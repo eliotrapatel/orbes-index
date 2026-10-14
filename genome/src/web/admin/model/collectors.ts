@@ -30,6 +30,7 @@ import {
   type HouseCurrency,
 } from '../types.js';
 import { countryName } from './analytics.js';
+import { parisDayText } from './client-profile.js';
 import { addDays, daysApart, isDay, parisDay } from './links.js';
 
 export const COLLECTORS_PAGE_COPY = Object.freeze({
@@ -392,6 +393,33 @@ export function openLabel(n: number, what: string): string {
   return `Open the ${collectorsWords(n)} ${what}`.trim();
 }
 
+/** The words after « Open the N collectors » that some figures' aria-labels end with (§3.6 C.6.1: every word here). */
+export const OPEN_WHO = Object.freeze({
+  firstLink: (name: string) => `whose first link was ${name}`,
+  lastLink: (name: string) => `whose last link was ${name}`,
+  firstCameFrom: (label: string) => `who first came from ${label}`,
+  notAnswered: 'who did not answer',
+  answeredOther: 'who answered Other, with their words',
+  heardThrough: (label: string) => `who heard of ORBES through ${label}`,
+  noSite: 'who came first with no referring site',
+  behindAverage: (name: string) => `behind the average of ${name}`,
+  campaign: (name: string) => `who first came through the campaign ${name}`,
+  firstVisitIn: (when: string) => `whose first visit fell in ${when}`,
+  signedUpIn: (when: string) => `who signed up in ${when}`,
+  mainDevice: (dim: string, label: string) => `whose main ${dim === 'device' ? 'device is a' : dim === 'system' ? 'system is' : dim === 'openedin' ? 'way in is' : 'app is'} ${label}`,
+  noScore: 'with no score',
+  scoreOf: (label: string) => `with a score of ${label}`,
+  neverActive: 'never active since sign-up',
+  statusOn: (status: string, day: string) => `${status.toLowerCase()} on ${formatDate(day)}`,
+  cohortActive: (month: string, after: number) => `of ${monthWords(month)} active after ${after === 1 ? '1 month' : `${after} months`}`,
+  ofThisView: 'of this view',
+  signedUpInPeriod: 'who signed up in the period',
+  firstVisitInPeriod: 'whose first visit fell in the period',
+  activeInPeriod: 'active in the period',
+  withScore: 'with a score',
+  addedWishInPeriod: 'who added a wish in the period',
+});
+
 /** Who reads the page: an AUDITOR's lists name no city, so no city opens a list for one (§3.0 (h)). */
 export interface Reader {
   withCities: boolean;
@@ -450,12 +478,14 @@ export const WHO_COPY = Object.freeze({
   title: 'Who they are',
   tabs: Object.freeze({ ages: 'AGES', countries: 'COUNTRIES', cities: 'CITIES' }),
   switch: Object.freeze({ given: 'AS GIVEN', connection: 'FROM THE CONNECTION' }),
+  /** The switch's name for screen readers (the tabs carry the panel's title). */
+  sidesLabel: 'Countries and cities: as given or from the connection',
   agesNote: (median: number | null) => `Age today, from the date of birth the client entered. Median: ${median === null ? WITHHELD.toLowerCase() : formatCount(median)}.`,
   notGiven: 'Not given',
   unknown: 'Unknown',
   showAll: (n: number) => `Show all ${formatCount(n)}`,
   dbip: 'Cities from the connection: IP geolocation by DB-IP (db-ip.com), approximate.',
-  citiesWithheld: 'An AUDITOR does not open the collectors of a city.',
+  citiesWithheld: 'Cities are withheld.',
   connection: 'From the connection: each collector’s usual place, the one with the most days.',
 });
 /** CITIES shows the top 20, then Show all. */
@@ -707,6 +737,11 @@ export const LIST_COPY = Object.freeze({
   unknown: 'This figure is not one the page opens.',
   columns: Object.freeze({ email: 'Email', name: 'Name', country: 'Country', city: 'City', tier: 'Tier', joined: 'Joined', lastSeen: 'Last seen', words: 'In their words' }),
 });
+
+/** A row's Joined: the Paris day of the sign-up, as the page and its slices count days (`01 OCT 2026` for 30 Sep 22:30 UTC). */
+export function joinedText(createdAt: string): string {
+  return parisDayText(createdAt);
+}
 
 /** The list's state from its address: the page's, the slice, what its title needs, the page. */
 export interface ListParams extends CollectorsParams {

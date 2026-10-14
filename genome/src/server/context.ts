@@ -42,7 +42,7 @@ import { ClubProgramService } from './services/club-program.js';
 import { TierGrantService } from './services/tier-grants.js';
 import { BirthdayCreditService } from './services/birthday-credits.js';
 import { EngagementService } from './services/engagement.js';
-import { runCollectorHistory } from './services/collector-history.js';
+import { runCollectorHistory, type HistoryMemo } from './services/collector-history.js';
 import { LikesService } from './services/likes.js';
 import { CareService, eraseCareLabels } from './services/care.js';
 import { GuaranteeService } from './services/guarantees.js';
@@ -614,6 +614,8 @@ export function startHousekeeping(
   let running: Promise<unknown> | undefined;
   /** The Paris day the `intelligence sizes` line was last written (once a day, §3.3 T.10). */
   let sizesDay: string | null = null;
+  /** The Paris day a pass last found no collector left behind in the monthly history (its check skipped until the next day). */
+  const historyMemo: HistoryMemo = { clearDay: null };
 
   const runOnce = async () => {
     // In the order the jobs run (§3.0 (f)).
@@ -692,7 +694,7 @@ export function startHousekeeping(
     if (morning) await job('engagement', async () => (await ctx.services.engagement.runIfDue(ctx.clock()))?.changed ?? 0);
     // Then the collectors' monthly history: on Paris day 1 once that morning's scores are finished (from 12:00 UTC
     // without them), the first deployment's back-fill, never while a test is RUNNING (§3.6 C.10).
-    if (morning) await job('collectorHistory', () => runCollectorHistory(ctx.db, ctx.clock(), { log: ctx.log }));
+    if (morning) await job('collectorHistory', () => runCollectorHistory(ctx.db, ctx.clock(), { log: ctx.log, memo: historyMemo }));
     const retentionDays = ctx.config.scanRetentionDays;
     if (counted && hourly && retentionDays !== null && retentionDays !== undefined) {
       await job('scanHistory', () =>

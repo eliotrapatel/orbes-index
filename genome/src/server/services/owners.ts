@@ -324,7 +324,7 @@ export interface OwnerClub {
     /** Null on a birthday credit. */
     tier: ClubTierName | null;
     kind: 'GIFT' | 'CREDIT' | 'BIRTHDAY';
-    /** A birthday credit's birthday, `YYYY-MM-DD`; null on a tier's grant. */
+    /** A birthday credit's birthday, `YYYY-MM-DD`; null on a tier's grant, and for an AUDITOR (routes/admin/serialize.ts `ownerClubJson`). */
     birthdayOn: string | null;
     grantedAt: Date;
     amountMinor: number | null;
@@ -339,9 +339,9 @@ export interface OwnerClub {
    * Its next birthday credit (§3.5 SB.4.3), for Client Services to answer « where is my birthday credit »: OFF when THE
    * PROGRAM gives none; NO_DATE without a date of birth; TEST_ENTRANT for an account of the test pool (never given);
    * otherwise NEXT, the first birthday from today (Paris) the 365-day rule and the entered-before rule allow (one still
-   * within its days, not granted, with the date entered before it, is today).
+   * within its days, not granted, with the date entered before it, is today). `on` null for an AUDITOR (`ownerClubJson`).
    */
-  birthdayNext: { state: 'OFF' } | { state: 'NO_DATE' } | { state: 'TEST_ENTRANT' } | { state: 'NEXT'; on: string };
+  birthdayNext: { state: 'OFF' } | { state: 'NO_DATE' } | { state: 'TEST_ENTRANT' } | { state: 'NEXT'; on: string | null };
 }
 
 export interface LockOutcome {

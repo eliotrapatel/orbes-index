@@ -406,7 +406,7 @@ describe('the panels’ words (§3.6 C.6.3, step 9.10)', () => {
 
 // ── Step 9.11: the collectors behind a figure ────────────────────────────────────────────────────────────────────
 
-import { bucketKeyWords, LIST_COPY, listParams, listTitle, tierWords } from '../../src/web/admin/model/collectors.js';
+import { bucketKeyWords, joinedText, LIST_COPY, listParams, listTitle, tierWords } from '../../src/web/admin/model/collectors.js';
 
 describe('the list of the collectors behind a figure (§3.6 C.6.5, step 9.11)', () => {
   const t = (slice: string, subject: string | null = null, o: { name?: string; split?: string } = {}) => listTitle({ slice, name: o.name ?? null, figure: null, split: o.split ?? null }, subject, OPTIONS, '2026-10-14');
@@ -444,5 +444,49 @@ describe('the list of the collectors behind a figure (§3.6 C.6.5, step 9.11)', 
     expect(tierWords(0)).toBe('—');
     expect(tierWords(3)).toBe('PALLADIUM');
     expect(LIST_COPY).toMatchObject({ back: 'Back to the figures', note: 'Read now: a figure read a few minutes ago may differ by a few.', empty: 'No collector in this figure now.' });
+  });
+
+  it('writes a row\'s Joined as the Paris day, as the page counts days', () => {
+    // 30 September 22:30 UTC is 1 October 00:30 in Paris: NEW IN THE PERIOD of a period from 1 October, and joined then.
+    expect(joinedText('2026-09-30T22:30:00.000Z')).toBe('01 OCT 2026');
+    expect(joinedText('2026-12-31T23:30:00.000Z')).toBe('01 JAN 2027');
+    expect(joinedText('2026-10-14T09:00:00.000Z')).toBe('14 OCT 2026');
+  });
+});
+
+// ── Review RI2: the panels' tabs and switches by keyboard, the focus kept across a redraw ──────────────────────────────
+
+import { focusMark, tabStep } from '../../src/web/admin/views/collectors-parts.js';
+import { LIKES_COPY } from '../../src/web/admin/model/likes.js';
+
+describe('the panels\' tabs by keyboard and the focus across a redraw (review RI2)', () => {
+  it('Left and Right move to the next tab, wrapping; Home and End to the ends; any other key none', () => {
+    expect([tabStep('ArrowRight', 0, 3), tabStep('ArrowRight', 2, 3), tabStep('ArrowLeft', 0, 3), tabStep('ArrowLeft', 2, 3)]).toEqual([1, 0, 2, 1]);
+    expect([tabStep('Home', 2, 3), tabStep('End', 0, 3)]).toEqual([0, 2]);
+    expect([tabStep('Enter', 0, 3), tabStep('ArrowDown', 0, 3), tabStep('ArrowRight', 0, 0)]).toEqual([null, null, null]);
+  });
+
+  /** A plain element stub: its attributes, its parent's nearest test id, and how many of a test id the root holds. */
+  const el = (attrs: Record<string, string>, group: string | null = null) => ({
+    getAttribute: (k: string) => attrs[k] ?? null,
+    parentElement: { closest: () => (group ? { getAttribute: () => group } : null) },
+  });
+  const root = (counts: Record<string, number>) => ({ querySelectorAll: (sel: string) => ({ length: counts[sel] ?? 0 }) });
+
+  it('finds a focused control again by its switch and key, its own test id when unique, or its name', () => {
+    const r = root({ '[data-testid="collectors-trend-split"]': 1, '[data-testid="collectors-figure"]': 9 });
+    expect(focusMark(el({ 'data-key': 'cities' }, 'collectors-who-tabs') as unknown as Element, r as unknown as ParentNode)).toBe('[data-testid="collectors-who-tabs"] [data-key="cities"]');
+    expect(focusMark(el({ 'data-testid': 'collectors-trend-split' }) as unknown as Element, r as unknown as ParentNode)).toBe('[data-testid="collectors-trend-split"]');
+    expect(focusMark(el({ name: 'cmp' }) as unknown as Element, r as unknown as ParentNode)).toBe('[name="cmp"]');
+    // A figure's link (one of many): not found again, never the wrong one.
+    expect(focusMark(el({ 'data-testid': 'collectors-figure' }) as unknown as Element, r as unknown as ParentNode)).toBeNull();
+    expect(focusMark(null, r as unknown as ParentNode)).toBeNull();
+    expect(focusMark(el({ name: 'say "x"' }) as unknown as Element, r as unknown as ParentNode)).toBe('[name="say \\"x\\""]');
+  });
+
+  it('names each switch apart for screen readers, and MOST WISHED\'s columns', () => {
+    const names = [WHO_COPY.title, WHO_COPY.sidesLabel, LIKES_COPY.title, ...Object.values(LIKES_COPY.switches)];
+    expect(new Set(names).size).toBe(names.length);
+    expect(LIKES_COPY.columns).toMatchObject({ rank: 'Rank', shareOfMost: 'Share of the most wished' });
   });
 });

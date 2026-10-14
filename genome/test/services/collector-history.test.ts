@@ -175,6 +175,26 @@ describe('the collectors’ monthly history (§3.6 C.10; step 9.5)', () => {
     expect(await runCollectorHistory(db(), z('2026-12-01T12:10:00Z'), noPause)).toBe(0);
   });
 
+  it('once a pass finds nobody left behind, the rest of that Paris day skips the check; one left behind later is written at the next day’s first pass', async () => {
+    const memo = { clearDay: null as string | null };
+    expect(await runCollectorHistory(db(), z('2026-12-05T10:00:00Z'), { ...noPause, memo })).toBe(0);
+    expect(memo.clearDay).toBe('2026-12-05');
+    // F, made in June, has no row: left behind (as when a test entrant's test ends and it is counted again).
+    const email = `history-f-${randomUUID().slice(0, 6)}@example.com`;
+    const f = (await db().insertInto('accounts').values({ email, email_normalized: email, password_hash: 'x', created_at: z('2026-06-01T10:00:00Z') }).returning('id').executeTakeFirstOrThrow()).id;
+    // The same Paris day: the check is not run, nothing written.
+    expect(await runCollectorHistory(db(), z('2026-12-05T22:50:00Z'), { ...noPause, memo })).toBe(0);
+    expect(await db().selectFrom('collector_history').select('account_id').where('account_id', '=', f).executeTakeFirst()).toBeUndefined();
+    // The next day's first pass in the morning window writes F's row.
+    expect(await runCollectorHistory(db(), z('2026-12-06T07:40:00Z'), { ...noPause, memo })).toBe(1);
+    expect((await db().selectFrom('collector_history').select('last_month').where('account_id', '=', f).executeTakeFirstOrThrow()).last_month).toBe('2026-11-01');
+    expect(memo.clearDay).toBe('2026-12-05');
+    expect(await runCollectorHistory(db(), z('2026-12-06T07:50:00Z'), { ...noPause, memo })).toBe(0);
+    expect(memo.clearDay).toBe('2026-12-06');
+    // Out of the next test's figures: F joins the test pool.
+    await db().insertInto('test_entrants').values({ account_id: f }).execute();
+  });
+
   it('runs in the housekeeping pass right after the engagement score, with that morning’s scores', async () => {
     const hk = startHousekeeping(h.ctx, { intervalMs: 3_600_000 });
     try {

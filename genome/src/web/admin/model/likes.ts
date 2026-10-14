@@ -13,6 +13,14 @@ export const LIKES_COPY = Object.freeze({
   tabs: Object.freeze({ pieces: 'FAVOURITE PIECES', finishes: 'FINISHES', wished: 'MOST WISHED', viewed: 'MOST VIEWED', held: 'PIECES HELD' }),
   wishedSwitch: Object.freeze({ models: 'MODELS', collections: 'COLLECTIONS' }),
   viewedSwitch: Object.freeze({ models: 'MODELS', releases: 'RELEASES', collectors: 'COLLECTORS', visitors: 'ALL VISITORS' }),
+  /** The switches' names for screen readers, one each. */
+  switches: Object.freeze({ wished: 'Most wished: models or collections', viewedWhat: 'Most viewed: models or releases', viewedWho: 'Most viewed: by collectors or by every visitor' }),
+  /** The words after « Open the N collectors » of this panel's aria-labels. */
+  open: Object.freeze({
+    noFavourite: (kind: 'PIECE' | 'FINISH') => `who chose no favourite ${kind === 'PIECE' ? 'piece' : 'finish'}`,
+    lookedAt: (name: string) => `who looked at ${name} in the period`,
+    holdPieceOf: (name: string) => `who hold a piece of ${name}`,
+  }),
   wishlists: 'Wishlists',
   withWishlist: 'Collectors with a wishlist',
   wishesAdded: 'Wishes added',
@@ -28,6 +36,9 @@ export const LIKES_COPY = Object.freeze({
   retired: '(no longer in the collection)',
   showAll: 'Show all',
   columns: Object.freeze({
+    rank: 'Rank',
+    /** MOST WISHED's bar column, its header read by screen readers only. */
+    shareOfMost: 'Share of the most wished',
     model: 'Model',
     type: 'Type',
     collection: 'Collection',

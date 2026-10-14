@@ -243,6 +243,16 @@ export async function backfill(db: Db, now: Date, opts: Omit<WriteOptions, 'with
 
 export interface HistoryJobOptions extends Omit<WriteOptions, 'withScores'> {
   log?: Logger;
+  /**
+   * The housekeeping's in-process memo (context.ts, like its `sizesDay`): the Paris day a pass last found nobody left
+   * behind, so the rest of that day's passes skip the check (§3.6 C.10: a job that works once a month). One left
+   * behind later in the day (a test entrant's test ended) is written at the next day's first pass.
+   */
+  memo?: HistoryMemo;
+}
+
+export interface HistoryMemo {
+  clearDay: string | null;
 }
 
 /** The housekeeping job `collectorHistory` (see the file header): the rows written by this pass. */
@@ -254,13 +264,17 @@ export async function runCollectorHistory(db: Db, now: Date, opts: HistoryJobOpt
   const month = monthEnded(now);
   const first = await backfill(db, now, opts);
   if (first.rows > 0) return first.rows;
+  const today = parisDay(now);
+  if (opts.memo?.clearDay === today) return 0;
   // Anyone left behind: a counted collector made before this month whose row stops before the month just ended.
   const behind = await sql<{ behind: boolean }>`
     SELECT EXISTS (SELECT 1 FROM accounts a LEFT JOIN collector_history h ON h.account_id = a.id
                     WHERE ${countedCollector('a.id')} AND a.created_at < ${parisMonthStart(now)}::timestamptz
                       AND (h.last_month IS NULL OR h.last_month < ${month}::date)) AS behind`.execute(db);
-  if (!behind.rows[0]?.behind) return 0;
-  const today = parisDay(now);
+  if (!behind.rows[0]?.behind) {
+    if (opts.memo) opts.memo.clearDay = today;
+    return 0;
+  }
   if (today.endsWith('-01')) {
     const run = await db.selectFrom('engagement_runs').select('day').where('day', '=', today).where('finished_at', 'is not', null).executeTakeFirst();
     if (run) return (await writeMonth(db, month, { ...opts, withScores: true })).rows;

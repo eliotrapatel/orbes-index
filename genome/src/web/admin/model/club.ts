@@ -488,10 +488,13 @@ export interface ClubBlockLine {
   link: { kind: 'order'; id: string } | { kind: 'care'; id: string } | null;
 }
 
+/** The next birthday credit's line for an AUDITOR, who reads no date of birth (§3.0 (h)): its day withheld. */
+export const BIRTHDAY_NEXT_WITHHELD = 'Next birthday credit: date withheld';
+
 /** Why no birthday credit comes, or when the next does (plan CUSTOMER INTELLIGENCE §3.5 SB.4.6), for Client Services to answer the client. */
 export function birthdayNextLine(next: NonNullable<OwnerSheet['club']>['birthdayNext'] | null | undefined): string | null {
   if (!next) return null;
-  if (next.state === 'NEXT') return `Next on ${formatDate(next.on)}`;
+  if (next.state === 'NEXT') return next.on === null ? BIRTHDAY_NEXT_WITHHELD : `Next on ${formatDate(next.on)}`;
   if (next.state === 'NO_DATE') return 'No date of birth';
   if (next.state === 'OFF') return 'Off in THE PROGRAM';
   if (next.state === 'TEST_ENTRANT') return 'Not given to test entrants';

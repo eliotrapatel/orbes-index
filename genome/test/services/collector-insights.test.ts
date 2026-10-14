@@ -1246,6 +1246,51 @@ describe('CollectorInsightsService (§3.6 C.6, steps 9.2 and on)', () => {
       });
     });
 
+    it('only the gated readings raise work_mem (§8 « Memory »: 32 MB at most twice): options() answers with the gate full, and it and the export keep the server\'s default', async () => {
+      // Every SET the service sends, read off the queries (a Kysely plugin sees each one before it runs).
+      const sets: string[] = [];
+      const spy: Db = h.t.db.withPlugin({
+        transformQuery: ({ node }) => {
+          if (node.kind === 'RawNode') {
+            const text = (node as unknown as { sqlFragments: readonly string[] }).sqlFragments.join('?');
+            if (/^SET LOCAL work_mem/u.test(text)) sets.push(text);
+          }
+          return node;
+        },
+        transformResult: async ({ result }) => result,
+      });
+      const admin = await createAdmin(h.ctx, 'ADMIN');
+      const { service } = make({ db: spy });
+      await service.options();
+      await service.exportCsv({}, { type: 'admin', id: admin.id });
+      expect(sets).toEqual([]);
+      await service.report({ panel: 'who' });
+      await service.list({ slice: 'all' }, { withCities: true });
+      expect(sets).toEqual(["SET LOCAL work_mem = '32MB'", "SET LOCAL work_mem = '32MB'"]);
+      // options() reads with the server's default (the links' channels are read inside its transaction).
+      let mem = '';
+      const links = Object.create(h.ctx.services.links) as typeof h.ctx.services.links;
+      links.channels = async (tx?: Db) => {
+        mem = (await sql<{ mem: string }>`SELECT current_setting('work_mem') AS mem`.execute(tx!)).rows[0]!.mem;
+        return h.ctx.services.links.channels(tx);
+      };
+      const withLinks = new CollectorInsightsService({ db: h.t.db, audit: h.ctx.audit, links, clock: createManualClock(NOW).now, log: quiet });
+      await withLinks.options();
+      expect(mem).not.toBe('32MB');
+      expect(mem).not.toBe('');
+      // The gate full (two readings held), options() still answers: it is not one of the two.
+      await h.t.db.transaction().execute(async (trx) => {
+        const releases: (() => void)[] = [];
+        const full = make({ db: trx, concurrent: 2, waitMs: 50, reader: () => new Promise((resolve) => releases.push(() => resolve({ ok: true }))) });
+        const held = [full.service.report({ panel: 'overview', sc: '0-1' }), full.service.report({ panel: 'overview', sc: '0-2' })];
+        await new Promise((r) => setTimeout(r, 5));
+        expect(releases).toHaveLength(2);
+        expect((await full.service.options()).countries.length).toBeGreaterThan(0);
+        for (const release of releases) release();
+        await Promise.all(held);
+      });
+    });
+
     it('refuses another panel, scope, currency, period or filter (400 VALIDATION_FAILED), before any reading', async () => {
       const { service, reads } = make();
       for (const req of [

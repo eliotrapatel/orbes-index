@@ -78,12 +78,23 @@ describe('GET /api/admin/collectors/… (§3.6 C.9)', () => {
       { key: 'FR', collectors: 2, compare: null },
       { key: 'IT', collectors: 2, compare: null },
     ]);
-    expect(all.figures.cities.given.rows.map((c: { label: string; collectors: number }) => [c.label, c.collectors])).toEqual([
+    // An AUDITOR reads countries, not cities (§3.0 (h)): a narrowed population's city of one would tie a person to it.
+    const none = { rows: [], groups: 0 };
+    expect(all.figures.cities).toEqual({ given: none, connection: none });
+    expect(all.figures.citiesWithheld).toBe(true);
+    expect(JSON.stringify(all)).not.toContain('Lyon');
+    // An ADMIN reads the cities, and otherwise the same figures (none names a person); an OPERATOR too.
+    const admin = await get('ADMIN', '/api/admin/collectors/report?panel=who&p=30d&cmp=0');
+    expect(admin.figures.cities.given.rows.map((c: { label: string; collectors: number }) => [c.label, c.collectors])).toEqual([
       ['Lyon', 3],
       ['Paris', 1],
     ]);
-    // An AUDITOR and an ADMIN read the same figures (no city or email is masked in a figure; none names a person).
-    expect((await get('ADMIN', '/api/admin/collectors/report?panel=who&p=30d&cmp=0')).figures).toEqual(all.figures);
+    expect(admin.figures.citiesWithheld).toBeUndefined();
+    expect((await get('OPERATOR', '/api/admin/collectors/report?panel=who&p=30d&cmp=0')).figures).toEqual(admin.figures);
+    expect({ ...all.figures, cities: null, citiesWithheld: null }).toEqual({ ...admin.figures, cities: null, citiesWithheld: null });
+    // The mask is the route's: the shared cache keeps the cities, read again by an ADMIN after an AUDITOR.
+    expect((await get('AUDITOR', '/api/admin/collectors/report?panel=who&p=30d&cmp=0')).figures.cities).toEqual({ given: none, connection: none });
+    expect((await get('ADMIN', '/api/admin/collectors/report?panel=who&p=30d&cmp=0')).figures).toEqual(admin.figures);
     const text = JSON.stringify([
       all,
       await get('ADMIN', '/api/admin/collectors/report?panel=overview'),

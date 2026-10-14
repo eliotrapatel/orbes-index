@@ -239,6 +239,7 @@ import {
   tierStanding,
   BIRTHDAY_CREDIT_LABEL,
   birthdayNextLine,
+  BIRTHDAY_NEXT_WITHHELD,
   clubBlockLines,
   tierThreshold,
   utcInstant,
@@ -941,6 +942,10 @@ describe('the Club\'s tiers (P-X04)', () => {
     expect(birthdayLines(club([], { state: 'TEST_ENTRANT' }))).toEqual(['Not given to test entrants']);
     expect(birthdayNextLine({ state: 'NEXT', on: '2028-02-29' })).toBe('Next on 29 FEB 2028');
     expect(birthdayNextLine(undefined)).toBeNull();
+    // An AUDITOR reads no date of birth (§3.0 (h)): the next one's day and each credit's birthday withheld.
+    expect(BIRTHDAY_NEXT_WITHHELD).toBe('Next birthday credit: date withheld');
+    expect(birthdayNextLine({ state: 'NEXT', on: null })).toBe(BIRTHDAY_NEXT_WITHHELD);
+    expect(birthdayLines(club([given({ birthdayOn: null, balanceMinor: 0 })], { state: 'NEXT', on: null }))).toEqual(['€\u00a020, €\u00a00 left, until 12 APR 2027', 'Next birthday credit: date withheld']);
     // A server before it (no birthdayNext): no line, never a wrong one.
     expect(clubBlockLines({ tier: null, grants: [], careThisYear: null } as unknown as Club, now)).toEqual([]);
 

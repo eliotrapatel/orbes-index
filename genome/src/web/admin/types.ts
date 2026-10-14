@@ -3437,8 +3437,8 @@ export interface OwnerClub {
     gift: { state: 'PENDING' | 'WITH_ORDER' | 'DELIVERED'; orderId: string | null; orderReference: string | null } | null;
   }[];
   careThisYear: { year: number; used: number; allowance: number | 'ALL'; open: { id: string; productId: string } | null } | null;
-  /** §3.5 SB.4.3: the next birthday credit, or why none comes. */
-  birthdayNext: { state: 'OFF' } | { state: 'NO_DATE' } | { state: 'TEST_ENTRANT' } | { state: 'NEXT'; on: string };
+  /** §3.5 SB.4.3: the next birthday credit, or why none comes; `on` (and each grant's `birthdayOn`) null for an AUDITOR (§3.0 (h)). */
+  birthdayNext: { state: 'OFF' } | { state: 'NO_DATE' } | { state: 'TEST_ENTRANT' } | { state: 'NEXT'; on: string | null };
 }
 
 /** A shipment of a yearly care: its carrier, its tracking number and link, when it left. */
@@ -4058,6 +4058,8 @@ export interface CollectorsWho {
   ages: { rows: CollectorBar[]; median: number | null };
   countries: { given: CollectorBar[]; connection: CollectorBar[] };
   cities: { given: { rows: CollectorCityBar[]; groups: number }; connection: { rows: CollectorCityBar[]; groups: number } };
+  /** An AUDITOR's reading: `cities` empty (§3.0 (h)). */
+  citiesWithheld?: boolean;
 }
 
 export interface CollectorSourceBar extends CollectorBar {

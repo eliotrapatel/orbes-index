@@ -74,17 +74,100 @@ export function swatch(color: string): HTMLElement {
   return dot;
 }
 
-/** Tabs inside a panel: buttons that switch what the panel shows, the current one underlined (`.range`). */
+/**
+ * Tabs inside a panel: buttons that switch what the panel shows, the current one underlined (`.range`). One stop in
+ * the Tab order (the current tab; a roving tabindex), Left and Right (Home and End) move to the next tab and show it;
+ * the panel's redraw gives the focus back to the new tab (`keepFocus`).
+ */
 export function panelTabs<T extends string>(label: string, items: readonly { key: T; text: string }[], current: T, pick: (key: T) => void, testid: string): HTMLElement {
-  return h(
+  const stop = items.some((t) => t.key === current) ? current : items[0]?.key;
+  const buttons: HTMLElement[] = [];
+  const list = h(
     'div',
     { class: ['range', 'collectors__tabs'], attrs: { role: 'tablist', 'aria-label': label }, data: { testid } },
     ...items.flatMap((t, i) => {
-      const b = h('button', { class: 'range__tab', attrs: { type: 'button', role: 'tab', 'aria-selected': t.key === current ? 'true' : 'false', 'data-key': t.key } }, t.text);
+      const b = h('button', { class: 'range__tab', attrs: { type: 'button', role: 'tab', 'aria-selected': t.key === current ? 'true' : 'false', tabindex: t.key === stop ? '0' : '-1', 'data-key': t.key } }, t.text);
       b.addEventListener('click', () => pick(t.key));
+      b.addEventListener('keydown', (ev) => {
+        const to = tabStep(ev.key, i, items.length);
+        if (to === null) return;
+        ev.preventDefault();
+        // The new tab focused first, so the redraw finds it and focuses its copy.
+        buttons[to]?.focus();
+        pick(items[to]!.key);
+      });
+      buttons.push(b);
       return [i > 0 ? h('span', { class: 'range__dot', attrs: { 'aria-hidden': 'true' } }) : null, b];
     }),
   );
+  return list;
+}
+
+/** The tab a key moves to from tab `i` of `n` (wrapping), or null for another key. */
+export function tabStep(key: string, i: number, n: number): number | null {
+  if (n <= 0) return null;
+  if (key === 'ArrowRight') return (i + 1) % n;
+  if (key === 'ArrowLeft') return (i - 1 + n) % n;
+  if (key === 'Home') return 0;
+  if (key === 'End') return n - 1;
+  return null;
+}
+
+const quoted = (v: string) => `"${v.replace(/["\\]/g, '\\$&')}"`;
+
+/**
+ * Where a focused control is, as a selector that finds its copy once its part of the page is drawn again: a switch's
+ * key in its list (`[data-testid="collectors-who-tabs"] [data-key="cities"]`), else its own test id when it is the only
+ * one under `root`, else its name. Null for anything else (a figure's link).
+ */
+export function focusMark(el: Element | null, root: ParentNode): string | null {
+  if (!el) return null;
+  const key = el.getAttribute('data-key');
+  const group = el.parentElement?.closest('[data-testid]')?.getAttribute('data-testid');
+  if (key !== null && group) return `[data-testid=${quoted(group)}] [data-key=${quoted(key)}]`;
+  const id = el.getAttribute('data-testid');
+  if (id && root.querySelectorAll(`[data-testid=${quoted(id)}]`).length === 1) return `[data-testid=${quoted(id)}]`;
+  const name = el.getAttribute('name');
+  if (name) return `[name=${quoted(name)}]`;
+  return null;
+}
+
+/** The focused element inside `root`, or null. */
+export function focusedIn(root: Element): Element | null {
+  const active = typeof document === 'undefined' ? null : document.activeElement;
+  return active && root.contains(active) ? active : null;
+}
+
+/** Focuses the copy `mark` names under `root`, unless the focus has moved elsewhere meanwhile; true when it did. */
+export function refocus(root: ParentNode, mark: string | null): boolean {
+  if (!mark) return false;
+  const active = document.activeElement;
+  if (active && active !== document.body && (active as Element).isConnected && !(root as Node).contains(active)) return false;
+  const again = root.querySelector<HTMLElement>(mark);
+  if (!again) return false;
+  if (document.activeElement !== again) again.focus({ preventScroll: true });
+  return true;
+}
+
+/** Redraws part of a panel (`draw` replaces `root`'s children), the focus kept on the same control's copy. */
+export function keepFocus(root: HTMLElement, draw: () => void): void {
+  const mark = focusMark(focusedIn(root), root);
+  draw();
+  refocus(root, mark);
+}
+
+/**
+ * Show all: draws the full list, then focuses the first row it adds (its link, or the row itself), counted by `rows`
+ * under `root` before and after.
+ */
+export function showMore(root: HTMLElement, rows: string, draw: () => void): void {
+  const before = root.querySelectorAll(rows).length;
+  draw();
+  const row = root.querySelectorAll<HTMLElement>(rows)[before];
+  if (!row) return;
+  const target = row.querySelector<HTMLElement>('a[href], button') ?? row;
+  if (target === row && !row.hasAttribute('tabindex')) row.setAttribute('tabindex', '-1');
+  target.focus({ preventScroll: true });
 }
 
 /** The children worth appending: nothing for null, a number as its text. */

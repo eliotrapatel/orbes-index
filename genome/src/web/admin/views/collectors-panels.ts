@@ -35,7 +35,9 @@ import {
   listHref,
   monthWords,
   OPENED_LABELS,
+  OPEN_WHO,
   openLabel,
+  OVERVIEW_COPY,
   ORIGIN_COPY as O,
   partWords,
   recordingNote,
@@ -65,7 +67,7 @@ import {
   type TrendSplit,
 } from '../types.js';
 import { button, emptyState, select, table } from '../ui/components.js';
-import { figureLink, noMatch, nodes, panelBars, panelLine, panelTabs, type PanelBar, type PanelCtx } from './collectors-parts.js';
+import { figureLink, keepFocus, noMatch, nodes, panelBars, panelLine, panelTabs, showMore, type PanelBar, type PanelCtx } from './collectors-parts.js';
 
 type R<P extends CollectorsReport['panel']> = Extract<CollectorsReport, { panel: P }>;
 
@@ -73,15 +75,16 @@ type R<P extends CollectorsReport['panel']> = Extract<CollectorsReport, { panel:
 function tabbed<T extends string>(label: string, items: readonly { key: T; text: string }[], first: T, testid: string, draw: (tab: T, redraw: () => void) => Child[]): HTMLElement {
   const body = h('div', { class: 'collectors__tab-body' });
   let tab = first;
-  const redraw = () => {
-    body.replaceChildren(
-      panelTabs<T>(label, items, tab, (k) => {
-        tab = k;
-        redraw();
-      }, testid),
-      ...nodes(draw(tab, redraw)),
+  const redraw = () =>
+    keepFocus(body, () =>
+      body.replaceChildren(
+        panelTabs<T>(label, items, tab, (k) => {
+          tab = k;
+          redraw();
+        }, testid),
+        ...nodes(draw(tab, redraw)),
+      ),
     );
-  };
   redraw();
   return body;
 }
@@ -107,9 +110,9 @@ function wishedBar(wished: number, most: number): HTMLElement {
 type OriginTab = 'sources' | 'heard' | 'links' | 'campaigns' | 'sites' | 'visits';
 
 function linkResult(pc: PanelCtx, r: CollectorLinkResult, slice: string | null, name: string, side: 'first' | 'last', currency: string): Child[] {
-  const which = side === 'first' ? 'whose first link was' : 'whose last link was';
+  const which = side === 'first' ? OPEN_WHO.firstLink(name) : OPEN_WHO.lastLink(name);
   return [
-    slice ? opens(r.collectors, listHref(pc.p, slice, r.collectors), openLabel(r.collectors, `${which} ${name}`)) : formatCount(r.collectors),
+    slice ? opens(r.collectors, listHref(pc.p, slice, r.collectors), openLabel(r.collectors, which)) : formatCount(r.collectors),
     formatCount(r.buyers),
     r.revenueMinor === null ? WITHHELD : money(r.revenueMinor, currency),
   ];
@@ -125,7 +128,7 @@ export function originPanel(pc: PanelCtx, r: R<'origin'>): Child[] {
         if (f.total === 0) return [noMatch(pc)];
         const rows: PanelBar[] = f.sources.map((b) => {
           const label = sourceBarLabel(b);
-          return { key: b.key, label, n: b.collectors, compare: barCmp(r, b), link: listHref(p, `source:${b.key}`, b.collectors), aria: openLabel(b.collectors, `who first came from ${label}`) };
+          return { key: b.key, label, n: b.collectors, compare: barCmp(r, b), link: listHref(p, `source:${b.key}`, b.collectors), aria: openLabel(b.collectors, OPEN_WHO.firstCameFrom(label)) };
         });
         return [panelBars(rows, f.total, 'collectors-sources'), panelLine(differWords(f.firstLastDiffer), 'collectors-differ')];
       }
@@ -134,7 +137,7 @@ export function originPanel(pc: PanelCtx, r: R<'origin'>): Child[] {
         const rows: PanelBar[] = f.heard.map((b) => {
           const label = b.key === 'none' ? O.notAnswered : `${b.label ?? ''}${b.setAside ? ` ${O.setAside}` : ''}`;
           const slice = b.other ? 'heardother' : `heard:${b.key}`;
-          const aria = b.key === 'none' ? openLabel(b.collectors, 'who did not answer') : b.other ? openLabel(b.collectors, 'who answered Other, with their words') : openLabel(b.collectors, `who heard of ORBES through ${b.label ?? ''}`);
+          const aria = openLabel(b.collectors, b.key === 'none' ? OPEN_WHO.notAnswered : b.other ? OPEN_WHO.answeredOther : OPEN_WHO.heardThrough(b.label ?? ''));
           return { key: b.key, label, n: b.collectors, compare: barCmp(r, b), link: listHref(p, slice, b.collectors), aria };
         });
         return [panelBars(rows, f.total, 'collectors-heard')];
@@ -191,7 +194,7 @@ export function originPanel(pc: PanelCtx, r: R<'origin'>): Child[] {
       case 'campaigns': {
         const C = O.columns;
         const rows = f.campaigns.rows.flatMap((c) => [
-          { key: `c:${c.campaign ?? ''}`, name: c.campaign ?? O.noCampaign, sub: false, visits: c.firstVisits, collectors: opens(c.collectors, listHref(p, `campaign:${c.campaign ?? 'none'}`, c.collectors), openLabel(c.collectors, `who first came through the campaign ${c.campaign ?? O.noCampaign}`)), buyers: c.buyers },
+          { key: `c:${c.campaign ?? ''}`, name: c.campaign ?? O.noCampaign, sub: false, visits: c.firstVisits, collectors: opens(c.collectors, listHref(p, `campaign:${c.campaign ?? 'none'}`, c.collectors), openLabel(c.collectors, OPEN_WHO.campaign(c.campaign ?? O.noCampaign))), buyers: c.buyers },
           ...c.rows.map((x, i) => ({ key: `c:${c.campaign ?? ''}:${i}`, name: `${x.source ?? O.noSource} / ${x.medium ?? O.noSource}`, sub: true, visits: x.firstVisits, collectors: formatCount(x.collectors) as Child, buyers: x.buyers })),
         ]);
         return [
@@ -213,7 +216,7 @@ export function originPanel(pc: PanelCtx, r: R<'origin'>): Child[] {
         const rows: PanelBar[] = list.map((b) => {
           const label = b.key === 'other' ? O.otherSites : b.key === 'none' ? O.noSite : (b.site ?? b.key);
           const slice = b.key === 'other' ? null : b.key === 'none' ? 'referrer:none' : `referrer:${b.site}`;
-          return { key: b.key, label, n: b.collectors, compare: barCmp(r, b), link: slice ? listHref(p, slice, b.collectors) : null, aria: openLabel(b.collectors, b.key === 'none' ? 'who came first with no referring site' : `who first came from ${label}`) };
+          return { key: b.key, label, n: b.collectors, compare: barCmp(r, b), link: slice ? listHref(p, slice, b.collectors) : null, aria: openLabel(b.collectors, b.key === 'none' ? OPEN_WHO.noSite : OPEN_WHO.firstCameFrom(label)) };
         });
         return [panelBars(rows, f.total, 'collectors-sites')];
       }
@@ -262,8 +265,8 @@ function firstVisits(pc: PanelCtx, r: R<'origin'>): Child[] {
       [
         { label: C.bucket, cell: (x: (typeof rows)[number]) => bucketWords(x.b), kind: ['nowrap'] },
         { label: C.firstVisits, cell: (x) => formatCount(x.b.firstVisits), kind: ['num'] },
-        { label: C.became, cell: (x) => opens(x.b.becameCollectors, listHref(pc.p, `bucket:firstvisit:${x.b.key}`, x.b.becameCollectors), openLabel(x.b.becameCollectors, `whose first visit fell in ${bucketWords(x.b)}`)), kind: ['num'] },
-        { label: C.newCollectors, cell: (x) => opens(x.b.newCollectors, listHref(pc.p, `bucket:signup:${x.b.key}`, x.b.newCollectors), openLabel(x.b.newCollectors, `who signed up in ${bucketWords(x.b)}`)), kind: ['num'] },
+        { label: C.became, cell: (x) => opens(x.b.becameCollectors, listHref(pc.p, `bucket:firstvisit:${x.b.key}`, x.b.becameCollectors), openLabel(x.b.becameCollectors, OPEN_WHO.firstVisitIn(bucketWords(x.b)))), kind: ['num'] },
+        { label: C.newCollectors, cell: (x) => opens(x.b.newCollectors, listHref(pc.p, `bucket:signup:${x.b.key}`, x.b.newCollectors), openLabel(x.b.newCollectors, OPEN_WHO.signedUpIn(bucketWords(x.b)))), kind: ['num'] },
         ...(prev ? [{ label: C.before, cell: (x: (typeof rows)[number]) => (x.before ? `${formatCount(x.before.firstVisits)} · ${bucketWords(x.before)}` : '—'), kind: ['num' as const, 'nowrap' as const] }] : []),
       ],
       rows,
@@ -298,7 +301,7 @@ export function likesPanel(pc: PanelCtx, r: R<'likes'>): Child[] {
   let viewedWhat: 'models' | 'releases' = 'models';
   let viewedWho: 'collectors' | 'visitors' = 'collectors';
   let all = false;
-  const body = tabbed<LikesTab>(L.title, items, 'wished', 'collectors-likes-tabs', (tab, redraw) => {
+  const body: HTMLElement = tabbed<LikesTab>(L.title, items, 'wished', 'collectors-likes-tabs', (tab, redraw) => {
     const showAll = (groups: number) =>
       !all && groups > SHOWN
         ? button(`${L.showAll} ${formatCount(groups)}`, {
@@ -306,7 +309,7 @@ export function likesPanel(pc: PanelCtx, r: R<'likes'>): Child[] {
             testId: 'collectors-likes-all',
             onClick: () => {
               all = true;
-              redraw();
+              showMore(body, 'tbody tr', redraw);
             },
           })
         : null;
@@ -327,7 +330,7 @@ export function likesPanel(pc: PanelCtx, r: R<'likes'>): Child[] {
           table(
             [
               { label: tab === 'pieces' ? L.favouritePieces : L.favouriteFinishes, cell: (x: Row) => h('span', null, x.swatch ? swatchDot(x.swatch) : null, x.label), kind: ['wide'] },
-              { label: L.columns.collectors, cell: (x) => opens(x.n, listHref(p, slice(x.key), x.n, { name: x.label }), x.key === 'none' ? openLabel(x.n, `who chose no favourite ${kind === 'PIECE' ? 'piece' : 'finish'}`) : tasteLabel(x.n, kind, { label: x.label })), kind: ['num'] },
+              { label: L.columns.collectors, cell: (x) => opens(x.n, listHref(p, slice(x.key), x.n, { name: x.label }), x.key === 'none' ? openLabel(x.n, L.open.noFavourite(kind)) : tasteLabel(x.n, kind, { label: x.label })), kind: ['num'] },
               { label: L.columns.chosen, cell: (x) => (x.chosen === null ? '' : formatCount(x.chosen)), kind: ['num'] },
               { label: L.columns.comparison, cell: (x) => (x.chosen === null ? '' : changeWords(x.chosen, x.previous)), kind: ['num'] },
             ],
@@ -337,7 +340,7 @@ export function likesPanel(pc: PanelCtx, r: R<'likes'>): Child[] {
         ];
       }
       case 'wished': {
-        const sides = panelTabs<'models' | 'collections'>(L.tabs.wished, [{ key: 'models', text: L.wishedSwitch.models }, { key: 'collections', text: L.wishedSwitch.collections }], wishedSide, (k) => {
+        const sides = panelTabs<'models' | 'collections'>(L.switches.wished, [{ key: 'models', text: L.wishedSwitch.models }, { key: 'collections', text: L.wishedSwitch.collections }], wishedSide, (k) => {
           wishedSide = k;
           all = false;
           redraw();
@@ -374,7 +377,7 @@ export function likesPanel(pc: PanelCtx, r: R<'likes'>): Child[] {
           sides,
           table(
             [
-              { label: '#', cell: (x: Row) => x.rank, kind: ['num'] },
+              { label: L.columns.rank, cell: (x: Row) => x.rank, kind: ['num'] },
               { label: L.columns.model, cell: (x) => h('span', { class: [x.variantRow ? 'cell-sub' : null] }, wishedName(x)), kind: ['wide'] },
               { label: L.columns.type, cell: (x) => x.type, kind: ['nowrap'] },
               { label: L.columns.collection, cell: (x) => x.collection ?? '—', kind: ['nowrap'] },
@@ -388,7 +391,7 @@ export function likesPanel(pc: PanelCtx, r: R<'likes'>): Child[] {
               },
               { label: L.columns.added, cell: (x) => formatCount(x.added), kind: ['num'] },
               { label: L.columns.comparison, cell: (x) => changeWords(x.wished, x.previous), kind: ['num'] },
-              { label: '', cell: (x) => wishedBar(x.wished, most) },
+              { label: L.columns.shareOfMost, hiddenLabel: true, cell: (x) => wishedBar(x.wished, most) },
             ],
             rows,
             { empty: L.empty.wishes, caption: L.mostWishedModels },
@@ -398,12 +401,12 @@ export function likesPanel(pc: PanelCtx, r: R<'likes'>): Child[] {
         ];
       }
       case 'viewed': {
-        const what = panelTabs<'models' | 'releases'>(L.tabs.viewed, [{ key: 'models', text: L.viewedSwitch.models }, { key: 'releases', text: L.viewedSwitch.releases }], viewedWhat, (k) => {
+        const what = panelTabs<'models' | 'releases'>(L.switches.viewedWhat, [{ key: 'models', text: L.viewedSwitch.models }, { key: 'releases', text: L.viewedSwitch.releases }], viewedWhat, (k) => {
           viewedWhat = k;
           all = false;
           redraw();
         }, 'collectors-viewed-what');
-        const who = panelTabs<'collectors' | 'visitors'>(L.tabs.viewed, [{ key: 'collectors', text: L.viewedSwitch.collectors }, { key: 'visitors', text: L.viewedSwitch.visitors }], viewedWho, (k) => {
+        const who = panelTabs<'collectors' | 'visitors'>(L.switches.viewedWho, [{ key: 'collectors', text: L.viewedSwitch.collectors }, { key: 'visitors', text: L.viewedSwitch.visitors }], viewedWho, (k) => {
           viewedWho = k;
           redraw();
         }, 'collectors-viewed-who');
@@ -424,7 +427,7 @@ export function likesPanel(pc: PanelCtx, r: R<'likes'>): Child[] {
             [
               { label: viewedWhat === 'models' ? C.model : C.release, cell: (x: Row) => h('span', { class: [x.sub ? 'cell-sub' : null] }, x.name), kind: ['wide'] },
               byCollectors
-                ? { label: C.collectorsWhoLooked, cell: (x: Row) => opens(x.collectors ?? 0, listHref(p, x.slice, x.collectors ?? 0), openLabel(x.collectors ?? 0, `who looked at ${x.name} in the period`)), kind: ['num'] }
+                ? { label: C.collectorsWhoLooked, cell: (x: Row) => opens(x.collectors ?? 0, listHref(p, x.slice, x.collectors ?? 0), openLabel(x.collectors ?? 0, L.open.lookedAt(x.name))), kind: ['num'] }
                 : { label: C.visitors, cell: (x: Row) => formatCount(x.visitors), kind: ['num'] },
               { label: C.views, cell: (x) => formatCount(x.views), kind: ['num'] },
               { label: C.timeSpent, cell: (x) => durationText(x.seconds), kind: ['num', 'nowrap'] },
@@ -447,7 +450,7 @@ export function likesPanel(pc: PanelCtx, r: R<'likes'>): Child[] {
           table(
             [
               { label: L.columns.model, cell: (x: Row) => h('span', { class: [x.sub ? 'cell-sub' : null] }, x.name), kind: ['wide'] },
-              { label: L.columns.collectors, cell: (x) => opens(x.collectors, listHref(p, LIKES_SLICES.holds(x.key), x.collectors), openLabel(x.collectors, `who hold a piece of ${x.name}`)), kind: ['num'] },
+              { label: L.columns.collectors, cell: (x) => opens(x.collectors, listHref(p, LIKES_SLICES.holds(x.key), x.collectors), openLabel(x.collectors, L.open.holdPieceOf(x.name))), kind: ['num'] },
               { label: L.columns.pieces, cell: (x) => formatCount(x.pieces), kind: ['num'] },
             ],
             rows,
@@ -495,7 +498,7 @@ export function devicesPanel(pc: PanelCtx, r: R<'devices'>): Child[] {
               n,
               compare: before ? compareWords(n, value(before, k)) : null,
               link: opensCollectors ? listHref(pc.p, `${dim}:${k}`, n) : null,
-              aria: openLabel(n, `whose main ${dim === 'device' ? 'device is a' : dim === 'system' ? 'system is' : dim === 'openedin' ? 'way in is' : 'app is'} ${label(k)}`),
+              aria: openLabel(n, OPEN_WHO.mainDevice(dim, label(k))),
             };
           }),
         cur.total,
@@ -541,7 +544,7 @@ export function engagementPanel(pc: PanelCtx, r: R<'engagement'>): Child[] {
       compare: null,
       ghost: x.key === 'none' ? null : x.previous,
       link: listHref(p, `score:${x.key}`, x.collectors),
-      aria: x.key === 'none' ? openLabel(x.collectors, 'with no score') : openLabel(x.collectors, `with a score of ${scoreLabel(x.key)}`),
+      aria: openLabel(x.collectors, x.key === 'none' ? OPEN_WHO.noScore : OPEN_WHO.scoreOf(scoreLabel(x.key))),
     })),
     f.total,
     'collectors-spread',
@@ -553,7 +556,7 @@ export function engagementPanel(pc: PanelCtx, r: R<'engagement'>): Child[] {
     return h(
       'li',
       { class: 'collectors__part', data: { key: x.key } },
-      figureLink(text, x.average === null ? null : listHref(p, `part:${x.key}`, x.collectors), openLabel(x.collectors, `behind the average of ${name}`)),
+      figureLink(text, x.average === null ? null : listHref(p, `part:${x.key}`, x.collectors), openLabel(x.collectors, OPEN_WHO.behindAverage(name))),
     );
   });
   const status = panelBars(
@@ -563,7 +566,7 @@ export function engagementPanel(pc: PanelCtx, r: R<'engagement'>): Child[] {
       n: x.collectors,
       compare: f.status.previousAsOf ? compareWords(x.collectors, x.previous) : null,
       link: listHref(p, `status:${x.key}`, x.collectors),
-      aria: openLabel(x.collectors, x.key === 'never' ? 'never active since sign-up' : `${(EP.statusLabels[x.key] ?? x.key).toLowerCase()} on ${formatDate(f.status.asOf)}`),
+      aria: openLabel(x.collectors, x.key === 'never' ? OPEN_WHO.neverActive : OPEN_WHO.statusOn(EP.statusLabels[x.key] ?? x.key, f.status.asOf)),
     })),
     f.total,
     'collectors-status',
@@ -572,14 +575,14 @@ export function engagementPanel(pc: PanelCtx, r: R<'engagement'>): Child[] {
   const cohorts = table(
     [
       { label: EP.month, cell: (x: Row) => monthWords(x.month), kind: ['nowrap'] },
-      { label: EP.collectors, cell: (x) => opens(x.collectors, listHref(p, `cohort:${x.month}:all`, x.collectors), openLabel(x.collectors, `who signed up in ${monthWords(x.month)}`)), kind: ['num'] },
+      { label: EP.collectors, cell: (x) => opens(x.collectors, listHref(p, `cohort:${x.month}:all`, x.collectors), openLabel(x.collectors, OPEN_WHO.signedUpIn(monthWords(x.month)))), kind: ['num'] },
       ...[0, 1, 2, 3].map((i) => ({
         label: EP.after([1, 3, 6, 12][i]!),
         cell: (x: Row) => {
           const m = x.marks[i];
           if (!m) return '';
           const words = cohortWords(m);
-          return m.active === null ? words : figureLink(words, listHref(p, `cohort:${x.month}:${m.after}:active`, m.active), openLabel(m.active, `of ${monthWords(x.month)} active after ${m.after === 1 ? '1 month' : `${m.after} months`}`));
+          return m.active === null ? words : figureLink(words, listHref(p, `cohort:${x.month}:${m.after}:active`, m.active), openLabel(m.active, OPEN_WHO.cohortActive(x.month, m.after)));
         },
         kind: ['num' as const, 'nowrap' as const],
       })),
@@ -592,7 +595,7 @@ export function engagementPanel(pc: PanelCtx, r: R<'engagement'>): Child[] {
     spread,
     panelLine(EP.spreadNote(f.spread.median)),
     f.spread.scored === 0 ? panelLine(EP.noScore) : null,
-    f.scoresOn && f.scoresOn !== today ? panelLine(`Scores of ${formatDate(f.scoresOn)}.`) : null,
+    f.scoresOn && f.scoresOn !== today ? panelLine(`${OVERVIEW_COPY.scoresOf(f.scoresOn)}.`) : null,
     f.spread.previousMonth && r.previous ? panelLine(EP.previousMonth(f.spread.previousMonth)) : null,
     h('h3', { class: 'panel__subtitle' }, EP.parts),
     h('ul', { class: 'collectors__parts', data: { testid: 'collectors-parts' } }, ...parts),

@@ -34,7 +34,8 @@
  *
  * How a reading runs (§3.6 C.6.4, §5.1 console 25):
  *   - one REPEATABLE READ, READ ONLY transaction per panel, `work_mem` 32 MB (several panels run at once on the shared
- *     box) and `statement_timeout` 8 s; a reading cut by the timeout answers 503 INSIGHTS_TIMEOUT, logged with the panel
+ *     box; only the gated panel and list readings carry it, so at most two at once: options() and the export keep the
+ *     server's default) and `statement_timeout` 8 s; a reading cut by the timeout answers 503 INSIGHTS_TIMEOUT, logged with the panel
  *     and the period, never the filters' values;
  *   - at most INSIGHTS_CONCURRENT readings at once in the process; another waits up to INSIGHTS_WAIT_MS, then answers 503
  *     INSIGHTS_BUSY;
@@ -226,6 +227,11 @@ export interface WhoFigures {
   countries: { given: BarRow[]; connection: BarRow[] };
   /** Grouped ignoring case and accents (as given) or by GeoIP place; `groups` before the cut at WHO_CITIES_MAX. */
   cities: { given: { rows: CityRow[]; groups: number }; connection: { rows: CityRow[]; groups: number } };
+  /**
+   * Set by the route for an AUDITOR (routes/admin/collectors.ts, §3.0 (h), §3.3 « An AUDITOR sees countries, not
+   * cities »): `cities` then empty, since a narrowed population's city of one would tie a person to it.
+   */
+  citiesWithheld?: true;
 }
 
 export interface ReportHead {
@@ -382,6 +388,7 @@ export class CollectorInsightsService {
 
   /** The filters' choices and the earliest dates with data (see the file header). */
   async options(): Promise<CollectorsOptions> {
+    // Outside the gate: small DISTINCT readings with the server's default work_mem (§8 « Memory »: 32 MB at most twice).
     return this.readOnly(async (tx) => {
       const countries = await sql<{ country: string }>`
         SELECT DISTINCT a.country FROM accounts a WHERE a.country IS NOT NULL AND ${countedCollector('a.id')} ORDER BY a.country`.execute(tx);
@@ -399,7 +406,7 @@ export class CollectorInsightsService {
         recordingSince: await recordingSince(tx),
         snapshotsSince: (await sql<{ m: string | null }>`SELECT min(first_month)::text AS m FROM collector_history`.execute(tx)).rows[0]?.m ?? null,
       };
-    });
+    }, { workMem: null });
   }
 
   /** The request checked and normalised at `now` (400 VALIDATION_FAILED otherwise). */
@@ -501,7 +508,8 @@ export class CollectorInsightsService {
       const now = this.clock();
       let doc: { rows: number; lines: string[] };
       try {
-        doc = await this.readOnly((tx) => exportDocument(tx, filters, now), COLLECTOR_EXPORT_TIMEOUT_MS);
+        // Outside the gate (its own one-at-a-time rule): keyset batches with the server's default work_mem.
+        doc = await this.readOnly((tx) => exportDocument(tx, filters, now), { timeoutMs: COLLECTOR_EXPORT_TIMEOUT_MS, workMem: null });
       } catch (e) {
         if ((e as { code?: unknown })?.code === QUERY_CANCELED) {
           this.log.warn({ export: 'collectors' }, 'collectors export took too long to read');
@@ -555,12 +563,17 @@ export class CollectorInsightsService {
     }
   }
 
-  /** `fn` in one REPEATABLE READ, READ ONLY transaction with the page's work_mem and statement_timeout (the export's 60 s). */
-  private async readOnly<T>(fn: (tx: Db) => Promise<T>, timeoutMs: number = this.timeoutMs): Promise<T> {
+  /**
+   * `fn` in one REPEATABLE READ, READ ONLY transaction with its statement_timeout (the export's 60 s) and the page's
+   * work_mem, raised only for the gated readings (report and list); `workMem` null keeps the server's default.
+   */
+  private async readOnly<T>(fn: (tx: Db) => Promise<T>, o: { timeoutMs?: number; workMem?: string | null } = {}): Promise<T> {
+    const timeoutMs = o.timeoutMs ?? this.timeoutMs;
+    const workMem = o.workMem === undefined ? INSIGHTS_WORK_MEM : o.workMem;
     if (this.db.isTransaction) return fn(this.db);
     return this.db.transaction().execute(async (tx) => {
       await sql`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY`.execute(tx);
-      await sql.raw(`SET LOCAL work_mem = '${INSIGHTS_WORK_MEM}'`).execute(tx);
+      if (workMem !== null) await sql.raw(`SET LOCAL work_mem = '${workMem}'`).execute(tx);
       await sql.raw(`SET LOCAL statement_timeout = '${Math.max(1, Math.floor(timeoutMs))}ms'`).execute(tx);
       return fn(tx);
     });

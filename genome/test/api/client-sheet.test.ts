@@ -26,7 +26,8 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FORMULA_LINES } from '../../src/server/services/engagement-formula.js';
 import { orderReference } from '../../src/server/services/orders.js';
-import { createLiveRelease, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { birthdayExpiry } from '../../src/server/services/birthday-credits.js';
+import { createAccount, createLiveRelease, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { accountClient, adminClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
 import { poolDraw } from '../support/draws.js';
 
@@ -174,6 +175,27 @@ describe('the client sheet and the Shopify exports: the console\'s routes', () =
     expect({ ...b, owner: null, profile: null }).toEqual({ ...a, owner: null, profile: null });
     const unknown = await op.get('/api/admin/owners/00000000-0000-4000-8000-000000000000');
     expect([unknown.statusCode, errorOf(unknown).code]).toEqual([404, 'ACCOUNT_NOT_FOUND']);
+  });
+
+  it('withholds a birthday credit\'s birthday and the next one\'s day from an AUDITOR (plan CUSTOMER INTELLIGENCE §3.0 (h)), never from an OPERATOR', async () => {
+    const someone = await createAccount(h.ctx.db);
+    const now = h.clock.now();
+    await h.ctx.db.insertInto('account_profiles').values({ account_id: someone.id, birth_date: '1990-03-14', birth_date_by: 'COLLECTOR', birth_date_at: new Date(now.getTime() - 400 * 24 * HOUR) }).execute();
+    await h.ctx.db
+      .insertInto('tier_grants')
+      .values({ account_id: someone.id, tier: null, kind: 'BIRTHDAY', granted_at: new Date('2026-03-13T23:05:00.000Z'), amount_minor: 2_000, currency: 'EUR', expires_at: birthdayExpiry('2026-03-14', 30), birthday_on: '2026-03-14' })
+      .execute();
+    const [clear, masked] = await Promise.all([op.get(`/api/admin/owners/${someone.id}`), auditor.get(`/api/admin/owners/${someone.id}`)]);
+    const a = (safeJson(clear) as Json).club;
+    const b = (safeJson(masked) as Json).club;
+    expect(a.grants.find((g: Json) => g.kind === 'BIRTHDAY').birthdayOn).toBe('2026-03-14');
+    expect(a.birthdayNext).toEqual({ state: 'NEXT', on: '2027-03-14' });
+    expect(b.grants.find((g: Json) => g.kind === 'BIRTHDAY').birthdayOn).toBeNull();
+    expect(b.birthdayNext).toEqual({ state: 'NEXT', on: null });
+    expect(masked.body).not.toContain('2026-03-14');
+    expect(masked.body).not.toContain('2027-03-14');
+    // The rest of the block reads the same.
+    expect({ ...b, grants: b.grants.map((g: Json) => ({ ...g, birthdayOn: null })), birthdayNext: null }).toEqual({ ...a, grants: a.grants.map((g: Json) => ({ ...g, birthdayOn: null })), birthdayNext: null });
   });
 
   it('sets a model\'s base price with its currency and its care guide, which MY PIECES reads with the model\'s orders', async () => {

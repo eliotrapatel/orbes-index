@@ -51,6 +51,7 @@ import {
   filterCount,
   KPI_LABELS,
   listHref,
+  OPEN_WHO,
   openLabel,
   OVERVIEW_COPY,
   PANEL_COPY,
@@ -85,7 +86,7 @@ import { openDialog } from '../ui/dialog.js';
 import { saveDownload } from '../ui/download.js';
 import { notify } from '../ui/toast.js';
 import { devicesPanel, engagementPanel, likesPanel, originPanel, trendsPanel } from './collectors-panels.js';
-import { compareBlock, figureLink, noMatch, nodes, panelBars, panelLine, panelTabs, type PanelBar, type PanelCtx } from './collectors-parts.js';
+import { compareBlock, figureLink, focusedIn, focusMark, keepFocus, noMatch, nodes, panelBars, panelLine, panelTabs, refocus, showMore, type PanelBar, type PanelCtx } from './collectors-parts.js';
 import type { ViewContext } from './context.js';
 
 // ── At a glance ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -112,24 +113,24 @@ function overviewPanel(pc: PanelCtx, r: Extract<CollectorsReport, { panel: 'over
   const median = f.medianScore.value === null ? '—' : formatCount(f.medianScore.value);
   const withheld = f.medianScore.value === null && f.medianScore.scored > 0 ? WITHHELD : null;
   const kpis = [
-    kpiBlock('collectors', KPI_LABELS.collectors, num(f.collectors.value), listHref(p, 'all', f.collectors.value ?? 0), openLabel(f.collectors.value ?? 0, 'of this view'), cmp(f.collectors), null),
-    kpiBlock('newCollectors', KPI_LABELS.newCollectors, num(f.newCollectors.value), listHref(p, 'new', f.newCollectors.value ?? 0), openLabel(f.newCollectors.value ?? 0, 'who signed up in the period'), cmp(f.newCollectors), null),
+    kpiBlock('collectors', KPI_LABELS.collectors, num(f.collectors.value), listHref(p, 'all', f.collectors.value ?? 0), openLabel(f.collectors.value ?? 0, OPEN_WHO.ofThisView), cmp(f.collectors), null),
+    kpiBlock('newCollectors', KPI_LABELS.newCollectors, num(f.newCollectors.value), listHref(p, 'new', f.newCollectors.value ?? 0), openLabel(f.newCollectors.value ?? 0, OPEN_WHO.signedUpInPeriod), cmp(f.newCollectors), null),
     kpiBlock(
       'firstVisits',
       KPI_LABELS.firstVisits,
       num(f.firstVisits.value),
       listHref(p, 'firstvisit', f.firstVisits.becameCollectors),
-      openLabel(f.firstVisits.becameCollectors, 'whose first visit fell in the period'),
+      openLabel(f.firstVisits.becameCollectors, OPEN_WHO.firstVisitInPeriod),
       cmp(f.firstVisits),
       OVERVIEW_COPY.became(f.firstVisits.becameCollectors),
     ),
-    kpiBlock('active', KPI_LABELS.active, num(f.active.value), listHref(p, 'active', f.active.value ?? 0), openLabel(f.active.value ?? 0, 'active in the period'), cmp(f.active), null),
+    kpiBlock('active', KPI_LABELS.active, num(f.active.value), listHref(p, 'active', f.active.value ?? 0), openLabel(f.active.value ?? 0, OPEN_WHO.activeInPeriod), cmp(f.active), null),
     kpiBlock(
       'medianScore',
       KPI_LABELS.medianScore,
       median,
       listHref(p, 'scored', f.medianScore.scored),
-      openLabel(f.medianScore.scored, 'with a score'),
+      openLabel(f.medianScore.scored, OPEN_WHO.withScore),
       f.medianScore.value === null ? null : cmp(f.medianScore, true),
       [withheld, OVERVIEW_COPY.scored(f.medianScore.scored), scoresOn].filter(Boolean).join(' · '),
     ),
@@ -138,7 +139,7 @@ function overviewPanel(pc: PanelCtx, r: Extract<CollectorsReport, { panel: 'over
       KPI_LABELS.wishesAdded,
       num(f.wishesAdded.value),
       listHref(p, 'wished', f.wishesAdded.collectors),
-      openLabel(f.wishesAdded.collectors, 'who added a wish in the period'),
+      openLabel(f.wishesAdded.collectors, OPEN_WHO.addedWishInPeriod),
       cmp(f.wishesAdded),
       OVERVIEW_COPY.by(f.wishesAdded.collectors),
     ),
@@ -173,7 +174,7 @@ function whoPanel(pc: PanelCtx, r: Extract<CollectorsReport, { panel: 'who' }>):
       all = false;
       draw();
     }, 'collectors-who-tabs');
-    const sides = panelTabs<Side>(WHO_COPY.title, [
+    const sides = panelTabs<Side>(WHO_COPY.sidesLabel, [
       { key: 'given', text: WHO_COPY.switch.given },
       { key: 'connection', text: WHO_COPY.switch.connection },
     ], side, (k) => {
@@ -189,6 +190,9 @@ function whoPanel(pc: PanelCtx, r: Extract<CollectorsReport, { panel: 'who' }>):
       const rows = side === 'given' ? f.countries.given : f.countries.connection;
       content.push(sides, panelBars(rows.map((row) => bar(side === 'given' ? 'country' : 'conncountry', row, countryRowLabel(row.key))), f.total, 'collectors-countries'));
       if (side === 'connection') content.push(panelLine(WHO_COPY.connection));
+    } else if (f.citiesWithheld || !pc.reader.withCities) {
+      // §3.0 (h): an AUDITOR reads countries, not cities (the server sends none).
+      content.push(panelLine(WHO_COPY.citiesWithheld, 'collectors-cities-withheld'));
     } else {
       const block = side === 'given' ? f.cities.given : f.cities.connection;
       const named = block.rows.filter((x) => x.key !== 'none' && x.key !== 'unknown');
@@ -204,15 +208,14 @@ function whoPanel(pc: PanelCtx, r: Extract<CollectorsReport, { panel: 'who' }>):
             testId: 'collectors-cities-all',
             onClick: () => {
               all = true;
-              draw();
+              showMore(body, '[data-testid=collectors-cities] .bar:not([data-key=none]):not([data-key=unknown])', draw);
             },
           }),
         );
       }
-      if (!pc.reader.withCities) content.push(panelLine(WHO_COPY.citiesWithheld));
       if (side === 'connection') content.push(panelLine(WHO_COPY.connection), panelLine(WHO_COPY.dbip, 'collectors-dbip'));
     }
-    body.replaceChildren(tabs, ...nodes(content));
+    keepFocus(body, () => body.replaceChildren(tabs, ...nodes(content)));
   };
   draw();
   return [body];
@@ -303,7 +306,7 @@ function periodControls(pc: PanelCtx, apply: (q: Partial<CollectorsParams>) => b
   const from = input('from', { type: 'date', value: p.from ?? '' });
   const to = input('to', { type: 'date', value: p.to ?? '' });
   const problem = h('p', { class: 'collectors__problem', attrs: { role: 'alert' } });
-  const form = h('form', { class: ['filters', 'collectors__custom'], attrs: { novalidate: true, 'data-testid': 'collectors-custom' } }, field(K.from, from), field(K.to, to), button(K.apply, { kind: 'secondary', type: 'submit' }), problem);
+  const form = h('form', { class: ['filters', 'collectors__custom'], attrs: { novalidate: true, 'data-testid': 'collectors-custom' } }, field(K.from, from), field(K.to, to), button(K.apply, { kind: 'secondary', type: 'submit', testId: 'collectors-custom-apply' }), problem);
   form.addEventListener('submit', (ev) => {
     ev.preventDefault();
     const bad = customProblem(from.value, to.value, parisDay(pc.ctx.now()));
@@ -366,12 +369,13 @@ function controls(pc: PanelCtx, problem: HTMLElement, place: ControlsPlace | nul
     problem.textContent = '';
     if (target !== collectorsHref(chosen)) {
       const open = filters.querySelector<HTMLDetailsElement>('details.collectors__pick[open]');
-      const active = document.activeElement;
+      const root = filters.closest('[data-testid=collectors-controls]') ?? filters;
       keptPlace = {
         target,
         pick: open?.dataset.testid ?? null,
         sheet: filters.classList.contains('is-open'),
-        focus: focus ?? (active instanceof HTMLInputElement && filters.contains(active) ? active.name : null),
+        // Any control of the controls in focus (a box, Compare, CUSTOM's or the score's Apply, Clear filters).
+        focus: focus ? `[name="${focus}"]` : focusMark(focusedIn(root), root),
       };
     }
     chosen = { ...chosen, ...q };
@@ -420,7 +424,7 @@ function controls(pc: PanelCtx, problem: HTMLElement, place: ControlsPlace | nul
     scFrom,
     h('span', { class: 'micro soft' }, K.scoreTo.toLowerCase()),
     scTo,
-    button(K.scoreApply, { kind: 'ghost', type: 'submit' }),
+    button(K.scoreApply, { kind: 'ghost', type: 'submit', testId: 'collectors-score-apply' }),
   );
   scoreForm.addEventListener('submit', (ev) => {
     ev.preventDefault();
@@ -442,7 +446,15 @@ function controls(pc: PanelCtx, problem: HTMLElement, place: ControlsPlace | nul
     scoreForm,
     favourite,
     n > 0 ? button(K.clear, { kind: 'ghost', testId: 'collectors-clear', onClick: () => apply(clearedFilters(chosen)) }) : null,
-    button(K.done, { kind: 'secondary', testId: 'collectors-filters-done', onClick: () => sheet(false) }),
+    button(K.done, {
+      kind: 'secondary',
+      testId: 'collectors-filters-done',
+      onClick: () => {
+        sheet(false);
+        // The sheet (and Done) hidden: the focus goes back to the fold that opened it.
+        fold.focus();
+      },
+    }),
   );
   const fold = button(n ? `${K.filters} (${n})` : K.filters, { kind: 'secondary', testId: 'collectors-filters-fold', onClick: () => sheet(!filters.classList.contains('is-open')) });
   fold.classList.add('collectors__fold');
@@ -456,16 +468,7 @@ function controls(pc: PanelCtx, problem: HTMLElement, place: ControlsPlace | nul
     const pick = [...filters.querySelectorAll<HTMLDetailsElement>('details.collectors__pick')].find((d) => d.dataset.testid === place.pick);
     if (pick) pick.open = true;
   }
-  if (place?.focus) {
-    const name = place.focus;
-    // Once the page is drawn (the route mounts it after this view resolves).
-    setTimeout(() => {
-      const box = [...filters.querySelectorAll('input')].find((x) => x.name === name);
-      if (box?.isConnected) box.focus({ preventScroll: true });
-    }, 0);
-  }
-
-  return h(
+  const root = h(
     'div',
     { class: 'collectors__controls', data: { testid: 'collectors-controls' } },
     periodControls(pc, apply),
@@ -473,6 +476,19 @@ function controls(pc: PanelCtx, problem: HTMLElement, place: ControlsPlace | nul
     filters,
     problem,
   );
+  if (place?.focus) {
+    const mark = place.focus;
+    // Once the page is drawn (the route mounts it after this view resolves). A control gone with the choice (Clear
+    // filters, once none is left) gives the focus to the filters: the phone's fold, else the first list.
+    setTimeout(() => {
+      if (!root.isConnected) return;
+      if (refocus(root, mark)) return;
+      const next = fold.offsetParent !== null ? fold : filters.querySelector<HTMLElement>('summary');
+      next?.focus({ preventScroll: true });
+    }, 0);
+  }
+
+  return root;
 }
 
 // ── The export (ADMIN) ───────────────────────────────────────────────────────────────────────────────────────────
@@ -557,6 +573,8 @@ export async function collectorsView(ctx: ViewContext): Promise<HTMLElement> {
       reading = mine;
       const stop = () => mine.abort();
       cancel.signal.addEventListener('abort', stop, { once: true });
+      // A choice inside the panel (Over time's figure or split, the currency) keeps its focus once the panel is read again.
+      const focus = focusMark(focusedIn(body), body);
       body.replaceChildren(h('div', { class: 'loading', attrs: { role: 'status' } }, h('span', { class: 'loading__orbit', attrs: { 'aria-hidden': 'true' } }), h('span', { class: 'loading__text' }, PANEL_COPY.loading)));
       el.setAttribute('aria-busy', 'true');
       void slow(() => ctx.api.collectorsReport(def.panel, collectorsApiQuery(p, extra), { fresh, signal: mine.signal }))
@@ -575,6 +593,7 @@ export async function collectorsView(ctx: ViewContext): Promise<HTMLElement> {
             clear: () => ctx.navigate(collectorsHref(clearedFilters(p))),
           };
           body.replaceChildren(...nodes(def.draw(pc, r)));
+          refocus(body, focus);
         })
         .catch((e: unknown) => {
           if (mine !== reading || cancel.signal.aborted || (e instanceof ApiError && e.code === 'ABORTED')) return;

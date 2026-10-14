@@ -9,7 +9,9 @@
  *        period (p=7d|30d|90d|12m|custom, with from and to for custom), cmp, scope=all|active|new, the five filters (c, s,
  *        t, sc, ft), currency, fresh; for trends its figure (collectors|new|firstvisits|active|medianscore|wishes|views|
  *        buyers) and split (none|country|source|tier|age|device).
- *        The figures name no one: counts, medians and groups, so an AUDITOR reads them as they are. 503 INSIGHTS_BUSY
+ *        The figures name no one: counts, medians and groups, so an AUDITOR reads them as they are, except the who
+ *        panel's cities (§3.0 (h): empty, with `citiesWithheld`, since a narrowed population's city of one would tie a
+ *        person to it). 503 INSIGHTS_BUSY
  *        while two readings run and another has waited 10 s; 503 INSIGHTS_TIMEOUT for a reading past 8 s.
  *   GET /api/admin/collectors/list      the collectors behind one figure: the report's query with `slice`
  *        (<dimension>[:<value>], §3.6 C.6.5) and `page`; 50 a page ordered by email, never a score; an AUDITOR reads
@@ -41,7 +43,11 @@ export const adminCollectorRoutes: FastifyPluginAsync<AdminRouteDeps> = async (a
 
   app.get('/api/admin/collectors/report', async (request) => {
     const q = parse(collectorsReportQuery, request.query);
-    return collectorInsights.report(q);
+    const report = await collectorInsights.report(q);
+    // §3.0 (h): an AUDITOR reads countries, not cities. Masked here, after the shared cache, which keeps every figure.
+    if (report.panel !== 'who' || readsClientEmails(request)) return report;
+    const none = { rows: [], groups: 0 };
+    return { ...report, figures: { ...report.figures, cities: { given: none, connection: none }, citiesWithheld: true as const } };
   });
 
   app.get('/api/admin/collectors/list', async (request) => {

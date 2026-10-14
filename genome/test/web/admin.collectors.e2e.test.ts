@@ -169,6 +169,50 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Collectors page (plan CUSTOMER IN
     await p.screenshot({ path: join(OUT_DIR, `admin-collectors-${name}.png`), fullPage: true });
   }
 
+  /** Devices' lists: how many columns, the compared lists, the rows, and any row whose bar is gone or whose comparison leaves its column. */
+  const devicesLayout = (p: Page) =>
+    p.evaluate(() => {
+      const lists = document.querySelector('[data-testid=collectors-panel-devices] .collectors__lists')!;
+      const rows = [...lists.querySelectorAll('[data-testid^=collectors-devices-] .bar')];
+      const bad = rows.flatMap((row) => {
+        const column = row.closest('.collectors__lists > div')!.getBoundingClientRect();
+        const cmp = row.querySelector('.collectors__cmp')!.getBoundingClientRect();
+        const track = row.querySelector('.bar__track')!.getBoundingClientRect();
+        const value = row.querySelector('.bar__value')!.getBoundingClientRect();
+        const key = (row as HTMLElement).dataset.key;
+        return [
+          cmp.right > column.right + 0.5 ? `${key} cmp ${Math.round(cmp.right)} > ${Math.round(column.right)}` : null,
+          value.right > column.right + 0.5 ? `${key} value ${Math.round(value.right)} > ${Math.round(column.right)}` : null,
+          track.width > 0 ? null : `${key} track 0`,
+        ].filter((x) => x !== null);
+      });
+      return { columns: getComputedStyle(lists).gridTemplateColumns.split(' ').length, compared: lists.querySelectorAll('.collectors__bars--cmp').length, rows: rows.length, bad };
+    });
+
+  /** Every KPI row of the page: each figure's text inside its own cell, and the third KPI's left hairline. */
+  const kpiLayout = (p: Page) =>
+    p.evaluate(() =>
+      [...document.querySelectorAll('[data-testid=collectors] .collectors__kpis')].map((row) => {
+        const cells = [...row.querySelectorAll(':scope > .kpi')];
+        const over = cells.flatMap((cell, i) => {
+          const value = cell.querySelector('.kpi__value');
+          if (!value) return [];
+          const range = document.createRange();
+          range.selectNodeContents(value);
+          const text = range.getBoundingClientRect();
+          const box = cell.getBoundingClientRect();
+          return text.right > box.right + 0.5 ? [`${i + 1}: ${Math.round(text.right)} > ${Math.round(box.right)}`] : [];
+        });
+        const third = cells[2] ? getComputedStyle(cells[2]) : null;
+        return {
+          row: (row as HTMLElement).dataset.testid,
+          columns: getComputedStyle(row).gridTemplateColumns.split(' ').length,
+          third: third ? `${third.borderLeftWidth} ${third.paddingLeft}` : null,
+          over,
+        };
+      }),
+    );
+
   /** No sideways scroll at the page's width. */
   async function fits(p: Page): Promise<void> {
     const wide = await p.evaluate(() => {
@@ -430,7 +474,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Collectors page (plan CUSTOMER IN
   );
 
   it(
-    'lays the page out at 375 px: the KPIs two by two, the filters folded into « Filters (1) » and opened as a sheet, no sideways scroll; an AUDITOR’s cities open nothing (step 9.9)',
+    'lays the page out at 375 px: the KPIs two by two, the filters folded into « Filters (1) » and opened as a sheet, no sideways scroll; an AUDITOR reads no city (step 9.9)',
     async () => {
       const phone = await open(ADMIN, 375);
       await go(phone, '#/collectors?c=FR');
@@ -454,9 +498,10 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Collectors page (plan CUSTOMER IN
       await auditor.click('[data-testid=collectors-who-tabs] [data-key=countries]');
       expect(await auditor.locator('[data-testid=collectors-countries] a').count()).toBe(4);
       await auditor.click('[data-testid=collectors-who-tabs] [data-key=cities]');
-      expect(await bars(auditor, 'collectors-cities')).toEqual(['Lyon 2', 'London 1', 'Milano 1', 'Not given 2']);
-      expect(await auditor.locator('[data-testid=collectors-cities] a').count()).toBe(0);
-      expect(await text(auditor, '[data-testid=collectors-panel-who] .growth__line')).toBe('An AUDITOR does not open the collectors of a city.');
+      // §3.0 (h): an AUDITOR reads countries, not cities: no city's name nor count, the withheld line.
+      expect(await auditor.locator('[data-testid=collectors-cities]').count()).toBe(0);
+      expect(await text(auditor, '[data-testid=collectors-cities-withheld]')).toBe('Cities are withheld.');
+      expect(await auditor.locator('[data-testid=collectors-panel-who]').innerText()).not.toMatch(/Lyon|London|Milano/u);
       await auditor.context().close();
     },
     STEP_TIMEOUT,
@@ -522,18 +567,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Collectors page (plan CUSTOMER IN
       expect(await p.locator('[data-testid=collectors-devices-system] .bar[data-key=IOS] a').getAttribute('aria-label')).toBe('Open the 1 collector whose main system is iPhone');
       expect(await bars(p, 'collectors-devices-browsers')).toEqual(['Chrome 1', 'Safari 1']);
       // At 1,440 px, compared: the three lists side by side, each row's bar drawn and its comparison inside its own column.
-      const outside = await p.evaluate(() => {
-        const lists = document.querySelector('[data-testid=collectors-panel-devices] .collectors__lists')!;
-        const rows = [...lists.querySelectorAll('[data-testid^=collectors-devices-] .bar')];
-        const bad = rows.flatMap((row) => {
-          const column = row.closest('.collectors__lists > div')!.getBoundingClientRect();
-          const cmp = row.querySelector('.collectors__cmp')!.getBoundingClientRect();
-          const track = row.querySelector('.bar__track')!.getBoundingClientRect();
-          const key = (row as HTMLElement).dataset.key;
-          return [cmp.right > column.right + 0.5 ? `${key} cmp ${Math.round(cmp.right)} > ${Math.round(column.right)}` : null, track.width > 0 ? null : `${key} track 0`].filter((x) => x !== null);
-        });
-        return { columns: getComputedStyle(lists).gridTemplateColumns.split(' ').length, compared: lists.querySelectorAll('.collectors__bars--cmp').length, rows: rows.length, bad };
-      });
+      const outside = await devicesLayout(p);
       expect(outside).toMatchObject({ columns: 3, compared: 4, bad: [] });
       expect(outside.rows).toBeGreaterThan(0);
       await p.click(`${devices} [data-key=byVisits]`);
@@ -577,6 +611,78 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Collectors page (plan CUSTOMER IN
       await phone.click(`${likes} [data-testid=collectors-likes-tabs] [data-key=viewed]`);
       await fits(phone);
       await shot(phone, 'panels-phone');
+      await phone.context().close();
+    },
+    STEP_TIMEOUT,
+  );
+
+  it(
+    'keeps the KPI rows and Devices\' compared lists inside their cells between the breakpoints (1,024 px) and on a 320 px phone with four-digit figures; the tabs by keyboard, the focus kept across a redraw (review RI2)',
+    async () => {
+      const p = await open(ADMIN, 1024);
+      await go(p, '#/collectors');
+      await allLoaded(p);
+      // Beside the menu, a third of the width is too narrow for a compared row: the three lists stack, each bar drawn.
+      const devices = await devicesLayout(p);
+      expect(devices).toMatchObject({ columns: 1, compared: 4, bad: [] });
+      expect(devices.rows).toBeGreaterThan(0);
+      // At a glance's six and What they like's three keep the third KPI's hairline (not the console's two-by-two rule).
+      expect(await kpiLayout(p)).toEqual([
+        { row: 'collectors-kpis', columns: 6, third: '1px 18px', over: [] },
+        { row: 'collectors-wishlists', columns: 3, third: '1px 18px', over: [] },
+      ]);
+      await fits(p);
+      await shot(p, 'tablet');
+
+      // By keyboard: one stop per list of tabs, Right shows the next tab and keeps the focus on it after the redraw.
+      const focused = () => p.evaluate(() => {
+        const a = document.activeElement as HTMLElement | null;
+        return a ? `${a.closest('[data-testid]:not([data-key])')?.getAttribute('data-testid') ?? ''} ${a.dataset.key ?? a.dataset.testid ?? a.getAttribute('name') ?? a.tagName}` : '';
+      });
+      expect(await p.locator('[data-testid=collectors-who-tabs] [tabindex="0"]').getAttribute('data-key')).toBe('ages');
+      await p.focus('[data-testid=collectors-who-tabs] [data-key=ages]');
+      await p.keyboard.press('ArrowRight');
+      expect(await p.locator('[data-testid=collectors-who-tabs] [aria-selected=true]').getAttribute('data-key')).toBe('countries');
+      expect(await focused()).toBe('collectors-who-tabs countries');
+      await p.keyboard.press('Enter');
+      expect(await focused()).toBe('collectors-who-tabs countries');
+      await p.keyboard.press('End');
+      expect(await focused()).toBe('collectors-who-tabs cities');
+      await p.keyboard.press('Tab');
+      expect(await focused()).toBe('collectors-who-side given');
+      await p.keyboard.press('ArrowRight');
+      expect(await focused()).toBe('collectors-who-side connection');
+      // A panel read again for a choice of its own (Over time's split) gives the focus back to that choice.
+      const split = p.locator('[data-testid=collectors-panel-trends] [data-testid=collectors-trend-split]');
+      await split.focus();
+      await split.selectOption('country');
+      await loaded(p, 'trends');
+      await expect.poll(focused).toMatch(/ collectors-trend-split$/u);
+      // Compare, applied from the keyboard: the page drawn again, the focus on Compare.
+      await p.focus('[data-testid=collectors-compare] input');
+      await act(p, () => p.keyboard.press('Space'), '#/collectors?cmp=0');
+      await expect.poll(() => p.evaluate(() => (document.activeElement as HTMLInputElement | null)?.name ?? '')).toBe('cmp');
+      await p.context().close();
+
+      const phone = await open(ADMIN, 320);
+      await go(phone, '#/collectors');
+      await allLoaded(phone);
+      // A house of thousands: every figure four digits.
+      await phone.evaluate(() => document.querySelectorAll('[data-testid=collectors] .collectors__kpis .kpi__value').forEach((v) => (v.textContent = '8,888')));
+      const rows = await kpiLayout(phone);
+      expect(rows.map((r) => [r.row, r.columns, r.over])).toEqual([
+        ['collectors-kpis', 2, []],
+        ['collectors-wishlists', 3, []],
+      ]);
+      // Three across on the phone: the third keeps its hairline on the same row.
+      expect(rows[1]!.third).toBe('1px 18px');
+      expect(await phone.evaluate(() => getComputedStyle(document.querySelector('[data-testid=collectors-wishlists] > .kpi:nth-child(3)')!).borderTopWidth)).toBe('0px');
+      await fits(phone);
+      await shot(phone, 'phone-320');
+      // The sheet's Done hides it: the focus goes back to the fold.
+      await phone.click('[data-testid=collectors-filters-fold]');
+      await phone.click('[data-testid=collectors-filters-done]');
+      expect(await phone.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.testid)).toBe('collectors-filters-fold');
       await phone.context().close();
     },
     STEP_TIMEOUT,

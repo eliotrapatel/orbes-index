@@ -12,9 +12,8 @@
  * The console's house style; text through h() only (CSP-safe).
  */
 import { h } from '../../shared/dom.js';
-import { formatDate } from '../format.js';
 import { countryName } from '../model/analytics.js';
-import { collectorsApiQuery, collectorsHref, LIST_COPY as K, listParams, listTitle, periodDays, tierWords, viewWords } from '../model/collectors.js';
+import { collectorsApiQuery, collectorsHref, joinedText, LIST_COPY as K, listParams, listTitle, periodDays, tierWords, viewWords } from '../model/collectors.js';
 import { parisDateTime } from '../model/links.js';
 import { href } from '../router.js';
 import type { CollectorsListRow, CollectorsOptions, TrendFigure, TrendSplit } from '../types.js';
@@ -41,7 +40,7 @@ export async function collectorsListView(ctx: ViewContext): Promise<HTMLElement>
     { label: K.columns.country, cell: (r) => (r.country ? `${r.country} · ${countryName(r.country)}` : '—'), kind: ['nowrap'] },
     ...(withCities ? [{ label: K.columns.city, cell: (r: CollectorsListRow) => r.city ?? '—', kind: ['nowrap' as const] }] : []),
     { label: K.columns.tier, cell: (r) => tierWords(r.tier), kind: ['nowrap'] },
-    { label: K.columns.joined, cell: (r) => formatDate(r.createdAt), kind: ['nowrap'] },
+    { label: K.columns.joined, cell: (r) => joinedText(r.createdAt), kind: ['nowrap'] },
     { label: K.columns.lastSeen, cell: (r) => (r.lastSeenAt ? parisDateTime(r.lastSeenAt) : '—'), kind: ['nowrap'] },
     ...(heardOther ? [{ label: K.columns.words, cell: (r: CollectorsListRow) => r.heardOther ?? '—', kind: ['wrap' as const] }] : []),
   ];

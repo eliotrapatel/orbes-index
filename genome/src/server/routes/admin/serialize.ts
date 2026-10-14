@@ -15,6 +15,7 @@ import { toBase64Url } from '../../../core/bytes.js';
 import { hasRole, requireAdmin } from '../../http/sessions.js';
 import type { KeyRecord } from '../../keys/key-service.js';
 import type { AdminProfile } from '../../services/auth.js';
+import type { OwnerClub } from '../../services/owners.js';
 import type { CodeRecord, GenomeRecord, IssueBatchLine, ProductRecord } from '../../services/issuance.js';
 import { STAFF_WITHHELD, type StaffProfileView } from '../../services/profiles.js';
 
@@ -85,6 +86,20 @@ export function parcelShipTo<T extends { name: string | null; address: string | 
 export function ownerProfile(p: StaffProfileView, inClear: boolean): StaffProfileView {
   if (inClear) return p;
   return { ...p, birthDate: null, age: null, phone: null, city: null, instagram: null, address: null, withheld: [...STAFF_WITHHELD] };
+}
+
+/**
+ * The client sheet's Club block as the caller may read it (plan CUSTOMER INTELLIGENCE §3.0 (h): « Date of birth:
+ * withheld; the age band shown »): in clear for OPERATOR and ADMIN; for an AUDITOR each birthday credit's birthday and
+ * the next birthday credit's day withheld (null), since together with the age band they give the date of birth back.
+ */
+export function ownerClubJson(c: OwnerClub, inClear: boolean): OwnerClub {
+  if (inClear) return c;
+  return {
+    ...c,
+    grants: c.grants.map((g) => (g.kind === 'BIRTHDAY' ? { ...g, birthdayOn: null } : g)),
+    birthdayNext: c.birthdayNext.state === 'NEXT' ? { state: 'NEXT', on: null } : c.birthdayNext,
+  };
 }
 
 export function adminJson(a: AdminProfile) {

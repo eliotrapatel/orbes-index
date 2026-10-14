@@ -110,6 +110,8 @@ export interface Column<T> {
    * `.cell-email`) on one line up to about thirty characters, a longer one on a second line.
    */
   kind?: ('num' | 'mono' | 'wide' | 'nowrap' | 'actions' | 'wrap' | 'email')[];
+  /** The header named for screen readers only (`aria-label`), its cell left blank (a column of bars). */
+  hiddenLabel?: boolean;
 }
 
 /** The empty state of a list or a chart: the mark and one line saying what is missing. */
@@ -133,7 +135,7 @@ export function table<T>(
       'table',
       { class: 'table' },
       opts.caption ? h('caption', { class: 'visually-hidden' }, opts.caption) : null,
-      h('thead', null, h('tr', null, ...columns.map((c) => h('th', { class: cls(c), attrs: { scope: 'col' } }, c.label)))),
+      h('thead', null, h('tr', null, ...columns.map((c) => h('th', { class: cls(c), attrs: { scope: 'col', 'aria-label': c.hiddenLabel ? c.label : null } }, c.hiddenLabel ? null : c.label)))),
       h(
         'tbody',
         null,

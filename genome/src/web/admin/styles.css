@@ -6274,7 +6274,7 @@ a.collectors__kpi-link:focus-visible {
 }
 
 /* The Collectors page's panels after Who they are (step 9.10): FIRST VISITS' columns, the device lists side by side
-   (stacked under 860 px), THE FIVE PARTS, Over time's line (a dash per group, the previous period pale) and its key. */
+   (stacked under 1 180 px), THE FIVE PARTS, Over time's line (a dash per group, the previous period pale) and its key. */
 
 .collectors__kpis--three {
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -6405,16 +6405,45 @@ a.collectors__kpi-link:focus-visible {
 .collectors__key--5::before { border-top-color: var(--ink-soft); border-top-style: dashed; }
 .collectors__key--6::before { border-top-color: var(--metal); }
 
-@media (max-width: 860px) {
+/* Devices' three lists stack under 1 180 px: beside the menu, a third of the width is narrower than a compared row's
+   label, bar, count and share. */
+@media (max-width: 1180px) {
   .collectors__lists {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+@media (max-width: 860px) {
   .collectors__lists .collectors__bars--cmp .bar {
     grid-template-columns: 120px minmax(0, 1fr) 48px;
     gap: 20px;
   }
+  /* What they like stays three across: its third KPI keeps its hairline, on the same row. */
   .collectors__kpis--three .kpi:nth-child(3) {
-    padding-left: 0;
-    border-left: 0;
+    padding-left: 18px;
+    border-left: 1px solid var(--hairline);
+    border-top: 0;
+  }
+}
+
+/* Between the breakpoints the console's two-by-two KPIs rule (.kpi:nth-child(3), up to 1 180 px) is not the Collectors
+   page's: its rows of six and of three keep the third KPI's hairline. */
+@media (min-width: 861px) and (max-width: 1180px) {
+  .collectors__kpis .kpi:nth-child(3) {
+    padding-left: 18px;
+    border-left: 1px solid var(--hairline);
+  }
+}
+
+/* A phone's thirds and halves take a four-digit figure at the heading size, as GROWTH's do; the page's actions (Read
+   again, Export) wrap rather than run past a 320 px screen, as the client sheet's do. */
+@media (max-width: 560px) {
+  .view--collectors .collectors__kpis .kpi__value {
+    font-size: var(--fs-heading);
+  }
+  .view--collectors .page-head__actions {
+    flex-wrap: wrap;
+    flex-shrink: 1;
+    max-width: 100%;
   }
 }
