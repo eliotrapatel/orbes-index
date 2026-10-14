@@ -50,6 +50,7 @@ import { tasteKey } from '../../shared/profile-rules.js';
 import { systemClock, type Clock } from '../types.js';
 import { CLUB_EXCLUDED_STATUSES } from './club.js';
 import { GROWTH_MIN_GROUP } from './growth.js';
+import { daysApart } from './insights-scope.js';
 import { countedCollector } from './population.js';
 import { parisDay } from './schedule.js';
 import { tasteOptions } from './tastes.js';
@@ -63,6 +64,12 @@ import { wishHistoryCutoff, wishModelState, type WishModelState } from './wishli
 export const LIKES_TOP = 50;
 /** A median of fewer collectors is withheld (GROWTH's minimum group). */
 export const LIKES_MIN_GROUP = GROWTH_MIN_GROUP;
+/**
+ * MOST VIEWED, COLLECTORS: a reading of more Paris days reads each collector's own views (collector_views_account_idx),
+ * one of fewer the period's views by time (collector_views_at_idx). Measured at 20,000 collectors and 3 M views: the
+ * same time either way from about 60 days; under it, the time index is the faster.
+ */
+export const LIKES_PROBE_AFTER_DAYS = 60;
 
 const MODEL = VIEW_PAGE_CODES.MODEL;
 const RELEASE_PAGES = [VIEW_PAGE_CODES.RELEASE, VIEW_PAGE_CODES.LIVE, VIEW_PAGE_CODES.AFTER_ROOM] as const;
@@ -532,14 +539,29 @@ async function viewedByCollectors(tx: Db, x: LikesInput): Promise<LikesFigures['
   const reachesBackTo = P.from < first ? first : null;
   if (P.to < first) return { models: [], releases: [], groups: 0, reachesBackTo };
   const start = P.from < first ? viewHistoryCutoff(x.now) : P.start;
+  const range = { start, end: P.end };
+  const days = daysApart(P.from < first ? first : P.from, P.to) + 1;
+  /**
+   * The population's views of `pages` in the reading, as `v (account_id, subject, seconds)`. Over LIKES_PROBE_AFTER_DAYS
+   * Paris days, one probe of collector_views_account_idx per collector: OFFSET 0 keeps it a probe, since as a join,
+   * PostgreSQL's parallel plans (genome-ci's postgres:16) read the 13 months whole. Within them, the period's rows by
+   * time (collector_views_at_idx).
+   */
+  const viewsOf = (pages: RawBuilder<unknown>) =>
+    days > LIKES_PROBE_AFTER_DAYS
+      ? sql`(SELECT c.account_id, r.subject, r.seconds FROM pop c
+               CROSS JOIN LATERAL (SELECT cv.subject, cv.seconds FROM collector_views cv
+                                    WHERE cv.account_id = c.account_id AND ${within(sql`cv.at`, range)} AND ${pages} AND cv.subject IS NOT NULL
+                                   OFFSET 0) r) v`
+      : sql`(SELECT cv.account_id, cv.subject, cv.seconds FROM collector_views cv JOIN pop c ON c.account_id = cv.account_id
+              WHERE ${within(sql`cv.at`, range)} AND ${pages} AND cv.subject IS NOT NULL) v`;
   const median = sql`floor(percentile_cont(0.5) WITHIN GROUP (ORDER BY s.secs) + 0.5)::int`;
   type MRow = { main: string; model: string | null; collectors: number; views: number; seconds: number; median: number };
   const models = (
     await sql<MRow>`
       WITH ${x.population('pop', P)},
       pv AS (SELECT coalesce(m.variant_of, m.id) AS main, v.subject AS model, v.account_id, count(*)::int AS views, sum(v.seconds)::bigint AS secs
-               FROM collector_views v JOIN pop c ON c.account_id = v.account_id JOIN models m ON m.id = v.subject
-              WHERE v.page = ${MODEL} AND v.subject IS NOT NULL AND ${within(sql`v.at`, { start, end: P.end })}
+               FROM ${viewsOf(sql`cv.page = ${MODEL}`)} JOIN models m ON m.id = v.subject
               GROUP BY 1, 2, 3)
       SELECT s.main::text AS main, s.model::text AS model, count(*)::int AS collectors, sum(s.views)::int AS views, sum(s.secs)::bigint AS seconds, ${median} AS median
         FROM pv s GROUP BY s.main, s.model
@@ -552,8 +574,7 @@ async function viewedByCollectors(tx: Db, x: LikesInput): Promise<LikesFigures['
     await sql<RRow>`
       WITH ${x.population('pop', P)},
       pv AS (SELECT v.subject, v.account_id, count(*)::int AS views, sum(v.seconds)::bigint AS secs
-               FROM collector_views v JOIN pop c ON c.account_id = v.account_id
-              WHERE v.page IN (${sql.join([...RELEASE_PAGES])}) AND v.subject IS NOT NULL AND ${within(sql`v.at`, { start, end: P.end })}
+               FROM ${viewsOf(sql`cv.page IN (${sql.join([...RELEASE_PAGES])})`)}
               GROUP BY 1, 2)
       SELECT s.subject::text AS drop, d.title, count(*)::int AS collectors, sum(s.views)::int AS views, sum(s.secs)::bigint AS seconds, ${median} AS median
         FROM pv s LEFT JOIN drops d ON d.id = s.subject GROUP BY s.subject, d.title`.execute(tx)

@@ -25,7 +25,7 @@ import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { VIEW_PAGE_CODES } from '../../src/server/db/schema.js';
 import { parisPeriod, previousPeriod, type Period } from '../../src/server/services/insights-scope.js';
-import { LIKES_MIN_GROUP, tasteFilter, type AccountFilter, type LikesWindow, type WishedModelRow } from '../../src/server/services/likes.js';
+import { LIKES_MIN_GROUP, LIKES_PROBE_AFTER_DAYS, tasteFilter, type AccountFilter, type LikesWindow, type WishedModelRow } from '../../src/server/services/likes.js';
 import { wishHistoryCutoff } from '../../src/server/services/wishlist.js';
 import { GrowthWorld } from '../support/growth.js';
 import { createAdmin, createHarness, type Harness } from '../api/support.js';
@@ -219,6 +219,34 @@ describe('LikesService (§3.2 W.8, §3.6 C.6.3 item 4; step 9.4)', () => {
     const before = await h.ctx.services.likes.likes(windowOf({ ...P30, from: '2025-06-01', start: z('2025-05-31T22:00:00Z') }, null));
     expect(before.viewed.collectors.reachesBackTo).toBe('2025-09-14');
     expect(before.viewed.collectors.models[0]!.views).toBe(6); // B's view of 10 Sep counted now
+    // Over LIKES_PROBE_AFTER_DAYS Paris days each collector's own views are read (one probe each), within them the
+    // period's by time: the same figures either way. B's view of 10 Sep is in each of these windows.
+    const withSeptember = {
+      models: [
+        {
+          modelId: m.MONO,
+          name: 'MONOLITHE',
+          variant: 'Silver',
+          collectors: 3,
+          views: 6,
+          seconds: 1050,
+          medianSeconds: 100, // A 100 s, B 940 s, C 10 s
+          visitors: null,
+          variants: [
+            { modelId: m.BLUE, name: 'MONOLITHE', variant: 'Blue', collectors: 2, views: 4, seconds: 1020, medianSeconds: null, visitors: null },
+            { modelId: m.STEEL, name: 'MONOLITHE', variant: 'Steel', collectors: 1, views: 1, seconds: 10, medianSeconds: null, visitors: null },
+          ],
+        },
+      ],
+      releases: [{ dropId: drop, title: 'MONOLITHE BLUE', collectors: 1, views: 1, seconds: 15, medianSeconds: null, visitors: null }],
+      groups: 1,
+    };
+    expect(before.viewed.collectors).toEqual({ ...withSeptember, reachesBackTo: '2025-09-14' });
+    for (const days of [LIKES_PROBE_AFTER_DAYS, LIKES_PROBE_AFTER_DAYS + 1, 90]) {
+      const from = new Date(Date.parse('2026-10-14T00:00:00Z') - (days - 1) * 86_400_000).toISOString().slice(0, 10);
+      const w = await likes(windowOf(parisPeriod({ p: 'custom', from, to: '2026-10-14' }, NOW), null));
+      expect(w.viewed.collectors, `${days} days`).toEqual({ ...withSeptember, reachesBackTo: null });
+    }
   });
 
   it('most viewed by every visitor: the daily totals by main model with its dots (devices a day), only the countries applying', async () => {
