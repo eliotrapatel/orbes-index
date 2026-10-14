@@ -439,12 +439,29 @@ Le client tient lui-même son profil : `YOUR PROFILE`, dans la feuille de son co
 4. Chaque changement est inscrit au journal d'audit : les noms des champs changés, jamais leurs valeurs ; ni la date, ni la raison.
 5. Une date mal saisie : inscrivez directement la bonne date. Ne la retirez pas : retirée, le client ne peut pas la saisir de nouveau, car il l'a déjà saisie une fois ; il repasserait par vous.
 6. Si le client a changé son profil pendant que vous l'éditiez, la console le relit et vous le dit : `The client changed the profile meanwhile. It has been read again: check and save.` Vérifiez, puis enregistrez de nouveau.
+7. Le crédit d'anniversaire suit la date enregistrée : il ne vient que pour un anniversaire dont la date était sur le compte avant minuit, heure de Paris, ce jour-là. Une date saisie ou corrigée le jour même ou après ne donne pas celui de cette année ; il vient l'année suivante. Dites-le au client avant de corriger une date proche de son anniversaire (voir « Le crédit d'anniversaire » ci-dessous).
 
 **Les tags et les notes privées** (`Tags and private notes`, sous `Profile`) : `Add a tag` (en capitales, 20 au plus par client ; la console propose ceux déjà utilisés), `Add a private note` (datée, à votre nom, jamais modifiée ; `Remove` pour celui qui l'a écrite ou un ADMIN). Ils ne sont **jamais montrés au client** : ni dans l'application, ni dans l'export de ses données. N'y écrivez que ce que vous pourriez lui dire.
 
 **Le rôle AUDITOR** lit la fiche sans rien changer : la date de naissance (seulement la tranche d'âge), le téléphone, la ville, l'adresse et l'Instagram du profil, et les villes de `Intelligence`, lui arrivent `Withheld` ; l'adresse e-mail du client lui arrive masquée, comme ailleurs.
 
 > Votre date de naissance ne se saisit qu'une fois dans votre profil, pour que personne d'autre ne puisse la changer à votre place. Je la corrige pour vous : la bonne date apparaît dès que vous rouvrez votre profil.
+
+### Le crédit d'anniversaire
+
+Chaque compte qui a une date de naissance, pièce ou non, reçoit le jour de son anniversaire (heure de Paris) un crédit de ORBES : par défaut 20 €, valable 30 jours, le jour de l'anniversaire compté, dans la devise des crédits des paliers. Il arrive dans les dix minutes après minuit. Le montant, les jours et l'interrupteur sont ceux de `THE PROGRAM` (`Club` → `Tiers`, un ADMIN : `Birthday credit given`, `Birthday credit`, `Birthday credit valid (days)`).
+
+1. **Où le client le voit** : dans la feuille de son compte, sous `YOUR TIER`, la première ligne de `IN USE` : `BIRTHDAY CREDIT`, son montant et sa date de fin (aussi pour un compte sans palier). Dans `YOUR PROFILE`, sous `DATE OF BIRTH`, une ligne lui annonce ce crédit.
+2. **Où vous le voyez** : la fiche du client, section `Account`, les lignes `Birthday credit` (le montant, ce qui reste, jusqu'à quand, l'anniversaire). Sans crédit ouvert, une seule ligne `Birthday credit` dit quand vient le prochain (`Next on …`) ou pourquoi il n'en vient pas : `No date of birth`, `Off in THE PROGRAM`, `Not given to test entrants`.
+3. **Le prendre sur une commande** : la page de la commande, `Apply credit`, comme le crédit d'un palier, sur une commande d'un tirage, d'une LIVE RELEASE ou de THE PRIVATE SALON, dans la devise du crédit. Les crédits sont pris dans cet ordre : le crédit d'anniversaire d'abord, puis celui de PALLADIUM, puis celui de PLATINE, chacun par la date de fin la plus proche. La facture porte la ligne CREDIT · BIRTHDAY, avant celles des paliers. Si la commande est annulée ou retournée, le crédit revient, sa date de fin inchangée.
+4. **Pourquoi il n'est parfois pas donné** :
+   - un crédit d'anniversaire a déjà été donné il y a moins de 12 mois (365 jours, d'anniversaire à anniversaire), même si la date de naissance a changé entre-temps ;
+   - le crédit est coupé dans `THE PROGRAM` : aucun nouveau crédit n'est donné, ceux déjà donnés restent valables jusqu'à leur fin ;
+   - le compte est un compte de test (`Not given to test entrants`) ;
+   - la date de naissance a été saisie ou changée le jour de l'anniversaire ou après : il viendra l'année suivante.
+5. Un jour manqué (le serveur arrêté à minuit) est rattrapé dès qu'il repart, tant que le crédit serait encore valable, avec les jours qui restent. Un crédit donné n'est jamais retiré.
+
+> Pour votre anniversaire, ORBES vous offre un crédit, à valoir sur une pièce d'un tirage, d'une LIVE RELEASE ou de THE PRIVATE SALON. Vous le voyez dans votre compte, sous IN USE, avec sa date de fin ; je le déduis de la facture de votre commande.
 
 ---
 

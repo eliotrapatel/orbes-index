@@ -1512,6 +1512,18 @@ du -sh /var/backups/orbes; df -h /
 
 Before and after each deployment, the pre-check of §15.7 (`free -h`, `docker stats --no-stream`, `df -h /`, `du -sh /var/backups/orbes`) keeps the before and after figures.
 
+#### The app's own scheduled work (plan CUSTOMER INTELLIGENCE §3.0 (f), §8)
+
+For AI Stack Atlas's picture of the box: the app has **no timer, cron or worker of its own** for this work. Everything runs in its existing housekeeping pass, every 10 minutes inside the app's process, never two passes at once, each job isolated and logged ([DATABASE §10](DATABASE.md)). Times in Paris, UTC in brackets:
+
+| Work | When | Its load |
+|---|---|---|
+| **The birthday credit** (`birthdayCredits`) | every pass; a birthday's credit within 10 minutes after midnight Paris (22:00 UTC until Sunday 25 October 2026, 23:00 UTC after) | milliseconds: one read of the accounts due, one short transaction each |
+| The conversions (`acquisitionConversions`) | every pass, day and night | a handful of index lookups |
+| **The morning window**: the views' and visits' daily counts (`viewStats`, `viewMonths`, `acquisitionDaily`), the wish months (`wishMonths`), **the engagement score** (`engagement`), **the monthly history** (`collectorHistory`), then the 13-month purges and the `intelligence sizes` line | from 09:30 Paris until Sunday 25 October 2026, from 08:30 Paris after (07:30 UTC), until the Paris day ends | each a few seconds of database work; the engagement score once a Paris day, in batches of 500 with 100 ms between two, and never while a LIVE RELEASE's room is open or a test of test entrants is running; the monthly history on Paris day 1 only, in batches of 1 000 with 200 ms between two, never while a test runs |
+
+The morning window keeps clear of the night freeze (03:00–05:30 UTC), the ORBES backup, the hub's backup minutes and AI Stack Atlas's no-load windows (plan §8). After deployment I2's first morning: `docker compose logs --since 24h app | grep -E 'engagement scores calculated|collector history'` gives the run's accounts, changed rows and milliseconds, and the back-fill's line (`collector history back-filled: 12 months, N collectors`).
+
 #### Disk used by what collectors look at (plan CUSTOMER INTELLIGENCE §3.3)
 
 **No host change.** The recording of the views, devices and places on verify.theorbes.com ([API §8.14](API.md#814-post-apiv1seen-the-views-the-collector-app-records-extension-of-the-contract), [DATABASE §5.97 to §5.105](DATABASE.md#597-geo_places)) adds no container, port, Caddy rule, compose change, volume, timer or variable: the views wait in the app's memory and are written every 2 s, its jobs run in the app's housekeeping in the morning window (from 07:30 UTC, [DATABASE §10](DATABASE.md)), and the city comes from the DB-IP City Lite file §3.4 and §15.6 already install and refresh. Its rows are in the database, so in every `pg_dump` and every archive.
