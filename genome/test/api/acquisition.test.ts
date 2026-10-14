@@ -115,6 +115,9 @@ describe('the attach at CREATE ACCOUNT and SIGN IN, through the real routes (§3
   beforeAll(async () => {
     h = await createHarness({ config: { rateLimits: { apiPerMinute: 1_000 } } });
     h.clock.set('2026-10-12T08:00:00.000Z');
+    // The harness boots at the real time, so the recording's start is pinned to the test clock: every account
+    // registered below is created after it, whatever the day the suite runs.
+    await h.ctx.db.updateTable('acquisition_state').set({ tracking_started_at: h.clock.now(), conversions_until: h.clock.now() }).execute();
     const admin = (await createAdmin(h.ctx, 'OPERATOR')).id;
     const channel = (await h.ctx.db.selectFrom('link_channels').select('id').where('name', '=', 'Instagram').executeTakeFirstOrThrow()).id;
     const link = await h.ctx.db.insertInto('links').values({ code: 'ig-bio', name: 'Instagram bio', channel_id: channel, destination: 'NOW', created_by: admin }).returning('id').executeTakeFirstOrThrow();
