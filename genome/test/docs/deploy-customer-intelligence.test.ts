@@ -17,12 +17,34 @@
  *    feature with its read-only query, the next morning's sizes, and the questions still open;
  *  - the console's and the app's words as they show them; one command per shell block, relative links that resolve,
  *    and the runbook linked from DEPLOYMENT and COMPLIANCE.
+ *
+ * Part I2 (plan §9 « §2 Déploiement I2 », §4 Finish I2): it starts from production as it runs when I2 starts (I1, then
+ * the light mode of 2026-10-14 without migration, 427546e), applies exactly 0045 to 0047, diffs deploy/vps against
+ * I1's final commit (1068835), never against H2; Before I2's launch (the owner's captures, no LIVE room nor test, the
+ * birthday credit shipped on, ORBES Client Services told « Le crédit d'anniversaire »); one real check per feature in
+ * the console's and the app's words; the first run of the score and the history read on the box, the sizes and the
+ * swap line; then the first links, the 50 MB rule and question 13's three-month follow-up. <SHA_I2> and <TAG_I2> stay
+ * placeholders until the main session hands the commit over.
  */
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { MIGRATIONS } from '../../src/server/db/migrate.js';
 import { VIEW_PAGES } from '../../src/server/db/schema.js';
+import { COLLECTOR_EXPORT_COLUMNS, collectorExportFilename } from '../../src/server/services/collector-export.js';
+import {
+  DEVICES_COPY,
+  ENGAGEMENT_PANEL_COPY,
+  EXPORT_COPY,
+  LIST_COPY,
+  ORIGIN_COPY,
+  OVERVIEW_COPY,
+  TRENDS_COPY,
+  WHO_COPY,
+} from '../../src/web/admin/model/collectors.js';
+import { LIKES_COPY } from '../../src/web/admin/model/likes.js';
+import { birthdayText } from '../../src/web/admin/model/program.js';
+import { SEGMENT_GROUP_LABELS } from '../../src/web/admin/model/segments.js';
 import { LEGAL_VERSION } from '../../src/web/legal/content/index.js';
 import { REPO, readDoc, section } from './lexicon.js';
 import { anchors, fenced } from './runbook.js';
@@ -259,5 +281,171 @@ describe('the runbook of the customer intelligence, part I1 (docs/launch/DEPLOY-
     }
     expect(readDoc('docs/DEPLOYMENT.md')).toContain('(launch/DEPLOY-CUSTOMER-INTELLIGENCE.md)');
     expect(readDoc('docs/COMPLIANCE.md')).toContain('(launch/DEPLOY-CUSTOMER-INTELLIGENCE.md)');
+  });
+});
+
+// ── Part I2 (plan §9 « §2 Déploiement I2 », §4 Finish I2) ─────────────────────────────────────────────────────
+
+const i2 = section(runbook, '## 2.');
+const commandsI2 = fenced(i2, 'bash');
+const outputsI2 = fenced(i2, 'text');
+
+/** I2's diff base: I1's final commit (the main session confirmed it), never H2's (plan §9). */
+const I1_COMMIT = '10688354808d874bc123c0e6729ffce5b733339d';
+/** I1's image as deployed on 2026-10-10 (f360b24, I1 with its CI fix), the previous tag of the deployment I2 starts from. */
+const I1_TAG = 'f360b24aaa37';
+/** What production runs when I2 starts: I1, the light mode and two console fixes (2026-10-14), no migration. */
+const PROD_COMMIT = '427546ea62a1d7a0cd9013033ffc50449735c064';
+const PROD_TAG = PROD_COMMIT.slice(0, 12);
+const DEPLOY_I2 = NAMES.filter((n) => numberOf(n) >= 45 && numberOf(n) <= 47);
+const AFTER_I2 = [...AFTER_I1, ...DEPLOY_I2];
+
+describe('the runbook of the customer intelligence, part I2 (docs/launch/DEPLOY-CUSTOMER-INTELLIGENCE.md §2)', () => {
+  it('starts from I1 in production, 0001 to 0044, and applies exactly 0045 to 0047, as the scripts print them', () => {
+    expect(DEPLOY_I2).toEqual(['0045_birthday_credit', '0046_engagement_scores', '0047_collector_history']);
+    expect(NAMES).toEqual(AFTER_I2);
+    expect(AFTER_I1).toHaveLength(45);
+    expect(i2).toContain(`le commit \`${PROD_COMMIT}\` (image \`orbes-genome:${PROD_TAG}\`, déployée le 2026-10-14), avec les quarante-cinq migrations de \`${AFTER_I1[0]}\` à \`${AFTER_I1.at(-1)}\``);
+    expect(i2).toContain(`Sortie attendue : quarante-cinq lignes, de \`${AFTER_I1[0]}\` à \`${AFTER_I1.at(-1)}\``);
+    expect(outputsI2.join('\n')).toContain(AFTER_I1.slice(-2).join('\n'));
+    expect(i2).toContain(`schema: ${AFTER_I1.length} migration(s) applied, all known to orbes-genome:<TAG_I2>`);
+    const rows = [...section(runbook, '### 2.0').matchAll(/^ *\| `(\d{4}_[a-z0-9_]+)` \|/gm)].map((m) => m[1]);
+    expect(rows).toEqual(DEPLOY_I2);
+    expect(i2).toContain(`Applied ${DEPLOY_I2.length} migration(s): ${DEPLOY_I2.join(', ')}`);
+    expect(i2).toContain(`previous image tag: ${PROD_TAG}`);
+    expect(i2).toContain(`(previous: ${PROD_TAG}). This release applied the migration(s) ${DEPLOY_I2.join(', ')}:`);
+    expect(i2).toContain(`orbes-genome:${PROD_TAG} cannot run on this schema any more (scripts/deploy.sh --image ${PROD_TAG} refuses it).`);
+    expect(i2).toContain(`deploy <TAG_I2> OK (previous ${PROD_TAG}; migrations ${DEPLOY_I2.join(', ')})`);
+    expect(i2).toContain(`les ${AFTER_I2.length} lignes \`applied\`, de \`${AFTER_I2[0]}\` à \`${AFTER_I2.at(-1)}\``);
+    // The light mode's deployment, without migration, as deploy.sh logs it: the last OK line before I2.
+    expect(readDoc('deploy/vps/scripts/deploy.sh')).toContain(`printf '%s deploy %s OK (previous %s%s)\\n'`);
+    expect(i2).toContain(`\`… deploy ${PROD_TAG} OK (previous ${I1_TAG})\``);
+    expect(i2).toContain(`Sortie attendue : \`${PROD_COMMIT}\` au début de la ligne`);
+    expect(i2).toContain(`Sortie attendue : \`ORBES_IMAGE_TAG=${PROD_TAG}\`.`);
+    expect(i2).toContain(`\`Updating ${PROD_COMMIT.slice(0, 7)}..<7 caractères de SHA_I2>\``);
+    // The deployment branch is merged into the lot's before I2's CI, so the fast-forward reaches <SHA_I2> (plan §9).
+    expect(i2).toContain('Claude fusionne la branche de déploiement dans celle du lot');
+    // <SHA_I2> and <TAG_I2> stay placeholders until the main session hands the commit over.
+    expect(i2).toContain('`<SHA_I2>` est le commit final (40 caractères)');
+    expect(i2).toContain('la branche est `orbes-customer-intelligence` (sa propre branche distante, jamais `main`, jamais une pull request)');
+  });
+
+  it("diffs deploy/vps against I1's final commit, never against H2, and keeps the rules", () => {
+    expect(commandsI2).toContain(`git -C /opt/orbes/orbes-index diff --stat ${I1_COMMIT} HEAD -- deploy/vps`);
+    expect(commandsI2.filter((c) => c.includes(H2_COMMIT))).toEqual([]);
+    expect(i2).toContain('jamais contre H2');
+    expect(section(runbook, '### 2.3')).toContain('Sortie attendue : **rien**. Une ligne de `deploy/vps` : arrête-toi');
+    expect(section(runbook, '### 2.4')).not.toContain('Recreate`');
+    expect(section(runbook, '### 2.4')).toContain("« ORBES I2 : déploiement lancé à 14:05 Paris (12:05 UTC), image orbes-genome:<TAG_I2>, 3 migrations, rien ne change sur l'hôte.");
+    expect(section(runbook, '### 2.6')).toContain("**Préviens le responsable de l'hôte**");
+    expect(section(runbook, '### 2.1')).toContain("une heure **hors** de 05:00–07:30 à Paris jusqu'au 25 octobre 2026, 04:00–06:30 ensuite (03:00–05:30 UTC");
+    // The box's figures before and after, the swap line read; once more with the first morning's figures.
+    for (const c of ['docker stats --no-stream', 'uptime', 'nproc', 'df -h /', 'du -sh /var/backups/orbes']) expect(commandsI2.filter((x) => x === c), c).toHaveLength(2);
+    expect(commandsI2.filter((x) => x === 'free -h')).toHaveLength(3);
+    expect(section(runbook, '### 2.1')).toContain('la ligne `Swap` de `free -h`');
+    expect(commandsI2).toContain('pgrep -a pg_dump');
+    expect(commandsI2).toContain('pgrep -a pg_dump || scripts/deploy.sh');
+    expect(commandsI2).toContain('git -C /opt/orbes/orbes-index merge --ff-only origin/claude/orbes-genome-code-system-o8bmnk');
+    for (const c of commandsI2.filter((x) => x.includes('restore.sh'))) expect(c).toContain('--dry-run');
+    expect(commandsI2.filter((c) => /\bprune\b/.test(c))).toEqual([]);
+    expect(section(runbook, '### 2.5')).toContain(`**jamais \`scripts/deploy.sh --image ${PROD_TAG}\`**`);
+    expect(section(runbook, '### 2.4')).toContain("**Note le nom de l'archive et sa taille en octets**");
+    // No legal page moves (plan §0.12).
+    expect(LEGAL_VERSION).toBe(H2_LEGAL_VERSION);
+    expect(i2).toContain(`Sortie attendue : \`export const LEGAL_VERSION = '${H2_LEGAL_VERSION}';\`, toujours celle de H2, inchangée.`);
+    for (const c of commandsI2) expect(c.split('\n'), c).toHaveLength(1);
+  });
+
+  it("Before I2's launch: the owner's captures, no LIVE room nor test, the credit shipped on, ORBES Client Services told", () => {
+    const before = section(runbook, '### 2.1');
+    for (const what of ["**1. Tes captures d'abord**", '**I1 est en production**', '**Aucune LIVE RELEASE**', '**aucun test de TEST ENTRANTS**', '**Le crédit d\'anniversaire part allumé**', '**Préviens ORBES Client Services**']) expect(before, what).toContain(what);
+    // Finish I2's captures (plan §4).
+    for (const what of ['la page `Collectors` au format bureau et à 375 px', 'la liste des collectionneurs derrière un chiffre', 'un segment avec les nouveaux critères', '`THE PROGRAM` avec `Birthday credit`', "la page d'une commande avec un crédit d'anniversaire", 'IN USE avec BIRTHDAY CREDIT']) expect(before, what).toContain(what);
+    expect(before).toContain("« Le crédit d'anniversaire »");
+    expect(before).toContain('le score d\'engagement est réservé au personnel');
+    for (const copy of ['docs/launch/SALES-PLAYBOOK.md', 'genome/src/server/documents/SALES-PLAYBOOK.md']) expect(readDoc(copy), copy).toContain("### Le crédit d'anniversaire");
+  });
+
+  it('checks each feature for real, names the console and the app as they show themselves', () => {
+    const checks = section(runbook, '### 2.7');
+    for (const what of ['§3.5', '§3.6']) expect(checks, what).toContain(`| ${what} |`);
+    // THE PROGRAM's row as the console writes it with the shipped defaults (0045: on, 2000 minor units, 30 days).
+    // (the console puts a no-break space after the currency sign; the runbook writes a plain one)
+    expect(birthdayText({ birthdayCreditOn: true, birthdayCreditMinor: 2000, birthdayCreditDays: 30, creditCurrency: 'EUR' }).replace(/ /g, ' ')).toBe('€ 20 · valid 30 days');
+    expect(checks).toContain('« € 20 · valid 30 days »');
+    const migration = readDoc('genome/src/server/db/migrations/0045_birthday_credit.ts');
+    for (const d of ['birthday_credit_on boolean NOT NULL DEFAULT true', 'birthday_credit_minor integer NOT NULL DEFAULT 2000', 'birthday_credit_days smallint NOT NULL DEFAULT 30']) expect(migration, d).toContain(d);
+    // YOUR PROFILE's line, as copy.ts writes it.
+    expect(readDoc('genome/src/web/verify/copy.ts')).toContain('`On your birthday, ORBES gives you a credit of ${amount}, valid ${days} ${days === 1 ? \'day\' : \'days\'}.`');
+    expect(checks).toContain('« On your birthday, ORBES gives you a credit of € 20, valid 30 days. »');
+    expect(section(runbook, '### 2.0')).toContain('« On your birthday, ORBES gives you a credit of € 20, valid 30 days. »');
+    // The five new groups of Segments and the seven panels of Collectors.
+    for (const g of ['PERSON', 'TASTES', 'BROWSING', 'ORIGIN', 'ENGAGEMENT'] as const) expect(i2, g).toContain(`\`${SEGMENT_GROUP_LABELS[g]}\``);
+    for (const t of [OVERVIEW_COPY.title, WHO_COPY.title, ORIGIN_COPY.title, LIKES_COPY.title, DEVICES_COPY.title, ENGAGEMENT_PANEL_COPY.title, TRENDS_COPY.title]) expect(section(runbook, '### 2.0'), t).toContain(`\`${t}\``);
+    expect(checks).toContain('Les sept panneaux');
+    expect(i2).toContain(`\`${EXPORT_COPY.button}\``);
+    expect(checks).toContain(`\`${EXPORT_COPY.button}\`, puis \`${EXPORT_COPY.confirm}\``);
+    expect(i2).toContain(`\`${LIST_COPY.back}\``);
+    // The export: 76 columns, its file name, its audit with counts only.
+    expect(COLLECTOR_EXPORT_COLUMNS).toHaveLength(76);
+    expect(collectorExportFilename(new Date('2026-10-15T10:00:00Z'))).toBe('orbes-collectors-2026-10-15.csv');
+    expect(checks).toContain('`orbes-collectors-<jour>.csv`');
+    expect(readDoc('genome/src/server/services/collector-insights.ts')).toContain("action: 'collectors.export'");
+    expect(checks).toContain('`collectors.export`');
+    expect(fenced(checks, 'bash')).toEqual(['python3 -c \'import csv, glob, os; f = sorted(glob.glob(os.path.expanduser("~/Downloads/orbes-collectors-*.csv")))[-1]; print(f, len(next(csv.reader(open(f, encoding="utf-8-sig")))))\'']);
+    expect(checks).toContain('Sortie attendue : le chemin du fichier, puis `76`.');
+    const admin = (file: string): string => readDoc(`genome/src/web/admin/${file}`);
+    const labels: ReadonlyArray<readonly [label: string, file: string]> = [
+      ['THE PROGRAM', 'views/tiers.ts'],
+      ['Birthday credit', 'views/tiers.ts'],
+      ['Birthday credit given', 'views/tiers.ts'],
+      ['Birthday credit valid (days)', 'views/tiers.ts'],
+      ['Edit program', 'views/tiers.ts'],
+      ['Club', 'main.ts'],
+      ['Segments', 'main.ts'],
+      ['Segment', 'views/live.ts'],
+      ['Collectors', 'main.ts'],
+      ['Clients', 'main.ts'],
+      ['Owners', 'views/owners.ts'],
+      ['Audit log', 'main.ts'],
+      ['Engagement score', 'model/engagement.ts'],
+      ['Intelligence', 'model/owner-intelligence.ts'],
+    ];
+    for (const [label, file] of labels) {
+      expect(i2, label).toContain(`\`${label}\``);
+      expect(admin(file), `${label}: not in ${file}`).toMatch(new RegExp(`['\`]${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['\`]`));
+    }
+    expect(i2).toContain('`Apply credit`');
+    expect(admin('views/order.ts')).toContain("'Apply credit'");
+    expect(i2).toContain('(`Next on …`)');
+    expect(admin('model/club.ts')).toContain('`Next on ${formatDate(next.on)}`');
+    const copy = readDoc('genome/src/web/verify/copy.ts');
+    for (const words of ['BIRTHDAY CREDIT', 'IN USE', 'YOUR TIER', 'YOUR PROFILE', 'DATE OF BIRTH']) {
+      expect(i2, words).toContain(words);
+      expect(copy, words).toContain(`'${words}'`);
+    }
+  });
+
+  it('reads the first run of the score and the history, the sizes and the box, then what follows', () => {
+    const first = section(runbook, '### 2.8');
+    expect(first).toContain('Après 09:30 à Paris (07:30 UTC ; 08:30 à Paris après le 25 octobre)');
+    expect(fenced(first, 'bash')).toEqual([
+      'docker compose exec -T postgres sh -c \'exec psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select day, accounts, changed, duration_ms from engagement_runs order by day desc limit 1"\'',
+      "docker compose logs app --since 24h | grep -E 'engagement scores calculated|collector history'",
+      "docker compose logs app --since 24h | grep 'intelligence sizes'",
+      'free -h',
+    ]);
+    const runs = readDoc('genome/src/server/db/migrations/0046_engagement_scores.ts');
+    for (const col of ['day         date', 'accounts    integer', 'changed     integer', 'duration_ms integer']) expect(runs, col).toContain(col);
+    expect(readDoc('genome/src/server/services/engagement.ts')).toContain("'engagement scores calculated'");
+    expect(first).toContain('"msg":"engagement scores calculated"');
+    expect(readDoc('genome/src/server/services/collector-history.ts')).toContain('`collector history back-filled: ${HISTORY_BACKFILL_MONTHS} months, ${w.created} collectors`');
+    expect(first).toContain('`collector history back-filled: 12 months, <N> collectors`');
+    expect(first).toContain('plus de 20 %');
+    expect(first).toContain('la ligne `Swap`');
+    const next = section(runbook, '### 2.9');
+    for (const what of ['**Les premiers vrais liens**', '**La règle des 50 Mo**', '**Dans trois mois**', '`VISITOR DATA`', '(question 13)']) expect(next, what).toContain(what);
+    expect(readDoc('docs/DEPLOYMENT.md')).toContain('then I2 with migrations `0045`–`0047`');
+    expect(readDoc('docs/COMPLIANCE.md')).toContain('**Le déploiement I2**');
   });
 });
