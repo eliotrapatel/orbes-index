@@ -11,13 +11,18 @@
  *  - the service: the live count, the options of the builder, created, renamed and changed (audited, the same twice is
  *    nothing), the names unique whatever the case, the ids named checked, deleted only when nothing uses it, and the
  *    members' CSV;
- *  - a post of the circle for a segment's members only, read again at each request.
+ *  - a post of the circle for a segment's members only, read again at each request;
+ *  - the customer intelligence lot's criteria (plan CUSTOMER INTELLIGENCE §3.0 (g), §3.6 C.5.1, steps 8.1 to 8.4), each
+ *    matched and negated, their bounds and refusals, the names they check: PERSON (the city given, folded; the age
+ *    today in Paris; how they heard; a tag). A test entrant matches none but through a NOT.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
 import { CircleService } from '../../src/server/services/circle.js';
 import { participatedReleases, participations } from '../../src/server/services/participation.js';
-import { cleanCriteria, isSegmentMember, SegmentService, type SegmentGroup } from '../../src/server/services/segments.js';
+import { cleanCriteria, isSegmentMember, SEGMENT_LIMITS, segmentMembers, SegmentService, type SegmentGroup } from '../../src/server/services/segments.js';
+import { TAG_MAX } from '../../src/server/services/client-notes.js';
+import { CITY_MAX } from '../../src/shared/profile-rules.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { accountOfTier, createAccount, createCollection, createLiveRelease, createModel, holdPieces, liveFixture, type LiveFixture } from '../support/live.js';
 import { poolDraw } from '../support/draws.js';
@@ -368,6 +373,120 @@ describe('taking part, and the segments', () => {
       const audit = await t.db.selectFrom('audit_logs').select('details').where('target_id', '=', note.id).where('action', '=', 'circle.post.create').executeTakeFirstOrThrow();
       expect(audit.details).toMatchObject({ segmentId: s.id });
       await rejects(circle.update(note.id, { segmentId: '00000000-0000-4000-8000-000000000000' }, f.admin), 'SEGMENT_NOT_FOUND', 404);
+    });
+  });
+});
+
+describe('the customer intelligence criteria (plan CUSTOMER INTELLIGENCE §3.0 (g), §3.6 C.5.1)', () => {
+  let t: TestDb;
+  let f: LiveFixture;
+  let segments: SegmentService;
+  /** The accounts of the scenario, by name; `entrant` is a test entrant, which has no profile, wish, view nor source. */
+  const p = {} as Record<'one' | 'two' | 'three' | 'four' | 'entrant', string>;
+  const heard = {} as Record<'instagram' | 'friend', string>;
+
+  const all = (...rules: unknown[]): SegmentGroup => cleanCriteria({ match: 'ALL', rules });
+  /** The accounts of the scenario a tree matches now, by name. */
+  const matched = async (criteria: SegmentGroup) => {
+    const ids = await segmentMembers(t.db, criteria, f.clock.now()).select('a.id').where('a.id', 'in', Object.values(p)).execute();
+    return (Object.keys(p) as (keyof typeof p)[]).filter((k) => ids.some((r) => r.id === p[k])).sort();
+  };
+  const bad = (...rules: unknown[]) => expect(() => cleanCriteria({ match: 'ALL', rules })).toThrow(DomainError);
+
+  beforeAll(async () => {
+    t = await createTestDb();
+    // 28 February 2027, a common year, at noon in Paris.
+    f = await liveFixture(t.db, '2027-02-28T11:00:00.000Z');
+    segments = new SegmentService({ db: t.db, audit: f.audit, clock: f.clock.now });
+    for (const k of ['one', 'two', 'three', 'four', 'entrant'] as const) p[k] = (await createAccount(t.db)).id;
+    await t.db.insertInto('test_entrants').values({ account_id: p.entrant }).execute();
+    heard.instagram = (await t.db.insertInto('heard_options').values({ label: 'Instagram', position: 1 }).returning('id').executeTakeFirstOrThrow()).id;
+    heard.friend = (await t.db.insertInto('heard_options').values({ label: 'A friend', position: 2 }).returning('id').executeTakeFirstOrThrow()).id;
+    const at = f.clock.now();
+    await t.db
+      .insertInto('account_profiles')
+      .values([
+        { account_id: p.one, city: 'Saint-Étienne', birth_date: '2008-02-29', birth_date_by: 'COLLECTOR', birth_date_at: at, heard_option_id: heard.instagram, heard_at: at },
+        { account_id: p.two, city: 'LYON', birth_date: '2008-03-01', birth_date_by: 'STAFF', birth_date_at: at, heard_option_id: heard.friend, heard_at: at },
+        { account_id: p.three, city: 'saint-etienne', birth_date: '1990-06-15', birth_date_by: 'COLLECTOR', birth_date_at: at },
+        { account_id: p.four },
+      ])
+      .execute();
+    await t.db
+      .insertInto('account_tags')
+      .values([
+        { account_id: p.one, tag: 'VIP', created_by: f.admin.id },
+        { account_id: p.one, tag: 'PRESS', created_by: f.admin.id },
+        { account_id: p.two, tag: 'VIP', created_by: f.admin.id },
+      ])
+      .execute();
+  });
+  afterAll(() => t.close());
+
+  describe('PERSON (step 8.1)', () => {
+    it('CITY: the city given in YOUR PROFILE, whatever its case and accents; negated', async () => {
+      expect(await matched(all({ kind: 'CITY', cities: ['SAINT-ÉTIENNE'] }))).toEqual(['one', 'three']);
+      expect(await matched(all({ kind: 'CITY', cities: ['lyon', 'Milan'] }))).toEqual(['two']);
+      expect(await matched(all({ kind: 'CITY', cities: ['Saint-Etienne'], not: true }))).toEqual(['entrant', 'four', 'two']);
+      // Stored folded, sorted and once: a segment is written the same way every time.
+      expect(all({ kind: 'CITY', cities: [' Saint-Étienne ', 'SAINT-ETIENNE', 'Lyon'] }).rules).toEqual([{ kind: 'CITY', cities: ['lyon', 'saint-etienne'] }]);
+    });
+
+    it('AGE: the age today in Paris from the date of birth, a birthday on 29 February counted on 28 February; negated', async () => {
+      expect(await matched(all({ kind: 'AGE', min: 19, max: 19 }))).toEqual(['one']);
+      expect(await matched(all({ kind: 'AGE', min: 18, max: 18 }))).toEqual(['two']);
+      expect(await matched(all({ kind: 'AGE', min: 18, max: 19 }))).toEqual(['one', 'two']);
+      expect(await matched(all({ kind: 'AGE', min: 0, max: 120 }))).toEqual(['one', 'three', 'two']);
+      expect(await matched(all({ kind: 'AGE', min: 36, max: 36 }))).toEqual(['three']);
+      expect(await matched(all({ kind: 'AGE', min: 18, max: 19, not: true }))).toEqual(['entrant', 'four', 'three']);
+      // 1 March at 00:30 in Paris (23:30 UTC the day before): the second turns 19.
+      const was = f.clock.now();
+      f.clock.set(new Date('2027-02-28T23:30:00.000Z'));
+      expect(await matched(all({ kind: 'AGE', min: 19, max: 19 }))).toEqual(['one', 'two']);
+      f.clock.set(was);
+    });
+
+    it('HEARD_FROM: the answer to « How did you hear about ORBES? », an answer set aside included; negated', async () => {
+      expect(await matched(all({ kind: 'HEARD_FROM', optionIds: [heard.instagram] }))).toEqual(['one']);
+      expect(await matched(all({ kind: 'HEARD_FROM', optionIds: [heard.instagram, heard.friend] }))).toEqual(['one', 'two']);
+      await t.db.updateTable('heard_options').set({ active: false }).where('id', '=', heard.friend).execute();
+      expect(await matched(all({ kind: 'HEARD_FROM', optionIds: [heard.friend] }))).toEqual(['two']);
+      expect(await matched(all({ kind: 'HEARD_FROM', optionIds: [heard.friend], not: true }))).toEqual(['entrant', 'four', 'one', 'three']);
+    });
+
+    it('TAGGED: any of the tags, cleaned as tags are; a tag removed matches fewer; negated', async () => {
+      expect(await matched(all({ kind: 'TAGGED', tags: ['vip'] }))).toEqual(['one', 'two']);
+      expect(await matched(all({ kind: 'TAGGED', tags: ['  press ', 'FRIEND OF THE HOUSE'] }))).toEqual(['one']);
+      expect(await matched(all({ kind: 'TAGGED', tags: ['VIP'], not: true }))).toEqual(['entrant', 'four', 'three']);
+      expect(all({ kind: 'TAGGED', tags: ['friend  of the house’s', 'vip'] }).rules).toEqual([{ kind: 'TAGGED', tags: ['FRIEND OF THE HOUSE’S', 'VIP'] }]);
+      await t.db.deleteFrom('account_tags').where('account_id', '=', p.two).where('tag', '=', 'VIP').execute();
+      expect(await matched(all({ kind: 'TAGGED', tags: ['VIP'] }))).toEqual(['one']);
+    });
+
+    it('nests and combines with the existing criteria', async () => {
+      const tree = cleanCriteria({ match: 'ANY', rules: [{ kind: 'TAGGED', tags: ['PRESS'] }, { match: 'ALL', rules: [{ kind: 'CITY', cities: ['saint-étienne'] }, { kind: 'AGE', min: 30, max: 40 }] }] });
+      expect(await matched(tree)).toEqual(['one', 'three']);
+    });
+
+    it('refuses a rule out of its bounds; checks the answers named; its bounds are the profile\'s and the tags\'', async () => {
+      bad({ kind: 'CITY', cities: [] });
+      bad({ kind: 'CITY', cities: ['   '] });
+      bad({ kind: 'CITY', cities: ['x'.repeat(81)] });
+      bad({ kind: 'CITY', cities: Array.from({ length: 51 }, (_, i) => `City ${i}`) });
+      bad({ kind: 'AGE', min: 35, max: 25 });
+      bad({ kind: 'AGE', min: -1, max: 25 });
+      bad({ kind: 'AGE', min: 25, max: 121 });
+      bad({ kind: 'AGE', min: 25.5, max: 30 });
+      bad({ kind: 'AGE', min: 25 });
+      bad({ kind: 'HEARD_FROM', optionIds: ['instagram'] });
+      bad({ kind: 'HEARD_FROM', optionIds: [] });
+      bad({ kind: 'TAGGED', tags: ['#VIP'] });
+      bad({ kind: 'TAGGED', tags: ['x'.repeat(33)] });
+      expect(() => cleanCriteria({ match: 'ALL', rules: [{ kind: 'AGE', min: 35, max: 25 }] })).toThrow('Age between N and N: whole years from 0 to 120, the first not above the second.');
+      expect(all({ kind: 'AGE', min: 0, max: 120, not: true }).rules).toEqual([{ kind: 'AGE', min: 0, max: 120, not: true }]);
+      await rejects(segments.count({ match: 'ALL', rules: [{ kind: 'HEARD_FROM', optionIds: ['00000000-0000-4000-8000-000000000000'] }] }), 'HEARD_OPTION_NOT_FOUND', 404);
+      expect(await segments.count({ match: 'ALL', rules: [{ kind: 'HEARD_FROM', optionIds: [heard.instagram] }] })).toEqual({ count: 1 });
+      expect([SEGMENT_LIMITS.city, SEGMENT_LIMITS.tag]).toEqual([CITY_MAX, TAG_MAX]);
     });
   });
 });

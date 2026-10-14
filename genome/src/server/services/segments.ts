@@ -11,6 +11,16 @@
  *   signals    I'LL BE THERE said (to one release, or any), an answer to the question after of a release, the last
  *              activity (a sign-in, a session still in use, a scan) within N days.
  *
+ * and, after SIGNALS, the customer intelligence lot's groups (plan CUSTOMER INTELLIGENCE of 2026-10-08, §3.0 (g),
+ * §3.6 C.5.1), the four above unchanged:
+ *
+ *   person     the city given in YOUR PROFILE (folded: case and accents, `orbes_fold`), the age today (Paris) from the
+ *              date of birth, the answer to « How did you hear about ORBES? », a staff tag.
+ *
+ * A new criterion reads what a test entrant never has (a profile, a wish, a view, a source, a score): a test entrant
+ * matches one only through a NOT (§3.0 (d)), as today's members rule (ACTIVE accounts, test entrants and the team's own
+ * accounts included) is unchanged.
+ *
  * A segment's `criteria` is a rule tree: a group (`match` ALL or ANY of its rules) whose rules are criteria or groups of
  * criteria (one level down: SEGMENT_LIMITS.depth); any criterion may be negated (`not`). Its members are the ACTIVE
  * accounts it matches, evaluated live, never stored: wherever it decides something (a release's access rule,
@@ -34,18 +44,29 @@ import { CLUB_EXCLUDED_STATUSES, CLUB_TIER_THRESHOLDS } from './club.js';
 import { LIVE_QUESTION_DEFAULT } from './live.js';
 import { participationCount, securedCount, securedIn, tookPartIn } from './participation.js';
 import { csvDocument, CSV_CONTENT_TYPE } from '../render/csv.js';
+import { fold } from '../../shared/fold.js';
+import { cleanWords, latestBirthDateForAge } from '../../shared/profile-rules.js';
+import { cleanTag } from './client-notes.js';
+import { parisDay } from './schedule.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
-/** Every criterion, by its group (the four of choice 27, in their order). */
+/** Every criterion, by its group: the four of choice 27, then the customer intelligence lot's (§3.0 (g)), in their order. */
 export const SEGMENT_CRITERIA = Object.freeze({
   RELEASES: Object.freeze(['PARTICIPATIONS', 'TOOK_PART', 'SECURED', 'SECURED_IN'] as const),
   CLUB: Object.freeze(['TIER', 'OWNS_MODEL', 'OWNS_COLLECTION'] as const),
   PROFILE: Object.freeze(['SIZE', 'COUNTRY'] as const),
   SIGNALS: Object.freeze(['INTEREST', 'ANSWER', 'ACTIVE'] as const),
+  PERSON: Object.freeze(['CITY', 'AGE', 'HEARD_FROM', 'TAGGED'] as const),
 });
 export type SegmentCriterionGroup = keyof typeof SEGMENT_CRITERIA;
-export const SEGMENT_RULE_KINDS = Object.freeze([...SEGMENT_CRITERIA.RELEASES, ...SEGMENT_CRITERIA.CLUB, ...SEGMENT_CRITERIA.PROFILE, ...SEGMENT_CRITERIA.SIGNALS] as const);
+export const SEGMENT_RULE_KINDS = Object.freeze([
+  ...SEGMENT_CRITERIA.RELEASES,
+  ...SEGMENT_CRITERIA.CLUB,
+  ...SEGMENT_CRITERIA.PROFILE,
+  ...SEGMENT_CRITERIA.SIGNALS,
+  ...SEGMENT_CRITERIA.PERSON,
+] as const);
 export type SegmentRuleKind = (typeof SEGMENT_RULE_KINDS)[number];
 export const SEGMENT_MATCHES = Object.freeze(['ALL', 'ANY'] as const);
 export type SegmentMatch = (typeof SEGMENT_MATCHES)[number];
@@ -64,6 +85,12 @@ export const SEGMENT_LIMITS = Object.freeze({
   /** The last activity within 1 to 3 650 days. */
   days: Object.freeze({ min: 1, max: 3650 }),
   sizeLabel: 12,
+  /** AGE: whole years from 0 to 120. */
+  age: Object.freeze({ min: 0, max: 120 }),
+  /** A city named by CITY, in characters (YOUR PROFILE's CITY_MAX). */
+  city: 80,
+  /** A tag named by TAGGED, in characters (services/client-notes.ts TAG_MAX). */
+  tag: 32,
 });
 
 /** A criterion of a segment; `not`: the accounts it does not match. */
@@ -80,6 +107,10 @@ export type SegmentRule = { not?: boolean } & (
   | { kind: 'INTEREST'; dropId: string | null }
   | { kind: 'ANSWER'; dropId: string; answer: number }
   | { kind: 'ACTIVE'; days: number }
+  | { kind: 'CITY'; cities: string[] }
+  | { kind: 'AGE'; min: number; max: number }
+  | { kind: 'HEARD_FROM'; optionIds: string[] }
+  | { kind: 'TAGGED'; tags: string[] }
 );
 
 /** A group of rules: ALL of them, or ANY. */
@@ -123,6 +154,13 @@ function country(v: unknown): string {
   return s;
 }
 
+/** A city as CITY compares it: as YOUR PROFILE keeps one (1 to 80 characters), then folded like `orbes_fold` (shared/fold.ts). */
+function city(v: unknown): string {
+  const c = cleanWords(v, SEGMENT_LIMITS.city);
+  if (!c.ok || c.value === null) throw validationError(`A city is 1 to ${SEGMENT_LIMITS.city} characters.`);
+  return fold(c.value);
+}
+
 function cleanRule(v: unknown): SegmentRule {
   const r = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
   const not = r.not === true ? { not: true as const } : {};
@@ -151,6 +189,18 @@ function cleanRule(v: unknown): SegmentRule {
       return { kind: 'ANSWER', dropId: id(r.dropId, 'The release'), answer: whole(r.answer, { min: 1, max: 6 }, 'The answer'), ...not };
     case 'ACTIVE':
       return { kind: 'ACTIVE', days: whole(r.days, SEGMENT_LIMITS.days, 'The days'), ...not };
+    case 'CITY':
+      return { kind: 'CITY', cities: list(r.cities, 'The cities', city), ...not };
+    case 'AGE': {
+      const min = whole(r.min, SEGMENT_LIMITS.age, 'The youngest age');
+      const max = whole(r.max, SEGMENT_LIMITS.age, 'The oldest age');
+      if (min > max) throw validationError(`Age between N and N: whole years from ${SEGMENT_LIMITS.age.min} to ${SEGMENT_LIMITS.age.max}, the first not above the second.`);
+      return { kind: 'AGE', min, max, ...not };
+    }
+    case 'HEARD_FROM':
+      return { kind: 'HEARD_FROM', optionIds: list(r.optionIds, 'The answers', (o) => id(o, 'An answer')), ...not };
+    case 'TAGGED':
+      return { kind: 'TAGGED', tags: list(r.tags, 'The tags', cleanTag), ...not };
     default:
       throw validationError(`A criterion is one of ${SEGMENT_RULE_KINDS.join(', ')}.`);
   }
@@ -301,6 +351,23 @@ function ruleSql(db: Db, eb: Accounts, r: SegmentRule, now: Date): Expression<Sq
       x = sql<SqlBool>`(${exists(signedIn)} or ${exists(session)} or ${exists(scanned)})`;
       break;
     }
+    case 'CITY':
+      // On account_profiles_city_fold_idx (migration 0044): the city given, folded as the rule's are.
+      x = sql<SqlBool>`exists (select 1 from account_profiles as pc where pc.account_id = ${account} and pc.city is not null and orbes_fold(pc.city) in (${sql.join(r.cities)}))`;
+      break;
+    case 'AGE': {
+      // Its age today (Paris) within min and max: born after the latest date of birth of max + 1, at or before min's.
+      const today = parisDay(now);
+      x = sql<SqlBool>`exists (select 1 from account_profiles as pa where pa.account_id = ${account}
+        and pa.birth_date > ${latestBirthDateForAge(today, r.max + 1)}::date and pa.birth_date <= ${latestBirthDateForAge(today, r.min)}::date)`;
+      break;
+    }
+    case 'HEARD_FROM':
+      x = sql<SqlBool>`exists (select 1 from account_profiles as ph where ph.account_id = ${account} and ph.heard_option_id in (${sql.join(r.optionIds.map((o) => sql`${o}::uuid`))}))`;
+      break;
+    case 'TAGGED':
+      x = sql<SqlBool>`exists (select 1 from account_tags as tg where tg.account_id = ${account} and tg.tag in (${sql.join(r.tags)}))`;
+      break;
   }
   return r.not ? sql<SqlBool>`not (${x})` : x;
 }
@@ -609,7 +676,10 @@ export class SegmentService {
     });
   }
 
-  /** The releases, models and collections the criteria name exist (404 otherwise); an answer is one of its release's. */
+  /**
+   * The releases, models, collections and answers of « How did you hear about ORBES? » the criteria name exist (404
+   * otherwise); an answer to the question after is one of its release's. Tags are free, never checked.
+   */
   private async checkNames(db: Db, criteria: SegmentGroup): Promise<void> {
     const rules = segmentRules(criteria);
     const drops = [...new Set(rules.flatMap((r) => ('dropId' in r && r.dropId ? [r.dropId] : [])))];
@@ -633,6 +703,9 @@ export class SegmentService {
     if (collections.length && (await db.selectFrom('collections').select('id').where('id', 'in', collections).execute()).length !== collections.length) {
       throw notFound('Collection', 'COLLECTION_NOT_FOUND');
     }
+    // An answer set aside still exists: a segment on it keeps matching those who gave it.
+    const heard = [...new Set(rules.flatMap((r) => (r.kind === 'HEARD_FROM' ? r.optionIds : [])))];
+    if (heard.length && (await db.selectFrom('heard_options').select('id').where('id', 'in', heard).execute()).length !== heard.length) throw notFound('Answer', 'HEARD_OPTION_NOT_FOUND');
   }
 
   private async usedBy(db: Db, sid: string): Promise<AdminSegment['usedBy']> {

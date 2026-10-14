@@ -12,6 +12,7 @@
  *   CALLING_CODES      every country of countries.ts (and XK) → its ITU-T E.164 calling code, without the `+`.
  *   toInstagram        the username, lower case, without `@`, from a username or a pasted profile link.
  *   birthDateProblem   a date of birth that exists, from 1900-01-01 and at least 13 years before today (in Paris).
+ *   ageOn              the age in whole years on a day; latestBirthDateForAge, the latest date of birth of an age.
  *   completion         how complete a profile is: ten items of equal weight (COMPLETION_KEYS), an item with nothing
  *                      to choose left out of the count; never blocking anything.
  *   tasteKey           a favourite piece's or finish's key: trimmed, inner spaces made single, in capitals.
@@ -195,6 +196,21 @@ export function ageOn(birthDate: string, today: string): number {
   const [ty, tm, td] = [Number(t[1]), Number(t[2]), Number(t[3])];
   const birthdayThisYear = Math.min(bd, daysIn(ty, bm));
   return ty - by - (tm < bm || (tm === bm && td < birthdayThisYear) ? 1 : 0);
+}
+
+/**
+ * The latest date of birth of someone at least `years` old on `today` (both 'YYYY-MM-DD', in Paris), by `ageOn`'s rule:
+ * the same day `years` before, or the last day of that month when it has none; and 29 February when `today` is 28
+ * February of a common year and that year was a leap year (ageOn counts a birthday on 29 February then). Segments' AGE
+ * reads a date of birth between two of these (services/segments.ts).
+ */
+export function latestBirthDateForAge(today: string, years: number): string {
+  const m = ISO_DAY.exec(today);
+  if (!m || !Number.isInteger(years) || years < 0) throw new TypeError(`not a day and an age: ${today}, ${years}`);
+  const [ty, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const y = ty - years;
+  if (mo === 2 && d === 28 && daysIn(ty, 2) === 28 && daysIn(y, 2) === 29) return `${pad(y, 4)}-02-29`;
+  return `${pad(y, 4)}-${pad(mo)}-${pad(Math.min(d, daysIn(y, mo)))}`;
 }
 
 /** The age bands staff read (plan §3.0 (h), §3.6 C.6): an AUDITOR sees the band, never the date. */

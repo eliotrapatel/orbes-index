@@ -15,6 +15,7 @@ import {
   E164_RE,
   KEEPS_TRUNK_ZERO,
   latestBirthDate,
+  latestBirthDateForAge,
   tasteKey,
   TASTES_MAX,
   toE164,
@@ -106,6 +107,33 @@ describe('the profile\'s rules (plan CUSTOMER INTELLIGENCE §3.1)', () => {
     expect([13, 17, 18, 24, 25, 34, 35, 44, 45, 54, 55, 64, 65, 99].map(ageBand)).toEqual([
       'under18', 'under18', '18-24', '18-24', '25-34', '25-34', '35-44', '35-44', '45-54', '45-54', '55-64', '55-64', '65plus', '65plus',
     ]);
+  });
+
+  it('latestBirthDateForAge: the latest date of birth of an age on a day, exactly as ageOn counts (Segments\' AGE), across 29 February', () => {
+    expect(latestBirthDateForAge('2026-10-14', 25)).toBe('2001-10-14');
+    expect(latestBirthDateForAge('2026-10-14', 0)).toBe('2026-10-14');
+    // 28 February of a common year: one born on 29 February of a leap year has his birthday that day.
+    expect(latestBirthDateForAge('2027-02-28', 19)).toBe('2008-02-29');
+    expect(latestBirthDateForAge('2027-02-28', 18)).toBe('2009-02-28');
+    // 29 February: the year of birth has none.
+    expect(latestBirthDateForAge('2028-02-29', 1)).toBe('2027-02-28');
+    expect(latestBirthDateForAge('2028-02-29', 4)).toBe('2024-02-29');
+    expect(() => latestBirthDateForAge('2026-13-01x', 1)).toThrow(TypeError);
+    expect(() => latestBirthDateForAge('2026-10-14', -1)).toThrow(TypeError);
+    // Every day around two ends of February, every age to 30: the bound is the last day that age reaches, its next day
+    // the first that does not.
+    const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+    const next = (d: string) => day(Date.parse(`${d}T00:00:00Z`) + 86_400_000);
+    for (const start of ['2027-02-25', '2028-02-25', '2100-02-25']) {
+      for (let i = 0; i < 6; i++) {
+        const today = day(Date.parse(`${start}T00:00:00Z`) + i * 86_400_000);
+        for (let years = 0; years <= 30; years++) {
+          const latest = latestBirthDateForAge(today, years);
+          expect(ageOn(latest, today), `${today} ${years}`).toBeGreaterThanOrEqual(years);
+          expect(ageOn(next(latest), today), `${today} ${years}`).toBeLessThan(years);
+        }
+      }
+    }
   });
 
   it('completion: ten items of equal weight, rounded, the missing ones in order; tastes with nothing to choose left out of the count', () => {

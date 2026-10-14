@@ -31,6 +31,9 @@ export const SEGMENT_LIMITS = Object.freeze({
   count: Object.freeze({ min: 1, max: 100 }),
   days: Object.freeze({ min: 1, max: 3650 }),
   sizeLabel: 12,
+  age: Object.freeze({ min: 0, max: 120 }),
+  city: 80,
+  tag: 32,
 });
 
 /** The four groups of criteria (choice 27), as the builder heads them. */

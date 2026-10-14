@@ -47,8 +47,16 @@ const OPTIONS: SegmentOptions = {
 describe('the Segments page mirrors the server', () => {
   it('holds the same bounds, criteria by group and ways to match', () => {
     expect(SEGMENT_LIMITS).toEqual({ ...SERVER_LIMITS, count: { ...SERVER_LIMITS.count }, days: { ...SERVER_LIMITS.days } });
-    expect(JSON.parse(JSON.stringify(SEGMENT_CRITERIA))).toEqual(JSON.parse(JSON.stringify(SERVER_CRITERIA)));
-    expect([...SEGMENT_RULE_KINDS]).toEqual([...SERVER_KINDS]);
+    // The customer intelligence lot's groups reach the server first (plan CUSTOMER INTELLIGENCE §4, steps 8.1 to 8.5)
+    // and the builder at step 8.7, which empties BUILDER_LATER: until then the server holds exactly these groups more,
+    // after the ones the builder mirrors.
+    const BUILDER_LATER = ['PERSON'];
+    const serverGroups = Object.keys(SERVER_CRITERIA);
+    expect(serverGroups).toEqual([...Object.keys(SEGMENT_CRITERIA), ...BUILDER_LATER]);
+    const mirrored = Object.fromEntries(Object.entries(SERVER_CRITERIA).filter(([g]) => !BUILDER_LATER.includes(g)));
+    expect(JSON.parse(JSON.stringify(SEGMENT_CRITERIA))).toEqual(JSON.parse(JSON.stringify(mirrored)));
+    expect([...SEGMENT_RULE_KINDS]).toEqual(Object.values(mirrored).flat());
+    expect(Object.values(SERVER_CRITERIA).flat()).toEqual([...SERVER_KINDS]);
     expect([...SEGMENT_MATCHES]).toEqual([...SERVER_MATCHES]);
     // Every criterion has its words, in its group of the four of choice 27.
     expect(criterionChoices().map((g) => [g.label, g.kinds.map((k) => k.value)])).toEqual([

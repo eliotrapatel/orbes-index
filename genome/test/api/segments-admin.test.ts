@@ -11,7 +11,9 @@
  *    (the rules in words, A SURPRISE IN EVERY BOX as a flag, never the description nor the segment's name) and the
  *    403 of an account outside them, with its count of releases taken part in or « This release is for selected
  *    collectors. »;
- *  - a post of the circle for a segment.
+ *  - a post of the circle for a segment;
+ *  - the customer intelligence lot's criteria (plan CUSTOMER INTELLIGENCE §3.6 C.5.1, steps 8.1 to 8.4) through the
+ *    routes: counted and saved, their fields checked by the route's schema and by the service.
  * Which role reaches which route is test/api/admin-roles.test.ts.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -180,5 +182,34 @@ describe('segments and the access rules: the console’s and the public routes',
     expect(await titles(member.client)).toContain('For size 50');
     const removed = await op.request('DELETE', `/api/admin/segments/${s.id}`);
     expect(removed.statusCode).toBe(204);
+  });
+
+  it('takes the customer intelligence criteria (plan CUSTOMER INTELLIGENCE §3.6 C.5.1): counted and saved, their fields checked', async () => {
+    const at = h.clock.now();
+    await h.ctx.db
+      .insertInto('account_profiles')
+      .values({ account_id: member.id, city: 'Paris', birth_date: '1990-01-01', birth_date_by: 'COLLECTOR', birth_date_at: at })
+      .onConflict((oc) => oc.column('account_id').doUpdateSet({ city: 'Paris', birth_date: '1990-01-01', birth_date_by: 'COLLECTOR', birth_date_at: at }))
+      .execute();
+    await h.ctx.db.insertInto('account_tags').values({ account_id: member.id, tag: 'VIP' }).execute();
+    const person = { match: 'ALL', rules: [{ kind: 'CITY', cities: ['PARIS'] }, { kind: 'AGE', min: 30, max: 40 }, { kind: 'TAGGED', tags: ['vip'] }] };
+    const counted = await op.post('/api/admin/segments/count', { criteria: person });
+    expect([counted.statusCode, safeJson(counted)]).toEqual([200, { count: 1 }]);
+    const created = await op.post('/api/admin/segments', { name: 'Paris, 30 to 40, VIP', criteria: person });
+    expect(created.statusCode).toBe(201);
+    expect((safeJson(created) as Json).criteria.rules).toEqual([
+      { kind: 'CITY', cities: ['paris'] },
+      { kind: 'AGE', min: 30, max: 40 },
+      { kind: 'TAGGED', tags: ['VIP'] },
+    ]);
+    const refused = async (rule: Json, status: number, code: string) => {
+      const r = await op.post('/api/admin/segments/count', { criteria: { match: 'ALL', rules: [rule] } });
+      expect([r.statusCode, errorOf(r).code], JSON.stringify(rule)).toEqual([status, code]);
+    };
+    await refused({ kind: 'CITY', cities: ['Paris'], near: true }, 400, 'VALIDATION_FAILED');
+    await refused({ kind: 'AGE', min: 40, max: 30 }, 400, 'VALIDATION_FAILED');
+    await refused({ kind: 'AGE', min: 30, max: 121 }, 400, 'VALIDATION_FAILED');
+    await refused({ kind: 'TAGGED', tags: ['#VIP'] }, 400, 'VALIDATION_FAILED');
+    await refused({ kind: 'HEARD_FROM', optionIds: ['00000000-0000-4000-8000-000000000000'] }, 404, 'HEARD_OPTION_NOT_FOUND');
   });
 });

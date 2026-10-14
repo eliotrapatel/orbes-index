@@ -1086,6 +1086,12 @@ const segmentRule = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('INTEREST'), dropId: uuid.nullable(), ...negated }),
   z.strictObject({ kind: z.literal('ANSWER'), dropId: uuid, answer: z.number().int('Must be an answer: 1 to 6').min(1, 'At least 1').max(6, 'At most 6'), ...negated }),
   z.strictObject({ kind: z.literal('ACTIVE'), days: whole(SEGMENT_LIMITS.days.min, SEGMENT_LIMITS.days.max, 'days'), ...negated }),
+  // The customer intelligence lot's (plan §3.6 C.5.1): the service checks the rest (an age's min not above its max, a
+  // tag's letters, the answers named exist).
+  z.strictObject({ kind: z.literal('CITY'), cities: segmentItems(text(SEGMENT_LIMITS.city)), ...negated }),
+  z.strictObject({ kind: z.literal('AGE'), min: whole(SEGMENT_LIMITS.age.min, SEGMENT_LIMITS.age.max, 'years'), max: whole(SEGMENT_LIMITS.age.min, SEGMENT_LIMITS.age.max, 'years'), ...negated }),
+  z.strictObject({ kind: z.literal('HEARD_FROM'), optionIds: segmentItems(uuid), ...negated }),
+  z.strictObject({ kind: z.literal('TAGGED'), tags: segmentItems(text(SEGMENT_LIMITS.tag)), ...negated }),
 ]);
 const segmentRules = <T extends z.ZodType>(item: T) => z.array(item).min(1, 'At least one rule').max(SEGMENT_LIMITS.rules, `At most ${SEGMENT_LIMITS.rules} rules`);
 /** A segment's rule tree: a group of criteria and of groups of criteria (one level down). */
