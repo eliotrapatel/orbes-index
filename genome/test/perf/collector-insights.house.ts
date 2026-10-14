@@ -24,13 +24,14 @@
  * `scale` multiplies every count (a smaller house to try the readings on PGlite); `VACUUM ANALYZE` ends it, as
  * autovacuum would have on the box.
  */
-import { sql } from 'kysely';
+import { sql, type RawBuilder } from 'kysely';
 import type { Db } from '../../src/server/db/connection.js';
 import { VIEW_PAGE_CODES } from '../../src/server/db/schema.js';
 import { AcquisitionService } from '../../src/server/services/acquisition.js';
 import { summariseDays } from '../../src/server/services/acquisition-jobs.js';
 import { parisDay, parisDayStart, parisMonthStart } from '../../src/server/services/schedule.js';
 import { aggregateViews } from '../../src/server/services/tracking-jobs.js';
+import { addParisDays } from '../../src/server/services/tracking-reads.js';
 import { nextParisDay, viewHistoryCutoff } from '../../src/server/services/tracking.js';
 import { GrowthWorld } from '../support/growth.js';
 
@@ -66,8 +67,10 @@ export interface PerfHouse {
   links: string[];
   channels: string[];
   heardOptions: string[];
-  /** A counted collector of the house (a member of the segment the test builds). */
+  /** A counted collector of the house with a row behind each new criterion of Segments (a member of both segments the test builds). */
   collector: string;
+  /** The 15 new criteria of Segments, each naming `collector`'s own values (`collectorRules`). */
+  rules: Record<string, unknown>[];
   /** Raw views written. */
   views: number;
   /** Paris days counted by the views' job. */
@@ -438,14 +441,117 @@ export async function seedInsightsHouse(db: Db, o: { scale?: number; log?: (m: s
      WHERE x.len >= 1`.execute(db);
   log(`scores: ${await count('account_scores')}, history: ${await count('collector_history')}`);
 
-  const collector = (await sql<{ id: string }>`SELECT a.id FROM perf_acc a JOIN accounts ac ON ac.id = a.id WHERE a.counted AND ac.status = 'ACTIVE' AND a.k = 2 * (${N} / 4) + 1`.execute(db)).rows[0]!.id;
+  const collector = await pickCollector(db, heardOptions);
+  const rules = await collectorRules(db, collector, now);
   const links = (await db.selectFrom('links').select('id').where('code', 'like', 'perf-link-%').orderBy('code').execute()).map((r) => r.id);
   const channels = (await db.selectFrom('link_channels').select('id').orderBy('position').execute()).map((r) => r.id);
   await sql`DROP TABLE perf_acc`.execute(db);
   await sql`DROP TABLE perf_days`.execute(db);
   // What autovacuum leaves on the box: the visibility map set (index-only scans read no heap) and the statistics.
   await sql`VACUUM ANALYZE`.execute(db);
-  return { collectors: N, models, mainModels, collections, drops, links, channels, heardOptions, collector, views: V, days: counted.days };
+  return { collectors: N, models, mainModels, collections, drops, links, channels, heardOptions, collector, rules, views: V, days: counted.days };
+}
+
+const RELEASE_VIEW_PAGES = [VIEW_PAGE_CODES.RELEASE, VIEW_PAGE_CODES.LIVE, VIEW_PAGE_CODES.AFTER_ROOM];
+
+/**
+ * The house's collector: a counted ACTIVE collector with a row behind each of the 15 new criteria (a city, a date of
+ * birth, a tag, an open wish, a favourite piece and finish, MODEL and release views, a place, a device, a first source
+ * and a sign-up's last source that are links, a score), its MODEL views the most recent of them. The house writes how
+ * they heard for even-numbered accounts and tags for odd-numbered ones: the collector's answer is written here when it
+ * has none.
+ */
+async function pickCollector(db: Db, heardOptions: readonly string[]): Promise<string> {
+  const id = (
+    await sql<{ id: string }>`
+      SELECT a.id FROM perf_acc a JOIN accounts ac ON ac.id = a.id
+        JOIN account_profiles p ON p.account_id = a.id AND p.city IS NOT NULL AND p.birth_date IS NOT NULL
+        JOIN account_sources s ON s.account_id = a.id JOIN acquisition_sources fs ON fs.id = s.first_source_id AND fs.kind = 'LINK'
+        JOIN acquisition_conversions c ON c.kind = 'SIGNUP' AND c.ref_id = a.id JOIN acquisition_sources ls ON ls.id = c.last_source_id AND ls.kind = 'LINK'
+        JOIN account_scores sc ON sc.account_id = a.id
+       WHERE a.counted AND ac.status = 'ACTIVE'
+         AND EXISTS (SELECT 1 FROM account_tags t WHERE t.account_id = a.id)
+         AND EXISTS (SELECT 1 FROM account_wishes w WHERE w.account_id = a.id AND w.removed_at IS NULL)
+         AND EXISTS (SELECT 1 FROM account_tastes t WHERE t.account_id = a.id AND t.kind = 'PIECE')
+         AND EXISTS (SELECT 1 FROM account_tastes t WHERE t.account_id = a.id AND t.kind = 'FINISH')
+         AND EXISTS (SELECT 1 FROM collector_views v WHERE v.account_id = a.id AND v.page IN (${sql.join(RELEASE_VIEW_PAGES)}))
+         AND EXISTS (SELECT 1 FROM collector_places cp WHERE cp.account_id = a.id)
+         AND EXISTS (SELECT 1 FROM tracking_device_accounts da JOIN tracking_devices d ON d.id = da.device_id WHERE da.account_id = a.id AND d.staff_at IS NULL)
+       ORDER BY (SELECT max(v.at) FROM collector_views v WHERE v.account_id = a.id AND v.page = ${VIEW_PAGE_CODES.MODEL}) DESC NULLS LAST, a.k
+       LIMIT 1`.execute(db)
+  ).rows[0]?.id;
+  if (!id) throw new Error('The house holds no collector with a row behind each new criterion.');
+  await sql`UPDATE account_profiles SET heard_option_id = ${heardOptions[1]!}::uuid, heard_at = created_at WHERE account_id = ${id}::uuid AND heard_option_id IS NULL`.execute(db);
+  return id;
+}
+
+/**
+ * The 15 new criteria of Segments (§3.6 C.5.1: PERSON, TASTES, BROWSING, ORIGIN, ENGAGEMENT), each naming the values
+ * of `collector`'s own rows, so the collector matches every one: its city, its age, its answer, its tags, an open wish
+ * and that model's collection, a favourite piece and finish, its most recent MODEL view's model (as many views as it
+ * has over the window) and a release it viewed, its most recent device's kind and system, its latest place's country,
+ * its first source's channel and its sign-up's last link, its score's band. A window in days reaches back to its own
+ * latest row (30 days at least).
+ */
+async function collectorRules(db: Db, collector: string, now: Date): Promise<Record<string, unknown>[]> {
+  const today = parisDay(now);
+  const one = async <T>(q: RawBuilder<T>): Promise<T> => {
+    const row = (await q.execute(db)).rows[0];
+    if (!row) throw new Error(`The house's collector lacks a row: ${q.compile(db).sql.slice(0, 120)}`);
+    return row;
+  };
+  const days = (d: number) => Math.min(395, Math.max(30, d));
+  const person = await one(sql<{ city: string; age: number; heard: string }>`
+    SELECT city, extract(year FROM age(${today}::date, birth_date))::int AS age, heard_option_id AS heard FROM account_profiles WHERE account_id = ${collector}::uuid`);
+  const tags = (await sql<{ tag: string }>`SELECT tag FROM account_tags WHERE account_id = ${collector}::uuid ORDER BY tag`.execute(db)).rows.map((r) => r.tag);
+  const wish = await one(sql<{ model: string; collection: string }>`
+    SELECT m.id AS model, m.collection_id AS collection FROM account_wishes w JOIN models m ON m.id = w.model_id
+     WHERE w.account_id = ${collector}::uuid AND w.removed_at IS NULL AND m.collection_id IS NOT NULL ORDER BY w.added_at DESC, m.id LIMIT 1`);
+  const taste = async (kind: string) =>
+    (await one(sql<{ key: string }>`SELECT value_key AS key FROM account_tastes WHERE account_id = ${collector}::uuid AND kind = ${kind} ORDER BY value_key LIMIT 1`)).key;
+  const viewed = await one(sql<{ model: string; days: number }>`
+    SELECT subject AS model, (${today}::date - (at AT TIME ZONE 'Europe/Paris')::date) + 1 AS days FROM collector_views
+     WHERE account_id = ${collector}::uuid AND page = ${VIEW_PAGE_CODES.MODEL} ORDER BY at DESC LIMIT 1`);
+  const modelDays = days(viewed.days);
+  const modelViews = await one(sql<{ n: number }>`
+    SELECT count(*)::int AS n FROM collector_views
+     WHERE account_id = ${collector}::uuid AND page = ${VIEW_PAGE_CODES.MODEL} AND at >= ${parisDayStart(addParisDays(today, -(modelDays - 1)))}
+       AND subject IN (SELECT id FROM models WHERE id = ${viewed.model}::uuid OR variant_of = ${viewed.model}::uuid)`);
+  const release = await one(sql<{ drop: string; n: number }>`
+    SELECT subject AS drop, count(*)::int AS n FROM collector_views
+     WHERE account_id = ${collector}::uuid AND page IN (${sql.join(RELEASE_VIEW_PAGES)}) AND at >= ${viewHistoryCutoff(now)}
+     GROUP BY subject ORDER BY count(*) DESC, subject LIMIT 1`);
+  const device = await one(sql<{ kind: string; os: string; days: number }>`
+    SELECT d.kind, d.os, (${today}::date - (greatest(da.last_linked_at, CASE WHEN d.account_id = da.account_id THEN d.last_seen_at END) AT TIME ZONE 'Europe/Paris')::date) + 1 AS days
+      FROM tracking_device_accounts da JOIN tracking_devices d ON d.id = da.device_id
+     WHERE da.account_id = ${collector}::uuid AND d.staff_at IS NULL ORDER BY 3, d.id LIMIT 1`);
+  const place = await one(sql<{ country: string; days: number }>`
+    SELECT g.country, (${today}::date - cp.last_day) + 1 AS days FROM collector_places cp JOIN geo_places g ON g.id = cp.place_id
+     WHERE cp.account_id = ${collector}::uuid ORDER BY cp.last_day DESC, cp.place_id LIMIT 1`);
+  const origin = await one(sql<{ channel: string; link: string }>`
+    SELECT fl.channel_id AS channel, ls.link_id AS link FROM account_sources s
+      JOIN acquisition_sources fs ON fs.id = s.first_source_id JOIN links fl ON fl.id = fs.link_id
+      JOIN acquisition_conversions c ON c.kind = 'SIGNUP' AND c.ref_id = s.account_id JOIN acquisition_sources ls ON ls.id = c.last_source_id
+     WHERE s.account_id = ${collector}::uuid AND ls.link_id IS NOT NULL`);
+  const score = (await one(sql<{ score: number }>`SELECT score FROM account_scores WHERE account_id = ${collector}::uuid`)).score;
+  const band = Math.min(90, Math.floor(score / 10) * 10);
+  return [
+    { kind: 'CITY', cities: [person.city, 'perf city 7'] },
+    { kind: 'AGE', min: Math.max(0, person.age - 2), max: Math.min(120, person.age + 2) },
+    { kind: 'HEARD_FROM', optionIds: [person.heard] },
+    { kind: 'TAGGED', tags },
+    { kind: 'WISHES_MODEL', modelIds: [wish.model] },
+    { kind: 'WISHES_COLLECTION', collectionIds: [wish.collection] },
+    { kind: 'FAVOURITE_PIECE', pieces: [await taste('PIECE')] },
+    { kind: 'FAVOURITE_FINISH', finishes: [await taste('FINISH')] },
+    { kind: 'VIEWED_MODEL', modelIds: [viewed.model], min: Math.min(100, modelViews.n), days: modelDays },
+    { kind: 'VIEWED_RELEASE', dropId: release.drop, min: Math.min(100, release.n) },
+    { kind: 'DEVICE', kinds: [device.kind], systems: [device.os], days: days(device.days) },
+    { kind: 'PLACE', countries: [place.country], days: days(place.days) },
+    { kind: 'FIRST_SOURCE', channelIds: [origin.channel] },
+    { kind: 'LAST_SOURCE', linkIds: [origin.link], at: 'EITHER' },
+    { kind: 'SCORE', min: band, max: band === 90 ? 100 : band + 9 },
+  ];
 }
 
 // ── What the test reads and how it times it ──────────────────────────────────────────────────────────────────────
@@ -477,29 +583,10 @@ export async function timeBest(fn: () => Promise<unknown>, runs = 3): Promise<{ 
 
 /**
  * Every criterion this lot adds to Segments (§3.6 C.5.1: PERSON, TASTES, BROWSING, ORIGIN, ENGAGEMENT, 15 kinds), each
- * naming the house's own values, as one group of `match`.
+ * naming the house's collector's own values (so it is a member under ALL and under ANY), as one group of `match`.
  */
 export function everyNewCriterion(h: PerfHouse, match: 'ALL' | 'ANY'): { match: 'ALL' | 'ANY'; rules: Record<string, unknown>[] } {
-  return {
-    match,
-    rules: [
-      { kind: 'CITY', cities: ['lyon', 'perf city 7'] },
-      { kind: 'AGE', min: 25, max: 60 },
-      { kind: 'HEARD_FROM', optionIds: [h.heardOptions[0]!, h.heardOptions[1]!] },
-      { kind: 'TAGGED', tags: ['VIP'] },
-      { kind: 'WISHES_MODEL', modelIds: [h.mainModels[0]!, h.mainModels[5]!] },
-      { kind: 'WISHES_COLLECTION', collectionIds: [h.collections[1]!] },
-      { kind: 'FAVOURITE_PIECE', pieces: ['RINGS', 'WATCHES'] },
-      { kind: 'FAVOURITE_FINISH', finishes: ['GOLD'] },
-      { kind: 'VIEWED_MODEL', modelIds: [h.mainModels[1]!], min: 2, days: 90 },
-      { kind: 'VIEWED_RELEASE', dropId: h.drops[h.drops.length - 2]!, min: 1 },
-      { kind: 'DEVICE', kinds: ['PHONE'], systems: ['IOS'], days: 90 },
-      { kind: 'PLACE', countries: ['FR', 'IT'], days: 90 },
-      { kind: 'FIRST_SOURCE', channelIds: [h.channels[0]!] },
-      { kind: 'LAST_SOURCE', linkIds: [h.links[0]!, h.links[1]!], at: 'EITHER' },
-      { kind: 'SCORE', min: 40, max: 100 },
-    ],
-  };
+  return { match, rules: h.rules };
 }
 
 /** One logged statement: its text and parameters, as Kysely's `log` hands them over. */

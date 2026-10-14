@@ -11,12 +11,13 @@
  *  - each panel within C.6.8's budget, cold (the page's cache emptied before each reading), for the view the page opens
  *    on (LAST 30 DAYS, compared with the period before, every collector); Over time for each of its eight figures and
  *    split by country; a list (the collectors behind a figure) for six slices. The same readings over LAST 12 MONTHS
- *    are timed and printed beside them, for the docs (DATABASE §11.4), not held to the budgets: C.6.8 sets one budget
- *    per panel, and 12 months of BY VISITS or of the views of 20,000 collectors read about a million raw rows;
+ *    are timed and printed beside them (DATABASE §11.4) and held to the same budgets, except devices and likes, printed
+ *    only: 12 months of BY VISITS or of the views of 20,000 collectors read about a million raw rows;
  *  - EXPLAIN of every statement of the panel likes over LAST 12 MONTHS that reads `collector_views`: never a
  *    sequential scan of it (its time index or its account index is read);
- *  - Segments with every new criterion in one segment (C.5.3): `isSegmentMember` under 20 ms and `count` under 1.5 s,
- *    for a segment of ALL of them and one of ANY;
+ *  - Segments with every new criterion in one segment (C.5.3), each naming the house's collector's own values:
+ *    `isSegmentMember` under 20 ms and `count` under 1.5 s, for a segment of ALL of them (the collector a member) and
+ *    one of ANY (timed for accounts that match none of them too, so every rule is read);
  *  - the export at 20,000 collectors: its body under C.7's 20 MB, within its own 60 s.
  *
  * Each figure is the best of three readings: the suite's other files run beside this one on the same runner, and their
@@ -31,12 +32,17 @@ import type { Database } from '../../src/server/db/schema.js';
 import { AuditService } from '../../src/server/services/audit.js';
 import { CollectorInsightsService, COLLECTOR_PANELS, TREND_FIGURES, type CollectorPanel, type InsightsRequest } from '../../src/server/services/collector-insights.js';
 import { LinkService } from '../../src/server/services/links.js';
-import { isSegmentMember, SegmentService } from '../../src/server/services/segments.js';
+import { isSegmentMember, segmentCondition, SegmentService } from '../../src/server/services/segments.js';
 import { everyNewCriterion, PERF_BUDGETS_MS, PERF_HOUSE, PERF_NOW, scansOf, seedInsightsHouse, timeBest, type LoggedQuery, type PerfHouse } from './collector-insights.house.js';
 
 const adminUrl = process.env.ORBES_TEST_POSTGRES_URL;
 /** The house's writing, on a shared CI runner: the views, their 395 days counted, the rest. */
 const SEED_MS = 25 * 60_000;
+/**
+ * The panels whose LAST 12 MONTHS reading is printed, not held to C.6.8's per-panel budget (a decision left to the
+ * owner, DATABASE §11.4): BY VISITS (devices) and What they like read about a million raw rows of the 13 months.
+ */
+const PRINTED_ONLY_12M: ReadonlySet<string> = new Set(['devices', 'likes']);
 
 describe.skipIf(!adminUrl)('the Collectors page and Segments at 20,000 collectors (PostgreSQL)', () => {
   let admin: Db;
@@ -112,14 +118,17 @@ describe.skipIf(!adminUrl)('the Collectors page and Segments at 20,000 collector
     expect(t.best).toBeLessThan(PERF_BUDGETS_MS.trends);
   }, 600_000);
 
-  it('times the same readings over LAST 12 MONTHS, for the docs', async () => {
+  it('times the same readings over LAST 12 MONTHS, and holds the panels that fit their budget', async () => {
     for (const panel of COLLECTOR_PANELS) {
       const t = await timeBest(cold({ panel, p: '12m' }), 2);
-      note(`${panel} 12m: ${t.best} ms (${t.all.join(', ')})`);
+      const budget = PERF_BUDGETS_MS[panel as CollectorPanel];
+      note(`${panel} 12m: ${t.best} ms (budget ${budget}${PRINTED_ONLY_12M.has(panel) ? ', printed only' : ''}; ${t.all.join(', ')})`);
+      if (!PRINTED_ONLY_12M.has(panel)) expect(t.best, `${panel} 12m`).toBeLessThan(budget);
     }
     for (const figure of TREND_FIGURES) {
       const t = await timeBest(cold({ panel: 'trends', p: '12m', figure }), 2);
       note(`trends ${figure} 12m: ${t.best} ms (${t.all.join(', ')})`);
+      expect(t.best, `trends ${figure} 12m`).toBeLessThan(PERF_BUDGETS_MS.trends);
     }
     // A reading cut by the page's own timeout (8 s) throws 503 INSIGHTS_TIMEOUT and fails this case.
   }, 600_000);
@@ -170,13 +179,35 @@ describe.skipIf(!adminUrl)('the Collectors page and Segments at 20,000 collector
       const members = (await segments.count(criteria)).count;
       note(`segment ${match}: count ${count.best} ms (${members} members; ${count.all.join(', ')})`);
       expect(count.best, `count ${match}`).toBeLessThan(PERF_BUDGETS_MS.segmentCount);
+      // The house's collector matches each of the 15 rules: under ALL it reads every one of them.
+      expect(members, `members ${match}`).toBeGreaterThan(0);
+      // Under ANY, accounts of the house that match none of the rules: each reads every one of the 15.
+      const outside =
+        match === 'ANY'
+          ? (
+              await db
+                .selectFrom('accounts as a')
+                .select('a.id')
+                .where('a.email', 'like', 'perf-%')
+                .where('a.status', '=', 'ACTIVE')
+                .where((eb) => eb.not(segmentCondition(db, eb, seg.criteria, PERF_NOW)))
+                .orderBy(sql`abs(hashtext(a.id::text))`)
+                .limit(5)
+                .execute()
+            ).map((r) => r.id)
+          : [];
+      if (match === 'ANY') expect(outside.length, 'non-members under ANY').toBeGreaterThan(0);
       const times: number[] = [];
-      for (const id of [house.collector, ...accounts]) {
-        await isSegmentMember(db, seg.id, id, PERF_NOW);
+      let outsiders = 0;
+      for (const id of [house.collector, ...accounts, ...outside]) {
+        const member = await isSegmentMember(db, seg.id, id, PERF_NOW);
+        if (id === house.collector) expect(member, `the house's collector under ${match}`).toBe(true);
+        if (outside.includes(id)) expect(member, `a non-member under ${match}`).toBe(false);
+        if (!member) outsiders++;
         times.push((await timeBest(() => isSegmentMember(db, seg.id, id, PERF_NOW))).best);
       }
       times.sort((a, b) => a - b);
-      note(`segment ${match}: isSegmentMember median ${times[Math.floor(times.length / 2)]} ms, slowest ${times[times.length - 1]} ms over ${times.length} accounts`);
+      note(`segment ${match}: isSegmentMember median ${times[Math.floor(times.length / 2)]} ms, slowest ${times[times.length - 1]} ms over ${times.length} accounts (${outsiders} not members)`);
       for (const t of times) expect(t, `isSegmentMember ${match}`).toBeLessThan(PERF_BUDGETS_MS.isSegmentMember);
     }
   }, 300_000);
