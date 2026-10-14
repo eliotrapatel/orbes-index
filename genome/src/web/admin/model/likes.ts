@@ -5,7 +5,7 @@
  * with steps 9.8 and 9.11: here, the slices each figure opens are named (question 16: a most wished model or collection
  * opens who wishes for it). Every word is checked by admin.brand.test.ts. An AUDITOR reads all of it: no email here.
  */
-import { formatCount } from '../format.js';
+import { formatCount, formatDate } from '../format.js';
 import { durationText } from './owner-intelligence.js';
 
 export const LIKES_COPY = Object.freeze({
@@ -55,7 +55,18 @@ export const LIKES_COPY = Object.freeze({
   }),
   /** A median of fewer than 3 collectors (GROWTH's minimum group). */
   withheld: 'Fewer than 3 collectors',
+  /** MOST VIEWED's note when the period reaches past the 13 months of detail (§3.6 C.6.3 item 4): `reachWords`. */
+  reach: 'Filters other than the country reach back 13 months, to',
 });
+
+/**
+ * MOST VIEWED's note under COLLECTORS when the period reaches further back than the 13 months of detail (the answer's
+ * `viewed.collectors.reachesBackTo`, a Paris day): `Filters other than the country reach back 13 months, to 14 SEP 2025.`,
+ * in the console's date format; null when the period stays within them.
+ */
+export function reachWords(day: string | null): string | null {
+  return day === null ? null : `${LIKES_COPY.reach} ${formatDate(day)}.`;
+}
 
 /** After a model not shown in THE COLLECTION now (W.8): hidden, discontinued, or shown in the private salon. */
 export const WISHED_STATE_MARKS = Object.freeze({ HIDDEN: '(hidden)', DISCONTINUED: '(discontinued)', RESERVED: '(the private salon)' } as const);
@@ -134,3 +145,33 @@ export const LIKES_SLICES = Object.freeze({
   viewedRelease: (dropId: string) => `viewed:r:${dropId}`,
   holds: (modelId: string) => `holds:${modelId}`,
 });
+
+/** A figure's link: the slice it opens and its `aria-label`. */
+export interface LikesLink {
+  slice: string;
+  label: string;
+}
+
+/**
+ * The link of a most wished row's 'Collectors wishing' (question 16; §3.6 C.6.3 item 4, C.6.5): a model's row opens
+ * `wishmodel:<id>` (a main model with its variants' wishers, a variant only its own), a collection's row
+ * `wishcollection:<id>`. None when the figures are read from the monthly totals (`raw` false: they name no one). 'Added
+ * in the period', 'Wishes added' and 'Wishes removed' count wishes, not collectors: they have no link.
+ */
+export function wishedLink(raw: boolean, kind: 'model', row: { modelId: string; name: string; variant: string | null; wished: number }): LikesLink | null;
+export function wishedLink(raw: boolean, kind: 'collection', row: { collectionId: string; name: string; collectors: number }): LikesLink | null;
+export function wishedLink(
+  raw: boolean,
+  kind: 'model' | 'collection',
+  row: { modelId: string; name: string; variant: string | null; wished: number } | { collectionId: string; name: string; collectors: number },
+): LikesLink | null {
+  if (!raw) return null;
+  if (kind === 'model' && 'modelId' in row) return { slice: LIKES_SLICES.wishmodel(row.modelId), label: wishedModelLabel(row.wished, row) };
+  if (kind === 'collection' && 'collectionId' in row) return { slice: LIKES_SLICES.wishcollection(row.collectionId), label: wishedCollectionLabel(row.collectors, row.name) };
+  return null;
+}
+
+/** The link of 'Collectors with a wishlist': `haswish`; none when `raw` is false (the count is then unknown). */
+export function wishlistLink(raw: boolean, n: number | null): LikesLink | null {
+  return !raw || n === null ? null : { slice: LIKES_SLICES.haswish(), label: wishlistLabel(n) };
+}

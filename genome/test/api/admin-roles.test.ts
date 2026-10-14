@@ -451,6 +451,8 @@ const PROBES: Probe[] = [
   // The Collectors page (plan CUSTOMER INTELLIGENCE §3.6 C.9): read from AUDITOR.
   { group: 'collectors', method: 'GET', url: '/api/admin/collectors/options', min: 'AUDITOR' },
   { group: 'collectors', method: 'GET', url: '/api/admin/collectors/report?panel=nothing', min: 'AUDITOR' },
+  // The panel likes (§3.2 W.13): an AUDITOR reads what they like.
+  { group: 'collectors', method: 'GET', url: '/api/admin/collectors/report?panel=likes', min: 'AUDITOR' },
   { group: 'audit', method: 'GET', url: '/api/admin/audit', min: 'AUDITOR' },
   { group: 'audit', method: 'GET', url: '/api/admin/audit/verify', min: 'AUDITOR' },
 ];

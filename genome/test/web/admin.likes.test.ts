@@ -2,22 +2,28 @@
  * What they like in the console (plan CUSTOMER INTELLIGENCE §3.2 W.8, §3.6 C.6.3 item 4, C.6.5; step 9.4;
  * web/admin/model/likes.ts): the panel's words as the plan writes them, a most wished row's name and mark, the change
  * against the previous period, the share, the retired mark, the withheld median, the links' labels (question 16: a most
- * wished model or collection opens who wishes for it) and the slices each figure opens.
+ * wished model or collection opens who wishes for it), the slices each figure opens, which figures are links (each most
+ * wished row, models and collections, and 'Collectors with a wishlist'; none on 'Added', the wishes added or removed,
+ * nor anything when `raw` is false), and MOST VIEWED's note past the 13 months of detail.
  */
 import { describe, expect, it } from 'vitest';
+import * as model from '../../src/web/admin/model/likes.js';
 import {
   changeWords,
   LIKES_COPY,
   LIKES_SLICES,
   medianWords,
   modelWords,
+  reachWords,
   shareWords,
   tasteLabel,
   tasteWords,
   wishedCollectionLabel,
   wishedModelLabel,
+  wishedLink,
   wishedName,
   wishlistLabel,
+  wishlistLink,
 } from '../../src/web/admin/model/likes.js';
 
 describe('What they like (§3.2 W.8, §3.6 C.6.3 item 4)', () => {
@@ -93,5 +99,28 @@ describe('What they like (§3.2 W.8, §3.6 C.6.3 item 4)', () => {
     expect(LIKES_SLICES.viewedModel('m-2')).toBe('viewed:m-2');
     expect(LIKES_SLICES.viewedRelease('d-1')).toBe('viewed:r:d-1');
     expect(LIKES_SLICES.holds('m-3')).toBe('holds:m-3');
+  });
+
+  it('links each most wished row (models and collections) and the collectors with a wishlist, none on Added nor when raw is false', () => {
+    const main = { modelId: 'm-1', name: 'MONOLITHE', variant: 'Silver', wished: 42 };
+    const dot = { modelId: 'm-2', name: 'MONOLITHE', variant: 'Blue', wished: 1 };
+    const orbital = { collectionId: 'c-1', name: 'ORBITAL', collectors: 12 };
+    expect(wishedLink(true, 'model', main)).toEqual({ slice: 'wishmodel:m-1', label: 'Open the 42 collectors who wish for MONOLITHE · Silver' });
+    expect(wishedLink(true, 'model', dot)).toEqual({ slice: 'wishmodel:m-2', label: 'Open the 1 collector who wishes for MONOLITHE · Blue' });
+    expect(wishedLink(true, 'collection', orbital)).toEqual({ slice: 'wishcollection:c-1', label: 'Open the 12 collectors who wish for a model of ORBITAL' });
+    expect(wishlistLink(true, 54)).toEqual({ slice: 'haswish', label: 'Open the 54 collectors with a wishlist' });
+    // From the monthly totals (raw: false) nothing names a collector: no row, nor the wishlist figure, is a link.
+    expect(wishedLink(false, 'model', main)).toBeNull();
+    expect(wishedLink(false, 'collection', orbital)).toBeNull();
+    expect(wishlistLink(false, 54)).toBeNull();
+    expect(wishlistLink(true, null)).toBeNull();
+    // 'Added' ('Added in the period'), 'Wishes added' and 'Wishes removed' count wishes: the module links nothing else.
+    expect(Object.keys(model).filter((k) => /Link$/.test(k)).sort()).toEqual(['wishedLink', 'wishlistLink']);
+  });
+
+  it('writes MOST VIEWED’s note when the period reaches past the 13 months of detail, in the console’s date format', () => {
+    expect(reachWords('2025-09-08')).toBe('Filters other than the country reach back 13 months, to 08 SEP 2025.');
+    expect(reachWords('2025-09-14')).toBe('Filters other than the country reach back 13 months, to 14 SEP 2025.');
+    expect(reachWords(null)).toBeNull();
   });
 });

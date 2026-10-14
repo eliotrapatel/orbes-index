@@ -13,6 +13,12 @@
  *   L   a LOCKED account (counted): wished Steel from 20 Aug to 10 Sep.
  *   T, H, X  a test entrant, one of the team's own accounts and a DELETED account: each wishes Blue, likes RING, holds
  *       Blue and looks at it, in no figure.
+ *
+ * "Open at T" (W.8: `added_at <= T AND (removed_at IS NULL OR removed_at > T)`, T the period's last moment) is read with
+ * the period's exclusive end, `end`, the first instant after its last Paris day: a wish is open at the end when it was
+ * added before `end` and not removed before `end`, so a removal at `end` exactly falls in the next period (the wish is
+ * still open) and an addition at `end` exactly too (the wish is neither open nor added). The second block pins it at
+ * the end of the period and of the previous one, the rule the slices `haswish`, `wishmodel` and `wishcollection` follow.
  */
 import { randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
@@ -287,5 +293,76 @@ describe('LikesService (§3.2 W.8, §3.6 C.6.3 item 4; step 9.4)', () => {
     expect(g.raw).toBe(true);
     expect(g.wishlists.previous).toBeNull();
     expect(g.pieces.rows.every((r) => r.previous === 0)).toBe(true);
+  });
+});
+
+describe('LikesService: "open at T" around a wish removed or added at the end exactly (§3.2 W.8, W.13; step 9.4)', () => {
+  let h: Harness;
+  const acc: Record<string, string> = {};
+  const m: Record<string, string> = {};
+  const c: Record<string, string> = {};
+  const P30 = parisPeriod({ p: '30d' }, NOW);
+  const B30 = previousPeriod(P30);
+  const only = (...keys: string[]): AccountFilter => (name) => sql`${sql.id(name)} AS (SELECT a.id AS account_id FROM accounts a WHERE a.id IN (${sql.join(keys.map((k) => acc[k]!))}))`;
+
+  // BORNE (in EDGE): R's wish removed at the period's end, RB's removed at the previous period's end.
+  // SEUIL (in LIMIT): N's wish added at the period's end, NB's added at the previous period's end.
+  beforeAll(async () => {
+    h = await createHarness();
+    h.clock.set(NOW);
+    const db = h.t.db;
+    expect(P30.end).toEqual(z('2026-10-14T22:00:00Z'));
+    expect(B30.end).toEqual(z('2026-09-14T22:00:00Z'));
+    expect(B30.end).toEqual(P30.start);
+    await new GrowthWorld(db).prepare();
+    for (const [key, name, collection] of [['BORNE', 'BORNE', 'EDGE'], ['SEUIL', 'SEUIL', 'LIMIT']] as const) {
+      c[collection] = (await db.insertInto('collections').values({ name: collection }).returning('id').executeTakeFirstOrThrow()).id;
+      const id = randomUUID();
+      await db
+        .insertInto('models')
+        .values({ id, category_id: 1, name, type: 'RING', sku_prefix: `E-${id.slice(0, 8)}`, collection_id: c[collection]!, slug: `edge-${id.slice(0, 8)}`, lookbook: 'PUBLIC', published_at: z('2026-01-01T00:00:00Z') })
+        .execute();
+      m[key] = id;
+    }
+    const wish = async (key: string, model: string, added: Date, removed: Date | null = null) => {
+      const email = `edge-${key.toLowerCase()}-${randomUUID().slice(0, 6)}@example.com`;
+      acc[key] = (
+        await db
+          .insertInto('accounts')
+          .values({ email, email_normalized: email, password_hash: 'x', country: 'FR', status: 'ACTIVE', created_at: z('2026-06-01T10:00:00Z') })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+      await db.insertInto('account_wishes').values({ account_id: acc[key]!, model_id: m[model]!, added_at: added, removed_at: removed }).execute();
+    };
+    await wish('R', 'BORNE', z('2026-10-01T10:00:00Z'), P30.end);
+    await wish('RB', 'BORNE', z('2026-09-01T10:00:00Z'), B30.end);
+    await wish('N', 'SEUIL', P30.end);
+    await wish('NB', 'SEUIL', B30.end);
+  }, 120_000);
+  afterAll(() => h?.close());
+
+  it('a wish removed at the end is open at the end and not removed in the period; one added at the end is neither open nor added', async () => {
+    const likes = (population?: AccountFilter) => h.ctx.services.likes.likes(windowOf(P30, B30), population);
+    const f = await likes();
+    expect(f.raw).toBe(true);
+    expect(f.total).toBe(4);
+    // BORNE: open at P30's end, R (removed at it), not RB (removed at P30's start, B30's end); added in P30: R. Open at
+    // B30's end: RB (removed at it).
+    // SEUIL: open at P30's end, NB (added at P30's start), not N (added at the end); added in P30: NB, not N. Open at
+    // B30's end: none (NB added at it).
+    expect(f.mostWished.rows.map((r) => [r.name, r.wished, r.added, r.previous])).toEqual([
+      ['BORNE', 1, 1, 1],
+      ['SEUIL', 1, 1, 0],
+    ]);
+    expect(f.collections.rows).toEqual([
+      { collectionId: c.EDGE, name: 'EDGE', collectors: 1, previous: 1 },
+      { collectionId: c.LIMIT, name: 'LIMIT', collectors: 1, previous: 0 },
+    ]);
+    // Removed in P30: RB's (at its start), not R's (at its end). Added in B30: RB's, not NB's (at its end).
+    expect(f.wishlists).toEqual({ collectors: 2, share: 50, added: 2, removed: 1, previous: { collectors: 1, added: 1, removed: 0 } });
+    // Each pair alone: the removals at an end leave the wish open at that end, the additions at an end do not open it.
+    expect((await likes(only('R', 'RB'))).wishlists).toEqual({ collectors: 1, share: 50, added: 1, removed: 1, previous: { collectors: 1, added: 1, removed: 0 } });
+    expect((await likes(only('N', 'NB'))).wishlists).toEqual({ collectors: 1, share: 50, added: 1, removed: 0, previous: { collectors: 0, added: 0, removed: 0 } });
   });
 });
