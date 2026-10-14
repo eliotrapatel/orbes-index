@@ -137,12 +137,12 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
 }
 #orbes-splash.exiting { opacity: 0; pointer-events: none; }
 #orbes-splash.gone { display: none; }
-.gate__lock { display: flex; flex-direction: column; align-items: center; gap: 56px; margin-top: -2vh; }
+.gate__lock { display: flex; flex-direction: column; align-items: center; margin-top: -4vh; }
 .gate__wm { font-size: 30px; letter-spacing: 0.62em; text-indent: 0.62em; line-height: 1; white-space: nowrap; }
 /* ENTER: the monogram, a hairline, the word; a fine light runs round its edge */
 @property --gate-a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
 .gate__enter {
-  all: unset; box-sizing: border-box; position: relative;
+  all: unset; box-sizing: border-box; position: absolute; left: 50%; bottom: max(14vh, 64px); translate: -50% 0;   /* low on the page, under the wordmark */
   display: inline-flex; align-items: center; justify-content: center; gap: 18px;
   height: 60px; min-width: 232px; padding: 0 30px 0 26px;
   color: var(--vault-ink); cursor: pointer; -webkit-tap-highlight-color: transparent;
@@ -267,7 +267,7 @@ html.n-locked #orbes-code-badge { opacity: 0 !important; }
   body { background: var(--vault-ground); }
   :focus-visible { outline: 1px solid var(--vault-ink); outline-offset: 4px; }
 
-  .gate__lock { gap: 72px; }
+  .gate__enter { bottom: max(15vh, 72px); }
   .gate__wm { font-size: 44px; }
   .gate__enter { height: 64px; min-width: 264px; padding: 0 34px 0 30px; gap: 20px; }
   .gate__enter-mono { width: 34px; }
