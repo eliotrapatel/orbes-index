@@ -10,7 +10,10 @@
  *             (the monthly history, null until step 9.5 writes it).
  *   report    GET /api/admin/collectors/report?panel=… (AUDITOR): one panel's figures for the period and, with the
  *             comparison on, the previous period, read in one transaction. The panels so far: `overview` (At a glance:
- *             six KPIs) and `who` (Who they are: AGES, COUNTRIES and CITIES, each as given and from the connection).
+ *             six KPIs), `who` (Who they are: AGES, COUNTRIES and CITIES, each as given and from the connection) and
+ *             `origin` (Where they come from: SOURCES, HOW THEY HEARD, LINKS first and last, CAMPAIGNS, REFERRING
+ *             SITES, FIRST VISITS; §3.4 A.10.6's block: the first source by kind and channel, the links and campaigns,
+ *             the first visits over time, the collectors whose first and last link differ).
  *
  * How a reading runs (§3.6 C.6.4, §5.1 console 25):
  *   - one REPEATABLE READ, READ ONLY transaction per panel, `work_mem` 32 MB (several panels run at once on the shared
@@ -32,7 +35,7 @@
  */
 import { sql, type RawBuilder } from 'kysely';
 import type { Db } from '../db/connection.js';
-import { HOUSE_CURRENCIES, type HouseCurrency } from '../db/schema.js';
+import { HOUSE_CURRENCIES, type HouseCurrency, type SourceKind } from '../db/schema.js';
 import { DomainError, validationError } from '../errors.js';
 import { ageOn } from '../../shared/profile-rules.js';
 import { fold } from '../../shared/fold.js';
@@ -43,16 +46,19 @@ import {
   AGE_SLICES,
   ageBandSql,
   activeIn,
+  bucketUnit,
   filtersKey,
   narrowsCollectors,
   parseFilters,
   parisPeriod,
+  periodBuckets,
   plusDays,
   previousPeriod,
   scopeCte,
   SCOPES,
   SOURCE_FILTER_KINDS,
   TIER_CHOICES,
+  type BucketUnit,
   type InsightsFilters,
   type Period,
   type Scope,
@@ -65,7 +71,7 @@ import { tasteOptions } from './tastes.js';
 // ── Constants ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The panels the page reads, top to bottom (§3.6 C.6.3); the others come with their steps. */
-export const COLLECTOR_PANELS = ['overview', 'who'] as const;
+export const COLLECTOR_PANELS = ['overview', 'who', 'origin'] as const;
 export type CollectorPanel = (typeof COLLECTOR_PANELS)[number];
 
 /** The cache: results kept, for how long, and the age under which Read again keeps the cached one. */
@@ -178,7 +184,10 @@ export interface ReportHead {
   recordingSince: Date | null;
 }
 
-export type CollectorsReport = (ReportHead & { panel: 'overview'; figures: OverviewFigures }) | (ReportHead & { panel: 'who'; figures: WhoFigures });
+export type CollectorsReport =
+  | (ReportHead & { panel: 'overview'; figures: OverviewFigures })
+  | (ReportHead & { panel: 'who'; figures: WhoFigures })
+  | (ReportHead & { panel: 'origin'; figures: OriginFigures });
 
 export interface CollectorsOptions {
   /** The accounts' countries among the counted collectors. */
@@ -290,7 +299,7 @@ export class CollectorInsightsService {
     this.cacheSize = l.cacheSize ?? INSIGHTS_CACHE_SIZE;
     this.cacheMs = l.cacheMs ?? INSIGHTS_CACHE_MS;
     this.freshMs = l.freshMs ?? INSIGHTS_FRESH_MS;
-    this.panels = { overview: overviewPanel, who: whoPanel, ...deps.panels };
+    this.panels = { overview: overviewPanel, who: whoPanel, origin: originPanel, ...deps.panels };
   }
 
   /** The filters' choices and the earliest dates with data (see the file header). */
@@ -471,34 +480,44 @@ export function barsOf(x: Reading, counts: Counts, dim: string, opts: { order?: 
 }
 
 /**
- * First visits by Paris day in a period (§3.6 C.6.3): with no filter narrowing the collectors (the source alone, or
- * none), the Links reports' rule (AcquisitionReportService.firstVisits: every device first seen, anonymous included,
- * from the daily summary and the devices' first sight), the source filter applied to the device's first source; with
- * one, the devices first seen in the period that were linked to one of the collectors (never a console's device).
+ * First visits in a period, by Paris day or by source (§3.6 C.6.3): with no filter narrowing the collectors (the source
+ * alone, or none), the Links reports' rule (AcquisitionReportService.firstVisits: every device first seen, anonymous
+ * included, from the daily summary and the devices' first sight), the source filter applied to the device's first
+ * source; with one, the devices first seen in the period that were linked to one of the collectors (never a console's
+ * device; by source, those with a first source).
  */
-export async function firstVisitDays(tx: Db, x: Reading, p: Period): Promise<Map<string, number>> {
+export async function firstVisitsBy(tx: Db, x: Reading, p: Period, by: 'day' | 'source'): Promise<Map<string, number>> {
   const f = x.q.filters;
   if (!narrowsCollectors(f, x.q.scope)) {
     const acquisition = new AcquisitionReportService({ db: tx, links: x.links });
-    return acquisition.firstVisits({ from: p.from, to: p.to, sources: { channelIds: f.sources.channelIds, kinds: f.sources.kinds } }, 'day');
+    return acquisition.firstVisits({ from: p.from, to: p.to, sources: { channelIds: f.sources.channelIds, kinds: f.sources.kinds } }, by);
+  }
+  const theirs = sql`${within(sql`td.first_seen_at`, p)} AND td.staff_at IS NULL
+       AND EXISTS (SELECT 1 FROM tracking_device_accounts tda JOIN col c ON c.account_id = tda.account_id WHERE tda.device_id = td.id)`;
+  const out = new Map<string, number>();
+  if (by === 'source') {
+    const rows = await sql<{ id: number; n: number }>`
+      WITH ${scopeCte('col', x.q, p)}
+      SELECT td.first_source_id AS id, count(*)::int AS n FROM tracking_devices td
+       WHERE ${theirs} AND td.first_source_id IS NOT NULL GROUP BY 1`.execute(tx);
+    for (const r of rows.rows) out.set(String(r.id), Number(r.n));
+    return out;
   }
   const days: string[] = [];
   for (let d = p.from; d <= p.to; d = plusDays(d, 1)) days.push(d);
   const starts = sql`ARRAY[${sql.join([...days, plusDays(p.to, 1)].map((d) => sql`${parisDayStart(d)}::timestamptz`))}]`;
   const rows = await sql<{ b: number; n: number }>`
     WITH ${scopeCte('col', x.q, p)}
-    SELECT width_bucket(td.first_seen_at, ${starts}) AS b, count(*)::int AS n
-      FROM tracking_devices td
-     WHERE ${within(sql`td.first_seen_at`, p)} AND td.staff_at IS NULL
-       AND EXISTS (SELECT 1 FROM tracking_device_accounts tda JOIN col c ON c.account_id = tda.account_id WHERE tda.device_id = td.id)
-     GROUP BY 1`.execute(tx);
-  const out = new Map<string, number>();
+    SELECT width_bucket(td.first_seen_at, ${starts}) AS b, count(*)::int AS n FROM tracking_devices td WHERE ${theirs} GROUP BY 1`.execute(tx);
   for (const r of rows.rows) {
     const day = days[Number(r.b) - 1];
     if (day !== undefined && Number(r.n) > 0) out.set(day, Number(r.n));
   }
   return out;
 }
+
+/** First visits by Paris day in a period (firstVisitsBy). */
+export const firstVisitDays = (tx: Db, x: Reading, p: Period): Promise<Map<string, number>> => firstVisitsBy(tx, x, p, 'day');
 
 const sum = (m: Map<string, number>): number => [...m.values()].reduce((a, b) => a + b, 0);
 
@@ -616,4 +635,310 @@ async function whoPanel(tx: Db, x: Reading): Promise<WhoFigures> {
     countries: { given: barsOf(x, counts, 'country', { last: ['none'] }), connection: barsOf(x, counts, 'conncountry', { last: ['unknown'] }) },
     cities: { given: { rows: cityRows, groups: given.length }, connection: { rows: connectionRows, groups: connectionCities.length } },
   };
+}
+
+// ── Where they come from (`origin`) ────────────────────────────────────────────────────────────────────────────
+
+/** A bar of SOURCES: a link channel, or a kind of first source. */
+export interface SourceBar extends BarRow {
+  kind: SourceKind;
+  channel: { id: string; name: string } | null;
+}
+
+/** A bar of HOW THEY HEARD: an answer (Other marked, one set aside marked), or `none` (Not answered). */
+export interface HeardBar extends BarRow {
+  optionId: string | null;
+  label: string | null;
+  other: boolean;
+  setAside: boolean;
+}
+
+/** A link's (or a channel's) results under one attribution; the revenue withheld under INSIGHTS_MIN_GROUP buyers. */
+export interface LinkResult {
+  collectors: number;
+  buyers: number;
+  revenueMinor: number | null;
+}
+
+export interface LinkTableRow {
+  link: { id: string; name: string; code: string; archived: boolean };
+  cost: { minor: number; currency: HouseCurrency } | null;
+  first: LinkResult;
+  last: LinkResult;
+}
+
+export interface LinkChannelRows {
+  channel: { id: string; name: string };
+  /** Its collectors and buyers counted once each, its revenue summed. */
+  first: LinkResult;
+  last: LinkResult;
+  links: LinkTableRow[];
+}
+
+export interface CampaignCounts {
+  firstVisits: number;
+  collectors: number;
+  buyers: number;
+}
+
+/** A campaign (utm_campaign), its sources and mediums under it (each with its content and term variants summed). */
+export interface CampaignGroupRow extends CampaignCounts {
+  campaign: string | null;
+  rows: (CampaignCounts & { source: string | null; medium: string | null; sourceIds: number[] })[];
+}
+
+/** A bar of REFERRING SITES: a site, Other sites, or None (typed or shared). */
+export interface SiteBar extends BarRow {
+  site: string | null;
+}
+
+export interface FirstVisitBucket {
+  key: string;
+  from: string;
+  to: string;
+  firstVisits: number;
+  newCollectors: number;
+}
+
+export interface OriginFigures {
+  total: number;
+  /** The link channels in their order, then Campaign tags, Referring sites, Direct, Before tracking (Console device when any). */
+  sources: SourceBar[];
+  /** The answers in the console's order (set aside ones when any collector gave them), then Not answered. */
+  heard: HeardBar[];
+  /** LINKS: by channel, each link's First link and Last link (sign-up or purchase): collectors, buyers, revenue; cost. */
+  links: { currency: HouseCurrency; currencies: HouseCurrency[]; channels: LinkChannelRows[] };
+  /** CAMPAIGNS: the top ORIGIN_CAMPAIGNS_TOP by collectors; `groups` before the cut. */
+  campaigns: { rows: CampaignGroupRow[]; groups: number };
+  /** REFERRING SITES: the top ORIGIN_SITES_TOP, then the other sites summed, then None (a direct first visit). */
+  sites: { rows: SiteBar[]; other: SiteBar; none: SiteBar; groups: number };
+  /** FIRST VISITS: by day, week or month, with the previous period's buckets; those that became collectors. */
+  firstVisits: { unit: BucketUnit; buckets: FirstVisitBucket[]; previous: FirstVisitBucket[] | null; total: number; previousTotal: number | null; becameCollectors: number };
+  /** The collectors made in the period, and those whose sign-up's last link is not their first source (§3.4 A.10.6). */
+  firstLastDiffer: { collectors: number; differ: number };
+}
+
+/** CAMPAIGNS and REFERRING SITES: the rows given at most. */
+export const ORIGIN_CAMPAIGNS_TOP = 50;
+export const ORIGIN_SITES_TOP = 20;
+
+/** The kinds of first source after the link channels, in the page's order (§3.6 C.6.3 SOURCES). */
+const SOURCE_KIND_ORDER = ['CAMPAIGN', 'SITE', 'DIRECT', 'BEFORE'] as const;
+
+/** The recording's start and the BEFORE and DIRECT sources: the fallbacks of an account or an act with no row (§3.4 A.5). */
+async function acquisitionBasis(tx: Db): Promise<{ started: Date; before: number; direct: number }> {
+  const state = await tx.selectFrom('acquisition_state').select('tracking_started_at').where('id', '=', 1).executeTakeFirst();
+  const fixed = await tx.selectFrom('acquisition_sources').select(['key', 'id']).where('key', 'in', ['BEFORE', 'DIRECT']).execute();
+  return {
+    started: state?.tracking_started_at ?? new Date('9999-12-31T00:00:00.000Z'),
+    before: fixed.find((f) => f.key === 'BEFORE')?.id ?? 0,
+    direct: fixed.find((f) => f.key === 'DIRECT')?.id ?? 0,
+  };
+}
+
+/** A paid order bought in the period (GROWTH's purchases: never GIFT, not CANCELLED or RETURNED). */
+const bought = (o: string, p: Period) => sql`${sql.ref(`${o}.paid_at`)} IS NOT NULL AND ${sql.ref(`${o}.channel`)} <> 'GIFT' AND ${sql.ref(`${o}.status`)} NOT IN ('CANCELLED', 'RETURNED') AND ${within(sql.ref(`${o}.paid_at`), p)}`;
+
+/** SOURCES, HOW THEY HEARD, LINKS, CAMPAIGNS, REFERRING SITES and FIRST VISITS (§3.6 C.6.3 item 3; §3.4 A.10.6). */
+async function originPanel(tx: Db, x: Reading): Promise<OriginFigures> {
+  const { q } = x;
+  const basis = await acquisitionBasis(tx);
+  const firstKey = sql`(CASE WHEN fs.account_id IS NULL THEN (CASE WHEN c.created_at < ${basis.started}::timestamptz THEN 'kind:BEFORE' ELSE 'kind:DIRECT' END)
+                             WHEN fk.kind = 'LINK' THEN 'channel:' || fl.channel_id::text ELSE 'kind:' || fk.kind END)`;
+  const keyed = (cte: string) => sql`
+    SELECT c.created_at, v.dim, v.key
+      FROM ${sql.table(cte)} c
+      LEFT JOIN account_sources fs ON fs.account_id = c.account_id
+      LEFT JOIN acquisition_sources fk ON fk.id = fs.first_source_id
+      LEFT JOIN links fl ON fl.id = fk.link_id
+      LEFT JOIN account_profiles pr ON pr.account_id = c.account_id
+      CROSS JOIN LATERAL (VALUES
+        ('source', ${firstKey}),
+        ('heard', coalesce(pr.heard_option_id::text, 'none')),
+        ('site', CASE WHEN fk.kind = 'SITE' THEN 'site:' || fk.site WHEN ${firstKey} = 'kind:DIRECT' THEN 'none' ELSE 'x' END)) AS v(dim, key)`;
+  const { counts, total } = await countBy(tx, x, keyed);
+
+  // SOURCES: every channel in its order, then the kinds; Console device only when some collector came first through it.
+  const channels = await x.links.channels(tx);
+  const sourceKeys = [...channels.map((c) => `channel:${c.id}`), ...SOURCE_KIND_ORDER.map((k) => `kind:${k}`)];
+  if (counts.get('source')?.has('kind:STAFF')) sourceKeys.push('kind:STAFF');
+  const sources: SourceBar[] = barsOf(x, counts, 'source', { order: sourceKeys }).map((b) => {
+    const channel = b.key.startsWith('channel:') ? channels.find((c) => `channel:${c.id}` === b.key)! : null;
+    return { ...b, kind: channel ? 'LINK' : (b.key.slice(5) as SourceKind), channel: channel ? { id: channel.id, name: channel.name } : null };
+  });
+
+  // HOW THEY HEARD: the answers in the console's order, a set-aside one while it has collectors, then Not answered.
+  const options = await tx.selectFrom('heard_options').select(['id', 'label', 'is_other', 'active']).orderBy('position').orderBy('id').execute();
+  const heardCounts = counts.get('heard') ?? new Map<string, { n: number; now: number; before: number }>();
+  const shown = options.filter((o) => o.active || (heardCounts.get(o.id)?.n ?? 0) + (heardCounts.get(o.id)?.before ?? 0) > 0);
+  const heard: HeardBar[] = barsOf(x, counts, 'heard', { order: [...shown.map((o) => o.id), 'none'] }).map((b) => {
+    const o = shown.find((x) => x.id === b.key);
+    return { ...b, optionId: o?.id ?? null, label: o?.label ?? null, other: o?.is_other ?? false, setAside: o ? !o.active : false };
+  });
+
+  // REFERRING SITES: the first source's site, the top ones, the rest as Other sites, then None (a direct first visit).
+  const siteBars = barsOf(x, counts, 'site').filter((b) => b.key.startsWith('site:'));
+  const sumBars = (key: string, list: BarRow[]): SiteBar => ({
+    key,
+    site: null,
+    collectors: list.reduce((a, b) => a + b.collectors, 0),
+    compare: q.previous ? { now: list.reduce((a, b) => a + b.compare!.now, 0), before: list.reduce((a, b) => a + b.compare!.before, 0) } : null,
+  });
+  const noneBar = barsOf(x, counts, 'site', { order: ['none'] })[0]!;
+  const sites = {
+    rows: siteBars.slice(0, ORIGIN_SITES_TOP).map((b) => ({ ...b, site: b.key.slice(5) })),
+    other: sumBars('other', siteBars.slice(ORIGIN_SITES_TOP)),
+    none: { ...noneBar, site: null },
+    groups: siteBars.length,
+  };
+
+  return {
+    total,
+    sources,
+    heard,
+    links: await originLinks(tx, x),
+    campaigns: await originCampaigns(tx, x),
+    sites,
+    firstVisits: await originFirstVisits(tx, x),
+    firstLastDiffer: await firstLastDiffer(tx, x, basis),
+  };
+}
+
+/** LINKS (§3.6 C.6.3): each link's and channel's collectors, buyers and revenue as the first link and as the last link. */
+async function originLinks(tx: Db, x: Reading): Promise<OriginFigures['links']> {
+  const { q } = x;
+  const P = q.period;
+  const { currency, currencies } = await currenciesOf(tx, q.currency ?? undefined);
+  const amount = sql`(CASE WHEN i.kind = 'INVOICE' THEN i.total_minor ELSE -i.total_minor END)::bigint`;
+  // Facts: m = fc/fb/fr (first link: collectors, buyers, revenue), lc/lb/lr (last link). The Before tracking and Direct
+  // fallbacks are never a link, so an account or an act without a row is never one of a link's.
+  const rows = await sql<{ m: string; channel_id: string; link_id: string | null; n: number; amount: number | null }>`
+    WITH ${scopeCte('col', q, P)},
+    fl AS (SELECT c.account_id, k.link_id FROM col c JOIN account_sources s ON s.account_id = c.account_id
+             JOIN acquisition_sources k ON k.id = s.first_source_id WHERE k.link_id IS NOT NULL),
+    buys AS (SELECT o.id, o.account_id FROM orders o JOIN col c ON c.account_id = o.account_id WHERE ${bought('o', P)}),
+    rev AS (SELECT o.id AS order_id, o.account_id, ${amount} AS amount
+              FROM invoices i JOIN orders o ON o.id = i.order_id JOIN col c ON c.account_id = o.account_id
+             WHERE i.currency = ${currency} AND ${within(sql`i.issued_at`, P)}),
+    ll AS (SELECT cv.account_id, k.link_id FROM acquisition_conversions cv JOIN col c ON c.account_id = cv.account_id
+             JOIN acquisition_sources k ON k.id = cv.last_source_id
+            WHERE k.link_id IS NOT NULL
+              AND (cv.kind = 'SIGNUP' OR (cv.kind = 'ORDER' AND EXISTS (
+                     SELECT 1 FROM orders lo WHERE lo.id = cv.ref_id AND lo.paid_at IS NOT NULL AND lo.channel <> 'GIFT')))),
+    ol AS (SELECT cv.ref_id AS order_id, k.link_id FROM acquisition_conversions cv JOIN acquisition_sources k ON k.id = cv.last_source_id
+            WHERE cv.kind = 'ORDER' AND k.link_id IS NOT NULL),
+    x AS (
+      SELECT 'fc'::text AS m, fl.account_id, fl.link_id, 0::bigint AS amount FROM fl
+      UNION ALL SELECT 'fb', b.account_id, fl.link_id, 0 FROM buys b JOIN fl ON fl.account_id = b.account_id
+      UNION ALL SELECT 'fr', r.account_id, fl.link_id, r.amount FROM rev r JOIN fl ON fl.account_id = r.account_id
+      UNION ALL SELECT 'lc', ll.account_id, ll.link_id, 0 FROM ll
+      UNION ALL SELECT 'lb', b.account_id, ol.link_id, 0 FROM buys b JOIN ol ON ol.order_id = b.id
+      UNION ALL SELECT 'lr', r.account_id, ol.link_id, r.amount FROM rev r JOIN ol ON ol.order_id = r.order_id)
+    SELECT x.m, l.channel_id::text AS channel_id, x.link_id::text AS link_id, count(DISTINCT x.account_id)::int AS n, sum(x.amount)::bigint AS amount
+      FROM x JOIN links l ON l.id = x.link_id
+     GROUP BY x.m, GROUPING SETS ((l.channel_id, x.link_id), (l.channel_id))`.execute(tx);
+  const figures = new Map<string, Record<string, { n: number; amount: number }>>();
+  for (const r of rows.rows) {
+    const key = r.link_id ?? `channel:${r.channel_id}`;
+    const f = figures.get(key) ?? {};
+    f[r.m] = { n: Number(r.n), amount: Number(r.amount ?? 0) };
+    figures.set(key, f);
+  }
+  const result = (key: string, side: 'f' | 'l'): LinkResult => {
+    const f = figures.get(key) ?? {};
+    const buyers = f[`${side}b`]?.n ?? 0;
+    return { collectors: f[`${side}c`]?.n ?? 0, buyers, revenueMinor: buyers >= INSIGHTS_MIN_GROUP ? (f[`${side}r`]?.amount ?? 0) : null };
+  };
+  const links = await x.links.list({ archived: true }, tx);
+  const out: LinkChannelRows[] = [];
+  for (const c of await x.links.channels(tx)) {
+    const mine = links
+      .filter((l) => l.channel.id === c.id)
+      .map((l) => ({ link: { id: l.id, name: l.name, code: l.code, archived: l.archivedAt !== null }, cost: l.cost, first: result(l.id, 'f'), last: result(l.id, 'l') }))
+      // An archived link is listed while it has a figure (§3.6 C.6.6: it stays, marked).
+      .filter((r) => !r.link.archived || figures.has(r.link.id));
+    if (mine.length === 0) continue;
+    out.push({ channel: { id: c.id, name: c.name }, first: result(`channel:${c.id}`, 'f'), last: result(`channel:${c.id}`, 'l'), links: mine });
+  }
+  return { currency, currencies, channels: out };
+}
+
+/** CAMPAIGNS (§3.6 C.6.3): by utm_campaign, then source and medium, first visits, collectors and buyers; the top 50. */
+async function originCampaigns(tx: Db, x: Reading): Promise<OriginFigures['campaigns']> {
+  const { q } = x;
+  const P = q.period;
+  const meta = await tx.selectFrom('acquisition_sources').select(['id', 'utm_source', 'utm_medium', 'utm_campaign']).where('kind', '=', 'CAMPAIGN').orderBy('id').execute();
+  if (meta.length === 0) return { rows: [], groups: 0 };
+  const visits = await firstVisitsBy(tx, x, P, 'source');
+  const rows = await sql<{ id: number; collectors: number; buyers: number }>`
+    WITH ${scopeCte('col', q, P)}
+    SELECT s.first_source_id AS id, count(*)::int AS collectors,
+           count(*) FILTER (WHERE EXISTS (SELECT 1 FROM orders o WHERE o.account_id = c.account_id AND ${bought('o', P)}))::int AS buyers
+      FROM col c JOIN account_sources s ON s.account_id = c.account_id
+      JOIN acquisition_sources k ON k.id = s.first_source_id AND k.kind = 'CAMPAIGN'
+     GROUP BY 1`.execute(tx);
+  const bySource = new Map(rows.rows.map((r) => [Number(r.id), { collectors: Number(r.collectors), buyers: Number(r.buyers) }]));
+  const groups = new Map<string, CampaignGroupRow>();
+  for (const m of meta) {
+    const c = bySource.get(m.id) ?? { collectors: 0, buyers: 0 };
+    const v = visits.get(String(m.id)) ?? 0;
+    if (c.collectors + v === 0) continue;
+    const g = groups.get(m.utm_campaign ?? '') ?? { campaign: m.utm_campaign, firstVisits: 0, collectors: 0, buyers: 0, rows: [] };
+    g.firstVisits += v;
+    g.collectors += c.collectors;
+    g.buyers += c.buyers;
+    const row = g.rows.find((r) => r.source === m.utm_source && r.medium === m.utm_medium);
+    if (row) {
+      row.firstVisits += v;
+      row.collectors += c.collectors;
+      row.buyers += c.buyers;
+      row.sourceIds.push(m.id);
+    } else g.rows.push({ source: m.utm_source, medium: m.utm_medium, sourceIds: [m.id], firstVisits: v, collectors: c.collectors, buyers: c.buyers });
+    groups.set(m.utm_campaign ?? '', g);
+  }
+  const order = <T extends CampaignCounts>(a: T, b: T, ka: string, kb: string) => b.collectors - a.collectors || b.firstVisits - a.firstVisits || (ka < kb ? -1 : ka > kb ? 1 : 0);
+  const list = [...groups.values()];
+  for (const g of list) g.rows.sort((a, b) => order(a, b, `${a.source}/${a.medium}`, `${b.source}/${b.medium}`));
+  list.sort((a, b) => order(a, b, a.campaign ?? '', b.campaign ?? ''));
+  return { rows: list.slice(0, ORIGIN_CAMPAIGNS_TOP), groups: list.length };
+}
+
+/** FIRST VISITS (§3.6 C.6.3): first visits and new collectors by bucket, the previous period's buckets beside them. */
+async function originFirstVisits(tx: Db, x: Reading): Promise<OriginFigures['firstVisits']> {
+  const { q } = x;
+  const of = async (p: Period) => {
+    const days = await firstVisitsBy(tx, x, p, 'day');
+    const created = await sql<{ created_at: Date }>`WITH ${scopeCte('col', q, p)} SELECT created_at FROM col WHERE ${within(sql`created_at`, p)}`.execute(tx);
+    const buckets: FirstVisitBucket[] = periodBuckets(p).map((b) => ({ key: b.key, from: b.from, to: b.to, firstVisits: 0, newCollectors: 0 }));
+    const at = (day: string) => buckets.find((b) => day >= b.from && day <= b.to);
+    for (const [day, n] of days) {
+      const b = at(day);
+      if (b) b.firstVisits += n;
+    }
+    for (const r of created.rows) {
+      const b = at(parisDay(new Date(r.created_at)));
+      if (b) b.newCollectors += 1;
+    }
+    return buckets;
+  };
+  const buckets = await of(q.period);
+  const previous = q.previous ? await of(q.previous) : null;
+  const became = await sql<{ n: number }>`
+    WITH ${scopeCte('col', q, q.period)}
+    SELECT count(*)::int AS n FROM col c JOIN account_sources s ON s.account_id = c.account_id WHERE ${within(sql`s.first_seen_at`, q.period)}`.execute(tx);
+  const total = (list: FirstVisitBucket[]) => list.reduce((a, b) => a + b.firstVisits, 0);
+  return { unit: bucketUnit(q.period), buckets, previous, total: total(buckets), previousTotal: previous ? total(previous) : null, becameCollectors: Number(became.rows[0]?.n ?? 0) };
+}
+
+/** The collectors made in the period whose sign-up's last link differs from their first source, with the reports' fallbacks. */
+async function firstLastDiffer(tx: Db, x: Reading, basis: { started: Date; before: number; direct: number }): Promise<OriginFigures['firstLastDiffer']> {
+  const fallback = sql`(CASE WHEN c.created_at < ${basis.started}::timestamptz THEN ${basis.before}::integer ELSE ${basis.direct}::integer END)`;
+  const r = await sql<{ collectors: number; differ: number }>`
+    WITH ${scopeCte('col', x.q, x.q.period)}
+    SELECT count(*)::int AS collectors, count(*) FILTER (WHERE d.first_src IS DISTINCT FROM d.last_src)::int AS differ FROM (
+      SELECT coalesce(s.first_source_id, ${fallback}) AS first_src, coalesce(cv.last_source_id, ${fallback}) AS last_src
+        FROM col c LEFT JOIN account_sources s ON s.account_id = c.account_id
+        LEFT JOIN acquisition_conversions cv ON cv.kind = 'SIGNUP' AND cv.ref_id = c.account_id
+       WHERE ${within(sql`c.created_at`, x.q.period)}) d`.execute(tx);
+  return { collectors: Number(r.rows[0]?.collectors ?? 0), differ: Number(r.rows[0]?.differ ?? 0) };
 }

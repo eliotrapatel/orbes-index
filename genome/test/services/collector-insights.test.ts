@@ -28,6 +28,8 @@ import {
   type BarRow,
   type CollectorsReport,
   type InsightsRequest,
+  type LinkChannelRows,
+  type OriginFigures,
   type OverviewFigures,
   type WhoFigures,
 } from '../../src/server/services/collector-insights.js';
@@ -627,5 +629,222 @@ describe('CollectorInsightsService (§3.6 C.6, steps 9.2 and on)', () => {
     });
     expect(o.recordingSince).toBeInstanceOf(Date);
     expect(parisDay(NOW)).toBe(TODAY);
+  });
+});
+
+/**
+ * Where they come from (step 9.3), on a scripted autumn written through the acquisition's own services (the arrivals,
+ * the links at sign-up, the conversions job), as test/services/acquisition-report.test.ts writes its story; the
+ * recording starts on 1 September 2026, the period is October (CUSTOM), the previous one September:
+ *
+ *   A     through L1 « Instagram bio » (2 Oct), then L2 « Léa — TikTok » (5 Oct), signs up 6 Oct, a salon order of € 300
+ *         paid 10 Oct (its last link L2), heard through the first answer;
+ *   B, C  through L1 (3 Oct, 4 Oct), sign up the same day, salon orders of € 200 and € 100 (12 Oct, 14 Oct; last L1);
+ *         B answered Other, C an answer set aside since;
+ *   D     through L1 (5 Oct), signs up, buys nothing;
+ *   E, E2 campaign tags ig / story / drop-14, content story-1 and story-2 (7 Oct, 8 Oct), sign up; E buys for £ 50;
+ *   F     from vogue.fr (9 Oct), signs up; G arrives direct (11 Oct) and signs up;
+ *   SEPT  through L1 on 15 Sep, signs up that day; OLD made on 20 Aug, before the recording: Before tracking;
+ *   two anonymous first visits in October (one through the archived L3, one through the campaign);
+ *   T a test entrant, H one of the team's own accounts and X a DELETED account, each through L1 with an order: in no
+ *   figure (their devices are first visits, the Links reports' rule counting every device).
+ * L2 is archived after A's visit: it stays in LINKS, marked, since it has a figure.
+ */
+describe('CollectorInsightsService, origin (§3.6 C.6.3 item 3, §3.4 A.10.6; step 9.3)', () => {
+  let h: Harness;
+  let svc: CollectorInsightsService;
+  let w: GrowthWorld;
+  let model = '';
+  const acc: Record<string, string> = {};
+  const link: Record<string, string> = {};
+  const channel: Record<string, string> = {};
+  const heard: { id: string; label: string; is_other: boolean }[] = [];
+  let seq = 0;
+  const z = (iso: string) => new Date(iso);
+  const OCT = { p: 'custom', from: '2026-10-01', to: '2026-10-31' } as const;
+
+  const device = async (key: string, first: Date) => {
+    const hash = `o${key.padEnd(7, '_')}${String(++seq).padStart(4, '0')}${'q'.repeat(31)}`;
+    const id = (await h.t.db.insertInto('tracking_devices').values({ device_hash: hash, first_seen_at: first, last_seen_at: first }).returning('id').executeTakeFirstOrThrow()).id;
+    return { id, hash };
+  };
+  const arrive = (d: { id: number }, at: string, a: { link?: string; utm?: Record<string, string>; referrer?: string }) =>
+    h.ctx.services.acquisition.arrive({ deviceId: d.id, accountId: null, now: z(at), ...a });
+  const signUp = async (key: string, d: { hash: string } | null, at: string, email = `origin-${key.toLowerCase()}-${randomUUID().slice(0, 6)}@example.com`) => {
+    acc[key] = (await h.t.db.insertInto('accounts').values({ email, email_normalized: email, password_hash: 'x', country: 'FR', created_at: z(at) }).returning('id').executeTakeFirstOrThrow()).id;
+    if (d) await h.ctx.services.tracking.link(d.hash, acc[key]!, 'SIGN_UP', z(at));
+  };
+  const code = async (key: string) => (await h.t.db.selectFrom('links').select('code').where('id', '=', link[key]!).executeTakeFirstOrThrow()).code;
+  const journey = async (key: string, first: string, a: { link?: string; utm?: Record<string, string>; referrer?: string }, signUpAt = first) => {
+    const d = await device(key, z(first));
+    await arrive(d, first, a);
+    await signUp(key, d, signUpAt);
+    return d;
+  };
+
+  beforeAll(async () => {
+    h = await createHarness();
+    h.clock.set('2026-09-01T08:00:00Z');
+    await h.t.db.updateTable('acquisition_state').set({ tracking_started_at: z('2026-09-01T08:00:00Z'), conversions_until: z('2026-09-01T08:00:00Z') }).execute();
+    w = await new GrowthWorld(h.t.db).prepare();
+    model = await w.model('MONOLITHE', { price: [30_000, 'EUR'] });
+    const admin = await createAdmin(h.ctx, 'OPERATOR');
+    const actor = { type: 'admin' as const, id: admin.id };
+    for (const c of await h.ctx.services.links.channels()) channel[c.name] = c.id;
+    for (const [key, name, ch, cost] of [
+      ['L1', 'Instagram bio', 'Instagram', { minor: 10_000, currency: 'EUR' as const }],
+      ['L2', 'Léa — TikTok', 'Influencers', null],
+      ['L3', 'Old post', 'Instagram', null],
+    ] as const) {
+      h.clock.advance(60_000);
+      link[key] = (await h.ctx.services.links.create({ name, channelId: channel[ch], destination: 'NOW', ...(cost ? { cost } : {}) }, actor)).id;
+    }
+    await h.ctx.services.links.archive(link.L3!, actor);
+    const [L1, L2, L3] = [await code('L1'), await code('L2'), await code('L3')];
+
+    await signUp('OLD', null, '2026-08-20T10:00:00Z');
+    await journey('SEPT', '2026-09-15T10:00:00Z', { link: L1 });
+    const dA = await device('A', z('2026-10-02T10:00:00Z'));
+    await arrive(dA, '2026-10-02T10:00:00Z', { link: L1 });
+    await arrive(dA, '2026-10-05T10:00:00Z', { link: L2 });
+    await signUp('A', dA, '2026-10-06T10:00:00Z');
+    await h.ctx.services.links.archive(link.L2!, actor);
+    await journey('B', '2026-10-03T09:00:00Z', { link: L1 }, '2026-10-03T10:00:00Z');
+    await journey('C', '2026-10-04T09:00:00Z', { link: L1 }, '2026-10-04T10:00:00Z');
+    await journey('D', '2026-10-05T09:00:00Z', { link: L1 }, '2026-10-05T10:00:00Z');
+    await journey('E', '2026-10-07T09:00:00Z', { utm: { source: 'ig', medium: 'story', campaign: 'drop-14', content: 'story-1' } }, '2026-10-07T10:00:00Z');
+    await journey('E2', '2026-10-08T09:00:00Z', { utm: { source: 'ig', medium: 'story', campaign: 'drop-14', content: 'story-2' } }, '2026-10-08T10:00:00Z');
+    await journey('F', '2026-10-09T09:00:00Z', { referrer: 'https://www.vogue.fr/article' }, '2026-10-09T10:00:00Z');
+    await journey('G', '2026-10-11T09:00:00Z', {}, '2026-10-11T10:00:00Z');
+    await arrive(await device('Y', z('2026-10-03T12:00:00Z')), '2026-10-03T12:00:00Z', { link: L3 });
+    await arrive(await device('Z', z('2026-10-07T12:00:00Z')), '2026-10-07T12:00:00Z', { utm: { source: 'ig', medium: 'story', campaign: 'drop-14', content: 'story-1' } });
+    const team = await createAdmin(h.ctx, 'AUDITOR');
+    await journey('T', '2026-10-06T09:00:00Z', { link: L1 }, '2026-10-06T10:00:00Z');
+    await h.t.db.insertInto('test_entrants').values({ account_id: acc.T! }).execute();
+    const dH = await device('H', z('2026-10-06T09:00:00Z'));
+    await arrive(dH, '2026-10-06T09:00:00Z', { link: L1 });
+    await signUp('H', dH, '2026-10-06T10:00:00Z', team.email);
+    await journey('X', '2026-10-06T09:00:00Z', { link: L1 }, '2026-10-06T10:00:00Z');
+    // Orders (paid at 12:00 UTC, reserved an hour before), then X deleted.
+    for (const [key, paid, total, currency] of [['A', '2026-10-10', 30_000, 'EUR'], ['B', '2026-10-12', 20_000, 'EUR'], ['C', '2026-10-14', 10_000, 'EUR'], ['E', '2026-10-15', 5_000, 'GBP'], ['T', '2026-10-15', 9_000, 'EUR'], ['H', '2026-10-15', 9_000, 'EUR'], ['X', '2026-10-15', 9_000, 'EUR']] as const) {
+      await w.order({ accountId: acc[key]!, modelId: model, channel: 'SALON', paid, total, currency });
+    }
+    await h.t.db.updateTable('accounts').set({ status: 'DELETED' }).where('id', '=', acc.X!).execute();
+    // How they heard: A the first answer, B Other with its words, C an answer set aside since.
+    heard.push(...(await h.t.db.selectFrom('heard_options').select(['id', 'label', 'is_other']).orderBy('position').execute()));
+    const other = heard.find((o) => o.is_other)!;
+    const aside = heard[2]!;
+    for (const [key, opt, words] of [['A', heard[0]!, null], ['B', other, 'a stylist'], ['C', aside, null]] as const) {
+      await h.t.db.insertInto('account_profiles').values({ account_id: acc[key]!, heard_option_id: opt.id, heard_other: words, heard_at: z('2026-10-20T10:00:00Z') }).execute();
+    }
+    await h.t.db.updateTable('heard_options').set({ active: false }).where('id', '=', aside.id).execute();
+    await h.ctx.services.acquisition.recordConversions(z('2026-10-31T22:30:00Z'));
+    h.clock.set('2026-11-02T10:00:00Z');
+    svc = h.ctx.services.collectorInsights;
+  }, 120_000);
+  afterAll(() => h?.close());
+
+  const origin = async (req: Omit<InsightsRequest, 'panel'> = {}) => {
+    svc.clearCache();
+    const r = await svc.report({ panel: 'origin', ...req });
+    expect(r.panel).toBe('origin');
+    return r.figures as OriginFigures;
+  };
+  const counted = ['A', 'B', 'C', 'D', 'E', 'E2', 'F', 'G', 'OLD', 'SEPT'];
+
+  it('SOURCES: each channel in its order, then the kinds; the stock compared « new in October » with « new in September »', async () => {
+    const f = await origin(OCT);
+    expect(f.total).toBe(counted.length);
+    const bar = (key: string) => f.sources.find((s) => s.key === key)!;
+    expect(f.sources.map((s) => s.key)).toEqual([...(await h.ctx.services.links.channels()).map((c) => `channel:${c.id}`), 'kind:CAMPAIGN', 'kind:SITE', 'kind:DIRECT', 'kind:BEFORE']);
+    expect(bar(`channel:${channel.Instagram}`)).toMatchObject({ kind: 'LINK', channel: { id: channel.Instagram, name: 'Instagram' }, collectors: 5, compare: { now: 4, before: 1 } });
+    expect(bar(`channel:${channel.Influencers}`)).toMatchObject({ collectors: 0, compare: { now: 0, before: 0 } });
+    expect(bar('kind:CAMPAIGN')).toMatchObject({ kind: 'CAMPAIGN', channel: null, collectors: 2, compare: { now: 2, before: 0 } });
+    expect(bar('kind:SITE')).toMatchObject({ collectors: 1, compare: { now: 1, before: 0 } });
+    expect(bar('kind:DIRECT')).toMatchObject({ collectors: 1, compare: { now: 1, before: 0 } });
+    expect(bar('kind:BEFORE')).toMatchObject({ collectors: 1, compare: { now: 0, before: 0 } });
+    expect(f.sources.reduce((a, s) => a + s.collectors, 0)).toBe(counted.length);
+  });
+
+  it('HOW THEY HEARD: the answers in the console’s order, the one set aside kept and marked, Not answered last', async () => {
+    const f = await origin(OCT);
+    expect(f.heard.map((b) => b.label)).toEqual([...heard.map((o) => o.label), null]);
+    expect(f.heard.map((b) => b.collectors)).toEqual([...heard.map((o): number => (o.id === heard[0]!.id || o.is_other || o.id === heard[2]!.id ? 1 : 0)), 7]);
+    expect(f.heard.find((b) => b.optionId === heard[2]!.id)).toMatchObject({ setAside: true, other: false });
+    expect(f.heard.find((b) => b.other)).toMatchObject({ label: 'Other', collectors: 1, setAside: false });
+    expect(f.heard[f.heard.length - 1]).toMatchObject({ key: 'none', optionId: null, collectors: 7 });
+  });
+
+  it('LINKS: by channel, each link as the first link and as the last link: collectors, buyers, revenue (withheld under 3 buyers), cost', async () => {
+    const f = await origin({ ...OCT, currency: 'EUR' });
+    expect(f.links).toMatchObject({ currency: 'EUR', currencies: ['EUR', 'GBP'] });
+    expect(f.links.channels.map((c) => c.channel.name)).toEqual(['Instagram', 'Influencers']);
+    const [instagram, influencers] = f.links.channels as [LinkChannelRows, LinkChannelRows];
+    // L3, archived with no figure, is left out; L2, archived with one, stays, marked.
+    expect(instagram.links.map((l) => l.link.name)).toEqual(['Instagram bio']);
+    expect(instagram.links[0]).toMatchObject({ link: { id: link.L1, archived: false }, cost: { minor: 10_000, currency: 'EUR' }, first: { collectors: 5, buyers: 3, revenueMinor: 60_000 }, last: { collectors: 4, buyers: 2, revenueMinor: null } });
+    expect(instagram).toMatchObject({ first: { collectors: 5, buyers: 3, revenueMinor: 60_000 }, last: { collectors: 4, buyers: 2, revenueMinor: null } });
+    expect(influencers.links).toEqual([{ link: { id: link.L2, name: 'Léa — TikTok', code: expect.any(String), archived: true }, cost: null, first: { collectors: 0, buyers: 0, revenueMinor: null }, last: { collectors: 1, buyers: 1, revenueMinor: null } }]);
+    // In pounds: the same buyers, no revenue in pounds on the link; the scope NEW of September holds SEPT alone.
+    expect((await origin({ ...OCT, currency: 'GBP' })).links.channels[0]!.first).toEqual({ collectors: 5, buyers: 3, revenueMinor: 0 });
+    const sept = await origin({ p: 'custom', from: '2026-09-01', to: '2026-09-30', scope: 'new' });
+    expect(sept.links.channels.map((c) => [c.channel.name, c.first.collectors, c.last.collectors])).toEqual([['Instagram', 1, 1]]);
+  });
+
+  it('CAMPAIGNS: by campaign, its source and medium with their content variants summed: first visits, collectors, buyers', async () => {
+    const f = await origin(OCT);
+    expect(f.campaigns.groups).toBe(1);
+    expect(f.campaigns.rows).toEqual([
+      { campaign: 'drop-14', firstVisits: 3, collectors: 2, buyers: 1, rows: [{ source: 'ig', medium: 'story', sourceIds: expect.any(Array), firstVisits: 3, collectors: 2, buyers: 1 }] },
+    ]);
+    expect(f.campaigns.rows[0]!.rows[0]!.sourceIds).toHaveLength(2);
+    // With a filter narrowing the collectors, the first visits are their devices'.
+    const fr = await origin({ ...OCT, c: 'FR' });
+    expect(fr.campaigns.rows[0]).toMatchObject({ firstVisits: 2, collectors: 2, buyers: 1 });
+  });
+
+  it('REFERRING SITES: by site, then Other sites and None (a direct first visit)', async () => {
+    const f = await origin(OCT);
+    expect(f.sites.rows).toEqual([{ key: 'site:vogue.fr', site: 'vogue.fr', collectors: 1, compare: { now: 1, before: 0 } }]);
+    expect(f.sites.other).toEqual({ key: 'other', site: null, collectors: 0, compare: { now: 0, before: 0 } });
+    expect(f.sites.none).toEqual({ key: 'none', site: null, collectors: 1, compare: { now: 1, before: 0 } });
+    expect(f.sites.groups).toBe(1);
+  });
+
+  it('FIRST VISITS: by day over October (by week over 78 days), the new collectors beside them, September’s buckets, those that became collectors', async () => {
+    const f = await origin(OCT);
+    expect(f.firstVisits.unit).toBe('day');
+    expect(f.firstVisits.buckets).toHaveLength(31);
+    const byDay = Object.fromEntries(f.firstVisits.buckets.filter((b) => b.firstVisits + b.newCollectors > 0).map((b) => [b.key, [b.firstVisits, b.newCollectors]]));
+    expect(byDay).toEqual({
+      '2026-10-02': [1, 0],
+      '2026-10-03': [2, 1],
+      '2026-10-04': [1, 1],
+      '2026-10-05': [1, 1],
+      '2026-10-06': [3, 1],
+      '2026-10-07': [2, 1],
+      '2026-10-08': [1, 1],
+      '2026-10-09': [1, 1],
+      '2026-10-11': [1, 1],
+    });
+    expect(f.firstVisits.total).toBe(13);
+    expect(f.firstVisits.previousTotal).toBe(1);
+    expect(f.firstVisits.previous!.find((b) => b.firstVisits > 0)).toMatchObject({ key: '2026-09-15', firstVisits: 1, newCollectors: 1 });
+    expect(f.firstVisits.becameCollectors).toBe(8);
+    expect(f.firstLastDiffer).toEqual({ collectors: 8, differ: 1 });
+    const ninety = await origin({ p: 'custom', from: '2026-08-15', to: '2026-10-31' });
+    expect(ninety.firstVisits.unit).toBe('week');
+    expect(ninety.firstVisits.buckets.reduce((a, b) => a + b.firstVisits, 0)).toBe(14);
+  });
+
+  it('a source filter keeps its collectors, the first visits of its sources and the links that are theirs', async () => {
+    const f = await origin({ ...OCT, s: `${channel.Instagram}` });
+    expect(f.total).toBe(5);
+    expect(f.sources.find((s) => s.key === `channel:${channel.Instagram}`)!.collectors).toBe(5);
+    expect(f.sources.filter((s) => s.collectors > 0)).toHaveLength(1);
+    // The devices whose first source is a link of Instagram: A, B, C, D, Y (L3), T, H, X.
+    expect(f.firstVisits.total).toBe(8);
+    expect(f.links.channels[0]!.first.collectors).toBe(5);
+    expect(f.firstLastDiffer).toEqual({ collectors: 4, differ: 1 });
   });
 });

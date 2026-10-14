@@ -46,7 +46,7 @@ describe('GET /api/admin/collectors/… (§3.6 C.9)', () => {
   };
 
   it('AUDITOR, OPERATOR and ADMIN read; RETAIL and LOGISTICS get 403; no session 401', async () => {
-    for (const url of ['/api/admin/collectors/options', '/api/admin/collectors/report?panel=overview', '/api/admin/collectors/report?panel=who']) {
+    for (const url of ['/api/admin/collectors/options', '/api/admin/collectors/report?panel=overview', '/api/admin/collectors/report?panel=who', '/api/admin/collectors/report?panel=origin']) {
       for (const role of ['AUDITOR', 'OPERATOR', 'ADMIN'] as const) await get(role, url);
       for (const role of ['RETAIL', 'LOGISTICS'] as const) expect(errorOf(await clients[role].get(url)).code, `${role} ${url}`).toBe('FORBIDDEN');
       expect((await h.client().get(url)).statusCode).toBe(401);
@@ -78,7 +78,7 @@ describe('GET /api/admin/collectors/… (§3.6 C.9)', () => {
     ]);
     // An AUDITOR and an ADMIN read the same figures (no city or email is masked in a figure; none names a person).
     expect((await get('ADMIN', '/api/admin/collectors/report?panel=who&p=30d&cmp=0')).figures).toEqual(all.figures);
-    const text = JSON.stringify([all, await get('ADMIN', '/api/admin/collectors/report?panel=overview')]);
+    const text = JSON.stringify([all, await get('ADMIN', '/api/admin/collectors/report?panel=overview'), await get('AUDITOR', '/api/admin/collectors/report?panel=origin')]);
     for (const e of emails) expect(text).not.toContain(e);
     for (const id of ids) expect(text).not.toContain(id);
     expect(text).not.toContain('Number');
