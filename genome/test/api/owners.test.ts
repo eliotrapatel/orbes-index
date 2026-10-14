@@ -697,10 +697,11 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       const reference = `OR-${order.replace(/-/g, '').slice(0, 8).toUpperCase()}`;
       expect(x.tierGrants).toEqual(
         expect.arrayContaining([
-          { tier: 'PLATINE', kind: 'GIFT', grantedAt: gift.granted_at.toISOString(), amountMinor: null, currency: null, expiresAt: null, model: null, balanceMinor: null, uses: [] },
+          { tier: 'PLATINE', kind: 'GIFT', birthdayOn: null, grantedAt: gift.granted_at.toISOString(), amountMinor: null, currency: null, expiresAt: null, model: null, balanceMinor: null, uses: [] },
           {
             tier: 'PLATINE',
             kind: 'CREDIT',
+            birthdayOn: null,
             grantedAt: credit.granted_at.toISOString(),
             amountMinor: 5_000,
             currency: 'EUR',

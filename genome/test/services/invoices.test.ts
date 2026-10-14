@@ -437,6 +437,32 @@ describe('invoices and credit notes (plan LIVE RELEASE+, S4)', () => {
     expect(exported.shipping).toEqual({ service: 'STANDARD', minor: 0, benefit: 2 });
   });
 
+  it('draws the birthday credit as CREDIT · BIRTHDAY, before the tiers\' CREDIT lines, on the invoice, its credit note and the PDF (plan CUSTOMER INTELLIGENCE §3.5 SB.4.3)', async () => {
+    const a = await createAccount(t.db);
+    await holdPieces(t.db, a.id, 5, f.modelId);
+    await ctx.services.tierGrants.ensure(a.id);
+    // A birthday credit as the daily grant gives it: no tier, its birthday, € 20 for 30 days.
+    await t.db
+      .insertInto('tier_grants')
+      .values({ account_id: a.id, tier: null, kind: 'BIRTHDAY', granted_at: clock.now(), amount_minor: 2_000, currency: 'EUR', expires_at: new Date(clock.now().getTime() + 30 * 86_400_000), birthday_on: '2026-11-03' })
+      .execute();
+    const { id } = await salonOrder({ accountId: a.id, priceMinor: 300_000 });
+    await orders().applyCredit(id, 3_000, admin);
+    await pay(id);
+    const [invoice] = await invoiceRows(id);
+    expect(linesOf(invoice!.lines).filter((l) => l.kind === 'CREDIT')).toEqual([
+      { kind: 'CREDIT', label: 'CREDIT · BIRTHDAY', detail: null, amountMinor: -2_000 },
+      { kind: 'CREDIT', label: 'CREDIT · PLATINE', detail: null, amountMinor: -1_000 },
+    ]);
+    expect(invoice!.total_minor).toBe(297_000);
+    clock.advance(MINUTE);
+    await orders().transition(id, { to: 'CANCELLED', note: 'The client withdrew.' }, admin);
+    const [, credit] = await invoiceRows(id);
+    expect((await invoices().get(credit!.id)).lines).toEqual((await invoices().get(invoice!.id)).lines);
+    const pdf = await invoices().accountDocument(a.id, id, 'INVOICE');
+    expect(new TextDecoder().decode(pdf.body.slice(0, 8))).toBe('%PDF-1.4');
+  });
+
   it('the orders paid at boot get their invoices too (a LIVE resolution CONCLUDED, mapped to PAID by the system)', async () => {
     const o = await salonOrder({ priceMinor: 200_000 });
     await orders().transition(o.id, { to: 'PAID' }, SYSTEM_ACTOR);

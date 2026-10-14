@@ -251,17 +251,21 @@ export async function issueInvoice(tx: Db, o: OrderRow, actor: Actor, now: Date)
       ? [{ kind: 'SHIPPING' as const, label: `SHIPPING · ${o.shipping_service}`, detail: o.shipping_benefit === 2 || o.shipping_benefit === 3 ? `FREE · ${TIER_WORDS[o.shipping_benefit]}` : null, amountMinor: o.shipping_minor }]
       : []),
   ];
-  // BP-19 T5: the credit taken off it (one line per grant, negative), then the welcome gift travelling with it (at 0).
+  // BP-19 T5: the credit taken off it (one line per tier, negative; the birthday credit's first, CREDIT · BIRTHDAY, plan
+  // CUSTOMER INTELLIGENCE §3.5 SB.4.3), then the welcome gift travelling with it (at 0).
   const credits = await tx
     .selectFrom('credit_uses as u')
     .innerJoin('tier_grants as g', 'g.id', 'u.grant_id')
-    .select((eb) => ['g.tier', eb.fn.sum<string>('u.amount_minor').as('amount')])
+    .select((eb) => ['g.kind', 'g.tier', eb.fn.sum<string>('u.amount_minor').as('amount')])
     .where('u.order_id', '=', o.id)
     .where('u.released_at', 'is', null)
-    .groupBy('g.tier')
-    .orderBy('g.tier', 'desc')
+    .groupBy(['g.kind', 'g.tier'])
+    .orderBy(sql`(g.kind = 'BIRTHDAY')`, 'desc')
+    .orderBy(sql`g.tier desc nulls last`)
     .execute();
-  for (const c of credits) lines.push({ kind: 'CREDIT', label: `CREDIT · ${TIER_WORDS[c.tier as 2 | 3]}`, detail: null, amountMinor: -Number(c.amount) });
+  for (const c of credits) {
+    lines.push({ kind: 'CREDIT', label: `CREDIT · ${c.kind === 'BIRTHDAY' ? 'BIRTHDAY' : TIER_WORDS[c.tier as 2 | 3]}`, detail: null, amountMinor: -Number(c.amount) });
+  }
   const gifts = await tx
     .selectFrom('orders as g')
     .innerJoin('models as m', 'm.id', 'g.model_id')

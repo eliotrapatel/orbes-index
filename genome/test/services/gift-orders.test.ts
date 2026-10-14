@@ -10,7 +10,8 @@
  *  - a parent with no currency yet gives its gift no price; priced, the gift takes 0 in its currency; the gift travels
  *    with it (its shipping at 0), has no price of its own (409 ORDER_TERMS_FIXED) and is never paid alone;
  *  - paid with its order, with no invoice of its own: the order's invoice carries its GIFT line at 0; an invoice at the
- *    most lines it carries (six add-ons, an engraving, its shipping, a credit split over both tiers, both tiers' gifts) is drawn;
+ *    most lines it carries (six add-ons, an engraving, its shipping, a credit split over the birthday credit and both
+ *    tiers', plan CUSTOMER INTELLIGENCE §3.5 SB.4.3, both tiers' gifts) is drawn;
  *  - in the Shopify order export, its own order at 0.00 (Source orbes-gift), once its parent is priced;
  *  - while its size is to be chosen, the collector's saved size (YOUR SIZES, AC-01) is a hint for Client Services only:
  *    the matching size's label or the saved measure; nothing is chosen for them;
@@ -28,6 +29,8 @@ import { linesOf } from '../../src/server/services/invoices.js';
 import { LIVE_ADDONS_MAX } from '../../src/server/services/live.js';
 import { attachGifts, orderReference } from '../../src/server/services/orders.js';
 import { ensureSku } from '../../src/server/services/stock.js';
+import { birthdayExpiry } from '../../src/server/services/birthday-credits.js';
+import { parisDay } from '../../src/server/services/schedule.js';
 import { orderActions as adminOrderActions } from '../../src/web/admin/model/orders.js';
 import type { OrderView as AdminOrderView } from '../../src/web/admin/types.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
@@ -409,11 +412,17 @@ describe('the welcome gift (BP-19 T5)', () => {
     await setGift(3, null);
   });
 
-  it('draws an invoice at the most lines it carries: six add-ons, an engraving priced from the settings (plan NEXT LOT §3.6.C), its shipping, a credit split over both tiers and both tiers\' gifts', async () => {
+  it('draws an invoice at the most lines it carries: six add-ons, an engraving priced from the settings (plan NEXT LOT §3.6.C), its shipping, a credit split over the birthday credit and both tiers (plan CUSTOMER INTELLIGENCE §3.5 SB.4.3) and both tiers\' gifts', async () => {
     const [platineGift, palladiumGift] = [await giftModel('ANNEAU VII', [null], 2), await giftModel('ANNEAU VIII', [null], 2)];
     await setGift(2, platineGift);
     await setGift(3, palladiumGift);
     const a = await account(10);
+    // Its birthday credit, as the daily grant gives it: no tier, today's birthday (Paris), € 20 for 30 days.
+    const birthdayOn = parisDay(clock.now());
+    await t.db
+      .insertInto('tier_grants')
+      .values({ account_id: a.id, tier: null, kind: 'BIRTHDAY', granted_at: clock.now(), amount_minor: 2_000, currency: 'EUR', expires_at: birthdayExpiry(birthdayOn, 30), birthday_on: birthdayOn })
+      .execute();
     const opensAt = new Date(clock.now().getTime() + HOUR);
     const r = await createLiveRelease(f, {
       opensAt,
@@ -435,8 +444,8 @@ describe('the welcome gift (BP-19 T5)', () => {
     const entry = await t.db.selectFrom('live_entries').select('id').where('drop_id', '=', r.id).where('account_id', '=', a.id).executeTakeFirstOrThrow();
     const order = await t.db.selectFrom('orders').selectAll().where('live_entry_id', '=', entry.id).where('channel', '=', 'LIVE').executeTakeFirstOrThrow();
     expect(await giftsOf(order.id)).toHaveLength(2);
-    // € 150 of credit: PALLADIUM's € 100, then PLATINE's € 50.
-    await orders().applyCredit(order.id, 15_000, admin);
+    // € 170 of credit: the birthday's € 20 first, PALLADIUM's € 100, then PLATINE's € 50.
+    await orders().applyCredit(order.id, 17_000, admin);
     // An engraving priced from the settings (plan NEXT LOT §3.6.C), entered by Client Services: its own line.
     await ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: 3_000, GBP: null, USD: null, CHF: null } }, admin);
     await orders().setTerms(order.id, { engravingText: 'A. & L.' }, admin);
@@ -444,9 +453,10 @@ describe('the welcome gift (BP-19 T5)', () => {
     await ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: null, GBP: null, USD: null, CHF: null } }, admin);
     const invoice = await t.db.selectFrom('invoices').selectAll().where('order_id', '=', order.id).where('kind', '=', 'INVOICE').executeTakeFirstOrThrow();
     const lines = linesOf(invoice.lines);
-    expect(lines.map((l) => l.kind)).toEqual(['PIECE', ...Array(LIVE_ADDONS_MAX).fill('ADDON'), 'ENGRAVING', 'SHIPPING', 'CREDIT', 'CREDIT', 'GIFT', 'GIFT']);
+    expect(lines.map((l) => l.kind)).toEqual(['PIECE', ...Array(LIVE_ADDONS_MAX).fill('ADDON'), 'ENGRAVING', 'SHIPPING', 'CREDIT', 'CREDIT', 'CREDIT', 'GIFT', 'GIFT']);
     expect(lines).toHaveLength(INVOICE_MAX_LINES);
     expect(lines.filter((l) => l.kind === 'CREDIT').map((l) => [l.label, l.amountMinor])).toEqual([
+      ['CREDIT · BIRTHDAY', -2_000],
       ['CREDIT · PALLADIUM', -10_000],
       ['CREDIT · PLATINE', -5_000],
     ]);

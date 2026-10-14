@@ -114,15 +114,36 @@ export const INVOICE_LAYOUT = Object.freeze({
 /**
  * The most lines of each kind an invoice carries (services/invoices.ts issueInvoice): the piece; its add-ons, six at most
  * as a LIVE RELEASE's (services/live.ts LIVE_ADDONS_MAX); its shipping; a CREDIT line per tier whose grant it takes from
- * (PLATINE and PALLADIUM); a welcome gift per tier (an account reaching PALLADIUM at once holds both) (plan NEXT-NINE,
- * BP-19 T4 and T5). Written out here, the renderer importing no service; test/render/invoice.test.ts holds them to the
- * services' own figures.
+ * (PLATINE and PALLADIUM) and one for the birthday credit (CREDIT · BIRTHDAY, plan CUSTOMER INTELLIGENCE §3.5 SB.4.3);
+ * a welcome gift per tier (an account reaching PALLADIUM at once holds both) (plan NEXT-NINE, BP-19 T4 and T5). Written
+ * out here, the renderer importing no service; test/render/invoice.test.ts holds them to the services' own figures.
  */
-export const INVOICE_LINE_BUDGET = Object.freeze({ piece: 1, addons: 6, engraving: 1, shipping: 1, credit: 2, gift: 2 });
-/** Lines a page holds: the sum of the budget, 13. Up to seven keep the table's pitch; more share its height. */
+export const INVOICE_LINE_BUDGET = Object.freeze({ piece: 1, addons: 6, engraving: 1, shipping: 1, credit: 3, gift: 2 });
+/**
+ * Lines a page holds: the sum of the budget, 14. Up to seven keep the table's pitch; more share its height; at the
+ * fourteenth a line's detail sits closer under it, clear of the next line's lettering.
+ */
 export const INVOICE_MAX_LINES = Object.values(INVOICE_LINE_BUDGET).reduce((n, k) => n + k, 0);
 /** The lines that keep the table's own pitch. */
 const FULL_PITCH_LINES = 7;
+/** The least room between a line's detail and the next line's lettering, mm. */
+const DETAIL_CLEARANCE = 0.04;
+
+/**
+ * The table's pitch and its detail's gap for `count` lines: the table's own up to seven; beyond, the lines share the
+ * height down to the total's rule, the last detail 3 mm above it. Where that pitch would bring the next line's lettering
+ * onto a detail (the fourteenth line), the detail moves up under its own line just enough to clear it.
+ */
+export function invoiceTablePitch(count: number): { pitch: number; detailGap: number } {
+  const T = INVOICE_LAYOUT.table;
+  if (count <= FULL_PITCH_LINES) return { pitch: T.pitch, detailGap: T.detailGap };
+  const room = INVOICE_LAYOUT.ruleTotal - 3 - T.first;
+  const clear = INVOICE_LAYOUT.rows.valueCap + DETAIL_CLEARANCE;
+  const pitch = (room - T.detailGap) / (count - 1);
+  if (pitch - T.detailGap >= clear) return { pitch, detailGap: T.detailGap };
+  const tight = (room + clear) / count;
+  return { pitch: tight, detailGap: tight - clear };
+}
 
 const NUMBER_RE = /^(INV|CN)-20\d{2}-\d{6}$/;
 const ORDER_RE = /^OR-[0-9A-F]{8}$/;
@@ -212,11 +233,11 @@ export function layoutInvoice(d: InvoiceDocument): PdfPage {
   section(C.amount, L.right, T.head, 'end');
   const describe = L.right - L.left - T.amountWidth - 4;
   // Up to seven lines at the table's pitch; more share its height, the last detail still above the total's rule.
-  const pitch = d.lines.length <= FULL_PITCH_LINES ? T.pitch : (L.ruleTotal - T.detailGap - 3 - T.first) / (d.lines.length - 1);
+  const { pitch, detailGap } = invoiceTablePitch(d.lines.length);
   d.lines.forEach((l, i) => {
     const baseline = T.first + i * pitch;
     value(toDocumentText(l.label), L.left, baseline, describe);
-    if (l.detail) fitted(toDocumentText(l.detail), { cap: T.detailCap, minCap: R.minValueCap, tracking: R.labelTracking, x: L.left, baseline: baseline + T.detailGap, maxWidth: describe });
+    if (l.detail) fitted(toDocumentText(l.detail), { cap: T.detailCap, minCap: R.minValueCap, tracking: R.labelTracking, x: L.left, baseline: baseline + detailGap, maxWidth: describe });
     line(documentAmount(l.amountMinor, d.currency), { cap: R.valueCap, tracking: R.valueTracking, x: L.right, baseline, align: 'end' });
   });
   rule(L.ruleTotal);

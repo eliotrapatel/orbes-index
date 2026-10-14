@@ -20,6 +20,7 @@ import { OwnershipCertificateService } from '../../src/server/services/ownership
 import { OwnershipService } from '../../src/server/services/ownership.js';
 import { OwnerService, parseScanReference, scanReference } from '../../src/server/services/owners.js';
 import { createScanToken } from '../../src/server/services/scan-tokens.js';
+import { parisDayStart } from '../../src/server/services/schedule.js';
 import { SessionService } from '../../src/server/services/sessions.js';
 import { createManualClock, SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
@@ -538,6 +539,87 @@ describe('OwnerService', () => {
     for (const word of ['VIP', 'PRESS', 'Called the client', 'account.tag', 'account.note']) expect(text, word).not.toContain(word);
     expect(x.activity.map((e) => e.action)).toEqual(['account.register']);
     expect(x.profile).toMatchObject({ firstName: 'Camille', city: 'Lyon' });
+  });
+  it('lists the birthday credits on the Club block after the tiers\' grants, the last two and any open, and says the next one (plan CUSTOMER INTELLIGENCE §3.5 SB.4.3): NO_DATE, OFF, TEST_ENTRANT, or NEXT by the 365-day and entered-before rules; the export carries each with its birthday', async () => {
+    clock.set('2027-02-01T10:00:00.000Z');
+    const profile = (accountId: string, birthDate: string, at: string) =>
+      t.db
+        .insertInto('account_profiles')
+        .values({ account_id: accountId, birth_date: birthDate, birth_date_by: 'COLLECTOR', birth_date_at: new Date(at), birth_date_collector_at: new Date(at) })
+        .onConflict((oc) => oc.column('account_id').doUpdateSet({ birth_date: birthDate, birth_date_by: 'STAFF', birth_date_at: new Date(at) }))
+        .execute();
+    /** A birthday credit as the daily grant gives it, given at the birthday's 00:00 Paris, expiring when `expires` says. */
+    const birthday = (accountId: string, on: string, expires: string) =>
+      t.db
+        .insertInto('tier_grants')
+        .values({ account_id: accountId, tier: null, kind: 'BIRTHDAY', granted_at: parisDayStart(on), amount_minor: 2_000, currency: 'EUR', expires_at: new Date(expires), birthday_on: on })
+        .execute();
+    const club = async (id: string) => (await owners.sheet(id)).club;
+
+    // No date of birth.
+    const a = await customer();
+    expect((await club(a.id)).birthdayNext).toEqual({ state: 'NO_DATE' });
+    // Entered before: its next birthday.
+    await profile(a.id, '1994-03-14', '2027-02-01T09:00:00.000Z');
+    expect((await club(a.id)).birthdayNext).toEqual({ state: 'NEXT', on: '2027-03-14' });
+    // Entered on its birthday (00:30 Paris): not that year, the next.
+    const late = await customer();
+    await profile(late.id, '1994-01-31', '2027-01-30T23:30:00.000Z');
+    expect((await club(late.id)).birthdayNext).toEqual({ state: 'NEXT', on: '2028-01-31' });
+    // Entered on its eve, 23:59 Paris: within its 30 days, it is today's (the next pass gives it).
+    const eve = await customer();
+    await profile(eve.id, '1990-01-20', '2027-01-19T22:59:00.000Z');
+    expect((await club(eve.id)).birthdayNext).toEqual({ state: 'NEXT', on: '2027-02-01' });
+    // 29 February in a common year: 28 February.
+    const leap = await customer();
+    await profile(leap.id, '2000-02-29', '2027-01-01T09:00:00.000Z');
+    expect((await club(leap.id)).birthdayNext).toEqual({ state: 'NEXT', on: '2027-02-28' });
+
+    // Given on 14 March 2027: listed after the tiers' grants, no tier, its birthday and balance; the next a year on.
+    clock.set('2027-03-20T10:00:00.000Z');
+    await birthday(a.id, '2027-03-14', '2027-04-12T21:59:59.999Z');
+    const given = await club(a.id);
+    expect(given.grants).toEqual([
+      { tier: null, kind: 'BIRTHDAY', birthdayOn: '2027-03-14', grantedAt: parisDayStart('2027-03-14'), amountMinor: 2_000, balanceMinor: 2_000, currency: 'EUR', expiresAt: new Date('2027-04-12T21:59:59.999Z'), gift: null },
+    ]);
+    expect(given.birthdayNext).toEqual({ state: 'NEXT', on: '2028-03-14' });
+    // Client Services changes the date to 20 November: nothing on 20 November 2027 (251 days), the credit in 2028.
+    await profile(a.id, '1994-11-20', '2027-03-20T10:00:00.000Z');
+    expect((await club(a.id)).birthdayNext).toEqual({ state: 'NEXT', on: '2028-11-20' });
+
+    // The last two birthday credits, newest first, and an older one still open; another older one left out.
+    const many = await customer();
+    for (const [on, expires] of [
+      ['2024-03-14', '2024-04-12T21:59:59.999Z'],
+      ['2025-03-14', '2027-12-31T22:59:59.999Z'],
+      ['2026-03-14', '2026-04-12T21:59:59.999Z'],
+      ['2027-03-14', '2027-04-12T21:59:59.999Z'],
+    ]) {
+      await birthday(many.id, on!, expires!);
+    }
+    await t.db.insertInto('tier_grants').values({ account_id: many.id, tier: 2, kind: 'CREDIT', granted_at: clock.now(), amount_minor: 5_000, currency: 'EUR', expires_at: new Date('2028-03-20T10:00:00.000Z') }).execute();
+    await t.db.insertInto('tier_grants').values({ account_id: many.id, tier: 2, kind: 'GIFT', granted_at: clock.now() }).execute();
+    expect((await club(many.id)).grants.map((g) => [g.kind, g.tier, g.birthdayOn])).toEqual([
+      ['GIFT', 'PLATINE', null],
+      ['CREDIT', 'PLATINE', null],
+      ['BIRTHDAY', null, '2027-03-14'],
+      ['BIRTHDAY', null, '2026-03-14'],
+      ['BIRTHDAY', null, '2025-03-14'],
+    ]);
+
+    // THE PROGRAM's switch off: OFF; a test entrant: TEST_ENTRANT, whatever the switch.
+    await t.db.insertInto('club_program_settings').values({ id: 1, birthday_credit_on: false }).execute();
+    expect((await club(a.id)).birthdayNext).toEqual({ state: 'OFF' });
+    await t.db.insertInto('test_entrants').values({ account_id: late.id }).execute();
+    expect((await club(late.id)).birthdayNext).toEqual({ state: 'TEST_ENTRANT' });
+    await t.db.deleteFrom('club_program_settings').execute();
+    expect((await club(late.id)).birthdayNext).toEqual({ state: 'TEST_ENTRANT' });
+
+    // The right of access: each birthday credit with no tier, its birthday and its balance.
+    const exported = (await owners.exportData(a.id, admin)).tierGrants;
+    expect(exported).toEqual([
+      { tier: null, kind: 'BIRTHDAY', birthdayOn: '2027-03-14', grantedAt: parisDayStart('2027-03-14'), amountMinor: 2_000, currency: 'EUR', expiresAt: new Date('2027-04-12T21:59:59.999Z'), model: null, balanceMinor: 2_000, uses: [] },
+    ]);
   });
 });
 

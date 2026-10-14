@@ -10,14 +10,19 @@
  *  - a piece reinstated (a flag lifted) counts again, and its owner's grants are made in its transaction;
  *  - a status read makes them, idempotently; at boot, `prepare` makes those of every ACTIVE account at PLATINE or above;
  *  - below its tier a grant waits: its credit is not usable, then comes back with its expiry unchanged;
- *  - a credit of 0 in THE PROGRAM gives no CREDIT row.
+ *  - a credit of 0 in THE PROGRAM gives no CREDIT row;
+ *  - the birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4.3, step 6.3; the plan's club.test, ClubService being
+ *    tested here): never made by ensureGrants, listed first by creditBalances, usable whatever the tier (usableAt), in
+ *    IN USE as `birthdayCredit` apart from the tiers' `credit`, for a collector without a piece too.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { testConfig } from '../../src/server/config.js';
 import { createContext, type AppContext } from '../../src/server/context.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import { createScanToken } from '../../src/server/services/scan-tokens.js';
-import { addUtcMonths, creditBalances } from '../../src/server/services/tier-grants.js';
+import { birthdayExpiry } from '../../src/server/services/birthday-credits.js';
+import { parisDay } from '../../src/server/services/schedule.js';
+import { addUtcMonths, creditBalances, usableAt } from '../../src/server/services/tier-grants.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { createAccount, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
@@ -199,6 +204,52 @@ describe('the tiers\' grants (BP-19 T5)', () => {
     // Below its tier it waits: no row.
     expect((await ctx.services.club.inUse(a.id, 1)).gifts).toEqual([]);
     await t.db.deleteFrom('club_program_settings').execute();
+  });
+
+  it('keeps the birthday credit apart (§3.5 SB.4.3): never made by ensureGrants, listed first, usable whatever the tier, IN USE\'s birthdayCredit beside the tiers\' credit, a collector without a piece included', async () => {
+    const birthday = (accountId: string, on: string, amountMinor = 2_000) =>
+      t.db
+        .insertInto('tier_grants')
+        .values({ account_id: accountId, tier: null, kind: 'BIRTHDAY', granted_at: clock.now(), amount_minor: amountMinor, currency: 'EUR', expires_at: birthdayExpiry(on, 30), birthday_on: on })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+    // A collector without a piece: no tier's grant, ever; its birthday credit alone in IN USE.
+    const none = await createAccount(t.db);
+    expect(await ctx.services.tierGrants.ensure(none.id)).toBe(0);
+    const today = parisDay(clock.now());
+    const given = await birthday(none.id, today);
+    expect(await creditBalances(t.db, none.id)).toEqual([
+      { grantId: given.id, kind: 'BIRTHDAY', tier: null, birthdayOn: today, amountMinor: 2_000, balanceMinor: 2_000, currency: 'EUR', expiresAt: birthdayExpiry(today, 30) },
+    ]);
+    const bare = await ctx.services.club.inUse(none.id, 0);
+    expect(bare).toMatchObject({ credit: null, birthdayCredit: { balanceMinor: 2_000, currency: 'EUR', expiresAt: birthdayExpiry(today, 30) } });
+    // ensureGrants (a status read) adds nothing to it.
+    await ctx.services.club.status(none.id);
+    expect((await grantsOf(none.id)).map((g) => g.kind)).toEqual(['BIRTHDAY']);
+    // PALLADIUM's and PLATINE's credits beside it: the birthday credit first; IN USE reads the two apart.
+    const a = await createAccount(t.db);
+    await holdPieces(t.db, a.id, 10, f.modelId);
+    await ctx.services.tierGrants.ensure(a.id);
+    await birthday(a.id, today, 1_500);
+    expect((await creditBalances(t.db, a.id)).map((c) => [c.kind, c.tier, c.amountMinor])).toEqual([
+      ['BIRTHDAY', null, 1_500],
+      ['CREDIT', 3, 10_000],
+      ['CREDIT', 2, 5_000],
+    ]);
+    const inUse = await ctx.services.club.inUse(a.id, 3);
+    expect(inUse.credit).toMatchObject({ balanceMinor: 15_000, currency: 'EUR' });
+    expect(inUse.birthdayCredit).toMatchObject({ balanceMinor: 1_500, currency: 'EUR' });
+    // Below PALLADIUM, its grant waits; the birthday credit never does.
+    expect((await ctx.services.club.inUse(a.id, 2)).credit).toMatchObject({ balanceMinor: 5_000 });
+    expect((await ctx.services.club.inUse(a.id, 0)).credit).toBeNull();
+    expect((await ctx.services.club.inUse(a.id, 0)).birthdayCredit).toMatchObject({ balanceMinor: 1_500 });
+    expect(usableAt({ kind: 'BIRTHDAY', tier: null }, 0)).toBe(true);
+    expect(usableAt({ kind: 'CREDIT', tier: 2 }, 1)).toBe(false);
+    expect(usableAt({ kind: 'CREDIT', tier: 2 }, 2)).toBe(true);
+    expect(usableAt({ kind: 'CREDIT', tier: 3 }, 2)).toBe(false);
+    // Used up or expired: none in IN USE.
+    clock.advance(30 * 24 * 60 * 60_000);
+    expect((await ctx.services.club.inUse(none.id, 0)).birthdayCredit).toBeNull();
   });
 
   it('counts the months in UTC calendar months', () => {

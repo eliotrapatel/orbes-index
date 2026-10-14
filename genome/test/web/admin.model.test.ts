@@ -896,11 +896,12 @@ describe('the Club\'s tiers (P-X04)', () => {
       clubBlockLines({
         tier: 'PLATINE',
         grants: [
-          { tier: 'PLATINE', kind: 'CREDIT', grantedAt: '2026-10-06T09:00:00Z', amountMinor: 5000, balanceMinor: 3000, currency: 'EUR', expiresAt: '2027-10-06T09:00:00Z', gift: null },
-          { tier: 'PLATINE', kind: 'GIFT', grantedAt: '2026-10-06T09:00:00Z', amountMinor: null, balanceMinor: null, currency: null, expiresAt: null, gift: { state: 'WITH_ORDER', orderId: 'o1', orderReference: 'OR-7C21A9F0' } },
-          { tier: 'PALLADIUM', kind: 'GIFT', grantedAt: '2026-10-06T09:00:00Z', amountMinor: null, balanceMinor: null, currency: null, expiresAt: null, gift: { state: 'PENDING', orderId: null, orderReference: null } },
+          { tier: 'PLATINE', kind: 'CREDIT', birthdayOn: null, grantedAt: '2026-10-06T09:00:00Z', amountMinor: 5000, balanceMinor: 3000, currency: 'EUR', expiresAt: '2027-10-06T09:00:00Z', gift: null },
+          { tier: 'PLATINE', kind: 'GIFT', birthdayOn: null, grantedAt: '2026-10-06T09:00:00Z', amountMinor: null, balanceMinor: null, currency: null, expiresAt: null, gift: { state: 'WITH_ORDER', orderId: 'o1', orderReference: 'OR-7C21A9F0' } },
+          { tier: 'PALLADIUM', kind: 'GIFT', birthdayOn: null, grantedAt: '2026-10-06T09:00:00Z', amountMinor: null, balanceMinor: null, currency: null, expiresAt: null, gift: { state: 'PENDING', orderId: null, orderReference: null } },
         ],
         careThisYear: { year: 2026, used: 0, allowance: 1, open: { id: 'c1', productId: 'O26-J-00184' } },
+        birthdayNext: { state: 'NO_DATE' },
       }),
     ).toEqual([
       { label: 'Credit PLATINE', value: '€\u00a050, €\u00a030 left, until 06 OCT 2027', link: null },
@@ -908,7 +909,7 @@ describe('the Club\'s tiers (P-X04)', () => {
       { label: 'Welcome gift PALLADIUM', value: 'pending', link: null },
       { label: 'Yearly care', value: '2026: 0 of 1 · open: O26-J-00184', link: { kind: 'care', id: 'c1' } },
     ]);
-    expect(clubBlockLines({ tier: 'PALLADIUM', grants: [], careThisYear: { year: 2026, used: 2, allowance: 'ALL', open: null } })).toEqual([{ label: 'Yearly care', value: '2026: 2 · every piece', link: null }]);
+    expect(clubBlockLines({ tier: 'PALLADIUM', grants: [], careThisYear: { year: 2026, used: 2, allowance: 'ALL', open: null }, birthdayNext: { state: 'NO_DATE' } })).toEqual([{ label: 'Yearly care', value: '2026: 2 · every piece', link: null }]);
   });
 
   it('lets OPERATOR change the words, an AUDITOR read them', () => {

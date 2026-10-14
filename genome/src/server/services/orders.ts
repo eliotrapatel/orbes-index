@@ -95,9 +95,10 @@
  *                leaves it. An order reaching PLATINE and PALLADIUM at once carries both tiers' gifts. Audited
  *                `order.create` and `order.gift`.
  *   the credit   (BP-19 T5) taken off a RESERVED order by Client Services (`applyCredit`): its channel one THE PROGRAM
- *                names, its currency the credit's, the account at the grant's tier now, the grant not expired, the
- *                amount within the balance and the piece's price; PALLADIUM's grant first, then the earliest expiry. A
- *                CREDIT line on the invoice. Removed while RESERVED (`removeCredit`), released when the order is
+ *                names, its currency the credit's, the account at the grant's tier now (a birthday credit whatever the
+ *                tier, plan CUSTOMER INTELLIGENCE §3.5 SB.4), the grant not expired, the amount within the balance and
+ *                the piece's price; the birthday credit first, then PALLADIUM's, then the earliest expiry. A CREDIT
+ *                line on the invoice. Removed while RESERVED (`removeCredit`), released when the order is
  *                cancelled or returned, the expiry unchanged. Audited `order.credit.apply`, `.remove`, `.release`.
  *
  * The LIVE RELEASES' Client Services resolution is retired into the orders (the console's Orders board steps them): the
@@ -111,6 +112,7 @@
  * return their audit entries for it to write after its own (a return's change of the piece's status, LifecycleService,
  * writes its own, last).
  */
+import { sql } from 'kysely';
 import { inRetriedTransaction, inTransaction, type Db } from '../db/connection.js';
 import {
   ORDER_STATUSES,
@@ -148,7 +150,7 @@ import { isTransitionAllowed, LifecycleService, returnTargetOf } from './lifecyc
 import { CERTIFICATE_ENDING_STATUSES } from './ownership.js';
 import { tierOf } from './club.js';
 import { engravingPrice, engravingPrices, giftModelOf, readProgram, shippingRate } from './club-program.js';
-import { creditBalances, ensureGrants } from './tier-grants.js';
+import { creditBalances, ensureGrants, usableAt } from './tier-grants.js';
 import { modelSizeCandidates, offeredSku, savedSizeAmong, savedSizeHint, sizesForExchange } from './sizes.js';
 import { parcelOrders, RETURN_WINDOW_DAYS } from './parcels.js';
 import { defaultLocationId, ensureSku, ensureStockSetup, knownLocation, linkSkus, lockSku, recordMovement, sizeLabelOf, stockBalances, stockLevel } from './stock.js';
@@ -439,10 +441,13 @@ export interface OrderView {
    * null without one). Nothing is chosen for Client Services.
    */
   giftOf: { tier: 2 | 3; sizes: { skuId: string; label: string | null; available: number }[]; savedSize: string | null } | null;
-  /** BP-19 T5: the client's credit usable now (balance, currency, expiry) and the credit taken off this order (released or not). */
+  /**
+   * BP-19 T5: the client's credit usable now (balance, currency, expiry) and the credit taken off this order (released or
+   * not); each a tier's (CREDIT, its tier) or the birthday credit (BIRTHDAY, no tier; plan CUSTOMER INTELLIGENCE §3.5 SB.4.3).
+   */
   credit: {
-    available: { grantId: string; tier: 2 | 3; balanceMinor: number; currency: string; expiresAt: Date }[];
-    applied: { id: string; grantId: string; tier: 2 | 3; amountMinor: number; appliedAt: Date; releasedAt: Date | null; releasedReason: CreditReleaseReason | null }[];
+    available: { grantId: string; kind: 'CREDIT' | 'BIRTHDAY'; tier: 2 | 3 | null; balanceMinor: number; currency: string; expiresAt: Date }[];
+    applied: { id: string; grantId: string; kind: 'CREDIT' | 'BIRTHDAY'; tier: 2 | 3 | null; amountMinor: number; appliedAt: Date; releasedAt: Date | null; releasedReason: CreditReleaseReason | null }[];
   };
   /** Its return (RETURNED): where the piece went, the note, and whether ORBES took its buyer's ownership back. */
   /** Its note null for an AUDITOR when the return was decided from an order case (routes/admin/orders.ts). */
@@ -807,15 +812,16 @@ async function openGifts(tx: Db, parentId: string, opts: { forUpdate?: boolean }
   return q.execute();
 }
 
-/** An order's credit taken off it and not released, with each grant's tier. */
+/** An order's credit taken off it and not released, with each grant's kind and tier: the birthday credit's first (§3.5 SB.4.3). */
 async function openCreditUses(tx: Db, orderId: string, opts: { forUpdate?: boolean } = {}) {
   let q = tx
     .selectFrom('credit_uses as u')
     .innerJoin('tier_grants as g', 'g.id', 'u.grant_id')
-    .select(['u.id', 'u.grant_id', 'u.amount_minor', 'u.applied_at', 'g.tier', 'g.currency'])
+    .select(['u.id', 'u.grant_id', 'u.amount_minor', 'u.applied_at', 'g.kind', 'g.tier', 'g.currency'])
     .where('u.order_id', '=', orderId)
     .where('u.released_at', 'is', null)
-    .orderBy('g.tier', 'desc')
+    .orderBy(sql`(g.kind = 'BIRTHDAY')`, 'desc')
+    .orderBy(sql`g.tier desc nulls last`)
     .orderBy('u.applied_at')
     .orderBy('u.id');
   if (opts.forUpdate) q = q.forUpdate();
@@ -1762,7 +1768,7 @@ export async function returnInTransaction(
   notes.push(await recordChange(tx, o, after, ORDER_STEP_ACTIONS.RETURNED, { note: r.caseId ? null : r.note, details }, actor, now), ...extra, ...withdrawn);
   // BP-19 T5: the credit taken off it given back; its welcome gift stays as it is. A size exchange carries it onto its
   // EXCHANGE order (`createExchangeOrder`), from what is released here.
-  const carried = (await openCreditUses(tx, after.id, { forUpdate: true })).map((u): CarriedCredit => ({ grantId: u.grant_id, tier: u.tier as 2 | 3, amountMinor: u.amount_minor }));
+  const carried = (await openCreditUses(tx, after.id, { forUpdate: true })).map((u): CarriedCredit => ({ grantId: u.grant_id, kind: creditKind(u.kind), tier: creditTier(u), amountMinor: u.amount_minor }));
   notes.push(...(await releaseCredit(tx, after, 'RETURNED', actor, now)));
   notes.push(...(await issueCreditNote(tx, after, 'return', actor, now)));
   // The piece's status, which LifecycleService audits at once: left to the caller to run last (no row is locked after it).
@@ -1774,12 +1780,19 @@ export async function returnInTransaction(
   return { after, productId: p.product_id, credit: carried, finish };
 }
 
-/** A returned order's credit, given back by its return, which its EXCHANGE order takes again (one per grant). */
+/** A returned order's credit, given back by its return, which its EXCHANGE order takes again (one per grant), the birthday credit's included. */
 export interface CarriedCredit {
   grantId: string;
-  tier: 2 | 3;
+  kind: 'CREDIT' | 'BIRTHDAY';
+  /** Null on a birthday credit. */
+  tier: 2 | 3 | null;
   amountMinor: number;
 }
+
+/** A credit grant's kind as an order reads it: a tier's (CREDIT) or the birthday credit (BIRTHDAY). */
+const creditKind = (kind: string): 'CREDIT' | 'BIRTHDAY' => (kind === 'BIRTHDAY' ? 'BIRTHDAY' : 'CREDIT');
+/** A credit grant's tier as an order reads it: none on a birthday credit. */
+const creditTier = (g: { kind: string; tier: number | null }): 2 | 3 | null => (g.kind === 'BIRTHDAY' || g.tier === null ? null : (g.tier as 2 | 3));
 
 /**
  * The EXCHANGE order of a size exchange decided (plan NEXT LOT §3.5.6.7), in the caller's transaction, its original
@@ -1850,7 +1863,7 @@ export async function createExchangeOrder(
         .values({ grant_id: c.grantId, order_id: o.id, amount_minor: c.amountMinor, applied_by: actor.type === 'admin' ? actor.id! : null, applied_at: now })
         .returning('id')
         .executeTakeFirstOrThrow();
-      uses.push({ useId: row.id, grantId: c.grantId, tier: c.tier, amountMinor: c.amountMinor });
+      uses.push({ useId: row.id, grantId: c.grantId, kind: c.kind, tier: c.tier, amountMinor: c.amountMinor });
     }
     const amountMinor = credit.reduce((n, c) => n + c.amountMinor, 0);
     notes.push(await recordChange(tx, o, o, 'order.credit.apply', { details: { amountMinor, currency: o.currency, uses, exchangeOfOrderId: original.id } }, actor, now));
@@ -2098,18 +2111,27 @@ export class OrderService {
     const standing = await tierOf(this.db, r.account_id, now);
     const credit: OrderView['credit'] = {
       available: (await creditBalances(this.db, r.account_id))
-        .filter((c) => c.tier <= standing.tier && c.balanceMinor > 0 && c.expiresAt.getTime() > now.getTime())
-        .map((c) => ({ grantId: c.grantId, tier: c.tier, balanceMinor: c.balanceMinor, currency: c.currency, expiresAt: c.expiresAt })),
+        .filter((c) => usableAt(c, standing.tier) && c.balanceMinor > 0 && c.expiresAt.getTime() > now.getTime())
+        .map((c) => ({ grantId: c.grantId, kind: c.kind, tier: c.tier, balanceMinor: c.balanceMinor, currency: c.currency, expiresAt: c.expiresAt })),
       applied: (
         await this.db
           .selectFrom('credit_uses as u')
           .innerJoin('tier_grants as t', 't.id', 'u.grant_id')
-          .select(['u.id', 'u.grant_id', 'u.amount_minor', 'u.applied_at', 'u.released_at', 'u.released_reason', 't.tier'])
+          .select(['u.id', 'u.grant_id', 'u.amount_minor', 'u.applied_at', 'u.released_at', 'u.released_reason', 't.kind', 't.tier'])
           .where('u.order_id', '=', id)
           .orderBy('u.applied_at')
           .orderBy('u.id')
           .execute()
-      ).map((u) => ({ id: u.id, grantId: u.grant_id, tier: u.tier as 2 | 3, amountMinor: u.amount_minor, appliedAt: u.applied_at, releasedAt: u.released_at, releasedReason: u.released_reason })),
+      ).map((u) => ({
+        id: u.id,
+        grantId: u.grant_id,
+        kind: creditKind(u.kind),
+        tier: creditTier(u),
+        amountMinor: u.amount_minor,
+        appliedAt: u.applied_at,
+        releasedAt: u.released_at,
+        releasedReason: u.released_reason,
+      })),
     };
     return {
       id: r.id,
@@ -2827,8 +2849,10 @@ export class OrderService {
    * until real payment exists (the invoice then carries a CREDIT line): the order's channel one THE PROGRAM names (409
    * ORDER_CREDIT_CHANNEL); its price entered; grants of the account's tier now, not expired, with a balance (409
    * ORDER_CREDIT_NONE), in the order's currency (409 ORDER_CREDIT_CURRENCY); the amount within their balance and, with
-   * what is already taken off it, within the piece's price (409 ORDER_CREDIT_EXCEEDS). PALLADIUM's grant first, then the
-   * earliest expiry, split over several when one does not cover it. The order's row, then the grants FOR UPDATE: two at
+   * what is already taken off it, within the piece's price (409 ORDER_CREDIT_EXCEEDS). The birthday credit (plan CUSTOMER
+   * INTELLIGENCE §3.5 SB.4) is one of them whatever the account's tier, a collector without a piece included, and is
+   * taken first (it expires soonest); then PALLADIUM's grant, then the earliest expiry, split over several when one does
+   * not cover it. The order's row, then the grants FOR UPDATE: two at
    * once never take more than the balance. Audited `order.credit.apply`.
    */
   async applyCredit(orderId: string, amountMinor: number, actor: Actor): Promise<OrderView> {
@@ -2842,7 +2866,7 @@ export class OrderService {
       if (!(program.creditChannels as readonly string[]).includes(o.channel)) throw creditChannel();
       if (o.price_minor === null || o.currency === null) throw validationError('Enter the order’s price and currency before taking a credit off it.');
       const standing = await tierOf(tx, o.account_id, now);
-      const grants = (await creditBalances(tx, o.account_id, { forUpdate: true })).filter((g) => g.tier <= standing.tier && g.expiresAt.getTime() > now.getTime() && g.balanceMinor > 0);
+      const grants = (await creditBalances(tx, o.account_id, { forUpdate: true })).filter((g) => usableAt(g, standing.tier) && g.expiresAt.getTime() > now.getTime() && g.balanceMinor > 0);
       if (grants.length === 0) throw creditNone();
       const usable = grants.filter((g) => g.currency === o.currency);
       if (usable.length === 0) throw creditCurrency();
@@ -2863,7 +2887,7 @@ export class OrderService {
           .values({ grant_id: g.grantId, order_id: o.id, amount_minor: part + (open?.amount_minor ?? 0), applied_by: actor.type === 'admin' ? actor.id! : null, applied_at: now })
           .returning('id')
           .executeTakeFirstOrThrow();
-        uses.push({ useId: row.id, grantId: g.grantId, tier: g.tier, amountMinor: part });
+        uses.push({ useId: row.id, grantId: g.grantId, kind: g.kind, tier: g.tier, amountMinor: part });
         left -= part;
       }
       notes.push(await recordChange(tx, o, o, 'order.credit.apply', { details: { amountMinor, currency: o.currency, uses } }, actor, now));

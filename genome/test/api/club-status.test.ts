@@ -6,7 +6,9 @@
  *    is invited to; none without a tier; NEXT's `program`, what the next tier's program adds;
  *  - `inUse`: the credit left and until when, usable now; the yearly care of the year (null when the tier gives none);
  *    a PENDING welcome gift only while its tier is held and has an active gift model, WITH_ORDER from its order until
- *    it is delivered; the channels THE PROGRAM takes the credit off (`creditChannels`), which its note names;
+ *    it is delivered; the channels THE PROGRAM takes the credit off (`creditChannels`), which its note names; the
+ *    birthday credit left (`birthdayCredit`, plan CUSTOMER INTELLIGENCE §3.5 SB.4.3) apart from the tiers' credit,
+ *    whatever the tier, a collector without a piece included; never a score, a tag or a note;
  *  - PLATINE's words by default are none: its early access and priority are its program's lines.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -25,6 +27,7 @@ interface StatusJson {
   next: { name: string; program: string[]; benefits: string[] } | null;
   inUse: {
     credit: { balanceMinor: number; currency: string; expiresAt: string } | null;
+    birthdayCredit: { balanceMinor: number; currency: string; expiresAt: string } | null;
     care: { year: number; used: number; allowance: number | 'ALL' } | null;
     gifts: { tier: string; model: string; state: string; orderReference: string | null }[];
     creditChannels: string[];
@@ -100,6 +103,8 @@ describe('YOUR TIER: the program and the benefits in use (BP-19 T10)', () => {
     const now = h.clock.now();
     expect(first.inUse).toEqual({
       credit: { balanceMinor: 5000, currency: 'EUR', expiresAt: addUtcMonths(now, 12).toISOString() },
+      // No birthday credit given: none.
+      birthdayCredit: null,
       care: { year: 2026, used: 0, allowance: 1 },
       // No gift model in THE PROGRAM: no WELCOME GIFT row, never a gift that would not come.
       gifts: [],
@@ -140,10 +145,30 @@ describe('YOUR TIER: the program and the benefits in use (BP-19 T10)', () => {
     await setProgram({ carePiecesPlatine: 1 });
     // Below its tier, the credit waits: no row; TITANE has no care row either.
     const titane = await holding(1);
-    expect((await status(titane.client)).inUse).toEqual({ credit: null, care: null, gifts: [], creditChannels: ['DRAW', 'LIVE', 'SALON'] });
+    expect((await status(titane.client)).inUse).toEqual({ credit: null, birthdayCredit: null, care: null, gifts: [], creditChannels: ['DRAW', 'LIVE', 'SALON'] });
     await h.t.db.updateTable('ownership').set({ ended_at: h.clock.now() }).where('account_id', '=', a.id).where('product_id', 'in', (eb) => eb.selectFrom('products').select('id').where('product_id', '!=', serial)).execute();
     expect((await status(a.client)).inUse.credit).toBeNull();
   });
+  it('shows the birthday credit left and until when apart from the tiers\' credit, a collector without a piece included (§3.5 SB.4.3)', async () => {
+    const birthday = async (accountId: string, amountMinor: number) => {
+      const now = h.clock.now();
+      const expiresAt = new Date(now.getTime() + 30 * 86_400_000);
+      await h.t.db
+        .insertInto('tier_grants')
+        .values({ account_id: accountId, tier: null, kind: 'BIRTHDAY', granted_at: now, amount_minor: amountMinor, currency: 'EUR', expires_at: expiresAt, birthday_on: now.toISOString().slice(0, 10) })
+        .execute();
+      return expiresAt.toISOString();
+    };
+    const none = await holding(0);
+    const until = await birthday(none.id, 2000);
+    expect((await status(none.client)).inUse).toEqual({ credit: null, birthdayCredit: { balanceMinor: 2000, currency: 'EUR', expiresAt: until }, care: null, gifts: [], creditChannels: ['DRAW', 'LIVE', 'SALON'] });
+    const platine = await holding(5);
+    const at = await birthday(platine.id, 1500);
+    const inUse = (await status(platine.client)).inUse;
+    expect(inUse.credit).toMatchObject({ balanceMinor: 5000 });
+    expect(inUse.birthdayCredit).toEqual({ balanceMinor: 1500, currency: 'EUR', expiresAt: at });
+  });
+
   it('gives the console\'s owner sheet its Club block: the grants, a credit with what is left, a gift and where it is, the yearly care of the year', async () => {
     const a = await holding(10);
     await status(a.client);
@@ -159,5 +184,7 @@ describe('YOUR TIER: the program and the benefits in use (BP-19 T10)', () => {
       ['PALLADIUM', 'CREDIT', 10000, null],
     ]);
     expect(club.careThisYear).toEqual({ year: 2026, used: 0, allowance: 'ALL', open: null });
+    // §3.5 SB.4.3: no date of birth, no birthday credit to come.
+    expect((safeJson(res) as { club: { birthdayNext: unknown } }).club.birthdayNext).toEqual({ state: 'NO_DATE' });
   });
 });

@@ -3314,9 +3314,11 @@ export interface CaseToReceive {
 /** BP-19 T10: what the tier program gave an account and what is in use (GET /api/admin/owners/:id `club`). */
 export interface OwnerClub {
   tier: ClubTierName | null;
+  /** The tiers' grants, then the birthday credits (plan CUSTOMER INTELLIGENCE §3.5 SB.4.3), newest first: no tier, their birthday. */
   grants: {
-    tier: ClubTierName;
-    kind: 'GIFT' | 'CREDIT';
+    tier: ClubTierName | null;
+    kind: 'GIFT' | 'CREDIT' | 'BIRTHDAY';
+    birthdayOn: string | null;
     grantedAt: Iso;
     amountMinor: number | null;
     balanceMinor: number | null;
@@ -3325,6 +3327,8 @@ export interface OwnerClub {
     gift: { state: 'PENDING' | 'WITH_ORDER' | 'DELIVERED'; orderId: string | null; orderReference: string | null } | null;
   }[];
   careThisYear: { year: number; used: number; allowance: number | 'ALL'; open: { id: string; productId: string } | null } | null;
+  /** §3.5 SB.4.3: the next birthday credit, or why none comes. */
+  birthdayNext: { state: 'OFF' } | { state: 'NO_DATE' } | { state: 'TEST_ENTRANT' } | { state: 'NEXT'; on: string };
 }
 
 /** A shipment of a yearly care: its carrier, its tracking number and link, when it left. */

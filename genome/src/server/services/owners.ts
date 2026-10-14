@@ -90,7 +90,7 @@ import { recoveryThrottledUntil } from './account-recovery.js';
 import type { AuditService } from './audit.js';
 import { normalizeEmail } from './auth.js';
 import { accountCircleData, type ExportedCircleAnswer, type ExportedCircleVote } from './circle.js';
-import { tierName, tierOf, type ClubTier, type ClubTierName } from './club.js';
+import { isTestEntrant, tierName, tierOf, type ClubTier, type ClubTierName } from './club.js';
 import { accountDropEntries, auditWithdrawnEntries, withdrawAccountEntries, type ExportedDropEntry } from './drops.js';
 import { accountCareRequests, careThisYear, type CareAllowance, type ExportedCareRequest } from './care.js';
 import { accountGuaranteesForStaff, exportedGuarantees, type AdminGuarantee, type ExportedGuarantee } from './guarantees.js';
@@ -104,6 +104,8 @@ import { exportedBrowsing, exportedBrowsingCount, type ExportedBrowsing } from '
 import { exportedWishes, type ExportedWish } from './wishlist.js';
 import { collectorValue, type LifetimeValue } from './growth.js';
 import { accountGrants, accountTierGrants, creditBalances, type ExportedTierGrant } from './tier-grants.js';
+import { nextBirthday } from './birthday-credits.js';
+import { readProgram } from './club-program.js';
 import { accountConversation, accountMessages, type ExportedMessage } from './messages.js';
 import { accountLiveData, auditRemovedLiveEntries, removeAccountLiveEntries, type ExportedLiveEntry, type ExportedLiveInterest } from './live.js';
 import { participatedReleases, releasesTakenPart } from './participation.js';
@@ -313,10 +315,17 @@ export interface OwnerSheet {
 /** BP-19 T10: what the tier program gave the account and what is in use (the console's Club block). */
 export interface OwnerClub {
   tier: ClubTierName | null;
-  /** Its grants, PLATINE's first: a credit with what is left and until when; a gift, pending, with an order, or delivered. */
+  /**
+   * Its grants, PLATINE's first: a credit with what is left and until when; a gift, pending, with an order, or delivered;
+   * then its birthday credits (plan CUSTOMER INTELLIGENCE §3.5 SB.4.3), the newest first: the last two, and any still
+   * open (a balance, not expired), with no tier and their birthday.
+   */
   grants: {
-    tier: ClubTierName;
-    kind: 'GIFT' | 'CREDIT';
+    /** Null on a birthday credit. */
+    tier: ClubTierName | null;
+    kind: 'GIFT' | 'CREDIT' | 'BIRTHDAY';
+    /** A birthday credit's birthday, `YYYY-MM-DD`; null on a tier's grant. */
+    birthdayOn: string | null;
     grantedAt: Date;
     amountMinor: number | null;
     balanceMinor: number | null;
@@ -326,6 +335,13 @@ export interface OwnerClub {
   }[];
   /** Its yearly care of the year, and the open request (a link to it); null when its tier gives none and none is open. */
   careThisYear: { year: number; used: number; allowance: CareAllowance; open: { id: string; productId: string } | null } | null;
+  /**
+   * Its next birthday credit (§3.5 SB.4.3), for Client Services to answer « where is my birthday credit »: OFF when THE
+   * PROGRAM gives none; NO_DATE without a date of birth; TEST_ENTRANT for an account of the test pool (never given);
+   * otherwise NEXT, the first birthday from today (Paris) the 365-day rule and the entered-before rule allow (one still
+   * within its days, not granted, with the date entered before it, is today).
+   */
+  birthdayNext: { state: 'OFF' } | { state: 'NO_DATE' } | { state: 'TEST_ENTRANT' } | { state: 'NEXT'; on: string };
 }
 
 export interface LockOutcome {
@@ -576,40 +592,60 @@ export class OwnerService {
     return this.summaries({ kind: 'all' }, page);
   }
 
-  /** The account's Club block (BP-19 T10): its grants with their balances and gifts, its yearly care of the year. */
+  /** The account's Club block (BP-19 T10): its grants with their balances and gifts, its yearly care of the year, its next birthday credit. */
   private async ownerClub(accountId: string, tier: ClubTier, now: Date): Promise<OwnerClub> {
-    const [grants, balances, care] = await Promise.all([accountGrants(this.db, accountId), creditBalances(this.db, accountId), careThisYear(this.db, accountId, now)]);
+    const [grants, balances, care, program, testEntrant, profile] = await Promise.all([
+      accountGrants(this.db, accountId),
+      creditBalances(this.db, accountId),
+      careThisYear(this.db, accountId, now),
+      readProgram(this.db),
+      isTestEntrant(this.db, accountId),
+      this.db.selectFrom('account_profiles').select(['birth_date', 'birth_date_at']).where('account_id', '=', accountId).executeTakeFirst(),
+    ]);
     const giftIds = grants.filter((g) => g.kind === 'GIFT').map((g) => g.id);
     const giftOrders = giftIds.length
       ? await this.db.selectFrom('orders').select(['gift_grant_id', 'status', 'with_order_id']).where('gift_grant_id', 'in', giftIds).where('status', '<>', 'CANCELLED').execute()
       : [];
+    // §3.5 SB.4.3: the tiers' grants first, PLATINE's first; then the birthday credits, newest first: the last two and any open.
+    const open = (id: string) => balances.some((b) => b.grantId === id && b.balanceMinor > 0 && b.expiresAt.getTime() > now.getTime());
+    const birthdays = grants.filter((g) => g.kind === 'BIRTHDAY').sort((a, b) => (a.birthday_on! < b.birthday_on! ? 1 : -1));
+    const shown = [
+      ...grants.filter((g) => g.kind !== 'BIRTHDAY' && g.tier !== null).sort((a, b) => a.tier! - b.tier! || (a.kind < b.kind ? 1 : -1)),
+      ...birthdays.filter((g, i) => i < 2 || open(g.id)),
+    ];
+    const next = nextBirthday({ birthDate: profile?.birth_date ?? null, birthDateAt: profile?.birth_date_at ?? null, granted: birthdays.map((g) => g.birthday_on!), days: program.birthdayCreditDays, now });
     return {
       tier: tierName(tier),
-      grants: grants
-        .filter((g): g is typeof g & { kind: 'GIFT' | 'CREDIT'; tier: number } => g.kind !== 'BIRTHDAY' && g.tier !== null) // the tiers' (0045's BIRTHDAY: none)
-        .sort((a, b) => a.tier - b.tier || (a.kind < b.kind ? 1 : -1))
-        .map((g) => {
-          const balance = balances.find((b) => b.grantId === g.id);
-          const order = giftOrders.find((o) => o.gift_grant_id === g.id);
-          return {
-            tier: tierName(g.tier as ClubTier)!,
-            kind: g.kind,
-            grantedAt: g.granted_at,
-            amountMinor: g.amount_minor,
-            balanceMinor: balance ? balance.balanceMinor : null,
-            currency: g.currency,
-            expiresAt: g.expires_at,
-            gift:
-              g.kind === 'GIFT'
-                ? {
-                    state: !order ? 'PENDING' : order.status === 'DELIVERED' || order.status === 'RETURNED' ? 'DELIVERED' : 'WITH_ORDER',
-                    orderId: order?.with_order_id ?? null,
-                    orderReference: order?.with_order_id ? orderReference(order.with_order_id) : null,
-                  }
-                : null,
-          };
-        }),
+      grants: shown.map((g) => {
+        const balance = balances.find((b) => b.grantId === g.id);
+        const order = giftOrders.find((o) => o.gift_grant_id === g.id);
+        return {
+          tier: g.tier === null ? null : tierName(g.tier as ClubTier)!,
+          kind: g.kind,
+          birthdayOn: g.birthday_on,
+          grantedAt: g.granted_at,
+          amountMinor: g.amount_minor,
+          balanceMinor: balance ? balance.balanceMinor : null,
+          currency: g.currency,
+          expiresAt: g.expires_at,
+          gift:
+            g.kind === 'GIFT'
+              ? {
+                  state: !order ? 'PENDING' : order.status === 'DELIVERED' || order.status === 'RETURNED' ? 'DELIVERED' : 'WITH_ORDER',
+                  orderId: order?.with_order_id ?? null,
+                  orderReference: order?.with_order_id ? orderReference(order.with_order_id) : null,
+                }
+              : null,
+        };
+      }),
       careThisYear: care.allowance === 0 && !care.open ? null : { year: care.year, used: care.used, allowance: care.allowance, open: care.open },
+      birthdayNext: testEntrant
+        ? { state: 'TEST_ENTRANT' }
+        : !program.birthdayCreditOn
+          ? { state: 'OFF' }
+          : next === null
+            ? { state: 'NO_DATE' }
+            : { state: 'NEXT', on: next },
     };
   }
 

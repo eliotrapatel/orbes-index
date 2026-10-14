@@ -416,6 +416,35 @@ describe('order cases (plan NEXT LOT §3.5.6.7)', () => {
       expect(applied.details).toMatchObject({ amountMinor: 3_000, currency: 'EUR', exchangeOfOrderId: id });
     });
 
+    it('an exchange of an order paid partly with a birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.2): carried onto the EXCHANGE order with its kind, CREDIT · BIRTHDAY on its invoice, the balance unchanged', async () => {
+      // A collector without a piece, a birthday credit of € 20 taken off the order before it is paid.
+      const a = await createAccount(db());
+      const now = h.clock.now();
+      const grant = (
+        await db()
+          .insertInto('tier_grants')
+          .values({ account_id: a.id, tier: null, kind: 'BIRTHDAY', granted_at: now, amount_minor: 2_000, currency: 'EUR', expires_at: new Date(now.getTime() + 30 * 86_400_000), birthday_on: now.toISOString().slice(0, 10) })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+      const { id } = await shippedOrder(freshSize(), { accountId: a.id, creditMinor: 2_000 });
+      expect((await creditBalances(db(), a.id))[0]).toMatchObject({ kind: 'BIRTHDAY', balanceMinor: 0 });
+      await h.ctx.services.logistics.markDelivered(id, agent, scope());
+      const otherSku = await skuOf(freshSize());
+      await stock(otherSku, 1);
+      const opened = await cases().open(id, { kind: 'EXCHANGE', reason: 'SIZE', exchangeSkuId: otherSku, note: 'One size up.' }, operator);
+      await cases().receive(opened.id, { pieceState: 'OK' }, agent, scope());
+      const decided = await cases().decide(opened.id, { decision: 'EXCHANGE', pieceTo: 'RESTOCKED', note: 'Exchanged.' }, operator, { admin: false });
+      const exchange = decided.case.decision!.exchangeOrder!.id;
+      expect((await creditBalances(db(), a.id))[0]).toMatchObject({ kind: 'BIRTHDAY', balanceMinor: 0 });
+      const uses = await db().selectFrom('credit_uses').select(['grant_id', 'amount_minor', 'released_reason']).where('order_id', '=', exchange).execute();
+      expect(uses).toEqual([{ grant_id: grant, amount_minor: 2_000, released_reason: null }]);
+      const exchanged = await db().selectFrom('invoices').select('lines').where('order_id', '=', exchange).where('kind', '=', 'INVOICE').executeTakeFirstOrThrow();
+      expect(linesOf(exchanged.lines as unknown[]).filter((l) => l.kind === 'CREDIT').map((l) => [l.label, l.amountMinor])).toEqual([['CREDIT · BIRTHDAY', -2_000]]);
+      const applied = await db().selectFrom('audit_logs').select('details').where('action', '=', 'order.credit.apply').where('target_id', '=', exchange).executeTakeFirstOrThrow();
+      expect(applied.details).toMatchObject({ uses: [{ grantId: grant, kind: 'BIRTHDAY', tier: null, amountMinor: 2_000 }], exchangeOfOrderId: id });
+    });
+
     it('an exchange of an order with a priced engraving: its words, author and price carried onto the EXCHANGE order, whose invoice bills the ENGRAVING line the original\'s credit note credits', async () => {
       const prices = (EUR: number | null) => h.ctx.services.clubProgram.setEngravingPrices({ prices: { EUR, GBP: null, USD: null, CHF: null } }, admin);
       await prices(3_000);

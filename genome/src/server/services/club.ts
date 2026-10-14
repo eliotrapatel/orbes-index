@@ -58,7 +58,7 @@ import { activeGifts, effectiveProgramLines, programLines, readProgram, type Clu
 import type { AccountDropEntry, DropService } from './drops.js';
 import { accountGuarantees, type AccountGuarantee } from './guarantees.js';
 import { orderReference } from './orders.js';
-import { creditBalances, ensureGrants } from './tier-grants.js';
+import { creditBalances, ensureGrants, usableAt } from './tier-grants.js';
 
 /** The pieces that count for nothing in the club: revoked, flagged or retired by ORBES, whose ownership stays open (N3). */
 export const CLUB_EXCLUDED_STATUSES: readonly ProductStatus[] = Object.freeze(['REVOKED', 'COUNTERFEIT_FLAGGED', 'RETIRED'] as const);
@@ -288,8 +288,13 @@ export interface ClubNextTier {
 
 /** A tier's benefits in use by the account now (BP-19 T10): YOUR TIER's IN USE, the console's Club block. */
 export interface ClubInUse {
-  /** Its credit left, usable now (its tier held, not expired): the sum of its grants' balances, the earliest expiry. */
+  /** Its tiers' credit left, usable now (its tier held, not expired): the sum of its grants' balances, the earliest expiry. */
   credit: { balanceMinor: number; currency: string; expiresAt: Date } | null;
+  /**
+   * Its birthday credit left (plan CUSTOMER INTELLIGENCE §3.5 SB.4.3), whatever its tier, not expired: the sum of its
+   * open birthday credits' balances, the earliest expiry; read apart from the tiers' `credit`.
+   */
+  birthdayCredit: { balanceMinor: number; currency: string; expiresAt: Date } | null;
   /** Its yearly care of the year (UTC); null when its tier gives none. */
   care: { year: number; used: number; allowance: CareAllowance } | null;
   /**
@@ -422,16 +427,20 @@ export class ClubService {
     };
   }
 
-  /** The account's benefits in use now (ClubInUse): its credit, its yearly care of the year, its welcome gifts. */
+  /** The account's benefits in use now (ClubInUse): its tiers' credit, its birthday credit, its yearly care of the year, its welcome gifts. */
   async inUse(accountId: string, tier: ClubTier, program?: ClubProgram): Promise<ClubInUse> {
     const now = this.clock();
     const p = program ?? (await readProgram(this.db));
-    // Usable now, PALLADIUM's first (creditBalances' order); one currency shown, the first grant's.
-    const open = (await creditBalances(this.db, accountId)).filter((g) => g.tier <= tier && g.balanceMinor > 0 && g.expiresAt.getTime() > now.getTime());
-    const usable = open.filter((g) => g.currency === open[0]?.currency);
-    const credit = usable.length
-      ? { balanceMinor: usable.reduce((n, g) => n + g.balanceMinor, 0), currency: usable[0]!.currency, expiresAt: new Date(Math.min(...usable.map((g) => g.expiresAt.getTime()))) }
-      : null;
+    // Usable now (creditBalances' order: the birthday credit, then PALLADIUM's); each figure in one currency, its first grant's.
+    const balances = (await creditBalances(this.db, accountId)).filter((g) => usableAt(g, tier) && g.balanceMinor > 0 && g.expiresAt.getTime() > now.getTime());
+    const summed = (open: typeof balances) => {
+      const usable = open.filter((g) => g.currency === open[0]?.currency);
+      return usable.length
+        ? { balanceMinor: usable.reduce((n, g) => n + g.balanceMinor, 0), currency: usable[0]!.currency, expiresAt: new Date(Math.min(...usable.map((g) => g.expiresAt.getTime()))) }
+        : null;
+    };
+    const credit = summed(balances.filter((g) => g.kind === 'CREDIT'));
+    const birthdayCredit = summed(balances.filter((g) => g.kind === 'BIRTHDAY'));
     const year = await careThisYear(this.db, accountId, now, p);
     const care = year.allowance === 0 ? null : { year: year.year, used: year.used, allowance: year.allowance };
     const grants = await this.db
@@ -456,7 +465,7 @@ export class ClubService {
         if (g.tier !== null && g.tier <= tier && a) gifts.push({ tier: name, model: a.name, state: 'PENDING', orderReference: null });
       }
     }
-    return { credit, care, gifts, creditChannels: [...p.creditChannels] };
+    return { credit, birthdayCredit, care, gifts, creditChannels: [...p.creditChannels] };
   }
 
   /** THE CLUB (GET /api/v1/the-club, public): every tier's program lines then its words, the credit's currency, the gifts. */

@@ -9,7 +9,11 @@
  *    (ORDER_CREDIT_EXCEEDS), past RESERVED (ORDER_CLOSED);
  *  - the invoice's CREDIT lines (negative, per tier) and its total less them; the credit note mirrors it;
  *  - given back by REMOVE CREDIT, a cancellation and a return, the grant's expiry unchanged; audited;
- *  - two applications at once never take more than the balance.
+ *  - two applications at once never take more than the balance;
+ *  - the birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4.3, step 6.3; the plan's orders.test and gift-orders.test
+ *    cases, here with the other cases of Apply credit): taken whatever the tier, a collector without a piece included,
+ *    first (before PALLADIUM's and PLATINE's), split with them, refused on a channel left out, in another currency and
+ *    once expired; CREDIT · BIRTHDAY first on the invoice; given back on a cancellation and a return, its expiry unchanged.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { inTransaction } from '../../src/server/db/connection.js';
@@ -19,14 +23,18 @@ import { DomainError } from '../../src/server/errors.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import { linesOf } from '../../src/server/services/invoices.js';
 import { ensureSku } from '../../src/server/services/stock.js';
+import { birthdayExpiry } from '../../src/server/services/birthday-credits.js';
+import { parisDay } from '../../src/server/services/schedule.js';
 import { creditBalances } from '../../src/server/services/tier-grants.js';
+import { poolDraw } from '../support/draws.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { packAndShip, stockPieces } from '../support/fulfil.js';
 import { createAccount, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
 
 const MINUTE = 60_000;
-const DAY = 24 * 60 * MINUTE;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
 
 async function rejects(p: Promise<unknown>, code: string): Promise<void> {
   const e = await p.then(
@@ -212,5 +220,135 @@ describe('the tiers\' credit (BP-19 T5)', () => {
     const refused = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
     expect((refused.reason as DomainError).code).toMatch(/^ORDER_CREDIT_(EXCEEDS|NONE)$/);
     expect((await creditBalances(t.db, a.id))[0]!.balanceMinor).toBe(0);
+  });
+
+  // ── The birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4.3) ─────────
+
+  /** A birthday credit as the daily grant gives it (step 6.4): no tier, today's birthday (Paris), € 20 for 30 days by default. */
+  async function birthdayGrant(accountId: string, o: { amountMinor?: number; currency?: string; on?: string } = {}) {
+    const on = o.on ?? parisDay(clock.now());
+    return (
+      await t.db
+        .insertInto('tier_grants')
+        .values({ account_id: accountId, tier: null, kind: 'BIRTHDAY', granted_at: clock.now(), amount_minor: o.amountMinor ?? 2_000, currency: o.currency ?? 'EUR', expires_at: birthdayExpiry(on, 30), birthday_on: on })
+        .returning(['id', 'expires_at'])
+        .executeTakeFirstOrThrow()
+    );
+  }
+  /** An order's credit uses, the birthday credit's first, then by tier (taken at one instant, their ids say nothing of the order). */
+  const birthdayUsesOf = async (orderId: string) =>
+    (
+      await t.db
+        .selectFrom('credit_uses as u')
+        .innerJoin('tier_grants as g', 'g.id', 'u.grant_id')
+        .select(['g.kind', 'g.tier', 'u.amount_minor', 'u.released_reason'])
+        .where('u.order_id', '=', orderId)
+        .execute()
+    ).sort((x, y) => (x.kind === 'BIRTHDAY' ? -1 : y.kind === 'BIRTHDAY' ? 1 : (y.tier ?? 0) - (x.tier ?? 0)));
+  const creditLines = async (orderId: string) =>
+    linesOf((await t.db.selectFrom('invoices').selectAll().where('order_id', '=', orderId).where('kind', '=', 'INVOICE').executeTakeFirstOrThrow()).lines)
+      .filter((l) => l.kind === 'CREDIT')
+      .map((l) => [l.label, l.amountMinor]);
+  /** A draw's order won by `account`, priced. */
+  async function drawOrder(account: { id: string; actor: Actor }, priceMinor: number) {
+    const opensAt = new Date(clock.now().getTime() + HOUR);
+    const drop = await poolDraw(
+      ctx.services.drops,
+      ctx.db,
+      { modelId: f.modelId, title: 'A BIRTHDAY DRAW', quantity: 1, opensAt, closesAt: new Date(opensAt.getTime() + HOUR), earlyAccessHours: 0, earlyAccessPlatineHours: 0, priceMinor, currency: 'EUR' },
+      admin,
+    );
+    clock.set(new Date(opensAt.getTime() + MINUTE));
+    await ctx.services.drops.enter(account.id, drop.id, account.actor);
+    clock.advance(HOUR);
+    await ctx.services.drops.draw(drop.id, admin);
+    const entry = await t.db.selectFrom('drop_entries').select('id').where('drop_id', '=', drop.id).executeTakeFirstOrThrow();
+    await ctx.services.drops.confirm(drop.id, entry.id, null, admin);
+    return (await t.db.selectFrom('orders').select('id').where('drop_entry_id', '=', entry.id).where('channel', '=', 'DRAW').executeTakeFirstOrThrow()).id;
+  }
+
+  it('takes the birthday credit off the draw order of a collector without a piece: offered whatever the tier, CREDIT · BIRTHDAY on the invoice, audited with its kind', async () => {
+    const a = await createAccount(t.db);
+    // No piece, no tier: without a birthday credit, none.
+    const none = await drawOrder(a, 300_000);
+    await rejects(orders().applyCredit(none, 1_000, admin), 'ORDER_CREDIT_NONE');
+    const grant = await birthdayGrant(a.id);
+    const id = await drawOrder(a, 300_000);
+    expect((await orders().get(id)).credit.available).toEqual([{ grantId: grant.id, kind: 'BIRTHDAY', tier: null, balanceMinor: 2_000, currency: 'EUR', expiresAt: grant.expires_at }]);
+    const view = await orders().applyCredit(id, 2_000, admin);
+    expect(view.credit.applied.map((u) => [u.kind, u.tier, u.amountMinor, u.releasedAt])).toEqual([['BIRTHDAY', null, 2_000, null]]);
+    expect(view.credit.available).toEqual([]);
+    expect((await auditsOf(id, 'order.credit.apply'))[0]!.details).toMatchObject({ amountMinor: 2_000, currency: 'EUR', uses: [{ grantId: grant.id, kind: 'BIRTHDAY', tier: null, amountMinor: 2_000 }] });
+    await pay(id);
+    expect(await creditLines(id)).toEqual([['CREDIT · BIRTHDAY', -2_000]]);
+    expect((await t.db.selectFrom('invoices').select('total_minor').where('order_id', '=', id).where('kind', '=', 'INVOICE').executeTakeFirstOrThrow()).total_minor).toBe(298_000);
+  });
+
+  it('takes the birthday credit first, then PALLADIUM\'s, then PLATINE\'s, split over them; CREDIT · BIRTHDAY first on the invoice', async () => {
+    const a = await account(10);
+    await birthdayGrant(a.id);
+    const id = await salonOrder(a.id, { priceMinor: 300_000 });
+    expect((await orders().get(id)).credit.available.map((c) => [c.kind, c.tier, c.balanceMinor])).toEqual([
+      ['BIRTHDAY', null, 2_000],
+      ['CREDIT', 3, 10_000],
+      ['CREDIT', 2, 5_000],
+    ]);
+    // € 130: the birthday's € 20, PALLADIUM's € 100, then € 10 of PLATINE's.
+    await orders().applyCredit(id, 13_000, admin);
+    expect((await birthdayUsesOf(id)).map((u) => [u.kind, u.tier, u.amount_minor])).toEqual([
+      ['BIRTHDAY', null, 2_000],
+      ['CREDIT', 3, 10_000],
+      ['CREDIT', 2, 1_000],
+    ]);
+    expect((await creditBalances(t.db, a.id)).map((c) => [c.kind, c.tier, c.birthdayOn, c.balanceMinor])).toEqual([
+      ['BIRTHDAY', null, parisDay(clock.now()), 0],
+      ['CREDIT', 3, null, 0],
+      ['CREDIT', 2, null, 4_000],
+    ]);
+    await pay(id);
+    expect(await creditLines(id)).toEqual([
+      ['CREDIT · BIRTHDAY', -2_000],
+      ['CREDIT · PALLADIUM', -10_000],
+      ['CREDIT · PLATINE', -1_000],
+    ]);
+  });
+
+  it('refuses the birthday credit on a channel THE PROGRAM leaves out, in another currency, and once expired', async () => {
+    const a = await createAccount(t.db);
+    await birthdayGrant(a.id);
+    const program = ctx.services.clubProgram;
+    await program.update({ ...(await program.read()), creditChannels: ['DRAW', 'LIVE'] }, admin);
+    await rejects(orders().applyCredit(await salonOrder(a.id, { priceMinor: 300_000 }), 1_000, admin), 'ORDER_CREDIT_CHANNEL');
+    await t.db.deleteFrom('club_program_settings').execute();
+    await rejects(orders().applyCredit(await salonOrder(a.id, { priceMinor: 300_000, currency: 'GBP' }), 1_000, admin), 'ORDER_CREDIT_CURRENCY');
+    // Day 30 is its last; day 31, gone.
+    const b = await createAccount(t.db);
+    await birthdayGrant(b.id);
+    const late = await salonOrder(b.id, { priceMinor: 300_000 });
+    clock.advance(31 * DAY);
+    await rejects(orders().applyCredit(late, 1_000, admin), 'ORDER_CREDIT_NONE');
+  });
+
+  it('gives the birthday credit back on a cancellation and a return, its expiry unchanged', async () => {
+    const a = await createAccount(t.db);
+    await birthdayGrant(a.id);
+    const [before] = await creditBalances(t.db, a.id);
+    const cancelled = await salonOrder(a.id, { priceMinor: 300_000 });
+    await orders().applyCredit(cancelled, 2_000, admin);
+    clock.advance(MINUTE);
+    await orders().transition(cancelled, { to: 'CANCELLED', note: 'The client changed their mind.' }, admin);
+    expect((await birthdayUsesOf(cancelled)).map((u) => [u.kind, u.released_reason])).toEqual([['BIRTHDAY', 'CANCELLED']]);
+    expect((await creditBalances(t.db, a.id))[0]).toEqual(before);
+    const sku = await inTransaction(t.db, (tx) => ensureSku(tx, f.modelId, '64'));
+    await stockPieces(ctx, { skuId: sku, locationId: france, count: 1, material: '925 STERLING SILVER' }, admin);
+    const returned = await salonOrder(a.id, { priceMinor: 300_000, size: '64' });
+    await orders().applyCredit(returned, 2_000, admin);
+    await pay(returned);
+    clock.advance(MINUTE);
+    await packAndShip(ctx, returned, { carrierId: colissimo, trackingNumber: '6A12345678902' }, admin);
+    clock.advance(MINUTE);
+    await orders().returnOrder(returned, { outcome: 'RESTOCKED', locationId: france, note: 'Returned unworn.' }, admin);
+    expect((await birthdayUsesOf(returned)).map((u) => [u.kind, u.released_reason])).toEqual([['BIRTHDAY', 'RETURNED']]);
+    expect((await creditBalances(t.db, a.id))[0]).toEqual(before);
   });
 });

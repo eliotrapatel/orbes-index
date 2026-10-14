@@ -7,7 +7,7 @@
 import { inflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { CertificateInputError } from '../../src/server/render/certificate.js';
-import { addressLines, documentAmount, INVOICE_COPY, INVOICE_LAYOUT, INVOICE_LINE_BUDGET, INVOICE_MAX_LINES, invoiceFilename, layoutInvoice, renderInvoicePdf, type InvoiceDocument } from '../../src/server/render/invoice.js';
+import { addressLines, documentAmount, INVOICE_COPY, INVOICE_LAYOUT, INVOICE_LINE_BUDGET, INVOICE_MAX_LINES, invoiceFilename, invoiceTablePitch, layoutInvoice, renderInvoicePdf, type InvoiceDocument } from '../../src/server/render/invoice.js';
 import { CLUB_TIER_THRESHOLDS } from '../../src/server/services/club.js';
 import { LIVE_ADDONS_MAX } from '../../src/server/services/live.js';
 import { toDocumentText, toLabelText } from '../../src/server/render/label-font.js';
@@ -141,17 +141,19 @@ describe('invoice and credit note (M7)', () => {
     }
   });
 
-  it('holds the most lines an invoice carries (BP-19): the piece, six add-ons, an engraving (plan NEXT LOT §3.6.C), its shipping, a credit and a welcome gift per tier; up to seven at the table\'s pitch, more sharing its height above the total', () => {
+  it('holds the most lines an invoice carries (BP-19): the piece, six add-ons, an engraving (plan NEXT LOT §3.6.C), its shipping, a credit per tier and the birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4.3), a welcome gift per tier; up to seven at the table\'s pitch, more sharing its height above the total', () => {
     // The budget is the services' own figures: LIVE_ADDONS_MAX add-ons, one ENGRAVING line (priced from the settings; one
-    // bought as an add-on is an add-on line), one CREDIT and one GIFT line per tier above TITANE.
+    // bought as an add-on is an add-on line), one CREDIT and one GIFT line per tier above TITANE, and the birthday
+    // credit's CREDIT line (a grant of no tier, taken first).
     const tiersWithGrants = CLUB_TIER_THRESHOLDS.length - 1;
-    expect(INVOICE_LINE_BUDGET).toEqual({ piece: 1, addons: LIVE_ADDONS_MAX, engraving: 1, shipping: 1, credit: tiersWithGrants, gift: tiersWithGrants });
-    expect(INVOICE_MAX_LINES).toBe(1 + LIVE_ADDONS_MAX + 1 + 1 + 2 + 2);
+    expect(INVOICE_LINE_BUDGET).toEqual({ piece: 1, addons: LIVE_ADDONS_MAX, engraving: 1, shipping: 1, credit: tiersWithGrants + 1, gift: tiersWithGrants });
+    expect(INVOICE_MAX_LINES).toBe(1 + LIVE_ADDONS_MAX + 1 + 1 + 3 + 2);
     const lines = [
       { label: 'MONOLITHE · SIZE 52', detail: 'LIVE RELEASE · MONOLITHE IN STEEL', amountMinor: 505_000 },
       ...Array.from({ length: LIVE_ADDONS_MAX }, (_, i) => ({ label: `ADD-ON ${i + 1}`, detail: null, amountMinor: 1_000 })),
       { label: 'Engraving', detail: null, amountMinor: 3_000 },
       { label: 'SHIPPING · EXPRESS', detail: 'FREE · PALLADIUM', amountMinor: 0 },
+      { label: 'CREDIT · BIRTHDAY', detail: null, amountMinor: -2_000 },
       { label: 'CREDIT · PALLADIUM', detail: null, amountMinor: -10_000 },
       { label: 'CREDIT · PLATINE', detail: null, amountMinor: -5_000 },
       { label: 'WELCOME GIFT · ECLIPSE', detail: 'ORDER OR-1A2B3C4D', amountMinor: 0 },
@@ -159,7 +161,15 @@ describe('invoice and credit note (M7)', () => {
     ];
     expect(lines).toHaveLength(INVOICE_MAX_LINES);
     const L = INVOICE_LAYOUT;
-    for (const n of [7, 8, INVOICE_MAX_LINES]) {
+    // Up to thirteen lines (every invoice before the birthday credit), the pitch and the detail's gap are as they were.
+    expect(invoiceTablePitch(7)).toEqual({ pitch: L.table.pitch, detailGap: L.table.detailGap });
+    for (const n of [8, 12, 13]) expect(invoiceTablePitch(n), String(n)).toEqual({ pitch: (L.ruleTotal - L.table.detailGap - 3 - L.table.first) / (n - 1), detailGap: L.table.detailGap });
+    // At the fourteenth, the detail sits closer under its line; the last detail still 3 mm above the total's rule.
+    const most = invoiceTablePitch(INVOICE_MAX_LINES);
+    expect(most.detailGap).toBeLessThan(L.table.detailGap);
+    expect(most.detailGap).toBeGreaterThan(L.table.detailCap + 2);
+    expect(L.table.first + (INVOICE_MAX_LINES - 1) * most.pitch + most.detailGap).toBeCloseTo(L.ruleTotal - 3, 6);
+    for (const n of [7, 8, 13, INVOICE_MAX_LINES]) {
       const some = lines.slice(0, n - 1).concat(lines[lines.length - 1]!);
       const page = layoutInvoice(doc({ lines: some, totalMinor: some.reduce((k, l) => k + l.amountMinor, 0) }));
       // The lettering between the table's head and the total (the hairlines, flat, aside): the last detail above the total's rule.
@@ -167,22 +177,26 @@ describe('invoice and credit note (M7)', () => {
       expect(inTable.length, String(n)).toBeGreaterThan(0);
       expect(Math.max(...inTable.map((b) => b.y1)), String(n)).toBeLessThan(L.ruleTotal);
     }
-    // At the most lines, each line's detail stays above the next line's lettering.
-    const full = layoutInvoice(doc({ lines, totalMinor: lines.reduce((k, l) => k + l.amountMinor, 0) }));
-    const pitch = (L.ruleTotal - L.table.detailGap - 3 - L.table.first) / (INVOICE_MAX_LINES - 1);
-    const marks = full.marks!.map((m) => bounds(m.d));
-    const near = (y: number) => marks.filter((b) => Math.abs(b.y1 - y) < 0.3);
-    let checked = 0;
-    lines.forEach((l, i) => {
-      if (!l.detail || i === lines.length - 1) return;
-      const detail = near(L.table.first + i * pitch + L.table.detailGap);
-      const next = near(L.table.first + (i + 1) * pitch);
-      expect(detail.length, l.label).toBeGreaterThan(0);
-      expect(next.length, l.label).toBeGreaterThan(0);
-      expect(Math.max(...detail.map((b) => b.y1)), l.label).toBeLessThan(Math.min(...next.map((b) => b.y0)));
-      checked += 1;
-    });
-    expect(checked).toBe(3);
+    // At the most lines, and at thirteen (without the birthday credit), each line's detail stays above the next line's lettering.
+    for (const set of [lines, lines.filter((l) => l.label !== 'CREDIT · BIRTHDAY')]) {
+      const full = layoutInvoice(doc({ lines: set, totalMinor: set.reduce((k, l) => k + l.amountMinor, 0) }));
+      const { pitch, detailGap } = invoiceTablePitch(set.length);
+      const marks = full.marks!.map((m) => bounds(m.d));
+      const near = (y: number) => marks.filter((b) => Math.abs(b.y1 - y) < 0.3);
+      let checked = 0;
+      set.forEach((l, i) => {
+        if (!l.detail || i === set.length - 1) return;
+        const detail = near(L.table.first + i * pitch + detailGap);
+        const next = near(L.table.first + (i + 1) * pitch);
+        expect(detail.length, l.label).toBeGreaterThan(0);
+        expect(next.length, l.label).toBeGreaterThan(0);
+        expect(Math.max(...detail.map((b) => b.y1)), l.label).toBeLessThan(Math.min(...next.map((b) => b.y0)));
+        // And under its own line's lettering.
+        expect(Math.min(...detail.map((b) => b.y0)), l.label).toBeGreaterThan(L.table.first + i * pitch);
+        checked += 1;
+      });
+      expect(checked).toBe(3);
+    }
   });
 
   it('renders a valid, deterministic PDF: no font, no text object, no VAT line, its title the document', async () => {
