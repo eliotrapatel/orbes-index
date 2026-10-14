@@ -190,6 +190,8 @@ body { background: var(--vault-light) no-repeat 50% 0 / 100% 480px, var(--vault-
   font-variant-numeric: tabular-nums; color: var(--vault-soft);
   opacity: 0; pointer-events: none; transition: opacity var(--d-dur-state) var(--d-ease);
 }
+/* while FOUNDING ACCESS is open the panel shows the code: the badge fades with the scrim, never cut by the founding bar */
+html.n-locked #orbes-code-badge { opacity: 0 !important; }
 /* The ACCESS button: its fade-in at 3.5 s is the pop-up's own (kept); the hover joins it. */
 #promo-trigger { transition: opacity 1.2s ease, background-color var(--d-dur-hover) var(--d-ease) !important; }
 
@@ -515,6 +517,8 @@ body { background: var(--vault-light) no-repeat 50% 0 / 100% 480px, var(--vault-
 }
 #promo-toast:empty { visibility: hidden; }
 #promo-toast.active { opacity: 1; }
+/* a phone under 360 px: tighter, so the code and SAVED TO CLIPBOARD stay whole on one line */
+@media (max-width: 359px) { #promo-toast { padding-left: 16px; padding-right: 16px; letter-spacing: 0.08em; } }
 #founding-bar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 9100;
   padding: 12px 24px calc(12px + env(safe-area-inset-bottom));
