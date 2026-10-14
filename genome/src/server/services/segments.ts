@@ -22,6 +22,11 @@
  * an OPERATOR. Audited `segment.create`, `segment.update` (before and after), `segment.delete`; a segment that a release
  * or a post of the circle uses is never deleted (409 SEGMENT_IN_USE). Its name is the console's: the public never reads
  * it (a release says FOR SELECTED COLLECTORS, decision 32).
+ *
+ * The test accounts (the test entrants' pool, `test_entrants`) are never among the members the console reads: not in a
+ * segment's count (the list's, its page's, the builder's live count), not in its CSV (`notTestEntrant`,
+ * services/population.ts). Where a segment decides (`segmentMembers`, `isSegmentMember`: a release's access rule, a
+ * post's audience) they are read as any account, so that a test run still enters a release open to a segment.
  */
 import { sql, type Expression, type ExpressionBuilder, type RawBuilder, type SqlBool } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
@@ -33,6 +38,7 @@ import type { AuditService } from './audit.js';
 import { CLUB_EXCLUDED_STATUSES, CLUB_TIER_THRESHOLDS } from './club.js';
 import { LIVE_QUESTION_DEFAULT } from './live.js';
 import { participationCount, securedCount, securedIn, tookPartIn } from './participation.js';
+import { notTestEntrant } from './population.js';
 import { csvDocument, CSV_CONTENT_TYPE } from '../render/csv.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
@@ -345,7 +351,7 @@ export interface AdminSegment {
   id: string;
   name: string;
   criteria: SegmentGroup;
-  /** Its members now. */
+  /** Its members now, the test accounts left out. */
   count: number;
   /** The releases whose access rule it is, the posts of the circle whose audience it is. */
   usedBy: { releases: { id: string; title: string }[]; posts: { id: string; title: string }[] };
@@ -416,7 +422,7 @@ export class SegmentService {
     this.clock = deps.clock ?? systemClock;
   }
 
-  /** Every segment, by name, each with its members now and what uses it. */
+  /** Every segment, by name, each with its members now (never a test account) and what uses it. */
   async list(): Promise<AdminSegment[]> {
     const rows = await this.db.selectFrom('segments').selectAll().orderBy(sql`lower(name)`).orderBy('id').execute();
     return Promise.all(rows.map((r) => this.view(this.db, r)));
@@ -434,7 +440,7 @@ export class SegmentService {
     return this.view(this.db, r);
   }
 
-  /** The members criteria being built would have now (the builder's live count): checked as a save checks them. */
+  /** The members criteria being built would have now (the builder's live count, never a test account): checked as a save checks them. */
   async count(criteria: unknown): Promise<{ count: number }> {
     const tree = cleanCriteria(criteria);
     await this.checkNames(this.db, tree);
@@ -558,7 +564,7 @@ export class SegmentService {
     });
   }
 
-  /** A segment's members now, by email, as a CSV (RFC 4180); `email` writes each as the caller may read it. */
+  /** A segment's members now (never a test account), by email, as a CSV (RFC 4180); `email` writes each as the caller may read it. */
   async csv(segmentId: string, view: { email: (stored: string) => string }): Promise<{ filename: string; contentType: string; body: string }> {
     const s = await this.get(segmentId);
     const rows = await this.memberRows(s.criteria);
@@ -572,16 +578,18 @@ export class SegmentService {
 
   // ── internals ────────────────────────────────────────────────────────────
 
+  /** The members the console counts: never a test account. */
   private async members(db: Db, criteria: SegmentGroup): Promise<number> {
-    const r = await segmentMembers(db, criteria, this.clock()).select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
+    const r = await segmentMembers(db, criteria, this.clock()).where(sql<SqlBool>`${notTestEntrant('a.id')}`).select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
     return Number(r.n);
   }
 
-  /** The members with what the CSV says of each, by email. */
+  /** The members with what the CSV says of each, by email: never a test account. */
   private async memberRows(criteria: SegmentGroup): Promise<SegmentMember[]> {
     const now = this.clock();
     const db = this.db;
     const rows = await segmentMembers(db, criteria, now)
+      .where(sql<SqlBool>`${notTestEntrant('a.id')}`)
       .select((eb) => [
         'a.id',
         'a.email',

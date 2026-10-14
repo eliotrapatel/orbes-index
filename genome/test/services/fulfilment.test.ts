@@ -8,6 +8,7 @@
  *    their bounds (audited `order.alerts`);
  *  - the board: the six columns, their counts and late counts, the longest waiting first, the latest closed first; the
  *    filters (channel, release, location, late, a reference or words); the CSV with the buyer as the caller may read it;
+ *    the orders of the test accounts left out of the cards, the counts and the CSV unless asked for (`test`), marked then;
  *  - an order's page: its timing, its piece, who changed it;
  *  - the LIVE resolution retired into the orders: the release report reads them.
  */
@@ -320,6 +321,42 @@ describe('the fulfilment board (plan LIVE RELEASE+, S2)', () => {
     expect(line).toContain('"J.D."');
     expect(line).not.toContain('Jane');
     expect(line).not.toContain('Paix');
+  });
+
+  it('leaves the orders of the test accounts out of the cards, the counts, the late counts and the CSV; shows them marked when asked; the client sheet and the order\'s page unchanged', async () => {
+    const model = await createModel(t.db, 'TEST ORDERS');
+    const real = await salonOrder('52', model);
+    clock.advance(MINUTE);
+    const test = await salonOrder('52', model);
+    await t.db.insertInto('test_entrants').values({ account_id: test.account.id }).execute();
+    // Both late (RESERVED over 2 days): the late count reads the same orders as the count.
+    clock.advance(3 * DAY);
+    const reserved = async (filter: object) => (await board({ q: 'TEST ORDERS', ...filter })).columns.find((c) => c.status === 'RESERVED')!;
+
+    const hidden = await reserved({});
+    expect(hidden.items.map((x) => x.id)).toEqual([real.order.id]);
+    expect([hidden.total, hidden.late]).toEqual([1, 1]);
+    expect(hidden.items[0]!.test).toBe(false);
+    expect((await reserved({ late: true })).total).toBe(1);
+    expect(await card(test.order.id)).toBeUndefined();
+    expect(await card(test.order.id, { q: orderReference(test.order.id) })).toBeUndefined();
+
+    const shown = await reserved({ test: true });
+    expect(shown.items.map((x) => [x.id, x.test])).toEqual([[real.order.id, false], [test.order.id, true]]);
+    expect([shown.total, shown.late]).toEqual([2, 2]);
+    expect((await card(test.order.id, { test: true }))!.account).toEqual({ id: test.account.id, email: test.account.email });
+
+    // The CSV keeps what the board keeps.
+    const view = { email: (e: string) => e, buyer: (b: { name: string | null; address: string | null }) => b };
+    const references = async (filter: object) => (await ctx.services.fulfilment.csv({ q: 'TEST ORDERS', ...filter }, view)).body.trim().split('\r\n').slice(1).map((l) => l.split(',')[0]);
+    expect(await references({})).toEqual([`"${orderReference(real.order.id)}"`]);
+    expect(await references({ test: true })).toEqual([`"${orderReference(real.order.id)}"`, `"${orderReference(test.order.id)}"`]);
+
+    // Out of the board, never out of reach: its page by its address, and its account's client sheet.
+    expect((await ctx.services.fulfilment.detail(test.order.id)).account).toEqual({ id: test.account.id, email: test.account.email });
+    const sheet = await ctx.services.fulfilment.forAccount(test.account.id);
+    expect(sheet.map((x) => x.id)).toEqual([test.order.id]);
+    expect(sheet[0]).not.toHaveProperty('test');
   });
 
   it('reads one order\'s page: its collector, timing, piece and who changed it', async () => {

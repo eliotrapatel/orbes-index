@@ -343,6 +343,33 @@ describe('taking part, and the segments', () => {
       expect(buyer).toBeDefined();
       await segments.remove(s.id, f.admin);
     });
+
+    it('never counts nor lists a test account: out of the count, the live count and the CSV; where the segment decides, read as any account', async () => {
+      const criteria = { match: 'ALL', rules: [{ kind: 'COUNTRY', countries: ['NZ'] }] };
+      const real = await createAccount(t.db);
+      const test = await createAccount(t.db);
+      await t.db.updateTable('accounts').set({ country: 'NZ' }).where('id', 'in', [real.id, test.id]).execute();
+      const s = await segments.create({ name: 'New Zealand', criteria }, f.admin);
+      expect(s.count).toBe(2);
+      await t.db.insertInto('test_entrants').values({ account_id: test.id }).execute();
+      try {
+        expect((await segments.get(s.id)).count).toBe(1);
+        expect((await segments.list()).find((x) => x.id === s.id)!.count).toBe(1);
+        expect(await segments.count(criteria)).toEqual({ count: 1 });
+        // Negated, the test account is still no member the console reads.
+        expect(await segments.count({ match: 'ALL', rules: [{ kind: 'COUNTRY', countries: ['FR'], not: true }, { kind: 'COUNTRY', countries: ['NZ'] }] })).toEqual({ count: 1 });
+        const lines = (await segments.csv(s.id, { email: (e) => e })).body.trim().split('\r\n');
+        expect(lines).toHaveLength(2);
+        expect(lines[1]).toContain(`"${real.email}"`);
+        expect(lines.join('\n')).not.toContain(test.email);
+        // A release's access rule and a post's audience read the segment as before (a test run enters a release open to it).
+        expect(await isSegmentMember(t.db, s.id, test.id, f.clock.now())).toBe(true);
+        expect(await isSegmentMember(t.db, s.id, real.id, f.clock.now())).toBe(true);
+      } finally {
+        await t.db.deleteFrom('test_entrants').where('account_id', '=', test.id).execute();
+        await segments.remove(s.id, f.admin);
+      }
+    });
   });
 
   describe('a post of the circle for a segment (choice 27)', () => {

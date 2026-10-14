@@ -1624,12 +1624,13 @@ export const auditListQuery = z.object({
 
 export const orderParams = z.object({ id: uuid });
 
-/** GET /api/admin/orders and its CSV: one channel, one release, one location, the late ones, a search. */
+/** GET /api/admin/orders and its CSV: one channel, one release, one location, the late ones, a search; `test`: the test accounts' orders too. */
 export const orderBoardQuery = z.object({
   channel: queryOptional(z.enum(ORDER_CHANNELS)),
   dropId: queryOptional(uuid),
   locationId: queryOptional(uuid),
   late: queryBool,
+  test: queryBool,
   q: queryOptional(z.string().trim().max(BOARD_SEARCH_MAX, `At most ${BOARD_SEARCH_MAX} characters`)),
 });
 

@@ -14,6 +14,7 @@
  *   DELETE /api/admin/segments/:id              OPERATOR  a segment nothing uses (409 SEGMENT_IN_USE otherwise)
  *   GET    /api/admin/segments/:id/members.csv  AUDITOR   its members now, as a CSV: emails masked for an AUDITOR
  *
+ * A test account (the test entrants' pool) is never among the members read here: not in a count, not in the CSV.
  * Every mutation is audited by the service.
  */
 import type { FastifyPluginAsync } from 'fastify';

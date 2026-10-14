@@ -623,4 +623,27 @@ describe('the Shopify exports and the ids pasted back (plan LIVE RELEASE+, S9)',
     await rejects(shopify().orderCsv({ from: '2025-12-01', to: '2026-12-02' }, asStored), 'VALIDATION_FAILED');
     await rejects(shopify().orderCsv({ from: '2026-12', to: '2026-12-02' }, asStored), 'VALIDATION_FAILED');
   });
+
+  it('never exports an order of a test account: a real account\'s priced order is in the file, a test account\'s is not', async () => {
+    clock.set('2026-12-05T10:00:00.000Z');
+    const priced = async () => {
+      const buyer = await createAccount(t.db);
+      const request = await t.db.insertInto('shop_requests').values({ account_id: buyer.id, model_id: f.modelId, created_at: clock.now() }).returning('id').executeTakeFirstOrThrow();
+      await ctx.services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, f.admin);
+      const o = await t.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow();
+      await ctx.services.orders.setTerms(o.id, { sizeLabel: '52', priceMinor: 300_000, currency: 'EUR' }, f.admin);
+      clock.advance(60_000);
+      return { id: o.id, account: buyer.id, email: buyer.email };
+    };
+    const real = await priced();
+    const test = await priced();
+    await t.db.insertInto('test_entrants').values({ account_id: test.account }).execute();
+    const file = await shopify().orderCsv({ from: '2026-12-05', to: '2026-12-05' }, asStored);
+    expect(records(file.body).map((x) => [x.Name, x.Email])).toEqual([[orderReference(real.id), real.email]]);
+    expect(file.body).not.toContain(orderReference(test.id));
+    expect(file.body).not.toContain(test.email);
+    // The same order, its account no longer a test account: exported.
+    await t.db.deleteFrom('test_entrants').where('account_id', '=', test.account).execute();
+    expect(records((await shopify().orderCsv({ from: '2026-12-05', to: '2026-12-05' }, asStored)).body).map((x) => x.Name)).toEqual([orderReference(real.id), orderReference(test.id)]);
+  });
 });

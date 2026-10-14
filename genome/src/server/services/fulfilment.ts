@@ -21,11 +21,14 @@
  *              order's reference OR-…, a LIVE reservation's LR-…, a piece's O26-J-…, or words of the model or the
  *              release). Each card: its channel and release, the collector (the routes mask the email for an AUDITOR),
  *              the model and size, the add-ons, the surprise, what it holds, its time in its step and whether it is late.
+ *              The orders of the test accounts (the test entrants' pool, `test_entrants`) are left out of the cards,
+ *              the counts and the late counts unless the board is asked for them (`test`: Show test orders); shown,
+ *              each carries `test`.
  *   a client   every order of one collector, the latest first, each with its steps' times and its timing: the client
  *              sheet's (N4, routes/admin/owners.ts).
  *   the CSV    every order the filters keep, the oldest first, with its buyer's details as `buyer` gives them (masked for
  *              an AUDITOR by the route) and never a price hidden: the CSV is Client Services' own (the packing slip is
- *              the document without prices).
+ *              the document without prices). The test accounts' orders are in it only when the board shows them.
  */
 import { orderClaimCard, orderClaimCode, type OrderClaimCard, type OrderClaimCode } from './claim-renewals.js';
 import { sql } from 'kysely';
@@ -38,6 +41,7 @@ import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import { liveReference, majorUnits } from './live-console.js';
 import { orderReference, trackingLink, type OrderService, type OrderView } from './orders.js';
+import { notTestEntrant } from './population.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -178,6 +182,8 @@ export interface OrderCard {
   status: OrderStatus;
   release: { id: string; title: string } | null;
   account: { id: string; email: string };
+  /** The order of a test account (the test entrants' pool): on the board only when it is asked for (`test`). */
+  test: boolean;
   model: { id: string; name: string };
   sizeLabel: string | null;
   skuCode: string | null;
@@ -224,10 +230,12 @@ export interface OrderBoardFilter {
   locationId?: string;
   late?: boolean;
   q?: string;
+  /** The orders of the test accounts too (Show test orders); left out otherwise. */
+  test?: boolean;
 }
 
 /** An order of a collector as the client sheet lists it (N4): the board's card and the time it reached each step. */
-export interface ClientOrder extends Omit<OrderCard, 'account'> {
+export interface ClientOrder extends Omit<OrderCard, 'account' | 'test'> {
   priceMinor: number | null;
   currency: string | null;
   steps: { reservedAt: Date; paidAt: Date | null; shippedAt: Date | null; deliveredAt: Date | null; cancelledAt: Date | null; returnedAt: Date | null };
@@ -302,6 +310,8 @@ interface BoardRow {
   tracking_url: string | null;
   piece_reference: string | null;
   registered: boolean;
+  /** Its account is one of the test entrants' pool. */
+  test: boolean;
 }
 
 /** LIKE's own characters, taken literally. */
@@ -465,7 +475,7 @@ export class FulfilmentService {
     const cases = await this.openCases();
     timed.sort((a, b) => b.row.reserved_at.getTime() - a.row.reserved_at.getTime() || a.row.id.localeCompare(b.row.id));
     return timed.map(({ row: r, timing }) => {
-      const { account: _account, ...card } = this.card(r, timing, cases);
+      const { account: _account, test: _test, ...card } = this.card(r, timing, cases);
       return {
         ...card,
         priceMinor: r.price_minor,
@@ -556,6 +566,7 @@ export class FulfilmentService {
       status: r.status,
       release: r.drop_id && r.release_title ? { id: r.drop_id, title: r.release_title } : null,
       account: { id: r.account_id, email: r.email },
+      test: Boolean(r.test),
       model: { id: r.model_id, name: r.model_name },
       sizeLabel: r.size_label,
       skuCode: r.sku_code,
@@ -628,7 +639,11 @@ export class FulfilmentService {
     });
   }
 
-  /** The orders the filters keep (but `late`, which needs their timing), with what the board and the CSV show; one collector's. */
+  /**
+   * The orders the filters keep (but `late`, which needs their timing), with what the board and the CSV show; one
+   * collector's. The test accounts' orders are left out unless `filter.test` asks for them; one collector's orders (the
+   * client sheet) are all read.
+   */
   private async rows(filter: OrderBoardFilter, accountId?: string): Promise<BoardRow[]> {
     const q = (filter.q ?? '').trim().slice(0, BOARD_SEARCH_MAX);
     let query = this.db
@@ -647,8 +662,10 @@ export class FulfilmentService {
         'l.name as location_name', 'd.title as release_title', 'k.code as sku_code', 'c.name as carrier_name', 'c.tracking_url',
         'p.product_id as piece_reference',
       ])
-      .select(sql<boolean>`EXISTS (SELECT 1 FROM ownership w WHERE w.product_id = o.product_id AND w.account_id = o.account_id)`.as('registered'));
+      .select(sql<boolean>`EXISTS (SELECT 1 FROM ownership w WHERE w.product_id = o.product_id AND w.account_id = o.account_id)`.as('registered'))
+      .select(sql<boolean>`NOT ${notTestEntrant('o.account_id')}`.as('test'));
     if (accountId) query = query.where('o.account_id', '=', accountId);
+    else if (!filter.test) query = query.where(sql<boolean>`${notTestEntrant('o.account_id')}`);
     if (filter.channel) query = query.where('o.channel', '=', filter.channel);
     if (filter.dropId) query = query.where('o.drop_id', '=', filter.dropId);
     if (filter.locationId) query = query.where('o.location_id', '=', filter.locationId);
