@@ -88,8 +88,13 @@ const named =
     names.some((n) => s.id === n || s.id.startsWith(`${n}-`));
 const full = (s: UiState) => s.variant === 'full';
 const accountMessages = named('account-write', 'account-messages');
-/** The tier program's states (plan NEXT-NINE, BP-19) in the full demo: a piece's YEARLY CARE, THE CLUB, IN USE. */
-const program = (s: UiState) => full(s) && !s.mutates && named('piece-care', 'club', 'account-sheet-in-use')(s);
+/** The birthday credit's stage (plan CUSTOMER INTELLIGENCE §3.5 SB.4.5): IN USE, BIRTHDAY CREDIT, for an account without a tier. */
+const birthday = (s: UiState) => s.variant === 'birthday-credit';
+/**
+ * The tier program's states (plan NEXT-NINE, BP-19) in the full demo: a piece's YEARLY CARE, THE CLUB, IN USE; and the
+ * birthday credit under IN USE, on its own stage.
+ */
+const program = (s: UiState) => (full(s) && !s.mutates && named('piece-care', 'club', 'account-sheet-in-use')(s)) || birthday(s);
 const ROOM_VARIANTS: readonly string[] = ['room', 'live', 'afterroom', 'afterroom-ends'];
 /** YOUR PROFILE's stage (plan CUSTOMER INTELLIGENCE §3.1 P.8): account-profile, then profile-tastes. */
 const profile = (s: UiState) => s.variant === 'account-profile';
@@ -111,7 +116,8 @@ export const CONTENT_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> =
   // CODE waiting on an order (plan NEXT LOT §3.4), and the collector's side of the orders (§3.6: orders-delivery,
   // orders-case; YOUR ADDRESSES, an account state), each on its own stage.
   pieces: (s) => ((full(s) && !s.mutates && named('pieces', 'piece')(s)) || (named('account')(s) && !accountMessages(s)) || ORDER_STAGES.includes(s.variant)) && !program(s) && !profile(s),
-  // The tier program (plan NEXT-NINE, BP-19), in the full demo: a piece's YEARLY CARE at each step, THE CLUB, IN USE.
+  // The tier program (plan NEXT-NINE, BP-19), in the full demo: a piece's YEARLY CARE at each step, THE CLUB, IN USE;
+  // the birthday credit under IN USE (plan CUSTOMER INTELLIGENCE §3.5 SB.4.5: birthday-credit), on its own stage.
   program,
   // YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1 P.8), on its own stage, its two states in order.
   profile,
@@ -128,7 +134,7 @@ export const CONTENT_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> =
   // The draws in every state; a draw in sizes (plan NEXT LOT §3.6.F), on its own stage.
   draws: (s) => s.variant === 'draws' || s.variant === 'draw-sizes',
   stress: (s) => s.variant === 'stress' && !named('account')(s),
-  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'draws' && s.variant !== 'draw-sizes' && s.variant !== 'stress' && s.variant !== 'pairs' && !ORDER_STAGES.includes(s.variant) && !named('account')(s) && !profile(s) && !wishlist(s),
+  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'draws' && s.variant !== 'draw-sizes' && s.variant !== 'stress' && s.variant !== 'pairs' && !ORDER_STAGES.includes(s.variant) && !named('account')(s) && !profile(s) && !wishlist(s) && !birthday(s),
 });
 
 /** The states of shard `name`, in the order of UI_STATES. */

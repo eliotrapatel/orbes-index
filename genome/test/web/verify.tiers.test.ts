@@ -3,7 +3,9 @@
  * counts in words the reading face sets), the benefits of the tier and of those below it, the way to the next tier
  * (how many more pieces, from how many, what it adds), PALLADIUM the highest, THE CLUB and what a first piece opens
  * for an account without a tier, the note when a listed piece counts for none; a malformed answer shows less, never
- * something wrong. The copy held to the lexicon, and to the server's tiers. Plan NEXT-NINE, BP-19 T1: the tiers at 1, 5
+ * something wrong. The BIRTHDAY CREDIT (plan CUSTOMER INTELLIGENCE §3.5 SB.4.5, step 6.5): IN USE's first row, shown
+ * to an account without a tier with that row only, the note with either credit. The copy held to the lexicon, and to
+ * the server's tiers. Plan NEXT-NINE, BP-19 T1: the tiers at 1, 5
  * and 10 pieces, and the meter of ten dots, one per piece up to PALLADIUM (TIER_DOTS, read from the status's
  * `tierThresholds`, never a typed 5). Pure: no DOM; the page is driven in Chromium by verify.e2e.test.ts.
  */
@@ -99,8 +101,86 @@ describe('the tier at the head of MY PIECES (P-X04)', () => {
     expect(inUseModel({ credit, care: null, gifts: [], creditChannels: ['DRAW', 'LIVE'] })!.note).toBe('ORBES Client Services takes it off the invoice of a piece from a draw or a LIVE RELEASE.');
     expect(inUseModel({ credit, care: null, gifts: [], creditChannels: ['SALON'] })!.note).toBe('ORBES Client Services takes it off the invoice of a piece from THE PRIVATE SALON.');
     expect(inUseModel({ credit, care: null, gifts: [], creditChannels: [] })).toEqual({ label: 'IN USE', rows: [['CREDIT', '€\u00a050 · UNTIL 6 OCT 2027']], note: null });
-    // No tier: no IN USE, whatever is sent.
+    // No tier: none of the tiers' rows, whatever is sent (the birthday credit alone is shown without one, below).
     expect(tierModel({ ...status(0, 0), inUse: { credit: { balanceMinor: 5000, currency: 'EUR', expiresAt: '2027-10-06T09:00:00.000Z' }, care: null, gifts: [], creditChannels: ALL_CHANNELS } }, 0).inUse).toBeNull();
+  });
+
+  it('puts the BIRTHDAY CREDIT first under IN USE, with what is left and until when, and the note with either credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4.5)', () => {
+    // € 20 given on 14 March 2027 for 30 days: until the end of 12 April, Paris (21:59:59.999 UTC).
+    const birthdayCredit = { balanceMinor: 2000, currency: 'EUR', expiresAt: '2027-04-12T21:59:59.999Z' };
+    const credit = { balanceMinor: 5000, currency: 'EUR', expiresAt: '2027-10-06T09:00:00.000Z' };
+    const note = 'ORBES Client Services takes it off the invoice of a piece from a draw, a LIVE RELEASE or THE PRIVATE SALON.';
+    expect(TIER.birthdayCredit).toBe('BIRTHDAY CREDIT');
+    // First, then CREDIT, YEARLY CARE and WELCOME GIFT as before.
+    expect(
+      inUseModel({
+        credit,
+        birthdayCredit,
+        care: { year: 2027, used: 0, allowance: 1 },
+        gifts: [{ tier: 'PLATINE', model: 'ECLIPSE', state: 'PENDING', orderReference: null }],
+        creditChannels: ALL_CHANNELS,
+      }),
+    ).toEqual({
+      label: 'IN USE',
+      rows: [
+        ['BIRTHDAY CREDIT', '€\u00a020 · UNTIL 12 APR 2027'],
+        ['CREDIT', '€\u00a050 · UNTIL 6 OCT 2027'],
+        ['YEARLY CARE', '0 OF 1 PIECE IN 2027'],
+        ['WELCOME GIFT', 'WITH YOUR NEXT ORDER'],
+      ],
+      note,
+    });
+    // The note shows with the birthday credit alone, in the same words, and follows THE PROGRAM's "Credit usable on".
+    expect(inUseModel({ credit: null, birthdayCredit, care: null, gifts: [], creditChannels: ALL_CHANNELS })).toEqual({ label: 'IN USE', rows: [['BIRTHDAY CREDIT', '€\u00a020 · UNTIL 12 APR 2027']], note });
+    expect(inUseModel({ credit: null, birthdayCredit, care: null, gifts: [], creditChannels: ['SALON'] })!.note).toBe('ORBES Client Services takes it off the invoice of a piece from THE PRIVATE SALON.');
+    expect(inUseModel({ credit: null, birthdayCredit, care: null, gifts: [], creditChannels: [] })!.note).toBeNull();
+    // What is left of it, once a part was taken off an order; with cents.
+    expect(inUseModel({ credit: null, birthdayCredit: { ...birthdayCredit, balanceMinor: 550 }, care: null, gifts: [], creditChannels: ALL_CHANNELS })!.rows).toEqual([['BIRTHDAY CREDIT', '€\u00a05.50 · UNTIL 12 APR 2027']]);
+    // Used up, none open, or a status that does not say (a server before it): no row, and no IN USE when it was the only one.
+    for (const none of [{ ...birthdayCredit, balanceMinor: 0 }, null, undefined]) {
+      expect(inUseModel({ credit: null, birthdayCredit: none, care: null, gifts: [], creditChannels: ALL_CHANNELS })).toBeNull();
+      expect(inUseModel({ credit, birthdayCredit: none, care: null, gifts: [], creditChannels: ALL_CHANNELS })!.rows).toEqual([['CREDIT', '€\u00a050 · UNTIL 6 OCT 2027']]);
+    }
+    // Malformed: less is shown, never something wrong.
+    for (const bad of [{ balanceMinor: 20.5, currency: 'EUR', expiresAt: '2027-04-12T21:59:59.999Z' }, { balanceMinor: 2000, currency: 'EUR' }, 'yes']) {
+      expect(inUseModel({ credit: null, birthdayCredit: bad as never, care: null, gifts: [], creditChannels: ALL_CHANNELS }), JSON.stringify(bad)).toBeNull();
+    }
+  });
+
+  it('shows IN USE to an account without a tier with the BIRTHDAY CREDIT only: every account receives it, piece or not', () => {
+    const birthdayCredit = { balanceMinor: 2000, currency: 'EUR', expiresAt: '2027-04-12T21:59:59.999Z' };
+    const m = tierModel({ ...status(0, 0), inUse: { credit: null, birthdayCredit, care: null, gifts: [], creditChannels: ALL_CHANNELS } }, 0);
+    expect(m).toEqual({
+      label: 'THE CLUB',
+      badge: null,
+      meter: null,
+      benefits: [],
+      inUse: { label: 'IN USE', rows: [['BIRTHDAY CREDIT', '€\u00a020 · UNTIL 12 APR 2027']], note: 'ORBES Client Services takes it off the invoice of a piece from a draw, a LIVE RELEASE or THE PRIVATE SALON.' },
+      next: { label: 'NEXT: TITANE', sentence: 'A piece registered to your ORBES account opens TITANE, the first tier of the club:', benefits: lines('TITANE') },
+      top: null,
+      note: null,
+    });
+    // A tier's credit, a yearly care or a welcome gift sent for an account without a tier still wait for their tier: that row only.
+    const waiting = tierModel(
+      {
+        ...status(0, 0),
+        inUse: {
+          credit: { balanceMinor: 5000, currency: 'EUR', expiresAt: '2027-10-06T09:00:00.000Z' },
+          birthdayCredit,
+          care: { year: 2027, used: 0, allowance: 1 },
+          gifts: [{ tier: 'PLATINE', model: 'ECLIPSE', state: 'PENDING', orderReference: null }],
+          creditChannels: ALL_CHANNELS,
+        },
+      },
+      0,
+    );
+    expect(waiting.inUse!.rows).toEqual([['BIRTHDAY CREDIT', '€\u00a020 · UNTIL 12 APR 2027']]);
+    // With a tier, it is the first row of that tier's IN USE.
+    const held = tierModel({ ...status(2, 5), inUse: { credit: { balanceMinor: 5000, currency: 'EUR', expiresAt: '2027-10-06T09:00:00.000Z' }, birthdayCredit, care: null, gifts: [], creditChannels: ALL_CHANNELS } }, 5);
+    expect(held.inUse!.rows.map(([l]) => l)).toEqual(['BIRTHDAY CREDIT', 'CREDIT']);
+    // No status of what is in use, or none open: THE CLUB as before.
+    expect(tierModel(status(0, 0), 0).inUse).toBeNull();
+    expect(tierModel({ ...status(0, 0), inUse: { credit: null, birthdayCredit: null, care: null, gifts: [], creditChannels: ALL_CHANNELS } }, 0).inUse).toBeNull();
   });
 
   it('says PALLADIUM is the highest, with every benefit and no next tier', () => {
@@ -167,7 +247,7 @@ describe('the tier at the head of MY PIECES (P-X04)', () => {
   });
 
   it('writes its copy within the lexicon: no word of §4.5, no "!", the tiers named as the server names them', () => {
-    const copy = [TIER.label, TIER.noneLabel, TIER.pieces(1), TIER.pieces(5), TIER.next('PLATINE'), TIER.nextWay('PLATINE', 4, 5), TIER.first('TITANE'), TIER.top, TIER.counted];
+    const copy = [TIER.label, TIER.noneLabel, TIER.pieces(1), TIER.pieces(5), TIER.next('PLATINE'), TIER.nextWay('PLATINE', 4, 5), TIER.first('TITANE'), TIER.top, TIER.counted, TIER.birthdayCredit];
     expect(findForbidden(copy.join('\n'), [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
     expect(copy.join('\n')).not.toContain('!');
     expect(TIER.top).toContain(CLUB_TIER_NAMES[2]);

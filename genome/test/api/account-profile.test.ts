@@ -3,13 +3,15 @@
  *
  *  - GET /api/v1/account/profile: the account's own profile, the catalogue's choices, the default address in short,
  *    how many are saved and how complete it is; signed out 401; never stored by a cache; no staff field in any reply;
+ *    from step 6.5 (question 14), `birthdayCredit`: THE PROGRAM's amount, currency and days, null once switched off;
  *  - PUT /api/v1/account/profile: the whole profile with the version read, its tastes in the same transaction; the CSRF
  *    token and the same origin; each 400 in its words, the 409s (PROFILE_CHANGED, BIRTH_DATE_SET, BIRTH_DATE_ENTERED)
  *    and the 403 of an account locked while the save was on its way; a bad taste refuses the whole SAVE.
  */
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { accountClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
+import { DEFAULT_PROGRAM, type ClubProgram } from '../../src/server/services/club-program.js';
+import { accountClient, adminClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
 
 /** What a collector may read: the plan's shape, and nothing about staff, the audit or who saved last. */
 const PROFILE_KEYS = ['birthDate', 'birthDateLocked', 'city', 'country', 'firstName', 'heard', 'instagram', 'lastName', 'phone', 'tastes', 'version'];
@@ -77,7 +79,7 @@ describe('YOUR PROFILE routes (plan CUSTOMER INTELLIGENCE §3.1 P.6.2, P.6.3)', 
     expect(res.statusCode).toBe(200);
     expect(res.headers['cache-control']).toBe('no-store');
     const v = safeJson(res) as any;
-    expect(Object.keys(v).sort()).toEqual(['address', 'addresses', 'completion', 'options', 'profile']);
+    expect(Object.keys(v).sort()).toEqual(['address', 'addresses', 'birthdayCredit', 'completion', 'options', 'profile']);
     expect(Object.keys(v.profile).sort()).toEqual(PROFILE_KEYS);
     expect(v.profile).toEqual({
       firstName: 'Owner',
@@ -252,5 +254,47 @@ describe('YOUR PROFILE routes (plan CUSTOMER INTELLIGENCE §3.1 P.6.2, P.6.3)', 
     expect((safeJson(res) as any).profile).toMatchObject({ city: 'Bordeaux', instagram: 'owner.test', version: read.profile.version + 1 });
     expect(res.body).not.toMatch(STAFF_WORDS);
     expect(res.body).not.toContain(staff.id);
+  });
+
+  it('GET and PUT give THE PROGRAM\'s birthday credit for the line under DATE OF BIRTH: its amount, currency and days, an ADMIN\'s change at the next read, null once switched off, and never a grant of the account (question 14)', async () => {
+    const { client, email } = await accountClient(h);
+    const id = await accountIdOf(email);
+    const admin = await adminClient(h, 'ADMIN');
+    const setProgram = async (over: Partial<ClubProgram>) => {
+      const res = await admin.request('PUT', '/api/admin/club/program', { body: { ...DEFAULT_PROGRAM, creditChannels: [...DEFAULT_PROGRAM.creditChannels], ...over } });
+      expect(res.statusCode, res.body).toBe(200);
+    };
+    const read = async () => safeJson(await client.get('/api/v1/account/profile')) as any;
+    try {
+      // THE PROGRAM's defaults: € 20, valid 30 days.
+      const first = await read();
+      expect(first.birthdayCredit).toEqual({ amountMinor: 2_000, currency: 'EUR', days: 30 });
+      // The SAVE's answer, the profile read again, carries it too.
+      const saved = await put(client, whole(first, { city: 'Nantes' }));
+      expect(saved.statusCode).toBe(200);
+      expect((safeJson(saved) as any).birthdayCredit).toEqual({ amountMinor: 2_000, currency: 'EUR', days: 30 });
+      // An ADMIN's new amount, length and currency show at the next read.
+      await setProgram({ birthdayCreditMinor: 2_050, birthdayCreditDays: 15, creditCurrency: 'CHF' });
+      expect((await read()).birthdayCredit).toEqual({ amountMinor: 2_050, currency: 'CHF', days: 15 });
+      // It says THE PROGRAM only: a birthday credit given to this account changes nothing of it, and none is named.
+      await setProgram({});
+      await h.ctx.db
+        .insertInto('tier_grants')
+        .values({ account_id: id, tier: null, kind: 'BIRTHDAY', granted_at: h.clock.now(), amount_minor: 5_500, currency: 'EUR', expires_at: new Date(h.clock.now().getTime() + 30 * 86_400_000), birthday_on: '2026-10-09' })
+        .execute();
+      const res = await client.get('/api/v1/account/profile');
+      expect((safeJson(res) as any).birthdayCredit).toEqual({ amountMinor: 2_000, currency: 'EUR', days: 30 });
+      expect(res.body).not.toMatch(/5500|grant|birthdayOn|birthday_on|expiresAt|balance/);
+      expect(res.body).not.toMatch(STAFF_WORDS);
+      // Switched off by an ADMIN: null, so the line is not drawn; the rest of the profile as before.
+      await setProgram({ birthdayCreditOn: false });
+      const off = await read();
+      expect(off.birthdayCredit).toBeNull();
+      expect(Object.keys(off).sort()).toEqual(['address', 'addresses', 'birthdayCredit', 'completion', 'options', 'profile']);
+      expect(off.profile.city).toBe('Nantes');
+    } finally {
+      await setProgram({});
+    }
+    expect((await read()).birthdayCredit).toEqual({ amountMinor: 2_000, currency: 'EUR', days: 30 });
   });
 });

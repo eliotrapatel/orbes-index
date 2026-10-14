@@ -411,6 +411,24 @@ async function yourProfile(run: StateRun, tastes: boolean): Promise<void> {
 }
 
 /**
+ * Plan CUSTOMER INTELLIGENCE §3.5 SB.4.5, the state birthday-credit (its own stage): the account without a piece
+ * (t.nguyen) was born on today's day, its date of birth entered on 20 September, before its birthday; the daily grant
+ * (BirthdayCreditService.grantDue, as housekeeping runs it) then gives its birthday credit: € 20 for 30 days, until
+ * 3 November 2026. Written once.
+ */
+async function birthdayCredit(run: StateRun): Promise<void> {
+  const { db, services } = run.stage.ctx;
+  const newcomer = run.demo.accounts.newcomer!;
+  if (await db.selectFrom('tier_grants').select('id').where('account_id', '=', newcomer.id).where('kind', '=', 'BIRTHDAY').executeTakeFirst()) return;
+  const read = await services.profiles.forCollector(newcomer.id);
+  // Paris and UTC name the same day at the stage's hour (18:49 in Paris).
+  await services.profiles.save(newcomer.id, { version: read.profile.version, birthDate: `1994-${NOCTURNE_NOW.toISOString().slice(5, 10)}` }, newcomer.actor);
+  const entered = new Date(NOCTURNE_NOW.getTime() - 15 * 86_400_000);
+  await db.updateTable('account_profiles').set({ birth_date_at: entered, birth_date_collector_at: entered }).where('account_id', '=', newcomer.id).execute();
+  if ((await services.birthdayCredits.grantDue(NOCTURNE_NOW)) !== 1) throw new Error('birthday-credit: the daily grant gave no credit to the account without a piece');
+}
+
+/**
  * Plan CUSTOMER INTELLIGENCE §3.2 W.10.2, the state wishlist (the stage wishes): your three wishes, the latest first:
  * MONOLITHE in blue (shown; the heart of sheet-wished, or written here), MONOLITHE in gold wished two days before and
  * discontinued since (shown, DISCONTINUED · 2026), ZENITH wished five days before and hidden since (NOT IN THE
@@ -1088,6 +1106,23 @@ export const UI_STATES: readonly UiState[] = [
     as: 'platine',
     path: at('/verify'),
     act: (run) => openAccountSheet(run),
+    ready: '.n-account:not([hidden]) .n-account__in-use',
+    viewport: true,
+  },
+  // Plan CUSTOMER INTELLIGENCE §3.5 SB.4.5: the birthday credit under IN USE for an account without a tier, under THE
+  // CLUB and what a first piece opens; on its own stage (birthdayCredit), so no other state holds a date of birth.
+  {
+    id: 'birthday-credit',
+    title: 'The account sheet of an account without a piece, on its birthday: THE CLUB, what a first piece opens, IN USE: BIRTHDAY CREDIT € 20 · UNTIL 3 NOV 2026',
+    refs: ['CUSTOMER INTELLIGENCE §3.5 SB.4.5'],
+    variant: 'birthday-credit',
+    as: 'newcomer',
+    path: at('/verify'),
+    mutates: true,
+    act: async (run) => {
+      await birthdayCredit(run);
+      await openAccountSheet(run);
+    },
     ready: '.n-account:not([hidden]) .n-account__in-use',
     viewport: true,
   },

@@ -8,7 +8,7 @@ import { COUNTRY_CODES, countryName, isCountryCode } from '../../shared/countrie
 import { CALLING_CODES, latestBirthDate, TASTES_MAX, toInstagram } from '../../shared/profile-rules.js';
 import { ACCOUNT_PROFILE } from './copy.js';
 import type { AccountProfileInput, AccountProfileView, ProfileCompletionKey, ProfileTaste } from './types.js';
-import { formatDate, formatDateLong } from './view-model.js';
+import { formatDate, formatDateLong, formatMoney } from './view-model.js';
 
 export { toInstagram as instagramFromInput } from '../../shared/profile-rules.js';
 
@@ -61,6 +61,18 @@ export function birthDateOf(day: string, month: string, year: string): { kind: '
   if (chosen === 0) return { kind: 'none' };
   if (chosen < 3) return { kind: 'partial' };
   return { kind: 'date', date: `${year}-${month}-${day}` };
+}
+
+/**
+ * The last line under DATE OF BIRTH (question 14): 'On your birthday, ORBES gives you a credit of € 20, valid 30 days.',
+ * from THE PROGRAM's birthday credit as the profile's read gives it. Null (no line) when it is switched off, missing
+ * (a server before it) or malformed: never a promise the server did not make.
+ */
+export function birthCreditLine(credit: AccountProfileView['birthdayCredit'] | undefined): string | null {
+  if (!credit || typeof credit !== 'object') return null;
+  const { amountMinor, currency, days } = credit;
+  if (!Number.isInteger(amountMinor) || amountMinor <= 0 || typeof currency !== 'string' || !/^[A-Z]{3}$/.test(currency) || !Number.isInteger(days) || days < 1) return null;
+  return ACCOUNT_PROFILE.birthCredit(formatMoney(amountMinor, currency), days);
 }
 
 /** A date of birth in words: '14 MARCH 1994'. */

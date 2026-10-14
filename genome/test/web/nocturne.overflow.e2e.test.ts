@@ -60,6 +60,9 @@ const NARROW_TOO = [
   // with NO LONGER IN THE COLLECTION, at 375, 360 and 320 px too.
   'account-profile',
   'profile-tastes',
+  // The birthday credit under IN USE for an account without a tier (plan CUSTOMER INTELLIGENCE §3.5 SB.4.5), at 375, 360
+  // and 320 px too.
+  'birthday-credit',
 ];
 /** Of NARROW_TOO, opened at the stage's 390 px only: the LIVE room with the guarantee's line. */
 const STAGE_ONLY = ['room-guaranteed'];

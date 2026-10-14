@@ -78,6 +78,7 @@ import { countryOptions } from '../addresses-model.js';
 import { guaranteeBlocks } from '../guarantee-model.js';
 import {
   birthDateOf,
+  birthCreditLine,
   birthDateWords,
   codeOptions,
   completionLine,
@@ -458,28 +459,31 @@ export class AccountSheet {
    * YOUR TIER (P-X04), moved from MY PIECES (decision 10), as tier-model.ts reads it: the tier and the pieces it counts,
    * its ten dots (TIER_DOTS), the benefits of the tier and of those below it, NEXT and what it adds (PALLADIUM: the highest);
    * without a tier, THE CLUB and what a first piece opens; the note of a piece that counts for none. Nothing when the
-   * status could not be read.
+   * status could not be read. IN USE (tier-model.ts inUseModel) with the BIRTHDAY CREDIT first while one is open (plan
+   * CUSTOMER INTELLIGENCE §3.5 SB.4.5): for an account without a tier too, then under what a first piece opens.
    */
   private tierBlock(): HTMLElement | null {
     if (!this.club) return null;
     const m = tierModel(this.club, this.listed);
     const list = (items: string[], extra?: string) =>
       items.length ? h('ul', { class: ['n-account__benefits', extra] }, ...items.map((l) => h('li', { class: 'n-sm n-account__benefit', text: l }))) : null;
+    const inUse = m.inUse
+      ? h(
+          'div',
+          { class: 'n-account__in-use', attrs: { 'aria-labelledby': 'account-in-use' } },
+          h('p', { class: 'n-g n-lb n-account__in-use-label', id: 'account-in-use', text: m.inUse.label }),
+          definitionList(m.inUse.rows, { kind: 'kv', extraClass: 'n-account__in-use-rows' }),
+          m.inUse.note ? h('p', { class: 'n-sm n-account__in-use-note', text: m.inUse.note }) : null,
+        )
+      : null;
     const parts: (HTMLElement | null)[] = [
       h('p', { class: 'n-g n-lb', id: 'account-tier', text: m.label }),
       m.badge
         ? h('div', { class: 'n-sb n-account__badge', data: { tier: m.badge.name } }, h('span', { class: 'n-g n-t2 n-account__tier-name', text: m.badge.name }), h('span', { class: 'n-sm n-account__tier-pieces', text: m.badge.pieces }))
         : null,
       m.meter ? tierDots(m.meter.on, m.meter.of, { start: true }) : null,
-      m.inUse
-        ? h(
-            'div',
-            { class: 'n-account__in-use', attrs: { 'aria-labelledby': 'account-in-use' } },
-            h('p', { class: 'n-g n-lb n-account__in-use-label', id: 'account-in-use', text: m.inUse.label }),
-            definitionList(m.inUse.rows, { kind: 'kv', extraClass: 'n-account__in-use-rows' }),
-            m.inUse.note ? h('p', { class: 'n-sm n-account__in-use-note', text: m.inUse.note }) : null,
-          )
-        : null,
+      // With a tier, IN USE right under its dots; without one, under what a first piece opens (the birthday credit alone).
+      m.badge ? inUse : null,
       list(m.benefits),
       m.next
         ? h(
@@ -490,6 +494,7 @@ export class AccountSheet {
             list(m.next.benefits, 'n-account__benefits--next'),
           )
         : null,
+      m.badge ? null : inUse,
       m.top ? h('p', { class: 'n-sm n-account__top', text: m.top }) : null,
       m.note ? h('p', { class: 'n-sm n-account__note', text: m.note }) : null,
     ];
@@ -843,6 +848,9 @@ export class AccountSheet {
       l.dataset.key = 'profile-write';
       return l;
     };
+    // The last line under DATE OF BIRTH, in each of its states (question 14): THE PROGRAM's birthday credit; none while it gives none.
+    const creditWords = birthCreditLine(view.birthdayCredit);
+    const creditLine = creditWords === null ? null : h('p', { class: 'n-sm n-fld__hint', id: 'profile-dob-credit', text: creditWords });
     if (p.birthDate !== null || p.birthDateLocked) {
       dob = h(
         'div',
@@ -851,6 +859,7 @@ export class AccountSheet {
         p.birthDate !== null ? h('p', { class: 'n-tx n-ivc n-profile__dob-date' }, ...withNumerals(birthDateWords(p.birthDate))) : null,
         h('p', { class: 'n-sm n-fld__hint', text: p.birthDate !== null ? P.birthSet : P.birthCleared }),
         h('p', { class: 'n-profile__write-line' }, writeLink()),
+        creditLine,
       );
     } else {
       const o = dobOptions(parisToday());
@@ -869,10 +878,11 @@ export class AccountSheet {
       };
       dob = h(
         'div',
-        { class: 'n-fld-group n-profile__dob-group', attrs: { role: 'group', 'aria-labelledby': 'profile-dob-label', 'aria-describedby': 'profile-dob-hint' } },
+        { class: 'n-fld-group n-profile__dob-group', attrs: { role: 'group', 'aria-labelledby': 'profile-dob-label', 'aria-describedby': creditLine ? 'profile-dob-hint profile-dob-credit' : 'profile-dob-hint' } },
         h('p', { class: 'n-fld' }, h('span', { class: 'n-g n-lab', id: 'profile-dob-label', text: P.birthDate })),
         h('div', { class: 'n-profile__dob' }, part('profile-dob-day', P.day, o.days, 'day'), part('profile-dob-month', P.month, o.months, 'month'), part('profile-dob-year', P.year, o.years, 'year')),
         h('p', { class: 'n-sm n-fld__hint', id: 'profile-dob-hint', text: P.birthHint }),
+        creditLine,
       );
     }
 

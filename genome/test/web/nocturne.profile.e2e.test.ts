@@ -12,16 +12,21 @@
  *  - changed meanwhile by ORBES Client Services: 409, the profile read again and drawn as it is now, the sentence;
  *  - CONFIRM YOUR DATE OF BIRTH: a second press, a change to the date going back to SAVE; then the date read only and
  *    WRITE TO ORBES CLIENT SERVICES opening MESSAGES;
+ *  - the birthday line (question 14; plan §3.5 SB.4.5, step 6.5), the last line under DATE OF BIRTH in its three states
+ *    (not entered, saved, removed by ORBES Client Services): THE PROGRAM's amount and days, an ADMIN's change at the
+ *    next read, and no line once switched off;
+ *  - the birthday credit in the account sheet of an account without a tier (the state birthday-credit): THE CLUB, what
+ *    a first piece opens, then IN USE with BIRTHDAY CREDIT alone and the note; its YOUR PROFILE with the birthday line;
  *  - at 390, 375, 360 and 320 px: no sideways scroll, every control's 44 px zone and 10 px type.
  * No CSP violation, no page error.
  */
 import { existsSync } from 'node:fs';
 import type { Page, Request } from 'playwright-core';
 import { describe, expect, it } from 'vitest';
-import { ACCOUNT_PROFILE, MESSAGES, REQUEST_ERRORS, TASTES } from '../../src/web/verify/copy.js';
+import { ACCOUNT_PROFILE, MESSAGES, REQUEST_ERRORS, TASTES, TIER } from '../../src/web/verify/copy.js';
 import { NOCTURNE_ADMIN, NOCTURNE_PASSWORD, type NocturneDemo } from '../support/nocturne-demo.js';
 import { eachState } from '../support/nocturne-stage.js';
-import { openState, settle, type OpenedState, type UiState } from '../support/nocturne-states.js';
+import { openState, settle, stateById, type OpenedState, type UiState } from '../support/nocturne-states.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
 import { CHROMIUM_PATH, type UiStage } from '../support/ui-stage.js';
 
@@ -228,6 +233,14 @@ const CASES: { state: UiState; check: Check }[] = [
       expect(await view(page).locator('.n-profile__note').getAttribute('role')).toBe('alert');
       expect(await view(page).locator('#profile-city').inputValue()).toBe('Lyon');
 
+      // ── The birthday line (question 14), the last line under DATE OF BIRTH while it is not entered: THE PROGRAM's words ──
+      const creditLine = ACCOUNT_PROFILE.birthCredit('€ 20', 30);
+      expect(creditLine).toBe('On your birthday, ORBES gives you a credit of € 20, valid 30 days.');
+      expect((await view(page).locator('.n-profile__dob-group > *').last().getAttribute('id'))).toBe('profile-dob-credit');
+      expect(norm(await view(page).locator('#profile-dob-credit').innerText())).toBe(creditLine);
+      expect(await view(page).locator('.n-profile__dob-group').getAttribute('aria-describedby')).toBe('profile-dob-hint profile-dob-credit');
+      expect((await view(page).locator('.n-profile__dob-group .n-fld__hint').allInnerTexts()).map(norm)).toEqual([ACCOUNT_PROFILE.birthHint, creditLine]);
+
       // ── CONFIRM YOUR DATE OF BIRTH: a second press; a change to the date goes back to SAVE ──
       await view(page).locator('#profile-dob-day').selectOption('14');
       await view(page).locator('#profile-dob-month').selectOption('03');
@@ -252,12 +265,68 @@ const CASES: { state: UiState; check: Check }[] = [
       await view(page).locator('form.form--profile').waitFor({ timeout: 20_000 });
       expect(norm(await view(page).locator('.n-profile__dob-date').innerText())).toBe('14 MARCH 1994');
       expect(await view(page).locator('#profile-dob-day').count()).toBe(0);
-      expect(norm(await view(page).locator('.n-profile__dob-set .n-fld__hint').innerText())).toBe(ACCOUNT_PROFILE.birthSet);
+      // Its hint, then the birthday line, the last under DATE OF BIRTH once the date is saved too.
+      expect((await view(page).locator('.n-profile__dob-set .n-fld__hint').allInnerTexts()).map(norm)).toEqual([ACCOUNT_PROFILE.birthSet, creditLine]);
+      expect((await view(page).locator('.n-profile__dob-set > *').last().getAttribute('id'))).toBe('profile-dob-credit');
       expect(norm(await view(page).locator('.n-profile__completion').innerText())).toBe(ACCOUNT_PROFILE.done);
       await fitsEveryPhone(page, 'YOUR PROFILE complete', failures);
+
+      // ── The date removed by ORBES Client Services: the birthday line still the last; THE PROGRAM switched off: no line ──
+      const staff = await adminActor(stage);
+      // The sheet reads the profile each time it opens: closed, then opened again.
+      const reopen = async () => {
+        await sheet(page).locator('.n-account__close').click();
+        await page.locator('.n-account:not([hidden])').waitFor({ state: 'detached', timeout: 20_000 }).catch(() => {});
+        await expect.poll(() => sheet(page).count(), POLL).toBe(0);
+        await openSheet(page);
+        await openProfile(page);
+        await view(page).locator('form.form--profile').waitFor({ timeout: 20_000 });
+      };
+      await stage.ctx.services.profiles.setBirthDateByStaff(id, { version: (await stage.ctx.services.profiles.forCollector(id)).profile.version, birthDate: null, why: 'Entered by mistake, the client says.' }, staff);
+      await reopen();
+      expect(await view(page).locator('.n-profile__dob-date').count()).toBe(0);
+      expect(await view(page).locator('#profile-dob-day').count()).toBe(0);
+      expect((await view(page).locator('.n-profile__dob-set .n-fld__hint').allInnerTexts()).map(norm)).toEqual([ACCOUNT_PROFILE.birthCleared, creditLine]);
+      const program = await stage.ctx.services.clubProgram.read();
+      try {
+        // An ADMIN's change shows at the next read: another amount and length.
+        await stage.ctx.services.clubProgram.update({ ...program, birthdayCreditMinor: 2_050, birthdayCreditDays: 15 }, staff);
+        await reopen();
+        expect(norm(await view(page).locator('#profile-dob-credit').innerText())).toBe('On your birthday, ORBES gives you a credit of € 20.50, valid 15 days.');
+        await fitsEveryPhone(page, 'YOUR PROFILE, the date removed', failures);
+        await stage.ctx.services.clubProgram.update({ ...program, birthdayCreditOn: false }, staff);
+        await reopen();
+        expect(await view(page).locator('#profile-dob-credit').count()).toBe(0);
+        expect((await view(page).locator('.n-profile__dob-set .n-fld__hint').allInnerTexts()).map(norm)).toEqual([ACCOUNT_PROFILE.birthCleared]);
+        expect(await view(page).getByText(/On your birthday/).count()).toBe(0);
+      } finally {
+        await stage.ctx.services.clubProgram.update(program, staff);
+      }
       await view(page).getByRole('button', { name: MESSAGES.write }).click();
       await sheet(page).locator('#account-messages-title').waitFor({ timeout: 20_000 });
       expect(norm(await sheet(page).locator('#account-messages-title').innerText())).toBe(MESSAGES.title);
+    },
+  },
+  {
+    // The birthday credit (plan §3.5 SB.4.5): the stage's account without a piece, its date of birth entered before its
+    // birthday, today; the daily grant gave its credit, and the state opens the account sheet.
+    state: { ...stateById('birthday-credit'), id: 'profile-e2e-birthday-credit' },
+    check: async ({ page }, _demo, failures) => {
+      const tier = sheet(page).locator('.n-account__tier');
+      // THE CLUB, what a first piece opens, then IN USE: no badge, no dots.
+      expect(norm(await tier.locator('#account-tier').innerText())).toBe(TIER.noneLabel);
+      expect(await tier.evaluate((el) => [...el.children].map((c) => c.id || [...c.classList].find((k) => k.startsWith('n-account__')) || c.tagName))).toEqual(['account-tier', 'n-account__next', 'n-account__in-use']);
+      expect(norm(await tier.locator('#account-in-use').innerText())).toBe(TIER.inUse);
+      // One row, BIRTHDAY CREDIT: € 20 until the end of its 30th day (5 October to 3 November 2026), then the note.
+      expect((await tier.locator('.n-account__in-use-rows dt').allInnerTexts()).map(norm)).toEqual([TIER.birthdayCredit]);
+      expect((await tier.locator('.n-account__in-use-rows dd').allInnerTexts()).map(norm)).toEqual(['€ 20 · UNTIL 3 NOV 2026']);
+      expect(norm(await tier.locator('.n-account__in-use-note').innerText())).toBe(TIER.creditNote(['DRAW', 'LIVE', 'SALON']));
+      await fitsEveryPhone(page, 'the account sheet, BIRTHDAY CREDIT without a tier', failures);
+      // YOUR PROFILE of that account: its date saved, the birthday line the last under DATE OF BIRTH.
+      await openProfile(page);
+      await view(page).locator('form.form--profile').waitFor({ timeout: 20_000 });
+      expect(norm(await view(page).locator('.n-profile__dob-date').innerText())).toBe('5 OCTOBER 1994');
+      expect((await view(page).locator('.n-profile__dob-set .n-fld__hint').allInnerTexts()).map(norm)).toEqual([ACCOUNT_PROFILE.birthSet, ACCOUNT_PROFILE.birthCredit('€ 20', 30)]);
     },
   },
 ];

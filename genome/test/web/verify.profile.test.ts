@@ -2,7 +2,8 @@
  * YOUR PROFILE's model (src/web/verify/profile-model.ts; plan CUSTOMER INTELLIGENCE §3.1 P.8, §3.2 W.10.3, P.16): the
  * completion sentence and the row's line, the missing list's commas and 'and', the date of birth's options and how its
  * three selects read, the COUNTRY CODE following COUNTRY until changed by hand, the phone shown again, YOUR TASTES' groups
- * (the retired at the end, the 30 cap), and what SAVE sends. Pure: no DOM. The view itself is driven in Chromium by
+ * (the retired at the end, the 30 cap), what SAVE sends, and the birthday line under DATE OF BIRTH (question 14; step 6.5).
+ * Pure: no DOM. The view itself is driven in Chromium by
  * test/web/nocturne.profile.e2e.test.ts.
  */
 import { describe, expect, it } from 'vitest';
@@ -10,6 +11,7 @@ import { COUNTRY_CODES } from '../../src/shared/countries.js';
 import { CALLING_CODES, toInstagram } from '../../src/shared/profile-rules.js';
 import { ACCOUNT_PROFILE } from '../../src/web/verify/copy.js';
 import {
+  birthCreditLine,
   birthDateOf,
   birthDateWords,
   codeOptions,
@@ -29,6 +31,7 @@ import {
   tasteToggle,
 } from '../../src/web/verify/profile-model.js';
 import type { AccountProfileView } from '../../src/web/verify/types.js';
+import { formatMoney } from '../../src/web/verify/view-model.js';
 
 const OTHER = '8d2f0c55-6f0e-4bb7-9d41-6a1a7f3f0c01';
 const FRIEND = '8d2f0c55-6f0e-4bb7-9d41-6a1a7f3f0c02';
@@ -66,6 +69,8 @@ function view(over: Partial<AccountProfileView['profile']> = {}, rest: Partial<O
     address: null,
     addresses: 0,
     completion: { percent: 0, missing: ['NAME', 'COUNTRY', 'BIRTH_DATE', 'CITY', 'ADDRESS', 'PHONE', 'INSTAGRAM', 'PIECES', 'FINISHES', 'HEARD'] },
+    // THE PROGRAM's birthday credit, at its defaults (§3.5 SB.4.5).
+    birthdayCredit: { amountMinor: 2_000, currency: 'EUR', days: 30 },
     ...rest,
   };
 }
@@ -118,6 +123,41 @@ describe('YOUR PROFILE: the date of birth (§3.1 P.8.2)', () => {
   it('writes a date of birth in words, as CONFIRM YOUR DATE OF BIRTH says it', () => {
     expect(birthDateWords('1994-03-14')).toBe('14 MARCH 1994');
     expect(ACCOUNT_PROFILE.birthConfirmLine(birthDateWords('1994-03-14'))).toBe('14 MARCH 1994. Once saved, only ORBES Client Services can change it.');
+  });
+});
+
+describe('YOUR PROFILE: the birthday line under DATE OF BIRTH (§3.1 P.8.2, §3.5 SB.4.5; question 14)', () => {
+  /** The app writes money with a no-break space after its sign (view-model.ts formatMoney). */
+  const spaced = (line: string | null) => line?.replace(/\u00a0/g, ' ') ?? null;
+
+  it('says exactly THE PROGRAM\'s birthday credit with its defaults: € 20, valid 30 days', () => {
+    expect(spaced(birthCreditLine(view().birthdayCredit))).toBe('On your birthday, ORBES gives you a credit of € 20, valid 30 days.');
+    expect(birthCreditLine(view().birthdayCredit)).toBe(ACCOUNT_PROFILE.birthCredit(formatMoney(2_000, 'EUR'), 30));
+  });
+
+  it('follows THE PROGRAM: another amount, another length, another currency', () => {
+    expect(spaced(birthCreditLine({ amountMinor: 2_050, currency: 'EUR', days: 15 }))).toBe('On your birthday, ORBES gives you a credit of € 20.50, valid 15 days.');
+    expect(spaced(birthCreditLine({ amountMinor: 150_000, currency: 'CHF', days: 365 }))).toBe('On your birthday, ORBES gives you a credit of CHF 1 500, valid 365 days.');
+    expect(spaced(birthCreditLine({ amountMinor: 2_000, currency: 'GBP', days: 1 }))).toBe('On your birthday, ORBES gives you a credit of £ 20, valid 1 day.');
+  });
+
+  it('is the same line in the three states of the date: not entered, saved, and removed by ORBES Client Services', () => {
+    const line = 'On your birthday, ORBES gives you a credit of € 20, valid 30 days.';
+    const unset = view();
+    const set = view({ birthDate: '1994-03-14', birthDateLocked: true });
+    const removed = view({ birthDate: null, birthDateLocked: true });
+    for (const v of [unset, set, removed]) expect(spaced(birthCreditLine(v.birthdayCredit))).toBe(line);
+    // It names THE PROGRAM only: the date of birth is not in it.
+    expect(birthCreditLine(set.birthdayCredit)).not.toContain('1994');
+  });
+
+  it('is absent when THE PROGRAM gives none (null), when the server does not say (a reply without it), and when what it says cannot be read', () => {
+    expect(birthCreditLine(view({}, { birthdayCredit: null }).birthdayCredit)).toBeNull();
+    const { birthdayCredit: _left, ...before } = view();
+    expect(birthCreditLine((before as Partial<AccountProfileView>).birthdayCredit)).toBeNull();
+    for (const bad of [{ amountMinor: 0, currency: 'EUR', days: 30 }, { amountMinor: 20.5, currency: 'EUR', days: 30 }, { amountMinor: 2_000, currency: 'euro', days: 30 }, { amountMinor: 2_000, currency: 'EUR', days: 0 }, { amountMinor: 2_000, currency: 'EUR' }, 'yes']) {
+      expect(birthCreditLine(bad as unknown as AccountProfileView['birthdayCredit']), JSON.stringify(bad)).toBeNull();
+    }
   });
 });
 

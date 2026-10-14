@@ -70,6 +70,10 @@
  *   wishes            the full story; its states write YOUR WISHLIST for you (plan CUSTOMER INTELLIGENCE §3.2 W.10): the
  *                     heart pressed on MONOLITHE in blue (sheet-wished); YOUR WISHLIST empty, then with three wishes,
  *                     MONOLITHE in gold discontinued and ZENITH hidden since (wishlist-empty, wishlist)
+ *   birthday-credit   the full story; its one state gives the account without a piece (t.nguyen) a date of birth
+ *                     entered before its birthday, today, and the daily grant its birthday credit (plan CUSTOMER
+ *                     INTELLIGENCE §3.5 SB.4.5): IN USE, BIRTHDAY CREDIT, for an account without a tier. On its own
+ *                     stage, so no other state holds a date of birth
  *
  * Ids written by the server (scan references, order and entry references, genomes, invoice numbers) are the server's;
  * the parity tool's comparisons treat them as live data.
@@ -111,7 +115,8 @@ export type DemoVariant =
   | 'orders-case'
   | 'account-addresses'
   | 'account-profile'
-  | 'wishes';
+  | 'wishes'
+  | 'birthday-credit';
 
 export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'full',
@@ -135,6 +140,7 @@ export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'account-addresses',
   'account-profile',
   'wishes',
+  'birthday-credit',
 ]);
 
 /** NOW: Monday 5 October 2026, 18:49 in Paris (16:49 UTC), the boards' afternoon. Every clock of the stage is fixed here. */
@@ -237,7 +243,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
   // claim-waiting stage (plan NEXT LOT §3.4) tells the full story, its state writing the rest.
   // The draw-sizes stage (plan NEXT LOT §3.6.F) tells the full story, then adds a draw in sizes, open. The stages of the
   // collector's side of an order (plan NEXT LOT §3.6) tell the full story, their state writing the rest.
-  const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes'] as const;
+  const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes', 'birthday-credit'] as const;
   const story = ((OWN_STAGES as readonly DemoVariant[]).includes(variant) ? 'full' : variant) as Exclude<DemoVariant, (typeof OWN_STAGES)[number]>;
   if (story === 'empty') await seedEmpty(w);
   else if (story === 'stress') await seedStress(w);

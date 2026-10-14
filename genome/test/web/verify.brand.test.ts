@@ -741,6 +741,12 @@ describe('verify app: one button to ORBES Client Services, the email under FORGO
     expect(verifyCopy.ACCOUNT_PROFILE.missing(['your phone', 'your date of birth', 'your Instagram'])).toBe('Missing: your phone, your date of birth and your Instagram.');
     expect(verifyCopy.ACCOUNT_PROFILE.percent(60)).toBe('Your profile is 60% complete.');
     expect(verifyCopy.ACCOUNT_PROFILE.birthConfirmLine('14 MARCH 1994')).toBe('14 MARCH 1994. Once saved, only ORBES Client Services can change it.');
+    // The birthday line under DATE OF BIRTH (question 14 of 8 October 2026; plan §3.5 SB.4.5), and IN USE's row.
+    const birthday = [verifyCopy.ACCOUNT_PROFILE.birthCredit('€ 20', 30), verifyCopy.ACCOUNT_PROFILE.birthCredit('€ 20.50', 1), verifyCopy.TIER.birthdayCredit];
+    expect(birthday).toEqual(['On your birthday, ORBES gives you a credit of € 20, valid 30 days.', 'On your birthday, ORBES gives you a credit of € 20.50, valid 1 day.', 'BIRTHDAY CREDIT']);
+    expect(birthday.join('\n')).not.toContain('!');
+    expect(findForbidden(birthday.join('\n'), [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
+    expect(birthday.join('\n')).not.toMatch(/product|atelier|handmade|craft|gift/i);
     expect(verifyCopy.ACCOUNT_PROFILE.groups).toEqual({ you: 'YOU', where: 'WHERE YOU ARE', contact: 'CONTACT', tastes: 'YOUR TASTES', found: 'HOW YOU FOUND ORBES' });
     expect(verifyCopy.TASTES).toEqual({
       title: 'YOUR TASTES',

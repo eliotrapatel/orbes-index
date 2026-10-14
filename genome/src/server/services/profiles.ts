@@ -10,7 +10,8 @@
  *                  `heard_option.setup`); a renamed answer is never created again.
  *   options        what the collector can choose: the catalogue's pieces and finishes (TasteService), the answers offered.
  *   forCollector   GET /api/v1/account/profile: the profile, the choices, the default address in short, how many are
- *                  saved, and how complete it is. No staff name, no author, no audit data.
+ *                  saved, how complete it is, and THE PROGRAM's birthday credit (its amount, currency and days; null
+ *                  when off) for the line under DATE OF BIRTH. No staff name, no author, no audit data.
  *   save           PUT /api/v1/account/profile: the whole profile with its tastes, in one transaction (below).
  *   saveByStaff    Client Services' Edit the profile: the same without the date of birth; a LOCKED account included.
  *   setBirthDateByStaff  Client Services' Change the date of birth (step 5.4): set, changed or removed, with the reason
@@ -51,6 +52,7 @@ import {
 import { SYSTEM_ACTOR, systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import { customerAccountLocked } from './auth.js';
+import { readProgram } from './club-program.js';
 import { countedCollector, houseAccount } from './population.js';
 import { insertNote } from './client-notes.js';
 import { profileName } from './sign-up.js';
@@ -109,6 +111,12 @@ export interface CollectorProfileView {
   /** How many addresses are saved. */
   addresses: number;
   completion: ProfileCompletion;
+  /**
+   * THE PROGRAM's birthday credit (plan §3.5 SB.4.5, question 14 of 8 October 2026), for the line under DATE OF BIRTH:
+   * its amount, the credits' currency and its days. Null while it is switched off, or when THE PROGRAM cannot be read.
+   * THE PROGRAM's words only: nothing about this account's grants.
+   */
+  birthdayCredit: { amountMinor: number; currency: string; days: number } | null;
 }
 
 /** What the role does not read on the client sheet (§3.0 (h)). */
@@ -378,7 +386,18 @@ export class ProfileService {
       address: g.address ? { name: g.address.name, firstLine: g.address.address.split('\n')[0]!.trim(), country: g.address.country } : null,
       addresses: g.addresses,
       completion: g.completion,
+      birthdayCredit: await this.birthdayCredit(db),
     };
+  }
+
+  /** THE PROGRAM's birthday credit as YOUR PROFILE states it; null when off, or when THE PROGRAM cannot be read (the line is then not drawn). */
+  private async birthdayCredit(db: Db): Promise<CollectorProfileView['birthdayCredit']> {
+    try {
+      const program = await readProgram(db);
+      return program.birthdayCreditOn ? { amountMinor: program.birthdayCreditMinor, currency: program.creditCurrency, days: program.birthdayCreditDays } : null;
+    } catch {
+      return null;
+    }
   }
 
   /**

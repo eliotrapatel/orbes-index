@@ -18,6 +18,10 @@
  * the year (no row when the tier gives none), a WELCOME GIFT while its tier has an active gift model (WITH YOUR NEXT
  * ORDER, then WITH ORDER OR-… until it is delivered). The program's lines come before the tiers' words, in the
  * benefits and in NEXT's.
+ *
+ * The BIRTHDAY CREDIT (plan CUSTOMER INTELLIGENCE §3.5 SB.4.5) is IN USE's first row while one is open, with what is
+ * left and until when, as CREDIT reads. It is given to every account, piece or not: without a tier, IN USE shows that
+ * row alone (the tiers' credit, care and gifts wait for their tier). The note under the rows shows with either credit.
  */
 import { TIER } from './copy.js';
 import type { ClubInUse, ClubStatus, ClubTierName, CreditChannel } from './types.js';
@@ -48,7 +52,7 @@ export interface TierModel {
   meter: { on: number; of: number } | null;
   /** The program's lines for the tier, then the words of the tier and of those below it, lowest first; [] without a tier. */
   benefits: string[];
-  /** IN USE (BP-19 T10): its rows, and the credit's note when a credit is in it; null when no row exists. */
+  /** IN USE (BP-19 T10): its rows, and the credit's note when a credit (a tier's or the birthday's) is in it; null when no row exists. */
   inUse: { label: string; rows: (readonly [string, string])[]; note: string | null } | null;
   /** The way to the next tier; null at the highest, or when the server did not say. */
   next: { label: string; sentence: string; benefits: string[] } | null;
@@ -66,6 +70,10 @@ const count = (v: unknown): number => (typeof v === 'number' && Number.isInteger
 export function inUseModel(u: ClubInUse | null | undefined): TierModel['inUse'] {
   if (!u || typeof u !== 'object') return null;
   const rows: (readonly [string, string])[] = [];
+  const b = u.birthdayCredit;
+  if (b && Number.isInteger(b.balanceMinor) && b.balanceMinor > 0 && typeof b.currency === 'string' && typeof b.expiresAt === 'string') {
+    rows.push([TIER.birthdayCredit, TIER.creditValue(formatMoney(b.balanceMinor, b.currency), formatDate(b.expiresAt))]);
+  }
   const c = u.credit;
   if (c && Number.isInteger(c.balanceMinor) && c.balanceMinor > 0 && typeof c.currency === 'string' && typeof c.expiresAt === 'string') {
     rows.push([TIER.credit, TIER.creditValue(formatMoney(c.balanceMinor, c.currency), formatDate(c.expiresAt))]);
@@ -82,7 +90,7 @@ export function inUseModel(u: ClubInUse | null | undefined): TierModel['inUse'] 
   if (rows.length === 0) return null;
   // The note names the orders THE PROGRAM takes the credit off, in its order; none known, no note (never a promise).
   const channels = Array.isArray(u.creditChannels) ? CREDIT_CHANNELS.filter((ch) => u.creditChannels.includes(ch)) : [];
-  return { label: TIER.inUse, rows, note: rows.some(([l]) => l === TIER.credit) && channels.length > 0 ? TIER.creditNote(channels) : null };
+  return { label: TIER.inUse, rows, note: rows.some(([l]) => l === TIER.credit || l === TIER.birthdayCredit) && channels.length > 0 ? TIER.creditNote(channels) : null };
 }
 
 export function tierModel(status: Pick<ClubStatus, 'tier' | 'pieces'> & Partial<Pick<ClubStatus, 'benefits' | 'next' | 'tierThresholds' | 'program' | 'inUse'>>, listed = 0): TierModel {
@@ -106,7 +114,8 @@ export function tierModel(status: Pick<ClubStatus, 'tier' | 'pieces'> & Partial<
     badge: name ? { name, pieces: TIER.pieces(pieces) } : null,
     meter: name ? { on: Math.min(pieces, tierDotsOf(status)), of: tierDotsOf(status) } : null,
     benefits: name ? [...lines(status.program), ...lines(status.benefits)] : [],
-    inUse: name ? inUseModel(status.inUse) : null,
+    // Without a tier: the birthday credit alone (every account receives it, piece or not).
+    inUse: name ? inUseModel(status.inUse) : status.inUse && typeof status.inUse === 'object' ? inUseModel({ ...status.inUse, credit: null, care: null, gifts: [] }) : null,
     next,
     top: name === 'PALLADIUM' ? TIER.top : null,
     note: listed > pieces ? TIER.counted : null,

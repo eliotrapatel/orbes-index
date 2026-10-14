@@ -705,6 +705,11 @@ export interface ClubNextTier {
 /** BP-19 T10: the account's benefits in use (GET /api/v1/club/status `inUse`). */
 export interface ClubInUse {
   credit: { balanceMinor: number; currency: string; expiresAt: string } | null;
+  /**
+   * The birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4.5): what is left of it and until when, apart from the
+   * tiers' `credit`, for an account without a tier too; null when none is open.
+   */
+  birthdayCredit?: { balanceMinor: number; currency: string; expiresAt: string } | null;
   care: { year: number; used: number; allowance: number | 'ALL' } | null;
   gifts: { tier: ClubTierName; model: string; state: 'PENDING' | 'WITH_ORDER'; orderReference: string | null }[];
   /** THE PROGRAM's "Credit usable on": the orders the credit is taken off (the note under CREDIT names them). */
@@ -1328,6 +1333,11 @@ export interface AccountProfileView {
   /** How many addresses are saved. */
   addresses: number;
   completion: { percent: number; missing: ProfileCompletionKey[] };
+  /**
+   * THE PROGRAM's birthday credit (§3.5 SB.4.5, question 14), for the line under DATE OF BIRTH: its amount, currency
+   * and days; null while it is switched off (the line is then not drawn).
+   */
+  birthdayCredit: { amountMinor: number; currency: string; days: number } | null;
 }
 
 /** PUT /api/v1/account/profile: the whole profile, with the version read; `birthDate` only when it is entered. */

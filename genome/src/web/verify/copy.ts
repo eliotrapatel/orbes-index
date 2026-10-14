@@ -717,6 +717,8 @@ export const TIER = Object.freeze({
   counted: 'A piece revoked or retired by ORBES counts for no tier.',
   /** The benefits in use (plan NEXT-NINE, BP-19 T10): shown only when a row exists. */
   inUse: 'IN USE',
+  /** The birthday credit's row (plan CUSTOMER INTELLIGENCE §3.5 SB.4.5), first under IN USE, with `creditValue`; for an account without a tier too. */
+  birthdayCredit: 'BIRTHDAY CREDIT',
   credit: 'CREDIT',
   creditValue: (amount: string, date: string) => `${amount} · UNTIL ${date}`,
   /**
@@ -2024,6 +2026,11 @@ export const ACCOUNT_PROFILE = Object.freeze({
   birthConfirm: 'CONFIRM YOUR DATE OF BIRTH',
   birthConfirmLine: (date: string) => `${date}. Once saved, only ORBES Client Services can change it.`,
   birthPartial: 'Choose the day, the month and the year.',
+  /**
+   * The last line under DATE OF BIRTH (question 14 of 8 October 2026), from THE PROGRAM's birthday credit: its amount
+   * as the app writes money ('€ 20') and its days. Not drawn while THE PROGRAM gives none.
+   */
+  birthCredit: (amount: string, days: number) => `On your birthday, ORBES gives you a credit of ${amount}, valid ${days} ${days === 1 ? 'day' : 'days'}.`,
   country: 'COUNTRY',
   city: 'CITY',
   address: 'ADDRESS',
