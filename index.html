@@ -643,7 +643,7 @@ html.toast-at-call #promo-toast { position: absolute; top: var(--toast-top, 0px)
 .open__mono {
   -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,.36) 0%, rgba(0,0,0,.22) 50%, rgba(0,0,0,0) 100%);
           mask-image: linear-gradient(to bottom, rgba(0,0,0,.36) 0%, rgba(0,0,0,.22) 50%, rgba(0,0,0,0) 100%);
-  transition: opacity 2.4s cubic-bezier(.2,0,0,1);
+  transition: opacity 3s cubic-bezier(.2,0,0,1);
 }
 html.dust .open__mono { opacity: 0; }
 html.dust.dust-settled .open__mono { opacity: .75; }
@@ -996,7 +996,7 @@ html.dust.dust-settled .open__mono { opacity: .75; }
   var still = matchMedia('(prefers-reduced-motion: reduce)').matches;
   var c = document.createElement('canvas'); c.className = 'open__dust'; c.setAttribute('aria-hidden', 'true');
   mark.appendChild(c);
-  var g = c.getContext('2d'), P = [], pts = [], W = 0, H = 0, d = 1, ox = 0, oy = 0, raf = 0, t0 = 0, started = false, visible = true;
+  var g = c.getContext('2d'), P = [], pts = [], W = 0, H = 0, d = 1, ox = 0, oy = 0, raf = 0, t0 = 0, last = 0, started = false, settled = false, visible = true;
   var ptr = { x: -1e4, y: -1e4 }, touching = false;
 
   function layout() {
@@ -1028,16 +1028,22 @@ html.dust.dust-settled .open__mono { opacity: .75; }
     var b = mono.getBoundingClientRect(), n = Math.round(Math.min(9000, b.width * b.height * .058, pts.length / 2 * 1.4));
     P = []; for (var i = 0; i < n; i++) { var p = {}; place(p, rising); P.push(p); }
   }
+  function settle() { if (!settled) { settled = true; root.classList.add('dust-settled'); } }
   function frame(now) {
     raf = 0;
-    var el = now - t0, R = 46 * d, gathering = el < 4200;
+    // time-based easing, so the dust gathers in the same time on any screen and under load
+    var dt = Math.min(64, Math.max(1, now - (last || now - 16.7))); last = now;
+    var el = now - t0, R = 46 * d, gathering = !settled, home = 0, counted = 0;
+    var kG = 1 - Math.pow(1 - .045, dt / 16.7), kS = 1 - Math.pow(1 - .08, dt / 16.7);
     g.clearRect(0, 0, W, H); g.fillStyle = '#f6f2ea';
     for (var i = 0; i < P.length; i++) {
       var p = P[i];
+      counted++;
       if (el < p.delay) continue;
       var dx = ptr.x - p.x, dy = ptr.y - p.y, dist = Math.sqrt(dx * dx + dy * dy);
       if (dist < R) { var f = (R - dist) / R, an = Math.atan2(dy, dx); p.x = p.bx - Math.cos(an) * f * 24 * d; p.y = p.by - Math.sin(an) * f * 24 * d; }
-      else { var k = gathering ? .045 : .08; p.x += (p.bx - p.x) * k; p.y += (p.by - p.y) * k; }
+      else { var k = gathering ? kG : kS; p.x += (p.bx - p.x) * k; p.y += (p.by - p.y) * k; }
+      if (Math.abs(p.bx - p.x) + Math.abs(p.by - p.y) < 2.5 * d) home++;
       if (!still) { p.age++; p.ph += .05; }
       var life = still ? 1 : Math.min(1, p.age / 25, (p.life - p.age) / 25);
       if (life <= 0) { place(p, false); continue; }
@@ -1046,15 +1052,17 @@ html.dust.dust-settled .open__mono { opacity: .75; }
       g.globalAlpha = al > 1 ? 1 : al; g.fillRect(p.x, p.y, p.s, p.s);
     }
     g.globalAlpha = 1;
+    // the faint monogram settles under the dust only once the dust has actually gathered (nine tenths home)
+    if (!settled && counted && home / counted >= .9) settle();
     if (!still && visible && !document.hidden) raf = requestAnimationFrame(frame);
   }
   function run() { if (!raf && !still && visible && !document.hidden && started) raf = requestAnimationFrame(frame); }
   function begin() {
     if (started || !layout()) return;
     started = true; t0 = performance.now();
-    if (still) { fill(false); root.classList.add('dust-settled'); frame(t0 + 9000); return; }
-    fill(true); run();
-    setTimeout(function () { root.classList.add('dust-settled'); }, 3600);
+    if (still) { fill(false); settle(); frame(t0 + 9000); return; }
+    fill(true); last = 0; run();
+    setTimeout(settle, 12000);   // a last resort if the dust never runs (a hidden tab from the start)
   }
   // the pointer parts the dust (a finger too, while it touches)
   function at(e) { var r = c.getBoundingClientRect(); ptr.x = (e.clientX - r.left) * d; ptr.y = (e.clientY - r.top) * d; }
