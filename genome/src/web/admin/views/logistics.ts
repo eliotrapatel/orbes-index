@@ -12,7 +12,8 @@
  *  - Stock: every size of every model and variant at each location, 0 included: on hand, reserved, available, waiting,
  *    the minimum. The agent proposes a correction, which ORBES approves. ORBES staff read the location, what to order
  *    (TO ORDER) and the sizes whose count no ORBES identity backs (NO PIECE · 3, with the notice over the table), and
- *    act at once (OPERATOR): Transfer, Correct, Minimum, Count pieces in. An AUDITOR reads.
+ *    act at once (OPERATOR): Transfer, Correct, Minimum, Count pieces in; Add to supplier order on every offered
+ *    size, to order in advance too, its pieces prefilled with what is TO ORDER where there is. An AUDITOR reads.
  *  - Returns (n): the parcels expected back at the location (returns, size exchanges, parcels back to sender or
  *    damaged); the agent records each one, the piece OK or damaged, and ORBES decides on the order's page.
  *  - Corrections (n): the agent's proposals and their status; ORBES approves or declines (with a note) those to approve.
@@ -43,6 +44,7 @@ import {
   minimumValue,
   noPieceMark,
   offersLocationFilter,
+  addToOrderQuantity,
   addToOrderText,
   cardsLine,
   expectedEmpty,
@@ -513,7 +515,7 @@ function stockTab(ctx: ViewContext, stock: LogisticsStock): HTMLElement {
       title: STOCK_TEXT.addToOrder,
       eyebrow: title(r),
       body: h('p', { class: 'dialog__text' }, addToOrderText(r)),
-      fields: [{ name: 'quantity', label: 'Pieces', required: true, maxlength: 5, value: String(r.toOrder ?? 1) }],
+      fields: [{ name: 'quantity', label: 'Pieces', required: true, maxlength: 5, value: addToOrderQuantity(r.toOrder) }],
       validate: addQuantityProblem,
       confirmLabel: STOCK_TEXT.addToOrder,
       submit: async (v) => {
@@ -525,7 +527,7 @@ function stockTab(ctx: ViewContext, stock: LogisticsStock): HTMLElement {
       ? [button(STOCK_TEXT.propose, { kind: 'ghost', testId: 'stock-propose', onClick: () => proposeCorrection(r) })]
       : manage
         ? [
-            order && (r.toOrder ?? 0) > 0 && !r.sku.setAside ? button(STOCK_TEXT.addToOrder, { kind: 'secondary', testId: 'stock-add-to-order', onClick: () => addToOrder(r) }) : null,
+            order && !r.sku.setAside ? button(STOCK_TEXT.addToOrder, { kind: 'secondary', testId: 'stock-add-to-order', onClick: () => addToOrder(r) }) : null,
             noPieceMark(r.unbacked) ? button(STOCK_TEXT.countIn, { kind: 'secondary', testId: 'stock-count-in', onClick: () => countIn(r) }) : null,
             stock.locations.length > 1 && r.available > 0 ? button(STOCK_TEXT.transfer, { kind: 'ghost', testId: 'stock-transfer', onClick: () => transfer(r) }) : null,
             button(STOCK_TEXT.correct, { kind: 'ghost', testId: 'stock-correct', onClick: () => correct(r) }),
