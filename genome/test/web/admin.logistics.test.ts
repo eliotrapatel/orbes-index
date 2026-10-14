@@ -13,6 +13,7 @@ import { encodeAttempts, PHOTO_LIMITS, PHOTO_MAX_BYTES, PHOTO_QUALITIES } from '
 import { STOCK_MOVE_MAX, STOCK_NOTE_MAX } from '../../src/server/services/stock.js';
 import { AdminApi, type FetchLike } from '../../src/web/admin/api.js';
 import {
+  addToOrderQuantity,
   approveText,
   CASE_KIND_LABELS,
   casePieces,
@@ -73,6 +74,7 @@ import {
   supplierReturnProblem,
 } from '../../src/web/admin/model/logistics.js';
 import { can, logisticsOnly } from '../../src/web/admin/model/permissions.js';
+import { addQuantityProblem } from '../../src/web/admin/model/supplier-orders.js';
 import { href, parseHash } from '../../src/web/admin/router.js';
 import { ADMIN_ROLES, ORDER_CASE_KINDS, SHIPMENT_STATUSES, STOCK_CORRECTION_STATUSES, type LogisticsSku, type ShippingOrderView } from '../../src/web/admin/types.js';
 
@@ -183,6 +185,14 @@ describe('the dialogs', () => {
     expect(minimumProblem({ minimum: '12' })).toBeNull();
     expect(minimumValue({ minimum: ' ' })).toBeNull();
     expect(minimumValue({ minimum: '12' })).toBe(12);
+  });
+
+  it('opens Add to supplier order with what is TO ORDER, empty for a size ordered in advance: 1 to 10 000 pieces typed', () => {
+    expect(addToOrderQuantity(2)).toBe('2');
+    expect(addToOrderQuantity(0)).toBe('');
+    expect(addToOrderQuantity(undefined)).toBe('');
+    expect(addQuantityProblem({ quantity: addToOrderQuantity(0) })).toMatch(/Add 1 to/);
+    expect(addQuantityProblem({ quantity: '500' })).toBeNull();
   });
 
   it('reads the serials of Count pieces in, one per line, in capitals, each once; refuses what is not a serial', () => {

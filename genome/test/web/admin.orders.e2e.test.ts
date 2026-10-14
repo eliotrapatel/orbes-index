@@ -18,6 +18,8 @@
  *  5. The settings (ADMIN): the delays of the alerts, a carrier added with its tracking link's example, a location
  *     renamed.
  *  6. An AUDITOR reads the board, an order and the invoices, the emails and the buyer masked, without one action.
+ *  7. A test account's order: out of the board, its counts and its CSV by default; Show test orders brings it back,
+ *     marked TEST; its page opens by its address; never in the Shopify export.
  * No CSP violation, no page error, no figure in the display face.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -900,6 +902,86 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await expect.poll(() => a.locator('#order-case [data-testid=order-case]').count()).toBe(1);
     expect(await a.locator('#order-case').textContent()).not.toContain('One size larger, please.');
     expect(await a.locator('[data-testid=buyer-phone]').textContent()).toBe('***');
+    await a.context().close();
+  }, STEP_TIMEOUT);
+
+  it('leaves a test account\'s order out of the board, its counts and its CSV; Show test orders brings it back, marked TEST; its page opens by its address', async () => {
+    const p = await open(OPERATOR);
+    await go(p, '#/orders', 'Orders');
+    const cards = p.locator('[data-testid=order-card]');
+    await expect.poll(() => cards.count()).toBeGreaterThan(0);
+    const before = await cards.count();
+    const summary = async () => (await p.locator('[data-testid=orders-summary] .board__figures').textContent())!.trim();
+    const figures = await summary();
+    const total = Number(/^(\d+) orders?/.exec(figures)![1]);
+    const reservedCount = async () => (await p.locator('[data-testid=column-RESERVED] .board__count').textContent())!.trim();
+    const reserved = Number(await reservedCount());
+
+    // An order of a test account (a row in test_entrants), made now.
+    const test = await salonOrder('58');
+    const account = (await ctx.db.selectFrom('orders').select('account_id').where('id', '=', test.id).executeTakeFirstOrThrow()).account_id;
+    await ctx.db.insertInto('test_entrants').values({ account_id: account }).execute();
+
+    // By default: not a card, not in a count.
+    await p.reload();
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Orders');
+    await expect.poll(() => cards.count()).toBe(before);
+    expect(await summary()).toBe(figures);
+    expect(await reservedCount()).toBe(String(reserved));
+    expect(await p.locator(`[data-order="${test.id}"]`).count()).toBe(0);
+    expect(await p.locator('[data-testid=order-card-test]').count()).toBe(0);
+    const toggle = p.locator('label.ccheck', { hasText: 'Show test orders' });
+    expect(await toggle.count()).toBe(1);
+    expect(await toggle.locator('input').isChecked()).toBe(false);
+    const references = async () => {
+      const [download] = await Promise.all([p.waitForEvent('download'), p.click('[data-testid=orders-csv]')]);
+      return readFileSync((await download.path())!, 'utf8');
+    };
+    expect(await references()).not.toContain(orderReference(test.id));
+
+    // Show test orders: its card, marked TEST under its reference, counted; the others unmarked.
+    await toggle.click();
+    await expect.poll(() => cards.count()).toBe(before + 1);
+    expect(await p.evaluate(() => location.hash)).toBe('#/orders?test=true');
+    expect(await p.locator('label.ccheck', { hasText: 'Show test orders' }).locator('input').isChecked()).toBe(true);
+    expect(await summary()).toMatch(new RegExp(`^${total + 1} orders · `));
+    expect(await reservedCount()).toBe(String(reserved + 1));
+    const card = p.locator(`[data-order="${test.id}"]`);
+    expect((await card.locator('[data-testid=order-card-test]').textContent())!.trim()).toBe('TEST');
+    expect(await card.getAttribute('aria-label')).toContain(`${orderReference(test.id)}, test order, `);
+    expect(await card.textContent()).toContain(test.email);
+    expect(await p.locator('[data-testid=order-card-test]').count()).toBe(1);
+    expect(await references()).toContain(orderReference(test.id));
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'board-test-orders', { phone: true });
+
+    // Its page, from its card; back on the board without the switch, it is gone again.
+    await card.click();
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe(orderReference(test.id));
+    await go(p, '#/orders?test=true', 'Orders');
+    await p.locator('label.ccheck', { hasText: 'Show test orders' }).click();
+    await expect.poll(() => cards.count()).toBe(before);
+    expect(await p.evaluate(() => location.hash)).toBe('#/orders');
+    expect(await summary()).toBe(figures);
+    // By its address, the page still opens while the board hides it.
+    await go(p, `#/orders/${test.id}`, orderReference(test.id));
+
+    // The Shopify export of its day: never the test account's order, priced as the export wants them.
+    await ctx.services.orders.setTerms(test.id, { priceMinor: 480_000, currency: 'EUR' }, admin);
+    const day = (await ctx.db.selectFrom('orders').select('reserved_at').where('id', '=', test.id).executeTakeFirstOrThrow()).reserved_at.toISOString().slice(0, 10);
+    const exported = async () => (await ctx.services.shopify.orderCsv({ from: day, to: day }, { email: (e) => e, buyer: (b) => b })).body;
+    expect(await exported()).not.toContain(orderReference(test.id));
+    await ctx.db.deleteFrom('test_entrants').where('account_id', '=', account).execute();
+    expect(await exported()).toContain(orderReference(test.id));
+    await ctx.db.insertInto('test_entrants').values({ account_id: account }).execute();
+    expect(await csp(p)).toEqual([]);
+    await p.context().close();
+
+    // An AUDITOR has the switch too.
+    const a = await open(AUDITOR);
+    await go(a, '#/orders?test=true', 'Orders');
+    await expect.poll(() => a.locator(`[data-order="${test.id}"] [data-testid=order-card-test]`).count()).toBe(1);
+    expect(await a.locator('label.ccheck', { hasText: 'Show test orders' }).locator('input').isChecked()).toBe(true);
     await a.context().close();
   }, STEP_TIMEOUT);
 });

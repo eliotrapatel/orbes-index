@@ -2778,6 +2778,8 @@ export interface OrderCard {
   status: OrderStatus;
   release: { id: string; title: string } | null;
   account: { id: string; email: string };
+  /** The order of a test account: on the board only with Show test orders (`test`). */
+  test?: boolean;
   model: { id: string; name: string };
   sizeLabel: string | null;
   skuCode: string | null;
@@ -2830,6 +2832,8 @@ export interface OrderBoardFilters {
   locationId?: string;
   late?: boolean;
   q?: string;
+  /** Show test orders: the test accounts' orders too. */
+  test?: boolean;
 }
 
 /** An order as its page reads it (the buyer masked for an AUDITOR: `J*** D***`, the address `***`). */

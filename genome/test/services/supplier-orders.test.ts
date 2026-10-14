@@ -9,7 +9,7 @@
  *  - the draft: one per supplier and location, created in its supplier's currency, the pieces added to the SKU's line,
  *    its unit price prefilled from the last sent line; refused for a size set aside (SIZE_SET_ASIDE) or without a
  *    supplier (SKU_NO_SUPPLIER); its lines, currency (two decimals only), shipping (none: '—'), date and note changed;
- *    discarded;
+ *    discarded; a size nothing calls for taken all the same (pieces ordered in advance);
  *  - send: refused while incomplete (422 SUPPLIER_ORDER_INCOMPLETE), then fixed (SUPPLIER_ORDER_NOT_DRAFT); confirmed by
  *    the supplier; its statuses through receptions, credits and Cancel the rest (refused while a reception is open);
  *    the pieces not on the order (`extras`); the supplier's answer to rejected pieces; the invoice and its payment;
@@ -318,5 +318,18 @@ describe('SupplierOrderService (plan NEXT LOT §3.5.6.3)', () => {
     const pdf = await so().pdf(o.id);
     expect(pdf.filename).toBe(`ORBES-${o.reference}.pdf`);
     expect(Buffer.from(pdf.body.subarray(0, 5)).toString()).toBe('%PDF-');
+  });
+
+  it('takes a size nothing calls for, ordered in advance: no waiting order, no minimum, nothing to order, and its pieces in the draft', async () => {
+    const east = await h.ctx.services.suppliers.create({ name: 'Eastern Foundry', currency: 'EUR' }, admin);
+    const model = (await h.ctx.db.insertInto('models').values({ category_id: (await h.ctx.categories.getByCode('J'))!.index, name: 'AXIS', type: 'RING', sku_prefix: 'AXS-RG', default_material: 'SILVER', supplier_id: east.id }).returning('id').executeTakeFirstOrThrow()).id;
+    const k = await skuOf('54', model);
+    const row = async () => (await h.ctx.services.logistics.stock({ locationId: france, modelId: model })).rows.find((r) => r.sku.id === k)!;
+    expect(await row()).toMatchObject({ onHand: 0, waiting: 0, minimum: null, expected: 0, toOrder: 0 });
+    expect((await so().proposal({ supplierId: east.id })).groups).toEqual([]);
+    const o = await so().addToDraft({ skuId: k, locationId: france, quantity: 500 }, admin);
+    expect(o).toMatchObject({ status: 'DRAFT', supplier: { id: east.id }, location: { id: france }, lines: [{ sku: { id: k }, quantity: 500 }] });
+    // Ordered ahead of any need: the proposal's figure stays 0, the size is not marked TO ORDER.
+    expect(await row()).toMatchObject({ toOrder: 0 });
   });
 });

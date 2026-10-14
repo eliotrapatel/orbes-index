@@ -1899,7 +1899,7 @@ The pool of test accounts (migration `0024_z_test_entrants`, the owner's lot of 
 | `created_at` | `timestamptz` | NOT NULL | `now()` | When it joined the pool. |
 
 - **Written by:** `TestEntrantService` (`services/test-entrants.ts`): a press (SEND TEST ENTRANTS, ADD MORE) creates the missing accounts with their rows (a number some account already uses is skipped), and sets the tier and seniority of each account it sends. Never deleted: the pool is reused from test to test.
-- **Read by:** `clubStandings` and `tierOf` (the test row wins over the pieces), `isTestEntrant` (`services/club.ts`: a test account counts as owning a LIVE RELEASE's models and collection, `services/live.ts` `accessOf`), the console's test panel (`real` and `test` entries of a release). Nothing else of the code tells a test account apart: its entries, orders and participation count as any collector's.
+- **Read by:** `clubStandings` and `tierOf` (the test row wins over the pieces), `isTestEntrant` (`services/club.ts`: a test account counts as owning a LIVE RELEASE's models and collection, `services/live.ts` `accessOf`), the console's test panel (`real` and `test` entries of a release). Also read through `services/population.ts` (`notTestEntrant`, `countedCollector`, `TestEntrantAccounts`): GROWTH and the customer intelligence's figures and recording leave a test account out, and so do three readings of the console: the Orders board and its CSV unless *Show test orders* is on (`services/fulfilment.ts`), the Shopify order export (`services/shopify.ts`), and a segment's count and members' CSV (`services/segments.ts`). Elsewhere its entries, orders and participation count as any collector's.
 
 ### 5.74 `test_runs`
 

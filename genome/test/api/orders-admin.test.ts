@@ -5,6 +5,8 @@
  *  - the board and an order's page, the buyer's name and address masked for an AUDITOR as the emails are; the steps
  *    with what each requires; the terms of a salon's order, the buyer, the location; its piece bound by the packing
  *    scan, its parcel shipped through Logistics (the SHIPPED gate, plan NEXT LOT step 5.12);
+ *  - the orders of the test accounts: out of the board, its counts and its CSV unless `test=true`, never out of the
+ *    Shopify order export, their page read by its address;
  *  - the delays of the alerts (ADMIN), the locations and the carriers (ADMIN), their validation, audited;
  *  - the stock through Logistics' routes since the atelier went (plan NEXT LOT step 5.13): a minimum, a count corrected,
  *    a transfer; the atelier's routes and Link a piece answer 404.
@@ -131,6 +133,46 @@ describe('orders, the stock and their settings: the console\'s routes', () => {
     const delivered = safeJson(await op.post(`/api/admin/orders/${id}/transition`, { to: 'DELIVERED' })) as Json;
     expect(delivered.order.status).toBe('DELIVERED');
     expect(delivered.timing).toMatchObject({ rule: 'UNREGISTERED', late: false });
+  });
+
+  it('leaves the orders of the test accounts out of the board and its CSV unless test=true, marks them then; never in the Shopify export; their page still read', async () => {
+    const real = await salonOrder();
+    const test = await salonOrder();
+    for (const id of [real, test]) await op.patch(`/api/admin/orders/${id}/terms`, { sizeLabel: '52', priceMinor: 480_000, currency: 'EUR' });
+    const account = (await h.ctx.db.selectFrom('orders').select('account_id').where('id', '=', test).executeTakeFirstOrThrow()).account_id;
+    const before = (safeJson(await auditor.get('/api/admin/orders')) as Json).columns[0].total as number;
+    await h.ctx.db.insertInto('test_entrants').values({ account_id: account }).execute();
+    try {
+      const reserved = async (query: string) => (safeJson(await auditor.get(`/api/admin/orders${query}`)) as Json).columns[0] as Json;
+      const hidden = await reserved('');
+      expect(hidden.total).toBe(before - 1);
+      expect(hidden.items.map((x: Json) => x.id)).toContain(real);
+      expect(hidden.items.map((x: Json) => x.id)).not.toContain(test);
+      expect((await reserved('?test=false')).total).toBe(before - 1);
+      const shown = await reserved('?test=true');
+      expect(shown.total).toBe(before);
+      expect(shown.items.find((x: Json) => x.id === test)).toMatchObject({ test: true, reference: orderReference(test) });
+      expect(shown.items.find((x: Json) => x.id === real)).toMatchObject({ test: false });
+      expect(errorOf(await auditor.get('/api/admin/orders?test=perhaps')).code).toBe('VALIDATION_FAILED');
+
+      // The board's CSV keeps what the board keeps.
+      expect((await op.get('/api/admin/orders.csv')).body).not.toContain(orderReference(test));
+      expect((await op.get('/api/admin/orders.csv?test=true')).body).toContain(orderReference(test));
+      // The Shopify order export: never, with no way to ask.
+      const day = h.clock.now().toISOString().slice(0, 10);
+      for (const query of ['', '&test=true']) {
+        const file = await op.get(`/api/admin/shopify/orders.csv?from=${day}&to=${day}${query}`);
+        expect(file.statusCode, query).toBe(200);
+        expect(file.body, query).toContain(orderReference(real));
+        expect(file.body, query).not.toContain(orderReference(test));
+      }
+      // Its page, by its address, as before.
+      const page = await op.get(`/api/admin/orders/${test}`);
+      expect(page.statusCode).toBe(200);
+      expect((safeJson(page) as Json).order.reference).toBe(orderReference(test));
+    } finally {
+      await h.ctx.db.deleteFrom('test_entrants').where('account_id', '=', account).execute();
+    }
   });
 
   it('binds a piece of the stock to an order by the packing scan, which ships only once packed; Link a piece is gone', async () => {

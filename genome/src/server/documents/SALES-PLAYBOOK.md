@@ -157,6 +157,8 @@ Le client demande un retour ou un échange de taille dans les 14 jours qui suive
 
 `Supplier orders` (ORBES seul) → `To order` : la console additionne ce qui manque (les commandes en attente et le stock sous son minimum) par fournisseur et par entrepôt. `Add to the draft`, ajustez quantités, prix, devise, frais de port et date attendue, puis `Mark sent` et envoyez vous-même le `PDF` au fournisseur : la console n'envoie aucun e-mail. Ensuite : `Confirmed by the supplier`, les réceptions, `Cancel the rest` quand le fournisseur ne livrera pas la suite, `Enter the invoice` et `Mark the invoice paid`. Les fournisseurs se créent dans `Suppliers` (`Add a supplier`) ; le fournisseur d'un modèle, ou d'une taille, se règle sur la page du modèle (`Edit supplier`).
 
+Pour commander d'avance, sans commande en attente ni minimum : `Logistics` → `Stock`, `Add to supplier order` sur la ligne de la taille (un OPERATOR), avec le nombre de pièces. Elles rejoignent le brouillon de son fournisseur pour cet entrepôt, que vous confirmez avant l'envoi.
+
 ---
 
 ## 3. Client inquiet

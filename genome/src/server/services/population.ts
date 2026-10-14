@@ -13,9 +13,11 @@
  *               TEST_ENTRANTS_CACHE_MAX), for the recording's ingestion (§3.3 T.8.3 item 2), which drops their requests
  *               without reading the database each time.
  *
- * Every figure of the lot reads `countedCollector`. Segments keep today's rule (ACTIVE accounts, test entrants and
- * team accounts included: a segment is not a figure), a client sheet shows everything, and GROWTH is unchanged (it
- * reads `notTestEntrant` only, and still counts the team's accounts).
+ * Every figure of the lot reads `countedCollector`. Segments keep today's rule where they decide (ACTIVE accounts, test
+ * entrants and team accounts included: a segment is not a figure); the console's reading of a segment (its count, its
+ * CSV), the Orders board by default and the Shopify order export leave the test entrants out (`notTestEntrant`). A
+ * client sheet shows everything, and GROWTH is unchanged (it reads `notTestEntrant` only, and still counts the team's
+ * accounts).
  *
  * `column` names a column holding an account id (`accounts.id`, `o.account_id`…), as `sql.ref` reads it.
  */

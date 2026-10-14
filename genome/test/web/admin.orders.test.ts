@@ -19,6 +19,7 @@ import {
   alertsInput,
   alertsProblem,
   boardFilters,
+  TEST_ORDERS_TEXT,
   buyerInput,
   buyerProblem,
   buyerSection,
@@ -143,6 +144,10 @@ describe('the board', () => {
   it('reads its filters from the page\'s query, only the values the server takes', () => {
     expect(boardFilters({ channel: 'LIVE', dropId: ID, locationId: LOC, late: 'true', q: '  OR-0F8E ' })).toEqual({ channel: 'LIVE', dropId: ID, locationId: LOC, late: true, q: 'OR-0F8E' });
     expect(boardFilters({ channel: 'SHOP', dropId: 'x', late: 'yes', q: '   ' })).toEqual({});
+    // Show test orders: on only when the page's query says so.
+    expect(boardFilters({ test: 'true' })).toEqual({ test: true });
+    expect(boardFilters({ test: 'yes' })).toEqual({});
+    expect(TEST_ORDERS_TEXT).toEqual({ show: 'Show test orders', mark: 'TEST', spoken: 'test order', title: 'An order of a test account.' });
   });
 
   it('says why an order is late, since when, and the delays, the marks without a figure (the display face sets them)', () => {

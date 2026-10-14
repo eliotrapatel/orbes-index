@@ -31,10 +31,12 @@
  *                        (Client Services' entry) as billing and shipping, and the collector's email, by which the
  *                        store matches its customers to the ORBES accounts once it exists. No VAT, no shipping fee:
  *                        taxes and shipping are 0.00. An AUDITOR reads the emails and the buyers masked (the routes).
+ *                        Never an order of a test account (the test entrants' pool, services/population.ts).
  *
  * Only the columns ORBES fills are written, in the published order: Shopify leaves the others to their defaults on an
  * import, and its header names are its own (test/services/shopify.test.ts holds them against the published lists).
  */
+import { sql } from 'kysely';
 import { advisoryXactLock, ADVISORY_LOCK, inTransaction, type Db } from '../db/connection.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
 import type { OrderChannel, OrderStatus } from '../db/schema.js';
@@ -45,6 +47,7 @@ import type { AuditService } from './audit.js';
 import { majorUnits } from './live-console.js';
 import { mediaUrl } from './media.js';
 import { ORDER_CURRENCIES, orderReference } from './orders.js';
+import { notTestEntrant } from './population.js';
 import { compareSizes, deriveSku, ensureSku, ONE_SIZE_LABEL } from './stock.js';
 
 // ── Shopify's formats ──────────────────────────────────────────────────────
@@ -408,7 +411,7 @@ export class ShopifyExportService {
 
   /**
    * The priced orders reserved from `from` to `to` (UTC days, both included), the oldest first, as Shopify's order CSV
-   * (see the header). `view` masks the email and the buyer for an AUDITOR.
+   * (see the header); never an order of a test account. `view` masks the email and the buyer for an AUDITOR.
    */
   async orderCsv(
     period: { from: string; to: string },
@@ -435,6 +438,7 @@ export class ShopifyExportService {
       .where('o.reserved_at', '>=', new Date(start))
       .where('o.reserved_at', '<', new Date(end + DAY_MS))
       .where('o.price_minor', 'is not', null)
+      .where(sql<boolean>`${notTestEntrant('o.account_id')}`) // never an order of a test account (TEST ENTRANTS)
       .orderBy('o.reserved_at')
       .orderBy('o.id')
       .execute()) as OrderRow[];

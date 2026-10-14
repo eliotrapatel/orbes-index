@@ -8,6 +8,8 @@
  *     Add to the draft; the draft's page: Edit, a line added then removed, Mark sent refused while a price is missing,
  *     then sent; its PDF; Confirmed by the supplier; Expected in the Stock; the invoice entered and paid; the list.
  *  3. An AUDITOR reads the page and the order without one action; a LOGISTICS login never reaches them.
+ *  4. A size nothing calls for keeps Add to supplier order (pieces ordered in advance, typed); never for an AUDITOR or
+ *     the agent.
  * No CSP violation, no page error, no figure in the display face.
  */
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -174,6 +176,7 @@ describe.skipIf(!HAS_CHROMIUM)('Supplier orders in the console (plan NEXT LOT §
     await go(a, `#/logistics?tab=stock&locationId=${france}`, 'Logistics');
     const row54 = a.locator('#logistics-stock tbody tr', { has: a.locator('.cell-sub.mono', { hasText: new RegExp(`^${code54}$`) }) });
     await expect.poll(() => row54.locator('[data-testid=stock-to-order]').textContent()).toBe('TO ORDER2');
+    expect(await row54.locator('[data-testid=stock-add-to-order]').getAttribute('class')).toBe('cbtn cbtn--secondary');
     await row54.locator('[data-testid=stock-add-to-order]').click();
     expect(await a.locator('dialog .dialog__text').textContent()).toBe('The pieces of MONOLITHE · 54 go to the draft of its supplier, to deliver to FRANCE WAREHOUSE. You confirm the draft before it is sent.');
     expect(await a.locator('dialog input[name=quantity]').inputValue()).toBe('2');
@@ -283,6 +286,30 @@ describe.skipIf(!HAS_CHROMIUM)('Supplier orders in the console (plan NEXT LOT §
     await g.evaluate(() => (location.hash = '#/supplier-orders'));
     await expect.poll(() => g.evaluate(() => location.hash)).toBe('#/logistics');
     expect(await g.evaluate(async () => (await fetch('/api/admin/supplier-orders')).status)).toBe(403);
+
+    // Ordered in advance: 54, which nothing calls for any more (its minimum is covered by what is expected: no TO ORDER),
+    // keeps Add to supplier order; its pieces are typed, and go to a new draft of its supplier. The AUDITOR and the
+    // agent read the Stock without it.
+    expect(await row54.locator('[data-testid=stock-to-order]').count()).toBe(0);
+    // The button is emphasised only where the console suggests it (TO ORDER): quiet here.
+    expect(await row54.locator('[data-testid=stock-add-to-order]').getAttribute('class')).toBe('cbtn cbtn--ghost');
+    await row54.locator('[data-testid=stock-add-to-order]').click();
+    expect(await a.locator('dialog input[name=quantity]').inputValue()).toBe('');
+    await a.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => a.locator('dialog .dialog__error').textContent()).toBe('Complete the required fields.');
+    await a.fill('dialog input[name=quantity]', '500');
+    await confirmDialog(a);
+    await expect
+      .poll(() => h.t.db.selectFrom('supplier_order_lines as l').innerJoin('supplier_orders as o', 'o.id', 'l.supplier_order_id').select(['l.sku_id', 'l.quantity', 'o.location_id']).where('o.status', '=', 'DRAFT').execute())
+      .toEqual([{ sku_id: sku54, quantity: 500, location_id: france }]);
+    await expect.poll(() => row54.locator('[data-testid=stock-add-to-order]').count()).toBe(1);
+    expect(await row54.locator('[data-testid=stock-to-order]').count()).toBe(0);
+    expect(await csp(a)).toEqual([]);
+    for (const p of [r, g]) {
+      await go(p, '#/logistics?tab=stock', 'Logistics');
+      await expect.poll(() => p.locator('#logistics-stock tbody tr').count()).toBeGreaterThan(0);
+      expect(await p.locator('[data-testid=stock-add-to-order]').count()).toBe(0);
+    }
     for (const p of [a, r, g]) await p.context().close();
   }, STEP_TIMEOUT);
 });
