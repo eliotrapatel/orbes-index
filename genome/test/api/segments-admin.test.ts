@@ -244,6 +244,15 @@ describe('segments and the access rules: the console’s and the public routes',
     await refused({ kind: 'FIRST_SOURCE', linkIds: ['00000000-0000-4000-8000-000000000000'] }, 404, 'LINK_NOT_FOUND');
     await refused({ kind: 'FIRST_SOURCE', channelIds: ['00000000-0000-4000-8000-000000000000'] }, 404, 'CHANNEL_NOT_FOUND');
 
+    // The builder's lists (step 8.6): an AUDITOR reads them; each is the server's, bounded (test/services/segments.test.ts).
+    const o = safeJson(await auditor.get('/api/admin/segments/options')) as Json;
+    expect(o.cities).toEqual(['Paris']);
+    expect(o.tags).toEqual([{ tag: 'VIP', accounts: 1 }]);
+    expect(o.tastes.pieces).toContainEqual(expect.objectContaining({ key: 'RING' }));
+    expect(o.sourceKinds).toEqual(['CAMPAIGN', 'SITE', 'DIRECT', 'BEFORE', 'STAFF']);
+    expect(o.devices.kinds).toEqual(['PHONE', 'TABLET', 'COMPUTER', 'UNKNOWN']);
+    for (const k of ['heardOptions', 'channels', 'links', 'places']) expect(Array.isArray(o[k]), k).toBe(true);
+
     // ENGAGEMENT (step 8.5): the member's score of the latest run; nobody else of the harness is scored.
     await seedScore(h.ctx.db, member.id, 74, h.clock.now());
     const engaged = { match: 'ALL', rules: [{ kind: 'SCORE', min: 60, max: 100 }] };

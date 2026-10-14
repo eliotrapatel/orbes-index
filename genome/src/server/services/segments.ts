@@ -43,7 +43,9 @@
  * services/live.ts; the audience of a post of the circle, services/circle.ts), at the moment it decides.
  *
  * The console (routes/admin/segments.ts): the list with each segment's count now and what uses it, the builder's
- * options (the releases, models, collections, sizes and countries it names), the live count of criteria being built
+ * options (the releases, models, collections, sizes and countries it names; for the lot's criteria, the cities, the
+ * answers of « How did you hear about ORBES? », the tags, the tastes, the channels, kinds of source and links, the places
+ * and the device lists, each bounded), the live count of criteria being built
  * (OPERATOR), a segment's members as a CSV (the routes mask the emails for an AUDITOR), created, changed and deleted by
  * an OPERATOR. Audited `segment.create`, `segment.update` (before and after), `segment.delete`; a segment that a release
  * or a post of the circle uses is never deleted (409 SEGMENT_IN_USE). Its name is the console's: the public never reads
@@ -79,7 +81,10 @@ import { fold } from '../../shared/fold.js';
 import { cleanWords, latestBirthDateForAge, TASTE_KEY_MAX, tasteKey } from '../../shared/profile-rules.js';
 import { cleanTag } from './client-notes.js';
 import { parisDay } from './schedule.js';
-import { browsingCondition } from './tracking-reads.js';
+import { addParisDays, browsingCondition } from './tracking-reads.js';
+import { tasteOptions } from './tastes.js';
+import { countryName } from '../../shared/countries.js';
+import { UNKNOWN_COUNTRY } from './scan-stats.js';
 import { LAST_SOURCE_AT, lastSourceFilter, sourceFilter, type LastSourceAt } from './acquisition-filters.js';
 import { notTestEntrant } from './population.js';
 
@@ -594,7 +599,20 @@ export interface SegmentName {
   name: string;
 }
 
-/** What the builder names: the releases (their question after for a LIVE one), models, collections, sizes and countries known. */
+/** The bounds of the builder's lists (§3.6 C.5.2): the most frequent, used or newest first. */
+export const SEGMENT_OPTION_LIMITS = Object.freeze({ cities: 500, tags: 200, links: 500, places: 500 });
+
+/** The kinds of first or last source the builder offers beside the channels and links (§3.6 C.5.2): no link's own. */
+export const SEGMENT_SOURCE_KINDS = Object.freeze(['CAMPAIGN', 'SITE', 'DIRECT', 'BEFORE', 'STAFF'] as const satisfies readonly SourceKind[]);
+
+/**
+ * What the builder names: the releases (their question after for a LIVE one), models, collections, sizes and countries
+ * known; and, for the customer intelligence lot's criteria (§3.6 C.5.2), each list bounded: the cities given (the most
+ * frequent first, each as most often typed), the answers of « How did you hear about ORBES? » (set aside included), the
+ * tags in use, the favourite pieces and finishes (the collection's, then the keys still held that it no longer
+ * offers), the channels, the kinds of source, the links (archived ones too, the newest first), the places seen from in
+ * the last 13 months and the device lists.
+ */
 export interface SegmentOptions {
   releases: { id: string; title: string; mode: 'DRAW' | 'LIVE'; opensAt: Date; answers: string[] | null }[];
   /** `variant` (NOCTURNE N1): the model's label among its variants, or null: a model and its variants share a name. */
@@ -602,6 +620,24 @@ export interface SegmentOptions {
   collections: { id: string; name: string }[];
   sizes: string[];
   countries: string[];
+  cities: string[];
+  heardOptions: { id: string; label: string; setAside: boolean }[];
+  tags: { tag: string; accounts: number }[];
+  tastes: {
+    pieces: { key: string; label: string; retired: boolean }[];
+    finishes: { key: string; label: string; swatch: string | null; retired: boolean }[];
+  };
+  channels: { id: string; name: string }[];
+  sourceKinds: (typeof SEGMENT_SOURCE_KINDS)[number][];
+  links: { id: string; name: string; channel: string; archived: boolean }[];
+  places: { id: number; label: string }[];
+  devices: { kinds: DeviceKind[]; systems: DeviceSystem[]; openedIn: OpenedIn[]; apps: InApp[] };
+}
+
+/** A place from the connection in words: « Paris, France », or its country alone. */
+function placeLabel(country: string, city: string | null): string {
+  const c = country === UNKNOWN_COUNTRY ? 'Unknown country' : countryName(country);
+  return city ? `${city}, ${c}` : c;
 }
 
 /** A member as the CSV lists it; the route masks the email for an AUDITOR. */
@@ -675,9 +711,12 @@ export class SegmentService {
     return { count: await this.members(this.db, tree) };
   }
 
-  /** What the builder names. */
+  /** What the builder names, each list bounded (SEGMENT_OPTION_LIMITS). */
   async options(): Promise<SegmentOptions> {
-    const [releases, models, collections, sizes, countries] = await Promise.all([
+    const now = this.clock();
+    // The places seen from within the longest window PLACE reads (the 13 months of the recording).
+    const placesSince = addParisDays(parisDay(now), -(SEGMENT_LIMITS.viewDays.max - 1));
+    const [releases, models, collections, sizes, countries, cities, heard, tags, offered, held, channels, links, places] = await Promise.all([
       this.db
         .selectFrom('drops')
         .select(['id', 'title', 'mode', 'opens_at', 'question_enabled', 'question_answers'])
@@ -698,7 +737,33 @@ export class SegmentService {
           select upper(btrim(country)) as country from accounts where country is not null
           union select country from live_entries where country is not null
         ) c where country ~ '^[A-Z]{2}$' order by country`.execute(this.db),
+      // The cities given, folded as CITY compares them, each shown as most often typed.
+      sql<{ city: string }>`select (array_agg(city order by n desc, city collate "C"))[1] as city from (
+          select orbes_fold(city) as folded, city, count(*) as n from account_profiles where city is not null group by orbes_fold(city), city
+        ) c group by folded order by sum(n) desc, folded collate "C" limit ${SEGMENT_OPTION_LIMITS.cities}`.execute(this.db),
+      this.db.selectFrom('heard_options').select(['id', 'label', 'active']).orderBy('position').orderBy('id').execute(),
+      sql<{ tag: string; accounts: number }>`select tag, count(*)::int as accounts from account_tags group by tag order by accounts desc, tag limit ${SEGMENT_OPTION_LIMITS.tags}`.execute(this.db),
+      tasteOptions(this.db),
+      // The keys still held, each with its most recent label (the collection's own words win where it still offers it).
+      sql<{ kind: 'PIECE' | 'FINISH'; value_key: string; label: string }>`select distinct on (kind, value_key) kind, value_key, label from account_tastes
+          order by kind, value_key, created_at desc, label`.execute(this.db),
+      this.db.selectFrom('link_channels').select(['id', 'name']).orderBy('position').orderBy(sql`lower(name)`).orderBy('id').execute(),
+      this.db
+        .selectFrom('links as l')
+        .innerJoin('link_channels as c', 'c.id', 'l.channel_id')
+        .select(['l.id', 'l.name', 'c.name as channel', 'l.archived_at'])
+        .orderBy('l.created_at', 'desc')
+        .orderBy('l.id')
+        .limit(SEGMENT_OPTION_LIMITS.links)
+        .execute(),
+      sql<{ id: number; country: string; city: string | null }>`select gp.id, gp.country, gp.city from geo_places gp
+          join (select place_id, count(*) as n from collector_places where last_day >= ${placesSince}::date group by place_id) cp on cp.place_id = gp.id
+          order by cp.n desc, gp.country, gp.city nulls first, gp.id limit ${SEGMENT_OPTION_LIMITS.places}`.execute(this.db),
     ]);
+    const retired = (kind: 'PIECE' | 'FINISH', current: readonly { key: string }[]) => {
+      const keys = new Set(current.map((o) => o.key));
+      return held.rows.filter((r) => r.kind === kind && !keys.has(r.value_key)).map((r) => ({ key: r.value_key, label: r.label, retired: true }));
+    };
     return {
       releases: releases.map((d) => ({
         id: d.id,
@@ -712,6 +777,18 @@ export class SegmentService {
       collections,
       sizes: sizes.rows.map((r) => r.size),
       countries: countries.rows.map((r) => r.country),
+      cities: cities.rows.map((r) => r.city),
+      heardOptions: heard.map((o) => ({ id: o.id, label: o.label, setAside: !o.active })),
+      tags: tags.rows.map((r) => ({ tag: r.tag, accounts: Number(r.accounts) })),
+      tastes: {
+        pieces: [...offered.pieces.map((o) => ({ key: o.key, label: o.label, retired: false })), ...retired('PIECE', offered.pieces)],
+        finishes: [...offered.finishes.map((o) => ({ key: o.key, label: o.label, swatch: o.swatch, retired: false })), ...retired('FINISH', offered.finishes).map((r) => ({ ...r, swatch: null }))],
+      },
+      channels,
+      sourceKinds: [...SEGMENT_SOURCE_KINDS],
+      links: links.map((l) => ({ id: l.id, name: l.name, channel: l.channel, archived: l.archived_at !== null })),
+      places: places.rows.map((r) => ({ id: Number(r.id), label: placeLabel(r.country, r.city) })),
+      devices: { kinds: [...DEVICE_KINDS], systems: [...DEVICE_SYSTEMS], openedIn: [...OPENED_IN], apps: [...IN_APPS] },
     };
   }
 

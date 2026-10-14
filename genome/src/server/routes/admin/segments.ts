@@ -6,7 +6,10 @@
  *   GET    /api/admin/segments/names            AUDITOR   every segment's id and name, by name (a release's access rule
  *                                                         and a post's audience choose among them), no count read
  *   GET    /api/admin/segments/options          AUDITOR   what the builder names: releases, models, collections, sizes,
- *                                                         countries
+ *                                                         countries; cities, answers of « How did you hear about
+ *                                                         ORBES? », tags, tastes, channels, kinds of source, links,
+ *                                                         places, device lists (plan CUSTOMER INTELLIGENCE §3.6
+ *                                                         C.5.2), each bounded
  *   POST   /api/admin/segments/count            OPERATOR  the members criteria being built would have now (live count)
  *   POST   /api/admin/segments                  OPERATOR  a new segment
  *   GET    /api/admin/segments/:id              AUDITOR   one segment

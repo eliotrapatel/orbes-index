@@ -19,13 +19,15 @@
  *    connection, within the 395 days), ORIGIN (the first source; the last link before the sign-up, a purchase or
  *    either; an archived link still matching; the reports' fallbacks), ENGAGEMENT (step 8.5: the score of the latest
  *    run within two bounds; a SCORE rule added to a segment a release uses, question 15). A test entrant matches none
- *    but through a NOT.
+ *    but through a NOT. The builder's lists for them (step 8.6, §3.6 C.5.2), each bounded.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
 import { CircleService } from '../../src/server/services/circle.js';
 import { participatedReleases, participations } from '../../src/server/services/participation.js';
-import { cleanCriteria, isSegmentMember, SEGMENT_LIMITS, segmentMembers, SegmentService, type SegmentGroup } from '../../src/server/services/segments.js';
+import { cleanCriteria, isSegmentMember, SEGMENT_LIMITS, SEGMENT_OPTION_LIMITS, segmentMembers, SegmentService, type SegmentGroup } from '../../src/server/services/segments.js';
+import { tasteOptions } from '../../src/server/services/tastes.js';
+import { sql } from 'kysely';
 import { TAG_MAX } from '../../src/server/services/client-notes.js';
 import { CITY_MAX } from '../../src/shared/profile-rules.js';
 import { randomBytes } from 'node:crypto';
@@ -880,6 +882,56 @@ describe('the customer intelligence criteria (plan CUSTOMER INTELLIGENCE §3.0 (
     });
   });
 
+  it('gives the builder the lot\'s lists (step 8.6, §3.6 C.5.2): cities, answers, tags, tastes, channels and links, kinds of source, places, devices', async () => {
+    // A place seen from only 15 months ago: past the 13 months, not offered.
+    const berlin = (await t.db.insertInto('geo_places').values({ country: 'DE', city: 'Berlin' }).returning('id').executeTakeFirstOrThrow()).id;
+    await t.db.insertInto('collector_places').values({ account_id: p.three, place_id: berlin, days: 1, first_day: '2025-11-20', last_day: '2025-11-20' }).execute();
+    await t.db.updateTable('heard_options').set({ active: false }).where('id', '=', heard.friend).execute();
+    const o = await segments.options();
+    // Folded once each, the most frequent first, as most often typed (a tie: the first in code order).
+    expect(o.cities).toEqual(['Saint-Étienne', 'LYON']);
+    expect(o.heardOptions).toEqual([
+      { id: heard.instagram, label: 'Instagram', setAside: false },
+      { id: heard.friend, label: 'A friend', setAside: true },
+    ]);
+    // The tags in use, the most used first (the second's VIP was removed above).
+    expect(o.tags).toEqual([
+      { tag: 'PRESS', accounts: 1 },
+      { tag: 'VIP', accounts: 1 },
+    ]);
+    // The collection's choices, then every key still held that it no longer offers, with its words.
+    const offered = await tasteOptions(t.db);
+    expect(o.tastes.pieces.filter((x) => !x.retired)).toEqual(offered.pieces.map((x) => ({ key: x.key, label: x.label, retired: false })));
+    expect(o.tastes.finishes.filter((x) => !x.retired)).toEqual(offered.finishes.map((x) => ({ key: x.key, label: x.label, swatch: x.swatch, retired: false })));
+    expect(o.tastes.finishes).toContainEqual({ key: 'ROSE GOLD', label: 'Rose gold', swatch: null, retired: true });
+    for (const k of ['RING', 'CUFF']) expect(o.tastes.pieces.filter((x) => x.key === k)).toHaveLength(1);
+    expect(o.tastes.finishes.filter((x) => x.key === 'BLUE')).toHaveLength(1);
+    expect(o.channels).toEqual([
+      { id: expect.any(String), name: 'Instagram' },
+      { id: expect.any(String), name: 'Press' },
+    ]);
+    expect(o.sourceKinds).toEqual(['CAMPAIGN', 'SITE', 'DIRECT', 'BEFORE', 'STAFF']);
+    // An archived link stays offered: a segment naming it keeps matching.
+    expect([...o.links].sort((a, b) => a.name.localeCompare(b.name))).toEqual([
+      { id: expect.any(String), name: 'Instagram bio', channel: 'Instagram', archived: false },
+      { id: expect.any(String), name: 'Press feature', channel: 'Press', archived: true },
+    ]);
+    expect(o.places).toEqual([
+      { id: place.paris, label: 'Paris, France' },
+      { id: place.milan, label: 'Milan, Italy' },
+    ]);
+    expect(o.devices).toEqual({
+      kinds: ['PHONE', 'TABLET', 'COMPUTER', 'UNKNOWN'],
+      systems: ['IOS', 'ANDROID', 'MACOS', 'WINDOWS', 'CHROMEOS', 'LINUX', 'OTHER'],
+      openedIn: ['BROWSER', 'IN_APP', 'HOME_SCREEN'],
+      apps: ['INSTAGRAM', 'TIKTOK', 'FACEBOOK', 'THREADS', 'SNAPCHAT', 'PINTEREST', 'LINKEDIN', 'GOOGLE', 'WECHAT', 'LINE', 'OTHER'],
+    });
+    // Every place offered is one the PLACE rule takes, every kind one FIRST_SOURCE takes.
+    expect(() => all({ kind: 'PLACE', placeIds: o.places.map((x) => x.id), days: 395 }, { kind: 'FIRST_SOURCE', kinds: o.sourceKinds }, { kind: 'DEVICE', ...o.devices, days: 395 })).not.toThrow();
+    // What existed before is as it was.
+    expect(Object.keys(o)).toEqual(['releases', 'models', 'collections', 'sizes', 'countries', 'cities', 'heardOptions', 'tags', 'tastes', 'channels', 'sourceKinds', 'links', 'places', 'devices']);
+  });
+
   it('saves a segment of every new group once: the same criteria again, written in another order, change nothing (§3.6 C.11)', async () => {
     const criteria = (order: 'ab' | 'ba') => ({
       match: 'ANY',
@@ -897,5 +949,48 @@ describe('the customer intelligence criteria (plan CUSTOMER INTELLIGENCE §3.0 (
     expect(again.updatedAt).toEqual(s.updatedAt);
     expect((await t.db.selectFrom('audit_logs').select('action').where('target_id', '=', s.id).execute()).map((a) => a.action)).toEqual(['segment.create']);
     expect(again.count).toBe(s.count);
+  });
+});
+
+describe('the builder\'s lists are bounded (plan CUSTOMER INTELLIGENCE §3.6 C.5.2, step 8.6)', () => {
+  let t: TestDb;
+  let f: LiveFixture;
+
+  beforeAll(async () => {
+    t = await createTestDb();
+    f = await liveFixture(t.db, '2027-02-28T11:00:00.000Z');
+  });
+  afterAll(() => t.close());
+
+  it('keeps the 500 most frequent cities, the 200 most used tags, the 500 newest links and the 500 places most seen from', async () => {
+    const n = 505;
+    const accounts = (
+      await sql<{ id: string }>`insert into accounts (email, email_normalized, password_hash)
+        select 'bound-' || g || '@example.com', 'bound-' || g || '@example.com', 'unused' from generate_series(1, ${n}) g returning id`.execute(t.db)
+    ).rows.map((r) => r.id);
+    // City 001 to City 505, one account each; then LYON given by three more of them (the most frequent).
+    await t.db.insertInto('account_profiles').values(accounts.map((id, i) => ({ account_id: id, city: i < 3 ? 'Lyon' : `City ${String(i).padStart(3, '0')}` }))).execute();
+    // 205 tags on the first account, and VIP on three: VIP first.
+    await t.db.insertInto('account_tags').values(Array.from({ length: 205 }, (_, i) => ({ account_id: accounts[0]!, tag: `T${String(i).padStart(3, '0')}` }))).execute();
+    await t.db.insertInto('account_tags').values(accounts.slice(0, 3).map((id) => ({ account_id: id, tag: 'VIP' }))).execute();
+    const channel = (await t.db.insertInto('link_channels').values({ name: 'Instagram', position: 10 }).returning('id').executeTakeFirstOrThrow()).id;
+    await t.db
+      .insertInto('links')
+      .values(Array.from({ length: n }, (_, i) => ({ code: `link-${i}`, name: `Link ${i}`, channel_id: channel, destination: 'NOW' as const, created_by: f.admin.id, created_at: new Date(Date.UTC(2027, 0, 1) + i * 60_000) })))
+      .execute();
+    const places = await t.db.insertInto('geo_places').values(Array.from({ length: n }, (_, i) => ({ country: 'FR', city: `Town ${String(i).padStart(3, '0')}` }))).returning(['id', 'city']).execute();
+    await t.db.insertInto('collector_places').values(places.map((pl, i) => ({ account_id: accounts[i]!, place_id: pl.id, days: 1, first_day: '2027-02-01', last_day: '2027-02-20' }))).execute();
+    // Town 504 seen from by a second account too: the most seen from.
+    await t.db.insertInto('collector_places').values({ account_id: accounts[0]!, place_id: places[n - 1]!.id, days: 1, first_day: '2027-02-01', last_day: '2027-02-20' }).execute();
+
+    const o = await new SegmentService({ db: t.db, audit: f.audit, clock: f.clock.now }).options();
+    expect([o.cities.length, o.tags.length, o.links.length, o.places.length]).toEqual([500, 200, 500, 500]);
+    expect([SEGMENT_OPTION_LIMITS.cities, SEGMENT_OPTION_LIMITS.tags, SEGMENT_OPTION_LIMITS.links, SEGMENT_OPTION_LIMITS.places]).toEqual([500, 200, 500, 500]);
+    expect(o.cities[0]).toBe('Lyon');
+    expect(o.tags[0]).toEqual({ tag: 'VIP', accounts: 3 });
+    // The newest links first: the five oldest are left out.
+    expect(o.links[0]!.name).toBe(`Link ${n - 1}`);
+    expect(o.links.map((l) => l.name)).not.toContain('Link 4');
+    expect(o.places[0]).toEqual({ id: places[n - 1]!.id, label: `Town ${n - 1}, France` });
   });
 });
