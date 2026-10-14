@@ -1,0 +1,105 @@
+/*
+ * The light mode (the owner's choice of 2026-10-14: GALLERY WHITE · SOFT): NOCTURNE drawn on white, a collector's own
+ * choice (LIGHT MODE in YOUR ACCOUNT, shared/mode.ts), kept on the device; NOCTURNE's dark stays the default.
+ * A gallery wall: pure white, NOCTURNE's ground as the ink, neutral greys only. Layout, sizes, spacing and type are
+ * NOCTURNE's, unchanged: this sheet turns the vault's colour tokens, then redraws five things for a light ground.
+ *
+ * It applies under `<html data-mode="light">` to every NOCTURNE screen (`body.nocturne`, the legal pages' too) but the
+ * camera (`data-screen="scan"`, as views/shell.ts LIGHT_EXCEPT says). The LIVE RELEASE's room and the shared ownership
+ * certificate are not NOCTURNE screens: they keep their own look. Photographs do not change with the mode (dark
+ * studio shots), nor does the ground a photograph waits on (--n-photo).
+ *
+ * Contrast (WCAG 2): ink #0a0a0a on the ground #ffffff 19.8 : 1; soft #5e5e5e 6.5 : 1 on the ground, 6.0 : 1 on the
+ * plate #f6f6f6 (AA); faint #949494 3.0 : 1, decoration only.
+ */
+
+html[data-mode="light"]:has(> body.nocturne:not([data-screen="scan"])) {
+  background: #ffffff;
+}
+
+[data-mode="light"] body.nocturne:not([data-screen="scan"]) {
+  --vault-ground: #ffffff;
+  --vault-ink: #0a0a0a;
+  --vault-soft: #5e5e5e;
+  --vault-faint: #949494;
+  --vault-plate: #f6f6f6;
+  --vault-hairline: rgba(10, 10, 10, 0.14);
+  --vault-hairline-strong: rgba(10, 10, 10, 0.4);
+  /* No overhead light on white. */
+  --vault-light: radial-gradient(120% 55% at 50% 0%, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0) 62%);
+  --vault-glow: drop-shadow(0 0 22px rgba(10, 10, 10, 0.14));
+
+  --n-card-line: rgba(10, 10, 10, 0.2);
+  --n-scan-ring: rgba(10, 10, 10, 0.7);
+  --n-scan-light: rgba(10, 10, 10, 0.1);
+  --n-glow: drop-shadow(0 0 18px rgba(10, 10, 10, 0.12));
+  --n-dot-ring: rgba(10, 10, 10, 0.24);
+  --n-seal-light: rgba(10, 10, 10, 0.06);
+  --n-scrim: rgba(10, 10, 10, 0.4);
+  --n-door-shadow: rgba(10, 10, 10, 0.3);
+  color-scheme: light;
+}
+
+/* ── 1. Photographs: a clean edge under the rail or their title, an eased dissolve into the white at their foot ── */
+
+[data-mode="light"] body.nocturne:not([data-screen="scan"]) .n-fade::before {
+  display: none;
+}
+
+/* Two pixels of the ground under the rail: its current chapter's mark stays on white above a photograph. */
+[data-mode="light"] body.nocturne:not([data-screen="scan"]) .n-rail {
+  z-index: 2;
+  box-shadow: 0 2px 0 var(--vault-ground);
+}
+
+/* The photograph stays itself longer, the grey middle is short, and the block lifted onto it stands on white. */
+[data-mode="light"] body.nocturne:not([data-screen="scan"]) .n-fade::after {
+  background: linear-gradient(
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0) 10%,
+    rgba(255, 255, 255, 0.034) 20%,
+    rgba(255, 255, 255, 0.126) 28%,
+    rgba(255, 255, 255, 0.259) 36%,
+    rgba(255, 255, 255, 0.417) 44%,
+    rgba(255, 255, 255, 0.583) 52%,
+    rgba(255, 255, 255, 0.741) 60%,
+    rgba(255, 255, 255, 0.874) 68%,
+    rgba(255, 255, 255, 0.966) 76%,
+    var(--vault-ground) 84%
+  );
+}
+
+/* ── 2. Plates: no fill, one fine line at the edge; NOCTURNE's inner frame gone ── */
+
+[data-mode="light"] body.nocturne:not([data-screen="scan"]) .n-card {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--n-card-line);
+}
+
+[data-mode="light"] body.nocturne:not([data-screen="scan"]) .n-card::before {
+  box-shadow: none;
+}
+
+/* ── 3. Outlined buttons: a firmer line ── */
+
+[data-mode="light"] body.nocturne:not([data-screen="scan"]) .n-btn--ol {
+  box-shadow: inset 0 0 0 1px rgba(10, 10, 10, 0.78);
+}
+
+/* ── 4. The SCAN ring: a white disc, its line and a soft shadow in place of the glow; its bar fades to white ── */
+
+[data-mode="light"] body.nocturne:not([data-screen="scan"]) .n-scan {
+  background: linear-gradient(rgba(255, 255, 255, 0) 30%, var(--vault-ground) 62%);
+}
+
+[data-mode="light"] body.nocturne:not([data-screen="scan"]) .n-scan__ring {
+  background: #ffffff;
+  box-shadow: inset 0 0 0 1px var(--n-scan-ring), 0 10px 24px -8px rgba(10, 10, 10, 0.24);
+}
+
+/* ── 5. The GENOME: drawn in ivory for the night (verify/genome-view.ts GENOME_SCREEN_INK); on white it takes the ink.
+   A filter, so the figure follows the switch at once and keeps its tones; it also takes the glow's place. ── */
+
+[data-mode="light"] body.nocturne:not([data-screen="scan"]) .n-gen__figure .genome-svg {
+  filter: invert(1) grayscale(1);
+}

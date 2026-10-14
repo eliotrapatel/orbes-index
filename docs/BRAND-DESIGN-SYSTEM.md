@@ -646,6 +646,22 @@ The dates: a LIVE RELEASE's T0 (an after-room's piece is a LIVE RELEASE card too
 
 ---
 
+### 3.13 The light mode (GALLERY WHITE · SOFT)
+
+The owner's choice of 2026-10-14, after two rounds of rendered palettes: a collector may turn **LIGHT MODE** on in YOUR ACCOUNT (a switch under SOUND, `views/account.ts`). NOCTURNE's dark stays the default; the choice is kept on the device (`shared/prefs.ts`, `orbes.mode`), never on the account.
+
+- **The palette** (`shared/light.css`): a gallery wall. The ground `#ffffff`, NOCTURNE's ground `#0a0a0a` as the ink (19.8 : 1), the secondary grey `#5e5e5e` (6.5 : 1), the decoration grey `#949494`, the plate `#f6f6f6`, hairlines in the ink at 14 % and 40 %. Neutral greys only: no warm tint, no accent. Layout, sizes, spacing and type are NOCTURNE's, unchanged.
+- **Five pieces redrawn for a light ground**, everything else being the colour tokens turned:
+  1. a photograph starts on a clean edge under the rail or its title (no fade at its top, two pixels of white under the rail so the current chapter's mark stays on white) and dissolves into the white at its foot on an eased curve, so the block lifted onto it stands on white;
+  2. a plate has no fill: one fine line at its edge (the ink at 20 %), NOCTURNE's inner frame gone;
+  3. an outlined button takes a firmer line (the ink at 78 %);
+  4. the SCAN ring is a white disc with its line and a soft shadow in place of the glow, its bar fading to white;
+  5. the GENOME, drawn in ivory for the night, takes the ink (a filter on the figure, so it follows the switch at once).
+- **What keeps its own look whatever the mode**: the LIVE RELEASE's room (the vault, §5), the camera (`data-screen="scan"`), the shared ownership certificate (its paper), the story card and the share image (drawn for sharing). Photographs do not change with the mode.
+- **How it is applied**: one attribute on the page's root, `<html data-mode="light">` (`shared/mode.ts`). Each shell loads a small plain script before its stylesheet (`mode.ts` → `shared/mode-early.ts`, a build entry), so a light page never opens dark; Safari's bars follow the ground (`views/shell.ts`). The legal pages read the same choice.
+
+**Checked by:** `test/web/verify.mode.test.ts` (the preference, the attribute, the early script's own values, the stylesheet's scope and palette) and `test/web/verify.mode.e2e.test.ts` (the switch, the computed values on the real screens, the page opened again before the app's script runs, the legal pages, off again).
+
 ## 4. Voice and copy
 
 ### 4.1 Principles

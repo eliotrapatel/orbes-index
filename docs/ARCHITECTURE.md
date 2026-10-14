@@ -185,7 +185,8 @@ genome/
                          and English (/legal, /legal/privacy, /legal/terms, /legal/notice, /legal/faq); content/*.ts with LEGAL_VERSION
     shared/              brand CSS, display font, monogram, DOM helpers; what verify/ and legal/ share (the legal pages' paths,
                          the second-hand sentence, the contact of ORBES Client Services and where SUBSCRIBE of ORBES Care leads);
-                         the preferences kept on the device (prefs.ts: the sound)
+                         the preferences kept on the device (prefs.ts: the sound, the light mode); the light mode
+                         (mode.ts, mode-early.ts before the first paint, light.css)
   scripts/             CLIs and studies (db, keys, admin, POC, benchmarks, scan matrix, test sheets, the views'
                          sizes (views-size.ts), …)
   test/                Vitest suites by area (core, ecc, decoder, api, db, services, e2e, web, …)
