@@ -1677,6 +1677,9 @@ export const collectorsOptionsQuery = z.strictObject({});
 export const collectorsReportQuery = z.strictObject({
   ...collectorsQueryShape,
   panel: z.string().trim().min(1, 'Required').max(20, 'At most 20 characters'),
+  /** Over time's select Figure and Split by (checked by the service). */
+  figure: collectorsFilter(20),
+  split: collectorsFilter(20),
   fresh: queryBool,
 });
 

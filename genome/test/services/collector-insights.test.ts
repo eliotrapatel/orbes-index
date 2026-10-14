@@ -28,7 +28,9 @@ import {
   CollectorInsightsService,
   INSIGHTS_CACHE_SIZE,
   SCORE_SLICES,
+  TREND_FIGURES,
   type DevicesPanelFigures,
+  type TrendsFigures,
   type EngagementFigures,
   type BarRow,
   type CollectorsReport,
@@ -42,7 +44,7 @@ import { median } from '../../src/server/services/growth.js';
 import { VIEW_PAGE_CODES } from '../../src/server/db/schema.js';
 import type { LikesFigures } from '../../src/server/services/likes.js';
 import type { DevicesFigures } from '../../src/server/services/tracking-reads.js';
-import { AGE_SLICES, parisPeriod, previousPeriod, type Period } from '../../src/server/services/insights-scope.js';
+import { AGE_SLICES, parisPeriod, periodBuckets, previousPeriod, type Bucket, type Period } from '../../src/server/services/insights-scope.js';
 import { parisDay, parisDayStart } from '../../src/server/services/schedule.js';
 import { createManualClock, type Logger } from '../../src/server/types.js';
 import { GrowthWorld } from '../support/growth.js';
@@ -122,6 +124,8 @@ const MAIN_DEVICES: DeviceClass[] = [
   { kind: 'TABLET', os: 'IOS', browser: 'SAFARI', opened_in: 'IN_APP', in_app: 'INSTAGRAM' },
   { kind: 'PHONE', os: 'ANDROID', browser: 'CHROME', opened_in: 'HOME_SCREEN', in_app: null },
 ];
+/** The buyers (step 9.7): every third account that signed in. */
+const buyer = (s: Seed): boolean => s.loginAt !== null && s.i % 12 === 0;
 const SECOND_DEVICE: DeviceClass = { kind: 'COMPUTER', os: 'WINDOWS', browser: 'EDGE', opened_in: 'BROWSER', in_app: null };
 const mainDevice = (s: Seed): DeviceClass | null => (s.loginAt ? MAIN_DEVICES[(s.i / 4) % 4]! : null);
 const secondDevice = (s: Seed): boolean => s.loginAt !== null && s.i % 8 === 0;
@@ -232,7 +236,8 @@ describe('CollectorInsightsService (§3.6 C.6, steps 9.2 and on)', () => {
           .execute();
     }
     // Wishes, on one model.
-    const model = await (await new GrowthWorld(db).prepare()).model('MONOLITHE', { price: [48_000, 'EUR'] });
+    const gw = await new GrowthWorld(db).prepare();
+    const model = await gw.model('MONOLITHE', { price: [48_000, 'EUR'] });
     for (const s of HOUSE) if (s.wishAt) await db.insertInto('account_wishes').values({ account_id: s.id!, model_id: model, added_at: s.wishAt }).execute();
     // Sign-ins, at their instants (the audit log takes the clock's time), oldest first.
     for (const s of [...HOUSE].filter((x) => x.loginAt).sort((a, b) => a.loginAt!.getTime() - b.loginAt!.getTime())) {
@@ -309,6 +314,34 @@ describe('CollectorInsightsService (§3.6 C.6, steps 9.2 and on)', () => {
       await db
         .insertInto('device_daily_stats')
         .values({ day: d, country, kind: c.kind, os: c.os, browser: c.browser, opened_in: c.opened_in, in_app: c.in_app ?? 'NONE', devices, new_devices: 0, signed_in_devices: 0 })
+        .execute();
+    }
+    // Orders (step 9.7): every account of BUYERS bought MONOLITHE, reserved at its sign-in's instant (its activity
+    // unchanged), paid half an hour later.
+    // GrowthWorld's salon order, written here at these instants (an order's times never change once written).
+    const location = (gw as unknown as { location: string }).location;
+    for (const s of HOUSE.filter(buyer)) {
+      const request = (
+        await db
+          .insertInto('shop_requests')
+          .values({ account_id: s.id!, model_id: model, status: 'CLOSED', created_at: s.created, handled_at: s.loginAt!, outcome: 'ACCEPTED' })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+      await db
+        .insertInto('orders')
+        .values({
+          channel: 'SALON',
+          account_id: s.id!,
+          model_id: model,
+          shop_request_id: request,
+          price_minor: 48_000,
+          currency: 'EUR',
+          status: 'PAID',
+          reserved_at: s.loginAt!,
+          paid_at: new Date(s.loginAt!.getTime() + 30 * 60_000),
+          location_id: location,
+        })
         .execute();
     }
     // The monthly history (counted collectors and test entrants; neither a team account nor a DELETED one ever has a row).
@@ -750,6 +783,142 @@ describe('CollectorInsightsService (§3.6 C.6, steps 9.2 and on)', () => {
         }
       }
       expect(f.cohorts.rows.find((r) => r.month === '2026-07')!.marks[0]!.active).toBeGreaterThan(0);
+    });
+  });
+
+  describe('trends (Over time, step 9.7)', () => {
+    const trends = async (req: Omit<InsightsRequest, 'panel'> = {}) => {
+      svc.clearCache();
+      const r = await svc.report({ panel: 'trends', ...req });
+      expect(r.panel).toBe('trends');
+      return r.figures as TrendsFigures;
+    };
+    const inBucket = (at: Date | null, b: Bucket) => at !== null && at >= b.start && at < b.end;
+    const viewsOf = (s: Seed) => (mainDevice(s) ? 3 + (secondDevice(s) ? 1 : 0) : 0);
+    /** A figure by hand for the collectors `list` over a bucket: [value, collectors behind it]. */
+    const hand = (figure: string, list: Seed[], b: Bucket, p: Period): [number | null, number] => {
+      const count = (f: (s: Seed) => boolean): [number, number] => {
+        const n = list.filter(f).length;
+        return [n, n];
+      };
+      switch (figure) {
+        case 'collectors':
+          return count((s) => s.created < b.end);
+        case 'new':
+          return count((s) => inBucket(s.created, b));
+        case 'firstvisits':
+          return [devices.filter((d) => inBucket(d.at, b)).length, list.filter((s) => inBucket(s.firstSeenAt, b)).length];
+        case 'active':
+          return count((s) => inBucket(s.loginAt, b));
+        case 'medianscore': {
+          // This morning's scores for the bucket holding now; the month the history kept for a bucket ending a month.
+          const month = `${b.to.slice(0, 7)}-01`;
+          const monthEnd = day(addMonths(month, 1), -1) === b.to;
+          const scores =
+            NOW >= b.start && NOW < b.end
+              ? list.filter((s) => s.score !== null).map((s) => s.score!)
+              : monthEnd
+                ? list.filter((s) => s.created < b.end).map((s) => historyAt(s, month)?.score ?? null).filter((v): v is number => v !== null)
+                : [];
+          return [scores.length >= 3 ? median(scores) : null, scores.length];
+        }
+        case 'wishes':
+          return count((s) => inBucket(s.wishAt, b));
+        case 'views': {
+          const viewers = list.filter((s) => inBucket(s.loginAt, b) && viewsOf(s) > 0);
+          return [viewers.reduce((a, s) => a + viewsOf(s), 0), viewers.length];
+        }
+        case 'buyers':
+          return count((s) => buyer(s) && inBucket(new Date(s.loginAt!.getTime() + 30 * 60_000), b) && within(new Date(s.loginAt!.getTime() + 30 * 60_000), p));
+      }
+      throw new Error(figure);
+    };
+    const line = (figure: string, list: Seed[], p: Period) =>
+      periodBuckets(p).map((b) => {
+        const [value, collectors] = hand(figure, list, b, p);
+        return { key: b.key, from: b.from, to: b.to, value, collectors };
+      });
+
+    it('each figure by Paris day over LAST 30 DAYS, with the previous period’s line, counted collectors only', async () => {
+      for (const figure of TREND_FIGURES) {
+        const f = await trends({ figure });
+        expect(f, figure).toMatchObject({ figure, split: 'none', unit: 'day', groups: [] });
+        expect(f.total, figure).toEqual(line(figure, COUNTED, P30));
+        expect(f.previous, figure).toEqual(line(figure, COUNTED, B30));
+        expect(f.total.some((x) => (x.value ?? 0) > 0), figure).toBe(true);
+      }
+      // The default figure is Collectors, the split Nothing; without the comparison, no previous line.
+      expect(await trends({ cmp: false })).toMatchObject({ figure: 'collectors', split: 'none', previous: null });
+    });
+
+    it('split by country, by age (six groups, then Other), by device, by source; the groups add up to the line', async () => {
+      const byCountry = await trends({ split: 'country' });
+      const country = (s: Seed) => s.country ?? 'none';
+      expect(byCountry.groups.map((g) => g.group).sort()).toEqual(['FR', 'GB', 'IT', 'none']);
+      for (const g of byCountry.groups) expect(g.points, g.group).toEqual(line('collectors', COUNTED.filter((s) => country(s) === g.group), P30));
+      expect(byCountry.total).toEqual(line('collectors', COUNTED, P30));
+
+      // AGES has eight slices: the six with most new collectors are named, the two others summed as Other.
+      const byAge = await trends({ split: 'age', figure: 'new' });
+      const age = (s: Seed) => (s.birth ? bandOfAge(ageOn(s.birth, TODAY)) : 'none');
+      const sizes = new Map<string, number>();
+      for (const s of COUNTED.filter((x) => within(x.created, P30))) sizes.set(age(s), (sizes.get(age(s)) ?? 0) + 1);
+      const named = [...sizes].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, 6).map(([k]) => k);
+      expect(byAge.groups.map((g) => g.group)).toEqual(sizes.size > 6 ? [...named, 'other'] : named);
+      const other = byAge.groups.find((g) => g.group === 'other');
+      if (other) expect(other.points).toEqual(line('new', COUNTED.filter((s) => !named.includes(age(s))), P30));
+      const sum = (key: string) => byAge.groups.reduce((a, g) => a + (g.points.find((x) => x.key === key)!.value ?? 0), 0);
+      for (const x of byAge.total) expect(sum(x.key), x.key).toBe(x.value);
+
+      // By device: the kind of each collector's main device in the period, Unknown without a view.
+      const byDevice = await trends({ split: 'device', figure: 'active' });
+      const kind = (s: Seed) => (within(s.loginAt, P30) ? mainDevice(s)!.kind : 'unknown');
+      for (const g of byDevice.groups) expect(g.points, g.group).toEqual(line('active', COUNTED.filter((s) => kind(s) === g.group), P30));
+
+      // First visits by country: the devices linked to a collector of France, the rest (a test entrant's, anonymous) as visitor.
+      // The collectors behind each group are those whose first visit fell in the bucket, whatever device (here they
+      // carry no linked device: the other countries have collectors behind and no first visit).
+      const visits = await trends({ split: 'country', figure: 'firstvisits' });
+      const groupsOf = visits.groups.map((g) => g.group);
+      expect(groupsOf[0]).toBe('FR');
+      expect(groupsOf[groupsOf.length - 1]).toBe('visitor');
+      const linked = (b: Bucket) => devices.filter((d) => inBucket(d.at, b) && d.linkedTo !== null && d.linkedTo.kind !== 'TEST').length;
+      expect(visits.groups[0]!.points.map((x) => x.value)).toEqual(periodBuckets(P30).map(linked));
+      expect(visits.groups.at(-1)!.points.map((x) => x.value)).toEqual(periodBuckets(P30).map((b) => devices.filter((d) => inBucket(d.at, b)).length - linked(b)));
+      for (const g of visits.groups.slice(1, -1)) {
+        expect(g.points.every((x) => x.value === 0), g.group).toBe(true);
+        expect(g.points.map((x) => x.collectors), g.group).toEqual(periodBuckets(P30).map((b) => COUNTED.filter((s) => country(s) === g.group && inBucket(s.firstSeenAt, b)).length));
+      }
+
+      // By source: every collector of the house came first direct (or has no row, after the recording's start).
+      const bySource = await trends({ split: 'source' });
+      expect(bySource.groups.map((g) => g.group)).toEqual(['kind:DIRECT']);
+    });
+
+    it('LAST 12 MONTHS by month: the median score from the history at each month’s end it holds, this morning’s for October', async () => {
+      const f = await trends({ p: '12m', figure: 'medianscore', cmp: false });
+      expect(f.unit).toBe('month');
+      const P12 = parisPeriod({ p: '12m' }, NOW);
+      const byMonth = Object.fromEntries(f.total.map((x) => [x.key, x.value]));
+      for (const month of ['2026-06', '2026-07', '2026-08', '2026-09']) {
+        const v = COUNTED.filter((s) => s.created < parisDayStart(day(`${month}-01`, 40).slice(0, 7) + '-01'))
+          .map((s) => historyAt(s, `${month}-01`)?.score ?? null)
+          .filter((x): x is number => x !== null);
+        expect(byMonth[month], month).toBe(v.length >= 3 ? median(v) : null);
+      }
+      expect(byMonth['2026-10']).toBe(scoreMedian(COUNTED));
+      expect(byMonth['2026-01']).toBeNull();
+      expect(f.total[0]!.from).toBe(P12.from);
+    });
+
+    it('refuses another figure or split (400 VALIDATION_FAILED); the figure and the split are part of the cached view', async () => {
+      await expect(svc.report({ panel: 'trends', figure: 'revenue' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+      await expect(svc.report({ panel: 'trends', split: 'city' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+      svc.clearCache();
+      const a = await svc.report({ panel: 'trends', figure: 'new' });
+      const b = await svc.report({ panel: 'trends', figure: 'active' });
+      expect(a).not.toBe(b);
+      expect(await svc.report({ panel: 'trends', figure: 'new' })).toBe(a);
     });
   });
 

@@ -456,6 +456,8 @@ const PROBES: Probe[] = [
   // The panels devices and engagement (§3.6 C.6.3 items 5 and 6): an AUDITOR reads them.
   { group: 'collectors', method: 'GET', url: '/api/admin/collectors/report?panel=devices', min: 'AUDITOR' },
   { group: 'collectors', method: 'GET', url: '/api/admin/collectors/report?panel=engagement', min: 'AUDITOR' },
+  // The panel trends (§3.6 C.6.3 item 7), its figure and split in the query.
+  { group: 'collectors', method: 'GET', url: '/api/admin/collectors/report?panel=trends&figure=new&split=tier', min: 'AUDITOR' },
   { group: 'audit', method: 'GET', url: '/api/admin/audit', min: 'AUDITOR' },
   { group: 'audit', method: 'GET', url: '/api/admin/audit/verify', min: 'AUDITOR' },
 ];

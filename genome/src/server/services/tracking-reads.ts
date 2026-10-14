@@ -904,6 +904,17 @@ function mainDevices(w: DayWindow, f: ViewFilters | undefined, countries: string
      ORDER BY r.account_id, r.s DESC, r.n DESC, r.last DESC, r.device_id`;
 }
 
+/**
+ * Each counted collector's main device of a window (devicesReport's BY COLLECTORS: the most time there), with its class:
+ * rows `account_id`, `kind`, `os`, `opened_in`, `in_app`. The window is read within the 13 months kept; null when
+ * nothing of it is (the Collectors page's Device split and its slices `device`, `system`, `openedin`, `app`).
+ */
+export function mainDeviceRows(window: DayWindow, now: Date): RawBuilder<unknown> | null {
+  const d = detailWindow(checkWindow(window), now);
+  if (!d.window) return null;
+  return sql`SELECT m.account_id, td.kind, td.os, td.opened_in, td.in_app FROM (${mainDevices(d.window, undefined, [])}) m JOIN tracking_devices td ON td.id = m.device_id`;
+}
+
 async function devicesFigures(db: Db, w: DayWindow, f: ViewFilters | undefined, countries: string[], by: DevicesBy): Promise<DevicesFigures> {
   type Row = { kind: string; os: string; browser: string; opened_in: string; in_app: string | null; n: unknown };
   let rows: Row[];

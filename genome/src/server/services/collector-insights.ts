@@ -18,7 +18,8 @@
  *             every visitor, PIECES HELD; read by likes.ts `readLikes`, §3.2 W.8), `devices` (Devices: DEVICE, SYSTEM,
  *             OPENED IN and BROWSERS by collectors, by visits and for all devices; tracking-reads.ts devicesReport, §3.3
  *             T.4.2) and `engagement` (Engagement: SCORE SPREAD with the month the history kept beside it, THE FIVE
- *             PARTS, ACTIVE AND DORMANT as of the period's last day, MONTHLY COHORTS from collector_history).
+ *             PARTS, ACTIVE AND DORMANT as of the period's last day, MONTHLY COHORTS from collector_history) and
+ *             `trends` (Over time: one figure by bucket, split by up to six groups and Other, the previous period's line).
  *
  * How a reading runs (§3.6 C.6.4, §5.1 console 25):
  *   - one REPEATABLE READ, READ ONLY transaction per panel, `work_mem` 32 MB (several panels run at once on the shared
@@ -40,7 +41,7 @@
  */
 import { sql, type RawBuilder } from 'kysely';
 import type { Db } from '../db/connection.js';
-import { HOUSE_CURRENCIES, type HouseCurrency, type SourceKind } from '../db/schema.js';
+import { HOUSE_CURRENCIES, VIEW_PAGE_CODES, type HouseCurrency, type SourceKind } from '../db/schema.js';
 import { DomainError, validationError } from '../errors.js';
 import { ageOn } from '../../shared/profile-rules.js';
 import { fold } from '../../shared/fold.js';
@@ -66,6 +67,7 @@ import {
   SCOPES,
   SOURCE_FILTER_KINDS,
   TIER_CHOICES,
+  type Bucket,
   type BucketUnit,
   type InsightsFilters,
   type Period,
@@ -76,12 +78,13 @@ import type { LinkService } from './links.js';
 import { countedCollector } from './population.js';
 import { parisDay, parisDayStart, parisMonthStart } from './schedule.js';
 import { tasteOptions } from './tastes.js';
-import { devicesReport, type DevicesBy, type DevicesFigures, type ViewFilters } from './tracking-reads.js';
+import { viewHistoryCutoff } from './tracking.js';
+import { devicesReport, mainDeviceRows, type DevicesBy, type DevicesFigures, type ViewFilters } from './tracking-reads.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The panels the page reads, top to bottom (§3.6 C.6.3); the others come with their steps. */
-export const COLLECTOR_PANELS = ['overview', 'who', 'origin', 'likes', 'devices', 'engagement'] as const;
+export const COLLECTOR_PANELS = ['overview', 'who', 'origin', 'likes', 'devices', 'engagement', 'trends'] as const;
 export type CollectorPanel = (typeof COLLECTOR_PANELS)[number];
 
 /** The cache: results kept, for how long, and the age under which Read again keeps the cached one. */
@@ -110,6 +113,14 @@ export const SCORE_SLICES = ['0-9', '10-19', '20-29', '30-39', '40-49', '50-59',
 /** Engagement, ACTIVE AND DORMANT, in the page's order. */
 export const ENGAGEMENT_STATUSES = ['active', 'dormant', 'never'] as const;
 export type EngagementStatus = (typeof ENGAGEMENT_STATUSES)[number];
+/** Over time (§3.6 C.6.3 item 7): the select Figure, in the page's order (`figure`), the first by default. */
+export const TREND_FIGURES = ['collectors', 'new', 'firstvisits', 'active', 'medianscore', 'wishes', 'views', 'buyers'] as const;
+export type TrendFigure = (typeof TREND_FIGURES)[number];
+/** Over time: the select Split by (`split`), Nothing by default. */
+export const TREND_SPLITS = ['none', 'country', 'source', 'tier', 'age', 'device'] as const;
+export type TrendSplit = (typeof TREND_SPLITS)[number];
+/** Over time: the groups drawn at most; the others are summed as `other`. */
+export const TREND_GROUPS_MAX = 6;
 
 export const insightsBusy = (): DomainError => new DomainError('INSIGHTS_BUSY', 503, 'The figures are being read for someone else. Try again in a moment.');
 export const insightsTimeout = (): DomainError =>
@@ -135,6 +146,9 @@ export interface InsightsRequest {
   sc?: string;
   ft?: string;
   currency?: string;
+  /** Over time: the figure and the split (the panel `trends` only reads them). */
+  figure?: string;
+  split?: string;
   /** Read again: bypass the cache unless its result is under INSIGHTS_FRESH_MS old. */
   fresh?: boolean;
 }
@@ -148,6 +162,8 @@ export interface InsightsQuery {
   scope: Scope;
   filters: InsightsFilters;
   currency: HouseCurrency | null;
+  /** Over time's figure and split. */
+  trend: { figure: TrendFigure; split: TrendSplit };
 }
 
 /** A bar: its key, its collectors, and its comparison (see the file header), null when the comparison is off. */
@@ -215,7 +231,8 @@ export type CollectorsReport =
   | (ReportHead & { panel: 'origin'; figures: OriginFigures })
   | (ReportHead & { panel: 'likes'; figures: LikesFigures })
   | (ReportHead & { panel: 'devices'; figures: DevicesPanelFigures })
-  | (ReportHead & { panel: 'engagement'; figures: EngagementFigures });
+  | (ReportHead & { panel: 'engagement'; figures: EngagementFigures })
+  | (ReportHead & { panel: 'trends'; figures: TrendsFigures });
 
 export interface CollectorsOptions {
   /** The accounts' countries among the counted collectors. */
@@ -327,7 +344,7 @@ export class CollectorInsightsService {
     this.cacheSize = l.cacheSize ?? INSIGHTS_CACHE_SIZE;
     this.cacheMs = l.cacheMs ?? INSIGHTS_CACHE_MS;
     this.freshMs = l.freshMs ?? INSIGHTS_FRESH_MS;
-    this.panels = { overview: overviewPanel, who: whoPanel, origin: originPanel, likes: likesPanel, devices: devicesPanel, engagement: engagementPanel, ...deps.panels };
+    this.panels = { overview: overviewPanel, who: whoPanel, origin: originPanel, likes: likesPanel, devices: devicesPanel, engagement: engagementPanel, trends: trendsPanel, ...deps.panels };
   }
 
   /** The filters' choices and the earliest dates with data (see the file header). */
@@ -361,6 +378,10 @@ export class CollectorInsightsService {
     const currency = req.currency ?? null;
     if (currency !== null && !(HOUSE_CURRENCIES as readonly string[]).includes(currency)) throw validationError(`currency: ${HOUSE_CURRENCIES.join(', ')}.`);
     const period = parisPeriod({ p: req.p, from: req.from, to: req.to }, now);
+    const figure = (req.figure ?? TREND_FIGURES[0]) as TrendFigure;
+    if (!TREND_FIGURES.includes(figure)) throw validationError(`figure: ${TREND_FIGURES.join(', ')}.`);
+    const split = (req.split ?? 'none') as TrendSplit;
+    if (!TREND_SPLITS.includes(split)) throw validationError(`split: ${TREND_SPLITS.join(', ')}.`);
     return {
       panel,
       period,
@@ -368,6 +389,7 @@ export class CollectorInsightsService {
       scope,
       filters: parseFilters({ c: req.c, s: req.s, t: req.t, sc: req.sc, ft: req.ft }),
       currency: currency as HouseCurrency | null,
+      trend: { figure, split },
     };
   }
 
@@ -437,7 +459,8 @@ export class CollectorInsightsService {
 
 /** The cache's key: the panel and the normalised query (equal for two requests that read the same figures). */
 export function cacheKey(q: InsightsQuery): string {
-  return [q.panel, q.period.key, q.period.from, q.period.to, q.previous ? 'cmp' : 'nocmp', q.scope, filtersKey(q.filters), q.currency ?? ''].join('|');
+  const trend = q.panel === 'trends' ? `${q.trend.figure}/${q.trend.split}` : '';
+  return [q.panel, q.period.key, q.period.from, q.period.to, q.previous ? 'cmp' : 'nocmp', q.scope, filtersKey(q.filters), q.currency ?? '', trend].join('|');
 }
 
 async function recordingSince(tx: Db): Promise<Date | null> {
@@ -447,7 +470,7 @@ async function recordingSince(tx: Db): Promise<Date | null> {
 
 // ── Shared readings ────────────────────────────────────────────────────────────────────────────────────────────
 
-const within = (column: RawBuilder<unknown>, p: Pick<Period, 'start' | 'end'>) => sql`${column} >= ${p.start}::timestamptz AND ${column} < ${p.end}::timestamptz`;
+export const within = (column: RawBuilder<unknown>, p: Pick<Period, 'start' | 'end'>) => sql`${column} >= ${p.start}::timestamptz AND ${column} < ${p.end}::timestamptz`;
 
 /** Counts of `rows`' keys: per dimension, per key, the collectors, and those made in the period and the previous one. */
 type Counts = Map<string, Map<string, { n: number; now: number; before: number }>>;
@@ -762,7 +785,7 @@ export const ORIGIN_SITES_TOP = 20;
 const SOURCE_KIND_ORDER = ['CAMPAIGN', 'SITE', 'DIRECT', 'BEFORE'] as const;
 
 /** The recording's start and the BEFORE and DIRECT sources: the fallbacks of an account or an act with no row (§3.4 A.5). */
-async function acquisitionBasis(tx: Db): Promise<{ started: Date; before: number; direct: number }> {
+export async function acquisitionBasis(tx: Db): Promise<{ started: Date; before: number; direct: number }> {
   const state = await tx.selectFrom('acquisition_state').select('tracking_started_at').where('id', '=', 1).executeTakeFirst();
   const fixed = await tx.selectFrom('acquisition_sources').select(['key', 'id']).where('key', 'in', ['BEFORE', 'DIRECT']).execute();
   return {
@@ -772,21 +795,30 @@ async function acquisitionBasis(tx: Db): Promise<{ started: Date; before: number
   };
 }
 
+/**
+ * Where the collector `c` first came from, as SOURCES keys it (§3.4 A.5, question 18): `channel:<id>` for a link, else
+ * `kind:<KIND>`; with no row, Before tracking for an account made before the recording, else Direct. It reads the
+ * joins FIRST_SOURCE_JOINS (`fs`, `fk`, `fl`) and `c.created_at`.
+ */
+export const firstSourceKey = (basis: { started: Date }): RawBuilder<string> =>
+  sql<string>`(CASE WHEN fs.account_id IS NULL THEN (CASE WHEN c.created_at < ${basis.started}::timestamptz THEN 'kind:BEFORE' ELSE 'kind:DIRECT' END)
+                             WHEN fk.kind = 'LINK' THEN 'channel:' || fl.channel_id::text ELSE 'kind:' || fk.kind END)`;
+export const FIRST_SOURCE_JOINS = sql`LEFT JOIN account_sources fs ON fs.account_id = c.account_id
+      LEFT JOIN acquisition_sources fk ON fk.id = fs.first_source_id
+      LEFT JOIN links fl ON fl.id = fk.link_id`;
+
 /** A paid order bought in the period (GROWTH's purchases: never GIFT, not CANCELLED or RETURNED). */
-const bought = (o: string, p: Period) => sql`${sql.ref(`${o}.paid_at`)} IS NOT NULL AND ${sql.ref(`${o}.channel`)} <> 'GIFT' AND ${sql.ref(`${o}.status`)} NOT IN ('CANCELLED', 'RETURNED') AND ${within(sql.ref(`${o}.paid_at`), p)}`;
+export const bought = (o: string, p: Pick<Period, 'start' | 'end'>) => sql`${sql.ref(`${o}.paid_at`)} IS NOT NULL AND ${sql.ref(`${o}.channel`)} <> 'GIFT' AND ${sql.ref(`${o}.status`)} NOT IN ('CANCELLED', 'RETURNED') AND ${within(sql.ref(`${o}.paid_at`), p)}`;
 
 /** SOURCES, HOW THEY HEARD, LINKS, CAMPAIGNS, REFERRING SITES and FIRST VISITS (§3.6 C.6.3 item 3; §3.4 A.10.6). */
 async function originPanel(tx: Db, x: Reading): Promise<OriginFigures> {
   const { q } = x;
   const basis = await acquisitionBasis(tx);
-  const firstKey = sql`(CASE WHEN fs.account_id IS NULL THEN (CASE WHEN c.created_at < ${basis.started}::timestamptz THEN 'kind:BEFORE' ELSE 'kind:DIRECT' END)
-                             WHEN fk.kind = 'LINK' THEN 'channel:' || fl.channel_id::text ELSE 'kind:' || fk.kind END)`;
+  const firstKey = firstSourceKey(basis);
   const keyed = (cte: string) => sql`
     SELECT c.created_at, v.dim, v.key
       FROM ${sql.table(cte)} c
-      LEFT JOIN account_sources fs ON fs.account_id = c.account_id
-      LEFT JOIN acquisition_sources fk ON fk.id = fs.first_source_id
-      LEFT JOIN links fl ON fl.id = fk.link_id
+      ${FIRST_SOURCE_JOINS}
       LEFT JOIN account_profiles pr ON pr.account_id = c.account_id
       CROSS JOIN LATERAL (VALUES
         ('source', ${firstKey}),
@@ -1266,5 +1298,328 @@ async function engagementPanel(tx: Db, x: Reading): Promise<EngagementFigures> {
       rows: ENGAGEMENT_STATUSES.map((key) => ({ key, collectors: statusNow.get(key)!, previous: statusBefore ? statusBefore.get(key)! : null })),
     },
     cohorts: { through: span ? span.last.slice(0, 7) : null, rows: cohorts },
+  };
+}
+
+// ── Over time (`trends`) ───────────────────────────────────────────────────────────────────────────────────────
+
+/** A point of a line: its bucket, the figure (null: withheld or not known then), and the collectors behind it (its list). */
+export interface TrendPoint {
+  key: string;
+  from: string;
+  to: string;
+  value: number | null;
+  collectors: number;
+}
+
+export interface TrendSeries {
+  /** The split's group (a country, `channel:<id>` or `kind:<KIND>`, a tier, an age slice, a device kind), `other`, or `visitor`. */
+  group: string;
+  points: TrendPoint[];
+}
+
+export interface TrendsFigures {
+  figure: TrendFigure;
+  split: TrendSplit;
+  unit: BucketUnit;
+  /** Every group together: the line drawn without a split. */
+  total: TrendPoint[];
+  /** With a split: the TREND_GROUPS_MAX largest groups, then `other` (the rest summed), then `visitor` (first visits of no collector in scope). */
+  groups: TrendSeries[];
+  /** The previous period's line (every group together), drawn pale; null without the comparison. */
+  previous: TrendPoint[] | null;
+  /** Views of models: the first day kept when the period reaches past the 13 months. */
+  reachesBackTo: string | null;
+}
+
+/** A cell of a line: the figure's value, the collectors behind it, and the scores a median is taken of. */
+interface TrendCell {
+  v: number;
+  n: number;
+  scores: number[];
+}
+
+/** By group, then by bucket (1 the first): the cells of one figure over one period. */
+type TrendCells = Map<string, Map<number, TrendCell>>;
+
+/**
+ * The group the split gives the collector `c` of a scope CTE (§3.6 C.6.3 item 7): its country (`none`: not given), its
+ * first source (SOURCES' keys), its tier now, its age slice today, or the kind of its main device in the period
+ * (`unknown` without a view in the 13 months). `joins` brings what the expression reads.
+ */
+export function trendGroup(x: Pick<Reading, 'today' | 'now'>, split: TrendSplit, basis: { started: Date }, p: Pick<Period, 'from' | 'to'>): { expr: RawBuilder<string>; joins: RawBuilder<unknown> } {
+  switch (split) {
+    case 'none':
+      return { expr: sql<string>`'all'`, joins: sql`` };
+    case 'country':
+      return { expr: sql<string>`coalesce(btrim(c.country), 'none')`, joins: sql`` };
+    case 'source':
+      return { expr: firstSourceKey(basis), joins: FIRST_SOURCE_JOINS };
+    case 'tier':
+      return { expr: sql<string>`c.tier::text`, joins: sql`` };
+    case 'age':
+      return { expr: ageBandSql(sql`pr.birth_date`, x.today), joins: sql`LEFT JOIN account_profiles pr ON pr.account_id = c.account_id` };
+    case 'device': {
+      const rows = mainDeviceRows({ from: p.from, to: p.to }, x.now);
+      return { expr: sql<string>`coalesce(md.kind::text, 'unknown')`, joins: rows ? sql`LEFT JOIN (${rows}) md ON md.account_id = c.account_id` : sql`LEFT JOIN (SELECT NULL::uuid AS account_id, NULL::text AS kind) md ON FALSE` };
+    }
+  }
+}
+
+/** A period's bucket starts and its end, for width_bucket (1 the first bucket, 0 before, n + 1 after). */
+const bucketStarts = (buckets: readonly Bucket[], end: Date) => sql`ARRAY[${sql.join([...buckets.map((b) => sql`${b.start}::timestamptz`), sql`${end}::timestamptz`])}]::timestamptz[]`;
+
+/** Whether a Paris day is its month's last. */
+const lastOfMonth = (day: string): boolean => plusDays(plusMonths(`${day.slice(0, 7)}-01`, 1), -1) === day;
+
+/**
+ * The cells of `figure` over period `p`, for the collectors of the scope CTE `cte` (scopeCte for `p`), by the split's
+ * group and the period's bucket (§3.6 C.6.3 item 7):
+ *   collectors   the collectors whose account existed at the bucket's end;
+ *   new          those made in the bucket;
+ *   firstvisits  the first visits of the bucket (the overview's rule, firstVisitsBy), by the group of the collector the
+ *                device was last linked to, the others as `visitor`; behind each, the collectors whose first visit fell in it;
+ *   active       those active in the bucket (activeIn's acts);
+ *   medianscore  the median of the scores at the bucket's end: this morning's for the bucket holding now, else the
+ *                month the history kept when the bucket ends on a month's last day, else not known;
+ *   wishes       the wishes added in the bucket, by how many collectors;
+ *   views        the views of models' sheets in the bucket (signed-in, the 13 months kept), by how many collectors;
+ *   buyers       the collectors with a paid order of the bucket (GROWTH's purchases: never GIFT, not cancelled or returned).
+ */
+async function trendCells(tx: Db, x: Reading, p: Period, cte: string, split: TrendSplit, figure: TrendFigure, basis: { started: Date }): Promise<{ buckets: Bucket[]; cells: TrendCells; reachesBackTo: string | null }> {
+  const buckets = periodBuckets(p);
+  const starts = bucketStarts(buckets, p.end);
+  const g = trendGroup(x, split, basis, p);
+  const cg = sql`${scopeCte(cte, x.q, p)}, cg AS (SELECT c.account_id, c.created_at, c.score, ${g.expr} AS g FROM ${sql.table(cte)} c ${g.joins})`;
+  const cells: TrendCells = new Map();
+  const cell = (group: string, b: number): TrendCell => {
+    const m = cells.get(group) ?? new Map<number, TrendCell>();
+    cells.set(group, m);
+    const c = m.get(b) ?? { v: 0, n: 0, scores: [] };
+    m.set(b, c);
+    return c;
+  };
+  const inRange = (b: number) => b >= 1 && b <= buckets.length;
+  type Row = { g: string; b: number; v?: number; n: number };
+  const put = (rows: Row[], valueIsN = false) => {
+    for (const r of rows) {
+      const b = Number(r.b);
+      if (!inRange(b)) continue;
+      const c = cell(r.g, b);
+      c.n += Number(r.n);
+      c.v += valueIsN ? Number(r.n) : Number(r.v ?? 0);
+    }
+  };
+  let reachesBackTo: string | null = null;
+  switch (figure) {
+    case 'collectors':
+    case 'new': {
+      const rows = (await sql<Row>`WITH ${cg} SELECT g, width_bucket(created_at, ${starts}) AS b, count(*)::int AS n FROM cg GROUP BY 1, 2`.execute(tx)).rows;
+      if (figure === 'new') put(rows, true);
+      else {
+        for (const group of new Set(rows.map((r) => r.g))) {
+          let running = 0;
+          const mine = rows.filter((r) => r.g === group);
+          for (let b = 0; b <= buckets.length; b++) {
+            running += mine.filter((r) => Number(r.b) === b).reduce((a, r) => a + Number(r.n), 0);
+            if (b >= 1 && running > 0) Object.assign(cell(group, b), { v: running, n: running });
+          }
+        }
+      }
+      break;
+    }
+    case 'firstvisits': {
+      put(
+        (
+          await sql<Row>`WITH ${cg} SELECT cg.g, width_bucket(s.first_seen_at, ${starts}) AS b, count(*)::int AS n
+             FROM cg JOIN account_sources s ON s.account_id = cg.account_id WHERE ${within(sql`s.first_seen_at`, p)} GROUP BY 1, 2`.execute(tx)
+        ).rows.map((r) => ({ ...r, v: 0 })),
+      );
+      const days = await firstVisitsBy(tx, x, p, 'day');
+      const totals = new Map<number, number>();
+      for (const [d, n] of days) {
+        const b = buckets.findIndex((k) => d >= k.from && d <= k.to) + 1;
+        if (b > 0) totals.set(b, (totals.get(b) ?? 0) + n);
+      }
+      if (split === 'none') {
+        for (const [b, n] of totals) cell('all', b).v = n;
+        break;
+      }
+      const linked = (
+        await sql<{ g: string; b: number; v: number }>`
+          WITH ${cg}
+          SELECT lk.g, width_bucket(td.first_seen_at, ${starts}) AS b, count(*)::int AS v
+            FROM tracking_devices td
+            CROSS JOIN LATERAL (SELECT cg.g FROM tracking_device_accounts tda JOIN cg ON cg.account_id = tda.account_id
+                                 WHERE tda.device_id = td.id ORDER BY tda.last_linked_at DESC, tda.account_id LIMIT 1) lk
+           WHERE ${within(sql`td.first_seen_at`, p)} AND td.staff_at IS NULL
+           GROUP BY 1, 2`.execute(tx)
+      ).rows;
+      const linkedBy = new Map<number, number>();
+      for (const r of linked) {
+        const b = Number(r.b);
+        if (!inRange(b)) continue;
+        cell(r.g, b).v += Number(r.v);
+        linkedBy.set(b, (linkedBy.get(b) ?? 0) + Number(r.v));
+      }
+      for (const [b, n] of totals) if (n - (linkedBy.get(b) ?? 0) > 0) cell('visitor', b).v = n - (linkedBy.get(b) ?? 0);
+      break;
+    }
+    case 'active': {
+      const a = (t: string, at: string, account = 'account_id') => sql`SELECT cg.account_id, x.${sql.raw(at)} AS at FROM cg JOIN ${sql.table(t)} x ON x.${sql.raw(account)} = cg.account_id AND ${within(sql.ref(`x.${at}`), p)}`;
+      put(
+        (
+          await sql<Row>`
+            WITH ${cg}, ev AS (
+              SELECT cg.account_id, x.occurred_at AS at FROM cg JOIN audit_logs x ON x.action = 'account.login' AND x.target_id = cg.account_id::text AND ${within(sql`x.occurred_at`, p)}
+              UNION ALL ${a('scan_events', 'occurred_at')}
+              UNION ALL ${a('collector_views', 'at')}
+              UNION ALL ${a('drop_entries', 'created_at')}
+              UNION ALL ${a('live_entries', 'joined_at')}
+              UNION ALL ${a('orders', 'reserved_at')})
+            SELECT cg.g, width_bucket(ev.at, ${starts}) AS b, count(DISTINCT ev.account_id)::int AS n FROM ev JOIN cg ON cg.account_id = ev.account_id GROUP BY 1, 2`.execute(tx)
+        ).rows,
+        true,
+      );
+      break;
+    }
+    case 'medianscore': {
+      const span = await historySpan(tx);
+      let current: { g: string; score: number }[] | null = null;
+      for (let i = 0; i < buckets.length; i++) {
+        const k = buckets[i]!;
+        let rows: { g: string; score: number }[] = [];
+        if (x.now >= k.start && x.now < k.end) {
+          current ??= (await sql<{ g: string; score: number }>`WITH ${cg} SELECT g, score FROM cg WHERE score IS NOT NULL`.execute(tx)).rows;
+          rows = current;
+        } else {
+          const month = `${k.to.slice(0, 7)}-01`;
+          if (!lastOfMonth(k.to) || !span || month < span.first || month > span.last) continue;
+          rows = (
+            await sql<{ g: string; score: number }>`
+              WITH ${cg} SELECT cg.g, h.scores[${historyIndex(sql`${month}::date`)}] AS score
+                FROM cg JOIN collector_history h ON h.account_id = cg.account_id
+               WHERE cg.created_at < ${k.end}::timestamptz AND h.scores[${historyIndex(sql`${month}::date`)}] IS NOT NULL`.execute(tx)
+          ).rows;
+        }
+        for (const r of rows) {
+          const c = cell(r.g, i + 1);
+          c.scores.push(Number(r.score));
+          c.n += 1;
+        }
+      }
+      break;
+    }
+    case 'wishes':
+      put(
+        (
+          await sql<Row>`WITH ${cg} SELECT cg.g, width_bucket(w.added_at, ${starts}) AS b, count(*)::int AS v, count(DISTINCT w.account_id)::int AS n
+             FROM account_wishes w JOIN cg ON cg.account_id = w.account_id WHERE ${within(sql`w.added_at`, p)} GROUP BY 1, 2`.execute(tx)
+        ).rows,
+      );
+      break;
+    case 'views': {
+      const cutoff = viewHistoryCutoff(x.now);
+      const first = parisDay(cutoff);
+      if (p.from < first) reachesBackTo = first;
+      if (p.end <= cutoff) break;
+      const start = p.start < cutoff ? cutoff : p.start;
+      put(
+        (
+          await sql<Row>`WITH ${cg} SELECT cg.g, width_bucket(v.at, ${starts}) AS b, count(*)::int AS v, count(DISTINCT v.account_id)::int AS n
+             FROM collector_views v JOIN cg ON cg.account_id = v.account_id
+            WHERE v.page = ${VIEW_PAGE_CODES.MODEL} AND ${within(sql`v.at`, { start, end: p.end })} GROUP BY 1, 2`.execute(tx)
+        ).rows,
+      );
+      break;
+    }
+    case 'buyers':
+      put(
+        (
+          await sql<Row>`WITH ${cg} SELECT cg.g, width_bucket(o.paid_at, ${starts}) AS b, count(DISTINCT o.account_id)::int AS n
+             FROM orders o JOIN cg ON cg.account_id = o.account_id WHERE ${bought('o', p)} GROUP BY 1, 2`.execute(tx)
+        ).rows,
+        true,
+      );
+      break;
+  }
+  return { buckets, cells, reachesBackTo };
+}
+
+/** Cells merged (values and collectors summed, scores gathered): a total, or `other`. */
+function mergeCells(groups: readonly Map<number, TrendCell>[]): Map<number, TrendCell> {
+  const out = new Map<number, TrendCell>();
+  for (const m of groups)
+    for (const [b, c] of m) {
+      const e = out.get(b) ?? { v: 0, n: 0, scores: [] };
+      e.v += c.v;
+      e.n += c.n;
+      e.scores.push(...c.scores);
+      out.set(b, e);
+    }
+  return out;
+}
+
+/** A line's points over the buckets: a median of fewer than INSIGHTS_MIN_GROUP scores, or a figure not known then, is null. */
+function trendPoints(buckets: readonly Bucket[], m: Map<number, TrendCell>, figure: TrendFigure): TrendPoint[] {
+  return buckets.map((k, i) => {
+    const c = m.get(i + 1);
+    const value =
+      figure === 'medianscore' ? (c && c.scores.length >= INSIGHTS_MIN_GROUP ? median(c.scores) : null) : (c?.v ?? 0);
+    return { key: k.key, from: k.from, to: k.to, value, collectors: c?.n ?? 0 };
+  });
+}
+
+/**
+ * The groups drawn by name: the TREND_GROUPS_MAX largest over the period (Collectors: at the last bucket; a median: by
+ * the collectors behind it; the others: their sum), then by the collectors behind them, equal ones in code order;
+ * never `visitor`.
+ */
+export function namedTrendGroups(cells: TrendCells, figure: TrendFigure, buckets: number): string[] {
+  const weight = (m: Map<number, TrendCell>) =>
+    figure === 'collectors' ? (m.get(buckets)?.n ?? 0) : [...m.values()].reduce((a, c) => a + (figure === 'medianscore' ? c.n : c.v), 0);
+  const behind = (m: Map<number, TrendCell>) => [...m.values()].reduce((a, c) => a + c.n, 0);
+  return [...cells]
+    .filter(([g]) => g !== 'visitor')
+    .map(([g, m]) => ({ g, w: weight(m), n: behind(m) }))
+    .sort((a, b) => b.w - a.w || b.n - a.n || (a.g < b.g ? -1 : a.g > b.g ? 1 : 0))
+    .slice(0, TREND_GROUPS_MAX)
+    .map((e) => e.g);
+}
+
+/** The named groups of a trend reading for `p` (the list's `other`: the collectors of none of them). */
+export async function trendNamedGroups(tx: Db, x: Reading, p: Period): Promise<string[]> {
+  const basis = await acquisitionBasis(tx);
+  const { buckets, cells } = await trendCells(tx, x, p, 'col', x.q.trend.split, x.q.trend.figure, basis);
+  return namedTrendGroups(cells, x.q.trend.figure, buckets.length);
+}
+
+/**
+ * Over time (§3.6 C.6.3 item 7): one figure (TREND_FIGURES) by bucket over the period (by day up to 31 days, by week up
+ * to 120, by month beyond), split by up to TREND_GROUPS_MAX groups and `other`, with the previous period's line beside
+ * it. Every point carries the collectors behind it, which its list (`bucket:trend:…`) opens.
+ */
+async function trendsPanel(tx: Db, x: Reading): Promise<TrendsFigures> {
+  const { q } = x;
+  const { figure, split } = q.trend;
+  const basis = await acquisitionBasis(tx);
+  const now = await trendCells(tx, x, q.period, 'col', split, figure, basis);
+  let groups: TrendSeries[] = [];
+  if (split !== 'none') {
+    const named = namedTrendGroups(now.cells, figure, now.buckets.length);
+    const rest = [...now.cells].filter(([g]) => g !== 'visitor' && !named.includes(g)).map(([, m]) => m);
+    groups = named.map((group) => ({ group, points: trendPoints(now.buckets, now.cells.get(group)!, figure) }));
+    if (rest.length) groups.push({ group: 'other', points: trendPoints(now.buckets, mergeCells(rest), figure) });
+    if (now.cells.has('visitor')) groups.push({ group: 'visitor', points: trendPoints(now.buckets, now.cells.get('visitor')!, figure) });
+  }
+  const before = q.previous ? await trendCells(tx, x, q.previous, 'colp', 'none', figure, basis) : null;
+  return {
+    figure,
+    split,
+    unit: bucketUnit(q.period),
+    total: trendPoints(now.buckets, mergeCells([...now.cells.values()]), figure),
+    groups,
+    previous: before ? trendPoints(before.buckets, mergeCells([...before.cells.values()]), figure) : null,
+    reachesBackTo: now.reachesBackTo,
   };
 }

@@ -46,7 +46,7 @@ describe('GET /api/admin/collectors/… (§3.6 C.9)', () => {
   };
 
   it('AUDITOR, OPERATOR and ADMIN read; RETAIL and LOGISTICS get 403; no session 401', async () => {
-    for (const url of ['/api/admin/collectors/options', '/api/admin/collectors/report?panel=overview', '/api/admin/collectors/report?panel=who', '/api/admin/collectors/report?panel=origin', '/api/admin/collectors/report?panel=likes', '/api/admin/collectors/report?panel=devices', '/api/admin/collectors/report?panel=engagement']) {
+    for (const url of ['/api/admin/collectors/options', '/api/admin/collectors/report?panel=overview', '/api/admin/collectors/report?panel=who', '/api/admin/collectors/report?panel=origin', '/api/admin/collectors/report?panel=likes', '/api/admin/collectors/report?panel=devices', '/api/admin/collectors/report?panel=engagement', '/api/admin/collectors/report?panel=trends&figure=active&split=country']) {
       for (const role of ['AUDITOR', 'OPERATOR', 'ADMIN'] as const) await get(role, url);
       for (const role of ['RETAIL', 'LOGISTICS'] as const) expect(errorOf(await clients[role].get(url)).code, `${role} ${url}`).toBe('FORBIDDEN');
       expect((await h.client().get(url)).statusCode).toBe(401);
@@ -85,6 +85,7 @@ describe('GET /api/admin/collectors/… (§3.6 C.9)', () => {
       await get('AUDITOR', '/api/admin/collectors/report?panel=likes'),
       await get('AUDITOR', '/api/admin/collectors/report?panel=devices'),
       await get('AUDITOR', '/api/admin/collectors/report?panel=engagement'),
+      await get('AUDITOR', '/api/admin/collectors/report?panel=trends&split=age'),
     ]);
     for (const e of emails) expect(text).not.toContain(e);
     for (const id of ids) expect(text).not.toContain(id);
@@ -109,6 +110,9 @@ describe('GET /api/admin/collectors/… (§3.6 C.9)', () => {
       '/api/admin/collectors/report?panel=overview&t=5',
       '/api/admin/collectors/report?panel=overview&sc=90-10',
       '/api/admin/collectors/report?panel=overview&p=custom&from=2026-13-01&to=2026-10-01',
+      '/api/admin/collectors/report?panel=trends&figure=revenue',
+      '/api/admin/collectors/report?panel=trends&split=city',
+      `/api/admin/collectors/report?panel=trends&figure=${'x'.repeat(21)}`,
     ]) {
       const res = await clients.AUDITOR.get(url);
       expect(res.statusCode, `${url} → ${res.body.slice(0, 200)}`).toBe(400);
