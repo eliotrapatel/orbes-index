@@ -63,6 +63,7 @@ import { dropView } from './views/drop.js';
 import { generatorView } from './views/generator.js';
 import { genomesView } from './views/genomes.js';
 import { growthView } from './views/growth.js';
+import { collectorsListView } from './views/collectors-list.js';
 import { collectorsView } from './views/collectors.js';
 import { keysView } from './views/keys.js';
 import { disposeLiveView, liveReleaseView } from './views/live.js';
@@ -192,6 +193,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   owner: { view: ownerView, title: 'Owner', nav: 'owners' },
   signUp: { view: signUpView, title: 'Sign-up', nav: 'owners' },
   collectors: { view: collectorsView, title: 'Collectors', nav: 'collectors' },
+  collectorsList: { view: collectorsListView, title: 'Collectors', nav: 'collectors' },
   club: { view: clubView, title: 'Club', nav: 'club' },
   drop: { view: dropView, title: 'Drop', nav: 'club' },
   liveRelease: { view: liveReleaseView, title: 'Live release', nav: 'club' },

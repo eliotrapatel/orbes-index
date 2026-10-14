@@ -15,6 +15,9 @@
  *       MOST VIEWED by collectors and by every visitor, PIECES HELD), Devices (BY COLLECTORS, BY VISITS, ALL DEVICES),
  *       Engagement (SCORE SPREAD, THE FIVE PARTS, ACTIVE AND DORMANT, MONTHLY COHORTS), Over time (a figure and a split);
  *       a most wished model's row opens the collectors who wish for it (question 16).
+ *  9.11 Figure → list → sheet: a KPI, a country, a most wished row open the list (#/collectors/list), its title naming the
+ *       figure, ordered by email, its pager, Back to the figures to the same view, a row to the client sheet; an
+ *       AUDITOR's list masks the emails and shows no city.
  *
  * Screens with ORBES_SCREENSHOTS=1 (genome/out/admin-collectors-*.png). No CSP violation, no page error.
  */
@@ -514,6 +517,74 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Collectors page (plan CUSTOMER IN
       await fits(phone);
       await shot(phone, 'panels-phone');
       await phone.context().close();
+    },
+    STEP_TIMEOUT,
+  );
+
+  it(
+    'opens a figure\'s collectors, ordered by email, back to the figures with the same view, a row to its client sheet; an AUDITOR reads emails masked and no city (step 9.11)',
+    async () => {
+      const p = await open(ADMIN);
+      await go(p, '#/collectors?c=FR');
+      const listed = async () => {
+        await expect.poll(async () => (await title(p).textContent())?.trim(), { timeout: 15_000 }).not.toBe('Collectors');
+        await p.waitForSelector('[data-testid=collectors-list]');
+      };
+      const emails = () => p.locator('[data-testid=collectors-list-row]').allTextContents();
+
+      // A KPI: the collectors of the view, France here.
+      await p.click('[data-testid=collectors-kpis] .kpi[data-key=collectors] a');
+      await listed();
+      expect(await title(p).textContent()).toBe('The collectors of this view');
+      expect(await p.locator('.page-head__eyebrow').textContent()).toBe('Collectors');
+      expect(await text(p, '.page-head__lead')).toMatch(/^Collectors in France\. Last 30 days, /);
+      expect(await emails()).toEqual(['a.collector@example.com', 'b.collector@example.com', 'e.collector@example.com']);
+      expect(await p.locator('[data-testid=collectors-list] thead th').allTextContents()).toEqual(['Email', 'Name', 'Country', 'City', 'Tier', 'Joined', 'Last seen']);
+      expect(await rowsOf(p, '[data-testid=collectors-list]')).toEqual([
+        expect.stringMatching(/^a\.collector@example\.com \| — \| FR · France \| Lyon \| TITANE \| \d{2} [A-Z]{3} \d{4} \| \d{2} [A-Z]{3} \d{4} · \d{2}:\d{2} Paris$/),
+        expect.stringMatching(/^b\.collector@example\.com \| — \| FR · France \| lyon \| — \| /),
+        expect.stringMatching(/^e\.collector@example\.com \| — \| FR · France \| — \| — \| \d{2} [A-Z]{3} \d{4} \| —$/),
+      ]);
+      expect(await text(p, '.pager__range')).toBe('1–3 of 3');
+      expect(await text(p, '[data-testid=collectors-list-note]')).toBe('Read now: a figure read a few minutes ago may differ by a few.');
+      await shot(p, 'list');
+      // Back to the figures: the same view.
+      await mark(p);
+      await p.click('[data-testid=collectors-list-back]');
+      await settled(p, '#/collectors?c=FR');
+
+      // A country's bar, then a most wished model's row (question 16), then a row to the client sheet.
+      await p.click('[data-testid=collectors-who-tabs] [data-key=countries]');
+      await p.click('[data-testid=collectors-countries] .bar[data-key=FR] a');
+      await listed();
+      expect(await title(p).textContent()).toBe('Country: France');
+      expect(await emails()).toEqual(['a.collector@example.com', 'b.collector@example.com', 'e.collector@example.com']);
+      await go(p, '#/collectors');
+      await loaded(p, 'likes');
+      await p.locator('[data-testid=collectors-panel-likes] tbody tr').first().locator('a').click();
+      await listed();
+      expect(await title(p).textContent()).toMatch(/^Wish for MONOLITHE · Silver on \d{2} [A-Z]{3} \d{4}$/);
+      expect(await emails()).toEqual(['a.collector@example.com', 'b.collector@example.com']);
+      await p.locator('[data-testid=collectors-list-row]', { hasText: 'b.collector@example.com' }).click();
+      await expect.poll(async () => (await title(p).textContent())?.trim(), { timeout: 15_000 }).toBe('b.collector@example.com');
+      expect(await hashOf(p)).toBe(`#/owners/${ids.b}`);
+      await p.context().close();
+
+      // An AUDITOR: the emails masked, no City column; a figure of no collector says so.
+      const a = await open(AUDITOR);
+      await a.evaluate(() => (location.hash = '#/collectors/list?slice=country:FR'));
+      await a.waitForSelector('[data-testid=collectors-list]');
+      expect(await a.locator('[data-testid=collectors-list] thead th').allTextContents()).toEqual(['Email', 'Name', 'Country', 'Tier', 'Joined', 'Last seen']);
+      const masked = await a.locator('[data-testid=collectors-list-row]').allTextContents();
+      expect(masked).toHaveLength(3);
+      for (const e of masked) expect(e).not.toMatch(/^[abe]\.collector@example\.com$/);
+      await a.evaluate(() => (location.hash = '#/collectors/list?slice=score:90-100'));
+      await expect.poll(() => a.locator('[data-testid=collectors-list] .empty__text').textContent().catch(() => null), { timeout: 15_000 }).toBe('No collector in this figure now.');
+      await a.setViewportSize({ width: 375, height: 812 });
+      await a.evaluate(() => (location.hash = '#/collectors/list?slice=all'));
+      await a.waitForSelector('[data-testid=collectors-list-row]');
+      await fits(a);
+      await a.context().close();
     },
     STEP_TIMEOUT,
   );

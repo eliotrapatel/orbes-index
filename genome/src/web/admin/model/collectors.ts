@@ -667,3 +667,167 @@ export function trendSlice(figure: string, key: string, o: { previous?: boolean;
   const group = o.previous || !o.group || o.group === 'all' ? '' : `:${o.group}`;
   return `bucket:trend:${figure}:${o.previous ? 'prev:' : ''}${key}${group}`;
 }
+
+// ── The collectors behind a figure (`#/collectors/list`, step 9.11) ──────────────────────────────────────────────
+
+export const LIST_COPY = Object.freeze({
+  eyebrow: 'Collectors',
+  back: 'Back to the figures',
+  note: 'Read now: a figure read a few minutes ago may differ by a few.',
+  empty: 'No collector in this figure now.',
+  unknown: 'This figure is not one the page opens.',
+  columns: Object.freeze({ email: 'Email', name: 'Name', country: 'Country', city: 'City', tier: 'Tier', joined: 'Joined', lastSeen: 'Last seen', words: 'In their words' }),
+});
+
+/** The list's state from its address: the page's, the slice, what its title needs, the page. */
+export interface ListParams extends CollectorsParams {
+  slice: string;
+  name: string | null;
+  figure: string | null;
+  split: string | null;
+  page: number;
+}
+
+export function listParams(query: Readonly<Record<string, string | undefined>>, now: Date): ListParams {
+  const n = Number(query.page);
+  return {
+    ...collectorsParams(query, now),
+    slice: query.slice ?? '',
+    name: query.name || null,
+    figure: query.figure || null,
+    split: query.split || null,
+    page: Number.isInteger(n) && n > 1 ? n : 1,
+  };
+}
+
+/** A time bucket's key in words: a day, an ISO week (`week 37 of 2026`) or a month. */
+export function bucketKeyWords(key: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(key)) return formatDate(key);
+  const w = /^(\d{4})-W(\d{2})$/.exec(key);
+  if (w) return `week ${Number(w[2])} of ${w[1]}`;
+  return /^\d{4}-\d{2}$/.test(key) ? monthWords(key) : key;
+}
+
+/**
+ * The list's title: the figure it opens, naming no ranking (§3.6 C.6.5): `Country: France`, `Score 60 to 69`, `Spend:
+ * the collectors with a score`, `Came through Instagram bio (first link)`, `Active after 3 months, March 2026`, `Wish for
+ * MONOLITHE · Blue on 14 OCT 2026`, `Wish for a model of ORBITAL on 14 OCT 2026`. `subject` is what the server names
+ * (a model, a collection, a link, a release, an answer, a place, a channel); `name` what the figure carried.
+ */
+export function listTitle(l: Pick<ListParams, 'slice' | 'name' | 'figure' | 'split'>, subject: string | null, options: Pick<CollectorsOptions, 'channels' | 'types'> | null, periodEnd: string): string {
+  const i = l.slice.indexOf(':');
+  const dim = i < 0 ? l.slice : l.slice.slice(0, i);
+  const v = i < 0 ? '' : l.slice.slice(i + 1);
+  const named = subject ?? l.name ?? v;
+  const on = formatDate(periodEnd);
+  switch (dim) {
+    case 'all':
+      return 'The collectors of this view';
+    case 'new':
+      return 'New in the period';
+    case 'active':
+      return 'Active in the period';
+    case 'firstvisit':
+      return 'First visit in the period';
+    case 'scored':
+      return 'With a score';
+    case 'wished':
+      return 'Added a wish in the period';
+    case 'age':
+      return v === 'none' ? 'Age: not given' : `Age: ${AGE_LABELS[v as CollectorAgeSlice] ?? v}`;
+    case 'country':
+      return v === 'none' ? 'Country: not given' : `Country: ${countryName(v)}`;
+    case 'conncountry':
+      return v === 'unknown' ? 'Country from the connection: unknown' : `Country from the connection: ${countryName(v)}`;
+    case 'city':
+      return v === 'none' ? 'City: not given' : `City: ${l.name ?? v}`;
+    case 'conncity':
+      return v === 'unknown' ? 'City from the connection: unknown' : `City from the connection: ${named}`;
+    case 'source':
+      return `First came from ${subject ?? sourceWords(v.startsWith('channel:') ? v.slice(8) : v, options)}`;
+    case 'heard':
+      return v === 'none' ? 'How they heard: not answered' : `How they heard: ${named}`;
+    case 'heardother':
+      return 'How they heard: Other, in their words';
+    case 'link1':
+      return `Came through ${named} (first link)`;
+    case 'link2':
+      return `Came through ${named} (last link)`;
+    case 'campaign':
+      return v === 'none' ? 'Campaign tags without a campaign' : `Campaign: ${v}`;
+    case 'referrer':
+      return v === 'none' ? 'Referring site: none (typed or shared)' : `Referring site: ${v}`;
+    case 'bucket': {
+      const parts = v.split(':');
+      const kind = parts.shift();
+      const figure = kind === 'trend' ? parts.shift() : null;
+      const previous = parts[0] === 'prev';
+      if (previous) parts.shift();
+      const key = parts.shift() ?? '';
+      const group = parts.join(':');
+      const when = `${bucketKeyWords(key)}${previous ? ', the period before' : ''}`;
+      if (kind === 'firstvisit') return `First visit in ${when}`;
+      if (kind === 'signup') return `Signed up in ${when}`;
+      const head = `${TREND_FIGURE_LABELS[figure ?? ''] ?? figure}, ${when}`;
+      return group ? `${head} · ${groupWords(l.split ?? 'none', group, options)}` : head;
+    }
+    case 'favpiece':
+      return v === 'none' ? 'No favourite piece chosen' : `Favourite piece: ${l.name ?? typeWords(v, options)}`;
+    case 'favfinish':
+      return v === 'none' ? 'No favourite finish chosen' : `Favourite finish: ${l.name ?? v}`;
+    case 'haswish':
+      return `With a wishlist on ${on}`;
+    case 'wishmodel':
+      return `Wish for ${named} on ${on}`;
+    case 'wishcollection':
+      return `Wish for a model of ${named} on ${on}`;
+    case 'viewed':
+      return `Looked at ${named} in the period`;
+    case 'holds':
+      return `Hold a piece of ${named} now`;
+    case 'device':
+      return `Main device: ${DEVICE_LABELS[v] ?? v}`;
+    case 'system':
+      return `Main system: ${SYSTEM_LABELS[v as (typeof SYSTEM_ORDER)[number]] ?? v}`;
+    case 'openedin':
+      return `Opened in: ${OPENED_LABELS[v] ?? v}`;
+    case 'app':
+      return `Inside an app: ${APP_NAMES[v] ?? v}`;
+    case 'score':
+      return v === 'none' ? 'Score: not measured' : `Score ${v.replace('-', ' to ')}`;
+    case 'part':
+      return `${PART_NAMES[v] ?? v}: the collectors with a score`;
+    case 'status':
+      return v === 'never' ? 'Never active since sign-up' : `${ENGAGEMENT_PANEL_COPY.statusLabels[v] ?? v} on ${on}`;
+    case 'cohort': {
+      const [month, mark, side] = v.split(':');
+      const m = monthWords(month ?? '');
+      if (mark === 'all') return `Signed up in ${m}`;
+      const after = mark === '1' ? '1 month' : `${mark} months`;
+      return side === 'inactive' ? `Not active after ${after}, ${m}` : `Active after ${after}, ${m}`;
+    }
+    default:
+      return LIST_COPY.unknown;
+  }
+}
+
+/** The apps and the parts, as the panels name them. */
+const APP_NAMES: Readonly<Record<string, string>> = Object.freeze({
+  INSTAGRAM: 'Instagram',
+  TIKTOK: 'TikTok',
+  FACEBOOK: 'Facebook',
+  THREADS: 'Threads',
+  SNAPCHAT: 'Snapchat',
+  PINTEREST: 'Pinterest',
+  LINKEDIN: 'LinkedIn',
+  GOOGLE: 'Google',
+  WECHAT: 'WeChat',
+  LINE: 'LINE',
+  OTHER: 'Other app',
+});
+const PART_NAMES: Readonly<Record<string, string>> = Object.freeze({ recency: 'Recency', frequency: 'Frequency', spend: 'Spend', speed: 'Release speed', attendance: 'Attendance' });
+
+/** A tier in a list: `PLATINE`, '—' without one. */
+export function tierWords(tier: number): string {
+  return tier > 0 ? (TIER_LABELS[tier] ?? String(tier)) : '—';
+}

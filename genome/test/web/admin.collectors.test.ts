@@ -364,3 +364,46 @@ describe('the panels’ words (§3.6 C.6.3, step 9.10)', () => {
     }
   });
 });
+
+// ── Step 9.11: the collectors behind a figure ────────────────────────────────────────────────────────────────────
+
+import { bucketKeyWords, LIST_COPY, listParams, listTitle, tierWords } from '../../src/web/admin/model/collectors.js';
+
+describe('the list of the collectors behind a figure (§3.6 C.6.5, step 9.11)', () => {
+  const t = (slice: string, subject: string | null = null, o: { name?: string; split?: string } = {}) => listTitle({ slice, name: o.name ?? null, figure: null, split: o.split ?? null }, subject, OPTIONS, '2026-10-14');
+
+  it('reads its address: the page’s query, the slice, the title’s name, the page', () => {
+    const l = listParams({ p: '7d', c: 'FR', slice: 'country:FR', page: '3', figure: 'active', split: 'tier' }, NOW);
+    expect(l).toMatchObject({ p: '7d', c: ['FR'], slice: 'country:FR', page: 3, figure: 'active', split: 'tier', name: null });
+    expect(listParams({ slice: 'all', page: 'x' }, NOW).page).toBe(1);
+    // Back to the figures: the page with the same query.
+    expect(collectorsHref(l)).toBe('#/collectors?p=7d&c=FR');
+  });
+
+  it('names the figure without ranking anyone, as the plan words it', () => {
+    expect(t('country:FR')).toBe('Country: France');
+    expect(t('score:60-69')).toBe('Score 60 to 69');
+    expect(t('part:spend')).toBe('Spend: the collectors with a score');
+    expect(t(`link1:${OPTIONS.channels[0]!.id}`, 'Instagram bio')).toBe('Came through Instagram bio (first link)');
+    expect(t(`link2:${OPTIONS.channels[0]!.id}`, 'Instagram bio')).toBe('Came through Instagram bio (last link)');
+    expect(t('cohort:2026-03:3:active')).toBe('Active after 3 months, March 2026');
+    expect(t('cohort:2026-03:1:inactive')).toBe('Not active after 1 month, March 2026');
+    expect(t('cohort:2026-03:all')).toBe('Signed up in March 2026');
+    expect(t(`wishmodel:${OPTIONS.channels[0]!.id}`, 'MONOLITHE · Blue')).toBe('Wish for MONOLITHE · Blue on 14 OCT 2026');
+    expect(t(`wishcollection:${OPTIONS.channels[0]!.id}`, 'ORBITAL')).toBe('Wish for a model of ORBITAL on 14 OCT 2026');
+    expect(t('city:lyon', null, { name: 'Lyon' })).toBe('City: Lyon');
+    expect(t('source:kind:SITE')).toBe('First came from Referring sites');
+    expect(t('age:25-34')).toBe('Age: 25–34');
+    expect(t('favpiece:RING')).toBe('Favourite piece: Rings');
+    expect(t('system:IPAD')).toBe('Main system: iPad');
+    expect(t('status:dormant')).toBe('Dormant on 14 OCT 2026');
+    expect(t('bucket:firstvisit:2026-09-14')).toBe('First visit in 14 SEP 2026');
+    expect(t('bucket:signup:prev:2026-W37')).toBe('Signed up in week 37 of 2026, the period before');
+    expect(t('bucket:trend:active:2026-09:FR', null, { split: 'country' })).toBe('Active collectors, September 2026 · FR · France');
+    expect(t('nothing')).toBe(LIST_COPY.unknown);
+    expect(bucketKeyWords('2026-W02')).toBe('week 2 of 2026');
+    expect(tierWords(0)).toBe('—');
+    expect(tierWords(3)).toBe('PALLADIUM');
+    expect(LIST_COPY).toMatchObject({ back: 'Back to the figures', note: 'Read now: a figure read a few minutes ago may differ by a few.', empty: 'No collector in this figure now.' });
+  });
+});
