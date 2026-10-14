@@ -96,9 +96,11 @@ body {
   text-indent: 0;
 }
 
+/* 8 px over it (12 before Collectors under Owners, plan CUSTOMER INTELLIGENCE §3.6 C.6.1): an ADMIN's sidebar fits a
+   900 px screen with its foot. */
 .side__product {
   display: block;
-  margin-top: 12px;
+  margin-top: 8px;
   font-size: var(--fs-nano);
   letter-spacing: 0.34em;
   text-transform: uppercase;
@@ -110,7 +112,8 @@ body {
    it). The Club took the 2 px a link gave up: the next link of a group needs room found elsewhere. */
 .side__nav {
   flex: 1;
-  padding: 2px 0 6px;
+  /* 2 px under it (6 before Collectors under Owners, plan CUSTOMER INTELLIGENCE §3.6 C.6.1). */
+  padding: 2px 0 2px;
 }
 
 /* 6 px over each group (8 before Supplier orders, plan NEXT LOT §3.5.4.2): an ADMIN's sidebar fits a 900 px screen with its foot. */
@@ -192,8 +195,10 @@ body {
   background: var(--ink);
 }
 
+/* 12 px above and 10 under (16 and 18 before Collectors under Owners, plan CUSTOMER INTELLIGENCE §3.6 C.6.1): an
+   ADMIN's sidebar fits a 900 px screen with its foot. */
 .side__foot {
-  padding: 16px 32px 18px;
+  padding: 12px 32px 10px;
   border-top: 1px solid var(--hairline);
 }
 
@@ -217,7 +222,8 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 12px 18px;
-  margin-top: 14px;
+  /* 10 px (14 before Collectors under Owners, plan CUSTOMER INTELLIGENCE §3.6 C.6.1). */
+  margin-top: 10px;
 }
 
 .side__small,
