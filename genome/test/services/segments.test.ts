@@ -14,7 +14,8 @@
  *  - a post of the circle for a segment's members only, read again at each request;
  *  - the customer intelligence lot's criteria (plan CUSTOMER INTELLIGENCE §3.0 (g), §3.6 C.5.1, steps 8.1 to 8.4), each
  *    matched and negated, their bounds and refusals, the names they check: PERSON (the city given, folded; the age
- *    today in Paris; how they heard; a tag). A test entrant matches none but through a NOT.
+ *    today in Paris; how they heard; a tag), TASTES (a wish for a model, a main model with its variants, or for a model
+ *    of a collection; a favourite piece or finish). A test entrant matches none but through a NOT.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
@@ -384,6 +385,7 @@ describe('the customer intelligence criteria (plan CUSTOMER INTELLIGENCE §3.0 (
   /** The accounts of the scenario, by name; `entrant` is a test entrant, which has no profile, wish, view nor source. */
   const p = {} as Record<'one' | 'two' | 'three' | 'four' | 'entrant', string>;
   const heard = {} as Record<'instagram' | 'friend', string>;
+  const m = {} as Record<'main' | 'blue' | 'orbit' | 'nocturne' | 'noir', string>;
 
   const all = (...rules: unknown[]): SegmentGroup => cleanCriteria({ match: 'ALL', rules });
   /** The accounts of the scenario a tree matches now, by name. */
@@ -418,6 +420,35 @@ describe('the customer intelligence criteria (plan CUSTOMER INTELLIGENCE §3.0 (
         { account_id: p.one, tag: 'VIP', created_by: f.admin.id },
         { account_id: p.one, tag: 'PRESS', created_by: f.admin.id },
         { account_id: p.two, tag: 'VIP', created_by: f.admin.id },
+      ])
+      .execute();
+
+    // MONOLITHE and its variant Blue, outside any collection; ORBIT in NOCTURNE; a second collection, NOIR.
+    m.nocturne = await createCollection(t.db, 'NOCTURNE');
+    m.noir = await createCollection(t.db, 'NOIR');
+    m.main = await createModel(t.db, 'MONOLITHE');
+    m.blue = await createModel(t.db, 'MONOLITHE');
+    await t.db.updateTable('models').set({ variant_label: 'Steel', variant_swatch: '#8A8D91' }).where('id', '=', m.main).execute();
+    await t.db.updateTable('models').set({ variant_of: m.main, variant_label: 'Blue', variant_swatch: '#1F3A93' }).where('id', '=', m.blue).execute();
+    m.orbit = await createModel(t.db, 'ORBIT', m.nocturne, 'CUFF');
+    const day = (d: string) => new Date(`${d}T10:00:00.000Z`);
+    await t.db
+      .insertInto('account_wishes')
+      .values([
+        { account_id: p.one, model_id: m.blue, added_at: day('2027-01-10') },
+        { account_id: p.two, model_id: m.main, added_at: day('2027-01-11') },
+        { account_id: p.two, model_id: m.orbit, added_at: day('2027-01-12'), removed_at: day('2027-01-20') },
+        { account_id: p.three, model_id: m.orbit, added_at: day('2027-01-13') },
+      ])
+      .execute();
+    // The second's ROSE GOLD is no longer in the collection: no model carries it.
+    await t.db
+      .insertInto('account_tastes')
+      .values([
+        { account_id: p.one, kind: 'PIECE', value_key: 'RING', label: 'Ring' },
+        { account_id: p.one, kind: 'FINISH', value_key: 'BLUE', label: 'Blue' },
+        { account_id: p.two, kind: 'PIECE', value_key: 'CUFF', label: 'Cuff' },
+        { account_id: p.two, kind: 'FINISH', value_key: 'ROSE GOLD', label: 'Rose gold' },
       ])
       .execute();
   });
@@ -487,6 +518,61 @@ describe('the customer intelligence criteria (plan CUSTOMER INTELLIGENCE §3.0 (
       await rejects(segments.count({ match: 'ALL', rules: [{ kind: 'HEARD_FROM', optionIds: ['00000000-0000-4000-8000-000000000000'] }] }), 'HEARD_OPTION_NOT_FOUND', 404);
       expect(await segments.count({ match: 'ALL', rules: [{ kind: 'HEARD_FROM', optionIds: [heard.instagram] }] })).toEqual({ count: 1 });
       expect([SEGMENT_LIMITS.city, SEGMENT_LIMITS.tag]).toEqual([CITY_MAX, TAG_MAX]);
+    });
+  });
+
+  describe('TASTES (step 8.2)', () => {
+    it('WISHES_MODEL: an open wish; a main model named includes its variants, a variant only itself; a removed wish no longer; negated', async () => {
+      expect(await matched(all({ kind: 'WISHES_MODEL', modelIds: [m.main] }))).toEqual(['one', 'two']);
+      expect(await matched(all({ kind: 'WISHES_MODEL', modelIds: [m.blue] }))).toEqual(['one']);
+      expect(await matched(all({ kind: 'WISHES_MODEL', modelIds: [m.orbit] }))).toEqual(['three']);
+      expect(await matched(all({ kind: 'WISHES_MODEL', modelIds: [m.main], not: true }))).toEqual(['entrant', 'four', 'three']);
+    });
+
+    it('WISHES_COLLECTION: an open wish for a model of the collection, following a model moved; negated', async () => {
+      expect(await matched(all({ kind: 'WISHES_COLLECTION', collectionIds: [m.nocturne] }))).toEqual(['three']);
+      expect(await matched(all({ kind: 'WISHES_COLLECTION', collectionIds: [m.noir] }))).toEqual([]);
+      await t.db.updateTable('models').set({ collection_id: m.noir }).where('id', 'in', [m.blue, m.orbit]).execute();
+      expect(await matched(all({ kind: 'WISHES_COLLECTION', collectionIds: [m.noir] }))).toEqual(['one', 'three']);
+      expect(await matched(all({ kind: 'WISHES_COLLECTION', collectionIds: [m.nocturne] }))).toEqual([]);
+      expect(await matched(all({ kind: 'WISHES_COLLECTION', collectionIds: [m.noir], not: true }))).toEqual(['entrant', 'four', 'two']);
+      await t.db.updateTable('models').set({ collection_id: null }).where('id', '=', m.blue).execute();
+      await t.db.updateTable('models').set({ collection_id: m.nocturne }).where('id', '=', m.orbit).execute();
+    });
+
+    it('FAVOURITE_PIECE and FAVOURITE_FINISH: a key chosen, written as keys are; one no longer in the collection still matches; negated', async () => {
+      expect(await matched(all({ kind: 'FAVOURITE_PIECE', pieces: ['ring'] }))).toEqual(['one']);
+      expect(await matched(all({ kind: 'FAVOURITE_PIECE', pieces: ['RING', 'Cuff'] }))).toEqual(['one', 'two']);
+      expect(await matched(all({ kind: 'FAVOURITE_FINISH', finishes: [' Rose  gold '] }))).toEqual(['two']);
+      expect(await matched(all({ kind: 'FAVOURITE_FINISH', finishes: ['RING'] }))).toEqual([]);
+      expect(await matched(all({ kind: 'FAVOURITE_PIECE', pieces: ['RING'], not: true }))).toEqual(['entrant', 'four', 'three', 'two']);
+      expect(all({ kind: 'FAVOURITE_FINISH', finishes: ['rose gold', 'ROSE  GOLD', 'Blue'] }).rules).toEqual([{ kind: 'FAVOURITE_FINISH', finishes: ['BLUE', 'ROSE GOLD'] }]);
+    });
+
+    it('nests; a test entrant matches none, and still holds the release\'s model for OWNS_MODEL (unchanged)', async () => {
+      const tree = cleanCriteria({
+        match: 'ANY',
+        rules: [
+          { kind: 'WISHES_MODEL', modelIds: [m.blue] },
+          { match: 'ALL', rules: [{ kind: 'FAVOURITE_PIECE', pieces: ['CUFF'] }, { kind: 'FAVOURITE_FINISH', finishes: ['ROSE GOLD'] }] },
+        ],
+      });
+      expect(await matched(tree)).toEqual(['one', 'two']);
+      expect(await matched(all({ kind: 'OWNS_MODEL', modelIds: [m.main] }))).toEqual(['entrant']);
+    });
+
+    it('refuses a rule out of its bounds; checks the models and collections named, never the keys', async () => {
+      bad({ kind: 'WISHES_MODEL', modelIds: [] });
+      bad({ kind: 'WISHES_MODEL', modelIds: ['MONOLITHE'] });
+      bad({ kind: 'WISHES_COLLECTION', collectionIds: Array.from({ length: 51 }, () => m.noir) });
+      bad({ kind: 'FAVOURITE_PIECE', pieces: ['  '] });
+      bad({ kind: 'FAVOURITE_FINISH', finishes: ['x'.repeat(61)] });
+      bad({ kind: 'FAVOURITE_FINISH', finishes: [] });
+      const unknown = '00000000-0000-4000-8000-000000000000';
+      await rejects(segments.count({ match: 'ALL', rules: [{ kind: 'WISHES_MODEL', modelIds: [m.main, unknown] }] }), 'MODEL_NOT_FOUND', 404);
+      await rejects(segments.count({ match: 'ALL', rules: [{ kind: 'WISHES_COLLECTION', collectionIds: [unknown] }] }), 'COLLECTION_NOT_FOUND', 404);
+      expect(await segments.count({ match: 'ALL', rules: [{ kind: 'FAVOURITE_FINISH', finishes: ['NEVER OFFERED'] }] })).toEqual({ count: 0 });
+      expect(await segments.count({ match: 'ALL', rules: [{ kind: 'WISHES_MODEL', modelIds: [m.main] }] })).toEqual({ count: 2 });
     });
   });
 });

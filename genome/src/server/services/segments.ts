@@ -15,7 +15,10 @@
  * §3.6 C.5.1), the four above unchanged:
  *
  *   person     the city given in YOUR PROFILE (folded: case and accents, `orbes_fold`), the age today (Paris) from the
- *              date of birth, the answer to « How did you hear about ORBES? », a staff tag.
+ *              date of birth, the answer to « How did you hear about ORBES? », a staff tag;
+ *   tastes     an open wish for a model (a main model named includes its variants, a variant only itself) or for a model
+ *              of a collection, a favourite piece or finish chosen in YOUR PROFILE (its key; one no longer in the
+ *              collection still matches: keys are never checked against the catalogue).
  *
  * A new criterion reads what a test entrant never has (a profile, a wish, a view, a source, a score): a test entrant
  * matches one only through a NOT (§3.0 (d)), as today's members rule (ACTIVE accounts, test entrants and the team's own
@@ -45,7 +48,7 @@ import { LIVE_QUESTION_DEFAULT } from './live.js';
 import { participationCount, securedCount, securedIn, tookPartIn } from './participation.js';
 import { csvDocument, CSV_CONTENT_TYPE } from '../render/csv.js';
 import { fold } from '../../shared/fold.js';
-import { cleanWords, latestBirthDateForAge } from '../../shared/profile-rules.js';
+import { cleanWords, latestBirthDateForAge, TASTE_KEY_MAX, tasteKey } from '../../shared/profile-rules.js';
 import { cleanTag } from './client-notes.js';
 import { parisDay } from './schedule.js';
 
@@ -58,6 +61,7 @@ export const SEGMENT_CRITERIA = Object.freeze({
   PROFILE: Object.freeze(['SIZE', 'COUNTRY'] as const),
   SIGNALS: Object.freeze(['INTEREST', 'ANSWER', 'ACTIVE'] as const),
   PERSON: Object.freeze(['CITY', 'AGE', 'HEARD_FROM', 'TAGGED'] as const),
+  TASTES: Object.freeze(['WISHES_MODEL', 'WISHES_COLLECTION', 'FAVOURITE_PIECE', 'FAVOURITE_FINISH'] as const),
 });
 export type SegmentCriterionGroup = keyof typeof SEGMENT_CRITERIA;
 export const SEGMENT_RULE_KINDS = Object.freeze([
@@ -66,6 +70,7 @@ export const SEGMENT_RULE_KINDS = Object.freeze([
   ...SEGMENT_CRITERIA.PROFILE,
   ...SEGMENT_CRITERIA.SIGNALS,
   ...SEGMENT_CRITERIA.PERSON,
+  ...SEGMENT_CRITERIA.TASTES,
 ] as const);
 export type SegmentRuleKind = (typeof SEGMENT_RULE_KINDS)[number];
 export const SEGMENT_MATCHES = Object.freeze(['ALL', 'ANY'] as const);
@@ -111,6 +116,10 @@ export type SegmentRule = { not?: boolean } & (
   | { kind: 'AGE'; min: number; max: number }
   | { kind: 'HEARD_FROM'; optionIds: string[] }
   | { kind: 'TAGGED'; tags: string[] }
+  | { kind: 'WISHES_MODEL'; modelIds: string[] }
+  | { kind: 'WISHES_COLLECTION'; collectionIds: string[] }
+  | { kind: 'FAVOURITE_PIECE'; pieces: string[] }
+  | { kind: 'FAVOURITE_FINISH'; finishes: string[] }
 );
 
 /** A group of rules: ALL of them, or ANY. */
@@ -152,6 +161,13 @@ function country(v: unknown): string {
   const s = typeof v === 'string' ? v.trim().toUpperCase() : '';
   if (!/^[A-Z]{2}$/.test(s)) throw validationError('A country is its two letters (FR, IT, US).');
   return s;
+}
+
+/** A favourite piece's or finish's key, as YOUR PROFILE keeps one (shared/profile-rules.ts tasteKey). */
+function taste(v: unknown): string {
+  const k = tasteKey(v);
+  if (k === null) throw validationError(`A favourite piece or finish is 1 to ${TASTE_KEY_MAX} characters.`);
+  return k;
 }
 
 /** A city as CITY compares it: as YOUR PROFILE keeps one (1 to 80 characters), then folded like `orbes_fold` (shared/fold.ts). */
@@ -201,6 +217,14 @@ function cleanRule(v: unknown): SegmentRule {
       return { kind: 'HEARD_FROM', optionIds: list(r.optionIds, 'The answers', (o) => id(o, 'An answer')), ...not };
     case 'TAGGED':
       return { kind: 'TAGGED', tags: list(r.tags, 'The tags', cleanTag), ...not };
+    case 'WISHES_MODEL':
+      return { kind: 'WISHES_MODEL', modelIds: list(r.modelIds, 'The models', (m) => id(m, 'A model')), ...not };
+    case 'WISHES_COLLECTION':
+      return { kind: 'WISHES_COLLECTION', collectionIds: list(r.collectionIds, 'The collections', (c) => id(c, 'A collection')), ...not };
+    case 'FAVOURITE_PIECE':
+      return { kind: 'FAVOURITE_PIECE', pieces: list(r.pieces, 'The favourite pieces', taste), ...not };
+    case 'FAVOURITE_FINISH':
+      return { kind: 'FAVOURITE_FINISH', finishes: list(r.finishes, 'The favourite finishes', taste), ...not };
     default:
       throw validationError(`A criterion is one of ${SEGMENT_RULE_KINDS.join(', ')}.`);
   }
@@ -368,6 +392,24 @@ function ruleSql(db: Db, eb: Accounts, r: SegmentRule, now: Date): Expression<Sq
     case 'TAGGED':
       x = sql<SqlBool>`exists (select 1 from account_tags as tg where tg.account_id = ${account} and tg.tag in (${sql.join(r.tags)}))`;
       break;
+    case 'WISHES_MODEL': {
+      // On account_wishes_open: a main model named includes its variants' wishes, a variant only its own.
+      const ids = sql.join(r.modelIds.map((m) => sql`${m}::uuid`));
+      x = sql<SqlBool>`exists (select 1 from account_wishes as ww join models as wm on wm.id = ww.model_id
+        where ww.account_id = ${account} and ww.removed_at is null and (ww.model_id in (${ids}) or wm.variant_of in (${ids})))`;
+      break;
+    }
+    case 'WISHES_COLLECTION':
+      // The model's collection now: a model moved takes its wishes with it (segments are read live).
+      x = sql<SqlBool>`exists (select 1 from account_wishes as cw join models as cm on cm.id = cw.model_id
+        where cw.account_id = ${account} and cw.removed_at is null and cm.collection_id in (${sql.join(r.collectionIds.map((c) => sql`${c}::uuid`))}))`;
+      break;
+    case 'FAVOURITE_PIECE':
+    case 'FAVOURITE_FINISH': {
+      const [kind, keys] = r.kind === 'FAVOURITE_PIECE' ? ['PIECE', r.pieces] : ['FINISH', r.finishes];
+      x = sql<SqlBool>`exists (select 1 from account_tastes as ft where ft.account_id = ${account} and ft.kind = ${kind} and ft.value_key in (${sql.join(keys)}))`;
+      break;
+    }
   }
   return r.not ? sql<SqlBool>`not (${x})` : x;
 }
@@ -678,13 +720,14 @@ export class SegmentService {
 
   /**
    * The releases, models, collections and answers of « How did you hear about ORBES? » the criteria name exist (404
-   * otherwise); an answer to the question after is one of its release's. Tags are free, never checked.
+   * otherwise); an answer to the question after is one of its release's. Tags are free, and favourite pieces and
+   * finishes are never checked against the catalogue of the day: a segment on a key no longer offered still runs.
    */
   private async checkNames(db: Db, criteria: SegmentGroup): Promise<void> {
     const rules = segmentRules(criteria);
     const drops = [...new Set(rules.flatMap((r) => ('dropId' in r && r.dropId ? [r.dropId] : [])))];
-    const models = [...new Set(rules.flatMap((r) => (r.kind === 'OWNS_MODEL' ? r.modelIds : [])))];
-    const collections = [...new Set(rules.flatMap((r) => (r.kind === 'OWNS_COLLECTION' ? r.collectionIds : [])))];
+    const models = [...new Set(rules.flatMap((r) => (r.kind === 'OWNS_MODEL' || r.kind === 'WISHES_MODEL' ? r.modelIds : [])))];
+    const collections = [...new Set(rules.flatMap((r) => (r.kind === 'OWNS_COLLECTION' || r.kind === 'WISHES_COLLECTION' ? r.collectionIds : [])))];
     if (drops.length) {
       const found = await db.selectFrom('drops').select(['id', 'mode', 'question_enabled', 'question_answers']).where('id', 'in', drops).where('parent_drop_id', 'is', null).execute();
       if (found.length !== drops.length) throw notFound('Release', 'DROP_NOT_FOUND');

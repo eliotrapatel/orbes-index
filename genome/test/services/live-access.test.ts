@@ -7,6 +7,7 @@
  *    or « This release is for selected collectors. » when the segment is all it lacks;
  *  - taking part (the release itself never counted) and the segment, combined with the tier and the pieces by AND or
  *    OR, read at I'LL BE THERE, at the entry and at SECURE, and when the room is read;
+ *  - a segment of the customer intelligence lot's criteria as the access rule (a wish for the model, step 8.2);
  *  - the public page: the rule in words, A SURPRISE IN EVERY BOX as a flag, never the surprise's description;
  *  - the console: the settings (the releases taken part in, the segment, AND or OR, the surprise and its description)
  *    checked, audited, and the release as it reads them; the surprise on each order and piece to make of the release.
@@ -159,6 +160,23 @@ describe('a release’s rules, read at each step', () => {
     await t.db.updateTable('ownership').set({ ended_at: f.clock.now(), ended_reason: 'TRANSFERRED' }).where('product_id', '=', piece!).execute();
     const late = await rejects(holdAndSecure(r.id, member.id, member.actor), 'LIVE_NOT_ELIGIBLE', 403);
     expect(late.message).toBe('This release is for selected collectors.');
+  });
+
+  it('a wish segment as the access rule (plan CUSTOMER INTELLIGENCE §3.2 W.6, step 8.2): one who wishes for the model enters, another is refused', async () => {
+    const s = await segments.create({ name: 'Wishes for MONOLITHE', criteria: { match: 'ALL', rules: [{ kind: 'WISHES_MODEL', modelIds: [f.modelId] }] } }, f.admin);
+    const wisher = await accountOfTier(f, 0);
+    const other = await accountOfTier(f, 2);
+    await t.db.insertInto('account_wishes').values({ account_id: wisher.id, model_id: f.modelId, added_at: f.clock.now() }).execute();
+    const T0 = new Date(f.clock.now().getTime() + 2 * HOUR);
+    const r = await createLiveRelease(f, { opensAt: T0, accessSegmentId: s.id, sizes: [{ label: '54', stock: 1 }] });
+    const refused = await rejects(f.live.setInterest(other.id, r.id, r.sizes[0]!.id, other.actor), 'LIVE_NOT_ELIGIBLE', 403);
+    expect(refused.message).toBe('This release is for selected collectors.');
+    await f.live.setInterest(wisher.id, r.id, r.sizes[0]!.id, wisher.actor);
+    f.clock.set(new Date(T0.getTime() - MINUTE));
+    await f.live.enter(wisher.id, r.id, { sizeId: r.sizes[0]!.id }, wisher.actor);
+    await rejects(f.live.enter(other.id, r.id, { sizeId: r.sizes[0]!.id }, other.actor), 'LIVE_NOT_ELIGIBLE', 403);
+    expect((await f.live.entry(wisher.id, r.id))?.status).toBe('WAITING');
+    f.clock.set(T0);
   });
 
   it('AND: every rule; OR: any one, the rules joined by « or » on the page', async () => {

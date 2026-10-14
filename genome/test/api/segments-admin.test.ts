@@ -211,5 +211,14 @@ describe('segments and the access rules: the console’s and the public routes',
     await refused({ kind: 'AGE', min: 30, max: 121 }, 400, 'VALIDATION_FAILED');
     await refused({ kind: 'TAGGED', tags: ['#VIP'] }, 400, 'VALIDATION_FAILED');
     await refused({ kind: 'HEARD_FROM', optionIds: ['00000000-0000-4000-8000-000000000000'] }, 404, 'HEARD_OPTION_NOT_FOUND');
+
+    // TASTES (step 8.2).
+    await h.ctx.db.insertInto('account_wishes').values({ account_id: member.id, model_id: f.modelId, added_at: at }).execute();
+    await h.ctx.db.insertInto('account_tastes').values({ account_id: member.id, kind: 'PIECE', value_key: 'RING', label: 'Ring' }).execute();
+    const tastes = { match: 'ALL', rules: [{ kind: 'WISHES_MODEL', modelIds: [f.modelId] }, { kind: 'FAVOURITE_PIECE', pieces: ['ring'] }] };
+    expect(safeJson(await op.post('/api/admin/segments/count', { criteria: tastes }))).toEqual({ count: 1 });
+    expect(safeJson(await op.post('/api/admin/segments/count', { criteria: { match: 'ALL', rules: [{ kind: 'FAVOURITE_FINISH', finishes: ['ROSE GOLD'] }] } }))).toEqual({ count: 0 });
+    await refused({ kind: 'WISHES_COLLECTION', collectionIds: ['00000000-0000-4000-8000-000000000000'] }, 404, 'COLLECTION_NOT_FOUND');
+    await refused({ kind: 'FAVOURITE_FINISH', finishes: ['x'.repeat(61)] }, 400, 'VALIDATION_FAILED');
   });
 });

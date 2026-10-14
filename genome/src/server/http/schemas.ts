@@ -104,6 +104,7 @@ import { NOTE_MAX } from '../services/client-notes.js';
 import { BATCH_MAX_EVENTS, SEEN_PAGES } from '../services/tracking.js';
 import { ATTRIBUTIONS, MEASURES, REPORT_MAX_DAYS, REPORT_VIEWS } from '../services/acquisition-report.js';
 import { pageRequest, type PageRequest } from '../types.js';
+import { TASTE_KEY_MAX } from '../../shared/profile-rules.js';
 import { fromZod } from './errors.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -1092,6 +1093,10 @@ const segmentRule = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('AGE'), min: whole(SEGMENT_LIMITS.age.min, SEGMENT_LIMITS.age.max, 'years'), max: whole(SEGMENT_LIMITS.age.min, SEGMENT_LIMITS.age.max, 'years'), ...negated }),
   z.strictObject({ kind: z.literal('HEARD_FROM'), optionIds: segmentItems(uuid), ...negated }),
   z.strictObject({ kind: z.literal('TAGGED'), tags: segmentItems(text(SEGMENT_LIMITS.tag)), ...negated }),
+  z.strictObject({ kind: z.literal('WISHES_MODEL'), modelIds: segmentItems(uuid), ...negated }),
+  z.strictObject({ kind: z.literal('WISHES_COLLECTION'), collectionIds: segmentItems(uuid), ...negated }),
+  z.strictObject({ kind: z.literal('FAVOURITE_PIECE'), pieces: segmentItems(text(TASTE_KEY_MAX)), ...negated }),
+  z.strictObject({ kind: z.literal('FAVOURITE_FINISH'), finishes: segmentItems(text(TASTE_KEY_MAX)), ...negated }),
 ]);
 const segmentRules = <T extends z.ZodType>(item: T) => z.array(item).min(1, 'At least one rule').max(SEGMENT_LIMITS.rules, `At most ${SEGMENT_LIMITS.rules} rules`);
 /** A segment's rule tree: a group of criteria and of groups of criteria (one level down). */
