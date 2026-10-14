@@ -27,7 +27,11 @@
  *   origin     (§3.4 A.5, A.10.6: services/acquisition-report.ts) the first source, or the last link before the sign-up,
  *              before a paid order that is not GIFT, or either, in some channels, links (archived ones too) or kinds of
  *              source, with the reports' fallbacks (Before tracking, Direct). A test entrant never matches one: it
- *              makes no visit and no conversion, and the fallbacks would read it Direct.
+ *              makes no visit and no conversion, and the fallbacks would read it Direct;
+ *   engagement (§3.5 SB.3.4) the engagement score of the latest morning run (account_scores, by its key) from … to …: an
+ *              account with no score yet (created since the run, a test entrant) never matches but through a NOT. A
+ *              segment that reads it may be a LIVE RELEASE's access rule or a post's audience like any other (question
+ *              15, §3.6 C.5.4): nothing refuses it.
  *
  * A new criterion reads what a test entrant never has (a profile, a wish, a view, a source, a score): a test entrant
  * matches one only through a NOT (§3.0 (d)), as today's members rule (ACTIVE accounts, test entrants and the team's own
@@ -91,6 +95,7 @@ export const SEGMENT_CRITERIA = Object.freeze({
   TASTES: Object.freeze(['WISHES_MODEL', 'WISHES_COLLECTION', 'FAVOURITE_PIECE', 'FAVOURITE_FINISH'] as const),
   BROWSING: Object.freeze(['VIEWED_MODEL', 'VIEWED_RELEASE', 'DEVICE', 'PLACE'] as const),
   ORIGIN: Object.freeze(['FIRST_SOURCE', 'LAST_SOURCE'] as const),
+  ENGAGEMENT: Object.freeze(['SCORE'] as const),
 });
 export type SegmentCriterionGroup = keyof typeof SEGMENT_CRITERIA;
 export const SEGMENT_RULE_KINDS = Object.freeze([
@@ -102,6 +107,7 @@ export const SEGMENT_RULE_KINDS = Object.freeze([
   ...SEGMENT_CRITERIA.TASTES,
   ...SEGMENT_CRITERIA.BROWSING,
   ...SEGMENT_CRITERIA.ORIGIN,
+  ...SEGMENT_CRITERIA.ENGAGEMENT,
 ] as const);
 export type SegmentRuleKind = (typeof SEGMENT_RULE_KINDS)[number];
 export const SEGMENT_MATCHES = Object.freeze(['ALL', 'ANY'] as const);
@@ -131,6 +137,8 @@ export const SEGMENT_LIMITS = Object.freeze({
   viewDays: Object.freeze({ min: 1, max: 395 }),
   /** Viewed at least N times (VIEW_RULE_MIN). */
   viewMin: Object.freeze({ min: 1, max: 100 }),
+  /** SCORE: the engagement score from … to …, whole numbers (account_scores.score). */
+  score: Object.freeze({ min: 0, max: 100 }),
 });
 
 /** A criterion of a segment; `not`: the accounts it does not match. */
@@ -161,6 +169,7 @@ export type SegmentRule = { not?: boolean } & (
   | { kind: 'PLACE'; countries?: string[]; placeIds?: number[]; days: number }
   | { kind: 'FIRST_SOURCE'; channelIds?: string[]; linkIds?: string[]; kinds?: SourceKind[] }
   | { kind: 'LAST_SOURCE'; channelIds?: string[]; linkIds?: string[]; kinds?: SourceKind[]; at: LastSourceAt }
+  | { kind: 'SCORE'; min: number; max: number }
 );
 
 /** A group of rules: ALL of them, or ANY. */
@@ -315,6 +324,12 @@ function cleanRule(v: unknown): SegmentRule {
     case 'PLACE': {
       const lists = someLists(r, { countries: country, placeIds: placeId }, 'Seen from');
       return { kind: 'PLACE', ...(lists as Pick<Extract<SegmentRule, { kind: 'PLACE' }>, 'countries' | 'placeIds'>), days: whole(r.days, SEGMENT_LIMITS.viewDays, 'Seen from: in the last N days'), ...not };
+    }
+    case 'SCORE': {
+      const b = SEGMENT_LIMITS.score;
+      const ok = (n: unknown): n is number => typeof n === 'number' && Number.isInteger(n) && n >= b.min && n <= b.max;
+      if (!ok(r.min) || !ok(r.max) || r.min > r.max) throw validationError(`The engagement score is two whole numbers from ${b.min} to ${b.max}, the first not above the second.`);
+      return { kind: 'SCORE', min: r.min, max: r.max, ...not };
     }
     default:
       throw validationError(`A criterion is one of ${SEGMENT_RULE_KINDS.join(', ')}.`);
@@ -514,6 +529,11 @@ function ruleSql(db: Db, eb: Accounts, r: SegmentRule, now: Date): Expression<Sq
       break;
     case 'LAST_SOURCE':
       x = sql<SqlBool>`(${lastSourceFilter('a.id', r, r.at)} and ${notTestEntrant('a.id')})`;
+      break;
+    case 'SCORE':
+      // account_scores by its primary key: the score of the latest morning run. No row (created since, a test entrant,
+      // DELETED): no match. A LOCKED account's frozen score still matches (members are ACTIVE accounts anyway).
+      x = sql<SqlBool>`exists (select 1 from account_scores as sc where sc.account_id = ${account} and sc.score between ${r.min} and ${r.max})`;
       break;
   }
   return r.not ? sql<SqlBool>`not (${x})` : x;

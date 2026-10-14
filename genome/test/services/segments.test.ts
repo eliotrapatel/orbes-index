@@ -17,7 +17,9 @@
  *    today in Paris; how they heard; a tag), TASTES (a wish for a model, a main model with its variants, or for a model
  *    of a collection; a favourite piece or finish), BROWSING (a model or a release viewed, a device, a place from the
  *    connection, within the 395 days), ORIGIN (the first source; the last link before the sign-up, a purchase or
- *    either; an archived link still matching; the reports' fallbacks). A test entrant matches none but through a NOT.
+ *    either; an archived link still matching; the reports' fallbacks), ENGAGEMENT (step 8.5: the score of the latest
+ *    run within two bounds; a SCORE rule added to a segment a release uses, question 15). A test entrant matches none
+ *    but through a NOT.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
@@ -33,6 +35,7 @@ import { createTestDb, type TestDb } from '../support/db.js';
 import { GrowthWorld } from '../support/growth.js';
 import { accountOfTier, createAccount, createCollection, createLiveRelease, createModel, holdPieces, liveFixture, type LiveFixture } from '../support/live.js';
 import { poolDraw } from '../support/draws.js';
+import { seedScore } from '../support/scores.js';
 
 const START = new Date('2026-11-01T09:00:00.000Z');
 const SECOND = 1000;
@@ -817,6 +820,66 @@ describe('the customer intelligence criteria (plan CUSTOMER INTELLIGENCE §3.0 (
     });
   });
 
+  describe('ENGAGEMENT (step 8.5)', () => {
+    beforeAll(async () => {
+      // The latest morning run: the first 72, the second 40, the third 100; the fourth was created since (no score yet),
+      // the test entrant is never scored.
+      await seedScore(t.db, p.one, 72, f.clock.now());
+      await seedScore(t.db, p.two, 40, f.clock.now());
+      await seedScore(t.db, p.three, 100, f.clock.now());
+    });
+
+    it('SCORE: the score of the latest run within the two bounds, both included; no score never matches but through a NOT', async () => {
+      expect(await matched(all({ kind: 'SCORE', min: 60, max: 100 }))).toEqual(['one', 'three']);
+      expect(await matched(all({ kind: 'SCORE', min: 40, max: 72 }))).toEqual(['one', 'two']);
+      expect(await matched(all({ kind: 'SCORE', min: 0, max: 100 }))).toEqual(['one', 'three', 'two']);
+      expect(await matched(all({ kind: 'SCORE', min: 73, max: 99 }))).toEqual([]);
+      expect(await matched(all({ kind: 'SCORE', min: 100, max: 100 }))).toEqual(['three']);
+      // Negated: every account the positive does not match, those with no score included.
+      expect(await matched(all({ kind: 'SCORE', min: 60, max: 100, not: true }))).toEqual(['entrant', 'four', 'two']);
+      // A LOCKED account keeps its score, but members are ACTIVE accounts: it reaches no release and no post.
+      await t.db.updateTable('accounts').set({ status: 'LOCKED' }).where('id', '=', p.three).execute();
+      expect(await matched(all({ kind: 'SCORE', min: 60, max: 100 }))).toEqual(['one']);
+      await t.db.updateTable('accounts').set({ status: 'ACTIVE' }).where('id', '=', p.three).execute();
+    });
+
+    it('nests and combines with the other criteria', async () => {
+      const tree = cleanCriteria({ match: 'ANY', rules: [{ kind: 'TAGGED', tags: ['PRESS'] }, { match: 'ALL', rules: [{ kind: 'SCORE', min: 90, max: 100 }, { kind: 'CITY', cities: ['saint-étienne'] }] }] });
+      expect(await matched(tree)).toEqual(['one', 'three']);
+      expect(await matched(all({ kind: 'SCORE', min: 60, max: 100 }, { kind: 'WISHES_MODEL', modelIds: [m.orbit] }))).toEqual(['three']);
+    });
+
+    it('refuses a rule out of its bounds, in one sentence', () => {
+      bad({ kind: 'SCORE', min: 80, max: 60 });
+      bad({ kind: 'SCORE', min: -1, max: 60 });
+      bad({ kind: 'SCORE', min: 60, max: 101 });
+      bad({ kind: 'SCORE', min: 60.5, max: 70 });
+      bad({ kind: 'SCORE', min: '60', max: 70 });
+      bad({ kind: 'SCORE', min: 60 });
+      expect(() => cleanCriteria({ match: 'ALL', rules: [{ kind: 'SCORE', min: 80, max: 60 }] })).toThrow('The engagement score is two whole numbers from 0 to 100, the first not above the second.');
+      expect(() => cleanCriteria({ match: 'ALL', rules: [{ kind: 'SCORE', min: 0, max: 101 }] })).toThrow('The engagement score is two whole numbers from 0 to 100, the first not above the second.');
+      expect(all({ kind: 'SCORE', min: 60, max: 100, not: true, extra: 1 }).rules).toEqual([{ kind: 'SCORE', min: 60, max: 100, not: true }]);
+      expect(SEGMENT_LIMITS.score).toEqual({ min: 0, max: 100 });
+    });
+
+    it('question 15: a SCORE rule may be added to a segment a release uses; the names are read as before', async () => {
+      const s = await segments.create({ name: 'Wishes for ORBIT', criteria: { match: 'ALL', rules: [{ kind: 'WISHES_MODEL', modelIds: [m.orbit] }] } }, f.admin);
+      const r = await createLiveRelease(f, { opensAt: new Date(f.clock.now().getTime() + 2 * HOUR), accessSegmentId: s.id });
+      const before = await segments.names();
+      f.clock.advance(SECOND);
+      const scored = await segments.update(s.id, { criteria: { match: 'ALL', rules: [{ kind: 'WISHES_MODEL', modelIds: [m.orbit] }, { match: 'ANY', rules: [{ kind: 'SCORE', min: 60, max: 100 }] }] } }, f.admin);
+      expect(scored.count).toBe(1);
+      expect(scored.usedBy.releases).toEqual([{ id: r.id, title: expect.any(String) }]);
+      // names() keeps its shape: id and name, no mark for a segment that reads the score.
+      expect(await segments.names()).toEqual(before);
+      expect(Object.keys((await segments.names()).find((x) => x.id === s.id)!).sort()).toEqual(['id', 'name']);
+      const audit = await t.db.selectFrom('audit_logs').select('details').where('target_id', '=', s.id).where('action', '=', 'segment.update').executeTakeFirstOrThrow();
+      expect(JSON.stringify(audit.details)).toContain('"kind":"SCORE"');
+      await t.db.updateTable('drops').set({ access_segment_id: null }).where('id', '=', r.id).execute();
+      await segments.remove(s.id, f.admin);
+    });
+  });
+
   it('saves a segment of every new group once: the same criteria again, written in another order, change nothing (§3.6 C.11)', async () => {
     const criteria = (order: 'ab' | 'ba') => ({
       match: 'ANY',
@@ -825,6 +888,7 @@ describe('the customer intelligence criteria (plan CUSTOMER INTELLIGENCE §3.0 (
         { kind: 'TAGGED', tags: order === 'ab' ? ['PRESS', 'vip'] : ['VIP', 'press', 'VIP'] },
         { match: 'ALL', rules: [{ kind: 'WISHES_MODEL', modelIds: order === 'ab' ? [m.main, m.orbit] : [m.orbit, m.main] }, { kind: 'DEVICE', apps: ['TIKTOK', 'INSTAGRAM'], kinds: ['PHONE'], days: 90 }] },
         { kind: 'LAST_SOURCE', kinds: order === 'ab' ? ['CAMPAIGN', 'SITE'] : ['SITE', 'CAMPAIGN'], at: 'EITHER', not: true },
+        order === 'ab' ? { kind: 'SCORE', min: 60, max: 100 } : { max: 100, min: 60, kind: 'SCORE' },
       ],
     });
     const s = await segments.create({ name: 'Every new group', criteria: criteria('ab') }, f.admin);

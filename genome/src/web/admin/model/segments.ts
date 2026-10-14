@@ -36,6 +36,7 @@ export const SEGMENT_LIMITS = Object.freeze({
   tag: 32,
   viewDays: Object.freeze({ min: 1, max: 395 }),
   viewMin: Object.freeze({ min: 1, max: 100 }),
+  score: Object.freeze({ min: 0, max: 100 }),
 });
 
 /** The four groups of criteria (choice 27), as the builder heads them. */

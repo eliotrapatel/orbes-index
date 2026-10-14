@@ -1126,6 +1126,7 @@ const segmentRule = z.discriminatedUnion('kind', [
   }),
   z.strictObject({ kind: z.literal('FIRST_SOURCE'), ...segmentSources, ...negated }),
   z.strictObject({ kind: z.literal('LAST_SOURCE'), ...segmentSources, at: z.enum(LAST_SOURCE_AT), ...negated }),
+  z.strictObject({ kind: z.literal('SCORE'), min: whole(SEGMENT_LIMITS.score.min, SEGMENT_LIMITS.score.max, 'points'), max: whole(SEGMENT_LIMITS.score.min, SEGMENT_LIMITS.score.max, 'points'), ...negated }),
 ]);
 const segmentRules = <T extends z.ZodType>(item: T) => z.array(item).min(1, 'At least one rule').max(SEGMENT_LIMITS.rules, `At most ${SEGMENT_LIMITS.rules} rules`);
 /** A segment's rule tree: a group of criteria and of groups of criteria (one level down). */

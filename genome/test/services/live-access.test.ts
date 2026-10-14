@@ -7,10 +7,12 @@
  *    or « This release is for selected collectors. » when the segment is all it lacks;
  *  - taking part (the release itself never counted) and the segment, combined with the tier and the pieces by AND or
  *    OR, read at I'LL BE THERE, at the entry and at SECURE, and when the room is read;
- *  - a segment of the customer intelligence lot's criteria as the access rule (a wish for the model, step 8.2);
+ *  - a segment of the customer intelligence lot's criteria as the access rule (a wish for the model, step 8.2; the
+ *    engagement score, step 8.5, question 15: within its range admitted, outside it or with no score yet refused);
  *  - the public page: the rule in words, A SURPRISE IN EVERY BOX as a flag, never the surprise's description;
  *  - the console: the settings (the releases taken part in, the segment, AND or OR, the surprise and its description)
- *    checked, audited, and the release as it reads them; the surprise on each order and piece to make of the release.
+ *    checked, audited, and the release as it reads them; a segment that reads the score saved as the access rule like any
+ *    other, at either depth (question 15: no guard); the surprise on each order and piece to make of the release.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
@@ -23,6 +25,7 @@ import type { Actor } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { accountOfTier, createLiveRelease, holdPieces, liveFixture, type LiveFixture } from '../support/live.js';
 import { poolDraw } from '../support/draws.js';
+import { seedScore } from '../support/scores.js';
 
 const MINUTE = 60_000;
 const HOUR = 3_600_000;
@@ -179,6 +182,40 @@ describe('a release’s rules, read at each step', () => {
     f.clock.set(T0);
   });
 
+  it('a score segment as the access rule (plan CUSTOMER INTELLIGENCE §3.6 C.5.4, step 8.5, question 15): within its range admitted, outside it or with no score yet refused', async () => {
+    const s = await segments.create({ name: 'Engaged', criteria: { match: 'ALL', rules: [{ kind: 'SCORE', min: 60, max: 100 }] } }, f.admin);
+    const engaged = await accountOfTier(f, 0);
+    const edge = await accountOfTier(f, 0);
+    const low = await accountOfTier(f, 3);
+    const unscored = await accountOfTier(f, 3);
+    await seedScore(t.db, engaged.id, 81, f.clock.now());
+    await seedScore(t.db, edge.id, 60, f.clock.now());
+    await seedScore(t.db, low.id, 59, f.clock.now());
+    const T0 = new Date(f.clock.now().getTime() + 2 * HOUR);
+    const r = await createLiveRelease(f, { opensAt: T0, accessSegmentId: s.id, sizes: [{ label: '54', stock: 1 }] });
+    const row = await t.db.selectFrom('drops').selectAll().where('id', '=', r.id).executeTakeFirstOrThrow();
+    const now = f.clock.now();
+    expect(await accessOf(t.db, row, engaged.id, now)).toMatchObject({ allowed: true, missing: null });
+    expect(await accessOf(t.db, row, edge.id, now)).toMatchObject({ allowed: true, missing: null });
+    expect(await accessOf(t.db, row, low.id, now)).toMatchObject({ allowed: false, missing: 'SEGMENT' });
+    expect(await accessOf(t.db, row, unscored.id, now)).toMatchObject({ allowed: false, missing: 'SEGMENT' });
+    // The page never names the score: « selected collectors », as for any segment.
+    expect(await room.sheet(r.id)).toMatchObject({ access: { text: 'selected collectors' } });
+    expect(JSON.stringify(await room.sheet(r.id))).not.toMatch(/score|Engaged/i);
+    const refused = await rejects(f.live.setInterest(low.id, r.id, r.sizes[0]!.id, low.actor), 'LIVE_NOT_ELIGIBLE', 403);
+    expect(refused.message).toBe('This release is for selected collectors.');
+    await rejects(f.live.setInterest(unscored.id, r.id, r.sizes[0]!.id, unscored.actor), 'LIVE_NOT_ELIGIBLE', 403);
+    await f.live.setInterest(engaged.id, r.id, r.sizes[0]!.id, engaged.actor);
+    f.clock.set(new Date(T0.getTime() - MINUTE));
+    await f.live.enter(engaged.id, r.id, { sizeId: r.sizes[0]!.id }, engaged.actor);
+    await rejects(f.live.enter(unscored.id, r.id, { sizeId: r.sizes[0]!.id }, unscored.actor), 'LIVE_NOT_ELIGIBLE', 403);
+    expect((await f.live.entry(engaged.id, r.id))?.status).toBe('WAITING');
+    // The planner's eligible collectors read the same rule.
+    const set = (await accessAccounts(t.db, row, f.clock.now()))!;
+    expect([engaged.id, edge.id, low.id, unscored.id].map((id) => set.has(id))).toEqual([true, true, false, false]);
+    f.clock.set(T0);
+  });
+
   it('AND: every rule; OR: any one, the rules joined by « or » on the page', async () => {
     const s = await segments.create({ name: 'The answer', criteria: { match: 'ALL', rules: [{ kind: 'COUNTRY', countries: ['JP'] }] } }, f.admin);
     const platine = await accountOfTier(f, 2);
@@ -311,6 +348,23 @@ describe('a release’s rules, read at each step', () => {
       expect(off.access).toMatchObject({ minParticipations: null, segment: null, combine: 'AND', text: 'owners from PLATINE' });
       const update = await t.db.selectFrom('audit_logs').select('details').where('target_id', '=', created.id).where('action', '=', 'drop.live.update').executeTakeFirstOrThrow();
       expect(update.details).toMatchObject({ before: { surpriseEnabled: true, minParticipations: 3, accessCombine: 'OR' }, after: { surpriseEnabled: false, minParticipations: null, accessCombine: 'AND' } });
+    });
+
+    it('saves a segment that reads the engagement score as the access rule like any other, at either depth (question 15: no guard)', async () => {
+      const flat = await segments.create({ name: 'Score 60 to 100', criteria: { match: 'ALL', rules: [{ kind: 'SCORE', min: 60, max: 100 }] } }, f.admin);
+      const nested = await segments.create(
+        { name: 'Buyers, or engaged in Italy', criteria: { match: 'ANY', rules: [{ kind: 'SECURED', min: 1 }, { match: 'ALL', rules: [{ kind: 'COUNTRY', countries: ['IT'] }, { kind: 'SCORE', min: 80, max: 100, not: true }] }] } },
+        f.admin,
+      );
+      const created = await f.liveConsole.create({ ...base(), accessSegmentId: flat.id }, f.admin);
+      expect(created.access).toMatchObject({ segment: { id: flat.id, name: 'Score 60 to 100' }, text: 'selected collectors' });
+      const changed = await f.liveConsole.update(created.id, { accessSegmentId: nested.id, accessCombine: 'OR', minTier: 2 }, f.admin);
+      expect(changed.access).toMatchObject({ segment: { id: nested.id, name: 'Buyers, or engaged in Italy' }, combine: 'OR' });
+      expect((await t.db.selectFrom('drops').select('access_segment_id').where('id', '=', created.id).executeTakeFirstOrThrow()).access_segment_id).toBe(nested.id);
+      const other = await f.liveConsole.create({ ...base(), accessSegmentId: nested.id }, f.admin);
+      expect(other.access.segment).toEqual({ id: nested.id, name: 'Buyers, or engaged in Italy' });
+      // Both releases are what uses it; neither segment can be deleted meanwhile.
+      expect((await segments.get(nested.id)).usedBy.releases.map((x) => x.id).sort()).toEqual([created.id, other.id].sort());
     });
 
     it('refuses a surprise without its description, an unknown segment, a count out of bounds, another way to combine', async () => {

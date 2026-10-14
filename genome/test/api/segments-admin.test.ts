@@ -12,12 +12,13 @@
  *    403 of an account outside them, with its count of releases taken part in or « This release is for selected
  *    collectors. »;
  *  - a post of the circle for a segment;
- *  - the customer intelligence lot's criteria (plan CUSTOMER INTELLIGENCE §3.6 C.5.1, steps 8.1 to 8.4) through the
+ *  - the customer intelligence lot's criteria (plan CUSTOMER INTELLIGENCE §3.6 C.5.1, steps 8.1 to 8.5) through the
  *    routes: counted and saved, their fields checked by the route's schema and by the service.
  * Which role reaches which route is test/api/admin-roles.test.ts.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { seedScore } from '../support/scores.js';
 import { accountClient, adminClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
 
 type Json = Record<string, any>;
@@ -242,5 +243,16 @@ describe('segments and the access rules: the console’s and the public routes',
     await refused({ kind: 'FIRST_SOURCE' }, 400, 'VALIDATION_FAILED');
     await refused({ kind: 'FIRST_SOURCE', linkIds: ['00000000-0000-4000-8000-000000000000'] }, 404, 'LINK_NOT_FOUND');
     await refused({ kind: 'FIRST_SOURCE', channelIds: ['00000000-0000-4000-8000-000000000000'] }, 404, 'CHANNEL_NOT_FOUND');
+
+    // ENGAGEMENT (step 8.5): the member's score of the latest run; nobody else of the harness is scored.
+    await seedScore(h.ctx.db, member.id, 74, h.clock.now());
+    const engaged = { match: 'ALL', rules: [{ kind: 'SCORE', min: 60, max: 100 }] };
+    expect(safeJson(await op.post('/api/admin/segments/count', { criteria: engaged }))).toEqual({ count: 1 });
+    const saved = await op.post('/api/admin/segments', { name: 'Engaged', criteria: engaged });
+    expect([saved.statusCode, (safeJson(saved) as Json).criteria]).toEqual([201, engaged]);
+    await refused({ kind: 'SCORE', min: 60 }, 400, 'VALIDATION_FAILED');
+    await refused({ kind: 'SCORE', min: 60, max: 101 }, 400, 'VALIDATION_FAILED');
+    const upside = await op.post('/api/admin/segments/count', { criteria: { match: 'ALL', rules: [{ kind: 'SCORE', min: 80, max: 60 }] } });
+    expect([upside.statusCode, errorOf(upside).message]).toEqual([400, 'The engagement score is two whole numbers from 0 to 100, the first not above the second.']);
   });
 });
