@@ -736,6 +736,16 @@ async function overviewPanel(tx: Db, x: Reading): Promise<OverviewFigures> {
   };
 }
 
+/**
+ * The usual place from the connection of the collector `c` (tracking's rule: the most days, then the latest, then the
+ * lowest id) as `gp` (geo_places), or NULLs. Read for every collector at once (one ordered pass over collector_places,
+ * one join of geo_places) rather than once per collector: the perf test's EXPLAIN (step 9.14) showed a lookup per
+ * collector hashing the whole of geo_places each time.
+ */
+const USUAL_PLACE = sql`LEFT JOIN (SELECT DISTINCT ON (cp.account_id) cp.account_id, cp.place_id FROM collector_places cp
+                          ORDER BY cp.account_id, cp.days DESC, cp.last_day DESC, cp.place_id) up ON up.account_id = c.account_id
+      LEFT JOIN geo_places gp ON gp.id = up.place_id`;
+
 // ── Who they are (`who`) ───────────────────────────────────────────────────────────────────────────────────────
 
 /** AGES, COUNTRIES and CITIES, as given and from the connection (§3.6 C.6.3 item 2). */
@@ -744,9 +754,7 @@ async function whoPanel(tx: Db, x: Reading): Promise<WhoFigures> {
     SELECT c.created_at, v.dim, v.key
       FROM ${sql.table(cte)} c
       LEFT JOIN account_profiles pr ON pr.account_id = c.account_id
-      LEFT JOIN LATERAL (SELECT cp.place_id FROM collector_places cp WHERE cp.account_id = c.account_id
-                          ORDER BY cp.days DESC, cp.last_day DESC, cp.place_id LIMIT 1) up ON TRUE
-      LEFT JOIN geo_places gp ON gp.id = up.place_id
+      ${USUAL_PLACE}
       CROSS JOIN LATERAL (VALUES
         ('age', ${ageBandSql(sql`pr.birth_date`, x.today)}),
         ('country', coalesce(btrim(c.country), 'none')),
@@ -1315,13 +1323,14 @@ const lastActBefore = (end: Date) => {
  * ACTIVE AND DORMANT of the collector `c` (its `account_id`, `created_at`) as of period `p`'s last day, over the day
  * starts `starts` (dayStarts): `never` with no act after the account's first Paris day; `active` with one in the
  * ENGAGEMENT_ACTIVE_DAYS Paris days up to the period's end; `dormant` otherwise. Accounts made after the period are
- * the caller's to leave out.
+ * the caller's to leave out. `OFFSET 0` keeps the latest act a value read once per collector: inlined, the CASE would
+ * read its six indexes again for each of its three tests (the perf test's EXPLAIN, step 9.14).
  */
 export function statusSql(p: Pick<Period, 'to' | 'end'>, starts: RawBuilder<unknown>): RawBuilder<EngagementStatus> {
   const windowStart = parisDayStart(plusDays(p.to, -(ENGAGEMENT_ACTIVE_DAYS - 1)));
   const firstDayEnd = sql`(${starts})[width_bucket(c.created_at, ${starts}) + 1]`;
   return sql<EngagementStatus>`(SELECT CASE WHEN st.la IS NULL OR st.la < st.fe THEN 'never' WHEN st.la >= greatest(st.fe, ${windowStart}::timestamptz) THEN 'active' ELSE 'dormant' END
-      FROM (SELECT ${lastActBefore(p.end)} AS la, ${firstDayEnd} AS fe) st)`;
+      FROM (SELECT ${lastActBefore(p.end)} AS la, ${firstDayEnd} AS fe OFFSET 0) st)`;
 }
 
 /** The collectors of a scope CTE by ACTIVE AND DORMANT as of the period's last day (those made by its end). */
@@ -1585,18 +1594,21 @@ async function trendCells(tx: Db, x: Reading, p: Period, cte: string, split: Tre
       break;
     }
     case 'active': {
-      const a = (t: string, at: string, account = 'account_id') => sql`SELECT cg.account_id, x.${sql.raw(at)} AS at FROM cg JOIN ${sql.table(t)} x ON x.${sql.raw(account)} = cg.account_id AND ${within(sql.ref(`x.${at}`), p)}`;
+      // Each kind of act gives each collector once per bucket (DISTINCT), so the union holds a few rows per collector
+      // rather than every act of the period (the perf test, step 9.14: 12 months held about 900,000 rows to sort).
+      const a = (t: string, at: string, account = 'account_id') =>
+        sql`SELECT DISTINCT cg.account_id, width_bucket(x.${sql.raw(at)}, ${starts}) AS b FROM cg JOIN ${sql.table(t)} x ON x.${sql.raw(account)} = cg.account_id AND ${within(sql.ref(`x.${at}`), p)}`;
       put(
         (
           await sql<Row>`
             WITH ${cg}, ev AS (
-              SELECT cg.account_id, x.occurred_at AS at FROM cg JOIN audit_logs x ON x.action = 'account.login' AND x.target_id = cg.account_id::text AND ${within(sql`x.occurred_at`, p)}
+              SELECT DISTINCT cg.account_id, width_bucket(x.occurred_at, ${starts}) AS b FROM cg JOIN audit_logs x ON x.action = 'account.login' AND x.target_id = cg.account_id::text AND ${within(sql`x.occurred_at`, p)}
               UNION ALL ${a('scan_events', 'occurred_at')}
               UNION ALL ${a('collector_views', 'at')}
               UNION ALL ${a('drop_entries', 'created_at')}
               UNION ALL ${a('live_entries', 'joined_at')}
               UNION ALL ${a('orders', 'reserved_at')})
-            SELECT cg.g, width_bucket(ev.at, ${starts}) AS b, count(DISTINCT ev.account_id)::int AS n FROM ev JOIN cg ON cg.account_id = ev.account_id GROUP BY 1, 2`.execute(tx)
+            SELECT cg.g, ev.b, count(DISTINCT ev.account_id)::int AS n FROM ev JOIN cg ON cg.account_id = ev.account_id GROUP BY 1, 2`.execute(tx)
         ).rows,
         true,
       );
@@ -1945,9 +1957,6 @@ interface SliceSql {
 
 const exists = (body: RawBuilder<unknown>) => sql`EXISTS (${body})`;
 const openWishAt = (end: Date) => sql`w.added_at < ${end}::timestamptz AND (w.removed_at IS NULL OR w.removed_at >= ${end}::timestamptz)`;
-const USUAL_PLACE = sql`LEFT JOIN LATERAL (SELECT cp.place_id FROM collector_places cp WHERE cp.account_id = c.account_id
-                          ORDER BY cp.days DESC, cp.last_day DESC, cp.place_id LIMIT 1) up ON TRUE
-      LEFT JOIN geo_places gp ON gp.id = up.place_id`;
 
 /** The bucket a key names in the period, or with `previous` in the previous one only (with the period it belongs to). */
 function bucketOfKey(q: InsightsQuery, key: string, previous: boolean): { bucket: Bucket; period: Period } {
@@ -2175,19 +2184,24 @@ async function readList(tx: Db, x: Reading, s: Slice, page: number, withCities: 
   const sel = await sliceSql(tx, x, s);
   const members = sql`${scopeCte('col', x.q, sel.period)},
     m AS (SELECT c.account_id, c.tier FROM col c LEFT JOIN account_profiles pr ON pr.account_id = c.account_id ${sel.joins} WHERE ${sel.cond})`;
-  const total = Number((await sql<{ n: number }>`WITH ${members} SELECT count(*)::int AS n FROM m`.execute(tx)).rows[0]?.n ?? 0);
-  const rows = await sql<{ id: string; email: string; display_name: string | null; country: string | null; city: string | null; tier: number; created_at: Date; heard_other: string | null; last_seen: Date | null }>`
-    WITH ${members}
-    SELECT a.id, a.email, a.display_name, a.country, pr.city, m.tier, a.created_at, pr.heard_other,
-           greatest((SELECT max(se.last_seen_at) FROM sessions se WHERE se.subject_type = 'account' AND se.subject_id = a.id),
-                    (SELECT max(cv.at) FROM collector_views cv WHERE cv.account_id = a.id)) AS last_seen
-      FROM m JOIN accounts a ON a.id = m.account_id LEFT JOIN account_profiles pr ON pr.account_id = a.id
-     ORDER BY a.email_normalized, a.id
-     LIMIT ${COLLECTORS_LIST_PAGE} OFFSET ${(page - 1) * COLLECTORS_LIST_PAGE}`.execute(tx);
+  // One statement: the members read once (`m` is used twice, so PostgreSQL materialises it), their count and the page
+  // (a page past the end gives the count alone). Counting apart read the slice twice (the perf test, step 9.14).
+  const read = await sql<{ total: number; id: string | null; email: string; display_name: string | null; country: string | null; city: string | null; tier: number; created_at: Date; heard_other: string | null; last_seen: Date | null }>`
+    WITH ${members}, t AS (SELECT count(*)::int AS n FROM m)
+    SELECT t.n AS total, pg.* FROM t LEFT JOIN LATERAL (
+      SELECT a.id, a.email, a.email_normalized AS sort_email, a.display_name, a.country, pr.city, m.tier, a.created_at, pr.heard_other,
+             greatest((SELECT max(se.last_seen_at) FROM sessions se WHERE se.subject_type = 'account' AND se.subject_id = a.id),
+                      (SELECT max(cv.at) FROM collector_views cv WHERE cv.account_id = a.id)) AS last_seen
+        FROM m JOIN accounts a ON a.id = m.account_id LEFT JOIN account_profiles pr ON pr.account_id = a.id
+       ORDER BY a.email_normalized, a.id
+       LIMIT ${COLLECTORS_LIST_PAGE} OFFSET ${(page - 1) * COLLECTORS_LIST_PAGE}) pg ON TRUE
+     ORDER BY pg.sort_email, pg.id`.execute(tx);
+  const total = Number(read.rows[0]?.total ?? 0);
+  const onPage = read.rows.filter((r): r is typeof r & { id: string } => r.id !== null);
   return {
     total,
     subject: await sliceSubject(tx, s),
-    rows: rows.rows.map((r) => ({
+    rows: onPage.map((r) => ({
       accountId: r.id,
       email: r.email,
       name: r.display_name,
