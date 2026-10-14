@@ -13,7 +13,7 @@
  *  - the cache (a second read does not read; Read again under 30 s does not either, after it does; 5 minutes; 50 kept),
  *    the load guard (a third reading waits, then 503 INSIGHTS_BUSY), the timeout (PostgreSQL's 57014 mapped to 503
  *    INSIGHTS_TIMEOUT, logged with the panel and the period only), and each reading's transaction (REPEATABLE READ,
- *    READ ONLY, work_mem 32MB, statement_timeout 8s).
+ *    READ ONLY, work_mem 32MB, statement_timeout 8s, JIT off).
  *
  * Test entrants, the team's accounts and DELETED accounts carry countries, profiles, places, scores, wishes, sign-ins
  * and devices too: none of it may reach a figure.
@@ -1223,7 +1223,7 @@ describe('CollectorInsightsService (§3.6 C.6, steps 9.2 and on)', () => {
       await expect(other.service.report({ panel: 'who' })).rejects.toThrow('boom');
     });
 
-    it('each reading runs in one REPEATABLE READ, READ ONLY transaction with work_mem 32MB and statement_timeout 8s', async () => {
+    it('each reading runs in one REPEATABLE READ, READ ONLY transaction with work_mem 32MB, statement_timeout 8s and JIT off', async () => {
       const { service } = make({
         reader: async (tx) => {
           const r = await sql<{
@@ -1231,9 +1231,10 @@ describe('CollectorInsightsService (§3.6 C.6, steps 9.2 and on)', () => {
             ro: string;
             mem: string;
             timeout: string;
+            jit: string;
           }>`
             SELECT current_setting('transaction_isolation') AS iso, current_setting('transaction_read_only') AS ro,
-                   current_setting('work_mem') AS mem, current_setting('statement_timeout') AS timeout`.execute(tx);
+                   current_setting('work_mem') AS mem, current_setting('statement_timeout') AS timeout, current_setting('jit') AS jit`.execute(tx);
           return r.rows[0];
         },
       });
@@ -1243,7 +1244,10 @@ describe('CollectorInsightsService (§3.6 C.6, steps 9.2 and on)', () => {
         ro: 'on',
         mem: '32MB',
         timeout: '8s',
+        jit: 'off',
       });
+      // SET LOCAL: the connection is back to the server's setting after the reading.
+      expect((await sql<{ jit: string }>`SELECT current_setting('jit') AS jit`.execute(h.t.db)).rows[0]!.jit).toBe('on');
     });
 
     it('only the gated readings raise work_mem (§8 « Memory »: 32 MB at most twice): options() answers with the gate full, and it and the export keep the server\'s default', async () => {

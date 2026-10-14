@@ -36,7 +36,7 @@
  *   - one REPEATABLE READ, READ ONLY transaction per panel, `work_mem` 32 MB (several panels run at once on the shared
  *     box; only the gated panel and list readings carry it, so at most two at once: options() and the export keep the
  *     server's default) and `statement_timeout` 8 s; a reading cut by the timeout answers 503 INSIGHTS_TIMEOUT, logged with the panel
- *     and the period, never the filters' values;
+ *     and the period, never the filters' values; PostgreSQL's JIT off in it (connection.ts jitOff);
  *   - at most INSIGHTS_CONCURRENT readings at once in the process; another waits up to INSIGHTS_WAIT_MS, then answers 503
  *     INSIGHTS_BUSY;
  *   - an in-process cache of the last INSIGHTS_CACHE_SIZE panel results, keyed by the panel and the normalised query,
@@ -52,7 +52,7 @@
  * GROWTH withholds its amounts (`GROWTH_MIN_GROUP`).
  */
 import { sql, type RawBuilder } from 'kysely';
-import type { Db } from '../db/connection.js';
+import { jitOff, type Db } from '../db/connection.js';
 import { CSV_CONTENT_TYPE } from '../render/csv.js';
 import type { AuditService } from './audit.js';
 import { DEVICE_KINDS, DEVICE_SYSTEMS, HOUSE_CURRENCIES, IN_APPS, OPENED_IN, VIEW_PAGE_CODES, type HouseCurrency, type SourceKind } from '../db/schema.js';
@@ -565,7 +565,9 @@ export class CollectorInsightsService {
 
   /**
    * `fn` in one REPEATABLE READ, READ ONLY transaction with its statement_timeout (the export's 60 s) and the page's
-   * work_mem, raised only for the gated readings (report and list); `workMem` null keeps the server's default.
+   * work_mem, raised only for the gated readings (report and list); `workMem` null keeps the server's default. JIT is off
+   * (connection.ts jitOff): the per-collector EXISTS of At a glance, ACTIVE AND DORMANT and the views are costed far
+   * above what they read, and compiling them took longer than reading them.
    */
   private async readOnly<T>(fn: (tx: Db) => Promise<T>, o: { timeoutMs?: number; workMem?: string | null } = {}): Promise<T> {
     const timeoutMs = o.timeoutMs ?? this.timeoutMs;
@@ -575,6 +577,7 @@ export class CollectorInsightsService {
       await sql`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY`.execute(tx);
       if (workMem !== null) await sql.raw(`SET LOCAL work_mem = '${workMem}'`).execute(tx);
       await sql.raw(`SET LOCAL statement_timeout = '${Math.max(1, Math.floor(timeoutMs))}ms'`).execute(tx);
+      await jitOff(tx);
       return fn(tx);
     });
   }

@@ -10,7 +10,7 @@
  *    I'LL BE THERE, the answers after, the last activity), negated, in ALL and ANY groups and a group within;
  *  - the service: the live count, the options of the builder, created, renamed and changed (audited, the same twice is
  *    nothing), the names unique whatever the case, the ids named checked, deleted only when nothing uses it, and the
- *    members' CSV;
+ *    members' CSV; the count and the CSV read with PostgreSQL's JIT off;
  *  - a post of the circle for a segment's members only, read again at each request;
  *  - the customer intelligence lot's criteria (plan CUSTOMER INTELLIGENCE §3.0 (g), §3.6 C.5.1, steps 8.1 to 8.4), each
  *    matched and negated, their bounds and refusals, the names they check: PERSON (the city given, folded; the age
@@ -361,6 +361,42 @@ describe('taking part, and the segments', () => {
       const buyer = lines.find((l) => l.includes(`masked:l`) && l.endsWith(`"`) && l.includes('"1","1"'));
       expect(buyer).toBeDefined();
       await segments.remove(s.id, f.admin);
+    });
+
+    it('reads the console’s count and CSV with PostgreSQL’s JIT off, in their own transaction', async () => {
+      // Every SET and each SELECT the service builds, in order (a Kysely plugin sees each query, and each subquery, as it
+      // is built): JIT turned off first, then only the members read.
+      const seen: string[] = [];
+      const JIT_OFF = 'SET LOCAL jit = off';
+      const afterLastSet = () => seen.slice(seen.lastIndexOf(JIT_OFF) + 1);
+      const spy = t.db.withPlugin({
+        transformQuery: ({ node }) => {
+          if (node.kind === 'RawNode') seen.push((node as unknown as { sqlFragments: readonly string[] }).sqlFragments.join('?'));
+          else if (node.kind === 'SelectQueryNode') seen.push('select');
+          return node;
+        },
+        transformResult: async ({ result }) => result,
+      });
+      const spied = new SegmentService({ db: spy, audit: f.audit, clock: f.clock.now });
+      const criteria = { match: 'ALL', rules: [{ kind: 'COUNTRY', countries: ['FR'] }] };
+      expect((await spied.count(criteria)).count).toBe(await count(cleanCriteria(criteria)));
+      expect(seen[0]).toBe(JIT_OFF);
+      expect(seen.filter((x) => x === JIT_OFF)).toHaveLength(1);
+      expect(afterLastSet().length).toBeGreaterThan(0);
+      expect(afterLastSet().every((x) => x === 'select')).toBe(true);
+      const s = await segments.create({ name: 'In France', criteria }, f.admin);
+      try {
+        seen.length = 0;
+        await spied.csv(s.id, { email: (e) => e });
+        // The segment read with its count, then its members.
+        expect(seen.filter((x) => x === JIT_OFF)).toHaveLength(2);
+        expect(afterLastSet().length).toBeGreaterThan(0);
+        expect(afterLastSet().every((x) => x === 'select')).toBe(true);
+      } finally {
+        await segments.remove(s.id, f.admin);
+      }
+      // SET LOCAL: the connection is back to the server's setting.
+      expect((await sql<{ jit: string }>`SELECT current_setting('jit') AS jit`.execute(t.db)).rows[0]!.jit).toBe('on');
     });
 
     it('never counts nor lists a test account: out of the count, the live count and the CSV; where the segment decides, read as any account', async () => {

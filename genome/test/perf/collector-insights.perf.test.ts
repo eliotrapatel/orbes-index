@@ -70,6 +70,9 @@ describe.skipIf(!adminUrl)('the Collectors page and Segments at 20,000 collector
     audit = new AuditService({ db, clock: () => PERF_NOW });
     links = new LinkService({ db, audit, publicOrigin: 'https://verify.orbes.bench', clock: () => PERF_NOW });
     insights = new CollectorInsightsService({ db, audit, links, clock: () => PERF_NOW });
+    // The server, in the log: its JIT (LLVM) is what the page's and Segments' readings turn off (connection.ts jitOff).
+    const env = (await sql<{ version: string; jit: string; llvm: boolean }>`SELECT current_setting('server_version') AS version, current_setting('jit') AS jit, pg_jit_available() AS llvm`.execute(db)).rows[0]!;
+    note(`PostgreSQL ${env.version}, jit ${env.jit} by default, LLVM ${env.llvm ? 'available' : 'not available'}; the page's readings and Segments' count run with jit off`);
   }, SEED_MS);
 
   afterAll(async () => {

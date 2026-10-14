@@ -58,7 +58,7 @@
  * access rule, a post's audience) they are read as any account, so that a test run still enters a release open to a segment.
  */
 import { sql, type Expression, type ExpressionBuilder, type RawBuilder, type SqlBool } from 'kysely';
-import { inTransaction, type Db } from '../db/connection.js';
+import { inTransaction, jitOff, type Db } from '../db/connection.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
 import {
   DEVICE_KINDS,
@@ -891,30 +891,38 @@ export class SegmentService {
 
   // ── internals ────────────────────────────────────────────────────────────
 
-  /** The members the console counts: never a test account. */
+  /**
+   * The members the console counts: never a test account. JIT off (connection.ts jitOff): under ANY, each rule's EXISTS
+   * is costed per account, millions for a statement read in under a second.
+   */
   private async members(db: Db, criteria: SegmentGroup): Promise<number> {
-    const r = await segmentMembers(db, criteria, this.clock()).where(sql<SqlBool>`${notTestEntrant('a.id')}`).select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
-    return Number(r.n);
+    return inTransaction(db, async (tx) => {
+      await jitOff(tx);
+      const r = await segmentMembers(tx, criteria, this.clock()).where(sql<SqlBool>`${notTestEntrant('a.id')}`).select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
+      return Number(r.n);
+    });
   }
 
-  /** The members with what the CSV says of each, by email: never a test account. */
+  /** The members with what the CSV says of each, by email: never a test account. JIT off, as for the count. */
   private async memberRows(criteria: SegmentGroup): Promise<SegmentMember[]> {
     const now = this.clock();
-    const db = this.db;
-    const rows = await segmentMembers(db, criteria, now)
-      .where(sql<SqlBool>`${notTestEntrant('a.id')}`)
-      .select((eb) => [
-        'a.id',
-        'a.email',
-        'a.country',
-        'a.created_at',
-        piecesHeld(db, eb.ref('a.id')).as('pieces'),
-        participationCount(db, now, eb.ref('a.id')).as('participations'),
-        securedCount(db, eb.ref('a.id')).as('secured'),
-      ])
-      .orderBy('a.email_normalized')
-      .orderBy('a.id')
-      .execute();
+    const rows = await inTransaction(this.db, async (db) => {
+      await jitOff(db);
+      return segmentMembers(db, criteria, now)
+        .where(sql<SqlBool>`${notTestEntrant('a.id')}`)
+        .select((eb) => [
+          'a.id',
+          'a.email',
+          'a.country',
+          'a.created_at',
+          piecesHeld(db, eb.ref('a.id')).as('pieces'),
+          participationCount(db, now, eb.ref('a.id')).as('participations'),
+          securedCount(db, eb.ref('a.id')).as('secured'),
+        ])
+        .orderBy('a.email_normalized')
+        .orderBy('a.id')
+        .execute();
+    });
     return rows.map((r) => {
       const pieces = Number(r.pieces);
       return {

@@ -44,7 +44,7 @@
  * (§3.0 (e)).
  */
 import { sql, type RawBuilder } from 'kysely';
-import type { Db } from '../db/connection.js';
+import { jitOff, type Db } from '../db/connection.js';
 import { VIEW_PAGE_CODES, type ViewPage } from '../db/schema.js';
 import { tasteKey } from '../../shared/profile-rules.js';
 import { systemClock, type Clock } from '../types.js';
@@ -671,13 +671,15 @@ export class LikesService {
 
   /**
    * What they like over `window` (and its previous period), for `population` (every counted collector by default); the
-   * countries for ALL VISITORS. One REPEATABLE READ, READ ONLY transaction, or the caller's.
+   * countries for ALL VISITORS. One REPEATABLE READ, READ ONLY transaction with JIT off as the Collectors page's
+   * (connection.ts jitOff), or the caller's.
    */
   async likes(window: LikesWindow, population: AccountFilter = countedCollectors, opts: { countries?: readonly string[] } = {}): Promise<LikesFigures> {
     const input: LikesInput = { window, population, countries: opts.countries, now: this.clock() };
     if (this.db.isTransaction) return readLikes(this.db, input);
     return this.db.transaction().execute(async (tx) => {
       await sql`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY`.execute(tx);
+      await jitOff(tx);
       return readLikes(tx, input);
     });
   }

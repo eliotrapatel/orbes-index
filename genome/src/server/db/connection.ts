@@ -132,6 +132,20 @@ export async function inTransaction<T>(db: Db, fn: (trx: Db) => Promise<T>): Pro
 }
 
 /**
+ * PostgreSQL's JIT turned off until the end of the transaction `trx` (SET LOCAL: the pooled connection is back to the
+ * server's setting afterwards), for the console's readings over every collector: the Collectors page's and Segments'
+ * count and CSV. The planner costs each correlated EXISTS or max() by its per-row form (20,000 collectors × six index
+ * probes, about 540,000) even where the executor runs it hashed, once; so statements that read in a fraction of a second
+ * pass jit_inline_above_cost and jit_optimize_above_cost (500,000), and the server would spend about a second compiling
+ * each one with LLVM, again on every reading (genome-ci's postgres:16, the perf test of the Collectors page). PGlite has no
+ * JIT: there it changes nothing.
+ */
+export async function jitOff(trx: Db): Promise<void> {
+  if (!trx.isTransaction) throw new Error('jitOff must be called inside a transaction');
+  await sql`SET LOCAL jit = off`.execute(trx);
+}
+
+/**
  * A list of uuids as ONE parameter, to read with `column = ANY(${uuidArray(ids)})`: a batch of several hundred ids costs
  * one parameter instead of one each, on both drivers alike (no array serialisation involved). An empty list matches
  * nothing. Every id must be a uuid: the cast refuses anything else.
