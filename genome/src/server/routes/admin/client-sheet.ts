@@ -42,7 +42,7 @@ import type { AdminRouteDeps } from './index.js';
 import { readsClientEmails } from './serialize.js';
 
 export const adminClientSheetRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
-  const { clientNotes, profiles, addresses, acquisition, wishlist, tracking } = ctx.services;
+  const { clientNotes, profiles, addresses, acquisition, wishlist, tracking, engagement } = ctx.services;
 
   app.put('/api/admin/owners/:id/profile', async (request) => {
     const { id } = parse(ownerParams, request.params);
@@ -64,10 +64,11 @@ export const adminClientSheetRoutes: FastifyPluginAsync<AdminRouteDeps> = async 
     return { profile: await profiles.forStaff(id, { inClear: true }) };
   });
 
-  // Step 5.7: the Intelligence, read after the sheet; one block failing marks only itself.
+  // Step 5.7: the Intelligence, read after the sheet; one block failing marks only itself. Step 7.5: its engagement
+  // score (staff only: this is its one way out of the server).
   app.get('/api/admin/owners/:id/intelligence', async (request) => {
     const { id } = parse(ownerParams, request.params);
-    return ownerIntelligence({ db: ctx.db, acquisition, wishlist, tracking, warn: (detail, message) => request.log.warn(detail, message) }, id, { inClear: readsClientEmails(request) });
+    return ownerIntelligence({ db: ctx.db, engagement, acquisition, wishlist, tracking, warn: (detail, message) => request.log.warn(detail, message) }, id, { inClear: readsClientEmails(request) });
   });
 
   app.get('/api/admin/tags', async () => ({ items: await clientNotes.suggestions() }));

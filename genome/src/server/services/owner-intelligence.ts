@@ -4,7 +4,8 @@
  * /api/admin/owners/:id/intelligence after the sheet, so a slow or failing read never keeps Client Services from the
  * sheet itself.
  *
- *   engagement  the engagement score and its five parts (§3.5 SB.3.6): null until I2 ships it (the block is absent).
+ *   engagement  the engagement score, its five parts and the figures behind them, with the formula's lines (§3.5
+ *               SB.3.6: EngagementService.account). Staff only.
  *   origin      where the client came from (§3.4 A.10.5): the first visit and its source, the source the sign-up came
  *               through, the source the latest purchase came through (AcquisitionService.originOf).
  *   wishlist    the client's open wishes, the latest first, with the model's state (§3.2 W.9: WishlistService.ofAccount).
@@ -12,7 +13,7 @@
  *               TrackingService.collectorBrowsing), the cities withheld for an AUDITOR (`inClear` false).
  *   recordingSince  the recording's start (`tracking_state.started_at`), for an account older than it.
  *
- * Each block is its own small read on indexes keyed by the account, the four run side by side; one failing is logged
+ * Each block is its own small read on indexes keyed by the account, the blocks run side by side; one failing is logged
  * and marked `{ failed: true }` alone, the others stand. An unknown account is 404 ACCOUNT_NOT_FOUND. Every role that
  * reaches the sheet reads it (AUDITOR and up), the cities aside. It only reads: nothing is written or audited.
  */
@@ -20,6 +21,7 @@ import type { Db } from '../db/connection.js';
 import { notFound } from '../errors.js';
 import type { AcquisitionService } from './acquisition.js';
 import type { OriginOf } from './acquisition-reads.js';
+import type { EngagementBlock, EngagementService } from './engagement.js';
 import type { CollectorBrowsing } from './tracking-reads.js';
 import type { TrackingService } from './tracking.js';
 import type { StaffWish, WishlistService } from './wishlist.js';
@@ -30,8 +32,8 @@ export interface FailedBlock {
 }
 
 export interface OwnerIntelligence {
-  /** The engagement score's block: null until I2 (plan §4, step 7.x). */
-  engagement: null;
+  /** The engagement score's block (§3.5 SB.3.6, step 7.5). */
+  engagement: EngagementBlock | FailedBlock;
   origin: OriginOf | FailedBlock;
   wishlist: StaffWish[] | FailedBlock;
   browsing: CollectorBrowsing | FailedBlock;
@@ -41,6 +43,7 @@ export interface OwnerIntelligence {
 
 export interface OwnerIntelligenceDeps {
   db: Db;
+  engagement: Pick<EngagementService, 'account'>;
   acquisition: Pick<AcquisitionService, 'originOf'>;
   wishlist: Pick<WishlistService, 'ofAccount'>;
   tracking: Pick<TrackingService, 'collectorBrowsing'>;
@@ -65,7 +68,8 @@ export async function ownerIntelligence(deps: OwnerIntelligenceDeps, accountId: 
       return { failed: true };
     }
   };
-  const [origin, wishlist, browsing, state] = await Promise.all([
+  const [engagement, origin, wishlist, browsing, state] = await Promise.all([
+    block('engagement', () => deps.engagement.account(id)),
     block('origin', () => deps.acquisition.originOf(id)),
     block('wishlist', () => deps.wishlist.ofAccount(id)),
     block('browsing', () => deps.tracking.collectorBrowsing(id, { withCities: opts.inClear })),
@@ -76,5 +80,5 @@ export async function ownerIntelligence(deps: OwnerIntelligenceDeps, accountId: 
       .executeTakeFirst()
       .catch(() => undefined),
   ]);
-  return { engagement: null, origin, wishlist, browsing, recordingSince: state?.started_at ?? null };
+  return { engagement, origin, wishlist, browsing, recordingSince: state?.started_at ?? null };
 }

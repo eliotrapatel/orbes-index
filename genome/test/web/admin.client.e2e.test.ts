@@ -19,7 +19,9 @@
  *  7. (step 5.6) Tags and private notes: a tag from a suggestion, the server's capitals, removed; a note added and
  *     removed by its writer, another's by an ADMIN only, the date of birth's reason as a note; an AUDITOR reads them.
  *  8. (step 5.7) The Intelligence: origin, wishlist, what they look at with « Show all », devices, places with DB-IP's
- *     attribution; an AUDITOR without cities.
+ *     attribution; an AUDITOR without cities. (§3.5 SB.3.6, step 7.5) Its engagement score first: the score out of 100,
+ *     the five parts with the figure behind each, « How the score is calculated » closed then opened; an AUDITOR reads
+ *     it too; the mark of a score no longer recalculated.
  * No CSP violation, no page error, no figure in the display face.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -36,7 +38,9 @@ import { testConfig } from '../../src/server/config.js';
 import { createContext, type AppContext } from '../../src/server/context.js';
 import { inTransaction } from '../../src/server/db/connection.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
+import { FORMULA_LINES } from '../../src/server/services/engagement-formula.js';
 import { orderReference } from '../../src/server/services/orders.js';
+import { parisDay } from '../../src/server/services/schedule.js';
 import { SHOPIFY_ORDER_COLUMNS, SHOPIFY_PRODUCT_COLUMNS } from '../../src/server/services/shopify.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import { createManualClock, SYSTEM_ACTOR, type ManualClock } from '../../src/server/types.js';
@@ -639,7 +643,7 @@ describe.skipIf(!HAS_CHROMIUM)('the client sheet and the Shopify exports in the 
     expect(JSON.stringify(audits)).not.toMatch(/Prefers a call|Day and month|boutique/);
   }, STEP_TIMEOUT);
 
-  it('reads the client sheet\'s Intelligence (plan CUSTOMER INTELLIGENCE §3.6 C.4.4, step 5.7): the origin, the wishlist, what they look at with « Show all », devices and places with DB-IP; an AUDITOR without cities', async () => {
+  it('reads the client sheet\'s Intelligence (plan CUSTOMER INTELLIGENCE §3.6 C.4.4, steps 5.7 and 7.5): the engagement score with its parts and how it is calculated, the origin, the wishlist, what they look at with « Show all », devices and places with DB-IP; an AUDITOR without cities', async () => {
     const client = await createAccount(ctx.db);
     const model = await ctx.db.selectFrom('models').select(['id', 'name']).where('id', '=', f.modelId).executeTakeFirstOrThrow();
     const site =
@@ -670,13 +674,47 @@ describe.skipIf(!HAS_CHROMIUM)('the client sheet and the Shopify exports in the 
       ])
       .execute();
     await ctx.db.insertInto('collector_places').values({ account_id: client.id, place_id: paris, days: 2, first_day: '2026-10-01', last_day: '2026-10-08' }).execute();
+    // The engagement score of the latest run, two hours ago: 72 = 20 + 12 + 18 + 9 + 13, its latest act 12 days before it.
+    const ranAt = new Date(now - 2 * HOUR);
+    await ctx.db.deleteFrom('engagement_runs').execute();
+    await ctx.db.insertInto('engagement_runs').values({ day: parisDay(ranAt), formula: 1, started_at: new Date(ranAt.getTime() - 3 * SECOND), finished_at: ranAt, accounts: 1, changed: 0, bands: [0, 0, 0, 0, 0, 0, 0, 1, 0, 0], duration_ms: 3_000 }).execute();
+    await ctx.db
+      .insertInto('account_scores')
+      .values({
+        account_id: client.id, formula: 1, score: 72, recency_points: 20, frequency_points: 12, spend_points: 18, speed_points: 9, attendance_points: 13,
+        last_act_at: new Date(ranAt.getTime() - 12 * 24 * HOUR), last_act_kind: 'DRAW', active_days: 6, spend_eur_minor: 41_000, purchases: 2, unpriced: 0, other_currencies: ['GBP'],
+        speed_minutes: 4, speed_releases: 5, releases_taken: 3, releases_open: 8, changed_at: new Date(now - 5 * 24 * HOUR),
+      })
+      .execute();
 
     const p = await open(OPERATOR);
     await go(p, `#/owners/${client.id}`, client.email);
     expect(await p.locator('main section.panel').evaluateAll((els) => els.slice(0, 4).map((e) => e.id))).toEqual(['account', 'profile', 'tags-notes', 'intelligence']);
     await p.waitForSelector('[data-testid=intelligence-browsing]');
     expect(await text(p, '#intelligence .panel__note')).toBe('Recorded on verify.theorbes.com. Staff only.');
-    expect(await p.locator('#intelligence .panel__subtitle').allTextContents()).toEqual(['Origin', 'Wishlist', 'What they look at', 'Devices', 'Places']);
+    expect(await p.locator('#intelligence .panel__subtitle').allTextContents()).toEqual(['Engagement score', 'Origin', 'Wishlist', 'What they look at', 'Devices', 'Places']);
+    // 1. The engagement score: the score, then each part's points with the figure behind it.
+    expect(await text(p, '[data-testid=owner-score]')).toBe('72 / 100');
+    expect(await text(p, '#engagement .intelligence__note')).toBe('Staff only: never shown to the client. A fixed formula, calculated each morning from the last 12 months.');
+    expect((await p.locator('#engagement .deflist__row').allInnerTexts()).map((x) => x.replace(/\s+/g, ' ').trim())).toEqual([
+      expect.stringMatching(/^SCORE 72 \/ 100 Calculated \d{2} [A-Z]{3} \d{4} · \d{2}:\d{2} Paris$/),
+      expect.stringMatching(/^RECENCY 20 of 25 Last act 12 days ago: a draw entry, \d{2} [A-Z]{3} \d{4}$/),
+      'FREQUENCY 12 of 20 6 active days in 12 months',
+      'SPEND 18 of 25 € 410 in 12 months, 2 purchases, GBP counted in euros at the code’s rate',
+      'RELEASE SPEED 9 of 10 Median 4 minutes after opening, over 5 releases',
+      expect.stringMatching(/^ATTENDANCE 13 of 20 3 of 8 releases since \d{2} [A-Z]{3} \d{4}$/),
+    ]);
+    expect(await p.locator('[data-testid=owner-score-stale]').count()).toBe(0);
+    // « How the score is calculated »: closed by default, then the formula's six lines.
+    const how = p.locator('[data-testid=owner-score-how]');
+    expect(await how.locator('summary').innerText()).toBe('How the score is calculated');
+    expect(await how.evaluate((el) => (el as HTMLDetailsElement).open)).toBe(false);
+    expect(await how.locator('li').first().isVisible()).toBe(false);
+    await how.locator('summary').click();
+    expect(await how.evaluate((el) => (el as HTMLDetailsElement).open)).toBe(true);
+    expect(await how.locator('li').allTextContents()).toEqual([...FORMULA_LINES]);
+    expect(await how.locator('li').nth(2).innerText()).toContain('A purchase 8, from € 150 13, from € 350 18, from € 700 22, from € 1 500 25.');
+    expect(await how.locator('li').first().isVisible()).toBe(true);
     expect((await p.locator('[data-testid=intelligence-origin] .deflist__row').allInnerTexts()).map((x) => x.replace(/\s+/g, ' ').trim())).toEqual([
       expect.stringMatching(/^FIRST VISIT \d{2} [A-Z]{3} \d{4} · \d{2}:\d{2} Paris · instagram\.com$/),
       'SIGNED UP THROUGH Direct',
@@ -716,7 +754,19 @@ describe.skipIf(!HAS_CHROMIUM)('the client sheet and the Shopify exports in the 
     expect(await text(a, '[data-testid=intelligence-places-foot]')).toBe('Cities are withheld.');
     expect(await a.locator('#intelligence').innerText()).not.toContain('Paris, France');
     expect(await a.locator('[data-testid=intelligence-wishlist] tbody tr').count()).toBe(1);
+    // The engagement score is read by every role that reaches the sheet.
+    expect(await text(a, '[data-testid=owner-score]')).toBe('72 / 100');
+    expect(await a.locator('#engagement .deflist__row').count()).toBe(6);
     await shot(a, 'intelligence-auditor');
+    // No calculation for three days: the Score row says since when.
+    const stopped = new Date(now - 3 * 24 * HOUR);
+    await ctx.db.updateTable('engagement_runs').set({ day: parisDay(stopped), started_at: new Date(stopped.getTime() - 3 * SECOND), finished_at: stopped }).execute();
+    await a.reload();
+    await a.waitForSelector('[data-testid=owner-score-stale]');
+    expect(await text(a, '[data-testid=owner-score-stale]')).toMatch(/^Not recalculated since \d{2} [A-Z]{3} \d{4}$/i);
+    expect(await text(a, '[data-testid=owner-score]')).toBe('72 / 100');
+    expect(await figuresInDisplayFace(a)).toEqual([]);
+    await shot(a, 'intelligence-engagement-stale', { phone: true });
     expect(problems).toEqual([]);
     await a.context().close();
   }, STEP_TIMEOUT);

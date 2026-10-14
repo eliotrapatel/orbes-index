@@ -2,8 +2,8 @@
  * The client sheet's Intelligence in the console (plan CUSTOMER INTELLIGENCE of 2026-10-08, §3.6 C.4.4, C.11, §3.4
  * A.10.5, §3.2 W.9, §3.3 T.4.1, step 5.7), as pure functions: the section's words and states, and its blocks 2 to 6 in
  * the words of the section that owns their data: Origin (where the client came from), Wishlist, What they look at,
- * Devices and Places. Block 1, the engagement score, ships with I2. Every time is Paris time, in the console's way of
- * writing dates; an AUDITOR reads every block without the cities.
+ * Devices and Places. Block 1, the engagement score, is model/engagement.ts. Every time is Paris time, in the console's
+ * way of writing dates; an AUDITOR reads every block without the cities.
  */
 import { countryName } from '../../../shared/countries.js';
 import { formatCount } from '../format.js';

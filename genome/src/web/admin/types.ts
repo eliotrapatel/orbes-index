@@ -257,6 +257,14 @@ export const IN_APPS = ['INSTAGRAM', 'TIKTOK', 'FACEBOOK', 'THREADS', 'SNAPCHAT'
 export type InApp = (typeof IN_APPS)[number];
 export const LINK_VIAS = ['SIGN_UP', 'SIGN_IN', 'SESSION'] as const;
 export type LinkVia = (typeof LINK_VIAS)[number];
+/**
+ * The acts of a collector the engagement score reads (account_scores.last_act_kind, migration 0046, plan CUSTOMER
+ * INTELLIGENCE §3.5 SB.3.1), and the currencies it converts to euros.
+ */
+export const SCORE_ACT_KINDS = ['SCAN', 'DRAW', 'LIVE', 'INTEREST', 'ORDER', 'REGISTRATION'] as const;
+export type ScoreActKind = (typeof SCORE_ACT_KINDS)[number];
+export const SCORE_OTHER_CURRENCIES = ['GBP', 'USD', 'CHF'] as const;
+export type ScoreOtherCurrency = (typeof SCORE_OTHER_CURRENCIES)[number];
 /** The app's screens a view records (schema.ts VIEW_PAGES, in their codes' order). */
 export const VIEW_PAGE_NAMES = ['SCAN', 'NOW', 'RESULT', 'MY_PIECES', 'MY_ORDERS', 'MY_RELEASES', 'PIECE', 'CERTIFICATE', 'COLLECTION', 'MODEL', 'CLUB', 'RELEASES', 'RELEASE', 'LIVE', 'AFTER_ROOM', 'HOW', 'CIRCLE', 'POST', 'ACCOUNT', 'MESSAGES', 'SIGN_IN', 'SIGN_UP', 'SIZES', 'ADDRESSES', 'PROFILE', 'WISHLIST'] as const;
 export type ViewPageName = (typeof VIEW_PAGE_NAMES)[number];
@@ -1491,9 +1499,55 @@ export interface CollectorBrowsing {
   citiesWithheld: boolean;
 }
 
-/** GET /api/admin/owners/:id/intelligence: four blocks, each failing alone; the engagement null until I2. */
+/** The five parts of the engagement score (services/engagement-formula.ts ENGAGEMENT_PARTS), in the sheet's order. */
+export const ENGAGEMENT_PARTS = ['recency', 'frequency', 'spend', 'speed', 'attendance'] as const;
+export type EngagementPart = (typeof ENGAGEMENT_PARTS)[number];
+
+/** What the sheet says of an account's score (services/engagement.ts EngagementState). */
+export const ENGAGEMENT_STATES = ['SCORED', 'NOT_YET', 'TEST_ENTRANT', 'LOCKED', 'DELETED'] as const;
+export type EngagementState = (typeof ENGAGEMENT_STATES)[number];
+
+/** A score as the sheet reads it: the points of each part and the figure behind them (services/engagement.ts SheetScore). */
+export interface SheetScore {
+  score: number;
+  formula: number;
+  points: Record<EngagementPart, number>;
+  lastActAt: Iso | null;
+  lastActKind: ScoreActKind | null;
+  activeDays: number;
+  spendEurMinor: number;
+  purchases: number;
+  unpriced: number;
+  otherCurrencies: ScoreOtherCurrency[];
+  speedMinutes: number | null;
+  speedReleases: number;
+  releasesTaken: number;
+  releasesOpen: number;
+  /** Since when the releases are counted: the 12 months' start at the calculation, or the account's creation if later. */
+  releasesSince: Iso;
+}
+
+/**
+ * The client sheet's Engagement score (plan CUSTOMER INTELLIGENCE §3.5 SB.3.6; services/engagement.ts EngagementBlock):
+ * staff only, never shown to the client.
+ */
+export interface EngagementBlock {
+  state: EngagementState;
+  /** With SCORED, and with LOCKED when the account had a score. */
+  score: SheetScore | null;
+  calculatedAt: Iso | null;
+  /** The Paris day of the latest finished calculation, `YYYY-MM-DD`. */
+  lastRunDay: string | null;
+  /** The latest calculation is more than one day old. */
+  stale: boolean;
+  partMax: Record<EngagementPart, number>;
+  /** « How the score is calculated »: the formula's lines, as the server writes them from its constants. */
+  formulaLines: string[];
+}
+
+/** GET /api/admin/owners/:id/intelligence: its blocks, each failing alone. */
 export interface OwnerIntelligence {
-  engagement: null;
+  engagement: EngagementBlock | FailedBlock;
   origin: OwnerOrigin | FailedBlock;
   wishlist: StaffWish[] | FailedBlock;
   browsing: CollectorBrowsing | FailedBlock;

@@ -90,8 +90,11 @@ import {
   wishMark,
 } from '../../src/web/admin/model/owner-intelligence.js';
 import { VIEW_PAGES } from '../../src/server/db/schema.js';
+import { ENGAGEMENT_PARTS as SERVER_ENGAGEMENT_PARTS, FORMULA_LINES, PART_MAX } from '../../src/server/services/engagement-formula.js';
+import type { EngagementState as ServerEngagementState } from '../../src/server/services/engagement.js';
+import { ACT_WORDS, agoWords, attendanceNote, ENGAGEMENT_COPY, engagementView, frequencyNote, medianWords, PART_LABELS, recencyNote, speedNote, spendNote } from '../../src/web/admin/model/engagement.js';
 import { formatCount } from '../../src/web/admin/format.js';
-import { VIEW_PAGE_NAMES } from '../../src/web/admin/types.js';
+import { ENGAGEMENT_PARTS, ENGAGEMENT_STATES, VIEW_PAGE_NAMES } from '../../src/web/admin/types.js';
 
 /** A server value as JSON carries it: dates become ISO strings. */
 type Json<T> = T extends Date ? string : T extends readonly (infer U)[] ? Json<U>[] : T extends object ? { [K in keyof T]: Json<T[K]> } : T;
@@ -670,5 +673,137 @@ describe('the client sheet\'s Intelligence (plan CUSTOMER INTELLIGENCE §3.6 C.4
       [1_000, false],
     ]);
     expect(shownModels(thousand, 1).map((x) => x.modelId)).toEqual(thousand.models.slice(0, 50).map((x) => x.modelId));
+  });
+});
+
+describe('the client sheet\'s Engagement score (plan CUSTOMER INTELLIGENCE §3.5 SB.3.6, §3.6 C.4.4 block 1, step 7.5)', () => {
+  const score = (extra: Partial<web.SheetScore> = {}): web.SheetScore => ({
+    score: 72,
+    formula: 1,
+    points: { recency: 20, frequency: 12, spend: 18, speed: 9, attendance: 13 },
+    lastActAt: '2026-09-26T17:30:00.000Z',
+    lastActKind: 'DRAW',
+    activeDays: 6,
+    spendEurMinor: 41_000,
+    purchases: 2,
+    unpriced: 0,
+    otherCurrencies: [],
+    speedMinutes: 4,
+    speedReleases: 5,
+    releasesTaken: 3,
+    releasesOpen: 8,
+    releasesSince: '2026-03-14T10:00:00.000Z',
+    ...extra,
+  });
+  const block = (extra: Partial<web.EngagementBlock> = {}): web.EngagementBlock => ({
+    state: 'SCORED',
+    score: score(),
+    calculatedAt: '2026-10-08T07:02:00.000Z',
+    lastRunDay: '2026-10-08',
+    stale: false,
+    partMax: { ...PART_MAX },
+    formulaLines: [...FORMULA_LINES],
+    ...extra,
+  });
+
+  it('holds its words, and names the five parts and the six acts as the server does', () => {
+    expect(ENGAGEMENT_COPY).toEqual({
+      title: 'Engagement score',
+      note: 'Staff only: never shown to the client. A fixed formula, calculated each morning from the last 12 months.',
+      failed: 'The engagement score could not be read just now.',
+      score: 'Score',
+      how: 'How the score is calculated',
+      notYet: 'Not calculated yet: the first score comes with the next morning’s calculation.',
+      testEntrant: 'Test entrants have no score.',
+      deleted: 'No score for a deleted account.',
+      locked: 'not updated while the account is locked',
+      lockedNone: 'Not calculated',
+    });
+    expect(PART_LABELS).toEqual({ recency: 'Recency', frequency: 'Frequency', spend: 'Spend', speed: 'Release speed', attendance: 'Attendance' });
+    expect(ACT_WORDS).toEqual({ SCAN: 'a scan', DRAW: 'a draw entry', LIVE: 'a LIVE RELEASE entry', INTEREST: 'I’LL BE THERE', ORDER: 'an order', REGISTRATION: 'a piece registered' });
+    // The mirrors: the parts in the server's order, each state the server knows.
+    expect([...ENGAGEMENT_PARTS]).toEqual([...SERVER_ENGAGEMENT_PARTS]);
+    const states: Record<ServerEngagementState, true> = { SCORED: true, NOT_YET: true, TEST_ENTRANT: true, LOCKED: true, DELETED: true };
+    expect([...ENGAGEMENT_STATES].sort()).toEqual(Object.keys(states).sort());
+  });
+
+  it('draws a score: the score out of 100 with when it was calculated, then each part\'s points with the figure behind it, and the formula\'s lines', () => {
+    const v = engagementView(block());
+    expect(v.line).toBeNull();
+    expect(v.rows).toEqual([
+      { key: 'score', label: 'Score', value: '72 / 100', note: 'Calculated 08 OCT 2026 · 09:02 Paris', stale: null },
+      { key: 'recency', label: 'Recency', value: '20 of 25', note: 'Last act 11 days ago: a draw entry, 26 SEP 2026', stale: null },
+      { key: 'frequency', label: 'Frequency', value: '12 of 20', note: '6 active days in 12 months', stale: null },
+      { key: 'spend', label: 'Spend', value: '18 of 25', note: '€\u00a0410 in 12 months, 2 purchases', stale: null },
+      { key: 'speed', label: 'Release speed', value: '9 of 10', note: 'Median 4 minutes after opening, over 5 releases', stale: null },
+      { key: 'attendance', label: 'Attendance', value: '13 of 20', note: '3 of 8 releases since 14 MAR 2026', stale: null },
+    ]);
+    expect(v.how).toEqual([...FORMULA_LINES]);
+    expect(v.how).toHaveLength(6);
+  });
+
+  it('says the figure behind each part in every form', () => {
+    const at = '2026-10-08T07:02:00.000Z';
+    // Recency: whole days before the calculation; none in 12 months.
+    expect(recencyNote({ lastActAt: '2026-09-26T07:02:00.000Z', lastActKind: 'DRAW' }, at)).toBe('Last act 12 days ago: a draw entry, 26 SEP 2026');
+    expect(recencyNote({ lastActAt: '2026-10-07T06:00:00.000Z', lastActKind: 'SCAN' }, at)).toBe('Last act 1 day ago: a scan, 07 OCT 2026');
+    expect(recencyNote({ lastActAt: '2026-10-07T20:00:00.000Z', lastActKind: 'INTEREST' }, at)).toBe('Last act less than a day ago: I’LL BE THERE, 07 OCT 2026');
+    expect(recencyNote({ lastActAt: '2026-08-01T10:00:00.000Z', lastActKind: 'LIVE' }, at)).toBe('Last act 67 days ago: a LIVE RELEASE entry, 01 AUG 2026');
+    expect(recencyNote({ lastActAt: '2026-08-01T10:00:00.000Z', lastActKind: 'ORDER' }, at)).toMatch(/: an order, /);
+    expect(recencyNote({ lastActAt: '2026-08-01T10:00:00.000Z', lastActKind: 'REGISTRATION' }, at)).toMatch(/: a piece registered, /);
+    expect(recencyNote({ lastActAt: null, lastActKind: null }, at)).toBe('No act in 12 months');
+    expect([agoWords(0), agoWords(1), agoWords(2)]).toEqual(['less than a day ago', '1 day ago', '2 days ago']);
+    // Frequency.
+    expect([0, 1, 6].map((activeDays) => frequencyNote({ activeDays }))).toEqual(['No active day in 12 months', '1 active day in 12 months', '6 active days in 12 months']);
+    // Spend: the euros and the purchases; a piece without a price; the currencies counted in euros.
+    const spend = (x: Partial<web.SheetScore>) => spendNote(score(x));
+    expect(spend({ purchases: 0, spendEurMinor: 0 })).toBe('No purchase in 12 months');
+    expect(spend({ purchases: 1, spendEurMinor: 30_000 })).toBe('€\u00a0300 in 12 months, 1 purchase');
+    expect(spend({ purchases: 1, unpriced: 1, spendEurMinor: 0 })).toBe('€\u00a00 in 12 months, 1 piece without a price');
+    expect(spend({ purchases: 2, unpriced: 2, spendEurMinor: 0 })).toBe('€\u00a00 in 12 months, 2 pieces without a price');
+    expect(spend({ purchases: 3, unpriced: 1, spendEurMinor: 41_050 })).toBe('€\u00a0410.50 in 12 months, 3 purchases, 1 without a price');
+    expect(spend({ purchases: 3, spendEurMinor: 52_000, otherCurrencies: ['GBP'] })).toBe('€\u00a0520 in 12 months, 3 purchases, GBP counted in euros at the code’s rate');
+    expect(spend({ purchases: 4, spendEurMinor: 152_000, otherCurrencies: ['GBP', 'USD'] })).toBe('€\u00a01\u00a0520 in 12 months, 4 purchases, GBP and USD counted in euros at the code’s rates');
+    expect(spend({ purchases: 4, spendEurMinor: 152_000, otherCurrencies: ['GBP', 'USD', 'CHF'] })).toMatch(/, GBP, USD and CHF counted in euros at the code’s rates$/);
+    // Release speed.
+    expect(speedNote({ speedMinutes: 4, speedReleases: 5 })).toBe('Median 4 minutes after opening, over 5 releases');
+    expect(speedNote({ speedMinutes: 1, speedReleases: 1 })).toBe('Median 1 minute after opening, over 1 release');
+    expect(speedNote({ speedMinutes: 0, speedReleases: 3 })).toBe('There at the opening, over 3 releases');
+    expect(speedNote({ speedMinutes: null, speedReleases: 0 })).toBe('No release in 12 months');
+    expect([119, 120, 2_879, 2_880, 21_600].map(medianWords)).toEqual(['119 minutes', '2 hours', '47 hours', '2 days', '15 days']);
+    // Attendance.
+    expect(attendanceNote({ releasesTaken: 3, releasesOpen: 8, releasesSince: '2026-03-14T10:00:00.000Z' })).toBe('3 of 8 releases since 14 MAR 2026');
+    expect(attendanceNote({ releasesTaken: 1, releasesOpen: 1, releasesSince: '2026-03-14T10:00:00.000Z' })).toBe('1 of 1 release since 14 MAR 2026');
+    expect(attendanceNote({ releasesTaken: 0, releasesOpen: 0, releasesSince: '2026-03-14T10:00:00.000Z' })).toBe('No release opened since the account was created');
+  });
+
+  it('draws each state: not calculated yet, a test entrant, a locked account with and without a score, a deleted account, and the stale mark', () => {
+    expect(engagementView(block({ state: 'NOT_YET', score: null, calculatedAt: null }))).toEqual({
+      rows: [{ key: 'score', label: 'Score', value: '—', note: 'Not calculated yet: the first score comes with the next morning’s calculation.', stale: null }],
+      line: null,
+      how: null,
+    });
+    expect(engagementView(block({ state: 'TEST_ENTRANT', score: null, calculatedAt: null }))).toEqual({ rows: [], line: 'Test entrants have no score.', how: null });
+    expect(engagementView(block({ state: 'DELETED', score: null, calculatedAt: null }))).toEqual({ rows: [], line: 'No score for a deleted account.', how: null });
+    // LOCKED: the rows as last calculated, and why they stand still.
+    const locked = engagementView(block({ state: 'LOCKED', calculatedAt: '2026-10-02T07:01:00.000Z', stale: true, lastRunDay: '2026-10-02' }));
+    expect(locked.rows).toHaveLength(6);
+    expect(locked.rows[0]).toEqual({ key: 'score', label: 'Score', value: '72 / 100', note: 'Calculated 02 OCT 2026 · 09:01 Paris · not updated while the account is locked', stale: null });
+    expect(locked.how).toHaveLength(6);
+    expect(engagementView(block({ state: 'LOCKED', score: null, calculatedAt: null })).rows).toEqual([{ key: 'score', label: 'Score', value: '—', note: 'Not calculated · not updated while the account is locked', stale: null }]);
+    // Stale: the Score row carries the day of the latest calculation; the parts never do.
+    const stale = engagementView(block({ stale: true, lastRunDay: '2026-10-06', calculatedAt: '2026-10-06T07:30:00.000Z' }));
+    expect(stale.rows.map((r) => r.stale)).toEqual(['Not recalculated since 06 OCT 2026', null, null, null, null, null]);
+    expect(engagementView(block({ stale: false })).rows[0]!.stale).toBeNull();
+    // Nothing in a score: every part says so.
+    const none = engagementView(block({ score: score({ score: 0, points: { recency: 0, frequency: 0, spend: 0, speed: 0, attendance: 0 }, lastActAt: null, lastActKind: null, activeDays: 0, spendEurMinor: 0, purchases: 0, speedMinutes: null, speedReleases: 0, releasesTaken: 0, releasesOpen: 0 }) }));
+    expect(none.rows.map((r) => [r.value, r.note])).toEqual([
+      ['0 / 100', 'Calculated 08 OCT 2026 · 09:02 Paris'],
+      ['0 of 25', 'No act in 12 months'],
+      ['0 of 20', 'No active day in 12 months'],
+      ['0 of 25', 'No purchase in 12 months'],
+      ['0 of 10', 'No release in 12 months'],
+      ['0 of 20', 'No release opened since the account was created'],
+    ]);
   });
 });

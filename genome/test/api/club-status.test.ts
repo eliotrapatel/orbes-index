@@ -169,6 +169,35 @@ describe('YOUR TIER: the program and the benefits in use (BP-19 T10)', () => {
     expect(inUse.birthdayCredit).toEqual({ balanceMinor: 1500, currency: 'EUR', expiresAt: at });
   });
 
+  it('never shows the engagement score to the collector: no score or engagement key in /api/v1/club/status nor in the account\'s own answers (§3.5 SB.3.3, SB.3.6)', async () => {
+    const a = await holding(5);
+    // The account has a score, made by the morning's run.
+    await h.t.db
+      .insertInto('account_scores')
+      .values({
+        account_id: a.id, formula: 1, score: 72, recency_points: 20, frequency_points: 12, spend_points: 18, speed_points: 9, attendance_points: 13,
+        last_act_at: new Date('2026-09-27T17:30:00Z'), last_act_kind: 'DRAW', active_days: 6, spend_eur_minor: 41_000, purchases: 2, unpriced: 0, other_currencies: ['GBP'],
+        speed_minutes: 4, speed_releases: 5, releases_taken: 3, releases_open: 8, changed_at: new Date('2026-10-07T07:30:00Z'),
+      })
+      .execute();
+    await h.t.db.insertInto('engagement_runs').values({ day: '2026-10-07', formula: 1, started_at: new Date('2026-10-07T07:30:00Z'), finished_at: new Date('2026-10-07T07:30:01Z'), accounts: 1, changed: 1, bands: [0, 0, 1, 0, 0, 0, 0, 0, 0, 0], duration_ms: 1_000 }).execute();
+    expect((await h.ctx.services.engagement.account(a.id)).score?.score).toBe(72);
+    const keysOf = (v: unknown, out: Set<string> = new Set()): Set<string> => {
+      if (Array.isArray(v)) for (const x of v) keysOf(x, out);
+      else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) keysOf(x, out.add(k));
+      return out;
+    };
+    for (const url of ['/api/v1/club/status', '/api/v1/account/me', '/api/v1/account/session', '/api/v1/account/profile', '/api/v1/account/products', '/api/v1/account/participation', '/api/v1/account/orders']) {
+      const res = await a.client.get(url);
+      expect(res.statusCode, url).toBe(200);
+      const keys = [...keysOf(safeJson(res))];
+      expect(keys.filter((k) => /score|engagement|recency|attendance|frequency/i.test(k)), url).toEqual([]);
+      expect(res.body, url).not.toMatch(/engagement|"score"|formulaLines|lastActKind/i);
+    }
+    await h.t.db.deleteFrom('account_scores').where('account_id', '=', a.id).execute();
+    await h.t.db.deleteFrom('engagement_runs').execute();
+  });
+
   it('gives the console\'s owner sheet its Club block: the grants, a credit with what is left, a gift and where it is, the yearly care of the year', async () => {
     const a = await holding(10);
     await status(a.client);

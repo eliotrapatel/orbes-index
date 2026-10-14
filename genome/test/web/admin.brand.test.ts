@@ -196,10 +196,11 @@ describe('console: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
   it('writes the client sheet\'s Profile, Tags and private notes and Intelligence calmly (plan CUSTOMER INTELLIGENCE §3.6 C.4, §0.7): no atelier, handmade or craft, no exclamation mark, never « product »', () => {
     const files = ['model', 'views'].flatMap((dir) =>
       readdirSync(join(WEB, 'admin', dir))
-        .filter((f) => /^(client-profile|client-notes|owner-intelligence)\./.test(f))
+        .filter((f) => /^(client-profile|client-notes|owner-intelligence|engagement)\./.test(f))
         .map((f) => join(WEB, 'admin', dir, f)),
     );
-    expect(files.map((f) => f.slice(WEB.length))).toEqual(expect.arrayContaining(['/admin/model/client-profile.ts', '/admin/views/client-profile.ts', '/admin/model/client-notes.ts', '/admin/views/client-notes.ts', '/admin/model/owner-intelligence.ts', '/admin/views/owner-intelligence.ts']));
+    // With the Intelligence's engagement score (§3.5 SB.3.6, step 7.5): model/engagement.ts.
+    expect(files.map((f) => f.slice(WEB.length))).toEqual(expect.arrayContaining(['/admin/model/client-profile.ts', '/admin/views/client-profile.ts', '/admin/model/client-notes.ts', '/admin/views/client-notes.ts', '/admin/model/owner-intelligence.ts', '/admin/views/owner-intelligence.ts', '/admin/model/engagement.ts']));
     for (const f of files) {
       const code = readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
       expect(code, f).not.toMatch(/atelier|handmade|hand-made|craft/i);

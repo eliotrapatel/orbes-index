@@ -4,7 +4,8 @@
  *
  *  - each block from seeded rows: the origin (a referring site as the first source, the sign-up's last link, the latest
  *    purchase's), the wishlist (its collection, the model's state), the browsing (the 13 months and the summary older
- *    than them, « Before the account »), the recording's start; the engagement block null until I2;
+ *    than them, « Before the account »), the recording's start; the engagement score from its row and the latest run
+ *    (step 7.5), not calculated yet for an account without one, never for a test entrant;
  *  - an AUDITOR's reading withholds every city, the rest the same;
  *  - the empty account: every block's empty answer;
  *  - one block failing marks only itself, logged; an unknown account 404.
@@ -13,6 +14,7 @@
 import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { VIEW_PAGE_CODES } from '../../src/server/db/schema.js';
+import { FORMULA_LINES } from '../../src/server/services/engagement-formula.js';
 import { ownerIntelligence, type OwnerIntelligenceDeps } from '../../src/server/services/owner-intelligence.js';
 import { createHarness, type Harness } from '../api/support.js';
 import { GrowthWorld } from '../support/growth.js';
@@ -26,7 +28,7 @@ describe('the client sheet\'s Intelligence (plan CUSTOMER INTELLIGENCE §3.6 C.4
   let empty: string;
   let model: string;
   const db = () => h.t.db;
-  const deps = (): OwnerIntelligenceDeps => ({ db: db(), acquisition: h.ctx.services.acquisition, wishlist: h.ctx.services.wishlist, tracking: h.ctx.services.tracking });
+  const deps = (): OwnerIntelligenceDeps => ({ db: db(), engagement: h.ctx.services.engagement, acquisition: h.ctx.services.acquisition, wishlist: h.ctx.services.wishlist, tracking: h.ctx.services.tracking });
 
   beforeAll(async () => {
     h = await createHarness();
@@ -67,9 +69,34 @@ describe('the client sheet\'s Intelligence (plan CUSTOMER INTELLIGENCE §3.6 C.4
   });
   afterAll(() => h?.close());
 
-  it('reads each block from its own data: the origin, the wishlist with its collection, the browsing and the summary older than 13 months; no engagement before I2', async () => {
+  it('reads each block from its own data: the engagement score, the origin, the wishlist with its collection, the browsing and the summary older than 13 months', async () => {
+    // The morning's run of 9 October scored the account 72: 20 + 12 + 18 + 9 + 13.
+    await db().insertInto('engagement_runs').values({ day: '2026-10-09', formula: 1, started_at: new Date('2026-10-09T07:30:00Z'), finished_at: new Date('2026-10-09T07:30:04Z'), accounts: 1, changed: 0, bands: [0, 0, 0, 0, 0, 0, 0, 1, 0, 0], duration_ms: 4_000 }).execute();
+    await db()
+      .insertInto('account_scores')
+      .values({
+        account_id: rich, formula: 1, score: 72, recency_points: 20, frequency_points: 12, spend_points: 18, speed_points: 9, attendance_points: 13,
+        last_act_at: new Date('2026-09-27T17:30:00Z'), last_act_kind: 'DRAW', active_days: 6, spend_eur_minor: 41_000, purchases: 2, unpriced: 0, other_currencies: ['GBP'],
+        speed_minutes: 4, speed_releases: 5, releases_taken: 3, releases_open: 8, changed_at: new Date('2026-10-08T07:30:02Z'),
+      })
+      .execute();
     const i = await ownerIntelligence(deps(), rich, { inClear: true });
-    expect(i.engagement).toBeNull();
+    expect(i.engagement).toEqual(await h.ctx.services.engagement.account(rich));
+    expect(i.engagement).toEqual({
+      state: 'SCORED',
+      score: {
+        score: 72, formula: 1, points: { recency: 20, frequency: 12, spend: 18, speed: 9, attendance: 13 },
+        lastActAt: new Date('2026-09-27T17:30:00Z'), lastActKind: 'DRAW', activeDays: 6, spendEurMinor: 41_000, purchases: 2, unpriced: 0, otherCurrencies: ['GBP'],
+        speedMinutes: 4, speedReleases: 5, releasesTaken: 3, releasesOpen: 8,
+        // The account is younger than the 12 months: its releases are counted since it was created.
+        releasesSince: new Date('2026-09-20T10:00:00Z'),
+      },
+      calculatedAt: new Date('2026-10-09T07:30:04Z'),
+      lastRunDay: '2026-10-09',
+      stale: false,
+      partMax: { recency: 25, frequency: 20, spend: 25, speed: 10, attendance: 20 },
+      formulaLines: [...FORMULA_LINES],
+    });
     expect(i.recordingSince).toEqual(new Date('2026-09-01T00:00:00Z'));
     expect(i.origin).toEqual(await h.ctx.services.acquisition.originOf(rich));
     expect(i.origin).toMatchObject({ firstVisit: { at: new Date('2026-09-18T19:04:00Z'), source: { kind: 'SITE', label: 'instagram.com' } }, signUp: { source: { kind: 'SITE' } }, lastOrder: null });
@@ -95,6 +122,11 @@ describe('the client sheet\'s Intelligence (plan CUSTOMER INTELLIGENCE §3.6 C.4
   it('reads an account with nothing recorded as every block\'s empty answer', async () => {
     const i = await ownerIntelligence(deps(), empty, { inClear: true });
     expect(i.wishlist).toEqual([]);
+    // No score yet: the next morning's run makes the first. A test entrant never has one.
+    expect(i.engagement).toMatchObject({ state: 'NOT_YET', score: null, calculatedAt: null, lastRunDay: '2026-10-09', stale: false });
+    const entrant = await w.account('2026-10-02', 'FR');
+    await db().insertInto('test_entrants').values({ account_id: entrant }).execute();
+    expect((await ownerIntelligence(deps(), entrant, { inClear: true })).engagement).toMatchObject({ state: 'TEST_ENTRANT', score: null, calculatedAt: null });
     // Made before the visits' recording started: Before tracking.
     expect(i.origin).toMatchObject({ firstVisit: { at: null, source: { kind: 'BEFORE', label: 'Before tracking' } }, lastOrder: null });
     expect(i.browsing).toMatchObject({ lastSeen: null, views: { count: 0, seconds: 0 }, older: null, beforeAccount: { kind: 'NOTHING' }, models: [], releases: [], devices: [], places: [], modelsViewed: 0 });
@@ -109,16 +141,23 @@ describe('the client sheet\'s Intelligence (plan CUSTOMER INTELLIGENCE §3.6 C.4
     };
     const i = await ownerIntelligence(failing, rich, { inClear: true });
     expect(i.wishlist).toEqual({ failed: true });
+    expect(i.engagement).toMatchObject({ state: 'SCORED' });
     expect(i.origin).not.toHaveProperty('failed');
     expect(i.browsing).not.toHaveProperty('failed');
     expect(warned).toEqual(['wishlist']);
+    // The engagement score failing leaves the three others.
+    const noScore = await ownerIntelligence({ ...deps(), engagement: { account: () => Promise.reject(new Error('scores down')) }, warn: (d) => warned.push(d.block) }, rich, { inClear: true });
+    expect(noScore.engagement).toEqual({ failed: true });
+    expect([noScore.origin, noScore.wishlist, noScore.browsing].some((b) => 'failed' in b)).toBe(false);
+    expect(warned).toEqual(['wishlist', 'engagement']);
     const all: OwnerIntelligenceDeps = {
       db: db(),
+      engagement: { account: () => Promise.reject(new Error('down')) },
       acquisition: { originOf: () => Promise.reject(new Error('down')) },
       wishlist: { ofAccount: () => Promise.reject(new Error('down')) },
       tracking: { collectorBrowsing: () => Promise.reject(new Error('down')) },
     };
-    expect(await ownerIntelligence(all, rich, { inClear: true })).toMatchObject({ engagement: null, origin: { failed: true }, wishlist: { failed: true }, browsing: { failed: true }, recordingSince: new Date('2026-09-01T00:00:00Z') });
+    expect(await ownerIntelligence(all, rich, { inClear: true })).toMatchObject({ engagement: { failed: true }, origin: { failed: true }, wishlist: { failed: true }, browsing: { failed: true }, recordingSince: new Date('2026-09-01T00:00:00Z') });
     await expect(ownerIntelligence(deps(), '5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6', { inClear: true })).rejects.toMatchObject({ code: 'ACCOUNT_NOT_FOUND' });
     await expect(ownerIntelligence(deps(), 'nope', { inClear: true })).rejects.toMatchObject({ code: 'ACCOUNT_NOT_FOUND' });
   });

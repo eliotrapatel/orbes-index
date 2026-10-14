@@ -3,16 +3,19 @@
  * after the sheet from GET /api/admin/owners/:id/intelligence, so a slow or failing read never keeps Client Services
  * from the sheet. Loading, then its blocks; the whole read failing says so with Try again; one block failing says so
  * under its own heading, the others stand.
+ *   1. Engagement score (§3.5 SB.3.6, step 7.5): the score, its five parts with the figure behind each, « How the score
+ *      is calculated » closed by default; one line for an account that has no score. Staff only.
  *   2. Origin (§3.4 A.10.5): the first visit, the sign-up's last link, the latest purchase's; a link's name opens its
  *      page on Links.
  *   3. Wishlist (§3.2 W.9): the client's open wishes, each model opening its Catalogue page.
  *   4. What they look at, 5. Devices, 6. Places (§3.3 T.4.1): the rows, then Most viewed models (with « Show all », 50 a
  *      page from the same answer, C.11), Releases viewed, the devices and the places with DB-IP's attribution; an AUDITOR reads no city.
- * Block 1, the engagement score, ships with I2: absent until then. The words are model/owner-intelligence.ts.
+ * The words are model/owner-intelligence.ts and, for the engagement score, model/engagement.ts.
  */
 import { h, mount, type Child } from '../../shared/dom.js';
 import { formatCount } from '../format.js';
 import { dayText, parisDayText } from '../model/client-profile.js';
+import { ENGAGEMENT_COPY as E, engagementView } from '../model/engagement.js';
 import {
   browsingRows,
   deviceText,
@@ -29,8 +32,8 @@ import {
   wishMark,
 } from '../model/owner-intelligence.js';
 import { href } from '../router.js';
-import type { CollectorBrowsing, FailedBlock, OwnerOrigin, OwnerSheet, StaffWish, ViewedModel } from '../types.js';
-import { button, defList, loading, section, table } from '../ui/components.js';
+import type { CollectorBrowsing, EngagementBlock, FailedBlock, OwnerOrigin, OwnerSheet, StaffWish, ViewedModel } from '../types.js';
+import { button, defList, loading, section, statusMark, table } from '../ui/components.js';
 import type { ViewContext } from './context.js';
 
 const failedBlock = <T extends object>(b: T | FailedBlock): b is FailedBlock => (b as FailedBlock).failed === true;
@@ -50,6 +53,40 @@ function modelCell(m: { modelId: string; name: string | null; variant: string | 
     h('a', { class: 'idlink', attrs: { href: href('model', { modelId: m.modelId }) } }, m.name ?? I.withdrawn),
     mark ? ` ${mark}` : null,
     m.variant ? h('span', { class: 'cell-sub cell-sub--variant' }, m.variant) : null,
+  );
+}
+
+/**
+ * The Engagement score (§3.5 SB.3.6): the score out of 100 and its five parts, each with the figure behind it; under
+ * them « How the score is calculated », closed by default, in the formula's own lines. An account without a score by
+ * nature (a test entrant, a deleted account) reads one line.
+ */
+export function engagementPanel(b: EngagementBlock): HTMLElement {
+  const view = engagementView(b);
+  return h(
+    'div',
+    { class: 'owner__engagement', attrs: { id: 'engagement' }, data: { testid: 'intelligence-engagement' } },
+    h('p', { class: 'soft intelligence__note' }, E.note),
+    view.line
+      ? h('p', { class: 'soft', data: { testid: 'owner-score-line' } }, view.line)
+      : defList(
+          view.rows.map((r) => ({
+            label: r.label,
+            value:
+              r.key === 'score'
+                ? h('span', { class: 'owner__engagement-score' }, h('span', { data: { testid: 'owner-score' } }, r.value), r.stale ? h('span', { data: { testid: 'owner-score-stale' } }, statusMark(r.stale, 'alert')) : null)
+                : r.value,
+            note: r.note,
+          })),
+        ),
+    view.how
+      ? h(
+          'details',
+          { class: 'owner__engagement-how', data: { testid: 'owner-score-how' } },
+          h('summary', null, E.how),
+          h('ul', null, ...view.how.map((line) => h('li', null, line))),
+        )
+      : null,
   );
 }
 
@@ -189,7 +226,8 @@ export function intelligenceSection(ctx: ViewContext, sheet: OwnerSheet): HTMLEl
         if (note) note.textContent = intelligenceNote(sheet.owner.createdAt, i.recordingSince);
         mount(
           body,
-          // 1. The engagement score: with I2.
+          subtitle(E.title),
+          failedBlock(i.engagement) ? blockFailure(E.failed, I.tryAgain, read) : engagementPanel(i.engagement),
           subtitle(I.origin),
           failedBlock(i.origin) ? blockFailure(I.originFailed, I.tryAgain, read) : originBlock(i.origin),
           subtitle(I.wishlist),

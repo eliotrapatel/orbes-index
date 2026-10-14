@@ -440,6 +440,8 @@ describe('admin enums mirror the server', () => {
       'OPENED_IN',
       'IN_APPS',
       'LINK_VIAS',
+      'SCORE_ACT_KINDS',
+      'SCORE_OTHER_CURRENCIES',
     ] as const) {
       expect([...web[name]], name).toEqual([...serverSchema[name]]);
     }

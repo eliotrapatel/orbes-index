@@ -532,10 +532,20 @@ describe('OwnerService', () => {
     // A console login with the same email: a team account.
     await auth.createAdmin({ email: email.toUpperCase(), password: PASSWORD, role: 'AUDITOR' }, SYSTEM_ACTOR);
     expect(await owners.sheet(c.id)).toMatchObject({ teamAccount: true, profile: { teamAccount: true } });
+    // The engagement score the morning's run gave the client (step 7.5): staff only too.
+    await t.db
+      .insertInto('account_scores')
+      .values({
+        account_id: c.id, formula: 1, score: 72, recency_points: 20, frequency_points: 12, spend_points: 18, speed_points: 9, attendance_points: 13,
+        last_act_at: clock.now(), last_act_kind: 'DRAW', active_days: 6, spend_eur_minor: 41_000, purchases: 2, unpriced: 0, other_currencies: ['GBP'],
+        speed_minutes: 4, speed_releases: 5, releases_taken: 3, releases_open: 8, changed_at: clock.now(),
+      })
+      .execute();
     // The right of access: no key and no word of them, and not even their audit entries.
     const x = await owners.exportData(c.id, admin);
     const text = JSON.stringify(x);
     for (const key of ['tags', 'privateNotes', 'engagement', 'score']) expect(Object.keys(x), key).not.toContain(key);
+    expect(text).not.toMatch(/"(score|engagement|recency\w*|attendance\w*|spend_points|speed_points|frequency\w*)"/i);
     for (const word of ['VIP', 'PRESS', 'Called the client', 'account.tag', 'account.note']) expect(text, word).not.toContain(word);
     expect(x.activity.map((e) => e.action)).toEqual(['account.register']);
     expect(x.profile).toMatchObject({ firstName: 'Camille', city: 'Lyon' });

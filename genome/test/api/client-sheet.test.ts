@@ -17,11 +17,14 @@
  *    the version's 409 on both sides, an AUDITOR 403; the sheet's Profile carries the choices Edit the profile opens on
  *    (step 5.5), with no route of its own;
  *  - the client sheet's Intelligence (§3.6 C.4.4, step 5.7): GET …/intelligence by role, the cities withheld for an
- *    AUDITOR, every model viewed in its one answer (« Show all », C.11), with no route of its own.
+ *    AUDITOR, every model viewed in its one answer (« Show all », C.11), with no route of its own; its engagement
+ *    score (§3.5 SB.3.6, step 7.5) in each state (not calculated yet, scored, stale, locked, a test entrant, deleted),
+ *    read alike by an AUDITOR and an OPERATOR.
  * Which role reaches which route is test/api/admin-roles.test.ts; the files' contents test/services/shopify.test.ts.
  */
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { FORMULA_LINES } from '../../src/server/services/engagement-formula.js';
 import { orderReference } from '../../src/server/services/orders.js';
 import { createLiveRelease, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { accountClient, adminClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
@@ -501,7 +504,7 @@ describe('The client sheet\'s Profile (plan CUSTOMER INTELLIGENCE §3.1 P.6.5, P
     expect((await op.get(`/api/admin/owners/${me.id}/profile`)).statusCode).toBe(404);
   });
 
-  it('GET …/intelligence (step 5.7): the origin, the wishlist and the browsing for every role, the cities withheld for an AUDITOR; no engagement before I2; « Show all » the models viewed; 404', async () => {
+  it('GET …/intelligence (step 5.7): the origin, the wishlist and the browsing for every role, the cities withheld for an AUDITOR; no engagement score yet; « Show all » the models viewed; 404', async () => {
     const paris = (await h.ctx.services.places.idOf('FR', 'Paris'))!;
     await h.ctx.db.insertInto('collector_places').values({ account_id: me.id, place_id: paris, days: 3, first_day: '2026-10-01', last_day: '2026-10-08' }).onConflict((oc) => oc.doNothing()).execute();
     const res = await op.get(`/api/admin/owners/${me.id}/intelligence`);
@@ -509,7 +512,7 @@ describe('The client sheet\'s Profile (plan CUSTOMER INTELLIGENCE §3.1 P.6.5, P
     expect(res.headers['cache-control']).toBe('no-store');
     const i = safeJson(res) as Json;
     expect(Object.keys(i).sort()).toEqual(['browsing', 'engagement', 'origin', 'recordingSince', 'wishlist']);
-    expect(i.engagement).toBeNull();
+    expect(i.engagement).toMatchObject({ state: 'NOT_YET', score: null, calculatedAt: null });
     expect(i.wishlist).toEqual([]);
     expect(i.origin).toMatchObject({ firstVisit: { source: { kind: expect.any(String) } }, signUp: { source: { kind: expect.any(String) } }, lastOrder: null });
     expect(i.browsing).toMatchObject({ places: [{ country: 'FR', city: 'Paris', days: 3 }], citiesWithheld: false });
@@ -521,6 +524,67 @@ describe('The client sheet\'s Profile (plan CUSTOMER INTELLIGENCE §3.1 P.6.5, P
     expect(i.browsing).toMatchObject({ models: [], modelsViewed: 0 });
     expect((await op.get(`/api/admin/owners/${me.id}/intelligence/models?page=1`)).statusCode).toBe(404);
     expect(errorOf(await op.get(`/api/admin/owners/${randomUUID()}/intelligence`)).code).toBe('ACCOUNT_NOT_FOUND');
+  });
+
+  it('GET …/intelligence (step 7.5): the engagement score in each state, the same for an AUDITOR and an OPERATOR', async () => {
+    const db = h.ctx.db;
+    const engagementOf = async (c: Client = op) => (safeJson(await c.get(`/api/admin/owners/${me.id}/intelligence`)) as Json).engagement;
+    const status = (value: 'ACTIVE' | 'LOCKED' | 'DELETED') => db.updateTable('accounts').set({ status: value }).where('id', '=', me.id).execute();
+    try {
+      // 9 October 2026, 11:00 Paris. Not calculated yet: no row, no run.
+      expect(await engagementOf()).toEqual({
+        state: 'NOT_YET', score: null, calculatedAt: null, lastRunDay: null, stale: false,
+        partMax: { recency: 25, frequency: 20, spend: 25, speed: 10, attendance: 20 }, formulaLines: [...FORMULA_LINES],
+      });
+      // Scored by the morning's run: the row, and when the run finished.
+      const scoredAt = new Date('2026-10-09T07:30:00.000Z');
+      await db
+        .insertInto('account_scores')
+        .values({
+          account_id: me.id, formula: 1, score: 72, recency_points: 20, frequency_points: 12, spend_points: 18, speed_points: 9, attendance_points: 13,
+          last_act_at: new Date('2026-09-27T17:30:00Z'), last_act_kind: 'DRAW', active_days: 6, spend_eur_minor: 41_000, purchases: 2, unpriced: 0, other_currencies: ['GBP'],
+          speed_minutes: 4, speed_releases: 5, releases_taken: 3, releases_open: 8, changed_at: scoredAt,
+        })
+        .execute();
+      await db.insertInto('engagement_runs').values({ day: '2026-10-09', formula: 1, started_at: scoredAt, finished_at: new Date('2026-10-09T07:30:02.000Z'), accounts: 1, changed: 1, bands: [0, 0, 0, 0, 0, 0, 0, 1, 0, 0], duration_ms: 2_000 }).execute();
+      const scored = await engagementOf();
+      expect(scored).toMatchObject({
+        state: 'SCORED', calculatedAt: '2026-10-09T07:30:02.000Z', lastRunDay: '2026-10-09', stale: false,
+        score: {
+          score: 72, formula: 1, points: { recency: 20, frequency: 12, spend: 18, speed: 9, attendance: 13 }, lastActAt: '2026-09-27T17:30:00.000Z', lastActKind: 'DRAW', activeDays: 6,
+          spendEurMinor: 41_000, purchases: 2, unpriced: 0, otherCurrencies: ['GBP'], speedMinutes: 4, speedReleases: 5, releasesTaken: 3, releasesOpen: 8,
+        },
+      });
+      expect(scored.formulaLines).toHaveLength(6);
+      expect(Object.keys(scored.score).sort()).toEqual(['activeDays', 'formula', 'lastActAt', 'lastActKind', 'otherCurrencies', 'points', 'purchases', 'releasesOpen', 'releasesSince', 'releasesTaken', 'score', 'speedMinutes', 'speedReleases', 'spendEurMinor', 'unpriced']);
+      // An AUDITOR reads the same block: nothing of the score is withheld (§3.0 (h)).
+      expect(await engagementOf(auditor)).toEqual(scored);
+      // Had the latest run been yesterday's, the score would still be fresh; two days without a run: stale.
+      await db.updateTable('engagement_runs').set({ day: '2026-10-08' }).execute();
+      expect(await engagementOf()).toMatchObject({ state: 'SCORED', stale: false, lastRunDay: '2026-10-08' });
+      await db.updateTable('engagement_runs').set({ day: '2026-10-07' }).execute();
+      expect(await engagementOf()).toMatchObject({ state: 'SCORED', stale: true, lastRunDay: '2026-10-07', calculatedAt: '2026-10-09T07:30:02.000Z' });
+      // LOCKED: the score as its row was last written, not updated meanwhile.
+      await status('LOCKED');
+      expect(await engagementOf()).toMatchObject({ state: 'LOCKED', calculatedAt: '2026-10-09T07:30:00.000Z', score: { score: 72 } });
+      // A test entrant has no score, whatever its row; a deleted account none either.
+      await status('ACTIVE');
+      await db.insertInto('test_entrants').values({ account_id: me.id }).execute();
+      expect(await engagementOf()).toMatchObject({ state: 'TEST_ENTRANT', score: null, calculatedAt: null });
+      await db.deleteFrom('test_entrants').where('account_id', '=', me.id).execute();
+      await status('DELETED');
+      expect(await engagementOf()).toMatchObject({ state: 'DELETED', score: null, calculatedAt: null });
+      expect(await engagementOf(auditor)).toMatchObject({ state: 'DELETED', score: null });
+      // A locked account never scored: no score, and locked.
+      await status('LOCKED');
+      await db.deleteFrom('account_scores').where('account_id', '=', me.id).execute();
+      expect(await engagementOf()).toMatchObject({ state: 'LOCKED', score: null, calculatedAt: null });
+    } finally {
+      await status('ACTIVE');
+      await db.deleteFrom('test_entrants').where('account_id', '=', me.id).execute();
+      await db.deleteFrom('account_scores').where('account_id', '=', me.id).execute();
+      await db.deleteFrom('engagement_runs').execute();
+    }
   });
 
   it('PUT …/profile: an OPERATOR edits the profile with the version read (409 PROFILE_CHANGED after the client saved); never the date of birth; an AUDITOR 403; the CSRF token and the same origin', async () => {

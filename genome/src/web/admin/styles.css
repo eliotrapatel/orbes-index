@@ -5278,6 +5278,37 @@ fieldset.cfield--checks > .cfield__label {
   color: var(--ink-soft);
 }
 
+/* The Engagement score (§3.5 SB.3.6): its stale mark beside the score (under it on a phone), and « How the score is
+   calculated » under the rows. */
+.owner__engagement-score {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+}
+
+.owner__engagement-how {
+  margin-top: 14px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+}
+
+.owner__engagement-how summary {
+  cursor: pointer;
+  width: fit-content;
+  color: var(--ink);
+}
+
+.owner__engagement-how ul {
+  margin: 10px 0 0;
+  padding-left: 18px;
+}
+
+.owner__engagement-how li + li {
+  margin-top: 6px;
+}
+
 /* ── Yearly care (BP-19 T6) ─────────────────────────────────────────────── */
 
 /* The name and the address a piece returns to, their lines as the client wrote them. */

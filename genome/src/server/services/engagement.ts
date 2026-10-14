@@ -49,14 +49,30 @@
  *   A failed batch fails the whole run: the error is thrown to the housekeeping pass, which logs it; the run's row
  *   stays unfinished and is claimed again once stale.
  *
+ *   `account` is the client sheet's Engagement block (SB.3.6), sent by GET /api/admin/owners/:id/intelligence to
+ *   every console role that reaches the sheet: the score with its five parts and the figures behind them, when it was
+ *   calculated, whether the runs are stale, and the formula's lines. It has no route of its own.
+ *
  * Nothing here is audited: a score is derived by the system and holds no decision (SB.3.3); the runs' table and the
  * job's log line are its trace. Nothing here is ever sent to a collector.
  */
 import { sql } from 'kysely';
 import { inTransaction, uuidArray, type Db } from '../db/connection.js';
 import { SCORE_ACT_KINDS, VIEW_PAGE_CODES, type ScoreActKind, type ScoreOtherCurrency } from '../db/schema.js';
+import { notFound } from '../errors.js';
 import { noopLogger, systemClock, type Clock, type Logger } from '../types.js';
-import { ENGAGEMENT_FORMULA, ENGAGEMENT_WINDOW_DAYS, isOtherCurrency, scoreOf, toEurMinor, type EngagementInputs, type EngagementScore } from './engagement-formula.js';
+import {
+  ENGAGEMENT_FORMULA,
+  ENGAGEMENT_WINDOW_DAYS,
+  FORMULA_LINES,
+  isOtherCurrency,
+  PART_MAX,
+  scoreOf,
+  toEurMinor,
+  type EngagementInputs,
+  type EngagementPart,
+  type EngagementScore,
+} from './engagement-formula.js';
 import { median, purchaseRows } from './growth.js';
 import { releaseEntries } from './participation.js';
 import { countedCollector, notTestEntrant } from './population.js';
@@ -90,6 +106,57 @@ export interface OpenRelease {
 export interface ScoredBatch {
   scores: Map<string, number>;
   changed: number;
+}
+
+/** What the client sheet says of an account's score (SB.3.6). */
+export type EngagementState =
+  /** An ACTIVE account with its score. */
+  | 'SCORED'
+  /** An ACTIVE account without a score yet: created since the last run. */
+  | 'NOT_YET'
+  /** A test entrant: never scored. */
+  | 'TEST_ENTRANT'
+  /** A LOCKED account: its score as last calculated (none when it never had one), not updated while it is locked. */
+  | 'LOCKED'
+  /** A DELETED account: no score. */
+  | 'DELETED';
+
+/** A score as the client sheet reads it: the points of each part and the figure behind them. */
+export interface SheetScore {
+  score: number;
+  /** The formula that made it. */
+  formula: number;
+  points: Record<EngagementPart, number>;
+  lastActAt: Date | null;
+  lastActKind: ScoreActKind | null;
+  activeDays: number;
+  spendEurMinor: number;
+  purchases: number;
+  unpriced: number;
+  otherCurrencies: ScoreOtherCurrency[];
+  speedMinutes: number | null;
+  speedReleases: number;
+  releasesTaken: number;
+  releasesOpen: number;
+  /** Since when the releases are counted: the window's start at the calculation, or the account's creation if later. */
+  releasesSince: Date;
+}
+
+/** The client sheet's Engagement block (GET /api/admin/owners/:id/intelligence, `engagement`). Staff only. */
+export interface EngagementBlock {
+  state: EngagementState;
+  /** With SCORED, and with LOCKED when the account had a score; null otherwise. */
+  score: SheetScore | null;
+  /** When the score shown was calculated; null without one. A LOCKED account's: when its row was last written. */
+  calculatedAt: Date | null;
+  /** The Paris day of the latest finished run, `YYYY-MM-DD`; null before the first. */
+  lastRunDay: string | null;
+  /** The latest finished run is more than one day before today (Paris): the scores are not being recalculated. */
+  stale: boolean;
+  /** The most each part gives. */
+  partMax: Record<EngagementPart, number>;
+  /** « How the score is calculated »: the formula's lines, written from its constants. */
+  formulaLines: string[];
 }
 
 /** A finished run of the daily job. */
@@ -214,6 +281,60 @@ export class EngagementService {
     }
     this.log.info({ job: 'engagement', day, accounts, changed, ms }, 'engagement scores calculated');
     return { day, accounts, changed, bands, ms };
+  }
+
+  /**
+   * The client sheet's Engagement block of an account (see the header): its state, its score when it has one, when it
+   * was calculated and whether the runs are stale. 404 ACCOUNT_NOT_FOUND for an unknown account. It only reads.
+   */
+  async account(accountId: string, now: Date = this.clock()): Promise<EngagementBlock> {
+    const found = await sql<{ status: string; created_at: Date; test_entrant: boolean }>`
+      SELECT a.status, a.created_at, NOT ${notTestEntrant('a.id')} AS test_entrant FROM accounts a WHERE a.id = ${accountId}`.execute(this.db);
+    const a = found.rows[0];
+    if (!a) throw notFound('Account', 'ACCOUNT_NOT_FOUND');
+    const run = await this.db.selectFrom('engagement_runs').select(['day', 'finished_at']).where('finished_at', 'is not', null).orderBy('day', 'desc').limit(1).executeTakeFirst();
+    const lastRunDay = run?.day ?? null;
+    const block = (state: EngagementState, score: SheetScore | null, calculatedAt: Date | null): EngagementBlock => ({
+      state,
+      score,
+      calculatedAt,
+      lastRunDay,
+      // More than one day before today: the day after the latest run is already past.
+      stale: lastRunDay !== null && nextParisDay(lastRunDay) < parisDay(now),
+      partMax: { ...PART_MAX },
+      formulaLines: [...FORMULA_LINES],
+    });
+    if (a.status !== 'ACTIVE' && a.status !== 'LOCKED') return block('DELETED', null, null);
+    if (a.test_entrant) return block('TEST_ENTRANT', null, null);
+    const row = await this.db.selectFrom('account_scores').selectAll().where('account_id', '=', accountId).executeTakeFirst();
+    const locked = a.status === 'LOCKED';
+    if (!row) return block(locked ? 'LOCKED' : 'NOT_YET', null, null);
+    // An ACTIVE account is calculated at every run: the latest finished one, or its row's own time when that is later
+    // (a run under way). A LOCKED account's row dates from when it was last written.
+    const finishedAt = run?.finished_at ?? null;
+    const calculatedAt = !locked && finishedAt && finishedAt.getTime() > row.changed_at.getTime() ? finishedAt : row.changed_at;
+    const since = Math.max(windowStart(calculatedAt).getTime(), a.created_at.getTime());
+    return block(
+      locked ? 'LOCKED' : 'SCORED',
+      {
+        score: row.score,
+        formula: row.formula,
+        points: { recency: row.recency_points, frequency: row.frequency_points, spend: row.spend_points, speed: row.speed_points, attendance: row.attendance_points },
+        lastActAt: row.last_act_at,
+        lastActKind: row.last_act_kind,
+        activeDays: row.active_days,
+        spendEurMinor: Number(row.spend_eur_minor),
+        purchases: row.purchases,
+        unpriced: row.unpriced,
+        otherCurrencies: [...row.other_currencies],
+        speedMinutes: row.speed_minutes,
+        speedReleases: row.speed_releases,
+        releasesTaken: row.releases_taken,
+        releasesOpen: row.releases_open,
+        releasesSince: new Date(since),
+      },
+      calculatedAt,
+    );
   }
 
   /** Whether the job must wait at `now`: a LIVE RELEASE's room is open, or a test of test entrants is RUNNING. */
