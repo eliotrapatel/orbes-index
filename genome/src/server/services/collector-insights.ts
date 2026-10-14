@@ -801,7 +801,7 @@ export interface FirstVisitBucket {
   to: string;
   firstVisits: number;
   newCollectors: number;
-  /** The collectors whose first visit fell in it (the bucket's list, `bucket:firstvisit:<key>`). */
+  /** The collectors whose first visit fell in it (the bucket's list, `bucket:firstvisit:<key>`, `bucket:firstvisit:prev:<key>` for the previous period's). */
   becameCollectors: number;
 }
 
@@ -1650,7 +1650,8 @@ export async function trendNamedGroups(tx: Db, x: Reading, p: Period): Promise<s
 /**
  * Over time (§3.6 C.6.3 item 7): one figure (TREND_FIGURES) by bucket over the period (by day up to 31 days, by week up
  * to 120, by month beyond), split by up to TREND_GROUPS_MAX groups and `other`, with the previous period's line beside
- * it. Every point carries the collectors behind it, which its list (`bucket:trend:…`) opens.
+ * it. Every point carries the collectors behind it, which its list (`bucket:trend:<figure>:<key>[:<group>]`, the previous
+ * line's `bucket:trend:<figure>:prev:<key>`) opens.
  */
 async function trendsPanel(tx: Db, x: Reading): Promise<TrendsFigures> {
   const { q } = x;
@@ -1765,6 +1766,38 @@ const SLICE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 const BUCKET_KEY = /^\d{4}-(\d{2}-\d{2}|W\d{2}|\d{2})$/;
 const badSlice = (why: string) => validationError(`slice: ${why}`);
 
+/**
+ * A bucket slice's parts: `firstvisit:<key>`, `signup:<key>`, `trend:<figure>:<key>[:<group>]`, each with `prev:` before the
+ * key for a bucket of the previous period. A week or a month is cut at the two periods' meeting day, so the previous
+ * period's last bucket and the period's first can share a key (`2026-W29`, `2025-10`): the marker names which one.
+ * Null when the value is not one of these forms.
+ */
+export interface BucketSlice {
+  kind: 'firstvisit' | 'signup' | 'trend';
+  figure: TrendFigure | null;
+  previous: boolean;
+  key: string;
+  /** The split's group of a trend point ('' for none); never on the previous period's line, which is not split. */
+  group: string;
+}
+export function bucketSlice(value: string): BucketSlice | null {
+  const parts = value.split(':');
+  const kind = parts.shift();
+  let figure: TrendFigure | null = null;
+  if (kind === 'trend') {
+    const f = parts.shift();
+    if (!f || !(TREND_FIGURES as readonly string[]).includes(f)) return null;
+    figure = f as TrendFigure;
+  } else if (kind !== 'firstvisit' && kind !== 'signup') return null;
+  const previous = parts[0] === 'prev';
+  if (previous) parts.shift();
+  const key = parts.shift();
+  if (!key || !BUCKET_KEY.test(key)) return null;
+  const group = parts.join(':');
+  if (parts.length && (kind !== 'trend' || previous || !group)) return null;
+  return { kind, figure, previous, key, group };
+}
+
 /** A slice from the query, checked against its dimension's values (400 VALIDATION_FAILED otherwise). */
 export function parseSlice(raw: string): Slice {
   const i = raw.indexOf(':');
@@ -1810,11 +1843,8 @@ export function parseSlice(raw: string): Slice {
       return one(value.length >= 1 && value.length <= 200);
     case 'referrer':
       return one(value === 'none' || /^[a-z0-9.-]{1,253}$/.test(value));
-    case 'bucket': {
-      const [kind, ...rest] = value.split(':');
-      if (kind === 'firstvisit' || kind === 'signup') return one(rest.length === 1 && BUCKET_KEY.test(rest[0]!));
-      return one(kind === 'trend' && rest.length >= 2 && (TREND_FIGURES as readonly string[]).includes(rest[0]!) && BUCKET_KEY.test(rest[1]!) && (rest.length === 2 || rest.slice(2).join(':').length > 0));
-    }
+    case 'bucket':
+      return one(bucketSlice(value) !== null);
     case 'favpiece':
     case 'favfinish':
       return one(value.length >= 1 && value.length <= 64);
@@ -1853,14 +1883,12 @@ const USUAL_PLACE = sql`LEFT JOIN LATERAL (SELECT cp.place_id FROM collector_pla
                           ORDER BY cp.days DESC, cp.last_day DESC, cp.place_id LIMIT 1) up ON TRUE
       LEFT JOIN geo_places gp ON gp.id = up.place_id`;
 
-/** The bucket a key names in the period, else in the previous one (with the period it belongs to). */
-function bucketOfKey(q: InsightsQuery, key: string): { bucket: Bucket; period: Period } {
-  const before = q.previous ?? previousPeriod(q.period);
-  for (const period of [q.period, before]) {
-    const bucket = periodBuckets(period).find((b) => b.key === key);
-    if (bucket) return { bucket, period };
-  }
-  throw badSlice(`no bucket ${key} in the period or the one before.`);
+/** The bucket a key names in the period, or with `previous` in the previous one only (with the period it belongs to). */
+function bucketOfKey(q: InsightsQuery, key: string, previous: boolean): { bucket: Bucket; period: Period } {
+  const period = previous ? (q.previous ?? previousPeriod(q.period)) : q.period;
+  const bucket = periodBuckets(period).find((b) => b.key === key);
+  if (bucket) return { bucket, period };
+  throw badSlice(previous ? `no bucket ${key} in the period before.` : `no bucket ${key} in the period.`);
 }
 
 /**
@@ -1953,21 +1981,17 @@ async function sliceSql(tx: Db, x: Reading, s: Slice): Promise<SliceSql> {
         ? at(sql`${firstSourceKey(await acquisitionBasis(tx))} = 'kind:DIRECT'`, FIRST_SOURCE_JOINS)
         : at(sql`fk.kind = 'SITE' AND fk.site = ${v}`, FIRST_SOURCE_JOINS);
     case 'bucket': {
-      const [kind, key, ...group] = v.split(':') as [string, string, ...string[]];
-      if (kind === 'firstvisit' || kind === 'signup') {
-        const { bucket, period } = bucketOfKey(q, key);
-        return kind === 'signup'
-          ? at(within(sql`c.created_at`, bucket), none, period)
-          : at(exists(sql`SELECT 1 FROM account_sources s WHERE s.account_id = c.account_id AND ${within(sql`s.first_seen_at`, bucket)}`), none, period);
-      }
-      // trend:<figure>:<bucket>[:<group>]: the group is of the query's split, on a bucket of the period.
-      const figure = key as TrendFigure;
-      const { bucket, period } = bucketOfKey(q, group[0]!);
+      const b = bucketSlice(v)!;
+      const { bucket, period } = bucketOfKey(q, b.key, b.previous);
+      if (b.kind === 'signup') return at(within(sql`c.created_at`, bucket), none, period);
+      if (b.kind === 'firstvisit') return at(exists(sql`SELECT 1 FROM account_sources s WHERE s.account_id = c.account_id AND ${within(sql`s.first_seen_at`, bucket)}`), none, period);
+      // trend:<figure>:[prev:]<bucket>[:<group>]: the group is of the query's split, on a bucket of the period (parseSlice
+      // refuses a group on the previous period's line, which is not split).
+      const figure = b.figure!;
       const point = await trendPointSql(tx, x, figure, bucket);
-      const g = group.slice(1).join(':');
+      const g = b.group;
       if (!g) return at(point, none, period);
       if (q.trend.split === 'none') throw badSlice('a trend group needs the split it belongs to (split).');
-      if (period !== P) throw badSlice('the previous period’s line is not split.');
       if (g === 'visitor') return at(sql`FALSE`);
       const t = trendGroup(x, q.trend.split, await acquisitionBasis(tx), P);
       // The age's expression reads `pr`, which every list joins already.

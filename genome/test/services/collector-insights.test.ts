@@ -1019,24 +1019,52 @@ describe('CollectorInsightsService (§3.6 C.6, steps 9.2 and on)', () => {
     });
 
     it('Over time: every point of every figure, the previous period’s line, a split’s groups with Other', async () => {
-      for (const figure of TREND_FIGURES) {
-        const t = await panel<TrendsFigures>('trends', { figure, p: '7d' });
-        await check(
-          [...t.total, ...t.previous!].map((x): [string, number] => [`bucket:trend:${figure}:${x.key}`, x.collectors]),
-          { figure, p: '7d' },
-        );
+      // By day (7d), by week (90d) and by month (12m), the comparison on: the previous line's points carry `prev:`.
+      for (const p of ['7d', '90d', '12m'] as const) {
+        for (const figure of TREND_FIGURES) {
+          const t = await panel<TrendsFigures>('trends', { figure, p });
+          expect(t.unit, p).toBe(p === '7d' ? 'day' : p === '90d' ? 'week' : 'month');
+          expect(t.previous, p).not.toBeNull();
+          await check(
+            [
+              ...t.total.map((x): [string, number] => [`bucket:trend:${figure}:${x.key}`, x.collectors]),
+              ...t.previous!.map((x): [string, number] => [`bucket:trend:${figure}:prev:${x.key}`, x.collectors]),
+            ],
+            { figure, p },
+          );
+        }
       }
-      const year = await panel<TrendsFigures>('trends', { figure: 'medianscore', p: '12m' });
-      await check(year.total.map((x): [string, number] => [`bucket:trend:medianscore:${x.key}`, x.collectors]), { p: '12m' });
       for (const [figure, split] of [['new', 'age'], ['collectors', 'country'], ['active', 'device'], ['buyers', 'tier']] as const) {
         const t = await panel<TrendsFigures>('trends', { figure, split });
         const pairs = t.groups.flatMap((g) => g.points.map((x): [string, number] => [`bucket:trend:${figure}:${x.key}:${g.group}`, x.collectors]));
         expect(pairs.length).toBeGreaterThan(0);
         await check(pairs, { figure, split });
       }
-      // A group without the split it belongs to, or a bucket of neither period: 400.
-      await expect(svc.list({ slice: 'bucket:trend:new:2026-10-01:FR' }, { withCities: true })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
-      await expect(svc.list({ slice: 'bucket:trend:new:2025-01-01' }, { withCities: true })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+      // A group without the split it belongs to, a group on the previous line (never split), a bucket outside the
+      // period it names (the previous period's without `prev:`, the period's with it): 400.
+      for (const slice of ['bucket:trend:new:2026-10-01:FR', 'bucket:trend:new:2025-01-01', 'bucket:trend:new:prev:2026-10-01', 'bucket:trend:new:2026-09-14', 'bucket:signup:prev:2026-10-14', 'bucket:firstvisit:2026-09-14']) {
+        await expect(svc.list({ slice }, { withCities: true }), slice).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+      }
+      await expect(svc.list({ slice: 'bucket:trend:new:prev:2026-10-01:FR', split: 'country' }, { withCities: true })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    });
+
+    it('a week or a month both periods share: the key opens the period’s part, `prev:` the previous period’s', async () => {
+      // LAST 90 DAYS by week: 2026-W29 is 17–19 July in the period and 13–16 July in the one before; LAST 12 MONTHS by
+      // month: 2025-10 is 15–31 October 2025 and 1–14 October 2025.
+      for (const [p, key] of [['90d', '2026-W29'], ['12m', '2025-10']] as const) {
+        const P = parisPeriod({ p }, NOW);
+        const now = periodBuckets(P).find((b) => b.key === key)!;
+        const before = periodBuckets(previousPeriod(P)).find((b) => b.key === key)!;
+        expect([now.from, before.to], p).toEqual(p === '90d' ? ['2026-07-17', '2026-07-16'] : ['2025-10-15', '2025-10-14']);
+        const made = (b: Bucket) => COUNTED.filter((s) => s.created >= b.start && s.created < b.end).map((s) => s.id).sort();
+        const ids = async (slice: string) => (await svc.list({ p, slice }, { withCities: true })).rows.map((r) => r.accountId).sort();
+        for (const kind of ['trend:new', 'signup']) {
+          expect(await ids(`bucket:${kind}:${key}`), `${p} ${kind}`).toEqual(made(now));
+          expect(await ids(`bucket:${kind}:prev:${key}`), `${p} ${kind} prev`).toEqual(made(before));
+        }
+      }
+      // The house's 13–16 July and 17–19 July: four collectors and three, so the two lists differ.
+      expect([(await svc.list({ p: '90d', slice: 'bucket:trend:new:prev:2026-W29' }, { withCities: true })).total, (await svc.list({ p: '90d', slice: 'bucket:trend:new:2026-W29' }, { withCities: true })).total]).toEqual([4, 3]);
     });
 
     it('a list: 50 a page ordered by email, no score, the city withheld on request, the page’s query applied', async () => {
@@ -1487,8 +1515,12 @@ describe('CollectorInsightsService, origin (§3.6 C.6.3 item 3, §3.4 A.10.6; st
       }
       expect(wrong).toEqual([]);
     };
-    for (const req of [OCT, { ...OCT, scope: 'new' as const }]) {
+    // OCT by day; by week a CUSTOM period from Thursday 17 September, whose week 2026-W38 the period before shares (SEPT
+    // signed up on Tuesday 15 September, in the previous period's part), LAST 90 DAYS by week, LAST 12 MONTHS by month.
+    const WEEKS = { p: 'custom', from: '2026-09-17', to: '2026-11-01' } as const;
+    for (const req of [OCT, { ...OCT, scope: 'new' as const }, WEEKS, { p: '90d' as const }, { p: '12m' as const }]) {
       const f = await origin(req);
+      expect(f.firstVisits.previous, req.p).not.toBeNull();
       await check(
         [
           ...f.sources.map((b): [string, number] => [`source:${b.key}`, b.collectors]),
@@ -1501,14 +1533,23 @@ describe('CollectorInsightsService, origin (§3.6 C.6.3 item 3, §3.4 A.10.6; st
           ...f.campaigns.rows.map((c): [string, number] => [`campaign:${c.campaign ?? 'none'}`, c.collectors]),
           ...f.sites.rows.map((b): [string, number] => [`referrer:${b.site}`, b.collectors]),
           ['referrer:none', f.sites.none.collectors],
-          ...[...f.firstVisits.buckets, ...f.firstVisits.previous!].flatMap((b): [string, number][] => [
+          ...f.firstVisits.buckets.flatMap((b): [string, number][] => [
             [`bucket:signup:${b.key}`, b.newCollectors],
             [`bucket:firstvisit:${b.key}`, b.becameCollectors],
+          ]),
+          ...f.firstVisits.previous!.flatMap((b): [string, number][] => [
+            [`bucket:signup:prev:${b.key}`, b.newCollectors],
+            [`bucket:firstvisit:prev:${b.key}`, b.becameCollectors],
           ]),
         ],
         req,
       );
     }
+    const weeks = await origin(WEEKS);
+    expect([weeks.firstVisits.unit, weeks.firstVisits.buckets[0]!.key, weeks.firstVisits.previous!.at(-1)!.key]).toEqual(['week', '2026-W38', '2026-W38']);
+    expect([weeks.firstVisits.buckets[0]!.newCollectors, weeks.firstVisits.previous!.at(-1)!.newCollectors]).toEqual([0, 1]);
+    const names = async (slice: string) => (await svc.list({ ...WEEKS, slice }, { withCities: true })).rows.map((r) => r.accountId);
+    expect([await names('bucket:signup:2026-W38'), await names('bucket:signup:prev:2026-W38'), await names('bucket:firstvisit:prev:2026-W38')]).toEqual([[], [acc.SEPT], [acc.SEPT]]);
     svc.clearCache();
     const l = (await svc.report({ panel: 'likes', ...OCT })).figures as LikesFigures;
     const main = l.mostWished.rows.find((r) => r.name === 'MONOLITHE')!;
