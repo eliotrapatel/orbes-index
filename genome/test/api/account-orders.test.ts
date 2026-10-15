@@ -176,7 +176,7 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       ...(await times(ids.live1)),
       shipment: null,
       // Not paid yet: no invoice; its care guide (step S4, M6).
-      documents: { invoice: null, creditNote: null, others: [], careGuide: true, certificate: false },
+      documents: { invoice: null, creditNote: null, others: [], careGuide: true, certificate: false, careConditions: true },
       // NOCTURNE, addition 3: its model's photograph; none taken yet.
       imageUrl: null,
       // Plan NEXT LOT §3.4: no new claim code waits for it.
@@ -217,7 +217,7 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       ...(await times(ids.delivered)),
       shipment: { carrier: 'Colissimo', trackingNumber: '6A 1234 5678 901', trackingUrl: 'https://www.laposte.fr/outils/suivre-vos-envois?code=6A12345678901' },
       // Paid: its invoice (step S4, M6); its piece not registered by the account: no certificate yet.
-      documents: { invoice: { number: expect.stringMatching(/^INV-2026-\d{6}$/), issuedAt: delivered.paidAt }, creditNote: null, others: [], careGuide: true, certificate: false },
+      documents: { invoice: { number: expect.stringMatching(/^INV-2026-\d{6}$/), issuedAt: delivered.paidAt }, creditNote: null, others: [], careGuide: true, certificate: false, careConditions: true },
       imageUrl: null,
       claimCode: null,
       // Plan NEXT LOT §3.6.B: its delivery address, as Client Services entered it (the country added to pack it); no
@@ -252,7 +252,7 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       expect(Object.keys(o).sort()).toEqual(
         ['addons', 'address', 'addressOf', 'cancelledAt', 'case', 'channel', 'claimCode', 'creditMinor', 'currency', 'deliveredAt', 'deliveryIssue', 'documents', 'editable', 'engraving', 'engravingOffer', 'giftTier', 'id', 'imageUrl', 'model', 'modelVariant', 'paidAt', 'preparingAt', 'priceMinor', 'reference', 'release', 'reservedAt', 'returnable', 'returnedAt', 'shipment', 'shippedAt', 'shipping', 'size', 'status', 'withOrder'].sort(),
       );
-      expect(Object.keys(o.documents).sort()).toEqual(['careGuide', 'certificate', 'creditNote', 'invoice', 'others']);
+      expect(Object.keys(o.documents).sort()).toEqual(['careConditions', 'careGuide', 'certificate', 'creditNote', 'invoice', 'others']);
       for (const a of o.addons) expect(Object.keys(a).sort()).toEqual(['label', 'priceMinor']);
     }
     // The delivery address and the engraving's words are the collector's own (plan NEXT LOT §3.6.B, §3.6.C), never who

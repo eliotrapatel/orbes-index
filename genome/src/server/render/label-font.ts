@@ -145,10 +145,17 @@ const GLYPHS: Readonly<Record<string, GlyphDef>> = {
       arc(0.5, 0.5, AT_RING, AT_JOIN_DEG, AT_JOIN_DEG - 300),
     ],
   },
+  // The semicolon and the percent sign of an article of the terms (the ORBES CARE conditions, plan ORBES CARE answer 14:
+  // « a credit of 30 % », « … is reported; a piece scratched … »): the colon's upper dot over the comma; two small rings
+  // either side of a slash.
+  ';': { w: 0.16, ops: [...circle(0.08, 0.38, 0.035), ['M', 0.12, 0.82], ['L', 0.04, 1]] },
+  '%': { w: 0.62, ops: [...circle(0.13, 0.17, 0.12), ['M', 0.04, 1], ['L', 0.58, 0], ...circle(0.49, 0.83, 0.12)] },
 };
 
-/** The characters only documents letter (an invoice's address, a buyer's email): never on a piece's label or card. */
-const DOCUMENT_ONLY = Object.freeze([',', "'", '+', '(', ')', '&', '_', '@']);
+/** The characters only documents letter (an invoice's address, a buyer's email, an article of the terms): never on a piece's label or card. */
+const DOCUMENT_ONLY = Object.freeze([',', "'", '+', '(', ')', '&', '_', '@', ';', '%']);
+/** Of those, what only an article of the terms letters (toArticleText): a buyer's free text never does (toDocumentText). */
+const ARTICLE_ONLY = Object.freeze([';', '%']);
 
 /** Space between glyph boxes before tracking, in cap heights. */
 const SIDE_BEARING = 0.16;
@@ -158,8 +165,13 @@ const DECIMALS = 3;
 
 /** What a label, a card or a certificate letters (toLabelText). */
 export const LABEL_CHARSET: ReadonlySet<string> = new Set(Object.keys(GLYPHS).filter((ch) => !DOCUMENT_ONLY.includes(ch)));
-/** What a document letters besides (toDocumentText): the punctuation of an address and of an email (the slash a label has already). */
+/**
+ * What a document letters besides: the punctuation of an address and of an email (the slash a label has already), and
+ * the semicolon and the percent sign of an article of the terms (toArticleText).
+ */
 export const DOCUMENT_CHARSET: ReadonlySet<string> = new Set(Object.keys(GLYPHS));
+/** What a document's free text keeps (toDocumentText): DOCUMENT_CHARSET but ARTICLE_ONLY, so an invoice issued before prints as it did. */
+const FREE_TEXT_CHARSET: ReadonlySet<string> = new Set(Object.keys(GLYPHS).filter((ch) => !ARTICLE_ONLY.includes(ch)));
 
 /** Letters that do not decompose into a base letter and accents (NFKD), spelt the way French and English print them in capitals. */
 const SPELLED: Readonly<Record<string, string>> = Object.freeze({ Æ: 'AE', Œ: 'OE', Ø: 'O', Đ: 'D', Ł: 'L', Þ: 'TH' });
@@ -181,11 +193,20 @@ const APOSTROPHES = /[\u2018\u2019\u02bc]/g;
 /**
  * Free text on a document (an invoice, a credit note: a buyer's name, address and email) as the lettering can draw it:
  * as toLabelText, keeping besides the comma, the apostrophe, the plus, parentheses, the ampersand, the underscore and
- * the at sign (DOCUMENT_CHARSET).
+ * the at sign (DOCUMENT_CHARSET but the semicolon and the percent sign, an article's only).
  * "Rue de l’Église, 12" → "RUE DE L'EGLISE, 12". Never throws.
  */
 export function toDocumentText(text: string): string {
-  return lettered(text.replace(APOSTROPHES, "'"), DOCUMENT_CHARSET);
+  return lettered(text.replace(APOSTROPHES, "'"), FREE_TEXT_CHARSET);
+}
+
+/**
+ * The fixed words of an article of the terms on a document (the ORBES CARE conditions, ./care-conditions.ts): as
+ * toDocumentText, keeping besides the semicolon and the percent sign (DOCUMENT_CHARSET), the ellipsis written '...'.
+ * "perte ; 30 %, porte-clés…" → "PERTE ; 30 %, PORTE-CLES...". Never throws.
+ */
+export function toArticleText(text: string): string {
+  return lettered(text.replace(APOSTROPHES, "'").replace(/\u2026/g, '...'), DOCUMENT_CHARSET);
 }
 
 function lettered(text: string, charset: ReadonlySet<string>): string {

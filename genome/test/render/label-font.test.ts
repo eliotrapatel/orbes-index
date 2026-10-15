@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DOCUMENT_CHARSET, LABEL_CHARSET, measureText, STROKE_RATIO, textRun, toDocumentText, toLabelText } from '../../src/server/render/label-font.js';
+import { DOCUMENT_CHARSET, LABEL_CHARSET, measureText, STROKE_RATIO, textRun, toArticleText, toDocumentText, toLabelText } from '../../src/server/render/label-font.js';
 
 /** Endpoints of every M/L/A command in absolute path data. */
 function endpoints(d: string): [number, number][] {
@@ -47,7 +47,8 @@ describe('label lettering', () => {
   });
 
   it('documents letter the punctuation of an address and an email besides (plan LIVE RELEASE+, M7); a label never does', () => {
-    expect([...DOCUMENT_CHARSET].filter((ch) => !LABEL_CHARSET.has(ch)).sort()).toEqual(["'", '(', ')', '+', ',', '&', '_', '@'].sort());
+    // Plan ORBES CARE (answer 14): the semicolon and the percent sign of an article of the terms, documents only.
+    expect([...DOCUMENT_CHARSET].filter((ch) => !LABEL_CHARSET.has(ch)).sort()).toEqual(["'", '(', ')', '+', ',', '&', '_', '@', ';', '%'].sort());
     for (const ch of LABEL_CHARSET) expect(DOCUMENT_CHARSET.has(ch), ch).toBe(true);
     expect(toDocumentText('Rue de l’Église, 12 (Bât. B) — jeanne+orbes@example.com')).toBe("RUE DE L'EGLISE, 12 (BAT. B) - JEANNE+ORBES@EXAMPLE.COM");
     expect(toLabelText('Rue de l’Église, 12 (Bât. B)')).toBe('RUE DE L EGLISE 12 BAT. B');
@@ -56,6 +57,26 @@ describe('label lettering', () => {
     expect(toDocumentText('12/14 rue des Arts & Métiers')).toBe('12/14 RUE DES ARTS & METIERS');
     expect(toLabelText('Arts & Métiers_')).toBe('ARTS METIERS');
     expect(toDocumentText('✓ ✓')).toBe('');
+  });
+
+  it('an article of the terms letters its semicolons and percent signs (plan ORBES CARE, answer 14); a label, a card and a buyer\'s free text never do', () => {
+    for (const ch of ';%:') expect(DOCUMENT_CHARSET.has(ch), ch).toBe(true);
+    for (const ch of ';%') expect(LABEL_CHARSET.has(ch), ch).toBe(false);
+    // The colon was a label's already (a time on the ownership certificate): unchanged.
+    expect(LABEL_CHARSET.has(':')).toBe(true);
+    expect(toArticleText('Une pièce perdue ; un crédit de 30 % : porte-clés…')).toBe('UNE PIECE PERDUE ; UN CREDIT DE 30 % : PORTE-CLES...');
+    expect(toArticleText('l’onglet — « ORBES CARE »')).toBe("L'ONGLET - ORBES CARE");
+    // An invoice's address, a supplier order's note, a label: as they always printed.
+    expect(toDocumentText('Bât. B; 30 % off')).toBe('BAT. B 30 OFF');
+    expect(toLabelText('Bât. B; 30 %')).toBe('BAT. B 30');
+    // The percent sign: two rings either side of a slash; the semicolon: the colon's upper dot over the comma.
+    const pct = endpoints(textRun('%', { capHeight: 10, x: 0, baseline: 10, align: 'start' }).d);
+    expect(Math.min(...pct.map(([, y]) => y))).toBeLessThan(1);
+    expect(Math.max(...pct.map(([, y]) => y))).toBeGreaterThan(9);
+    const semi = endpoints(textRun(';', { capHeight: 10, x: 0, baseline: 10, align: 'start' }).d).map(([, y]) => y);
+    expect(Math.max(...semi)).toBeCloseTo(10, 6);
+    const colon = endpoints(textRun(':', { capHeight: 10, x: 0, baseline: 10, align: 'start' }).d).map(([, y]) => y);
+    expect(Math.min(...semi)).toBeCloseTo(Math.min(...colon), 6);
   });
 
   it('draws every glyph inside its advance box, with arcs continuous from the pen', () => {

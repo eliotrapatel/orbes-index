@@ -138,6 +138,7 @@ import {
 } from '../db/schema.js';
 import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
 import { countryName } from '../../shared/countries.js';
+import { renderCareConditionsPdf } from '../render/care-conditions.js';
 import { systemClock, SYSTEM_ACTOR, type Actor, type Clock, type Logger, noopLogger } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
 import { addressNotFound, checkAddress, checkCountry, checkPhone, defaultAddress, insertAddress, lockAccountAddresses, type DeliveryAddress } from './addresses.js';
@@ -663,6 +664,11 @@ export interface AccountOrderDocuments {
   careGuide: boolean;
   /** Its ownership certificate (PDF): once its piece is registered to this account, and while it may have one. */
   certificate: boolean;
+  /**
+   * Plan ORBES CARE, answer 14: the ORBES CARE conditions (PDF, article 11 of the terms in force), given with every
+   * order whatever its status (GET /api/v1/account/orders/:id/care-conditions.pdf).
+   */
+  careConditions: true;
 }
 
 /** The model's care guide of an order (GET /api/v1/account/orders/:id/care-guide): its own words, or null for the house's general care text. */
@@ -2335,6 +2341,7 @@ export class OrderService {
         others: othersOf(r.id),
         careGuide: r.status !== 'CANCELLED' && r.status !== 'RETURNED',
         certificate: ORDER_CERTIFICATE_STATUSES.includes(r.status) && r.ownership_id !== null && r.piece_status !== null && !CERTIFICATE_ENDING_STATUSES.includes(r.piece_status),
+        careConditions: true,
       },
       imageUrl: mediaUrl(r.model_image),
       claimCode: claimCodes.get(r.id) ?? null,
@@ -2555,6 +2562,20 @@ export class OrderService {
       .executeTakeFirst();
     if (!r) throw orderNotFound();
     return { model: r.name, text: r.care_guide ?? r.care_instructions ?? null };
+  }
+
+  /**
+   * The ORBES CARE conditions of an order, for its own account (plan ORBES CARE, answer 14): article 11 of the terms in
+   * force, in English and in French, naming the order (render/care-conditions.ts), for every order whatever its status.
+   * Drawn on each request, never stored; a read, not audited. 404 ORDER_NOT_FOUND for another account's order or an
+   * unknown one.
+   */
+  async careConditions(accountId: string, orderId: string): Promise<{ contentType: string; body: Uint8Array; filename: string }> {
+    if (typeof accountId !== 'string' || !UUID_RE.test(accountId)) throw orderNotFound();
+    const id = knownOrderId(orderId);
+    const r = await this.db.selectFrom('orders').select('id').where('id', '=', id).where('account_id', '=', accountId.toLowerCase()).executeTakeFirst();
+    if (!r) throw orderNotFound();
+    return renderCareConditionsPdf({ orderReference: orderReference(r.id) });
   }
 
   /**

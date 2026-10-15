@@ -221,6 +221,7 @@ describe('returns (plan LIVE RELEASE+, S4)', () => {
       others: [],
       careGuide: false,
       certificate: false,
+      careConditions: true,
     });
     expect((await ctx.services.ownership.listForAccount(buyer.id)).map((x) => x.productId)).not.toContain(piece.product.productId);
 

@@ -46,6 +46,7 @@ const NOT_READ: Readonly<Record<string, string>> = Object.freeze({
   '/api/v1/account/orders/:id/credit-note.pdf': 'a PDF of the order, the collector’s own',
   '/api/v1/account/orders/:id/documents/:number': 'a PDF of the order, the collector’s own',
   '/api/v1/account/orders/:id/certificate.pdf': 'a PDF of the piece, the collector’s own',
+  '/api/v1/account/orders/:id/care-conditions.pdf': 'a PDF of the order’s ORBES CARE conditions, the published terms',
   '/api/v1/account/care/:id/label.pdf': 'a PDF label of a care request',
   '/api/v1/account/warranty-claims/:id/label.pdf': 'a PDF label of a warranty claim',
   '/api/v1/media/:sha256': 'a stored photograph',

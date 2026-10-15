@@ -304,6 +304,14 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
     return sendPdf(reply, await invoices.accountDocumentByNumber(account.id, id, number));
   });
 
+  // Plan ORBES CARE, answer 14: the ORBES CARE conditions given with every order, next to its invoice (a PDF drawn on
+  // each request from article 11 of the terms in force).
+  app.get('/api/v1/account/orders/:id/care-conditions.pdf', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(accountOrderParams, request.params);
+    return sendPdf(reply, await orders.careConditions(account.id, id));
+  });
+
   app.get('/api/v1/account/orders/:id/certificate.pdf', async (request, reply) => {
     const { account } = requireAccount(request);
     const { id } = parse(accountOrderParams, request.params);

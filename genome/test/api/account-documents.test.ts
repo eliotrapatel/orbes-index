@@ -9,6 +9,8 @@
  *    before the piece is registered to the account and after it is returned;
  *  - GET /api/v1/account/orders/:id/care-guide: the model's care guide, else its care instructions, else none (the
  *    house's general care text, in the app);
+ *  - GET /api/v1/account/orders/:id/care-conditions.pdf (plan ORBES CARE, answer 14): the ORBES CARE conditions,
+ *    article 11 of the terms naming the order, listed and given for every order whatever its status;
  *  - an account session only (401), the account's own orders only (404 for another's, as for an unknown one).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -79,7 +81,7 @@ describe('MY PIECES: an order\'s documents', () => {
   afterAll(() => h?.close());
 
   it('needs an account session for every document: 401, never stored', async () => {
-    for (const path of ['invoice.pdf', 'credit-note.pdf', 'certificate.pdf', 'care-guide']) {
+    for (const path of ['invoice.pdf', 'credit-note.pdf', 'certificate.pdf', 'care-guide', 'care-conditions.pdf']) {
       const res = await h.client().get(`/api/v1/account/orders/${delivered}/${path}`);
       expect(res.statusCode, path).toBe(401);
       expect(res.headers['cache-control']).toBe('no-store');
@@ -88,7 +90,7 @@ describe('MY PIECES: an order\'s documents', () => {
 
   it('lists each order\'s documents: the invoice once paid, the credit note once cancelled after it, the care guide while the piece comes or is kept', async () => {
     const list = await listed(mine);
-    expect(list.get(delivered)!.documents).toEqual({ invoice: { number: 'INV-2026-000001', issuedAt: expect.any(String) }, creditNote: null, others: [], careGuide: true, certificate: false });
+    expect(list.get(delivered)!.documents).toEqual({ invoice: { number: 'INV-2026-000001', issuedAt: expect.any(String) }, creditNote: null, others: [], careGuide: true, certificate: false, careConditions: true });
     expect(list.get(cancelled)!.documents).toEqual({
       invoice: { number: 'INV-2026-000002', issuedAt: expect.any(String) },
       creditNote: { number: 'CN-2026-000001', issuedAt: expect.any(String) },
@@ -96,8 +98,9 @@ describe('MY PIECES: an order\'s documents', () => {
       others: [],
       careGuide: false,
       certificate: false,
+      careConditions: true,
     });
-    expect(list.get(reserved)!.documents).toEqual({ invoice: null, creditNote: null, others: [], careGuide: true, certificate: false });
+    expect(list.get(reserved)!.documents).toEqual({ invoice: null, creditNote: null, others: [], careGuide: true, certificate: false, careConditions: true });
   });
 
   it('gives the account its own invoice and credit note as PDFs, never stored; nothing of another account\'s', async () => {
@@ -167,9 +170,40 @@ describe('MY PIECES: an order\'s documents', () => {
       others: [],
       careGuide: false,
       certificate: false,
+      careConditions: true,
     });
     const after = await mine.get(`/api/v1/account/orders/${delivered}/certificate.pdf`);
     expect([after.statusCode, errorOf(after).code]).toEqual([409, 'CERTIFICATE_NOT_AVAILABLE']);
     expect((await mine.get(`/api/v1/account/orders/${delivered}/credit-note.pdf`)).statusCode).toBe(200);
+  });
+
+  it('gives the ORBES CARE conditions of every order of the account, whatever its status, as a PDF naming the order; nothing of another account\'s (plan ORBES CARE, answer 14)', async () => {
+    const list = await listed(mine);
+    // Delivered then returned, paid then cancelled, reserved: each lists the conditions and gives them.
+    expect([delivered, cancelled, reserved].map((id) => [list.get(id)!.status, list.get(id)!.documents.careConditions])).toEqual([
+      ['RETURNED', true],
+      ['CANCELLED', true],
+      ['RESERVED', true],
+    ]);
+    for (const id of [delivered, cancelled, reserved]) {
+      const res = await mine.get(`/api/v1/account/orders/${id}/care-conditions.pdf`);
+      expect(res.statusCode, id).toBe(200);
+      expect(res.headers['content-type']).toBe('application/pdf');
+      expect(res.headers['content-disposition']).toBe(`attachment; filename="ORBES-CARE-CONDITIONS-${orderReference(id)}.pdf"`);
+      expect(res.headers['cache-control']).toBe('no-store');
+      const raw = res.rawPayload.toString('latin1');
+      expect(raw.startsWith('%PDF-')).toBe(true);
+      expect(raw).toContain(`(ORBES CARE CONDITIONS ${orderReference(id)})`);
+    }
+    // Another account's order, an unknown one: one answer; a malformed id: refused.
+    for (const [c, id] of [
+      [other, delivered],
+      [other, reserved],
+      [mine, '00000000-0000-4000-8000-000000000000'],
+    ] as const) {
+      const res = await c.get(`/api/v1/account/orders/${id}/care-conditions.pdf`);
+      expect([res.statusCode, errorOf(res).code], id).toEqual([404, 'ORDER_NOT_FOUND']);
+    }
+    expect(errorOf(await mine.get('/api/v1/account/orders/nope/care-conditions.pdf')).code).toBe('VALIDATION_FAILED');
   });
 });

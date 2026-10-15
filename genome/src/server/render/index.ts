@@ -93,8 +93,20 @@ export {
   type SheetPageSize,
   type SheetPlacement,
 } from './print-sheet.js';
+export {
+  CARE_CONDITIONS,
+  CARE_CONDITIONS_COPY,
+  CARE_CONDITIONS_LAYOUT,
+  CARE_CONDITIONS_VERSION,
+  careConditionsFilename,
+  careConditionsTexts,
+  layoutCareConditions,
+  renderCareConditionsPdf,
+  type CareConditionsArticle,
+  type CareConditionsDocument,
+} from './care-conditions.js';
 export { CSV_CONTENT_TYPE, csvDocument } from './csv.js';
-export { LABEL_CHARSET, measureText, textRun, toLabelText } from './label-font.js';
+export { LABEL_CHARSET, measureText, textRun, toArticleText, toLabelText } from './label-font.js';
 export {
   ARTIFACT_THEMES,
   ARTIFACT_THEME_NAMES,
