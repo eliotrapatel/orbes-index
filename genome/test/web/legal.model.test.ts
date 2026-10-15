@@ -97,8 +97,8 @@ describe('legal pages: the text of the content', () => {
 
   it("links a cross-reference to an article of the same document, its text unchanged (C23)", () => {
     const anchors = new Set(['article-11', 'article-12', 'article-15']);
-    expect(parseInline('MY PIECES also presents ORBES Care (article 11).', 'en', anchors)).toEqual([
-      { kind: 'text', text: 'MY PIECES also presents ORBES Care (' },
+    expect(parseInline('MY PIECES also presents ORBES CARE, the warranty and the care of each piece (article 11).', 'en', anchors)).toEqual([
+      { kind: 'text', text: 'MY PIECES also presents ORBES CARE, the warranty and the care of each piece (' },
       { kind: 'link', text: 'article 11', href: '#article-11', external: false },
       { kind: 'text', text: ').' },
     ]);
@@ -119,7 +119,7 @@ describe('legal pages: the text of the content', () => {
     });
     expect(plainText(list)).toBe('Tier: a rank (article 12).\nprivacy (article 99)');
     // Without the document's anchors (or with none), nothing is linked.
-    expect(parseInline('ORBES Care (article 11).', 'en')).toEqual([{ kind: 'text', text: 'ORBES Care (article 11).' }]);
+    expect(parseInline('ORBES CARE (article 11).', 'en')).toEqual([{ kind: 'text', text: 'ORBES CARE (article 11).' }]);
   });
 
   it('sets French punctuation with a narrow no-break space, and leaves English and addresses as they are', () => {

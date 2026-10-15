@@ -44,9 +44,16 @@ export { LANGS, type Block, type Lang, type LegalDocument, type LegalSection } f
  * paragraph and the privacy policy's engraving clause, which the atelier's removal made untrue (an order waits for
  * supplier stock; no piece is made for it); the build's date, 2026-10-08, is not after H1's 2026-10-09, so the version
  * is the day after it, set mechanically. Steps 5.14 and 6.12 move its fingerprint; the finish step moves it to the date
- * of H2's final commit.
+ * of H2's final commit. The customer intelligence (deployments I1 and I2) moved no text: 2026-10-10 stayed in force.
+ * 2026-10-15 is the version of ORBES CARE (plan of 2026-10-15, §2(d), step 4.1): the terms' article 11 rewritten whole
+ * (ORBES CARE and the two ORBES warranties, PRIVATE CARE, the legal guarantees, the written conditions given as a PDF
+ * with each order), articles 1, 2 and 13 without the ORBES Care subscription, and the privacy policy's sentence on a
+ * warranty claim in place of the subscription's page; the build's date, after I2's published 2026-10-10, set
+ * mechanically. The server's CARE_CONDITIONS_VERSION (src/server/render/care-conditions.ts), the version the ORBES
+ * CARE CONDITIONS PDF prints, moves with it (test/web/legal.content.test.ts holds the two equal); the finish step moves
+ * both to the date of the build's final commit. Its date never holds the deployment.
  */
-export const LEGAL_VERSION = '2026-10-10';
+export const LEGAL_VERSION = '2026-10-15';
 
 export const DOCUMENTS: Readonly<Record<LegalPage, Readonly<Record<Lang, LegalDocument>>>> = Object.freeze({
   privacy: PRIVACY,

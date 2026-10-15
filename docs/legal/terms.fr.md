@@ -1,12 +1,12 @@
 # Conditions générales d'utilisation du service ORBES GENOME CODE
 
-**Brouillon pour revue juridique, non validé.** Version : 10 octobre 2026. [English version](terms.en.md).
+**Brouillon pour revue juridique, non validé.** Version : 15 octobre 2026. [English version](terms.en.md).
 
 Chaque article se termine par une ligne *Code : …* qui renvoie aux règles du code qu'il décrit ([TERMS-FACTS](TERMS-FACTS.md)). Ces lignes servent à la revue et ne sont pas publiées. Les champs [À COMPLÉTER : …] attendent l'identité légale d'ORBES et les choix de l'avocat ([note pour l'avocat](counsel-note.fr.md)).
 
 ## Article 1 — Objet
 
-Les présentes conditions régissent l'utilisation du service ORBES GENOME CODE, accessible à l'adresse theorbes.com/verify (servie par verify.theorbes.com), et du compte ORBES qui s'y rattache : la vérification d'une pièce ORBES, l'enregistrement de sa propriété, son transfert, la déclaration de sa perte ou de son vol, le certificat de propriété, les sorties et leur accès anticipé, les LIVE RELEASES, les demandes du salon privé, les commandes et leurs documents, et le cercle des propriétaires. MY PIECES présente aussi ORBES Care (article 11).
+Les présentes conditions régissent l'utilisation du service ORBES GENOME CODE, accessible à l'adresse theorbes.com/verify (servie par verify.theorbes.com), et du compte ORBES qui s'y rattache : la vérification d'une pièce ORBES, l'enregistrement de sa propriété, son transfert, la déclaration de sa perte ou de son vol, le certificat de propriété, les sorties et leur accès anticipé, les LIVE RELEASES, les demandes du salon privé, les commandes et leurs documents, et le cercle des propriétaires. MY PIECES présente aussi ORBES CARE, la garantie et l'entretien de chaque pièce (article 11).
 
 Le service est édité par CONGLOMERAT LLC (« ORBES »), dont l'identité complète figure dans les [mentions légales](legal-notice.fr.md). Utiliser le service, c'est accepter les présentes conditions. Créer un compte ORBES, c'est les accepter, comme le service l'indique sous CREATE ACCOUNT, avec un lien vers les présentes conditions.
 
@@ -29,7 +29,7 @@ Le service est édité par CONGLOMERAT LLC (« ORBES »), dont l'identité compl
 - **Salle d'après** : une seconde porte qui peut suivre une LIVE RELEASE épuisée, pour les comptes qui attendaient encore dans sa file (article 13).
 - **Commande** : une pièce réservée à un compte, d'une LIVE RELEASE, d'une sortie ou du salon privé, suivie étape par étape dans MY PIECES (article 14).
 - **Cercle des propriétaires** : la partie du service où ORBES publie, pour les propriétaires d'une pièce, des notes, des invitations et des sondages (article 15).
-- **ORBES Care** : l'abonnement d'entretien qu'ORBES présente dans MY PIECES (article 11).
+- **ORBES CARE** : ce qu'ORBES donne gratuitement à une pièce après sa vente : sa garantie, PRIVATE CARE, le guide d'entretien de son modèle et ORBES Client Services (article 11).
 - **ORBES Client Services** : le service client d'ORBES, joignable à support@theorbes.com, du lundi au vendredi, de 10 h à 18 h (heure de Paris).
 
 *Code : — (clause juridique).*
@@ -140,17 +140,51 @@ La déclaration dans le registre ORBES ne remplace pas une plainte auprès des a
 
 *Code : R46, R47, R48, R49, R50, R51, R127.*
 
-## Article 11 — Garantie
+## Article 11 — ORBES CARE et garanties
 
-**Début.** La garantie ORBES commence à son activation par ORBES ou par un détaillant agréé inscrit au registre des points de vente d'ORBES, à la date d'achat, pour la durée prévue pour la catégorie de la pièce. En boutique, le vendeur active la garantie dans les 10 minutes qui suivent son scan de la pièce, à la date du jour et au pays du point de vente.
+**ORBES CARE.** ORBES CARE réunit ce qu'ORBES donne à une pièce après sa vente : sa garantie ORBES, PRIVATE CARE, le guide d'entretien de son modèle et ORBES Client Services. MY PIECES le présente dans l'onglet ORBES CARE de chaque pièce. ORBES CARE est gratuit : rien n'y est vendu.
 
-**Suivi.** Le service affiche l'état de la garantie de chaque pièce. La garantie reste attachée à la pièce quand celle-ci change de propriétaire.
+**Deux garanties.** Chaque pièce a l'une des deux garanties ORBES : la **garantie à vie** (partie A), pour les bijoux et les accessoires autres que la maroquinerie (boutons de manchette, porte-clés…), ou la **garantie de 2 ans** (partie B), pour toute autre pièce, dont la maroquinerie. L'onglet ORBES CARE de chaque pièce indique laquelle elle a : ACTIVE · LIFETIME, ou la date de fin de sa garantie. Les parties A et B ont chacune leurs règles ; le reste de cet article s'applique aux deux.
 
-**Conditions.** Les conditions de la garantie commerciale ORBES figurent dans [À COMPLÉTER : document des conditions de la garantie commerciale]. ORBES peut annuler la garantie d'une pièce dans les cas que ces conditions prévoient. Les garanties légales restent dues dans tous les cas.
+**Garant.** Les garanties ORBES sont accordées gratuitement par CONGLOMERAT LLC, 30 N Gould St, Ste N, Sheridan, WY 82801, États-Unis, dont l'identité complète figure dans les [mentions légales](legal-notice.fr.md), joignable par ORBES Client Services.
 
-**ORBES Care.** MY PIECES présente ORBES Care, un abonnement d'entretien de vos pièces : un entretien annuel par l'atelier ORBES, une réparation prioritaire et une garantie prolongée. ORBES Care n'est pas en vente tant que SUBSCRIBE n'apparaît pas dans MY PIECES. Une fois ouvert, l'abonnement se souscrit sur une page tierce (Whop), selon les conditions propres à cette page : le service n'encaisse aucun paiement, et ne transmet à cette page rien de votre compte ni de vos pièces.
+**Début.** Une garantie ORBES commence à son activation par ORBES ou par un détaillant agréé inscrit au registre des points de vente d'ORBES, à la date d'achat. En boutique, le vendeur active la garantie dans les 10 minutes qui suivent son scan de la pièce, à la date du jour et au pays du point de vente.
 
-*Code : R42, R52, R53, R54, R55, R92.*
+**Faire jouer la garantie.** Seul le propriétaire enregistré de la pièce peut faire jouer sa garantie. Il écrit à ORBES Client Services depuis la pièce dans MY PIECES (WRITE TO ORBES CLIENT SERVICES). ORBES Client Services lui envoie une étiquette prépayée, qu'il télécharge dans l'onglet ORBES CARE de la pièce : la pièce est toujours renvoyée d'abord à ORBES, aux frais d'ORBES. ORBES l'examine et répond dans MESSAGES ; l'onglet ORBES CARE indique où en est la demande et son issue.
+
+**Suivi.** Le service affiche l'état de la garantie de chaque pièce. La garantie reste attachée à la pièce quand celle-ci change de propriétaire ; son propriétaire enregistré du moment fait jouer la garantie.
+
+**A. La garantie à vie.** Elle dure toute la vie de la pièce.
+
+**A.1 Ce qu'elle couvre.** Si la pièce se ternit, se décolore ou se casse par accident, ORBES la remplace.
+
+**A.2 Ce qu'elle ne couvre pas.** Une pièce perdue, ou dont le vol est déclaré ; une pièce rayée, abîmée volontairement ou abîmée par un tiers ; une pièce modifiée ou réparée hors d'ORBES.
+
+**A.3 Ce que fait ORBES.** Quand la demande est acceptée, ORBES envoie la même pièce, neuve, une fois la pièce reçue. L'identité de la pièce remplacée est close, et la nouvelle pièce s'enregistre avec sa propre carte certificat. Si le modèle n'est plus fabriqué, ORBES accorde à la place un crédit de la valeur de la pièce, à valoir sur une nouvelle pièce. La valeur de la pièce est le prix auquel ORBES l'a vendue, ou à défaut le prix de son modèle chez ORBES le jour de la décision, dans la devise de ce prix.
+
+**A.4 Un remplacement offert.** Chaque pièce a, depuis son achat d'origine, un remplacement offert, ou le crédit de sa valeur. Une pièce de remplacement prolonge celle qu'elle remplace et n'ouvre pas de remplacement offert à son tour. Après le remplacement offert, une demande acceptée donne un crédit de 30 % de la valeur de la pièce, à valoir sur une nouvelle pièce, et la pièce est rendue à son propriétaire.
+
+**A.5 Crédits.** Un crédit accordé au titre de la garantie à vie vaut 12 mois, dans la devise de la valeur de la pièce ; ORBES Client Services le déduit de la facture d'une pièce achetée dans cette devise, sur les commandes auxquelles s'appliquent les crédits des paliers (article 12). Il n'est jamais versé en argent.
+
+**A.6 Refus.** ORBES ne refuse une demande au titre de la garantie à vie que pour un motif que donne cette partie : un cas qu'elle ne couvre pas, une garantie annulée, ou une pièce qui n'est ni ternie, ni décolorée, ni cassée par accident. ORBES dit toujours lequel.
+
+**B. La garantie de 2 ans.** Elle dure 2 ans à compter de son début et prend fin à la date qu'affiche MY PIECES.
+
+**B.1 Ce qu'elle couvre.** Les seuls défauts de fabrication. Quand la demande est acceptée, ORBES répare la pièce ou, si elle ne peut être réparée, la remplace par la même pièce, neuve, une fois la pièce reçue. Une pièce réparée est rendue à son propriétaire aux frais d'ORBES. L'identité d'une pièce remplacée est close ; la nouvelle pièce s'enregistre avec sa propre carte certificat et a sa propre garantie de 2 ans à compter du jour où ORBES l'envoie.
+
+**B.2 Ce qu'elle ne couvre pas.** Tout ce qui n'est pas un défaut de fabrication, notamment l'usure, un accident, une rayure ou un dommage, une pièce perdue ou dont le vol est déclaré. La garantie de 2 ans ne donne ni crédit ni remplacement offert : ils relèvent de la garantie à vie (partie A).
+
+**B.3 Refus.** ORBES ne refuse une demande au titre de la garantie de 2 ans que pour un motif que donne cette partie : une pièce sans défaut de fabrication, une pièce perdue ou dont le vol est déclaré, une garantie terminée ou annulée. ORBES dit toujours lequel.
+
+**Territoire.** Les garanties ORBES s'appliquent dans chaque pays où ORBES ou un détaillant agréé vend ses pièces.
+
+**PRIVATE CARE.** À partir de PLATINE (article 12), les pièces d'un compte ont PRIVATE CARE : une inspection, un nettoyage et un polissage de chaque pièce par ORBES, gratuits, une fois par an chacune, demandés depuis la pièce dans MY PIECES, avec une étiquette prépayée à l'aller et au retour. C'est un avantage des paliers : THE CLUB le décrit, et l'article 12 s'y applique.
+
+**Vos droits légaux.** Les garanties ORBES s'ajoutent à vos droits et ne les remplacent jamais. Quoi qu'elles disent, le vendeur reste tenu de la garantie légale de conformité (articles L. 217-3 à L. 217-20 du Code de la consommation, 2 ans à compter de la délivrance) et de la garantie des vices cachés (articles 1641 à 1648 et 2232 du Code civil). Ces garanties légales ne dépendent ni de l'enregistrement de la pièce ni d'un compte ORBES : l'acheteur les fait valoir auprès du vendeur. Une demande traitée au titre de la garantie légale n'use jamais le remplacement offert de la garantie à vie, et n'est jamais réglée par un crédit.
+
+**Conditions écrites.** Ces conditions sont remises avec chaque commande, en anglais et en français, en PDF dans les DOCUMENTS de la commande dans MY PIECES, à côté de sa facture (ORBES CARE CONDITIONS), et restent publiées ici.
+
+*Code : R42, R52, R53, R54, R55, R92, R156, R157, R158, R159, R160, R161, R163, R164, N11.*
 
 ## Article 12 — Sorties et salon privé
 
@@ -190,7 +224,7 @@ Une LIVE RELEASE est une sortie qui se vit en direct, sans tirage : ORBES l'anno
 
 **Votre tour.** Quand assez de pièces de votre taille sont libres pour la quantité choisie et que vous êtes le suivant de la file dans cette taille, c'est votre tour. Vous avez alors 30 secondes, sauf si la sortie fixe un autre délai (de 10 à 300 secondes, qui peut varier selon le palier), pour appuyer à l'écran sur l'ORBES CODE de la salle, un spécimen qui n'est le code d'aucune pièce, et le maintenir jusqu'à ce que son anneau soit plein. Le service ne sécurise la pièce que pour un appui d'au moins 1,4 seconde, mesuré par sa propre horloge. Un tour qui n'est pas pris à temps passe, et sa pièce va au suivant de la file.
 
-**Votre pièce.** Une fois sécurisée, la pièce vous est tenue pendant 5 minutes, sauf si la sortie fixe un autre délai (de 1 à 60 minutes, qui peut varier selon le palier). Pendant ce temps, vous pouvez choisir les options que propose la sortie, 6 au plus, par exemple une gravure, un coffret ou ORBES Care, chacune au prix que fixe la sortie, gardé tel qu'il était quand vous l'avez choisie ; puis presser PAY, ou rendre la pièce avec RELEASE MY PLACE. Une pièce qui n'est pas confirmée à temps n'est plus tenue, et ses options tombent avec elle.
+**Votre pièce.** Une fois sécurisée, la pièce vous est tenue pendant 5 minutes, sauf si la sortie fixe un autre délai (de 1 à 60 minutes, qui peut varier selon le palier). Pendant ce temps, vous pouvez choisir les options que propose la sortie, 6 au plus, par exemple une gravure ou un coffret, chacune au prix que fixe la sortie, gardé tel qu'il était quand vous l'avez choisie ; puis presser PAY, ou rendre la pièce avec RELEASE MY PLACE. Une pièce qui n'est pas confirmée à temps n'est plus tenue, et ses options tombent avec elle.
 
 **PAY.** PAY confirme la réservation de la pièce tenue, avec ses options et leur total, et crée sa commande, une par pièce (article 14). Rien n'est payé sur le service : ORBES Client Services vous contacte pour le paiement et la livraison, puis conclut la vente avec vous, hors du service, ou annule la commande. MY PIECES montre votre réservation, sa référence et sa commande.
 
@@ -256,7 +290,7 @@ Le verrouillage ferme toutes les sessions du compte, révoque son code de récup
 
 ORBES traite les données du service (compte, enregistrements, scans, inscriptions et réservations aux sorties, entrées, options et réservations des LIVE RELEASES, réponses aux questions d'après, commandes et leurs factures, réponses et votes du cercle, demandes du salon privé) comme le décrit sa politique de confidentialité, qui dit aussi comment ORBES regroupe les collectionneurs et compte leur activité par heure. Le service ne transmet vos commandes à aucune boutique en ligne. Vous pouvez demander à ORBES Client Services une copie de tout ce que le registre ORBES garde de votre compte. Vos demandes au salon privé, avec vos notes, figurent dans cette copie. Vos entrées aux LIVE RELEASES, avec leurs options, et votre I'LL BE THERE figurent dans cette copie. Vos commandes, avec le nom et l'adresse de l'acheteur, leurs étapes et leurs factures, et vos réponses aux questions d'après figurent dans cette copie.
 
-*Code : R21, R90, R117, R133, R139, R144, R145, R151, N10.*
+*Code : R21, R90, R117, R133, R139, R144, R145, R151, R162, N10.*
 
 ## Article 18 — Responsabilité
 

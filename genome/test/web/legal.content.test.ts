@@ -47,6 +47,8 @@ import { CONTENT_SECURITY_POLICY } from '../../src/server/http/security.js';
 import { UP as LIVE_MIGRATION } from '../../src/server/db/migrations/0021_live_release.js';
 import { UP as ORDERS_MIGRATION } from '../../src/server/db/migrations/0022_orders_stock.js';
 import { UP as COLLECTORS_MIGRATION } from '../../src/server/db/migrations/0023_releases_collectors.js';
+import { CARE_CONDITIONS, CARE_CONDITIONS_VERSION } from '../../src/server/render/care-conditions.js';
+import { CARE_LABEL_RETENTION_MS } from '../../src/server/services/care.js';
 import { INVOICE_ISSUER } from '../../src/server/services/invoices.js';
 import { RECOVERY_CODE_TTL_MS, TRANSFER_FREEZE_MS } from '../../src/server/services/account-recovery.js';
 import { LIVE_NETWORK_RETENTION_DAYS, liveNetworkHash, liveNetworkPrefix } from '../../src/server/services/live.js';
@@ -250,7 +252,8 @@ describe('legal pages: the terms of use and the legal notice, published from the
     const mediator = ['In a dispute, turn to ORBES. You may also use, free of charge, the consumer mediator [À COMPLÉTER: name of the mediator].'];
     expect(sectionProblems('t', mediator, ['In a dispute, turn to ORBES. You may also use, free of charge, the consumer mediator.'])).not.toEqual([]);
     expect(sectionProblems('t', mediator, ['In a dispute, turn to ORBES.'])).toEqual([]);
-    // A sentence that refers back to one left out with its field goes too, and so does the lead of that one (article 11).
+    // A sentence that refers back to one left out with its field goes too, and so does the lead of that one (as article
+    // 11 had it before ORBES CARE wrote its conditions in, plan of 2026-10-15).
     const warranty = ['**Conditions.** The conditions are set out in [À COMPLÉTER: document]. ORBES may void the warranty in the cases those conditions provide for. The statutory guarantees remain due.'];
     expect(sectionProblems('t', warranty, ['**Conditions.** ORBES may void the warranty in the cases those conditions provide for. The statutory guarantees remain due.'])).not.toEqual([]);
     expect(sectionProblems('t', warranty, ['ORBES may void the warranty in the cases those conditions provide for. The statutory guarantees remain due.'])).not.toEqual([]);
@@ -309,6 +312,28 @@ describe('legal pages: the terms of use and the legal notice, published from the
       const text = readText(DOCUMENTS.notice[lang], lang);
       for (const s of ['2004-575', 'Vercel Inc.', 'OVHcloud', 'Canada', 'IP Geolocation by DB-IP']) expect(text, s).toContain(s);
     }
+  });
+
+  it("gives with each order the terms' article 11 as published: the server's ORBES CARE CONDITIONS, block by block, in the version in force (plan ORBES CARE, answer 14)", () => {
+    // The server cannot read the published terms (its image holds src/server only): it keeps its own copy of article 11,
+    // which must be the published one, its title and each paragraph in order, the link to the legal notice as its words.
+    const asWords = (block: string): string => block.replace(/\[([^\]]+)\]\([^)\s]+\)/g, '$1');
+    for (const lang of LANGS) {
+      const article = DOCUMENTS.terms[lang].sections.find((s) => s.id === 'article-11');
+      expect(article, lang).toBeDefined();
+      const blocks = article!.blocks.filter((b): b is string => typeof b === 'string');
+      expect(blocks.length, lang).toBe(article!.blocks.length);
+      expect(CARE_CONDITIONS[lang].title, lang).toBe(article!.title);
+      expect([...CARE_CONDITIONS[lang].blocks], lang).toEqual(blocks.map(asWords));
+      // And so the draft's article 11, the review line left out (the comparison above holds the page to it).
+      expect(CARE_CONDITIONS[lang].title, lang).toBe(DRAFTS.terms[lang].sections[10].title);
+      expect([...CARE_CONDITIONS[lang].blocks], lang).toEqual(DRAFTS.terms[lang].sections[10].blocks.map(asWords));
+    }
+    // A link survives only as its words: the PDF has no link.
+    expect(asWords('in the [legal notice](/legal/notice), and')).toBe('in the legal notice, and');
+    expect(CARE_CONDITIONS.en.blocks.join('\n')).not.toMatch(/\]\(|\*Code/);
+    // The PDF prints the version of the terms in force.
+    expect(CARE_CONDITIONS_VERSION).toBe(LEGAL_VERSION);
   });
 });
 
@@ -439,9 +464,17 @@ describe('legal pages: the privacy policy, written from the code', () => {
     for (const s of [`${SHOP_NOTE_MAX} caractères au plus`, "la note qu'ORBES Client Services écrit en la clôturant", 'la voit masquée', "Ni votre note ni celle d'ORBES Client Services ne sont inscrites au journal d'audit", 'figure dans la copie de vos données', 'ses demandes ouvertes sont closes']) expect(fr, s).toContain(s);
     expect(sectionText(DOCUMENTS.privacy.en, 'retention')).toContain('**Requests in the private salon**');
     expect(sectionText(DOCUMENTS.privacy.fr, 'retention')).toContain('**Demandes au salon privé**');
-    // ORBES Care's page is a third party's: nothing of the account or the piece goes to it.
-    expect(sectionText(DOCUMENTS.privacy.en, 'account')).toContain('the service sends it neither your account nor your piece');
-    expect(sectionText(DOCUMENTS.privacy.fr, 'account')).toContain('le service ne lui transmet ni votre compte ni votre pièce');
+    // ORBES CARE (plan of 2026-10-15): the paid subscription and its third-party page are gone; a warranty claim is kept
+    // with the account and in the copy of its data, its prepaid label erased as the housekeeping erases it.
+    const days = CARE_LABEL_RETENTION_MS / DAY;
+    expect(days).toBe(30);
+    expect(sectionText(DOCUMENTS.privacy.en, 'account')).toContain(
+      `When you claim under the warranty or the legal guarantee, ORBES keeps the claim with your account: its steps, its outcome and any credit, which the copy of your data includes. The prepaid label, which carries your address, is erased ${days} days after the claim ends.`,
+    );
+    expect(sectionText(DOCUMENTS.privacy.fr, 'account')).toContain(
+      `Quand vous faites jouer la garantie ou la garantie légale, ORBES conserve la demande avec votre compte : ses étapes, son issue et l'éventuel crédit, que la copie de vos données comprend. L'étiquette prépayée, qui porte votre adresse, est effacée ${days} jours après la fin de la demande.`,
+    );
+    for (const lang of LANGS) expect(readText(DOCUMENTS.privacy[lang], lang), lang).not.toMatch(/Whop|SUBSCRIBE|ORBES Care\b/);
   });
 
   it('says what a LIVE RELEASE records, as the code keeps it: the network as a keyed fingerprint for 30 days, the country alone', () => {
@@ -769,6 +802,11 @@ describe('legal pages: both languages, links, lexicon', () => {
       // Finish H2: H2's final commit is dated 2026-10-09 (Paris), not later than H1's published 2026-10-09, so the
       // plan's rule (§4) keeps the day after, 2026-10-10.
       '2026-10-10': '53025a555a7cf244',
+      // ORBES CARE (plan of 2026-10-15, step 4.1): the terms' article 11 rewritten whole (ORBES CARE and the two ORBES
+      // warranties), articles 1, 2 and 13 without the ORBES Care subscription, the privacy policy's sentence on a
+      // warranty claim; the next date after I2's 2026-10-10 (the customer intelligence moved no text). The finish step
+      // moves it to the date of the build's final commit.
+      '2026-10-15': '7eb71749de28069d',
     };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
     expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });

@@ -94,7 +94,7 @@ describe('the ORBES CARE conditions PDF (render/care-conditions.ts)', () => {
     const pages = careConditionsTexts({ orderReference: ORDER });
     expect(pages.length).toBeGreaterThan(1);
     const [first] = pages;
-    expect(first!.slice(0, 7)).toEqual(['ORBES', 'ORBES CARE CONDITIONS', 'VERSION', '10 OCTOBER 2026', 'ORDER', ORDER, HEADS[0]]);
+    expect(first!.slice(0, 7)).toEqual(['ORBES', 'ORBES CARE CONDITIONS', 'VERSION', '15 OCTOBER 2026', 'ORDER', ORDER, HEADS[0]]);
     pages.forEach((p, i) => {
       expect(p.slice(-2), `page ${i + 1}`).toEqual([CARE_CONDITIONS_COPY.foot, `PAGE ${i + 1} OF ${pages.length}`]);
       if (i > 0) expect(p.slice(0, 3)).toEqual(['ORBES', 'ORBES CARE CONDITIONS', ORDER]);

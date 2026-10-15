@@ -1,12 +1,12 @@
 # Terms of use of the ORBES GENOME CODE service
 
-**Draft for legal review, not validated.** Version: 10 October 2026. [Version française](terms.fr.md).
+**Draft for legal review, not validated.** Version: 15 October 2026. [Version française](terms.fr.md).
 
 Each article ends with a *Code: …* line that points to the rules of the code it describes ([TERMS-FACTS](TERMS-FACTS.md)). These lines are for the review and are not published. The [À COMPLÉTER: …] fields await the legal identity of ORBES and counsel's choices ([note for counsel](counsel-note.fr.md), in French). Every field keeps the French marker, so that one search finds them all in both languages.
 
 ## Article 1 — Purpose
 
-These terms govern the use of the ORBES GENOME CODE service, available at theorbes.com/verify (served by verify.theorbes.com), and of the ORBES account attached to it: verifying an ORBES piece, registering its ownership, transferring it, reporting its loss or theft, the ownership certificate, the releases and their early access, the LIVE RELEASES, the requests of the private salon, the orders and their documents, and the owners' circle. MY PIECES also presents ORBES Care (article 11).
+These terms govern the use of the ORBES GENOME CODE service, available at theorbes.com/verify (served by verify.theorbes.com), and of the ORBES account attached to it: verifying an ORBES piece, registering its ownership, transferring it, reporting its loss or theft, the ownership certificate, the releases and their early access, the LIVE RELEASES, the requests of the private salon, the orders and their documents, and the owners' circle. MY PIECES also presents ORBES CARE, the warranty and the care of each piece (article 11).
 
 The service is published by CONGLOMERAT LLC ("ORBES"), whose full identity is given in the [legal notice](legal-notice.en.md). Using the service means accepting these terms. Creating an ORBES account means accepting them, as the service says under CREATE ACCOUNT, with a link to these terms.
 
@@ -29,7 +29,7 @@ The service is published by CONGLOMERAT LLC ("ORBES"), whose full identity is gi
 - **After-room**: a second door that may follow a LIVE RELEASE sold out, for the accounts still waiting in its line (article 13).
 - **Order**: a piece reserved for an account, from a LIVE RELEASE, a release or the private salon, followed step by step in MY PIECES (article 14).
 - **Owners' circle**: the part of the service where ORBES publishes, for the owners of a piece, notes, invitations and polls (article 15).
-- **ORBES Care**: the care subscription ORBES presents in MY PIECES (article 11).
+- **ORBES CARE**: what ORBES gives a piece after its sale, free of charge: its warranty, PRIVATE CARE, the care guide of its model and ORBES Client Services (article 11).
 - **ORBES Client Services**: the client service of ORBES, reachable at support@theorbes.com, Monday to Friday, 10:00–18:00 (Paris time).
 
 *Code: — (legal clause).*
@@ -140,17 +140,51 @@ A report in the ORBES registry does not replace a complaint to the authorities. 
 
 *Code: R46, R47, R48, R49, R50, R51, R127.*
 
-## Article 11 — Warranty
+## Article 11 — ORBES CARE and the warranties
 
-**Start.** The ORBES warranty starts when ORBES, or an authorised retailer listed in the ORBES register of points of sale, activates it, on the date of purchase, for the length set for the category of the piece. In a boutique, the seller activates the warranty within 10 minutes of their scan of the piece, on the day's date and in the country of the point of sale.
+**ORBES CARE.** ORBES CARE is what ORBES gives a piece after its sale: its ORBES warranty, PRIVATE CARE, the care guide of its model and ORBES Client Services. MY PIECES presents it in the ORBES CARE tab of each piece. ORBES CARE is free of charge: no part of it is sold.
 
-**Follow-up.** The service shows the status of the warranty of each piece. The warranty stays with the piece when it changes hands.
+**Two warranties.** Each piece has one of two ORBES warranties: the **lifetime warranty** (part A), for jewelry and for accessories other than leather goods (cufflinks, key rings…), or the **2-year warranty** (part B), for every other piece, leather goods among them. The ORBES CARE tab of each piece shows which one it has: ACTIVE · LIFETIME, or the date its warranty ends. Parts A and B each have their own rules; the rest of this article applies to both.
 
-**Conditions.** The conditions of the ORBES commercial warranty are set out in [À COMPLÉTER: document of the commercial warranty conditions]. ORBES may void the warranty of a piece in the cases those conditions provide for. The statutory guarantees remain due in every case.
+**Guarantor.** The ORBES warranties are given free of charge by CONGLOMERAT LLC, 30 N Gould St, Ste N, Sheridan, WY 82801, United States, whose full identity is given in the [legal notice](legal-notice.en.md), and reached through ORBES Client Services.
 
-**ORBES Care.** MY PIECES presents ORBES Care, a care subscription for your pieces: an annual care service by the ORBES atelier, priority repair and an extended warranty. ORBES Care is not on sale until SUBSCRIBE appears in MY PIECES. Once open, the subscription is taken out on a third-party page (Whop), under that page's own terms: the service takes no payment, and sends that page nothing about your account or your pieces.
+**Start.** An ORBES warranty starts when ORBES, or an authorised retailer listed in the ORBES register of points of sale, activates it, on the date of purchase. In a boutique, the seller activates the warranty within 10 minutes of their scan of the piece, on the day's date and in the country of the point of sale.
 
-*Code: R42, R52, R53, R54, R55, R92.*
+**How to claim.** Only the registered owner of the piece may claim under its warranty. They write to ORBES Client Services from the piece in MY PIECES (WRITE TO ORBES CLIENT SERVICES). ORBES Client Services sends a prepaid label, which the owner downloads from the ORBES CARE tab of the piece: the piece is always sent back to ORBES first, at ORBES's cost. ORBES examines it and answers in MESSAGES; the ORBES CARE tab shows where the claim stands and its outcome.
+
+**Follow-up.** The service shows the status of the warranty of each piece. The warranty stays with the piece when it changes hands; its registered owner at the time makes the claim.
+
+**A. The lifetime warranty.** It lasts for the life of the piece.
+
+**A.1 What it covers.** If the piece tarnishes, fades or breaks by accident, ORBES replaces it.
+
+**A.2 What it does not cover.** A piece that is lost, or whose theft is reported; a piece scratched, damaged on purpose or damaged by someone else; a piece altered or repaired outside ORBES.
+
+**A.3 What ORBES does.** When the claim is accepted, ORBES sends the same piece, new, once it has received the piece claimed for. The identity of the piece replaced is closed, and the new piece is registered with its own certificate card. If the model is no longer made, ORBES gives instead a credit of the piece's value toward a new piece. The piece's value is the price ORBES sold it at, or else the price of its model at ORBES on the day of the decision, in the currency of that price.
+
+**A.4 One free replacement.** Each piece has, from its original purchase, one free replacement, or the credit of its value. A replacement piece continues the piece it replaces and opens no free replacement of its own. After the free replacement, an accepted claim gives a credit of 30 % of the piece's value toward a new piece, and the piece is returned to its owner.
+
+**A.5 Credits.** A credit given under the lifetime warranty is valid 12 months, in the currency of the piece's value, and ORBES Client Services takes it off the invoice of a piece bought in that currency, on the orders the credits of the tiers apply to (article 12). It is never paid out in money.
+
+**A.6 Refusal.** ORBES declines a claim under the lifetime warranty only for a reason this part gives: a case it does not cover, a warranty voided, or a piece that shows no tarnish, fading or accidental break. It always says which.
+
+**B. The 2-year warranty.** It lasts 2 years from its start and ends on the date MY PIECES shows.
+
+**B.1 What it covers.** Manufacturing defects only. When the claim is accepted, ORBES repairs the piece or, when it cannot be repaired, replaces it with the same piece, new, once it has received the piece claimed for. A repaired piece is returned to its owner at ORBES's cost. The identity of a piece replaced is closed; the new piece is registered with its own certificate card and has its own 2-year warranty from the day ORBES sends it.
+
+**B.2 What it does not cover.** Anything that is not a manufacturing defect, among others wear, an accident, a scratch or damage, a piece lost or whose theft is reported. The 2-year warranty gives no credit and no free replacement: those are the lifetime warranty's (part A).
+
+**B.3 Refusal.** ORBES declines a claim under the 2-year warranty only for a reason this part gives: a piece that shows no manufacturing defect, a piece lost or whose theft is reported, a warranty ended or voided. It always says which.
+
+**Territory.** The ORBES warranties apply in every country where ORBES or an authorised retailer sells its pieces.
+
+**PRIVATE CARE.** From PLATINE (article 12), the pieces of an account have PRIVATE CARE: an inspection, a cleaning and a polishing of each piece by ORBES, free of charge, once a year each, asked for from the piece in MY PIECES, with a prepaid label both ways. It is a benefit of the tiers: THE CLUB describes it, and article 12 applies to it.
+
+**Your rights by law.** The ORBES warranties add to your rights and never take their place. Whatever they say, the seller owes the legal guarantee of conformity (articles L. 217-3 to L. 217-20 of the French Consumer Code, 2 years from delivery) and the guarantee against hidden defects (articles 1641 to 1648 and 2232 of the French Civil Code). These legal guarantees do not depend on registering the piece, nor on an ORBES account: the buyer claims them from the seller. A claim handled under the legal guarantee never uses the free replacement of the lifetime warranty, and is never settled by a credit.
+
+**Written conditions.** These conditions are given with each order, in English and in French, as a PDF in the DOCUMENTS of the order in MY PIECES, next to its invoice (ORBES CARE CONDITIONS), and stay published here.
+
+*Code: R42, R52, R53, R54, R55, R92, R156, R157, R158, R159, R160, R161, R163, R164, N11.*
 
 ## Article 12 — Releases and the private salon
 
@@ -190,7 +224,7 @@ A LIVE RELEASE is a release that takes place live, without a draw: ORBES announc
 
 **Your turn.** When enough pieces of your size are free for the quantity you chose and you are next in the line for that size, it is your turn. You then have 30 seconds, unless the release sets another time (from 10 to 300 seconds, which may differ by tier), to press and hold, on your screen, the ORBES CODE of the room, a specimen that is no piece's code, until its ring is full. The service secures the piece only for a hold of at least 1.4 seconds, measured by its own clock. A turn not taken in time passes, and its piece goes to the next in line.
 
-**Your piece.** Once secured, the piece is held for you for 5 minutes, unless the release sets another time (from 1 to 60 minutes, which may differ by tier). Meanwhile you may choose the options the release offers, at most 6, for example an engraving, a gift box or ORBES Care, each at the price the release sets, kept as it was when you chose it; then press PAY, or give the piece back with RELEASE MY PLACE. A piece not confirmed in time is no longer held, and its options lapse with it.
+**Your piece.** Once secured, the piece is held for you for 5 minutes, unless the release sets another time (from 1 to 60 minutes, which may differ by tier). Meanwhile you may choose the options the release offers, at most 6, for example an engraving or a gift box, each at the price the release sets, kept as it was when you chose it; then press PAY, or give the piece back with RELEASE MY PLACE. A piece not confirmed in time is no longer held, and its options lapse with it.
 
 **PAY.** PAY confirms the reservation of the piece held, with its options and their total, and creates its order, one per piece (article 14). Nothing is paid on the service: ORBES Client Services contacts you for payment and delivery, then concludes the sale with you, outside the service, or cancels the order. MY PIECES shows your reservation, its reference and its order.
 
@@ -256,7 +290,7 @@ The lock ends every session of the account, revokes its recovery code, withdraws
 
 ORBES processes the data of the service (account, registrations, scans, entries and reservations in releases, entries, options and reservations in the LIVE RELEASES, answers to the question after, orders and their invoices, answers and votes in the circle, requests in the private salon) as its privacy policy describes, which also says how ORBES groups collectors and counts their activity by hour. The service sends your orders to no online store. You can ask ORBES Client Services for a copy of everything the ORBES registry holds about your account. Your requests in the private salon, with your notes, are in that copy. Your entries in the LIVE RELEASES, with their options, and your I'LL BE THERE are in that copy. Your orders, with the buyer's name and address, their steps and their invoices, and your answers to the questions after are in that copy.
 
-*Code: R21, R90, R117, R133, R139, R144, R145, R151, N10.*
+*Code: R21, R90, R117, R133, R139, R144, R145, R151, R162, N10.*
 
 ## Article 18 — Liability
 

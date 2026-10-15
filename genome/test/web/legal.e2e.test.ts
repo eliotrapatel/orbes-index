@@ -140,7 +140,8 @@ describe.skipIf(!HAS_CHROMIUM)('legal pages (Chromium, mobile)', () => {
     for (const lang of ['en', 'fr'] as const) {
       const { page, problems } = await open(`/legal/terms?lang=${lang}`);
       const article = (n: number) => page.locator(`#article-${n}`).locator('xpath=..');
-      // Article 1: "MY PIECES also presents ORBES Care (article 11)"; article 13: "the owners from a tier (article 12)".
+      // Article 1: "MY PIECES also presents ORBES CARE, the warranty and the care of each piece (article 11)"; article 13:
+      // "the owners from a tier (article 12)".
       const care = article(1).locator('a[href="#article-11"]');
       await textOf(care, 'article 11');
       expect(await care.getAttribute('class')).toMatch(/\bn-ivc\b.*\bn-u\b/);

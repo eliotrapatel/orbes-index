@@ -8,8 +8,8 @@
  * (Dockerfile), so the server cannot read the published terms (src/web/legal/content/terms.ts). CARE_CONDITIONS holds
  * article 11 in English and in French as the terms publish it: its title and its bold-led paragraphs, the review line
  * (*Code: …*) left out as the published page leaves it, the link to the legal notice as its words.
- * test/web/legal.content.test.ts holds it to terms.ts article 11, and CARE_CONDITIONS_VERSION to LEGAL_VERSION, once
- * the terms publish it (step 4.1).
+ * test/web/legal.content.test.ts holds it to terms.ts article 11, block by block, and CARE_CONDITIONS_VERSION to
+ * LEGAL_VERSION (the terms publish it since step 4.1).
  *
  * A4, black on white, on the invoice's grid (./invoice.ts): the word ORBES, ORBES CARE CONDITIONS and the monogram;
  * VERSION (the version's date) and ORDER (the order it is given with); then ARTICLE 11 - ORBES CARE AND THE WARRANTIES
@@ -36,9 +36,10 @@ export interface CareConditionsArticle {
 
 /**
  * The version of the terms in force, whose article 11 this file holds (YYYY-MM-DD): the date the PDF prints and its
- * file's date. It moves with LEGAL_VERSION (src/web/legal/content/index.ts), step 4.1 holding the two equal.
+ * file's date. It moves with LEGAL_VERSION (src/web/legal/content/index.ts): test/web/legal.content.test.ts holds the
+ * two equal.
  */
-export const CARE_CONDITIONS_VERSION = '2026-10-10';
+export const CARE_CONDITIONS_VERSION = '2026-10-15';
 
 /** Article 11 of the terms, in English and in French, as published (plan ORBES CARE §2(d)). */
 export const CARE_CONDITIONS: Readonly<{ en: CareConditionsArticle; fr: CareConditionsArticle }> = Object.freeze({

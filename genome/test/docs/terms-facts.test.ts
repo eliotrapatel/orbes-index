@@ -43,9 +43,12 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SESSION_TTL_HOURS } from '../../src/server/config.js';
+import { WARRANTY_CLAIM_OUTCOMES_BY_BASIS, WARRANTY_CLAIM_REFUSALS_BY_BASIS } from '../../src/server/db/schema.js';
 import { registerAccountBody } from '../../src/server/http/schemas.js';
+import { CARE_CONDITIONS_VERSION } from '../../src/server/render/care-conditions.js';
 import { RECOVERY_ATTEMPT_LIMIT, RECOVERY_ATTEMPT_WINDOW_MS, RECOVERY_CODE_TTL_MS, TRANSFER_FREEZE_MS } from '../../src/server/services/account-recovery.js';
 import { ACCOUNT_LOGIN_THROTTLE, PASSWORD_MIN_LENGTH } from '../../src/server/services/auth.js';
+import { CARE_LABEL_RETENTION_MS } from '../../src/server/services/care.js';
 import { CIRCLE_LINK_HOSTS } from '../../src/server/services/circle.js';
 import { CLUB_EXCLUDED_STATUSES, CLUB_TIER_NAMES, CLUB_TIER_THRESHOLDS, tierForPieces, tierName } from '../../src/server/services/club.js';
 import { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES } from '../../src/server/services/after-room.js';
@@ -84,6 +87,7 @@ import { RETURN_WINDOW_DAYS } from '../../src/server/services/parcels.js';
 import { SALE_TOKEN_TTL_MS } from '../../src/server/services/sale.js';
 import { normalizeShopNote, SHOP_NOTE_MAX } from '../../src/server/services/salon.js';
 import { SCAN_TOKEN_TTL_MS, TRANSFER_TOKEN_TTL_MS } from '../../src/server/services/scan-tokens.js';
+import { WARRANTY_CREDIT_VALIDITY_MONTHS } from '../../src/server/services/warranty-claims.js';
 import { dateInWords, LEGAL_VERSION } from '../../src/web/legal/content/index.js';
 import { LEGAL_IDENTITY } from '../../src/web/legal/content/notice.js';
 import { ASSURANCE_NOTE, LEGAL as LEGAL_COPY, RESALE_GUIDANCE } from '../../src/web/verify/copy.js';
@@ -459,6 +463,49 @@ const CONSTANTS: Record<string, ConstantSpec> = {
     holds: () => expect([AFTER_ROOM_DELAY_MINUTES.default, AFTER_ROOM_LENGTH_MINUTES.default]).toEqual([10, 15]),
   },
   LIVE_MIN_PARTICIPATIONS: { value: `de ${LIVE_MIN_PARTICIPATIONS.min} à ${LIVE_MIN_PARTICIPATIONS.max} sorties` },
+  // ORBES CARE (plan of 2026-10-15): the lifetime warranty's 30 % after its free replacement (THE PROGRAM's, D5) and
+  // the 12 months of its credits (R159), the terms' article 11 stating both.
+  'DEFAULT_PROGRAM.warrantyCreditPercent, WARRANTY_CREDIT_VALIDITY_MONTHS': {
+    value: `${DEFAULT_PROGRAM.warrantyCreditPercent} %, valable ${WARRANTY_CREDIT_VALIDITY_MONTHS} mois`,
+    fr: [`un crédit de ${DEFAULT_PROGRAM.warrantyCreditPercent} % de la valeur de la pièce`, `vaut ${WARRANTY_CREDIT_VALIDITY_MONTHS} mois`],
+    en: [`a credit of ${DEFAULT_PROGRAM.warrantyCreditPercent} % of the piece's value`, `valid ${WARRANTY_CREDIT_VALIDITY_MONTHS} months`],
+    holds: () => {
+      // The console's bounds hold the default (THE PROGRAM, R159: 1 to 100 %).
+      expect(DEFAULT_PROGRAM.warrantyCreditPercent).toBeGreaterThanOrEqual(PROGRAM_LIMITS.warrantyCredit.min);
+      expect(DEFAULT_PROGRAM.warrantyCreditPercent).toBeLessThanOrEqual(PROGRAM_LIMITS.warrantyCredit.max);
+    },
+  },
+  WARRANTY_CLAIM_REFUSALS_BY_BASIS: {
+    value: '—',
+    holds: () => {
+      // R160: each warranty refuses only for its own reasons: the lifetime warranty never ends (no WARRANTY_ENDED), the
+      // 2-year one covers manufacturing defects only (no accident exclusion), the legal guarantee three reasons.
+      expect(WARRANTY_CLAIM_REFUSALS_BY_BASIS.LIFETIME).not.toContain('WARRANTY_ENDED');
+      expect([...WARRANTY_CLAIM_REFUSALS_BY_BASIS.TWO_YEARS].sort()).toEqual(['LOST', 'NO_FAULT_FOUND', 'THEFT_REPORTED', 'WARRANTY_ENDED', 'WARRANTY_VOID']);
+      expect([...WARRANTY_CLAIM_REFUSALS_BY_BASIS.LEGAL].sort()).toEqual(['DAMAGED_BY_SOMEONE_ELSE', 'DAMAGED_ON_PURPOSE', 'NO_FAULT_FOUND']);
+    },
+  },
+  WARRANTY_CLAIM_OUTCOMES_BY_BASIS: {
+    value: '—',
+    holds: () => {
+      // R161, R163: a credit only under the lifetime warranty; the 2-year warranty repairs or replaces; the legal
+      // guarantee its own remedies, never a credit; the lifetime warranty never a repair.
+      for (const basis of ['TWO_YEARS', 'LEGAL'] as const) for (const credit of ['VALUE_CREDIT', 'PART_CREDIT'] as const) expect(WARRANTY_CLAIM_OUTCOMES_BY_BASIS[basis], basis).not.toContain(credit);
+      expect([...WARRANTY_CLAIM_OUTCOMES_BY_BASIS.TWO_YEARS].sort()).toEqual(['REFUSED', 'REPAIR', 'REPLACEMENT']);
+      expect([...WARRANTY_CLAIM_OUTCOMES_BY_BASIS.LEGAL].sort()).toEqual(['PRICE_REDUCTION', 'REFUND', 'REFUSED', 'REPAIR', 'REPLACEMENT']);
+      expect(WARRANTY_CLAIM_OUTCOMES_BY_BASIS.LIFETIME).not.toContain('REPAIR');
+    },
+  },
+  CARE_LABEL_RETENTION_MS: {
+    // R162: a claim's prepaid label, like PRIVATE CARE's, erased 30 days after its end (the privacy policy says so).
+    value: `${CARE_LABEL_RETENTION_MS / DAY} jours`,
+    holds: () => expect(CARE_LABEL_RETENTION_MS % DAY).toBe(0),
+  },
+  CARE_CONDITIONS_VERSION: {
+    value: '—',
+    // R164: the ORBES CARE CONDITIONS PDF prints the version of the terms in force.
+    holds: () => expect(CARE_CONDITIONS_VERSION).toBe(LEGAL_VERSION),
+  },
   LIVE_QUESTION_OPEN_DAYS: {
     value: `${LIVE_QUESTION_OPEN_DAYS} jours`,
     fr: [`pendant ${LIVE_QUESTION_OPEN_DAYS} jours`],
@@ -505,7 +552,12 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'the export lists the requests (P-X08)': 'shopRequests,',
   'the lock closes the open requests, before the transfers are cancelled (P-X08)': 'closeAccountShopRequests(tx, account.id, actor, now)',
   'a discontinued model\'s pieces verify as before, said DISCONTINUED with the year (P-R06)': 'discontinuedYear: reg.modelDiscontinuedAt.getUTCFullYear()',
-  'SUBSCRIBE of ORBES Care only once its address is published (P-M02)': "field('CARE_SUBSCRIBE_URL', zHttpsLink, e.CARE_SUBSCRIBE_URL) ?? null",
+  // ORBES CARE (plan of 2026-10-15) replaces the subscription of P-M02, removed (answer 1).
+  'ORBES CARE, one tab of each piece, nothing sold (answers 1, 6)': "tabs: Object.freeze({ ownership: 'OWNERSHIP', care: 'ORBES CARE', service: 'SERVICE' }),",
+  'a warranty per model, followed by its pieces not VOID (answer 12)': "await tx.updateTable('models').set({ warranty_lifetime: lifetime }).where('id', '=', id).execute();",
+  'only the registered owner who wrote claims under the ORBES warranty (answer 3)': 'owner.account_id !== accountId) throw claimNotRegistered();',
+  'one free replacement per original purchase, lifetime warranty (answer 4)': "if (isUniqueViolation(e, 'warranty_claims_free_once')) throw claimFreeUsed();",
+  'the conditions given with every order (answer 14)': 'careConditions: true,',
   'no stage of a LIVE RELEASE before its time (choice 30)': 'photo: t >= photoAt,',
   'access by tier, model or collection, read again at each step (choices 1, 35)': "if ((d.live_min_tier ?? 0) > 0) rules.push({ rule: 'TIER', met: async () => tier >= (d.live_min_tier ?? 0) });",
   'the room opens before T0 (choice 16)': 'if (now.getTime() < roomOpensAt(d).getTime()) throw roomNotOpen(roomOpensAt(d));',
@@ -688,6 +740,22 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
     // The exports exist, as files of the console.
     expect(ROUTES).toContainEqual({ method: 'get', path: '/api/admin/shopify/orders.csv' });
     expect(ROUTES).toContainEqual({ method: 'get', path: '/api/admin/shopify/products.csv' });
+  },
+  N11: () => {
+    // ORBES CARE (plan of 2026-10-15, answers 3 and 9): no claim button, photo nor form. A claim is opened by ORBES Client
+    // Services from the console; the collector's only route of a warranty claim reads its prepaid label.
+    expect(ROUTES.filter((r) => !r.path.startsWith('/api/admin/') && /warrant/i.test(r.path))).toEqual([{ method: 'get', path: '/api/v1/account/warranty-claims/:id/label.pdf' }]);
+    expect(ROUTES).toContainEqual({ method: 'post', path: '/api/admin/warranty-claims' });
+    const verify = SOURCES.filter(({ file }) => file.startsWith(join('src', 'web', 'verify')));
+    expect(verify.length).toBeGreaterThan(20);
+    expect(verify.filter(({ text }) => text.includes('warranty-claims')).map(({ file }) => file)).toEqual([join('src', 'web', 'verify', 'api.ts')]);
+    const api = readDoc('genome/src/web/verify/api.ts');
+    expect([...api.matchAll(/this\.send\('(\w+)', `\/api\/v1\/account\/warranty-claims\//g)].map((m) => m[1])).toEqual(['GET']);
+    // The claim's block in the ORBES CARE tab: words and one button, DOWNLOAD LABEL; no field, form or upload.
+    const block = readDoc('genome/src/web/verify/views/warranty-claim.ts');
+    expect(block).not.toMatch(/h\('(?:input|form|textarea|select)'|type: 'file'|FormData/);
+    expect(block.match(/\bbutton\(/g) ?? []).toHaveLength(1);
+    expect(block).toContain('button(m.download,');
   },
 };
 

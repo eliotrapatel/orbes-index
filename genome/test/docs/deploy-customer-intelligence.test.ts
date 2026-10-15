@@ -192,8 +192,10 @@ describe('the runbook of the customer intelligence, part I1 (docs/launch/DEPLOY-
   });
 
   it("tells ORBES Client Services before, keeps the legal version, one real check per feature, the next morning and what stays open", () => {
-    // No legal page moves in this lot (plan §0.12).
-    expect(LEGAL_VERSION).toBe(H2_LEGAL_VERSION);
+    // No legal page moves in this lot (plan §0.12): H2's version stays the one in force through I1 and I2. A later lot
+    // moves it after them (ORBES CARE, plan of 2026-10-15, with its own runbook), H2's line staying published.
+    expect(LEGAL_VERSION >= H2_LEGAL_VERSION).toBe(true);
+    expect(readDoc('genome/test/web/legal.content.test.ts')).toContain(`'${H2_LEGAL_VERSION}': '`);
     expect(i1).toContain(`Sortie attendue : \`export const LEGAL_VERSION = '${H2_LEGAL_VERSION}';\`, celle de H2, inchangée.`);
     expect(section(runbook, '## 0.')).toContain('ne retient jamais le déploiement');
     const before = section(runbook, '### 1.1');
@@ -353,7 +355,8 @@ describe('the runbook of the customer intelligence, part I2 (docs/launch/DEPLOY-
     expect(section(runbook, '### 2.5')).toContain(`**jamais \`scripts/deploy.sh --image ${PROD_TAG}\`**`);
     expect(section(runbook, '### 2.4')).toContain("**Note le nom de l'archive et sa taille en octets**");
     // No legal page moves (plan §0.12).
-    expect(LEGAL_VERSION).toBe(H2_LEGAL_VERSION);
+    // Still H2's through I2; a later lot (ORBES CARE, plan of 2026-10-15) moves it after.
+    expect(LEGAL_VERSION >= H2_LEGAL_VERSION).toBe(true);
     expect(i2).toContain(`Sortie attendue : \`export const LEGAL_VERSION = '${H2_LEGAL_VERSION}';\`, toujours celle de H2, inchangée.`);
     for (const c of commandsI2) expect(c.split('\n'), c).toHaveLength(1);
   });

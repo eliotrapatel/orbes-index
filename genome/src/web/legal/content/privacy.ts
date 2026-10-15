@@ -67,9 +67,14 @@
  *    audited `shop.request` and `shop.request.close` with the model only,
  *    never a note; kept with the account (no purge), exported with it
  *    (AccountExport.shopRequests), and closed when the account is locked;
- *  - ORBES Care (P-M02): SUBSCRIBE, once CARE_SUBSCRIBE_URL is set, opens a
- *    third-party page (Whop) in a new tab, rel="noopener noreferrer": the
- *    service sends it neither the account nor the piece;
+ *  - the warranty claims (plan ORBES CARE of 2026-10-15, services/
+ *    warranty-claims.ts, migration 0048): a claim under the ORBES warranty
+ *    or the legal guarantee is kept with the account (its steps, outcome and
+ *    any WARRANTY credit), exported with it (AccountExport.warrantyClaims),
+ *    its staff note and who opened or decided it never sent to the
+ *    collector; its prepaid label's PDF erased CARE_LABEL_RETENTION_MS
+ *    (30 days) after the claim ends (eraseCareLabels). The paid ORBES Care
+ *    subscription and its third-party page are removed (answer 1);
  *  - the orders (plan LIVE RELEASE+ of 2026-10-04, services/orders.ts,
  *    migration 0022): one per piece reserved (PAY, a draw's entry confirmed,
  *    a salon request ACCEPTED), its source, model, size, price, add-ons,
@@ -172,7 +177,7 @@ const EN: LegalDocument = {
         'Each sign-in opens a session of 30 days at most. It is kept with a pseudonym of your IP address and the identification string of your browser (its user agent), for the security of your account.',
         "The service's audit log, which records every change, names your account by its identifier and a pseudonym of the IP address, never by your email address or your name.",
         'The sizes you save in YOUR SIZES are kept with your account until you clear them, and only preselect a size you then confirm.',
-        'In MY PIECES, SUBSCRIBE of ORBES Care, once ORBES publishes it, opens a third-party page (Whop) in a new tab. That page collects its own data under its own policy; the service sends it neither your account nor your piece.',
+        'When you claim under the warranty or the legal guarantee, ORBES keeps the claim with your account: its steps, its outcome and any credit, which the copy of your data includes. The prepaid label, which carries your address, is erased 30 days after the claim ends.',
       ],
     },
     {
@@ -375,7 +380,7 @@ const FR: LegalDocument = {
         "Chaque connexion ouvre une session de 30 jours au plus. Elle est gardée avec un pseudonyme de votre adresse IP et la chaîne d'identification de votre navigateur (son user agent), pour la sécurité de votre compte.",
         "Le journal d'audit du service, qui enregistre chaque modification, désigne votre compte par son identifiant et un pseudonyme de l'adresse IP, jamais par votre adresse e-mail ni par votre nom.",
         "Les tailles que vous enregistrez dans YOUR SIZES sont conservées avec votre compte jusqu'à ce que vous les effaciez, et ne font que présélectionner une taille que vous confirmez ensuite.",
-        "Dans MY PIECES, SUBSCRIBE d'ORBES Care, une fois qu'ORBES le publie, ouvre une page tierce (Whop) dans un nouvel onglet. Cette page collecte ses propres données selon sa propre politique ; le service ne lui transmet ni votre compte ni votre pièce.",
+        "Quand vous faites jouer la garantie ou la garantie légale, ORBES conserve la demande avec votre compte : ses étapes, son issue et l'éventuel crédit, que la copie de vos données comprend. L'étiquette prépayée, qui porte votre adresse, est effacée 30 jours après la fin de la demande.",
       ],
     },
     {
