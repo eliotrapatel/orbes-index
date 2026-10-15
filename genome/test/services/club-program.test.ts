@@ -202,6 +202,9 @@ describe('THE PROGRAM and SHIPPING (BP-19 T2)', () => {
     expect(() => checkProgram({ ...program(), birthdayCreditOn: 1 })).toThrow('The birthday credit is given or not: true or false.');
     // PLATINE's PRIVATE CARE every piece (null, migration 0048, plan ORBES CARE step 1.1), as PALLADIUM's.
     expect(checkProgram({ ...program(), carePiecesPlatine: null })).toMatchObject({ carePiecesPlatine: null, carePiecesPalladium: null });
+    // Its refusal in the console's words, PRIVATE CARE (answer 5; the completeness audit, CARE-A).
+    expect(() => checkProgram({ ...program(), carePiecesPlatine: 21 })).toThrow('PLATINE’s PRIVATE CARE, in pieces, is 0 to 20.');
+    expect(() => checkProgram({ ...program(), carePiecesPalladium: -1 })).toThrow('PALLADIUM’s PRIVATE CARE, in pieces, is 0 to 20.');
     // The warranty credit (plan ORBES CARE, step 1.4): its words, and its bounds reached.
     expect(() => checkProgram({ ...program(), warrantyCreditPercent: 101 })).toThrow('The warranty credit, in percent of the piece’s value, is 1 to 100.');
     expect(checkProgram(program({ warrantyCreditPercent: 1 })).warrantyCreditPercent).toBe(1);

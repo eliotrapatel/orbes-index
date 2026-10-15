@@ -83,7 +83,7 @@ genome/
                          now-model.ts: a LIVE RELEASE, a draw or the newest model leads); mobile scanner: camera
                          capture, decoder worker, result views; MY PIECES (/verify/pieces, its tabs PIECES ·
                          ORDERS · RELEASES) and a piece (/verify/pieces/<id>, views/piece.ts, its tabs
-                         OWNERSHIP · WARRANTY · SERVICE · CARE), an ownership
+                         OWNERSHIP · ORBES CARE · SERVICE), an ownership
                          certificate's page (/verify/c#token), THE COLLECTION, the lookbook of the models
                          (/verify/lookbook) and THE PRIVATE SALON for an owner,
                          THE RELEASES, the drops, their early access and their draw (/verify/releases),
