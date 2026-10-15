@@ -2132,6 +2132,11 @@ fieldset.cfield--checks > .cfield__label {
   margin-top: 6px;
 }
 
+/* Edit model's live warranty line, then the care preview: set apart as a field from the next. */
+.dialog__live > .dialog__text + .care-preview {
+  margin-top: 24px;
+}
+
 /* The care block of a model as the client reads it on /verify (catalogue,
    A-10): the ORBES CARE tab, centred over its hairline and underlined in ink as
    verify's selected tab (.tabs__tab), then the instructions in brand.css
@@ -4652,6 +4657,11 @@ fieldset.cfield--checks > .cfield__label {
   .page-head {
     flex-direction: column;
     align-items: flex-start;
+  }
+  /* A page's actions wider than the phone (a claim's page: four) go to a second line instead of out of the screen. */
+  .page-head__actions {
+    flex-wrap: wrap;
+    max-width: 100%;
   }
   .sheet__row,
   .deflist__row {

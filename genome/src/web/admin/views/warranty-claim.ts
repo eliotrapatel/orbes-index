@@ -251,7 +251,7 @@ export async function warrantyClaimView(ctx: ViewContext): Promise<HTMLElement> 
   const f = s.freeReplacement;
   const facts = defList([
     { label: 'Status', value: h('span', { attrs: { 'data-testid': 'claim-status' } }, statusMark(CLAIM_STATUS_LABELS[s.status], toneOf('claim', s.status))) },
-    { label: 'Basis', value: h('span', { attrs: { 'data-testid': 'claim-basis' } }, CLAIM_BASIS_LABELS[s.basis]), note: 'Read from the piece when the claim was opened' },
+    { label: 'Basis', value: h('span', { attrs: { 'data-testid': 'claim-basis' } }, CLAIM_BASIS_LABELS[s.basis]), note: s.basis === 'LEGAL' ? undefined : 'Read from the piece when the claim was opened' },
     { label: 'Piece', value: link(productHref(s.piece.productId), s.piece.productId, 'claim-piece'), note: s.piece.model },
     ...(s.rootProductId !== s.piece.productId ? [{ label: 'Original piece', value: link(productHref(s.rootProductId), s.rootProductId, 'claim-root') }] : []),
     {
