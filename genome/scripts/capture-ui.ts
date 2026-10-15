@@ -394,16 +394,18 @@ async function captureVerify(stage: Stage, shots: Shots, workDir: string): Promi
     if (state !== 'AUTHENTIC_FIRST_REGISTRATION') throw new Error(`${FIRST_REGISTRATION} verified as ${state}`);
     await shots.full(page, 'verify-04-result-first-registration');
 
+    // ORBES CARE (plan of 2026-10-15) holds the warranty: verify-06 is that tab whole (its WARRANTY first), verify-07
+    // its CARING FOR THIS PIECE; the old file names kept.
     const tabs: [string, string][] = [
       ['product', 'verify-05-tab-product'],
-      // ORBES CARE (plan of 2026-10-15) holds the warranty: no WARRANTY tab, so no verify-06; the old file names kept.
-      ['care', 'verify-07-tab-care'],
+      ['care', 'verify-06-tab-warranty'],
       ['ownership', 'verify-08-tab-ownership'],
     ];
     for (const [id, name] of tabs) {
       await page.click(`#tab-${id}`);
       await sleep(900); // panel fade (0.7 s), underline draw
       await shots.region(page, '.n-result__tabs', name);
+      if (id === 'care') await shots.region(page, '.n-result__care-guide', 'verify-07-tab-care');
     }
     await context.close();
   } finally {

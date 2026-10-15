@@ -978,11 +978,11 @@ The client recomputes the genome from the glyphs it received and draws the orbit
 <table>
 <tr>
 <td width="50%"><img src="assets/ui/verify-05-tab-product.png" width="330" alt="PRODUCT tab: product rows and VERIFICATION rows"></td>
-<td width="50%"><img src="assets/ui/verify-06-tab-warranty.png" width="330" alt="The ORBES CARE tab, its WARRANTY: status ACTIVE, from and until dates, one sentence"><br><br><img src="assets/ui/verify-07-tab-care.png" width="330" alt="The ORBES CARE tab, CARING FOR THIS PIECE: care instructions in prose"></td>
+<td width="50%"><img src="assets/ui/verify-06-tab-warranty.png" width="330" alt="The ORBES CARE tab: its WARRANTY (status ACTIVE · LIFETIME, from its date, the sentence of its kind), CARING FOR THIS PIECE and the contact sentence"><br><br><img src="assets/ui/verify-07-tab-care.png" width="330" alt="The ORBES CARE tab, CARING FOR THIS PIECE: care instructions in prose"></td>
 </tr>
 <tr>
 <td valign="top"><b>PRODUCT.</b> Facts as label/value rows (a DISCONTINUED row with the year once its model is discontinued, P-R06), then VERIFICATION: signature, code version and issue, genome version, issue date, assurance. This is where the technology lives, in plain words.</td>
-<td valign="top"><b>WARRANTY</b> and <b>CARE.</b> Status rows with one explanatory sentence; care as prose from the model (a default text otherwise).</td>
+<td valign="top"><b>ORBES CARE.</b> The warranty's status rows with the sentence of its kind (ACTIVE · LIFETIME without an end date, or ACTIVE until its date); CARING FOR THIS PIECE as prose from the model (a default text otherwise); then the sentence that ORBES Client Services answers in MESSAGES.</td>
 </tr>
 <tr>
 <td colspan="2"><img src="assets/ui/verify-08-tab-ownership.png" width="330" alt="OWNERSHIP tab: REGISTRATION OPEN, sign-in form"><br><b>OWNERSHIP.</b> Registration with the claim code from the certificate card, sign-in or account creation, transfer codes, and RECEIVING THIS PIECE for the piece scanned only (F-03, §4.4); under sign-in, FORGOTTEN PASSWORD? (ORBES Client Services, then the recovery code), and, signed in, MY PIECES beside SIGN OUT (§4.4). Fields are single hairlines; errors are one sentence preceded by an em dash; secrets are never stored beyond the form.</td>
