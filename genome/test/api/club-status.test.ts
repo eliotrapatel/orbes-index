@@ -4,7 +4,8 @@
  *  - `program`: the lines THE PROGRAM gives the account's tier now: the early access, shipping and care of its own
  *    tier, the priority from the tier it starts from, the gift and the credit of its own tier only, the experiences it
  *    is invited to; none without a tier; NEXT's `program`, what the next tier's program adds;
- *  - `inUse`: the credit left and until when, usable now; the yearly care of the year (null when the tier gives none);
+ *  - `inUse`: the credit left and until when, usable now; PRIVATE CARE of the year (null when the tier gives none;
+ *    every piece for PLATINE too by default, plan ORBES CARE step 1.4);
  *    a PENDING welcome gift only while its tier is held and has an active gift model, WITH_ORDER from its order until
  *    it is delivered; the channels THE PROGRAM takes the credit off (`creditChannels`), which its note names; the
  *    birthday credit left (`birthdayCredit`, plan CUSTOMER INTELLIGENCE §3.5 SB.4.3) apart from the tiers' credit,
@@ -76,19 +77,22 @@ describe('YOUR TIER: the program and the benefits in use (BP-19 T10)', () => {
     expect(platine.program).toEqual([
       'Early access to each draw: a place reserved directly 2 hours before entries open to everyone, unless its page says otherwise.',
       'Free shipping on every order.',
-      'The yearly care of 1 piece a year by the ORBES atelier, asked for from the piece, with a prepaid label both ways.',
+      'PRIVATE CARE: the inspection, cleaning and polishing of every piece by ORBES, free, once a year each, asked for from the piece, with a prepaid label both ways.',
       'Priority with ORBES Client Services: your messages are read first.',
       'A credit of € 50, valid 12 months, on a piece from a draw, a LIVE RELEASE or THE PRIVATE SALON.',
       'The members’ evening, once a year, by invitation in THE CIRCLE.',
     ]);
     // PLATINE's words by default are none: its benefits are TITANE's words only.
     expect(platine.benefits).toEqual(CLUB_TIER_DEFAULT_BENEFITS.TITANE.split('\n'));
+    // What PALLADIUM adds says no PRIVATE CARE line: PLATINE's already gives every piece (plan ORBES CARE, step 1.4).
+    expect(platine.next!.program).toEqual(programLines(DEFAULT_PROGRAM, 3));
+    expect(platine.next!.program.filter((l) => l.startsWith('PRIVATE CARE'))).toEqual([]);
     // PALLADIUM: its own early access, shipping and care; the priority it holds from PLATINE; its own credit only.
     const palladium = await status((await holding(10)).client);
     expect(palladium.program).toEqual([
       'Early access to each draw: a place reserved directly 4 hours before entries open to everyone, unless its page says otherwise.',
       'Free express shipping on every order.',
-      'The yearly care of every piece by the ORBES atelier, once a year each, asked for from the piece, with a prepaid label both ways.',
+      'PRIVATE CARE: the inspection, cleaning and polishing of every piece by ORBES, free, once a year each, asked for from the piece, with a prepaid label both ways.',
       'Priority with ORBES Client Services: your messages are read first.',
       'A credit of € 100, valid 12 months, on a piece from a draw, a LIVE RELEASE or THE PRIVATE SALON.',
       'The members’ evening, once a year, by invitation in THE CIRCLE.',
@@ -105,7 +109,7 @@ describe('YOUR TIER: the program and the benefits in use (BP-19 T10)', () => {
       credit: { balanceMinor: 5000, currency: 'EUR', expiresAt: addUtcMonths(now, 12).toISOString() },
       // No birthday credit given: none.
       birthdayCredit: null,
-      care: { year: 2026, used: 0, allowance: 1 },
+      care: { year: 2026, used: 0, allowance: 'ALL' },
       // No gift model in THE PROGRAM: no WELCOME GIFT row, never a gift that would not come.
       gifts: [],
       // THE PROGRAM's "Credit usable on", which the note under CREDIT names.
@@ -136,13 +140,15 @@ describe('YOUR TIER: the program and the benefits in use (BP-19 T10)', () => {
       .where('with_order_id', '=', parent)
       .execute();
     expect((await status(a.client)).inUse.gifts).toEqual([]);
-    // The yearly care asked for counts; a tier whose care is 0 has no YEARLY CARE row.
+    // PRIVATE CARE asked for counts; a tier whose care is 0 has no PRIVATE CARE row.
     const serial = (await h.t.db.selectFrom('ownership as o').innerJoin('products as p', 'p.id', 'o.product_id').select('p.product_id').where('o.account_id', '=', a.id).executeTakeFirstOrThrow()).product_id;
     await h.ctx.services.care.request(a.id, serial, { name: 'A. Owner', address: '1 rue de Rivoli, Paris' }, { type: 'account', id: a.id });
+    expect((await status(a.client)).inUse.care).toEqual({ year: 2026, used: 1, allowance: 'ALL' });
+    await setProgram({ carePiecesPlatine: 1 });
     expect((await status(a.client)).inUse.care).toEqual({ year: 2026, used: 1, allowance: 1 });
     await setProgram({ carePiecesPlatine: 0, giftPlatineModelId: null });
     expect((await status(a.client)).inUse.care).toBeNull();
-    await setProgram({ carePiecesPlatine: 1 });
+    await setProgram({ carePiecesPlatine: null });
     // Below its tier, the credit waits: no row; TITANE has no care row either.
     const titane = await holding(1);
     expect((await status(titane.client)).inUse).toEqual({ credit: null, birthdayCredit: null, care: null, gifts: [], creditChannels: ['DRAW', 'LIVE', 'SALON'] });

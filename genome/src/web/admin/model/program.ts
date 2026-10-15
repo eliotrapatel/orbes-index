@@ -35,6 +35,7 @@ export const PROGRAM_LIMITS = Object.freeze({
   fee: Object.freeze({ min: 0, max: 100_000_000 }),
   birthdayCredit: Object.freeze({ min: 1, max: 100_000_000 }),
   birthdayDays: Object.freeze({ min: 1, max: 365 }),
+  warrantyCredit: Object.freeze({ min: 1, max: 100 }),
 });
 
 const TIER_WORDS: Readonly<Record<1 | 2 | 3, string>> = Object.freeze({ 1: 'TITANE', 2: 'PLATINE', 3: 'PALLADIUM' });

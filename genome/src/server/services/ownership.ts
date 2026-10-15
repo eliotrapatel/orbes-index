@@ -610,7 +610,7 @@ export class OwnershipService {
       // Its yearly care under way (plan NEXT-NINE, BP-19 T6): the request names this owner and their return address.
       // RECEIVED and RETURNING are already refused below (the piece is SERVICED).
       const care = await tx.selectFrom('care_requests').select('id').where('product_id', '=', p.id).where('status', 'in', ['REQUESTED', 'LABEL_SENT']).executeTakeFirst();
-      if (care) throw new DomainError('CARE_OPEN', 409, "This piece's yearly care is under way: cancel the request or wait until it returns.");
+      if (care) throw new DomainError('CARE_OPEN', 409, "This piece's PRIVATE CARE is under way: cancel the request or wait until it returns.");
       if (!TRANSFERABLE_STATUSES.includes(p.status)) {
         throw new DomainError('TRANSFER_NOT_ALLOWED', 409, 'This product cannot be transferred at this time.', { detail: `status ${p.status}` });
       }

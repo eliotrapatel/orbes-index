@@ -1,11 +1,13 @@
 /**
- * The yearly care (plan NEXT-NINE of 2026-10-06, §3.2 BP-19 T6; migration 0028; API §10.18 and §16.29): PLATINE's 1
- * piece a year and PALLADIUM's every piece (THE PROGRAM's `care_pieces_platine` and `care_pieces_palladium`), asked for
- * from the piece, with a prepaid label both ways, recorded in SERVICE HISTORY as YEARLY CARE.
+ * PRIVATE CARE, the yearly care (plan NEXT-NINE of 2026-10-06, §3.2 BP-19 T6; migration 0028; API §10.18 and §16.29;
+ * named PRIVATE CARE on screen by plan ORBES CARE, its internal names kept): every piece once a year each from PLATINE
+ * (THE PROGRAM's `care_pieces_platine` and `care_pieces_palladium`, null for every piece since migration 0048), asked
+ * for from the piece, with a prepaid label both ways, recorded in SERVICE HISTORY as YEARLY CARE.
  *
  *   status       GET /api/v1/account/products/:productId/care: the year (UTC), the tier now, its allowance (a number,
- *                'ALL' or 0), the pieces asked for this year, the piece's own request, and why it may or may not be
- *                asked for (`reason`). The tier is the one held now (services/club.ts tierOf); no grace period.
+ *                'ALL' or 0), the tier it opens from (`opens`, THE PROGRAM's lowest tier that includes it), the pieces
+ *                asked for this year, the piece's own request, and why it may or may not be asked for (`reason`). The
+ *                tier is the one held now (services/club.ts tierOf); no grace period.
  *   addressHint  the buyer name and address of the account's latest order that has an address, to prefill the request's
  *                own form (its own account only), or null.
  *   request      POST …/care {name, address}: an ACTIVE account, holding the piece now (an open ownership), the piece
@@ -17,8 +19,8 @@
  *                never in the audit log (`care.request`).
  *   cancel       by the account while REQUESTED (`care.cancel`), which gives the year's allowance back; by ORBES before
  *                the piece is shipped back, with a note (an open record cancelled with it).
- *   staff        SEND LABEL (a PDF of at most 2 MiB, `%PDF-`; its carrier and tracking number) → LABEL_SENT; RECEIVED AT
- *                THE ATELIER → RECEIVED, opening the YEARLY_CARE record (WarrantyService.openService, the piece IN
+ *   staff        SEND LABEL (a PDF of at most 2 MiB, `%PDF-`; its carrier and tracking number) → LABEL_SENT; RECEIVED BY
+ *                ORBES → RECEIVED, opening the YEARLY_CARE record (WarrantyService.openService, the piece IN
  *                SERVICE); SHIP BACK (carrier, tracking) → RETURNING, to the address the collector gave; COMPLETE (the
  *                record's notes) → DONE, the record COMPLETED and the piece back to its status. Each step in one
  *                transaction with the record it opens or closes; audited `care.label`, `care.receive`, `care.return`,
@@ -52,8 +54,8 @@ export const CARE_LABEL_MAX_BYTES = 2 * 1024 * 1024;
 export const CARE_LABEL_RETENTION_MS = 30 * 86_400_000;
 /** The return name and address, as an order's buyer (migration 0022): 1 to 200 and 1 to 1 000 characters, trimmed. */
 export const CARE_ADDRESS_LIMITS = Object.freeze({ name: 200, address: 1000, note: 500 });
-/** Where the atelier works: the location of the YEARLY_CARE record. */
-export const CARE_LOCATION = 'ORBES atelier';
+/** Where PRIVATE CARE is done: the location of the YEARLY_CARE record (plan ORBES CARE, answer 7: never "atelier"). */
+export const CARE_LOCATION = 'ORBES';
 
 /** The steps still open: the piece is with ORBES, or on its way to or from it. */
 export const CARE_OPEN_STATUSES: readonly CareRequestStatus[] = Object.freeze(['REQUESTED', 'LABEL_SENT', 'RECEIVED', 'RETURNING']);
@@ -63,12 +65,12 @@ const TRACKING_RE = /^[A-Za-z0-9][A-Za-z0-9 -]{2,39}$/;
 const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 const PDF_SIGNATURE = [0x25, 0x50, 0x44, 0x46, 0x2d]; // %PDF-
 
-export const careNotIncluded = () => new DomainError('CARE_NOT_INCLUDED', 403, 'Your tier does not include the yearly care.');
-export const careUsed = () => conflict('CARE_USED', 'Your yearly care for this year has been used for another piece.');
-export const careAlreadyRequested = () => conflict('CARE_ALREADY_REQUESTED', 'The yearly care of this piece has already been requested this year.');
-export const careUnavailable = () => conflict('CARE_UNAVAILABLE', 'The yearly care cannot be requested for this piece just now.');
+export const careNotIncluded = () => new DomainError('CARE_NOT_INCLUDED', 403, 'Your tier does not include PRIVATE CARE.');
+export const careUsed = () => conflict('CARE_USED', 'Your PRIVATE CARE for this year has been used for another piece.');
+export const careAlreadyRequested = () => conflict('CARE_ALREADY_REQUESTED', 'PRIVATE CARE for this piece has already been requested this year.');
+export const careUnavailable = () => conflict('CARE_UNAVAILABLE', 'PRIVATE CARE cannot be requested for this piece just now.');
 export const careRequestNotFound = () => notFound('Care request', 'CARE_REQUEST_NOT_FOUND');
-export const careStep = () => conflict('CARE_STEP', 'This yearly care is not at that step.');
+export const careStep = () => conflict('CARE_STEP', 'This PRIVATE CARE request is not at that step.');
 export const fileNotPdf = () => new DomainError('FILE_NOT_PDF', 415, 'Send the label itself, as a PDF.');
 export const fileTooLarge = () => new DomainError('FILE_TOO_LARGE', 413, 'The label is limited to 2 MB.');
 const addressMissing = () => validationError('Enter the name and the address the piece returns to.');
@@ -103,12 +105,20 @@ export interface CareRequestView {
   cancelledAt: Date | null;
 }
 
+/** The lowest tier whose PRIVATE CARE is not none, and its allowance (plan ORBES CARE: « PRIVATE CARE opens from PLATINE »). */
+export interface CareOpens {
+  tier: ClubTierName;
+  allowance: Exclude<CareAllowance, 0>;
+}
+
 /** GET /api/v1/account/products/:productId/care. */
 export interface CareStatus {
   /** The calendar year, in UTC. */
   year: number;
   tier: ClubTierName | null;
   allowance: CareAllowance;
+  /** The tier PRIVATE CARE opens from in THE PROGRAM now, whatever the account's; null when no tier includes it. */
+  opens: CareOpens | null;
   /** The account's requests of the year not cancelled. */
   used: number;
   /** The piece's request: an open one, else the account's latest of the year; null without one. */
@@ -173,6 +183,15 @@ export function careAllowance(p: Pick<ClubProgram, 'carePiecesPlatine' | 'carePi
   if (tier >= 3) return p.carePiecesPalladium === null ? 'ALL' : p.carePiecesPalladium;
   if (tier === 2) return p.carePiecesPlatine === null ? 'ALL' : p.carePiecesPlatine;
   return 0;
+}
+
+/** The lowest tier (PLATINE, then PALLADIUM) whose allowance in THE PROGRAM is not 0, with that allowance; null when none. */
+export function careOpens(p: Pick<ClubProgram, 'carePiecesPlatine' | 'carePiecesPalladium'>): CareOpens | null {
+  for (const t of [2, 3] as const) {
+    const allowance = careAllowance(p, t);
+    if (allowance !== 0) return { tier: tierName(t)!, allowance };
+  }
+  return null;
 }
 
 /** The return name and address as given: trimmed, line breaks kept in the address, within their limits. */
@@ -392,6 +411,7 @@ export class CareService {
       year,
       tier: tierName(standing.tier),
       allowance,
+      opens: careOpens(program),
       used,
       request: shown ? await toView(this.db, shown) : null,
       reason,
@@ -488,7 +508,7 @@ export class CareService {
       .where('c.id', '=', rid)
       .executeTakeFirst();
     if (!r || r.account_id !== accountId || !r.label_pdf) throw careRequestNotFound();
-    return { contentType: 'application/pdf', body: r.label_pdf, filename: `ORBES-YEARLY-CARE-${r.product_id}-${r.year}-LABEL.pdf` };
+    return { contentType: 'application/pdf', body: r.label_pdf, filename: `ORBES-PRIVATE-CARE-${r.product_id}-${r.year}-LABEL.pdf` };
   }
 
   // ── The console ──────────────────────────────────────────────────────────
@@ -586,7 +606,7 @@ export class CareService {
     });
   }
 
-  /** RECEIVED AT THE ATELIER (OPERATOR): the YEARLY_CARE record opened, the piece IN SERVICE, in the same transaction. */
+  /** RECEIVED BY ORBES (OPERATOR): the YEARLY_CARE record opened, the piece IN SERVICE, in the same transaction. */
   async receive(id: string, actor: Actor): Promise<CareSheet> {
     return this.step(id, ['LABEL_SENT'], actor, 'care.receive', async (tx, r, now, by) => {
       const record = await this.warranty.openService(r.product_id, { type: 'YEARLY_CARE', location: CARE_LOCATION, notes: null, performedBy: CARE_LOCATION }, actor, tx);
@@ -635,7 +655,7 @@ export class CareService {
     return this.step(id, ['REQUESTED', 'LABEL_SENT', 'RECEIVED'], actor, 'care.cancel', async (tx, r, now, by) => {
       if (r.service_record_id) {
         const open = await tx.selectFrom('service_records').select('status').where('id', '=', r.service_record_id).executeTakeFirst();
-        if (open?.status === 'OPEN') await this.warranty.cancelService(r.service_record_id, { reason: 'yearly care cancelled' }, actor, tx);
+        if (open?.status === 'OPEN') await this.warranty.cancelService(r.service_record_id, { reason: 'PRIVATE CARE cancelled' }, actor, tx);
       }
       await tx
         .updateTable('care_requests')
@@ -657,7 +677,7 @@ export class CareService {
     apply: (tx: Db, r: CareRequestRow, now: Date, by: string) => Promise<Record<string, unknown>>,
   ): Promise<CareSheet> {
     const by = adminIdOf(actor);
-    if (by === null) throw forbidden('Only ORBES Client Services handle a yearly care.');
+    if (by === null) throw forbidden('Only ORBES Client Services handle PRIVATE CARE.');
     const rid = requestId(id);
     await inTransaction(this.db, async (tx) => {
       const r = await tx.selectFrom('care_requests').selectAll().where('id', '=', rid).forUpdate().executeTakeFirst();

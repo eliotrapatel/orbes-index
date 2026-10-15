@@ -157,14 +157,15 @@ describe('the tiers of the club (P-X04)', () => {
       expect(t.benefits).not.toMatch(/!|product|token|NFT|crypto|lottery/i);
     }
     // PLATINE says nothing of its own by default: its early access and priority are THE PROGRAM's lines (plan NEXT-NINE,
-    // BP-19 T1); PALLADIUM its commissions and the atelier.
+    // BP-19 T1); PALLADIUM its commissions and its yearly visit to ORBES (plan ORBES CARE, answer 7: never "atelier").
     expect(CLUB_TIER_DEFAULT_BENEFITS.TITANE).toMatch(/circle/);
     expect(CLUB_TIER_DEFAULT_BENEFITS.TITANE).toMatch(/draw/);
     expect(CLUB_TIER_DEFAULT_BENEFITS.PLATINE).toBe('');
     expect(benefitLines(CLUB_TIER_DEFAULT_BENEFITS.PLATINE)).toEqual([]);
     expect(Object.values(CLUB_TIER_DEFAULT_BENEFITS).join('\n')).not.toMatch(/48 hours|Priority care/);
     expect(CLUB_TIER_DEFAULT_BENEFITS.PALLADIUM).toMatch(/commissions/);
-    expect(CLUB_TIER_DEFAULT_BENEFITS.PALLADIUM).toMatch(/yearly visit to the ORBES atelier/);
+    expect(CLUB_TIER_DEFAULT_BENEFITS.PALLADIUM).toBe(['Special commissions, made for you by ORBES.', 'A yearly visit to ORBES.'].join('\n'));
+    expect(Object.values(CLUB_TIER_DEFAULT_BENEFITS).join('\n')).not.toMatch(/atelier/i);
   });
 
   it('lets OPERATOR change a tier\'s words, one per line, audited, read at once by the club; restored, the row goes', async () => {

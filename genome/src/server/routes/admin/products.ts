@@ -319,7 +319,7 @@ export const adminProductRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
     const { productId } = parse(productParams, request.params);
     const b = parse(openServiceBody, request.body);
     // The yearly care (BP-19 T6) is opened by its own flow only (services/care.ts), never from here.
-    if (b.type === 'YEARLY_CARE') throw new DomainError('VALIDATION_FAILED', 422, 'The yearly care is opened from the Yearly care board, when the piece reaches the atelier.');
+    if (b.type === 'YEARLY_CARE') throw new DomainError('VALIDATION_FAILED', 422, 'PRIVATE CARE is opened from the PRIVATE CARE board, when the piece reaches ORBES.');
     const service = await warranty.openService(
       productId,
       { type: b.type, location: b.location ?? null, notes: b.notes ?? null, performedBy: b.performedBy ?? null },
@@ -334,7 +334,7 @@ export const adminProductRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
     const b = parse(completeServiceBody, request.body);
     // A YEARLY_CARE record (BP-19 T6) is closed by its own flow only (services/care.ts COMPLETE or CANCEL), never from here.
     const record = await db.selectFrom('service_records').select('type').where('id', '=', id).executeTakeFirst();
-    if (record?.type === 'YEARLY_CARE') throw new DomainError('VALIDATION_FAILED', 422, 'The yearly care is completed from the Yearly care board.');
+    if (record?.type === 'YEARLY_CARE') throw new DomainError('VALIDATION_FAILED', 422, 'PRIVATE CARE is completed from the PRIVATE CARE board.');
     return warranty.completeService(id, { notes: b.notes ?? null }, adminActor(request));
   });
 

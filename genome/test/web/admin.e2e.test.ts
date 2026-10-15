@@ -2532,8 +2532,9 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     }
     await go(p, `#/owners/${a.account.id}`, 'tier.owner@example.com');
     await expect.poll(() => p.locator('[data-testid=owner-tier]').textContent()).toBe('PLATINE · 5 pieces held');
-    // The Club block under the tier (plan NEXT-NINE, BP-19 T10): PLATINE's yearly care of the year, none asked for yet.
-    await expect.poll(() => p.locator('[data-testid=owner-club]').allTextContents()).toContainEqual(expect.stringMatching(/^\d{4}: 0 of 1$/));
+    // The Club block under the tier (plan NEXT-NINE, BP-19 T10): PLATINE's yearly care of the year, none asked for yet;
+    // every piece since plan ORBES CARE, step 1.4 (PRIVATE CARE).
+    await expect.poll(() => p.locator('[data-testid=owner-club]').allTextContents()).toContainEqual(expect.stringMatching(/^\d{4}: 0 · every piece$/));
     expect(await figuresInDisplayFace(p)).toEqual([]);
     await shot(p, 'owner-club', { full: true, phone: true });
     await c.close();

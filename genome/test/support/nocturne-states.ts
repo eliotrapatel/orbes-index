@@ -916,6 +916,7 @@ export const UI_STATES: readonly UiState[] = [
     [
       ['piece-care-available', 'careAvailable', 'voter1', 'A PLATINE piece: SERVICE, YEARLY CARE, REQUEST YEARLY CARE'],
       ['piece-care-requested', 'careRequested', 'platine', 'A PLATINE piece: YEARLY CARE REQUESTED, its return address, CANCEL REQUEST'],
+      // Plan ORBES CARE, step 1.4: on its own stage (care-used), THE PROGRAM's PLATINE at 1 piece a year, its default now every piece.
       ['piece-care-used', 'careUsed', 'platine', 'A PLATINE piece: the year’s yearly care used for another piece'],
       ['piece-care-label', 'careLabel', 'voter2', 'A PLATINE piece: YOUR PREPAID LABEL, DOWNLOAD LABEL'],
       ['piece-care-returning', 'careReturning', 'voter3', 'A PLATINE piece in service: ON ITS WAY BACK, TRACK THE SHIPMENT'],
@@ -926,7 +927,7 @@ export const UI_STATES: readonly UiState[] = [
       id,
       title,
       refs: ['BP-19'],
-      variant: 'full',
+      variant: id === 'piece-care-used' ? 'care-used' : 'full',
       as: who,
       path: piece(role),
       act: (run) => serviceCare(run),

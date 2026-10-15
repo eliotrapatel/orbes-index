@@ -90,11 +90,13 @@ const full = (s: UiState) => s.variant === 'full';
 const accountMessages = named('account-write', 'account-messages');
 /** The birthday credit's stage (plan CUSTOMER INTELLIGENCE §3.5 SB.4.5): IN USE, BIRTHDAY CREDIT, for an account without a tier. */
 const birthday = (s: UiState) => s.variant === 'birthday-credit';
+/** PRIVATE CARE used for another piece (plan ORBES CARE, step 1.4), on its own stage: THE PROGRAM's PLATINE at 1 piece a year. */
+const careUsed = (s: UiState) => s.variant === 'care-used';
 /**
- * The tier program's states (plan NEXT-NINE, BP-19) in the full demo: a piece's YEARLY CARE, THE CLUB, IN USE; and the
- * birthday credit under IN USE, on its own stage.
+ * The tier program's states (plan NEXT-NINE, BP-19) in the full demo: a piece's YEARLY CARE, THE CLUB, IN USE; the
+ * birthday credit under IN USE, and PRIVATE CARE used for another piece, each on its own stage.
  */
-const program = (s: UiState) => (full(s) && !s.mutates && named('piece-care', 'club', 'account-sheet-in-use')(s)) || birthday(s);
+const program = (s: UiState) => (full(s) && !s.mutates && named('piece-care', 'club', 'account-sheet-in-use')(s)) || birthday(s) || careUsed(s);
 const ROOM_VARIANTS: readonly string[] = ['room', 'live', 'afterroom', 'afterroom-ends'];
 /** YOUR PROFILE's stage (plan CUSTOMER INTELLIGENCE §3.1 P.8): account-profile, then profile-tastes. */
 const profile = (s: UiState) => s.variant === 'account-profile';
@@ -134,7 +136,7 @@ export const CONTENT_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> =
   // The draws in every state; a draw in sizes (plan NEXT LOT §3.6.F), on its own stage.
   draws: (s) => s.variant === 'draws' || s.variant === 'draw-sizes',
   stress: (s) => s.variant === 'stress' && !named('account')(s),
-  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'draws' && s.variant !== 'draw-sizes' && s.variant !== 'stress' && s.variant !== 'pairs' && !ORDER_STAGES.includes(s.variant) && !named('account')(s) && !profile(s) && !wishlist(s) && !birthday(s),
+  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'draws' && s.variant !== 'draw-sizes' && s.variant !== 'stress' && s.variant !== 'pairs' && !ORDER_STAGES.includes(s.variant) && !named('account')(s) && !profile(s) && !wishlist(s) && !birthday(s) && !careUsed(s),
 });
 
 /** The states of shard `name`, in the order of UI_STATES. */

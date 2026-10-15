@@ -1190,14 +1190,15 @@ const optionalModel = z.preprocess((v) => (v === '' ? null : v), uuid.nullable()
 /**
  * PUT /api/admin/club/program (ADMIN): THE PROGRAM whole, each value within its bounds (services/club-program.ts holds
  * PALLADIUM's early access at least PLATINE's, and a gift's model existing and active), the birthday credit included
- * (plan CUSTOMER INTELLIGENCE §3.5 SB.4.3: its switch, 1 to 100 000 000 minor units, 1 to 365 days).
+ * (plan CUSTOMER INTELLIGENCE §3.5 SB.4.3: its switch, 1 to 100 000 000 minor units, 1 to 365 days); PLATINE's PRIVATE
+ * CARE every piece (null) as PALLADIUM's, and the warranty credit, 1 to 100 percent (plan ORBES CARE, migration 0048).
  */
 export const clubProgramBody = body({
   earlyAccessPalladiumHours: whole(PROGRAM_LIMITS.hours.min, PROGRAM_LIMITS.hours.max, 'hours'),
   earlyAccessPlatineHours: whole(PROGRAM_LIMITS.hours.min, PROGRAM_LIMITS.hours.max, 'hours'),
   shippingFreePlatine: z.enum(SHIPPING_FREE_LEVELS),
   shippingFreePalladium: z.enum(SHIPPING_FREE_LEVELS),
-  carePiecesPlatine: whole(PROGRAM_LIMITS.care.min, PROGRAM_LIMITS.care.max, 'pieces'),
+  carePiecesPlatine: whole(PROGRAM_LIMITS.care.min, PROGRAM_LIMITS.care.max, 'pieces').nullable(),
   carePiecesPalladium: whole(PROGRAM_LIMITS.care.min, PROGRAM_LIMITS.care.max, 'pieces').nullable(),
   messagesPriorityMinTier: z.union(PRIORITY_TIERS.map((t) => z.literal(t)) as [z.ZodLiteral<0>, z.ZodLiteral<2>, z.ZodLiteral<3>]),
   giftPlatineModelId: optionalModel,
@@ -1213,6 +1214,7 @@ export const clubProgramBody = body({
   birthdayCreditOn: z.boolean(),
   birthdayCreditMinor: whole(PROGRAM_LIMITS.birthdayCredit.min, PROGRAM_LIMITS.birthdayCredit.max, 'minor units'),
   birthdayCreditDays: whole(PROGRAM_LIMITS.birthdayDays.min, PROGRAM_LIMITS.birthdayDays.max, 'days'),
+  warrantyCreditPercent: whole(PROGRAM_LIMITS.warrantyCredit.min, PROGRAM_LIMITS.warrantyCredit.max, 'percent'),
 });
 
 /** PUT /api/admin/orders/shipping-rates (ADMIN): the rates set, each currency and service once; a rate left out is cleared. */

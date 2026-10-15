@@ -672,8 +672,11 @@ export const YEARLY_CARE = Object.freeze({
   used: (year: number) => `Your yearly care for ${year} has been used for another piece. It renews on 1 January.`,
   pieceDone: (year: number) => `This piece has had its yearly care for ${year}.`,
   unavailable: 'The yearly care cannot be requested for this piece just now.',
-  /** CREATE TRANSFER CODE refused while the piece's care is REQUESTED or LABEL_SENT (409 CARE_OPEN, API §11.2). */
-  transferOpen: "This piece's yearly care is under way: cancel the request or wait until it returns.",
+  /**
+   * CREATE TRANSFER CODE refused while the piece's care is REQUESTED or LABEL_SENT (409 CARE_OPEN, API §11.2): the
+   * server's words (services/ownership.ts), PRIVATE CARE since plan ORBES CARE, step 1.4.
+   */
+  transferOpen: "This piece's PRIVATE CARE is under way: cancel the request or wait until it returns.",
 });
 
 /**

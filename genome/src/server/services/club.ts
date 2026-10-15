@@ -84,7 +84,7 @@ export const CLUB_TIER_DEFAULT_BENEFITS: Readonly<Record<ClubTierName, string>> 
   TITANE: ['The owners’ circle: its notes, its invitations and its polls.', 'Priority in the draw of each release, before the accounts that hold no piece.'].join('\n'),
   // PLATINE's early access and priority with ORBES Client Services are said by THE PROGRAM's lines (plan NEXT-NINE, BP-19 T1).
   PLATINE: '',
-  PALLADIUM: ['Special commissions, made for you by the ORBES atelier.', 'A yearly visit to the ORBES atelier.'].join('\n'),
+  PALLADIUM: ['Special commissions, made for you by ORBES.', 'A yearly visit to ORBES.'].join('\n'),
 });
 
 /** 0: no piece held; 1 TITANE, 2 PLATINE, 3 PALLADIUM. */

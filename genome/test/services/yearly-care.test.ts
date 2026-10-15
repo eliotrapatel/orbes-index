@@ -2,8 +2,9 @@
  * The yearly care (plan NEXT-NINE of 2026-10-06, §3.2 BP-19 T6, step 2.6; migration 0028), on the services and the
  * routes as createContext and buildApp wire them:
  *
- *  - the allowances: PLATINE 1 piece a year, PALLADIUM every piece, nothing below PLATINE, THE PROGRAM's numbers; the
- *    year is the calendar year in UTC;
+ *  - the allowances: PLATINE and PALLADIUM every piece by default (plan ORBES CARE, step 1.4: PRIVATE CARE), nothing
+ *    below PLATINE, THE PROGRAM's numbers (a PLATINE year of 1 piece used for another); the tier it opens from
+ *    (`opens`); the year is the calendar year in UTC;
  *  - the return name and address are required (400), stored with the request, prefilled from the account's last order
  *    (`addressHint`, null without one, never another account's), in the export, and never in the audit log;
  *  - each staff step runs in one transaction with the service record it opens or closes (a failure rolls both back);
@@ -23,7 +24,7 @@
  */
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { careAllowance, eraseCareLabels, CARE_LABEL_MAX_BYTES } from '../../src/server/services/care.js';
+import { careAllowance, careOpens, eraseCareLabels, CARE_LABEL_MAX_BYTES, CARE_LOCATION } from '../../src/server/services/care.js';
 import { DEFAULT_PROGRAM } from '../../src/server/services/club-program.js';
 import type { Actor } from '../../src/server/types.js';
 import { YEARLY_CARE } from '../../src/web/verify/copy.js';
@@ -37,6 +38,7 @@ interface CareJson {
   year: number;
   tier: string | null;
   allowance: number | 'ALL';
+  opens: { tier: string; allowance: number | 'ALL' } | null;
   used: number;
   reason: string;
   request: { id: string; status: string; returnName: string; returnAddress: string; label: { carrier: { name: string }; tracking: string; trackingUrl: string; pdf: boolean } | null; return: { tracking: string } | null } | null;
@@ -77,53 +79,78 @@ describe('the yearly care (BP-19 T6)', () => {
     messages: Number((await h.t.db.selectFrom('client_messages').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow()).n),
     conversations: Number((await h.t.db.selectFrom('client_conversations').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow()).n),
   });
+  /** THE PROGRAM's PLATINE at `n` pieces a year (its default is every piece since plan ORBES CARE, step 1.4) while `run` runs. */
+  async function platineAt<T>(n: number, run: () => Promise<T>): Promise<T> {
+    await h.t.db.insertInto('club_program_settings').values({ id: 1, care_pieces_platine: n }).execute();
+    try {
+      return await run();
+    } finally {
+      await h.t.db.deleteFrom('club_program_settings').execute();
+    }
+  }
   const label = (id: string, body: Buffer = PDF, query = `carrierId=${carrierId}&tracking=6A12345678901`, type = 'application/pdf') =>
     operator.request('POST', `/api/admin/care/${id}/label?${query}`, { body, headers: { 'content-type': type } });
 
-  it('gives PLATINE 1 piece a year, PALLADIUM every piece, and nothing below PLATINE; THE PROGRAM sets the numbers', async () => {
+  it('gives PLATINE and PALLADIUM every piece by default (PRIVATE CARE), and nothing below PLATINE; THE PROGRAM sets the numbers and the tier it opens from', async () => {
     expect(careAllowance(DEFAULT_PROGRAM, 0)).toBe(0);
     expect(careAllowance(DEFAULT_PROGRAM, 1)).toBe(0);
-    expect(careAllowance(DEFAULT_PROGRAM, 2)).toBe(1);
+    // Plan ORBES CARE, step 1.4: PLATINE's every piece by default (migration 0048), as PALLADIUM's.
+    expect(careAllowance(DEFAULT_PROGRAM, 2)).toBe('ALL');
     expect(careAllowance(DEFAULT_PROGRAM, 3)).toBe('ALL');
     expect(careAllowance({ carePiecesPlatine: 0, carePiecesPalladium: 2 }, 3)).toBe(2);
     expect(careAllowance({ carePiecesPlatine: 0, carePiecesPalladium: 2 }, 2)).toBe(0);
-    // PLATINE's every piece (migration 0048, plan ORBES CARE step 1.1), as PALLADIUM's.
-    expect(careAllowance({ carePiecesPlatine: null, carePiecesPalladium: null }, 2)).toBe('ALL');
+    expect(careAllowance({ carePiecesPlatine: 1, carePiecesPalladium: null }, 2)).toBe(1);
+    // The lowest tier that includes it, with its allowance; none when no tier does.
+    expect(careOpens(DEFAULT_PROGRAM)).toEqual({ tier: 'PLATINE', allowance: 'ALL' });
+    expect(careOpens({ carePiecesPlatine: 1, carePiecesPalladium: null })).toEqual({ tier: 'PLATINE', allowance: 1 });
+    expect(careOpens({ carePiecesPlatine: 0, carePiecesPalladium: 2 })).toEqual({ tier: 'PALLADIUM', allowance: 2 });
+    expect(careOpens({ carePiecesPlatine: 0, carePiecesPalladium: 0 })).toBeNull();
     const titane = await collector(1);
     const platine = await collector(5);
     const palladium = await collector(10);
     const of = async (c: { client: Client; serials: string[] }) => safeJson(await care(c.client, c.serials[0]!)) as CareJson;
-    expect(await of(titane)).toMatchObject({ year: 2026, tier: 'TITANE', allowance: 0, used: 0, reason: 'NOT_INCLUDED', request: null, addressHint: null });
-    expect(await of(platine)).toMatchObject({ year: 2026, tier: 'PLATINE', allowance: 1, used: 0, reason: 'AVAILABLE', request: null });
-    expect(await of(palladium)).toMatchObject({ year: 2026, tier: 'PALLADIUM', allowance: 'ALL', used: 0, reason: 'AVAILABLE' });
-    expect(errorOf(await ask(titane.client, titane.serials[0]!))).toMatchObject({ code: 'CARE_NOT_INCLUDED' });
-    // PLATINE: one piece, then the year is used for any other; PALLADIUM: each piece once.
-    expect((await ask(platine.client, platine.serials[0]!)).statusCode).toBe(201);
-    expect((await of({ client: platine.client, serials: [platine.serials[1]!] })).reason).toBe('USED');
-    const used = await ask(platine.client, platine.serials[1]!);
-    expect(used.statusCode).toBe(409);
-    expect(errorOf(used).code).toBe('CARE_USED');
+    const opens = { tier: 'PLATINE', allowance: 'ALL' };
+    expect(await of(titane)).toMatchObject({ year: 2026, tier: 'TITANE', allowance: 0, opens, used: 0, reason: 'NOT_INCLUDED', request: null, addressHint: null });
+    expect(await of(platine)).toMatchObject({ year: 2026, tier: 'PLATINE', allowance: 'ALL', opens, used: 0, reason: 'AVAILABLE', request: null });
+    expect(await of(palladium)).toMatchObject({ year: 2026, tier: 'PALLADIUM', allowance: 'ALL', opens, used: 0, reason: 'AVAILABLE' });
+    expect(errorOf(await ask(titane.client, titane.serials[0]!))).toMatchObject({ code: 'CARE_NOT_INCLUDED', message: 'Your tier does not include PRIVATE CARE.' });
+    // PLATINE and PALLADIUM: each piece once a year.
+    for (const s of platine.serials.slice(0, 2)) expect((await ask(platine.client, s)).statusCode).toBe(201);
+    expect(errorOf(await ask(platine.client, platine.serials[0]!))).toMatchObject({ code: 'CARE_ALREADY_REQUESTED', message: 'PRIVATE CARE for this piece has already been requested this year.' });
     for (const s of palladium.serials.slice(0, 3)) expect((await ask(palladium.client, s)).statusCode).toBe(201);
     expect(errorOf(await ask(palladium.client, palladium.serials[0]!)).code).toBe('CARE_ALREADY_REQUESTED');
     expect(await of(palladium)).toMatchObject({ used: 3, reason: 'PIECE_DONE', request: { status: 'REQUESTED' } });
+    // THE PROGRAM at 1 piece a year for PLATINE: one piece, then the year is used for any other; the tier it opens from says 1.
+    await platineAt(1, async () => {
+      const one = await collector(5);
+      expect(await of(one)).toMatchObject({ tier: 'PLATINE', allowance: 1, opens: { tier: 'PLATINE', allowance: 1 }, reason: 'AVAILABLE' });
+      expect((await ask(one.client, one.serials[0]!)).statusCode).toBe(201);
+      expect((await of({ client: one.client, serials: [one.serials[1]!] })).reason).toBe('USED');
+      const used = await ask(one.client, one.serials[1]!);
+      expect(used.statusCode).toBe(409);
+      expect(errorOf(used)).toEqual({ code: 'CARE_USED', message: 'Your PRIVATE CARE for this year has been used for another piece.' });
+      expect((await of(titane)).opens).toEqual({ tier: 'PLATINE', allowance: 1 });
+    });
   });
 
-  it('counts the calendar year in UTC: a PLATINE year used on 31 December opens again on 1 January', async () => {
+  it('counts the calendar year in UTC: a PLATINE year used on 31 December opens again on 1 January (THE PROGRAM at 1 piece a year)', async () => {
     const before = h.clock.now();
-    try {
-      h.clock.set('2026-12-31T23:30:00.000Z');
-      const p = await collector(5);
-      expect((await ask(p.client, p.serials[0]!)).statusCode).toBe(201);
-      expect((safeJson(await care(p.client, p.serials[1]!)) as CareJson).reason).toBe('USED');
-      h.clock.set('2027-01-01T00:30:00.000Z');
-      const next = safeJson(await care(p.client, p.serials[1]!)) as CareJson;
-      expect(next).toMatchObject({ year: 2027, used: 0, reason: 'AVAILABLE' });
-      expect((await ask(p.client, p.serials[1]!)).statusCode).toBe(201);
-      // The piece asked for in 2026 keeps showing its open request in 2027.
-      expect((safeJson(await care(p.client, p.serials[0]!)) as CareJson).request).toMatchObject({ status: 'REQUESTED' });
-    } finally {
-      h.clock.set(before);
-    }
+    await platineAt(1, async () => {
+      try {
+        h.clock.set('2026-12-31T23:30:00.000Z');
+        const p = await collector(5);
+        expect((await ask(p.client, p.serials[0]!)).statusCode).toBe(201);
+        expect((safeJson(await care(p.client, p.serials[1]!)) as CareJson).reason).toBe('USED');
+        h.clock.set('2027-01-01T00:30:00.000Z');
+        const next = safeJson(await care(p.client, p.serials[1]!)) as CareJson;
+        expect(next).toMatchObject({ year: 2027, used: 0, reason: 'AVAILABLE' });
+        expect((await ask(p.client, p.serials[1]!)).statusCode).toBe(201);
+        // The piece asked for in 2026 keeps showing its open request in 2027.
+        expect((safeJson(await care(p.client, p.serials[0]!)) as CareJson).request).toMatchObject({ status: 'REQUESTED' });
+      } finally {
+        h.clock.set(before);
+      }
+    });
   });
 
   it('requires the name and the address the piece returns to, stores them, prefills them from the last order only, exports them and never audits them', async () => {
@@ -217,7 +244,7 @@ describe('the yearly care (BP-19 T6)', () => {
     const first = ((safeJson(await ask(p.client, p.serials[0]!)) as CareJson).request!).id;
     const refused = await offer(p.serials[0]!);
     expect(refused.statusCode, refused.body).toBe(409);
-    expect(errorOf(refused)).toMatchObject({ code: 'CARE_OPEN', message: "This piece's yearly care is under way: cancel the request or wait until it returns." });
+    expect(errorOf(refused)).toMatchObject({ code: 'CARE_OPEN', message: "This piece's PRIVATE CARE is under way: cancel the request or wait until it returns." });
     // The verify app says it in the same words (copy.ts).
     expect(errorOf(refused).message).toBe(YEARLY_CARE.transferOpen);
     expect(await transfers(p.serials[0]!)).toBe(0);
@@ -233,25 +260,27 @@ describe('the yearly care (BP-19 T6)', () => {
     expect((await offer(p.serials[1]!)).statusCode).toBe(201);
   });
 
-  it('lets one of two requests at once by a PLATINE account win, and gives the allowance back when it is cancelled', async () => {
-    const p = await collector(5);
-    const both = await Promise.allSettled([0, 1].map((i) => h.ctx.services.care.request(p.id, p.serials[i]!, ADDRESS, p.actor)));
-    expect(both.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
-    const lost = both.find((r) => r.status === 'rejected') as PromiseRejectedResult;
-    expect(lost.reason).toMatchObject({ code: 'CARE_USED' });
-    expect(await h.t.db.selectFrom('care_requests').select('id').where('account_id', '=', p.id).execute()).toHaveLength(1);
-    const won = (both.find((r) => r.status === 'fulfilled') as PromiseFulfilledResult<{ request: { id: string } }>).value.request.id;
-    const winner = (await h.t.db.selectFrom('care_requests as c').innerJoin('products as p', 'p.id', 'c.product_id').select('p.product_id').where('c.id', '=', won).executeTakeFirstOrThrow()).product_id;
-    const loser = p.serials.find((s) => s !== winner && p.serials.indexOf(s) < 2)!;
-    // Cancel (the account's, while REQUESTED): the year's allowance is back, for any piece.
-    const cancelled = await p.client.post(`/api/v1/account/care/${won}/cancel`);
-    expect(cancelled.statusCode, cancelled.body).toBe(200);
-    expect(safeJson(cancelled)).toMatchObject({ used: 0, reason: 'AVAILABLE', request: { status: 'CANCELLED' } });
-    expect((await ask(p.client, loser)).statusCode).toBe(201);
-    // Once cancelled, it cannot be cancelled again; another account's request is not found.
-    expect(errorOf(await p.client.post(`/api/v1/account/care/${won}/cancel`)).code).toBe('CARE_STEP');
-    const other = await collector(5);
-    expect((await other.client.post(`/api/v1/account/care/${won}/cancel`)).statusCode).toBe(404);
+  it('lets one of two requests at once by a PLATINE account win, and gives the allowance back when it is cancelled (THE PROGRAM at 1 piece a year)', async () => {
+    await platineAt(1, async () => {
+      const p = await collector(5);
+      const both = await Promise.allSettled([0, 1].map((i) => h.ctx.services.care.request(p.id, p.serials[i]!, ADDRESS, p.actor)));
+      expect(both.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      const lost = both.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+      expect(lost.reason).toMatchObject({ code: 'CARE_USED' });
+      expect(await h.t.db.selectFrom('care_requests').select('id').where('account_id', '=', p.id).execute()).toHaveLength(1);
+      const won = (both.find((r) => r.status === 'fulfilled') as PromiseFulfilledResult<{ request: { id: string } }>).value.request.id;
+      const winner = (await h.t.db.selectFrom('care_requests as c').innerJoin('products as p', 'p.id', 'c.product_id').select('p.product_id').where('c.id', '=', won).executeTakeFirstOrThrow()).product_id;
+      const loser = p.serials.find((s) => s !== winner && p.serials.indexOf(s) < 2)!;
+      // Cancel (the account's, while REQUESTED): the year's allowance is back, for any piece.
+      const cancelled = await p.client.post(`/api/v1/account/care/${won}/cancel`);
+      expect(cancelled.statusCode, cancelled.body).toBe(200);
+      expect(safeJson(cancelled)).toMatchObject({ used: 0, reason: 'AVAILABLE', request: { status: 'CANCELLED' } });
+      expect((await ask(p.client, loser)).statusCode).toBe(201);
+      // Once cancelled, it cannot be cancelled again; another account's request is not found.
+      expect(errorOf(await p.client.post(`/api/v1/account/care/${won}/cancel`)).code).toBe('CARE_STEP');
+      const other = await collector(5);
+      expect((await other.client.post(`/api/v1/account/care/${won}/cancel`)).statusCode).toBe(404);
+    });
   });
 
   it('opens and closes a YEARLY_CARE record through the steps, the piece IN SERVICE and back, with no message written and the label for its own account only', async () => {
@@ -283,16 +312,19 @@ describe('the yearly care (BP-19 T6)', () => {
     expect(pdf.statusCode).toBe(200);
     expect(pdf.headers['content-type']).toBe('application/pdf');
     expect(pdf.headers['cache-control']).toBe('no-store');
+    // Its file named PRIVATE CARE (plan ORBES CARE, step 1.4).
+    expect(pdf.headers['content-disposition']).toBe(`attachment; filename="ORBES-PRIVATE-CARE-${p.serials[0]}-2026-LABEL.pdf"`);
     expect(pdf.rawPayload.subarray(0, 5).toString('latin1')).toBe('%PDF-');
     const stranger = await collector(1);
     expect((await stranger.client.get(`/api/v1/account/care/${id}/label.pdf`)).statusCode).toBe(404);
-    // At the atelier: its YEARLY_CARE record open, the piece IN SERVICE.
+    // With ORBES: its YEARLY_CARE record open at ORBES (plan ORBES CARE, answer 7: never "atelier"), the piece IN SERVICE.
     const received = safeJson(await operator.post(`/api/admin/care/${id}/receive`)) as { status: string; serviceRecordId: string };
     expect(received.status).toBe('RECEIVED');
     const piece = () => h.t.db.selectFrom('products').select(['status']).where('product_id', '=', p.serials[0]!).executeTakeFirstOrThrow();
     expect((await piece()).status).toBe('SERVICED');
     const record = () => h.t.db.selectFrom('service_records').select(['type', 'status', 'location']).where('id', '=', received.serviceRecordId).executeTakeFirstOrThrow();
-    expect(await record()).toEqual({ type: 'YEARLY_CARE', status: 'OPEN', location: 'ORBES atelier' });
+    expect(CARE_LOCATION).toBe('ORBES');
+    expect(await record()).toEqual({ type: 'YEARLY_CARE', status: 'OPEN', location: 'ORBES' });
     // Shipped back, then completed: the record COMPLETED, the piece back to its status, YEARLY_CARE in SERVICE HISTORY.
     expect(errorOf(await operator.post(`/api/admin/care/${id}/complete`, {})).code).toBe('CARE_STEP');
     const back = await operator.post(`/api/admin/care/${id}/return`, { carrierId, tracking: '6A12345678902' });
@@ -334,16 +366,18 @@ describe('the yearly care (BP-19 T6)', () => {
     // Only the care flow closes it too: the product page's complete route refuses it, the record stays OPEN.
     const notClosed = await operator.post(`/api/admin/services/${atelier.serviceRecordId}/complete`, {});
     expect(notClosed.statusCode).toBe(422);
-    expect(errorOf(notClosed).code).toBe('VALIDATION_FAILED');
+    expect(errorOf(notClosed)).toEqual({ code: 'VALIDATION_FAILED', message: 'PRIVATE CARE is completed from the PRIVATE CARE board.' });
     expect((await h.t.db.selectFrom('service_records').select('status').where('id', '=', atelier.serviceRecordId).executeTakeFirstOrThrow()).status).toBe('OPEN');
     // Only the care flow opens a YEARLY_CARE record: the product page's route refuses it.
-    const refused = await operator.post(`/api/admin/products/${p.serials[1]}/services`, { type: 'YEARLY_CARE', location: 'ORBES atelier' });
+    const refused = await operator.post(`/api/admin/products/${p.serials[1]}/services`, { type: 'YEARLY_CARE', location: 'ORBES' });
     expect(refused.statusCode).toBe(422);
-    expect(errorOf(refused).code).toBe('VALIDATION_FAILED');
+    expect(errorOf(refused)).toEqual({ code: 'VALIDATION_FAILED', message: 'PRIVATE CARE is opened from the PRIVATE CARE board, when the piece reaches ORBES.' });
     // ORBES cancels a request at the atelier: its open record is cancelled with it, the piece back to its status.
     const cancelled = safeJson(await operator.post(`/api/admin/care/${id}/cancel`, { note: 'The client asked by phone.' })) as { status: string; serviceRecordId: string; cancelledBy: string; note: string };
     expect(cancelled).toMatchObject({ status: 'CANCELLED', cancelledBy: 'admin', note: 'The client asked by phone.' });
     expect((await h.t.db.selectFrom('service_records').select('status').where('id', '=', cancelled.serviceRecordId).executeTakeFirstOrThrow()).status).toBe('CANCELLED');
+    // Its reason in PRIVATE CARE's words (plan ORBES CARE, step 1.4).
+    expect((await h.t.db.selectFrom('service_records').select('notes').where('id', '=', cancelled.serviceRecordId).executeTakeFirstOrThrow()).notes).toContain('PRIVATE CARE cancelled');
     expect((await h.t.db.selectFrom('products').select('status').where('product_id', '=', p.serials[0]!).executeTakeFirstOrThrow()).status).toBe('OWNED');
     expect((await operator.post(`/api/admin/care/${id}/cancel`, {})).statusCode).toBe(400);
   });

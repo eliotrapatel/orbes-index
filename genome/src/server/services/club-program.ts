@@ -6,16 +6,18 @@
  *
  *   THE PROGRAM   one row of `club_program_settings`, or none: the defaults are its columns' (DEFAULT_PROGRAM). A new
  *                 draw's early access by default (PALLADIUM 4 hours, PLATINE 2, PALLADIUM's window at least PLATINE's),
- *                 the free shipping of PLATINE (standard) and PALLADIUM (express), the yearly care (PLATINE 1 piece,
- *                 PALLADIUM every piece), the Messages board's priority (from PLATINE), the welcome gift of each tier
- *                 (a model of the catalogue, none by default), the credit (€ 50 and € 100, in one currency, valid 12
- *                 months, on a draw, a LIVE RELEASE or the private salon), the tier each experience of the circle
- *                 invites from (the members' evening PLATINE, the launch previews and the partner experiences
- *                 PALLADIUM), and the birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4, migration 0045: given or
- *                 not, € 20 valid 30 days by default, in the credit's currency, on the credit's orders; no tier's
- *                 benefit, so no program line says it). Changed whole (`update`), each value within its bounds (PROGRAM_LIMITS), a gift's model
- *                 existing (404 MODEL_NOT_FOUND) and active (409 MODEL_INACTIVE). Audited `club.program.update`, before
- *                 and after.
+ *                 the free shipping of PLATINE (standard) and PALLADIUM (express), PRIVATE CARE (every piece, PLATINE
+ *                 and PALLADIUM: plan ORBES CARE, migration 0048), the Messages board's priority (from PLATINE), the
+ *                 welcome gift of each tier (a model of the catalogue, none by default), the credit (€ 50 and € 100, in
+ *                 one currency, valid 12 months, on a draw, a LIVE RELEASE or the private salon), the tier each
+ *                 experience of the circle invites from (the members' evening PLATINE, the launch previews and the
+ *                 partner experiences PALLADIUM), the birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4, migration
+ *                 0045: given or not, € 20 valid 30 days by default, in the credit's currency, on the credit's orders;
+ *                 no tier's benefit, so no program line says it), and the warranty credit (plan ORBES CARE, migration
+ *                 0048: the percent of a piece's value credited on an accepted lifetime-warranty claim once its free
+ *                 replacement is used, 30 by default, stated in the terms; no tier's benefit, no program line).
+ *                 Changed whole (`update`), each value within its bounds (PROGRAM_LIMITS), a gift's model existing (404
+ *                 MODEL_NOT_FOUND) and active (409 MODEL_INACTIVE). Audited `club.program.update`, before and after.
  *   the lines     what each tier's program says, in English, as /verify shows it in YOUR TIER and THE CLUB and the
  *                 console's tiers list it (`programLines`): early access, shipping, care, priority, gift, credit, the
  *                 experiences, each only while its setting gives it.
@@ -68,6 +70,8 @@ export const PROGRAM_LIMITS = Object.freeze({
   birthdayCredit: Object.freeze({ min: 1, max: 100_000_000 }),
   /** The birthday credit's validity, in days from the birthday (the birthday is day 1). */
   birthdayDays: Object.freeze({ min: 1, max: 365 }),
+  /** The warranty credit after the free replacement, in percent of the piece's value (plan ORBES CARE, migration 0048). */
+  warrantyCredit: Object.freeze({ min: 1, max: 100 }),
 });
 
 /** The tiers the Messages board's priority may start from: 0 (off), 2 PLATINE, 3 PALLADIUM. */
@@ -108,15 +112,20 @@ export interface ClubProgram {
   birthdayCreditOn: boolean;
   birthdayCreditMinor: number;
   birthdayCreditDays: number;
+  /**
+   * The warranty credit (plan ORBES CARE, answer 4, D5): the percent of a piece's value credited on an accepted claim
+   * under the lifetime warranty once its free replacement is used. The terms, article 11, state it.
+   */
+  warrantyCreditPercent: number;
 }
 
-/** THE PROGRAM by default: the columns' defaults of migrations 0026 and 0045. */
+/** THE PROGRAM by default: the columns' defaults of migrations 0026, 0045 and 0048 (PLATINE's PRIVATE CARE every piece). */
 export const DEFAULT_PROGRAM: Readonly<ClubProgram> = Object.freeze({
   earlyAccessPalladiumHours: 4,
   earlyAccessPlatineHours: 2,
   shippingFreePlatine: 'STANDARD',
   shippingFreePalladium: 'EXPRESS',
-  carePiecesPlatine: 1,
+  carePiecesPlatine: null,
   carePiecesPalladium: null,
   messagesPriorityMinTier: 2,
   giftPlatineModelId: null,
@@ -132,6 +141,7 @@ export const DEFAULT_PROGRAM: Readonly<ClubProgram> = Object.freeze({
   birthdayCreditOn: true,
   birthdayCreditMinor: 2000,
   birthdayCreditDays: 30,
+  warrantyCreditPercent: 30,
 } satisfies ClubProgram);
 
 /** The tier each experience invites from (circle_posts.experience). */
@@ -216,6 +226,7 @@ export async function readProgram(db: Db): Promise<ClubProgram> {
     birthdayCreditOn: r.birthday_credit_on,
     birthdayCreditMinor: r.birthday_credit_minor,
     birthdayCreditDays: r.birthday_credit_days,
+    warrantyCreditPercent: r.warranty_credit_percent,
   };
 }
 
@@ -283,11 +294,12 @@ function orList(items: readonly string[]): string {
 
 const earlyLine = (hours: number) => `Early access to each draw: a place reserved directly ${hours} ${hours === 1 ? 'hour' : 'hours'} before entries open to everyone, unless its page says otherwise.`;
 const SHIPPING_LINES: Readonly<Partial<Record<ShippingFreeLevel, string>>> = Object.freeze({ STANDARD: 'Free shipping on every order.', EXPRESS: 'Free express shipping on every order.' });
+/** A tier's PRIVATE CARE (plan ORBES CARE, answer 5): every piece once a year each (null), a number of pieces, or none. */
 const careLine = (care: number | null) =>
   care === null
-    ? 'The yearly care of every piece by the ORBES atelier, once a year each, asked for from the piece, with a prepaid label both ways.'
+    ? 'PRIVATE CARE: the inspection, cleaning and polishing of every piece by ORBES, free, once a year each, asked for from the piece, with a prepaid label both ways.'
     : care > 0
-      ? `The yearly care of ${care === 1 ? '1 piece' : `${care} pieces`} a year by the ORBES atelier, asked for from the piece, with a prepaid label both ways.`
+      ? `PRIVATE CARE: the inspection, cleaning and polishing of ${care === 1 ? '1 piece' : `${care} pieces`} a year by ORBES, free, asked for from the piece, with a prepaid label both ways.`
       : null;
 const PRIORITY_LINE = 'Priority with ORBES Client Services: your messages are read first.';
 const giftLine = (gift: string) => `A welcome gift, ${gift}, added to your next order.`;
@@ -304,28 +316,32 @@ function experienceLine(launch: boolean, partner: boolean): string | null {
   if (partner) return 'Partner experiences, by invitation in THE CIRCLE.';
   return null;
 }
-/** A tier's early access, shipping and care lines (PLATINE and PALLADIUM). */
-function serviceLines(p: ClubProgram, t: 2 | 3): string[] {
+/**
+ * A tier's early access, shipping and care lines (PLATINE and PALLADIUM). `added`: only what the tier adds (THE CLUB,
+ * `programLines`), so PALLADIUM's care line is left out when it says what PLATINE's does (plan ORBES CARE: with both at
+ * every piece, only PLATINE says it); an account's own lines (`effectiveProgramLines`) keep it.
+ */
+function serviceLines(p: ClubProgram, t: 2 | 3, added = false): string[] {
   const out: string[] = [];
   const hours = t === 3 ? p.earlyAccessPalladiumHours : p.earlyAccessPlatineHours;
   if (hours > 0) out.push(earlyLine(hours));
   const shipping = SHIPPING_LINES[t === 3 ? p.shippingFreePalladium : p.shippingFreePlatine];
   if (shipping) out.push(shipping);
   const care = careLine(t === 3 ? p.carePiecesPalladium : p.carePiecesPlatine);
-  if (care) out.push(care);
+  if (care && !(added && t === 3 && care === careLine(p.carePiecesPlatine))) out.push(care);
   return out;
 }
 
 /**
  * What a tier's program says (§3.2 T2, « The program lines »), in this order: its early access, its free shipping, its
- * yearly care, the priority with Client Services (on the tier it starts from), its welcome gift (while its model is
+ * PRIVATE CARE (PALLADIUM's only when it differs from PLATINE's), the priority with Client Services (on the tier it starts from), its welcome gift (while its model is
  * active: `gifts` names the active ones by tier), its credit, then the experiences of the circle (each on the tier it
  * invites from). A setting that gives nothing gives no line. TITANE (1) has no early access, shipping, care, gift nor
  * credit. What the tier adds, as THE CLUB and the console's tiers say it.
  */
 export function programLines(p: ClubProgram, tier: 1 | 2 | 3, gifts: Partial<Record<2 | 3, string | null>> = {}): string[] {
   const lines: string[] = [];
-  if (tier >= 2) lines.push(...serviceLines(p, tier as 2 | 3));
+  if (tier >= 2) lines.push(...serviceLines(p, tier as 2 | 3, true));
   if (p.messagesPriorityMinTier !== 0 && p.messagesPriorityMinTier === tier) lines.push(PRIORITY_LINE);
   if (tier >= 2) {
     const t = tier as 2 | 3;
@@ -428,6 +444,7 @@ export function checkProgram(input: unknown): ClubProgram {
     birthdayCreditOn: v.birthdayCreditOn,
     birthdayCreditMinor: whole(v.birthdayCreditMinor, PROGRAM_LIMITS.birthdayCredit, 'The birthday credit, in minor units,'),
     birthdayCreditDays: whole(v.birthdayCreditDays, PROGRAM_LIMITS.birthdayDays, 'The birthday credit’s validity, in days,'),
+    warrantyCreditPercent: whole(v.warrantyCreditPercent, PROGRAM_LIMITS.warrantyCredit, 'The warranty credit, in percent of the piece’s value,'),
   };
   if (p.earlyAccessPalladiumHours < p.earlyAccessPlatineHours) throw earlyAccessOrder();
   return p;
@@ -530,6 +547,7 @@ export class ClubProgramService {
         birthday_credit_on: next.birthdayCreditOn,
         birthday_credit_minor: next.birthdayCreditMinor,
         birthday_credit_days: next.birthdayCreditDays,
+        warranty_credit_percent: next.warrantyCreditPercent,
         updated_by: actor.id!,
         updated_at: now,
       };

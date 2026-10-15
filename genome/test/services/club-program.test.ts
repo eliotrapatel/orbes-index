@@ -9,13 +9,16 @@
  *  - the program lines of each tier, as /verify will show them, from the settings;
  *  - the shipping rates set whole, each currency and service once, a rate left out cleared;
  *  - the birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4.3, migration 0045): on, € 20 for 30 days by default, its
- *    switch a boolean, 1 to 100 000 000 minor units and 1 to 365 days, saved and audited with the rest; no program line.
+ *    switch a boolean, 1 to 100 000 000 minor units and 1 to 365 days, saved and audited with the rest; no program line;
+ *  - plan ORBES CARE, step 1.4 (migration 0048): PRIVATE CARE every piece for PLATINE too by default (null), its line
+ *    said once by PLATINE when PALLADIUM's says the same; the warranty credit, 30 % by default, 1 to 100, required,
+ *    saved and audited with the rest; no program line.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { HOUSE_CURRENCIES } from '../../src/server/db/schema.js';
-import { checkProgram, DEFAULT_PROGRAM, giftModels, programLines, programMoney, type ClubProgram } from '../../src/server/services/club-program.js';
+import { checkProgram, DEFAULT_PROGRAM, effectiveProgramLines, giftModels, programLines, programMoney, type ClubProgram } from '../../src/server/services/club-program.js';
 import { liveMoney } from '../../src/server/services/live-console.js';
 import { ORDER_CURRENCIES } from '../../src/server/services/orders.js';
 import { ensureSku } from '../../src/server/services/stock.js';
@@ -63,14 +66,14 @@ describe('THE PROGRAM and SHIPPING (BP-19 T2)', () => {
   const audits = (action: string) => h.ctx.db.selectFrom('audit_logs').select(['actor_type', 'actor_id', 'details']).where('action', '=', action).orderBy('id').execute();
   const program = (over: Partial<ClubProgram> = {}): ClubProgram => ({ ...DEFAULT_PROGRAM, creditChannels: [...DEFAULT_PROGRAM.creditChannels], ...over });
 
-  it('reads the defaults without a row: 4 h and 2 h, free standard and express shipping, care 1 and every piece, priority from PLATINE, no gift, € 50 and € 100 for 12 months on every channel, the birthday credit on at € 20 for 30 days', async () => {
+  it('reads the defaults without a row: 4 h and 2 h, free standard and express shipping, PRIVATE CARE every piece for both, priority from PLATINE, no gift, € 50 and € 100 for 12 months on every channel, the birthday credit on at € 20 for 30 days, the warranty credit at 30 %', async () => {
     expect(await h.ctx.db.selectFrom('club_program_settings').selectAll().execute()).toEqual([]);
     expect(await svc().read()).toEqual({
       earlyAccessPalladiumHours: 4,
       earlyAccessPlatineHours: 2,
       shippingFreePlatine: 'STANDARD',
       shippingFreePalladium: 'EXPRESS',
-      carePiecesPlatine: 1,
+      carePiecesPlatine: null,
       carePiecesPalladium: null,
       messagesPriorityMinTier: 2,
       giftPlatineModelId: null,
@@ -86,12 +89,11 @@ describe('THE PROGRAM and SHIPPING (BP-19 T2)', () => {
       birthdayCreditOn: true,
       birthdayCreditMinor: 2000,
       birthdayCreditDays: 30,
+      warrantyCreditPercent: 30,
     });
-    // The column defaults of migrations 0026 and 0045 are DEFAULT_PROGRAM's: a row inserted with none reads the same, but
-    // for PLATINE's PRIVATE CARE: 0048's default is every piece (null), which DEFAULT_PROGRAM takes in step 1.4 of the
-    // ORBES CARE plan (step 1.1 changes only the column).
+    // The column defaults of migrations 0026, 0045 and 0048 are DEFAULT_PROGRAM's: a row inserted with none reads the same.
     await h.ctx.db.insertInto('club_program_settings').values({ id: 1 }).execute();
-    expect(await svc().read()).toEqual({ ...program(), carePiecesPlatine: null });
+    expect(await svc().read()).toEqual(program());
     await h.ctx.db.deleteFrom('club_program_settings').execute();
     expect(Object.isFrozen(DEFAULT_PROGRAM)).toBe(true);
     // The credit and the rates are in the currencies an order is priced in.
@@ -109,7 +111,7 @@ describe('THE PROGRAM and SHIPPING (BP-19 T2)', () => {
     expect(programLines(p, 2)).toEqual([
       'Early access to each draw: a place reserved directly 2 hours before entries open to everyone, unless its page says otherwise.',
       'Free shipping on every order.',
-      'The yearly care of 1 piece a year by the ORBES atelier, asked for from the piece, with a prepaid label both ways.',
+      'PRIVATE CARE: the inspection, cleaning and polishing of every piece by ORBES, free, once a year each, asked for from the piece, with a prepaid label both ways.',
       'Priority with ORBES Client Services: your messages are read first.',
       'A credit of €\u00a050, valid 12 months, on a piece from a draw, a LIVE RELEASE or THE PRIVATE SALON.',
       'The members’ evening, once a year, by invitation in THE CIRCLE.',
@@ -117,16 +119,28 @@ describe('THE PROGRAM and SHIPPING (BP-19 T2)', () => {
     expect(programLines(p, 3, { 3: 'ECLIPSE' })).toEqual([
       'Early access to each draw: a place reserved directly 4 hours before entries open to everyone, unless its page says otherwise.',
       'Free express shipping on every order.',
-      'The yearly care of every piece by the ORBES atelier, once a year each, asked for from the piece, with a prepaid label both ways.',
       'A welcome gift, ECLIPSE, added to your next order.',
       'A credit of €\u00a0100, valid 12 months, on a piece from a draw, a LIVE RELEASE or THE PRIVATE SALON.',
       'Launch previews and partner experiences, by invitation in THE CIRCLE.',
     ]);
-    // The birthday credit is no tier's benefit: on or off, at any amount, no line of any tier changes.
+    // Plan ORBES CARE, step 1.4: PALLADIUM's PRIVATE CARE line is left out of what it adds when it says what PLATINE's
+    // does (both every piece by default); a PALLADIUM account's own lines still say it, and it comes back when they differ.
+    const every = 'PRIVATE CARE: the inspection, cleaning and polishing of every piece by ORBES, free, once a year each, asked for from the piece, with a prepaid label both ways.';
+    expect(effectiveProgramLines(p, 3)).toContain(every);
+    expect(effectiveProgramLines(p, 2)).toContain(every);
+    expect(programLines(program({ carePiecesPlatine: 1 }), 2)).toContain(
+      'PRIVATE CARE: the inspection, cleaning and polishing of 1 piece a year by ORBES, free, asked for from the piece, with a prepaid label both ways.',
+    );
+    expect(programLines(program({ carePiecesPlatine: 1 }), 3)).toContain(every);
+    expect(programLines(program({ carePiecesPlatine: 2, carePiecesPalladium: 2 }), 3).filter((l) => l.startsWith('PRIVATE CARE'))).toEqual([]);
+    // The birthday credit and the warranty credit are no tier's benefit: on or off, at any amount, no line of any tier changes.
     for (const t of [1, 2, 3] as const) {
       expect(programLines(program({ birthdayCreditOn: false }), t)).toEqual(programLines(p, t));
       expect(programLines(program({ birthdayCreditMinor: 5_000, birthdayCreditDays: 7 }), t)).toEqual(programLines(p, t));
+      expect(programLines(program({ warrantyCreditPercent: 50 }), t)).toEqual(programLines(p, t));
     }
+    // "atelier" is said by no line (plan ORBES CARE, answer 7).
+    for (const t of [1, 2, 3] as const) for (const l of [...programLines(p, t), ...effectiveProgramLines(p, t)]) expect(l).not.toMatch(/atelier/i);
     // Nothing given, nothing said: no early access, no shipping, no care, priority off, no credit; one hour, one month.
     const bare = program({
       earlyAccessPalladiumHours: 1,
@@ -147,7 +161,7 @@ describe('THE PROGRAM and SHIPPING (BP-19 T2)', () => {
     expect(programLines(bare, 3)).toEqual([
       'Early access to each draw: a place reserved directly 1 hour before entries open to everyone, unless its page says otherwise.',
       'Free express shipping on every order.',
-      'The yearly care of 3 pieces a year by the ORBES atelier, asked for from the piece, with a prepaid label both ways.',
+      'PRIVATE CARE: the inspection, cleaning and polishing of 3 pieces a year by ORBES, free, asked for from the piece, with a prepaid label both ways.',
       'A credit of £\u00a0100, valid 1 month, on a piece from THE PRIVATE SALON.',
       'Launch previews, by invitation in THE CIRCLE.',
     ]);
@@ -175,6 +189,10 @@ describe('THE PROGRAM and SHIPPING (BP-19 T2)', () => {
       [{ birthdayCreditMinor: 2000.5 }, 'a fraction of a minor unit'],
       [{ birthdayCreditDays: 0 }, 'a birthday credit valid no day'],
       [{ birthdayCreditDays: 366 }, 'a birthday credit valid 366 days'],
+      [{ warrantyCreditPercent: 0 }, 'a warranty credit of 0 %'],
+      [{ warrantyCreditPercent: 101 }, 'a warranty credit over 100 %'],
+      [{ warrantyCreditPercent: 30.5 }, 'a fraction of a percent'],
+      [{ warrantyCreditPercent: undefined }, 'no warranty credit'],
     ] as [Record<string, unknown>, string][]) {
       expect(() => checkProgram({ ...program(), ...over }), what).toThrow(DomainError);
     }
@@ -184,6 +202,10 @@ describe('THE PROGRAM and SHIPPING (BP-19 T2)', () => {
     expect(() => checkProgram({ ...program(), birthdayCreditOn: 1 })).toThrow('The birthday credit is given or not: true or false.');
     // PLATINE's PRIVATE CARE every piece (null, migration 0048, plan ORBES CARE step 1.1), as PALLADIUM's.
     expect(checkProgram({ ...program(), carePiecesPlatine: null })).toMatchObject({ carePiecesPlatine: null, carePiecesPalladium: null });
+    // The warranty credit (plan ORBES CARE, step 1.4): its words, and its bounds reached.
+    expect(() => checkProgram({ ...program(), warrantyCreditPercent: 101 })).toThrow('The warranty credit, in percent of the piece’s value, is 1 to 100.');
+    expect(checkProgram(program({ warrantyCreditPercent: 1 })).warrantyCreditPercent).toBe(1);
+    expect(checkProgram(program({ warrantyCreditPercent: 100 })).warrantyCreditPercent).toBe(100);
     expect(checkProgram(program({ birthdayCreditOn: false, birthdayCreditMinor: 100_000_000, birthdayCreditDays: 365 }))).toMatchObject({ birthdayCreditOn: false, birthdayCreditMinor: 100_000_000, birthdayCreditDays: 365 });
     expect(checkProgram(program({ birthdayCreditMinor: 1, birthdayCreditDays: 1 }))).toMatchObject({ birthdayCreditOn: true, birthdayCreditMinor: 1, birthdayCreditDays: 1 });
     await rejects(svc().update(program({ earlyAccessPalladiumHours: 2, earlyAccessPlatineHours: 3 }), admin), 'PROGRAM_EARLY_ACCESS', 422);
@@ -226,6 +248,7 @@ describe('THE PROGRAM and SHIPPING (BP-19 T2)', () => {
       creditChannels: ['LIVE', 'DRAW'],
       birthdayCreditMinor: 2550,
       birthdayCreditDays: 15,
+      warrantyCreditPercent: 25,
     });
     const sheet = await svc().update(next, admin);
     expect(await svc().read()).toEqual({ ...next, creditChannels: ['DRAW', 'LIVE'] });
@@ -236,6 +259,9 @@ describe('THE PROGRAM and SHIPPING (BP-19 T2)', () => {
     // The birthday credit in the before and the after, as every figure (§3.5 SB.4.3: no new code).
     expect(last!.details).toMatchObject({ before: { birthdayCreditOn: true, birthdayCreditMinor: 2000, birthdayCreditDays: 30 }, after: { birthdayCreditOn: true, birthdayCreditMinor: 2550, birthdayCreditDays: 15 } });
     expect(await h.ctx.db.selectFrom('club_program_settings').select(['birthday_credit_on', 'birthday_credit_minor', 'birthday_credit_days']).executeTakeFirstOrThrow()).toEqual({ birthday_credit_on: true, birthday_credit_minor: 2550, birthday_credit_days: 15 });
+    // The warranty credit and PLATINE's PRIVATE CARE every piece (plan ORBES CARE, step 1.4), as every figure.
+    expect(last!.details).toMatchObject({ before: { warrantyCreditPercent: 30, carePiecesPlatine: null }, after: { warrantyCreditPercent: 25, carePiecesPlatine: null } });
+    expect(await h.ctx.db.selectFrom('club_program_settings').select(['warranty_credit_percent', 'care_pieces_platine']).executeTakeFirstOrThrow()).toEqual({ warranty_credit_percent: 25, care_pieces_platine: null });
     // Switched off: the amount and the days kept for when it comes back.
     await svc().update({ ...next, birthdayCreditOn: false }, admin);
     expect(await svc().read()).toMatchObject({ birthdayCreditOn: false, birthdayCreditMinor: 2550, birthdayCreditDays: 15 });
@@ -265,6 +291,12 @@ describe('THE PROGRAM and SHIPPING (BP-19 T2)', () => {
     expect((await clients.ADMIN.request('PUT', '/api/admin/club/program', { body: withoutBirthday })).statusCode).toBe(400);
     expect((await clients.ADMIN.request('PUT', '/api/admin/club/program', { body: { ...body, birthdayCreditDays: 366 } })).statusCode).toBe(400);
     expect((await clients.ADMIN.request('PUT', '/api/admin/club/program', { body: { ...body, birthdayCreditMinor: 0 } })).statusCode).toBe(400);
+    // So is the warranty credit (plan ORBES CARE, step 1.4): without it, or out of 1 to 100, refused; PLATINE's every piece taken.
+    const { warrantyCreditPercent: _percent, ...withoutWarranty } = body;
+    expect((await clients.ADMIN.request('PUT', '/api/admin/club/program', { body: withoutWarranty })).statusCode).toBe(400);
+    expect((await clients.ADMIN.request('PUT', '/api/admin/club/program', { body: { ...body, warrantyCreditPercent: 0 } })).statusCode).toBe(400);
+    expect((await clients.ADMIN.request('PUT', '/api/admin/club/program', { body: { ...body, warrantyCreditPercent: 101 } })).statusCode).toBe(400);
+    expect(body.carePiecesPlatine).toBeNull();
     const ok = await clients.ADMIN.request('PUT', '/api/admin/club/program', { body });
     expect(ok.statusCode).toBe(200);
     expect(await svc().read()).toEqual(body);

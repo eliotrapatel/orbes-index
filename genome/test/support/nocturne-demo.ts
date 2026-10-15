@@ -74,6 +74,9 @@
  *                     entered before its birthday, today, and the daily grant its birthday credit (plan CUSTOMER
  *                     INTELLIGENCE §3.5 SB.4.5): IN USE, BIRTHDAY CREDIT, for an account without a tier. On its own
  *                     stage, so no other state holds a date of birth
+ *   care-used         the full story, THE PROGRAM's PLATINE PRIVATE CARE then set to 1 piece a year (plan ORBES CARE,
+ *                     step 1.4: PLATINE's default is every piece), so the PLATINE account's second piece reads the
+ *                     year's PRIVATE CARE used for another piece (piece-care-used)
  *
  * Ids written by the server (scan references, order and entry references, genomes, invoice numbers) are the server's;
  * the parity tool's comparisons treat them as live data.
@@ -116,7 +119,8 @@ export type DemoVariant =
   | 'account-addresses'
   | 'account-profile'
   | 'wishes'
-  | 'birthday-credit';
+  | 'birthday-credit'
+  | 'care-used';
 
 export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'full',
@@ -141,6 +145,7 @@ export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'account-profile',
   'wishes',
   'birthday-credit',
+  'care-used',
 ]);
 
 /** NOW: Monday 5 October 2026, 18:49 in Paris (16:49 UTC), the boards' afternoon. Every clock of the stage is fixed here. */
@@ -243,7 +248,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
   // claim-waiting stage (plan NEXT LOT §3.4) tells the full story, its state writing the rest.
   // The draw-sizes stage (plan NEXT LOT §3.6.F) tells the full story, then adds a draw in sizes, open. The stages of the
   // collector's side of an order (plan NEXT LOT §3.6) tell the full story, their state writing the rest.
-  const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes', 'birthday-credit'] as const;
+  const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes', 'birthday-credit', 'care-used'] as const;
   const story = ((OWN_STAGES as readonly DemoVariant[]).includes(variant) ? 'full' : variant) as Exclude<DemoVariant, (typeof OWN_STAGES)[number]>;
   if (story === 'empty') await seedEmpty(w);
   else if (story === 'stress') await seedStress(w);
@@ -261,6 +266,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
     if (story === 'full' || story === 'room') await seedSizes(w, story);
     if (variant === 'pairs') await seedPairs(w);
     if (variant === 'draw-sizes') await seedDrawSizes(w);
+    if (variant === 'care-used') await seedCareUsed(w);
   }
   clock.set(NOCTURNE_NOW);
   // Every account's session opened now: a capture signs in with its cookie.
@@ -1290,6 +1296,16 @@ async function seedYearlyCare(w: World): Promise<void> {
   await ctx.services.care.shipBack(done, { carrierId: await carrier(w, 'Colissimo'), tracking: '6A20260924001' }, admin);
   clock.set(at('2026-09-25T09:00:00Z'));
   await ctx.services.care.complete(done, { notes: 'Inspected, cleaned and polished.' }, admin);
+}
+
+/**
+ * The stage care-used (plan ORBES CARE, step 1.4): THE PROGRAM's PLATINE PRIVATE CARE set to 1 piece a year after the
+ * full story (PLATINE's default is now every piece), so the PLATINE account, its first piece REQUESTED, reads the
+ * year's PRIVATE CARE used on its second.
+ */
+async function seedCareUsed(w: World): Promise<void> {
+  const { ctx, admin } = w;
+  await ctx.services.clubProgram.update({ ...(await ctx.services.clubProgram.read()), carePiecesPlatine: 1 }, admin);
 }
 
 // ── The extreme content (fidelity rule 5) and the empty states ─────────────
