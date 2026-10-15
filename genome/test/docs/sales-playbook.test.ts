@@ -75,6 +75,10 @@ const SHEETS = [
   '## 3. Client inquiet',
   '## 4. Revente',
   '## 5. Perte ou vol',
+  // Plan ORBES CARE of 2026-10-15 (§2(e)): a warranty claim, PRIVATE CARE and a model's warranty, after the loss.
+  '## 5b. Une demande au titre de la garantie',
+  '## 5c. PRIVATE CARE',
+  '## 5d. La garantie d\'un modèle',
   '## 6. Mot de passe oublié',
   '## 7. Scans personnels du personnel',
   '## 8. Lexique interdit',
@@ -82,7 +86,12 @@ const SHEETS = [
   '## 10. Créer un OPERATOR nominatif',
   '## 11. Validation',
 ] as const;
-const sheet = (n: number): string => section(playbook, SHEETS[n]);
+/** The sheet numbered `n` (`5`, `'5b'`): its heading starts with `## n.`. */
+const sheet = (n: number | string): string => {
+  const heading = SHEETS.find((h) => h.startsWith(`## ${n}. `));
+  if (!heading) throw new Error(`no sheet ${n}`);
+  return section(playbook, heading);
+};
 
 /**
  * Text compared without regard to apostrophes, underscores or runs of spaces, case kept: `COUNTERFEIT FLAGGED` is
@@ -384,7 +393,7 @@ describe('sales playbook (docs/launch/SALES-PLAYBOOK.md)', () => {
       expect(findForbidden(q, terms), q).toEqual([]);
     }
     // Every sheet a customer hears has its words.
-    for (const n of [1, 2, 3, 4, 5, 6]) expect(quotes(sheet(n)).length, SHEETS[n]).toBeGreaterThan(0);
+    for (const n of [1, 2, 3, 4, 5, '5b', 6]) expect(quotes(sheet(n)).length, String(n)).toBeGreaterThan(0);
   });
 
   it('writes no exclamation mark (BRAND §4.1)', () => {
@@ -528,6 +537,33 @@ describe('sales playbook (docs/launch/SALES-PLAYBOOK.md)', () => {
     const targets = [...playbook.matchAll(/\]\(([^)\s]+)\)/g)].map((m) => m[1]).filter((t) => !/^(?:[a-z]+:|#)/i.test(t));
     expect(targets.length).toBeGreaterThan(0);
     expect(targets.filter((t) => !existsSync(resolve(here, t.replace(/#.*$/, ''))))).toEqual([]);
+  });
+
+  it('runs a warranty claim, PRIVATE CARE and a model\'s warranty from the console as the plan ORBES CARE sets them (§5b to §5d)', () => {
+    const claim = sheet('5b');
+    // A normal message, opened by Client Services from the conversation: never a photo, never a form.
+    for (const span of ['Messages', 'Open a warranty claim', 'Open a legal-guarantee claim', 'Send label', 'Received', 'Decide', 'Move to the legal guarantee', 'Refuse', 'Ship', 'Apply credit', 'This model is no longer made.']) {
+      expect(codeSpans(claim), span).toContain(span);
+    }
+    expect(claim).toContain('Jamais de photo demandée, jamais de formulaire.');
+    expect(claim).toContain('le serveur vérifie qu\'il est le propriétaire enregistré de la pièce');
+    expect(claim).toContain('Ne refusez jamais avec un motif inexact.');
+    // The two warranties as the console names them, and every outcome an OPERATOR's (answer 11).
+    for (const span of ['Lifetime warranty', '2-year warranty (defects only)', 'Legal guarantee']) expect(codeSpans(claim), span).toContain(span);
+    expect(claim).toContain('OPERATOR ou ADMIN');
+    expect(claim).toContain('jamais un crédit');
+    // PRIVATE CARE, every piece from PLATINE, nothing to sell; the board's steps as the console labels them.
+    const care = sheet('5c');
+    for (const span of ['Clients', 'PRIVATE CARE', 'Send label', 'Received by ORBES', 'Ship back', 'Complete']) expect(codeSpans(care), span).toContain(span);
+    expect(care).toContain('Plus d\'abonnement ORBES Care : rien n\'est à vendre.');
+    // A model's warranty: chosen at its creation, changed by an ADMIN only, never to shorten one given after the launch.
+    const model = sheet('5d');
+    for (const span of ['Lifetime (jewelry)', '2 years (defects only)', 'Edit model']) expect(codeSpans(model), span).toContain(span);
+    expect(model).toContain('Seul un ADMIN la change ensuite');
+    // No atelier, and the ORBES CARE tab where the WARRANTY tab was (lines 74, 84, 206, 208).
+    expect(withoutCodeSpans(playbook)).not.toMatch(/atelier/i);
+    expect(sheet(3)).toContain('La garantie est dans l\'onglet `ORBES CARE`');
+    expect(quotes(sheet(3)).join(' ')).toContain('Sa garantie est dans l\'onglet ORBES CARE');
   });
 
   it('is linked from LAUNCH §7, before the first sale', () => {

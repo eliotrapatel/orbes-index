@@ -71,7 +71,7 @@ Sur le téléphone du comptoir, avec votre compte RETAIL (ou OPERATOR) :
 3. `Scan the piece`, et visez l'ORBES CODE de la pièce vendue (ou `Upload a photo`). Chaque scan est inscrit à votre nom (`Each scan here is recorded under your name.`).
 4. Lisez l'écran (tableau ci-dessous). Avec `READY TO SELL`, vérifiez que l'identité affichée (`O26-…`) est celle imprimée sur la carte certificat rangée avec la pièce.
 5. `Activate warranty`, dans les 10 minutes qui suivent le scan (`This scan stays valid for … minutes.`). Passé ce délai, scannez de nouveau.
-6. L'écran affiche `WARRANTY ACTIVE`, les dates de la garantie et votre point de vente, puis `Tell the client` : `Register your piece with its card at theorbes.com/verify.`
+6. L'écran affiche `WARRANTY ACTIVE`, les dates de la garantie (ou, pour une garantie à vie, sa date de début et `Lifetime`) et votre point de vente, puis `Tell the client` : `Register your piece with its card at theorbes.com/verify.`
 7. Remettez la carte certificat, **son claim code imprimé en clair** : le personnel ne le saisit ni ne le recopie jamais. Puis `Next sale`.
 
 Le mode Boutique inscrit la vente **aujourd'hui**, avec le pays du point de vente. Pour une vente d'un autre jour (téléphone indisponible, vente oubliée), un OPERATOR l'inscrit dans la console, ci-dessous.
@@ -81,7 +81,7 @@ Le mode Boutique inscrit la vente **aujourd'hui**, avec le pays du point de vent
 | `READY TO SELL` | Un code signé par ORBES, d'une pièce de son registre, dont la garantie n'a pas commencé | Le point de vente choisi, `Activate warranty` |
 | `ALREADY SOLD` | La garantie a déjà commencé, ou un compte client détient la pièce | Ne vendez pas. Mettez la pièce de côté et prévenez ORBES Client Services avec son identité |
 | `WARRANTY VOID` | La garantie a été annulée | Ne vendez pas. ORBES Client Services |
-| `NOT FOR SALE` | Le statut de la pièce ne permet pas la vente, ou elle est en entretien | Ne vendez pas. L'atelier clôt d'abord l'entretien |
+| `NOT FOR SALE` | Le statut de la pièce ne permet pas la vente, ou elle est en entretien | Ne vendez pas. ORBES clôt d'abord l'entretien |
 | `SUSPICIOUS ACTIVITY`, `REVOKED`, `UNKNOWN`, `INVALID SIGNATURE` | Le code n'a pas été reconnu comme celui d'une pièce qu'ORBES peut vendre | Ne vendez pas. Mettez la pièce de côté, notez son identité et prévenez un OPERATOR : le scan est inscrit à votre nom, il le retrouvera |
 | `MALFORMED CODE` | Le code n'a pas été lu | `Scan another` sous une lumière égale ; sinon, `Upload a photo` sous l'image de la caméra |
 
@@ -203,9 +203,9 @@ Le client lit : *This ORBES identity was issued and signed by ORBES and is regis
 
 **Ce que cela veut dire.** Le lecteur, connecté, est le propriétaire enregistré.
 
-**Ce que vous faites.** Rien de plus. La garantie est dans l'onglet `WARRANTY` ; le transfert, dans l'onglet `OWNERSHIP`.
+**Ce que vous faites.** Rien de plus. La garantie est dans l'onglet `ORBES CARE` ; le transfert, dans l'onglet `OWNERSHIP`.
 
-> Cette pièce est enregistrée à votre compte ORBES. Sa garantie est dans l'onglet WARRANTY ; si elle change de mains un jour, c'est dans l'onglet OWNERSHIP que vous créerez le code de transfert.
+> Cette pièce est enregistrée à votre compte ORBES. Sa garantie est dans l'onglet ORBES CARE ; si elle change de mains un jour, c'est dans l'onglet OWNERSHIP que vous créerez le code de transfert.
 
 ### AUTHENTIC — OWNERSHIP VERIFIED, avec une activité inhabituelle
 
@@ -393,6 +393,35 @@ Le claim code n'est gardé que sous forme d'empreinte : personne ne peut le reli
 4. **Une pièce en stock** (sans acheteur) : `Make a new claim code`. Le code s'affiche une seule fois, à vous : `Download certificate card`, imprimez la carte et remplacez celle de la boîte de la pièce.
 
 Une pièce vendue en boutique, sans commande, ne reçoit pas de nouveau claim code : la console le refuse, car son acheteur n'a pas de commande où le recevoir et le personnel ne voit jamais un code dû à un acheteur. Prévenez un ADMIN. Une pièce dont l'ORBES CODE a été révoqué reçoit d'abord un nouvel ORBES CODE (`Re-issue code`), puis son nouveau claim code.
+
+## 5b. Une demande au titre de la garantie
+
+Deux garanties ORBES, selon le modèle de la pièce : la **garantie à vie** (`Lifetime warranty` : la pièce ternie, décolorée ou cassée par accident ; un remplacement offert par achat d'origine, puis un crédit de 30 % de sa valeur) et la **garantie de 2 ans** (`2-year warranty (defects only)` : les seuls défauts de fabrication, réparés ou remplacés ; jamais de crédit). La garantie légale de conformité s'y ajoute, pour l'acheteur, dans les 2 ans de la livraison (CGU, article 11). Le client ne trouve aucun bouton de demande, aucun formulaire, aucun envoi de photo : il vous écrit, et vous menez la demande.
+
+1. Le client écrit dans `Messages`, depuis la pièce dans MY PIECES. La garantie ORBES se demande seulement ainsi : un e-mail à support@ reçoit pour réponse d'écrire depuis la pièce. Ouvrez la demande depuis sa conversation (`Open a warranty claim`) : le serveur vérifie qu'il est le propriétaire enregistré de la pièce ; sinon, il l'enregistre d'abord. La garantie légale, elle, ne demande ni enregistrement ni compte : l'acheteur d'une commande ORBES écrit depuis son compte ; un acheteur en boutique sans compte passe par le point de vente, et vous ouvrez la demande depuis la page de la pièce (`Open a legal-guarantee claim`), le ticket de caisse noté.
+2. Lisez la garantie de la pièce, que la console affiche à l'ouverture : **garantie à vie** (`Lifetime` : ternie, décolorée, cassée par accident ; un remplacement offert, puis 30 %) ou **garantie de 2 ans** (sa date : les seuls défauts de fabrication, réparés ou remplacés ; jamais de crédit). Vous ne la choisissez pas : elle vient du modèle de la pièce. À l'ouverture, regardez aussi si le modèle est encore fabriqué : la console écrit `This model is no longer made.` (le modèle arrêté, `Discontinued in …` dans le Catalogue). Une pièce de 2 ans d'un modèle arrêté ne peut pas être remplacée : si son défaut ne se répare pas, ouvrez d'emblée la demande en `Legal guarantee` (dans les 2 ans de la livraison, pour l'acheteur), qui permet le remboursement. Si vous ne le découvrez qu'à réception : sur la demande de 2 ans, `Move to the legal guarantee` (mêmes conditions) ; la pièce reste chez ORBES, la demande continue au titre de la garantie légale, et vous décidez ensuite. Hors de ces conditions (au-delà des 2 ans de la livraison, ou un client qui n'est pas l'acheteur), laissez la demande à `Received` et remontez le cas à la direction. Ne refusez jamais avec un motif inexact. Dans les 2 ans de la livraison, demandez-vous si c'est un défaut de conformité (`Legal guarantee`) : il n'use jamais le remplacement offert, et ne se règle jamais par un crédit.
+3. Un cas exclu évident (perdue, vol déclaré, pour l'une ou l'autre garantie) : `Open a warranty claim`, puis `Refuse` avec le motif, et répondez dans `Messages`.
+4. Sinon `Send label` (l'étiquette prépayée vers ORBES) : le client la télécharge dans l'onglet ORBES CARE de la pièce (`DOWNLOAD LABEL`).
+5. Pièce reçue : `Received`.
+6. Vous décidez (`Decide`, OPERATOR ou ADMIN ; la console ne propose que ce que la garantie de la demande permet) : **garantie à vie**, la même pièce neuve (`Replace with the same piece, new` : son identité ORBES, tirée du stock et décomptée par `Logistics` → `Corrections`, ou émise par le `Generator`, qu'un ADMIN utilise), le crédit de sa valeur si le modèle n'est plus fabriqué (`Credit of its value (model no longer made)`), 30 % si le remplacement offert est déjà utilisé ; **garantie de 2 ans**, la réparation (`Repaired`) ou, si elle n'est pas possible, la même pièce neuve, jamais un crédit ; au titre de la garantie légale un remplacement, une réparation, une réduction du prix (`Price reduction`) ou un remboursement (`Refund` : le vendeur rembourse ; pour une commande ORBES, ouvrez son retour, `Open a return`, décidé vers l'archive, qui fait l'avoir), ou un refus avec son motif (garantie de 2 ans : absence de défaut de fabrication, perdue, vol déclaré, garantie terminée ou annulée ; garantie légale : seulement absence de défaut de conformité, abîmée volontairement ou par un tiers). Le remboursement d'une commande ORBES passe par l'archive de son retour, qui reste une décision d'ADMIN. Le remplacement est la même référence et la même taille ; une autre taille seulement si le client la demande, case cochée par vous (`Another size, as the client asked`).
+7. `Ship` : la nouvelle pièce avec sa carte certificat (le client l'enregistre avec son claim code), ou la pièce rendue.
+8. Répondez dans `Messages` ; un crédit se déduit par `Apply credit` sur une commande d'un tirage, d'une LIVE RELEASE ou du salon privé. Pendant le transport, l'ancienne pièce, close, ne compte plus pour le palier : dites-le si le client le remarque. Jamais de photo demandée, jamais de formulaire.
+
+Une demande ouverte à tort, ou que le client abandonne avant d'envoyer la pièce, se clôt avec une note (`Close`). Toutes les demandes se retrouvent dans `Warranties`, onglet `Claims`, et sur la page de chaque pièce.
+
+> ORBES Client Services vous envoie une étiquette prépayée : vous la trouverez dans l'onglet ORBES CARE de votre pièce, dans MY PIECES. Renvoyez-nous la pièce dans sa boîte ; nous l'examinons dès sa réception et vous répondons ici.
+
+---
+
+## 5c. PRIVATE CARE
+
+Chaque pièce, une fois par an, à partir de PLATINE : l'inspection, le nettoyage et le polissage par ORBES, gratuits. Le client la demande depuis l'onglet ORBES CARE de la pièce (`REQUEST PRIVATE CARE`), avec l'adresse de retour. Dans la console, `Clients` → `PRIVATE CARE` : `Send label`, `Received by ORBES`, `Ship back`, `Complete`. Plus d'abonnement ORBES Care : rien n'est à vendre.
+
+---
+
+## 5d. La garantie d'un modèle
+
+Un modèle se crée avec sa garantie (`New model`, champ `Warranty`) : `Lifetime (jewelry)` par défaut, `2 years (defects only)` pour la maroquinerie. Seul un ADMIN la change ensuite (`Edit model`), et le changement s'applique aux pièces déjà vendues : avant le lancement public seulement, jamais pour raccourcir une garantie déjà donnée après lui.
 
 ---
 
