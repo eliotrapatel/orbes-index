@@ -92,15 +92,13 @@ export interface VerifyOutcome {
 }
 
 /**
- * GET /api/v1/client-services: how ORBES Client Services is reached, and where SUBSCRIBE of ORBES Care leads (P-M02,
- * CARE_SUBSCRIBE_URL); `{}` when nothing is configured.
+ * GET /api/v1/client-services: how ORBES Client Services is reached; `{}` when nothing is configured. (Its
+ * `careSubscribeUrl` is no longer served nor read: the ORBES Care subscription is gone, plan ORBES CARE, answer 1.)
  */
 export interface ClientServices {
   email?: string;
   phone?: string;
   hours?: string;
-  /** An https:// page, opened in a new tab from the CARE tab of MY PIECES; absent: "Subscriptions open soon". */
-  careSubscribeUrl?: string;
 }
 
 /** Where the customer saw or bought the piece of a result that was not authentic (POST /api/v1/reports). */
@@ -190,7 +188,7 @@ export interface OwnedPiece {
   imageUrl: string | null;
   /** NOCTURNE N3, N6: its model's lookbook sheet (`<slug>`) when the model is PUBLIC there, or RESERVED and the account's tier reaches it, else null. */
   lookbook?: string | null;
-  /** The model's care instructions (P-M02, the CARE tab of MY PIECES); null: the general care text of /verify. */
+  /** The model's care instructions (P-M02; CARING FOR THIS PIECE in the ORBES CARE tab of MY PIECES); null: the general care text of /verify. */
   care: string | null;
   /**
    * NOCTURNE, addition 2: where the piece comes from, its order of this account and the release it was sold in; null

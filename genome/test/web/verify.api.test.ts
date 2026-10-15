@@ -329,6 +329,26 @@ describe('ApiClient', () => {
     expect(f.calls.at(-1)!.headers['x-csrf-token']).toBeUndefined();
   });
 
+  it('a warranty claim\'s prepaid label (plan ORBES CARE, answer 9): read with a GET, no CSRF header; saved under the server\'s name, else a fallback; a body that is not a PDF is a bad response', async () => {
+    const ID = 'c1a1e000-0000-4000-8000-0000000000c1';
+    const pdf = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+    const f = fakeFetch([
+      () => new Response(pdf, { status: 200, headers: { 'content-type': 'application/pdf', 'content-disposition': 'attachment; filename="ORBES-WARRANTY-CLAIM-O26-J-00184-LABEL.pdf"' } }),
+      () => new Response(pdf, { status: 200, headers: { 'content-type': 'application/pdf' } }),
+      () => json(404, { error: { code: 'WARRANTY_CLAIM_NOT_FOUND', message: 'Warranty claim not found.' } }),
+      () => new Response('<html>', { status: 200, headers: { 'content-type': 'text/html' } }),
+    ]);
+    const api = new ApiClient({ fetch: f.impl });
+    const file = await api.claimLabel(ID);
+    expect(file.filename).toBe('ORBES-WARRANTY-CLAIM-O26-J-00184-LABEL.pdf');
+    expect(new Uint8Array(await file.blob.arrayBuffer())).toEqual(pdf);
+    expect(f.calls[0]).toMatchObject({ method: 'GET', url: `/api/v1/account/warranty-claims/${ID}/label.pdf`, credentials: 'same-origin' });
+    expect(f.calls[0]!.headers['x-csrf-token']).toBeUndefined();
+    expect((await api.claimLabel(ID)).filename).toBe('ORBES-warranty-claim-label.pdf');
+    await expect(api.claimLabel(ID)).rejects.toMatchObject({ status: 404, code: 'WARRANTY_CLAIM_NOT_FOUND' });
+    await expect(api.claimLabel(ID)).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+  });
+
   it('ownership certificates (F-06): creates, lists and withdraws with the CSRF token; reads one and its PDF with none, the token in the body', async () => {
     const offer = { id: '5a864af8-0d6b-4c1e-9f2a-3b7c1d2e4f5a', productId: 'O26-J-00184', token: 'T'.repeat(52), url: `https://verify.theorbes.com/verify/c#${'T'.repeat(52)}`, createdAt: 'a', expiresAt: 'b' };
     const pdf = new Uint8Array([0x25, 0x50, 0x44, 0x46]);

@@ -13,7 +13,7 @@
  *     THE DRAW OF 14 SEPTEMBER   ›              view), from the order of the account the piece fulfils; nothing for a
  *     ORDER OR-7C21A9F0          ›              piece without one (a boutique sale)
  *            GENOME                             its GENOME in ivory, the ORBES monogram at its centre (decision 12)
- *   OWNERSHIP  WARRANTY  SERVICE  CARE          underlined tabs (`.tabsx`)
+ *   OWNERSHIP  ORBES CARE  SERVICE              underlined tabs (`.tabsx`; plan ORBES CARE §2(a), answer 6)
  *     ACQUIRED · OWNERSHIP · SINCE · TRANSFER   the facts of its ownership; a transfer under way and CANCEL TRANSFER
  *     OWNERSHIP CERTIFICATE                     (F-06) CREATE CERTIFICATE, 7 · 30 · 90 DAYS, then CREATE LINK; the link
  *                                               shown once, COPY LINK, OPEN LINK; the open links, each with WITHDRAW
@@ -22,9 +22,10 @@
  *                                               loss ORBES Client Services recorded, or a piece the server would refuse
  *                                               to report: their sentence
  *     WRITE TO ORBES CLIENT SERVICES            the write sheet, the piece attached (plan NEXT-NINE, CS-01)
- *     WARRANTY (C35): STATUS, FROM, UNTIL and its sentence; SERVICE: YEARLY CARE (plan NEXT-NINE, BP-19 T6, only when
- *     the tier includes it: views/yearly-care.ts), then SERVICE HISTORY, each service; CARE: CARING FOR
- *     THIS PIECE, then ORBES CARE and SUBSCRIBE (its page, a new tab) or « Subscriptions open soon. »
+ *     ORBES CARE: WARRANTY (C35: STATUS, FROM, UNTIL and its sentence), the WARRANTY CLAIM while one is under way
+ *     (views/warranty-claim.ts), PRIVATE CARE (plan NEXT-NINE, BP-19 T6: views/yearly-care.ts; or the tier it opens
+ *     from), CARING FOR THIS PIECE, then the contact sentence and WRITE TO ORBES CLIENT SERVICES, the piece attached;
+ *     SERVICE: SERVICE HISTORY, each service
  *
  * Signed out, the OWNERSHIP panel's sign-in forms stand alone, as on MY PIECES; a piece the account does not hold (an
  * address that is none, a piece passed on) gives way to MY PIECES (`onMissing`).
@@ -38,7 +39,7 @@ import { ownerCertificateLine } from '../certificate-model.js';
 import { LOOKBOOK, ORBES_CARE, PIECES, RELEASES } from '../copy.js';
 import { nocturneGenome } from '../genome-view.js';
 import { lookbookSheetPath } from '../lookbook-model.js';
-import { careOfferModel, PIECE_TAB_LABELS, PIECE_TABS, pieceModel, serviceRows, type PieceModel, type PieceTabId } from '../pieces-model.js';
+import { PIECE_TAB_LABELS, PIECE_TABS, pieceModel, serviceRows, type PieceModel, type PieceTabId } from '../pieces-model.js';
 import type { SessionStore } from '../session.js';
 import type { CertificateOffer, ClientServices, IncidentType, OwnedPiece, OwnerCertificate, ServiceRecord } from '../types.js';
 import { formatDate, recoveryContactModel } from '../view-model.js';
@@ -47,6 +48,7 @@ import { PIECES_PATH, viewRoot, withNumerals } from './common.js';
 import { FormError, messageOf, nocturneForm } from './forms.js';
 import { accLink, appAnchor, button, definitionList, failedState, field, icon, loadingState, textLink } from './nocturne.js';
 import { writeButton } from './write.js';
+import { WarrantyClaimBlock } from './warranty-claim.js';
 import { YearlyCareBlock } from './yearly-care.js';
 import { OwnershipPanel } from './ownership.js';
 import { modelPhoto } from './result.js';
@@ -237,8 +239,10 @@ class PieceCard {
   private notice: string | null = null;
   private services: { kind: 'loading' } | { kind: 'ready'; list: ServiceRecord[] } | { kind: 'failed'; message: string } | null = null;
   private readonly servicePanel = h('div', { class: 'n-piece__panel' });
-  /** YEARLY CARE (BP-19 T6), above SERVICE HISTORY: drawn only when the tier includes it, or a request of the piece is open. */
+  /** PRIVATE CARE (BP-19 T6) in ORBES CARE: drawn when the tier includes it (or the tier it opens from), or a request of the piece is open. */
   private readonly yearlyCare: YearlyCareBlock;
+  /** The piece's WARRANTY CLAIM in ORBES CARE (plan ORBES CARE, answer 9), read with PRIVATE CARE's status. */
+  private readonly claim: WarrantyClaimBlock;
   private certificates: OwnerCertificate[] | null;
   private offer: CertificateOffer | null = null;
   private creating = false;
@@ -251,7 +255,8 @@ class PieceCard {
   ) {
     this.model = pieceModel(piece);
     this.certificates = deps.certificates;
-    this.yearlyCare = new YearlyCareBlock({ api: deps.api, session: deps.session, productId: piece.productId });
+    this.claim = new WarrantyClaimBlock({ api: deps.api, session: deps.session });
+    this.yearlyCare = new YearlyCareBlock({ api: deps.api, session: deps.session, productId: piece.productId, onCare: (care) => this.claim.show(care?.claim ?? null) });
     const m = this.model;
     const key = m.key || 'piece';
     const slug = m.lookbook;
@@ -320,53 +325,47 @@ class PieceCard {
     switch (id) {
       case 'ownership':
         return this.panel;
-      case 'warranty':
-        return this.warrantyPanel();
-      case 'service':
-        if (this.services === null) {
-          void this.loadServices();
-          void this.yearlyCare.load();
-        }
-        return this.servicePanel;
       case 'care':
-        return this.carePanel();
+        void this.yearlyCare.load();
+        return this.orbesCarePanel();
+      case 'service':
+        if (this.services === null) void this.loadServices();
+        return this.servicePanel;
     }
   }
 
-  // ── WARRANTY, SERVICE, CARE (C35, states 1 to 3) ─────────────────────────
-
-  private warrantyPanel(): HTMLElement {
-    const w = this.model.warranty;
-    if (!w) return h('div', { class: 'n-piece__panel' }, h('p', { class: 'n-tx', text: ORBES_CARE.warranty.none }));
-    return h('div', { class: 'n-piece__panel' }, definitionList(w.rows, { kind: 'kv' }), h('p', { class: 'n-tx n-piece__note', text: w.note }));
-  }
+  // ── ORBES CARE, SERVICE (C35; plan ORBES CARE §2(a)) ─────────────────────
 
   /**
-   * CARE (P-M02): the care of the piece's model, then ORBES Care, what it offers, and SUBSCRIBE, the hairline button to
-   * its page in a new tab, or a plain sentence while ORBES publishes none.
+   * ORBES CARE (answers 1, 6 and 9), in this order: WARRANTY, its rows and its sentence; the WARRANTY CLAIM while one is
+   * under way; PRIVATE CARE (or the tier it opens from); CARING FOR THIS PIECE, the care of its model; then how to reach
+   * ORBES Client Services and WRITE TO ORBES CLIENT SERVICES, the piece attached, as on OWNERSHIP.
    */
-  private carePanel(): HTMLElement {
-    const offer = careOfferModel(this.deps.contacts);
-    const offerId = `${this.model.key || 'piece'}-care-offer`;
+  private orbesCarePanel(): HTMLElement {
+    const m = this.model;
+    const key = m.key || 'piece';
+    const w = m.warranty;
     return h(
       'div',
-      { class: 'n-piece__panel piece__care' },
-      h('h3', { class: 'n-g n-lb', text: ORBES_CARE.careLabel }),
-      h('p', { class: 'n-tx n-piece__care-text piece__care-text', text: this.model.care }),
+      { class: 'n-piece__panel n-piece__care piece__care' },
       h(
         'section',
-        { class: 'n-piece__care-offer', attrs: { 'aria-labelledby': offerId } },
-        h('h3', { class: 'n-g n-lb', id: offerId, text: offer.label }),
-        h('p', { class: 'n-tx n-piece__care-lead', text: offer.lead }),
-        h('ul', { class: 'n-piece__benefits' }, ...offer.benefits.map((b) => h('li', { class: 'n-sm n-piece__benefit pieces__benefit', text: b }))),
-        offer.subscribe
-          ? h('a', {
-              class: 'n-g n-btn n-btn--ol n-piece__subscribe piece__subscribe',
-              attrs: { href: offer.subscribe.href, target: '_blank', rel: 'noopener noreferrer', 'aria-label': offer.subscribe.label },
-              text: offer.subscribe.text,
-            })
-          : h('p', { class: 'n-sm n-piece__care-soon piece__care-soon', text: offer.soon ?? '' }),
+        { class: 'n-piece__care-section n-piece__warranty piece__warranty', attrs: { 'aria-labelledby': `${key}-warranty` } },
+        h('h3', { class: 'n-g n-lb', id: `${key}-warranty`, text: ORBES_CARE.warranty.label }),
+        ...(w
+          ? [definitionList(w.rows, { kind: 'kv', extraClass: 'n-piece__warranty-rows' }), h('p', { class: 'n-tx n-piece__note', text: w.note })]
+          : [h('p', { class: 'n-tx n-piece__note', text: ORBES_CARE.warranty.none })]),
       ),
+      this.claim.root,
+      this.yearlyCare.root,
+      h(
+        'section',
+        { class: 'n-piece__care-guide', attrs: { 'aria-labelledby': `${key}-care-guide` } },
+        h('h3', { class: 'n-g n-lb', id: `${key}-care-guide`, text: ORBES_CARE.careLabel }),
+        h('p', { class: 'n-tx n-piece__care-text piece__care-text', text: m.care }),
+      ),
+      h('p', { class: 'n-tx n-piece__care-contact', text: ORBES_CARE.contact }),
+      writeButton(pieceContext(this.piece)),
     );
   }
 
@@ -404,7 +403,7 @@ class PieceCard {
           ),
         ),
       );
-    this.servicePanel.replaceChildren(this.yearlyCare.root, ...out);
+    this.servicePanel.replaceChildren(...out);
     if (hadFocus && !this.servicePanel.contains(document.activeElement)) this.servicePanel.closest<HTMLElement>('[role="tabpanel"]')?.focus({ preventScroll: true });
   }
 

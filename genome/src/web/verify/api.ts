@@ -801,6 +801,19 @@ export class ApiClient {
     return { blob, filename: filenameOf(res.headers.get('content-disposition'), 'ORBES-yearly-care-label.pdf') };
   }
 
+  /**
+   * DOWNLOAD LABEL of a warranty claim (plan ORBES CARE, answer 9; API GET /api/v1/account/warranty-claims/:id/label.pdf):
+   * the prepaid label ORBES Client Services sent, for the claim's own account only.
+   */
+  async claimLabel(id: string): Promise<DownloadedFile> {
+    const res = await this.send('GET', `/api/v1/account/warranty-claims/${encodeURIComponent(id)}/label.pdf`, undefined, {});
+    if (!res.ok) throw toApiError(res.status, await readJson(res));
+    const type = res.headers.get('content-type') ?? '';
+    const blob = await res.blob();
+    if (!type.startsWith('application/pdf') || blob.size === 0 || blob.size > MAX_FILE_BYTES) throw new ApiError(res.status, 'BAD_RESPONSE', 'Unexpected response.');
+    return { blob, filename: filenameOf(res.headers.get('content-disposition'), 'ORBES-warranty-claim-label.pdf') };
+  }
+
   /** REPORT LOST / STOLEN: from then on every scan of the piece shows UNUSUAL ACTIVITY, and a pending transfer is cancelled. */
   reportIncident(productId: string, type: IncidentType): Promise<IncidentReport> {
     return this.request<IncidentReport>('POST', '/api/v1/ownership/incidents', { productId, type }, { csrf: true });

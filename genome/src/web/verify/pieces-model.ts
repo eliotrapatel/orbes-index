@@ -6,19 +6,23 @@
  * The owner's view says what the registry holds about their own piece: since when it is theirs, how
  * they acquired it, whether their ownership is verified, a transfer under way, the warranty, the
  * services, their own declaration (LOST or STOLEN), the photographs ORBES holds of it (F-04), as an
- * authentic result shows them, and the care of its model with ORBES Care (P-M02). It never names an internal status.
+ * authentic result shows them, and the care of its model (ORBES CARE, plan ORBES CARE §2(a)). It never names an
+ * internal status.
  */
-import { careSubscribeHref } from '../shared/client-services.js';
-import { DEFAULT_CARE, ORBES_CARE, ORDERS, PIECES } from './copy.js';
+import { DEFAULT_CARE, ORDERS, PIECES } from './copy.js';
 import { orderDate } from './orders-model.js';
 import { releasePath } from './releases-model.js';
-import type { ClientServices, IncidentType, OwnedPiece, PieceOrigin, ServiceRecord } from './types.js';
+import type { IncidentType, OwnedPiece, PieceOrigin, ServiceRecord } from './types.js';
 import { formatDate, formatDateLong, modelVariantLine, photoModels, pieceLines, productLines, upper, validGlyphs, warrantyModel, type GenomeModel, type PhotoModel, type Row } from './view-model.js';
 
-export type PieceTabId = 'ownership' | 'warranty' | 'service' | 'care';
+export type PieceTabId = 'ownership' | 'care' | 'service';
 
-/** OWNERSHIP · WARRANTY · SERVICE · CARE (P-M02): four labels, the width of the result's four. */
-export const PIECE_TABS: readonly PieceTabId[] = ['ownership', 'warranty', 'service', 'care'];
+/**
+ * OWNERSHIP · ORBES CARE · SERVICE (plan ORBES CARE §2(a), answer 6): ORBES CARE merges the WARRANTY and CARE tabs, and
+ * holds PRIVATE CARE; SERVICE holds SERVICE HISTORY. Three labels, the width of the result's three (PRODUCT · ORBES CARE ·
+ * OWNERSHIP, step 2.3).
+ */
+export const PIECE_TABS: readonly PieceTabId[] = ['ownership', 'care', 'service'];
 
 export const PIECE_TAB_LABELS: Readonly<Record<PieceTabId, string>> = PIECES.tabs;
 
@@ -75,7 +79,7 @@ export interface PieceModel {
    */
   certificateOffered: boolean;
   warranty?: { status: string; rows: Row[]; note: string };
-  /** The CARE tab (P-M02): the model's care instructions, else the general care text of a result's CARE tab. */
+  /** CARING FOR THIS PIECE in the ORBES CARE tab: the model's care instructions, else the general care text of a result. */
   care: string;
 }
 
@@ -114,29 +118,6 @@ export function pieceOriginModel(o: PieceOrigin | null | undefined, now: Date, o
   return {
     release: r && day && (r.mode === 'DRAW' || r.mode === 'LIVE') ? { id: r.id, title: r.mode === 'DRAW' ? PIECES.origin.draw(day) : PIECES.origin.live(day), href: releasePath(r.id) } : null,
     order: { reference: o.order.reference, title: ORDERS.reference(o.order.reference), line: PIECES.origin.step(step, orderDate(o.order.at, offsetMinutes)) },
-  };
-}
-
-/**
- * ORBES Care in the CARE tab (P-M02): its presentation, then SUBSCRIBE, a link to the subscription page in a new tab
- * when ORBES publishes one (`careSubscribeUrl`, https only, checked again here); otherwise `soon`, a plain sentence.
- */
-export interface CareOfferModel {
-  label: string;
-  lead: string;
-  benefits: string[];
-  subscribe: { href: string; text: string; label: string } | null;
-  soon: string | null;
-}
-
-export function careOfferModel(cs: ClientServices | undefined): CareOfferModel {
-  const href = careSubscribeHref(cs);
-  return {
-    label: ORBES_CARE.label,
-    lead: ORBES_CARE.lead,
-    benefits: [...ORBES_CARE.benefits],
-    subscribe: href ? { href, text: ORBES_CARE.subscribe, label: ORBES_CARE.subscribeLabel } : null,
-    soon: href ? null : ORBES_CARE.soon,
   };
 }
 

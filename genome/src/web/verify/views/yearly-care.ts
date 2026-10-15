@@ -1,11 +1,13 @@
 /**
- * YEARLY CARE in a piece's SERVICE tab (plan NEXT-NINE of 2026-10-06, §3.2 BP-19 T6), above SERVICE HISTORY, in
- * NOCTURNE's pieces: the label (Gravesend), the reading text, the hairline button, the underlined fields, the `.kv` rows
- * and the text links. care-model.ts says what it shows; this draws it, opens the request's own form in place, and sends
- * the request, its cancellation and the label's download.
+ * PRIVATE CARE (internal name YEARLY_CARE; plan NEXT-NINE of 2026-10-06, §3.2 BP-19 T6) in a piece's ORBES CARE tab (plan
+ * ORBES CARE §2(a) item 3), under WARRANTY and the WARRANTY CLAIM, above CARING FOR THIS PIECE, in NOCTURNE's pieces: the
+ * label (Gravesend), the reading text, the hairline button, the underlined fields, the `.kv` rows and the text links.
+ * care-model.ts says what it shows; this draws it, opens the request's own form in place, and sends the request, its
+ * cancellation and the label's download.
  *
- * Nothing is drawn while the care is read, when it cannot be read, or when the account's tier includes no care (and no
- * request of the piece is open): the SERVICE tab then reads as before.
+ * Nothing is drawn while the care is read, when it cannot be read, or when no tier includes it (and no request of the
+ * piece is open); a tier that includes none reads the tier it opens from. The care status also carries the piece's
+ * warranty claim: `onCare` hands it on (views/warranty-claim.ts) each time the status is read or changes.
  */
 import { h } from '../../shared/dom.js';
 import { saveDownload } from '../../shared/download.js';
@@ -23,10 +25,12 @@ export interface YearlyCareDeps {
   productId: string;
   /** Asked after a step that changes the piece's history (none here today): SERVICE HISTORY read again. */
   onChange?(): void;
+  /** Told the piece's care status each time it is drawn (null: not read): its warranty claim's block follows it. */
+  onCare?(care: PieceCare | null): void;
 }
 
 export class YearlyCareBlock {
-  readonly root = h('section', { class: 'n-piece__care-year piece__yearly-care', attrs: { 'aria-labelledby': 'piece-yearly-care', hidden: true } });
+  readonly root = h('section', { class: 'n-piece__care-section n-piece__care-year piece__yearly-care', attrs: { 'aria-labelledby': 'piece-yearly-care', hidden: true } });
   private care: PieceCare | null = null;
   private form = false;
   private error: string | null = null;
@@ -53,6 +57,7 @@ export class YearlyCareBlock {
   }
 
   private render(focus: 'title' | 'field' | null = null): void {
+    this.deps.onCare?.(this.care);
     const m = careModel(this.care);
     if (!m) {
       this.root.hidden = true;

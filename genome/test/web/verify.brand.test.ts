@@ -19,6 +19,9 @@ import { computeGenome, genomeLayout } from '../../src/core/genome/index.js';
 import { packIdentity } from '../../src/core/identity.js';
 import { MONOGRAM_BOUNDS, MONOGRAM_PATHS } from '../../src/core/render/monogram.js';
 import { genomeFigureMarkup } from '../../src/web/admin/ui/figures.js';
+import { CARE_LOCATION } from '../../src/server/services/care.js';
+import { CLUB_TIER_DEFAULT_BENEFITS } from '../../src/server/services/club.js';
+import { DEFAULT_PROGRAM, effectiveProgramLines, programLines } from '../../src/server/services/club-program.js';
 import * as verifyCopy from '../../src/web/verify/copy.js';
 import { RESALE_ACTION, RESALE_GUIDANCE } from '../../src/web/verify/copy.js';
 import { GENOME_SCREEN_INK, genomeRowMarkup } from '../../src/web/verify/genome-view.js';
@@ -830,6 +833,24 @@ describe('verify app: the lexicon of BRAND-DESIGN-SYSTEM §4.5, and the second-h
     expect(findForbidden(verifyCopy.ASSURANCE_NOTE, terms)).toEqual([expect.stringContaining('"GENUINE"')]);
     expect(verifyCopy.ASSURANCE_NOTE).toMatch(/cannot prove that an object is genuine/);
     expect(lines.join('\n')).not.toContain('!');
+  });
+
+  it('never says "atelier" to a collector (plan ORBES CARE, answer 7): not in the copy, nor in the server\'s words the app shows (THE CLUB\'s lines, PALLADIUM\'s default benefits, PRIVATE CARE\'s place and errors)', () => {
+    const lines = copyLines();
+    expect(lines.filter((l) => /atelier/i.test(l))).toEqual([]);
+    // copy.ts as written, its comments aside (a code comment may still name a demo's title).
+    const copySource = readFileSync(join(WEB, 'verify/copy.ts'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    expect(copySource).not.toMatch(/atelier/i);
+    const server = [
+      ...[1, 2, 3].flatMap((t) => programLines({ ...DEFAULT_PROGRAM, carePiecesPlatine: 1 }, t as 1 | 2 | 3)),
+      ...[1, 2, 3].flatMap((t) => effectiveProgramLines(DEFAULT_PROGRAM, t)),
+      ...Object.values(CLUB_TIER_DEFAULT_BENEFITS),
+      CARE_LOCATION,
+    ].join('\n');
+    expect(server.length).toBeGreaterThan(200);
+    expect(server).not.toMatch(/atelier/i);
+    const careErrors = readFileSync(join(WEB, '../server/services/care.ts'), 'utf8').match(/'[^'\n]*'/g) ?? [];
+    expect(careErrors.filter((w) => /atelier/i.test(w))).toEqual([]);
   });
 
   it('asks a buyer for the seller\'s transfer code in one calm sentence, quoted in BRAND §4.3, its link in §4.3 and §4.4', () => {

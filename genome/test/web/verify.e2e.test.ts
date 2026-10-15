@@ -1430,11 +1430,11 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await countOf(card.locator('.genome-svg g[data-layer="genome"]'), 8);
     await attrOf(card.locator('.genome-svg'), 'aria-label', new RegExp(older.genome.fingerprint));
     await textOf(card.locator('.n-gen__fp'), `${older.genome.fingerprint} · GENOME-01`);
-    await textsOf(card.getByRole('tab'), ['OWNERSHIP', 'WARRANTY', 'SERVICE', 'CARE']);
+    await textsOf(card.getByRole('tab'), ['OWNERSHIP', 'ORBES CARE', 'SERVICE']);
     await attrOf(card.getByRole('tab', { name: 'OWNERSHIP' }), 'aria-selected', 'true');
     await textOf(card.locator('.n-piece__rows'), /^ACQUIRED FIRST REGISTRATION OWNERSHIP VERIFIED SINCE \d{1,2} [A-Z]{3} \d{4}$/);
     expect(await figuresInDisplayFace(page)).toEqual([]);
-    const pieceControls = ['MY PIECES', 'OWNERSHIP', 'WARRANTY', 'SERVICE', 'CARE', 'CREATE CERTIFICATE', 'REPORT LOST / STOLEN'];
+    const pieceControls = ['MY PIECES', 'OWNERSHIP', 'ORBES CARE', 'SERVICE', 'CREATE CERTIFICATE', 'REPORT LOST / STOLEN'];
     await keepsFloors(page, pieceControls);
     await page.screenshot({ path: join(OUT_DIR, 'verify-my-piece.png'), fullPage: true });
     for (const width of PHONE_WIDTHS) {
@@ -1447,59 +1447,85 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const tab = (name: string) => card.getByRole('tab', { name });
     await tab('OWNERSHIP').focus();
     await page.keyboard.press('ArrowRight');
-    await attrOf(tab('WARRANTY'), 'aria-selected', 'true');
-    expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('WARRANTY');
-    expect(await card.getByRole('tab').evaluateAll((els) => els.map((el) => (el as HTMLElement).tabIndex))).toEqual([-1, 0, -1, -1]);
-    await textOf(card.getByRole('tabpanel'), /STATUS ACTIVE FROM 20 SEP 2026 UNTIL 20 SEP 2028 This piece is covered by the ORBES warranty against manufacturing defects until 20 September 2028: ORBES repairs or replaces it\./);
+    await attrOf(tab('ORBES CARE'), 'aria-selected', 'true');
+    expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('ORBES CARE');
+    expect(await card.getByRole('tab').evaluateAll((els) => els.map((el) => (el as HTMLElement).tabIndex))).toEqual([-1, 0, -1]);
+    // ORBES CARE (plan ORBES CARE §2(a), answer 6): WARRANTY, then PRIVATE CARE (this TITANE account: the tier it opens
+    // from), CARING FOR THIS PIECE, the contact and WRITE TO ORBES CLIENT SERVICES, the piece attached. No claim: no
+    // WARRANTY CLAIM; no subscription, no SUBSCRIBE (answer 1).
+    const carePanel = card.getByRole('tabpanel');
+    await visible(carePanel.locator('.piece__yearly-care'));
+    await textsOf(carePanel.locator('h3'), ['WARRANTY', 'PRIVATE CARE', 'CARING FOR THIS PIECE']);
+    await textOf(carePanel.locator('.piece__warranty'), /^WARRANTY STATUS ACTIVE FROM 20 SEP 2026 UNTIL 20 SEP 2028 This piece is covered by the ORBES warranty against manufacturing defects until 20 September 2028: ORBES repairs or replaces it\.$/);
+    await countOf(carePanel.locator('.piece__warranty-claim:not([hidden])'), 0);
+    await textOf(carePanel.locator('.piece__yearly-care'), 'PRIVATE CARE PRIVATE CARE opens from PLATINE: the inspection, cleaning and polishing of every piece by ORBES, free, once a year each.');
+    await textOf(carePanel.locator('.n-piece__care-text'), 'Store on its own in the ORBES pouch. Wipe with a soft, dry cloth after wearing; avoid perfume, chlorine and abrasive cleaners.');
+    await textOf(carePanel.locator('.n-piece__care-contact'), ORBES_CARE.contact);
+    const careWrite = carePanel.getByRole('button', { name: 'WRITE TO ORBES CLIENT SERVICES' });
+    await attrOf(careWrite, 'data-context', 'PIECE');
+    await attrOf(careWrite, 'data-context-id', older.product.productId);
+    await countOf(carePanel.getByRole('button'), 1);
+    await countOf(carePanel.getByRole('link'), 0);
+    await countOf(carePanel.getByText(/subscri/i), 0);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await keepsFloors(page, ['OWNERSHIP', 'ORBES CARE', 'SERVICE', 'WRITE TO ORBES CLIENT SERVICES']);
     await page.keyboard.press('ArrowRight');
     await attrOf(tab('SERVICE'), 'aria-selected', 'true');
-    // The service history, without staff notes: its dates and place, then its kind.
+    // SERVICE: SERVICE HISTORY alone, without staff notes: its dates and place, then its kind.
     await textOf(card.getByRole('tabpanel').locator('.n-piece__service'), /^\d{1,2} [A-Z]{3} \d{4} · PARIS ATELIER POLISH$/);
+    await textsOf(card.getByRole('tabpanel').locator('h3'), ['SERVICE HISTORY']);
+    await countOf(card.getByRole('tabpanel').locator('.piece__yearly-care'), 0);
     await countOf(card.getByText('staff note'), 0);
-    // CARE (P-M02): the care of the piece's model, then ORBES Care; no subscription page is published on this server,
-    // so a plain sentence says subscriptions open soon, with nothing to press.
-    await page.keyboard.press('ArrowRight');
-    await attrOf(tab('CARE'), 'aria-selected', 'true');
-    const carePanel = card.getByRole('tabpanel');
-    await textsOf(carePanel.locator('h3'), ['CARING FOR THIS PIECE', 'ORBES CARE']);
-    await textOf(carePanel.locator('.n-piece__care-text'), 'Store on its own in the ORBES pouch. Wipe with a soft, dry cloth after wearing; avoid perfume, chlorine and abrasive cleaners.');
-    await visible(carePanel.getByRole('region', { name: 'ORBES CARE' }));
-    await textsOf(carePanel.locator('.n-piece__benefit'), [...ORBES_CARE.benefits]);
-    await textOf(carePanel.locator('.n-piece__care-soon'), 'Subscriptions open soon.');
-    await countOf(carePanel.getByRole('link'), 0);
-    await countOf(carePanel.getByRole('button'), 0);
-    expect(await figuresInDisplayFace(page)).toEqual([]);
-    await keepsFloors(page, ['OWNERSHIP', 'WARRANTY', 'SERVICE', 'CARE']);
     await page.keyboard.press('ArrowRight');
     await attrOf(tab('OWNERSHIP'), 'aria-selected', 'true');
     await page.keyboard.press('End');
-    await attrOf(tab('CARE'), 'aria-selected', 'true');
+    await attrOf(tab('SERVICE'), 'aria-selected', 'true');
     await page.keyboard.press('Home');
     await attrOf(tab('OWNERSHIP'), 'aria-selected', 'true');
     expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('OWNERSHIP');
 
-    // A reload stays on the piece, signed in. This time the server publishes the subscription page of ORBES Care
-    // (CARE_SUBSCRIBE_URL, served by GET /api/v1/client-services): CARE offers SUBSCRIBE, the hairline button (C35), in a
-    // new tab.
-    const careUrl = 'https://whop.com/orbes/care';
-    await page.route('**/api/v1/client-services', async (route) => {
+    // A warranty claim of the piece (answer 9), as the care status carries it: its step, DOWNLOAD LABEL (the label's
+    // PDF, for the claim's own account), then its outcome with the shipment and TRACK THE SHIPMENT. Nothing starts or
+    // feeds a claim: no other button.
+    const CLAIM = 'c1a1e000-0000-4000-8000-0000000000c1';
+    const shipment = { carrier: { id: 'c', name: 'Colissimo' }, tracking: '6A12345678901', trackingUrl: 'https://www.laposte.fr/outils/suivre-vos-envois?code=6A12345678901', at: '2026-10-12T09:00:00.000Z' };
+    const claimBase = { id: CLAIM, basis: 'LIFETIME', openedAt: '2026-10-10T09:00:00.000Z', receivedAt: null, outcome: null, refusalReason: null, credit: null, value: null, decidedAt: null, return: null, doneAt: null, cancelledAt: null };
+    let claim: Record<string, unknown> = { ...claimBase, status: 'LABEL_SENT', label: { ...shipment, pdf: true } };
+    const careRoute = `**/api/v1/account/products/${older.product.productId}/care`;
+    await page.route(careRoute, async (route) => {
       const response = await route.fetch();
-      await route.fulfill({ response, json: { ...((await response.json()) as object), careSubscribeUrl: careUrl } });
+      await route.fulfill({ response, json: { ...((await response.json()) as object), claim } });
     });
+    const labelRoute = `**/api/v1/account/warranty-claims/${CLAIM}/label.pdf`;
+    await page.route(labelRoute, (route) =>
+      route.fulfill({ status: 200, headers: { 'content-type': 'application/pdf', 'content-disposition': `attachment; filename="ORBES-WARRANTY-CLAIM-${older.product.productId}-LABEL.pdf"` }, body: Buffer.from('%PDF-1.4\n%%EOF\n') }),
+    );
     await page.reload();
     await visible(card);
-    expect(new URL(page.url()).pathname).toBe(`/verify/pieces/${older.product.productId}`);
-    await tab('CARE').click();
-    const subscribe = card.getByRole('tabpanel').getByRole('link', { name: 'Subscribe to ORBES Care, in a new tab' });
-    await textOf(subscribe, 'SUBSCRIBE');
-    await attrOf(subscribe, 'href', careUrl);
-    await attrOf(subscribe, 'target', '_blank');
-    await attrOf(subscribe, 'rel', 'noopener noreferrer');
-    expect(await subscribe.getAttribute('class')).toMatch(/\bn-btn--ol\b/);
-    await countOf(card.locator('.n-piece__care-soon'), 0);
-    await keepsFloors(page, ['SUBSCRIBE']);
+    await tab('ORBES CARE').click();
+    const claimBlock = card.getByRole('tabpanel').getByRole('region', { name: 'WARRANTY CLAIM' });
+    await visible(claimBlock);
+    await textsOf(card.getByRole('tabpanel').locator('h3'), ['WARRANTY', 'WARRANTY CLAIM', 'PRIVATE CARE', 'CARING FOR THIS PIECE']);
+    await textOf(claimBlock, 'WARRANTY CLAIM YOUR PREPAID LABEL Print it, pack the piece in its box and hand it to the carrier. ORBES answers once it has received the piece. DOWNLOAD LABEL CARRIER COLISSIMO TRACKING NUMBER 6A12345678901');
+    const [label] = await Promise.all([page.waitForEvent('download'), claimBlock.getByRole('button', { name: 'DOWNLOAD LABEL' }).click()]);
+    expect(label.suggestedFilename()).toBe(`ORBES-WARRANTY-CLAIM-${older.product.productId}-LABEL.pdf`);
+    await countOf(claimBlock.getByRole('button'), 1);
+    await keepsFloors(page, ['DOWNLOAD LABEL', 'WRITE TO ORBES CLIENT SERVICES']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-my-pieces-care.png'), fullPage: true });
-    await page.unroute('**/api/v1/client-services');
+    // Replaced, shipped: REPLACED, the new piece's shipment and TRACK THE SHIPMENT, its own tab.
+    claim = { ...claimBase, status: 'DONE', label: { ...shipment, pdf: false }, receivedAt: '2026-10-13T09:00:00.000Z', outcome: 'REPLACEMENT', decidedAt: '2026-10-14T09:00:00.000Z', return: shipment, doneAt: '2026-10-15T09:00:00.000Z' };
+    await page.reload();
+    await visible(card);
+    await tab('ORBES CARE').click();
+    await textOf(claimBlock, 'WARRANTY CLAIM REPLACED Your new piece is on its way. Register it with the certificate card in its box. CARRIER COLISSIMO TRACKING NUMBER 6A12345678901 TRACK THE SHIPMENT');
+    const track = claimBlock.getByRole('link', { name: 'Track the shipment 6A12345678901 on the site of Colissimo (opens in a new tab)' });
+    await attrOf(track, 'href', shipment.trackingUrl);
+    await attrOf(track, 'target', '_blank');
+    await countOf(claimBlock.getByRole('button'), 0);
+    await page.unroute(careRoute);
+    await page.unroute(labelRoute);
+    await page.reload();
+    await visible(card);
     await tab('OWNERSHIP').click();
 
     // REPORT LOST / STOLEN, confirmed: LOST or STOLEN first, then CONFIRM REPORT.

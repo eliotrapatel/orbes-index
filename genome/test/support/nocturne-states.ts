@@ -100,11 +100,10 @@ async function piecesTab(run: StateRun, name: 'PIECES' | 'ORDERS' | 'RELEASES'):
   await run.page.locator(`.view--pieces[data-tab="${name.toLowerCase()}"]`).waitFor();
 }
 
-/** A piece's SERVICE tab, its PRIVATE CARE drawn (plan NEXT-NINE, BP-19 T6; plan ORBES CARE, step 2.1) and its SERVICE HISTORY read. */
-async function serviceCare(run: StateRun): Promise<void> {
-  await tab(run, 'SERVICE').click();
+/** A piece's ORBES CARE tab (plan ORBES CARE, step 2.2), its PRIVATE CARE drawn (plan NEXT-NINE, BP-19 T6). */
+async function orbesCare(run: StateRun): Promise<void> {
+  await tab(run, 'ORBES CARE').click();
   await run.page.locator('.view--piece .piece__yearly-care:not([hidden])').waitFor();
-  await run.page.locator('.view--piece .n-piece__service-wait').waitFor({ state: 'detached' });
 }
 
 /** A result read from a photo of `role`'s code, then `then` on it. */
@@ -875,22 +874,22 @@ export const UI_STATES: readonly UiState[] = [
   { id: 'piece-boutique', title: 'A piece sold at a boutique (no order): nothing of where it comes from', refs: ['C4'], variant: 'full', as: you, path: piece('yours'), ready: '.view--piece .n-piece__article' },
   {
     id: 'pieces-warranty',
-    title: 'A piece: WARRANTY',
+    title: 'A piece: ORBES CARE, its WARRANTY',
     refs: ['C35'],
     variant: 'full',
     as: you,
     path: piece('yours'),
-    act: async (run) => tab(run, 'WARRANTY').click(),
+    act: (run) => orbesCare(run),
     ready: '.view--piece .n-piece__article',
   },
   {
     id: 'pieces-care',
-    title: 'A piece: CARE, then ORBES CARE',
+    title: 'A piece: ORBES CARE, CARING FOR THIS PIECE and the contact',
     refs: ['C35'],
     variant: 'full',
     as: you,
     path: piece('yours'),
-    act: async (run) => tab(run, 'CARE').click(),
+    act: (run) => orbesCare(run),
     ready: '.view--piece .n-piece__article',
   },
   {
@@ -911,16 +910,16 @@ export const UI_STATES: readonly UiState[] = [
   { id: 'club-platine', title: 'THE CLUB of a PLATINE account: YOUR TIER: PLATINE · 5 PIECES HELD', refs: ['BP-19'], variant: 'full', as: 'platine', path: at('/verify/club'), ready: '.view--club .n-club__way' },
   { id: 'club-no-piece', title: 'THE CLUB of an account without a piece: YOUR FIRST PIECE OPENS TITANE', refs: ['BP-19'], variant: 'full', as: 'newcomer', path: at('/verify/club'), ready: '.view--club .n-club__way' },
   { id: 'club-stress', title: 'THE CLUB of the extreme content: PALLADIUM, ten pieces, the welcome gift ORBITAL CHARM', refs: ['BP-19'], variant: 'stress', as: you, path: at('/verify/club'), ready: '.view--club .n-club__way', stress: true },
-  // PRIVATE CARE (plan NEXT-NINE, BP-19 T6; named so by plan ORBES CARE): above SERVICE HISTORY, for a PLATINE account, each step on a piece of its own.
+  // PRIVATE CARE (plan NEXT-NINE, BP-19 T6; named so by plan ORBES CARE): in ORBES CARE, for a PLATINE account, each step on a piece of its own.
   ...(
     [
-      ['piece-care-available', 'careAvailable', 'voter1', 'A PLATINE piece: SERVICE, PRIVATE CARE, REQUEST PRIVATE CARE'],
+      ['piece-care-available', 'careAvailable', 'voter1', 'A PLATINE piece: ORBES CARE, PRIVATE CARE, REQUEST PRIVATE CARE'],
       ['piece-care-requested', 'careRequested', 'platine', 'A PLATINE piece: PRIVATE CARE REQUESTED, its return address, CANCEL REQUEST'],
       // Plan ORBES CARE, step 1.4: on its own stage (care-used), THE PROGRAM's PLATINE at 1 piece a year, its default now every piece.
       ['piece-care-used', 'careUsed', 'platine', 'A PLATINE piece: the year’s PRIVATE CARE used for another piece'],
       ['piece-care-label', 'careLabel', 'voter2', 'A PLATINE piece: YOUR PREPAID LABEL, DOWNLOAD LABEL'],
       ['piece-care-returning', 'careReturning', 'voter3', 'A PLATINE piece in service: ON ITS WAY BACK, TRACK THE SHIPMENT'],
-      ['piece-care-done', 'careDone', 'cared', 'A PLATINE piece: its PRIVATE CARE complete, PRIVATE CARE in SERVICE HISTORY'],
+      ['piece-care-done', 'careDone', 'cared', 'A PLATINE piece: its PRIVATE CARE complete'],
     ] as const
   ).map(
     ([id, role, who, title]): UiState => ({
@@ -930,7 +929,7 @@ export const UI_STATES: readonly UiState[] = [
       variant: id === 'piece-care-used' ? 'care-used' : 'full',
       as: who,
       path: piece(role),
-      act: (run) => serviceCare(run),
+      act: (run) => orbesCare(run),
       ready: '.view--piece .piece__yearly-care:not([hidden])',
     }),
   ),
@@ -942,7 +941,7 @@ export const UI_STATES: readonly UiState[] = [
     as: 'voter1',
     path: piece('careAvailable'),
     act: async (run) => {
-      await serviceCare(run);
+      await orbesCare(run);
       await button(run, 'REQUEST PRIVATE CARE').click();
       await run.page.locator('.piece__yearly-care form textarea').waitFor();
     },

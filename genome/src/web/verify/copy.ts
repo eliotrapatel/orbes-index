@@ -249,7 +249,7 @@ export const ACCOUNT_PASSWORD = Object.freeze({
 
 /**
  * MY PIECES (F-01, /verify/pieces, API §10.5–§10.6 and §11.5–§11.6): the signed-in owner's pieces, each on its
- * ivory plate with its GENOME, then OWNERSHIP · WARRANTY · SERVICE. An owner whose piece is gone declares it
+ * ivory plate with its GENOME, then OWNERSHIP · ORBES CARE · SERVICE. An owner whose piece is gone declares it
  * here without scanning it (REPORT LOST / STOLEN, confirmed); a loss they declared themselves, they withdraw
  * (PIECE FOUND); a theft, or a loss ORBES Client Services recorded, Client Services withdraw once they have
  * checked the piece. The words LOST and STOLEN name the owner's own declaration, on their own account's
@@ -266,7 +266,8 @@ export const PIECES = Object.freeze({
   loadFailed: 'Your pieces could not be shown just now.',
   retry: 'TRY AGAIN',
   scan: 'SCAN ORBES CODE',
-  tabs: Object.freeze({ ownership: 'OWNERSHIP', warranty: 'WARRANTY', service: 'SERVICE', care: 'CARE' }),
+  /** A piece's three tabs (plan ORBES CARE §2(a), answer 6): ORBES CARE holds its warranty and its care; SERVICE its history. */
+  tabs: Object.freeze({ ownership: 'OWNERSHIP', care: 'ORBES CARE', service: 'SERVICE' }),
   status: Object.freeze({ yours: 'REGISTERED TO YOU', lost: 'REPORTED LOST', stolen: 'REPORTED STOLEN', transfer: 'TRANSFER PENDING', service: 'IN SERVICE' }),
   acquired: Object.freeze({ FIRST_REGISTRATION: 'FIRST REGISTRATION', TRANSFER: 'TRANSFER', RESALE: 'RESALE', ADMIN: 'ORBES CLIENT SERVICES' }),
   verified: 'VERIFIED',
@@ -615,25 +616,15 @@ export const QUESTION = Object.freeze({
 });
 
 /**
- * The CARE tab of a piece in MY PIECES (P-M02): the care of its model (the result's CARE text), then ORBES Care, the
- * subscription that looks after the owner's pieces. SUBSCRIBE opens its page in a new tab once ORBES publishes one
- * (CARE_SUBSCRIBE_URL); until then, a plain sentence says subscriptions open soon, with nothing to press.
+ * The ORBES CARE tab of a piece in MY PIECES (plan ORBES CARE §2(a), answers 1 and 6; P-M02 before it): everything after
+ * the sale under one name, in this order: its WARRANTY, its WARRANTY CLAIM when one is under way, PRIVATE CARE, CARING
+ * FOR THIS PIECE (the care of its model, the result's care text), then how to reach ORBES Client Services. The paid
+ * ORBES Care subscription is gone (answer 1). On a result, its ORBES CARE tab holds the warranty, the care and the
+ * contact (step 2.3).
  */
 export const ORBES_CARE = Object.freeze({
   /** The label of the model's care instructions. */
   careLabel: 'CARING FOR THIS PIECE',
-  /** The label of the subscription's presentation, and its accessible name. */
-  label: 'ORBES CARE',
-  lead: 'ORBES Care looks after your pieces, year after year:',
-  benefits: Object.freeze([
-    'An annual care service by the ORBES atelier: inspection, cleaning and polishing.',
-    'Priority repair with ORBES Client Services.',
-    'An extended warranty.',
-  ]),
-  subscribe: 'SUBSCRIBE',
-  /** The accessible name of SUBSCRIBE: it opens another page, in a new tab. */
-  subscribeLabel: 'Subscribe to ORBES Care, in a new tab',
-  soon: 'Subscriptions open soon.',
   /**
    * The WARRANTY of a piece (plan ORBES CARE §2(a) item 1, answers 10 and 12), on a result and in MY PIECES: its rows and
    * the one sentence under them, which says what that warranty covers. `lifetime` is the piece's own warranty kind, as

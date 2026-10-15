@@ -1,6 +1,6 @@
 /**
- * PRODUCT · WARRANTY · CARE · OWNERSHIP on a result, OWNERSHIP · WARRANTY ·
- * SERVICE · CARE on each piece of MY PIECES (P-M02), LIVE · PAST on THE
+ * PRODUCT · WARRANTY · CARE · OWNERSHIP on a result, OWNERSHIP · ORBES CARE ·
+ * SERVICE on each piece of MY PIECES (plan ORBES CARE, answer 6), LIVE · PAST on THE
  * RELEASES (plan LIVE RELEASE+, choice 5) — an ARIA tablist (manual activation
  * is unnecessary here: panels are light, so arrow keys select).
  * Keyboard: ←/→ move, Home/End jump; only the selected tab is in the tab

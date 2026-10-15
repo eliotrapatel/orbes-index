@@ -1598,12 +1598,22 @@ body.nocturne .view--piece {
   margin-top: 14px;
 }
 
-/* YEARLY CARE (plan NEXT-NINE, BP-19 T6): above SERVICE HISTORY, set apart from it by a hairline; its steps' head in the
-   display face, its sentences in the reading face, its rows `.kv`, its form's fields underlined. */
-.n-piece__care-year {
+/* ORBES CARE (plan ORBES CARE §2(a), answer 6): WARRANTY, the WARRANTY CLAIM, PRIVATE CARE, CARING FOR THIS PIECE, then
+   the contact and WRITE TO ORBES CLIENT SERVICES. Each of the first three is set apart from what follows by a hairline.
+   PRIVATE CARE (plan NEXT-NINE, BP-19 T6) and the claim: their steps' head in the display face, their sentences in the
+   reading face, their rows `.kv`, PRIVATE CARE's form's fields underlined. */
+.n-piece__care-section {
   margin-bottom: 24px;
   padding-bottom: 22px;
   border-bottom: 1px solid var(--vault-hairline);
+}
+
+.n-piece__warranty-rows {
+  margin-top: 14px;
+}
+
+.n-piece__care-contact {
+  margin-top: 24px;
 }
 
 .n-piece__care-year-text,
@@ -1652,37 +1662,8 @@ body.nocturne .view--piece {
   margin-top: 12px;
 }
 
-.n-piece__care-text,
-.n-piece__care-lead {
+.n-piece__care-text {
   margin-top: 10px;
-}
-
-.n-piece__care-offer {
-  margin-top: 24px;
-}
-
-.n-piece__benefits {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 10px;
-  list-style: none;
-}
-
-.n-piece__benefit {
-  position: relative;
-  padding-left: 14px;
-}
-
-.n-piece__benefit::before {
-  content: "–";
-  position: absolute;
-  left: 0;
-}
-
-.n-piece__subscribe,
-.n-piece__care-soon {
-  margin-top: 18px;
 }
 
 /* The contact under a button of the OWNERSHIP panel (C4 sets it 14 px under REPORT LOST / STOLEN): its email's 44 px
