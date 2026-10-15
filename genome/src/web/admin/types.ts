@@ -612,6 +612,13 @@ export interface Model {
   imageUrl: string | null;
   /** Pieces issued with this model: their public result reads its name, care instructions and collection. */
   products: number;
+  /**
+   * Plan ORBES CARE (answer 12): the lifetime warranty; false: the 2-year warranty (manufacturing defects only, its
+   * category's months). Chosen in New model (Lifetime preselected), changed afterwards by an ADMIN (D16).
+   */
+  warrantyLifetime: boolean;
+  /** Its pieces whose warranty has started and is not VOID: what a change of its warranty reaches among the pieces sold. */
+  soldPieces: number;
   /** Its place in the lookbook (P-R02). */
   lookbook: LookbookState;
   /** The address of its sheet, /verify/lookbook/<slug>; null until named; fixed once `publishedAt` is set. */

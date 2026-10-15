@@ -14,6 +14,7 @@ import { ORBES_CODE_STYLES } from '../../src/core/code/styles.js';
 import { computeGenome } from '../../src/core/genome/index.js';
 import { packIdentity } from '../../src/core/identity.js';
 import { MONOGRAM_PATHS } from '../../src/core/render/monogram.js';
+import { CATEGORY_WARRANTY_HINT, categoryWarranty, WARRANTY_ADMIN_HINT, WARRANTY_HINT, WARRANTY_OPTIONS, warrantyReach } from '../../src/web/admin/model/catalogue.js';
 import { BIRTHDAY_CREDIT_LABEL, clubBlockLines } from '../../src/web/admin/model/club.js';
 import { dashboardKpis } from '../../src/web/admin/model/dashboard.js';
 import { APPLY_CREDIT_TEXT, creditAppliedLine, creditAvailableLine } from '../../src/web/admin/model/orders.js';
@@ -275,6 +276,30 @@ describe('console: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
       expect(said.length, f).toBeGreaterThan(0);
       expect(said, f).not.toMatch(/!(?!==?)/);
       expect(said, f).not.toMatch(/atelier|handmade|hand-made|craft|\bproducts?\b|\bgift\b/i);
+    }
+  });
+
+  it('writes the Catalogue\'s warranty choice calmly (plan ORBES CARE, step 3.1): no atelier, handmade or craft, no exclamation mark, never « stolen » nor « guarantee », no material named', () => {
+    const lifetime = { warrantyLifetime: true, soldPieces: 3 };
+    const twoYears = { warrantyLifetime: false, soldPieces: 1 };
+    const said = [
+      ...WARRANTY_OPTIONS.map((o) => o.label),
+      WARRANTY_HINT,
+      WARRANTY_ADMIN_HINT,
+      CATEGORY_WARRANTY_HINT,
+      ...[lifetime, twoYears, { ...lifetime, soldPieces: 0 }, { ...twoYears, soldPieces: 0 }].flatMap((m) => ['lifetime', 'two-years'].map((w) => warrantyReach(m, { warranty: w }) ?? '')),
+      ...[24, 60, 1].map((n) => categoryWarranty({ warrantyMonths: n }).text),
+    ].join('\n');
+    expect(said).toContain('Lifetime (jewelry)');
+    expect(said).not.toMatch(/!|atelier|handmade|hand-made|craft|stolen|guarantee/i);
+    expect(said).not.toMatch(/gold|silver|steel|leather(?! goods)|metal|platinum|titanium/i);
+    // The words of the view and the model that say it, their comments aside.
+    for (const f of ['admin/model/catalogue.ts', 'admin/views/catalogue.ts']) {
+      const code = readFileSync(join(WEB, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+      const words = [...code.matchAll(/'([^'\n]*[Ww]arrant[^'\n]*)'|`([^`\n]*[Ww]arrant[^`\n]*)`/g)].map((m) => m[1] ?? m[2] ?? '').join('\n');
+      expect(words.length, f).toBeGreaterThan(0);
+      // A `!` before `=` or a regular expression is code caught between two quotes, not a word.
+      expect(words, f).not.toMatch(/!(?![=/])|atelier|handmade|hand-made|craft|stolen|guarantee/i);
     }
   });
 

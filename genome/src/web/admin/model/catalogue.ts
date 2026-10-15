@@ -19,10 +19,19 @@
  * sheet and their ownership certificates) and may reinstate it, each after a
  * typed phrase. A discontinued model's edit has no status: it is offered
  * again only by reinstating it.
+ *
+ * The warranty (plan ORBES CARE, answer 12, D16): each model has the lifetime
+ * warranty or the 2-year warranty (manufacturing defects only), chosen in New
+ * model (Lifetime preselected) and changed afterwards in Edit model by an
+ * ADMIN only, through its own route: the PATCH never carries it
+ * (`modelChange`), `warrantyChanged` says when the dialog must send it, and
+ * `warrantyReach` says first what the change does to the pieces already sold.
+ * A category's months are the length of its 2-year models' warranty: the
+ * terms give 2 years (24 months), any other length is marked.
  */
 import { DEFAULT_CARE } from '../../shared/care.js';
 import { formatCount } from '../format.js';
-import type { Model, ModelChange, OrderCurrency } from '../types.js';
+import type { Category, Model, ModelChange, OrderCurrency } from '../types.js';
 import { moneyField, parseMoney } from './live.js';
 
 /** A care guide, at most (services/catalog.ts CARE_GUIDE_MAX). */
@@ -149,6 +158,73 @@ export function modelChange(m: Model, f: ModelForm): ModelChange {
   const guide = careGuideText(f.careGuide);
   if (guide !== (m.careGuide ?? '')) out.careGuide = guide;
   return out;
+}
+
+/** The Warranty select of New model and Edit model: its value, `lifetime` or `two-years`. */
+export type WarrantyChoice = 'lifetime' | 'two-years';
+
+export const WARRANTY_OPTIONS: readonly { value: WarrantyChoice; label: string }[] = Object.freeze([
+  { value: 'lifetime', label: 'Lifetime (jewelry)' },
+  { value: 'two-years', label: '2 years (defects only)' },
+]);
+
+/** Under the Warranty select of New model, and of Edit model for an ADMIN. */
+export const WARRANTY_HINT = 'Lifetime: tarnish, fading and accidental break, for life. 2 years: manufacturing defects only. Leather goods take 2 years.';
+
+/** Under the Warranty select of Edit model for a role below ADMIN, whose other option is disabled. */
+export const WARRANTY_ADMIN_HINT = 'An ADMIN changes it: it changes the warranty of the pieces already sold.';
+
+/** The Categories table's note on its Warranty column. */
+export const CATEGORY_WARRANTY_HINT = 'Warranty: the length of the warranty of its 2-year models’ pieces. The terms give 2 years.';
+
+/** The months the terms give a 2-year warranty. */
+export const TWO_YEARS_MONTHS = 24;
+
+/** The select's value for a model's warranty. */
+export function warrantyChoice(m: Pick<Model, 'warrantyLifetime'>): WarrantyChoice {
+  return m.warrantyLifetime ? 'lifetime' : 'two-years';
+}
+
+/** What a Warranty select's value sends: the lifetime warranty unless 2 years is chosen (Lifetime when absent, as the server). */
+export function warrantyLifetimeOf(value: string | undefined): boolean {
+  return value !== 'two-years';
+}
+
+/**
+ * The Warranty select's options in Edit model: both for a role that changes it (an ADMIN); otherwise the model's own
+ * option alone can be chosen, the other drawn disabled (the dialog's fields have no disabled state of their own).
+ */
+export function warrantyOptions(m: Pick<Model, 'warrantyLifetime'>, canChange: boolean): { value: WarrantyChoice; label: string; disabled?: boolean }[] {
+  const own = warrantyChoice(m);
+  return WARRANTY_OPTIONS.map((o) => (canChange || o.value === own ? { ...o } : { ...o, disabled: true }));
+}
+
+/** Whether the Edit model dialog's Warranty differs from the model's: it is then sent through its own route, never the PATCH. */
+export function warrantyChanged(m: Pick<Model, 'warrantyLifetime'>, v: { warranty?: string }): boolean {
+  return v.warranty !== undefined && v.warranty !== '' && warrantyLifetimeOf(v.warranty) !== m.warrantyLifetime;
+}
+
+/** Said live under the Warranty of Edit model once it differs from the model's: the pieces already sold it reaches. Null otherwise. */
+export function warrantyReach(m: Pick<Model, 'warrantyLifetime' | 'soldPieces'>, v: { warranty?: string }): string | null {
+  if (!warrantyChanged(m, v)) return null;
+  const n = Number.isFinite(m.soldPieces) && m.soldPieces > 0 ? m.soldPieces : 0;
+  const lifetime = warrantyLifetimeOf(v.warranty);
+  if (n === 0) return lifetime ? 'No piece of it is sold yet: its pieces will take a warranty without an end date.' : 'No piece of it is sold yet: its pieces will take a 2-year warranty from their start.';
+  const its = `Its ${formatCount(n)} ${n === 1 ? 'piece' : 'pieces'} already sold`;
+  if (lifetime) return `${its} ${n === 1 ? 'takes' : 'take'} a warranty without an end date.`;
+  const expired = n === 1 ? 'takes a 2-year warranty from its start: it may read EXPIRED.' : 'take a 2-year warranty from their start: some may read EXPIRED.';
+  return `${its} ${expired} Before the public launch only: after it, a warranty already given is never shortened.`;
+}
+
+/** The Models table's Warranty cell. */
+export function modelWarrantyText(m: Pick<Model, 'warrantyLifetime'>): 'LIFETIME' | '2 YEARS' {
+  return m.warrantyLifetime ? 'LIFETIME' : '2 YEARS';
+}
+
+/** The Categories table's Warranty cell: 2 YEARS at the terms' 24 months, else its months, marked. */
+export function categoryWarranty(c: Pick<Category, 'warrantyMonths'>): { text: string; marked: boolean } {
+  if (c.warrantyMonths === TWO_YEARS_MONTHS) return { text: '2 YEARS', marked: false };
+  return { text: `${formatCount(c.warrantyMonths)} ${c.warrantyMonths === 1 ? 'MONTH' : 'MONTHS'}`, marked: true };
 }
 
 function pieces(n: number): string {

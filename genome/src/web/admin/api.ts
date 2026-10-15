@@ -615,6 +615,8 @@ export class AdminApi {
     careInstructions?: string;
     /** Plan NEXT LOT §3.3: required since H1. */
     sizeType: SizeType;
+    /** Plan ORBES CARE (answer 12): the lifetime warranty (true, the server's default when absent) or the 2-year warranty. */
+    warrantyLifetime?: boolean;
   }): Promise<Model> {
     return this.post('/api/admin/models', input);
   }
@@ -768,6 +770,14 @@ export class AdminApi {
   async shopifyOrdersCsv(from: string, to: string): Promise<Download> {
     const res = await this.request<Response>('GET', '/api/admin/shopify/orders.csv', { raw: true, query: { from, to } });
     return toDownload(res, `ORBES-shopify-orders-${from}-to-${to}.csv`);
+  }
+
+  /**
+   * Plan ORBES CARE (answer 12, D16), ADMIN: the model's warranty, lifetime or 2 years; its pieces' warranties that are
+   * not VOID follow it (the server's CatalogService.setWarranty).
+   */
+  setModelWarranty(id: string, lifetime: boolean): Promise<Model> {
+    return this.post(`/api/admin/models/${encodeURIComponent(id)}/warranty`, { lifetime });
   }
 
   /** P-R06, ADMIN: the model discontinued (inactive, said DISCONTINUED on its pieces' results). */

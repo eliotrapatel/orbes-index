@@ -33,6 +33,14 @@
  * Variants (plan NOCTURNE, N1): a model's row says its place among them (its
  * label, the model it is a variant of, or how many it has); they are set on
  * its page (Lookbook on its row: VARIANTS, ADD A VARIANT).
+ *
+ * The warranty (plan ORBES CARE, answer 12, D16): New model chooses it
+ * (Lifetime preselected); Edit model shows it, an ADMIN changes it (the pieces
+ * already sold it reaches said live under it, sent through its own route after
+ * the PATCH, which never carries it), and for any other role its other option
+ * is disabled. The Models table reads LIFETIME or 2 YEARS on each row, a
+ * variant's included; the Categories table reads a category's months as 2 YEARS
+ * at the terms' 24, any other length marked.
  */
 import { h } from '../../shared/dom.js';
 import { formatCount, formatDate, humanize } from '../format.js';
@@ -40,7 +48,9 @@ import {
   basePriceProblem,
   CARE_GUIDE_MAX,
   carePreview,
+  CATEGORY_WARRANTY_HINT,
   categoryImpact,
+  categoryWarranty,
   collectionImpact,
   discontinuedYear,
   discontinueImpact,
@@ -50,7 +60,16 @@ import {
   modelForm,
   modelImpact,
   modelStatus,
+  modelWarrantyText,
   reinstateImpact,
+  WARRANTY_ADMIN_HINT,
+  WARRANTY_HINT,
+  WARRANTY_OPTIONS,
+  warrantyChanged,
+  warrantyChoice,
+  warrantyLifetimeOf,
+  warrantyOptions,
+  warrantyReach,
   type ModelForm,
 } from '../model/catalogue.js';
 import { can } from '../model/permissions.js';
@@ -76,6 +95,7 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
   const canToggle = can(role, 'activateCategory');
   const canPhotograph = can(role, 'photograph');
   const canDiscontinue = can(role, 'discontinueModel');
+  const canSetWarranty = can(role, 'setModelWarranty');
   const done = (msg: string) => (r: unknown) => {
     if (!r) return;
     notify(msg);
@@ -92,7 +112,9 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
       fields: [
         { name: 'code', label: 'Letter (A–Z)', required: true, maxlength: 1 },
         { name: 'name', label: 'Name', required: true, maxlength: 64 },
-        { name: 'warrantyMonths', label: 'Warranty (months)', value: '24', maxlength: 3 },
+        // Plan ORBES CARE (answer 12): the length of its 2-year models' warranty; the lifetime warranty is a model's choice.
+        // The label is set in the display face, which takes no figure: « two-year » in letters, the figures in the hint.
+        { name: 'warrantyMonths', label: 'Warranty of its two-year models (months)', value: '24', maxlength: 3, hint: 'The terms give 2 years: 24.' },
       ],
       validate: (v) =>
         !/^[A-Za-z]$/.test(v.code.trim()) ? 'The letter must be A–Z.' : v.warrantyMonths && !/^\d{1,3}$/.test(v.warrantyMonths.trim()) ? 'Warranty is a number of months.' : null,
@@ -157,6 +179,8 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
         { name: 'careInstructions', label: 'Care instructions', kind: 'textarea', maxlength: 2000 },
         // Plan NEXT LOT §3.3 item 6b: every new model is given its size type.
         { name: 'sizeType', label: 'Size type', kind: 'select', required: true, options: [...NEW_MODEL_SIZE_TYPE.options], value: '', hint: NEW_MODEL_SIZE_TYPE.hint },
+        // Plan ORBES CARE (answer 12): its warranty, Lifetime preselected ("default to jewelry").
+        { name: 'warranty', label: 'Warranty', kind: 'select', required: true, options: WARRANTY_OPTIONS.map((o) => ({ ...o })), value: 'lifetime', hint: WARRANTY_HINT },
       ],
       validate: (v) => (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(v.skuPrefix.trim()) ? 'SKU prefix: letters, digits, dot, underscore, hyphen.' : null),
       confirmLabel: 'Create model',
@@ -167,6 +191,7 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
           type: v.type.trim(),
           skuPrefix: v.skuPrefix.trim(),
           sizeType: v.sizeType as SizeType,
+          warrantyLifetime: warrantyLifetimeOf(v.warranty),
           ...(v.collectionId ? { collectionId: v.collectionId } : {}),
           ...(v.defaultMaterial?.trim() ? { defaultMaterial: v.defaultMaterial.trim() } : {}),
           ...(v.careInstructions?.trim() ? { careInstructions: v.careInstructions.trim() } : {}),
@@ -185,9 +210,12 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
     });
   };
 
-  // Only what differs is sent; the category and the SKU prefix are not fields at all.
+  // Only what differs is sent; the category and the SKU prefix are not fields at all. The warranty (plan ORBES CARE,
+  // answer 12, D16) is never in the PATCH: changed (an ADMIN's), it is sent through its own route after it, alone when
+  // nothing else changed; the PATCH once accepted is not sent again when the dialog is confirmed anew after a refusal.
   const editModel = (m: Model) => {
     const form = modelForm(m);
+    let patched: string | null = null;
     void openDialog({
       title: 'Edit model',
       eyebrow: `${humanize(m.name)} · ${m.skuPrefix}`,
@@ -208,12 +236,25 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
         { name: 'basePrice', label: 'Base price', maxlength: 14, value: form.basePrice, hint: 'The price of the Shopify product export, in units: 4800, or 4800.50. Each release keeps its own. Empty: none.' },
         { name: 'baseCurrency', label: 'Currency', kind: 'select', options: ORDER_CURRENCIES.map((c) => ({ value: c, label: c })), value: form.baseCurrency },
         { name: 'careGuide', label: 'Care guide', kind: 'textarea', rows: 6, maxlength: CARE_GUIDE_MAX, value: form.careGuide, hint: 'MY PIECES shows it with each order of this model. Empty: its care instructions stand in.' },
+        // Last, so that what a change reaches is said right under it (the live block follows the fields).
+        { name: 'warranty', label: 'Warranty', kind: 'select', options: warrantyOptions(m, canSetWarranty), value: warrantyChoice(m), hint: canSetWarranty ? WARRANTY_HINT : WARRANTY_ADMIN_HINT },
       ],
-      live: (v) => careBlock(v.careInstructions),
-      validate: (v) => basePriceProblem(v as unknown as ModelForm) ?? (Object.keys(modelChange(m, v as unknown as ModelForm)).length === 0 ? 'Nothing has changed.' : null),
+      live: (v) => {
+        const reach = canSetWarranty ? warrantyReach(m, v) : null;
+        return [reach ? h('p', { class: 'dialog__text', data: { testid: 'model-warranty-reach' } }, reach) : null, careBlock(v.careInstructions)];
+      },
+      validate: (v) =>
+        basePriceProblem(v as unknown as ModelForm) ??
+        (Object.keys(modelChange(m, v as unknown as ModelForm)).length === 0 && !(canSetWarranty && warrantyChanged(m, v)) ? 'Nothing has changed.' : null),
       confirmLabel: 'Save model',
       submit: async (v) => {
-        await ctx.api.updateModel(m.id, modelChange(m, v as unknown as ModelForm));
+        const change = modelChange(m, v as unknown as ModelForm);
+        const sent = JSON.stringify(change);
+        if (Object.keys(change).length > 0 && sent !== patched) {
+          await ctx.api.updateModel(m.id, change);
+          patched = sent;
+        }
+        if (canSetWarranty && warrantyChanged(m, v)) await ctx.api.setModelWarranty(m.id, warrantyLifetimeOf(v.warranty));
       },
     }).then(done('Model saved.'));
   };
@@ -312,7 +353,15 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
     { label: 'Index', cell: (c) => mono(String(c.index).padStart(2, '0')), kind: ['num'] },
     { label: 'Letter', cell: (c) => mono(c.code), kind: ['nowrap'] },
     { label: 'Name', cell: (c) => humanize(c.name), kind: ['wide'] },
-    { label: 'Warranty', cell: (c) => `${c.warrantyMonths} MONTHS`, kind: ['nowrap'] },
+    // Plan ORBES CARE (answer 12): the length of its 2-year models' warranty; any other than the terms' 2 years is marked.
+    {
+      label: 'Warranty',
+      cell: (c) => {
+        const w = categoryWarranty(c);
+        return w.marked ? h('span', { class: 'soft', attrs: { title: CATEGORY_WARRANTY_HINT }, data: { testid: 'category-warranty-not-two-years' } }, w.text) : w.text;
+      },
+      kind: ['nowrap'],
+    },
     { label: 'Status', cell: (c) => activeMark(c.active), kind: ['nowrap'] },
     { label: 'Issued', cell: (c) => formatCount(c.products), kind: ['num'] },
     { label: 'Created', cell: (c) => formatDate(c.createdAt), kind: ['nowrap'] },
@@ -338,6 +387,8 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
     // Plan NEXT LOT §3.3 item 5: its size type and how many sizes it offers, or that it is to give.
     { label: 'Type', cell: (m) => h('span', null, humanize(m.type), h('span', { class: 'cell-sub', data: { testid: 'model-size-type' } }, catalogueSizeLine(m))) },
     { label: 'Category', cell: (m) => `${humanize(m.category.name)} · ${m.category.code}`, kind: ['nowrap'] },
+    // Plan ORBES CARE (answer 12, D16): each row its own, a variant's beside its main model's.
+    { label: 'Warranty', cell: (m) => h('span', { data: { testid: 'model-warranty' } }, modelWarrantyText(m)), kind: ['nowrap'] },
     { label: 'Collection', cell: (m) => humanize(m.collection?.name) },
     { label: 'SKU prefix', cell: (m) => mono(m.skuPrefix), kind: ['nowrap'] },
     { label: 'Default material', cell: (m) => humanize(m.defaultMaterial), kind: ['wide'] },
@@ -396,7 +447,7 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
       title: 'Catalogue',
       lead: 'Categories, collections and models that products are issued against. A model’s name, care instructions, collection and reference photograph, and a collection’s name, read on the result of every piece issued with them. A model’s sheet in the lookbook is set on its Lookbook page; its base price and care guide in its edit, and its Shopify product through the export and the ids pasted back.',
     }),
-    section('Categories', table(categoryColumns, cats.items, { empty: 'No category.', caption: 'Categories' }), {
+    section('Categories', [table(categoryColumns, cats.items, { empty: 'No category.', caption: 'Categories' }), cats.items.length ? h('p', { class: 'footnote', data: { testid: 'category-warranty-hint' } }, CATEGORY_WARRANTY_HINT) : null], {
       id: 'categories',
       tools: can(role, 'createCategory') ? [button('New category', { kind: 'ghost', onClick: newCategory })] : [],
     }),

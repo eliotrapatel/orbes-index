@@ -200,6 +200,19 @@ describe('AdminApi', () => {
     }
   });
 
+  it('sets a model\'s warranty through its own route (plan ORBES CARE, answer 12, D16): POST, { lifetime }, the CSRF token', async () => {
+    const { fetch, calls } = fakeFetch(json(200, SESSION), json(200, { id: 'm' }), json(200, { id: 'm' }));
+    const api = new AdminApi({ fetch });
+    await api.login('admin@orbes.test', 'pw');
+    await api.setModelWarranty('m/1', false);
+    await api.setModelWarranty('m/1', true);
+    expect(calls.slice(1).map((c) => [c.init.method, c.url, JSON.parse(String(c.init.body))])).toEqual([
+      ['POST', '/api/admin/models/m%2F1/warranty', { lifetime: false }],
+      ['POST', '/api/admin/models/m%2F1/warranty', { lifetime: true }],
+    ]);
+    for (const c of calls.slice(1)) expect(header(c, 'x-csrf-token')).toBe('tok-1');
+  });
+
   it('reads the requests of the private salon with a GET, closes one with a POST, its note, its outcome and the CSRF token (P-X08)', async () => {
     const page = { items: [], total: 0, page: 2, pageSize: 50 };
     const { fetch, calls } = fakeFetch(json(200, SESSION), json(200, page), json(200, { id: 'r' }), json(200, { id: 'r' }));

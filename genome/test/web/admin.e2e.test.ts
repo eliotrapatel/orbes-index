@@ -405,9 +405,18 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await expect.poll(() => page.locator('dialog .dialog__error').textContent()).toBe('Complete the required fields.');
     expect(await page.locator('dialog select[name=sizeType] option').allTextContents()).toEqual(['Choose', 'Ring size', 'Bracelet size', 'Necklace length', 'Watch (one size)', 'One size']);
     await page.selectOption('dialog select[name=sizeType]', 'NECKLACE');
+    // Plan ORBES CARE (answer 12): after the size type, its warranty, Lifetime preselected, with what each covers.
+    const warranty = page.locator('dialog select[name=warranty]');
+    expect(await warranty.locator('option').allTextContents()).toEqual(['Lifetime (jewelry)', '2 years (defects only)']);
+    expect(await warranty.inputValue()).toBe('lifetime');
+    expect(await warranty.locator('option[disabled]').count()).toBe(0);
+    expect(await page.locator('dialog .cfield[data-field=warranty] .cfield__hint').textContent()).toBe(
+      'Lifetime: tarnish, fading and accidental break, for life. 2 years: manufacturing defects only. Leather goods take 2 years.',
+    );
+    expect(await page.locator('dialog select').evaluateAll((els) => els.map((e) => e.getAttribute('name')))).toEqual(['categoryCode', 'collectionId', 'sizeType', 'warranty']);
     await page.click('[data-testid=dialog-confirm]');
     await page.waitForSelector('.toast:has-text("Model created.")');
-    expect((await ctx.db.selectFrom('models').select(['size_type', 'size_kind']).where('sku_prefix', '=', 'ECL-PD').executeTakeFirstOrThrow())).toEqual({ size_type: 'NECKLACE', size_kind: 'NECKLACE' });
+    expect((await ctx.db.selectFrom('models').select(['size_type', 'size_kind', 'warranty_lifetime']).where('sku_prefix', '=', 'ECL-PD').executeTakeFirstOrThrow())).toEqual({ size_type: 'NECKLACE', size_kind: 'NECKLACE', warranty_lifetime: true });
     // A necklace's sizes are ticked next: its page opens on the Sizes dialog at once (plan NEXT LOT §3.3 item 6b).
     await expect.poll(async () => (await title(page).textContent())?.trim(), { timeout: 15_000 }).toBe('ECLIPSE');
     await expect.poll(() => page.locator('dialog .dialog__title').textContent(), { timeout: 15_000 }).toBe('Sizes');
@@ -421,6 +430,17 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await go(page, '#/catalogue', 'Catalogue');
     await expect.poll(() => page.locator('td:has-text("ECL-PD")').count()).toBe(1);
     expect(await page.locator('#models tbody tr', { hasText: 'ECL-PD' }).locator('[data-testid=model-size-type]').textContent()).toBe('Necklace length · 1 size');
+    // Plan ORBES CARE (answer 12): the Models table's Warranty, after the Category; MONOLITHE, inserted by plain SQL, at
+    // 2 years (the column's default), ECLIPSE, created through New model, Lifetime.
+    expect(await page.locator('#models thead th').allTextContents()).toEqual(expect.arrayContaining(['Category', 'Warranty']));
+    const heads = await page.locator('#models thead th').allTextContents();
+    expect(heads.indexOf('Warranty')).toBe(heads.indexOf('Category') + 1);
+    expect(await page.locator('#models tbody tr', { hasText: 'ECL-PD' }).locator('[data-testid=model-warranty]').textContent()).toBe('LIFETIME');
+    expect(await page.locator('#models tbody tr', { hasText: 'MNL-RG' }).locator('[data-testid=model-warranty]').textContent()).toBe('2 YEARS');
+    // A category's months: 2 YEARS at the terms' 24, none marked here; the column's note under the table.
+    expect(await page.locator('#categories tbody tr').evaluateAll((rows) => rows.map((r) => r.querySelectorAll('td')[3]?.textContent))).toEqual(['2 YEARS', '2 YEARS']);
+    expect(await page.locator('#categories [data-testid=category-warranty-not-two-years]').count()).toBe(0);
+    expect(await page.locator('#categories [data-testid=category-warranty-hint]').textContent()).toBe('Warranty: the length of the warranty of its 2-year models’ pieces. The terms give 2 years.');
     await shot(page, 'catalogue');
   }, STEP_TIMEOUT);
 
@@ -451,6 +471,16 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     });
     expect(set).toEqual(['Helvetica Neue', '13px', '22.75px', 'rgb(92, 92, 92)']);
     expect(await figuresInDisplayFace(page)).toEqual([]);
+    // Plan ORBES CARE (answer 12, D16): its Warranty, last, at 2 years; chosen otherwise, the pieces already sold it
+    // reaches are said live under it (its six started warranties), and chosen back, nothing is said nor sent for it.
+    expect(await page.locator('dialog .dialog__fields > .cfield').last().getAttribute('data-field')).toBe('warranty');
+    expect(await page.locator('dialog select[name=warranty]').inputValue()).toBe('two-years');
+    expect((await ctx.services.catalog.getModel(modelId)).soldPieces).toBe(6);
+    await page.selectOption('dialog select[name=warranty]', 'lifetime');
+    await expect.poll(() => page.locator('dialog [data-testid=model-warranty-reach]').textContent()).toBe('Its 6 pieces already sold take a warranty without an end date.');
+    await shot(page, 'catalogue-model-warranty', { dialog: true });
+    await page.selectOption('dialog select[name=warranty]', 'two-years');
+    await expect.poll(() => page.locator('dialog [data-testid=model-warranty-reach]').count()).toBe(0);
     await confirmDialog(page);
     await page.waitForSelector('.toast:has-text("Model saved.")');
     expect(await ctx.services.catalog.getModel(modelId)).toMatchObject({ careInstructions: care, name: 'MONOLITHE', active: true, products: 9 });
@@ -459,6 +489,42 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await model('ECL-PD').locator('[data-testid=edit-model]').click();
     await impact.waitFor();
     expect(await impact.textContent()).toMatch(/^Touches no issued piece yet\./);
+    await page.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => page.locator('dialog .dialog__error').textContent()).toBe('Nothing has changed.');
+    // Plan ORBES CARE (answer 12, D16): an ADMIN changes its warranty alone, the pieces it reaches said first (none sold);
+    // saved through its own route only, no PATCH, one notice.
+    const ecWarranty = page.locator('dialog select[name=warranty]');
+    expect(await ecWarranty.inputValue()).toBe('lifetime');
+    expect(await ecWarranty.locator('option[disabled]').count()).toBe(0);
+    expect(await page.locator('dialog [data-testid=model-warranty-reach]').count()).toBe(0);
+    await page.selectOption('dialog select[name=warranty]', 'two-years');
+    await expect.poll(() => page.locator('dialog [data-testid=model-warranty-reach]').textContent()).toBe('No piece of it is sold yet: its pieces will take a 2-year warranty from their start.');
+    const modelRequests: string[] = [];
+    const onModelRequest = (r: { url(): string; method(): string }) => {
+      if (/\/api\/admin\/models\//.test(r.url()) && r.method() !== 'GET') modelRequests.push(`${r.method()} ${new URL(r.url()).pathname}`);
+    };
+    page.on('request', onModelRequest);
+    await page.evaluate(() => {
+      const w = window as unknown as { __toasts?: string[] };
+      w.__toasts = [];
+      new MutationObserver((ms) => {
+        for (const m of ms) for (const n of Array.from(m.addedNodes)) if (n instanceof HTMLElement && n.classList.contains('toast')) w.__toasts!.push(n.querySelector('.toast__text')?.textContent ?? '');
+      }).observe(document.body, { childList: true, subtree: true });
+    });
+    await confirmDialog(page);
+    await page.waitForSelector('.toast:has-text("Model saved.")');
+    await expect.poll(() => model('ECL-PD').locator('[data-testid=model-warranty]').textContent()).toBe('2 YEARS');
+    page.off('request', onModelRequest);
+    const eclipseRow = await ctx.db.selectFrom('models').select(['id', 'warranty_lifetime']).where('sku_prefix', '=', 'ECL-PD').executeTakeFirstOrThrow();
+    expect(modelRequests).toEqual([`POST /api/admin/models/${eclipseRow.id}/warranty`]);
+    expect(eclipseRow.warranty_lifetime).toBe(false);
+    expect(await page.evaluate(() => (window as unknown as { __toasts?: string[] }).__toasts)).toEqual(['Model saved.']);
+    expect(await ctx.db.selectFrom('audit_logs').select('action').where('action', '=', 'model.warranty').where('target_id', '=', eclipseRow.id).execute()).toHaveLength(1);
+    expect(await model('MNL-RG').locator('[data-testid=model-warranty]').textContent()).toBe('2 YEARS');
+    // Opened again: it reads 2 years, and nothing changed is still nothing.
+    await model('ECL-PD').locator('[data-testid=edit-model]').click();
+    await impact.waitFor();
+    expect(await page.locator('dialog select[name=warranty]').inputValue()).toBe('two-years');
     await page.click('[data-testid=dialog-confirm]');
     await expect.poll(() => page.locator('dialog .dialog__error').textContent()).toBe('Nothing has changed.');
     await page.selectOption('dialog select[name=status]', 'inactive');
@@ -536,6 +602,40 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await page.selectOption('select[name=categoryCode]', 'J');
     expect(await page.locator('select[name=modelId] option').allTextContents()).toEqual(['MONOLITHE · RING · MNL-RG']);
     expect(await cspViolations(page)).toEqual([]);
+
+    // Plan ORBES CARE (answer 12, D16): an OPERATOR chooses the warranty of a new model, but in Edit model reads it, the
+    // other option disabled, an ADMIN's to change; nothing is said nor sent for it.
+    const operator = { email: 'catalogue.operator@orbes.test', password: 'catalogue operator passphrase 2026' };
+    await ctx.services.auth.createAdmin({ ...operator, role: 'OPERATOR' }, SYSTEM_ACTOR);
+    const oc = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const op = await oc.newPage();
+    await watch(op);
+    await signIn(op, operator.email, operator.password);
+    await expect.poll(async () => (await title(op).textContent())?.trim()).toBe('Dashboard');
+    await go(op, '#/catalogue', 'Catalogue');
+    await op.locator('#models tbody tr', { hasText: 'MNL-RG' }).locator('[data-testid=edit-model]').click();
+    const opWarranty = op.locator('dialog select[name=warranty]');
+    await opWarranty.waitFor();
+    expect(await opWarranty.inputValue()).toBe('two-years');
+    expect(await opWarranty.locator('option').evaluateAll((os) => os.map((o) => [(o as HTMLOptionElement).value, (o as HTMLOptionElement).disabled]))).toEqual([
+      ['lifetime', true],
+      ['two-years', false],
+    ]);
+    expect(await op.locator('dialog .cfield[data-field=warranty] .cfield__hint').textContent()).toBe('An ADMIN changes it: it changes the warranty of the pieces already sold.');
+    expect(await op.locator('dialog [data-testid=model-warranty-reach]').count()).toBe(0);
+    await op.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => op.locator('dialog .dialog__error').textContent()).toBe('Nothing has changed.');
+    await shot(op, 'catalogue-model-warranty-operator', { dialog: true });
+    await op.click('[data-testid=dialog-cancel]');
+    await op.waitForSelector('dialog.dialog', { state: 'detached' });
+    await op.getByRole('button', { name: 'New model' }).click();
+    const opNew = op.locator('dialog select[name=warranty]');
+    await opNew.waitFor();
+    expect(await opNew.inputValue()).toBe('lifetime');
+    expect(await opNew.locator('option[disabled]').count()).toBe(0);
+    await op.click('[data-testid=dialog-cancel]');
+    expect(await cspViolations(op)).toEqual([]);
+    await oc.close();
   }, STEP_TIMEOUT);
 
   it('issues a product with the generator and shows the one-time claim code', async () => {

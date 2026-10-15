@@ -173,7 +173,9 @@ import {
   CARE_GUIDE_MAX,
   careGuideText,
   carePreview,
+  CATEGORY_WARRANTY_HINT,
   categoryImpact,
+  categoryWarranty,
   collectionImpact,
   discontinuedYear,
   discontinueImpact,
@@ -183,7 +185,16 @@ import {
   modelForm,
   modelImpact,
   modelStatus,
+  modelWarrantyText,
   reinstateImpact,
+  WARRANTY_ADMIN_HINT,
+  WARRANTY_HINT,
+  WARRANTY_OPTIONS,
+  warrantyChanged,
+  warrantyChoice,
+  warrantyLifetimeOf,
+  warrantyOptions,
+  warrantyReach,
 } from '../../src/web/admin/model/catalogue.js';
 import { ownerSearch } from '../../src/web/admin/model/owners.js';
 import {
@@ -2436,6 +2447,66 @@ describe('catalogue edits (A-10)', () => {
     expect(modelChange(priced, { ...g, careGuide: typed })).toEqual({});
     expect(modelChange(priced, { ...g, careGuide: '' })).toEqual({ careGuide: '' });
     expect([CARE_GUIDE_MAX, BASE_PRICE_MAX_MINOR]).toEqual([SERVER_CARE_GUIDE_MAX, SERVER_BASE_PRICE_MAX]);
+  });
+
+  it('chooses the warranty apart from the PATCH (plan ORBES CARE, answer 12, D16): Lifetime preselected, a change counted, said first, sent through its own route', () => {
+    const lifetime = { ...model, warrantyLifetime: true, soldPieces: 12 } as Model;
+    const twoYears = { ...model, warrantyLifetime: false, soldPieces: 1 } as Model;
+    // The select: Lifetime first, preselected in New model; what each value sends (Lifetime when absent, as the server).
+    expect(WARRANTY_OPTIONS).toEqual([
+      { value: 'lifetime', label: 'Lifetime (jewelry)' },
+      { value: 'two-years', label: '2 years (defects only)' },
+    ]);
+    expect([warrantyLifetimeOf('lifetime'), warrantyLifetimeOf('two-years'), warrantyLifetimeOf(''), warrantyLifetimeOf(undefined)]).toEqual([true, false, true, true]);
+    expect([warrantyChoice(lifetime), warrantyChoice(twoYears)]).toEqual(['lifetime', 'two-years']);
+    expect(WARRANTY_HINT).toBe('Lifetime: tarnish, fading and accidental break, for life. 2 years: manufacturing defects only. Leather goods take 2 years.');
+    // Edit model: an ADMIN chooses either; any other role reads the model's own, the other option disabled.
+    expect(warrantyOptions(lifetime, true)).toEqual([...WARRANTY_OPTIONS]);
+    expect(warrantyOptions(lifetime, false)).toEqual([
+      { value: 'lifetime', label: 'Lifetime (jewelry)' },
+      { value: 'two-years', label: '2 years (defects only)', disabled: true },
+    ]);
+    expect(warrantyOptions(twoYears, false)).toEqual([
+      { value: 'lifetime', label: 'Lifetime (jewelry)', disabled: true },
+      { value: 'two-years', label: '2 years (defects only)' },
+    ]);
+    expect(WARRANTY_ADMIN_HINT).toBe('An ADMIN changes it: it changes the warranty of the pieces already sold.');
+    // A changed Warranty is a change of the dialog, but never a field of the PATCH (updateModelBody is strict, without it).
+    const f = modelForm(lifetime);
+    expect(Object.keys(f)).not.toContain('warranty');
+    expect(warrantyChanged(lifetime, { ...f, warranty: 'lifetime' })).toBe(false);
+    expect(warrantyChanged(lifetime, { ...f, warranty: 'two-years' })).toBe(true);
+    expect(warrantyChanged(twoYears, { warranty: 'lifetime' })).toBe(true);
+    expect(warrantyChanged(twoYears, { warranty: 'two-years' })).toBe(false);
+    expect(warrantyChanged(twoYears, {})).toBe(false);
+    for (const v of [{ ...f, warranty: 'two-years' }, { ...f, warranty: 'two-years', name: 'MONOLITHE II' }]) {
+      const change = modelChange(lifetime, v as typeof f);
+      expect(Object.keys(change)).not.toEqual(expect.arrayContaining(['warrantyLifetime']));
+      expect(Object.keys(change)).not.toEqual(expect.arrayContaining(['warranty']));
+    }
+    expect(modelChange(lifetime, { ...f, warranty: 'two-years' } as typeof f)).toEqual({});
+    // Said live under it, once it differs: the pieces already sold it reaches (soldPieces).
+    expect(warrantyReach(lifetime, { warranty: 'lifetime' })).toBeNull();
+    expect(warrantyReach(lifetime, { warranty: 'two-years' })).toBe(
+      'Its 12 pieces already sold take a 2-year warranty from their start: some may read EXPIRED. Before the public launch only: after it, a warranty already given is never shortened.',
+    );
+    expect(warrantyReach(twoYears, { warranty: 'lifetime' })).toBe('Its 1 piece already sold takes a warranty without an end date.');
+    expect(warrantyReach({ ...lifetime, soldPieces: 1 }, { warranty: 'two-years' })).toBe(
+      'Its 1 piece already sold takes a 2-year warranty from its start: it may read EXPIRED. Before the public launch only: after it, a warranty already given is never shortened.',
+    );
+    expect(warrantyReach({ ...lifetime, soldPieces: 0 }, { warranty: 'two-years' })).toBe('No piece of it is sold yet: its pieces will take a 2-year warranty from their start.');
+    expect(warrantyReach({ ...twoYears, soldPieces: 0 }, { warranty: 'lifetime' })).toBe('No piece of it is sold yet: its pieces will take a warranty without an end date.');
+    // The tables: a model's row, a category's months (2 YEARS at the terms' 24, any other length marked).
+    expect([modelWarrantyText(lifetime), modelWarrantyText(twoYears)]).toEqual(['LIFETIME', '2 YEARS']);
+    expect(categoryWarranty({ warrantyMonths: 24 })).toEqual({ text: '2 YEARS', marked: false });
+    expect(categoryWarranty({ warrantyMonths: 60 })).toEqual({ text: '60 MONTHS', marked: true });
+    expect(categoryWarranty({ warrantyMonths: 12 })).toEqual({ text: '12 MONTHS', marked: true });
+    expect(categoryWarranty({ warrantyMonths: 1 })).toEqual({ text: '1 MONTH', marked: true });
+    expect(CATEGORY_WARRANTY_HINT).toBe('Warranty: the length of the warranty of its 2-year models’ pieces. The terms give 2 years.');
+    // Changed by an ADMIN only, as the server's guard of POST /api/admin/models/:id/warranty.
+    expect(can('OPERATOR', 'setModelWarranty')).toBe(false);
+    expect(can('ADMIN', 'setModelWarranty')).toBe(true);
+    expect(can('OPERATOR', 'createCatalog')).toBe(true);
   });
 
   it('previews the care block with the words /verify shows: the instructions trimmed, else the general care text', () => {

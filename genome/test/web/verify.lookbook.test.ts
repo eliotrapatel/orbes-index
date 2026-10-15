@@ -631,6 +631,8 @@ describe('the console\'s Lookbook page (P-R02)', () => {
     active: true,
     imageUrl: null,
     products: 3,
+    warrantyLifetime: true,
+    soldPieces: 0,
     lookbook: 'HIDDEN',
     slug: null,
     story: null,

@@ -3,7 +3,7 @@
  * AUDITOR reads, OPERATOR mutates, ADMIN for keys, revocation,
  * reinstatement, categories (created, activated, deactivated), console users,
  * points of sale, a customer's recovery code, lock and export, the draw
- * of a drop, a model discontinued or reinstated, a LIVE RELEASE ended now or
+ * of a drop, a model discontinued or reinstated or its warranty changed, a LIVE RELEASE ended now or
  * an entry removed from it, a release's test entrants sent, stopped and
  * ended, a returned piece archived, the settings of the
  * orders: their delays, the locations, the carriers and the shipping rates; a
@@ -121,6 +121,11 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   manageSegments: 'OPERATOR',
   /** Discontinue a model (P-R06: inactive, said DISCONTINUED on its pieces' results) and reinstate it: ADMIN, with a phrase to type. */
   discontinueModel: 'ADMIN',
+  /**
+   * Plan ORBES CARE (answer 12, D16): a model's warranty changed after its creation (Edit model), lifetime or 2 years:
+   * ADMIN, as it rewrites the warranties of its pieces already sold. Chosen at creation by whoever creates the model.
+   */
+  setModelWarranty: 'ADMIN',
   /** Revoking or retiring a product (both end its public validity; RETIRED is terminal). */
   revokeProduct: 'ADMIN',
   reinstate: 'ADMIN',
