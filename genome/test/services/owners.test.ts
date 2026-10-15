@@ -616,6 +616,29 @@ describe('OwnerService', () => {
       ['BIRTHDAY', null, '2026-03-14'],
       ['BIRTHDAY', null, '2025-03-14'],
     ]);
+    // Plan ORBES CARE, step 1.5: its warranty credits after the birthday credits, every one, newest first, no tier, with
+    // what is left and until when (one expired and used up included).
+    await t.db
+      .insertInto('tier_grants')
+      .values([
+        { account_id: many.id, tier: null, kind: 'WARRANTY', granted_at: new Date('2026-05-02T10:00:00.000Z'), amount_minor: 4_000, currency: 'EUR', expires_at: new Date('2027-05-02T10:00:00.000Z') },
+        { account_id: many.id, tier: null, kind: 'WARRANTY', granted_at: new Date('2027-03-01T10:00:00.000Z'), amount_minor: 13_500, currency: 'GBP', expires_at: new Date('2028-03-01T10:00:00.000Z') },
+      ])
+      .execute();
+    const withWarranty = (await club(many.id)).grants;
+    expect(withWarranty.map((g) => [g.kind, g.tier, g.birthdayOn])).toEqual([
+      ['GIFT', 'PLATINE', null],
+      ['CREDIT', 'PLATINE', null],
+      ['BIRTHDAY', null, '2027-03-14'],
+      ['BIRTHDAY', null, '2026-03-14'],
+      ['BIRTHDAY', null, '2025-03-14'],
+      ['WARRANTY', null, null],
+      ['WARRANTY', null, null],
+    ]);
+    expect(withWarranty.slice(-2).map((g) => [g.amountMinor, g.balanceMinor, g.currency, g.expiresAt, g.gift])).toEqual([
+      [13_500, 13_500, 'GBP', new Date('2028-03-01T10:00:00.000Z'), null],
+      [4_000, 4_000, 'EUR', new Date('2027-05-02T10:00:00.000Z'), null],
+    ]);
 
     // THE PROGRAM's switch off: OFF; a test entrant: TEST_ENTRANT, whatever the switch.
     await t.db.insertInto('club_program_settings').values({ id: 1, birthday_credit_on: false }).execute();

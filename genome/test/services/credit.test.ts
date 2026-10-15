@@ -13,7 +13,10 @@
  *  - the birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4.3, step 6.3; the plan's orders.test and gift-orders.test
  *    cases, here with the other cases of Apply credit): taken whatever the tier, a collector without a piece included,
  *    first (before PALLADIUM's and PLATINE's), split with them, refused on a channel left out, in another currency and
- *    once expired; CREDIT · BIRTHDAY first on the invoice; given back on a cancellation and a return, its expiry unchanged.
+ *    once expired; CREDIT · BIRTHDAY first on the invoice; given back on a cancellation and a return, its expiry unchanged;
+ *  - the warranty credit (plan ORBES CARE, step 1.5; kind WARRANTY): taken whatever the tier, a collector without a
+ *    piece included, after the birthday credit and before PALLADIUM's and PLATINE's, split with them, in its own
+ *    currency only; CREDIT · WARRANTY on the invoice after CREDIT · BIRTHDAY; given back on a cancellation.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { inTransaction } from '../../src/server/db/connection.js';
@@ -25,7 +28,7 @@ import { linesOf } from '../../src/server/services/invoices.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import { birthdayExpiry } from '../../src/server/services/birthday-credits.js';
 import { parisDay } from '../../src/server/services/schedule.js';
-import { creditBalances } from '../../src/server/services/tier-grants.js';
+import { addUtcMonths, creditBalances } from '../../src/server/services/tier-grants.js';
 import { poolDraw } from '../support/draws.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
@@ -349,6 +352,83 @@ describe('the tiers\' credit (BP-19 T5)', () => {
     clock.advance(MINUTE);
     await orders().returnOrder(returned, { outcome: 'RESTOCKED', locationId: france, note: 'Returned unworn.' }, admin);
     expect((await birthdayUsesOf(returned)).map((u) => [u.kind, u.released_reason])).toEqual([['BIRTHDAY', 'RETURNED']]);
+    expect((await creditBalances(t.db, a.id))[0]).toEqual(before);
+  });
+  // ── The warranty credit (plan ORBES CARE, step 1.5) ──────────────────────
+
+  /** A warranty credit as a claim's decision gives it: no tier, no birthday, valid 12 months, in the value's currency. */
+  async function warrantyGrant(accountId: string, o: { amountMinor?: number; currency?: string } = {}) {
+    return t.db
+      .insertInto('tier_grants')
+      .values({ account_id: accountId, tier: null, kind: 'WARRANTY', granted_at: clock.now(), amount_minor: o.amountMinor ?? 13_500, currency: o.currency ?? 'EUR', expires_at: addUtcMonths(clock.now(), 12) })
+      .returning(['id', 'expires_at'])
+      .executeTakeFirstOrThrow();
+  }
+  /** An order's credit uses in the order they are taken: the birthday credit, the warranty credit, then by tier. */
+  const usesInOrder = async (orderId: string) => {
+    const rank = (k: string) => (k === 'BIRTHDAY' ? 0 : k === 'WARRANTY' ? 1 : 2);
+    return (
+      await t.db
+        .selectFrom('credit_uses as u')
+        .innerJoin('tier_grants as g', 'g.id', 'u.grant_id')
+        .select(['g.kind', 'g.tier', 'u.amount_minor', 'u.released_reason'])
+        .where('u.order_id', '=', orderId)
+        .execute()
+    ).sort((x, y) => rank(x.kind) - rank(y.kind) || (y.tier ?? 0) - (x.tier ?? 0));
+  };
+
+  it('takes the warranty credit off the draw order of a collector without a piece: offered whatever the tier, CREDIT · WARRANTY on the invoice, audited with its kind', async () => {
+    const a = await createAccount(t.db);
+    const grant = await warrantyGrant(a.id);
+    const id = await drawOrder(a, 300_000);
+    expect((await orders().get(id)).credit.available).toEqual([{ grantId: grant.id, kind: 'WARRANTY', tier: null, balanceMinor: 13_500, currency: 'EUR', expiresAt: grant.expires_at }]);
+    const view = await orders().applyCredit(id, 13_500, admin);
+    expect(view.credit.applied.map((u) => [u.kind, u.tier, u.amountMinor, u.releasedAt])).toEqual([['WARRANTY', null, 13_500, null]]);
+    expect((await auditsOf(id, 'order.credit.apply'))[0]!.details).toMatchObject({ amountMinor: 13_500, currency: 'EUR', uses: [{ grantId: grant.id, kind: 'WARRANTY', tier: null, amountMinor: 13_500 }] });
+    await pay(id);
+    expect(await creditLines(id)).toEqual([['CREDIT · WARRANTY', -13_500]]);
+    expect((await t.db.selectFrom('invoices').select('total_minor').where('order_id', '=', id).where('kind', '=', 'INVOICE').executeTakeFirstOrThrow()).total_minor).toBe(286_500);
+  });
+
+  it('takes the birthday credit, then the warranty credit, then PALLADIUM\'s, then PLATINE\'s, split over them; CREDIT · WARRANTY after CREDIT · BIRTHDAY on the invoice', async () => {
+    const a = await account(10);
+    await birthdayGrant(a.id);
+    await warrantyGrant(a.id, { amountMinor: 3_000 });
+    const id = await salonOrder(a.id, { priceMinor: 300_000 });
+    expect((await orders().get(id)).credit.available.map((c) => [c.kind, c.tier, c.balanceMinor])).toEqual([
+      ['BIRTHDAY', null, 2_000],
+      ['WARRANTY', null, 3_000],
+      ['CREDIT', 3, 10_000],
+      ['CREDIT', 2, 5_000],
+    ]);
+    // € 160: the birthday's € 20, the warranty's € 30, PALLADIUM's € 100, then € 10 of PLATINE's.
+    await orders().applyCredit(id, 16_000, admin);
+    expect((await usesInOrder(id)).map((u) => [u.kind, u.tier, u.amount_minor])).toEqual([
+      ['BIRTHDAY', null, 2_000],
+      ['WARRANTY', null, 3_000],
+      ['CREDIT', 3, 10_000],
+      ['CREDIT', 2, 1_000],
+    ]);
+    await pay(id);
+    expect(await creditLines(id)).toEqual([
+      ['CREDIT · BIRTHDAY', -2_000],
+      ['CREDIT · WARRANTY', -3_000],
+      ['CREDIT · PALLADIUM', -10_000],
+      ['CREDIT · PLATINE', -1_000],
+    ]);
+  });
+
+  it('takes a warranty credit only off an order of its own currency, and gives it back on a cancellation, its expiry unchanged', async () => {
+    const a = await createAccount(t.db);
+    await warrantyGrant(a.id, { amountMinor: 9_000, currency: 'GBP' });
+    await rejects(orders().applyCredit(await salonOrder(a.id, { priceMinor: 300_000 }), 1_000, admin), 'ORDER_CREDIT_CURRENCY');
+    const [before] = await creditBalances(t.db, a.id);
+    const gbp = await salonOrder(a.id, { priceMinor: 300_000, currency: 'GBP' });
+    await orders().applyCredit(gbp, 9_000, admin);
+    expect((await creditBalances(t.db, a.id))[0]!.balanceMinor).toBe(0);
+    clock.advance(MINUTE);
+    await orders().transition(gbp, { to: 'CANCELLED', note: 'The client changed their mind.' }, admin);
+    expect((await usesInOrder(gbp)).map((u) => [u.kind, u.released_reason])).toEqual([['WARRANTY', 'CANCELLED']]);
     expect((await creditBalances(t.db, a.id))[0]).toEqual(before);
   });
 });

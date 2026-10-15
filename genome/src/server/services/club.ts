@@ -44,9 +44,9 @@
  *
  * Plan NEXT-NINE, BP-19 T9 and T10: THE PROGRAM's lines (services/club-program.ts) say what each tier gives with the
  * figures of the console's settings; the status adds the lines the account's tier gives now (`program`) and its
- * benefits in use (`inUse`: its credit, its yearly care of the year, its welcome gifts), and the public THE CLUB
- * (GET /api/v1/the-club, `theClub`) every tier's lines and words, for no account. PLATINE's words by default are none:
- * its early access and priority are its program's lines.
+ * benefits in use (`inUse`: its credit, its birthday and warranty credits, its yearly care of the year, its welcome
+ * gifts), and the public THE CLUB (GET /api/v1/the-club, `theClub`) every tier's lines and words, for no account.
+ * PLATINE's words by default are none: its early access and priority are its program's lines.
  */
 import { inTransaction, type Db } from '../db/connection.js';
 import { CLUB_TIER_NAMES, type ClubTierName, type CreditChannel, type ProductStatus } from '../db/schema.js';
@@ -295,6 +295,12 @@ export interface ClubInUse {
    * open birthday credits' balances, the earliest expiry; read apart from the tiers' `credit`.
    */
   birthdayCredit: { balanceMinor: number; currency: string; expiresAt: Date } | null;
+  /**
+   * Its warranty credit left (plan ORBES CARE: a claim under the lifetime warranty's credit), whatever its tier, not
+   * expired: the sum of its open warranty credits' balances in one currency, the earliest expiry; read apart from the
+   * other two.
+   */
+  warrantyCredit: { balanceMinor: number; currency: string; expiresAt: Date } | null;
   /** Its yearly care of the year (UTC); null when its tier gives none. */
   care: { year: number; used: number; allowance: CareAllowance } | null;
   /**
@@ -427,11 +433,12 @@ export class ClubService {
     };
   }
 
-  /** The account's benefits in use now (ClubInUse): its tiers' credit, its birthday credit, its yearly care of the year, its welcome gifts. */
+  /** The account's benefits in use now (ClubInUse): its tiers' credit, its birthday credit, its warranty credit, its yearly care of the year, its welcome gifts. */
   async inUse(accountId: string, tier: ClubTier, program?: ClubProgram): Promise<ClubInUse> {
     const now = this.clock();
     const p = program ?? (await readProgram(this.db));
-    // Usable now (creditBalances' order: the birthday credit, then PALLADIUM's); each figure in one currency, its first grant's.
+    // Usable now (creditBalances' order: the birthday credit, the warranty credit, then PALLADIUM's); each figure in one
+    // currency, its first grant's.
     const balances = (await creditBalances(this.db, accountId)).filter((g) => usableAt(g, tier) && g.balanceMinor > 0 && g.expiresAt.getTime() > now.getTime());
     const summed = (open: typeof balances) => {
       const usable = open.filter((g) => g.currency === open[0]?.currency);
@@ -441,6 +448,7 @@ export class ClubService {
     };
     const credit = summed(balances.filter((g) => g.kind === 'CREDIT'));
     const birthdayCredit = summed(balances.filter((g) => g.kind === 'BIRTHDAY'));
+    const warrantyCredit = summed(balances.filter((g) => g.kind === 'WARRANTY'));
     const year = await careThisYear(this.db, accountId, now, p);
     const care = year.allowance === 0 ? null : { year: year.year, used: year.used, allowance: year.allowance };
     const grants = await this.db
@@ -465,7 +473,7 @@ export class ClubService {
         if (g.tier !== null && g.tier <= tier && a) gifts.push({ tier: name, model: a.name, state: 'PENDING', orderReference: null });
       }
     }
-    return { credit, birthdayCredit, care, gifts, creditChannels: [...p.creditChannels] };
+    return { credit, birthdayCredit, warrantyCredit, care, gifts, creditChannels: [...p.creditChannels] };
   }
 
   /** THE CLUB (GET /api/v1/the-club, public): every tier's program lines then its words, the credit's currency, the gifts. */

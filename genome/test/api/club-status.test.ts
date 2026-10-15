@@ -9,7 +9,8 @@
  *    a PENDING welcome gift only while its tier is held and has an active gift model, WITH_ORDER from its order until
  *    it is delivered; the channels THE PROGRAM takes the credit off (`creditChannels`), which its note names; the
  *    birthday credit left (`birthdayCredit`, plan CUSTOMER INTELLIGENCE §3.5 SB.4.3) apart from the tiers' credit,
- *    whatever the tier, a collector without a piece included; never a score, a tag or a note;
+ *    whatever the tier, a collector without a piece included; the warranty credit left (`warrantyCredit`, plan ORBES
+ *    CARE, step 1.5) apart from both, whatever the tier too; never a score, a tag or a note;
  *  - PLATINE's words by default are none: its early access and priority are its program's lines.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -29,6 +30,7 @@ interface StatusJson {
   inUse: {
     credit: { balanceMinor: number; currency: string; expiresAt: string } | null;
     birthdayCredit: { balanceMinor: number; currency: string; expiresAt: string } | null;
+    warrantyCredit: { balanceMinor: number; currency: string; expiresAt: string } | null;
     care: { year: number; used: number; allowance: number | 'ALL' } | null;
     gifts: { tier: string; model: string; state: string; orderReference: string | null }[];
     creditChannels: string[];
@@ -109,6 +111,8 @@ describe('YOUR TIER: the program and the benefits in use (BP-19 T10)', () => {
       credit: { balanceMinor: 5000, currency: 'EUR', expiresAt: addUtcMonths(now, 12).toISOString() },
       // No birthday credit given: none.
       birthdayCredit: null,
+      // No warranty credit given (plan ORBES CARE, step 1.5): none.
+      warrantyCredit: null,
       care: { year: 2026, used: 0, allowance: 'ALL' },
       // No gift model in THE PROGRAM: no WELCOME GIFT row, never a gift that would not come.
       gifts: [],
@@ -151,7 +155,7 @@ describe('YOUR TIER: the program and the benefits in use (BP-19 T10)', () => {
     await setProgram({ carePiecesPlatine: null });
     // Below its tier, the credit waits: no row; TITANE has no care row either.
     const titane = await holding(1);
-    expect((await status(titane.client)).inUse).toEqual({ credit: null, birthdayCredit: null, care: null, gifts: [], creditChannels: ['DRAW', 'LIVE', 'SALON'] });
+    expect((await status(titane.client)).inUse).toEqual({ credit: null, birthdayCredit: null, warrantyCredit: null, care: null, gifts: [], creditChannels: ['DRAW', 'LIVE', 'SALON'] });
     await h.t.db.updateTable('ownership').set({ ended_at: h.clock.now() }).where('account_id', '=', a.id).where('product_id', 'in', (eb) => eb.selectFrom('products').select('id').where('product_id', '!=', serial)).execute();
     expect((await status(a.client)).inUse.credit).toBeNull();
   });
@@ -167,12 +171,29 @@ describe('YOUR TIER: the program and the benefits in use (BP-19 T10)', () => {
     };
     const none = await holding(0);
     const until = await birthday(none.id, 2000);
-    expect((await status(none.client)).inUse).toEqual({ credit: null, birthdayCredit: { balanceMinor: 2000, currency: 'EUR', expiresAt: until }, care: null, gifts: [], creditChannels: ['DRAW', 'LIVE', 'SALON'] });
+    expect((await status(none.client)).inUse).toEqual({ credit: null, birthdayCredit: { balanceMinor: 2000, currency: 'EUR', expiresAt: until }, warrantyCredit: null, care: null, gifts: [], creditChannels: ['DRAW', 'LIVE', 'SALON'] });
     const platine = await holding(5);
     const at = await birthday(platine.id, 1500);
     const inUse = (await status(platine.client)).inUse;
     expect(inUse.credit).toMatchObject({ balanceMinor: 5000 });
     expect(inUse.birthdayCredit).toEqual({ balanceMinor: 1500, currency: 'EUR', expiresAt: at });
+  });
+
+  it('shows the warranty credit left and until when apart from the tiers\' and the birthday credits, a collector without a piece included (plan ORBES CARE, step 1.5)', async () => {
+    const warranty = async (accountId: string, amountMinor: number) => {
+      const expiresAt = addUtcMonths(h.clock.now(), 12);
+      await h.t.db.insertInto('tier_grants').values({ account_id: accountId, tier: null, kind: 'WARRANTY', granted_at: h.clock.now(), amount_minor: amountMinor, currency: 'EUR', expires_at: expiresAt }).execute();
+      return expiresAt.toISOString();
+    };
+    const none = await holding(0);
+    const until = await warranty(none.id, 45_000);
+    expect((await status(none.client)).inUse).toEqual({ credit: null, birthdayCredit: null, warrantyCredit: { balanceMinor: 45_000, currency: 'EUR', expiresAt: until }, care: null, gifts: [], creditChannels: ['DRAW', 'LIVE', 'SALON'] });
+    const platine = await holding(5);
+    const at = await warranty(platine.id, 13_500);
+    const inUse = (await status(platine.client)).inUse;
+    expect(inUse.credit).toMatchObject({ balanceMinor: 5000 });
+    expect(inUse.birthdayCredit).toBeNull();
+    expect(inUse.warrantyCredit).toEqual({ balanceMinor: 13_500, currency: 'EUR', expiresAt: at });
   });
 
   it('never shows the engagement score to the collector: no score or engagement key in /api/v1/club/status nor in the account\'s own answers (§3.5 SB.3.3, SB.3.6)', async () => {

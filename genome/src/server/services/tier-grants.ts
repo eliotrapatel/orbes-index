@@ -20,11 +20,16 @@
  *                with no tier and its `birthday_on`, given on the account's birthday (services/birthday-credits.ts),
  *                never by `ensureGrants`. It is a credit like a tier's (`creditBalances`, Apply credit, the invoice,
  *                the export, END TEST), usable whatever the tier (`usableAt`), and taken first: it expires soonest.
+ *   warranty     the warranty credit (plan ORBES CARE, migration 0048) is a grant of kind WARRANTY, with no tier, given
+ *                by the decision of a claim under the lifetime warranty (services/warranty-claims.ts), never by
+ *                `ensureGrants`. A credit like the birthday credit (`creditBalances`, Apply credit, the invoice's
+ *                CREDIT · WARRANTY, the export, END TEST), usable whatever the tier, taken after the birthday credit
+ *                and before the tiers' credits.
  *
  * Lock order: the account's grants after the rows of the sale or the order that reads them; the audit log last (the
  * entries are returned for the caller to write after its own).
  */
-import { sql } from 'kysely';
+import { sql, type RawBuilder } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
 import type { CreditReleaseReason, TierGrantKind, TierGrantRow } from '../db/schema.js';
 import { SYSTEM_ACTOR, systemClock, type Clock, type Logger, noopLogger } from '../types.js';
@@ -89,12 +94,16 @@ export async function ensureGrants(tx: Db, accountId: string, now: Date): Promis
   return notes;
 }
 
+/** The kinds of grant that are credits: a tier's (CREDIT), the birthday credit (§3.5 SB.4), the warranty credit (plan ORBES CARE). */
+export const CREDIT_KINDS = Object.freeze(['CREDIT', 'BIRTHDAY', 'WARRANTY'] as const satisfies readonly TierGrantKind[]);
+export type CreditKind = (typeof CREDIT_KINDS)[number];
+
 /** A credit grant with its balance now: its amount less its open uses. */
 export interface CreditBalance {
   grantId: string;
-  /** A tier's credit, or the birthday credit (§3.5 SB.4). */
-  kind: 'CREDIT' | 'BIRTHDAY';
-  /** A tier's credit's tier; null on a birthday credit. */
+  /** A tier's credit, the birthday credit (§3.5 SB.4) or the warranty credit (plan ORBES CARE). */
+  kind: CreditKind;
+  /** A tier's credit's tier; null on a birthday or a warranty credit. */
   tier: 2 | 3 | null;
   /** A birthday credit's birthday, `YYYY-MM-DD`; null on a tier's credit. */
   birthdayOn: string | null;
@@ -106,17 +115,17 @@ export interface CreditBalance {
 
 /**
  * The account's credit grants with their balances (every one, expired or not, whatever its tier now), the birthday
- * credit first (it expires soonest, §3.5 SB.4.1), then PALLADIUM's, then PLATINE's, the earliest expiry first within
- * each: the order a credit is taken off them. `forUpdate`: their rows locked (in the order's transaction, after the
- * order's row).
+ * credit first (it expires soonest, §3.5 SB.4.1), then the warranty credit (plan ORBES CARE), then PALLADIUM's, then
+ * PLATINE's, the earliest expiry first within each: the order a credit is taken off them. `forUpdate`: their rows
+ * locked (in the order's transaction, after the order's row).
  */
 export async function creditBalances(db: Db, accountId: string, opts: { forUpdate?: boolean } = {}): Promise<CreditBalance[]> {
   let q = db
     .selectFrom('tier_grants')
     .select(['id', 'kind', 'tier', 'birthday_on', 'amount_minor', 'currency', 'expires_at'])
     .where('account_id', '=', accountId)
-    .where('kind', 'in', ['CREDIT', 'BIRTHDAY'])
-    .orderBy(sql`(kind = 'BIRTHDAY')`, 'desc')
+    .where('kind', 'in', [...CREDIT_KINDS])
+    .orderBy(creditKindOrder(sql.ref('kind')))
     .orderBy(sql`tier desc nulls last`)
     .orderBy('expires_at')
     .orderBy('id');
@@ -133,8 +142,8 @@ export async function creditBalances(db: Db, accountId: string, opts: { forUpdat
   const usedOf = new Map(used.map((u) => [u.grant_id, Number(u.used)]));
   return grants.map((g) => ({
     grantId: g.id,
-    kind: g.kind as 'CREDIT' | 'BIRTHDAY',
-    tier: g.kind === 'BIRTHDAY' ? null : (g.tier as 2 | 3),
+    kind: g.kind as CreditKind,
+    tier: g.kind === 'CREDIT' ? (g.tier as 2 | 3) : null,
     birthdayOn: g.birthday_on,
     amountMinor: g.amount_minor!,
     balanceMinor: Math.max(0, g.amount_minor! - (usedOf.get(g.id) ?? 0)),
@@ -144,12 +153,20 @@ export async function creditBalances(db: Db, accountId: string, opts: { forUpdat
 }
 
 /**
- * Whether a credit may be taken off an order of an account at `tier` now (§3.5 SB.4.3): the birthday credit whatever
- * the tier (« every account … piece or not »), a tier's credit while that tier is held. Expiry and balance are the
- * caller's.
+ * Whether a credit may be taken off an order of an account at `tier` now (§3.5 SB.4.3): the birthday credit and the
+ * warranty credit (plan ORBES CARE) whatever the tier (« every account … piece or not »), a tier's credit while that
+ * tier is held. Expiry and balance are the caller's.
  */
 export function usableAt(g: Pick<CreditBalance, 'kind' | 'tier'>, tier: number): boolean {
-  return g.kind === 'BIRTHDAY' || (g.tier !== null && g.tier <= tier);
+  return g.kind === 'BIRTHDAY' || g.kind === 'WARRANTY' || (g.tier !== null && g.tier <= tier);
+}
+
+/**
+ * The order credits are taken off and listed in, by their grant's kind (an SQL expression to sort on): the birthday
+ * credit first (§3.5 SB.4.1), then the warranty credit (plan ORBES CARE), then the tiers' credits (their tier next).
+ */
+export function creditKindOrder(kind: RawBuilder<unknown>) {
+  return sql<number>`CASE ${kind} WHEN 'BIRTHDAY' THEN 0 WHEN 'WARRANTY' THEN 1 ELSE 2 END`;
 }
 
 /** An account's grants as their rows hold them, its tiers in order (the console's, the export's). */
@@ -161,10 +178,11 @@ export async function accountGrants(db: Db, accountId: string): Promise<TierGran
  * A tier's grant in the account's export (the right of access, plan NEXT-NINE BP-19 T5): its tier and kind, when it was
  * granted; a CREDIT's amount, currency, expiry, balance now and each use (the order, the amount, when taken off and
  * when given back, and why); a GIFT's model once attached to an order. A birthday credit (BIRTHDAY, plan CUSTOMER
- * INTELLIGENCE §3.5 SB.4.3) as a CREDIT, with no tier and its birthday. Never who applied or released a use.
+ * INTELLIGENCE §3.5 SB.4.3) as a CREDIT, with no tier and its birthday; a warranty credit (WARRANTY, plan ORBES CARE)
+ * as a CREDIT, with no tier. Never who applied or released a use.
  */
 export interface ExportedTierGrant {
-  /** Null on a birthday credit. */
+  /** Null on a birthday or a warranty credit. */
   tier: 'PLATINE' | 'PALLADIUM' | null;
   kind: TierGrantKind;
   /** A birthday credit's birthday, `YYYY-MM-DD`; null on every other grant. */
@@ -175,9 +193,9 @@ export interface ExportedTierGrant {
   expiresAt: Date | null;
   /** A GIFT's model as given (its name, and its variant's label or null); null on a CREDIT and before an order carries it. */
   model: { name: string; variant: string | null } | null;
-  /** A CREDIT's (or a birthday credit's) amount less its open uses; null on a GIFT. */
+  /** A CREDIT's (or a birthday or warranty credit's) amount less its open uses; null on a GIFT. */
   balanceMinor: number | null;
-  /** A CREDIT's (or a birthday credit's) uses, oldest first; [] on a GIFT. */
+  /** A CREDIT's (or a birthday or warranty credit's) uses, oldest first; [] on a GIFT. */
   uses: { orderReference: string; amountMinor: number; appliedAt: Date; releasedAt: Date | null; reason: CreditReleaseReason | null }[];
 }
 
@@ -202,7 +220,7 @@ export async function accountTierGrants(db: Db, accountId: string): Promise<Expo
     .execute();
   return grants.map((g) => {
     const own = uses.filter((u) => u.grant_id === g.id);
-    const credit = g.kind === 'CREDIT' || g.kind === 'BIRTHDAY';
+    const credit = (CREDIT_KINDS as readonly string[]).includes(g.kind);
     return {
       tier: g.tier === null ? null : g.tier === 3 ? 'PALLADIUM' : 'PLATINE',
       kind: g.kind,

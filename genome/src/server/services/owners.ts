@@ -318,12 +318,13 @@ export interface OwnerClub {
   /**
    * Its grants, PLATINE's first: a credit with what is left and until when; a gift, pending, with an order, or delivered;
    * then its birthday credits (plan CUSTOMER INTELLIGENCE §3.5 SB.4.3), the newest first: the last two, and any still
-   * open (a balance, not expired), with no tier and their birthday.
+   * open (a balance, not expired), with no tier and their birthday; then its warranty credits (plan ORBES CARE), every
+   * one, the newest first, with no tier.
    */
   grants: {
-    /** Null on a birthday credit. */
+    /** Null on a birthday or a warranty credit. */
     tier: ClubTierName | null;
-    kind: 'GIFT' | 'CREDIT' | 'BIRTHDAY';
+    kind: 'GIFT' | 'CREDIT' | 'BIRTHDAY' | 'WARRANTY';
     /** A birthday credit's birthday, `YYYY-MM-DD`; null on a tier's grant, and for an AUDITOR (routes/admin/serialize.ts `ownerClubJson`). */
     birthdayOn: string | null;
     grantedAt: Date;
@@ -606,12 +607,14 @@ export class OwnerService {
     const giftOrders = giftIds.length
       ? await this.db.selectFrom('orders').select(['gift_grant_id', 'status', 'with_order_id']).where('gift_grant_id', 'in', giftIds).where('status', '<>', 'CANCELLED').execute()
       : [];
-    // §3.5 SB.4.3: the tiers' grants first, PLATINE's first; then the birthday credits, newest first: the last two and any open.
+    // §3.5 SB.4.3: the tiers' grants first, PLATINE's first; then the birthday credits, newest first: the last two and any
+    // open; then the warranty credits (plan ORBES CARE), every one, newest first.
     const open = (id: string) => balances.some((b) => b.grantId === id && b.balanceMinor > 0 && b.expiresAt.getTime() > now.getTime());
     const birthdays = grants.filter((g): g is typeof g & { kind: 'BIRTHDAY' } => g.kind === 'BIRTHDAY').sort((a, b) => (a.birthday_on! < b.birthday_on! ? 1 : -1));
     const shown = [
-      ...grants.filter((g): g is typeof g & { kind: 'GIFT' | 'CREDIT' } => (g.kind === 'GIFT' || g.kind === 'CREDIT') && g.tier !== null).sort((a, b) => a.tier! - b.tier! || (a.kind < b.kind ? 1 : -1)), // 0048's WARRANTY: none before step 1.5
+      ...grants.filter((g) => (g.kind === 'GIFT' || g.kind === 'CREDIT') && g.tier !== null).sort((a, b) => a.tier! - b.tier! || (a.kind < b.kind ? 1 : -1)),
       ...birthdays.filter((g, i) => i < 2 || open(g.id)),
+      ...grants.filter((g) => g.kind === 'WARRANTY').sort((a, b) => b.granted_at.getTime() - a.granted_at.getTime() || (a.id < b.id ? -1 : 1)),
     ];
     const next = nextBirthday({ birthDate: profile?.birth_date ?? null, birthDateAt: profile?.birth_date_at ?? null, granted: birthdays.map((g) => g.birthday_on!), days: program.birthdayCreditDays, now });
     return {

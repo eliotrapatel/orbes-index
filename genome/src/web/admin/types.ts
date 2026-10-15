@@ -133,8 +133,11 @@ export type HouseCurrency = (typeof HOUSE_CURRENCIES)[number];
 export const CREDIT_CHANNELS = ['DRAW', 'LIVE', 'SALON'] as const;
 export type CreditChannel = (typeof CREDIT_CHANNELS)[number];
 
-/** A credit taken off an order: a tier's, or the birthday credit (tier_grants.kind, plan CUSTOMER INTELLIGENCE §3.5 SB.4.3). */
-export type CreditKind = 'CREDIT' | 'BIRTHDAY';
+/**
+ * A credit taken off an order: a tier's, the birthday credit (tier_grants.kind, plan CUSTOMER INTELLIGENCE §3.5 SB.4.3)
+ * or a warranty credit (plan ORBES CARE).
+ */
+export type CreditKind = 'CREDIT' | 'BIRTHDAY' | 'WARRANTY';
 
 /** Why a credit taken off an order was given back (credit_uses.released_reason, BP-19 T5). */
 export const CREDIT_RELEASE_REASONS = ['REMOVED', 'CANCELLED', 'RETURNED'] as const;
@@ -3031,8 +3034,9 @@ export interface OrderView {
   giftOf: { tier: 2 | 3; sizes: { skuId: string; label: string | null; available: number }[]; savedSize: string | null } | null;
   /**
    * BP-19 T5: the client's credit usable now, and the credit taken off this order (released or not). Each is a tier's
-   * credit (CREDIT, its tier) or the birthday credit (BIRTHDAY, no tier; plan CUSTOMER INTELLIGENCE §3.5 SB.4.3), the
-   * birthday credit first: it is taken first.
+   * credit (CREDIT, its tier), the birthday credit (BIRTHDAY, no tier; plan CUSTOMER INTELLIGENCE §3.5 SB.4.3) or a
+   * warranty credit (WARRANTY, no tier; plan ORBES CARE), the birthday credit first, then the warranty credit: the order
+   * they are taken in.
    */
   credit: {
     available: { grantId: string; kind: CreditKind; tier: 2 | 3 | null; balanceMinor: number; currency: string; expiresAt: Iso }[];
@@ -3461,10 +3465,13 @@ export interface CaseToReceive {
 /** BP-19 T10: what the tier program gave an account and what is in use (GET /api/admin/owners/:id `club`). */
 export interface OwnerClub {
   tier: ClubTierName | null;
-  /** The tiers' grants, then the birthday credits (plan CUSTOMER INTELLIGENCE §3.5 SB.4.3), newest first: no tier, their birthday. */
+  /**
+   * The tiers' grants, then the birthday credits (plan CUSTOMER INTELLIGENCE §3.5 SB.4.3), newest first: no tier, their
+   * birthday; then the warranty credits (plan ORBES CARE), newest first, no tier.
+   */
   grants: {
     tier: ClubTierName | null;
-    kind: 'GIFT' | 'CREDIT' | 'BIRTHDAY';
+    kind: 'GIFT' | 'CREDIT' | 'BIRTHDAY' | 'WARRANTY';
     birthdayOn: string | null;
     grantedAt: Iso;
     amountMinor: number | null;

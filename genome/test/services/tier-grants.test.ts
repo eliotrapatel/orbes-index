@@ -13,7 +13,10 @@
  *  - a credit of 0 in THE PROGRAM gives no CREDIT row;
  *  - the birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4.3, step 6.3; the plan's club.test, ClubService being
  *    tested here): never made by ensureGrants, listed first by creditBalances, usable whatever the tier (usableAt), in
- *    IN USE as `birthdayCredit` apart from the tiers' `credit`, for a collector without a piece too.
+ *    IN USE as `birthdayCredit` apart from the tiers' `credit`, for a collector without a piece too;
+ *  - the warranty credit (plan ORBES CARE, step 1.5; migration 0048's kind WARRANTY): never made by ensureGrants, no
+ *    tier, listed after the birthday credit and before the tiers' credits, usable whatever the tier, in IN USE as
+ *    `warrantyCredit` apart from the other two, for a collector without a piece too.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { testConfig } from '../../src/server/config.js';
@@ -250,6 +253,63 @@ describe('the tiers\' grants (BP-19 T5)', () => {
     // Used up or expired: none in IN USE.
     clock.advance(30 * 24 * 60 * 60_000);
     expect((await ctx.services.club.inUse(none.id, 0)).birthdayCredit).toBeNull();
+  });
+
+  it('keeps the warranty credit apart (plan ORBES CARE, step 1.5): never made by ensureGrants, no tier, after the birthday credit and before the tiers\' credits, usable whatever the tier, IN USE\'s warrantyCredit beside the others, a collector without a piece included', async () => {
+    const warranty = (accountId: string, amountMinor: number, currency = 'EUR', months = 12) =>
+      t.db
+        .insertInto('tier_grants')
+        .values({ account_id: accountId, tier: null, kind: 'WARRANTY', granted_at: clock.now(), amount_minor: amountMinor, currency, expires_at: addUtcMonths(clock.now(), months) })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+    // A collector without a piece (its piece replaced by a credit of its value): the warranty credit alone in IN USE.
+    const none = await createAccount(t.db);
+    const given = await warranty(none.id, 45_000);
+    expect(await creditBalances(t.db, none.id)).toEqual([
+      { grantId: given.id, kind: 'WARRANTY', tier: null, birthdayOn: null, amountMinor: 45_000, balanceMinor: 45_000, currency: 'EUR', expiresAt: addUtcMonths(clock.now(), 12) },
+    ]);
+    expect(await ctx.services.club.inUse(none.id, 0)).toMatchObject({ credit: null, birthdayCredit: null, warrantyCredit: { balanceMinor: 45_000, currency: 'EUR', expiresAt: addUtcMonths(clock.now(), 12) } });
+    // ensureGrants (a status read) adds nothing to it.
+    await ctx.services.club.status(none.id);
+    expect((await grantsOf(none.id)).map((g) => g.kind)).toEqual(['WARRANTY']);
+    // Beside a birthday credit and PALLADIUM's and PLATINE's credits: the birthday credit, then the warranty credits
+    // (the earliest expiry first), then the tiers'; IN USE reads the three apart.
+    const a = await createAccount(t.db);
+    await holdPieces(t.db, a.id, 10, f.modelId);
+    await ctx.services.tierGrants.ensure(a.id);
+    const today = parisDay(clock.now());
+    await t.db
+      .insertInto('tier_grants')
+      .values({ account_id: a.id, tier: null, kind: 'BIRTHDAY', granted_at: clock.now(), amount_minor: 2_000, currency: 'EUR', expires_at: birthdayExpiry(today, 30), birthday_on: today })
+      .execute();
+    await warranty(a.id, 13_500, 'EUR', 12);
+    await warranty(a.id, 4_000, 'EUR', 6);
+    expect((await creditBalances(t.db, a.id)).map((c) => [c.kind, c.tier, c.amountMinor])).toEqual([
+      ['BIRTHDAY', null, 2_000],
+      ['WARRANTY', null, 4_000],
+      ['WARRANTY', null, 13_500],
+      ['CREDIT', 3, 10_000],
+      ['CREDIT', 2, 5_000],
+    ]);
+    const inUse = await ctx.services.club.inUse(a.id, 3);
+    expect(inUse.credit).toMatchObject({ balanceMinor: 15_000, currency: 'EUR' });
+    expect(inUse.birthdayCredit).toMatchObject({ balanceMinor: 2_000, currency: 'EUR' });
+    expect(inUse.warrantyCredit).toEqual({ balanceMinor: 17_500, currency: 'EUR', expiresAt: addUtcMonths(clock.now(), 6) });
+    // Whatever the tier: below every tier, the warranty credit is still usable.
+    expect((await ctx.services.club.inUse(a.id, 0)).warrantyCredit).toMatchObject({ balanceMinor: 17_500 });
+    expect(usableAt({ kind: 'WARRANTY', tier: null }, 0)).toBe(true);
+    expect(usableAt({ kind: 'WARRANTY', tier: null }, 3)).toBe(true);
+    // In another currency (the currency of the value it was computed from): IN USE sums the first currency's only, as the others.
+    const gbp = await createAccount(t.db);
+    await warranty(gbp.id, 9_000, 'GBP');
+    expect((await ctx.services.club.inUse(gbp.id, 0)).warrantyCredit).toMatchObject({ balanceMinor: 9_000, currency: 'GBP' });
+    // The export carries it as a credit, with no tier and no birthday.
+    expect((await ctx.services.owners.exportData(none.id, admin)).tierGrants).toEqual([
+      { tier: null, kind: 'WARRANTY', birthdayOn: null, grantedAt: clock.now(), amountMinor: 45_000, currency: 'EUR', expiresAt: addUtcMonths(clock.now(), 12), model: null, balanceMinor: 45_000, uses: [] },
+    ]);
+    // Expired: none in IN USE.
+    clock.advance(13 * 31 * 24 * 60 * 60_000);
+    expect((await ctx.services.club.inUse(none.id, 0)).warrantyCredit).toBeNull();
   });
 
   it('counts the months in UTC calendar months', () => {

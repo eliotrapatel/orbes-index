@@ -808,6 +808,35 @@ describe('END TEST and the tier program', () => {
     expect(await w.h.ctx.db.selectFrom('credit_uses').select(['amount_minor', 'released_at']).where('order_id', '=', order.id).execute()).toEqual([{ amount_minor: 2_000, released_at: null }]);
     expect((await creditBalances(w.h.ctx.db, holder.id)).map((c) => [c.kind, c.balanceMinor])).toEqual([['BIRTHDAY', 0]]);
   });
+  it('END TEST leaves a real collector\'s warranty credit in the same release as it is (plan ORBES CARE, step 1.5): its order and its credit taken off it untouched, the report 5/5', async () => {
+    const admin = w.f.admin;
+    // A real collector of no tier, a place guaranteed in a priced draw, and a warranty credit of € 135 (a claim's).
+    const drop = await openDraw(w, { quantity: 4, priceMinor: 120_000 });
+    const holder = await createAccount(w.h.ctx.db);
+    const until = new Date(w.h.clock.now().getTime() + 30 * 86_400_000).toISOString().slice(0, 10);
+    await w.h.ctx.services.guarantees.grant(holder.id, { scope: 'RELEASE', targetId: drop, pieces: 1, validUntil: until, visible: true }, admin);
+    await w.h.ctx.services.drops.enter(holder.id, drop, holder.actor);
+    await w.h.ctx.db
+      .insertInto('tier_grants')
+      .values({ account_id: holder.id, tier: null, kind: 'WARRANTY', granted_at: w.h.clock.now(), amount_minor: 13_500, currency: 'EUR', expires_at: new Date(w.h.clock.now().getTime() + 365 * 86_400_000) })
+      .execute();
+    // Three test entrants enter beside it; the draw, the holder's place confirmed, its warranty credit taken off its order.
+    const run = await w.tests.start(drop, press(drop, { titane: 3 }, { behaviour: { confirmPct: 0 } }), admin);
+    await drive(w, 0);
+    expect(await statusOf(w, run.id)).toBe('DONE');
+    w.h.clock.advance(HOUR);
+    await w.h.ctx.services.drops.draw(drop, admin);
+    const entry = await w.h.ctx.db.selectFrom('drop_entries').select('id').where('drop_id', '=', drop).where('account_id', '=', holder.id).executeTakeFirstOrThrow();
+    await w.h.ctx.services.drops.confirm(drop, entry.id, null, admin);
+    const order = await w.h.ctx.db.selectFrom('orders').select('id').where('drop_entry_id', '=', entry.id).executeTakeFirstOrThrow();
+    await w.h.ctx.services.orders.applyCredit(order.id, 13_500, admin);
+    // END TEST: the report 5/5; the real order RESERVED, its warranty credit still taken off it.
+    const ended = await w.tests.end(run.id, testPhrase(drop, true), admin);
+    expect(ended.report?.passed).toBe(5);
+    expect((await w.h.ctx.db.selectFrom('orders').select('status').where('id', '=', order.id).executeTakeFirstOrThrow()).status).toBe('RESERVED');
+    expect(await w.h.ctx.db.selectFrom('credit_uses').select(['amount_minor', 'released_at']).where('order_id', '=', order.id).execute()).toEqual([{ amount_minor: 13_500, released_at: null }]);
+    expect((await creditBalances(w.h.ctx.db, holder.id)).map((c) => [c.kind, c.balanceMinor])).toEqual([['WARRANTY', 0]]);
+  });
 });
 
 describe('END TEST and a new claim code (plan NEXT LOT §3.4.8)', () => {

@@ -463,6 +463,36 @@ describe('invoices and credit notes (plan LIVE RELEASE+, S4)', () => {
     expect(new TextDecoder().decode(pdf.body.slice(0, 8))).toBe('%PDF-1.4');
   });
 
+  it('draws the warranty credit as CREDIT · WARRANTY, after CREDIT · BIRTHDAY and before the tiers\' CREDIT lines, on the invoice, its credit note and the PDF (plan ORBES CARE, step 1.5)', async () => {
+    const a = await createAccount(t.db);
+    await holdPieces(t.db, a.id, 5, f.modelId);
+    await ctx.services.tierGrants.ensure(a.id);
+    // A birthday credit and a warranty credit (no tier, no birthday, 12 months), as the daily grant and a claim give them.
+    await t.db
+      .insertInto('tier_grants')
+      .values([
+        { account_id: a.id, tier: null, kind: 'BIRTHDAY', granted_at: clock.now(), amount_minor: 2_000, currency: 'EUR', expires_at: new Date(clock.now().getTime() + 30 * 86_400_000), birthday_on: '2026-11-03' },
+        { account_id: a.id, tier: null, kind: 'WARRANTY', granted_at: clock.now(), amount_minor: 1_500, currency: 'EUR', expires_at: new Date(clock.now().getTime() + 365 * 86_400_000) },
+      ])
+      .execute();
+    const { id } = await salonOrder({ accountId: a.id, priceMinor: 300_000 });
+    await orders().applyCredit(id, 4_500, admin);
+    await pay(id);
+    const [invoice] = await invoiceRows(id);
+    expect(linesOf(invoice!.lines).filter((l) => l.kind === 'CREDIT')).toEqual([
+      { kind: 'CREDIT', label: 'CREDIT · BIRTHDAY', detail: null, amountMinor: -2_000 },
+      { kind: 'CREDIT', label: 'CREDIT · WARRANTY', detail: null, amountMinor: -1_500 },
+      { kind: 'CREDIT', label: 'CREDIT · PLATINE', detail: null, amountMinor: -1_000 },
+    ]);
+    expect(invoice!.total_minor).toBe(295_500);
+    clock.advance(MINUTE);
+    await orders().transition(id, { to: 'CANCELLED', note: 'The client withdrew.' }, admin);
+    const [, credit] = await invoiceRows(id);
+    expect((await invoices().get(credit!.id)).lines).toEqual((await invoices().get(invoice!.id)).lines);
+    const pdf = await invoices().accountDocument(a.id, id, 'INVOICE');
+    expect(new TextDecoder().decode(pdf.body.slice(0, 8))).toBe('%PDF-1.4');
+  });
+
   it('the orders paid at boot get their invoices too (a LIVE resolution CONCLUDED, mapped to PAID by the system)', async () => {
     const o = await salonOrder({ priceMinor: 200_000 });
     await orders().transition(o.id, { to: 'PAID' }, SYSTEM_ACTOR);

@@ -41,6 +41,7 @@ import type { AuditRecordInput } from './audit.js';
 import { writeJournal } from './journal.js';
 import { majorUnits } from './live-console.js';
 import { addressOf, orderReference } from './orders.js';
+import { creditKindOrder } from './tier-grants.js';
 import { countryName } from '../../shared/countries.js';
 
 /**
@@ -252,7 +253,8 @@ export async function issueInvoice(tx: Db, o: OrderRow, actor: Actor, now: Date)
       : []),
   ];
   // BP-19 T5: the credit taken off it (one line per tier, negative; the birthday credit's first, CREDIT · BIRTHDAY, plan
-  // CUSTOMER INTELLIGENCE §3.5 SB.4.3), then the welcome gift travelling with it (at 0).
+  // CUSTOMER INTELLIGENCE §3.5 SB.4.3, then a warranty credit's, CREDIT · WARRANTY, plan ORBES CARE), then the welcome
+  // gift travelling with it (at 0).
   const credits = await tx
     .selectFrom('credit_uses as u')
     .innerJoin('tier_grants as g', 'g.id', 'u.grant_id')
@@ -260,11 +262,11 @@ export async function issueInvoice(tx: Db, o: OrderRow, actor: Actor, now: Date)
     .where('u.order_id', '=', o.id)
     .where('u.released_at', 'is', null)
     .groupBy(['g.kind', 'g.tier'])
-    .orderBy(sql`(g.kind = 'BIRTHDAY')`, 'desc')
+    .orderBy(creditKindOrder(sql.ref('g.kind')))
     .orderBy(sql`g.tier desc nulls last`)
     .execute();
   for (const c of credits) {
-    lines.push({ kind: 'CREDIT', label: `CREDIT · ${c.kind === 'BIRTHDAY' ? 'BIRTHDAY' : TIER_WORDS[c.tier as 2 | 3]}`, detail: null, amountMinor: -Number(c.amount) });
+    lines.push({ kind: 'CREDIT', label: `CREDIT · ${c.kind === 'BIRTHDAY' || c.kind === 'WARRANTY' ? c.kind : TIER_WORDS[c.tier as 2 | 3]}`, detail: null, amountMinor: -Number(c.amount) });
   }
   const gifts = await tx
     .selectFrom('orders as g')
