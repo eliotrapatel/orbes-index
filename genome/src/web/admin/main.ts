@@ -99,6 +99,7 @@ import { packingSlipView, shippingSlipView } from './views/slip.js';
 import { teamView } from './views/team.js';
 import { warrantiesView } from './views/warranties.js';
 import { careRequestView, careView } from './views/care.js';
+import { warrantyClaimView } from './views/warranty-claim.js';
 
 interface NavItem {
   route: RouteName;
@@ -199,6 +200,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   liveRelease: { view: liveReleaseView, title: 'Live release', nav: 'club' },
   circlePost: { view: circlePostView, title: 'Circle', nav: 'club' },
   warranties: { view: warrantiesView, title: 'Warranties', nav: 'warranties' },
+  warrantyClaim: { view: warrantyClaimView, title: 'Warranty claim', nav: 'warranties' },
   care: { view: careView, title: 'Yearly care', nav: 'care' },
   careRequest: { view: careRequestView, title: 'Yearly care', nav: 'care' },
   revocations: { view: revocationsView, title: 'Revocations', nav: 'revocations' },

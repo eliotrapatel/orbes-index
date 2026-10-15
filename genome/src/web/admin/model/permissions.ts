@@ -83,6 +83,12 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   assignMessages: 'ADMIN',
   /** The Yearly care board (BP-19 T6): send the prepaid label, receive the piece, ship it back, complete, cancel. */
   manageCare: 'OPERATOR',
+  /**
+   * Plan ORBES CARE (answer 11): the warranty claims, every step: open one (from the client's conversation, or a legal
+   * claim from the piece page), send its label, receive the piece, decide every outcome, move a 2-year claim to the
+   * legal guarantee, ship, close. Client Services decide: an OPERATOR, not only an ADMIN.
+   */
+  handleClaims: 'OPERATOR',
   /** THE HOUSE'S GUARANTEE (IN-01): grant one from the client sheet, change it, revoke it. */
   grantGuarantee: 'OPERATOR',
   /** THE HOUSE'S GUARANTEE (IN-01): the Grant dialog's defaults in Orders → Settings. */

@@ -31,8 +31,11 @@ import {
   productActions,
   productAttributes,
   productSheet,
+  warrantyLengthNote,
+  warrantyPeriod,
   type ProductActions,
 } from '../model/product.js';
+import { CLAIM_BASIS_SHORT, CLAIM_STATUS_LABELS, claimHref, freeReplacementRow, outcomeText } from '../model/claims.js';
 import { confirmationPhrase } from '../model/registry.js';
 import { retailerOptions } from '../model/sale.js';
 import { toneOf } from '../model/tone.js';
@@ -372,6 +375,12 @@ function actionsPanel(ctx: ViewContext, d: ProductDetail, a: ProductActions): HT
             }).then((r) => r && done(ctx, 'Warranty extended.')),
         })
       : null,
+    a.canOpenLegalClaim
+      ? button('Open a legal-guarantee claim', {
+          testId: 'action-legal-claim',
+          onClick: () => void legalClaimDialog(ctx, d),
+        })
+      : null,
     a.canVoidWarranty
       ? button('Void warranty', {
           kind: 'danger',
@@ -454,6 +463,37 @@ function actionsPanel(ctx: ViewContext, d: ProductDetail, a: ProductActions): HT
 
   if (groups.length === 0) return null;
   return section('Actions', h('div', { class: 'actions' }, ...groups), { id: 'actions', note: 'Every action is signed into the audit log' });
+}
+
+/**
+ * Open a legal-guarantee claim (plan ORBES CARE §2(b), answer 11): a buyer without an ORBES account (a boutique sale, the
+ * receipt shown at the point of sale) claims under the legal guarantee; the receipt's facts go in the note. A client with
+ * an account is claimed for from their conversation instead (Open a warranty claim). The claim's page follows.
+ */
+async function legalClaimDialog(ctx: ViewContext, d: ProductDetail): Promise<void> {
+  const pid = d.product.productId;
+  const until = d.warrantyClaims.legalUntil;
+  let opened: string | null = null;
+  const ok = await openDialog({
+    title: 'Open a legal-guarantee claim',
+    eyebrow: pid,
+    body: [
+      h(
+        'p',
+        { class: 'dialog__text' },
+        'For a buyer without an ORBES account, from a boutique sale: write the receipt’s facts in the note. A client with an account is claimed for from their conversation in Messages. The claim shows nowhere in the app: send its label by e-mail.',
+      ),
+      h('p', { class: 'dialog__text', data: { testid: 'legal-claim-until' } }, until ? `The legal guarantee applies until ${formatDate(until)}.` : 'The legal guarantee has no start for this piece: no delivery nor warranty start.'),
+    ],
+    fields: [{ name: 'note', label: 'Receipt and note', kind: 'textarea', required: true, maxlength: 500, hint: 'The receipt: its number, the point of sale and the date. Staff only.' }],
+    confirmLabel: 'Open the claim',
+    submit: async (v) => {
+      opened = (await ctx.api.openWarrantyClaim({ conversationId: null, productId: pid, basis: 'LEGAL', note: v.note ?? '' })).id;
+    },
+  });
+  if (!ok || !opened) return;
+  notify('Warranty claim opened.');
+  ctx.navigate(claimHref(opened));
 }
 
 /**
@@ -652,12 +692,33 @@ function ownershipPanel(d: ProductDetail): HTMLElement {
 
 function warrantyPanel(d: ProductDetail): HTMLElement {
   const w = d.warranty;
+  const free = freeReplacementRow(d.warrantyClaims);
   return section(
     'Warranty & service',
     [
       defList([
         { label: 'Status', value: statusMark(humanize(w?.status ?? 'NOT_STARTED'), toneOf('warranty', w?.status ?? 'NOT_STARTED')) },
-        { label: 'Period', value: w?.startDate ? `${formatDate(w.startDate)} → ${formatDate(w.endDate)}` : '—', note: w ? `${w.durationMonths} months` : undefined },
+        {
+          label: 'Period',
+          value: h('span', { data: { testid: 'warranty-period' } }, w?.startDate ? warrantyPeriod(w) : '—'),
+          note: w ? warrantyLengthNote(w) : undefined,
+        },
+        // Plan ORBES CARE (answer 4): one free replacement per original purchase, under the lifetime warranty only.
+        ...(free
+          ? [
+              {
+                label: 'Free replacement',
+                value: h(
+                  'span',
+                  { data: { testid: 'free-replacement' } },
+                  free.value,
+                  free.claimId ? ' · ' : null,
+                  free.claimId ? h('a', { class: 'idlink', attrs: { href: claimHref(free.claimId) } }, 'claim') : null,
+                ),
+                note: 'Once per original purchase',
+              },
+            ]
+          : []),
         { label: 'Purchase', value: w?.purchaseDate ? formatDate(w.purchaseDate) : '—', note: [w?.retailer, w?.country].filter(Boolean).join(' · ') || undefined },
         ...(w?.voidedAt ? [{ label: 'Voided', value: formatDate(w.voidedAt), note: w.voidReason ?? undefined }] : []),
       ]),
@@ -673,6 +734,18 @@ function warrantyPanel(d: ProductDetail): HTMLElement {
         ],
         d.services,
         { empty: 'No service record.' },
+      ),
+      // Plan ORBES CARE §2(b): the piece's warranty claims, each linked to its page.
+      h('h3', { class: 'panel__subtitle' }, 'Warranty claims'),
+      table(
+        [
+          { label: 'Opened', cell: (c) => h('a', { class: 'idlink', attrs: { href: claimHref(c.id), 'data-testid': 'piece-claim' } }, formatDate(c.openedAt)), kind: ['nowrap'] },
+          { label: 'Basis', cell: (c) => CLAIM_BASIS_SHORT[c.basis], kind: ['nowrap'] },
+          { label: 'Status', cell: (c) => statusMark(CLAIM_STATUS_LABELS[c.status], toneOf('claim', c.status)), kind: ['nowrap'] },
+          { label: 'Outcome', cell: (c) => outcomeText(c.outcome), kind: ['wide'] },
+        ],
+        d.warrantyClaims.items,
+        { empty: 'No warranty claim.', onRow: (c) => claimHref(c.id), caption: 'Warranty claims' },
       ),
     ],
     { id: 'warranty' },

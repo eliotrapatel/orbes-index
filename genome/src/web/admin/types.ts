@@ -988,6 +988,8 @@ export interface WarrantyRecord {
   voidedAt: Iso | null;
   voidReason: string | null;
   status: WarrantyStatus;
+  /** Plan ORBES CARE (answer 12): the lifetime warranty (no end date), copied from its model's choice; false: 2 years. */
+  lifetime: boolean;
   createdAt: Iso;
   updatedAt: Iso;
 }
@@ -1122,6 +1124,10 @@ export interface ProductDetail {
   lifecycle: LifecycleSnapshot;
   /** NEW CLAIM CODE (plan NEXT LOT §3.4): what New claim code may do for the piece, and its new claim codes; never a code. */
   claimCode: ClaimCodeSituation;
+  /** Plan ORBES CARE §2(b): the piece's warranty claims, its warranty kind and its free replacement. */
+  warrantyClaims: PieceClaims;
+  /** The INSPECTION records its warranty claims opened: closed by their claim only, never completed from this page. */
+  claimServiceIds: string[];
 }
 
 /** Whom a new claim code is made for (services/claim-renewals.ts CLAIM_SITUATIONS). */
@@ -1753,7 +1759,8 @@ export interface SaleLookup {
     material: string;
     createdYear: number;
     registered: boolean;
-    warranty: { status: WarrantyStatus; startDate: string | null; endDate: string | null };
+    /** `lifetime` (true) only on a lifetime warranty, which has no end date (plan ORBES CARE). */
+    warranty: { status: WarrantyStatus; startDate: string | null; endDate: string | null; lifetime?: true };
   } | null;
   sale: { token: string; expiresAt: Iso } | null;
   refusal: { code: SaleRefusal; message: string } | null;
@@ -3527,6 +3534,97 @@ export interface CareSheet extends CareRow {
   note: string | null;
   handledBy: { id: string; email: string } | null;
   conversation: { conversationId: string; status: ClientConversationStatus } | null;
+}
+
+// ── The warranty claims (plan ORBES CARE of 2026-10-15, §2(b)) ─────────────
+
+/** An amount in minor units and its currency. */
+export interface ClaimAmount {
+  amountMinor: number;
+  currency: string;
+}
+
+/** A row of Warranties → Claims (GET /api/admin/warranty-claims): the client's email masked for an AUDITOR. */
+export interface ClaimBoardRow {
+  id: string;
+  status: WarrantyClaimStatus;
+  basis: WarrantyClaimBasis;
+  outcome: WarrantyClaimOutcome | null;
+  openedAt: Iso;
+  piece: { productId: string; model: string };
+  /** The claimant; null for a legal claim of a buyer without an ORBES account. */
+  account: { id: string; email: string } | null;
+}
+
+/** A claim's page (GET /api/admin/warranty-claims/:id): the emails masked for an AUDITOR. */
+export interface ClaimSheet extends ClaimBoardRow {
+  /** The original piece (the claimed piece, or the one its replacement came from). */
+  rootProductId: string;
+  registeredOwner: { id: string; email: string } | null;
+  conversation: { conversationId: string; status: ClientConversationStatus } | null;
+  openedBy: { id: string; email: string };
+  label: (CareShipment & { pdf: boolean }) | null;
+  receivedAt: Iso | null;
+  serviceRecordId: string | null;
+  refusalReason: WarrantyClaimRefusal | null;
+  value: ClaimAmount | null;
+  creditPercent: number | null;
+  grant: (ClaimAmount & { id: string; expiresAt: Iso }) | null;
+  replacement: { productId: string } | null;
+  otherSize: boolean;
+  decidedAt: Iso | null;
+  decidedBy: { id: string; email: string } | null;
+  return: CareShipment | null;
+  doneAt: Iso | null;
+  cancelledAt: Iso | null;
+  /** Staff only: never shown to the client. */
+  note: string | null;
+  /** The 2-year claim this LEGAL claim continues, and the LEGAL claim continuing this one. */
+  continues: string | null;
+  continuedBy: string | null;
+  /** The piece's warranty now. */
+  warranty: { lifetime: boolean; status: WarrantyStatus; startDate: string | null; endDate: string | null };
+  modelDiscontinued: boolean;
+  /** Lifetime claims only: the free replacement still available, or the claim that used it. */
+  freeReplacement: { available: true } | { available: false; claimId: string; decidedAt: Iso } | null;
+  /** The legal guarantee's last day (2 years from delivery, else from the warranty's start); null without either. */
+  legalUntil: string | null;
+  /**
+   * What a decision may be now (the server filters the free replacement and the part credit); the piece's value a credit
+   * comes from, and the price paid a refund or a price reduction comes from (null: staff enter it).
+   */
+  decision: { outcomes: WarrantyClaimOutcome[]; refusalReasons: WarrantyClaimRefusal[]; value: ClaimAmount | null; paid: ClaimAmount | null; creditPercent: number };
+}
+
+/** A claim of the piece page's Warranty claims table. */
+export interface PieceClaimRow {
+  id: string;
+  status: WarrantyClaimStatus;
+  basis: WarrantyClaimBasis;
+  outcome: WarrantyClaimOutcome | null;
+  openedAt: Iso;
+  decidedAt: Iso | null;
+}
+
+/** GET /api/admin/products/:productId `warrantyClaims`. */
+export interface PieceClaims {
+  /** The piece's warranty kind now: its own row's, else its model's choice (what a claim under the ORBES warranty records). */
+  lifetime: boolean;
+  modelDiscontinued: boolean;
+  legalUntil: string | null;
+  /** A lifetime piece only. */
+  freeReplacement: ClaimSheet['freeReplacement'];
+  /** Newest first. */
+  items: PieceClaimRow[];
+}
+
+/** POST /api/admin/warranty-claims/:id/decide. */
+export interface ClaimDecision {
+  outcome: WarrantyClaimOutcome;
+  refusalReason?: WarrantyClaimRefusal;
+  replacementProductId?: string;
+  otherSize?: boolean;
+  valueMinor?: number;
 }
 
 // ── GROWTH (plan NEXT-NINE, BP-29; services/growth.ts, API §16.31) ─────────

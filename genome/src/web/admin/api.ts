@@ -168,6 +168,10 @@ import type {
   CareRequestStatus,
   CareRow,
   CareSheet,
+  ClaimBoardRow,
+  ClaimDecision,
+  ClaimSheet,
+  WarrantyClaimStatus,
   ConversationPage,
   MessagesSummary,
   ShopRequestStatus,
@@ -1934,6 +1938,55 @@ export class AdminApi {
   /** OPERATOR: CANCEL, with a note, before the piece is shipped back. */
   cancelCare(id: string, note: string): Promise<CareSheet> {
     return this.post(`/api/admin/care/${encodeURIComponent(id)}/cancel`, { note });
+  }
+
+  // ── The warranty claims (plan ORBES CARE of 2026-10-15, §2(b)) ───────────
+
+  /** Warranties → Claims: the claims under way first, then the others, newest first; one status. */
+  warrantyClaims(q: { status?: WarrantyClaimStatus; page?: number; pageSize?: number } = {}): Promise<Paged<ClaimBoardRow>> {
+    return this.get('/api/admin/warranty-claims', q);
+  }
+
+  warrantyClaim(id: string): Promise<ClaimSheet> {
+    return this.get(`/api/admin/warranty-claims/${encodeURIComponent(id)}`);
+  }
+
+  /**
+   * OPERATOR: open a claim from the client's conversation (`conversationId`), under the ORBES warranty (its kind read from
+   * the piece by the server) or the legal guarantee; `conversationId` null for a legal claim of a buyer without an account.
+   */
+  openWarrantyClaim(b: { conversationId: string | null; productId: string; basis: 'WARRANTY' | 'LEGAL'; note?: string }): Promise<ClaimSheet> {
+    return this.post('/api/admin/warranty-claims', { conversationId: b.conversationId, productId: b.productId, basis: b.basis, ...(b.note?.trim() ? { note: b.note.trim() } : {}) });
+  }
+
+  /** OPERATOR: SEND LABEL, through PRIVATE CARE's upload path with the claim's id (the edge lets a label through there only). */
+  sendClaimLabel(id: string, pdf: Blob, carrierId: string, tracking: string): Promise<ClaimSheet> {
+    return this.request('POST', `/api/admin/care/${encodeURIComponent(id)}/label`, { query: { carrierId, tracking }, upload: { type: 'application/pdf', data: pdf } });
+  }
+
+  /** OPERATOR: RECEIVED, the INSPECTION record opened. */
+  receiveWarrantyClaim(id: string): Promise<ClaimSheet> {
+    return this.post(`/api/admin/warranty-claims/${encodeURIComponent(id)}/receive`);
+  }
+
+  /** OPERATOR: DECIDE (a refusal also from OPEN). */
+  decideWarrantyClaim(id: string, d: ClaimDecision): Promise<ClaimSheet> {
+    return this.post(`/api/admin/warranty-claims/${encodeURIComponent(id)}/decide`, d);
+  }
+
+  /** OPERATOR: MOVE TO THE LEGAL GUARANTEE, a received 2-year claim; answers the LEGAL claim continuing it. */
+  moveWarrantyClaimToLegal(id: string, note: string): Promise<ClaimSheet> {
+    return this.post(`/api/admin/warranty-claims/${encodeURIComponent(id)}/legal`, note.trim() ? { note: note.trim() } : {});
+  }
+
+  /** OPERATOR: SHIP, the new piece or the piece back; a replacement's identity chosen again when needed. */
+  shipWarrantyClaim(id: string, b: { carrierId: string; tracking: string; replacementProductId?: string }): Promise<ClaimSheet> {
+    return this.post(`/api/admin/warranty-claims/${encodeURIComponent(id)}/ship`, b);
+  }
+
+  /** OPERATOR: CLOSE, with a note (OPEN or LABEL_SENT). */
+  cancelWarrantyClaim(id: string, note: string): Promise<ClaimSheet> {
+    return this.post(`/api/admin/warranty-claims/${encodeURIComponent(id)}/cancel`, { note });
   }
 
   // ── The Club: the private salon's requests (P-X08) ───────────────────────

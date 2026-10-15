@@ -22,7 +22,7 @@ import type { DecodeReply } from '../../verify/protocol.js';
 import { Camera, CameraError, DecoderClient, DecoderUnavailableError, PhotoError, readPhoto, ScanSession, workerUrl } from '../../verify/scanner.js';
 import { ApiError } from '../api.js';
 import { formatDate, humanize } from '../format.js';
-import { CLIENT_REGISTRATION, minutesLeft, SALE_CARD_NOTE, pieceLines, preselectedRetailer, RETAILER_STORAGE_KEY, retailerOptions, saleVerdict } from '../model/sale.js';
+import { CLIENT_REGISTRATION, minutesLeft, SALE_CARD_NOTE, pieceLines, preselectedRetailer, RETAILER_STORAGE_KEY, retailerOptions, saleVerdict, saleWarrantyDates } from '../model/sale.js';
 import { can } from '../model/permissions.js';
 import { toneOf } from '../model/tone.js';
 import type { Retailer, SaleLookup } from '../types.js';
@@ -218,7 +218,7 @@ class SaleFlow {
           {
             label: 'Warranty',
             value: statusMark(humanize(p.warranty.status), toneOf('warranty', p.warranty.status)),
-            note: p.warranty.startDate ? `${formatDate(p.warranty.startDate)} – ${formatDate(p.warranty.endDate)}` : undefined,
+            note: p.warranty.startDate ? saleWarrantyDates(p.warranty) : undefined,
           },
           { label: 'Client account', value: p.registered ? 'Registered' : 'Not registered yet' },
         ]),
@@ -243,7 +243,7 @@ class SaleFlow {
     this.stage.querySelector<HTMLElement>('[data-testid=sale-activate]:not([disabled]), [data-testid=sale-again]')?.focus({ preventScroll: true });
   }
 
-  private showDone(r: SaleLookup, result: { warranty: { startDate: string | null; endDate: string | null; retailer: string | null } }): void {
+  private showDone(r: SaleLookup, result: { warranty: { startDate: string | null; endDate: string | null; retailer: string | null; lifetime?: boolean } }): void {
     const w = result.warranty;
     const next = button('Next sale', { kind: 'primary', testId: 'sale-next', onClick: () => void this.startScan() });
     this.show(
@@ -252,7 +252,7 @@ class SaleFlow {
         { class: 'sale__piece sale__piece--done', attrs: { 'aria-label': 'Warranty active' }, data: { testid: 'sale-done' } },
         h('div', { class: 'sale__verdict' }, statusMark('WARRANTY ACTIVE', 'solid')),
         h('p', { class: 'sale__id' }, r.piece?.productId ?? ''),
-        h('p', { class: 'sale__line' }, `${formatDate(w.startDate)} – ${formatDate(w.endDate)}`),
+        h('p', { class: 'sale__line', data: { testid: 'sale-done-dates' } }, saleWarrantyDates(w)),
         h('p', { class: 'sale__line sale__line--soft' }, w.retailer ?? ''),
         bracket(
           h(

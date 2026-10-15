@@ -335,7 +335,7 @@ import {
   ratesValues,
 } from '../../src/web/admin/model/program.js';
 import { checkProgram, DEFAULT_PROGRAM, experienceTier, PROGRAM_LIMITS as SERVER_PROGRAM_LIMITS } from '../../src/server/services/club-program.js';
-import { CLIENT_REGISTRATION, minutesLeft, pieceLines, preselectedRetailer, READY_TO_SELL, retailerLabel, retailerOptions, SALE_CARD_NOTE, saleVerdict } from '../../src/web/admin/model/sale.js';
+import { CLIENT_REGISTRATION, minutesLeft, pieceLines, preselectedRetailer, READY_TO_SELL, retailerLabel, retailerOptions, SALE_CARD_NOTE, saleVerdict, saleWarrantyDates } from '../../src/web/admin/model/sale.js';
 import { SALE_REFUSALS as SERVER_SALE_REFUSALS, SALE_TOKEN_TTL_MS } from '../../src/server/services/sale.js';
 import { SALE_REFUSAL_MESSAGES } from '../../src/server/routes/admin/sale.js';
 import {
@@ -350,6 +350,8 @@ import {
   productActions,
   productAttributes,
   productSheet,
+  warrantyLengthNote,
+  warrantyPeriod,
 } from '../../src/web/admin/model/product.js';
 import { RETURN_CLAIM_TEXT } from '../../src/web/admin/views/order.js';
 import {
@@ -1322,6 +1324,12 @@ describe('sale mode view model (A-08)', () => {
     expect(SALE_CARD_NOTE).toBe('Hand over the certificate card: with the claim code printed on it, they register the piece in their name.');
     expect(SALE_CARD_NOTE).not.toMatch(/prove|theirs|owner|guarantee/i);
   });
+
+  it('reads a lifetime warranty’s dates `15 OCT 2026 – Lifetime` (plan ORBES CARE, answer 12), a 2-year one’s with its end', () => {
+    expect(saleWarrantyDates({ startDate: '2026-10-15', endDate: null, lifetime: true })).toBe('15 OCT 2026 – Lifetime');
+    expect(saleWarrantyDates({ startDate: '2026-10-15', endDate: '2028-10-15' })).toBe('15 OCT 2026 – 15 OCT 2028');
+    expect(saleWarrantyDates({ startDate: '2026-10-15', endDate: '2028-10-15', lifetime: false })).toBe('15 OCT 2026 – 15 OCT 2028');
+  });
 });
 
 describe('tones', () => {
@@ -1514,6 +1522,7 @@ function detail(over: Partial<ProductDetail> = {}): ProductDetail {
       voidedAt: null,
       voidReason: null,
       status: 'ACTIVE',
+      lifetime: false,
       createdAt: '2026-09-04T00:00:00.000Z',
       updatedAt: '2026-09-04T00:00:00.000Z',
     },
@@ -1523,6 +1532,9 @@ function detail(over: Partial<ProductDetail> = {}): ProductDetail {
     lifecycle: { status: 'OWNED', allowed: ['TRANSFERRED', 'SERVICED', 'RESOLD', 'RETIRED', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'LOST', 'STOLEN'], returnTo: null, canReinstate: false },
     // Registered: no new claim code (plan NEXT LOT §3.4).
     claimCode: { renewable: null, refusal: 'REGISTERED', order: null, lastRenewalId: null, cardNeeded: false, renewals: [] },
+    // Plan ORBES CARE: a 2-year piece without a claim.
+    warrantyClaims: { lifetime: false, modelDiscontinued: false, legalUntil: '2028-09-04', freeReplacement: null, items: [] },
+    claimServiceIds: [],
   };
   return { ...base, ...over };
 }
@@ -1700,6 +1712,37 @@ describe('product view model (spec §22)', () => {
     const service = { id: 's1', productId: '00184', status: 'OPEN' as const, location: null, notes: null, openedAt: '2026-05-01T00:00:00.000Z', closedAt: null, performedBy: null };
     const caring = detail({ services: [{ ...service, type: 'YEARLY_CARE' }, { ...service, id: 's2', type: 'REPAIR' }] });
     expect(productActions(caring, 'OPERATOR').completableServices.map((s) => s.id)).toEqual(['s2']);
+    // Plan ORBES CARE: a warranty claim's INSPECTION record is closed by its claim only (the server answers 422 here).
+    const claimed = detail({ services: [{ ...service, id: 's3', type: 'INSPECTION' }, { ...service, id: 's4', type: 'INSPECTION' }], claimServiceIds: ['s3'] });
+    expect(productActions(claimed, 'OPERATOR').completableServices.map((s) => s.id)).toEqual(['s4']);
+  });
+
+  it('reads a lifetime warranty (plan ORBES CARE, answer 12): no end date, no Extend warranty; a 2-year one keeps Extend', () => {
+    const lifetime = detail();
+    lifetime.warranty = { ...lifetime.warranty!, endDate: null, lifetime: true };
+    lifetime.warrantyClaims = { ...lifetime.warrantyClaims, lifetime: true, freeReplacement: { available: true } };
+    expect(productActions(lifetime, 'OPERATOR').canExtendWarranty).toBe(false);
+    expect(productActions(lifetime, 'ADMIN').canExtendWarranty).toBe(false);
+    expect(productActions(detail(), 'OPERATOR').canExtendWarranty).toBe(true);
+    // The header line and the Warranty & service panel's period and note.
+    expect(productSheet(lifetime).find((r) => r.key === 'warranty')!.note).toBe('04 SEP 2026 → Lifetime');
+    expect(warrantyPeriod(lifetime.warranty)).toBe('04 SEP 2026 → Lifetime');
+    expect(warrantyLengthNote(lifetime.warranty)).toBe('Lifetime');
+    expect(warrantyPeriod(detail().warranty!)).toBe('04 SEP 2026 → 04 SEP 2028');
+    expect(warrantyLengthNote(detail().warranty!)).toBe('2 years · defects only');
+    expect(warrantyLengthNote({ durationMonths: 36, lifetime: false })).toBe('36 months · defects only');
+  });
+
+  it('offers Open a legal-guarantee claim to an OPERATOR while no claim of the piece is under way (plan ORBES CARE, answer 11)', () => {
+    expect(productActions(detail(), 'OPERATOR').canOpenLegalClaim).toBe(true);
+    expect(productActions(detail(), 'ADMIN').canOpenLegalClaim).toBe(true);
+    expect(productActions(detail(), 'AUDITOR').canOpenLegalClaim).toBe(false);
+    const claim = { id: 'c1', basis: 'TWO_YEARS' as const, outcome: null, openedAt: '2026-10-01T00:00:00.000Z', decidedAt: null };
+    for (const status of serverSchema.WARRANTY_CLAIM_STATUSES) {
+      const d = detail();
+      d.warrantyClaims = { ...d.warrantyClaims, items: [{ ...claim, status }] };
+      expect(productActions(d, 'OPERATOR').canOpenLegalClaim, status).toBe(status === 'DONE' || status === 'CANCELLED');
+    }
   });
 
   it('lists catalogue attributes without cryptographic material', () => {

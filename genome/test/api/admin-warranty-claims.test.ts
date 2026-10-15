@@ -187,4 +187,34 @@ describe('the warranty claims’ routes (plan ORBES CARE, step 1.7)', () => {
     expect(errorOf(notOwner)).toEqual({ code: 'CLAIM_NOT_REGISTERED', message: 'Only the registered owner of a piece can claim under its warranty.' });
     expect((await operator.post('/api/admin/warranty-claims', { conversationId: null, productId: c.serial, basis: 'WARRANTY' })).statusCode).toBe(409);
   });
+
+  it('the piece page reads its claims: its warranty kind, its free replacement, the legal guarantee’s end and the INSPECTION records only a claim closes (step 3.2)', async () => {
+    const c = await collector();
+    const product = await h.t.db.selectFrom('products').select('id').where('product_id', '=', c.serial).executeTakeFirstOrThrow();
+    // A lifetime piece (its model's choice, copied to its warranty).
+    await h.t.db.updateTable('warranties').set({ lifetime: true, end_date: null }).where('product_id', '=', product.id).execute();
+    type Detail = { warrantyClaims: Record<string, unknown> & { items: { id: string; status: string; basis: string }[] }; claimServiceIds: string[]; warranty: { lifetime: boolean; endDate: string | null } };
+    const page = async () => safeJson(await auditor.get(`/api/admin/products/${c.serial}`)) as Detail;
+    const before = await page();
+    expect(before.warranty).toMatchObject({ lifetime: true, endDate: null });
+    expect(before.warrantyClaims).toEqual({ lifetime: true, modelDiscontinued: false, legalUntil: '2028-03-01', freeReplacement: { available: true }, items: [] });
+    expect(before.claimServiceIds).toEqual([]);
+    const claim = safeJson(await operator.post('/api/admin/warranty-claims', { conversationId: c.conversationId, productId: c.serial, basis: 'WARRANTY' })) as ClaimJson;
+    expect(claim.basis).toBe('LIFETIME');
+    expect((await label(claim.id)).statusCode).toBe(200);
+    const received = safeJson(await operator.post(`/api/admin/warranty-claims/${claim.id}/receive`)) as ClaimJson;
+    const during = await page();
+    expect(during.warrantyClaims.items).toEqual([{ id: claim.id, status: 'RECEIVED', basis: 'LIFETIME', outcome: null, openedAt: expect.any(String), decidedAt: null }]);
+    expect(during.claimServiceIds).toEqual([received.serviceRecordId]);
+    // The free replacement used by a credit of its value: the row names the claim that used it.
+    const value = (safeJson(await operator.get(`/api/admin/warranty-claims/${claim.id}`)) as { decision: { value: unknown } }).decision.value;
+    const decided = await operator.post(`/api/admin/warranty-claims/${claim.id}/decide`, { outcome: 'VALUE_CREDIT', ...(value ? {} : { valueMinor: 45_000 }) });
+    expect(decided.statusCode, decided.body).toBe(200);
+    const after = await page();
+    expect(after.warrantyClaims.freeReplacement).toEqual({ available: false, claimId: claim.id, decidedAt: expect.any(String) });
+    expect(after.warrantyClaims.items.map((x) => [x.id, x.status])).toEqual([[claim.id, 'DONE']]);
+    // A 2-year piece has no free replacement row.
+    const two = await collector();
+    expect((safeJson(await auditor.get(`/api/admin/products/${two.serial}`)) as Detail).warrantyClaims).toMatchObject({ lifetime: false, freeReplacement: null });
+  });
 });

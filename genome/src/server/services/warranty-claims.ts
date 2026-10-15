@@ -214,8 +214,37 @@ export interface ClaimSheet extends ClaimBoardRow {
   freeReplacement: { available: true } | { available: false; claimId: string; decidedAt: Date } | null;
   /** The last day the legal guarantee applies (2 years from delivery, else from the warranty's start); null without either. */
   legalUntil: string | null;
-  /** What a decision may be now, from the basis and the free replacement: its outcomes and refusal reasons. */
-  decision: { outcomes: WarrantyClaimOutcome[]; refusalReasons: WarrantyClaimRefusal[]; value: ClaimAmount | null; creditPercent: number };
+  /**
+   * What a decision may be now, from the basis and the free replacement: its outcomes and refusal reasons; the piece's
+   * value a credit comes from (D11) and the price paid a refund or a price reduction comes from (null: entered by staff).
+   */
+  decision: { outcomes: WarrantyClaimOutcome[]; refusalReasons: WarrantyClaimRefusal[]; value: ClaimAmount | null; paid: ClaimAmount | null; creditPercent: number };
+}
+
+/** A claim of the console's piece page (its Warranty claims table). */
+export interface PieceClaimRow {
+  id: string;
+  status: WarrantyClaimStatus;
+  basis: WarrantyClaimBasis;
+  outcome: WarrantyClaimOutcome | null;
+  openedAt: Date;
+  decidedAt: Date | null;
+}
+
+/** A piece's warranty claims as the console's piece page reads them (GET /api/admin/products/:productId, plan ORBES CARE §2(b)). */
+export interface PieceClaims {
+  /** The piece's warranty kind now: its own row's, else its model's choice (what a claim under the ORBES warranty records). */
+  lifetime: boolean;
+  /** Whether its model is no longer made (models.discontinued_at). */
+  modelDiscontinued: boolean;
+  /** The last day the legal guarantee applies (2 years from delivery, else from the warranty's start); null without either. */
+  legalUntil: string | null;
+  /** A lifetime piece only: the free replacement of its original purchase, still available or the claim that used it. */
+  freeReplacement: { available: true } | { available: false; claimId: string; decidedAt: Date } | null;
+  /** Its claims, newest first. */
+  items: PieceClaimRow[];
+  /** The INSPECTION records its claims opened: each is closed by its claim only, never from the piece page. */
+  serviceIds: string[];
 }
 
 /** A claim in the account's right-of-access export: its facts, never its note nor who handled it. */
@@ -607,6 +636,45 @@ export class WarrantyClaimService {
     );
   }
 
+  /**
+   * A piece's claims for its console page (plan ORBES CARE §2(b) « The piece page »): its warranty kind now, its model
+   * discontinued or not, the legal guarantee's last day, the free replacement read from its original purchase (a lifetime
+   * piece only), its claims newest first and the INSPECTION records they opened. `productUuid` is the piece's row id.
+   */
+  async forPiece(productUuid: string): Promise<PieceClaims> {
+    const db = this.db;
+    const p = await db
+      .selectFrom('products as p')
+      .innerJoin('models as m', 'm.id', 'p.model_id')
+      .leftJoin('warranties as w', 'w.product_id', 'p.id')
+      .select(['m.warranty_lifetime', 'm.discontinued_at', 'w.lifetime'])
+      .where('p.id', '=', productUuid)
+      .executeTakeFirstOrThrow();
+    const lifetime = p.lifetime ?? p.warranty_lifetime;
+    const rows = await db
+      .selectFrom('warranty_claims')
+      .select(['id', 'status', 'basis', 'outcome', 'opened_at', 'decided_at', 'service_record_id'])
+      .where('product_id', '=', productUuid)
+      .orderBy('opened_at', 'desc')
+      .orderBy(sql`continues_claim_id IS NULL`)
+      .orderBy('id')
+      .execute();
+    let freeReplacement: PieceClaims['freeReplacement'] = null;
+    if (lifetime) {
+      const replaced = await db.selectFrom('warranty_claims').select('root_product_id').where('replacement_product_id', '=', productUuid).executeTakeFirst();
+      const used = await freeUsedBy(db, replaced?.root_product_id ?? productUuid);
+      freeReplacement = used ? { available: false, claimId: used.id, decidedAt: used.decided_at } : { available: true };
+    }
+    return {
+      lifetime,
+      modelDiscontinued: p.discontinued_at !== null,
+      legalUntil: await legalUntil(db, productUuid),
+      freeReplacement,
+      items: rows.map((r) => ({ id: r.id, status: r.status, basis: r.basis, outcome: r.outcome, openedAt: r.opened_at, decidedAt: r.decided_at })),
+      serviceIds: rows.flatMap((r) => (r.service_record_id ? [r.service_record_id] : [])),
+    };
+  }
+
   /** A claim as the console reads it (GET /api/admin/warranty-claims/:id). */
   async sheet(id: string): Promise<ClaimSheet> {
     const cid = claimId(id);
@@ -688,6 +756,7 @@ export class WarrantyClaimService {
         outcomes: decisionOutcomes(r.basis, freeAvailable),
         refusalReasons: [...WARRANTY_CLAIM_REFUSALS_BY_BASIS[r.basis]],
         value: await pieceValue(db, { id: r.product_id, model_id: r.model_id }, r.root_product_id),
+        paid: await pricePaid(db, r.product_id, r.root_product_id),
         creditPercent: program.warrantyCreditPercent,
       },
     };

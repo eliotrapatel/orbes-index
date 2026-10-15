@@ -53,7 +53,9 @@ export const ROUTES = [
   { name: 'links', path: '/links' },
   { name: 'linkCollectors', path: '/links/collectors' },
   { name: 'link', path: '/links/:linkId' },
+  /** Warranties: the warranties, and their Claims tab (`?tab=claims`, plan ORBES CARE); a claim's page from its row. */
   { name: 'warranties', path: '/warranties' },
+  { name: 'warrantyClaim', path: '/warranty-claims/:claimId' },
   /** The Yearly care board (BP-19 T6): the requests by step; a request's page from its row, or from a client's Messages row. */
   { name: 'care', path: '/care' },
   { name: 'careRequest', path: '/care/:careId' },

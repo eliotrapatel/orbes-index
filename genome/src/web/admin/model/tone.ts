@@ -98,6 +98,11 @@ const CONVERSATION: Record<string, Tone> = { TO_ANSWER: 'alert', ANSWERED: 'soli
 /** A yearly care (BP-19 T6): to act on while ORBES holds the next step, solid once done. */
 const CARE: Record<string, Tone> = { REQUESTED: 'alert', LABEL_SENT: 'outline', RECEIVED: 'alert', RETURNING: 'outline', DONE: 'solid', CANCELLED: 'muted' };
 /**
+ * A warranty claim (plan ORBES CARE): to act on while ORBES holds the next step (open, received, decided), pending while
+ * the client sends the piece, solid once done, muted once closed.
+ */
+const CLAIM: Record<string, Tone> = { OPEN: 'alert', LABEL_SENT: 'outline', RECEIVED: 'alert', DECIDED: 'alert', DONE: 'solid', CANCELLED: 'muted' };
+/**
  * THE HOUSE'S GUARANTEE (IN-01): waiting for a release or set aside, pending; entered, in force; used, historical in
  * force; expired, historical; revoked, needing attention as a revocation does.
  */
@@ -138,6 +143,7 @@ export type ToneDomain =
   | 'shopRequest'
   | 'conversation'
   | 'care'
+  | 'claim'
   | 'guarantee'
   | 'livePhase'
   | 'liveEntry'
@@ -166,6 +172,7 @@ const TABLES: Record<ToneDomain, Record<string, Tone>> = {
   shopRequest: SHOP_REQUEST,
   conversation: CONVERSATION,
   care: CARE,
+  claim: CLAIM,
   guarantee: GUARANTEE,
   livePhase: LIVE_PHASE,
   liveEntry: LIVE_ENTRY,

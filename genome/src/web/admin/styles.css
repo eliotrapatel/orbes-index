@@ -5372,6 +5372,14 @@ fieldset.cfield--checks > .cfield__label {
   row-gap: 0;
 }
 
+/* ── Warranty claims (plan ORBES CARE) ─────────────────────────────────── */
+
+/* A claim's staff note: its lines as written (a closing note follows the opening one), never past the page's width. */
+.claim__note {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
 /* ── Messages (CS-01) ──────────────────────────────────────────────────── */
 
 /* The priority tag of a PLATINE or PALLADIUM client on the board and a conversation's head. */

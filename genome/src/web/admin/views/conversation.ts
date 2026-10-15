@@ -10,8 +10,10 @@
  * Client Services. A closed conversation reopens by itself when the client writes again.
  */
 import { h } from '../../shared/dom.js';
-import { formatDateTime } from '../format.js';
+import { formatDateTime, isoDay } from '../format.js';
+import { claimablePieces, claimHref, discontinuedText, openBasisOptions, warrantyKindText, warrantyRefusal } from '../model/claims.js';
 import { tierName } from '../model/club.js';
+import { can } from '../model/permissions.js';
 import { ANSWER_HINT, ANSWER_SENT, answeringText, answerProblem, canAnswer, canAssign, CONVERSATION_CLOSED, MESSAGE_LIMITS, priorityTag, STATUS_LABELS } from '../model/messages.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
@@ -48,6 +50,10 @@ export async function conversationView(ctx: ViewContext): Promise<HTMLElement> {
   const actions: HTMLElement[] = [];
   if (canAnswer(role) && c.answeredBy?.id !== ctx.session.admin.id) {
     actions.push(button('Take it', { kind: 'secondary', testId: 'take-conversation', onClick: () => void act(() => ctx.api.takeConversation(c.id)) }));
+  }
+  // Plan ORBES CARE (answers 3, 11): a claim is a normal message; Client Services open its record from the conversation.
+  if (can(role, 'handleClaims')) {
+    actions.push(button('Open a warranty claim', { kind: 'secondary', testId: 'open-claim', onClick: () => void openClaimDialog(ctx, c) }));
   }
   if (canAnswer(role) && c.status !== 'CLOSED') {
     actions.push(
@@ -120,4 +126,74 @@ export async function conversationView(ctx: ViewContext): Promise<HTMLElement> {
     section('Conversation', [head, assign], { id: 'conversation' }),
     section('Thread', [h('ol', { class: 'thread', attrs: { 'data-testid': 'thread' } }, ...c.messages.map((m) => messageItem(m, c.account.email))), answer], { id: 'thread' }),
   );
+}
+
+/**
+ * Open a warranty claim (plan ORBES CARE §2(b)), in two steps. First the piece: one of those registered to the client,
+ * or of its orders (the legal guarantee is the buyer's). Then what it is claimed under: the ORBES warranty (for the
+ * registered owner only, answer 3), named as the server will record it, read from the piece (Lifetime warranty or
+ * 2-year warranty, answer 12: staff never choose it), or the legal guarantee within its 2 years; and a note. The claim's
+ * page follows.
+ */
+async function openClaimDialog(ctx: ViewContext, c: Conversation): Promise<void> {
+  let pieces;
+  try {
+    const sheet = await ctx.api.owner(c.account.id);
+    pieces = claimablePieces(sheet.pieces, sheet.orders);
+  } catch (e) {
+    notifyError(e, 'The client’s pieces could not be loaded.');
+    return;
+  }
+  if (pieces.length === 0) {
+    notify('This client holds no piece and has no order with a piece.');
+    return;
+  }
+  const first = await openDialog({
+    title: 'Open a warranty claim',
+    eyebrow: c.account.email,
+    body: h('p', { class: 'dialog__text' }, 'The piece the client wrote about. Its prepaid label and the claim’s progress show in its ORBES CARE tab.'),
+    fields: [{ name: 'piece', label: 'Piece', kind: 'select', required: true, options: pieces.map((p) => ({ value: p.productId, label: p.label })) }],
+    confirmLabel: 'Continue',
+  });
+  if (!first?.piece) return;
+  const pid = first.piece;
+  let d;
+  try {
+    d = await ctx.api.product(pid);
+  } catch (e) {
+    notifyError(e, 'The piece could not be loaded.');
+    return;
+  }
+  const registered = d.ownership.current?.accountId === c.account.id;
+  const today = isoDay(ctx.now());
+  const options = openBasisOptions(registered, d.warrantyClaims.legalUntil, today);
+  const firstOpen = options.find((o) => !o.disabled);
+  let opened: string | null = null;
+  const ok = await openDialog({
+    title: 'Open a warranty claim',
+    eyebrow: `${pid} · ${c.account.email}`,
+    fields: [
+      { name: 'basis', label: 'Under', kind: 'select', required: true, options, value: firstOpen?.value ?? 'WARRANTY' },
+      { name: 'note', label: 'Note', kind: 'textarea', maxlength: 500, hint: 'What the client wrote about, by phone or in Messages. Staff only.' },
+    ],
+    live: (v) => {
+      const lines: string[] = [];
+      if (v.basis === 'LEGAL') lines.push('Legal guarantee: replacement, repair, price reduction or refund; never a credit.');
+      else {
+        const refusal = warrantyRefusal(registered);
+        lines.push(refusal ?? warrantyKindText(d.warrantyClaims.lifetime));
+      }
+      const gone = discontinuedText(d.warrantyClaims);
+      if (gone) lines.push(gone);
+      return lines.map((t) => h('p', { class: 'dialog__text', data: { testid: 'claim-open-text' } }, t));
+    },
+    validate: (v) => (options.find((o) => o.value === v.basis)?.disabled ? (v.basis === 'WARRANTY' ? warrantyRefusal(registered) : 'The legal guarantee does not apply: more than 2 years after delivery.') : null),
+    confirmLabel: 'Open the claim',
+    submit: async (v) => {
+      opened = (await ctx.api.openWarrantyClaim({ conversationId: c.id, productId: pid, basis: v.basis === 'LEGAL' ? 'LEGAL' : 'WARRANTY', note: v.note ?? '' })).id;
+    },
+  });
+  if (!ok || !opened) return;
+  notify('Warranty claim opened.');
+  ctx.navigate(claimHref(opened));
 }

@@ -13,7 +13,10 @@
  *
  * The detail view re-verifies every stored code live (payload fields, hash,
  * key trust, Ed25519 over the canonical signing message), so a row tampered
- * with in the database shows up as invalid in the console.
+ * with in the database shows up as invalid in the console. It also carries the
+ * piece's warranty claims (plan ORBES CARE §2(b): its warranty kind, its free
+ * replacement, its claims and `claimServiceIds`, the INSPECTION records only a
+ * claim closes).
  */
 import { createHash } from 'node:crypto';
 import type { FastifyPluginAsync } from 'fastify';
@@ -125,7 +128,7 @@ export async function liveCodeCheck(ctx: AppContext, row: CodeRow, packedIdentit
 
 export const adminProductRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
   const { db } = ctx;
-  const { issuance, lifecycle, warranty, ownership, anomaly, claimRenewals } = ctx.services;
+  const { issuance, lifecycle, warranty, ownership, anomaly, claimRenewals, warrantyClaims } = ctx.services;
 
   /** The current owner, every ownership period and transfer; owners' emails masked for an AUDITOR (A-06). */
   const ownershipJson = async (productId: string, inClear: boolean) => {
@@ -194,6 +197,8 @@ export const adminProductRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
       .where('product_id', '=', product.id)
       .executeTakeFirstOrThrow();
     const genomes = genomeRows.map((g) => genomeJson(toGenomeRecord(g)));
+    // Plan ORBES CARE §2(b): the piece's warranty claims, its free replacement, and the INSPECTION records only a claim closes.
+    const { serviceIds: claimServiceIds, ...claims } = await warrantyClaims.forPiece(product.id);
 
     return {
       product: {
@@ -225,6 +230,8 @@ export const adminProductRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
       lifecycle: await lifecycle.snapshot(product.id),
       // NEW CLAIM CODE (plan NEXT LOT §3.4): what it may do for this piece, and its new claim codes; never a code.
       claimCode: await claimRenewals.situation(product.id),
+      warrantyClaims: claims,
+      claimServiceIds,
     };
   });
 

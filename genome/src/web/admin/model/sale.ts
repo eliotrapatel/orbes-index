@@ -5,7 +5,7 @@
  * the server stays the authority (a token only when the piece can be sold,
  * 409 RETAILER_INACTIVE, 410 SALE_TOKEN_EXPIRED…).
  */
-import { humanize } from '../format.js';
+import { formatDate, humanize } from '../format.js';
 import type { Retailer, SaleLookup } from '../types.js';
 import { toneOf, type Tone } from './tone.js';
 
@@ -80,6 +80,14 @@ export function pieceLines(p: NonNullable<SaleLookup['piece']>): [string, string
   const first = [p.model, p.type, p.variant].filter((v): v is string => typeof v === 'string' && v.trim() !== '').map(humanize);
   const second = [p.material, p.category.name, p.collection].filter((v): v is string => typeof v === 'string' && v.trim() !== '').map(humanize);
   return [first.join(' · '), second.join(' · ')];
+}
+
+/**
+ * A warranty's dates as the sale mode reads them: `15 OCT 2026 – 15 OCT 2028`, or `15 OCT 2026 – Lifetime` for a lifetime
+ * warranty, which has no end date (plan ORBES CARE, answer 12).
+ */
+export function saleWarrantyDates(w: { startDate: string | null; endDate: string | null; lifetime?: boolean }): string {
+  return `${formatDate(w.startDate)} – ${w.lifetime ? 'Lifetime' : formatDate(w.endDate)}`;
 }
 
 /** Whole minutes left on a sale token, at least 0 (shown under ACTIVATE WARRANTY). */

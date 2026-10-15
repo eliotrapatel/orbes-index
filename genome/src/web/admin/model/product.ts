@@ -115,7 +115,7 @@ export function productSheet(d: ProductDetail): SheetRow[] {
     : ws === 'VOID'
       ? `Voided ${formatDate(w.voidedAt)}${w.voidReason ? ` · ${w.voidReason}` : ''}`
       : w.startDate
-        ? `${formatDate(w.startDate)} → ${formatDate(w.endDate)}`
+        ? warrantyPeriod(w)
         : 'Not activated';
   rows.push({ key: 'warranty', label: 'Warranty', value: humanize(ws), tone: toneOf('warranty', ws), note: wNote });
 
@@ -133,6 +133,20 @@ export function productSheet(d: ProductDetail): SheetRow[] {
   return rows;
 }
 
+/** A started warranty's period: `14 OCT 2026 → 14 OCT 2028`, or `14 OCT 2026 → Lifetime` (plan ORBES CARE, answer 12). */
+export function warrantyPeriod(w: Pick<NonNullable<ProductDetail['warranty']>, 'startDate' | 'endDate' | 'lifetime'>): string {
+  return `${formatDate(w.startDate)} → ${w.lifetime ? 'Lifetime' : formatDate(w.endDate)}`;
+}
+
+/**
+ * The Warranty & service panel's note under the period: `Lifetime`, or `2 years · defects only` (answer 10: the 2-year
+ * warranty covers manufacturing defects only); a 2-year warranty extended by staff names its months.
+ */
+export function warrantyLengthNote(w: Pick<NonNullable<ProductDetail['warranty']>, 'durationMonths' | 'lifetime'>): string {
+  if (w.lifetime) return 'Lifetime';
+  return `${w.durationMonths === 24 ? '2 years' : `${w.durationMonths} months`} · defects only`;
+}
+
 /** Statuses from which a product can no longer receive a printed code (mirrors issuance NOT_PRINTABLE). */
 const NOT_PRINTABLE: ReadonlySet<ProductStatus> = new Set(['RETIRED', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'LOST', 'STOLEN']);
 const WARRANTY_ACTIVATABLE: ReadonlySet<ProductStatus> = new Set(['ISSUED', 'ACTIVATED', 'REGISTERED', 'OWNED', 'TRANSFERRED', 'SERVICED', 'RESOLD']);
@@ -148,11 +162,16 @@ export interface ProductActions {
   canDownload: boolean;
   canActivateWarranty: boolean;
   canVoidWarranty: boolean;
-  /** Add months to a started, non-void warranty (POST …/warranty/extend). */
+  /** Add months to a started, non-void 2-year warranty (POST …/warranty/extend); a lifetime warranty has no end to move. */
   canExtendWarranty: boolean;
   canOpenService: boolean;
-  /** Open service records the admin may complete (never a YEARLY_CARE one). */
+  /** Open service records the admin may complete (never a YEARLY_CARE one, never a warranty claim's INSPECTION). */
   completableServices: ServiceRecord[];
+  /**
+   * Open a legal-guarantee claim (plan ORBES CARE §2(b)): for a buyer without an ORBES account, the receipt's facts in
+   * the note; an OPERATOR's (answer 11), while no claim of the piece is under way.
+   */
+  canOpenLegalClaim: boolean;
   canConfirmOwnership: boolean;
   /** NEW CLAIM CODE (plan NEXT LOT §3.4): OPERATOR and above, and the server says the piece is renewable. */
   canRenewClaim: boolean;
@@ -173,10 +192,12 @@ export function productActions(d: ProductDetail, role: AdminRole): ProductAction
     // Not during a pre-sale service (ISSUED → SERVICED, its return target ISSUED): the server refuses it until the service closes.
     canActivateWarranty: can(role, 'warranty') && WARRANTY_ACTIVATABLE.has(status) && !(status === 'SERVICED' && d.lifecycle.returnTo === 'ISSUED') && !w?.startDate && !w?.voidedAt,
     canVoidWarranty: can(role, 'warranty') && !w?.voidedAt,
-    canExtendWarranty: can(role, 'warranty') && !!w?.startDate && !w?.voidedAt,
+    canExtendWarranty: can(role, 'warranty') && !!w?.startDate && !w?.voidedAt && !w?.lifetime,
     canOpenService: can(role, 'service') && d.lifecycle.allowed.includes('SERVICED'),
-    // Not a YEARLY_CARE record: the Yearly care board closes it with its request (the server refuses it here).
-    completableServices: can(role, 'service') ? d.services.filter((s) => s.status === 'OPEN' && s.type !== 'YEARLY_CARE') : [],
+    // Not a YEARLY_CARE record: the Yearly care board closes it with its request (the server refuses it here). Nor a
+    // warranty claim's INSPECTION record: its claim closes it (plan ORBES CARE; the server refuses it too).
+    completableServices: can(role, 'service') ? d.services.filter((s) => s.status === 'OPEN' && s.type !== 'YEARLY_CARE' && !d.claimServiceIds.includes(s.id)) : [],
+    canOpenLegalClaim: can(role, 'handleClaims') && !d.warrantyClaims.items.some((c) => c.status !== 'DONE' && c.status !== 'CANCELLED'),
     canConfirmOwnership: can(role, 'confirmOwnership') && owner !== null && !owner.verified,
     // Not for a piece registered, issued without a claim code, RESERVED, not printable, with no ACTIVE code, or sold
     // outside an order (the server's `claimCode.refusal`).
