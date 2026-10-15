@@ -939,6 +939,54 @@ export const UI_STATES: readonly UiState[] = [
       ready: '.view--piece .piece__yearly-care:not([hidden])',
     }),
   ),
+  // ORBES CARE (plan ORBES CARE, step 5.1), on its own stage (orbes-care, test/support/nocturne-demo.ts): a piece's
+  // ORBES CARE tab for each warranty and each moment of a claim, one collector each; a lifetime piece's certificate; a
+  // warranty credit under IN USE.
+  ...(
+    [
+      ['pieces-orbes-care', 'careLifetime', 'platine', 'A PLATINE piece: ORBES CARE, WARRANTY ACTIVE · LIFETIME, PRIVATE CARE, CARING FOR THIS PIECE, the contact', false],
+      ['pieces-orbes-care-two-years', 'twoYears', 'leather', 'A piece of a 2-year model: ORBES CARE, WARRANTY ACTIVE until its date, manufacturing defects only', false],
+      ['pieces-orbes-care-below', 'yours', you, 'A TITANE piece: ORBES CARE, WARRANTY ACTIVE · LIFETIME, PRIVATE CARE opens from PLATINE', false],
+      ['pieces-claim-label', 'claimLabel', 'claimant1', 'A lifetime piece: WARRANTY CLAIM, YOUR PREPAID LABEL, DOWNLOAD LABEL', true],
+      ['pieces-claim-replaced', 'claimReplaced', 'claimant2', 'A lifetime piece: WARRANTY CLAIM, REPLACED, the new piece on its way, TRACK THE SHIPMENT', true],
+      ['pieces-claim-part-credit', 'claimPartCredit', 'claimant3', 'A replacement piece: WARRANTY CLAIM, a 30 % credit after the free replacement, the piece returned', true],
+      ['pieces-claim-refused', 'claimRefused', 'claimant4', 'A lifetime piece: WARRANTY CLAIM, REFUSED after inspection (a scratch), the piece returned', true],
+      ['pieces-claim-repaired', 'claimRepaired', 'leather', 'A piece of a 2-year model: WARRANTY CLAIM, REPAIRED, the piece returned', true],
+    ] as const
+  ).map(
+    ([id, role, who, title, claimed]): UiState => ({
+      id,
+      title,
+      refs: ['ORBES CARE §2(a)'],
+      variant: 'orbes-care',
+      as: who,
+      path: piece(role),
+      act: async (run) => {
+        await tab(run, 'ORBES CARE').click();
+        await run.page.locator(claimed ? '.view--piece .piece__warranty-claim:not([hidden])' : '.view--piece .piece__yearly-care:not([hidden])').waitFor();
+      },
+      ready: claimed ? '.view--piece .piece__warranty-claim:not([hidden])' : '.view--piece .piece__yearly-care:not([hidden])',
+    }),
+  ),
+  {
+    id: 'certificate-lifetime',
+    title: 'The shared ownership certificate of a lifetime piece: WARRANTY ACTIVE · LIFETIME, no UNTIL',
+    refs: ['ORBES CARE §2(a)'],
+    variant: 'orbes-care',
+    path: (d) => `/verify/c#${d.links.certificateLifetime}`,
+    ready: '.view--certificate .genome-svg',
+  },
+  {
+    id: 'tier-warranty-credit',
+    title: 'The account sheet of a collector given a 30 % credit: YOUR TIER, IN USE, WARRANTY CREDIT and its note',
+    refs: ['ORBES CARE §2(a)'],
+    variant: 'orbes-care',
+    as: 'claimant3',
+    path: at('/verify'),
+    act: (run) => openAccountSheet(run),
+    ready: '.n-account:not([hidden]) .n-account__in-use',
+    viewport: true,
+  },
   {
     id: 'piece-care-request',
     title: 'A PLATINE piece: REQUEST PRIVATE CARE, its own form: RETURN ADDRESS, NAME, ADDRESS, CONFIRM REQUEST · CANCEL',

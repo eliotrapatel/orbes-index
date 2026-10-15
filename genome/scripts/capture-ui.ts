@@ -987,7 +987,6 @@ async function captureLive(stage: Stage, shots: Shots): Promise<void> {
       addons: [
         { label: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000 },
         { label: 'GIFT BOX', priceMinor: 9_000 },
-        { label: 'ORBES CARE', line: 'Two years of care in the atelier', priceMinor: 12_000 },
       ],
     });
     await ctx.services.media.setLiveSilhouette(planned.id, { mime: 'image/webp', bytes: silhouette }, f.admin);
@@ -1022,7 +1021,6 @@ async function captureLive(stage: Stage, shots: Shots): Promise<void> {
       addons: [
         { label: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000 },
         { label: 'GIFT BOX', priceMinor: 9_000 },
-        { label: 'ORBES CARE', line: 'Two years of care in the atelier', priceMinor: 12_000 },
       ],
     });
     const [s50, s52, s54] = r.sizes;
@@ -1118,7 +1116,7 @@ async function captureLive(stage: Stage, shots: Shots): Promise<void> {
     await untilText(page, '.live__secured > .live__overline', 'SECURED');
     await sleep(2_600);
     await page.getByRole('button', { name: /ENGRAVING/ }).click();
-    await page.getByRole('button', { name: /ORBES CARE/ }).click();
+    await page.getByRole('button', { name: /GIFT BOX/ }).click();
     await page.mouse.move(0, 0);
     await settle(page, 600);
     await shots.full(page, 'live-11-secured');

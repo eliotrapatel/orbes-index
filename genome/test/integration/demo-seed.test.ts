@@ -16,6 +16,7 @@ import {
   DEMO_FIRST_REGISTRATION_PRODUCT_ID,
   DEMO_GUARANTEE,
   DEMO_MIN_NOW,
+  DEMO_MODELS,
   DEMO_TIMELINE_START,
   DemoSeedError,
   demoSeedStatus,
@@ -166,10 +167,32 @@ describe('demo seed', () => {
     const transfers = await ctx.db.selectFrom('ownership_transfers').select(['status']).execute();
     expect(transfers.filter((x) => x.status === 'ACCEPTED').length).toBeGreaterThanOrEqual(3);
     expect(transfers.filter((x) => x.status === 'PENDING')).toHaveLength(1);
-    expect(await ctx.services.warranty.status('O25-F-00009', NOW)).toBe('EXPIRED');
+    // Plan ORBES CARE, step 5.1: every category's warranty is 2 years (the terms', answer 12), so the fragrance sold in
+    // May 2025 is still covered (it was the demo's EXPIRED warranty at 12 months); a 2-year piece ends 24 months after
+    // its start; the jewelry and the accessories are Lifetime.
+    expect((await ctx.categories.list()).map((c) => c.warrantyMonths)).toEqual(DEMO_CATEGORIES.map(() => 24));
+    expect(await ctx.services.warranty.status('O25-F-00009', NOW)).toBe('ACTIVE');
     expect(await ctx.services.warranty.status('O25-L-00008', NOW)).toBe('VOID');
     expect(await ctx.services.warranty.status('O26-W-00003', NOW)).toBe('ACTIVE');
     expect(await ctx.services.warranty.status('O26-J-00186', NOW)).toBe('NOT_STARTED');
+    const kinds = await ctx.db
+      .selectFrom('models')
+      .select(['sku_prefix', 'warranty_lifetime'])
+      .orderBy('sku_prefix')
+      .execute();
+    expect(Object.fromEntries(kinds.map((m) => [m.sku_prefix, m.warranty_lifetime]))).toEqual(Object.fromEntries(DEMO_MODELS.map((m) => [m.skuPrefix, ['J', 'A'].includes(m.category)])));
+    const ends = await ctx.db
+      .selectFrom('warranties as w')
+      .innerJoin('products as p', 'p.id', 'w.product_id')
+      .select(['p.product_id', 'w.lifetime', 'w.start_date', 'w.end_date'])
+      .where('p.product_id', 'in', ['O26-W-00003', 'O25-F-00009', 'O26-J-00192'])
+      .orderBy('p.product_id')
+      .execute();
+    expect(ends.map((e) => ({ id: e.product_id, lifetime: e.lifetime, start: String(e.start_date), end: e.end_date === null ? null : String(e.end_date) }))).toEqual([
+      { id: 'O25-F-00009', lifetime: false, start: '2025-05-10', end: '2027-05-10' },
+      { id: 'O26-J-00192', lifetime: true, start: '2026-02-10', end: null },
+      { id: 'O26-W-00003', lifetime: false, start: '2026-02-14', end: '2028-02-14' },
+    ]);
 
     expect(result.scans).toBeGreaterThan(40);
     const recent = await ctx.db

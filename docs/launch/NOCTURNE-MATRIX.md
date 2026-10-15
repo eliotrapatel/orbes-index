@@ -39,7 +39,11 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
   `orders-delivery` (an engraving price in euros, a saved default address put on your reserved LIVE order with its
   add-on's engraving words, a paid order of MONOLITHE in blue with a priced engraving, packing begun), `orders-case` (a
   delivered order of MONOLITHE in blue whose return you asked, its location's address the return address) and
-  `account-addresses` (two saved addresses, one the default).
+  `account-addresses` (two saved addresses, one the default). Since plan ORBES CARE (step 5.1), the demo's models are
+  jewelry, Lifetime (every started warranty reads ACTIVE · LIFETIME, no UNTIL), and `orbes-care` tells the full story,
+  then ORBES CARE: ATLAS, a 2-year model of leather goods, a piece of each warranty, a PLATINE piece's lifetime warranty,
+  the certificate of your piece, and one warranty claim per collector (its label sent; replaced; a 30 % credit after the
+  free replacement; refused after inspection; a 2-year piece repaired).
 - **Where the demo differs from the boards** (live data excepted: times, ids, a countdown's digits, the GENOME's glyphs):
   - Since N1, MONOLITHE in steel is a model and gold and blue its variants (ADD A VARIANT; the dots Steel · Gold · Blue):
     the lookbook's list gives them as one entry, which THE COLLECTION shows as one model with its dots since N6.
@@ -223,6 +227,7 @@ ORBES header alone (no rail, no account button, no SCAN ring), as C12 and C17 dr
 | `account-addresses` | (plan NEXT LOT §3.6.B; step 6.10) YOUR ADDRESSES: ‹ YOUR ACCOUNT, its lead, Paris (DEFAULT, first) and London with EDIT · MAKE DEFAULT · REMOVE, ADD AN ADDRESS | YOUR ADDRESSES in the sheet | NEXT LOT §3.6.B |
 | `account-sheet-password` | CHANGE PASSWORD, its sentence, CURRENT PASSWORD, NEW PASSWORD, *At least 12 characters.*, CHANGE PASSWORD, CANCEL | CHANGE PASSWORD in the sheet | C2, C39 (4) |
 | `account-sheet-stress` | PALLADIUM, six pieces: five dots, its benefits, *PALLADIUM is the highest tier of the club.* | the stress demo | same pieces |
+| `tier-warranty-credit` | (plan ORBES CARE, step 5.1) YOUR TIER of a TITANE account given a 30 % credit: IN USE, WARRANTY CREDIT *€ 1 170 · UNTIL 29 SEP 2027*, the credit's note | the `orbes-care` demo (s.renard) | ORBES CARE §2(a) |
 
 ## NOW (today: the landing, `/verify`)
 
@@ -390,7 +395,7 @@ THE RELEASES and THE CIRCLE the rail's. The content test looks for what the one 
 | `piece-boutique` | (N5) O26-J-00184 in steel, sold at a boutique: no WHERE IT COMES FROM | SEE THE PIECE | C4 |
 | `piece-stolen`, `piece-transfer`, `piece-in-service` | (N5) the owner's pieces reported stolen (its sentence, the contact), with a transfer pending (TRANSFER PENDING UNTIL *date*, its sentence, CANCEL TRANSFER), in service | the owner (m.okafor) | C35 (7) |
 | `pieces-orders-stress`, `piece-stress` | (N5) four orders (€ 125 400, USD, a 27-character tracking number); a piece of the 24-character model without a photograph, its 14-character Size | the stress demo | same pieces |
-| `pieces-warranty` | (plan ORBES CARE, step 2.2) ORBES CARE: WARRANTY, STATUS, FROM, UNTIL and the sentence of its kind (on O26-J-00184's page) | ORBES CARE | C35 (1) |
+| `pieces-warranty` | (plan ORBES CARE, step 2.2) ORBES CARE: WARRANTY, STATUS, FROM, UNTIL and the sentence of its kind (on O26-J-00184's page; since step 5.1 a jewelry piece, Lifetime: ACTIVE · LIFETIME, FROM, no UNTIL) | ORBES CARE | C35 (1) |
 | `pieces-service` | SERVICE HISTORY, *No service has been recorded for this piece.* (or each service: *status since date · place*) | SERVICE | C35 (2) |
 | `pieces-care` | (plan ORBES CARE, step 2.2) ORBES CARE: CARING FOR THIS PIECE, the care; *A question about this piece, its warranty or its care: ORBES Client Services answers in MESSAGES.*, WRITE TO ORBES CLIENT SERVICES; for a TITANE account *PRIVATE CARE opens from PLATINE: …*. No subscription (answer 1) | ORBES CARE | C35 (3) |
 | `pieces-certificate-choice` | 7 DAYS · 30 DAYS · 90 DAYS, its sentence, CREATE LINK, CANCEL | CREATE CERTIFICATE | C35 (4) |
@@ -410,6 +415,14 @@ THE RELEASES and THE CIRCLE the rail's. The content test looks for what the one 
 | `pieces-stress` | six pieces (a 14-character free-text field), four orders (€ 125 400, $ 6 400, a 27-character tracking number) | the stress demo | same pieces |
 | `pieces-draws` | r.castel's MY PIECES: YOUR ORDERS with an order PAID (*Your payment is received. ORBES is preparing your piece for shipping.*); YOUR RELEASES with an entry in each state, each *state · status* and its sentence: ENTRIES OPEN · WITHDRAWN, ENTRIES CLOSED · ENTERED, CANCELLED · ENTERED, DRAWN · PLACE HELD (*held until …*, the contact), DRAWN · WAITING LIST (*rank n*), DRAWN · CONCLUDED, DRAWN · LAPSED | the `draws` demo | C24, C31 (2) |
 | `pieces-certificate-withdrawn` | *The link has been withdrawn: it no longer leads to the certificate.*, the open links left | WITHDRAW on a certificate link | C35 (4) |
+| `pieces-orbes-care` | (plan ORBES CARE, step 5.1) a PLATINE piece's ORBES CARE: WARRANTY ACTIVE · LIFETIME, FROM, *This piece is covered for life by the ORBES warranty: …*; PRIVATE CARE, REQUEST PRIVATE CARE; CARING FOR THIS PIECE; the contact, WRITE TO ORBES CLIENT SERVICES | the `orbes-care` demo, a.lindqvist's third piece | ORBES CARE §2(a) |
+| `pieces-orbes-care-two-years` | (step 5.1) a piece of ATLAS, a 2-year model of leather goods: WARRANTY ACTIVE, FROM, UNTIL, *… against manufacturing defects until … : ORBES repairs or replaces it.*; *PRIVATE CARE opens from PLATINE: …* | the `orbes-care` demo, r.duval | ORBES CARE §2(a) |
+| `pieces-orbes-care-below` | (step 5.1) your O26-J-00184, Lifetime, for a TITANE account: WARRANTY ACTIVE · LIFETIME; *PRIVATE CARE opens from PLATINE: …* | the `orbes-care` demo | ORBES CARE §2(a) |
+| `pieces-claim-label` | (step 5.1) WARRANTY CLAIM: YOUR PREPAID LABEL, its sentence, DOWNLOAD LABEL, CARRIER, TRACKING NUMBER; PRIVATE CARE unavailable meanwhile | a lifetime claim, its label sent (c.dubois) | ORBES CARE §2(a) item 2 |
+| `pieces-claim-replaced` | (step 5.1) WARRANTY CLAIM: REPLACED, *Your new piece is on its way. Register it with the certificate card in its box.*, CARRIER, TRACKING NUMBER, TRACK THE SHIPMENT; the piece revoked, no tier | a lifetime claim replaced and shipped (p.girard) | ORBES CARE §2(a) item 2 |
+| `pieces-claim-part-credit` | (step 5.1) on the replacement piece: WARRANTY CLAIM, *A credit of € 1 170 toward a new piece is in your account until …*, *Your piece is on its way back.*, the shipment | a second lifetime claim after the free replacement (s.renard) | ORBES CARE §2(a) item 2 |
+| `pieces-claim-refused` | (step 5.1) WARRANTY CLAIM: *Not covered by the warranty: it is scratched.*, *Your piece is on its way back.*, the shipment | a lifetime claim refused after inspection (n.petit) | ORBES CARE §2(a) item 2 |
+| `pieces-claim-repaired` | (step 5.1) on ATLAS: WARRANTY CLAIM, *Your piece has been repaired under the ORBES warranty. It is on its way back.*, the shipment | a 2-year claim repaired (r.duval) | ORBES CARE §2(a) item 2 |
 | *(not reached)* | SHIPPED in MY PIECES of the `full` demo (seen in `pieces-stress`); the password changed / recovered notices; a declaration confirmed (*now reported lost …*); a certificate link that could not be read; *A loss or a theft of this piece cannot be reported here* (a revoked piece) | each needs a failure the stage does not make, or a password changed (it ends every session of the demo's account) | C35, C39 |
 
 ## THE COLLECTION and a model (`/verify/lookbook`, `/verify/lookbook/<slug>`)
@@ -571,6 +584,7 @@ wordmark to the header; on an invitation's card, while answers are taken, YOU AN
 | State | What it shows | Reference |
 |---|---|---|
 | `certificate` | ORBES, OWNERSHIP CERTIFICATE, VALID (or NO LONGER VALID, NOT FOUND), its lead, the GENOME plate, the product lines, THE RECORD (OWNERSHIP, SINCE, WARRANTY, LOSS OR THEFT), THIS CERTIFICATE (CHECKED, ISSUED, VALID UNTIL), its note, DOWNLOAD PDF, SCAN ORBES CODE, VERIFY ONLY AT THEORBES.COM/VERIFY | choice 3, verify-13 |
+| `certificate-lifetime` | (plan ORBES CARE, step 5.1) the same for O26-J-00184, Lifetime: THE RECORD's WARRANTY ACTIVE · LIFETIME, FROM, no UNTIL | ORBES CARE §2(a), the `orbes-care` demo |
 | `board` | the boutique board: ORBES, LIVE, the door, LIVE RELEASE · *phase*, *name*, *quantity*, OPENS IN, *left OF quantity LEFT*, *day · time* PARIS, FULL SCREEN (THIS BOARD IS NOT AVAILABLE without its secret) | scope guard, live-07 |
 
 ## The legal pages (`/legal`, `/legal/privacy`, `/legal/terms`, `/legal/notice`, `/legal/faq`)

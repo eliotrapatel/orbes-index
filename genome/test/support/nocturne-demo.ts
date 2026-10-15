@@ -77,6 +77,11 @@
  *   care-used         the full story, THE PROGRAM's PLATINE PRIVATE CARE then set to 1 piece a year (plan ORBES CARE,
  *                     step 1.4: PLATINE's default is every piece), so the PLATINE account's second piece reads the
  *                     year's PRIVATE CARE used for another piece (piece-care-used)
+ *   orbes-care        the full story, then ORBES CARE (plan ORBES CARE, step 5.1): a 2-year model of leather goods beside
+ *                     the jewelry (Lifetime), a piece of each with its warranty, a PLATINE piece's lifetime warranty and
+ *                     its certificate, and one warranty claim per collector at each moment its ORBES CARE tab shows: its
+ *                     prepaid label sent; replaced, the new piece shipped; after the free replacement, a 30 % credit (IN
+ *                     USE, WARRANTY CREDIT); refused after inspection, the piece returned; a 2-year piece repaired
  *
  * Ids written by the server (scan references, order and entry references, genomes, invoice numbers) are the server's;
  * the parity tool's comparisons treat them as live data.
@@ -93,6 +98,7 @@ import { deriveDropSeedKey } from '../../src/server/services/drops.js';
 import { deriveLiveTurnKey } from '../../src/server/services/live.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import { SYSTEM_ACTOR, type Actor, type ManualClock } from '../../src/server/types.js';
+import type { DecideClaimInput } from '../../src/server/services/warranty-claims.js';
 import { packAndShip, stockPieces } from './fulfil.js';
 import { createLiveRelease, holdPieces, type LiveFixture, type LiveReleaseOptions } from './live.js';
 import { poolDraw, withDrawSizes } from './draws.js';
@@ -120,7 +126,8 @@ export type DemoVariant =
   | 'account-profile'
   | 'wishes'
   | 'birthday-credit'
-  | 'care-used';
+  | 'care-used'
+  | 'orbes-care';
 
 export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'full',
@@ -146,6 +153,7 @@ export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'wishes',
   'birthday-credit',
   'care-used',
+  'orbes-care',
 ]);
 
 /** NOW: Monday 5 October 2026, 18:49 in Paris (16:49 UTC), the boards' afternoon. Every clock of the stage is fixed here. */
@@ -248,7 +256,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
   // claim-waiting stage (plan NEXT LOT §3.4) tells the full story, its state writing the rest.
   // The draw-sizes stage (plan NEXT LOT §3.6.F) tells the full story, then adds a draw in sizes, open. The stages of the
   // collector's side of an order (plan NEXT LOT §3.6) tell the full story, their state writing the rest.
-  const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes', 'birthday-credit', 'care-used'] as const;
+  const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes', 'birthday-credit', 'care-used', 'orbes-care'] as const;
   const story = ((OWN_STAGES as readonly DemoVariant[]).includes(variant) ? 'full' : variant) as Exclude<DemoVariant, (typeof OWN_STAGES)[number]>;
   if (story === 'empty') await seedEmpty(w);
   else if (story === 'stress') await seedStress(w);
@@ -267,6 +275,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
     if (variant === 'pairs') await seedPairs(w);
     if (variant === 'draw-sizes') await seedDrawSizes(w);
     if (variant === 'care-used') await seedCareUsed(w);
+    if (variant === 'orbes-care') await seedOrbesCare(w);
   }
   clock.set(NOCTURNE_NOW);
   // Every account's session opened now: a capture signs in with its cookie.
@@ -300,11 +309,11 @@ async function seedCatalogue(w: World): Promise<void> {
   const care = 'Store this piece on its own, away from humidity, perfume and cosmetics. Wipe it with a soft, dry cloth after wearing. ORBES Client Services offers inspection, cleaning and polishing.';
   const story = 'Two rails of metal held apart, then closed by one angled link: a form built like architecture, cut to lie flat on the wrist.';
   // N1: MONOLITHE in steel, then its variants added from it (ADD A VARIANT, which gives steel its own dot), in the
-  // order of the dots: Steel · Gold · Blue. Plan ORBES CARE, step 1.3: the demo's models are created at the 2-year
-  // warranty (`warrantyLifetime: false`, its variants copying it), so the boards keep today's warranties until step 5.1.
+  // order of the dots: Steel · Gold · Blue. Plan ORBES CARE, step 5.1: the demo's models are jewelry, created at the
+  // Lifetime warranty (the default of New model, answer 12), its variants copying it.
   w.clock.set(at('2026-08-31T08:00:00Z'));
   const steel = await ctx.services.catalog.createModel(
-    { categoryCode: 'J', collectionId: w.collection, name: 'MONOLITHE', type: 'BRACELET', skuPrefix: 'MNL-ST', defaultMaterial: '925 STERLING SILVER', careInstructions: care, warrantyLifetime: false },
+    { categoryCode: 'J', collectionId: w.collection, name: 'MONOLITHE', type: 'BRACELET', skuPrefix: 'MNL-ST', defaultMaterial: '925 STERLING SILVER', careInstructions: care },
     admin,
   );
   w.models.steel = steel.id;
@@ -315,7 +324,7 @@ async function seedCatalogue(w: World): Promise<void> {
   w.models.blue = (await ctx.services.catalog.createVariant(steel.id, { ...NOCTURNE_VARIANTS.blue, skuPrefix: 'MNL-BL' }, admin)).id;
   const make = async (key: string, material: string, opts: { slug: string; lookbook: 'PUBLIC' | 'RESERVED'; photo: 'steel' | 'blue' | 'gold'; priceLabel?: string; create?: { name: string; prefix: string } }) => {
     const id = opts.create
-      ? (await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: opts.create.name, type: 'BRACELET', skuPrefix: opts.create.prefix, defaultMaterial: material, careInstructions: care, warrantyLifetime: false }, admin)).id
+      ? (await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: opts.create.name, type: 'BRACELET', skuPrefix: opts.create.prefix, defaultMaterial: material, careInstructions: care }, admin)).id
       : w.models[key]!;
     await ctx.services.media.setModelImage(id, { mime: 'image/webp', bytes: nocturnePhoto(opts.photo) }, admin);
     await ctx.services.catalog.updateModel(
@@ -351,15 +360,15 @@ async function seedCatalogue(w: World): Promise<void> {
 }
 
 /** Issue a piece of `model` under `role`, its serial named when given; sold (its warranty started) unless `sold` is false. */
-async function issue(w: World, role: string, model: string, opts: { serial?: number; variant?: string; material?: string; sold?: string | false } = {}) {
+async function issue(w: World, role: string, model: string, opts: { serial?: number; variant?: string | null; material?: string; sold?: string | false; category?: string } = {}) {
   const r = await w.ctx.services.issuance.issueProduct(
     {
-      categoryCode: 'J',
+      categoryCode: opts.category ?? 'J',
       year: 2026,
       ...(opts.serial ? { serial: opts.serial } : {}),
       modelId: w.models[model]!,
       collectionId: w.collection,
-      variant: opts.variant ?? '17',
+      ...(opts.variant === null ? {} : { variant: opts.variant ?? '17' }),
       material: opts.material ?? (model === 'gold' ? '18K YELLOW GOLD' : '925 STERLING SILVER'),
       productionBatch: 'B-2026-09',
       productionDate: '2026-08-28',
@@ -1201,7 +1210,7 @@ async function seedSizes(w: World, variant: 'full' | 'room'): Promise<void> {
     return;
   }
   const care = 'Store this piece on its own, away from humidity, perfume and cosmetics. Wipe it with a soft, dry cloth after wearing. ORBES Client Services offers inspection, cleaning and polishing.';
-  const halo = (await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: 'HALO', type: 'RING', skuPrefix: 'HAL-RG', defaultMaterial: '18K YELLOW GOLD', careInstructions: care, warrantyLifetime: false }, admin)).id;
+  const halo = (await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: 'HALO', type: 'RING', skuPrefix: 'HAL-RG', defaultMaterial: '18K YELLOW GOLD', careInstructions: care }, admin)).id;
   await ctx.services.media.setModelImage(halo, { mime: 'image/webp', bytes: nocturnePhoto('gold') }, admin);
   await ctx.services.catalog.updateModel(
     halo,
@@ -1308,6 +1317,152 @@ async function seedCareUsed(w: World): Promise<void> {
   await ctx.services.clubProgram.update({ ...(await ctx.services.clubProgram.read()), carePiecesPlatine: 1 }, admin);
 }
 
+/**
+ * The stage orbes-care (plan ORBES CARE, step 5.1), after the full story: what a piece's ORBES CARE tab shows, each case
+ * on a collector of its own. ATLAS, a cardholder of leather goods, is a 2-year model (answer 10: manufacturing defects
+ * only) beside the jewelry, Lifetime. The PLATINE account's third piece is sold with its lifetime warranty; your piece
+ * of MONOLITHE in steel is shared by a certificate. Each claim is opened from its collector's conversation, its label sent, the piece received and
+ * decided by ORBES Client Services (answer 11), as the console does: a label sent on 2 October; a piece replaced and
+ * its replacement shipped on 26 September; a piece whose free replacement was used, then a 30 % credit on its
+ * replacement (YOUR TIER, IN USE: WARRANTY CREDIT); a claim refused after inspection, the piece returned; a 2-year piece
+ * repaired and returned.
+ */
+async function seedOrbesCare(w: World): Promise<void> {
+  const { ctx, admin, clock, demo } = w;
+  const colissimo = await carrier(w, 'Colissimo');
+  const chronopost = await carrier(w, 'Chronopost');
+  // ATLAS, the 2-year model (Leather Goods: 24 months, the terms' 2 years).
+  clock.set(at('2026-08-31T10:00:00Z'));
+  if (!(await ctx.categories.getByCode('L'))) await ctx.categories.create({ code: 'L', name: 'Leather Goods', warrantyMonths: 24 }, SYSTEM_ACTOR);
+  w.models.atlas = (
+    await ctx.services.catalog.createModel(
+      {
+        categoryCode: 'L',
+        collectionId: null,
+        name: 'ATLAS',
+        type: 'CARDHOLDER',
+        skuPrefix: 'ATL-CH',
+        defaultMaterial: 'FULL-GRAIN CALF LEATHER',
+        careInstructions: 'Keep away from water, heat and direct sunlight. Nourish twice a year with a neutral leather balm. Store it in its dust bag.',
+        warrantyLifetime: false,
+      },
+      admin,
+    )
+  ).id;
+  // The collectors, each with a piece bought on 2 September and registered the next day, and a word in MESSAGES.
+  const collector = async (key: string, email: string, role: string, model: string, words: string, opts: { variant?: string | null; category?: string; material?: string } = {}) => {
+    clock.set(at('2026-09-02T10:00:00Z'));
+    const who = demo.accounts[key] ?? (await account(w, key, email));
+    const piece = await issue(w, role, model, { sold: '2026-09-02', ...opts });
+    clock.set(at('2026-09-03T18:00:00Z'));
+    await register(w, who, piece);
+    return { who, piece, words };
+  };
+  const write = async (c: { who: DemoAccount; piece: { productId: string }; words: string }, when: string) => {
+    clock.set(at(when));
+    await ctx.services.messages.write(c.who.id, { body: c.words, context: { kind: 'PIECE', id: c.piece.productId } }, c.who.actor);
+    return (await ctx.db.selectFrom('client_conversations').select('id').where('account_id', '=', c.who.id).executeTakeFirstOrThrow()).id;
+  };
+  const claim = async (c: { who: DemoAccount; piece: { productId: string }; words: string }, opened: string) => {
+    const conversationId = await write(c, opened);
+    return (await ctx.services.warrantyClaims.open({ conversationId, productId: c.piece.productId, basis: 'WARRANTY' }, admin)).id;
+  };
+  const label = async (id: string, when: string, tracking: string) => {
+    clock.set(at(when));
+    await ctx.services.warrantyClaims.label(id, { pdf: DEMO_LABEL_PDF, carrierId: colissimo, tracking }, admin);
+  };
+  const receive = async (id: string, when: string) => {
+    clock.set(at(when));
+    await ctx.services.warrantyClaims.receive(id, admin);
+  };
+  const decide = async (id: string, when: string, input: DecideClaimInput) => {
+    clock.set(at(when));
+    await ctx.services.warrantyClaims.decide(id, input, admin);
+  };
+  const ship = async (id: string, when: string, tracking: string, replacementProductId?: string) => {
+    clock.set(at(when));
+    await ctx.services.warrantyClaims.ship(id, { carrierId: chronopost, tracking, ...(replacementProductId ? { replacementProductId } : {}) }, admin);
+  };
+
+  // The PLATINE account's third piece, sold with its lifetime warranty (pieces-orbes-care).
+  const platine = demo.accounts.platine!;
+  const third = (
+    await ctx.db
+      .selectFrom('ownership as o')
+      .innerJoin('products as p', 'p.id', 'o.product_id')
+      .select(['p.id', 'p.product_id'])
+      .where('o.account_id', '=', platine.id)
+      .where('o.ended_at', 'is', null)
+      .orderBy('p.year', 'desc')
+      .orderBy('p.serial')
+      .execute()
+  )[2]!;
+  clock.set(at('2026-09-04T10:00:00Z'));
+  await ctx.services.warranty.activate(third.id, { purchaseDate: '2026-06-01', retailer: 'ORBES PARIS', country: 'FR' }, admin);
+  demo.pieces.careLifetime = third.product_id;
+  // The certificate of your piece of MONOLITHE in steel, Lifetime, shared on 4 October (certificate-lifetime).
+  clock.set(at('2026-10-04T10:00:00Z'));
+  const you = demo.accounts.you!;
+  demo.links.certificateLifetime = (await ctx.services.ownershipCertificates.create(you.id, demo.pieces.yours!, { validDays: 30 }, you.actor)).token;
+
+  // A collector of leather goods: a 2-year piece without a claim, and another repaired under its warranty.
+  await collector('leather', 'r.duval@example.com', 'twoYears', 'atlas', '', { variant: null, category: 'L', material: 'FULL-GRAIN CALF LEATHER' });
+  const repaired = await collector('leather', 'r.duval@example.com', 'claimRepaired', 'atlas', 'The stitching of my cardholder has come undone along one edge.', { variant: null, category: 'L', material: 'FULL-GRAIN CALF LEATHER' });
+  const rep = await claim(repaired, '2026-09-14T08:30:00Z');
+  await label(rep, '2026-09-14T15:00:00Z', '6A20260914101');
+  await receive(rep, '2026-09-17T10:00:00Z');
+  await decide(rep, '2026-09-21T10:00:00Z', { outcome: 'REPAIR' });
+  await ship(rep, '2026-09-24T10:00:00Z', 'XY20260924101FR');
+
+  // Its prepaid label sent on 2 October (pieces-claim-label).
+  const waiting = await collector('claimant1', 'c.dubois@example.com', 'claimLabel', 'gold', 'One of the links of my bracelet has broken.');
+  const lab = await claim(waiting, '2026-10-02T08:30:00Z');
+  await label(lab, '2026-10-02T15:00:00Z', '6A20261002101');
+
+  // Replaced: the same piece, new, shipped on 26 September (pieces-claim-replaced).
+  const replaced = await collector('claimant2', 'p.girard@example.com', 'claimReplaced', 'gold', 'The gold of my bracelet has faded on one side.');
+  const rpl = await claim(replaced, '2026-09-18T08:30:00Z');
+  await label(rpl, '2026-09-18T15:00:00Z', '6A20260918101');
+  await receive(rpl, '2026-09-22T10:00:00Z');
+  clock.set(at('2026-09-23T09:00:00Z'));
+  const fresh = await issue(w, 'claimReplacement', 'gold', { sold: false });
+  await decide(rpl, '2026-09-24T10:00:00Z', { outcome: 'REPLACEMENT', replacementProductId: fresh.productId });
+  await ship(rpl, '2026-09-26T10:00:00Z', 'XY20260926101FR');
+
+  // After the free replacement (its replacement registered), a further accepted claim: a 30 % credit of the piece's
+  // value, valid 12 months (pieces-claim-part-credit, tier-warranty-credit).
+  const credited = await collector('claimant3', 's.renard@example.com', 'claimFirst', 'gold', 'My bracelet broke when it fell.');
+  const first = await claim(credited, '2026-09-07T08:30:00Z');
+  await label(first, '2026-09-07T15:00:00Z', '6A20260907101');
+  await receive(first, '2026-09-09T10:00:00Z');
+  clock.set(at('2026-09-09T11:00:00Z'));
+  const second = await issue(w, 'claimPartCredit', 'gold', { sold: false });
+  await decide(first, '2026-09-10T10:00:00Z', { outcome: 'REPLACEMENT', replacementProductId: second.productId });
+  await ship(first, '2026-09-11T10:00:00Z', 'XY20260911101FR');
+  clock.set(at('2026-09-13T18:00:00Z'));
+  await register(w, credited.who, second);
+  const again = await claim({ who: credited.who, piece: second, words: 'The new bracelet broke too, caught in a door.' }, '2026-09-25T08:30:00Z');
+  await label(again, '2026-09-25T15:00:00Z', '6A20260925101');
+  await receive(again, '2026-09-28T10:00:00Z');
+  await decide(again, '2026-09-29T10:00:00Z', { outcome: 'PART_CREDIT', ...(await valueUnknown(w, second.uuid)) });
+  await ship(again, '2026-10-01T10:00:00Z', 'XY20261001101FR');
+
+  // Refused after inspection (a scratch, not covered), the piece returned (pieces-claim-refused).
+  const refused = await collector('claimant4', 'n.petit@example.com', 'claimRefused', 'gold', 'My bracelet is scratched on its top.');
+  const ref = await claim(refused, '2026-09-21T08:30:00Z');
+  await label(ref, '2026-09-21T15:00:00Z', '6A20260921101');
+  await receive(ref, '2026-09-24T10:00:00Z');
+  await decide(ref, '2026-09-25T10:00:00Z', { outcome: 'REFUSED', refusalReason: 'SCRATCHED' });
+  await ship(ref, '2026-09-28T10:00:00Z', 'XY20260928101FR');
+}
+
+/** The value of a piece the server finds none for (no order, no base price) is entered by staff: € 3 900 here. */
+async function valueUnknown(w: World, productUuid: string): Promise<{ valueMinor?: number }> {
+  const sheet = (await w.ctx.db.selectFrom('warranty_claims').select('id').where('product_id', '=', productUuid).where('status', '=', 'RECEIVED').executeTakeFirstOrThrow()).id;
+  const known = (await w.ctx.services.warrantyClaims.sheet(sheet)).decision.value;
+  return known ? {} : { valueMinor: 390_000 };
+}
+
 // ── The extreme content (fidelity rule 5) and the empty states ─────────────
 
 /**
@@ -1320,7 +1475,7 @@ async function seedStress(w: World): Promise<void> {
   const { ctx, admin, clock } = w;
   await seedCatalogue(w);
   clock.set(at('2026-09-01T09:00:00Z'));
-  const long = await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: 'MONOLITHE ARCHITECTURALE', type: 'ARTICULATED BRACELET', skuPrefix: 'MNL-AR', defaultMaterial: '925 STERLING SILVER, BRUSHED AND POLISHED', careInstructions: null, warrantyLifetime: false }, admin);
+  const long = await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: 'MONOLITHE ARCHITECTURALE', type: 'ARTICULATED BRACELET', skuPrefix: 'MNL-AR', defaultMaterial: '925 STERLING SILVER, BRUSHED AND POLISHED', careInstructions: null }, admin);
   await ctx.services.catalog.updateModel(long.id, { lookbook: 'PUBLIC', slug: 'monolithe-architecturale', story: 'A model without a photograph yet.', specs: 'Metal: 925 sterling silver, brushed and polished by hand\nClosure: Hinged, with a hidden clasp' }, admin);
   w.models.long = long.id;
   w.demo.slugs.long = 'monolithe-architecturale';
@@ -1373,7 +1528,7 @@ async function seedStress(w: World): Promise<void> {
   // counted in stock, chosen after the four orders (none of them carries a gift); and the PALLADIUM credit (€ 100, made
   // with the first order: the account reached PALLADIUM before it) in use on the last order, RESERVED at € 4 800.
   clock.set(at('2026-09-14T10:00:00Z'));
-  const charm = await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: null, name: 'ORBITAL CHARM', type: 'PENDANT', skuPrefix: 'ORB-CH', defaultMaterial: '925 STERLING SILVER', warrantyLifetime: false }, admin);
+  const charm = await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: null, name: 'ORBITAL CHARM', type: 'PENDANT', skuPrefix: 'ORB-CH', defaultMaterial: '925 STERLING SILVER' }, admin);
   // Its one piece in stock, counted in (plan NEXT LOT step 5.12: a piece behind the count, for the packing scan).
   await stockPieces(ctx, { skuId: await ensureSku(ctx.db, charm.id, null), locationId: (await ctx.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id, count: 1 }, admin);
   const program = await ctx.services.clubProgram.read();
@@ -1436,7 +1591,7 @@ async function seedStress(w: World): Promise<void> {
 async function seedPairs(w: World): Promise<void> {
   const { ctx, admin, clock } = w;
   clock.set(at('2026-10-04T09:00:00Z'));
-  const long = await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: 'MONOLITHE ARCHITECTURALE', type: 'ARTICULATED BRACELET', skuPrefix: 'MNL-AR', defaultMaterial: '925 STERLING SILVER, BRUSHED AND POLISHED', careInstructions: null, warrantyLifetime: false }, admin);
+  const long = await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: 'MONOLITHE ARCHITECTURALE', type: 'ARTICULATED BRACELET', skuPrefix: 'MNL-AR', defaultMaterial: '925 STERLING SILVER, BRUSHED AND POLISHED', careInstructions: null }, admin);
   await ctx.services.catalog.updateModel(long.id, { lookbook: 'PUBLIC', slug: 'monolithe-architecturale', story: 'A model without a photograph yet.' }, admin);
   w.models.long = long.id;
   w.demo.slugs.long = 'monolithe-architecturale';
@@ -1487,7 +1642,7 @@ async function seedEmpty(w: World): Promise<void> {
   const { ctx, admin } = w;
   w.clock.set(at('2026-09-01T09:00:00Z'));
   w.collection = (await ctx.services.catalog.createCollection({ name: 'ORBITAL' }, admin)).id;
-  const hidden = await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: 'MONOLITHE', type: 'BRACELET', skuPrefix: 'MNL-ST', defaultMaterial: '925 STERLING SILVER', careInstructions: null, warrantyLifetime: false }, admin);
+  const hidden = await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: 'MONOLITHE', type: 'BRACELET', skuPrefix: 'MNL-ST', defaultMaterial: '925 STERLING SILVER', careInstructions: null }, admin);
   w.models.steel = hidden.id;
   await account(w, 'you', 'you@example.com');
   await account(w, 'owner', 'm.okafor@example.com', 1, hidden.id);

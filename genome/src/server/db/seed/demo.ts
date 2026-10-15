@@ -110,8 +110,8 @@ export interface DemoCategory {
 export const DEMO_CATEGORIES: readonly DemoCategory[] = Object.freeze([
   { code: 'J', index: 1, name: 'Jewelry', warrantyMonths: 24 },
   { code: 'L', index: 2, name: 'Leather Goods', warrantyMonths: 24 },
-  { code: 'W', index: 3, name: 'Watches', warrantyMonths: 60 },
-  { code: 'F', index: 4, name: 'Fragrance', warrantyMonths: 12 },
+  { code: 'W', index: 3, name: 'Watches', warrantyMonths: 24 },
+  { code: 'F', index: 4, name: 'Fragrance', warrantyMonths: 24 },
   { code: 'A', index: 5, name: 'Accessories', warrantyMonths: 24 },
 ]);
 
@@ -121,7 +121,7 @@ type CollectionName = (typeof DEMO_COLLECTIONS)[number];
 const CARE = {
   silver:
     'Wipe with a soft, dry cloth after wear. Store on its own in the ORBES pouch to avoid scratches. Keep away from perfume, chlorine and salt water.',
-  gold: 'Clean with lukewarm soapy water and a soft brush, then dry with a lint-free cloth. Store separately. Bring it to an ORBES atelier for polishing.',
+  gold: 'Clean with lukewarm soapy water and a soft brush, then dry with a lint-free cloth. Store separately. ORBES Client Services offers inspection, cleaning and polishing.',
   leather:
     'Keep away from water, heat and direct sunlight. Nourish twice a year with a neutral leather balm. Store stuffed, in its dust bag.',
   watch: 'Water resistant to 50 m with the crown pushed in. Wind fully once a month if not worn. Service the movement every five years.',
@@ -137,6 +137,11 @@ export interface DemoModel {
   skuPrefix: string;
   defaultMaterial: string;
   care: string;
+  /**
+   * The model's warranty (plan ORBES CARE, answer 12): Lifetime for jewelry and the accessories (J, A), 2 years for the
+   * rest (L, W, F), the category's months.
+   */
+  warrantyLifetime: boolean;
 }
 
 type ModelKey =
@@ -153,17 +158,17 @@ type ModelKey =
   | 'PARALLAX';
 
 export const DEMO_MODELS: readonly DemoModel[] = Object.freeze([
-  { key: 'MONOLITHE', category: 'J', collection: 'ORBITAL', name: 'MONOLITHE', type: 'RING', skuPrefix: 'MNL-RG', defaultMaterial: '925 STERLING SILVER', care: CARE.silver },
-  { key: 'ORBITE', category: 'J', collection: 'ORBITAL', name: 'ORBITE', type: 'SIGNET RING', skuPrefix: 'ORB-SG', defaultMaterial: '18K YELLOW GOLD', care: CARE.gold },
-  { key: 'ECLIPSE', category: 'J', collection: 'ORBITAL', name: 'ECLIPSE', type: 'PENDANT', skuPrefix: 'ECL-PD', defaultMaterial: '925 STERLING SILVER', care: CARE.silver },
-  { key: 'HORIZON', category: 'J', collection: 'ORBITAL', name: 'HORIZON', type: 'CUFF', skuPrefix: 'HRZ-CF', defaultMaterial: '925 STERLING SILVER', care: CARE.silver },
-  { key: 'ATLAS', category: 'L', collection: 'MERIDIAN', name: 'ATLAS', type: 'CARDHOLDER', skuPrefix: 'ATL-CH', defaultMaterial: 'FULL-GRAIN CALF LEATHER', care: CARE.leather },
-  { key: 'PERIGEE', category: 'L', collection: 'MERIDIAN', name: 'PERIGEE', type: 'WALLET', skuPrefix: 'PRG-WL', defaultMaterial: 'FULL-GRAIN CALF LEATHER', care: CARE.leather },
-  { key: 'APOGEE', category: 'L', collection: 'MERIDIAN', name: 'APOGEE', type: 'BELT', skuPrefix: 'APG-BT', defaultMaterial: 'FULL-GRAIN CALF LEATHER', care: CARE.leather },
-  { key: 'SOLSTICE', category: 'W', collection: 'ZENITH', name: 'SOLSTICE', type: 'AUTOMATIC WATCH', skuPrefix: 'SLS-AW', defaultMaterial: '316L STAINLESS STEEL', care: CARE.watch },
-  { key: 'NOCTURNE', category: 'F', collection: 'NOCTURNE', name: 'NOCTURNE', type: 'EAU DE PARFUM 100 ML', skuPrefix: 'NCT-EDP', defaultMaterial: 'GLASS FLACON, BRUSHED STEEL CAP', care: CARE.fragrance },
-  { key: 'EQUINOX', category: 'A', collection: 'EQUINOX', name: 'EQUINOX', type: 'KEY RING', skuPrefix: 'EQX-KR', defaultMaterial: '925 STERLING SILVER', care: CARE.silver },
-  { key: 'PARALLAX', category: 'A', collection: 'EQUINOX', name: 'PARALLAX', type: 'CUFFLINKS', skuPrefix: 'PLX-CL', defaultMaterial: '925 STERLING SILVER', care: CARE.silver },
+  { key: 'MONOLITHE', category: 'J', collection: 'ORBITAL', name: 'MONOLITHE', type: 'RING', skuPrefix: 'MNL-RG', defaultMaterial: '925 STERLING SILVER', care: CARE.silver, warrantyLifetime: true },
+  { key: 'ORBITE', category: 'J', collection: 'ORBITAL', name: 'ORBITE', type: 'SIGNET RING', skuPrefix: 'ORB-SG', defaultMaterial: '18K YELLOW GOLD', care: CARE.gold, warrantyLifetime: true },
+  { key: 'ECLIPSE', category: 'J', collection: 'ORBITAL', name: 'ECLIPSE', type: 'PENDANT', skuPrefix: 'ECL-PD', defaultMaterial: '925 STERLING SILVER', care: CARE.silver, warrantyLifetime: true },
+  { key: 'HORIZON', category: 'J', collection: 'ORBITAL', name: 'HORIZON', type: 'CUFF', skuPrefix: 'HRZ-CF', defaultMaterial: '925 STERLING SILVER', care: CARE.silver, warrantyLifetime: true },
+  { key: 'ATLAS', category: 'L', collection: 'MERIDIAN', name: 'ATLAS', type: 'CARDHOLDER', skuPrefix: 'ATL-CH', defaultMaterial: 'FULL-GRAIN CALF LEATHER', care: CARE.leather, warrantyLifetime: false },
+  { key: 'PERIGEE', category: 'L', collection: 'MERIDIAN', name: 'PERIGEE', type: 'WALLET', skuPrefix: 'PRG-WL', defaultMaterial: 'FULL-GRAIN CALF LEATHER', care: CARE.leather, warrantyLifetime: false },
+  { key: 'APOGEE', category: 'L', collection: 'MERIDIAN', name: 'APOGEE', type: 'BELT', skuPrefix: 'APG-BT', defaultMaterial: 'FULL-GRAIN CALF LEATHER', care: CARE.leather, warrantyLifetime: false },
+  { key: 'SOLSTICE', category: 'W', collection: 'ZENITH', name: 'SOLSTICE', type: 'AUTOMATIC WATCH', skuPrefix: 'SLS-AW', defaultMaterial: '316L STAINLESS STEEL', care: CARE.watch, warrantyLifetime: false },
+  { key: 'NOCTURNE', category: 'F', collection: 'NOCTURNE', name: 'NOCTURNE', type: 'EAU DE PARFUM 100 ML', skuPrefix: 'NCT-EDP', defaultMaterial: 'GLASS FLACON, BRUSHED STEEL CAP', care: CARE.fragrance, warrantyLifetime: false },
+  { key: 'EQUINOX', category: 'A', collection: 'EQUINOX', name: 'EQUINOX', type: 'KEY RING', skuPrefix: 'EQX-KR', defaultMaterial: '925 STERLING SILVER', care: CARE.silver, warrantyLifetime: true },
+  { key: 'PARALLAX', category: 'A', collection: 'EQUINOX', name: 'PARALLAX', type: 'CUFFLINKS', skuPrefix: 'PLX-CL', defaultMaterial: '925 STERLING SILVER', care: CARE.silver, warrantyLifetime: true },
 ]);
 
 // ── Places, boutiques, people ──────────────────────────────────────────────
@@ -210,7 +215,7 @@ const POINTS_OF_SALE: readonly { name: string; city: string | null; country: str
   { name: BOUTIQUES.ONLINE_DE.retailer, city: null, country: null },
 ];
 
-const ATELIER = 'ORBES ATELIER — PARIS';
+const ORBES_PARIS = 'ORBES — PARIS';
 
 export interface DemoAccount {
   key: AccountKey;
@@ -452,11 +457,11 @@ const PRODUCTS: readonly ProductDef[] = [
     batch: 'B2601-ORB',
     issuedAt: '2026-02-03T10:05',
     expect: 'AUTHENTIC_REGISTERED',
-    scenario: 'Owned by Sofia Rossi, at the Paris atelier for a resize (SERVICED, open service).',
+    scenario: 'Owned by Sofia Rossi, at ORBES in Paris for a resize (SERVICED, open service).',
     story: (s, t) => {
       s.activate('2026-03-01T15:30', 'MILAN');
       s.register('2026-03-01T17:00', 'sofia');
-      s.service(t.ago(9, 4), 'RESIZE', ATELIER, 'Resize from 54 to 56 requested by the client.');
+      s.service(t.ago(9, 4), 'RESIZE', ORBES_PARIS, 'Resize from 54 to 56 requested by the client.');
     },
   },
   {
@@ -465,11 +470,11 @@ const PRODUCTS: readonly ProductDef[] = [
     batch: 'B2601-ECL',
     issuedAt: '2026-01-20T11:00',
     expect: 'AUTHENTIC_REGISTERED',
-    scenario: 'Owned by Lucas Weber; polished at the atelier in May (completed service).',
+    scenario: 'Owned by Lucas Weber; polished by ORBES in May (completed service).',
     story: (s) => {
       s.activate('2026-02-10T10:00', 'ONLINE_DE');
       s.register('2026-02-12T19:45', 'lucas');
-      s.service('2026-05-04T09:30', 'POLISH', ATELIER, 'Complimentary polish.', '2026-05-11T16:00');
+      s.service('2026-05-04T09:30', 'POLISH', ORBES_PARIS, 'Complimentary polish.', '2026-05-11T16:00');
       s.scan('2026-05-12T18:10', { account: 'lucas' }, 'BERLIN', 'AUTHENTIC_OWNERSHIP_VERIFIED');
     },
   },
@@ -626,7 +631,7 @@ const PRODUCTS: readonly ProductDef[] = [
     issuedAt: '2025-04-01T09:05',
     expect: 'REVOKED',
     scenario: 'Boutique display piece retired from circulation (RETIRED).',
-    story: (s) => s.status('2026-01-15T10:00', 'RETIRED', 'Display piece retired from circulation and destroyed by the atelier.'),
+    story: (s) => s.status('2026-01-15T10:00', 'RETIRED', 'Display piece retired from circulation and destroyed by ORBES.'),
   },
   {
     productId: 'O25-J-00045',
@@ -694,11 +699,11 @@ const PRODUCTS: readonly ProductDef[] = [
     batch: 'L2602-PRG',
     issuedAt: '2026-02-16T08:15',
     expect: 'AUTHENTIC_REGISTERED',
-    scenario: 'Owned by Lucas Weber; cleaned at the atelier in June (completed service).',
+    scenario: 'Owned by Lucas Weber; cleaned by ORBES in June (completed service).',
     story: (s) => {
       s.activate('2026-03-14T09:00', 'ONLINE_DE');
       s.register('2026-03-16T20:15', 'lucas');
-      s.service('2026-06-10T10:00', 'CLEANING', ATELIER, 'Deep clean and edge paint touch-up.', '2026-06-18T15:00');
+      s.service('2026-06-10T10:00', 'CLEANING', ORBES_PARIS, 'Deep clean and edge paint touch-up.', '2026-06-18T15:00');
     },
   },
   {
@@ -722,11 +727,11 @@ const PRODUCTS: readonly ProductDef[] = [
     batch: 'L2602-APG',
     issuedAt: '2026-02-16T08:25',
     expect: 'AUTHENTIC_REGISTERED',
-    scenario: 'Owned by Noor Haddad, at the atelier for a buckle repair (SERVICED).',
+    scenario: 'Owned by Noor Haddad, with ORBES for a buckle repair (SERVICED).',
     story: (s, t) => {
       s.activate('2026-04-11T13:00', 'DUBAI');
       s.register('2026-04-11T18:20', 'noor');
-      s.service(t.ago(5, 6), 'REPAIR', ATELIER, 'Buckle hinge replaced under warranty.');
+      s.service(t.ago(5, 6), 'REPAIR', ORBES_PARIS, 'Buckle hinge replaced under warranty.');
     },
   },
   {
@@ -804,7 +809,7 @@ const PRODUCTS: readonly ProductDef[] = [
     batch: 'W2601-SLS',
     issuedAt: '2026-01-12T09:00',
     expect: 'AUTHENTIC_REGISTERED',
-    scenario: 'Owned by Hugo Bernard, 60-month warranty.',
+    scenario: 'Owned by Hugo Bernard, 2-year warranty.',
     story: (s) => {
       s.activate('2026-02-14T14:30', 'PARIS');
       s.register('2026-02-14T19:00', 'hugo', 'PARIS');
@@ -896,7 +901,7 @@ const PRODUCTS: readonly ProductDef[] = [
     batch: 'F2504-NCT',
     issuedAt: '2025-04-14T08:00',
     expect: 'AUTHENTIC_REGISTERED',
-    scenario: 'Owned by Camille Martin; its 12-month warranty has EXPIRED.',
+    scenario: 'Owned by Camille Martin; its 2-year warranty runs until May 2027.',
     story: (s) => {
       s.activate('2025-05-10T15:00', 'PARIS');
       s.register('2025-05-10T21:00', 'camille');
@@ -1391,6 +1396,7 @@ async function ensureCatalogue(ctx: AppContext): Promise<void> {
           sku_prefix: m.skuPrefix,
           default_material: m.defaultMaterial,
           care_instructions: m.care,
+          warranty_lifetime: m.warrantyLifetime,
           created_at: now,
         })
         .returning('id')
@@ -1401,7 +1407,7 @@ async function ensureCatalogue(ctx: AppContext): Promise<void> {
           action: 'model.create',
           targetType: 'model',
           targetId: row.id,
-          details: { name: m.name, type: m.type, skuPrefix: m.skuPrefix, category: m.category, collectionId },
+          details: { name: m.name, type: m.type, skuPrefix: m.skuPrefix, category: m.category, collectionId, warrantyLifetime: m.warrantyLifetime },
         },
         tx,
       );

@@ -92,6 +92,8 @@ const accountMessages = named('account-write', 'account-messages');
 const birthday = (s: UiState) => s.variant === 'birthday-credit';
 /** PRIVATE CARE used for another piece (plan ORBES CARE, step 1.4), on its own stage: THE PROGRAM's PLATINE at 1 piece a year. */
 const careUsed = (s: UiState) => s.variant === 'care-used';
+/** ORBES CARE (plan ORBES CARE, step 5.1), on its own stage: each warranty, each moment of a claim, a lifetime certificate, a warranty credit. */
+const orbesCare = (s: UiState) => s.variant === 'orbes-care';
 /**
  * The tier program's states (plan NEXT-NINE, BP-19) in the full demo: a piece's YEARLY CARE, THE CLUB, IN USE; the
  * birthday credit under IN USE, and PRIVATE CARE used for another piece, each on its own stage.
@@ -133,10 +135,12 @@ export const CONTENT_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> =
   circle: (s) => full(s) && !s.mutates && named('circle', 'post', 'legal', 'certificate')(s),
   writes: (s) => full(s) && !!s.mutates,
   room: (s) => ROOM_VARIANTS.includes(s.variant),
+  // ORBES CARE (plan ORBES CARE, step 5.1), on its own stage (orbes-care), its states in order.
+  care: orbesCare,
   // The draws in every state; a draw in sizes (plan NEXT LOT §3.6.F), on its own stage.
   draws: (s) => s.variant === 'draws' || s.variant === 'draw-sizes',
   stress: (s) => s.variant === 'stress' && !named('account')(s),
-  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'draws' && s.variant !== 'draw-sizes' && s.variant !== 'stress' && s.variant !== 'pairs' && !ORDER_STAGES.includes(s.variant) && !named('account')(s) && !profile(s) && !wishlist(s) && !birthday(s) && !careUsed(s),
+  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'draws' && s.variant !== 'draw-sizes' && s.variant !== 'stress' && s.variant !== 'pairs' && !ORDER_STAGES.includes(s.variant) && !named('account')(s) && !profile(s) && !wishlist(s) && !birthday(s) && !careUsed(s) && !orbesCare(s),
 });
 
 /** The states of shard `name`, in the order of UI_STATES. */
