@@ -100,7 +100,7 @@ async function piecesTab(run: StateRun, name: 'PIECES' | 'ORDERS' | 'RELEASES'):
   await run.page.locator(`.view--pieces[data-tab="${name.toLowerCase()}"]`).waitFor();
 }
 
-/** A piece's SERVICE tab, its YEARLY CARE drawn (plan NEXT-NINE, BP-19 T6) and its SERVICE HISTORY read. */
+/** A piece's SERVICE tab, its PRIVATE CARE drawn (plan NEXT-NINE, BP-19 T6; plan ORBES CARE, step 2.1) and its SERVICE HISTORY read. */
 async function serviceCare(run: StateRun): Promise<void> {
   await tab(run, 'SERVICE').click();
   await run.page.locator('.view--piece .piece__yearly-care:not([hidden])').waitFor();
@@ -911,16 +911,16 @@ export const UI_STATES: readonly UiState[] = [
   { id: 'club-platine', title: 'THE CLUB of a PLATINE account: YOUR TIER: PLATINE · 5 PIECES HELD', refs: ['BP-19'], variant: 'full', as: 'platine', path: at('/verify/club'), ready: '.view--club .n-club__way' },
   { id: 'club-no-piece', title: 'THE CLUB of an account without a piece: YOUR FIRST PIECE OPENS TITANE', refs: ['BP-19'], variant: 'full', as: 'newcomer', path: at('/verify/club'), ready: '.view--club .n-club__way' },
   { id: 'club-stress', title: 'THE CLUB of the extreme content: PALLADIUM, ten pieces, the welcome gift ORBITAL CHARM', refs: ['BP-19'], variant: 'stress', as: you, path: at('/verify/club'), ready: '.view--club .n-club__way', stress: true },
-  // YEARLY CARE (plan NEXT-NINE, BP-19 T6): above SERVICE HISTORY, for a PLATINE account, each step on a piece of its own.
+  // PRIVATE CARE (plan NEXT-NINE, BP-19 T6; named so by plan ORBES CARE): above SERVICE HISTORY, for a PLATINE account, each step on a piece of its own.
   ...(
     [
-      ['piece-care-available', 'careAvailable', 'voter1', 'A PLATINE piece: SERVICE, YEARLY CARE, REQUEST YEARLY CARE'],
-      ['piece-care-requested', 'careRequested', 'platine', 'A PLATINE piece: YEARLY CARE REQUESTED, its return address, CANCEL REQUEST'],
+      ['piece-care-available', 'careAvailable', 'voter1', 'A PLATINE piece: SERVICE, PRIVATE CARE, REQUEST PRIVATE CARE'],
+      ['piece-care-requested', 'careRequested', 'platine', 'A PLATINE piece: PRIVATE CARE REQUESTED, its return address, CANCEL REQUEST'],
       // Plan ORBES CARE, step 1.4: on its own stage (care-used), THE PROGRAM's PLATINE at 1 piece a year, its default now every piece.
-      ['piece-care-used', 'careUsed', 'platine', 'A PLATINE piece: the year’s yearly care used for another piece'],
+      ['piece-care-used', 'careUsed', 'platine', 'A PLATINE piece: the year’s PRIVATE CARE used for another piece'],
       ['piece-care-label', 'careLabel', 'voter2', 'A PLATINE piece: YOUR PREPAID LABEL, DOWNLOAD LABEL'],
       ['piece-care-returning', 'careReturning', 'voter3', 'A PLATINE piece in service: ON ITS WAY BACK, TRACK THE SHIPMENT'],
-      ['piece-care-done', 'careDone', 'cared', 'A PLATINE piece: its yearly care complete, YEARLY CARE in SERVICE HISTORY'],
+      ['piece-care-done', 'careDone', 'cared', 'A PLATINE piece: its PRIVATE CARE complete, PRIVATE CARE in SERVICE HISTORY'],
     ] as const
   ).map(
     ([id, role, who, title]): UiState => ({
@@ -936,14 +936,14 @@ export const UI_STATES: readonly UiState[] = [
   ),
   {
     id: 'piece-care-request',
-    title: 'A PLATINE piece: REQUEST YEARLY CARE, its own form: RETURN ADDRESS, NAME, ADDRESS, CONFIRM REQUEST · CANCEL',
+    title: 'A PLATINE piece: REQUEST PRIVATE CARE, its own form: RETURN ADDRESS, NAME, ADDRESS, CONFIRM REQUEST · CANCEL',
     refs: ['BP-19'],
     variant: 'full',
     as: 'voter1',
     path: piece('careAvailable'),
     act: async (run) => {
       await serviceCare(run);
-      await button(run, 'REQUEST YEARLY CARE').click();
+      await button(run, 'REQUEST PRIVATE CARE').click();
       await run.page.locator('.piece__yearly-care form textarea').waitFor();
     },
     ready: '.view--piece .piece__yearly-care form',
@@ -1101,7 +1101,7 @@ export const UI_STATES: readonly UiState[] = [
   },
   {
     id: 'account-sheet-in-use',
-    title: 'The account sheet of a PLATINE account: YOUR TIER, IN USE (its credit, its yearly care), the program’s lines, THE CLUB',
+    title: 'The account sheet of a PLATINE account: YOUR TIER, IN USE (its credit, its PRIVATE CARE), the program’s lines, THE CLUB',
     refs: ['BP-19'],
     variant: 'full',
     as: 'platine',

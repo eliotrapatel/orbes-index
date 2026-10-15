@@ -908,7 +908,7 @@
         "4 OCT 2026",
         "UNTIL",
         "4 OCT 2028",
-        "This piece is covered by the ORBES warranty until 4 October 2028.",
+        "This piece is covered by the ORBES warranty against manufacturing defects until 4 October 2028: ORBES repairs or replaces it.",
         "This verification confirms an identity issued and signed by ORBES and its registry record. A printed code alone cannot prove that an object is genuine; ORBES Client Services can inspect a piece on request.",
         "VERIFIED 5 OCT 2026 · 18:49",
         "REF «ref»",
@@ -2987,7 +2987,7 @@
         "3 OCT 2026",
         "UNTIL",
         "3 OCT 2028",
-        "This piece is covered by the ORBES warranty until 3 October 2028.",
+        "This piece is covered by the ORBES warranty against manufacturing defects until 3 October 2028: ORBES repairs or replaces it.",
         "THE CLUB",
         "PRIVACY",
         "TERMS",
@@ -3086,6 +3086,8 @@
         "WARRANTY",
         "SERVICE",
         "CARE",
+        "PRIVATE CARE",
+        "PRIVATE CARE opens from PLATINE: the inspection, cleaning and polishing of every piece by ORBES, free, once a year each.",
         "SERVICE HISTORY",
         "No service has been recorded for this piece.",
         "THE CLUB",
@@ -3314,7 +3316,7 @@
       ]
     },
     "piece-care-available": {
-      "title": "A PLATINE piece: SERVICE, YEARLY CARE, REQUEST YEARLY CARE",
+      "title": "A PLATINE piece: SERVICE, PRIVATE CARE, REQUEST PRIVATE CARE",
       "refs": [
         "BP-19"
       ],
@@ -3344,9 +3346,9 @@
         "WARRANTY",
         "SERVICE",
         "CARE",
-        "YEARLY CARE",
-        "Your PLATINE tier includes the yearly care of every piece in 2026: inspection, cleaning and polishing by the ORBES atelier. ORBES Client Services sends you a prepaid label for this piece, and returns it to you at no cost.",
-        "REQUEST YEARLY CARE",
+        "PRIVATE CARE",
+        "Your PLATINE tier includes PRIVATE CARE for every piece, once a year each: inspection, cleaning and polishing by ORBES, free of charge. ORBES Client Services sends you a prepaid label for this piece, and returns it to you at no cost.",
+        "REQUEST PRIVATE CARE",
         "SERVICE HISTORY",
         "No service has been recorded for this piece.",
         "THE CLUB",
@@ -3361,7 +3363,7 @@
       ]
     },
     "piece-care-requested": {
-      "title": "A PLATINE piece: YEARLY CARE REQUESTED, its return address, CANCEL REQUEST",
+      "title": "A PLATINE piece: PRIVATE CARE REQUESTED, its return address, CANCEL REQUEST",
       "refs": [
         "BP-19"
       ],
@@ -3391,7 +3393,7 @@
         "WARRANTY",
         "SERVICE",
         "CARE",
-        "YEARLY CARE",
+        "PRIVATE CARE",
         "REQUESTED · 1 OCT 2026",
         "ORBES Client Services is preparing your prepaid label. It will appear here.",
         "RETURN ADDRESS",
@@ -3411,7 +3413,7 @@
       ]
     },
     "piece-care-used": {
-      "title": "A PLATINE piece: the year’s yearly care used for another piece",
+      "title": "A PLATINE piece: the year’s PRIVATE CARE used for another piece",
       "refs": [
         "BP-19"
       ],
@@ -3441,8 +3443,8 @@
         "WARRANTY",
         "SERVICE",
         "CARE",
-        "YEARLY CARE",
-        "Your yearly care for 2026 has been used for another piece. It renews on 1 January.",
+        "PRIVATE CARE",
+        "Your PRIVATE CARE for 2026 has been used for another piece. It renews on 1 January.",
         "SERVICE HISTORY",
         "No service has been recorded for this piece.",
         "THE CLUB",
@@ -3487,7 +3489,7 @@
         "WARRANTY",
         "SERVICE",
         "CARE",
-        "YEARLY CARE",
+        "PRIVATE CARE",
         "YOUR PREPAID LABEL",
         "Print it, pack the piece in its box and hand it to the carrier.",
         "DOWNLOAD LABEL",
@@ -3539,7 +3541,7 @@
         "WARRANTY",
         "SERVICE",
         "CARE",
-        "YEARLY CARE",
+        "PRIVATE CARE",
         "ON ITS WAY BACK",
         "CARRIER",
         "CHRONOPOST",
@@ -3560,7 +3562,7 @@
       ]
     },
     "piece-care-done": {
-      "title": "A PLATINE piece: its yearly care complete, YEARLY CARE in SERVICE HISTORY",
+      "title": "A PLATINE piece: its PRIVATE CARE complete, PRIVATE CARE in SERVICE HISTORY",
       "refs": [
         "BP-19"
       ],
@@ -3590,8 +3592,8 @@
         "WARRANTY",
         "SERVICE",
         "CARE",
-        "YEARLY CARE",
-        "Its yearly care for 2026 is complete. It is recorded in SERVICE HISTORY.",
+        "PRIVATE CARE",
+        "Its PRIVATE CARE for 2026 is complete. It is recorded in SERVICE HISTORY.",
         "SERVICE HISTORY",
         "15 SEP 2026 – 25 SEP 2026 · ORBES",
         "THE CLUB",
@@ -3606,7 +3608,7 @@
       ]
     },
     "piece-care-request": {
-      "title": "A PLATINE piece: REQUEST YEARLY CARE, its own form: RETURN ADDRESS, NAME, ADDRESS, CONFIRM REQUEST · CANCEL",
+      "title": "A PLATINE piece: REQUEST PRIVATE CARE, its own form: RETURN ADDRESS, NAME, ADDRESS, CONFIRM REQUEST · CANCEL",
       "refs": [
         "BP-19"
       ],
@@ -3636,8 +3638,8 @@
         "WARRANTY",
         "SERVICE",
         "CARE",
-        "YEARLY CARE",
-        "Request the yearly care of this piece for 2026?",
+        "PRIVATE CARE",
+        "Request PRIVATE CARE for this piece for 2026?",
         "RETURN ADDRESS",
         "Where ORBES returns the piece once its care is done.",
         "NAME",
@@ -4814,7 +4816,7 @@
         "IN USE",
         "CREDIT",
         "€ 50 · UNTIL 2 SEP 2027",
-        "YEARLY CARE",
+        "PRIVATE CARE",
         "EVERY PIECE · 0 IN 2026",
         "WELCOME GIFT",
         "WITH YOUR NEXT ORDER",
@@ -4848,7 +4850,7 @@
       ]
     },
     "account-sheet-in-use": {
-      "title": "The account sheet of a PLATINE account: YOUR TIER, IN USE (its credit, its yearly care), the program’s lines, THE CLUB",
+      "title": "The account sheet of a PLATINE account: YOUR TIER, IN USE (its credit, its PRIVATE CARE), the program’s lines, THE CLUB",
       "refs": [
         "BP-19"
       ],
@@ -4921,7 +4923,7 @@
         "IN USE",
         "CREDIT",
         "€ 50 · UNTIL 5 OCT 2027",
-        "YEARLY CARE",
+        "PRIVATE CARE",
         "EVERY PIECE · 1 IN 2026",
         "ORBES Client Services takes it off the invoice of a piece from a draw, a LIVE RELEASE or THE PRIVATE SALON.",
         "Early access to each draw: a place reserved directly 2 hours before entries open to everyone, unless its page says otherwise.",

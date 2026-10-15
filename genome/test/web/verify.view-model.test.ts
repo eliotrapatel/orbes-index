@@ -13,6 +13,7 @@ import {
   FALLBACK_TITLES,
   HINTS,
   NOT_DELIVERED_NOTE,
+  ORBES_CARE,
   PHOTOS,
   PROBLEMS,
   problemForApiError,
@@ -46,6 +47,7 @@ import {
   shortReference,
   splitTitle,
   toneOf,
+  warrantyModel,
 } from '../../src/web/verify/view-model.js';
 
 const GENOME = {
@@ -168,7 +170,7 @@ describe('verify view-model: AUTHENTIC', () => {
         ['FROM', '20 SEP 2026'],
         ['UNTIL', '20 SEP 2028'],
       ],
-      note: 'This piece is covered by the ORBES warranty until 20 September 2028.',
+      note: 'This piece is covered by the ORBES warranty against manufacturing defects until 20 September 2028: ORBES repairs or replaces it.',
     });
     expect(vm.care).toBe('Wipe with a soft, dry cloth.');
     expect(vm.footnote).toBe(ASSURANCE_NOTE);
@@ -646,6 +648,48 @@ describe('verify view-model: assurance and warranty notes', () => {
     expect(vm.warranty?.status).toBe(label);
     expect(vm.warranty?.rows).toEqual([['STATUS', label]]);
     expect(vm.warranty?.note).toMatch(note);
+  });
+
+  it('says what each warranty covers once started (plan ORBES CARE, answers 10 and 12): the lifetime warranty without an end, the 2-year warranty until its date', () => {
+    const lifetime = resultViewModel(outcome('AUTHENTIC', { warranty: { status: 'ACTIVE', startDate: '2026-10-14', lifetime: true } }));
+    expect(lifetime.warranty).toEqual({
+      status: 'ACTIVE · LIFETIME',
+      rows: [
+        ['STATUS', 'ACTIVE · LIFETIME'],
+        ['FROM', '14 OCT 2026'],
+      ],
+      note: 'This piece is covered for life by the ORBES warranty: if it tarnishes, fades or breaks by accident, ORBES replaces it.',
+    });
+    // An end date sent with a lifetime warranty is never shown: it has none.
+    expect(warrantyModel({ status: 'ACTIVE', startDate: '2026-10-14', endDate: '2028-10-14', lifetime: true })!.rows.map((r) => r[0])).toEqual(['STATUS', 'FROM']);
+    expect(warrantyModel({ status: 'ACTIVE', startDate: '2026-10-14', endDate: '2028-10-14' })).toEqual({
+      status: 'ACTIVE',
+      rows: [
+        ['STATUS', 'ACTIVE'],
+        ['FROM', '14 OCT 2026'],
+        ['UNTIL', '14 OCT 2028'],
+      ],
+      note: 'This piece is covered by the ORBES warranty against manufacturing defects until 14 October 2028: ORBES repairs or replaces it.',
+    });
+    expect(warrantyModel({ status: 'ACTIVE' })!.note).toBe('This piece is covered by the ORBES warranty against manufacturing defects: ORBES repairs or replaces it.');
+    // Not yet started: the lifetime warranty says so; a VOID one reads as before, its start kept.
+    expect(warrantyModel({ status: 'NOT_STARTED', lifetime: true })).toEqual({
+      status: 'NOT YET STARTED',
+      rows: [['STATUS', 'NOT YET STARTED']],
+      note: 'The ORBES lifetime warranty begins on the date of purchase from an ORBES boutique or authorised retailer.',
+    });
+    expect(warrantyModel({ status: 'NOT_STARTED' })!.note).toBe('The ORBES warranty begins on the date of purchase from an ORBES boutique or authorised retailer.');
+    expect(warrantyModel({ status: 'VOID', startDate: '2026-10-14', lifetime: true })).toEqual({
+      status: 'NO LONGER VALID',
+      rows: [
+        ['STATUS', 'NO LONGER VALID'],
+        ['FROM', '14 OCT 2026'],
+      ],
+      note: 'The ORBES warranty no longer applies to this piece. Please contact ORBES Client Services.',
+    });
+    // The words are copy.ts's, shared with MY PIECES.
+    expect(lifetime.warranty!.note).toBe(ORBES_CARE.warranty.lifetime);
+    expect(ORBES_CARE.warranty.none).toBe('Warranty details for this piece are available from ORBES Client Services.');
   });
 
   it('never surfaces fields the server did not send', () => {

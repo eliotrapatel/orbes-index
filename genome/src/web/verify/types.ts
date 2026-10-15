@@ -78,7 +78,8 @@ export interface VerifyOutcome {
     discontinuedYear?: number;
   };
   genome?: { id: string; version: string; fingerprint: string; glyphs: number[]; ids: string[] };
-  warranty?: { status: WarrantyStatus; startDate?: string; endDate?: string };
+  /** `lifetime`: a lifetime warranty (plan ORBES CARE, answer 12), sent only when true; it has no end date. */
+  warranty?: { status: WarrantyStatus; startDate?: string; endDate?: string; lifetime?: true };
   ownership?: { registered: boolean; you: boolean; transferPending?: boolean };
   registration?: { token: string; expiresAt: string; claimCodeRequired: boolean };
   /**
@@ -183,7 +184,8 @@ export interface OwnedPiece {
   certificateAllowed: boolean;
   /** `version` is an integer here (1), `pattern` the glyph ids joined by "·". */
   genome: { id: string; version: number; fingerprint: string; glyphs: number[]; pattern: string } | null;
-  warranty: { status: WarrantyStatus; startDate?: string; endDate?: string };
+  /** `lifetime`: a lifetime warranty (plan ORBES CARE, answer 12), sent only when true. */
+  warranty: { status: WarrantyStatus; startDate?: string; endDate?: string; lifetime?: true };
   /** The model's reference photograph (F-04): `/api/v1/media/<sha256>`, or null; never the piece's own (decision 9). */
   imageUrl: string | null;
   /** NOCTURNE N3, N6: its model's lookbook sheet (`<slug>`) when the model is PUBLIC there, or RESERVED and the account's tier reaches it, else null. */
@@ -252,6 +254,53 @@ export interface PieceCare {
   reason: 'AVAILABLE' | 'NOT_INCLUDED' | 'USED' | 'PIECE_DONE' | 'UNAVAILABLE';
   /** The buyer name and address of the account's last order, to prefill the request's form; null without one. */
   addressHint?: { name: string; address: string } | null;
+  /**
+   * Plan ORBES CARE §2(a) item 3: the lowest tier PRIVATE CARE opens from in THE PROGRAM, with its allowance, whatever the
+   * account's tier; null when no tier includes it. Absent from a server before it.
+   */
+  opens?: { tier: string; allowance: number | 'ALL' } | null;
+  /** Plan ORBES CARE §2(a) item 2 (answer 9): the piece's warranty claim of this account; null without one. */
+  claim?: PieceClaim | null;
+}
+
+/** The steps of a warranty claim, its warranty, its outcome and why it was refused (the server's warranty_claims). */
+export type WarrantyClaimStatus = 'OPEN' | 'LABEL_SENT' | 'RECEIVED' | 'DECIDED' | 'DONE' | 'CANCELLED';
+export type WarrantyClaimBasis = 'LIFETIME' | 'TWO_YEARS' | 'LEGAL';
+export type WarrantyClaimOutcome = 'REPLACEMENT' | 'VALUE_CREDIT' | 'PART_CREDIT' | 'REPAIR' | 'PRICE_REDUCTION' | 'REFUND' | 'REFUSED';
+export type WarrantyClaimRefusal =
+  | 'LOST'
+  | 'THEFT_REPORTED'
+  | 'SCRATCHED'
+  | 'DAMAGED_ON_PURPOSE'
+  | 'DAMAGED_BY_SOMEONE_ELSE'
+  | 'ALTERED_OUTSIDE_ORBES'
+  | 'NO_FAULT_FOUND'
+  | 'WARRANTY_ENDED'
+  | 'WARRANTY_VOID';
+
+/**
+ * A warranty claim of a piece as its collector reads it (the care status's `claim`; plan ORBES CARE, answer 9): never a
+ * note nor who handled it. Shown while it is under way, and for 30 days after it ended.
+ */
+export interface PieceClaim {
+  id: string;
+  status: WarrantyClaimStatus;
+  basis: WarrantyClaimBasis;
+  openedAt: string;
+  /** The prepaid label, and whether its PDF can still be downloaded. */
+  label: (CareShipment & { pdf: boolean }) | null;
+  receivedAt: string | null;
+  outcome: WarrantyClaimOutcome | null;
+  refusalReason: WarrantyClaimRefusal | null;
+  /** A credit of value or a credit after the free replacement (the lifetime warranty): its amount and until when. */
+  credit: { amountMinor: number; currency: string; expiresAt: string } | null;
+  /** A price reduction's or a refund's amount (the legal guarantee). */
+  value: { amountMinor: number; currency: string } | null;
+  decidedAt: string | null;
+  /** The new piece, or the piece back. */
+  return: CareShipment | null;
+  doneAt: string | null;
+  cancelledAt: string | null;
 }
 
 /** POST /api/v1/ownership/incidents. */
@@ -316,7 +365,7 @@ export type CertificateLookup =
       piece: CertificatePiece;
       /** `since`: the day the ownership began, YYYY-MM-DD. */
       ownership: { verified: boolean; since: string };
-      warranty: { status: WarrantyStatus; startDate?: string; endDate?: string };
+      warranty: { status: WarrantyStatus; startDate?: string; endDate?: string; lifetime?: true };
       incidentReported: false;
     }
   | { status: 'NO_LONGER_VALID'; checkedAt: string };
@@ -710,6 +759,11 @@ export interface ClubInUse {
    * tiers' `credit`, for an account without a tier too; null when none is open.
    */
   birthdayCredit?: { balanceMinor: number; currency: string; expiresAt: string } | null;
+  /**
+   * The warranty credit (plan ORBES CARE, answer 9): what is left of the credits a lifetime warranty's claims gave, and
+   * until when, apart from the others; for an account without a tier too. Absent from a server before it; null when none.
+   */
+  warrantyCredit?: { balanceMinor: number; currency: string; expiresAt: string } | null;
   care: { year: number; used: number; allowance: number | 'ALL' } | null;
   gifts: { tier: ClubTierName; model: string; state: 'PENDING' | 'WITH_ORDER'; orderReference: string | null }[];
   /** THE PROGRAM's "Credit usable on": the orders the credit is taken off (the note under CREDIT names them). */

@@ -151,7 +151,7 @@ describe('MY PIECES: a piece on its plate', () => {
         ['FROM', '20 SEP 2026'],
         ['UNTIL', '20 SEP 2028'],
       ],
-      note: 'This piece is covered by the ORBES warranty until 20 September 2028.',
+      note: 'This piece is covered by the ORBES warranty against manufacturing defects until 20 September 2028: ORBES repairs or replaces it.',
     });
     // The very rows of a result's WARRANTY tab.
     const vm = resultViewModel({
@@ -165,6 +165,13 @@ describe('MY PIECES: a piece on its plate', () => {
     });
     expect(vm.warranty).toEqual(warrantyModel(w));
     expect(pieceModel(piece({ warranty: { status: 'BROKEN' as 'ACTIVE' } })).warranty).toBeUndefined();
+    // A lifetime warranty (plan ORBES CARE, answer 12): the piece's own kind, as on a result.
+    const life = { status: 'ACTIVE', startDate: '2026-10-14', lifetime: true } as const;
+    expect(pieceModel(piece({ warranty: life })).warranty).toEqual(warrantyModel(life));
+    expect(pieceModel(piece({ warranty: life })).warranty!.rows).toEqual([
+      ['STATUS', 'ACTIVE · LIFETIME'],
+      ['FROM', '14 OCT 2026'],
+    ]);
   });
 });
 
@@ -298,6 +305,17 @@ describe('MY PIECES: the service history', () => {
       ['RESIZE', 'CANCELLED · 1 OCT 2026'],
     ]);
     expect(serviceRows([])).toEqual([]);
+  });
+
+  it('names a YEARLY_CARE record PRIVATE CARE (plan ORBES CARE §2(a)), any other type as it is stored', () => {
+    expect(serviceRows([svc({ type: 'YEARLY_CARE', location: 'ORBES' }), svc({ type: 'WARRANTY_REPAIR', location: null }), svc({ type: 'INSPECTION', location: 'ORBES' })])).toEqual([
+      ['PRIVATE CARE', '1 OCT 2026 – 3 OCT 2026 · ORBES'],
+      ['WARRANTY REPAIR', '1 OCT 2026 – 3 OCT 2026'],
+      ['INSPECTION', '1 OCT 2026 – 3 OCT 2026 · ORBES'],
+    ]);
+    expect(PIECES.serviceTypes.YEARLY_CARE).toBe('PRIVATE CARE');
+    // A type named like an object's own key is read as stored, never from the prototype.
+    expect(serviceRows([svc({ type: 'constructor', location: null })])[0]![0]).toBe('CONSTRUCTOR');
   });
 });
 

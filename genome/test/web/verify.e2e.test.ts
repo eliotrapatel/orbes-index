@@ -1450,7 +1450,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await attrOf(tab('WARRANTY'), 'aria-selected', 'true');
     expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('WARRANTY');
     expect(await card.getByRole('tab').evaluateAll((els) => els.map((el) => (el as HTMLElement).tabIndex))).toEqual([-1, 0, -1, -1]);
-    await textOf(card.getByRole('tabpanel'), /STATUS ACTIVE FROM 20 SEP 2026 UNTIL 20 SEP 2028 This piece is covered by the ORBES warranty until 20 September 2028\./);
+    await textOf(card.getByRole('tabpanel'), /STATUS ACTIVE FROM 20 SEP 2026 UNTIL 20 SEP 2028 This piece is covered by the ORBES warranty against manufacturing defects until 20 September 2028: ORBES repairs or replaces it\./);
     await page.keyboard.press('ArrowRight');
     await attrOf(tab('SERVICE'), 'aria-selected', 'true');
     // The service history, without staff notes: its dates and place, then its kind.
@@ -3005,8 +3005,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(await tier.locator('.n-account__tier-pieces').evaluate((el) => getComputedStyle(el).fontFamily)).not.toMatch(/Gravesend/);
     await countOf(tier.locator('.n-meter__dot'), 10);
     await countOf(tier.locator('.n-meter__dot.is-on'), 5);
-    // IN USE (plan NEXT-NINE, BP-19 T10): PLATINE's credit and its yearly care of the year.
-    await textsOf(tier.locator('.n-account__in-use .n-kv__label'), ['CREDIT', 'YEARLY CARE']);
+    // IN USE (plan NEXT-NINE, BP-19 T10): PLATINE's credit and its PRIVATE CARE of the year (plan ORBES CARE, step 2.1).
+    await textsOf(tier.locator('.n-account__in-use .n-kv__label'), ['CREDIT', 'PRIVATE CARE']);
     // The program's lines of PLATINE, then the benefits of TITANE and PLATINE (none by default), then PALLADIUM: five
     // more pieces, its program's lines and what ORBES says it adds.
     await textsOf(tier.locator('.n-account__benefits:not(.n-account__benefits--next) .n-account__benefit'), [

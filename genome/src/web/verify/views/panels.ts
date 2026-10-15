@@ -4,6 +4,7 @@
  * view-model.
  */
 import { h } from '../../shared/dom.js';
+import { ORBES_CARE } from '../copy.js';
 import type { ResultViewModel } from '../view-model.js';
 import { definitionList } from './nocturne.js';
 import { writeButton } from './write.js';
@@ -22,7 +23,7 @@ export function productPanel(vm: ResultViewModel): HTMLElement {
 
 export function warrantyPanel(vm: ResultViewModel): HTMLElement {
   if (!vm.warranty) {
-    return h('div', { class: 'n-result__panel' }, h('p', { class: 'n-tx', text: 'Warranty details for this piece are available from ORBES Client Services.' }));
+    return h('div', { class: 'n-result__panel' }, h('p', { class: 'n-tx', text: ORBES_CARE.warranty.none }));
   }
   // A warranty that no longer applies sends the customer to Client Services: WRITE TO ORBES CLIENT SERVICES follows the
   // note, the scan attached, about its warranty (CS-01).

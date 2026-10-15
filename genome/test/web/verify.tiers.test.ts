@@ -68,19 +68,19 @@ describe('the tier at the head of MY PIECES (P-X04)', () => {
     expect(m.next!.benefits).toEqual(['Free express shipping on every order.', ...lines('PALLADIUM')]);
   });
 
-  it('shows IN USE only when a row exists: the credit and until when, the yearly care, one WELCOME GIFT row for the next order and one per order (plan NEXT-NINE, BP-19 T10)', () => {
+  it('shows IN USE only when a row exists: the credit and until when, PRIVATE CARE, one WELCOME GIFT row for the next order and one per order (plan NEXT-NINE, BP-19 T10)', () => {
     expect(inUseModel({ credit: null, care: null, gifts: [], creditChannels: ALL_CHANNELS })).toBeNull();
     expect(inUseModel(undefined)).toBeNull();
     expect(inUseModel({ credit: { balanceMinor: 5000, currency: 'EUR', expiresAt: '2027-10-06T09:00:00.000Z' }, care: { year: 2026, used: 0, allowance: 1 }, gifts: [], creditChannels: ALL_CHANNELS })).toEqual({
       label: 'IN USE',
       rows: [
         ['CREDIT', '€\u00a050 · UNTIL 6 OCT 2027'],
-        ['YEARLY CARE', '0 OF 1 PIECE IN 2026'],
+        ['PRIVATE CARE', '0 OF 1 PIECE IN 2026'],
       ],
       note: 'ORBES Client Services takes it off the invoice of a piece from a draw, a LIVE RELEASE or THE PRIVATE SALON.',
     });
-    expect(inUseModel({ credit: null, care: { year: 2026, used: 2, allowance: 'ALL' }, gifts: [], creditChannels: ALL_CHANNELS })!.rows).toEqual([['YEARLY CARE', 'EVERY PIECE · 2 IN 2026']]);
-    expect(inUseModel({ credit: null, care: { year: 2026, used: 1, allowance: 3 }, gifts: [], creditChannels: ALL_CHANNELS })!.rows).toEqual([['YEARLY CARE', '1 OF 3 PIECES IN 2026']]);
+    expect(inUseModel({ credit: null, care: { year: 2026, used: 2, allowance: 'ALL' }, gifts: [], creditChannels: ALL_CHANNELS })!.rows).toEqual([['PRIVATE CARE', 'EVERY PIECE · 2 IN 2026']]);
+    expect(inUseModel({ credit: null, care: { year: 2026, used: 1, allowance: 3 }, gifts: [], creditChannels: ALL_CHANNELS })!.rows).toEqual([['PRIVATE CARE', '1 OF 3 PIECES IN 2026']]);
     const gifts = inUseModel({
       credit: null,
       care: null,
@@ -111,7 +111,7 @@ describe('the tier at the head of MY PIECES (P-X04)', () => {
     const credit = { balanceMinor: 5000, currency: 'EUR', expiresAt: '2027-10-06T09:00:00.000Z' };
     const note = 'ORBES Client Services takes it off the invoice of a piece from a draw, a LIVE RELEASE or THE PRIVATE SALON.';
     expect(TIER.birthdayCredit).toBe('BIRTHDAY CREDIT');
-    // First, then CREDIT, YEARLY CARE and WELCOME GIFT as before.
+    // First, then CREDIT, PRIVATE CARE and WELCOME GIFT as before.
     expect(
       inUseModel({
         credit,
@@ -125,7 +125,7 @@ describe('the tier at the head of MY PIECES (P-X04)', () => {
       rows: [
         ['BIRTHDAY CREDIT', '€\u00a020 · UNTIL 12 APR 2027'],
         ['CREDIT', '€\u00a050 · UNTIL 6 OCT 2027'],
-        ['YEARLY CARE', '0 OF 1 PIECE IN 2027'],
+        ['PRIVATE CARE', '0 OF 1 PIECE IN 2027'],
         ['WELCOME GIFT', 'WITH YOUR NEXT ORDER'],
       ],
       note,
@@ -160,7 +160,7 @@ describe('the tier at the head of MY PIECES (P-X04)', () => {
       top: null,
       note: null,
     });
-    // A tier's credit, a yearly care or a welcome gift sent for an account without a tier still wait for their tier: that row only.
+    // A tier's credit, PRIVATE CARE or a welcome gift sent for an account without a tier still wait for their tier: that row only.
     const waiting = tierModel(
       {
         ...status(0, 0),
@@ -181,6 +181,32 @@ describe('the tier at the head of MY PIECES (P-X04)', () => {
     // No status of what is in use, or none open: THE CLUB as before.
     expect(tierModel(status(0, 0), 0).inUse).toBeNull();
     expect(tierModel({ ...status(0, 0), inUse: { credit: null, birthdayCredit: null, care: null, gifts: [], creditChannels: ALL_CHANNELS } }, 0).inUse).toBeNull();
+  });
+
+  it('shows a WARRANTY CREDIT after the birthday credit, with what is left and until when, the note with it, for an account without a tier too (plan ORBES CARE, answer 9)', () => {
+    const birthdayCredit = { balanceMinor: 2000, currency: 'EUR', expiresAt: '2027-04-12T21:59:59.999Z' };
+    const warrantyCredit = { balanceMinor: 13_500, currency: 'EUR', expiresAt: '2027-10-15T21:59:59.999Z' };
+    const credit = { balanceMinor: 5000, currency: 'EUR', expiresAt: '2027-10-06T09:00:00.000Z' };
+    const note = 'ORBES Client Services takes it off the invoice of a piece from a draw, a LIVE RELEASE or THE PRIVATE SALON.';
+    expect(TIER.warrantyCredit).toBe('WARRANTY CREDIT');
+    expect(inUseModel({ credit, birthdayCredit, warrantyCredit, care: { year: 2026, used: 0, allowance: 'ALL' }, gifts: [], creditChannels: ALL_CHANNELS })).toEqual({
+      label: 'IN USE',
+      rows: [
+        ['BIRTHDAY CREDIT', '€\u00a020 · UNTIL 12 APR 2027'],
+        ['WARRANTY CREDIT', '€\u00a0135 · UNTIL 15 OCT 2027'],
+        ['CREDIT', '€\u00a050 · UNTIL 6 OCT 2027'],
+        ['PRIVATE CARE', 'EVERY PIECE · 0 IN 2026'],
+      ],
+      note,
+    });
+    // Alone: its row and the note; none open, used up or malformed: no row.
+    expect(inUseModel({ credit: null, warrantyCredit, care: null, gifts: [], creditChannels: ALL_CHANNELS })).toEqual({ label: 'IN USE', rows: [['WARRANTY CREDIT', '€\u00a0135 · UNTIL 15 OCT 2027']], note });
+    for (const none of [null, undefined, { ...warrantyCredit, balanceMinor: 0 }, { balanceMinor: 1.5, currency: 'EUR', expiresAt: '2027-10-15T21:59:59.999Z' }, 'yes']) {
+      expect(inUseModel({ credit: null, warrantyCredit: none as never, care: null, gifts: [], creditChannels: ALL_CHANNELS }), JSON.stringify(none)).toBeNull();
+    }
+    // An account without a tier reads it, as the birthday credit (only the lifetime warranty gives one: answer 10).
+    const m = tierModel({ ...status(0, 0), inUse: { credit, warrantyCredit, care: { year: 2026, used: 0, allowance: 1 }, gifts: [], creditChannels: ALL_CHANNELS } }, 0);
+    expect(m.inUse).toEqual({ label: 'IN USE', rows: [['WARRANTY CREDIT', '€\u00a0135 · UNTIL 15 OCT 2027']], note });
   });
 
   it('says PALLADIUM is the highest, with every benefit and no next tier', () => {

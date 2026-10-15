@@ -26,7 +26,7 @@
  */
 import { contactLines, type ContactLines } from '../shared/client-services.js';
 import { isLookbookSlug } from '../shared/lookbook.js';
-import { ASSURANCE_NOTE, CONTACT, DEFAULT_CARE, DISCONTINUED, FALLBACK_TITLES, MODEL_VARIANT, PHOTOS, RESALE_ACTION, RESALE_GUIDANCE } from './copy.js';
+import { ASSURANCE_NOTE, CONTACT, DEFAULT_CARE, DISCONTINUED, FALLBACK_TITLES, MODEL_VARIANT, ORBES_CARE, PHOTOS, RESALE_ACTION, RESALE_GUIDANCE } from './copy.js';
 import { scanContext, warrantyContext, type WriteContext } from './messages-model.js';
 import type { StoryInput } from './story-card.js';
 import { VERIFICATION_STATES, type ClientServices, type VerificationState, type VerifyOutcome, type WarrantyStatus } from './types.js';
@@ -281,23 +281,22 @@ export function shortReference(scanId: string): string {
   return /^[0-9a-f]{6,}$/i.test(head) ? head.toUpperCase() : '';
 }
 
-const WARRANTY_STATUS: Readonly<Record<WarrantyStatus, string>> = Object.freeze({
-  NOT_STARTED: 'NOT YET STARTED',
-  ACTIVE: 'ACTIVE',
-  EXPIRED: 'EXPIRED',
-  VOID: 'NO LONGER VALID',
-});
+const W = ORBES_CARE.warranty;
 
-function warrantyNote(status: WarrantyStatus, end: string): string {
+/**
+ * The sentence under a warranty's rows (plan ORBES CARE §2(a) item 1): what it covers once started (answer 10: the
+ * lifetime warranty tarnish, fading and accidental break; the 2-year warranty manufacturing defects until its end date).
+ */
+function warrantyNote(status: WarrantyStatus, end: string, lifetime: boolean): string {
   switch (status) {
     case 'NOT_STARTED':
-      return 'The ORBES warranty begins on the date of purchase from an ORBES boutique or authorised retailer.';
+      return lifetime ? W.notStartedLifetime : W.notStarted;
     case 'ACTIVE':
-      return end ? `This piece is covered by the ORBES warranty until ${end}.` : 'This piece is covered by the ORBES warranty.';
+      return lifetime ? W.lifetime : W.active(end);
     case 'EXPIRED':
-      return 'The warranty period of this piece has ended. ORBES Client Services remains at your disposal for care and repair.';
+      return W.expired;
     case 'VOID':
-      return 'The ORBES warranty no longer applies to this piece. Please contact ORBES Client Services.';
+      return W.void;
   }
 }
 
@@ -390,13 +389,18 @@ export function discontinuedYearOf(year: unknown): number | null {
   return typeof year === 'number' && Number.isInteger(year) && year >= 1000 && year <= 9999 ? year : null;
 }
 
-/** The WARRANTY rows and their sentence, on a result and in MY PIECES; undefined for a status the app does not know. */
-export function warrantyModel(w: { status: WarrantyStatus; startDate?: string; endDate?: string } | undefined | null): { status: string; rows: Row[]; note: string } | undefined {
-  if (!w || !WARRANTY_STATUS[w.status]) return undefined;
-  const rows: Row[] = [['STATUS', WARRANTY_STATUS[w.status]]];
-  if (w.startDate) rows.push(['FROM', formatDate(w.startDate)]);
-  if (w.endDate) rows.push(['UNTIL', formatDate(w.endDate)]);
-  return { status: WARRANTY_STATUS[w.status], rows, note: warrantyNote(w.status, formatDateLong(w.endDate)) };
+/**
+ * The WARRANTY rows and their sentence, on a result and in MY PIECES; undefined for a status the app does not know. A
+ * lifetime warranty (`lifetime`, answer 12) reads ACTIVE · LIFETIME once started, and has no UNTIL row.
+ */
+export function warrantyModel(w: { status: WarrantyStatus; startDate?: string; endDate?: string; lifetime?: true } | undefined | null): { status: string; rows: Row[]; note: string } | undefined {
+  if (!w || !Object.hasOwn(W.status, w.status)) return undefined;
+  const lifetime = w.lifetime === true;
+  const status = lifetime && w.status === 'ACTIVE' ? W.activeLifetime : W.status[w.status];
+  const rows: Row[] = [[W.rows.status, status]];
+  if (w.startDate) rows.push([W.rows.from, formatDate(w.startDate)]);
+  if (w.endDate && !lifetime) rows.push([W.rows.until, formatDate(w.endDate)]);
+  return { status, rows, note: warrantyNote(w.status, formatDateLong(w.endDate), lifetime) };
 }
 
 /** Eight glyph indices of 0 to 15, as GENOME-01 defines them: anything else is not drawn. */

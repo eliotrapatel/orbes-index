@@ -233,7 +233,9 @@ describe('the runbook of the next nine (docs/launch/DEPLOY-NEXT-NINE.md)', () =>
     expect(runbook).toContain('`Ship with its order`');
     expect(admin('views/order.ts')).not.toContain('Ship with its order');
     const copy = readDoc('genome/src/web/verify/copy.ts');
-    for (const words of ['WRITE TO ORBES CLIENT SERVICES', 'MESSAGES', 'YOUR SIZES', 'THE CLUB', 'HOW RELEASES WORK', 'SHARE TO STORIES', 'SAVE IMAGE', 'PAIRS WELL WITH', 'THE RELEASES OF THIS MODEL', 'IN USE', 'REQUEST YEARLY CARE', 'TO CONFIRM', 'NOT SET']) {
+    // 2026-10-15, plan ORBES CARE step 2.1: REQUEST YEARLY CARE reads REQUEST PRIVATE CARE (answer 5). The runbook is a
+    // record of deployment G and keeps its words; the app's live words are no longer pinned to them.
+    for (const words of ['WRITE TO ORBES CLIENT SERVICES', 'MESSAGES', 'YOUR SIZES', 'THE CLUB', 'HOW RELEASES WORK', 'SHARE TO STORIES', 'SAVE IMAGE', 'PAIRS WELL WITH', 'THE RELEASES OF THIS MODEL', 'IN USE', 'TO CONFIRM', 'NOT SET']) {
       expect(runbook, words).toContain(words);
       expect(copy, words).toContain(`'${words}'`);
     }

@@ -231,7 +231,7 @@ export function pieceModel(p: OwnedPiece, opts: { now?: Date; offsetMinutes?: nu
 }
 
 /**
- * The SERVICE tab: one row per service, oldest first. The label is its type, the value its dates (opened to closed,
+ * The SERVICE tab: one row per service, oldest first. The label is its type (PIECES.serviceTypes), the value its dates (opened to closed,
  * or IN PROGRESS SINCE …, or CANCELLED …) and the place; staff notes never reach the owner.
  */
 export function serviceRows(services: readonly ServiceRecord[]): Row[] {
@@ -241,6 +241,8 @@ export function serviceRows(services: readonly ServiceRecord[]): Row[] {
     if (s.status === 'OPEN') when = `${PIECES.serviceStatus.OPEN} SINCE ${opened}`;
     else if (s.status === 'CANCELLED') when = `${PIECES.serviceStatus.CANCELLED} · ${opened}`;
     else when = s.closedAt && formatDate(s.closedAt) !== opened ? `${opened} – ${formatDate(s.closedAt)}` : opened;
-    return [upper(s.type).replace(/_/g, ' '), [when, upper(s.location)].filter((x) => x.length > 0).join(' · ')] as const;
+    // PRIVATE CARE for a YEARLY_CARE record (plan ORBES CARE §2(a)); any other type as it is stored.
+    const kind = Object.hasOwn(PIECES.serviceTypes, s.type) ? PIECES.serviceTypes[s.type]! : upper(s.type).replace(/_/g, ' ');
+    return [kind, [when, upper(s.location)].filter((x) => x.length > 0).join(' · ')] as const;
   });
 }

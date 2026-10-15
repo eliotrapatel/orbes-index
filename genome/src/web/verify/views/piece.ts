@@ -337,7 +337,7 @@ class PieceCard {
 
   private warrantyPanel(): HTMLElement {
     const w = this.model.warranty;
-    if (!w) return h('div', { class: 'n-piece__panel' }, h('p', { class: 'n-tx', text: 'Warranty details for this piece are available from ORBES Client Services.' }));
+    if (!w) return h('div', { class: 'n-piece__panel' }, h('p', { class: 'n-tx', text: ORBES_CARE.warranty.none }));
     return h('div', { class: 'n-piece__panel' }, definitionList(w.rows, { kind: 'kv' }), h('p', { class: 'n-tx n-piece__note', text: w.note }));
   }
 

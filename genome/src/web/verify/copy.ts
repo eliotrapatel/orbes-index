@@ -315,6 +315,11 @@ export const PIECES = Object.freeze({
   noService: 'No service has been recorded for this piece.',
   serviceFailed: 'The service history could not be shown just now.',
   serviceStatus: Object.freeze({ OPEN: 'IN PROGRESS', COMPLETED: 'COMPLETED', CANCELLED: 'CANCELLED' }),
+  /**
+   * A service's label in SERVICE HISTORY by its type (plan ORBES CARE §2(a)): YEARLY_CARE reads PRIVATE CARE; any other
+   * type reads as it is stored, in capitals, its underscores as spaces.
+   */
+  serviceTypes: Object.freeze({ YEARLY_CARE: 'PRIVATE CARE' }) as Readonly<Record<string, string>>,
   // The ownership certificate (F-06), in the OWNERSHIP tab of a piece that is not reported lost or stolen.
   certificateTitle: 'OWNERSHIP CERTIFICATE',
   certificateLead:
@@ -629,24 +634,119 @@ export const ORBES_CARE = Object.freeze({
   /** The accessible name of SUBSCRIBE: it opens another page, in a new tab. */
   subscribeLabel: 'Subscribe to ORBES Care, in a new tab',
   soon: 'Subscriptions open soon.',
+  /**
+   * The WARRANTY of a piece (plan ORBES CARE §2(a) item 1, answers 10 and 12), on a result and in MY PIECES: its rows and
+   * the one sentence under them, which says what that warranty covers. `lifetime` is the piece's own warranty kind, as
+   * its model gives it: a lifetime warranty has no end date, and never reads EXPIRED.
+   */
+  warranty: Object.freeze({
+    /** The section's label in the ORBES CARE tab. */
+    label: 'WARRANTY',
+    rows: Object.freeze({ status: 'STATUS', from: 'FROM', until: 'UNTIL' }),
+    status: Object.freeze({ NOT_STARTED: 'NOT YET STARTED', ACTIVE: 'ACTIVE', EXPIRED: 'EXPIRED', VOID: 'NO LONGER VALID' }),
+    /** STATUS of a lifetime warranty once started. */
+    activeLifetime: 'ACTIVE · LIFETIME',
+    notStarted: 'The ORBES warranty begins on the date of purchase from an ORBES boutique or authorised retailer.',
+    notStartedLifetime: 'The ORBES lifetime warranty begins on the date of purchase from an ORBES boutique or authorised retailer.',
+    lifetime: 'This piece is covered for life by the ORBES warranty: if it tarnishes, fades or breaks by accident, ORBES replaces it.',
+    /** The 2-year warranty: manufacturing defects only, repaired or replaced, until its end date (written in full). */
+    active: (until: string) =>
+      until
+        ? `This piece is covered by the ORBES warranty against manufacturing defects until ${until}: ORBES repairs or replaces it.`
+        : 'This piece is covered by the ORBES warranty against manufacturing defects: ORBES repairs or replaces it.',
+    expired: 'The warranty period of this piece has ended. ORBES Client Services remains at your disposal for care and repair.',
+    void: 'The ORBES warranty no longer applies to this piece. Please contact ORBES Client Services.',
+    /** No warranty the app can read: on a result and in MY PIECES alike. */
+    none: 'Warranty details for this piece are available from ORBES Client Services.',
+  }),
+  /** The ORBES CARE tab's last words, above WRITE TO ORBES CLIENT SERVICES in MY PIECES (and on a result). */
+  contact: 'A question about this piece, its warranty or its care: ORBES Client Services answers in MESSAGES.',
 });
 
 /**
- * YEARLY CARE (plan NEXT-NINE of 2026-10-06, §3.2 BP-19 T6), in a piece's SERVICE tab above SERVICE HISTORY: the yearly
- * care a PLATINE or PALLADIUM tier includes, asked for from the piece with the address it returns to, then each step.
- * Shown only when the account's tier has a care allowance (or a request of the piece is still open). Apart from ORBES
- * CARE, the subscription of the CARE tab, which stays as it is. The prepaid label is shown here only.
+ * A WARRANTY CLAIM in a piece's ORBES CARE tab (plan ORBES CARE §2(a) item 2, answer 9): its state as ORBES Client
+ * Services take it, from the prepaid label to the outcome. Nothing here starts or feeds a claim: a collector writes to
+ * ORBES Client Services in MESSAGES, who open it. The words of the outcome follow the claim's warranty (answer 10): the
+ * lifetime warranty, the 2-year warranty, or the legal guarantee.
+ */
+const CLAIM_CREDIT = (amount: string, until: string) =>
+  amount && until ? `a credit of ${amount} toward a new piece is in your account until ${until}` : 'a credit toward a new piece is in your account';
+
+export const WARRANTY_CLAIM = Object.freeze({
+  /** The block's label, and its accessible name. */
+  label: 'WARRANTY CLAIM',
+  open: 'ORBES Client Services is preparing your prepaid label. It will appear here.',
+  labelTitle: 'YOUR PREPAID LABEL',
+  labelText: 'Print it, pack the piece in its box and hand it to the carrier. ORBES answers once it has received the piece.',
+  download: 'DOWNLOAD LABEL',
+  carrier: 'CARRIER',
+  tracking: 'TRACKING NUMBER',
+  track: 'TRACK THE SHIPMENT',
+  received: 'WITH ORBES',
+  receivedText: 'ORBES has received your piece and is examining it.',
+  /** The same piece, new: decided, then shipped. */
+  replacement: 'Your new piece is being prepared. Its shipment will appear here.',
+  replaced: 'REPLACED',
+  replacedText: 'Your new piece is on its way. Register it with the certificate card in its box.',
+  /** The lifetime warranty's credit of the piece's value (the model no longer made), and its credit after the free replacement. */
+  valueCredit: (amount: string, until: string) => `This model is no longer made: ${CLAIM_CREDIT(amount, until)}.`,
+  partCredit: (amount: string, until: string) =>
+    amount && until ? `A credit of ${amount} toward a new piece is in your account until ${until}.` : 'A credit toward a new piece is in your account.',
+  /** The piece goes back to its owner: decided, then shipped. */
+  returned: 'Your piece is returned to you.',
+  onItsWay: 'Your piece is on its way back.',
+  repaired: Object.freeze({
+    TWO_YEARS: 'Your piece has been repaired under the ORBES warranty.',
+    LEGAL: 'Your piece has been repaired under the legal guarantee.',
+  }),
+  /** After a repair, once shipped. */
+  repairedBack: 'It is on its way back.',
+  priceReduction: (amount: string) => `Under the legal guarantee, the price of your piece is reduced by ${amount}: the seller pays it back to you.`,
+  refund: (amount: string) => `Under the legal guarantee, your piece is refunded, ${amount}: the seller pays it back to you (for an ORBES order, with its credit note in ORDERS).`,
+  refused: (reason: string) => `Not covered by the warranty: ${reason}.`,
+  refusedLegal: (reason: string) => `Not covered by the legal guarantee: ${reason}.`,
+  /** Why a claim is refused, each warranty with its own list (the server's). */
+  reasons: Object.freeze({
+    LOST: 'the piece is lost',
+    THEFT_REPORTED: 'its theft is reported',
+    SCRATCHED: 'it is scratched',
+    DAMAGED_ON_PURPOSE: 'it was damaged on purpose',
+    DAMAGED_BY_SOMEONE_ELSE: 'it was damaged by someone else',
+    ALTERED_OUTSIDE_ORBES: 'it was altered or repaired outside ORBES',
+    WARRANTY_ENDED: 'its warranty has ended',
+    WARRANTY_VOID: 'its warranty no longer applies',
+  }),
+  /** NO_FAULT_FOUND, in the words of the claim's warranty. */
+  noFault: Object.freeze({
+    LIFETIME: 'it shows no tarnish, fading or accidental break',
+    TWO_YEARS: 'it shows no manufacturing defect',
+    LEGAL: 'it shows no lack of conformity',
+  }),
+  cancelled: 'This claim was closed.',
+});
+
+/**
+ * PRIVATE CARE (plan NEXT-NINE of 2026-10-06, §3.2 BP-19 T6, named PRIVATE CARE by plan ORBES CARE, answer 5; its
+ * internal name YEARLY_CARE is kept): the inspection, cleaning and polishing of a piece by ORBES, free, once a year, that
+ * the tiers from PLATINE include, asked for from the piece with the address it returns to, then each step. Shown when the
+ * account's tier has a care allowance (or a request of the piece is still open); otherwise the tier it opens from, when
+ * THE PROGRAM gives one (`opens`). The prepaid label is shown here only.
  */
 const CARE_PIECES = (allowance: number | 'ALL') => (allowance === 'ALL' ? 'every piece' : allowance === 1 ? '1 piece' : `${allowance} pieces`);
+/** What a tier's allowance gives, as THE CLUB's line says it: every piece once a year each, or a number of pieces a year. */
+const CARE_OPENS = (allowance: number | 'ALL') =>
+  allowance === 'ALL' ? 'the inspection, cleaning and polishing of every piece by ORBES, free, once a year each' : `the inspection, cleaning and polishing of ${CARE_PIECES(allowance)} a year by ORBES, free`;
 
 export const YEARLY_CARE = Object.freeze({
   /** The block's label, and its accessible name. */
-  label: 'YEARLY CARE',
+  label: 'PRIVATE CARE',
   available: (tier: string, allowance: number | 'ALL', year: number) =>
-    `Your ${tier} tier includes the yearly care of ${CARE_PIECES(allowance)} in ${year}: inspection, cleaning and polishing by the ORBES atelier. ORBES Client Services sends you a prepaid label for this piece, and returns it to you at no cost.`,
-  request: 'REQUEST YEARLY CARE',
+    `Your ${tier} tier includes PRIVATE CARE for ${allowance === 'ALL' ? 'every piece, once a year each' : `${CARE_PIECES(allowance)} in ${year}`}: inspection, cleaning and polishing by ORBES, free of charge. ORBES Client Services sends you a prepaid label for this piece, and returns it to you at no cost.`,
+  /** A tier that includes none: the tier PRIVATE CARE opens from in THE PROGRAM, and what it gives. */
+  opens: (tier: string, allowance: number | 'ALL') => `PRIVATE CARE opens from ${tier}: ${CARE_OPENS(allowance)}.`,
+  request: 'REQUEST PRIVATE CARE',
   /** The request's own form, in place. */
-  confirm: (year: number) => `Request the yearly care of this piece for ${year}?`,
+  confirm: (year: number) => `Request PRIVATE CARE for this piece for ${year}?`,
   returnAddress: 'RETURN ADDRESS',
   returnLead: 'Where ORBES returns the piece once its care is done.',
   name: 'NAME',
@@ -666,15 +766,15 @@ export const YEARLY_CARE = Object.freeze({
   download: 'DOWNLOAD LABEL',
   carrier: 'CARRIER',
   tracking: 'TRACKING NUMBER',
-  received: 'AT THE ATELIER',
-  receivedText: 'The ORBES atelier has received your piece.',
+  received: 'WITH ORBES',
+  receivedText: 'ORBES has received your piece.',
   returning: 'ON ITS WAY BACK',
   track: 'TRACK THE SHIPMENT',
-  done: (year: number) => `Its yearly care for ${year} is complete. It is recorded in SERVICE HISTORY.`,
+  done: (year: number) => `Its PRIVATE CARE for ${year} is complete. It is recorded in SERVICE HISTORY.`,
   cancelled: 'This request was cancelled.',
-  used: (year: number) => `Your yearly care for ${year} has been used for another piece. It renews on 1 January.`,
-  pieceDone: (year: number) => `This piece has had its yearly care for ${year}.`,
-  unavailable: 'The yearly care cannot be requested for this piece just now.',
+  used: (year: number) => `Your PRIVATE CARE for ${year} has been used for another piece. It renews on 1 January.`,
+  pieceDone: (year: number) => `This piece has had its PRIVATE CARE for ${year}.`,
+  unavailable: 'PRIVATE CARE cannot be requested for this piece just now.',
   /**
    * CREATE TRANSFER CODE refused while the piece's care is REQUESTED or LABEL_SENT (409 CARE_OPEN, API §11.2): the
    * server's words (services/ownership.ts), PRIVATE CARE since plan ORBES CARE, step 1.4.
@@ -725,6 +825,11 @@ export const TIER = Object.freeze({
   inUse: 'IN USE',
   /** The birthday credit's row (plan CUSTOMER INTELLIGENCE §3.5 SB.4.5), first under IN USE, with `creditValue`; for an account without a tier too. */
   birthdayCredit: 'BIRTHDAY CREDIT',
+  /**
+   * A warranty credit (plan ORBES CARE §2(a), answer 9): a credit of the lifetime warranty, after BIRTHDAY CREDIT, with
+   * `creditValue`; for an account without a tier too.
+   */
+  warrantyCredit: 'WARRANTY CREDIT',
   credit: 'CREDIT',
   creditValue: (amount: string, date: string) => `${amount} · UNTIL ${date}`,
   /**
@@ -732,7 +837,7 @@ export const TIER = Object.freeze({
    * words of the program's credit line (services/club-program.ts CHANNEL_WORDS, `a, b or c`).
    */
   creditNote: (channels: readonly ('DRAW' | 'LIVE' | 'SALON')[]) => `ORBES Client Services takes it off the invoice of a piece from ${CREDIT_ON(channels)}.`,
-  care: 'YEARLY CARE',
+  care: 'PRIVATE CARE',
   careOf: (used: number, allowance: number, year: number) => `${used} OF ${allowance} ${allowance === 1 ? 'PIECE' : 'PIECES'} IN ${year}`,
   careAll: (used: number, year: number) => `EVERY PIECE · ${used} IN ${year}`,
   gift: 'WELCOME GIFT',
