@@ -18,7 +18,9 @@
  * exports read by an AUDITOR, the order CSV masked, the Shopify ids pasted back by an OPERATOR; the Messages board of
  * the next nine, CS-01, read by an AUDITOR, its conversations answered, taken and closed by an OPERATOR, assigned by an
  * ADMIN; THE PROGRAM of the club's tiers and the orders' shipping rates, BP-19 T2, read by an AUDITOR, set by an ADMIN;
- * the Yearly care board, BP-19 T6, read by an AUDITOR, its steps taken by an OPERATOR; THE HOUSE'S GUARANTEE, IN-01,
+ * the Yearly care board, BP-19 T6, read by an AUDITOR, its steps taken by an OPERATOR; the warranty claims (plan ORBES
+ * CARE, answer 11) read by an AUDITOR, opened, received, decided, moved to the legal guarantee, shipped and closed by
+ * an OPERATOR, their label sent on the Yearly care board's label path; THE HOUSE'S GUARANTEE, IN-01,
  * granted, changed and revoked by an OPERATOR, its defaults read by an AUDITOR and set by an ADMIN; a model's Sizes, AC-01,
  * read by an AUDITOR and set by an OPERATOR, its sizes declared, removed and reinstated by an OPERATOR (NEXT LOT §3.3); GROWTH, BP-29, read by an AUDITOR;
  * the suppliers, read by an AUDITOR, added and changed by an OPERATOR, a model's supplier set by an OPERATOR, NEXT LOT §3.5.6.2;
@@ -248,6 +250,17 @@ const PROBES: Probe[] = [
   { group: 'care', method: 'POST', url: `/api/admin/care/${UUID}/return`, body: INVALID, min: 'OPERATOR' },
   { group: 'care', method: 'POST', url: `/api/admin/care/${UUID}/complete`, body: INVALID, min: 'OPERATOR' },
   { group: 'care', method: 'POST', url: `/api/admin/care/${UUID}/cancel`, body: INVALID, min: 'OPERATOR' },
+  // Plan ORBES CARE (answer 11): the warranty claims read by an AUDITOR, every step an OPERATOR's (`/decide` and
+  // `/legal` included); the label goes through the care label path above.
+  { group: 'warranty-claims', method: 'GET', url: '/api/admin/warranty-claims', min: 'AUDITOR' },
+  { group: 'warranty-claims', method: 'GET', url: '/api/admin/warranty-claims?status=OPEN', min: 'AUDITOR' },
+  { group: 'warranty-claims', method: 'GET', url: `/api/admin/warranty-claims/${UUID}`, min: 'AUDITOR' },
+  { group: 'warranty-claims', method: 'POST', url: '/api/admin/warranty-claims', body: INVALID, min: 'OPERATOR' },
+  { group: 'warranty-claims', method: 'POST', url: `/api/admin/warranty-claims/${UUID}/receive`, body: INVALID, min: 'OPERATOR' },
+  { group: 'warranty-claims', method: 'POST', url: `/api/admin/warranty-claims/${UUID}/decide`, body: INVALID, min: 'OPERATOR' },
+  { group: 'warranty-claims', method: 'POST', url: `/api/admin/warranty-claims/${UUID}/legal`, body: INVALID, min: 'OPERATOR' },
+  { group: 'warranty-claims', method: 'POST', url: `/api/admin/warranty-claims/${UUID}/ship`, body: INVALID, min: 'OPERATOR' },
+  { group: 'warranty-claims', method: 'POST', url: `/api/admin/warranty-claims/${UUID}/cancel`, body: INVALID, min: 'OPERATOR' },
   // IN-01: THE HOUSE'S GUARANTEE granted, changed and revoked by an OPERATOR (grantGuarantee), a release's guarantees and
   // the defaults read by an AUDITOR, the defaults set by an ADMIN (manageGuaranteeSettings).
   { group: 'guarantees', method: 'POST', url: `/api/admin/owners/${UUID}/guarantees`, body: INVALID, min: 'OPERATOR' },
@@ -523,6 +536,7 @@ describe('admin role enforcement', () => {
       'messages',
       'program',
       'care',
+      'warranty-claims',
       'guarantees',
       'sizes',
       'pairs',

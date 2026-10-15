@@ -7,7 +7,9 @@
  *   status       GET /api/v1/account/products/:productId/care: the year (UTC), the tier now, its allowance (a number,
  *                'ALL' or 0), the tier it opens from (`opens`, THE PROGRAM's lowest tier that includes it), the pieces
  *                asked for this year, the piece's own request, and why it may or may not be asked for (`reason`). The
- *                tier is the one held now (services/club.ts tierOf); no grace period.
+ *                tier is the one held now (services/club.ts tierOf); no grace period. With it, the piece's warranty
+ *                claim of the account (`claim`, plan ORBES CARE: services/warranty-claims.ts collectorClaim), so the
+ *                ORBES CARE tab reads both in one request.
  *   addressHint  the buyer name and address of the account's latest order that has an address, to prefill the request's
  *                own form (its own account only), or null.
  *   request      POST …/care {name, address}: an ACTIVE account, holding the piece now (an open ownership), the piece
@@ -47,6 +49,7 @@ import { findProduct } from './lifecycle.js';
 import { trackingLink } from './orders.js';
 import { TRANSFERABLE_STATUSES } from './ownership.js';
 import type { WarrantyService } from './warranty.js';
+import type { CollectorClaim } from './warranty-claims.js';
 
 /** The label's PDF: at most 2 MiB (the CHECK of migration 0028; the console's upload route takes as much). */
 export const CARE_LABEL_MAX_BYTES = 2 * 1024 * 1024;
@@ -124,6 +127,8 @@ export interface CareStatus {
   /** The piece's request: an open one, else the account's latest of the year; null without one. */
   request: CareRequestView | null;
   reason: CareReason;
+  /** The piece's warranty claim of this account, as its ORBES CARE tab shows it (plan ORBES CARE, answer 9); null without one. */
+  claim: CollectorClaim | null;
 }
 
 /** A row of the console's Yearly care board. */
@@ -382,6 +387,8 @@ export interface CareServiceDeps {
   audit: AuditService;
   warranty: WarrantyService;
   clock?: Clock;
+  /** The piece's warranty claim for the account (services/warranty-claims.ts collectorClaim, given by context.ts); none without it. */
+  claimOf?: (db: Db, accountId: string, productUuid: string, now: Date) => Promise<CollectorClaim | null>;
 }
 
 export class CareService {
@@ -389,12 +396,14 @@ export class CareService {
   private readonly audit: AuditService;
   private readonly warranty: WarrantyService;
   private readonly clock: Clock;
+  private readonly claimOf: NonNullable<CareServiceDeps['claimOf']>;
 
   constructor(deps: CareServiceDeps) {
     this.db = deps.db;
     this.audit = deps.audit;
     this.warranty = deps.warranty;
     this.clock = deps.clock ?? systemClock;
+    this.claimOf = deps.claimOf ?? (async () => null);
   }
 
   // ── The collector ────────────────────────────────────────────────────────
@@ -425,6 +434,7 @@ export class CareService {
       used,
       request: shown ? await toView(this.db, shown) : null,
       reason,
+      claim: await this.claimOf(this.db, accountId, product.id, now),
     };
   }
 

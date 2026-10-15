@@ -45,7 +45,7 @@ import { EngagementService } from './services/engagement.js';
 import { runCollectorHistory, type HistoryMemo } from './services/collector-history.js';
 import { LikesService } from './services/likes.js';
 import { CareService, eraseCareLabels } from './services/care.js';
-import { WarrantyClaimService } from './services/warranty-claims.js';
+import { collectorClaim, WarrantyClaimService } from './services/warranty-claims.js';
 import { GuaranteeService } from './services/guarantees.js';
 import { SizeService } from './services/sizes.js';
 import { AddressService } from './services/addresses.js';
@@ -342,7 +342,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const tierGrants = new TierGrantService({ db, audit, clock, log });
     const birthdayCredits = new BirthdayCreditService({ db, audit, clock, log });
     const engagement = new EngagementService({ db, clock, log });
-    const care = new CareService({ db, audit, warranty, clock });
+    const care = new CareService({ db, audit, warranty, clock, claimOf: collectorClaim });
     const warrantyClaims = new WarrantyClaimService({ db, audit, warranty, lifecycle, clock });
     const guarantees = new GuaranteeService({ db, audit, clock });
     const sizes = new SizeService({ db, audit, clock });

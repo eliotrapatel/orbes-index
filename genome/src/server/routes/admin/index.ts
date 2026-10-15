@@ -16,7 +16,9 @@
  * photograph routes (media.ts: an image of at most 1 MiB, F-04; a photograph
  * of a model's lookbook gallery, P-R02; a photograph of a post of the circle,
  * P-X01; the silhouette of a LIVE RELEASE) and the prepaid label of a yearly
- * care (care.ts: a PDF of at most 2 MiB, BP-19 T6). RETAIL (A-08, a seller's account)
+ * care or of a warranty claim (care.ts: a PDF of at most 2 MiB, BP-19 T6; plan ORBES CARE). The warranty claims
+ * (warranty-claims.ts, plan ORBES CARE) are read by an AUDITOR and opened, received, decided, moved to the legal
+ * guarantee, shipped and closed by an OPERATOR; a model's warranty is changed by an ADMIN (catalog.ts). RETAIL (A-08, a seller's account)
  * reaches only the routes that declare it: the sale mode, the list of points
  * of sale and its own session, password and second factor.
  */
@@ -64,6 +66,7 @@ import { adminSignUpRoutes } from './sign-up.js';
 import { adminSupplierOrderRoutes } from './supplier-orders.js';
 import { adminSystemRoutes } from './system.js';
 import { adminTestEntrantRoutes } from './test-entrants.js';
+import { adminWarrantyClaimRoutes } from './warranty-claims.js';
 
 export interface AdminRouteDeps extends RouteDeps {
   /** Admin sessions must have passed TOTP (except on the auth routes). */
@@ -90,6 +93,7 @@ export const adminRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, deps)
   await app.register(adminClientSheetRoutes, deps);
   await app.register(adminMessageRoutes, deps);
   await app.register(adminCareRoutes, deps);
+  await app.register(adminWarrantyClaimRoutes, deps);
   await app.register(adminGuaranteeRoutes, deps);
   await app.register(adminDropRoutes, deps);
   await app.register(adminLiveRoutes, deps);

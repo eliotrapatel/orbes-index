@@ -53,11 +53,15 @@ import {
   SUPPLIER_ORDER_STATUSES,
   SUPPLIER_RETURN_SETTLEMENTS,
   VERIFICATION_STATES,
+  WARRANTY_CLAIM_OUTCOMES,
+  WARRANTY_CLAIM_REFUSALS,
+  WARRANTY_CLAIM_STATUSES,
 } from '../db/schema.js';
 import { BASE_PRICE_MAX_MINOR, CARE_GUIDE_MAX, MODEL_IDENTITY_MESSAGE, VARIANT_LABEL_MAX } from '../services/catalog.js';
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
 import { CIRCLE_BODY_MAX, CIRCLE_CAPACITY_MAX, CIRCLE_PLACE_MAX, CIRCLE_POLL_OPTION_MAX, CIRCLE_POLL_OPTIONS, CIRCLE_TITLE_MAX, CIRCLE_URL_MAX } from '../services/circle.js';
 import { CARE_ADDRESS_LIMITS } from '../services/care.js';
+import { CLAIM_NOTE_MAX } from '../services/warranty-claims.js';
 import { CLAIM_RENEWAL_REASON_MAX, CLAIM_SITUATIONS } from '../services/claim-renewals.js';
 import { GUARANTEE_NOTE_MAX, GUARANTEE_PIECES, GUARANTEE_VALID_DAYS } from '../services/guarantees.js';
 import { CLUB_TIER_BENEFITS_MAX } from '../services/club.js';
@@ -1963,6 +1967,50 @@ export const careCompleteBody = optionalBody({ notes: optionalText(4000) });
 
 /** POST /api/admin/care/:id/cancel: a note, for ORBES only (1 to 500 characters). */
 export const careCancelBody = body({ note: text(CARE_ADDRESS_LIMITS.note) });
+
+// ── The warranty claims (plan ORBES CARE, §2(c), step 1.7) ───────────────
+
+const claimNote = z.preprocess((v) => (v === '' ? null : v), text(CLAIM_NOTE_MAX).nullable().optional());
+
+/** A warranty claim (GET /api/admin/warranty-claims/:id, its steps; GET /api/v1/account/warranty-claims/:id/label.pdf). */
+export const warrantyClaimParams = z.object({ id: uuid });
+
+/** GET /api/admin/warranty-claims: a status's filter. */
+export const adminWarrantyClaimsQuery = z.object({ status: queryOptional(z.enum(WARRANTY_CLAIM_STATUSES)) });
+
+/**
+ * POST /api/admin/warranty-claims: the collector's conversation (null for a legal claim of a buyer without an ORBES
+ * account, its receipt in the note), the piece, the ORBES warranty (its kind read from the piece) or the legal guarantee,
+ * a staff note (1 to 500 characters).
+ */
+export const warrantyClaimOpenBody = body({
+  conversationId: uuid.nullable(),
+  productId: productRef,
+  basis: z.enum(['WARRANTY', 'LEGAL']),
+  note: claimNote,
+});
+
+/**
+ * POST /api/admin/warranty-claims/:id/decide: the outcome, a refusal's reason, a replacement's identity and « Another
+ * size », the value when none is found or a price reduction's amount (minor units). services/warranty-claims.ts checks
+ * what the claim's basis allows.
+ */
+export const warrantyClaimDecideBody = body({
+  outcome: z.enum(WARRANTY_CLAIM_OUTCOMES),
+  refusalReason: z.enum(WARRANTY_CLAIM_REFUSALS).nullable().optional(),
+  replacementProductId: productRef.nullable().optional(),
+  otherSize: z.boolean().optional(),
+  valueMinor: z.number().int('Must be a whole number of cents').min(1, 'At least 1').max(ORDER_AMOUNT_MAX_MINOR, `At most ${ORDER_AMOUNT_MAX_MINOR}`).nullable().optional(),
+});
+
+/** POST /api/admin/warranty-claims/:id/ship: the carrier and tracking number of the new piece, or of the piece back. */
+export const warrantyClaimShipBody = body({ carrierId: uuid, tracking: careTracking });
+
+/** POST /api/admin/warranty-claims/:id/cancel: why it is closed (1 to 500 characters). */
+export const warrantyClaimCancelBody = body({ note: text(CLAIM_NOTE_MAX) });
+
+/** POST /api/admin/warranty-claims/:id/legal: a note, required for a boutique sale's receipt (services/warranty-claims.ts). */
+export const warrantyClaimLegalBody = optionalBody({ note: claimNote });
 
 // ── THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01) ─────────────────────────
 

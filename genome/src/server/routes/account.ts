@@ -20,7 +20,7 @@ import { forbidden } from '../errors.js';
 import { connectionPlace } from '../geo/place.js';
 import { userAgentOf } from '../http/client.js';
 import { rateLimitHook } from '../http/rate-limit.js';
-import { accountAddressBody, accountAddressParams, accountAddressUpdateBody, accountClaimCodeBody, accountDocumentParams, accountEngravingBody, accountOrderCaseBody, accountOrderAddressBody, accountOrderParams, accountProfileBody, accountSizesBody, careParams, careRequestBody, changePasswordBody, emptyBody, loginBody, lookbookParams, parse, productParams, recoverAccountBody, registerAccountBody } from '../http/schemas.js';
+import { accountAddressBody, accountAddressParams, accountAddressUpdateBody, accountClaimCodeBody, accountDocumentParams, accountEngravingBody, accountOrderCaseBody, accountOrderAddressBody, accountOrderParams, accountProfileBody, accountSizesBody, careParams, careRequestBody, changePasswordBody, emptyBody, loginBody, lookbookParams, parse, productParams, recoverAccountBody, registerAccountBody, warrantyClaimParams } from '../http/schemas.js';
 import { accountActor, clearSessionCookie, clientMeta, requireAccount, sessionGuard, sessionToken, setSessionCookie } from '../http/sessions.js';
 import type { AccountProfile } from '../services/auth.js';
 import { findProduct } from '../services/lifecycle.js';
@@ -39,7 +39,7 @@ export function accountJson(a: AccountProfile): { email: string; displayName: st
 export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limiters }) => {
   app.addHook('onRequest', rateLimitHook(limiters, 'api'));
   app.addHook('onRequest', sessionGuard(ctx, { kind: 'account' }));
-  const { addresses, auth, care, claimRenewals, invoices, orders, ownership, ownershipCertificates, pastReleases, profiles, questions, recovery, sizes, warranty, wishlist } = ctx.services;
+  const { addresses, auth, care, claimRenewals, invoices, orders, ownership, ownershipCertificates, pastReleases, profiles, questions, recovery, sizes, warranty, warrantyClaims, wishlist } = ctx.services;
 
   // CREATE ACCOUNT (plan CUSTOMER INTELLIGENCE §3.1 P.4.2): the first and last name and the country required here, in the
   // collector's words; the optional answer to « How did you hear about ORBES? » never refuses a sign-up.
@@ -346,7 +346,8 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
 
   // The yearly care (plan NEXT-NINE, BP-19 T6; API §10.18): asked for from a piece the account holds, with the address
   // it returns to in the request's own form (prefilled from the account's last order); its prepaid label downloaded
-  // here only, by its own account (404 for any other). Nothing is written in MESSAGES.
+  // here only, by its own account (404 for any other). Nothing is written in MESSAGES. Its status carries the tier it
+  // opens from (`opens`) and the piece's warranty claim (`claim`, plan ORBES CARE).
   // Every answer of the piece's care carries the address hint, the POSTs' too, so that after CANCEL REQUEST the form
   // opens prefilled again (to change the address, the collector cancels and asks again). It is read once the status
   // has settled, so a request's transaction never waits on a read beside it.
@@ -380,6 +381,15 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
     const { account } = requireAccount(request);
     const { id } = parse(careParams, request.params);
     return sendPdf(reply, await care.labelPdf(account.id, id));
+  });
+
+  // A warranty claim's prepaid label (plan ORBES CARE, answer 9): opened by Client Services from the collector's
+  // conversation, followed in the piece's ORBES CARE tab (the care status's `claim`), downloaded here by its own
+  // account only (404 for any other, and once erased). Nothing here starts or feeds a claim.
+  app.get('/api/v1/account/warranty-claims/:id/label.pdf', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(warrantyClaimParams, request.params);
+    return sendPdf(reply, await warrantyClaims.labelPdf(account.id, id));
   });
 
   app.get('/api/v1/products/:productId/service-history', async (request) => {

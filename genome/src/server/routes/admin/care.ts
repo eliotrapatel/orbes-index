@@ -7,7 +7,10 @@
  *   GET  /api/admin/care/:id             AUDITOR   a request: its facts, the address it returns to, the client's
  *                                                  conversation
  *   POST /api/admin/care/:id/label       OPERATOR  SEND LABEL: the PDF itself (`application/pdf`, at most 2 MiB), its
- *                                                  carrier and tracking number in the query (`?carrierId=&tracking=`)
+ *                                                  carrier and tracking number in the query (`?carrierId=&tracking=`);
+ *                                                  also a warranty claim's label (plan ORBES CARE): an id not of a
+ *                                                  request but of a claim is the claim's (warranty-claims.ts), and the
+ *                                                  claim is answered
  *   POST /api/admin/care/:id/receive     OPERATOR  RECEIVED AT THE ATELIER: the YEARLY_CARE record opened
  *   POST /api/admin/care/:id/return      OPERATOR  SHIP BACK {carrierId, tracking}
  *   POST /api/admin/care/:id/complete    OPERATOR  COMPLETE {notes?}: the record completed
@@ -27,6 +30,7 @@ import { adminActor } from '../../http/sessions.js';
 import { CARE_LABEL_MAX_BYTES, fileNotPdf, type CareBoardRow, type CareSheet } from '../../services/care.js';
 import type { AdminRouteDeps } from './index.js';
 import { clientEmail, orderBuyer, readsClientEmails } from './serialize.js';
+import { claimSheetJson } from './warranty-claims.js';
 
 /** The label's upload route (POST, role OPERATOR): the edge gives exactly it, besides the photographs, more than 64 KB. */
 export const CARE_LABEL_UPLOAD_ROUTE = '/api/admin/care/:id/label';
@@ -48,7 +52,7 @@ function sheetJson(s: CareSheet, inClear: boolean): CareSheet {
 }
 
 export const adminCareRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
-  const { care } = ctx.services;
+  const { care, warrantyClaims } = ctx.services;
 
   app.addContentTypeParser('application/pdf', { parseAs: 'buffer', bodyLimit: CARE_LABEL_BODY_LIMIT_BYTES }, (_request, body, done) => {
     const b = body as Buffer;
@@ -78,7 +82,11 @@ export const adminCareRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
     const { id } = parse(careParams, request.params);
     if (!(request.body instanceof PdfBody)) throw fileNotPdf();
     const q = parse(careLabelQuery, request.query);
-    return sheetJson(await care.sendLabel(id, { pdf: request.body.bytes, carrierId: q.carrierId, tracking: q.tracking }, adminActor(request)), readsClientEmails(request));
+    const label = { pdf: request.body.bytes, carrierId: q.carrierId, tracking: q.tracking };
+    // The one upload path the edge opens to a label (plan ORBES CARE): a care request's id first, else a warranty claim's.
+    const isRequest = await ctx.db.selectFrom('care_requests').select('id').where('id', '=', id).executeTakeFirst();
+    if (!isRequest && (await warrantyClaims.has(id))) return claimSheetJson(await warrantyClaims.label(id, label, adminActor(request)), readsClientEmails(request));
+    return sheetJson(await care.sendLabel(id, label, adminActor(request)), readsClientEmails(request));
   });
 
   app.post('/api/admin/care/:id/receive', async (request) => {

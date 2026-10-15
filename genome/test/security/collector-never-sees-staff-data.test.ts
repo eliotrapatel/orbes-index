@@ -7,7 +7,9 @@
  * The house is the NOCTURNE demo (test/support/nocturne-demo.ts, the full story the e2e tests and the boards read), its
  * collector you@example.com signed in. Before any reading, the sentinel gives that collector what staff hold about it:
  * a tag and a private note written through ClientNoteService, an `account_scores` row (the morning's score and its five
- * parts) and a `collector_history` row (a month's score, tier and activity). It checks the staff side reads them back
+ * parts), a `collector_history` row (a month's score, tier and activity) and a warranty claim on its first piece with
+ * Client Services' note (plan ORBES CARE, step 1.7: the care status's `claim` and the export's `warrantyClaims` are
+ * read as every reply is, never empty). It checks the staff side reads them back
  * (the client sheet, its Intelligence, the history row) and that its scanner finds them there: without that seeding the
  * sentinel fails, so it never passes on an empty house.
  *
@@ -20,7 +22,8 @@
  *  - the right-of-access JSON of that account (GET /api/admin/owners/:id/export, ADMIN), which goes to the collector.
  *
  * Every reply is scanned: no key `tags`, `privateNotes`, `score`, `scores`, `engagement`, the parts' names or the
- * history's; no tag's or note's words; no email of a console login; no email nor id of another account.
+ * history's, nor who opened or decided a claim; no tag's or note's words (the claim's note too); no email of a console
+ * login; no email nor id of another account.
  */
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -44,6 +47,7 @@ const NOT_READ: Readonly<Record<string, string>> = Object.freeze({
   '/api/v1/account/orders/:id/documents/:number': 'a PDF of the order, the collector’s own',
   '/api/v1/account/orders/:id/certificate.pdf': 'a PDF of the piece, the collector’s own',
   '/api/v1/account/care/:id/label.pdf': 'a PDF label of a care request',
+  '/api/v1/account/warranty-claims/:id/label.pdf': 'a PDF label of a warranty claim',
   '/api/v1/media/:sha256': 'a stored photograph',
   '/api/v1/live/:id/stream': 'the LIVE room’s event stream, the state GET /api/v1/live/:id/state carries',
 });
@@ -71,11 +75,17 @@ const STAFF_KEYS = new Set([
   'firstMonth',
   'first_month',
   'teamAccount',
+  // A warranty claim's staff side (plan ORBES CARE): who opened and who decided it.
+  'openedBy',
+  'decidedBy',
+  'opened_by',
+  'decided_by',
 ]);
 
 const TAG = 'SENTINEL ZQX';
 const NOTE = 'Sentinel note QZX: prefers a call after six.';
 const SCORE = 87;
+const CLAIM_NOTE = 'Sentinel claim note QXZ: the clasp, seen at the counter.';
 
 /** What a reply carries that it must not: keys of STAFF_KEYS, and the forbidden words (found in its text). */
 function findings(body: string, forbidden: readonly string[]): string[] {
@@ -113,6 +123,7 @@ describe('the collector never sees staff data (§3.6 C.9, §3.0 (k); step 9.13)'
   let you: Client;
   let admin: Client;
   let youId = '';
+  let claimId = '';
   /** Words no reply to the collector may hold: the tag, the note, console logins' emails, other accounts' emails and ids. */
   let forbidden: string[] = [];
   /** Every reply read, by what was asked. */
@@ -130,10 +141,23 @@ describe('the collector never sees staff data (§3.6 C.9, §3.0 (k); step 9.13)'
     await h.ctx.services.clientNotes.addNote(youId, NOTE, staff);
     await seedScore(h.t.db, youId, SCORE, h.clock.now());
     await h.t.db.insertInto('collector_history').values({ account_id: youId, first_month: '2026-09-01', scores: [SCORE], tiers: [1], active: [true], last_month: '2026-09-01' }).execute();
+    // A warranty claim on the collector's first piece (the one the care status below is read for), with Client Services' note.
+    const first = await h.t.db
+      .selectFrom('ownership as o')
+      .innerJoin('products as p', 'p.id', 'o.product_id')
+      .select('p.product_id')
+      .where('o.account_id', '=', youId)
+      .where('o.ended_at', 'is', null)
+      .orderBy('o.started_at')
+      .executeTakeFirstOrThrow();
+    const conversation =
+      (await h.t.db.selectFrom('client_conversations').select('id').where('account_id', '=', youId).executeTakeFirst()) ??
+      (await h.t.db.insertInto('client_conversations').values({ account_id: youId, status: 'ANSWERED', last_message_at: h.clock.now() }).returning('id').executeTakeFirstOrThrow());
+    claimId = (await h.ctx.services.warrantyClaims.open({ conversationId: conversation.id, productId: first.product_id, basis: 'WARRANTY', note: CLAIM_NOTE }, staff)).id;
 
     const accounts = await h.t.db.selectFrom('accounts').select(['id', 'email']).where('id', '<>', youId).execute();
     const logins = await h.t.db.selectFrom('admin_users').select('email').execute();
-    forbidden = [TAG, NOTE, ...logins.map((l) => l.email), ...accounts.flatMap((a) => [a.email, a.id])];
+    forbidden = [TAG, NOTE, CLAIM_NOTE, staff.id, ...logins.map((l) => l.email), ...accounts.flatMap((a) => [a.email, a.id])];
 
     you = h.client();
     you.cookies.set(sessionCookieName(h.ctx.config, 'account'), demo.accounts.you!.token);
@@ -157,6 +181,10 @@ describe('the collector never sees staff data (§3.6 C.9, §3.0 (k); step 9.13)'
     // The scanner is not blind: it reports the staff side.
     expect(findings(sheet.body, forbidden)).toEqual(expect.arrayContaining(['key $.tags', `text ${TAG}`, `text ${NOTE}`, 'key $.privateNotes']));
     expect(findings(intel.body, forbidden)).toEqual(expect.arrayContaining(['key $.engagement']));
+    // The claim: staff read its note and who opened it.
+    const claim = await admin.get(`/api/admin/warranty-claims/${claimId}`);
+    expect(claim.statusCode).toBe(200);
+    expect(findings(claim.body, forbidden)).toEqual(expect.arrayContaining([`text ${CLAIM_NOTE}`, 'key $.openedBy']));
   });
 
   it('every collector GET (and the lot’s /api/v1 replies) carries no tag, note, score, history, console login nor another collector’s data', async () => {
@@ -243,6 +271,8 @@ describe('the collector never sees staff data (§3.6 C.9, §3.0 (k); step 9.13)'
       expect(replies.get(`GET ${path}`)!.statusCode, path).toBe(200);
     }
     expect(replies.get('GET /go/:code')!.statusCode).toBe(302);
+    // The piece's care status carries its claim (plan ORBES CARE): the sentinel reads a real one.
+    expect((safeJson(replies.get('GET /api/v1/account/products/:productId/care')!) as { claim: { id: string } | null }).claim?.id).toBe(claimId);
 
     // The lot's replies to the collector's own writes: YOUR PROFILE saved as read, a heart on a model, a batch of views.
     const read = safeJson(replies.get('GET /api/v1/account/profile')!) as {
@@ -281,8 +311,9 @@ describe('the collector never sees staff data (§3.6 C.9, §3.0 (k); step 9.13)'
     expect(res.statusCode).toBe(200);
     const x = safeJson(res) as Record<string, unknown>;
     // Everything else held is there: its profile, its wishlist, its browsing, its origin.
-    for (const key of ['account', 'profile', 'tastes', 'wishlist', 'browsing', 'origin', 'orders']) expect(Object.keys(x), key).toContain(key);
+    for (const key of ['account', 'profile', 'tastes', 'wishlist', 'browsing', 'origin', 'orders', 'warrantyClaims']) expect(Object.keys(x), key).toContain(key);
     expect((x.account as { id: string }).id).toBe(youId);
+    expect((x.warrantyClaims as { id: string }[]).map((c) => c.id)).toEqual([claimId]);
     expect(findings(res.body, forbidden)).toEqual([]);
   });
 });
