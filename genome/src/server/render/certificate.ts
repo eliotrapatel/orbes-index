@@ -726,6 +726,8 @@ export const OWNERSHIP_CERTIFICATE_COPY = Object.freeze({
   unverified: 'REGISTERED · NOT YET VERIFIED',
   noIncident: 'NONE REPORTED',
   warranty: Object.freeze({ NOT_STARTED: 'NOT YET STARTED', ACTIVE: 'ACTIVE', EXPIRED: 'EXPIRED', VOID: 'NO LONGER VALID' }),
+  /** WARRANTY of a lifetime warranty once started (plan ORBES CARE, answers 10 and 12): it has no UNTIL row. */
+  activeLifetime: 'ACTIVE · LIFETIME',
   valid: (when: string) => `VALID ON ${when}`,
   statement: Object.freeze([
     'THIS CERTIFICATE ATTESTS WHAT THE ORBES REGISTRY RECORDED ABOUT THIS PIECE ON THE DATE ABOVE.',
@@ -788,7 +790,8 @@ export interface OwnershipCertificateDocument {
   verified: boolean;
   /** The day the ownership began, 'YYYY-MM-DD' (UTC). */
   since: string;
-  warranty: { status: WarrantySummaryStatus; startDate?: string; endDate?: string };
+  /** `lifetime` (plan ORBES CARE): present (true) only on a lifetime warranty, which has no end date. */
+  warranty: { status: WarrantySummaryStatus; startDate?: string; endDate?: string; lifetime?: true };
   /** A link's creation and expiry (F-06): with `link` only. */
   issuedAt?: Date;
   expiresAt?: Date;
@@ -824,6 +827,24 @@ export function certificateLinkLettering(link: string): { address: string; code:
   if (!m) throw new CertificateInputError('not a certificate link');
   const host = m[1].replace(/^https?:\/\//, '');
   return { address: toLabelText(`${host}/VERIFY/C#`), code: m[2].match(/.{1,4}/g)!.join('-') };
+}
+
+/**
+ * THE RECORD's rows of an ownership certificate: OWNERSHIP, SINCE, WARRANTY with FROM and UNTIL when it has them, LOSS OR
+ * THEFT. A lifetime warranty once started reads ACTIVE · LIFETIME and has no UNTIL row, whatever end date it is given
+ * (plan ORBES CARE §2(a), answers 10 and 12); a 2-year warranty reads as before.
+ */
+export function ownershipCertificateRecordRows(d: Pick<OwnershipCertificateDocument, 'verified' | 'since' | 'warranty'>): [string, string][] {
+  const C = OWNERSHIP_CERTIFICATE_COPY;
+  const lifetime = d.warranty.lifetime === true;
+  return [
+    [C.rows.ownership, d.verified ? C.verified : C.unverified],
+    [C.rows.since, longDate(d.since)],
+    [C.rows.warranty, lifetime && d.warranty.status === 'ACTIVE' ? C.activeLifetime : C.warranty[d.warranty.status]],
+    ...(d.warranty.startDate ? [[C.rows.from, longDate(d.warranty.startDate)] as [string, string]] : []),
+    ...(d.warranty.endDate && !lifetime ? [[C.rows.until, longDate(d.warranty.endDate)] as [string, string]] : []),
+    [C.rows.incidents, C.noIncident],
+  ];
 }
 
 /** The A4 page of an ownership certificate. Throws CertificateInputError on input it cannot draw. */
@@ -911,14 +932,7 @@ export function layoutOwnershipCertificate(d: OwnershipCertificateDocument): Pdf
     [C.rows.created, String(d.createdYear)],
     ...(d.discontinuedYear ? [[C.rows.discontinued, String(d.discontinuedYear)] as [string, string]] : []),
   ];
-  const record: [string, string][] = [
-    [C.rows.ownership, d.verified ? C.verified : C.unverified],
-    [C.rows.since, longDate(d.since)],
-    [C.rows.warranty, C.warranty[d.warranty.status]],
-    ...(d.warranty.startDate ? [[C.rows.from, longDate(d.warranty.startDate)] as [string, string]] : []),
-    ...(d.warranty.endDate ? [[C.rows.until, longDate(d.warranty.endDate)] as [string, string]] : []),
-    [C.rows.incidents, C.noIncident],
-  ];
+  const record = ownershipCertificateRecordRows(d);
   column(L.columns[0], C.piece, piece);
   column(L.columns[1], C.record, record);
   rule(L.ruleMiddle);

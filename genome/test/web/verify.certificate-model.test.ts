@@ -97,6 +97,39 @@ describe('certificate page', () => {
     expect(odd.key).toBe('');
   });
 
+  it('reads a lifetime warranty ACTIVE · LIFETIME with no UNTIL row, its other states and a 2-year warranty as before (plan ORBES CARE §2(a), answers 10 and 12)', () => {
+    const rowsOf = (warranty: Valid['warranty']) => {
+      const s = certificateScreen(valid({ warranty }));
+      if (s.kind !== 'valid') throw new Error(s.kind);
+      return s.recordRows.filter(([label]) => ['WARRANTY', 'FROM', 'UNTIL'].includes(label));
+    };
+    expect(rowsOf({ status: 'ACTIVE', startDate: '2026-09-20', lifetime: true })).toEqual([
+      ['WARRANTY', 'ACTIVE · LIFETIME'],
+      ['FROM', '20 SEP 2026'],
+    ]);
+    // Never an end date on a lifetime warranty, even one sent by mistake.
+    expect(rowsOf({ status: 'ACTIVE', startDate: '2026-09-20', endDate: '2028-09-20', lifetime: true })).toEqual([
+      ['WARRANTY', 'ACTIVE · LIFETIME'],
+      ['FROM', '20 SEP 2026'],
+    ]);
+    expect(rowsOf({ status: 'NOT_STARTED', lifetime: true })).toEqual([['WARRANTY', 'NOT YET STARTED']]);
+    expect(rowsOf({ status: 'VOID', startDate: '2026-09-20', lifetime: true })).toEqual([
+      ['WARRANTY', 'NO LONGER VALID'],
+      ['FROM', '20 SEP 2026'],
+    ]);
+    // The 2-year warranty: unchanged, its end date shown.
+    expect(rowsOf({ status: 'ACTIVE', startDate: '2026-09-20', endDate: '2028-09-20' })).toEqual([
+      ['WARRANTY', 'ACTIVE'],
+      ['FROM', '20 SEP 2026'],
+      ['UNTIL', '20 SEP 2028'],
+    ]);
+    expect(rowsOf({ status: 'EXPIRED', startDate: '2024-09-20', endDate: '2026-09-20' })).toEqual([
+      ['WARRANTY', 'EXPIRED'],
+      ['FROM', '20 SEP 2024'],
+      ['UNTIL', '20 SEP 2026'],
+    ]);
+  });
+
   it('puts the model variant right under the model in the piece\'s lines (plan NEXT LOT §3.1), and nothing without one', () => {
     const s = certificateScreen(valid({ piece: { ...valid().piece, modelVariant: 'Steel' } }));
     if (s.kind !== 'valid') throw new Error(s.kind);

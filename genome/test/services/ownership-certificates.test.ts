@@ -10,7 +10,7 @@ import { computeGenome } from '../../src/core/genome/index.js';
 import { packIdentity } from '../../src/core/identity.js';
 import type { ProductStatus } from '../../src/server/db/schema.js';
 import { DomainError } from '../../src/server/errors.js';
-import { renderOwnershipCertificatePdf } from '../../src/server/render/certificate.js';
+import { ownershipCertificateRecordRows, renderOwnershipCertificatePdf } from '../../src/server/render/certificate.js';
 import { AuditService } from '../../src/server/services/audit.js';
 import { LifecycleService } from '../../src/server/services/lifecycle.js';
 import {
@@ -239,6 +239,43 @@ describe('OwnershipCertificateService', () => {
     const offer = await certificates.create(owner.id, p.productId, { validDays: 90 }, owner.actor);
     const r = await certificates.lookup(offer.token);
     expect(r.status === 'VALID' && r.warranty).toEqual({ status: 'ACTIVE', startDate: '2026-09-20', lifetime: true });
+  });
+
+  it('the PDF of a lifetime warranty\'s certificate reads WARRANTY ACTIVE · LIFETIME with no UNTIL row (plan ORBES CARE, step 2.4)', async () => {
+    const { owner, p } = await owned({ lifetime: true });
+    const offer = await certificates.create(owner.id, p.productId, { validDays: 90 }, owner.actor);
+    const r = await certificates.lookup(offer.token);
+    if (r.status !== 'VALID') throw new Error(r.status);
+    const doc = {
+      productId: r.piece.productId,
+      category: r.piece.category.name,
+      collection: r.piece.collection,
+      model: r.piece.model,
+      modelVariant: r.piece.modelVariant,
+      type: r.piece.type,
+      variant: r.piece.variant,
+      material: r.piece.material,
+      createdYear: r.piece.createdYear,
+      genome: r.piece.genome,
+      discontinuedYear: r.piece.discontinuedYear,
+      verified: r.ownership.verified,
+      since: r.ownership.since,
+      warranty: r.warranty,
+      issuedAt: r.certificate.issuedAt,
+      expiresAt: r.certificate.expiresAt,
+      checkedAt: r.checkedAt,
+      link: offer.url,
+    };
+    // The service hands the warranty on whole, `lifetime` with it: the page's record reads it.
+    expect(ownershipCertificateRecordRows(doc).filter(([label]) => ['WARRANTY', 'FROM', 'UNTIL'].includes(label))).toEqual([
+      ['WARRANTY', 'ACTIVE · LIFETIME'],
+      ['FROM', '20 SEPTEMBER 2026'],
+    ]);
+    const pdf = await certificates.renderPdf(offer.token);
+    expect(Buffer.from(pdf.body as Uint8Array).equals(Buffer.from((await renderOwnershipCertificatePdf(doc)).body as Uint8Array))).toBe(true);
+    // Not the page the same piece would print without `lifetime`.
+    const { lifetime: _l, ...plain } = r.warranty;
+    expect(Buffer.from(pdf.body as Uint8Array).equals(Buffer.from((await renderOwnershipCertificatePdf({ ...doc, warranty: plain })).body as Uint8Array))).toBe(false);
   });
 
   it('VALID: the piece, its GENOME, the ownership and its day, the warranty, no loss or theft; never a person', async () => {

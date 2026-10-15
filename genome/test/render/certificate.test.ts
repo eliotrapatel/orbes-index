@@ -41,6 +41,7 @@ import {
   MAX_CERTIFICATE_ITEMS,
   OWNERSHIP_CERTIFICATE_COPY,
   OWNERSHIP_CERTIFICATE_LAYOUT,
+  ownershipCertificateRecordRows,
   certificateCardSvg,
   certificateLinkLettering,
   certificatesCsv,
@@ -817,6 +818,45 @@ describe('ownership certificate (F-06)', () => {
     // Two piece rows, the GENOME (and its fingerprint line), and FROM and UNTIL with their values fewer.
     expect(full.marks!.length - bare.marks!.length).toBe(2 * 2 + 1 + 2 * 2);
     expect(bare.placements).toEqual([]);
+  });
+
+  it('reads a lifetime warranty ACTIVE · LIFETIME with no UNTIL row; a 2-year warranty as before (plan ORBES CARE §2(a), answers 10 and 12)', async () => {
+    const warrantyRows = (warranty: OwnershipCertificateDocument['warranty']) =>
+      ownershipCertificateRecordRows(ownershipDoc({ warranty })).filter(([label]) => ['WARRANTY', 'FROM', 'UNTIL'].includes(label));
+    expect(OWNERSHIP_CERTIFICATE_COPY.activeLifetime).toBe('ACTIVE · LIFETIME');
+    expect(toLabelText(OWNERSHIP_CERTIFICATE_COPY.activeLifetime)).toBe(OWNERSHIP_CERTIFICATE_COPY.activeLifetime);
+    expect(warrantyRows({ status: 'ACTIVE', startDate: '2026-09-20', lifetime: true })).toEqual([
+      ['WARRANTY', 'ACTIVE · LIFETIME'],
+      ['FROM', '20 SEPTEMBER 2026'],
+    ]);
+    // Never an end date on a lifetime warranty, even one given by mistake; its other states read as any warranty's.
+    expect(warrantyRows({ status: 'ACTIVE', startDate: '2026-09-20', endDate: '2028-09-20', lifetime: true })).toEqual(warrantyRows({ status: 'ACTIVE', startDate: '2026-09-20', lifetime: true }));
+    expect(warrantyRows({ status: 'NOT_STARTED', lifetime: true })).toEqual([['WARRANTY', 'NOT YET STARTED']]);
+    expect(warrantyRows({ status: 'VOID', startDate: '2026-09-20', lifetime: true })).toEqual([
+      ['WARRANTY', 'NO LONGER VALID'],
+      ['FROM', '20 SEPTEMBER 2026'],
+    ]);
+    // The 2-year warranty: unchanged.
+    expect(warrantyRows({ status: 'ACTIVE', startDate: '2026-09-20', endDate: '2028-09-20' })).toEqual([
+      ['WARRANTY', 'ACTIVE'],
+      ['FROM', '20 SEPTEMBER 2026'],
+      ['UNTIL', '20 SEPTEMBER 2028'],
+    ]);
+    // THE RECORD as the page draws it: the whole list, in its order.
+    expect(ownershipCertificateRecordRows(ownershipDoc({ warranty: { status: 'ACTIVE', startDate: '2026-09-20', lifetime: true } }))).toEqual([
+      ['OWNERSHIP', 'VERIFIED'],
+      ['SINCE', '1 OCTOBER 2026'],
+      ['WARRANTY', 'ACTIVE · LIFETIME'],
+      ['FROM', '20 SEPTEMBER 2026'],
+      ['LOSS OR THEFT', 'NONE REPORTED'],
+    ]);
+    // On the page: the UNTIL row's two runs fewer than the 2-year piece's, the value of WARRANTY lettered otherwise.
+    const twoYears = layoutOwnershipCertificate(ownershipDoc());
+    const lifetime = layoutOwnershipCertificate(ownershipDoc({ warranty: { status: 'ACTIVE', startDate: '2026-09-20', endDate: '2028-09-20', lifetime: true } }));
+    expect(twoYears.marks!.length - lifetime.marks!.length).toBe(2);
+    const a = await renderOwnershipCertificatePdf(ownershipDoc({ warranty: { status: 'ACTIVE', startDate: '2026-09-20', lifetime: true } }));
+    const b = await renderOwnershipCertificatePdf(ownershipDoc({ warranty: { status: 'ACTIVE', startDate: '2026-09-20', lifetime: true } }));
+    expect(Buffer.from(a.body as Uint8Array).equals(Buffer.from(b.body as Uint8Array))).toBe(true);
   });
 
   it('draws the model variant on an unlabelled line right under MODEL\'s value (plan NEXT LOT §3.1); the Size field\'s row keeps its label VARIANT', () => {

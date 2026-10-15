@@ -8,6 +8,8 @@
  *    YOUR FIRST PIECE OPENS TITANE › MY PIECES, SIGN IN TO SEE YOUR TIER › MY PIECES' sign-in;
  *  - FROM n PIECES under each tier's name in the reading face, as its lines;
  *  - HOW THE TIERS WORK says the credit's currency as THE PROGRAM sets it (GBP: pounds sterling);
+ *  - a warranty credit (plan ORBES CARE, answer 9; step 2.4) shows under IN USE as WARRANTY CREDIT, before the tier's
+ *    CREDIT, the credit's note with it;
  *  - no link to HOW RELEASES WORK anywhere on the page;
  *  - ONE MOMENT… while GET /api/v1/the-club is held, and its failure with TRY AGAIN, which shows the tiers once it
  *    answers.
@@ -186,6 +188,43 @@ const CASES: { state: UiState; check: (page: Page, run: Run) => Promise<void> }[
       expect(await page.locator('.view--club .n-club__failed').count()).toBe(0);
     },
   },
+  // ── A warranty credit under IN USE (plan ORBES CARE, answer 9; step 2.4): given here as a decided claim gives it (a
+  //    grant of kind WARRANTY, no tier, never deleted: it writes), its row after the birthday credit's place and before
+  //    the tier's CREDIT, the credit's note with them ──
+  {
+    state: derived('account-sheet-in-use', 'club-e2e-warranty-credit', { mutates: true }),
+    check: async (page, { browser, stage, demo }) => {
+      const inUse = (p: Page) => p.locator('.n-account:not([hidden]) .n-account__in-use');
+      const rowsOf = async (p: Page) =>
+        inUse(p)
+          .locator('.n-kv__row')
+          .evaluateAll((rows) => rows.map((r) => [r.querySelector('dt')?.textContent?.trim() ?? '', (r.querySelector('dd')?.textContent ?? '').replace(/\s+/g, ' ').trim()]));
+      // Before: the tier's CREDIT and PRIVATE CARE, no WARRANTY CREDIT.
+      expect((await rowsOf(page)).map(([label]) => label)).toEqual(['CREDIT', 'PRIVATE CARE']);
+      const platine = demo.accounts.platine!.id;
+      await stage.ctx.db
+        .insertInto('tier_grants')
+        .values({ account_id: platine, tier: null, kind: 'WARRANTY', granted_at: new Date('2026-10-05T10:00:00.000Z'), amount_minor: 13_500, currency: 'EUR', expires_at: new Date('2027-10-15T21:59:59.999Z') })
+        .execute();
+      expect((await stage.ctx.services.club.status(platine)).inUse?.warrantyCredit).toEqual({ balanceMinor: 13_500, currency: 'EUR', expiresAt: new Date('2027-10-15T21:59:59.999Z') });
+      // A new phone, so that no answer kept a minute stands in for the new one.
+      const again = await openState(browser, stage, demo, derived('account-sheet-in-use', 'club-e2e-warranty-credit-shown'));
+      try {
+        expect(await rowsOf(again.page)).toEqual([
+          ['WARRANTY CREDIT', '€ 135 · UNTIL 15 OCT 2027'],
+          ['CREDIT', '€ 50 · UNTIL 5 OCT 2027'],
+          ['PRIVATE CARE', 'EVERY PIECE · 1 IN 2026'],
+        ]);
+        expect((await inUse(again.page).locator('.n-account__in-use-note').innerText()).trim()).toBe(
+          'ORBES Client Services takes it off the invoice of a piece from a draw, a LIVE RELEASE or THE PRIVATE SALON.',
+        );
+        // No word of the claim it came from, nor any button: IN USE only shows what is there.
+        expect(await inUse(again.page).locator('button, a').count()).toBe(0);
+      } finally {
+        await again.close();
+      }
+    },
+  },
   // ── The credit's currency, as THE PROGRAM sets it (last: it writes, and puts it back) ──
   {
     state: derived('club', 'club-e2e-currency', { mutates: true }),
@@ -214,7 +253,7 @@ const CASES: { state: UiState; check: (page: Page, run: Run) => Promise<void> }[
 
 describe.skipIf(!HAS_CHROMIUM)('THE CLUB (BP-19 T9, Chromium)', () => {
   it(
-    'opens from the footer and from the account sheet in the same tab with Back returning, leads each reader to their tier, says the credit\'s currency, links nowhere near HOW RELEASES WORK, and waits and fails as every page',
+    'opens from the footer and from the account sheet in the same tab with Back returning, leads each reader to their tier, says the credit\'s currency, shows a warranty credit IN USE, links nowhere near HOW RELEASES WORK, and waits and fails as every page',
     async () => {
       const failures: string[] = [];
       await eachState(

@@ -45,6 +45,7 @@ export {
   layoutCertificateCard,
   layoutCertificateSheet,
   layoutOwnershipCertificate,
+  ownershipCertificateRecordRows,
   sizeLabel,
   variantLine,
   renderCertificateCsv,
