@@ -100,23 +100,26 @@ describe('public API', () => {
       }
     });
 
-    it('serves where SUBSCRIBE of ORBES Care leads (CARE_SUBSCRIBE_URL, P-M02) once it is set, beside the contact or alone', async () => {
+    it('never serves where SUBSCRIBE of ORBES Care led (plan ORBES CARE, answer 1: the subscription is removed), even with CARE_SUBSCRIBE_URL set (D6: the config keeps it)', async () => {
       const url = 'https://whop.com/orbes/care';
       const both = await createHarness({ config: { clientServices: { email: 'clientservices@theorbes.com' }, careSubscribeUrl: url } });
       try {
+        // The config still reads it; the route sends the contact alone.
+        expect(both.ctx.config.careSubscribeUrl).toBe(url);
         const res = await both.client().get('/api/v1/client-services');
-        expect(safeJson(res)).toEqual({ email: 'clientservices@theorbes.com', careSubscribeUrl: url });
+        expect(safeJson(res)).toEqual({ email: 'clientservices@theorbes.com' });
+        expect(res.body).not.toContain('whop.com');
         expect(res.headers['cache-control']).toBe('public, max-age=300');
       } finally {
         await both.close();
       }
       const alone = await createHarness({ config: { careSubscribeUrl: url } });
       try {
-        expect(safeJson(await alone.client().get('/api/v1/client-services'))).toEqual({ careSubscribeUrl: url });
+        expect(safeJson(await alone.client().get('/api/v1/client-services'))).toEqual({});
       } finally {
         await alone.close();
       }
-      // Unset (the default): nothing, and the CARE tab says subscriptions open soon.
+      // Unset (the default): nothing either.
       expect(h.ctx.config.careSubscribeUrl).toBeNull();
       expect(safeJson(await h.client().get('/api/v1/client-services'))).not.toHaveProperty('careSubscribeUrl');
     });
