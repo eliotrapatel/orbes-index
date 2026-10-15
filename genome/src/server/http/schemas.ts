@@ -2003,8 +2003,11 @@ export const warrantyClaimDecideBody = body({
   valueMinor: z.number().int('Must be a whole number of cents').min(1, 'At least 1').max(ORDER_AMOUNT_MAX_MINOR, `At most ${ORDER_AMOUNT_MAX_MINOR}`).nullable().optional(),
 });
 
-/** POST /api/admin/warranty-claims/:id/ship: the carrier and tracking number of the new piece, or of the piece back. */
-export const warrantyClaimShipBody = body({ carrierId: uuid, tracking: careTracking });
+/**
+ * POST /api/admin/warranty-claims/:id/ship: the carrier and tracking number of the new piece, or of the piece back; a
+ * replacement's identity chosen again when the one kept aside can no longer be it (services/warranty-claims.ts checks it).
+ */
+export const warrantyClaimShipBody = body({ carrierId: uuid, tracking: careTracking, replacementProductId: productRef.nullable().optional() });
 
 /** POST /api/admin/warranty-claims/:id/cancel: why it is closed (1 to 500 characters). */
 export const warrantyClaimCancelBody = body({ note: text(CLAIM_NOTE_MAX) });

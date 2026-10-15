@@ -2,7 +2,9 @@
  * Two decisions of one warranty claim at once (plan ORBES CARE, §2(f), step 1.6; services/warranty-claims.ts
  * `decide`): the claim's row is taken FOR UPDATE and its step checked under the lock, so one decision wins and the
  * other reads the claim DECIDED or DONE and is refused 409 CLAIM_STEP; at most one grant is given, the piece is revoked
- * once. (Two claims of one root are never live at once through the service: one live claim per piece, and every
+ * once. A claim opened while the piece's owner asks for PRIVATE CARE: both lock the piece's row (services/care.ts
+ * `request` after the account's, as the house's order account → product), so one of them waits and is refused, never
+ * both written. (Two claims of one root are never live at once through the service: one live claim per piece, and every
  * replacement revokes the old piece; `warranty_claims_free_once` is tested by direct inserts in migrations.test.ts.)
  *
  * On PGlite (always) the calls are issued together and the database serialises their transactions. On PostgreSQL
@@ -18,6 +20,7 @@ import { closeDb, createDb, type Db } from '../../src/server/db/connection.js';
 import { migrateToLatest } from '../../src/server/db/migrate.js';
 import { DomainError } from '../../src/server/errors.js';
 import { AuditService } from '../../src/server/services/audit.js';
+import { CareService } from '../../src/server/services/care.js';
 import { CategoryRegistry } from '../../src/server/services/categories.js';
 import { LifecycleService } from '../../src/server/services/lifecycle.js';
 import { WarrantyService } from '../../src/server/services/warranty.js';
@@ -73,6 +76,8 @@ for (const backend of BACKENDS) {
     const clock = createManualClock('2026-10-15T09:00:00.000Z');
     /** Two processes' claim services over the same database. */
     let services: WarrantyClaimService[];
+    /** PRIVATE CARE, in a third process. */
+    let care: CareService;
     let staff: Actor;
     let carrierId: string;
     let accountId: string;
@@ -92,6 +97,10 @@ for (const backend of BACKENDS) {
         const warranty = new WarrantyService({ db, audit, lifecycle, clock: clock.now });
         return new WarrantyClaimService({ db, audit, warranty, lifecycle, clock: clock.now });
       });
+      {
+        const lifecycle = new LifecycleService({ db, audit, clock: clock.now });
+        care = new CareService({ db, audit, warranty: new WarrantyService({ db, audit, lifecycle, clock: clock.now }), clock: clock.now });
+      }
       const admin = await db.insertInto('admin_users').values({ email: 'cs@orbes.test', email_normalized: 'cs@orbes.test', password_hash: 'scrypt$x', role: 'OPERATOR' }).returning('id').executeTakeFirstOrThrow();
       staff = { type: 'admin', id: admin.id };
       carrierId = (await db.insertInto('carriers').values({ name: `Claims ${randomBytes(3).toString('hex')}`, tracking_url: 'https://track.test/{tracking}' }).returning('id').executeTakeFirstOrThrow()).id;
@@ -107,8 +116,8 @@ for (const backend of BACKENDS) {
     }, 60_000);
     afterAll(() => close?.());
 
-    /** A piece of the account, its lifetime warranty started, claimed and received by ORBES. */
-    async function receivedClaim(): Promise<{ claimId: string; productId: string }> {
+    /** A piece held by `owner` since 1 March 2026, its lifetime warranty started. */
+    async function ownedPiece(owner: string): Promise<{ id: string; product_id: string }> {
       serial += 1;
       const p = await db
         .insertInto('products')
@@ -126,8 +135,14 @@ for (const backend of BACKENDS) {
         })
         .returning(['id', 'product_id'])
         .executeTakeFirstOrThrow();
-      await db.insertInto('ownership').values({ product_id: p.id, account_id: accountId, acquired_via: 'FIRST_REGISTRATION', started_at: new Date('2026-03-01T10:00:00Z') }).execute();
+      await db.insertInto('ownership').values({ product_id: p.id, account_id: owner, acquired_via: 'FIRST_REGISTRATION', started_at: new Date('2026-03-01T10:00:00Z') }).execute();
       await db.insertInto('warranties').values({ product_id: p.id, purchase_date: '2026-03-01', start_date: '2026-03-01', duration_months: 24, lifetime: true }).execute();
+      return p;
+    }
+
+    /** A piece of the account, its lifetime warranty started, claimed and received by ORBES. */
+    async function receivedClaim(): Promise<{ claimId: string; productId: string }> {
+      const p = await ownedPiece(accountId);
       const c = await services[0]!.open({ conversationId, productId: p.product_id, basis: 'WARRANTY' }, staff);
       await services[0]!.label(c.id, { pdf: PDF, carrierId, tracking: '6A12345678901' }, staff);
       await services[1]!.receive(c.id, staff);
@@ -170,6 +185,30 @@ for (const backend of BACKENDS) {
       } else {
         expect(claim).toMatchObject({ outcome: 'REFUSED', refusal_reason: 'SCRATCHED', grant_id: null });
         expect(after).toBe(before);
+      }
+    }, 60_000);
+
+    it('a claim opened while its owner asks for PRIVATE CARE: one of them is refused, never both written', async () => {
+      for (let round = 0; round < 3; round++) {
+        const email = `care-race-${round}-${randomBytes(3).toString('hex')}@example.com`;
+        const owner = (await db.insertInto('accounts').values({ email, email_normalized: email, password_hash: 'unused' }).returning('id').executeTakeFirstOrThrow()).id;
+        const conversation = (await db.insertInto('client_conversations').values({ account_id: owner, status: 'ANSWERED', last_message_at: clock.now() }).returning('id').executeTakeFirstOrThrow()).id;
+        // Six pieces: PRIVATE CARE is the account's (THE PROGRAM's defaults).
+        for (let i = 0; i < 5; i++) await ownedPiece(owner);
+        const p = await ownedPiece(owner);
+        const settled = await Promise.allSettled([
+          services[0]!.open({ conversationId: conversation, productId: p.product_id, basis: 'WARRANTY' }, staff),
+          care.request(owner, p.product_id, { name: 'Camille Martin', address: '12 rue de la Paix\n75002 Paris' }, { type: 'account', id: owner }),
+        ]);
+        const won = settled.filter((s) => s.status === 'fulfilled');
+        const lost = settled.filter((s): s is PromiseRejectedResult => s.status === 'rejected');
+        expect(won).toHaveLength(1);
+        expect(lost).toHaveLength(1);
+        expect(lost[0]!.reason).toBeInstanceOf(DomainError);
+        expect(['CARE_OPEN', 'CARE_UNAVAILABLE']).toContain((lost[0]!.reason as DomainError).code);
+        const claims = await db.selectFrom('warranty_claims').select('id').where('product_id', '=', p.id).execute();
+        const requests = await db.selectFrom('care_requests').select('id').where('product_id', '=', p.id).execute();
+        expect(claims.length + requests.length).toBe(1);
       }
     }, 60_000);
   });

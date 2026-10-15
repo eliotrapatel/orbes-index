@@ -52,9 +52,11 @@
  *                `warranty.claim.decide` and, for a grant, `club.grant`.
  *   ship         DECIDED → DONE: the new piece (its warranty started today, of its own model's kind, no service record
  *                on it, via `warranty_claim`), or the piece back (its record completed, the piece back to its status).
- *                Audited `warranty.claim.ship`.
- *   cancel       OPEN or LABEL_SENT, with a note (the collector never sent the piece, or withdrew). Audited
- *                `warranty.claim.cancel`.
+ *                A replacement's identity may be chosen again at shipment (`replacementProductId`, checked as at the
+ *                decision): the one kept aside may have gone to an order since. Audited `warranty.claim.ship`.
+ *   cancel       OPEN or LABEL_SENT, with a note (the collector never sent the piece, or withdrew). The closing note
+ *                is always kept whole: when it does not fit beside the claim's own note, the earlier one is cut to fit
+ *                (ending « … »), so a claim can always be closed. Audited `warranty.claim.cancel`.
  *
  * While a claim is OPEN or LABEL_SENT a transfer offer is refused (409 CLAIM_OPEN, services/ownership.ts); RECEIVED and
  * DECIDED are refused by the piece's SERVICED status. PRIVATE CARE is UNAVAILABLE while a claim is live
@@ -298,13 +300,26 @@ function cleanNote(v: unknown, required: boolean, message = 'Write a note.'): st
   return s;
 }
 
-/** A note added to the claim's own: both kept, within the 500 characters of the column. */
-function withNote(before: string | null, added: string | null): string | null {
+const NOTE_SEPARATOR = '\n\n';
+const NOTE_CUT = '…';
+
+/**
+ * A note added to the claim's own: both kept, within the 500 characters of the column. With `cut` (CLOSE, whose note
+ * is required), the added note is kept whole and the earlier one is cut to fit, ending « … » (dropped when not even
+ * one character of it fits), so a claim opened with a long note can always be closed.
+ */
+function withNote(before: string | null, added: string | null, cut = false): string | null {
   if (added === null) return before;
   if (before === null) return added;
-  const both = `${before}\n\n${added}`;
-  if (both.length > CLAIM_NOTE_MAX) throw validationError('The notes of a claim are limited to 500 characters in all.');
-  return both;
+  const both = `${before}${NOTE_SEPARATOR}${added}`;
+  if (both.length <= CLAIM_NOTE_MAX) return both;
+  if (!cut) throw validationError('The notes of a claim are limited to 500 characters in all.');
+  const room = CLAIM_NOTE_MAX - added.length - NOTE_SEPARATOR.length - NOTE_CUT.length;
+  // Never half of a character written in two UTF-16 units (an unpaired surrogate is not valid text).
+  let kept = before.slice(0, Math.max(0, room));
+  if (/[\uD800-\uDBFF]$/.test(kept)) kept = kept.slice(0, -1);
+  kept = kept.trimEnd();
+  return kept === '' ? added : `${kept}${NOTE_CUT}${NOTE_SEPARATOR}${added}`;
 }
 
 function cleanTracking(v: unknown): string {
@@ -761,12 +776,15 @@ export class WarrantyClaimService {
   async cancel(id: string, input: { note?: unknown }, actor: Actor): Promise<ClaimSheet> {
     const added = cleanNote(input?.note, true)!;
     return this.step(id, ['OPEN', 'LABEL_SENT'], actor, 'warranty.claim.cancel', async (tx, c, now) => {
+      const note = withNote(c.note, added, true);
       await tx
         .updateTable('warranty_claims')
-        .set({ status: 'CANCELLED', cancelled_at: notBefore(now, c.label_at ?? c.opened_at), note: withNote(c.note, added) })
+        .set({ status: 'CANCELLED', cancelled_at: notBefore(now, c.label_at ?? c.opened_at), note })
         .where('id', '=', c.id)
         .execute();
-      return { from: c.status };
+      // Never the note itself in the audit: only that the earlier one was cut.
+      const shortened = c.note !== null && note !== `${c.note}${NOTE_SEPARATOR}${added}`;
+      return { from: c.status, ...(shortened ? { noteShortened: true } : {}) };
     });
   }
 
@@ -940,17 +958,52 @@ export class WarrantyClaimService {
     });
   }
 
-  /** SHIP (OPERATOR): the new piece, or the piece back, with its carrier and tracking → DONE. */
-  async ship(id: string, input: { carrierId: unknown; tracking: unknown }, actor: Actor): Promise<ClaimSheet> {
+  /**
+   * SHIP (OPERATOR): the new piece, or the piece back, with its carrier and tracking → DONE. A replacement's identity
+   * may be chosen again here (`replacementProductId`), checked as at the decision, when the one kept aside can no
+   * longer be it.
+   */
+  async ship(id: string, input: { carrierId: unknown; tracking: unknown; replacementProductId?: unknown }, actor: Actor): Promise<ClaimSheet> {
     const tracking = cleanTracking(input?.tracking);
+    const again = input?.replacementProductId ?? null;
     return this.step(id, ['DECIDED'], actor, 'warranty.claim.ship', async (tx, c, now) => {
+      if (again !== null && c.outcome !== 'REPLACEMENT') throw validationError('A replacement’s identity is given with a replacement only.');
       const carrier = await this.activeCarrier(tx, input.carrierId);
       const at = notBefore(now, c.decided_at);
       const details: Record<string, unknown> = { carrierId: carrier, outcome: c.outcome };
       if (c.outcome === 'REPLACEMENT') {
         // The new piece: checked again (it stayed ISSUED since the decision), its warranty started today, of its own model's kind.
-        const next = await this.piece(tx, c.replacement_product_id!);
-        await this.assertReplaceable(tx, next);
+        let next: ProductRow;
+        if (again === null) {
+          next = await this.piece(tx, c.replacement_product_id!);
+          await this.assertReplaceable(tx, next);
+        } else {
+          // Chosen again: of the claimed piece's SKU (or its model, the client having asked for another size), never sold.
+          const claimed = await this.piece(tx, c.product_id);
+          next = await this.replacementFor(tx, claimed, again, c.other_size === true, c.id);
+          if (next.id !== c.replacement_product_id) {
+            const before = await tx.selectFrom('products').select('product_id').where('id', '=', c.replacement_product_id!).executeTakeFirstOrThrow();
+            await tx
+              .updateTable('warranty_claims')
+              .set({ replacement_product_id: next.id })
+              .where('id', '=', c.id)
+              .execute()
+              .catch((e: unknown) => {
+                if (isUniqueViolation(e, 'warranty_claims_replacement_product_id_key')) throw replacementNotAllowed('This identity is already the replacement of another claim.');
+                throw e;
+              });
+            // The old piece's revocation names the identity that replaces it.
+            await tx
+              .updateTable('revocations')
+              .set({ reason: `Replaced under warranty by ${next.product_id}` })
+              .where('target_type', '=', 'PRODUCT')
+              .where('target_id', '=', claimed.product_id)
+              .where('reason_code', '=', 'REPLACED')
+              .where('lifted_at', 'is', null)
+              .execute();
+            details.replacedReplacement = before.product_id;
+          }
+        }
         const old = await tx.selectFrom('warranties').select('country').where('product_id', '=', c.product_id).executeTakeFirst();
         const started = await this.warranty.activate(next.id, { country: old?.country ?? null }, actor, { tx, via: { via: 'warranty_claim', claimId: c.id } });
         details.replacement = next.product_id;
@@ -1011,7 +1064,7 @@ export class WarrantyClaimService {
   }
 
   /** The replacement's identity, FOR UPDATE: ISSUED, of the claimed piece's SKU (or of its model with `otherSize`), never sold. */
-  private async replacementFor(tx: Db, claimed: ProductRow, ref: unknown, otherSize: boolean): Promise<ProductRow> {
+  private async replacementFor(tx: Db, claimed: ProductRow, ref: unknown, otherSize: boolean, claimId: string | null = null): Promise<ProductRow> {
     if (typeof ref !== 'string' || ref.trim() === '') throw validationError('Enter the ORBES identity of the replacement.');
     const next = await findProduct(tx, ref.trim(), { forUpdate: true });
     if (!next) throw notFound('Product', 'PRODUCT_NOT_FOUND');
@@ -1022,7 +1075,7 @@ export class WarrantyClaimService {
       if (!otherSize) throw replacementNotAllowed('The replacement is another size: choose « Another size, as the client asked ».', `sku ${next.sku_id ?? 'none'}`);
     }
     const taken = await tx.selectFrom('warranty_claims').select('id').where('replacement_product_id', '=', next.id).executeTakeFirst();
-    if (taken) throw replacementNotAllowed('This identity is already the replacement of another claim.');
+    if (taken && taken.id !== claimId) throw replacementNotAllowed('This identity is already the replacement of another claim.');
     await this.assertReplaceable(tx, next);
     return next;
   }

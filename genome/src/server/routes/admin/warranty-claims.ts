@@ -14,7 +14,8 @@
  *   POST /api/admin/warranty-claims/:id/decide  OPERATOR  DECIDE {outcome, refusalReason?, replacementProductId?,
  *                                                         otherSize?, valueMinor?}
  *   POST /api/admin/warranty-claims/:id/legal   OPERATOR  MOVE TO THE LEGAL GUARANTEE {note?}: a received 2-year claim
- *   POST /api/admin/warranty-claims/:id/ship    OPERATOR  SHIP {carrierId, tracking}: the new piece, or the piece back
+ *   POST /api/admin/warranty-claims/:id/ship    OPERATOR  SHIP {carrierId, tracking, replacementProductId?}: the new piece
+ *                                                         (its identity chosen again when needed), or the piece back
  *   POST /api/admin/warranty-claims/:id/cancel  OPERATOR  CLOSE {note}: OPEN or LABEL_SENT
  *
  * The claim's prepaid label is sent through PRIVATE CARE's upload path, POST /api/admin/care/:id/label with the claim's
@@ -97,7 +98,7 @@ export const adminWarrantyClaimRoutes: FastifyPluginAsync<AdminRouteDeps> = asyn
   app.post('/api/admin/warranty-claims/:id/ship', async (request) => {
     const { id } = parse(warrantyClaimParams, request.params);
     const b = parse(warrantyClaimShipBody, request.body);
-    return claimSheetJson(await warrantyClaims.ship(id, { carrierId: b.carrierId, tracking: b.tracking }, adminActor(request)), readsClientEmails(request));
+    return claimSheetJson(await warrantyClaims.ship(id, { carrierId: b.carrierId, tracking: b.tracking, replacementProductId: b.replacementProductId ?? null }, adminActor(request)), readsClientEmails(request));
   });
 
   app.post('/api/admin/warranty-claims/:id/cancel', async (request) => {

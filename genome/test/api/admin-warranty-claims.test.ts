@@ -110,6 +110,10 @@ describe('the warranty claims’ routes (plan ORBES CARE, step 1.7)', () => {
     expect(decided.statusCode, decided.body).toBe(200);
     expect(safeJson(decided)).toMatchObject({ status: 'DECIDED', outcome: 'REPAIR' });
     expect(errorOf(await operator.post(`/api/admin/warranty-claims/${claim.id}/decide`, { outcome: 'REPAIR' })).code).toBe('CLAIM_STEP');
+    // A replacement's identity is chosen again at shipment for a replacement only.
+    const repick = await operator.post(`/api/admin/warranty-claims/${claim.id}/ship`, { carrierId, tracking: '6A99999999999', replacementProductId: c.serial });
+    expect(repick.statusCode).toBe(400);
+    expect(errorOf(repick)).toMatchObject({ code: 'VALIDATION_FAILED', message: 'A replacement’s identity is given with a replacement only.' });
     const shipped = await operator.post(`/api/admin/warranty-claims/${claim.id}/ship`, { carrierId, tracking: '6A99999999999' });
     expect(shipped.statusCode, shipped.body).toBe(200);
     expect(safeJson(shipped)).toMatchObject({ status: 'DONE', return: { tracking: '6A99999999999' } });

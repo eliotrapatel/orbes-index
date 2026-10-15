@@ -463,7 +463,7 @@ export class CareService {
       const a = await tx.selectFrom('accounts').select('status').where('id', '=', accountId).forUpdate().executeTakeFirst();
       if (!a) throw notFound('Account', 'ACCOUNT_NOT_FOUND');
       if (a.status !== 'ACTIVE') throw customerAccountLocked();
-      const product = await this.ownPiece(tx, accountId, productRef);
+      const product = await this.ownPiece(tx, accountId, productRef, true); // FOR UPDATE (account → product): a claim opened at once is waited for.
       const program = await readProgram(tx);
       const standing = await tierOf(tx, accountId, now);
       const allowance = careAllowance(program, standing.tier);
@@ -718,8 +718,8 @@ export class CareService {
   }
 
   /** The piece, held by the account now (an open ownership); 404 PRODUCT_NOT_FOUND otherwise, as for any piece not its own. */
-  private async ownPiece(db: Db, accountId: string, productRef: string) {
-    const product = await findProduct(db, productRef);
+  private async ownPiece(db: Db, accountId: string, productRef: string, forUpdate = false) {
+    const product = await findProduct(db, productRef, { forUpdate });
     const notYours = () => notFound('Product', 'PRODUCT_NOT_FOUND');
     if (!product) throw notYours();
     const o = await db.selectFrom('ownership').select('id').where('product_id', '=', product.id).where('account_id', '=', accountId).where('ended_at', 'is', null).executeTakeFirst();

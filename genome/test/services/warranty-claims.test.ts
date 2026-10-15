@@ -22,7 +22,9 @@
  *  - the INSPECTION record left open while ORBES holds a piece that goes back (a transfer refused then), completed by
  *    `ship`; a transfer offer refused CLAIM_OPEN while OPEN or LABEL_SENT;
  *  - `forCollector` and the export never carry the note nor who handled the claim; the audit never holds the note; the
- *    label served to its own account only and erased 30 days after the claim ends; GROWTH counts no replacement as a sale.
+ *    label served to its own account only and erased 30 days after the claim ends; GROWTH counts no replacement as a sale;
+ *  - CLOSE always succeeds: its note kept whole, a long earlier note cut to fit (the audit says so, never the note);
+ *  - a replacement's identity chosen again at `ship` when the one kept aside can no longer be it, checked as at the decision.
  */
 import { randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
@@ -390,6 +392,75 @@ describe('warranty claims (plan ORBES CARE, step 1.6)', () => {
     const refs = purchases.rows.map((r) => r.ref);
     const ownershipOfReplacement = await db().selectFrom('ownership').select('id').where('product_id', '=', other54.id).executeTakeFirstOrThrow();
     expect(refs).not.toContain(ownershipOfReplacement.id);
+  });
+
+  it('a claim opened with a 500-character note is closed from OPEN and from LABEL_SENT: the closing note kept whole, the earlier one cut to fit', async () => {
+    const c = await collector();
+    const long = `${'Opening note. '.repeat(35)}${'z'.repeat(10)}`;
+    expect(long).toHaveLength(500);
+    // From OPEN: the earlier note cut, ending « … », the closing note whole, 500 characters in all.
+    const a = await open(c, await piece(models.life, { owner: c.id }), 'WARRANTY', long);
+    expect(a.note).toBe(long);
+    const closedA = await svc().cancel(a.id, { note: 'The client withdrew.' }, operator);
+    expect(closedA.status).toBe('CANCELLED');
+    expect(closedA.note!.endsWith('…\n\nThe client withdrew.')).toBe(true);
+    expect(closedA.note!.length).toBeLessThanOrEqual(500);
+    expect(long.startsWith(closedA.note!.slice(0, closedA.note!.indexOf('…')))).toBe(true);
+    const auditA = await db().selectFrom('audit_logs').select('details').where('action', '=', 'warranty.claim.cancel').where('target_id', '=', a.id).executeTakeFirstOrThrow();
+    expect(auditA.details).toMatchObject({ from: 'OPEN', noteShortened: true });
+    expect(JSON.stringify(auditA.details)).not.toContain('withdrew');
+    // From LABEL_SENT, with a closing note of 500 characters itself: only it is kept.
+    const b = await open(c, await piece(models.life, { owner: c.id }), 'WARRANTY', long);
+    await label(b.id);
+    const closing = 'n'.repeat(500);
+    expect(await svc().cancel(b.id, { note: closing }, operator)).toMatchObject({ status: 'CANCELLED', note: closing });
+    // A cut never leaves half of a character written in two UTF-16 units.
+    const added = 'The collector never sent the piece.';
+    const room = 500 - added.length - 2 - 1;
+    const d = await open(c, await piece(models.life, { owner: c.id }), 'WARRANTY', `${'x'.repeat(room - 1)}\u{1F48D}${'y'.repeat(500 - room - 1)}`);
+    const closedD = await svc().cancel(d.id, { note: added }, operator);
+    expect(closedD.note).toBe(`${'x'.repeat(room - 1)}…\n\n${added}`);
+    // Notes that fit are both kept whole, and the audit says nothing was cut.
+    const e = await open(c, await piece(models.life, { owner: c.id }));
+    expect((await svc().cancel(e.id, { note: 'The client withdrew.' }, operator)).note).toBe(`${NOTE}\n\nThe client withdrew.`);
+    const auditE = await db().selectFrom('audit_logs').select('details').where('action', '=', 'warranty.claim.cancel').where('target_id', '=', e.id).executeTakeFirstOrThrow();
+    expect(auditE.details).not.toHaveProperty('noteShortened');
+    // MOVE TO THE LEGAL GUARANTEE still refuses notes over 500 characters in all (its note is optional).
+    expect((await refusal(svc().moveToLegal((await received(c, await piece(models.two, { owner: c.id }))).id, { note: long }, operator))).code).toBe('VALIDATION_FAILED');
+  });
+
+  it('a replacement’s identity chosen again at shipment when the one kept aside went to an order, checked as at the decision', async () => {
+    const c = await collector();
+    const p = await piece(models.life, { owner: c.id });
+    const s = await received(c, p);
+    const kept = await piece(models.life);
+    await decide(s.id, { outcome: 'REPLACEMENT', replacementProductId: kept.serial });
+    // The identity kept aside is bound to an order meanwhile: shipping it is refused, the claim stays DECIDED.
+    await sell((await collector()).id, kept.id, models.life);
+    expect((await refusal(ship(s.id))).code).toBe('CLAIM_REPLACEMENT_NOT_ALLOWED');
+    expect((await svc().sheet(s.id)).status).toBe('DECIDED');
+    // Another identity: the same checks as the decision (SKU without « Another size », another claim's replacement, sold).
+    const size54 = await piece(models.life, { size: 54 });
+    const repick = (ref: string) => svc().ship(s.id, { carrierId, tracking: '6A77777777777', replacementProductId: ref }, operator);
+    expect(await refusal(repick(size54.serial))).toMatchObject({ code: 'CLAIM_REPLACEMENT_NOT_ALLOWED', message: 'The replacement is another size: choose « Another size, as the client asked ».' });
+    expect((await refusal(repick(kept.serial))).code).toBe('CLAIM_REPLACEMENT_NOT_ALLOWED');
+    expect((await refusal(repick(p.serial))).code).toBe('CLAIM_REPLACEMENT_NOT_ALLOWED');
+    const fresh = await piece(models.life);
+    const shipped = await repick(fresh.serial);
+    expect(shipped).toMatchObject({ status: 'DONE', replacement: { productId: fresh.serial }, return: { tracking: '6A77777777777' } });
+    expect(await status(fresh.id)).toBe('ACTIVATED');
+    expect(await status(kept.id)).not.toBe('ACTIVATED');
+    const revocation = await db().selectFrom('revocations').select(['reason_code', 'reason']).where('target_id', '=', p.serial).executeTakeFirstOrThrow();
+    expect(revocation).toEqual({ reason_code: 'REPLACED', reason: `Replaced under warranty by ${fresh.serial}` });
+    const audit = await db().selectFrom('audit_logs').select('details').where('action', '=', 'warranty.claim.ship').where('target_id', '=', s.id).executeTakeFirstOrThrow();
+    expect(audit.details).toMatchObject({ outcome: 'REPLACEMENT', replacement: fresh.serial, replacedReplacement: kept.serial });
+    // The identity decided, given again at shipment, is accepted as it is (it is this claim's own).
+    const t = await received(c, await piece(models.life, { owner: c.id }));
+    const same = await piece(models.life);
+    await decide(t.id, { outcome: 'REPLACEMENT', replacementProductId: same.serial });
+    expect(await svc().ship(t.id, { carrierId, tracking: '6A77777777778', replacementProductId: same.serial }, operator)).toMatchObject({ status: 'DONE', replacement: { productId: same.serial } });
+    const auditT = await db().selectFrom('audit_logs').select('details').where('action', '=', 'warranty.claim.ship').where('target_id', '=', t.id).executeTakeFirstOrThrow();
+    expect(auditT.details).not.toHaveProperty('replacedReplacement');
   });
 
   it('the lifetime warranty: a credit of the piece’s value (DONE at once, the piece kept), never REPAIR nor WARRANTY_ENDED; a value entered only when none is found', async () => {
