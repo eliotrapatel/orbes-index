@@ -1086,8 +1086,9 @@ body.nocturne .pieces__empty {
   margin-top: 4px;
 }
 
-/* A result's tabs (C9): CARE, the one word under 44 px, has its zone 4 px wider each side, given back, so it reaches
-   44 px; its underline keeps to the word. */
+/* A result's tabs (C9): written for CARE, the one word under 44 px, whose zone grew 4 px each side, given back, to
+   reach 44 px. ORBES CARE is wider than 44 px; the rule still applies to it, harmless (no sideways scroll), its
+   underline kept to the words. */
 .n-tabsx__tab[aria-controls$="panel-care"] {
   margin-right: -4px;
   margin-left: -4px;

@@ -17,7 +17,7 @@
  * Captures
  *   verify (390 × 844 CSS px at 2×, iPhone user agent, Europe/Paris), in NOCTURNE since its step N9
  *     NOW (the screen /verify opens on; verify-01-landing.png) · scanner (searching) · scanner (locked on the code) · result
- *     O26-J-00184 AUTHENTIC — FIRST REGISTRATION · its four tabs ·
+ *     O26-J-00184 AUTHENTIC — FIRST REGISTRATION · its three tabs (PRODUCT · ORBES CARE · OWNERSHIP) ·
  *     VERIFYING… (photo path) · UNUSUAL ACTIVITY (O26-J-00193, reported
  *     stolen) · INVALID SIGNATURE (a demo code with one signature bit flipped)
  *   admin (1440 × 900 CSS px at 1×)
@@ -396,7 +396,7 @@ async function captureVerify(stage: Stage, shots: Shots, workDir: string): Promi
 
     const tabs: [string, string][] = [
       ['product', 'verify-05-tab-product'],
-      ['warranty', 'verify-06-tab-warranty'],
+      // ORBES CARE (plan of 2026-10-15) holds the warranty: no WARRANTY tab, so no verify-06; the old file names kept.
       ['care', 'verify-07-tab-care'],
       ['ownership', 'verify-08-tab-ownership'],
     ];
