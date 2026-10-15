@@ -28,7 +28,7 @@
  *     variant without one; a piece whose model has neither counts and adds no value (« Pieces without a price »). A
  *     piece is named by an order when an order not CANCELLED names it, for its buyer, or for anyone while not
  *     RETURNED: an ordered piece counts once, and a returned order nets to zero. TRANSFER, RESALE and ADMIN pieces never
- *     count. The Shopify store's pieces are ELSEWHERE until the sync (PIECE_SOURCES gains its channel then).
+ *     count, nor the replacement of a warranty claim registered by its claimant (plan ORBES CARE: not a sale). The Shopify store's pieces are ELSEWHERE until the sync (PIECE_SOURCES gains its channel then).
  *   - Revenue is invoices less credit notes, in the UTC month each was issued, app orders only: BP-19's shipping lines
  *     and credits are inside the totals, and a GIFT order (no invoice) adds nothing. Its orders are counted on their main
  *     invoice only: a supplementary invoice (an engraving after PAID) adds to the totals, never another order.
@@ -385,7 +385,8 @@ export function purchaseRows(account?: string | readonly string[]): RawBuilder<u
       JOIN models m ON m.id = p.model_id
       LEFT JOIN models mm ON mm.id = m.variant_of
      WHERE w.acquired_via = 'FIRST_REGISTRATION' ${reg} AND ${notTestEntrant('w.account_id')}
-       AND NOT EXISTS (SELECT 1 FROM orders x WHERE x.product_id = w.product_id AND x.status <> 'CANCELLED' AND (x.account_id = w.account_id OR x.status <> 'RETURNED'))`;
+       AND NOT EXISTS (SELECT 1 FROM orders x WHERE x.product_id = w.product_id AND x.status <> 'CANCELLED' AND (x.account_id = w.account_id OR x.status <> 'RETURNED'))
+       AND NOT EXISTS (SELECT 1 FROM warranty_claims c WHERE c.replacement_product_id = w.product_id)`;
 }
 
 interface CollectorRow {

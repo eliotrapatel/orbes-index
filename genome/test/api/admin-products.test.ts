@@ -225,6 +225,28 @@ describe('admin products, codes and records', () => {
       expect((await auditor.get('/api/admin/warranties?status=BROKEN')).statusCode).toBe(400);
     });
 
+    it('refuses to complete a warranty claim’s INSPECTION record here: only its claim closes it (plan ORBES CARE, step 1.6)', async () => {
+      const p = await issueViaApi();
+      await operator.post(`/api/admin/products/${p.product.productId}/warranty/activate`, {});
+      const { client, email } = await accountClient(h);
+      const scan = safeJson(await client.post('/api/v1/verify', { code: p.code.data })) as any;
+      expect((await client.post('/api/v1/ownership/register', { registrationToken: scan.registration.token })).statusCode).toBe(201);
+      const db = h.t.db;
+      const account = await db.selectFrom('accounts').select('id').where('email_normalized', '=', email).executeTakeFirstOrThrow();
+      const conversation = await db.insertInto('client_conversations').values({ account_id: account.id, status: 'ANSWERED', last_message_at: h.clock.now() }).returning('id').executeTakeFirstOrThrow();
+      // Through the service, as the console's claim routes call it (an admin id and a hashed IP, as the audit check below reads).
+      const staff = { type: 'admin' as const, id: (await db.selectFrom('admin_users').select('id').where('role', '=', 'OPERATOR').executeTakeFirstOrThrow()).id, ipHash: 'C'.repeat(43) };
+      const carrierId = (await db.selectFrom('carriers').select('id').where('active', '=', true).executeTakeFirstOrThrow()).id;
+      const claims = h.ctx.services.warrantyClaims;
+      const opened = await claims.open({ conversationId: conversation.id, productId: p.product.productId, basis: 'WARRANTY' }, staff);
+      await claims.label(opened.id, { pdf: new Uint8Array(Buffer.from('%PDF-1.4\n%%EOF\n', 'latin1')), carrierId, tracking: '6A12345678901' }, staff);
+      const received = await claims.receive(opened.id, staff);
+      const refused = await operator.post(`/api/admin/services/${received.serviceRecordId}/complete`, { notes: 'done' });
+      expect(refused.statusCode).toBe(422);
+      expect(errorOf(refused)).toEqual({ code: 'VALIDATION_FAILED', message: 'This inspection is closed from its warranty claim.' });
+      expect((await db.selectFrom('service_records').select('status').where('id', '=', received.serviceRecordId!).executeTakeFirstOrThrow()).status).toBe('OPEN');
+    });
+
     it('confirms an unverified registration', async () => {
       const p = await issueViaApi();
       await operator.post(`/api/admin/products/${p.product.productId}/warranty/activate`, {});

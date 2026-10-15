@@ -490,6 +490,9 @@ export type WarrantyClaimBasis = (typeof WARRANTY_CLAIM_BASES)[number];
 export const WARRANTY_CLAIM_STATUSES = ['OPEN', 'LABEL_SENT', 'RECEIVED', 'DECIDED', 'DONE', 'CANCELLED'] as const;
 export type WarrantyClaimStatus = (typeof WARRANTY_CLAIM_STATUSES)[number];
 
+/** A claim still under way, at most one per piece (`warranty_claims_open_once`'s predicate, migration 0048). */
+export const WARRANTY_CLAIM_LIVE_STATUSES: readonly WarrantyClaimStatus[] = Object.freeze(['OPEN', 'LABEL_SENT', 'RECEIVED', 'DECIDED']);
+
 /**
  * A warranty claim's outcome (warranty_claims.outcome, migration 0048): the same piece, new; a credit of its value (the
  * model no longer made); a part credit (THE PROGRAM's percent, after the free replacement); a repair; a price reduction

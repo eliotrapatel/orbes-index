@@ -45,6 +45,7 @@ import { EngagementService } from './services/engagement.js';
 import { runCollectorHistory, type HistoryMemo } from './services/collector-history.js';
 import { LikesService } from './services/likes.js';
 import { CareService, eraseCareLabels } from './services/care.js';
+import { WarrantyClaimService } from './services/warranty-claims.js';
 import { GuaranteeService } from './services/guarantees.js';
 import { SizeService } from './services/sizes.js';
 import { AddressService } from './services/addresses.js';
@@ -177,6 +178,8 @@ export interface AppServices {
   engagement: EngagementService;
   /** The yearly care (plan NEXT-NINE, BP-19 T6): asked for from the piece, a prepaid label both ways, recorded as YEARLY CARE. */
   care: CareService;
+  /** The warranty claims (plan ORBES CARE): opened by Client Services from the collector's conversation, decided by an OPERATOR. */
+  warrantyClaims: WarrantyClaimService;
   /** THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01): a guaranteed place at a coming release, granted by Client Services. */
   guarantees: GuaranteeService;
   /** YOUR SIZES (plan NEXT-NINE, AC-01): the sizes a collector saves, which preselect a size it then confirms; a model's size kind and fits. */
@@ -340,6 +343,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const birthdayCredits = new BirthdayCreditService({ db, audit, clock, log });
     const engagement = new EngagementService({ db, clock, log });
     const care = new CareService({ db, audit, warranty, clock });
+    const warrantyClaims = new WarrantyClaimService({ db, audit, warranty, lifecycle, clock });
     const guarantees = new GuaranteeService({ db, audit, clock });
     const sizes = new SizeService({ db, audit, clock });
     const addresses = new AddressService({ db, audit, clock });
@@ -420,6 +424,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       birthdayCredits,
       engagement,
       care,
+      warrantyClaims,
       guarantees,
       sizes,
       addresses,

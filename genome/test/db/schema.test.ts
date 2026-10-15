@@ -1082,6 +1082,9 @@ describe('schema', () => {
     }
     expect(S.WARRANTY_CLAIM_OUTCOMES_BY_BASIS.TWO_YEARS.filter((o) => o.endsWith('_CREDIT'))).toEqual([]);
     expect(S.WARRANTY_CLAIM_OUTCOMES_BY_BASIS.LEGAL.filter((o) => o.endsWith('_CREDIT'))).toEqual([]);
+    // A claim under way (step 1.6: the service, PRIVATE CARE and the transfers read it): warranty_claims_open_once's predicate.
+    const open = (await sql<{ def: string }>`SELECT indexdef AS def FROM pg_indexes WHERE indexname = 'warranty_claims_open_once'`.execute(t.db)).rows[0].def;
+    expect(sorted([...open.matchAll(/'([^']*)'::text/g)].map((m) => m[1]))).toEqual(sorted(S.WARRANTY_CLAIM_LIVE_STATUSES));
   });
 
   it('ORBES CARE (0048): the mirror at work: a model\'s warranty, false by default; a warranty inserted without its kind taking its model\'s, a lifetime one with no end date; THE PROGRAM\'s PLATINE every piece and the warranty credit\'s 30 %; a WARRANTY grant with no tier; a claim with its basis and defaults', async () => {

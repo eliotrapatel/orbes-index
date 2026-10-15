@@ -36,7 +36,7 @@
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
-import { CARE_REQUEST_STATUSES, type CareRequestRow, type CareRequestStatus, type ClientConversationStatus } from '../db/schema.js';
+import { CARE_REQUEST_STATUSES, WARRANTY_CLAIM_LIVE_STATUSES, type CareRequestRow, type CareRequestStatus, type ClientConversationStatus } from '../db/schema.js';
 import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
 import { makePage, pageOffset, systemClock, type Actor, type Clock, type Page, type PageRequest } from '../types.js';
 import type { AuditService } from './audit.js';
@@ -247,7 +247,8 @@ function modelName(name: string, variantLabel: string | null): string {
 
 type ShipmentRow = Pick<CareRequestRow, 'label_carrier_id' | 'label_tracking' | 'label_at' | 'return_carrier_id' | 'return_tracking' | 'return_shipped_at'>;
 
-async function shipments(db: Db, r: ShipmentRow): Promise<{ label: CareShipment | null; back: CareShipment | null }> {
+/** The label's and the return's shipments of a request (or of a warranty claim, services/warranty-claims.ts: the same columns). */
+export async function shipments(db: Db, r: ShipmentRow): Promise<{ label: CareShipment | null; back: CareShipment | null }> {
   const ids = [r.label_carrier_id, r.return_carrier_id].filter((x): x is string => x !== null);
   const carriers = ids.length ? await db.selectFrom('carriers').select(['id', 'name', 'tracking_url']).where('id', 'in', ids).execute() : [];
   const of = (id: string | null, tracking: string | null, at: Date | null): CareShipment | null => {
@@ -353,7 +354,10 @@ export async function accountCareRequests(db: Db, accountId: string): Promise<Ex
   }));
 }
 
-/** The housekeeping: the labels' PDFs erased 30 days after their request ended. Returns how many. */
+/**
+ * The housekeeping: the labels' PDFs erased 30 days after their request ended, and those of the warranty claims 30 days
+ * after the claim ended (plan ORBES CARE, services/warranty-claims.ts). Returns how many.
+ */
 export async function eraseCareLabels(db: Db, now: Date): Promise<number> {
   const before = new Date(now.getTime() - CARE_LABEL_RETENTION_MS);
   const r = await db
@@ -362,7 +366,13 @@ export async function eraseCareLabels(db: Db, now: Date): Promise<number> {
     .where('label_pdf', 'is not', null)
     .where((eb) => eb.or([eb.and([eb('status', '=', 'DONE'), eb('done_at', '<', before)]), eb.and([eb('status', '=', 'CANCELLED'), eb('cancelled_at', '<', before)])]))
     .executeTakeFirst();
-  return Number(r.numUpdatedRows);
+  const claims = await db
+    .updateTable('warranty_claims')
+    .set({ label_pdf: null })
+    .where('label_pdf', 'is not', null)
+    .where((eb) => eb.or([eb.and([eb('status', '=', 'DONE'), eb('done_at', '<', before)]), eb.and([eb('status', '=', 'CANCELLED'), eb('cancelled_at', '<', before)])]))
+    .executeTakeFirst();
+  return Number(r.numUpdatedRows) + Number(claims.numUpdatedRows);
 }
 
 // ── Service ────────────────────────────────────────────────────────────────
@@ -716,6 +726,9 @@ export class CareService {
     if (!TRANSFERABLE_STATUSES.includes(product.status as never)) return 'UNAVAILABLE';
     const pending = await db.selectFrom('ownership_transfers').select('id').where('product_id', '=', product.id).where('status', '=', 'PENDING').executeTakeFirst();
     if (pending) return 'UNAVAILABLE';
+    // A warranty claim under way (plan ORBES CARE): the piece is ORBES's to examine first.
+    const claim = await db.selectFrom('warranty_claims').select('id').where('product_id', '=', product.id).where('status', 'in', [...WARRANTY_CLAIM_LIVE_STATUSES]).executeTakeFirst();
+    if (claim) return 'UNAVAILABLE';
     return 'AVAILABLE';
   }
 }

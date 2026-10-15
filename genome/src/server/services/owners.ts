@@ -93,6 +93,7 @@ import { accountCircleData, type ExportedCircleAnswer, type ExportedCircleVote }
 import { isTestEntrant, tierName, tierOf, type ClubTier, type ClubTierName } from './club.js';
 import { accountDropEntries, auditWithdrawnEntries, withdrawAccountEntries, type ExportedDropEntry } from './drops.js';
 import { accountCareRequests, careThisYear, type CareAllowance, type ExportedCareRequest } from './care.js';
+import { accountWarrantyClaims, type ExportedWarrantyClaim } from './warranty-claims.js';
 import { accountGuaranteesForStaff, exportedGuarantees, type AdminGuarantee, type ExportedGuarantee } from './guarantees.js';
 import { exportedSizes, type ExportedSize } from './sizes.js';
 import { exportedAddresses, type ExportedAddress } from './addresses.js';
@@ -458,6 +459,11 @@ export interface AccountExport {
    * step's time, and the name and address the piece returns to as the collector gave them; never who handled it.
    */
   careRequests: ExportedCareRequest[];
+  /**
+   * The account's warranty claims (plan ORBES CARE), oldest first: the piece, the basis, each step's time, the outcome,
+   * a refusal's reason, the value, the part credit's percent and the replacement; never the note nor who handled it.
+   */
+  warrantyClaims: ExportedWarrantyClaim[];
   /**
    * The house's guarantees granted to the account (plan NEXT-NINE, IN-01), oldest first: every one, shown to the client
    * or not, with Client Services' notes, the grant's and the revocation's (the right of access requires them); never who granted it.
@@ -999,6 +1005,7 @@ export class OwnerService {
       const orders = await accountOrders(tx, a.id);
       const messages = await accountMessages(tx, a.id);
       const careRequests = await accountCareRequests(tx, a.id);
+      const warrantyClaims = await accountWarrantyClaims(tx, a.id);
       const guarantees = await exportedGuarantees(tx, a.id);
       const sizes = await exportedSizes(tx, a.id);
       const addresses = await exportedAddresses(tx, a.id);
@@ -1092,6 +1099,7 @@ export class OwnerService {
         orders,
         messages,
         careRequests,
+        warrantyClaims,
         guarantees,
         sizes,
         addresses,
@@ -1137,6 +1145,7 @@ export class OwnerService {
             orders: out.orders.length,
             messages: out.messages.length,
             careRequests: out.careRequests.length,
+            warrantyClaims: out.warrantyClaims.length,
             guarantees: out.guarantees.length,
             sizes: out.sizes.length,
             addresses: out.addresses.length,

@@ -335,6 +335,9 @@ export const adminProductRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
     // A YEARLY_CARE record (BP-19 T6) is closed by its own flow only (services/care.ts COMPLETE or CANCEL), never from here.
     const record = await db.selectFrom('service_records').select('type').where('id', '=', id).executeTakeFirst();
     if (record?.type === 'YEARLY_CARE') throw new DomainError('VALIDATION_FAILED', 422, 'PRIVATE CARE is completed from the PRIVATE CARE board.');
+    // A warranty claim's INSPECTION record (plan ORBES CARE) is closed by its claim only (its decision or its shipment).
+    const claim = await db.selectFrom('warranty_claims').select('id').where('service_record_id', '=', id).executeTakeFirst();
+    if (claim) throw new DomainError('VALIDATION_FAILED', 422, 'This inspection is closed from its warranty claim.');
     return warranty.completeService(id, { notes: b.notes ?? null }, adminActor(request));
   });
 

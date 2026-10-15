@@ -591,7 +591,8 @@ export class OwnershipService {
    * (`accounts.transfers_frozen_until`, AccountRecoveryService). The account row is read FOR SHARE
    * before the product is locked (lock order account → product, as in the recovery), so a transfer
    * started while a recovery commits waits for it and sees the pause. Refused with 409 CARE_OPEN while the piece's
-   * yearly care is REQUESTED or LABEL_SENT (plan NEXT-NINE, BP-19 T6).
+   * yearly care is REQUESTED or LABEL_SENT (plan NEXT-NINE, BP-19 T6), and 409 CLAIM_OPEN while its warranty claim is
+   * OPEN or LABEL_SENT (plan ORBES CARE).
    */
   async initiateTransfer(accountId: string, productId: string, actor: Actor): Promise<TransferOffer> {
     assertAccountId(accountId);
@@ -611,6 +612,10 @@ export class OwnershipService {
       // RECEIVED and RETURNING are already refused below (the piece is SERVICED).
       const care = await tx.selectFrom('care_requests').select('id').where('product_id', '=', p.id).where('status', 'in', ['REQUESTED', 'LABEL_SENT']).executeTakeFirst();
       if (care) throw new DomainError('CARE_OPEN', 409, "This piece's PRIVATE CARE is under way: cancel the request or wait until it returns.");
+      // Its warranty claim under way (plan ORBES CARE): opened for this owner, its label on its way. RECEIVED and DECIDED
+      // are refused below (the piece is SERVICED).
+      const claim = await tx.selectFrom('warranty_claims').select('id').where('product_id', '=', p.id).where('status', 'in', ['OPEN', 'LABEL_SENT']).executeTakeFirst();
+      if (claim) throw new DomainError('CLAIM_OPEN', 409, "This piece's warranty claim is under way: it can be transferred once the claim ends.");
       if (!TRANSFERABLE_STATUSES.includes(p.status)) {
         throw new DomainError('TRANSFER_NOT_ALLOWED', 409, 'This product cannot be transferred at this time.', { detail: `status ${p.status}` });
       }
