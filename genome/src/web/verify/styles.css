@@ -684,6 +684,26 @@ body.nocturne .pieces__empty {
   margin-top: 16px;
 }
 
+/* A result's ORBES CARE (plan ORBES CARE §2(a), answer 6), as a piece's in MY PIECES: WARRANTY set apart from CARING
+   FOR THIS PIECE by a hairline, then the contact. */
+.n-result__care-section {
+  margin-bottom: 24px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--vault-hairline);
+}
+
+.n-result__warranty-rows {
+  margin-top: 14px;
+}
+
+.n-result__care {
+  margin-top: 10px;
+}
+
+.n-result__care-contact {
+  margin-top: 24px;
+}
+
 /* ORBES Client Services (C15, C16): the help line, then the contact. */
 .n-result__help {
   margin-top: 40px;

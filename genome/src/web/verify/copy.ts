@@ -1034,7 +1034,7 @@ export { RESALE_GUIDANCE } from '../shared/resale.js';
 /** The text link under it, which opens the OWNERSHIP tab on RECEIVING THIS PIECE, where the transfer code is entered. */
 export const RESALE_ACTION = 'I HAVE A TRANSFER CODE';
 
-/** The CARE tab of a piece whose model has no care instructions (shared with the console's care preview). */
+/** CARING FOR THIS PIECE of a piece whose model has no care instructions (shared with the console's care preview). */
 export { DEFAULT_CARE } from '../shared/care.js';
 
 /**

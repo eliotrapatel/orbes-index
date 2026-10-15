@@ -1,5 +1,5 @@
 /**
- * PRODUCT · WARRANTY · CARE · OWNERSHIP on a result, OWNERSHIP · ORBES CARE ·
+ * PRODUCT · ORBES CARE · OWNERSHIP on a result, OWNERSHIP · ORBES CARE ·
  * SERVICE on each piece of MY PIECES (plan ORBES CARE, answer 6), LIVE · PAST on THE
  * RELEASES (plan LIVE RELEASE+, choice 5) — an ARIA tablist (manual activation
  * is unnecessary here: panels are light, so arrow keys select).
@@ -33,7 +33,7 @@ export interface TabsOptions<T extends string> {
   /** Told each tab selected by the reader (a click or a key), not the first. */
   onSelect?: (id: T) => void;
   /**
-   * NOCTURNE's underlined tabs (views/nocturne.ts) in place of the house tabs: C_CSS `.tabsx`, a result's four spread
+   * NOCTURNE's underlined tabs (views/nocturne.ts) in place of the house tabs: C_CSS `.tabsx`, a result's three spread
    * across the column; `.tabs`, THE RELEASES' LIVE and PAST 30 px apart (C7, C25); no dot between them.
    */
   kind?: 'tabsx' | 'tabs';

@@ -17,7 +17,7 @@
  *    (the operator's, else "The MONOLITHE RING model, photographed by
  *    ORBES"), the story (its paragraphs drawn by shared/lookbook.ts, as the
  *    console's preview draws them), the specifications as rows and the care
- *    (the model's, else the general care text of the CARE tab); its line
+ *    (the model's, else the general care text of the ORBES CARE tab); its line
  *    says DISCONTINUED · <year> once an ADMIN discontinued it (P-R06).
  *  - THE PRIVATE SALON (P-X08): a reserved card names its price; a reserved
  *    sheet read through the club its price, the tier it is offered from, and

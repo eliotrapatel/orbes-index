@@ -15,6 +15,7 @@ import {
   NOT_DELIVERED_NOTE,
   ORBES_CARE,
   PHOTOS,
+  PIECES,
   PROBLEMS,
   problemForApiError,
   RECEIVING,
@@ -44,6 +45,7 @@ import {
   recoveryContactModel,
   registrationOpen,
   resultViewModel,
+  TAB_LABELS,
   shortReference,
   splitTitle,
   toneOf,
@@ -137,8 +139,18 @@ describe('verify view-model: AUTHENTIC', () => {
     expect(vm.productLines).toEqual(['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
   });
 
-  it('offers the four tabs in the specified order', () => {
-    expect(vm.tabs).toEqual(['product', 'warranty', 'care', 'ownership']);
+  it('offers the three tabs in the specified order: PRODUCT · ORBES CARE · OWNERSHIP (plan ORBES CARE §2(a), answer 6)', () => {
+    expect(vm.tabs).toEqual(['product', 'care', 'ownership']);
+    // ORBES CARE merges the WARRANTY and CARE tabs, as on a piece of MY PIECES: the same label, no tab of its own left.
+    expect(vm.tabs.map((t) => TAB_LABELS[t])).toEqual(['PRODUCT', 'ORBES CARE', 'OWNERSHIP']);
+    expect(TAB_LABELS.care).toBe(PIECES.tabs.care);
+    expect(Object.keys(TAB_LABELS).sort()).toEqual(['care', 'ownership', 'product']);
+    expect(Object.values(TAB_LABELS)).not.toContain('WARRANTY');
+    // Its words: the warranty's rows and sentence, the care, the contact MY PIECES shows (no PRIVATE CARE on a scan).
+    expect(vm.warranty).toBeDefined();
+    expect(vm.care.length).toBeGreaterThan(0);
+    expect(ORBES_CARE.contact).toBe('A question about this piece, its warranty or its care: ORBES Client Services answers in MESSAGES.');
+    expect(ORBES_CARE.warranty.none).toBe('Warranty details for this piece are available from ORBES Client Services.');
   });
 
   it('fills the product and verification rows', () => {
@@ -263,7 +275,7 @@ describe('verify view-model: DISCONTINUED (P-R06)', () => {
     ]);
     // The piece still verifies as it did: the state, the tabs and the rest of the result are unchanged.
     expect(vm.tone).toBe('authentic');
-    expect(vm.tabs).toEqual(['product', 'warranty', 'care', 'ownership']);
+    expect(vm.tabs).toEqual(['product', 'care', 'ownership']);
   });
 
   it('says nothing without a year, nor for one that is not a year', () => {
@@ -296,7 +308,7 @@ describe('verify view-model: ownership modes', () => {
     const vm = resultViewModel(outcome('AUTHENTIC_FIRST_REGISTRATION', { staffScan: true }));
     expect(vm.ownership).toEqual({ kind: 'staff' });
     // Not the registration's tab: the result opens on PRODUCT as for any piece the viewer cannot register.
-    expect(vm.tabs).toEqual(['product', 'warranty', 'care', 'ownership']);
+    expect(vm.tabs).toEqual(['product', 'care', 'ownership']);
     // The flag decides, not the absence of a token: a staff scan never registers, a customer's scan without a token cannot.
     expect(
       resultViewModel(outcome('AUTHENTIC_FIRST_REGISTRATION', { staffScan: true, registration: { token: 'tok', expiresAt: '2026-10-01T08:45:00.000Z', claimCodeRequired: false } })).ownership,
@@ -764,7 +776,7 @@ describe('verify view-model: WRITE TO ORBES CLIENT SERVICES (CS-01)', () => {
     }
   });
 
-  it('on an authentic result, appears only in the WARRANTY tab of a warranty that no longer applies, about the warranty', () => {
+  it('on an authentic result, appears only in the ORBES CARE tab of a warranty that no longer applies, about the warranty', () => {
     for (const status of ['NOT_STARTED', 'ACTIVE', 'EXPIRED'] as const) {
       expect(resultViewModel(outcome('AUTHENTIC_REGISTERED', { warranty: { status } }), { clientServices: CS }).write, status).toBeUndefined();
     }

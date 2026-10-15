@@ -189,8 +189,8 @@ export function collectionImpact(n: number): string {
 }
 
 /**
- * The care block as the client reads it (the CARE tab of /verify, verify/view-model.ts): the instructions as the
- * server keeps them (trimmed), or the general care text when there are none.
+ * The care block as the client reads it (CARING FOR THIS PIECE in the ORBES CARE tab of /verify, verify/view-model.ts):
+ * the instructions as the server keeps them (trimmed), or the general care text when there are none.
  */
 export function carePreview(careInstructions: string | null | undefined): { text: string; general: boolean } {
   const care = (careInstructions ?? '').trim();

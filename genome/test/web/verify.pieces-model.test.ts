@@ -99,7 +99,7 @@ describe('MY PIECES: a piece on its plate', () => {
     expect(PIECE_TABS).toEqual(['ownership', 'care', 'service']);
     expect(PIECE_TABS.map((t) => PIECE_TAB_LABELS[t])).toEqual(['OWNERSHIP', 'ORBES CARE', 'SERVICE']);
     // SERVICE in place of the result's PRODUCT: the same seven letters, so the three fit as the result's PRODUCT ·
-    // ORBES CARE · OWNERSHIP will (step 2.3: its PRODUCT and OWNERSHIP labels are the result's own).
+    // ORBES CARE · OWNERSHIP (step 2.3) do.
     const result = resultViewModel({
       state: 'AUTHENTIC',
       scanId: '4515b884-1c2d-4e5f-8a9b-0c1d2e3f4a5b',
@@ -109,8 +109,8 @@ describe('MY PIECES: a piece on its plate', () => {
       product: { productId: 'O26-J-00184', category: { code: 'J', name: 'Jewelry' }, model: 'M', type: 'T', material: 'S', createdYear: 2026 },
     });
     const width = (labels: string[]) => labels.join('').length;
-    expect(result.tabs).toContain('product');
-    expect(width(PIECE_TABS.map((t) => PIECE_TAB_LABELS[t]))).toBe(width([TAB_LABELS.product, PIECES.tabs.care, TAB_LABELS.ownership]));
+    expect(result.tabs).toEqual(['product', 'care', 'ownership']);
+    expect(width(PIECE_TABS.map((t) => PIECE_TAB_LABELS[t]))).toBe(width(result.tabs.map((t) => TAB_LABELS[t])));
   });
 
   it('says since when the piece is the owner\'s, how it came, whether the ownership is verified', () => {

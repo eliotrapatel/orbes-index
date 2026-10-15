@@ -2,7 +2,7 @@
  * WRITE TO ORBES CLIENT SERVICES and MESSAGES, end to end (plan NEXT-NINE of 2026-10-06, §3.1 CS-01, steps 1.4 and
  * 1.5), on the NOCTURNE stage (test/support/nocturne-states.ts), outside the content shards:
  *
- *  - each site shows the button, with what it attaches: a scan with a problem, the warranty tab of a warranty that no
+ *  - each site shows the button, with what it attaches: a scan with a problem, the ORBES CARE tab of a warranty that no
  *    longer applies, a piece, MY PIECES' orders and releases, a draw's page, the LIVE RELEASE's CONFIRMED screen (the
  *    house's hairline `btn`) and YOUR ENTRY IS REMOVED, a salon request on its model's sheet;
  *  - signed out, the sheet leads through the sign-in to the form, its context kept (its FORGOTTEN PASSWORD? shows the
@@ -289,15 +289,15 @@ const CASES: { state: UiState; check: Check }[] = [
       expect(text).not.toContain(NOCTURNE_CLIENT_SERVICES.hours);
     },
   },
-  // ── Site 2: the warranty tab of a warranty that no longer applies (written last: it voids a warranty) ──
+  // ── Site 2: the ORBES CARE tab of a warranty that no longer applies (written last: it voids a warranty) ──
   {
-    state: writing('result-first-registration-warranty', 'messages-warranty-void', {
+    state: writing('result-first-registration-care', 'messages-warranty-void', {
       act: async (run) => {
         await run.stage.ctx.services.warranty.void(run.demo.pieces.first!, 'Test of the warranty tab.', await adminActor(run.stage));
         await run.page.locator('.view--now[data-ready]').waitFor();
         await run.page.setInputFiles('#photo-input', { name: 'orbes-code.png', mimeType: 'image/png', buffer: codePhoto(run.demo.codes.first!) });
         await run.page.locator('.view--result .n-result__title').waitFor({ timeout: 30_000 });
-        await run.page.getByRole('tab', { name: 'WARRANTY', exact: true }).first().click();
+        await run.page.getByRole('tab', { name: 'ORBES CARE', exact: true }).first().click();
       },
     }),
     check: async (page) => {

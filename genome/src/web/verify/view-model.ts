@@ -16,8 +16,8 @@
  * registration token or a transfer window, the certificate-card or the
  * transfer-code section), when the scan's windows end on this device's
  * clock, where WRITE TO ORBES CLIENT SERVICES is offered with what it
- * attaches (plan NEXT-NINE, CS-01: the scan, and its warranty on the
- * warranty tab), the email of ORBES Client Services under FORGOTTEN
+ * attaches (plan NEXT-NINE, CS-01: the scan, and its warranty in the
+ * ORBES CARE tab), the email of ORBES Client Services under FORGOTTEN
  * PASSWORD? (the one place it remains), and whether the customer
  * may say where the piece was seen or bought (a result that was not
  * authentic). It never infers
@@ -32,12 +32,16 @@ import type { StoryInput } from './story-card.js';
 import { VERIFICATION_STATES, type ClientServices, type VerificationState, type VerifyOutcome, type WarrantyStatus } from './types.js';
 
 export type Tone = 'authentic' | 'caution' | 'void';
-export type TabId = 'product' | 'warranty' | 'care' | 'ownership';
+/**
+ * A result's tabs: PRODUCT · ORBES CARE · OWNERSHIP (plan ORBES CARE §2(a), answer 6). ORBES CARE merges the WARRANTY
+ * and CARE tabs, as on each piece of MY PIECES; a result has no SERVICE tab (the service history is the account's) and
+ * keeps its PRODUCT tab.
+ */
+export type TabId = 'product' | 'care' | 'ownership';
 
 export const TAB_LABELS: Readonly<Record<TabId, string>> = Object.freeze({
   product: 'PRODUCT',
-  warranty: 'WARRANTY',
-  care: 'CARE',
+  care: 'ORBES CARE',
   ownership: 'OWNERSHIP',
 });
 
@@ -90,8 +94,8 @@ export interface ContactModel {
 
 /**
  * WRITE TO ORBES CLIENT SERVICES on a result (plan NEXT-NINE, CS-01): under the help line of every caution and void
- * result (`help`), and in the WARRANTY tab when the warranty no longer applies (`warranty`), with the scan it attaches
- * (null: a staff scan, which attaches nothing).
+ * result (`help`), and in the ORBES CARE tab when the warranty no longer applies (`warranty`), with the scan it
+ * attaches (null: a staff scan, which attaches nothing).
  */
 export interface WriteModel {
   placement: 'help' | 'warranty';
@@ -486,7 +490,7 @@ export function resultViewModel(
     if (discontinued !== null) rows.push([DISCONTINUED.row, String(discontinued)]);
     vm.productRows = rows;
     if (p.care && p.care.trim()) vm.care = p.care.trim();
-    vm.tabs = ['product', 'warranty', 'care', 'ownership'];
+    vm.tabs = ['product', 'care', 'ownership'];
     // The server sends them on authentic results only; the client shows them nowhere else either.
     vm.photos = photoModels(p);
     // SEE THE MODEL (P-R02): the sheet of a model shown in THE COLLECTION, when the server names one.

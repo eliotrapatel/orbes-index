@@ -1301,7 +1301,7 @@ export interface OrderCareGuide {
 /** What a message concerns (client_messages.context_kind). */
 export type MessageContextKind = 'PIECE' | 'ORDER' | 'RELEASE' | 'SCAN' | 'MODEL';
 
-/** What the collector attaches to a message: a kind and its id; `about` WARRANTY for the warranty tab's scan only. */
+/** What the collector attaches to a message: a kind and its id; `about` WARRANTY for a result's ORBES CARE tab only. */
 export interface MessageContextInput {
   kind: MessageContextKind;
   id: string;

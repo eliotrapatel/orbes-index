@@ -606,8 +606,14 @@ export const UI_STATES: readonly UiState[] = [
   // ── The results ──
   { id: 'result-first-registration', title: 'AUTHENTIC — FIRST REGISTRATION, signed out: OWNERSHIP and the sign-in', refs: ['C9'], variant: 'full', ...result('first') },
   { id: 'result-first-registration-product', title: 'AUTHENTIC — FIRST REGISTRATION: the PRODUCT tab', refs: ['same pieces'], variant: 'full', ...result('first', (run) => tab(run, 'PRODUCT').click()) },
-  { id: 'result-first-registration-warranty', title: 'AUTHENTIC — FIRST REGISTRATION: the WARRANTY tab', refs: ['C35'], variant: 'full', ...result('first', (run) => tab(run, 'WARRANTY').click()) },
-  { id: 'result-first-registration-care', title: 'AUTHENTIC — FIRST REGISTRATION: the CARE tab', refs: ['C35'], variant: 'full', ...result('first', (run) => tab(run, 'CARE').click()) },
+  // Plan ORBES CARE, step 2.3 (answer 6): the WARRANTY and CARE tabs merged into ORBES CARE, one state for their two.
+  {
+    id: 'result-first-registration-care',
+    title: 'AUTHENTIC — FIRST REGISTRATION: the ORBES CARE tab (its WARRANTY, CARING FOR THIS PIECE, the contact)',
+    refs: ['C35'],
+    variant: 'full',
+    ...result('first', (run) => tab(run, 'ORBES CARE').click()),
+  },
   {
     id: 'result-create-account',
     title: 'The OWNERSHIP tab, signed out: CREATE ACCOUNT',

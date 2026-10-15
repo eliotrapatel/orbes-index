@@ -6,7 +6,7 @@
  * answer is unread.
  *
  * The ids sent, by kind (API §10.17): PIECE its productId (O26-J-00184); ORDER its orderId; RELEASE its dropId; MODEL its
- * modelId (never the slug); SCAN its scanId, `about` WARRANTY on the warranty tab only. The server checks each and
+ * modelId (never the slug); SCAN its scanId, `about` WARRANTY in ORBES CARE only. The server checks each and
  * writes its own label; the one here is what the collector reads before sending.
  */
 import { MESSAGES } from './copy.js';
@@ -50,7 +50,7 @@ export function scanContext(scanId: string, reference: string, state: string): W
   return { kind: 'SCAN', id: scanId, label: labelOf(`${MESSAGES.label.ref} ${reference}`, stateWords(state)) };
 }
 
-/** The warranty tab of a scan (site 2): the scan, about its warranty no longer valid. */
+/** The ORBES CARE tab of a scan's result (site 2): the scan, about its warranty no longer valid. */
 export function warrantyContext(scanId: string, reference: string, state: string): WriteContext {
   return { kind: 'SCAN', id: scanId, about: 'WARRANTY', label: labelOf(`${MESSAGES.label.ref} ${reference}`, stateWords(state), MESSAGES.label.warranty) };
 }

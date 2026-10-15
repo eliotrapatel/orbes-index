@@ -448,7 +448,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(await page.locator('.n-result__genome .n-gen__fp').evaluate((el) => getComputedStyle(el).fontSize)).toBe('11.5px');
     const orbit = genomeLayout(plain.genome, 'orbit');
     expect((box!.width * 2 * orbit.glyphRadius) / orbit.viewBox.w).toBeGreaterThan(32);
-    await textsOf(page.getByRole('tab'), ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP']);
+    await textsOf(page.getByRole('tab'), ['PRODUCT', 'ORBES CARE', 'OWNERSHIP']);
     await attrOf(page.getByRole('tab', { name: 'PRODUCT' }), 'aria-selected', 'true');
     // The id, the fingerprint, the product lines, the rows and the reference read in Helvetica Neue.
     expect(await figuresInDisplayFace(page)).toEqual([]);
@@ -459,21 +459,40 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
 
     await page.waitForTimeout(2_000);
     await page.screenshot({ path: join(OUT_DIR, 'verify-result.png'), fullPage: true });
-    // The four tabs at 10 px keep the width they had at 9 px: 44 px zones on this phone and on the
+    // The three tabs at 10 px keep the width they had at 9 px: 44 px zones on this phone and on the
     // smallest in use (320 px, where they tighten), without scrolling sideways.
-    await keepsFloors(page, ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'SCAN ANOTHER', ...LEGAL_LINKS]);
+    await keepsFloors(page, ['PRODUCT', 'ORBES CARE', 'OWNERSHIP', 'SCAN ANOTHER', ...LEGAL_LINKS]);
     await page.setViewportSize({ width: 320, height: 640 });
-    await keepsFloors(page, ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'SCAN ANOTHER', ...LEGAL_LINKS]);
+    await keepsFloors(page, ['PRODUCT', 'ORBES CARE', 'OWNERSHIP', 'SCAN ANOTHER', ...LEGAL_LINKS]);
     await page.setViewportSize(MOBILE_VIEWPORT);
 
     // Keyboard: arrows move between tabs and show their panels.
     await page.getByRole('tab', { name: 'PRODUCT' }).focus();
     await page.keyboard.press('ArrowRight');
-    await attrOf(page.getByRole('tab', { name: 'WARRANTY' }), 'aria-selected', 'true');
+    await attrOf(page.getByRole('tab', { name: 'ORBES CARE' }), 'aria-selected', 'true');
     await textOf(page.getByRole('tabpanel'), /NOT YET STARTED/);
+    // ORBES CARE (plan ORBES CARE §2(a), answer 6), in MY PIECES' order: WARRANTY, its rows and its sentence; CARING
+    // FOR THIS PIECE, the care; then the contact, the words MY PIECES shows. No PRIVATE CARE (a scan reads no tier), no
+    // button (the warranty applies), no link.
+    const orbesCare = page.getByRole('tabpanel');
+    await textsOf(orbesCare.locator('h3'), ['WARRANTY', 'CARING FOR THIS PIECE']);
+    await textOf(orbesCare.locator('.n-kv').first(), /STATUS\s+NOT YET STARTED/);
+    await textOf(orbesCare.locator('.n-result__panel-note'), 'The ORBES warranty begins on the date of purchase from an ORBES boutique or authorised retailer.');
+    await textOf(orbesCare.locator('.n-result__care'), /\S/);
+    await textOf(orbesCare.locator('.n-result__care-contact'), ORBES_CARE.contact);
+    expect(await orbesCare.evaluate((el) => [...el.querySelectorAll('h3, .n-kv, p')].map((e) => e.className.split(' ').find((c) => c.startsWith('n-result__')) ?? e.tagName))).toEqual([
+      'H3',
+      'n-result__warranty-rows',
+      'n-result__panel-note',
+      'H3',
+      'n-result__care',
+      'n-result__care-contact',
+    ]);
+    await countOf(orbesCare.locator('button, a'), 0);
+    expect(await orbesCare.innerText()).not.toMatch(/PRIVATE CARE|SUBSCRIBE/);
     // Its focus ring shows, clear of the tabs on either side (C9's tabs spread across the column, no dots between them).
     // NOCTURNE's ring: an ivory outline, 2 px, 2 px off (plan, Accessibility), round the word.
-    const ring = await page.getByRole('tab', { name: 'WARRANTY' }).evaluate((el) => {
+    const ring = await page.getByRole('tab', { name: 'ORBES CARE' }).evaluate((el) => {
       const cs = getComputedStyle(el);
       const r = el.getBoundingClientRect();
       const off = Number.parseFloat(cs.outlineWidth) + Number.parseFloat(cs.outlineOffset);
@@ -481,9 +500,9 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     });
     expect(ring).toMatchObject({ focusVisible: true, style: 'solid', width: '2px' });
     const product = (await page.getByRole('tab', { name: 'PRODUCT' }).boundingBox())!;
-    const care = (await page.getByRole('tab', { name: 'CARE' }).boundingBox())!;
+    const ownership = (await page.getByRole('tab', { name: 'OWNERSHIP' }).boundingBox())!;
     expect(ring.left).toBeGreaterThan(product.x + product.width);
-    expect(ring.right).toBeLessThan(care.x);
+    expect(ring.right).toBeLessThan(ownership.x);
     await page.keyboard.press('End');
     await attrOf(page.getByRole('tab', { name: 'OWNERSHIP' }), 'aria-selected', 'true');
     // A piece ORBES has not sold yet says so (S-07): not yet delivered by ORBES or an authorised retailer.
@@ -1120,7 +1139,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await attrOf(link, 'class', /\bn-tl\b/);
     await countOf(page.locator('.n-btn'), 1);
     await attrOf(page.getByRole('tab', { name: 'PRODUCT' }), 'aria-selected', 'true');
-    const controls = [RESALE_ACTION, 'PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'SCAN ANOTHER'];
+    const controls = [RESALE_ACTION, 'PRODUCT', 'ORBES CARE', 'OWNERSHIP', 'SCAN ANOTHER'];
     await keepsFloors(page, controls);
     for (const width of PHONE_WIDTHS) {
       await page.setViewportSize({ width, height: 640 });
@@ -2346,30 +2365,34 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.context().close();
   }, 120_000);
 
-  it('offers WRITE TO ORBES CLIENT SERVICES in the WARRANTY tab of an authentic piece whose warranty no longer applies, and nowhere else', async () => {
+  it('offers WRITE TO ORBES CLIENT SERVICES in the ORBES CARE tab of an authentic piece whose warranty no longer applies, under its sentence, and nowhere else', async () => {
     const issued = await srv.issue();
     await srv.ctx.services.warranty.void(issued.product.id, 'unauthorised modification', SYSTEM_ACTOR);
     const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
     await uploadPhoto(page, writeCodePng(srv.workDir, 'void-warranty.png', issued));
     expect(await resultTitle(page)).toBe('AUTHENTIC');
     await countOf(page.locator('.n-write__open'), 0);
-    await page.getByRole('tab', { name: 'WARRANTY' }).click();
+    await page.getByRole('tab', { name: 'ORBES CARE' }).click();
     const panel = page.getByRole('tabpanel');
     await textOf(panel.locator('.n-kv'), /NO LONGER VALID/);
     // The scan attached, about its warranty (CS-01); no email, phone or hours.
     const write = panel.getByRole('button', { name: 'WRITE TO ORBES CLIENT SERVICES' });
     await visible(write);
+    // Where the WARRANTY tab had it: right under the warranty's sentence, before CARING FOR THIS PIECE and the contact.
+    await countOf(panel.locator('.n-result__care-section > .n-result__panel-note + .n-write__open'), 1);
+    await countOf(panel.getByRole('button'), 1);
+    await textOf(panel.locator('.n-result__care-contact'), ORBES_CARE.contact);
     await attrOf(write, 'data-context', 'SCAN');
     await attrOf(write, 'data-context-about', 'WARRANTY');
     await countOf(page.locator('a[href^="mailto:"], a[href^="tel:"]'), 0);
-    await keepsFloors(page, ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'WRITE TO ORBES CLIENT SERVICES', 'SCAN ANOTHER']);
+    await keepsFloors(page, ['PRODUCT', 'ORBES CARE', 'OWNERSHIP', 'WRITE TO ORBES CLIENT SERVICES', 'SCAN ANOTHER']);
     await countOf(page.locator('.n-write__open:visible'), 1);
     // A button at the width of a tab panel: one line on this phone and on the narrower ones in use.
     await countOf(page.locator('.n-btn:visible:not(.n-write__open)'), 1);
     expect(await linesOf(write)).toBe(1);
     for (const width of PHONE_WIDTHS) {
       await page.setViewportSize({ width, height: 640 });
-      await keepsFloors(page, ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'WRITE TO ORBES CLIENT SERVICES', 'SCAN ANOTHER']);
+      await keepsFloors(page, ['PRODUCT', 'ORBES CARE', 'OWNERSHIP', 'WRITE TO ORBES CLIENT SERVICES', 'SCAN ANOTHER']);
       expect(await linesOf(write), `${width} px`).toBe(1);
     }
     await page.setViewportSize(MOBILE_VIEWPORT);
@@ -2429,11 +2452,11 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
       '9.5px',
     ]);
     expect(await figuresInDisplayFace(page)).toEqual([]);
-    await keepsFloors(page, ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'SCAN ANOTHER']);
+    await keepsFloors(page, ['PRODUCT', 'ORBES CARE', 'OWNERSHIP', 'SCAN ANOTHER']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-result-photographs.png'), fullPage: true });
     // The same frames on the smallest phone in use, without scrolling sideways.
     await page.setViewportSize({ width: 320, height: 640 });
-    await keepsFloors(page, ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'SCAN ANOTHER']);
+    await keepsFloors(page, ['PRODUCT', 'ORBES CARE', 'OWNERSHIP', 'SCAN ANOTHER']);
     await page.setViewportSize(MOBILE_VIEWPORT);
 
     // The same piece's code with its signature altered: no photograph, nothing of the piece.

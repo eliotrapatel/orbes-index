@@ -1,6 +1,7 @@
 /**
- * The general care text of the CARE tab on /verify, read on the result of a
- * piece whose model has no care instructions of its own.
+ * The general care text of CARING FOR THIS PIECE in the ORBES CARE tab on
+ * /verify, read on the result of a piece whose model has no care instructions
+ * of its own.
  *
  * Shared by the verification app (verify/copy.ts) and the console, whose
  * preview of a model's care block (catalogue, A-10) shows the client's very

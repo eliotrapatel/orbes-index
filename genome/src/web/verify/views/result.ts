@@ -1,6 +1,6 @@
 /**
  * Result (plan NOCTURNE, screen 2; C9, C13–C16, C36, C37): the state, the GENOME, THE MODEL's photograph, the piece's
- * lines and the four tabs, on the ground, centred, in NOCTURNE's pieces (views/nocturne.ts).
+ * lines and the three tabs, on the ground, centred, in NOCTURNE's pieces (views/nocturne.ts).
  *
  *               ◉                    tone mark (authentic: ring and core; caution: ring and moon; void: the ring)
  *          A U T H E N T I C         the word, 30 px
@@ -18,7 +18,8 @@
  *           MONOLITHE                the model's name, then its lines: BRACELET / JEWELRY / 925 STERLING SILVER /
  *           BRACELET …               SIZE 17 / CREATED 2026 / DISCONTINUED · 2027 (P-R06)
  *         SEE THE MODEL              its model's sheet in THE COLLECTION (P-R02), when it is PUBLIC
- *   PRODUCT  WARRANTY  CARE  OWNERSHIP   underlined tabs (`.tabsx`), registration opening on OWNERSHIP
+ *   PRODUCT  ORBES CARE  OWNERSHIP   underlined tabs (`.tabsx`), registration opening on OWNERSHIP (ORBES CARE: the
+ *                                    warranty, CARING FOR THIS PIECE and the contact, plan ORBES CARE answer 6)
  *   This verification confirms …     the assurance note (positive results)
  *   VERIFIED 5 OCT 2026 · 18:49    REF 54ADC7BD
  *   [ SCAN ANOTHER ]                 the hairline button
@@ -30,8 +31,8 @@
  * THE CERTIFICATE CARD? (registration with the claim code) or DO YOU HOLD A TRANSFER CODE? (F-03: receiving the piece
  * with it); then WHERE DID YOU SEE OR BUY THIS PIECE?, an optional answer attached to the scan: open under UNUSUAL
  * ACTIVITY (C15), a row that opens (+) under the others (C16). A warranty that no longer applies offers the same button
- * in its tab, and FORGOTTEN PASSWORD? in the OWNERSHIP panel keeps the email of ORBES Client Services for a customer who
- * needs a recovery code (C-04).
+ * in the ORBES CARE tab, and FORGOTTEN PASSWORD? in the OWNERSHIP panel keeps the email of ORBES Client Services for a
+ * customer who needs a recovery code (C-04).
  *
  * The ceremony (P-D01) is the result VIEW AS OWNER opens right after a first registration: the GENOME comes first,
  * at 220 px (C36), above the photograph; its eight glyphs appear one by one (opacity and scale of each
@@ -54,7 +55,7 @@ import { initialTab, type CeremonyModel, type PhotoModel, type ResultViewModel, 
 import { viewRoot, withNumerals } from './common.js';
 import { button, fadedPhoto, textLink, toneMark } from './nocturne.js';
 import { OwnershipPanel, type OwnershipDeps } from './ownership.js';
-import { carePanel, productPanel, warrantyPanel } from './panels.js';
+import { orbesCarePanel, productPanel } from './panels.js';
 import { reportSection, type ReportDeps } from './report.js';
 import { storyButton } from './story.js';
 import { tabsView, type TabsView } from './tabs.js';
@@ -214,10 +215,8 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
       switch (id) {
         case 'product':
           return productPanel(vm);
-        case 'warranty':
-          return warrantyPanel(vm);
         case 'care':
-          return carePanel(vm);
+          return orbesCarePanel(vm);
         case 'ownership':
           ownership = panelOf();
           return h('div', { class: 'n-result__panel' }, ownership.root);

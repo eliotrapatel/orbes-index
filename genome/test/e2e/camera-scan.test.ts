@@ -215,7 +215,7 @@ describe.skipIf(!HAS_CHROMIUM)('E2E camera scan: real browser, fake camera, real
         expect(await genome.locator('g[data-layer="seal"]').count()).toBe(0);
         expect(await genome.locator('g[data-layer="monogram"]').count()).toBe(1);
         expect(await genome.locator('g[data-layer="genome"]').count()).toBe(8);
-        expect((await page.getByRole('tab').allInnerTexts()).map(norm)).toEqual(['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP']);
+        expect((await page.getByRole('tab').allInnerTexts()).map(norm)).toEqual(['PRODUCT', 'ORBES CARE', 'OWNERSHIP']);
 
         const timeline = await readTimeline(page);
         const timing = scanTiming(timeline);
