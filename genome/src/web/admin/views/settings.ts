@@ -189,7 +189,7 @@ function locationsSection(ctx: ViewContext, items: StockLocation[], admin: boole
     void openDialog({
       title,
       eyebrow: 'Settings · Locations',
-      fields: [{ name: 'name', label: 'Name', required: true, maxlength: LOGISTICS_LIMITS.locationName, value, hint: 'As the team says it: PARIS ATELIER.' }],
+      fields: [{ name: 'name', label: 'Name', required: true, maxlength: LOGISTICS_LIMITS.locationName, value, hint: 'As the team says it: ORBES PARIS.' }],
       validate: (v) => locationProblem(v.name) ?? (v.name.trim() === value ? 'Nothing has changed.' : null),
       confirmLabel: 'Save',
       submit: async (v) => {

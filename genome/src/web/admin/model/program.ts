@@ -3,10 +3,12 @@
  *
  *  - THE PROGRAM (Club → Tiers, ADMIN): every figure of the tiers' benefits the owner called configurable, as the
  *    section lists it and the Edit program dialog holds it: the early access by default (PALLADIUM's window at least
- *    PLATINE's), the free shipping, the yearly care, the Messages priority, the welcome gift of each tier (an active
- *    model of the catalogue), the credit (its amounts, currency, validity and channels), the experiences' tiers, the
- *    birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4.6: given or not, its amount and days); what the server would
- *    refuse before anything is sent (services/club-program.ts), and what to send.
+ *    PLATINE's), the free shipping, PRIVATE CARE (plan ORBES CARE: every piece, or a number, for PLATINE and
+ *    PALLADIUM), the Messages priority, the welcome gift of each tier (an active model of the catalogue), the credit
+ *    (its amounts, currency, validity and channels), the experiences' tiers, the birthday credit (plan CUSTOMER
+ *    INTELLIGENCE §3.5 SB.4.6: given or not, its amount and days), the warranty credit after the free replacement (plan
+ *    ORBES CARE, its percent); what the server would refuse before anything is sent (services/club-program.ts), and
+ *    what to send.
  *  - SHIPPING (Orders → Settings, ADMIN): the optional rates, per currency and service, '—' for none.
  */
 import { formatDateTime } from '../format.js';
@@ -52,7 +54,7 @@ export function hoursText(n: number): string {
   return n === 0 ? 'None' : `${n} ${n === 1 ? 'hour' : 'hours'}`;
 }
 
-/** A tier's yearly care: `1 piece a year`, `Every piece`, `None`. */
+/** A tier's PRIVATE CARE: `1 piece a year`, `Every piece`, `None`. */
 export function careText(n: number | null): string {
   if (n === null) return 'Every piece';
   return n === 0 ? 'None' : `${n} ${n === 1 ? 'piece' : 'pieces'} a year`;
@@ -97,6 +99,15 @@ export function birthdayText(p: Pick<ClubProgram, 'birthdayCreditOn' | 'birthday
   return `${formatMoney(p.birthdayCreditMinor, p.creditCurrency)} · valid ${d} ${d === 1 ? 'day' : 'days'}`;
 }
 
+/** The warranty credit after the free replacement (plan ORBES CARE): `30 % of the piece's value · valid 12 months`. */
+export function warrantyCreditText(p: Pick<ClubProgram, 'warrantyCreditPercent'>): string {
+  return `${p.warrantyCreditPercent} % of the piece’s value · valid 12 months`;
+}
+
+/** The hints of PRIVATE CARE's selects and of the warranty credit's field: the terms state them (plan ORBES CARE, §2(b)). */
+export const PRIVATE_CARE_HINT = 'The terms, article 11, state every piece: change them with it.';
+export const WARRANTY_CREDIT_HINT = 'The terms, article 11, state this rate: change them with it.';
+
 /** What the birthday credit row says under its value. */
 export const BIRTHDAY_NOTE = 'Every account with a date of birth, piece or not, on its birthday (Paris), once per 12 months; in the credit’s currency, on the orders above.';
 
@@ -113,7 +124,7 @@ export function changedText(s: Pick<ClubProgramSheet, 'updatedAt' | 'updatedBy'>
 
 // ── The dialog ─────────────────────────────────────────────────────────────
 
-/** The care's select: `ALL` (every piece, PALLADIUM only), then 0 (none) to 20. */
+/** PRIVATE CARE's select: `ALL` (every piece; PLATINE's and PALLADIUM's, plan ORBES CARE), then 0 (none) to 20. */
 export function careOptions(all: boolean): { value: string; label: string }[] {
   const counts = Array.from({ length: PROGRAM_LIMITS.care.max + 1 }, (_, n) => ({ value: String(n), label: n === 0 ? 'None' : `${n} ${n === 1 ? 'piece' : 'pieces'} a year` }));
   return all ? [{ value: 'ALL', label: 'Every piece' }, ...counts] : counts;
@@ -133,7 +144,7 @@ export function programValues(p: ClubProgram): Record<string, string> {
     earlyAccessPlatineHours: String(p.earlyAccessPlatineHours),
     shippingFreePlatine: p.shippingFreePlatine,
     shippingFreePalladium: p.shippingFreePalladium,
-    carePiecesPlatine: String(p.carePiecesPlatine),
+    carePiecesPlatine: p.carePiecesPlatine === null ? 'ALL' : String(p.carePiecesPlatine),
     carePiecesPalladium: p.carePiecesPalladium === null ? 'ALL' : String(p.carePiecesPalladium),
     messagesPriorityMinTier: String(p.messagesPriorityMinTier),
     giftPlatineModelId: p.giftPlatineModelId ?? '',
@@ -151,6 +162,7 @@ export function programValues(p: ClubProgram): Record<string, string> {
     birthdayOn: p.birthdayCreditOn ? 'true' : '',
     birthdayCredit: moneyField(p.birthdayCreditMinor),
     birthdayDays: String(p.birthdayCreditDays),
+    warrantyCreditPercent: String(p.warrantyCreditPercent),
   };
 }
 
@@ -177,6 +189,7 @@ export function programProblem(v: Record<string, string>): string | null {
   const birthday = parseMoney(v.birthdayCredit);
   if (birthday === null || birthday < PROGRAM_LIMITS.birthdayCredit.min || birthday > PROGRAM_LIMITS.birthdayCredit.max) return 'A birthday credit is an amount above 0: 20, or 20.50.';
   if (wholeIn(v.birthdayDays, PROGRAM_LIMITS.birthdayDays) === null) return `A birthday credit is valid ${PROGRAM_LIMITS.birthdayDays.min} to ${PROGRAM_LIMITS.birthdayDays.max} days.`;
+  if (wholeIn(v.warrantyCreditPercent, PROGRAM_LIMITS.warrantyCredit) === null) return `The warranty credit is ${PROGRAM_LIMITS.warrantyCredit.min} to ${PROGRAM_LIMITS.warrantyCredit.max} % of the piece’s value.`;
   return null;
 }
 
@@ -188,7 +201,7 @@ export function programInput(v: Record<string, string>): ClubProgram {
     earlyAccessPlatineHours: Number(v.earlyAccessPlatineHours!.trim()),
     shippingFreePlatine: (SHIPPING_FREE_LEVELS as readonly string[]).includes(v.shippingFreePlatine ?? '') ? (v.shippingFreePlatine as ShippingFreeLevel) : 'NONE',
     shippingFreePalladium: (SHIPPING_FREE_LEVELS as readonly string[]).includes(v.shippingFreePalladium ?? '') ? (v.shippingFreePalladium as ShippingFreeLevel) : 'NONE',
-    carePiecesPlatine: Number(v.carePiecesPlatine ?? 0),
+    carePiecesPlatine: v.carePiecesPlatine === 'ALL' ? null : Number(v.carePiecesPlatine ?? 0),
     carePiecesPalladium: v.carePiecesPalladium === 'ALL' ? null : Number(v.carePiecesPalladium ?? 0),
     messagesPriorityMinTier: Number(v.messagesPriorityMinTier ?? 0) as 0 | 2 | 3,
     giftPlatineModelId: v.giftPlatineModelId || null,
@@ -204,6 +217,7 @@ export function programInput(v: Record<string, string>): ClubProgram {
     birthdayCreditOn: v.birthdayOn === 'true',
     birthdayCreditMinor: parseMoney(v.birthdayCredit) ?? 0,
     birthdayCreditDays: Number((v.birthdayDays ?? '').trim()),
+    warrantyCreditPercent: Number((v.warrantyCreditPercent ?? '').trim()),
   };
 }
 
@@ -233,6 +247,7 @@ const programValuesKeys: Record<keyof ClubProgram, true> = {
   birthdayCreditOn: true,
   birthdayCreditMinor: true,
   birthdayCreditDays: true,
+  warrantyCreditPercent: true,
 };
 
 /** Whether the dialog changes THE PROGRAM. */

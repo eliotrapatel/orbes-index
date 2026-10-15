@@ -2790,7 +2790,7 @@ export interface ConversationRow {
   waitingSince: Iso | null;
   status: ClientConversationStatus;
   answeredBy: { id: string; email: string } | null;
-  /** The client's open yearly care (BP-19 T6): `Yearly care · O26-J-00184`, a link to its page; null without one. */
+  /** The client's open PRIVATE CARE (BP-19 T6): `PRIVATE CARE · O26-J-00184`, a link to its page; null without one. */
   care: { id: string; serial: string } | null;
 }
 
@@ -2865,6 +2865,8 @@ export interface ClubProgram {
   birthdayCreditOn: boolean;
   birthdayCreditMinor: number;
   birthdayCreditDays: number;
+  /** Plan ORBES CARE (answer 4, D5): the credit after the free replacement, in percent of the piece's value (1 to 100, 30 by default). */
+  warrantyCreditPercent: number;
 }
 
 /** A model a welcome gift may be. */

@@ -147,6 +147,11 @@ export function warrantyLengthNote(w: Pick<NonNullable<ProductDetail['warranty']
   return `${w.durationMonths === 24 ? '2 years' : `${w.durationMonths} months`} · defects only`;
 }
 
+/** A service record's type in the piece page's table: a YEARLY_CARE record reads PRIVATE CARE (plan ORBES CARE), the others as they are. */
+export function serviceTypeText(type: ServiceRecord['type']): string {
+  return type === 'YEARLY_CARE' ? 'PRIVATE CARE' : humanize(type);
+}
+
 /** Statuses from which a product can no longer receive a printed code (mirrors issuance NOT_PRINTABLE). */
 const NOT_PRINTABLE: ReadonlySet<ProductStatus> = new Set(['RETIRED', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'LOST', 'STOLEN']);
 const WARRANTY_ACTIVATABLE: ReadonlySet<ProductStatus> = new Set(['ISSUED', 'ACTIVATED', 'REGISTERED', 'OWNED', 'TRANSFERRED', 'SERVICED', 'RESOLD']);
@@ -194,7 +199,7 @@ export function productActions(d: ProductDetail, role: AdminRole): ProductAction
     canVoidWarranty: can(role, 'warranty') && !w?.voidedAt,
     canExtendWarranty: can(role, 'warranty') && !!w?.startDate && !w?.voidedAt && !w?.lifetime,
     canOpenService: can(role, 'service') && d.lifecycle.allowed.includes('SERVICED'),
-    // Not a YEARLY_CARE record: the Yearly care board closes it with its request (the server refuses it here). Nor a
+    // Not a YEARLY_CARE record: the PRIVATE CARE board closes it with its request (the server refuses it here). Nor a
     // warranty claim's INSPECTION record: its claim closes it (plan ORBES CARE; the server refuses it too).
     completableServices: can(role, 'service') ? d.services.filter((s) => s.status === 'OPEN' && s.type !== 'YEARLY_CARE' && !d.claimServiceIds.includes(s.id)) : [],
     canOpenLegalClaim: can(role, 'handleClaims') && !d.warrantyClaims.items.some((c) => c.status !== 'DONE' && c.status !== 'CANCELLED'),

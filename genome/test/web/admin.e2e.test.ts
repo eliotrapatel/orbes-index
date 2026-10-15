@@ -46,7 +46,7 @@
  * window and the tabs, COLLECTORS BY VALUE paged and opening the client sheet
  * (its Lifetime value), the console's figures gathered with their links, one
  * failing panel leaving the rest, no sideways scroll at 390 px, the ADMIN's
- * sidebar with Growth, Messages and Yearly care fitting 1 440 × 900; an
+ * sidebar with Growth, Messages and PRIVATE CARE fitting 1 440 × 900; an
  * AUDITOR reads the emails masked, RETAIL never sees it. No CSP violation or
  * page error is tolerated.
  *
@@ -463,7 +463,9 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await page.fill('dialog textarea[name=careInstructions]', care);
     await expect.poll(() => preview.locator('.care-preview__text').textContent()).toBe(care);
     expect(await preview.getAttribute('data-general')).toBe('false');
-    // Set as /verify's CARE tab: the tab in the display face, the words in .prose (Helvetica Neue 13 px, line 1.75, --ink-soft).
+    // Set as /verify's ORBES CARE tab (plan ORBES CARE, step 3.3): the tab in the display face, the words in .prose
+    // (Helvetica Neue 13 px, line 1.75, --ink-soft).
+    expect(await preview.locator('.care-preview__tab').textContent()).toBe('ORBES CARE');
     expect(await preview.locator('.care-preview__tab').evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Gravesend Sans"?,/);
     const set = await preview.locator('.care-preview__text').evaluate((el) => {
       const s = getComputedStyle(el);
@@ -2201,7 +2203,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await signIn(p, ADMIN.email, ADMIN.password);
     await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
     // Club in the Clients group after Owners, then Segments, Orders and Invoices (plan LIVE RELEASE+), Messages first
-    // (plan NEXT-NINE, CS-01), Yearly care after Warranties (BP-19 T6), Links after Segments; the ADMIN's sidebar, twenty-nine links with
+    // (plan NEXT-NINE, CS-01), PRIVATE CARE after Warranties (BP-19 T6; plan ORBES CARE), Links after Segments; the ADMIN's sidebar, twenty-nine links with
     // Growth under Overview (BP-29), Logistics in the Atelier's place and Supplier orders under it (plan NEXT LOT
     // §3.5.4.1, no Atelier), still fits a 900 px screen.
     const registry = p.locator('.side__group', { hasText: 'Registry' }).locator('.side__link');
@@ -2665,7 +2667,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await expect.poll(() => p.locator('.tiers .panel__title').allTextContents()).toEqual(['THE PROGRAM', 'TITANE', 'PLATINE', 'PALLADIUM']);
     expect(await p.locator('[data-testid=program-early]').textContent()).toBe('PALLADIUM 4 hours · PLATINE 2 hours');
     expect(await p.locator('[data-testid=program-shipping]').textContent()).toBe('PLATINE Standard · PALLADIUM Express');
-    expect(await p.locator('[data-testid=program-care]').textContent()).toBe('PLATINE 1 piece a year · PALLADIUM Every piece');
+    // PRIVATE CARE (plan ORBES CARE): every piece from PLATINE; the warranty credit after the free replacement, 30 %.
+    expect(await p.locator('#tier-program .deflist__row', { has: p.locator('[data-testid=program-care]') }).locator('.deflist__label').textContent()).toBe('PRIVATE CARE');
+    expect(await p.locator('[data-testid=program-care]').textContent()).toBe('PLATINE Every piece · PALLADIUM Every piece');
+    expect(await p.locator('[data-testid=program-warranty-credit]').textContent()).toBe('30 % of the piece’s value · valid 12 months');
     expect(await p.locator('[data-testid=program-priority]').textContent()).toBe('From PLATINE');
     expect(await p.locator('[data-testid=program-gift-platine]').textContent()).toBe('None');
     expect(await p.locator('[data-testid=program-credit-platine]').textContent()).toBe('€\u00a050 · valid 12 months');
@@ -2683,6 +2688,19 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // Refused before anything is sent: PALLADIUM after PLATINE; unchanged.
     await p.click('[data-testid=program-edit]');
     expect(await p.locator('dialog input[name=earlyAccessPalladiumHours]').inputValue()).toBe('4');
+    // PLATINE's PRIVATE CARE offers Every piece, as PALLADIUM's, each with the terms' hint.
+    expect(await p.locator('dialog select[name=carePiecesPlatine]').inputValue()).toBe('ALL');
+    expect((await p.locator('dialog select[name=carePiecesPlatine] option').allTextContents())[0]).toBe('Every piece');
+    for (const name of ['carePiecesPlatine', 'carePiecesPalladium']) {
+      expect(await p.locator(`dialog .cfield[data-field=${name}] .cfield__hint`).textContent(), name).toBe('The terms, article 11, state every piece: change them with it.');
+    }
+    expect(await p.locator('dialog .cfield[data-field=carePiecesPlatine] .cfield__label').textContent()).toMatch(/^PRIVATE CARE, PLATINE/);
+    expect(await p.locator('dialog input[name=warrantyCreditPercent]').inputValue()).toBe('30');
+    expect(await p.locator('dialog .cfield[data-field=warrantyCreditPercent] .cfield__hint').textContent()).toBe('The terms, article 11, state this rate: change them with it.');
+    await p.fill('dialog input[name=warrantyCreditPercent]', '101');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('The warranty credit is 1 to 100 % of the piece’s value.');
+    await p.fill('dialog input[name=warrantyCreditPercent]', '30');
     await p.click('[data-testid=dialog-confirm]');
     await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Nothing has changed.');
     await p.fill('dialog input[name=earlyAccessPalladiumHours]', '1');
@@ -2705,7 +2723,9 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.locator('[data-testid=tier-program-PALLADIUM] li').allTextContents()).toContain(`A welcome gift, ${giftName}, added to your next order.`);
     expect(await p.locator('[data-testid=tier-program-PLATINE] li').allTextContents()).toContain('Free express shipping on every order.');
     const row = await ctx.db.selectFrom('club_program_settings').selectAll().executeTakeFirstOrThrow();
-    expect(row).toMatchObject({ early_access_palladium_hours: 6, early_access_platine_hours: 3, shipping_free_platine: 'EXPRESS', gift_palladium_model_id: modelId, credit_platine_minor: 7500 });
+    // Saved whole: PLATINE's PRIVATE CARE kept at every piece (null), the warranty credit at 30 %.
+    expect(row).toMatchObject({ early_access_palladium_hours: 6, early_access_platine_hours: 3, shipping_free_platine: 'EXPRESS', gift_palladium_model_id: modelId, credit_platine_minor: 7500, care_pieces_platine: null, warranty_credit_percent: 30 });
+    expect(await p.locator('[data-testid=program-care]').textContent()).toBe('PLATINE Every piece · PALLADIUM Every piece');
     // An ADMIN switches the birthday credit off: the row says Off, its amount and days kept; refused first out of its bounds.
     await p.click('[data-testid=program-edit]');
     expect(await p.locator('dialog input[name=birthdayOn]').isChecked()).toBe(true);
@@ -2747,7 +2767,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await ctx.db.deleteFrom('club_program_settings').execute();
   }, STEP_TIMEOUT);
 
-  it('handles a yearly care from Clients → Yearly care (plan NEXT-NINE, BP-19 T6): the return address the client gave, the label sent as a PDF, the piece received; the client\'s Messages row links it; an AUDITOR reads it masked', async () => {
+  it('handles PRIVATE CARE from Clients → PRIVATE CARE (plan NEXT-NINE, BP-19 T6; plan ORBES CARE, step 3.3): the return address the client gave, the label sent as a PDF, the piece received; the client\'s Messages row links it; an AUDITOR reads it masked', async () => {
     // The PLATINE owner of the Tiers step asks for the yearly care of a piece, and has written once to Client Services.
     const owner = await ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', 'tier.owner@example.com').executeTakeFirstOrThrow();
     const serial = (
@@ -2763,14 +2783,14 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await signIn(p, ADMIN.email, ADMIN.password);
     await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
     // Its link in the sidebar, under Clients after Warranties.
-    expect(await p.locator('.side__link[data-route=care]').textContent()).toBe('Yearly care');
+    expect(await p.locator('.side__link[data-route=care]').textContent()).toBe('PRIVATE CARE');
     // The client's Messages row links the open request.
     await go(p, '#/messages', 'Messages');
-    await expect.poll(() => p.locator('[data-testid=conversation-care]').first().textContent()).toBe(`Yearly care · ${serial}`);
+    await expect.poll(() => p.locator('[data-testid=conversation-care]').first().textContent()).toBe(`PRIVATE CARE · ${serial}`);
     await p.click('[data-testid=conversation-care]');
     await expect.poll(async () => (await title(p).textContent())?.trim()).toBe(serial);
     // The board: Requested first; the request's page with the address the client gave, in clear.
-    await go(p, '#/care', 'Yearly care');
+    await go(p, '#/care', 'PRIVATE CARE');
     await expect.poll(() => p.locator('[data-testid=care-piece]').allTextContents()).toContain(serial);
     await shot(p, 'yearly-care-board', { full: true, phone: true });
     await go(p, `#/care/${careId}`, serial);
@@ -2788,10 +2808,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await confirmDialog(p);
     await expect.poll(() => p.locator('[data-testid=care-status]').textContent()).toBe('Label sent');
     expect(await p.locator('[data-testid=care-label-shipment]').textContent()).toMatch(/ · 6A12345678901$/);
-    // RECEIVED AT THE ATELIER: the YEARLY CARE record opened.
+    // RECEIVED BY ORBES: the YEARLY_CARE record opened (PRIVATE CARE on screen).
     await p.click('[data-testid=care-receive]');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=care-status]').textContent()).toBe('At the atelier');
+    await expect.poll(() => p.locator('[data-testid=care-status]').textContent()).toBe('With ORBES');
     const record = await ctx.db.selectFrom('service_records as s').innerJoin('products as p', 'p.id', 's.product_id').select(['s.type', 's.status']).where('p.product_id', '=', serial).executeTakeFirstOrThrow();
     expect(record).toEqual({ type: 'YEARLY_CARE', status: 'OPEN' });
     // Nothing was written in the client's messages.
@@ -3266,7 +3286,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await watch(p);
     await signIn(p, ADMIN.email, ADMIN.password);
     await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
-    // Overview: Dashboard, Growth, …; the ADMIN's sidebar with Growth, Messages and Yearly care still fits 1 440 × 900.
+    // Overview: Dashboard, Growth, …; the ADMIN's sidebar with Growth, Messages and PRIVATE CARE still fits 1 440 × 900.
     const overview = p.locator('.side__group', { hasText: 'Overview' }).locator('.side__link');
     expect(await overview.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['dashboard', 'growth', 'generator', 'documents']);
     // 28 with Supplier orders under Registry (plan NEXT LOT §3.5.4.2), 29 with Links (plan CUSTOMER INTELLIGENCE §3.4 A.10),

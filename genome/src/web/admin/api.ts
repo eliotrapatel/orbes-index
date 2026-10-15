@@ -1920,7 +1920,7 @@ export class AdminApi {
     return this.request('POST', `/api/admin/care/${encodeURIComponent(id)}/label`, { query: { carrierId, tracking }, upload: { type: 'application/pdf', data: pdf } });
   }
 
-  /** OPERATOR: RECEIVED AT THE ATELIER, the YEARLY_CARE record opened. */
+  /** OPERATOR: RECEIVED BY ORBES, the YEARLY_CARE record opened. */
   receiveCare(id: string): Promise<CareSheet> {
     return this.post(`/api/admin/care/${encodeURIComponent(id)}/receive`);
   }

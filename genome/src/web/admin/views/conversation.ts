@@ -96,7 +96,7 @@ export async function conversationView(ctx: ViewContext): Promise<HTMLElement> {
     ...(tag ? [{ label: 'Priority', value: h('span', { class: 'messages__priority', attrs: { 'data-testid': 'conversation-priority' } }, tag) }] : []),
     { label: 'Status', value: h('span', { attrs: { 'data-testid': 'conversation-status' } }, statusMark(STATUS_LABELS[c.status], toneOf('conversation', c.status))), note: c.waitingSince ? `Waiting since ${formatDateTime(c.waitingSince)}` : undefined },
     { label: 'Answering', value: h('span', { attrs: { 'data-testid': 'conversation-answering' } }, answeringText(c)) },
-    ...(c.care ? [{ label: 'Yearly care', value: careLink(c.care), note: 'Open: on the Yearly care board' }] : []),
+    ...(c.care ? [{ label: 'PRIVATE CARE', value: careLink(c.care), note: 'Open: on the PRIVATE CARE board' }] : []),
   ]);
 
   const answer = (() => {

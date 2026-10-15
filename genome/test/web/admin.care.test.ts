@@ -1,5 +1,6 @@
 /**
- * The console's Yearly care board (plan NEXT-NINE of 2026-10-06, §3.2 BP-19 T6): its pure parts. The tabs in the order
+ * The console's PRIVATE CARE board (plan NEXT-NINE of 2026-10-06, §3.2 BP-19 T6, the yearly care, named PRIVATE CARE on
+ * screen by plan ORBES CARE, step 3.3): its pure parts. The tabs in the order
  * of the steps, each step's words, what an OPERATOR may do at each step (an AUDITOR nothing), the label's check (a PDF
  * of at most 2 MiB, the server's limit), the Messages board's link to an open request, and its place in the sidebar.
  */
@@ -11,10 +12,10 @@ import { CARE_LABEL_MAX_BYTES, CARE_STATUS_LABELS, CARE_TABS, careActions, careH
 import { CAPABILITY_MIN_ROLE } from '../../src/web/admin/model/permissions.js';
 import { toneOf } from '../../src/web/admin/model/tone.js';
 
-describe('the Yearly care board (BP-19 T6)', () => {
+describe('the PRIVATE CARE board (BP-19 T6; plan ORBES CARE)', () => {
   it('has a tab per step, in their order, Requested by default', () => {
     expect(CARE_TABS.map((t) => t.value)).toEqual([...CARE_REQUEST_STATUSES]);
-    expect(CARE_TABS.map((t) => t.label)).toEqual(['Requested', 'Label sent', 'At the atelier', 'On its way back', 'Done', 'Cancelled']);
+    expect(CARE_TABS.map((t) => t.label)).toEqual(['Requested', 'Label sent', 'With ORBES', 'On its way back', 'Done', 'Cancelled']);
     expect(careTab({})).toBe('REQUESTED');
     expect(careTab({ status: 'RETURNING' })).toBe('RETURNING');
     expect(careTab({ status: 'NOPE' })).toBe('REQUESTED');
@@ -45,8 +46,8 @@ describe('the Yearly care board (BP-19 T6)', () => {
     expect(labelFileProblem({ type: 'application/pdf', size: CARE_LABEL_MAX_BYTES, name: 'label.pdf' })).toBeNull();
   });
 
-  it('links a client\'s open request from the Messages board as `Yearly care · O26-J-00184`', () => {
-    expect(careLinkText({ serial: 'O26-J-00184' })).toBe('Yearly care · O26-J-00184');
+  it('links a client\'s open request from the Messages board as `PRIVATE CARE · O26-J-00184`', () => {
+    expect(careLinkText({ serial: 'O26-J-00184' })).toBe('PRIVATE CARE · O26-J-00184');
     expect(careHref({ id: 'abc' })).toBe('#/care/abc');
     expect(shipmentText(null)).toBe('—');
     expect(shipmentText({ carrier: { id: 'c', name: 'Colissimo' }, tracking: '6A12345678901', trackingUrl: 'https://x/6A12345678901', at: '2026-10-07T09:00:00Z', pdf: true })).toBe('Colissimo · 6A12345678901');
@@ -54,6 +55,6 @@ describe('the Yearly care board (BP-19 T6)', () => {
 
   it('sits in the sidebar under Clients, after Warranties', () => {
     const main = readFileSync(new URL('../../src/web/admin/main.ts', import.meta.url), 'utf8');
-    expect(main).toMatch(/\{ route: 'warranties', label: 'Warranties' \},\n\s+\{ route: 'care', label: 'Yearly care' \},\n\s+\{ route: 'retailers', label: 'Points of sale' \}/);
+    expect(main).toMatch(/\{ route: 'warranties', label: 'Warranties' \},\n\s+\{ route: 'care', label: 'PRIVATE CARE' \},\n\s+\{ route: 'retailers', label: 'Points of sale' \}/);
   });
 });

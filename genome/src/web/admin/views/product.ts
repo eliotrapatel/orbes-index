@@ -31,6 +31,7 @@ import {
   productActions,
   productAttributes,
   productSheet,
+  serviceTypeText,
   warrantyLengthNote,
   warrantyPeriod,
   type ProductActions,
@@ -724,7 +725,7 @@ function warrantyPanel(d: ProductDetail): HTMLElement {
       ]),
       table(
         [
-          { label: 'Service', cell: (s) => humanize(s.type) },
+          { label: 'Service', cell: (s) => serviceTypeText(s.type) },
           { label: 'Status', cell: (s) => statusMark(humanize(s.status), toneOf('service', s.status)), kind: ['nowrap'] },
           { label: 'Location', cell: (s) => s.location ?? '—' },
           { label: 'By', cell: (s) => s.performedBy ?? '—' },

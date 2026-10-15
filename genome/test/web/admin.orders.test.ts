@@ -371,6 +371,29 @@ describe('an order\'s welcome gift and credit (plan NEXT-NINE, BP-19 T5)', () =>
       'A credit taken off this order’s invoice, in its currency: the birthday credit first, then the tiers’. It is given back if the order is cancelled or returned, with its expiry unchanged.',
     );
   });
+
+  it('says a warranty credit (plan ORBES CARE, step 3.3) as WARRANTY, after the birthday credit and before the tiers\', never as the birthday credit', () => {
+    const platine = { ...grant, grantId: 'g2', tier: 2 as const };
+    const warranty = { grantId: 'gw', kind: 'WARRANTY' as const, tier: null, balanceMinor: 13_500, currency: 'EUR', expiresAt: '2027-10-15T09:00:00.000Z' };
+    expect(creditAvailableLine(view({ credit: { available: [warranty], applied: [] } }))).toBe('Warranty €\u00a0135 until 15 OCT 2027');
+    for (const available of [[platine, warranty, birthday], [warranty, birthday, platine]]) {
+      expect(creditAvailableLine(view({ credit: { available, applied: [] } }))).toBe('Birthday €\u00a020 until 12 APR 2027 · Warranty €\u00a0135 until 15 OCT 2027 · PLATINE €\u00a050 until 06 OCT 2027');
+    }
+    const applied = view({
+      priceMinor: 300_000,
+      currency: 'EUR',
+      credit: {
+        available: [],
+        applied: [
+          { id: 'u1', grantId: 'g2', kind: 'CREDIT', tier: 2, amountMinor: 3_000, appliedAt: 'x', releasedAt: null, releasedReason: null },
+          { id: 'u2', grantId: 'gw', kind: 'WARRANTY', tier: null, amountMinor: 13_500, appliedAt: 'x', releasedAt: null, releasedReason: null },
+          { id: 'u3', grantId: 'gb', kind: 'BIRTHDAY', tier: null, amountMinor: 2_000, appliedAt: 'x', releasedAt: null, releasedReason: null },
+        ],
+      },
+    });
+    expect(creditAppliedLine(applied)).toBe('\u2212 €\u00a020 (BIRTHDAY) · \u2212 €\u00a0135 (WARRANTY) · \u2212 €\u00a030 (PLATINE)');
+    expect(creditAppliedLine(view({ currency: 'EUR', credit: { available: [], applied: [applied.credit.applied[1]!] } }))).toBe('\u2212 €\u00a0135 (WARRANTY)');
+  });
 });
 
 describe('what a role may do with an order', () => {

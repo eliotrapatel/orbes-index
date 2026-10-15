@@ -1,13 +1,14 @@
 /**
- * Clients → Yearly care (plan NEXT-NINE of 2026-10-06, §3.2 BP-19 T6; `#/care` and `#/care/:careId`): the yearly care
- * the PLATINE and PALLADIUM tiers include, asked for by clients from a piece.
+ * Clients → PRIVATE CARE (plan NEXT-NINE of 2026-10-06, §3.2 BP-19 T6, the yearly care, named PRIVATE CARE on screen by
+ * plan ORBES CARE; `#/care` and `#/care/:careId`): PRIVATE CARE, which the tiers from PLATINE include, asked for by
+ * clients from a piece.
  *
- * The board: tabs by step (Requested · Label sent · At the atelier · On its way back · Done · Cancelled), oldest first;
+ * The board: tabs by step (Requested · Label sent · With ORBES · On its way back · Done · Cancelled), oldest first;
  * each row when it was asked for, the piece's serial and model, the client (the email masked for an AUDITOR), the tier
  * at the request and the year. A request's page: its facts, the name and address the piece returns to as the client gave
  * them (masked for an AUDITOR), the client's MESSAGES conversation as a link (or « No conversation yet. »), and the
- * steps (OPERATOR): SEND LABEL (the PDF, its carrier and tracking number; the label then shows in the piece's SERVICE
- * tab), RECEIVED AT THE ATELIER, SHIP BACK, COMPLETE (the notes of the service record), CANCEL (a note). Each change is
+ * steps (OPERATOR): SEND LABEL (the PDF, its carrier and tracking number; the label then shows in the piece's ORBES
+ * CARE tab), RECEIVED BY ORBES, SHIP BACK, COMPLETE (the notes of the service record), CANCEL (a note). Each change is
  * audited, and the page is read again. Nothing is written in the client's messages.
  */
 import { h } from '../../shared/dom.js';
@@ -38,7 +39,7 @@ import { pageParam, type ViewContext } from './context.js';
 function careTabs(current: string): HTMLElement {
   return h(
     'nav',
-    { class: 'range care__tabs', attrs: { 'aria-label': 'Yearly care' } },
+    { class: 'range care__tabs', attrs: { 'aria-label': 'PRIVATE CARE' } },
     ...CARE_TABS.flatMap((t, i) => [
       i > 0 ? h('span', { class: 'range__dot', attrs: { 'aria-hidden': 'true' } }) : null,
       h('a', { class: 'range__tab', attrs: { href: href('care', {}, { status: t.value }), 'aria-current': t.value === current ? 'page' : null, 'data-testid': `care-tab-${t.value}` } }, t.label),
@@ -52,7 +53,7 @@ export async function careView(ctx: ViewContext): Promise<HTMLElement> {
   return h(
     'div',
     { class: 'view view--care' },
-    pageHeader({ eyebrow: 'Clients', title: 'Yearly care', lead: CARE_LEAD }),
+    pageHeader({ eyebrow: 'Clients', title: 'PRIVATE CARE', lead: CARE_LEAD }),
     careTabs(status),
     section(
       CARE_STATUS_LABELS[status],
@@ -71,7 +72,7 @@ export async function careView(ctx: ViewContext): Promise<HTMLElement> {
             { label: 'Status', cell: (r) => statusMark(CARE_STATUS_LABELS[r.status], toneOf('care', r.status)), kind: ['nowrap'] },
           ],
           list.items,
-          { empty: CARE_EMPTY, onRow: (r) => href('careRequest', { careId: r.id }), caption: 'Yearly care' },
+          { empty: CARE_EMPTY, onRow: (r) => href('careRequest', { careId: r.id }), caption: 'PRIVATE CARE' },
         ),
         pager(list, (p) => ctx.setQuery({ page: p })),
       ],
@@ -114,7 +115,7 @@ export async function careRequestView(ctx: ViewContext): Promise<HTMLElement> {
         title: 'Send label',
         eyebrow: `${s.piece.productId} · ${s.account.email}`,
         body: [
-          h('p', { class: 'dialog__text' }, 'The prepaid label shows in the piece’s SERVICE tab of the client’s app, with its carrier and tracking number. Nothing is written in their messages.'),
+          h('p', { class: 'dialog__text' }, 'The prepaid label shows in the piece’s ORBES CARE tab of the client’s app, with its carrier and tracking number. Nothing is written in their messages.'),
           field('Label', file, { wide: true, hint: 'The PDF itself, at most 2 MB.' }),
         ],
         confirmLabel: 'Send label',
@@ -127,14 +128,14 @@ export async function careRequestView(ctx: ViewContext): Promise<HTMLElement> {
     },
     receive: () => {
       void openDialog({
-        title: 'Received at the atelier',
+        title: 'Received by ORBES',
         eyebrow: s.piece.productId,
-        body: h('p', { class: 'dialog__text' }, 'The piece is at the ORBES atelier: its YEARLY CARE service record opens, and the piece reads IN SERVICE.'),
-        confirmLabel: 'Received at the atelier',
+        body: h('p', { class: 'dialog__text' }, 'The piece is with ORBES: its PRIVATE CARE service record opens, and the piece reads IN SERVICE.'),
+        confirmLabel: 'Received by ORBES',
         submit: async () => {
           await ctx.api.receiveCare(s.id);
         },
-      }).then(done('Received at the atelier.'), notifyError);
+      }).then(done('Received by ORBES.'), notifyError);
     },
     return: () => {
       void openDialog({
@@ -152,27 +153,27 @@ export async function careRequestView(ctx: ViewContext): Promise<HTMLElement> {
       void openDialog({
         title: 'Complete',
         eyebrow: s.piece.productId,
-        body: h('p', { class: 'dialog__text' }, 'The YEARLY CARE service record is completed, and the piece returns to its status.'),
+        body: h('p', { class: 'dialog__text' }, 'The PRIVATE CARE service record is completed, and the piece returns to its status.'),
         confirmLabel: 'Complete',
-        fields: [{ name: 'notes', label: 'Notes for the service record', kind: 'textarea', maxlength: 4000, hint: 'Staff only: the client reads YEARLY CARE and its dates.' }],
+        fields: [{ name: 'notes', label: 'Notes for the service record', kind: 'textarea', maxlength: 4000, hint: 'Staff only: the client reads PRIVATE CARE and its dates.' }],
         submit: async (v) => {
           await ctx.api.completeCare(s.id, v.notes ?? '');
         },
-      }).then(done('Yearly care completed.'), notifyError);
+      }).then(done('PRIVATE CARE completed.'), notifyError);
     },
     cancel: () => {
       void openDialog({
-        title: 'Cancel the yearly care',
+        title: 'Cancel PRIVATE CARE',
         eyebrow: s.piece.productId,
         body: h('p', { class: 'dialog__text' }, s.serviceRecordId ? 'Its open service record is cancelled with it, and the piece returns to its status.' : 'The client may ask for it again this year.'),
-        confirmLabel: 'Cancel the yearly care',
+        confirmLabel: 'Cancel PRIVATE CARE',
         cancelLabel: 'Keep it',
         danger: true,
         fields: [{ name: 'note', label: 'Note', kind: 'textarea', required: true, maxlength: 500, hint: 'Staff only.' }],
         submit: async (v) => {
           await ctx.api.cancelCare(s.id, v.note ?? '');
         },
-      }).then(done('Yearly care cancelled.'), notifyError);
+      }).then(done('PRIVATE CARE cancelled.'), notifyError);
     },
   };
   const actions = careActions(s.status, ctx.session.admin.role).map((a) =>
@@ -188,7 +189,7 @@ export async function careRequestView(ctx: ViewContext): Promise<HTMLElement> {
     { label: 'Requested', value: formatDateTime(s.requestedAt) },
     { label: 'Return address', value: returnAddress(s), note: 'As the client gave it. To change it, they cancel and ask again.' },
     { label: 'Label', value: shipment(s.label, 'care-label-shipment'), note: s.label ? `Sent ${formatDateTime(s.label.at)}${s.label.pdf ? '' : ' · its PDF erased'}` : undefined },
-    { label: 'At the atelier', value: s.receivedAt ? formatDateTime(s.receivedAt) : '—' },
+    { label: 'With ORBES', value: s.receivedAt ? formatDateTime(s.receivedAt) : '—' },
     { label: 'Shipped back', value: shipment(s.return, 'care-return-shipment'), note: s.return ? formatDateTime(s.return.at) : undefined },
     { label: 'Done', value: s.doneAt ? formatDateTime(s.doneAt) : '—' },
     ...(s.cancelledAt ? [{ label: 'Cancelled', value: formatDateTime(s.cancelledAt), note: s.cancelledBy === 'account' ? 'By the client' : 'By ORBES' }] : []),
@@ -205,7 +206,7 @@ export async function careRequestView(ctx: ViewContext): Promise<HTMLElement> {
   return h(
     'div',
     { class: 'view view--care-request' },
-    pageHeader({ eyebrow: 'Yearly care', title: s.piece.productId, identifier: true, actions }),
+    pageHeader({ eyebrow: 'PRIVATE CARE', title: s.piece.productId, identifier: true, actions }),
     section('The request', facts, { id: 'care-request' }),
   );
 }

@@ -1,8 +1,9 @@
 /**
- * The Yearly care board of the console (plan NEXT-NINE of 2026-10-06, §3.2 BP-19 T6): its pure parts. The tabs by
- * step, each step's words, what an OPERATOR may do at each step, the label's file check, and the Messages board's link
- * to an open request (`Yearly care · O26-J-00184`). The server orders the board (oldest first) and holds every rule;
- * this module only words it. Nothing is written in MESSAGES at any step.
+ * The PRIVATE CARE board of the console (plan NEXT-NINE of 2026-10-06, §3.2 BP-19 T6, the yearly care; named PRIVATE
+ * CARE on screen by plan ORBES CARE, its route `#/care` and internal names kept): its pure parts. The tabs by step, each
+ * step's words, what an OPERATOR may do at each step, the label's file check, and the Messages board's link to an open
+ * request (`PRIVATE CARE · O26-J-00184`). The server orders the board (oldest first) and holds every rule; this module
+ * only words it. Nothing is written in MESSAGES at any step.
  */
 import { can } from './permissions.js';
 import { href } from '../router.js';
@@ -13,8 +14,8 @@ export const CARE_LABEL_MAX_BYTES = 2 * 1024 * 1024;
 
 /** The board's lead and its empty state. */
 export const CARE_LEAD =
-  'The yearly care the PLATINE and PALLADIUM tiers include, asked for by clients from a piece. Send each the prepaid label, receive the piece at the atelier, ship it back to the address they gave, then complete it: it is recorded in the piece’s SERVICE HISTORY as YEARLY CARE. Nothing is written in their messages; the label shows in the piece’s SERVICE tab.';
-export const CARE_EMPTY = 'No yearly care at this step.';
+  'PRIVATE CARE, which the tiers from PLATINE include, asked for by clients from a piece. Send each the prepaid label, receive the piece, ship it back to the address they gave, then complete it: it is recorded in the piece’s SERVICE HISTORY.';
+export const CARE_EMPTY = 'No PRIVATE CARE at this step.';
 /** The conversation row of a request without one. */
 export const NO_CONVERSATION = 'No conversation yet.';
 
@@ -22,13 +23,13 @@ export const NO_CONVERSATION = 'No conversation yet.';
 export const CARE_STATUS_LABELS: Readonly<Record<CareRequestStatus, string>> = Object.freeze({
   REQUESTED: 'Requested',
   LABEL_SENT: 'Label sent',
-  RECEIVED: 'At the atelier',
+  RECEIVED: 'With ORBES',
   RETURNING: 'On its way back',
   DONE: 'Done',
   CANCELLED: 'Cancelled',
 });
 
-/** The tabs, in the order of the steps: Requested · Label sent · At the atelier · On its way back · Done · Cancelled. */
+/** The tabs, in the order of the steps: Requested · Label sent · With ORBES · On its way back · Done · Cancelled. */
 export const CARE_TABS: readonly { value: CareRequestStatus; label: string }[] = Object.freeze(CARE_REQUEST_STATUSES.map((s) => ({ value: s, label: CARE_STATUS_LABELS[s] })));
 
 /** The tab the route names; Requested by default. */
@@ -36,7 +37,7 @@ export function careTab(query: Record<string, string>): CareRequestStatus {
   return (CARE_REQUEST_STATUSES as readonly string[]).includes(query.status ?? '') ? (query.status as CareRequestStatus) : 'REQUESTED';
 }
 
-/** The actions of a request: SEND LABEL, RECEIVED AT THE ATELIER, SHIP BACK, COMPLETE, CANCEL. */
+/** The actions of a request: SEND LABEL, RECEIVED BY ORBES, SHIP BACK, COMPLETE, CANCEL. */
 export type CareAction = 'label' | 'receive' | 'return' | 'complete' | 'cancel';
 
 /** What an OPERATOR may do at each step (the server refuses the others: 409 CARE_STEP). */
@@ -59,7 +60,7 @@ export function careActions(status: CareRequestStatus, role: AdminRole): CareAct
 /** The actions' words. */
 export const CARE_ACTION_LABELS: Readonly<Record<CareAction, string>> = Object.freeze({
   label: 'Send label',
-  receive: 'Received at the atelier',
+  receive: 'Received by ORBES',
   return: 'Ship back',
   complete: 'Complete',
   cancel: 'Cancel',
@@ -80,9 +81,9 @@ export function shipmentText(s: CareSheet['label'] | CareSheet['return']): strin
   return s ? `${s.carrier.name} · ${s.tracking}` : '—';
 }
 
-/** The Messages board's and a conversation's link to a client's open yearly care: `Yearly care · O26-J-00184`. */
+/** The Messages board's and a conversation's link to a client's open PRIVATE CARE: `PRIVATE CARE · O26-J-00184`. */
 export function careLinkText(care: { serial: string }): string {
-  return `Yearly care · ${care.serial}`;
+  return `PRIVATE CARE · ${care.serial}`;
 }
 
 export function careHref(care: { id: string }): string {

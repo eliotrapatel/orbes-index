@@ -479,6 +479,8 @@ export function tierThreshold(t: Pick<ClubTierSheet, 'pieces'>): string {
 
 /** The birthday credit's label in an owner's Club block (§3.5 SB.4.6). */
 export const BIRTHDAY_CREDIT_LABEL = 'Birthday credit';
+/** A warranty credit's label in an owner's Club block (plan ORBES CARE). */
+export const WARRANTY_CREDIT_LABEL = 'Warranty credit';
 
 /** One line of an owner's Club block (BP-19 T10), and where it leads. */
 export interface ClubBlockLine {
@@ -503,12 +505,13 @@ export function birthdayNextLine(next: NonNullable<OwnerSheet['club']>['birthday
 
 /**
  * An owner's Club block, under the tier line: `Credit PLATINE € 50, € 50 left, until 06 OCT 2027`, `Welcome gift
- * PLATINE: pending` (`with OR-…`, `delivered`), `Yearly care: 2026: 0 of 1` (a link to an open request).
+ * PLATINE: pending` (`with OR-…`, `delivered`), `PRIVATE CARE: 2026: 0 of 1` (a link to an open request).
  *
  * Then the birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4.6): each one the sheet lists, `Birthday credit € 20,
  * € 20 left, until 12 APR 2027 · birthday 14 MAR 2027`; and, when none is open at `now` (a balance, not expired), one
  * line `Birthday credit` saying when the next comes (`Next on 14 MAR 2027`) or why none does (`No date of birth`,
- * `Off in THE PROGRAM`, `Not given to test entrants`). The label carries no figure: the display face takes none.
+ * `Off in THE PROGRAM`, `Not given to test entrants`). Then each warranty credit (plan ORBES CARE), `Warranty credit
+ * € 135, € 135 left, until 15 OCT 2027`. The label carries no figure: the display face takes none.
  */
 export function clubBlockLines(c: OwnerSheet['club'] | null | undefined, now: Date = new Date()): ClubBlockLine[] {
   if (!c) return [];
@@ -530,7 +533,7 @@ export function clubBlockLines(c: OwnerSheet['club'] | null | undefined, now: Da
   if (care) {
     // The year in the value: a label is set in the display face, which takes no figure.
     const of = care.allowance === 'ALL' ? `${care.year}: ${care.used} · every piece` : `${care.year}: ${care.used} of ${care.allowance}`;
-    out.push({ label: 'Yearly care', value: care.open ? `${of} · open: ${care.open.productId}` : of, link: care.open ? { kind: 'care', id: care.open.id } : null });
+    out.push({ label: 'PRIVATE CARE', value: care.open ? `${of} · open: ${care.open.productId}` : of, link: care.open ? { kind: 'care', id: care.open.id } : null });
   }
   let open = false;
   for (const g of c.grants) {
@@ -546,6 +549,15 @@ export function clubBlockLines(c: OwnerSheet['club'] | null | undefined, now: Da
   }
   const next = open ? null : birthdayNextLine(c.birthdayNext);
   if (next !== null) out.push({ label: BIRTHDAY_CREDIT_LABEL, value: next, link: null });
+  // Plan ORBES CARE: each warranty credit (a claim's credit of value or 30 %), after the birthday credit, newest first.
+  for (const g of c.grants) {
+    if (g.kind !== 'WARRANTY' || g.amountMinor === null || !g.currency) continue;
+    out.push({
+      label: WARRANTY_CREDIT_LABEL,
+      value: `${formatMoney(g.amountMinor, g.currency)}, ${formatMoney(g.balanceMinor ?? 0, g.currency)} left, until ${formatDate(g.expiresAt)}`,
+      link: null,
+    });
+  }
   return out;
 }
 

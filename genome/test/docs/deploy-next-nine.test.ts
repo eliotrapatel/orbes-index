@@ -203,7 +203,6 @@ describe('the runbook of the next nine (docs/launch/DEPLOY-NEXT-NINE.md)', () =>
     const admin = (file: string): string => readDoc(`genome/src/web/admin/${file}`);
     const labels: ReadonlyArray<readonly [label: string, file: string]> = [
       ['Messages', 'main.ts'],
-      ['Yearly care', 'main.ts'],
       ['Growth', 'main.ts'],
       ['Tiers', 'model/club.ts'],
       ['Edit program', 'views/tiers.ts'],
@@ -228,6 +227,9 @@ describe('the runbook of the next nine (docs/launch/DEPLOY-NEXT-NINE.md)', () =>
       expect(runbook, label).toContain(`\`${label}\``);
       expect(admin(file), `${label}: not in ${file}`).toMatch(new RegExp(`['\`]${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['\`]`));
     }
+    // 2026-10-15, plan ORBES CARE step 3.3: the console's Yearly care reads PRIVATE CARE (answer 5). The runbook is a
+    // record of deployment G and keeps its words; the console's live label is no longer pinned to them.
+    expect(runbook).toContain('`Yearly care`');
     // Deployment G's record keeps SHIP WITH ITS ORDER, which plan NEXT LOT (step 5.11e) retires: a travelling order ships
     // in its parent's parcel, from the Shipping section; its label is the runbook's, no longer the order page's.
     expect(runbook).toContain('`Ship with its order`');

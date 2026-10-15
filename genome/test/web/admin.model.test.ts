@@ -249,6 +249,7 @@ import {
   tierName,
   tierStanding,
   BIRTHDAY_CREDIT_LABEL,
+  WARRANTY_CREDIT_LABEL,
   birthdayNextLine,
   BIRTHDAY_NEXT_WITHHELD,
   clubBlockLines,
@@ -316,6 +317,7 @@ import { LOGISTICS_LOCATIONS_REQUIRED as SERVER_LOCATIONS_REQUIRED } from '../..
 import {
   BIRTHDAY_NOTE,
   birthdayText,
+  careOptions,
   careText,
   changedText,
   channelsText,
@@ -323,6 +325,7 @@ import {
   giftOptionLabel,
   giftOptions,
   giftText,
+  PRIVATE_CARE_HINT,
   PROGRAM_LIMITS as WEB_PROGRAM_LIMITS,
   programChanged,
   programInput,
@@ -333,6 +336,8 @@ import {
   ratesInput,
   ratesProblem,
   ratesValues,
+  WARRANTY_CREDIT_HINT,
+  warrantyCreditText,
 } from '../../src/web/admin/model/program.js';
 import { checkProgram, DEFAULT_PROGRAM, experienceTier, PROGRAM_LIMITS as SERVER_PROGRAM_LIMITS } from '../../src/server/services/club-program.js';
 import { CLIENT_REGISTRATION, minutesLeft, pieceLines, preselectedRetailer, READY_TO_SELL, retailerLabel, retailerOptions, SALE_CARD_NOTE, saleVerdict, saleWarrantyDates } from '../../src/web/admin/model/sale.js';
@@ -350,6 +355,7 @@ import {
   productActions,
   productAttributes,
   productSheet,
+  serviceTypeText,
   warrantyLengthNote,
   warrantyPeriod,
 } from '../../src/web/admin/model/product.js';
@@ -932,12 +938,12 @@ describe('the Club\'s tiers (P-X04)', () => {
       { label: 'Credit PLATINE', value: '€\u00a050, €\u00a030 left, until 06 OCT 2027', link: null },
       { label: 'Welcome gift PLATINE', value: 'with OR-7C21A9F0', link: { kind: 'order', id: 'o1' } },
       { label: 'Welcome gift PALLADIUM', value: 'pending', link: null },
-      { label: 'Yearly care', value: '2026: 0 of 1 · open: O26-J-00184', link: { kind: 'care', id: 'c1' } },
+      { label: 'PRIVATE CARE', value: '2026: 0 of 1 · open: O26-J-00184', link: { kind: 'care', id: 'c1' } },
       // Plan CUSTOMER INTELLIGENCE §3.5 SB.4.6: the birthday credit's line, last.
       { label: 'Birthday credit', value: 'No date of birth', link: null },
     ]);
     expect(clubBlockLines({ tier: 'PALLADIUM', grants: [], careThisYear: { year: 2026, used: 2, allowance: 'ALL', open: null }, birthdayNext: { state: 'NO_DATE' } })).toEqual([
-      { label: 'Yearly care', value: '2026: 2 · every piece', link: null },
+      { label: 'PRIVATE CARE', value: '2026: 2 · every piece', link: null },
       { label: 'Birthday credit', value: 'No date of birth', link: null },
     ]);
   });
@@ -992,9 +998,24 @@ describe('the Club\'s tiers (P-X04)', () => {
     };
     expect(clubBlockLines(full, new Date('2028-03-20T10:00:00.000Z'))).toEqual([
       { label: 'Credit PLATINE', value: '€\u00a050, €\u00a050 left, until 06 OCT 2027', link: null },
-      { label: 'Yearly care', value: '2028: 0 of 1', link: null },
+      { label: 'PRIVATE CARE', value: '2028: 0 of 1', link: null },
       { label: 'Birthday credit', value: '€\u00a025, €\u00a025 left, until 12 APR 2028 · birthday 14 MAR 2028', link: null },
       { label: 'Birthday credit', value: '€\u00a020, €\u00a00 left, until 12 APR 2027 · birthday 14 MAR 2027', link: null },
+    ]);
+  });
+
+  it('says each warranty credit in an owner\'s Club block (plan ORBES CARE): its amount, what is left, until when, after the birthday credit', () => {
+    type Club = NonNullable<Parameters<typeof clubBlockLines>[0]>;
+    const warranty = (over: Partial<Club['grants'][number]> = {}): Club['grants'][number] => ({
+      tier: null, kind: 'WARRANTY', birthdayOn: null, grantedAt: '2026-10-15T09:00:00Z', amountMinor: 13_500, balanceMinor: 13_500, currency: 'EUR', expiresAt: '2027-10-15T09:00:00Z', gift: null, ...over,
+    });
+    const club: Club = { tier: null, grants: [warranty(), warranty({ amountMinor: 45_000, balanceMinor: 0, currency: 'GBP', expiresAt: '2027-03-01T09:00:00Z' })], careThisYear: null, birthdayNext: { state: 'NO_DATE' } };
+    expect(WARRANTY_CREDIT_LABEL).toBe('Warranty credit');
+    expect(WARRANTY_CREDIT_LABEL).not.toMatch(/\d/);
+    expect(clubBlockLines(club, new Date('2026-10-20T10:00:00Z'))).toEqual([
+      { label: 'Birthday credit', value: 'No date of birth', link: null },
+      { label: 'Warranty credit', value: '€\u00a0135, €\u00a0135 left, until 15 OCT 2027', link: null },
+      { label: 'Warranty credit', value: '£\u00a0450, £\u00a00 left, until 01 MAR 2027', link: null },
     ]);
   });
 
@@ -1070,6 +1091,36 @@ describe('THE PROGRAM and SHIPPING (plan NEXT-NINE, BP-19 T2)', () => {
     // A sheet carries more than the figures (its gifts, lines, author): only the figures count.
     const sheet: web.ClubProgramSheet = { ...defaults(), gifts: { platine: null, palladium: null }, giftOptions: [], lines: { TITANE: [], PLATINE: [], PALLADIUM: [] }, updatedAt: null, updatedBy: null };
     expect(programChanged(sheet, programInput(programValues(sheet)))).toBe(false);
+  });
+
+  it('saves PLATINE’s PRIVATE CARE as every piece and reads it back (plan ORBES CARE: \'ALL\' <-> null), and the warranty credit’s percent', () => {
+    // THE PROGRAM's default: PRIVATE CARE for every piece from PLATINE, a warranty credit of 30 %.
+    expect(defaults()).toMatchObject({ carePiecesPlatine: null, carePiecesPalladium: null, warrantyCreditPercent: 30 });
+    const v = programValues(defaults());
+    expect([v.carePiecesPlatine, v.carePiecesPalladium, v.warrantyCreditPercent]).toEqual(['ALL', 'ALL', '30']);
+    // PLATINE's select offers Every piece, as PALLADIUM's.
+    expect(careOptions(true)[0]).toEqual({ value: 'ALL', label: 'Every piece' });
+    const back = programInput(v);
+    expect(back).toMatchObject({ carePiecesPlatine: null, warrantyCreditPercent: 30 });
+    expect(checkProgram(back)).toEqual(back);
+    // A number for PLATINE, then Every piece again: each round trip as the server takes it.
+    const one = programInput({ ...v, carePiecesPlatine: '1' });
+    expect(one.carePiecesPlatine).toBe(1);
+    expect(programChanged(defaults(), one)).toBe(true);
+    expect(programValues(one).carePiecesPlatine).toBe('1');
+    expect(programInput(programValues(one))).toEqual(checkProgram(one));
+    // The warranty credit: 1 to 100 %, refused first; a change counts.
+    for (const pct of ['0', '101', '', '12.5', 'thirty']) expect(programProblem({ ...v, warrantyCreditPercent: pct }), pct).toBe('The warranty credit is 1 to 100 % of the piece’s value.');
+    expect(programProblem({ ...v, warrantyCreditPercent: '1' })).toBeNull();
+    expect(programProblem({ ...v, warrantyCreditPercent: '100' })).toBeNull();
+    const twenty = programInput({ ...v, warrantyCreditPercent: '25' });
+    expect(twenty.warrantyCreditPercent).toBe(25);
+    expect(checkProgram(twenty)).toEqual(twenty);
+    expect(programChanged(defaults(), twenty)).toBe(true);
+    // The read rows' and the hints' words.
+    expect(warrantyCreditText(defaults())).toBe('30 % of the piece’s value · valid 12 months');
+    expect(PRIVATE_CARE_HINT).toBe('The terms, article 11, state every piece: change them with it.');
+    expect(WARRANTY_CREDIT_HINT).toBe('The terms, article 11, state this rate: change them with it.');
   });
 
   it('reads and writes the shipping rates, — for none', () => {
@@ -1708,7 +1759,7 @@ describe('product view model (spec §22)', () => {
     const revoked = detail({ lifecycle: { status: 'REVOKED', allowed: [], returnTo: 'OWNED', canReinstate: true } });
     expect(productActions(revoked, 'OPERATOR').canReinstate).toBe(false);
     expect(productActions(revoked, 'ADMIN').canReinstate).toBe(true);
-    // An OPEN YEARLY_CARE record is closed from the Yearly care board only (the server answers 422 here).
+    // An OPEN YEARLY_CARE record is closed from the PRIVATE CARE board only (the server answers 422 here).
     const service = { id: 's1', productId: '00184', status: 'OPEN' as const, location: null, notes: null, openedAt: '2026-05-01T00:00:00.000Z', closedAt: null, performedBy: null };
     const caring = detail({ services: [{ ...service, type: 'YEARLY_CARE' }, { ...service, id: 's2', type: 'REPAIR' }] });
     expect(productActions(caring, 'OPERATOR').completableServices.map((s) => s.id)).toEqual(['s2']);
@@ -1731,6 +1782,12 @@ describe('product view model (spec §22)', () => {
     expect(warrantyPeriod(detail().warranty!)).toBe('04 SEP 2026 → 04 SEP 2028');
     expect(warrantyLengthNote(detail().warranty!)).toBe('2 years · defects only');
     expect(warrantyLengthNote({ durationMonths: 36, lifetime: false })).toBe('36 months · defects only');
+  });
+
+  it('reads a YEARLY_CARE record as PRIVATE CARE in the service table (plan ORBES CARE, step 3.3), the other types as they are', () => {
+    expect(serviceTypeText('YEARLY_CARE')).toBe('PRIVATE CARE');
+    expect(serviceTypeText('INSPECTION')).toBe('INSPECTION');
+    expect(serviceTypeText('POLISH')).toBe('POLISH');
   });
 
   it('offers Open a legal-guarantee claim to an OPERATOR while no claim of the piece is under way (plan ORBES CARE, answer 11)', () => {

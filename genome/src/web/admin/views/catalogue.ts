@@ -485,8 +485,8 @@ function activeMark(active: boolean): HTMLElement {
 }
 
 /**
- * The care block as the client reads it on /verify: the CARE tab, then the instructions in brand.css `.prose`, as
- * verify's carePanel sets them (verify/views/panels.ts), or the general care text when there are none.
+ * The care block as the client reads it on /verify: the ORBES CARE tab, then the instructions in brand.css `.prose`, as
+ * verify's orbesCarePanel sets them (verify/views/panels.ts), or the general care text when there are none.
  */
 function careBlock(careInstructions: string | undefined): HTMLElement {
   const care = carePreview(careInstructions);
@@ -497,7 +497,7 @@ function careBlock(careInstructions: string | undefined): HTMLElement {
     h(
       'div',
       { class: 'care-preview__panel' },
-      h('p', { class: 'care-preview__tabs' }, h('span', { class: 'care-preview__tab' }, 'Care')),
+      h('p', { class: 'care-preview__tabs' }, h('span', { class: 'care-preview__tab' }, 'ORBES CARE')),
       h('p', { class: 'prose care-preview__text', text: care.text }),
     ),
     care.general ? h('p', { class: 'care-preview__note' }, 'No care instructions of its own: the general care text of /verify.') : null,

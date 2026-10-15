@@ -2133,7 +2133,7 @@ fieldset.cfield--checks > .cfield__label {
 }
 
 /* The care block of a model as the client reads it on /verify (catalogue,
-   A-10): the CARE tab, centred over its hairline and underlined in ink as
+   A-10): the ORBES CARE tab, centred over its hairline and underlined in ink as
    verify's selected tab (.tabs__tab), then the instructions in brand.css
    .prose, 26 px under it as verify's .panel__care. */
 .care-preview__label {

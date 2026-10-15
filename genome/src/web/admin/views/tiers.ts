@@ -34,11 +34,14 @@ import {
   giftText,
   hoursText,
   priorityText,
+  PRIVATE_CARE_HINT,
   programChanged,
   programInput,
   programProblem,
   programValues,
   SHIPPING_FREE_LABELS,
+  WARRANTY_CREDIT_HINT,
+  warrantyCreditText,
 } from '../model/program.js';
 import { CREDIT_CHANNELS, HOUSE_CURRENCIES, SHIPPING_FREE_LEVELS, type ClubProgramSheet, type ClubTierSheet } from '../types.js';
 import type { Child } from '../../shared/dom.js';
@@ -171,8 +174,8 @@ function programSection(ctx: ViewContext, p: ClubProgramSheet, admin: boolean, d
         { name: 'earlyAccessPlatineHours', label: 'Early access by default, PLATINE (hours)', required: true, maxlength: 3, value: programValues(p).earlyAccessPlatineHours },
         { name: 'shippingFreePlatine', label: 'Free shipping, PLATINE', kind: 'select', options: SHIPPING_FREE_LEVELS.map((l) => ({ value: l, label: SHIPPING_FREE_LABELS[l] })), value: p.shippingFreePlatine },
         { name: 'shippingFreePalladium', label: 'Free shipping, PALLADIUM', kind: 'select', options: SHIPPING_FREE_LEVELS.map((l) => ({ value: l, label: SHIPPING_FREE_LABELS[l] })), value: p.shippingFreePalladium },
-        { name: 'carePiecesPlatine', label: 'Yearly care, PLATINE', kind: 'select', options: careOptions(false), value: programValues(p).carePiecesPlatine },
-        { name: 'carePiecesPalladium', label: 'Yearly care, PALLADIUM', kind: 'select', options: careOptions(true), value: programValues(p).carePiecesPalladium },
+        { name: 'carePiecesPlatine', label: 'PRIVATE CARE, PLATINE', kind: 'select', options: careOptions(true), value: programValues(p).carePiecesPlatine, hint: PRIVATE_CARE_HINT },
+        { name: 'carePiecesPalladium', label: 'PRIVATE CARE, PALLADIUM', kind: 'select', options: careOptions(true), value: programValues(p).carePiecesPalladium, hint: PRIVATE_CARE_HINT },
         {
           name: 'messagesPriorityMinTier',
           label: 'Messages first, from',
@@ -211,6 +214,14 @@ function programSection(ctx: ViewContext, p: ClubProgramSheet, admin: boolean, d
         { name: 'birthdayOn', label: 'Birthday credit given', kind: 'checkbox', value: programValues(p).birthdayOn, hint: 'Off: no new birthday credit is given; those given stay usable until they expire.' },
         { name: 'birthdayCredit', label: 'Birthday credit', required: true, maxlength: 12, value: programValues(p).birthdayCredit, hint: 'An amount in units: 20, or 20.50. In the credit currency above.' },
         { name: 'birthdayDays', label: 'Birthday credit valid (days)', required: true, maxlength: 3, value: programValues(p).birthdayDays, hint: 'From the birthday, Paris time: 30 by default.' },
+        {
+          name: 'warrantyCreditPercent',
+          label: 'Warranty credit after the free replacement (%)',
+          required: true,
+          maxlength: 3,
+          value: programValues(p).warrantyCreditPercent,
+          hint: WARRANTY_CREDIT_HINT,
+        },
         { name: 'experienceMembersEveningMinTier', label: 'Members’ evening, from', kind: 'select', options: TIER_OPTIONS, value: String(p.experienceMembersEveningMinTier) },
         { name: 'experienceLaunchPreviewMinTier', label: 'Launch previews, from', kind: 'select', options: TIER_OPTIONS, value: String(p.experienceLaunchPreviewMinTier) },
         { name: 'experiencePartnerMinTier', label: 'Partner experiences, from', kind: 'select', options: TIER_OPTIONS, value: String(p.experiencePartnerMinTier) },
@@ -228,7 +239,7 @@ function programSection(ctx: ViewContext, p: ClubProgramSheet, admin: boolean, d
       defList([
         row('Early access by default', `PALLADIUM ${hoursText(p.earlyAccessPalladiumHours)} · PLATINE ${hoursText(p.earlyAccessPlatineHours)}`, 'program-early'),
         row('Free shipping', `PLATINE ${SHIPPING_FREE_LABELS[p.shippingFreePlatine]} · PALLADIUM ${SHIPPING_FREE_LABELS[p.shippingFreePalladium]}`, 'program-shipping', 'Deliveries only: returns are unchanged.'),
-        row('Yearly care', `PLATINE ${careText(p.carePiecesPlatine)} · PALLADIUM ${careText(p.carePiecesPalladium)}`, 'program-care'),
+        row('PRIVATE CARE', `PLATINE ${careText(p.carePiecesPlatine)} · PALLADIUM ${careText(p.carePiecesPalladium)}`, 'program-care'),
         row('Messages first', priorityText(p.messagesPriorityMinTier), 'program-priority'),
         row('Welcome gift, PLATINE', platineGift.value, 'program-gift-platine', platineGift.note),
         row('Welcome gift, PALLADIUM', palladiumGift.value, 'program-gift-palladium', palladiumGift.note),
@@ -236,6 +247,7 @@ function programSection(ctx: ViewContext, p: ClubProgramSheet, admin: boolean, d
         row('Credit, PALLADIUM', creditText(p.creditPalladiumMinor, p), 'program-credit-palladium'),
         row('Credit usable on', channelsText(p.creditChannels.filter((c) => CREDIT_CHANNELS.includes(c))), 'program-credit-channels', `Orders in ${p.creditCurrency} only.`),
         row('Birthday credit', birthdayText(p), 'program-birthday', BIRTHDAY_NOTE),
+        row('Warranty credit', warrantyCreditText(p), 'program-warranty-credit'),
         row('Members’ evening', fromTier(p.experienceMembersEveningMinTier), 'program-evening'),
         row('Launch previews', fromTier(p.experienceLaunchPreviewMinTier), 'program-previews'),
         row('Partner experiences', fromTier(p.experiencePartnerMinTier), 'program-partner'),

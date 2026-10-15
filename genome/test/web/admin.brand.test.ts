@@ -169,6 +169,22 @@ describe('console: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
     }
   });
 
+  it('never says atelier anywhere in the console\'s copy (plan ORBES CARE, answer 7: PRIVATE CARE, the claims, THE PROGRAM, the settings), nor « stolen » in the claims\' words', () => {
+    // Every view and model, their comments aside: the words staff read on screen.
+    const files = ['model', 'views'].flatMap((dir) => readdirSync(join(WEB, 'admin', dir)).map((f) => join(WEB, 'admin', dir, f)));
+    expect(files.map((f) => f.slice(WEB.length))).toEqual(expect.arrayContaining(['/admin/model/care.ts', '/admin/views/care.ts', '/admin/model/claims.ts', '/admin/views/warranty-claim.ts', '/admin/views/tiers.ts', '/admin/views/settings.ts']));
+    for (const f of files) {
+      const code = readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+      expect(code, f).not.toMatch(/atelier/i);
+    }
+    const main = readFileSync(join(WEB, 'admin', 'main.ts'), 'utf8');
+    expect(main).toContain("{ route: 'care', label: 'PRIVATE CARE' }");
+    for (const f of ['model/claims.ts', 'views/warranty-claim.ts']) {
+      const code = readFileSync(join(WEB, 'admin', f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+      expect(code, f).not.toMatch(/stolen|!['"`]/i);
+    }
+  });
+
   it('writes the Sign-up page calmly (plan CUSTOMER INTELLIGENCE §3.1 P.10): no atelier, handmade or craft, no exclamation mark', () => {
     for (const f of ['admin/model/sign-up.ts', 'admin/views/sign-up.ts']) {
       const code = readFileSync(join(WEB, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');

@@ -7,7 +7,7 @@
  * scan's REF. Columns: the priority (`Priority · PALLADIUM` or `Priority · PLATINE`, the tier read now), the client (its
  * sheet; the email masked for an AUDITOR), what the messages concern (the latest, then `+N more`; a link to its page),
  * the last message's excerpt, the waiting time, the status and who answers. A client's open yearly care (BP-19 T6) adds
- * `Yearly care · O26-J-00184` under what the messages concern, a link to its request. The server orders the rows: To answer first,
+ * `PRIVATE CARE · O26-J-00184` under what the messages concern, a link to its request. The server orders the rows: To answer first,
  * PALLADIUM, then PLATINE, then the rest, the longest waiting first; then the others, newest first. Each row opens its
  * conversation (views/conversation.ts).
  */
@@ -48,7 +48,7 @@ export function concernsCell(c: ConversationRow['concerns'], more = 0): HTMLElem
 }
 
 /**
- * The client's open yearly care (BP-19 T6): `Yearly care · O26-J-00184`, a link to its page on the Yearly care board.
+ * The client's open PRIVATE CARE (BP-19 T6): `PRIVATE CARE · O26-J-00184`, a link to its page on the PRIVATE CARE board.
  * It changes neither the conversation's status nor its place in the order.
  */
 export function careLink(care: NonNullable<ConversationRow['care']>): HTMLElement {
