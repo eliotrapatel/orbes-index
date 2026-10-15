@@ -303,7 +303,9 @@ const AFTER_I2 = [...AFTER_I1, ...DEPLOY_I2];
 describe('the runbook of the customer intelligence, part I2 (docs/launch/DEPLOY-CUSTOMER-INTELLIGENCE.md §2)', () => {
   it('starts from I1 in production, 0001 to 0044, and applies exactly 0045 to 0047, as the scripts print them', () => {
     expect(DEPLOY_I2).toEqual(['0045_birthday_credit', '0046_engagement_scores', '0047_collector_history']);
-    expect(NAMES).toEqual(AFTER_I2);
+    // A later migration (ORBES CARE's 0048, plan of 2026-10-15) has its own runbook and comes after I2's, in build order.
+    expect(NAMES.slice(0, AFTER_I2.length)).toEqual(AFTER_I2);
+    expect(NAMES.filter((n) => numberOf(n) > 47).every((n) => n > DEPLOY_I2.at(-1)!)).toBe(true);
     expect(AFTER_I1).toHaveLength(45);
     expect(i2).toContain(`le commit \`${PROD_COMMIT}\` (image \`orbes-genome:${PROD_TAG}\`, déployée le 2026-10-14), avec les quarante-cinq migrations de \`${AFTER_I1[0]}\` à \`${AFTER_I1.at(-1)}\``);
     expect(i2).toContain(`Sortie attendue : quarante-cinq lignes, de \`${AFTER_I1[0]}\` à \`${AFTER_I1.at(-1)}\``);

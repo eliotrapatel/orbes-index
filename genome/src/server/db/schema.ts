@@ -446,9 +446,10 @@ export type CircleExperience = (typeof CIRCLE_EXPERIENCES)[number];
 
 /**
  * What an account received on reaching a tier (tier_grants.kind, migration 0027, BP-19 T5): its welcome gift, its credit;
- * and, with no tier, its birthday credit (BIRTHDAY, migration 0045, plan CUSTOMER INTELLIGENCE §3.5 SB.4).
+ * and, with no tier, its birthday credit (BIRTHDAY, migration 0045, plan CUSTOMER INTELLIGENCE §3.5 SB.4) and a credit
+ * decided on a lifetime warranty claim (WARRANTY, migration 0048, plan ORBES CARE §2(c)).
  */
-export const TIER_GRANT_KINDS = ['GIFT', 'CREDIT', 'BIRTHDAY'] as const;
+export const TIER_GRANT_KINDS = ['GIFT', 'CREDIT', 'BIRTHDAY', 'WARRANTY'] as const;
 export type TierGrantKind = (typeof TIER_GRANT_KINDS)[number];
 
 /**
@@ -473,6 +474,61 @@ export type CareRequestStatus = (typeof CARE_REQUEST_STATUSES)[number];
 /** Who cancelled a yearly care (care_requests.cancelled_by): the collector's account, or ORBES. */
 export const CARE_CANCELLED_BY = ['account', 'admin'] as const;
 export type CareCancelledBy = (typeof CARE_CANCELLED_BY)[number];
+
+/**
+ * What a warranty claim is made under (warranty_claims.basis, migration 0048, plan ORBES CARE §2(c), answer 10): the
+ * piece's ORBES warranty, LIFETIME or TWO_YEARS (its kind read at opening, `warranties.lifetime`, never chosen by staff),
+ * or the legal guarantee of conformity (LEGAL).
+ */
+export const WARRANTY_CLAIM_BASES = ['LIFETIME', 'TWO_YEARS', 'LEGAL'] as const;
+export type WarrantyClaimBasis = (typeof WARRANTY_CLAIM_BASES)[number];
+
+/**
+ * The steps of a warranty claim (warranty_claims.status, migration 0048): opened by Client Services, its prepaid label
+ * sent, the piece received by ORBES, decided, done; or cancelled before any decision.
+ */
+export const WARRANTY_CLAIM_STATUSES = ['OPEN', 'LABEL_SENT', 'RECEIVED', 'DECIDED', 'DONE', 'CANCELLED'] as const;
+export type WarrantyClaimStatus = (typeof WARRANTY_CLAIM_STATUSES)[number];
+
+/**
+ * A warranty claim's outcome (warranty_claims.outcome, migration 0048): the same piece, new; a credit of its value (the
+ * model no longer made); a part credit (THE PROGRAM's percent, after the free replacement); a repair; a price reduction
+ * or a refund (the legal guarantee); or a refusal with its reason.
+ */
+export const WARRANTY_CLAIM_OUTCOMES = ['REPLACEMENT', 'VALUE_CREDIT', 'PART_CREDIT', 'REPAIR', 'PRICE_REDUCTION', 'REFUND', 'REFUSED'] as const;
+export type WarrantyClaimOutcome = (typeof WARRANTY_CLAIM_OUTCOMES)[number];
+
+/**
+ * Why a warranty claim is refused (warranty_claims.refusal_reason, migration 0048): the exclusions of the lifetime
+ * warranty (lost, theft reported, scratched, damaged on purpose or by someone else, altered or repaired outside ORBES),
+ * no fault found, the warranty ended (2 years) or void.
+ */
+export const WARRANTY_CLAIM_REFUSALS = [
+  'LOST', 'THEFT_REPORTED', 'SCRATCHED', 'DAMAGED_ON_PURPOSE', 'DAMAGED_BY_SOMEONE_ELSE', 'ALTERED_OUTSIDE_ORBES', 'NO_FAULT_FOUND', 'WARRANTY_ENDED', 'WARRANTY_VOID',
+] as const;
+export type WarrantyClaimRefusal = (typeof WARRANTY_CLAIM_REFUSALS)[number];
+
+/**
+ * Each basis's outcomes (`warranty_claims_basis_outcome`, answer 10 and D1), in WARRANTY_CLAIM_OUTCOMES' order: the
+ * lifetime warranty a replacement or a credit, never a repair; the 2-year warranty a repair or a replacement, never a
+ * credit; the legal guarantee its remedies, never a credit.
+ */
+export const WARRANTY_CLAIM_OUTCOMES_BY_BASIS: Readonly<Record<WarrantyClaimBasis, readonly WarrantyClaimOutcome[]>> = Object.freeze({
+  LIFETIME: Object.freeze(['REPLACEMENT', 'VALUE_CREDIT', 'PART_CREDIT', 'REFUSED'] as const),
+  TWO_YEARS: Object.freeze(['REPLACEMENT', 'REPAIR', 'REFUSED'] as const),
+  LEGAL: Object.freeze(['REPLACEMENT', 'REPAIR', 'PRICE_REDUCTION', 'REFUND', 'REFUSED'] as const),
+});
+
+/**
+ * Each basis's refusal reasons (`warranty_claims_basis_refusal`), in WARRANTY_CLAIM_REFUSALS' order: the lifetime
+ * warranty never ends; the 2-year warranty covers manufacturing defects only (no accident exclusion applies to it); the
+ * ORBES warranty's exclusions never defeat a conformity claim (the lawyer confirms the list).
+ */
+export const WARRANTY_CLAIM_REFUSALS_BY_BASIS: Readonly<Record<WarrantyClaimBasis, readonly WarrantyClaimRefusal[]>> = Object.freeze({
+  LIFETIME: Object.freeze(['LOST', 'THEFT_REPORTED', 'SCRATCHED', 'DAMAGED_ON_PURPOSE', 'DAMAGED_BY_SOMEONE_ELSE', 'ALTERED_OUTSIDE_ORBES', 'NO_FAULT_FOUND', 'WARRANTY_VOID'] as const),
+  TWO_YEARS: Object.freeze(['LOST', 'THEFT_REPORTED', 'NO_FAULT_FOUND', 'WARRANTY_ENDED', 'WARRANTY_VOID'] as const),
+  LEGAL: Object.freeze(['DAMAGED_ON_PURPOSE', 'DAMAGED_BY_SOMEONE_ELSE', 'NO_FAULT_FOUND'] as const),
+});
 
 /**
  * What THE HOUSE'S GUARANTEE covers (house_guarantees.scope, migration 0029, IN-01): a chosen release, the next release of
@@ -675,6 +731,12 @@ export interface ModelsTable {
    * its main model's. A size may name its own (skus.supplier_id).
    */
   supplier_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /**
+   * Migration 0048 (plan ORBES CARE, answer 12): its warranty, LIFETIME (true) or 2 years (false: manufacturing defects
+   * only, for its category's `warranty_months`). The column's default is false (a model written by plain SQL); the
+   * service's default for a new model is Lifetime. Every model of before was backfilled true.
+   */
+  warranty_lifetime: WithDefault<boolean>;
   created_at: TimestampDefault;
 }
 
@@ -911,6 +973,13 @@ export interface WarrantiesTable {
   void_reason: string | null;
   created_at: TimestampDefault;
   updated_at: TimestampDefault;
+  /**
+   * Migration 0048 (plan ORBES CARE, answer 12): the piece's warranty kind, copied from its model, following a later
+   * change of it; a lifetime warranty has no end date (`warranties_lifetime_open`), its `duration_months` kept. Never NULL
+   * once written; optional on insert: the trigger `warranties_kind` copies the model's choice into a row inserted
+   * without it, and clears the end date of a lifetime row.
+   */
+  lifetime: ColumnType<boolean, boolean | undefined, boolean>;
 }
 
 export interface ServiceRecordsTable {
@@ -2381,8 +2450,8 @@ export interface ClubProgramSettingsTable {
   early_access_platine_hours: WithDefault<number>;
   shipping_free_platine: WithDefault<ShippingFreeLevel>;
   shipping_free_palladium: WithDefault<ShippingFreeLevel>;
-  /** Pieces cared for a year, 0..20: PLATINE 1; PALLADIUM NULL, every piece. */
-  care_pieces_platine: WithDefault<number>;
+  /** Pieces cared for a year, 0..20 or NULL, every piece: PLATINE NULL (migration 0048, plan ORBES CARE: PRIVATE CARE for every piece from PLATINE; 1 before), PALLADIUM NULL. */
+  care_pieces_platine: WithDefault<number | null>;
   care_pieces_palladium: ColumnType<number | null, number | null | undefined, number | null>;
   /** The Messages board's priority from this tier: 2 PLATINE, 3 PALLADIUM, 0 off. */
   messages_priority_min_tier: WithDefault<number>;
@@ -2403,22 +2472,25 @@ export interface ClubProgramSettingsTable {
   birthday_credit_on: WithDefault<boolean>;
   birthday_credit_minor: WithDefault<number>;
   birthday_credit_days: WithDefault<number>;
+  /** The credit of an accepted lifetime warranty claim once the free replacement is used, in percent of the piece's value (migration 0048, plan ORBES CARE: 30, 1..100). */
+  warranty_credit_percent: WithDefault<number>;
   updated_by: string | null;
   updated_at: TimestampDefault;
 }
 
 /**
  * What an account received on reaching a tier (migration 0027, BP-19 T5): its welcome gift and its credit, once per tier
- * and per account, ever (`tier_grants_once`); and its birthday credits (BIRTHDAY, no tier, migration 0045), once per
- * birthday (`tier_grants_birthday_key`). Never deleted, its identity and amount never changed.
+ * and per account, ever (`tier_grants_once`); its birthday credits (BIRTHDAY, no tier, migration 0045), once per
+ * birthday (`tier_grants_birthday_key`); and the credits decided on its lifetime warranty claims (WARRANTY, no tier,
+ * migration 0048, each named by its claim's `grant_id`). Never deleted, its identity and amount never changed.
  */
 export interface TierGrantsTable {
   id: Generated<string>;
   account_id: string;
-  tier: ColumnType<number | null, number | null | undefined, number | null>;   // 2 PLATINE, 3 PALLADIUM; NULL on a BIRTHDAY grant
+  tier: ColumnType<number | null, number | null | undefined, number | null>;   // 2 PLATINE, 3 PALLADIUM; NULL on a BIRTHDAY or WARRANTY grant
   kind: TierGrantKind;
   granted_at: TimestampDefault;
-  /** A CREDIT's or a BIRTHDAY grant's amount (1..100 000 000 minor units), currency and expiry; NULL on a GIFT. */
+  /** A CREDIT's, a BIRTHDAY or a WARRANTY grant's amount (1..100 000 000 minor units), currency and expiry; NULL on a GIFT. */
   amount_minor: ColumnType<number | null, number | null | undefined, number | null>;
   currency: ColumnType<string | null, string | null | undefined, string | null>;
   expires_at: TimestampNullable;
@@ -2471,6 +2543,57 @@ export interface CareRequestsTable {
   /** Staff only: 1..500 characters. */
   note: ColumnType<string | null, string | null | undefined, string | null>;
   handled_by: ColumnType<string | null, string | null | undefined, string | null>;
+}
+
+/**
+ * A warranty claim (migration 0048, plan ORBES CARE §2(c)): opened by Client Services from the claimant's conversation
+ * (or, for a legal claim of a buyer without an account, from the piece with the receipt in `note`), on the piece's
+ * warranty kind read at opening or the legal guarantee (`basis`, never changed); its prepaid label (a PDF, erased 30 days
+ * after the claim ends), the INSPECTION record its receipt opened, the decision (its outcome as its basis allows, a
+ * refusal's reason, a value and its currency, a part credit's percent, the WARRANTY grant, the replacement piece), the
+ * return. One live claim per piece; one free replacement per original purchase under the lifetime warranty
+ * (`root_product_id`). Never deleted; who claims what, on which basis, opened when and by whom never change.
+ */
+export interface WarrantyClaimsTable {
+  id: Generated<string>;
+  product_id: string;
+  /** The original piece: the claimed piece, or the root of the claim whose replacement it is. */
+  root_product_id: string;
+  /** The claimant (the registered owner for the ORBES warranty) and the conversation it was opened from; both NULL only on a LEGAL claim of a buyer without an account. */
+  account_id: ColumnType<string | null, string | null | undefined, string | null>;
+  conversation_id: ColumnType<string | null, string | null | undefined, string | null>;
+  basis: WarrantyClaimBasis;
+  status: ColumnType<WarrantyClaimStatus, WarrantyClaimStatus | undefined, WarrantyClaimStatus>;
+  opened_at: TimestampDefault;
+  opened_by: string;                   // admin_users.id
+  label_pdf: ColumnType<Uint8Array | null, Uint8Array | null | undefined, Uint8Array | null>;
+  label_carrier_id: ColumnType<string | null, string | null | undefined, string | null>;
+  label_tracking: ColumnType<string | null, string | null | undefined, string | null>;
+  label_at: TimestampNullable;
+  service_record_id: ColumnType<string | null, string | null | undefined, string | null>;
+  received_at: TimestampNullable;
+  outcome: ColumnType<WarrantyClaimOutcome | null, WarrantyClaimOutcome | null | undefined, WarrantyClaimOutcome | null>;
+  refusal_reason: ColumnType<WarrantyClaimRefusal | null, WarrantyClaimRefusal | null | undefined, WarrantyClaimRefusal | null>;
+  /** The value a credit, a price reduction or a refund is computed from or amounts to, 1..100 000 000 minor units, with its currency. */
+  value_minor: ColumnType<number | null, number | null | undefined, number | null>;
+  currency: ColumnType<HouseCurrency | null, HouseCurrency | null | undefined, HouseCurrency | null>;
+  /** A PART_CREDIT's percent (THE PROGRAM's `warranty_credit_percent` at the decision), 1..100. */
+  credit_percent: ColumnType<number | null, number | null | undefined, number | null>;
+  grant_id: ColumnType<string | null, string | null | undefined, string | null>;
+  replacement_product_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** A replacement of another size of the same model, chosen by the staff member deciding. */
+  other_size: WithDefault<boolean>;
+  decided_at: TimestampNullable;
+  decided_by: ColumnType<string | null, string | null | undefined, string | null>;
+  return_carrier_id: ColumnType<string | null, string | null | undefined, string | null>;
+  return_tracking: ColumnType<string | null, string | null | undefined, string | null>;
+  return_shipped_at: TimestampNullable;
+  done_at: TimestampNullable;
+  cancelled_at: TimestampNullable;
+  /** Staff only: 1..500 characters; never shown to the collector nor written in the audit log. */
+  note: ColumnType<string | null, string | null | undefined, string | null>;
+  /** A LEGAL claim continuing a 2-year claim moved to the legal guarantee after receipt. */
+  continues_claim_id: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
 /**
@@ -2824,6 +2947,7 @@ export interface Database {
   tier_grants: TierGrantsTable;
   credit_uses: CreditUsesTable;
   care_requests: CareRequestsTable;
+  warranty_claims: WarrantyClaimsTable;
   house_guarantees: HouseGuaranteesTable;
   guarantee_settings: GuaranteeSettingsTable;
   account_sizes: AccountSizesTable;
@@ -3006,6 +3130,7 @@ export type CollectorHistoryRow = Selectable<CollectorHistoryTable>;
 export type TierGrantRow = Selectable<TierGrantsTable>;
 export type CreditUseRow = Selectable<CreditUsesTable>;
 export type CareRequestRow = Selectable<CareRequestsTable>;
+export type WarrantyClaimRow = Selectable<WarrantyClaimsTable>;
 export type HouseGuaranteeRow = Selectable<HouseGuaranteesTable>;
 export type GuaranteeSettingsRow = Selectable<GuaranteeSettingsTable>;
 export type TestEntrantRow = Selectable<TestEntrantsTable>;

@@ -443,9 +443,16 @@ describe('admin enums mirror the server', () => {
       'LINK_VIAS',
       'SCORE_ACT_KINDS',
       'SCORE_OTHER_CURRENCIES',
+      'WARRANTY_CLAIM_BASES',
+      'WARRANTY_CLAIM_STATUSES',
+      'WARRANTY_CLAIM_OUTCOMES',
+      'WARRANTY_CLAIM_REFUSALS',
     ] as const) {
       expect([...web[name]], name).toEqual([...serverSchema[name]]);
     }
+    // Each basis's outcomes and refusal reasons (plan ORBES CARE, migration 0048), as the server holds them.
+    expect(web.WARRANTY_CLAIM_OUTCOMES_BY_BASIS).toEqual(serverSchema.WARRANTY_CLAIM_OUTCOMES_BY_BASIS);
+    expect(web.WARRANTY_CLAIM_REFUSALS_BY_BASIS).toEqual(serverSchema.WARRANTY_CLAIM_REFUSALS_BY_BASIS);
     expect([...web.AUTH_POLICY_KINDS]).toEqual([...SERVER_POLICY_KINDS]);
     expect([...web.ANOMALY_SORTS]).toEqual([...SERVER_ANOMALY_SORTS]);
     expect([...web.SCAN_STAT_EVENT_TYPES]).toEqual([...serverSchema.SCAN_STAT_EVENT_TYPES]);

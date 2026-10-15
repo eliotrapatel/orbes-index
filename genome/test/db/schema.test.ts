@@ -183,6 +183,11 @@ describe('schema', () => {
       ['acquisition_conversions', 'kind', S.CONVERSION_KINDS],
       ['account_scores', 'last_act_kind', S.SCORE_ACT_KINDS],
       ['account_scores', 'other_currencies', S.SCORE_OTHER_CURRENCIES],
+      ['warranty_claims', 'basis', S.WARRANTY_CLAIM_BASES],
+      ['warranty_claims', 'status', S.WARRANTY_CLAIM_STATUSES],
+      ['warranty_claims', 'outcome', S.WARRANTY_CLAIM_OUTCOMES],
+      ['warranty_claims', 'refusal_reason', S.WARRANTY_CLAIM_REFUSALS],
+      ['warranty_claims', 'currency', S.HOUSE_CURRENCIES],
     ];
     for (const [table, column, values] of cases) {
       expect(await checkValues(t.db, table, column), `${table}.${column}`).toEqual(sorted(values));
@@ -1056,6 +1061,78 @@ describe('schema', () => {
     await t.db.deleteFrom('collector_history').execute();
     expect(await t.db.insertInto('collector_history').values({ account_id: account.id, first_month: '2026-09-01' }).returningAll().executeTakeFirstOrThrow()).toEqual({ account_id: account.id, first_month: '2026-09-01', scores: [], tiers: [], active: [], last_month: null });
     await t.db.deleteFrom('collector_history').execute();
+  });
+
+  it('each basis\'s outcomes and refusal reasons (0048) are schema.ts\'s WARRANTY_CLAIM_OUTCOMES_BY_BASIS and WARRANTY_CLAIM_REFUSALS_BY_BASIS', async () => {
+    // Each CHECK evaluated on every basis and value: the values it lets through, basis by basis.
+    const allowed = async (constraint: string, column: string, values: readonly string[]) => {
+      const def = (await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = 'warranty_claims'::regclass AND conname = ${constraint}`.execute(t.db)).rows[0].def;
+      const list = (xs: readonly string[]) => `ARRAY[${xs.map((x) => `'${x}'`).join(', ')}]::text[]`;
+      const r = await sql.raw<{ basis: S.WarrantyClaimBasis; value: string; ok: boolean }>(
+        `SELECT basis, ${column} AS value, (${def.replace(/^CHECK /, '')}) AS ok FROM unnest(${list(S.WARRANTY_CLAIM_BASES)}) AS b(basis) CROSS JOIN unnest(${list(values)}) WITH ORDINALITY AS v(${column}, n) ORDER BY b.basis, v.n`,
+      ).execute(t.db);
+      return Object.fromEntries(S.WARRANTY_CLAIM_BASES.map((b) => [b, r.rows.filter((x) => x.basis === b && x.ok).map((x) => x.value)]));
+    };
+    expect(await allowed('warranty_claims_basis_outcome', 'outcome', S.WARRANTY_CLAIM_OUTCOMES)).toEqual(S.WARRANTY_CLAIM_OUTCOMES_BY_BASIS);
+    expect(await allowed('warranty_claims_basis_refusal', 'refusal_reason', S.WARRANTY_CLAIM_REFUSALS)).toEqual(S.WARRANTY_CLAIM_REFUSALS_BY_BASIS);
+    // Each list in its full list's order; the 2-year warranty and the legal guarantee never a credit (answer 10, D1).
+    for (const b of S.WARRANTY_CLAIM_BASES) {
+      expect(S.WARRANTY_CLAIM_OUTCOMES_BY_BASIS[b], b).toEqual(S.WARRANTY_CLAIM_OUTCOMES.filter((o) => S.WARRANTY_CLAIM_OUTCOMES_BY_BASIS[b].includes(o)));
+      expect(S.WARRANTY_CLAIM_REFUSALS_BY_BASIS[b], b).toEqual(S.WARRANTY_CLAIM_REFUSALS.filter((o) => S.WARRANTY_CLAIM_REFUSALS_BY_BASIS[b].includes(o)));
+    }
+    expect(S.WARRANTY_CLAIM_OUTCOMES_BY_BASIS.TWO_YEARS.filter((o) => o.endsWith('_CREDIT'))).toEqual([]);
+    expect(S.WARRANTY_CLAIM_OUTCOMES_BY_BASIS.LEGAL.filter((o) => o.endsWith('_CREDIT'))).toEqual([]);
+  });
+
+  it('ORBES CARE (0048): the mirror at work: a model\'s warranty, false by default; a warranty inserted without its kind taking its model\'s, a lifetime one with no end date; THE PROGRAM\'s PLATINE every piece and the warranty credit\'s 30 %; a WARRANTY grant with no tier; a claim with its basis and defaults', async () => {
+    const { product, model } = await seedProduct(t.db);
+    expect(model.warranty_lifetime).toBe(false);
+    const lifetime = await t.db.updateTable('models').set({ warranty_lifetime: true }).where('id', '=', model.id).returning('warranty_lifetime').executeTakeFirstOrThrow();
+    expect(lifetime).toEqual({ warranty_lifetime: true });
+    // Inserted without its kind: the model's, and no end date on a lifetime warranty (the trigger warranties_kind).
+    const w = await t.db
+      .insertInto('warranties')
+      .values({ product_id: product.id, start_date: '2026-10-15', duration_months: 24, end_date: '2028-10-15' })
+      .returning(['lifetime', 'start_date', 'duration_months', 'end_date'])
+      .executeTakeFirstOrThrow();
+    expect(w).toEqual({ lifetime: true, start_date: '2026-10-15', duration_months: 24, end_date: null });
+    const two = await t.db.updateTable('warranties').set({ lifetime: false, end_date: '2028-10-15' }).where('product_id', '=', product.id).returning(['lifetime', 'end_date']).executeTakeFirstOrThrow();
+    expect(two).toEqual({ lifetime: false, end_date: '2028-10-15' });
+    await expect(sql`ALTER TABLE warranties DISABLE TRIGGER warranties_kind`.execute(t.db).then(() => t.db.updateTable('warranties').set({ lifetime: true }).where('product_id', '=', product.id).execute()))
+      .rejects.toSatisfy((e) => isCheckViolation(e, 'warranties_lifetime_open'));
+    await sql`ALTER TABLE warranties ENABLE TRIGGER warranties_kind`.execute(t.db);
+
+    const had = await t.db.selectFrom('club_program_settings').select('id').executeTakeFirst();
+    if (!had) await t.db.insertInto('club_program_settings').values({ id: 1 }).execute();
+    if (!had) expect(await t.db.selectFrom('club_program_settings').select(['care_pieces_platine', 'care_pieces_palladium', 'warranty_credit_percent']).executeTakeFirstOrThrow()).toEqual({ care_pieces_platine: null, care_pieces_palladium: null, warranty_credit_percent: 30 });
+    if (!had) await t.db.deleteFrom('club_program_settings').execute();
+
+    const account = await t.db.insertInto('accounts').values({ email: 'w-s0048@example.com', email_normalized: 'w-s0048@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const admin = await t.db.insertInto('admin_users').values({ email: 'care-s0048@orbes.test', email_normalized: 'care-s0048@orbes.test', password_hash: 'scrypt$x', role: 'OPERATOR' }).returning('id').executeTakeFirstOrThrow();
+    const at = new Date('2026-10-15T08:00:00.000Z');
+    const conversation = await t.db.insertInto('client_conversations').values({ account_id: account.id, status: 'ANSWERED', last_message_at: at }).returning('id').executeTakeFirstOrThrow();
+    const grant = await t.db
+      .insertInto('tier_grants')
+      .values({ account_id: account.id, tier: null, kind: 'WARRANTY', granted_at: at, amount_minor: 12_000, currency: 'EUR', expires_at: new Date('2027-10-15T08:00:00.000Z') })
+      .returning(['tier', 'kind', 'birthday_on'])
+      .executeTakeFirstOrThrow();
+    expect(grant).toEqual({ tier: null, kind: 'WARRANTY', birthday_on: null });
+    const claim = await t.db
+      .insertInto('warranty_claims')
+      .values({ product_id: product.id, root_product_id: product.id, account_id: account.id, conversation_id: conversation.id, basis: 'LIFETIME', opened_at: at, opened_by: admin.id })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(claim).toMatchObject({ basis: 'LIFETIME', status: 'OPEN', other_size: false, outcome: null, refusal_reason: null, label_pdf: null, continues_claim_id: null });
+    await expect(t.db.updateTable('warranty_claims').set({ basis: 'TWO_YEARS' }).where('id', '=', claim.id).execute()).rejects.toSatisfy(isGuardViolation);
+    await expect(t.db.deleteFrom('warranty_claims').where('id', '=', claim.id).execute()).rejects.toSatisfy(isGuardViolation);
+    // Refused from OPEN: done, with its reason.
+    const refused = await t.db
+      .updateTable('warranty_claims')
+      .set({ status: 'DONE', outcome: 'REFUSED', refusal_reason: 'SCRATCHED', decided_at: at, decided_by: admin.id, done_at: at })
+      .where('id', '=', claim.id)
+      .returning(['status', 'outcome', 'refusal_reason'])
+      .executeTakeFirstOrThrow();
+    expect(refused).toEqual({ status: 'DONE', outcome: 'REFUSED', refusal_reason: 'SCRATCHED' });
   });
 
   it('audit_logs is append-only at the database level', async () => {

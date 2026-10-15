@@ -608,9 +608,9 @@ export class OwnerService {
       : [];
     // §3.5 SB.4.3: the tiers' grants first, PLATINE's first; then the birthday credits, newest first: the last two and any open.
     const open = (id: string) => balances.some((b) => b.grantId === id && b.balanceMinor > 0 && b.expiresAt.getTime() > now.getTime());
-    const birthdays = grants.filter((g) => g.kind === 'BIRTHDAY').sort((a, b) => (a.birthday_on! < b.birthday_on! ? 1 : -1));
+    const birthdays = grants.filter((g): g is typeof g & { kind: 'BIRTHDAY' } => g.kind === 'BIRTHDAY').sort((a, b) => (a.birthday_on! < b.birthday_on! ? 1 : -1));
     const shown = [
-      ...grants.filter((g) => g.kind !== 'BIRTHDAY' && g.tier !== null).sort((a, b) => a.tier! - b.tier! || (a.kind < b.kind ? 1 : -1)),
+      ...grants.filter((g): g is typeof g & { kind: 'GIFT' | 'CREDIT' } => (g.kind === 'GIFT' || g.kind === 'CREDIT') && g.tier !== null).sort((a, b) => a.tier! - b.tier! || (a.kind < b.kind ? 1 : -1)), // 0048's WARRANTY: none before step 1.5
       ...birthdays.filter((g, i) => i < 2 || open(g.id)),
     ];
     const next = nextBirthday({ birthDate: profile?.birth_date ?? null, birthDateAt: profile?.birth_date_at ?? null, granted: birthdays.map((g) => g.birthday_on!), days: program.birthdayCreditDays, now });

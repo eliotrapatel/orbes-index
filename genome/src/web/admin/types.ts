@@ -144,6 +144,38 @@ export type CreditReleaseReason = (typeof CREDIT_RELEASE_REASONS)[number];
 export const CARE_REQUEST_STATUSES = ['REQUESTED', 'LABEL_SENT', 'RECEIVED', 'RETURNING', 'DONE', 'CANCELLED'] as const;
 export type CareRequestStatus = (typeof CARE_REQUEST_STATUSES)[number];
 
+/** What a warranty claim is made under (warranty_claims.basis, plan ORBES CARE): the lifetime or the 2-year warranty, read from the piece, or the legal guarantee. */
+export const WARRANTY_CLAIM_BASES = ['LIFETIME', 'TWO_YEARS', 'LEGAL'] as const;
+export type WarrantyClaimBasis = (typeof WARRANTY_CLAIM_BASES)[number];
+
+/** The steps of a warranty claim (warranty_claims.status). */
+export const WARRANTY_CLAIM_STATUSES = ['OPEN', 'LABEL_SENT', 'RECEIVED', 'DECIDED', 'DONE', 'CANCELLED'] as const;
+export type WarrantyClaimStatus = (typeof WARRANTY_CLAIM_STATUSES)[number];
+
+/** A warranty claim's outcome (warranty_claims.outcome). */
+export const WARRANTY_CLAIM_OUTCOMES = ['REPLACEMENT', 'VALUE_CREDIT', 'PART_CREDIT', 'REPAIR', 'PRICE_REDUCTION', 'REFUND', 'REFUSED'] as const;
+export type WarrantyClaimOutcome = (typeof WARRANTY_CLAIM_OUTCOMES)[number];
+
+/** Why a warranty claim is refused (warranty_claims.refusal_reason). */
+export const WARRANTY_CLAIM_REFUSALS = [
+  'LOST', 'THEFT_REPORTED', 'SCRATCHED', 'DAMAGED_ON_PURPOSE', 'DAMAGED_BY_SOMEONE_ELSE', 'ALTERED_OUTSIDE_ORBES', 'NO_FAULT_FOUND', 'WARRANTY_ENDED', 'WARRANTY_VOID',
+] as const;
+export type WarrantyClaimRefusal = (typeof WARRANTY_CLAIM_REFUSALS)[number];
+
+/** Each basis's outcomes (warranty_claims_basis_outcome): the 2-year warranty and the legal guarantee never a credit. */
+export const WARRANTY_CLAIM_OUTCOMES_BY_BASIS: Readonly<Record<WarrantyClaimBasis, readonly WarrantyClaimOutcome[]>> = Object.freeze({
+  LIFETIME: Object.freeze(['REPLACEMENT', 'VALUE_CREDIT', 'PART_CREDIT', 'REFUSED'] as const),
+  TWO_YEARS: Object.freeze(['REPLACEMENT', 'REPAIR', 'REFUSED'] as const),
+  LEGAL: Object.freeze(['REPLACEMENT', 'REPAIR', 'PRICE_REDUCTION', 'REFUND', 'REFUSED'] as const),
+});
+
+/** Each basis's refusal reasons (warranty_claims_basis_refusal). */
+export const WARRANTY_CLAIM_REFUSALS_BY_BASIS: Readonly<Record<WarrantyClaimBasis, readonly WarrantyClaimRefusal[]>> = Object.freeze({
+  LIFETIME: Object.freeze(['LOST', 'THEFT_REPORTED', 'SCRATCHED', 'DAMAGED_ON_PURPOSE', 'DAMAGED_BY_SOMEONE_ELSE', 'ALTERED_OUTSIDE_ORBES', 'NO_FAULT_FOUND', 'WARRANTY_VOID'] as const),
+  TWO_YEARS: Object.freeze(['LOST', 'THEFT_REPORTED', 'NO_FAULT_FOUND', 'WARRANTY_ENDED', 'WARRANTY_VOID'] as const),
+  LEGAL: Object.freeze(['DAMAGED_ON_PURPOSE', 'DAMAGED_BY_SOMEONE_ELSE', 'NO_FAULT_FOUND'] as const),
+});
+
 /** What THE HOUSE'S GUARANTEE covers (house_guarantees.scope, IN-01): a chosen release, the next of a model, of a collection. */
 export const GUARANTEE_SCOPES = ['RELEASE', 'MODEL', 'COLLECTION'] as const;
 export type GuaranteeScope = (typeof GUARANTEE_SCOPES)[number];
@@ -2796,7 +2828,8 @@ export interface ClubProgram {
   earlyAccessPlatineHours: number;
   shippingFreePlatine: ShippingFreeLevel;
   shippingFreePalladium: ShippingFreeLevel;
-  carePiecesPlatine: number;
+  /** null: every piece (migration 0048, plan ORBES CARE: PRIVATE CARE for every piece from PLATINE). */
+  carePiecesPlatine: number | null;
   /** null: every piece. */
   carePiecesPalladium: number | null;
   /** 0: off. */

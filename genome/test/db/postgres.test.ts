@@ -179,4 +179,33 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     expect(await db.selectFrom('product_status_history').select('to_status').where('product_id', '=', b.id).where('to_status', '=', 'ACTIVATED').execute()).toHaveLength(1);
     expect((await audit.verifyChain()).ok).toBe(true);
   });
+
+  it('fills a warranty\'s kind from its model and clears a lifetime warranty\'s end date before its constraints (0048, warranties_kind), so the previous image\'s insert and activation pass during the roll-out; gives back an end date clamped to the month\'s end', async () => {
+    await db.insertInto('categories').values({ id: 21, code: 'W', name: 'Warranty parity' }).execute();
+    // A model written by plain SQL is at 2 years (the column's false); the service's Lifetime is written explicitly.
+    const twoYears = await db.insertInto('models').values({ category_id: 21, name: 'ECLIPSE', type: 'BAG', sku_prefix: 'WKIND-BG' }).returning(['id', 'warranty_lifetime']).executeTakeFirstOrThrow();
+    expect(twoYears.warranty_lifetime).toBe(false);
+    const lifetime = await db.insertInto('models').values({ category_id: 21, name: 'HALO', type: 'RING', sku_prefix: 'WKIND-RG', warranty_lifetime: true }).returning('id').executeTakeFirstOrThrow();
+    const piece = async (serial: number, model: string) =>
+      (
+        await db
+          .insertInto('products')
+          .values({ product_id: `O26-W-${String(serial).padStart(5, '0')}`, packed_identity: (26 << 25) | (21 << 20) | serial, year: 2026, category_id: 21, serial, sku: `WKIND-${serial}`, model_id: model, material: 'SILVER' })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+    const bag = await piece(1, twoYears.id);
+    const ring = await piece(2, lifetime.id);
+    // Inserted as the previous image does, without the kind: each takes its model's.
+    await db.insertInto('warranties').values({ product_id: bag, duration_months: 24 }).execute();
+    await db.insertInto('warranties').values({ product_id: ring, duration_months: 24 }).execute();
+    // Its activation writes the start, the months and the end: kept on the 2-year piece, the end cleared on the lifetime one.
+    await db.updateTable('warranties').set({ start_date: '2026-01-31', duration_months: 1, end_date: '2026-02-28' }).where('product_id', 'in', [bag, ring]).execute();
+    const rows = await db.selectFrom('warranties').select(['product_id', 'lifetime', 'end_date']).where('product_id', 'in', [bag, ring]).execute();
+    expect(rows.find((r) => r.product_id === bag)).toMatchObject({ lifetime: false, end_date: '2026-02-28' });
+    expect(rows.find((r) => r.product_id === ring)).toMatchObject({ lifetime: true, end_date: null });
+    // DOWN's (and a switch to 2 years') end date: start + months, clamped to the month's end as addMonthsClamped does.
+    const end = await sql<{ d: string }>`SELECT ((date '2026-01-31' + make_interval(months => 1))::date)::text AS d`.execute(db);
+    expect(end.rows[0].d).toBe('2026-02-28');
+  });
 });

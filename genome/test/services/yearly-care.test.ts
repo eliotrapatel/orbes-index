@@ -87,6 +87,8 @@ describe('the yearly care (BP-19 T6)', () => {
     expect(careAllowance(DEFAULT_PROGRAM, 3)).toBe('ALL');
     expect(careAllowance({ carePiecesPlatine: 0, carePiecesPalladium: 2 }, 3)).toBe(2);
     expect(careAllowance({ carePiecesPlatine: 0, carePiecesPalladium: 2 }, 2)).toBe(0);
+    // PLATINE's every piece (migration 0048, plan ORBES CARE step 1.1), as PALLADIUM's.
+    expect(careAllowance({ carePiecesPlatine: null, carePiecesPalladium: null }, 2)).toBe('ALL');
     const titane = await collector(1);
     const platine = await collector(5);
     const palladium = await collector(10);

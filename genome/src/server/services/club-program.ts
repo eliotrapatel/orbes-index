@@ -81,8 +81,8 @@ export interface ClubProgram {
   earlyAccessPlatineHours: number;
   shippingFreePlatine: ShippingFreeLevel;
   shippingFreePalladium: ShippingFreeLevel;
-  /** Pieces cared for a year: 0 none; PALLADIUM's null is every piece. */
-  carePiecesPlatine: number;
+  /** Pieces cared for a year: 0 none; null is every piece (PALLADIUM's; PLATINE's from migration 0048, plan ORBES CARE). */
+  carePiecesPlatine: number | null;
   carePiecesPalladium: number | null;
   /** The Messages board puts first, and marks, the conversations from this tier: 0 off. */
   messagesPriorityMinTier: PriorityTier;
@@ -412,7 +412,7 @@ export function checkProgram(input: unknown): ClubProgram {
     earlyAccessPlatineHours: whole(v.earlyAccessPlatineHours, PROGRAM_LIMITS.hours, 'PLATINE’s early access, in hours,'),
     shippingFreePlatine: oneOf(v.shippingFreePlatine, SHIPPING_FREE_LEVELS, 'PLATINE’s free shipping'),
     shippingFreePalladium: oneOf(v.shippingFreePalladium, SHIPPING_FREE_LEVELS, 'PALLADIUM’s free shipping'),
-    carePiecesPlatine: whole(v.carePiecesPlatine, PROGRAM_LIMITS.care, 'PLATINE’s yearly care, in pieces,'),
+    carePiecesPlatine: v.carePiecesPlatine === null ? null : whole(v.carePiecesPlatine, PROGRAM_LIMITS.care, 'PLATINE’s yearly care, in pieces,'),
     carePiecesPalladium: v.carePiecesPalladium === null ? null : whole(v.carePiecesPalladium, PROGRAM_LIMITS.care, 'PALLADIUM’s yearly care, in pieces,'),
     messagesPriorityMinTier: oneOf(v.messagesPriorityMinTier, PRIORITY_TIERS, 'The Messages priority'),
     giftPlatineModelId: model(v.giftPlatineModelId),

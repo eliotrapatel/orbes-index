@@ -87,9 +87,11 @@ describe('THE PROGRAM and SHIPPING (BP-19 T2)', () => {
       birthdayCreditMinor: 2000,
       birthdayCreditDays: 30,
     });
-    // The column defaults of migrations 0026 and 0045 are DEFAULT_PROGRAM's: a row inserted with none reads the same.
+    // The column defaults of migrations 0026 and 0045 are DEFAULT_PROGRAM's: a row inserted with none reads the same, but
+    // for PLATINE's PRIVATE CARE: 0048's default is every piece (null), which DEFAULT_PROGRAM takes in step 1.4 of the
+    // ORBES CARE plan (step 1.1 changes only the column).
     await h.ctx.db.insertInto('club_program_settings').values({ id: 1 }).execute();
-    expect(await svc().read()).toEqual(program());
+    expect(await svc().read()).toEqual({ ...program(), carePiecesPlatine: null });
     await h.ctx.db.deleteFrom('club_program_settings').execute();
     expect(Object.isFrozen(DEFAULT_PROGRAM)).toBe(true);
     // The credit and the rates are in the currencies an order is priced in.
@@ -180,6 +182,8 @@ describe('THE PROGRAM and SHIPPING (BP-19 T2)', () => {
     expect(() => checkProgram({ ...program(), birthdayCreditMinor: 100_000_001 })).toThrow('The birthday credit, in minor units, is 1 to 100000000.');
     expect(() => checkProgram({ ...program(), birthdayCreditDays: 366 })).toThrow('The birthday credit’s validity, in days, is 1 to 365.');
     expect(() => checkProgram({ ...program(), birthdayCreditOn: 1 })).toThrow('The birthday credit is given or not: true or false.');
+    // PLATINE's PRIVATE CARE every piece (null, migration 0048, plan ORBES CARE step 1.1), as PALLADIUM's.
+    expect(checkProgram({ ...program(), carePiecesPlatine: null })).toMatchObject({ carePiecesPlatine: null, carePiecesPalladium: null });
     expect(checkProgram(program({ birthdayCreditOn: false, birthdayCreditMinor: 100_000_000, birthdayCreditDays: 365 }))).toMatchObject({ birthdayCreditOn: false, birthdayCreditMinor: 100_000_000, birthdayCreditDays: 365 });
     expect(checkProgram(program({ birthdayCreditMinor: 1, birthdayCreditDays: 1 }))).toMatchObject({ birthdayCreditOn: true, birthdayCreditMinor: 1, birthdayCreditDays: 1 });
     await rejects(svc().update(program({ earlyAccessPalladiumHours: 2, earlyAccessPlatineHours: 3 }), admin), 'PROGRAM_EARLY_ACCESS', 422);

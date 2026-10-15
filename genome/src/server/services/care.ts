@@ -168,10 +168,10 @@ export function careYear(now: Date): number {
   return now.getUTCFullYear();
 }
 
-/** A tier's allowance in THE PROGRAM: PLATINE's number, PALLADIUM's number or every piece; nothing below PLATINE. */
+/** A tier's allowance in THE PROGRAM: PLATINE's and PALLADIUM's number or every piece (null); nothing below PLATINE. */
 export function careAllowance(p: Pick<ClubProgram, 'carePiecesPlatine' | 'carePiecesPalladium'>, tier: number): CareAllowance {
   if (tier >= 3) return p.carePiecesPalladium === null ? 'ALL' : p.carePiecesPalladium;
-  if (tier === 2) return p.carePiecesPlatine;
+  if (tier === 2) return p.carePiecesPlatine === null ? 'ALL' : p.carePiecesPlatine;
   return 0;
 }
 
