@@ -1289,8 +1289,9 @@ class App {
   }
 
   /**
-   * How ORBES Client Services is reached, read in the collector app only for the email under FORGOTTEN PASSWORD? and
-   * ORBES Care's SUBSCRIBE (plan NEXT-NINE, CS-01: everywhere else, WRITE TO ORBES CLIENT SERVICES); never rejects
+   * How ORBES Client Services is reached, read in the collector app only for the email under FORGOTTEN PASSWORD? (plan
+   * NEXT-NINE, CS-01: everywhere else, WRITE TO ORBES CLIENT SERVICES; the ORBES Care subscription is gone, plan ORBES
+   * CARE, answer 1); never rejects
    * (`{}` when it cannot be read), and never makes a result wait more than CONTACT_WAIT_MS. A read that fails (it gives
    * up after CONTACT_TIMEOUT_MS) is tried again with the next result.
    */

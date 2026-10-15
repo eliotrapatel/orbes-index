@@ -268,7 +268,15 @@ describe.skipIf(!HAS_CHROMIUM)('the warranty claims in the console (E2E, Chromiu
     await confirm(p);
     await expect.poll(() => status(p), POLL).toBe('With ORBES');
     expect(await actions(p)).toEqual(['Decide']);
-    // DECIDE: the free replacement still available, the same piece new or a credit of its value; no 30 % credit.
+    // DECIDE: the free replacement still available: the same piece new; LUNE still made, no credit of its value (answer 4);
+    // no 30 % credit.
+    await p.click('[data-testid=claim-decide]');
+    expect(await options(p, 'outcome')).toEqual(['Choose a decision', 'Replace with the same piece, new', 'Refuse']);
+    await cancel(p);
+    // LUNE no longer made: the credit of its value is offered too (LUNE made again once decided).
+    await ctx.db.updateTable('models').set({ active: false, discontinued_at: new Date() }).where('name', '=', 'LUNE').execute();
+    await p.reload();
+    await expect.poll(() => status(p), POLL).toBe('With ORBES');
     await p.click('[data-testid=claim-decide]');
     expect(await options(p, 'outcome')).toEqual(['Choose a decision', 'Replace with the same piece, new', 'Credit of its value (model no longer made)', 'Refuse']);
     await p.selectOption('dialog select[name=outcome]', 'REFUSED');
@@ -280,6 +288,7 @@ describe.skipIf(!HAS_CHROMIUM)('the warranty claims in the console (E2E, Chromiu
     await shot(p, 'decide-lifetime', { dialog: true });
     await confirm(p);
     await expect.poll(() => status(p), POLL).toBe('Decided');
+    await ctx.db.updateTable('models').set({ active: true, discontinued_at: null }).where('name', '=', 'LUNE').execute();
     expect(await p.locator('[data-testid=claim-decision]').textContent()).toBe(`Replaced · by ${serial.spare}`);
     // SHIP: the new piece; DONE.
     await p.click('[data-testid=claim-ship]');

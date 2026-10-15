@@ -119,6 +119,7 @@ import {
   ORDER_STATUSES,
   RETURN_OUTCOMES,
   SHIPPING_SERVICES,
+  WARRANTY_CLAIM_LIVE_STATUSES,
   jsonText,
   type AddressSource,
   type OrderCaseOutcome,
@@ -228,6 +229,8 @@ const notReady = () => conflict('ORDER_NOT_READY', 'The piece is not in stock at
 const pieceNotLinked = () => conflict('ORDER_PIECE_NOT_LINKED', 'Link the piece that fulfils this order before it ships.');
 /** Plan NEXT LOT §3.5.6.7 (step 5.12): an order ships only through its parcel's Ship, packed and checked. */
 export const orderNotPacked = () => conflict('ORDER_NOT_PACKED', 'Pack the parcel and check it before it ships.');
+/** Plan ORBES CARE §2(c): a return never takes a piece from a warranty claim under way (it would go to a former owner). */
+const claimUnderWay = () => conflict('CLAIM_OPEN', 'A warranty claim is under way for this piece: finish or close it first.');
 const pieceLinked = () => conflict('ORDER_PIECE_LINKED', 'A piece is already linked to this order: transfer the piece instead.');
 const termsFixed = () => conflict('ORDER_TERMS_FIXED', 'The size and the price of a LIVE RELEASE order are those of its release.');
 /** Plan NEXT LOT §3.6.F and §3.6.G: a draw's entry and a salon's request with a size fix it; an exchange goes through an order case. */
@@ -1687,7 +1690,8 @@ export async function attachPiece(tx: Db, o: OrderRow, productUuid: string, via:
  * the piece back to stock at a location with its new claim code (its hash prepared before the transaction), or to the
  * archive; the ownership taken back; the credit given back; the credit note; its parcel, shipped and never marked
  * delivered, DELIVERED once no order of it is still SHIPPED. `expected` is what the caller read before its transaction
- * (409 ORDER_RETURN_CHANGED when it changed). Returns the order after it, the piece's reference, the credit given back
+ * (409 ORDER_RETURN_CHANGED when it changed); 409 CLAIM_OPEN while a warranty claim of the piece is live (plan ORBES
+ * CARE §2(c)). Returns the order after it, the piece's reference, the credit given back
  * (`credit`, which an exchange carries onto its EXCHANGE order) and `finish`, the piece's change of status, which the
  * caller runs last (LifecycleService audits at once). From an order case (`caseId`), the note is ORBES's decision's,
  * which an AUDITOR never reads: the `order.return` event keeps no words (`caseId` and `noted` only), the return's row
@@ -1710,6 +1714,9 @@ export async function returnInTransaction(
   const locationId = r.outcome === 'RESTOCKED' ? await knownLocation(tx, r.locationId!) : null;
   if (locationId) await lockSku(tx, o.sku_id);
   const p = await tx.selectFrom('products').selectAll().where('id', '=', o.product_id).forUpdate().executeTakeFirstOrThrow();
+  // A warranty claim live on the piece (services/warranty-claims.ts): its next steps would carry on for a former owner.
+  const claim = await tx.selectFrom('warranty_claims').select('id').where('product_id', '=', p.id).where('status', 'in', [...WARRANTY_CLAIM_LIVE_STATUSES]).executeTakeFirst();
+  if (claim) throw claimUnderWay();
   const owner = await tx.selectFrom('ownership').selectAll().where('product_id', '=', p.id).where('ended_at', 'is', null).forUpdate().executeTakeFirst();
   if ((owner !== undefined) !== expected.reclaim) throw returnChanged();
   // Plan NEXT LOT §3.4: a buyer's new claim code still waiting is withdrawn (RESTOCKED writes its own new code, shown

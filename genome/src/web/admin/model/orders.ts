@@ -274,9 +274,9 @@ export function creditAppliedLine(o: Pick<OrderView, 'credit' | 'currency'>): st
   ].join(' · ');
 }
 
-/** APPLY CREDIT's sentence (§3.5 SB.4.6): the birthday credit is taken first, then the tiers'. */
+/** APPLY CREDIT's sentence (§3.5 SB.4.6): the birthday credit is taken first, then the warranty credit (plan ORBES CARE), then the tiers'. */
 export const APPLY_CREDIT_TEXT =
-  'A credit taken off this order’s invoice, in its currency: the birthday credit first, then the tiers’. It is given back if the order is cancelled or returned, with its expiry unchanged.';
+  'A credit taken off this order’s invoice, in its currency: the birthday credit first, then the warranty credit, then the tiers’. It is given back if the order is cancelled or returned, with its expiry unchanged.';
 
 /** The credit usable on this order: the balances in its currency, and what its price leaves (null before it is priced). */
 export function creditRoom(o: Pick<OrderView, 'credit' | 'currency' | 'priceMinor'>): number {

@@ -482,11 +482,11 @@ async function legalClaimDialog(ctx: ViewContext, d: ProductDetail): Promise<voi
       h(
         'p',
         { class: 'dialog__text' },
-        'For a buyer without an ORBES account, from a boutique sale: write the receipt’s facts in the note. A client with an account is claimed for from their conversation in Messages. The claim shows nowhere in the app: send its label by e-mail.',
+        'For a buyer without an ORBES account, from a boutique sale: write the receipt’s facts in the note. A client with an account is claimed for from their conversation in Messages. The claim shows nowhere in the app: send its label by email.',
       ),
       h('p', { class: 'dialog__text', data: { testid: 'legal-claim-until' } }, until ? `The legal guarantee applies until ${formatDate(until)}.` : 'The legal guarantee has no start for this piece: no delivery nor warranty start.'),
     ],
-    fields: [{ name: 'note', label: 'Receipt and note', kind: 'textarea', required: true, maxlength: 500, hint: 'The receipt: its number, the point of sale and the date. Staff only.' }],
+    fields: [{ name: 'note', label: 'Receipt and note', kind: 'textarea', required: true, maxlength: 500, hint: 'The receipt: its number, the point of sale and the date. Never the buyer’s email nor address. Staff only.' }],
     confirmLabel: 'Open the claim',
     submit: async (v) => {
       opened = (await ctx.api.openWarrantyClaim({ conversationId: null, productId: pid, basis: 'LEGAL', note: v.note ?? '' })).id;

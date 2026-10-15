@@ -25,9 +25,9 @@ import {
   claimActions,
   claimHref,
   decisionBasisLine,
+  decisionChoices,
   decisionNote,
   decisionText,
-  outcomeChoice,
   refusalOptions,
   type ClaimAction,
 } from '../model/claims.js';
@@ -87,7 +87,7 @@ export async function warrantyClaimView(ctx: ViewContext): Promise<HTMLElement> 
             { class: 'dialog__text' },
             s.account
               ? 'The prepaid label shows in the piece’s ORBES CARE tab of the client’s app, with its carrier and tracking number. Nothing is written in their messages.'
-              : 'This buyer has no ORBES account: send them the label by e-mail as well. The claim shows nowhere in the app.',
+              : 'This buyer has no ORBES account: send them the label by email as well. The claim shows nowhere in the app.',
           ),
           field('Label', file, { wide: true, hint: 'The PDF itself, at most 2 MB.' }),
         ],
@@ -149,7 +149,7 @@ export async function warrantyClaimView(ctx: ViewContext): Promise<HTMLElement> 
             label: 'Decision',
             kind: 'select',
             required: true,
-            options: [{ value: '', label: 'Choose a decision' }, ...s.decision.outcomes.map((o) => ({ value: o, label: outcomeChoice(o, s.decision.creditPercent) }))],
+            options: [{ value: '', label: 'Choose a decision' }, ...decisionChoices(s)],
           },
           { name: 'reason', label: 'Reason', kind: 'select', options: [{ value: '', label: 'Choose a reason' }, ...reasons], shown: (v) => v.outcome === 'REFUSED' },
           {

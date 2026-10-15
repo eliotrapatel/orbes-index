@@ -20,7 +20,8 @@
  *
  * The claim's prepaid label is sent through PRIVATE CARE's upload path, POST /api/admin/care/:id/label with the claim's
  * id (routes/admin/care.ts): the edge lets a body over 64 KB through on that path only (deploy/vps/Caddyfile), and
- * deploy/vps never changes. An AUDITOR reads the clients' emails masked (serialize.ts). services/warranty-claims.ts
+ * deploy/vps never changes. An AUDITOR reads the clients' emails masked (serialize.ts), and no note on a claim of a buyer
+ * without an account. services/warranty-claims.ts
  * checks, steps and audits each change (`warranty.claim.*`: never the note nor an email).
  */
 import type { FastifyPluginAsync } from 'fastify';
@@ -45,9 +46,17 @@ function rowJson<T extends ClaimBoardRow>(r: T, inClear: boolean): T {
   return { ...r, account: r.account ? { ...r.account, email: clientEmail(r.account.email, inClear) } : null };
 }
 
-/** A claim as the console reads it: the claimant's and the registered owner's emails masked for an AUDITOR. */
+/**
+ * A claim as the console reads it: the claimant's and the registered owner's emails masked for an AUDITOR, and the note
+ * of a buyer without an account withheld from an AUDITOR (the boutique sale's receipt, the only place staff write about
+ * such a buyer).
+ */
 export function claimSheetJson(s: ClaimSheet, inClear: boolean): ClaimSheet {
-  return { ...rowJson(s, inClear), registeredOwner: s.registeredOwner ? { ...s.registeredOwner, email: clientEmail(s.registeredOwner.email, inClear) } : null };
+  return {
+    ...rowJson(s, inClear),
+    registeredOwner: s.registeredOwner ? { ...s.registeredOwner, email: clientEmail(s.registeredOwner.email, inClear) } : null,
+    note: !inClear && s.account === null ? null : s.note,
+  };
 }
 
 export const adminWarrantyClaimRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {

@@ -109,7 +109,8 @@ for (const backend of BACKENDS) {
       modelId = (
         await db
           .insertInto('models')
-          .values({ category_id: category, name: 'ECLIPSE', type: 'RING', sku_prefix: 'ECL-RG', default_material: '925 STERLING SILVER', warranty_lifetime: true, base_price_minor: 45_000, base_currency: 'EUR' })
+          // No longer made: its pieces' claims may take the credit of their value (answer 4).
+          .values({ category_id: category, name: 'ECLIPSE', type: 'RING', sku_prefix: 'ECL-RG', default_material: '925 STERLING SILVER', warranty_lifetime: true, base_price_minor: 45_000, base_currency: 'EUR', active: false, discontinued_at: new Date('2026-06-01T10:00:00Z') })
           .returning('id')
           .executeTakeFirstOrThrow()
       ).id;

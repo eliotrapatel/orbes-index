@@ -65,6 +65,14 @@ export function outcomeChoice(o: WarrantyClaimOutcome, creditPercent: number): s
   }
 }
 
+/**
+ * The decision dialog's choices: the server's outcomes for now (`decision.outcomes`), in its order, never the credit of
+ * the piece's value while its model is still made (answer 4; the server refuses it too, 422 CLAIM_OUTCOME_NOT_ALLOWED).
+ */
+export function decisionChoices(s: Pick<ClaimSheet, 'decision' | 'modelDiscontinued'>): { value: WarrantyClaimOutcome; label: string }[] {
+  return s.decision.outcomes.filter((o) => o !== 'VALUE_CREDIT' || s.modelDiscontinued).map((o) => ({ value: o, label: outcomeChoice(o, s.decision.creditPercent) }));
+}
+
 /** An outcome once decided (the tables and the claim's page); the part credit with its rate when known. */
 export function outcomeText(o: WarrantyClaimOutcome | null, creditPercent: number | null = null): string {
   switch (o) {

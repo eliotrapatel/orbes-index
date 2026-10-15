@@ -364,11 +364,14 @@ export class WarrantyService {
     return row ? toRecord(row, product.product_id, utcDate(now ?? this.clock())) : null;
   }
 
-  /** Void the warranty (e.g. unauthorised modification). Works before activation too. */
-  async void(productId: string, reason: string | null | undefined, actor: Actor): Promise<WarrantyRecord> {
+  /**
+   * Void the warranty (e.g. unauthorised modification). Works before activation too. `trx`: the caller's transaction
+   * (a warranty claim that closes the piece's identity, services/warranty-claims.ts).
+   */
+  async void(productId: string, reason: string | null | undefined, actor: Actor, trx?: Db): Promise<WarrantyRecord> {
     const why = cleanReason(reason);
     const now = this.clock();
-    return inTransaction(this.db, async (tx) => {
+    return inTransaction(trx ?? this.db, async (tx) => {
       const product = await requireProduct(tx, productId, { forUpdate: true });
       const existing = await tx.selectFrom('warranties').selectAll().where('product_id', '=', product.id).executeTakeFirst();
       if (existing?.voided_at) throw new DomainError('WARRANTY_ALREADY_VOID', 409, 'The warranty of this product is already void.');

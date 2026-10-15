@@ -3,8 +3,9 @@
  * routes/admin/warranty-claims.ts, routes/admin/care.ts, routes/account.ts), as buildApp wires them:
  *
  *  - every console route: GET the Claims tab and a claim (AUDITOR, the clients' emails masked for an AUDITOR, in clear
- *    from OPERATOR); POST open, receive, decide, legal, ship and cancel (OPERATOR: Client Services take every step,
- *    answer 11); the roles themselves are probed in admin-roles.test.ts;
+ *    from OPERATOR; the note of a buyer without an account withheld from an AUDITOR); POST open, receive, decide, legal,
+ *    ship and cancel (OPERATOR: Client Services take every step, answer 11); the roles themselves are probed in
+ *    admin-roles.test.ts;
  *  - the label goes through PRIVATE CARE's upload path, POST /api/admin/care/:id/label, for both kinds of id: a care
  *    request's is the request's, a claim's is the claim's; the same PDF checks (415, 400) for both; an id of neither is
  *    404 as before;
@@ -176,6 +177,23 @@ describe('the warranty claims’ routes (plan ORBES CARE, step 1.7)', () => {
     expect((await operator.get('/api/admin/warranty-claims/5b0a7c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b')).statusCode).toBe(404);
   });
 
+  it('an AUDITOR reads no note on a claim of a buyer without an account (the boutique sale’s receipt); an OPERATOR reads it, and an AUDITOR reads the note of a claim with an account', async () => {
+    const c = await collector();
+    const receipt = 'Receipt 5512, boutique Paris, 1 March 2026.';
+    const opened = await operator.post('/api/admin/warranty-claims', { conversationId: null, productId: c.serial, basis: 'LEGAL', note: receipt });
+    expect(opened.statusCode, opened.body).toBe(201);
+    const claim = safeJson(opened) as ClaimJson;
+    expect(claim).toMatchObject({ basis: 'LEGAL', account: null, note: receipt });
+    const forAuditor = await auditor.get(`/api/admin/warranty-claims/${claim.id}`);
+    expect(forAuditor.statusCode).toBe(200);
+    expect((safeJson(forAuditor) as ClaimJson).note).toBeNull();
+    expect(forAuditor.body).not.toContain('Receipt 5512');
+    expect((safeJson(await operator.get(`/api/admin/warranty-claims/${claim.id}`)) as ClaimJson).note).toBe(receipt);
+    expect((await operator.post(`/api/admin/warranty-claims/${claim.id}/cancel`, { note: 'Opened to test.' })).statusCode).toBe(200);
+    const withAccount = safeJson(await operator.post('/api/admin/warranty-claims', { conversationId: c.conversationId, productId: c.serial, basis: 'WARRANTY', note: NOTE })) as ClaimJson;
+    expect((safeJson(await auditor.get(`/api/admin/warranty-claims/${withAccount.id}`)) as ClaimJson).note).toBe(NOTE);
+  });
+
   it('refuses a malformed opening: an unknown field, a basis of neither kind, no piece; the registered owner only', async () => {
     const c = await collector();
     const other = await collector();
@@ -206,9 +224,11 @@ describe('the warranty claims’ routes (plan ORBES CARE, step 1.7)', () => {
     const during = await page();
     expect(during.warrantyClaims.items).toEqual([{ id: claim.id, status: 'RECEIVED', basis: 'LIFETIME', outcome: null, openedAt: expect.any(String), decidedAt: null }]);
     expect(during.claimServiceIds).toEqual([received.serviceRecordId]);
-    // The free replacement used by a credit of its value: the row names the claim that used it.
+    // The free replacement used by a credit of its value (its model no longer made, answer 4): the row names the claim that used it.
+    await h.t.db.updateTable('models').set({ active: false, discontinued_at: h.clock.now() }).where('id', '=', catalog.modelId).execute();
     const value = (safeJson(await operator.get(`/api/admin/warranty-claims/${claim.id}`)) as { decision: { value: unknown } }).decision.value;
     const decided = await operator.post(`/api/admin/warranty-claims/${claim.id}/decide`, { outcome: 'VALUE_CREDIT', ...(value ? {} : { valueMinor: 45_000 }) });
+    await h.t.db.updateTable('models').set({ active: true, discontinued_at: null }).where('id', '=', catalog.modelId).execute();
     expect(decided.statusCode, decided.body).toBe(200);
     const after = await page();
     expect(after.warrantyClaims.freeReplacement).toEqual({ available: false, claimId: claim.id, decidedAt: expect.any(String) });

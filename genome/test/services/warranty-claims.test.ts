@@ -64,8 +64,13 @@ describe('warranty claims (plan ORBES CARE, step 1.6)', () => {
   let category: number;
   let location: string;
   let serial = 70_000;
-  /** A lifetime model and a 2-year model, each with sizes 52 and 54; a model with no base price. */
-  const models = { life: '', two: '', unpriced: '' };
+  /**
+   * A lifetime model and a 2-year model, each with sizes 52 and 54, still made; a lifetime model no longer made (the
+   * credit of its value, answer 4); a lifetime model no longer made with no base price.
+   */
+  const models = { life: '', two: '', gone: '', unpriced: '' };
+  /** Other 2-year models a test creates (`piece` gives their pieces a 2-year warranty). */
+  const twoYearModels = new Set<string>();
   const skus: Record<string, { s52: string; s54: string }> = {};
 
   const svc = () => h.ctx.services.warrantyClaims;
@@ -79,7 +84,7 @@ describe('warranty claims (plan ORBES CARE, step 1.6)', () => {
     operator = { type: 'admin', id: (await createAdmin(h.ctx, 'OPERATOR')).id };
     carrierId = (await db().selectFrom('carriers').select('id').where('active', '=', true).orderBy('name').executeTakeFirstOrThrow()).id;
     location = (await db().selectFrom('stock_locations').select('id').executeTakeFirstOrThrow()).id;
-    const model = async (name: string, lifetime: boolean, price: number | null) => {
+    const model = async (name: string, lifetime: boolean, price: number | null, discontinued = false) => {
       const m = await db()
         .insertInto('models')
         .values({
@@ -92,6 +97,7 @@ describe('warranty claims (plan ORBES CARE, step 1.6)', () => {
           warranty_lifetime: lifetime,
           base_price_minor: price,
           base_currency: price === null ? null : 'EUR',
+          ...(discontinued ? { active: false, discontinued_at: new Date('2026-06-01T10:00:00Z') } : {}),
         })
         .returning('id')
         .executeTakeFirstOrThrow();
@@ -100,7 +106,8 @@ describe('warranty claims (plan ORBES CARE, step 1.6)', () => {
     };
     models.life = await model('ECLIPSE', true, 45_000);
     models.two = await model('SATCHEL', false, 30_000);
-    models.unpriced = await model('HALO', true, null);
+    models.gone = await model('SOLSTICE', true, 45_000, true);
+    models.unpriced = await model('HALO', true, null, true);
     void catalog;
   });
   afterAll(() => h?.close());
@@ -118,7 +125,7 @@ describe('warranty claims (plan ORBES CARE, step 1.6)', () => {
    */
   async function piece(modelId: string, o: { owner?: string | null; status?: ProductStatus; start?: string | null; size?: 52 | 54 | null; voided?: boolean } = {}) {
     serial += 1;
-    const lifetime = modelId !== models.two;
+    const lifetime = modelId !== models.two && !twoYearModels.has(modelId);
     const p = await db()
       .insertInto('products')
       .values({
@@ -158,12 +165,12 @@ describe('warranty claims (plan ORBES CARE, step 1.6)', () => {
     return { id: p.id, serial: p.product_id };
   }
 
-  /** The piece sold to `accountId` through an ORBES order (SALON), DELIVERED on `delivered` at `price` in `currency`. */
-  async function sell(accountId: string, productId: string, modelId: string, o: { price?: number; currency?: HouseCurrency; delivered?: string } = {}) {
+  /** The piece sold to `accountId` through an ORBES order (SALON), DELIVERED on `delivered` at `price` in `currency`; the order's id. */
+  async function sell(accountId: string, productId: string, modelId: string, o: { price?: number; currency?: HouseCurrency; delivered?: string } = {}): Promise<string> {
     const delivered = new Date(`${o.delivered ?? '2026-03-01'}T12:00:00Z`);
     const request = await db().insertInto('shop_requests').values({ account_id: accountId, model_id: modelId, status: 'CLOSED', created_at: delivered, handled_at: delivered, outcome: 'ACCEPTED' }).returning('id').executeTakeFirstOrThrow();
     const at = (h: number) => new Date(delivered.getTime() - h * 3_600_000);
-    await db()
+    return db()
       .insertInto('orders')
       .values({
         channel: 'SALON',
@@ -182,7 +189,9 @@ describe('warranty claims (plan ORBES CARE, step 1.6)', () => {
         location_id: location,
         product_id: productId,
       })
-      .execute();
+      .returning('id')
+      .executeTakeFirstOrThrow()
+      .then((r) => r.id);
   }
 
   const open = (c: { conversationId: string | null }, p: { serial: string }, basis: 'WARRANTY' | 'LEGAL' = 'WARRANTY', note: string | null = NOTE) =>
@@ -211,7 +220,8 @@ describe('warranty claims (plan ORBES CARE, step 1.6)', () => {
     const two = await piece(models.two, { owner: c.id });
     const a = await open(c, life);
     expect(a).toMatchObject({ basis: 'LIFETIME', status: 'OPEN', account: { id: c.id }, registeredOwner: { id: c.id }, conversation: { conversationId: c.conversationId }, freeReplacement: { available: true }, note: NOTE });
-    expect(a.decision.outcomes).toEqual(['REPLACEMENT', 'VALUE_CREDIT', 'REFUSED']);
+    // Its model still made: no credit of its value (answer 4).
+    expect(a.decision.outcomes).toEqual(['REPLACEMENT', 'REFUSED']);
     const b = await open(c, two);
     expect(b).toMatchObject({ basis: 'TWO_YEARS', freeReplacement: null });
     expect(b.decision).toMatchObject({ outcomes: ['REPLACEMENT', 'REPAIR', 'REFUSED'], refusalReasons: ['LOST', 'THEFT_REPORTED', 'NO_FAULT_FOUND', 'WARRANTY_ENDED', 'WARRANTY_VOID'] });
@@ -340,6 +350,98 @@ describe('warranty claims (plan ORBES CARE, step 1.6)', () => {
     expect(await open(c, q)).toMatchObject({ status: 'OPEN', account: { id: c.id } });
   });
 
+  it('a return of the piece’s order and a claim never run at once: the return refused while a claim is live, a claim refused while a return or an exchange is not ended', async () => {
+    const c = await collector();
+    const p = await piece(models.life, { owner: c.id });
+    const orderId = await sell(c.id, p.id, models.life);
+    const sku = (await db().selectFrom('products').select('sku_id').where('id', '=', p.id).executeTakeFirstOrThrow()).sku_id;
+    await db().updateTable('orders').set({ sku_id: sku }).where('id', '=', orderId).execute();
+    const giveBack = () => h.ctx.services.orders.returnOrder(orderId, { outcome: 'ARCHIVED', note: 'Returned by the client.' }, operator);
+    const live = { code: 'CLAIM_OPEN', status: 409, message: 'A warranty claim is under way for this piece: finish or close it first.' };
+    // A claim first: the return is refused at each live step (OPEN, then RECEIVED, the piece IN SERVICE), nothing changed.
+    const s = await open(c, p);
+    expect(await refusal(giveBack())).toEqual(live);
+    await label(s.id);
+    await receive(s.id);
+    expect(await refusal(giveBack())).toEqual(live);
+    expect((await db().selectFrom('orders').select('status').where('id', '=', orderId).executeTakeFirstOrThrow()).status).toBe('DELIVERED');
+    expect(await status(p.id)).toBe('SERVICED');
+    expect((await db().selectFrom('ownership').select('account_id').where('product_id', '=', p.id).where('ended_at', 'is', null).executeTakeFirstOrThrow()).account_id).toBe(c.id);
+    await decide(s.id, { outcome: 'REFUSED', refusalReason: 'SCRATCHED' });
+    expect(await refusal(giveBack())).toEqual(live);
+    await ship(s.id);
+    // A return or an exchange of its order first (not ended): the claim is refused, under either basis.
+    for (const kind of ['RETURN', 'EXCHANGE'] as const) {
+      const k = await db()
+        .insertInto('order_cases')
+        .values({
+          order_id: orderId,
+          kind,
+          opened_by_type: 'account',
+          opened_by_id: c.id,
+          opened_at: h.clock.now(),
+          reason: kind === 'EXCHANGE' ? 'SIZE' : 'NOT_AS_EXPECTED',
+          ...(kind === 'EXCHANGE' ? { exchange_sku_id: skus[models.life]!.s54, exchange_size_label: '54' } : {}),
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      for (const basis of ['WARRANTY', 'LEGAL'] as const) {
+        const e = await open(c, p, basis).then(
+          () => null,
+          (x: unknown) => x as DomainError,
+        );
+        expect(e, `${kind} ${basis}`).toBeInstanceOf(DomainError);
+        expect({ code: e!.code, status: e!.httpStatus, message: e!.publicMessage, detail: e!.internal?.detail }).toEqual({
+          code: 'CLAIM_NOT_ALLOWED',
+          status: 409,
+          message: 'A return of this piece’s order is under way: it can be claimed once the return is decided or cancelled.',
+          detail: 'return pending',
+        });
+      }
+      await db().updateTable('order_cases').set({ status: 'RECEIVED', received_at: h.clock.now(), piece_state: 'OK' }).where('id', '=', k.id).execute();
+      expect((await refusal(open(c, p))).code, `${kind} received`).toBe('CLAIM_NOT_ALLOWED');
+      await db().updateTable('order_cases').set({ status: 'CANCELLED', cancelled_at: h.clock.now(), cancelled_by: operator.id!, cancel_note: 'Opened to test.' }).where('id', '=', k.id).execute();
+    }
+    expect(await db().selectFrom('warranty_claims').select('id').where('product_id', '=', p.id).where('status', '!=', 'DONE').execute()).toEqual([]);
+    // Both ended: the claim opens again.
+    expect(await open(c, p)).toMatchObject({ status: 'OPEN', account: { id: c.id } });
+  });
+
+  it('a 2-year claim keeps its basis when its model is switched to Lifetime after opening: an expired warranty is still only refused', async () => {
+    const admin = { type: 'admin' as const, id: (await createAdmin(h.ctx, 'ADMIN')).id };
+    const m = await db()
+      .insertInto('models')
+      .values({ category_id: category, collection_id: null, name: 'SADDLE', type: 'RING', sku_prefix: `SAD-${randomUUID().slice(0, 6).toUpperCase()}`, default_material: '925 STERLING SILVER', warranty_lifetime: false, base_price_minor: 30_000, base_currency: 'EUR' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    skus[m.id] = { s52: await ensureSku(db(), m.id, '52'), s54: await ensureSku(db(), m.id, '54') };
+    twoYearModels.add(m.id);
+    const c = await collector();
+    const old = await piece(m.id, { owner: c.id, start: '2024-01-10' });
+    const s = await received(c, old);
+    expect(s).toMatchObject({ basis: 'TWO_YEARS', warranty: { status: 'EXPIRED' } });
+    await h.ctx.services.catalog.setWarranty(m.id, true, admin);
+    // The row now lifetime, no end date: the claim still reads the warranty it was opened on.
+    expect(await db().selectFrom('warranties').select(['lifetime', 'end_date']).where('product_id', '=', old.id).executeTakeFirstOrThrow()).toEqual({ lifetime: true, end_date: null });
+    for (const outcome of ['REPAIR', 'REPLACEMENT'] as const) {
+      const replacement = outcome === 'REPLACEMENT' ? (await piece(m.id)).serial : null;
+      expect(await refusal(decide(s.id, { outcome, replacementProductId: replacement })), outcome).toEqual({
+        code: 'CLAIM_OUTCOME_NOT_ALLOWED',
+        status: 422,
+        message: 'The warranty of this piece was not active when the claim was opened: only a refusal is possible.',
+      });
+    }
+    expect(await decide(s.id, { outcome: 'REFUSED', refusalReason: 'WARRANTY_ENDED' })).toMatchObject({ status: 'DECIDED', basis: 'TWO_YEARS', refusalReason: 'WARRANTY_ENDED' });
+    // A 2-year claim opened within its 2 years on that model is still remedied after the switch.
+    const fresh = await db().insertInto('models').values({ category_id: category, collection_id: null, name: 'BRIDLE', type: 'RING', sku_prefix: `BRI-${randomUUID().slice(0, 6).toUpperCase()}`, default_material: '925 STERLING SILVER', warranty_lifetime: false }).returning('id').executeTakeFirstOrThrow();
+    skus[fresh.id] = { s52: await ensureSku(db(), fresh.id, '52'), s54: await ensureSku(db(), fresh.id, '54') };
+    twoYearModels.add(fresh.id);
+    const young = await piece(fresh.id, { owner: c.id });
+    const t = await received(c, young);
+    await h.ctx.services.catalog.setWarranty(fresh.id, true, admin);
+    expect(await decide(t.id, { outcome: 'REPAIR' })).toMatchObject({ status: 'DECIDED', basis: 'TWO_YEARS', outcome: 'REPAIR' });
+  });
+
   it('the lifetime warranty: a replacement of the same SKU, checked; the old piece REVOKED REPLACED; the new warranty started by ship', async () => {
     const c = await collector();
     const p = await piece(models.life, { owner: c.id });
@@ -372,6 +474,11 @@ describe('warranty claims (plan ORBES CARE, step 1.6)', () => {
     const revocation = await db().selectFrom('revocations').select(['reason_code', 'reason']).where('target_id', '=', p.serial).executeTakeFirstOrThrow();
     expect(revocation).toEqual({ reason_code: 'REPLACED', reason: `Replaced under warranty by ${other54.serial}` });
     expect((await record(s.serviceRecordId!)).status).toBe('COMPLETED');
+    // Its identity closed, its warranty too: VOID, the revocation's reason, audited (MY PIECES no longer reads it covered).
+    expect(await h.ctx.services.warranty.status(p.serial)).toBe('VOID');
+    expect((await db().selectFrom('warranties').select('void_reason').where('product_id', '=', p.id).executeTakeFirstOrThrow()).void_reason).toBe(`Replaced under warranty by ${other54.serial}`);
+    const voidAudit = await db().selectFrom('audit_logs').select(['actor_type', 'details']).where('action', '=', 'warranty.void').where('target_id', '=', p.serial).executeTakeFirstOrThrow();
+    expect(voidAudit).toEqual({ actor_type: 'admin', details: { reason: `Replaced under warranty by ${other54.serial}` } });
     const audit = await db().selectFrom('audit_logs').select('details').where('action', '=', 'warranty.claim.decide').where('target_id', '=', s.id).executeTakeFirstOrThrow();
     expect(audit.details).toMatchObject({ claimId: s.id, productId: p.serial, basis: 'LIFETIME', outcome: 'REPLACEMENT', replacement: other54.serial, otherSize: true });
     // Shipped: the new piece's warranty starts today, lifetime (its model's), no service record on it.
@@ -478,6 +585,11 @@ describe('warranty claims (plan ORBES CARE, step 1.6)', () => {
     expect(await status(kept.id)).not.toBe('ACTIVATED');
     const revocation = await db().selectFrom('revocations').select(['reason_code', 'reason']).where('target_id', '=', p.serial).executeTakeFirstOrThrow();
     expect(revocation).toEqual({ reason_code: 'REPLACED', reason: `Replaced under warranty by ${fresh.serial}` });
+    // Its warranty, voided at the decision, names the new identity too.
+    expect(await db().selectFrom('warranties').select(['voided_at', 'void_reason']).where('product_id', '=', p.id).executeTakeFirstOrThrow()).toEqual({
+      voided_at: expect.any(Date),
+      void_reason: `Replaced under warranty by ${fresh.serial}`,
+    });
     const audit = await db().selectFrom('audit_logs').select('details').where('action', '=', 'warranty.claim.ship').where('target_id', '=', s.id).executeTakeFirstOrThrow();
     expect(audit.details).toMatchObject({ outcome: 'REPLACEMENT', replacement: fresh.serial, replacedReplacement: kept.serial });
     // The identity decided, given again at shipment, is accepted as it is (it is this claim's own).
@@ -491,8 +603,10 @@ describe('warranty claims (plan ORBES CARE, step 1.6)', () => {
 
   it('the lifetime warranty: a credit of the piece’s value (DONE at once, the piece kept), never REPAIR nor WARRANTY_ENDED; a value entered only when none is found', async () => {
     const c = await collector();
-    const p = await piece(models.life, { owner: c.id });
+    const p = await piece(models.gone, { owner: c.id });
     const s = await received(c, p);
+    expect(s).toMatchObject({ modelDiscontinued: true, freeReplacement: { available: true } });
+    expect(s.decision.outcomes).toEqual(['REPLACEMENT', 'VALUE_CREDIT', 'REFUSED']);
     expect((await refusal(decide(s.id, { outcome: 'PART_CREDIT' }))).code).toBe('CLAIM_OUTCOME_NOT_ALLOWED');
     for (const outcome of ['REPAIR', 'PRICE_REDUCTION', 'REFUND'] as const) {
       expect(await refusal(decide(s.id, { outcome, valueMinor: outcome === 'REPAIR' ? null : 100 })), outcome).toMatchObject({ code: 'CLAIM_OUTCOME_NOT_ALLOWED', status: 422 });
@@ -505,12 +619,34 @@ describe('warranty claims (plan ORBES CARE, step 1.6)', () => {
     expect(await status(p.id)).toBe('REVOKED');
     expect((await db().selectFrom('revocations').select('reason_code').where('target_id', '=', p.serial).executeTakeFirstOrThrow()).reason_code).toBe('REPLACED');
     expect((await record(s.serviceRecordId!)).status).toBe('COMPLETED');
+    expect(await db().selectFrom('warranties').select(['voided_at', 'void_reason']).where('product_id', '=', p.id).executeTakeFirstOrThrow()).toEqual({
+      voided_at: expect.any(Date),
+      void_reason: 'Replaced under warranty by a credit of its value',
+    });
     // No value found (no order, no base price): entered, in THE PROGRAM's credit currency.
     const q = await piece(models.unpriced, { owner: c.id });
     const t = await received(c, q);
     expect(await refusal(decide(t.id, { outcome: 'VALUE_CREDIT' }))).toMatchObject({ code: 'VALIDATION_FAILED', message: 'Enter the value of this piece.' });
     expect(t.decision.value).toBeNull();
     expect(await decide(t.id, { outcome: 'VALUE_CREDIT', valueMinor: 38_000 })).toMatchObject({ value: { amountMinor: 38_000, currency: 'EUR' }, grant: { amountMinor: 38_000, currency: 'EUR' } });
+  });
+
+  it('the credit of the piece’s value only when its model is no longer made (answer 4): refused while it is made, the free replacement kept', async () => {
+    const c = await collector();
+    const p = await piece(models.life, { owner: c.id });
+    const s = await received(c, p);
+    expect(s).toMatchObject({ modelDiscontinued: false, freeReplacement: { available: true } });
+    expect(s.decision.outcomes).toEqual(['REPLACEMENT', 'REFUSED']);
+    expect(await refusal(decide(s.id, { outcome: 'VALUE_CREDIT' }))).toEqual({ code: 'CLAIM_OUTCOME_NOT_ALLOWED', status: 422, message: 'This model is still made: replace the piece with the same piece, new.' });
+    // Nothing changed: the claim at RECEIVED, the piece IN SERVICE, no grant, the free replacement still available.
+    const after = await svc().sheet(s.id);
+    expect(after).toMatchObject({ status: 'RECEIVED', outcome: null, grant: null, freeReplacement: { available: true } });
+    expect(await status(p.id)).toBe('SERVICED');
+    expect(await db().selectFrom('tier_grants').select('id').where('account_id', '=', c.id).execute()).toEqual([]);
+    expect(decisionOutcomes('LIFETIME', true, false)).toEqual(['REPLACEMENT', 'REFUSED']);
+    expect(decisionOutcomes('LIFETIME', true, true)).toEqual(['REPLACEMENT', 'VALUE_CREDIT', 'REFUSED']);
+    expect(decisionOutcomes('LIFETIME', false, false)).toEqual(['PART_CREDIT', 'REFUSED']);
+    expect(decisionOutcomes('LIFETIME', false, true)).toEqual(['PART_CREDIT', 'REFUSED']);
   });
 
   it('the 2-year warranty: REPAIR, REPLACEMENT or REFUSED only, its five reasons, no free-replacement counter, an EXPIRED warranty refused WARRANTY_ENDED', async () => {
@@ -572,17 +708,19 @@ describe('warranty claims (plan ORBES CARE, step 1.6)', () => {
     expect(r).toMatchObject({ status: 'DONE', outcome: 'REFUND', value: { amountMinor: 30_000, currency: 'EUR' }, grant: null });
     expect(await status(p.id)).toBe('REVOKED');
     expect((await db().selectFrom('revocations').select('reason_code').where('target_id', '=', p.serial).executeTakeFirstOrThrow()).reason_code).toBe('REFUNDED');
-    // A legal replacement never uses the lifetime warranty's free replacement.
-    const life = await piece(models.life, { owner: c.id, start: '2026-05-01' });
-    await sell(c.id, life.id, models.life, { delivered: '2026-05-01' });
+    expect(r.warranty.status).toBe('VOID');
+    expect((await db().selectFrom('warranties').select('void_reason').where('product_id', '=', p.id).executeTakeFirstOrThrow()).void_reason).toBe('Refunded under the legal guarantee');
+    // A legal replacement never uses the lifetime warranty's free replacement (a model no longer made: its credit of value).
+    const life = await piece(models.gone, { owner: c.id, start: '2026-05-01' });
+    await sell(c.id, life.id, models.gone, { delivered: '2026-05-01' });
     const l = await received(c, life, 'LEGAL');
-    const n = await piece(models.life);
+    const n = await piece(models.gone);
     await decide(l.id, { outcome: 'REPLACEMENT', replacementProductId: n.serial });
     await ship(l.id);
     await register(n.id, c.id);
     const after = await received(c, n);
     expect(after).toMatchObject({ basis: 'LIFETIME', rootProductId: life.serial, freeReplacement: { available: true } });
-    expect(after.decision.outcomes).toEqual(decisionOutcomes('LIFETIME', true));
+    expect(after.decision.outcomes).toEqual(decisionOutcomes('LIFETIME', true, true));
     expect(await decide(after.id, { outcome: 'VALUE_CREDIT' })).toMatchObject({ status: 'DONE', outcome: 'VALUE_CREDIT' });
   });
 
@@ -632,7 +770,7 @@ describe('warranty claims (plan ORBES CARE, step 1.6)', () => {
   it('forCollector and the export carry no note nor who handled the claim; the audit never holds the note; the label is the account’s own, erased 30 days after', async () => {
     const c = await collector();
     const other = await collector();
-    const p = await piece(models.life, { owner: c.id });
+    const p = await piece(models.gone, { owner: c.id });
     const s = await received(c, p);
     const view = await svc().forCollector(c.id, p.serial);
     expect(view).toMatchObject({ id: s.id, status: 'RECEIVED', basis: 'LIFETIME', label: { pdf: true }, outcome: null, credit: null, value: null });
@@ -676,7 +814,7 @@ describe('warranty claims (plan ORBES CARE, step 1.6)', () => {
     expect(firstEnded === -1 || lastLive < firstEnded).toBe(true);
     expect((await svc().list({ status: 'OPEN' }, { page: 1, pageSize: 200 })).items.every((r) => r.status === 'OPEN')).toBe(true);
     // Two decisions at once on one claim: the second reads its step taken (see warranty-claims-concurrency.test.ts).
-    const q = await piece(models.life, { owner: c.id });
+    const q = await piece(models.gone, { owner: c.id });
     const r = await received(c, q);
     const [a, b] = await Promise.allSettled([decide(r.id, { outcome: 'VALUE_CREDIT' }), decide(r.id, { outcome: 'VALUE_CREDIT' })]);
     expect([a.status, b.status].sort()).toEqual(['fulfilled', 'rejected']);

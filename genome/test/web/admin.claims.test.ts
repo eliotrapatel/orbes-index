@@ -22,6 +22,7 @@ import {
   claimStatusFilter,
   claimValueText,
   decisionBasisLine,
+  decisionChoices,
   decisionNote,
   decisionText,
   discontinuedText,
@@ -100,6 +101,21 @@ describe('the warranty claims in the console (plan ORBES CARE, step 3.2)', () =>
     expect(refusalText('TWO_YEARS', 'NO_FAULT_FOUND')).toBe('No manufacturing defect');
     // Never "stolen" (the BRAND lexicon), even for staff.
     for (const b of serverSchema.WARRANTY_CLAIM_BASES) for (const r of serverSchema.WARRANTY_CLAIM_REFUSALS) expect(refusalText(b, r)).not.toMatch(/stolen|atelier/i);
+  });
+
+  it('the decision dialog offers the server’s outcomes, never the credit of the piece’s value for a model still made (answer 4)', () => {
+    const gone = { ...sheet(), modelDiscontinued: true };
+    expect(decisionChoices(gone)).toEqual([
+      { value: 'REPLACEMENT', label: 'Replace with the same piece, new' },
+      { value: 'VALUE_CREDIT', label: 'Credit of its value (model no longer made)' },
+      { value: 'REFUSED', label: 'Refuse' },
+    ]);
+    const made = { ...sheet(), modelDiscontinued: false };
+    expect(decisionChoices(made).map((c) => c.value)).toEqual(['REPLACEMENT', 'REFUSED']);
+    expect(decisionChoices({ ...made, decision: { ...made.decision, outcomes: ['PART_CREDIT', 'REFUSED'] } })).toEqual([
+      { value: 'PART_CREDIT', label: '30 % credit' },
+      { value: 'REFUSED', label: 'Refuse' },
+    ]);
   });
 
   it('offers an OPERATOR each step in turn (answer 11), MOVE TO THE LEGAL GUARANTEE on a received 2-year claim within it; an AUDITOR nothing', () => {

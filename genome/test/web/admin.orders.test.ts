@@ -368,7 +368,7 @@ describe('an order\'s welcome gift and credit (plan NEXT-NINE, BP-19 T5)', () =>
     expect(creditActions(applied, 'OPERATOR')).toEqual({ apply: false, remove: true });
     // The one sentence changed in the console: the old one would be untrue.
     expect(APPLY_CREDIT_TEXT).toBe(
-      'A credit taken off this order’s invoice, in its currency: the birthday credit first, then the tiers’. It is given back if the order is cancelled or returned, with its expiry unchanged.',
+      'A credit taken off this order’s invoice, in its currency: the birthday credit first, then the warranty credit, then the tiers’. It is given back if the order is cancelled or returned, with its expiry unchanged.',
     );
   });
 

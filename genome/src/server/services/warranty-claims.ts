@@ -17,7 +17,10 @@
  *                SERVICED (another service open) and RESERVED are refused (409 CLAIM_NOT_ALLOWED); a LOST or STOLEN
  *                piece only to be refused from OPEN (`label` refuses it). One live claim per piece (409 CLAIM_OPEN), none
  *                while its PRIVATE CARE is under way (409 CARE_OPEN) nor while a transfer offer of it is pending
- *                (409 CLAIM_NOT_ALLOWED, detail `transfer pending`, as PRIVATE CARE is UNAVAILABLE then). `root_product_id`: the original piece (the root of
+ *                (409 CLAIM_NOT_ALLOWED, detail `transfer pending`, as PRIVATE CARE is UNAVAILABLE then) nor while an
+ *                order of it has a return or an exchange not ended (409 CLAIM_NOT_ALLOWED, detail `return pending`: the
+ *                return would take the piece from its claimant; services/orders.ts refuses a return while a claim is
+ *                live, 409 CLAIM_OPEN). `root_product_id`: the original piece (the root of
  *                the claim whose replacement this piece is, else the piece). Audited `warranty.claim.open` (never the
  *                note, never an email).
  *   label        OPEN → LABEL_SENT: the prepaid label's PDF (2 MiB, as PRIVATE CARE's), its carrier and tracking; the
@@ -41,13 +44,16 @@
  *                                  another size of the same model with `otherSize`), never sold, registered, bound to
  *                                  an order nor with a warranty started or voided; the old piece REVOKED `REPLACED` and
  *                                  its record completed → DECIDED (the new piece ships).
- *                  VALUE_CREDIT    a WARRANTY grant of the piece's value; the old piece REVOKED `REPLACED` → DONE.
+ *                  VALUE_CREDIT    a WARRANTY grant of the piece's value, its model no longer made (answer 4: 422
+ *                                  CLAIM_OUTCOME_NOT_ALLOWED while it is made); the old piece REVOKED `REPLACED` → DONE.
  *                  PART_CREDIT     a WARRANTY grant of THE PROGRAM's percent of the value → DECIDED (the piece goes back).
  *                  REPAIR          → DECIDED (the piece goes back repaired).
  *                  PRICE_REDUCTION the amount (at most the price paid) → DECIDED; paid back by the seller.
  *                  REFUND          the price paid; the old piece REVOKED `REFUNDED` → DONE; paid back by the seller (an
  *                                  ORBES order: its RETURN case, decided to the archive, draws the credit note).
  *                  REFUSED         a reason of the basis's list → DECIDED (the piece goes back), or DONE from OPEN.
+ *                A piece REVOKED by its claim has its warranty voided in the same transaction (WarrantyService.void, the
+ *                revocation's reason, audited `warranty.void`): its identity closed, MY PIECES no longer reads it covered.
  *                The piece's value (D11): the price ORBES sold it at (its order's, else its original's), else its
  *                model's base price, in that currency; entered by the staff member deciding only when none is found, in
  *                THE PROGRAM's credit currency. A credit is valid 12 months (WARRANTY_CREDIT_VALIDITY_MONTHS). Audited
@@ -133,6 +139,8 @@ export const claimFreeUsed = () => conflict('CLAIM_FREE_USED', 'The free replace
 const claimNotAllowed = (status: string) => conflict('CLAIM_NOT_ALLOWED', 'The status of this piece does not allow a warranty claim.', `status ${status}`);
 const transferPending = () =>
   conflict('CLAIM_NOT_ALLOWED', 'A transfer of this piece is pending: it can be claimed once the transfer is accepted, cancelled or expired.', 'transfer pending');
+const returnPending = () =>
+  conflict('CLAIM_NOT_ALLOWED', 'A return of this piece’s order is under way: it can be claimed once the return is decided or cancelled.', 'return pending');
 const claimNotLegal = (detail: string) => conflict('CLAIM_NOT_LEGAL', 'The legal guarantee does not apply to this claim.', detail);
 const outcomeNotAllowed = (message: string) => new DomainError('CLAIM_OUTCOME_NOT_ALLOWED', 422, message);
 const replacementNotAllowed = (message: string, detail?: string) => conflict('CLAIM_REPLACEMENT_NOT_ALLOWED', message, detail);
@@ -293,10 +301,14 @@ export function claimRules(basis: WarrantyClaimBasis): { outcomes: readonly Warr
   return { outcomes: WARRANTY_CLAIM_OUTCOMES_BY_BASIS[basis], refusalReasons: WARRANTY_CLAIM_REFUSALS_BY_BASIS[basis] };
 }
 
-/** The outcomes of a decision now: the basis's, under the lifetime warranty the free replacement or, once used, the part credit. */
-export function decisionOutcomes(basis: WarrantyClaimBasis, freeAvailable: boolean): WarrantyClaimOutcome[] {
+/**
+ * The outcomes of a decision now: the basis's, under the lifetime warranty the free replacement or, once used, the part
+ * credit; the credit of the piece's value only when its model is no longer made (answer 4).
+ */
+export function decisionOutcomes(basis: WarrantyClaimBasis, freeAvailable: boolean, modelDiscontinued: boolean): WarrantyClaimOutcome[] {
   return WARRANTY_CLAIM_OUTCOMES_BY_BASIS[basis].filter((o) => {
     if (basis !== 'LIFETIME') return true;
+    if (o === 'VALUE_CREDIT') return freeAvailable && modelDiscontinued;
     if (FREE.includes(o)) return freeAvailable;
     if (o === 'PART_CREDIT') return !freeAvailable;
     return true;
@@ -525,12 +537,18 @@ async function warrantyKind(db: Db, product: Pick<ProductRow, 'id' | 'model_id'>
   return m.warranty_lifetime;
 }
 
-/** The ORBES warranty's status on the day the claim was opened, read as the claim's basis (a lifetime claim never ends). */
+/**
+ * The ORBES warranty's status on the day the claim was opened, read as the claim's basis (a lifetime claim never ends). A
+ * 2-year claim whose model was switched to Lifetime since has lost its row's end date (`warranties_kind`): it is rebuilt
+ * from the start and the months, as a switch back to 2 years gives it (D17), so the claim keeps its fixed basis.
+ */
 async function statusAtOpening(db: Db, claim: Pick<WarrantyClaimRow, 'product_id' | 'basis' | 'opened_at'>): Promise<WarrantyStatus> {
   const w = await db.selectFrom('warranties').selectAll().where('product_id', '=', claim.product_id).executeTakeFirst();
   if (!w) return 'NOT_STARTED';
   const voidedBefore = w.voided_at !== null && w.voided_at.getTime() <= claim.opened_at.getTime();
-  return computeWarrantyStatus({ ...w, voided_at: voidedBefore ? w.voided_at : null, lifetime: claim.basis === 'LIFETIME' }, utcDate(claim.opened_at));
+  const lifetime = claim.basis === 'LIFETIME';
+  const endDate = !lifetime && w.start_date !== null && w.end_date === null ? addMonthsClamped(w.start_date, w.duration_months) : w.end_date;
+  return computeWarrantyStatus({ ...w, voided_at: voidedBefore ? w.voided_at : null, lifetime, end_date: endDate }, utcDate(claim.opened_at));
 }
 
 /** The claim that used the free replacement of a root under the lifetime warranty, if any. */
@@ -753,7 +771,7 @@ export class WarrantyClaimService {
       freeReplacement: r.basis !== 'LIFETIME' ? null : used === undefined ? { available: true } : { available: false, claimId: used.id, decidedAt: used.decided_at },
       legalUntil: await legalUntil(db, r.product_id),
       decision: {
-        outcomes: decisionOutcomes(r.basis, freeAvailable),
+        outcomes: decisionOutcomes(r.basis, freeAvailable, r.discontinued_at !== null),
         refusalReasons: [...WARRANTY_CLAIM_REFUSALS_BY_BASIS[r.basis]],
         value: await pieceValue(db, { id: r.product_id, model_id: r.model_id }, r.root_product_id),
         paid: await pricePaid(db, r.product_id, r.root_product_id),
@@ -790,6 +808,16 @@ export class WarrantyClaimService {
       // the claim carries on for the one who offered it (answer 3; §2(c): the return never goes to a former owner).
       const offer = await tx.selectFrom('ownership_transfers').select('id').where('product_id', '=', product.id).where('status', '=', 'PENDING').where('expires_at', '>', now).executeTakeFirst();
       if (offer) throw transferPending();
+      // A return or an exchange of the piece's order not ended: its decision would take the piece back from the claimant.
+      const back = await tx
+        .selectFrom('order_cases as k')
+        .innerJoin('orders as o', 'o.id', 'k.order_id')
+        .select('k.id')
+        .where('o.product_id', '=', product.id)
+        .where('k.kind', 'in', ['RETURN', 'EXCHANGE'])
+        .where('k.status', 'in', ['OPEN', 'RECEIVED'])
+        .executeTakeFirst();
+      if (back) throw returnPending();
       const replaced = await tx.selectFrom('warranty_claims').select('root_product_id').where('replacement_product_id', '=', product.id).executeTakeFirst();
       const root = replaced?.root_product_id ?? product.id;
       let basis: WarrantyClaimBasis;
@@ -940,6 +968,11 @@ export class WarrantyClaimService {
         if (outcome === 'PART_CREDIT' && !used) throw outcomeNotAllowed('The free replacement of this piece is still available: replace it, or give the credit of its value.');
       }
       const product = await this.piece(tx, c.product_id);
+      // A credit of the piece's value only when its model is no longer made (answer 4), read under the piece's lock.
+      if (outcome === 'VALUE_CREDIT') {
+        const m = await tx.selectFrom('models').select('discontinued_at').where('id', '=', product.model_id).forShare().executeTakeFirstOrThrow();
+        if (m.discontinued_at === null) throw outcomeNotAllowed('This model is still made: replace the piece with the same piece, new.');
+      }
       const program = await readProgram(tx);
       const decidedAt = notBefore(now, c.received_at ?? c.opened_at);
       const details: Record<string, unknown> = { basis: c.basis, outcome, ...(reason ? { refusalReason: reason } : {}) };
@@ -1016,6 +1049,9 @@ export class WarrantyClaimService {
         const why = outcome === 'REPLACEMENT' ? `Replaced under warranty by ${details.replacement as string}` : outcome === 'REFUND' ? 'Refunded under the legal guarantee' : 'Replaced under warranty by a credit of its value';
         await this.lifecycle.transition(product.id, 'REVOKED', { reason: why, revocationReasonCode: code }, actor, tx);
         await this.closeRecord(tx, c.service_record_id, actor);
+        // Its identity closed, its warranty too (terms art. 11): MY PIECES no longer reads it as covered.
+        const w = await tx.selectFrom('warranties').select('voided_at').where('product_id', '=', product.id).executeTakeFirst();
+        if (!w?.voided_at) await this.warranty.void(product.id, why, actor, tx);
       }
 
       set.status = c.status === 'OPEN' || KEPT.includes(outcome) ? 'DONE' : 'DECIDED';
@@ -1069,7 +1105,7 @@ export class WarrantyClaimService {
                 if (isUniqueViolation(e, 'warranty_claims_replacement_product_id_key')) throw replacementNotAllowed('This identity is already the replacement of another claim.');
                 throw e;
               });
-            // The old piece's revocation names the identity that replaces it.
+            // The old piece's revocation, and its warranty's void reason, name the identity that replaces it.
             await tx
               .updateTable('revocations')
               .set({ reason: `Replaced under warranty by ${next.product_id}` })
@@ -1077,6 +1113,12 @@ export class WarrantyClaimService {
               .where('target_id', '=', claimed.product_id)
               .where('reason_code', '=', 'REPLACED')
               .where('lifted_at', 'is', null)
+              .execute();
+            await tx
+              .updateTable('warranties')
+              .set({ void_reason: `Replaced under warranty by ${next.product_id}`, updated_at: now })
+              .where('product_id', '=', claimed.id)
+              .where('void_reason', '=', `Replaced under warranty by ${before.product_id}`)
               .execute();
             details.replacedReplacement = before.product_id;
           }

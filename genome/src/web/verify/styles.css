@@ -1101,28 +1101,6 @@ body.nocturne .pieces__empty {
   left: 4px;
 }
 
-/* A piece's tabs (C4) end on CARE: on a narrow phone SERVICE stands right beside it, so its zone grows to the right
-   only (8 px, given back), into the margin; the tablist holds it (8 px more, given back), its hairline kept to the
-   column as drawn. */
-.n-piece__tabs .n-tabsx {
-  margin-right: -8px;
-  padding-right: 8px;
-  border-bottom-color: transparent;
-  background: linear-gradient(var(--vault-hairline), var(--vault-hairline)) left bottom / calc(100% - 8px) 1px no-repeat border-box;
-}
-
-.n-piece__tabs .n-tabsx__tab[aria-controls$="panel-care"]:last-child {
-  margin-right: -8px;
-  margin-left: 0;
-  padding-right: 8px;
-  padding-left: 0;
-}
-
-.n-piece__tabs .n-tabsx__tab[aria-controls$="panel-care"]:last-child[aria-selected="true"]::after {
-  right: 8px;
-  left: 0;
-}
-
 /* The + / − of a row that opens: a 16 px icon at the row's right, never squeezed by its text (C16's `.acc` svg). */
 .n-acc__sign {
   display: flex;
