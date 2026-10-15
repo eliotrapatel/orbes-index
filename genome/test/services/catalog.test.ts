@@ -6,6 +6,7 @@ import { isGuardViolation } from '../../src/server/db/pg-errors.js';
 import { CatalogService, MODEL_IDENTITY_MESSAGE, type ModelRecord, type UpdateModelInput } from '../../src/server/services/catalog.js';
 import { CategoryRegistry } from '../../src/server/services/categories.js';
 import { ensureSku } from '../../src/server/services/stock.js';
+import { addMonthsClamped } from '../../src/server/services/warranty.js';
 import { createManualClock, type Actor } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 
@@ -305,7 +306,7 @@ describe('CatalogService (collections and models)', () => {
       { code: 'ECL-BL-SIZE-52', size_label: 'SIZE 52', fit_min_mm: 51, fit_max_mm: 53, set_aside_at: null },
     ]);
     const created = (await audit.list({ action: 'model.variant.create', targetId: blue.id })).items[0]!.details as Record<string, unknown>;
-    expect(created).toMatchObject({ copied: ['type', 'collection', 'story', 'specs', 'care', 'sizes'], sizes: ['ONE SIZE', 'SIZE 52'] });
+    expect(created).toMatchObject({ copied: ['type', 'collection', 'story', 'specs', 'care', 'sizes', 'warranty'], sizes: ['ONE SIZE', 'SIZE 52'] });
     expect(created).not.toHaveProperty('sizeType');
     // The route's rule: a variant of a typeless main is given its type (400 otherwise); a typed main's is copied.
     expect((await domainError(catalog.createVariant(main.id, { label: 'Gold', swatch: '#B88A3A', skuPrefix: 'ECL-GD' }, admin, { requireSizeType: true }))).publicMessage).toBe('Give the model its size type.');
@@ -316,5 +317,136 @@ describe('CatalogService (collections and models)', () => {
     await t.db.updateTable('models').set({ variant_label: 'Steel', variant_swatch: '#9D9B96' }).where('id', '=', typed.id).execute();
     expect((await domainError(catalog.createVariant(typed.id, { label: 'Gold', swatch: '#B88A3A', skuPrefix: 'ZEN-GD', sizeType: 'RING' }, admin))).publicMessage).toBe('This model has its size type: its variant copies it.');
     expect(await catalog.createVariant(typed.id, { label: 'Gold', swatch: '#B88A3A', skuPrefix: 'ZEN-GD' }, admin, { requireSizeType: true })).toMatchObject({ sizeType: 'BRACELET', sizesOffered: 0 });
+  });
+});
+
+describe('a model’s warranty (plan ORBES CARE, answer 12, D16, D17)', () => {
+  let t: TestDb;
+  let audit: AuditService;
+  let catalog: CatalogService;
+  let serial = 0;
+  const clock = createManualClock('2026-10-15T10:00:00.000Z');
+
+  beforeAll(async () => {
+    t = await createTestDb();
+    audit = new AuditService({ db: t.db, clock: clock.now });
+    const categories = new CategoryRegistry({ db: t.db, audit, clock: clock.now });
+    await categories.load();
+    await categories.create({ code: 'J', name: 'Jewelry', warrantyMonths: 24 }, admin);
+    catalog = new CatalogService({ db: t.db, audit, categories, clock: clock.now });
+  });
+  afterAll(() => t.close());
+
+  /** A piece of `modelId` with its warranty row as given. */
+  async function piece(modelId: string, warranty: { start_date?: string | null; duration_months?: number; end_date?: string | null; lifetime: boolean; voided_at?: Date | null }) {
+    const s = ++serial;
+    const p = await t.db
+      .insertInto('products')
+      .values({ product_id: `O26-J-${String(s).padStart(5, '0')}`, packed_identity: packIdentity({ year: 2026, categoryIndex: 1, serial: s }), year: 2026, category_id: 1, serial: s, sku: `W-${s}`, model_id: modelId, material: '925 STERLING SILVER' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    await t.db.insertInto('warranties').values({ product_id: p.id, duration_months: 24, ...warranty }).execute();
+    return p.id;
+  }
+  const rowOf = (productId: string) =>
+    t.db.selectFrom('warranties').select(['lifetime', 'start_date', 'end_date', 'duration_months', 'voided_at']).where('product_id', '=', productId).executeTakeFirstOrThrow();
+
+  it('a new model is Lifetime unless created at 2 years; model.create says which', async () => {
+    const life = await catalog.createModel({ categoryCode: 'J', name: 'HALO', type: 'RING', skuPrefix: 'HAL-RG' }, admin);
+    expect(life).toMatchObject({ warrantyLifetime: true, soldPieces: 0 });
+    expect((await t.db.selectFrom('models').select('warranty_lifetime').where('id', '=', life.id).executeTakeFirstOrThrow()).warranty_lifetime).toBe(true);
+    expect((await audit.list({ action: 'model.create', targetId: life.id })).items[0]!.details).toMatchObject({ warrantyLifetime: true });
+    const two = await catalog.createModel({ categoryCode: 'J', name: 'ATLAS', type: 'WALLET', skuPrefix: 'ATL-WL', warrantyLifetime: false }, admin);
+    expect(two.warrantyLifetime).toBe(false);
+    expect((await audit.list({ action: 'model.create', targetId: two.id })).items[0]!.details).toMatchObject({ warrantyLifetime: false });
+    expect((await domainError(catalog.createModel({ categoryCode: 'J', name: 'X', type: 'RING', skuPrefix: 'X-1', warrantyLifetime: 'yes' as never }, admin))).code).toBe('VALIDATION_FAILED');
+    expect((await catalog.listModels()).map((m) => [m.name, m.warrantyLifetime])).toEqual([
+      ['ATLAS', false],
+      ['HALO', true],
+    ]);
+  });
+
+  it('ADD A VARIANT copies its main model’s warranty, then keeps its own', async () => {
+    const two = await catalog.createModel({ categoryCode: 'J', name: 'CARRY', type: 'BAG', skuPrefix: 'CRY-BG', warrantyLifetime: false }, admin);
+    const tan = await catalog.createVariant(two.id, { label: 'Tan', swatch: '#A0704A', skuPrefix: 'CRY-TN', mainLabel: 'Black', mainSwatch: '#111111' }, admin);
+    expect(tan.warrantyLifetime).toBe(false);
+    const life = await catalog.createModel({ categoryCode: 'J', name: 'ORBIT', type: 'RING', skuPrefix: 'ORB-RG' }, admin);
+    const gold = await catalog.createVariant(life.id, { label: 'Gold', swatch: '#B88A3A', skuPrefix: 'ORB-GD', mainLabel: 'Silver', mainSwatch: '#D7D5D0' }, admin);
+    expect(gold.warrantyLifetime).toBe(true);
+    expect((await audit.list({ action: 'model.variant.create', targetId: gold.id })).items[0]!.details).toMatchObject({ copied: expect.arrayContaining(['warranty']) });
+    // Afterwards, each its own row: the main model's change does not reach its variant.
+    await catalog.setWarranty(life.id, false, admin);
+    expect((await catalog.getModel(gold.id)).warrantyLifetime).toBe(true);
+  });
+
+  it('the edit never takes it: 400 with the service’s own words, nothing written', async () => {
+    const m = await catalog.createModel({ categoryCode: 'J', name: 'NOVA', type: 'RING', skuPrefix: 'NOV-RG' }, admin);
+    const e = await domainError(catalog.updateModel(m.id, { warrantyLifetime: false } as unknown as UpdateModelInput, admin));
+    expect(e.code).toBe('VALIDATION_FAILED');
+    expect(e.publicMessage).toBe('A model has no field warrantyLifetime to change.');
+    expect((await catalog.getModel(m.id)).warrantyLifetime).toBe(true);
+  });
+
+  it('to 2 years: each started piece gets start + its own months (EXPIRED when past, an extension kept, clamped, never before the start); not started, only the kind; VOID untouched; audited with its counts', async () => {
+    const m = await catalog.createModel({ categoryCode: 'J', name: 'LUNA', type: 'RING', skuPrefix: 'LUN-RG' }, admin);
+    const recent = await piece(m.id, { start_date: '2026-06-01', lifetime: true });
+    const old = await piece(m.id, { start_date: '2023-01-10', lifetime: true });
+    const extended = await piece(m.id, { start_date: '2025-08-31', duration_months: 30, lifetime: true });
+    const clamped = await piece(m.id, { start_date: '2026-01-31', duration_months: 25, lifetime: true });
+    const zero = await piece(m.id, { start_date: '2026-06-01', duration_months: 0, lifetime: true });
+    const notStarted = await piece(m.id, { lifetime: true });
+    const voided = await piece(m.id, { start_date: '2026-03-01', lifetime: true, voided_at: new Date('2026-04-01T00:00:00.000Z') });
+    expect((await catalog.getModel(m.id)).soldPieces).toBe(5);
+
+    const r = await catalog.setWarranty(m.id, false, admin);
+    expect(r).toMatchObject({ id: m.id, warrantyLifetime: false, soldPieces: 5 });
+    expect(await rowOf(recent)).toMatchObject({ lifetime: false, end_date: '2028-06-01', duration_months: 24 });
+    expect(await rowOf(old)).toMatchObject({ lifetime: false, end_date: '2025-01-10' });
+    expect(await rowOf(extended)).toMatchObject({ lifetime: false, end_date: addMonthsClamped('2025-08-31', 30), duration_months: 30 });
+    expect((await rowOf(extended)).end_date).toBe('2028-02-29');
+    expect(await rowOf(clamped)).toMatchObject({ lifetime: false, end_date: addMonthsClamped('2026-01-31', 25) });
+    expect((await rowOf(clamped)).end_date).toBe('2028-02-29');
+    expect(await rowOf(zero)).toMatchObject({ lifetime: false, end_date: '2026-06-01' });
+    expect(await rowOf(notStarted)).toMatchObject({ lifetime: false, start_date: null, end_date: null });
+    expect(await rowOf(voided)).toMatchObject({ lifetime: true, end_date: null, start_date: '2026-03-01' });
+    const entry = (await audit.list({ action: 'model.warranty', targetId: m.id })).items[0]!;
+    expect(entry).toMatchObject({ actorType: 'admin', actorId: admin.id, targetType: 'model' });
+    // Changed: the six not VOID; started: five; past their new end: the old one and the 0-month one.
+    expect(entry.details).toEqual({ before: { warrantyLifetime: true }, after: { warrantyLifetime: false }, pieces: 6, sold: 5, nowExpired: 2 });
+
+    // The same choice again writes and audits nothing.
+    await catalog.setWarranty(m.id, false, admin);
+    expect((await audit.list({ action: 'model.warranty', targetId: m.id })).total).toBe(1);
+
+    // Back to lifetime: every end date cleared, the EXPIRED ones ACTIVE again; the months kept; VOID untouched.
+    await catalog.setWarranty(m.id, true, admin);
+    for (const id of [recent, old, extended, clamped, zero, notStarted]) expect(await rowOf(id)).toMatchObject({ lifetime: true, end_date: null });
+    expect((await rowOf(extended)).duration_months).toBe(30);
+    expect((await audit.list({ action: 'model.warranty', targetId: m.id })).items[0]!.details).toEqual({
+      before: { warrantyLifetime: false },
+      after: { warrantyLifetime: true },
+      pieces: 6,
+      sold: 5,
+      nowExpired: 0,
+    });
+    // And to 2 years once more: the same end dates as the first time (D17).
+    await catalog.setWarranty(m.id, false, admin);
+    expect((await rowOf(old)).end_date).toBe('2025-01-10');
+    expect((await rowOf(extended)).end_date).toBe('2028-02-29');
+  });
+
+  it('counts its pieces sold (started, not VOID), as products counts its pieces issued', async () => {
+    const m = await catalog.createModel({ categoryCode: 'J', name: 'SOL', type: 'RING', skuPrefix: 'SOL-RG' }, admin);
+    await piece(m.id, { start_date: '2026-06-01', lifetime: true });
+    await piece(m.id, { lifetime: true });
+    await piece(m.id, { start_date: '2026-06-01', lifetime: true, voided_at: clock.now() });
+    expect(await catalog.getModel(m.id)).toMatchObject({ products: 3, soldPieces: 1 });
+    expect((await catalog.listModels()).find((x) => x.id === m.id)).toMatchObject({ products: 3, soldPieces: 1 });
+  });
+
+  it('refuses an unknown model (404) and a choice that is not a boolean (400)', async () => {
+    expect((await domainError(catalog.setWarranty('00000000-0000-4000-8000-000000000000', false, admin))).code).toBe('MODEL_NOT_FOUND');
+    const m = await catalog.createModel({ categoryCode: 'J', name: 'VEGA', type: 'RING', skuPrefix: 'VEG-RG' }, admin);
+    expect((await domainError(catalog.setWarranty(m.id, 'no' as never, admin))).code).toBe('VALIDATION_FAILED');
   });
 });

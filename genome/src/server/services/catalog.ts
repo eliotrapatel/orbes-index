@@ -57,6 +57,14 @@
  * variant's sheet is its main model's, so are its pairs. Its record read alone carries them (`pairs`, each with whether
  * the sheet shows it) and what the sheet shows without them (`pairsFallback`).
  *
+ * ITS WARRANTY (plan ORBES CARE, answer 12, D16, migration 0048): each model has the lifetime warranty
+ * (`warrantyLifetime` true, the default of a new model: jewelry and metal accessories) or the 2-year warranty
+ * (manufacturing defects only, for its category's months). It is chosen at creation (`createModel`, absent = lifetime),
+ * copied by ADD A VARIANT from its main model, and changed afterwards only by an ADMIN (`setWarranty`, audited
+ * `model.warranty`), never through the edit (`updateModel`: 400): a change rewrites the warranties of the model's
+ * pieces already sold. A piece's warranty copies its model's choice when its row is created (IssuanceService,
+ * WarrantyService); `soldPieces` counts the model's pieces whose warranty has started and is not VOID.
+ *
  * DISCONTINUED (P-R06, migration 0019): an ADMIN closes a model's edition
  * (`discontinueModel`, audited `model.discontinue`) and may open it again
  * (`reinstateModel`, `model.reinstate`). Discontinuing sets
@@ -82,6 +90,7 @@ import { mediaUrl } from './media.js';
 import { ORDER_AMOUNT_MAX_MINOR, ORDER_CURRENCIES } from './orders.js';
 import { LISTED_SIZE_TYPES, SIZE_TYPE_KIND } from './sizes.js';
 import { compareSizes, ensureSku, ONE_SIZE_LABEL } from './stock.js';
+import { computeWarrantyStatus, utcDate } from './warranty.js';
 
 /** A model's care guide, at most (models.care_guide, migration 0022). */
 export const CARE_GUIDE_MAX = 8000;
@@ -127,6 +136,10 @@ export interface ModelRecord {
   imageUrl: string | null;
   /** Pieces issued with this model: a change of its name, care instructions or collection reaches each of their public results. */
   products: number;
+  /** Plan ORBES CARE (answer 12): the lifetime warranty; false: the 2-year warranty (its category's months). Changed by `setWarranty` (ADMIN). */
+  warrantyLifetime: boolean;
+  /** Its pieces whose warranty has started and is not VOID: what a change of its warranty reaches among the pieces sold. */
+  soldPieces: number;
   /** Its place in the lookbook (P-R02): HIDDEN, PUBLIC (everyone) or RESERVED (the owners of a piece). */
   lookbook: LookbookState;
   /** The address of its sheet, /verify/lookbook/<slug>; null until named. Fixed once `publishedAt` is set. */
@@ -289,6 +302,8 @@ export interface CreateModelInput {
    * seed that build models directly). A watch or a model of one size declares ONE SIZE at once.
    */
   sizeType?: SizeType;
+  /** Plan ORBES CARE (answer 12): the lifetime warranty (true, the default when absent) or the 2-year warranty (false). */
+  warrantyLifetime?: boolean;
 }
 
 /**
@@ -550,6 +565,9 @@ export class CatalogService {
     const collectionId = input.collectionId ?? null;
     const sizeType = input.sizeType;
     if (sizeType !== undefined && !(SIZE_TYPES as readonly string[]).includes(sizeType)) throw validationError('Give the model its size type.');
+    // Plan ORBES CARE (answer 12): Lifetime by default ("default to jewelry").
+    const warrantyLifetime = input.warrantyLifetime ?? true;
+    if (typeof warrantyLifetime !== 'boolean') throw validationError('warrantyLifetime must be true or false.');
 
     const category = /^[A-Z]$/.test(categoryCode) ? await this.categories.getByCode(categoryCode) : undefined;
     if (!category) throw notFound('Category', 'CATEGORY_NOT_FOUND');
@@ -569,6 +587,7 @@ export class CatalogService {
             sku_prefix: skuPrefix,
             default_material: defaultMaterial,
             care_instructions: careInstructions,
+            warranty_lifetime: warrantyLifetime,
             ...(sizeType !== undefined ? { size_type: sizeType, size_kind: SIZE_TYPE_KIND[sizeType] } : {}),
             created_at: this.clock(),
           })
@@ -583,7 +602,7 @@ export class CatalogService {
             action: 'model.create',
             targetType: 'model',
             targetId: r.id,
-            details: { name, type, skuPrefix, category: category.code, collectionId, ...(sizeType !== undefined ? { sizeType } : {}) },
+            details: { name, type, skuPrefix, category: category.code, collectionId, warrantyLifetime, ...(sizeType !== undefined ? { sizeType } : {}) },
           },
           tx,
         );
@@ -598,7 +617,8 @@ export class CatalogService {
 
   /**
    * ADD A VARIANT (POST /api/admin/models/:id/variants, N1): a new model, a variant of `mainId`, that copies its
-   * category, collection, name, type, story, specifications and care (instructions and guide), with its own label,
+   * category, collection, name, type, story, specifications, care (instructions and guide) and warranty (plan ORBES CARE:
+   * lifetime or 2 years, its own afterwards), with its own label,
    * colour and SKU prefix; HIDDEN from the lookbook (its photographs come next, then its publication), active, without a
    * material nor prices of its own yet. A main model without its own label and colour takes `mainLabel` and
    * `mainSwatch` in the same transaction (400 when they are missing), audited `model.update`. Refused: a main model that
@@ -642,6 +662,7 @@ export class CatalogService {
             'm.variant_swatch',
             'm.size_type',
             'm.size_kind',
+            'm.warranty_lifetime',
             'c.code as category_code',
           ])
           .where('m.id', '=', id)
@@ -687,6 +708,7 @@ export class CatalogService {
             variant_of: id,
             variant_label: label,
             variant_swatch: swatch,
+            warranty_lifetime: main.warranty_lifetime,
             ...(sizeType !== null ? { size_type: sizeType, size_kind: sizeKind } : {}),
             created_at: now,
           })
@@ -727,7 +749,7 @@ export class CatalogService {
               collectionId: main.collection_id,
               label,
               swatch,
-              copied: ['type', 'collection', 'story', 'specs', 'care', 'sizes'],
+              copied: ['type', 'collection', 'story', 'specs', 'care', 'sizes', 'warranty'],
               ...(sizeType !== null ? { sizeType } : {}),
               sizes,
             },
@@ -949,6 +971,62 @@ export class CatalogService {
   }
 
   /**
+   * A model's warranty (POST /api/admin/models/:id/warranty, ADMIN; plan ORBES CARE, answer 12, D16, D17): the lifetime
+   * warranty (`lifetime` true) or the 2-year warranty (false, its category's months). The model's row FOR UPDATE, then in
+   * the same transaction the warranties of its pieces that are not VOID and of the other kind follow it: to lifetime, no
+   * end date; to 2 years, the end date their start and their own months give (`start + duration_months`, the category's
+   * months with any extension kept, clamped to the month's end as addMonthsClamped; never before the start), none while
+   * not started. A VOID warranty is never touched; a piece REVOKED or RETIRED follows like any other. An issuance and a
+   * piece's first warranty row read the model's choice under a share lock (IssuanceService, WarrantyService), so a piece
+   * issued meanwhile is ordered with this change and ends on it. The same choice again writes and audits nothing.
+   * Audited `model.warranty` with the choice before and after and the counts of the warranties changed (`pieces`), of
+   * those started (`sold`) and of those past their new end (`nowExpired`).
+   */
+  async setWarranty(modelId: string, lifetime: boolean, actor: Actor): Promise<ModelRecord> {
+    const id = modelKey(modelId);
+    if (typeof lifetime !== 'boolean') throw validationError('lifetime must be true or false.');
+    await inTransaction(this.db, async (tx) => {
+      const row = await tx.selectFrom('models').select(['warranty_lifetime']).where('id', '=', id).forUpdate().executeTakeFirst();
+      if (!row) throw notFound('Model', 'MODEL_NOT_FOUND');
+      if (row.warranty_lifetime === lifetime) return;
+      await tx.updateTable('models').set({ warranty_lifetime: lifetime }).where('id', '=', id).execute();
+      const changed = await tx
+        .updateTable('warranties')
+        .set(
+          lifetime
+            ? { lifetime: true, end_date: null }
+            : {
+                lifetime: false,
+                end_date: sql<string | null>`CASE WHEN start_date IS NULL THEN NULL ELSE (start_date + make_interval(months => duration_months))::date END`,
+              },
+        )
+        .where('voided_at', 'is', null)
+        .where('lifetime', '=', !lifetime)
+        .where('product_id', 'in', (eb) => eb.selectFrom('products').select('id').where('model_id', '=', id))
+        .returning(['start_date', 'end_date', 'voided_at', 'duration_months', 'lifetime'])
+        .execute();
+      const today = utcDate(this.clock());
+      await this.audit.record(
+        {
+          actor,
+          action: 'model.warranty',
+          targetType: 'model',
+          targetId: id,
+          details: {
+            before: { warrantyLifetime: row.warranty_lifetime },
+            after: { warrantyLifetime: lifetime },
+            pieces: changed.length,
+            sold: changed.filter((w) => w.start_date !== null).length,
+            nowExpired: changed.filter((w) => computeWarrantyStatus(w, today) === 'EXPIRED').length,
+          },
+        },
+        tx,
+      );
+    });
+    return this.getModel(id);
+  }
+
+  /**
    * Discontinue a model (POST /api/admin/models/:id/discontinue, ADMIN; P-R06): `discontinued_at` now, its author
    * (null for a script), and `active = false`, in one transaction. Its pieces verify as before, said DISCONTINUED with
    * the year; no new piece is issued with it (409 MODEL_INACTIVE). Audited `model.discontinue` with whether it was
@@ -1011,6 +1089,19 @@ export class CatalogService {
         (eb) => eb.selectFrom('products').select((p) => ['model_id', p.fn.countAll<number>().as('n')]).groupBy('model_id').as('issued'),
         (j) => j.onRef('issued.model_id', '=', 'm.id'),
       )
+      // Plan ORBES CARE: its pieces sold (their warranty started, not VOID), counted per model as `issued` is.
+      .leftJoin(
+        (eb) =>
+          eb
+            .selectFrom('products as sp')
+            .innerJoin('warranties as sw', 'sw.product_id', 'sp.id')
+            .select((p) => ['sp.model_id', p.fn.countAll<number>().as('n')])
+            .where('sw.start_date', 'is not', null)
+            .where('sw.voided_at', 'is', null)
+            .groupBy('sp.model_id')
+            .as('sold'),
+        (j) => j.onRef('sold.model_id', '=', 'm.id'),
+      )
       .select([
         'm.id',
         'm.name',
@@ -1042,6 +1133,8 @@ export class CatalogService {
         'col.id as collection_id',
         'col.name as collection_name',
         'issued.n as products',
+        'm.warranty_lifetime',
+        'sold.n as sold_pieces',
       ])
       // N2: the model's Shopify product (one id on all its SKUs, services/shopify.ts) and how many sizes have their variant;
         // plan NEXT LOT §3.3: the product id too read from its offered sizes (a set-aside size keeps its old id).
@@ -1183,6 +1276,8 @@ type ModelQueryRow = {
   collection_id: string | null;
   collection_name: string | null;
   products: number | string | null;
+  warranty_lifetime: boolean;
+  sold_pieces: number | string | null;
 };
 
 /** A variant as its main model's page lists it. */
@@ -1219,6 +1314,8 @@ function toModelRecord(r: ModelQueryRow, gallery: GalleryImageRecord[], others: 
     active: r.active,
     imageUrl: mediaUrl(r.image_sha256),
     products: Number(r.products ?? 0),
+    warrantyLifetime: r.warranty_lifetime,
+    soldPieces: Number(r.sold_pieces ?? 0),
     lookbook: r.lookbook,
     slug: r.slug,
     story: r.story,

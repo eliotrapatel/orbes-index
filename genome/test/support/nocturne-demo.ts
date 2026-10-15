@@ -294,10 +294,11 @@ async function seedCatalogue(w: World): Promise<void> {
   const care = 'Store this piece on its own, away from humidity, perfume and cosmetics. Wipe it with a soft, dry cloth after wearing. ORBES Client Services offers inspection, cleaning and polishing.';
   const story = 'Two rails of metal held apart, then closed by one angled link: a form built like architecture, cut to lie flat on the wrist.';
   // N1: MONOLITHE in steel, then its variants added from it (ADD A VARIANT, which gives steel its own dot), in the
-  // order of the dots: Steel · Gold · Blue.
+  // order of the dots: Steel · Gold · Blue. Plan ORBES CARE, step 1.3: the demo's models are created at the 2-year
+  // warranty (`warrantyLifetime: false`, its variants copying it), so the boards keep today's warranties until step 5.1.
   w.clock.set(at('2026-08-31T08:00:00Z'));
   const steel = await ctx.services.catalog.createModel(
-    { categoryCode: 'J', collectionId: w.collection, name: 'MONOLITHE', type: 'BRACELET', skuPrefix: 'MNL-ST', defaultMaterial: '925 STERLING SILVER', careInstructions: care },
+    { categoryCode: 'J', collectionId: w.collection, name: 'MONOLITHE', type: 'BRACELET', skuPrefix: 'MNL-ST', defaultMaterial: '925 STERLING SILVER', careInstructions: care, warrantyLifetime: false },
     admin,
   );
   w.models.steel = steel.id;
@@ -308,7 +309,7 @@ async function seedCatalogue(w: World): Promise<void> {
   w.models.blue = (await ctx.services.catalog.createVariant(steel.id, { ...NOCTURNE_VARIANTS.blue, skuPrefix: 'MNL-BL' }, admin)).id;
   const make = async (key: string, material: string, opts: { slug: string; lookbook: 'PUBLIC' | 'RESERVED'; photo: 'steel' | 'blue' | 'gold'; priceLabel?: string; create?: { name: string; prefix: string } }) => {
     const id = opts.create
-      ? (await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: opts.create.name, type: 'BRACELET', skuPrefix: opts.create.prefix, defaultMaterial: material, careInstructions: care }, admin)).id
+      ? (await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: opts.create.name, type: 'BRACELET', skuPrefix: opts.create.prefix, defaultMaterial: material, careInstructions: care, warrantyLifetime: false }, admin)).id
       : w.models[key]!;
     await ctx.services.media.setModelImage(id, { mime: 'image/webp', bytes: nocturnePhoto(opts.photo) }, admin);
     await ctx.services.catalog.updateModel(
@@ -1194,7 +1195,7 @@ async function seedSizes(w: World, variant: 'full' | 'room'): Promise<void> {
     return;
   }
   const care = 'Store this piece on its own, away from humidity, perfume and cosmetics. Wipe it with a soft, dry cloth after wearing. ORBES Client Services offers inspection, cleaning and polishing.';
-  const halo = (await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: 'HALO', type: 'RING', skuPrefix: 'HAL-RG', defaultMaterial: '18K YELLOW GOLD', careInstructions: care }, admin)).id;
+  const halo = (await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: 'HALO', type: 'RING', skuPrefix: 'HAL-RG', defaultMaterial: '18K YELLOW GOLD', careInstructions: care, warrantyLifetime: false }, admin)).id;
   await ctx.services.media.setModelImage(halo, { mime: 'image/webp', bytes: nocturnePhoto('gold') }, admin);
   await ctx.services.catalog.updateModel(
     halo,
@@ -1303,7 +1304,7 @@ async function seedStress(w: World): Promise<void> {
   const { ctx, admin, clock } = w;
   await seedCatalogue(w);
   clock.set(at('2026-09-01T09:00:00Z'));
-  const long = await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: 'MONOLITHE ARCHITECTURALE', type: 'ARTICULATED BRACELET', skuPrefix: 'MNL-AR', defaultMaterial: '925 STERLING SILVER, BRUSHED AND POLISHED', careInstructions: null }, admin);
+  const long = await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: 'MONOLITHE ARCHITECTURALE', type: 'ARTICULATED BRACELET', skuPrefix: 'MNL-AR', defaultMaterial: '925 STERLING SILVER, BRUSHED AND POLISHED', careInstructions: null, warrantyLifetime: false }, admin);
   await ctx.services.catalog.updateModel(long.id, { lookbook: 'PUBLIC', slug: 'monolithe-architecturale', story: 'A model without a photograph yet.', specs: 'Metal: 925 sterling silver, brushed and polished by hand\nClosure: Hinged, with a hidden clasp' }, admin);
   w.models.long = long.id;
   w.demo.slugs.long = 'monolithe-architecturale';
@@ -1356,7 +1357,7 @@ async function seedStress(w: World): Promise<void> {
   // counted in stock, chosen after the four orders (none of them carries a gift); and the PALLADIUM credit (€ 100, made
   // with the first order: the account reached PALLADIUM before it) in use on the last order, RESERVED at € 4 800.
   clock.set(at('2026-09-14T10:00:00Z'));
-  const charm = await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: null, name: 'ORBITAL CHARM', type: 'PENDANT', skuPrefix: 'ORB-CH', defaultMaterial: '925 STERLING SILVER' }, admin);
+  const charm = await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: null, name: 'ORBITAL CHARM', type: 'PENDANT', skuPrefix: 'ORB-CH', defaultMaterial: '925 STERLING SILVER', warrantyLifetime: false }, admin);
   // Its one piece in stock, counted in (plan NEXT LOT step 5.12: a piece behind the count, for the packing scan).
   await stockPieces(ctx, { skuId: await ensureSku(ctx.db, charm.id, null), locationId: (await ctx.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id, count: 1 }, admin);
   const program = await ctx.services.clubProgram.read();
@@ -1419,7 +1420,7 @@ async function seedStress(w: World): Promise<void> {
 async function seedPairs(w: World): Promise<void> {
   const { ctx, admin, clock } = w;
   clock.set(at('2026-10-04T09:00:00Z'));
-  const long = await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: 'MONOLITHE ARCHITECTURALE', type: 'ARTICULATED BRACELET', skuPrefix: 'MNL-AR', defaultMaterial: '925 STERLING SILVER, BRUSHED AND POLISHED', careInstructions: null }, admin);
+  const long = await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: 'MONOLITHE ARCHITECTURALE', type: 'ARTICULATED BRACELET', skuPrefix: 'MNL-AR', defaultMaterial: '925 STERLING SILVER, BRUSHED AND POLISHED', careInstructions: null, warrantyLifetime: false }, admin);
   await ctx.services.catalog.updateModel(long.id, { lookbook: 'PUBLIC', slug: 'monolithe-architecturale', story: 'A model without a photograph yet.' }, admin);
   w.models.long = long.id;
   w.demo.slugs.long = 'monolithe-architecturale';
@@ -1470,7 +1471,7 @@ async function seedEmpty(w: World): Promise<void> {
   const { ctx, admin } = w;
   w.clock.set(at('2026-09-01T09:00:00Z'));
   w.collection = (await ctx.services.catalog.createCollection({ name: 'ORBITAL' }, admin)).id;
-  const hidden = await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: 'MONOLITHE', type: 'BRACELET', skuPrefix: 'MNL-ST', defaultMaterial: '925 STERLING SILVER', careInstructions: null }, admin);
+  const hidden = await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: 'MONOLITHE', type: 'BRACELET', skuPrefix: 'MNL-ST', defaultMaterial: '925 STERLING SILVER', careInstructions: null, warrantyLifetime: false }, admin);
   w.models.steel = hidden.id;
   await account(w, 'you', 'you@example.com');
   await account(w, 'owner', 'm.okafor@example.com', 1, hidden.id);

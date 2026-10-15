@@ -45,6 +45,8 @@ describe('admin products, codes and records', () => {
         defaultMaterial: '925 STERLING SILVER',
         careInstructions: 'Polish with a soft dry cloth.',
         sizeType: 'RING',
+        // Plan ORBES CARE, step 1.3: at the 2-year warranty, so its pieces' warranties have an end date (Lifetime by default).
+        warrantyLifetime: false,
       });
       expect(model.statusCode, model.body).toBe(201);
       const m = safeJson(model) as any;

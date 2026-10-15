@@ -17,8 +17,14 @@
  * §3.3) its size type, given at creation, and its declared sizes, ticked (PUT
  * …/sizes), removed or set aside and reinstated one by one (POST
  * …/sizes/:skuId/remove and …/reinstate, OPERATOR, no body). Its pairs (plan NEXT-NINE, BP-34, PAIRS WELL WITH): the models its sheet
- * ends with, set by OPERATOR (PUT …/pairs) and read with the model. The
- * services validate, write and audit; these routes only parse and shape.
+ * ends with, set by OPERATOR (PUT …/pairs) and read with the model. Its
+ * warranty (plan ORBES CARE, answer 12, D16): the lifetime warranty or the
+ * 2-year warranty, chosen at creation (`warrantyLifetime`, Lifetime when
+ * absent; OPERATOR, as creating a model), copied by ADD A VARIANT, and changed
+ * afterwards by an ADMIN only (POST …/warranty, `{ lifetime }`), as the change
+ * rewrites the warranties of its pieces already sold; never through the edit
+ * (PATCH: 400). The services validate, write and audit; these routes only
+ * parse and shape.
  */
 import type { FastifyPluginAsync } from 'fastify';
 import {
@@ -31,6 +37,7 @@ import {
   createVariantBody,
   emptyBody,
   modelPairsBody,
+  modelWarrantyBody,
   modelSizeParams,
   modelSizesBody,
   parse,
@@ -113,6 +120,7 @@ export const adminCatalogRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
         defaultMaterial: b.defaultMaterial ?? null,
         careInstructions: b.careInstructions ?? null,
         ...(b.sizeType !== undefined ? { sizeType: b.sizeType } : {}),
+        ...(b.warrantyLifetime !== undefined ? { warrantyLifetime: b.warrantyLifetime } : {}),
       },
       adminActor(request),
     );
@@ -207,6 +215,13 @@ export const adminCatalogRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
     const { id } = parse(catalogParams, request.params);
     const b = parse(modelPairsBody, request.body);
     return catalog.setPairs(id, b.models, adminActor(request));
+  });
+
+  // Plan ORBES CARE (answer 12, D16): ADMIN only, as it rewrites the warranties of the model's pieces already sold.
+  app.post('/api/admin/models/:id/warranty', { config: { guard: { minRole: 'ADMIN' } } }, async (request) => {
+    const { id } = parse(catalogParams, request.params);
+    const b = parse(modelWarrantyBody, request.body);
+    return catalog.setWarranty(id, b.lifetime, adminActor(request));
   });
 
   // P-R06: ADMIN only, reversible (the console asks for a typed phrase first). Discontinuing also makes the model inactive.

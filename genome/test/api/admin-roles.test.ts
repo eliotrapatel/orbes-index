@@ -8,7 +8,8 @@
  * P-X08), ADMIN for keys, revocations, reinstatement, categories (created,
  * activated or deactivated), the console users of the Team page (A-02), the
  * points of sale (A-08), a customer's recovery code, lock and export, the draw of a drop, a model
- * discontinued or reinstated (P-R06), a LIVE RELEASE ended now or an entry removed from it (its creation, edits,
+ * discontinued or reinstated (P-R06), a model's warranty changed (plan ORBES CARE, D16: it rewrites the warranties of
+ * its pieces already sold), a LIVE RELEASE ended now or an entry removed from it (its creation, edits,
  * publication, cancellation, silhouette, board link and live controls: OPERATOR), and the settings of the orders: their
  * alerts' delays, the locations and the carriers (plan LIVE RELEASE+; the orders' steps, returns, terms, buyer and piece,
  * and, since the atelier's removal (plan NEXT LOT step 5.13), Logistics' stock below: OPERATOR; the invoices and credit notes read by an AUDITOR;
@@ -91,6 +92,8 @@ const PROBES: Probe[] = [
   // P-R06: an ADMIN discontinues a model and reinstates it.
   { group: 'models', method: 'POST', url: `/api/admin/models/${UUID}/discontinue`, body: INVALID, min: 'ADMIN' },
   { group: 'models', method: 'POST', url: `/api/admin/models/${UUID}/reinstate`, body: INVALID, min: 'ADMIN' },
+  // Plan ORBES CARE (answer 12, D16): an ADMIN changes a model's warranty, lifetime or 2 years.
+  { group: 'models', method: 'POST', url: `/api/admin/models/${UUID}/warranty`, body: INVALID, min: 'ADMIN' },
   { group: 'lookbook', method: 'POST', url: `/api/admin/models/${UUID}/gallery`, ...PHOTO, min: 'OPERATOR' },
   { group: 'lookbook', method: 'DELETE', url: `/api/admin/models/${UUID}/gallery/${'ab'.repeat(32)}`, min: 'OPERATOR' },
   { group: 'lookbook', method: 'PATCH', url: `/api/admin/models/${UUID}/gallery`, body: INVALID, min: 'OPERATOR' },

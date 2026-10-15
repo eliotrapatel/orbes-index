@@ -199,7 +199,7 @@ describe('the variants of a model (NOCTURNE N1)', () => {
       collectionId: catalog.collectionId,
       label: 'Gold',
       swatch: '#B88A3A',
-      copied: ['type', 'collection', 'story', 'specs', 'care', 'sizes'],
+      copied: ['type', 'collection', 'story', 'specs', 'care', 'sizes', 'warranty'],
       sizeType: 'ONE_SIZE',
       sizes: ['ONE SIZE'],
     });
@@ -446,7 +446,7 @@ describe('the variants of a model (NOCTURNE N1)', () => {
     // Their stock is their own, at 0 (no movement).
     expect(await h.ctx.db.selectFrom('stock_movements').select('id').where('sku_id', 'in', section.sizes.map((z) => z.skuId)).execute()).toEqual([]);
     const [created] = await audits('model.variant.create', blue);
-    expect(created!.details).toMatchObject({ copied: ['type', 'collection', 'story', 'specs', 'care', 'sizes'], sizeType: 'RING', sizes: ['50', '52', '54'] });
+    expect(created!.details).toMatchObject({ copied: ['type', 'collection', 'story', 'specs', 'care', 'sizes', 'warranty'], sizeType: 'RING', sizes: ['50', '52', '54'] });
     // Nothing links the two afterwards: a change on the main never reaches the variant, nor the reverse.
     await sizes.declare(main, { ticked: ['50', '52', '54', '56'] }, operatorActor);
     expect((await sizes.modelSizes(blue)).sizes.map((z) => z.label)).toEqual(['50', '52', '54']);

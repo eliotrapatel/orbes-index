@@ -178,6 +178,8 @@ describe('full flow: issue → print → scan → verify → own → transfer �
         defaultMaterial: '925 STERLING SILVER',
         careInstructions: 'Wipe with a soft, dry cloth after wear.',
         sizeType: 'RING',
+        // Plan ORBES CARE, step 1.3: at the 2-year warranty, so its piece's warranty has an end date (Lifetime by default).
+        warrantyLifetime: false,
       }),
       201,
     );

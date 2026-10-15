@@ -7,7 +7,10 @@
  * category issues no new piece (409) while its pieces verify as before.
  * An ADMIN discontinues a model and reinstates it (P-R06: POST
  * /api/admin/models/:id/discontinue and /reinstate). A model is created with
- * its size type (plan NEXT LOT §3.3 item 6b: POST /api/admin/models).
+ * its size type (plan NEXT LOT §3.3 item 6b: POST /api/admin/models), and its
+ * warranty (plan ORBES CARE, answer 12: Lifetime unless created at 2 years),
+ * which an ADMIN changes afterwards (POST /api/admin/models/:id/warranty), never
+ * the edit.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { inTransaction } from '../../src/server/db/connection.js';
@@ -27,6 +30,8 @@ interface ModelJson {
   active: boolean;
   products: number;
   discontinuedAt: string | null;
+  warrantyLifetime: boolean;
+  soldPieces: number;
 }
 
 describe('the editable catalogue (A-10)', () => {
@@ -274,5 +279,45 @@ describe('the editable catalogue (A-10)', () => {
     const variant = safeJson(await operator.post(`/api/admin/models/${main}/variants`, { label: 'Blue', swatch: '#1F3A6B', skuPrefix: 'SUP-HALO-BL', mainLabel: 'Steel', mainSwatch: '#C9CCD1' })) as { id: string };
     expect((await sizes(variant.id)).supplier).toEqual({ own: null, inherited: { id: supplier.id, name: 'Halo Works', active: true, from: 'HALO' }, sizes: {} });
     expect((await auditor.request('PUT', `/api/admin/models/${main}/supplier`, { body: { supplierId: null } })).statusCode).toBe(403);
+  });
+
+  it('a model’s warranty (plan ORBES CARE, answer 12, D16): Lifetime unless created at 2 years; changed by an ADMIN through POST …/warranty, which rewrites its pieces sold; never through the edit', async () => {
+    const create = (body: Record<string, unknown>) => operator.post('/api/admin/models', { categoryCode: 'J', type: 'PENDANT', sizeType: 'ONE_SIZE', ...body });
+    const life = safeJson(await create({ name: 'AUBE', skuPrefix: 'WAR-AUB' })) as ModelJson;
+    expect(life).toMatchObject({ warrantyLifetime: true, soldPieces: 0 });
+    const res = await create({ name: 'CUIR', skuPrefix: 'WAR-CUI', warrantyLifetime: false });
+    expect(res.statusCode, res.body).toBe(201);
+    expect(safeJson(res)).toMatchObject({ warrantyLifetime: false });
+    expect(errorOf(await create({ name: 'X', skuPrefix: 'WAR-X', warrantyLifetime: 'yes' })).code).toBe('VALIDATION_FAILED');
+
+    // A piece of the lifetime model, sold: its warranty has no end date.
+    const sold = await issue(h.ctx, { ...catalog, modelId: life.id });
+    await h.ctx.services.warranty.activate(sold.product.productId, { purchaseDate: '2026-01-31' }, { type: 'system' });
+    expect(await modelOf(life.id)).toMatchObject({ warrantyLifetime: true, soldPieces: 1, products: 1 });
+    expect((await h.ctx.services.warranty.get(sold.product.productId))?.endDate).toBeNull();
+
+    // The edit never takes it: the strict body answers first.
+    const patched = await operator.patch(`/api/admin/models/${life.id}`, { warrantyLifetime: false });
+    expect(patched.statusCode).toBe(400);
+    expect(errorOf(patched)).toEqual({ code: 'VALIDATION_FAILED', message: 'The request contains unknown fields: warrantyLifetime.' });
+    expect(errorOf(await admin.patch(`/api/admin/models/${life.id}`, { name: 'AUBE', warrantyLifetime: false })).message).toBe('The request contains unknown fields: warrantyLifetime.');
+
+    // ADMIN only, before anything is read; a boolean `lifetime` and nothing else; an unknown model is a 404.
+    const url = `/api/admin/models/${life.id}/warranty`;
+    for (const c of [operator, auditor]) expect(errorOf(await c.post(url, { lifetime: false })).code).toBe('FORBIDDEN');
+    for (const body of [{}, { lifetime: 'false' }, { lifetime: false, months: 24 }]) expect(errorOf(await admin.post(url, body)).code, JSON.stringify(body)).toBe('VALIDATION_FAILED');
+    expect(errorOf(await admin.post('/api/admin/models/00000000-0000-4000-8000-000000000000/warranty', { lifetime: false })).code).toBe('MODEL_NOT_FOUND');
+    expect((await admin.post(url, { lifetime: false }, { noCsrf: true })).statusCode).toBe(403);
+
+    const switched = await admin.post(url, { lifetime: false });
+    expect(switched.statusCode, switched.body).toBe(200);
+    expect(safeJson(switched)).toMatchObject({ id: life.id, warrantyLifetime: false, soldPieces: 1 });
+    expect(await h.ctx.services.warranty.get(sold.product.productId)).toMatchObject({ lifetime: false, startDate: '2026-01-31', endDate: '2028-01-31' });
+    const entry = (await h.ctx.audit.list({ action: 'model.warranty', targetId: life.id })).items[0]!;
+    expect(entry).toMatchObject({ actorType: 'admin', targetType: 'model' });
+    expect(entry.details).toMatchObject({ before: { warrantyLifetime: true }, after: { warrantyLifetime: false }, pieces: 1, sold: 1 });
+    // Back to lifetime: its end date removed.
+    expect(safeJson(await admin.post(url, { lifetime: true }))).toMatchObject({ warrantyLifetime: true });
+    expect(await h.ctx.services.warranty.get(sold.product.productId)).toMatchObject({ lifetime: true, endDate: null, status: 'ACTIVE' });
   });
 });

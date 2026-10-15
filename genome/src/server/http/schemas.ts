@@ -638,6 +638,8 @@ export const createModelBody = body({
   // Plan NEXT LOT §3.3 item 6b: a model is given its size type at creation (a watch or a model of one size has its ONE
   // SIZE at once; a ring's, a bracelet's or a necklace's sizes are ticked next, on its page).
   sizeType: z.enum(SIZE_TYPES).optional(),
+  // Plan ORBES CARE (answer 12): the lifetime warranty (true, the default when absent) or the 2-year warranty (false).
+  warrantyLifetime: z.boolean().optional(),
 }).refine((b) => b.sizeType !== undefined, { message: 'Give the model its size type.' });
 
 /** The letter in `/api/admin/categories/:code/active`, any case. */
@@ -651,6 +653,9 @@ export const categoryParams = z.object({
 
 /** ADMIN: a category stops (false) or starts again (true) receiving new products; its pieces verify either way. */
 export const categoryActiveBody = body({ active: z.boolean() });
+
+/** ADMIN (plan ORBES CARE, answer 12, D16): a model's warranty, the lifetime warranty (true) or the 2-year warranty (false). */
+export const modelWarrantyBody = body({ lifetime: z.boolean() });
 
 export const catalogParams = z.object({ id: uuid });
 
