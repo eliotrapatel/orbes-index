@@ -16,7 +16,8 @@
  *                wrote). The piece must be able to go IN SERVICE at receipt: REVOKED, RETIRED, COUNTERFEIT_FLAGGED,
  *                SERVICED (another service open) and RESERVED are refused (409 CLAIM_NOT_ALLOWED); a LOST or STOLEN
  *                piece only to be refused from OPEN (`label` refuses it). One live claim per piece (409 CLAIM_OPEN), none
- *                while its PRIVATE CARE is under way (409 CARE_OPEN). `root_product_id`: the original piece (the root of
+ *                while its PRIVATE CARE is under way (409 CARE_OPEN) nor while a transfer offer of it is pending
+ *                (409 CLAIM_NOT_ALLOWED, detail `transfer pending`, as PRIVATE CARE is UNAVAILABLE then). `root_product_id`: the original piece (the root of
  *                the claim whose replacement this piece is, else the piece). Audited `warranty.claim.open` (never the
  *                note, never an email).
  *   label        OPEN → LABEL_SENT: the prepaid label's PDF (2 MiB, as PRIVATE CARE's), its carrier and tracking; the
@@ -26,7 +27,8 @@
  *                SERVICE, in the same transaction. Only the claim closes that record (`/api/admin/services/:id/complete`
  *                refuses it).
  *   moveToLegal  a received 2-year claim whose piece can be neither repaired nor replaced continues under the legal
- *                guarantee (409 CLAIM_NOT_LEGAL when it does not apply): the claim CANCELLED (its label and receipt times
+ *                guarantee (409 CLAIM_NOT_LEGAL when it does not apply; a boutique sale's receipt written in the note
+ *                given with this step, the claim's own note not counting): the claim CANCELLED (its label and receipt times
  *                kept, its record handed over) and a LEGAL claim RECEIVED continuing it, with the same INSPECTION record
  *                (nothing is sent again). Audited `warranty.claim.legal`.
  *   decide       RECEIVED (a refusal also from OPEN), the claim's row FOR UPDATE and its step checked under the lock (409
@@ -129,6 +131,8 @@ export const claimOpen = () => conflict('CLAIM_OPEN', 'A warranty claim is alrea
 export const claimNotRegistered = () => conflict('CLAIM_NOT_REGISTERED', 'Only the registered owner of a piece can claim under its warranty.');
 export const claimFreeUsed = () => conflict('CLAIM_FREE_USED', 'The free replacement of this piece has already been used.');
 const claimNotAllowed = (status: string) => conflict('CLAIM_NOT_ALLOWED', 'The status of this piece does not allow a warranty claim.', `status ${status}`);
+const transferPending = () =>
+  conflict('CLAIM_NOT_ALLOWED', 'A transfer of this piece is pending: it can be claimed once the transfer is accepted, cancelled or expired.', 'transfer pending');
 const claimNotLegal = (detail: string) => conflict('CLAIM_NOT_LEGAL', 'The legal guarantee does not apply to this claim.', detail);
 const outcomeNotAllowed = (message: string) => new DomainError('CLAIM_OUTCOME_NOT_ALLOWED', 422, message);
 const replacementNotAllowed = (message: string, detail?: string) => conflict('CLAIM_REPLACEMENT_NOT_ALLOWED', message, detail);
@@ -713,6 +717,10 @@ export class WarrantyClaimService {
       if (await liveClaimOf(tx, product.id)) throw claimOpen();
       const care = await tx.selectFrom('care_requests').select('id').where('product_id', '=', product.id).where('status', 'in', [...CARE_OPEN_STATUSES]).executeTakeFirst();
       if (care) throw careUnderWay();
+      // A transfer offer pending (an expired one can no longer be accepted): the piece could pass to its recipient while
+      // the claim carries on for the one who offered it (answer 3; §2(c): the return never goes to a former owner).
+      const offer = await tx.selectFrom('ownership_transfers').select('id').where('product_id', '=', product.id).where('status', '=', 'PENDING').where('expires_at', '>', now).executeTakeFirst();
+      if (offer) throw transferPending();
       const replaced = await tx.selectFrom('warranty_claims').select('root_product_id').where('replacement_product_id', '=', product.id).executeTakeFirst();
       const root = replaced?.root_product_id ?? product.id;
       let basis: WarrantyClaimBasis;
@@ -802,8 +810,8 @@ export class WarrantyClaimService {
       if (c.basis !== 'TWO_YEARS') throw claimNotLegal('only a 2-year claim moves to the legal guarantee');
       if (c.status !== 'RECEIVED') throw claimStep();
       const note = withNote(c.note, added);
-      // A boutique sale's receipt: in the note given now, or already in the claim's.
-      await assertLegal(tx, c.product_id, c.root_product_id, c.account_id, note, utcDate(this.clock()));
+      // A boutique sale's receipt: in the note given now (the claim's own note was written for the 2-year warranty).
+      await assertLegal(tx, c.product_id, c.root_product_id, c.account_id, added, utcDate(this.clock()));
       const now = notBefore(this.clock(), c.received_at);
       // The 2-year claim first, so that `warranty_claims_open_once` and the UNIQUE record hold for the LEGAL one.
       await tx.updateTable('warranty_claims').set({ status: 'CANCELLED', cancelled_at: now, service_record_id: null }).where('id', '=', c.id).execute();

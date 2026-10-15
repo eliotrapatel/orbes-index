@@ -16,11 +16,11 @@
  *    `ship`, of its model's kind, no service record on it; VALUE_CREDIT and PART_CREDIT grants (amount, currency of the
  *    value, 12 months, usable at any tier); a staff-entered value in THE PROGRAM's currency when none is found;
  *  - the 2-year warranty: REPAIR, REPLACEMENT or REFUSED only, its five reasons, no counter, an EXPIRED warranty refused
- *    WARRANTY_ENDED; `moveToLegal` to a LEGAL claim with the same record;
+ *    WARRANTY_ENDED; `moveToLegal` to a LEGAL claim with the same record (a boutique sale's receipt written with it);
  *  - the legal guarantee: PRICE_REDUCTION (at most the price paid) and REFUND (REVOKED `REFUNDED`), its three reasons,
  *    never a credit (the service and the CHECK);
  *  - the INSPECTION record left open while ORBES holds a piece that goes back (a transfer refused then), completed by
- *    `ship`; a transfer offer refused CLAIM_OPEN while OPEN or LABEL_SENT;
+ *    `ship`; a transfer offer refused CLAIM_OPEN while OPEN or LABEL_SENT, and a claim refused while an offer is pending;
  *  - `forCollector` and the export never carry the note nor who handled the claim; the audit never holds the note; the
  *    label served to its own account only and erased 30 days after the claim ends; GROWTH counts no replacement as a sale;
  *  - CLOSE always succeeds: its note kept whole, a long earlier note cut to fit (the audit says so, never the note);
@@ -314,6 +314,32 @@ describe('warranty claims (plan ORBES CARE, step 1.6)', () => {
     expect((await h.ctx.services.ownership.initiateTransfer(c.id, other.serial, c.actor)).transferCode).toBeTruthy();
   });
 
+  it('a transfer offer pending refuses the claim (the piece could pass to its recipient while the claim ran for the one who offered it)', async () => {
+    const c = await collector();
+    const p = await piece(models.life, { owner: c.id });
+    await h.ctx.services.ownership.initiateTransfer(c.id, p.serial, c.actor);
+    for (const basis of ['WARRANTY', 'LEGAL'] as const) {
+      expect(await refusal(open(c, p, basis))).toEqual({
+        code: 'CLAIM_NOT_ALLOWED',
+        status: 409,
+        message: 'A transfer of this piece is pending: it can be claimed once the transfer is accepted, cancelled or expired.',
+      });
+    }
+    // Nothing written: no claim, the offer still pending, the claimant still the registered owner.
+    expect(await db().selectFrom('warranty_claims').select('id').where('product_id', '=', p.id).execute()).toEqual([]);
+    expect((await db().selectFrom('ownership_transfers').select('status').where('product_id', '=', p.id).executeTakeFirstOrThrow()).status).toBe('PENDING');
+    expect((await db().selectFrom('ownership').select('account_id').where('product_id', '=', p.id).where('ended_at', 'is', null).executeTakeFirstOrThrow()).account_id).toBe(c.id);
+    // The offer cancelled: the claim opens, and no new offer can be made while it is OPEN.
+    await h.ctx.services.ownership.cancelTransfer(c.id, p.serial, c.actor);
+    expect(await open(c, p)).toMatchObject({ status: 'OPEN', account: { id: c.id } });
+    expect((await refusal(h.ctx.services.ownership.initiateTransfer(c.id, p.serial, c.actor))).code).toBe('CLAIM_OPEN');
+    // An offer past its expiry can no longer be accepted: it does not hold the claim back.
+    const q = await piece(models.life, { owner: c.id });
+    await h.ctx.services.ownership.initiateTransfer(c.id, q.serial, c.actor);
+    await db().updateTable('ownership_transfers').set({ expires_at: new Date(h.clock.now().getTime() - 1_000) }).where('product_id', '=', q.id).execute();
+    expect(await open(c, q)).toMatchObject({ status: 'OPEN', account: { id: c.id } });
+  });
+
   it('the lifetime warranty: a replacement of the same SKU, checked; the old piece REVOKED REPLACED; the new warranty started by ship', async () => {
     const c = await collector();
     const p = await piece(models.life, { owner: c.id });
@@ -591,6 +617,16 @@ describe('warranty claims (plan ORBES CARE, step 1.6)', () => {
     expect((await refusal(svc().moveToLegal((await received(buyer, life)).id, {}, operator))).code).toBe('CLAIM_NOT_LEGAL');
     const early = await piece(models.two, { owner: buyer.id });
     expect((await refusal(svc().moveToLegal((await open(buyer, early)).id, {}, operator))).code).toBe('CLAIM_STEP');
+
+    // A boutique sale (no order): the receipt is written with this step; the claim's own note, written for the 2-year
+    // warranty, does not count as the receipt.
+    const boutique = await piece(models.two, { owner: buyer.id });
+    const b = await received(buyer, boutique);
+    expect(b.note).toBe(NOTE);
+    expect(await refusal(svc().moveToLegal(b.id, {}, operator))).toMatchObject({ code: 'VALIDATION_FAILED', message: 'Write the receipt of the boutique sale in the note.' });
+    expect((await svc().sheet(b.id)).status).toBe('RECEIVED');
+    const receipt = 'Receipt 5120, boutique Paris, 1 March 2026.';
+    expect(await svc().moveToLegal(b.id, { note: receipt }, operator)).toMatchObject({ basis: 'LEGAL', status: 'RECEIVED', continues: b.id, note: `${NOTE}\n\n${receipt}` });
   });
 
   it('forCollector and the export carry no note nor who handled the claim; the audit never holds the note; the label is the account’s own, erased 30 days after', async () => {
