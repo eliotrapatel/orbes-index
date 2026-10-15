@@ -411,7 +411,7 @@ Sortie attendue : `0`.
 docker compose exec -T postgres sh -c 'exec psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select care_pieces_platine, warranty_credit_percent from club_program_settings"'
 ```
 
-Sortie attendue : `|30`.
+Sortie attendue : `|30`, ou **rien** si `THE PROGRAM` n'a jamais été enregistré : ses valeurs par défaut s'appliquent alors (chaque pièce, 30 %).
 
 **Le serveur, après** (les six mêmes qu'au §1.1, à comparer) :
 

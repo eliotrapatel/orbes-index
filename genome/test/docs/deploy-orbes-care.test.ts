@@ -181,10 +181,13 @@ describe('the runbook of ORBES CARE (docs/launch/DEPLOY-ORBES-CARE.md)', () => {
     ]);
     for (const q of [...reads, ...fenced(section(runbook, '### 1.7'), 'bash')]) expect(q, q).not.toMatch(/\b(update|insert|delete|alter|drop|truncate)\b/i);
     expect(after).toContain('Sortie attendue : une seule ligne, `t|<le nombre de tes modèles>`.');
-    expect(after).toContain('Sortie attendue : `|30`.');
+    // 0026 inserts no row and 0048 only changes row 1: a THE PROGRAM never saved prints nothing, its defaults apply.
+    expect(after).toContain("Sortie attendue : `|30`, ou **rien** si `THE PROGRAM` n'a jamais été enregistré : ses valeurs par défaut s'appliquent alors (chaque pièce, 30 %).");
     const migration = readDoc('genome/src/server/db/migrations/0048_orbes_care.ts');
     for (const d of ['warranty_lifetime boolean NOT NULL DEFAULT false', 'UPDATE models SET warranty_lifetime = true', 'warranty_credit_percent', 'care_pieces_platine']) expect(migration, d).toContain(d);
     expect(migration).toMatch(/warranties[\s\S]*lifetime/);
+    expect(migration).toContain('UPDATE club_program_settings SET care_pieces_platine = NULL WHERE id = 1');
+    expect(readDoc('genome/src/server/db/migrations/0026_club_program.ts')).not.toMatch(/INSERT INTO club_program_settings/i);
     // THE PROGRAM's PLATINE: every piece (null), 30 % by default.
     expect(DEFAULT_PROGRAM.carePiecesPlatine).toBeNull();
     expect(DEFAULT_PROGRAM.warrantyCreditPercent).toBe(30);
