@@ -285,14 +285,13 @@ TERMS · LEGAL · HELP (a new tab) and IP GEOLOCATION BY DB-IP. An authentic res
 the piece has one*, THE MODEL, *Photographed by ORBES. Compare it/them with the piece in your hands.*), the GENOME
 (GENOME, *product id*, *the glyphs*, *fingerprint · GENOME-01*), the product lines (*model*, *type*, *category*,
 *material*, CREATED *year*, DISCONTINUED · *year* when so), SEE THE MODEL (when the model is public), the tabs PRODUCT ·
-WARRANTY · CARE · OWNERSHIP and the assurance note.
+ORBES CARE · OWNERSHIP (plan ORBES CARE of 2026-10-15, step 2.3: WARRANTY and CARE merged) and the assurance note.
 
 | State | What it shows | Shown when | Reference |
 |---|---|---|---|
 | `result-first-registration` | AUTHENTIC, FIRST REGISTRATION; OWNERSHIP: REGISTRATION OPEN, its sentence, REGISTRATION OPEN UNTIL *time*, *Sign in or create an ORBES account to continue.*, SIGN IN · CREATE ACCOUNT, EMAIL, PASSWORD, SIGN IN, FORGOTTEN PASSWORD? | an activated piece never registered, signed out | C9, verify-04 |
 | `result-first-registration-product` | PRODUCT ID, COLLECTION, MODEL, TYPE, VARIANT *(the free-text field; SIZE since N1)*, CATEGORY, MATERIAL, CREATED, VERIFICATION, SIGNATURE (VALID · ORBES KEY *n*), CODE (CODE-01 · ISSUE *n*), ISSUED, ASSURANCE (PRINTED CODE) | the PRODUCT tab | verify-05 |
-| `result-first-registration-warranty` | STATUS, FROM, UNTIL (or the sentence of Client Services) | WARRANTY | C35 (1), verify-06 |
-| `result-first-registration-care` | the model's care (or the house's general care text) | CARE | C35 (3), verify-07 |
+| `result-first-registration-care` | (plan ORBES CARE, step 2.3) ORBES CARE: WARRANTY, STATUS, FROM, UNTIL and the sentence of its kind (or the sentence of Client Services); CARING FOR THIS PIECE, the model's care (or the house's general care text); *A question about this piece, its warranty or its care: ORBES Client Services answers in MESSAGES.* | ORBES CARE | C35 (1, 3), verify-06, verify-07 |
 | `result-create-account` | NAME (OPTIONAL), EMAIL, PASSWORD (*At least 12 characters.*), CREATE ACCOUNT, the terms note, TERMS OF USE · PRIVACY POLICY (a new tab) | CREATE ACCOUNT | C39 (1) |
 | `result-forgotten-password` | FORGOTTEN PASSWORD, its sentence, the contact of Client Services (email, phone, hours), I HAVE A RECOVERY CODE, BACK TO SIGN IN | FORGOTTEN PASSWORD? | C39 (2) |
 | `result-recovery-code` | SET A NEW PASSWORD, its sentence, EMAIL, RECOVERY CODE (XXXX-XXXX-XXXX, *Given by ORBES Client Services. It works once.*), NEW PASSWORD, SET NEW PASSWORD | I HAVE A RECOVERY CODE | C39 (3) |
@@ -347,11 +346,11 @@ Signed in, top to bottom at 5efd4c9: the banner; ORBES, MY PIECES, *The pieces r
 (*tier*, *n pieces held*, its benefits, NEXT: *tier*, *how many more open it, from how many*, what it adds; PALLADIUM is
 the highest; without a piece THE CLUB and what a first piece opens; *A piece revoked or retired …* when it applies: in the
 account sheet since N2, decision 10); each
-piece (the GENOME plate, the photographs, the product lines, OWNERSHIP · WARRANTY · SERVICE · CARE with the status,
+piece (the GENOME plate, the photographs, the product lines, OWNERSHIP · ORBES CARE · SERVICE (plan ORBES CARE, step 2.2; OWNERSHIP · WARRANTY · SERVICE · CARE at 5efd4c9) with the status,
 SINCE, ACQUIRED, OWNERSHIP VERIFIED / NOT YET VERIFIED, TRANSFER, the declarations, the ownership certificate); AFTER THE
 RELEASES; YOUR ORDERS (each: *model*, *channel · release*, its sentence, the steps RESERVED · PAID · SHIPPED · DELIVERED
 or CANCELLED or RETURNED with their dates, SIZE, PRICE, *add-ons*, TOTAL, CARRIER, TRACKING NUMBER, TRACK THE SHIPMENT,
-DOCUMENTS: INVOICE *n*, CREDIT NOTE *n*, CARE GUIDE, OWNERSHIP CERTIFICATE, ORDER *OR-…*); EARLY ACCESS (an account without
+DOCUMENTS: INVOICE *n*, ORBES CARE CONDITIONS, CREDIT NOTE *n*, CARE GUIDE, OWNERSHIP CERTIFICATE, ORDER *OR-…*); EARLY ACCESS (an account without
 a piece only); YOUR RELEASES (each: *release*, *state · status*, its sentence, YOUR ENTRY *id* or REFERENCE *LR-…*, the
 contact for a place held); SIGNED IN AS *email*, CHANGE PASSWORD, SIGN OUT; SCAN ORBES CODE, THE COLLECTION, THE
 RELEASES, THE CIRCLE (an owner), the legal links.
@@ -364,13 +363,14 @@ REGISTERED TO YOU · SINCE *date* (or its state alone), SEE THE PIECE; AFTER THE
 a piece); ADD A PIECE, *Scan a piece, then register it from the OWNERSHIP tab of its result.*, SCAN ORBES CODE. ORDERS:
 each order on its model's photograph (addition 3), *channel · release* (THE PRIVATE SALON · *model*), *model*, the steps
 (one reached dated in full, several by day and month: C24, C32), its sentence, SIZE, PRICE, *add-on* + *price*, TOTAL,
-CARRIER, TRACKING NUMBER, TRACK THE SHIPMENT, ORDER *OR-…*, DOCUMENTS as rows (INVOICE *n* · PDF ›, CREDIT NOTE *n* · PDF ›,
-CARE GUIDE · *The care guide of model* +, OWNERSHIP CERTIFICATE · PDF ›). RELEASES: each entry a row, its title a link,
+CARRIER, TRACKING NUMBER, TRACK THE SHIPMENT, ORDER *OR-…*, DOCUMENTS as rows (INVOICE *n* · PDF ›, ORBES CARE CONDITIONS · PDF › (plan ORBES CARE, answer 14: right after the
+INVOICE, first without one, on every order), CREDIT NOTE *n* · PDF ›, CARE GUIDE · *The care guide of model* +, OWNERSHIP
+CERTIFICATE · PDF ›). RELEASES: each entry a row, its title a link,
 *state · status*, its sentence, YOUR ENTRY *id* (in the reading face, lower case, as the draw publishes it) or REFERENCE
 *LR-…*, the contact. **A piece** (`/verify/pieces/<id>`): ‹ MY PIECES; THE MODEL's photograph, captioned, its sentence; the
 name, its lines with SIZE, SEE THE MODEL; its state; WHERE IT COMES FROM (addition 2: THE DRAW OF *day* or THE LIVE
 RELEASE OF *day*, SEE THE RELEASE ›; ORDER *OR-…*, *STEP* ON *date* ›, which opens ORDERS with it in view; nothing for a
-piece without an order); its GENOME; OWNERSHIP · WARRANTY · SERVICE · CARE: ACQUIRED, OWNERSHIP, SINCE (TRANSFER), the
+piece without an order); its GENOME; OWNERSHIP · ORBES CARE · SERVICE (plan ORBES CARE): ACQUIRED, OWNERSHIP, SINCE (TRANSFER), the
 sentences, CANCEL TRANSFER, OWNERSHIP CERTIFICATE, REPORT LOST / STOLEN or REPORTED LOST / STOLEN and its sentences,
 PIECE FOUND, the contact. SIGNED IN AS, CHANGE PASSWORD and SIGN OUT are the account sheet's (C2, C39); THE COLLECTION,
 THE RELEASES and THE CIRCLE the rail's. The content test looks for what the one page showed in all of its parts
@@ -390,9 +390,9 @@ THE RELEASES and THE CIRCLE the rail's. The content test looks for what the one 
 | `piece-boutique` | (N5) O26-J-00184 in steel, sold at a boutique: no WHERE IT COMES FROM | SEE THE PIECE | C4 |
 | `piece-stolen`, `piece-transfer`, `piece-in-service` | (N5) the owner's pieces reported stolen (its sentence, the contact), with a transfer pending (TRANSFER PENDING UNTIL *date*, its sentence, CANCEL TRANSFER), in service | the owner (m.okafor) | C35 (7) |
 | `pieces-orders-stress`, `piece-stress` | (N5) four orders (€ 125 400, USD, a 27-character tracking number); a piece of the 24-character model without a photograph, its 14-character Size | the stress demo | same pieces |
-| `pieces-warranty` | STATUS, FROM, UNTIL, the warranty's note (since N5 on O26-J-00184's page, as it was its tab before) | WARRANTY | C35 (1) |
+| `pieces-warranty` | (plan ORBES CARE, step 2.2) ORBES CARE: WARRANTY, STATUS, FROM, UNTIL and the sentence of its kind (on O26-J-00184's page) | ORBES CARE | C35 (1) |
 | `pieces-service` | SERVICE HISTORY, *No service has been recorded for this piece.* (or each service: *status since date · place*) | SERVICE | C35 (2) |
-| `pieces-care` | CARING FOR THIS PIECE, the care; ORBES CARE, its lead, its three benefits, SUBSCRIBE (a new tab) or *Subscriptions open soon.* | CARE | C35 (3) |
+| `pieces-care` | (plan ORBES CARE, step 2.2) ORBES CARE: CARING FOR THIS PIECE, the care; *A question about this piece, its warranty or its care: ORBES Client Services answers in MESSAGES.*, WRITE TO ORBES CLIENT SERVICES; for a TITANE account *PRIVATE CARE opens from PLATINE: …*. No subscription (answer 1) | ORBES CARE | C35 (3) |
 | `pieces-certificate-choice` | 7 DAYS · 30 DAYS · 90 DAYS, its sentence, CREATE LINK, CANCEL | CREATE CERTIFICATE | C35 (4) |
 | `pieces-certificate-link` | CERTIFICATE LINK, *the link*, VALID UNTIL *date*, *This link is shown once …*, COPY LINK, OPEN LINK, CREATED *date* · VALID UNTIL *date*, WITHDRAW | CREATE LINK | C35 (4) |
 | `pieces-report-choice` | REPORT LOST / STOLEN, LOST · STOLEN (pressed), what follows each, the effect, CONFIRM REPORT, CANCEL | REPORT LOST / STOLEN | C35 (5) |
@@ -616,7 +616,6 @@ verification app's own.
 | CREATE TRANSFER CODE / CANCEL TRANSFER | the owner, no incident / a transfer pending |
 | OWNERSHIP CERTIFICATE | a piece not reported lost or stolen, not revoked or retired |
 | PIECE FOUND | a loss the owner reported |
-| SUBSCRIBE (ORBES Care) | CARE_SUBSCRIBE_URL set; otherwise *Subscriptions open soon.* |
 | The contact of Client Services | configured (email, phone, hours each when set) |
 | RESERVE A PLACE | a PLATINE or PALLADIUM account in a draw's early access |
 | ENTER THE DRAW / WITHDRAW | entries open / entered |
