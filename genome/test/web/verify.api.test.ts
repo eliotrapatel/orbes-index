@@ -304,6 +304,7 @@ describe('ApiClient', () => {
       () => json(200, { careGuide: { model: 'MONOLITHE', text: 'Store it alone.' } }),
       () => json(200, { careGuide: { model: 'MONOLITHE', text: null } }),
       () => json(200, { careGuide: { model: 'MONOLITHE', text: 3 } }),
+      asPdf('ORBES-CARE-CONDITIONS-OR-1A2B3C4D.pdf'),
     ]);
     const api = new ApiClient({ fetch: f.impl });
     expect((await api.orderDocument(ID, 'invoice')).filename).toBe('ORBES-invoice-INV-2026-000001.pdf');
@@ -322,6 +323,10 @@ describe('ApiClient', () => {
     expect(f.calls.at(-1)).toMatchObject({ method: 'GET', url: `/api/v1/account/orders/${ID}/care-guide` });
     expect(await api.orderCareGuide(ID)).toEqual({ model: 'MONOLITHE', text: null });
     await expect(api.orderCareGuide(ID)).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    // Plan ORBES CARE (answer 14): the ORBES CARE conditions, saved as the invoice is.
+    expect((await api.orderDocument(ID, 'care-conditions')).filename).toBe('ORBES-CARE-CONDITIONS-OR-1A2B3C4D.pdf');
+    expect(f.calls.at(-1)).toMatchObject({ method: 'GET', url: `/api/v1/account/orders/${ID}/care-conditions.pdf` });
+    expect(f.calls.at(-1)!.headers['x-csrf-token']).toBeUndefined();
   });
 
   it('ownership certificates (F-06): creates, lists and withdraws with the CSRF token; reads one and its PDF with none, the token in the body', async () => {

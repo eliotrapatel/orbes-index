@@ -566,7 +566,8 @@ export const ORDERS = Object.freeze({
   }),
   /**
    * Its documents (plan LIVE RELEASE+, M6): the invoice and the credit note (PDFs, issued by CONGLOMERAT LLC), the
-   * model's care guide (shown under them), and once the piece is registered to the account its ownership certificate.
+   * model's care guide (shown under them), and once the piece is registered to the account its ownership certificate;
+   * plan ORBES CARE (answer 14): the ORBES CARE conditions (PDF), right after the invoice, for every order.
    */
   documents: Object.freeze({
     title: 'DOCUMENTS',
@@ -575,12 +576,14 @@ export const ORDERS = Object.freeze({
     creditNote: 'CREDIT NOTE',
     careGuide: 'CARE GUIDE',
     certificate: 'OWNERSHIP CERTIFICATE',
+    careConditions: 'ORBES CARE CONDITIONS',
     /** Under a document that saves a file (C24). */
     pdf: 'PDF',
     /** Accessible names: what each link does. */
     invoiceLabel: (number: string) => `Download the invoice ${number} (PDF)`,
     creditNoteLabel: (number: string) => `Download the credit note ${number} (PDF)`,
     certificateLabel: (model: string) => `Download the ownership certificate of your ${model} (PDF)`,
+    careConditionsLabel: (model: string) => `Download the ORBES CARE conditions of your ${model} (PDF)`,
     careGuideLabel: (model: string) => `The care guide of ${model}`,
     downloadFailed: 'This document could not be downloaded just now.',
     careFailed: 'The care guide could not be shown just now.',

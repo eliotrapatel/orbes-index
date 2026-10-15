@@ -123,10 +123,10 @@ export function orderClaim(o: AccountOrder): OrderClaimModel | null {
 
 /** One document of an order: a PDF to save (`file`), or its model's care guide, shown under the documents. */
 export interface OrderDocumentModel {
-  kind: 'INVOICE' | 'CREDIT_NOTE' | 'CARE_GUIDE' | 'CERTIFICATE';
+  kind: 'INVOICE' | 'CREDIT_NOTE' | 'CARE_GUIDE' | 'CERTIFICATE' | 'CARE_CONDITIONS';
   /** `INVOICE`, `CARE GUIDE`: the display face. */
   label: string;
-  /** `INV-2026-000001`: the reading face, after the label; null for the care guide and the certificate. */
+  /** `INV-2026-000001`: the reading face, after the label; null for the care guide, the certificate and the ORBES CARE conditions. */
   number: string | null;
   /** What the link does, for a screen reader. */
   ariaLabel: string;
@@ -148,6 +148,8 @@ export function orderDocuments(o: AccountOrder): OrderDocumentModel[] {
   const out: OrderDocumentModel[] = [];
   const invoice = d.invoice?.number;
   if (typeof invoice === 'string' && DOCUMENT_NUMBER.test(invoice) && invoice.startsWith('INV-')) out.push({ kind: 'INVOICE', label: D.invoice, number: invoice, ariaLabel: D.invoiceLabel(invoice), file: 'invoice', byNumber: false });
+  // Plan ORBES CARE (answer 14): the ORBES CARE conditions next to the invoice, the first row while there is none.
+  if (d.careConditions === true) out.push({ kind: 'CARE_CONDITIONS', label: D.careConditions, number: null, ariaLabel: D.careConditionsLabel(model), file: 'care-conditions', byNumber: false });
   const credit = d.creditNote?.number;
   if (typeof credit === 'string' && DOCUMENT_NUMBER.test(credit) && credit.startsWith('CN-')) out.push({ kind: 'CREDIT_NOTE', label: D.creditNote, number: credit, ariaLabel: D.creditNoteLabel(credit), file: 'credit-note', byNumber: false });
   // Plan NEXT LOT §3.6.C: its other documents (an engraving added or removed after payment), in order of issue.

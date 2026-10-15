@@ -332,6 +332,40 @@ describe('YOUR ORDERS: an order\'s card (orders-model.ts)', () => {
     expect([D.title, D.careGuide, D.certificate]).toEqual(['DOCUMENTS', 'CARE GUIDE', 'OWNERSHIP CERTIFICATE']);
   });
 
+  it('lists the ORBES CARE conditions right after the invoice, first while there is none, for any order the server lists them for; none from a server before them (plan ORBES CARE, answer 14)', () => {
+    const D = ORDERS.documents;
+    const row = { kind: 'CARE_CONDITIONS', label: 'ORBES CARE CONDITIONS', number: null, ariaLabel: 'Download the ORBES CARE conditions of your MONOLITHE (PDF)', file: 'care-conditions', byNumber: false };
+    const paid = order({
+      status: 'DELIVERED',
+      documents: {
+        invoice: { number: 'INV-2026-000001', issuedAt: '2026-10-06T09:00:00.000Z' },
+        creditNote: { number: 'CN-2026-000002', issuedAt: '2026-10-09T09:00:00.000Z' },
+        others: [{ kind: 'INVOICE', number: 'INV-2026-000003', issuedAt: '2026-10-07T09:00:00.000Z' }],
+        careGuide: true,
+        certificate: true,
+        careConditions: true,
+      },
+    });
+    expect(orderDocuments(paid).map((d) => [d.kind, d.number])).toEqual([
+      ['INVOICE', 'INV-2026-000001'],
+      ['CARE_CONDITIONS', null],
+      ['CREDIT_NOTE', 'CN-2026-000002'],
+      ['INVOICE', 'INV-2026-000003'],
+      ['CARE_GUIDE', null],
+      ['CERTIFICATE', null],
+    ]);
+    expect(orderDocuments(paid)[1]).toEqual(row);
+    // RESERVED (no invoice yet), CANCELLED or RETURNED (no care guide): the conditions still, first.
+    const none = { invoice: null, creditNote: null, careGuide: false, certificate: false };
+    expect(orderDocuments(order({ status: 'RESERVED', documents: { ...none, careGuide: true, careConditions: true } })).map((d) => d.kind)).toEqual(['CARE_CONDITIONS', 'CARE_GUIDE']);
+    expect(orderDocuments(order({ status: 'CANCELLED', documents: { ...none, careConditions: true } }))).toEqual([row]);
+    // Absent, or anything but true: no row.
+    expect(orderDocuments(order({ documents: none })).map((d) => d.kind)).toEqual([]);
+    expect(orderDocuments(order({ documents: { ...none, careConditions: 'yes' as never } }))).toEqual([]);
+    // The model with its variant, as the other labels read aloud.
+    expect(orderDocuments(order({ modelVariant: 'BLUE', documents: { ...none, careConditions: true } }))[0]!.ariaLabel).toBe(D.careConditionsLabel('MONOLITHE in blue'));
+  });
+
   it('writes the brand\'s English: no word of BRAND §4.5 (nor "product"), no exclamation', () => {
     const D = ORDERS.documents;
     const words = [

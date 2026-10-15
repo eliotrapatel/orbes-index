@@ -156,8 +156,8 @@ function questionOf(q: AccountQuestion | null): AccountQuestion | null {
   return q;
 }
 
-/** An order's documents saved as PDFs (GET /api/v1/account/orders/:id/<kind>.pdf). */
-export type OrderDocumentKind = 'invoice' | 'credit-note' | 'certificate';
+/** An order's documents saved as PDFs (GET /api/v1/account/orders/:id/<kind>.pdf); plan ORBES CARE: its ORBES CARE conditions. */
+export type OrderDocumentKind = 'invoice' | 'credit-note' | 'certificate' | 'care-conditions';
 
 export class ApiClient {
   private csrfToken: string | undefined;
@@ -680,7 +680,7 @@ export class ApiClient {
     return r.orders as AccountOrder[];
   }
 
-  /** One of an order's documents as a PDF, to save (M6): its invoice, its credit note, or its ownership certificate. */
+  /** One of an order's documents as a PDF, to save (M6): its invoice, its credit note, its ownership certificate, or its ORBES CARE conditions. */
   async orderDocument(orderId: string, document: OrderDocumentKind): Promise<DownloadedFile> {
     const res = await this.send('GET', `/api/v1/account/orders/${encodeURIComponent(orderId)}/${document}.pdf`, undefined, {});
     if (!res.ok) throw toApiError(res.status, await readJson(res));

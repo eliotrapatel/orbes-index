@@ -1231,6 +1231,11 @@ export interface AccountOrderDocuments {
   careGuide: boolean;
   /** Its ownership certificate (PDF), once its piece is registered to this account. */
   certificate: boolean;
+  /**
+   * Plan ORBES CARE (answer 14): the ORBES CARE conditions (PDF, article 11 of the terms in force), for every order.
+   * Absent from a server before it: no row.
+   */
+  careConditions?: boolean;
 }
 
 /** GET /api/v1/account/orders/:id/care-guide: the model's own words, or null for the house's general care text. */

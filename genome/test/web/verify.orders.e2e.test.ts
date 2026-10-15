@@ -14,9 +14,11 @@
  *    LIVE RELEASE's piece to its order's steps, never a payment still to settle.
  *  - Delivered by ORBES Client Services, read again: every step reached, DELIVERED current.
  *  - Its documents (step S4, M6): the LIVE RELEASE's piece registered by the collector, its card offers its INVOICE
- *    (its number in the reading face) and its OWNERSHIP CERTIFICATE, rows that save their PDF, and its CARE GUIDE, a row
- *    that opens under it (the house's general care text, its model having none) and closes again; the salon's order still to
- *    pay, its care guide only; the one cancelled before it was paid, none. A document that cannot be read says so.
+ *    (its number in the reading face), its ORBES CARE CONDITIONS right after it (plan ORBES CARE, answer 14) and its
+ *    OWNERSHIP CERTIFICATE, rows that save their PDF, and its CARE GUIDE, a row that opens under it (the house's general
+ *    care text, its model having none) and closes again; the salon's order still to pay, its ORBES CARE CONDITIONS and its
+ *    care guide; the one cancelled before it was paid, its ORBES CARE CONDITIONS only. A document that cannot be read
+ *    says so.
  *  - Where its piece comes from (plan NOCTURNE, addition 2; C4): on the registered piece's page, WHERE IT COMES FROM, THE
  *    LIVE RELEASE OF its day (its page) and ORDER OR-…, DELIVERED ON its date, which opens ORDERS with the order in view.
  *  - Its orders unreadable (a server error): said in their tab, the pieces still shown; signed out: no orders at all.
@@ -294,7 +296,7 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     await page.context().close();
   }, 120_000);
 
-  it('its documents: the invoice and the ownership certificate saved as PDFs, the care guide opened and closed; a document that cannot be read says so', async () => {
+  it('its documents: the invoice, the ORBES CARE conditions and the ownership certificate saved as PDFs, the care guide opened and closed; a document that cannot be read says so', async () => {
     const D = ORDERS.documents;
     // The collector registers the piece of the LIVE RELEASE (its warranty started at SHIP).
     const scan = await srv.ctx.services.verification.verify({ code: livePiece.codeData }, {});
@@ -310,19 +312,27 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     await visible(group);
     // Each a row: its label and number, then PDF or what the guide is (C24).
     const links = group.locator('.n-pieces__document');
-    await textsOf(links, [`${D.invoice} ${invoice} ${D.pdf}`, `${D.careGuide} ${D.careGuideLabel('MONOLITHE')}`, `${D.certificate} ${D.pdf}`]);
+    await textsOf(links, [`${D.invoice} ${invoice} ${D.pdf}`, `${D.careConditions} ${D.pdf}`, `${D.careGuide} ${D.careGuideLabel('MONOLITHE')}`, `${D.certificate} ${D.pdf}`]);
     // The number in the reading face, the label in the display face.
     expect(await links.first().locator('.n-pieces__document-number').innerText()).toBe(invoice);
     // The model's photograph above the order (addition 3): the model has none here, so none is shown.
     expect(await live.locator('img').count()).toBe(0);
-    // The salon's order, not paid yet: its care guide only; the one cancelled before it was paid: no document.
-    await textsOf(page.locator('article.n-pieces__order[data-status="RESERVED"] .n-pieces__document'), [`${D.careGuide} ${D.careGuideLabel('MONOLITHE')}`]);
-    expect(await page.locator('article.n-pieces__order[data-status="CANCELLED"] .n-pieces__documents').count()).toBe(0);
+    // The salon's order, not paid yet: its ORBES CARE conditions first (no invoice yet), then its care guide; the one
+    // cancelled before it was paid: its ORBES CARE conditions only (plan ORBES CARE, answer 14: every order).
+    await textsOf(page.locator('article.n-pieces__order[data-status="RESERVED"] .n-pieces__document'), [`${D.careConditions} ${D.pdf}`, `${D.careGuide} ${D.careGuideLabel('MONOLITHE')}`]);
+    await textsOf(page.locator('article.n-pieces__order[data-status="CANCELLED"] .n-pieces__document'), [`${D.careConditions} ${D.pdf}`]);
 
     // INVOICE: its PDF saved.
     const [pdf] = await Promise.all([page.waitForEvent('download'), group.getByRole('button', { name: D.invoiceLabel(invoice) }).click()]);
     expect(pdf.suggestedFilename()).toBe(`ORBES-invoice-${invoice}.pdf`);
     expect(readFileSync((await pdf.path())!).subarray(0, 5).toString()).toBe('%PDF-');
+    // ORBES CARE CONDITIONS: its PDF saved, naming the order (plan ORBES CARE, answer 14).
+    const [conditions] = await Promise.all([page.waitForEvent('download'), group.getByRole('button', { name: D.careConditionsLabel('MONOLITHE') }).click()]);
+    const reference = (await srv.ctx.services.orders.forAccount(me.id)).find((o) => o.id === ids.live)!.reference;
+    expect(conditions.suggestedFilename()).toBe(`ORBES-CARE-CONDITIONS-${reference}.pdf`);
+    const conditionsFile = readFileSync((await conditions.path())!);
+    expect(conditionsFile.subarray(0, 5).toString()).toBe('%PDF-');
+    expect(conditionsFile.toString('latin1')).toContain(`(ORBES CARE CONDITIONS ${reference})`);
     // OWNERSHIP CERTIFICATE: the piece is registered to the collector.
     const [certificate] = await Promise.all([page.waitForEvent('download'), group.getByRole('button', { name: D.certificateLabel('MONOLITHE') }).click()]);
     expect(certificate.suggestedFilename()).toMatch(new RegExp(`^ORBES-ownership-certificate-${livePiece.productId}-\\d{4}-\\d{2}-\\d{2}\\.pdf$`));
@@ -346,7 +356,7 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     const floors = await tapZoneFloors(page);
     expect(floors.problems).toEqual([]);
     // The rows, by their words (the label, the number, then the line under them).
-    expect(floors.checked).toEqual(expect.arrayContaining([`${D.invoice} ${invoice}${D.pdf}`, `${D.careGuide}${D.careGuideLabel('MONOLITHE')}`, `${D.certificate}${D.pdf}`]));
+    expect(floors.checked).toEqual(expect.arrayContaining([`${D.invoice} ${invoice}${D.pdf}`, `${D.careConditions}${D.pdf}`, `${D.careGuide}${D.careGuideLabel('MONOLITHE')}`, `${D.certificate}${D.pdf}`]));
     // At rest for the picture: the pointer off the links, the page at its top (its fixed frame drawn there).
     await page.mouse.move(0, 0);
     await page.evaluate(() => window.scrollTo(0, 0));
