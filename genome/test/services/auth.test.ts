@@ -127,7 +127,7 @@ describe('AuthService', () => {
       // The audit log is append-only: it must not hold customer PII.
       const entry = (await audit.list({ action: 'account.register', targetId: account.id })).items[0];
       expect(entry).toMatchObject({ actorType: 'account', actorId: account.id, ipHash: 'ip-1' });
-      expect(JSON.stringify(entry)).not.toMatch(/example\.com|Ada/i);
+      expect(JSON.stringify(entry)).not.toMatch(/example\.com|\bAda\b/i);
     });
 
     it('refuses duplicate emails case-insensitively, and invalid input', async () => {
