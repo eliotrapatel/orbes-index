@@ -69,7 +69,8 @@ export function saleLookupJson(r: SaleLookup) {
           material: p.material,
           createdYear: p.createdYear,
           registered: p.registered,
-          warranty: { status: p.warranty.status, startDate: p.warranty.startDate, endDate: p.warranty.endDate },
+          // Plan ORBES CARE: `lifetime` (true) only on a lifetime warranty, which has no end date.
+          warranty: { status: p.warranty.status, startDate: p.warranty.startDate, endDate: p.warranty.endDate, ...(p.warranty.lifetime ? { lifetime: true } : {}) },
         }
       : null,
     sale: r.sale,

@@ -767,10 +767,14 @@ export class IssuanceService {
     const now = this.clock();
     // Read again under a share lock: a model or category deactivated (A-10) since the checks before the transaction
     // (the claim-code hash and the signing come in between) issues nothing, and a deactivation now waits for this one.
+    // Plan ORBES CARE (answer 12): the model's warranty choice is read here too, under the same lock, and written on the
+    // piece's warranty below (never the one `prepareIssue` read outside the transaction): a change of the model's choice
+    // (CatalogService.setWarranty, the model's row FOR UPDATE) commits before this read, or waits for this issuance and
+    // then rewrites its row.
     const live = await trx
       .selectFrom('models as m')
       .innerJoin('categories as c', 'c.id', 'm.category_id')
-      .select(['m.active as model_active', 'c.active as category_active'])
+      .select(['m.active as model_active', 'c.active as category_active', 'm.warranty_lifetime'])
       .where('m.id', '=', p.modelId)
       .forShare()
       .executeTakeFirst();
@@ -863,7 +867,7 @@ export class IssuanceService {
 
     await trx
       .insertInto('warranties')
-      .values({ product_id: productRow.id, duration_months: a.warrantyMonths, created_at: now, updated_at: now })
+      .values({ product_id: productRow.id, duration_months: a.warrantyMonths, lifetime: live.warranty_lifetime, created_at: now, updated_at: now })
       .execute();
     // The event journal (plan LIVE RELEASE+, N1): every piece's change, its issue first.
     await writeJournal(trx, [{ type: 'product.issue', entityType: 'product', entityId: productRow.id, payload: productPayload(productRow, now) }], now);
@@ -1180,7 +1184,7 @@ export interface StockIdentityInput {
  * serial of the year and of the model's category (`allocateSerial`, never reused), the product ISSUED, unregistered,
  * in its SKU and size, with its material, batch and claim hash, entering the stock now (`stock_entered_at`) from its
  * reception line (`reception_line_id`); its status history null → ISSUED; its genome; its first code signed
- * (`signFirst`, issue 1); its warranty, not started; journaled `product.issue`. Returns the row and the audit entry
+ * (`signFirst`, issue 1); its warranty, not started, of its model's kind (lifetime or 2 years, plan ORBES CARE); journaled `product.issue`. Returns the row and the audit entry
  * `product.issue` (with the reception) for the caller to write last.
  */
 export async function issueStockIdentity(
@@ -1192,11 +1196,14 @@ export async function issueStockIdentity(
   now: Date,
 ): Promise<{ product: ProductRow; code: CodeRecord; audit: AuditRecordInput }> {
   if (!trx.isTransaction) throw new Error('issueStockIdentity must run inside a transaction');
+  // FOR SHARE (plan ORBES CARE, answer 12): the model's warranty choice written on the piece's warranty below is the one in
+  // force when this transaction commits; a change of it (CatalogService.setWarranty, FOR UPDATE) waits, then rewrites it.
   const model = await trx
     .selectFrom('models as m')
     .innerJoin('categories as c', 'c.id', 'm.category_id')
-    .select(['m.category_id', 'c.code', 'c.warranty_months'])
+    .select(['m.category_id', 'c.code', 'c.warranty_months', 'm.warranty_lifetime'])
     .where('m.id', '=', input.modelId)
+    .forShare()
     .executeTakeFirst();
   if (!model) throw notFound('Model', 'MODEL_NOT_FOUND');
   const sku = await trx.selectFrom('skus').select(['code', 'size_label']).where('id', '=', input.skuId).where('model_id', '=', input.modelId).executeTakeFirst();
@@ -1242,7 +1249,10 @@ export async function issueStockIdentity(
     .values({ product_id: row.id, genome_version: genome.version, genome_id: productId, value: genome.value, glyphs: genome.glyphs, pattern: genome.ids.join('·'), fingerprint: genome.fingerprint, created_at: now })
     .execute();
   const signed = await signFirst(row, now);
-  await trx.insertInto('warranties').values({ product_id: row.id, duration_months: model.warranty_months, created_at: now, updated_at: now }).execute();
+  await trx
+    .insertInto('warranties')
+    .values({ product_id: row.id, duration_months: model.warranty_months, lifetime: model.warranty_lifetime, created_at: now, updated_at: now })
+    .execute();
   await writeJournal(trx, [{ type: 'product.issue', entityType: 'product', entityId: row.id, payload: productPayload(row, now) }], now);
   return {
     product: row,

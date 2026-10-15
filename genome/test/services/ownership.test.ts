@@ -854,6 +854,17 @@ describe('OwnershipService', () => {
       expect(await ownership.listForAccount((await account()).id)).toEqual([]);
     });
 
+    it('listForAccount says a lifetime warranty (`lifetime`, no end date) and leaves it out of a 2-year one (plan ORBES CARE)', async () => {
+      const { p, owner } = await owned();
+      // The piece's own row is lifetime (issuance copies its model's choice): its activation keeps it so.
+      await t.db.insertInto('warranties').values({ product_id: p.id, duration_months: 24, lifetime: true }).execute();
+      await warranty.activate(p.productId, { purchaseDate: '2026-06-01' }, admin);
+      expect((await ownership.listForAccount(owner.id))[0].warranty).toEqual({ status: 'ACTIVE', startDate: '2026-06-01', lifetime: true });
+      const two = await owned();
+      await warranty.activate(two.p.productId, { purchaseDate: '2026-06-01' }, admin);
+      expect((await ownership.listForAccount(two.owner.id))[0].warranty).toEqual({ status: 'ACTIVE', startDate: '2026-06-01', endDate: '2028-06-01' });
+    });
+
     it('history lists every owner and transfer; currentOwner reflects the latest', async () => {
       const { p, owner } = await owned();
       const offer = await ownership.initiateTransfer(owner.id, p.productId, owner.actor);

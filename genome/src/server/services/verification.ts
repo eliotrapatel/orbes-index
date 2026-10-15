@@ -138,7 +138,8 @@ export interface VerifyOutcome {
     discontinuedYear?: number;
   };
   genome?: { id: string; version: string; fingerprint: string; glyphs: number[]; ids: string[] };
-  warranty?: { status: WarrantyStatus; startDate?: string; endDate?: string };
+  /** `lifetime` present (true) only on a lifetime warranty, which has no end date (plan ORBES CARE). */
+  warranty?: { status: WarrantyStatus; startDate?: string; endDate?: string; lifetime?: true };
   ownership?: { registered: boolean; you: boolean; transferPending?: boolean };
   registration?: { token: string; expiresAt: string; claimCodeRequired: boolean };
   /**
@@ -180,7 +181,8 @@ export interface StaffScanPiece {
   variant: string | null;
   material: string;
   createdYear: number;
-  warranty: { status: WarrantyStatus; startDate: string | null; endDate: string | null; voided: boolean };
+  /** `lifetime`: its kind, copied from its model (plan ORBES CARE); a lifetime warranty has no end date. */
+  warranty: { status: WarrantyStatus; startDate: string | null; endDate: string | null; voided: boolean; lifetime: boolean };
   /** A customer account holds it. */
   registered: boolean;
 }
@@ -277,7 +279,7 @@ interface Registered {
   /** When its model was discontinued (P-R06), else null. */
   modelDiscontinuedAt: Date | null;
   code: { id: string; status: CodeStatus; createdAt: Date; payloadHash: Uint8Array } | null;
-  warranty: { start_date: string | null; end_date: string | null; voided_at: Date | null; duration_months: number } | null;
+  warranty: { start_date: string | null; end_date: string | null; voided_at: Date | null; duration_months: number; lifetime: boolean } | null;
   ownerAccountId: string | null;
   transferPending: boolean;
 }
@@ -561,6 +563,7 @@ export class VerificationService {
                 startDate: reg.warranty?.start_date ?? null,
                 endDate: reg.warranty?.end_date ?? null,
                 voided: reg.warranty?.voided_at !== null && reg.warranty?.voided_at !== undefined,
+                lifetime: reg.warranty?.lifetime === true,
               },
               registered: reg.ownerAccountId !== null,
             }
@@ -706,6 +709,7 @@ export class VerificationService {
         'w.end_date as wEnd',
         'w.voided_at as wVoided',
         'w.duration_months as wMonths',
+        'w.lifetime as wLifetime',
         'o.account_id as ownerAccountId',
         't.expires_at as transferExpiresAt',
       ])
@@ -738,8 +742,8 @@ export class VerificationService {
           ? { id: r.codeId, status: r.codeStatus, createdAt: r.codeCreatedAt, payloadHash: r.payloadHash }
           : null,
       warranty:
-        r.wMonths !== null
-          ? { start_date: r.wStart, end_date: r.wEnd, voided_at: r.wVoided, duration_months: r.wMonths }
+        r.wMonths !== null && r.wLifetime !== null
+          ? { start_date: r.wStart, end_date: r.wEnd, voided_at: r.wVoided, duration_months: r.wMonths, lifetime: r.wLifetime }
           : null,
       ownerAccountId: r.ownerAccountId,
       transferPending: r.transferExpiresAt !== null && r.transferExpiresAt.getTime() > now.getTime(),
@@ -874,6 +878,7 @@ export class VerificationService {
         status: computeWarrantyStatus(wr, today),
         ...(wr?.start_date ? { startDate: wr.start_date } : {}),
         ...(wr?.end_date ? { endDate: wr.end_date } : {}),
+        ...(wr?.lifetime ? { lifetime: true as const } : {}),
       };
       out.ownership = {
         registered: reg.ownerAccountId !== null,

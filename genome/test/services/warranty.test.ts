@@ -60,7 +60,7 @@ describe('warranty date arithmetic (UTC, clamped)', () => {
   });
 
   it('computes the status, end date inclusive', () => {
-    const w = { start_date: '2026-01-10', end_date: '2028-01-10', voided_at: null, duration_months: 24 };
+    const w = { start_date: '2026-01-10', end_date: '2028-01-10', voided_at: null, duration_months: 24, lifetime: false };
     expect(computeWarrantyStatus(null, '2026-01-01')).toBe('NOT_STARTED');
     expect(computeWarrantyStatus({ ...w, start_date: null, end_date: null }, '2026-01-01')).toBe('NOT_STARTED');
     expect(computeWarrantyStatus(w, '2026-01-09')).toBe('NOT_STARTED');
@@ -71,6 +71,16 @@ describe('warranty date arithmetic (UTC, clamped)', () => {
     expect(computeWarrantyStatus({ ...w, voided_at: new Date() }, '2025-01-01')).toBe('VOID');
     expect(computeWarrantyStatus({ ...w, duration_months: 0, end_date: '2026-01-10' }, '2026-01-10')).toBe('EXPIRED');
   });
+
+  it('a lifetime warranty is ACTIVE once started, whatever its months; VOID still wins (plan ORBES CARE)', () => {
+    const w = { start_date: '2026-01-10', end_date: null, voided_at: null, duration_months: 24, lifetime: true };
+    expect(computeWarrantyStatus({ ...w, start_date: null }, '2026-01-10')).toBe('NOT_STARTED');
+    expect(computeWarrantyStatus(w, '2026-01-09')).toBe('NOT_STARTED');
+    expect(computeWarrantyStatus(w, '2026-01-10')).toBe('ACTIVE');
+    expect(computeWarrantyStatus(w, '2099-12-31')).toBe('ACTIVE');
+    expect(computeWarrantyStatus({ ...w, duration_months: 0 }, '2030-01-01')).toBe('ACTIVE');
+    expect(computeWarrantyStatus({ ...w, voided_at: new Date() }, '2030-01-01')).toBe('VOID');
+  });
 });
 
 describe('WarrantyService', () => {
@@ -80,6 +90,8 @@ describe('WarrantyService', () => {
   let warranty: WarrantyService;
   let modelId: string;
   let shortModelId: string;
+  /** A model of category J at the lifetime warranty (plan ORBES CARE, answer 12). */
+  let lifetimeModelId: string;
   let serial = 0;
   const clock = createManualClock('2026-06-15T10:00:00.000Z');
 
@@ -98,10 +110,13 @@ describe('WarrantyService', () => {
       .execute();
     modelId = (await t.db.insertInto('models').values({ category_id: 1, name: 'MONOLITHE', type: 'RING', sku_prefix: 'MON' }).returning('id').executeTakeFirstOrThrow()).id;
     shortModelId = (await t.db.insertInto('models').values({ category_id: 2, name: 'ATLAS', type: 'WALLET', sku_prefix: 'ATL' }).returning('id').executeTakeFirstOrThrow()).id;
+    lifetimeModelId = (
+      await t.db.insertInto('models').values({ category_id: 1, name: 'ECLIPSE', type: 'RING', sku_prefix: 'ECL', warranty_lifetime: true }).returning('id').executeTakeFirstOrThrow()
+    ).id;
   });
   afterAll(() => t.close());
 
-  async function product(opts: { category?: 1 | 2 | 3; path?: ProductStatus[] } = {}) {
+  async function product(opts: { category?: 1 | 2 | 3; path?: ProductStatus[]; lifetime?: true } = {}) {
     const cat = opts.category ?? 1;
     const code = { 1: 'J', 2: 'L', 3: 'Z' }[cat];
     const s = ++serial;
@@ -115,7 +130,7 @@ describe('WarrantyService', () => {
         category_id: cat,
         serial: s,
         sku: `SKU-${s}`,
-        model_id: cat === 2 ? shortModelId : modelId,
+        model_id: opts.lifetime ? lifetimeModelId : cat === 2 ? shortModelId : modelId,
         material: 'SILVER',
         created_at: clock.now(),
       })
@@ -398,6 +413,130 @@ describe('WarrantyService', () => {
       await expectDomainError(warranty.completeService('not-a-uuid', {}, admin), 'SERVICE_NOT_FOUND', 404);
       await expectDomainError(warranty.completeService('00000000-0000-4000-8000-000000000000', {}, admin), 'SERVICE_NOT_FOUND', 404);
       await expectDomainError(warranty.cancelService('00000000-0000-4000-8000-000000000000', { reason: '' }, admin), 'VALIDATION_FAILED', 400);
+    });
+  });
+
+  describe('the lifetime warranty (plan ORBES CARE, answers 2 and 12)', () => {
+    const rowOf = async (id: string) => t.db.selectFrom('warranties').selectAll().where('product_id', '=', id).executeTakeFirstOrThrow();
+
+    it('activate gives a lifetime model’s piece without a row a lifetime warranty: no end date, its months kept, audited', async () => {
+      const p = await product({ lifetime: true });
+      const { warranty: w } = await warranty.activate(p.productId, { purchaseDate: '2026-06-01' }, admin);
+      expect(w).toMatchObject({ startDate: '2026-06-01', endDate: null, durationMonths: 24, lifetime: true, status: 'ACTIVE' });
+      expect(await rowOf(p.id)).toMatchObject({ lifetime: true, end_date: null, duration_months: 24 });
+      expect(await warranty.summary(p.productId)).toEqual({ status: 'ACTIVE', startDate: '2026-06-01', lifetime: true });
+      expect(await warranty.status(p.productId, new Date('2090-01-01T00:00:00.000Z'))).toBe('ACTIVE');
+      const entry = (await audit.list({ action: 'warranty.activate', targetId: p.productId })).items[0];
+      expect(entry.details).toMatchObject({ startDate: '2026-06-01', endDate: null, lifetime: true, durationMonths: 24 });
+      // A 2-year piece's audit and summary are as before: no `lifetime`.
+      const q = await product();
+      const two = await warranty.activate(q.productId, { purchaseDate: '2026-06-01' }, admin);
+      expect(two.warranty).toMatchObject({ endDate: '2028-06-01', lifetime: false });
+      expect((await audit.list({ action: 'warranty.activate', targetId: q.productId })).items[0].details).not.toHaveProperty('lifetime');
+      expect(await warranty.summary(q.productId)).toEqual({ status: 'ACTIVE', startDate: '2026-06-01', endDate: '2028-06-01' });
+    });
+
+    it('activate reads the kind from the piece’s own row, not from its model, when the piece has one', async () => {
+      // A row of a lifetime model's piece written at 2 years (an explicit write is kept) starts at 2 years...
+      const a = await product({ lifetime: true });
+      await t.db.insertInto('warranties').values({ product_id: a.id, duration_months: 24, lifetime: false }).execute();
+      expect((await warranty.activate(a.productId, { purchaseDate: '2026-06-01' }, admin)).warranty).toMatchObject({ endDate: '2028-06-01', lifetime: false });
+      // ...and a lifetime row of a 2-year model's piece starts for life.
+      const b = await product();
+      await t.db.insertInto('warranties').values({ product_id: b.id, duration_months: 24, lifetime: true }).execute();
+      expect((await warranty.activate(b.productId, { purchaseDate: '2026-06-01' }, admin)).warranty).toMatchObject({ endDate: null, lifetime: true, status: 'ACTIVE' });
+    });
+
+    it('void creates the row of its model’s kind for a piece without one', async () => {
+      const p = await product({ lifetime: true });
+      expect(await warranty.void(p.productId, 'grey market', admin)).toMatchObject({ status: 'VOID', lifetime: true, durationMonths: 24, endDate: null });
+      const q = await product();
+      expect(await warranty.void(q.productId, 'grey market', admin)).toMatchObject({ status: 'VOID', lifetime: false, durationMonths: 24 });
+    });
+
+    it('extend refuses a lifetime warranty (409 WARRANTY_LIFETIME) and writes nothing', async () => {
+      const p = await product({ lifetime: true });
+      await warranty.activate(p.productId, { purchaseDate: '2026-06-01' }, admin);
+      const before = await rowOf(p.id);
+      await expectDomainError(warranty.extend(p.productId, 12, admin), 'WARRANTY_LIFETIME', 409);
+      expect(await rowOf(p.id)).toEqual(before);
+      expect((await audit.list({ action: 'warranty.extend', targetId: p.productId })).total).toBe(0);
+    });
+
+    it('names a warranty claim’s replacement in the activation’s audit (via warranty_claim, its claimId), a SHIP its order as before', async () => {
+      const claimId = '6c2f0a64-6d1e-4c39-9d8e-2a1b3c4d5e6f';
+      const p = await product({ lifetime: true });
+      await warranty.activate(p.productId, {}, admin, { via: { via: 'warranty_claim', claimId } });
+      const d = (await audit.list({ action: 'warranty.activate', targetId: p.productId })).items[0].details;
+      expect(d).toMatchObject({ via: 'warranty_claim', claimId });
+      expect(d).not.toHaveProperty('orderId');
+      const orderId = '7d3f1b75-7e2f-4d4a-8e9f-3b2c4d5e6f70';
+      const q = await product();
+      await warranty.activate(q.productId, {}, admin, { via: { via: 'ship', orderId } });
+      expect((await audit.list({ action: 'warranty.activate', targetId: q.productId })).items[0].details).toMatchObject({ via: 'ship', orderId });
+    });
+
+    describe('the trigger warranties_kind (migration 0048)', () => {
+      it('a row inserted without `lifetime` takes its model’s choice', async () => {
+        const a = await product({ lifetime: true });
+        await t.db.insertInto('warranties').values({ product_id: a.id, duration_months: 24 }).execute();
+        expect((await rowOf(a.id)).lifetime).toBe(true);
+        const b = await product();
+        await t.db.insertInto('warranties').values({ product_id: b.id, duration_months: 24 }).execute();
+        expect((await rowOf(b.id)).lifetime).toBe(false);
+      });
+
+      it('an end date written on a lifetime row is cleared (the previous image’s activation during the roll-out)', async () => {
+        const a = await product({ lifetime: true });
+        await t.db.insertInto('warranties').values({ product_id: a.id, duration_months: 24 }).execute();
+        // What 90d9d30's activate writes: the start, the category's months and their end date, never `lifetime`.
+        await t.db.updateTable('warranties').set({ purchase_date: '2026-06-01', start_date: '2026-06-01', duration_months: 24, end_date: '2028-06-01' }).where('product_id', '=', a.id).execute();
+        expect(await rowOf(a.id)).toMatchObject({ lifetime: true, start_date: '2026-06-01', end_date: null, duration_months: 24 });
+        expect(await warranty.status(a.productId, new Date('2040-01-01T00:00:00.000Z'))).toBe('ACTIVE');
+        // Its insert of a started row (activate without a row) too.
+        const b = await product({ lifetime: true });
+        await t.db.insertInto('warranties').values({ product_id: b.id, start_date: '2026-06-01', duration_months: 24, end_date: '2028-06-01' }).execute();
+        expect(await rowOf(b.id)).toMatchObject({ lifetime: true, end_date: null });
+      });
+
+      it('an explicit write is kept as it is', async () => {
+        const a = await product({ lifetime: true });
+        await t.db.insertInto('warranties').values({ product_id: a.id, start_date: '2026-06-01', duration_months: 24, end_date: '2028-06-01', lifetime: false }).execute();
+        expect(await rowOf(a.id)).toMatchObject({ lifetime: false, end_date: '2028-06-01' });
+        const b = await product();
+        await t.db.insertInto('warranties').values({ product_id: b.id, start_date: '2026-06-01', duration_months: 24, lifetime: true }).execute();
+        expect(await rowOf(b.id)).toMatchObject({ lifetime: true, end_date: null });
+      });
+    });
+
+    it('the list’s SQL status equals computeWarrantyStatus on lifetime rows', async () => {
+      // Started long ago, with 1 month and with 0 months: ACTIVE for life; one not started yet; one VOID.
+      const kinds = [
+        { start_date: '2001-01-01', duration_months: 1 },
+        { start_date: '2001-01-01', duration_months: 0 },
+        { start_date: null, duration_months: 24 },
+        { start_date: '2026-06-01', duration_months: 24, voided_at: clock.now() },
+      ];
+      const ids: string[] = [];
+      for (const k of kinds) {
+        const p = await product({ lifetime: true });
+        await t.db.insertInto('warranties').values({ product_id: p.id, ...k, lifetime: true }).execute();
+        ids.push(p.productId);
+      }
+      const all = (await warranty.list({}, { page: 1, pageSize: 500 })).items;
+      const today = utcDate(clock.now());
+      for (const item of all) {
+        const row = { start_date: item.startDate, end_date: item.endDate, voided_at: item.voidedAt, duration_months: item.durationMonths, lifetime: item.lifetime };
+        expect(item.status).toBe(computeWarrantyStatus(row, today));
+      }
+      for (const status of ['NOT_STARTED', 'ACTIVE', 'EXPIRED', 'VOID'] as const) {
+        const page = (await warranty.list({ status }, { page: 1, pageSize: 500 })).items;
+        expect(page.every((w) => computeWarrantyStatus({ start_date: w.startDate, end_date: w.endDate, voided_at: w.voidedAt, duration_months: w.durationMonths, lifetime: w.lifetime }, today) === status)).toBe(true);
+      }
+      const statusOfItem = (pid: string) => all.find((x) => x.productId === pid)?.status;
+      expect(ids.map(statusOfItem)).toEqual(['ACTIVE', 'ACTIVE', 'NOT_STARTED', 'VOID']);
+      const active = (await warranty.list({ status: 'ACTIVE' }, { page: 1, pageSize: 500 })).items.map((x) => x.productId);
+      expect(active).toEqual(expect.arrayContaining(ids.slice(0, 2)));
     });
   });
 

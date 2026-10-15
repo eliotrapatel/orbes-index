@@ -32,7 +32,7 @@ interface LookupJson {
     material: string;
     createdYear: number;
     registered: boolean;
-    warranty: { status: string; startDate: string | null; endDate: string | null };
+    warranty: { status: string; startDate: string | null; endDate: string | null; lifetime?: true };
   };
   sale: { token: string; expiresAt: string } | null;
   refusal: { code: string; message: string } | null;
@@ -206,6 +206,27 @@ describe('sale mode (A-08)', () => {
     // The client can now register it from the card, as the sale screen tells them.
     const pub = await h.client().post('/api/v1/verify', { code: piece.code.data });
     expect(body<{ state: string }>(pub).state).toBe('AUTHENTIC_FIRST_REGISTRATION');
+  });
+
+  it('a lifetime model’s piece: the lookup carries `lifetime`, the sale starts its warranty for life, with no end date (plan ORBES CARE, answer 12)', async () => {
+    const life = await seedCatalog(h.ctx);
+    await h.ctx.db.updateTable('models').set({ warranty_lifetime: true }).where('id', '=', life.modelId).execute();
+    const piece = await issue(h.ctx, life);
+    const r = await lookup(seller, scanOf(piece));
+    expect(r.piece?.warranty).toEqual({ status: 'NOT_STARTED', startDate: null, endDate: null, lifetime: true });
+    const res = await seller.post('/api/admin/sale/activate', { token: r.sale!.token, retailerId: shop.id });
+    expect(res.statusCode, res.body).toBe(200);
+    const today = h.clock.now().toISOString().slice(0, 10);
+    expect(body<{ warranty: Record<string, unknown> }>(res).warranty).toMatchObject({ startDate: today, endDate: null, lifetime: true, status: 'ACTIVE' });
+    expect((await lookup(seller, scanOf(piece))).piece?.warranty).toEqual({ status: 'ACTIVE', startDate: today, endDate: null, lifetime: true });
+    // The public result of a scan says it too (an ACTIVE warranty with no end date), and a 2-year piece's says nothing more.
+    const pub = body<{ warranty: unknown }>(await h.client().post('/api/v1/verify', { code: piece.code.data }));
+    expect(pub.warranty).toEqual({ status: 'ACTIVE', startDate: today, lifetime: true });
+    const two = await issue(h.ctx, catalog);
+    await h.ctx.services.warranty.activate(two.product.productId, {}, SYSTEM_ACTOR);
+    expect((await lookup(seller, scanOf(two))).piece?.warranty).not.toHaveProperty('lifetime');
+    const twoPub = body<{ warranty: Record<string, unknown> }>(await h.client().post('/api/v1/verify', { code: two.code.data }));
+    expect(twoPub.warranty).toEqual({ status: 'ACTIVE', startDate: today, endDate: expect.any(String) });
   });
 
   it('the token ties the activation to the seller, the piece and the time of the scan', async () => {

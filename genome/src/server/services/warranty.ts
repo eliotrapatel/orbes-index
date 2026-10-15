@@ -8,9 +8,19 @@
  * the month (2026-01-31 + 1 month = 2026-02-28; 2024-02-29 + 12 = 2025-02-28).
  * Coverage includes the end date.
  *
+ * Its kind (plan ORBES CARE, answer 12, migration 0048): a warranty is LIFETIME
+ * or of the category's months (the 2-year warranty), copied from its model's
+ * choice (`models.warranty_lifetime`) when its row is created (issuance, or
+ * `activate` and `void` for a piece without one) and kept current by a change
+ * of the model's choice (CatalogService.setWarranty). A lifetime warranty has
+ * no end date (`warranties_lifetime_open`); it keeps its `duration_months`, so
+ * a switch to 2 years gives back `start + duration_months`. `activate` reads the
+ * kind from the piece's own row, else from its model.
+ *
  * Status is computed, never stored:
  *   VOID         voided_at is set (wins over everything)
  *   NOT_STARTED  no warranty row, no start date, or start date in the future
+ *   ACTIVE       a lifetime warranty, once started
  *   EXPIRED      today > end date, or a 0-month warranty (no coverage)
  *   ACTIVE       otherwise
  *
@@ -90,13 +100,15 @@ export function addMonthsClamped(date: string, months: number): string {
   return `${String(ny).padStart(4, '0')}-${String(nm).padStart(2, '0')}-${String(nd).padStart(2, '0')}`;
 }
 
-type WarrantyDates = Pick<WarrantyRow, 'start_date' | 'end_date' | 'voided_at' | 'duration_months'>;
+type WarrantyDates = Pick<WarrantyRow, 'start_date' | 'end_date' | 'voided_at' | 'duration_months' | 'lifetime'>;
 
 /** Computed warranty status at UTC date `today` ('YYYY-MM-DD'). */
 export function computeWarrantyStatus(w: WarrantyDates | null | undefined, today: string): WarrantyStatus {
   if (!w) return 'NOT_STARTED';
   if (w.voided_at !== null) return 'VOID';
   if (w.start_date === null || w.start_date > today) return 'NOT_STARTED';
+  // Plan ORBES CARE (answer 2): the lifetime warranty never ends once started, whatever its stored months.
+  if (w.lifetime) return 'ACTIVE';
   if (w.duration_months === 0) return 'EXPIRED';
   if (w.end_date !== null && w.end_date < today) return 'EXPIRED';
   return 'ACTIVE';
@@ -113,8 +125,12 @@ export interface WarrantyRecord {
   retailerId: string | null;
   country: string | null;
   startDate: string | null;
+  /** null for a lifetime warranty (and before it starts). */
   endDate: string | null;
+  /** Kept on a lifetime warranty (the category's months, plus any extension): a switch of its model to 2 years gives back `start + durationMonths`. */
   durationMonths: number;
+  /** Plan ORBES CARE (answer 12): the lifetime warranty, copied from its model's choice; false: the 2-year warranty (the category's months). */
+  lifetime: boolean;
   voidedAt: Date | null;
   voidReason: string | null;
   status: WarrantyStatus;
@@ -127,7 +143,12 @@ export interface WarrantySummary {
   status: WarrantyStatus;
   startDate?: string;
   endDate?: string;
+  /** Plan ORBES CARE: present (true) only on a lifetime warranty, which has no end date. */
+  lifetime?: true;
 }
+
+/** What started a warranty, in its audit entry: a parcel's SHIP (its order), or a warranty claim's replacement shipped (plan ORBES CARE). */
+export type ActivationVia = { via: 'ship'; orderId: string } | { via: 'warranty_claim'; claimId: string };
 
 export interface ActivateWarrantyInput {
   /** 'YYYY-MM-DD'; defaults to today (UTC). */
@@ -219,7 +240,7 @@ export class WarrantyService {
     productId: string,
     input: ActivateWarrantyInput,
     actor: Actor,
-    opts: { tx?: Db; saleScanId?: string; via?: { via: 'ship'; orderId: string } } = {},
+    opts: { tx?: Db; saleScanId?: string; via?: ActivationVia } = {},
   ): Promise<{ warranty: WarrantyRecord; statusChange: StatusChange | null }> {
     const now = this.clock();
     const today = utcDate(now);
@@ -236,7 +257,12 @@ export class WarrantyService {
       const pointOfSale = input.retailerId === undefined || input.retailerId === null ? null : await requireActiveRetailer(tx, input.retailerId);
       const country = givenCountry ?? pointOfSale?.country?.trim() ?? null;
       const product = await requireProduct(tx, productId, { forUpdate: true });
-      const existing = await tx.selectFrom('warranties').selectAll().where('product_id', '=', product.id).executeTakeFirst();
+      // The category's months and the model's choice, the model's row under a share lock taken before the warranty's row
+      // (the order CatalogService.setWarranty takes them in: the model, then its pieces' warranties).
+      const kind = await this.pieceWarranty(tx, product);
+      // FOR UPDATE: a change of its model's choice (CatalogService.setWarranty) rewrites this row; read under its lock,
+      // the kind written below is the one in force, never one replaced meanwhile.
+      const existing = await tx.selectFrom('warranties').selectAll().where('product_id', '=', product.id).forUpdate().executeTakeFirst();
       if (existing?.voided_at) throw new DomainError('WARRANTY_VOID', 409, 'The warranty of this product has been voided.');
       if (existing?.start_date) throw new DomainError('WARRANTY_ALREADY_ACTIVATED', 409, 'The warranty of this product is already activated.');
       if (!ACTIVATABLE_STATUSES.includes(product.status)) {
@@ -256,8 +282,11 @@ export class WarrantyService {
       // its code in force) that may have changed during its 10 minutes; checked again under the row lock.
       if (opts.saleScanId !== undefined) await this.assertStillForSale(tx, product, opts.saleScanId);
 
-      const months = await this.categoryMonths(tx, product.category_id);
-      const endDate = addMonthsClamped(purchaseDate, months);
+      // The kind is the piece's own row's (copied from its model at issuance, kept current by the model's switch), else
+      // its model's (a piece without a row).
+      const months = kind.months;
+      const lifetime = existing ? existing.lifetime : kind.lifetime;
+      const endDate = lifetime ? null : addMonthsClamped(purchaseDate, months);
       const values = {
         purchase_date: purchaseDate,
         retailer,
@@ -266,6 +295,7 @@ export class WarrantyService {
         start_date: purchaseDate,
         duration_months: months,
         end_date: endDate,
+        lifetime,
         updated_at: now,
       };
       const row = existing
@@ -287,13 +317,15 @@ export class WarrantyService {
             purchaseDate,
             startDate: purchaseDate,
             endDate,
+            ...(lifetime ? { lifetime: true } : {}),
             durationMonths: months,
             retailer: pointOfSale?.name ?? retailer,
             ...(pointOfSale ? { retailerId: pointOfSale.id } : {}),
             country,
             ...(opts.saleScanId ? { saleScanId: opts.saleScanId } : {}),
-            // Plan NEXT LOT §3.5.6.8b: started by the parcel's SHIP, for its order.
-            ...(opts.via ? { via: opts.via.via, orderId: opts.via.orderId } : {}),
+            // Plan NEXT LOT §3.5.6.8b: started by the parcel's SHIP, for its order (`orderId`); plan ORBES CARE: by the
+            // shipping of a warranty claim's replacement (`claimId`).
+            ...(opts.via ? { ...opts.via } : {}),
           },
         },
         tx,
@@ -315,6 +347,7 @@ export class WarrantyService {
       status: w.status,
       ...(w.startDate ? { startDate: w.startDate } : {}),
       ...(w.endDate ? { endDate: w.endDate } : {}),
+      ...(w.lifetime ? { lifetime: true as const } : {}),
     };
   }
 
@@ -339,6 +372,8 @@ export class WarrantyService {
       const product = await requireProduct(tx, productId, { forUpdate: true });
       const existing = await tx.selectFrom('warranties').selectAll().where('product_id', '=', product.id).executeTakeFirst();
       if (existing?.voided_at) throw new DomainError('WARRANTY_ALREADY_VOID', 409, 'The warranty of this product is already void.');
+      // A piece without a row gets one of its model's kind (plan ORBES CARE, answer 12), as issuance writes it.
+      const kind = existing ? null : await this.pieceWarranty(tx, product);
       const row = existing
         ? await tx
             .updateTable('warranties')
@@ -350,7 +385,8 @@ export class WarrantyService {
             .insertInto('warranties')
             .values({
               product_id: product.id,
-              duration_months: await this.categoryMonths(tx, product.category_id),
+              duration_months: kind!.months,
+              lifetime: kind!.lifetime,
               voided_at: now,
               void_reason: why,
               created_at: now,
@@ -371,7 +407,10 @@ export class WarrantyService {
     return this.void(productId, reason, actor);
   }
 
-  /** Add months to an activated warranty (goodwill, paid extension). The end date is recomputed from the start. */
+  /**
+   * Add months to an activated warranty (goodwill, paid extension). The end date is recomputed from the start. A
+   * lifetime warranty has no end to move: 409 WARRANTY_LIFETIME (plan ORBES CARE).
+   */
   async extend(productId: string, months: number, actor: Actor): Promise<WarrantyRecord> {
     if (!Number.isInteger(months) || months < 1 || months > MAX_EXTEND_MONTHS) {
       throw validationError(`Extension must be 1 to ${MAX_EXTEND_MONTHS} months.`);
@@ -382,6 +421,7 @@ export class WarrantyService {
       const w = await tx.selectFrom('warranties').selectAll().where('product_id', '=', product.id).executeTakeFirst();
       if (w?.voided_at) throw new DomainError('WARRANTY_VOID', 409, 'The warranty of this product has been voided.');
       if (!w?.start_date) throw new DomainError('WARRANTY_NOT_STARTED', 409, 'The warranty of this product has not been activated.');
+      if (w.lifetime) throw new DomainError('WARRANTY_LIFETIME', 409, 'The warranty of this product is a lifetime warranty: it has no end date to extend.');
       const duration = w.duration_months + months;
       if (duration > MAX_DURATION_MONTHS) throw validationError('The warranty cannot be extended that far.');
       // From the start, not from the old end: clamping must not compound (Jan 31 → Feb 28 → Mar 28).
@@ -479,6 +519,7 @@ export class WarrantyService {
     const statusExpr = sql<WarrantyStatus>`CASE
       WHEN w.voided_at IS NOT NULL THEN 'VOID'
       WHEN w.start_date IS NULL OR w.start_date > ${today}::date THEN 'NOT_STARTED'
+      WHEN w.lifetime THEN 'ACTIVE'
       WHEN w.duration_months = 0 OR w.end_date < ${today}::date THEN 'EXPIRED'
       ELSE 'ACTIVE' END`;
     let q = this.db.selectFrom('warranties as w').innerJoin('products as p', 'p.id', 'w.product_id');
@@ -560,9 +601,15 @@ export class WarrantyService {
     );
   }
 
-  private async categoryMonths(tx: Db, categoryId: number): Promise<number> {
-    const c = await tx.selectFrom('categories').select('warranty_months').where('id', '=', categoryId).executeTakeFirstOrThrow();
-    return c.warranty_months;
+  /**
+   * A piece's warranty as its model gives it: the category's months and the model's choice (plan ORBES CARE, answer 12),
+   * read under a share lock so a change of the model's choice (CatalogService.setWarranty, the model's row FOR UPDATE)
+   * and this write are ordered.
+   */
+  private async pieceWarranty(tx: Db, product: Pick<ProductRow, 'model_id' | 'category_id'>): Promise<{ months: number; lifetime: boolean }> {
+    const c = await tx.selectFrom('categories').select('warranty_months').where('id', '=', product.category_id).executeTakeFirstOrThrow();
+    const m = await tx.selectFrom('models').select('warranty_lifetime').where('id', '=', product.model_id).forShare().executeTakeFirstOrThrow();
+    return { months: c.warranty_months, lifetime: m.warranty_lifetime };
   }
 }
 
@@ -585,6 +632,7 @@ function toRecord(r: WarrantyRowWithRetailer, productId: string, today: string):
     startDate: r.start_date,
     endDate: r.end_date,
     durationMonths: r.duration_months,
+    lifetime: r.lifetime,
     voidedAt: r.voided_at,
     voidReason: r.void_reason,
     status: computeWarrantyStatus(r, today),

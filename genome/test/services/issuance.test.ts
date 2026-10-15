@@ -193,6 +193,33 @@ describe('IssuanceService.issueProduct', () => {
     expect(warranty.duration_months).toBe(12);
   });
 
+  it('writes its model’s warranty choice on the piece’s warranty, read inside the issuing transaction (plan ORBES CARE, answer 12)', async () => {
+    const kindOf = async (id: string) => w.t.db.selectFrom('warranties').select(['lifetime', 'end_date', 'duration_months']).where('product_id', '=', id).executeTakeFirstOrThrow();
+    const setLifetime = (on: boolean) => w.t.db.updateTable('models').set({ warranty_lifetime: on }).where('id', '=', w.modelId).execute();
+    try {
+      await setLifetime(true);
+      const life = await w.issuance.issueProduct(ring(w), admin);
+      expect(await kindOf(life.product.id)).toEqual({ lifetime: true, end_date: null, duration_months: 24 });
+      await setLifetime(false);
+      const two = await w.issuance.issueProduct(ring(w), admin);
+      expect(await kindOf(two.product.id)).toEqual({ lifetime: false, end_date: null, duration_months: 24 });
+      // The choice written is the one read under the share lock in the transaction, not the one the checks before it
+      // read: a switch between the two reaches the piece.
+      type Prepare = { prepareIssue: (i: IssueProductInput) => Promise<unknown> };
+      const original = (IssuanceService.prototype as unknown as Prepare).prepareIssue;
+      const spy = vi.spyOn(w.issuance as unknown as Prepare, 'prepareIssue').mockImplementationOnce(async (input: IssueProductInput) => {
+        const prepared = await original.call(w.issuance, input);
+        await setLifetime(true);
+        return prepared;
+      });
+      const switched = await w.issuance.issueProduct(ring(w), admin);
+      spy.mockRestore();
+      expect(await kindOf(switched.product.id)).toMatchObject({ lifetime: true, end_date: null });
+    } finally {
+      await setLifetime(false);
+    }
+  });
+
   it('issues a claim code once, stores only its scrypt hash, keeps it out of the audit log', async () => {
     const r = await w.issuance.issueProduct(ring(w, { withClaimSecret: true }), admin);
     expect(r.claimCode).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/);
@@ -911,6 +938,26 @@ describe('issueStockIdentity: a piece received from a supplier (plan NEXT LOT §
     expect(JSON.stringify(out.audit)).not.toContain(code);
     // Outside a transaction: refused.
     await expect(issueStockIdentity(w.t.db, async () => out.code, { modelId: w.modelId, skuId, material: 'X', productionBatch: 'X', claimHash: hash, receptionLineId: lineId }, { receptionId }, admin, w.clock.now())).rejects.toThrow(/inside a transaction/);
+  });
+
+  it('writes its model’s warranty choice on the piece’s warranty (plan ORBES CARE, answer 12)', async () => {
+    const issue = (code: string) =>
+      hashClaimCode(code).then((hash) =>
+        w.issuance.inSigningTransaction((trx, signFirst) =>
+          issueStockIdentity(trx, signFirst, { modelId: w.modelId, skuId, material: '925 STERLING SILVER', productionBatch: 'SO-7C21A0B9', claimHash: hash, receptionLineId: lineId }, { receptionId }, admin, w.clock.now()),
+        ),
+      );
+    const kindOf = async (id: string) => w.t.db.selectFrom('warranties').select(['lifetime', 'end_date', 'duration_months']).where('product_id', '=', id).executeTakeFirstOrThrow();
+    try {
+      await w.t.db.updateTable('models').set({ warranty_lifetime: true }).where('id', '=', w.modelId).execute();
+      const life = await issue('BCDE-FGHJ-KMNP');
+      expect(await kindOf(life.product.id)).toEqual({ lifetime: true, end_date: null, duration_months: 24 });
+      await w.t.db.updateTable('models').set({ warranty_lifetime: false }).where('id', '=', w.modelId).execute();
+      const two = await issue('CDEF-GHJK-MNPQ');
+      expect(await kindOf(two.product.id)).toEqual({ lifetime: false, end_date: null, duration_months: 24 });
+    } finally {
+      await w.t.db.updateTable('models').set({ warranty_lifetime: false }).where('id', '=', w.modelId).execute();
+    }
   });
 });
 

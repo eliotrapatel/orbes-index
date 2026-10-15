@@ -1054,6 +1054,8 @@ export class OwnershipService {
           status: ws,
           ...(w?.start_date ? { startDate: w.start_date } : {}),
           ...(w?.end_date ? { endDate: w.end_date } : {}),
+          // Plan ORBES CARE: a lifetime warranty (no end date), sent only when it is one.
+          ...(w?.lifetime ? { lifetime: true as const } : {}),
         },
         imageUrl: mediaUrl(r.image_sha256),
         // A RESERVED model (THE PRIVATE SALON) is named only to an owner whose tier reaches its private_min_tier, as

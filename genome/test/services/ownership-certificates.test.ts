@@ -111,8 +111,8 @@ describe('OwnershipCertificateService', () => {
     return { id: row.id, email, actor: { type: 'account', id: row.id } as Actor };
   }
 
-  /** A piece sold (its warranty running) and registered to a new account, with its GENOME. */
-  async function owned() {
+  /** A piece sold (its warranty running: 2 years, or for life with `lifetime`) and registered to a new account, with its GENOME. */
+  async function owned(opts: { lifetime?: true } = {}) {
     const s = ++serial;
     const productId = `O26-J-${String(s).padStart(5, '0')}`;
     const packed = packIdentity({ year: 2026, categoryIndex: 1, serial: s });
@@ -128,7 +128,10 @@ describe('OwnershipCertificateService', () => {
       .execute();
     await t.db.insertInto('product_status_history').values({ product_id: row.id, from_status: null, to_status: 'ISSUED', actor_type: 'system', created_at: clock.now() }).execute();
     await lifecycle.transition(productId, 'ACTIVATED', {}, admin);
-    await t.db.insertInto('warranties').values({ product_id: row.id, duration_months: 24, purchase_date: '2026-09-20', start_date: '2026-09-20', end_date: '2028-09-20' }).execute();
+    await t.db
+      .insertInto('warranties')
+      .values({ product_id: row.id, duration_months: 24, purchase_date: '2026-09-20', start_date: '2026-09-20', end_date: opts.lifetime ? null : '2028-09-20', lifetime: opts.lifetime === true })
+      .execute();
     const owner = await account();
     const scan = await t.db
       .insertInto('scan_events')
@@ -230,6 +233,13 @@ describe('OwnershipCertificateService', () => {
   });
 
   // ── the public lookup ─────────────────────────────────────────────────────
+
+  it('VALID: a lifetime warranty reads ACTIVE with `lifetime` and no end date (plan ORBES CARE)', async () => {
+    const { owner, p } = await owned({ lifetime: true });
+    const offer = await certificates.create(owner.id, p.productId, { validDays: 90 }, owner.actor);
+    const r = await certificates.lookup(offer.token);
+    expect(r.status === 'VALID' && r.warranty).toEqual({ status: 'ACTIVE', startDate: '2026-09-20', lifetime: true });
+  });
 
   it('VALID: the piece, its GENOME, the ownership and its day, the warranty, no loss or theft; never a person', async () => {
     const { p, owner } = await owned();
