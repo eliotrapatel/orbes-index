@@ -1539,7 +1539,7 @@ The models whose owners may enter a LIVE RELEASE (choice 35), with `drops.access
 
 ### 5.41 `live_addons`
 
-The add-ons a LIVE RELEASE offers with a piece held (choice 34: engraving, a gift box, ORBES Care…): `id` (PK), `drop_id` (FK → `drops.id`), `label` (`CHECK (length(btrim(label)) BETWEEN 1 AND 40)`), `line` (NULL, 1–120 characters), `price_minor` (`CHECK (price_minor >= 0)`, per piece, in the release's currency), `position` (1–6, `live_addons_position_key` unique `(drop_id, position)`, which leads with the release). `live_addons_immutable_identity` guards `id` and `drop_id`. Written by `LiveConsoleService` (until the announcement). No personal data.
+The add-ons a LIVE RELEASE offers with a piece held (choice 34: engraving, a gift box…): `id` (PK), `drop_id` (FK → `drops.id`), `label` (`CHECK (length(btrim(label)) BETWEEN 1 AND 40)`), `line` (NULL, 1–120 characters), `price_minor` (`CHECK (price_minor >= 0)`, per piece, in the release's currency), `position` (1–6, `live_addons_position_key` unique `(drop_id, position)`, which leads with the release). `live_addons_immutable_identity` guards `id` and `drop_id`. Written by `LiveConsoleService` (until the announcement). No personal data.
 
 ### 5.42 `live_entry_addons`
 
