@@ -9,8 +9,8 @@
  *               before M's end whose row is missing or stops before M. Each gets the months after its `last_month` up
  *               to M (a row's first: HISTORY_BACKFILL_MONTHS months back from M, or the account's month of creation if
  *               later; so a collector made during M starts at M): the tier at each month's end (the pieces held at that
- *               instant, from the ownership intervals, CLUB_EXCLUDED_STATUSES left out, by CLUB_TIER_THRESHOLDS as the
- *               tiers count them), the activity in it (insights-scope.ts `activeIn`: a sign-in, a scan, a view, a draw
+ *               instant, from the ownership intervals, as club.ts clubCounts counts them, by CLUB_TIER_THRESHOLDS as
+ *               the tiers count them), the activity in it (insights-scope.ts `activeIn`: a sign-in, a scan, a view, a draw
  *               entry, a LIVE entry or an order), and the score: M's from `account_scores` when `withScores`, NULL for
  *               every other month (not measured). Past HISTORY_MAX_MONTHS the oldest months are dropped and
  *               `first_month` moves on. HISTORY_BATCH accounts by keyset on the account, each batch its own short
@@ -35,7 +35,7 @@
 import { sql } from 'kysely';
 import { uuidArray, type Db } from '../db/connection.js';
 import { noopLogger, type Logger } from '../types.js';
-import { CLUB_EXCLUDED_STATUSES, CLUB_TIER_THRESHOLDS } from './club.js';
+import { CLUB_TIER_THRESHOLDS, clubCounts } from './club.js';
 import { activeIn } from './insights-scope.js';
 import { countedCollector } from './population.js';
 import { morningWindowOpen, parisDay, parisMonthStart } from './schedule.js';
@@ -171,7 +171,7 @@ async function writeBatch(db: Db, month: string, batch: readonly Read[], withSco
       SELECT a.id::text AS id, coalesce(hp.pieces, 0)::int AS pieces, ${activeIn('a.id', start, end)} AS active
         FROM accounts a
         LEFT JOIN (SELECT o.account_id, count(*)::int AS pieces FROM ownership o JOIN products p ON p.id = o.product_id
-                    WHERE o.account_id = ANY(${uuidArray(who)}) AND p.status NOT IN (${sql.join([...CLUB_EXCLUDED_STATUSES])})
+                    WHERE o.account_id = ANY(${uuidArray(who)}) AND ${clubCounts('p', 'o.account_id')}
                       AND o.started_at < ${end}::timestamptz AND (o.ended_at IS NULL OR o.ended_at >= ${end}::timestamptz)
                     GROUP BY o.account_id) hp ON hp.account_id = a.id
        WHERE a.id = ANY(${uuidArray(who)})`.execute(db);

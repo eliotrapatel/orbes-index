@@ -34,7 +34,7 @@ import { inTransaction, type Db } from '../db/connection.js';
 import type { CreditReleaseReason, TierGrantKind, TierGrantRow } from '../db/schema.js';
 import { SYSTEM_ACTOR, systemClock, type Clock, type Logger, noopLogger } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
-import { CLUB_EXCLUDED_STATUSES, CLUB_TIER_THRESHOLDS, tierOf } from './club.js';
+import { CLUB_TIER_THRESHOLDS, clubCounts, tierOf } from './club.js';
 import { creditOf, readProgram } from './club-program.js';
 import { orderReference } from './orders.js';
 
@@ -282,7 +282,7 @@ export class TierGrantService {
       .innerJoin('accounts as a', 'a.id', 'o.account_id')
       .select((eb) => ['o.account_id', eb.fn.countAll<number>().as('pieces')])
       .where('o.ended_at', 'is', null)
-      .where('p.status', 'not in', [...CLUB_EXCLUDED_STATUSES])
+      .where(clubCounts('p', 'o.account_id'))
       .where('a.status', '=', 'ACTIVE')
       .groupBy('o.account_id')
       .having((eb) => eb.fn.countAll(), '>=', CLUB_TIER_THRESHOLDS[1]!)

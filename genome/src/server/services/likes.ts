@@ -24,7 +24,7 @@
  *                figures (§3.3 T.4.2, `look`): Views, Time spent, Visitors, Collectors seen (the counted collectors
  *                with a signed-in view, from the 13 months of detail), Views by day and Pages.
  *   held         PIECES HELD: by main model with its variants, the collectors holding at least one piece now and the
- *                pieces (CLUB_EXCLUDED_STATUSES left out, as the tiers count them).
+ *                pieces (as the tiers count them, club.ts clubCounts).
  *
  * The population (`AccountFilter`) is the page's: CollectorInsightsService passes its `scopeCte` (counted collectors,
  * the five filters, the scope); alone, LikesService reads every counted collector (population.ts `countedCollector`:
@@ -48,7 +48,7 @@ import { jitOff, type Db } from '../db/connection.js';
 import { VIEW_PAGE_CODES, type ViewPage } from '../db/schema.js';
 import { tasteKey } from '../../shared/profile-rules.js';
 import { systemClock, type Clock } from '../types.js';
-import { CLUB_EXCLUDED_STATUSES } from './club.js';
+import { clubCounts } from './club.js';
 import { GROWTH_MIN_GROUP } from './growth.js';
 import { daysApart } from './insights-scope.js';
 import { countedCollector } from './population.js';
@@ -663,7 +663,7 @@ async function held(tx: Db, x: LikesInput): Promise<LikesFigures['held']> {
       WITH ${x.population('pop', x.window)},
       h AS (SELECT coalesce(m.variant_of, m.id) AS main, m.id AS model, o.account_id
               FROM ownership o JOIN pop c ON c.account_id = o.account_id JOIN products p ON p.id = o.product_id JOIN models m ON m.id = p.model_id
-             WHERE o.ended_at IS NULL AND p.status NOT IN (${sql.join([...CLUB_EXCLUDED_STATUSES])}))
+             WHERE o.ended_at IS NULL AND ${clubCounts('p', 'o.account_id')})
       SELECT h.main::text AS main, h.model::text AS model, count(DISTINCT h.account_id)::int AS collectors, count(*)::int AS pieces
         FROM h GROUP BY GROUPING SETS ((h.main, h.model), (h.main))`.execute(tx)
   ).rows;

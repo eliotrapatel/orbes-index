@@ -53,7 +53,7 @@ import type { Db } from '../db/connection.js';
 import type { DropRow, LiveEndReason, LiveEntryStatus, LiveResolution } from '../db/schema.js';
 import { csvDocument, CSV_CONTENT_TYPE } from '../render/csv.js';
 import { systemClock, type Clock } from '../types.js';
-import { CLUB_EXCLUDED_STATUSES, clubStandings, tierForPieces, tierName, type ClubTier } from './club.js';
+import { clubCounts, clubStandings, tierForPieces, tierName, type ClubTier } from './club.js';
 import { DROP_QUANTITY_MAX, dropNotFound } from './drops.js';
 import { accessAccounts, effectiveDeadline, livePhase, LIVE_GESTURE_MIN_MS, LIVE_NETWORK_RETENTION_DAYS, LIVE_OPEN_STATUSES, roomOpensAt, type LivePhase } from './live.js';
 import { defaultQuantityLine, liveMoney, majorUnits } from './live-console.js';
@@ -1834,7 +1834,7 @@ export class LiveInsightsService {
           sql<(string | null)[]>`array_agg(DISTINCT coalesce(p.collection_id, m.collection_id)::text)`.as('collections'),
         ])
         .where('o.ended_at', 'is', null)
-        .where('p.status', 'not in', [...CLUB_EXCLUDED_STATUSES])
+        .where(clubCounts('p', 'o.account_id'))
         .where('a.status', '=', 'ACTIVE')
         .groupBy('o.account_id')
         .execute(),
@@ -1860,7 +1860,7 @@ export class LiveInsightsService {
       .select(['o.account_id', 'p.variant'])
       .distinctOn('o.account_id')
       .where('o.ended_at', 'is', null)
-      .where('p.status', 'not in', [...CLUB_EXCLUDED_STATUSES])
+      .where(clubCounts('p', 'o.account_id'))
       .where('p.variant', 'is not', null)
       .where('m.type', '=', modelType)
       .orderBy('o.account_id')

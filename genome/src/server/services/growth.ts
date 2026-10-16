@@ -52,7 +52,7 @@ import { uuidArray, type Db } from '../db/connection.js';
 import { HOUSE_CURRENCIES, type DropMode } from '../db/schema.js';
 import { notFound, validationError } from '../errors.js';
 import { systemClock, type Clock } from '../types.js';
-import { CLUB_EXCLUDED_STATUSES, CLUB_TIER_NAMES, CLUB_TIER_THRESHOLDS, clubMembersByTier, tierName, type ClubMembers, type ClubTier, type ClubTierName } from './club.js';
+import { CLUB_TIER_NAMES, clubCounts, CLUB_TIER_THRESHOLDS, clubMembersByTier, tierName, type ClubMembers, type ClubTier, type ClubTierName } from './club.js';
 import { LiveInsightsService } from './live-insights.js';
 import { notTestEntrant } from './population.js';
 import { scanMonths } from './scan-stats.js';
@@ -352,8 +352,6 @@ export type LifetimeValue = { currency: string; valueMinor: number }[];
 
 // ── Reads ──────────────────────────────────────────────────────────────────
 
-const EXCLUDED = sql.join([...CLUB_EXCLUDED_STATUSES]);
-
 /**
  * Every purchase (the rule in the file header): its account, when, a reference that orders ties, its source, its main
  * model, its currency and value (both NULL: a piece from elsewhere whose model has no price). `account` narrows it to
@@ -423,7 +421,7 @@ function collectorRows(currency: Currency): RawBuilder<CollectorRow> {
                   min(r.model_id::text) FILTER (WHERE r.rn = 1) AS first_model
              FROM r GROUP BY r.account_id),
          held AS (SELECT o.account_id, count(*)::int AS n FROM ownership o JOIN products p ON p.id = o.product_id
-                   WHERE o.ended_at IS NULL AND p.status NOT IN (${EXCLUDED}) GROUP BY o.account_id)
+                   WHERE o.ended_at IS NULL AND ${clubCounts('p', 'o.account_id')} GROUP BY o.account_id)
     SELECT agg.account_id, a.email, a.country, coalesce(h.n, 0)::int AS held, agg.priced, agg.unpriced, agg.value,
            agg.first_at, agg.second_at, agg.first_source, agg.first_model
       FROM agg
@@ -556,9 +554,9 @@ export class GrowthService {
         // Only the accounts that held enough pieces at some time can have reached PLATINE: the others are not read.
         (await sql<{ account_id: string; started_at: Date; ended_at: Date | null }>`
           SELECT o.account_id, o.started_at, o.ended_at FROM ownership o JOIN products p ON p.id = o.product_id
-           WHERE p.status NOT IN (${EXCLUDED}) AND ${notTestEntrant('o.account_id')}
+           WHERE ${clubCounts('p', 'o.account_id')} AND ${notTestEntrant('o.account_id')}
              AND o.account_id IN (SELECT o2.account_id FROM ownership o2 JOIN products p2 ON p2.id = o2.product_id
-                                   WHERE p2.status NOT IN (${EXCLUDED}) GROUP BY o2.account_id HAVING count(*) >= ${this.thresholds[1]!})`.execute(trx)).rows,
+                                   WHERE ${clubCounts('p2', 'o2.account_id')} GROUP BY o2.account_id HAVING count(*) >= ${this.thresholds[1]!})`.execute(trx)).rows,
         await clubMembersByTier(trx, this.thresholds, { withoutTestEntrants: true }),
       ];
       const byAccount = new Map<string, { start: Date; end: Date | null }[]>();

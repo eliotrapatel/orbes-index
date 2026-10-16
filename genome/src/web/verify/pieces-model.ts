@@ -9,7 +9,7 @@
  * authentic result shows them, and the care of its model (ORBES CARE, plan ORBES CARE §2(a)). It never names an
  * internal status.
  */
-import { DEFAULT_CARE, ORDERS, PIECES } from './copy.js';
+import { DEFAULT_CARE, ORBES_CARE, ORDERS, PIECES } from './copy.js';
 import { orderDate } from './orders-model.js';
 import { releasePath } from './releases-model.js';
 import type { IncidentType, OwnedPiece, PieceOrigin, ServiceRecord } from './types.js';
@@ -79,6 +79,11 @@ export interface PieceModel {
    */
   certificateOffered: boolean;
   warranty?: { status: string; rows: Row[]; note: string };
+  /**
+   * CARE-C2: a piece its warranty claim closed (replaced, credited or refunded; the server's `claimOutcome`): the WARRANTY
+   * section reads this one line, its head and its sentence, instead of `warranty` (NO LONGER VALID and its contact).
+   */
+  closed?: { head: string; text: string };
   /** CARING FOR THIS PIECE in the ORBES CARE tab: the model's care instructions, else the general care text of a result. */
   care: string;
 }
@@ -207,7 +212,9 @@ export function pieceModel(p: OwnedPiece, opts: { now?: Date; offsetMinutes?: nu
   const genome = pieceGenomeModel(p.genome);
   if (genome) model.genome = genome;
   const warranty = warrantyModel(p.warranty);
-  if (warranty) model.warranty = warranty;
+  const closed = p.warranty?.status === 'VOID' && typeof p.claimOutcome === 'string' && Object.hasOwn(ORBES_CARE.warranty.closed, p.claimOutcome) ? ORBES_CARE.warranty.closed[p.claimOutcome] : null;
+  if (closed) model.closed = { head: closed.head, text: closed.text };
+  else if (warranty) model.warranty = warranty;
   return model;
 }
 

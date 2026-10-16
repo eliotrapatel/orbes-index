@@ -195,6 +195,11 @@ export interface OwnedPiece {
    * for a piece without one (a boutique sale). Absent from a server before it: nothing is said.
    */
   origin?: PieceOrigin | null;
+  /**
+   * Plan ORBES CARE, CARE-C2: the outcome of this account's warranty claim that closed the piece (revoked, its warranty
+   * VOID by the decision): its ORBES CARE tab reads one calm line instead of NO LONGER VALID. Absent otherwise.
+   */
+  claimOutcome?: 'REPLACEMENT' | 'VALUE_CREDIT' | 'REFUND';
 }
 
 /** Where a piece of the account comes from (OwnedPiece.origin). */

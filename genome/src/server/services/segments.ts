@@ -79,7 +79,7 @@ import {
 import { conflict, forbidden, notFound, validationError } from '../errors.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
-import { CLUB_EXCLUDED_STATUSES, CLUB_TIER_THRESHOLDS } from './club.js';
+import { CLUB_TIER_THRESHOLDS, clubCounts } from './club.js';
 import { LIVE_QUESTION_DEFAULT } from './live.js';
 import { participationCount, securedCount, securedIn, tookPartIn } from './participation.js';
 import { notTestEntrant } from './population.js';
@@ -396,7 +396,7 @@ function piecesHeld(db: Db, account: Expression<string>): RawBuilder<number> {
     .select((eb) => eb.fn.countAll<number>().as('n'))
     .where('ho.account_id', '=', account)
     .where('ho.ended_at', 'is', null)
-    .where('hp.status', 'not in', [...CLUB_EXCLUDED_STATUSES])})`;
+    .where(clubCounts('hp', 'ho.account_id'))})`;
 }
 
 function ruleSql(db: Db, eb: Accounts, r: SegmentRule, now: Date): Expression<SqlBool> {
@@ -427,7 +427,7 @@ function ruleSql(db: Db, eb: Accounts, r: SegmentRule, now: Date): Expression<Sq
           .select('mo.id')
           .where('mo.account_id', '=', account)
           .where('mo.ended_at', 'is', null)
-          .where('mp.status', 'not in', [...CLUB_EXCLUDED_STATUSES])
+          .where(clubCounts('mp', 'mo.account_id'))
           .where('mp.model_id', 'in', r.modelIds),
       )} or exists (select 1 from test_entrants as te where te.account_id = ${account}))`; // a test entrant owns the release's model (services/test-entrants.ts)
       break;
@@ -440,7 +440,7 @@ function ruleSql(db: Db, eb: Accounts, r: SegmentRule, now: Date): Expression<Sq
           .select('co.id')
           .where('co.account_id', '=', account)
           .where('co.ended_at', 'is', null)
-          .where('cp.status', 'not in', [...CLUB_EXCLUDED_STATUSES])
+          .where(clubCounts('cp', 'co.account_id'))
           .where((w) => w(w.fn.coalesce('cp.collection_id', 'cm.collection_id'), 'in', r.collectionIds)),
       )} or exists (select 1 from test_entrants as te where te.account_id = ${account}))`; // a test entrant owns the release's collection (services/test-entrants.ts)
       break;
@@ -452,7 +452,7 @@ function ruleSql(db: Db, eb: Accounts, r: SegmentRule, now: Date): Expression<Sq
         .select('so.id')
         .where('so.account_id', '=', account)
         .where('so.ended_at', 'is', null)
-        .where('sp.status', 'not in', [...CLUB_EXCLUDED_STATUSES])
+        .where(clubCounts('sp', 'so.account_id'))
         .where(sql<SqlBool>`upper(btrim(sp.variant)) in (${sizes})`);
       const entered = db.selectFrom('live_entries as ze').innerJoin('drop_sizes as zs', 'zs.id', 'ze.size_id').select('ze.id').where('ze.account_id', '=', account).where(sql<SqlBool>`upper(zs.label) in (${sizes})`);
       const said = db.selectFrom('live_interest as zi').innerJoin('drop_sizes as zz', 'zz.id', 'zi.size_id').select('zi.drop_id').where('zi.account_id', '=', account).where(sql<SqlBool>`upper(zz.label) in (${sizes})`);

@@ -26,7 +26,7 @@ import { CLUB_TIER_NAMES, type TasteKind } from '../db/schema.js';
 import { csvField } from '../render/csv.js';
 import { ageOn, completion } from '../../shared/profile-rules.js';
 import { exportColumns as acquisitionColumns } from './acquisition-reads.js';
-import { CLUB_EXCLUDED_STATUSES, tierForPieces } from './club.js';
+import { clubCounts, tierForPieces } from './club.js';
 import { purchaseRows } from './growth.js';
 import { activeIn, plusDays, scopeCte, type InsightsFilters } from './insights-scope.js';
 import { participationRows } from './participation.js';
@@ -246,7 +246,7 @@ export async function exportBatch(tx: Db, ids: readonly string[], basis: ExportB
       LEFT JOIN account_profiles p ON p.account_id = a.id
       LEFT JOIN heard_options ho ON ho.id = p.heard_option_id
       LEFT JOIN (SELECT o.account_id, count(*)::int AS pieces FROM ownership o JOIN products pr ON pr.id = o.product_id
-                  WHERE o.account_id = ANY(${list}) AND o.ended_at IS NULL AND pr.status NOT IN (${sql.join([...CLUB_EXCLUDED_STATUSES])})
+                  WHERE o.account_id = ANY(${list}) AND o.ended_at IS NULL AND ${clubCounts('pr', 'o.account_id')}
                   GROUP BY o.account_id) h ON h.account_id = a.id
       LEFT JOIN account_scores sc ON sc.account_id = a.id
      WHERE a.id = ANY(${list})`.execute(tx);

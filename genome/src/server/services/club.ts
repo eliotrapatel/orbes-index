@@ -7,7 +7,10 @@
  * COUNTERFEIT_FLAGGED or RETIRED. Those three never end an ownership (a
  * revocation is not a transfer: TERMS-FACTS N3, the table is only read
  * here), so they are left out of the count instead. It is read again at each
- * request: the access goes with the last piece.
+ * request: the access goes with the last piece. One exception (plan ORBES
+ * CARE, CARE-C2): a piece REVOKED by its holder's warranty claim decided
+ * REPLACEMENT keeps counting until its new piece is registered, which then
+ * counts instead (`clubCounts`, the one SQL every reader of the count uses).
  *
  * P-R02: the lookbook's RESERVED models (LookbookService), listed and opened
  * for an owner only (routes/club.ts); any other account is answered
@@ -48,6 +51,7 @@
  * gifts), and the public THE CLUB (GET /api/v1/the-club, `theClub`) every tier's lines and words, for no account.
  * PLATINE's words by default are none: its early access and priority are its program's lines.
  */
+import { sql, type RawBuilder, type SqlBool } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
 import { CLUB_TIER_NAMES, type ClubTierName, type CreditChannel, type ProductStatus } from '../db/schema.js';
 import { DomainError, forbidden, notFound, validationError } from '../errors.js';
@@ -164,6 +168,25 @@ export function fullYears(from: Date, to: Date): number {
   return Math.max(0, years);
 }
 
+/**
+ * Whether the club counts a piece held through an open ownership, in SQL (plan ORBES CARE, CARE-C2): `product` is the
+ * alias of its `products` row, `account` the column of the ownership's account (e.g. `o.account_id`). A piece counts
+ * when it is not REVOKED, COUNTERFEIT_FLAGGED or RETIRED (CLUB_EXCLUDED_STATUSES); and a piece REVOKED by a warranty
+ * claim of that account decided REPLACEMENT counts on while its new piece has never been registered (no ownership of it,
+ * by anyone), so its holder keeps the tier the decision found. Once the new piece is registered, it counts instead
+ * (to its claimant) and the old one no more: never both. A claim closed before its decision revokes nothing, so it
+ * changes nothing here. The one definition of « as the club counts them »: every reader of the count (the tier, its
+ * benefits, the draws and the access, the segments, the console's figures and exports) uses it, in its own query.
+ * The left disjunct is read first: the claim is looked up only for a REVOKED piece.
+ */
+export function clubCounts(product: string, account: string): RawBuilder<SqlBool> {
+  const status = sql.ref(`${product}.status`);
+  return sql<SqlBool>`(${status} NOT IN (${sql.join([...CLUB_EXCLUDED_STATUSES])}) OR (${status} = 'REVOKED' AND EXISTS (
+    SELECT 1 FROM warranty_claims club_wc
+     WHERE club_wc.product_id = ${sql.ref(`${product}.id`)} AND club_wc.account_id = ${sql.ref(account)} AND club_wc.outcome = 'REPLACEMENT'
+       AND NOT EXISTS (SELECT 1 FROM ownership club_wo WHERE club_wo.product_id = club_wc.replacement_product_id))))`;
+}
+
 /** The pieces an account holds now, as the club counts them (see the file header). */
 export async function activePieceCount(db: Db, accountId: string): Promise<number> {
   const r = await db
@@ -172,7 +195,7 @@ export async function activePieceCount(db: Db, accountId: string): Promise<numbe
     .select((eb) => eb.fn.countAll<number>().as('n'))
     .where('o.account_id', '=', accountId)
     .where('o.ended_at', 'is', null)
-    .where('p.status', 'not in', [...CLUB_EXCLUDED_STATUSES])
+    .where(clubCounts('p', 'o.account_id'))
     .executeTakeFirstOrThrow();
   return Number(r.n);
 }
@@ -193,7 +216,7 @@ export async function clubStandings(db: Db, accountIds: readonly string[], now: 
       .innerJoin('products as p', 'p.id', 'o.product_id')
       .select((eb) => [
         'o.account_id',
-        eb.fn.count<number>('o.id').filterWhere((w) => w.and([w('o.ended_at', 'is', null), w('p.status', 'not in', [...CLUB_EXCLUDED_STATUSES])])).as('pieces'),
+        eb.fn.count<number>('o.id').filterWhere((w) => w.and([w('o.ended_at', 'is', null), clubCounts('p', 'o.account_id')])).as('pieces'),
         eb.fn.min<Date>('o.started_at').as('since'),
       ])
       .where('o.account_id', 'in', chunk)
@@ -252,7 +275,7 @@ export async function clubMembersByTier(db: Db, thresholds: readonly number[] = 
     .innerJoin('accounts as a', 'a.id', 'o.account_id')
     .select((eb) => ['o.account_id', eb.fn.countAll<number>().as('pieces')])
     .where('o.ended_at', 'is', null)
-    .where('p.status', 'not in', [...CLUB_EXCLUDED_STATUSES])
+    .where(clubCounts('p', 'o.account_id'))
     .where('a.status', '=', 'ACTIVE')
     .$if(opts.withoutTestEntrants === true, (q) => q.where(({ not, exists, selectFrom }) => not(exists(selectFrom('test_entrants as te').select('te.account_id').whereRef('te.account_id', '=', 'o.account_id')))))
     .groupBy('o.account_id');

@@ -352,9 +352,12 @@ class PieceCard {
         'section',
         { class: 'n-piece__care-section n-piece__warranty piece__warranty', attrs: { 'aria-labelledby': `${key}-warranty` } },
         h('h3', { class: 'n-g n-lb', id: `${key}-warranty`, text: ORBES_CARE.warranty.label }),
-        ...(w
-          ? [definitionList(w.rows, { kind: 'kv', extraClass: 'n-piece__warranty-rows' }), h('p', { class: 'n-tx n-piece__note', text: w.note })]
-          : [h('p', { class: 'n-tx n-piece__note', text: ORBES_CARE.warranty.none })]),
+        // CARE-C2: a piece its claim closed reads one calm line (its head, its sentence), never NO LONGER VALID.
+        ...(m.closed
+          ? [h('p', { class: 'n-g n-t3 n-ivc n-piece__warranty-closed', text: m.closed.head }), h('p', { class: 'n-tx n-piece__note', text: m.closed.text })]
+          : w
+            ? [definitionList(w.rows, { kind: 'kv', extraClass: 'n-piece__warranty-rows' }), h('p', { class: 'n-tx n-piece__note', text: w.note })]
+            : [h('p', { class: 'n-tx n-piece__note', text: ORBES_CARE.warranty.none })]),
       ),
       this.claim.root,
       this.yearlyCare.root,

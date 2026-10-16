@@ -97,7 +97,7 @@ import { conflict, DomainError, forbidden, notFound, validationError } from '../
 import { systemClock, SYSTEM_ACTOR, type Actor, type Clock } from '../types.js';
 import { afterRoomDoors, afterRoomPlace, isAfterRoom, settleAfterRoom, type AfterRoomDoor } from './after-room.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
-import { CLUB_EXCLUDED_STATUSES, clubStandings, isTestEntrant, tierName, tierOf, type ClubTier } from './club.js';
+import { clubCounts, clubStandings, isTestEntrant, tierName, tierOf, type ClubTier } from './club.js';
 import { DROP_QUANTITY_MAX, drawKey, dropNotFound, openDropSeed } from './drops.js';
 import { holderGuarantee, holdsGuaranteeFor, releaseCovered, sizeServesGuarantee, useGuarantees, visibleGuaranteeIds } from './guarantees.js';
 import { ordersForLiveEntry } from './orders.js';
@@ -518,7 +518,7 @@ export async function accessOf(
           .select('o.id')
           .where('o.account_id', '=', accountId)
           .where('o.ended_at', 'is', null)
-          .where('p.status', 'not in', [...CLUB_EXCLUDED_STATUSES])
+          .where(clubCounts('p', 'o.account_id'))
           .where((eb) =>
             eb.or([
               ...(ids.length > 0 ? [eb('p.model_id', 'in', ids)] : []),

@@ -204,6 +204,26 @@ describe('MY PIECES: the ORBES CARE tab (plan ORBES CARE §2(a); P-M02)', () => 
     expect(words).not.toMatch(/subscri/i);
     for (const key of ['label', 'lead', 'benefits', 'subscribe', 'subscribeLabel', 'soon']) expect(Object.hasOwn(ORBES_CARE, key), key).toBe(false);
   });
+
+  it('reads a piece its warranty claim closed as one calm line, never NO LONGER VALID nor « Please contact » (CARE-C2)', () => {
+    const voided = { status: 'VOID' as const, startDate: '2026-06-01', lifetime: true as const };
+    const replaced = pieceModel(piece({ warranty: voided, claimOutcome: 'REPLACEMENT', incidentReportable: false, certificateAllowed: false }));
+    expect(replaced.closed).toEqual({ head: 'REPLACED UNDER ORBES CARE', text: 'Your new piece takes its place.' });
+    expect(replaced.warranty).toBeUndefined();
+    expect(pieceModel(piece({ warranty: voided, claimOutcome: 'VALUE_CREDIT' })).closed).toEqual({ head: 'REPLACED UNDER ORBES CARE', text: 'A credit of its value takes its place.' });
+    expect(pieceModel(piece({ warranty: voided, claimOutcome: 'REFUND' })).closed).toEqual({ head: 'REFUNDED UNDER THE LEGAL GUARANTEE', text: 'Its price is paid back to you by its seller.' });
+    for (const line of Object.values(ORBES_CARE.warranty.closed).flatMap((c) => [c.head, c.text])) expect(line, line).not.toMatch(/NO LONGER VALID|contact|atelier|handmade|!/i);
+    // Its OWNERSHIP tab stays as it is: no REPORT LOST / STOLEN on a piece the server would refuse to report.
+    expect(replaced.incident).toEqual({ kind: 'not-reportable' });
+    // Without a closing claim (or an outcome the app does not know), a VOID warranty reads as before.
+    const plain = pieceModel(piece({ warranty: voided }));
+    expect(plain.closed).toBeUndefined();
+    expect(plain.warranty).toEqual(warrantyModel(voided));
+    expect(plain.warranty!.note).toBe('The ORBES warranty no longer applies to this piece. Please contact ORBES Client Services.');
+    expect(pieceModel(piece({ warranty: voided, claimOutcome: 'REPAIR' as 'REFUND' })).closed).toBeUndefined();
+    // An outcome beside a warranty that is not VOID changes nothing.
+    expect(pieceModel(piece({ warranty: { status: 'ACTIVE', lifetime: true }, claimOutcome: 'REPLACEMENT' })).closed).toBeUndefined();
+  });
 });
 
 describe('MY PIECES: loss and theft', () => {

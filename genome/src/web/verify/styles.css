@@ -1611,6 +1611,15 @@ body.nocturne .view--piece {
   margin-top: 14px;
 }
 
+/* CARE-C2: a piece its warranty claim closed, one line (its head, as a claim's step reads, then its sentence). */
+.n-piece__warranty-closed {
+  margin-top: 12px;
+}
+
+.n-piece__warranty-closed + .n-piece__note {
+  margin-top: 10px;
+}
+
 .n-piece__care-contact {
   margin-top: 24px;
 }

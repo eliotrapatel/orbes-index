@@ -33,6 +33,8 @@ import { packIdentity } from '../../src/core/identity.js';
 import type { HouseCurrency, ProductStatus } from '../../src/server/db/schema.js';
 import { DomainError } from '../../src/server/errors.js';
 import { eraseCareLabels } from '../../src/server/services/care.js';
+import { activePieceCount, clubMembersByTier, tierOf } from '../../src/server/services/club.js';
+import { exportBasis, exportBatch } from '../../src/server/services/collector-export.js';
 import { purchaseRows } from '../../src/server/services/growth.js';
 import { creditBalances, usableAt } from '../../src/server/services/tier-grants.js';
 import { decisionOutcomes, partCredit, WARRANTY_CREDIT_VALIDITY_MONTHS, type ClaimSheet, type DecideClaimInput } from '../../src/server/services/warranty-claims.js';
@@ -647,6 +649,77 @@ describe('warranty claims (plan ORBES CARE, step 1.6)', () => {
     expect(decisionOutcomes('LIFETIME', true, true)).toEqual(['REPLACEMENT', 'VALUE_CREDIT', 'REFUSED']);
     expect(decisionOutcomes('LIFETIME', false, false)).toEqual(['PART_CREDIT', 'REFUSED']);
     expect(decisionOutcomes('LIFETIME', false, true)).toEqual(['PART_CREDIT', 'REFUSED']);
+  });
+
+  it('CARE-C2: a piece replaced under its claim keeps counting for its claimant’s tier until the new piece is registered, which then counts instead, never both', async () => {
+    const c = await collector();
+    const held = [];
+    for (let i = 0; i < 5; i++) held.push(await piece(models.life, { owner: c.id }));
+    const [claimed, other] = held as [{ id: string; serial: string }, { id: string; serial: string }];
+    const now = () => h.clock.now();
+    const platine = async () => (await clubMembersByTier(db())).PLATINE;
+    const inTier2 = async () => (await h.ctx.services.segments.count({ match: 'ALL', rules: [{ kind: 'TIER', tiers: [2] }] })).count;
+    /** Every reader of the count (the club's count, its tier, YOUR TIER, PRIVATE CARE, the client sheet, the export) at `pieces`. */
+    const expectCount = async (pieces: number, at: string) => {
+      const tier = pieces >= 5 ? 2 : pieces >= 1 ? 1 : 0;
+      expect(await tierOf(db(), c.id, now()), at).toMatchObject({ pieces, tier });
+      expect(await activePieceCount(db(), c.id), at).toBe(pieces);
+      expect(await h.ctx.services.club.status(c.id), at).toMatchObject({ pieces, tier: { level: tier } });
+      expect((await h.ctx.services.care.status(c.id, other.serial)).tier, at).toBe(tier === 2 ? 'PLATINE' : 'TITANE');
+      expect((await h.ctx.services.owners.sheet(c.id)).tier, at).toMatchObject({ level: tier, pieces });
+      const [row] = await exportBatch(db(), [c.id], await exportBasis(db(), now()));
+      expect(row!['pieces held'], at).toBe(String(pieces));
+    };
+    await expectCount(5, 'before the claim');
+    const [members, segment] = [await platine(), await inTier2()];
+    const s = await received(c, claimed);
+    const fresh = await piece(models.life);
+    await decide(s.id, { outcome: 'REPLACEMENT', replacementProductId: fresh.serial });
+    expect(await status(claimed.id)).toBe('REVOKED');
+    // Decided: the claimed piece, revoked, still counts (its new piece registered by nobody): PLATINE stays.
+    await expectCount(5, 'decided');
+    expect(await platine()).toBe(members);
+    expect(await inTier2()).toBe(segment);
+    // MY PIECES: the claimed piece carries its claim's outcome (one calm line), the others none.
+    const listed = await h.ctx.services.ownership.listForAccount(c.id);
+    expect(listed.find((x) => x.productId === claimed.serial)).toMatchObject({ warranty: { status: 'VOID' }, claimOutcome: 'REPLACEMENT' });
+    expect(listed.filter((x) => x.claimOutcome !== undefined)).toHaveLength(1);
+    // Shipped: the same.
+    await ship(s.id);
+    await expectCount(5, 'shipped');
+    // The new piece registered to its claimant: it counts, the old one no more (5, not 6).
+    await register(fresh.id, c.id);
+    await expectCount(5, 'registered');
+    expect(await platine()).toBe(members);
+    expect(await inTier2()).toBe(segment);
+
+    // A new piece registered by someone else ends the count of the old one too (never both).
+    const d = await collector();
+    const mine = await piece(models.life, { owner: d.id });
+    const r = await received(d, mine);
+    const next = await piece(models.life);
+    await decide(r.id, { outcome: 'REPLACEMENT', replacementProductId: next.serial });
+    expect(await tierOf(db(), d.id, now())).toMatchObject({ pieces: 1, tier: 1 });
+    await ship(r.id);
+    await register(next.id, (await collector()).id);
+    expect(await tierOf(db(), d.id, now())).toMatchObject({ pieces: 0, tier: 0 });
+
+    // A claim closed before its decision revokes nothing: the piece counts as it did.
+    const e = await collector();
+    const kept = await piece(models.life, { owner: e.id });
+    const k = await open(e, kept);
+    await label(k.id);
+    await svc().cancel(k.id, { note: 'The client withdrew.' }, operator);
+    expect(await status(kept.id)).toBe('OWNED');
+    expect(await tierOf(db(), e.id, now())).toMatchObject({ pieces: 1, tier: 1 });
+
+    // A credit of its value (the model no longer made) closes the piece: it counts no more, as before; MY PIECES reads its outcome.
+    const f = await collector();
+    const gone = await piece(models.gone, { owner: f.id });
+    const g = await received(f, gone);
+    await decide(g.id, { outcome: 'VALUE_CREDIT' });
+    expect(await tierOf(db(), f.id, now())).toMatchObject({ pieces: 0, tier: 0 });
+    expect((await h.ctx.services.ownership.listForAccount(f.id))[0]).toMatchObject({ warranty: { status: 'VOID' }, claimOutcome: 'VALUE_CREDIT' });
   });
 
   it('the 2-year warranty: REPAIR, REPLACEMENT or REFUSED only, its five reasons, no free-replacement counter, an EXPIRED warranty refused WARRANTY_ENDED', async () => {

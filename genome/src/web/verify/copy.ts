@@ -647,6 +647,16 @@ export const ORBES_CARE = Object.freeze({
         : 'This piece is covered by the ORBES warranty against manufacturing defects: ORBES repairs or replaces it.',
     expired: 'The warranty period of this piece has ended. ORBES Client Services remains at your disposal for care and repair.',
     void: 'The ORBES warranty no longer applies to this piece. Please contact ORBES Client Services.',
+    /**
+     * A piece its warranty claim closed (CARE-C2, the owner's answer of 2026-10-16): one calm line in place of NO LONGER
+     * VALID and its contact sentence, in MY PIECES, for as long as the piece is listed. The claim's own block keeps its
+     * steps (the new piece prepared, then on its way).
+     */
+    closed: Object.freeze({
+      REPLACEMENT: Object.freeze({ head: 'REPLACED UNDER ORBES CARE', text: 'Your new piece takes its place.' }),
+      VALUE_CREDIT: Object.freeze({ head: 'REPLACED UNDER ORBES CARE', text: 'A credit of its value takes its place.' }),
+      REFUND: Object.freeze({ head: 'REFUNDED UNDER THE LEGAL GUARANTEE', text: 'Its price is paid back to you by its seller.' }),
+    }),
     /** No warranty the app can read: on a result and in MY PIECES alike. */
     none: 'Warranty details for this piece are available from ORBES Client Services.',
   }),

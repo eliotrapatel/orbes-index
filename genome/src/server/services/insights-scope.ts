@@ -19,7 +19,7 @@
  *   scopeCte        `<name> AS (…)`: the counted collectors (population.ts `countedCollector`: no test entrant, no team
  *                   account, no DELETED account) the five filters keep and the scope selects, one row each with its
  *                   creation, its country, its tier now and its score now. The tier comes from one grouped pass over
- *                   the pieces held now (`ownership` ⋈ `products`, CLUB_EXCLUDED_STATUSES left out), never a per-row
+ *                   the pieces held now (`ownership` ⋈ `products`, as club.ts clubCounts counts them), never a per-row
  *                   subquery, by CLUB_TIER_THRESHOLDS as club.ts counts them; the score from `account_scores`.
  *
  * The filters (§3.6 C.6.2): Country is the account's country; Source is where the collector first came from
@@ -37,7 +37,7 @@ import { sql, type RawBuilder, type SqlBool } from 'kysely';
 import { ageBand as bandOfAge, ageOn, AGE_BANDS, latestBirthDateForAge, tasteKey, type AgeBand } from '../../shared/profile-rules.js';
 import { validationError } from '../errors.js';
 import { sourceFilter } from './acquisition-filters.js';
-import { CLUB_EXCLUDED_STATUSES, CLUB_TIER_THRESHOLDS } from './club.js';
+import { CLUB_TIER_THRESHOLDS, clubCounts } from './club.js';
 import { countedCollector } from './population.js';
 import { parisDay, parisDayStart } from './schedule.js';
 import { tasteFilter } from './tastes.js';
@@ -345,7 +345,7 @@ export function scopeCte(name: string, q: { filters: InsightsFilters; scope: Sco
         FROM accounts a
         LEFT JOIN (SELECT o.account_id, count(*)::int AS pieces
                      FROM ownership o JOIN products p ON p.id = o.product_id
-                    WHERE o.ended_at IS NULL AND p.status NOT IN (${sql.join([...CLUB_EXCLUDED_STATUSES])})
+                    WHERE o.ended_at IS NULL AND ${clubCounts('p', 'o.account_id')}
                     GROUP BY o.account_id) h ON h.account_id = a.id
         LEFT JOIN account_scores sc ON sc.account_id = a.id
        WHERE ${sql.join(where, sql` AND `)}) b

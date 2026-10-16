@@ -61,7 +61,7 @@ import { ageOn } from '../../shared/profile-rules.js';
 import { fold } from '../../shared/fold.js';
 import { noopLogger, systemClock, type Actor, type Clock, type Logger } from '../types.js';
 import { AcquisitionReportService } from './acquisition-report.js';
-import { CLUB_EXCLUDED_STATUSES } from './club.js';
+import { clubCounts } from './club.js';
 import { plusMonths } from './collector-history.js';
 import { collectorExportFilename, COLLECTOR_EXPORT_TIMEOUT_MS, COLLECTOR_EXPORT_VERSION, exportDocument } from './collector-export.js';
 import { band, ENGAGEMENT_PARTS, PART_MAX, type EngagementPart } from './engagement-formula.js';
@@ -2131,7 +2131,7 @@ async function sliceSql(tx: Db, x: Reading, s: Slice): Promise<SliceSql> {
     case 'holds':
       return at(
         exists(sql`SELECT 1 FROM ownership o JOIN products p ON p.id = o.product_id JOIN models m ON m.id = p.model_id
-                    WHERE o.account_id = c.account_id AND o.ended_at IS NULL AND p.status NOT IN (${sql.join([...CLUB_EXCLUDED_STATUSES])})
+                    WHERE o.account_id = c.account_id AND o.ended_at IS NULL AND ${clubCounts('p', 'o.account_id')}
                       AND (m.id = ${v}::uuid OR m.variant_of = ${v}::uuid)`),
       );
     case 'device':

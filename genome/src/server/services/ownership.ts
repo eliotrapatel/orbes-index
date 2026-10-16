@@ -42,7 +42,7 @@ import { utf8 } from '../../core/bytes.js';
 import type { AppConfig } from '../config.js';
 import { deriveSubkey } from '../crypto/secretbox.js';
 import { inTransaction, type Db } from '../db/connection.js';
-import type { AccountStatus, AcquiredVia, DropMode, OrderChannel, OrderStatus, OwnershipRow, OwnershipState, OwnershipTransferRow, ProductRow, ProductStatus, TransferStatus } from '../db/schema.js';
+import type { AccountStatus, AcquiredVia, DropMode, OrderChannel, OrderStatus, OwnershipRow, OwnershipState, OwnershipTransferRow, ProductRow, ProductStatus, TransferStatus, WarrantyClaimOutcome } from '../db/schema.js';
 import { DomainError, forbidden, notFound, tooManyRequests, validationError } from '../errors.js';
 import { systemClock, SYSTEM_ACTOR, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
@@ -230,7 +230,17 @@ export interface OwnedProduct {
    * piece received from another owner). Only ever an order of the account that holds the piece now.
    */
   origin: PieceOrigin | null;
+  /**
+   * Plan ORBES CARE, CARE-C2: the outcome of this account's warranty claim that closed the piece (REPLACEMENT,
+   * VALUE_CREDIT or REFUND: the piece revoked and its warranty voided by the decision), sent only then, and only while
+   * the warranty reads VOID. MY PIECES reads it as one calm line in place of NO LONGER VALID. Absent otherwise.
+   */
+  claimOutcome?: ClosingClaimOutcome;
 }
+
+/** The outcomes of a warranty claim that close its piece (services/warranty-claims.ts: the piece REVOKED, its warranty voided). */
+export type ClosingClaimOutcome = Extract<WarrantyClaimOutcome, 'REPLACEMENT' | 'VALUE_CREDIT' | 'REFUND'>;
+const CLOSING_CLAIM_OUTCOMES: readonly ClosingClaimOutcome[] = ['REPLACEMENT', 'VALUE_CREDIT', 'REFUND'];
 
 /** Where a piece of an account comes from (OwnedProduct.origin): its order, and the release it was sold in. */
 export interface PieceOrigin {
@@ -994,7 +1004,7 @@ export class OwnershipService {
     if (rows.length === 0) return [];
     const ids = rows.map((r) => r.uuid);
 
-    const [genomes, warranties, transfers, orders] = await Promise.all([
+    const [genomes, warranties, transfers, orders, closings] = await Promise.all([
       this.db.selectFrom('genomes').selectAll().where('product_id', 'in', ids).orderBy('genome_version', 'desc').execute(),
       this.db.selectFrom('warranties').selectAll().where('product_id', 'in', ids).execute(),
       this.db
@@ -1019,6 +1029,15 @@ export class OwnershipService {
         .orderBy('o.reserved_at', 'desc')
         .orderBy('o.id')
         .execute(),
+      // CARE-C2: this account's claims that closed a piece (one at most per piece: the piece is revoked by it).
+      this.db
+        .selectFrom('warranty_claims')
+        .select(['product_id', 'outcome'])
+        .where('product_id', 'in', ids)
+        .where('account_id', '=', accountId)
+        .where('outcome', 'in', [...CLOSING_CLAIM_OUTCOMES])
+        .orderBy('decided_at', 'desc')
+        .execute(),
     ]);
     // A loss the owner declared themselves is theirs to withdraw (PIECE FOUND): read from the status history.
     const resolvable = new Set(
@@ -1035,6 +1054,7 @@ export class OwnershipService {
       const w = warranties.find((x) => x.product_id === r.uuid);
       const t = transfers.find((x) => x.product_id === r.uuid);
       const ws = computeWarrantyStatus(w, today);
+      const closing = r.status === 'REVOKED' && ws === 'VOID' ? closings.find((x) => x.product_id === r.uuid) : undefined;
       return {
         productId: r.product_id,
         category: { code: r.category_code.trim(), name: r.category_name },
@@ -1069,6 +1089,7 @@ export class OwnershipService {
           r.model_slug && (r.model_lookbook === 'PUBLIC' || (r.model_lookbook === 'RESERVED' && r.model_min_tier <= accountTier)) ? r.model_slug : null,
         care: r.care_instructions,
         origin: pieceOrigin(orders.find((o) => o.product_id === r.uuid)),
+        ...(closing ? { claimOutcome: closing.outcome as ClosingClaimOutcome } : {}),
       };
     });
   }
