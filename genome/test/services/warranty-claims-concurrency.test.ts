@@ -2,10 +2,12 @@
  * Two decisions of one warranty claim at once (plan ORBES CARE, §2(f), step 1.6; services/warranty-claims.ts
  * `decide`): the claim's row is taken FOR UPDATE and its step checked under the lock, so one decision wins and the
  * other reads the claim DECIDED or DONE and is refused 409 CLAIM_STEP; at most one grant is given, the piece is revoked
- * once. A claim opened while the piece's owner asks for PRIVATE CARE: both lock the piece's row (services/care.ts
- * `request` after the account's, as the house's order account → product), so one of them waits and is refused, never
- * both written. (Two claims of one root are never live at once through the service: one live claim per piece, and every
- * replacement revokes the old piece; `warranty_claims_free_once` is tested by direct inserts in migrations.test.ts.)
+ * once. A claim opened while the piece's owner asks for PRIVATE CARE: both lock the owner's account, then the piece's row
+ * (the house's order account → product: the claim's account FOR KEY SHARE, services/care.ts `request` FOR UPDATE), so one
+ * of them waits and is refused, never both written (taken after the piece, the claim's account crossed the request: a
+ * deadlock on PostgreSQL). (Two claims of one root are never live at once through the service: one live claim per
+ * piece, and every replacement revokes the old piece; `warranty_claims_free_once` is tested by direct inserts in
+ * migrations.test.ts.)
  *
  * On PGlite (always) the calls are issued together and the database serialises their transactions. On PostgreSQL
  * (opt-in, a pool of 8: true parallelism) the same cases run, in genome-ci:

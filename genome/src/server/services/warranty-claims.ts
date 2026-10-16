@@ -71,7 +71,9 @@
  * (services/care.ts). The label's PDF is erased 30 days after the claim ends (`eraseCareLabels`). The collector's view
  * and the right-of-access export never carry `note`, `opened_by`, `decided_by` nor any staff email.
  *
- * Lock order: the conversation, then the piece (open); the claim, then its piece, then the replacement (every step).
+ * Lock order: the conversation, then the claimant's account, then the piece (open); the claim, then its account (decide,
+ * moveToLegal), then its piece, then the replacement (every step). The account FOR KEY SHARE (`lockAccount`) before any
+ * piece, as the house's order account → product (PRIVATE CARE's request takes the account FOR UPDATE, then the piece).
  */
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
@@ -551,6 +553,15 @@ async function statusAtOpening(db: Db, claim: Pick<WarrantyClaimRow, 'product_id
   return computeWarrantyStatus({ ...w, voided_at: voidedBefore ? w.voided_at : null, lifetime, end_date: endDate }, utcDate(claim.opened_at));
 }
 
+/**
+ * The claim's account FOR KEY SHARE, the lock its foreign key takes on a claim's insert or a grant's anyway, taken before
+ * the piece (lock order account → product): taken after it, by that insert, it crossed PRIVATE CARE's request, which
+ * holds the account FOR UPDATE and waits for the piece, and PostgreSQL broke the deadlock by failing one of them.
+ */
+async function lockAccount(tx: Db, accountId: string): Promise<void> {
+  await tx.selectFrom('accounts').select('id').where('id', '=', accountId).forKeyShare().execute();
+}
+
 /** The claim that used the free replacement of a root under the lifetime warranty, if any. */
 async function freeUsedBy(db: Db, rootUuid: string): Promise<{ id: string; decided_at: Date } | undefined> {
   const r = await db
@@ -795,6 +806,7 @@ export class WarrantyClaimService {
         const v = await tx.selectFrom('client_conversations').select(['id', 'account_id']).where('id', '=', conversationId).forShare().executeTakeFirst();
         if (!v) throw notFound('Conversation', 'CONVERSATION_NOT_FOUND');
         accountId = v.account_id;
+        await lockAccount(tx, accountId);
       }
       const product = await findProduct(tx, input.productId, { forUpdate: true });
       if (!product) throw notFound('Product', 'PRODUCT_NOT_FOUND');
@@ -907,6 +919,7 @@ export class WarrantyClaimService {
       if (c.basis !== 'TWO_YEARS') throw claimNotLegal('only a 2-year claim moves to the legal guarantee');
       if (c.status !== 'RECEIVED') throw claimStep();
       const note = withNote(c.note, added);
+      if (c.account_id !== null) await lockAccount(tx, c.account_id);
       // A boutique sale's receipt: in the note given now (the claim's own note was written for the 2-year warranty).
       await assertLegal(tx, c.product_id, c.root_product_id, c.account_id, added, utcDate(this.clock()));
       const now = notBefore(this.clock(), c.received_at);
@@ -956,6 +969,8 @@ export class WarrantyClaimService {
     const otherSize = input.otherSize === true;
     if (otherSize && outcome !== 'REPLACEMENT') throw validationError('Another size is chosen with a replacement only.');
     return this.step(id, outcome === 'REFUSED' ? ['OPEN', 'RECEIVED'] : ['RECEIVED'], actor, 'warranty.claim.decide', async (tx, c, now, by) => {
+      // Its account before its piece: a credit's grant references the account.
+      if (c.account_id !== null) await lockAccount(tx, c.account_id);
       const rules = claimRules(c.basis);
       if (!rules.outcomes.includes(outcome)) throw outcomeNotAllowed('This warranty does not allow that outcome.');
       if (reason !== null && !rules.refusalReasons.includes(reason)) throw outcomeNotAllowed('This warranty does not allow that reason of refusal.');
