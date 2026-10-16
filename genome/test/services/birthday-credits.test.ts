@@ -397,7 +397,8 @@ describe('the daily grant of the birthday credit (§3.5 SB.4.4)', () => {
     expect(audits).toEqual([
       { actor_type: 'system', actor_id: null, details: { grantId: grants[0]!.id, kind: 'BIRTHDAY', birthdayOn: '2032-07-21', amountMinor: 2_000, currency: 'EUR', expiresAt: birthdayExpiry('2032-07-21', 30).toISOString() } },
     ]);
-    expect(JSON.stringify(audits)).not.toContain('1993');
+    // The grant's random id is set aside: a uuid can hold "1993" (…-f19935c5eb18) without any date of birth.
+    expect(JSON.stringify(audits).replaceAll(grants[0]!.id, '')).not.toContain('1993');
     // The key is the last guard: a second grant for the same birthday is refused by the database.
     await expect(
       t.db.insertInto('tier_grants').values({ account_id: a.id, tier: null, kind: 'BIRTHDAY', granted_at: clock.now(), amount_minor: 2_000, currency: 'EUR', expires_at: birthdayExpiry('2032-07-21', 30), birthday_on: '2032-07-21' }).execute(),
