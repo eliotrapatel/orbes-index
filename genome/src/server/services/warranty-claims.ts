@@ -74,6 +74,11 @@
  * Lock order: the conversation, then the claimant's account, then the piece (open); the claim, then its account (decide,
  * moveToLegal), then its piece, then the replacement (every step). The account FOR KEY SHARE (`lockAccount`) before any
  * piece, as the house's order account → product (PRIVATE CARE's request takes the account FOR UPDATE, then the piece).
+ * A decision that revokes the piece (REPLACEMENT, VALUE_CREDIT, REFUND) reads the piece's model FOR SHARE right after
+ * the piece and before its first audit entry, as WarrantyService.activate (the model, then the warranties row): a
+ * model's warranty change (CatalogService.setWarranty) takes the model FOR UPDATE, then its pieces' warranties, then
+ * the audit chain's lock, so it can no longer hold this piece's warranty while the decision, holding the audit lock,
+ * waits to void it (no row is locked after the audit chain's lock but the warranty, which the model now orders).
  */
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
@@ -126,6 +131,8 @@ const SOLD_ORDER_STATUSES = ['RESERVED', 'PAID', 'SHIPPED', 'DELIVERED'] as cons
 const ONLY_REFUSED: readonly string[] = ['LOST', 'STOLEN'];
 /** The outcomes after which ORBES keeps the piece (D9): the claim is DONE at the decision. */
 const KEPT: readonly WarrantyClaimOutcome[] = ['VALUE_CREDIT', 'REFUND'];
+/** The outcomes that revoke the piece and void its warranty (ORBES keeps it): its model is read FOR SHARE first. */
+const VOIDS: readonly WarrantyClaimOutcome[] = ['REPLACEMENT', 'VALUE_CREDIT', 'REFUND'];
 /** The ORBES warranty's remedies, which need a warranty ACTIVE when the claim was opened. */
 const REMEDIES: readonly WarrantyClaimOutcome[] = ['REPLACEMENT', 'REPAIR', 'VALUE_CREDIT', 'PART_CREDIT'];
 /** The free replacement under the lifetime warranty (answer 4): `warranty_claims_free_once`. */
@@ -983,11 +990,12 @@ export class WarrantyClaimService {
         if (outcome === 'PART_CREDIT' && !used) throw outcomeNotAllowed('The free replacement of this piece is still available: replace it, or give the credit of its value.');
       }
       const product = await this.piece(tx, c.product_id);
+      // ORBES keeps the piece: its model FOR SHARE before anything here audits. Its warranty is voided below, after the
+      // audit chain's lock; a model's warranty change (CatalogService.setWarranty) takes the model FOR UPDATE before its
+      // pieces' warranties, so it waits here instead of holding this piece's warranty while waiting for the audit lock.
+      const model = VOIDS.includes(outcome) ? await tx.selectFrom('models').select('discontinued_at').where('id', '=', product.model_id).forShare().executeTakeFirstOrThrow() : null;
       // A credit of the piece's value only when its model is no longer made (answer 4), read under the piece's lock.
-      if (outcome === 'VALUE_CREDIT') {
-        const m = await tx.selectFrom('models').select('discontinued_at').where('id', '=', product.model_id).forShare().executeTakeFirstOrThrow();
-        if (m.discontinued_at === null) throw outcomeNotAllowed('This model is still made: replace the piece with the same piece, new.');
-      }
+      if (outcome === 'VALUE_CREDIT' && model!.discontinued_at === null) throw outcomeNotAllowed('This model is still made: replace the piece with the same piece, new.');
       const program = await readProgram(tx);
       const decidedAt = notBefore(now, c.received_at ?? c.opened_at);
       const details: Record<string, unknown> = { basis: c.basis, outcome, ...(reason ? { refusalReason: reason } : {}) };
@@ -1059,7 +1067,7 @@ export class WarrantyClaimService {
       }
 
       // ORBES keeps the piece (a replacement, a credit of value, a refund): its identity closed, its record completed.
-      if (outcome === 'REPLACEMENT' || outcome === 'VALUE_CREDIT' || outcome === 'REFUND') {
+      if (VOIDS.includes(outcome)) {
         const code = outcome === 'REFUND' ? 'REFUNDED' : 'REPLACED';
         const why = outcome === 'REPLACEMENT' ? `Replaced under warranty by ${details.replacement as string}` : outcome === 'REFUND' ? 'Refunded under the legal guarantee' : 'Replaced under warranty by a credit of its value';
         await this.lifecycle.transition(product.id, 'REVOKED', { reason: why, revocationReasonCode: code }, actor, tx);

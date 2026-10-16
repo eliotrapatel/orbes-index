@@ -704,6 +704,24 @@ describe('warranty claims (plan ORBES CARE, step 1.6)', () => {
     await register(next.id, (await collector()).id);
     expect(await tierOf(db(), d.id, now())).toMatchObject({ pieces: 0, tier: 0 });
 
+    // A replacement chosen again at shipment: the identity now chosen ends the old piece's count, never the first one.
+    const q = await collector();
+    const five = [];
+    for (let i = 0; i < 5; i++) five.push(await piece(models.life, { owner: q.id }));
+    const qc = await received(q, five[0]!);
+    const n1 = await piece(models.life);
+    const n2 = await piece(models.life);
+    await decide(qc.id, { outcome: 'REPLACEMENT', replacementProductId: n1.serial });
+    await svc().ship(qc.id, { carrierId, tracking: '6A99999999998', replacementProductId: n2.serial }, operator);
+    expect(await tierOf(db(), q.id, now())).toMatchObject({ pieces: 5, tier: 2 });
+    // The first one, set aside and registered by someone else, ends nothing: the old piece still counts.
+    await register(n1.id, (await collector()).id);
+    expect(await tierOf(db(), q.id, now())).toMatchObject({ pieces: 5, tier: 2 });
+    // The one shipped, registered to its claimant: it counts instead of the old piece (5, not 6).
+    await register(n2.id, q.id);
+    expect(await tierOf(db(), q.id, now())).toMatchObject({ pieces: 5, tier: 2 });
+    expect(await activePieceCount(db(), q.id)).toBe(5);
+
     // A claim closed before its decision revokes nothing: the piece counts as it did.
     const e = await collector();
     const kept = await piece(models.life, { owner: e.id });

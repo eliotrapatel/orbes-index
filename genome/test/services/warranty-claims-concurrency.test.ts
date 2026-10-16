@@ -5,7 +5,11 @@
  * once. A claim opened while the piece's owner asks for PRIVATE CARE: both lock the owner's account, then the piece's row
  * (the house's order account → product: the claim's account FOR KEY SHARE, services/care.ts `request` FOR UPDATE), so one
  * of them waits and is refused, never both written (taken after the piece, the claim's account crossed the request: a
- * deadlock on PostgreSQL). (Two claims of one root are never live at once through the service: one live claim per
+ * deadlock on PostgreSQL). A replacement decided while an ADMIN changes the piece's model's warranty: the decision
+ * reads the model FOR SHARE before its first audit entry, and CatalogService.setWarranty takes it FOR UPDATE before the
+ * warranties of its pieces, so one waits for the other on the model and both are written (read after the audit chain's
+ * lock, the model let setWarranty hold the piece's warranty while the decision, holding the audit lock, waited to void
+ * it: a deadlock on PostgreSQL). (Two claims of one root are never live at once through the service: one live claim per
  * piece, and every replacement revokes the old piece; `warranty_claims_free_once` is tested by direct inserts in
  * migrations.test.ts.)
  *
@@ -23,6 +27,7 @@ import { migrateToLatest } from '../../src/server/db/migrate.js';
 import { DomainError } from '../../src/server/errors.js';
 import { AuditService } from '../../src/server/services/audit.js';
 import { CareService } from '../../src/server/services/care.js';
+import { CatalogService } from '../../src/server/services/catalog.js';
 import { CategoryRegistry } from '../../src/server/services/categories.js';
 import { LifecycleService } from '../../src/server/services/lifecycle.js';
 import { WarrantyService } from '../../src/server/services/warranty.js';
@@ -80,6 +85,8 @@ for (const backend of BACKENDS) {
     let services: WarrantyClaimService[];
     /** PRIVATE CARE, in a third process. */
     let care: CareService;
+    /** The console's catalogue (a model's warranty), in a fourth process. */
+    let catalog: CatalogService;
     let staff: Actor;
     let carrierId: string;
     let accountId: string;
@@ -103,6 +110,7 @@ for (const backend of BACKENDS) {
         const lifecycle = new LifecycleService({ db, audit, clock: clock.now });
         care = new CareService({ db, audit, warranty: new WarrantyService({ db, audit, lifecycle, clock: clock.now }), clock: clock.now });
       }
+      catalog = new CatalogService({ db, audit, categories, clock: clock.now });
       const admin = await db.insertInto('admin_users').values({ email: 'cs@orbes.test', email_normalized: 'cs@orbes.test', password_hash: 'scrypt$x', role: 'OPERATOR' }).returning('id').executeTakeFirstOrThrow();
       staff = { type: 'admin', id: admin.id };
       carrierId = (await db.insertInto('carriers').values({ name: `Claims ${randomBytes(3).toString('hex')}`, tracking_url: 'https://track.test/{tracking}' }).returning('id').executeTakeFirstOrThrow()).id;
@@ -141,6 +149,26 @@ for (const backend of BACKENDS) {
       await db.insertInto('ownership').values({ product_id: p.id, account_id: owner, acquired_via: 'FIRST_REGISTRATION', started_at: new Date('2026-03-01T10:00:00Z') }).execute();
       await db.insertInto('warranties').values({ product_id: p.id, purchase_date: '2026-03-01', start_date: '2026-03-01', duration_months: 24, lifetime: true }).execute();
       return p;
+    }
+
+    /** An identity of the model never sold, registered nor with a warranty: a replacement. */
+    async function issuedPiece(): Promise<{ id: string; product_id: string }> {
+      serial += 1;
+      return db
+        .insertInto('products')
+        .values({
+          product_id: `O26-J-${String(serial).padStart(5, '0')}`,
+          packed_identity: packIdentity({ year: 2026, categoryIndex: category, serial }),
+          year: 2026,
+          category_id: category,
+          serial,
+          sku: `ECL-${serial}`,
+          model_id: modelId,
+          material: '925 STERLING SILVER',
+          status: 'ISSUED',
+        })
+        .returning(['id', 'product_id'])
+        .executeTakeFirstOrThrow();
     }
 
     /** A piece of the account, its lifetime warranty started, claimed and received by ORBES. */
@@ -212,6 +240,25 @@ for (const backend of BACKENDS) {
         const claims = await db.selectFrom('warranty_claims').select('id').where('product_id', '=', p.id).execute();
         const requests = await db.selectFrom('care_requests').select('id').where('product_id', '=', p.id).execute();
         expect(claims.length + requests.length).toBe(1);
+      }
+    }, 60_000);
+
+    it('a replacement decided while the model changes warranty: both are written, never a deadlock', async () => {
+      // Four rounds, the model to 2 years then back to lifetime, each side started first in turn; it ends as it began.
+      for (let round = 0; round < 4; round++) {
+        const lifetime = round % 2 === 1;
+        const { claimId, productId } = await receivedClaim();
+        const next = await issuedPiece();
+        const decision = () => services[0]!.decide(claimId, { outcome: 'REPLACEMENT', replacementProductId: next.product_id }, staff);
+        const change = () => catalog.setWarranty(modelId, lifetime, staff);
+        const settled = round < 2 ? await Promise.allSettled([decision(), change()]) : await Promise.allSettled([change(), decision()]);
+        for (const s of settled) if (s.status === 'rejected') throw s.reason;
+        const claim = await db.selectFrom('warranty_claims').select(['status', 'outcome', 'replacement_product_id']).where('id', '=', claimId).executeTakeFirstOrThrow();
+        expect(claim).toMatchObject({ status: 'DECIDED', outcome: 'REPLACEMENT', replacement_product_id: next.id });
+        const w = await db.selectFrom('warranties').select(['voided_at']).where('product_id', '=', productId).executeTakeFirstOrThrow();
+        expect(w.voided_at).not.toBeNull();
+        const m = await db.selectFrom('models').select('warranty_lifetime').where('id', '=', modelId).executeTakeFirstOrThrow();
+        expect(m.warranty_lifetime).toBe(lifetime);
       }
     }, 60_000);
   });
