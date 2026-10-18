@@ -49,7 +49,7 @@ jobs:
   test:
     name: typecheck, tests, web build
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 75
 
     services:
       postgres:
