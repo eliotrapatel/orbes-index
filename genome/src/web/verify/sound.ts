@@ -36,6 +36,7 @@
 import { setSoundPref, soundPref, type PrefStorage, deviceStorage } from '../shared/prefs.js';
 import type { VerificationState } from './types.js';
 import { isAuthenticState } from './view-model.js';
+import { onComputer } from '../shared/desktop.js';
 
 /** The chord: its voices, how they are struck, how long it lasts. Times in seconds. */
 export const SIGNATURE = Object.freeze({
@@ -141,6 +142,8 @@ export interface SoundEnvironment {
   storage: PrefStorage | null;
   setTimeout(fn: () => void, ms: number): unknown;
   clearTimeout(handle: unknown): void;
+  /** Desktop (BRIEF §5.10): the default when nothing is kept, off on a computer of any window width (D6); on when absent. */
+  defaultOn?(): boolean;
 }
 
 type AudioContextClass = new () => AudioContext;
@@ -158,6 +161,7 @@ export function browserSoundEnvironment(): SoundEnvironment {
     storage: deviceStorage(),
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+    defaultOn: () => !onComputer(),
   };
 }
 
@@ -177,7 +181,7 @@ export class SoundSignature implements SoundSwitch {
   private rest: unknown = null;
 
   constructor(private readonly env: SoundEnvironment = browserSoundEnvironment()) {
-    this.enabled = soundPref(env.storage);
+    this.enabled = soundPref(env.storage, env.defaultOn?.() ?? true);
   }
 
   /** Whether the chord plays (the preference of this device; on by default). */
@@ -188,7 +192,7 @@ export class SoundSignature implements SoundSwitch {
   /** SOUND ON / OFF: kept on this device; off also releases the audio output at once. */
   set(on: boolean): void {
     this.enabled = on;
-    setSoundPref(on, this.env.storage);
+    setSoundPref(on, this.env.storage, !(this.env.defaultOn?.() ?? true));
     if (!on) this.suspend();
   }
 

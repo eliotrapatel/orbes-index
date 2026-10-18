@@ -1,0 +1,26 @@
+/*
+ * The desktop's rules a phone needs too (desktop, D8): imported by the phone's own stylesheets (verify/styles.css,
+ * legal/styles.css), after light.css, so they load with the first paint on every screen. The registration of
+ * `--d-ph-h`, which views/nocturne.ts fadedPhoto() reads before its own height, and the elements the phone's own
+ * markup carries for the desktop layout only, hidden everywhere until shared/desktop.css lays them out. Everything else
+ * of the desktop loads apart: the hover and pressed states in shared/desktop-pointer.css, the layout in
+ * shared/desktop.css and the sheets beside it (verify/desktop.css, legal/desktop.css), each linked under its media
+ * query by the app's shell, so a phone never waits for them.
+ */
+
+/* A photograph's height (fadedPhoto's inline height reads it first): set on the photograph only, never inherited. */
+@property --d-ph-h {
+  syntax: "*";
+  inherits: false;
+}
+
+/* ══ Elements of the desktop layout only (a draw's frame: THIS RELEASE IS OVER once drawn and YOUR ENTRY's main
+   action; an unknown release's THE RELEASES): never on a phone ════════════════════════════════════════════════════ */
+
+.n-release__over-word,
+.n-release__frame-action,
+.n-release__missing-back,
+.n-model__missing-back,
+.n-post__missing-back {
+  display: none;
+}

@@ -1,0 +1,66 @@
+/*
+ * A computer with a touch screen (the owner's answer Q2, 2026-10-16): a Windows laptop, a Chromebook, any computer
+ * whose browser reports touch points but whose main pointer is a mouse or a trackpad has the desktop layout, and
+ * shared/mode-early.ts marks it `html.d-tap` before the first paint. It can be tapped by finger, so each desktop control
+ * whose box is under 44 px reaches 44 px by an invisible extension of its hit area, centred on it (BRAND-DESIGN-SYSTEM
+ * §3.8's 44 px, the phone's floor): a layer of its own with no ground, no line and no colour, nothing in the layout moves
+ * and nothing is drawn (test/web/verify.brand.test.ts holds the declarations to that). A mouse never sees it; a phone
+ * and a tablet (`html.d-touch`) never have this layout.
+ *
+ * The controls are those the desktop draws under 44 px in either direction, found by tapping every state of the demo
+ * as a touch laptop at 1024, 1440 and 1920 px (step 7's check): the bar's ORBES, its account and the menu, the footer's
+ * links and THE CLUB, SEE THE MODEL, a piece's and a wishlist's name under its photograph, an address's EDIT,
+ * MAKE DEFAULT and REMOVE, the last message's READ, the room's links at its foot, the legal pages' list of sections at
+ * its two ends. Two kinds are left as they are: a link inside a sentence (the legal pages' text: it is the sentence's,
+ * as on the phone) and two controls closer than 44 px (the legal pages' sections, 37 px apart), which share the space
+ * between them.
+ *
+ * Loaded last in each app's desktop stylesheet (verify/desktop.css, legal/desktop.css), under the desktop's query.
+ */
+
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  /* The zone: the control's own box where it is 44 px or more, else 44 px centred on it, each way on its own. Its
+     layer is placed on the control, so the control holds it (positioned where it is not already). */
+  html.d-tap:not(.d-touch) body.nocturne :is(a.n-wm, .n-fl__link, .n-foot__club-link, .n-release__see, .d-ptile__name, .d-wish__name, .n-account__address-link, .now__messages-read) {
+    position: relative;
+  }
+
+  html.d-tap:not(.d-touch) body.nocturne :is(a.n-wm, .n-fl__link, .n-foot__club-link, .n-release__see, .d-ptile__name, .d-wish__name, .n-account__address-link, .now__messages-read)::after {
+    content: "";
+    position: absolute;
+    top: min(0px, calc(50% - 22px));
+    right: min(0px, calc(50% - 22px));
+    bottom: min(0px, calc(50% - 22px));
+    left: min(0px, calc(50% - 22px));
+  }
+
+  /* The room's links at its foot (PRIVACY, TERMS, LEGAL, HELP: 44 px high, HELP 38 px wide), the menu's words and the
+     account in the bar (44 px high, NOW 36 px wide, the account's monogram 25 px) hold a pressed ground that already
+     reaches 12 px past each side of the word (shared/desktop-room.css, shared/desktop-pointer.css), and their ::after
+     is their current line: that ground takes the finger too, so their zone is the ground's own box, drawn as it was. */
+  html.d-tap:not(.d-touch) .d-room > .live__foot .legal-links__link::after,
+  html.d-tap:not(.d-touch) body.nocturne .n-hd .n-acct::before,
+  html.d-tap:not(.d-touch) body.nocturne .n-hd > .n-rail > .n-rail__link::before {
+    pointer-events: auto;
+  }
+
+  /* The legal pages' list of sections: its rows 37 px apart share the space between them; the first reaches up and the
+     last down to 44 px, where no row is beside them. */
+  html.d-tap:not(.d-touch) body.nocturne .d-legal__item:first-child > .d-legal__link::after,
+  html.d-tap:not(.d-touch) body.nocturne .d-legal__item:last-child > .d-legal__link::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+  }
+
+  html.d-tap:not(.d-touch) body.nocturne .d-legal__item:first-child > .d-legal__link::after {
+    top: min(0px, calc(50% - 22px));
+  }
+
+  html.d-tap:not(.d-touch) body.nocturne .d-legal__item:last-child > .d-legal__link::after {
+    bottom: min(0px, calc(50% - 22px));
+  }
+}

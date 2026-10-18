@@ -30,7 +30,9 @@
  *    server's words, the button kept; done: its line takes the block's place and the focus, the ORDERS tab kept, the piece
  *    in PIECES); on the order still to ship, no REGISTER THIS PIECE but how it registers once arrived. A reload leaves no
  *    block; a reading that fails says so and keeps the button; one the server refuses says so and the block goes. Nothing
- *    scrolls sideways at 390, 375, 360 and 320 px, the code on one line; captured at phone and desk sizes (out/).
+ *    scrolls sideways at 390, 375, 360 and 320 px, the code on one line; captured at phone size and on a large tablet,
+ *    1280 px wide (out/): a tablet keeps the phone layout (the owner's answer Q2); a computer's orders are rows that open
+ *    the order's page (the desktop suite's).
  *
  * On the screen: the text's contrast on its ground computed from the page's own colours (at least 4.5 : 1), no figure in
  * the display face, no button on ORDERS (its documents are rows; the one hairline button, SCAN ORBES CODE, is the
@@ -53,7 +55,7 @@ import { orderDate } from '../../src/web/verify/orders-model.js';
 import { createLiveRelease, liveFixture, type LiveFixture } from '../support/live.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
 import { screenChecks } from '../support/vault-checks.js';
-import { CHROMIUM_PATH, launchChromium, mobileContext, startVerifyServer, type VerifyServer } from './verify.harness.js';
+import { CHROMIUM_PATH, launchChromium, mobileContext, startVerifyServer, tabletContext, type VerifyServer } from './verify.harness.js';
 import { countPiecesIn, packAndShip, scanIntoParcel, stockPieces } from '../support/fulfil.js';
 
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'out');
@@ -74,6 +76,8 @@ async function textsOf(loc: Locator, expected: string[]): Promise<void> {
   await expect.poll(async () => (await loc.allInnerTexts()).map(norm), POLL).toEqual(expected);
 }
 const visible = (loc: Locator) => loc.waitFor({ state: 'visible', timeout: POLL.timeout });
+/** The page on the phone layout, as a phone or a tablet has it whatever its width (`html.d-touch`, the owner's Q2). */
+const onPhoneLayout = (page: Page) => page.evaluate(() => document.documentElement.classList.contains('d-touch'));
 /** A tab of MY PIECES, by its name (its count after it), selected. */
 async function openTab(page: Page, name: 'PIECES' | 'ORDERS' | 'RELEASES'): Promise<void> {
   await page.getByRole('tab', { name: new RegExp(`^${name}\\s*\\d*$`) }).click();
@@ -510,7 +514,8 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: YOUR NEW CLAIM CODE on an order (plan
   const card = (page: Page, id: string) => page.locator(`article.n-pieces__order[data-order="${ref(id)}"]`);
 
   async function phone(width = 390): Promise<{ page: Page; problems: string[]; answers: string[] }> {
-    const context = await (width === 1280 ? browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'en-GB', timezoneId: 'Europe/Paris' }) : mobileContext(browser));
+    // 1280: a large tablet, touch, on the phone layout (a computer's orders are rows that open the order's page).
+    const context = await (width === 1280 ? tabletContext(browser) : mobileContext(browser));
     await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: srv.origin });
     await context.addCookies([{ name: sessionCookieName(srv.ctx.config, 'account'), value: me.token, url: srv.origin }]);
     const page = await context.newPage();
@@ -565,10 +570,13 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: YOUR NEW CLAIM CODE on an order (plan
       expect(problems).toEqual([]);
       await page.context().close();
     }
-    const desk = await phone(1280);
-    await visible(card(desk.page, ids.shipped).locator('.pieces__claim-show'));
-    await desk.page.screenshot({ path: join(OUT_DIR, 'verify-claim-code-waiting-desk.png'), fullPage: true });
-    await desk.page.context().close();
+    // On a large tablet, 1280 px wide: the phone layout, the block as on the phone.
+    const tablet = await phone(1280);
+    expect(await onPhoneLayout(tablet.page)).toBe(true);
+    await visible(card(tablet.page, ids.shipped).locator('.pieces__claim-show'));
+    await tablet.page.screenshot({ path: join(OUT_DIR, 'verify-claim-code-waiting-tablet.png'), fullPage: true });
+    expect(tablet.problems).toEqual([]);
+    await tablet.page.context().close();
   }, 120_000);
 
   it('a reading that fails says so and keeps SHOW THE CODE; one the server refuses says so, and the block goes', async () => {
@@ -629,10 +637,11 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: YOUR NEW CLAIM CODE on an order (plan
     expect(await block.locator('.pieces__claim-arrived').count()).toBe(0);
     await textOf(block.locator('.n-pieces__claim-card'), C.card);
     await page.screenshot({ path: join(OUT_DIR, 'verify-claim-code-shown-phone.png'), fullPage: true });
-    // The same, at desk size, then back to the phone.
+    // The same on a touch screen 1280 px wide (still the phone layout), then back to the phone.
     await page.setViewportSize({ width: 1280, height: 900 });
+    expect(await onPhoneLayout(page)).toBe(true);
     expect(await noSideways(page)).toBe(true);
-    await page.screenshot({ path: join(OUT_DIR, 'verify-claim-code-shown-desk.png'), fullPage: true });
+    await page.screenshot({ path: join(OUT_DIR, 'verify-claim-code-shown-tablet.png'), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
 
     // COPY CODE: the code alone on the clipboard.
@@ -690,7 +699,7 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: YOUR NEW CLAIM CODE on an order (plan
     await page.context().close();
   }, 120_000);
 
-  it('on an order still to ship: the code, how the piece registers once it has arrived, no REGISTER THIS PIECE; one line at 320 px; desk', async () => {
+  it('on an order still to ship: the code, how the piece registers once it has arrived, no REGISTER THIS PIECE; one line at 320 px; on a touch screen 1280 px wide', async () => {
     const { page, problems } = await phone(320);
     const block = card(page, ids.paid).locator('.pieces__claim');
     await block.getByRole('button', { name: C.show, exact: true }).click();
@@ -706,16 +715,19 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: YOUR NEW CLAIM CODE on an order (plan
       expect(await noSideways(page), `${width} px`).toBe(true);
     }
     await page.screenshot({ path: join(OUT_DIR, 'verify-claim-code-to-ship-phone.png'), fullPage: true });
+    // On a touch screen 1280 px wide (still the phone layout): one line, nothing sideways.
     await page.setViewportSize({ width: 1280, height: 900 });
+    expect(await onPhoneLayout(page)).toBe(true);
     expect(await noSideways(page)).toBe(true);
-    await page.screenshot({ path: join(OUT_DIR, 'verify-claim-code-to-ship-desk.png'), fullPage: true });
-    const desk = await page.context().newPage();
-    await desk.setViewportSize({ width: 1280, height: 900 });
-    await desk.goto(`${srv.origin}/verify/pieces`);
-    await openTab(desk, 'ORDERS');
-    // Read once: the desk's page shows nothing more about it.
-    await visible(card(desk, ids.paid));
-    expect(await card(desk, ids.paid).locator('.pieces__claim').count()).toBe(0);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-claim-code-to-ship-tablet.png'), fullPage: true });
+    const wide = await page.context().newPage();
+    await wide.setViewportSize({ width: 1280, height: 900 });
+    await wide.goto(`${srv.origin}/verify/pieces`);
+    expect(await onPhoneLayout(wide)).toBe(true);
+    await openTab(wide, 'ORDERS');
+    // Read once: a second page shows nothing more about it.
+    await visible(card(wide, ids.paid));
+    expect(await card(wide, ids.paid).locator('.pieces__claim').count()).toBe(0);
     expect(problems).toEqual([]);
     await page.context().close();
   }, 120_000);
@@ -797,7 +809,8 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: an order\'s delivery address, engravi
   });
 
   async function phone(width = 390): Promise<{ page: Page; problems: string[] }> {
-    const context = await (width === 1280 ? browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'en-GB', timezoneId: 'Europe/Paris' }) : mobileContext(browser));
+    // 1280: a large tablet, touch, on the phone layout (a computer's orders are rows that open the order's page).
+    const context = await (width === 1280 ? tabletContext(browser) : mobileContext(browser));
     await context.addCookies([{ name: sessionCookieName(srv.ctx.config, 'account'), value: me.token, url: srv.origin }]);
     const page = await context.newPage();
     if (width !== 390 && width !== 1280) await page.setViewportSize({ width, height: 844 });
@@ -1015,11 +1028,14 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: an order\'s delivery address, engravi
     await page.screenshot({ path: join(OUT_DIR, 'verify-order-exchange-requested-phone.png'), fullPage: true });
     expect(problems).toEqual([]);
     await page.context().close();
-    const desk = await phone(1280);
-    await visible(card(desk.page, ids.delivered).locator('.pieces__request'));
-    expect(await noSideways(desk.page)).toBe(true);
-    await desk.page.screenshot({ path: join(OUT_DIR, 'verify-orders-delivery-desk.png'), fullPage: true });
-    await desk.page.context().close();
+    // On a large tablet, 1280 px wide: the phone layout, the request on the card as on the phone.
+    const tablet = await phone(1280);
+    expect(await onPhoneLayout(tablet.page)).toBe(true);
+    await visible(card(tablet.page, ids.delivered).locator('.pieces__request'));
+    expect(await noSideways(tablet.page)).toBe(true);
+    await tablet.page.screenshot({ path: join(OUT_DIR, 'verify-orders-delivery-tablet.png'), fullPage: true });
+    expect(tablet.problems).toEqual([]);
+    await tablet.page.context().close();
   }, 120_000);
 
   it('YOUR ADDRESSES: an address edited, the other made the default (DEFAULT moves), one removed at the second tap (TAP AGAIN TO REMOVE disarmed after 4 s), then five kept: ADD AN ADDRESS gives way to the limit', async () => {

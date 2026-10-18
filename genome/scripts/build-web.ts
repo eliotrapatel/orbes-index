@@ -9,8 +9,11 @@
  * Discovery: every directory under src/web/ (except `shared`) with an
  * index.html and a main.ts is an app. Its entries are main.ts (→ <app>.js),
  * worker.ts (→ <app>-worker.js), mode.ts (→ <app>-mode.js: the light mode
- * before the first paint, a plain script of the shell's head) and styles.css
- * (→ <app>.css) when present.
+ * before the first paint, a plain script of the shell's head), styles.css
+ * (→ <app>.css), desktop-pointer.css (→ <app>-desktop-pointer.css) and
+ * desktop.css (→ <app>-desktop.css) when present: the desktop's hover and
+ * layout stylesheets, which the shell links under their media queries so a
+ * phone never waits for them (D8).
  * index.html refers to them by their source names (`./main.ts`, `./mode.ts`,
  * `./styles.css`, `<meta name="orbes-worker" content="./worker.ts">`); any
  * other local file it references (favicon.svg) is copied with a content hash.
@@ -89,7 +92,7 @@ export class WebBuildError extends Error {
 
 // ── Discovery ──────────────────────────────────────────────────────────────
 
-const ENTRY_FILES = ['main.ts', 'worker.ts', 'mode.ts', 'styles.css'] as const;
+const ENTRY_FILES = ['main.ts', 'worker.ts', 'mode.ts', 'styles.css', 'desktop-pointer.css', 'desktop.css'] as const;
 
 export function discoverApps(srcDir: string = DEFAULT_SRC_DIR): WebApp[] {
   if (!existsSync(srcDir)) return [];
@@ -108,10 +111,15 @@ export function discoverApps(srcDir: string = DEFAULT_SRC_DIR): WebApp[] {
   return apps;
 }
 
-/** Output base name of an entry: main.ts → <app>, worker.ts → <app>-worker, mode.ts → <app>-mode, styles.css → <app>. */
+/**
+ * Output base name of an entry: main.ts → <app>, worker.ts → <app>-worker, mode.ts → <app>-mode, styles.css → <app>,
+ * desktop-pointer.css → <app>-desktop-pointer, desktop.css → <app>-desktop.
+ */
 export function entryOutName(app: string, entry: string): string {
   if (entry === 'worker.ts') return `${app}-worker`;
   if (entry === 'mode.ts') return `${app}-mode`;
+  if (entry === 'desktop-pointer.css') return `${app}-desktop-pointer`;
+  if (entry === 'desktop.css') return `${app}-desktop`;
   return app;
 }
 

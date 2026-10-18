@@ -32,7 +32,7 @@ import type { AccountAddresses, AccountOrder, OrderCaseRequest } from '../types.
 import { addressFields } from './address.js';
 import { withNumerals } from './common.js';
 import { FormError, messageOf, nocturneForm } from './forms.js';
-import { icon, selectField, sizeButtons, switchControl, textLink } from './nocturne.js';
+import { button, icon, selectField, sizeButtons, switchControl, textLink } from './nocturne.js';
 
 /** What a card asks a sheet for: its kind, its order, the control that opened it, and what to do with the order the server answers. */
 export type OrderSheetRequest =
@@ -57,6 +57,12 @@ export interface OrderSheetDeps {
   session: SessionStore;
   /** What the page holds outside the sheet, made inert while it is open. */
   outside(): HTMLElement[];
+  /**
+   * Desktop (decision 5: an order's edits are forms of its page, never a sheet): the form drawn in its
+   * section of the order's page (views/desktop-order.ts), which is told when it closes (`focus`: what takes the keyboard
+   * focus, else the section's own control); none on a phone.
+   */
+  inline?: { closed(focus: HTMLElement | null): void; drawn?(panel: HTMLElement): void };
 }
 
 const REASONS = ['SIZE', 'NOT_AS_EXPECTED', 'DAMAGED', 'OTHER'] as const;
@@ -81,8 +87,15 @@ export class OrderSheet {
   private unsubscribe: (() => void) | null = null;
 
   constructor(private readonly deps: OrderSheetDeps) {
-    this.panel = h('section', { class: 'n-account__panel n-write__panel n-osheet__panel', attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'order-sheet-title' } });
-    this.el = h('div', { class: 'n-account n-write n-osheet', attrs: { hidden: true } }, h('div', { class: 'n-account__scrim', attrs: { 'aria-hidden': 'true' }, on: { click: () => this.close() } }), this.panel);
+    if (deps.inline) {
+      // Desktop: a form of the order's page, in its section (no plate, no scrim, no dialog).
+      this.panel = h('div', { class: 'd-oform' });
+      this.el = this.panel;
+      this.el.hidden = true;
+    } else {
+      this.panel = h('section', { class: 'n-account__panel n-write__panel n-osheet__panel', attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'order-sheet-title' } });
+      this.el = h('div', { class: 'n-account n-write n-osheet', attrs: { hidden: true } }, h('div', { class: 'n-account__scrim', attrs: { 'aria-hidden': 'true' }, on: { click: () => this.close() } }), this.panel);
+    }
     this.el.addEventListener('keydown', (ev) => {
       if (ev.key === 'Escape') {
         ev.preventDefault();
@@ -105,15 +118,23 @@ export class OrderSheet {
     this.busy = false;
     this.choice = 'new';
     this.el.hidden = false;
-    document.documentElement.classList.add('n-locked');
-    for (const el of this.deps.outside()) el.inert = true;
+    if (!this.deps.inline) {
+      document.documentElement.classList.add('n-locked');
+      for (const el of this.deps.outside()) el.inert = true;
+    }
     // Signed out here or elsewhere: the order is no longer this page's to change.
     this.unsubscribe = this.deps.session.subscribe((s) => {
       if (s.status === 'anonymous') this.close();
     });
     this.render();
-    this.title()?.focus({ preventScroll: true });
+    this.focusStart();
     if (req.kind === 'address') void this.readSaved();
+  }
+
+  /** The keyboard focus on the sheet's title; in a page's section (desktop), on its heading or first field. */
+  private focusStart(): void {
+    const target = this.title() ?? (this.deps.inline ? this.panel.querySelector<HTMLElement>('input:checked, input:not([type="radio"]), select, textarea, button') : null);
+    target?.focus({ preventScroll: true });
   }
 
   /** Closed: the focus back on `focus` (the card drawn again), else on the control that opened it. */
@@ -123,6 +144,12 @@ export class OrderSheet {
     this.unsubscribe?.();
     this.unsubscribe = null;
     this.el.hidden = true;
+    if (this.deps.inline) {
+      this.panel.replaceChildren();
+      this.req = null;
+      this.deps.inline.closed(focus);
+      return;
+    }
     document.documentElement.classList.remove('n-locked');
     for (const el of this.deps.outside()) el.inert = false;
     this.panel.replaceChildren();
@@ -156,10 +183,26 @@ export class OrderSheet {
     );
     const about = h('div', { class: 'n-px n-write__concerning' }, h('p', { class: 'n-g n-ivc n-write__label n-osheet__concerning', attrs: { 'data-testid': 'order-sheet-concerning' } }, ...withNumerals(concerning)));
     const body = req.kind === 'address' ? this.addressView() : req.kind === 'engraving' ? this.engravingView(req.engraving) : this.requestView(req.kind, req.returns);
+    if (this.deps.inline) {
+      // Desktop: the form in its section, under the section's own label (the page is the order's: what it
+      // concerns goes without saying); a request titled by what it asks; CANCEL beside the main action (§10.22).
+      const heading = req.kind === 'RETURN' || req.kind === 'EXCHANGE' ? h('h3', { class: 'n-g d-oform__title', id: 'order-sheet-title', attrs: { tabindex: -1 }, text: title }) : null;
+      this.panel.replaceChildren(...(heading ? [heading] : []), ...body);
+      const actions = this.panel.querySelector<HTMLElement>('form > .n-form__actions');
+      const cancel = this.panel.querySelector<HTMLElement>(':scope > .n-osheet__cancel');
+      if (actions && cancel) {
+        actions.classList.add('n-duo');
+        actions.append(cancel);
+      }
+      this.deps.inline.drawn?.(this.panel);
+      return;
+    }
     this.panel.replaceChildren(h('div', { class: 'n-handle', attrs: { 'aria-hidden': 'true' } }), head, about, h('div', { class: 'n-px n-osheet__body' }, ...body));
   }
 
   private cancel(): HTMLElement {
+    // Desktop: in the order's page, the hairline button beside the form's main one.
+    if (this.deps.inline) return button(ORDERS.address.cancel, { outline: true, onClick: () => this.close(), extraClass: 'n-osheet__cancel' });
     return textLink(ORDERS.address.cancel, { onOpen: () => this.close(), extraClass: 'n-write__cancel n-osheet__cancel' });
   }
 
@@ -182,7 +225,7 @@ export class OrderSheet {
       this.savedError = messageOf(e);
     }
     this.render();
-    this.title()?.focus({ preventScroll: true });
+    this.focusStart();
   }
 
   private addressView(): HTMLElement[] {

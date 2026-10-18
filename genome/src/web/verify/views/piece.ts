@@ -33,6 +33,7 @@
  * After a report, a withdrawal or a cancelled transfer, the piece is read again (GET /api/v1/account/products): the
  * status it returned to is the server's (a loss declared during a service returns to IN SERVICE), never guessed.
  */
+import { isDesktop } from '../../shared/desktop.js';
 import { h } from '../../shared/dom.js';
 import { ApiError, type ApiClient } from '../api.js';
 import { ownerCertificateLine } from '../certificate-model.js';
@@ -44,7 +45,7 @@ import type { SessionStore } from '../session.js';
 import type { CertificateOffer, ClientServices, IncidentType, OwnedPiece, OwnerCertificate, ServiceRecord } from '../types.js';
 import { formatDate, recoveryContactModel } from '../view-model.js';
 import { pieceContext } from '../messages-model.js';
-import { PIECES_PATH, viewRoot, withNumerals } from './common.js';
+import { listLine, orderPagePath, PIECES_PATH, viewRoot, withNumerals } from './common.js';
 import { FormError, messageOf, nocturneForm } from './forms.js';
 import { accLink, appAnchor, button, definitionList, failedState, field, icon, loadingState, textLink } from './nocturne.js';
 import { writeButton } from './write.js';
@@ -313,7 +314,8 @@ class PieceCard {
         accLink(h('span', { class: 'n-num' }, ...withNumerals(o.order.title)), {
           line: h('span', null, ...withNumerals(o.order.line)),
           lineKind: 'lb',
-          href: PIECES_PATH,
+          // Desktop (decision 5): on a computer the order's own page.
+          href: isDesktop() ? orderPagePath(o.order.reference) : PIECES_PATH,
           onOpen: this.deps.onOrder ? () => this.deps.onOrder!(o.order.reference) : undefined,
           extraClass: 'n-piece__origin-order',
         }),
@@ -421,14 +423,24 @@ class PieceCard {
     const m = this.model;
     this.stateLine.replaceChildren(h('span', { class: 'n-state n-piece__state' }, m.registered ? icon('check', { small: true }) : null, m.status));
     const hadFocus = this.panel.contains(document.activeElement);
-    const out: (HTMLElement | null)[] = [definitionList(m.ownershipRows, { kind: 'kv', extraClass: 'n-piece__rows' }), ...m.ownershipNotes.map((n) => this.small(n))];
-    if (m.transferPending && this.confirm === null) out.push(this.actionLine(this.outline(PIECES.cancelTransfer, () => this.cancelTransfer(), 'piece__transfer-action')));
+    const facts: (HTMLElement | null)[] = [definitionList(m.ownershipRows, { kind: 'kv', extraClass: 'n-piece__rows' }), ...m.ownershipNotes.map((n) => this.small(n))];
+    if (m.transferPending && this.confirm === null) facts.push(this.actionLine(this.outline(PIECES.cancelTransfer, () => this.cancelTransfer(), 'piece__transfer-action')));
+    const actions: (HTMLElement | null)[] = [];
+    const notice = this.notice ? h('p', { class: 'n-sm n-ivc n-piece__notice', attrs: { role: 'status' }, text: this.notice }) : null;
     // A piece reported lost or stolen, revoked or retired takes no certificate (the server refuses one): no section.
-    if (m.certificateOffered && this.confirm === null) out.push(...this.certificateBlock());
-    out.push(...this.incidentBlock());
-    if (this.notice) out.push(h('p', { class: 'n-sm n-ivc n-piece__notice', attrs: { role: 'status' }, text: this.notice }));
-    out.push(writeButton(pieceContext(this.piece)));
-    this.panel.replaceChildren(...out.filter((x): x is HTMLElement => x !== null));
+    const certificate = m.certificateOffered && this.confirm === null;
+    // Desktop (BRIEF §10.4): a link's notice (copied, withdrawn) stands in the certificate's block, under what
+    // it answers, not under the report; a phone keeps every notice at the panel's foot.
+    const ofCertificate = certificate && isDesktop() && (this.notice === PIECES.copied || this.notice === PIECES.withdrawn);
+    if (certificate) actions.push(...this.certificateBlock(ofCertificate ? notice : null));
+    actions.push(...this.incidentBlock());
+    if (!ofCertificate) actions.push(notice);
+    const write = writeButton(pieceContext(this.piece));
+    const kept = (list: (HTMLElement | null)[]) => list.filter((x): x is HTMLElement => x !== null);
+    // Desktop (BRIEF §10.22): the facts and WRITE TO ORBES CLIENT SERVICES on the left, the certificate and the
+    // report on the right (shared/desktop.css); a phone keeps one column in this order.
+    if (isDesktop()) this.panel.replaceChildren(h('div', { class: 'd-own__facts' }, ...kept(facts), write), h('div', { class: 'd-own__actions' }, ...kept(actions)));
+    else this.panel.replaceChildren(...kept([...facts, ...actions, write]));
     const q = (sel: string) => this.panel.querySelector<HTMLElement>(sel);
     let target: HTMLElement | null = null;
     if (focus === 'status' || focus === 'title') target = q('.n-piece__incident-title');
@@ -475,7 +487,9 @@ class PieceCard {
    * CREATE CERTIFICATE opens the choice of its validity (7 · 30 · 90 DAYS) and CREATE LINK; the link is then shown once,
    * with COPY LINK and OPEN LINK; each open link has WITHDRAW.
    */
-  private certificateBlock(): (HTMLElement | null)[] {
+  private certificateBlock(notice: HTMLElement | null = null): (HTMLElement | null)[] {
+    // COPY LINK answered under its pair, in the link's block; WITHDRAW (its row gone) under CREATE CERTIFICATE.
+    const underLink = notice !== null && this.offer !== null && this.notice === PIECES.copied;
     const out: (HTMLElement | null)[] = [
       h('h3', { class: 'n-g n-t3 n-piece__heading n-piece__heading--first piece__certificate-title', attrs: { tabindex: -1 }, text: PIECES.certificateTitle }),
       this.small(PIECES.certificateLead, true),
@@ -495,6 +509,7 @@ class PieceCard {
             this.filled(PIECES.copyLink, () => void this.copyLink(offer.url), 'certificate-link__copy'),
             h('a', { class: 'n-g n-btn n-btn--ol certificate-link__open', attrs: { href: offer.url, target: '_blank', rel: 'noopener noreferrer' }, text: PIECES.openLink }),
           ),
+          underLink ? notice : null,
         ),
       );
     }
@@ -513,7 +528,8 @@ class PieceCard {
             h(
               'li',
               { class: 'n-kv__row n-piece__certificate piece__certificate' },
-              h('span', { class: 'n-g n-kv__label n-num piece__certificate-line' }, ...withNumerals(ownerCertificateLine(c))),
+              // On a computer the line breaks between its values only (listLine): VALID UNTIL never parts from its date.
+              h('span', { class: 'n-g n-kv__label n-num piece__certificate-line' }, ...listLine(ownerCertificateLine(c))),
               h('button', {
                 class: 'n-g n-tl n-piece__withdraw piece__certificate-withdraw',
                 attrs: { type: 'button', disabled: this.busy, 'aria-label': `${PIECES.withdraw} · ${ownerCertificateLine(c)}` },
@@ -527,7 +543,7 @@ class PieceCard {
       );
     }
     if (!this.creating) {
-      out.push(this.errorLine(this.certificateError), this.actionLine(this.outline(PIECES.createCertificate, () => this.openCertificate(), 'piece__certificate-action')));
+      out.push(this.errorLine(this.certificateError), this.actionLine(this.outline(PIECES.createCertificate, () => this.openCertificate(), 'piece__certificate-action')), underLink ? null : notice);
       return out;
     }
     const option = (days: CertificateDays) =>
@@ -543,6 +559,7 @@ class PieceCard {
       this.small(PIECES.certificateHow, true),
       this.errorLine(this.certificateError),
       h('div', { class: 'n-duo n-piece__duo' }, this.filled(PIECES.confirmCertificate, () => void this.createCertificate()), this.outline(PIECES.cancel, () => this.closeCertificate())),
+      underLink ? null : notice,
     );
     return out;
   }

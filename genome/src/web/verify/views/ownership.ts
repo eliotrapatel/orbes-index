@@ -55,6 +55,8 @@ import { contactBlock, PIECES_PATH, piecesLink, sectionLabel, termsNote, withNum
 import { accountForm, field as vaultField, FormError, messageOf, MIN_PASSWORD, nocturneForm, selectField as vaultSelectField, signUpProblem } from './forms.js';
 import { appAnchor, button, contactLines, field, selectField, textLink } from './nocturne.js';
 import { seen } from '../seen.js';
+import { isDesktop, onDesktopChange, touchLayout } from '../../shared/desktop.js';
+import { signInLine } from './desktop-signin.js';
 
 export { MIN_PASSWORD } from './forms.js';
 
@@ -78,12 +80,18 @@ export interface OwnershipDeps {
    * rule 6) for the sign-in those pages show (the account mode). NOCTURNE's pieces otherwise.
    */
   look?: 'nocturne' | 'vault';
+  /**
+   * Desktop (BRIEF decision 6): the panel is the sign-in page's own (views/desktop-signin.ts), which shows
+   * its forms, opened on `tab`, its lead said by the page; `onTab` tells the page which form is shown. Without it, on a
+   * computer, the panel shows its lead and a line that leads to that page (SIGN IN, CREATE ACCOUNT) in place of its forms.
+   */
+  page?: { tab: AuthTab; onTab?(tab: AuthTab): void };
 }
 
 /** The id of RECEIVING THIS PIECE, the heading of a piece registered to someone else (J-02 links to it). */
 const RECEIVING_ID = 'receiving-title';
 
-type AuthTab = 'signin' | 'create';
+export type AuthTab = 'signin' | 'create';
 /** A forgotten password: first how to reach ORBES Client Services, then the recovery form. */
 type RecoverStep = 'contact' | 'code';
 
@@ -106,6 +114,33 @@ function timeOf(iso: string): string {
   if (Number.isNaN(t)) return '';
   const d = new Date(t);
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+/**
+ * A sign-in refused on the sign-in page of a computer: PASSWORD marked first (the form's sentence goes under it, and the
+ * focus to it: views/forms.ts), then EMAIL, both described by the sentence; either changed, EMAIL's mark goes (PASSWORD's
+ * goes with the sentence).
+ */
+function markRefused(email: HTMLInputElement, password: HTMLInputElement): void {
+  password.setAttribute('aria-invalid', 'true');
+  // After the form has placed its sentence (and named it), on the next turn.
+  window.setTimeout(() => {
+    // The sentence's id: the last that describes PASSWORD (views/forms.ts placeUnderField adds it last).
+    const error = password.getAttribute('aria-describedby')?.split(' ').filter(Boolean).at(-1);
+    if (!error || password.getAttribute('aria-invalid') !== 'true') return;
+    const before = email.getAttribute('aria-describedby');
+    email.setAttribute('aria-invalid', 'true');
+    email.setAttribute('aria-describedby', before ? `${before} ${error}` : error);
+    const clear = () => {
+      email.removeAttribute('aria-invalid');
+      if (before === null) email.removeAttribute('aria-describedby');
+      else email.setAttribute('aria-describedby', before);
+      email.removeEventListener('input', clear);
+      password.removeEventListener('input', clear);
+    };
+    email.addEventListener('input', clear);
+    password.addEventListener('input', clear);
+  }, 0);
 }
 
 export class OwnershipPanel {
@@ -140,13 +175,14 @@ export class OwnershipPanel {
    */
   private authShown: AuthTab | 'recover' | null = null;
   private authUsed = false;
+  private offDesktop: (() => void) | null = null;
 
   constructor(
     mode: OwnershipMode,
     private readonly deps: OwnershipDeps,
   ) {
     this.now = deps.now ?? (() => Date.now());
-    this.state = { mode, authTab: 'signin', recover: null, signInEmail: '', offer: null, confirmation: null, error: null, notice: null, busy: false };
+    this.state = { mode, authTab: deps.page?.tab ?? 'signin', recover: null, signInEmail: '', offer: null, confirmation: null, error: null, notice: null, busy: false };
     // No live region on the whole panel (a re-render would read it all out); status and alert lines carry their own roles.
     this.vault = deps.look === 'vault';
     this.root = h('div', { class: this.vault ? 'ownership' : 'n-own' });
@@ -158,6 +194,8 @@ export class OwnershipPanel {
     this.root.addEventListener('pointerdown', used);
     this.root.addEventListener('focusin', used);
     this.unsubscribe = deps.session.subscribe(() => this.render());
+    // Desktop: the window crossing the desktop's width draws the forms, or the line to the sign-in page.
+    if (!deps.page) this.offDesktop = onDesktopChange(() => this.render());
     this.render();
     if (deps.session.state.status === 'unknown') {
       deps.session.ensure().catch(() => {
@@ -171,7 +209,18 @@ export class OwnershipPanel {
   dispose(): void {
     this.unsubscribe?.();
     this.unsubscribe = null;
+    this.offDesktop?.();
+    this.offDesktop = null;
     seen.release(this);
+  }
+
+  /** The sign-in page's tabs from its address (back, forward): SIGN IN or CREATE ACCOUNT. */
+  showTab(tab: AuthTab): void {
+    if (this.state.authTab === tab && this.state.recover === null) return;
+    this.state.recover = null;
+    this.state.authTab = tab;
+    this.state.error = null;
+    this.render();
   }
 
   /** The account forms, once used, cover the page while the panel is on it; otherwise the page counts (§3.3 T.9). */
@@ -281,7 +330,9 @@ export class OwnershipPanel {
   /** A heading of the panel (TRANSFER OF OWNERSHIP, RECEIVING THIS PIECE, FORGOTTEN PASSWORD): an ivory title. */
   private heading(text: string, id?: string): HTMLHeadingElement {
     if (this.vault) return sectionLabel(text, id);
-    return h('h3', { class: 'n-g n-t3 n-ivc n-own__heading', id, text });
+    // On a computer's sign-in page the panel's steps stand directly under the page's h1 (YOUR ACCOUNT): level 2, so the
+    // headings keep their order (§10.32); everywhere else under a section's own h2.
+    return h(this.deps.page && isDesktop() ? 'h2' : 'h3', { class: 'n-g n-t3 n-ivc n-own__heading', id, text });
   }
 
   /** A button of the panel: the ivory one (its one primary action) or `outline`, the hairline one. */
@@ -452,6 +503,11 @@ export class OwnershipPanel {
         h('div', { class: 'ownership__links' }, piecesLink(this.deps.onPieces), this.vaultTextButton('SIGN OUT', () => this.signOut())),
       );
     }
+    const links = [
+      h('span', { class: 'n-nw' }, appAnchor(PIECES_PATH, ['n-ivc', 'n-u', 'n-own__link'], this.deps.onPieces, PIECES.link), '\u00a0·'),
+      ' ',
+      h('button', { class: 'n-g n-ivc n-u n-own__link', attrs: { type: 'button', disabled: this.state.busy }, on: { click: () => this.signOut() }, text: 'SIGN OUT' }),
+    ];
     return h(
       'p',
       { class: 'n-g n-lb n-own__account' },
@@ -459,11 +515,11 @@ export class OwnershipPanel {
       h('span', { class: 'n-own__email', text: email }),
       // Each dot stays with the words before it: a short line wraps after it, never before. The email is text (the
       // no-break space holds its dot); MY PIECES is an inline-block (its 44 px zone), a break on either side, so it is
-      // held with its dot in one unbroken span.
+      // held with its dot in one unbroken span. On a computer MY PIECES · SIGN OUT are held together too (`.d-keep`),
+      // so a line that breaks does so after the email, never leaving SIGN OUT alone (§10.9); a phone or a tablet keeps
+      // its own line, as before.
       '\u00a0· ',
-      h('span', { class: 'n-nw' }, appAnchor(PIECES_PATH, ['n-ivc', 'n-u', 'n-own__link'], this.deps.onPieces, PIECES.link), '\u00a0·'),
-      ' ',
-      h('button', { class: 'n-g n-ivc n-u n-own__link', attrs: { type: 'button', disabled: this.state.busy }, on: { click: () => this.signOut() }, text: 'SIGN OUT' }),
+      ...(touchLayout() ? links : [h('span', { class: 'd-keep' }, ...links)]),
     );
   }
 
@@ -486,6 +542,12 @@ export class OwnershipPanel {
       // Still asking the server who is signed in: no flash of sign-in forms for an owner.
       return [h('p', { class: this.vault ? 'ownership__meta micro soft' : 'n-g n-lb n-own__waiting', attrs: { 'aria-busy': 'true' }, text: 'ONE MOMENT…' })];
     }
+    // Desktop (BRIEF decision 6): on a computer, a page of its own over a photograph holds the forms; here, the
+    // lead and the line that leads there (SIGN IN, CREATE ACCOUNT), back here once signed in.
+    if (!this.deps.page && isDesktop()) {
+      this.authShown = null;
+      return [this.vault ? this.text(lead) : h('p', { class: 'n-tx n-own__lead', text: lead }), signInLine(lead, { look: this.vault ? 'vault' : 'nocturne' })];
+    }
     if (this.state.recover) {
       this.authShown = 'recover';
       return this.recoverBlock(this.state.recover);
@@ -497,7 +559,8 @@ export class OwnershipPanel {
     const option = (t: AuthTab, label: string) =>
       h('button', { class: 'n-g n-switch2__tab n-own__option', attrs: { type: 'button', 'aria-pressed': tab === t ? 'true' : 'false' }, on: { click: () => this.setAuthTab(t) }, text: label });
     const switcher = h('div', { class: 'n-switch2 n-own__switch', attrs: { role: 'group', 'aria-label': 'Account' } }, option('signin', 'SIGN IN'), option('create', 'CREATE ACCOUNT'));
-    const leadLine = h('p', { class: 'n-tx n-own__lead', text: lead });
+    // The sign-in page says the lead itself, beside its panel (desktop).
+    const leadLine = this.deps.page ? null : h('p', { class: 'n-tx n-own__lead', text: lead });
     // Under CREATE ACCOUNT, the terms of use it accepts (J-06), in a new tab so the form and the scan's window stay.
     if (tab === 'create') return [leadLine, switcher, this.createForm(), termsNote()];
     // Under the sign-in form: a forgotten password goes through ORBES Client Services (C-04); a refusal is said under
@@ -530,6 +593,7 @@ export class OwnershipPanel {
     if (this.state.authTab === t) return;
     this.state.authTab = t;
     this.state.error = null;
+    this.deps.page?.onTab?.(t);
     this.render();
     this.root.querySelector<HTMLInputElement>('input')?.focus();
   }
@@ -597,7 +661,15 @@ export class OwnershipPanel {
     const password = h('input', { attrs: { type: 'password', name: 'password', autocomplete: 'current-password', required: true, maxlength: 1024 } });
     return this.form('signin', [this.field('auth-email', 'EMAIL', email), this.field('auth-password', 'PASSWORD', password)], 'SIGN IN', async () => {
       if (!email.value.trim() || !password.value) throw new FormError('Enter your email and password.');
-      const s = await this.deps.api.login(email.value.trim(), password.value);
+      let s: Awaited<ReturnType<ApiClient['login']>>;
+      try {
+        s = await this.deps.api.login(email.value.trim(), password.value);
+      } catch (e) {
+        // The sign-in page of a computer (desktop, §10.22): a sign-in refused is said under PASSWORD, above
+        // SIGN IN, both fields marked as the fields to correct and described by it (views/forms.ts places it).
+        if (this.deps.page && isDesktop() && !(e instanceof FormError)) markRefused(email, password);
+        throw e;
+      }
       password.value = '';
       this.state.signInEmail = '';
       this.state.notice = null;
@@ -656,6 +728,12 @@ export class OwnershipPanel {
     const country = this.select('auth-country', SIGN_UP.country, countryOptions(SIGN_UP.chooseCountry), '', SIGN_UP.countryHint);
     country.select.required = true;
     const heard = this.select('auth-heard', SIGN_UP.heard, [{ value: '', label: SIGN_UP.choose }], '');
+    // The sign-in page of a computer (desktop, §10.22): every field its autocomplete (COUNTRY's values are
+    // ISO codes: `country`; the question has none to fill).
+    if (this.deps.page) {
+      country.select.setAttribute('autocomplete', 'country');
+      heard.select.setAttribute('autocomplete', 'off');
+    }
     const other = h('input', { attrs: { type: 'text', name: 'heard-other', autocomplete: 'off', maxlength: 100 } });
     const otherGroup = this.field('auth-heard-other', SIGN_UP.other, other);
     otherGroup.hidden = true;
@@ -669,11 +747,13 @@ export class OwnershipPanel {
     this.fillSignUp();
     if (this.signUpRead === 'idle') void this.readSignUp();
     const by = { firstName: first, lastName: last, email, password, country: country.select } as const;
+    const firstField = this.field('auth-first-name', SIGN_UP.firstName, first);
+    const lastField = this.field('auth-last-name', SIGN_UP.lastName, last);
     return this.form(
       'create',
       [
-        this.field('auth-first-name', SIGN_UP.firstName, first),
-        this.field('auth-last-name', SIGN_UP.lastName, last),
+        // The sign-in page of a computer (desktop, §10.22): the two names side by side.
+        ...(this.deps.page ? [h('div', { class: 'd-acct__pair' }, firstField, lastField)] : [firstField, lastField]),
         this.field('auth-email', 'EMAIL', email),
         this.field('auth-password', 'PASSWORD', password, `At least ${MIN_PASSWORD} characters.`),
         country.el,

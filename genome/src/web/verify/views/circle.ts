@@ -42,10 +42,11 @@ import { lookbookSheetPath } from '../lookbook-model.js';
 import { releasePath } from '../releases-model.js';
 import type { SessionStore } from '../session.js';
 import type { CircleAnswer, CircleCard } from '../types.js';
-import { viewRoot, withNumerals } from './common.js';
+import { computerClock, viewRoot, withNumerals } from './common.js';
+import { isDesktop } from '../../shared/desktop.js';
 import { messageOf } from './forms.js';
 import { CircleCardLines, kindLine } from './invitation.js';
-import { accLink, appAnchor, button, failedState, fadedPhoto, icon, lift, loadingState, plateCard, quietLine } from './nocturne.js';
+import { accLink, appAnchor, button, failedState, fadedPhoto, icon, lift, loadingState, plateCard, quietLine, textLink } from './nocturne.js';
 import { OwnershipPanel } from './ownership.js';
 
 export interface CircleView {
@@ -453,9 +454,14 @@ class PostPage {
       case 'owners-only':
         this.body.replaceChildren(this.quiet(CIRCLE.ownersOnly, 'circle__closed'));
         break;
-      case 'missing':
-        this.body.replaceChildren(this.quiet(CIRCLE.notFound, 'circle-post__missing'));
+      case 'missing': {
+        // On a computer the sentence is the page's h1 (§10.32), and the crumb's way (THE CIRCLE) stands under it, its
+        // action (§10.24), as an unknown release gives THE RELEASES; never shown on a phone (shared/desktop.css).
+        const head = this.quiet(CIRCLE.notFound, 'circle-post__missing', isDesktop());
+        head.append(h('p', { class: 'n-post__missing-back' }, textLink(CIRCLE.link, { href: CIRCLE_PATH, onOpen: () => this.deps.onCircle(), extraClass: 'n-post__missing-link' })));
+        this.body.replaceChildren(head);
         break;
+      }
       case 'failed':
         this.body.replaceChildren(h('div', { class: 'n-px n-post__failed' }, failedState({ sentence: CIRCLE.loadFailed, reason: l.message, retry: CIRCLE.retry, onRetry: () => void this.fetch(), retryClass: 'circle-post__retry' })));
         if (hadFocus) this.body.querySelector<HTMLElement>('.circle-post__retry')?.focus();
@@ -486,8 +492,8 @@ class PostPage {
   }
 
   /** A sentence alone on the margin under ‹ THE CIRCLE (C40): it names the page. */
-  private quiet(text: string, extraClass: string): HTMLElement {
-    const line = quietLine(text, extraClass);
+  private quiet(text: string, extraClass: string, heading = false): HTMLElement {
+    const line = heading ? h('h1', { class: ['n-sm', 'n-quiet', extraClass], text }) : quietLine(text, extraClass);
     line.id = 'circle-post-title';
     return h('div', { class: 'n-px n-post__head n-post__head--bare' }, line);
   }
@@ -543,7 +549,8 @@ class PostPage {
               { class: 'n-kv__value n-post__value' },
               h('span', { class: 'n-num circle-post__utc' }, ...withNumerals(r.value)),
               r.local ? h('br') : null,
-              r.local ? h('span', { class: 'n-sm n-num circle-post__local', text: r.local }) : null,
+              // On a computer the date and its hour one group, `on this computer (UTC+02:00)` another (decision 8, §10.9).
+              r.local ? h('span', { class: 'n-sm n-num circle-post__local' }, ...computerClock(r.local)) : null,
             ),
           ),
         ),

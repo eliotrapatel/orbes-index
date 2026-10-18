@@ -994,6 +994,13 @@ export class ApiClient {
     return r.unread;
   }
 
+  /** How many answers are unread (on a computer: the account page's MESSAGES card, «1 UNREAD»). */
+  async messagesUnreadCount(): Promise<number> {
+    const r = await this.request<{ count?: unknown }>('GET', '/api/v1/account/messages/unread-count');
+    if (typeof r?.count !== 'number' || !Number.isInteger(r.count) || r.count < 0) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.count;
+  }
+
   // ── Transport ────────────────────────────────────────────────────────────
 
   private remember(s: SessionInfo): void {

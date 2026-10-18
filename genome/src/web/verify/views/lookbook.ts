@@ -44,6 +44,7 @@
  * JSON call through ApiClient (the session cookie, the CSRF token); server messages are shown as they come. CSP-safe:
  * h() only, NOCTURNE's pieces (views/nocturne.ts), their places by class (verify/styles.css, THE COLLECTION).
  */
+import { isDesktop } from '../../shared/desktop.js';
 import { h } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
@@ -72,7 +73,7 @@ import { nextRelease, type NextReleaseModel } from '../next-release-model.js';
 import type { SessionStore } from '../session.js';
 import type { ClubLookbook, DropCard, LiveCard, OwnedPiece, SalonOpening } from '../types.js';
 import { heartState, wishedSlugs } from '../wishlist-model.js';
-import { LOOKBOOK_PATH, PIECES_PATH, viewRoot, withNumerals } from './common.js';
+import { listLine, LOOKBOOK_PATH, PIECES_PATH, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
 import { accLink, appAnchor, button, definitionList, failedState, fadedPhoto, icon, lift, loadingState, plateCard, quietLine, sizeButtons, textLink, variantDots } from './nocturne.js';
 import { writeButton } from './write.js';
@@ -557,10 +558,14 @@ class SheetPage {
       return;
     }
     if (l.kind === 'missing') {
-      // C40: the sentence alone on the margin, under ‹ THE COLLECTION; it names the page.
-      const line = quietLine(LOOKBOOK.notFound, 'sheet__missing');
+      // C40: the sentence alone on the margin, under ‹ THE COLLECTION; it names the page (on a computer, its h1: one
+      // per page, BRIEF §10.32; its look kept).
+      const line = isDesktop() ? h('h1', { class: 'n-sm n-quiet sheet__missing', text: LOOKBOOK.notFound }) : quietLine(LOOKBOOK.notFound, 'sheet__missing');
       line.id = 'sheet-title';
-      this.body.replaceChildren(h('div', { class: 'n-px n-model__missing' }, line));
+      // On a computer, the crumb's way (THE COLLECTION) under the sentence too, its action (§10.24), as an unknown
+      // release gives THE RELEASES; never shown on a phone (shared/desktop.css).
+      const back = h('p', { class: 'n-model__missing-back' }, textLink(LOOKBOOK.link, { href: LOOKBOOK_PATH, onOpen: () => this.deps.onCollection(), extraClass: 'n-model__missing-link' }));
+      this.body.replaceChildren(h('div', { class: 'n-px n-model__missing' }, line, back));
       this.focusTitle();
       return;
     }
@@ -582,7 +587,7 @@ class SheetPage {
           h('p', { class: 'n-g n-lb sheet__collection' }, ...withNumerals(s.collection ?? s.category)),
           h('h1', { class: 'n-g n-t1 n-model__title sheet__title', id: 'sheet-title' }, ...withNumerals(s.name)),
           h('p', { class: 'n-g n-lb n-model__line sheet__line' }, ...withNumerals(sheetLine(s))),
-          s.sizes ? h('p', { class: 'n-g n-lb n-ivc n-num n-model__sizes' }, ...withNumerals(s.sizes)) : null,
+          s.sizes ? h('p', { class: 'n-g n-lb n-ivc n-num n-model__sizes' }, ...listLine(s.sizes)) : null,
           s.dots.length > 0 ? this.dots(s) : null,
           owned ? h('p', { class: 'n-state n-model__owned' }, icon('check', { small: true }), owned) : null,
           this.heart(s.slug),

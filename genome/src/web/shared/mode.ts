@@ -7,6 +7,7 @@
  * screen: the vault), the camera (`body[data-screen="scan"]`) and the shared ownership certificate (its paper).
  * shared/mode-early.ts sets the attribute before the page first paints, so a light page never opens dark.
  */
+import { isDesktop } from './desktop.js';
 import { lightPref, setLightPref, type PrefStorage, deviceStorage } from './prefs.js';
 
 /** The switch YOUR ACCOUNT shows (LIGHT MODE). */
@@ -29,6 +30,24 @@ export function applyMode(light: boolean, root: HTMLElement = document.documentE
   else delete root.dataset.mode;
 }
 
+/** Desktop (BRIEF §10.13): the class under which nothing on a computer's page animates while the mode turns. */
+export const MODE_SWITCH_CLASS = 'd-mode-switch';
+
+/**
+ * Draw the page in the mode at once: on a computer, the hover and pressed states' transitions (shared/desktop.css)
+ * would otherwise fade the bar, the buttons and the choices into the new mode after the page; held off for the switch's
+ * two frames. A phone switches as it always has.
+ */
+function switchMode(light: boolean, root: HTMLElement): void {
+  if (!isDesktop() || typeof requestAnimationFrame !== 'function' || !root.classList) {
+    applyMode(light, root);
+    return;
+  }
+  root.classList.add(MODE_SWITCH_CLASS);
+  applyMode(light, root);
+  requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove(MODE_SWITCH_CLASS)));
+}
+
 /** The mode of this device: read once, switched from YOUR ACCOUNT. `onChange` runs after each switch (the bar colour). */
 export class DeviceMode implements ModeSwitch {
   private on: boolean;
@@ -48,7 +67,7 @@ export class DeviceMode implements ModeSwitch {
   set(light: boolean): void {
     this.on = light;
     setLightPref(light, this.env.storage);
-    applyMode(light, this.env.root);
+    switchMode(light, this.env.root);
     this.onChange();
   }
 }

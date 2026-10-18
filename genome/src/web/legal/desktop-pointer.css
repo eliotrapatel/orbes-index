@@ -1,0 +1,5 @@
+/*
+ * Hover, pressed and cursor on a computer, at any window width (desktop, D8, decision 13): its own stylesheet, which
+ * index.html links after ./styles.css under `media="(hover: hover) and (pointer: fine)"`, so a phone never waits for it.
+ */
+@import "../shared/desktop-pointer.css";

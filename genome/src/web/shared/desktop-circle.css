@@ -1,0 +1,697 @@
+/*
+ * THE CIRCLE, a post and THE CLUB on a computer (desktop, BRIEF §3, §10.1–§10.5, §10.22, §10.24, §10.27;
+ * verify/views/circle.ts, invitation.ts, club.ts). A phone keeps its column: every rule lives in the desktop's query.
+ *
+ * THE CIRCLE: the chapter's head (D2, 96 px under the bar) and its sentence; EARLY ACCESS between two hairlines, its
+ * label on columns 1–4 beside its sentence; then each post a row of the canvas, 120 px apart: a post with its
+ * photograph shows it square on 1–6, its words beside it on 8–12, their foot on the photograph's (the frames' lower
+ * third); a post without one stands in two blocks, its kind, title and day on 1–6, its event, places, YES / NO and its
+ * link on 8–12 (an invitation on NOW's plate, across the canvas). SHOW MORE on the edge. Times stay in UTC (decision 8).
+ *
+ * A post: its crumb; its first photograph square on 1–6 beside its words (kind, title in T1, day, text) on 8–12, its
+ * other photographs as tiles under the first (three columns each); then each section across the canvas: THE
+ * INVITATION's rows on 1–6 beside YOUR ANSWER on 8–12, THE POLL's sentence beside its options and VOTE (or its results),
+ * TO SEE's label beside its rows. A post without a photograph: its words on 1–6, its sections stacked on 8–12.
+ *
+ * THE CLUB: the chapter's head and its sentence, the tiers side by side (four columns each, a hairline above each),
+ * then HOW THE TIERS WORK on 1–6 beside the way to the reader's tier on 8–12.
+ */
+
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  /* ── 1. THE CIRCLE: the chapter's head, EARLY ACCESS ──────────────────────────────────────────────────────────── */
+
+  html:not(.d-touch) body.nocturne main.view--circle,
+  html:not(.d-touch) body.nocturne main.view--circle-post,
+  html:not(.d-touch) body.nocturne main.view--club {
+    --n-margin: var(--d-edge);
+    width: auto;
+    max-width: none;
+    margin-right: 0;
+    margin-left: 0;
+    padding-bottom: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .view--circle > .n-circle__head,
+  html:not(.d-touch) body.nocturne .view--club > .n-club__head {
+    padding-top: var(--d-s9);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.view--circle .circle__title, .view--club .club__title) {
+    margin: 0;
+    font-size: var(--d-fs-d2);
+    line-height: 1.04;
+    letter-spacing: var(--d-tr-d23);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.n-circle__lead, .n-club__lead) {
+    max-width: 32em;
+    margin-top: var(--d-s5);
+  }
+
+  /* EARLY ACCESS as MY PIECES lays it: its label and its sentence 16 px under it on columns 1–6 (one block, one
+     layout), between its two hairlines. */
+  html:not(.d-touch) body.nocturne .n-circle__body > .n-circle__early {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    column-gap: var(--d-gutter);
+    align-items: start;
+    margin: var(--d-s8) var(--d-edge) 0;
+    padding: var(--d-s5) 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-circle__early > .circle__early-label {
+    grid-column: 1 / span 6;
+    grid-row: 1;
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-circle__early > .n-circle__early-text {
+    grid-column: 1 / span 6;
+    grid-row: 2;
+    max-width: 32em;
+    margin: var(--d-s4) 0 0;
+    font-size: var(--d-fs-text);
+    line-height: 1.6;
+  }
+
+  /* While the feed is read, and what replaces it when there is no feed (nothing for this account, could not be
+     shown): where the feed's first row starts, 72 px under the head, so the swap from ONE MOMENT… moves nothing
+     (§10.11, §10.24). Nothing published: 72 px under EARLY ACCESS, where the first post would stand. */
+  html:not(.d-touch) body.nocturne .n-circle__body > :is(.n-circle__quiet, .n-circle__failed, .n-loading) {
+    margin-top: var(--d-s8);
+  }
+
+  html:not(.d-touch) body.nocturne .n-circle__body > :is(.n-circle__quiet, .n-circle__failed) :is(.n-quiet, .n-tx) {
+    max-width: 36em;
+  }
+
+  html:not(.d-touch) body.nocturne .n-circle__body > .n-circle__quiet .n-quiet {
+    font-size: var(--d-fs-text);
+    line-height: 1.6;
+  }
+
+  /* ── 2. THE CIRCLE: each post a row of the canvas ─────────────────────────────────────────────────────────────── */
+
+  html:not(.d-touch) body.nocturne .n-circle__body > .n-circle__list {
+    margin: var(--d-s8) 0 0;
+    padding: 0 var(--d-edge);
+  }
+
+  /* The head's lead to the page's first section: 120 px, as every chapter head's (THE COLLECTION, THE CLUB, HOW
+     RELEASES WORK, §10.4), whichever comes first (EARLY ACCESS, the feed, ONE MOMENT… as it is read, its sentence when
+     there is none), so the swap from ONE MOMENT… moves nothing. */
+  html:not(.d-touch) body.nocturne .n-circle__body > :first-child:is(.n-circle__early, .n-circle__list, .n-circle__quiet, .n-circle__failed, .n-loading) {
+    margin-top: var(--d-s10);
+  }
+
+  /* Posts a hairline apart across the canvas, 72 px each side of it; the first post 72 px under EARLY ACCESS's closing
+     hairline, as every later one under its own. */
+  html:not(.d-touch) body.nocturne .n-circle__item + .n-circle__item {
+    margin-top: var(--d-s8);
+    padding-top: var(--d-s8);
+    border-top: 1px solid var(--vault-hairline);
+  }
+
+  html:not(.d-touch) body.nocturne .n-circle__item > .n-circle-card {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    column-gap: var(--d-gutter);
+    align-items: end;
+  }
+
+  /* A post's photograph: square on 1–6, whole and unfaded (the phone's fade is its column's). */
+  html:not(.d-touch) body.nocturne .n-circle-card > .n-circle-card__photo {
+    --d-ph-h: auto;
+    grid-column: 1 / span 6;
+    grid-row: 1;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    margin: 0;
+    background-color: var(--n-photo);
+  }
+
+  html:not(.d-touch) body.nocturne .n-circle-card > .n-circle-card__photo::before,
+  html:not(.d-touch) body.nocturne .n-circle-card > .n-circle-card__photo::after {
+    display: none;
+  }
+
+  html:not(.d-touch) body.nocturne .n-circle-card > .n-circle-card__photo > img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  /* …its words beside it, their foot on the photograph's. */
+  html:not(.d-touch) body.nocturne .n-circle-card > .n-circle-card__photo:not([hidden]) + .n-circle-card__words {
+    grid-column: 8 / -1;
+    grid-row: 1;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* A post without its photograph (none, or one that could not be loaded): its words in two blocks across the canvas
+     (shared/desktop.ts gathers them), its kind, title and day on 1–6, its event, places, YES / NO and its link on 8–12,
+     on one foot line (§10.27); an invitation on NOW's plate, its right block on the canvas's eighth column too. */
+  html:not(.d-touch) body.nocturne .n-circle-card > :is(.n-circle-card__photo[hidden] + .n-circle-card__words, .n-circle-card__words:only-child) {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-row: 1;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    column-gap: var(--d-gutter);
+    align-items: end;
+    margin: 0;
+    padding: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-circle-card > :is(.n-circle-card__photo[hidden] + .n-circle-card__words, .n-circle-card__words:only-child) > .d-frame__main {
+    grid-column: 1 / span 6;
+  }
+
+  html:not(.d-touch) body.nocturne .n-circle-card > :is(.n-circle-card__photo[hidden] + .n-circle-card__words, .n-circle-card__words:only-child) > .d-frame__aside {
+    grid-column: 8 / -1;
+  }
+
+  /* The plate: 48 px inside its line's 12; its right block where the canvas's eighth column starts (the plate spans
+     the canvas, so that column is 7/12 of its width and 7/12 of a gutter from its left, less its padding). */
+  html:not(.d-touch) body.nocturne .n-circle-card > .n-circle-card__plate {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-row: 1;
+    grid-template-columns: minmax(0, 1fr) calc((5 * (100% + 2 * var(--d-s7)) - 7 * var(--d-gutter)) / 12 - var(--d-s7));
+    column-gap: 0;
+    align-items: end;
+    margin: 0;
+    padding: var(--d-s7);
+  }
+
+  html:not(.d-touch) body.nocturne .n-circle-card > .n-circle-card__plate::before {
+    inset: var(--d-s3);
+  }
+
+  html:not(.d-touch) body.nocturne .n-circle-card > .n-circle-card__plate > .d-frame__main {
+    grid-column: 1;
+    max-width: calc((6 * (100% + 2 * var(--d-s7)) - 6 * var(--d-gutter)) / 12);
+  }
+
+  html:not(.d-touch) body.nocturne .n-circle-card > .n-circle-card__plate > .d-frame__aside {
+    grid-column: 2;
+  }
+
+  /* Both blocks hold their words on the left edge of their columns (the feed reads down its two axes). */
+  html:not(.d-touch) body.nocturne .n-circle-card .d-frame__aside {
+    width: auto;
+    align-items: stretch;
+    text-align: left;
+  }
+
+  /* A post's lines, on the scale (§10.4): the kind, then the title 16 px under it, the day 8 px under the title; the
+     event 24 px under the day, its places 8 px under it, YES / NO 24 px under them, the link 32 px under the last. */
+  html:not(.d-touch) body.nocturne .n-circle-card .n-circle-card__title {
+    margin-top: var(--d-s4);
+    font-size: var(--d-fs-t2);
+    line-height: 1.2;
+    letter-spacing: var(--d-tr-mid);
+  }
+
+  html:not(.d-touch) body.nocturne .n-circle-card .n-circle-card__experience {
+    margin-top: var(--d-s2);
+  }
+
+  html:not(.d-touch) body.nocturne .n-circle-card .n-circle-card__date {
+    margin-top: var(--d-s2);
+  }
+
+  html:not(.d-touch) body.nocturne .n-circle-card .n-circle-card__event {
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .n-circle-card .n-circle-card__places {
+    margin-top: var(--d-s2);
+  }
+
+  html:not(.d-touch) body.nocturne .n-circle-card .n-circle-card__answer {
+    max-width: 440px;
+    margin-top: var(--d-s5);
+    column-gap: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .n-circle-card :is(.n-circle-card__mine, .n-circle-card__error) {
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne .n-circle-card .n-circle-card__link {
+    margin-top: var(--d-s6);
+  }
+
+  /* An invitation's event line breaks between its time (kept whole) and its place, as on a phone. */
+  html:not(.d-touch) body.nocturne .n-circle-card .d-frame__aside .n-circle-card__event {
+    white-space: normal;
+  }
+
+  /* Each block's first line on its block's top: the blocks stand on one foot line. */
+  html:not(.d-touch) body.nocturne .n-circle-card :is(.d-frame__main, .d-frame__aside) > :first-child {
+    margin-top: 0;
+  }
+
+  /* SHOW MORE, a page being read, the next page refused: on the edge, 120 px under the last post. */
+  html:not(.d-touch) body.nocturne .n-circle__body > :is(.n-circle__more, p.circle__waiting, .n-circle__more-failed) {
+    margin-top: 0;
+    padding: var(--d-s10) var(--d-edge) 0;
+    text-align: left;
+  }
+
+  html:not(.d-touch) body.nocturne .n-circle__body > .n-circle__more-failed {
+    padding-top: var(--d-s7);
+  }
+
+  /* ── 3. A post: its photograph beside its words, then each section across the canvas ─────────────────────────── */
+
+  /* The crumb 24 px under the bar, as wide as its words, its chevron hanging before the edge (as YOUR WISHLIST's, an
+     order's, the account's sections). */
+  html:not(.d-touch) body.nocturne .view--circle-post > .n-post__crumb {
+    display: flex;
+    align-items: center;
+    width: max-content;
+    height: 44px;
+    margin: var(--d-s5) 0 0 calc(var(--d-edge) - 16px - 6px);
+    padding: 0;
+    letter-spacing: var(--d-tr-label);
+  }
+
+  html:not(.d-touch) body.nocturne .view--circle-post > .n-post__body {
+    margin-top: var(--d-s7);
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__body:has(> .n-post__head) {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    column-gap: var(--d-gutter);
+    align-items: start;
+    padding: 0 var(--d-edge);
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__body:has(> .n-post__head) > * {
+    grid-column: 1 / -1;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* Its photographs: the first square on 1–6; the others two to a row under its words on 8–12, the last row's foot on
+     the first photograph's (a lone one as wide as one of a pair). */
+  html:not(.d-touch) body.nocturne .n-post__body > .n-post__photos {
+    display: contents;
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__photos > .n-post__photo:first-child {
+    --d-ph-h: auto;
+    grid-column: 1 / span 6;
+    grid-row: 1 / span 2;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    margin: 0;
+    background-color: var(--n-photo);
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__photos > .n-post__pair {
+    display: grid;
+    grid-column: 8 / -1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--d-gutter);
+    align-self: end;
+    margin: var(--d-s5) 0 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__photos > .n-post__pair:nth-child(2) {
+    grid-row: 2;
+    margin-top: var(--d-s7);
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__pair > .n-post__photo {
+    --d-ph-h: auto;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    margin: 0;
+    background-color: var(--n-photo);
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__photos .n-post__photo > img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  /* …its words beside the first, from its top: the kind, the title in T1, the day, the text at its measure. */
+  html:not(.d-touch) body.nocturne .n-post__body > .n-post__photos:not([hidden]) ~ .n-post__head {
+    grid-column: 8 / -1;
+    grid-row: 1;
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__head > .n-post__title {
+    margin-top: var(--d-s4);
+    font-size: var(--d-fs-t1);
+    line-height: 1.1;
+    letter-spacing: var(--d-tr-t1);
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__head > .n-post__title:first-child {
+    margin-top: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__head > :is(.circle-post__experience, .n-post__date) {
+    margin-top: var(--d-s2);
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__head > .n-post__title + .n-post__date {
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__head > .n-post__text {
+    max-width: 36em;
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__head > .n-post__text .n-art {
+    font-size: var(--d-fs-lead);
+    line-height: 1.5;
+  }
+
+  /* A post without a photograph: its words on 1–6, its sections stacked on 8–12 from the same top. */
+  html:not(.d-touch) body.nocturne .n-post__body:not(:has(> .n-post__photos:not([hidden]))) > .n-post__head {
+    grid-column: 1 / span 6;
+    grid-row: 1 / span 8;
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__body:not(:has(> .n-post__photos:not([hidden]))) > .n-post__section {
+    grid-column: 8 / -1;
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__body:not(:has(> .n-post__photos:not([hidden]))) > .n-post__section + .n-post__section {
+    margin-top: var(--d-s8);
+  }
+
+  /* …and without a section either (a note alone): its head across the canvas, the title on 1–12, its text on 1–6 at
+     its measure, so no column stands alone with the other side empty. */
+  html:not(.d-touch) body.nocturne .n-post__body:not(:has(> .n-post__photos:not([hidden]), > .n-post__section)) > .n-post__head {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__body:not(:has(> .n-post__photos:not([hidden]), > .n-post__section)) > .n-post__head > .n-post__text {
+    max-width: min(36em, calc((6 * (100% + var(--d-gutter))) / 12 - var(--d-gutter)));
+  }
+
+  /* With its photographs: each section across the canvas, 120 px under what comes before it, in two columns. Three
+     rows: the label, what stands under it (THE INVITATION's rows, THE POLL's sentence), then the rest of the right
+     column's height, so the left column keeps its own spacing however tall the right one is. */
+  html:not(.d-touch) body.nocturne .n-post__body:has(> .n-post__photos:not([hidden])) > .n-post__section {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    grid-template-rows: auto auto 1fr;
+    column-gap: var(--d-gutter);
+    align-items: start;
+    margin-top: var(--d-s10);
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__body:has(> .n-post__photos:not([hidden])) > .n-post__section > * {
+    grid-column: 8 / -1;
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__body:has(> .n-post__photos:not([hidden])) > .n-post__section > h2:first-child {
+    grid-column: 1 / span 6;
+    grid-row: 1;
+    margin: 0;
+  }
+
+  /* THE INVITATION: its rows under its label on 1–6; YOUR ANSWER, its sentence and YES / NO on 8–12. */
+  html:not(.d-touch) body.nocturne .n-post__body:has(> .n-post__photos:not([hidden])) > .n-post__section > .n-post__rows {
+    grid-column: 1 / span 6;
+    grid-row: 2;
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__body:has(> .n-post__photos:not([hidden])) > .n-post__section > .n-post__reply {
+    grid-row: 1 / -1;
+    margin-top: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__body:has(> .n-post__photos:not([hidden])) > .n-post__section > .circle-post__error {
+    grid-row: 4;
+  }
+
+  /* THE POLL: its sentence under its label on 1–6; its options and VOTE, or its results, on 8–12. */
+  html:not(.d-touch) body.nocturne .n-post__body:has(> .n-post__photos:not([hidden])) > .n-post__section--poll > .n-post__sentence {
+    grid-column: 1 / span 6;
+    grid-row: 2;
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__body:has(> .n-post__photos:not([hidden])) > .n-post__section--poll > :is(.n-post__options, .n-post__results) {
+    grid-row: 1 / -1;
+    margin-top: 0;
+  }
+
+  /* TO SEE: its rows on 8–12, the first one's title on the label's line: each row keeps its 20 px above its words (its
+     hover ground and its keyboard ring as every row's), the list drawn up by as much; the first row draws no line
+     above it, as THE CLUB's and the legal index's first rows. */
+  html:not(.d-touch) body.nocturne .n-post__body:has(> .n-post__photos:not([hidden])) > .n-post__section > .n-post__links {
+    grid-row: 1 / -1;
+    margin-top: -20px;
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__body:has(> .n-post__photos:not([hidden])) > .n-post__section > .n-post__links > :first-child {
+    margin-top: 0;
+    border-top: 0;
+  }
+
+  /* The sections' own lines on the scale, their forms and options a form's column (440 px at most, §10.22). */
+  html:not(.d-touch) body.nocturne .n-post__section > .n-post__rows {
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__section > .n-post__rows > .n-kv__row:first-child {
+    border-top: 0;
+  }
+
+  /* THE POLL's sentence 16 px under its label wherever the section stands (the phone's 10 is off the scale). */
+  html:not(.d-touch) body.nocturne .n-post__section > .n-post__sentence {
+    margin-top: var(--d-s4);
+  }
+
+  /* …and in one role before and after the vote (views/circle.ts sets the results' sentence in reading text): Small, as
+     YOUR ANSWER's sentence, so voting never changes its size. */
+  html:not(.d-touch) body.nocturne .n-post__section--poll > .n-post__sentence {
+    font-size: var(--d-fs-small);
+    line-height: var(--n-lh-sm);
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__section > .n-post__reply,
+  html:not(.d-touch) body.nocturne .n-post__section > :is(.n-post__options, .n-post__vote, .n-post__results) {
+    max-width: 440px;
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__reply > .n-post__choice {
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__section > .n-post__vote {
+    width: 100%;
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__reply > .n-post__answer-title {
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__reply > .n-post__answer-title + .n-post__sentence {
+    margin-top: var(--d-s4);
+  }
+
+  /* Stacked on 8–12 (a post without a photograph), YOUR ANSWER 72 px under THE INVITATION's rows. */
+  html:not(.d-touch) body.nocturne .n-post__body:not(:has(> .n-post__photos:not([hidden]))) .n-post__reply {
+    margin-top: var(--d-s8);
+  }
+
+  /* A post that could not be shown, or that does not exist: under the crumb, on the edge (§10.24). */
+  html:not(.d-touch) body.nocturne .n-post__body > .n-post__failed {
+    padding: 0 var(--d-edge);
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__body > .n-post__head--bare:only-child .n-quiet {
+    max-width: 36em;
+    font-size: var(--d-fs-text);
+    line-height: 1.6;
+  }
+
+  /* A post that does not exist (§10.24): its sentence the page's h1, in the lead's role and in ink, as an unknown
+     release's; THE CIRCLE, the crumb's way, 32 px under it. */
+  html:not(.d-touch) body.nocturne .n-post__body > .n-post__head--bare:only-child h1.circle-post__missing {
+    max-width: 32em;
+    margin: 0;
+    color: var(--vault-ink);
+    font-size: var(--d-fs-lead);
+    font-weight: 400;
+    line-height: 1.5;
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__head--bare > .n-post__missing-back {
+    display: block;
+    margin-top: var(--d-s6);
+  }
+
+  /* Below 1280 the photographs on 1–5 and the words beside them on 7–12, so a post's title in T1 keeps its lines in a
+     window's narrower columns. */
+  @media (max-width: 1279.98px) {
+    html:not(.d-touch) body.nocturne .n-circle-card > .n-circle-card__photo,
+    html:not(.d-touch) body.nocturne .n-post__photos > .n-post__photo:first-child {
+      grid-column: 1 / span 5;
+    }
+
+    html:not(.d-touch) body.nocturne .n-circle-card > .n-circle-card__photo:not([hidden]) + .n-circle-card__words,
+    html:not(.d-touch) body.nocturne .n-post__body > .n-post__photos:not([hidden]) ~ .n-post__head,
+    html:not(.d-touch) body.nocturne .n-post__photos > .n-post__pair {
+      grid-column: 7 / -1;
+    }
+
+    /* …a post without its photograph on the same two axes (its plate's right block from the canvas's seventh column)… */
+    html:not(.d-touch) body.nocturne .n-circle-card > :is(.n-circle-card__photo[hidden] + .n-circle-card__words, .n-circle-card__words:only-child) > .d-frame__main {
+      grid-column: 1 / span 5;
+    }
+
+    html:not(.d-touch) body.nocturne .n-circle-card > :is(.n-circle-card__photo[hidden] + .n-circle-card__words, .n-circle-card__words:only-child) > .d-frame__aside {
+      grid-column: 7 / -1;
+    }
+
+    html:not(.d-touch) body.nocturne .n-circle-card > .n-circle-card__plate {
+      grid-template-columns: minmax(0, 1fr) calc((6 * (100% + 2 * var(--d-s7)) - 6 * var(--d-gutter)) / 12 - var(--d-s7));
+    }
+
+    /* …and the sections under them on the same two axes. */
+    html:not(.d-touch) body.nocturne .n-post__body:has(> .n-post__photos:not([hidden])) > .n-post__section > * {
+      grid-column: 7 / -1;
+    }
+
+    html:not(.d-touch) body.nocturne .n-post__body:has(> .n-post__photos:not([hidden])) > .n-post__section > :is(h2:first-child, .n-post__rows),
+    html:not(.d-touch) body.nocturne .n-post__body:has(> .n-post__photos:not([hidden])) > .n-post__section--poll > .n-post__sentence {
+      grid-column: 1 / span 5;
+    }
+  }
+
+  /* ── 4. THE CLUB: the tiers side by side, then how the tiers work beside the reader's own ─────────────────────── */
+
+  html:not(.d-touch) body.nocturne .view--club > .n-club__body {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    column-gap: var(--d-gutter);
+    align-items: start;
+    padding: 0 var(--d-edge);
+  }
+
+  html:not(.d-touch) body.nocturne .n-club__body > * {
+    grid-column: 1 / -1;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-club__body > .n-club__lead {
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .n-club__body > .n-club__tier {
+    grid-column: span 4;
+    margin-top: var(--d-s10);
+    padding-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .n-club__tier > .n-club__plate {
+    padding: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-club__tier .n-club__name {
+    margin: 0;
+    font-size: var(--d-fs-t2);
+    line-height: 1.2;
+    letter-spacing: var(--d-tr-mid);
+  }
+
+  html:not(.d-touch) body.nocturne .n-club__tier .n-club__from {
+    margin-top: var(--d-s2);
+  }
+
+  html:not(.d-touch) body.nocturne .n-club__tier .n-club__lines {
+    gap: var(--d-s3);
+    margin-top: var(--d-s5);
+    padding: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-club__tier .n-club__line {
+    max-width: 32em;
+  }
+
+  /* Its welcome gift: its photograph square at the column's width, its name 16 px under it. */
+  html:not(.d-touch) body.nocturne .n-club__tier > .n-club__gift {
+    margin: var(--d-s6) 0 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-club__gift > .n-club__gift-photo {
+    --d-ph-h: auto;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    background-color: var(--n-photo);
+  }
+
+  html:not(.d-touch) body.nocturne .n-club__gift > .n-club__gift-photo > img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  html:not(.d-touch) body.nocturne .n-club__gift > .n-club__gift-name {
+    margin-top: var(--d-s4);
+    padding: 0;
+  }
+
+  /* HOW THE TIERS WORK on 1–6 under a hairline across the canvas; the way to the reader's tier on 8–12, from its top. */
+  html:not(.d-touch) body.nocturne .n-club__body > .n-club__how {
+    grid-column: 1 / span 6;
+    margin-top: var(--d-s10);
+    padding-top: var(--d-s6);
+    border-top: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-club__body > .n-club__how::before {
+    content: "";
+    position: absolute;
+    right: var(--d-edge);
+    left: var(--d-edge);
+    margin-top: calc(-1 * var(--d-s6));
+    border-top: 1px solid var(--vault-hairline);
+  }
+
+  html:not(.d-touch) body.nocturne .n-club__how > h2 {
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-club__how .n-club__rules {
+    gap: var(--d-s3);
+    margin-top: var(--d-s5);
+    padding: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-club__body > .n-club__way {
+    grid-column: 8 / -1;
+    margin-top: var(--d-s10);
+    padding-top: var(--d-s6);
+  }
+
+  /* Its row keeps its 20 px above its words (its hover ground and its keyboard ring as every row's), drawn up by as
+     much, so its words stand on HOW THE TIERS WORK's line. */
+  html:not(.d-touch) body.nocturne .n-club__way > .n-acc {
+    margin-top: -20px;
+  }
+
+  /* While it is read, or when it could not be shown: on the edge, 48 px under the head (§10.24). */
+  html:not(.d-touch) body.nocturne .n-club__body > :is(.n-loading, .n-club__failed) {
+    margin-top: var(--d-s7);
+  }
+}

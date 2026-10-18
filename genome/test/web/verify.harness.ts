@@ -207,3 +207,21 @@ export async function mobileContext(browser: Browser, opts: { reducedMotion?: 'r
     timezoneId: 'Europe/Paris',
   });
 }
+
+/**
+ * A large tablet held landscape (1280 × 900, an iPad's user agent, touch): it keeps the phone layout (`html.d-touch`,
+ * the owner's answer Q2), so the phone's checks hold on it at a computer's width. A computer is a context without touch.
+ */
+export async function tabletContext(browser: Browser): Promise<BrowserContext> {
+  return browser.newContext({
+    viewport: { width: 1280, height: 900 },
+    deviceScaleFactor: 2,
+    isMobile: true,
+    hasTouch: true,
+    userAgent:
+      'Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+    reducedMotion: 'no-preference',
+    locale: 'en-GB',
+    timezoneId: 'Europe/Paris',
+  });
+}

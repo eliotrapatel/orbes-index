@@ -30,8 +30,10 @@
 import { CHAPTER_IDS, CHAPTER_LABELS, CHAPTER_PATHS, RAIL_LABEL, showRailLive } from '../shared/chapters.js';
 import { contactLines, phoneHref } from '../shared/client-services.js';
 import { byId, h, mount, s } from '../shared/dom.js';
+import { dockRail, isDesktop, onComputer, onDesktopChange, watchBar, wordmarkLink } from '../shared/desktop.js';
 import { GEOIP_ATTRIBUTION, LEGAL_PAGES } from '../shared/legal.js';
 import { railLive } from '../verify/nocturne-model.js';
+import { forComputer, SECTIONS_LABEL } from './content/desktop.js';
 import { DOCUMENTS, LANGS, LANGUAGE_NAMES, LEGAL_VERSION, WORDS, type Block, type Lang, type LegalDocument, type LegalWords } from './content/index.js';
 import { hrefOf, parseBlock, type Anchors, pickLanguage, routeOf, splitFigures, typography, type LegalRoute, type Run } from './model.js';
 
@@ -39,6 +41,8 @@ import { hrefOf, parseBlock, type Anchors, pickLanguage, routeOf, splitFigures, 
 const CONTACT_TIMEOUT_MS = 5_000;
 /** The address of the verification app, for VERIFY A PIECE. */
 const VERIFY_PATH = '/verify';
+/** Desktop: the SCAN page, where a computer verifies a piece (decision 4; verify/views/desktop-scan.ts). */
+const SCAN_PATH = '/verify/scan';
 
 const NEW_TAB = { target: '_blank', rel: 'noopener' } as const;
 
@@ -51,9 +55,12 @@ function inline(runs: Run[]): Node[] {
   });
 }
 
+/** Desktop (BRIEF §5.8): a line written for a phone in a computer's words, on a computer of any window width (D6). */
+const onDevice = (text: string, lang: Lang): string => (onComputer() ? forComputer(text, lang) : text);
+
 /** A heading in the display face, its figures set apart in the reading face (Gravesend's one is its capital I). */
 function heading<K extends 'h1' | 'h2'>(tag: K, text: string, cls: string, lang: Lang, id?: string): HTMLElementTagNameMap[K] {
-  const parts = splitFigures(typography(text, lang)).map((p) => (p.figure ? h('span', { class: 'legal__figure', text: p.text }) : p.text));
+  const parts = splitFigures(typography(onDevice(text, lang), lang)).map((p) => (p.figure ? h('span', { class: 'legal__figure', text: p.text }) : p.text));
   return h(tag, { class: cls, id }, ...parts);
 }
 
@@ -61,7 +68,7 @@ function heading<K extends 'h1' | 'h2'>(tag: K, text: string, cls: string, lang:
 function block(b: Block, lang: Lang, anchors?: Anchors): HTMLElement {
   // The contact of ORBES Client Services: filled once the server has said it (fillContacts), hidden until then.
   if (typeof b !== 'string') return h('div', { class: 'n-contact legal__contact', attrs: { hidden: true } });
-  const parsed = parseBlock(b, lang, anchors);
+  const parsed = parseBlock(onDevice(b, lang), lang, anchors);
   if (parsed.kind === 'list') return h('ul', { class: 'n-art legal__list' }, ...parsed.items.map((item) => h('li', { class: 'legal__item' }, ...inline(item))));
   return h('p', { class: 'n-art legal__text' }, ...inline(parsed.runs));
 }
@@ -71,9 +78,15 @@ function chevron(): SVGSVGElement {
   return s('svg', { class: 'n-ic n-ic--sm', viewBox: '0 0 22 22', 'aria-hidden': 'true', focusable: 'false' }, s('path', { d: 'M8.5 4.5L15 11l-6.5 6.5' }));
 }
 
-/** The header (C23): ORBES at the left; VERIFY A PIECE, the way back to the app, at the right. */
+/**
+ * The header (C23): ORBES at the left; VERIFY A PIECE, the way back to the app, at the right. Desktop: on a
+ * computer ORBES leads to NOW (§10.17), and VERIFY A PIECE to the SCAN page, where a computer verifies a piece
+ * (decision 4); its words stay.
+ */
 function header(words: LegalWords): HTMLElement {
-  return h('header', { class: 'n-hd legal-head' }, h('span', { class: 'n-g n-wm', text: 'ORBES' }), h('a', { class: 'n-g n-acct legal-head__verify', attrs: { href: VERIFY_PATH }, text: words.verify }));
+  const head = h('header', { class: 'n-hd legal-head' }, h('span', { class: 'n-g n-wm', text: 'ORBES' }), h('a', { class: 'n-g n-acct legal-head__verify', attrs: { href: isDesktop() ? SCAN_PATH : VERIFY_PATH }, text: words.verify }));
+  wordmarkLink(head.querySelector<HTMLElement>(':scope > .n-wm'), () => h('a', { class: 'n-g n-wm', attrs: { href: VERIFY_PATH }, text: 'ORBES' }));
+  return head;
 }
 
 /**
@@ -87,7 +100,11 @@ function rail(lang: Lang): { el: HTMLElement; live: HTMLElement; liveWord: HTMLE
   // The dot said to a screen reader: RELEASES LIVE while it shows (shared/chapters.ts).
   const liveWord = h('span', { class: 'visually-hidden n-rail__live-word', attrs: { hidden: true } });
   const links = CHAPTER_IDS.map((c) => h('a', { class: 'n-g n-rail__link', attrs: { href: CHAPTER_PATHS[c] }, data: { chapter: c } }, CHAPTER_LABELS[c], c === 'releases' ? live : null, c === 'releases' ? liveWord : null));
-  return { el: h('nav', { class: 'n-rail legal-rail', attrs: { 'aria-label': RAIL_LABEL, lang: lang === 'en' ? null : 'en' } }, ...links), live, liveWord };
+  // Desktop (BRIEF §10.11): on a computer the menu shows once RELEASES' dot is known (readRail; two seconds at
+  // most), so the centred menu never moves as the dot comes; nothing on a phone.
+  const el = h('nav', { class: 'n-rail legal-rail', attrs: { 'aria-label': RAIL_LABEL, lang: lang === 'en' ? null : 'en', 'data-d-pending': true } }, ...links);
+  window.setTimeout(() => el.removeAttribute('data-d-pending'), 2_000);
+  return { el, live, liveWord };
 }
 
 /** RELEASES' dot: what is announced, read from the app's public routes (GET /api/v1/live/next, /api/v1/drops). */
@@ -109,6 +126,7 @@ async function readRail(live: HTMLElement, liveWord: HTMLElement): Promise<void>
     // Offline or refused: the rail without its dot.
   } finally {
     clearTimeout(timer);
+    live.closest('.n-rail')?.removeAttribute('data-d-pending');
   }
 }
 
@@ -158,14 +176,32 @@ function versionLine(route: LegalRoute, lang: Lang, words: LegalWords): HTMLElem
 function documentView(doc: LegalDocument, lang: Lang): HTMLElement[] {
   // The terms' cross-references ("(article 11)") link to their sections, as C23 draws them (ivory, underlined).
   const anchors: Anchors = new Set(doc.sections.map((sec) => sec.id));
+  const title = heading('h1', doc.title, 'n-g n-t1 legal__title', lang);
+  const intro = doc.intro.map((b) => block(b, lang, anchors));
+  const body = h(
+    'article',
+    { class: 'n-px legal__body' },
+    ...doc.sections.map((sec) => h('section', { class: 'legal__section', attrs: { 'aria-labelledby': sec.id } }, heading('h2', sec.title, 'n-g n-t3 legal__heading', lang, sec.id), ...sec.blocks.map((b) => block(b, lang, anchors)))),
+  );
+  if (!isDesktop()) return [h('div', { class: 'n-px legal-titles' }, title, ...intro), body];
+  // Desktop (BRIEF §3): the title across the page; under it, the list of its sections beside the text, read
+  // at its measure (the introduction, then every section); shared/desktop-legal.css lays them out.
   return [
-    h('div', { class: 'n-px legal-titles' }, heading('h1', doc.title, 'n-g n-t1 legal__title', lang), ...doc.intro.map((b) => block(b, lang, anchors))),
-    h(
-      'article',
-      { class: 'n-px legal__body' },
-      ...doc.sections.map((sec) => h('section', { class: 'legal__section', attrs: { 'aria-labelledby': sec.id } }, heading('h2', sec.title, 'n-g n-t3 legal__heading', lang, sec.id), ...sec.blocks.map((b) => block(b, lang, anchors)))),
-    ),
+    h('div', { class: 'n-px legal-titles' }, title),
+    h('div', { class: 'n-px d-legal' }, sectionsNav(doc, lang), h('div', { class: 'd-legal__text' }, h('div', { class: 'legal-titles d-legal__intro' }, ...intro), body)),
   ];
+}
+
+/**
+ * Desktop: the page's sections, each a link to its heading (the address takes its anchor, as a
+ * cross-reference does, and the language switch follows), in the order of the text; their words are the headings'.
+ */
+function sectionsNav(doc: LegalDocument, lang: Lang): HTMLElement {
+  return h(
+    'nav',
+    { class: 'd-legal__sections', attrs: { 'aria-label': SECTIONS_LABEL[lang] } },
+    h('ol', { class: 'd-legal__list' }, ...doc.sections.map((sec) => h('li', { class: 'd-legal__item' }, h('a', { class: 'd-legal__link', attrs: { href: `#${sec.id}` }, text: typography(onDevice(sec.title, lang), lang) })))),
+  );
 }
 
 /** /legal: the four pages, each a row that leads on, with its sentence. */
@@ -251,11 +287,13 @@ function start(): void {
   document.title = `${doc ? doc.title : words.indexTitle} — ORBES`;
   const root = byId('app');
   const chapters = rail(lang);
+  const content = (): HTMLElement[] => (doc ? documentView(doc, lang) : indexView(lang, words));
+  let shown = content();
   mount(
     root,
     header(words),
     chapters.el,
-    h('main', { class: 'legal', id: 'main' }, pagesNav(route, lang, words), versionLine(route, lang, words), ...(doc ? documentView(doc, lang) : indexView(lang, words))),
+    h('main', { class: 'legal', id: 'main' }, pagesNav(route, lang, words), versionLine(route, lang, words), ...shown),
     foot(route, lang, words),
   );
   // An anchor in the address (/legal/faq#transfer): its section, now that it exists.
@@ -264,6 +302,35 @@ function start(): void {
   target?.scrollIntoView();
   void fillContacts(root, words);
   void readRail(chapters.live, chapters.liveWord);
+  // Desktop (shared/desktop.ts): the menu inside the top bar, and the bar's ground.
+  const head = root.querySelector<HTMLElement>('.n-hd');
+  const back = head?.querySelector<HTMLElement>('.legal-head__verify');
+  if (head && back) dockRail(head, chapters.el, () => [back]);
+  // Desktop (§4: a window resized across the breakpoint never breaks): the document drawn again in the other layout
+  // (the sections beside the text, or the phone's column), VERIFY A PIECE leading where that layout verifies a piece,
+  // and the reader kept at the section the address names, else at the one they were reading.
+  onDesktopChange((desktop) => {
+    back?.setAttribute('href', desktop ? SCAN_PATH : VERIFY_PATH);
+    if (!doc) return;
+    const reading = currentSection().slice(1) || sectionAtTop();
+    const next = content();
+    shown[0]?.before(...next);
+    for (const el of shown) el.remove();
+    shown = next;
+    void fillContacts(root, words);
+    if (reading) document.getElementById(reading)?.scrollIntoView();
+  });
+  watchBar();
+}
+
+/** The id of the last section heading at or above the top of the window (under the bar), '' above the first. */
+function sectionAtTop(): string {
+  let id = '';
+  for (const el of document.querySelectorAll<HTMLElement>('.legal__heading[id]')) {
+    if (el.getBoundingClientRect().top > 80) break;
+    id = el.id;
+  }
+  return id;
 }
 
 start();

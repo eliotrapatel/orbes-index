@@ -1,7 +1,8 @@
 /**
  * MESSAGES for the collector (plan NEXT-NINE of 2026-10-06, §3.1 CS-01; API §10.17): 401 signed out, the CSRF token and
- * the same origin on every write, `no-store` on every answer, the shapes (each context kind's `path`, a scan's null),
- * and staff never named to the collector.
+ * the same origin on every write, `no-store` on every answer, the shapes (each context kind's `path`, a scan's null, and
+ * the thread's `ref`, the id a reply attaches again), the answers unread counted for the account alone (`unread-count`,
+ * a computer's account page), and staff never named to the collector.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
@@ -13,7 +14,7 @@ interface MessageJson {
   from: 'YOU' | 'ORBES_CLIENT_SERVICES';
   body: string;
   at: string;
-  concerning: { kind: string; label: string; path: string | null } | null;
+  concerning: { kind: string; label: string; path: string | null; ref?: string | null } | null;
 }
 
 describe('MESSAGES for the collector (CS-01)', () => {
@@ -46,6 +47,7 @@ describe('MESSAGES for the collector (CS-01)', () => {
       ['POST', '/api/v1/account/messages', { body: 'Hello.' }],
       ['POST', '/api/v1/account/messages/read', { upTo: new Date().toISOString() }],
       ['GET', '/api/v1/account/messages/unread'],
+      ['GET', '/api/v1/account/messages/unread-count'],
     ] as const) {
       const res = await anon.request(method, url, body ? { body } : {});
       expect(res.statusCode, `${method} ${url}`).toBe(401);
@@ -90,6 +92,15 @@ describe('MESSAGES for the collector (CS-01)', () => {
     expect(errorOf(await me.client.post('/api/v1/account/messages', { body: '' }))).toEqual({ code: 'VALIDATION_FAILED', message: 'Write your message.' });
     expect(errorOf(await me.client.post('/api/v1/account/messages', { body: 'x'.repeat(2001) }))).toEqual({ code: 'VALIDATION_FAILED', message: 'Your message is limited to 2,000 characters.' });
     expect((await me.client.post('/api/v1/account/messages', { body: 'Hi.', context: { kind: 'PIECE', id: serial, extra: 1 } })).statusCode).toBe(400);
+    // The thread gives each the id a reply attaches again (`ref`): the piece's serial, the scan's, the model's and the
+    // release's id, as the collector sent them.
+    const thread = safeJson(await me.client.get('/api/v1/account/messages')) as { messages: MessageJson[] };
+    expect(thread.messages.map((m) => [m.concerning?.kind, m.concerning?.ref])).toEqual([
+      ['PIECE', serial],
+      ['SCAN', scanId],
+      ['MODEL', catalog.modelId],
+      ['RELEASE', draw.id],
+    ]);
   });
 
   it('reads the thread with the answers signed ORBES Client Services, marks them read, and never names staff', async () => {
@@ -104,6 +115,13 @@ describe('MESSAGES for the collector (CS-01)', () => {
     const unread = await me.client.get('/api/v1/account/messages/unread');
     expect(unread.headers['cache-control']).toBe('no-store');
     expect(safeJson(unread)).toEqual({ unread: true });
+    // How many: one answer; another account reads its own count, never this one's.
+    const count = await me.client.get('/api/v1/account/messages/unread-count');
+    expect(count.statusCode).toBe(200);
+    expect(count.headers['cache-control']).toBe('no-store');
+    expect(safeJson(count)).toEqual({ count: 1 });
+    const stranger = await accountClient(h);
+    expect(safeJson(await stranger.client.get('/api/v1/account/messages/unread-count'))).toEqual({ count: 0 });
     const res = await me.client.get('/api/v1/account/messages');
     expect(res.headers['cache-control']).toBe('no-store');
     const thread = safeJson(res) as { messages: MessageJson[]; unread: boolean };
@@ -114,6 +132,7 @@ describe('MESSAGES for the collector (CS-01)', () => {
     const read = await me.client.post('/api/v1/account/messages/read', { upTo: answer.at });
     expect(read.statusCode).toBe(204);
     expect(safeJson(await me.client.get('/api/v1/account/messages/unread'))).toEqual({ unread: false });
+    expect(safeJson(await me.client.get('/api/v1/account/messages/unread-count'))).toEqual({ count: 0 });
     expect((await me.client.post('/api/v1/account/messages/read', { upTo: 'yesterday' })).statusCode).toBe(400);
   });
 });

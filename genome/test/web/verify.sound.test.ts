@@ -13,8 +13,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { deviceStorage, readPref, setSoundPref, SOUND_OFF, SOUND_PREF_KEY, soundPref, writePref, type PrefStorage } from '../../src/web/shared/prefs.js';
 import { SOUND } from '../../src/web/verify/copy.js';
-import { scheduleSignature, scheduleTick, SIGNATURE, SoundSignature, SUSPEND_AFTER_MS, TICK, type SoundContext, type SoundEnvironment, type SoundNode, type SoundParam } from '../../src/web/verify/sound.js';
+import { browserSoundEnvironment, scheduleSignature, scheduleTick, SIGNATURE, SoundSignature, SUSPEND_AFTER_MS, TICK, type SoundContext, type SoundEnvironment, type SoundNode, type SoundParam } from '../../src/web/verify/sound.js';
 import { VERIFICATION_STATES } from '../../src/web/verify/types.js';
+import { at, installDevice } from '../support/fake-device.js';
 
 /** A Map behind the Storage interface. */
 class MemoryStorage implements PrefStorage {
@@ -424,5 +425,65 @@ describe('the tick of the last ten seconds before a LIVE RELEASE opens (plan of 
     sound.set(false);
     expect(sound.tick()).toBe(false);
     expect(ctx.voices).toHaveLength(10);
+  });
+});
+
+describe('a computer\'s sound (desktop, BRIEF §5.10; decision D6)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** The page's own environment on `name` at `width` px, its preference kept in `storage`. */
+  const onDevice = (name: string, width: number, storage: PrefStorage) => {
+    installDevice(at(name, width));
+    return { ...browserSoundEnvironment(), storage };
+  };
+
+  it('starts off on a computer with nothing kept, whatever its window\'s width, and on on a phone or a tablet', () => {
+    for (const [name, width, on] of [
+      ['a Mac', 1440, false],
+      ['a Mac', 900, false],
+      ['a Windows computer with a mouse', 683, false],
+      ['a Windows laptop with a touch screen and a trackpad', 1920, false],
+      ['an iPhone', 390, true],
+      ['an iPad with its trackpad (Safari, as a Mac)', 1366, true],
+      ['an Android tablet with a trackpad cover (a fine pointer)', 1280, true],
+    ] as const) {
+      const env = onDevice(name, width, new MemoryStorage());
+      expect(env.defaultOn!(), `${name} at ${width}`).toBe(on);
+      expect(new SoundSignature(env).on, `${name} at ${width}`).toBe(on);
+    }
+  });
+
+  it('keeps SOUND ON as on on a computer, and SOUND OFF as off', () => {
+    const storage = new MemoryStorage();
+    const sound = new SoundSignature(onDevice('a Mac', 1440, storage));
+    sound.set(true);
+    expect(storage.items.get(SOUND_PREF_KEY)).toBe('on');
+    expect(new SoundSignature(onDevice('a Mac', 1440, storage)).on).toBe(true);
+    sound.set(false);
+    expect(storage.items.get(SOUND_PREF_KEY)).toBe(SOUND_OFF);
+    expect(new SoundSignature(onDevice('a Mac', 1440, storage)).on).toBe(false);
+  });
+
+  it('keeps SOUND ON pressed in a narrow window: a wide window of the same computer starts with the sound on', () => {
+    const storage = new MemoryStorage();
+    const narrow = new SoundSignature(onDevice('a Mac', 900, storage));
+    expect(narrow.on).toBe(false);
+    narrow.set(true);
+    // Once the key was removed here (the narrow window took a phone's default, on), and a wide window started off again.
+    expect(storage.items.get(SOUND_PREF_KEY)).toBe('on');
+    expect(new SoundSignature(onDevice('a Mac', 1440, storage)).on).toBe(true);
+    expect(new SoundSignature(onDevice('a Mac', 900, storage)).on).toBe(true);
+  });
+
+  it('keeps a phone as production has it: off stored, on removes the key', () => {
+    const storage = new MemoryStorage();
+    const sound = new SoundSignature(onDevice('an iPhone', 390, storage));
+    expect(sound.on).toBe(true);
+    sound.set(false);
+    expect(storage.items.get(SOUND_PREF_KEY)).toBe(SOUND_OFF);
+    sound.set(true);
+    expect(storage.items.has(SOUND_PREF_KEY)).toBe(false);
   });
 });

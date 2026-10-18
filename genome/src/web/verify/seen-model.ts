@@ -6,7 +6,9 @@
  *
  *   pageOf      the screen on show → its page and subject (a model's slug, a release's or a post's id, a piece's serial),
  *               or null for the screens never recorded: the scan itself, VERIFYING…, a problem of the scan, a LIVE
- *               RELEASE's boutique board (a shop's screen) and the password screen.
+ *               RELEASE's boutique board (a shop's screen), the password screen and a computer's SCAN page; a computer's
+ *               other pages are their phone equivalents (an order's page MY_ORDERS; the account's, sign-in and MESSAGES
+ *               pages claimed as the sheet's and the panel's views).
  *   ViewClock   the time a view is in front: it pauses while the page is hidden and after IDLE_MS without a touch, a key
  *               or a scroll (but on a LIVE room and a scan's result, watched without touching), and resumes on input or
  *               when the page shows again; a new screen counts from its showing (the collector's doing). A claim (the account sheet and its views, the sign-in and create-account
@@ -98,7 +100,19 @@ export type SeenScreen =
   | 'circlePost'
   | 'club'
   | 'how'
-  | 'wishlist';
+  | 'wishlist'
+  // Desktop (plan of 2026-10-16, Q4): a computer's pages count as their phone equivalents, with no page name added.
+  // The SCAN page of a computer is never recorded (pageOf: null): a scan is written by the server.
+  | 'scanPage'
+  // …the account's pages and the sign-in page claim their views as the sheet's and the sign-in panel's do
+  // (accountPageOf: ACCOUNT, PROFILE, SIZES, ADDRESSES; views/ownership.ts: SIGN_IN, SIGN_UP), so the screens
+  // themselves are not recorded twice; THE WISHLIST is the phone's own screen.
+  | 'account'
+  | 'signIn'
+  // …MESSAGES in two parts claims MESSAGES, as the sheet's view; an order's page is MY_ORDERS, as MY PIECES' ORDERS
+  // where the phone opens it.
+  | 'messages'
+  | 'order';
 
 /** What the app holds beside its screen, for the subject. */
 export interface SeenAppState {
@@ -146,7 +160,11 @@ export function pageOf(screen: SeenScreen, state: SeenAppState): SeenView | null
       return { page: 'POST', subject: state.postId };
     case 'wishlist':
       return { page: 'WISHLIST' };
-    // The scan, VERIFYING…, a problem of the scan, the boutique board: never recorded.
+    // Desktop: an order's page, as MY PIECES' ORDERS (the phone opens an order there).
+    case 'order':
+      return { page: 'MY_ORDERS' };
+    // The scan, VERIFYING…, a problem of the scan, the boutique board, a computer's SCAN page: never recorded. A
+    // computer's account, sign-in and MESSAGES pages: recorded by their claims, not as screens.
     default:
       return null;
   }

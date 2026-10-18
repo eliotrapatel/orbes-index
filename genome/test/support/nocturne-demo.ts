@@ -82,6 +82,9 @@
  *                     its certificate, and one warranty claim per collector at each moment its ORBES CARE tab shows: its
  *                     prepaid label sent; replaced, the new piece shipped; after the free replacement, a 30 % credit (IN
  *                     USE, WARRANTY CREDIT); refused after inspection, the piece returned; a 2-year piece repaired
+ *   gallery           the full story, then a gallery on MONOLITHE in steel (desktop, D11: for the desktop states and the
+ *                     owner's look only): the demo's own photographs of it in gold and in blue, after its cover, so a
+ *                     model's page on a computer shows its grid of tiles and the viewer they open
  *
  * Ids written by the server (scan references, order and entry references, genomes, invoice numbers) are the server's;
  * the parity tool's comparisons treat them as live data.
@@ -127,7 +130,8 @@ export type DemoVariant =
   | 'wishes'
   | 'birthday-credit'
   | 'care-used'
-  | 'orbes-care';
+  | 'orbes-care'
+  | 'gallery';
 
 export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'full',
@@ -154,6 +158,7 @@ export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'birthday-credit',
   'care-used',
   'orbes-care',
+  'gallery',
 ]);
 
 /** NOW: Monday 5 October 2026, 18:49 in Paris (16:49 UTC), the boards' afternoon. Every clock of the stage is fixed here. */
@@ -256,7 +261,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
   // claim-waiting stage (plan NEXT LOT §3.4) tells the full story, its state writing the rest.
   // The draw-sizes stage (plan NEXT LOT §3.6.F) tells the full story, then adds a draw in sizes, open. The stages of the
   // collector's side of an order (plan NEXT LOT §3.6) tell the full story, their state writing the rest.
-  const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes', 'birthday-credit', 'care-used', 'orbes-care'] as const;
+  const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes', 'birthday-credit', 'care-used', 'orbes-care', 'gallery'] as const;
   const story = ((OWN_STAGES as readonly DemoVariant[]).includes(variant) ? 'full' : variant) as Exclude<DemoVariant, (typeof OWN_STAGES)[number]>;
   if (story === 'empty') await seedEmpty(w);
   else if (story === 'stress') await seedStress(w);
@@ -276,6 +281,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
     if (variant === 'draw-sizes') await seedDrawSizes(w);
     if (variant === 'care-used') await seedCareUsed(w);
     if (variant === 'orbes-care') await seedOrbesCare(w);
+    if (variant === 'gallery') await seedGallery(w);
   }
   clock.set(NOCTURNE_NOW);
   // Every account's session opened now: a capture signs in with its cookie.
@@ -1315,6 +1321,17 @@ async function seedYearlyCare(w: World): Promise<void> {
 async function seedCareUsed(w: World): Promise<void> {
   const { ctx, admin } = w;
   await ctx.services.clubProgram.update({ ...(await ctx.services.clubProgram.read()), carePiecesPlatine: 1 }, admin);
+}
+
+/**
+ * The stage gallery (desktop, D11), after the full story: MONOLITHE in steel's gallery, the demo's own photographs of
+ * the bracelet in gold and in blue added after its cover (its steel photograph), as the console adds them (POST
+ * /api/admin/models/:id/gallery). Test support only: for the desktop states and the owner's look.
+ */
+async function seedGallery(w: World): Promise<void> {
+  const { ctx, admin, clock } = w;
+  clock.set(at('2026-10-04T09:20:00Z'));
+  for (const kind of ['gold', 'blue'] as const) await ctx.services.media.addModelGalleryImage(w.models.steel!, { mime: 'image/webp', bytes: nocturnePhoto(kind) }, admin);
 }
 
 /**

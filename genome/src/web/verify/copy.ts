@@ -7,9 +7,17 @@
  * physical piece (the result copy itself comes from the server).
  */
 import { CHAPTER_LABELS, RAIL_LABEL } from '../shared/chapters.js';
+import { onComputer } from '../shared/desktop.js';
 import { ApiError } from './api.js';
 import type { ScanHint } from './capture.js';
 import type { VerificationState } from './types.js';
+
+/**
+ * Desktop (BRIEF §5.8): a line written for a phone (a tap, "this phone") and its words on a computer, chosen
+ * each time the line is read; a computer reads its own whatever its window's width (decision D6, shared/desktop.ts
+ * `onComputer`), a phone and a tablet (and the tests) read the phone's words, unchanged.
+ */
+const forDevice = (phone: string, computer: string): string => (onComputer() ? computer : phone);
 
 export const STATUS = Object.freeze({
   starting: 'PREPARING CAMERA…',
@@ -202,6 +210,18 @@ export const FALLBACK_TITLES: Readonly<Record<VerificationState, string>> = Obje
   INVALID_SIGNATURE: 'INVALID SIGNATURE',
   MALFORMED_CODE: 'UNREADABLE CODE',
 });
+
+/**
+ * Desktop (BRIEF §5.8): the server's sentence for an unreadable code asks for the camera ("in even light,
+ * holding the camera steady"); on a computer of any width (decision D6) the result asks for a photo instead (the SCAN
+ * page's upload, or UPLOAD A PHOTO under the camera in a window narrower than 1024 px), so it says the photo's words
+ * (as PROBLEMS' 'upload-unreadable') and the phone. A phone keeps the server's sentence, unchanged; every other result
+ * keeps it on both.
+ */
+export function resultMessage(state: VerificationState, server: string): string {
+  if (state !== 'MALFORMED_CODE' || !server) return server;
+  return forDevice(server, 'This code could not be read. Please upload a sharp, well-lit photo in which the whole code is visible, or scan it with your phone.');
+}
 
 /**
  * ORBES Client Services' email under FORGOTTEN PASSWORD? (BRAND-DESIGN-SYSTEM §4.2), the one place of the collector app
@@ -558,7 +578,13 @@ export const ORDERS = Object.freeze({
     register: 'REGISTER THIS PIECE',
     copy: 'COPY CODE',
     save: 'SAVE YOUR NEW CARD',
-    card: 'Your new certificate card, with its ORBES CODE and this claim code (PDF). Print it, or open it on another screen to scan it.',
+    /** On a computer, the card is open on its own screen: the phone scans it there (desktop, decision 8). */
+    get card() {
+      return forDevice(
+        'Your new certificate card, with its ORBES CODE and this claim code (PDF). Print it, or open it on another screen to scan it.',
+        'Your new certificate card, with its ORBES CODE and this claim code (PDF). Print it, or open it on this screen and scan it with your phone.',
+      );
+    },
     registered: 'Your piece is registered to your account.',
     showFailed: 'Your new claim code could not be shown just now.',
     unavailable: 'This claim code can no longer be shown. ORBES Client Services can assist you.',
@@ -604,8 +630,9 @@ export const ORDERS = Object.freeze({
  */
 export const QUESTION = Object.freeze({
   label: 'ONE QUESTION',
-  /** Before an answer, and after it: until when it may change (the date on this phone's calendar). */
-  ask: (until: string) => `One tap. You may change your answer until ${until}.`,
+  /** Before an answer, and after it: until when it may change (the date on this phone's calendar). On a computer, no
+   *  tap: the same sentence in words for any device (desktop, decision 8). */
+  ask: (until: string) => forDevice(`One tap. You may change your answer until ${until}.`, `One choice. You may change your answer until ${until}.`),
   answered: (until: string) => `Thank you: your answer is recorded. You may change it until ${until}.`,
   saving: 'Recording your answer…',
   failed: 'Your answer could not be recorded just now.',
@@ -1280,9 +1307,10 @@ export const RELEASES = Object.freeze({
   },
   pieces: (n: number) => (n === 1 ? '1 PIECE' : `${n} PIECES`),
   hours: (n: number) => (n === 1 ? '1 HOUR' : `${n} HOURS`),
-  /** A time shown in UTC, then on the phone's own clock. */
+  /** A time shown in UTC, then on the phone's own clock (on a computer's, desktop decision 8). */
   utc: (time: string) => `${time} UTC`,
   onThisPhone: (time: string, offset: string) => `${time} on this phone (${offset})`,
+  onThisComputer: (time: string, offset: string) => `${time} on this computer (${offset})`,
   /** The line of a release in the list: its pieces and the time that matters now. */
   opensLine: (pieces: string, time: string) => `${pieces} · ENTRIES OPEN ${time} UTC`,
   closesLine: (pieces: string, time: string) => `${pieces} · ENTRIES CLOSE ${time} UTC`,
@@ -1365,9 +1393,19 @@ export const RELEASES = Object.freeze({
   /** Labels in the display face, so no figure: the commitment's sentence names SHA-256. */
   seedHash: 'SEED FINGERPRINT',
   seed: 'SEED',
-  /** The check made on this phone, once the seed is published. */
-  seedChecked: 'Checked on this phone: the SHA-256 of the seed is the fingerprint published with the release.',
-  seedMismatch: 'Checked on this phone: the SHA-256 of the seed is not the fingerprint published with the release. ORBES Client Services can assist you.',
+  /** The check made on this phone (this computer, desktop decision 8), once the seed is published. */
+  get seedChecked() {
+    return forDevice(
+      'Checked on this phone: the SHA-256 of the seed is the fingerprint published with the release.',
+      'Checked on this computer: the SHA-256 of the seed is the fingerprint published with the release.',
+    );
+  },
+  get seedMismatch() {
+    return forDevice(
+      'Checked on this phone: the SHA-256 of the seed is not the fingerprint published with the release. ORBES Client Services can assist you.',
+      'Checked on this computer: the SHA-256 of the seed is not the fingerprint published with the release. ORBES Client Services can assist you.',
+    );
+  },
   /** Over the draw's list: what it shows, never how many (no end figure, plan LIVE RELEASE+ choice 5). */
   entriesLead: 'Every entry the draw ranked, in its order: its rank, its tier and its seniority at the draw, then its identifier.',
   /** One entry of the draw's list: its rank, its tier and its seniority. */
@@ -1728,8 +1766,10 @@ export const ACCOUNT_ADDRESSES = Object.freeze({
   edit: 'EDIT',
   makeDefault: 'MAKE DEFAULT',
   remove: 'REMOVE',
-  /** REMOVE asks for a second tap, as RELEASE MY PLACE does. */
-  removeConfirm: 'TAP AGAIN TO REMOVE',
+  /** REMOVE asks for a second tap (a second click on a computer, desktop decision 8), as RELEASE MY PLACE does. */
+  get removeConfirm() {
+    return forDevice('TAP AGAIN TO REMOVE', 'CLICK AGAIN TO REMOVE');
+  },
   add: 'ADD AN ADDRESS',
   defaultSwitch: 'MY DEFAULT ADDRESS',
   save: 'SAVE',
@@ -1749,8 +1789,8 @@ export const ACCOUNT_ADDRESSES = Object.freeze({
   editLabel: (name: string) => `Edit the address of ${name}`,
   makeDefaultLabel: (name: string) => `Make the address of ${name} your default`,
   removeLabel: (name: string) => `Remove the address of ${name}`,
-  /** REMOVE once armed: the second tap, still naming the address. */
-  removeConfirmLabel: (name: string) => `Tap again to remove the address of ${name}`,
+  /** REMOVE once armed: the second tap (click), still naming the address. */
+  removeConfirmLabel: (name: string) => forDevice(`Tap again to remove the address of ${name}`, `Click again to remove the address of ${name}`),
   /** The most a collector keeps (services/addresses.ts ADDRESS_LIMITS.saved). */
   max: 5,
 });
@@ -1802,9 +1842,10 @@ export const LIVE = Object.freeze({
   opens: (when: string) => `OPENS ${when}`,
   opensIn: 'OPENS IN',
   units: Object.freeze({ days: 'DAYS', hours: 'HOURS', minutes: 'MINUTES', seconds: 'SECONDS' }),
-  /** A time of the release in Paris (`SUNDAY 11 OCTOBER · 19:00 PARIS`), then on this phone when its zone differs. */
+  /** A time of the release in Paris (`SUNDAY 11 OCTOBER · 19:00 PARIS`), then on this phone (computer) when its zone differs. */
   paris: (day: string, time: string) => `${day} · ${time} PARIS`,
   onThisPhone: (day: string, time: string) => `${day} · ${time} ON THIS PHONE`,
+  onThisComputer: (day: string, time: string) => `${day} · ${time} ON THIS COMPUTER`,
   /**
    * The rules of access as the page states them, after « FOR »: « owners from PLATINE », « collectors who have taken part
    * in 3 releases », « selected collectors » (a segment's name is never said), joined by « or » when any one is enough.
@@ -1929,8 +1970,10 @@ export const LIVE = Object.freeze({
   /** Plan NEXT LOT §3.6.B: the delivery address is the collector's own, added in YOUR ORDERS. */
   payNote: 'ORBES Client Services will contact you for payment. Your delivery address is added in YOUR ORDERS.',
   release: 'RELEASE MY PLACE',
-  /** RELEASE MY PLACE gives the piece back at once: a second tap within a few seconds confirms it. */
-  releaseConfirm: 'TAP AGAIN TO RELEASE',
+  /** RELEASE MY PLACE gives the piece back at once: a second tap (click, on a computer) within a few seconds confirms it. */
+  get releaseConfirm() {
+    return forDevice('TAP AGAIN TO RELEASE', 'CLICK AGAIN TO RELEASE');
+  },
   // Confirmed
   confirmed: 'CONFIRMED',
   confirmedOf: (name: string) => `LIVE RELEASE · ${name}`,
@@ -1956,7 +1999,9 @@ export const LIVE = Object.freeze({
       stay: 'Every piece in your size is taken. You keep your place in case one returns, or you may leave.',
       none: 'Every piece in your size is reserved. You keep your place should ORBES add one, or you may leave.',
       leave: 'LEAVE THE LINE',
-      leaveConfirm: 'TAP AGAIN TO LEAVE',
+      get leaveConfirm() {
+        return forDevice('TAP AGAIN TO LEAVE', 'CLICK AGAIN TO LEAVE');
+      },
     }),
     ended: Object.freeze({
       SOLD_OUT: Object.freeze({ title: 'SOLD OUT', text: 'Every piece of this release is reserved.' }),
@@ -2040,6 +2085,8 @@ export const STORY = Object.freeze({
   button: 'SHARE TO STORIES',
   /** The preview's accessible name. */
   label: 'Your story card',
+  /** Desktop: the preview's name, over its actions beside the card (a computer only). */
+  title: 'YOUR STORY CARD',
   /** The card's label in its hairline box, by where it comes from. */
   status: Object.freeze({ live: 'CONFIRMED', draw: 'SELECTED', registered: 'REGISTERED' }),
   /** The card's line over its title (a registration's: the piece's type and collection). */
@@ -2050,8 +2097,13 @@ export const STORY = Object.freeze({
   save: 'SAVE IMAGE',
   saved: 'IMAGE SAVED',
   close: 'CLOSE',
-  /** Under SAVE IMAGE where the browser cannot share a file. */
-  cannotShare: 'This browser cannot share an image. Save it, then add it to your story from your photos.',
+  /** Under SAVE IMAGE where the browser cannot share a file; on a computer, the story is added from the phone. */
+  get cannotShare() {
+    return forDevice(
+      'This browser cannot share an image. Save it, then add it to your story from your photos.',
+      'This browser cannot share an image. Save it, then add it to your story from your phone.',
+    );
+  },
   /** The card's alternative text: its words, joined. */
   alt: (...words: string[]) => words.join('. '),
   /** The title handed to the share sheet with the file (no text, no link). */
@@ -2200,4 +2252,100 @@ export const WISHLIST = Object.freeze({
   notShown: 'NOT IN THE COLLECTION NOW',
   discontinued: (year: number) => `DISCONTINUED · ${year}`,
   salon: 'THE PRIVATE SALON',
+});
+
+/**
+ * The desktop layout (desktop, BRIEF §5.4): on a computer, SCAN stands in the top bar beside the account and
+ * opens a page that sends the collector to their phone (its QR code), with UPLOAD A PHOTO below it; no camera opens.
+ */
+export const DESKTOP = Object.freeze({
+  /** SCAN in the top bar: its word, and its name (the word first, as it reads). */
+  scan: 'SCAN',
+  scanLabel: 'Scan an ORBES code',
+  /** The SCAN page (/verify/scan); `lead` is NOW's scan line too (views/desktop-now.ts). */
+  scanPage: Object.freeze({
+    title: 'SCAN AN ORBES CODE',
+    lead: 'The code on your piece’s certificate card is read by a phone’s camera. Open ORBES on your phone to scan it, or upload a photo of the code.',
+    /** The page's own sentence under its title. */
+    intro: 'The ORBES CODE on your piece’s certificate card is read by a phone’s camera.',
+    /** Beside the QR code: how it leads to the phone. */
+    phoneLabel: 'WITH YOUR PHONE',
+    phone: 'Point your phone’s camera at this code and open the link it shows: ORBES opens on your phone. Then tap SCAN ORBES CODE.',
+    /** Under it: the photo path, from the computer itself. */
+    computerLabel: 'FROM THIS COMPUTER',
+    computer: 'Upload a photo of the ORBES CODE: a sharp, well-lit photo in which the whole code is visible.',
+    /** What the QR code opens (the live site's scan address), under it and in its name. */
+    address: 'verify.theorbes.com/verify',
+    url: 'https://verify.theorbes.com/verify',
+    /** Its name for a screen reader (never "QR": the brand's lexicon keeps the word out of the copy). */
+    qrLabel: 'A code for your phone’s camera: it opens verify.theorbes.com/verify',
+    upload: 'UPLOAD A PHOTO',
+  }),
+  /**
+   * A model's gallery on a computer (decision 1): each photograph a tile that enlarges it in a full-window viewer, its
+   * PREVIOUS, NEXT and CLOSE, and where it stands in the gallery. The viewer is named as the gallery is (LOOKBOOK.photosLabel).
+   */
+  viewer: Object.freeze({
+    previous: 'PREVIOUS',
+    next: 'NEXT',
+    close: 'CLOSE',
+    position: (at: number, of: number) => `${at} / ${of}`,
+    enlarge: (at: number, of: number) => `Enlarge photograph ${at} of ${of}`,
+  }),
+  /**
+   * THE ENTRIES of a draw drawn, as a table on a computer (§10.30): the head of its columns, over the ranked entries
+   * (each line's rank, tier, seniority and size as RELEASES.entryLine says them, then the entry's identifier). Shown to
+   * the eye only: a screen reader reads each entry's own line.
+   */
+  entries: Object.freeze({
+    rank: 'RANK',
+    tier: 'TIER',
+    seniority: 'SENIORITY',
+    size: 'SIZE',
+    id: 'IDENTIFIER',
+  }),
+  /**
+   * The LIVE RELEASE's room on a computer (decision 7, the Cinema room): the release's choice in its corner, under its
+   * name, from the account's entry (`SIZE 17 · 1 PIECE`; at the turn, its price after it, as the seal's line says it).
+   */
+  room: Object.freeze({
+    pieces: (n: number) => (n === 1 ? '1 PIECE' : `${n} PIECES`),
+  }),
+  /**
+   * Sign in and create account on a computer (decision 6): their own page over a photograph (/verify/sign-in), its
+   * title YOUR ACCOUNT (ACCOUNT.title) over the lead of the place it was opened from; every place that holds the sign-in
+   * on a phone shows its lead and a line with SIGN IN and CREATE ACCOUNT, which open that page on that form. `lead`: the
+   * page's sentence when it is opened from the top bar's SIGN IN.
+   */
+  signIn: Object.freeze({
+    signIn: 'SIGN IN',
+    create: 'CREATE ACCOUNT',
+    lead: 'Sign in or create an ORBES account to continue.',
+  }),
+  /**
+   * The account as pages on a computer (decision 5): YOUR ACCOUNT's cards, each with its line from the account's data;
+   * MESSAGES' line, how many answers are unread (none: no line, as the phone's row has no NEW then).
+   */
+  account: Object.freeze({
+    unread: (n: number) => `${n} UNREAD`,
+  }),
+  /**
+   * MESSAGES as a page in two parts on a computer (decision 5, "Subjects | conversation"): on the left what the
+   * collector has written about, each subject named as its first message was (MESSAGES.label's words, written by the
+   * server), GENERAL for what concerns nothing in particular; on the right the conversation on the subject chosen, under
+   * CONCERNING and the way to the place it names (an order's: SEE THE ORDER). A subject opened from WRITE TO ORBES
+   * CLIENT SERVICES before its first message says where the answer will be, in the write sheet's words (MESSAGES.where).
+   */
+  messages: Object.freeze({
+    subjects: 'Your subjects with ORBES Client Services',
+    general: 'GENERAL',
+    seeOrder: 'SEE THE ORDER',
+  }),
+  /**
+   * An order as its own page on a computer (decision 5, /verify/orders/OR-…), MY PIECES' ORDERS listing them as rows:
+   * each row's name for a screen reader (its model, its reference, where it is now).
+   */
+  orders: Object.freeze({
+    rowLabel: (title: string, reference: string, step: string) => `${title}, ${reference}: ${step}`,
+  }),
 });

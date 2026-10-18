@@ -11,16 +11,20 @@
  * The states are run in shards (CONTENT_SHARDS), one test file each (test/web/nocturne.content-<shard>.e2e.test.ts), so
  * vitest's forks run them side by side, each within its own time limit; test/web/nocturne.content.e2e.test.ts checks that
  * the shards hold every state once. A shard keeps the states of a variant that write (`mutates`) together and in order:
- * each one finds the demo as the states before it in the baseline's run left it.
+ * each one finds the demo as the states before it in the baseline's run left it. The phone's states run in the phone's
+ * shards; a computer's (desk-*, desktop) in the shards desk-1 … desk-12 (test/support/nocturne-states.ts DESK_GROUPS).
  *
  * Nothing may disappear but what MOVED lists: a value moved (or removed) on purpose, with its reason and its new place.
- * Each entry names a value of the baseline, so the list can never excuse a value that was not there.
+ * Each entry names a value of the baseline, so the list can never excuse a value that was not there. A computer's state
+ * made from a phone's (its desk twin) also shows every value of the phone's state, but what the desktop's DESKTOP_MOVED
+ * lists (test/web/desktop.content-parity.harness.ts: the desktop's content parity, plan DESKTOP step 13).
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { BASELINE_FILE, eachState, type Baseline } from '../support/nocturne-stage.js';
-import { myPiecesTexts, normalizeText, openState, pageTexts, shows, UI_STATES, type UiState } from '../support/nocturne-states.js';
+import { DESK_GROUPS, myPiecesTexts, normalizeText, openState, pageTexts, shows, UI_STATES, type UiState } from '../support/nocturne-states.js';
 import { CHROMIUM_PATH } from '../support/ui-stage.js';
+import { parityMissing, phoneTwin } from './desktop.content-parity.harness.js';
 
 export const HAS_CHROMIUM = existsSync(CHROMIUM_PATH);
 
@@ -108,11 +112,11 @@ const wishlist = (s: UiState) => s.variant === 'wishes';
 const ORDER_STAGES: readonly string[] = ['claim-waiting', 'orders-delivery', 'orders-case'];
 
 /**
- * The shards of the content test, each a test file: the `full` demo by screen group (its states that write in one
+ * The phone's shards, each a test file: the `full` demo by screen group (its states that write in one
  * shard of their own, in their order), the room's variants, the draws in every state, the extreme content (the stress
  * demo; its account sheet runs with the others) and the other variants. Each holds about twenty states.
  */
-export const CONTENT_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> = Object.freeze({
+const PHONE_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> = Object.freeze({
   scan: (s) => full(s) && !s.mutates && named('now', 'scan', 'photo', 'problem')(s),
   // The results, and CREATE ACCOUNT on its own (plan CUSTOMER INTELLIGENCE §3.1 P.4.1: sign-up), beside the result's.
   results: (s) => full(s) && !s.mutates && named('result', 'sign-up')(s),
@@ -141,6 +145,18 @@ export const CONTENT_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> =
   draws: (s) => s.variant === 'draws' || s.variant === 'draw-sizes',
   stress: (s) => s.variant === 'stress' && !named('account')(s),
   variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'draws' && s.variant !== 'draw-sizes' && s.variant !== 'stress' && s.variant !== 'pairs' && !ORDER_STAGES.includes(s.variant) && !named('account')(s) && !profile(s) && !wishlist(s) && !birthday(s) && !careUsed(s) && !orbesCare(s),
+});
+
+/** A computer's state (desktop: test/support/nocturne-states.ts DESK_STATES), never in a phone's shard. */
+const onComputer = (s: UiState) => s.id.startsWith('desk-');
+
+/**
+ * The shards of the content test, each a test file: the phone's (PHONE_SHARDS, each its predicate on the phone's states
+ * alone), then a computer's (desk-1 … desk-12, DESK_GROUPS: about twenty states each, a stage's writes in one).
+ */
+export const CONTENT_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> = Object.freeze({
+  ...Object.fromEntries(Object.entries(PHONE_SHARDS).map(([name, pick]) => [name, (s: UiState) => !onComputer(s) && pick(s)])),
+  ...Object.fromEntries(Object.entries(DESK_GROUPS).map(([name, states]) => [name, (s: UiState) => states.includes(s)])),
 });
 
 /** The states of shard `name`, in the order of UI_STATES. */
@@ -185,6 +201,15 @@ export function contentSuite(name: string): void {
               // MY PIECES split (N5): what its one page showed is shown in one of its parts.
               const parts = unseen.length > 0 && SPLIT.states.includes(state.id) ? await myPiecesTexts(opened) : null;
               for (const u of unseen) if (!parts || !shows(parts, u.text)) missing.push(`${state.id}: ${u.label}`);
+              // A computer's state (desk-*) made from a phone's: every word of the phone's state is shown on the computer
+              // too, or moved on purpose (desktop.content-parity.harness.ts DESKTOP_MOVED); read last, as it may leave
+              // the state for the page a value moved to.
+              const twin = phoneTwin(state);
+              if (twin) {
+                const phone = baseline.states[twin];
+                if (!phone) throw new Error(`${state.id}: its phone state ${twin} is not in the baseline`);
+                for (const value of await parityMissing(opened, state, twin, phone.values)) missing.push(`${state.id}: the phone's «${value}» (${twin}) is not shown on the computer`);
+              }
             } finally {
               await opened.close();
             }

@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, type Browser } from 'playwright-core';
 import { buildWeb } from '../../scripts/build-web.js';
-import { createManualClock } from '../../src/server/types.js';
+import { createManualClock, type ManualClock } from '../../src/server/types.js';
 import { NOCTURNE_ADMIN, NOCTURNE_CLIENT_SERVICES, NOCTURNE_NOW, seedNocturne, type DemoVariant, type NocturneDemo } from './nocturne-demo.js';
 import { runOrder, type UiState } from './nocturne-states.js';
 import { cameraClip, CHROMIUM_PATH, startUiStage, type UiStage } from './ui-stage.js';
@@ -48,6 +48,8 @@ export interface NocturneStage {
   stage: UiStage;
   demo: NocturneDemo;
   browser: Browser;
+  /** Every service's clock, fixed at NOW (a test that needs time to pass on the server moves it). */
+  clock: ManualClock;
   close(): Promise<void>;
 }
 
@@ -76,6 +78,7 @@ export async function startNocturneStage(webDir: string, variant: DemoVariant, w
       stage,
       demo: demo!,
       browser,
+      clock,
       async close() {
         await browser.close().catch(() => {});
         await stage.close();

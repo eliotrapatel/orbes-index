@@ -38,6 +38,12 @@ export interface LiveBannerView {
   el: HTMLElement;
   /** On show with the landing and MY PIECES; off on every other screen (it then reads and counts nothing). */
   show(on: boolean): void;
+  /**
+   * Desktop (BRIEF §10.11): settles once the banner knows whether it shows (its release read, or found
+   * unreadable), reading it now when it was not read lately; MY PIECES waits for it on a computer, so the banner and
+   * the page are laid out together and nothing moves when it arrives. It shows nothing by itself.
+   */
+  decided(): Promise<void>;
   dispose(): void;
 }
 
@@ -56,6 +62,8 @@ class Banner implements LiveBannerView {
   private on = false;
   private readAt = 0;
   private reading = false;
+  /** The read under way, for whoever waits for it (decided). */
+  private pending: Promise<void> | null = null;
   private pulse: ReturnType<typeof setInterval> | null = null;
   private refresh: ReturnType<typeof setTimeout> | null = null;
   private shown: BannerModel | null = null;
@@ -99,6 +107,11 @@ class Banner implements LiveBannerView {
     this.draw();
   }
 
+  decided(): Promise<void> {
+    if (this.disposed || (this.offset !== null && Date.now() - this.readAt < BANNER_REFRESH_MS)) return Promise.resolve();
+    return this.read();
+  }
+
   dispose(): void {
     this.disposed = true;
     this.stop();
@@ -116,7 +129,16 @@ class Banner implements LiveBannerView {
     return Date.now() + (this.offset ?? 0);
   }
 
-  private async read(): Promise<void> {
+  /** Reads the release (one read at a time: a second call while one runs gets that one). */
+  private read(): Promise<void> {
+    if (this.pending) return this.pending;
+    this.pending = this.readOnce().finally(() => {
+      this.pending = null;
+    });
+    return this.pending;
+  }
+
+  private async readOnce(): Promise<void> {
     if (this.reading) return;
     this.reading = true;
     try {

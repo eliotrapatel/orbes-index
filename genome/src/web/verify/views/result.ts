@@ -45,6 +45,7 @@
  *
  * Everything shown comes from the server outcome through resultViewModel().
  */
+import { isDesktop } from '../../shared/desktop.js';
 import { h, prefersReducedMotion } from '../../shared/dom.js';
 import { CEREMONY, LOOKBOOK, MESSAGES, PHOTOS, RECEIVING } from '../copy.js';
 import { genomeFromModel, nocturneGenome } from '../genome-view.js';
@@ -111,10 +112,10 @@ function ceremonyBlock(c: CeremonyModel, glyphs: Parameters<typeof prepareShareI
  * sentence for it (a result, C9; a piece's page, C4). A photograph that cannot be loaded (removed meanwhile) takes its section with it: never a broken
  * image.
  */
-export function modelPhoto(photos: readonly PhotoModel[], opts: { extraClass?: string } = {}): HTMLElement | null {
+export function modelPhoto(photos: readonly PhotoModel[], opts: { extraClass?: string; eager?: boolean } = {}): HTMLElement | null {
   const photo = photos[0];
   if (!photo) return null;
-  const frame = fadedPhoto(photo.src, photo.alt, { fade: false, eager: true, extraClass: 'n-result__photo' });
+  const frame = fadedPhoto(photo.src, photo.alt, { fade: false, eager: opts.eager ?? true, extraClass: 'n-result__photo' });
   const section = h(
     'section',
     { class: ['n-result__model', opts.extraClass], attrs: { 'aria-label': 'Photograph of the model' } },
@@ -189,8 +190,10 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
       }
     }
   }
-  // The GENOME first, then THE MODEL's photograph (C9); the ceremony opens on the GENOME too.
-  sections.push(genome, modelPhoto(vm.photos));
+  // The GENOME first, then THE MODEL's photograph (C9); the ceremony opens on the GENOME too. On a computer a result
+  // with a GENOME opens on its stage, a window high (views/desktop-result.ts): the photograph is below the first window,
+  // so it is fetched as it nears it (BRIEF §10.11); the phone keeps its eager photograph.
+  sections.push(genome, modelPhoto(vm.photos, { eager: !(genome && isDesktop()) }));
 
   if (vm.modelName || vm.pieceLines.length > 0) {
     const slug = vm.lookbook;

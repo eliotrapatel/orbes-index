@@ -89,9 +89,14 @@ export function contextInput(c: WriteContext | null): MessageContextInput | null
   return c.about ? { kind: c.kind, id: c.id, about: c.about } : { kind: c.kind, id: c.id };
 }
 
+/** The words as they are sent: every line end made `\n`, then trimmed. */
+export function messageText(text: string): string {
+  return text.replace(/\r\n?/g, '\n').trim();
+}
+
 /** What is wrong with the words before they are sent (the server's own words), or null. */
 export function messageProblem(text: string): string | null {
-  const s = text.replace(/\r\n?/g, '\n').trim();
+  const s = messageText(text);
   if (s === '') return MESSAGES.empty;
   if (s.length > MESSAGES.max) return MESSAGES.tooLong;
   return null;

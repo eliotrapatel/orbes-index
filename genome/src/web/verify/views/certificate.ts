@@ -34,6 +34,7 @@ import { CERTIFICATE } from '../copy.js';
 import { genomeBlock } from '../genome-view.js';
 import { rows, sectionLabel, viewRoot } from './common.js';
 import { messageOf } from './forms.js';
+import { isDesktop } from '../../shared/desktop.js';
 
 export interface CertificateDeps {
   api: ApiClient;
@@ -70,10 +71,14 @@ class CertificatePage {
 
   constructor(private readonly deps: CertificateDeps) {
     this.root = viewRoot('certificate', 'certificate-title');
+    // On a computer the certificate's head and foot are the page's banner and contentinfo landmarks (§10.32): the page
+    // has no other, and a header or footer inside its main is none by itself.
+    const desktop = isDesktop();
+    if (desktop) this.foot.setAttribute('role', 'contentinfo');
     this.root.append(
       h(
         'header',
-        { class: 'certificate__head' },
+        { class: 'certificate__head', attrs: { role: desktop ? 'banner' : undefined } },
         h('span', { class: 'wordmark wordmark--small certificate__wordmark', attrs: { 'aria-hidden': 'true' }, text: 'ORBES' }),
         h('h1', { class: 'certificate__title', id: 'certificate-title', text: CERTIFICATE.title }),
         this.state,

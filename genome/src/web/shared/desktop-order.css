@@ -1,0 +1,794 @@
+/*
+ * An order as its own page on a computer, and MY PIECES' ORDERS as rows that open it (desktop, BRIEF decision
+ * 5, §10.16, §10.22, §10.30; verify/views/desktop-order.ts, verify/views/pieces.ts orderRow). A phone keeps the order's
+ * card and its sheets: every rule lives in the desktop's query.
+ *
+ * MY PIECES on ORDERS: the chapter's head (D2, 96 px under the bar) and its tabs on the edge, then each order a hairline
+ * row on the grid's columns — its model's photograph and the model with where it was sold on 1–5, where it is now on
+ * 6–8, its reference on 9–10, its price on 11–12 with the chevron at the row's end; below 1280, so every label holds its
+ * line, the photograph and the model on 1–6, where it is now on 7–10, its reference above its price at the row's end.
+ * The order's page: its crumb; its model's photograph (square) on 1–4 beside the summary on 6–12 (the line, the title
+ * in T1, the reference, the steps, the sentence, YOUR NEW CLAIM CODE, the terms, WRITE TO ORBES CLIENT SERVICES and
+ * TRACK THE SHIPMENT); then each section a row of the page as YOUR PROFILE's: its label on 1–5, what it holds (or its
+ * form, 440 px at most) on 6–12. Below 1440 the photograph on 1–3, the labels on 1–4 and the rest on 5–12. The summary
+ * is that wide so an order's five steps stand in equal columns, their dots evenly spaced, at 1280 and above.
+ */
+
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  /* ── 1. MY PIECES on ORDERS: the page's head and its tabs on the edge ─────────────────────────────────────────── */
+
+  html:not(.d-touch) body.nocturne main.view--pieces.n-pieces[data-tab="orders"] {
+    --n-margin: var(--d-edge);
+    width: auto;
+    max-width: none;
+    margin-right: 0;
+    margin-left: 0;
+    padding-bottom: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .view--pieces[data-tab="orders"] > .n-pieces__head {
+    padding-top: var(--d-s9);
+  }
+
+  html:not(.d-touch) body.nocturne .view--pieces[data-tab="orders"] .n-pieces__title {
+    margin: 0;
+    font-size: var(--d-fs-d2);
+    line-height: 1.04;
+    letter-spacing: var(--d-tr-d23);
+  }
+
+  html:not(.d-touch) body.nocturne .view--pieces[data-tab="orders"] .n-pieces__tabs {
+    margin: var(--d-s7) var(--d-edge) 0;
+    padding: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .view--pieces[data-tab="orders"] .n-pieces__panel {
+    padding: 0 var(--d-edge);
+  }
+
+  /* Under the tabs, whose hairline closes their row 48 px above the list (§10.26), the list draws no second line. */
+  html:not(.d-touch) body.nocturne .view--pieces .d-orows {
+    border-top: 0;
+  }
+
+  /* Each order a hairline row, its parts on the grid's columns (a subgrid of the canvas). */
+  html:not(.d-touch) body.nocturne .d-orows {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    column-gap: var(--d-gutter);
+    margin: 0;
+    padding: 0;
+    border-top: 1px solid var(--vault-hairline);
+    list-style: none;
+  }
+
+  html:not(.d-touch) body.nocturne .d-orows__item {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+  }
+
+  html:not(.d-touch) body.nocturne .d-orow {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+    align-items: center;
+    min-height: 104px;
+    padding: var(--d-s4) 0;
+    border-bottom: 1px solid var(--vault-hairline);
+    color: var(--vault-ink);
+    text-decoration: none;
+    user-select: none;
+  }
+
+  /* Its model's photograph, then the model and where it was sold: columns 1–5. */
+  html:not(.d-touch) body.nocturne .d-orow__photo {
+    grid-column: 1;
+    grid-row: 1;
+    display: block;
+    width: 72px;
+    aspect-ratio: 1;
+    overflow: hidden;
+    background-color: var(--n-photo);
+  }
+
+  html:not(.d-touch) body.nocturne .d-orow__photo > img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: opacity var(--d-dur-hover) var(--d-ease);
+  }
+
+  html:not(.d-touch) body.nocturne .d-orow__photo.is-bare {
+    background-color: var(--vault-plate);
+  }
+
+  html:not(.d-touch) body.nocturne .d-orow__photo.is-bare > img {
+    display: none;
+  }
+
+  html:not(.d-touch) body.nocturne .d-orow__name {
+    grid-column: 1 / span 5;
+    grid-row: 1;
+    display: flex;
+    flex-direction: column;
+    gap: var(--d-s2);
+    min-width: 0;
+    padding-left: calc(72px + var(--d-s5));
+  }
+
+  html:not(.d-touch) body.nocturne .d-orow__title {
+    font-size: var(--d-fs-t2);
+    line-height: 1.2;
+    letter-spacing: var(--d-tr-mid);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.d-orow__line, .d-orow__date, .d-orow__ref) {
+    color: var(--vault-soft);
+  }
+
+  /* Where it is now: its step, that step's date, then YOUR NEW CLAIM CODE or its request (columns 6–8). */
+  html:not(.d-touch) body.nocturne .d-orow__now {
+    grid-column: 6 / span 3;
+    display: flex;
+    flex-direction: column;
+    gap: var(--d-s2);
+    min-width: 0;
+  }
+
+  html:not(.d-touch) body.nocturne :is(.d-orow__step, .d-orow__mark) {
+    color: var(--vault-ink);
+  }
+
+  /* Its reference (9–10) and its price (11–12), the chevron at the row's end. */
+  html:not(.d-touch) body.nocturne .d-orow__end {
+    display: contents;
+  }
+
+  html:not(.d-touch) body.nocturne .d-orow__ref {
+    grid-column: 9 / span 2;
+  }
+
+  html:not(.d-touch) body.nocturne .d-orow__amount {
+    grid-column: 11 / span 2;
+    grid-row: 1;
+    padding-right: calc(16px + var(--d-s5));
+    color: var(--vault-ink);
+    font-size: var(--n-fs-kv);
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  html:not(.d-touch) body.nocturne .d-orow > .n-ic {
+    grid-column: 12;
+    grid-row: 1;
+    justify-self: end;
+    color: var(--vault-soft);
+    transition: color var(--d-dur-hover) var(--d-ease);
+  }
+
+  /* Its step, date and reference on one line each, their figures tabular and lining (§10.7). */
+  html:not(.d-touch) body.nocturne .d-orow :is(.d-orow__step, .d-orow__date, .d-orow__ref) {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  /* An order that ended (cancelled, returned): its name in the soft ink, as the card's ended state. */
+  html:not(.d-touch) body.nocturne .d-orow.is-ended :is(.d-orow__title, .d-orow__step, .d-orow__amount) {
+    color: var(--vault-soft);
+  }
+
+  /* Below 1280 the narrower columns: the photograph a little smaller, the model and where it was sold on 1–6, where
+     it is now on 7–10 (RETURN REQUESTED · 5 OCT 2026 on one line), the reference above the price at the row's end
+     (columns 10–12, as wide as they are, its words ending 24 px before the chevron), so no label leaves its line at
+     1024. */
+  @media (max-width: 1279.98px) {
+    html:not(.d-touch) body.nocturne .d-orow__photo {
+      width: 64px;
+    }
+
+    html:not(.d-touch) body.nocturne .d-orow__name {
+      grid-column: 1 / span 6;
+      padding-left: calc(64px + var(--d-s4));
+    }
+
+    html:not(.d-touch) body.nocturne .d-orow__now {
+      grid-column: 7 / span 4;
+      grid-row: 1;
+    }
+
+    html:not(.d-touch) body.nocturne .d-orow__end {
+      grid-column: 10 / span 3;
+      grid-row: 1;
+      justify-self: end;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: var(--d-s2);
+      padding-right: calc(16px + var(--d-s5));
+    }
+
+    html:not(.d-touch) body.nocturne .d-orow__end > .d-orow__amount {
+      padding-right: 0;
+    }
+  }
+
+  /* Where it was sold and its mark break between their values first (each value a box of its own, moved whole to the
+     next line), a value longer than the column (a 24-character model's name) only then between its own words. */
+  html:not(.d-touch) body.nocturne :is(.d-orow__line, .d-orow__mark) .n-nw {
+    display: inline-block;
+    white-space: normal;
+  }
+
+  /* ── 2. The order's page ──────────────────────────────────────────────────────────────────────────────────────── */
+
+  html:not(.d-touch) body.nocturne .view--order.d-order {
+    display: grid;
+    grid-template-columns: var(--d-page-grid);
+    column-gap: var(--d-gutter);
+    align-content: start;
+    padding-bottom: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order > * {
+    grid-column: canvas;
+    min-width: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order > .d-order__crumb-line {
+    padding-top: var(--d-s5);
+  }
+
+  /* The crumb as wide as its words, its chevron hanging before the edge (as the account's sections). */
+  html:not(.d-touch) body.nocturne .d-order__crumb-line > .d-order__crumb {
+    width: max-content;
+    height: 44px;
+    margin: 0 0 0 calc(-16px - 6px);
+    padding: 0;
+    letter-spacing: var(--d-tr-label);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__body {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    column-gap: var(--d-gutter);
+    align-items: start;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__body > * {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+
+  /* ONE MOMENT… in the middle of the window under the bar; a failure on the edge, as an empty state (§10.24). */
+  html:not(.d-touch) body.nocturne .d-order__body > .d-order__loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: calc(100vh - var(--d-bar) - 68px - var(--d-s11));
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__failed {
+    padding-top: var(--d-s7);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__failed > .n-failed {
+    align-items: flex-start;
+    margin: 0;
+    padding: 0;
+    text-align: left;
+  }
+
+  /* The photograph beside the summary, their tops on one line. */
+  html:not(.d-touch) body.nocturne .d-order__head {
+    display: grid;
+    grid-template-columns: subgrid;
+    align-items: start;
+    margin-top: var(--d-s7);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__photo {
+    grid-column: 1 / span 4;
+    position: relative;
+    aspect-ratio: 1;
+    overflow: hidden;
+    background-color: var(--n-photo);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__photo > img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__photo.is-bare {
+    background-color: var(--vault-plate);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__photo.is-bare > img {
+    display: none;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__summary {
+    grid-column: 6 / -1;
+    min-width: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__summary > * {
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__line {
+    color: var(--vault-soft);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__title {
+    margin-top: var(--d-s4);
+    font-size: var(--d-fs-t1);
+    line-height: 1.04;
+    letter-spacing: var(--d-tr-t1);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__ref {
+    margin-top: var(--d-s5);
+    color: var(--vault-soft);
+  }
+
+  /* The reference in the label's face beside its word, selected whole in one click (§10.19). */
+  html:not(.d-touch) body.nocturne .d-order__ref-value {
+    color: var(--vault-ink);
+    user-select: all;
+    cursor: text;
+  }
+
+  /* Its steps across the summary: the labels at the label's tracking, the dates in the reading face's figures. */
+  /* Each step's column at least as wide as its label (IN PREPARATION) and 24 px of room after it: the room is the step's
+     own (its right padding), never a gap between the columns, so the columns touch and the hairline (from the first dot
+     to the last column's start) and the bar (to the reached step's column) meet their dots as on the phone. The columns
+     are equal (the dots evenly spaced, no step reading as a longer wait) wherever the widest label and its room fit in
+     each: five steps from 1280 (and from about 1140 below it), six in the widest windows (1920); narrower, the widest
+     column takes what its label needs and the others share the rest equally. */
+  /* A column per step of the order (views/desktop-order.ts --d-steps: a cancelled order's two, a returned one's six), so
+     the hairline (to the last column's start) and the bar end on the last dot. */
+  html:not(.d-touch) body.nocturne .d-order__summary > .d-order__steps {
+    grid-template-columns: repeat(var(--d-steps, 5), minmax(max-content, 1fr)) !important;
+    margin-top: var(--d-s7);
+  }
+
+  /* A returned order's bar: every step reached, it ends on RETURNED's dot (the phone's runs on to the line's end). */
+  html:not(.d-touch) body.nocturne .d-order__steps > .n-steps__bar.d-order__bar--end {
+    grid-column: 1 / -2 !important;
+    right: -5px !important;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__steps .n-steps__step {
+    padding-right: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__steps .n-steps__step:not(:last-child) {
+    padding-right: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__steps .n-steps__label {
+    margin-top: var(--d-s4);
+    font-size: var(--d-fs-label);
+    letter-spacing: var(--d-tr-label);
+    white-space: nowrap;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__steps .n-steps__date {
+    margin-top: var(--d-s2);
+    font-size: var(--d-fs-cap);
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__summary > .d-order__sentence {
+    max-width: 32em;
+    margin-top: var(--d-s7);
+    font-size: var(--d-fs-lead);
+    line-height: 1.5;
+    text-wrap: pretty;
+  }
+
+  /* YOUR NEW CLAIM CODE, under the sentence: its block under a hairline (the terms' own closes it), its actions in one
+     row. */
+  html:not(.d-touch) body.nocturne .d-order__summary > .n-pieces__claim {
+    margin-top: var(--d-s7);
+    padding-top: var(--d-s6);
+    border-top: 1px solid var(--vault-hairline);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order .n-pieces__claim-block > * {
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order .n-pieces__claim-block > * + * {
+    margin-top: var(--d-s3);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order .n-pieces__claim-block > :is(.n-pieces__claim-text, .n-pieces__claim-error, .n-pieces__claim-notice) {
+    max-width: 36em;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order .n-pieces__claim-label + .n-pieces__claim-text {
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order .n-pieces__claim-code {
+    margin-top: var(--d-s4);
+    font-size: var(--d-fs-t2);
+    font-variant-numeric: tabular-nums lining-nums;
+    user-select: all;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order .n-pieces__claim-block > :is(.n-pieces__claim-show, .n-pieces__claim-register, .n-pieces__claim-duo) {
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order .n-pieces__claim-block > .n-btn {
+    width: auto;
+    min-width: 280px;
+    padding: 0 var(--d-s7);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order .n-pieces__claim-duo {
+    display: flex;
+    gap: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order .n-pieces__claim-duo > .n-btn {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 280px;
+    padding: 0 var(--d-s7);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order .n-pieces__claim-block > .n-pieces__claim-register + .n-pieces__claim-duo {
+    margin-top: var(--d-s4);
+  }
+
+  /* The terms: hairline rows across the summary. */
+  html:not(.d-touch) body.nocturne .d-order__summary > .d-order__terms {
+    margin-top: var(--d-s7);
+    border-top: 1px solid var(--vault-hairline);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__terms .n-kv__row {
+    align-items: baseline;
+    padding: var(--d-s4) 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__terms .n-kv__value {
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  /* WRITE TO ORBES CLIENT SERVICES at its content's width, TRACK THE SHIPMENT beside it. */
+  html:not(.d-touch) body.nocturne .d-order__summary > .d-order__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--d-s5) var(--d-s7);
+    margin-top: var(--d-s6);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__actions > .n-btn {
+    width: auto;
+    min-width: 280px;
+    margin: 0;
+    padding: 0 var(--d-s7);
+  }
+
+  /* The sections: each a row of the page, its label on 1–5, what it holds on 7–12 (a form 440 px at most). */
+  html:not(.d-touch) body.nocturne .d-order__row {
+    display: grid;
+    grid-template-columns: subgrid;
+    align-items: start;
+    padding: var(--d-s7) 0;
+    border-top: 1px solid var(--vault-hairline);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__head + .d-order__row {
+    margin-top: var(--d-s10);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__row:last-child {
+    padding-bottom: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__row-side {
+    grid-column: 1 / span 5;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__row-label {
+    margin: 0;
+    color: var(--vault-soft);
+    font-size: var(--d-fs-label);
+    line-height: 1.5;
+    letter-spacing: var(--d-tr-label);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__row-main {
+    grid-column: 6 / -1;
+    min-width: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__row-main > * {
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__row-main > * + * {
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__row-main > .d-order__do {
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__lines {
+    max-width: 36em;
+    font-size: var(--d-fs-text);
+    line-height: 1.6;
+  }
+
+  /* A section's sentence (what the engraving is, the returns' terms) in the Small role, as the address's sentence and a
+     document's line beside it: one role for one kind of words on the page. */
+  html:not(.d-touch) body.nocturne .d-order__text {
+    max-width: 36em;
+    font-size: var(--d-fs-small);
+    line-height: 1.5;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__lines {
+    color: var(--vault-ink);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__note {
+    max-width: 36em;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__do > .n-btn,
+  html:not(.d-touch) body.nocturne .d-order__asks > .n-btn {
+    width: auto;
+    min-width: 280px;
+    margin: 0;
+    padding: 0 var(--d-s7);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order__row-main > .d-order__asks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--d-s5);
+    margin-top: var(--d-s5);
+  }
+
+  /* Below 1440 the summary takes a column more (the photograph on 1–3, the summary and the sections' contents on 5–12,
+     the labels on 1–4): five steps in columns from 1280, each label keeping 24 px after it, and WRITE TO ORBES
+     CLIENT SERVICES and TRACK THE SHIPMENT one row, 32 px apart; below 1280 the step labels tracked closer, so six
+     still keep their room. */
+  @media (max-width: 1439.98px) {
+    html:not(.d-touch) body.nocturne .d-order__photo {
+      grid-column: 1 / span 3;
+    }
+
+    html:not(.d-touch) body.nocturne .d-order__row-side {
+      grid-column: 1 / span 4;
+    }
+
+    html:not(.d-touch) body.nocturne :is(.d-order__summary, .d-order__row-main) {
+      grid-column: 5 / -1;
+    }
+
+    html:not(.d-touch) body.nocturne .d-order__summary > .d-order__actions {
+      column-gap: var(--d-s6);
+    }
+  }
+
+  /* Below 1280 the step labels are tracked closer, so the widest one keeps its 24 px after it (§10.4) without pressing
+     the others: IN PREPARATION and SHIPPED never read as one phrase. */
+  @media (max-width: 1279.98px) {
+    html:not(.d-touch) body.nocturne .d-order__steps .n-steps__label {
+      letter-spacing: var(--d-tr-mid);
+    }
+  }
+
+  /* A request as it stands: its label, then what to do and the return address. */
+  html:not(.d-touch) body.nocturne .d-order .n-pieces__request > * {
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order .n-pieces__request > * + * {
+    margin-top: var(--d-s3);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order .n-pieces__request-label {
+    color: var(--vault-ink);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order .n-pieces__request-text {
+    max-width: 36em;
+    font-size: var(--d-fs-text);
+    line-height: 1.6;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order .n-pieces__request > .n-pieces__return-address {
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order .n-pieces__return-address .n-pieces__lines {
+    margin-top: var(--d-s2);
+    font-size: var(--d-fs-text);
+    line-height: 1.6;
+    color: var(--vault-ink);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order .n-pieces__request + :is(.d-order__text, .d-oform) {
+    margin-top: var(--d-s7);
+  }
+
+  /* DOCUMENTS: the card's rows on the section's columns, the first one's words on the label's line. */
+  html:not(.d-touch) body.nocturne .d-order .n-pieces__document-list {
+    margin-top: 0;
+    border-top: 0;
+  }
+
+  /* Each row as every hairline row (shared/desktop.css): its words and its chevron on the column's edges, its hairline
+     on the column, its ground under the pointer hanging 12 px outside on each side. Its room above and below the
+     words: 24 px. The care guide open: its row's line goes, the guide's own closes it (as on the phone). */
+  html:not(.d-touch) body.nocturne .d-order :is(a, button).n-pieces__document {
+    padding-block: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .d-order :is(a, button).n-pieces__document[aria-expanded="true"] {
+    border-bottom: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order .n-pieces__care {
+    padding-inline: 0;
+    padding-bottom: var(--d-s5);
+  }
+
+  /* The number as ORDER OR-… is: its letters in the label's face, its figures in the reading face (views/pieces.ts
+     documentTitle sets them as .numeral: Gravesend's one is its capital I), tabular. */
+  html:not(.d-touch) body.nocturne .d-order .n-pieces__document-number {
+    font-family: var(--font-display);
+    letter-spacing: inherit;
+  }
+
+  html:not(.d-touch) body.nocturne .d-order .n-pieces__document-number > .numeral {
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  /* …the list drawn up by its first row's own room (24 px), so that row's words stand on the label's line and its
+     ground, under the pointer, keeps its room above them. */
+  html:not(.d-touch) body.nocturne .d-order__row-main > .n-pieces__documents:first-child {
+    margin-top: calc(-1 * var(--d-s5));
+  }
+
+  html:not(.d-touch) body.nocturne .d-order .n-pieces__documents > .n-pieces__document-error {
+    margin-top: var(--d-s4);
+  }
+
+  /* A form of the page (views/order-sheet.ts in its `inline` mode): 440 px at most; a request's under its own title. */
+  html:not(.d-touch) body.nocturne .d-oform {
+    max-width: 440px;
+  }
+
+  html:not(.d-touch) body.nocturne .d-oform > * {
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-oform > * + * {
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .d-oform__title {
+    font-size: var(--d-fs-t2);
+    line-height: 1.2;
+    letter-spacing: var(--d-tr-mid);
+  }
+
+  html:not(.d-touch) body.nocturne .d-oform__title:focus {
+    outline: none;
+  }
+
+  html:not(.d-touch) body.nocturne .d-oform .n-osheet__lead {
+    font-size: var(--d-fs-text);
+    line-height: 1.6;
+  }
+
+  html:not(.d-touch) body.nocturne .d-oform > .n-form > :first-child,
+  html:not(.d-touch) body.nocturne .d-oform > .n-form > .n-osheet__choices + .n-fld-group {
+    margin-top: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-oform > .n-form > .n-osheet__choices + .n-fld-group {
+    margin-top: var(--d-s6);
+  }
+
+  /* YOUR ADDRESSES as option rows, A NEW ADDRESS the last. */
+  html:not(.d-touch) body.nocturne .d-oform .n-osheet__choices {
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-oform .n-osheet__legend {
+    margin-bottom: var(--d-s3);
+    padding: 0;
+    font-size: var(--d-fs-label);
+    letter-spacing: var(--d-tr-label);
+  }
+
+  /* SAVE IT TO YOUR ADDRESSES: its words on the form's edge, its switch on the form's right edge, as the fields. */
+  html:not(.d-touch) body.nocturne .d-oform .n-osheet__save {
+    margin-top: var(--d-s5);
+    padding: var(--d-s3) 0;
+    border-top: 1px solid var(--vault-hairline);
+    border-bottom: 1px solid var(--vault-hairline);
+    cursor: pointer;
+  }
+
+  html:not(.d-touch) body.nocturne .d-oform :is(.n-osheet__price, .n-osheet__note, .n-osheet__size-note, .n-osheet__decides, .n-osheet__yours) {
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne .d-oform .n-osheet__size-label {
+    margin: 0 0 var(--d-s2);
+    font-size: var(--d-fs-label);
+    letter-spacing: var(--d-tr-label);
+  }
+
+  /* No size in stock: the sizes stand outside a form, under the request's title. */
+  html:not(.d-touch) body.nocturne .d-oform > .n-osheet__size-label {
+    margin-top: var(--d-s5);
+  }
+
+  /* CANCEL beside the form's main action, on its line (the phone's own room above it goes). */
+  html:not(.d-touch) body.nocturne .d-oform .n-form__actions > .n-osheet__cancel {
+    margin: 0;
+  }
+
+  /* A note's box keeps its height: no grip. */
+  html:not(.d-touch) body.nocturne .d-oform textarea {
+    resize: none;
+  }
+
+  html:not(.d-touch) body.nocturne .d-oform > :is(.n-osheet__remove, .n-osheet__remove-error) {
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .d-oform .n-form__actions .n-btn {
+    width: 100%;
+  }
+
+  /* No size of the exchange in stock: the sentence, then CANCEL alone at its own width. */
+  html:not(.d-touch) body.nocturne .d-oform > .n-osheet__cancel {
+    width: auto;
+    min-width: 280px;
+    padding: 0 var(--d-s7);
+  }
+}
+
+/* ══ Hover, pressed (§10.16) ═════════════════════════════════════════════════════════════════════════════════════ */
+
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  /* An order's row: the ground across it (hanging 12 px outside its hairlines, as every hairline row's: shared/desktop.css),
+     its chevron to ink, its photograph at 0.88; no zoom. */
+  html:not(.d-touch) body.nocturne .d-orow {
+    cursor: pointer;
+  }
+
+  html:not(.d-touch) body.nocturne .d-orow:hover > .n-ic {
+    color: var(--vault-ink);
+  }
+
+  html:not(.d-touch) body.nocturne .d-orow:hover .d-orow__photo > img {
+    opacity: 0.88;
+  }
+
+}

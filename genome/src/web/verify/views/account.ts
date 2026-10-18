@@ -164,88 +164,106 @@ export interface AccountSheetDeps {
   onRead?(): void;
 }
 
-type View = 'account' | 'password' | 'messages' | 'sizes' | 'addresses' | 'profile';
+export type AccountSheetView = 'account' | 'password' | 'messages' | 'sizes' | 'addresses' | 'profile';
+type View = AccountSheetView;
 
 export class AccountSheet {
   readonly el: HTMLElement;
-  private readonly panel: HTMLElement;
-  private trigger: HTMLElement | null = null;
-  private view: View = 'account';
+  protected readonly panel: HTMLElement;
+  protected trigger: HTMLElement | null = null;
+  protected view: View = 'account';
   /** The club's status and the pieces listed (for the note of a piece that counts for none); null until read, or unreadable. */
-  private club: ClubStatus | null = null;
-  private listed = 0;
-  private notice: string | null = null;
-  private busy = false;
-  private readGen = 0;
-  private soundInput: HTMLInputElement | null = null;
+  protected club: ClubStatus | null = null;
+  protected listed = 0;
+  protected notice: string | null = null;
+  protected busy = false;
+  protected readGen = 0;
+  protected soundInput: HTMLInputElement | null = null;
   /** An answer is unread (MESSAGES' NEW); false until read. */
-  private unread = false;
+  protected unread = false;
   /** MESSAGES: the conversation as read, null while it reads (or unreadable: `threadError`). */
-  private thread: ThreadModel | null = null;
-  private threadError: string | null = null;
-  private replyDraft = '';
+  protected thread: ThreadModel | null = null;
+  protected threadError: string | null = null;
+  protected replyDraft = '';
   /**
    * YOUR SIZES (AC-01): the sizes saved, null until read for this opening (or unreadable: the row then says nothing of
    * them, and the view reads them before it shows its fields). Forgotten as the sheet closes: another account may sign in.
    */
-  private sizes: AccountSizes | null = null;
+  protected sizes: AccountSizes | null = null;
   /** The view's own read of the sizes: why it failed (the server's message), null while it reads or once read. */
-  private sizesError: string | null = null;
-  private sizesGen = 0;
+  protected sizesError: string | null = null;
+  protected sizesGen = 0;
   /**
    * YOUR ADDRESSES (plan NEXT LOT §3.6.B): as read for this opening, null until (or unreadable: `addressesError`);
    * forgotten as the sheet closes, as the sizes are.
    */
-  private addresses: AccountAddresses | null = null;
-  private addressesError: string | null = null;
-  private addressesGen = 0;
+  protected addresses: AccountAddresses | null = null;
+  protected addressesError: string | null = null;
+  protected addressesGen = 0;
   /** The address being written: 'new' (ADD AN ADDRESS), an address's id (EDIT), or none. */
-  private editing: string | null = null;
+  protected editing: string | null = null;
   /** What the view says once done: saved or removed (a status), or a failure (an alert). */
-  private addressesNote: { text: string; error: boolean } | null = null;
+  protected addressesNote: { text: string; error: boolean } | null = null;
   /** REMOVE pressed once: the address it would remove, until the second tap or a few seconds. */
-  private removeArmed: string | null = null;
-  private removeTimer: ReturnType<typeof setTimeout> | null = null;
-  private addressBusy = false;
+  protected removeArmed: string | null = null;
+  protected removeTimer: ReturnType<typeof setTimeout> | null = null;
+  protected addressBusy = false;
   /** YOUR ADDRESSES opened from YOUR PROFILE: its back link reads ‹ YOUR PROFILE and goes back there. */
-  private addressesFromProfile = false;
+  protected addressesFromProfile = false;
   /** YOUR ADDRESSES opened on ADD AN ADDRESS (YOUR PROFILE without an address): its form, once the list is read. */
-  private addAddressNext = false;
+  protected addAddressNext = false;
   /**
    * YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1 P.8): as read for this opening, null until (or unreadable:
    * `profileError`); forgotten as the sheet closes, as the sizes are.
    */
-  private profile: AccountProfileView | null = null;
-  private profileError: string | null = null;
-  private profileGen = 0;
+  protected profile: AccountProfileView | null = null;
+  protected profileError: string | null = null;
+  protected profileGen = 0;
   /** What the view's fields hold while the sheet is open (as `replyDraft` keeps a reply); forgotten at close and CANCEL. */
-  private profileDraft: ProfileDraft | null = null;
+  protected profileDraft: ProfileDraft | null = null;
   /** A sentence said over the form drawn again (changed meanwhile, the date's refusals): an alert. */
-  private profileNote: string | null = null;
+  protected profileNote: string | null = null;
   /** SAVE pressed once with a date of birth to enter: CONFIRM YOUR DATE OF BIRTH, until it is pressed again or the date changes. */
-  private profileConfirm = false;
+  protected profileConfirm = false;
   /** YOUR WISHLIST's line (3 MODELS, NONE YET), read as the sheet opens; null until read, or unreadable (no line). */
-  private wishCount: string | null = null;
+  protected wishCount: string | null = null;
 
-  constructor(private readonly deps: AccountSheetDeps) {
-    this.panel = h('section', { class: 'n-account__panel', attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'account-title' } });
-    this.el = h('div', { class: 'n-account', attrs: { hidden: true } }, h('div', { class: 'n-account__scrim', attrs: { 'aria-hidden': 'true' }, on: { click: () => this.close() } }), this.panel);
-    this.el.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Escape') {
-        ev.preventDefault();
-        this.close();
-      }
-    });
+  /**
+   * `page` (desktop, BRIEF decision 5: views/desktop-account.ts): the account as pages of the app, its views
+   * each a page at its own address, drawn in a page of the window (`main`) instead of a sheet.
+   */
+  constructor(
+    protected readonly deps: AccountSheetDeps,
+    page = false,
+  ) {
+    if (page) {
+      this.panel = h('div', { class: 'd-acct' });
+      this.el = h('main', { class: 'view view--account', attrs: { 'aria-labelledby': 'account-title', hidden: true } }, this.panel);
+    } else {
+      this.panel = h('section', { class: 'n-account__panel', attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'account-title' } });
+      this.el = h('div', { class: 'n-account', attrs: { hidden: true } }, h('div', { class: 'n-account__scrim', attrs: { 'aria-hidden': 'true' }, on: { click: () => this.close() } }), this.panel);
+      this.el.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape') {
+          ev.preventDefault();
+          this.close();
+        }
+      });
+    }
     deps.session.subscribe((s) => {
       // Signed out here or elsewhere (a 401): the sheet has nothing left to show, and nothing of the account is kept.
       if (s.status !== 'signed-in') {
-        if (this.isOpen) this.close();
+        this.leave();
         this.sizes = null;
         this.addresses = null;
         this.profile = null;
         this.profileDraft = null;
       }
     });
+  }
+
+  /** Signed out while open: the sheet closes (the account's pages say it instead, views/desktop-account.ts). */
+  protected leave(): void {
+    if (this.isOpen) this.close();
   }
 
   get isOpen(): boolean {
@@ -262,6 +280,28 @@ export class AccountSheet {
     if (this.deps.session.state.status !== 'signed-in') return;
     if (!this.isOpen) this.open(trigger ?? document.body);
     this.openThread();
+  }
+
+  /** Desktop: the view the sheet shows (a phone's window widened to a computer's: that page, main.ts). */
+  get shownView(): View {
+    return this.view;
+  }
+
+  /**
+   * Desktop: the sheet opened on one of its views (a computer's window narrowed to a phone's while that page
+   * of the account was shown, main.ts).
+   */
+  openOn(view: View, trigger: HTMLElement): void {
+    if (view === 'messages') {
+      this.openMessages(trigger);
+      return;
+    }
+    this.open(trigger);
+    if (!this.isOpen) return;
+    if (view === 'sizes') this.openSizes();
+    else if (view === 'profile') this.openProfile();
+    else if (view === 'addresses') this.openAddresses();
+    else if (view === 'password') this.openPassword();
   }
 
   open(trigger: HTMLElement): void {
@@ -316,12 +356,12 @@ export class AccountSheet {
     if (this.soundInput) this.soundInput.checked = this.deps.sound.on;
   }
 
-  private focusTitle(): void {
+  protected focusTitle(): void {
     this.panel.querySelector<HTMLElement>('#account-title')?.focus({ preventScroll: true });
   }
 
   /** The heading of the view open now (MESSAGES, YOUR SIZES): a screen reader says the view changed. */
-  private focusView(): void {
+  protected focusView(): void {
     const id =
       this.view === 'messages'
         ? 'account-messages-title'
@@ -336,7 +376,7 @@ export class AccountSheet {
   }
 
   /** The club's status and the pieces, read afresh: YOUR TIER as it is now. */
-  private async read(): Promise<void> {
+  protected async read(): Promise<void> {
     const gen = ++this.readGen;
     const [club, pieces, unread, sizes, addresses, profile, wishlist] = await Promise.all([
       this.deps.api.clubStatus().catch((e: unknown) => {
@@ -383,7 +423,7 @@ export class AccountSheet {
 
   // ── Rendering ────────────────────────────────────────────────────────────
 
-  private render(): void {
+  protected render(): void {
     const s = this.deps.session.state;
     if (s.status !== 'signed-in') return;
     // The recording (plan CUSTOMER INTELLIGENCE §3.3 T.9): the sheet and its view cover the page while it is open; the
@@ -410,7 +450,7 @@ export class AccountSheet {
     this.panel.replaceChildren(h('div', { class: 'n-handle', attrs: { 'aria-hidden': 'true' } }), head, ...body);
   }
 
-  private accountView(email: string): HTMLElement[] {
+  protected accountView(email: string): HTMLElement[] {
     const sw = switchControl({
       label: SOUND.label,
       checked: this.deps.sound.on,
@@ -469,7 +509,7 @@ export class AccountSheet {
    * status could not be read. IN USE (tier-model.ts inUseModel) with the BIRTHDAY CREDIT first while one is open (plan
    * CUSTOMER INTELLIGENCE §3.5 SB.4.5): for an account without a tier too, then under what a first piece opens.
    */
-  private tierBlock(): HTMLElement | null {
+  protected tierBlock(): HTMLElement | null {
     if (!this.club) return null;
     const m = tierModel(this.club, this.listed);
     const list = (items: string[], extra?: string) =>
@@ -515,7 +555,7 @@ export class AccountSheet {
   }
 
   /** THE HOUSE'S GUARANTEE (IN-01): one block per guarantee shown to the client, under YOUR TIER; none without one. */
-  private guaranteeBlocks(): HTMLElement[] {
+  protected guaranteeBlocks(): HTMLElement[] {
     return guaranteeBlocks(this.club).map((b) =>
       h(
         'section',
@@ -539,13 +579,13 @@ export class AccountSheet {
   // ── MESSAGES (plan NEXT-NINE, CS-01) ─────────────────────────────────────
 
   /** The first row: MESSAGES, NEW at its right while an answer is unread (no number, no badge on the header). */
-  private messagesRow(): HTMLElement {
+  protected messagesRow(): HTMLElement {
     const row = leadRow(MESSAGES.title, { onOpen: () => this.openThread(), attrs: { 'data-key': 'messages' }, extraClass: 'n-account__messages' });
     if (this.unread) row.insertBefore(h('span', { class: 'n-g n-lb n-ivc n-row__new', text: MESSAGES.new }), row.lastChild);
     return row;
   }
 
-  private openThread(): void {
+  protected openThread(): void {
     this.view = 'messages';
     this.notice = null;
     this.thread = null;
@@ -555,14 +595,14 @@ export class AccountSheet {
     void this.readThread();
   }
 
-  private closeThread(): void {
+  protected closeThread(): void {
     this.view = 'account';
     this.render();
     this.panel.querySelector<HTMLElement>('[data-key="messages"]')?.focus({ preventScroll: true });
   }
 
   /** The conversation, read; then read up to its latest message (NEW and NOW's line go). */
-  private async readThread(focusReply = false): Promise<void> {
+  protected async readThread(focusReply = false): Promise<void> {
     const gen = ++this.readGen;
     try {
       const t = await this.deps.api.messages();
@@ -588,7 +628,7 @@ export class AccountSheet {
     else this.focusView();
   }
 
-  private messagesView(): HTMLElement[] {
+  protected messagesView(): HTMLElement[] {
     const back = h(
       'button',
       { class: 'n-g n-tl n-messages__back', attrs: { type: 'button' }, data: { key: 'messages-back' }, on: { click: () => this.closeThread() } },
@@ -635,13 +675,13 @@ export class AccountSheet {
     return out.filter((x): x is HTMLElement => x !== null);
   }
 
-  private toConcerning(target: ConcerningTarget): void {
+  protected toConcerning(target: ConcerningTarget): void {
     this.close();
     this.deps.onConcerning(target);
   }
 
   /** YOUR REPLY (YOUR MESSAGE before the first) and SEND: a message written from MESSAGES carries no context. */
-  private replyForm(label: string): HTMLElement {
+  protected replyForm(label: string): HTMLElement {
     const area = h('textarea', {
       class: 'n-fld__input n-write__area',
       id: 'messages-reply',
@@ -674,13 +714,13 @@ export class AccountSheet {
   // ── YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1 P.8) ──────────────────
 
   /** The row after MESSAGES: YOUR PROFILE, its line how complete it is (`60% COMPLETE`, or COMPLETE); nothing while unread. */
-  private profileRow(): HTMLElement {
+  protected profileRow(): HTMLElement {
     const row = leadRow(ACCOUNT_PROFILE.row, { onOpen: () => this.openProfile(), attrs: { 'data-key': 'profile' }, extraClass: 'n-account__sizes n-account__profile' });
     if (this.profile) row.insertBefore(h('span', { class: 'n-g n-lb n-row__value n-account__profile-line' }, ...withNumerals(completionRow(this.profile.completion))), row.lastChild);
     return row;
   }
 
-  private openProfile(): void {
+  protected openProfile(): void {
     this.view = 'profile';
     this.notice = null;
     this.profileError = null;
@@ -693,7 +733,7 @@ export class AccountSheet {
   }
 
   /** The profile read for the view: its fields once it is, or the sentence and the server's message. */
-  private async readProfile(): Promise<void> {
+  protected async readProfile(): Promise<void> {
     const gen = ++this.profileGen;
     try {
       const profile = await this.deps.api.profile();
@@ -709,7 +749,7 @@ export class AccountSheet {
   }
 
   /** The view drawn again (its profile read, or not), the focus on `focus` when given, else on its title. */
-  private showProfile(focus?: string): void {
+  protected showProfile(focus?: string): void {
     this.render();
     const at = focus ? this.panel.querySelector<HTMLElement>(focus) : null;
     if (at) at.focus({ preventScroll: true });
@@ -717,7 +757,7 @@ export class AccountSheet {
   }
 
   /** Back to the account view (`notice` said there), the focus on YOUR PROFILE's row. */
-  private closeProfile(notice: string | null): void {
+  protected closeProfile(notice: string | null): void {
     this.view = 'account';
     this.notice = notice;
     this.profileNote = null;
@@ -730,7 +770,7 @@ export class AccountSheet {
    * Back from YOUR ADDRESSES to YOUR PROFILE: what was typed is kept (the draft), the address block read again (the
    * default address, how many are saved, how complete the profile is), never the fields.
    */
-  private backToProfile(): void {
+  protected backToProfile(): void {
     this.view = 'profile';
     this.addressesFromProfile = false;
     this.addAddressNext = false;
@@ -758,7 +798,7 @@ export class AccountSheet {
    * groups and SAVE, CANCEL under it. Until the profile is read, ONE MOMENT…; when it cannot be, the sentence and TRY
    * AGAIN, no field, no SAVE.
    */
-  private profileView(): HTMLElement[] {
+  protected profileView(): HTMLElement[] {
     const P = ACCOUNT_PROFILE;
     const back = h(
       'button',
@@ -806,7 +846,7 @@ export class AccountSheet {
   }
 
   /** A group's label (YOU, WHERE YOU ARE, …): the label face, a hairline over it. */
-  private profileGroup(id: string, label: string, ...children: (HTMLElement | null)[]): HTMLElement {
+  protected profileGroup(id: string, label: string, ...children: (HTMLElement | null)[]): HTMLElement {
     return h(
       'div',
       { class: 'n-profile__group', attrs: { role: 'group', 'aria-labelledby': id } },
@@ -816,7 +856,7 @@ export class AccountSheet {
   }
 
   /** A text field of the view, its value the draft's, the draft following what is typed. */
-  private profileInput(id: string, label: string, value: string, attrs: Record<string, string | number | boolean>, onInput: (v: string) => void, hint?: string): { el: HTMLElement; input: HTMLInputElement } {
+  protected profileInput(id: string, label: string, value: string, attrs: Record<string, string | number | boolean>, onInput: (v: string) => void, hint?: string): { el: HTMLElement; input: HTMLInputElement } {
     const input = h('input', { attrs: { type: 'text', ...attrs } });
     input.value = value;
     input.addEventListener('input', () => onInput(input.value));
@@ -824,13 +864,13 @@ export class AccountSheet {
   }
 
   /** A select of the view, the draft following what is chosen. */
-  private profileSelect(id: string, label: string, options: readonly Option[], value: string, onChange: (v: string) => void, hint?: string): { el: HTMLElement; select: HTMLSelectElement } {
+  protected profileSelect(id: string, label: string, options: readonly Option[], value: string, onChange: (v: string) => void, hint?: string): { el: HTMLElement; select: HTMLSelectElement } {
     const f = selectField(id, label, options, value, hint);
     f.select.addEventListener('change', () => onChange(f.select.value));
     return f;
   }
 
-  private profileForm(view: AccountProfileView, d: ProfileDraft): HTMLFormElement {
+  protected profileForm(view: AccountProfileView, d: ProfileDraft): HTMLFormElement {
     const P = ACCOUNT_PROFILE;
     const p = view.profile;
     const armed = birthDateOf(d.day, d.month, d.year);
@@ -1040,7 +1080,7 @@ export class AccountSheet {
   }
 
   /** YOUR ADDRESSES › from YOUR PROFILE: its view, its back link ‹ YOUR PROFILE. */
-  private profileAddressesLink(): HTMLElement {
+  protected profileAddressesLink(): HTMLElement {
     const l = textLink(ACCOUNT_PROFILE.addresses, { onOpen: () => this.openAddresses({ fromProfile: true }), extraClass: 'n-profile__addresses' });
     l.dataset.key = 'profile-addresses';
     return l;
@@ -1052,7 +1092,7 @@ export class AccountSheet {
    * IN THE COLLECTION under it; up to 30 of each ('Up to 30.'). A group with nothing to choose is not shown; neither is
    * the block when both are empty.
    */
-  private tastesBlock(view: AccountProfileView, d: ProfileDraft): HTMLElement | null {
+  protected tastesBlock(view: AccountProfileView, d: ProfileDraft): HTMLElement | null {
     const groups = tasteGroups(view, d);
     if (groups.pieces.length === 0 && groups.finishes.length === 0) return null;
     const group = (kind: 'pieces' | 'finishes', label: string, choices: TasteChoice[]) => {
@@ -1101,13 +1141,13 @@ export class AccountSheet {
   // ── YOUR SIZES (plan NEXT-NINE, AC-01) ───────────────────────────────────
 
   /** The second row: YOUR SIZES, its line the sizes saved (`RING 52 · WRIST 16.5 CM`) or NOT SET; nothing while unread. */
-  private sizesRow(): HTMLElement {
+  protected sizesRow(): HTMLElement {
     const row = leadRow(ACCOUNT_SIZES.row, { onOpen: () => this.openSizes(), attrs: { 'data-key': 'sizes' }, extraClass: 'n-account__sizes' });
     if (this.sizes) row.insertBefore(h('span', { class: 'n-g n-lb n-row__value n-account__sizes-line' }, ...withNumerals(sizesSummary(this.sizes))), row.lastChild);
     return row;
   }
 
-  private openSizes(): void {
+  protected openSizes(): void {
     this.view = 'sizes';
     this.notice = null;
     this.sizesError = null;
@@ -1118,7 +1158,7 @@ export class AccountSheet {
   }
 
   /** The sizes read for the view: its fields once they are, or the sentence and the server's message. */
-  private async readSizes(): Promise<void> {
+  protected async readSizes(): Promise<void> {
     const gen = ++this.sizesGen;
     try {
       const sizes = await this.deps.api.sizes();
@@ -1135,12 +1175,12 @@ export class AccountSheet {
   }
 
   /** The view drawn again once its sizes are read (or could not be), the focus on its title. */
-  private showSizes(): void {
+  protected showSizes(): void {
     this.render();
     this.focusView();
   }
 
-  private closeSizes(notice: string | null): void {
+  protected closeSizes(notice: string | null): void {
     this.view = 'account';
     this.notice = notice;
     this.render();
@@ -1151,7 +1191,7 @@ export class AccountSheet {
    * The four sizes, each a select (NOT SET, then its range), its unit as its hint; SAVE saves them whole, CANCEL under it
    * goes back. Until the sizes are read, ONE MOMENT…; when they cannot be, the sentence and TRY AGAIN, no field, no SAVE.
    */
-  private sizesView(): HTMLElement[] {
+  protected sizesView(): HTMLElement[] {
     const cancel = button(ACCOUNT_SIZES.cancel, { outline: true, onClick: () => this.closeSizes(null) });
     const head = [h('h3', { class: 'n-g n-t3 n-ivc', id: 'account-sizes-title', attrs: { tabindex: -1 }, text: ACCOUNT_SIZES.title }), h('p', { class: 'n-tx n-account__sizes-lead', text: ACCOUNT_SIZES.lead })];
     const saved = this.sizes;
@@ -1204,7 +1244,7 @@ export class AccountSheet {
   // ── YOUR ADDRESSES (plan NEXT LOT §3.6.B) ────────────────────────────────
 
   /** YOUR WISHLIST (plan CUSTOMER INTELLIGENCE §3.2 W.10.2): its count at its right, then its page (the sheet closes first). */
-  private wishlistRow(): HTMLElement {
+  protected wishlistRow(): HTMLElement {
     const row = leadRow(WISHLIST.row, {
       href: WISHLIST_PATH,
       onOpen: () => {
@@ -1219,14 +1259,14 @@ export class AccountSheet {
   }
 
   /** The row after YOUR SIZES: YOUR ADDRESSES, its line how many are saved (`2 SAVED`) or NOT SET; nothing while unread. */
-  private addressesRow(): HTMLElement {
+  protected addressesRow(): HTMLElement {
     const row = leadRow(ACCOUNT_ADDRESSES.row, { onOpen: () => this.openAddresses(), attrs: { 'data-key': 'addresses' }, extraClass: 'n-account__sizes n-account__addresses' });
     if (this.addresses) row.insertBefore(h('span', { class: 'n-g n-lb n-row__value n-account__addresses-line' }, ...withNumerals(addressesSummary(this.addresses.addresses))), row.lastChild);
     return row;
   }
 
   /** YOUR ADDRESSES; from YOUR PROFILE (`fromProfile`) its back link goes back there, and `add` opens ADD AN ADDRESS. */
-  private openAddresses(opts: { fromProfile?: boolean; add?: boolean } = {}): void {
+  protected openAddresses(opts: { fromProfile?: boolean; add?: boolean } = {}): void {
     this.view = 'addresses';
     this.notice = null;
     this.addressesError = null;
@@ -1243,7 +1283,7 @@ export class AccountSheet {
   }
 
   /** The addresses read for the view (again after a change): its list once they are, or the sentence and the server's message. */
-  private async readAddresses(): Promise<void> {
+  protected async readAddresses(): Promise<void> {
     const gen = ++this.addressesGen;
     try {
       const list = await this.deps.api.addresses();
@@ -1258,7 +1298,7 @@ export class AccountSheet {
     if (this.view === 'addresses') this.showAddresses();
   }
 
-  private showAddresses(focus?: string): void {
+  protected showAddresses(focus?: string): void {
     // Opened on ADD AN ADDRESS (YOUR PROFILE without an address): its form once the list is read.
     if (this.addAddressNext && this.addresses !== null) {
       this.addAddressNext = false;
@@ -1273,7 +1313,7 @@ export class AccountSheet {
     else this.focusView();
   }
 
-  private closeAddresses(): void {
+  protected closeAddresses(): void {
     this.view = 'account';
     this.addressesFromProfile = false;
     this.addAddressNext = false;
@@ -1284,14 +1324,14 @@ export class AccountSheet {
     this.panel.querySelector<HTMLElement>('[data-key="addresses"]')?.focus({ preventScroll: true });
   }
 
-  private disarmRemove(): void {
+  protected disarmRemove(): void {
     if (this.removeTimer) clearTimeout(this.removeTimer);
     this.removeTimer = null;
     this.removeArmed = null;
   }
 
   /** A change done: the list read again (its default as the server made it), the note said. */
-  private async addressesChanged(note: string, focus?: string): Promise<void> {
+  protected async addressesChanged(note: string, focus?: string): Promise<void> {
     this.editing = null;
     this.addressesNote = { text: note, error: false };
     this.addresses = null;
@@ -1300,7 +1340,7 @@ export class AccountSheet {
     if (focus && this.view === 'addresses') this.panel.querySelector<HTMLElement>(focus)?.focus({ preventScroll: true });
   }
 
-  private addressesView(): HTMLElement[] {
+  protected addressesView(): HTMLElement[] {
     const A = ACCOUNT_ADDRESSES;
     // ‹ YOUR PROFILE when opened from YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1 P.14), else ‹ YOUR ACCOUNT.
     const fromProfile = this.addressesFromProfile;
@@ -1347,7 +1387,7 @@ export class AccountSheet {
   }
 
   /** One saved address: its lines, DEFAULT on the default one, then EDIT · MAKE DEFAULT · REMOVE. */
-  private addressItem(a: SavedAddress): HTMLElement {
+  protected addressItem(a: SavedAddress): HTMLElement {
     const A = ACCOUNT_ADDRESSES;
     const link = (text: string, label: string, key: string, onOpen: () => void) => {
       const l = textLink(text, { onOpen, extraClass: 'n-account__address-link' });
@@ -1372,7 +1412,7 @@ export class AccountSheet {
     );
   }
 
-  private editAddress(id: string): void {
+  protected editAddress(id: string): void {
     this.editing = id;
     this.addressesNote = null;
     this.disarmRemove();
@@ -1381,7 +1421,7 @@ export class AccountSheet {
   }
 
   /** ADD AN ADDRESS (with MY DEFAULT ADDRESS) or EDIT: the four fields, SAVE, and CANCEL beside it. */
-  private addressForm(list: AccountAddresses): HTMLElement {
+  protected addressForm(list: AccountAddresses): HTMLElement {
     const A = ACCOUNT_ADDRESSES;
     const editing = this.editing === 'new' ? null : (list.addresses.find((a) => a.id === this.editing) ?? null);
     const fields = addressFields('account-address', editing, list.defaultCountry);
@@ -1417,7 +1457,7 @@ export class AccountSheet {
     );
   }
 
-  private async makeDefault(id: string): Promise<void> {
+  protected async makeDefault(id: string): Promise<void> {
     if (this.addressBusy) return;
     this.addressBusy = true;
     this.disarmRemove();
@@ -1437,7 +1477,7 @@ export class AccountSheet {
    * REMOVE armed or not, written into its link in place: no render and no focus moved, so a keyboard or a screen reader
    * stays where it is; its accessible name keeps the address.
    */
-  private paintRemove(id: string, armed: boolean): void {
+  protected paintRemove(id: string, armed: boolean): void {
     const link = this.panel.querySelector<HTMLElement>(`[data-key="address-remove-${id}"]`);
     const name = this.addresses?.addresses.find((a) => a.id === id)?.name;
     if (!link || name === undefined) return;
@@ -1447,7 +1487,7 @@ export class AccountSheet {
   }
 
   /** REMOVE: a first tap asks for a second (TAP AGAIN TO REMOVE, a few seconds), the second removes it. */
-  private async removeAddress(id: string): Promise<void> {
+  protected async removeAddress(id: string): Promise<void> {
     if (this.addressBusy) return;
     if (this.removeArmed !== id) {
       const before = this.removeArmed;
@@ -1483,14 +1523,14 @@ export class AccountSheet {
 
   // ── CHANGE PASSWORD (C-04, C39) ──────────────────────────────────────────
 
-  private openPassword(): void {
+  protected openPassword(): void {
     this.view = 'password';
     this.notice = null;
     this.render();
     this.panel.querySelector<HTMLInputElement>('input')?.focus();
   }
 
-  private closePassword(notice: string | null): void {
+  protected closePassword(notice: string | null): void {
     this.view = 'account';
     this.notice = notice;
     this.render();
@@ -1498,7 +1538,7 @@ export class AccountSheet {
   }
 
   /** The current password, then a new one; this session stays, the others end (a wrong current one is said on its field). */
-  private passwordView(): HTMLElement[] {
+  protected passwordView(): HTMLElement[] {
     const current = h('input', { attrs: { type: 'password', name: 'current-password', autocomplete: 'current-password', required: true, maxlength: 1024 } });
     const next = h('input', { attrs: { type: 'password', name: 'new-password', autocomplete: 'new-password', required: true, minlength: MIN_PASSWORD, maxlength: 1024 } });
     const cancel = button(ACCOUNT_PASSWORD.cancel, { outline: true, onClick: () => this.closePassword(null) });
@@ -1545,7 +1585,7 @@ export class AccountSheet {
 
   // ── SIGN OUT ─────────────────────────────────────────────────────────────
 
-  private signOut(): void {
+  protected signOut(): void {
     if (this.busy) return;
     this.busy = true;
     this.render();

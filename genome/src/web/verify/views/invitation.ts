@@ -16,6 +16,7 @@
  * The lines are drawn into a host the page frames (NOW's plate card, the feed's photograph and its lifted words): an
  * answer draws them again in place, its photograph untouched. CSP-safe: h() only, its places by class.
  */
+import { isDesktop } from '../../shared/desktop.js';
 import { h } from '../../shared/dom.js';
 import { ApiError, type ApiClient } from '../api.js';
 import { circlePostPath, invitationReply, type CircleCardModel, type InvitationReply } from '../circle-model.js';
@@ -43,6 +44,17 @@ export function splitEvent(line: string): { time: string; place: string | null }
   const time = line.slice(0, at + 4);
   const rest = line.slice(at + 4).replace(/^ · /, '');
   return { time, place: rest || null };
+}
+
+/**
+ * The event line's words: its time kept whole (`.n-nw`), then its place. On a computer (desktop, BRIEF §10.9)
+ * the separator stays with the time and the place is held whole too (`.n-keep`, broken inside only when it alone is
+ * wider than its block), so the line breaks between its two values only, as a tile's list line (common.ts listLine).
+ */
+function eventWords(event: { time: string; place: string | null }): (string | HTMLElement)[] {
+  if (!event.place) return [h('span', { class: 'n-nw' }, ...withNumerals(event.time))];
+  if (!isDesktop()) return [h('span', { class: 'n-nw' }, ...withNumerals(event.time)), ' · ', ...withNumerals(event.place)];
+  return [h('span', { class: 'n-nw' }, ...withNumerals(`${event.time} ·`)), ' ', h('span', { class: 'n-keep' }, ...withNumerals(event.place))];
 }
 
 /**
@@ -91,9 +103,7 @@ export class CircleCardLines {
         card.experience ? h('p', { class: 'n-g n-lb n-circle-card__experience circle-card__experience', text: card.experience }) : null,
         h(this.opts.heading, { class: 'n-g n-t2 n-circle-card__title circle-card__title', id: this.opts.titleId }, ...withNumerals(card.title)),
         card.date ? h('p', { class: 'n-sm n-num n-circle-card__date', text: card.date }) : null,
-        event
-          ? h('p', { class: 'n-g n-lb n-ivc n-num n-circle-card__event circle-card__event' }, h('span', { class: 'n-nw' }, ...withNumerals(event.time)), ...(event.place ? [' · ', ...withNumerals(event.place)] : []))
-          : null,
+        event ? h('p', { class: 'n-g n-lb n-ivc n-num n-circle-card__event circle-card__event' }, ...eventWords(event)) : null,
         reply?.places ? h('p', { class: 'n-g n-lb n-num n-circle-card__places' }, ...withNumerals(reply.places)) : null,
         reply?.open ? h('div', { class: 'n-duo n-circle-card__answer', attrs: { role: 'group', 'aria-label': CIRCLE.answerChoice } }, option('YES', CIRCLE.yes, reply), option('NO', CIRCLE.no, reply)) : null,
         mine ? h('p', { class: 'n-g n-lb n-ivc n-circle-card__mine circle-card__mine', text: mine }) : null,

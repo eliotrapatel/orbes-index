@@ -15,6 +15,7 @@
  *
  * Nothing the server did not send: a picture is taken from this origin's media route only.
  */
+import { onComputer } from '../shared/desktop.js';
 import { isLookbookSlug } from '../shared/lookbook.js';
 import { LIVE, RELEASES } from './copy.js';
 import { afterRoomPath, isReleaseId, releasePath, tierLabel, zonedDate, type EntryModel, type MyEntryModel } from './releases-model.js';
@@ -127,7 +128,10 @@ export function releaseTime(at: string, localZone: string): { paris: string; loc
   if (!paris) return { paris: '', local: null };
   const local = zonedTime(at, localZone);
   const same = !local || (local.day === paris.day && local.time === paris.time);
-  return { paris: LIVE.paris(paris.day, paris.time), local: same ? null : LIVE.onThisPhone(local.day, local.time) };
+  // On a computer, its clock is said so (desktop, decision 8), whatever its window's width (D6); the time and its zone
+  // stay as they are.
+  const onThis = onComputer() ? LIVE.onThisComputer : LIVE.onThisPhone;
+  return { paris: LIVE.paris(paris.day, paris.time), local: same ? null : onThis(local.day, local.time) };
 }
 
 /** A countdown in two-digit groups: DAYS HOURS MINUTES a day or more ahead, HOURS MINUTES SECONDS within a day. */

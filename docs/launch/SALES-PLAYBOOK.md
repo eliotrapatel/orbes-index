@@ -153,6 +153,10 @@ Le client demande un retour ou un échange de taille dans les 14 jours qui suive
 - **Le prix de la gravure.** `Orders` → `Settings` → `Engraving` (un ADMIN) : un prix par devise. Une devise sans prix n'offre aucune gravure aux clients. Une commande garde le prix qu'elle a pris. Ajoutée après le paiement, la gravure a sa propre facture ; retirée, un avoir pour sa ligne : les deux sont émis d'eux-mêmes, dans `DOCUMENTS` du client et sur la page de la commande.
 - **La gravure vendue par une LIVE RELEASE.** Quand une sortie vend la gravure parmi ses options, son libellé contient le mot ENGRAVING (par exemple la ligne d'option ENGRAVING, 150, Your initials, by hand) : ses acheteurs saisissent leurs mots sur la commande, sans second prix, jusqu'au début de l'emballage.
 
+### Sur un ordinateur : la page d'une commande
+
+Sur un ordinateur (une fenêtre d'au moins 1024 px, avec une souris ou un pavé tactile), MY PIECES → ORDERS liste les commandes du client en lignes, et chaque ligne ouvre la page de sa commande. Elle montre ce que la carte de la commande montre sur un téléphone, avec les mêmes mots et les mêmes règles : les étapes, DELIVERY ADDRESS et ENGRAVING jusqu'à `Start packing`, RETURNS AND EXCHANGES pendant les 14 jours qui suivent la livraison, YOUR NEW CLAIM CODE, et DOCUMENTS avec ORBES CARE CONDITIONS · PDF. Un client qui vous écrit depuis un ordinateur se guide donc comme sur son téléphone.
+
 ### Commandes fournisseur
 
 `Supplier orders` (ORBES seul) → `To order` : la console additionne ce qui manque (les commandes en attente et le stock sous son minimum) par fournisseur et par entrepôt. `Add to the draft`, ajustez quantités, prix, devise, frais de port et date attendue, puis `Mark sent` et envoyez vous-même le `PDF` au fournisseur : la console n'envoie aucun e-mail. Ensuite : `Confirmed by the supplier`, les réceptions, `Cancel the rest` quand le fournisseur ne livrera pas la suite, `Enter the invoice` et `Mark the invoice paid`. Les fournisseurs se créent dans `Suppliers` (`Add a supplier`) ; le fournisseur d'un modèle, ou d'une taille, se règle sur la page du modèle (`Edit supplier`).
@@ -172,6 +176,8 @@ Un client vous montre un résultat, au comptoir ou au téléphone.
 5. Le client peut aussi vous écrire depuis l'application : `WRITE TO ORBES CLIENT SERVICES`, sous la phrase d'aide d'un résultat, sur une pièce, une commande, une sortie ou une demande du salon privé. Son message arrive dans `Messages`, avec ce qu'il concerne (la pièce, la commande, la sortie, le scan et sa REF, le modèle).
 
 **Répondre aux `MESSAGES`** (OPERATOR et au-dessus ; un AUDITOR lit, les adresses masquées). Console : `Messages`, le premier lien du groupe `Clients` ; son nombre compte les conversations `To answer`, les PALLADIUM puis les PLATINE d'abord, puis la plus ancienne. Ouvrez la conversation, `Take it` : elle est à vous. Lisez ce que concerne chaque message (son lien mène à la pièce, à la commande, à la sortie ou au scan), écrivez la réponse, `Send answer` : le client la lit dans son compte, sous `MESSAGES`, signée ORBES Client Services, jamais à votre nom. Quand tout est dit, `Close conversation` ; si le client écrit de nouveau, elle revient d'elle-même dans `To answer`. Aucun e-mail n'est envoyé, et aucun délai de réponse n'est promis, ni dans l'application ni par vous. Vous ne commencez jamais une conversation : vous répondez à celle qu'un client a ouverte. Un ADMIN peut confier une conversation à un autre membre de l'équipe (`Assign to`).
+
+**Sur un ordinateur, MESSAGES par sujet.** Le client lit la même conversation sur une page en deux parties : à gauche ses sujets (une pièce, une commande, une sortie, un modèle du salon privé, un scan et sa REF, ou GENERAL pour un message qui ne concerne rien), à droite la conversation du sujet choisi ; la carte MESSAGES de YOUR ACCOUNT dit combien de réponses il n'a pas lues (1 UNREAD). Vos réponses ne portent pas de sujet : chacune se range sous le message du client qui la précède, ou sous GENERAL s'il n'en a pas. Répondez donc à son dernier message ; s'il a écrit sur deux sujets à la suite, nommez dans votre réponse la pièce ou la commande dont vous parlez. Sa réponse depuis un sujet reste sur ce sujet, sauf sur un scan de plus de 24 heures ou sur une pièce qu'il ne détient plus : elle se range alors sous GENERAL.
 
 Ce que prouve un résultat AUTHENTIC, si le client le demande :
 
@@ -257,11 +263,17 @@ Le client lit : *The activity recorded for this ORBES identity requires review. 
 
 Le client lit : *This code could not be read. Please scan it again in even light, holding the camera steady.*
 
+Sur un ordinateur, il lit à la place : *This code could not be read. Please upload a sharp, well-lit photo in which the whole code is visible, or scan it with your phone.*
+
 **Ce que cela veut dire.** Le code n'a pas été lu : lumière, flou, distance, ou étiquette abîmée.
 
 **Ce que vous faites.** Conseillez une lumière égale, 10 à 20 cm, le code entier dans l'orbite. Une étiquette abîmée : un OPERATOR signe un nouveau code depuis la fiche de la pièce (`Re-issue code`) et fait refaire l'étiquette ; l'ancien code se lit alors `REVOKED`.
 
+Sur un ordinateur (une fenêtre d'au moins 1024 px), SCAN ouvre la page SCAN AN ORBES CODE. Elle montre, sous WITH YOUR PHONE, un code que l'appareil photo du téléphone ouvre (ORBES s'ouvre sur le téléphone, puis SCAN ORBES CODE), et, sous FROM THIS COMPUTER, UPLOAD A PHOTO, pour envoyer une photo du code. Une photo où aucun code ne se lit donne NO ORBES CODE FOUND : une photo nette, bien éclairée, le code entier, ou le téléphone. Dans une fenêtre plus étroite ou très zoomée, SCAN ouvre l'appareil photo de l'ordinateur comme sur un téléphone, avec UPLOAD A PHOTO dessous.
+
 > Le code n'a pas pu être lu. Scannez-le de nouveau sous une lumière égale, à 10 ou 20 cm, en tenant le téléphone immobile, le code entier dans l'orbite.
+
+> Sur un ordinateur, le plus simple est votre téléphone : visez avec son appareil photo le code de la page SCAN AN ORBES CODE, puis touchez SCAN ORBES CODE. Vous pouvez aussi envoyer une photo nette et bien éclairée de l'ORBES CODE entier avec UPLOAD A PHOTO.
 
 ### REVOKED
 

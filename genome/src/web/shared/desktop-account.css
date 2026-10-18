@@ -1,0 +1,1168 @@
+/*
+ * The account as pages and the sign-in page of a computer (desktop, BRIEF decisions 5 and 6, §10.22, §10.23,
+ * §10.30; views/desktop-account.ts, views/desktop-signin.ts), and the line that stands where the phone embeds the
+ * sign-in. A phone keeps the account sheet and the sign-in where they stand: every rule lives in the desktop's query.
+ *
+ * YOUR ACCOUNT: its head as a chapter's (D2, 96 px under the bar), the tier in a right block of the frame's width on the
+ * right edge; six hairline cards (one fine line, no fill, equal heights, the line to ink on hover), three to a row from
+ * 1200 px, two below; SOUND, LIGHT MODE and SIGN OUT on the cards' columns; what the tier gives on columns 1–5 beside
+ * NEXT (or IN USE, or what a first piece opens) on 7–12; the guarantees two to a row on the grid's halves; the last
+ * links on the cards' columns. A section's page: its crumb, its title (T1) on columns 1–6, its lead and what it says
+ * now, then its form (440 px at most) on 7–12; YOUR PROFILE's groups each a row of the page. The sign-in page: the
+ * newest model's photograph as a page frame beside the panel, the page's title and lead in its lower third on the
+ * left, the forms in a solid panel of 440 px on the right edge, standing on the photograph's dissolve.
+ */
+
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  /* ── 1. YOUR ACCOUNT ──────────────────────────────────────────────────────────────────────────────────────────── */
+
+  html:not(.d-touch) body.nocturne .view--account {
+    padding-bottom: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct {
+    display: grid;
+    grid-template-columns: var(--d-page-grid);
+    column-gap: var(--d-gutter);
+    align-content: start;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct > * {
+    grid-column: canvas;
+    min-width: 0;
+    margin: 0;
+  }
+
+  /* The head: YOUR ACCOUNT and who is signed in; the tier's name, its pieces and its dots in a block of the frame's
+     right width, its last line on the head's (§10.27). */
+  html:not(.d-touch) body.nocturne .d-acct__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: var(--d-s8);
+    padding: var(--d-s9) 0 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__who {
+    min-width: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__title {
+    margin: 0;
+    font-size: var(--d-fs-d2);
+    line-height: 1.04;
+    letter-spacing: var(--d-tr-d23);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__as {
+    margin: var(--d-s5) 0 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__email {
+    margin: var(--d-s2) 0 0;
+    font-size: var(--d-fs-text);
+    line-height: 1.6;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__tier {
+    flex: 0 0 var(--d-aside);
+    width: var(--d-aside);
+    padding-bottom: var(--d-s2);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__tier > .n-account__badge {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__tier .n-account__tier-name {
+    font-size: var(--d-fs-t2);
+    line-height: 1.2;
+    letter-spacing: var(--d-tr-mid);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__tier .n-account__tier-pieces {
+    color: var(--vault-soft);
+  }
+
+  /* The ten dots across the block: one per piece up to PALLADIUM, the held ones filled. */
+  html:not(.d-touch) body.nocturne .d-acct__tier > .n-account__dots {
+    justify-content: space-between;
+    margin: var(--d-s5) 0 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__tier .n-meter__dot {
+    width: 10px;
+    height: 10px;
+  }
+
+  /* What the page says once a section is saved (Your sizes are saved.): a status under the head. */
+  html:not(.d-touch) body.nocturne .d-acct__notice {
+    margin-top: var(--d-s7);
+    padding: 0;
+  }
+
+  /* The six cards: one fine line, no fill, equal heights, each one link (§10.30). */
+  html:not(.d-touch) body.nocturne .d-acct__cards,
+  html:not(.d-touch) body.nocturne .d-acct__settings,
+  html:not(.d-touch) body.nocturne .d-acct__guarantees,
+  html:not(.d-touch) body.nocturne .d-acct__links {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    column-gap: var(--d-gutter);
+  }
+
+  /* …every row as tall as the tallest (a card's status on two lines grows all six alike). */
+  html:not(.d-touch) body.nocturne .d-acct__cards {
+    grid-auto-rows: 1fr;
+    row-gap: var(--d-gutter);
+    margin-top: var(--d-s8);
+    padding: 0;
+    list-style: none;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__notice + .d-acct__cards {
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__cell {
+    display: flex;
+    min-width: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__card {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: var(--d-s7);
+    width: 100%;
+    min-height: 160px;
+    padding: var(--d-s6);
+    border: 1px solid var(--vault-hairline);
+    color: var(--vault-ink);
+    text-decoration: none;
+    user-select: none;
+    transition:
+      border-color var(--d-dur-hover) var(--d-ease),
+      background-color var(--d-dur-hover) var(--d-ease);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__card-title {
+    font-size: var(--d-fs-t2);
+    line-height: 1.2;
+    letter-spacing: var(--d-tr-mid);
+    white-space: nowrap;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__card-top > .n-ic {
+    flex: none;
+    margin-right: calc(-1 * var(--d-s1));
+    color: var(--vault-soft);
+    transition: color var(--d-dur-hover) var(--d-ease);
+  }
+
+  /* Its status: one line, or two where it is long (YOUR SIZES with its four sizes), breaking only after a ` · `, each
+     value held whole (views/common.ts listLine, §10.9); the cards of a row stretch to the tallest. */
+  html:not(.d-touch) body.nocturne .d-acct__card-line {
+    min-height: calc(var(--n-fs-lb) * var(--n-lh-base));
+    color: var(--vault-soft);
+  }
+
+  /* SOUND and LIGHT MODE, rows of a switch on the cards' columns; SIGN OUT at the end of the row, on the right edge. */
+  html:not(.d-touch) body.nocturne .d-acct__settings {
+    align-items: center;
+    margin-top: var(--d-s7);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__switch {
+    min-height: 64px;
+    padding: var(--d-s3) 0;
+    border-top: 1px solid var(--vault-hairline);
+    border-bottom: 1px solid var(--vault-hairline);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__out {
+    display: flex;
+    justify-content: flex-end;
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__out > .n-btn {
+    width: auto;
+    min-width: 280px;
+    padding: 0 var(--d-s7);
+  }
+
+  /* What the tier gives, in two columns as YOUR PROFILE's rows stand: the left on columns 1–5, the right on 7–12 (a
+     full column between their reading lines at every width), aligned at the top (§10.27), one layout for every tier:
+     YOUR TIER across, the tier's benefits on the left, IN USE then NEXT on the right, each with its own label; THE
+     CLUB's sentence with what a first piece opens (views/desktop-account.ts tierSection). */
+  html:not(.d-touch) body.nocturne .d-acct__more {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    column-gap: var(--d-gutter);
+    row-gap: var(--d-s5);
+    align-items: start;
+    margin-top: var(--d-s10);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__more-cell {
+    min-width: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__more-cell--l1,
+  html:not(.d-touch) body.nocturne .d-acct__more-cell--l2 {
+    grid-column: 1 / span 5;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__more-cell--r2 {
+    grid-column: 7 / -1;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__more-cell--l1 {
+    grid-row: 1;
+  }
+
+  html:not(.d-touch) body.nocturne :is(.d-acct__more-cell--l2, .d-acct__more-cell--r2) {
+    grid-row: 2;
+  }
+
+  /* A tier's: each column with its own label row, aligned at the top (§10.27): YOUR TIER over the benefits on the left,
+     on the line of IN USE or NEXT: … on the right; the benefits 16 px under it, on the line of the right column's
+     sentence (§10.4). */
+  html:not(.d-touch) body.nocturne .d-acct__more--headed > :is(.d-acct__more-cell--l2, .d-acct__more-cell--r2) {
+    grid-row: 1;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__more--headed > .d-acct__more-cell--l2 > #account-tier + * {
+    margin-top: var(--d-s4);
+  }
+
+  /* The right column's blocks (IN USE, NEXT: …, the highest tier's sentence) each from its own label, 32 px apart. */
+  html:not(.d-touch) body.nocturne .d-acct__more--headed > .d-acct__more-cell--r2 > * + * {
+    margin-top: var(--d-s6);
+  }
+
+  /* NEXT: …, its sentence 16 px under it, what it adds 24 px under that (§10.4). */
+  html:not(.d-touch) body.nocturne .d-acct__more .n-account__next {
+    max-width: none;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__more .n-account__next > * {
+    max-width: 36em;
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__more .n-account__next > .n-account__next-way {
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__more .n-account__next > .n-account__benefits {
+    margin-top: var(--d-s5);
+  }
+
+  /* Without a tier: THE CLUB's sentence, then what a first piece opens directly under it, its lines two to a row on
+     the halves of the grid (as YOUR TIER beside NEXT), so the sentence's colon leads to its list. */
+  html:not(.d-touch) body.nocturne .d-acct__more--club > .d-acct__more-cell--l2 {
+    grid-column: 1 / -1;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__more--club .d-acct__more-cell--l2 > .n-account__benefits {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    column-gap: var(--d-gutter);
+    max-width: none;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__more--club .n-account__benefits > .n-account__benefit:nth-child(odd) {
+    grid-column: 1 / span 5;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__more--club .n-account__benefits > .n-account__benefit:nth-child(even) {
+    grid-column: 7 / -1;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__more-cell > * {
+    max-width: 36em;
+    margin: 0;
+    padding: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__more-cell > * + * {
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__more .n-account__next-label {
+    color: var(--vault-soft);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__more .n-account__in-use > * {
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__more .n-account__in-use > * + * {
+    margin-top: var(--d-s3);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__more .n-account__in-use > .n-account__in-use-note {
+    max-width: 36em;
+    margin-top: var(--d-s5);
+  }
+
+  /* IN USE's rows across their column (hairline rows, not a reading measure), as the guarantees' beside them. */
+  html:not(.d-touch) body.nocturne .d-acct__more-cell > .n-account__in-use {
+    max-width: none;
+  }
+
+  /* Without a tier, IN USE (a birthday credit) follows what a first piece opens: a block of its own, 32 px under the
+     list as a tier's right column sets its blocks apart, its rows on the left half (columns 1–5, YOUR TIER's column)
+     instead of across the canvas. */
+  html:not(.d-touch) body.nocturne .d-acct__more--club .d-acct__more-cell > .n-account__in-use {
+    width: calc((100% - 11 * var(--d-gutter)) * 5 / 12 + 4 * var(--d-gutter));
+    margin-top: var(--d-s6);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__more .n-account__benefits {
+    gap: var(--d-s3);
+  }
+
+  /* NEXT's sentence in the reading text; what a tier gives in the Small role, as THE CLUB's lines (one size for every
+     list of a tier's benefits). */
+  html:not(.d-touch) body.nocturne .d-acct__more .n-account__next-way {
+    font-size: var(--d-fs-text);
+    line-height: var(--n-lh-tx);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__more .n-account__benefit {
+    font-size: var(--d-fs-small);
+    line-height: var(--n-lh-sm);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__more .n-account__benefit {
+    padding-left: var(--d-s5);
+  }
+
+  /* THE HOUSE'S GUARANTEE: one block per guarantee shown, two to a row on the halves of the grid (the right one on
+     column 7, as YOUR TIER's NEXT), so a release's name holds one line beside RELEASE (or one line under it where the
+     half is narrower, below 1200 px); the blocks of a row share their rows' heights (a subgrid): their sentences, their
+     rows and their notes start on one line. */
+  html:not(.d-touch) body.nocturne .d-acct__guarantees {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 0;
+    align-items: start;
+    margin-top: var(--d-s10);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__guarantees > .n-account__guarantee {
+    display: grid;
+    grid-row: span 4;
+    grid-template-rows: subgrid;
+    row-gap: 0;
+    align-content: start;
+    margin: 0;
+    padding: var(--d-s5) 0 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__guarantees > .n-account__guarantee:nth-child(n + 3) {
+    margin-top: var(--d-s7);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__guarantees > .n-account__guarantee > * {
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__guarantees .n-account__guarantee-sentence {
+    max-width: 36em;
+    margin-top: var(--d-s4);
+    font-size: var(--d-fs-text);
+    line-height: 1.6;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__guarantees > .n-account__guarantee > :is(.n-account__guarantee-rows, .n-account__guarantee-note) {
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__guarantees .n-account__guarantee-note {
+    max-width: 36em;
+  }
+
+  /* RELEASE and its release's name on one line where the half holds both, else the name on its own line under it, on
+     the left; the name itself never breaks (§10.9). */
+  html:not(.d-touch) body.nocturne .d-acct__guarantees .n-kv__row:has(.n-account__guarantee-release) {
+    flex-wrap: wrap;
+    row-gap: var(--d-s2);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__guarantees .n-kv__value:has(> .n-account__guarantee-release) {
+    flex: none;
+    min-width: auto;
+    text-align: left;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__guarantees .n-account__guarantee-release {
+    white-space: nowrap;
+  }
+
+  /* Below 1200 px a half holds no name beside RELEASE: every name on its own line, so the blocks of a row keep their
+     rows on one line. */
+  @media (max-width: 1199.98px) {
+    html:not(.d-touch) body.nocturne .d-acct__guarantees .n-kv__value:has(> .n-account__guarantee-release) {
+      flex-basis: 100%;
+    }
+  }
+
+  /* MY PIECES, THE CLUB, PRIVACY · TERMS · LEGAL · HELP: the sheet's last rows, hairline rows on the cards' columns. */
+  html:not(.d-touch) body.nocturne .d-acct__links {
+    margin-top: var(--d-s10);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__links > .n-row {
+    min-height: 64px;
+    padding: var(--d-s3) 0;
+    border-top: 1px solid var(--vault-hairline);
+  }
+
+  @media (max-width: 1199.98px) {
+    html:not(.d-touch) body.nocturne .d-acct__cards,
+    html:not(.d-touch) body.nocturne .d-acct__settings,
+    html:not(.d-touch) body.nocturne .d-acct__links {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    html:not(.d-touch) body.nocturne .d-acct__settings {
+      row-gap: var(--d-s5);
+    }
+
+    html:not(.d-touch) body.nocturne .d-acct__out {
+      grid-column: 2;
+    }
+
+    html:not(.d-touch) body.nocturne .d-acct__links {
+      row-gap: 0;
+    }
+  }
+
+  /* Not signed in (the session being read, the sign-in page or NOW on their way): ONE MOMENT… in the middle of the
+     window under the bar. */
+  html:not(.d-touch) body.nocturne .d-acct > .d-acct__loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: calc(100vh - var(--d-bar));
+    margin: 0;
+  }
+
+  /* ── 2. A section's page ──────────────────────────────────────────────────────────────────────────────────────── */
+
+  html:not(.d-touch) body.nocturne .d-acct > .d-acct__crumb-line {
+    padding-top: var(--d-s5);
+  }
+
+  /* The crumb as wide as its words (its chevron hanging before the edge): its pointer zone and its keyboard ring wrap
+     them, not the canvas's row (§10.16, §10.17). */
+  html:not(.d-touch) body.nocturne .d-acct__crumb-line > .d-acct__crumb {
+    width: max-content;
+    height: 44px;
+    margin: 0 0 0 calc(-16px - 6px);
+    padding: 0;
+    letter-spacing: var(--d-tr-label);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__sub {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    column-gap: var(--d-gutter);
+    margin-top: var(--d-s7);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.d-acct__subhead, .d-acct__body, .d-acct__rows) {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: subgrid;
+    align-items: start;
+  }
+
+  /* The title on columns 1–6 (up to the lead's column, less a gutter); the lead and what the section says now on 7–12. */
+  /* (Out of the flow, so the right column's lead and its form keep their own rhythm whatever the title's lines.) */
+  html:not(.d-touch) body.nocturne .d-acct__t1 {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: calc((var(--d-canvas) - 11 * var(--d-gutter)) / 12 * 6 + 5 * var(--d-gutter));
+    margin: 0;
+    /* T1, a little smaller in the narrowest windows (42 px at 1024, 44 from 1074) so YOUR ADDRESSES holds one line. */
+    font-size: min(var(--d-fs-t1), 4.1vw);
+    line-height: 1.04;
+    letter-spacing: var(--d-tr-t1);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__intro {
+    grid-column: 7 / -1;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__intro > * {
+    max-width: 32em;
+    margin: 0;
+    padding: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__intro > * + * {
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__intro > :first-child:is(.n-tx) {
+    font-size: var(--d-fs-lead);
+    line-height: 1.5;
+  }
+
+  /* What the section holds: on 7–12; a form at most 440 px (§10.22). */
+  html:not(.d-touch) body.nocturne .d-acct__body {
+    margin-top: var(--d-s7);
+  }
+
+  /* A page without a lead (MESSAGES): what it holds from the title's top. */
+  html:not(.d-touch) body.nocturne .d-acct__subhead:not(:has(> .d-acct__intro)) + .d-acct__body {
+    margin-top: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__body > * {
+    grid-column: 7 / -1;
+    margin: 0;
+    padding: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__body > form,
+  html:not(.d-touch) body.nocturne .d-acct__body > :is(.n-account__addresses-add, .n-messages__reply) form {
+    max-width: 440px;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__body > * + * {
+    margin-top: var(--d-s6);
+  }
+
+  /* YOUR PROFILE: each group a row of the page, its label on 1–5 (YOUR TASTES' sentence under it), its fields on 7–12. */
+  html:not(.d-touch) body.nocturne .d-acct__body > .d-acct__rows {
+    grid-column: 1 / -1;
+    max-width: none;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__row {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: subgrid;
+    align-items: start;
+    margin: 0;
+    padding: var(--d-s7) 0;
+    border-top: 1px solid var(--vault-hairline);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__row:first-child {
+    padding-top: 0;
+    border-top: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__row--end {
+    padding-bottom: 0;
+  }
+
+  /* The last row's first shown element (SAVE and CANCEL, or the date of birth's confirmation, or a refusal said there)
+     48 px under its hairline, as every row's first label: the form's own space above its actions is the row's. */
+  html:not(.d-touch) body.nocturne .d-acct__row--end > .d-acct__row-fields > :not([hidden]):not(:not([hidden]) ~ *) {
+    margin-top: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__row-side {
+    grid-column: 1 / span 5;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__row-side > * {
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__row-side > * + * {
+    max-width: 30em;
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__row-fields {
+    grid-column: 7 / -1;
+    max-width: 440px;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__row-fields > :first-child,
+  html:not(.d-touch) body.nocturne .d-acct__row-fields > .d-acct__pair:first-child > .n-fld-group {
+    margin-top: 0;
+  }
+
+  /* Fields that pair, side by side; YOUR SIZES two by two. */
+  html:not(.d-touch) body.nocturne :is(.d-acct__pair, .d-acct__grid2) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: var(--d-s5);
+    align-items: start;
+  }
+
+  /* DATE OF BIRTH's DAY, MONTH and YEAR: the pairs' 24 px between them (the phone's 10 px is off the scale). */
+  html:not(.d-touch) body.nocturne .d-acct .n-profile__dob {
+    column-gap: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__grid2 > .n-fld-group:nth-child(-n + 2) {
+    margin-top: 0;
+  }
+
+  /* YOUR TASTES: a choice no longer in the collection keeps NO LONGER IN THE COLLECTION on one line under it, from its
+     left edge in the left column, to its right edge in the right one, over the room beside it (§10.9); two such choices
+     side by side each keep theirs under them, as on the phone. */
+  html:not(.d-touch) body.nocturne .d-acct .n-profile__taste-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    min-width: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct .n-profile__taste-cell:nth-child(even) {
+    align-items: flex-end;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct .n-profile__taste-cell > .n-profile__taste {
+    align-self: stretch;
+  }
+
+  /* A finish's word beside its swatch in the choices' own label role (as BRACELET, SILVER): one size and tracking for
+     every choice (§10.5); the swatch as it is. */
+  html:not(.d-touch) body.nocturne .d-acct .n-profile__taste .n-fin__item {
+    font-size: inherit;
+    letter-spacing: inherit;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct .n-profile__taste-cell > .n-profile__taste-retired {
+    margin-top: var(--d-s2);
+    white-space: nowrap;
+    text-align: left;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct .n-profile__taste-cell:nth-child(even) > .n-profile__taste-retired {
+    text-align: right;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct .n-profile__taste-cell:nth-child(odd):has(> .n-profile__taste-retired):has(+ .n-profile__taste-cell > .n-profile__taste-retired) > .n-profile__taste-retired,
+  html:not(.d-touch) body.nocturne .d-acct .n-profile__taste-cell:nth-child(odd):has(> .n-profile__taste-retired) + .n-profile__taste-cell > .n-profile__taste-retired {
+    align-self: stretch;
+    white-space: normal;
+    text-align: center;
+  }
+
+  /* YOUR ADDRESSES: each address a hairline row; its links in a row; ADD AN ADDRESS under the list. */
+  html:not(.d-touch) body.nocturne .d-acct__body > .n-account__addresses-list {
+    border-top: 1px solid var(--vault-hairline);
+  }
+
+  html:not(.d-touch) body.nocturne .n-account__addresses-list > .n-account__address {
+    margin: 0;
+    padding: var(--d-s5) 0;
+    border-bottom: 1px solid var(--vault-hairline);
+  }
+
+  html:not(.d-touch) body.nocturne .n-account__address > .n-account__address-default {
+    margin: 0 0 var(--d-s3);
+  }
+
+  html:not(.d-touch) body.nocturne .n-account__address > .n-account__address-lines {
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-account__address > .n-account__address-links {
+    display: flex;
+    gap: var(--d-s6);
+    justify-content: flex-start;
+    margin: var(--d-s5) 0 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__body > .n-account__addresses-add > .n-btn,
+  html:not(.d-touch) body.nocturne .d-acct__body > :is(.n-profile__retry, .n-account__sizes-retry, .n-account__addresses-retry) > .n-btn {
+    width: auto;
+    min-width: 280px;
+    padding: 0 var(--d-s7);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__body > :is(.n-profile__retry, .n-account__sizes-retry) {
+    display: flex;
+    gap: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__body .n-account__address-switch {
+    margin-top: var(--d-s5);
+    padding: var(--d-s3) 0;
+    border-top: 1px solid var(--vault-hairline);
+    border-bottom: 1px solid var(--vault-hairline);
+    cursor: pointer;
+  }
+
+  /* The sheet's MESSAGES as a section's page (MESSAGES is now its own page in two parts, shared/desktop-messages.css). */
+  html:not(.d-touch) body.nocturne .d-acct__body > .n-messages__list {
+    max-width: 44em;
+  }
+
+  /* ── 3. Fields and forms of these pages (§10.22, §10.23) ──────────────────────────────────────────────────────── */
+
+  /* A result's forms too (REPORT UNUSUAL ACTIVITY's PLACE and NOTE, CLAIM CODE, OWNERSHIP's transfer code): every field
+     of a computer on one scale, the label at 11 px, the field 52 px high. */
+
+  html:not(.d-touch) body.nocturne :is(.d-acct, .d-signin__panel, .d-order, .d-msg, .view--piece, .view--result) .n-fld-group {
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.d-acct, .d-signin__panel, .d-order, .d-msg, .view--piece, .view--result) .n-fld .n-lab {
+    margin-bottom: var(--d-s2);
+    font-size: var(--d-fs-label);
+    line-height: 1.5;
+    letter-spacing: var(--d-tr-label);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.d-acct, .d-signin__panel, .d-order, .d-msg, .view--piece, .view--result) .n-fld__input:not(textarea) {
+    height: 52px;
+  }
+
+  html:not(.d-touch) body.nocturne :is(.d-acct, .d-signin__panel, .d-order, .d-msg, .view--piece, .view--result) .n-fld__input {
+    font-size: var(--d-fs-text);
+    transition: border-color var(--d-dur-hover) var(--d-ease);
+  }
+
+  /* Its focus is its own line in ink: no second ring round the field. A field to correct: its line 2 px of ink. */
+  html:not(.d-touch) body.nocturne :is(.d-acct, .d-signin__panel, .d-order, .d-msg, .view--piece, .view--result) .n-fld__input:focus-visible {
+    border-bottom-color: var(--vault-ink);
+    outline: none;
+  }
+
+  /* A field of several lines (an address, on YOUR ADDRESSES or an order's page) has room for its four: no grip of the
+     browser's in its corner (§10.22). */
+  html:not(.d-touch) body.nocturne :is(.d-acct, .d-order) textarea.n-fld__input {
+    resize: none;
+  }
+
+  html:not(.d-touch) body.nocturne :is(.d-acct, .d-signin__panel, .d-order, .d-msg, .view--piece, .view--result) .n-fld__input:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  /* The first field of a section's form, or of a row of YOUR PROFILE, stands on its column's top: 48 px under the lead
+     on every section's page, its label on its row's label (§10.4, §10.27). */
+  html:not(.d-touch) body.nocturne .d-acct .d-acct__body > form > .n-fld-group:first-child,
+  html:not(.d-touch) body.nocturne .d-acct .d-acct__body > form > :first-child > .n-fld-group:first-child,
+  html:not(.d-touch) body.nocturne .d-acct .d-acct__row-fields > .n-fld-group:first-child,
+  html:not(.d-touch) body.nocturne .d-acct .d-acct__row-fields > :first-child > .n-fld-group:first-child {
+    margin-top: 0;
+  }
+
+  html:not(.d-touch) body.nocturne :is(.d-acct, .d-signin__panel, .d-order, .d-msg, .view--piece, .view--result) .n-fld__input[aria-invalid="true"] {
+    border-bottom-color: var(--vault-ink);
+    box-shadow: inset 0 -1px 0 0 var(--vault-ink);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.d-acct, .d-signin__panel, .d-order, .d-msg, .view--piece, .view--result) .n-fld__hint {
+    margin-top: var(--d-s2);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.d-acct, .d-signin__panel, .d-order, .d-msg, .view--piece) .n-form .form__error {
+    margin-top: var(--d-s4);
+  }
+
+  /* …under the field to correct, which it describes (views/forms.ts placeUnderField): 8 px under it, as its hint; two
+     fields side by side, under their row (§10.22). */
+  html:not(.d-touch) body.nocturne .n-form :is(.n-fld-group, .d-acct__pair, .d-acct__grid2) + .form__error {
+    margin-top: var(--d-s2);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.d-acct, .d-signin__panel, .d-order, .d-msg, .view--piece) .n-form__actions {
+    margin-top: var(--d-s6);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.d-acct, .d-signin__panel, .d-order, .d-msg, .view--piece) .n-form__actions.n-duo {
+    gap: var(--d-s5);
+  }
+
+  /* A pending main button reads ONE MOMENT… at its own width (views/forms.ts): not dimmed as a disabled one. */
+  html:not(.d-touch) body.nocturne .n-btn[aria-busy="true"]:disabled {
+    opacity: 1;
+    cursor: default;
+  }
+
+  /* What a page holds hidden stays hidden (the sheet's views took it from their own section's rule). */
+  html:not(.d-touch) body.nocturne :is(.d-acct, .d-signin) [hidden] {
+    display: none !important;
+  }
+
+  html:not(.d-touch) body.nocturne :is(.d-acct, .d-signin__panel, .d-order, .d-msg, .view--piece) .n-form__actions .n-btn {
+    width: 100%;
+  }
+
+  /* ── 4. The sign-in page (§10.30) ─────────────────────────────────────────────────────────────────────────────── */
+
+  html:not(.d-touch) body.nocturne .view--signin {
+    padding-bottom: 0;
+  }
+
+  html:not(.d-touch) body.nocturne:not([data-banner]) .view--signin {
+    margin-top: calc(-1 * var(--d-bar));
+  }
+
+  html:not(.d-touch) body.nocturne .d-signin {
+    position: relative;
+    display: grid;
+    grid-template-columns: var(--d-page-grid);
+    column-gap: var(--d-gutter);
+    align-items: start;
+    min-height: var(--d-frame-page);
+    /* No room under the panel: a panel taller than the frame ends the section, 160 px above the footer as every page's
+       last section (§10.4); a shorter one leaves the frame's height, the photograph's foot 160 px above it. */
+    padding: var(--d-bar) 0 0;
+  }
+
+  /* The photograph: the window's height from the top under the bar, its veils as a frame's; the page under it on the
+     ground when a long form grows the page (the photograph itself never moves). It runs from the window's left edge to
+     96 px under the panel and dissolves into the ground from a gutter before the panel's left edge (light.css's eased
+     curve, as a frame's foot), so the panel stands on the dissolve and the ground and the piece stands whole beside it,
+     never under it, at every width (§10.10, §10.30). */
+  html:not(.d-touch) body.nocturne .d-signin {
+    --d-signin-under: var(--d-s9);
+    /* …never taller than wide (a narrow window's box, 1024 px: the piece then keeps its margins instead of growing to
+       the box's height, its foot dissolving into the ground as a frame's). */
+    --d-signin-photo-h: min(calc(var(--d-frame-page) * var(--d-signin-photo, 1)), calc(100vw - var(--d-edge) - 440px + var(--d-signin-under)));
+  }
+
+  /* What the top bar watches as the page's frame (shared/desktop.ts OPENING_FRAMES): from the page's top to the
+     photograph's foot or the panel's top, whichever comes first; the bar takes its ground and its hairline as its foot
+     passes, so its words never stand over the panel's fields (§10.14). */
+  html:not(.d-touch) body.nocturne .d-signin__over {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 1px;
+    height: min(var(--d-signin-photo-h), calc(var(--d-bar) + var(--d-signin-top, var(--d-s9))));
+    pointer-events: none;
+  }
+
+  html:not(.d-touch) body.nocturne .d-signin__photo {
+    --d-ph-h: var(--d-photo-h);
+    position: absolute;
+    top: 0;
+    right: calc(var(--d-edge) + 440px - var(--d-signin-under));
+    left: 0;
+    height: var(--d-signin-photo-h);
+    margin: 0;
+    overflow: hidden;
+    container-type: size;
+    background-color: var(--n-photo);
+  }
+
+  /* Its crop: the photograph covers the box (no bar); the piece's centre (--frame-focus-y, its height --frame-focus-h)
+     in the middle of the clear part beside the panel, at 40 % of the frame in the dark (its top 24 px under the bar at
+     least), in the middle of what is clear between the bar and the dissolve in the light. */
+  html:not(.d-touch) body.nocturne .d-signin .d-signin__photo > img {
+    --d-sz: max(100cqw, 100cqh);
+    --d-signin-at: max(calc(var(--d-bar) + var(--d-s5) + var(--frame-focus-h) * var(--d-sz) / 2), calc(var(--d-focus-at) * 100cqh));
+    object-fit: cover;
+    object-position:
+      clamp(calc(100cqw - var(--d-sz)), calc((100cqw - var(--d-signin-under) - var(--d-gutter)) / 2 - var(--d-sz) / 2), 0px)
+      clamp(calc(100cqh - var(--d-sz)), calc(var(--d-signin-at) - var(--frame-focus-y) * var(--d-sz)), 0px);
+  }
+
+  html[data-mode="light"]:not(.d-touch) body.nocturne .d-signin .d-signin__photo > img {
+    --d-signin-at: max(calc(var(--d-bar) + var(--d-s5) + var(--frame-focus-h) * var(--d-sz) / 2), calc((var(--d-bar) + var(--d-s5) + var(--d-dis) * 100cqh) / 2));
+  }
+
+  html:not(.d-touch) body.nocturne .d-signin__photo > img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+
+  html:not(.d-touch) body.nocturne .d-signin__photo.is-bare > img {
+    display: none;
+  }
+
+  html:not(.d-touch) body.nocturne .d-signin__photo::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 0;
+    left: 0;
+    z-index: 1;
+    height: 26%;
+    background: var(--d-scrim-top);
+  }
+
+  html:not(.d-touch) body.nocturne .d-signin__photo::after {
+    --d-w: calc(var(--d-signin-under) + var(--d-gutter));
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      var(--d-scrim-foot),
+      linear-gradient(
+        90deg,
+        transparent calc(100% - var(--d-w)),
+        color-mix(in srgb, var(--vault-ground) 3.4%, transparent) calc(100% - var(--d-w) * 0.8696),
+        color-mix(in srgb, var(--vault-ground) 12.6%, transparent) calc(100% - var(--d-w) * 0.7609),
+        color-mix(in srgb, var(--vault-ground) 25.9%, transparent) calc(100% - var(--d-w) * 0.6522),
+        color-mix(in srgb, var(--vault-ground) 41.7%, transparent) calc(100% - var(--d-w) * 0.5435),
+        color-mix(in srgb, var(--vault-ground) 58.3%, transparent) calc(100% - var(--d-w) * 0.4348),
+        color-mix(in srgb, var(--vault-ground) 74.1%, transparent) calc(100% - var(--d-w) * 0.3261),
+        color-mix(in srgb, var(--vault-ground) 87.4%, transparent) calc(100% - var(--d-w) * 0.2174),
+        color-mix(in srgb, var(--vault-ground) 96.6%, transparent) calc(100% - var(--d-w) * 0.1087),
+        var(--vault-ground) 100%
+      );
+  }
+
+  /* The page's title and its lead: in the photograph's lower third on the left, their foot 72 px above its foot. */
+  html:not(.d-touch) body.nocturne .d-signin__words {
+    position: absolute;
+    top: calc(var(--d-frame-page) - var(--d-frame-foot));
+    left: var(--d-edge);
+    z-index: 2;
+    width: calc(var(--d-canvas) - 440px - var(--d-s8));
+    transform: translateY(-100%);
+  }
+
+  html:not(.d-touch) body.nocturne .d-signin__title {
+    margin: 0;
+    font-size: var(--d-fs-d2);
+    line-height: 1.04;
+    letter-spacing: var(--d-tr-d23);
+  }
+
+  html:not(.d-touch) body.nocturne .d-signin__lead {
+    max-width: 32em;
+    margin: var(--d-s5) 0 0;
+    font-size: var(--d-fs-lead);
+    line-height: 1.5;
+  }
+
+  html:not([data-mode="light"]):not(.d-touch) body.nocturne .d-signin__words {
+    --vault-soft: var(--d-on-photo-soft);
+    color: var(--d-on-photo-ink);
+  }
+
+  html:not([data-mode="light"]):not(.d-touch) body.nocturne .d-signin__lead {
+    color: var(--d-on-photo-ink);
+  }
+
+  /* The panel: a solid ground (no blur, no transparency), 440 px on the right edge; its top where the page first set it
+     (views/desktop-signin.ts), its steps swapped inside it. */
+  html:not(.d-touch) body.nocturne .d-signin__panel {
+    position: relative;
+    z-index: 2;
+    grid-column: canvas;
+    justify-self: end;
+    width: 440px;
+    margin-top: var(--d-signin-top, var(--d-s9));
+    padding: var(--d-s7) var(--d-s6);
+    border: 1px solid var(--vault-hairline);
+    background-color: var(--vault-ground);
+  }
+
+  /* Shown once its place is set (views/desktop-signin.ts), so it never moves as the page loads. */
+  html:not(.d-touch) body.nocturne .d-signin__panel:not(.is-placed) {
+    visibility: hidden;
+  }
+
+  html:not(.d-touch) body.nocturne .d-signin__panel > .n-own > * {
+    margin-top: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-signin__panel .n-own__switch {
+    margin: 0;
+  }
+
+  /* 48 px between the tab row and what follows (§10.26). */
+  html:not(.d-touch) body.nocturne .d-signin__panel .n-switch2 + * {
+    margin-top: var(--d-s7);
+  }
+
+  html:not(.d-touch) body.nocturne .d-signin__panel .n-own > .n-form > .n-fld-group:first-child,
+  html:not(.d-touch) body.nocturne .d-signin__panel .n-own > .n-form > .d-acct__pair:first-child > .n-fld-group {
+    margin-top: 0;
+  }
+
+  /* FORGOTTEN PASSWORD?, BACK TO SIGN IN: under the form, on its edge. */
+  html:not(.d-touch) body.nocturne .d-signin__panel .n-own__tl-line {
+    margin-top: var(--d-s6);
+    text-align: left;
+  }
+
+  html:not(.d-touch) body.nocturne .d-signin__panel :is(.n-own__terms, .n-own__notice, .n-own__error) {
+    margin-top: var(--d-s5);
+  }
+
+  /* A sign-in refused: said under the form's last line (C18), 24 px under it. */
+  html:not(.d-touch) body.nocturne .d-signin__panel .n-own > .n-err {
+    margin-top: var(--d-s5);
+  }
+
+  /* Under CREATE ACCOUNT, the terms it accepts: the sentence, then TERMS OF USE · PRIVACY POLICY together on a line. */
+  html:not(.d-touch) body.nocturne .d-signin__panel .n-own__terms > span:first-child {
+    display: block;
+    margin-bottom: var(--d-s2);
+  }
+
+  /* FORGOTTEN PASSWORD's steps: the title, its sentence, ORBES Client Services' email, then the way on. */
+  html:not(.d-touch) body.nocturne .d-signin__panel .n-own__heading {
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-signin__panel .n-own__heading + .n-own__text {
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne .d-signin__panel .n-own__text + .n-form {
+    margin-top: var(--d-s6);
+  }
+
+  html:not(.d-touch) body.nocturne .d-signin__panel .n-own__text + .n-form > .n-fld-group:first-child {
+    margin-top: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-signin__panel :is(.n-contact, .n-own__action) {
+    margin-top: var(--d-s6);
+  }
+
+  html:not(.d-touch) body.nocturne .d-signin__panel .n-own__action {
+    width: 100%;
+  }
+
+  /* In the light mode, as every light page frame: the photograph keeps the frame down to 24 px above the title and its
+     lead (views/desktop-signin.ts measures them), dissolving into the white at its foot, where they stand in ink; it
+     runs under the panel to the panel's centre, its side's dissolve ending there, so the panel (white, one fine line)
+     stands over the photograph and not beside it; the piece stays whole left of the panel (§3, §10.28, §10.30). */
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .d-signin {
+    /* As far under the panel as the piece stays a gutter clear of it (its width --frame-focus-w, centred in the
+       photograph as wide as its box): 96 px at least (a narrow window), half the panel at most (a wide one). */
+    --d-signin-under: clamp(var(--d-s9), calc(((1 - var(--frame-focus-w)) / 2 * (100vw - var(--d-edge) - 440px) - var(--d-gutter)) / ((1 + var(--frame-focus-w)) / 2)), calc(440px / 2));
+    --d-signin-photo-h: min(calc(var(--d-frame-page) - var(--d-frame-foot) - var(--d-signin-words-h, 160px) - var(--d-s5)), calc(100vw - var(--d-edge) - 440px + var(--d-signin-under)));
+  }
+
+  /* The account's pages mark the account button, the sign-in page SIGN IN: their words in ink, as the menu's current. */
+  html:not(.d-touch) body.nocturne .n-hd .n-acct[aria-current="page"] {
+    color: var(--vault-ink);
+  }
+
+  /* ── 5. The line where the phone embeds the sign-in: SIGN IN and CREATE ACCOUNT, to the sign-in page ──────────── */
+
+  /* Two buttons side by side, main action first (§10.22): 280 px each where the column holds them, sharing a narrower
+     one (208 px each in a 440 px column, 241 in a result's 506 px), as SAVE and CANCEL share a form's 440 px; one under
+     the other only in a column under 392 px (184 + 24 + 184), where CREATE ACCOUNT would not hold on half of it (the
+     write sheet's). */
+  html:not(.d-touch) .d-signin-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--d-s5);
+    margin-top: var(--d-s6);
+  }
+
+  html:not(.d-touch) .d-signin-line > :is(.n-btn, .btn),
+  html:not(.d-touch) .d-room .d-signin-line > .btn {
+    /* Halves of the line less half the gap as their base (not 0: an outlined button's line counts in it, so both are
+       one width): the two bases and the gap fill the line exactly, so it breaks only where a half is under 184 px. */
+    flex: 1 1 calc(50% - var(--d-s5) / 2);
+    width: auto;
+    min-width: 184px;
+    max-width: 280px;
+    margin: 0;
+    padding: 0 var(--d-s3);
+  }
+
+  /* In the room (SIGN IN TO ENTER): the sentence and the line under the title, in the centre, on the photograph (the
+     forms are the sign-in page's). */
+  html:not(.d-touch) .d-room .d-room__body > .live__panel:has(.d-signin-line) {
+    width: min(100%, 584px);
+    padding: 0;
+    background-color: transparent;
+    text-align: center;
+  }
+
+  html:not(.d-touch) .d-room .live__panel .d-signin-line {
+    justify-content: center;
+  }
+
+  html:not(.d-touch) .d-room .live__panel:has(.d-signin-line) .ownership {
+    padding-top: 0;
+  }
+
+  html:not(.d-touch) .d-room .live__panel:has(.d-signin-line) .ownership__text {
+    max-width: min(100%, 30em);
+    margin: 0 auto;
+    color: var(--d-room-soft);
+    font-size: var(--d-fs-text);
+    line-height: 1.6;
+    letter-spacing: 0;
+    text-wrap: pretty;
+  }
+
+  /* A piece's page signed out: the sentence and the line on the edge, as its title. */
+  html:not(.d-touch) body.nocturne .view--piece .pieces__signin {
+    padding: 0 var(--d-edge);
+  }
+
+  /* …its sentence at a lead's measure (§10.5), as the signed-out pages' leads. */
+  html:not(.d-touch) body.nocturne .view--piece .pieces__signin .n-tx {
+    max-width: 32em;
+  }
+
+  /* MY PIECES and THE CIRCLE signed out: the title, its lead and the line on the edge, as a piece's signed-out page,
+     never a centred stack (§10.1, §10.24). */
+  html:not(.d-touch) body.nocturne main.view:is(.view--pieces:has(.pieces__signin), .view--circle:has(.circle__signin)) {
+    --n-margin: var(--d-edge);
+    max-width: none;
+    margin-right: 0;
+    margin-left: 0;
+  }
+
+  html:not(.d-touch) body.nocturne main.view.view--pieces .pieces__signin .n-tx,
+  html:not(.d-touch) body.nocturne main.view.view--circle:has(.circle__signin) :is(.circle__signin .n-tx, .n-circle__head > .n-lead) {
+    max-width: 32em;
+  }
+}
+
+/* ══ Hover, pressed: the account's cards and rows (§10.16) ══════════════════════════════════════════════════════════ */
+
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  html:not(.d-touch) body.nocturne .d-acct__card:hover {
+    border-color: var(--vault-ink);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__card:hover .n-ic {
+    color: var(--vault-ink);
+  }
+
+  html:not(.d-touch) body.nocturne .d-acct__card:active {
+    border-color: var(--vault-ink);
+    background-color: var(--d-press-ground);
+    transition-duration: var(--d-dur-press);
+  }
+
+  /* A switch's row: anywhere on it, its switch takes its hover (the row is the switch's label; its ground hangs outside
+     it as every hairline row's, shared/desktop.css). */
+  html:not(.d-touch) body.nocturne :is(.d-acct__switch, .n-account__address-switch):hover .n-sw__input:not(:checked, :disabled) + .n-sw__track {
+    box-shadow: inset 0 0 0 1px var(--vault-ink);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.d-acct__switch, .n-account__address-switch):hover .n-sw__input:checked:not(:disabled) + .n-sw__track {
+    background-color: color-mix(in srgb, var(--vault-ink) 88%, var(--vault-ground));
+  }
+
+}

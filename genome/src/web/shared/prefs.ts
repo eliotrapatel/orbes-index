@@ -25,6 +25,11 @@ export interface PrefStorage {
 export const SOUND_PREF_KEY = 'orbes.sound';
 /** Its one stored value: the sound was turned off. Turned back on, the key is removed (the default). */
 export const SOUND_OFF = 'off';
+/**
+ * Desktop (BRIEF §5.10): a computer's default is off, so turning the sound on there is kept as such (a phone
+ * keeps its key removed for on, its default).
+ */
+export const SOUND_ON = 'on';
 
 /** The key of the light mode's preference: shared/mode-early.ts reads it by name (the privacy policy's sentence on
  *  the device's preferences names it from its next version on). */
@@ -62,14 +67,23 @@ export function writePref(key: string, value: string | null, storage: PrefStorag
   }
 }
 
-/** Whether the sound signature plays (P-D07): on unless it was turned off on this device. */
-export function soundPref(storage: PrefStorage | null = deviceStorage()): boolean {
-  return readPref(SOUND_PREF_KEY, storage) !== SOUND_OFF;
+/**
+ * Whether the sound signature plays (P-D07): on unless it was turned off on this device. Desktop: `fallback`
+ * is the default when nothing is kept (off on a computer, BRIEF §5.10), and a kept `on` reads on.
+ */
+export function soundPref(storage: PrefStorage | null = deviceStorage(), fallback = true): boolean {
+  const kept = readPref(SOUND_PREF_KEY, storage);
+  if (kept === SOUND_OFF) return false;
+  if (kept === SOUND_ON) return true;
+  return fallback;
 }
 
-/** Keep the sound preference: off is stored, on removes the key (the default). */
-export function setSoundPref(on: boolean, storage: PrefStorage | null = deviceStorage()): boolean {
-  return writePref(SOUND_PREF_KEY, on ? null : SOUND_OFF, storage);
+/**
+ * Keep the sound preference: off is stored, on removes the key (the default). Desktop: `keepOn` (a computer,
+ * whose default is off) stores on as well.
+ */
+export function setSoundPref(on: boolean, storage: PrefStorage | null = deviceStorage(), keepOn = false): boolean {
+  return writePref(SOUND_PREF_KEY, on ? (keepOn ? SOUND_ON : null) : SOUND_OFF, storage);
 }
 
 /** Whether the light mode is on: off (NOCTURNE's dark) unless it was turned on on this device. */

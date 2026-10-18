@@ -31,6 +31,7 @@
  * Nothing the server did not send: a photograph is taken from this origin's
  * media route only, an address only if it is one.
  */
+import { onComputer } from '../shared/desktop.js';
 import { isLookbookSlug } from '../shared/lookbook.js';
 import { RELEASES } from './copy.js';
 import type { ClubEntry, DrawSizeRef, DropCard, DropEntryStatus, DropSheet, DropState, DrawEntry, Participation, PastRelease } from './types.js';
@@ -142,7 +143,10 @@ export interface TwoClocks {
 export function twoClocks(iso: string, offsetMinutes: number): TwoClocks {
   const utc = formatDateTime(iso, 0);
   if (!utc) return { utc: '', local: null };
-  return { utc: RELEASES.utc(utc), local: offsetMinutes === 0 ? null : RELEASES.onThisPhone(formatDateTime(iso, offsetMinutes), utcOffsetLabel(offsetMinutes)) };
+  // On a computer, its clock is said so (desktop, decision 8), whatever its window's width (D6); the time and its zone
+  // stay as they are.
+  const local = onComputer() ? RELEASES.onThisComputer : RELEASES.onThisPhone;
+  return { utc: RELEASES.utc(utc), local: offsetMinutes === 0 ? null : local(formatDateTime(iso, offsetMinutes), utcOffsetLabel(offsetMinutes)) };
 }
 
 export interface ReleasePhoto {

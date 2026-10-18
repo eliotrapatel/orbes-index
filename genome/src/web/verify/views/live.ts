@@ -67,7 +67,9 @@ import { bracket } from '../../shared/corners.js';
 import { h, prefersReducedMotion, s } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { GUARANTEE, HOW, LIVE, LOOKBOOK, PIECES, RELEASES } from '../copy.js';
+import { DESKTOP, GUARANTEE, HOW, LIVE, LOOKBOOK, PIECES, RELEASES, TIER } from '../copy.js';
+import { CLUB_PATH } from '../club-model.js';
+import { isDesktop, onDesktopChange, touchLayout } from '../../shared/desktop.js';
 import { HOW_PATH } from '../how-model.js';
 import {
   addonChoices,
@@ -117,13 +119,14 @@ import { formatMoney as money, upper } from '../view-model.js';
 import { referenceWords, releaseContext } from '../messages-model.js';
 import { dayAndHour, legalLinks, lookbookLink, PIECES_PATH, piecesLink, releasesLink, soundToggle, toneMark, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
-import { appAnchor, button, countdown as countdownView, fadedPhoto, failedState, icon, loadingState, modelTitle, monogram, sizeButtons, textLink } from './nocturne.js';
+import { appAnchor, button, copyrightLine, countdown as countdownView, fadedPhoto, failedState, icon, loadingState, modelTitle, monogram, sizeButtons, textLink } from './nocturne.js';
 import { writeButton } from './write.js';
 import { OwnershipPanel } from './ownership.js';
 import { QuestionBlock } from './question.js';
 import { CEREMONY_VIBRATION } from './result.js';
 import { storyButton } from './story.js';
 import { StoryCards } from '../story-card.js';
+import { DesktopRoom, type RoomFacts } from './desktop-room.js';
 
 /** The state read while the stream is lost. */
 export const LIVE_POLL_MS = 2000;
@@ -156,7 +159,8 @@ const FINAL = new Set(['CONFIRMED', 'MISSED', 'EXPIRED', 'RELEASED', 'REMOVED', 
 const OPEN = new Set(['WAITING', 'QUEUED', 'TURN', 'SECURED']);
 /**
  * The screens drawn in NOCTURNE with its chrome (choice 4; C20, C27–C30): the release announced, its final page, and the
- * pages that end a visit (fidelity rule 6). Every other screen is the room's, kept as lot E built it.
+ * pages that end a visit (fidelity rule 6). Every other screen is the room's, kept as lot E built it. On a computer the
+ * pages that end a visit are the room's too (desktop, decision 7: stagedEnd).
  */
 const END_PAGES: ReadonlySet<string> = new Set(['missed', 'expired', 'released', 'left', 'removed', 'ended', 'over']);
 
@@ -178,6 +182,8 @@ export interface LiveDeps {
   onReleases(): void;
   /** HOW RELEASES WORK (plan NEXT-NINE, FT-01): the last line of NOCTURNE's pages, the first of the room's foot. */
   onHow(): void;
+  /** THE CLUB, in an end page's foot on a computer (desktop, decision 7: the app's footer is not shown there). */
+  onClub?(): void;
   onPieces(): void;
   onScan(): void;
   /** SEE THE MODEL: the model's sheet in the lookbook (`/verify/lookbook/<slug>`), from the photograph's stage. */
@@ -189,9 +195,10 @@ export interface LiveDeps {
   /**
    * NOCTURNE's chrome (the header, the rail, the SCAN ring, the footer): shown on the release's pages before and after
    * the room (announced, its final page, the end of a visit), hidden inside it (choice 4: the door, the line, the turn,
-   * the hold, CONFIRMED, the after-room), told at each change of screen.
+   * the hold, CONFIRMED, the after-room), told at each change of screen. `drawn` (desktop, decision 7):
+   * whether the chrome is on screen, false on a computer for an end page staged as the room (`shown` keeps its meaning).
    */
-  onChrome?(shown: boolean): void;
+  onChrome?(shown: boolean, drawn?: boolean): void;
 }
 
 export function liveView(deps: LiveDeps): LiveView {
@@ -225,7 +232,11 @@ const isApi = (e: unknown, code: string) => e instanceof ApiError && e.code === 
 class LivePage {
   readonly root: HTMLElement;
   private readonly notice = h('div', { class: 'live__notice', attrs: { 'aria-live': 'polite' } });
+  private readonly head = h('header', { class: 'live__head' }, h('span', { class: 'wordmark wordmark--small live__wordmark', attrs: { 'aria-hidden': 'true' }, text: 'ORBES' }), this.notice);
   private readonly stage = h('div', { class: 'live__stage' });
+  /** Desktop (decision 7): the Cinema room, on a computer only (views/desktop-room.ts); null on a phone. */
+  private cinema: DesktopRoom | null = null;
+  private offDesktop: (() => void) | null = null;
   private readonly foot = h('footer', { class: 'live__foot' });
   /**
    * HOW RELEASES WORK, first in the room's foot (plan NEXT-NINE, FT-01): in the app; in a new tab while the collector holds
@@ -310,13 +321,24 @@ class LivePage {
     this.root.classList.add('vault');
     this.sheet = deps.sheet;
     this.root.append(
-      h('header', { class: 'live__head' }, h('span', { class: 'wordmark wordmark--small live__wordmark', attrs: { 'aria-hidden': 'true' }, text: 'ORBES' }), this.notice),
+      this.head,
       this.stage,
       this.foot,
       this.polite,
       this.assertive,
     );
     this.unsubscribe = deps.session.subscribe(() => this.onSession());
+    // A window crossing the desktop breakpoint: the room staged for the computer, or back as the phone draws it. An end
+    // page changes its look and chrome with it (NOCTURNE's on a phone, the room's on a computer): drawn again.
+    this.offDesktop = onDesktopChange((desktop) => {
+      if (!desktop) this.cinema?.undo();
+      if (this.screen && END_PAGES.has(this.screen.kind)) this.rebuild();
+      else if (this.screen) {
+        // The room's foot in the order of the window's layout (SOUND in the legal row on a computer, apart on a phone).
+        this.renderFoot(this.screen);
+        if (desktop) this.stageRoom();
+      }
+    });
     this.render();
     if (this.sheet) void this.start();
   }
@@ -325,6 +347,9 @@ class LivePage {
     this.disposed = true;
     this.unsubscribe?.();
     this.unsubscribe = null;
+    this.offDesktop?.();
+    this.offDesktop = null;
+    this.cinema?.undo();
     this.signIn?.dispose();
     this.signIn = null;
     this.thereSignIn?.dispose();
@@ -689,6 +714,40 @@ class LivePage {
     else this.screen.update();
     this.renderNotice();
     this.syncHowFoot();
+    if (this.cinema && isDesktop()) this.cinema.update(this.roomFacts());
+  }
+
+  /** Desktop (decision 7): the screen on show staged as the Cinema room, on a computer. */
+  private stageRoom(): void {
+    if (!this.screen || !isDesktop()) return;
+    this.cinema ??= new DesktopRoom(this.root, this.head, this.notice);
+    this.cinema.arrange(this.screen.kind, this.screen.el, this.roomFacts());
+  }
+
+  /**
+   * What the Cinema room's corners say (decision 7): the release's photograph, its title with its variant, the account's
+   * choice on the screens of the line (`SIZE 17 · 1 PIECE`; at the turn its price after it, as the seal's line says it),
+   * the people in the room.
+   */
+  private roomFacts(): RoomFacts {
+    const sheet = this.sheet;
+    const picture = sheet ? pictureOf(sheet) : null;
+    const e = heldEntry(this.entry);
+    const kind = this.screen?.kind;
+    let choice: string | null = null;
+    if (e && (kind === 'line' || kind === 'soldOut' || kind === 'turn')) {
+      const parts = [LIVE.size(e.size.label), DESKTOP.room.pieces(e.quantity)];
+      if (kind === 'turn') parts.push(formatMoney(e.priceMinor * e.quantity, e.currency));
+      choice = parts.join(' · ');
+    }
+    return {
+      photo: picture?.kind === 'photo' ? picture.src : null,
+      name: this.name(),
+      model: sheet?.name ? upper(sheet.name) : this.name(),
+      heading: (sheet ? liveHeading(sheet) : null) ?? this.name(),
+      choice,
+      count: this.room?.inRoom ?? null,
+    };
   }
 
   /** The room's HOW RELEASES WORK opens a new tab while the collector holds an entry, the app's page otherwise. */
@@ -712,6 +771,13 @@ class LivePage {
     this.deps.onHow();
   }
 
+  /** THE CLUB in an end page's foot on a computer (decision 7): in the app, as the app's footer opens it. */
+  private openClub(ev: MouseEvent): void {
+    if (!this.deps.onClub || ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+    ev.preventDefault();
+    this.deps.onClub();
+  }
+
   /** HOW RELEASES WORK, the last line of NOCTURNE's pages of the release (announced, its end pages, its final page). */
   private howLine(): HTMLElement {
     return h('p', { class: 'n-px n-ctr n-live__how' }, textLink(HOW.link, { href: HOW_PATH, onOpen: () => this.deps.onHow(), extraClass: 'n-live__how-link' }));
@@ -732,17 +798,22 @@ class LivePage {
     const screen = this.build(kind, revealing);
     this.screen = screen;
     screen.el.classList.add('live__screen');
+    // The Cinema room (a computer): what the screen leaving had borrowed (the host's messages) back in its place first.
+    this.cinema?.release();
     this.stage.replaceChildren(screen.el);
     this.root.dataset.screen = kind;
-    // Before and after the room, NOCTURNE's look and chrome; inside it, the room's own (choice 4, fidelity rule 6).
+    // Before and after the room, NOCTURNE's look and chrome; inside it, the room's own (choice 4, fidelity rule 6). On a
+    // computer the end pages are the room's too (desktop, decision 7): its look, no menu, SCAN or account.
     const nocturne = this.nocturne(kind);
-    this.root.classList.toggle('is-nocturne', nocturne);
-    this.deps.onChrome?.(nocturne);
+    const look = nocturne && !this.stagedEnd(kind);
+    this.root.classList.toggle('is-nocturne', look);
+    this.deps.onChrome?.(nocturne, look);
     // Out into the light: CONFIRMED in the ivory house style; every other screen in the vault.
     this.root.classList.toggle('vault', kind !== 'confirmed');
     this.root.classList.toggle('is-light', kind === 'confirmed');
     this.renderFoot(screen);
     screen.update();
+    this.stageRoom();
     if (previous !== undefined && hadFocus) (screen.focus ?? screen.el.querySelector<HTMLElement>('h1'))?.focus({ preventScroll: kind !== 'turn' });
     if (kind !== previous && kind === 'turn') this.say(this.returned ? LIVE.announce.returned : LIVE.announce.turn, true);
     if (kind !== previous && revealing) this.say(LIVE.announce.secured(this.name()));
@@ -754,6 +825,11 @@ class LivePage {
     if (kind === 'announced' || kind === 'past' || kind === 'failed') return true;
     if (kind === 'loading') return isEndedSheet(this.sheet);
     return END_PAGES.has(kind);
+  }
+
+  /** Desktop (decision 7): an end page on a computer, staged as the Cinema room (views/desktop-room.ts). */
+  private stagedEnd(kind: LiveScreenKind | 'failed'): boolean {
+    return END_PAGES.has(kind) && isDesktop();
   }
 
   private say(text: string, urgent = false): void {
@@ -782,15 +858,24 @@ class LivePage {
   private renderFoot(screen: Screen): void {
     const kind = screen.kind;
     // NOCTURNE's screens have the chrome's footer (SOUND, the legal pages) and THE RELEASES in their own words.
-    if (this.nocturne(kind)) {
+    const end = this.stagedEnd(kind);
+    if (this.nocturne(kind) && !end) {
       this.foot.replaceChildren();
       return;
     }
     // A page whose one action is THE RELEASES: the foot does not say it twice. HOW RELEASES WORK comes first (FT-01).
     const back = screen.back ? null : releasesLink(() => this.deps.onReleases(), { extraClass: 'live__releases' });
     const sound = kind === 'confirmed' ? null : soundToggle(this.deps.sound, 'live__sound');
+    // An end page on a computer (decision 7): the room's foot, with what the app's footer says there on a phone (THE
+    // CLUB, the copyright line), so nothing of the page goes (decision 12).
+    const club = end ? h('a', { class: 'textlink live__club', attrs: { href: CLUB_PATH }, text: TIER.club, on: { click: (ev) => this.openClub(ev) } }) : null;
+    const legal = legalLinks({ extraClass: 'live__legal' });
+    // On a computer the foot is one row with SOUND at its right end (desktop, decision 7): SOUND after the legal
+    // pages and before DB-IP's line, so the tab order follows the eye (§10.17). The phone's foot keeps its order.
+    const soundInLegal = sound !== null && isDesktop();
+    if (soundInLegal) legal.insertBefore(sound, legal.querySelector(':scope > .legal-links__credit'));
     this.syncHowFoot();
-    this.foot.replaceChildren(...[this.howFoot, back, sound, legalLinks({ extraClass: 'live__legal' })].filter((x): x is HTMLElement => x !== null));
+    this.foot.replaceChildren(...[this.howFoot, back, club, soundInLegal ? null : sound, legal, end ? copyrightLine('live__cr') : null].filter((x): x is HTMLElement => x !== null));
   }
 
   private build(kind: LiveScreenKind | 'failed', revealing = false): Screen {
@@ -1119,7 +1204,8 @@ class LivePage {
           };
           open.addEventListener('click', () => {
             show();
-            panel.querySelector<HTMLInputElement>('input')?.focus();
+            // (On a computer, the line to the sign-in page: its SIGN IN.)
+            panel.querySelector<HTMLElement>('input, .d-signin-line__in')?.focus();
           });
           body.replaceChildren(h('p', { class: 'n-live__there-open-line' }, open), lead, panel);
           // Opened before (the page drawn again since): it stays open.
@@ -1272,7 +1358,7 @@ class LivePage {
     }
     this.render();
     // The action gone (said, or withdrawn): the keyboard's focus on the size now said, else on the action back.
-    if (from && !from.isConnected) requestAnimationFrame(() => this.root.querySelector<HTMLElement>('.n-live__there .live__size[aria-pressed="true"], .n-live__there-action')?.focus());
+    if (from && !from.isConnected) requestAnimationFrame(() => this.root.querySelector<HTMLElement>('.n-live__there .live__size[aria-pressed="true"], .n-live__there-action')?.focus({ preventScroll: isDesktop() }));
   }
 
   private signInScreen(): Screen {
@@ -1558,7 +1644,8 @@ class LivePage {
       () => {
         // ENTER goes once entered: the keyboard's focus moves to the size now chosen, still changeable until T0.
         requestAnimationFrame(() => {
-          if (document.activeElement === from || document.activeElement === document.body) this.root.querySelector<HTMLElement>('.live__size[aria-pressed="true"]')?.focus();
+          // On a computer the room is staged in the window (views/desktop-room.ts): the focus moves without scrolling it.
+          if (document.activeElement === from || document.activeElement === document.body) this.root.querySelector<HTMLElement>('.live__size[aria-pressed="true"]')?.focus({ preventScroll: isDesktop() });
         });
       },
     );
@@ -2089,7 +2176,8 @@ class LivePage {
       h(
         'dl',
         { class: 'n-live__receipt-rows' },
-        ...rows.map(([label, value]) => h('div', { class: 'n-kv__row' }, h('dt', { class: 'n-g n-kv__label' }, ...withNumerals(label)), h('dd', { class: 'n-kv__value n-num', text: value }))),
+        // The reference selected whole in one click on a computer (§10.19): its value marked (a phone's as before).
+        ...rows.map(([label, value]) => h('div', { class: 'n-kv__row' }, h('dt', { class: 'n-g n-kv__label' }, ...withNumerals(label)), h('dd', { class: ['n-kv__value', 'n-num', label === LIVE.rows.reference && !touchLayout() ? 'n-live__ref' : null], text: value }))),
       ),
       h('p', { class: 'n-live__receipt-link' }, appAnchor(PIECES_PATH, ['n-g', 'n-live__pieces'], () => this.deps.onPieces(), PIECES.link)),
     );

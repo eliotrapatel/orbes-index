@@ -1,0 +1,205 @@
+/*
+ * The legal pages on a computer (desktop, BRIEF §3, §10.1, §10.5, §10.17, §10.25, §10.26; legal/main.ts):
+ * imported by legal/desktop.css, which the shell links under the desktop's query. A phone keeps its column: every rule
+ * lives in the desktop's query (the hover and pressed states of a section's link are in shared/desktop-pointer.css).
+ *
+ * Each page on the grid: its four pages as tabs on the edge, 48 px under the bar; the version and the language on one
+ * line; the title (T1) 72 px under it. A text: under its title, the list of its sections on columns 1–4, beside the
+ * text on 6–12 at its measure (36 em), the introduction then every section; the list stays in view while the text is
+ * read (sticky under the bar; it scrolls on its own, thin, when the window is too short for it). The index: its title
+ * and sentence on 1–5 beside the four pages' rows on 7–12. The footer in one row: the four pages, VERIFY A PIECE on
+ * the right edge; then © ORBES · GENOME CODE · PARIS and DB-IP's attribution.
+ */
+
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  html:not(.d-touch) body.nocturne main.legal {
+    --n-margin: var(--d-edge);
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    column-gap: var(--d-gutter);
+    align-content: start;
+    width: auto;
+    max-width: none;
+    margin: 0;
+    padding: 0 var(--d-edge);
+  }
+
+  html:not(.d-touch) body.nocturne main.legal > * {
+    grid-column: 1 / -1;
+    min-width: 0;
+    padding-right: 0;
+    padding-left: 0;
+  }
+
+  /* The four pages, 48 px under the bar; the version line 48 px under their hairline (shared/desktop.css). */
+  html:not(.d-touch) body.nocturne main.legal > .legal-pages {
+    margin-top: var(--d-s7);
+  }
+
+  html:not(.d-touch) body.nocturne main.legal .legal-nav {
+    flex-wrap: nowrap;
+  }
+
+  /* The title: a sub-page's (T1), 72 px under the version line. */
+  html:not(.d-touch) body.nocturne main.legal > .legal-titles {
+    margin-top: var(--d-s8);
+  }
+
+  html:not(.d-touch) body.nocturne main.legal .legal__title {
+    margin: 0;
+    font-size: var(--d-fs-t1);
+    line-height: 1.1;
+    letter-spacing: var(--d-tr-t1);
+  }
+
+  /* Reading text (§10.5): 16.5 / 1.6, at most 36 em, broken prettily. */
+  html:not(.d-touch) body.nocturne main.legal :is(.legal__text, .legal__list) {
+    max-width: 36em;
+    font-size: var(--d-fs-text);
+    line-height: 1.6;
+    text-wrap: pretty;
+  }
+
+  /* ── A text: its sections beside it ─────────────────────────────────────────────────────────────────────────── */
+
+  html:not(.d-touch) body.nocturne main.legal > .d-legal {
+    display: grid;
+    grid-template-columns: subgrid;
+    align-items: start;
+    margin-top: var(--d-s7);
+  }
+
+  /* The index scrolls on its own: room inside its box on every side (16 px above, where the first link's box stands
+     8 px over its words; 12 elsewhere), given back by its margin, so its words stay on the edge and under the title's
+     line, and a link's keyboard ring, 4 px off it, and its pressed ground, 12 px past it, are drawn whole instead of cut
+     by the box's edge (§10.17). */
+  html:not(.d-touch) body.nocturne .d-legal > .d-legal__sections {
+    position: sticky;
+    top: calc(var(--d-bar) + var(--d-s5) - var(--d-s4));
+    grid-column: 1 / span 4;
+    max-height: calc(100vh - var(--d-bar) - var(--d-s7) + var(--d-s4) + var(--d-s3));
+    margin: calc(-1 * var(--d-s4)) calc(-1 * var(--d-s3)) calc(-1 * var(--d-s3));
+    padding: var(--d-s4) var(--d-s3) var(--d-s3);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--vault-hairline) transparent;
+  }
+
+  html:not(.d-touch) body.nocturne .d-legal__list {
+    margin: 0;
+    padding: 0 var(--d-s3) 0 0;
+    list-style: none;
+  }
+
+  /* Each section's link: its heading's words in the reading face, soft at rest (ink on hover, as the menu's). */
+  html:not(.d-touch) body.nocturne .d-legal__link {
+    display: block;
+    padding: var(--d-s2) 0;
+    color: var(--vault-soft);
+    font-family: var(--font);
+    font-size: var(--n-fs-sm);
+    line-height: 1.45;
+    text-decoration: none;
+    text-wrap: pretty;
+  }
+
+  /* The first link as high as the others (its ring as theirs), its words still on the title's line. */
+  html:not(.d-touch) body.nocturne .d-legal__item:first-child > .d-legal__link {
+    margin-top: calc(-1 * var(--d-s2));
+  }
+
+  html:not(.d-touch) body.nocturne .d-legal__link:focus-visible {
+    outline: 1px solid var(--vault-ink);
+    outline-offset: 4px;
+  }
+
+  html:not(.d-touch) body.nocturne .d-legal > .d-legal__text {
+    grid-column: 6 / -1;
+  }
+
+  html:not(.d-touch) body.nocturne .d-legal__text > .d-legal__intro {
+    margin: 0;
+    padding: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-legal__intro > :first-child {
+    margin-top: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-legal__intro > * + * {
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne .d-legal__text > .legal__body {
+    margin-top: var(--d-s8);
+    padding: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-legal__text > .d-legal__intro:empty + .legal__body {
+    margin-top: 0;
+  }
+
+  /* Every section: its heading 72 px under the text before it, its text 16 px under it, its paragraphs 16 apart. */
+  html:not(.d-touch) body.nocturne main.legal .legal__section + .legal__section {
+    margin-top: var(--d-s8);
+  }
+
+  html:not(.d-touch) body.nocturne main.legal .legal__section > :is(.legal__text, .legal__list, .legal__contact) {
+    margin-top: var(--d-s4);
+  }
+
+  /* ── The index: its title and sentence beside the four pages ────────────────────────────────────────────────── */
+
+  html:not(.d-touch) body.nocturne main.legal > .legal-titles:has(+ .legal-index) {
+    grid-column: 1 / span 5;
+    grid-row: 3;
+  }
+
+  html:not(.d-touch) body.nocturne main.legal > .legal-titles:has(+ .legal-index) > .legal__text {
+    max-width: 32em;
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne main.legal > .legal-index {
+    grid-column: 7 / -1;
+    grid-row: 3;
+    margin-top: var(--d-s8);
+  }
+
+  /* The first row's words on the title's line: the row keeps its 20 px above them (its hover ground and its keyboard
+     ring as every row's), drawn up by as much, with no line above it. */
+  html:not(.d-touch) body.nocturne main.legal .legal-index__item:first-child .legal-index__link {
+    margin-top: -20px;
+    border-top: 0;
+  }
+
+  /* ── The footer: the four pages and VERIFY A PIECE in one row, then its last line ─────────────────────────────── */
+
+  html:not(.d-touch) body.nocturne .n-foot.legal-foot:not([hidden]) {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "links . sound"
+      "cr . credit";
+  }
+
+  html:not(.d-touch) body.nocturne .legal-foot > .legal-foot__pages {
+    flex-wrap: nowrap;
+    row-gap: 0;
+  }
+
+  /* VERIFY A PIECE on the four pages' baseline, in their size (the label's 11 px). */
+  html:not(.d-touch) body.nocturne .legal-foot > :is(.legal-foot__pages, .legal-foot__verify) {
+    align-self: baseline;
+  }
+
+  html:not(.d-touch) body.nocturne .legal-foot > .legal-foot__verify {
+    margin: 0;
+    font-size: var(--n-fs-micro);
+    line-height: var(--n-lh-base);
+  }
+
+  html:not(.d-touch) body.nocturne .legal-foot__verify > .legal-foot__link {
+    font-size: var(--n-fs-micro);
+  }
+}

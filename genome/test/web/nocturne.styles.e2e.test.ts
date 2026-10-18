@@ -5,8 +5,10 @@
  *
  * The screens are the NOCTURNE stage's (test/support/nocturne-states.ts): the account sheet over NOW (C2), MY PIECES
  * while it reads, could not be shown (a piece, THE CIRCLE and a post too), empty (C40), the sheet's CHANGE PASSWORD (C39), the shared certificate (Safari's
- * bars back to its light), the column on a computer. The pieces no screen holds yet (each step from N3 places them)
- * are built by their own view code into a real screen, under its stylesheet (test/support/nocturne-specimen.ts).
+ * bars back to its light), the column on a touch screen as wide as a computer's (a tablet keeps the phone layout, the
+ * owner's answer Q2), and on a computer of that width the desktop page across the window instead. The pieces no screen
+ * holds yet (each step from N3 places them) are built by their own view code into a real screen, under its stylesheet
+ * (test/support/nocturne-specimen.ts).
  */
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -97,7 +99,7 @@ async function specimenScript(): Promise<string> {
 
 describe.skipIf(!HAS_CHROMIUM)('NOCTURNE: every piece on the real screens takes the rulebook\'s values (build.py, Chromium)', () => {
   it(
-    'sets the header, the rail, the account sheet, the type scale, the buttons, the rows, the switch, the dots, the fields, the footer, the SCAN ring, the loading state and could-not-be-shown, the column, and the pieces to come',
+    'sets the header, the rail, the account sheet, the type scale, the buttons, the rows, the switch, the dots, the fields, the footer, the SCAN ring, the loading state and could-not-be-shown, the column (on a touch screen 1280 px wide too; on a computer of that width, the desktop page), and the pieces to come',
     async () => {
       const specimen = await specimenScript();
       const states = ['account-sheet', 'account-sheet-password', 'pieces-loading', 'pieces-failed', 'piece-failed', 'circle-failed', 'post-failed', 'pieces-empty', 'pieces', 'certificate'];
@@ -122,6 +124,13 @@ describe.skipIf(!HAS_CHROMIUM)('NOCTURNE: every piece on the real screens takes 
               await chrome(page);
               await column(page);
               await pieces(page, specimen);
+              // The same page on a computer 1280 px wide (a mouse, no touch): the desktop's, no phone column.
+              const computer = await openState(browser, stage, demo, { ...state, size: { width: 1280, height: 900 } });
+              try {
+                await desktopPage(computer.page);
+              } finally {
+                await computer.close();
+              }
             }
             if (state.id === 'certificate') expect(await page.locator('meta[name="theme-color"]').getAttribute('content')).toBe('#ffffff');
           } finally {
@@ -727,7 +736,10 @@ async function chrome(page: Page): Promise<void> {
   await check(page, 'body.nocturne .n-column', { 'padding-bottom': 132 });
 }
 
-/** The column on black, phone width at most on a computer (choice 5), its overhead light; the ground and the type. */
+/**
+ * The column on black, its overhead light; the ground and the type. On a touch screen as wide as a computer's (a tablet:
+ * the phone layout whatever its width, the owner's answer Q2), the phone's width at most, centred (choice 5).
+ */
 async function column(page: Page): Promise<void> {
   await check(page, 'body', { 'background-color': GROUND, color: IV, 'font-size': 15, 'line-height': '22.5px' });
   const family = (await read(page, 'body', ['font-family']))['font-family']!;
@@ -736,6 +748,8 @@ async function column(page: Page): Promise<void> {
   const size = page.viewportSize()!;
   await page.setViewportSize({ width: 1280, height: size.height });
   try {
+    // A touch screen: the phone layout at 1280 px too.
+    expect(await page.evaluate(() => document.documentElement.classList.contains('d-touch') && navigator.maxTouchPoints > 0)).toBe(true);
     const col = await read(page, '.n-column', ['max-width']);
     expect(col['max-width']).toBe('480px');
     expect(Number(col._w)).toBeCloseTo(480, 1);
@@ -746,6 +760,29 @@ async function column(page: Page): Promise<void> {
   } finally {
     await page.setViewportSize(size);
   }
+}
+
+/**
+ * The same page on a computer 1280 px wide (a mouse, no touch; desktop decision 1, shared/desktop.css §3 and §4): no
+ * phone column, the page across the window on the same ground and type; no SCAN ring, SCAN and the menu in the top bar,
+ * 84 px high and sticky, its words on the page's edge (6.667 % of the window, between 48 and 128 px).
+ */
+async function desktopPage(page: Page): Promise<void> {
+  expect(
+    await page.evaluate(() => !document.documentElement.classList.contains('d-touch') && navigator.maxTouchPoints === 0 && matchMedia('(min-width: 1024px) and (hover: hover) and (pointer: fine)').matches),
+  ).toBe(true);
+  await check(page, 'body', { 'background-color': GROUND, color: IV, 'font-size': 15, 'line-height': '22.5px' });
+  expect(isHelvetica((await read(page, 'body', ['font-family']))['font-family']!)).toBe(true);
+  await check(page, '.n-column', { 'max-width': 'none', 'padding-bottom': 0, _w: 1280, _left: 0 });
+  await check(page, '.n-column', { display: 'none' }, '::before');
+  await check(page, '.n-scan', { display: 'none' });
+  const edge = 1280 * 0.06667;
+  await check(page, 'body.nocturne .n-hd', { position: 'sticky', top: 0, height: 84, 'padding-left': edge, 'padding-right': edge, 'background-color': GROUND, _w: 1280, _top: 0, _left: 0 });
+  for (const inBar of ['.n-hd > .n-wm', '.n-hd .n-rail', '.n-hd .n-hd__scan']) expect(await page.locator(inBar).first().isVisible(), inBar).toBe(true);
+  // The wordmark on the edge, its O set back by 0.04 em onto it.
+  const wm = await read(page, '.n-hd > .n-wm', ['margin-left', 'font-size']);
+  expect(Number.parseFloat(wm['margin-left']!)).toBeCloseTo(-0.04 * Number.parseFloat(wm['font-size']!), 1);
+  expect(Number(wm._left)).toBeCloseTo(edge + Number.parseFloat(wm['margin-left']!), 1);
 }
 
 /** C2: the sheet, its handle, its words, its rows, the switch, the dots, SIGN OUT (C .plate .handle .row .sw .meter .btn.ol). */

@@ -6,6 +6,7 @@
  * pages, the app's paths, the figures of a title set in the reading face, and
  * the view shell.
  */
+import { isDesktop } from '../../shared/desktop.js';
 import { h, s } from '../../shared/dom.js';
 import { GEOIP_ATTRIBUTION, LEGAL_PAGES, legalPath } from '../../shared/legal.js';
 import { CIRCLE_PATH, circlePostPath } from '../circle-model.js';
@@ -74,6 +75,13 @@ export function sectionLabel(text: string, id?: string): HTMLHeadingElement {
 /** The app's own paths (static.ts serves the shell at /verify and /verify/*; main.ts routes them). */
 export const LANDING_PATH = '/verify';
 export const PIECES_PATH = '/verify/pieces';
+/** Desktop (decision 5): an order's own page of a computer, `/verify/orders/OR-1A2B3C4D` (views/desktop-order.ts). */
+export const ORDERS_PAGE_PATH = '/verify/orders';
+
+/** An order's page, by its reference (`OR-1A2B3C4D`; `ORDER OR-…` as a card says it is read too). */
+export function orderPagePath(reference: string): string {
+  return `${ORDERS_PAGE_PATH}/${reference.replace(/^ORDER /, '').toUpperCase()}`;
+}
 /** The ownership certificate (F-06): its token follows in the fragment, `/verify/c#…`, never in the path. */
 export const CERTIFICATE_PATH = '/verify/c';
 /** THE COLLECTION (P-R02): the lookbook's grid; a model's sheet is `/verify/lookbook/<slug>`. */
@@ -132,6 +140,32 @@ export function circleLink(onOpen?: () => void, opts: { id?: string; label?: str
  */
 export function withNumerals(text: string): (string | HTMLSpanElement)[] {
   return text.split(/(\d+)/).flatMap((part, i): (string | HTMLSpanElement)[] => (part === '' ? [] : i % 2 === 1 ? [h('span', { class: 'numeral', text: part })] : [part]));
+}
+
+/**
+ * A list line (`SIZES 17 · 17 · WIDE BAND · BRUSHED COBALT`) on a computer (desktop, BRIEF §10.9): each value
+ * held whole with the separator after it, so a narrow block breaks the line only after a ` · `, never inside a value
+ * (`SIZES 17 · 17 · WIDE BAND ·` / `BRUSHED COBALT`). On a phone, the line as it was.
+ */
+export function listLine(text: string): (string | HTMLSpanElement)[] {
+  const values = text.split(' · ');
+  if (!isDesktop() || values.length < 2) return withNumerals(text);
+  return values.flatMap((v, i) => {
+    const last = i === values.length - 1;
+    const group = h('span', { class: 'n-nw' }, ...withNumerals(last ? v : `${v} ·`));
+    return last ? [group] : [group, ' '];
+  });
+}
+
+/**
+ * A time then the computer's own clock (`11 OCT 2026 · 20:00 on this computer (UTC+02:00)`, desktop decision
+ * 8): the date and its hour held together, and `on this computer (UTC+02:00)` too, so a narrow block breaks the line
+ * between them only (BRIEF §10.9). On a phone, the line as it was.
+ */
+export function computerClock(text: string): (string | HTMLSpanElement)[] {
+  const at = isDesktop() ? text.indexOf(' on this computer (') : -1;
+  if (at < 0) return [text];
+  return [h('span', { class: 'n-nw' }, text.slice(0, at)), ' ', h('span', { class: 'n-nw' }, text.slice(at + 1))];
 }
 
 /**

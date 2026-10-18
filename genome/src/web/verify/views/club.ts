@@ -27,6 +27,8 @@ export interface ClubDeps {
   onAccount(trigger: HTMLElement): void;
   /** YOUR FIRST PIECE OPENS TITANE and SIGN IN TO SEE YOUR TIER: MY PIECES, and its sign-in. */
   onPieces(): void;
+  /** SIGN IN TO SEE YOUR TIER, signed out: the sign-in (on a computer its page); MY PIECES' otherwise. */
+  onSignIn?(): void;
 }
 
 export interface ClubView {
@@ -147,7 +149,7 @@ class ClubPage {
       const yours = m.yours;
       const link = accLink(h('span', { class: 'n-num' }, ...withNumerals(yours.text)), {
         ...(yours.to === 'account' ? {} : { href: PIECES_PATH }),
-        onOpen: () => (yours.to === 'account' ? this.deps.onAccount(link) : this.deps.onPieces()),
+        onOpen: () => (yours.to === 'account' ? this.deps.onAccount(link) : yours.to === 'signIn' && this.deps.onSignIn ? this.deps.onSignIn() : this.deps.onPieces()),
         extraClass: 'n-club__yours club__yours',
       });
       link.dataset.to = yours.to;

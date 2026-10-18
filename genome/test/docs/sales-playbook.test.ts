@@ -32,13 +32,16 @@
  *    shell commands of §10 as scripts/admin.ts knows them, the TOTP secret
  *    read from ADMIN_TOTP_SECRET, never on a command line;
  *  - §9: the six steps of the brief, at most 30 minutes in all;
+ *  - what a collector sees on a computer (the desktop plan of 2026-10-16): an
+ *    order's own page, MESSAGES by subject, the SCAN page and UNREADABLE
+ *    CODE's sentence, in the app's words as a computer shows them;
  *  - theorbes.com and verify.theorbes.com as its only addresses, relative
  *    links that resolve, and the playbook linked from LAUNCH §7.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { transformSync } from 'esbuild';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ADMIN_USAGE } from '../../scripts/admin.js';
 import { VERIFICATION_STATES } from '../../src/server/db/schema.js';
 import { RECOVERY_ATTEMPT_LIMIT, RECOVERY_ATTEMPT_WINDOW_MS, RECOVERY_CODE_TTL_MS, TRANSFER_FREEZE_MS } from '../../src/server/services/account-recovery.js';
@@ -48,7 +51,8 @@ import { CLAIM_ATTEMPT_LIMIT, CLAIM_ATTEMPT_WINDOW_MS, TRANSFER_TTL_MS } from '.
 import { SALE_TOKEN_TTL_MS } from '../../src/server/services/sale.js';
 import { SCAN_TOKEN_TTL_MS, TRANSFER_TOKEN_TTL_MS } from '../../src/server/services/scan-tokens.js';
 import { CLIENT_REGISTRATION } from '../../src/web/admin/model/sale.js';
-import { RESALE_GUIDANCE } from '../../src/web/verify/copy.js';
+import { DESKTOP, NOW, ORDERS, PROBLEMS, RESALE_GUIDANCE, resultMessage } from '../../src/web/verify/copy.js';
+import { at, installDevice } from '../support/fake-device.js';
 import {
   LEXICON_BEGIN,
   LEXICON_END,
@@ -564,6 +568,42 @@ describe('sales playbook (docs/launch/SALES-PLAYBOOK.md)', () => {
     expect(withoutCodeSpans(playbook)).not.toMatch(/atelier/i);
     expect(sheet(3)).toContain('La garantie est dans l\'onglet `ORBES CARE`');
     expect(quotes(sheet(3)).join(' ')).toContain('Sa garantie est dans l\'onglet ORBES CARE');
+  });
+
+  it('says what a collector sees on a computer, in the app\'s words as a computer shows them', () => {
+    // An order's own page (MY PIECES' ORDERS as rows), with the card's words and rules.
+    const order = subsection(sheet(2), '### Sur un ordinateur : la page d\'une commande');
+    for (const words of [ORDERS.address.label, ORDERS.engraving.title, ORDERS.returns.label, ORDERS.claim.label, ORDERS.documents.title, `${ORDERS.documents.careConditions} · PDF`]) {
+      expect(order, words).toContain(words);
+    }
+    expect(order).toContain('`Start packing`');
+    expect(order).toContain('14 jours');
+    // MESSAGES by subject: an answer stands under the collector's message before it, GENERAL otherwise.
+    const worried = sheet(3).split('### ')[0];
+    expect(worried).toContain('**Sur un ordinateur, MESSAGES par sujet.**');
+    expect(worried).toContain(`ou ${DESKTOP.messages.general} pour un message qui ne concerne rien`);
+    expect(worried).toContain(`(${DESKTOP.account.unread(1)})`);
+    expect(worried).toContain('chacune se range sous le message du client qui la précède');
+    // A reply on a subject the server no longer attaches (a scan over 24 hours old, a piece no longer held): GENERAL.
+    expect(worried).toContain(`sauf sur un scan de plus de 24 heures ou sur une pièce qu'il ne détient plus : elle se range alors sous ${DESKTOP.messages.general}.`);
+    // The SCAN page and UNREADABLE CODE's sentence on a computer, read as a computer reads it.
+    const unreadable = subsection(sheet(3), `### ${VERIFICATION_COPY.MALFORMED_CODE.title}`);
+    installDevice(at('a Mac', 1440));
+    let onComputer: string;
+    try {
+      onComputer = resultMessage('MALFORMED_CODE', VERIFICATION_COPY.MALFORMED_CODE.message);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(onComputer).not.toBe(VERIFICATION_COPY.MALFORMED_CODE.message);
+    expect(unreadable).toContain(`Sur un ordinateur, il lit à la place : *${onComputer}*`);
+    for (const words of [DESKTOP.scanPage.title, DESKTOP.scanPage.phoneLabel, DESKTOP.scanPage.computerLabel, DESKTOP.scanPage.upload, NOW.scan, PROBLEMS['upload-unreadable'].title]) {
+      expect(unreadable, words).toContain(words);
+    }
+    expect(quotes(unreadable).join(' ')).toContain(`le code de la page ${DESKTOP.scanPage.title}`);
+    // A computer window under 1024 px, or zoomed far, has the phone's layout: SCAN opens the camera, UPLOAD A PHOTO under it.
+    expect(unreadable).toContain(`Sur un ordinateur (une fenêtre d'au moins 1024 px), SCAN ouvre la page ${DESKTOP.scanPage.title}.`);
+    expect(unreadable).toContain(`Dans une fenêtre plus étroite ou très zoomée, SCAN ouvre l'appareil photo de l'ordinateur comme sur un téléphone, avec ${DESKTOP.scanPage.upload} dessous.`);
   });
 
   it('is linked from LAUNCH §7, before the first sale', () => {

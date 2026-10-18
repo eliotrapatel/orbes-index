@@ -40,7 +40,9 @@ function withImports(file: string): string {
     rel.endsWith('/brand.css') ? line : withImports(join(dirname(file), rel)),
   );
 }
-const styles = withImports('verify/styles.css');
+/** The app's stylesheets in the order of the cascade (verify/index.html): its own, then the desktop's (D8), the
+ *  pointer's and the layout's, which the shell links after it under their media queries. */
+const styles = ['verify/styles.css', 'verify/desktop-pointer.css', 'verify/desktop.css'].map(withImports).join('\n');
 const brand = readFileSync(join(WEB, 'shared/brand.css'), 'utf8');
 const adminStyles = readFileSync(join(WEB, 'admin/styles.css'), 'utf8');
 const resultView = readFileSync(join(WEB, 'verify/views/result.ts'), 'utf8');
@@ -186,13 +188,18 @@ describe('verify app: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
 describe('verify app: floors of 10 px for what is acted on and 44 px for what is tapped (BRAND-DESIGN-SYSTEM §3.8)', () => {
   const all = [...rules(brand), ...rules(styles)];
   const px = (v: string) => Number.parseFloat(resolve(v));
-  /** Every rule that styles `cls` itself, alone or compound, in a descendant selector or a media query (not its ::after rule). */
+  /** Every rule that styles `cls` itself, alone or compound, in a descendant selector or a media query (not its ::after rule).
+   *  (Desktop: a computer's rules, `html:not(.d-touch) …`, are out of the phone's floors, as below: a mouse or a
+   *  trackpad is never a tap, and a computer with a touch screen, `html.d-tap`, has its own floor, the 44 px zones of
+   *  shared/desktop-tap.css, held below.) */
   const about = (cls: string) => {
     const re = new RegExp(`${cls.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`);
-    return all.filter((r) => r.selectors.some((s) => re.test(s) && !s.includes('::')));
+    return all.filter((r) => !r.selectors[0]?.startsWith('html:not(.d-touch)') && r.selectors.some((s) => re.test(s) && !s.includes('::')));
   };
-  // Whatever the app offers to tap shows a pointer: that is how a control is found.
-  const interactive = [...new Set(all.filter((r) => r.decls.cursor === 'pointer').flatMap((r) => r.selectors))].sort();
+  // Whatever the app offers to tap shows a pointer: that is how a control is found. (Desktop: the rules of
+  // shared/desktop.css, `html:not(.d-touch) …`, are a computer's: out of the phone's floors; where that computer can be
+  // tapped, `html.d-tap`, its controls reach 44 px by shared/desktop-tap.css, held below.)
+  const interactive = [...new Set(all.filter((r) => r.decls.cursor === 'pointer').flatMap((r) => r.selectors))].filter((sel) => !sel.startsWith('html:not(.d-touch)')).sort();
 
   /** NOCTURNE's controls (views/nocturne.ts, the chrome, the account sheet), held to the rulebook (build.py). */
   const NOCTURNE_CONTROLS = [
@@ -361,6 +368,111 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
     // The 8 px .nano class is left to decoration: no view sets it now (the landing's © ORBES · GENOME CODE · PARIS
     // gave way to NOCTURNE's footer, whose © ORBES · PARIS is 9 px, in ash).
     expect(classes.filter((c) => c.split(' ').includes('nano'))).toEqual([]);
+  });
+});
+
+// The sheet itself; that every control a touch laptop shows reaches 44 px in the page is measured by
+// desktop.tap.e2e.test.ts (Chromium).
+describe('a computer with a touch screen (html.d-tap, Q2): each desktop control reaches 44 px, and nothing is drawn', () => {
+  const TAP = 'shared/desktop-tap.css';
+  const tap = readFileSync(join(WEB, TAP), 'utf8');
+  const code = tap.replace(/\/\*[\s\S]*?\*\//g, '');
+  const tapRules = rules(tap);
+  /** A selector list split at its top-level commas (never inside :is()). */
+  const selectorsOf = (head: string) => {
+    const out: string[] = [];
+    let depth = 0;
+    let cur = '';
+    for (const ch of head) {
+      if (ch === '(') depth++;
+      if (ch === ')') depth--;
+      if (ch === ',' && depth === 0) {
+        out.push(cur.trim());
+        cur = '';
+      } else cur += ch;
+    }
+    return [...out, cur.trim()].filter(Boolean);
+  };
+  const ZONE = 'min(0px, calc(50% - 22px))';
+  /** The zone's reach on a side, for a control `size` px across: `min(0px, calc(50% - 22px))` of it. */
+  const reach = (value: string, size: number) => (value === ZONE ? Math.min(0, size / 2 - 22) : Number.parseFloat(value));
+
+  it('is loaded last by both apps\' desktop stylesheets, under the desktop\'s query', () => {
+    for (const app of ['verify', 'legal']) {
+      const imports = [...readFileSync(join(WEB, `${app}/desktop.css`), 'utf8').matchAll(/^@import "([^"]+)";$/gm)].map((m) => m[1]);
+      expect(imports.at(-1), app).toBe('../shared/desktop-tap.css');
+    }
+    expect(code.trim().startsWith('@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {')).toBe(true);
+    expect(code.match(/@media/g)).toHaveLength(1);
+  });
+
+  it('applies to a computer with a touch screen alone: every selector starts html.d-tap:not(.d-touch)', () => {
+    const heads = [...code.replace(/^\s*@media[^{]*\{/, '').matchAll(/([^{}]+)\{[^{}]*\}/g)].map((m) => m[1]!.trim());
+    expect(heads.length).toBeGreaterThan(3);
+    for (const head of heads) for (const sel of selectorsOf(head)) expect(sel.startsWith('html.d-tap:not(.d-touch) '), sel).toBe(true);
+  });
+
+  it('draws nothing and moves nothing: an empty layer, positioned on its control, or a ground that already exists taking the finger', () => {
+    const allowed: Readonly<Record<string, readonly string[]>> = {
+      content: ['""'],
+      position: ['absolute', 'relative'],
+      top: ['0', ZONE],
+      right: ['0', ZONE],
+      bottom: ['0', ZONE],
+      left: ['0', ZONE],
+      'pointer-events': ['auto'],
+    };
+    for (const r of tapRules) {
+      for (const [prop, value] of Object.entries(r.decls)) {
+        expect(allowed[prop], `${prop} in ${r.selectors.join(', ')}`).toBeDefined();
+        expect(allowed[prop], `${prop}: ${value}`).toContain(value);
+      }
+      // A rule that positions a control positions it relatively only (it stays where it is).
+      if (!r.selectors.some((s) => s.includes('::'))) expect(r.decls, r.selectors.join(', ')).toEqual({ position: 'relative' });
+    }
+  });
+
+  it('gives each zone 44 px at least, centred, whatever the control\'s size, and the control\'s own box where it is larger', () => {
+    const zones = tapRules.filter((r) => r.decls.content === '""');
+    expect(zones.length).toBeGreaterThan(1);
+    for (const r of zones) {
+      expect(r.decls.position, r.selectors.join(', ')).toBe('absolute');
+      for (const side of ['top', 'right', 'bottom', 'left']) expect(r.decls[side], `${side} of ${r.selectors.join(', ')}`).toBeDefined();
+    }
+    const full = zones.find((r) => ['top', 'right', 'bottom', 'left'].every((p) => r.decls[p] === ZONE))!;
+    expect(full).toBeDefined();
+    for (const size of [9.5, 20, 25.5, 36, 40.5, 44, 60, 388]) {
+      const across = size - reach(full.decls.top!, size) - reach(full.decls.bottom!, size);
+      expect(across, `${size} px`).toBe(Math.max(44, size));
+      expect(reach(full.decls.top!, size), `${size} px`).toBe(reach(full.decls.bottom!, size));
+    }
+    // The legal pages' list of sections: the first row reaches up, the last down, never into the row beside it.
+    expect(code).toMatch(/\.d-legal__item:first-child > \.d-legal__link::after \{\s*top: min\(0px, calc\(50% - 22px\)\);\s*\}/);
+    expect(code).toMatch(/\.d-legal__item:last-child > \.d-legal__link::after \{\s*bottom: min\(0px, calc\(50% - 22px\)\);\s*\}/);
+  });
+
+  it('lets a pressed ground take the finger only where it already reaches 12 px past a 44 px high word on each side', () => {
+    const grounds = tapRules.filter((r) => r.decls['pointer-events'] === 'auto').flatMap((r) => r.selectors);
+    expect(grounds).toEqual([
+      'html.d-tap:not(.d-touch) .d-room > .live__foot .legal-links__link::after',
+      'html.d-tap:not(.d-touch) body.nocturne .n-hd .n-acct::before',
+      'html.d-tap:not(.d-touch) body.nocturne .n-hd > .n-rail > .n-rail__link::before',
+    ]);
+    // The menu's words and the bar's account: 44 px high, their ground 12 px past each side (desktop-pointer.css); the
+    // room's foot links: the phone's 44 px zone, their ground 12 px past each side (desktop-room.css).
+    const desktop = withImports('verify/desktop.css');
+    expect(desktop).toMatch(/\.n-hd > \.n-rail > \.n-rail__link \{[^}]*height: 44px;/);
+    expect(styles).toMatch(/\n\.n-acct \{[^}]*\n  height: 44px;/);
+    expect(styles).toMatch(/:is\(\.n-rail__link, \.n-hd__scan, \.n-acct,[^)]*\)::before \{[^}]*inset: 0 calc\(var\(--d-press-trail, 0\.2em\) - var\(--d-press-reach, var\(--d-s3, 12px\)\)\) 0 calc\(-1 \* var\(--d-press-reach, var\(--d-s3, 12px\)\)\);/);
+    expect(desktop).toMatch(/\.d-room > \.live__foot \.textlink::after \{[^}]*inset: 0 calc\(var\(--d-tr-label\) - var\(--d-s3\)\) 0 calc\(-1 \* var\(--d-s3\)\);/);
+    expect(styles).toMatch(/\.legal-links__link \{[^}]*min-width: 44px;/);
+  });
+
+  it('names only classes the app draws', () => {
+    const sources = ['verify', 'legal', 'shared'].flatMap((dir) => readdirSync(join(WEB, dir), { recursive: true, encoding: 'utf8' }).filter((f) => f.endsWith('.ts')).map((f) => readFileSync(join(WEB, dir, f), 'utf8'))).join('\n');
+    const named = [...new Set([...code.matchAll(/\.([a-z][\w-]*)/g)].map((m) => m[1]!))].filter((c) => !['d-tap', 'd-touch', 'nocturne'].includes(c));
+    expect(named.length).toBeGreaterThan(10);
+    for (const cls of named) expect(sources, cls).toMatch(new RegExp(`[\\s'"\`]${cls}[\\s'"\`]`));
   });
 });
 
@@ -590,8 +702,8 @@ describe('verify app: the photographs of an authentic piece (F-04)', () => {
   it('sets THE MODEL\'s photograph under the GENOME of a result, full width, whole, without the fade, captioned (C9, decision 9)', () => {
     const at = (needle: string) => resultView.indexOf(needle);
     // The GENOME first, then the photograph (C9), the ceremony's GENOME too (C36).
-    expect(at('sections.push(genome, modelPhoto(vm.photos));')).toBeGreaterThan(at('nocturneGenome(vm.genome'));
-    expect(resultView).toContain("fadedPhoto(photo.src, photo.alt, { fade: false, eager: true, extraClass: 'n-result__photo' })");
+    expect(at('sections.push(genome, modelPhoto(vm.photos, { eager: !(genome && isDesktop()) }));')).toBeGreaterThan(at('nocturneGenome(vm.genome'));
+    expect(resultView).toContain("fadedPhoto(photo.src, photo.alt, { fade: false, eager: opts.eager ?? true, extraClass: 'n-result__photo' })");
     expect(resultView).toContain("h('span', { class: 'n-g n-lb n-result__caption', text: photo.caption })");
     expect(resultView).toContain("h('p', { class: 'n-px n-sm n-result__photo-note', text: PHOTOS.note(1) })");
     // Shown whole (contain), never cropped; 48 px under the GENOME, as the GENOME under the message.

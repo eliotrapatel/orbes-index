@@ -1,0 +1,697 @@
+/*
+ * Hover, pressed and cursor on a computer (desktop, BRIEF §4, §10.13, §10.16, §10.18; decision 13): a computer's pointer,
+ * at any window width, so a computer window narrower than the desktop layout has them too. Linked by each app's shell
+ * through verify/desktop-pointer.css and legal/desktop-pointer.css under `media="(hover: hover) and (pointer: fine)"`
+ * (a phone never waits for it), after the app's own stylesheet and before the layout's (shared/desktop.css). Every
+ * rule excludes `html.d-touch` (shared/mode-early.ts), as the layout's do. In order: the vocabulary's states, the
+ * switch of LIGHT MODE and reduced motion (from shared/desktop.css); the shared certificate and a piece's tile (from
+ * shared/desktop-pieces.css); a legal page's list of sections (from shared/desktop-legal.css).
+ */
+
+/* ══ Hover, pressed, cursor: a computer's pointer, at any window width (BRIEF §4, §10.16, §10.18) ══════════════════ */
+
+@media (hover: hover) and (pointer: fine) {
+  /* The vocabulary's tokens (§10.13, §10.16), here too for a computer's window narrower than the desktop layout, where
+     the hover answers on the phone layout (§4); they paint nothing at rest (the layout's own query repeats them). */
+  html:not(.d-touch) body.nocturne {
+    --d-dur-press: 80ms;
+    --d-dur-hover: 160ms;
+    --d-ease: cubic-bezier(0.2, 0, 0, 1);
+    --d-dim: 0.64;
+    --d-hover-ground: color-mix(in srgb, var(--vault-ink) 4%, transparent);
+    --d-press-ground: color-mix(in srgb, var(--vault-ink) 8%, transparent);
+  }
+
+  /* The menu, SCAN, the account's tier, the crumb, the footer's links and SOUND, every kind of tabs, the legal pages'
+     switches: soft at rest, ink on hover. */
+  html:not(.d-touch) body.nocturne :is(.n-hd__scan, .n-acct, .n-crumb, .n-fl__link, .n-foot__club-link, .n-snd, .n-dbip, .n-tabs__tab, .n-tabsx__tab, .n-switch2__tab, .legal-lang__link, .d-viewer__nav, .d-viewer__close) {
+    transition:
+      color var(--d-dur-hover, 160ms) var(--d-ease, ease),
+      opacity var(--d-dur-hover, 160ms) var(--d-ease, ease);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.n-rail__link, .n-hd__scan, .n-acct, .n-crumb, .n-fl__link, .n-foot__club-link, .n-snd, .n-dbip, .n-tabs__tab, .n-tabsx__tab, .n-switch2__tab, .legal-lang__link:not([aria-current]), .d-viewer__nav, .d-viewer__close):hover {
+    color: var(--vault-ink);
+  }
+
+  /* A crumb's chevron is in its words' colour, so it goes to full ink with them on hover and pressed (§10.16; at rest
+     both are the soft grey, the phone's look; on a photograph, the on-photo tokens the words take). */
+  html:not(.d-touch) body.nocturne .n-crumb > .n-ic {
+    color: inherit;
+  }
+
+  /* …and pressed, one step further (§10.16): the ink kept (the current item's too, the language shown's), the pressed
+     ground behind the word, reaching 12 px past it on each side as a row's does (on the right, past its last letter, not
+     its tracking's last space). The ground is a layer of its own under the word that only fades, in 80 ms and back in
+     160 (§10.13): never half drawn, and nothing in the layout moves. (Each control holds its layer: positioned where it
+     is not already, at the lowest weight, so a crumb placed over a photograph keeps its own place.) */
+  :where(html:not(.d-touch) body.nocturne) :where(.n-rail__link, .n-hd__scan, .n-acct, .n-crumb, .n-fl__link, .n-foot__club-link, .n-snd, .n-dbip, .n-tabs__tab, .n-tabsx__tab, .n-switch2__tab, .legal-lang__link, .d-viewer__nav, .d-viewer__close, .n-heart) {
+    position: relative;
+    z-index: 0;
+  }
+
+  html:not(.d-touch) body.nocturne :is(.n-rail__link, .n-hd__scan, .n-acct, .n-crumb, .n-fl__link, .n-foot__club-link, .n-snd, .n-dbip, .n-tabs__tab, .n-tabsx__tab, .n-switch2__tab, .legal-lang__link, .d-viewer__nav, .d-viewer__close)::before {
+    content: "";
+    position: absolute;
+    inset: 0 calc(var(--d-press-trail, 0.2em) - var(--d-press-reach, var(--d-s3, 12px))) 0 calc(-1 * var(--d-press-reach, var(--d-s3, 12px)));
+    z-index: -1;
+    background-color: var(--d-press-ground);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--d-dur-hover, 160ms) var(--d-ease, cubic-bezier(0.2, 0, 0, 1));
+  }
+
+  html:not(.d-touch) body.nocturne :is(.n-rail__link, .n-hd__scan, .n-acct, .n-crumb, .n-fl__link, .n-foot__club-link, .n-snd, .n-dbip, .n-tabs__tab, .n-tabsx__tab, .n-switch2__tab, .legal-lang__link, .d-viewer__nav, .d-viewer__close):active {
+    color: var(--vault-ink);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.n-rail__link, .n-hd__scan, .n-acct, .n-crumb, .n-fl__link, .n-foot__club-link, .n-snd, .n-dbip, .n-tabs__tab, .n-tabsx__tab, .n-switch2__tab, .legal-lang__link, .d-viewer__nav, .d-viewer__close):active::before {
+    opacity: 1;
+    transition-duration: var(--d-dur-press, 80ms);
+  }
+
+  /* ORBES, the bar's way to NOW on a computer (shared/desktop.ts wordmark): already in ink at rest, so hovered it steps
+     as a text link does, to the dim, and further pressed; a dark window's bar over a frame keeps the same steps. */
+  html:not(.d-touch) body.nocturne a.n-wm {
+    color: inherit;
+    text-decoration: none;
+    transition: opacity var(--d-dur-hover, 160ms) var(--d-ease, ease);
+  }
+
+  html:not(.d-touch) body.nocturne a.n-wm:hover {
+    opacity: var(--d-dim, 0.64);
+  }
+
+  html:not(.d-touch) body.nocturne a.n-wm:active {
+    opacity: 0.5;
+    transition-duration: var(--d-dur-press, 80ms);
+  }
+
+  /* SCAN's word and the account's monogram end on their last mark: no tracking's space to give back (nor the viewer's
+     NEXT and CLOSE, which end on their icon). */
+  html:not(.d-touch) body.nocturne :is(.n-hd__scan, .n-acct:has(> .n-mono), .d-viewer__next, .d-viewer__close) {
+    --d-press-trail: 0px;
+  }
+
+
+  /* Filled button: its ground toward the other contrast. Outlined: its line to full ink, a ground when pressed. */
+  html:not(.d-touch) body.nocturne .n-btn {
+    transition:
+      background-color var(--d-dur-hover, 160ms) var(--d-ease, ease),
+      border-color var(--d-dur-hover, 160ms) var(--d-ease, ease),
+      color var(--d-dur-hover, 160ms) var(--d-ease, ease);
+  }
+
+  html:not(.d-touch) body.nocturne .n-btn:not(.n-btn--ol):not(:disabled, [aria-disabled="true"]):hover {
+    background-color: color-mix(in srgb, var(--vault-ink) 88%, var(--vault-ground));
+  }
+
+  html:not(.d-touch) body.nocturne .n-btn:not(.n-btn--ol):not(:disabled, [aria-disabled="true"]):active {
+    background-color: color-mix(in srgb, var(--vault-ink) 80%, var(--vault-ground));
+    transition-duration: var(--d-dur-press, 80ms);
+  }
+
+  /* (On desktop the line is a border, shared below: its colour moves; on a narrow window, the phone's inset line.) */
+  html:not(.d-touch) body.nocturne .n-btn--ol:not(:disabled, [aria-disabled="true"]):hover {
+    border-color: var(--vault-ink);
+    box-shadow: inset 0 0 0 1px var(--vault-ink);
+  }
+
+  html:not(.d-touch) body.nocturne .n-btn--ol:not(:disabled, [aria-disabled="true"]):active {
+    border-color: var(--vault-ink);
+    background-color: var(--d-press-ground, transparent);
+    box-shadow: inset 0 0 0 1px var(--vault-ink);
+    transition-duration: var(--d-dur-press, 80ms);
+  }
+
+  /* In the light mode the firmer line is already near the ink: the hover also takes the hover's ground (ink at 4 %), so
+     it reads as a step, the press one further (§10.16). */
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .n-btn--ol:not(:disabled, [aria-disabled="true"]):hover:not(:active) {
+    background-color: var(--d-hover-ground, transparent);
+  }
+
+  /* A select as a field (YOUR PROFILE, YOUR SIZES): its line a step toward the ink under the pointer (its focus, the
+     line in ink, stays the field's). */
+  html:not(.d-touch) body.nocturne .n-fld__select > .n-fld__select-input {
+    transition: border-color var(--d-dur-hover, 160ms) var(--d-ease, cubic-bezier(0.2, 0, 0, 1));
+  }
+
+  html:not(.d-touch) body.nocturne .n-fld__select > .n-fld__select-input:not(:disabled, :focus):hover {
+    border-bottom-color: color-mix(in srgb, var(--vault-ink) 64%, transparent);
+  }
+
+  /* A frame that leads somewhere is one link (§10.16): anywhere on it, its action takes its hover. */
+  html:not(.d-touch) body.nocturne .n-releases__release:hover a.n-releases__see:not(.n-btn--ol) {
+    background-color: color-mix(in srgb, var(--vault-ink) 88%, var(--vault-ground));
+  }
+
+  html:not(.d-touch) body.nocturne .n-releases__release:hover a.n-releases__see.n-btn--ol {
+    border-color: var(--vault-ink);
+  }
+
+  html:not(.d-touch) body.nocturne .n-releases__release:active a.n-releases__see:not(.n-btn--ol) {
+    background-color: color-mix(in srgb, var(--vault-ink) 80%, var(--vault-ground));
+    transition-duration: var(--d-dur-press, 80ms);
+  }
+
+  html:not(.d-touch) body.nocturne .n-releases__release:active a.n-releases__see.n-btn--ol {
+    border-color: var(--vault-ink);
+    background-color: var(--d-press-ground, transparent);
+    transition-duration: var(--d-dur-press, 80ms);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.n-releases__release, .n-lookbook__model:not(:where(.n-wishlist__card))):hover :is(.n-releases__see-line, .n-lookbook__see) > a.n-tl {
+    opacity: var(--d-dim, 0.64);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.n-releases__release, .n-lookbook__model:not(:where(.n-wishlist__card))):active :is(.n-releases__see-line, .n-lookbook__see) > a.n-tl {
+    opacity: 0.5;
+    transition-duration: var(--d-dur-press, 80ms);
+  }
+
+  /* A text link: its word and its line dim on hover, further when pressed. */
+  html:not(.d-touch) body.nocturne .n-tl {
+    transition: opacity var(--d-dur-hover, 160ms) var(--d-ease, ease);
+  }
+
+  html:not(.d-touch) body.nocturne .n-tl:hover {
+    opacity: var(--d-dim, 0.64);
+  }
+
+  html:not(.d-touch) body.nocturne .n-tl:active {
+    opacity: 0.5;
+    transition-duration: var(--d-dur-press, 80ms);
+  }
+
+  /* A hairline row: a ground across the row, its chevron to ink. */
+  html:not(.d-touch) body.nocturne :is(a, button).n-acc {
+    transition: background-color var(--d-dur-hover, 160ms) var(--d-ease, ease);
+  }
+
+  html:not(.d-touch) body.nocturne :is(a, button).n-acc:hover {
+    background-color: var(--d-hover-ground, transparent);
+  }
+
+  html:not(.d-touch) body.nocturne :is(a, button).n-acc:active {
+    background-color: var(--d-press-ground, transparent);
+    transition-duration: var(--d-dur-press, 80ms);
+  }
+
+  html:not(.d-touch) body.nocturne :is(a, button).n-acc:hover > .n-ic,
+  html:not(.d-touch) body.nocturne :is(a, button).n-acc:hover > .n-acc__sign .n-ic {
+    color: var(--vault-ink);
+  }
+
+  /* A photo tile: the photograph a little lighter, its name underlined; no zoom. A tile without its photograph: its
+     plate. A wish shown on YOUR WISHLIST (views/desktop-wishlist.ts): its photograph and its name are SEE THE MODEL's
+     link, so the three answer together. */
+  html:not(.d-touch) body.nocturne :is(.now__piece, .n-model__pair) :is(.n-ph > img),
+  html:not(.d-touch) body.nocturne .now__piece > .now__piece-ground,
+  html:not(.d-touch) body.nocturne .d-wish > .n-ph > img {
+    transition: opacity var(--d-dur-hover, 160ms) var(--d-ease, ease);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.now__piece, .n-model__pair):hover .n-ph > img,
+  html:not(.d-touch) body.nocturne .now__piece:hover > .now__piece-ground,
+  html:not(.d-touch) body.nocturne .d-wish:has(:is(.d-wish__open, .d-wish__name, .n-wishlist__see):hover) > .n-ph > img {
+    opacity: 0.88;
+  }
+
+  html:not(.d-touch) body.nocturne :is(.now__piece, .n-model__pair):active .n-ph > img,
+  html:not(.d-touch) body.nocturne .now__piece:active > .now__piece-ground,
+  html:not(.d-touch) body.nocturne .d-wish:has(:is(.d-wish__open, .d-wish__name, .n-wishlist__see):active) > .n-ph > img {
+    opacity: 0.8;
+    transition-duration: var(--d-dur-press, 80ms);
+  }
+
+  html:not(.d-touch) body.nocturne .d-wish:has(:is(.d-wish__open, .d-wish__name):hover) .n-wishlist__see {
+    opacity: var(--d-dim, 0.64);
+  }
+
+  html:not(.d-touch) body.nocturne .d-wish:has(:is(.d-wish__open, .d-wish__name):active) .n-wishlist__see {
+    opacity: 0.5;
+    transition-duration: var(--d-dur-press, 80ms);
+  }
+
+  html:not(.d-touch) body.nocturne .d-wish:has(:is(.d-wish__open, .d-wish__name, .n-wishlist__see):hover) .n-wishlist__name {
+    text-decoration: underline 1px;
+    text-underline-offset: 4px;
+  }
+
+  /* A photograph of a model's gallery (decision 1): lighter under the pointer, a little more pressed; it enlarges. */
+  html:not(.d-touch) body.nocturne .n-model__gallery-photo > img {
+    transition: opacity var(--d-dur-hover, 160ms) var(--d-ease, ease);
+  }
+
+  html:not(.d-touch) body.nocturne .n-model__gallery-photo:has(> .d-gallery__open:hover) > img {
+    opacity: 0.88;
+  }
+
+  html:not(.d-touch) body.nocturne .n-model__gallery-photo:has(> .d-gallery__open:active) > img {
+    opacity: 0.8;
+    transition-duration: var(--d-dur-press, 80ms);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.now__piece, .n-model__pair):hover :is(.n-cap, .n-model__pair-name) {
+    text-decoration: underline 1px;
+    text-underline-offset: 4px;
+  }
+
+  /* A variant dot: a ring at half ink on hover (full ink once chosen). */
+  html:not(.d-touch) body.nocturne .n-vsel__option:not([aria-pressed="true"]):hover .n-vsel__dot {
+    box-shadow: 0 0 0 3px var(--vault-ground), 0 0 0 4px color-mix(in srgb, var(--vault-ink) 50%, transparent);
+  }
+
+  /* …and pressed, the ring at full ink, as once chosen. */
+  html:not(.d-touch) body.nocturne .n-vsel__option:not([aria-pressed="true"]):active .n-vsel__dot {
+    box-shadow: 0 0 0 3px var(--vault-ground), 0 0 0 4px var(--vault-ink);
+  }
+
+  /* A selected or current control keeps its look on hover (its ring, its line, its ink are already whole) and answers
+     the press as every control does, one step further: the pressed ground behind it, as the menu's current item, the
+     current tab and the current page's. Here the chosen dot (a disc of it behind its ring, clear of its name) and the
+     chosen size (inside its double ring); the language shown is with the soft words (above). */
+  html:not(.d-touch) body.nocturne .n-vsel__option[aria-pressed="true"]:not(:disabled):active .n-vsel__dot {
+    box-shadow: 0 0 0 3px var(--vault-ground), 0 0 0 4px var(--vault-ink), 0 0 0 var(--d-s2, 8px) var(--d-press-ground);
+  }
+
+  html:not(.d-touch) body.nocturne .n-sizes__option[aria-pressed="true"]:not(:disabled, [aria-disabled="true"], .is-gone):active {
+    background-color: var(--d-press-ground);
+    transition-duration: var(--d-dur-press);
+  }
+
+  /* The heart: its stroke to ink on hover (soft at rest on desktop, below); pressed, one step further as the soft
+     words: the stroke kept in ink, the pressed ground behind the heart and WISHLIST, reaching 12 px past the heart and
+     past the word's last letter (its box already holds 10 px of air on each side, and the word's tracking's last space
+     on the right). The ground is its own layer, fading as theirs (80 ms, back in 160); nothing dims. */
+  html:not(.d-touch) body.nocturne .n-heart {
+    transition: opacity var(--d-dur-hover, 160ms) var(--d-ease, ease);
+  }
+
+  html:not(.d-touch) body.nocturne .n-heart .n-ic {
+    transition: color var(--d-dur-hover, 160ms) var(--d-ease, ease);
+  }
+
+  html:not(.d-touch) body.nocturne .n-heart:not(:disabled):hover .n-ic {
+    color: var(--vault-ink);
+  }
+
+  html:not(.d-touch) body.nocturne .n-heart::before {
+    content: "";
+    position: absolute;
+    inset: 0 calc(10px + var(--n-track-lb, 0.2em) - var(--d-s3, 12px)) 0 calc(10px - var(--d-s3, 12px));
+    z-index: -1;
+    background-color: var(--d-press-ground);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--d-dur-hover, 160ms) var(--d-ease, cubic-bezier(0.2, 0, 0, 1));
+  }
+
+  html:not(.d-touch) body.nocturne .n-heart:not(:disabled):active::before {
+    opacity: 1;
+    transition-duration: var(--d-dur-press, 80ms);
+  }
+
+  /* On a computer's window narrower than the desktop layout (§4) the heart is in ink at rest (the phone's): its hover
+     takes the text link's step instead, to the dim, so it still answers the pointer. */
+  @media (max-width: 1023.98px) {
+    html:not(.d-touch) body.nocturne .n-heart:not(:disabled):hover {
+      opacity: var(--d-dim, 0.64);
+    }
+  }
+
+  html:not(.d-touch) body.nocturne .n-heart:not(:disabled):active .n-ic {
+    color: var(--vault-ink);
+    transition-duration: var(--d-dur-press, 80ms);
+  }
+
+  /* The next release's row: a ground on its plate toward the ink, one step more when pressed; its chevron to ink. */
+  html:not(.d-touch) body.nocturne a.n-nx {
+    transition: background-color var(--d-dur-hover, 160ms) var(--d-ease, ease);
+  }
+
+  html:not(.d-touch) body.nocturne a.n-nx:hover {
+    background-color: color-mix(in srgb, var(--vault-ink) 4%, var(--vault-plate));
+  }
+
+  html:not(.d-touch) body.nocturne a.n-nx:active {
+    background-color: color-mix(in srgb, var(--vault-ink) 8%, var(--vault-plate));
+    transition-duration: var(--d-dur-press, 80ms);
+  }
+
+  html:not(.d-touch) body.nocturne a.n-nx:hover > .n-ic {
+    color: var(--vault-ink);
+  }
+
+  /* An underlined link in ink (MY PIECES and SIGN OUT on a result, the terms', SEE THE MODEL beside a draw's model, a
+     release's name in MY PIECES, the legal texts' links, Client Services' address): as a text link, its word and its line
+     dim on hover, further when pressed; the current one (the language shown) keeps its ink. */
+  html:not(.d-touch) body.nocturne :is(a[href], button):is(.n-u, .n-own__link, .n-own__terms-link, .n-release__see, .n-pieces__entry-title, .n-live__pieces, .n-contact__email, .legal__link, .legal__contact-link):not([aria-current]),
+  html:not(.d-touch) body.nocturne .n-contact a[href] {
+    transition: opacity var(--d-dur-hover) var(--d-ease);
+  }
+
+  html:not(.d-touch) body.nocturne :is(a[href], button):is(.n-u, .n-own__link, .n-own__terms-link, .n-release__see, .n-pieces__entry-title, .n-live__pieces, .n-contact__email, .legal__link, .legal__contact-link):not([aria-current]):hover,
+  html:not(.d-touch) body.nocturne .n-contact a[href]:hover {
+    opacity: var(--d-dim);
+  }
+
+  html:not(.d-touch) body.nocturne :is(a[href], button):is(.n-u, .n-own__link, .n-own__terms-link, .n-release__see, .n-pieces__entry-title, .n-live__pieces, .n-contact__email, .legal__link, .legal__contact-link):not([aria-current]):active,
+  html:not(.d-touch) body.nocturne .n-contact a[href]:active {
+    opacity: 0.5;
+    transition-duration: var(--d-dur-press);
+  }
+
+  /* An option, a size, a chip (§10.16): a line at half ink and the hover's ground on hover, the line at full ink and
+     the pressed ground when pressed (a line is instant: only grounds, words and opacity move, §10.13). A chosen option
+     or chip, filled, moves as a filled button; a chosen size keeps its double ring. A size gone or a disabled option
+     takes none. */
+  html:not(.d-touch) body.nocturne :is(.n-opt2__option, .n-sizes__option) {
+    transition:
+      background-color var(--d-dur-hover) var(--d-ease),
+      color var(--d-dur-hover) var(--d-ease);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.n-opt2__option, .n-sizes__option):not([aria-pressed="true"], :disabled, [aria-disabled="true"], .is-gone):hover {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vault-ink) 50%, transparent);
+    background-color: var(--d-hover-ground);
+    color: var(--vault-ink);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.n-opt2__option, .n-sizes__option):not([aria-pressed="true"], :disabled, [aria-disabled="true"], .is-gone):active {
+    box-shadow: inset 0 0 0 1px var(--vault-ink);
+    background-color: var(--d-press-ground);
+    color: var(--vault-ink);
+    transition-duration: var(--d-dur-press);
+  }
+
+  html:not(.d-touch) body.nocturne .n-opt2__option[aria-pressed="true"]:not(:disabled, [aria-disabled="true"]):hover {
+    background-color: color-mix(in srgb, var(--vault-ink) 88%, var(--vault-ground));
+  }
+
+  html:not(.d-touch) body.nocturne .n-opt2__option[aria-pressed="true"]:not(:disabled, [aria-disabled="true"]):active {
+    background-color: color-mix(in srgb, var(--vault-ink) 80%, var(--vault-ground));
+    transition-duration: var(--d-dur-press);
+  }
+
+  /* An option row (a radio in its row: a saved address or A NEW ADDRESS in an order's delivery): the whole row takes the
+     pointer and the hover's ground, its ring at half ink (full ink once chosen, §10.16); pressed, the pressed ground and
+     its ring at full ink. A disabled one takes none. */
+  html:not(.d-touch) body.nocturne label.n-opt:not(:has(> .n-opt__input:disabled)) {
+    cursor: pointer;
+    transition: background-color var(--d-dur-hover) var(--d-ease);
+  }
+
+  html:not(.d-touch) body.nocturne label.n-opt:not(:has(> .n-opt__input:disabled)):hover {
+    background-color: var(--d-hover-ground);
+  }
+
+  html:not(.d-touch) body.nocturne label.n-opt:not(:has(> .n-opt__input:disabled)):hover > .n-opt__input:not(:checked) + .n-opt__mark {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vault-ink) 50%, transparent);
+  }
+
+  html:not(.d-touch) body.nocturne label.n-opt:not(:has(> .n-opt__input:disabled)):active {
+    background-color: var(--d-press-ground);
+    transition-duration: var(--d-dur-press);
+  }
+
+  html:not(.d-touch) body.nocturne label.n-opt:not(:has(> .n-opt__input:disabled)):active > .n-opt__input:not(:checked) + .n-opt__mark {
+    box-shadow: inset 0 0 0 1px var(--vault-ink);
+  }
+
+  /* A row of the account (YOUR SIZES, YOUR ADDRESSES, MESSAGES…), as a hairline row: a ground across it, its chevron
+     to ink. */
+  html:not(.d-touch) body.nocturne :is(a, button).n-row {
+    transition: background-color var(--d-dur-hover) var(--d-ease);
+  }
+
+  html:not(.d-touch) body.nocturne :is(a, button).n-row:hover {
+    background-color: var(--d-hover-ground);
+  }
+
+  html:not(.d-touch) body.nocturne :is(a, button).n-row:active {
+    background-color: var(--d-press-ground);
+    transition-duration: var(--d-dur-press);
+  }
+
+  html:not(.d-touch) body.nocturne :is(a, button).n-row:hover .n-ic {
+    color: var(--vault-ink);
+  }
+
+  /* A switch (SOUND, LIGHT MODE, MY DEFAULT ADDRESS): off, its track takes a line of ink on hover, and a step toward the
+     ink when pressed; on, its filled track moves as a filled button. */
+  html:not(.d-touch) body.nocturne .n-sw__track {
+    transition: background-color var(--d-dur-hover) var(--d-ease);
+  }
+
+  html:not(.d-touch) body.nocturne .n-sw__input:not(:checked, :disabled):hover + .n-sw__track {
+    box-shadow: inset 0 0 0 1px var(--vault-ink);
+  }
+
+  html:not(.d-touch) body.nocturne .n-sw__input:not(:checked, :disabled):active + .n-sw__track {
+    background-color: color-mix(in srgb, var(--vault-ink) 24%, var(--vault-hairline-strong));
+    box-shadow: inset 0 0 0 1px var(--vault-ink);
+    transition-duration: var(--d-dur-press);
+  }
+
+  html:not(.d-touch) body.nocturne .n-sw__input:checked:not(:disabled):hover + .n-sw__track {
+    background-color: color-mix(in srgb, var(--vault-ink) 88%, var(--vault-ground));
+  }
+
+  html:not(.d-touch) body.nocturne .n-sw__input:checked:not(:disabled):active + .n-sw__track {
+    background-color: color-mix(in srgb, var(--vault-ink) 80%, var(--vault-ground));
+    transition-duration: var(--d-dur-press);
+  }
+
+  /* A button of an icon alone (the sheet's CLOSE): a ground behind it on hover, a step more when pressed. */
+  html:not(.d-touch) body.nocturne .n-account__close {
+    transition: background-color var(--d-dur-hover) var(--d-ease);
+  }
+
+  html:not(.d-touch) body.nocturne .n-account__close:hover {
+    background-color: var(--d-hover-ground);
+  }
+
+  html:not(.d-touch) body.nocturne .n-account__close:active {
+    background-color: var(--d-press-ground);
+    transition-duration: var(--d-dur-press);
+  }
+
+  /* The LIVE RELEASES' banner, a link on its plate: the plate a step toward the ink, as the next release's row. */
+  html:not(.d-touch) body.nocturne a.live-banner {
+    transition: background-color var(--d-dur-hover) var(--d-ease);
+  }
+
+  html:not(.d-touch) body.nocturne a.live-banner:hover {
+    background-color: color-mix(in srgb, var(--vault-ink) 4%, var(--vault-plate));
+  }
+
+  html:not(.d-touch) body.nocturne a.live-banner:active {
+    background-color: color-mix(in srgb, var(--vault-ink) 8%, var(--vault-plate));
+    transition-duration: var(--d-dur-press);
+  }
+
+  /* The house's older controls, outside NOCTURNE (the LIVE RELEASE's room, the shared certificate), kept as they look
+     (their hover fills a button, draws a text link's line: the house's own rules): pressed, one step further (§10.16).
+     Never on the boutique board, which stays as production has it, pressed too (desktop plan §2(j)); the `:where()`
+     keeps each rule's weight as it was. */
+  html:not(.d-touch) :where(body:not([data-screen="board"])) .btn:not(:disabled, [aria-disabled="true"], .live-hold, .live__addon):active {
+    background-color: color-mix(in srgb, var(--ink) 80%, transparent);
+    transition-duration: var(--d-dur-press, 80ms);
+  }
+
+  /* …and one filled at rest (the room's ENTER THE ROOM, PAY, a size chosen), which their hover cannot fill further:
+     its ground a step toward the other contrast, as a filled button's. */
+  html:not(.d-touch) :where(body:not([data-screen="board"])) .btn:is(.live__primary, [aria-pressed="true"]):not(:disabled, [aria-disabled="true"], .live-hold, .live__addon):hover {
+    background-color: color-mix(in srgb, var(--ink) 88%, transparent);
+  }
+
+  html:not(.d-touch) :where(body:not([data-screen="board"])) .btn:is(.live__primary, [aria-pressed="true"]):not(:disabled, [aria-disabled="true"], .live-hold, .live__addon):active {
+    background-color: color-mix(in srgb, var(--ink) 80%, transparent);
+  }
+
+  /* A text link of the house (soft at rest, whole with its line on hover) and its tabs and choices (soft at rest, ink
+     on hover): pressed, the word kept whole and the pressed ground behind it, as NOCTURNE's soft words (above). */
+  html:not(.d-touch) :where(body:not([data-screen="board"])) :is(.auth__option, .tabs__tab):not([aria-pressed="true"], [aria-selected="true"]):hover {
+    color: var(--ink);
+  }
+
+  html:not(.d-touch) :where(body:not([data-screen="board"])) .textlink:not(:disabled):active {
+    opacity: 1;
+  }
+
+  html:not(.d-touch) :where(body:not([data-screen="board"])) :is(.auth__option, .tabs__tab):not(:disabled):active {
+    color: var(--ink);
+  }
+
+  html:not(.d-touch) :where(body:not([data-screen="board"])) :is(.textlink, .auth__option, .tabs__tab):not(:disabled):active {
+    background-color: color-mix(in srgb, var(--ink) 8%, transparent);
+    box-shadow:
+      -12px 0 0 0 color-mix(in srgb, var(--ink) 8%, transparent),
+      12px 0 0 0 color-mix(in srgb, var(--ink) 8%, transparent);
+    transition-duration: var(--d-dur-press, 80ms);
+  }
+
+  html:not(.d-touch) :where(body:not([data-screen="board"])) .btn.live__addon:not(:disabled):hover .live__addon-mark {
+    border-color: var(--ink);
+  }
+
+  html:not(.d-touch) :where(body:not([data-screen="board"])) .btn.live__addon:not(:disabled):active {
+    background-color: color-mix(in srgb, var(--ink) 8%, transparent);
+    transition-duration: var(--d-dur-press, 80ms);
+  }
+
+  /* THE ENTRIES of a draw (§10.16, §10.30): a hairline row, its ground across the full row under the pointer. It leads
+     nowhere: no pointer, no pressed step; its identifier is a reference's text (§10.18). */
+  html:not(.d-touch) body.nocturne .n-release__item {
+    transition: background-color var(--d-dur-hover) var(--d-ease);
+  }
+
+  html:not(.d-touch) body.nocturne .n-release__item:hover {
+    background-color: var(--d-hover-ground);
+  }
+
+}
+
+/* LIGHT MODE switched (shared/mode.ts): the whole page changes at once; only hover and pressed states animate
+   (§10.13), never a change of mode. */
+@media (hover: hover) and (pointer: fine) {
+  html.d-mode-switch:not(.d-touch) *,
+  html.d-mode-switch:not(.d-touch) *::before,
+  html.d-mode-switch:not(.d-touch) *::after {
+    transition: none !important;
+  }
+}
+
+/* Reduced motion (§10.15): every state of the desktop changes at once (the room keeps its own path: not NOCTURNE's). */
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: reduce) {
+  html:not(.d-touch) body.nocturne *,
+  html:not(.d-touch) body.nocturne *::before,
+  html:not(.d-touch) body.nocturne *::after {
+    transition-duration: 0s !important;
+  }
+}
+
+/* ══ Hover, pressed: the shared certificate's controls on its paper (§10.13, §10.16, §10.19) ═══════════════════════ */
+
+@media (hover: hover) and (pointer: fine) {
+  /* Its paper keeps its own look (decision 9): DOWNLOAD PDF still fills with ink under the pointer, SCAN ORBES CODE still
+     takes its line; only the motion is the desktop's: colours, grounds and lines in the hover's 160 ms on the one
+     easing, the press in 80 ms, the line appearing whole in its place (no line drawn from its left, no transform), and
+     neither is text to select. */
+  html:not(.d-touch) body[data-screen="certificate"] .btn {
+    transition:
+      color var(--d-dur-hover, 160ms) var(--d-ease, cubic-bezier(0.2, 0, 0, 1)),
+      background-color var(--d-dur-hover, 160ms) var(--d-ease, cubic-bezier(0.2, 0, 0, 1)),
+      border-color var(--d-dur-hover, 160ms) var(--d-ease, cubic-bezier(0.2, 0, 0, 1));
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .btn:active {
+    transition-duration: var(--d-dur-press, 80ms);
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .textlink {
+    transition: opacity var(--d-dur-hover, 160ms) var(--d-ease, cubic-bezier(0.2, 0, 0, 1));
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .textlink::after {
+    transform: none;
+    opacity: 0;
+    transition: opacity var(--d-dur-hover, 160ms) var(--d-ease, cubic-bezier(0.2, 0, 0, 1));
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .textlink:not(:disabled):is(:hover, :active, :focus-visible)::after {
+    opacity: 1;
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .textlink:not(:disabled):active,
+  html:not(.d-touch) body[data-screen="certificate"] .textlink:not(:disabled):active::after {
+    transition-duration: var(--d-dur-press, 80ms);
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] :is(button, .btn, .textlink) {
+    user-select: none;
+  }
+}
+
+/* ══ Hover, pressed: a piece's tile (§10.16) ════════════════════════════════════════════════════════════════════ */
+
+@media (hover: hover) and (pointer: fine) {
+  /* Anywhere it leads (its photograph, its name, SEE THE PIECE): the photograph a little lighter, its name underlined,
+     SEE THE PIECE in its hover; no zoom. */
+  html:not(.d-touch) body.nocturne .n-pieces__piece > .n-ph > img {
+    transition: opacity var(--d-dur-hover, 160ms) var(--d-ease, ease);
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__piece:has(:is(.d-ptile__open, .d-ptile__name, .n-pieces__see):hover) > .n-ph > img {
+    opacity: 0.88;
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__piece:has(:is(.d-ptile__open, .d-ptile__name, .n-pieces__see):active) > .n-ph > img {
+    opacity: 0.8;
+    transition-duration: var(--d-dur-press, 80ms);
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__piece:has(:is(.d-ptile__open, .d-ptile__name, .n-pieces__see):hover) .n-pieces__name {
+    text-decoration: underline 1px;
+    text-underline-offset: 4px;
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__piece:has(:is(.d-ptile__open, .d-ptile__name):hover) .n-pieces__see {
+    opacity: var(--d-dim, 0.64);
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__piece:has(:is(.d-ptile__open, .d-ptile__name):active) .n-pieces__see {
+    opacity: 0.5;
+    transition-duration: var(--d-dur-press, 80ms);
+  }
+
+  html:not(.d-touch) body.nocturne .d-ptile__open,
+  html:not(.d-touch) body.nocturne .d-ptile__name {
+    cursor: pointer;
+  }
+}
+
+/* ══ Hover, pressed: a section's link (§10.16) ═════════════════════════════════════════════════════════════════ */
+
+@media (hover: hover) and (pointer: fine) {
+  html:not(.d-touch) body.nocturne .d-legal__link {
+    transition: color var(--d-dur-hover, 160ms) var(--d-ease, ease);
+  }
+
+  html:not(.d-touch) body.nocturne .d-legal__link:hover {
+    color: var(--vault-ink);
+  }
+
+  /* …and pressed one step further: the pressed ground behind the line, 12 px past it on each side, as a menu link's
+     (its own layer, fading in 80 ms and back in 160, §10.13). */
+  html:not(.d-touch) body.nocturne .d-legal__link {
+    position: relative;
+    z-index: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-legal__link::before {
+    content: "";
+    position: absolute;
+    inset: 0 calc(-1 * var(--d-s3, 12px));
+    z-index: -1;
+    background-color: var(--d-press-ground);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--d-dur-hover, 160ms) var(--d-ease, cubic-bezier(0.2, 0, 0, 1));
+  }
+
+  html:not(.d-touch) body.nocturne .d-legal__link:active {
+    color: var(--vault-ink);
+    transition-duration: var(--d-dur-press, 80ms);
+  }
+
+  html:not(.d-touch) body.nocturne .d-legal__link:active::before {
+    opacity: 1;
+    transition-duration: var(--d-dur-press, 80ms);
+  }
+
+  html:not(.d-touch) body.nocturne .d-legal__link {
+    cursor: pointer;
+  }
+}

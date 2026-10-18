@@ -100,7 +100,7 @@ export interface CollectorMessage {
   body: string;
   at: Date;
   /** On the collector's own messages: what it concerns, and where it is in the app (null for a scan). */
-  concerning: { kind: ClientMessageContext; label: string; path: string | null } | null;
+  concerning: { kind: ClientMessageContext; label: string; path: string | null; ref?: string | null } | null;
 }
 
 /** GET /api/v1/account/messages. */
@@ -280,6 +280,24 @@ function pathOf(kind: ClientMessageContext, ids: { serial: string | null; orderI
       return ids.dropId ? `/verify/releases/${ids.dropId}` : null;
     case 'MODEL':
       return ids.slug ? `/verify/lookbook/${ids.slug}` : null;
+    default:
+      return null;
+  }
+}
+
+/** The id a message's context is attached by again (MessageContextInput.id), from its row; null when it is gone. */
+function refOf(kind: ClientMessageContext, ids: { serial: string | null; orderId: string | null; dropId: string | null; modelId: string | null; scanEventId: string | null }): string | null {
+  switch (kind) {
+    case 'PIECE':
+      return ids.serial;
+    case 'ORDER':
+      return ids.orderId;
+    case 'RELEASE':
+      return ids.dropId;
+    case 'MODEL':
+      return ids.modelId;
+    case 'SCAN':
+      return ids.scanEventId;
     default:
       return null;
   }
@@ -476,7 +494,7 @@ export class MessageService {
       .selectFrom('client_messages as m')
       .leftJoin('products as p', 'p.id', 'm.product_id')
       .leftJoin('models as md', 'md.id', 'm.model_id')
-      .select(['m.id', 'm.author', 'm.body', 'm.created_at', 'm.context_kind', 'm.context_label', 'm.order_id', 'm.drop_id', 'p.product_id as serial', 'md.slug'])
+      .select(['m.id', 'm.author', 'm.body', 'm.created_at', 'm.context_kind', 'm.context_label', 'm.order_id', 'm.drop_id', 'm.model_id', 'm.scan_event_id', 'p.product_id as serial', 'md.slug'])
       .where('m.conversation_id', '=', c.id)
       .orderBy('m.created_at')
       .orderBy('m.id')
@@ -490,7 +508,14 @@ export class MessageService {
         at: r.created_at,
         concerning:
           r.author === 'COLLECTOR' && r.context_kind && r.context_label
-            ? { kind: r.context_kind, label: r.context_label, path: pathOf(r.context_kind, { serial: r.serial ?? null, orderId: r.order_id, dropId: r.drop_id, slug: r.slug ?? null }) }
+            ? {
+                kind: r.context_kind,
+                label: r.context_label,
+                path: pathOf(r.context_kind, { serial: r.serial ?? null, orderId: r.order_id, dropId: r.drop_id, slug: r.slug ?? null }),
+                // Desktop (MESSAGES as subjects): the id the collector's app sends to attach the same thing to a
+                // reply (MessageContextInput.id), so a reply on a subject stays on it; null once it can no longer be read.
+                ref: refOf(r.context_kind, { serial: r.serial ?? null, orderId: r.order_id, dropId: r.drop_id, modelId: r.model_id, scanEventId: r.scan_event_id }),
+              }
             : null,
       })),
       unread: rows.some((r) => r.author === 'STAFF' && r.created_at.getTime() > readAt),
@@ -510,6 +535,23 @@ export class MessageService {
       .limit(1)
       .executeTakeFirst();
     return { unread: r !== undefined };
+  }
+
+  /**
+   * How many answers are unread (GET /api/v1/account/messages/unread-count: a computer's account page, its
+   * MESSAGES card, «1 UNREAD»): the answers newer than what the collector read, as `unread` counts them.
+   */
+  async unreadCount(accountId: string): Promise<{ count: number }> {
+    const account = assertAccount(accountId);
+    const r = await this.db
+      .selectFrom('client_conversations as c')
+      .innerJoin('client_messages as m', 'm.conversation_id', 'c.id')
+      .select((eb) => eb.fn.countAll<string | number | bigint>().as('n'))
+      .where('c.account_id', '=', account)
+      .where('m.author', '=', 'STAFF')
+      .where((eb) => eb.or([eb('c.collector_read_at', 'is', null), eb('m.created_at', '>', eb.ref('c.collector_read_at'))]))
+      .executeTakeFirst();
+    return { count: Number(r?.n ?? 0) };
   }
 
   /** The collector has read the conversation up to `upTo` (never later than now; never earlier than before). */

@@ -1,0 +1,901 @@
+/*
+ * MY PIECES, a piece and the shared certificate on a computer (desktop, BRIEF §3, §10.1–§10.5, §10.22,
+ * §10.26, §10.27; verify/views/pieces.ts, piece.ts, certificate.ts, desktop-pieces.ts). A phone keeps its column:
+ * every rule lives in the desktop's query (the hover and pressed states of the certificate and of a piece's tile are in
+ * shared/desktop-pointer.css).
+ *
+ * MY PIECES: the chapter's head (D2, 96 px under the bar or the banner) with its sentence, whose room is kept on every
+ * tab so the tabs never move; the tabs on the edge. PIECES: each piece a tile of up to 400 px (three to a row, two below
+ * 1200), its model's photograph square above its words; then AFTER THE RELEASES, EARLY ACCESS and ADD A PIECE, each a
+ * row under a hairline across the canvas: its label and sentence on columns 1–6, what it offers (the questions, SCAN
+ * ORBES CODE) on 8–12. RELEASES: each entry a hairline row, the release and its state on 1–5 (1–4 below 1440), what it
+ * means, its id and WRITE TO ORBES CLIENT SERVICES on 6–12 (5–12). (ORDERS: shared/desktop-order.css.)
+ *
+ * A piece: its frame, then where it comes from beside its GENOME (a piece without an order: its GENOME's words beside
+ * its figure), then its three tabs: OWNERSHIP's facts beside the certificate and the report; ORBES CARE's WARRANTY (and
+ * its claim under it) beside PRIVATE CARE and CARING FOR THIS PIECE, the contact across under both; SERVICE's history
+ * as hairline rows across the canvas.
+ *
+ * The shared certificate keeps its paper (decision 9): its head centred over two columns, the piece's écrin and lines
+ * on 1–5, the record and the certificate's rows on 7–12, its foot centred under them.
+ */
+
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  /* ── 1. MY PIECES: the chapter's head on every tab, the tabs on the edge ───────────────────────────────────────── */
+
+  html:not(.d-touch) body.nocturne main.view--pieces.n-pieces,
+  html:not(.d-touch) body.nocturne[data-banner] main.view--pieces.n-pieces {
+    --n-margin: var(--d-edge);
+    width: auto;
+    max-width: none;
+    margin-right: 0;
+    margin-left: 0;
+    padding-bottom: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .view--pieces > .n-pieces__head {
+    padding-top: var(--d-s9);
+  }
+
+  html:not(.d-touch) body.nocturne .view--pieces .n-pieces__title {
+    margin: 0;
+    font-size: var(--d-fs-d2);
+    line-height: 1.04;
+    letter-spacing: var(--d-tr-d23);
+  }
+
+  html:not(.d-touch) body.nocturne .view--pieces .n-pieces__lead {
+    max-width: 32em;
+    margin-top: var(--d-s5);
+  }
+
+  /* Signed out, the sign-in's sentence stands where the signed-in sentence does: 24 px under the title (§10.4). */
+  html:not(.d-touch) body.nocturne .view--pieces .pieces__signin .n-own > .n-own__lead:first-child {
+    margin-top: var(--d-s5);
+  }
+
+  /* The sentence is the PIECES tab's: on ORDERS and RELEASES its room is kept, so the head is as tall on every tab and
+     the tabs stay where they are when another is chosen. */
+  html:not(.d-touch) body.nocturne .view--pieces:is([data-tab="pieces"], [data-tab="orders"], [data-tab="releases"]) .n-pieces__lead[hidden] {
+    display: block;
+    visibility: hidden;
+  }
+
+  html:not(.d-touch) body.nocturne .view--pieces .n-pieces__tabs {
+    margin: var(--d-s7) var(--d-edge) 0;
+    padding: 0;
+  }
+
+  /* Without tabs (PIECES alone to show), the panel 48 px under the sentence, as under the tabs. */
+  html:not(.d-touch) body.nocturne .view--pieces .n-pieces__body > .n-pieces__panel:first-child {
+    margin-top: var(--d-s7);
+  }
+
+  /* While its pieces are read, or when they could not be shown: on the edge, 48 px under the head (§10.24). */
+  html:not(.d-touch) body.nocturne .view--pieces .n-pieces__body > :is(.n-loading, .n-pieces__failed) {
+    margin-top: var(--d-s7);
+  }
+
+  html:not(.d-touch) body.nocturne .view--pieces .n-pieces__body > .n-pieces__failed .n-tx {
+    max-width: 36em;
+  }
+
+  /* A page that could not be shown (MY PIECES, a piece, THE CIRCLE, a post, THE CLUB): its sentence and reason on the
+     edge at a reading measure, TRY AGAIN at its width 32 px under them, never a centred stack (§10.24). */
+  html:not(.d-touch) body.nocturne :is(.view--pieces, .view--piece, .view--circle, .view--circle-post, .view--club) .n-failed {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    max-width: 36em;
+    margin: 0;
+    text-align: left;
+  }
+
+  html:not(.d-touch) body.nocturne :is(.view--pieces, .view--piece, .view--circle, .view--circle-post, .view--club) .n-failed > .n-failed__reason {
+    margin-top: var(--d-s2);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.view--pieces, .view--piece, .view--circle, .view--circle-post, .view--club) .n-failed > .n-btn {
+    width: auto;
+    min-width: 280px;
+    margin-top: var(--d-s6);
+    padding: 0 var(--d-s6);
+  }
+
+  /* …its sentence, the page's h1 where the page has no title (views/desktop-pieces.ts): as it stood, its weight kept. */
+  html:not(.d-touch) body.nocturne .d-untitled__h1 {
+    margin: 0;
+    font-weight: inherit;
+  }
+
+  /* ── 2. PIECES: the pieces as tiles, then the page's rows ──────────────────────────────────────────────────────── */
+
+  html:not(.d-touch) body.nocturne .view--pieces .n-pieces__list {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 400px));
+    justify-content: start;
+    gap: var(--d-s8) var(--d-gutter);
+    margin: 0;
+    padding: 0 var(--d-edge);
+  }
+
+  /* Below 1200 two to a row, so a piece's line (BRACELET · 925 STERLING SILVER · SIZE 17) holds on one line. */
+  @media (max-width: 1199.98px) {
+    html:not(.d-touch) body.nocturne .view--pieces .n-pieces__list {
+      grid-template-columns: repeat(2, minmax(0, 400px));
+    }
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__list > .n-pieces__piece {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__piece > .n-ph {
+    --d-ph-h: auto;
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    margin: 0;
+    background-color: var(--n-photo);
+  }
+
+  /* A tile shows its photograph whole and unfaded (the phone's fade is its column's). */
+  html:not(.d-touch) body.nocturne .n-pieces__piece > .n-ph::before,
+  html:not(.d-touch) body.nocturne .n-pieces__piece > .n-ph::after {
+    display: none;
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__piece > .n-ph > img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  /* A piece whose model has no photograph: the plate of a missing photograph, as every tile's (one size per row). */
+  html:not(.d-touch) body.nocturne .n-pieces__piece--bare::before {
+    content: "";
+    display: block;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    background-color: var(--vault-plate);
+  }
+
+  /* Its words fill the tile down to the row's foot, SEE THE PIECE on it: every SEE THE PIECE of a row on one line,
+     32 px at least under the state (the tiles of a row are as tall as the tallest). */
+  html:not(.d-touch) body.nocturne .n-pieces__piece > .n-pieces__words {
+    display: flex;
+    flex: 1 0 auto;
+    flex-direction: column;
+    margin: var(--d-s4) 0 0;
+    padding: 0;
+    text-align: left;
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__piece--bare > .n-pieces__words {
+    padding-top: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__piece .n-pieces__name-line {
+    align-items: baseline;
+    gap: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__piece .n-pieces__name {
+    font-size: var(--d-fs-t2);
+    line-height: 1.2;
+    letter-spacing: var(--d-tr-mid);
+    overflow-wrap: normal;
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__piece .n-pieces__id {
+    color: var(--vault-soft);
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__piece :is(.n-pieces__variant, .n-pieces__line) {
+    margin-top: var(--d-s2);
+    overflow-wrap: normal;
+  }
+
+  /* Its state as one line of words (REGISTERED TO YOU · SINCE 3 OCT 2026: a word space each side of the dot), on the
+     tile's edge as every state; the check that leads it hangs before the edge (§10.6), 8 px before its words, out of
+     the line, so the line is as tall with it as without it (from 1280 the check stands inside the 24 px gutter). */
+  html:not(.d-touch) body.nocturne .n-pieces__piece .n-pieces__state {
+    position: relative;
+    display: block;
+    margin-top: var(--d-s4);
+    line-height: var(--n-lh-base);
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__piece .n-pieces__state > .n-ic {
+    position: absolute;
+    top: calc((1lh - 16px) / 2);
+    left: calc(-16px - var(--d-s2));
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__piece .n-pieces__see-line {
+    margin-top: auto;
+    padding-top: var(--d-s6);
+  }
+
+  /* A tile leads to its piece from its photograph and its name too (views/desktop-pieces.ts), as every photo tile does
+     on a computer (§10.16): the photograph under a link that covers it, the name a link in its own ink. */
+  html:not(.d-touch) body.nocturne .n-pieces__piece > .n-ph > .d-ptile__open {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: block;
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__piece .d-ptile__name {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__piece .d-ptile__name:focus-visible {
+    outline: 1px solid var(--vault-ink);
+    outline-offset: 4px;
+  }
+
+  /* No piece yet: the page's sentence on the edge, in reading text (§10.24). */
+  html:not(.d-touch) body.nocturne .view--pieces .n-pieces__quiet {
+    margin-top: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .view--pieces .n-pieces__quiet > .n-quiet {
+    max-width: 36em;
+    font-size: var(--d-fs-text);
+    line-height: 1.6;
+  }
+
+  /* Each row of the page under a hairline across the canvas: its label and sentence on 1–6, what it offers on 8–12,
+     120 px under what comes before it (§10.4). */
+  html:not(.d-touch) body.nocturne .n-pieces__panel > :is(.pieces__questions, .pieces__early, .n-pieces__add) {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    grid-auto-rows: auto;
+    column-gap: var(--d-gutter);
+    align-items: start;
+    margin: var(--d-s10) var(--d-edge) 0;
+    padding: var(--d-s6) 0 0;
+    border-top: 1px solid var(--vault-hairline);
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__panel > :is(.pieces__questions, .pieces__early, .n-pieces__add) > :is(h2, .n-pieces__section-lead) {
+    grid-column: 1 / span 6;
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__panel > :is(.pieces__questions, .pieces__early, .n-pieces__add) > h2 {
+    grid-row: 1;
+    font-size: var(--n-fs-lb);
+    letter-spacing: var(--d-tr-label);
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__panel > :is(.pieces__questions, .pieces__early, .n-pieces__add) > .n-pieces__section-lead {
+    grid-row: 2;
+    max-width: 32em;
+    margin-top: var(--d-s4);
+    font-size: var(--d-fs-text);
+    line-height: 1.6;
+  }
+
+  /* SCAN ORBES CODE, at its width, its top on the label's (8–12). */
+  html:not(.d-touch) body.nocturne .n-pieces__add > .n-pieces__scan {
+    grid-column: 8 / -1;
+    grid-row: 1 / span 2;
+    justify-self: start;
+    width: auto;
+    min-width: 280px;
+    margin: 0;
+    padding: 0 var(--d-s6);
+  }
+
+  /* AFTER THE RELEASES: each question on 8–12 (a form's column, 440 px at most), its words on the column's edge. */
+  html:not(.d-touch) body.nocturne .pieces__questions > .pieces__question-list {
+    grid-column: 8 / -1;
+    grid-row: 1 / span 3;
+    max-width: 440px;
+    margin: 0;
+    padding: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .pieces__question + .pieces__question {
+    margin-top: var(--d-s8);
+  }
+
+  html:not(.d-touch) body.nocturne .pieces__question > .question {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    border-top: 0;
+    text-align: left;
+  }
+
+  /* Its words in the desktop's roles (§10.5): ONE QUESTION and the release in the label's 11 px, the release 8 px under
+     ONE QUESTION; the question in T3's 12 px, 16 px under them; the answers in the label's 11 px, 24 px under it (each
+     keeps its 44 px zone, 8 px of it above and below its 28 px line, given back: the words stand 24 px apart); the
+     note in Small (14.5 / 1.5), 24 px under the last answer. */
+  html:not(.d-touch) body.nocturne .pieces__question > .question :is(.question__label, .question__release) {
+    font-size: var(--d-fs-label);
+    line-height: var(--n-lh-base);
+    letter-spacing: var(--d-tr-label);
+  }
+
+  html:not(.d-touch) body.nocturne .pieces__question > .question .question__release {
+    margin-top: var(--d-s2);
+  }
+
+  html:not(.d-touch) body.nocturne .pieces__question > .question .question__text {
+    margin-top: var(--d-s4);
+    font-size: var(--n-fs-t3);
+    line-height: 1.5;
+    letter-spacing: var(--d-tr-label);
+  }
+
+  html:not(.d-touch) body.nocturne .pieces__question > .question .question__answers {
+    align-items: flex-start;
+    gap: var(--d-s4);
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne .pieces__question > .question .question__answer {
+    font-size: var(--d-fs-label);
+    letter-spacing: var(--d-tr-label);
+    text-align: left;
+  }
+
+  html:not(.d-touch) body.nocturne .pieces__question > .question .question__note {
+    margin-top: var(--d-s4);
+    font-size: var(--d-fs-small);
+    line-height: 1.5;
+  }
+
+  /* ── 3. RELEASES: each entry a hairline row on the grid ────────────────────────────────────────────────────────── */
+
+  /* Under the tabs, whose hairline closes their row 48 px above the list (§10.26), the list draws no second line. */
+  html:not(.d-touch) body.nocturne .view--pieces .n-pieces__entries {
+    --d-entry-left: calc((4 * 100% - 8 * var(--d-gutter)) / 12);
+    --d-entry-right: calc((5 * 100% + 5 * var(--d-gutter)) / 12);
+    margin-top: 0;
+  }
+
+  @media (min-width: 1440px) {
+    html:not(.d-touch) body.nocturne .view--pieces .n-pieces__entries {
+      --d-entry-left: calc((5 * 100% - 7 * var(--d-gutter)) / 12);
+      --d-entry-right: calc(50% + var(--d-gutter) / 2);
+    }
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__entries > .n-pieces__entry:first-child {
+    border-top: 0;
+  }
+
+  /* Each entry: the release (its link) across the row on its first line; under it, its state and the house's guarantee
+     stacked on the left (1–4, 1–5 from 1440), what it means now, its id and WRITE TO ORBES CLIENT SERVICES on the right
+     (5–12, 7–12), both from the same top. */
+  html:not(.d-touch) body.nocturne .n-pieces__entries > .n-pieces__entry {
+    display: flow-root;
+    padding: var(--d-s6) 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__entries > .n-pieces__entry > * {
+    margin: 0 0 0 var(--d-entry-right);
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__entry > .n-pieces__entry-title {
+    display: block;
+    width: fit-content;
+    max-width: 100%;
+    /* Its 44 px zone given back above; under it 24 px to what follows, so its keyboard ring (4 px off the zone) clears
+       the state line (§10.17). */
+    margin: -15px 0 calc(var(--d-s5) - 15px);
+    font-size: var(--d-fs-t2);
+    letter-spacing: var(--d-tr-mid);
+    line-height: 1.2;
+    overflow-wrap: normal;
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__entry > :is(.pieces__entry-state, .n-pieces__guarantee) {
+    float: left;
+    clear: left;
+    max-width: var(--d-entry-left);
+    margin-left: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__entry > .n-pieces__guarantee {
+    margin-top: var(--d-s3);
+  }
+
+  /* An entry's state and its guarantee label each take their own line under the release. */
+  html:not(.d-touch) body.nocturne .n-pieces__entry > .pieces__entry-state {
+    width: var(--d-entry-left);
+    margin-top: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__entry > .pieces__entry-sentence {
+    max-width: 36em;
+    font-size: var(--d-fs-text);
+    line-height: 1.6;
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__entry > .pieces__entry-sentence ~ .n-pieces__entry-line {
+    margin-top: var(--d-s3);
+  }
+
+  html:not(.d-touch) body.nocturne .n-pieces__entry > .n-write__open {
+    display: flex;
+    width: max-content;
+    min-width: 280px;
+    margin-top: var(--d-s5);
+    padding: 0 var(--d-s6);
+  }
+
+  /* ── 4. A piece: where it comes from beside its GENOME; its three tabs, each panel on the grid ───────────────────── */
+
+  /* A piece without an order (a boutique's): its GENOME's figure stays on 8–12, its words (GENOME, the serial, the
+     fingerprint) stand beside it on 1–6, so the row never holds a figure alone. */
+  html:not(.d-touch) body.nocturne .n-piece__article:not(:has(> .n-piece__origin)) > .n-piece__genome {
+    display: grid;
+    grid-column: canvas;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    grid-template-rows: auto auto auto 1fr;
+    column-gap: var(--d-gutter);
+    align-items: start;
+    text-align: left;
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__article:not(:has(> .n-piece__origin)) > .n-piece__genome > .n-gen__label {
+    grid-column: 1 / span 6;
+    grid-row: 1;
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__article:not(:has(> .n-piece__origin)) > .n-piece__genome > .n-gen__id {
+    grid-column: 1 / span 6;
+    grid-row: 2;
+    margin: var(--d-s5) 0 0;
+    font-size: var(--d-fs-t2);
+    letter-spacing: var(--d-tr-mid);
+    justify-self: start;
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__article:not(:has(> .n-piece__origin)) > .n-piece__genome > .n-gen__fp {
+    grid-column: 1 / span 6;
+    grid-row: 3;
+    margin: var(--d-s3) 0 0;
+    justify-self: start;
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__article:not(:has(> .n-piece__origin)) > .n-piece__genome > .n-gen__figure {
+    grid-column: 8 / -1;
+    grid-row: 1 / -1;
+    justify-self: center;
+    margin: 0;
+  }
+
+  /* A piece whose model has no photograph: its frame's words on the canvas under the crumb, its state in the right
+     block's place (384 px, pinned to the right edge) on the lines' foot line, as a frame's (§10.27). */
+  html:not(.d-touch) body.nocturne .n-piece__article:not(:has(> .n-piece__photo)) > .n-piece__state-line {
+    grid-column: canvas;
+    grid-row: 1;
+    justify-self: end;
+    align-self: end;
+    width: var(--d-aside);
+    margin: 0;
+    padding: 0 0 var(--d-frame-foot);
+    text-align: center;
+  }
+
+  /* With nothing between the frame and the tabs (no origin, no GENOME), the tabs are the first canvas section: 160 px
+     under the frame's foot (§10.4). */
+  html:not(.d-touch) body.nocturne .n-piece__article:not(:has(> :is(.n-piece__origin, .n-piece__genome):not([hidden]))) > .n-piece__tabs {
+    margin-top: var(--d-s11);
+  }
+
+  /* The tabs' panels: two columns, the first on 1–6, the second on 8–12, top-aligned (§10.27); each 48 px under the
+     tabs' hairline as MY PIECES' (§10.26), the phone's own room above a panel given back. */
+  html:not(.d-touch) body.nocturne .n-piece__tabs .n-tabs__panel {
+    padding-top: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__tabs .n-piece__panel {
+    grid-auto-flow: row dense;
+  }
+
+  /* ORBES CARE (D1), on named areas, so a section the care status draws later (the claim, PRIVATE CARE) never moves
+     another to a new place: WARRANTY on 1–6 beside PRIVATE CARE (or the tier it opens from) on 8–12, each label on
+     the row's top line (§10.27); the WARRANTY CLAIM under WARRANTY while one is under way, beside CARING FOR THIS PIECE;
+     then, across under both, the contact sentence and WRITE TO ORBES CLIENT SERVICES. The two sections of a row share
+     its height, so their hairlines (the phone's, kept) close the row on one line. */
+  html:not(.d-touch) body.nocturne .n-piece__tabs .n-piece__care {
+    grid-template-areas:
+      'warranty warranty warranty warranty warranty warranty . care care care care care'
+      'claim claim claim claim claim claim . guide guide guide guide guide'
+      'contact contact contact contact contact contact contact contact contact contact contact contact'
+      'write write write write write write write write write write write write';
+  }
+
+  /* Below 1280, where the columns narrow, WARRANTY takes 1–5 and PRIVATE CARE 7–12, so its request's form keeps a
+     column of about 440 px and CONFIRM REQUEST · CANCEL their room (§10.22). */
+  @media (max-width: 1279.98px) {
+    html:not(.d-touch) body.nocturne .n-piece__tabs .n-piece__care {
+      grid-template-areas:
+        'warranty warranty warranty warranty warranty . care care care care care care'
+        'claim claim claim claim claim . guide guide guide guide guide guide'
+        'contact contact contact contact contact contact contact contact contact contact contact contact'
+        'write write write write write write write write write write write write';
+    }
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__tabs .n-piece__care > .n-piece__warranty {
+    grid-area: warranty;
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__tabs .n-piece__care > .n-piece__claim {
+    grid-area: claim;
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__tabs .n-piece__care > .n-piece__care-year {
+    grid-area: care;
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__tabs .n-piece__care > .n-piece__care-guide {
+    grid-area: guide;
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__tabs .n-piece__care > .n-piece__care-contact {
+    grid-area: contact;
+    max-width: 36em;
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__tabs .n-piece__care > .n-write__open {
+    grid-area: write;
+  }
+
+  /* Each section's hairline 32 px under its last line (lines → what follows, §10.4), the next row 48 px under it. */
+  html:not(.d-touch) body.nocturne .n-piece__tabs .n-piece__care > .n-piece__care-section {
+    align-self: stretch;
+    margin: 0;
+    padding-bottom: var(--d-s6);
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__tabs .n-piece__care > :is(.n-piece__claim, .n-piece__care-guide, .n-piece__care-contact) {
+    margin-top: var(--d-s7);
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__tabs .n-piece__care > .n-write__open {
+    margin-top: var(--d-s6);
+  }
+
+  /* WARRANTY's lines on the scale: its rows 16 px under its label, its sentence 24 px under the rows; a piece its claim
+     closed, its head 16 px under the label and its sentence 16 px under the head. */
+  html:not(.d-touch) body.nocturne .n-piece__care :is(.n-piece__warranty, .n-piece__care-guide) > h3 {
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__warranty > :is(.n-piece__warranty-rows, .n-piece__warranty-closed) {
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__warranty > .n-piece__warranty-rows > .n-kv__row:first-child {
+    padding-top: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__warranty > .n-piece__note {
+    max-width: 36em;
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__warranty > :is(.n-piece__warranty-closed + .n-piece__note, .n-piece__note:nth-child(2)) {
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__care-guide > .n-piece__care-text {
+    max-width: 36em;
+    margin-top: var(--d-s4);
+  }
+
+  /* PRIVATE CARE's and the WARRANTY CLAIM's lines on the scale (§10.4), the claim reusing PRIVATE CARE's parts: its
+     label, then its head or its text 16 px under it, the text or the rows 16 px under the head; an action or the rows
+     32 px under the words before them, and 32 px between an action and the rows; an error 16 px under what it follows.
+     PRIVATE CARE's form: RETURN ADDRESS 32 px under the question, its lead 16 px under it, the fields 32 px under the
+     lead. */
+  html:not(.d-touch) body.nocturne :is(.n-piece__care-year, .n-piece__claim) > * {
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.n-piece__care-year, .n-piece__claim) > h3:first-child {
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne :is(.n-piece__care-year, .n-piece__claim) > :is(.n-piece__action-line, .n-piece__care-year-rows, .n-piece__care-year-to, form) {
+    margin-top: var(--d-s6);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.n-piece__care-year, .n-piece__claim) > .n-piece__care-year-head + .n-piece__care-year-rows {
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.n-piece__care-year, .n-piece__claim) > .n-piece__care-year-rows > .n-kv__row:first-child {
+    padding-top: 0;
+  }
+
+  html:not(.d-touch) body.nocturne :is(.n-piece__care-year, .n-piece__claim) :is(.n-piece__care-year-text, .n-piece__care-year-question) {
+    max-width: 36em;
+  }
+
+  /* PRIVATE CARE's request: a form's column (440 px at most, §10.22), CONFIRM REQUEST and CANCEL sharing it. */
+  html:not(.d-touch) body.nocturne .n-piece__care-year > form {
+    max-width: 440px;
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__care-year > form > .n-fld-group:first-child {
+    margin-top: 0;
+  }
+
+  /* SERVICE (D2): SERVICE HISTORY's services as hairline rows across the canvas, as an order's rows: when and where on
+     1–6, what was done on 8–12, on one line. Its empty line (or its wait, or its error and RETRY) on 1–6 under its
+     label, with nothing beside it. */
+  html:not(.d-touch) body.nocturne .n-piece__tabs .n-piece__panel > :is(.n-piece__service-none, .n-piece__service-wait, .n-piece__service-error, .n-piece__action-line) {
+    grid-column: 1 / span 6;
+    max-width: 36em;
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__tabs .n-piece__panel > .n-piece__services {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+    margin: var(--d-s5) 0 0;
+    padding: 0;
+    border-top: 1px solid var(--vault-hairline);
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__services > .n-piece__service {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+    align-items: baseline;
+    margin: 0;
+    padding: var(--d-s5) 0;
+    border-bottom: 1px solid var(--vault-hairline);
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__service > :first-child {
+    grid-column: 1 / span 6;
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__service > .n-piece__service-kind {
+    grid-column: 8 / -1;
+    margin: 0;
+  }
+
+  /* SERVICE HISTORY's empty line: its label, then one line of reading text (§10.24), as WARRANTY's sentence. */
+  html:not(.d-touch) body.nocturne .n-piece__service-none {
+    font-size: var(--d-fs-text);
+    line-height: 1.6;
+  }
+
+  /* OWNERSHIP's choices and pairs of buttons (7 · 30 · 90 DAYS, LOST · STOLEN, CREATE LINK · CANCEL, COPY LINK · OPEN
+     LINK): a form's column, 440 px at most, the pair sharing it (§10.22). */
+  html:not(.d-touch) body.nocturne .d-own__actions :is(.n-duo, .n-opt2) {
+    max-width: 440px;
+  }
+
+  /* OWNERSHIP's certificate link, shown once: its address on one line where it holds, else broken anywhere (it is an
+     address, selected whole in one click, §10.19). */
+  html:not(.d-touch) body.nocturne .n-piece__link-value {
+    user-select: all;
+    overflow-wrap: anywhere;
+  }
+
+  /* OWNERSHIP's notice 16 px under what it answers (views/piece.ts): COPY LINK's pair, CREATE CERTIFICATE after a
+     WITHDRAW, the report's last line once it is confirmed. */
+  html:not(.d-touch) body.nocturne .d-own__actions .n-piece__notice {
+    margin-top: var(--d-s4);
+  }
+
+  /* The link shown once, on the scale (§10.4): its label 24 px under the lead, COPY LINK · OPEN LINK 32 px under its
+     words (words to their action, as on every tab); the open links 24 px under what comes before them. */
+  html:not(.d-touch) body.nocturne .d-own__actions > .n-piece__link > :first-child,
+  html:not(.d-touch) body.nocturne .d-own__actions > .n-piece__certificates {
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .d-own__actions > .n-piece__link > .n-piece__duo {
+    margin-top: var(--d-s6);
+  }
+
+  /* PIECE FOUND's password: a form's field on the column (440 px at most), CONFIRM and CANCEL in one row. */
+  html:not(.d-touch) body.nocturne .d-own__actions > .n-piece__form {
+    max-width: 440px;
+    margin-top: var(--d-s6);
+  }
+}
+
+/* ══ The shared certificate (/verify/c#…): its paper in both modes, laid out for a computer ══════════════════════ */
+
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  html:not(.d-touch) body[data-screen="certificate"] .view--certificate {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    column-gap: var(--d-gutter);
+    width: auto;
+    /* 1056 px of content, as approved at 1440, held on wider windows (§10.2: it stops growing, never shrinks). */
+    max-width: calc(1056px + 2 * var(--d-margin));
+    margin: 0 auto;
+    padding: var(--d-s9) var(--d-margin);
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .certificate__head {
+    grid-column: 1 / -1;
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .certificate__wordmark {
+    margin-bottom: var(--d-s8);
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .certificate__lead {
+    max-width: 52ch;
+    margin-top: var(--d-s5);
+    text-wrap: pretty;
+  }
+
+  /* The piece in its écrin and its lines on 1–5, stacked; the record and the certificate's own rows on 7–12, from the
+     same top. */
+  html:not(.d-touch) body[data-screen="certificate"] .certificate__body {
+    --d-cert-left: calc((5 * 100% - 7 * var(--d-gutter)) / 12);
+    --d-cert-right: calc(50% + var(--d-gutter) / 2);
+    display: flow-root;
+    grid-column: 1 / -1;
+    margin-top: var(--d-s9);
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .certificate__body > * {
+    margin: 0 0 0 var(--d-cert-right);
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .certificate__body > :first-child,
+  html:not(.d-touch) body[data-screen="certificate"] .certificate__body > .certificate__lines {
+    float: left;
+    clear: left;
+    width: var(--d-cert-left);
+    margin-left: 0;
+  }
+
+  /* The piece's lines under the écrin as one centred line that breaks between its values only (two rows for a
+     piece's six), a gutter between two values, in the paper's own type: no longer the phone's stack of six (the
+     piece's frame sets its lines the same way). */
+  html:not(.d-touch) body[data-screen="certificate"] .certificate__body > .certificate__lines {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    column-gap: var(--d-gutter);
+    margin-top: var(--d-s7);
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .certificate__lines > .lines__line {
+    min-width: 0;
+  }
+
+  /* DOWNLOAD PDF at a button's 280 px at least (§10.22). */
+  html:not(.d-touch) body[data-screen="certificate"] .certificate__pdf {
+    min-width: 280px;
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .certificate__body > .certificate__section + .certificate__section {
+    margin-top: var(--d-s7);
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .certificate__body > .certificate__note {
+    max-width: 36em;
+    margin-top: var(--d-s6);
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .certificate__foot {
+    grid-column: 1 / -1;
+    margin-top: var(--d-s9);
+  }
+
+  /* Its words on the desktop's roles (§10.5), in the paper's own colours, the same in both modes: every label (VALID,
+     GENOME, THE RECORD, THIS CERTIFICATE, the rows' labels, the foot line) 11 px at 0.2 em, centred ones indented as
+     much; the record's values and the piece's lines 14.5 px in lining, tabular figures; the serial at the piece
+     GENOME's 21 px; the lead in reading text and the note in Small, within 36 em; DOWNLOAD PDF and SCAN ORBES CODE at a
+     button's 12 px. */
+  html:not(.d-touch) body[data-screen="certificate"] :is(.certificate__state, .genome__label, .certificate__footnote) {
+    font-size: var(--d-fs-label);
+    letter-spacing: var(--d-tr-label);
+    text-indent: var(--d-tr-label);
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .certificate__state {
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .certificate__lead {
+    max-width: 36em;
+    font-size: var(--d-fs-text);
+    line-height: 1.6;
+    letter-spacing: 0;
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .certificate__body > .certificate__note {
+    font-size: var(--d-fs-small);
+    line-height: 1.5;
+    letter-spacing: 0;
+    text-wrap: pretty;
+  }
+
+  /* GENOME and THE RECORD on one top line: the écrin's room above its label is the room above the record's (32 px),
+     both labels on one line height. */
+  html:not(.d-touch) body[data-screen="certificate"] .certificate__body > .piece__plate {
+    padding-top: var(--d-s6);
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] :is(.genome__label, .certificate__section > .section-label) {
+    line-height: 1;
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .certificate__body > .certificate__lines + .certificate__section {
+    margin-top: var(--d-s6);
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .genome__id {
+    margin-top: var(--d-s4);
+    font-size: var(--d-fs-t2);
+    letter-spacing: var(--d-tr-mid);
+    text-indent: var(--d-tr-mid);
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .genome__meta {
+    font-size: var(--n-fs-gen-fp);
+    letter-spacing: var(--d-tr-mid);
+  }
+
+  /* The serial and the fingerprint are selected whole in one click (there is no copy button, §10.19). */
+  html:not(.d-touch) body[data-screen="certificate"] :is(.genome__id, .genome__meta > span:not(.sep)) {
+    font-variant-numeric: tabular-nums lining-nums;
+    user-select: all;
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .certificate__lines > .lines__line {
+    font-size: var(--d-fs-small);
+    letter-spacing: var(--d-tr-mid);
+    text-indent: var(--d-tr-mid);
+    line-height: 2;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .certificate__section > .section-label {
+    margin-top: 0;
+    font-size: var(--d-fs-label);
+    letter-spacing: var(--d-tr-label);
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .certificate__section > .section-label + .rows {
+    margin-top: var(--d-s2);
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .certificate__section .rows__row {
+    padding: var(--d-s4) 0;
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .certificate__section .rows__label {
+    font-size: var(--d-fs-label);
+    letter-spacing: var(--d-tr-label);
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .certificate__section .rows__value {
+    font-size: var(--d-fs-small);
+    letter-spacing: var(--d-tr-mid);
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  html:not(.d-touch) body[data-screen="certificate"] .certificate__foot :is(.certificate__pdf, .certificate__scan) {
+    font-size: var(--n-fs-btn);
+    letter-spacing: var(--d-tr-label);
+    text-indent: var(--d-tr-label);
+  }
+}

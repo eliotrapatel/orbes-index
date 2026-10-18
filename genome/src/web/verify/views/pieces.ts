@@ -60,17 +60,18 @@
 import { h } from '../../shared/dom.js';
 import { saveDownload } from '../../shared/download.js';
 import { ApiError, type ApiClient, type OrderDocumentKind } from '../api.js';
-import { CLAIM_HELD, DEFAULT_CARE, GUARANTEE, ORDERS, PIECES, QUESTION, RELEASES } from '../copy.js';
+import { CLAIM_HELD, DEFAULT_CARE, DESKTOP, GUARANTEE, LIVE, ORDERS, PIECES, QUESTION, RELEASES } from '../copy.js';
+import { isDesktop, onDesktopChange } from '../../shared/desktop.js';
 import { orderContext } from '../messages-model.js';
 import { myLiveEntries } from '../live-model.js';
-import { orderModels, type OrderClaimModel, type OrderModel } from '../orders-model.js';
+import { orderDate, orderModels, type OrderClaimModel, type OrderModel } from '../orders-model.js';
 import { openOrderSheet } from './order-sheet.js';
 import { pieceModel, type PieceModel } from '../pieces-model.js';
 import { myEntries, type MyEntryModel } from '../releases-model.js';
 import type { SessionStore } from '../session.js';
 import type { AccountOrder, AccountQuestion, ClientServices, ClubEntry, LiveAccountEntry, OwnedPiece } from '../types.js';
 import { recoveryContactModel } from '../view-model.js';
-import { PIECES_PATH, viewRoot, withNumerals } from './common.js';
+import { listLine, orderPagePath, PIECES_PATH, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
 import { appAnchor, button, definitionList, fadedPhoto, failedState, icon, lift, loadingState, orderSteps, quietLine, tabs, textLink } from './nocturne.js';
 import { writeButton } from './write.js';
@@ -98,6 +99,8 @@ export interface PiecesDeps {
   onAfterRoom?(parentId: string): void;
   /** SEE THE PIECE: the piece's page. */
   onPiece?(productId: string): void;
+  /** Desktop (decision 5): an order's row of ORDERS, its own page (`OR-1A2B3C4D`). */
+  onOrder?(reference: string): void;
   /** The tab to open on (its place in the history keeps it), PIECES by default. */
   tab?: PiecesTab;
   /** Told each tab selected by the reader (the history keeps it; the banner is the PIECES tab's). */
@@ -106,6 +109,11 @@ export interface PiecesDeps {
   order?: string | null;
   /** This phone's time zone: the question after's dates on its calendar (UTC by default). */
   localZone?: string;
+  /**
+   * Desktop (§4): the form the sign-in opens on, when a computer's sign-in page gives way here as its window
+   * narrows to a phone's (CREATE ACCOUNT kept); SIGN IN by default.
+   */
+  signInTab?: 'signin' | 'create';
 }
 
 export interface PiecesView {
@@ -162,6 +170,7 @@ class PiecesPage {
   private order: string | null;
   /** On screen: the app's swap is done (focus and scrolling then hold). */
   private onScreen = false;
+  private readonly stopDesktop: () => void;
 
   constructor(private readonly deps: PiecesDeps) {
     this.tab = deps.tab ?? 'pieces';
@@ -170,6 +179,11 @@ class PiecesPage {
     this.root.classList.add('n-pieces');
     this.root.append(h('div', { class: 'n-px n-pieces__head' }, this.title, this.lead), this.body);
     this.unsubscribe = deps.session.subscribe(() => this.onSession());
+    // Desktop: ORDERS are rows that open each order's page on a computer, cards on a phone; a window resized
+    // across the breakpoint draws them again.
+    this.stopDesktop = onDesktopChange(() => {
+      if (this.tab === 'orders') this.render();
+    });
     this.render();
     void this.start();
   }
@@ -183,6 +197,7 @@ class PiecesPage {
     this.disposed = true;
     this.unsubscribe?.();
     this.unsubscribe = null;
+    this.stopDesktop();
     this.signIn?.dispose();
     this.signIn = null;
   }
@@ -222,10 +237,13 @@ class PiecesPage {
       this.claimBlocks.clear();
       this.focusClaim = null;
       this.tier = null;
-      this.signIn ??= new OwnershipPanel(
-        { kind: 'account' },
-        { api: this.deps.api, session: this.deps.session, onRescan: () => this.deps.onScan(), contact: recoveryContactModel(this.contacts, '') ?? undefined },
-      );
+      if (!this.signIn) {
+        this.signIn = new OwnershipPanel(
+          { kind: 'account' },
+          { api: this.deps.api, session: this.deps.session, onRescan: () => this.deps.onScan(), contact: recoveryContactModel(this.contacts, '') ?? undefined },
+        );
+        if (this.deps.signInTab === 'create') this.signIn.showTab('create');
+      }
     }
     this.render();
   }
@@ -418,7 +436,8 @@ class PiecesPage {
       h('div', { class: 'n-sb n-pieces__name-line' }, h('h2', { class: 'n-g n-t2 n-pieces__name', id: titleId }, ...withNumerals(m.name)), h('span', { class: 'n-sm n-num n-pieces__id', text: m.productId })),
       // Plan NEXT LOT §3.1: the model's variant on its own line, right under the name, in the style of the line under it.
       m.variant ? h('p', { class: 'n-g n-lb n-pieces__variant' }, ...withNumerals(m.variant)) : null,
-      m.listLine ? h('p', { class: 'n-g n-lb n-pieces__line' }, ...withNumerals(m.listLine)) : null,
+      // Desktop (BRIEF §10.9): on a computer the line breaks only between its values (common.ts listLine).
+      m.listLine ? h('p', { class: 'n-g n-lb n-pieces__line' }, ...listLine(m.listLine)) : null,
       h('p', { class: 'n-state n-pieces__state' }, m.registered ? icon('check', { small: true }) : null, ...stateWords(m.stateLine)),
       h('p', { class: 'n-pieces__see-line' }, see),
     ];
@@ -502,6 +521,8 @@ class PiecesPage {
 
   private ordersPanel(orders: OrderModel[] | null): HTMLElement[] {
     if (orders === null) return [h('div', { class: 'n-px n-pieces__quiet' }, h('p', { class: 'n-sm n-pieces__failed', attrs: { role: 'alert' }, text: ORDERS.loadFailed }))];
+    // Desktop (decision 5): each order a hairline row that opens its own page.
+    if (isDesktop()) return [h('ul', { class: 'd-orows', attrs: { 'aria-label': ORDERS.title } }, ...orders.map((m) => h('li', { class: 'd-orows__item' }, orderRow(m, this.orders?.find((o) => o.id === m.id), this.deps.onOrder))))];
     const deps: OrderDeps = { api: this.deps.api, session: this.deps.session, onChanged: (order, focus) => this.orderChanged(order, focus) };
     return [h('div', { class: 'n-pieces__orders' }, ...orders.map((m) => orderCard(m, deps, this.claimBlockFor(m, deps))))];
   }
@@ -568,10 +589,21 @@ class PiecesPage {
       // The entry's id as the draw publishes it (and hashes it): in the reading face and in lower case, to be compared
       // by eye with the draw's list, never in the label's capitals.
       m.entry.entryId ? h('p', { class: 'n-g n-lb n-pieces__entry-line' }, RELEASES.entryId(''), h('span', { class: 'n-num n-pieces__entry-id pieces__entry-id', text: m.entry.entryId })) : null,
-      m.entry.reference ? h('p', { class: 'n-g n-lb n-num n-pieces__entry-line pieces__entry-id' }, ...withNumerals(m.entry.reference)) : null,
+      m.entry.reference ? h('p', { class: 'n-g n-lb n-num n-pieces__entry-line pieces__entry-id' }, ...referenceWords(m.entry.reference)) : null,
       write ? writeButton(write) : null,
     );
   }
+}
+
+/**
+ * A LIVE RELEASE entry's `REFERENCE LR-…`. On a computer (desktop, BRIEF §10.19) the reference stands in its
+ * own span after the word, as YOUR ENTRY's id, so one click selects it whole (there is no copy button); on a phone, the
+ * line as it was.
+ */
+function referenceWords(line: string): (string | HTMLElement)[] {
+  const word = LIVE.reference('');
+  if (!isDesktop() || !line.startsWith(word)) return withNumerals(line);
+  return [word, h('span', { class: 'n-num n-pieces__entry-id', text: line.slice(word.length) })];
 }
 
 /** A state line: its words, the date after SINCE in the reading face's figures (`.num`). */
@@ -583,7 +615,7 @@ function stateWords(line: string): (string | HTMLElement)[] {
 
 // ── One order ──────────────────────────────────────────────────────────────
 
-interface OrderDeps {
+export interface OrderDeps {
   api: ApiClient;
   session: SessionStore;
   /**
@@ -650,15 +682,55 @@ function orderCard(m: OrderModel, deps: OrderDeps, claim: HTMLElement | null = n
   return article;
 }
 
+/**
+ * An order's row of ORDERS on a computer (desktop, decision 5; §10.16's hairline row): its model's photograph,
+ * the model and where it was sold, where it is now (its step and that step's date; YOUR NEW CLAIM CODE while one waits,
+ * or its request), its reference, its price (its total when it has one), leading to its own page. Nothing the card
+ * would not show: no delivery estimate, no dot.
+ */
+function orderRow(m: OrderModel, o: AccountOrder | undefined, onOrder?: (reference: string) => void): HTMLElement {
+  const reference = m.reference.replace(/^ORDER /, '');
+  const now = m.steps.find((s) => s.state === 'current') ?? m.steps.at(-1)!;
+  // The step's date in full, as one step alone is dated (the card's row of five drops a shared year).
+  const at: Record<string, string | null | undefined> = o ? { RESERVED: o.reservedAt, PAID: o.paidAt, IN_PREPARATION: o.preparingAt, SHIPPED: o.shippedAt, DELIVERED: o.deliveredAt, CANCELLED: o.cancelledAt, RETURNED: o.returnedAt } : {};
+  const date = orderDate(at[now.status]) || now.date;
+  const amount = (m.rows.find(([k]) => k === ORDERS.rows.total) ?? m.rows.find(([k]) => k === ORDERS.rows.price))?.[1] ?? null;
+  const mark = m.claim ? ORDERS.claim.label : (m.request?.label ?? null);
+  const photo = m.photo ? h('img', { attrs: { src: m.photo.src, alt: '', decoding: 'async', loading: 'lazy' } }) : null;
+  const frame = h('span', { class: ['d-orow__photo', photo ? null : 'is-bare'], attrs: { 'aria-hidden': 'true' } }, photo);
+  photo?.addEventListener('error', () => frame.classList.add('is-bare'), { once: true });
+  const a = appAnchor(
+    orderPagePath(reference),
+    ['d-orow', m.status === 'CANCELLED' || m.status === 'RETURNED' ? 'is-ended' : null],
+    onOrder ? () => onOrder(reference) : undefined,
+    frame,
+    h('span', { class: 'd-orow__name' }, h('span', { class: 'n-g d-orow__title' }, ...withNumerals(m.title)), h('span', { class: 'n-g n-lb d-orow__line' }, ...listLine(m.line))),
+    h(
+      'span',
+      { class: 'd-orow__now' },
+      h('span', { class: 'n-g n-lb d-orow__step' }, now.label),
+      date ? h('span', { class: 'n-g n-lb d-orow__date' }, ...withNumerals(date)) : null,
+      mark ? h('span', { class: 'n-g n-lb d-orow__mark' }, ...listLine(mark)) : null,
+    ),
+    // Its reference and its price: two columns from 1280, one above the other in narrower windows (desktop-order.css).
+    h('span', { class: 'd-orow__end' }, h('span', { class: 'n-g n-lb d-orow__ref' }, ...withNumerals(reference)), h('span', { class: 'n-num d-orow__amount' }, amount ?? '')),
+    icon('chev', { small: true }),
+  );
+  a.setAttribute('aria-label', DESKTOP.orders.rowLabel(m.title, m.reference, [now.label, date, mark].filter(Boolean).join(' · ')));
+  a.dataset.order = reference;
+  a.dataset.status = m.status;
+  return a;
+}
+
 // ── The collector's side of the order (plan NEXT LOT §3.6) ─────────────────
 
 /** Lines as typed (an address), one under the other in the reading face. */
-function lines(list: readonly string[], extraClass: string): HTMLElement {
+export function lines(list: readonly string[], extraClass: string): HTMLElement {
   return h('p', { class: ['n-tx', 'n-pieces__lines', extraClass] }, ...list.flatMap((l, i) => (i === 0 ? [l] : [h('br'), l])));
 }
 
 /** A request (§3.6.D) as the card says it: asked (with where to send the piece), received, exchanged, or answered in MESSAGES. */
-function requestBlock(m: OrderModel): HTMLElement {
+export function requestBlock(m: OrderModel): HTMLElement {
   const r = m.request!;
   const id = `${m.key}-request`;
   return h(
@@ -740,12 +812,22 @@ function returnsBlock(m: OrderModel, deps: OrderDeps): HTMLElement {
 }
 
 /**
+ * A document's row title: its label, then its number (INVOICE INV-2026-000001). On a phone the number in the reading
+ * face (C24); on a computer (desktop) its letters in the label's face and its figures in the reading face, as
+ * ORDER OR-… is (Gravesend's one is its capital I: INV-2026-00000I otherwise).
+ */
+export function documentTitle(label: string, number: string | null): HTMLElement {
+  const n = number ? h('span', { class: 'n-pieces__document-number n-num' }, ...(isDesktop() ? withNumerals(number) : [number])) : null;
+  return h('span', { class: 'n-g n-t3 n-ivc n-acc__title' }, label, ...(n ? [' ', n] : []));
+}
+
+/**
  * An order's DOCUMENTS (M6; C24, C32): rows that lead on (›) for INVOICE and CREDIT NOTE with their numbers and the
  * OWNERSHIP CERTIFICATE, each saving its PDF; CARE GUIDE a row that opens (+ / −) the model's care guide under it (read
  * once, on first opening; the house's general care text when the model has none). A document that cannot be read says
  * so under the rows, the others still work.
  */
-function orderDocumentsBlock(m: OrderModel, deps: OrderDeps): HTMLElement {
+export function orderDocumentsBlock(m: OrderModel, deps: OrderDeps): HTMLElement {
   const D = ORDERS.documents;
   const titleId = `${m.key}-documents`;
   const careId = `${m.key}-care`;
@@ -769,7 +851,7 @@ function orderDocumentsBlock(m: OrderModel, deps: OrderDeps): HTMLElement {
   };
   const row = (d: OrderModel['documents'][number]): HTMLElement => {
     // The label in the display face, the number in the reading face; under it, PDF or what the guide is.
-    const title = h('span', { class: 'n-g n-t3 n-ivc n-acc__title' }, d.label, ...(d.number ? [' ', h('span', { class: 'n-pieces__document-number n-num', text: d.number })] : []));
+    const title = documentTitle(d.label, d.number);
     const saves = d.file !== null || (d.byNumber && d.number !== null);
     const text = h('span', { class: 'n-acc__text' }, title, h('span', { class: 'n-sm n-acc__line', text: saves ? D.pdf : d.ariaLabel }));
     if (saves) {
@@ -852,7 +934,7 @@ type ClaimBusy = null | 'show' | 'register' | 'save';
  * NEW CARD (the certificate card with its ORBES CODE and this claim code, as a PDF). The look is the certificate link's
  * (views/piece.ts): the label, the reading text, the code in the reading face's numerals, the hairline and filled buttons.
  */
-class ClaimBlock {
+export class ClaimBlock {
   readonly el = h('div', { class: 'n-pieces__claim pieces__claim' });
   private state: ClaimState = { kind: 'waiting', failed: false };
   private busy: ClaimBusy = null;

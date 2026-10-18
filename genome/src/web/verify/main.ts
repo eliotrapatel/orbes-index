@@ -71,7 +71,7 @@ import { viewportCorners } from '../shared/corners.js';
 import { byId, focusFirst, h, prefersReducedMotion } from '../shared/dom.js';
 import { ApiClient, ApiError, settledWithin } from './api.js';
 import { buildVerifyInput, defaultZoomLevel, zoomLabel, type ZoomState } from './capture.js';
-import { HINTS, HOW, PROBLEMS, problemForApiError, STATUS, type ProblemAction, type ProblemKind } from './copy.js';
+import { DESKTOP, HINTS, HOW, MESSAGES, PROBLEMS, problemForApiError, STATUS, type ProblemAction, type ProblemKind } from './copy.js';
 import type { DecodeReply } from './protocol.js';
 import { Camera, CameraError, DecoderClient, DecoderUnavailableError, PhotoError, readPhoto, ScanSession, workerUrl } from './scanner.js';
 import { SessionStore } from './session.js';
@@ -86,7 +86,7 @@ import { lookbookRouteOf, lookbookSheetPath } from './lookbook-model.js';
 import { boardTokenOf } from './board-model.js';
 import { afterRoomPath, releasePath, releasesRouteOf, RELEASES_PATH } from './releases-model.js';
 import { recoveryContactModel, resultViewModel } from './view-model.js';
-import { orderReference, type ConcerningTarget } from './messages-model.js';
+import { orderReference, type ConcerningTarget, type WriteContext } from './messages-model.js';
 import { boardView } from './views/board.js';
 import { certificateView } from './views/certificate.js';
 import { circlePostView, circleView } from './views/circle.js';
@@ -111,25 +111,47 @@ import { readArrival, sendArrival, tabStorage } from './arrival.js';
 import { seen } from './seen.js';
 import type { SeenAppState } from './seen-model.js';
 import { verifyingView } from './views/verifying.js';
+import { isDesktop, onDesktopChange, watchBar } from '../shared/desktop.js';
+import { nowArrangement } from './views/desktop-now.js';
+import { resultArrangement } from './views/desktop-result.js';
+import { modelArrangement } from './views/desktop-model.js';
+import { wishlistArrangement } from './views/desktop-wishlist.js';
+import { releaseArrangement } from './views/desktop-release.js';
+import { piecesArrangement } from './views/desktop-pieces.js';
+import { isScanPagePath, SCAN_PAGE_PATH, scanPageView } from './views/desktop-scan.js';
+import { ACCOUNT_PATH, ACCOUNT_WISHLIST_PATH, accountPath, accountRouteOf, isAccountView, type AccountView } from './views/desktop-account.js';
+import { isSignInPath, registerSignInPage, SIGN_IN_PATH, signInPageView, type SignInPageView, type SignInRequest, type SignInTab } from './views/desktop-signin.js';
+import { isMessagesPath, isWriteContext, messagesPageView, messagesPath, messagesSubjectOf, subjectKey } from './views/desktop-messages.js';
+import { isOrdersPath, orderPagePath, orderPageView, orderReferenceOf } from './views/desktop-order.js';
 
-type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'live' | 'board' | 'circle' | 'circlePost' | 'club' | 'how' | 'wishlist';
+type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'live' | 'board' | 'circle' | 'circlePost' | 'club' | 'how' | 'wishlist' | 'scanPage' | 'account' | 'signIn' | 'messages' | 'order';
 
 /**
  * What a history entry of the app holds: the landing, a screen of a scan, MY PIECES, a certificate, the lookbook or a
  * sheet, the releases or a release's page, the circle or a post, THE CLUB, HOW RELEASES WORK, YOUR WISHLIST.
  */
-type Entry = 'landing' | 'app' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'circle' | 'circlePost' | 'club' | 'how' | 'wishlist';
+type Entry = 'landing' | 'app' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'circle' | 'circlePost' | 'club' | 'how' | 'wishlist' | 'scanPage' | 'account' | 'signIn' | 'messages' | 'order';
 
 /** The entries above the landing that a scan, MY PIECES or a list takes the place of (their own address goes with them). */
-const REPLACEABLE: readonly Entry[] = ['app', 'pieces', 'piece', 'certificate', 'lookbook', 'sheet', 'releases', 'release', 'circle', 'circlePost', 'club', 'how', 'wishlist'];
+const REPLACEABLE: readonly Entry[] = ['app', 'pieces', 'piece', 'certificate', 'lookbook', 'sheet', 'releases', 'release', 'circle', 'circlePost', 'club', 'how', 'wishlist', 'scanPage', 'account', 'signIn', 'messages', 'order'];
 
 /**
  * The route of a path under /verify: MY PIECES, a certificate, the lookbook, a model's sheet, the releases, a
  * release's page, the circle, a post, or the landing (also for a path the app does not know). In any case: the
  * certificate's PDF letters its address in capitals (the server redirects those to /verify/c).
  */
-function routeOf(pathname: string): 'landing' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'board' | 'circle' | 'circlePost' | 'club' | 'how' | 'wishlist' {
+function routeOf(pathname: string): 'landing' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'board' | 'circle' | 'circlePost' | 'club' | 'how' | 'wishlist' | 'scanPage' | 'account' | 'signIn' | 'messages' | 'order' {
   const path = pathname.replace(/\/+$/, '').toLowerCase();
+  // Desktop (decision 5): MESSAGES in two parts and an order's page of a computer. A phone keeps the account
+  // sheet's MESSAGES (NOW at its address) and the order's card on MY PIECES' ORDERS (an order's address shows it there).
+  if (isMessagesPath(path) && isDesktop()) return 'messages';
+  if (isOrdersPath(path)) return isDesktop() && orderReferenceOf(pathname) ? 'order' : 'pieces';
+  // Desktop (decisions 5, 6): the account's pages and the sign-in page of a computer (a phone keeps the sheet
+  // and the sign-in where it stands: NOW at these addresses); YOUR WISHLIST's card's address is its page everywhere.
+  const account = accountRouteOf(path);
+  if (account === 'wishlist') return 'wishlist';
+  if (account && isDesktop()) return 'account';
+  if (isSignInPath(path) && isDesktop()) return 'signIn';
   if (path === PIECES_PATH) return 'pieces';
   // A piece of MY PIECES; under /verify/pieces, an address that is none is MY PIECES.
   if (path.startsWith(`${PIECES_PATH}/`)) return pieceIdOf(pathname) ? 'piece' : 'pieces';
@@ -143,6 +165,8 @@ function routeOf(pathname: string): 'landing' | 'pieces' | 'piece' | 'certificat
   if (isClubPath(path)) return 'club';
   // YOUR WISHLIST (plan CUSTOMER INTELLIGENCE §3.2 W.10.2), opened from the account sheet.
   if (isWishlistPath(path)) return 'wishlist';
+  // Desktop: the SCAN page of a computer (a phone keeps NOW at this address).
+  if (isScanPagePath(path) && isDesktop()) return 'scanPage';
   return path === CERTIFICATE_PATH ? 'certificate' : 'landing';
 }
 
@@ -180,6 +204,19 @@ const postIdOf = (pathname: string): string | null => circleRouteOf(pathname)?.p
 const entryOf = (state: unknown): Entry | undefined => (state as { screen?: Entry } | null)?.screen;
 
 /**
+ * Desktop: the page a piece, a release or a model's sheet was opened over when it was opened from MESSAGES
+ * (its SEE THE PIECE, SEE THE RELEASE, SEE THE MODEL) or an order's page, with no list under it; null over its list.
+ * Back from it returns to that page; its crumb (‹ MY PIECES, ‹ THE RELEASES, ‹ THE COLLECTION) opens the list over it.
+ */
+const overOf = (state: unknown): 'messages' | 'order' | null => {
+  const over = (state as { from?: unknown } | null)?.from;
+  return over === 'messages' || over === 'order' ? over : null;
+};
+
+/** On a computer, the page a piece, a release or a sheet opened now stands over directly (MESSAGES, an order's page). */
+const pageUnder = (entry: Entry | undefined): 'messages' | 'order' | null => (isDesktop() && (entry === 'messages' || entry === 'order') ? entry : null);
+
+/**
  * How many entries of the app an entry lies above the landing (0: the landing). Every entry the app writes carries it
  * (push, replace), so NOW (the rail) goes back to the landing in one step whatever the way taken. An entry written
  * without it (an address edited in place) is read from its kind: one over the landing, two for a sheet, a piece, a
@@ -190,8 +227,10 @@ function depthOf(state: unknown): number {
   if (typeof depth === 'number' && Number.isInteger(depth) && depth >= 0) return depth;
   const entry = entryOf(state);
   if (entry === undefined || entry === 'landing') return 0;
-  if (entry === 'sheet' || entry === 'circlePost' || entry === 'piece' || entry === 'how') return 2;
+  if (entry === 'sheet' || entry === 'circlePost' || entry === 'piece' || entry === 'how' || entry === 'order') return 2;
   if (entry === 'release') return afterRoomOf(location.pathname) ? 3 : 2;
+  // An account's section over YOUR ACCOUNT (desktop).
+  if (entry === 'account') return accountRouteOf(location.pathname) === 'account' ? 1 : 2;
   return 1;
 }
 
@@ -205,6 +244,15 @@ function replaceEntry(state: unknown, url?: string): void {
   const depth = entryOf(state) === 'landing' ? 0 : depthOf(history.state);
   history.replaceState({ ...(state as object | null), depth }, '', url);
 }
+
+/** Desktop: the page the sign-in page gives way to once signed in (MESSAGES on a subject, an order's page). */
+type SignInThen = { screen: 'messages' | 'order'; path: string; context?: WriteContext | null };
+
+/** The sign-in page's form its entry keeps (desktop): CREATE ACCOUNT, or SIGN IN by default. */
+const signInTabOf = (state: unknown): SignInTab => ((state as { tab?: unknown } | null)?.tab === 'create' ? 'create' : 'signin');
+
+/** YOUR WISHLIST's address: on a computer its card's, under YOUR ACCOUNT (desktop). */
+const wishlistPath = (): string => (isDesktop() ? ACCOUNT_WISHLIST_PATH : WISHLIST_PATH);
 
 /** THE RELEASES' tab its place in the history keeps (plan LIVE RELEASE+, choice 5): PAST, or LIVE by default. */
 const releasesTabOf = (state: unknown): ReleasesTab => ((state as { tab?: unknown } | null)?.tab === 'past' ? 'past' : 'live');
@@ -221,6 +269,8 @@ const CONTACT_WAIT_MS = 1_000;
 const LEAVE_MS = 280;
 /** Pause on "ORBES CODE FOUND" before VERIFYING…, so the lock is seen. */
 const LOCK_PAUSE_MS = 420;
+/** Desktop: the longest MY PIECES waits on a computer for its banner to be known before it shows. */
+const BANNER_WAIT_MS = 1_200;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -284,6 +334,13 @@ class App {
   private shell: Shell | null = null;
   /** The LIVE RELEASE's page on show shows its room (its own chrome): the recording's LIVE (plan CUSTOMER INTELLIGENCE §3.3 T.9). */
   private liveRoom = false;
+  /**
+   * Desktop (decision 6): the screen the sign-in page was opened from, kept as it stood (its page, its tab, a
+   * result and its scan's windows), shown again once signed in there or on back.
+   */
+  private signInFrom: { root: HTMLElement; live: { dispose(): void } | null; screen: Screen; path: string; depth: number } | null = null;
+  /** The sign-in page on show (its form follows its entry's). */
+  private signInPage: SignInPageView | null = null;
 
   start(): void {
     // Where the visit comes from (plan CUSTOMER INTELLIGENCE §3.4 A.9): `o` and the `utm_` tags read and taken out of the
@@ -301,8 +358,24 @@ class App {
       // a scan's entry (its screen is gone), the landing.
       const entry = entryOf(ev.state);
       const route = routeOf(location.pathname);
+      // Desktop: back from the sign-in page (or signed in there) onto the place it was opened from, as it was.
+      if (this.signInFrom && entry !== 'signIn' && route !== 'signIn') {
+        const from = this.signInFrom;
+        this.signInFrom = null;
+        if (location.pathname + location.search + location.hash === from.path && depthOf(ev.state) === from.depth) {
+          void this.restoreScreen(from);
+          return;
+        }
+        from.live?.dispose();
+      }
       if (route === 'board') {
         if (this.screen !== 'board') void this.showBoard();
+      } else if (entry === 'messages' || route === 'messages') {
+        // Desktop: MESSAGES on the subject its address names (a phone: the account sheet on MESSAGES).
+        void this.showMessages();
+      } else if (entry === 'order' || route === 'order') {
+        // Desktop: an order's page (a phone: its card on MY PIECES' ORDERS).
+        void this.showOrder();
       } else if (entry === 'piece' || route === 'piece') {
         const id = pieceIdOf(location.pathname);
         if (!(this.screen === 'piece' && this.pieceId === id)) void this.showPiece(id);
@@ -331,8 +404,16 @@ class App {
         if (this.screen !== 'circle') void this.showCircle();
       } else if (entry === 'club' || route === 'club') {
         if (this.screen !== 'club') void this.showClub();
+      } else if (entry === 'signIn' || route === 'signIn') {
+        // The sign-in page (desktop): its form as its entry keeps it.
+        if (this.screen === 'signIn') this.signInPage?.showTab(signInTabOf(history.state));
+        else void this.showSignIn();
+      } else if (entry === 'account' || route === 'account') {
+        void this.showAccount();
       } else if (entry === 'wishlist' || route === 'wishlist') {
         if (this.screen !== 'wishlist') void this.showWishlist();
+      } else if ((entry === 'scanPage' || route === 'scanPage') && isDesktop()) {
+        if (this.screen !== 'scanPage') void this.showScanPage();
       } else if (this.screen !== 'landing') void this.showLanding();
     });
     // A certificate's fragment changed in place (pasted, edited): the certificate of the new one.
@@ -346,6 +427,17 @@ class App {
     window.addEventListener('pagehide', () => this.stopCamera());
 
     document.body.prepend(viewportCorners());
+    // Desktop: the top bar over an opening frame, then on the ground (shared/desktop.ts); NOW's and a
+    // result's own arrangements on a computer (views/desktop-now.ts, views/desktop-result.ts).
+    watchBar({ arrange: [nowArrangement, resultArrangement, modelArrangement, wishlistArrangement, releaseArrangement, piecesArrangement] });
+    // Desktop (BRIEF §5b: no scroll restore): a computer changes pages at once, so the browser's own restore
+    // after Back would run after the page's scrollTo(0, 0) and win; every page opens at its top, as on the phone (whose
+    // fade lets the page's scroll come last). The phone keeps the browser's default.
+    const scrollRule = (desktop: boolean) => {
+      if ('scrollRestoration' in history) history.scrollRestoration = desktop ? 'manual' : 'auto';
+    };
+    scrollRule(isDesktop());
+    onDesktopChange(scrollRule);
     this.shell = new Shell(
       {
         api: this.api,
@@ -359,10 +451,21 @@ class App {
           else if (c === 'circle') this.openCircle();
           else this.openPieces({ tab: 'pieces' });
         },
-        onSignIn: () => this.openPieces(),
+        onSignIn: () => this.signIn(),
+        onAccount: () => this.openAccount(),
+        onMessagesPage: () => this.openMessages(),
+        onWrite: (context) => this.openMessages({ context }),
+        accountHost: {
+          navigate: (view) => this.navigateAccount(view),
+          openWishlist: () => this.openWishlist(),
+          signedOut: () => this.openNow(),
+          signIn: (view) => this.accountSignIn(view),
+          openMessages: () => this.openMessages(),
+        },
         onTheClub: () => this.openClub(),
         onWishlist: () => this.openWishlist(),
         onScan: () => void this.startScan(),
+        onScanPage: () => this.openScanPage(),
         onConcerning: (target) => this.openConcerning(target),
         onMessagesRead: () => {
           if (this.screen === 'landing') (this.live as NowView | null)?.messagesRead();
@@ -372,6 +475,45 @@ class App {
       this.host,
       this.banner.el,
     );
+    // Desktop (decision 6): every SIGN IN · CREATE ACCOUNT line of a computer opens the sign-in page.
+    registerSignInPage((request) => this.openSignIn(request));
+    // Desktop (§4: a window resized across the breakpoint never breaks): a computer's window narrowed past the
+    // desktop's width on an account's page shows NOW in that entry's place, the account sheet open on the same view
+    // (the account's pages are a computer's, the sheet the phone's); widened again with the sheet open, that page.
+    onDesktopChange((desktop) => {
+      if (desktop) {
+        const shown = this.shell?.closeAccountSheet() ?? null;
+        if (shown === 'account') this.openAccount();
+        else if (shown) this.openAccountSection(shown);
+        return;
+      }
+      if (this.screen === 'signIn') {
+        this.signInToPhone();
+        return;
+      }
+      if (this.screen === 'messages') {
+        void this.showMessages();
+        return;
+      }
+      if (this.screen === 'order') {
+        void this.showOrder();
+        return;
+      }
+      // The SCAN page is a computer's (decision 4): narrowed past the desktop's width, NOW in its entry's place, as its
+      // address gives on a phone (routeOf); widened again, NOW stays.
+      if (this.screen === 'scanPage') {
+        replaceEntry({ screen: 'landing' }, LANDING_PATH);
+        void this.showLanding();
+        return;
+      }
+      if (this.screen !== 'account') return;
+      const named = accountRouteOf(location.pathname);
+      const view: AccountView = named && named !== 'wishlist' ? named : 'account';
+      replaceEntry({ screen: 'landing' }, LANDING_PATH);
+      void this.showLanding().then(() => {
+        if (this.screen === 'landing') this.shell?.openAccountSheet(view);
+      });
+    });
     const route = routeOf(location.pathname);
     if (route === 'board') {
       // The boutique board: on its own, nothing under it; its secret stays in its own address.
@@ -379,10 +521,14 @@ class App {
       void this.showBoard(false);
     } else if (route === 'pieces') {
       // A reload keeps its entry; a direct visit (a link, a bookmark) puts the landing under MY PIECES. An address under
-      // /verify/pieces that is none shows MY PIECES, its own address put back.
+      // /verify/pieces that is none shows MY PIECES, its own address put back. Desktop: an order's address
+      // (/verify/orders/OR-…) on a phone, its card on ORDERS.
+      const orders = isOrdersPath(location.pathname);
+      const order = orders ? orderReferenceOf(location.pathname) : null;
+      if (order) this.pendingOrder = order;
       if (entryOf(history.state) !== 'pieces') {
         replaceEntry({ screen: 'landing' }, LANDING_PATH);
-        pushEntry({ screen: 'pieces' }, PIECES_PATH);
+        pushEntry(orders ? { screen: 'pieces', tab: 'orders' } : { screen: 'pieces' }, PIECES_PATH);
       } else if (location.pathname !== PIECES_PATH) replaceEntry(history.state, PIECES_PATH);
       void this.showPieces(false);
     } else if (route === 'piece') {
@@ -454,12 +600,58 @@ class App {
       } else if (location.pathname !== CLUB_PATH) replaceEntry({ screen: 'club' }, CLUB_PATH);
       void this.showClub(false);
     } else if (route === 'wishlist') {
-      // YOUR WISHLIST over the landing, as THE CLUB: its own address put back.
+      // YOUR WISHLIST over the landing, as THE CLUB: its own address put back. On a computer, YOUR WISHLIST's card's
+      // page, over YOUR ACCOUNT (desktop).
+      const path = wishlistPath();
       if (entryOf(history.state) !== 'wishlist') {
         replaceEntry({ screen: 'landing' }, LANDING_PATH);
-        pushEntry({ screen: 'wishlist' }, WISHLIST_PATH);
-      } else if (location.pathname !== WISHLIST_PATH) replaceEntry({ screen: 'wishlist' }, WISHLIST_PATH);
+        if (isDesktop()) {
+          pushEntry({ screen: 'account', view: 'account' }, ACCOUNT_PATH);
+          pushEntry({ screen: 'wishlist', under: 'account' }, path);
+        } else pushEntry({ screen: 'wishlist' }, path);
+      } else if (location.pathname !== path) replaceEntry(history.state, path);
       void this.showWishlist(false);
+    } else if (route === 'account') {
+      // Desktop (decision 5): YOUR ACCOUNT over the landing, a section's page over both.
+      const view = accountRouteOf(location.pathname) as AccountView;
+      if (entryOf(history.state) !== 'account') {
+        replaceEntry({ screen: 'landing' }, LANDING_PATH);
+        pushEntry({ screen: 'account', view: 'account' }, ACCOUNT_PATH);
+        if (view !== 'account') pushEntry({ screen: 'account', view, under: 'account' }, accountPath(view));
+      } else if (location.pathname !== accountPath(view)) replaceEntry(history.state, accountPath(view));
+      void this.showAccount(false);
+    } else if (route === 'messages') {
+      // Desktop (decision 5): MESSAGES over the landing, on the subject its address names (a reload keeps the
+      // context of a subject not written yet: its entry's).
+      if (entryOf(history.state) !== 'messages') {
+        const path = location.pathname;
+        replaceEntry({ screen: 'landing' }, LANDING_PATH);
+        pushEntry({ screen: 'messages' }, path);
+      }
+      void this.showMessages(false);
+    } else if (route === 'order') {
+      // Desktop (decision 5): an order's page over MY PIECES' ORDERS, over the landing.
+      if (entryOf(history.state) !== 'order') {
+        const path = orderPagePath(orderReferenceOf(location.pathname)!);
+        replaceEntry({ screen: 'landing' }, LANDING_PATH);
+        pushEntry({ screen: 'pieces', tab: 'orders' }, PIECES_PATH);
+        pushEntry({ screen: 'order', under: 'pieces' }, path);
+      }
+      void this.showOrder(false);
+    } else if (route === 'signIn') {
+      // Desktop (decision 6): the sign-in page over the landing (signed in there: back to it).
+      if (entryOf(history.state) !== 'signIn') {
+        replaceEntry({ screen: 'landing' }, LANDING_PATH);
+        pushEntry({ screen: 'signIn', tab: 'signin' }, SIGN_IN_PATH);
+      }
+      void this.showSignIn(false);
+    } else if (route === 'scanPage') {
+      // Desktop: the SCAN page over the landing, as THE CLUB.
+      if (entryOf(history.state) !== route) {
+        replaceEntry({ screen: 'landing' }, LANDING_PATH);
+        pushEntry({ screen: route }, SCAN_PAGE_PATH);
+      } else if (location.pathname !== SCAN_PAGE_PATH) replaceEntry({ screen: route }, SCAN_PAGE_PATH);
+      void this.showScanPage(false);
     } else {
       replaceEntry({ screen: 'landing' }, location.pathname === LANDING_PATH ? undefined : LANDING_PATH);
       void this.showLanding(false);
@@ -513,8 +705,14 @@ class App {
    * order in view. `tab` opens on that tab (the rail's PIECES: PIECES); by default the one its entry kept.
    */
   private openPieces(opts: { tab?: PiecesTab; order?: string } = {}): void {
+    // Desktop (decision 5): an order named (ORDER OR-… of a piece's page) opens its own page.
+    if (opts.order && isDesktop()) {
+      this.openOrder(opts.order);
+      return;
+    }
     const entry = entryOf(history.state);
-    if (entry === 'piece') {
+    // (A piece opened over MESSAGES or an order's page has no list under it: MY PIECES over it.)
+    if (entry === 'piece' && overOf(history.state) === null) {
       this.pendingOrder = opts.order ?? null;
       history.back();
       return;
@@ -531,16 +729,22 @@ class App {
   private openConcerning(target: ConcerningTarget): void {
     if (target.to === 'piece') this.openPiece(target.id);
     else if (target.to === 'order') this.openPieces({ order: orderReference(target.id) });
+    // (On a computer, openPieces opens the order's own page.)
     else if (target.to === 'pieces') this.openPieces({ tab: 'orders' });
     else if (target.to === 'release') this.openRelease(target.id);
     else this.openSheet(target.slug);
   }
 
-  /** A piece of MY PIECES (C4), over MY PIECES' entry: back from it returns to the list. */
+  /**
+   * A piece of MY PIECES (C4), over MY PIECES' entry: back from it returns to the list. On a computer, from MESSAGES or an
+   * order's page, over that page: back returns to it in one step.
+   */
   private openPiece(id: string): void {
     const entry = entryOf(history.state);
     const address = piecePath(id);
-    if (entry === 'piece') replaceEntry({ screen: 'piece' }, address);
+    const under = pageUnder(entry);
+    if (entry === 'piece') replaceEntry({ screen: 'piece', from: overOf(history.state) ?? undefined }, address);
+    else if (under) pushEntry({ screen: 'piece', from: under }, address);
     else {
       if (entry !== 'pieces') {
         if (entry === 'app' || entry === 'certificate') replaceEntry({ screen: 'pieces' }, PIECES_PATH);
@@ -557,7 +761,7 @@ class App {
    */
   private openLookbook(): void {
     const entry = entryOf(history.state);
-    if (entry === 'sheet') {
+    if (entry === 'sheet' && overOf(history.state) === null) {
       history.back();
       return;
     }
@@ -573,7 +777,7 @@ class App {
   private openReleases(): void {
     const entry = entryOf(history.state);
     // HOW RELEASES WORK opened from the list: back to it; opened from a release's page, the list in its place.
-    if (entry === 'release' || (entry === 'how' && (history.state as { over?: unknown } | null)?.over === 'releases')) {
+    if ((entry === 'release' && overOf(history.state) === null) || (entry === 'how' && (history.state as { over?: unknown } | null)?.over === 'releases')) {
       history.back();
       return;
     }
@@ -630,9 +834,160 @@ class App {
    */
   private openWishlist(): void {
     const entry = entryOf(history.state);
-    if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'releases' || entry === 'circle' || entry === 'club' || entry === 'wishlist') replaceEntry({ screen: 'wishlist' }, WISHLIST_PATH);
-    else pushEntry({ screen: 'wishlist' }, WISHLIST_PATH);
+    // Desktop: YOUR WISHLIST's card, over YOUR ACCOUNT (its crumb goes back there).
+    if (entry === 'account') pushEntry({ screen: 'wishlist', under: 'account' }, wishlistPath());
+    else if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'releases' || entry === 'circle' || entry === 'club' || entry === 'wishlist') replaceEntry({ screen: 'wishlist' }, wishlistPath());
+    else pushEntry({ screen: 'wishlist' }, wishlistPath());
     void this.showWishlist();
+  }
+
+  /** SIGN IN (the header, a heart, THE PRIVATE SALON, YOUR WISHLIST): on a computer its page (decision 6); MY PIECES' sign-in on a phone. */
+  private signIn(): void {
+    if (isDesktop()) this.openSignIn();
+    else this.openPieces();
+  }
+
+  /**
+   * ‹ YOUR ACCOUNT (YOUR WISHLIST's crumb, THE CLUB's line): the account sheet on a phone; on a computer YOUR ACCOUNT's
+   * page, back to it when it is the page under.
+   */
+  private toAccount(trigger: HTMLElement): void {
+    if (isDesktop()) this.openAccount();
+    else this.shell?.sheet.open(trigger);
+  }
+
+  /**
+   * YOUR ACCOUNT (desktop, decision 5): the header's account button and every ‹ YOUR ACCOUNT, over the page it
+   * is opened from (back returns there); from a section of the account or YOUR WISHLIST over it, back to it.
+   */
+  private openAccount(): void {
+    if (!isDesktop()) return;
+    const entry = entryOf(history.state);
+    if (entry === 'account' && accountRouteOf(location.pathname) === 'account') {
+      void this.showAccount();
+      return;
+    }
+    if ((entry === 'account' || entry === 'wishlist') && (history.state as { under?: unknown } | null)?.under === 'account') {
+      history.back();
+      return;
+    }
+    pushEntry({ screen: 'account', view: 'account' }, ACCOUNT_PATH);
+    void this.showAccount();
+  }
+
+  /** A section of the account from outside it (NOW's READ, SEE MESSAGES: MESSAGES), over the page it is opened from. */
+  private openAccountSection(view: AccountView): void {
+    if (!isDesktop()) return;
+    // MESSAGES is its own page in two parts (decision 5).
+    if (view === 'messages') {
+      this.openMessages();
+      return;
+    }
+    if (entryOf(history.state) === 'account') {
+      this.navigateAccount(view);
+      void this.showAccount();
+      return;
+    }
+    pushEntry({ screen: 'account', view }, accountPath(view));
+    void this.showAccount();
+  }
+
+  /** The account's page moved by itself (a card, its crumb, SAVE): its address follows, back to the page under when it is that one. */
+  private navigateAccount(view: AccountView): void {
+    const st = history.state as { under?: unknown } | null;
+    const current = entryOf(st) === 'account' ? (accountRouteOf(location.pathname) as AccountView | null) : null;
+    if (current === view) return;
+    if (current !== null && st?.under === view) {
+      history.back();
+      return;
+    }
+    pushEntry({ screen: 'account', view, under: current ?? undefined }, accountPath(view));
+  }
+
+  /**
+   * The sign-in page (desktop, decision 6), on its form, with the sentence of the place it is opened from;
+   * that place is kept as it stands and shown again once signed in (or on back). Already on it: its form.
+   */
+  private openSignIn(request: SignInRequest = {}, then?: SignInThen): void {
+    if (!isDesktop()) {
+      this.openPieces();
+      return;
+    }
+    const tab: SignInTab = request.tab ?? 'signin';
+    const lead = request.lead ?? DESKTOP.signIn.lead;
+    if (this.screen === 'signIn' && entryOf(history.state) === 'signIn') {
+      replaceEntry({ ...(history.state as object), tab });
+      this.signInPage?.showTab(tab);
+      return;
+    }
+    const root = this.host.firstElementChild as HTMLElement | null;
+    this.signInFrom?.live?.dispose();
+    this.signInFrom = root ? { root, live: this.live, screen: this.screen, path: location.pathname + location.search + location.hash, depth: depthOf(history.state) } : null;
+    this.live = null;
+    pushEntry({ screen: 'signIn', tab, lead, ...(then ? { then: then.screen, thenPath: then.path, thenContext: then.context ?? null } : {}) }, SIGN_IN_PATH);
+    void this.showSignIn();
+  }
+
+  /**
+   * MESSAGES (desktop, decision 5): every WRITE TO ORBES CLIENT SERVICES of a computer, on the subject of what
+   * it attaches (`context`), and SEE MESSAGES, NOW's READ and the account's card on the newest subject; over the page it
+   * is opened from (back returns there). Signed out, the sign-in page first, the place kept as it stands; once signed in,
+   * this page on that subject in the sign-in page's place.
+   */
+  private openMessages(opts: { context?: WriteContext | null } = {}): void {
+    if (!isDesktop()) return;
+    const context = opts.context ?? null;
+    const path = messagesPath(context ? subjectKey(context) : null);
+    if (this.session.state.status === 'anonymous') {
+      this.openSignIn({ lead: MESSAGES.signedOut }, { screen: 'messages', path, context });
+      return;
+    }
+    if (entryOf(history.state) === 'messages') replaceEntry({ screen: 'messages', context }, path);
+    else pushEntry({ screen: 'messages', context }, path);
+    void this.showMessages();
+  }
+
+  /**
+   * An order's page (desktop, decision 5): from MY PIECES' ORDERS over its entry (‹ MY PIECES goes back to it);
+   * from anywhere else (a piece's ORDER OR-…, a message's SEE THE ORDER) over the page it is opened from.
+   */
+  private openOrder(reference: string): void {
+    if (!isDesktop()) {
+      this.openPieces({ order: reference });
+      return;
+    }
+    const path = orderPagePath(reference);
+    const entry = entryOf(history.state);
+    if (entry === 'order') replaceEntry({ ...(history.state as object), screen: 'order' }, path);
+    else if (entry === 'pieces') {
+      replaceEntry({ ...(history.state as object), screen: 'pieces', tab: 'orders' });
+      pushEntry({ screen: 'order', under: 'pieces' }, path);
+    } else pushEntry({ screen: 'order' }, path);
+    void this.showOrder();
+  }
+
+  /**
+   * A page of a computer reached signed out (an address typed, a reload, a session ended): the sign-in page in its
+   * entry's place, with its lead; signed in there, that page again in its place (MESSAGES with its subject's context).
+   */
+  private pageSignIn(screen: 'messages' | 'order', lead: string): void {
+    if (!isDesktop() || entryOf(history.state) !== screen) return;
+    const context = (history.state as { context?: unknown } | null)?.context;
+    this.signInFrom?.live?.dispose();
+    this.signInFrom = null;
+    replaceEntry({ screen: 'signIn', tab: 'signin', lead, then: screen, thenPath: location.pathname, thenContext: isWriteContext(context) ? context : null }, SIGN_IN_PATH);
+    void this.showSignIn();
+  }
+
+  /**
+   * The SCAN page (desktop, BRIEF §5.4): SCAN in the top bar, and every SCAN of the app on a computer, which
+   * opens no camera; over the current entry, or in the place of a chapter's, as THE CLUB.
+   */
+  private openScanPage(): void {
+    const entry = entryOf(history.state);
+    if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'releases' || entry === 'circle' || entry === 'club' || entry === 'wishlist' || entry === 'scanPage') replaceEntry({ screen: 'scanPage' }, SCAN_PAGE_PATH);
+    else pushEntry({ screen: 'scanPage' }, SCAN_PAGE_PATH);
+    void this.showScanPage();
   }
 
   /** A post of the circle, over the feed's entry (from a post of the feed). Back from it returns to the feed. */
@@ -652,12 +1007,15 @@ class App {
 
   /**
    * A release's page, over the list's entry: from the list (SEE THE RELEASE), or from MY PIECES (an entry's release: its
-   * entry becomes the list's). Back from it returns to the list, never straight to the landing.
+   * entry becomes the list's). Back from it returns to the list, never straight to the landing. On a computer, from
+   * MESSAGES or an order's page, over that page: back returns to it in one step.
    */
   private openRelease(id: string): void {
     const entry = entryOf(history.state);
     const address = releasePath(id);
-    if (entry === 'release') replaceEntry({ screen: 'release' }, address);
+    const under = pageUnder(entry);
+    if (entry === 'release') replaceEntry({ screen: 'release', from: overOf(history.state) ?? undefined }, address);
+    else if (under) pushEntry({ screen: 'release', from: under }, address);
     else {
       if (entry !== 'releases') {
         if (entry === 'app' || entry === 'pieces' || entry === 'certificate') replaceEntry({ screen: 'releases' }, RELEASES_PATH);
@@ -681,11 +1039,14 @@ class App {
   /**
    * A model's sheet, over the lookbook's entry: from the lookbook (a card's SEE THE MODEL), or from a result (SEE THE
    * MODEL: the scan's entry becomes the lookbook's). Back from it returns to the lookbook, never straight to the landing.
+   * On a computer, from MESSAGES (a model of THE PRIVATE SALON) or an order's page, over that page: back returns to it.
    */
   private openSheet(slug: string): void {
     const entry = entryOf(history.state);
     const address = lookbookSheetPath(slug);
-    if (entry === 'sheet') replaceEntry({ screen: 'sheet' }, address);
+    const under = pageUnder(entry);
+    if (entry === 'sheet') replaceEntry({ screen: 'sheet', from: overOf(history.state) ?? undefined }, address);
+    else if (under) pushEntry({ screen: 'sheet', from: under }, address);
     else {
       if (entry !== 'lookbook') {
         if (entry === 'app' || entry === 'pieces' || entry === 'certificate') replaceEntry({ screen: 'lookbook' }, LOOKBOOK_PATH);
@@ -700,7 +1061,8 @@ class App {
   private async swap(next: HTMLElement, screen: Screen, focus = true, beforeShow?: () => void): Promise<boolean> {
     const gen = this.generation;
     const old = this.host.firstElementChild as HTMLElement | null;
-    if (old && !prefersReducedMotion()) {
+    // Desktop (BRIEF §5b, §10.13): on a computer a page changes at once, with no fade; the phone keeps its own.
+    if (old && !prefersReducedMotion() && !isDesktop()) {
       old.classList.add('is-leaving');
       await sleep(LEAVE_MS);
       if (gen !== this.generation) return false;
@@ -714,6 +1076,13 @@ class App {
     this.shell?.show(screen);
     this.host.replaceChildren(next);
     this.screen = screen;
+    // Desktop: the sign-in page left for a new entry over it (a menu or footer link): the place it was opened from is
+    // never shown again by Back in one step, so it is let go (a LIVE RELEASE's stream and timers with it). A page that
+    // takes the sign-in page's own entry (signed in: MESSAGES, an order's page) keeps it for Back.
+    if (screen !== 'signIn' && this.signInFrom && depthOf(history.state) > this.signInFrom.depth + 1) {
+      this.signInFrom.live?.dispose();
+      this.signInFrom = null;
+    }
     seen.screen(screen, this.seenState());
     // On NOW, the LIVE RELEASE the banner would name leads the page itself (C1): the banner is MY PIECES' PIECES tab's (C3).
     this.banner.show(screen === 'pieces' && this.piecesTab === 'pieces');
@@ -761,7 +1130,7 @@ class App {
   }
 
   /** MY PIECES (F-01): the signed-in owner's pieces, its orders and its releases, or the sign-in when signed out. */
-  private async showPieces(focus = true): Promise<void> {
+  private async showPieces(focus = true, signInTab?: SignInTab): Promise<void> {
     this.generation++;
     this.stopCamera();
     this.pieceId = null;
@@ -777,6 +1146,7 @@ class App {
       onRelease: (id) => this.openRelease(id),
       onAfterRoom: (parentId) => this.openAfterRoom(parentId),
       onPiece: (id) => this.openPiece(id),
+      onOrder: (reference) => this.openOrder(reference),
       tab: this.piecesTab,
       order,
       onTab: (tab) => {
@@ -788,7 +1158,18 @@ class App {
         }
       },
       localZone: localZone(),
+      signInTab,
     });
+    // Desktop (BRIEF §10.11): on a computer the PIECES tab is shown once its banner is known (a short wait at
+    // most), so the banner and the page are laid out together; the page never moves when the banner arrives.
+    if (isDesktop() && this.piecesTab === 'pieces') {
+      const gen = this.generation;
+      await Promise.race([this.banner.decided(), sleep(BANNER_WAIT_MS)]);
+      if (gen !== this.generation) {
+        view.dispose();
+        return;
+      }
+    }
     if (await this.swap(view.root, 'pieces', focus)) {
       this.live = view;
       view.shown();
@@ -867,8 +1248,9 @@ class App {
     const view = clubView({
       api: this.api,
       session: this.session,
-      onAccount: (trigger) => this.shell?.sheet.open(trigger),
+      onAccount: (trigger) => this.toAccount(trigger),
       onPieces: () => this.openPieces(),
+      onSignIn: () => this.signIn(),
     });
     if (await this.swap(view.root, 'club', focus)) this.live = view;
     else view.dispose();
@@ -881,12 +1263,192 @@ class App {
     const view = wishlistView({
       api: this.api,
       session: this.session,
-      onAccount: (trigger) => this.shell?.sheet.open(trigger),
+      onAccount: (trigger) => this.toAccount(trigger),
       onSheet: (slug) => this.openSheet(slug),
       onCollection: () => this.openLookbook(),
-      onSignIn: () => this.openPieces(),
+      onSignIn: () => this.signIn(),
     });
     if (await this.swap(view.root, 'wishlist', focus)) this.live = view;
+    else view.dispose();
+  }
+
+  /** YOUR ACCOUNT or one of its sections (desktop, decision 5), as its address names it. */
+  private async showAccount(focus = true): Promise<void> {
+    const page = this.shell?.page;
+    if (!page || !isDesktop()) {
+      void this.showLanding(focus);
+      return;
+    }
+    const named = accountRouteOf(location.pathname);
+    const view: AccountView = named && named !== 'wishlist' ? named : 'account';
+    // MESSAGES is its own page in two parts: an entry of the account's that names it shows that page.
+    if (view === 'messages') {
+      replaceEntry({ screen: 'messages' }, messagesPath(null));
+      return this.showMessages(focus);
+    }
+    // Signed out: the sign-in page in its place, this page once signed in.
+    if (this.session.state.status === 'anonymous') {
+      this.accountSignIn(view);
+      return;
+    }
+    const under = (history.state as { under?: AccountView } | null)?.under;
+    if (this.screen === 'account' && page.root.isConnected) {
+      page.arrive(view, under, focus);
+      return;
+    }
+    this.generation++;
+    this.stopCamera();
+    // The page is the same element each time: shown again, it comes back from its way out (a screen left for another).
+    page.root.classList.remove('is-leaving');
+    page.arrive(view, under, focus);
+    if (await this.swap(page.root, 'account', focus)) this.live = { dispose: () => page.left() };
+  }
+
+  /** The sign-in page (desktop, decision 6): its form and its sentence as its entry keeps them. */
+  private async showSignIn(focus = true): Promise<void> {
+    this.generation++;
+    this.stopCamera();
+    const st = history.state as { lead?: unknown } | null;
+    const view = signInPageView({
+      api: this.api,
+      session: this.session,
+      tab: signInTabOf(history.state),
+      lead: typeof st?.lead === 'string' ? st.lead : DESKTOP.signIn.lead,
+      contact: async () => recoveryContactModel(await this.contactDetails(), '') ?? undefined,
+      onTab: (tab) => {
+        if (entryOf(history.state) === 'signIn') replaceEntry({ ...(history.state as object), tab });
+      },
+      // Signed in (or an account created): back to the place it was opened from (the landing for an address typed);
+      // in the place of an account's page reached signed out, that page.
+      onDone: () => {
+        if (entryOf(history.state) !== 'signIn') return;
+        const st = history.state as { then?: unknown; thenPath?: unknown; thenContext?: unknown } | null;
+        const then = st?.then;
+        if ((then === 'messages' || then === 'order') && typeof st?.thenPath === 'string') {
+          // MESSAGES on its subject, or an order's page, in the sign-in page's place (the place it was opened from, if
+          // kept, stays under it: back returns there as it stood).
+          replaceEntry(then === 'messages' ? { screen: 'messages', context: isWriteContext(st.thenContext) ? st.thenContext : null } : { screen: 'order' }, st.thenPath);
+          void (then === 'messages' ? this.showMessages() : this.showOrder());
+        } else if (isAccountView(then)) {
+          replaceEntry({ screen: 'account', view: then }, accountPath(then));
+          void this.showAccount();
+        } else history.back();
+      },
+    });
+    this.signInPage = view;
+    if (await this.swap(view.root, 'signIn', focus)) {
+      this.live = {
+        dispose: () => {
+          view.dispose();
+          if (this.signInPage === view) this.signInPage = null;
+        },
+      };
+    } else view.dispose();
+  }
+
+  /** MESSAGES in two parts (desktop, decision 5), on the subject its address names; a phone: the sheet on MESSAGES. */
+  private async showMessages(focus = true): Promise<void> {
+    if (!isDesktop()) {
+      replaceEntry({ screen: 'landing' }, LANDING_PATH);
+      await this.showLanding(focus);
+      if (this.screen === 'landing') this.shell?.openAccountSheet('messages');
+      return;
+    }
+    this.generation++;
+    this.stopCamera();
+    const context = (history.state as { context?: unknown } | null)?.context;
+    const view = messagesPageView({
+      api: this.api,
+      session: this.session,
+      subject: messagesSubjectOf(location.pathname),
+      context: isWriteContext(context) ? context : null,
+      onSubject: (key, ctx) => {
+        if (entryOf(history.state) === 'messages') replaceEntry({ ...(history.state as object), screen: 'messages', context: ctx }, messagesPath(key));
+      },
+      onAccount: () => this.openAccount(),
+      onConcerning: (target) => this.openConcerning(target),
+      onCancel: () => history.back(),
+      onSignIn: () => this.pageSignIn('messages', MESSAGES.signedOut),
+      onRead: () => undefined,
+    });
+    if (await this.swap(view.root, 'messages', focus)) this.live = view;
+    else view.dispose();
+  }
+
+  /** An order's page (desktop, decision 5); a phone, or an address that names none: MY PIECES' ORDERS. */
+  private async showOrder(focus = true): Promise<void> {
+    const reference = orderReferenceOf(location.pathname);
+    if (!isDesktop() || !reference) {
+      this.pendingOrder = reference;
+      replaceEntry({ screen: 'pieces', tab: 'orders' }, PIECES_PATH);
+      return this.showPieces(focus);
+    }
+    this.generation++;
+    this.stopCamera();
+    const gen = this.generation;
+    const view = orderPageView({
+      api: this.api,
+      session: this.session,
+      reference,
+      onPieces: () => {
+        if ((history.state as { under?: unknown } | null)?.under === 'pieces') history.back();
+        else this.openPieces({ tab: 'orders' });
+      },
+      // Not the account's (another account's address, or gone): MY PIECES' ORDERS in its place, at its address.
+      onMissing: () => {
+        if (gen !== this.generation) return;
+        if (entryOf(history.state) === 'order') replaceEntry({ screen: 'pieces', tab: 'orders' }, PIECES_PATH);
+        void this.showPieces();
+      },
+      onSignIn: () => this.pageSignIn('order', DESKTOP.signIn.lead),
+    });
+    if (await this.swap(view.root, 'order', focus)) this.live = view;
+    else view.dispose();
+  }
+
+  /**
+   * An account's page reached signed out on a computer (an address typed, back, a session ended): the sign-in page in
+   * its entry's place (back leaves both), with the page's lead; signed in there, that account's page in its place.
+   */
+  private accountSignIn(view: AccountView): void {
+    if (!isDesktop()) return;
+    this.signInFrom?.live?.dispose();
+    this.signInFrom = null;
+    replaceEntry({ screen: 'signIn', tab: 'signin', lead: DESKTOP.signIn.lead, then: view }, SIGN_IN_PATH);
+    void this.showSignIn();
+  }
+
+  /**
+   * Desktop (§4: a window resized across the breakpoint never breaks): the sign-in page is a computer's; a
+   * window narrowed past the desktop's width on it gives way to the phone's own sign-in, as the account's pages give
+   * way to its sheet: the place it was opened from, as it stood (its sign-in drawn as a phone's, in its place), or,
+   * reached by its address, MY PIECES' sign-in on the same form.
+   */
+  private signInToPhone(): void {
+    if (entryOf(history.state) !== 'signIn') return;
+    if (this.signInFrom) {
+      history.back();
+      return;
+    }
+    const tab = signInTabOf(history.state);
+    replaceEntry({ screen: 'pieces' }, PIECES_PATH);
+    void this.showPieces(true, tab);
+  }
+
+  /** The place the sign-in page was opened from, shown again as it stood. */
+  private async restoreScreen(from: { root: HTMLElement; live: { dispose(): void } | null; screen: Screen }): Promise<void> {
+    this.generation++;
+    from.root.classList.remove('is-leaving');
+    if (await this.swap(from.root, from.screen, true)) this.live = from.live;
+    else from.live?.dispose();
+  }
+
+  /** The SCAN page of a computer (desktop): its QR code, UPLOAD A PHOTO. */
+  private async showScanPage(focus = true): Promise<void> {
+    this.generation++;
+    this.stopCamera();
+    const view = scanPageView({ onUpload: () => this.pickPhoto() });
+    if (await this.swap(view.root, 'scanPage', focus)) this.live = view;
     else view.dispose();
   }
 
@@ -899,8 +1461,8 @@ class App {
       api: this.api,
       session: this.session,
       onScan: () => void this.startScan(),
-      // THE PRIVATE SALON's teaser: SIGN IN, MY PIECES' sign-in (as the header's SIGN IN).
-      onSignIn: () => this.openPieces(),
+      // THE PRIVATE SALON's teaser: SIGN IN, MY PIECES' sign-in (as the header's SIGN IN); the sign-in page on a computer.
+      onSignIn: () => this.signIn(),
       onSheet: (slug) => this.openSheet(slug),
     });
     if (await this.swap(view.root, 'lookbook', focus)) this.live = view;
@@ -917,8 +1479,8 @@ class App {
       session: this.session,
       slug,
       onCollection: () => this.openLookbook(),
-      // The heart's SIGN IN, signed out (plan CUSTOMER INTELLIGENCE §3.2 W.10.1): MY PIECES' sign-in.
-      onSignIn: () => this.openPieces(),
+      // The heart's SIGN IN, signed out (plan CUSTOMER INTELLIGENCE §3.2 W.10.1): MY PIECES' sign-in; its page on a computer.
+      onSignIn: () => this.signIn(),
       // A dot chosen (N6): the sheet's address becomes that variant's, in the same history entry.
       onVariant: (variant) => {
         if (this.screen !== 'sheet' || entryOf(history.state) !== 'sheet') return;
@@ -1031,6 +1593,9 @@ class App {
   /** A LIVE RELEASE's page (or its after-room's), as read; `failure` when it could not be. */
   private async showLive(id: string, sheet: LiveSheet | LiveEndedSheet | null, failure: string | null, focus: boolean, afterRoom: boolean): Promise<void> {
     let chrome: boolean | null = null;
+    // Desktop (decision 7): whether the chrome is on screen, which an end page staged as the room hides on a
+    // computer while it stays out of the room (`chrome`) for what the app records.
+    let drawn: boolean | null = null;
     let mounted = false;
     const view = liveView({
       api: this.api,
@@ -1045,13 +1610,15 @@ class App {
       onModel: (slug) => this.openSheet(slug),
       onAfterRoom: (parentId) => this.openAfterRoom(parentId),
       onHow: () => this.openHow(),
+      onClub: () => this.openClub(),
       localZone: localZone(),
       // The chrome is the page's on screen: the one this page asks for is kept until it is mounted (the page left keeps
       // its own while it fades out, and keeps it should this one be given up), then followed while it is shown.
-      onChrome: (shown) => {
+      onChrome: (shown, onScreen = shown) => {
         chrome = shown;
+        drawn = onScreen;
         if (mounted && view.root.isConnected) {
-          this.shell?.liveChrome(shown);
+          this.shell?.liveChrome(onScreen);
           // Into the room or out of it: the recording's LIVE, or the release's page.
           this.liveRoom = !shown;
           if (this.screen === 'live') seen.screen('live', this.seenState());
@@ -1061,7 +1628,7 @@ class App {
     const beforeShow = (): void => {
       mounted = true;
       this.liveRoom = chrome === false;
-      if (chrome !== null) this.shell?.liveChrome(chrome);
+      if (drawn !== null) this.shell?.liveChrome(drawn);
     };
     if (await this.swap(view.root, 'live', focus, beforeShow)) this.live = view;
     else view.dispose();
@@ -1142,6 +1709,8 @@ class App {
    * back in view), where no tap allows it.
    */
   private async startScan(gesture = true): Promise<void> {
+    // Desktop (BRIEF §5.4): a computer opens no camera; its SCAN is the page that sends to the phone.
+    if (gesture && isDesktop()) return this.openScanPage();
     if (gesture) this.sound.prime();
     const gen = ++this.generation;
     this.stopCamera();

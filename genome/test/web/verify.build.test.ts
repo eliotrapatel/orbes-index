@@ -2,12 +2,18 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gzipSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { assertCspSafeHtml, buildWeb, discoverApps, entryOutName, rewriteHtml, WebBuildError, type BuildWebResult } from '../../scripts/build-web.js';
 import { cacheControlFor, HASHED_ASSET_RE, IMMUTABLE_CACHE } from '../../src/server/http/static.js';
+import { DESKTOP_QUERY } from '../../src/web/shared/desktop.js';
 
 const FONT_SRC = join(dirname(fileURLToPath(import.meta.url)), '../../src/web/shared/fonts/gravesend-sans-500.woff2');
 const FONT_REF = '../shared/fonts/gravesend-sans-500.woff2';
+/** The desktop's hover and pressed states: a computer's pointer at any window width (D8, decision 13). */
+const POINTER_QUERY = '(hover: hover) and (pointer: fine)';
+/** gzip -9 size of a built file, as scripts/bench.ts measures the bundles. */
+const gz = (bytes: Buffer) => gzipSync(bytes, { level: 9 }).length;
 
 describe('build-web: production build of the real apps', () => {
   let dir: string;
@@ -22,9 +28,9 @@ describe('build-web: production build of the real apps', () => {
   const html = () => readFileSync(join(result.outDir, 'verify', 'index.html'), 'utf8');
   const asset = (url: string) => join(result.outDir, url.replace(/^\/assets\//, 'assets/'));
 
-  it('publishes the verify shell, main bundle, worker bundle, stylesheet, favicon and preloaded font', () => {
+  it('publishes the verify shell, main bundle, worker bundle, stylesheets, favicon and preloaded font', () => {
     const app = result.apps.find((a) => a.name === 'verify')!;
-    expect(Object.keys(app.assets).sort()).toEqual([FONT_REF, 'favicon.svg', 'main.ts', 'mode.ts', 'styles.css', 'worker.ts']);
+    expect(Object.keys(app.assets).sort()).toEqual([FONT_REF, 'desktop-pointer.css', 'desktop.css', 'favicon.svg', 'main.ts', 'mode.ts', 'styles.css', 'worker.ts']);
     expect(app.assets['main.ts']).toMatch(/^\/assets\/verify-[A-Z0-9]{8}\.js$/);
     // The light mode before the first paint (shared/mode-early.ts): its own small file, a plain script of the head
     // before the stylesheet, with nothing a plain script cannot run and no name left on the page.
@@ -37,6 +43,9 @@ describe('build-web: production build of the real apps', () => {
     expect(shell.indexOf(`<script src="${app.assets['mode.ts']}"></script>`)).toBeLessThan(shell.indexOf('rel="stylesheet"'));
     expect(app.assets['worker.ts']).toMatch(/^\/assets\/verify-worker-[A-Z0-9]{8}\.js$/);
     expect(app.assets['styles.css']).toMatch(/^\/assets\/verify-[A-Z0-9]{8}\.css$/);
+    // The desktop's two stylesheets (D8): its hover and pressed states, and its layout.
+    expect(app.assets['desktop-pointer.css']).toMatch(/^\/assets\/verify-desktop-pointer-[A-Z0-9]{8}\.css$/);
+    expect(app.assets['desktop.css']).toMatch(/^\/assets\/verify-desktop-[A-Z0-9]{8}\.css$/);
     for (const url of Object.values(app.assets)) {
       expect(existsSync(asset(url)), url).toBe(true);
       // The static server caches exactly these names as immutable.
@@ -55,6 +64,46 @@ describe('build-web: production build of the real apps', () => {
     expect(page).toContain(`<meta name="orbes-worker" content="${app.assets['worker.ts']}">`);
     expect(page).toContain(`<link rel="stylesheet" href="${app.assets['styles.css']}">`);
     expect(() => assertCspSafeHtml(page)).not.toThrow();
+  });
+
+  it('links the desktop stylesheets after the phone stylesheet, each under its media query, so a phone never waits for them (D8)', () => {
+    const page = html();
+    const app = result.apps.find((a) => a.name === 'verify')!;
+    const phone = `<link rel="stylesheet" href="${app.assets['styles.css']}">`;
+    const pointer = `<link rel="stylesheet" href="${app.assets['desktop-pointer.css']}" media="${POINTER_QUERY}">`;
+    const layout = `<link rel="stylesheet" href="${app.assets['desktop.css']}" media="${DESKTOP_QUERY}">`;
+    // The order of the cascade: the phone's (the screens' own rules), the pointer's, the layout's; all before the bundle.
+    const at = [phone, pointer, layout, `<script type="module" src="${app.assets['main.ts']}"></script>`].map((tag) => page.indexOf(tag));
+    expect(at.every((i) => i > -1), at.join()).toBe(true);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+    // Only the phone's stylesheet blocks the first paint: it is the one link without a media query.
+    expect([...page.matchAll(/<link rel="stylesheet"(?![^>]*\smedia=)[^>]*>/g)].map((m) => m[0])).toEqual([phone]);
+  });
+
+  it('keeps the desktop out of the phone stylesheet, within the weight limits (D8)', () => {
+    const app = result.apps.find((a) => a.name === 'verify')!;
+    const phone = readFileSync(asset(app.assets['styles.css']));
+    const pointer = readFileSync(asset(app.assets['desktop-pointer.css']));
+    const layout = readFileSync(asset(app.assets['desktop.css']));
+    const phoneCss = phone.toString('utf8');
+    // The phone keeps what it needs of the desktop (shared/desktop-base.css): --d-ph-h registered, the desktop-only
+    // elements of its own markup hidden. No hover rule of a computer and no rule of the layout.
+    expect(phoneCss).toMatch(/@property --d-ph-h\{syntax:\s?"\*";\s?inherits:\s?false;?\}/);
+    expect(phoneCss).toMatch(/\.n-post__missing-back\{display:none\}/);
+    // (Every rule of the desktop excludes html.d-touch; the phone's own one hover rule, a pairing row's scrollbar, stays.)
+    expect(phoneCss).not.toContain('d-touch');
+    expect(phoneCss).not.toMatch(/min-width:\s?1024px\)\s?and\s?\(hover/);
+    // Each desktop sheet holds its own rules only, under its own query.
+    expect(pointer.toString('utf8')).toContain('d-touch');
+    expect(pointer.toString('utf8')).not.toMatch(/min-width:\s?1024px/);
+    expect(layout.toString('utf8')).toMatch(/@media\s?\(min-width:\s?1024px\)\s?and\s?\(hover:\s?hover\)\s?and\s?\(pointer:\s?fine\)/);
+    for (const css of [pointer, layout]) {
+      expect(css.toString('utf8')).not.toMatch(/@property|@import|\.n-post__missing-back\{display:none\}/);
+    }
+    // Weight, gzip -9: the phone's stylesheet at most 22 KB (production c3d25c2's was 20.8 KB); a computer's two more
+    // at most 45 KB together.
+    expect(gz(phone)).toBeLessThanOrEqual(22 * 1024);
+    expect(gz(pointer) + gz(layout)).toBeLessThanOrEqual(45 * 1024);
   });
 
   it('minifies, drops sourcemaps and bundles the shared brand stylesheet', () => {
@@ -154,12 +203,14 @@ describe('build-web: the display font, preloaded by both shells', () => {
     expect(urls.size).toBe(1);
   });
 
-  it('builds the legal pages (J-06), discovered like the others: shell, bundle, stylesheet, tab icon, preloaded font, no decoder', () => {
+  it('builds the legal pages (J-06), discovered like the others: shell, bundle, stylesheets, tab icon, preloaded font, no decoder', () => {
     const legal = result.apps.find((a) => a.name === 'legal')!;
-    expect(Object.keys(legal.assets).sort()).toEqual([FONT_REF, 'favicon.svg', 'main.ts', 'mode.ts', 'styles.css']);
+    expect(Object.keys(legal.assets).sort()).toEqual([FONT_REF, 'desktop-pointer.css', 'desktop.css', 'favicon.svg', 'main.ts', 'mode.ts', 'styles.css']);
     expect(legal.assets['mode.ts']).toMatch(/^\/assets\/legal-mode-[A-Z0-9]{8}\.js$/);
     expect(legal.assets['main.ts']).toMatch(/^\/assets\/legal-[A-Z0-9]{8}\.js$/);
     expect(legal.assets['styles.css']).toMatch(/^\/assets\/legal-[A-Z0-9]{8}\.css$/);
+    expect(legal.assets['desktop-pointer.css']).toMatch(/^\/assets\/legal-desktop-pointer-[A-Z0-9]{8}\.css$/);
+    expect(legal.assets['desktop.css']).toMatch(/^\/assets\/legal-desktop-[A-Z0-9]{8}\.css$/);
     for (const url of Object.values(legal.assets)) expect(HASHED_ASSET_RE.test(url), url).toBe(true);
     // The public apps share one tab icon: the same hashed file.
     expect(legal.assets['favicon.svg']).toBe(result.apps.find((a) => a.name === 'verify')!.assets['favicon.svg']);
@@ -178,6 +229,22 @@ describe('build-web: the display font, preloaded by both shells', () => {
     const css = read(legal.assets['styles.css']).toString('utf8');
     expect(css).not.toMatch(/@import/);
     expect(css).toMatch(/@media print/);
+    // The desktop as on /verify (D8): the phone's stylesheet first and alone without a media query, then the pointer's
+    // and the layout's under theirs; the phone's keeps only what a phone needs of it; the weight limits.
+    const phone = `<link rel="stylesheet" href="${legal.assets['styles.css']}">`;
+    const pointer = `<link rel="stylesheet" href="${legal.assets['desktop-pointer.css']}" media="${POINTER_QUERY}">`;
+    const layout = `<link rel="stylesheet" href="${legal.assets['desktop.css']}" media="${DESKTOP_QUERY}">`;
+    const at = [phone, pointer, layout, `<script type="module" src="${legal.assets['main.ts']}"></script>`].map((tag) => page.indexOf(tag));
+    expect(at.every((i) => i > -1), at.join()).toBe(true);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+    expect([...page.matchAll(/<link rel="stylesheet"(?![^>]*\smedia=)[^>]*>/g)].map((m) => m[0])).toEqual([phone]);
+    expect(css).toMatch(/@property --d-ph-h\{syntax:\s?"\*";\s?inherits:\s?false;?\}/);
+    expect(css).not.toContain('d-touch');
+    expect(css).not.toMatch(/pointer:\s?fine/);
+    expect(read(legal.assets['desktop.css']).toString('utf8')).toMatch(/\.d-legal__list/);
+    expect(read(legal.assets['desktop-pointer.css']).toString('utf8')).toMatch(/\.d-legal__link/);
+    expect(gz(read(legal.assets['styles.css']))).toBeLessThanOrEqual(22 * 1024);
+    expect(gz(read(legal.assets['desktop-pointer.css'])) + gz(read(legal.assets['desktop.css']))).toBeLessThanOrEqual(45 * 1024);
   });
 
   it('gives the console its own decoder worker (A-08): the sale mode reads codes, the main bundle carries no decoder', () => {
@@ -245,6 +312,8 @@ describe('build-web: discovery and validation', () => {
     expect(Object.keys(apps[0].entries).sort()).toEqual(['main.ts', 'styles.css', 'worker.ts']);
     expect(entryOutName('alpha', 'worker.ts')).toBe('alpha-worker');
     expect(entryOutName('alpha', 'main.ts')).toBe('alpha');
+    expect(entryOutName('alpha', 'desktop-pointer.css')).toBe('alpha-desktop-pointer');
+    expect(entryOutName('alpha', 'desktop.css')).toBe('alpha-desktop');
   });
 
   it('builds a discovered app with shared imports', async () => {

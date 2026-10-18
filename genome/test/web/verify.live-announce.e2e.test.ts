@@ -14,7 +14,9 @@
  *    ROOM IS OPEN, LIVE NOW, hidden at the end; it opens the release's page.
  *  - The boutique board by its secret link only (landscape): the countdown, the door, the pieces left overall, live; the
  *    secret never in an address; never indexed; no person, no count of the room, no host message, no size; the door
- *    open at T0; SOLD OUT said at the end; without its secret, with a wrong one, or once revoked: not available.
+ *    open at T0; SOLD OUT said at the end; without its secret, with a wrong one, or once revoked: not available. A
+ *    boutique's screen is a computer (a mouse, no touch): the board stays as it is, no desktop rule on it (desktop plan
+ *    §2(j)), at 1280 × 720 and 1920 × 1080.
  *
  * On every vault screen: the text's contrast computed from the page's own colours, at most one primary action, no
  * figure in the display face, the floors of BRAND-DESIGN-SYSTEM §3.8 (vault-checks.ts). Skipped when Chromium is absent.
@@ -50,6 +52,65 @@ async function textOf(loc: Locator, expected: string | RegExp, timeout = POLL.ti
   else await expect.poll(async () => norm(await loc.innerText()), { ...POLL, timeout }).toMatch(expected);
 }
 const visible = (loc: Locator, timeout = POLL.timeout) => loc.waitFor({ state: 'visible', timeout });
+
+/**
+ * The boutique board on a computer as it is without the desktop (desktop plan §2(j)): the desktop layout's query
+ * matches, yet the window keeps the browser's colour scheme and scroll padding, no bar, menu, SCAN ring, footer nor
+ * other desktop piece is drawn, and FULL SCREEN pressed with the mouse is production's press.
+ */
+async function boardAsItIs(page: Page): Promise<void> {
+  expect(await page.evaluate(() => matchMedia('(min-width: 1024px) and (hover: hover) and (pointer: fine)').matches && !document.documentElement.classList.contains('d-touch'))).toBe(true);
+  expect(await page.evaluate(() => document.body.dataset.screen)).toBe('board');
+  expect(await page.evaluate(() => [getComputedStyle(document.documentElement).colorScheme, getComputedStyle(document.documentElement).scrollPaddingTop])).toEqual(['normal', 'auto']);
+  // Scrollbars that take room (html.d-scrollbars, set by shared/mode-early.ts on Windows or with a mouse; headless
+  // Chromium's are overlay, so it is set here for the check) keep no gutter on the board: the browser's own, as
+  // production. The window's other marks on <html> (d-tap, d-bar-over, d-bar-still, d-bar-turn) draw nothing here:
+  // their rules hold only on NOCTURNE pages and the room.
+  expect(
+    await page.evaluate(() => {
+      const root = document.documentElement;
+      const had = root.classList.contains('d-scrollbars');
+      root.classList.add('d-scrollbars');
+      const gutter = getComputedStyle(root).scrollbarGutter;
+      if (!had) root.classList.remove('d-scrollbars');
+      return gutter;
+    }),
+  ).toBe('auto');
+  const drawn = await page.evaluate(() =>
+    [...document.querySelectorAll('.n-hd, .n-rail, .n-scan, .n-foot, [class^="d-"], [class*=" d-"]')]
+      .filter((el) => el !== document.documentElement && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden')
+      .map((el) => el.className),
+  );
+  expect(drawn).toEqual([]);
+  // Pressed with the mouse (hovered and active, forced in the page's own style engine), its one control FULL SCREEN
+  // keeps production's press: whole, its line drawn, no ground behind it, no wings, its rest's timing; the house's
+  // pressed step on a computer never reaches the board.
+  const full = page.locator('.board__full');
+  if (!(await full.isVisible())) return;
+  const pressedStyle = () =>
+    full.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { background: s.backgroundColor, shadow: s.boxShadow, opacity: s.opacity, duration: s.transitionDuration, line: getComputedStyle(el, '::after').transform };
+    });
+  const rest = await pressedStyle();
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    await cdp.send('DOM.enable');
+    await cdp.send('CSS.enable');
+    const { root } = await cdp.send('DOM.getDocument', { depth: 0 });
+    const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: '.board__full' });
+    await cdp.send('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: ['hover', 'active'] });
+    await expect.poll(async () => {
+      const s = await pressedStyle();
+      return [s.opacity, s.line];
+    }, POLL).toEqual(['1', 'matrix(1, 0, 0, 1, 0, 0)']);
+    expect(await pressedStyle()).toEqual({ background: 'rgba(0, 0, 0, 0)', shadow: 'none', opacity: '1', duration: rest.duration, line: 'matrix(1, 0, 0, 1, 0, 0)' });
+    await cdp.send('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: [] });
+    await expect.poll(pressedStyle, POLL).toEqual(rest);
+  } finally {
+    await cdp.detach();
+  }
+}
 
 /** Until `at` (ms, the server's clock is this machine's), `hidden` keeps holding, checked every 150 ms: never before its time. */
 async function holdsUntil(at: number, hidden: () => Promise<void>): Promise<void> {
@@ -573,6 +634,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     // The ground of the vault (eased in from the page's).
     await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(INK);
     await keepsVault(page, null, ['FULL SCREEN']);
+    await boardAsItIs(page);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-board.png') });
 
     // T0: the lock aligns, the door opens on the piece, LIVE NOW; the pieces left follow the line, live.
@@ -624,8 +686,12 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     await textOf(page.locator('.board__count-label'), 'OPENS IN');
     await expect.poll(async () => (await page.locator('.board__countdown .live__unit-label').allInnerTexts()).map(norm)).toEqual(['DAYS', 'HOURS', 'MINUTES']);
     await textOf(page.locator('.board__status'), 'LIVE');
+    // A larger screen, 1920 × 1080: as it is too.
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await boardAsItIs(page);
     await f.live.revokeBoardLink(next.id, f.admin);
     await textOf(page.locator('.board__title'), 'THIS BOARD IS NOT AVAILABLE', 15_000);
+    await boardAsItIs(page);
     expect(problems).toEqual([]);
     await page.context().close();
   }, 120_000);

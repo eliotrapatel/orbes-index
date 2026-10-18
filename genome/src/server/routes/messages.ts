@@ -8,6 +8,8 @@
  *   POST /api/v1/account/messages          {body, context?: {kind, id, about?}} → 201 {message}
  *   POST /api/v1/account/messages/read     {upTo} → 204: read up to that time
  *   GET  /api/v1/account/messages/unread   {unread}: NOW's line and the account sheet's NEW
+ *   GET  /api/v1/account/messages/unread-count  {count}: how many answers are unread (on a computer: the account
+ *                                          page's MESSAGES card, «1 UNREAD»)
  *
  * services/messages.ts checks the words and the context, and audits `message.write` (never the words).
  */
@@ -45,5 +47,10 @@ export const messageRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
   app.get('/api/v1/account/messages/unread', async (request) => {
     const { account } = requireAccount(request);
     return messages.unread(account.id);
+  });
+
+  app.get('/api/v1/account/messages/unread-count', async (request) => {
+    const { account } = requireAccount(request);
+    return messages.unreadCount(account.id);
   });
 };

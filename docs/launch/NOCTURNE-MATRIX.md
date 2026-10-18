@@ -26,6 +26,10 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
 - **Phone.** 390 × 844 CSS px at scale 2, an iPhone's user agent, English, Paris time zone. Its camera is Chromium's
   fake camera playing a hand-held clip of the stage's piece to register; the track reports a torch and a zoom from 0.5×
   to 5×, like an iPhone's, so LIGHT and the zoom toggle show (the camera opens at 2×, the toggle offering 0.5×).
+- **Computer** (since the desktop plan of 2026-10-16, the states `desk-*` below): a window of 1440 × 900 CSS px, or
+  1024 × 768 and 1920 × 1080 where a state says so, with a mouse and no touch point (a fine pointer with hover), so the
+  app takes its desktop layout, CINEMA (BRAND-DESIGN-SYSTEM §3.14); English, Paris time zone; the whole page captured.
+  A computer opens no camera: every SCAN opens the SCAN page.
 - **The demo** (`genome/test/support/nocturne-demo.ts`), in thirteen variants, each seeded on its own stage through the
   real services: `full` (the boards' story), `rules` (C27–C28), `draw-leads` (C42), `draw-soon` and `draw-early` (C42's
   other states), `collection-leads` (C43), `room` (C21), `live` (the room's screens), `afterroom` (C26), `afterroom-ends`
@@ -43,7 +47,10 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
   jewelry, Lifetime (every started warranty reads ACTIVE · LIFETIME, no UNTIL), and `orbes-care` tells the full story,
   then ORBES CARE: ATLAS, a 2-year model of leather goods, a piece of each warranty, a PLATINE piece's lifetime warranty,
   the certificate of your piece, and one warranty claim per collector (its label sent; replaced; a 30 % credit after the
-  free replacement; refused after inspection; a 2-year piece repaired).
+  free replacement; refused after inspection; a 2-year piece repaired). Since the desktop plan (step 12, D11, test
+  support only), `gallery` tells the full story, then gives MONOLITHE in steel a gallery of the demo's own photographs in
+  gold and in blue (two: the media store refuses a model's cover in its own gallery), for a computer's gallery and its
+  viewer.
 - **Where the demo differs from the boards** (live data excepted: times, ids, a countdown's digits, the GENOME's glyphs):
   - Since N1, MONOLITHE in steel is a model and gold and blue its variants (ADD A VARIANT; the dots Steel · Gold · Blue):
     the lookbook's list gives them as one entry, which THE COLLECTION shows as one model with its dots since N6.
@@ -57,7 +64,8 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
     does (`circle-platine`), and C34 is captured as that account.
   - The question after (C30) is shown to a collector whose turn passed on 5 Oct (the guest); you secured your piece.
   - No model has a gallery (the media store refuses a gallery photograph that is the model's cover, and the demo holds
-    the owner's three photographs only): the sheet's gallery is *(not reached)*.
+    the owner's three photographs only): the sheet's gallery is *(not reached)* on the phone; on a computer, the
+    `gallery` variant reaches a model's gallery and its viewer (`desk-model-gallery`, `desk-model-gallery-viewer`).
   - C33 (N6): ZENITH has a story and specifications in the demo (the content baseline holds them), and a SKU in size 17
     (its order from the salon): its sheet shows SIZE 17 under its line and THE STORY and SPECIFICATIONS before CARE,
     which the board draws without.
@@ -644,6 +652,56 @@ verification app's own.
 | GENOME CODE in the footer's © line | a screen 560 px wide or more (© ORBES · PARIS on a phone) |
 | The account button | signed in: the tier's name (none without a tier) and the monogram; signed out: SIGN IN; nothing while the session is asked for |
 
+## The desktop states (`desk-*`, since the desktop plan of 2026-10-16)
+
+The same screens on a computer (the stage's **Computer**, above): `DESK_GROUPS` in
+`genome/test/support/nocturne-states.ts`, 248 states beside the phone's 261, after them in `UI_STATES`. Each is either a
+phone state opened on a computer's window (the same demo, account, address, routes and acts, its `refs` naming its phone
+twin, `phone: <id>`), or a state made for a computer (`refs: ['desktop']`). Its id is `desk-`, then `light-` in light, its
+name, then its window's width unless it is 1440 × 900 (`desk-pieces-orbes-care-1024`, `desk-light-model-1920`). A
+state's `light` stores LIGHT MODE as the app does (`orbes.mode`) before the page opens. Their values are recorded in the
+same baseline (`nocturne-baseline.json`, the desk-* entries), the phone's 261 entries byte for byte as production's.
+
+| Shard | States | Windows | What it holds |
+|---|---|---|---|
+| `desk-1` | 17 | 1440 × 900 | NOW; the SCAN page, UPLOAD A PHOTO of a code (its result) and of a photo without one (NO ORBES CODE FOUND); results; the service failing (CONNECTION INTERRUPTED, A MOMENT, PLEASE, VERIFICATION UNAVAILABLE) and the scan's window closing; the sign-in page, CREATE ACCOUNT, a refused sign-in, FORGOTTEN PASSWORD? |
+| `desk-2` | 22 | 1440 × 900 | MY PIECES and ORDERS, an order's page, a piece and PRIVATE CARE's steps, the certificate, VALID, NO LONGER VALID and NOT FOUND; THE COLLECTION, a model, THE PRIVATE SALON and locked; YOUR WISHLIST signed out and failed; THE CLUB; CHANGE PASSWORD; YOUR SIZES |
+| `desk-3` | 16 | 1440 × 900 | THE RELEASES, PAST, a draw, drawn, and THE ENTRIES at 600; a LIVE RELEASE before and after; THE CIRCLE and a post; the legal pages (English and French); an answer on NOW |
+| `desk-4` | 20 | 1440 × 900 | YOUR ACCOUNT and MESSAGES (empty, writing from a piece, an answer); the other stages (the room, the turn, the after-room's door, PAIRS WELL WITH, a place held, PRIVATE CARE used, YOUR WISHLIST); an order's page with YOUR NEW CLAIM CODE waiting, packing begun, a return asked; YOUR ADDRESSES; a model's gallery and its viewer (`gallery`) |
+| `desk-5` | 24 | 1024 × 768, 1440 × 900, 1920 × 1080 | ORBES CARE's stage (`orbes-care`: each warranty, each moment of a claim, LIFETIME, a warranty credit), PRIVATE CARE used, an order's DOCUMENTS with ORBES CARE CONDITIONS · PDF |
+| `desk-6` | 25 | the three | PRIVATE CARE's form and label, SERVICE, a result's ORBES CARE and with its warranty no longer valid (WRITE in WARRANTY, by a route), IN USE, the birthday credit (`birthday-credit`), PRIVATE CARE's steps, THE CLUB of a PLATINE account |
+| `desk-7` | 23 | the three | ORBES CARE and I2 at 1920 × 1080; YOUR PROFILE (`account-profile`) entered, its tastes, and two retired tastes side by side |
+| `desk-8` | 24 | the three, in light | CINEMA in white: NOW, THE RELEASES, THE COLLECTION, a model, a draw, a LIVE RELEASE, a piece's ORBES CARE, IN USE |
+| `desk-9` | 16 | 1440 × 900, in light | The states the review preview could not show, in light: the service failing, the scan's window closing, the three order writes, an answer in MESSAGES and on NOW, THE PRIVATE SALON locked, YOUR WISHLIST signed out and failed, the certificate NO LONGER VALID and NOT FOUND, 600 entries, two retired tastes |
+| `desk-10` | 19 | 1440 × 900 | The room's other screens (the line, secured, CONFIRMED, sold out in a size, its five ends, ENTER THE LINE), a LIVE RELEASE's rules and not eligible, the room not eligible and ready, the after-room's join and its ends |
+| `desk-11` | 22 | 1440 × 900, ORDERS also 1024 × 768 | A result's other answers, a piece's incidents, THE PRIVATE SALON in sizes, the draw's other states, the failures and the pages not found; the full demo's writes last (a transfer code, the ceremony, a piece received, REQUESTED, a draw entered) |
+| `desk-12` | 20 | 1440 × 900 | The extreme content (`stress`, its ceremony last) and the empty demo |
+
+Routes (Playwright's, in the test only) make five states the demo cannot reach: the certificate NO LONGER VALID, THE
+PRIVATE SALON locked (the server's own shape: PLATINE, from 5 pieces), YOUR WISHLIST that could not be read, a warranty
+VOID on a result, and 600 entries served page by page (the list scrolled to its end, so the rows drawn,
+`content-visibility`, are its last). The service's failures keep the phone's own routes.
+
+**The content test on a computer.** Each `desk-N` shard has its file, `genome/test/web/nocturne.content-desk-N.e2e.test.ts`
+(at most 28 states a shard, each within `SHARD_TIMEOUT_MS`), and every phone shard's predicate leaves the `desk-*` states
+out, so the phone's shards hold exactly what they held. Each desk state is held to its own baseline values; a desk state
+made from a phone state is also held to its phone twin's words (`genome/test/web/desktop.content-parity.harness.ts`):
+every value of the phone's state is shown on the computer, or is where `DESKTOP_MOVED` says it went (a computer's words,
+`DESKTOP_WORDS`: *on this computer*, CLICK AGAIN…, SOUND OFF, the UNREADABLE CODE sentence, the legal pages' computer
+phrases; a sheet's words on the page that replaces the sheet; a sign-in form's on the sign-in page; an order's card on
+its rows and its page; MESSAGES' CONCERNING once per subject; the room's menu and footer, which it does not show).
+`desktop.content-parity.e2e.test.ts` holds that list to the two baselines without a browser (no invented value, no
+reason a twin no longer needs).
+
+**The desktop suites** (Chromium, a mouse, at 1440 × 900 and 1024 × 768, dark and light):
+`desktop.chrome.e2e.test.ts` (the bar, the menu, SCAN and the account on every page, the footer, the switch per device,
+a live resize across 1024 px), `desktop.pages.e2e.test.ts` (each page and what it is for, ORBES CARE's 8 states, the
+gallery's viewer by keyboard), `desktop.flows.e2e.test.ts` (the SCAN page's code read from the screen and UPLOAD A PHOTO,
+sign in and create account, the account's pages, MESSAGES, an order's page, PRIVATE CARE, a draw entered, the room's
+seal held with the mouse, the space bar and Enter, against the real server) and `desktop.tap.e2e.test.ts` (a touch
+laptop's 44 px). An iPad (by touch or with its trackpad) and a large touch tablet keep the phone's states:
+`verify.orders.e2e.test.ts` checks its orders at 1280 px on a touch tablet.
+
 ## Using it
 
 From `genome/`, with `ORBES_CHROMIUM` set:
@@ -652,7 +710,10 @@ From `genome/`, with `ORBES_CHROMIUM` set:
   `<out>/<C-id>.pair.png`); C21 and C26, stand-in images of the room, are paired with their state's before-capture.
 - `npx tsx scripts/parity.ts --live [<id,…>]` — each LIVE state beside its before-capture (`<out>/live/<state>.pair.png`;
   by default every state whose reference is a live-xx or plus-xx capture).
-- `npx tsx scripts/parity.ts --states <id,…|variant|all>` — any state of this matrix.
+- `npx tsx scripts/parity.ts --states <id,…|variant|all>` — any state of this matrix, a `desk-*` state on its computer's
+  window.
 - `npx tsx scripts/parity.ts --stress` — the extreme cases and what overflows in each.
 - `npx tsx scripts/parity.ts --baseline` — the content baseline (recorded once, at N0); `--baseline --states <id,…>`
-  records those states only (a state added, or one whose way there changed), every other entry's values kept.
+  records those states only (a state added, or one whose way there changed), every other entry's values kept: the
+  `desk-*` states are recorded this way (`--baseline --states <desk ids>`), the phone's 261 entries checked byte-equal
+  after.

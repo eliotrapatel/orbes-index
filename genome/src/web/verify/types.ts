@@ -1320,7 +1320,7 @@ export interface AccountMessage {
   body: string;
   at: string;
   /** On the collector's own messages: what it concerned, and its place in the app (null for a scan). */
-  concerning: { kind: MessageContextKind; label: string; path: string | null } | null;
+  concerning: { kind: MessageContextKind; label: string; path: string | null; /** Desktop: its id, to attach it to a reply again. */ ref?: string | null } | null;
 }
 
 export interface AccountThread {

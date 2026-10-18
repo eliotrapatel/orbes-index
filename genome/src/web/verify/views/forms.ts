@@ -11,7 +11,8 @@
 import { isCountryCode } from '../../../shared/countries.js';
 import { h } from '../../shared/dom.js';
 import { ApiError } from '../api.js';
-import { REQUEST_ERRORS, SIGN_UP } from '../copy.js';
+import { PIECES, REQUEST_ERRORS, SIGN_UP } from '../copy.js';
+import { isDesktop } from '../../shared/desktop.js';
 import type { SessionStore } from '../session.js';
 
 /** Minimum password length (PLATFORM-CONTRACTS §2.9). */
@@ -113,27 +114,81 @@ export function nocturneForm(
   return wireForm(form, submit, error, session, onSubmit);
 }
 
+/** The ids given to a form's sentence placed under its field (desktop). */
+let errorIds = 0;
+
+/**
+ * Desktop (BRIEF §10.22): on a computer, the sentence of a refused form stands under the field to correct (two
+ * fields side by side: under their row), and that field is described by it (`aria-describedby`); corrected (typed in,
+ * chosen), the field is no longer marked and the sentence goes. Returns how to put the sentence back at the form's foot,
+ * where a phone keeps it (and where a refusal without a field is said); null when nothing was moved.
+ */
+function placeUnderField(form: HTMLFormElement, error: HTMLElement): (() => void) | null {
+  if (!isDesktop()) return null;
+  const input = form.querySelector<HTMLElement>('[aria-invalid="true"]');
+  const group = input?.closest<HTMLElement>('.n-fld-group, .field') ?? null;
+  if (!input || !group || !form.contains(group)) return null;
+  const pairRow = group.parentElement?.matches('.d-acct__pair, .d-acct__grid2') ? group.parentElement : null;
+  const home = { parent: error.parentNode, next: error.nextSibling };
+  if (!error.id) error.id = `form-error-${++errorIds}`;
+  (pairRow ?? group).after(error);
+  const before = input.getAttribute('aria-describedby');
+  input.setAttribute('aria-describedby', before ? `${before} ${error.id}` : error.id);
+  let undone = false;
+  const undo = () => {
+    if (undone) return;
+    undone = true;
+    input.removeEventListener('input', corrected);
+    if (before === null) input.removeAttribute('aria-describedby');
+    else input.setAttribute('aria-describedby', before);
+    if (home.parent && error.isConnected) home.parent.insertBefore(error, home.next && home.next.parentNode === home.parent ? home.next : null);
+  };
+  const corrected = () => {
+    input.removeAttribute('aria-invalid');
+    error.hidden = true;
+    error.textContent = '';
+    undo();
+  };
+  input.addEventListener('input', corrected);
+  return undo;
+}
+
 /** One submit at a time; a failure said in `error`, focus on the field to correct (or the button); a 401 ends the session. */
 function wireForm(form: HTMLFormElement, submit: HTMLButtonElement, error: HTMLElement, session: SessionStore, onSubmit: () => Promise<void>): HTMLFormElement {
+  let unplace: (() => void) | null = null;
   form.addEventListener('submit', (ev) => {
     ev.preventDefault();
     if (submit.disabled) return;
     void (async () => {
+      unplace?.();
+      unplace = null;
       error.hidden = true;
       error.textContent = '';
       for (const f of Array.from(form.querySelectorAll('[aria-invalid]'))) f.removeAttribute('aria-invalid');
       submit.disabled = true;
       submit.setAttribute('aria-busy', 'true');
+      // Desktop (BRIEF §10.22): the main button reads ONE MOMENT… while it is pending, at its own width.
+      const label = isDesktop() && submit.classList.contains('n-btn') ? submit.textContent : null;
+      if (label !== null) {
+        submit.style.minWidth = `${submit.offsetWidth}px`;
+        submit.textContent = PIECES.loading;
+      }
       try {
         await onSubmit();
       } catch (e) {
         session.noteError(e);
         error.textContent = e instanceof FormError ? e.message : messageOf(e);
+        unplace = placeUnderField(form, error);
         error.hidden = false;
         (form.querySelector<HTMLElement>('[aria-invalid="true"]') ?? submit).focus();
       } finally {
         submit.disabled = false;
         submit.setAttribute('aria-busy', 'false');
+        // Its words back, unless the step changed them meanwhile (CONFIRM YOUR DATE OF BIRTH).
+        if (label !== null) {
+          if (submit.textContent === PIECES.loading) submit.textContent = label;
+          submit.style.minWidth = '';
+        }
       }
     })();
   });

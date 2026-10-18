@@ -9,7 +9,8 @@
  * a tag and a private note written through ClientNoteService, an `account_scores` row (the morning's score and its five
  * parts), a `collector_history` row (a month's score, tier and activity) and a warranty claim on its first piece with
  * Client Services' note (plan ORBES CARE, step 1.7: the care status's `claim` and the export's `warrantyClaims` are
- * read as every reply is, never empty). It checks the staff side reads them back
+ * read as every reply is, never empty); the collector's own two messages about that piece and its latest order give
+ * MESSAGES' thread its `ref`s (the desktop's subjects), read as every reply is. It checks the staff side reads them back
  * (the client sheet, its Intelligence, the history row) and that its scanner finds them there: without that seeding the
  * sentinel fails, so it never passes on an empty house.
  *
@@ -151,6 +152,11 @@ describe('the collector never sees staff data (§3.6 C.9, §3.0 (k); step 9.13)'
       .where('o.ended_at', 'is', null)
       .orderBy('o.started_at')
       .executeTakeFirstOrThrow();
+    // A word in MESSAGES about that piece and about the collector's latest order, so the thread's `ref`s are read too.
+    const order = await h.t.db.selectFrom('orders').select('id').where('account_id', '=', youId).orderBy('reserved_at', 'desc').executeTakeFirstOrThrow();
+    const asYou = { type: 'account' as const, id: youId };
+    await h.ctx.services.messages.write(youId, { body: 'About my piece.', context: { kind: 'PIECE', id: first.product_id } }, asYou);
+    await h.ctx.services.messages.write(youId, { body: 'About my order.', context: { kind: 'ORDER', id: order.id } }, asYou);
     const conversation =
       (await h.t.db.selectFrom('client_conversations').select('id').where('account_id', '=', youId).executeTakeFirst()) ??
       (await h.t.db.insertInto('client_conversations').values({ account_id: youId, status: 'ANSWERED', last_message_at: h.clock.now() }).returning('id').executeTakeFirstOrThrow());
@@ -252,6 +258,7 @@ describe('the collector never sees staff data (§3.6 C.9, §3.0 (k); step 9.13)'
       '/api/v1/live/:id/question': `/api/v1/live/${live.id}/question`,
       '/api/v1/account/messages': '/api/v1/account/messages',
       '/api/v1/account/messages/unread': '/api/v1/account/messages/unread',
+      '/api/v1/account/messages/unread-count': '/api/v1/account/messages/unread-count',
       '/api/v1/ownership/certificates': '/api/v1/ownership/certificates',
       '/go/:code': `/go/${link.code}`,
     };
@@ -268,12 +275,26 @@ describe('the collector never sees staff data (§3.6 C.9, §3.0 (k); step 9.13)'
       expect(res.statusCode, `GET ${url} → ${res.body.slice(0, 200)}`).toBeLessThan(500);
     }
     // The collector's own screens answer: the sentinel reads real replies, not refusals.
-    for (const path of ['/api/v1/account/me', '/api/v1/account/products', '/api/v1/account/profile', '/api/v1/account/wishlist', '/api/v1/account/orders', '/api/v1/account/participation', '/api/v1/club/status', '/api/v1/club/circle', '/api/v1/account/messages', '/api/v1/ownership/certificates', '/api/v1/live/mine', '/api/v1/account/sign-up', '/api/v1/lookbook/:slug', '/api/v1/club/drops/:id/entry']) {
+    for (const path of ['/api/v1/account/me', '/api/v1/account/products', '/api/v1/account/profile', '/api/v1/account/wishlist', '/api/v1/account/orders', '/api/v1/account/participation', '/api/v1/club/status', '/api/v1/club/circle', '/api/v1/account/messages', '/api/v1/account/messages/unread-count', '/api/v1/ownership/certificates', '/api/v1/live/mine', '/api/v1/account/sign-up', '/api/v1/lookbook/:slug', '/api/v1/club/drops/:id/entry']) {
       expect(replies.get(`GET ${path}`)!.statusCode, path).toBe(200);
     }
     expect(replies.get('GET /go/:code')!.statusCode).toBe(302);
     // The piece's care status carries its claim (plan ORBES CARE): the sentinel reads a real one.
     expect((safeJson(replies.get('GET /api/v1/account/products/:productId/care')!) as { claim: { id: string } | null }).claim?.id).toBe(claimId);
+    // MESSAGES carries each context's `ref` (desktop: a reply on a subject attaches it again): the sentinel reads real
+    // ones, and each is the collector's own (a piece it holds or held, its order) or a scan, release or model it wrote about.
+    const thread = safeJson(replies.get('GET /api/v1/account/messages')!) as { messages: { concerning: { kind: string; ref?: string | null } | null }[] };
+    const refs = thread.messages.flatMap((m) => (m.concerning?.ref ? [{ kind: m.concerning.kind, ref: m.concerning.ref }] : []));
+    expect(refs.map((r) => r.kind)).toEqual(expect.arrayContaining(['PIECE', 'ORDER']));
+    for (const { kind, ref } of refs) {
+      expect(['PIECE', 'ORDER', 'RELEASE', 'SCAN', 'MODEL'], ref).toContain(kind);
+      if (kind === 'PIECE') {
+        const held = await db.selectFrom('ownership as o').innerJoin('products as p', 'p.id', 'o.product_id').select('o.id').where('o.account_id', '=', youId).where('p.product_id', '=', ref).executeTakeFirst();
+        expect(held, `PIECE ${ref}`).toBeDefined();
+      }
+      if (kind === 'ORDER') expect((await db.selectFrom('orders').select('account_id').where('id', '=', ref).executeTakeFirstOrThrow()).account_id).toBe(youId);
+    }
+    expect(safeJson(replies.get('GET /api/v1/account/messages/unread-count')!)).toEqual({ count: expect.any(Number) });
 
     // The lot's replies to the collector's own writes: YOUR PROFILE saved as read, a heart on a model, a batch of views.
     const read = safeJson(replies.get('GET /api/v1/account/profile')!) as {

@@ -12,8 +12,13 @@
  *    offline, 429 kept, 400 dropped, 50 a batch, views older than 24 h never sent, every batch one the server's schema
  *    takes;
  *  - ApiClient.seen: a same-origin keepalive POST without a CSRF token, never thrown;
- *  - the app's page names are the server's VIEW_PAGES but SCAN; the recorder does nothing outside a browser.
+ *  - the app's page names are the server's VIEW_PAGES but SCAN; the recorder does nothing outside a browser;
+ *  - a computer's pages (plan of 2026-10-16, Q4): each counts as its phone equivalent, with no page name added (an
+ *    order's page MY_ORDERS; the account's pages, sign in and MESSAGES by their claims; the SCAN page never).
  */
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { seenBody } from '../../src/server/http/schemas.js';
 import { SEEN_PAGES } from '../../src/server/services/tracking.js';
@@ -68,6 +73,11 @@ describe('pageOf (plan CUSTOMER INTELLIGENCE §3.3 T.9)', () => {
       club: { page: 'CLUB' },
       how: { page: 'HOW' },
       wishlist: { page: 'WISHLIST' },
+      scanPage: null,
+      account: null,
+      signIn: null,
+      messages: null,
+      order: { page: 'MY_ORDERS' },
     };
     for (const [screen, view] of Object.entries(all)) expect(pageOf(screen as SeenScreen, STATE), screen).toEqual(view);
   });
@@ -92,6 +102,69 @@ describe('pageOf (plan CUSTOMER INTELLIGENCE §3.3 T.9)', () => {
 
   it('names the pages the server takes: VIEW_PAGES but SCAN', () => {
     expect([...SEEN_PAGE_NAMES]).toEqual([...SEEN_PAGES]);
+  });
+
+  it('counts a computer’s pages as their phone equivalents, with no page name added (Q4)', () => {
+    // An order's page is MY PIECES' ORDERS whatever tab MY PIECES was on; the SCAN page is never recorded.
+    for (const piecesTab of ['pieces', 'orders', 'releases'] as const) expect(pageOf('order', { ...STATE, piecesTab })).toEqual({ page: 'MY_ORDERS' });
+    expect(pageOf('scanPage', STATE)).toBeNull();
+    // Each page as the app shows it (main.ts swap: the screen's view; the page's own claim while it is on show), for 5 s,
+    // then NOW: what is recorded is the phone's page for the same thing.
+    const SECTION: Record<string, ReturnType<typeof accountPageOf>> = { account: 'ACCOUNT', profile: 'PROFILE', sizes: 'SIZES', addresses: 'ADDRESSES', password: null };
+    const pages: [string, SeenScreen, ReturnType<typeof accountPageOf> | 'SIGN_IN' | 'SIGN_UP' | null, string[]][] = [
+      ['an order’s page', 'order', null, ['MY_ORDERS']],
+      ...Object.entries(SECTION).map(([view, page]): [string, SeenScreen, ReturnType<typeof accountPageOf>, string[]] => [
+        `the account’s ${view} page`,
+        'account',
+        accountPageOf(view as Parameters<typeof accountPageOf>[0]),
+        page ? [page] : [],
+      ]),
+      ['THE WISHLIST', 'wishlist', null, ['WISHLIST']],
+      ['sign in', 'signIn', 'SIGN_IN', ['SIGN_IN']],
+      ['create account', 'signIn', 'SIGN_UP', ['SIGN_UP']],
+      ['MESSAGES', 'messages', 'MESSAGES', ['MESSAGES']],
+      ['the SCAN page', 'scanPage', null, []],
+    ];
+    for (const [what, screen, claimed, expected] of pages) {
+      const { c, done } = clock();
+      const page = {};
+      let shown = true;
+      if (claimed !== null || screen === 'account') c.claim(page, claimed, () => shown, 0);
+      c.show(pageOf(screen, STATE), 0);
+      shown = false;
+      c.release(page, 5_000);
+      c.show(pageOf('landing', STATE), 5_000);
+      c.show(null, 9_000);
+      expect(done.map((v) => v.page), what).toEqual([...expected, 'NOW']);
+      for (const v of done) expect(SEEN_PAGE_NAMES, what).toContain(v.page);
+      if (expected.length > 0) expect(done[0], what).toMatchObject({ ms: 5_000, subject: null });
+    }
+    // From MY PIECES' ORDERS to an order's page and back: one MY_ORDERS view, as the phone's order opens in its tab.
+    const { c, views } = clock();
+    c.show(pageOf('pieces', { ...STATE, piecesTab: 'orders' }), 0);
+    c.show(pageOf('order', STATE), 3_000);
+    c.show(pageOf('pieces', { ...STATE, piecesTab: 'orders' }), 8_000);
+    c.show(pageOf('landing', STATE), 10_000);
+    c.show(null, 12_000);
+    expect(views()).toEqual([
+      ['MY_ORDERS', null, 10_000, 0],
+      ['NOW', null, 2_000, 10_000],
+    ]);
+  });
+
+  it('has a computer’s account, sign-in and MESSAGES pages claim their phone page, as the sheet and the panel do', () => {
+    const views = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'web', 'verify', 'views');
+    const read = (file: string) => readFileSync(join(views, file), 'utf8');
+    // YOUR ACCOUNT's pages: the sheet's own claim (accountPageOf of the page on show), released when it leaves.
+    expect(read('desktop-account.ts')).toContain('seen.claim(this, accountPageOf(this.view), () => this.isOpen)');
+    expect(read('account.ts')).toContain('seen.claim(this, accountPageOf(this.view), () => this.isOpen)');
+    // MESSAGES in two parts: MESSAGES, as the sheet's view.
+    expect(read('desktop-messages.ts')).toContain("seen.claim(this, 'MESSAGES',");
+    // The sign-in page is the OWNERSHIP panel's own sign-in, which claims SIGN_IN or SIGN_UP.
+    expect(read('desktop-signin.ts')).toMatch(/new OwnershipPanel\(/);
+    expect(read('ownership.ts')).toContain("seen.claim(this, this.authShown === 'create' ? 'SIGN_UP' : this.authShown === 'signin' ? 'SIGN_IN' : null,");
+    // No desktop view records a page of its own.
+    for (const file of ['desktop-account.ts', 'desktop-messages.ts', 'desktop-signin.ts', 'desktop-scan.ts', 'desktop-order.ts']) expect(read(file), file).not.toMatch(/seen\.(show|screen)\(/);
   });
 });
 

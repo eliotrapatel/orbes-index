@@ -1,0 +1,1726 @@
+/*
+ * The LIVE RELEASE's room on a computer (desktop, BRIEF §5.7, decision 7: the Cinema room). views/desktop-room.ts
+ * stages each screen of the room and the after-room (`.view--live.d-room`): the release's model (variant) photograph
+ * fills the window, darkened; ORBES top left, the count in the room top right; the door, the countdown, the line, the
+ * seal to hold, the piece secured in the centre, the host's messages under them; the release's name and its choice in
+ * the bottom left corner, the collector's own part in the bottom right (READY CHECK and ENTER THE ROOM, YOUR PLACE, the
+ * add-ons and PAY), both on the page's edges; the room's own foot under the window. CONFIRMED comes out into the light:
+ * the photograph gives way to the house's ivory, its words beside its receipt.
+ *
+ * The room is not one of NOCTURNE's screens (body.nocturne): light.css never reaches it, it stays dark with LIGHT MODE
+ * on (decision 9). Its colours are the vault's tokens and the desktop's on-photo ones. Every moment of the room is the
+ * phone's (house.css): the lock aligning, the door, the light sweep, the reveal, out into the light; nothing here
+ * animates but those and the controls' hover and pressed states (§10.13, §10.16). The `.d-room` class exists on a
+ * computer only (views/live.ts adds it there), so the phone's room is untouched.
+ */
+
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  /* ── 1. The room's tokens: its corners' width, the space between them and the centre ─────────────────────────── */
+
+  html:not(.d-touch) .d-room {
+    --d-room-side: clamp(272px, 26vw, 384px);
+    --d-room-gap: var(--d-s5);
+    /* A size's chip, and each cell of the quantity under the sizes (the same columns). */
+    --d-room-chip: 64px;
+    /* Words in the room's soft grey stand on a darkened photograph: the on-photo soft (§10.32). */
+    --d-room-soft: var(--d-on-photo-soft);
+    /* The big figures: the countdown, the place in the line, the turn's and the hold's time. */
+    --d-room-figure: var(--d-fs-count);
+    /* The right side bearing of each figure of Helvetica Neue at weight 200 (tabular), in em: YOUR PLACE's last. */
+    --d-rsb-0: 0.028em;
+    --d-rsb-1: 0.225em;
+    --d-rsb-2: 0.05em;
+    --d-rsb-3: 0.045em;
+    --d-rsb-4: 0.037em;
+    --d-rsb-5: 0.048em;
+    --d-rsb-6: 0.037em;
+    --d-rsb-7: 0.055em;
+    --d-rsb-8: 0.039em;
+    --d-rsb-9: 0.036em;
+  }
+
+  @media (min-width: 1280px) {
+    html:not(.d-touch) .d-room {
+      --d-room-gap: var(--d-s7);
+    }
+  }
+
+  /* Out into the light (CONFIRMED): the house's ivory, its soft grey; the vault's tokens are the house's again there
+     (house.css .vault, which every other screen of the room carries). */
+  html:not(.d-touch) .d-room.is-light {
+    --d-room-soft: var(--ink-soft);
+  }
+
+  /* No viewfinder at the window's corners: the room's corners hold its words (round 4's corner marks were not chosen). */
+  html:not(.d-touch) body[data-screen="live"]:has(.view--live.d-room) .corners {
+    display: none;
+  }
+
+  /* ── 2. The page: the window's stage, then the room's foot ──────────────────────────────────────────────────── */
+
+  html:not(.d-touch) .view--live.d-room {
+    position: relative;
+    display: block;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    color: var(--ink);
+    text-align: left;
+    isolation: isolate;
+    font-synthesis: none;
+    /* The page arrives at once, as every page of a computer (§5b, §10.13: no fade or slide between screens; NOCTURNE's
+       pages have none): the phone's view-in (a rise of 10 px over 1.1 s) would carry the room's controls up under the
+       pointer while it plays. The room's own staging (the door, the light, the line, a screen's live-in) is kept. */
+    animation: none;
+  }
+
+  html:not(.d-touch) .d-room ::selection {
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  html:not(.d-touch) .d-room.is-light ::selection {
+    background: var(--ink);
+    color: var(--white);
+  }
+
+  /* The photograph: the window's height, the piece in its middle, darkened (the words of the centre and the corners at
+     4.5 : 1 or better against its brightest pixel, §10.32); its foot dissolves into the room's ground, where the foot
+     stands. No zoom, no filter on it (§10.12). */
+  html:not(.d-touch) .d-room > .d-room__photo {
+    position: absolute;
+    top: 0;
+    right: 0;
+    left: 0;
+    z-index: 0;
+    height: var(--d-frame-page);
+    overflow: hidden;
+    background-color: var(--n-photo);
+    pointer-events: none;
+    transition: opacity 0.9s var(--ease);
+  }
+
+  html:not(.d-touch) .d-room > .d-room__photo.is-bare {
+    background-color: transparent;
+  }
+
+  html:not(.d-touch) .d-room > .d-room__photo > .d-room__img {
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    object-fit: cover;
+    object-position: 50% 50%;
+  }
+
+  html:not(.d-touch) .d-room > .d-room__photo.is-bare > .d-room__img {
+    display: none;
+  }
+
+  html:not(.d-touch) .d-room > .d-room__photo::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--vault-ground) 60%, transparent) 0%,
+        transparent 20%,
+        transparent 56%,
+        color-mix(in srgb, var(--vault-ground) 60%, transparent) 82%,
+        var(--vault-ground) 100%
+      ),
+      radial-gradient(120% 100% at 50% 46%, color-mix(in srgb, var(--vault-ground) 76%, transparent) 0%, color-mix(in srgb, var(--vault-ground) 80%, transparent) 50%, color-mix(in srgb, var(--vault-ground) 90%, transparent) 100%);
+  }
+
+  /* Out into the light: CONFIRMED in the house's ivory, the photograph giving way with the ground (0.9 s, house.css). */
+  html:not(.d-touch) .d-room.is-light > .d-room__photo {
+    opacity: 0;
+  }
+
+  /* The top band: ORBES on the left edge, the count in the room on the right one, in the bar's place (no menu, no SCAN,
+     no account button: the room's own). */
+  html:not(.d-touch) .d-room > .live__head {
+    position: absolute;
+    top: 0;
+    right: var(--d-edge);
+    left: var(--d-edge);
+    z-index: 2;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    width: auto;
+    height: var(--d-bar);
+    pointer-events: none;
+  }
+
+  /* ORBES where the app's bar sets it (its line box, 1.5), so it does not move between a release's page and its room. */
+  html:not(.d-touch) .d-room .live__wordmark {
+    margin-left: -0.04em;
+    font-size: var(--n-fs-wm);
+    line-height: 1.5;
+    letter-spacing: var(--n-track-wm);
+    text-indent: 0;
+  }
+
+  html:not(.d-touch) .d-room.is-light > .live__head {
+    color: var(--ink);
+  }
+
+  html:not(.d-touch) .d-room .d-room__count {
+    display: flex;
+    align-items: center;
+    gap: var(--d-s2);
+    margin-right: calc(-1 * var(--d-tr-label));
+    font-family: var(--font-display);
+    font-size: var(--d-fs-label);
+    line-height: 1.5;
+    letter-spacing: var(--d-tr-label);
+    white-space: nowrap;
+    /* Its capitals' middle on ORBES' (§10.14, as the app's bar): with both line boxes centred in the band, the 11 px
+       capitals stand 1 px higher than the 17 px ones; given back. */
+    position: relative;
+    top: 1px;
+  }
+
+  html:not(.d-touch) .d-room .d-room__count[hidden] {
+    display: none;
+  }
+
+  /* Its dot stands still: no breathing LIVE dot on a computer (§5b, §10.13); the phone's presence line keeps its own. */
+  html:not(.d-touch) .d-room .d-room__count > .live__dot {
+    background: var(--ink);
+    animation: none;
+  }
+
+  /* The stage: the window, its grid on the page's edges (§10.1). The head spans it over the centre; the centre stands
+     between the corners; the corners stand on the edges, their last lines 72 px over the window's foot (§10.27). */
+  html:not(.d-touch) .d-room > .live__stage {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    margin: 0;
+  }
+
+  html:not(.d-touch) .d-room .d-room__screen {
+    display: grid;
+    grid-template-columns: [bl] var(--d-room-side) [c] minmax(0, 1fr) [br] var(--d-room-side);
+    grid-template-rows: [top] minmax(0, 1fr) [head] auto [body] auto [rest] minmax(0, 1fr);
+    column-gap: var(--d-room-gap);
+    align-items: start;
+    width: 100%;
+    min-height: var(--d-frame-page);
+    padding: calc(var(--d-bar) + var(--d-s5)) var(--d-edge) var(--d-s8);
+    text-align: center;
+  }
+
+  html:not(.d-touch) .d-room .d-room__head {
+    grid-column: 1 / -1;
+    grid-row: head;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 0;
+  }
+
+  html:not(.d-touch) .d-room .d-room__body {
+    grid-column: c;
+    grid-row: body;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+  }
+
+  html:not(.d-touch) .d-room .d-room__head + .d-room__body {
+    padding-top: var(--d-s6);
+  }
+
+  html:not(.d-touch) .d-room .d-room__bl,
+  html:not(.d-touch) .d-room .d-room__br {
+    grid-row: body / -1;
+    align-self: end;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    min-width: 0;
+  }
+
+  html:not(.d-touch) .d-room .d-room__bl {
+    grid-column: bl;
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  html:not(.d-touch) .d-room .d-room__br {
+    grid-column: br;
+    align-items: flex-end;
+    text-align: right;
+  }
+
+  html:not(.d-touch) .d-room .d-room__bl:empty,
+  html:not(.d-touch) .d-room .d-room__br:empty {
+    visibility: hidden;
+  }
+
+  /* ── 3. The room's words (§10.5): labels, the centre's title, figures in tabular lining figures (§10.7) ─────────── */
+
+  html:not(.d-touch) .d-room :is(.live__overline, .live__fact, .live__surprise, .live__subtitle, .live__notice-label, .live__check-label, .live__check-value, .live__deadline-label, .d-room__choice) {
+    margin: 0;
+    font-size: var(--d-fs-label);
+    line-height: 1.6;
+    letter-spacing: var(--d-tr-label);
+    text-indent: 0;
+    white-space: nowrap;
+  }
+
+  /* Figures in a line of capitals are the reading face's (withNumerals), tabular and lining (§10.7): Gravesend has
+     proportional figures only. */
+  html:not(.d-touch) .d-room .numeral {
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  html:not(.d-touch) .d-room :is(.live__overline, .live__fact, .d-room__choice) {
+    color: var(--d-room-soft);
+  }
+
+  /* A centred line gives its tracking's last space back as an indent, so its words stand on the centre (house.css). */
+  html:not(.d-touch) .d-room :is(.d-room__head, .d-room__body) :is(.live__overline, .live__fact, .live__subtitle) {
+    text-indent: var(--d-tr-label);
+  }
+
+  /* A line on the right edge ends on its last letter. */
+  html:not(.d-touch) .d-room .d-room__br > :is(.live__overline, .live__fact) {
+    margin-right: calc(-1 * var(--d-tr-label));
+  }
+
+  /* The centre's title (§10.5 D3), at most two lines, never balanced (§10.9). */
+  html:not(.d-touch) .d-room .d-room__head > .live__title {
+    max-width: 100%;
+    margin: var(--d-s4) 0 0;
+    font-size: var(--d-fs-d3);
+    line-height: 1.04;
+    letter-spacing: var(--d-tr-d23);
+    text-indent: var(--d-tr-d23);
+    overflow-wrap: normal;
+  }
+
+  html:not(.d-touch) .d-room .d-room__head > .live__title:first-child {
+    margin-top: 0;
+  }
+
+  /* The corner's name: the release's title with its variant (T2), its lines under it (§10.4: 12, then 24 to a control). */
+  html:not(.d-touch) .d-room .d-room__bl > .d-room__name {
+    max-width: 100%;
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: var(--d-fs-t2);
+    font-weight: 400;
+    line-height: 1.3;
+    letter-spacing: var(--d-tr-mid);
+    text-indent: 0;
+    color: var(--ink);
+    overflow-wrap: normal;
+  }
+
+  html:not(.d-touch) .d-room .d-room__variant {
+    white-space: nowrap;
+  }
+
+  html:not(.d-touch) .d-room .d-room__bl > .d-room__name + * {
+    margin-top: var(--d-s3);
+  }
+
+  html:not(.d-touch) .d-room .d-room__bl > .d-room__choice {
+    margin-top: var(--d-s3);
+    color: var(--ink);
+  }
+
+  html:not(.d-touch) .d-room .d-room__bl > .live__offer + .live__surprise {
+    margin-top: var(--d-s3);
+  }
+
+  html:not(.d-touch) .d-room .d-room__bl > .live__detail {
+    margin-top: var(--d-s3);
+    color: var(--ink);
+  }
+
+  /* Reading words: a sentence of the room at the small size, in the soft grey made for the photograph. */
+  html:not(.d-touch) .d-room :is(.live__note, .live__addon-line) {
+    max-width: 100%;
+    margin: 0;
+    font-size: var(--d-fs-small);
+    line-height: 1.5;
+    letter-spacing: 0;
+    color: var(--d-room-soft);
+    text-wrap: pretty;
+  }
+
+  html:not(.d-touch) .d-room .live__error {
+    max-width: 100%;
+    margin: var(--d-s4) 0 0;
+    font-size: var(--d-fs-small);
+    line-height: 1.5;
+  }
+
+  /* The big figures: the reading face, thin, tabular (§10.7); their groups never move as they change. */
+  html:not(.d-touch) .d-room :is(.live__count, .live__place, .live__turn-left, .live__deadline-time) {
+    margin: 0;
+    font-family: var(--font);
+    font-size: var(--d-room-figure);
+    font-weight: 200;
+    line-height: 1;
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums lining-nums;
+    user-select: none;
+  }
+
+  /* The text link of the room (SEE THE MODEL, LEAVE THE ROOM, RELEASE MY PLACE, an end page's THE RELEASES): NOCTURNE's,
+     its word and its line in ink; dimmed on hover, further pressed (§10.16). */
+  html:not(.d-touch) .d-room :is(.live__stage, .live__foot) :is(.textlink, .n-tl) {
+    min-height: 44px;
+    margin: calc(-1 * var(--d-s3)) 0;
+    padding: var(--d-s3) 0;
+    border: 0;
+    color: var(--ink);
+    font-size: var(--n-fs-tl);
+    line-height: 20px;
+    letter-spacing: var(--d-tr-label);
+    text-indent: 0;
+    text-decoration: underline 1px;
+    text-underline-offset: 7px;
+    white-space: nowrap;
+    opacity: 1;
+    transition: opacity var(--d-dur-hover) var(--d-ease);
+  }
+
+  html:not(.d-touch) .d-room :is(.live__stage, .live__foot) .textlink::after {
+    display: none;
+  }
+
+  /* Its keyboard ring round the word, 4 px off (the zone's padding inside it given back), as the house draws it. */
+  html:not(.d-touch) .d-room :is(.live__stage, .live__foot) :is(.textlink, .n-tl):focus-visible {
+    outline: none;
+  }
+
+  html:not(.d-touch) .d-room :is(.live__stage, .live__foot) :is(.textlink, .n-tl):focus-visible::before {
+    content: "";
+    position: absolute;
+    inset: var(--d-s2) calc(-1 * var(--d-s1));
+    display: block;
+    outline: 1px solid currentColor;
+    pointer-events: none;
+  }
+
+  /* ── 4. The controls: the house's, drawn in the desktop's one vocabulary (§10.16–10.19) ─────────────────────────── */
+
+  /* The one filled action of a screen (ENTER THE ROOM, ENTER THE LINE, PAY, ENTER THE AFTER-ROOM): ivory, its words in
+     the ground's ink, the corner's width. */
+  html:not(.d-touch) .d-room .btn {
+    min-width: 0;
+    min-height: 44px;
+    height: var(--n-button);
+    padding: 0 var(--d-s5);
+    font-size: var(--n-fs-btn);
+    letter-spacing: var(--d-tr-label);
+    text-indent: var(--d-tr-label);
+    white-space: nowrap;
+    transition:
+      background-color var(--d-dur-hover) var(--d-ease),
+      border-color var(--d-dur-hover) var(--d-ease),
+      color var(--d-dur-hover) var(--d-ease),
+      opacity var(--d-dur-hover) var(--d-ease);
+  }
+
+  html:not(.d-touch) .d-room .btn.live__primary {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    border-color: var(--ink);
+    background-color: var(--ink);
+    color: var(--paper);
+  }
+
+  html:not(.d-touch) .d-room .btn.live__primary:not(:disabled, [aria-disabled="true"]):hover {
+    border-color: color-mix(in srgb, var(--ink) 88%, var(--paper));
+    background-color: color-mix(in srgb, var(--ink) 88%, var(--paper));
+    color: var(--paper);
+  }
+
+  html:not(.d-touch) .d-room .btn.live__primary:not(:disabled, [aria-disabled="true"]):active {
+    border-color: color-mix(in srgb, var(--ink) 80%, var(--paper));
+    background-color: color-mix(in srgb, var(--ink) 80%, var(--paper));
+    color: var(--paper);
+    transition-duration: var(--d-dur-press);
+  }
+
+  /* An outlined action (LEAVE THE LINE, THE RELEASES): the hairline, to full ink on hover, a ground when pressed;
+     its content's width, 280 px at least (§10.22). */
+  html:not(.d-touch) .d-room .btn.live__action {
+    width: auto;
+    min-width: 280px;
+    max-width: none;
+    margin: var(--d-s6) 0 0;
+    border-color: var(--hairline-strong);
+    background-color: transparent;
+    color: var(--ink);
+  }
+
+  html:not(.d-touch) .d-room .btn.live__action:not(:disabled, [aria-disabled="true"]):hover {
+    border-color: var(--ink);
+    background-color: transparent;
+    color: var(--ink);
+  }
+
+  html:not(.d-touch) .d-room .btn.live__action:not(:disabled, [aria-disabled="true"]):active {
+    border-color: var(--ink);
+    background-color: color-mix(in srgb, var(--ink) 8%, transparent);
+    color: var(--ink);
+    transition-duration: var(--d-dur-press);
+  }
+
+  /* A size, and a step of the quantity: NOCTURNE's chips (§10.16): a hairline at rest, half ink and the hover's ground
+     under the pointer, full ink and the pressed ground pressed. The size picked before ENTER takes the double ring (the
+     choice, ENTER the one filled action); once entered, it is filled, the entry's own (house.css). */
+  html:not(.d-touch) .d-room :is(.btn.live__size, .btn.live__step) {
+    height: 52px;
+    border: 0;
+    background-color: transparent;
+    box-shadow: inset 0 0 0 1px var(--hairline-strong);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: var(--n-fs-tx);
+    letter-spacing: 0;
+    text-indent: 0;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  html:not(.d-touch) .d-room .btn.live__size {
+    flex: none;
+    min-width: var(--d-room-chip);
+    padding: 0 var(--d-s4);
+  }
+
+  html:not(.d-touch) .d-room .btn.live__step {
+    width: var(--d-room-chip);
+    min-width: var(--d-room-chip);
+    padding: 0;
+    font-size: var(--n-fs-lead);
+  }
+
+  html:not(.d-touch) .d-room :is(.btn.live__size, .btn.live__step):not([aria-pressed="true"], :disabled, [aria-disabled="true"]):hover {
+    border: 0;
+    background-color: color-mix(in srgb, var(--ink) 4%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 50%, transparent);
+    color: var(--ink);
+  }
+
+  html:not(.d-touch) .d-room :is(.btn.live__size, .btn.live__step):not([aria-pressed="true"], :disabled, [aria-disabled="true"]):active {
+    border: 0;
+    background-color: color-mix(in srgb, var(--ink) 8%, transparent);
+    box-shadow: inset 0 0 0 1px var(--ink);
+    color: var(--ink);
+    transition-duration: var(--d-dur-press);
+  }
+
+  html:not(.d-touch) .d-room .live__picker.is-choosing .btn.live__size[aria-pressed="true"],
+  html:not(.d-touch) .d-room .live__picker.is-choosing .btn.live__size[aria-pressed="true"]:hover {
+    outline: 0;
+    background-color: transparent;
+    box-shadow:
+      inset 0 0 0 1px var(--ink),
+      inset 0 0 0 4px var(--paper),
+      inset 0 0 0 5px var(--ink);
+    color: var(--ink);
+  }
+
+  html:not(.d-touch) .d-room .live__picker.is-choosing .btn.live__size[aria-pressed="true"]:not(:disabled):active {
+    background-color: color-mix(in srgb, var(--ink) 8%, transparent);
+    transition-duration: var(--d-dur-press);
+  }
+
+  html:not(.d-touch) .d-room .live__picker:not(.is-choosing) .btn.live__size[aria-pressed="true"] {
+    box-shadow: none;
+    background-color: var(--ink);
+    color: var(--paper);
+  }
+
+  html:not(.d-touch) .d-room .live__picker:not(.is-choosing) .btn.live__size[aria-pressed="true"]:not(:disabled):hover {
+    background-color: color-mix(in srgb, var(--ink) 88%, var(--paper));
+    color: var(--paper);
+  }
+
+  html:not(.d-touch) .d-room .live__picker:not(.is-choosing) .btn.live__size[aria-pressed="true"]:not(:disabled):active {
+    background-color: color-mix(in srgb, var(--ink) 80%, var(--paper));
+    color: var(--paper);
+    transition-duration: var(--d-dur-press);
+  }
+
+  /* The keyboard's focus on every control of the room: one hairline of ink, 4 px off, square (§10.17); a size picked
+     before ENTER keeps its double ring inside. */
+  html:not(.d-touch) .d-room :is(.btn, .live-hold):focus-visible {
+    outline: 1px solid var(--ink);
+    outline-offset: 4px;
+  }
+
+  html:not(.d-touch) .d-room .live__picker.is-choosing .btn.live__size[aria-pressed="true"]:focus-visible {
+    outline: 1px solid var(--ink);
+    outline-offset: 4px;
+    box-shadow:
+      inset 0 0 0 1px var(--ink),
+      inset 0 0 0 4px var(--paper),
+      inset 0 0 0 5px var(--ink);
+  }
+
+  /* Disabled (§10.16): at 0.4, no hover, the default pointer. */
+  html:not(.d-touch) .d-room :is(.btn, .n-btn, .textlink, .n-tl):is(:disabled, [aria-disabled="true"]) {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  /* Not text to select (§10.19): the room's controls, its figures and its labels of state. */
+  html:not(.d-touch) .d-room :is(button, .btn, .n-btn, .live__sizes, .live__qty, .live__checks, .live__count-block, .live__meter, .d-room__count) {
+    user-select: none;
+  }
+
+  html:not(.d-touch) .d-room a[href],
+  html:not(.d-touch) .d-room button:not(:disabled) {
+    cursor: pointer;
+  }
+
+  /* ── 5. The room before T0 (B2): the door and the countdown in the centre; the release and its sizes bottom left;
+        READY CHECK and ENTER THE ROOM bottom right ─────────────────────────────────────────────────────────────── */
+
+  /* The door: its leaves, its lock (the seal), wider for the window; its height the window's share, so a short window
+     keeps it whole above the corners. */
+  html:not(.d-touch) .d-room .d-room__body > .live-door {
+    width: min(100%, clamp(256px, 27.78vw, 480px), max(256px, (100vh - 520px) * 1.4174));
+    max-width: none;
+    margin: 0;
+  }
+
+  html:not(.d-touch) .d-room .live-door__leaf::before {
+    inset: var(--d-s4);
+  }
+
+  /* Behind the door, the piece under its light fills the opening (its photograph's middle: the piece whole), the sweep
+     masked to it, so the door opens onto the lit piece, never onto a plate's dark sides. */
+  html:not(.d-touch) .d-room .live-door__inside .live__img {
+    object-fit: cover;
+  }
+
+  html:not(.d-touch) .d-room .live-door__inside .live__sweep {
+    -webkit-mask-size: cover;
+    mask-size: cover;
+  }
+
+  html:not(.d-touch) .d-room .live__count-block {
+    margin-top: var(--d-s6);
+  }
+
+  html:not(.d-touch) .d-room .live__count-block > .live__until {
+    margin-top: var(--d-s3);
+  }
+
+  /* The count in the room stands top right: the screens' own line of it (the room's, the late arrivals') is the
+     phone's. */
+  html:not(.d-touch) .d-room .live__screen .live__presence {
+    display: none;
+  }
+
+  html:not(.d-touch) .d-room .live__drawing {
+    margin-top: var(--d-s6);
+  }
+
+  html:not(.d-touch) .d-room .live__drawing > .live__subtitle {
+    color: var(--ink);
+  }
+
+  html:not(.d-touch) .d-room .live__drawing > .live__note {
+    margin-top: var(--d-s2);
+  }
+
+  /* At T0 the room is the piece's: the sizes go with READY CHECK and ENTER (house.css hides the prep, the view SEE THE
+     MODEL). */
+  html:not(.d-touch) .d-room .live__room.is-opening .d-room__bl > :is(.live__picker, .live__guarantee) {
+    display: none;
+  }
+
+  /* YOUR SIZE: its label, the sizes on the corner's edge, the quantity under them. */
+  html:not(.d-touch) .d-room .d-room__bl > .live__picker {
+    align-items: flex-start;
+    width: 100%;
+    max-width: none;
+    margin-top: var(--d-s6);
+  }
+
+  html:not(.d-touch) .d-room .d-room__bl .live__size-label {
+    text-indent: 0;
+  }
+
+  html:not(.d-touch) .d-room .d-room__bl .live__sizes {
+    justify-content: flex-start;
+    gap: var(--d-s2);
+    margin-top: var(--d-s3);
+  }
+
+  html:not(.d-touch) .d-room .live__yours-block--room {
+    margin-top: var(--d-s3);
+    text-align: left;
+  }
+
+  html:not(.d-touch) .d-room .live__yours-block--room > .live__note {
+    margin: var(--d-s1) 0 0;
+  }
+
+  html:not(.d-touch) .d-room .live__yours-block--room > .live__overline {
+    color: var(--ink);
+  }
+
+  /* PIECES on the sizes' columns (§10.1): its label on a line of its own, as YOUR SIZE's; −, the figure and + three
+     cells of a size's width at the sizes' gap, so the row ends with the last size. */
+  html:not(.d-touch) .d-room .live__qty {
+    display: grid;
+    grid-template-columns: repeat(3, var(--d-room-chip));
+    align-items: center;
+    column-gap: var(--d-s2);
+    row-gap: var(--d-s3);
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) .d-room .live__qty > .live__overline {
+    grid-column: 1 / -1;
+    justify-self: start;
+    margin: 0;
+    text-indent: 0;
+  }
+
+  html:not(.d-touch) .d-room .live__qty-value {
+    min-width: 0;
+    font-size: var(--d-fs-lead);
+    text-align: center;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  html:not(.d-touch) .d-room .d-room__bl > .live__guarantee {
+    margin-top: var(--d-s3);
+  }
+
+  html:not(.d-touch) .d-room .d-room__bl > .live__see-model {
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) .d-room .d-room__bl > .live__offer {
+    color: var(--ink);
+    white-space: normal;
+  }
+
+  html:not(.d-touch) .d-room .d-room__bl > .live__offer > .n-nw {
+    white-space: nowrap;
+  }
+
+  /* A SURPRISE IN EVERY BOX: a label of the corner, never a box's. */
+  html:not(.d-touch) .d-room .d-room__bl > .live__surprise {
+    padding: 0;
+    border: 0;
+    color: var(--d-room-soft);
+  }
+
+  /* READY CHECK: its label, then its five checks as hairline rows, each value and its tick on the right edge. */
+  html:not(.d-touch) .d-room .d-room__br > .live__prep {
+    align-items: stretch;
+    width: 100%;
+  }
+
+  html:not(.d-touch) .d-room .live__checks {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    background: none;
+    text-align: left;
+  }
+
+  html:not(.d-touch) .d-room .live__checks > .bracket {
+    display: none;
+  }
+
+  html:not(.d-touch) .d-room .live__checks-title {
+    margin: 0 0 var(--d-s3);
+  }
+
+  html:not(.d-touch) .d-room .live__check {
+    gap: var(--d-s3);
+    min-height: 36px;
+    border-top: 1px solid var(--hairline);
+  }
+
+  html:not(.d-touch) .d-room .live__check:last-child {
+    border-bottom: 1px solid var(--hairline);
+  }
+
+  html:not(.d-touch) .d-room .live__check-label {
+    color: var(--ink);
+  }
+
+  html:not(.d-touch) .d-room .live__check-value {
+    gap: var(--d-s3);
+    color: var(--d-room-soft);
+  }
+
+  html:not(.d-touch) .d-room .live__check-mark path {
+    stroke: var(--d-room-soft);
+  }
+
+  html:not(.d-touch) .d-room .live__check.is-ok .live__check-mark path {
+    stroke: var(--ink);
+  }
+
+  html:not(.d-touch) .d-room .live__prep > .live__error {
+    text-align: right;
+  }
+
+  html:not(.d-touch) .d-room .live__prep > .live__choose {
+    margin-top: var(--d-s5);
+    text-align: right;
+  }
+
+  html:not(.d-touch) .d-room .live__prep > .btn.live__enter {
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) .d-room .live__prep > .live__ready {
+    margin-top: var(--d-s5);
+    font-size: var(--d-fs-t2);
+    line-height: 1.3;
+    letter-spacing: var(--d-tr-mid);
+    text-indent: 0;
+    margin-right: calc(-1 * var(--d-tr-mid));
+    text-align: right;
+  }
+
+  html:not(.d-touch) .d-room .live__prep > .live__ready-line {
+    margin-top: var(--d-s3);
+    text-align: right;
+  }
+
+  html:not(.d-touch) .d-room .live__prep > .live__ready:not([hidden]) + .live__ready-line {
+    margin-top: var(--d-s2);
+  }
+
+  html:not(.d-touch) .d-room .live__prep > .live__leave {
+    align-self: flex-end;
+    margin-top: var(--d-s4);
+  }
+
+  /* ── 6. After T0, an account not in the line (join): the piece under its light in the centre ─────────────────── */
+
+  html:not(.d-touch) .d-room :is(.live__plate, .live__reveal) > .bracket {
+    display: none;
+  }
+
+  /* The piece under its light: its photograph whole on a square plate (the phone's plate is wider than the square
+     photograph; on the window's photograph its sides would read as bars). */
+  html:not(.d-touch) .d-room .d-room__body > .live__plate--join {
+    width: min(100%, clamp(240px, 22.23vw, 400px), max(240px, 100vh - 560px));
+    max-width: none;
+    margin: 0;
+    aspect-ratio: 1;
+  }
+
+  html:not(.d-touch) .d-room .d-room__body > .live__left {
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) .d-room .d-room__bl > .live__picker:not(:first-child) {
+    margin-top: var(--d-s6);
+  }
+
+  /* Its line at a measure that breaks between its sentences (§10.9: no last line of one or two words). */
+  html:not(.d-touch) .d-room .d-room__br > .live__join-line {
+    max-width: min(100%, 18em);
+    text-align: right;
+  }
+
+  html:not(.d-touch) .d-room .d-room__br > .btn.live__enter {
+    margin-top: var(--d-s4);
+  }
+
+  /* ── 7. The line (B3): the pieces in the centre, YOUR PLACE bottom right ─────────────────────────────────────── */
+
+  html:not(.d-touch) .d-room .d-room__body > .live__meter {
+    max-width: min(100%, clamp(400px, 33.34vw, 600px));
+    margin: 0;
+  }
+
+  html:not(.d-touch) .d-room .live__cell {
+    height: 32px;
+  }
+
+  html:not(.d-touch) .d-room .live__meter--bar {
+    height: 2px;
+  }
+
+  html:not(.d-touch) .d-room .d-room__body > .live__left {
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) .d-room .d-room__body > .live__held {
+    margin-top: var(--d-s1);
+  }
+
+  html:not(.d-touch) .d-room .d-room__body > .live__rule {
+    display: none;
+  }
+
+  html:not(.d-touch) .d-room .d-room__body > .live__line-note {
+    max-width: min(100%, 26em);
+    margin-top: var(--d-s6);
+  }
+
+  html:not(.d-touch) .d-room .d-room__br > .live__place-label {
+    margin: 0 calc(-1 * var(--d-tr-label)) 0 0;
+  }
+
+  /* YOUR PLACE: the figure at the room's largest size, its last figure's ink on the right edge (§10.1): the tabular
+     figures keep their width (§10.7), so the side bearing of the last one (views/desktop-room.ts says which it is) is
+     given back, as measured on Helvetica Neue at weight 200. */
+  html:not(.d-touch) .d-room .d-room__br > .live__place {
+    margin-top: var(--d-s3);
+    margin-right: calc(-1 * var(--d-place-rsb, 0em));
+    font-size: var(--d-fs-d1);
+  }
+
+  html:not(.d-touch) .d-room .live__place[data-d-last="0"] { --d-place-rsb: var(--d-rsb-0); }
+  html:not(.d-touch) .d-room .live__place[data-d-last="1"] { --d-place-rsb: var(--d-rsb-1); }
+  html:not(.d-touch) .d-room .live__place[data-d-last="2"] { --d-place-rsb: var(--d-rsb-2); }
+  html:not(.d-touch) .d-room .live__place[data-d-last="3"] { --d-place-rsb: var(--d-rsb-3); }
+  html:not(.d-touch) .d-room .live__place[data-d-last="4"] { --d-place-rsb: var(--d-rsb-4); }
+  html:not(.d-touch) .d-room .live__place[data-d-last="5"] { --d-place-rsb: var(--d-rsb-5); }
+  html:not(.d-touch) .d-room .live__place[data-d-last="6"] { --d-place-rsb: var(--d-rsb-6); }
+  html:not(.d-touch) .d-room .live__place[data-d-last="7"] { --d-place-rsb: var(--d-rsb-7); }
+  html:not(.d-touch) .d-room .live__place[data-d-last="8"] { --d-place-rsb: var(--d-rsb-8); }
+  html:not(.d-touch) .d-room .live__place[data-d-last="9"] { --d-place-rsb: var(--d-rsb-9); }
+
+  html:not(.d-touch) .d-room .d-room__br > .live__ahead {
+    margin-top: var(--d-s4);
+    color: var(--ink);
+  }
+
+  /* ── 8. Sold out in its size: the title over the centre, its sentence and LEAVE THE LINE; the place bottom right ── */
+
+  html:not(.d-touch) .d-room .d-room__screen--soldOut .d-room__body > .live__note,
+  html:not(.d-touch) .d-room .d-room__screen--notEligible .d-room__body > .live__note {
+    max-width: min(100%, 30em);
+    font-size: var(--d-fs-text);
+    line-height: 1.6;
+  }
+
+  /* The title to its sentence: 24 px, as on the end pages (§10.4, title → its lines); the sentence to LEAVE THE LINE (or
+     to THE RELEASES) keeps its 32. */
+  html:not(.d-touch) .d-room :is(.d-room__screen--soldOut, .d-room__screen--notEligible) > .d-room__head + .d-room__body {
+    padding-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) .d-room .d-room__screen--soldOut .d-room__br > .live__ahead {
+    color: var(--ink);
+  }
+
+  /* YOUR PLACE as the line draws it (views/desktop-room.ts): its label over its figure; the phone's one line, which
+     says the same, steps aside while they say it. */
+  html:not(.d-touch) .d-room .d-room__screen--soldOut .d-room__br > .live__ahead.d-room__redrawn {
+    display: none;
+  }
+
+  /* Its figure is the corner's last line here: its baseline on the left corner's last one (SIZE 17 · 1 PIECE), the
+     bottom line they share (§10.27). The figure's baseline stands 0.13 em over its box's foot (Helvetica Neue, line
+     height 1), a label line's 6 px over its own (11 px, line height 1.6). */
+  html:not(.d-touch) .d-room .d-room__screen--soldOut .d-room__br > .live__place {
+    margin-bottom: calc(6px - 0.13em);
+  }
+
+  /* ── 9. The turn (B4): the seal to hold in the centre, its time under it; the piece and its choice bottom left ──── */
+
+  /* The seal's own line (the model · its size · its price) is said in the corner, the name and the choice apart. */
+  html:not(.d-touch) .d-room .d-room__bl > .live__turn-piece {
+    display: none;
+  }
+
+  /* The seal: a square as on the phone (house.css), never the room's button height (§4 .btn above). */
+  html:not(.d-touch) .d-room .d-room__body > .btn.live-hold {
+    width: min(100%, clamp(240px, 22.23vw, 400px), max(var(--d-room-seal-min, 220px), 100vh - 600px));
+    height: auto;
+    min-height: 0;
+    aspect-ratio: 1;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  html:not(.d-touch) .d-room .btn.live-hold[aria-disabled="true"] {
+    cursor: default;
+  }
+
+  /* Under the pointer the seal's track steps toward ink; pressed, the hold's own ring says it (house.css). Its stroke
+     is its colour, so only the colour changes (§10.13). */
+  html:not(.d-touch) .d-room .btn.live-hold .live-hold__track {
+    stroke: currentColor;
+    color: var(--hairline);
+    transition: color var(--d-dur-hover) var(--d-ease);
+  }
+
+  html:not(.d-touch) .d-room .btn.live-hold:not([aria-disabled="true"]):hover .live-hold__track {
+    color: color-mix(in srgb, var(--ink) 50%, transparent);
+  }
+
+  html:not(.d-touch) .d-room .btn.live-hold:not([aria-disabled="true"]):active .live-hold__track {
+    color: var(--ink);
+    transition-duration: var(--d-dur-press);
+  }
+
+  html:not(.d-touch) .d-room .btn.live-hold:is(:hover, :active) {
+    background: transparent;
+    color: var(--ink);
+  }
+
+  html:not(.d-touch) .d-room .btn.live-hold:focus-visible {
+    outline-offset: 8px;
+    border-radius: 50%;
+  }
+
+  html:not(.d-touch) .d-room .d-room__body > .live__turn-left {
+    margin-top: var(--d-s6);
+  }
+
+  html:not(.d-touch) .d-room .d-room__body > .live__to-secure {
+    margin-top: var(--d-s3);
+  }
+
+  html:not(.d-touch) .d-room .d-room__body > .live__let-go {
+    margin-top: var(--d-s4);
+  }
+
+  /* ── 10. Secured (B5): the reveal and the time to confirm in the centre; the piece bottom left; the add-ons and PAY
+        bottom right ──────────────────────────────────────────────────────────────────────────────────────────── */
+
+  html:not(.d-touch) .d-room .d-room__body > .live__reveal {
+    width: min(100%, clamp(240px, 22.23vw, 400px), max(240px, (100vh - 520px) * 1.1));
+    max-width: none;
+    margin: 0;
+    background: none;
+  }
+
+  html:not(.d-touch) .d-room .live__reveal > .live__overline {
+    color: var(--ink);
+  }
+
+  html:not(.d-touch) .d-room .live__reveal > .live__piece-seal {
+    width: 58%;
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) .d-room .live__reveal > .live__secured-at {
+    margin-top: var(--d-s5);
+  }
+
+  /* The time to confirm: its figure as the turn's, its label under it. */
+  html:not(.d-touch) .d-room .d-room__body > .live__deadline {
+    flex-direction: column;
+    align-items: center;
+    gap: var(--d-s3);
+    margin-top: var(--d-s6);
+  }
+
+  html:not(.d-touch) .d-room .live__deadline-label {
+    color: var(--d-room-soft);
+    text-indent: var(--d-tr-label);
+  }
+
+  html:not(.d-touch) .d-room .d-room__br > .live__addons-title {
+    margin: 0 calc(-1 * var(--d-tr-label)) 0 0;
+  }
+
+  html:not(.d-touch) .d-room .d-room__br > .live__addons {
+    gap: var(--d-s2);
+    width: 100%;
+    max-width: none;
+    margin-top: var(--d-s3);
+    text-align: left;
+  }
+
+  /* An add-on is one control, its line with it: its button reaches over the line (the whole box answers the pointer),
+     and the hover's ground, the pressed one and the keyboard's ring are the box's, so one box is drawn, never two. */
+  html:not(.d-touch) .d-room .live__addon-item {
+    position: relative;
+    border: 0;
+    box-shadow: inset 0 0 0 1px var(--hairline-strong);
+    transition: background-color var(--d-dur-hover) var(--d-ease);
+  }
+
+  html:not(.d-touch) .d-room .live__addon-item:has(.live__addon[aria-pressed="true"]) {
+    box-shadow: inset 0 0 0 1px var(--ink);
+  }
+
+  /* An add-on: the whole row its button, the hover's ground across it, its mark to ink; pressed, the pressed ground. */
+  html:not(.d-touch) .d-room .btn.live__addon {
+    min-height: 56px;
+    padding: 0 var(--d-s4);
+    gap: var(--d-s3);
+    border: 0;
+    background-color: transparent;
+    color: var(--ink);
+    font-family: var(--font-display);
+    font-size: var(--n-fs-micro);
+    letter-spacing: var(--d-tr-label);
+    text-indent: 0;
+  }
+
+  html:not(.d-touch) .d-room .btn.live__addon::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+  }
+
+  html:not(.d-touch) .d-room .btn.live__addon:not(:disabled):is(:hover, :active) {
+    background-color: transparent;
+    color: var(--ink);
+  }
+
+  html:not(.d-touch) .d-room .live__addon-item:has(> .btn.live__addon:not(:disabled):hover) {
+    background-color: color-mix(in srgb, var(--ink) 4%, transparent);
+  }
+
+  html:not(.d-touch) .d-room .live__addon-item:has(> .btn.live__addon:not(:disabled):active) {
+    background-color: color-mix(in srgb, var(--ink) 8%, transparent);
+    transition-duration: var(--d-dur-press);
+  }
+
+  /* Its keyboard ring round the whole add-on, its line with it (§10.17): one control framed once; the button's own ring
+     gives way to it. */
+  html:not(.d-touch) .d-room .live__addon-item:has(> .btn.live__addon:focus-visible) {
+    outline: 1px solid var(--ink);
+    outline-offset: 4px;
+  }
+
+  html:not(.d-touch) .d-room .btn.live__addon:focus-visible {
+    outline: none;
+  }
+
+  html:not(.d-touch) .d-room .live__addon-mark {
+    border-color: var(--hairline-strong);
+  }
+
+  html:not(.d-touch) .d-room .live__addon-price {
+    font-size: var(--d-fs-small);
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  html:not(.d-touch) .d-room .live__addon-line {
+    margin: calc(-1 * var(--d-s3)) var(--d-s4) 0 calc(var(--d-s4) + 14px + var(--d-s3));
+    padding-bottom: var(--d-s4);
+    font-size: var(--d-fs-cap);
+  }
+
+  html:not(.d-touch) .d-room .d-room__br > .btn.live__pay {
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) .d-room .live__money {
+    letter-spacing: 0.04em;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  html:not(.d-touch) .d-room .d-room__br > .live__pay-note {
+    margin-top: var(--d-s4);
+    text-align: right;
+  }
+
+  html:not(.d-touch) .d-room .d-room__br > .live__release {
+    margin-top: var(--d-s4);
+  }
+
+  /* ── 11. CONFIRMED (B6): out into the light, the house's ivory; its words beside its receipt, on the grid ─────────── */
+
+  html:not(.d-touch) .d-room .d-room__screen--confirmed {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    grid-template-rows: auto;
+    column-gap: var(--d-gutter);
+    align-content: center;
+    align-items: start;
+    padding-top: calc(var(--d-bar) + var(--d-s5));
+    text-align: left;
+  }
+
+  html:not(.d-touch) .d-room .d-room__screen--confirmed > .d-room__a {
+    grid-column: 1 / span 6;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  html:not(.d-touch) .d-room .d-room__screen--confirmed > .d-room__b {
+    grid-column: 8 / -1;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  @media (max-width: 1279.98px) {
+    html:not(.d-touch) .d-room .d-room__screen--confirmed > .d-room__b {
+      grid-column: 7 / -1;
+    }
+  }
+
+  html:not(.d-touch) .d-room .d-room__a > .live__mark {
+    margin-left: -4px;
+  }
+
+  html:not(.d-touch) .d-room .d-room__a > .live__mark .mark {
+    width: 44px;
+    height: 44px;
+  }
+
+  html:not(.d-touch) .d-room .d-room__a > .live__title {
+    margin: var(--d-s5) 0 0 calc(-1 * var(--d-lsb));
+    font-size: var(--d-fs-d3);
+    line-height: 1.04;
+    letter-spacing: var(--d-tr-d23);
+    text-indent: 0;
+  }
+
+  html:not(.d-touch) .d-room .d-room__a > .live__confirmed-of {
+    margin-top: var(--d-s4);
+    color: var(--ink-soft);
+  }
+
+  html:not(.d-touch) .d-room .d-room__a > .live__confirmed-text {
+    max-width: 32em;
+    margin: var(--d-s5) 0 0;
+    font-size: var(--d-fs-lead);
+    line-height: 1.5;
+    text-align: left;
+    color: var(--ink-soft);
+    text-wrap: pretty;
+  }
+
+  html:not(.d-touch) .d-room .d-room__a > .n-story__open {
+    width: auto;
+    min-width: 280px;
+    margin-top: var(--d-s6);
+  }
+
+  html:not(.d-touch) .d-room .d-room__b > .live__receipt-plate {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: var(--d-s2) var(--d-s5);
+  }
+
+  html:not(.d-touch) .d-room .live__receipt .rows__row {
+    padding: var(--d-s3) 0;
+  }
+
+  html:not(.d-touch) .d-room .live__receipt :is(.rows__label, .rows__value) {
+    font-size: var(--d-fs-label);
+    letter-spacing: var(--d-tr-label);
+  }
+
+  html:not(.d-touch) .d-room .live__receipt .rows__value {
+    font-family: var(--font);
+    font-size: var(--d-fs-small);
+    letter-spacing: 0.04em;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  /* The reference, selected whole in one click (§10.19). */
+  html:not(.d-touch) .d-room .live__receipt .rows__row:last-child .rows__value {
+    user-select: all;
+  }
+
+  html:not(.d-touch) .d-room .d-room__b > .live__cs-title {
+    margin-top: var(--d-s7);
+    color: var(--ink-soft);
+  }
+
+  html:not(.d-touch) .d-room .d-room__b > .write__open {
+    align-self: flex-start;
+    width: auto;
+    min-width: 280px;
+    margin-top: var(--d-s3);
+  }
+
+  html:not(.d-touch) .d-room .d-room__b > .live__pieces {
+    align-self: flex-start;
+    margin-top: var(--d-s5);
+  }
+
+  /* Its buttons: the house's, outlined in ink on the ivory; the hairline to full ink is already there, so the hover
+     gives a ground, pressed a deeper one (§10.16). */
+  html:not(.d-touch) .d-room.is-light .btn:not(.live__primary) {
+    border-color: var(--ink);
+    background-color: transparent;
+    color: var(--ink);
+  }
+
+  html:not(.d-touch) .d-room.is-light .btn:not(.live__primary, :disabled):hover {
+    background-color: color-mix(in srgb, var(--ink) 4%, transparent);
+    color: var(--ink);
+  }
+
+  html:not(.d-touch) .d-room.is-light .btn:not(.live__primary, :disabled):active {
+    background-color: color-mix(in srgb, var(--ink) 8%, transparent);
+    color: var(--ink);
+    transition-duration: var(--d-dur-press);
+  }
+
+  html:not(.d-touch) .d-room.is-light .btn:focus-visible {
+    outline: 1px solid var(--ink);
+    outline-offset: 4px;
+  }
+
+  html:not(.d-touch) .d-room.is-light :is(.live__stage, .live__foot) .textlink {
+    color: var(--ink);
+  }
+
+  /* ── 12. The edge pages: sign in to enter, not eligible; the second door ────────────────────────────────────── */
+
+  /* SIGN IN TO ENTER: its panel on a solid ground under the title (a sign-in page replaces it, decision 6). */
+  html:not(.d-touch) .d-room .d-room__body > .live__panel {
+    width: min(100%, 440px);
+    max-width: none;
+    margin: 0;
+    padding: var(--d-s6);
+    background-color: var(--paper);
+    text-align: left;
+  }
+
+  html:not(.d-touch) .d-room .d-room__screen--notEligible .d-room__body > .live__note {
+    color: var(--d-room-soft);
+  }
+
+  html:not(.d-touch) .d-room .d-room__body > .live-door--after {
+    width: min(100%, clamp(256px, 27.78vw, 480px), max(256px, (100vh - 520px) * 1.4174));
+    max-width: none;
+    margin: 0;
+  }
+
+  html:not(.d-touch) .d-room .d-room__br > .live__after-text {
+    max-width: 100%;
+    text-align: right;
+  }
+
+  /* YOUR ENTRY IS REMOVED: its two sentences one to a line, ORBES Client Services never parted (§10.9). */
+  html:not(.d-touch) .d-room .d-room__screen--removed .n-live__outcome-block > .n-live__outcome-text {
+    max-width: min(100%, 24em);
+  }
+
+  html:not(.d-touch) .d-room .d-room__br > .live__after-until {
+    margin: var(--d-s4) calc(-1 * var(--d-tr-label)) 0 0;
+    color: var(--ink);
+  }
+
+  html:not(.d-touch) .d-room .d-room__br > .btn.live__after-enter {
+    margin-top: var(--d-s5);
+  }
+
+  /* ── 12b. The end of a visit (decision 7, "and the end screens"): what happened over the centre, its sentence under
+        it, its actions in the centre; the release's title and its day bottom left; the room's foot under the window.
+        NOCTURNE's page on a phone (views/live.ts draws it so there) ──────────────────────────────────────────────── */
+
+  /* The phone's photograph is the window's here, its words the corner's; HOW RELEASES WORK is the foot's. */
+  html:not(.d-touch) .d-room .d-room__screen--end > :is(.n-ph, .n-live__seal, .n-live__words, .n-live__how) {
+    display: none;
+  }
+
+  /* What happened (§10.5 D3) and its sentence: one live region, kept whole (said aloud as it changes). */
+  html:not(.d-touch) .d-room .d-room__head > .n-live__outcome-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  html:not(.d-touch) .d-room .n-live__outcome-block > .n-live__outcome {
+    max-width: 100%;
+    margin: 0;
+    color: var(--ink);
+    font-size: var(--d-fs-d3);
+    font-weight: 400;
+    line-height: 1.04;
+    letter-spacing: var(--d-tr-d23);
+    text-indent: var(--d-tr-d23);
+    overflow-wrap: normal;
+  }
+
+  /* The title to its sentence: 24 px (§10.4, title → its lines). */
+  html:not(.d-touch) .d-room .n-live__outcome-block > .n-live__outcome-text {
+    max-width: min(100%, 30em);
+    margin: var(--d-s5) 0 0;
+    color: var(--d-room-soft);
+    font-size: var(--d-fs-text);
+    line-height: 1.6;
+    letter-spacing: 0;
+    text-wrap: pretty;
+  }
+
+  /* Its actions in the centre: WRITE TO ORBES CLIENT SERVICES (an entry removed) as the room's outlined action, the
+     question after once open, THE RELEASES as the room's text link; 32 px under the sentence (the body's own space), and
+     32 px between them: a gap, which passes over the question while it is not shown, so every end page keeps one rhythm
+     (§10.4). */
+  html:not(.d-touch) .d-room .d-room__screen--end .d-room__body {
+    gap: var(--d-s6);
+  }
+
+  html:not(.d-touch) .d-room .d-room__screen--end .d-room__body > * {
+    margin: 0;
+    padding: 0;
+  }
+
+  html:not(.d-touch) .d-room .d-room__screen--end .d-room__body > .n-question {
+    width: min(100%, 480px);
+    text-align: left;
+  }
+
+  html:not(.d-touch) .d-room .d-room__screen--end .d-room__body > .n-live__contact > .n-btn {
+    width: auto;
+    min-width: 280px;
+    height: var(--n-button);
+    /* The phone's breath above it (.n-write__open) is the body's 32 here, as every end page's (§10.4). */
+    margin: 0;
+    padding: 0 var(--d-s5);
+    border: 1px solid var(--hairline-strong);
+    background-color: transparent;
+    box-shadow: none;
+    color: var(--ink);
+    font-size: var(--n-fs-btn);
+    letter-spacing: var(--d-tr-label);
+    text-indent: var(--d-tr-label);
+    white-space: nowrap;
+    transition:
+      background-color var(--d-dur-hover) var(--d-ease),
+      border-color var(--d-dur-hover) var(--d-ease);
+  }
+
+  html:not(.d-touch) .d-room .d-room__screen--end .d-room__body > .n-live__contact > .n-btn:not(:disabled):hover {
+    border-color: var(--ink);
+  }
+
+  html:not(.d-touch) .d-room .d-room__screen--end .d-room__body > .n-live__contact > .n-btn:not(:disabled):active {
+    border-color: var(--ink);
+    background-color: color-mix(in srgb, var(--ink) 8%, transparent);
+    transition-duration: var(--d-dur-press);
+  }
+
+  html:not(.d-touch) .d-room .d-room__screen--end .d-room__body > .n-live__contact > .n-btn:focus-visible {
+    outline: 1px solid var(--ink);
+    outline-offset: 4px;
+  }
+
+  html:not(.d-touch) .d-room .d-room__body .n-tl {
+    position: relative;
+    display: inline-block;
+  }
+
+  /* The corner: the release's title (T2, its variant held on one line), its day under it in the room's soft grey,
+     broken only between its values (§10.9). */
+  html:not(.d-touch) .d-room .d-room__bl > .n-live__kind {
+    margin: var(--d-s3) 0 0;
+    padding: 0;
+    color: var(--d-room-soft);
+    font-size: var(--d-fs-label);
+    line-height: 1.6;
+    letter-spacing: var(--d-tr-label);
+    text-indent: 0;
+    white-space: normal;
+  }
+
+  html:not(.d-touch) .d-room .d-room__bl > .n-live__kind > .n-nw {
+    white-space: nowrap;
+  }
+
+  html:not(.d-touch) .d-room .d-room__bl > .n-live__kind .numeral {
+    line-height: inherit;
+  }
+
+  /* ── 13. The host's messages and the pause: under the centre, above the corners (decision 7) ─────────────────── */
+
+  html:not(.d-touch) .d-room .d-room__body > .live__notice {
+    width: min(100%, 480px);
+    max-width: none;
+    margin-top: var(--d-s6);
+  }
+
+  html:not(.d-touch) .d-room .d-room__body > .live__notice:empty {
+    display: none;
+  }
+
+  html:not(.d-touch) .d-room :is(.live__paused, .live__message) {
+    padding: var(--d-s3) 0;
+    border-color: var(--hairline-strong);
+    font-size: var(--d-fs-small);
+    line-height: 1.5;
+    color: var(--d-room-soft);
+    text-wrap: pretty;
+  }
+
+  html:not(.d-touch) .d-room .live__notice-label {
+    margin-bottom: var(--d-s1);
+    text-indent: var(--d-tr-label);
+    color: var(--ink);
+  }
+
+  /* ONE MOMENT…: the monogram breathing over it, in the window's middle (§10.24). */
+  html:not(.d-touch) .d-room .d-room__screen--loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  html:not(.d-touch) .d-room .live__waiting {
+    padding: 0;
+  }
+
+  /* ── 14. The room's foot (FT-01): one hairline over the content, HOW RELEASES WORK, THE RELEASES and the legal pages in
+        one row with SOUND on the right edge, DB-IP's line under it (as the app's footer, §10.25) ────────────────── */
+
+  html:not(.d-touch) .d-room > .live__foot {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: max-content max-content max-content minmax(max-content, 1fr);
+    grid-template-rows: auto auto;
+    align-items: center;
+    column-gap: var(--d-room-gap);
+    row-gap: var(--d-s5);
+    width: auto;
+    margin: 0 var(--d-edge);
+    padding: var(--d-s7) 0;
+    border-top: 1px solid var(--hairline);
+  }
+
+  html:not(.d-touch) .d-room.is-light > .live__foot {
+    border-top-color: var(--hairline);
+  }
+
+  html:not(.d-touch) .d-room > .live__foot > .live__how {
+    grid-area: 1 / 1;
+  }
+
+  /* The foot's second place: THE RELEASES, or on an end page THE CLUB (its copyright line under the row, on the left
+     edge, as the app's footer says it, §10.25). */
+  html:not(.d-touch) .d-room > .live__foot > :is(.live__releases, .live__club) {
+    grid-area: 1 / 2;
+  }
+
+  /* Its line box the foot's links' (20 px), so it stands on DB-IP's baseline across the row. */
+  html:not(.d-touch) .d-room > .live__foot > .live__cr {
+    grid-area: 2 / 1 / 3 / -1;
+    justify-self: start;
+    margin: 0;
+    color: var(--d-room-soft);
+    font-size: var(--n-fs-micro);
+    line-height: 20px;
+    letter-spacing: var(--d-tr-label);
+    white-space: nowrap;
+  }
+
+  html:not(.d-touch) .d-room > .live__foot > .live__cr > .n-cr__wide {
+    display: inline;
+  }
+
+  /* No second place (THE RELEASES is the page's own action): its column goes, so the row keeps one gap (§10.4). */
+  html:not(.d-touch) .d-room > .live__foot:not(:has(> :is(.live__releases, .live__club))) {
+    grid-template-columns: max-content max-content minmax(max-content, 1fr);
+  }
+
+  html:not(.d-touch) .d-room > .live__foot:not(:has(> :is(.live__releases, .live__club))) > .live__legal {
+    grid-column: 2 / 4;
+  }
+
+  /* The legal pages in the row, DB-IP's line on the right edge under SOUND: the nav laid on the foot's own columns. */
+  html:not(.d-touch) .d-room > .live__foot > .live__legal {
+    grid-column: 3 / 5;
+    grid-row: 1 / 3;
+    display: grid;
+    grid-template-columns: subgrid;
+    grid-template-rows: subgrid;
+    gap: normal;
+    align-items: center;
+    margin: 0;
+    pointer-events: none;
+  }
+
+  html:not(.d-touch) .d-room > .live__foot > .live__legal > .legal-links__pages {
+    grid-area: 1 / 1;
+    display: flex;
+    align-items: center;
+    gap: var(--d-room-gap);
+    pointer-events: auto;
+  }
+
+  html:not(.d-touch) .d-room > .live__foot .legal-links__dot {
+    display: none;
+  }
+
+  html:not(.d-touch) .d-room > .live__foot > .live__legal > .legal-links__credit {
+    grid-area: 2 / 2;
+    justify-self: end;
+    margin-right: calc(-1 * var(--d-tr-label));
+    pointer-events: auto;
+  }
+
+  /* SOUND at the row's right end: in the nav after the pages, before DB-IP's line (views/live.ts on a computer), so the
+     keyboard meets it where the eye does, after HELP (§10.17). */
+  html:not(.d-touch) .d-room > .live__foot > .live__legal > .live__sound {
+    grid-area: 1 / 2;
+    justify-self: end;
+    margin-right: calc(-1 * var(--d-tr-label));
+    pointer-events: auto;
+  }
+
+  /* Its words: the footer's (11 px, soft at rest, ink under the pointer, the pressed ground behind them, §10.16). */
+  html:not(.d-touch) .d-room > .live__foot .textlink {
+    min-width: 0;
+    border: 0;
+    text-decoration: none;
+    color: var(--d-room-soft);
+    font-size: var(--n-fs-micro);
+    letter-spacing: var(--d-tr-label);
+    transition: color var(--d-dur-hover) var(--d-ease);
+  }
+
+  html:not(.d-touch) .d-room.is-light > .live__foot .textlink {
+    color: var(--ink-soft);
+  }
+
+  html:not(.d-touch) .d-room > .live__foot .textlink:not(:disabled):hover {
+    color: var(--ink);
+    opacity: 1;
+  }
+
+  html:not(.d-touch) .d-room.is-light > .live__foot .textlink:not(:disabled):hover {
+    color: var(--ink);
+  }
+
+  /* …pressed, the pressed ground behind the word, 12 px past it on each side (on the right past its last letter): its
+     own layer (the link's line is not drawn in the foot), fading in 80 ms and back in 160 (§10.13, §10.16). */
+  html:not(.d-touch) .d-room > .live__foot .textlink {
+    z-index: 0;
+  }
+
+  html:not(.d-touch) .d-room > .live__foot .textlink::after {
+    content: "";
+    display: block;
+    position: absolute;
+    inset: 0 calc(var(--d-tr-label) - var(--d-s3)) 0 calc(-1 * var(--d-s3));
+    z-index: -1;
+    height: auto;
+    background-color: color-mix(in srgb, var(--ink) 8%, transparent);
+    opacity: 0;
+    transform: none;
+    pointer-events: none;
+    transition: opacity var(--d-dur-hover) var(--d-ease);
+  }
+
+  html:not(.d-touch) .d-room > .live__foot .textlink:not(:disabled):active {
+    color: var(--ink);
+    opacity: 1;
+    transition-duration: var(--d-dur-press);
+  }
+
+  html:not(.d-touch) .d-room > .live__foot .textlink:not(:disabled):active::after {
+    opacity: 1;
+    transition-duration: var(--d-dur-press);
+  }
+
+  /* The room's text links in the stage (SEE THE MODEL, LEAVE THE ROOM, RELEASE MY PLACE): dimmed on hover, further
+     pressed, as NOCTURNE's (§10.16). */
+  html:not(.d-touch) .d-room .live__stage :is(.textlink, .n-tl):not(:disabled):hover {
+    opacity: var(--d-dim);
+  }
+
+  html:not(.d-touch) .d-room .live__stage :is(.textlink, .n-tl):not(:disabled):active {
+    opacity: 0.5;
+    background: none;
+    box-shadow: none;
+    transition-duration: var(--d-dur-press);
+  }
+
+  /* Every sentence of the room (its notes, CONFIRMED's, an end page's, the host's message typed live at any length): its
+     last three words held on one line (views/desktop-room.ts), so it never ends on a line of one or two words at any
+     width (§10.9; text-wrap: pretty only catches one). */
+  html:not(.d-touch) .d-room .d-room__tail {
+    white-space: nowrap;
+  }
+
+  /* A small desktop (1024–1279): the corners and the centre are at their narrowest, so the room's own sentences take a
+     measure that leaves no last line of one or two words (§10.9). */
+  @media (max-width: 1279.98px) {
+    html:not(.d-touch) .d-room .d-room__bl > .live__guarantee {
+      max-width: 16em;
+    }
+
+    html:not(.d-touch) .d-room .d-room__screen--notEligible .d-room__body > .live__note {
+      max-width: 15em;
+    }
+
+    html:not(.d-touch) .d-room .d-room__br > .live__after-text {
+      max-width: 16em;
+    }
+  }
+
+  /* A short window (1024 × 768, 1440 × 700): the centre's steps one size closer, so the window holds the screen. */
+  @media (max-height: 800px) {
+    html:not(.d-touch) .d-room .d-room__head + .d-room__body {
+      padding-top: var(--d-s5);
+    }
+
+    /* …and on the shortest (1440 × 700), the centre's title and figures a step smaller, the seal too. */
+    html:not(.d-touch) .d-room {
+      --d-room-figure: min(var(--d-fs-count), 8vh);
+      --d-room-seal-min: 180px;
+    }
+
+    html:not(.d-touch) .d-room .d-room__head > .live__title {
+      font-size: min(var(--d-fs-d3), 6.4vh);
+    }
+
+    html:not(.d-touch) .d-room .d-room__screen:not(.d-room__screen--confirmed) {
+      padding-top: calc(var(--d-bar) + var(--d-s4));
+    }
+
+    html:not(.d-touch) .d-room .d-room__body > .live__to-secure {
+      margin-top: var(--d-s2);
+    }
+
+    html:not(.d-touch) .d-room .d-room__body > .live__let-go {
+      margin-top: var(--d-s3);
+    }
+
+    html:not(.d-touch) .d-room :is(.live__paused, .live__message) {
+      padding: var(--d-s2) 0;
+    }
+
+    html:not(.d-touch) .d-room .d-room__body > :is(.live__count-block, .live__turn-left, .live__deadline, .live__notice, .live__drawing, .live__line-note) {
+      margin-top: var(--d-s5);
+    }
+  }
+}
+
+/* Reduced motion (§10.15): the room keeps its own path (house.css: cross-fades, no sweep, no reveal); its controls'
+   states change at once. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) and (prefers-reduced-motion: reduce) {
+  html:not(.d-touch) .d-room :is(.btn, .n-btn, .textlink, .n-tl, .live-hold__track, .live__addon-item) {
+    transition-duration: 0s;
+  }
+
+  html:not(.d-touch) .d-room > .d-room__photo {
+    transition: none;
+  }
+}

@@ -3,7 +3,8 @@
  * labelled by the server, and every one refused; a locked account and the eleventh message of an hour; the statuses, a
  * closed conversation reopened and the waiting time kept; the board in the order of the tier read now (PALLADIUM, then
  * PLATINE, then the rest), the mark lost with the tier; unread and read; staff never open a conversation; two answers
- * and a write at once; audit entries without words; the scan retention keeping a message's REF.
+ * and a write at once; audit entries without words; the scan retention keeping a message's REF; the answers unread
+ * counted (unreadCount) and each context's `ref` (desktop: a reply on a subject attaches it again).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
@@ -156,6 +157,43 @@ describe('MessageService (CS-01)', () => {
     const thread = await messages().thread(a.id);
     expect(thread.messages.map((m) => m.concerning?.kind ?? null)).toEqual(['PIECE', 'PIECE', 'ORDER', 'RELEASE', 'RELEASE', 'SCAN', 'SCAN', 'MODEL', 'MODEL', null]);
     expect(thread.messages[0]).toMatchObject({ from: 'YOU', body: 'About my ring.', concerning: { path: `/verify/pieces/${serial}` } });
+    // …each with its `ref`, the id a reply attaches again (MessageContextInput.id): a piece's serial (written by its row
+    // id too), the order's, the release's, the scan's and the model's id; a message without a context carries none.
+    expect(thread.messages.map((m) => m.concerning?.ref ?? null)).toEqual([serial, serial, sale.order.id, sale.dropId, draw.id, s, w, aurore, eclipse, null]);
+  });
+
+  it("gives each message's context the id a reply attaches again (`ref`): a reply by it lands on the same thing; none on an answer", async () => {
+    const a = await createAccount(t.db);
+    const [piece] = await holdPieces(t.db, a.id, 1, f.modelId);
+    const sale = await liveSale(a);
+    const w = await scan({ state: 'AUTHENTIC_REGISTERED', productId: piece! });
+    const aurore = await lookbookModel('AURORE', 'PUBLIC');
+    // Written as the app attaches them: the piece by its row id, the scan from the warranty tab.
+    const sent: MessageContextInput[] = [
+      { kind: 'PIECE', id: piece! },
+      { kind: 'ORDER', id: sale.order.id },
+      { kind: 'RELEASE', id: sale.dropId },
+      { kind: 'SCAN', id: w, about: 'WARRANTY' },
+      { kind: 'MODEL', id: aurore },
+    ];
+    for (const c of sent) await write(a, `About ${c.kind}.`, c);
+    const { id } = await conversationOf(a.id);
+    clock.advance(MINUTE);
+    await messages().answer(id, operator, { body: 'Our answer.' });
+    const first = await messages().thread(a.id);
+    expect(first.messages.at(-1)).toMatchObject({ from: 'ORBES_CLIENT_SERVICES', concerning: null });
+    const mine = first.messages.filter((m) => m.from === 'YOU');
+    expect(mine).toHaveLength(sent.length);
+    // A reply sent with each `ref` (and `about` where the label says it) is accepted and names the same thing.
+    for (const m of mine) {
+      const c = m.concerning!;
+      expect(c.ref, c.kind).toEqual(expect.any(String));
+      const again = await write(a, 'And a reply.', { kind: c.kind, id: c.ref!, ...(c.label.endsWith('WARRANTY NO LONGER VALID') ? { about: 'WARRANTY' as const } : {}) });
+      expect(again.message.concerning, c.kind).toEqual({ kind: c.kind, label: c.label, path: c.path });
+    }
+    // Every `ref` is the account's own: its piece, its order, its scan, or a published release and a model it may read.
+    const serial = (await t.db.selectFrom('products').select('product_id').where('id', '=', piece!).executeTakeFirstOrThrow()).product_id;
+    expect(mine.map((m) => m.concerning!.ref)).toEqual([serial, sale.order.id, sale.dropId, w, aurore]);
   });
 
   it("names a model with a variant's label as the app does (modelWithVariant), the main model of its group included", async () => {
@@ -414,6 +452,45 @@ describe('MessageService (CS-01)', () => {
     expect(await messages().unread(a.id)).toEqual({ unread: false });
   });
 
+  it('counts the answers unread (unreadCount), as `unread` reads them, for the account alone', async () => {
+    const a = await createAccount(t.db);
+    const other = await createAccount(t.db);
+    // No conversation yet, then only the collector's own words: nothing to read.
+    expect(await messages().unreadCount(a.id)).toEqual({ count: 0 });
+    await write(a, 'Hello.');
+    await write(other, 'Hello too.');
+    expect(await messages().unreadCount(a.id)).toEqual({ count: 0 });
+    const { id } = await conversationOf(a.id);
+    const theirs = (await conversationOf(other.id)).id;
+    clock.advance(MINUTE);
+    await messages().answer(id, operator, { body: 'One.' });
+    const firstAt = clock.now();
+    clock.advance(MINUTE);
+    await messages().answer(id, operator2, { body: 'Two.' });
+    await write(a, 'Thank you.');
+    // Two answers unread, whoever wrote them; the collector's own message after them is not counted.
+    expect(await messages().unreadCount(a.id)).toEqual({ count: 2 });
+    expect(await messages().unread(a.id)).toEqual({ unread: true });
+    // Another account's answers are never counted for this one, and this one's never for it.
+    expect(await messages().unreadCount(other.id)).toEqual({ count: 0 });
+    clock.advance(MINUTE);
+    await messages().answer(theirs, operator, { body: 'Yours.' });
+    expect(await messages().unreadCount(other.id)).toEqual({ count: 1 });
+    expect(await messages().unreadCount(a.id)).toEqual({ count: 2 });
+    // Read up to the first answer: the second only; up to now: none, with `unread`.
+    await messages().markRead(a.id, firstAt);
+    expect(await messages().unreadCount(a.id)).toEqual({ count: 1 });
+    await messages().markRead(a.id, clock.now());
+    expect(await messages().unreadCount(a.id)).toEqual({ count: 0 });
+    expect(await messages().unread(a.id)).toEqual({ unread: false });
+    // A later answer is counted again; the account must be an account's id.
+    clock.advance(MINUTE);
+    await messages().answer(id, operator, { body: 'Three.' });
+    expect(await messages().unreadCount(a.id)).toEqual({ count: 1 });
+    expect(await messages().unreadCount(other.id)).toEqual({ count: 1 });
+    await expect(messages().unreadCount('not-an-id')).rejects.toBeInstanceOf(DomainError);
+  });
+
   it('keeps one conversation consistent under two answers and a write at once', async () => {
     const a = await createAccount(t.db);
     await write(a, 'Hello.');
@@ -459,6 +536,8 @@ describe('MessageService (CS-01)', () => {
     expect(row).toMatchObject({ scan_event_id: null, scan_ref: s.slice(0, 8).toUpperCase(), context_kind: 'SCAN', context_label: `REF ${s.slice(0, 8).toUpperCase()} · INVALID SIGNATURE` });
     const c = await messages().conversation(id);
     expect(c.messages[0]!.concerns).toMatchObject({ scanEventId: null, scanRef: s.slice(0, 8).toUpperCase() });
+    // The collector's thread keeps the label, with no place and no `ref` once the scan is gone: nothing to attach again.
+    expect((await messages().thread(a.id)).messages[0]!.concerning).toEqual({ kind: 'SCAN', label: `REF ${s.slice(0, 8).toUpperCase()} · INVALID SIGNATURE`, path: null, ref: null });
     const exported = await accountMessages(t.db, a.id);
     expect(exported).toEqual([
       { at: expect.any(Date), from: 'YOU', body: 'This scan.', concerning: { kind: 'SCAN', label: `REF ${s.slice(0, 8).toUpperCase()} · INVALID SIGNATURE` } },

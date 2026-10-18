@@ -26,7 +26,7 @@
  */
 import { contactLines, type ContactLines } from '../shared/client-services.js';
 import { isLookbookSlug } from '../shared/lookbook.js';
-import { ASSURANCE_NOTE, CONTACT, DEFAULT_CARE, DISCONTINUED, FALLBACK_TITLES, MODEL_VARIANT, ORBES_CARE, PHOTOS, RESALE_ACTION, RESALE_GUIDANCE } from './copy.js';
+import { ASSURANCE_NOTE, CONTACT, DEFAULT_CARE, DISCONTINUED, FALLBACK_TITLES, MODEL_VARIANT, ORBES_CARE, PHOTOS, RESALE_ACTION, RESALE_GUIDANCE, resultMessage } from './copy.js';
 import { scanContext, warrantyContext, type WriteContext } from './messages-model.js';
 import type { StoryInput } from './story-card.js';
 import { VERIFICATION_STATES, type ClientServices, type VerificationState, type VerifyOutcome, type WarrantyStatus } from './types.js';
@@ -436,7 +436,8 @@ export function resultViewModel(
     state,
     tone: toneOf(state),
     titleMain: title.main,
-    message: outcome.message || '',
+    // Desktop (BRIEF §5.8): an unreadable code's camera sentence said for a computer there (copy.ts).
+    message: resultMessage(state, outcome.message || ''),
     photos: [],
     productLines: [],
     pieceLines: [],

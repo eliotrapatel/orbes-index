@@ -19,6 +19,7 @@
  * is the filled button and one ash line says so. A share sheet closed leaves the preview as it is; a share refused saves
  * the file. The object URL is revoked on close. Nothing is sent to ORBES.
  */
+import { isDesktop } from '../../shared/desktop.js';
 import { h } from '../../shared/dom.js';
 import { saveDownload } from '../../shared/download.js';
 import { STORY } from '../copy.js';
@@ -85,15 +86,15 @@ class StoryPreview {
     const canShare = canShareStory(blob, nav);
     const save = button(STORY.save, { outline: canShare, extraClass: 'n-story__save', onClick: () => this.save(save) });
     const share = canShare ? button(STORY.share, { extraClass: 'n-story__share', onClick: () => this.share(save) }) : null;
-    this.el = h(
-      'div',
-      { class: 'n-story', attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-label': STORY.label } },
-      h('div', { class: 'n-story__head' }, close),
-      h('img', { class: 'n-story__card', attrs: { src: this.url, alt: STORY.alt(...storyWords(m)), width: 1080, height: 1920, decoding: 'async' } }),
-      h('div', { class: 'n-story__actions' }, share, save),
-      canShare ? null : h('p', { class: 'n-sm n-story__note', text: STORY.cannotShare }),
-      this.status,
-    );
+    const card = h('img', { class: 'n-story__card', attrs: { src: this.url, alt: STORY.alt(...storyWords(m)), width: 1080, height: 1920, decoding: 'async' } });
+    const actions = h('div', { class: 'n-story__actions' }, share, save);
+    const note = canShare ? null : h('p', { class: 'n-sm n-story__note', text: STORY.cannotShare });
+    const head = h('div', { class: 'n-story__head' }, close);
+    this.el = h('div', { class: 'n-story', attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-label': STORY.label } });
+    // Desktop (BRIEF §6, decision 13): on a computer the card stands beside its name, its actions and its
+    // line (shared/desktop.css); a phone keeps them under it, in this order.
+    if (isDesktop()) this.el.append(head, card, h('div', { class: 'd-story__side' }, h('p', { class: 'n-g n-lb n-story__title', text: STORY.title }), actions, note), this.status);
+    else this.el.append(head, card, actions, ...(note ? [note] : []), this.status);
     this.el.addEventListener('keydown', (ev) => {
       if (ev.key === 'Escape') {
         ev.preventDefault();

@@ -49,7 +49,7 @@ import {
 import { lookbookSheetPath } from '../lookbook-model.js';
 import type { SessionStore } from '../session.js';
 import type { CircleCard, ClubStatus, DropCard, LiveCard, LookbookCard, OwnedPiece } from '../types.js';
-import { CIRCLE_PATH, LOOKBOOK_PATH, PIECES_PATH, viewRoot, withNumerals } from './common.js';
+import { CIRCLE_PATH, computerClock, listLine, LOOKBOOK_PATH, PIECES_PATH, viewRoot, withNumerals } from './common.js';
 import { CircleCardLines } from './invitation.js';
 import { appAnchor, countdown, fadedPhoto, icon, lift, loadingState, modelTitle, plateCard, textLink, variantDots } from './nocturne.js';
 import { openMessages } from './write.js';
@@ -347,7 +347,7 @@ class Now implements NowView {
           h('p', { class: 'n-g n-lb now__type' }, ...withNumerals(m.model)),
           m.price ? h('p', { class: 'n-num now__price', text: m.price }) : null,
           this.drawLine(m, 'now__line'),
-          m.local ? h('p', { class: 'n-sm n-num now__local-time', text: m.local }) : null,
+          m.local ? h('p', { class: 'n-sm n-num now__local-time' }, ...computerClock(m.local)) : null,
           appAnchor(m.href, ['n-g', 'n-btn', 'now__primary'], () => this.deps.onRelease(m.id), RELEASES.see),
         ],
         { center: true, extraClass: picture ? undefined : 'now__bare' },
@@ -430,7 +430,7 @@ class Now implements NowView {
           h('p', { class: 'n-g n-lb' }, ...withNumerals(m.label)),
           h('h1', { class: 'n-g n-t1 now__title' }, ...withNumerals(m.name)),
           m.type ? h('p', { class: 'n-g n-lb now__type' }, ...withNumerals(m.type)) : null,
-          m.sizes ? h('p', { class: 'n-g n-lb n-ivc n-num now__sizes' }, ...withNumerals(m.sizes)) : null,
+          m.sizes ? h('p', { class: 'n-g n-lb n-ivc n-num now__sizes' }, ...listLine(m.sizes)) : null,
           dots,
           m.owned ? h('p', { class: 'n-state now__owned' }, icon('check', { small: true }), m.owned) : null,
           see,

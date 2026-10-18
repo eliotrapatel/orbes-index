@@ -62,6 +62,11 @@ export interface UiState {
    * boutique board's landscape screen, live-07: capture-ui's 1280 × 720).
    */
   size?: { width: number; height: number };
+  /**
+   * LIGHT MODE kept on the device before the page opens, as the app keeps it (shared/prefs.ts: orbes.mode), so the page
+   * draws in light from its first paint (the desktop states of Cinema in white).
+   */
+  light?: boolean;
 }
 
 /** Requests a state holds open while it is captured, released when the run ends. */
@@ -91,6 +96,23 @@ async function upload(run: StateRun, role: string): Promise<void> {
 }
 
 const button = (run: StateRun, name: string | RegExp) => run.page.getByRole('button', { name, exact: typeof name === 'string' }).first();
+/**
+ * A computer's window (desktop, BRIEF decisions 5 and 6): the account's sheet is a page there
+ * (/verify/account and its sections, each card a link), and where the phone embeds the sign-in a line of two links
+ * leads to the sign-in page (/verify/sign-in).
+ */
+/**
+ * Whether the app draws its computer layout: the app's own test, read in the page (a wide window with a fine
+ * pointer and hover, on a device the page did not mark as a phone or a tablet, `html.d-touch`: shared/desktop.ts
+ * `isDesktop`), never the window's width alone, so a touch context of 1024 px or more (an iPad, a large tablet) takes
+ * the phone's paths as the app does, and a computer with a touch screen (`html.d-tap`) the computer's.
+ */
+const onComputer = (run: StateRun): Promise<boolean> =>
+  run.page.evaluate(() => matchMedia('(min-width: 1024px) and (hover: hover) and (pointer: fine)').matches && !document.documentElement.classList.contains('d-touch'));
+/** Where the account's views stand: the phone's sheet, or a computer's page. */
+const ACCT = ':is(.n-account, .view--account):not([hidden])';
+/** An item of the account (YOUR SIZES, CHANGE PASSWORD…): the sheet's button, or a computer's card (a link). */
+const accountItem = async (run: StateRun, name: RegExp) => run.page.locator(ACCT).getByRole((await onComputer(run)) ? 'link' : 'button', { name }).first();
 const link = (run: StateRun, name: string | RegExp) => run.page.getByRole('link', { name, exact: typeof name === 'string' }).first();
 const tab = (run: StateRun, name: string) => run.page.getByRole('tab', { name, exact: true }).first();
 /** A tab of MY PIECES (PIECES, ORDERS, RELEASES: its name with its count), selected, its panel drawn. */
@@ -119,6 +141,13 @@ function result(role: string, then?: (run: StateRun) => Promise<void>): Pick<UiS
     },
     ready: '.view--result',
   };
+}
+
+/** A computer: the OWNERSHIP tab's SIGN IN opens the sign-in page, where FORGOTTEN PASSWORD? is (a phone's is in the tab). */
+async function resultSignIn(run: StateRun): Promise<void> {
+  if (!(await onComputer(run))) return;
+  await run.page.locator('.view--result .d-signin-line').getByRole('link', { name: 'SIGN IN', exact: true }).click();
+  await run.page.locator('.view--signin form').first().waitFor();
 }
 
 /** On a result signed in, OWNERSHIP: the piece `role` registered with its claim code (REGISTER THIS PIECE). */
@@ -178,20 +207,21 @@ function cameraProblem(id: string, title: string, camera: CameraFailure): UiStat
  * the phone then as tall as the sheet's content below the header and the rail, so the whole sheet is in the picture.
  */
 async function openAccountSheet(run: StateRun): Promise<void> {
-  const account = run.page.locator('.n-hd button.n-acct');
+  // The phone's button; a computer's link to YOUR ACCOUNT's page (desktop, decision 5).
+  const account = run.page.locator('.n-hd .n-acct:has(> .n-mono):not([hidden])');
   await account.waitFor();
   // The tier is read for the header: wait for its name (or for an account without one, a moment).
   await run.page.waitForFunction(() => !!document.querySelector('.n-acct__tier:not([hidden])')?.textContent || document.querySelector('.n-acct')?.getAttribute('aria-label') === 'Your account', null, { timeout: 10_000 }).catch(() => {});
   await account.click();
-  await run.page.locator('.n-account:not([hidden]) .n-account__tier').waitFor({ timeout: 20_000 });
+  await run.page.locator(`${ACCT} :is(.n-account__tier, .d-acct__cards)`).first().waitFor({ timeout: 20_000 });
   await fitSheet(run.page);
 }
 
 /** YOUR SIZES (plan NEXT-NINE, AC-01): the account sheet opened, then its view of the four sizes, the phone grown to it. */
 async function openSizes(run: StateRun): Promise<void> {
   await openAccountSheet(run);
-  await run.page.locator('.n-account').getByRole('button', { name: /^YOUR SIZES/ }).click();
-  await run.page.locator('.n-account:not([hidden]) .n-account__sizes-view form').waitFor({ timeout: 20_000 });
+  await (await accountItem(run, /^YOUR SIZES/)).click();
+  await run.page.locator(`${ACCT} :is(.n-account__sizes-view, .d-acct__sub--sizes) form`).waitFor({ timeout: 20_000 });
   await fitSheet(run.page);
 }
 
@@ -221,14 +251,21 @@ async function fitSheet(page: Page, selector = '.n-account__panel'): Promise<voi
 /** WRITE TO ORBES CLIENT SERVICES (plan NEXT-NINE, CS-01) under `within`: the write sheet opened, the phone grown to it. */
 async function openWrite(run: StateRun, within = 'main'): Promise<void> {
   await run.page.locator(within).getByRole('button', { name: 'WRITE TO ORBES CLIENT SERVICES' }).first().click();
-  await run.page.locator('.n-write:not([hidden]) #write-title').waitFor({ timeout: 20_000 });
+  // The phone's sheet; a computer's MESSAGES page on the subject, or (signed out) its sign-in page (desktop).
+  await run.page.locator(':is(.n-write:not([hidden]) #write-title, .d-msg #messages-reply, .d-signin__panel .n-own)').first().waitFor({ timeout: 20_000 });
   await fitSheet(run.page, '.n-write__panel');
 }
 
 /** The account sheet on MESSAGES (CS-01), its conversation read, the phone grown to it. */
 async function openMessages(run: StateRun, ready: string): Promise<void> {
-  await openAccountSheet(run);
-  await run.page.locator('.n-account').getByRole('button', { name: 'MESSAGES' }).first().click();
+  // A computer: YOUR ACCOUNT's page, then its MESSAGES card, which opens MESSAGES' page (desktop).
+  if (await onComputer(run)) {
+    await run.page.locator('.n-hd .n-acct:has(> .n-mono):not([hidden])').click();
+    await run.page.locator('.d-acct__card[data-key="messages"]').click({ timeout: 20_000 });
+  } else {
+    await openAccountSheet(run);
+    await run.page.locator('.n-account').getByRole('button', { name: 'MESSAGES' }).first().click();
+  }
   await run.page.locator(ready).first().waitFor({ timeout: 20_000 });
   await fitSheet(run.page);
 }
@@ -456,8 +493,8 @@ async function yourWishes(run: StateRun): Promise<void> {
 /** The account sheet opened on YOUR PROFILE, its form drawn, the phone grown to it. */
 async function openProfile(run: StateRun): Promise<void> {
   await openAccountSheet(run);
-  await run.page.locator('.n-account').getByRole('button', { name: /^YOUR PROFILE/ }).click();
-  await run.page.locator('.n-account:not([hidden]) form.form--profile').waitFor({ timeout: 20_000 });
+  await (await accountItem(run, /^YOUR PROFILE/)).click();
+  await run.page.locator(`${ACCT} form.form--profile`).waitFor({ timeout: 20_000 });
   await fitSheet(run.page);
 }
 
@@ -475,7 +512,8 @@ async function invitationAnswer(page: Page, change: (inv: Record<string, unknown
   });
 }
 
-export const UI_STATES: readonly UiState[] = [
+/** The states of the phone (and the boutique board's screen): those of the NOCTURNE baseline at c3d25c2. */
+export const PHONE_STATES: readonly UiState[] = [
   // ── NOW (today: the landing, its banner of the LIVE RELEASES) ──
   { id: 'now-signed-out', title: 'NOW, signed out: a LIVE RELEASE announced, a draw open', refs: ['C10'], variant: 'full', path: at('/verify'), ready: '.view--now[data-ready]' },
   { id: 'now-signed-in', title: 'NOW, signed in (TITANE, two pieces): a LIVE RELEASE announced, a draw open', refs: ['C1'], variant: 'full', as: you, path: at('/verify'), ready: '.view--now[data-ready]' },
@@ -621,8 +659,14 @@ export const UI_STATES: readonly UiState[] = [
     variant: 'full',
     ...result('first', async (run) => {
       await tab(run, 'OWNERSHIP').click();
-      await button(run, 'CREATE ACCOUNT').click();
+      // A computer: the line's CREATE ACCOUNT opens the sign-in page on its form.
+      if (await onComputer(run)) {
+        await run.page.locator('.view--result .d-signin-line').getByRole('link', { name: 'CREATE ACCOUNT', exact: true }).click();
+        await run.page.locator('.view--signin form.form--create').waitFor();
+      } else await button(run, 'CREATE ACCOUNT').click();
     }),
+    // A computer: the sign-in page in the result's place (decision 6).
+    ready: ':is(.view--result, .view--signin .d-signin__panel)',
   },
   {
     id: 'result-forgotten-password',
@@ -631,8 +675,11 @@ export const UI_STATES: readonly UiState[] = [
     variant: 'full',
     ...result('first', async (run) => {
       await tab(run, 'OWNERSHIP').click();
+      await resultSignIn(run);
       await button(run, 'FORGOTTEN PASSWORD?').click();
     }),
+    // A computer: the sign-in page in the result's place (decision 6).
+    ready: ':is(.view--result, .view--signin .d-signin__panel)',
   },
   {
     id: 'result-recovery-code',
@@ -641,9 +688,12 @@ export const UI_STATES: readonly UiState[] = [
     variant: 'full',
     ...result('first', async (run) => {
       await tab(run, 'OWNERSHIP').click();
+      await resultSignIn(run);
       await button(run, 'FORGOTTEN PASSWORD?').click();
       await button(run, 'I HAVE A RECOVERY CODE').click();
     }),
+    // A computer: the sign-in page in the result's place (decision 6).
+    ready: ':is(.view--result, .view--signin .d-signin__panel)',
   },
   { id: 'result-first-registration-signed-in', title: 'AUTHENTIC — FIRST REGISTRATION, signed in: the claim code', refs: ['C36'], variant: 'full', as: you, ...result('first', (run) => tab(run, 'OWNERSHIP').click()) },
   {
@@ -693,7 +743,7 @@ export const UI_STATES: readonly UiState[] = [
     refs: ['CS-01'],
     variant: 'full',
     ...result('forged', (run) => openWrite(run, '.n-result__help')),
-    ready: '.n-write:not([hidden]) .n-own',
+    ready: ':is(.n-write:not([hidden]), .d-signin__panel) .n-own',
     viewport: true,
   },
   { id: 'result-unknown', title: 'UNKNOWN ORBES CODE: a code ORBES signed for no piece', refs: ['C16'], variant: 'full', ...result('unknown') },
@@ -769,7 +819,7 @@ export const UI_STATES: readonly UiState[] = [
   },
 
   // ── MY PIECES ──
-  { id: 'pieces-signed-out', title: 'MY PIECES, signed out: the sign-in', refs: ['C18'], variant: 'full', path: at('/verify/pieces'), ready: '.view--pieces form' },
+  { id: 'pieces-signed-out', title: 'MY PIECES, signed out: the sign-in', refs: ['C18'], variant: 'full', path: at('/verify/pieces'), ready: ':is(.view--pieces form, .view--pieces .d-signin-line)' },
   {
     id: 'pieces-sign-in-refused',
     title: 'MY PIECES, signed out: a sign-in refused',
@@ -777,12 +827,19 @@ export const UI_STATES: readonly UiState[] = [
     variant: 'full',
     path: at('/verify/pieces'),
     act: async (run) => {
-      await run.page.locator('.view--pieces input[type=email]').first().fill('you@example.com');
-      await run.page.locator('.view--pieces input[type=password]').first().fill('not-the-password-of-the-demo');
-      await run.page.locator('.view--pieces form').first().getByRole('button', { name: 'SIGN IN', exact: true }).click();
-      await run.page.locator('.view--pieces .form__error').first().waitFor();
+      // A computer: MY PIECES' SIGN IN opens the sign-in page, where the form is.
+      let scope = '.view--pieces';
+      if (await onComputer(run)) {
+        await run.page.locator('.view--pieces .d-signin-line').getByRole('link', { name: 'SIGN IN', exact: true }).click();
+        scope = '.view--signin';
+        await run.page.locator(`${scope} form`).first().waitFor();
+      }
+      await run.page.locator(`${scope} input[type=email]`).first().fill('you@example.com');
+      await run.page.locator(`${scope} input[type=password]`).first().fill('not-the-password-of-the-demo');
+      await run.page.locator(`${scope} form`).first().getByRole('button', { name: 'SIGN IN', exact: true }).click();
+      await run.page.locator(`${scope} .form__error`).first().waitFor();
     },
-    ready: '.view--pieces .form__error',
+    ready: ':is(.view--pieces, .view--signin) .form__error',
   },
   // Plan CUSTOMER INTELLIGENCE §3.1 P.4.1: CREATE ACCOUNT asks the names and the country, then the one optional
   // question, its answers read from the server (the console's list); Other chosen, IN A FEW WORDS shows under it.
@@ -793,13 +850,20 @@ export const UI_STATES: readonly UiState[] = [
     variant: 'full',
     path: at('/verify/pieces'),
     act: async (run) => {
-      await run.page.locator('.view--pieces form').first().waitFor();
-      await run.page.locator('.view--pieces').getByRole('button', { name: 'CREATE ACCOUNT', exact: true }).first().click();
+      // A computer: MY PIECES' CREATE ACCOUNT opens the sign-in page on its form.
+      let scope = '.view--pieces';
+      if (await onComputer(run)) {
+        await run.page.locator('.view--pieces .d-signin-line').getByRole('link', { name: 'CREATE ACCOUNT', exact: true }).click();
+        scope = '.view--signin';
+      } else {
+        await run.page.locator('.view--pieces form').first().waitFor();
+        await run.page.locator('.view--pieces').getByRole('button', { name: 'CREATE ACCOUNT', exact: true }).first().click();
+      }
       // The answers arrive after the form: Other is chosen once they are there.
-      await run.page.locator('.view--pieces #auth-heard option', { hasText: 'Other' }).waitFor({ state: 'attached' });
-      await run.page.locator('.view--pieces #auth-heard').selectOption({ label: 'Other' });
+      await run.page.locator(`${scope} #auth-heard option`, { hasText: 'Other' }).waitFor({ state: 'attached' });
+      await run.page.locator(`${scope} #auth-heard`).selectOption({ label: 'Other' });
     },
-    ready: '.view--pieces form.form--create #auth-heard-other',
+    ready: ':is(.view--pieces, .view--signin) form.form--create #auth-heard-other',
   },
   { id: 'pieces', title: 'MY PIECES, PIECES: each piece on its model\u2019s photograph, its size, its state, SEE THE PIECE; ADD A PIECE', refs: ['C3'], variant: 'full', as: you, path: at('/verify/pieces'), ready: '.view--pieces article.n-pieces__piece' },
   {
@@ -810,7 +874,7 @@ export const UI_STATES: readonly UiState[] = [
     as: you,
     path: at('/verify/pieces'),
     act: (run) => piecesTab(run, 'ORDERS'),
-    ready: '.view--pieces article.n-pieces__order',
+    ready: '.view--pieces :is(article.n-pieces__order, .d-orow)',
   },
   // Plan NEXT LOT §3.4: YOUR NEW CLAIM CODE waiting on a shipped order, before SHOW THE CODE (no code is ever on screen
   // here); on its own stage, whose state writes the order and the code (claimWaiting).
@@ -826,9 +890,10 @@ export const UI_STATES: readonly UiState[] = [
       await claimWaiting(run);
       await run.page.reload();
       await piecesTab(run, 'ORDERS');
-      await run.page.locator('.view--pieces .pieces__claim-show').waitFor();
+      // The card's block on a phone; a computer's row (its order's page holds the block).
+      await run.page.locator('.view--pieces :is(.pieces__claim-show, .d-orow)').first().waitFor();
     },
-    ready: '.view--pieces .pieces__claim',
+    ready: '.view--pieces :is(.pieces__claim, .d-orows)',
   },
   // Plan NEXT LOT §3.6.B, C: DELIVERY ADDRESS and ENGRAVING on the orders, IN PREPARATION, packing begun; on its own stage,
   // whose state writes them (ordersDelivery).
@@ -844,9 +909,9 @@ export const UI_STATES: readonly UiState[] = [
       await ordersDelivery(run);
       await run.page.reload();
       await piecesTab(run, 'ORDERS');
-      await run.page.locator('.view--pieces .pieces__address-change').first().waitFor();
+      await run.page.locator('.view--pieces :is(.pieces__address-change, .d-orow)').first().waitFor();
     },
-    ready: '.view--pieces .pieces__engraving-locked',
+    ready: '.view--pieces :is(.pieces__engraving-locked, .d-orows)',
   },
   // Plan NEXT LOT §3.6.D: a return asked on a delivered order (RETURN REQUESTED, RETURN ADDRESS), and RETURNS AND
   // EXCHANGES on another; on its own stage, whose state writes them (ordersCase).
@@ -862,9 +927,9 @@ export const UI_STATES: readonly UiState[] = [
       await ordersCase(run);
       await run.page.reload();
       await piecesTab(run, 'ORDERS');
-      await run.page.locator('.view--pieces .pieces__request').waitFor();
+      await run.page.locator('.view--pieces :is(.pieces__request, .d-orow)').first().waitFor();
     },
-    ready: '.view--pieces .pieces__return-address',
+    ready: '.view--pieces :is(.pieces__return-address, .d-orows)',
   },
   {
     id: 'pieces-releases',
@@ -984,7 +1049,7 @@ export const UI_STATES: readonly UiState[] = [
     as: 'claimant3',
     path: at('/verify'),
     act: (run) => openAccountSheet(run),
-    ready: '.n-account:not([hidden]) .n-account__in-use',
+    ready: `${ACCT} .n-account__in-use`,
     viewport: true,
   },
   {
@@ -1033,7 +1098,10 @@ export const UI_STATES: readonly UiState[] = [
     path: at('/verify/pieces'),
     act: async (run) => {
       await piecesTab(run, 'ORDERS');
-      await run.page.locator('article.n-pieces__order[data-status="DELIVERED"] [data-document="CARE_GUIDE"]').click();
+      // A computer: the delivered order's own page first (desktop, decision 5).
+      const row = run.page.locator('.d-orow[data-status="DELIVERED"]');
+      if ((await row.count()) > 0) await row.first().click();
+      await run.page.locator(':is(article.n-pieces__order[data-status="DELIVERED"], .d-order) [data-document="CARE_GUIDE"]').first().click();
       await run.page.locator('.n-pieces__care-text').first().waitFor();
     },
     ready: '.n-pieces__care-text',
@@ -1048,11 +1116,11 @@ export const UI_STATES: readonly UiState[] = [
     act: async (run) => {
       await run.page.locator('.view--pieces article.n-pieces__piece').first().waitFor();
       await openAccountSheet(run);
-      await run.page.locator('.n-account').getByRole('button', { name: 'CHANGE PASSWORD' }).first().click();
-      await run.page.locator('.n-account__password').waitFor();
+      await (await accountItem(run, /^CHANGE PASSWORD$/)).click();
+      await run.page.locator(`${ACCT} :is(.n-account__password, .d-acct__sub--password)`).first().waitFor();
       await fitSheet(run.page);
     },
-    ready: '.n-account__password',
+    ready: ':is(.n-account__password, .d-acct__sub--password form)',
     viewport: true,
   },
   { id: 'pieces-incidents', title: 'MY PIECES of an owner: reported stolen, transfer pending, reported lost, in service', refs: ['C3', 'C35'], variant: 'full', as: 'owner', path: at('/verify/pieces'), ready: '.view--pieces article.n-pieces__piece' },
@@ -1111,7 +1179,7 @@ export const UI_STATES: readonly UiState[] = [
     as: you,
     path: at('/verify/pieces'),
     act: (run) => piecesTab(run, 'ORDERS'),
-    ready: '.view--pieces article.n-pieces__order',
+    ready: '.view--pieces :is(article.n-pieces__order, .d-orow)',
     stress: true,
   },
   { id: 'piece-stress', title: 'A piece of a 24-character model without a photograph, its Size of 14 characters', refs: ['same pieces'], variant: 'stress', as: you, path: piece('piece1'), ready: '.view--piece .n-piece__article', stress: true },
@@ -1126,7 +1194,7 @@ export const UI_STATES: readonly UiState[] = [
     as: you,
     path: at('/verify'),
     act: (run) => openAccountSheet(run),
-    ready: '.n-account:not([hidden]) .n-account__tier',
+    ready: `${ACCT} :is(.n-account__tier, .d-acct__cards)`,
     viewport: true,
   },
   {
@@ -1137,7 +1205,7 @@ export const UI_STATES: readonly UiState[] = [
     as: 'newcomer',
     path: at('/verify'),
     act: (run) => openAccountSheet(run),
-    ready: '.n-account:not([hidden]) .n-account__tier',
+    ready: `${ACCT} :is(.n-account__tier, .d-acct__cards)`,
     viewport: true,
   },
   {
@@ -1148,7 +1216,7 @@ export const UI_STATES: readonly UiState[] = [
     as: you,
     path: at('/verify'),
     act: (run) => openAccountSheet(run),
-    ready: '.n-account:not([hidden]) .n-account__tier',
+    ready: `${ACCT} :is(.n-account__tier, .d-acct__cards)`,
     viewport: true,
     stress: true,
   },
@@ -1160,7 +1228,7 @@ export const UI_STATES: readonly UiState[] = [
     as: 'platine',
     path: at('/verify'),
     act: (run) => openAccountSheet(run),
-    ready: '.n-account:not([hidden]) .n-account__in-use',
+    ready: `${ACCT} .n-account__in-use`,
     viewport: true,
   },
   // Plan CUSTOMER INTELLIGENCE §3.5 SB.4.5: the birthday credit under IN USE for an account without a tier, under THE
@@ -1177,7 +1245,7 @@ export const UI_STATES: readonly UiState[] = [
       await birthdayCredit(run);
       await openAccountSheet(run);
     },
-    ready: '.n-account:not([hidden]) .n-account__in-use',
+    ready: `${ACCT} .n-account__in-use`,
     viewport: true,
   },
   // Plan NEXT LOT §3.6.B: YOUR ADDRESSES in the account sheet, two saved, one the default; on its own stage
@@ -1193,11 +1261,11 @@ export const UI_STATES: readonly UiState[] = [
     act: async (run) => {
       await accountAddresses(run);
       await openAccountSheet(run);
-      await run.page.locator('.n-account').getByRole('button', { name: /^YOUR ADDRESSES/ }).click();
-      await run.page.locator('.n-account:not([hidden]) .n-account__address').first().waitFor({ timeout: 20_000 });
+      await (await accountItem(run, /^YOUR ADDRESSES/)).click();
+      await run.page.locator(`${ACCT} .n-account__address`).first().waitFor({ timeout: 20_000 });
       await fitSheet(run.page);
     },
-    ready: '.n-account:not([hidden]) .n-account__addresses-add',
+    ready: `${ACCT} .n-account__addresses-add`,
     viewport: true,
   },
   // Plan CUSTOMER INTELLIGENCE §3.1 P.8: YOUR PROFILE in the account sheet, its row after MESSAGES; on its own stage
@@ -1214,7 +1282,7 @@ export const UI_STATES: readonly UiState[] = [
       await yourProfile(run, false);
       await openProfile(run);
     },
-    ready: '.n-account:not([hidden]) form.form--profile',
+    ready: `${ACCT} form.form--profile`,
     viewport: true,
   },
   {
@@ -1228,9 +1296,9 @@ export const UI_STATES: readonly UiState[] = [
     act: async (run) => {
       await yourProfile(run, true);
       await openProfile(run);
-      await run.page.locator('.n-account:not([hidden]) #profile-group-tastes').scrollIntoViewIfNeeded();
+      await run.page.locator(`${ACCT} #profile-group-tastes`).scrollIntoViewIfNeeded();
     },
-    ready: '.n-account:not([hidden]) .n-profile__taste-retired',
+    ready: `${ACCT} .n-profile__taste-retired`,
     viewport: true,
   },
   {
@@ -1242,10 +1310,10 @@ export const UI_STATES: readonly UiState[] = [
     path: at('/verify'),
     act: async (run) => {
       await openAccountSheet(run);
-      await run.page.locator('.n-account').getByRole('button', { name: 'CHANGE PASSWORD', exact: true }).click();
+      await (await accountItem(run, /^CHANGE PASSWORD$/)).click();
       await fitSheet(run.page);
     },
-    ready: '.n-account:not([hidden]) form',
+    ready: `${ACCT} form`,
     viewport: true,
   },
 
@@ -1258,7 +1326,7 @@ export const UI_STATES: readonly UiState[] = [
     as: you,
     path: piece('yours'),
     act: (run) => openWrite(run, '.view--piece'),
-    ready: '.n-write:not([hidden]) textarea',
+    ready: ':is(.n-write:not([hidden]), .d-msg) textarea',
     viewport: true,
   },
   {
@@ -1268,8 +1336,8 @@ export const UI_STATES: readonly UiState[] = [
     variant: 'draw-leads',
     as: you,
     path: at('/verify'),
-    act: (run) => openMessages(run, '.n-messages__empty'),
-    ready: '.n-account:not([hidden]) .n-messages__empty',
+    act: (run) => openMessages(run, ':is(.n-messages__empty, .d-msg__none)'),
+    ready: ':is(.n-account:not([hidden]) .n-messages__empty, .d-msg .d-msg__none)',
     viewport: true,
   },
   {
@@ -1281,12 +1349,14 @@ export const UI_STATES: readonly UiState[] = [
     path: piece('yours'),
     act: async (run) => {
       await openWrite(run, '.view--piece');
-      await run.page.locator('.n-write textarea').fill('Could the atelier adjust the clasp of this bracelet?');
-      await run.page.locator('.n-write').getByRole('button', { name: 'SEND', exact: true }).click();
-      await run.page.locator('.n-write__sent').waitFor({ timeout: 20_000 });
+      // The phone's sheet; a computer's MESSAGES page (desktop).
+      const box = run.page.locator(':is(.n-write:not([hidden]), .d-msg)').first();
+      await box.locator('textarea').fill('Could the atelier adjust the clasp of this bracelet?');
+      await box.getByRole('button', { name: 'SEND', exact: true }).click();
+      await run.page.locator(':is(.n-write__sent, .d-msg__sent)').first().waitFor({ timeout: 20_000 });
       await fitSheet(run.page, '.n-write__panel');
     },
-    ready: '.n-write:not([hidden]) .n-write__sent',
+    ready: ':is(.n-write:not([hidden]) .n-write__sent, .d-msg__sent)',
     viewport: true,
     mutates: true,
   },
@@ -1301,9 +1371,9 @@ export const UI_STATES: readonly UiState[] = [
       await messageAndAnswer(run);
       await run.page.reload();
       await run.page.locator('.view--now[data-ready]').waitFor();
-      await openMessages(run, '.n-messages__list');
+      await openMessages(run, ':is(.n-messages__list, ol.d-msg__conversation)');
     },
-    ready: '.n-account:not([hidden]) .n-messages__list',
+    ready: ':is(.n-account:not([hidden]) .n-messages__list, .d-msg ol.d-msg__conversation)',
     viewport: true,
     mutates: true,
   },
@@ -1437,7 +1507,7 @@ export const UI_STATES: readonly UiState[] = [
   { id: 'releases-empty', title: 'THE RELEASES with no release', refs: ['C40'], variant: 'empty', path: at('/verify/releases'), ready: '.view--releases .releases__body p, .view--releases p.prose', stress: true },
   { id: 'releases-stress', title: 'THE RELEASES: a countdown under an hour, one over 9 days, a price in USD', refs: ['same pieces'], variant: 'stress', as: you, path: at('/verify/releases'), ready: '.view--releases article.live-card', stress: true },
   { id: 'draw', title: 'A draw, entries open, signed in: ENTER THE DRAW', refs: ['C19'], variant: 'full', as: you, path: release('draw'), ready: '.view--release .release__body section, .view--release section' },
-  { id: 'draw-signed-out', title: 'A draw, signed out: the sign-in', refs: ['C19'], variant: 'full', path: release('draw'), ready: '.view--release form' },
+  { id: 'draw-signed-out', title: 'A draw, signed out: the sign-in', refs: ['C19'], variant: 'full', path: release('draw'), ready: ':is(.view--release form, .view--release .d-signin-line)' },
   { id: 'draw-soon', title: 'A draw before its entries open', refs: ['C42'], variant: 'draw-soon', as: you, path: release('draw'), ready: '.view--release section' },
   { id: 'draw-early', title: 'A draw in its early access, for a PLATINE account: RESERVE A PLACE', refs: ['C42'], variant: 'draw-early', as: 'platine', path: release('draw'), ready: '.view--release section' },
   { id: 'draw-drawn', title: 'A draw drawn: THIS RELEASE IS OVER, the seed checked, the entries by rank', refs: ['C29'], variant: 'full', as: you, path: release('draw:MONOLITHE IN GOLD'), ready: '.view--release section .n-story__open:not([hidden])' },
@@ -1492,7 +1562,7 @@ export const UI_STATES: readonly UiState[] = [
     as: 'holder',
     path: at('/verify'),
     act: (run) => openAccountSheet(run),
-    ready: '.n-account:not([hidden]) .n-account__guarantee',
+    ready: `${ACCT} .n-account__guarantee`,
     viewport: true,
   },
   {
@@ -1596,7 +1666,7 @@ export const UI_STATES: readonly UiState[] = [
       }),
     ready: '.view--circle .circle__more',
   },
-  { id: 'circle-signed-out', title: 'THE CIRCLE, signed out: the sign-in', refs: ['C40'], variant: 'full', path: at('/verify/circle'), ready: '.view--circle form' },
+  { id: 'circle-signed-out', title: 'THE CIRCLE, signed out: the sign-in', refs: ['C40'], variant: 'full', path: at('/verify/circle'), ready: ':is(.view--circle form, .view--circle .d-signin-line)' },
   { id: 'circle-no-piece', title: 'THE CIRCLE without a piece: it opens once a piece is registered', refs: ['C40'], variant: 'full', as: 'newcomer', path: at('/verify/circle'), ready: '.view--circle .circle__closed' },
   {
     id: 'circle-failed',
@@ -1883,7 +1953,7 @@ export const UI_STATES: readonly UiState[] = [
     // It writes nothing: it runs with the writes of YOUR SIZES, before them (the content test's shards, CONTENT_SHARDS).
     mutates: true,
     act: (run) => openSizes(run),
-    ready: '.n-account:not([hidden]) .n-account__sizes-view form',
+    ready: `${ACCT} :is(.n-account__sizes-view, .d-acct__sub--sizes) form`,
     viewport: true,
   },
   {
@@ -1895,7 +1965,7 @@ export const UI_STATES: readonly UiState[] = [
     path: at('/verify'),
     mutates: true,
     act: (run) => saveSizes(run, { ring: '52', wrist: '16.5' }),
-    ready: '.n-account:not([hidden]) .n-account__sizes-line',
+    ready: `${ACCT} :is(.n-account__sizes-line, .d-acct__card[data-key="sizes"] .d-acct__card-line)`,
     viewport: true,
   },
   {
@@ -1911,7 +1981,7 @@ export const UI_STATES: readonly UiState[] = [
       const values = await run.page.evaluate(() => ['ring', 'bracelet', 'wrist', 'necklace'].map((k) => (document.querySelector(`#account-size-${k}`) as HTMLSelectElement | null)?.value ?? null));
       if (JSON.stringify(values) !== JSON.stringify(['52', '', '16.5', ''])) throw new Error(`YOUR SIZES read again: ${JSON.stringify(values)}`);
     },
-    ready: '.n-account:not([hidden]) .n-account__sizes-view form',
+    ready: `${ACCT} :is(.n-account__sizes-view, .d-acct__sub--sizes) form`,
     viewport: true,
   },
   {
@@ -1924,9 +1994,9 @@ export const UI_STATES: readonly UiState[] = [
     mutates: true,
     act: async (run) => {
       await saveSizes(run, { ring: '', bracelet: '', wrist: '', necklace: '' });
-      await run.page.locator('.n-account__sizes-line', { hasText: /^NOT SET$/ }).waitFor({ timeout: 20_000 });
+      await run.page.locator(':is(.n-account__sizes-line, .d-acct__card[data-key="sizes"] .d-acct__card-line)', { hasText: /^NOT SET$/ }).waitFor({ timeout: 20_000 });
     },
-    ready: '.n-account:not([hidden]) .n-account__sizes-line',
+    ready: `${ACCT} :is(.n-account__sizes-line, .d-acct__card[data-key="sizes"] .d-acct__card-line)`,
     viewport: true,
   },
   {
@@ -1949,6 +2019,403 @@ export const UI_STATES: readonly UiState[] = [
     ready: '.view--live .live-door',
   },
 ];
+
+// ── A computer's window (desktop) ──────────────────────────────────────────
+
+/**
+ * The windows of a computer the desktop states open in: a mouse, no touch (openState's `size`), so the app draws its
+ * computer layout (desktop, BRIEF decisions 5 and 6). Every screen family at 1440 × 900; ORBES CARE's (PRIVATE CARE's
+ * every step, an order's DOCUMENTS), customer intelligence I2's (THE CLUB's tier) and Cinema in white also at
+ * 1024 × 768 and 1920 × 1080.
+ */
+const DESK_WINDOWS = Object.freeze({
+  1024: Object.freeze({ width: 1024, height: 768 }),
+  1440: Object.freeze({ width: 1440, height: 900 }),
+  1920: Object.freeze({ width: 1920, height: 1080 }),
+});
+type DeskWidth = keyof typeof DESK_WINDOWS;
+
+/** The phone's state `id` (its account, address, routes, acts and ready). */
+function phoneState(id: string): UiState {
+  const s = PHONE_STATES.find((x) => x.id === id);
+  if (!s) throw new Error(`no phone state ${id}`);
+  return s;
+}
+
+/** A desktop state's id: `desk-`, `light-` in light, its name, then its window's width unless it is 1440 × 900. */
+const deskId = (name: string, width: DeskWidth, light: boolean) => `desk-${light ? 'light-' : ''}${name}${width === 1440 ? '' : `-${width}`}`;
+const deskTitle = (title: string, width: DeskWidth, light: boolean) => {
+  const w = DESK_WINDOWS[width];
+  return `${title} (a computer, ${w.width} × ${w.height}${light ? ', in light' : ''})`;
+};
+
+/**
+ * The state `base` on a computer's window of `width` (in light with `light`): the same demo, account, address, routes and
+ * acts, the window a mouse's (the phone's own acts take the computer's paths where a computer's differ: onComputer), its
+ * capture the whole page. `name` is its id after `desk-` (the phone's id by default).
+ */
+function onDesk(base: UiState, width: DeskWidth, opts: { light?: boolean; name?: string; extra?: Partial<UiState> } = {}): UiState {
+  const light = opts.light ?? false;
+  return {
+    ...base,
+    id: deskId(opts.name ?? base.id, width, light),
+    title: deskTitle(base.title, width, light),
+    refs: ['desktop', ...(PHONE_STATES.includes(base) ? [`phone: ${base.id}`] : [])],
+    size: DESK_WINDOWS[width],
+    light: light || undefined,
+    viewport: undefined,
+    stress: undefined,
+    ...opts.extra,
+  };
+}
+
+/** The phone's states `ids` on a computer's window of `width`. */
+const desk = (width: DeskWidth, ...ids: string[]): UiState[] => ids.map((id) => onDesk(phoneState(id), width));
+/** The phone's states `ids` on each window of `widths` (in light with `light`), in the order of `ids` then of the windows. */
+const atWidths = (widths: readonly DeskWidth[], light: boolean, ids: readonly string[]): UiState[] => ids.flatMap((id) => widths.map((w) => onDesk(phoneState(id), w, { light })));
+const SMALL_AND_MAIN: readonly DeskWidth[] = [1024, 1440];
+const THREE: readonly DeskWidth[] = [1024, 1440, 1920];
+
+/** A state's act, then `more` on the page it reached. */
+const andThen = (s: UiState, more: (run: StateRun) => Promise<void>): Pick<UiState, 'act'> => ({
+  act: async (run, hold) => {
+    await s.act?.(run, hold);
+    await more(run);
+  },
+});
+
+/** A state made for a computer: its id, title and window (1440 × 900 unless said). */
+function deskOwn(name: string, state: Omit<UiState, 'id' | 'refs' | 'size'>, width: DeskWidth = 1440): UiState {
+  return { ...state, id: deskId(name, width, !!state.light), title: deskTitle(state.title, width, !!state.light), refs: ['desktop'], size: DESK_WINDOWS[width] };
+}
+
+/** The SCAN page (/verify/scan), UPLOAD A PHOTO given `photo`: the photo path, as on a phone. */
+async function scanPageUpload(run: StateRun, photo: { name: string; mimeType: string; buffer: Buffer }): Promise<void> {
+  await run.page.locator('.view--scanpage .d-scanpage__code svg').waitFor();
+  await run.page.setInputFiles('#photo-input', photo);
+}
+
+/** MY PIECES' ORDERS (a computer's rows), then the order whose row reads `row`: its own page (/verify/orders/OR-…). */
+async function openOrderPage(run: StateRun, row: RegExp): Promise<void> {
+  await piecesTab(run, 'ORDERS');
+  await run.page.locator('.view--pieces .d-orow', { hasText: row }).first().click();
+  await run.page.locator('.view--order .d-order__head').waitFor({ timeout: 20_000 });
+}
+
+/** The scan's answer with its warranty VOID (no demo piece has a void warranty and a code to read): NO LONGER VALID, WRITE. */
+async function voidWarranty(page: Page): Promise<void> {
+  await page.route('**/api/v1/verify', async (route) => {
+    const response = await route.fetch();
+    const body = (await response.json()) as { warranty?: Record<string, unknown> | null };
+    if (body.warranty) body.warranty = { ...body.warranty, status: 'VOID' };
+    await route.fulfill({ response, json: body });
+  });
+}
+
+/** A drawn release's list of entries as the server pages it, `total` long, ranked (THE ENTRIES at its longest). */
+async function longEntries(page: Page, total: number): Promise<void> {
+  await page.route('**/api/v1/drops/*/entries?*', async (route) => {
+    const url = new URL(route.request().url());
+    const size = Number(url.searchParams.get('pageSize')) || 100;
+    const at = Math.max(1, Number(url.searchParams.get('page')) || 1);
+    const items = [];
+    for (let rank = (at - 1) * size + 1; rank <= Math.min(total, at * size); rank++) {
+      items.push({ id: `00000000-0000-4000-8000-${String(rank).padStart(12, '0')}`, tier: 1 + (rank % 3), seniority: 1 + (rank % 7), rank, size: null });
+    }
+    await route.fulfill({ json: { items, page: at, pageSize: size, total } });
+  });
+}
+
+/** ORBES CARE's stage (orbes-care) at the three windows: each warranty, each moment of a claim, LIFETIME, a warranty credit. */
+const CARE_STAGE = [
+  'pieces-orbes-care',
+  'pieces-orbes-care-two-years',
+  'pieces-orbes-care-below',
+  'pieces-claim-label',
+  'pieces-claim-replaced',
+  'pieces-claim-part-credit',
+  'pieces-claim-refused',
+  'pieces-claim-repaired',
+  'certificate-lifetime',
+  'tier-warranty-credit',
+] as const;
+/** The full demo's ORBES CARE and I2 at the three windows: PRIVATE CARE's form and label, SERVICE, a result's ORBES CARE, IN USE. */
+const CARE_FULL = ['piece-care-request', 'piece-care-label', 'pieces-service', 'result-first-registration-care', 'account-sheet-in-use'] as const;
+/** A result's ORBES CARE with its warranty no longer valid (no demo piece has one and a code to read): WRITE in WARRANTY. */
+const voidWarrantyAt = (w: DeskWidth): UiState =>
+  onDesk(phoneState('result-registered-signed-out'), w, {
+    name: 'result-void-warranty',
+    extra: {
+      title: 'A piece read signed out, its warranty no longer valid: ORBES CARE, NO LONGER VALID, WRITE TO ORBES CLIENT SERVICES',
+      routes: voidWarranty,
+      ...andThen(phoneState('result-registered-signed-out'), (run) => tab(run, 'ORBES CARE').click()),
+    },
+  });
+
+/** The paid order IN BLUE's own page, packing begun (orders-delivery's writes): DELIVERY ADDRESS, ENGRAVING, DOCUMENTS with ORBES CARE CONDITIONS · PDF. */
+const orderDeliveryAt = (w: DeskWidth): UiState =>
+  onDesk(phoneState('orders-delivery'), w, { name: 'order-delivery', extra: { ...andThen(phoneState('orders-delivery'), (run) => openOrderPage(run, /IN BLUE/)), ready: '.view--order .pieces__engraving-locked' } });
+/** PRIVATE CARE's steps in the full demo (ORBES CARE, plan §2(d) item 2), beside CARE_FULL. */
+const PRIVATE_CARE = ['piece-care-available', 'piece-care-requested', 'piece-care-returning', 'piece-care-done'] as const;
+
+/**
+ * The desktop shards in dark, and Cinema in white (desk-8); the light twins of HANDOVER §5.8 follow in desk-9, the other
+ * screens in desk-10 … desk-12 (DESK_GROUPS).
+ */
+const DESK_SHARDS: Record<string, readonly UiState[]> = {
+  'desk-1': [
+    // ── NOW, THE SCAN, a result, the scan's problems, sign in ──
+    ...desk(1440, 'now-signed-in', 'now-signed-out'),
+    deskOwn('scan-page', { title: 'The SCAN page: SCAN AN ORBES CODE, WITH YOUR PHONE (its QR code), FROM THIS COMPUTER, UPLOAD A PHOTO', variant: 'full', path: at('/verify/scan'), ready: '.view--scanpage .d-scanpage__code svg' }),
+    deskOwn('scan-upload', {
+      title: 'The SCAN page, UPLOAD A PHOTO of a code: AUTHENTIC — FIRST REGISTRATION',
+      variant: 'full',
+      path: at('/verify/scan'),
+      act: async (run) => {
+        const code = run.demo.codes.first;
+        if (!code) throw new Error('no demo code first');
+        await scanPageUpload(run, { name: 'orbes-code.png', mimeType: 'image/png', buffer: codePhoto(code) });
+        await run.page.locator('.view--result .n-result__title').waitFor({ timeout: 30_000 });
+        await settle(run.page);
+      },
+      ready: '.view--result',
+    }),
+    deskOwn('scan-photo-unreadable', {
+      title: 'The SCAN page, UPLOAD A PHOTO without a code: NO ORBES CODE FOUND',
+      variant: 'full',
+      path: at('/verify/scan'),
+      act: (run) => scanPageUpload(run, { name: 'blank.png', mimeType: 'image/png', buffer: blankPng() }),
+      ready: '.view--message',
+    }),
+    ...desk(1440, 'result-ownership-verified', 'result-registered-signed-out', 'result-unusual-card', 'result-invalid'),
+    // The service failing (HANDOVER §5.8): CONNECTION INTERRUPTED, A MOMENT, PLEASE, VERIFICATION UNAVAILABLE; the scan's window closing.
+    ...desk(1440, 'problem-network', 'problem-rate-limited', 'problem-server', 'result-registration-closed'),
+    deskOwn('sign-in', { title: 'The sign-in page over a photograph: SIGN IN, CREATE ACCOUNT', variant: 'full', path: at('/verify/sign-in'), ready: '.view--signin form' }),
+    ...desk(1440, 'sign-up', 'pieces-sign-in-refused', 'result-forgotten-password'),
+  ],
+  'desk-2': [
+    // ── PIECES, an order's page, a piece, the certificate ──
+    ...desk(1440, 'pieces', 'pieces-orders'),
+    deskOwn('order', {
+      title: 'An order’s page: the LIVE RELEASE’s order RESERVED, its steps, its terms, DELIVERY ADDRESS, ENGRAVING, DOCUMENTS',
+      variant: 'full',
+      as: you,
+      path: at('/verify/pieces'),
+      act: (run) => openOrderPage(run, /RESERVED/),
+      ready: '.view--order .d-order__head',
+    }),
+    ...desk(1440, 'pieces-releases', 'piece', 'pieces-failed', 'piece-care-available', 'piece-care-requested', 'piece-care-returning', 'piece-care-done', 'certificate'),
+    deskOwn('certificate-ended', {
+      title: 'The shared certificate NO LONGER VALID (its record changed since)',
+      variant: 'full',
+      path: (d) => `/verify/c#${d.links.certificate}`,
+      // The server's own answer for a certificate no longer valid (services/ownership-certificates.ts: CertificateLookup).
+      routes: (page) => page.route('**/api/v1/certificates/lookup', (route) => route.fulfill({ json: { status: 'NO_LONGER_VALID', checkedAt: NOCTURNE_NOW.toISOString() } })),
+      ready: '.view--certificate[data-state="ended"]',
+    }),
+    deskOwn('certificate-not-found', {
+      title: 'The shared certificate NOT FOUND (a link withdrawn or incomplete)',
+      variant: 'full',
+      path: at('/verify/c#not-a-certificate-link'),
+      ready: '.view--certificate[data-state="unknown"]',
+    }),
+
+    // ── THE COLLECTION, a model, THE PRIVATE SALON, YOUR WISHLIST, THE CLUB, the account's pages ──
+    ...desk(1440, 'collection', 'model', 'model-salon'),
+    deskOwn('collection-salon-locked', {
+      title: 'THE COLLECTION of a TITANE owner, THE PRIVATE SALON locked: it opens at PLATINE, from 5 pieces',
+      variant: 'full',
+      as: you,
+      path: at('/verify/lookbook'),
+      // An owner below the salon's tier: no model of its tier, the lowest tier above it (as services/salon.ts answers).
+      routes: (page) => page.route('**/api/v1/club/lookbook', (route) => route.fulfill({ json: { models: [], opensAt: { level: 2, name: 'PLATINE', pieces: 5 } } })),
+      ready: '.view--lookbook[data-state="ready"] .n-lookbook__teaser-text',
+    }),
+    deskOwn('wishlist-signed-out', { title: 'YOUR WISHLIST’s page, signed out', variant: 'full', path: at('/verify/account/wishlist'), ready: '.view--wishlist:not([data-state="loading"])' }),
+    deskOwn('wishlist-failed', {
+      title: 'YOUR WISHLIST’s page that could not be read: TRY AGAIN',
+      variant: 'full',
+      as: you,
+      path: at('/verify/account/wishlist'),
+      routes: (page) => page.route('**/api/v1/account/wishlist', (route) => (route.request().method() === 'GET' ? route.abort('failed') : route.continue())),
+      ready: '.view--wishlist[data-state="failed"]',
+    }),
+    ...desk(1440, 'club-platine', 'account-sheet-password'),
+    // YOUR SIZES' page: it writes nothing (sizes-view runs with the writes of YOUR SIZES only for the phone's shard).
+    onDesk(phoneState('sizes-view'), 1440, { name: 'account-sizes', extra: { mutates: undefined } }),
+  ],
+  'desk-3': [
+    // ── THE RELEASES, a draw, a LIVE RELEASE, THE CIRCLE, the legal pages ──
+    ...desk(1440, 'releases', 'releases-past', 'draw', 'draw-drawn'),
+    deskOwn('draw-entries-long', {
+      title: 'A draw drawn, THE ENTRIES at 600: SHOW MORE until the last, the list at its end, its head held under the bar',
+      variant: 'full',
+      as: you,
+      path: release('draw:MONOLITHE IN GOLD'),
+      routes: (page) => longEntries(page, 600),
+      act: async (run) => {
+        const items = run.page.locator('.view--release .release__list > *');
+        await items.first().waitFor({ timeout: 20_000 });
+        for (let n = await items.count(); n < 600; n = await items.count()) {
+          await run.page.locator('.view--release .release__more').first().click();
+          await run.page.waitForFunction((was) => document.querySelectorAll('.view--release .release__list > *').length > was, n, { timeout: 20_000 });
+        }
+        // The last entry at the window's foot: the rows drawn (content-visibility) are then those of its end, whatever is above the list.
+        await items.last().evaluate((el) => el.scrollIntoView({ block: 'end' }));
+      },
+      ready: '.view--release .release__list',
+    }),
+    ...desk(1440, 'live-announced', 'live-past-secured', 'circle', 'post-invitation', 'post-poll'),
+    ...desk(1440, 'legal-terms', 'legal-terms-fr', 'legal-privacy', 'legal-faq', 'legal-index'),
+    // An answer of ORBES Client Services (HANDOVER §5.8), on NOW: it writes, after the full demo's other desktop states.
+    ...desk(1440, 'now-messages'),
+  ],
+  'desk-4': [
+    // ── The other stages at 1440 × 900 ──
+    // YOUR ACCOUNT and MESSAGES' page (the draw-leads stage): empty, writing from a piece, an answer (HANDOVER §5.8).
+    ...desk(1440, 'now-draw-leads', 'account-sheet', 'account-messages-empty', 'account-write', 'account-messages-thread'),
+    ...desk(1440, 'now-collection-leads', 'now-empty', 'room', 'live-turn', 'after-room-door', 'model-pairs', 'draw-place-held', 'piece-care-used', 'wishlist'),
+    // The console's writes on an order (HANDOVER §5.8), each on its order's page: YOUR NEW CLAIM CODE waiting, packing begun, a return asked.
+    onDesk(phoneState('claim-waiting'), 1440, { name: 'order-claim-waiting', extra: { ...andThen(phoneState('claim-waiting'), (run) => openOrderPage(run, /IN BLUE/)), ready: '.view--order .pieces__claim' } }),
+    orderDeliveryAt(1440),
+    onDesk(phoneState('orders-case'), 1440, { name: 'order-case', extra: { ...andThen(phoneState('orders-case'), (run) => openOrderPage(run, /IN BLUE/)), ready: '.view--order .pieces__return-address' } }),
+    ...desk(1440, 'account-addresses'),
+    // A model's gallery (the stage gallery, D11): its grid of tiles; the viewer opened on the first, 1 / 2.
+    deskOwn('model-gallery', { title: 'A model’s page with its gallery: MONOLITHE in steel, its photographs in gold and in blue as tiles', variant: 'gallery', as: you, path: sheet('steel'), ready: '.view--sheet .n-model__gallery.d-gallery .d-gallery__open' }),
+    deskOwn('model-gallery-viewer', {
+      title: 'A model’s gallery, its first photograph enlarged: PREVIOUS, NEXT, CLOSE, 1 / 2',
+      variant: 'gallery',
+      as: you,
+      path: sheet('steel'),
+      act: async (run) => {
+        await run.page.locator('.view--sheet .d-gallery__open').first().click();
+        await run.page.locator('.d-viewer .d-viewer__photo').waitFor();
+      },
+      ready: '.d-viewer .d-viewer__position',
+    }),
+  ],
+  // ── ORBES CARE and I2 at 1024 × 768, 1440 × 900 and 1920 × 1080 ──
+  // ORBES CARE's stage at 1024 and 1440; PRIVATE CARE used (its stage) and an order's DOCUMENTS with ORBES CARE
+  // CONDITIONS · PDF (orders-delivery's stage, written once) at 1024 and 1920, their 1440 in desk-2 and desk-4.
+  'desk-5': [...atWidths(SMALL_AND_MAIN, false, CARE_STAGE), ...atWidths([1024, 1920], false, ['piece-care-used']), orderDeliveryAt(1024), orderDeliveryAt(1920)],
+  // The full demo's ORBES CARE and I2 at 1024 and 1440; the birthday credit's stage (its one write) at the three;
+  // PRIVATE CARE's steps and THE CLUB of a PLATINE account at 1024 and 1920 (their 1440 in desk-2).
+  'desk-6': [
+    ...atWidths(SMALL_AND_MAIN, false, CARE_FULL),
+    ...SMALL_AND_MAIN.map(voidWarrantyAt),
+    ...atWidths(THREE, false, ['birthday-credit']),
+    ...atWidths([1024, 1920], false, [...PRIVATE_CARE, 'club-platine']),
+  ],
+  // Both at 1920; YOUR PROFILE's stage (its writes, in order) at the three: entered, its tastes, then two retired.
+  'desk-7': [
+    ...atWidths([1920], false, CARE_STAGE),
+    ...atWidths([1920], false, CARE_FULL),
+    voidWarrantyAt(1920),
+    ...atWidths(THREE, false, ['account-profile', 'profile-tastes']),
+    onDesk(phoneState('profile-tastes'), 1440, {
+      name: 'profile-retired-tastes',
+      extra: {
+        title: 'YOUR PROFILE: YOUR TASTES with three finishes the collection no longer shows (Black, Rose gold, Silver), the last two side by side: NO LONGER IN THE COLLECTION',
+        act: async (run, hold) => {
+          // Two more finishes chosen when the collection showed them, which it no longer does (written once). The retired
+          // follow the collection's three in their keys' order (services/tastes.ts), so BLACK sits alone at the end of the
+          // second row and ROSE GOLD and SILVER share the third: one note under its finish, two side by side.
+          const you = run.demo.accounts.you!;
+          const { db } = run.stage.ctx;
+          await yourProfile(run, true);
+          for (const [key, label] of [['BLACK', 'Black'], ['ROSE GOLD', 'Rose gold']] as const) {
+            if (!(await db.selectFrom('account_tastes').select('value_key').where('account_id', '=', you.id).where('value_key', '=', key).executeTakeFirst())) {
+              await db.insertInto('account_tastes').values({ account_id: you.id, kind: 'FINISH', value_key: key, label }).execute();
+            }
+          }
+          await phoneState('profile-tastes').act?.(run, hold);
+        },
+      },
+    }),
+  ],
+  // ── Cinema in white (light mode) at the three windows ──
+  'desk-8': atWidths(THREE, true, ['now-signed-in', 'releases', 'collection', 'model', 'draw', 'live-announced', 'pieces-orbes-care', 'account-sheet-in-use']),
+};
+
+/** The states the review preview could not show (HANDOVER §5.8; plan §2(j): both modes), by their desk names at 1440 × 900. */
+const UNSHOWN_IN_PREVIEW = [
+  'problem-network',
+  'problem-rate-limited',
+  'problem-server',
+  'result-registration-closed',
+  'order-claim-waiting',
+  'order-delivery',
+  'order-case',
+  'account-messages-thread',
+  'now-messages',
+  'collection-salon-locked',
+  'wishlist-signed-out',
+  'wishlist-failed',
+  'certificate-ended',
+  'certificate-not-found',
+  'draw-entries-long',
+  'profile-retired-tastes',
+] as const;
+
+/** The dark desk state `desk-<name>` at 1440 × 900, in light: the same demo, routes and acts, LIGHT MODE stored. */
+function inLight(name: string): UiState {
+  const s = Object.values(DESK_SHARDS)
+    .flat()
+    .find((x) => x.id === deskId(name, 1440, false));
+  if (!s || s.light || s.size !== DESK_WINDOWS[1440]) throw new Error(`no dark desk state ${name} at 1440 × 900`);
+  // Its title says its window (deskTitle), unless the state's own title replaced it (onDesk's extra).
+  const at1440 = deskTitle('', 1440, false);
+  const title = s.title.endsWith(at1440) ? s.title.slice(0, -at1440.length) : s.title;
+  return { ...s, id: deskId(name, 1440, true), title: deskTitle(title, 1440, true), light: true };
+}
+
+/**
+ * The desktop states (plan DESKTOP, step 12), by the content test's shard each runs in (nocturne.content.harness.ts:
+ * desk-1 … desk-12; about twenty states each, at most 28, the states of a stage that write in one shard, in order): every
+ * screen family on a computer at 1440 × 900, the pages the computer adds (the SCAN page, sign in, an order's page, the
+ * account's pages, MESSAGES), the states the review preview could not show (HANDOVER §5.8: the service failing, the
+ * scan's window closing, the console's writes, the salon locked, the wishlist signed out and failed, a certificate no
+ * longer valid or not found, 600 entries, two retired tastes side by side) in both modes, a model's gallery (the stage
+ * gallery, D11); the room's and the after-room's other screens, a result's other answers, a piece's incidents, the draw's
+ * other states, the failures and the extreme content (desk-10 … desk-12); ORBES CARE (every PRIVATE CARE step, an
+ * order's DOCUMENTS), I2 (THE CLUB's tier) and Cinema in white also at 1024 × 768 and 1920 × 1080. Their text is the baseline's own (its desk-* entries).
+ */
+export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.freeze({
+  ...DESK_SHARDS,
+  // ── HANDOVER §5.8's states in light at 1440 × 900 (each stage fresh: its writes once, in order) ──
+  'desk-9': UNSHOWN_IN_PREVIEW.map(inLight),
+  // ── The room's other screens at 1440 × 900, each staged for a computer (HANDOVER §5.4) ──
+  // The line, secured with PAY, CONFIRMED, sold out in a size, the five ends, ENTER THE LINE; a LIVE RELEASE's rules and
+  // not eligible; the room not eligible, then entered (its write, last of its stage); the after-room's join and its ends.
+  'desk-10': [
+    ...desk(1440, 'live-line', 'live-secured', 'live-confirmed', 'live-sold-out-size', 'live-missed', 'live-expired', 'live-released', 'live-left', 'live-removed', 'live-join'),
+    ...desk(1440, 'live-rules', 'live-rules-not-eligible', 'room-not-eligible', 'room-ready'),
+    ...desk(1440, 'after-room-join', 'after-room-sold-out', 'after-room-closed', 'after-room-ended', 'after-room-over'),
+  ],
+  // ── A result's other answers, a piece's incidents, THE PRIVATE SALON in sizes, the draw's other states, the failures ──
+  // The full demo's writes (a transfer code, the ceremony, a piece received, REQUESTED, a draw entered) last, in this order;
+  // MY PIECES' ORDERS also at 1024 × 768 (plan §2(d) item 6: the row's wrap).
+  'desk-11': [
+    ...desk(1440, 'result-unknown', 'result-revoked', 'result-unreadable'),
+    ...desk(1440, 'piece-stolen', 'piece-transfer', 'piece-in-service', 'model-salon-sizes'),
+    ...desk(1440, 'draw-soon', 'draw-early', 'draw-sizes', 'pieces-draws'),
+    ...desk(1440, 'circle-failed', 'post-failed', 'post-not-found', 'model-not-found', 'draw-not-found'),
+    ...desk(1024, 'pieces-orders'),
+    ...desk(1440, 'result-transfer-code', 'result-ceremony', 'result-received', 'model-salon-requested', 'draw-entered'),
+  ],
+  // ── The extreme content at 1440 × 900: the stress demo's 16 states (its ceremony, which writes, last), the empty demo's ──
+  'desk-12': [
+    ...desk(1440, 'now-stress', 'result-stress', 'club-stress', 'pieces-stress', 'pieces-orders-stress', 'piece-stress', 'account-sheet-stress', 'collection-stress', 'model-stress'),
+    ...desk(1440, 'releases-stress', 'room-stress', 'live-far-stress', 'circle-stress', 'post-stress', 'post-poll-stress', 'result-ceremony-stress'),
+    ...desk(1440, 'pieces-empty', 'collection-empty', 'releases-empty', 'circle-empty'),
+  ],
+});
+
+/** The desktop states, shard by shard. */
+export const DESK_STATES: readonly UiState[] = Object.values(DESK_GROUPS).flat();
+
+/** Every state the content test reaches: the phone's, then the computer's (desk-*). */
+export const UI_STATES: readonly UiState[] = [...PHONE_STATES, ...DESK_STATES];
 
 /**
  * Plan NEXT-NINE, AC-01: the room of a collector who saved a bracelet of 17 cm (the room demo's `sized`): 17 preselected,
@@ -2164,6 +2631,8 @@ export async function openState(browser: Browser, stage: UiStage, demo: Nocturne
     await context.addInitScript({ content: 'globalThis.__name = globalThis.__name || ((f) => f);' });
     await context.clock.setFixedTime(NOCTURNE_NOW);
     await context.addInitScript(cameraScript, { failure: state.camera && state.camera !== 'hold' ? state.camera : null, hold: state.camera === 'hold' });
+    // LIGHT MODE as the app keeps it on the device (a string: no transpiler helper reaches the page).
+    if (state.light) await context.addInitScript({ content: "try { localStorage.setItem('orbes.mode', 'light'); } catch {}" });
     if (state.as) {
       const a = demo.accounts[state.as];
       if (!a) throw new Error(`no demo account ${state.as}`);
@@ -2223,7 +2692,7 @@ export async function myPiecesTexts(opened: { page: Page; stage: UiStage }): Pro
     await settle(page, 200);
     out.push(...(await pageTexts(page)));
   }
-  const account = page.locator('.n-hd button.n-acct');
+  const account = page.locator('.n-hd .n-acct:has(> .n-mono):not([hidden])');
   if ((await account.count()) > 0) {
     await account.first().click();
     await page.locator('.n-account:not([hidden]) .n-account__panel').waitFor({ timeout: 20_000 });

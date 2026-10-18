@@ -1,0 +1,14 @@
+/*
+ * The desktop layout of the verification app (desktop, D8): its own stylesheet, which index.html links after
+ * ./styles.css under the desktop's media query (shared/desktop.ts DESKTOP_QUERY), so a phone never waits for it.
+ * CINEMA's foundation (shared/desktop.css), then each family of screens, in that order of the cascade, and last a
+ * computer with a touch screen's hit areas (shared/desktop-tap.css, Q2).
+ */
+@import "../shared/desktop.css";
+@import "../shared/desktop-room.css";
+@import "../shared/desktop-account.css";
+@import "../shared/desktop-order.css";
+@import "../shared/desktop-messages.css";
+@import "../shared/desktop-pieces.css";
+@import "../shared/desktop-circle.css";
+@import "../shared/desktop-tap.css";

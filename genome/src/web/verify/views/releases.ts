@@ -86,7 +86,20 @@ import { StoryCards } from '../story-card.js';
 import { messageOf } from './forms.js';
 import { BANNER_REFRESH_MS } from './live-banner.js';
 import { OwnershipPanel } from './ownership.js';
+import { signInLine } from './desktop-signin.js';
+import { isDesktop, touchLayout } from '../../shared/desktop.js';
 import { tabsView } from './tabs.js';
+
+/**
+ * A seed's figures as two halves with a break between them: a computer's column too narrow for the 64 figures at the
+ * Small role breaks them once, in the middle, never inside a group (shared/desktop.css `.d-hex-half`). A phone or a
+ * tablet keeps its one text, which breaks anywhere, as before.
+ */
+function hexHalves(value: string): (HTMLElement | string)[] {
+  if (touchLayout()) return [value];
+  const mid = Math.ceil(value.length / 2);
+  return [h('span', { class: 'd-hex-half', text: value.slice(0, mid) }), h('wbr'), h('span', { class: 'd-hex-half', text: value.slice(mid) })];
+}
 
 export interface ReleasesView {
   root: HTMLElement;
@@ -206,6 +219,8 @@ function drawClock(c: Clock, now: number): void {
 /** `liveFailed`: the LIVE half could not be read (a refusal of its own rate group, an error): the draws show all the same. */
 type ListLoad = { kind: 'loading' } | { kind: 'ready'; live: LiveCardModel[]; liveFailed: boolean; cards: ReleaseCardModel[] } | { kind: 'failed'; message: string };
 
+/** Desktop: a draw frame's words waiting for the account's entry (renderHero; shared/desktop.css). */
+const WORDS_WAIT = 'd-words-wait';
 /** THE RELEASES reads its releases again at the next moment that changes a LIVE RELEASE's card, this long after it. */
 const CHANGE_MARGIN_MS = 600;
 /** …and at the latest this often while it is open. */
@@ -769,6 +784,11 @@ class ReleasePage {
   private part: string | null = null;
   /** What the hero was drawn from: drawn again only when it changes (the photograph is not loaded again). */
   private heroKey = '';
+  /** On a computer, the frame's place for YOUR ENTRY's main action (syncFrameAction); hidden on a phone. */
+  private frameAction: HTMLElement | null = null;
+  /** On a computer, the frame's words wait (unseen, their room kept) for the account's entry, at most this long, so
+   *  YOUR ENTRY's main action arrives with them and nothing in the frame moves (BRIEF §10.11). */
+  private wordsWait = 0;
   /** Plan NEXT LOT §3.6.F: the size YOUR SIZES suggests in this draw (the server's), read with the entry. */
   private savedSize: DrawSizeRef | null = null;
   /** The size picked in YOUR SIZE (preselected, or tapped), and where a preselection came from. */
@@ -1025,7 +1045,9 @@ class ReleasePage {
       // C40: the sentence alone on the margin, 22 px under ‹ THE RELEASES.
       const line = quietLine(RELEASES.notFound, 'release__missing');
       line.id = 'release-title';
-      this.body.replaceChildren(h('div', { class: 'n-px n-release__missing' }, line));
+      // On a computer, the page's action under its sentence (§10.24): THE RELEASES, as its crumb; never on a phone.
+      const back = h('p', { class: 'n-release__missing-back' }, textLink(RELEASES.link, { href: RELEASES_PATH, onOpen: () => this.deps.onReleases(), extraClass: 'n-release__missing-link' }));
+      this.body.replaceChildren(h('div', { class: 'n-px n-release__missing' }, line, back));
       // The focus the page's title had (gone with it) comes to the sentence, never taken from the chrome.
       const active = document.activeElement;
       if (active === null || active === document.body || this.root.contains(active)) {
@@ -1077,6 +1099,10 @@ class ReleasePage {
     this.heroKey = key;
     const title = modelTitle('h1', ['n-g', 'n-t1', 'n-release__title', 'release__title'], s.title, modelName(s.model));
     title.id = 'release-title';
+    // On a computer the frame's right block holds, under the state, the page's main action (YOUR ENTRY's): an element
+    // of the desktop layout only, never shown on a phone (shared/desktop.css). When entries close is THE RELEASE's row
+    // alone (one place per piece of information).
+    this.frameAction = h('p', { class: 'n-release__frame-action', attrs: { hidden: true } });
     const words = h(
       'div',
       { class: 'n-px n-ctr n-lift n-release__words' },
@@ -1084,9 +1110,74 @@ class ReleasePage {
       title,
       s.drawn ? null : h('p', { class: 'n-g n-lb n-ivc n-release__state release__state', text: s.stateLabel }),
       s.access ? timedAccess(s.access) : null,
+      s.drawn ? null : this.frameAction,
+      // On a computer, THIS RELEASE IS OVER stands in the frame beside the title (its plate under the frame is the
+      // phone's): an element of the desktop layout only, never shown on a phone (shared/desktop.css).
+      s.drawn ? h('p', { class: 'n-g n-t2 n-ivc n-release__over-word', text: RELEASES.over }) : null,
       s.drawn && this.part ? h('p', { class: 'n-state n-release__part release__part' }, ...(this.part === RELEASES.past.secured ? [icon('check', { small: true })] : []), this.part) : null,
     );
     this.hero.replaceChildren(...photographed(s.image, words, { eager: true, bare: 'n-release__bare', extraClass: 'n-release__photo release__photo', imgClass: 'release__img' }));
+    // Desktop: signed in, a draw that may offer ENTER THE DRAW or RESERVE A PLACE draws that button in its
+    // frame's right block once the account's entry is read; until then (400 ms at most) the words are kept unseen in
+    // their place, so the block never grows under the eye (a phone shows them at once, as before).
+    window.clearTimeout(this.wordsWait);
+    if (isDesktop() && !s.drawn && (s.state === 'OPEN' || s.state === 'UPCOMING') && this.deps.session.state.status === 'signed-in' && (this.entry.kind === 'loading' || this.entry.kind === 'none')) {
+      words.classList.add(WORDS_WAIT);
+      this.wordsWait = window.setTimeout(() => words.classList.remove(WORDS_WAIT), 400);
+    }
+    this.syncFrameAction();
+  }
+
+  /**
+   * The frame's main action on a computer (desktop, BRIEF §3, §10.27): YOUR ENTRY's own, ENTER THE DRAW or
+   * RESERVE A PLACE, under the same name and conditions; pressed, it takes the page to YOUR ENTRY and presses its
+   * button, or, in a draw with sizes, brings the focus to YOUR SIZE. Signed out while entries are open or soon, YOUR
+   * ENTRY's line (decision 6): SIGN IN and CREATE ACCOUNT, to the sign-in page. Hidden when YOUR ENTRY offers neither
+   * (and always on a phone).
+   */
+  private syncFrameAction(): void {
+    const slot = this.frameAction;
+    if (!slot) return;
+    // The entry read (or no longer awaited): the frame's words are seen, with their action (renderHero).
+    if (this.entry.kind !== 'loading' && this.entry.kind !== 'none') slot.closest('.n-release__words')?.classList.remove(WORDS_WAIT);
+    const main = this.entrySection.querySelector<HTMLButtonElement>('.release__enter, .release__reserve');
+    const label = main?.textContent ?? '';
+    const current = slot.querySelector<HTMLButtonElement>(':scope > button');
+    const sheet = this.load.kind === 'ready' ? this.load.sheet : null;
+    const signedOut = this.deps.session.state.status !== 'signed-in' && sheet !== null && (sheet.state === 'OPEN' || sheet.state === 'UPCOMING');
+    if (!main && signedOut && isDesktop()) {
+      if (!slot.querySelector(':scope > .d-signin-line')) slot.replaceChildren(signInLine(RELEASES.signIn));
+      slot.classList.add('n-release__frame-action--pair');
+      slot.hidden = false;
+      return;
+    }
+    slot.classList.remove('n-release__frame-action--pair');
+    if (!main) {
+      if (!slot.hidden) slot.hidden = true;
+      return;
+    }
+    // Disabled only while a request runs: a main action that waits for a size leads to YOUR SIZE.
+    const busy = this.busy;
+    if (current && current.textContent === label && current.disabled === busy && !slot.hidden) return;
+    const b = button(label, {
+      extraClass: 'n-release__frame-button',
+      onClick: () => {
+        const now = this.entrySection.querySelector<HTMLButtonElement>('.release__enter, .release__reserve');
+        if (!now) return;
+        // A draw with sizes: never entered from the frame with a size not seen; YOUR SIZE first (its size picked, else
+        // the first it offers), where the size is checked, right above the action.
+        const sizes = this.entrySection.querySelector<HTMLElement>('.release__sizes');
+        if (sizes) (sizes.querySelector<HTMLElement>('button[aria-pressed="true"]:not([disabled])') ?? sizes.querySelector<HTMLElement>('button:not([disabled])') ?? now).focus();
+        else if (!now.disabled) {
+          // The answer (ENTERED, PLACE RESERVED, or why not) is YOUR ENTRY's: the page is taken there, at once.
+          this.entrySection.scrollIntoView({ block: 'start' });
+          now.click();
+        }
+      },
+      attrs: { disabled: busy, 'aria-busy': busy ? 'true' : 'false' },
+    });
+    slot.replaceChildren(b);
+    slot.hidden = false;
   }
 
   /** YOUR ENTRY: the sign-in when signed out, else what the entry means now and the one action it allows. */
@@ -1157,6 +1248,7 @@ class ReleasePage {
     }
     this.entrySection.replaceChildren(...out.filter((x): x is HTMLElement => x !== null));
     if (hadFocus && !this.entrySection.contains(document.activeElement)) (this.entrySection.querySelector<HTMLElement>('input, button:not([disabled])') ?? heading).focus({ preventScroll: true });
+    this.syncFrameAction();
   }
 
   /**
@@ -1238,7 +1330,7 @@ class ReleasePage {
       h(
         'dl',
         { class: 'n-release__seed release__seed' },
-        ...facts.map((f) => h('div', { class: 'n-release__seed-fact' }, h('dt', { class: 'n-g n-lb n-release__seed-label', text: f.label }), h('dd', { class: 'n-sm n-num n-release__hex release__hex', text: f.value }))),
+        ...facts.map((f) => h('div', { class: 'n-release__seed-fact' }, h('dt', { class: 'n-g n-lb n-release__seed-label', text: f.label }), h('dd', { class: 'n-sm n-num n-release__hex release__hex' }, ...hexHalves(f.value)))),
       ),
     ];
     if (s.drawn && this.seedMatches !== null) {

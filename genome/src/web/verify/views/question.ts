@@ -18,6 +18,7 @@
  * wrote it (closed, not asked), the block staying as it was.
  */
 import { h } from '../../shared/dom.js';
+import { isDesktop } from '../../shared/desktop.js';
 import { ApiError, type ApiClient } from '../api.js';
 import { QUESTION } from '../copy.js';
 import { questionModel } from '../question-model.js';
@@ -115,8 +116,9 @@ export class QuestionBlock {
     });
     const note = this.busy ? QUESTION.saving : m.note;
     if (this.note.textContent === note) return;
-    // On NOCTURNE's plate card a date is kept whole (the canvas's .nw): `12 OCT 2026` never breaks across two lines.
-    if (this.deps.tone === 'nocturne') this.note.replaceChildren(...keepDates(note));
+    // On NOCTURNE's plate card, and in MY PIECES on a computer, a date is kept whole (the canvas's .nw): `12 OCT 2026`
+    // never breaks across two lines.
+    if (this.deps.tone === 'nocturne' || isDesktop()) this.note.replaceChildren(...keepDates(note));
     else this.note.textContent = note;
   }
 

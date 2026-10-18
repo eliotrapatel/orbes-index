@@ -31,6 +31,7 @@
  */
 import { h, s } from '../../shared/dom.js';
 import { GEOIP_ATTRIBUTION, LEGAL_PAGES, legalPath } from '../../shared/legal.js';
+import { isDesktop } from '../../shared/desktop.js';
 import { monogramSvg } from '../../shared/monogram.js';
 import { LEGAL, SOUND, TIER } from '../copy.js';
 import { CLUB_PATH } from '../club-model.js';
@@ -299,12 +300,14 @@ export function modelTitle(tag: 'h1' | 'h2', cls: (string | null)[], text: strin
 /**
  * A photograph shown whole at the column's full width (never cropped), on the photograph's ground while it loads; with
  * `fade` (a hero's, a list's) it dissolves into the ground at its top (22 %) and its foot (46 %). `height` is the
- * canvas's (390 px for a square one).
+ * canvas's (390 px for a square one); a layout's own rules may set another through the custom property `--d-ph-h` (the
+ * desktop's frames, shared/desktop.css), which the inline height reads first, so they never fight it. On a computer, an
+ * `eager` photograph (the one a page opens on, its first frame) is also fetched first (BRIEF §10.11).
  */
 export function fadedPhoto(src: string, alt: string, opts: { height?: number; fade?: boolean; eager?: boolean; extraClass?: string } = {}): HTMLElement {
   const box = h('div', { class: ['n-ph', 'n-ph--contain', opts.fade === false ? null : 'n-fade', opts.extraClass] });
-  box.style.height = `${opts.height ?? 390}px`;
-  box.append(h('img', { attrs: { src, alt, decoding: 'async', loading: opts.eager ? 'eager' : 'lazy' } }));
+  box.style.height = `var(--d-ph-h, ${opts.height ?? 390}px)`;
+  box.append(h('img', { attrs: { src, alt, decoding: 'async', loading: opts.eager ? 'eager' : 'lazy', fetchpriority: opts.eager && isDesktop() ? 'high' : undefined } }));
   return box;
 }
 
@@ -552,10 +555,18 @@ export function footer(sound: SoundSwitch | null, onSound: () => void, onClub?: 
     ),
     soundButton ? h('p', { class: 'n-foot__sound' }, soundButton) : null,
     h('p', { class: 'n-foot__credit' }, h('a', { class: 'n-g n-dbip', attrs: { href: GEOIP_ATTRIBUTION.href, ...NEW_TAB }, text: GEOIP_ATTRIBUTION.text })),
-    // GENOME CODE joins the line on a screen 560 px wide or more, as the landing's foot had it before NOCTURNE.
-    h('p', { class: 'n-g n-cr' }, '© ORBES', h('span', { class: 'n-cr__wide', text: ' · GENOME CODE' }), ' · PARIS'),
+    copyrightLine(),
   );
   return { el, soundButton };
+}
+
+/**
+ * The footer's last line, © ORBES · GENOME CODE · PARIS: GENOME CODE joins the line on a screen 560 px wide or more, as
+ * the landing's foot had it before NOCTURNE. `extraClass` (desktop): an end page of a LIVE RELEASE on a
+ * computer says it in the room's foot (views/live.ts).
+ */
+export function copyrightLine(extraClass?: string): HTMLElement {
+  return h('p', { class: ['n-g', 'n-cr', extraClass] }, '© ORBES', h('span', { class: 'n-cr__wide', text: ' · GENOME CODE' }), ' · PARIS');
 }
 
 /** SOUND ON / OFF drawn from the switch: pressed when on. */
