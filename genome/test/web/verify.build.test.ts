@@ -247,6 +247,42 @@ describe('build-web: the display font, preloaded by both shells', () => {
     expect(gz(read(legal.assets['desktop-pointer.css'])) + gz(read(legal.assets['desktop.css']))).toBeLessThanOrEqual(45 * 1024);
   });
 
+  it('ships none of the review build in the public bundles: no review address, kit, hook or demo state list (§2(k))', () => {
+    // Every literal is built by concatenation, so this file never holds the tokens it looks for. Not the bare word
+    // (production's own verify bundle and worker hold Object's in a library guard), and not the console's assets (its
+    // own sheet and batch preview classes).
+    const P = 'proto';
+    const tokens = [
+      '/verify/' + P + 'type',
+      P + '-scan',
+      P + '-fail',
+      P + '-hold',
+      '__pre' + 'view',
+      'd-' + 'kit',
+      'd-' + P,
+      'view--' + 'kit',
+      P.toUpperCase() + 'TYPE_STATES',
+      // A few titles of the removed demo state list.
+      'NOW, signed out: a LIVE RELEASE announced, ' + 'a draw open',
+      'The scan: PREPARING CAMERA…, ' + 'before the stream',
+      'AUTHENTIC — FIRST REGISTRATION: ' + 'the CARE tab',
+      'NOW with the extreme content ' + '(a release in 42 minutes, its room open)',
+    ];
+    const files = readdirSync(join(result.outDir, 'assets')).filter((f) => /^(verify|verify-worker|verify-mode|legal|legal-mode)-[A-Z0-9]{8}\.js$/.test(f) || /^(verify|legal)(-desktop|-desktop-pointer)?-[A-Z0-9]{8}\.css$/.test(f));
+    // The two apps' bundles, their light mode's early scripts, the verify worker and their six stylesheets.
+    for (const app of ['verify', 'legal']) {
+      const a = result.apps.find((x) => x.name === app)!;
+      for (const entry of ['main.ts', 'mode.ts', 'styles.css', 'desktop-pointer.css', 'desktop.css', ...(app === 'verify' ? ['worker.ts'] : [])]) {
+        expect(files, `${app} ${entry}`).toContain(a.assets[entry]!.slice('/assets/'.length));
+      }
+    }
+    expect(files).toHaveLength(11);
+    for (const f of files) {
+      const text = read(`/assets/${f}`).toString('utf8');
+      for (const t of tokens) expect(text.includes(t), `${f} holds ${t}`).toBe(false);
+    }
+  });
+
   it('gives the console its own decoder worker (A-08): the sale mode reads codes, the main bundle carries no decoder', () => {
     const admin = result.apps.find((a) => a.name === 'admin')!;
     expect(Object.keys(admin.assets).sort()).toEqual([FONT_REF, 'favicon.svg', 'main.ts', 'styles.css', 'worker.ts']);
