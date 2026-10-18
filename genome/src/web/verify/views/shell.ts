@@ -181,8 +181,6 @@ export class Shell {
     this.header = h('header', { class: 'n-hd' }, h('span', { class: 'n-g n-wm', text: 'ORBES' }), this.account, this.signIn);
     // Desktop: on a computer ORBES is a link to NOW, the first Tab stop (§10.17); the phone's word elsewhere.
     wordmarkLink(this.header.querySelector<HTMLElement>(':scope > .n-wm'), () => appAnchor(LANDING_PATH, ['n-g', 'n-wm'], () => deps.onChapter('now'), 'ORBES'));
-    this.header.insertBefore(this.scanLink, this.account);
-    this.header.insertBefore(this.accountLink, this.signIn);
 
     this.links = new Map(
       CHAPTERS.map((c) => {
@@ -221,8 +219,9 @@ export class Shell {
     host.before(this.column);
     this.column.append(this.header, this.rail, banner, host, this.foot);
     for (const el of [this.header, this.rail, this.foot]) el.hidden = true;
-    // Desktop: the menu inside the top bar, before SCAN (the Tab order follows the eye, BRIEF §10.17).
-    dockRail(this.header, this.rail, () => [this.scanLink, this.account, this.accountLink, this.signIn]);
+    // Desktop: the menu inside the top bar, before SCAN (the Tab order follows the eye, BRIEF §10.17). SCAN and the
+    // account's link are a computer's only: out of the header elsewhere, so a phone's header is production's.
+    dockRail(this.header, this.rail, () => (isDesktop() ? [this.scanLink, this.account, this.accountLink, this.signIn] : [this.account, this.signIn]));
 
     this.sheet = new AccountSheet({
       api: deps.api,
