@@ -239,19 +239,30 @@ describe.skipIf(!HAS_CHROMIUM)('desktop chrome (Chromium, a computer)', () => {
           ['an iPad by touch', { viewport: { width: 1366, height: 1024 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, userAgent: IPAD }, null],
           ['an iPad with its trackpad', { viewport: { width: 1366, height: 1024 }, userAgent: IPAD }, TRACKPAD],
         ] as const) {
-          const context = await st.browser.newContext({ ...options, locale: 'en-GB', timezoneId: 'Europe/Paris' });
-          try {
-            if (script) await context.addInitScript({ content: script });
-            const page = await context.newPage();
-            await page.goto(`${st.stage.origin}/verify/releases/${st.demo.releases.draw}`);
-            await page.locator('.view--release').waitFor({ timeout: 20_000 });
-            await settle(page, 300);
-            const f = await facts(page);
-            if (!f.touch || f.desktop) problems.push(`${name}: not the phone's layout`);
-            const text = norm(await page.locator('main').innerText());
-            if (!/on this phone \(UTC\+02:00\)/.test(text) || /on this computer/.test(text)) problems.push(`${name}: not the phone's words`);
-          } finally {
-            await context.close();
+          // Under load, Chromium now and then opens a touch context without its touch (no touch points, a fine pointer):
+          // that window is no iPad, so it is opened again (three tries) before the app is judged on it.
+          for (let attempt = 1; ; attempt++) {
+            const context = await st.browser.newContext({ ...options, locale: 'en-GB', timezoneId: 'Europe/Paris' });
+            try {
+              if (script) await context.addInitScript({ content: script });
+              const page = await context.newPage();
+              await page.goto(`${st.stage.origin}/verify/releases/${st.demo.releases.draw}`);
+              await page.locator('.view--release').waitFor({ timeout: 20_000 });
+              const touched = await page.evaluate(() => navigator.maxTouchPoints > 0 && matchMedia('(pointer: coarse)').matches);
+              if (!script && !touched) {
+                if (attempt < 3) continue;
+                problems.push(`${name}: the browser gave the window no touch (${attempt} tries)`);
+                break;
+              }
+              await settle(page, 300);
+              const f = await facts(page);
+              if (!f.touch || f.desktop) problems.push(`${name}: not the phone's layout`);
+              const text = norm(await page.locator('main').innerText());
+              if (!/on this phone \(UTC\+02:00\)/.test(text) || /on this computer/.test(text)) problems.push(`${name}: not the phone's words`);
+              break;
+            } finally {
+              await context.close();
+            }
           }
         }
         // A mouse at 1440: the computer's layout; at 900: the phone's layout, the computer's words, hover.
