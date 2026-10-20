@@ -12,7 +12,9 @@
  *                        each size plus the eligible collectors whose latest piece of the model's type is in that size
  *                        (`products.variant`); the eligible collectors by tier. Eligible: what the release's rules let
  *                        in now; with a rule of taking part or of a segment, or rules combined by OR (plan LIVE
- *                        RELEASE+), every rule read for every account as at the entry (live.ts accessAccounts).
+ *                        RELEASE+), every rule read for every account as at the entry (live.ts accessAccounts). Above
+ *                        LIVE_ROOM_CAPACITY, a pace (W4: X buyers admitted every Y minutes, `suggestedPace`), worded as
+ *                        a suggestion, never applied.
  *   audience forecast    (`forecast`) the room at T0 as a range: from the interest (I'LL BE THERE) at the share of the
  *                        interest present at T0 in past releases (their lowest and highest; LIVE_INSIGHT_RULES.
  *                        defaultShowUp without one); before any interest, from the eligible accounts of each tier at
@@ -32,7 +34,8 @@
  *   live alerts          (`signals`, on the live board and its stream) exactly three: a size sells out; a wave of missed
  *                        turns (at least `missedWave.count` in `missedWave.windowSeconds`, half the turns that ended then
  *                        or more); a line stalled while pieces are free (a turn due in a size for `stallSeconds` and none
- *                        given: the engine gives one within a second).
+ *                        given: the engine gives one within a second; on a paced release only an admitted entry is due a
+ *                        turn, from its admission: the time nobody admitted waits counts for nothing).
  *   live sell-out        (`signals`) per size and overall: the pace of the pieces secured in the last `pace.windowMinutes`
  *   forecast             at the share of holds confirmed, against what the line can still absorb (the holds, the turns
  *                        and the line of each size at the release's conversion so far).
@@ -55,7 +58,18 @@ import { csvDocument, CSV_CONTENT_TYPE } from '../render/csv.js';
 import { systemClock, type Clock } from '../types.js';
 import { clubCounts, clubStandings, tierForPieces, tierName, type ClubTier } from './club.js';
 import { DROP_QUANTITY_MAX, dropNotFound } from './drops.js';
-import { accessAccounts, effectiveDeadline, livePhase, LIVE_GESTURE_MIN_MS, LIVE_NETWORK_RETENTION_DAYS, LIVE_OPEN_STATUSES, roomOpensAt, type LivePhase } from './live.js';
+import {
+  accessAccounts,
+  effectiveDeadline,
+  livePhase,
+  LIVE_GESTURE_MIN_MS,
+  LIVE_NETWORK_RETENTION_DAYS,
+  LIVE_OPEN_STATUSES,
+  LIVE_PACE_BATCH,
+  LIVE_PACE_MINUTES,
+  roomOpensAt,
+  type LivePhase,
+} from './live.js';
 import { defaultQuantityLine, liveMoney, majorUnits } from './live-console.js';
 import { notFound } from '../errors.js';
 import { releaseSizeLabel, sizeMix, type SizeMix } from './release-stock.js';
@@ -100,6 +114,8 @@ export const LIVE_INSIGHT_RULES = Object.freeze({
   pace: Object.freeze({ windowMinutes: 5, minSeconds: 30 }),
   /** The demand radar counts at most this many rounds of turns. */
   maxRounds: 10,
+  /** The pace the planner suggests above the room's capacity (W4): a batch every this many minutes. */
+  admissionMinutes: 1,
   /** The lists (bot radar, who came without a piece): at most this many rows, the total given. */
   listMax: 500,
 });
@@ -234,6 +250,11 @@ export interface InsightEntry {
   country: string | null;
   /** IN-01: the entry uses the house's guarantee: first in line in its size (services/live.ts giveTurnsNow). */
   guaranteed?: boolean;
+  /**
+   * W4: when it was admitted to take a turn (its batch's time); null while it waits for its batch on a paced release.
+   * Omitted (fixtures, entries before 0049): admitted, as with no pace.
+   */
+  admittedAt?: Date | null;
 }
 
 /**
@@ -515,7 +536,30 @@ export interface ReleasePlan {
   eligibleByTier: number[];
   /** The model's type the sizes were read in (`models.type`). */
   modelType: string;
+  /**
+   * W4: the pace suggested when the forecast's upper end is above the room's capacity (LIVE_ROOM_CAPACITY), worded in
+   * the reasoning as a suggestion: never applied (the console sets a pace). Null within the capacity, or without the
+   * release's windows.
+   */
+  pace: SuggestedPace | null;
   reasoning: string[];
+}
+
+/** A pace suggested by the planner: X buyers admitted every Y minutes. */
+export interface SuggestedPace {
+  batch: number;
+  minutes: number;
+}
+
+/**
+ * The pace that keeps the room within its capacity (W4): an admitted buyer stays at most a turn and the time to pay
+ * (`stayMs`), so X admitted every Y minutes keep about X × stay ÷ Y in the room; X = capacity × Y ÷ stay, rounded down,
+ * within LIVE_PACE_BATCH, Y = LIVE_INSIGHT_RULES.admissionMinutes.
+ */
+export function suggestedPace(stayMs: number, capacity: number = LIVE_ROOM_CAPACITY.inRoom): SuggestedPace {
+  const minutes = Math.min(LIVE_PACE_MINUTES.max, Math.max(LIVE_PACE_MINUTES.min, LIVE_INSIGHT_RULES.admissionMinutes));
+  const batch = Math.floor((capacity * minutes * MINUTE) / Math.max(1, stayMs));
+  return { batch: Math.min(LIVE_PACE_BATCH.max, Math.max(LIVE_PACE_BATCH.min, batch)), minutes };
 }
 
 export function releasePlan(input: {
@@ -526,6 +570,8 @@ export function releasePlan(input: {
   /** By size label in capitals: the eligible collectors whose latest piece of the type is in that size. */
   collectorsBySize: ReadonlyMap<string, number>;
   modelType: string;
+  /** The release's turn and pay windows, which the pace suggested above the room's capacity reads; none: no pace suggested. */
+  windows?: { turnSeconds: number; payMinutes: number };
 }): ReleasePlan {
   const why: string[] = [];
   const past = input.past.filter((p) => p.presentAtT0 > 0);
@@ -555,6 +601,17 @@ export function releasePlan(input: {
   );
   const otherSizes = [...input.collectorsBySize.entries()].filter(([label]) => !known.has(label)).map(([label, n]) => ({ label, collectors: n })).sort((a, b) => b.collectors - a.collectors || (a.label < b.label ? -1 : 1));
   if (otherSizes.length) why.push(`Eligible collectors also hold sizes this release does not offer: ${otherSizes.map((s) => `${s.label}: ${count(s.collectors)}`).join(', ')}.`);
+  // W4: above the room's capacity, a pace is suggested, never applied.
+  let pace: SuggestedPace | null = null;
+  if (f.aboveCapacity && input.windows) {
+    const stayMs = input.windows.turnSeconds * SECOND + input.windows.payMinutes * MINUTE;
+    pace = suggestedPace(stayMs, f.capacity);
+    const every = pace.minutes === 1 ? 'every minute' : `every ${count(pace.minutes)} minutes`;
+    const all = Math.ceil(f.high / pace.batch) * pace.minutes;
+    why.push(
+      `Suggested pace: ${count(pace.batch)} ${pace.batch === 1 ? 'buyer' : 'buyers'} admitted ${every}. The upper end, ${count(f.high)}, is above the ${count(f.capacity)} in the room the server holds; an admitted buyer stays at most a turn and the time to pay, ${duration(stayMs)}, so ${count(pace.batch)} ${every} keep about ${count(Math.round((pace.batch * stayMs) / (pace.minutes * MINUTE)))} in the room, and all ${count(f.high)} are admitted within ${duration(all * MINUTE)}. A suggestion only: the pace is set in the release’s times.`,
+    );
+  }
   return {
     forecast: f,
     demandPerPerson,
@@ -564,6 +621,7 @@ export function releasePlan(input: {
     otherSizes,
     eligibleByTier: f.eligibleByTier,
     modelType: input.modelType,
+    pace,
     reasoning: why,
   };
 }
@@ -740,7 +798,8 @@ export function dueTurns(r: InsightRelease, entries: readonly InsightEntry[], no
     const free = s.stock - confirmed - sumQ(own.filter(running));
     const servable = s.stock - confirmed;
     const head = own
-      .filter((e) => e.status === 'QUEUED' && e.quantity <= servable)
+      // W4: only an admitted entry takes a turn; one waiting for its batch is due nothing yet.
+      .filter((e) => e.status === 'QUEUED' && e.admittedAt !== null && e.quantity <= servable)
       // IN-01: the places guaranteed by the house first in their size, as the engine gives the turns.
       .sort((a, b) => Number(b.guaranteed === true) - Number(a.guaranteed === true) || (a.position ?? 0) - (b.position ?? 0))[0];
     if (!head || head.quantity > free) continue;
@@ -751,7 +810,8 @@ export function dueTurns(r: InsightRelease, entries: readonly InsightEntry[], no
     const place = head.position ?? 0;
     const ahead = (e: InsightEntry) => e.position !== null && e.position < place;
     const passedOver = own.some((e) => e.status === 'QUEUED' && ahead(e));
-    let since = Math.max(r.opensAt.getTime(), head.queuedAt?.getTime() ?? 0);
+    // W4: on a paced release the turn is due from the head's admission, never while it waited for its batch.
+    let since = Math.max(r.opensAt.getTime(), head.queuedAt?.getTime() ?? 0, head.admittedAt?.getTime() ?? 0);
     for (const e of own) {
       const moves = [e.turnAt, e.turnAt !== null || ahead(e) ? e.endedAt : null, passedOver ? e.confirmedAt : null];
       for (const d of moves) if (d && d.getTime() > since) since = d.getTime();
@@ -1510,7 +1570,15 @@ export class LiveInsightsService {
     for (const v of variants) if (eligible.has(v.accountId)) collectorsBySize.set(v.size, (collectorsBySize.get(v.size) ?? 0) + 1);
     const interestBySize = new Map<string, number>();
     for (const i of interest) interestBySize.set(i.sizeId, (interestBySize.get(i.sizeId) ?? 0) + 1);
-    return releasePlan({ sizes: release.sizes, forecast, past: past.map((p) => p.summary), interestBySize, collectorsBySize, modelType });
+    return releasePlan({
+      sizes: release.sizes,
+      forecast,
+      past: past.map((p) => p.summary),
+      interestBySize,
+      collectorsBySize,
+      modelType,
+      windows: { turnSeconds: release.turnSeconds, payMinutes: release.payMinutes },
+    });
   }
 
   /**
@@ -1767,7 +1835,7 @@ export class LiveInsightsService {
       .selectFrom('live_entries as e')
       .select([
         'id', 'drop_id', 'account_id', 'size_id', 'quantity', 'status', 'tier', 'position', 'joined_at', 'queued_at', 'turn_at', 'turn_expires_at', 'secured_at',
-        'hold_expires_at', 'confirmed_at', 'ended_at', 'gesture_ms', 'country', 'guarantee_id',
+        'hold_expires_at', 'confirmed_at', 'ended_at', 'gesture_ms', 'country', 'guarantee_id', 'admitted_at',
       ])
       .select(entryOutcome.as('resolution'))
       .where('drop_id', 'in', [...dropIds])
@@ -1798,6 +1866,7 @@ export class LiveInsightsService {
       resolution: r.resolution,
       country: r.country,
       guaranteed: r.guarantee_id !== null,
+      admittedAt: r.admitted_at,
     }));
   }
 

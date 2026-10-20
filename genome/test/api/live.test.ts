@@ -17,7 +17,9 @@
  *    of quiet, the turn's secret to its own account only, at most two per account, a disconnection that frees its
  *    place, one frame and one read of the entries per pulse whatever the audience, the last frame then the end once
  *    over (204 afterwards), the end of a REMOVED entry's stream, the end of a stream whose session has ended (signed
- *    out, account locked), the server's shutdown with streams open;
+ *    out, account locked), the server's shutdown with streams open; on a paced release (W2, W5), the queue's small frame
+ *    in place of the room for a viewer waiting for its batch, with its own place, PAUSED, then the room once admitted,
+ *    and its state with `pollMs` (10 s in the queue, 2 s in the room);
  *  - the board by its secret link only: valid, missing, malformed, wrong, another release's, replaced, revoked, a stream
  *    open on a link replaced or revoked ended at the next pulse; never a person in its answers, never indexed;
  *  - the clock for the page's sync, the .ics (its alarm, its lines).
@@ -775,6 +777,60 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       for (const s of streams) await s.next((e) => e.event === 'room' && e.data.inRoom === 1);
       expect((await streams[0]!.next((e) => e.event === 'you' && e.data.entry !== null)).data).toMatchObject({ now: h.clock.now().toISOString(), entry: { status: 'WAITING' } });
       for (const s of streams) s.close();
+      await until(() => h.app.liveHub.open.streams === 0);
+    });
+
+    it('on a paced release (W2, W5), a viewer waiting for its batch reads the queue’s small frame in place of the room and its own place, then the room once admitted; its state the same, with pollMs 10 s in the queue and 2 s in the room', async () => {
+      const r = await release(h, f, { inMinutes: 4, pace: { batch: 1, minutes: 1 } });
+      const [a, b] = [await member(h, f, 1), await member(h, f, 1)];
+      for (const m of [a, b]) expect((await m.client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[0]!.id })).statusCode).toBe(200);
+      const state = async (m: Member) => safeJson(await m.client.get(`/api/v1/live/${r.id}/state`)) as Record<string, unknown> & { entry: { queue: unknown } };
+      // Before T0 nobody waits for a batch: the room, read every 2 s, as before.
+      const early = await state(a);
+      expect(early).toMatchObject({ pollMs: 2000, room: { phase: 'ROOM', inRoom: 2 }, entry: { status: 'WAITING', queue: null } });
+      expect(early).not.toHaveProperty('queue');
+
+      // T0: the first batch admits one; the other waits for the next, a minute later.
+      h.clock.advance(4 * MINUTE);
+      const next = new Date(h.clock.now().getTime() + MINUTE).toISOString();
+      await advance(h, r.id);
+      const [sa, sb] = [await state(a), await state(b)];
+      const [waiter, inside, ws, is] = sa.entry.queue !== null ? [a, b, sa, sb] : [b, a, sb, sa];
+      expect(is).toMatchObject({ pollMs: 2000, room: { phase: 'LIVE' }, entry: { status: 'TURN', queue: null } });
+      expect(is).not.toHaveProperty('queue');
+      const frame = { phase: 'LIVE', nextBatchAt: next, batch: 1, minutes: 1, paused: false, batches: 1, waiting: 1 };
+      expect(ws).toMatchObject({ pollMs: 10_000, queue: frame, entry: { status: 'QUEUED', queue: { place: 1, etaAt: next, paused: false } } });
+      expect(ws).not.toHaveProperty('room');
+
+      // The streams: the queue's frame and its own entry to the one waiting, never the room; the room to the one inside.
+      const [sw, si] = [await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: waiter.client.cookies }), await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: inside.client.cookies })];
+      expect((await sw.next((e) => e.event === 'queue')).data).toEqual({ now: h.clock.now().toISOString(), ...frame });
+      expect((await sw.next((e) => e.event === 'you')).data.entry).toMatchObject({ status: 'QUEUED', queue: { place: 1, etaAt: next } });
+      await si.next((e) => e.event === 'room');
+      expect(sw.events.map((e) => e.event)).not.toContain('room');
+      expect(si.events.map((e) => e.event)).not.toContain('queue');
+
+      // PAUSE PACE reaches the queue: PAUSED, no estimate; RESUME PACE at once moves nothing.
+      let from = sw.events.length;
+      await f.live.pausePace(r.id, f.admin);
+      await h.app.liveHub.pulse();
+      expect((await sw.next((e) => e.event === 'queue', from)).data).toMatchObject({ paused: true, nextBatchAt: next });
+      expect((await sw.next((e) => e.event === 'you', from)).data.entry).toMatchObject({ queue: { place: 1, etaAt: null, paused: true } });
+      expect(si.events.slice(from).map((e) => e.event)).not.toContain('queue');
+      await f.live.resumePace(r.id, f.admin);
+
+      // The next batch: admitted, the room again, its state every 2 s.
+      h.clock.advance(MINUTE);
+      await advance(h, r.id);
+      from = sw.events.length;
+      await h.app.liveHub.pulse();
+      expect((await sw.next((e) => e.event === 'you', from)).data.entry).toMatchObject({ queue: null });
+      expect((await sw.next((e) => e.event === 'room', from)).data).toMatchObject({ phase: 'LIVE', line: 0 });
+      const admitted = await state(waiter);
+      expect(admitted).toMatchObject({ pollMs: 2000, room: { phase: 'LIVE' }, entry: { queue: null } });
+      expect(admitted).not.toHaveProperty('queue');
+      sw.close();
+      si.close();
       await until(() => h.app.liveHub.open.streams === 0);
     });
 

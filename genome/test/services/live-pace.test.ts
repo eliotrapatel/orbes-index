@@ -15,7 +15,11 @@
  *    its place and its admission;
  *  - the queue an entry reads (its place, its estimated entry time, PAUSED), the console's pace state and entries, the
  *    audit log as counts, the right-of-access export;
- *  - 5 000 entries admitted in 20 batches of 250, every batch checked.
+ *  - 5 000 entries admitted in 20 batches of 250, every batch checked;
+ *  - (M1.3) the console board's pace figures; the TEST REPORT's PACE check: it passes on the engine's own history
+ *    (batches, an empty one, NEXT BATCH NOW, LET IN, the release's PAUSE, SET PACE raising X and shortening Y, a late
+ *    arrival, 5 000 entries), and finds each fault planted (a batch not recorded or miscounted, too many, too few while
+ *    others waited, out of the line's order, before its time or off the pace, a batch skipped while people waited).
  */
 import { randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
@@ -23,6 +27,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
 import { GuaranteeService } from '../../src/server/services/guarantees.js';
 import { accountLiveData, liveQueueEta, paceNextAt, paceShiftMs } from '../../src/server/services/live.js';
+import { livePaceFacts, paceCheck, type PaceFacts } from '../../src/server/services/test-entrants.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { accountOfTier, createLiveRelease, entriesOf, liveFixture, type LiveFixture, type LiveRelease } from '../support/live.js';
 
@@ -439,5 +444,170 @@ describe('LiveService with a pace', () => {
       });
     });
     expect(await pace(r.id)).toMatchObject({ pace_batches: 21, pace_next_at: at(21 * MINUTE) });
+    // M1.3: the TEST REPORT's PACE check reads the same.
+    const d = await t.db.selectFrom('drops').selectAll().where('id', '=', r.id).executeTakeFirstOrThrow();
+    expect(paceCheck(await livePaceFacts(t.db, d, at(20 * MINUTE)))).toEqual({
+      id: 'PACE',
+      label: 'The pace',
+      pass: true,
+      line: '20 batches admitted 5000 entries at 250 every 1 min, each on its time and in the line’s order.',
+    });
   }, 120_000);
+
+  it('shows the pace on the console’s live board: in the queue, admitted, the batches, the next batch, its pause; none without a pace', async () => {
+    const r = await release({ pace: { batch: 2, minutes: 5 } });
+    await room(r, 5);
+    expect((await f.liveConsole.board(r.id))!.pace).toMatchObject({ batch: 2, minutes: 5, nextAt: T0, paused: false, batches: 0, waiting: 0, admitted: 0 });
+    await advance(r, T0);
+    const board = (await f.liveConsole.board(r.id))!;
+    expect(board.pace).toEqual({ batch: 2, minutes: 5, nextAt: at(5 * MINUTE), pausedAt: null, paused: false, batches: 1, waiting: 3, admitted: 2 });
+    // The line carries each entry's batch.
+    expect(board.line.map((e) => [e.position, e.batch])).toEqual([
+      [1, 1],
+      [2, 1],
+      [3, null],
+      [4, null],
+      [5, null],
+    ]);
+    f.clock.set(at(MINUTE));
+    await f.live.pausePace(r.id, f.admin);
+    expect((await f.liveConsole.board(r.id))!.pace).toMatchObject({ paused: true, pausedAt: at(MINUTE), waiting: 3 });
+    const none = await release();
+    expect((await f.liveConsole.board(none.id))!.pace).toBeNull();
+  });
+
+  it('the TEST REPORT’s PACE check passes on the engine’s history: batches, NEXT BATCH NOW, LET IN, the release’s PAUSE, SET PACE, a late arrival, empty batches', async () => {
+    const r = await release({ pace: { batch: 2, minutes: 5 } });
+    await room(r, 10);
+    await advance(r, T0);
+    f.clock.set(at(MINUTE));
+    await f.live.nextBatch(r.id, f.admin);
+    f.clock.set(at(2 * MINUTE));
+    const last = (await entriesOf(t.db, r.id)).at(-1)!;
+    await f.live.letIn(r.id, last.id, f.admin);
+    await advance(r, at(5 * MINUTE));
+    f.clock.set(at(6 * MINUTE));
+    await f.live.pause(r.id, f.admin);
+    f.clock.set(at(8 * MINUTE));
+    await f.live.resume(r.id, f.admin);
+    await advance(r, at(12 * MINUTE));
+    f.clock.set(at(13 * MINUTE));
+    await f.live.setPace(r.id, { batch: 3, minutes: 2 }, f.admin);
+    const late = await accountOfTier(f, 0);
+    f.clock.set(at(14 * MINUTE));
+    await f.live.enter(late.id, r.id, { sizeId: r.sizes[0]!.id }, late.actor);
+    await advance(r, at(17 * MINUTE));
+    await advance(r, at(25 * MINUTE));
+    expect((await line(r)).map((x) => [x[0], x[2], x[3]])).toEqual([
+      [1, 1, 0],
+      [2, 1, 0],
+      [3, 2, MINUTE],
+      [4, 2, MINUTE],
+      [5, 3, 5 * MINUTE],
+      [6, 3, 5 * MINUTE],
+      [7, 4, 12 * MINUTE],
+      [8, 4, 12 * MINUTE],
+      [9, 5, 17 * MINUTE],
+      [10, 2, 2 * MINUTE],
+      [11, 5, 17 * MINUTE],
+    ]);
+    const d = await t.db.selectFrom('drops').selectAll().where('id', '=', r.id).executeTakeFirstOrThrow();
+    const check = paceCheck(await livePaceFacts(t.db, d, at(25 * MINUTE)));
+    expect(check).toEqual({
+      id: 'PACE',
+      label: 'The pace',
+      pass: true,
+      line: '5 batches admitted 10 entries at 2 every 5 min, then 3 every 2 min, each on its time and in the line’s order, 1 by NEXT BATCH NOW; 1 entry let in by hand.',
+    });
+  });
+});
+
+describe('the TEST REPORT’s PACE check finds a fault planted', () => {
+  /** Five entries in the line at T0, a pace of 2 every 5 minutes: batch 1 at T0 (places 1, 2), batch 2 at T0+5 (3, 4). */
+  const facts = (): PaceFacts => ({
+    opensAt: T0,
+    end: at(7 * MINUTE),
+    pace: { batch: 2, minutes: 5 },
+    entries: [1, 2, 3, 4, 5].map((p) => ({
+      id: `e${p}`,
+      position: p,
+      guaranteed: false,
+      queuedAt: T0,
+      admittedAt: p <= 2 ? T0 : p <= 4 ? at(5 * MINUTE) : null,
+      batch: p <= 2 ? 1 : p <= 4 ? 2 : null,
+      endedAt: null,
+    })),
+    events: [
+      { kind: 'BATCH', at: T0, batch: 1, entries: 2, extra: false, recordedAt: T0 },
+      { kind: 'BATCH', at: at(5 * MINUTE), batch: 2, entries: 2, extra: false, recordedAt: at(5 * MINUTE) },
+    ],
+  });
+  const lineOf = (f: PaceFacts) => {
+    const c = paceCheck(f);
+    return c.pass ? `PASS ${c.line}` : c.line;
+  };
+
+  it('passes the history as it should be', () => {
+    expect(lineOf(facts())).toBe('PASS 2 batches admitted 4 entries at 2 every 5 min, each on its time and in the line’s order.');
+    const nothing = { ...facts(), entries: facts().entries.map((e) => ({ ...e, admittedAt: null, batch: null })), events: [], end: at(-MINUTE) };
+    expect(lineOf(nothing)).toBe('PASS No batch has admitted anyone yet (2 every 5 min): nothing to check.');
+  });
+
+  it('a batch not recorded, or recorded with another count', () => {
+    const f = facts();
+    f.entries[4] = { ...f.entries[4]!, admittedAt: at(6 * MINUTE), batch: 7 };
+    expect(lineOf(f)).toBe('Place 5 was admitted in batch 7, which no batch recorded.');
+    const g = facts();
+    g.events[0] = { kind: 'BATCH', at: T0, batch: 1, entries: 3, extra: false, recordedAt: T0 };
+    expect(lineOf(g)).toBe('Batch 1 recorded 3 entries; 2 carry its number.');
+  });
+
+  it('too many in a batch, or too few while others waited', () => {
+    const f = facts();
+    f.entries[2] = { ...f.entries[2]!, admittedAt: T0, batch: 1 };
+    f.events[0] = { kind: 'BATCH', at: T0, batch: 1, entries: 3, extra: false, recordedAt: T0 };
+    f.events[1] = { kind: 'BATCH', at: at(5 * MINUTE), batch: 2, entries: 1, extra: false, recordedAt: at(5 * MINUTE) };
+    expect(lineOf(f)).toBe('Batch 1 admitted 3, more than the 2 of the pace.');
+    const g = facts();
+    g.entries[1] = { ...g.entries[1]!, admittedAt: null, batch: null };
+    g.events[0] = { kind: 'BATCH', at: T0, batch: 1, entries: 1, extra: false, recordedAt: T0 };
+    expect(lineOf(g)).toBe('Batch 1 admitted 1 of 2 while 4 entries more waited.');
+  });
+
+  it('a batch out of the line’s order; the house’s guarantee first', () => {
+    const f = facts();
+    f.entries[1] = { ...f.entries[1]!, admittedAt: at(5 * MINUTE), batch: 2 };
+    f.entries[2] = { ...f.entries[2]!, admittedAt: T0, batch: 1 };
+    expect(lineOf(f)).toBe('Place 3 was admitted in batch 1 while place 2, ahead of it, waited.');
+    // A guaranteed place 5 admitted first is in order.
+    const g = facts();
+    g.entries[4] = { ...g.entries[4]!, guaranteed: true, admittedAt: T0, batch: 1 };
+    g.entries[1] = { ...g.entries[1]!, admittedAt: at(5 * MINUTE), batch: 2 };
+    g.entries[3] = { ...g.entries[3]!, admittedAt: null, batch: null };
+    expect(lineOf(g)).toMatch(/^PASS /);
+  });
+
+  it('a batch before its time, off the pace, or one skipped while people waited', () => {
+    const f = facts();
+    for (const e of f.entries.slice(2, 4)) e.admittedAt = at(4 * MINUTE);
+    f.events[1] = { kind: 'BATCH', at: at(4 * MINUTE), batch: 2, entries: 2, extra: false, recordedAt: at(4 * MINUTE) };
+    expect(lineOf(f)).toBe('Batch 2 came at 11:04:00 PARIS, before its time, 11:05:00 PARIS.');
+    const g = facts();
+    for (const e of g.entries.slice(2, 4)) e.admittedAt = at(6 * MINUTE);
+    g.events[1] = { kind: 'BATCH', at: at(6 * MINUTE), batch: 2, entries: 2, extra: false, recordedAt: at(6 * MINUTE) };
+    expect(lineOf(g)).toBe('Batch 2 came at 11:06:00 PARIS, off the pace of every 5 min.');
+    const k = facts();
+    for (const e of k.entries.slice(2, 4)) e.admittedAt = at(10 * MINUTE);
+    k.events[1] = { kind: 'BATCH', at: at(10 * MINUTE), batch: 3, entries: 2, extra: false, recordedAt: at(10 * MINUTE) };
+    for (const e of k.entries.slice(2, 4)) e.batch = 3;
+    k.end = at(12 * MINUTE);
+    expect(lineOf(k)).toBe('No batch came at 11:05:00 PARIS, while 3 entries waited.');
+    // The last one waiting, never admitted by the batch of T0+10 while the release ran on.
+    const tail = facts();
+    tail.end = at(11 * MINUTE);
+    expect(lineOf(tail)).toBe('No batch came at 11:10:00 PARIS, while 1 entry waited.');
+    // Left the line before the batch ran: nobody waited.
+    tail.entries[4] = { ...tail.entries[4]!, endedAt: at(9 * MINUTE) };
+    expect(lineOf(tail)).toMatch(/^PASS /);
+  });
 });

@@ -38,7 +38,8 @@
  *    in a size: the Choices' size, else one of the draw's sizes with pieces at random (a reservation refused in a size
  *    full enters at the opening, as one refused in a release full);
  *  - a LIVE RELEASE: I'LL BE THERE first for its share (before T0), ENTER with its size and pieces; then it follows its
- *    turn as a phone whose stream is lost does, reading GET /state every POLL_MS (its turn's secret is there); on its
+ *    turn as a phone whose stream is lost does, reading GET /state every POLL_MS (its turn's secret is there), or as
+ *    often as the state's `pollMs` says while it waits for its batch on a paced release (W2: every 10 s); on its
  *    TURN: PRESS, the hold, SECURE, its add-ons, then PAY or RELEASE MY PLACE after a few seconds; or it misses its turn,
  *    or LEAVES (on its turn, or a while after entering). An after-room is left to the routes, as for anyone.
  * A draw's places confirm themselves from the database (`sweep`, every SWEEP_MS while a draw's test is RUNNING or DONE),
@@ -50,8 +51,8 @@
  *
  * END TEST (ADMIN, the phrase `END TEST <8>`; RUNNING, DONE, STOPPED or INTERRUPTED): the bots stopped; the TEST REPORT
  * computed BEFORE the clean-up (`report`, kept on the run: five checks over the whole release, real and test entries
- * together, and the test's peaks); then, for the test's accounts in that release: their open orders cancelled one by one
- * as Client Services cancels one (the stock goes back and serves the next order waiting for it; no serial is retired,
+ * together, six on a LIVE RELEASE with a pace (W4: PACE), and the test's peaks); then, for the test's accounts in that
+ * release: their open orders cancelled one by one as Client Services cancels one (the stock goes back and serves the next order waiting for it; no serial is retired,
  * an order holding no reserved identity since plan NEXT LOT §3.5), the parents first, those awaiting supplier stock
  * before those holding stock (so the pieces freed serve real waiting orders, not test orders about to be cancelled), with the GIFT orders travelling with them (the next nine's welcome gifts, BP-19 T5: cancelled with
  * their order, their grant waiting again) and the credit taken off them given back (its uses released, the grant's
@@ -201,13 +202,16 @@ export interface TestRunSelected {
 
 /** One check of a TEST REPORT: passed or failed, said in one plain line. */
 export interface TestReportCheck {
-  id: 'ONE_ENTRY' | 'ORDER' | 'ONE_PLACE' | 'STOCK' | 'ORDERS';
+  id: 'ONE_ENTRY' | 'ORDER' | 'ONE_PLACE' | 'STOCK' | 'ORDERS' | 'PACE';
   label: string;
   pass: boolean;
   line: string;
 }
 
-/** The TEST REPORT, computed at END TEST before the clean-up: five checks over the whole release, and the test's peaks. */
+/**
+ * The TEST REPORT, computed at END TEST before the clean-up: five checks over the whole release (six on a LIVE RELEASE
+ * with a pace: PACE), and the test's peaks.
+ */
 export interface TestReport {
   at: Date;
   checks: TestReportCheck[];
@@ -1225,11 +1229,13 @@ export class TestEntrantService {
         }
         const entry = (r.json?.entry ?? null) as { status: string; turn: { token: string | null } | null } | null;
         if (!entry) return this.finish(run, bot, 'GONE');
+        // W2: the state says how soon to read it again: every 2 s in the room, every 10 s while waiting for its batch.
+        const pollMs = typeof r.json?.pollMs === 'number' && r.json.pollMs > 0 ? r.json.pollMs : POLL_MS;
         switch (entry.status) {
           case 'WAITING':
           case 'QUEUED':
             if (plan.outcome === 'LEAVE' && now >= bot.leaveAt) return this.leave(run, bot);
-            bot.at = this.nextWatch(run, bot);
+            bot.at = this.nextWatch(run, bot, pollMs);
             return;
           case 'TURN': {
             if (!bot.now && plan.outcome === 'LEAVE') return this.leave(run, bot);
@@ -1284,11 +1290,14 @@ export class TestEntrantService {
     }
   }
 
-  /** When a LIVE bot reads its state next: from T0 on (nothing moves before), every POLL_MS; a LEAVE bot at its time too. */
-  private nextWatch(run: ActiveRun, bot: Bot): number {
+  /**
+   * When a LIVE bot reads its state next: from T0 on (nothing moves before), every `pollMs` (the state's: POLL_MS in the
+   * room, 10 s while it waits for its batch, W2); a LEAVE bot at its time too.
+   */
+  private nextWatch(run: ActiveRun, bot: Bot, pollMs = POLL_MS): number {
     const now = this.now().getTime();
     const t0 = run.drop.opens_at.getTime();
-    const next = now < t0 ? t0 + between(0, POLL_MS) : now + POLL_MS;
+    const next = now < t0 ? t0 + between(0, POLL_MS) : now + pollMs;
     return Math.min(next, bot.leaveAt);
   }
 
@@ -1650,7 +1659,7 @@ export class TestEntrantService {
 
   // ── The TEST REPORT ──────────────────────────────────────────────────────
 
-  /** The five checks over the whole release `d` (real and test entries together), now. */
+  /** The five checks over the whole release `d` (real and test entries together; six with a pace: PACE), now. */
   async report(d: DropRow, now: Date): Promise<Omit<TestReport, 'peaks'>> {
     const checks = d.mode === 'DRAW' ? await this.drawChecks(d) : await this.liveChecks(d, now);
     const passed = checks.filter((c) => c.pass).length;
@@ -1810,6 +1819,9 @@ export class TestEntrantService {
     // 5. Every confirmed place has its orders, one per piece.
     const missing = confirmed.filter((e) => orders.filter((o) => o.live_entry_id === e.id).length < e.quantity).length;
     checks.push(ordersCheck(missing, confirmed.length));
+
+    // 6. W4, a release with a pace: its batches, from its entries and its audit log.
+    if (d.pace_batch !== null && d.pace_minutes !== null) checks.push(paceCheck(await livePaceFacts(this.db, d, now)));
     return checks;
   }
 
@@ -1874,4 +1886,223 @@ function ordersCheck(missing: number, confirmed: number): TestReportCheck {
   return missing === 0
     ? { id: 'ORDERS', label: 'Every confirmed place has its order', pass: true, line: `${confirmed} confirmed ${confirmed === 1 ? 'place has its order' : 'places have their orders'}.` }
     : { id: 'ORDERS', label: 'Every confirmed place has its order', pass: false, line: `${missing} of ${confirmed} confirmed ${confirmed === 1 ? 'place has' : 'places have'} no order.` };
+}
+
+// ── The PACE check (W4) ────────────────────────────────────────────────────
+
+/** The audit actions the PACE check reads, in their order: the pace set, the batches, LET IN, every pause and resume. */
+const PACE_ACTIONS = Object.freeze([
+  'drop.live.pace',
+  'drop.live.admit',
+  'drop.live.pace.next',
+  'drop.live.let_in',
+  'drop.live.pace.pause',
+  'drop.live.pace.resume',
+  'drop.live.pause',
+  'drop.live.resume',
+] as const);
+
+/** A slot of the pace is checked once the engine has had this long to admit it (it runs every second). */
+const PACE_SLOT_MARGIN_MS = 5000;
+
+interface PaceOf {
+  batch: number;
+  minutes: number;
+}
+
+/** One moment of a pace's history, in audit order. */
+export type PaceEvent =
+  /** SET PACE: from the next batch on (the next batch keeps its time when there was a pace already). */
+  | { kind: 'PACE'; at: Date; before: PaceOf | null; after: PaceOf }
+  /** A batch that admitted anyone: the engine's at its logical time (`drop.live.admit`), or NEXT BATCH NOW's (`extra`). */
+  | { kind: 'BATCH'; at: Date; batch: number; entries: number; extra: boolean; recordedAt: Date }
+  /** LET IN admitted this entry out of its batch. */
+  | { kind: 'LET_IN'; at: Date; entryId: string }
+  /** A pause or a resume, the pace's own or the release's: the times of the batches start again from the next one. */
+  | { kind: 'HOLD'; at: Date };
+
+/** What the PACE check reads: the release's entries placed in the line, and its pace's history. */
+export interface PaceFacts {
+  opensAt: Date;
+  /** The release's end, or now. */
+  end: Date;
+  /** The pace now. */
+  pace: PaceOf;
+  entries: {
+    id: string;
+    position: number;
+    guaranteed: boolean;
+    queuedAt: Date | null;
+    admittedAt: Date | null;
+    batch: number | null;
+    endedAt: Date | null;
+  }[];
+  events: PaceEvent[];
+}
+
+/** What the PACE check reads of a paced release: its entries placed in the line, and its pace's and pauses' history in audit order. */
+export async function livePaceFacts(db: Db, d: DropRow, now: Date): Promise<PaceFacts> {
+  const rows = await db
+    .selectFrom('live_entries')
+    .select(['id', 'position', 'guarantee_id', 'queued_at', 'admitted_at', 'admitted_batch', 'ended_at'])
+    .where('drop_id', '=', d.id)
+    .where('position', 'is not', null)
+    .execute();
+  const audits = await db
+    .selectFrom('audit_logs')
+    .select(['action', 'occurred_at', 'details'])
+    .where('target_type', '=', 'drop')
+    .where('target_id', '=', d.id)
+    .where('action', 'in', [...PACE_ACTIONS])
+    .orderBy('id')
+    .execute();
+  const events: PaceEvent[] = [];
+  for (const a of audits) {
+    const x = (typeof a.details === 'string' ? JSON.parse(a.details) : (a.details ?? {})) as Record<string, unknown>;
+    const at = new Date(a.occurred_at);
+    const pace = (v: unknown) => (v && typeof v === 'object' ? { batch: Number((v as PaceOf).batch), minutes: Number((v as PaceOf).minutes) } : null);
+    if (a.action === 'drop.live.pace') {
+      const after = pace(x.after);
+      if (after) events.push({ kind: 'PACE', at, before: pace(x.before), after });
+    } else if (a.action === 'drop.live.admit') events.push({ kind: 'BATCH', at: new Date(String(x.at)), batch: Number(x.batch), entries: Number(x.entries), extra: false, recordedAt: at });
+    else if (a.action === 'drop.live.pace.next') events.push({ kind: 'BATCH', at, batch: Number(x.batch), entries: Number(x.entries), extra: true, recordedAt: at });
+    else if (a.action === 'drop.live.let_in') {
+      if (x.admitted === true && typeof x.entryId === 'string') events.push({ kind: 'LET_IN', at, entryId: x.entryId });
+    } else events.push({ kind: 'HOLD', at });
+  }
+  return {
+    opensAt: d.opens_at,
+    end: d.ended_at && d.ended_at.getTime() < now.getTime() ? d.ended_at : now,
+    pace: { batch: d.pace_batch!, minutes: d.pace_minutes! },
+    entries: rows.map((r) => ({
+      id: r.id,
+      position: r.position!,
+      guaranteed: r.guarantee_id !== null,
+      queuedAt: r.queued_at,
+      admittedAt: r.admitted_at,
+      batch: r.admitted_batch,
+      endedAt: r.ended_at,
+    })),
+    events,
+  };
+}
+
+/** A Paris time to the second, as the report says it: `10:02:00 PARIS`. */
+const parisClock = (at: Date): string =>
+  `${new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).format(at)} PARIS`;
+
+const paceWords = (p: PaceOf): string => `${p.batch} every ${p.minutes} min`;
+
+/**
+ * W4, the PACE check of a LIVE RELEASE with a pace: every entry admitted by a batch is in a batch the log recorded, at
+ * its time; no batch admitted more than X (the pace in force), nor fewer while others waited; each batch in the line's
+ * order (the house's guarantee first, then the place), so nobody waiting was passed over except by LET IN; and the
+ * batches came exactly every Y minutes on their logical times, the first at T0, none skipped while anyone waited (a
+ * pause, a resume or a pace set without one before starts the times again from the next batch; NEXT BATCH NOW is an
+ * extra batch that moves no time).
+ */
+export function paceCheck(f: PaceFacts): TestReportCheck {
+  const fail = (line: string): TestReportCheck => ({ id: 'PACE', label: 'The pace', pass: false, line });
+  const t = (d: Date | null) => (d ? new Date(d).getTime() : null);
+  const entries = f.entries.map((e) => ({ ...e, q: t(e.queuedAt), a: t(e.admittedAt), x: t(e.endedAt), key: (e.guaranteed ? 0 : 1) * 1e9 + e.position }));
+  const letIn = new Set(f.events.filter((e): e is Extract<PaceEvent, { kind: 'LET_IN' }> => e.kind === 'LET_IN').map((e) => e.entryId));
+  // Waiting for a batch due at `at` that the engine ran at `by` (an overdue batch runs late, a slot within the margin):
+  // placed by `at`, not admitted by then, nor let in or out of the line before the engine ran.
+  const waitingAt = (at: number, by: number) =>
+    entries.filter((e) => e.q !== null && e.q <= at && (e.a === null || e.a > at) && !(letIn.has(e.id) && e.a !== null && e.a <= by) && (e.x === null || e.x > by));
+
+  // The pace in force at each batch, from the first SET PACE's « before » (the settings' pace), else the pace now.
+  const firstSet = f.events.find((e): e is Extract<PaceEvent, { kind: 'PACE' }> => e.kind === 'PACE');
+  let pace: PaceOf | null = firstSet ? firstSet.before : f.pace;
+  const paces: PaceOf[] = pace ? [pace] : [];
+
+  // 1. Every entry admitted by a paced batch (1 and up, LET IN apart) belongs to a batch the log recorded, at its time.
+  const batches = f.events.filter((e): e is Extract<PaceEvent, { kind: 'BATCH' }> => e.kind === 'BATCH');
+  const byBatch = new Map(batches.map((b) => [b.batch, b]));
+  const members = new Map<number, typeof entries>();
+  for (const e of entries) {
+    if (e.a === null || e.batch === null || e.batch < 1 || letIn.has(e.id)) continue;
+    const b = byBatch.get(e.batch);
+    if (!b) return fail(`Place ${e.position} was admitted in batch ${e.batch}, which no batch recorded.`);
+    const list = members.get(e.batch) ?? [];
+    list.push(e);
+    members.set(e.batch, list);
+  }
+  for (const b of batches) {
+    const own = members.get(b.batch) ?? [];
+    // NEXT BATCH NOW's time is its entries' own (the log's is a moment later).
+    const at = b.extra && own.length > 0 ? own[0]!.a! : b.at.getTime();
+    if (own.length !== b.entries) return fail(`Batch ${b.batch} recorded ${count(b.entries, 'entry', 'entries')}; ${own.length} carry its number.`);
+    if (own.some((e) => e.a !== at)) return fail(`Batch ${b.batch} admitted its entries at different times.`);
+  }
+
+  // 2 to 4: walk the history in order: each batch's size and order, and the times between batches.
+  let expect: number | null = pace ? new Date(f.opensAt).getTime() : null;
+  let stepMs = pace ? pace.minutes * 60_000 : 0;
+  let extra = 0;
+  let admitted = 0;
+  const skipped = (until: number, inclusive: boolean): TestReportCheck | null => {
+    if (expect === null || stepMs <= 0) return null;
+    for (let s = expect; inclusive ? s <= until : s < until; s += stepMs) {
+      const waiting = waitingAt(s, s + PACE_SLOT_MARGIN_MS).length;
+      if (waiting > 0) return fail(`No batch came at ${parisClock(new Date(s))}, while ${count(waiting, 'entry', 'entries')} waited.`);
+    }
+    return null;
+  };
+  for (const ev of f.events) {
+    const at = ev.at.getTime();
+    if (ev.kind === 'LET_IN') continue;
+    if (ev.kind === 'HOLD') {
+      const gap = skipped(at, false);
+      if (gap) return gap;
+      expect = null;
+      continue;
+    }
+    if (ev.kind === 'PACE') {
+      const gap = skipped(at, false);
+      if (gap) return gap;
+      if (at < new Date(f.opensAt).getTime()) expect = new Date(f.opensAt).getTime();
+      else if (!pace) expect = null;
+      // During the release the next batch keeps its time; from it on, the new Y.
+      pace = ev.after;
+      stepMs = pace.minutes * 60_000;
+      paces.push(pace);
+      continue;
+    }
+    if (!pace) return fail(`Batch ${ev.batch} came before the release had a pace.`);
+    const own = members.get(ev.batch) ?? [];
+    const time = ev.extra && own.length > 0 ? own[0]!.a! : at;
+    if (own.length > pace.batch) return fail(`Batch ${ev.batch} admitted ${own.length}, more than the ${pace.batch} of the pace.`);
+    const waiting = waitingAt(time, Math.max(time, ev.recordedAt.getTime()));
+    if (own.length < pace.batch && waiting.length > 0) return fail(`Batch ${ev.batch} admitted ${own.length} of ${pace.batch} while ${count(waiting.length, 'entry', 'entries')} more waited.`);
+    if (own.length > 0 && waiting.length > 0) {
+      const last = own.reduce((m, e) => (e.key > m.key ? e : m));
+      const first = waiting.reduce((m, e) => (e.key < m.key ? e : m));
+      if (first.key < last.key) return fail(`Place ${last.position} was admitted in batch ${ev.batch} while place ${first.position}, ahead of it, waited.`);
+    }
+    admitted += own.length;
+    if (ev.extra) {
+      extra++;
+      continue;
+    }
+    if (expect !== null) {
+      if (time < expect) return fail(`Batch ${ev.batch} came at ${parisClock(new Date(time))}, before its time, ${parisClock(new Date(expect))}.`);
+      if ((time - expect) % stepMs !== 0) return fail(`Batch ${ev.batch} came at ${parisClock(new Date(time))}, off the pace of every ${pace.minutes} min.`);
+      const gap = skipped(time, false);
+      if (gap) return gap;
+    }
+    expect = time + stepMs;
+  }
+  const tail = skipped(new Date(f.end).getTime() - PACE_SLOT_MARGIN_MS, true);
+  if (tail) return tail;
+
+  const recorded = batches.length;
+  if (recorded === 0 && letIn.size === 0) return { id: 'PACE', label: 'The pace', pass: true, line: `No batch has admitted anyone yet (${paceWords(f.pace)}): nothing to check.` };
+  const set = [...new Map(paces.map((p) => [paceWords(p), p])).keys()].join(', then ');
+  return {
+    id: 'PACE',
+    label: 'The pace',
+    pass: true,
+    line: `${count(recorded, 'batch', 'batches')} admitted ${count(admitted, 'entry', 'entries')} at ${set}, each on its time and in the line’s order${extra ? `, ${extra} by NEXT BATCH NOW` : ''}${letIn.size ? `; ${count(letIn.size, 'entry', 'entries')} let in by hand` : ''}.`,
+  };
 }

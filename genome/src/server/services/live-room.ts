@@ -25,7 +25,9 @@
  *
  * The room (`frame`): built once for all of a release's viewers (routes/live.ts fans it out once a second): its phase,
  * the pieces left and held per size, the people in the room and in the line, the latest host message; and the board's
- * share of it (the countdown, the door, the pieces left overall: no personal data). `viewer` says who may read it: a
+ * share of it (the countdown, the door, the pieces left overall: no personal data); on a paced release (W2) the queue's
+ * small frame too (`LiveQueueFrame`: the next batch, the pace, held or not, the batches, those waiting), which the
+ * viewers waiting for their batch read in place of the room. `viewer` says who may read it: a
  * signed-in account allowed to enter the release now, or holding an entry in it (a REMOVED one reads its state but
  * follows no stream); never anyone else (spectator mode was declined).
  *
@@ -52,6 +54,8 @@ import {
   livePhase,
   liveRuleText,
   liveStages,
+  paceHeld,
+  paceNextAt,
   roomOpensAt,
   stagesAt,
   LIVE_OPEN_STATUSES,
@@ -251,10 +255,33 @@ export interface LiveBoard {
   release: { revealed: LiveCard['revealed']; name: string | null; silhouetteUrl: string | null; imageUrl: string | null };
 }
 
+/**
+ * The queue page's shared frame (W2, W5): what a viewer whose entry waits for its batch reads in place of the room, the
+ * same small frame for all of them, once a second: the next batch, the pace (X, Y: the page computes each estimate from
+ * them and its own place, never shows them), whether it is held, the batches so far and those waiting. No person.
+ */
+export interface LiveQueueFrame {
+  phase: LiveRoom['phase'];
+  /** When the next batch is due (T0 before the first); a pause in progress moves it when it ends. */
+  nextBatchAt: Date;
+  /** X: the buyers admitted per batch. */
+  batch: number;
+  /** Y: the minutes between two batches. */
+  minutes: number;
+  /** The pace held (PAUSE PACE, or the release's PAUSE): no batch comes, every place is kept. */
+  paused: boolean;
+  /** The batches admitted so far. */
+  batches: number;
+  /** The entries in the line waiting for their batch. */
+  waiting: number;
+}
+
 /** One build of a release's room: what its viewers and its boards read. */
 export interface LiveFrame {
   room: LiveRoom;
   board: LiveBoard;
+  /** W2: on a paced release, the queue's frame for the viewers waiting for their batch; null without a pace. */
+  queue: LiveQueueFrame | null;
   /**
    * The SHA-256 of the board link's secret as it stands now (null: revoked or never issued), for the hub to end a board
    * stream opened with a link since replaced or revoked. Internal: never in `room` or `board`, never sent.
@@ -626,15 +653,17 @@ export class LiveRoomService {
   }
 
   /**
-   * One build of a release's room and board, for every viewer and board at once: four reads whatever the audience. Null
-   * once it is no longer an announced, published LIVE RELEASE (cancelled, unpublished).
+   * One build of a release's room, board and queue, for every viewer and board at once: four reads whatever the audience
+   * (five on a paced release: those waiting for their batch). Null once it is no longer an announced, published LIVE
+   * RELEASE (cancelled, unpublished).
    */
   async frame(dropId: string): Promise<LiveFrame | null> {
     const id = releaseId(dropId);
     const now = this.clock();
     const r = await this.reads().where('d.id', '=', id).where('d.mode', '=', 'LIVE').where('d.published_at', 'is not', null).executeTakeFirst();
     if (!r || r.cancelled_at || !isAnnounced(r, stagesAt(r, now))) return null;
-    const [sizes, counts, message] = await Promise.all([
+    const paced = r.pace_batch !== null && r.pace_minutes !== null;
+    const [sizes, counts, message, waiting] = await Promise.all([
       this.db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', id).orderBy('position').execute(),
       this.db
         .selectFrom('live_entries')
@@ -643,6 +672,16 @@ export class LiveRoomService {
         .groupBy(['size_id', 'status'])
         .execute(),
       this.db.selectFrom('live_messages').select(['text', 'created_at']).where('drop_id', '=', id).orderBy('created_at', 'desc').orderBy('id', 'desc').limit(1).executeTakeFirst(),
+      // W2: a paced release's line waiting for its batch (the partial index live_entries_waiting_admission): one read more.
+      paced
+        ? this.db
+            .selectFrom('live_entries')
+            .select((eb) => eb.fn.countAll<number>().as('n'))
+            .where('drop_id', '=', id)
+            .where('status', '=', 'QUEUED')
+            .where('admitted_at', 'is', null)
+            .executeTakeFirstOrThrow()
+        : Promise.resolve(null),
     ]);
     const people = (statuses: readonly string[]) => counts.filter((c) => statuses.includes(c.status)).reduce((n, c) => n + Number(c.n), 0);
     const pieces = (sizeId: string, statuses: readonly string[]) =>
@@ -692,7 +731,18 @@ export class LiveRoomService {
         imageUrl: stages.photo ? mediaUrl(r.model_image) : null,
       },
     };
-    return { room, board, boardTokenHash: r.board_token_hash ? new Uint8Array(r.board_token_hash) : null };
+    const queue: LiveQueueFrame | null = paced
+      ? {
+          phase,
+          nextBatchAt: paceNextAt(r)!,
+          batch: r.pace_batch!,
+          minutes: r.pace_minutes!,
+          paused: paceHeld(r) && !over,
+          batches: Number(r.pace_batches),
+          waiting: Number(waiting?.n ?? 0),
+        }
+      : null;
+    return { room, board, queue, boardTokenHash: r.board_token_hash ? new Uint8Array(r.board_token_hash) : null };
   }
 
   /**

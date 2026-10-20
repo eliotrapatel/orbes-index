@@ -4,7 +4,11 @@
  *   viewers   GET /api/v1/live/:id/stream (routes/live.ts), a signed-in account allowed to enter the release (or holding
  *             an entry in it): `room` events, the room as LiveRoomService.frame builds it, and `you` events, the
  *             account's own entry (with its turn's secret while it is its turn), each sent when it changed; the first
- *             `you` event also carries `savedSize` (AC-01: the size YOUR SIZES preselects, or null);
+ *             `you` event also carries `savedSize` (AC-01: the size YOUR SIZES preselects, or null). On a paced release
+ *             (W2, W5), a viewer whose entry waits for its batch (its `queue` set) gets `queue` events in place of the
+ *             room's: the queue's one small frame shared by all of them (LiveQueueFrame: the next batch, the pace, held
+ *             or not, the batches, those waiting), with its own `you` events (its place, its estimated entry time); once
+ *             admitted, the room's events again. Before T0 nobody waits for a batch: the room for everyone;
  *   boards    POST /api/v1/live/:id/board/stream, by the board's secret link: `board` events (the countdown, the door, the
  *             pieces left overall), sent when they changed;
  *   consoles  GET /api/admin/live/:id/stream (routes/admin/live.ts), a console session (AUDITOR and up): `console` events
@@ -18,8 +22,9 @@
  * event (and the board's) written once for all and each stream sent one chunk; its console board, when a console
  * follows it, built once too. The database
  * work per second grows with the releases followed, never with the people following them; the state that a client
- * polls when its stream is lost (`room`) shares the same frame, at most a pulse old. A frame that no longer exists (the
- * release cancelled) closes its streams; a release that is over sends its last frame, then closes them, and a stream
+ * polls when its stream is lost (`room`, or `queue` while it waits for its batch, with `pollMs`: LIVE_ROOM_POLL_MS, or
+ * LIVE_QUEUE_POLL_MS for the queue, five times less often) shares the same frame, at most a pulse old. A frame that no
+ * longer exists (the release cancelled) closes its streams; a release that is over sends its last frame, then closes them, and a stream
  * asked for again answers 204, which an EventSource takes as the end. An entry REMOVED sends its last `you` event and
  * closes that stream. A stream is checked again at every pulse, not only when it opens: a viewer's session that has
  * ended (signed out, revoked, its account locked or disabled: one read for every viewer of the process), a console's
@@ -38,7 +43,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { DomainError } from '../errors.js';
 import type { LiveEntryView } from '../services/live.js';
 import type { AdminLiveBoard } from '../services/live-console.js';
-import type { LiveBoard, LiveFrame, LiveRoom, LiveRoomService, LiveSavedSize } from '../services/live-room.js';
+import type { LiveBoard, LiveFrame, LiveQueueFrame, LiveRoom, LiveRoomService, LiveSavedSize } from '../services/live-room.js';
 import { noopLogger, systemClock, type Clock, type Logger } from '../types.js';
 
 /**
@@ -48,6 +53,10 @@ import { noopLogger, systemClock, type Clock, type Logger } from '../types.js';
 export const LIVE_STREAM_ROUTES = Object.freeze(['/api/v1/live/:id/stream', '/api/v1/live/:id/board/stream', '/api/admin/live/:id/stream'] as const);
 
 export const LIVE_PULSE_MS = 1000;
+/** A page whose stream is lost reads its state this often in the room (web/verify/views/live.ts LIVE_POLL_MS)… */
+export const LIVE_ROOM_POLL_MS = 2000;
+/** …and this often while it waits for its batch (W2): a queue of thousands reads five times less than the room. */
+export const LIVE_QUEUE_POLL_MS = 10_000;
 export const LIVE_HEARTBEAT_MS = 20_000;
 export const LIVE_STREAMS_PER_ACCOUNT = 2;
 /**
@@ -124,6 +133,7 @@ interface Outgoing {
   now: string;
   room?: Shared;
   board?: Shared;
+  queue?: Shared;
 }
 
 interface Shared {
@@ -186,9 +196,16 @@ export class LiveHub {
     return { streams: n, releases: this.streams.size, accounts: new Map(this.accounts) };
   }
 
-  /** A release's room, from memory when built within the cache's time (the state polled when a stream is lost). */
-  async roomOf(dropId: string): Promise<LiveRoom | null> {
-    return (await this.frame(dropId, false))?.room ?? null;
+  /**
+   * What a viewer polls when its stream is lost (GET /state), from the same frame (from memory when built within the
+   * cache's time): the queue's frame while its entry waits for its batch on a paced release (`waiting`: its `queue` is
+   * set), with LIVE_QUEUE_POLL_MS; the room otherwise, with LIVE_ROOM_POLL_MS. Null once the release is no longer one
+   * to read.
+   */
+  async stateOf(dropId: string, waiting: boolean): Promise<({ room: LiveRoom } | { queue: LiveQueueFrame }) & { pollMs: number } | null> {
+    const frame = await this.frame(dropId, false);
+    if (!frame) return null;
+    return waiting && frame.queue ? { queue: frame.queue, pollMs: LIVE_QUEUE_POLL_MS } : { room: frame.room, pollMs: LIVE_ROOM_POLL_MS };
   }
 
   /** A release's board, as the board's page reads it before its stream. */
@@ -439,12 +456,12 @@ export class LiveHub {
     return { frame, now: JSON.stringify(this.clock()) };
   }
 
-  /** The room's or the board's JSON and event (`{ now, ...data }`), made once per pulse. */
-  private shared(out: Outgoing, kind: 'room' | 'board'): Shared {
+  /** The room's, the board's or the queue's JSON and event (`{ now, ...data }`), made once per pulse. */
+  private shared(out: Outgoing, kind: 'room' | 'board' | 'queue'): Shared {
     let shared = out[kind];
     if (!shared) {
       const json = JSON.stringify(out.frame[kind]);
-      // `{ now, ...data }`, the data's fields after the time (the room and the board are never empty objects).
+      // `{ now, ...data }`, the data's fields after the time (the room, the board and the queue are never empty objects).
       shared = { json, event: `event: ${kind}\ndata: {"now":${out.now},${json.slice(1)}\n\n` };
       out[kind] = shared;
     }
@@ -453,13 +470,14 @@ export class LiveHub {
 
   /**
    * Send what changed for this stream since its last events, in one write: the viewer's own entry first, then the
-   * room, so a page that stops following at a room that is over has already read its final entry.
+   * room (or, while its entry waits for its batch, the queue's frame), so a page that stops following at a room that is
+   * over has already read its final entry.
    */
   private deliver(s: ViewerStream | BoardStream, out: Outgoing, views: ReadonlyMap<string, LiveEntryView>, first?: { savedSize: LiveSavedSize | null }): void {
     if (s.closed) return;
-    const shared = this.shared(out, s.kind === 'viewer' ? 'room' : 'board');
-    let chunk = '';
     const entry = s.kind === 'viewer' ? (views.get(s.accountId) ?? null) : null;
+    const shared = this.shared(out, s.kind === 'board' ? 'board' : entry?.queue && out.frame.queue ? 'queue' : 'room');
+    let chunk = '';
     if (s.kind === 'viewer') {
       const you = JSON.stringify(entry);
       if (you !== s.you) {

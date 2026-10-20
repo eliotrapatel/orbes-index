@@ -22,9 +22,11 @@
  *    LIVE holder of no tier first in the line and over the per-account: every check passes;
  *  - a LIVE RELEASE end to end: I'LL BE THERE, the line at T0, PRESS, the hold, SECURE, PAY and RELEASE, END TEST; a
  *    size of the release set aside during the test (plan NEXT LOT §3.3): END TEST puts the stock back on its SKU;
- *  - the report's checks find a fault planted; the sweeper resumes a confirmation due after a restart.
+ *  - the report's checks find a fault planted; the sweeper resumes a confirmation due after a restart;
+ *  - a LIVE RELEASE with a pace (W2, W4): the bots wait in the queue, reading their state every 10 s (its `pollMs`), and
+ *    are admitted batch by batch; END TEST: the report 6/6 with its PACE check.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { sql } from 'kysely';
 import { buildApp } from '../../src/server/app.js';
 import { inTransaction } from '../../src/server/db/connection.js';
@@ -933,6 +935,52 @@ describe('a LIVE RELEASE end to end', () => {
     const removals = await w.h.ctx.db.selectFrom('audit_logs').select('details').where('action', '=', 'drop.live.remove').where('target_id', '=', release.id).execute();
     expect(removals.map((r) => r.details)).toEqual(Array.from({ length: 3 }, () => expect.objectContaining({ from: 'CONFIRMED', reason: 'test_ended' })));
     expect((await w.h.ctx.services.liveRoom.frame(release.id))?.room).toMatchObject({ left: 6, held: 0 });
+  });
+
+  it('a paced release (W2, W4): the bots wait in the queue reading their state every 10 s, admitted 2 every minute; END TEST: the report 6/6 with PACE', async () => {
+    const t0 = new Date(w.h.clock.now().getTime() + 2 * MINUTE);
+    const release = await createLiveRelease(w.f, { opensAt: t0, sizes: [{ label: '52', stock: 10 }], pace: { batch: 2, minutes: 1 }, accessModels: [w.f.modelId] });
+    const run = await w.tests.start(
+      release.id,
+      press(release.id, { titane: 6 }, { behaviour: { payPct: 100, releasePct: 0, missPct: 0, leavePct: 0, holdSeconds: 1.5 }, choices: { size: '52', quantity: 1, addOnsPct: 0 } }),
+      w.f.admin,
+    );
+    await drive(w, 0, 500, release.id);
+    const inject = vi.spyOn(w.h.app, 'inject');
+    try {
+      w.h.clock.set(t0);
+      // The first minute: two admitted at T0 and served; four waiting for their batch read their state every 10 s.
+      await drive(w, 50_000, 500, release.id);
+      const reads = inject.mock.calls.filter((call) => String(((call as unknown[])[0] as { url?: string } | undefined)?.url).endsWith('/state')).length;
+      // About 4 × 5 reads in 50 s at 10 s (4 × 25 at 2 s); the two admitted at T0 a few more before their turn.
+      expect(reads).toBeGreaterThan(4);
+      expect(reads).toBeLessThan(40);
+    } finally {
+      inject.mockRestore();
+    }
+    w.h.clock.set(new Date(t0.getTime() + MINUTE));
+    await drive(w, 2 * MINUTE, 500, release.id);
+    expect(await statusOf(w, run.id)).toBe('DONE');
+    const admitted = await w.h.ctx.db.selectFrom('live_entries').select(['admitted_batch', 'admitted_at', 'status']).where('drop_id', '=', release.id).orderBy('position').execute();
+    expect(admitted.map((e) => [e.admitted_batch, e.admitted_at!.getTime() - t0.getTime(), e.status])).toEqual([
+      [1, 0, 'CONFIRMED'],
+      [1, 0, 'CONFIRMED'],
+      [2, MINUTE, 'CONFIRMED'],
+      [2, MINUTE, 'CONFIRMED'],
+      [3, 2 * MINUTE, 'CONFIRMED'],
+      [3, 2 * MINUTE, 'CONFIRMED'],
+    ]);
+    const ended = await w.tests.end(run.id, testPhrase(release.id, true), w.f.admin);
+    expect(ended.report?.checks.map((c) => [c.id, c.pass])).toEqual([
+      ['ONE_ENTRY', true],
+      ['ORDER', true],
+      ['ONE_PLACE', true],
+      ['STOCK', true],
+      ['ORDERS', true],
+      ['PACE', true],
+    ]);
+    expect(ended.report?.checks.at(-1)).toMatchObject({ label: 'The pace', line: '3 batches admitted 6 entries at 2 every 1 min, each on its time and in the line’s order.' });
+    expect([ended.report?.passed, ended.report?.total]).toEqual([6, 6]);
   });
 
   it('a size of the release set aside during the test (plan NEXT LOT §3.3): END TEST cancels the orders, their stock back on that SKU, the report 5/5, the size still there and set aside', async () => {

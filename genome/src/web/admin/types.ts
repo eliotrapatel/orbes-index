@@ -2250,6 +2250,8 @@ export interface LiveBoard {
   alerts: LiveAlert[];
   /** The live sell-out forecast, from T0 until the end. */
   sellOut: LiveSellOut | null;
+  /** W4: the pace's figures (in the queue, admitted, the batches, the next batch, X every Y, its pause); null without one. */
+  pace?: LivePaceState | null;
 }
 
 /** The release's state after a live control (pause, resume, extend, add pieces, end). */
@@ -2335,6 +2337,8 @@ export interface LiveReleasePlan {
   otherSizes: { label: string; collectors: number }[];
   eligibleByTier: number[];
   modelType: string;
+  /** W4: the pace suggested when the forecast's upper end is above the room's capacity, never applied; null otherwise. */
+  pace?: LivePace | null;
   reasoning: string[];
 }
 
@@ -3860,8 +3864,8 @@ export interface TestReportCheck {
 }
 
 /**
- * A TEST REPORT: its five checks (one entry per account, the draw's order, no two places, the stock, the orders), how
- * many passed, and the test's peaks while it ran.
+ * A TEST REPORT: its five checks (one entry per account, the draw's order, no two places, the stock, the orders; a sixth,
+ * the pace, on a LIVE RELEASE with one: W4), how many passed, and the test's peaks while it ran.
  */
 export interface TestReport {
   at?: Iso;

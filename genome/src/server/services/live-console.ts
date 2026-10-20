@@ -30,8 +30,9 @@
  *   cancel          before the room opens (409 LIVE_ROOM_OPEN after: an ADMIN ends a release with END NOW); its after-room
  *                   with it.
  *   the live board  the counters (in the room, the line, the turns, the pieces secured and confirmed, the missed turns,
- *                   the holds that ended, per size and overall, the interest), the latest host message and the line
- *                   itself (its open entries by place, at most LIVE_CONSOLE_LINE_MAX), and from T0 until the release is
+ *                   the holds that ended, per size and overall, the interest; on a paced release the pace's: in the
+ *                   queue, admitted, the batches, the next batch, X every Y and its pause), the latest host message
+ *                   and the line itself (its open entries by place, at most LIVE_CONSOLE_LINE_MAX), and from T0 until the release is
  *                   over its live alerts and live sell-out forecast (live-insights.ts, injected as `insights`): GET and
  *                   the console's stream (http/live-stream.ts) read the same `board`. The routes mask the emails for an
  *                   AUDITOR.
@@ -63,6 +64,7 @@ import {
   effectiveDeadline,
   isAnnounced,
   liveAccessRule,
+  livePaceState,
   livePhase,
   liveRuleText,
   liveStages,
@@ -80,6 +82,7 @@ import {
   LIVE_TURN_SECONDS,
   type AdminLiveEntry,
   type LiveAccessRule,
+  type LivePaceState,
   type LivePhase,
 } from './live.js';
 import { coverOnPublish, guaranteedPieces, releaseCovered, releaseGuaranteed, type ReleaseGuaranteed } from './guarantees.js';
@@ -779,6 +782,11 @@ export interface AdminLiveBoard {
   alerts: LiveAlert[];
   /** The live sell-out forecast, from T0 until the end; null otherwise. */
   sellOut: LiveSellOut | null;
+  /**
+   * W4: the pace's figures, null without a pace: X every Y, the next batch, its own pause, the batches so far, those in
+   * the queue (waiting for their batch) and those admitted; the line's entries carry their batch (`admittedAt`, `batch`).
+   */
+  pace: LivePaceState | null;
 }
 
 const EMPTY_COUNTS = (): Record<LiveEntryStatus, number> => Object.fromEntries(LIVE_ENTRY_STATUSES.map((s) => [s, 0])) as Record<LiveEntryStatus, number>;
@@ -908,11 +916,12 @@ export class LiveConsoleService {
     const phase = livePhase(d, now);
     // Over on the recorded end (the clock alone may run ahead of the engine's pass), with no turn or hold left.
     const over = d.ended_at !== null && holding === 0;
-    const [line, lineTotal, signals] = await Promise.all([
+    const [line, lineTotal, signals, pace] = await Promise.all([
       this.adminEntries(this.db, d, { statuses: [...LIVE_OPEN_STATUSES] }, LIVE_CONSOLE_LINE_MAX, 0, now),
       this.db.selectFrom('live_entries').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', id).where('status', 'in', [...LIVE_OPEN_STATUSES]).executeTakeFirstOrThrow(),
       // The alerts and the forecast from T0 while the release runs; once it is over, the report says the rest.
       this.insights && !over ? this.insights.signals(d, now) : Promise.resolve<LiveSignals>({ alerts: [], sellOut: null }),
+      livePaceState(this.db, d),
     ]);
     return {
       id,
@@ -952,6 +961,7 @@ export class LiveConsoleService {
       lineTotal: Number(lineTotal.n),
       alerts: signals.alerts,
       sellOut: signals.sellOut,
+      pace,
     };
   }
 

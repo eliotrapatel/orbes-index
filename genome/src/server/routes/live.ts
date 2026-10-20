@@ -17,7 +17,9 @@
  *   GET    /api/v1/live/mine                its entries, with their releases (MY PIECES)
  *   GET    /api/v1/live/:id/after-room      the after-room of release :id, for one of its guests from its T0 (404 for
  *                                           anyone else: nobody else ever sees it); then its own id for the routes below
- *   GET    /api/v1/live/:id/state           the room, its own entry and interest: the page's fallback when its stream is lost
+ *   GET    /api/v1/live/:id/state           the room, its own entry and interest: the page's fallback when its stream is lost;
+ *                                           while its entry waits for its batch (W2), the queue's frame in place of the
+ *                                           room; `pollMs`, how soon to read it again (2 s, 10 s in the queue)
  *   GET    /api/v1/live/:id/stream          the room and its own entry in real time (SSE), at most two per account
  *   PUT    /api/v1/live/:id/interest        I'LL BE THERE, with a size
  *   DELETE /api/v1/live/:id/interest        withdrawn
@@ -143,9 +145,11 @@ export const liveRoutes: FastifyPluginAsync<LiveRouteDeps> = async (app, { ctx, 
     const { account } = requireAccount(request);
     const { id } = parse(liveParams, request.params);
     const viewer = await liveRoom.viewer(account.id, id, 'state');
-    const [room, own] = await Promise.all([hub.roomOf(viewer.dropId), liveRoom.own(account.id, viewer)]);
-    if (!room) throw dropNotFound();
-    return { now: ctx.clock(), room, ...own };
+    const own = await liveRoom.own(account.id, viewer);
+    // W2: while its entry waits for its batch, the queue's small frame in place of the room, read every 10 s (`pollMs`).
+    const state = await hub.stateOf(viewer.dropId, Boolean(own.entry?.queue));
+    if (!state) throw dropNotFound();
+    return { now: ctx.clock(), ...state, ...own };
   });
 
   app.get('/api/v1/live/:id/stream', async (request, reply) => {

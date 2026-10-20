@@ -3,7 +3,8 @@
  * Intelligence), on fixtures whose figures are worked out by hand in each test:
  *
  *  - the rules, pure: the audience forecast (from the interest, from each tier's eligible accounts, without a basis,
- *    capped by the rule, above the room's capacity), the release planner (the quantity and its size mix), the demand
+ *    capped by the rule, above the room's capacity), the release planner (the quantity and its size mix; above the
+ *    room's capacity a pace suggested, never applied: W4), the demand
  *    radar (pressure, rounds, expected sell-out, ADD PIECES with the quantity line), exactly three live alerts and none
  *    falsely, the live sell-out forecast (each outlook), the bot radar (each sign), the release report and its CSV, the
  *    collector insights, the release comparison; each with its reasoning;
@@ -36,6 +37,7 @@ import {
   releaseReport,
   releaseReportCsv,
   sellOutForecast,
+  suggestedPace,
   summarize,
   utc,
   type BotEntryFacts,
@@ -214,6 +216,25 @@ describe('the release planner', () => {
     expect(plan.quantity).toBeNull();
     expect(plan.sizes.every((s) => s.suggested === null)).toBe(true);
     expect(plan.reasoning).toContain('No audience to forecast yet: no quantity is suggested.');
+    expect(plan.pace).toBeNull();
+  });
+
+  it('above the room’s capacity, suggests a pace (W4): X every minute that keeps about the capacity in the room, worded as a suggestion; none within it', () => {
+    const above = audienceForecast({ interest: 1500, eligibleByTier: [3000, 0, 0, 0], past: [], inRoom: null });
+    const windows = { turnSeconds: 30, payMinutes: 5 };
+    const plan = releasePlan({ sizes: release().sizes, forecast: above, past: [], interestBySize: new Map(), collectorsBySize: new Map(), modelType: 'RING', windows });
+    // A buyer stays a turn and the time to pay, 5 min 30 s: 500 × 1 min ÷ 5.5 min = 90.9 → 90 every minute (about 495).
+    expect(plan.pace).toEqual({ batch: 90, minutes: 1 });
+    expect(plan.reasoning.at(-1)).toBe(
+      'Suggested pace: 90 buyers admitted every minute. The upper end, 1\u2009500, is above the 500 in the room the server holds; an admitted buyer stays at most a turn and the time to pay, 5 min 30 s, so 90 every minute keep about 495 in the room, and all 1\u2009500 are admitted within 17 min. A suggestion only: the pace is set in the release’s times.',
+    );
+    // Within the capacity, or without the release's windows (a model's size mix): none.
+    expect(releasePlan({ sizes: release().sizes, forecast, past: [], interestBySize: new Map(), collectorsBySize: new Map(), modelType: 'RING', windows }).pace).toBeNull();
+    expect(releasePlan({ sizes: release().sizes, forecast: above, past: [], interestBySize: new Map(), collectorsBySize: new Map(), modelType: 'RING' }).pace).toBeNull();
+    // Within the pace's bounds: 1 to 5 000 buyers.
+    expect(suggestedPace(SECOND)).toEqual({ batch: 5000, minutes: 1 });
+    expect(suggestedPace(HOUR)).toEqual({ batch: 8, minutes: 1 });
+    expect(suggestedPace(HOUR, 1)).toEqual({ batch: 1, minutes: 1 });
   });
 });
 
@@ -294,6 +315,13 @@ describe('the live alerts: exactly three', () => {
     // Paused, ended, or before T0: no turn is due.
     expect(liveAlerts(release({ pausedAt: at(9.5 * MINUTE) }), [turn, next], none, now)).toEqual([]);
     expect(liveAlerts(release(), [turn, next], none, at(-MINUTE))).toEqual([]);
+  });
+
+  it('on a paced release (W4), only an admitted entry is due a turn, from its admission: the time waiting for a batch is no stall', () => {
+    expect(liveAlerts(release(), [entry({ sizeId: 's52', admittedAt: null })], none, now)).toEqual([]);
+    expect(liveAlerts(release(), [entry({ sizeId: 's52', admittedAt: at(10 * MINUTE - 5 * SECOND) })], none, now)).toEqual([]);
+    const head = entry({ sizeId: 's52', admittedAt: at(9 * MINUTE) });
+    expect(liveAlerts(release(), [head, entry({ sizeId: 's52', admittedAt: null })], none, now).map((a) => [a.kind, a.since])).toEqual([['LINE_STALLED', at(9 * MINUTE)]]);
   });
 
   it('a turn the engine did not mark frees its piece at its deadline: stalled ten seconds after it', () => {
