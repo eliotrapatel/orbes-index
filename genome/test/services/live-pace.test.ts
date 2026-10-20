@@ -355,11 +355,16 @@ describe('LiveService with a pace', () => {
     expect(await f.live.enter(late.id, open.id, { sizeId: open.sizes[0]!.id }, late.actor)).toMatchObject({ queue: { place: 1, etaAt: at(5 * MINUTE) } });
     expect(await advance(open, at(5 * MINUTE))).toMatchObject({ admitted: 1, turns: 1 });
 
-    // Refused: outside the bounds, without a pace (PAUSE PACE, NEXT BATCH NOW), after the end, by a customer.
+    // Refused: outside the bounds, on an after-room, without a pace (PAUSE PACE, NEXT BATCH NOW), after the end, by a customer.
     await rejects(f.live.setPace(r.id, { batch: 0, minutes: 5 }, f.admin), 'VALIDATION_FAILED', 400);
     await rejects(f.live.setPace(r.id, { batch: 5001, minutes: 5 }, f.admin), 'VALIDATION_FAILED', 400);
     await rejects(f.live.setPace(r.id, { batch: 1, minutes: 61 }, f.admin), 'VALIDATION_FAILED', 400);
     await rejects(f.live.setPace(r.id, { batch: 1.5, minutes: 5 }, f.admin), 'VALIDATION_FAILED', 400);
+    const parent = await release({ afterRoom: { modelId: f.modelId, priceMinor: 90_000, sizes: [{ label: 'ONE SIZE', stock: 1 }] } as never });
+    // Published, as a sell-out with people waiting publishes it (after-room.ts settleAfterRoom).
+    await t.db.updateTable('drops').set({ published_at: f.clock.now() }).where('id', '=', parent.afterRoom!.id).execute();
+    await rejects(f.live.setPace(parent.afterRoom!.id, { batch: 1, minutes: 5 }, f.admin), 'LIVE_AFTER_ROOM', 409);
+    expect((await pace(parent.afterRoom!.id)).pace_batch).toBeNull();
     const none = await release();
     f.clock.set(at(MINUTE));
     await rejects(f.live.pausePace(none.id, f.admin), 'LIVE_NO_PACE', 409);
