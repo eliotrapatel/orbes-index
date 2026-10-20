@@ -320,6 +320,10 @@ export type LiveEntryStatus = (typeof LIVE_ENTRY_STATUSES)[number];
 export const LIVE_RESOLUTIONS = ['CONCLUDED', 'CANCELLED'] as const;
 export type LiveResolution = (typeof LIVE_RESOLUTIONS)[number];
 
+/** A LIVE RELEASE's pace (drops.pace_batch, drops.pace_minutes, migration 0049, W4): X buyers admitted every Y minutes; X 1..5 000, Y 1..60. */
+export const LIVE_PACE_BATCH = Object.freeze({ min: 1, max: 5000 } as const);
+export const LIVE_PACE_MINUTES = Object.freeze({ min: 1, max: 60 } as const);
+
 /** How the access rules of a LIVE RELEASE combine (drops.access_combine): every rule met, or any one of them. */
 export const ACCESS_COMBINES = ['AND', 'OR'] as const;
 export type AccessCombine = (typeof ACCESS_COMBINES)[number];

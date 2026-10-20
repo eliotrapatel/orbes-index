@@ -44,7 +44,11 @@ const PROD_TAG = PROD_COMMIT.slice(0, 12);
 /** I2's image, ORBES CARE's previous one, as ORBES CARE's deployment log line names it (DEPLOY-ORBES-CARE §1.6). */
 const I2_TAG = '90d9d3007e20';
 
-const NAMES = Object.keys(MIGRATIONS);
+/**
+ * The migrations of the desktop's deployment, 0001 to 0048: a later number belongs to the macro scope of 2026-10-20 (lot
+ * M1, 0049 on), which has its own runbook and ships after the desktop.
+ */
+const NAMES = Object.keys(MIGRATIONS).filter((n) => Number(n.slice(0, 4)) <= 48);
 
 /** What the runbook expects from the scripts, each printed word for word by its source. */
 const MESSAGES: ReadonlyArray<readonly [message: string, source: string]> = [
@@ -80,8 +84,9 @@ const MESSAGES: ReadonlyArray<readonly [message: string, source: string]> = [
 
 describe('the runbook of the desktop (docs/launch/DEPLOY-DESKTOP.md)', () => {
   it('starts from ORBES CARE in production, 0001 to 0048, and applies no migration, as the scripts print it', () => {
-    // No migration since ORBES CARE: the last one is still 0048_orbes_care.
+    // No migration since ORBES CARE: the last one is still 0048_orbes_care (the macro scope's come after, in build order).
     expect(NAMES).toHaveLength(49);
+    expect(Object.keys(MIGRATIONS).slice(0, NAMES.length)).toEqual(NAMES);
     expect(NAMES.at(-1)).toBe('0048_orbes_care');
     expect(runbook).toContain(`le commit \`${PROD_COMMIT}\` (image \`orbes-genome:${PROD_TAG}\`), avec les quarante-neuf migrations de \`${NAMES[0]}\` à \`${NAMES.at(-1)}\``);
     expect(runbook).toContain(`Sortie attendue : quarante-neuf lignes, de \`${NAMES[0]}\` à \`${NAMES.at(-1)}\``);

@@ -635,6 +635,13 @@ export type ReportChannel = (typeof REPORT_CHANNELS)[number];
 export const REPORT_STATUSES = ['OPEN', 'CLOSED'] as const;
 export type ReportStatus = (typeof REPORT_STATUSES)[number];
 
+/**
+ * The pace of a LIVE RELEASE (drops.pace_batch and drops.pace_minutes, migration 0049, W4): X buyers admitted every Y
+ * minutes, counted across the whole release; X from 1 to 5 000, Y from 1 to 60. Neither: no pace, everyone admitted at T0.
+ */
+export const LIVE_PACE_BATCH = Object.freeze({ min: 1, max: 5000 } as const);
+export const LIVE_PACE_MINUTES = Object.freeze({ min: 1, max: 60 } as const);
+
 // ── Column helpers ─────────────────────────────────────────────────────────
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -1207,6 +1214,18 @@ export interface DropsTable {
   question_enabled: ColumnType<boolean | null, boolean | null | undefined, boolean | null>;
   question_text: ColumnType<string | null, string | null | undefined, string | null>;
   question_answers: ColumnType<string[] | null, string[] | null | undefined, string[] | null>;
+  /**
+   * Migration 0049 (W4), LIVE only and never on an after-room: the pace, X buyers admitted every Y minutes
+   * (LIVE_PACE_BATCH, LIVE_PACE_MINUTES), both or neither; neither, no pace (everyone admitted at T0).
+   */
+  pace_batch: ColumnType<number | null, number | null | undefined, number | null>;
+  pace_minutes: ColumnType<number | null, number | null | undefined, number | null>;
+  /** The pace's own pause in progress since then (the release's PAUSE holds it too); only with a pace. */
+  pace_paused_at: TimestampNullable;
+  /** When the next batch is due; only with a pace. */
+  pace_next_at: TimestampNullable;
+  /** The batches admitted so far (int ≥ 0, NOT NULL DEFAULT 0); above 0 only with a pace. */
+  pace_batches: WithDefault<number>;
 }
 
 /**
@@ -1397,6 +1416,12 @@ export interface LiveEntriesTable {
   country: ColumnType<string | null, string | null | undefined, string | null>;     // two capital letters
   /** Migration 0029 (IN-01): the house's guarantee this entry uses (first in line in its size), once each. */
   guarantee_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /**
+   * Migration 0049 (W4): admitted to take a turn, at its batch's logical time (or its place's time with no pace), with
+   * its batch (int ≥ 0: 0 with no pace, or by LET IN before the first batch); both or neither, only with a place.
+   */
+  admitted_at: TimestampNullable;
+  admitted_batch: ColumnType<number | null, number | null | undefined, number | null>;
 }
 
 /** The models whose owners may enter a LIVE RELEASE (migration 0021). */

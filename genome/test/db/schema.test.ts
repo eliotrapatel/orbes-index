@@ -1138,6 +1138,50 @@ describe('schema', () => {
     expect(refused).toEqual({ status: 'DONE', outcome: 'REFUSED', refusal_reason: 'SCRATCHED' });
   });
 
+  it('the pace\'s bounds (0049) are schema.ts\'s LIVE_PACE_BATCH and LIVE_PACE_MINUTES', async () => {
+    const bounds = async (constraint: string) => {
+      const def = (await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = 'drops'::regclass AND conname = ${constraint}`.execute(t.db)).rows[0].def;
+      const m = /^CHECK \(\(\(\w+ >= (\d+)\) AND \(\w+ <= (\d+)\)\)\)$/.exec(def);
+      expect(m, def).not.toBeNull();
+      return { min: Number(m![1]), max: Number(m![2]) };
+    };
+    expect(await bounds('drops_pace_batch_check')).toEqual(S.LIVE_PACE_BATCH);
+    expect(await bounds('drops_pace_minutes_check')).toEqual(S.LIVE_PACE_MINUTES);
+  });
+
+  it('the LIVE waiting room\'s pace (0049): the mirror at work: a release without a pace, 0 batches; a pace with its next batch and its pause; an entry not admitted, then admitted with its batch', async () => {
+    const { model } = await seedProduct(t.db);
+    const account = await t.db.insertInto('accounts').values({ email: 'pace-s0049@example.com', email_normalized: 'pace-s0049@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const release = await t.db
+      .insertInto('drops')
+      .values({
+        model_id: model.id, title: 'PACE 0049', quantity: 4, opens_at: new Date('2026-12-01T10:00:00Z'), closes_at: new Date('2026-12-01T11:00:00Z'), seed_enc: `v1.${'A'.repeat(16)}.${'B'.repeat(64)}`,
+        seed_hash: new Uint8Array(32), early_access_hours: 0, mode: 'LIVE', live_min_tier: 0, tier_priority: true, room_opens_minutes: 5, turn_seconds: 30, pay_minutes: 5, per_account: 1,
+        price_minor: 1000, currency: 'EUR', quantity_line: '4 PIECES',
+      })
+      .returning(['id', 'pace_batch', 'pace_minutes', 'pace_paused_at', 'pace_next_at', 'pace_batches'])
+      .executeTakeFirstOrThrow();
+    expect(release).toEqual({ id: expect.any(String), pace_batch: null, pace_minutes: null, pace_paused_at: null, pace_next_at: null, pace_batches: 0 });
+    const next = new Date('2026-12-01T10:01:00Z');
+    const paced = await t.db
+      .updateTable('drops')
+      .set({ pace_batch: S.LIVE_PACE_BATCH.max, pace_minutes: S.LIVE_PACE_MINUTES.min, pace_next_at: next, pace_paused_at: new Date('2026-12-01T10:00:30Z'), pace_batches: 1 })
+      .where('id', '=', release.id)
+      .returning(['pace_batch', 'pace_minutes', 'pace_next_at', 'pace_batches'])
+      .executeTakeFirstOrThrow();
+    expect(paced).toEqual({ pace_batch: 5000, pace_minutes: 1, pace_next_at: next, pace_batches: 1 });
+    const size = await t.db.insertInto('drop_sizes').values({ drop_id: release.id, label: '52', position: 1, stock: 4 }).returning('id').executeTakeFirstOrThrow();
+    const entry = await t.db
+      .insertInto('live_entries')
+      .values({ drop_id: release.id, account_id: account.id, size_id: size.id, quantity: 1, tier: 0, status: 'QUEUED', position: 1, queued_at: new Date('2026-12-01T10:00:00Z') })
+      .returning(['id', 'admitted_at', 'admitted_batch'])
+      .executeTakeFirstOrThrow();
+    expect(entry).toEqual({ id: expect.any(String), admitted_at: null, admitted_batch: null });
+    const admitted = await t.db.updateTable('live_entries').set({ admitted_at: next, admitted_batch: 1 }).where('id', '=', entry.id).returning(['admitted_at', 'admitted_batch']).executeTakeFirstOrThrow();
+    expect(admitted).toEqual({ admitted_at: next, admitted_batch: 1 });
+    await expect(t.db.updateTable('live_entries').set({ admitted_batch: null }).where('id', '=', entry.id).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'live_entries_admitted'));
+  });
+
   it('audit_logs is append-only at the database level', async () => {
     const h = (b: number) => new Uint8Array(32).fill(b);
     await t.db

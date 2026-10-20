@@ -94,7 +94,9 @@ describe('the runbook of ORBES CARE (docs/launch/DEPLOY-ORBES-CARE.md)', () => {
   it('starts from I2 in production, 0001 to 0047, and applies exactly 0048_orbes_care, as the scripts print it', () => {
     expect(DEPLOY).toEqual(['0048_orbes_care']);
     expect(BEFORE).toHaveLength(48);
-    expect(NAMES).toEqual(AFTER);
+    // A later migration (the macro scope of 2026-10-20, lot M1, 0049 on) has its own runbook and comes after ORBES CARE's, in build order.
+    expect(NAMES.slice(0, AFTER.length)).toEqual(AFTER);
+    expect(NAMES.slice(AFTER.length).every((n) => numberOf(n) >= 49)).toBe(true);
     expect(runbook).toContain(`le commit \`${PROD_COMMIT}\` (image \`orbes-genome:${PROD_TAG}\`), avec les quarante-huit migrations de \`${BEFORE[0]}\` à \`${BEFORE.at(-1)}\``);
     expect(runbook).toContain(`Sortie attendue : quarante-huit lignes, de \`${BEFORE[0]}\` à \`${BEFORE.at(-1)}\``);
     expect(outputs.join('\n')).toContain(BEFORE.slice(-2).join('\n'));

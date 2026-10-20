@@ -25,7 +25,7 @@ import { SaleService } from '../../src/server/services/sale.js';
 import { createScanToken } from '../../src/server/services/scan-tokens.js';
 import type { VerificationService } from '../../src/server/services/verification.js';
 import { WarrantyService } from '../../src/server/services/warranty.js';
-import { isGuardViolation } from '../../src/server/db/pg-errors.js';
+import { isCheckViolation, isGuardViolation } from '../../src/server/db/pg-errors.js';
 
 const adminUrl = process.env.ORBES_TEST_POSTGRES_URL;
 
@@ -207,5 +207,45 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     // DOWN's (and a switch to 2 years') end date: start + months, clamped to the month's end as addMonthsClamped does.
     const end = await sql<{ d: string }>`SELECT ((date '2026-01-31' + make_interval(months => 1))::date)::text AS d`.execute(db);
     expect(end.rows[0].d).toBe('2026-02-28');
+  });
+
+  it('holds the pace of a LIVE RELEASE and the admission of its entries by their CHECKs (0049), with the previous image\'s inserts unpaced and not admitted, and the same JS types as PGlite', async () => {
+    await db.insertInto('categories').values({ id: 22, code: 'P', name: 'Pace parity' }).execute();
+    const model = await db.insertInto('models').values({ category_id: 22, name: 'PACE', type: 'RING', sku_prefix: 'PACE-PG' }).returning('id').executeTakeFirstOrThrow();
+    const account = await db.insertInto('accounts').values({ email: 'pace-pg@example.com', email_normalized: 'pace-pg@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    // Inserted as the previous image does, naming none of the pace's columns.
+    const release = await db
+      .insertInto('drops')
+      .values({
+        model_id: model.id, title: 'PACE PG', quantity: 2, opens_at: new Date('2026-12-01T10:00:00Z'), closes_at: new Date('2026-12-01T11:00:00Z'), seed_enc: `v1.${'A'.repeat(16)}.${'B'.repeat(64)}`,
+        seed_hash: new Uint8Array(32), early_access_hours: 0, mode: 'LIVE', live_min_tier: 0, tier_priority: true, room_opens_minutes: 5, turn_seconds: 30, pay_minutes: 5, per_account: 1,
+        price_minor: 1000, currency: 'EUR', quantity_line: '2 PIECES', published_at: new Date('2026-11-30T10:00:00Z'),
+      })
+      .returning(['id', 'pace_batch', 'pace_minutes', 'pace_next_at', 'pace_paused_at', 'pace_batches'])
+      .executeTakeFirstOrThrow();
+    expect(release).toEqual({ id: expect.any(String), pace_batch: null, pace_minutes: null, pace_next_at: null, pace_paused_at: null, pace_batches: 0 });
+    const set = (v: Record<string, unknown>) => db.updateTable('drops').set(v).where('id', '=', release.id).execute();
+    await expect(set({ pace_batch: 250 })).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_pace'));
+    await expect(set({ pace_batch: 5001, pace_minutes: 1 })).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_pace_batch_check'));
+    await expect(set({ pace_batch: 250, pace_minutes: 61 })).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_pace_minutes_check'));
+    await expect(set({ pace_next_at: new Date('2026-12-01T10:01:00Z') })).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_pace_state'));
+    await expect(set({ pace_batches: 1 })).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_pace'));
+    const next = new Date('2026-12-01T10:01:00Z');
+    await set({ pace_batch: 250, pace_minutes: 1, pace_next_at: next, pace_batches: 1 });
+    const paced = await db.selectFrom('drops').select(['pace_batch', 'pace_minutes', 'pace_next_at', 'pace_batches']).where('id', '=', release.id).executeTakeFirstOrThrow();
+    expect(paced).toEqual({ pace_batch: 250, pace_minutes: 1, pace_next_at: next, pace_batches: 1 });
+    const size = await db.insertInto('drop_sizes').values({ drop_id: release.id, label: '52', position: 1, stock: 2 }).returning('id').executeTakeFirstOrThrow();
+    // An entry queued as the previous image queues it: not admitted.
+    const entry = await db
+      .insertInto('live_entries')
+      .values({ drop_id: release.id, account_id: account.id, size_id: size.id, quantity: 1, tier: 0, status: 'QUEUED', position: 1, queued_at: new Date('2026-12-01T10:00:00Z') })
+      .returning(['id', 'admitted_at', 'admitted_batch'])
+      .executeTakeFirstOrThrow();
+    expect(entry).toEqual({ id: expect.any(String), admitted_at: null, admitted_batch: null });
+    const admit = (v: Record<string, unknown>) => db.updateTable('live_entries').set(v).where('id', '=', entry.id).execute();
+    await expect(admit({ admitted_at: next })).rejects.toSatisfy((e) => isCheckViolation(e, 'live_entries_admitted'));
+    await expect(admit({ admitted_at: next, admitted_batch: -1 })).rejects.toSatisfy((e) => isCheckViolation(e, 'live_entries_admitted_batch_check'));
+    await admit({ admitted_at: next, admitted_batch: 1 });
+    expect(await db.selectFrom('live_entries').select(['admitted_at', 'admitted_batch']).where('id', '=', entry.id).executeTakeFirstOrThrow()).toEqual({ admitted_at: next, admitted_batch: 1 });
   });
 });

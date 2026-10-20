@@ -472,6 +472,9 @@ describe('admin enums mirror the server', () => {
     // Each basis's outcomes and refusal reasons (plan ORBES CARE, migration 0048), as the server holds them.
     expect(web.WARRANTY_CLAIM_OUTCOMES_BY_BASIS).toEqual(serverSchema.WARRANTY_CLAIM_OUTCOMES_BY_BASIS);
     expect(web.WARRANTY_CLAIM_REFUSALS_BY_BASIS).toEqual(serverSchema.WARRANTY_CLAIM_REFUSALS_BY_BASIS);
+    // The pace of a LIVE RELEASE (macro scope W4, migration 0049): X and Y's bounds, as the server holds them.
+    expect(web.LIVE_PACE_BATCH).toEqual(serverSchema.LIVE_PACE_BATCH);
+    expect(web.LIVE_PACE_MINUTES).toEqual(serverSchema.LIVE_PACE_MINUTES);
     expect([...web.AUTH_POLICY_KINDS]).toEqual([...SERVER_POLICY_KINDS]);
     expect([...web.ANOMALY_SORTS]).toEqual([...SERVER_ANOMALY_SORTS]);
     expect([...web.SCAN_STAT_EVENT_TYPES]).toEqual([...serverSchema.SCAN_STAT_EVENT_TYPES]);
