@@ -1944,6 +1944,8 @@ export interface LiveRelease extends LiveCard {
   /** Its settings still change: neither announced nor cancelled. */
   editable: boolean;
   roomOpensMinutes: number;
+  /** W4: X buyers admitted every Y minutes; null: no pace (everyone admitted at T0). */
+  pace?: LivePace | null;
   turnSeconds: number;
   payMinutes: number;
   perAccount: number;
@@ -2116,6 +2118,8 @@ export interface LiveSettings {
   opensAt: Iso;
   closesAt: Iso;
   roomOpensMinutes?: number;
+  /** W4: the pace; null (blank): none. */
+  pace?: LivePace | null;
   turnSeconds?: number;
   payMinutes?: number;
   perAccount?: number;
@@ -2182,6 +2186,26 @@ export interface LiveEntry {
   letIn: boolean;
   /** IN-01: the entry uses the house's guarantee: first in line in its size. */
   guaranteed: boolean;
+  /** W4: when it was admitted to take a turn, null while it waits for its batch. */
+  admittedAt?: Iso | null;
+  /** Its batch: 0 with no pace (or by LET IN before the first batch). */
+  batch?: number | null;
+}
+
+/** A release's pace (W4): X buyers admitted every Y minutes (LIVE_PACE_BATCH, LIVE_PACE_MINUTES). */
+export interface LivePace {
+  batch: number;
+  minutes: number;
+}
+
+/** The pace as it runs (LiveState.pace): the next batch, its own pause, the batches, those waiting and admitted. */
+export interface LivePaceState extends LivePace {
+  nextAt: Iso;
+  pausedAt: Iso | null;
+  paused: boolean;
+  batches: number;
+  waiting: number;
+  admitted: number;
 }
 
 /** A size on the live board: its pieces and its people. */
@@ -2241,6 +2265,8 @@ export interface LiveState {
   quantity: number;
   quantityLine: string;
   sizes: { id: string; label: string; stock: number }[];
+  /** W4: the pace, null without one. */
+  pace?: LivePaceState | null;
 }
 
 // ── The Club: the LIVE RELEASES' intelligence (services/live-insights.ts) ──

@@ -247,6 +247,36 @@ for (const backend of BACKENDS) {
       expect(rows.map((x) => x.status)).toEqual(['TURN', 'TURN', 'QUEUED', 'QUEUED', 'QUEUED', 'QUEUED', 'QUEUED']);
     });
 
+    it('admission under concurrent advance, LET IN, SET PACE and NEXT BATCH NOW (W4): no entry admitted twice, the batches exact', async () => {
+      const r = await release({ sizes: [{ label: '52', stock: 100 }], pace: { batch: 3, minutes: 2 } });
+      await lineOf(r, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+      const rows = await entriesOf(handle.db, r.id);
+      const tenth = rows.find((x) => x.position === 10)!;
+      // At T0+2 the second batch is due: the engines, SET PACE (the same pace) and NEXT BATCH NOW admit the due batch
+      // first, whoever comes first; NEXT BATCH NOW then the third; LET IN admits the tenth itself.
+      f.clock.set(at(120 * SECOND));
+      const outcomes = await together([
+        () => f.live.advance(r.id),
+        () => f.live.advance(r.id),
+        () => f.live.letIn(r.id, tenth.id, f.admin),
+        () => f.live.setPace(r.id, { batch: 3, minutes: 2 }, f.admin),
+        () => f.live.nextBatch(r.id, f.admin),
+      ]);
+      expect(outcomes).toEqual(['ok', 'ok', 'ok', 'ok', 'ok']);
+      const after = await entriesOf(handle.db, r.id);
+      expect(after.slice(0, 9).map((x) => [x.position, x.admitted_batch])).toEqual([
+        [1, 1], [2, 1], [3, 1], [4, 2], [5, 2], [6, 2], [7, 3], [8, 3], [9, 3],
+      ]);
+      expect(after.slice(0, 9).map((x) => x.admitted_at!.getTime() - T0.getTime())).toEqual([0, 0, 0, 120_000, 120_000, 120_000, 120_000, 120_000, 120_000]);
+      expect(after[9]).toMatchObject({ position: 10, status: 'TURN', admitted_at: at(120 * SECOND) });
+      // The first batch's turns ran out at T0+30 s; every entry admitted now has its turn.
+      expect(after.map((x) => x.status)).toEqual([...Array(3).fill('MISSED'), ...Array(7).fill('TURN')]);
+      const d = await handle.db.selectFrom('drops').select(['pace_batches', 'pace_next_at']).where('id', '=', r.id).executeTakeFirstOrThrow();
+      expect(d).toEqual({ pace_batches: 3, pace_next_at: at(240 * SECOND) });
+      expect(await auditCount(r, 'drop.live.admit')).toBe(2);
+      expect(await auditCount(r, 'drop.live.pace.next')).toBe(1);
+    });
+
     it('double presses: the last press counts; a SECURE needs 1.4 s from it', async () => {
       const r = await release({ sizes: [{ label: '52', stock: 1 }] });
       const [first] = await lineOf(r, [0]);

@@ -7,7 +7,8 @@
  *                   the members of a segment, and whether every rule is needed or any one: plan LIVE RELEASE+, choices 4
  *                   and 27); the surprise in every box (on or off, its description: internal, choice 3); the line's tier
  *                   priority; T0 (`opens_at`), the end of
- *                   the sales (`closes_at`), the room's opening, the turn and pay windows, the pieces per person, the
+ *                   the sales (`closes_at`), the room's opening, the pace (W4: X buyers admitted every Y minutes,
+ *                   blank for none; SET PACE in live.ts changes it until the end), the turn and pay windows, the pieces per person, the
  *                   price and its currency; the sizes and their stock, the quantity line (« 25 PIECES » by default, at
  *                   most 40 characters); the add-ons (at most 6); the staged reveals (announcement, silhouette, name,
  *                   photograph); the per-tier turn and pay windows. Everything changes until the announcement (a DRAFT,
@@ -69,6 +70,8 @@ import {
   LIVE_ADDONS_MAX,
   LIVE_MIN_PARTICIPATIONS,
   LIVE_OPEN_STATUSES,
+  LIVE_PACE_BATCH,
+  LIVE_PACE_MINUTES,
   LIVE_PAY_MINUTES,
   LIVE_PER_ACCOUNT,
   LIVE_ROOM_OPENS_MINUTES,
@@ -186,6 +189,12 @@ export interface LiveTierWindowInput {
   payMinutes?: number | null;
 }
 
+/** A release's pace (W4): X buyers (LIVE_PACE_BATCH) admitted every Y minutes (LIVE_PACE_MINUTES). */
+export interface LivePaceInput {
+  batch: number;
+  minutes: number;
+}
+
 /** Every setting of a LIVE RELEASE; those not given take their defaults (the plan's choices 15 and 16). */
 export interface LiveSettingsInput {
   modelId: string;
@@ -196,6 +205,8 @@ export interface LiveSettingsInput {
   /** The end of the sales. */
   closesAt: Date;
   roomOpensMinutes?: number;
+  /** W4, the times part: X buyers admitted every Y minutes; null or omitted (blank): no pace, everyone admitted at T0. */
+  pace?: LivePaceInput | null;
   turnSeconds?: number;
   payMinutes?: number;
   perAccount?: number;
@@ -258,6 +269,7 @@ interface Settings {
   opensAt: Date;
   closesAt: Date;
   roomOpensMinutes: number;
+  pace: LivePaceInput | null;
   turnSeconds: number;
   payMinutes: number;
   perAccount: number;
@@ -295,6 +307,14 @@ export interface AfterRoomSettings {
   addons: { id: string | null; label: string; line: string | null; priceMinor: number }[];
   delayMinutes: number;
   lengthMinutes: number;
+}
+
+/** A pace as the settings hold it: both figures within their bounds, or none (null: no pace). */
+function cleanPace(v: unknown): LivePaceInput | null {
+  if (v === null || v === undefined || v === '') return null;
+  const p = v as Partial<LivePaceInput>;
+  const message = `A pace admits ${LIVE_PACE_BATCH.min} to ${LIVE_PACE_BATCH.max} buyers every ${LIVE_PACE_MINUTES.min} to ${LIVE_PACE_MINUTES.max} minutes; leave it blank for none.`;
+  return { batch: wholeIn(p.batch, LIVE_PACE_BATCH.min, LIVE_PACE_BATCH.max, message), minutes: wholeIn(p.minutes, LIVE_PACE_MINUTES.min, LIVE_PACE_MINUTES.max, message) };
 }
 
 function wholeIn(v: unknown, min: number, max: number, message: string): number {
@@ -455,6 +475,7 @@ function settingsOf(base: Settings | null, change: LiveSettingsChange): Settings
     opensAt: change.opensAt !== undefined || !base ? cleanTime(change.opensAt, 'T0') : base.opensAt,
     closesAt: change.closesAt !== undefined || !base ? cleanTime(change.closesAt, 'The end') : base.closesAt,
     roomOpensMinutes: wholeIn(change.roomOpensMinutes ?? base?.roomOpensMinutes ?? LIVE_ROOM_OPENS_MINUTES.default, LIVE_ROOM_OPENS_MINUTES.min, LIVE_ROOM_OPENS_MINUTES.max, `The room opens ${LIVE_ROOM_OPENS_MINUTES.min} to ${LIVE_ROOM_OPENS_MINUTES.max} minutes before T0.`),
+    pace: change.pace !== undefined ? cleanPace(change.pace) : (base?.pace ?? null),
     turnSeconds: wholeIn(change.turnSeconds ?? base?.turnSeconds ?? LIVE_TURN_SECONDS.default, LIVE_TURN_SECONDS.min, LIVE_TURN_SECONDS.max, `A turn lasts ${LIVE_TURN_SECONDS.min} to ${LIVE_TURN_SECONDS.max} seconds.`),
     payMinutes: wholeIn(change.payMinutes ?? base?.payMinutes ?? LIVE_PAY_MINUTES.default, LIVE_PAY_MINUTES.min, LIVE_PAY_MINUTES.max, `The time to pay is ${LIVE_PAY_MINUTES.min} to ${LIVE_PAY_MINUTES.max} minutes.`),
     perAccount: wholeIn(change.perAccount ?? base?.perAccount ?? LIVE_PER_ACCOUNT.default, LIVE_PER_ACCOUNT.min, LIVE_PER_ACCOUNT.max, `A person secures ${LIVE_PER_ACCOUNT.min} to ${LIVE_PER_ACCOUNT.max} pieces.`),
@@ -537,6 +558,7 @@ function auditSettings(s: Settings): Record<string, unknown> {
     opensAt: t(s.opensAt),
     closesAt: t(s.closesAt),
     roomOpensMinutes: s.roomOpensMinutes,
+    pace: s.pace ? { batch: s.pace.batch, minutes: s.pace.minutes } : null,
     turnSeconds: s.turnSeconds,
     payMinutes: s.payMinutes,
     perAccount: s.perAccount,
@@ -617,6 +639,8 @@ export interface AdminLiveRelease extends AdminLiveCard {
   /** Its settings still change (not announced, not cancelled). */
   editable: boolean;
   roomOpensMinutes: number;
+  /** W4: X buyers admitted every Y minutes; null: no pace (everyone admitted at T0). The board's `pace` has its state. */
+  pace: LivePaceInput | null;
   turnSeconds: number;
   payMinutes: number;
   perAccount: number;
@@ -1256,6 +1280,8 @@ export class LiveConsoleService {
       live_min_tier: s.minTier,
       tier_priority: s.tierPriority,
       room_opens_minutes: s.roomOpensMinutes,
+      pace_batch: s.pace?.batch ?? null,
+      pace_minutes: s.pace?.minutes ?? null,
       turn_seconds: s.turnSeconds,
       pay_minutes: s.payMinutes,
       per_account: s.perAccount,
@@ -1513,6 +1539,7 @@ export class LiveConsoleService {
       opensAt: d.opens_at,
       closesAt: d.closes_at,
       roomOpensMinutes: d.room_opens_minutes ?? LIVE_ROOM_OPENS_MINUTES.default,
+      pace: d.pace_batch !== null && d.pace_minutes !== null ? { batch: d.pace_batch, minutes: d.pace_minutes } : null,
       turnSeconds: d.turn_seconds ?? LIVE_TURN_SECONDS.default,
       payMinutes: d.pay_minutes ?? LIVE_PAY_MINUTES.default,
       perAccount: d.per_account ?? LIVE_PER_ACCOUNT.default,
@@ -1692,6 +1719,7 @@ export class LiveConsoleService {
       // An after-room is set with its release, never on its own.
       editable: !r.cancelled_at && !isAnnounced(r, now) && !r.parent_drop_id,
       roomOpensMinutes: s.roomOpensMinutes,
+      pace: s.pace,
       turnSeconds: s.turnSeconds,
       payMinutes: s.payMinutes,
       perAccount: s.perAccount,
@@ -1743,6 +1771,7 @@ export class LiveConsoleService {
       .select([
         'e.id', 'e.account_id', 'a.email', 'e.status', 'e.size_id', 's.label', 'e.quantity', 'e.tier', 'e.position', 'e.joined_at', 'e.turn_at',
         'e.turn_expires_at', 'e.secured_at', 'e.hold_expires_at', 'e.confirmed_at', 'e.ended_at', 'e.gesture_ms', 'e.let_in_by', 'e.guarantee_id',
+        'e.admitted_at', 'e.admitted_batch',
       ])
       .where('e.drop_id', '=', d.id);
     if (filter.statuses) q = q.where('e.status', 'in', [...filter.statuses]);
@@ -1775,6 +1804,8 @@ export class LiveConsoleService {
       gestureMs: r.gesture_ms,
       letIn: r.let_in_by !== null,
       guaranteed: r.guarantee_id !== null,
+      admittedAt: r.admitted_at,
+      batch: r.admitted_batch,
     }));
   }
 }

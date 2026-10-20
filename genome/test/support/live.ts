@@ -160,6 +160,8 @@ export interface LiveReleaseOptions {
   minTier?: number;
   tierPriority?: boolean;
   roomOpensMinutes?: number;
+  /** W4: X buyers admitted every Y minutes; none by default. */
+  pace?: { batch: number; minutes: number } | null;
   turnSeconds?: number;
   payMinutes?: number;
   perAccount?: number;
@@ -206,6 +208,8 @@ export async function createLiveRelease(f: LiveFixture, o: LiveReleaseOptions): 
       live_min_tier: o.minTier ?? 0,
       tier_priority: o.tierPriority ?? true,
       room_opens_minutes: o.roomOpensMinutes ?? 5,
+      pace_batch: o.pace?.batch ?? null,
+      pace_minutes: o.pace?.minutes ?? null,
       turn_seconds: o.turnSeconds ?? 30,
       pay_minutes: o.payMinutes ?? 5,
       per_account: o.perAccount ?? 1,

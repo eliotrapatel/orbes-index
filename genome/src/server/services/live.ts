@@ -27,6 +27,18 @@
  *              may still be confirmed, given back, its add-ons chosen); RESUME moves the turns and holds that were still
  *              running when it began by the time paused (`paused_ms_total` adds it). Paused time never consumes a turn
  *              or a hold, and never revives one that had run out.
+ *   the pace   (macro scope of 2026-10-20, W1-W6; migration 0049) a release may admit its line at a fixed pace, X buyers
+ *              every Y minutes counted across the whole release (`pace_batch`, `pace_minutes`). Only an ADMITTED QUEUED
+ *              entry is given a turn. With no pace every entry is admitted as it takes its place (batch 0), which is the
+ *              room as before. With a pace the first batch is due at T0, then one every Y minutes (`pace_next_at`,
+ *              `pace_batches`): each admits the next X entries not admitted yet, in the order of the turns (`guarantee_id
+ *              IS NULL, position`), among those placed by the batch's logical time, and is stamped with that time, so a
+ *              restart changes nothing; a batch with nobody waiting still moves the clock. The release's PAUSE holds the
+ *              pace (RESUME moves the next batch by the time paused), and so does the pace's own PAUSE PACE; SET PACE
+ *              changes X and Y (from the next batch on), NEXT BATCH NOW admits one batch at once, LET IN admits the entry
+ *              it lets in. Absent people are admitted with their batch: their turn runs out (MISSED) and passes to the
+ *              next in their size, as before; an entry keeps its place whatever happens (W6). A QUEUED entry not admitted
+ *              reads its place among those waiting and its estimated entry time (`LiveEntryView.queue`, W5).
  *   the end    SOLD_OUT, every piece confirmed: WAITING and QUEUED entries ENDED at once. CLOSED at `closes_at`: no new
  *              turn, WAITING and QUEUED ENDED at once; a turn in progress may still be secured, a hold confirmed, until
  *              their deadlines. ENDED by an ADMIN: WAITING, QUEUED and TURN ENDED at once; holds may still be
@@ -77,9 +89,10 @@
  * The audit log names releases, entries, sizes and add-ons by id, never an email: the customers' state changes
  * (`drop.live.enter`, `.size`, `.leave`, `.interest`, `.interest.withdraw`, `.secure`, `.addons`, `.confirm`,
  * `.release`; a PRESS changes no state and is not audited), the engine's (`drop.live.queue` at T0, `drop.live.end` for
- * SOLD_OUT and CLOSED, the system as actor) and the console's (`drop.live.pause`, `.resume`, `.extend`, `.stock`,
- * `.free`, `.let_in`, `.message`, `.end`, `.remove`, and the boutique board's link, `.board.issue` and `.board.revoke`,
- * never with its secret). A lock of an account (OwnerService) removes its open entries and
+ * SOLD_OUT and CLOSED, `drop.live.admit` for a paced batch as counts, the system as actor) and the console's
+ * (`drop.live.pause`, `.resume`, `.extend`, `.stock`, `.free`, `.let_in`, `.message`, `.end`, `.remove`, the pace's
+ * `.pace`, `.pace.pause`, `.pace.resume` and `.pace.next`, as counts, and the boutique board's link, `.board.issue` and
+ * `.board.revoke`, never with its secret). A lock of an account (OwnerService) removes its open entries and
  * withdraws its interest in the releases not opened yet (`removeAccountLiveEntries`); the right of access exports every
  * entry with its add-ons, and its interest (`accountLiveData`).
  */
@@ -92,7 +105,7 @@ import type { AppConfig } from '../config.js';
 import { deriveSubkey } from '../crypto/secretbox.js';
 import { inTransaction, type Db } from '../db/connection.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
-import type { AccessCombine, DropRow, LiveEndReason, LiveEntryStatus, LiveResolution } from '../db/schema.js';
+import { LIVE_PACE_BATCH, LIVE_PACE_MINUTES, type AccessCombine, type DropRow, type LiveEndReason, type LiveEntryStatus, type LiveResolution } from '../db/schema.js';
 import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
 import { systemClock, SYSTEM_ACTOR, type Actor, type Clock } from '../types.js';
 import { afterRoomDoors, afterRoomPlace, isAfterRoom, settleAfterRoom, type AfterRoomDoor } from './after-room.js';
@@ -140,6 +153,8 @@ export const LIVE_QUESTION_DEFAULT = Object.freeze({
 export const LIVE_BOARD_TOKEN_BYTES = 32;
 /** The network's hash of an entry is erased this many days after the release's end (or its cancellation). */
 export const LIVE_NETWORK_RETENTION_DAYS = 30;
+/** The pace (W4, the CHECKs of migration 0049): X buyers admitted every Y minutes, X 1 to 5 000, Y 1 to 60. */
+export { LIVE_PACE_BATCH, LIVE_PACE_MINUTES };
 
 /** The entries that hold pieces of their size, by their quantity. */
 export const LIVE_HOLDING_STATUSES = Object.freeze(['TURN', 'SECURED', 'CONFIRMED'] as const);
@@ -219,6 +234,41 @@ export function pausedFor(d: Pick<DropRow, 'paused_at'>, now: Date): number {
 /** A deadline as it stands at `now`: moved by the pause in progress (RESUME moves the stored one by the whole pause). */
 export function effectiveDeadline(deadline: Date, d: Pick<DropRow, 'paused_at'>, now: Date): Date {
   return new Date(new Date(deadline).getTime() + pausedFor(d, now));
+}
+
+export type LivePaceRow = Pick<DropRow, 'opens_at' | 'paused_at' | 'pace_batch' | 'pace_minutes' | 'pace_paused_at' | 'pace_next_at'>;
+
+/** When the next batch of a paced release is due: `pace_next_at`, or T0 before the first. Null without a pace. */
+export function paceNextAt(d: LivePaceRow): Date | null {
+  if (d.pace_batch === null || d.pace_batch === undefined) return null;
+  return new Date(d.pace_next_at ?? d.opens_at);
+}
+
+/** Whether a paced release holds its pace now: by the pace's own pause or by the release's PAUSE. */
+export function paceHeld(d: Pick<DropRow, 'paused_at' | 'pace_paused_at'>): boolean {
+  return d.paused_at !== null || d.pace_paused_at !== null;
+}
+
+/**
+ * The estimated entry time of the `place`-th entry waiting for its batch (1 is the next admitted): the next batch, then
+ * one batch of X every Y minutes, `next + (ceil(place / X) − 1) × Y`, never before `now` (W5). Null while the pace is
+ * held (PAUSED) or without a pace.
+ */
+export function liveQueueEta(d: LivePaceRow, place: number, now: Date): Date | null {
+  const next = paceNextAt(d);
+  if (!next || paceHeld(d) || !d.pace_batch || !d.pace_minutes) return null;
+  const from = Math.max(next.getTime(), now.getTime());
+  return new Date(from + (Math.ceil(Math.max(1, place) / d.pace_batch) - 1) * d.pace_minutes * MINUTE_MS);
+}
+
+/**
+ * How far one pause that ends at `now` moves the next batch: the time it was the pace's only hold, so a stretch held
+ * by both pauses (the pace's own and the release's) counts once. `own` began this pause; `other` is the other one, if
+ * it is still in progress (it moves the batch for the rest when it ends).
+ */
+export function paceShiftMs(own: Date, other: Date | null, now: Date): number {
+  const end = other ? Math.min(now.getTime(), new Date(other).getTime()) : now.getTime();
+  return Math.max(0, end - new Date(own).getTime());
 }
 
 /** Where a published LIVE RELEASE stands at `now`, from its row alone. */
@@ -355,6 +405,12 @@ const entryNotSecured = () => conflict('LIVE_ENTRY_NOT_SECURED', 'Only a held pi
 const entryClosed = () => conflict('LIVE_ENTRY_CLOSED', 'This entry is no longer in the release.');
 const noBoardLink = () => conflict('LIVE_NO_BOARD_LINK', 'This release has no board link.');
 const afterRoomBoard = () => conflict('LIVE_AFTER_ROOM', 'An after-room has no board: nobody but its guests ever sees it.');
+const afterRoomPace = () => conflict('LIVE_AFTER_ROOM', 'An after-room has no pace: its guests come straight from the release’s line.');
+const noPace = () => conflict('LIVE_NO_PACE', 'This release has no pace: set one first.');
+const paceAlreadyPaused = () => conflict('LIVE_PACE_ALREADY_PAUSED', 'The pace of this release is already paused.');
+const paceNotPaused = () => conflict('LIVE_PACE_NOT_PAUSED', 'The pace of this release is not paused.');
+const paceInvalid = () =>
+  validationError(`A pace admits ${LIVE_PACE_BATCH.min} to ${LIVE_PACE_BATCH.max} buyers every ${LIVE_PACE_MINUTES.min} to ${LIVE_PACE_MINUTES.max} minutes.`);
 
 /** 403 LIVE_NOT_ELIGIBLE: the rule of the release in words, and the account's own standing against it (`liveRefusal`). */
 export const liveNotEligible = (rule: LiveAccessRule, access?: LiveAccess) => new DomainError('LIVE_NOT_ELIGIBLE', 403, liveRefusal(rule, access));
@@ -631,6 +687,21 @@ export interface LiveEntryView {
   afterRoom: AfterRoomDoor | null;
   /** IN-01: the entry uses the house's guarantee and the guarantee is shown to the client (false for one not shown). */
   guaranteed: boolean;
+  /**
+   * W5: while QUEUED and not admitted yet, on a paced release, the queue page's figures; null otherwise (admitted, or
+   * no pace: the line as before).
+   */
+  queue: LiveQueueView | null;
+}
+
+/** An entry waiting for its batch (W2, W5): its place among those waiting and when it should come in. */
+export interface LiveQueueView {
+  /** 1 is admitted next: the entries waiting for their batch before it in the line's order, plus one. */
+  place: number;
+  /** The estimated entry time (liveQueueEta); null while the pace is held. */
+  etaAt: Date | null;
+  /** The pace is held (PAUSE PACE, or the release's PAUSE): the place is kept, no batch comes. */
+  paused: boolean;
 }
 
 /** An account's interest (I'LL BE THERE). */
@@ -655,6 +726,27 @@ export interface LiveReleaseState {
   quantity: number;
   quantityLine: string;
   sizes: (LiveSizeRef & { stock: number })[];
+  /** W4: the pace, null without one. */
+  pace: LivePaceState | null;
+}
+
+/** The pace of a release as the console reads it. */
+export interface LivePaceState {
+  /** X: the buyers admitted per batch. */
+  batch: number;
+  /** Y: the minutes between two batches. */
+  minutes: number;
+  /** When the next batch is due (T0 before the first; a pause in progress moves it when it ends). */
+  nextAt: Date;
+  /** The pace's own pause in progress (PAUSE PACE): since when; the release's PAUSE is `pausedAt`. */
+  pausedAt: Date | null;
+  paused: boolean;
+  /** The batches admitted so far (one with nobody waiting counts). */
+  batches: number;
+  /** The entries in the line waiting for their batch. */
+  waiting: number;
+  /** The entries admitted so far, by a batch or by LET IN. */
+  admitted: number;
 }
 
 /** An entry as the console's controls return it; the routes mask the email for an AUDITOR. */
@@ -681,6 +773,10 @@ export interface AdminLiveEntry {
   letIn: boolean;
   /** IN-01: the entry uses the house's guarantee (GUARANTEED: first in line in its size). */
   guaranteed: boolean;
+  /** W4: when it was admitted to take a turn (its batch's logical time), null while it waits for its batch. */
+  admittedAt: Date | null;
+  /** Its batch: 0 with no pace (or by LET IN before the first batch), else the batch's number. */
+  batch: number | null;
 }
 
 export interface LiveMessageView {
@@ -694,6 +790,8 @@ export interface LiveAdvance {
   dropId: string;
   /** Entries placed in the line (the cohort of T0, or a late one). */
   queued: number;
+  /** Entries admitted to take a turn (W4: by their batches, or at once with no pace). */
+  admitted: number;
   missed: number;
   expired: number;
   turns: number;
@@ -808,6 +906,8 @@ export interface ExportedLiveEntry {
   position: number | null;
   joinedAt: Date;
   queuedAt: Date | null;
+  /** W4: when it was admitted to take a turn (its batch's time), null if it never was. */
+  admittedAt: Date | null;
   turnAt: Date | null;
   turnExpiresAt: Date | null;
   pressStartedAt: Date | null;
@@ -842,7 +942,7 @@ export async function accountLiveData(db: Db, accountId: string): Promise<{ entr
     .innerJoin('drops as d', 'd.id', 'e.drop_id')
     .innerJoin('drop_sizes as s', 's.id', 'e.size_id')
     .select([
-      'e.id', 'e.drop_id', 'd.title', 's.label', 'e.quantity', 'e.status', 'e.tier', 'e.position', 'e.joined_at', 'e.queued_at', 'e.turn_at',
+      'e.id', 'e.drop_id', 'd.title', 's.label', 'e.quantity', 'e.status', 'e.tier', 'e.position', 'e.joined_at', 'e.queued_at', 'e.admitted_at', 'e.turn_at',
       'e.turn_expires_at', 'e.press_started_at', 'e.gesture_ms', 'e.secured_at', 'e.hold_expires_at', 'e.confirmed_at', 'e.ended_at',
       'e.let_in_by', 'e.country', 'd.currency', 'd.price_minor', 'e.resolution', 'e.handled_at', 'e.resolution_note',
     ])
@@ -883,6 +983,7 @@ export async function accountLiveData(db: Db, accountId: string): Promise<{ entr
       position: r.position,
       joinedAt: r.joined_at,
       queuedAt: r.queued_at,
+      admittedAt: r.admitted_at,
       turnAt: r.turn_at,
       turnExpiresAt: r.turn_expires_at,
       pressStartedAt: r.press_started_at,
@@ -947,7 +1048,7 @@ export async function liveEntryViews(
     .select([
       'e.id', 'e.drop_id', 'e.account_id', 'e.status', 'e.size_id', 's.label', 'e.quantity', 'e.tier', 'e.position', 'e.joined_at', 'e.turn_at',
       'e.turn_expires_at', 'e.secured_at', 'e.hold_expires_at', 'e.confirmed_at', 'e.ended_at', 'e.let_in_by', 'd.paused_at', 'd.price_minor', 'd.currency',
-      'e.guarantee_id',
+      'e.guarantee_id', 'e.admitted_at', 'd.opens_at', 'd.pace_batch', 'd.pace_minutes', 'd.pace_paused_at', 'd.pace_next_at',
     ])
     .where('d.mode', '=', 'LIVE')
     .where('d.published_at', 'is not', null);
@@ -989,6 +1090,21 @@ export async function liveEntryViews(
        WHERE q.id IN (${sql.join(part.map((x) => x.id))})`.execute(db);
     for (const a of r.rows) ahead.set(a.id, Number(a.ahead));
   }
+  // W5: on a paced release, the entries waiting for their batch read their place among those waiting, in the order the
+  // batches admit them (the partial index live_entries_waiting_admission), up to the last of their places.
+  const waiting = queued.filter((r) => r.admitted_at === null && r.pace_batch !== null);
+  const place = new Map<string, number>();
+  for (const part of chunks(waiting)) {
+    const drops = [...new Set(part.map((r) => r.drop_id))];
+    const last = Math.max(...part.map((r) => r.position ?? 0));
+    const r = await sql<{ id: string; place: number }>`
+      SELECT q.id, q.place
+        FROM (SELECT id, row_number() OVER (PARTITION BY drop_id ORDER BY (guarantee_id IS NULL), position)::int AS place
+                FROM live_entries
+               WHERE drop_id IN (${sql.join(drops)}) AND status = 'QUEUED' AND admitted_at IS NULL AND (position <= ${last} OR guarantee_id IS NOT NULL)) AS q
+       WHERE q.id IN (${sql.join(part.map((x) => x.id))})`.execute(db);
+    for (const a of r.rows) place.set(a.id, Number(a.place));
+  }
   for (const r of rows) {
     const own = addons.filter((a) => a.entry_id === r.id);
     const price = r.price_minor ?? 0;
@@ -1024,9 +1140,14 @@ export async function liveEntryViews(
       totalMinor: r.quantity * unit,
       afterRoom: doors.get(r.id) ?? null,
       guaranteed: r.guarantee_id !== null && shown.has(r.guarantee_id),
+      queue: place.has(r.id) ? queueOf(r, place.get(r.id)!, now) : null,
     });
   }
   return out;
+}
+
+function queueOf(d: LivePaceRow, place: number, now: Date): LiveQueueView {
+  return { place, etaAt: liveQueueEta(d, place, now), paused: paceHeld(d) };
 }
 
 // ── Service ────────────────────────────────────────────────────────────────
@@ -1072,11 +1193,12 @@ type EntryRow = {
   secured_at: Date | null;
   hold_expires_at: Date | null;
   guarantee_id: string | null;
+  admitted_at: Date | null;
 };
 
 const ENTRY_COLUMNS = [
   'id', 'drop_id', 'account_id', 'size_id', 'quantity', 'status', 'tier', 'position', 'joined_at', 'turn_at', 'turn_expires_at', 'turn_token_hash',
-  'press_started_at', 'secured_at', 'hold_expires_at', 'guarantee_id',
+  'press_started_at', 'secured_at', 'hold_expires_at', 'guarantee_id', 'admitted_at',
 ] as const;
 
 export class LiveService {
@@ -1175,7 +1297,9 @@ export class LiveService {
       const slot = late
         ? { status: 'QUEUED' as const, position: place ?? (await this.lastPosition(tx, id)) + 1, queued_at: now }
         : { status: 'WAITING' as const, position: null, queued_at: null };
-      const values = { size_id: size.id, quantity, tier: access.tier, joined_at: now, ended_at: null, network_hash: networkHash, country, guarantee_id: g?.id ?? null, ...slot };
+      // W4: with no pace a place in the line is an admission (batch 0); with one, the entry waits for its batch.
+      const admission = late && d.pace_batch === null ? { admitted_at: now, admitted_batch: 0 } : { admitted_at: null, admitted_batch: null };
+      const values = { size_id: size.id, quantity, tier: access.tier, joined_at: now, ended_at: null, network_hash: networkHash, country, guarantee_id: g?.id ?? null, ...slot, ...admission };
       let entryId: string;
       if (existing) {
         await tx.updateTable('live_entries').set(values).where('id', '=', existing.id).where('status', '=', 'LEFT').execute();
@@ -1426,15 +1550,22 @@ export class LiveService {
 
   // ── The console's controls (OPERATOR; END and REMOVE: ADMIN, by the routes) ─
 
-  /** PAUSE a release that has opened and not ended: no new turn, the deadlines frozen. Audited `drop.live.pause`. */
+  /**
+   * PAUSE a release that has opened and not ended: no new turn, the deadlines frozen, the pace held (W4: the batches due
+   * before now are admitted first, at their times). Audited `drop.live.pause`.
+   */
   async pause(dropId: string, actor: Actor): Promise<LiveReleaseState> {
     assertStaff(actor, 'pause a release');
     return this.control(dropId, async (tx, d, now) => {
       if (now.getTime() < d.opens_at.getTime()) throw liveNotStarted();
       if (d.ended_at || now.getTime() >= d.closes_at.getTime()) throw liveEnded();
       if (d.paused_at) throw alreadyPaused();
+      const notes: AuditRecordInput[] = [];
+      await this.formLine(tx, d, now, notes);
+      await this.admitDue(tx, d, now, notes);
       await tx.updateTable('drops').set({ paused_at: now }).where('id', '=', d.id).execute();
-      await this.audit.record({ actor, action: 'drop.live.pause', targetType: 'drop', targetId: d.id, details: {} }, tx);
+      notes.push({ actor, action: 'drop.live.pause', targetType: 'drop', targetId: d.id, details: {} });
+      await this.record(tx, notes);
     });
   }
 
@@ -1527,7 +1658,8 @@ export class LiveService {
 
   /**
    * LET IN: a QUEUED entry takes its turn now, out of order, within the free pieces of its size (409
-   * LIVE_NO_FREE_PIECE), while the release is live and not paused. Audited `drop.live.let_in` with its place.
+   * LIVE_NO_FREE_PIECE), while the release is live and not paused; one still waiting for its batch is admitted now
+   * (W4: with the batches admitted so far as its batch). Audited `drop.live.let_in` with its place.
    */
   async letIn(dropId: string, entryId: string, actor: Actor): Promise<AdminLiveEntry> {
     const admin = assertStaff(actor, 'let an entry in');
@@ -1541,9 +1673,114 @@ export class LiveService {
       if (entry.status !== 'QUEUED') throw entryNotQueued();
       const total = (await this.sizeTotals(tx, d.id)).find((s) => s.id === entry.size_id)!;
       if (entry.quantity > freeOf(total)) throw noFreePiece();
+      const admitted = entry.admitted_at === null;
+      if (admitted) {
+        await tx.updateTable('live_entries').set({ admitted_at: now, admitted_batch: d.pace_batches }).where('id', '=', entry.id).where('status', '=', 'QUEUED').execute();
+      }
       const used: AuditRecordInput[] = [];
       await this.grant(tx, d, [entry], now, admin, used);
-      notes.push({ actor, action: 'drop.live.let_in', targetType: 'drop', targetId: d.id, details: { entryId: entry.id, position: entry.position } }, ...used);
+      notes.push({ actor, action: 'drop.live.let_in', targetType: 'drop', targetId: d.id, details: { entryId: entry.id, position: entry.position, ...(admitted ? { admitted: true } : {}) } }, ...used);
+      await this.record(tx, notes);
+    });
+  }
+
+  /**
+   * SET PACE (W4): X buyers admitted every Y minutes (LIVE_PACE_BATCH, LIVE_PACE_MINUTES), before or during the release,
+   * until its end; never on an after-room (409 LIVE_AFTER_ROOM). Before T0 the first batch stays due at T0. During the
+   * release the batches due under the pace in force are admitted first, at their times; the change then takes effect
+   * from the next batch, which keeps its time, or comes Y minutes from now when the release had no pace until then
+   * (everyone was admitted at once). There is no control that takes a pace away: a pace left blank in the settings
+   * before the announcement is no pace. Audited `drop.live.pace` with the pace before and after.
+   */
+  async setPace(dropId: string, pace: { batch: number; minutes: number }, actor: Actor): Promise<LiveReleaseState> {
+    assertStaff(actor, 'set the pace of a release');
+    const batch = pace?.batch;
+    const minutes = pace?.minutes;
+    if (!Number.isInteger(batch) || batch < LIVE_PACE_BATCH.min || batch > LIVE_PACE_BATCH.max) throw paceInvalid();
+    if (!Number.isInteger(minutes) || minutes < LIVE_PACE_MINUTES.min || minutes > LIVE_PACE_MINUTES.max) throw paceInvalid();
+    return this.control(dropId, async (tx, d, now) => {
+      if (isAfterRoom(d)) throw afterRoomPace();
+      if (d.ended_at || now.getTime() >= d.closes_at.getTime()) throw liveEnded();
+      const notes: AuditRecordInput[] = [];
+      const started = now.getTime() >= d.opens_at.getTime();
+      if (started) {
+        await this.formLine(tx, d, now, notes);
+        await this.admitDue(tx, d, now, notes);
+      }
+      const before = d.pace_batch !== null ? { batch: d.pace_batch, minutes: d.pace_minutes } : null;
+      const nextAt = started ? (d.pace_batch === null ? new Date(now.getTime() + minutes * MINUTE_MS) : paceNextAt(d)) : null;
+      await tx.updateTable('drops').set({ pace_batch: batch, pace_minutes: minutes, pace_next_at: nextAt }).where('id', '=', d.id).execute();
+      Object.assign(d, { pace_batch: batch, pace_minutes: minutes, pace_next_at: nextAt });
+      notes.push({ actor, action: 'drop.live.pace', targetType: 'drop', targetId: d.id, details: { before, after: { batch, minutes }, nextAt: nextAt ? nextAt.toISOString() : null } });
+      await this.record(tx, notes);
+    });
+  }
+
+  /**
+   * PAUSE PACE (W4): no batch is admitted until RESUME PACE; the turns of those already admitted go on. From T0 (409
+   * LIVE_NOT_STARTED before) to the end, on a paced release (409 LIVE_NO_PACE); the batches due before now are admitted
+   * first, at their times. Audited `drop.live.pace.pause`.
+   */
+  async pausePace(dropId: string, actor: Actor): Promise<LiveReleaseState> {
+    assertStaff(actor, 'pause the pace of a release');
+    return this.control(dropId, async (tx, d, now) => {
+      if (d.pace_batch === null) throw noPace();
+      if (now.getTime() < d.opens_at.getTime()) throw liveNotStarted();
+      if (d.ended_at || now.getTime() >= d.closes_at.getTime()) throw liveEnded();
+      if (d.pace_paused_at) throw paceAlreadyPaused();
+      const notes: AuditRecordInput[] = [];
+      await this.formLine(tx, d, now, notes);
+      await this.admitDue(tx, d, now, notes);
+      const nextAt = paceNextAt(d)!;
+      await tx.updateTable('drops').set({ pace_paused_at: now, pace_next_at: nextAt }).where('id', '=', d.id).execute();
+      Object.assign(d, { pace_paused_at: now, pace_next_at: nextAt });
+      notes.push({ actor, action: 'drop.live.pace.pause', targetType: 'drop', targetId: d.id, details: { batches: d.pace_batches } });
+      await this.record(tx, notes);
+    });
+  }
+
+  /**
+   * RESUME PACE: the next batch moved by the time the pace was held by this pause alone (paceShiftMs: a stretch the
+   * release's PAUSE also held is moved once), then the batches and the turns due. Audited `drop.live.pace.resume` with
+   * the time paused.
+   */
+  async resumePace(dropId: string, actor: Actor): Promise<LiveReleaseState> {
+    assertStaff(actor, 'resume the pace of a release');
+    return this.control(dropId, async (tx, d, now) => {
+      if (d.pace_batch === null) throw noPace();
+      if (!d.pace_paused_at) throw paceNotPaused();
+      const pausedMs = Math.max(0, now.getTime() - d.pace_paused_at.getTime());
+      const next = paceNextAt(d)!;
+      const nextAt = next.getTime() > d.pace_paused_at.getTime() ? new Date(next.getTime() + paceShiftMs(d.pace_paused_at, d.paused_at, now)) : next;
+      await tx.updateTable('drops').set({ pace_paused_at: null, pace_next_at: nextAt }).where('id', '=', d.id).execute();
+      Object.assign(d, { pace_paused_at: null, pace_next_at: nextAt });
+      const notes: AuditRecordInput[] = [{ actor, action: 'drop.live.pace.resume', targetType: 'drop', targetId: d.id, details: { pausedMs, nextAt: nextAt.toISOString() } }];
+      await this.giveTurnsNow(tx, d, now, notes);
+      await this.record(tx, notes);
+    });
+  }
+
+  /**
+   * NEXT BATCH NOW (W4): one batch admitted at once, the next X waiting in the line's order, the batches due before it
+   * first; the clock of the batches keeps its time (an extra batch). From T0 to the end, on a paced release, the pace
+   * held or not. Audited `drop.live.pace.next` with the batch and the entries admitted, as counts.
+   */
+  async nextBatch(dropId: string, actor: Actor): Promise<LiveReleaseState> {
+    assertStaff(actor, 'admit the next batch');
+    return this.control(dropId, async (tx, d, now) => {
+      if (d.pace_batch === null) throw noPace();
+      if (now.getTime() < d.opens_at.getTime()) throw liveNotStarted();
+      if (d.ended_at || now.getTime() >= d.closes_at.getTime()) throw liveEnded();
+      const notes: AuditRecordInput[] = [];
+      await this.formLine(tx, d, now, notes);
+      await this.admitDue(tx, d, now, notes);
+      const batch = d.pace_batches + 1;
+      const entries = await this.admitBatch(tx, d, now, batch);
+      const nextAt = paceNextAt(d)!;
+      await tx.updateTable('drops').set({ pace_batches: batch, pace_next_at: nextAt }).where('id', '=', d.id).execute();
+      Object.assign(d, { pace_batches: batch, pace_next_at: nextAt });
+      notes.push({ actor, action: 'drop.live.pace.next', targetType: 'drop', targetId: d.id, details: { batch, entries } });
+      await this.giveTurnsNow(tx, d, now, notes);
       await this.record(tx, notes);
     });
   }
@@ -1668,8 +1905,8 @@ export class LiveService {
 
   /**
    * One pass of the engine on one release, in one transaction, its row FOR NO KEY UPDATE (as lockLive): the line at T0, the turns and holds
-   * that ran out (not while paused), the end (SOLD_OUT, CLOSED), then the turns. Null when it is not a live LIVE
-   * RELEASE (any more).
+   * that ran out (not while paused), the end (SOLD_OUT, CLOSED), then the admissions due (W4) and the turns. Null when
+   * it is not a live LIVE RELEASE (any more).
    */
   async advance(dropId: string, db: Db = this.db): Promise<LiveAdvance | null> {
     const id = knownId(dropId, dropNotFound);
@@ -1677,7 +1914,7 @@ export class LiveService {
       const d = await tx.selectFrom('drops').selectAll().where('id', '=', id).forNoKeyUpdate().executeTakeFirst();
       if (!d || d.mode !== 'LIVE' || !d.published_at || d.cancelled_at) return null;
       const now = this.clock();
-      const out: LiveAdvance = { dropId: id, queued: 0, missed: 0, expired: 0, turns: 0, ended: null };
+      const out: LiveAdvance = { dropId: id, queued: 0, admitted: 0, missed: 0, expired: 0, turns: 0, ended: null };
       if (now.getTime() < d.opens_at.getTime()) return out;
       const notes: AuditRecordInput[] = [];
       out.queued = await this.formLine(tx, d, now, notes);
@@ -1686,7 +1923,7 @@ export class LiveService {
       out.ended = await this.settleEnd(tx, d, now, notes);
       // A pause the end has just ended (settleEnd): what ran out before it began is marked now, as a pass after it would.
       if (paused && !d.paused_at) await this.runOut(tx, d, now, out);
-      out.turns = await this.giveTurnsNow(tx, d, now, notes);
+      out.turns = await this.giveTurnsNow(tx, d, now, notes, out);
       await this.record(tx, notes);
       return out;
     });
@@ -1957,8 +2194,8 @@ export class LiveService {
 
   /**
    * End a pause: the turns and holds still running when it began moved by its length (one that had already run out,
-   * the engine not having marked it yet, keeps its deadline and is marked at it), the length added to
-   * `paused_ms_total`. Returns it.
+   * the engine not having marked it yet, keeps its deadline and is marked at it), the next batch of a pace too (W4), the
+   * length added to `paused_ms_total`. Returns it.
    */
   private async unpause(tx: Db, d: LiveDrop, now: Date): Promise<number> {
     const pausedMs = pausedFor(d, now);
@@ -1978,19 +2215,31 @@ export class LiveService {
       .where('status', '=', 'SECURED')
       .where('hold_expires_at', '>', since)
       .execute();
-    await tx.updateTable('drops').set({ paused_at: null, paused_ms_total: sql<number>`paused_ms_total + ${pausedMs}::bigint` }).where('id', '=', d.id).execute();
+    // W4: the next batch moves too, by the time this pause alone held the pace (a stretch PAUSE PACE also held is moved
+    // once, when the later of the two ends: paceShiftMs).
+    const next = paceNextAt(d);
+    const nextAt = next && next.getTime() > since.getTime() ? new Date(next.getTime() + paceShiftMs(since, d.pace_paused_at, now)) : next;
+    await tx
+      .updateTable('drops')
+      .set({ paused_at: null, paused_ms_total: sql<number>`paused_ms_total + ${pausedMs}::bigint`, ...(nextAt ? { pace_next_at: nextAt } : {}) })
+      .where('id', '=', d.id)
+      .execute();
+    if (nextAt) d.pace_next_at = nextAt;
     d.paused_at = null;
     d.paused_ms_total = Number(d.paused_ms_total) + pausedMs;
     return pausedMs;
   }
 
   /**
-   * The turns due now, when the release is live (T0 passed, not ended, not paused, before its close): for each size with
-   * free pieces, its QUEUED entries by place; one that wants more than the size can still give is passed over, the
-   * first that fits takes a turn, one that does not fit yet stops the size. Returns the turns given.
+   * The turns due now, when the release is live (T0 passed, not ended, not paused, before its close): the admissions
+   * due first (admitDue, counted on `out`), then for each size with free pieces, its admitted QUEUED entries by place;
+   * one that wants more than the size can still give is passed over, the first that fits takes a turn, one that does
+   * not fit yet stops the size. Returns the turns given.
    */
-  private async giveTurnsNow(tx: Db, d: LiveDrop, now: Date, notes: AuditRecordInput[]): Promise<number> {
+  private async giveTurnsNow(tx: Db, d: LiveDrop, now: Date, notes: AuditRecordInput[], out?: LiveAdvance): Promise<number> {
     if (now.getTime() < d.opens_at.getTime() || d.ended_at || d.paused_at || now.getTime() >= d.closes_at.getTime()) return 0;
+    const admitted = await this.admitDue(tx, d, now, notes);
+    if (out) out.admitted += admitted;
     const open = (await this.sizeTotals(tx, d.id)).filter((s) => freeOf(s) > 0);
     if (open.length === 0) return 0;
     const queued = await tx
@@ -1998,6 +2247,8 @@ export class LiveService {
       .select([...ENTRY_COLUMNS])
       .where('drop_id', '=', d.id)
       .where('status', '=', 'QUEUED')
+      // W4: only an admitted entry takes a turn.
+      .where('admitted_at', 'is not', null)
       .where('size_id', 'in', open.map((s) => s.id))
       // IN-01: the places guaranteed by the house first in their size, then the line.
       .orderBy(sql`guarantee_id IS NULL`)
@@ -2018,6 +2269,87 @@ export class LiveService {
     }
     if (grants.length) await this.grant(tx, d, grants, now, null, notes);
     return grants.length;
+  }
+
+  /**
+   * The admissions due at `now` (W4), from T0 until the end. With no pace, every QUEUED entry not admitted yet is
+   * admitted at its place's time (batch 0): the room as before. With a pace not held (neither PAUSE PACE nor the
+   * release's PAUSE), each batch due by now in turn (the first at T0, then every Y minutes) admits the next X entries
+   * waiting (admitBatch) at its logical time, so batches overdue after a restart keep their own times; a batch with
+   * nobody to admit still moves the clock (`pace_next_at`, `pace_batches`, on the row and on `d`). A paced batch that
+   * admits anyone is noted `drop.live.admit` with its number, time and count. Returns the entries admitted.
+   */
+  private async admitDue(tx: Db, d: LiveDrop, now: Date, notes: AuditRecordInput[]): Promise<number> {
+    if (now.getTime() < d.opens_at.getTime() || d.ended_at) return 0;
+    if (d.pace_batch === null || d.pace_minutes === null) {
+      const r = await tx
+        .updateTable('live_entries')
+        .set((eb) => ({ admitted_at: eb.fn.coalesce('queued_at', sql<Date>`${now}::timestamptz`), admitted_batch: 0 }))
+        .where('drop_id', '=', d.id)
+        .where('status', '=', 'QUEUED')
+        .where('admitted_at', 'is', null)
+        .executeTakeFirst();
+      return Number(r.numUpdatedRows ?? 0);
+    }
+    if (paceHeld(d)) return 0;
+    const step = d.pace_minutes * MINUTE_MS;
+    const first = paceNextAt(d)!.getTime();
+    let next = first;
+    let batches = d.pace_batches;
+    let admitted = 0;
+    while (next <= now.getTime()) {
+      const w = await tx
+        .selectFrom('live_entries')
+        .select((eb) => [eb.fn.countAll<number>().as('n'), eb.fn.min('queued_at').as('from')])
+        .where('drop_id', '=', d.id)
+        .where('status', '=', 'QUEUED')
+        .where('admitted_at', 'is', null)
+        .executeTakeFirstOrThrow();
+      const due = Math.floor((now.getTime() - next) / step) + 1;
+      if (Number(w.n) === 0 || !w.from) {
+        // Nobody waits: every batch due by now passes empty.
+        batches += due;
+        next += due * step;
+        break;
+      }
+      const from = new Date(w.from as Date).getTime();
+      if (from > next) {
+        // The first one waiting came after this batch: the empty batches before its arrival pass at once.
+        const skip = Math.min(due, Math.ceil((from - next) / step));
+        batches += skip;
+        next += skip * step;
+        continue;
+      }
+      batches += 1;
+      const at = new Date(next);
+      const entries = await this.admitBatch(tx, d, at, batches);
+      admitted += entries;
+      if (entries > 0) notes.push({ actor: SYSTEM_ACTOR, action: 'drop.live.admit', targetType: 'drop', targetId: d.id, details: { batch: batches, at: at.toISOString(), entries } });
+      next += step;
+    }
+    if (next !== first || d.pace_next_at === null) {
+      await tx.updateTable('drops').set({ pace_next_at: new Date(next), pace_batches: batches }).where('id', '=', d.id).execute();
+      d.pace_next_at = new Date(next);
+      d.pace_batches = batches;
+    }
+    return admitted;
+  }
+
+  /**
+   * One batch (W4): the next X QUEUED entries not admitted yet, in the order of the turns (`guarantee_id IS NULL,
+   * position`, the partial index live_entries_waiting_admission), among those placed by `at`, admitted at `at` with the
+   * batch's number. Returns how many.
+   */
+  private async admitBatch(tx: Db, d: LiveDrop, at: Date, batch: number): Promise<number> {
+    const r = await sql<{ id: string }>`
+      UPDATE live_entries
+         SET admitted_at = ${at}::timestamptz, admitted_batch = ${batch}::int
+       WHERE id IN (SELECT id FROM live_entries
+                     WHERE drop_id = ${d.id} AND status = 'QUEUED' AND admitted_at IS NULL AND queued_at <= ${at}::timestamptz
+                     ORDER BY (guarantee_id IS NULL), position
+                     LIMIT ${d.pace_batch ?? 0})
+      RETURNING id`.execute(tx);
+    return r.rows.length;
   }
 
   /**
@@ -2085,6 +2417,7 @@ export class LiveService {
       quantity: d.quantity,
       quantityLine: d.quantity_line ?? '',
       sizes: sizes.map((s) => ({ id: s.id, label: s.label, stock: s.stock })),
+      pace: await livePaceState(db, d),
     };
   }
 
@@ -2096,6 +2429,7 @@ export class LiveService {
       .select([
         'e.id', 'e.account_id', 'a.email', 'e.status', 'e.size_id', 's.label', 'e.quantity', 'e.tier', 'e.position', 'e.joined_at', 'e.turn_at',
         'e.turn_expires_at', 'e.secured_at', 'e.hold_expires_at', 'e.confirmed_at', 'e.ended_at', 'e.gesture_ms', 'e.let_in_by', 'e.guarantee_id',
+        'e.admitted_at', 'e.admitted_batch',
       ])
       .where('e.id', '=', entryId)
       .executeTakeFirstOrThrow();
@@ -2119,6 +2453,8 @@ export class LiveService {
       gestureMs: r.gesture_ms,
       letIn: r.let_in_by !== null,
       guaranteed: r.guarantee_id !== null,
+      admittedAt: r.admitted_at,
+      batch: r.admitted_batch,
     };
   }
 
@@ -2136,6 +2472,33 @@ export class LiveService {
       .executeTakeFirst();
     return r ? { dropId: r.drop_id, size: { id: r.size_id, label: r.label }, since: r.created_at } : null;
   }
+}
+
+/**
+ * The pace of a release as the console reads it (W4), null without one: X and Y, the next batch, the pace's own pause,
+ * the batches so far, and the entries waiting for their batch and admitted so far (two counts on the partial index and
+ * the release's entries).
+ */
+export async function livePaceState(db: Db, d: LivePaceRow & Pick<DropRow, 'id' | 'pace_batches'>): Promise<LivePaceState | null> {
+  if (d.pace_batch === null || d.pace_minutes === null) return null;
+  const c = await db
+    .selectFrom('live_entries')
+    .select([
+      sql<number>`count(*) FILTER (WHERE status = 'QUEUED' AND admitted_at IS NULL)`.as('waiting'),
+      sql<number>`count(admitted_at)`.as('admitted'),
+    ])
+    .where('drop_id', '=', d.id)
+    .executeTakeFirstOrThrow();
+  return {
+    batch: d.pace_batch,
+    minutes: d.pace_minutes,
+    nextAt: paceNextAt(d)!,
+    pausedAt: d.pace_paused_at,
+    paused: d.pace_paused_at !== null,
+    batches: Number(d.pace_batches),
+    waiting: Number(c.waiting),
+    admitted: Number(c.admitted),
+  };
 }
 
 /** Whether a release is announced at `now` (its announcement, or its publication). */

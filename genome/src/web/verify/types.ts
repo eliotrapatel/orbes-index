@@ -1075,6 +1075,17 @@ export interface LiveEntry {
   afterRoom?: AfterRoomDoor | null;
   /** IN-01: the entry uses the house's guarantee, shown to the client: first in line in its size. */
   guaranteed?: boolean;
+  /** W5: while it waits for its batch on a paced release, its place among those waiting and its estimated entry time. */
+  queue?: LiveQueue | null;
+}
+
+/** The queue page's figures (W2, W5). */
+export interface LiveQueue {
+  /** 1 is admitted next. */
+  place: number;
+  /** The estimated entry time; null while the queue is paused. */
+  etaAt: string | null;
+  paused: boolean;
 }
 
 /** The account against the release's rules now. */
