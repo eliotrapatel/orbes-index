@@ -271,6 +271,31 @@ describe('LiveService with a pace', () => {
     expect(await advance(r, at(11 * MINUTE))).toMatchObject({ admitted: 1 });
     expect((await audits(r.id, 'drop.live.pace.pause')).map((a) => a.details)).toEqual([{ batches: 1 }]);
     expect((await audits(r.id, 'drop.live.pace.resume')).map((a) => a.details)).toEqual([{ pausedMs: 6 * MINUTE, nextAt: at(11 * MINUTE).toISOString() }]);
+    // After the end, the pace still held: RESUME PACE refused like PAUSE PACE, nothing written.
+    f.clock.set(at(12 * MINUTE));
+    await f.live.pausePace(r.id, f.admin);
+    f.clock.set(at(61 * MINUTE));
+    await rejects(f.live.resumePace(r.id, f.admin), 'LIVE_ENDED', 409);
+    expect(await pace(r.id)).toMatchObject({ pace_paused_at: at(12 * MINUTE) });
+    expect(await audits(r.id, 'drop.live.pace.resume')).toHaveLength(1);
+  });
+
+  it('SET PACE while the release is PAUSED, on a release with no pace: the first batch Y minutes after RESUME', async () => {
+    const r = await release();
+    await room(r, 2);
+    await advance(r, T0);
+    f.clock.set(at(MINUTE));
+    await f.live.pause(r.id, f.admin);
+    f.clock.set(at(11 * MINUTE));
+    await f.live.setPace(r.id, { batch: 1, minutes: 2 }, f.admin);
+    f.clock.set(at(12 * MINUTE));
+    // Held from 1 to 12 with no pace for most of it: the first batch at T0+14, not T0+24.
+    expect((await f.live.resume(r.id, f.admin)).pace).toMatchObject({ batch: 1, minutes: 2, nextAt: at(14 * MINUTE), paused: false });
+    const late = await accountOfTier(f, 0);
+    f.clock.set(at(13 * MINUTE));
+    expect(await f.live.enter(late.id, r.id, { sizeId: r.sizes[0]!.id }, late.actor)).toMatchObject({ queue: { place: 1, etaAt: at(14 * MINUTE) } });
+    expect(await advance(r, at(14 * MINUTE - 1))).toMatchObject({ admitted: 0 });
+    expect(await advance(r, at(14 * MINUTE))).toMatchObject({ admitted: 1 });
   });
 
   it('NEXT BATCH NOW admits one batch at once, the clock keeping its time; LET IN admits the entry it lets in', async () => {

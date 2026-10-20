@@ -269,6 +269,9 @@ for (const backend of BACKENDS) {
       ]);
       expect(after.slice(0, 9).map((x) => x.admitted_at!.getTime() - T0.getTime())).toEqual([0, 0, 0, 120_000, 120_000, 120_000, 120_000, 120_000, 120_000]);
       expect(after[9]).toMatchObject({ position: 10, status: 'TURN', admitted_at: at(120 * SECOND) });
+      // LET IN's batch is the batches so far, whichever order the calls ran in; the one let in is in no batch's count.
+      expect([1, 2, 3]).toContain(after[9]!.admitted_batch);
+      expect(after.filter((x) => x.id !== tenth.id && (x.admitted_batch ?? 0) >= 1)).toHaveLength(9);
       // The first batch's turns ran out at T0+30 s; every entry admitted now has its turn.
       expect(after.map((x) => x.status)).toEqual([...Array(3).fill('MISSED'), ...Array(7).fill('TURN')]);
       const d = await handle.db.selectFrom('drops').select(['pace_batches', 'pace_next_at']).where('id', '=', r.id).executeTakeFirstOrThrow();

@@ -1688,9 +1688,10 @@ export class LiveService {
    * SET PACE (W4): X buyers admitted every Y minutes (LIVE_PACE_BATCH, LIVE_PACE_MINUTES), before or during the release,
    * until its end; never on an after-room (409 LIVE_AFTER_ROOM). Before T0 the first batch stays due at T0. During the
    * release the batches due under the pace in force are admitted first, at their times; the change then takes effect
-   * from the next batch, which keeps its time, or comes Y minutes from now when the release had no pace until then
-   * (everyone was admitted at once). There is no control that takes a pace away: a pace left blank in the settings
-   * before the announcement is no pace. Audited `drop.live.pace` with the pace before and after.
+   * from the next batch, which keeps its time, or comes Y minutes from now (from RESUME while the release is PAUSED)
+   * when the release had no pace until then (everyone was admitted at once). There is no control that takes a pace
+   * away: a pace left blank in the settings before the announcement is no pace. Audited `drop.live.pace` with the pace
+   * before and after.
    */
   async setPace(dropId: string, pace: { batch: number; minutes: number }, actor: Actor): Promise<LiveReleaseState> {
     assertStaff(actor, 'set the pace of a release');
@@ -1708,7 +1709,10 @@ export class LiveService {
         await this.admitDue(tx, d, now, notes);
       }
       const before = d.pace_batch !== null ? { batch: d.pace_batch, minutes: d.pace_minutes } : null;
-      const nextAt = started ? (d.pace_batch === null ? new Date(now.getTime() + minutes * MINUTE_MS) : paceNextAt(d)) : null;
+      // A release with no pace until now: the first batch Y minutes from when the pace starts running. While the
+      // release is PAUSED it is stored from the pause's start, since RESUME moves the next batch by the whole pause.
+      const from = d.paused_at && d.paused_at.getTime() < now.getTime() ? d.paused_at : now;
+      const nextAt = started ? (d.pace_batch === null ? new Date(from.getTime() + minutes * MINUTE_MS) : paceNextAt(d)) : null;
       await tx.updateTable('drops').set({ pace_batch: batch, pace_minutes: minutes, pace_next_at: nextAt }).where('id', '=', d.id).execute();
       Object.assign(d, { pace_batch: batch, pace_minutes: minutes, pace_next_at: nextAt });
       notes.push({ actor, action: 'drop.live.pace', targetType: 'drop', targetId: d.id, details: { before, after: { batch, minutes }, nextAt: nextAt ? nextAt.toISOString() : null } });
@@ -1741,13 +1745,14 @@ export class LiveService {
 
   /**
    * RESUME PACE: the next batch moved by the time the pace was held by this pause alone (paceShiftMs: a stretch the
-   * release's PAUSE also held is moved once), then the batches and the turns due. Audited `drop.live.pace.resume` with
-   * the time paused.
+   * release's PAUSE also held is moved once), then the batches and the turns due. Until the end (409 LIVE_ENDED after,
+   * as PAUSE PACE and NEXT BATCH NOW). Audited `drop.live.pace.resume` with the time paused.
    */
   async resumePace(dropId: string, actor: Actor): Promise<LiveReleaseState> {
     assertStaff(actor, 'resume the pace of a release');
     return this.control(dropId, async (tx, d, now) => {
       if (d.pace_batch === null) throw noPace();
+      if (d.ended_at || now.getTime() >= d.closes_at.getTime()) throw liveEnded();
       if (!d.pace_paused_at) throw paceNotPaused();
       const pausedMs = Math.max(0, now.getTime() - d.pace_paused_at.getTime());
       const next = paceNextAt(d)!;
