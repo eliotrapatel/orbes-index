@@ -354,7 +354,7 @@ describe('viewMonths, viewPurge and devicePurge (plan CUSTOMER INTELLIGENCE §3.
       lines.length = 0;
       const failed = await hk.runOnce();
       expect(Object.keys(failed)).toEqual([
-        'sessions', 'transfers', 'scanTokens', 'scanStats', 'activity', 'birthdayCredits', 'acquisitionConversions', 'viewStats', 'viewMonths', 'acquisitionDaily', 'wishMonths', 'engagement', 'collectorHistory', 'scanHistory', 'viewPurge', 'acquisitionPurge', 'wishHistory', 'devicePurge', 'liveNetworks', 'careLabels', 'packingPhotos', 'emailPurge', 'sizes',
+        'sessions', 'transfers', 'scanTokens', 'scanStats', 'activity', 'birthdayCredits', 'houseMoments', 'acquisitionConversions', 'viewStats', 'viewMonths', 'acquisitionDaily', 'wishMonths', 'engagement', 'collectorHistory', 'scanHistory', 'viewPurge', 'acquisitionPurge', 'wishHistory', 'devicePurge', 'liveNetworks', 'careLabels', 'packingPhotos', 'emailPurge', 'sizes',
       ]);
       expect(failed).toMatchObject({ viewStats: 0, viewPurge: 0, devicePurge: 0 });
       expect(await h.t.db.selectFrom('tracking_devices').select('id').where('id', '=', old).execute()).toHaveLength(1);
@@ -363,8 +363,8 @@ describe('viewMonths, viewPurge and devicePurge (plan CUSTOMER INTELLIGENCE §3.
       expect(await h.t.db.selectFrom('collector_views').select('id').where('device_id', '=', e).execute()).toHaveLength(1);
       const sizes = lines.filter((l) => l.msg === 'intelligence sizes');
       expect(sizes).toHaveLength(1);
-      expect(Object.keys((sizes[0]!.o as { tables: Record<string, number> }).tables)).toEqual(['collector_views', 'tracking_devices', 'view_daily_stats', 'acquisition_touches', 'acquisition_conversions', 'account_wishes', 'account_profiles', 'account_tastes']);
-      expect(failed.sizes).toBe(8);
+      expect(Object.keys((sizes[0]!.o as { tables: Record<string, number> }).tables)).toEqual(['collector_views', 'tracking_devices', 'view_daily_stats', 'acquisition_touches', 'acquisition_conversions', 'account_wishes', 'account_profiles', 'account_tastes', 'house_deliveries']);
+      expect(failed.sizes).toBe(9);
       await sql`DROP TRIGGER view_stats_fail ON view_daily_stats`.execute(h.t.db);
       await sql`DROP FUNCTION view_stats_fail()`.execute(h.t.db);
       lines.length = 0;
@@ -377,15 +377,15 @@ describe('viewMonths, viewPurge and devicePurge (plan CUSTOMER INTELLIGENCE §3.
       expect(pass.sizes).toBe(0);
       expect(lines.filter((l) => l.msg === 'intelligence sizes')).toHaveLength(0);
       h.clock.set('2026-10-09T07:30:00.000Z');
-      expect((await hk.runOnce()).sizes).toBe(8);
+      expect((await hk.runOnce()).sizes).toBe(9);
     } finally {
       await hk.stop();
     }
   });
 
-  it('measures the lot’s tables that exist (the acquisition’s since 0043)', async () => {
+  it('measures the lot’s tables that exist (the acquisition’s since 0043) and the house messages’ deliveries (plan MACRO M2)', async () => {
     const sizes = await intelligenceSizes(h.t.db);
-    expect(Object.keys(sizes)).toEqual(['collector_views', 'tracking_devices', 'view_daily_stats', 'acquisition_touches', 'acquisition_conversions', 'account_wishes', 'account_profiles', 'account_tastes']);
+    expect(Object.keys(sizes)).toEqual(['collector_views', 'tracking_devices', 'view_daily_stats', 'acquisition_touches', 'acquisition_conversions', 'account_wishes', 'account_profiles', 'account_tastes', 'house_deliveries']);
     expect(Object.values(sizes).every((n) => Number.isInteger(n) && n > 0)).toBe(true);
   });
 });

@@ -41,6 +41,8 @@ import { ClubService } from './services/club.js';
 import { ClubProgramService } from './services/club-program.js';
 import { TierGrantService } from './services/tier-grants.js';
 import { BirthdayCreditService } from './services/birthday-credits.js';
+import { HouseMessageService } from './services/house-messages.js';
+import { HouseMomentService } from './services/house-moments.js';
 import { EngagementService } from './services/engagement.js';
 import { runCollectorHistory, type HistoryMemo } from './services/collector-history.js';
 import { LikesService } from './services/likes.js';
@@ -236,6 +238,10 @@ export interface AppServices {
   likes: LikesService;
   /** NEW CLAIM CODE (plan NEXT LOT §3.4): a new claim code for a piece not registered yet, shown once to staff or sealed for its buyer. */
   claimRenewals: ClaimRenewalService;
+  /** The house's moments (plan MACRO M2 §1.2, D24 M1): six automatic messages, each switched and worded in the console, delivered by the housekeeping job `houseMoments`. */
+  houseMoments: HouseMomentService;
+  /** House messages, the collector's side (plan MACRO M2 §1.4, D24 M3 and M4): MESSAGES' FROM ORBES, read-only, and their unread counts. */
+  houseMessages: HouseMessageService;
 }
 
 export interface AppContext {
@@ -359,6 +365,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const clubProgram = new ClubProgramService({ db, audit, clock });
     const tierGrants = new TierGrantService({ db, audit, clock, log });
     const birthdayCredits = new BirthdayCreditService({ db, audit, clock, log });
+    const houseMoments = new HouseMomentService({ db, audit, clock, log });
+    const houseMessages = new HouseMessageService({ db, clock });
     const engagement = new EngagementService({ db, clock, log });
     const care = new CareService({ db, audit, warranty, clock, claimOf: collectorClaim, emails });
     const warrantyClaims = new WarrantyClaimService({ db, audit, warranty, lifecycle, clock, emails });
@@ -471,6 +479,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       collectorInsights,
       likes,
       claimRenewals,
+      houseMoments,
+      houseMessages,
       ...overrides.services,
     };
 
@@ -550,6 +560,7 @@ export interface Housekeeping {
     scanStats: number;
     activity: number;
     birthdayCredits: number;
+    houseMoments: number;
     acquisitionConversions: number;
     viewStats: number;
     viewMonths: number;
@@ -597,6 +608,10 @@ export interface Housekeeping {
  *                birthday (a Paris day) is today, or passed within the
  *                credit's days and not given yet, while THE PROGRAM's switch
  *                is on (services/birthday-credits.ts, §3.5 SB.4.4);
+ *   houseMoments every pass in the morning window: the house's moments
+ *                switched on, each event due since its switch-on delivered
+ *                once to MESSAGES (services/house-moments.ts, plan MACRO M2
+ *                §1.2);
  *   acquisitionConversions  every pass: each sign-up, entry and order written
  *                since the recording started gets its conversion with its
  *                last link; once a Paris day in the window, its catch-up
@@ -660,6 +675,7 @@ export function startHousekeeping(
       scanStats: 0,
       activity: 0,
       birthdayCredits: 0,
+      houseMoments: 0,
       acquisitionConversions: 0,
       viewStats: 0,
       viewMonths: 0,
@@ -697,6 +713,9 @@ export function startHousekeeping(
     // Every pass: the birthday credits due (plan CUSTOMER INTELLIGENCE §3.5 SB.4.4), within 10 minutes after midnight
     // Paris; nothing while THE PROGRAM's switch is off.
     await job('birthdayCredits', () => ctx.services.birthdayCredits.grantDue(ctx.clock()));
+    // In the morning window, after the birthday credits (plan MACRO M2 §1.2, D24 M1): the house's moments switched on,
+    // each due since its switch-on delivered once (services/house-moments.ts).
+    if (morningWindowOpen(ctx.clock())) await job('houseMoments', () => ctx.services.houseMoments.runMoments(ctx.clock()));
     // Every pass: the conversions with their last link (its daily catch-up in the morning window, §3.4 A.8).
     await job('acquisitionConversions', async () => {
       const r = await ctx.services.acquisition.recordConversions(ctx.clock());

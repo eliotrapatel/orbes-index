@@ -114,7 +114,7 @@ describe('MESSAGES for the collector (CS-01)', () => {
     expect((await operator.post(`/api/admin/messages/${conversation.id}/answer`, { body: 'Our answer.' })).statusCode).toBe(200);
     const unread = await me.client.get('/api/v1/account/messages/unread');
     expect(unread.headers['cache-control']).toBe('no-store');
-    expect(safeJson(unread)).toEqual({ unread: true });
+    expect(safeJson(unread)).toEqual({ unread: true, house: false });
     // How many: one answer; another account reads its own count, never this one's.
     const count = await me.client.get('/api/v1/account/messages/unread-count');
     expect(count.statusCode).toBe(200);
@@ -131,8 +131,124 @@ describe('MESSAGES for the collector (CS-01)', () => {
     expect(res.body).not.toMatch(/@orbes\.test|TO_ANSWER|ANSWERED|CLOSED|adminId|admin_id/);
     const read = await me.client.post('/api/v1/account/messages/read', { upTo: answer.at });
     expect(read.statusCode).toBe(204);
-    expect(safeJson(await me.client.get('/api/v1/account/messages/unread'))).toEqual({ unread: false });
+    expect(safeJson(await me.client.get('/api/v1/account/messages/unread'))).toEqual({ unread: false, house: false });
     expect(safeJson(await me.client.get('/api/v1/account/messages/unread-count'))).toEqual({ count: 0 });
     expect((await me.client.post('/api/v1/account/messages/read', { upTo: 'yesterday' })).statusCode).toBe(400);
+  });
+});
+
+describe('house messages for the collector (plan MACRO M2 §1.4, D24 M3 and M4)', () => {
+  let h: Harness;
+  let catalog: Catalog;
+  let me: { client: Client; email: string };
+  let meId: string;
+  let serial: string;
+  let admin: Client;
+
+  interface HouseJson {
+    id: string;
+    source: 'MOMENT' | 'CUSTOM';
+    moment: string | null;
+    title: string;
+    body: string;
+    pieceRef: string | null;
+    pieceHeld: boolean | null;
+    at: string;
+    unread: boolean;
+  }
+
+  beforeAll(async () => {
+    h = await createHarness();
+    catalog = await seedCatalog(h.ctx);
+    me = await accountClient(h);
+    admin = await adminClient(h, 'ADMIN');
+    meId = (await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', me.email.toLowerCase()).executeTakeFirstOrThrow()).id;
+    const p = await issue(h.ctx, catalog);
+    await h.ctx.services.warranty.activate(p.product.productId, { retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
+    const scan = safeJson(await me.client.post('/api/v1/verify', { code: p.code.data })) as { registration: { token: string } };
+    expect((await me.client.post('/api/v1/ownership/register', { registrationToken: scan.registration.token })).statusCode).toBe(201);
+    serial = p.product.productId;
+  });
+  afterAll(() => h?.close());
+
+  const at = (minutes: number) => new Date(h.clock.now().getTime() - minutes * 60_000);
+
+  it('answers 401 signed out, and refuses a read without the CSRF token or from another origin', async () => {
+    const anon = h.client();
+    expect((await anon.get('/api/v1/account/house-messages')).statusCode).toBe(401);
+    expect((await anon.post('/api/v1/account/house-messages/read', { upTo: new Date().toISOString() })).statusCode).toBe(401);
+    expect(errorOf(await me.client.post('/api/v1/account/house-messages/read', { upTo: new Date().toISOString() }, { noCsrf: true })).code).toBe('CSRF_FAILED');
+    expect((await me.client.post('/api/v1/account/house-messages/read', { upTo: new Date().toISOString() }, { origin: 'https://evil.example' })).statusCode).toBe(403);
+    const empty = await me.client.get('/api/v1/account/house-messages');
+    expect(empty.headers['cache-control']).toBe('no-store');
+    expect(safeJson(empty)).toEqual({ messages: [], unread: 0, total: 0 });
+    expect(safeJson(await me.client.get('/api/v1/account/messages/unread'))).toEqual({ unread: false, house: false });
+    expect(safeJson(await me.client.get('/api/v1/account/messages/unread-count'))).toEqual({ count: 0 });
+  });
+
+  it('lists a moment with its piece and a custom message with the first name filled, newest first; flags and counts them unread; reads them up to a time', async () => {
+    const staff = (await h.ctx.db.selectFrom('admin_users').select('id').where('role', '=', 'ADMIN').executeTakeFirstOrThrow()).id;
+    await h.ctx.db
+      .insertInto('house_deliveries')
+      .values({ account_id: meId, source: 'MOMENT', moment: 'FIRST_REGISTRATION', title: 'YOUR FIRST PIECE', body: 'MONOLITHE is registered to you.\n\nIts care.', piece_ref: serial, dedupe_key: `FIRST_REGISTRATION:${meId}`, delivered_at: at(10) })
+      .execute();
+    const custom = await h.ctx.db
+      .insertInto('house_messages')
+      .values({ title: 'FOR {firstName}', body: 'Dear {firstName},\n\nA word from ORBES.', status: 'SENT', audience_min_tier: 1, audience_label: 'TITANE', send_at: at(5), sent_at: at(5), reach: 1, sent_by: staff, created_by: staff, updated_by: staff })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    await h.ctx.db.insertInto('house_deliveries').values({ account_id: meId, source: 'CUSTOM', house_message_id: custom.id, dedupe_key: `CUSTOM:${custom.id}:${meId}`, delivered_at: at(5) }).execute();
+    // Another account's message never shows here.
+    const other = await accountClient(h);
+    const otherId = (await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', other.email.toLowerCase()).executeTakeFirstOrThrow()).id;
+    await h.ctx.db.insertInto('house_deliveries').values({ account_id: otherId, source: 'MOMENT', moment: 'NINETY_DAYS', title: 'WHAT IS NEW', body: 'Theirs.', dedupe_key: `NINETY_DAYS:${otherId}:2026-01-01`, delivered_at: at(1) }).execute();
+
+    const page = safeJson(await me.client.get('/api/v1/account/house-messages')) as { messages: HouseJson[]; unread: number; total: number };
+    expect(page.unread).toBe(2);
+    expect(page.total).toBe(2);
+    expect(page.messages).toEqual([
+      { id: expect.any(String), source: 'CUSTOM', moment: null, title: 'FOR Owner', body: 'Dear Owner,\n\nA word from ORBES.', pieceRef: null, pieceHeld: null, at: at(5).toISOString(), unread: true },
+      { id: expect.any(String), source: 'MOMENT', moment: 'FIRST_REGISTRATION', title: 'YOUR FIRST PIECE', body: 'MONOLITHE is registered to you.\n\nIts care.', pieceRef: serial, pieceHeld: true, at: at(10).toISOString(), unread: true },
+    ]);
+    expect(JSON.stringify(page)).not.toMatch(/Theirs|audience|TITANE|sent_by|reach|dedupe/);
+    expect(safeJson(await me.client.get('/api/v1/account/messages/unread'))).toEqual({ unread: false, house: true });
+    expect(safeJson(await me.client.get('/api/v1/account/messages/unread-count'))).toEqual({ count: 2 });
+    // Read up to the first: the second stays unread; a time ahead reads no later than now.
+    expect((await me.client.post('/api/v1/account/house-messages/read', { upTo: at(10).toISOString() })).statusCode).toBe(204);
+    expect(((safeJson(await me.client.get('/api/v1/account/house-messages')) as { messages: HouseJson[] }).messages.map((m) => m.unread))).toEqual([true, false]);
+    expect(safeJson(await me.client.get('/api/v1/account/messages/unread-count'))).toEqual({ count: 1 });
+    expect((await me.client.post('/api/v1/account/house-messages/read', { upTo: new Date(h.clock.now().getTime() + 86_400_000).toISOString() })).statusCode).toBe(204);
+    const read = await h.ctx.db.selectFrom('house_deliveries').select(['read_at']).where('account_id', '=', meId).orderBy('delivered_at').execute();
+    expect(read.map((r) => r.read_at)).toEqual([at(10), h.clock.now()]);
+    expect(safeJson(await me.client.get('/api/v1/account/messages/unread'))).toEqual({ unread: false, house: false });
+    expect(safeJson(await me.client.get('/api/v1/account/messages/unread-count'))).toEqual({ count: 0 });
+    expect(safeJson(await other.client.get('/api/v1/account/messages/unread-count'))).toEqual({ count: 1 });
+    expect((await me.client.post('/api/v1/account/house-messages/read', { upTo: 'yesterday' })).statusCode).toBe(400);
+  });
+
+  it('pages them 30 at a time, newest first; anything unreadable is page 1', async () => {
+    for (let i = 0; i < 30; i++) {
+      await h.ctx.db.insertInto('house_deliveries').values({ account_id: meId, source: 'MOMENT', moment: 'NINETY_DAYS', title: `WHAT IS NEW ${i}`, body: 'Words.', dedupe_key: `NINETY_DAYS:${meId}:page-${i}`, delivered_at: at(4 - i / 100) }).execute();
+    }
+    const first = safeJson(await me.client.get('/api/v1/account/house-messages')) as { messages: HouseJson[]; unread: number; total: number };
+    expect([first.messages.length, first.total, first.unread]).toEqual([30, 32, 30]);
+    expect(first.messages[0]!.title).toBe('WHAT IS NEW 29');
+    const second = safeJson(await me.client.get('/api/v1/account/house-messages?page=2')) as { messages: HouseJson[] };
+    expect(second.messages.map((m) => m.title)).toEqual(['FOR Owner', 'YOUR FIRST PIECE']);
+    expect((safeJson(await me.client.get('/api/v1/account/house-messages?page=nope')) as { messages: HouseJson[] }).messages[0]!.title).toBe('WHAT IS NEW 29');
+    expect((safeJson(await me.client.get('/api/v1/account/house-messages?page=9')) as { messages: HouseJson[] }).messages).toEqual([]);
+  });
+
+  it('gives them in the account’s export, oldest first, as read, with when each was delivered and read', async () => {
+    const res = await admin.get(`/api/admin/owners/${meId}/export`);
+    expect(res.statusCode).toBe(200);
+    const x = safeJson(res) as { houseMessages: { source: string; moment: string | null; title: string; body: string; pieceRef: string | null; deliveredAt: string; readAt: string | null }[] };
+    expect(x.houseMessages).toHaveLength(32);
+    expect(x.houseMessages.slice(0, 2)).toEqual([
+      { source: 'MOMENT', moment: 'FIRST_REGISTRATION', title: 'YOUR FIRST PIECE', body: 'MONOLITHE is registered to you.\n\nIts care.', pieceRef: serial, deliveredAt: expect.any(String), readAt: expect.any(String) },
+      { source: 'CUSTOM', moment: null, title: 'FOR Owner', body: 'Dear Owner,\n\nA word from ORBES.', pieceRef: null, deliveredAt: expect.any(String), readAt: expect.any(String) },
+    ]);
+    const audit = await h.ctx.db.selectFrom('audit_logs').select('details').where('action', '=', 'account.export').where('target_id', '=', meId).executeTakeFirstOrThrow();
+    expect(audit.details).toMatchObject({ houseMessages: 32 });
   });
 });

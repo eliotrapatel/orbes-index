@@ -109,6 +109,7 @@ import { accountGrants, accountTierGrants, creditBalances, type ExportedTierGran
 import { nextBirthday } from './birthday-credits.js';
 import { readProgram } from './club-program.js';
 import { accountConversation, accountMessages, type ExportedMessage } from './messages.js';
+import { accountHouseMessages, type ExportedHouseMessage } from './house-messages.js';
 import { accountLiveData, auditRemovedLiveEntries, removeAccountLiveEntries, type ExportedLiveEntry, type ExportedLiveInterest } from './live.js';
 import { participatedReleases, releasesTakenPart } from './participation.js';
 import { accountReleaseAnswers, type ExportedReleaseAnswer } from './question.js';
@@ -523,6 +524,12 @@ export interface AccountExport {
    * settled. Never its address, subject or words: they repeat what this export holds, and the kind names the email.
    */
   emails: ExportedEmail[];
+  /**
+   * The house messages the account received in MESSAGES (plan MACRO M2 §1.4, D24), oldest first: a moment's kind or a
+   * custom message, its title and words as the collector reads them, the piece it names, when it was delivered and when
+   * it was read. House messages are kept with the account, with when they were read.
+   */
+  houseMessages: ExportedHouseMessage[];
   /**
    * The new claim codes ORBES Client Services made for the account's orders (plan NEXT LOT §3.4), oldest first: the
    * order, when it was made, where it stands and when it was read; never the code, sealed or clear, nor who made it.
@@ -1155,6 +1162,7 @@ export class OwnerService {
         foundingList,
         emailPreferences: { releaseNotices: preference?.release_notices ?? false, changedAt: preference?.changed_at ?? null },
         emails: emails.map((e) => ({ kind: e.kind, status: e.status, createdAt: e.created_at, sentAt: e.sent_at, settledAt: e.settled_at })),
+        houseMessages: await accountHouseMessages(tx, a.id),
         claimCodes,
         tierGrants,
         activity: activity.slice(0, EXPORT_LIST_LIMIT).map((e) => ({
@@ -1203,6 +1211,7 @@ export class OwnerService {
             origin: exportedOriginCount(out.origin),
             foundingList: out.foundingList ? 1 : 0,
             emails: out.emails.length,
+            houseMessages: out.houseMessages.length,
             claimCodes: out.claimCodes.length,
             tierGrants: out.tierGrants.length,
             activity: out.activity.length,

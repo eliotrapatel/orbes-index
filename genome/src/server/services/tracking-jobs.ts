@@ -59,7 +59,8 @@ export const VIEW_PURGE_MAX_DAYS = 7;
 
 /**
  * The lot's growing tables (§3.3 T.10): the `intelligence sizes` line measures those that exist (the acquisition's since
- * migration 0043).
+ * migration 0043), and the house messages' deliveries (plan MACRO M2 §1.4, migration 0052: one row per message an
+ * account received, never deleted), for the same 50 MB backup watch.
  */
 export const INTELLIGENCE_TABLES = [
   'collector_views',
@@ -70,6 +71,7 @@ export const INTELLIGENCE_TABLES = [
   'account_wishes',
   'account_profiles',
   'account_tastes',
+  'house_deliveries',
 ] as const;
 
 /** The Paris day before `YYYY-MM-DD`. */
@@ -277,12 +279,13 @@ export interface VisitorData {
   profilesBytes: number;
 }
 
-/** The « Visitor data » parts of an `intelligence sizes` measure (a table not there yet counts 0). */
+/**
+ * The « Visitor data » parts of an `intelligence sizes` measure (a table not there yet counts 0), in all the sum of its
+ * parts: the house messages' deliveries, measured on the same line, are no visitor data.
+ */
 export function visitorDataOf(tables: Readonly<Record<string, number>>, at: Date): VisitorData {
   const of = (...names: (typeof INTELLIGENCE_TABLES)[number][]) => names.reduce((n, t) => n + (tables[t] ?? 0), 0);
-  return {
-    at: at.toISOString(),
-    totalBytes: Object.values(tables).reduce((a, b) => a + b, 0),
+  const parts = {
     viewsBytes: of('collector_views', 'view_daily_stats'),
     devicesBytes: of('tracking_devices'),
     visitsBytes: of('acquisition_touches'),
@@ -290,6 +293,7 @@ export function visitorDataOf(tables: Readonly<Record<string, number>>, at: Date
     wishesBytes: of('account_wishes'),
     profilesBytes: of('account_profiles', 'account_tastes'),
   };
+  return { at: at.toISOString(), totalBytes: Object.values(parts).reduce((a, b) => a + b, 0), ...parts };
 }
 
 /** A failed on-demand read is tried again after this long (Server status asks every 2 s). */

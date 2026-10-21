@@ -263,9 +263,18 @@ describe('the collector never sees staff data (§3.6 C.9, §3.0 (k); step 9.13)'
       '/api/v1/account/messages': '/api/v1/account/messages',
       '/api/v1/account/messages/unread': '/api/v1/account/messages/unread',
       '/api/v1/account/messages/unread-count': '/api/v1/account/messages/unread-count',
+      // Lot M2 step M2.2: MESSAGES' house messages (a moment delivered below, so the reply is a real one).
+      '/api/v1/account/house-messages': '/api/v1/account/house-messages',
       '/api/v1/ownership/certificates': '/api/v1/ownership/certificates',
       '/go/:code': `/go/${link.code}`,
     };
+
+    // A house message of the collector's own (plan MACRO M2 §1.2: the first registration's moment, its piece named).
+    await db
+      .insertInto('house_deliveries')
+      .values({ account_id: youId, source: 'MOMENT', moment: 'FIRST_REGISTRATION', title: 'YOUR FIRST PIECE', body: 'Its words.', piece_ref: piece.product_id, dedupe_key: `FIRST_REGISTRATION:${youId}` })
+      .onConflict((oc) => oc.column('dedupe_key').doNothing())
+      .execute();
 
     // The route files read: every GET they declare is read here or named in NOT_READ.
     const declared = COLLECTOR_FILES.flatMap(getPaths);
@@ -279,7 +288,7 @@ describe('the collector never sees staff data (§3.6 C.9, §3.0 (k); step 9.13)'
       expect(res.statusCode, `GET ${url} → ${res.body.slice(0, 200)}`).toBeLessThan(500);
     }
     // The collector's own screens answer: the sentinel reads real replies, not refusals.
-    for (const path of ['/api/v1/account/me', '/api/v1/account/products', '/api/v1/account/profile', '/api/v1/account/wishlist', '/api/v1/account/orders', '/api/v1/account/participation', '/api/v1/club/status', '/api/v1/club/circle', '/api/v1/account/messages', '/api/v1/account/messages/unread-count', '/api/v1/ownership/certificates', '/api/v1/live/mine', '/api/v1/account/sign-up', '/api/v1/lookbook/:slug', '/api/v1/club/drops/:id/entry']) {
+    for (const path of ['/api/v1/account/me', '/api/v1/account/products', '/api/v1/account/profile', '/api/v1/account/wishlist', '/api/v1/account/orders', '/api/v1/account/participation', '/api/v1/club/status', '/api/v1/club/circle', '/api/v1/account/messages', '/api/v1/account/messages/unread-count', '/api/v1/account/house-messages', '/api/v1/ownership/certificates', '/api/v1/live/mine', '/api/v1/account/sign-up', '/api/v1/lookbook/:slug', '/api/v1/club/drops/:id/entry']) {
       expect(replies.get(`GET ${path}`)!.statusCode, path).toBe(200);
     }
     expect(replies.get('GET /go/:code')!.statusCode).toBe(302);

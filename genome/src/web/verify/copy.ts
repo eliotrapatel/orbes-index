@@ -2467,3 +2467,10 @@ export const RELEASE_NOTICES = Object.freeze({
   hint: 'To the email of your account, saved as soon as it is switched. Each of these emails can stop them too.',
   failed: 'Your choice could not be saved just now.',
 });
+
+/**
+ * The house messages' words (macro scope D24 M1; lot M2 plan §1.2, step M2.2): each moment's default title and words,
+ * shared with the server, which renders and stores them at delivery (src/shared/house-words.ts), so every collector word
+ * still lives here.
+ */
+export { HOUSE } from '../../shared/house-words.js';
