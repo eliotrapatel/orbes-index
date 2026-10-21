@@ -302,7 +302,7 @@ ORBES describes faithfully what the service checks and what it does not (article
 
 ## Article 19 — Changes to these terms
 
-ORBES may change these terms. The version in force and its date are published on the service. [À COMPLÉTER: how account holders are informed and when changes take effect, on counsel's advice; the service sends no email.]
+ORBES may change these terms. The version in force and its date are published on the service. [À COMPLÉTER: how account holders are informed and when changes take effect, on counsel's advice; no email of the service announces it.]
 
 *Code: R57.*
 

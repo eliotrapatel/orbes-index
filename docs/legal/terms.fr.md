@@ -302,7 +302,7 @@ ORBES décrit fidèlement ce que vérifie le service et ce qu'il ne vérifie pas
 
 ## Article 19 — Modification des conditions
 
-ORBES peut modifier les présentes conditions. La version en vigueur et sa date sont publiées sur le service. [À COMPLÉTER : information des titulaires de compte et date d'effet des modifications, selon l'avis de l'avocat ; le service n'envoie pas d'e-mail.]
+ORBES peut modifier les présentes conditions. La version en vigueur et sa date sont publiées sur le service. [À COMPLÉTER : information des titulaires de compte et date d'effet des modifications, selon l'avis de l'avocat ; aucun e-mail du service ne l'annonce.]
 
 *Code : R57.*
 
