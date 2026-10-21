@@ -5,7 +5,8 @@
  *    transaction carries the email (rolled back, no email);
  *  - the sender: SENT with its headers (Message-ID the row's id, List-Unsubscribe on an email one may stop), not before
  *    its time, the retries 1 min, 5 min, 30 min, 2 h then FAILED, FAILED at once on a permanent refusal, no credential in
- *    `last_error`, no address in the log, two senders never sending one email twice, the loop every 15 s;
+ *    `last_error`, no address in the log, two senders never sending one email twice, the loop every 15 s, a stop or
+ *    half the lease between two emails giving the rest back;
  *  - the 90-day purge; the unsubscribe token; the rendering of every kind, default and edited words, escaped values.
  *
  * CI (PostgreSQL): « two senders claim the outbox without sending twice (FOR UPDATE SKIP LOCKED), on PostgreSQL ».
@@ -253,6 +254,19 @@ describe('the emails: outbox, sender, purge, unsubscribe', () => {
     expect(r2.last_error).toMatch(/^auth: 535/);
     expect(r2.last_error).not.toContain(wrong.user);
     expect(r2.last_error).not.toContain('a-wrong-password-42');
+
+    // A message that cannot even be written (an unsubscribe link on http, a dev origin) is refused alike on every try:
+    // FAILED at once, never tried again.
+    await switchOn('RELEASE_NOTICE');
+    const dev = new EmailService({ db, config: { publicOrigin: 'http://localhost:8080', email: smtpConfig(s) }, unsubscribeKey: KEY, clock: clock.now, transport: async () => {} });
+    const q3 = await dev.enqueue(db, { kind: 'RELEASE_NOTICE', to: a.email, accountId: a.id, dedupeKey: 'E2:dev1', values: {} });
+    if (!q3.queued) throw new Error('not queued');
+    expect(await dev.sendDue()).toEqual({ sent: 0, retried: 0, failed: 1 });
+    expect(await db.selectFrom('email_outbox').selectAll().where('id', '=', q3.id).executeTakeFirstOrThrow()).toMatchObject({
+      status: 'FAILED',
+      attempts: 1,
+      last_error: 'unsubscribe: an https address',
+    });
   });
 
   it('gives up at once when the server refuses the address for good (a 5xx to RCPT TO)', async () => {
@@ -285,6 +299,65 @@ describe('the emails: outbox, sender, purge, unsubscribe', () => {
     expect(new Set(sent).size).toBe(60);
     expect(sent).toHaveLength(60);
     expect(await one.sendDue()).toEqual({ sent: 0, retried: 0, failed: 0 });
+    expect((await outbox()).every((r) => r.status === 'SENT' && r.attempts === 1)).toBe(true);
+  });
+
+  it('stops between two emails: stop() returns after the email in progress, the rest given back due at once, none sent twice; a pass ends at half the lease', async () => {
+    expect(EMAIL_SENDER.passMs).toBe(EMAIL_SENDER.leaseMs / 2);
+    const idOf = (data: string) => /Message-ID: <([^@]+)@/.exec(data)![1]!;
+    const sent: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let begin!: () => void;
+    const begun = new Promise<void>((r) => (begin = r));
+    const closing = service(null, {
+      transport: async (e) => {
+        begin();
+        await gate;
+        sent.push(idOf(e.data));
+      },
+    });
+    await switchOn('ORDER_CANCELLED');
+    const a = await account();
+    for (let i = 0; i < 5; i++) {
+      await closing.enqueue(db, { kind: 'ORDER_CANCELLED', to: a.email, accountId: a.id, dedupeKey: `E5:s${i}`, values: {} });
+      clock.advance(10);
+    }
+    closing.start();
+    await begun;
+    let stopped = false;
+    const stop = closing.stop().then(() => void (stopped = true));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(stopped).toBe(false); // the email in progress first
+    release();
+    await stop;
+    expect(sent).toHaveLength(1);
+    const rows = await outbox();
+    expect(rows.filter((r) => r.status === 'SENT').map((r) => [r.id, r.attempts])).toEqual([[sent[0], 1]]);
+    const rest = rows.filter((r) => r.status === 'QUEUED');
+    expect(rest).toHaveLength(4);
+    expect(rest.every((r) => r.attempts === 0 && r.not_before.getTime() === clock.now().getTime())).toBe(true);
+    // The next process sends them at once, each once.
+    const next = service(null, { transport: async (e) => void sent.push(idOf(e.data)) });
+    expect(await next.sendDue()).toEqual({ sent: 4, retried: 0, failed: 0 });
+    expect(new Set(sent).size).toBe(5);
+    expect(sent).toHaveLength(5);
+
+    // A slow provider (2 min an email): the pass tries no further email 5 min after its claim and gives the rest back.
+    const slow = service(null, {
+      transport: async (e) => {
+        clock.advance(2 * 60_000);
+        sent.push(idOf(e.data));
+      },
+    });
+    for (let i = 0; i < 6; i++) await slow.enqueue(db, { kind: 'ORDER_CANCELLED', to: a.email, accountId: a.id, dedupeKey: `E5:t${i}`, values: {} });
+    expect(await slow.sendDue()).toEqual({ sent: 3, retried: 0, failed: 0 });
+    const back = (await outbox()).filter((r) => r.status === 'QUEUED');
+    expect(back).toHaveLength(3);
+    expect(back.every((r) => r.attempts === 0 && r.not_before.getTime() === clock.now().getTime())).toBe(true);
+    expect(await slow.sendDue()).toEqual({ sent: 3, retried: 0, failed: 0 });
+    expect(new Set(sent).size).toBe(11);
+    expect(sent).toHaveLength(11);
     expect((await outbox()).every((r) => r.status === 'SENT' && r.attempts === 1)).toBe(true);
   });
 

@@ -61,7 +61,8 @@ export type SmtpStage = 'input' | 'connect' | 'greeting' | 'ehlo' | 'starttls' |
 /**
  * A refused or failed send. `code` is the server's reply code (0 when there was none: a network error, a timeout, a
  * refused certificate). `permanent`: the server refused this message or this address for good (a 5xx reply to RCPT TO,
- * DATA or the message); every other failure may pass (a 4xx reply, the network, the credentials until they are fixed).
+ * DATA or the message), or the message could not even be written (`input`: the same refusal on every try); every other
+ * failure may pass (a 4xx reply, the network, the credentials until they are fixed).
  */
 export class SmtpError extends Error {
   override readonly name = 'SmtpError';
@@ -74,6 +75,7 @@ export class SmtpError extends Error {
   }
 
   get permanent(): boolean {
+    if (this.stage === 'input') return true;
     return this.code >= 500 && this.code < 600 && (this.stage === 'rcpt' || this.stage === 'data' || this.stage === 'message');
   }
 }

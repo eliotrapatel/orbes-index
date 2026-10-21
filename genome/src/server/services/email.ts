@@ -11,7 +11,10 @@
  *   sendDue     the sender: every EMAIL_SENDER.intervalMs (15 s) while the channel is on (start, from context.ts), the
  *               QUEUED rows due, oldest first, at most EMAIL_SENDER.batch (50) a pass. Each is claimed first (FOR UPDATE
  *               SKIP LOCKED, its attempt counted and its `not_before` moved a lease ahead), so two processes never send
- *               one email at once; then sent over SMTP (email/smtp.ts), one connection each. Sent: SENT. Refused for
+ *               one email at once; then sent over SMTP (email/smtp.ts), one connection each. A pass stops before its
+ *               next email once the process is closing (stop) or half the lease has passed since the claim (a slow
+ *               provider), so an email is always settled well inside its lease; the rows claimed but not tried are
+ *               given back, due at once, their attempt not counted. Sent: SENT. Refused for
  *               good by the server (a 5xx to the address or the message): FAILED at once. Any other failure is tried
  *               again 1 min, 5 min, 30 min, then 2 h later, then FAILED. `last_error` keeps the step and the server's
  *               words, never the credentials. The log says `email sent` / `email failed` with the kind and the row's
@@ -48,6 +51,8 @@ export const EMAIL_SENDER = Object.freeze({
   retryMs: Object.freeze([60_000, 5 * 60_000, 30 * 60_000, 2 * 60 * 60_000]),
   /** How long a claimed row is kept from another sender while it is being sent. */
   leaseMs: 10 * 60_000,
+  /** A pass tries no further email once this long has passed since its claim (half the lease); the rest are given back. */
+  passMs: 5 * 60_000,
 });
 
 /** An email is erased this many days after it was sent, failed or was cancelled (the privacy policy's 90 days). */
@@ -129,6 +134,8 @@ export class EmailService {
   private timers = false;
   private timer: NodeJS.Timeout | null = null;
   private running: Promise<void> | null = null;
+  /** Set by stop(): a pass under way tries no further email. */
+  private stopping = false;
 
   constructor(deps: EmailServiceDeps) {
     this.db = deps.db;
@@ -256,16 +263,47 @@ export class EmailService {
 
   // ── The sender ───────────────────────────────────────────────────────────
 
-  /** One pass: the QUEUED rows due, claimed, sent or put back for later. Nothing while the channel is off. */
+  /**
+   * One pass: the QUEUED rows due, claimed, sent or put back for later. Nothing while the channel is off. It tries no
+   * further email once the process is closing or EMAIL_SENDER.passMs has passed since the claim: those are given back.
+   */
   async sendDue(): Promise<SendReport> {
+    return (await this.pass()).report;
+  }
+
+  /** A pass, and whether more may be due at once (a full batch, or rows given back). */
+  private async pass(): Promise<{ report: SendReport; more: boolean }> {
     const report: SendReport = { sent: 0, retried: 0, failed: 0 };
-    if (!this.on || this.transport === null) return report;
+    if (!this.on || this.transport === null || this.stopping) return { report, more: false };
     const rows = await this.claim();
-    for (const row of rows) {
+    const claimedAt = this.clock().getTime();
+    for (const [i, row] of rows.entries()) {
+      if (this.stopping || this.clock().getTime() - claimedAt >= EMAIL_SENDER.passMs) {
+        await this.giveBack(rows.slice(i));
+        return { report, more: !this.stopping };
+      }
       const outcome = await this.sendOne(row);
       report[outcome] += 1;
     }
-    return report;
+    return { report, more: rows.length >= EMAIL_SENDER.batch };
+  }
+
+  /** Rows claimed but not tried: due at once again, their attempt not counted (still under this pass's lease only). */
+  private async giveBack(rows: OutboxRow[]): Promise<void> {
+    if (rows.length === 0) return;
+    // Every row of one claim carries the same lease; a row whose lease is no longer it is not this pass's to give.
+    await this.db
+      .updateTable('email_outbox')
+      .set((eb) => ({ attempts: eb('attempts', '-', 1), not_before: this.clock() }))
+      .where(
+        'id',
+        'in',
+        rows.map((r) => r.id),
+      )
+      .where('status', '=', 'QUEUED')
+      .where('not_before', '=', rows[0]!.not_before)
+      .execute();
+    this.log.info({ count: rows.length, stopping: this.stopping }, 'emails: claimed emails given back for the next pass');
   }
 
   /** The rows due, oldest first, each one's attempt counted and its time moved a lease ahead, in one transaction. */
@@ -360,11 +398,16 @@ export class EmailService {
   start(): void {
     if (!this.on) return;
     this.timers = true;
+    this.stopping = false;
     this.schedule(0);
   }
 
-  /** At the process's close: no new pass; the one under way finishes. */
+  /**
+   * At the process's close: no new pass; the one under way finishes the email it is sending (written SENT, or put back)
+   * and gives back the rest of its claim, due at once for the next process.
+   */
   async stop(): Promise<void> {
+    this.stopping = true;
     this.timers = false;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
@@ -383,8 +426,7 @@ export class EmailService {
     let full = false;
     this.running = (async () => {
       try {
-        const r = await this.sendDue();
-        full = r.sent + r.retried + r.failed >= EMAIL_SENDER.batch;
+        full = (await this.pass()).more;
       } catch (e) {
         this.log.error({ err: { message: (e as Error)?.message } }, 'emails: a pass of the sender failed');
       }
