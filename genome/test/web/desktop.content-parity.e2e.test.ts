@@ -65,7 +65,13 @@ describe('the desktop’s content parity: DESKTOP_MOVED and DESKTOP_WORDS held t
       if (m.states.length === 0) problems.push(`${label}: no state`);
       for (const id of m.states) {
         const phone = baseline.states[id];
-        const of = twins.get(id) ?? [];
+        const all = twins.get(id) ?? [];
+        for (const t of m.twins ?? []) if (!all.includes(t)) problems.push(`${label}: ${t} is no computer twin of ${id}`);
+        // An entry limited to some twins is needed on those (the others are held to the value).
+        const of = m.twins ? all.filter((t) => m.twins!.includes(t)) : all;
+        for (const t of all.filter((x) => m.twins && !m.twins.includes(x))) {
+          for (const v of m.values ?? phone?.values ?? []) if (!shownOrBroken(deskTexts(t), v)) problems.push(`${label}: ${t}, not in its twins, does not show «${v}»`);
+        }
         if (!phone || of.length === 0) {
           problems.push(`${label}: ${id} is no phone state with a computer twin`);
           continue;

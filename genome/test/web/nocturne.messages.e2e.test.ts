@@ -36,6 +36,33 @@ const buttons = (page: Page, within = 'body') =>
   );
 
 /** No sideways scroll at each phone width; the button on one line. */
+/**
+ * FROM ORBES' first page unreadable once (a server error), then held while TRY AGAIN reads it again, so ONE MOMENT… is
+ * seen in its place (lot M2.5); `release` lets the page through and stops intercepting.
+ */
+async function houseFailsThenHolds(page: Page): Promise<{ release(): Promise<void> }> {
+  let calls = 0;
+  let open!: () => void;
+  const held = new Promise<void>((r) => (open = r));
+  const passed: Promise<void>[] = [];
+  const matches = (u: URL) => u.pathname === '/api/v1/account/house-messages';
+  await page.route(matches, async (route) => {
+    calls++;
+    if (calls === 1) return route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":{"code":"INTERNAL","message":"Something went wrong."}}' });
+    const done = held.then(() => route.continue());
+    passed.push(done);
+    return done;
+  });
+  return {
+    release: async () => {
+      open();
+      // The held requests let through before the route goes (unrouting first would answer them twice).
+      await Promise.all(passed);
+      await page.unroute(matches);
+    },
+  };
+}
+
 async function fitsEveryWidth(page: Page, what: string): Promise<void> {
   for (const width of WIDTHS) {
     await page.setViewportSize({ width, height: 844 });
@@ -355,9 +382,18 @@ const CASES: { state: UiState; check: Check }[] = [
       expect(await unread()).toBe(1);
       const line = page.locator('.now__messages');
       expect(await line.innerText()).toContain('A new message from ORBES.');
+      const house = await houseFailsThenHolds(page);
       await line.getByRole('button', { name: 'READ' }).click();
-      // MESSAGES opens on FROM ORBES: its tab selected, the unread message NEW for the visit; read on the server.
+      // Unreadable first: FROM ORBES' failure under its tab; TRY AGAIN keeps both tabs on FROM ORBES, ONE MOMENT… meanwhile.
       const sheet = page.locator('.n-account:not([hidden])');
+      await sheet.locator('.n-house__retry').click({ timeout: 15_000 });
+      await sheet.locator('.n-house__wait[role="status"]').waitFor({ timeout: 15_000 });
+      expect(await sheet.locator('.n-messages__parts [role="tab"]').count()).toBe(2);
+      expect(await sheet.locator('#messages-part-house').getAttribute('aria-selected')).toBe('true');
+      expect(await sheet.locator('.n-messages__part textarea').count()).toBe(0);
+      expect(await page.evaluate(() => document.activeElement?.id)).toBe('messages-part-house');
+      await house.release();
+      // MESSAGES on FROM ORBES: its tab selected, the unread message NEW for the visit; read on the server.
       await sheet.locator('.n-house__list').waitFor({ timeout: 15_000 });
       expect(await sheet.locator('#messages-part-house').getAttribute('aria-selected')).toBe('true');
       expect(await sheet.locator('.n-house__item').first().locator('.n-house__new').innerText()).toBe('NEW');
@@ -393,9 +429,15 @@ const CASES: { state: UiState; check: Check }[] = [
       await page.reload();
       const line = page.locator('.now__messages');
       await line.waitFor({ timeout: 15_000 });
+      const house = await houseFailsThenHolds(page);
       await line.getByRole('button', { name: 'READ' }).click();
-      // MESSAGES on its subject FROM ORBES (its address), read on the server.
+      // Unreadable first: TRY AGAIN gives way to ONE MOMENT… while FROM ORBES is read again (nothing to press twice).
       await page.waitForURL('**/verify/messages/from-orbes');
+      await page.locator('.d-msg__house-failed .n-failed__retry').click({ timeout: 15_000 });
+      await page.locator('.d-msg__house-wait[role="status"]').waitFor({ timeout: 15_000 });
+      expect(await page.locator('.d-msg__house-failed .n-failed__retry').count()).toBe(0);
+      await house.release();
+      // MESSAGES on its subject FROM ORBES (its address), read on the server.
       await page.locator('.d-msg ol.d-msg__house').waitFor({ timeout: 15_000 });
       expect(await page.locator('.d-msg__subject.is-current').getAttribute('data-key')).toBe('from-orbes');
       expect(await page.locator('.d-msg__house-new').count()).toBe(1);

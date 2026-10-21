@@ -86,6 +86,8 @@ export interface DesktopMoved {
    * stage that the computer's state runs before), shown on the computer as it stands then.
    */
   run?: true;
+  /** Only on these computer twins (their desk states' ids); absent: on every twin of the states. */
+  twins?: readonly string[];
 }
 
 /** The room's and the after-room's ends: no menu, SCAN nor account on a computer (decision 7). */
@@ -161,8 +163,9 @@ export const DESKTOP_MOVED: readonly DesktopMoved[] = [
     states: ['account-messages-house'],
     values: ['NEW'],
     reason: 'The run, not the desktop: FROM ORBES is read as it opens, so on the stage only its first opening (desk-messages-house) shows the message unread; its light and 1024 twins open it after.',
-    now: 'NEW beside the unread message’s author line the first time FROM ORBES opens (desk-messages-house).',
+    now: 'NEW beside the unread message’s author line the first time FROM ORBES opens (desk-messages-house, where it is checked).',
     run: true,
+    twins: ['desk-light-messages-house', 'desk-messages-house-1024'],
   },
   {
     states: ['account-messages-house', 'account-messages-house-stress'],
@@ -283,10 +286,10 @@ export function shownOrBroken(texts: readonly string[], value: string): boolean 
   return false;
 }
 
-/** The DESKTOP_MOVED entry of a phone state's value, if any. */
-export function movedEntry(phoneId: string, value: string): DesktopMoved | null {
+/** The DESKTOP_MOVED entry of a phone state's value, if any (on the computer twin `deskId` when it is given). */
+export function movedEntry(phoneId: string, value: string, deskId?: string): DesktopMoved | null {
   const v = lower(value);
-  const of = DESKTOP_MOVED.filter((m) => m.states.includes(phoneId));
+  const of = DESKTOP_MOVED.filter((m) => m.states.includes(phoneId) && (!m.twins || deskId === undefined || m.twins.includes(deskId)));
   // A value listed by name first, then a state's every value moved.
   return of.find((m) => m.values?.some((x) => lower(x) === v)) ?? of.find((m) => !m.values) ?? null;
 }
@@ -405,7 +408,7 @@ export async function parityMissing(run: StateRun, state: UiState, phoneId: stri
   const elsewhere = new Map<string, string[]>();
   for (const value of phoneValues) {
     if (shownIn(here, value)) continue;
-    const m = movedEntry(phoneId, value);
+    const m = movedEntry(phoneId, value, state.id);
     if (m?.removed || m?.run) continue;
     if (m?.shownAs) {
       if (!m.shownAs.every((p) => shownIn(here, p))) missing.push(`${value} (shown apart as ${m.shownAs.join(' + ')})`);

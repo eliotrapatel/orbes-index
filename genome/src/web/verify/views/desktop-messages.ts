@@ -266,6 +266,8 @@ class MessagesPage {
   private house: HouseList | null = null;
   private houseError: string | null = null;
   private houseKnown = false;
+  /** TRY AGAIN pressed: FROM ORBES read again, ONE MOMENT… in place of its failure, a second press ignored. */
+  private houseRetrying = false;
   /** SHOW EARLIER: reading the next page, or why it could not be read. */
   private earlier: { busy: boolean; error: string | null } = { busy: false, error: null };
   private selected: string | null;
@@ -359,8 +361,10 @@ class MessagesPage {
       this.thread = t;
       const before = new Map(this.subjects.map((s) => [s.key, s.unread]));
       // The count holds the house messages unread too (GET …/unread-count): the answers' NEW counts the answers alone.
-      const houseUnread = this.house ? this.house.unread : this.houseKnown ? 1 : 0;
-      this.subjects = this.withHouse(subjectsOf(t, Math.max(0, count - houseUnread), -new Date().getTimezoneOffset()));
+      // FROM ORBES unreadable, how many of the count are its own is not known: only the latest answer is marked, and
+      // only while the conversation says an answer is unread (never an older answer marked NEW wrongly).
+      const answers = this.house || !this.houseError ? count - (this.house?.unread ?? 0) : Math.min(count, t.unread ? 1 : 0);
+      this.subjects = this.withHouse(subjectsOf(t, Math.max(0, answers), -new Date().getTimezoneOffset()));
       // NEW stays on a subject for the visit (the conversation is read as the page opens), until it is opened.
       if (!opts.first) for (const s of this.subjects) s.unread = (before.get(s.key) ?? false) && !this.opened.has(s.key);
       await this.place(opts.select ?? null);
@@ -416,11 +420,21 @@ class MessagesPage {
     void this.deps.api.readHouseMessages(upTo).then(() => this.deps.onRead(), () => undefined);
   }
 
-  /** FROM ORBES read again (TRY AGAIN in its part). */
+  /** FROM ORBES read again (TRY AGAIN in its part): ONE MOMENT… while it reads, as SHOW EARLIER has it. */
   private async retryHouse(): Promise<void> {
+    if (this.houseRetrying) return;
     const gen = this.loadGen;
+    this.houseRetrying = true;
+    this.render();
+    this.root.querySelector<HTMLElement>('.d-msg__house-wait')?.focus({ preventScroll: true });
     await this.readHouse();
-    if (gen !== this.loadGen || this.disposed) return;
+    this.houseRetrying = false;
+    if (this.disposed) return;
+    // A later read of the page draws FROM ORBES as just read; until it does, the failure or the list replaces ONE MOMENT….
+    if (gen !== this.loadGen) {
+      this.render();
+      return;
+    }
     this.subjects = this.withHouse(this.subjects);
     const s = this.subjects.find((x) => x.key === FROM_ORBES_KEY);
     if (s) s.unread = false;
@@ -708,11 +722,17 @@ class MessagesPage {
             : null,
           ...[...list.items].reverse().map((m) => this.houseMessage(m)),
         )
-      : h(
-          'div',
-          { class: 'd-msg__conversation d-msg__conversation--none d-msg__house-failed' },
-          failedState({ sentence: FROM_ORBES.unreadable, reason: this.houseError ?? '', retry: FROM_ORBES.retry, onRetry: () => void this.retryHouse() }),
-        );
+      : this.houseRetrying
+        ? h(
+            'div',
+            { class: 'd-msg__conversation d-msg__conversation--none d-msg__house-failed' },
+            h('p', { class: 'n-g n-lb n-ivc d-msg__house-wait', attrs: { role: 'status', tabindex: -1 }, text: FROM_ORBES.loading }),
+          )
+        : h(
+            'div',
+            { class: 'd-msg__conversation d-msg__conversation--none d-msg__house-failed' },
+            failedState({ sentence: FROM_ORBES.unreadable, reason: this.houseError ?? '', retry: FROM_ORBES.retry, onRetry: () => void this.retryHouse() }),
+          );
     const foot = h(
       'div',
       { class: 'd-msg__reply d-msg__noreply' },

@@ -3660,7 +3660,8 @@ body.nocturne[data-screen="live"] {
   margin-top: 18px;
 }
 
-.n-house__failed {
+.n-house__failed,
+.n-house__wait {
   margin-top: 32px;
 }
 

@@ -199,6 +199,12 @@ export class AccountSheet {
    */
   protected house: HouseList | null = null;
   protected houseError: string | null = null;
+  /**
+   * TRY AGAIN pressed and FROM ORBES read again: the part stays, ONE MOMENT… in place of its failure (lot M2 plan's
+   * states); `houseGen` tells a read again from a later opening of MESSAGES (a reply's own reading does not discard it).
+   */
+  protected houseRetrying = false;
+  protected houseGen = 0;
   /** SHOW EARLIER: reading the next page, or why it could not be read. */
   protected houseEarlier: { busy: boolean; error: string | null } = { busy: false, error: null };
   /** The part of MESSAGES shown (its tabs once the account has a house message), and the part asked for at opening. */
@@ -638,6 +644,8 @@ export class AccountSheet {
     this.threadError = null;
     this.house = null;
     this.houseError = null;
+    this.houseRetrying = false;
+    this.houseGen++;
     this.houseEarlier = { busy: false, error: null };
     this.askedPart = part ?? null;
     this.partsShown.clear();
@@ -713,9 +721,12 @@ export class AccountSheet {
     else this.focusView();
   }
 
-  /** Whether MESSAGES has its two parts: the account has a house message (or one is unread while they cannot be read). */
+  /**
+   * Whether MESSAGES has its two parts: the account has a house message (or one is unread while they cannot be read, or
+   * they are being read again after TRY AGAIN).
+   */
   protected hasHouse(): boolean {
-    return this.house !== null || (this.houseError !== null && (this.houseUnread || this.askedPart === 'house'));
+    return this.house !== null || this.houseRetrying || (this.houseError !== null && (this.houseUnread || this.askedPart === 'house'));
   }
 
   /** A part shown: its NEW goes, and what it holds unread is read (up to the latest answer, or the newest house message). */
@@ -750,20 +761,27 @@ export class AccountSheet {
     else this.panel.querySelector<HTMLElement>(`#messages-part-${part}`)?.focus({ preventScroll: true });
   }
 
-  /** FROM ORBES read again (TRY AGAIN), its first page. */
+  /**
+   * FROM ORBES read again (TRY AGAIN), its first page: the tabs stay on FROM ORBES, ONE MOMENT… in place of the failure
+   * (a second press cannot send another request), the focus on the FROM ORBES tab until the page or the failure is back.
+   */
   protected async readHouse(): Promise<void> {
-    const gen = this.readGen;
-    this.houseError = null;
+    if (this.houseRetrying) return;
+    const gen = this.houseGen;
+    this.houseRetrying = true;
     this.render();
+    this.panel.querySelector<HTMLElement>('#messages-part-house')?.focus({ preventScroll: true });
     try {
       const page = await this.deps.api.houseMessages(1);
-      if (gen !== this.readGen || !this.isOpen || this.view !== 'messages') return;
+      if (gen !== this.houseGen || !this.isOpen || this.view !== 'messages') return;
+      this.houseRetrying = false;
       this.house = houseList(page, -new Date().getTimezoneOffset());
       this.houseError = null;
       if (this.part === 'house') this.showPart('house');
     } catch (e) {
       this.deps.session.noteError(e);
-      if (gen !== this.readGen || !this.isOpen) return;
+      if (gen !== this.houseGen || !this.isOpen || this.view !== 'messages') return;
+      this.houseRetrying = false;
       this.houseError = messageOf(e);
     }
     this.render();
@@ -878,6 +896,9 @@ export class AccountSheet {
    */
   protected housePart(): (HTMLElement | null)[] {
     const list = this.house;
+    if (!list && this.houseRetrying) {
+      return [h('p', { class: 'n-px n-g n-lb n-ivc n-ctr n-house__wait', attrs: { role: 'status' }, text: FROM_ORBES.loading })];
+    }
     if (!list) {
       return [
         h(
