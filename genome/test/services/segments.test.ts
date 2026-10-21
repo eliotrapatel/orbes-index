@@ -343,7 +343,7 @@ describe('taking part, and the segments', () => {
       await t.db.updateTable('drops').set({ access_segment_id: s.id }).where('id', '=', releases.later).execute();
       const post = await circle.create({ kind: 'NOTE', title: 'For the buyers', segmentId: s.id }, f.admin);
       const used = await segments.get(s.id);
-      expect(used.usedBy).toEqual({ releases: [{ id: releases.later, title: 'LIVE', mode: 'LIVE' }], posts: [{ id: post.id, title: 'For the buyers' }] });
+      expect(used.usedBy).toEqual({ releases: [{ id: releases.later, title: 'LIVE', mode: 'LIVE' }], posts: [{ id: post.id, title: 'For the buyers' }], houseMessages: [] });
       await rejects(segments.remove(s.id, f.admin), 'SEGMENT_IN_USE', 409);
       await t.db.updateTable('drops').set({ access_segment_id: null }).where('id', '=', releases.later).execute();
       await circle.update(post.id, { segmentId: null }, f.admin);

@@ -58,6 +58,7 @@ import {
   WARRANTY_CLAIM_OUTCOMES,
   WARRANTY_CLAIM_REFUSALS,
   WARRANTY_CLAIM_STATUSES,
+  HOUSE_MESSAGE_STATUSES,
 } from '../db/schema.js';
 import { BASE_PRICE_MAX_MINOR, CARE_GUIDE_MAX, MODEL_IDENTITY_MESSAGE, VARIANT_LABEL_MAX } from '../services/catalog.js';
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
@@ -1986,6 +1987,48 @@ export const accountMessageBody = body({
 
 /** POST /api/v1/account/messages/read: read up to this time (the latest message on screen). */
 export const accountMessagesReadBody = body({ upTo: isoDateTime });
+
+// ── House messages, the console (plan MACRO M2 §1.3, §1.4, step M2.3) ──────
+
+/** A moment by its name (the service answers 404 HOUSE_MOMENT_NOT_FOUND for any other). */
+export const houseMomentParams = z.object({ moment: z.string().max(40) });
+/** PUT /api/admin/house/moments/:moment/enabled (ADMIN): the moment on (from now on: nothing for the past) or off. */
+export const houseMomentEnabledBody = body({ enabled: z.boolean() });
+/** A moment's title or words as written: a string, null for the default's (the service checks bounds and placeholders). */
+const houseWordsField = (max: number) => z.string().max(max, `At most ${max} characters`).nullable().optional();
+/** PUT /api/admin/house/moments/:moment/words (OPERATOR): a title, words or both; left out: kept. */
+export const houseMomentWordsBody = body({ title: houseWordsField(400), body: houseWordsField(8000) }).refine((b) => b.title !== undefined || b.body !== undefined, {
+  message: 'Give a title or words',
+});
+/** POST /api/admin/house/moments/:moment/preview (OPERATOR): the words being written, or nothing for the moment's own; nothing stored. */
+export const houseMomentPreviewBody = optionalBody({ title: houseWordsField(400), body: houseWordsField(8000) });
+
+/** A custom message's audience: a segment's id or a tier, 1 TITANE, 2 PLATINE, 3 PALLADIUM (exactly one: 422 HOUSE_AUDIENCE otherwise). */
+const houseAudience = z.strictObject(
+  { segmentId: uuid.nullable().optional(), tier: z.number().int('A tier is 1, 2 or 3').min(1, 'A tier is 1, 2 or 3').max(3, 'A tier is 1, 2 or 3').nullable().optional() },
+  { error: 'An audience is an object' },
+);
+/** POST /api/admin/house/messages (OPERATOR): a new draft; the service checks the title (one line, 80) and words (2 000). */
+export const houseMessageBody = body({ title: z.string().max(400, 'At most 400 characters'), body: z.string().max(8000, 'At most 8000 characters'), audience: houseAudience });
+/** PATCH /api/admin/house/messages/:id (OPERATOR): its title, words or audience. */
+export const houseMessagePatchBody = body({
+  title: z.string().max(400, 'At most 400 characters').optional(),
+  body: z.string().max(8000, 'At most 8000 characters').optional(),
+  audience: houseAudience.optional(),
+}).refine((b) => b.title !== undefined || b.body !== undefined || b.audience !== undefined, { message: 'Give a title, words or an audience' });
+export const houseMessageParams = z.object({ id: uuid });
+/** GET /api/admin/house/messages: one status or all, paged. */
+export const houseMessagesQuery = z.object({ status: queryOptional(z.enum(HOUSE_MESSAGE_STATUSES)) });
+/** POST /api/admin/house/count (OPERATOR): an audience's reach now. */
+export const houseCountBody = body({ audience: houseAudience });
+/**
+ * POST /api/admin/house/messages/:id/send (ADMIN): the phrase SEND, and `at`, a date and time read in Paris
+ * (`YYYY-MM-DDTHH:MM`, a `datetime-local` value); without it, now.
+ */
+export const houseSendBody = body({
+  at: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, 'A date and time in Paris, YYYY-MM-DDTHH:MM').nullable().optional(),
+  phrase: z.string().max(40),
+});
 
 /** GET /api/admin/messages: To answer by default, or Answered, Closed, All; Mine or Unassigned; an email or a REF. */
 export const adminMessagesQuery = z.object({

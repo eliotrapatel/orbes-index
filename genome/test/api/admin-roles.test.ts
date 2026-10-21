@@ -29,7 +29,9 @@
  * reports and the collectors behind a figure read by an AUDITOR, CUSTOMER INTELLIGENCE §3.4 A.7.2; the client sheet's
  * profile, its date of birth and default address edited by an OPERATOR, CUSTOMER INTELLIGENCE §3.1 P.6.5, P.6.6, and its
  * tags and private notes, read by an AUDITOR, written by an OPERATOR, CUSTOMER INTELLIGENCE §3.6 C.9; the Collectors page's
- * options and panels read by an AUDITOR, CUSTOMER INTELLIGENCE §3.6 C.9);
+ * options and panels read by an AUDITOR, CUSTOMER INTELLIGENCE §3.6 C.9; the house messages, plan MACRO M2 §1.4, read by an
+ * AUDITOR, the moments' words and the custom messages written by an OPERATOR, a moment switched and a message sent or
+ * cancelled by an ADMIN);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. LOGISTICS (plan NEXT LOT §3.5.6.1),
@@ -458,6 +460,22 @@ const PROBES: Probe[] = [
   { group: 'email', method: 'GET', url: `/api/admin/email/announcement/${UUID}/preview`, min: 'AUDITOR' },
   { group: 'email', method: 'POST', url: `/api/admin/email/announcement/${UUID}`, body: INVALID, min: 'ADMIN' },
   { group: 'email', method: 'POST', url: `/api/admin/email/announcement/${UUID}/cancel`, body: INVALID, min: 'ADMIN' },
+  // House messages (plan MACRO M2 §1.4, step M2.3): read from AUDITOR, the moments' words and the custom messages written,
+  // counted and deleted (a draft) by an OPERATOR, a moment switched and a message sent or cancelled by an ADMIN only
+  // (test/api/admin-house.test.ts).
+  { group: 'house', method: 'GET', url: '/api/admin/house/moments', min: 'AUDITOR' },
+  { group: 'house', method: 'PUT', url: '/api/admin/house/moments/NINETY_DAYS/enabled', body: INVALID, min: 'ADMIN' },
+  { group: 'house', method: 'PUT', url: '/api/admin/house/moments/NINETY_DAYS/words', body: INVALID, min: 'OPERATOR' },
+  { group: 'house', method: 'GET', url: '/api/admin/house/moments/NOPE/preview', min: 'AUDITOR' },
+  { group: 'house', method: 'POST', url: '/api/admin/house/moments/NINETY_DAYS/preview', body: INVALID, min: 'OPERATOR' },
+  { group: 'house', method: 'GET', url: '/api/admin/house/messages', min: 'AUDITOR' },
+  { group: 'house', method: 'POST', url: '/api/admin/house/messages', body: INVALID, min: 'OPERATOR' },
+  { group: 'house', method: 'GET', url: `/api/admin/house/messages/${UUID}`, min: 'AUDITOR' },
+  { group: 'house', method: 'PATCH', url: `/api/admin/house/messages/${UUID}`, body: INVALID, min: 'OPERATOR' },
+  { group: 'house', method: 'DELETE', url: `/api/admin/house/messages/${UUID}`, body: INVALID, min: 'OPERATOR' },
+  { group: 'house', method: 'POST', url: '/api/admin/house/count', body: INVALID, min: 'OPERATOR' },
+  { group: 'house', method: 'POST', url: `/api/admin/house/messages/${UUID}/send`, body: INVALID, min: 'ADMIN' },
+  { group: 'house', method: 'POST', url: `/api/admin/house/messages/${UUID}/cancel`, body: INVALID, min: 'ADMIN' },
   { group: 'links', method: 'GET', url: '/api/admin/link-channels', min: 'AUDITOR' },
   { group: 'links', method: 'POST', url: '/api/admin/link-channels', body: INVALID, min: 'OPERATOR' },
   { group: 'links', method: 'PATCH', url: `/api/admin/link-channels/${UUID}`, body: INVALID, min: 'OPERATOR' },
@@ -573,6 +591,7 @@ describe('admin role enforcement', () => {
       'links',
       'founding',
       'email',
+      'house',
       'client-sheet',
       'collectors',
     ]) {

@@ -122,3 +122,24 @@ export function morningWindowOpen(now: Date): boolean {
   const [hh, mm] = MORNING_WINDOW_UTC.split(':').map(Number) as [number, number];
   return now.getTime() >= Date.UTC(y, m - 1, d, hh, mm);
 }
+
+const LOCAL_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
+
+/**
+ * The instant a Paris wall-clock time names, `YYYY-MM-DDTHH:MM` (a `datetime-local` value read in Paris: the house
+ * messages' SCHEDULE, plan MACRO M2 §1.3): the earlier of the two on the night clocks go back (25 October 2026, 02:30
+ * happens twice), null for a time that does not exist (28 March 2027, 02:30: the clocks go from 02:00 to 03:00) or a
+ * value that is not one. Paris is UTC+1 or UTC+2, so the instant is one of those two readings.
+ */
+export function parisLocalInstant(local: string): Date | null {
+  const m = typeof local === 'string' ? LOCAL_RE.exec(local) : null;
+  if (!m) return null;
+  const [y, mo, d, hh, mm] = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4]), Number(m[5])];
+  if (!validDate(y, mo, d) || hh > 23 || mm > 59) return null;
+  const wall = Date.UTC(y, mo - 1, d, hh, mm);
+  for (const offsetHours of [2, 1]) {
+    const at = new Date(wall - offsetHours * 3_600_000);
+    if (parisDateTime(at) === `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}`) return at;
+  }
+  return null;
+}

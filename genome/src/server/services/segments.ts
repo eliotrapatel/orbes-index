@@ -50,9 +50,9 @@
  * answers of « How did you hear about ORBES? », the tags, the tastes, the channels, kinds of source and links, the places
  * and the device lists, each bounded), the live count of criteria being built
  * (OPERATOR), a segment's members as a CSV (the routes mask the emails for an AUDITOR), created, changed and deleted by
- * an OPERATOR. Audited `segment.create`, `segment.update` (before and after), `segment.delete`; a segment that a release
- * or a post of the circle uses is never deleted (409 SEGMENT_IN_USE). Its name is the console's: the public never reads
- * it (a release says FOR SELECTED COLLECTORS, decision 32).
+ * an OPERATOR. Audited `segment.create`, `segment.update` (before and after), `segment.delete`; a segment that a release,
+ * a post of the circle or a house message not sent yet (plan MACRO M2 §1.4) uses is never deleted (409 SEGMENT_IN_USE).
+ * Its name is the console's: the public never reads it (a release says FOR SELECTED COLLECTORS, decision 32).
  *
  * The test accounts (the test entrants' pool, `test_entrants`) are never among the members the console reads: not in a
  * segment's count (the list's, its page's, the builder's live count), not in its CSV, nor in the builder's tag counts
@@ -603,8 +603,16 @@ export interface AdminSegment {
   criteria: SegmentGroup;
   /** Its members now, the test accounts left out. */
   count: number;
-  /** The releases whose access rule it is (a LIVE RELEASE, or a draw: plan MACRO M1 §3.1, F4), the posts of the circle whose audience it is. */
-  usedBy: { releases: { id: string; title: string; mode: DropMode }[]; posts: { id: string; title: string }[] };
+  /**
+   * The releases whose access rule it is (a LIVE RELEASE, or a draw: plan MACRO M1 §3.1, F4), the posts of the circle
+   * whose audience it is, and the house messages not sent yet (DRAFT or SCHEDULED) whose audience it is (plan MACRO M2
+   * §1.4).
+   */
+  usedBy: {
+    releases: { id: string; title: string; mode: DropMode }[];
+    posts: { id: string; title: string }[];
+    houseMessages: { id: string; title: string; status: 'DRAFT' | 'SCHEDULED' }[];
+  };
   createdAt: Date;
   createdBy: { id: string; email: string } | null;
   updatedAt: Date;
@@ -672,7 +680,7 @@ export interface SegmentMember {
 
 const segmentNotFound = () => notFound('Segment', 'SEGMENT_NOT_FOUND');
 const nameTaken = () => conflict('SEGMENT_NAME_TAKEN', 'A segment already has this name.');
-const inUse = () => conflict('SEGMENT_IN_USE', 'This segment is the access rule of a release or the audience of a post of the circle: choose another there first.');
+const inUse = () => conflict('SEGMENT_IN_USE', 'This segment is the access rule of a release or the audience of a post of the circle or of a house message: choose another there first.');
 
 function assertStaff(actor: Actor, what: string): string {
   if (actor?.type !== 'admin' || typeof actor.id !== 'string' || !UUID_RE.test(actor.id)) throw forbidden(`Only an ORBES admin can ${what}.`);
@@ -874,7 +882,10 @@ export class SegmentService {
     });
   }
 
-  /** Delete a segment no release and no post of the circle uses (409 SEGMENT_IN_USE). Audited `segment.delete`. */
+  /**
+   * Delete a segment no release, no post of the circle and no house message not sent yet uses (409 SEGMENT_IN_USE). The
+   * house messages sent or cancelled to it keep its name (`audience_label`) and lose its id. Audited `segment.delete`.
+   */
   async remove(segmentId: string, actor: Actor): Promise<void> {
     assertStaff(actor, 'delete a segment');
     const sid = knownSegment(segmentId);
@@ -882,7 +893,14 @@ export class SegmentService {
       const s = await tx.selectFrom('segments').selectAll().where('id', '=', sid).forUpdate().executeTakeFirst();
       if (!s) throw segmentNotFound();
       const used = await this.usedBy(tx, sid);
-      if (used.releases.length + used.posts.length > 0) throw inUse();
+      if (used.releases.length + used.posts.length + used.houseMessages.length > 0) throw inUse();
+      // A sent or cancelled house message names it by its label from now on (migration 0052: its id may only be cleared).
+      await tx
+        .updateTable('house_messages')
+        .set((eb) => ({ audience_segment_id: null, audience_label: eb.fn.coalesce('audience_label', sql.val(s.name.replace(/\s+/g, ' ').trim().slice(0, 80))) }))
+        .where('audience_segment_id', '=', sid)
+        .where('status', 'in', ['SENT', 'CANCELLED'])
+        .execute();
       await tx.deleteFrom('segments').where('id', '=', sid).execute();
       await this.audit.record({ actor, action: 'segment.delete', targetType: 'segment', targetId: sid, details: { name: s.name, criteria: s.criteria } }, tx);
     });
@@ -989,11 +1007,19 @@ export class SegmentService {
   }
 
   private async usedBy(db: Db, sid: string): Promise<AdminSegment['usedBy']> {
-    const [releases, posts] = await Promise.all([
+    const [releases, posts, houseMessages] = await Promise.all([
       db.selectFrom('drops').select(['id', 'title', 'mode']).where('access_segment_id', '=', sid).orderBy('opens_at', 'desc').orderBy('id').execute(),
       db.selectFrom('circle_posts').select(['id', 'title']).where('segment_id', '=', sid).orderBy('created_at', 'desc').orderBy('id').execute(),
+      db
+        .selectFrom('house_messages')
+        .select(['id', 'title', 'status'])
+        .where('audience_segment_id', '=', sid)
+        .where('status', 'in', ['DRAFT', 'SCHEDULED'])
+        .orderBy('created_at', 'desc')
+        .orderBy('id')
+        .execute(),
     ]);
-    return { releases, posts };
+    return { releases, posts, houseMessages: houseMessages.map((m) => ({ id: m.id, title: m.title, status: m.status as 'DRAFT' | 'SCHEDULED' })) };
   }
 
   private async view(db: Db, r: SegmentRow): Promise<AdminSegment> {

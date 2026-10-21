@@ -41,9 +41,10 @@
  * transaction audited by counts (`house.moment.delivered {moment, count}`, the system as actor; never an account). One
  * `house moments` log line per pass while a moment is on, with the counts per moment.
  *
- * The console (lot M2 step M2.3 routes it): `settings()` reads each moment's switch, words, defaults, placeholders and
- * links; `setMoment` switches (`house.moment.enable` / `.disable`) and edits the words (`house.moment.words`, each as
- * its length and SHA-256, never the words themselves).
+ * The console (routes/admin/house.ts, step M2.3): `settings()` reads each moment's switch, words, defaults, placeholders
+ * and links, `moments()` adds how many were delivered and read (30 days and in all), `preview` renders a moment with
+ * example values; `setMoment` switches (`house.moment.enable` / `.disable`, ADMIN) and edits the words
+ * (`house.moment.words`, OPERATOR, each as its length and SHA-256, never the words themselves).
  */
 import { createHash } from 'node:crypto';
 import { sql } from 'kysely';
@@ -216,6 +217,26 @@ export interface HouseMomentView {
   updatedAt: Date | null;
 }
 
+/** How many of a moment's messages were delivered and read: over the last 30 days (delivered since then) and in all. */
+export interface HouseMomentFigures {
+  delivered30: number;
+  read30: number;
+  delivered: number;
+  read: number;
+}
+
+/** The console's figures cover this many days. */
+export const HOUSE_FIGURES_DAYS = 30;
+/** The first name a preview is written to. */
+export const HOUSE_SAMPLE_FIRST_NAME = 'Camille';
+
+/** A moment as its PREVIEW shows it: the title and words rendered, its links, the example values used. */
+export interface HouseMomentPreview extends HouseWords {
+  moment: HouseMoment;
+  links: readonly HouseLinkKind[];
+  values: Record<string, string>;
+}
+
 /** One message due to one account. */
 interface Due {
   accountId: string;
@@ -325,6 +346,57 @@ export class HouseMomentService {
       }
       return (await this.settings(tx)).find((v) => v.moment === m)!;
     });
+  }
+
+  /**
+   * Every moment as the console's MOMENTS lists it (step M2.3): `settings()` with how many were delivered and read, over
+   * the last 30 days (delivered since then) and in all.
+   */
+  async moments(now: Date = this.clock()): Promise<(HouseMomentView & { figures: HouseMomentFigures })[]> {
+    const since = new Date(now.getTime() - HOUSE_FIGURES_DAYS * DAY_MS);
+    const [views, counted] = await Promise.all([
+      this.settings(),
+      sql<{ moment: HouseMoment; delivered: string | number; read: string | number; delivered30: string | number; read30: string | number }>`
+        SELECT moment, count(*) AS delivered, count(read_at) AS read,
+               count(*) FILTER (WHERE delivered_at >= ${since}) AS delivered30,
+               count(read_at) FILTER (WHERE delivered_at >= ${since}) AS read30
+          FROM house_deliveries
+         WHERE source = 'MOMENT'
+         GROUP BY moment`.execute(this.db),
+    ]);
+    const of = new Map(counted.rows.map((r) => [r.moment, r]));
+    return views.map((v) => {
+      const r = of.get(v.moment);
+      return { ...v, figures: { delivered30: Number(r?.delivered30 ?? 0), read30: Number(r?.read30 ?? 0), delivered: Number(r?.delivered ?? 0), read: Number(r?.read ?? 0) } };
+    });
+  }
+
+  /**
+   * A moment as a collector would read it (the console's PREVIEW), with example values: the words given (each a string,
+   * null for the default's; absent: the moment's own now), checked as a save checks them (422 HOUSE_PLACEHOLDER).
+   * {piece} names the catalogue's first model, {amount} € 20, {expires} a date 30 days ahead, {tier} the tier PRIVATE
+   * CARE opens from. Nothing is stored.
+   */
+  async preview(moment: unknown, words: { title?: unknown; body?: unknown } = {}, now: Date = this.clock()): Promise<HouseMomentPreview> {
+    if (typeof moment !== 'string' || !(HOUSE_MOMENTS as readonly string[]).includes(moment)) throw notFound('Moment', 'HOUSE_MOMENT_NOT_FOUND');
+    const m = moment as HouseMoment;
+    const allowed = HOUSE_PLACEHOLDERS[m];
+    const title = words.title === undefined ? undefined : cleanHouseTitle(words.title, allowed);
+    const body = words.body === undefined ? undefined : cleanHouseBody(words.body, allowed);
+    const current = (await this.settings()).find((v) => v.moment === m)!;
+    const [model, program] = await Promise.all([
+      this.db.selectFrom('models').select(['name', 'variant_label']).where('active', '=', true).orderBy('name').orderBy('id').limit(1).executeTakeFirst(),
+      readProgram(this.db),
+    ]);
+    const values: HouseValues = {
+      firstName: HOUSE_SAMPLE_FIRST_NAME,
+      piece: model ? pieceName(model.name, model.variant_label) : 'YOUR PIECE',
+      amount: houseMoney(2000, 'EUR'),
+      expires: houseDate(parisDay(new Date(now.getTime() + 30 * DAY_MS))),
+      tier: careOpens(program)?.tier ?? 'PLATINE',
+    };
+    const rendered = renderMoment(m, { title: title === undefined ? current.title : title, body: body === undefined ? current.body : body }, values);
+    return { moment: m, ...rendered, links: HOUSE_MOMENT_LINKS[m], values: Object.fromEntries(allowed.map((p) => [p, values[p] ?? ''])) };
   }
 
   /**

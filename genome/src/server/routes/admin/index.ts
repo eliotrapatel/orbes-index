@@ -10,7 +10,8 @@
  * a location or a carrier added or changed, a conversation of the Messages board
  * assigned, the defaults of THE HOUSE'S GUARANTEE, the answers to « How did you hear about ORBES? », a
  * pre-registration removed from the founding list, an email kind switched on or off, a test email to oneself, the
- * founding announcement sent or cancelled); every
+ * founding announcement sent or cancelled, a house moment switched on or off, a house message sent, scheduled or
+ * cancelled); every
  * mutation needs the CSRF token and a same-origin
  * request. Each mutation is audited by the service it calls (or by the route
  * for the few table writes without a service), with the admin's id and the
@@ -46,6 +47,7 @@ import { adminCollectorRoutes } from './collectors.js';
 import { adminCodeRoutes } from './codes.js';
 import { adminDashboardRoutes } from './dashboard.js';
 import { adminGrowthRoutes } from './growth.js';
+import { adminHouseRoutes } from './house.js';
 import { adminInvoiceRoutes } from './invoices.js';
 import { adminKeyRoutes } from './keys.js';
 import { adminLinkRoutes } from './links.js';
@@ -111,6 +113,7 @@ export const adminRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, deps)
   await app.register(adminSegmentRoutes, deps);
   await app.register(adminFoundingRoutes, deps);
   await app.register(adminEmailRoutes, deps);
+  await app.register(adminHouseRoutes, deps);
   await app.register(adminShopifyRoutes, deps);
   await app.register(adminCircleRoutes, deps);
   await app.register(adminClubRoutes, deps);

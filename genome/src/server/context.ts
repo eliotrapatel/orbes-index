@@ -41,7 +41,7 @@ import { ClubService } from './services/club.js';
 import { ClubProgramService } from './services/club-program.js';
 import { TierGrantService } from './services/tier-grants.js';
 import { BirthdayCreditService } from './services/birthday-credits.js';
-import { HouseMessageService } from './services/house-messages.js';
+import { HouseMessageService, HouseSender } from './services/house-messages.js';
 import { HouseMomentService } from './services/house-moments.js';
 import { EngagementService } from './services/engagement.js';
 import { runCollectorHistory, type HistoryMemo } from './services/collector-history.js';
@@ -240,8 +240,13 @@ export interface AppServices {
   claimRenewals: ClaimRenewalService;
   /** The house's moments (plan MACRO M2 §1.2, D24 M1): six automatic messages, each switched and worded in the console, delivered by the housekeeping job `houseMoments`. */
   houseMoments: HouseMomentService;
-  /** House messages, the collector's side (plan MACRO M2 §1.4, D24 M3 and M4): MESSAGES' FROM ORBES, read-only, and their unread counts. */
+  /**
+   * House messages (plan MACRO M2 §1.3, §1.4, D24 M2 to M4): MESSAGES' FROM ORBES, read-only, and their unread counts; the
+   * console's custom messages to a segment or a tier, sent now or scheduled in Paris, and their deliveries (deliverDue).
+   */
   houseMessages: HouseMessageService;
+  /** The custom messages' sender (plan MACRO M2 §1.3): a pass of houseMessages.deliverDue every 30 s, always on; tests drive deliverDue. */
+  houseSender: HouseSender;
 }
 
 export interface AppContext {
@@ -366,7 +371,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const tierGrants = new TierGrantService({ db, audit, clock, log });
     const birthdayCredits = new BirthdayCreditService({ db, audit, clock, log });
     const houseMoments = new HouseMomentService({ db, audit, clock, log });
-    const houseMessages = new HouseMessageService({ db, clock });
+    const houseMessages = new HouseMessageService({ db, audit, clock, log });
+    const houseSender = new HouseSender({ messages: houseMessages, clock, log });
     const engagement = new EngagementService({ db, clock, log });
     const care = new CareService({ db, audit, warranty, clock, claimOf: collectorClaim, emails });
     const warrantyClaims = new WarrantyClaimService({ db, audit, warranty, lifecycle, clock, emails });
@@ -481,6 +487,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       claimRenewals,
       houseMoments,
       houseMessages,
+      houseSender,
       ...overrides.services,
     };
 
@@ -501,6 +508,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
         closed = true;
         await services.receptions.stop();
         await services.email.stop();
+        await services.houseSender.stop();
         // The views still in memory are written before the database closes (§3.3 T.8.3).
         await services.tracking.stop();
         if (ownsDb) await closeDb(db);
@@ -542,6 +550,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     if (overrides.timers ?? config.env !== 'test') services.tracking.start();
     // The emails' sender (plan MACRO M1 §4.1, E0): a pass every 15 s, only while the channel is on; tests drive sendDue.
     if (overrides.timers ?? config.env !== 'test') services.email.start();
+    // The house messages' sender (plan MACRO M2 §1.3): a pass every 30 s, always on; tests drive deliverDue.
+    if (overrides.timers ?? config.env !== 'test') services.houseSender.start();
     return ctx;
   } catch (e) {
     if (ownsDb) await closeDb(db).catch(() => {});
