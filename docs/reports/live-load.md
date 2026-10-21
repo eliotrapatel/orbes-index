@@ -1,6 +1,7 @@
 # Load report — the LIVE RELEASES
 
-Status: measured 2026-10-05 · Owner: LIVE RELEASE+ (its completeness audit, step PLUS-A) · first measured 2026-10-04
+Status: measured 2026-10-05; a paced release of 5 000 measured 2026-10-21 (§7) · Owner: LIVE RELEASE+ (its
+completeness audit, step PLUS-A), and the macro lot M1 for §7 (step M1.6) · first measured 2026-10-04
 by the LIVE RELEASE lot (step L7) · Source: `genome/scripts/live-load.ts` · Raw figures:
 `genome/out/live-load/results-<series>.json`, with the app's log of the last series' levels beside them as
 `server-<N>.log` (git-ignored, rewritten by every run).
@@ -41,6 +42,14 @@ statements for one guest against about twenty for an entry in the room, all with
 page read waited 0.75 to 1.5 s at p95. PostgreSQL, with its pool of ten, runs the page reads and the streams beside the
 entries; this test cannot show by how much, and the figure stays the conservative one until it is measured on
 PostgreSQL (`--database-url`, §6).
+
+**With a pace (§7, 2026-10-21).** A LIVE release can now admit X buyers every Y minutes; the others wait on the queue
+page. A local run of **5 000 people with a pace of 250 every minute**, twice on PGlite, held the queue exactly: 20 batches
+of 250, each on its minute, the TEST REPORT's PACE check passed, all 4 750 people who waited let in by their own batch
+at the time their page first gave them, no answer other than 200, no stream lost. It did not hold the VPS profile's
+targets for one app container: the app's memory reached 964 and 1 149 MiB with 5 000 streams open, above the
+container's 768 MB, and its CPU about 1.9 cores on the VPS. The measured capacity of the room above (500) is unchanged.
+The real check is the TEST ENTRANTS run of 5 000 on production (§7.4).
 
 ## 1. The test
 
@@ -217,9 +226,105 @@ npx tsx scripts/live-load.ts                                   # 500, 1 000, 1 5
 npx tsx scripts/live-load.ts --levels 500,750,1000,1500       # the levels of this report
 npx tsx scripts/live-load.ts --levels 1000 --vps-factor 2.5    # one level, assuming a slower VPS
 npx tsx scripts/live-load.ts --database-url postgres://user:pass@127.0.0.1:5432/orbes_load   # a THROWAWAY database
+npx tsx scripts/live-load.ts --pace 250,1 --levels 5000        # a paced release (§7); about 27 minutes
 ```
 
 Close other heavy work first: every figure depends on what else the machine is running.
+
+## 7. With a pace: 5 000 people in the queue
+
+The macro lot M1 (scope W2 and W4, 2026-10-20) gives a LIVE release a pace: **X buyers admitted every Y minutes**,
+counted across the whole release. From T0, the people not yet admitted wait on the queue page, which shows their place
+and an estimated time of entry, until their batch lets them into the room.
+
+`--pace X,Y` runs the test of §1 with a pace, as the plan asks: `--pace 250,1 --levels 5000`. **This is a local
+measurement, on PGlite, on this machine.** It is not a measurement of the VPS.
+
+### 7.1 What the paced run does differently
+
+- **The release** has a pace of 250 every minute. For 5 000 people that is 20 batches: the first at T0, the last at
+  T0 + 19 minutes.
+- **The door.** The room opens 5 minutes before T0, the console's default. The streams and I'LL BE THERE come over the
+  2 minutes before the room opens. The entries come over the room's first 4 minutes.
+  - The first try used the door of §1 (10 seconds of entries, a room of one minute). At 5 000 it collapsed before T0
+    on PGlite's one connection: every ENTER timed out after 30 s, 3 399 of the 5 000 streams were refused, and only 64
+    entries were placed. The pace meters the room, not the door, so the door was given the minutes the house gives it.
+- **The turns.** Until the last batch, each turn is taken (PRESS, SECURE, an add-on for half) and then given back with
+  RELEASE MY PLACE, so the release lasts until every batch is in. From the last batch on, the phones act as in §1
+  (seven in ten PAY) and the release sells out.
+- **No after-room.** A paced release is published without one. The pace meters the release's line, not the
+  after-room's door, which would open to the thousands the sell-out ended at the same second. That door was measured
+  without a pace (§3).
+- **Measured besides:**
+  - **the queue's frames:** from each frame's time on the server to the last waiting phone that read it;
+  - **every batch on the server,** against the plan: exactly 250, each at T0 + (k − 1) minutes to the millisecond, and
+    the TEST REPORT's own PACE check run on the release's entries and audit log;
+  - **the queue on the phones:** every phone that waited was let in, none from a place beyond 250, at the time its
+    page first estimated, and how long its admission took to reach it.
+- **The action target** is held against the actions behind the pace (the turns, PAY, RELEASE). The door's actions,
+  before T0, are reported beside them.
+
+### 7.2 Results
+
+Two runs on 2026-10-21, at 05:35 and 06:03 Paris, under the lock shared with the other workflow's browser suites.
+That workflow's other work ran at the same time (one-minute load averages 2.8–8.2 in run 1, 3.5–12.3 in run 2).
+
+**The queue.** It held exactly in both runs:
+
+| | Run 1 | Run 2 |
+|---|---|---|
+| Batches on the server | 20 of 20, each 250, each on its minute to the millisecond | the same |
+| The engine wrote each batch after its time | p95 349 ms · max 702 ms | p95 308 ms · max 480 ms |
+| The TEST REPORT's PACE check | passed | passed |
+| People who waited / let in by their batch | 4 750 / 4 750 | 4 750 / 4 750 |
+| Let in from a place beyond 250 | 0 | 0 |
+| Let in at the time their page first gave | 4 750 | 4 750 |
+| Their admission on the phone, after the batch's time | p50 683 · p95 1 082 · max 1 257 ms | p50 629 · p95 1 063 · max 1 114 ms |
+| Streams | 5 000 open · 0 refused · 0 dropped | the same |
+| Answers other than 200 · errors in the app's log | 0 · 0 | 0 · 0 |
+| The end | SOLD OUT 19 min 12 s after T0, 25 confirmed | SOLD OUT 19 min 16 s after T0, 25 confirmed |
+| The orders | 25: 13 held in stock, 12 waiting for stock | the same |
+
+**The targets of one app container (1.5 CPU, 768 MB), on the VPS profile of §2.** The bold figures are what the VPS
+would see under §2: the app's thread taken twice as slow, and the GeoIP database added to the memory.
+
+| Target | Run 1 | Run 2 | Verdict |
+|---|---|---|---|
+| Actions behind the pace, p95 < 200 ms | 556.6 → **640.2 ms** | 544.3 → **627.7 ms** | not met |
+| The door before T0 (I'LL BE THERE, ENTER), for information | p95 175.9 ms | p95 176.2 ms | |
+| Fan-out of the room, p95 < 100 ms | 94 → **188 ms** | 93 → **186 ms** | not met |
+| Fan-out of the queue's frames, p95 < 100 ms | 135 → **270 ms** | 133 → **266 ms** | not met |
+| Memory with GeoIP, < 460.8 MiB | 964 → **1 089 MiB** | 1 149 → **1 274 MiB** | not met |
+| CPU, busiest five seconds, < 1 core | 0.97 → **1.9** | 0.93 → **1.9** | not met |
+
+### 7.3 What it means
+
+- **The pace works at 5 000.** The batches are exact, the line's order is kept, the estimated times are right, and
+  nobody is lost. This is the scope's "Done when" for W2 and W4, measured locally.
+- **One app container is not shown to hold 5 000 open streams.** The pace lets people into the room in batches. Every
+  person on the queue page still holds a stream for the whole release.
+  - **Memory.** 149.6 and 186.8 KiB per viewer. At the peak, 787 and 963 MiB were outside V8's heap: the process's
+    native memory, which grew with the 5 000 connections. That is above the 768 MB container. The run measures macOS; Linux in the
+    container is not measured here.
+  - **The pulse.** Once a second, the server reads the entries of every viewer of the release in one read: the pulse
+    took 513 and 509 ms at p50 for 5 000 viewers, against PGlite's one connection. The number of reads stays the same
+    whatever the audience, but that read's rows grow with it, and at 5 000 they weigh.
+  - **The actions.** A batch lets 250 people in at the same second, and the 25 pieces give 25 turns at once. Their 25
+    SECUREs arrive together 1.5 s later, and on one connection the last waits for the other 24: SECURE p95 621 and
+    593 ms. The same wave showed at 150 people (SECURE p95 226 ms).
+- **Not measured here:**
+  - PostgreSQL and its pool of ten (`--database-url`);
+  - the VPS's own memory accounting;
+  - an after-room behind a paced release.
+
+### 7.4 The real check
+
+The production run is a **TEST ENTRANTS run of 5 000 on a test LIVE release with a pace**, followed by END TEST. It
+belongs to the deployment's runbook. It checks the pace on PostgreSQL: the batches at exactly X every Y, the PACE
+check in the TEST REPORT, and the box's figures during the run.
+
+Its bots follow their turns by reading `GET /state` through the app's own routes (`services/test-entrants.ts`). **They
+open no stream.** That run does not check the memory of 5 000 open streams, which §7.3 found above one container.
 
 ## Machine and conditions
 
@@ -232,4 +337,5 @@ Close other heavy work first: every figure depends on what else the machine is r
 | Database | PGlite 0.5.8, in its own process, over a Unix socket |
 | Code | branch `orbes-plus` at step PLUS-A (after `4ea1a11`) |
 | Runs | 2026-10-05 (CEST): series 1 at 18:01, series 2 at 18:12, series 3 at 18:37 |
+| Paced runs (§7) | 2026-10-21 (CEST): 05:35 and 06:03, branch `orbes-macro` at step M1.6 (after `f57a0cf`), `--pace 250,1 --levels 5000`; calibration 475 and 445 ms; PGlite 0.5.8 |
 | Machine load | Another workflow's work ran at the same time, except its Chromium suites (shared lock); load averages 4.2–7.5 |

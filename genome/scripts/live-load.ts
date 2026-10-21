@@ -2,7 +2,7 @@
  * The LIVE RELEASES' load test (plan of 2026-10-04, Architecture › Load; Quality bar 6).
  *
  *   npx tsx scripts/live-load.ts [--levels 500,1000,1500,2000] [--vps-factor 2] [--burst-seconds 10] [--seed N]
- *                                [--database-url postgres://…] [--json PATH]
+ *                                [--pace X,Y] [--database-url postgres://…] [--json PATH]
  *
  * For each level N, three processes, as on the VPS: the app (this file with --serve: the server's own createContext,
  * buildApp, logger and LIVE engine, as src/server/index.ts starts them; ORBES_ENV=development, so the production rate
@@ -69,6 +69,27 @@
  * meeting them too: the room the server holds (LIVE_ROOM_CAPACITY, services/live-insights.ts), which the audience
  * forecast warns against.
  *
+ * --pace X,Y (W4, the plan of 2026-10-20 §1.5: `--pace 250,1 --levels 5000`) gives the release a pace, X buyers admitted
+ * every Y minutes (LIVE_PACE_BATCH, LIVE_PACE_MINUTES), and measures its queue (W2): from T0 the phones not admitted yet
+ * wait on the queue's frame (`queue` events and their own `you` events, their place and estimated entry time) until
+ * their batch lets them into the room. The door before T0 is the house's for that many people: the room opens
+ * PACED_ROOM_MINUTES (5) before T0, the console's default, the streams and I'LL BE THERE come over up to two minutes
+ * before it, and the entries over the room's first four minutes (--burst-seconds sets another burst). So that the
+ * release lasts until its last batch, a phone whose turn comes before
+ * the last batch's time takes it (PRESS, SECURE, the add-ons for half) and then RELEASES MY PLACE, the piece going to
+ * the next admitted in its size; from the last batch on, the phones act as in the room (PAY seven in ten) and the
+ * release sells out. A paced release is published without an after-room (step 6 is left out): the pace meters the
+ * release's line, not the after-room's door, which would open to the thousands the sell-out ended at the same second,
+ * the door measured without a pace (docs/reports/live-load.md, §3); the run measures the queue. Measured besides, and held against the targets: the
+ * queue's fan-out (each pulse's queue frame, from its time to the last waiting phone that read it, over the pulses that
+ * reached 95 % of those waiting); every batch on the server (pacedBatchesProblem: exactly X, the last the rest, the k-th
+ * at T0 + (k − 1) × Y to the millisecond, and the TEST REPORT's own PACE check, services/test-entrants.ts paceCheck, on
+ * the release's entries and audit log); and on the phones (queueVerdict): every phone that waited admitted, none from
+ * a place beyond X, at the time the queue first estimated, and how long its admission took to reach it. The action
+ * target is held against the actions behind the pace (the turns, PAY, RELEASE); the door's (I'LL BE
+ * THERE and ENTER, before T0, which the pace does not meter) are reported beside them. Its verdict is the queue's, not a
+ * capacity: no LIVE_ROOM_CAPACITY is read from it.
+ *
  * Prints a table per level and the capacity; writes every figure to genome/out/live-load/results.json (or --json
  * PATH) and the app's log of each level beside it (server-<N>.log). Seeded: the same arguments give the same
  * accounts, sizes and moments; the times depend on the machine and on what else runs on it.
@@ -80,9 +101,10 @@ import { Agent, request as httpRequest, type IncomingMessage } from 'node:http';
 import { createConnection, createServer, type Socket } from 'node:net';
 import { cpus, platform, release as osRelease, tmpdir, totalmem } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import v8 from 'node:v8';
+import { LIVE_PACE_BATCH, LIVE_PACE_MINUTES } from '../src/server/db/schema.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SELF = fileURLToPath(import.meta.url);
@@ -162,6 +184,14 @@ const AFTER_ROOM_LATE_CODES: readonly string[] = ['LIVE_SIZE_SOLD_OUT', 'LIVE_OV
 const AFTER_ROOM_READING_MS = Object.freeze({ min: 2_000, max: 8_000 });
 /** The room opens this long before T0 (the console's minimum). */
 const ROOM_MINUTES = 1;
+/**
+ * --pace: the room opens this long before T0, the console's default (LIVE_ROOM_OPENS_MINUTES.default), and the
+ * announcement comes up to PACED_LEAD_MS before it: the thousands a pace is meant for arrive over the minutes the house
+ * gives them, as a crowd of 5 000 in ten seconds collapsed the door on PGlite's one connection before T0 (the report,
+ * §7: 30 s timeouts, its streams refused).
+ */
+export const PACED_ROOM_MINUTES = 5;
+const PACED_LEAD_MS = 120_000;
 /** Held this long before SECURE (the house's ring: 1.5 s; the server asks for 1.4 s). */
 const HOLD_MS = 1500;
 /** After T0, the release must have sold out within this time. */
@@ -176,18 +206,24 @@ interface SetupMessage {
   viewers: number;
   /** From the publication to the room's opening: the time the streams have to connect. */
   leadMs: number;
+  /** The room opens this long before T0. */
+  roomMinutes: number;
   /** PostgreSQL's URL (--database-url), or `pglite:memory` with the socket of PGlite's process. */
   databaseUrl: string;
   databaseSocket: string | null;
   seed: number;
+  /** --pace: the release's pace (W4), or none. */
+  pace: LoadPace | null;
+  /** The release has its after-room (step 6); false with a pace. */
+  afterRoom: boolean;
 }
 
 interface ReadyMessage {
   type: 'ready';
   port: number;
   dropId: string;
-  /** Its after-room's id (the phones read it from its door, and check it is this one). */
-  afterRoomId: string;
+  /** Its after-room's id (the phones read it from its door, and check it is this one); null without one (--pace). */
+  afterRoomId: string | null;
   sizes: { id: string; label: string }[];
   addons: string[];
   roomOpensAt: number;
@@ -248,6 +284,24 @@ interface ReleaseFacts {
   afterRoom: { guests: number; reason: string | null; confirmed: number };
   /** The rows of the event journal (services/journal.ts), written with every order and movement. */
   journal: number;
+  /** --pace: the release's batches as its audit log recorded them, and the TEST REPORT's PACE check on them; null without a pace. */
+  pace: PacedFacts | null;
+}
+
+/** What a paced release left: its batches (`drop.live.admit`), its entries placed and admitted, the PACE check. */
+interface PacedFacts {
+  batches: PacedBatch[];
+  placed: number;
+  admitted: number;
+  check: { pass: boolean; line: string };
+}
+
+/** One batch as the audit log recorded it: its number, its logical time, its entries, and when the engine wrote it. */
+export interface PacedBatch {
+  batch: number;
+  at: number;
+  entries: number;
+  recordedAt: number;
 }
 
 // ── Options ────────────────────────────────────────────────────────────────
@@ -255,20 +309,67 @@ interface ReleaseFacts {
 interface Options {
   levels: number[];
   vpsFactor: number;
-  burstSeconds: number;
+  /** The entries' burst in the room, s; null: 10 s, or with a pace the room's minutes but the last (240 s). */
+  burstSeconds: number | null;
   seed: number;
   databaseUrl: string;
   json: string;
+  /** --pace X,Y: X buyers admitted every Y minutes (W4); null, no pace (everyone admitted at T0). */
+  pace: LoadPace | null;
 }
 
-function parseArgs(argv: string[]): Options {
+/** A release's pace in this test (W4): X buyers admitted every Y minutes. */
+export interface LoadPace {
+  batch: number;
+  minutes: number;
+}
+
+/** --pace's value, `X,Y`: X buyers (LIVE_PACE_BATCH) every Y minutes (LIVE_PACE_MINUTES), the console's bounds. */
+export function parsePace(value: string | undefined): LoadPace {
+  const m = /^\s*(\d+)\s*,\s*(\d+)\s*$/.exec(value ?? '');
+  const batch = m ? Number(m[1]) : NaN;
+  const minutes = m ? Number(m[2]) : NaN;
+  if (!(batch >= LIVE_PACE_BATCH.min && batch <= LIVE_PACE_BATCH.max && minutes >= LIVE_PACE_MINUTES.min && minutes <= LIVE_PACE_MINUTES.max)) {
+    throw new Error(`--pace is X,Y: ${LIVE_PACE_BATCH.min} to ${LIVE_PACE_BATCH.max} buyers every ${LIVE_PACE_MINUTES.min} to ${LIVE_PACE_MINUTES.max} minutes (e.g. --pace 250,1)`);
+  }
+  return { batch, minutes };
+}
+
+/** The entries' burst in the room, s: --burst-seconds, else 10, or with a pace the room's minutes but the last. */
+export function entryBurstSeconds(o: Pick<Options, 'burstSeconds' | 'pace'>): number {
+  return o.burstSeconds ?? (o.pace ? (PACED_ROOM_MINUTES - 1) * 60 : 10);
+}
+
+/**
+ * The release a level publishes: the time the streams have to connect before its room opens (a few seconds, more for a
+ * larger audience; with a pace up to PACED_LEAD_MS, two minutes for 5 000), its room's minutes before T0, and whether
+ * it has its after-room (not with a pace: the run measures the queue).
+ */
+export function releaseTimes(o: Pick<Options, 'pace'>, viewers: number): { leadMs: number; roomMinutes: number; afterRoom: boolean } {
+  return o.pace
+    ? { leadMs: Math.min(PACED_LEAD_MS, Math.max(10_000, Math.round(viewers * 24))), roomMinutes: PACED_ROOM_MINUTES, afterRoom: false }
+    : { leadMs: Math.min(30_000, Math.max(10_000, Math.round(viewers * 8))), roomMinutes: ROOM_MINUTES, afterRoom: true };
+}
+
+/**
+ * The batches a paced level needs: every viewer enters, so ceil(N / X) batches, the first at T0 and the k-th at
+ * T0 + (k − 1) × Y; the last admits the rest. `spanMs` runs from T0 to the last batch.
+ */
+export function pacePlan(viewers: number, pace: LoadPace, opensAt: number): { batches: number; lastBatchAt: number; lastBatchSize: number; spanMs: number } {
+  const batches = Math.max(1, Math.ceil(viewers / pace.batch));
+  const spanMs = (batches - 1) * pace.minutes * 60_000;
+  return { batches, lastBatchAt: opensAt + spanMs, lastBatchSize: viewers - (batches - 1) * pace.batch, spanMs };
+}
+
+export function parseArgs(argv: string[]): Options {
   const o: Options = {
     levels: [500, 1000, 1500, 2000],
     vpsFactor: DEFAULT_VPS_FACTOR,
-    burstSeconds: 10,
+    burstSeconds: null,
     seed: 20261004,
     databaseUrl: 'pglite:memory',
     json: join(ROOT, 'out', 'live-load', 'results.json'),
+    pace: null,
   };
   const num = (v: string | undefined, name: string): number => {
     const n = Number(v);
@@ -288,6 +389,7 @@ function parseArgs(argv: string[]): Options {
       if (!/^postgres(ql)?:\/\//.test(o.databaseUrl)) throw new Error('--database-url is a postgres:// URL (of a throwaway database)');
     }
     else if (a === '--json') o.json = resolve(argv[++i] ?? '');
+    else if (a === '--pace') o.pace = parsePace(argv[++i]);
     else if (a === '--help' || a === '-h') {
       process.stdout.write(readFileSync(SELF, 'utf8').split('*/')[0]!.replace(/^\/\*\*\n/, '').replace(/^ \* ?/gm, ''));
       process.exit(0);
@@ -521,6 +623,7 @@ async function serve(): Promise<void> {
   const { sessionCookieName } = await import('../src/server/services/sessions.js');
   const { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES } = await import('../src/server/services/after-room.js');
   const { defaultLocationId } = await import('../src/server/services/stock.js');
+  const { livePaceFacts, paceCheck } = await import('../src/server/services/test-entrants.js');
 
   // As in production, but ORBES_ENV=development: no TLS, secrets or keys to provide; the production rate limits.
   const config = loadConfig({
@@ -612,14 +715,14 @@ async function serve(): Promise<void> {
 
   const publishedAt = Date.now();
   const roomOpensAt = publishedAt + setup.leadMs;
-  const opensAt = roomOpensAt + ROOM_MINUTES * 60_000;
+  const opensAt = roomOpensAt + setup.roomMinutes * 60_000;
   const created = await ctx.services.liveConsole.create(
     {
       modelId,
       title: 'MONOLITHE · LIVE RELEASE',
       opensAt: new Date(opensAt),
       closesAt: new Date(opensAt + 3_600_000),
-      roomOpensMinutes: ROOM_MINUTES,
+      roomOpensMinutes: setup.roomMinutes,
       priceMinor: 480_000,
       sizes: SIZES,
       addons: ADDONS,
@@ -629,14 +732,18 @@ async function serve(): Promise<void> {
       accessCombine: 'AND',
       surpriseEnabled: true,
       surpriseText: 'A polishing cloth in the house black.',
-      afterRoom: {
-        modelId: afterModelId,
-        priceMinor: 120_000,
-        sizes: AFTER_SIZES,
-        addons: AFTER_ADDONS,
-        delayMinutes: AFTER_ROOM_DELAY_MINUTES.min,
-        lengthMinutes: AFTER_ROOM_LENGTH_MINUTES.min,
-      },
+      // --pace (W4): X buyers admitted every Y minutes, the first batch at T0; none, everyone admitted at T0.
+      pace: setup.pace,
+      afterRoom: setup.afterRoom
+        ? {
+            modelId: afterModelId,
+            priceMinor: 120_000,
+            sizes: AFTER_SIZES,
+            addons: AFTER_ADDONS,
+            delayMinutes: AFTER_ROOM_DELAY_MINUTES.min,
+            lengthMinutes: AFTER_ROOM_LENGTH_MINUTES.min,
+          }
+        : null,
     },
     admin,
   );
@@ -649,7 +756,8 @@ async function serve(): Promise<void> {
     await ctx.services.stock.adjust({ skuId: s.sku_id, locationId, delta: n, note: 'Load test: pieces made in advance.' }, admin);
   }
   await ctx.services.liveConsole.publish(created.id, {}, admin);
-  const afterRoomId = (await db.selectFrom('drops').select('id').where('parent_drop_id', '=', created.id).executeTakeFirstOrThrow()).id;
+  const afterRoomId = (await db.selectFrom('drops').select('id').where('parent_drop_id', '=', created.id).executeTakeFirst())?.id ?? null;
+  if (setup.afterRoom !== (afterRoomId !== null)) throw new Error(`the release was published ${afterRoomId ? 'with' : 'without'} an after-room`);
   const { token: boardToken } = await ctx.services.live.issueBoardLink(created.id, admin);
   const release = await db.selectFrom('drop_sizes').select(['id', 'label']).where('drop_id', '=', created.id).orderBy('position').execute();
   const addons = await db.selectFrom('live_addons').select('id').where('drop_id', '=', created.id).orderBy('position').execute();
@@ -711,9 +819,11 @@ async function serve(): Promise<void> {
 
   /** What the two rooms left in the database. */
   const factsOf = async (): Promise<ReleaseFacts> => {
-    const ids = [created.id, afterRoomId];
+    const ids = afterRoomId ? [created.id, afterRoomId] : [created.id];
     const orders = await db.selectFrom('orders').select(['id', 'drop_id', 'reservation']).where('drop_id', 'in', ids).execute();
-    const child = await db.selectFrom('drops').select('ended_reason').where('id', '=', afterRoomId).executeTakeFirstOrThrow();
+    const child = afterRoomId ? await db.selectFrom('drops').select('ended_reason').where('id', '=', afterRoomId).executeTakeFirstOrThrow() : { ended_reason: null };
+    // Without an after-room (--pace): no guest, no entry (an id no row has).
+    const afterId = afterRoomId ?? randomUUID();
     const count = async (q: Promise<{ n: number | string | bigint }>) => Number((await q).n);
     return {
       orders: {
@@ -724,11 +834,25 @@ async function serve(): Promise<void> {
         other: orders.filter((o) => o.reservation !== 'STOCK' && o.reservation !== 'AWAITING').length,
       },
       afterRoom: {
-        guests: await count(db.selectFrom('after_room_guests').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', afterRoomId).executeTakeFirstOrThrow()),
+        guests: await count(db.selectFrom('after_room_guests').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', afterId).executeTakeFirstOrThrow()),
         reason: child.ended_reason,
-        confirmed: await count(db.selectFrom('live_entries').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', afterRoomId).where('status', '=', 'CONFIRMED').executeTakeFirstOrThrow()),
+        confirmed: await count(db.selectFrom('live_entries').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', afterId).where('status', '=', 'CONFIRMED').executeTakeFirstOrThrow()),
       },
       journal: await count(db.selectFrom('event_journal').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow()),
+      pace: setup.pace ? await pacedFacts() : null,
+    };
+  };
+
+  /** A paced release's batches, as its audit log recorded them, and the TEST REPORT's PACE check on its entries and log. */
+  const pacedFacts = async (): Promise<PacedFacts> => {
+    const row = await db.selectFrom('drops').selectAll().where('id', '=', created.id).executeTakeFirstOrThrow();
+    const facts = await livePaceFacts(db, row, new Date());
+    const check = paceCheck(facts);
+    return {
+      batches: facts.events.flatMap((e) => (e.kind === 'BATCH' ? [{ batch: e.batch, at: e.at.getTime(), entries: e.entries, recordedAt: e.recordedAt.getTime() }] : [])),
+      placed: facts.entries.length,
+      admitted: facts.entries.filter((e) => e.admittedAt !== null).length,
+      check: { pass: check.pass, line: check.line },
     };
   };
 
@@ -820,6 +944,64 @@ interface Viewer {
   outcome: Record<RoomKey, string | null>;
   /** The after-room's T0, from the second door its last frame of the main room carried: a guest. */
   door: number | null;
+  /** --pace: what its phone read of the queue. */
+  queue: QueuePhone;
+}
+
+/** What a phone read of the queue (W2) on a paced release: from its `you` events and the queue's frames. */
+export interface QueuePhone {
+  /** It waited for a batch: a `you` event carried its queue. */
+  waited: boolean;
+  /** The estimated entry time its first queue view gave, and its last place in the queue. */
+  firstEta: number | null;
+  lastPlace: number | null;
+  /** The next batch's time, from the last queue frame it read: the batch it waits for. */
+  waitingFor: number | null;
+  /** When its phone read its admission (a `you` event, QUEUED or TURN, its queue gone), and the batch's time it waited for then. */
+  admittedSeenAt: number | null;
+  admittedFor: number | null;
+}
+
+/** One queue frame a waiting phone read: its pulse's time, when it was read, and how many waited. */
+interface QueueEvent {
+  now: number;
+  at: number;
+  waiting: number;
+}
+
+/**
+ * The queue on the phones (W2, W4): every phone that waited was admitted; none from a place beyond X (the published
+ * order: its last place before its batch within the batch); at the time its first estimate gave (the queue held no
+ * pause, nobody left: the estimate is exact); the batches it saw; and how long each admission took to reach its phone
+ * after the batch's time.
+ */
+export function queueVerdict(phones: readonly QueuePhone[], pace: LoadPace): { waited: number; admitted: number; orderBroken: number; etaKept: number; batchesSeen: number; delivery: number[] } {
+  const waited = phones.filter((q) => q.waited);
+  const admitted = waited.filter((q) => q.admittedSeenAt !== null && q.admittedFor !== null);
+  return {
+    waited: waited.length,
+    admitted: admitted.length,
+    orderBroken: admitted.filter((q) => q.lastPlace === null || q.lastPlace > pace.batch).length,
+    etaKept: admitted.filter((q) => q.firstEta !== null && q.firstEta === q.admittedFor).length,
+    batchesSeen: new Set(admitted.map((q) => q.admittedFor)).size,
+    delivery: admitted.map((q) => q.admittedSeenAt! - q.admittedFor!),
+  };
+}
+
+/**
+ * The batches on the server against the plan (pacePlan): as many as needed, numbered 1 to B, each of X but the last (the
+ * rest), the k-th at T0 + (k − 1) × Y to the millisecond. A line saying what is wrong, or null.
+ */
+export function pacedBatchesProblem(batches: readonly PacedBatch[], viewers: number, pace: LoadPace, opensAt: number): string | null {
+  const plan = pacePlan(viewers, pace, opensAt);
+  if (batches.length !== plan.batches) return `${batches.length} batches recorded, ${plan.batches} expected.`;
+  for (const [i, b] of [...batches].sort((x, y) => x.batch - y.batch).entries()) {
+    const size = i === plan.batches - 1 ? plan.lastBatchSize : pace.batch;
+    if (b.batch !== i + 1) return `Batch ${b.batch} recorded where batch ${i + 1} was expected.`;
+    if (b.entries !== size) return `Batch ${b.batch} admitted ${b.entries}, ${size} expected.`;
+    if (b.at !== opensAt + i * pace.minutes * 60_000) return `Batch ${b.batch} came at T0 + ${b.at - opensAt} ms, T0 + ${i * pace.minutes * 60_000} ms expected.`;
+  }
+  return null;
 }
 
 interface RoomEvent {
@@ -860,6 +1042,12 @@ interface LevelResult {
     appShareMs: number;
     /** The p95 on the VPS: the app's share taken --vps-factor times slower, the rest (the database's wait) as measured. */
     vpsP95Ms: number;
+    /**
+     * --pace: the door's actions (I'LL BE THERE and ENTER, before T0: the pace does not meter them) and those behind the
+     * pace (the turns, PAY, RELEASE), which the action target is then held against.
+     */
+    door: Stats;
+    behind: Stats;
   };
   fanOut: { pulses: number; full: number; received: Stats; afterRoom: FanOut; serverPulse: Stats; serverPulseFull: Stats };
   turns: { given: number; delivery: Stats; lineDrawnMs: number | null; t0PassMs: number | null };
@@ -885,6 +1073,8 @@ interface LevelResult {
   outcome: RoomOutcome;
   /** The after-room: its guests, their phones' doors read and streams, its end after its T0. */
   afterRoom: {
+    /** --pace: the release had no after-room. */
+    none: boolean;
     guests: number;
     doorRead: Stats;
     streams: { opened: number; refused: number; dropped: number; connect: Stats };
@@ -894,9 +1084,29 @@ interface LevelResult {
   };
   /** What the rooms left in the database: the orders (held in stock or waiting), the after-room's guests, the journal. */
   facts: ReleaseFacts;
+  /** --pace: the queue and its batches; null without a pace. */
+  pace: PacedResult | null;
   appErrors: number;
   messageErrors: number;
-  verdict: { action: boolean; fanOut: boolean; memory: boolean; cpu: boolean; clean: boolean; pass: boolean };
+  verdict: { action: boolean; fanOut: boolean; memory: boolean; cpu: boolean; clean: boolean; pace: boolean; pass: boolean };
+}
+
+interface PacedResult {
+  pace: LoadPace;
+  /** The batches planned (pacePlan), and those the audit log recorded: their problem against the plan, or null. */
+  planned: number;
+  batches: PacedBatch[];
+  problem: string | null;
+  /** From each batch's time to the engine's writing it. */
+  engineLag: Stats;
+  /** The TEST REPORT's PACE check on the release's entries and log. */
+  check: { pass: boolean; line: string };
+  placed: number;
+  admitted: number;
+  /** The queue on the phones (queueVerdict), its admissions on the phone after their batch's time. */
+  phones: Omit<ReturnType<typeof queueVerdict>, 'delivery'> & { delivery: Stats };
+  /** The queue's frames: from each pulse's time to the last waiting phone that read it, over the pulses that reached 95 % of those waiting. */
+  fanOut: { pulses: number; full: number; received: Stats };
 }
 
 /** The app's process, its log (stdout) in the level's file. */
@@ -957,13 +1167,15 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
   const socketPath = join(tmpdir(), `orbes-live-load-${process.pid}-${viewersWanted}.sock`);
   const database = pglite ? await startDatabase(socketPath) : undefined;
   const child = startServer(logPath);
-  // Time for the streams to connect before the room opens: a few seconds, more for a larger audience.
-  const leadMs = Math.min(30_000, Math.max(10_000, Math.round(viewersWanted * 8)));
-  child.send({ type: 'setup', viewers: viewersWanted, leadMs, databaseUrl: o.databaseUrl, databaseSocket: pglite ? socketPath : null, seed: o.seed } satisfies SetupMessage);
+  child.send({ type: 'setup', viewers: viewersWanted, ...releaseTimes(o, viewersWanted), databaseUrl: o.databaseUrl, databaseSocket: pglite ? socketPath : null, seed: o.seed, pace: o.pace } satisfies SetupMessage);
   const ready = await nextMessage<ReadyMessage>(child, 'ready');
   process.stdout.write(`  ${viewersWanted}: app ready (port ${ready.port}, seeded in ${(ready.seedMs / 1000).toFixed(1)} s, calibration ${ready.calibrationMs} ms)\n`);
 
   const random = prng(o.seed + viewersWanted);
+  // --pace: the batches the level needs; until the last, a turn ends in RELEASE MY PLACE, so the release lasts.
+  const plan = o.pace ? pacePlan(viewersWanted, o.pace, ready.opensAt) : null;
+  /** The queue's frames the waiting phones read. */
+  const queueEvents: QueueEvent[] = [];
   const agent = new Agent({ keepAlive: true });
   const actions: ActionRecord[] = [];
   /** Guests who came after the after-room, or their size, had sold out. */
@@ -994,6 +1206,7 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
     acting: { main: false, after: false },
     outcome: { main: null, after: null },
     door: null,
+    queue: { waited: false, firstEta: null, lastPlace: null, waitingFor: null, admittedSeenAt: null, admittedFor: null },
   }));
 
   /** One request of a phone, timed. */
@@ -1057,7 +1270,10 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
         if (ids.length) await call(v, room, 'addons', 'PUT', '/addons', { addonIds: [ids[Math.floor(random() * ids.length)]!] });
       }
       await sleep(random() * 1000);
-      if (random() < 0.7) {
+      // --pace: before the last batch, the place given back, so that the pieces last until every batch is admitted.
+      if (plan && room === 'main' && Date.now() < plan.lastBatchAt) {
+        if ((await call(v, room, 'release', 'POST', '/release', {})).status === 200) v.outcome[room] = 'RELEASED';
+      } else if (random() < 0.7) {
         if ((await call(v, room, 'confirm', 'POST', '/confirm', {})).status === 200) v.outcome[room] = 'CONFIRMED';
       } else if ((await call(v, room, 'release', 'POST', '/release', {})).status === 200) v.outcome[room] = 'RELEASED';
     } finally {
@@ -1080,13 +1296,27 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
       rooms.push({ room, now: Date.parse(body.now as string), at });
       last[room] = body as (typeof last)[RoomKey];
       if (last[room].endedReason && endRead[room] === null) endRead[room] = at;
+    } else if (name === 'queue') {
+      // W2: the queue's frame, shared by the phones waiting for their batch.
+      queueEvents.push({ now: Date.parse(body.now as string), at, waiting: Number(body.waiting) });
+      v.queue.waitingFor = Date.parse(body.nextBatchAt as string);
     } else if (name === 'you') {
       const entry = body.entry as {
         status: string;
         position: number | null;
         turn: { at: string; token: string | null } | null;
         afterRoom?: { opensAt: string } | null;
+        queue?: { place: number; etaAt: string | null; paused: boolean } | null;
       } | null;
+      if (room === 'main' && entry?.queue) {
+        v.queue.waited = true;
+        v.queue.lastPlace = entry.queue.place;
+        if (v.queue.firstEta === null && entry.queue.etaAt) v.queue.firstEta = Date.parse(entry.queue.etaAt);
+      } else if (room === 'main' && v.queue.waited && v.queue.admittedSeenAt === null && (entry?.status === 'QUEUED' || entry?.status === 'TURN')) {
+        // Its batch let it in: its queue gone, its entry in the line.
+        v.queue.admittedSeenAt = at;
+        v.queue.admittedFor = v.queue.waitingFor;
+      }
       if (room === 'main' && entry?.position != null && !v.placed) {
         v.placed = true;
         placed++;
@@ -1164,13 +1394,14 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
 
   // The burst of entries, in the first seconds of the room.
   await sleep(ready.roomOpensAt - Date.now() + 50);
-  const entries = viewers.map((v) => sleep(random() * o.burstSeconds * 1000).then(() => call(v, 'main', 'enter', 'POST', '/enter', { sizeId: v.sizeId })));
+  const entries = viewers.map((v) => sleep(random() * entryBurstSeconds(o) * 1000).then(() => call(v, 'main', 'enter', 'POST', '/enter', { sizeId: v.sizeId })));
   await Promise.all([...interest, ...entries]);
 
   // T0, then until the release is over and its streams have ended.
   await sleep(ready.opensAt - Date.now());
   const roomDone = (room: RoomKey, among: Viewer[]) => last[room].over === true && among.every((v) => { const s = v.streams[room]; return !s || s.ended || s.status !== 200; });
-  const deadline = ready.opensAt + SELL_OUT_LIMIT_MS;
+  // With a pace, the release sells out after its last batch.
+  const deadline = ready.opensAt + (plan?.spanMs ?? 0) + SELL_OUT_LIMIT_MS;
   while (Date.now() < deadline && !roomDone('main', viewers)) await sleep(200);
   while (viewers.some((v) => v.acting.main) && Date.now() < deadline + 10_000) await sleep(100);
 
@@ -1181,7 +1412,7 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
   if (afterOpensAt !== null) {
     await sleep(afterOpensAt - Date.now() + 50);
     const visit = async (v: Viewer) => {
-      await sleep(random() * o.burstSeconds * 1000);
+      await sleep(random() * (o.burstSeconds ?? 10) * 1000);
       const door = await request(v, 'GET', `/api/v1/live/${ready.dropId}/after-room`, undefined);
       doorReads.push({ ms: door.ms, status: door.status });
       const sheet = door.json as { id?: string; phase?: string; sizes?: { id: string }[]; addons?: { id: string }[] } | null;
@@ -1282,6 +1513,7 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
   const afterOutcome = outcomeOf('after', afterOpensAt);
   const quantity = SIZES.reduce((n, s) => n + s.stock, 0);
   const afterQuantity = AFTER_SIZES.reduce((n, s) => n + s.stock, 0);
+  const hasAfterRoom = ready.afterRoomId !== null;
   const stocked = SIZES.reduce((n, s) => n + Math.min(s.stock, STOCKED[s.label] ?? 0), 0);
   const facts = report.facts;
   const clean =
@@ -1295,17 +1527,20 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
     report.messageErrors === 0 &&
     outcome.reason === 'SOLD_OUT' &&
     outcome.confirmed === quantity &&
-    // Every phone the sell-out ended read the second door, and only they.
-    guests.length === facts.afterRoom.guests &&
-    guests.length > 0 &&
-    afterOutcome.reason === 'SOLD_OUT' &&
-    afterOutcome.confirmed === afterQuantity &&
-    facts.afterRoom.confirmed === afterQuantity &&
+    (hasAfterRoom
+      ? // Every phone the sell-out ended read the second door, and only they.
+        guests.length === facts.afterRoom.guests &&
+        guests.length > 0 &&
+        afterOutcome.reason === 'SOLD_OUT' &&
+        afterOutcome.confirmed === afterQuantity &&
+        facts.afterRoom.confirmed === afterQuantity
+      : // --pace: no after-room, so no door in the last frames, no guest.
+        guests.length === 0 && facts.afterRoom.guests === 0) &&
     // One order per piece confirmed; those of STOCKED held in stock, every other one waiting for supplier stock (plan NEXT LOT §3.5).
     facts.orders.main === quantity &&
-    facts.orders.afterRoom === afterQuantity &&
+    facts.orders.afterRoom === (hasAfterRoom ? afterQuantity : 0) &&
     facts.orders.stock === stocked &&
-    facts.orders.awaiting === quantity + afterQuantity - stocked &&
+    facts.orders.awaiting === quantity + (hasAfterRoom ? afterQuantity : 0) - stocked &&
     facts.orders.other === 0;
   // The busiest five seconds of the app's CPU.
   let busiest = 0;
@@ -1314,16 +1549,59 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
   // An action's time is the app's share (waiting for its thread, then its own work) and the database's wait. Only the
   // first runs on the app's core; the second is PGlite's one connection here, a stand-in already pessimistic.
   const appShare = report.loopDelayMs.p99 + (report.cpuMs.user + report.cpuMs.system) / Math.max(1, actions.length + doorReads.length);
-  const vpsP95 = all.p95 + (f - 1) * appShare;
+  // --pace: the door (I'LL BE THERE, ENTER in the main room, before T0) apart from what the pace meters.
+  const atDoor = (a: ActionRecord) => a.room === 'main' && (a.kind === 'interest' || a.kind === 'enter');
+  const door = stats(actions.filter(atDoor).map((a) => a.ms));
+  const behind = stats(actions.filter((a) => !atDoor(a)).map((a) => a.ms));
+  const vpsP95 = (o.pace ? behind.p95 : all.p95) + (f - 1) * appShare;
+
+  // --pace: the queue's frames, the batches on the server, the queue on the phones.
+  let paced: PacedResult | null = null;
+  if (o.pace && plan) {
+    const byPulse = new Map<number, { n: number; last: number; waiting: number }>();
+    for (const e of queueEvents) {
+      const r = byPulse.get(e.now) ?? { n: 0, last: 0, waiting: e.waiting };
+      r.n++;
+      r.last = Math.max(r.last, e.at);
+      byPulse.set(e.now, r);
+    }
+    const fullQueue = [...byPulse.entries()].filter(([, r]) => r.waiting > 0 && r.n >= FULL_PULSE * r.waiting);
+    const batches = facts.pace?.batches ?? [];
+    const phones = queueVerdict(viewers.map((v) => v.queue), o.pace);
+    paced = {
+      pace: o.pace,
+      planned: plan.batches,
+      batches,
+      problem: facts.pace ? pacedBatchesProblem(batches, viewersWanted, o.pace, ready.opensAt) : 'The release has no pace.',
+      engineLag: stats(batches.map((b) => b.recordedAt - b.at)),
+      check: facts.pace?.check ?? { pass: false, line: 'No PACE check.' },
+      placed: facts.pace?.placed ?? 0,
+      admitted: facts.pace?.admitted ?? 0,
+      phones: { ...phones, delivery: stats(phones.delivery) },
+      fanOut: { pulses: byPulse.size, full: fullQueue.length, received: stats(fullQueue.map(([now, r]) => r.last - now)) },
+    };
+  }
+  const queueHeld =
+    paced === null ||
+    (paced.problem === null &&
+      paced.check.pass &&
+      paced.placed === viewersWanted &&
+      paced.admitted === viewersWanted &&
+      // Everyone beyond the first batch waited (the first batch too, when a pulse came between T0 and its pass).
+      paced.phones.waited >= viewersWanted - o.pace!.batch &&
+      paced.phones.admitted === paced.phones.waited &&
+      paced.phones.orderBroken === 0 &&
+      (viewersWanted <= o.pace!.batch || (paced.fanOut.received.n > 0 && paced.fanOut.received.p95 * f < LIVE_LOAD_TARGETS.fanOutP95Ms)));
   const verdict = {
     action: vpsP95 < LIVE_LOAD_TARGETS.actionP95Ms,
     fanOut: fan.n > 0 && fan.p95 * f < LIVE_LOAD_TARGETS.fanOutP95Ms,
     memory: withGeoIp < limitMib,
     cpu: busiest * f < LIVE_LOAD_TARGETS.cpuCores,
     clean,
+    pace: queueHeld,
     pass: false,
   };
-  verdict.pass = verdict.action && verdict.fanOut && verdict.memory && verdict.cpu && verdict.clean;
+  verdict.pass = verdict.action && verdict.fanOut && verdict.memory && verdict.cpu && verdict.clean && verdict.pace;
 
   return {
     viewers: viewersWanted,
@@ -1331,7 +1609,7 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
     calibrationMs: ready.calibrationMs,
     seedMs: ready.seedMs,
     streams,
-    actions: { all, byKind, main: stats(actions.filter((a) => a.room === 'main').map((a) => a.ms)), afterRoom: stats(actions.filter((a) => a.room === 'after').map((a) => a.ms)), unexpected, appShareMs: round(appShare), vpsP95Ms: round(vpsP95) },
+    actions: { all, byKind, main: stats(actions.filter((a) => a.room === 'main').map((a) => a.ms)), afterRoom: stats(actions.filter((a) => a.room === 'after').map((a) => a.ms)), unexpected, appShareMs: round(appShare), vpsP95Ms: round(vpsP95), door, behind },
     fanOut: {
       pulses: pulses.length,
       full: full.length,
@@ -1367,8 +1645,9 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
     },
     loopDelayMs: { p50: Math.round(report.loopDelayMs.p50 * 10) / 10, p99: Math.round(report.loopDelayMs.p99 * 10) / 10, max: Math.round(report.loopDelayMs.max * 10) / 10 },
     outcome,
-    afterRoom: { guests: guests.length, doorRead: stats(doorReads.map((d) => d.ms)), streams: afterStreams, late: lateGuests.size, outcome: afterOutcome },
+    afterRoom: { none: !hasAfterRoom, guests: guests.length, doorRead: stats(doorReads.map((d) => d.ms)), streams: afterStreams, late: lateGuests.size, outcome: afterOutcome },
     facts,
+    pace: paced,
     appErrors,
     messageErrors: report.messageErrors,
     verdict,
@@ -1384,19 +1663,27 @@ function printLevel(r: LevelResult): void {
   const k = r.actions.byKind;
   const f = r.vpsFactor;
   const vps = (x: number) => (Number.isFinite(x) ? ` (× ${f}: ${round(x * f)} ms)` : '');
+  const p = r.pace;
+  const paris = (at: number) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).format(at);
   const lines = [
-    `### ${r.viewers} in the room (calibration ${r.calibrationMs} ms; a VPS vCPU taken as ${f} times slower)`,
+    `### ${r.viewers} ${p ? `with a pace of ${p.pace.batch} every ${p.pace.minutes} min` : 'in the room'} (calibration ${r.calibrationMs} ms; a VPS vCPU taken as ${f} times slower)`,
     '',
     '| Figure | Measured | Target, on the VPS |',
     '|---|---|---|',
-    `| Actions, all (${r.actions.all.n}) | p50 ${ms(r.actions.all.p50)} · **p95 ${ms(r.actions.all.p95)}** (the app's share ${ms(r.actions.appShareMs)}, × ${f}: ${ms(r.actions.vpsP95Ms)}) · p99 ${ms(r.actions.all.p99)} · max ${ms(r.actions.all.max)} | p95 < ${LIVE_LOAD_TARGETS.actionP95Ms} ms: ${yes(r.verdict.action)} |`,
+    ...(p
+      ? [
+          `| Actions behind the pace (${r.actions.behind.n}: the turns, PAY, RELEASE) | p50 ${ms(r.actions.behind.p50)} · **p95 ${ms(r.actions.behind.p95)}** (the app's share ${ms(r.actions.appShareMs)}, × ${f}: ${ms(r.actions.vpsP95Ms)}) · p99 ${ms(r.actions.behind.p99)} · max ${ms(r.actions.behind.max)} | p95 < ${LIVE_LOAD_TARGETS.actionP95Ms} ms: ${yes(r.verdict.action)} |`,
+          `| The door, before T0 (${r.actions.door.n}: I'LL BE THERE and ENTER, which the pace does not meter) | p50 ${ms(r.actions.door.p50)} · p95 ${ms(r.actions.door.p95)} · max ${ms(r.actions.door.max)} | |`,
+          `| Actions, all (${r.actions.all.n}) | p50 ${ms(r.actions.all.p50)} · p95 ${ms(r.actions.all.p95)} · p99 ${ms(r.actions.all.p99)} · max ${ms(r.actions.all.max)} | |`,
+        ]
+      : [`| Actions, all (${r.actions.all.n}) | p50 ${ms(r.actions.all.p50)} · **p95 ${ms(r.actions.all.p95)}** (the app's share ${ms(r.actions.appShareMs)}, × ${f}: ${ms(r.actions.vpsP95Ms)}) · p99 ${ms(r.actions.all.p99)} · max ${ms(r.actions.all.max)} | p95 < ${LIVE_LOAD_TARGETS.actionP95Ms} ms: ${yes(r.verdict.action)} |`]),
     `| By room: the main room (${r.actions.main.n}) / the after-room (${r.actions.afterRoom.n}) | p50 ${ms(r.actions.main.p50)} / ${ms(r.actions.afterRoom.p50)} · p95 ${ms(r.actions.main.p95)} / ${ms(r.actions.afterRoom.p95)} · max ${ms(r.actions.main.max)} / ${ms(r.actions.afterRoom.max)} | |`,
     `| I'LL BE THERE (${k.interest.n}) | p50 ${ms(k.interest.p50)} · p95 ${ms(k.interest.p95)} · max ${ms(k.interest.max)} | |`,
     `| ENTER (${k.enter.n}) | p50 ${ms(k.enter.p50)} · p95 ${ms(k.enter.p95)} · max ${ms(k.enter.max)} | |`,
     `| PRESS / SECURE (${k.press.n} / ${k.secure.n}) | p95 ${ms(k.press.p95)} / ${ms(k.secure.p95)} · max ${ms(k.press.max)} / ${ms(k.secure.max)} | |`,
     `| Add-ons / PAY / RELEASE (${k.addons.n} / ${k.confirm.n} / ${k.release.n}) | p95 ${ms(k.addons.p95)} / ${ms(k.confirm.p95)} / ${ms(k.release.p95)} | |`,
     `| Fan-out, the room in memory → the last phone (${r.fanOut.full} full pulses of ${r.fanOut.pulses}) | p50 ${ms(r.fanOut.received.p50)} · **p95 ${ms(r.fanOut.received.p95)}**${vps(r.fanOut.received.p95)} · max ${ms(r.fanOut.received.max)} | p95 < ${LIVE_LOAD_TARGETS.fanOutP95Ms} ms: ${yes(r.verdict.fanOut)} |`,
-    `| The after-room's fan-out (${r.fanOut.afterRoom.full} full pulses) | p95 ${ms(r.fanOut.afterRoom.received.p95)}${vps(r.fanOut.afterRoom.received.p95)} · max ${ms(r.fanOut.afterRoom.received.max)} | |`,
+    ...(r.afterRoom.none ? [] : [`| The after-room's fan-out (${r.fanOut.afterRoom.full} full pulses) | p95 ${ms(r.fanOut.afterRoom.received.p95)}${vps(r.fanOut.afterRoom.received.p95)} · max ${ms(r.fanOut.afterRoom.received.max)} | |`]),
     `| The pulse on the server, its reads included (all / full) | p50 ${ms(r.fanOut.serverPulse.p50)} · p95 ${ms(r.fanOut.serverPulse.p95)} / ${ms(r.fanOut.serverPulseFull.p95)} · max ${ms(r.fanOut.serverPulse.max)} | |`,
     `| Memory, the app's peak | ${r.memory.peakRssMib} MiB resident (${r.memory.idleMib} MiB started, ${r.memory.baselineMib} MiB before the streams; ${r.memory.perViewerKib} KiB per viewer; at the peak V8's heap ${r.memory.atPeak.heapTotalMib} MiB, ${r.memory.atPeak.heapUsedMib} in use, ${r.memory.atPeak.outsideHeapMib} MiB outside it)${r.memory.databasePeakMib === null ? '' : ` · PGlite's process ${r.memory.databasePeakMib} MiB`} | |`,
     `| Memory with the GeoIP database (+${GEOIP_RESIDENT_MIB} MiB) | **${r.memory.withGeoIpMib} MiB** | < ${r.memory.limitMib} MiB: ${yes(r.verdict.memory)} |`,
@@ -1407,11 +1694,22 @@ function printLevel(r: LevelResult): void {
     `| Event loop delay | p50 ${ms(r.loopDelayMs.p50)} · p99 ${ms(r.loopDelayMs.p99)} · max ${ms(r.loopDelayMs.max)} | |`,
     `| CPU, the app | busiest five seconds **${r.cpu.busiest5s} of a core** (× ${f}: ${round(r.cpu.busiest5s * f)}) · ${r.cpu.cores} over ${(r.cpu.wallMs / 1000).toFixed(0)} s (user ${r.cpu.userMs} ms, system ${r.cpu.systemMs} ms) | < ${LIVE_LOAD_TARGETS.cpuCores} core: ${yes(r.verdict.cpu)} |`,
     `| The end | ${r.outcome.reason ?? 'not over'} ${r.outcome.endedMs !== null ? `${(r.outcome.endedMs / 1000).toFixed(1)} s after T0` : ''} · ${r.outcome.confirmed} confirmed · ${r.outcome.released} released | every piece confirmed |`,
-    `| The after-room | ${r.afterRoom.guests} guests (${r.facts.afterRoom.guests} remembered) · door read p95 ${ms(r.afterRoom.doorRead.p95)} · ${r.afterRoom.streams.opened} streams, ${r.afterRoom.streams.refused} refused, ${r.afterRoom.streams.dropped} dropped · ${r.afterRoom.late} came after their size or the room sold out · ${r.afterRoom.outcome.reason ?? 'not over'} ${r.afterRoom.outcome.endedMs !== null ? `${(r.afterRoom.outcome.endedMs / 1000).toFixed(1)} s after its T0` : ''} · ${r.afterRoom.outcome.confirmed} confirmed · ${r.afterRoom.outcome.released} released | every piece confirmed |`,
+    r.afterRoom.none
+      ? `| The after-room | none: a paced release is published without one (the run measures the queue) | |`
+      : `| The after-room | ${r.afterRoom.guests} guests (${r.facts.afterRoom.guests} remembered) · door read p95 ${ms(r.afterRoom.doorRead.p95)} · ${r.afterRoom.streams.opened} streams, ${r.afterRoom.streams.refused} refused, ${r.afterRoom.streams.dropped} dropped · ${r.afterRoom.late} came after their size or the room sold out · ${r.afterRoom.outcome.reason ?? 'not over'} ${r.afterRoom.outcome.endedMs !== null ? `${(r.afterRoom.outcome.endedMs / 1000).toFixed(1)} s after its T0` : ''} · ${r.afterRoom.outcome.confirmed} confirmed · ${r.afterRoom.outcome.released} released | every piece confirmed |`,
     `| The orders | ${r.facts.orders.main} + ${r.facts.orders.afterRoom} (after-room) · ${r.facts.orders.stock} held in stock · ${r.facts.orders.awaiting} awaiting stock · ${r.facts.orders.other} other · ${r.facts.journal} journal rows | one per piece |`,
     `| Answers other than 200 · app errors | ${r.actions.unexpected.length} · ${r.appErrors} | none: ${yes(r.verdict.clean)} |`,
+    ...(p
+      ? [
+          `| The queue's frames, the pulse's time → the last waiting phone (${p.fanOut.full} full pulses of ${p.fanOut.pulses}) | p50 ${ms(p.fanOut.received.p50)} · **p95 ${ms(p.fanOut.received.p95)}**${vps(p.fanOut.received.p95)} · max ${ms(p.fanOut.received.max)} | p95 < ${LIVE_LOAD_TARGETS.fanOutP95Ms} ms |`,
+          `| The batches on the server (${p.batches.length} of ${p.planned} planned) | ${p.batches.map((b) => b.entries).join(' · ')} admitted, the first at ${p.batches.length ? `${paris(p.batches[0]!.at)} Paris` : '—'} (T0), each ${p.pace.minutes} min after the last · the engine wrote each p95 ${ms(p.engineLag.p95)} · max ${ms(p.engineLag.max)} after its time · ${p.admitted} of ${p.placed} placed admitted | ${p.problem ?? 'exactly X every Y, on their times'} |`,
+          `| The PACE check (TEST REPORT) | ${p.check.line} | ${p.check.pass ? 'passed' : 'FAILED'} |`,
+          `| The queue on the phones | ${p.phones.waited} waited · ${p.phones.admitted} admitted, in ${p.phones.batchesSeen} batches · ${p.phones.orderBroken} from a place beyond ${p.pace.batch} · ${p.phones.etaKept} at the time first estimated · the admission on the phone p50 ${ms(p.phones.delivery.p50)} · p95 ${ms(p.phones.delivery.p95)} · max ${ms(p.phones.delivery.max)} after the batch's time | every one admitted, in the line's order |`,
+          `| The queue held | | ${yes(r.verdict.pace)} |`,
+        ]
+      : []),
     '',
-    `**${r.verdict.pass ? 'Every target met' : 'A target not met'}** at ${r.viewers} in the room.`,
+    `**${r.verdict.pass ? 'Every target met' : 'A target not met'}** at ${r.viewers} ${p ? `with a pace of ${p.pace.batch} every ${p.pace.minutes} min` : 'in the room'}.`,
     '',
   ];
   if (r.actions.unexpected.length) {
@@ -1427,7 +1725,7 @@ function printLevel(r: LevelResult): void {
 
 async function drive(o: Options): Promise<void> {
   process.stdout.write(
-    `LIVE RELEASES load test (LIVE RELEASE+: the rules, the stock, the after-room): levels ${o.levels.join(', ')}, a VPS vCPU taken as ${o.vpsFactor} times slower, a burst of ${o.burstSeconds} s, seed ${o.seed}, ${o.databaseUrl === 'pglite:memory' ? 'PGlite in its own process' : 'PostgreSQL'}\n`,
+    `LIVE RELEASES load test (${o.pace ? 'a paced release: the queue, the rules, the stock' : 'LIVE RELEASE+: the rules, the stock, the after-room'}): levels ${o.levels.join(', ')}, a VPS vCPU taken as ${o.vpsFactor} times slower, a burst of ${entryBurstSeconds(o)} s, seed ${o.seed}, ${o.databaseUrl === 'pglite:memory' ? 'PGlite in its own process' : 'PostgreSQL'}${o.pace ? `, a pace of ${o.pace.batch} every ${o.pace.minutes} min (W4)` : ''}\n`,
   );
   const results: LevelResult[] = [];
   for (const level of o.levels) {
@@ -1443,17 +1741,23 @@ async function drive(o: Options): Promise<void> {
     capacity = r.viewers;
   }
   process.stdout.write(
-    capacity === null
-      ? 'No level met every target.\n'
-      : `Capacity: ${capacity} in the room (levels met: ${passing.join(', ')}). LIVE_ROOM_CAPACITY (services/live-insights.ts) is set from it.\n`,
+    o.pace
+      ? `With a pace: ${passing.length ? `the queue held and every target met at ${passing.join(', ')}` : 'no level met every target'}. A paced run measures the queue; LIVE_ROOM_CAPACITY is not read from it.\n`
+      : capacity === null
+        ? 'No level met every target.\n'
+        : `Capacity: ${capacity} in the room (levels met: ${passing.join(', ')}). LIVE_ROOM_CAPACITY (services/live-insights.ts) is set from it.\n`,
   );
   const machine = { cpu: cpus()[0]?.model ?? 'unknown', cpus: cpus().length, memoryGib: Math.round((totalmem() / 1073741824) * 10) / 10, os: `${platform()} ${osRelease()}`, node: process.version };
   mkdirSync(dirname(o.json), { recursive: true });
-  writeFileSync(o.json, `${JSON.stringify({ at: new Date().toISOString(), options: o, targets: LIVE_LOAD_TARGETS, geoIpMib: GEOIP_RESIDENT_MIB, machine, capacity, results }, null, 2)}\n`);
+  writeFileSync(o.json, `${JSON.stringify({ at: new Date().toISOString(), options: o, targets: LIVE_LOAD_TARGETS, geoIpMib: GEOIP_RESIDENT_MIB, machine, capacity: o.pace ? null : capacity, results }, null, 2)}\n`);
   process.stdout.write(`Figures: ${o.json}\n`);
 }
 
-if (process.argv.includes('--database')) {
+// Run as a script (the driver, or the app's or the database's process it forks), never on import (its tests).
+const isMain = process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
+if (!isMain) {
+  // Imported: its exports only.
+} else if (process.argv.includes('--database')) {
   void databaseProcess(process.argv[process.argv.indexOf('--database') + 1]!).catch((e: unknown) => {
     process.stderr.write(`live-load database: ${(e as Error)?.stack ?? String(e)}\n`);
     process.exit(1);
