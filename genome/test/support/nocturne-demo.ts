@@ -66,6 +66,11 @@
  *   draw-selected     the full story, the October draw then opened to the segment Founding list (plan MACRO M1 §3.3,
  *                     F4): you joined the founding list on theorbes.com before the draw (matched to your account),
  *                     the guest (h.morel) did not (seedDrawSelected)
+ *   email             the full story with the emails' channel on (its stage's configuration, test/support/nocturne-stage.ts:
+ *                     an SMTP host nothing reaches, the sender never running on a stage) and RESET BY EMAIL, release
+ *                     notices and the founding announcement switched on (plan MACRO M1 §4.4, E1–E3): you asked for
+ *                     release notices; a link to choose a new password was sent to you at NOW; a founding list's
+ *                     pre-registration (seedEmail)
  *   orders-delivery   the full story; its one state writes (plan NEXT LOT §3.6.B, C): an engraving price in euros, a
  *   orders-case       saved default address for you, put on the reserved LIVE order with the add-on's words, and a
  *   account-addresses paid order of MONOLITHE in blue with a priced engraving, packing begun; orders-case's, a delivered
@@ -132,6 +137,7 @@ export type DemoVariant =
   | 'claim-waiting'
   | 'draw-sizes'
   | 'draw-selected'
+  | 'email'
   | 'orders-delivery'
   | 'orders-case'
   | 'account-addresses'
@@ -161,6 +167,7 @@ export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'claim-waiting',
   'draw-sizes',
   'draw-selected',
+  'email',
   'orders-delivery',
   'orders-case',
   'account-addresses',
@@ -272,7 +279,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
   // claim-waiting stage (plan NEXT LOT §3.4) tells the full story, its state writing the rest.
   // The draw-sizes stage (plan NEXT LOT §3.6.F) tells the full story, then adds a draw in sizes, open. The stages of the
   // collector's side of an order (plan NEXT LOT §3.6) tell the full story, their state writing the rest.
-  const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'draw-selected', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes', 'birthday-credit', 'care-used', 'orbes-care', 'gallery'] as const;
+  const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'draw-selected', 'email', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes', 'birthday-credit', 'care-used', 'orbes-care', 'gallery'] as const;
   const story = ((OWN_STAGES as readonly DemoVariant[]).includes(variant) ? 'full' : variant) as Exclude<DemoVariant, (typeof OWN_STAGES)[number]>;
   if (story === 'empty') await seedEmpty(w);
   else if (story === 'stress') await seedStress(w);
@@ -293,6 +300,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
     if (variant === 'pairs') await seedPairs(w);
     if (variant === 'draw-sizes') await seedDrawSizes(w);
     if (variant === 'draw-selected') await seedDrawSelected(w);
+    if (variant === 'email') await seedEmail(w);
     if (variant === 'care-used') await seedCareUsed(w);
     if (variant === 'orbes-care') await seedOrbesCare(w);
     if (variant === 'gallery') await seedGallery(w);
@@ -1336,6 +1344,31 @@ async function seedDrawSelected(w: World): Promise<void> {
   clock.set(at('2026-09-28T09:00:00Z'));
   const segment = await ctx.services.segments.create({ name: 'Founding list', criteria: { match: 'ALL', rules: [{ kind: 'FOUNDING_LIST' }] } }, admin);
   await ctx.db.updateTable('drops').set({ access_segment_id: segment.id }).where('id', '=', demo.releases.draw!).execute();
+}
+
+/**
+ * Plan MACRO M1 §4.4 (E1–E3; lot M1, step M1.19), the stage `email`: the console switches RESET BY EMAIL, release notices
+ * and the founding announcement on; you ask, in YOUR PROFILE, to be told when a release is announced; Inès joined the
+ * founding list on theorbes.com on 20 September; at NOW you ask for a link to choose a new password (RESET BY EMAIL), its
+ * address and code read back from the email written in the outbox (never sent: the stage's sender does not run). The
+ * links of the emails (the reset link's fragment, the STOP THESE EMAILS tokens) are kept in demo.links.
+ */
+async function seedEmail(w: World): Promise<void> {
+  const { ctx, admin, clock, demo } = w;
+  const you = demo.accounts.you!;
+  for (const kind of ['PASSWORD_RESET', 'RELEASE_NOTICE', 'FOUNDING_ANNOUNCEMENT'] as const) await ctx.services.email.setEnabled(kind, true, admin);
+  await ctx.services.emails.setPreferences(you.id, { releaseNotices: true }, you.actor);
+  clock.set(at('2026-09-20T18:00:00Z'));
+  await ctx.services.founding.register({ email: 'ines.fabre@example.com', firstName: 'Inès', country: 'FR', consent: true, website: '' }, { type: 'system', id: 'public' });
+  const founding = await ctx.db.selectFrom('preregistrations').select('id').where('email_normalized', '=', 'ines.fabre@example.com').executeTakeFirstOrThrow();
+  clock.set(NOCTURNE_NOW);
+  await ctx.services.recovery.requestByEmail(you.email);
+  const sent = await ctx.db.selectFrom('email_outbox').select('body_text').where('kind', '=', 'PASSWORD_RESET').where('account_id', '=', you.id).orderBy('created_at', 'desc').executeTakeFirstOrThrow();
+  const link = /\/verify\/reset#([^\s)\]>]+)/.exec(sent.body_text);
+  if (!link) throw new Error('no reset link in the email');
+  demo.links.reset = link[1]!;
+  demo.links.unsubscribe = ctx.services.email.unsubscribeToken('RELEASE_NOTICE', you.id);
+  demo.links.unsubscribeFounding = ctx.services.email.unsubscribeToken('FOUNDING_ANNOUNCEMENT', founding.id);
 }
 
 async function seedSizes(w: World, variant: 'full' | 'room'): Promise<void> {

@@ -107,6 +107,8 @@ export const DESKTOP_MOVED: readonly DesktopMoved[] = [
       'tier-warranty-credit',
       'account-sheet-in-use',
       'account-sheet-stress',
+      // Lot M1 (E2): YOUR PROFILE's release notices, on its page.
+      'profile-release-notices',
     ],
     reason: 'Decision 5: the account, MESSAGES and their sections are pages of their own on a computer, never a sheet over the page they were opened on.',
     now: 'On that page itself (NOW, or the piece WRITE TO ORBES CLIENT SERVICES was pressed on), at its own address.',
@@ -148,7 +150,7 @@ export const DESKTOP_MOVED: readonly DesktopMoved[] = [
     where: 'scrolled' as const,
   })),
   {
-    states: ['sign-up', 'pieces-sign-in-refused', 'result-forgotten-password'],
+    states: ['sign-up', 'pieces-sign-in-refused', 'result-forgotten-password', 'signin-reset-email', 'signin-reset-sent'],
     reason: 'Decision 6: SIGN IN and CREATE ACCOUNT open the sign-in page on a computer, in the place of the page they were pressed on.',
     now: 'On the page they were pressed on (MY PIECES, the result), which the sign-in page gives way to.',
     where: 'back',

@@ -53,6 +53,16 @@ export interface NocturneStage {
   close(): Promise<void>;
 }
 
+/**
+ * The stage `email`'s configuration (plan MACRO M1 §4.4, lot M1 step M1.19): the emails' channel on, so that the app shows
+ * RESET BY EMAIL and YOUR PROFILE's release notices; its SMTP host is one nothing reaches, and a stage never starts the
+ * sender (ORBES_ENV=test: no timers), so no email leaves.
+ */
+export const NOCTURNE_EMAIL_CONFIG = Object.freeze({
+  ...NOCTURNE_CONFIG,
+  email: { transport: 'smtp' as const, from: { address: 'hello@theorbes.com', name: 'ORBES' }, replyTo: null, smtp: { host: 'smtp.invalid', port: 465, security: 'tls' as const, user: 'stage', password: 'stage' } },
+});
+
 /** The demo `variant` seeded on its own stage, and a browser whose fake camera films its piece to register. */
 export async function startNocturneStage(webDir: string, variant: DemoVariant, workDir: string): Promise<NocturneStage> {
   const clock = createManualClock(NOCTURNE_NOW);
@@ -60,7 +70,7 @@ export async function startNocturneStage(webDir: string, variant: DemoVariant, w
   const stage = await startUiStage({
     webDir,
     clock: clock.now,
-    config: NOCTURNE_CONFIG,
+    config: variant === 'email' ? NOCTURNE_EMAIL_CONFIG : NOCTURNE_CONFIG,
     seed: async (ctx) => {
       demo = await seedNocturne(ctx, clock, variant);
     },

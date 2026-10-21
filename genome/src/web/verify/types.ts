@@ -132,6 +132,18 @@ export interface RecoveryResult {
   transfersPausedUntil: string;
 }
 
+/**
+ * YOUR PROFILE's EMAIL ME WHEN A RELEASE IS ANNOUNCED (lot M1, E2; GET and PUT /api/v1/account/email-preferences): on or
+ * off, and when it last changed. The server answers 409 EMAIL_OFF while the emails' channel is off.
+ */
+export interface EmailPreferences {
+  releaseNotices: boolean;
+  changedAt: string | null;
+}
+
+/** What a STOP THESE EMAILS link stops (lot M1, E1 and E2; GET /api/v1/email/unsubscribe), null for a link the server does not recognise. */
+export type UnsubscribeKind = 'FOUNDING_ANNOUNCEMENT' | 'RELEASE_NOTICE';
+
 export interface OwnershipConfirmation {
   productId: string;
   verified: boolean;

@@ -1057,6 +1057,89 @@ body.nocturne .pieces__empty {
   margin-top: 18px;
 }
 
+/* RESET BY EMAIL (lot M1, E3) under FORGOTTEN PASSWORD: the account's email and SEND LINK under the sentence, the same
+   sentence for any address in the form's place, then NO ACCESS TO THIS EMAIL? over ORBES Client Services' way. */
+.n-own .form--reset-request {
+  margin-top: 6px;
+}
+
+.n-own .form--reset-request .n-form__actions {
+  margin-top: 24px;
+}
+
+.n-own__sent {
+  margin-top: 18px;
+}
+
+.n-own__other {
+  margin-top: 34px;
+  padding-top: 26px;
+  border-top: 1px solid var(--vault-hairline);
+}
+
+.n-own__other + .n-own__text {
+  margin-top: 10px;
+}
+
+/* ── The emails' pages (lot M1, step M1.19): SET A NEW PASSWORD and STOP THESE EMAILS, built as HOW RELEASES WORK's
+   head (the title and its line), then the panel's part: a form, a sentence, STOP; a phone's 24 px margin ── */
+.n-mail__head {
+  padding-top: 30px;
+}
+
+.n-mail__lead {
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+}
+
+.n-mail__lead[hidden] {
+  display: none;
+}
+
+.n-mail__body {
+  margin-top: 28px;
+}
+
+.n-mail__part > :first-child,
+.n-mail__part > .n-form:first-child > .n-fld-group:first-child,
+.n-mail__body .n-own > :first-child {
+  margin-top: 0;
+}
+
+.n-mail__text,
+.n-mail__again {
+  margin-top: 12px;
+}
+
+.n-mail__part > * + .n-form,
+.n-mail__part > * + .n-contact {
+  margin-top: 18px;
+}
+
+.n-mail__part .n-form__actions {
+  margin-top: 26px;
+}
+
+.n-mail__action {
+  margin-top: 26px;
+}
+
+.n-mail__body > .n-loading,
+.n-mail__body > .n-failed {
+  margin: 0;
+  padding: 34px 0 0;
+}
+
+/* The account a reset link is for, for a password manager: in the form, never drawn. */
+.n-mail__username {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .n-cam__sweep {
     animation: none;
@@ -3716,6 +3799,27 @@ body.nocturne[data-screen="live"] {
 
 .n-profile__address-add {
   margin-top: 12px;
+}
+
+/* EMAILS (lot M1, E2): EMAIL ME WHEN A RELEASE IS ANNOUNCED and its switch on one line, the hint under it. */
+.n-profile__notices {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 44px;
+}
+
+.n-profile__notices-label {
+  line-height: 1.5;
+}
+
+.n-profile__notices + .n-fld__hint {
+  margin-top: 6px;
+}
+
+.n-profile__notices-error {
+  margin-top: 10px;
 }
 
 /* INSTAGRAM: a fixed @ before the username, on the field's line. */

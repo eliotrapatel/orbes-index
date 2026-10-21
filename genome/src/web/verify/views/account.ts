@@ -73,7 +73,7 @@ import { LEGAL_PATH } from '../../shared/legal.js';
 import { ApiError, type ApiClient } from '../api.js';
 import { addressesSummary, addressLines, mayAddAddress } from '../addresses-model.js';
 import { countryName } from '../../../shared/countries.js';
-import { ACCOUNT, ACCOUNT_ADDRESSES, ACCOUNT_PASSWORD, ACCOUNT_PROFILE, ACCOUNT_SIZES, MESSAGES, MODE, PIECES, SIGN_UP, SOUND, TASTES, TIER, WISHLIST } from '../copy.js';
+import { ACCOUNT, ACCOUNT_ADDRESSES, ACCOUNT_PASSWORD, ACCOUNT_PROFILE, ACCOUNT_SIZES, MESSAGES, MODE, PIECES, RELEASE_NOTICES, SIGN_UP, SOUND, TASTES, TIER, WISHLIST } from '../copy.js';
 import { CLUB_PATH } from '../club-model.js';
 import { countryOptions } from '../addresses-model.js';
 import { guaranteeBlocks } from '../guarantee-model.js';
@@ -141,6 +141,8 @@ export interface AccountSheetDeps {
     | 'profile'
     | 'saveProfile'
     | 'wishlist'
+    | 'emailPreferences'
+    | 'setReleaseNotices'
   >;
   session: SessionStore;
   sound: SoundSwitch;
@@ -225,6 +227,13 @@ export class AccountSheet {
   protected profileNote: string | null = null;
   /** SAVE pressed once with a date of birth to enter: CONFIRM YOUR DATE OF BIRTH, until it is pressed again or the date changes. */
   protected profileConfirm = false;
+  /**
+   * EMAIL ME WHEN A RELEASE IS ANNOUNCED (lot M1, E2), YOUR PROFILE's last group: the choice as read for this opening;
+   * null while unread, unreadable, or while the emails' channel is off (409 EMAIL_OFF): the group is then not drawn, so
+   * nothing is promised that is not sent. Forgotten as the sheet closes, as the profile is.
+   */
+  protected notices: { on: boolean; error: string | null } | null = null;
+  protected noticesGen = 0;
   /** YOUR WISHLIST's line (3 MODELS, NONE YET), read as the sheet opens; null until read, or unreadable (no line). */
   protected wishCount: string | null = null;
 
@@ -338,6 +347,8 @@ export class AccountSheet {
     this.profileDraft = null;
     this.profileNote = null;
     this.profileConfirm = false;
+    this.noticesGen++;
+    this.notices = null;
     this.wishCount = null;
     // The sheet's view ends as it closes; the page under it counts again.
     seen.release(this);
@@ -730,6 +741,74 @@ export class AccountSheet {
     this.focusView();
     // Not read yet (or unreadable): read it before the fields show, ONE MOMENT… meanwhile.
     if (this.profile === null) void this.readProfile();
+    if (this.notices === null) void this.readNotices();
+  }
+
+  /**
+   * EMAIL ME WHEN A RELEASE IS ANNOUNCED, read beside the profile: drawn once read (the focus kept where it is); not
+   * drawn while the emails' channel is off (409 EMAIL_OFF) or when it cannot be read.
+   */
+  protected async readNotices(): Promise<void> {
+    const gen = ++this.noticesGen;
+    try {
+      const p = await this.deps.api.emailPreferences();
+      if (gen !== this.noticesGen || !this.isOpen) return;
+      this.notices = { on: p.releaseNotices, error: null };
+    } catch (e) {
+      this.deps.session.noteError(e);
+      return;
+    }
+    if (this.view !== 'profile' || this.profile === null) return;
+    const key = this.panel.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.key : undefined;
+    this.showProfile(key ? `[data-key="${key}"]` : undefined);
+  }
+
+  /**
+   * YOUR PROFILE's EMAILS: EMAIL ME WHEN A RELEASE IS ANNOUNCED, a switch saved as it is switched (apart from SAVE), its
+   * hint, and the sentence of a switch that could not be saved (the switch back as it was).
+   */
+  protected noticesGroup(): HTMLElement | null {
+    const n = this.notices;
+    if (!n) return null;
+    const R = RELEASE_NOTICES;
+    const error = h('p', { class: 'n-err n-profile__notices-error', attrs: { role: 'alert', hidden: !n.error }, text: n.error ?? '' });
+    const sw = switchControl({ label: R.label, checked: n.on, onChange: (on) => void this.switchNotices(on, sw.input, error) });
+    sw.input.dataset.key = 'profile-release-notices';
+    sw.input.setAttribute('aria-describedby', 'profile-notices-hint');
+    return this.profileGroup(
+      'profile-group-emails',
+      R.group,
+      h('label', { class: 'n-profile__notices' }, h('span', { class: 'n-g n-lab n-profile__notices-label', text: R.label }), sw.el),
+      h('p', { class: 'n-sm n-fld__hint', id: 'profile-notices-hint', text: R.hint }),
+      error,
+    );
+  }
+
+  /** The switch saved at once: the choice as the server keeps it, or the switch back with the sentence. */
+  protected async switchNotices(on: boolean, input: HTMLInputElement, error: HTMLElement): Promise<void> {
+    const n = this.notices;
+    if (!n) return;
+    const gen = this.noticesGen;
+    input.disabled = true;
+    error.hidden = true;
+    n.error = null;
+    try {
+      const p = await this.deps.api.setReleaseNotices(on);
+      if (gen !== this.noticesGen) return;
+      n.on = p.releaseNotices;
+    } catch (e) {
+      this.deps.session.noteError(e);
+      if (gen !== this.noticesGen) return;
+      n.error = RELEASE_NOTICES.failed;
+      error.textContent = n.error;
+      error.hidden = false;
+    } finally {
+      if (input.isConnected) {
+        input.checked = n.on;
+        input.disabled = false;
+        input.focus({ preventScroll: true });
+      }
+    }
   }
 
   /** The profile read for the view: its fields once it is, or the sentence and the server's message. */
@@ -1021,6 +1100,7 @@ export class AccountSheet {
         this.profileGroup('profile-group-contact', P.groups.contact, code.el, field('profile-phone-number', P.phoneNumber, number, P.phoneHint), instagramField),
         tastes,
         this.profileGroup('profile-group-found', P.groups.found, heard.el, other.el),
+        this.noticesGroup(),
         confirmLine,
       ].filter((x): x is HTMLElement => x !== null),
       this.profileConfirm ? P.birthConfirm : P.save,

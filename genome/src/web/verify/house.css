@@ -434,6 +434,11 @@ h1[tabindex="-1"]:focus,
   color: var(--ink-soft);
 }
 
+/* RESET BY EMAIL in the vault's look (lot M1, E3): NO ACCESS TO THIS EMAIL? over ORBES Client Services' way. */
+.ownership__other {
+  margin-top: 30px;
+}
+
 /* SIGNED IN AS …, then two links: MY PIECES and SIGN OUT in the OWNERSHIP
    tab, CHANGE PASSWORD (C-04) and SIGN OUT at the foot of MY PIECES (F-01).
    When the line is too short for the three, the two links wrap under the

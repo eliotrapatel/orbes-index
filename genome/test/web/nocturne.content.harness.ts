@@ -148,7 +148,9 @@ const PHONE_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> = Object.f
   // The queue of a paced release (macro scope of 2026-10-20, W2, W5, W6; lot M1, step M1.5), on its own stage: the room's
   // shard holds its limit of states.
   queue: (s) => s.variant === 'queue',
-  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'queue' && s.variant !== 'draws' && s.variant !== 'draw-sizes' && s.variant !== 'draw-selected' && s.variant !== 'stress' && s.variant !== 'pairs' && !ORDER_STAGES.includes(s.variant) && !named('account')(s) && !profile(s) && !wishlist(s) && !birthday(s) && !careUsed(s) && !orbesCare(s),
+  // The emails' screens (lot M1, step M1.19, E1–E3), on their own stage (the emails' channel on), their writes last.
+  email: (s) => s.variant === 'email',
+  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'queue' && s.variant !== 'email' && s.variant !== 'draws' && s.variant !== 'draw-sizes' && s.variant !== 'draw-selected' && s.variant !== 'stress' && s.variant !== 'pairs' && !ORDER_STAGES.includes(s.variant) && !named('account')(s) && !profile(s) && !wishlist(s) && !birthday(s) && !careUsed(s) && !orbesCare(s),
 });
 
 /** A computer's state (desktop: test/support/nocturne-states.ts DESK_STATES), never in a phone's shard. */

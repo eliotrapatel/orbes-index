@@ -112,7 +112,10 @@ export type SeenScreen =
   // …MESSAGES in two parts claims MESSAGES, as the sheet's view; an order's page is MY_ORDERS, as MY PIECES' ORDERS
   // where the phone opens it.
   | 'messages'
-  | 'order';
+  | 'order'
+  // The emails' pages (lot M1, step M1.19): SET A NEW PASSWORD (a password screen) and STOP THESE EMAILS, never recorded.
+  | 'reset'
+  | 'unsubscribe';
 
 /** What the app holds beside its screen, for the subject. */
 export interface SeenAppState {
@@ -163,8 +166,9 @@ export function pageOf(screen: SeenScreen, state: SeenAppState): SeenView | null
     // Desktop: an order's page, as MY PIECES' ORDERS (the phone opens an order there).
     case 'order':
       return { page: 'MY_ORDERS' };
-    // The scan, VERIFYING…, a problem of the scan, the boutique board, a computer's SCAN page: never recorded. A
-    // computer's account, sign-in and MESSAGES pages: recorded by their claims, not as screens.
+    // The scan, VERIFYING…, a problem of the scan, the boutique board, a computer's SCAN page, the emails' pages (SET A
+    // NEW PASSWORD, STOP THESE EMAILS): never recorded. A computer's account, sign-in and MESSAGES pages: recorded by
+    // their claims, not as screens.
     default:
       return null;
   }

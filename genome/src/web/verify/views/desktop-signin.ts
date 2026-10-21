@@ -86,8 +86,8 @@ export interface SignInPageView {
   dispose(): void;
 }
 
-/** The newest model of the collection with a photograph, as NOW leads with it: the page's photograph. */
-function newest(cards: readonly { name: string; type: string; imageUrl: string | null; publishedAt?: string | null; variant?: { label: string } | null }[]) {
+/** The newest model of the collection with a photograph, as NOW leads with it: the page's photograph (the emails' pages' too, views/mail-frame.ts). */
+export function newest(cards: readonly { name: string; type: string; imageUrl: string | null; publishedAt?: string | null; variant?: { label: string } | null }[]) {
   const shown = cards.filter((c) => c.imageUrl);
   return [...shown].sort((a, b) => (Date.parse(b.publishedAt ?? '') || 0) - (Date.parse(a.publishedAt ?? '') || 0))[0] ?? null;
 }

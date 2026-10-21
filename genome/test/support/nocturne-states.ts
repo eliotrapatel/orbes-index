@@ -2067,7 +2067,163 @@ export const PHONE_STATES: readonly UiState[] = [
     },
     ready: '.view--live .live-door',
   },
+  // Plan MACRO M1 §4.4 (E1–E3; lot M1, step M1.19), on the stage `email` (the emails' channel on): FORGOTTEN PASSWORD? with
+  // RESET BY EMAIL and its sentence once sent (an address no account uses: nothing is written); the page of the link (its
+  // form, a link incomplete, a link refused, the new password saved); YOUR PROFILE's release notices; STOP THESE EMAILS
+  // (release notices, the founding list's email, a link not recognised, then stopped). The writes last, in this order:
+  // stopped, then the new password (which ends every session of you's, so nothing after it signs in as you).
+  {
+    id: 'signin-reset-email',
+    title: 'MY PIECES, signed out: FORGOTTEN PASSWORD with RESET BY EMAIL (EMAIL, SEND LINK) over ORBES Client Services’ way',
+    refs: ['E3'],
+    variant: 'email',
+    path: at('/verify/pieces'),
+    act: async (run) => {
+      await forgottenByEmail(run);
+    },
+    ready: ':is(.view--pieces, .view--signin) form.form--reset-request',
+  },
+  {
+    id: 'signin-reset-sent',
+    title: 'RESET BY EMAIL, SEND LINK pressed: the same sentence for any address',
+    refs: ['E3'],
+    variant: 'email',
+    path: at('/verify/pieces'),
+    act: async (run) => {
+      const scope = await forgottenByEmail(run);
+      await run.page.locator(`${scope} form.form--reset-request input[type=email]`).fill('someone.else@example.com');
+      await run.page.locator(`${scope} form.form--reset-request`).getByRole('button', { name: 'SEND LINK', exact: true }).click();
+      await run.page.locator(`${scope} .n-own__sent`).waitFor({ timeout: 20_000 });
+    },
+    ready: ':is(.view--pieces, .view--signin) .n-own__sent',
+  },
+  {
+    id: 'reset-new-password',
+    title: 'SET A NEW PASSWORD, the link of RESET BY EMAIL: the account, NEW PASSWORD twice, SAVE',
+    refs: ['E3'],
+    variant: 'email',
+    path: (d) => `/verify/reset#${d.links.reset}`,
+    ready: '.view--reset form.form--reset',
+  },
+  {
+    id: 'reset-incomplete',
+    title: 'SET A NEW PASSWORD, a link without its address and code: incomplete, SEND A NEW LINK',
+    refs: ['E3'],
+    variant: 'email',
+    path: at('/verify/reset'),
+    ready: '.view--reset form.form--reset-request',
+  },
+  {
+    id: 'reset-expired',
+    title: 'SET A NEW PASSWORD, a link refused (expired, used or replaced): the recovery’s words, SEND A NEW LINK',
+    refs: ['E3'],
+    variant: 'email',
+    // An address no account uses: the server's one answer for every refusal, and no guess counted against you's code.
+    path: at('/verify/reset#no.account%40example.com/7K3M-Q9TD-2WXA'),
+    act: async (run) => {
+      await run.page.locator('.view--reset form.form--reset').waitFor();
+      await run.page.locator('#reset-password').fill('a new password for orbes');
+      await run.page.locator('#reset-password-again').fill('a new password for orbes');
+      await run.page.locator('.view--reset form.form--reset').getByRole('button', { name: 'SAVE', exact: true }).click();
+      await run.page.locator('.view--reset .n-mail__refused').waitFor({ timeout: 20_000 });
+    },
+    ready: '.view--reset form.form--reset-request',
+  },
+  {
+    id: 'profile-release-notices',
+    title: 'YOUR PROFILE, the emails’ channel on: EMAILS, EMAIL ME WHEN A RELEASE IS ANNOUNCED (on)',
+    refs: ['E2'],
+    variant: 'email',
+    as: you,
+    path: at('/verify'),
+    act: async (run) => {
+      await openProfile(run);
+      await run.page.locator(`${ACCT} #profile-group-emails`).scrollIntoViewIfNeeded();
+    },
+    ready: `${ACCT} .n-profile__notices .n-sw__input:checked`,
+    viewport: true,
+  },
+  {
+    id: 'unsubscribe',
+    title: 'STOP THESE EMAILS?, a release notice’s link: what it stops, STOP',
+    refs: ['E2'],
+    variant: 'email',
+    path: (d) => `/verify/unsubscribe#${d.links.unsubscribe}`,
+    ready: '.view--unsubscribe .n-mail__action',
+  },
+  {
+    id: 'unsubscribe-founding',
+    title: 'STOP THESE EMAILS?, the founding list’s link: what it stops, STOP',
+    refs: ['E1'],
+    variant: 'email',
+    path: (d) => `/verify/unsubscribe#${d.links.unsubscribeFounding}`,
+    ready: '.view--unsubscribe .n-mail__action',
+  },
+  {
+    id: 'unsubscribe-invalid',
+    title: 'STOP THESE EMAILS, a link not recognised: one calm sentence',
+    refs: ['E1', 'E2'],
+    variant: 'email',
+    path: at('/verify/unsubscribe#not-a-link-of-orbes'),
+    ready: '.view--unsubscribe .n-mail__invalid',
+  },
+  {
+    id: 'unsubscribe-done',
+    title: 'EMAILS STOPPED, release notices: no longer sent, and how to switch them on again',
+    refs: ['E2'],
+    variant: 'email',
+    path: (d) => `/verify/unsubscribe#${d.links.unsubscribe}`,
+    mutates: true,
+    act: async (run) => {
+      await run.page.locator('.view--unsubscribe').getByRole('button', { name: 'STOP', exact: true }).click();
+      await run.page.locator('.view--unsubscribe .n-mail__stopped').waitFor({ timeout: 20_000 });
+    },
+    ready: '.view--unsubscribe .n-mail__stopped',
+  },
+  {
+    id: 'reset-done',
+    title: 'SET A NEW PASSWORD, saved: SIGN IN with the account’s email, and what the recovery did',
+    refs: ['E3'],
+    variant: 'email',
+    path: at('/verify'),
+    mutates: true,
+    act: async (run) => {
+      // A link of its own (ORBES Client Services' code for you, at NOW), so that each stage's run saves once.
+      await run.page.goto(`${run.stage.origin}${await freshResetLink(run)}`);
+      await run.page.locator('.view--reset form.form--reset').waitFor();
+      await run.page.locator('#reset-password').fill('a new password for orbes');
+      await run.page.locator('#reset-password-again').fill('a new password for orbes');
+      await run.page.locator('.view--reset form.form--reset').getByRole('button', { name: 'SAVE', exact: true }).click();
+      await run.page.locator('.view--reset .n-own__notice').waitFor({ timeout: 20_000 });
+    },
+    ready: '.view--reset form.form--signin',
+  },
 ];
+
+/**
+ * Lot M1 (E3): MY PIECES signed out (on a computer, its SIGN IN opens the sign-in page), then FORGOTTEN PASSWORD?, RESET
+ * BY EMAIL drawn; the scope the step stands in.
+ */
+async function forgottenByEmail(run: StateRun): Promise<string> {
+  let scope = '.view--pieces';
+  if (await onComputer(run)) {
+    await run.page.locator('.view--pieces .d-signin-line').getByRole('link', { name: 'SIGN IN', exact: true }).click();
+    scope = '.view--signin';
+  }
+  await run.page.locator(`${scope} form`).first().waitFor();
+  await run.page.locator(scope).getByRole('button', { name: 'FORGOTTEN PASSWORD?', exact: true }).click();
+  await run.page.locator(`${scope} form.form--reset-request`).waitFor({ timeout: 20_000 });
+  return scope;
+}
+
+/** Lot M1 (E3): a link to choose a new password for you, its code issued at NOW by ORBES Client Services. */
+async function freshResetLink(run: StateRun): Promise<string> {
+  const { ctx } = run.stage;
+  const you = run.demo.accounts.you!;
+  const admin = await ctx.db.selectFrom('admin_users').select('id').orderBy('created_at').executeTakeFirstOrThrow();
+  const issued = await ctx.services.recovery.issue(you.id, { type: 'admin', id: admin.id });
+  return `/verify/reset#${encodeURIComponent(you.email)}/${issued.recoveryCode}`;
+}
 
 // ── A computer's window (desktop) ──────────────────────────────────────────
 
@@ -2462,6 +2618,18 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
     ...desk(1440, 'now-stress', 'result-stress', 'club-stress', 'pieces-stress', 'pieces-orders-stress', 'piece-stress', 'account-sheet-stress', 'collection-stress', 'model-stress'),
     ...desk(1440, 'releases-stress', 'room-stress', 'live-far-stress', 'circle-stress', 'post-stress', 'post-poll-stress', 'result-ceremony-stress'),
     ...desk(1440, 'pieces-empty', 'collection-empty', 'releases-empty', 'circle-empty'),
+  ],
+  // ── The emails' screens (lot M1, step M1.19, E1–E3) on the stage `email`: each at 1440 × 900, RESET BY EMAIL, the
+  // link's page, YOUR PROFILE's release notices and STOP THESE EMAILS also in light, the link's form and STOP THESE EMAILS
+  // at 1024 × 768; their writes last (stopped, then the new password, which ends you's sessions) ──
+  'desk-13': [
+    ...desk(1440, 'signin-reset-email', 'signin-reset-sent', 'reset-new-password', 'reset-incomplete', 'reset-expired', 'profile-release-notices', 'unsubscribe', 'unsubscribe-founding', 'unsubscribe-invalid'),
+    ...atWidths([1440], true, ['signin-reset-email', 'reset-new-password', 'profile-release-notices', 'unsubscribe']),
+    ...desk(1024, 'reset-new-password', 'unsubscribe'),
+    ...desk(1440, 'unsubscribe-done'),
+    onDesk(phoneState('unsubscribe-done'), 1440, { light: true }),
+    ...desk(1440, 'reset-done'),
+    onDesk(phoneState('reset-done'), 1440, { light: true }),
   ],
 });
 

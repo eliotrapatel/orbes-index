@@ -2394,3 +2394,76 @@ export const DESKTOP = Object.freeze({
     rowLabel: (title: string, reference: string, step: string) => `${title}, ${reference}: ${step}`,
   }),
 });
+
+/**
+ * RESET BY EMAIL (macro scope E3; lot M1 plan §4.4, step M1.19): offered only while GET /api/v1/account/reset says so (the
+ * emails' channel on and PASSWORD_RESET switched on); otherwise FORGOTTEN PASSWORD? is ORBES Client Services' way alone,
+ * word for word as before. Under FORGOTTEN PASSWORD, the email of the account and SEND LINK, then the same sentence for
+ * any address (nothing is said of whether it has an account); ORBES Client Services' way stays under it, for whoever no
+ * longer reaches that email. The link opens /verify/reset (views/reset.ts): the new password twice, then SAVE; the
+ * existing recovery code underneath (a refused link reads the server's RECOVERY_CODE_INVALID words).
+ */
+export const ACCOUNT_RESET = Object.freeze({
+  lead: 'Enter the email of your ORBES account: a link to choose a new password is sent to it.',
+  send: 'SEND LINK',
+  /** The same sentence for any address, whether an account uses it or not. */
+  sent: 'If an account uses this address, a link is on its way. It works for 30 minutes.',
+  noEmail: 'Enter the email of your ORBES account.',
+  /** Above ORBES Client Services' way, under the link's form. */
+  other: 'NO ACCESS TO THIS EMAIL?',
+  /** The page the link opens: its title (SET A NEW PASSWORD) and, under it, the account it is for. */
+  title: ACCOUNT_PASSWORD.recoverTitle,
+  pageLead: (email: string) => `For the ORBES account ${email}.`,
+  newPassword: ACCOUNT_PASSWORD.newPassword,
+  confirm: 'NEW PASSWORD, AGAIN',
+  confirmHint: 'The same password, to be sure of it.',
+  mismatch: 'The two passwords are not the same.',
+  save: 'SAVE',
+  /** A link opened without its address and code (cut, or opened again after the page took them out of the address). */
+  incomplete: 'This link is incomplete. Open it again from its email, or ask for a new one.',
+  /** A link refused or incomplete: a new one, to the address it was for (or the one typed). */
+  againLead: 'Ask for a new link: it works once, for 30 minutes.',
+  again: 'SEND A NEW LINK',
+  /** Done: the page's line over the sign-in, the recovery's own sentence under it (ACCOUNT_PASSWORD.recovered). */
+  doneLead: 'Sign in with your new password.',
+});
+
+/**
+ * STOP THESE EMAILS (macro scope E1, E2; lot M1 plan §4.4, step M1.19): the page an email's STOP THESE EMAILS opens
+ * (/verify/unsubscribe#<token>, views/unsubscribe.ts). It names what the link stops, asks once (STOP), then says what
+ * no longer comes. A link the server does not recognise has one calm answer; nothing is said of whose it was.
+ */
+export const UNSUBSCRIBE = Object.freeze({
+  ask: 'STOP THESE EMAILS?',
+  done: 'EMAILS STOPPED',
+  plain: 'STOP THESE EMAILS',
+  /** What each link stops, under the question. */
+  kind: Object.freeze({
+    FOUNDING_ANNOUNCEMENT: 'The email of the ORBES founding list, which announces the first release.',
+    RELEASE_NOTICE: 'Release notices: an email each time ORBES announces a release.',
+  }),
+  stop: 'STOP',
+  /** Once stopped, what no longer comes. */
+  stopped: Object.freeze({
+    FOUNDING_ANNOUNCEMENT: 'You will no longer receive the email of the ORBES founding list.',
+    RELEASE_NOTICE: 'You will no longer receive release notices.',
+  }),
+  /** Release notices only: they are the account's own choice. */
+  again: 'To receive them again, switch them on in YOUR PROFILE.',
+  invalid: 'This link could not be read. Open it again from the email it came in.',
+  loading: 'ONE MOMENT…',
+  failed: 'This could not be done just now.',
+  retry: 'TRY AGAIN',
+});
+
+/**
+ * EMAIL ME WHEN A RELEASE IS ANNOUNCED (macro scope E2; lot M1 plan §4.4, step M1.19): YOUR PROFILE's last group, shown
+ * only while the emails' channel is on (GET /api/v1/account/email-preferences answers; 409 EMAIL_OFF hides it), so
+ * nothing is promised that is not sent. Saved as it is switched, apart from the profile's SAVE.
+ */
+export const RELEASE_NOTICES = Object.freeze({
+  group: 'EMAILS',
+  label: 'EMAIL ME WHEN A RELEASE IS ANNOUNCED',
+  hint: 'To the email of your account, saved as soon as it is switched. Each of these emails can stop them too.',
+  failed: 'Your choice could not be saved just now.',
+});

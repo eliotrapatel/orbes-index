@@ -22,6 +22,10 @@
  *        ▲                                     │ I HAVE A RECOVERY CODE
  *        └──── BACK TO SIGN IN / recovered ◀── SET A NEW PASSWORD (form)
  *
+ * RESET BY EMAIL (lot M1, E3): while GET /api/v1/account/reset says it is offered (read once a page load, reset-model.ts),
+ * FORGOTTEN PASSWORD opens on the email of the account and SEND LINK, then the same sentence for any address; ORBES
+ * Client Services' way stays under it (NO ACCESS TO THIS EMAIL?). Not offered, the step is as it always was.
+ *
  * A piece registered to someone else shows RECEIVING THIS PIECE, the heading
  * the link under the result's second-hand guidance moves to (J-02).
  *
@@ -50,7 +54,8 @@ import type { SessionStore, SessionState } from '../session.js';
 import { countryOptions } from '../addresses-model.js';
 import type { OwnershipConfirmation, SignUpOptions, TransferOffer } from '../types.js';
 import { formatDate, formatDateTime, formatDateTimeLong, normalizeCodeInput, registrationOpen, registrationStatus, type ContactModel, type OwnershipMode } from '../view-model.js';
-import { ACCOUNT_PASSWORD, CLAIM_HELD, CONTACT, NOT_DELIVERED_NOTE, PIECES, RECEIVING, SIGN_UP, STAFF_SCAN_NOTE, YEARLY_CARE } from '../copy.js';
+import { ACCOUNT_PASSWORD, ACCOUNT_RESET, CLAIM_HELD, CONTACT, NOT_DELIVERED_NOTE, PIECES, RECEIVING, SIGN_UP, STAFF_SCAN_NOTE, YEARLY_CARE } from '../copy.js';
+import { readResetOffer, resetOfferKnown } from '../reset-model.js';
 import { contactBlock, PIECES_PATH, piecesLink, sectionLabel, termsNote, withNumerals } from './common.js';
 import { accountForm, field as vaultField, FormError, messageOf, MIN_PASSWORD, nocturneForm, selectField as vaultSelectField, signUpProblem } from './forms.js';
 import { appAnchor, button, contactLines, field, selectField, textLink } from './nocturne.js';
@@ -102,6 +107,8 @@ interface PanelState {
   recover: RecoverStep | null;
   /** The email of a recovered account, put back in the sign-in form (never a password). */
   signInEmail: string;
+  /** RESET BY EMAIL's SEND LINK answered: its sentence in the form's place, until FORGOTTEN PASSWORD is left. */
+  resetSent: boolean;
   offer: TransferOffer | null;
   confirmation: { verified: boolean; via: 'register' | 'transfer'; productId: string } | null;
   error: string | null;
@@ -175,6 +182,10 @@ export class OwnershipPanel {
    */
   private authShown: AuthTab | 'recover' | null = null;
   private authUsed = false;
+  /** RESET BY EMAIL's offer asked (once a panel, the answer shared by the page's: reset-model.ts). */
+  private resetAsked = false;
+  /** The server said EMAIL_OFF to SEND LINK (the channel switched off since it was read): ORBES Client Services' way alone. */
+  private resetRefused = false;
   private offDesktop: (() => void) | null = null;
 
   constructor(
@@ -182,7 +193,7 @@ export class OwnershipPanel {
     private readonly deps: OwnershipDeps,
   ) {
     this.now = deps.now ?? (() => Date.now());
-    this.state = { mode, authTab: deps.page?.tab ?? 'signin', recover: null, signInEmail: '', offer: null, confirmation: null, error: null, notice: null, busy: false };
+    this.state = { mode, authTab: deps.page?.tab ?? 'signin', recover: null, signInEmail: '', resetSent: false, offer: null, confirmation: null, error: null, notice: null, busy: false };
     // No live region on the whole panel (a re-render would read it all out); status and alert lines carry their own roles.
     this.vault = deps.look === 'vault';
     this.root = h('div', { class: this.vault ? 'ownership' : 'n-own' });
@@ -212,6 +223,19 @@ export class OwnershipPanel {
     this.offDesktop?.();
     this.offDesktop = null;
     seen.release(this);
+  }
+
+  /**
+   * After a reset by email (views/reset.ts): SIGN IN, the account's email in it, and what the recovery did said under it,
+   * as after I HAVE A RECOVERY CODE.
+   */
+  recovered(email: string, notice: string): void {
+    this.state.recover = null;
+    this.state.authTab = 'signin';
+    this.state.signInEmail = email;
+    this.state.error = null;
+    this.state.notice = notice;
+    this.render();
   }
 
   /** The sign-in page's tabs from its address (back, forward): SIGN IN or CREATE ACCOUNT. */
@@ -548,6 +572,7 @@ export class OwnershipPanel {
       this.authShown = null;
       return [this.vault ? this.text(lead) : h('p', { class: 'n-tx n-own__lead', text: lead }), signInLine(lead, { look: this.vault ? 'vault' : 'nocturne' })];
     }
+    this.askReset();
     if (this.state.recover) {
       this.authShown = 'recover';
       return this.recoverBlock(this.state.recover);
@@ -598,9 +623,27 @@ export class OwnershipPanel {
     this.root.querySelector<HTMLInputElement>('input')?.focus();
   }
 
+  /**
+   * Whether RESET BY EMAIL is offered, asked once the sign-in shows (one read a page load, reset-model.ts); FORGOTTEN
+   * PASSWORD, open when the answer comes, is drawn again with it.
+   */
+  private askReset(): void {
+    if (this.resetAsked) return;
+    this.resetAsked = true;
+    void readResetOffer(this.deps.api).then((on) => {
+      if (on && this.state.recover === 'contact' && this.root.isConnected) this.render();
+    });
+  }
+
+  /** RESET BY EMAIL is offered now (its answer read, and not refused since). */
+  private get resetByEmail(): boolean {
+    return !this.resetRefused && resetOfferKnown(this.deps.api) === true;
+  }
+
   /** Move between the steps of FORGOTTEN PASSWORD? (null: back to the sign-in form); keyboard focus follows. */
   private setRecover(step: RecoverStep | null): void {
     this.state.recover = step;
+    this.state.resetSent = false;
     this.state.error = null;
     this.state.notice = null;
     this.render();
@@ -621,6 +664,7 @@ export class OwnershipPanel {
     if (step === 'contact') {
       return [
         title,
+        ...(this.resetByEmail ? [this.text(ACCOUNT_RESET.lead), this.resetSentLine() ?? this.resetForm(), h('p', { class: 'n-g n-lb n-own__other', text: ACCOUNT_RESET.other })] : []),
         this.text(ACCOUNT_PASSWORD.forgottenLead),
         this.deps.contact ? contactLines(this.deps.contact, CONTACT) : null,
         this.action(ACCOUNT_PASSWORD.haveCode, () => this.setRecover('code'), { outline: true, extraClass: 'n-own__action--recover' }),
@@ -628,6 +672,38 @@ export class OwnershipPanel {
       ].filter((x): x is HTMLElement => x !== null);
     }
     return [title, this.text(ACCOUNT_PASSWORD.recoverLead), this.recoverForm(), back];
+  }
+
+  /** RESET BY EMAIL answered: the same sentence for any address, in the form's place. */
+  private resetSentLine(): HTMLElement | null {
+    if (!this.state.resetSent) return null;
+    return h('p', { class: this.vault ? 'form__notice ownership__sent' : 'n-tx n-ivc n-own__sent', attrs: { role: 'status', tabindex: -1 }, text: ACCOUNT_RESET.sent });
+  }
+
+  /** RESET BY EMAIL: the email of the account, then SEND LINK. */
+  private resetForm(): HTMLFormElement {
+    const email = h('input', { attrs: { type: 'email', name: 'email', autocomplete: 'username', inputmode: 'email', required: true, maxlength: 254, spellcheck: 'false', autocapitalize: 'none' } });
+    if (this.state.signInEmail) email.value = this.state.signInEmail;
+    return this.form('reset-request', [this.field('reset-email', 'EMAIL', email)], ACCOUNT_RESET.send, async () => {
+      if (!email.value.trim()) {
+        email.setAttribute('aria-invalid', 'true');
+        throw new FormError(ACCOUNT_RESET.noEmail);
+      }
+      try {
+        await this.deps.api.requestReset(email.value.trim());
+      } catch (e) {
+        // The channel switched off since it was read: ORBES Client Services' way alone, as before.
+        if (e instanceof ApiError && e.code === 'EMAIL_OFF') {
+          this.resetRefused = true;
+          this.render();
+          return;
+        }
+        throw e;
+      }
+      this.state.resetSent = true;
+      this.render();
+      this.root.querySelector<HTMLElement>(this.vault ? '.ownership__sent' : '.n-own__sent')?.focus({ preventScroll: true });
+    });
   }
 
   /** FORGOTTEN PASSWORD in the vault's look (lot E's): its title, its sentence, the contact, then its text buttons. */
@@ -638,6 +714,7 @@ export class OwnershipPanel {
     if (step === 'contact') {
       return [
         title,
+        ...(this.resetByEmail ? [this.text(ACCOUNT_RESET.lead), this.resetSentLine() ?? this.resetForm(), h('p', { class: 'ownership__meta micro soft ownership__other', text: ACCOUNT_RESET.other })] : []),
         this.text(ACCOUNT_PASSWORD.forgottenLead),
         this.deps.contact ? contactBlock(this.deps.contact) : null,
         h('div', { class: 'ownership__actions ownership__actions--stack' }, this.vaultTextButton(ACCOUNT_PASSWORD.haveCode, () => this.setRecover('code')), back),

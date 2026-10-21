@@ -812,11 +812,11 @@
 
   /* ── 4. The sign-in page (§10.30) ─────────────────────────────────────────────────────────────────────────────── */
 
-  html:not(.d-touch) body.nocturne .view--signin {
+  html:not(.d-touch) body.nocturne :is(.view--signin, .n-mail--desk) {
     padding-bottom: 0;
   }
 
-  html:not(.d-touch) body.nocturne:not([data-banner]) .view--signin {
+  html:not(.d-touch) body.nocturne:not([data-banner]) :is(.view--signin, .n-mail--desk) {
     margin-top: calc(-1 * var(--d-bar));
   }
 
@@ -981,7 +981,8 @@
     visibility: hidden;
   }
 
-  html:not(.d-touch) body.nocturne .d-signin__panel > .n-own > * {
+  html:not(.d-touch) body.nocturne .d-signin__panel > .n-own > *,
+  html:not(.d-touch) body.nocturne .d-signin__panel > :where(.n-mail__content) > .n-own > * {
     margin-top: 0;
   }
 
@@ -1043,6 +1044,44 @@
 
   html:not(.d-touch) body.nocturne .d-signin__panel .n-own__action {
     width: 100%;
+  }
+
+  /* RESET BY EMAIL under FORGOTTEN PASSWORD (lot M1, E3): the form 32 px under its sentence, the same sentence for any
+     address in its place, then NO ACCESS TO THIS EMAIL? 48 px under it, a hairline above, over ORBES Client Services' way. */
+  html:not(.d-touch) body.nocturne .d-signin__panel .n-own__text + .n-own__sent {
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .d-signin__panel .n-own__other {
+    margin-top: var(--d-s7);
+    padding-top: var(--d-s6);
+  }
+
+  html:not(.d-touch) body.nocturne .d-signin__panel .n-own__other + .n-own__text {
+    margin-top: var(--d-s3);
+  }
+
+  /* The emails' pages (lot M1, step M1.19; views/mail-frame.ts): the sign-in page's frame, their part in its panel. */
+  html:not(.d-touch) body.nocturne .n-mail__panel .n-mail__part > :first-child,
+  html:not(.d-touch) body.nocturne .n-mail__panel .n-mail__part > .n-form:first-child > .n-fld-group:first-child {
+    margin-top: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-mail__panel .n-mail__part > * + :is(.n-form, .n-contact) {
+    margin-top: var(--d-s6);
+  }
+
+  html:not(.d-touch) body.nocturne .n-mail__panel :is(.n-mail__text, .n-mail__again) {
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne .n-mail__panel .n-mail__action {
+    margin-top: var(--d-s6);
+  }
+
+  html:not(.d-touch) body.nocturne .n-mail__panel :is(.n-loading, .n-failed) {
+    margin: 0;
+    padding: 0;
   }
 
   /* In the light mode, as every light page frame: the photograph keeps the frame down to 24 px above the title and its

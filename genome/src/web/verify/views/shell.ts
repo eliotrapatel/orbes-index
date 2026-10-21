@@ -83,7 +83,7 @@ export interface ShellDeps {
  * The screens drawn in NOCTURNE with its chrome; the others of NOCTURNE (the scanner, VERIFYING…, a problem of the
  * scan: C11, C12, C17) keep the whole screen, without the rail and the ring.
  */
-const CHROME_SCREENS: readonly string[] = ['landing', 'result', 'pieces', 'piece', 'lookbook', 'sheet', 'releases', 'release', 'circle', 'circlePost', 'club', 'how', 'wishlist', 'scanPage', 'account', 'signIn', 'messages', 'order'];
+const CHROME_SCREENS: readonly string[] = ['landing', 'result', 'pieces', 'piece', 'lookbook', 'sheet', 'releases', 'release', 'circle', 'circlePost', 'club', 'how', 'wishlist', 'scanPage', 'account', 'signIn', 'messages', 'order', 'reset', 'unsubscribe'];
 const NOCTURNE_SCREENS: readonly string[] = [...CHROME_SCREENS, 'scan', 'verifying', 'message'];
 /** Desktop (BRIEF §5.3): on a computer the top bar stays on every page, VERIFYING… and a problem of the scan
  *  too (they open no camera there); the phone keeps them on the whole screen. */

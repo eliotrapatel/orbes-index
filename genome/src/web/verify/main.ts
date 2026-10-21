@@ -49,6 +49,9 @@
  *                             is shown the release's page instead, its address put back;
  *   /verify/circle            THE CIRCLE, the owners' feed (P-X01);
  *   /verify/circle/<id>       a post, its answer or its vote (an address that is none: the feed);
+ *   /verify/reset#…           SET A NEW PASSWORD, RESET BY EMAIL's link (lot M1, E3): the account's email and its code in
+ *                             the fragment, read and taken out of the address bar at once (kept in memory), over the landing;
+ *   /verify/unsubscribe#…     STOP THESE EMAILS, an email's link (lot M1, E1, E2): its token, read and taken out alike;
  *   anything else    the landing, its address put back to /verify.
  *
  * History: the landing screen is the base entry and every other screen shares
@@ -87,6 +90,7 @@ import { boardTokenOf } from './board-model.js';
 import { afterRoomPath, releasePath, releasesRouteOf, RELEASES_PATH } from './releases-model.js';
 import { recoveryContactModel, resultViewModel } from './view-model.js';
 import { orderReference, type ConcerningTarget, type WriteContext } from './messages-model.js';
+import { isResetPath, isUnsubscribePath, RESET_PATH, resetLinkOf, UNSUBSCRIBE_PATH, unsubscribeTokenOf, type ResetLink } from './reset-model.js';
 import { boardView } from './views/board.js';
 import { certificateView } from './views/certificate.js';
 import { circlePostView, circleView } from './views/circle.js';
@@ -104,6 +108,8 @@ import { piecePath, piecesView, type PiecesTab } from './views/pieces.js';
 import { wishlistView } from './views/wishlist.js';
 import { isWishlistPath, WISHLIST_PATH } from './wishlist-model.js';
 import { releasesView, releaseView, type ReleasesTab } from './views/releases.js';
+import { resetView } from './views/reset.js';
+import { unsubscribeView } from './views/unsubscribe.js';
 import { resultView } from './views/result.js';
 import { scanView, type ScanView } from './views/scanning.js';
 import { Shell } from './views/shell.js';
@@ -124,23 +130,23 @@ import { isSignInPath, registerSignInPage, SIGN_IN_PATH, signInPageView, type Si
 import { isMessagesPath, isWriteContext, messagesPageView, messagesPath, messagesSubjectOf, subjectKey } from './views/desktop-messages.js';
 import { isOrdersPath, orderPagePath, orderPageView, orderReferenceOf } from './views/desktop-order.js';
 
-type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'live' | 'board' | 'circle' | 'circlePost' | 'club' | 'how' | 'wishlist' | 'scanPage' | 'account' | 'signIn' | 'messages' | 'order';
+type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'live' | 'board' | 'circle' | 'circlePost' | 'club' | 'how' | 'wishlist' | 'scanPage' | 'account' | 'signIn' | 'messages' | 'order' | 'reset' | 'unsubscribe';
 
 /**
  * What a history entry of the app holds: the landing, a screen of a scan, MY PIECES, a certificate, the lookbook or a
  * sheet, the releases or a release's page, the circle or a post, THE CLUB, HOW RELEASES WORK, YOUR WISHLIST.
  */
-type Entry = 'landing' | 'app' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'circle' | 'circlePost' | 'club' | 'how' | 'wishlist' | 'scanPage' | 'account' | 'signIn' | 'messages' | 'order';
+type Entry = 'landing' | 'app' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'circle' | 'circlePost' | 'club' | 'how' | 'wishlist' | 'scanPage' | 'account' | 'signIn' | 'messages' | 'order' | 'reset' | 'unsubscribe';
 
 /** The entries above the landing that a scan, MY PIECES or a list takes the place of (their own address goes with them). */
-const REPLACEABLE: readonly Entry[] = ['app', 'pieces', 'piece', 'certificate', 'lookbook', 'sheet', 'releases', 'release', 'circle', 'circlePost', 'club', 'how', 'wishlist', 'scanPage', 'account', 'signIn', 'messages', 'order'];
+const REPLACEABLE: readonly Entry[] = ['app', 'pieces', 'piece', 'certificate', 'lookbook', 'sheet', 'releases', 'release', 'circle', 'circlePost', 'club', 'how', 'wishlist', 'scanPage', 'account', 'signIn', 'messages', 'order', 'reset', 'unsubscribe'];
 
 /**
  * The route of a path under /verify: MY PIECES, a certificate, the lookbook, a model's sheet, the releases, a
  * release's page, the circle, a post, or the landing (also for a path the app does not know). In any case: the
  * certificate's PDF letters its address in capitals (the server redirects those to /verify/c).
  */
-function routeOf(pathname: string): 'landing' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'board' | 'circle' | 'circlePost' | 'club' | 'how' | 'wishlist' | 'scanPage' | 'account' | 'signIn' | 'messages' | 'order' {
+function routeOf(pathname: string): 'landing' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'board' | 'circle' | 'circlePost' | 'club' | 'how' | 'wishlist' | 'scanPage' | 'account' | 'signIn' | 'messages' | 'order' | 'reset' | 'unsubscribe' {
   const path = pathname.replace(/\/+$/, '').toLowerCase();
   // Desktop (decision 5): MESSAGES in two parts and an order's page of a computer. A phone keeps the account
   // sheet's MESSAGES (NOW at its address) and the order's card on MY PIECES' ORDERS (an order's address shows it there).
@@ -167,6 +173,9 @@ function routeOf(pathname: string): 'landing' | 'pieces' | 'piece' | 'certificat
   if (isWishlistPath(path)) return 'wishlist';
   // Desktop: the SCAN page of a computer (a phone keeps NOW at this address).
   if (isScanPagePath(path) && isDesktop()) return 'scanPage';
+  // The emails' pages (lot M1, step M1.19): an email's link, on a phone and a computer alike.
+  if (isResetPath(path)) return 'reset';
+  if (isUnsubscribePath(path)) return 'unsubscribe';
   return path === CERTIFICATE_PATH ? 'certificate' : 'landing';
 }
 
@@ -341,6 +350,12 @@ class App {
   private signInFrom: { root: HTMLElement; live: { dispose(): void } | null; screen: Screen; path: string; depth: number } | null = null;
   /** The sign-in page on show (its form follows its entry's). */
   private signInPage: SignInPageView | null = null;
+  /**
+   * The emails' links (lot M1, step M1.19): RESET BY EMAIL's email and code, an unsubscribe link's token, read from the
+   * fragment and taken out of the address bar at once; kept in memory for back and forward, never stored.
+   */
+  private resetLink: ResetLink | null = null;
+  private unsubscribeToken: string | null = null;
 
   start(): void {
     // Where the visit comes from (plan CUSTOMER INTELLIGENCE §3.4 A.9): `o` and the `utm_` tags read and taken out of the
@@ -414,6 +429,10 @@ class App {
         if (this.screen !== 'wishlist') void this.showWishlist();
       } else if ((entry === 'scanPage' || route === 'scanPage') && isDesktop()) {
         if (this.screen !== 'scanPage') void this.showScanPage();
+      } else if (entry === 'reset' || route === 'reset') {
+        if (this.screen !== 'reset') void this.showReset();
+      } else if (entry === 'unsubscribe' || route === 'unsubscribe') {
+        if (this.screen !== 'unsubscribe') void this.showUnsubscribe();
       } else if (this.screen !== 'landing') void this.showLanding();
     });
     // A certificate's fragment changed in place (pasted, edited): the certificate of the new one.
@@ -422,6 +441,8 @@ class App {
       if (route === 'certificate') this.onCertificateAddress();
       // A board's secret pasted or changed in place: the board of the new one.
       else if (route === 'board') void this.showBoard();
+      // An email's link opened again in this tab (only its fragment differs): its page, with the new one.
+      else if ((route === 'reset' || route === 'unsubscribe') && location.hash.length > 1) this.openMailLink(route);
     });
     document.addEventListener('visibilitychange', () => this.onVisibility());
     window.addEventListener('pagehide', () => this.stopCamera());
@@ -645,6 +666,15 @@ class App {
         pushEntry({ screen: 'signIn', tab: 'signin' }, SIGN_IN_PATH);
       }
       void this.showSignIn(false);
+    } else if (route === 'reset' || route === 'unsubscribe') {
+      // An email's link (lot M1, step M1.19) over the landing: its fragment read, then taken out of the address bar.
+      const fresh = location.hash.length > 1;
+      this.takeMailLink(route);
+      if (fresh || entryOf(history.state) !== route) {
+        replaceEntry({ screen: 'landing' }, LANDING_PATH);
+        pushEntry({ screen: route }, route === 'reset' ? RESET_PATH : UNSUBSCRIBE_PATH);
+      } else replaceEntry(history.state, route === 'reset' ? RESET_PATH : UNSUBSCRIBE_PATH);
+      void (route === 'reset' ? this.showReset(false) : this.showUnsubscribe(false));
     } else if (route === 'scanPage') {
       // Desktop: the SCAN page over the landing, as THE CLUB.
       if (entryOf(history.state) !== route) {
@@ -1667,6 +1697,56 @@ class App {
     if (this.screen === 'certificate' && certificateTokenOf(location.hash) === this.certificateToken) return;
     if (entryOf(history.state) !== 'certificate') replaceEntry({ screen: 'certificate' }, `${CERTIFICATE_PATH}${location.hash}`);
     void this.showCertificate();
+  }
+
+  /**
+   * An email's link (lot M1, step M1.19): what its fragment holds, kept in memory, the fragment taken out of the address
+   * bar at once (it never stays in the history, nor reaches a bookmark). A page reloaded without it keeps the one read.
+   */
+  private takeMailLink(route: 'reset' | 'unsubscribe'): void {
+    const hash = location.hash;
+    if (hash.length > 1) {
+      if (route === 'reset') this.resetLink = resetLinkOf(hash);
+      else this.unsubscribeToken = unsubscribeTokenOf(hash);
+    }
+    if (hash) history.replaceState(history.state, '', route === 'reset' ? RESET_PATH : UNSUBSCRIBE_PATH);
+  }
+
+  /** An email's link opened again in this tab (only its fragment differs): its page, on its own entry. */
+  private openMailLink(route: 'reset' | 'unsubscribe'): void {
+    this.takeMailLink(route);
+    if (entryOf(history.state) !== route) replaceEntry({ screen: route }, route === 'reset' ? RESET_PATH : UNSUBSCRIBE_PATH);
+    void (route === 'reset' ? this.showReset() : this.showUnsubscribe());
+  }
+
+  /** SET A NEW PASSWORD (lot M1, E3): RESET BY EMAIL's link, its email and code read from the fragment. */
+  private async showReset(focus = true): Promise<void> {
+    this.generation++;
+    this.stopCamera();
+    const view = resetView({
+      api: this.api,
+      session: this.session,
+      link: this.resetLink,
+      contact: async () => recoveryContactModel(await this.contactDetails(), '') ?? undefined,
+      onSignedIn: () => {
+        // Signed in with the new password: MY PIECES in this page's place (back does not return to the link).
+        if (this.screen !== 'reset') return;
+        this.resetLink = null;
+        replaceEntry({ screen: 'pieces', tab: 'pieces' }, PIECES_PATH);
+        void this.showPieces();
+      },
+    });
+    if (await this.swap(view.root, 'reset', focus)) this.live = view;
+    else view.dispose();
+  }
+
+  /** STOP THESE EMAILS (lot M1, E1, E2): an email's link, its token read from the fragment. */
+  private async showUnsubscribe(focus = true): Promise<void> {
+    this.generation++;
+    this.stopCamera();
+    const view = unsubscribeView({ api: this.api, token: this.unsubscribeToken });
+    if (await this.swap(view.root, 'unsubscribe', focus)) this.live = view;
+    else view.dispose();
   }
 
   private showProblem(kind: ProblemKind): void {

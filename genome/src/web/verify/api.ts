@@ -27,6 +27,7 @@ import type {
   AccountMessage,
   AccountSizes,
   DeliveryAddressInput,
+  EmailPreferences,
   OrderCaseRequest,
   AccountThread,
   MessageContextInput,
@@ -80,6 +81,7 @@ import type {
   SignUpInput,
   SignUpOptions,
   TransferOffer,
+  UnsubscribeKind,
   VerifyInput,
   VerifyOutcome,
   WishAdded,
@@ -635,6 +637,43 @@ export class ApiClient {
     return r;
   }
 
+  // ── Emails (lot M1, E1–E3; API §10.27, §10.28, §8.18) ──
+
+  /** RESET BY EMAIL: whether it is offered now (the emails' channel on and PASSWORD_RESET switched on). */
+  async resetOffered(): Promise<boolean> {
+    const r = await this.request<{ email?: unknown }>('GET', '/api/v1/account/reset');
+    if (typeof r?.email !== 'boolean') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.email;
+  }
+
+  /** RESET BY EMAIL's SEND LINK: 202 for any address (nothing is said of it); 409 EMAIL_OFF while it is not offered. */
+  async requestReset(email: string): Promise<void> {
+    await this.request('POST', '/api/v1/account/reset-request', { email });
+  }
+
+  /** EMAIL ME WHEN A RELEASE IS ANNOUNCED, as saved; 409 EMAIL_OFF while the emails' channel is off. */
+  async emailPreferences(): Promise<EmailPreferences> {
+    return checkedPreferences(await this.request<EmailPreferences>('GET', '/api/v1/account/email-preferences'));
+  }
+
+  /** EMAIL ME WHEN A RELEASE IS ANNOUNCED switched; the choice as saved. */
+  async setReleaseNotices(on: boolean): Promise<EmailPreferences> {
+    return checkedPreferences(await this.request<EmailPreferences>('PUT', '/api/v1/account/email-preferences', { releaseNotices: on }, { csrf: true }));
+  }
+
+  /** What a STOP THESE EMAILS link stops, or null for a link the server does not recognise. */
+  async unsubscribeKind(token: string): Promise<UnsubscribeKind | null> {
+    const r = await this.request<{ kind?: unknown }>('GET', `/api/v1/email/unsubscribe?t=${encodeURIComponent(token)}`);
+    if (r?.kind === null) return null;
+    if (r?.kind !== 'FOUNDING_ANNOUNCEMENT' && r?.kind !== 'RELEASE_NOTICE') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.kind;
+  }
+
+  /** STOP: the same answer for any link. */
+  async unsubscribe(token: string): Promise<void> {
+    await this.request('POST', '/api/v1/email/unsubscribe', { token });
+  }
+
   async logout(): Promise<void> {
     try {
       await this.request('POST', '/api/v1/account/logout', undefined, { csrf: true });
@@ -1064,6 +1103,12 @@ function checkedProfile(r: AccountProfileView | null | undefined): AccountProfil
     throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
   }
   return r;
+}
+
+/** EMAIL ME WHEN A RELEASE IS ANNOUNCED as the server answers it, or BAD_RESPONSE. */
+function checkedPreferences(r: EmailPreferences | undefined): EmailPreferences {
+  if (!r || typeof r.releaseNotices !== 'boolean' || (r.changedAt !== null && typeof r.changedAt !== 'string')) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+  return { releaseNotices: r.releaseNotices, changedAt: r.changedAt };
 }
 
 /** YOUR ADDRESSES as the server answers it, or BAD_RESPONSE. */

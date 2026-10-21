@@ -204,6 +204,8 @@ export const OPENING_FRAMES = [
   // watches runs from the page's top to the photograph's foot or the panel's top, whichever comes first, so the bar
   // takes its ground before its words would stand over the panel's fields (shared/desktop-account.css `.d-signin__over`).
   'body:not([data-banner]) .view--signin > .d-signin > .d-signin__over',
+  // The emails' pages (lot M1, step M1.19: SET A NEW PASSWORD, STOP THESE EMAILS) in the same frame (views/mail-frame.ts).
+  'body:not([data-banner]) .n-mail--desk > .d-signin > .d-signin__over',
   // (A result's stage has no photograph: it opens under the solid bar, as every page without a frame.)
 ].join(', ');
 
