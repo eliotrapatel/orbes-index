@@ -1107,17 +1107,14 @@ async function auditedSizes(db: Db, dropId: string): Promise<{ label: string; pi
 
 /**
  * A draw's ADD TO CALENDAR (services/calendar.ts): one event from the opening of its entries to their close, an alarm
- * CALENDAR_ALARM_MINUTES before the opening, and a second one when its early access begins (P-X02: its first tier's,
- * `earlyAccessOpensAt`), when it has one that starts earlier still; its page's address; the model's name, public on the
+ * CALENDAR_ALARM_MINUTES before the opening, as a LIVE RELEASE's; its page's address; the model's name, public on the
  * draw's page from its publication; no personal data.
  */
-export function drawCalendar(input: { id: string; name: string; opensAt: Date; closesAt: Date; earlyAccessOpensAt: Date | null; now: Date; origin: string }): string {
+export function drawCalendar(input: { id: string; name: string; opensAt: Date; closesAt: Date; now: Date; origin: string }): string {
   const host = new URL(input.origin).host;
   const summary = `DRAW · ${input.name} · ORBES`;
   const url = `${input.origin}/verify/releases/${input.id}`;
   const alarms: IcsAlarm[] = [{ minutes: CALENDAR_ALARM_MINUTES, description: summary }];
-  const early = input.earlyAccessOpensAt ? Math.round((input.opensAt.getTime() - input.earlyAccessOpensAt.getTime()) / 60_000) : 0;
-  if (early > CALENDAR_ALARM_MINUTES) alarms.push({ minutes: early, description: `EARLY ACCESS · ${summary}` });
   return releaseIcs({
     prodId: '-//ORBES//DRAW//EN',
     uid: `draw-${input.id}@${host}`,
@@ -1284,7 +1281,7 @@ export class DropService {
     if (!r || r.cancelled_at) throw dropNotFound();
     return {
       filename: 'orbes-draw.ics',
-      body: drawCalendar({ id, name: r.model_name, opensAt: r.opens_at, closesAt: r.closes_at, earlyAccessOpensAt: earlyAccessOpensAt(r), now: this.clock(), origin }),
+      body: drawCalendar({ id, name: r.model_name, opensAt: r.opens_at, closesAt: r.closes_at, now: this.clock(), origin }),
     };
   }
 

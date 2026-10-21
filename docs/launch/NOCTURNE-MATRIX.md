@@ -416,7 +416,6 @@ THE RELEASES and THE CIRCLE the rail's. The content test looks for what the one 
 | `pieces-question-after` | AFTER THE RELEASES, *You said you would be there …*, ONE QUESTION, *release · date*, WHAT WOULD YOU HAVE WANTED?, the three answers, *One tap. You may change your answer until …* | said I'LL BE THERE, did not come | C30, plus-14 |
 | `pieces-turn-passed` | YOUR RELEASES: *release*, LIVE RELEASE · TURN PASSED, *Your turn passed before the seal was held.* | a turn passed | C31 (2) |
 | `live-pieces-turn` | YOUR RELEASES: LIVE NOW · YOUR TURN, *It is your turn. Open the release to secure your piece.* | a turn now | C31 (2) |
-| `live-pieces-queued` | (lot M1, W5) YOUR RELEASES: IN THE QUEUE · PLACE *412*, *You are in the queue. Open the release to follow your place.* | waiting for its batch (`queue`) | macro scope W5 |
 | `pieces-empty` | THE CLUB, *A piece registered … opens TITANE …*, its benefits, *No piece is registered …*, EARLY ACCESS and its recall | an account without a piece | C40 (3) |
 | `pieces-loading` | ONE MOMENT… | the pieces being read | C40 (1) |
 | `pieces-failed` | *Your pieces could not be shown just now.* *the reason*, TRY AGAIN | the pieces could not be read | C40 (2) |
@@ -687,12 +686,12 @@ verification app's own.
 ## The desktop states (`desk-*`, since the desktop plan of 2026-10-16)
 
 The same screens on a computer (the stage's **Computer**, above): `DESK_GROUPS` in
-`genome/test/support/nocturne-states.ts`, 272 states beside the phone's 283 (since lot M1), after them in `UI_STATES`. Each is either a
+`genome/test/support/nocturne-states.ts`, 270 states beside the phone's 282 (since lot M1), after them in `UI_STATES`. Each is either a
 phone state opened on a computer's window (the same demo, account, address, routes and acts, its `refs` naming its phone
 twin, `phone: <id>`), or a state made for a computer (`refs: ['desktop']`). Its id is `desk-`, then `light-` in light, its
 name, then its window's width unless it is 1440 × 900 (`desk-pieces-orbes-care-1024`, `desk-light-model-1920`). A
 state's `light` stores LIGHT MODE as the app does (`orbes.mode`) before the page opens. Their values are recorded in the
-same baseline (`nocturne-baseline.json`, the desk-* entries), the phone's entries byte for byte as production's but where lot M1 changed them on purpose (ADD TO CALENDAR on the draws to open or open, the legal pages of `2026-10-21`) and its 22 new states.
+same baseline (`nocturne-baseline.json`, the desk-* entries), the phone's entries byte for byte as production's but where lot M1 changed them on purpose (ADD TO CALENDAR on the draws to open or open, the legal pages of `2026-10-21`) and its 21 new states.
 
 | Shard | States | Windows | What it holds |
 |---|---|---|---|
@@ -705,7 +704,7 @@ same baseline (`nocturne-baseline.json`, the desk-* entries), the phone's entrie
 | `desk-7` | 23 | the three | ORBES CARE and I2 at 1920 × 1080; YOUR PROFILE (`account-profile`) entered, its tastes, and two retired tastes side by side |
 | `desk-8` | 24 | the three, in light | CINEMA in white: NOW, THE RELEASES, THE COLLECTION, a model, a draw, a LIVE RELEASE, a piece's ORBES CARE, IN USE |
 | `desk-9` | 16 | 1440 × 900, in light | The states the review preview could not show, in light: the service failing, the scan's window closing, the three order writes, an answer in MESSAGES and on NOW, THE PRIVATE SALON locked, YOUR WISHLIST signed out and failed, the certificate NO LONGER VALID and NOT FOUND, 600 entries, two retired tastes |
-| `desk-10` | 23 | 1440 × 900, MY PIECES in the queue also 1024 × 768 | The room's other screens (the line, secured, CONFIRMED, sold out in a size, its five ends, ENTER THE LINE), a LIVE RELEASE's rules and not eligible, the room not eligible and ready, the after-room's join and its ends; the queue of a paced release, its place and estimate, then paused, and MY PIECES' IN THE QUEUE · PLACE 412 (lot M1: `desk-live-queue`, `desk-live-queue-paused`, `desk-live-pieces-queued` and its 1024 twin, `queue`) |
+| `desk-10` | 21 | 1440 × 900 | The room's other screens (the line, secured, CONFIRMED, sold out in a size, its five ends, ENTER THE LINE), a LIVE RELEASE's rules and not eligible, the room not eligible and ready, the after-room's join and its ends; the queue of a paced release, its place and estimate, then paused (lot M1: `desk-live-queue`, `desk-live-queue-paused`, `queue`) |
 | `desk-11` | 25 | 1440 × 900, ORDERS also 1024 × 768 | A result's other answers, a piece's incidents, THE PRIVATE SALON in sizes, the draw's other states (lot M1: ADD TO CALENDAR, `desk-draw-open-calendar`; FOR SELECTED COLLECTORS for one among them and for another, `desk-draw-selected`, `desk-draw-selected-not-eligible`), the failures and the pages not found; the full demo's writes last (a transfer code, the ceremony, a piece received, REQUESTED, a draw entered) |
 | `desk-12` | 20 | 1440 × 900 | The extreme content (`stress`, its ceremony last) and the empty demo |
 | `desk-13` | 19 | 1440 × 900, some in light, two at 1024 × 768 | Lot M1's emails' pages (the stage `email`): RESET BY EMAIL and its sentence, SET A NEW PASSWORD and its incomplete, refused and saved states, YOUR PROFILE's release notices, STOP THESE EMAILS (both links, not recognised, stopped); RESET BY EMAIL, the link's page, the release notices and STOP THESE EMAILS also in light, the link's page and STOP THESE EMAILS at 1024 × 768; the writes last (stopped, then the new password) |

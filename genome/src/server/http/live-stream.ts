@@ -8,7 +8,11 @@
  *             (W2, W5), a viewer whose entry waits for its batch (its `queue` set) gets `queue` events in place of the
  *             room's: the queue's one small frame shared by all of them (LiveQueueFrame: the next batch, the pace, held
  *             or not, the batches, those waiting), with its own `you` events (its place, its estimated entry time); once
- *             admitted, the room's events again. Before T0 nobody waits for a batch: the room for everyone;
+ *             admitted, the room's events again. Only an entry whose batch is the next one (`queue.next`) keeps its
+ *             stream: one further behind is sent its `you` and the queue's frame, then its stream ends, and a stream it
+ *             asks for answers 204 until its batch is the next one; its page reads GET /state meanwhile, as often as
+ *             `liveQueuePollMs` says (10 s to a minute). So a queue of thousands holds about X streams, not thousands
+ *             (docs/reports/live-load.md §7). Before T0 nobody waits for a batch: the room for everyone;
  *   boards    POST /api/v1/live/:id/board/stream, by the board's secret link: `board` events (the countdown, the door, the
  *             pieces left overall), sent when they changed;
  *   consoles  GET /api/admin/live/:id/stream (routes/admin/live.ts), a console session (AUDITOR and up): `console` events
@@ -41,7 +45,7 @@
 import type { ServerResponse } from 'node:http';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { DomainError } from '../errors.js';
-import type { LiveEntryView } from '../services/live.js';
+import type { LiveEntryView, LiveQueueView } from '../services/live.js';
 import type { AdminLiveBoard } from '../services/live-console.js';
 import type { LiveBoard, LiveFrame, LiveQueueFrame, LiveRoom, LiveRoomService, LiveSavedSize } from '../services/live-room.js';
 import { noopLogger, systemClock, type Clock, type Logger } from '../types.js';
@@ -55,8 +59,27 @@ export const LIVE_STREAM_ROUTES = Object.freeze(['/api/v1/live/:id/stream', '/ap
 export const LIVE_PULSE_MS = 1000;
 /** A page whose stream is lost reads its state this often in the room (web/verify/views/live.ts LIVE_POLL_MS)… */
 export const LIVE_ROOM_POLL_MS = 2000;
-/** …and this often while it waits for its batch (W2): a queue of thousands reads five times less than the room. */
+/** …and this often while it waits for its batch (W2) as the next one, its stream lost: five times less than the room… */
 export const LIVE_QUEUE_POLL_MS = 10_000;
+/**
+ * …and, further behind (no stream: `liveQueuePollMs`), half the time until its batch becomes the next one, within these
+ * bounds; `held` while the pace is held. The page counts the batches due between two reads itself (web/verify/live-model.ts
+ * queueModel), so its place and estimate stay right between them.
+ */
+export const LIVE_QUEUE_FAR_POLL_MS = Object.freeze({ min: 10_000, max: 60_000, held: 30_000 });
+
+/**
+ * How soon a page whose entry waits for its batch reads its state again (`pollMs`, W2): LIVE_QUEUE_POLL_MS when its
+ * batch is the next one (its stream lost); further behind, half the time until its batch becomes the next one, so it
+ * opens its stream a batch ahead (LIVE_QUEUE_FAR_POLL_MS, whole seconds); `held` while the pace is held.
+ */
+export function liveQueuePollMs(queue: Pick<LiveQueueView, 'next' | 'paused' | 'etaAt'>, minutes: number, now: number): number {
+  if (queue.next) return LIVE_QUEUE_POLL_MS;
+  const { min, max, held } = LIVE_QUEUE_FAR_POLL_MS;
+  if (queue.paused || !queue.etaAt) return held;
+  const untilNext = new Date(queue.etaAt).getTime() - minutes * 60_000 - now;
+  return Math.min(max, Math.max(min, Math.round(untilNext / 2 / 1000) * 1000));
+}
 export const LIVE_HEARTBEAT_MS = 20_000;
 export const LIVE_STREAMS_PER_ACCOUNT = 2;
 /**
@@ -154,6 +177,11 @@ interface ConsoleStream extends Stream {
 
 type AnyStream = ViewerStream | BoardStream | ConsoleStream;
 
+/** An entry waiting for its batch behind the next one (W2): it holds no stream. */
+function behindNextBatch(entry: LiveEntryView | null | undefined): boolean {
+  return !!entry?.queue && !entry.queue.next;
+}
+
 /** The same link's hash (not a secret: both sides are the server's own hashes). */
 function sameHash(a: Uint8Array, b: Uint8Array | null): boolean {
   return b !== null && a.length === b.length && a.every((x, i) => x === b[i]);
@@ -197,15 +225,16 @@ export class LiveHub {
   }
 
   /**
-   * What a viewer polls when its stream is lost (GET /state), from the same frame (from memory when built within the
-   * cache's time): the queue's frame while its entry waits for its batch on a paced release (`waiting`: its `queue` is
-   * set), with LIVE_QUEUE_POLL_MS; the room otherwise, with LIVE_ROOM_POLL_MS. Null once the release is no longer one
-   * to read.
+   * What a viewer polls when it has no stream (GET /state), from the same frame (from memory when built within the
+   * cache's time): the queue's frame while its entry waits for its batch on a paced release (`queue`, its own), with
+   * `liveQueuePollMs`; the room otherwise, with LIVE_ROOM_POLL_MS. Null once the release is no longer one to read.
    */
-  async stateOf(dropId: string, waiting: boolean): Promise<({ room: LiveRoom } | { queue: LiveQueueFrame }) & { pollMs: number } | null> {
+  async stateOf(dropId: string, queue: LiveQueueView | null): Promise<({ room: LiveRoom } | { queue: LiveQueueFrame }) & { pollMs: number } | null> {
     const frame = await this.frame(dropId, false);
     if (!frame) return null;
-    return waiting && frame.queue ? { queue: frame.queue, pollMs: LIVE_QUEUE_POLL_MS } : { room: frame.room, pollMs: LIVE_ROOM_POLL_MS };
+    return queue && frame.queue
+      ? { queue: frame.queue, pollMs: liveQueuePollMs(queue, frame.queue.minutes, this.clock().getTime()) }
+      : { room: frame.room, pollMs: LIVE_ROOM_POLL_MS };
   }
 
   /** A release's board, as the board's page reads it before its stream. */
@@ -215,7 +244,8 @@ export class LiveHub {
 
   /**
    * Open a viewer's stream (the route has checked who may read the room), for as long as its session lives: 429
-   * LIVE_STREAMS_LIMIT past the account's streams; 204 when the release is over.
+   * LIVE_STREAMS_LIMIT past the account's streams; 204 when the release is over, or while its entry waits behind the
+   * next batch (W2: its page reads its state).
    */
   async openViewer(request: FastifyRequest, reply: FastifyReply, dropId: string, viewer: { accountId: string; sessionId: string }): Promise<void> {
     const { accountId, sessionId } = viewer;
@@ -230,6 +260,10 @@ export class LiveHub {
         return;
       }
       const views = await this.room.viewerEntries(dropId, [accountId]);
+      if (behindNextBatch(views.get(accountId))) {
+        reply.code(204).send();
+        return;
+      }
       // AC-01: the first frame says which size YOUR SIZES preselects, while the account holds no entry nor interest.
       const savedSize = views.has(accountId) ? null : await this.room.savedSize(accountId, dropId);
       const stream: ViewerStream = { kind: 'viewer', dropId, accountId, sessionId, res: this.begin(request, reply), lastWrite: 0, sent: undefined, you: undefined, closed: false };
@@ -492,7 +526,9 @@ export class LiveHub {
       chunk += shared.event;
     }
     if (chunk) this.write(s, chunk);
-    if (entry?.status === 'REMOVED') this.close(s);
+    // REMOVED: its last event. Waiting behind the next batch (W2): its place and the queue's frame sent, its page reads
+    // its state until its batch is the next one.
+    if (entry?.status === 'REMOVED' || behindNextBatch(entry)) this.close(s);
   }
 
   private write(s: AnyStream, chunk: string): void {

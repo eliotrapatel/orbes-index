@@ -1102,6 +1102,8 @@ export interface LiveQueue {
   /** The estimated entry time; null while the queue is paused. */
   etaAt: string | null;
   paused: boolean;
+  /** Its batch is the next one: the page follows the stream. Behind it, the server gives no stream: the page reads its state (`pollMs`). */
+  next: boolean;
 }
 
 /** The account against the release's rules now. */
@@ -1148,7 +1150,7 @@ export interface LiveState {
   room?: LiveRoom;
   /** W2: the queue's frame while the account's entry waits for its batch on a paced release. */
   queue?: LiveQueueFrame;
-  /** How soon to read the state again while the stream is lost (2 s in the room, 10 s in the queue). */
+  /** How soon to read the state again without a stream (2 s in the room, 10 s in the queue's next batch, up to a minute behind it). */
   pollMs?: number;
   access: LiveAccess;
   entry: LiveEntry | null;

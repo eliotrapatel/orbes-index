@@ -72,7 +72,11 @@
  * --pace X,Y (W4, the plan of 2026-10-20 §1.5: `--pace 250,1 --levels 5000`) gives the release a pace, X buyers admitted
  * every Y minutes (LIVE_PACE_BATCH, LIVE_PACE_MINUTES), and measures its queue (W2): from T0 the phones not admitted yet
  * wait on the queue's frame (`queue` events and their own `you` events, their place and estimated entry time) until
- * their batch lets them into the room. The door before T0 is the house's for that many people: the room opens
+ * their batch lets them into the room. As the page does (web/verify/views/live.ts), only a phone whose batch is the
+ * next one keeps its stream: the server ends the stream of one behind it after its place, and that phone reads GET
+ * /state instead, first at a moment of its own within LIVE_QUEUE_SPREAD_MS, then as the state's `pollMs` says, until
+ * its batch is the next one and it opens its stream again. Reported besides: those state reads, the streams the server
+ * ended so and opened again, and the app's memory before T0 and from T0 on with the streams then open. The door before T0 is the house's for that many people: the room opens
  * PACED_ROOM_MINUTES (5) before T0, the console's default, the streams and I'LL BE THERE come over up to two minutes
  * before it, and the entries over the room's first four minutes (--burst-seconds sets another burst). So that the
  * release lasts until its last batch, a phone whose turn comes before
@@ -94,7 +98,7 @@
  * PATH) and the app's log of each level beside it (server-<N>.log). Seeded: the same arguments give the same
  * accounts, sizes and moments; the times depend on the machine and on what else runs on it.
  */
-import { fork, type ChildProcess } from 'node:child_process';
+import { execFile, fork, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { Agent, request as httpRequest, type IncomingMessage } from 'node:http';
@@ -105,11 +109,18 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import v8 from 'node:v8';
 import { LIVE_PACE_BATCH, LIVE_PACE_MINUTES } from '../src/server/db/schema.js';
+import { LIVE_QUEUE_POLL_MS } from '../src/server/http/live-stream.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SELF = fileURLToPath(import.meta.url);
 /** The app's public origin in this test: every mutation sends it, as a browser on the site does. */
 const ORIGIN = 'https://verify.orbes.load';
+/** As the page (web/verify/views/live.ts LIVE_QUEUE_SPREAD_MS): its first state read once the server ended its stream behind the next batch. */
+const LIVE_QUEUE_SPREAD_MS = 60_000;
+/** As the page (web/verify/views/live.ts FINAL): an entry in one of these is over for its page, which closes its stream. */
+const FINAL_STATUSES: ReadonlySet<string> = new Set(['CONFIRMED', 'MISSED', 'EXPIRED', 'RELEASED', 'REMOVED']);
+/** From T0, this long for the streams behind the next batch to end: the memory and streams "from T0" are read after it. */
+const QUEUE_SETTLE_MS = 10_000;
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
 
 // ── Targets (plan of 2026-10-04, Architecture › Load) ──────────────────────
@@ -242,6 +253,8 @@ interface ReadyMessage {
 interface MemorySample {
   at: number;
   rss: number;
+  /** The streams open on the app then (the hub's), once the release is made. */
+  streams?: number;
   /** The heap V8 holds (its young and old generations), and the part in use. */
   heapTotal: number;
   heapUsed: number;
@@ -792,7 +805,7 @@ async function serve(): Promise<void> {
   // The seeding's garbage collected: the figures are the room's (an app running for days holds none of it).
   collect();
   const memory: MemorySample[] = [];
-  const sampler = setInterval(() => memory.push(sample()), 250);
+  const sampler = setInterval(() => memory.push({ ...sample(), streams: hub.open.streams }), 250);
 
   const loop = monitorEventLoopDelay({ resolution: 10 });
   loop.enable();
@@ -923,12 +936,17 @@ interface ActionRecord {
 
 /** A phone's stream of one room. */
 interface StreamState {
-  /** When it asked, and when its first room arrived. */
+  /** When it asked, and when its first event arrived. */
   asked: number;
   connectedMs: number | null;
   status: number | null;
   ended: boolean;
   dropped: boolean;
+  /** --pace: ended by the server (or refused, 204) while the entry waits behind the next batch (W2): neither dropped nor refused. */
+  parked: boolean;
+  /** Closed by its phone, its entry over (as the page does, web/verify/views/live.ts `done`): not dropped. */
+  closedByPhone: boolean;
+  close: () => void;
 }
 
 interface Viewer {
@@ -946,6 +964,9 @@ interface Viewer {
   door: number | null;
   /** --pace: what its phone read of the queue. */
   queue: QueuePhone;
+  /** --pace: its entry waits behind the next batch (its last `you` or state said `queue.next` false); its state read meanwhile. */
+  behind: boolean;
+  polling: boolean;
 }
 
 /** What a phone read of the queue (W2) on a paced release: from its `you` events and the queue's frames. */
@@ -962,11 +983,11 @@ export interface QueuePhone {
   admittedFor: number | null;
 }
 
-/** One queue frame a waiting phone read: its pulse's time, when it was read, and how many waited. */
+/** One queue frame a waiting phone read: its pulse's time, when it was read, and how many waiting phones held a stream then. */
 interface QueueEvent {
   now: number;
   at: number;
-  waiting: number;
+  streaming: number;
 }
 
 /**
@@ -986,6 +1007,63 @@ export function queueVerdict(phones: readonly QueuePhone[], pace: LoadPace): { w
     batchesSeen: new Set(admitted.map((q) => q.admittedFor)).size,
     delivery: admitted.map((q) => q.admittedSeenAt! - q.admittedFor!),
   };
+}
+
+/** One reading of macOS's `footprint` for the app: its physical footprint, its peak so far, and the memory it lists as reclaimable. */
+interface FootprintSample {
+  at: number;
+  footprintMib: number;
+  peakMib: number | null;
+  reclaimableMib: number;
+}
+
+/**
+ * `footprint -p <pid>`'s header (« Footprint: 412 MB »), its `phys_footprint_peak` (the most since the process
+ * started; null when absent) and its categories' Reclaimable column, summed, in MiB; null when it cannot be read.
+ */
+export function parseFootprint(out: string): { footprintMib: number; peakMib: number | null; reclaimableMib: number } | null {
+  const mibOf = (n: string, unit: string) => Number(n) * ({ B: 1 / 1048576, KB: 1 / 1024, MB: 1, GB: 1024 } as Record<string, number>)[unit.toUpperCase()]!;
+  const head = /Footprint:\s*([\d.]+)\s*(B|KB|MB|GB)\b/i.exec(out);
+  if (!head) return null;
+  const peak = /phys_footprint_peak:\s*([\d.]+)\s*(B|KB|MB|GB)\b/i.exec(out);
+  let reclaimable = 0;
+  for (const line of out.split('\n')) {
+    const m = /^\s*([\d.]+)\s*(B|KB|MB|GB)\s+([\d.]+)\s*(B|KB|MB|GB)\s+([\d.]+)\s*(B|KB|MB|GB)\s+\d+\s+\S/i.exec(line);
+    if (m) reclaimable += mibOf(m[5]!, m[6]!);
+  }
+  const round1 = (x: number) => Math.round(x * 10) / 10;
+  return { footprintMib: round1(mibOf(head[1]!, head[2]!)), peakMib: peak ? round1(mibOf(peak[1]!, peak[2]!)) : null, reclaimableMib: round1(reclaimable) };
+}
+
+/** A phase's memory as the report reads it: its peak, the streams open then, the most open. */
+function phaseLine(x: PhaseFigures): string {
+  if (x.peakMib === null) return '—';
+  const footprint = x.footprintPeakMib === null ? '' : `; footprint at most ${x.footprintPeakMib} MiB by its end (${x.reclaimableAtPeakMib} MiB reclaimable then)`;
+  return `peak ${x.peakMib} MiB resident with ${x.streamsAtPeak ?? '—'} streams open (at most ${x.maxStreams ?? '—'})${footprint}`;
+}
+
+/** Per minute from T0 (negative before it): the peak resident memory and footprint in that minute, and the most streams open. */
+function byMinute(memory: readonly MemorySample[], footprints: readonly FootprintSample[], t0: number): { minute: number; rssMib: number; footprintMib: number | null; streams: number }[] {
+  const out = new Map<number, { minute: number; rssMib: number; footprintMib: number | null; streams: number }>();
+  for (const m of memory) {
+    const minute = Math.floor((m.at - t0) / 60_000);
+    const r = out.get(minute) ?? { minute, rssMib: 0, footprintMib: null, streams: 0 };
+    r.rssMib = Math.max(r.rssMib, mib(m.rss));
+    r.streams = Math.max(r.streams, m.streams ?? 0);
+    out.set(minute, r);
+  }
+  for (const f of footprints) {
+    const r = out.get(Math.floor((f.at - t0) / 60_000));
+    if (r) r.footprintMib = Math.max(r.footprintMib ?? 0, f.footprintMib);
+  }
+  return [...out.values()].sort((a, b) => a.minute - b.minute);
+}
+
+/** The most of these moments (ms) within one second, counted per whole second. */
+export function peakPerSecond(moments: readonly number[]): number {
+  const bySecond = new Map<number, number>();
+  for (const m of moments) bySecond.set(Math.floor(m / 1000), (bySecond.get(Math.floor(m / 1000)) ?? 0) + 1);
+  return Math.max(0, ...bySecond.values());
 }
 
 /**
@@ -1106,8 +1184,27 @@ interface PacedResult {
   admitted: number;
   /** The queue on the phones (queueVerdict), its admissions on the phone after their batch's time. */
   phones: Omit<ReturnType<typeof queueVerdict>, 'delivery'> & { delivery: Stats };
-  /** The queue's frames: from each pulse's time to the last waiting phone that read it, over the pulses that reached 95 % of those waiting. */
+  /** The queue's frames: from each pulse's time to the last phone waiting on a stream that read it, over the pulses that reached 95 % of them. */
   fanOut: { pulses: number; full: number; received: Stats };
+  /** W2: the app's memory before T0 (everyone in the room on a stream) and from T0 + QUEUE_SETTLE_MS on: its peak, the streams open then, the most open. */
+  memory: { beforeT0: PhaseFigures; fromT0: PhaseFigures };
+  /** macOS: the two readings of `footprint` (just before T0, once the release is over). */
+  footprints: FootprintSample[];
+  memoryByMinute: { minute: number; rssMib: number; footprintMib: number | null; streams: number }[];
+  /** W2: the phones behind the next batch: their streams ended (or refused) by the server, opened again once their batch was the next one, their state reads. */
+  queueStreams: { parked: number; reopened: number; stateReads: Stats; stateReadsNot200: number; stateReadsPeakPerSecond: number };
+}
+
+interface PhaseFigures {
+  peakMib: number | null;
+  streamsAtPeak: number | null;
+  maxStreams: number | null;
+  /**
+   * macOS: the app's physical footprint at its most (`footprint`'s phys_footprint_peak read at the phase's end: just
+   * before T0, then once the release is over, so the second is the run's), and what it listed as reclaimable then.
+   */
+  footprintPeakMib: number | null;
+  reclaimableAtPeakMib: number | null;
 }
 
 /** The app's process, its log (stdout) in the level's file. */
@@ -1168,6 +1265,21 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
   const socketPath = join(tmpdir(), `orbes-live-load-${process.pid}-${viewersWanted}.sock`);
   const database = pglite ? await startDatabase(socketPath) : undefined;
   const child = startServer(logPath);
+  // macOS: the app's physical footprint (`footprint`, what the system charges the process: its resident memory less the
+  // pages the allocators have given back, which RSS still counts until the system takes them), read twice only, as it
+  // stops the process while it walks its memory: just before T0 and once the release is over, each with its peak so far.
+  const footprints: FootprintSample[] = [];
+  const readFootprint = (): Promise<void> =>
+    platform() !== 'darwin' || !child.pid
+      ? Promise.resolve()
+      : new Promise((done) => {
+          const at = Date.now();
+          execFile('/usr/bin/footprint', ['-p', String(child.pid)], { timeout: 20_000 }, (err, out) => {
+            const f = err ? null : parseFootprint(out);
+            if (f) footprints.push({ at, ...f });
+            done();
+          });
+        });
   child.send({ type: 'setup', viewers: viewersWanted, ...releaseTimes(o, viewersWanted), databaseUrl: o.databaseUrl, databaseSocket: pglite ? socketPath : null, seed: o.seed, pace: o.pace } satisfies SetupMessage);
   const ready = await nextMessage<ReadyMessage>(child, 'ready');
   process.stdout.write(`  ${viewersWanted}: app ready (port ${ready.port}, seeded in ${(ready.seedMs / 1000).toFixed(1)} s, calibration ${ready.calibrationMs} ms)\n`);
@@ -1208,7 +1320,17 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
     outcome: { main: null, after: null },
     door: null,
     queue: { waited: false, firstEta: null, lastPlace: null, waitingFor: null, admittedSeenAt: null, admittedFor: null },
+    behind: false,
+    polling: false,
   }));
+  /** --pace: the phones waiting for their batch on a stream (the next batch's), which the queue's frames reach. */
+  const queueStreaming = new Set<Viewer>();
+  /** --pace: the state reads of the phones behind the next batch (W2), and the streams opened again once it was theirs. */
+  const stateReads: { ms: number; status: number; at: number }[] = [];
+  let reopened = 0;
+  /** The phones whose stream the server ended (or refused) behind the next batch. */
+  const parked = new Set<Viewer>();
+  let finished = false;
 
   /** One request of a phone, timed. */
   const request = (v: Viewer, method: string, path: string, body: unknown): Promise<{ status: number; ms: number; json: Record<string, unknown> | null }> =>
@@ -1292,14 +1414,14 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
     if (!data) return;
     const body = JSON.parse(data) as Record<string, unknown>;
     const stream = v.streams[room]!;
+    if (stream.connectedMs === null) stream.connectedMs = at - stream.asked;
     if (name === 'room') {
-      if (stream.connectedMs === null) stream.connectedMs = at - stream.asked;
       rooms.push({ room, now: Date.parse(body.now as string), at });
       last[room] = body as (typeof last)[RoomKey];
       if (last[room].endedReason && endRead[room] === null) endRead[room] = at;
     } else if (name === 'queue') {
       // W2: the queue's frame, shared by the phones waiting for their batch.
-      queueEvents.push({ now: Date.parse(body.now as string), at, waiting: Number(body.waiting) });
+      queueEvents.push({ now: Date.parse(body.now as string), at, streaming: queueStreaming.size });
       v.queue.waitingFor = Date.parse(body.nextBatchAt as string);
     } else if (name === 'you') {
       const entry = body.entry as {
@@ -1307,8 +1429,14 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
         position: number | null;
         turn: { at: string; token: string | null } | null;
         afterRoom?: { opensAt: string } | null;
-        queue?: { place: number; etaAt: string | null; paused: boolean } | null;
+        queue?: { place: number; etaAt: string | null; paused: boolean; next: boolean } | null;
       } | null;
+      if (room === 'main') {
+        // W2: behind the next batch, the server ends this stream after this chunk (the phone then reads its state).
+        v.behind = entry?.queue?.next === false;
+        if (entry?.queue && !v.behind) queueStreaming.add(v);
+        else queueStreaming.delete(v);
+      }
       if (room === 'main' && entry?.queue) {
         v.queue.waited = true;
         v.queue.lastPlace = entry.queue.place;
@@ -1329,11 +1457,58 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
         deliveries.push(at - Date.parse(entry.turn.at));
         void takeTurn(v, room, entry.turn.token);
       }
+      // --pace: its entry over, the phone closes its stream as the page does (the release lasts twenty minutes; without a
+      // pace it ends within seconds, every stream with it, as before).
+      if (plan && entry && FINAL_STATUSES.has(entry.status) && !stream.closedByPhone) {
+        stream.closedByPhone = true;
+        stream.close();
+      }
     }
   };
 
+  /**
+   * W2: a phone behind the next batch reads its state, first after `firstMs`, then as its `pollMs` says, until its batch
+   * is the next one (or it is let in): then its stream again. Nothing once the release is over or the entry final.
+   */
+  const pollState = (v: Viewer, firstMs: number) => {
+    if (v.polling) return;
+    v.polling = true;
+    const read = async () => {
+      if (finished || last.main.over) {
+        v.polling = false;
+        return;
+      }
+      const r = await request(v, 'GET', `/api/v1/live/${ready.dropId}/state`, undefined);
+      stateReads.push({ ms: r.ms, status: r.status, at: Date.now() });
+      const entry = r.json?.entry as { status: string; queue: { place: number; etaAt: string | null; next: boolean } | null } | null | undefined;
+      const frame = r.json?.queue as { nextBatchAt?: string } | undefined;
+      const pollMs = typeof r.json?.pollMs === 'number' ? r.json.pollMs : LIVE_QUEUE_POLL_MS;
+      if (r.status === 200 && entry) {
+        if (entry.queue) {
+          v.queue.waited = true;
+          v.queue.lastPlace = entry.queue.place;
+          if (v.queue.firstEta === null && entry.queue.etaAt) v.queue.firstEta = Date.parse(entry.queue.etaAt);
+          if (frame?.nextBatchAt) v.queue.waitingFor = Date.parse(frame.nextBatchAt);
+        }
+        v.behind = entry.queue?.next === false;
+        if (!['QUEUED', 'TURN', 'SECURED', 'WAITING'].includes(entry.status)) {
+          v.polling = false;
+          return;
+        }
+        if (!v.behind) {
+          v.polling = false;
+          reopened++;
+          openStream(v, 'main');
+          return;
+        }
+      }
+      setTimeout(() => void read(), pollMs);
+    };
+    setTimeout(() => void read(), firstMs);
+  };
+
   const openStream = (v: Viewer, room: RoomKey) => {
-    const stream: StreamState = { asked: Date.now(), connectedMs: null, status: null, ended: false, dropped: false };
+    const stream: StreamState = { asked: Date.now(), connectedMs: null, status: null, ended: false, dropped: false, parked: false, closedByPhone: false, close: () => {} };
     v.streams[room] = stream;
     const req = httpRequest(
       {
@@ -1348,6 +1523,12 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
         stream.status = res.statusCode ?? 0;
         if (res.statusCode !== 200) {
           res.resume();
+          // W2: still behind the next batch for the server: its state read again.
+          if (room === 'main' && res.statusCode === 204 && v.queue.waited && !last.main.over) {
+            stream.parked = true;
+            parked.add(v);
+            pollState(v, LIVE_QUEUE_POLL_MS);
+          }
           return;
         }
         res.setEncoding('utf8');
@@ -1362,13 +1543,20 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
         });
         res.on('close', () => {
           stream.ended = true;
-          if (!last[room].over) stream.dropped = true;
+          if (room === 'main') queueStreaming.delete(v);
+          // W2: ended by the server behind the next batch: the state read, from a moment of its own.
+          if (room === 'main' && v.behind && !last.main.over) {
+            stream.parked = true;
+            parked.add(v);
+            pollState(v, random() * LIVE_QUEUE_SPREAD_MS);
+          } else if (!last[room].over && !stream.closedByPhone) stream.dropped = true;
         });
       },
     );
+    stream.close = () => req.destroy();
     req.on('error', () => {
       stream.ended = true;
-      stream.dropped = true;
+      if (!stream.closedByPhone) stream.dropped = true;
     });
     req.end();
   };
@@ -1398,7 +1586,11 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
   const entries = viewers.map((v) => sleep(random() * entryBurstSeconds(o) * 1000).then(() => call(v, 'main', 'enter', 'POST', '/enter', { sizeId: v.sizeId })));
   await Promise.all([...interest, ...entries]);
 
-  // T0, then until the release is over and its streams have ended.
+  // T0, then until the release is over and its streams have ended (--pace: the app's footprint read just before T0).
+  if (o.pace) {
+    await sleep(ready.opensAt - 2000 - Date.now());
+    await readFootprint();
+  }
   await sleep(ready.opensAt - Date.now());
   const roomDone = (room: RoomKey, among: Viewer[]) => last[room].over === true && among.every((v) => { const s = v.streams[room]; return !s || s.ended || s.status !== 200; });
   // With a pace, the release sells out after its last batch.
@@ -1436,6 +1628,8 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
   // The turns under way finish (none should be: the rooms are over).
   while (viewers.some((v) => v.acting.main || v.acting.after) && Date.now() < afterDeadline + 10_000) await sleep(100);
 
+  finished = true;
+  if (o.pace) await readFootprint();
   child.send({ type: 'collect' });
   const report = await nextMessage<ServerReport>(child, 'report');
   child.send({ type: 'stop' });
@@ -1497,7 +1691,7 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
     const s = among.filter((v) => !(room === 'after' && lateGuests.has(v) && v.streams.after?.status !== 200)).map((v) => v.streams[room]);
     return {
       opened: s.filter((x) => x?.status === 200).length,
-      refused: s.filter((x) => !x || x.status !== 200).length,
+      refused: s.filter((x) => !x || (x.status !== 200 && !x.parked)).length,
       dropped: s.filter((x) => x?.dropped).length,
       connect: stats(s.filter((x): x is StreamState => x !== null && x.connectedMs !== null).map((x) => x.connectedMs!)),
     };
@@ -1519,6 +1713,7 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
   const facts = report.facts;
   const clean =
     unexpected.length === 0 &&
+    stateReads.every((r) => r.status === 200) &&
     doorReads.every((d) => d.status === 200) &&
     streams.refused === 0 &&
     streams.dropped === 0 &&
@@ -1557,16 +1752,33 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
   const vpsP95 = (o.pace ? behind.p95 : all.p95) + (f - 1) * appShare;
 
   // --pace: the queue's frames, the batches on the server, the queue on the phones.
+  // W2: the memory and the streams before T0 (everyone in the room on a stream) and from T0 + QUEUE_SETTLE_MS on (the
+  // streams behind the next batch ended).
+  const phase = (from: number, to: number): PhaseFigures => {
+    const m = report.memory.filter((x) => x.at >= from && x.at < to);
+    const peak = m.reduce<MemorySample | null>((a, x) => (a === null || x.rss > a.rss ? x : a), null);
+    const f = footprints.filter((x) => x.at >= from && x.at < to).at(-1) ?? null;
+    return {
+      peakMib: peak ? mib(peak.rss) : null,
+      streamsAtPeak: peak?.streams ?? null,
+      maxStreams: m.length ? Math.max(...m.map((x) => x.streams ?? 0)) : null,
+      footprintPeakMib: f ? (f.peakMib ?? f.footprintMib) : null,
+      reclaimableAtPeakMib: f?.reclaimableMib ?? null,
+    };
+  };
   let paced: PacedResult | null = null;
   if (o.pace && plan) {
-    const byPulse = new Map<number, { n: number; last: number; waiting: number }>();
+    // The phones a pulse's frame was for: those waiting on a stream then (W2: the next batch's; at T0 every waiting
+    // phone reads one frame before its stream ends behind it).
+    const byPulse = new Map<number, { n: number; last: number; streaming: number }>();
     for (const e of queueEvents) {
-      const r = byPulse.get(e.now) ?? { n: 0, last: 0, waiting: e.waiting };
+      const r = byPulse.get(e.now) ?? { n: 0, last: 0, streaming: 0 };
       r.n++;
       r.last = Math.max(r.last, e.at);
+      r.streaming = Math.max(r.streaming, e.streaming);
       byPulse.set(e.now, r);
     }
-    const fullQueue = [...byPulse.entries()].filter(([, r]) => r.waiting > 0 && r.n >= FULL_PULSE * r.waiting);
+    const fullQueue = [...byPulse.entries()].filter(([, r]) => r.streaming > 0 && r.n >= FULL_PULSE * r.streaming);
     const batches = facts.pace?.batches ?? [];
     const phones = queueVerdict(viewers.map((v) => v.queue), o.pace);
     paced = {
@@ -1580,6 +1792,17 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
       admitted: facts.pace?.admitted ?? 0,
       phones: { ...phones, delivery: stats(phones.delivery) },
       fanOut: { pulses: byPulse.size, full: fullQueue.length, received: stats(fullQueue.map(([now, r]) => r.last - now)) },
+      memory: { beforeT0: phase(0, ready.opensAt), fromT0: phase(ready.opensAt + QUEUE_SETTLE_MS, Number.POSITIVE_INFINITY) },
+      footprints,
+      // Each minute from the streams' opening: the app's peak resident memory and footprint, the streams then (results.json only).
+      memoryByMinute: byMinute(report.memory, footprints, ready.opensAt),
+      queueStreams: {
+        parked: parked.size,
+        reopened,
+        stateReads: stats(stateReads.map((r) => r.ms)),
+        stateReadsNot200: stateReads.filter((r) => r.status !== 200).length,
+        stateReadsPeakPerSecond: peakPerSecond(stateReads.map((r) => r.at)),
+      },
     };
   }
   const queueHeld =
@@ -1710,6 +1933,8 @@ function printLevel(r: LevelResult): void {
           `| The PACE check (TEST REPORT) | ${p.check.line} | ${p.check.pass ? 'passed' : 'FAILED'} |`,
           `| The queue on the phones | ${p.phones.waited} waited · ${p.phones.admitted} admitted, in ${p.phones.batchesSeen} batches · ${p.phones.orderBroken} from a place beyond ${p.pace.batch} · ${p.phones.etaKept} at the time first estimated · the admission on the phone p50 ${ms(p.phones.delivery.p50)} · p95 ${ms(p.phones.delivery.p95)} · max ${ms(p.phones.delivery.max)} after the batch's time | every one admitted, in the line's order |`,
           `| The queue held | | ${yes(r.verdict.pace)} |`,
+          `| Behind the next batch (W2) | ${p.queueStreams.parked} streams ended by the server · ${p.queueStreams.reopened} opened again once their batch was the next · ${p.queueStreams.stateReads.n} state reads instead, p50 ${ms(p.queueStreams.stateReads.p50)} · p95 ${ms(p.queueStreams.stateReads.p95)} · max ${ms(p.queueStreams.stateReads.max)}, at most ${p.queueStreams.stateReadsPeakPerSecond} in a second, ${p.queueStreams.stateReadsNot200} other than 200 | |`,
+          `| Memory before T0 / from T0 + ${QUEUE_SETTLE_MS / 1000} s | ${phaseLine(p.memory.beforeT0)} / ${phaseLine(p.memory.fromT0)} | |`,
         ]
       : []),
     '',

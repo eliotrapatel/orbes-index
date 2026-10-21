@@ -1,6 +1,6 @@
 # Load report — the LIVE RELEASES
 
-Status: measured 2026-10-05; a paced release of 5 000 measured 2026-10-21 (§7) · Owner: LIVE RELEASE+ (its
+Status: measured 2026-10-05; a paced release of 5 000 measured 2026-10-21 (§7), its queue page lightened the same day (§7.5) · Owner: LIVE RELEASE+ (its
 completeness audit, step PLUS-A), and the macro lot M1 for §7 (step M1.6) · first measured 2026-10-04
 by the LIVE RELEASE lot (step L7) · Source: `genome/scripts/live-load.ts` · Raw figures:
 `genome/out/live-load/results-<series>.json`, with the app's log of the last series' levels beside them as
@@ -51,6 +51,14 @@ targets for one app container: the app's memory reached 964 and 1 149 MiB with 5
 container's 768 MB, its CPU about 1.9 cores on the VPS, and the queue's frames reached the last waiting phone at
 p95 270 and 266 ms on the VPS profile, above the 100 ms fan-out target. The measured capacity of the room above (500) is unchanged.
 The real check is the TEST ENTRANTS run of 5 000 on production (§7.4).
+
+**The queue page lightened (§7.5, the same day).** Only the entry whose batch is the next one now keeps its stream; the
+others read their state every 10 s to a minute. Three more runs of 5 000 held the queue exactly, with no answer other
+than 200 and no stream lost; after T0 the app held at most 454 to 786 streams, its CPU 1.1 to 1.4 cores on the VPS. Its
+footprint, what macOS charges the process, stayed at 380–567 MiB (**505–692 MiB with GeoIP: under the 768 MB
+container**, above the 60 % margin); its resident size, which also counts memory already given back, still read
+857–930 MiB. The state reads now weigh on PGlite's one connection instead: the actions behind the pace at p95 0.5 to
+1.5 s.
 
 ## 1. The test
 
@@ -309,7 +317,8 @@ would see under §2: the app's thread taken twice as slow, and the GeoIP databas
   person on the queue page still holds a stream for the whole release.
   - **Memory.** 149.6 and 186.8 KiB per viewer. At the peak, 787 and 963 MiB were outside V8's heap: the process's
     native memory, which grew with the 5 000 connections. That is above the 768 MB container. The run measures macOS; Linux in the
-    container is not measured here.
+    container is not measured here. (§7.5 measured it again: the resident size did not follow the streams, and most of
+    it was memory the allocator had already given back, which macOS still counts as resident.)
   - **The pulse.** Once a second, the server reads the entries of every viewer of the release in one read: the pulse
     took 513 and 509 ms at p50 for 5 000 viewers, against PGlite's one connection. The number of reads stays the same
     whatever the audience, but that read's rows grow with it, and at 5 000 they weigh.
@@ -329,6 +338,70 @@ check in the TEST REPORT, and the box's figures during the run.
 
 Its bots follow their turns by reading `GET /state` through the app's own routes (`services/test-entrants.ts`). **They
 open no stream.** That run does not check the memory of 5 000 open streams, which §7.3 found above one container.
+Since §7.5, a phone behind the next batch opens no stream either: it reads `GET /state` as the state's `pollMs` says,
+as the bots do, so that run now also checks the reads of a queue of 5 000 on PostgreSQL. It still does not check the
+room before T0, where every phone holds a stream (§7.5: measured here).
+
+### 7.5 The queue page lightened (the completeness audit of lot M1)
+
+The audit of lot M1 found §7.3's result short of the scope's "Done when" (the queue page holding 5 000) and of the
+owner's note (*"to not overload the server"*). The waiting viewer was made lighter:
+
+- **Only the next batch holds a stream.** An entry whose batch is the next one (its place within X) keeps its stream, to
+  be let in at the batch's second. The server sends one further behind its place and the queue's frame, then ends its
+  stream, and answers `204` to a new one until its batch is the next (`http/live-stream.ts`).
+- **The page reads its state instead.** As often as the state's `pollMs` says: half the time until its batch becomes the
+  next one, within 10 s and a minute (30 s while the pace is held; 10 s for the next batch whose stream is lost). Its
+  first read comes at a moment of its own within a minute of the stream's end, so a queue of thousands ended at the
+  same pulse does not read at once. Between two reads the page counts the batches due itself: its place goes down by X
+  at each, and its estimated time stays the one it was given (`queuePlace`, `queueEta`). Its batch the next one, it
+  opens its stream again, a batch ahead of its own.
+- **The phones of this test do what the page does:** they read their state behind the next batch, and close their
+  stream once their entry is over (`done` on the page). The first run of the change, at 16:21, still kept every stream
+  until the end of the release: up to 4 511 streams after T0, its state reads waiting on the database, 16 turns passed.
+  It is not counted.
+
+Three runs on 2026-10-21, at 16:50, 17:19 and 17:47 Paris, under the same lock and the same other work (one-minute load
+averages 1.9–8.7). The 17:19 run read macOS's `footprint` of the app every 15 s, which stops the process while it walks
+its memory: its times are slower for it, and only its memory is used below. The 17:47 run read it twice (just before T0
+and at the end).
+
+| | 16:50 | 17:19 | 17:47 |
+|---|---|---|---|
+| Batches on the server, the PACE check | 20 of 20, each 250 on its minute · passed | the same | the same |
+| People who waited / let in by their batch, at the time first given | 4 750 / 4 750 / 4 750 | the same | the same |
+| Their admission on the phone, after the batch's time, p95 | 949 ms | 2 627 ms | 2 033 ms |
+| Answers other than 200 · streams dropped | 0 · 0 | 0 · 0 | 0 · 0 |
+| Streams after T0 + 10 s, at most | 454 | 786 | 591 |
+| State reads behind the next batch | 58 773 · p50 39 · p95 1 199 ms | 56 094 · p50 528 · p95 13 043 ms | 57 010 · p50 969 · p95 3 879 ms |
+| The pulse on the server, p50 · p95 | 202 · 596 ms | 224 · 1 115 ms | 242 · 1 440 ms |
+| The app's CPU, busiest five seconds → VPS | 0.64 → **1.3** | 0.56 → **1.1** | 0.69 → **1.4** |
+| Actions behind the pace, p95 → VPS | 506 → **542 ms** | 1 503 → **1 542 ms** | 1 484 → **1 523 ms** |
+| Fan-out of the room · of the queue's frames, p95 → VPS | 84 → **168** · 106 → **212 ms** | 92 → **184** · 131 → **262 ms** | 93 → **186** · 114 → **228 ms** |
+| Resident memory, before T0 / after | 504 / 930 MiB | 496 / 920 MiB | 498 / 857 MiB |
+| **Footprint**, before T0 / after (with GeoIP) | not read | 380 / 382 MiB (**505 / 507**) | 393 / 567 MiB (**518 / 692**) |
+
+**What it means.**
+
+- **The queue held 5 000, exactly, three times.** Every batch on its minute, the PACE check passed, every one of the
+  4 750 who waited let in by its own batch at the time its page first gave, no answer other than 200, no stream lost.
+- **The streams follow the next batch, not the queue.** After T0 the app held at most 454 to 786 streams (the next
+  batch, those admitted still in the line, the console and the board), against 5 000 for the whole release before.
+  Before T0 everyone is in the room on a stream, as in any LIVE RELEASE.
+- **Memory: under the container, above the house's margin.** The resident size (RSS) still rose to 857–930 MiB after T0
+  with a few hundred streams: it did not follow them. macOS's `footprint`, what the system charges the process, read
+  380–393 MiB before T0 with 5 002 streams open and 382–567 MiB at most over the run, with 594 MiB listed as
+  reclaimable: memory the allocator had given back, which RSS still counts until the system takes it. §7.3's 964 and
+  1 149 MiB were resident sizes too. With the GeoIP database, **505–692 MiB: under the 768 MB container**, above the
+  60 % margin (460.8 MiB) of §2. Linux in the container, whose allocator gives memory back otherwise, is not measured
+  here.
+- **The database is where the time goes.** Instead of one read a second for every viewer, a queue of 4 500 makes about
+  50 state reads a second (each reads the account against the release's rules, its entry and its place), on PGlite's
+  one connection: the state reads took 39 ms to 1 s at p50 from run to run, and the actions behind the pace
+  0.5 to 1.5 s at p95, against 0.54–0.56 s before. The CPU went down (1.1–1.4 cores on the VPS, from 1.9), the pulse
+  too (p50 about 0.2 s, from 0.5). PostgreSQL's pool of ten runs these reads side by side; it is not measured here.
+- **Not met, as before:** the actions' 200 ms, the fan-outs' 100 ms and one core of CPU on the VPS profile. The production
+  run of §7.4 now reads the queue as these phones do.
 
 ## Machine and conditions
 
@@ -342,4 +415,5 @@ open no stream.** That run does not check the memory of 5 000 open streams, whic
 | Code | branch `orbes-plus` at step PLUS-A (after `4ea1a11`) |
 | Runs | 2026-10-05 (CEST): series 1 at 18:01, series 2 at 18:12, series 3 at 18:37 |
 | Paced runs (§7) | 2026-10-21 (CEST): 05:35 and 06:03, branch `orbes-macro` at step M1.6 (after `f57a0cf`), `--pace 250,1 --levels 5000`; calibration 475 and 445 ms; PGlite 0.5.8 |
+| Paced runs (§7.5) | 2026-10-21 (CEST): 16:50, 17:19 and 17:47, branch `orbes-macro` at its completeness audit (after `bdaaead`), the same arguments; calibration 454, 399 and 444 ms; load averages 1.9–8.7 |
 | Machine load | Another workflow's work ran at the same time, except its Chromium suites (shared lock); load averages 4.2–7.5 |

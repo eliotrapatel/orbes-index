@@ -2501,8 +2501,6 @@ export interface LiveReleasePlan {
   otherSizes: { label: string; collectors: number }[];
   eligibleByTier: number[];
   modelType: string;
-  /** W4: the pace suggested when the forecast's upper end is above the room's capacity, never applied; null otherwise. */
-  pace?: LivePace | null;
   reasoning: string[];
 }
 

@@ -534,10 +534,10 @@ describe('the console of a LIVE RELEASE’s pace (W4)', () => {
       '1 buyer every 5 minutes',
       '5\u2009000 buyers every 60 minutes',
     ]);
-    expect(paceHint(500, { batch: 90, minutes: 1 })).toBe(
-      'Buyers admitted from the line, 1 to 5\u2009000, every 1 to 60 minutes, counted across the release, in its order. Both blank: no pace, everyone admitted at T0. The room holds 500, as the load test measured. The planner suggests 90 buyers every minute.',
+    expect(paceHint(500)).toBe(
+      'Buyers admitted from the line, 1 to 5\u2009000, every 1 to 60 minutes, counted across the release, in its order. Both blank: no pace, everyone admitted at T0. The room holds 500, as the load test measured.',
     );
-    expect(paceHint(null, null)).toBe('Buyers admitted from the line, 1 to 5\u2009000, every 1 to 60 minutes, counted across the release, in its order. Both blank: no pace, everyone admitted at T0.');
+    expect(paceHint(null)).toBe('Buyers admitted from the line, 1 to 5\u2009000, every 1 to 60 minutes, counted across the release, in its order. Both blank: no pace, everyone admitted at T0.');
   });
 
   it('draws the Pace block’s figures in Paris time, a dash while held, and offers its controls to an OPERATOR from T0 to the end', () => {

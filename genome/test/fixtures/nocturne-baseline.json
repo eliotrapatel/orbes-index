@@ -11053,38 +11053,6 @@
         "IP GEOLOCATION BY DB-IP"
       ]
     },
-    "live-pieces-queued": {
-      "title": "MY PIECES of a collector in the queue: IN THE QUEUE · PLACE 412",
-      "refs": [
-        "W5"
-      ],
-      "variant": "queue",
-      "as": "queued",
-      "values": [
-        "ORBES",
-        "TITANE",
-        "NOW",
-        "RELEASES",
-        "COLLECTION",
-        "CIRCLE",
-        "PIECES",
-        "MY PIECES",
-        "PIECES1",
-        "RELEASES1",
-        "MONOLITHE IN BLUE",
-        "LIVE RELEASE · IN THE QUEUE · PLACE 412",
-        "You are in the queue. Open the release to follow your place.",
-        "THE CLUB",
-        "PRIVACY",
-        "TERMS",
-        "LEGAL",
-        "HELP",
-        "SOUND ON",
-        "IP GEOLOCATION BY DB-IP",
-        "© ORBES · PARIS",
-        "SCAN"
-      ]
-    },
     "live-queue-stress": {
       "title": "The queue at its longest: YOUR PLACE 4999, ESTIMATED ENTRY 20:54 PARIS, ABOUT 2 H 05",
       "refs": [
@@ -25245,72 +25213,6 @@
         "HELP",
         "SOUND OFF",
         "IP GEOLOCATION BY DB-IP"
-      ]
-    },
-    "desk-live-pieces-queued": {
-      "title": "MY PIECES of a collector in the queue: IN THE QUEUE · PLACE 412 (a computer, 1440 × 900)",
-      "refs": [
-        "desktop",
-        "phone: live-pieces-queued"
-      ],
-      "variant": "queue",
-      "as": "queued",
-      "values": [
-        "ORBES",
-        "NOW",
-        "RELEASES",
-        "COLLECTION",
-        "CIRCLE",
-        "PIECES",
-        "SCAN",
-        "TITANE",
-        "MY PIECES",
-        "PIECES1",
-        "RELEASES1",
-        "MONOLITHE IN BLUE",
-        "LIVE RELEASE · IN THE QUEUE · PLACE 412",
-        "You are in the queue. Open the release to follow your place.",
-        "THE CLUB",
-        "PRIVACY",
-        "TERMS",
-        "LEGAL",
-        "HELP",
-        "SOUND OFF",
-        "IP GEOLOCATION BY DB-IP",
-        "© ORBES · GENOME CODE · PARIS"
-      ]
-    },
-    "desk-live-pieces-queued-1024": {
-      "title": "MY PIECES of a collector in the queue: IN THE QUEUE · PLACE 412 (a computer, 1024 × 768)",
-      "refs": [
-        "desktop",
-        "phone: live-pieces-queued"
-      ],
-      "variant": "queue",
-      "as": "queued",
-      "values": [
-        "ORBES",
-        "NOW",
-        "RELEASES",
-        "COLLECTION",
-        "CIRCLE",
-        "PIECES",
-        "SCAN",
-        "TITANE",
-        "MY PIECES",
-        "PIECES1",
-        "RELEASES1",
-        "MONOLITHE IN BLUE",
-        "LIVE RELEASE · IN THE QUEUE · PLACE 412",
-        "You are in the queue. Open the release to follow your place.",
-        "THE CLUB",
-        "PRIVACY",
-        "TERMS",
-        "LEGAL",
-        "HELP",
-        "SOUND OFF",
-        "IP GEOLOCATION BY DB-IP",
-        "© ORBES · GENOME CODE · PARIS"
       ]
     },
     "desk-result-unknown": {

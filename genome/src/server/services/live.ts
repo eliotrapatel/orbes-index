@@ -252,13 +252,13 @@ export function paceHeld(d: Pick<DropRow, 'paused_at' | 'pace_paused_at'>): bool
 /**
  * The estimated entry time of the `place`-th entry waiting for its batch (1 is the next admitted): the next batch, then
  * one batch of X every Y minutes, `next + (ceil(place / X) − 1) × Y`, never before `now` (W5). Null while the pace is
- * held (PAUSED) or without a pace.
+ * held (PAUSED) or without a pace. The same figure a page computes from a frame read a while ago (web/verify/live-model.ts
+ * queueEta): the batches due since then are counted, not added again.
  */
 export function liveQueueEta(d: LivePaceRow, place: number, now: Date): Date | null {
   const next = paceNextAt(d);
   if (!next || paceHeld(d) || !d.pace_batch || !d.pace_minutes) return null;
-  const from = Math.max(next.getTime(), now.getTime());
-  return new Date(from + (Math.ceil(Math.max(1, place) / d.pace_batch) - 1) * d.pace_minutes * MINUTE_MS);
+  return new Date(Math.max(now.getTime(), next.getTime() + (Math.ceil(Math.max(1, place) / d.pace_batch) - 1) * d.pace_minutes * MINUTE_MS));
 }
 
 /**
@@ -702,6 +702,11 @@ export interface LiveQueueView {
   etaAt: Date | null;
   /** The pace is held (PAUSE PACE, or the release's PAUSE): the place is kept, no batch comes. */
   paused: boolean;
+  /**
+   * Its batch is the next one (place ≤ X): its page follows the stream, to be let in at the batch's second. Otherwise
+   * it holds no stream (http/live-stream.ts) and reads its state as often as the state's `pollMs` says.
+   */
+  next: boolean;
 }
 
 /** An account's interest (I'LL BE THERE). */
@@ -1147,7 +1152,7 @@ export async function liveEntryViews(
 }
 
 function queueOf(d: LivePaceRow, place: number, now: Date): LiveQueueView {
-  return { place, etaAt: liveQueueEta(d, place, now), paused: paceHeld(d) };
+  return { place, etaAt: liveQueueEta(d, place, now), paused: paceHeld(d), next: typeof d.pace_batch === 'number' && place <= d.pace_batch };
 }
 
 // ── Service ────────────────────────────────────────────────────────────────

@@ -774,12 +774,11 @@ export function paceProblem(batch: string | undefined, minutes: string | undefin
   return null;
 }
 
-/** The pace's hint in the times part: its bounds, blank for none, the room's measured capacity and the planner's suggestion. */
-export function paceHint(capacity: number | null, suggested: LivePace | null): string {
+/** The pace's hint in the times part: its bounds, blank for none, and the room's measured capacity. */
+export function paceHint(capacity: number | null): string {
   return [
     `Buyers admitted from the line, ${formatCount(LIVE_PACE_BATCH.min)} to ${formatCount(LIVE_PACE_BATCH.max)}, every ${LIVE_PACE_MINUTES.min} to ${LIVE_PACE_MINUTES.max} minutes, counted across the release, in its order. Both blank: no pace, everyone admitted at T0.`,
     capacity !== null ? `The room holds ${formatCount(capacity)}, as the load test measured.` : null,
-    suggested ? `The planner suggests ${paceLine(suggested)}.` : null,
   ]
     .filter((x): x is string => x !== null)
     .join(' ');

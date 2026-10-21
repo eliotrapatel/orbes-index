@@ -19,8 +19,10 @@
  *                                           anyone else: nobody else ever sees it); then its own id for the routes below
  *   GET    /api/v1/live/:id/state           the room, its own entry and interest: the page's fallback when its stream is lost;
  *                                           while its entry waits for its batch (W2), the queue's frame in place of the
- *                                           room; `pollMs`, how soon to read it again (2 s, 10 s in the queue)
- *   GET    /api/v1/live/:id/stream          the room and its own entry in real time (SSE), at most two per account
+ *                                           room; `pollMs`, how soon to read it again (2 s; in the queue 10 s, up to
+ *                                           a minute behind the next batch, whose entry holds no stream)
+ *   GET    /api/v1/live/:id/stream          the room and its own entry in real time (SSE), at most two per account (204
+ *                                           while its entry waits behind the next batch, W2)
  *   PUT    /api/v1/live/:id/interest        I'LL BE THERE, with a size
  *   DELETE /api/v1/live/:id/interest        withdrawn
  *   POST   /api/v1/live/:id/enter           ENTER the room (or, after T0, the line), with a size and a quantity
@@ -146,8 +148,9 @@ export const liveRoutes: FastifyPluginAsync<LiveRouteDeps> = async (app, { ctx, 
     const { id } = parse(liveParams, request.params);
     const viewer = await liveRoom.viewer(account.id, id, 'state');
     const own = await liveRoom.own(account.id, viewer);
-    // W2: while its entry waits for its batch, the queue's small frame in place of the room, read every 10 s (`pollMs`).
-    const state = await hub.stateOf(viewer.dropId, Boolean(own.entry?.queue));
+    // W2: while its entry waits for its batch, the queue's small frame in place of the room, read again as `pollMs` says
+    // (10 s for the next batch, up to a minute further behind, which holds no stream).
+    const state = await hub.stateOf(viewer.dropId, own.entry?.queue ?? null);
     if (!state) throw dropNotFound();
     return { now: ctx.clock(), ...state, ...own };
   });

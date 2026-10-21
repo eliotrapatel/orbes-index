@@ -64,7 +64,9 @@
  *
  * Real time: the stream (EventSource, `room` and `you` events; `queue` in place of `room` while the entry waits for its
  * batch) while it is open; its state polled while it is not, as often as the server's `pollMs` says (2 s in the room,
- * LIVE_POLL_MS by default; 10 s in the queue), the stream tried again later. Every countdown counts on the server's
+ * LIVE_POLL_MS by default; 10 s in the queue), the stream tried again later. Behind the next batch (W2) the server
+ * ends the stream and the page reads its state only (10 s to a minute, its first read spread over LIVE_QUEUE_SPREAD_MS),
+ * until its batch is the next one. Every countdown counts on the server's
  * clock, synced by three round trips (clockOffset). Every action is a same-origin JSON call through ApiClient (the session, the CSRF token);
  * the server's refusals read as it wrote them. Reduced motion: cross-fades only. aria-live: the place, the turn, the
  * piece secured. One primary action per screen (filled ivory): ENTER, the size chosen, PAY.
@@ -141,6 +143,11 @@ export const LIVE_POLL_MS = 2000;
 const POLL_BOUNDS = Object.freeze({ min: 1000, max: 60_000 });
 /** A stream refused or closed is asked for again after this long (the state is polled meanwhile). */
 export const LIVE_STREAM_RETRY_MS = 15_000;
+/**
+ * W2: a page whose stream the server ends behind the next batch reads its state first within this long, at a moment of
+ * its own (then as the state's `pollMs` says): a queue of thousands ended at the same pulse does not read at once.
+ */
+export const LIVE_QUEUE_SPREAD_MS = 60_000;
 /** The page's own pulse: the countdowns, the lock, the ticks. */
 const PULSE_MS = 250;
 /** The opening at T0 (the lock aligning, the door, the sweep) plays this long before the line takes its place. */
@@ -258,7 +265,7 @@ class LivePage {
   private room: LiveRoom | null = null;
   /** W2: the queue's frame, read while the account's entry waits for its batch (the stream's `queue`, the state's); null otherwise. */
   private queueFrame: LiveQueueFrame | null = null;
-  /** How often the state is read while the stream is lost: the server's `pollMs` (10 s in the queue), 2 s by default. */
+  /** How often the state is read without a stream: the server's `pollMs` (10 s to a minute in the queue), 2 s by default. */
   private pollMs = LIVE_POLL_MS;
   private entry: LiveEntry | null = null;
   private access: LiveAccess | null = null;
@@ -283,7 +290,9 @@ class LivePage {
   private synced = false;
   private connection: 'live' | 'reconnecting' = 'reconnecting';
   private stream: EventSource | null = null;
-  private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private pollTimer: ReturnType<typeof setTimeout> | null = null;
+  /** W2: the entry waits behind the next batch (`queue.next` false): no stream, its state read (`pollMs`). */
+  private behind = false;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private syncTimer: ReturnType<typeof setTimeout> | null = null;
   private pulseTimer: ReturnType<typeof setInterval> | null = null;
@@ -562,6 +571,23 @@ class LivePage {
       this.picked = { sizeId: first.sizeId, quantity: this.picked.quantity };
       this.fromYours = first.from === 'saved';
     }
+    this.trackQueue();
+  }
+
+  /**
+   * W2: only an entry whose batch is the next one follows the stream. Behind it, the server ends its stream (the page
+   * stops it there, `follow`'s error) and refuses a new one: its state is read as often as `pollMs` says, and the page
+   * counts the batches due between two reads (live-model queuePlace). Its batch the next one, or let in: the stream.
+   */
+  private trackQueue(): void {
+    const was = this.behind;
+    this.behind = this.entry?.queue?.next === false;
+    if (this.disposed || this.viewer !== 'ready' || this.done()) return;
+    if (this.behind && !this.stream) {
+      if (this.retryTimer) clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+      this.startPolling();
+    } else if (!this.behind && was && !this.stream) this.follow();
   }
 
   /** AC-01: the two lines under the sizes while the size picked is YOUR SIZES' and not confirmed; null otherwise. */
@@ -609,10 +635,14 @@ class LivePage {
 
   // ── Real time ────────────────────────────────────────────────────────────
 
-  /** Follow the room: its stream, or its state every `pollMs` while the stream is lost. */
+  /** Follow the room: its stream, or its state every `pollMs` while the stream is lost (or behind the next batch, W2). */
   private follow(): void {
     if (this.disposed || this.viewer !== 'ready' || this.done()) return;
     if (this.stream) return;
+    if (this.behind) {
+      this.startPolling();
+      return;
+    }
     if (typeof EventSource !== 'function' || !this.sheet) {
       this.startPolling();
       return;
@@ -649,6 +679,15 @@ class LivePage {
     es.addEventListener('error', () => {
       if (this.stream !== es) return;
       this.connection = 'reconnecting';
+      // W2: behind the next batch, the server has ended the stream after its place and the queue's frame: not asked for
+      // again; the state read from a moment of its own within LIVE_QUEUE_SPREAD_MS, then as `pollMs` says.
+      if (this.behind) {
+        es.close();
+        this.stream = null;
+        this.startPolling(Math.random() * LIVE_QUEUE_SPREAD_MS);
+        this.screen?.update();
+        return;
+      }
       // The browser reconnects by itself (CONNECTING); a refusal or the end (CLOSED) is asked for again later.
       if (es.readyState === EventSource.CLOSED) {
         es.close();
@@ -682,13 +721,20 @@ class LivePage {
     this.retryTimer = null;
   }
 
-  private startPolling(): void {
+  /** Read the state every `pollMs` (as it is at each read), the first after `firstMs`. */
+  private startPolling(firstMs = this.pollMs): void {
     if (this.pollTimer || this.done()) return;
-    this.pollTimer = setInterval(() => void this.readState(false), this.pollMs);
+    const tick = (ms: number): void => {
+      this.pollTimer = setTimeout(() => {
+        tick(this.pollMs);
+        void this.readState(false);
+      }, ms);
+    };
+    tick(firstMs);
   }
 
   private stopPolling(): void {
-    if (this.pollTimer) clearInterval(this.pollTimer);
+    if (this.pollTimer) clearTimeout(this.pollTimer);
     this.pollTimer = null;
   }
 

@@ -1673,7 +1673,6 @@ export const PHONE_STATES: readonly UiState[] = [
     },
     ready: '.view--live .live__queue .live__error:not([hidden])',
   },
-  { id: 'live-pieces-queued', title: 'MY PIECES of a collector in the queue: IN THE QUEUE · PLACE 412', refs: ['W5'], variant: 'queue', as: 'queued', path: at('/verify/pieces'), act: (run) => piecesTab(run, 'RELEASES'), ready: '.view--pieces .pieces__releases' },
   { id: 'live-queue-stress', title: 'The queue at its longest: YOUR PLACE 4999, ESTIMATED ENTRY 20:54 PARIS, ABOUT 2 H 05', refs: ['same pieces'], variant: 'queue', as: 'queueFar', path: release('queue'), ready: '.view--live .live__queue[data-state="eta"]', stress: true },
   {
     id: 'live-queue-loading',
@@ -2597,10 +2596,8 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
     ...desk(1440, 'live-line', 'live-secured', 'live-confirmed', 'live-sold-out-size', 'live-missed', 'live-expired', 'live-released', 'live-left', 'live-removed', 'live-join'),
     ...desk(1440, 'live-rules', 'live-rules-not-eligible', 'room-not-eligible', 'room-ready'),
     ...desk(1440, 'after-room-join', 'after-room-sold-out', 'after-room-closed', 'after-room-ended', 'after-room-over'),
-    // The queue of a paced release (lot M1, W2, W5): the place and its estimate, then paused; MY PIECES' long label
-    // (LIVE RELEASE · IN THE QUEUE · PLACE 412) in the computer's column, at both widths.
-    ...desk(1440, 'live-queue', 'live-queue-paused', 'live-pieces-queued'),
-    ...desk(1024, 'live-pieces-queued'),
+    // The queue of a paced release (lot M1, W2, W5): the place and its estimate, then paused.
+    ...desk(1440, 'live-queue', 'live-queue-paused'),
   ],
   // ── A result's other answers, a piece's incidents, THE PRIVATE SALON in sizes, the draw's other states, the failures ──
   // The full demo's writes (a transfer code, the ceremony, a piece received, REQUESTED, a draw entered) last, in this order;

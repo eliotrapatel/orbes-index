@@ -1252,7 +1252,7 @@ describe('a draw’s ADD TO CALENDAR over HTTP (plan MACRO M1 §2.1, C1)', () =>
   });
   afterAll(() => h?.close());
 
-  it('gives a published draw’s .ics to anyone: its entries’ opening to their close, an alarm 10 minutes before and its early access, its page, its name, no personal data, kept a minute', async () => {
+  it('gives a published draw’s .ics to anyone: its entries’ opening to their close, one alarm 10 minutes before (an early access or not), its page, its name, no personal data, kept a minute', async () => {
     const d = await draw({ earlyAccessHours: 4, earlyAccessPlatineHours: 2 }, 24 * HOUR);
     expect((await operator.post(`/api/admin/drops/${d.id}/publish`)).statusCode).toBe(200);
     // A collector exists: the file still names no one.
@@ -1272,7 +1272,7 @@ describe('a draw’s ADD TO CALENDAR over HTTP (plan MACRO M1 §2.1, C1)', () =>
     // The name the draw's public page shows from its publication.
     const page = safeJson(await h.client().get(`/api/v1/drops/${d.id}`)) as { model: { name: string } };
     expect(u).toContain(`SUMMARY:DRAW · ${page.model.name} · ORBES`);
-    expect([...u.matchAll(/TRIGGER:([^\r]+)/g)].map((m) => m[1])).toEqual(['-PT10M', '-PT4H']);
+    expect([...u.matchAll(/TRIGGER:([^\r]+)/g)].map((m) => m[1])).toEqual(['-PT10M']);
     expect(u).not.toMatch(/ATTENDEE|ORGANIZER|@example\.com/);
     expect(u).not.toContain(fan.email);
   });

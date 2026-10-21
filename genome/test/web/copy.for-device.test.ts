@@ -60,6 +60,8 @@ const PAIRS: readonly { where: string; read: () => string; phone: string; comput
   },
   { where: 'LIVE.releaseConfirm', read: () => LIVE.releaseConfirm, phone: 'TAP AGAIN TO RELEASE', computer: 'CLICK AGAIN TO RELEASE' },
   { where: 'LIVE.edge.soldOut.leaveConfirm', read: () => LIVE.edge.soldOut.leaveConfirm, phone: 'TAP AGAIN TO LEAVE', computer: 'CLICK AGAIN TO LEAVE' },
+  // The queue's LEAVE THE LINE (lot M1, W6).
+  { where: 'LIVE.queue.leaveConfirm', read: () => LIVE.queue.leaveConfirm, phone: 'TAP AGAIN TO LEAVE', computer: 'CLICK AGAIN TO LEAVE' },
   {
     where: 'STORY.cannotShare',
     read: () => STORY.cannotShare,

@@ -494,13 +494,28 @@ export type QueueModel =
 
 /**
  * The estimated entry time of the `place`-th entry waiting (1 is let in next) at the server's time `now`, as the server
- * estimates it (services/live.ts liveQueueEta): the next batch (never before now), then one batch every `minutes`;
- * null while the queue is paused or its pace is not one.
+ * estimates it (services/live.ts liveQueueEta): the next batch, then one batch every `minutes`, never before now; null
+ * while the queue is paused or its pace is not one. A frame read a while ago gives the same time: the batches due
+ * since are counted, not added again.
  */
 export function queueEta(place: number, frame: Pick<LiveQueueFrame, 'nextBatchAt' | 'batch' | 'minutes' | 'paused'>, now: number): number | null {
   const next = Date.parse(frame.nextBatchAt);
   if (frame.paused || !Number.isFinite(next) || !(frame.batch >= 1) || !(frame.minutes >= 1)) return null;
-  return Math.max(next, now) + (Math.ceil(Math.max(1, place) / frame.batch) - 1) * frame.minutes * MINUTE;
+  return Math.max(now, next + (Math.ceil(Math.max(1, place) / frame.batch) - 1) * frame.minutes * MINUTE);
+}
+
+/**
+ * The place now of the `place`-th entry waiting as last read with `frame`: less the batches due since the frame's next
+ * batch, while the pace runs and the place stays behind them (W2: an entry behind the next batch reads its state only
+ * every 10 s to a minute, so its page counts the batches between two reads). Its own batch due: its place as read,
+ * until the state says it is let in.
+ */
+export function queuePlace(place: number, frame: Pick<LiveQueueFrame, 'nextBatchAt' | 'batch' | 'minutes' | 'paused'>, now: number): number {
+  const next = Date.parse(frame.nextBatchAt);
+  if (frame.paused || !Number.isFinite(next) || now < next || !(frame.batch >= 1) || !(frame.minutes >= 1)) return place;
+  const due = Math.floor((now - next) / (frame.minutes * MINUTE)) + 1;
+  const left = place - due * frame.batch;
+  return left >= 1 ? left : place;
 }
 
 /** How long until the estimate: ANY MOMENT NOW within half a minute; ABOUT 12 MIN; ABOUT 2 H 05 from an hour. */
@@ -516,9 +531,10 @@ export function queueAbout(ms: number): string {
  */
 export function queueModel(queue: LiveQueue, frame: LiveQueueFrame | null, now: number, localZone: string): QueueModel {
   if (!frame) return { kind: 'reading' };
-  const place = queue.place;
-  if (frame.paused) return { kind: 'paused', place, announce: LIVE.announce.queue(place, null) };
-  const at = queueEta(place, frame, now) ?? (queue.etaAt ? Date.parse(queue.etaAt) : Number.NaN);
+  if (frame.paused) return { kind: 'paused', place: queue.place, announce: LIVE.announce.queue(queue.place, null) };
+  // The estimate from the place as read (it counts the batches due since); the place shown, less them.
+  const at = queueEta(queue.place, frame, now) ?? (queue.etaAt ? Date.parse(queue.etaAt) : Number.NaN);
+  const place = queuePlace(queue.place, frame, now);
   const paris = Number.isFinite(at) ? zonedTime(at, PARIS) : null;
   if (!paris) return { kind: 'reading' };
   const local = zonedTime(at, localZone);
@@ -880,11 +896,9 @@ export function myLiveEntries(list: readonly LiveAccountEntry[]): MyEntryModel[]
     .map((x) => {
       const e = x.entry;
       const title = upper(x.release.title ?? x.release.name ?? '') || LIVE.kind;
-      // W5: an entry waiting in the queue says so, with its place.
-      const queued = e.status === 'QUEUED' && e.queue && Number.isInteger(e.queue.place) ? e.queue : null;
-      const label = queued ? LIVE.queue.inPieces(queued.place) : LIVE.statusLabel[e.status];
+      const label = LIVE.statusLabel[e.status];
       const reference = liveReference(e.id);
-      const sentence = e.status === 'CONFIRMED' ? LIVE.securedInPieces(e.size.label, e.quantity) : queued ? LIVE.queue.sentence : LIVE.sentence[e.status];
+      const sentence = e.status === 'CONFIRMED' ? LIVE.securedInPieces(e.size.label, e.quantity) : LIVE.sentence[e.status];
       // An after-room's entry: read through the release it follows.
       const parent = isReleaseId(x.release.afterRoomOf) ? x.release.afterRoomOf : null;
       const entry: EntryModel = {

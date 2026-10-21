@@ -1986,9 +1986,6 @@ export const LIVE = Object.freeze({
     get leaveConfirm() {
       return forDevice('TAP AGAIN TO LEAVE', 'CLICK AGAIN TO LEAVE');
     },
-    /** MY PIECES: the entry's status while it waits in the queue, with its place, and what it means now. */
-    inPieces: (place: number) => `IN THE QUEUE · PLACE ${place}`,
-    sentence: 'You are in the queue. Open the release to follow your place.',
   }),
   // The turn
   yourTurn: 'YOUR TURN',

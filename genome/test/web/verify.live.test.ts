@@ -51,6 +51,7 @@ import {
   queueAbout,
   queueEta,
   queueModel,
+  queuePlace,
   readyChecks,
   releaseTime,
   servable,
@@ -728,7 +729,7 @@ describe('the announcements: the release calendar, I\'LL BE THERE, the banner', 
 describe('the queue (macro scope of 2026-10-20, W2, W5, W6; lot M1)', () => {
   const NOW = Date.parse('2026-10-05T16:49:00.000Z');
   const frame = (o: Partial<LiveQueueFrame> = {}): LiveQueueFrame => ({ phase: 'LIVE', nextBatchAt: iso(NOW + 60_000), batch: 40, minutes: 1, paused: false, batches: 6, waiting: 5040, ...o });
-  const queue = (place: number, o: Partial<LiveQueue> = {}): LiveQueue => ({ place, etaAt: null, paused: false, ...o });
+  const queue = (place: number, o: Partial<LiveQueue> = {}): LiveQueue => ({ place, etaAt: null, paused: false, next: place <= 40, ...o });
 
   it('shows the queue while the entry waits for its batch, the line once it is let in', () => {
     const waiting = entry({ status: 'QUEUED', position: 612, ahead: 200, queue: queue(412) });
@@ -747,10 +748,32 @@ describe('the queue (macro scope of 2026-10-20, W2, W5, W6; lot M1)', () => {
     expect(queueEta(41, frame(), NOW)).toBe(NOW + 2 * 60_000);
     // A batch due already: from now.
     expect(queueEta(1, frame({ nextBatchAt: iso(NOW - 5_000) }), NOW)).toBe(NOW);
+    // A frame read a while ago (W2: behind the next batch, the state is read every 10 s to a minute): the batches due
+    // since are counted, not added again, so the estimate stays the one first given.
+    const read = frame({ nextBatchAt: iso(NOW - 90_000) });
+    expect(queueEta(412, read, NOW)).toBe(NOW - 90_000 + 10 * 60_000);
+    expect(queueEta(412, read, NOW + 5 * 60_000)).toBe(NOW - 90_000 + 10 * 60_000);
     expect(queueEta(4999, frame(), NOW)).toBe(NOW + 125 * 60_000);
     expect(queueEta(5, frame({ paused: true }), NOW)).toBeNull();
     expect(queueEta(5, frame({ batch: 0 }), NOW)).toBeNull();
     expect(queueEta(5, frame({ nextBatchAt: 'soon' }), NOW)).toBeNull();
+  });
+
+  it('counts the batches due since the frame was read in the place shown, until its own batch is due (W2)', () => {
+    // Place 412, the next batch read at NOW + 1 min: nothing due before it.
+    expect(queuePlace(412, frame(), NOW)).toBe(412);
+    expect(queuePlace(412, frame(), NOW + 60_000 - 1)).toBe(412);
+    // Its time come: one batch of 40 let in; 2 min 30 s later, three.
+    expect(queuePlace(412, frame(), NOW + 60_000)).toBe(372);
+    expect(queuePlace(412, frame(), NOW + 210_000)).toBe(292);
+    // Its own batch due: the place as read, until the state says it is let in.
+    expect(queuePlace(30, frame(), NOW + 60_000)).toBe(30);
+    expect(queuePlace(41, frame(), NOW + 120_000)).toBe(41);
+    // Held, or no pace to count with: as read.
+    expect(queuePlace(412, frame({ paused: true }), NOW + 600_000)).toBe(412);
+    expect(queuePlace(412, frame({ minutes: 0 }), NOW + 600_000)).toBe(412);
+    // The page: the place counted down, the estimate unchanged.
+    expect(queueModel(queue(412), frame(), NOW + 210_000, 'Europe/Paris')).toMatchObject({ kind: 'eta', place: 292, eta: 'ESTIMATED ENTRY 19:00 PARIS', about: 'ABOUT 8 MIN' });
   });
 
   it('says how long until then in minutes, in hours and minutes from an hour, ANY MOMENT NOW within half a minute', () => {
@@ -814,10 +837,10 @@ describe('MY PIECES: the account\'s LIVE RELEASE entries', () => {
     expect(myLiveEntries([{ release: { ...release, id: 'x' }, entry: entry() }])).toEqual([]);
   });
 
-  it('says an entry waiting in the queue with its place (W5), IN LINE once let in', () => {
+  it('says an entry waiting in the queue IN LINE, as before the pace and once let in (its place is on the release\'s page)', () => {
     const release = { id: ID, phase: 'LIVE' as const, endedReason: null, title: 'Monolithe in blue', name: 'Monolithe', imageUrl: null, opensAt: iso(T0), closesAt: iso(T0 + 3_600_000), afterRoomOf: null };
-    const queued = entry({ status: 'QUEUED', position: 612, ahead: 200, queue: { place: 412, etaAt: iso(T0), paused: false } });
-    expect(myLiveEntries([{ release, entry: queued }])[0]!.entry).toMatchObject({ label: 'IN THE QUEUE · PLACE 412', sentence: LIVE.queue.sentence, reference: null });
+    const queued = entry({ status: 'QUEUED', position: 612, ahead: 200, queue: { place: 412, etaAt: iso(T0), paused: false, next: false } });
+    expect(myLiveEntries([{ release, entry: queued }])[0]!.entry).toMatchObject({ label: 'IN LINE', sentence: LIVE.sentence.QUEUED, reference: null });
     expect(myLiveEntries([{ release, entry: { ...queued, queue: null } }])[0]!.entry).toMatchObject({ label: 'IN LINE', sentence: LIVE.sentence.QUEUED });
   });
 

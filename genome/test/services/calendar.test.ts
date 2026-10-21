@@ -3,7 +3,7 @@
  * byte for byte the file the room wrote before (the SHA-256 of three files recorded from production's live-room.ts
  * before the move: a name, none, and a long name with every escaped character and a room opening a minute before);
  * a draw's (services/drops.ts drawCalendar): its event from the opening of its entries to their close, an alarm 10
- * minutes before, the early access as a second alarm when it starts earlier, its page's address, no personal data.
+ * minutes before (one alarm, as a LIVE RELEASE's, an early access or not), its page's address, no personal data.
  * The routes are test/api/live.test.ts's (unchanged) and test/api/drops.test.ts's.
  */
 import { createHash } from 'node:crypto';
@@ -77,7 +77,7 @@ describe('a draw’s ADD TO CALENDAR (services/drops.ts drawCalendar)', () => {
   const alarms = (file: string) => [...unfold(file).matchAll(/BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:([^\r]+)\r\nTRIGGER:([^\r]+)\r\nEND:VALARM/g)].map((m) => [m[1], m[2]]);
 
   it('is one event from the opening of the entries to their close, with its page, its name and an alarm 10 minutes before', () => {
-    const file = drawCalendar({ ...draw, earlyAccessOpensAt: null });
+    const file = drawCalendar(draw);
     const u = unfold(file);
     expect(file.split('\r\n').every((l) => Buffer.byteLength(l) <= 75)).toBe(true);
     expect(u).toContain('PRODID:-//ORBES//DRAW//EN');
@@ -92,15 +92,4 @@ describe('a draw’s ADD TO CALENDAR (services/drops.ts drawCalendar)', () => {
     expect(u).not.toMatch(/ATTENDEE|ORGANIZER|@example\.com/);
   });
 
-  it('adds the early access as a second alarm when it begins earlier than the first, in whole hours or minutes', () => {
-    const four = drawCalendar({ ...draw, earlyAccessOpensAt: new Date('2026-11-05T05:00:00Z') });
-    expect(alarms(four)).toEqual([
-      ['DRAW · MONOLITHE · ORBES', '-PT10M'],
-      ['EARLY ACCESS · DRAW · MONOLITHE · ORBES', '-PT4H'],
-    ]);
-    // Published 25 minutes before its opening: the early access begins at the publication.
-    expect(alarms(drawCalendar({ ...draw, earlyAccessOpensAt: new Date('2026-11-05T08:35:00Z') }))[1]).toEqual(['EARLY ACCESS · DRAW · MONOLITHE · ORBES', '-PT25M']);
-    // Within the first alarm's 10 minutes: one alarm.
-    expect(alarms(drawCalendar({ ...draw, earlyAccessOpensAt: new Date('2026-11-05T08:52:00Z') }))).toHaveLength(1);
-  });
 });

@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { LIVE_PACE_BATCH, LIVE_PACE_MINUTES } from '../../src/server/db/schema.js';
 import { LIVE_ROOM_OPENS_MINUTES } from '../../src/server/services/live.js';
-import { entryBurstSeconds, PACED_ROOM_MINUTES, pacedBatchesProblem, pacePlan, parseArgs, parsePace, queueVerdict, releaseTimes, type PacedBatch, type QueuePhone } from '../../scripts/live-load.js';
+import { entryBurstSeconds, PACED_ROOM_MINUTES, pacedBatchesProblem, pacePlan, parseArgs, parseFootprint, parsePace, peakPerSecond, queueVerdict, releaseTimes, type PacedBatch, type QueuePhone } from '../../scripts/live-load.js';
 
 const T0 = Date.parse('2026-10-21T17:00:00.000Z');
 const MIN = 60_000;
@@ -76,5 +76,31 @@ describe('live-load --pace', () => {
     // A phone let in from a place beyond X breaks the line's order; one that waited and was never let in is not admitted.
     const broken = queueVerdict([...phones, phone({ waited: true, lastPlace: 3, waitingFor: T0 + 2 * MIN, admittedSeenAt: T0 + 2 * MIN + 100, admittedFor: T0 + 2 * MIN }), phone({ waited: true, lastPlace: 1, waitingFor: T0 + 3 * MIN })], pace);
     expect(broken).toMatchObject({ waited: 5, admitted: 4, orderBroken: 1 });
+  });
+
+  it('counts the most state reads within one second (W2: the phones behind the next batch read their state instead of a stream)', () => {
+    expect(peakPerSecond([])).toBe(0);
+    expect(peakPerSecond([T0, T0 + 999, T0 + 1000, T0 + 1500, T0 + 1999, T0 + 5000])).toBe(3);
+  });
+
+  it('reads macOS footprint’s header and its reclaimable memory, in MiB (the app\'s memory beside its resident size)', () => {
+    const out = [
+      '======================================================================',
+      'node [72234]: 64-bit    Footprint: 1.5 GB (16384 bytes per page)',
+      '======================================================================',
+      '',
+      '  Dirty      Clean  Reclaimable    Regions    Category',
+      '    ---        ---          ---        ---    ---',
+      ' 412 MB        0 B       256 MB         34    MALLOC_SMALL',
+      '4288 KB        0 B       512 KB          1    app-specific tag 16',
+      ' 158 KB        0 B          0 B         54    __DATA',
+      '',
+      'Auxiliary data:',
+      '    phys_footprint: 1.5 GB',
+      '    phys_footprint_peak: 1700 MB',
+    ].join('\n');
+    expect(parseFootprint(out)).toEqual({ footprintMib: 1536, peakMib: 1700, reclaimableMib: 256.5 });
+    expect(parseFootprint(out.split('\nAuxiliary')[0]!)).toMatchObject({ peakMib: null });
+    expect(parseFootprint('footprint: no process')).toBeNull();
   });
 });

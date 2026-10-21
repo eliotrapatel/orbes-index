@@ -22,7 +22,8 @@
  *    RELEASE+, decision 30); the release's end said once the room says its reason, when the entry's end is read first.
  *  - A paced release (macro scope of 2026-10-20, W2, W5, W6): the queue page while the entry waits for its batch (its
  *    place, its estimated entry time in Paris and how long until it, the place kept, LEAVE THE LINE; never the pace),
- *    its state read every 10 s without a stream (the server's pollMs), PAUSED while ORBES holds the pace; let in by a
+ *    its state read every 10 s without a stream (the server's pollMs), PAUSED while ORBES holds the pace; behind the next
+ *    batch, its stream ended at T0 and its state read instead, the stream again once its batch is the next; let in by a
  *    batch, the line in its place, said aloud, and the state read every 2 s again.
  *  - A collector entered on another phone, back in the room: a tap there makes the ten ticks heard; untouched, silence.
  *  - The LIVE RELEASES refused (429, their own rate group): THE RELEASES still shows the draws and says the LIVE half is
@@ -560,6 +561,45 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     const inLine = polls.length;
     await sleep(4_500);
     expect(polls.length - inLine).toBeGreaterThanOrEqual(2);
+    expect(problems).toEqual([]);
+  }, 120_000);
+
+  it('a paced release (W2): behind the next batch, its stream ended at T0 and its state read instead; its batch the next one, the stream again, then let in through it', async () => {
+    const r = await release({ opensAt: new Date(Date.now() + 3_000), sizes: [{ label: '52', stock: 1 }], pace: { batch: 1, minutes: 60 }, turnSeconds: 120 });
+    // Three in the room before T0, by tier: the first let in at T0, the second next, this phone behind the next batch.
+    for (const pieces of [5, 3]) {
+      const a = await account(pieces);
+      await srv.ctx.services.live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id }, a.actor);
+    }
+    const me = await account(1);
+    await srv.ctx.services.live.enter(me.id, r.id, { sizeId: r.sizes[0]!.id }, me.actor);
+    const { page, problems } = await phone(me.token);
+    const streams: number[] = [];
+    page.on('response', (res) => {
+      if (new URL(res.url()).pathname === `/api/v1/live/${r.id}/stream`) streams.push(res.status());
+    });
+    // Its timers in the test's hand: the state read behind the next batch comes within a minute.
+    await page.clock.install();
+    await page.goto(`${srv.origin}/verify/releases/${r.id}`);
+    await visible(page.locator('.live__queue[data-state="eta"]'), 30_000);
+    await textOf(page.locator('.live__queue .live__place-figure'), '2');
+    // The room's stream before T0, ended by the server behind the next batch: never asked for again.
+    const before = streams.length;
+    await page.clock.runFor(10_000);
+    await sleep(1_000);
+    expect(streams.length).toBe(before);
+    expect(streams.filter((st) => st === 200).length).toBeLessThanOrEqual(1);
+    // NEXT BATCH NOW lets the second in: this phone's batch is now the next one. At its next read (within a minute),
+    // the place 1 and the stream again.
+    await srv.ctx.services.live.nextBatch(r.id, f.admin);
+    await page.clock.runFor(61_000);
+    await textOf(page.locator('.live__queue .live__place-figure'), '1');
+    await expect.poll(() => streams.slice(before).filter((st) => st === 200).length, POLL).toBe(1);
+    // Its batch, through the stream: the line takes the queue's place.
+    await srv.ctx.services.live.nextBatch(r.id, f.admin);
+    await visible(page.locator('.live__line .live__place-figure'), 30_000);
+    expect(await page.locator('.live__queue').count()).toBe(0);
+    expect(streams.slice(before)).toEqual([200]);
     expect(problems).toEqual([]);
   }, 120_000);
 

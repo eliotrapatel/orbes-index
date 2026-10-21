@@ -791,16 +791,15 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
         { name: 'opensAt', label: 'The opening', kind: 'datetime', required: true, value: v.opensAt, hint: 'T0: the door opens and the line forms.' },
         { name: 'closesAt', label: 'End of the sales', kind: 'datetime', required: true, value: v.closesAt, hint: 'No new turn after it; the release also ends at its sell-out.' },
         // W4: X buyers every Y minutes; both blank, no pace.
-        { name: 'paceBatch', label: 'Pace · buyers per batch', maxlength: 4, value: v.paceBatch, hint: paceHint(planCapacity, planPace) },
+        { name: 'paceBatch', label: 'Pace · buyers per batch', maxlength: 4, value: v.paceBatch, hint: paceHint(planCapacity) },
         { name: 'paceMinutes', label: 'Pace · every (minutes)', maxlength: 2, value: v.paceMinutes, hint: 'Blank with the buyers: no pace. SET PACE on the live board changes it until the end.' },
       ],
     );
   };
-  // The pace's hint: the room's measured capacity and the planner's suggestion, when the planner was read.
+  // The pace's hint: the room's measured capacity, when the planner or the forecast was read.
   const plan = intelligence.plan && intelligence.plan !== 'failed' ? intelligence.plan : null;
   const forecast = intelligence.forecast && intelligence.forecast !== 'failed' ? intelligence.forecast : null;
   const planCapacity = plan?.forecast.capacity ?? forecast?.capacity ?? null;
-  const planPace = plan?.pace ?? null;
   const turnsPart = () => {
     const v = values('turns');
     editPart('turns', 'Turns and holds', [

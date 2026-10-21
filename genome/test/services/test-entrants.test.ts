@@ -23,7 +23,7 @@
  *  - a LIVE RELEASE end to end: I'LL BE THERE, the line at T0, PRESS, the hold, SECURE, PAY and RELEASE, END TEST; a
  *    size of the release set aside during the test (plan NEXT LOT §3.3): END TEST puts the stock back on its SKU;
  *  - the report's checks find a fault planted; the sweeper resumes a confirmation due after a restart;
- *  - a LIVE RELEASE with a pace (W2, W4): the bots wait in the queue, reading their state every 10 s (its `pollMs`), and
+ *  - a LIVE RELEASE with a pace (W2, W4): the bots wait in the queue, reading their state as its `pollMs` says, and
  *    are admitted batch by batch; END TEST: the report 6/6 with its PACE check.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -937,7 +937,7 @@ describe('a LIVE RELEASE end to end', () => {
     expect((await w.h.ctx.services.liveRoom.frame(release.id))?.room).toMatchObject({ left: 6, held: 0 });
   });
 
-  it('a paced release (W2, W4): the bots wait in the queue reading their state every 10 s, admitted 2 every minute; END TEST: the report 6/6 with PACE', async () => {
+  it('a paced release (W2, W4): the bots wait in the queue reading their state as its pollMs says (10 s to 30 s here), admitted 2 every minute; END TEST: the report 6/6 with PACE', async () => {
     const t0 = new Date(w.h.clock.now().getTime() + 2 * MINUTE);
     const release = await createLiveRelease(w.f, { opensAt: t0, sizes: [{ label: '52', stock: 10 }], pace: { batch: 2, minutes: 1 }, accessModels: [w.f.modelId] });
     const run = await w.tests.start(
@@ -949,10 +949,11 @@ describe('a LIVE RELEASE end to end', () => {
     const inject = vi.spyOn(w.h.app, 'inject');
     try {
       w.h.clock.set(t0);
-      // The first minute: two admitted at T0 and served; four waiting for their batch read their state every 10 s.
+      // The first minute: two admitted at T0 and served; four waiting for their batch read their state every 10 s (the
+      // next batch's) or up to 30 s (behind it: half the time until their batch is the next one).
       await drive(w, 50_000, 500, release.id);
       const reads = inject.mock.calls.filter((call) => String(((call as unknown[])[0] as { url?: string } | undefined)?.url).endsWith('/state')).length;
-      // About 4 × 5 reads in 50 s at 10 s (4 × 25 at 2 s); the two admitted at T0 a few more before their turn.
+      // At most about 4 × 5 reads in 50 s at 10 s (4 × 25 at 2 s); the two admitted at T0 a few more before their turn.
       expect(reads).toBeGreaterThan(4);
       expect(reads).toBeLessThan(40);
     } finally {

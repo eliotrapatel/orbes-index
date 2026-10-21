@@ -19,7 +19,8 @@
  *    over (204 afterwards), the end of a REMOVED entry's stream, the end of a stream whose session has ended (signed
  *    out, account locked), the server's shutdown with streams open; on a paced release (W2, W5), the queue's small frame
  *    in place of the room for a viewer waiting for its batch, with its own place, PAUSED, then the room once admitted,
- *    and its state with `pollMs` (10 s in the queue, 2 s in the room);
+ *    and its state with `pollMs` (10 s in the queue, 2 s in the room); behind the next batch, its stream ended after its
+ *    place and refused (204) until its batch is the next one, its `pollMs` up to a minute (30 s while held);
  *  - the board by its secret link only: valid, missing, malformed, wrong, another release's, replaced, revoked, a stream
  *    open on a link replaced or revoked ended at the next pulse; never a person in its answers, never indexed;
  *  - the clock for the page's sync, the .ics (its alarm, its lines).
@@ -33,7 +34,7 @@ import { LIVE_GESTURE_MIN_MS, liveNetworkHash } from '../../src/server/services/
 import { foldIcsLine, liveStages } from '../../src/server/services/live-room.js';
 import { jpegPhoto } from '../support/images.js';
 import { createCollection, createLiveRelease, createModel, holdPieces, liveFixtureOn, type LiveFixture, type LiveRelease, type LiveReleaseOptions } from '../support/live.js';
-import { openSse } from '../support/sse.js';
+import { openSse, type Sse } from '../support/sse.js';
 import { accountClient, adminClient, createHarness, errorOf, ORIGIN, safeJson, type Client, type Harness } from './support.js';
 import { poolDraw } from '../support/draws.js';
 
@@ -831,6 +832,60 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       expect(admitted).not.toHaveProperty('queue');
       sw.close();
       si.close();
+      await until(() => h.app.liveHub.open.streams === 0);
+    });
+
+    it('on a paced release (W2), only an entry whose batch is the next one keeps its stream: one behind it is sent its place and the queue’s frame, then its stream ends, a new one answers 204, and its state says to read it again as its batch nears (a minute at most, 30 s while held)', async () => {
+      const r = await release(h, f, { inMinutes: 4, pace: { batch: 1, minutes: 3 } });
+      const [a, b, c] = [await member(h, f, 1), await member(h, f, 1), await member(h, f, 1)];
+      for (const m of [a, b, c]) expect((await m.client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[0]!.id })).statusCode).toBe(200);
+      const state = async (m: Member) => safeJson(await m.client.get(`/api/v1/live/${r.id}/state`)) as Record<string, unknown> & { entry: { queue: { place: number; next: boolean } | null } };
+      // Before T0, everyone in the room on a stream.
+      const streams = new Map<Member, Sse>();
+      for (const m of [a, b, c]) streams.set(m, await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: m.client.cookies }));
+      await until(() => h.app.liveHub.open.streams === 3);
+
+      // T0: one admitted, one for the next batch (3 min later), one behind it (6 min later).
+      h.clock.advance(4 * MINUTE);
+      await advance(h, r.id);
+      const states = new Map<Member, Awaited<ReturnType<typeof state>>>();
+      for (const m of [a, b, c]) states.set(m, await state(m));
+      const at = (place: number | null) => [a, b, c].find((m) => (states.get(m)!.entry.queue?.place ?? null) === place)!;
+      const [inside, next, behind] = [at(null), at(1), at(2)];
+      expect(states.get(next)).toMatchObject({ pollMs: 10_000, entry: { queue: { place: 1, next: true } } });
+      // 6 min to its batch, 3 once it is the next one: read again within half of that, a minute at most.
+      expect(states.get(behind)).toMatchObject({ pollMs: 60_000, entry: { queue: { place: 2, next: false } } });
+
+      // The pulse: the one behind is sent its place and the queue's frame, then its stream ends; the others keep theirs.
+      const from = new Map([...streams].map(([m, s]) => [m, s.events.length]));
+      await h.app.liveHub.pulse();
+      const sb = streams.get(behind)!;
+      expect((await sb.next((e) => e.event === 'you', from.get(behind))).data.entry).toMatchObject({ status: 'QUEUED', queue: { place: 2, next: false } });
+      expect((await sb.next((e) => e.event === 'queue', from.get(behind))).data).toMatchObject({ batch: 1, minutes: 3, waiting: 2 });
+      await until(() => sb.ended);
+      expect((await streams.get(next)!.next((e) => e.event === 'you', from.get(next))).data.entry).toMatchObject({ queue: { place: 1, next: true } });
+      await streams.get(inside)!.next((e) => e.event === 'room', from.get(inside));
+      await until(() => h.app.liveHub.open.streams === 2);
+      expect(streams.get(next)!.ended).toBe(false);
+      // Asked again while behind: 204, nothing held.
+      const again = await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: behind.client.cookies });
+      expect(again.status).toBe(204);
+      expect(h.app.liveHub.open.streams).toBe(2);
+      expect(h.app.liveHub.open.accounts.get(behind.id)).toBeUndefined();
+
+      // Held: its state says 30 s, PAUSED.
+      await f.live.pausePace(r.id, f.admin);
+      expect(await state(behind)).toMatchObject({ pollMs: 30_000, queue: { paused: true }, entry: { queue: { place: 2, paused: true, next: false } } });
+      await f.live.resumePace(r.id, f.admin);
+
+      // The next batch: the one behind is now the next one, its stream allowed again.
+      h.clock.advance(3 * MINUTE);
+      await advance(h, r.id);
+      expect(await state(behind)).toMatchObject({ pollMs: 10_000, entry: { queue: { place: 1, next: true } } });
+      const reopened = await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: behind.client.cookies });
+      expect(reopened.status).toBe(200);
+      expect((await reopened.next((e) => e.event === 'you')).data.entry).toMatchObject({ queue: { place: 1, next: true } });
+      for (const s of [...streams.values(), reopened]) s.close();
       await until(() => h.app.liveHub.open.streams === 0);
     });
 

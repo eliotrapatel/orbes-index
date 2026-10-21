@@ -60,8 +60,9 @@ describe('the rules of the pace', () => {
     expect(liveQueueEta(d, 250, at(-MINUTE))).toEqual(T0);
     expect(liveQueueEta(d, 251, at(-MINUTE))).toEqual(at(2 * MINUTE));
     expect(liveQueueEta(d, 4999, at(-MINUTE))).toEqual(at(38 * MINUTE));
-    // A batch due a moment ago, the engine about to run: from now.
+    // A batch due a moment ago, the engine about to run: from now; behind it, the time first given, counted from it.
     expect(liveQueueEta(d, 1, at(SECOND))).toEqual(at(SECOND));
+    expect(liveQueueEta(d, 251, at(SECOND))).toEqual(at(2 * MINUTE));
     expect(liveQueueEta({ ...d, pace_paused_at: T0 }, 1, at(SECOND))).toBeNull();
     expect(liveQueueEta({ ...d, paused_at: T0 }, 1, at(SECOND))).toBeNull();
   });
@@ -246,11 +247,11 @@ describe('LiveService with a pace', () => {
     // Paused: the queue reads PAUSED, no estimate; nothing is admitted at the batch's time.
     const waiting = (await entriesOf(t.db, r.id)).find((e) => e.position === 2)!;
     const view = (await f.live.entry(people.find((p) => p.id === waiting.account_id)!.id, r.id))!;
-    expect(view.queue).toEqual({ place: 1, etaAt: null, paused: true });
+    expect(view.queue).toEqual({ place: 1, etaAt: null, paused: true, next: true });
     expect(await advance(r, at(7 * MINUTE))).toMatchObject({ admitted: 0 });
     f.clock.set(at(8 * MINUTE));
     expect((await f.live.resume(r.id, f.admin)).pace).toMatchObject({ nextAt: at(11 * MINUTE), batches: 1 });
-    expect((await f.live.entry(waiting.account_id, r.id))!.queue).toEqual({ place: 1, etaAt: at(11 * MINUTE), paused: false });
+    expect((await f.live.entry(waiting.account_id, r.id))!.queue).toEqual({ place: 1, etaAt: at(11 * MINUTE), paused: false, next: true });
     expect(await advance(r, at(11 * MINUTE - 1))).toMatchObject({ admitted: 0 });
     expect(await advance(r, at(11 * MINUTE))).toMatchObject({ admitted: 1 });
   });
@@ -389,9 +390,10 @@ describe('LiveService with a pace', () => {
     const rows = await entriesOf(t.db, r.id);
     const byPlace = (p: number) => rows.find((e) => e.position === p)!.account_id;
     expect((await f.live.entry(byPlace(1), r.id))!.queue).toBeNull();
-    expect((await f.live.entry(byPlace(3), r.id))!.queue).toEqual({ place: 1, etaAt: at(3 * MINUTE), paused: false });
-    expect((await f.live.entry(byPlace(4), r.id))!.queue).toEqual({ place: 2, etaAt: at(3 * MINUTE), paused: false });
-    expect((await f.live.entry(byPlace(6), r.id))!.queue).toEqual({ place: 4, etaAt: at(6 * MINUTE), paused: false });
+    // Places 1 and 2 come with the next batch (W2: they follow the stream); 4 waits behind it (its page reads its state).
+    expect((await f.live.entry(byPlace(3), r.id))!.queue).toEqual({ place: 1, etaAt: at(3 * MINUTE), paused: false, next: true });
+    expect((await f.live.entry(byPlace(4), r.id))!.queue).toEqual({ place: 2, etaAt: at(3 * MINUTE), paused: false, next: true });
+    expect((await f.live.entry(byPlace(6), r.id))!.queue).toEqual({ place: 4, etaAt: at(6 * MINUTE), paused: false, next: false });
     // The console's entries say when and by which batch.
     const listed = await f.liveConsole.entries(r.id, {}, { page: 1, pageSize: 10 });
     expect(listed.items.map((e) => [e.position, e.batch, e.admittedAt])).toEqual([
