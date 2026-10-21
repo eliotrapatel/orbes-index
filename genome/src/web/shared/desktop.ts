@@ -226,11 +226,11 @@ const FRAME_WORDS: readonly { words: string; aside: readonly string[]; main: boo
   { words: '.n-lookbook__model:not(.n-wishlist__card) > .n-lift', main: true, aside: ['.n-lookbook__dots', '.n-lookbook__owned', '.n-lookbook__see'] },
   // A model: its sizes, its finishes, what the collector owns.
   { words: '.n-model__body > .n-model__words', main: true, aside: ['.n-model__sizes', '.n-model__dots', '.n-model__owned'] },
-  // A release's page (views/desktop-release.ts): a draw's state, when its entries close (or open) and YOUR ENTRY's main
-  // action, or once drawn THIS RELEASE IS OVER and the account's part (its early access stays under its title); a LIVE
-  // RELEASE's clock, its time and ADD TO CALENDAR, or once over THIS RELEASE IS OVER and the account's part, or the end
-  // of a visit and its sentence.
-  { words: '.n-release__hero.d-pframe > .n-release__words', main: true, aside: ['.n-release__state', '.n-release__frame-when', '.n-release__frame-action', '.n-release__over-word', '.n-release__part'] },
+  // A release's page (views/desktop-release.ts): a draw's state, when its entries close (or open), ADD TO CALENDAR and
+  // YOUR ENTRY's main action, or once drawn THIS RELEASE IS OVER and the account's part (its early access stays under
+  // its title); a LIVE RELEASE's clock, its time and ADD TO CALENDAR, or once over THIS RELEASE IS OVER and the
+  // account's part, or the end of a visit and its sentence.
+  { words: '.n-release__hero.d-pframe > .n-release__words', main: true, aside: ['.n-release__state', '.n-release__frame-when', '.n-release__calendar-line', '.n-release__frame-action', '.n-release__over-word', '.n-release__part'] },
   { words: '.d-pframe > .n-live__words', main: true, aside: ['.n-live__opens', '.n-live__countdown', '.n-live__when', '.n-live__local', '.n-live__calendar-line', '.n-live__over', '.n-live__part', '.n-live__outcome-block'] },
   // A piece: its state, THE MODEL and the photograph's note, in the photograph's frame.
   { words: '.n-piece__article > .n-piece__photo', main: false, aside: ['.n-piece__state-line', '.n-cap2', '.n-result__photo-note'] },

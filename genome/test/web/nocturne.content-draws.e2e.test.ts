@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
 import { describe, expect, it } from 'vitest';
-import { STORY } from '../../src/web/verify/copy.js';
+import { LIVE, STORY } from '../../src/web/verify/copy.js';
 import { eachState } from '../support/nocturne-stage.js';
 import { openState, stateById } from '../support/nocturne-states.js';
 import { contentSuite, HAS_CHROMIUM, hiddenGuaranteeSuite, SHARD_TIMEOUT_MS } from './nocturne.content.harness.js';
@@ -126,6 +126,45 @@ describe.skipIf(!HAS_CHROMIUM)('a draw in sizes: enter in a size, change it, wit
             await page.setViewportSize({ width: 320, height: 800 });
             const wide = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
             if (wide > 0) found.push(`sideways ${wide} px at 320`);
+          } finally {
+            await opened.close();
+          }
+        },
+        () => {},
+      );
+      expect(found).toEqual([]);
+    },
+    SHARD_TIMEOUT_MS,
+  );
+});
+
+// Macro scope C1 (lot M1, step M1.9): ADD TO CALENDAR on a draw's page while its entries are to open or open, LIVE's
+// word, its .ics read from the server (the opening of entries to their close); none once its entries are closed or it is
+// cancelled (the server has no file then).
+describe.skipIf(!HAS_CHROMIUM)('ADD TO CALENDAR on a draw\'s page (macro scope C1, Chromium)', () => {
+  it(
+    'links an open draw to its .ics, a calendar file; a closed or cancelled draw offers none',
+    async () => {
+      const found: string[] = [];
+      await eachState(
+        ['draw-open-calendar', 'draw-closed', 'draw-cancelled'].map((id) => stateById(id)),
+        async (state, { stage, demo, browser }) => {
+          const opened = await openState(browser, stage, demo, state);
+          try {
+            const page = opened.page;
+            const link = page.getByRole('link', { name: LIVE.calendar });
+            if (state.id !== 'draw-open-calendar') {
+              if ((await link.count()) !== 0) found.push(`${state.id}: shows ${LIVE.calendar}`);
+              return;
+            }
+            const href = (await link.getAttribute('href')) ?? '';
+            if (href !== `/api/v1/drops/${demo.releases.draw}/calendar.ics`) found.push(`href ${href}`);
+            if ((await link.getAttribute('download')) !== 'orbes-draw.ics') found.push(`download ${await link.getAttribute('download')}`);
+            const res = await page.request.get(new URL(href, page.url()).toString());
+            if (res.status() !== 200) found.push(`status ${res.status()}`);
+            if (!/^text\/calendar/.test(res.headers()['content-type'] ?? '')) found.push(`type ${res.headers()['content-type']}`);
+            const body = await res.text();
+            if (!body.startsWith('BEGIN:VCALENDAR') || !/BEGIN:VEVENT/.test(body)) found.push('not a calendar');
           } finally {
             await opened.close();
           }

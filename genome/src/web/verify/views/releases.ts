@@ -28,7 +28,8 @@
  *       first shown. The tab shown is kept with the page's place in the history (back from a release returns to it).
  *
  * A draw's page (C19): ‹ THE RELEASES; the model's photograph, faded; its collection (or model), its title, its state
- * (with an early access, P-X02: PLATINE AND PALLADIUM: FROM … · EVERYONE: FROM …, in UTC); once drawn, the account's
+ * (with an early access, P-X02: PLATINE AND PALLADIUM: FROM … · EVERYONE: FROM …, in UTC), and while entries are to open
+ * or open ADD TO CALENDAR (macro scope C1: its .ics, the opening of entries to their close); once drawn, the account's
  * part in it (YOU TOOK PART, YOU SECURED A PIECE) and THIS RELEASE IS OVER on a plate (as C29). THE RELEASE: its
  * description, its model with SEE THE MODEL, its facts (PRICE, PIECES, the times in UTC then on this phone, the early
  * access, how long a place drawn is held, the places reserved directly), the paragraph on the early access. YOUR ENTRY:
@@ -1091,10 +1092,11 @@ class ReleasePage {
 
   /**
    * The hero (C19): the model's photograph, faded; its collection (or model), its title (the model's name on a line of
-   * its own), its state and, with an early access, its two openings in UTC; drawn, the account's part in it (C29).
+   * its own), its state and, with an early access, its two openings in UTC; ADD TO CALENDAR while entries are to open
+   * or open (macro scope C1); drawn, the account's part in it (C29).
    */
   private renderHero(s: ReleaseSheetModel): void {
-    const key = JSON.stringify([s.id, s.image, s.eyebrow, s.title, s.stateLabel, s.access, s.drawn, this.part]);
+    const key = JSON.stringify([s.id, s.image, s.eyebrow, s.title, s.stateLabel, s.access, s.calendarHref, s.drawn, this.part]);
     if (key === this.heroKey) return;
     this.heroKey = key;
     const title = modelTitle('h1', ['n-g', 'n-t1', 'n-release__title', 'release__title'], s.title, modelName(s.model));
@@ -1110,6 +1112,9 @@ class ReleasePage {
       title,
       s.drawn ? null : h('p', { class: 'n-g n-lb n-ivc n-release__state release__state', text: s.stateLabel }),
       s.access ? timedAccess(s.access) : null,
+      // ADD TO CALENDAR (macro scope C1), LIVE's word: under the state and its times while entries are to open or open,
+      // as a LIVE RELEASE's page has it under its time; on a computer, the frame's right block under the time.
+      s.calendarHref ? h('p', { class: 'n-release__calendar-line' }, h('a', { class: 'n-g n-tl n-release__calendar', attrs: { href: s.calendarHref, download: 'orbes-draw.ics' }, text: LIVE.calendar })) : null,
       s.drawn ? null : this.frameAction,
       // On a computer, THIS RELEASE IS OVER stands in the frame beside the title (its plate under the frame is the
       // phone's): an element of the desktop layout only, never shown on a phone (shared/desktop.css).

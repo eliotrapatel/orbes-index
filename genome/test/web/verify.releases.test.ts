@@ -10,7 +10,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { dropNotFound, drawOrder } from '../../src/server/services/drops.js';
-import { HOW, RELEASES } from '../../src/web/verify/copy.js';
+import { HOW, LIVE, RELEASES } from '../../src/web/verify/copy.js';
 import { guaranteedLines } from '../../src/web/verify/guarantee-model.js';
 import {
   drawLines,
@@ -200,6 +200,19 @@ describe('the releases\' list and pages (P-R03)', () => {
     expect(releaseSheet(sheet({ purchaseWindowHours: 1 }), 0).rows[3]).toEqual({ label: 'PLACE HELD', value: '1 HOUR' });
     // NOCTURNE (addition 5, C19): a draw's price first among its facts, when ORBES gave one.
     expect(releaseSheet(sheet({ priceMinor: 420000, currency: 'EUR' }), 0).rows[0]).toEqual({ label: 'PRICE', value: '€\u00a04\u00a0200' });
+  });
+
+  it('offers ADD TO CALENDAR, LIVE\'s word, while entries are to open or open; never once closed, drawn or cancelled (macro scope C1)', () => {
+    const href = `/api/v1/drops/${ID}/calendar.ics`;
+    expect(releaseSheet(sheet(), 0).calendarHref).toBe(href);
+    expect(releaseSheet(sheet({ state: 'UPCOMING' }), 0).calendarHref).toBe(href);
+    expect(releaseSheet(sheet({ ...EARLY, state: 'UPCOMING', earlyAccessOpen: true }), 0).calendarHref).toBe(href);
+    for (const state of ['CLOSED', 'CANCELLED'] as const) expect(releaseSheet(sheet({ state }), 0).calendarHref).toBeNull();
+    expect(releaseSheet(sheet({ state: 'DRAWN', seed: 'cd'.repeat(32), drawnAt: '2026-10-14T12:00:00.000Z' }), 0).calendarHref).toBeNull();
+    // A state the page does not know is not offered one.
+    expect(releaseSheet(sheet({ state: 'DRAFT' as never }), 0).calendarHref).toBeNull();
+    // The one word, LIVE's.
+    expect(LIVE.calendar).toBe('ADD TO CALENDAR');
   });
 
   it('lists the draw\'s entries by rank, tier and seniority, the account\'s own marked', () => {

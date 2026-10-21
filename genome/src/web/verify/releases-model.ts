@@ -256,6 +256,11 @@ export interface ReleaseSheetModel {
   sizes: DrawSizeModel[];
   /** The rule of its draw, word for word: a draw with sizes has its own. */
   rule: string;
+  /**
+   * ADD TO CALENDAR (macro scope C1): its `.ics` (GET /api/v1/drops/:id/calendar.ics, the opening of entries to their
+   * close), while entries are to open or open; null once closed, drawn or cancelled (the server has none then).
+   */
+  calendarHref: string | null;
 }
 
 /** Hexadecimal in groups of four, for reading and comparing by eye. */
@@ -326,6 +331,7 @@ export function releaseSheet(s: DropSheet, offsetMinutes: number): ReleaseSheetM
     guaranteed: state === 'DRAWN' && Array.isArray(s.guaranteed) ? s.guaranteed.filter((x) => x && isReleaseId(x.id) && Number.isInteger(x.pieces)) : [],
     sizes,
     rule: sizes.length > 0 ? RELEASES.ruleSizes : RELEASES.rule,
+    calendarHref: state === 'UPCOMING' || state === 'OPEN' ? `/api/v1/drops/${encodeURIComponent(s.id)}/calendar.ics` : null,
   };
 }
 

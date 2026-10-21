@@ -1529,6 +1529,8 @@ export const PHONE_STATES: readonly UiState[] = [
   { id: 'draw-full', title: 'A draw in its early access, every piece reserved: EVERY PIECE RESERVED, the waiting list after', refs: ['C42'], variant: 'draws', as: you, path: release('full'), ready: '.view--release .release__status' },
   { id: 'draw-place-reserved', title: 'A PLATINE account’s direct reservation: PLACE RESERVED, held until …, ORBES Client Services', refs: ['C42', 'C31'], variant: 'draws', as: 'platine', path: release('full'), ready: '.view--release:has(.release__status) .n-story__open:not([hidden])' },
   { id: 'draw-open-full', title: 'A draw open, every piece reserved: you may still enter, the waiting list', refs: ['C19'], variant: 'draws', as: you, path: release('openFull'), ready: '.view--release .release__status' },
+  // ADD TO CALENDAR (macro scope C1; lot M1, step M1.9): a draw open, not entered, its .ics under its state.
+  { id: 'draw-open-calendar', title: 'A draw open, not entered: ENTRIES OPEN, ADD TO CALENDAR under it, ENTER THE DRAW', refs: ['K25'], variant: 'draws', as: you, path: release('draw'), ready: '.view--release .n-release__calendar-line a[href$="/calendar.ics"]' },
   // Plan NEXT LOT §3.6.F: a draw in sizes, open, its SIZES row, its own rule, YOUR SIZE preselected from YOUR SIZES.
   {
     id: 'draw-sizes',
@@ -2442,7 +2444,7 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
   'desk-11': [
     ...desk(1440, 'result-unknown', 'result-revoked', 'result-unreadable'),
     ...desk(1440, 'piece-stolen', 'piece-transfer', 'piece-in-service', 'model-salon-sizes'),
-    ...desk(1440, 'draw-soon', 'draw-early', 'draw-sizes', 'pieces-draws'),
+    ...desk(1440, 'draw-soon', 'draw-early', 'draw-sizes', 'pieces-draws', 'draw-open-calendar'),
     ...desk(1440, 'circle-failed', 'post-failed', 'post-not-found', 'model-not-found', 'draw-not-found'),
     ...desk(1024, 'pieces-orders'),
     ...desk(1440, 'result-transfer-code', 'result-ceremony', 'result-received', 'model-salon-requested', 'draw-entered'),

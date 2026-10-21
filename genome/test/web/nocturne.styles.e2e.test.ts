@@ -1477,6 +1477,8 @@ async function aDraw(page: Page): Promise<void> {
   await check(page, '.n-release__words', { 'margin-top': -56, 'text-align': 'center' });
   await check(page, '#release-title', { 'margin-top': 12, 'font-size': 26, 'letter-spacing': em(26, 0.08), color: IV });
   await check(page, '.n-release__state', { 'margin-top': 14, color: IV, 'font-size': 9.5 });
+  // ADD TO CALENDAR under the state (macro scope C1), LIVE's text link.
+  await check(page, '.n-release__calendar-line', { 'margin-top': 18 });
   // THE RELEASE, YOUR ENTRY, THE DRAW: 44 px apart.
   await check(page, '.n-release__section', { 'padding-top': 44, 'padding-left': 24 });
   await check(page, '.n-release__description', { 'margin-top': 14 });
