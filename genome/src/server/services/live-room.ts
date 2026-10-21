@@ -42,6 +42,7 @@ import type { DropRow, LiveEndReason } from '../db/schema.js';
 import { DomainError } from '../errors.js';
 import { systemClock, type Clock } from '../types.js';
 import { afterRoomPlace, isAfterRoom } from './after-room.js';
+import { CALENDAR_ALARM_MINUTES, releaseIcs } from './calendar.js';
 import { dropNotFound } from './drops.js';
 import {
   accessOf,
@@ -74,8 +75,8 @@ import { savedSizeAmong } from './sizes.js';
 export const LIVE_LIST_LIMIT = 50;
 /** MY PIECES lists an account's latest entries, at most this many. */
 export const LIVE_MINE_LIMIT = 50;
-/** The .ics alarm: this many minutes before the room opens. */
-export const LIVE_CALENDAR_ALARM_MINUTES = 10;
+/** The .ics alarm: this many minutes before the room opens (services/calendar.ts, a draw's before its entries open too). */
+export const LIVE_CALENDAR_ALARM_MINUTES = CALENDAR_ALARM_MINUTES;
 
 // ── The stages ─────────────────────────────────────────────────────────────
 
@@ -358,60 +359,30 @@ const MINUTE_MS = 60_000;
 
 // ── The calendar ───────────────────────────────────────────────────────────
 
-const icsTime = (t: Date) => `${new Date(t).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')}`;
-const icsText = (s: string) => s.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
-
-/** RFC 5545 §3.1: lines of at most 75 octets, continued on the next after a space; never inside a character. */
-export function foldIcsLine(line: string): string {
-  const out: string[] = [];
-  let cur = '';
-  let bytes = 0;
-  for (const ch of line) {
-    const n = Buffer.byteLength(ch, 'utf8');
-    if (bytes + n > (out.length === 0 ? 75 : 74)) {
-      out.push(cur);
-      cur = '';
-      bytes = 0;
-    }
-    cur += ch;
-    bytes += n;
-  }
-  out.push(cur);
-  return out.join('\r\n ');
-}
+/** RFC 5545 folding, from the shared writer (services/calendar.ts). */
+export { foldIcsLine } from './calendar.js';
 
 /**
  * The .ics of a release: one event from the room's opening to the end of the sales, an alarm LIVE_CALENDAR_ALARM_MINUTES
- * before, its page's address, the model's name only once revealed, no personal data.
+ * before, its page's address, the model's name only once revealed, no personal data. Written by the shared writer
+ * (services/calendar.ts releaseIcs), byte for byte as before it (test/services/calendar.test.ts).
  */
 export function liveCalendar(input: { id: string; name: string | null; roomOpensAt: Date; opensAt: Date; closesAt: Date; now: Date; origin: string }): string {
   const host = new URL(input.origin).host;
   const summary = input.name ? `LIVE RELEASE · ${input.name} · ORBES` : 'LIVE RELEASE · ORBES';
   const url = `${input.origin}/verify/releases/${input.id}`;
   const minutes = Math.round((input.opensAt.getTime() - input.roomOpensAt.getTime()) / MINUTE_MS);
-  const lines = [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'PRODID:-//ORBES//LIVE RELEASE//EN',
-    'CALSCALE:GREGORIAN',
-    'METHOD:PUBLISH',
-    'BEGIN:VEVENT',
-    `UID:live-${input.id}@${host}`,
-    `DTSTAMP:${icsTime(input.now)}`,
-    `DTSTART:${icsTime(input.roomOpensAt)}`,
-    `DTEND:${icsTime(input.closesAt)}`,
-    `SUMMARY:${icsText(summary)}`,
-    `DESCRIPTION:${icsText(`The room opens ${minutes} minute${minutes === 1 ? '' : 's'} before the release. ${url}`)}`,
-    `URL:${url}`,
-    'BEGIN:VALARM',
-    'ACTION:DISPLAY',
-    `DESCRIPTION:${icsText(summary)}`,
-    `TRIGGER:-PT${LIVE_CALENDAR_ALARM_MINUTES}M`,
-    'END:VALARM',
-    'END:VEVENT',
-    'END:VCALENDAR',
-  ];
-  return `${lines.map(foldIcsLine).join('\r\n')}\r\n`;
+  return releaseIcs({
+    prodId: '-//ORBES//LIVE RELEASE//EN',
+    uid: `live-${input.id}@${host}`,
+    now: input.now,
+    start: input.roomOpensAt,
+    end: input.closesAt,
+    summary,
+    description: `The room opens ${minutes} minute${minutes === 1 ? '' : 's'} before the release. ${url}`,
+    url,
+    alarms: [{ minutes: LIVE_CALENDAR_ALARM_MINUTES, description: summary }],
+  });
 }
 
 // ── Service ────────────────────────────────────────────────────────────────

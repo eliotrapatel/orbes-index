@@ -79,6 +79,7 @@ import { PlaceService } from './services/places.js';
 import { AcquisitionService } from './services/acquisition.js';
 import { AcquisitionReportService } from './services/acquisition-report.js';
 import { LinkService } from './services/links.js';
+import { CampaignService } from './services/campaign.js';
 import { TrackingService } from './services/tracking.js';
 import { SalonService } from './services/salon.js';
 import { ShopifyExportService } from './services/shopify.js';
@@ -204,6 +205,8 @@ export interface AppServices {
   links: LinkService;
   /** What the links, tags and sites brought in, first and last link (plan CUSTOMER INTELLIGENCE §3.4 A.7.1, A.10): reads only. */
   acquisitionReport: AcquisitionReportService;
+  /** A release's CAMPAIGN tab (plan MACRO M1 §2.1, C2): its links, one per channel in one click, and what each brought in, last link. */
+  campaign: CampaignService;
   /** The lot's growing tables' bytes as last measured (plan CUSTOMER INTELLIGENCE §3.3 T.10, §3.4 A.10.7): the `intelligence sizes` line and Server status's « Visitor data ». */
   intelligenceSizes: IntelligenceSizes;
   /** The suppliers (plan NEXT LOT §3.5.6.2): who makes ORBES's pieces, and the supplier of each model and size. */
@@ -358,6 +361,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const acquisition = new AcquisitionService({ db, publicOrigin: config.publicOrigin, clock, log });
     const links = new LinkService({ db, audit, publicOrigin: config.publicOrigin, clock });
     const acquisitionReport = new AcquisitionReportService({ db, links });
+    const campaign = new CampaignService({ db, audit, links, clock });
     const intelligenceSizes = new IntelligenceSizes(db, clock, log);
     // The page load's arrival rides in the views' batches (§3.0 (c), §3.4 A.7.2): the same route, the same exclusions.
     // The link attaches the device's visits in its own transaction (§3.3 T.8.4 step 7, §3.4 A.4).
@@ -437,6 +441,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       acquisition,
       links,
       acquisitionReport,
+      campaign,
       intelligenceSizes,
       suppliers,
       supplierOrders,

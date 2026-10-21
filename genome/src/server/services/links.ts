@@ -292,8 +292,8 @@ export class LinkService {
     return this.view(row);
   }
 
-  /** Make a link and its LINK source (see the header). */
-  async create(input: LinkInput, actor: Actor): Promise<LinkView> {
+  /** Make a link and its LINK source (see the header); inside `db` when it is a caller's transaction (services/campaign.ts). */
+  async create(input: LinkInput, actor: Actor, db: Db = this.db): Promise<LinkView> {
     const name = this.linkName(input?.name);
     const note = this.note(input?.note);
     const cost = this.cost(input?.cost);
@@ -301,7 +301,7 @@ export class LinkService {
     const author = adminIdOf(actor);
     if (!author) throw validationError('A link is made by a console user.');
     try {
-      const id = await inTransaction(this.db, async (tx) => {
+      const id = await inTransaction(db, async (tx) => {
         const channelId = await this.existingChannel(tx, input?.channelId);
         const target = await this.destination(tx, input?.destination, input?.dropId, input?.modelId);
         let code = asked;
@@ -345,7 +345,7 @@ export class LinkService {
         );
         return row.id;
       });
-      return this.get(id);
+      return this.get(id, db);
     } catch (e) {
       if (isUniqueViolation(e, 'links_code_key')) throw codeTaken();
       throw e;

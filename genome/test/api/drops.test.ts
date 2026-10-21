@@ -48,7 +48,7 @@ import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { isCheckViolation } from '../../src/server/db/pg-errors.js';
 import { giveSizes } from '../support/draws.js';
 import { createLiveRelease, createModel, holdPieces, liveFixtureOn } from '../support/live.js';
-import { accountClient, adminClient, createAdmin, createHarness, errorOf, issue, PASSWORD, safeJson, scanToReceive, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
+import { accountClient, adminClient, createAdmin, createHarness, errorOf, issue, ORIGIN, PASSWORD, safeJson, scanToReceive, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
 
 const HOUR = 3_600_000;
 /** Plan NEXT LOT §3.6.F: a draw's pieces are given per size; one size holding them all. */
@@ -1227,5 +1227,69 @@ describe('draws in sizes over HTTP (plan NEXT LOT §3.6.F)', () => {
       ['52', 1, 1],
       ['54', 1, 0],
     ]);
+  });
+});
+
+describe('a draw’s ADD TO CALENDAR over HTTP (plan MACRO M1 §2.1, C1)', () => {
+  let h: Harness;
+  let catalog: Catalog;
+  let operator: Client;
+
+  const at = (offsetMs: number) => new Date(h.clock.now().getTime() + offsetMs).toISOString();
+  const ics = (id: string) => h.client().get(`/api/v1/drops/${id}/calendar.ics`);
+  const stamp = (iso: string) => iso.replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  async function draw(body: Record<string, unknown>, opensIn: number, hours = 48): Promise<AdminDropJson> {
+    const res = await operator.post('/api/admin/drops', { modelId: catalog.modelId, title: 'MONOLITHE — ON THE CALENDAR', sizes: one(2), opensAt: at(opensIn), closesAt: at(opensIn + hours * HOUR), ...body });
+    expect(res.statusCode, res.body).toBe(201);
+    return safeJson(res) as AdminDropJson;
+  }
+
+  beforeAll(async () => {
+    h = await createHarness();
+    catalog = await seedCatalog(h.ctx);
+    await giveSizes(h.ctx.db, catalog.modelId);
+    operator = await adminClient(h, 'OPERATOR');
+  });
+  afterAll(() => h?.close());
+
+  it('gives a published draw’s .ics to anyone: its entries’ opening to their close, an alarm 10 minutes before and its early access, its page, its name, no personal data, kept a minute', async () => {
+    const d = await draw({ earlyAccessHours: 4, earlyAccessPlatineHours: 2 }, 24 * HOUR);
+    expect((await operator.post(`/api/admin/drops/${d.id}/publish`)).statusCode).toBe(200);
+    // A collector exists: the file still names no one.
+    const fan = await accountClient(h);
+    const res = await ics(d.id);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.headers['content-type']).toBe('text/calendar; charset=utf-8');
+    expect(res.headers['content-disposition']).toBe('attachment; filename="orbes-draw.ics"');
+    expect(res.headers['cache-control']).toBe('public, max-age=60');
+    expect(res.body.endsWith('\r\n')).toBe(true);
+    expect(res.body.split('\r\n').every((l) => Buffer.byteLength(l) <= 75)).toBe(true);
+    const u = res.body.replace(/\r\n /g, '');
+    expect(u).toContain(`DTSTART:${stamp(d.opensAt)}`);
+    expect(u).toContain(`DTEND:${stamp(d.closesAt)}`);
+    expect(u).toContain(`UID:draw-${d.id}@verify.orbes.test`);
+    expect(u).toContain(`URL:${ORIGIN}/verify/releases/${d.id}`);
+    // The name the draw's public page shows from its publication.
+    const page = safeJson(await h.client().get(`/api/v1/drops/${d.id}`)) as { model: { name: string } };
+    expect(u).toContain(`SUMMARY:DRAW · ${page.model.name} · ORBES`);
+    expect([...u.matchAll(/TRIGGER:([^\r]+)/g)].map((m) => m[1])).toEqual(['-PT10M', '-PT4H']);
+    expect(u).not.toMatch(/ATTENDEE|ORGANIZER|@example\.com/);
+    expect(u).not.toContain(fan.email);
+  });
+
+  it('answers 404 DROP_NOT_FOUND for a DRAFT, a cancelled draw, a LIVE RELEASE (its own is /api/v1/live), an unknown or malformed id', async () => {
+    const draft = await draw({ earlyAccessHours: 0 }, 24 * HOUR);
+    const cancelled = await draw({ earlyAccessHours: 0 }, 24 * HOUR);
+    expect((await operator.post(`/api/admin/drops/${cancelled.id}/publish`)).statusCode).toBe(200);
+    expect((await operator.post(`/api/admin/drops/${cancelled.id}/cancel`)).statusCode).toBe(200);
+    const live = await createLiveRelease(await liveFixtureOn(h.ctx, h.clock), { opensAt: new Date(h.clock.now().getTime() + 24 * HOUR) });
+    for (const id of [draft.id, cancelled.id, live.id, '00000000-0000-4000-8000-000000000000', 'not-an-id']) {
+      const res = await ics(id);
+      expect([id, res.statusCode, errorOf(res).code]).toEqual([id, 404, 'DROP_NOT_FOUND']);
+    }
+    // Without an early access: one alarm.
+    const plain = await draw({ earlyAccessHours: 0 }, 24 * HOUR);
+    expect((await operator.post(`/api/admin/drops/${plain.id}/publish`)).statusCode).toBe(200);
+    expect([...(await ics(plain.id)).body.matchAll(/TRIGGER:([^\r]+)/g)].map((m) => m[1])).toEqual(['-PT10M']);
   });
 });

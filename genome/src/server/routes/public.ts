@@ -2,10 +2,11 @@
  * Public routes (contract §3): health, public keys, categories, Client
  * Services contact, verify, the photographs an authentic result shows
  * (F-04), the lookbook of the models (P-R02: the PUBLIC ones and their
- * sheets), the drops (P-R03: the releases to come, a release's page
- * and, once drawn, its entries by rank), THE RELEASES' PAST (plan LIVE
- * RELEASE+, choice 5: the releases ended), THE CLUB (plan NEXT-NINE, BP-19
- * T9: the tiers and what each gives), the rules HOW RELEASES WORK states
+ * sheets), the drops (P-R03: the releases to come, a release's page,
+ * its ADD TO CALENDAR file and, once drawn, its entries by rank), THE
+ * RELEASES' PAST (plan LIVE RELEASE+, choice 5: the releases ended), THE
+ * CLUB (plan NEXT-NINE, BP-19 T9: the tiers and what each gives), the
+ * rules HOW RELEASES WORK states
  * (plan NEXT-NINE, FT-01: their figures), the report a customer may attach
  * to a scan that was not authentic, and the ownership certificate an owner
  * shares (F-06: its live record and its PDF, by the token of the link).
@@ -206,6 +207,16 @@ export const publicRoutes: FastifyPluginAsync<PublicRouteDeps> = async (app, { c
     const page = await ctx.services.drops.drawEntries(id, pageOf(request.query));
     reply.header('cache-control', DROPS_CACHE_CONTROL);
     return page;
+  });
+
+  // ADD TO CALENDAR (plan MACRO M1 §2.1, C1): a published draw's .ics, the same for everyone, as its page; a DRAFT, a
+  // cancelled draw, an unknown or malformed id: one 404 DROP_NOT_FOUND (a LIVE RELEASE's is routes/live.ts's).
+  app.get('/api/v1/drops/:id/calendar.ics', async (request, reply) => {
+    const { id } = parse(publicDropParams, request.params);
+    const file = await ctx.services.drops.calendar(id, ctx.config.publicOrigin);
+    reply.header('cache-control', DROPS_CACHE_CONTROL);
+    reply.header('content-disposition', `attachment; filename="${file.filename}"`);
+    return reply.type('text/calendar; charset=utf-8').send(file.body);
   });
 
   // THE RELEASES' PAST (plan LIVE RELEASE+, choice 5): every release ended, LIVE RELEASES and draws together, the newest

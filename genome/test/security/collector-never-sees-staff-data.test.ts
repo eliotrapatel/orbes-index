@@ -238,6 +238,7 @@ describe('the collector never sees staff data (§3.6 C.9, §3.0 (k); step 9.13)'
       '/api/v1/drops': '/api/v1/drops',
       '/api/v1/drops/:id': `/api/v1/drops/${draw.id}`,
       '/api/v1/drops/:id/entries': `/api/v1/drops/${draw.id}/entries`,
+      '/api/v1/drops/:id/calendar.ics': `/api/v1/drops/${draw.id}/calendar.ics`,
       '/api/v1/releases/past': '/api/v1/releases/past',
       '/api/v1/the-club': '/api/v1/the-club',
       '/api/v1/releases/rules': '/api/v1/releases/rules',

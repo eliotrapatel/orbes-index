@@ -198,6 +198,8 @@ export const ADVISORY_LOCK = Object.freeze({
   RECEPTION_LINE: 0x4f52_0601,
   /** An account's saved addresses (services/addresses.ts): its limit and its one default, with the account id's first 32 bits as its second part. */
   ACCOUNT_ADDRESSES: 0x4f52_0701,
+  /** A release's links made in one click (services/campaign.ts makeLinks), with the release id's first 32 bits as its second part. */
+  RELEASE_CAMPAIGN: 0x4f52_0801,
 });
 
 /**

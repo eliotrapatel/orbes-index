@@ -124,6 +124,7 @@ import type { DropEntryStatus, DropRow, DropUpdate } from '../db/schema.js';
 import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
 import { makePage, pageOffset, systemClock, type Actor, type Clock, type Page, type PageRequest } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
+import { CALENDAR_ALARM_MINUTES, releaseIcs, type IcsAlarm } from './calendar.js';
 import { CLUB_TIER_THRESHOLDS, clubStandings, tierName, tierOf, type ClubTier } from './club.js';
 import { readProgram } from './club-program.js';
 import { coverOnPublish, guaranteedPieces, holderGuarantee, releaseCovered, releaseGuaranteed, sizeServesGuarantee, useGuarantees, type ReleaseGuaranteed } from './guarantees.js';
@@ -1061,6 +1062,34 @@ async function auditedSizes(db: Db, dropId: string): Promise<{ label: string; pi
   return (await drawSizesOf(db, dropId)).map((x) => ({ label: x.label, pieces: x.stock }));
 }
 
+// ── The calendar (plan MACRO M1 §2.1, C1) ─────────────────────────────────
+
+/**
+ * A draw's ADD TO CALENDAR (services/calendar.ts): one event from the opening of its entries to their close, an alarm
+ * CALENDAR_ALARM_MINUTES before the opening, and a second one when its early access begins (P-X02: its first tier's,
+ * `earlyAccessOpensAt`), when it has one that starts earlier still; its page's address; the model's name, public on the
+ * draw's page from its publication; no personal data.
+ */
+export function drawCalendar(input: { id: string; name: string; opensAt: Date; closesAt: Date; earlyAccessOpensAt: Date | null; now: Date; origin: string }): string {
+  const host = new URL(input.origin).host;
+  const summary = `DRAW · ${input.name} · ORBES`;
+  const url = `${input.origin}/verify/releases/${input.id}`;
+  const alarms: IcsAlarm[] = [{ minutes: CALENDAR_ALARM_MINUTES, description: summary }];
+  const early = input.earlyAccessOpensAt ? Math.round((input.opensAt.getTime() - input.earlyAccessOpensAt.getTime()) / 60_000) : 0;
+  if (early > CALENDAR_ALARM_MINUTES) alarms.push({ minutes: early, description: `EARLY ACCESS · ${summary}` });
+  return releaseIcs({
+    prodId: '-//ORBES//DRAW//EN',
+    uid: `draw-${input.id}@${host}`,
+    now: input.now,
+    start: input.opensAt,
+    end: input.closesAt,
+    summary,
+    description: `Entries open at the start of this event and close at its end. ${url}`,
+    url,
+    alarms,
+  });
+}
+
 // ── Service ────────────────────────────────────────────────────────────────
 
 export interface DropServiceDeps {
@@ -1195,6 +1224,20 @@ export class DropService {
       Number(total.n),
       page,
     );
+  }
+
+  /**
+   * ADD TO CALENDAR (plan MACRO M1 §2.1, C1): a published draw's .ics (`drawCalendar`), `origin` its page's (PUBLIC_ORIGIN).
+   * A DRAFT, a cancelled draw, a LIVE RELEASE (its own: routes/live.ts), an unknown or malformed id: 404 DROP_NOT_FOUND.
+   */
+  async calendar(dropId: string, origin: string): Promise<{ filename: string; body: string }> {
+    const id = knownId(dropId, dropNotFound);
+    const r = await this.reads(this.db).where('d.id', '=', id).where('d.published_at', 'is not', null).where('d.mode', '=', 'DRAW').executeTakeFirst();
+    if (!r || r.cancelled_at) throw dropNotFound();
+    return {
+      filename: 'orbes-draw.ics',
+      body: drawCalendar({ id, name: r.model_name, opensAt: r.opens_at, closesAt: r.closes_at, earlyAccessOpensAt: earlyAccessOpensAt(r), now: this.clock(), origin }),
+    };
   }
 
   // ── The account (routes/club.ts) ─────────────────────────────────────────

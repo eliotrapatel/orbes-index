@@ -52,7 +52,9 @@
  *                                                                     the suggested hour and its T0's
  *
  * Client Services follows the confirmed reservations through their orders (routes/admin/orders.ts: the Orders board
- * replaces the LIVE plan's list, its CSV and its CONCLUDED / CANCELLED resolution).
+ * replaces the LIVE plan's list, its CSV and its CONCLUDED / CANCELLED resolution). Its CAMPAIGN tab (plan MACRO M1
+ * §2.1, C2: its links in one click, the readout per link) is a draw's too: GET and POST /api/admin/releases/:id/campaign…
+ * (routes/admin/drops.ts, services/campaign.ts).
  *
  * A release and its entries carry THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01): `guaranteed` (places and pieces), and
  * each entry's `guaranteed`, the guaranteed entries listed first; its guarantees are GET /api/admin/drops/:id/guarantees.

@@ -279,4 +279,54 @@ describe.skipIf(!adminUrl)('API on PostgreSQL (production configuration)', () =>
     expect((await client().post('/api/v1/account/login', { email: 'buyer@example.com', password: PASSWORD })).statusCode).toBe(403);
     expect((safeJson(await op.get('/api/admin/audit/verify')) as any).ok).toBe(true);
   });
+
+  // Plan MACRO M1 §2.1 (C2): the CAMPAIGN readout in one REPEATABLE READ, READ ONLY transaction, and MAKE THE LINKS
+  // clicked four times at once on the pool's connections making each channel's link once (the release's advisory lock).
+  it('reads a release’s CAMPAIGN under REPEATABLE READ, READ ONLY, and makes each link once when clicks meet', async () => {
+    const db = ctx.db;
+    const adminId = (await db.selectFrom('admin_users').select('id').orderBy('created_at').executeTakeFirstOrThrow()).id;
+    const modelId = (await db.selectFrom('models').select('id').orderBy('created_at').executeTakeFirstOrThrow()).id;
+    const now = Date.now();
+    const id = (
+      await db
+        .insertInto('drops')
+        .values({
+          model_id: modelId,
+          title: 'CAMPAIGN ON PG',
+          quantity: 1,
+          opens_at: new Date(now + 86_400_000),
+          closes_at: new Date(now + 2 * 86_400_000),
+          seed_enc: `v1.${'A'.repeat(16)}.${'B'.repeat(64)}`,
+          seed_hash: new Uint8Array(randomBytes(32)),
+          published_at: new Date(now - 60_000),
+          mode: 'DRAW',
+          early_access_hours: 0,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    ).id;
+    const actor = { type: 'admin' as const, id: adminId };
+    const clicks = await Promise.all(Array.from({ length: 4 }, () => ctx.services.campaign.makeLinks(id, actor)));
+    const channels = await ctx.services.links.channels();
+    expect(clicks.reduce((n, c) => n + c.made.length, 0)).toBe(channels.length);
+    const made = await db.selectFrom('links').select('channel_id').where('drop_id', '=', id).execute();
+    expect(new Set(made.map((l) => l.channel_id)).size).toBe(made.length);
+    expect((await db.selectFrom('audit_logs').select('id').where('action', '=', 'drop.campaign.links').where('target_id', '=', id).execute()).length).toBe(1);
+    // The readout's transaction, seen from inside it (LinkService.channels reads in it).
+    const links = ctx.services.links;
+    const channelsOf = links.channels.bind(links);
+    let seen: { i: string; r: string } | undefined;
+    links.channels = async (tx) => {
+      seen = (await sql<{ i: string; r: string }>`SELECT current_setting('transaction_isolation') AS i, current_setting('transaction_read_only') AS r`.execute(tx!)).rows[0];
+      return channelsOf(tx);
+    };
+    try {
+      const campaign = await ctx.services.campaign.campaign(id);
+      expect(campaign.missing).toEqual([]);
+      expect(campaign.readout.total).toEqual({ entries: 0, buyers: 0, revenueMinor: 0 });
+    } finally {
+      links.channels = channelsOf;
+    }
+    expect(seen).toEqual({ i: 'repeatable read', r: 'on' });
+  });
 });

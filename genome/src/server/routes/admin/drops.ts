@@ -14,6 +14,11 @@
  *   POST  /api/admin/drops/:id/entries/:entryId/lapse       OPERATOR  LAPSED, after `respond_by` only
  *   POST  /api/admin/drops/:id/offer-next                   OPERATOR  the next of the waiting list, SELECTED ({ sizeId }: per size)
  *
+ * A release's CAMPAIGN tab (plan MACRO M1 §2.1, C2; services/campaign.ts), a draw's or a LIVE RELEASE's alike:
+ *
+ *   GET   /api/admin/releases/:id/campaign                  AUDITOR   its links by channel, the channels without one, the readout
+ *   POST  /api/admin/releases/:id/campaign/links            OPERATOR  one link per channel still without one   drop.campaign.links
+ *
  * Plan NEXT LOT §3.6.F: a draw has its sizes and their pieces (`sizes` on POST and PATCH, its quantity their sum; a
  * `quantity` sent is refused), each size with its counts (`sizes`), each entry its size, OFFER NEXT per size; its stock
  * check (`feasibility`, §3.5.4.3), as a LIVE RELEASE's.
@@ -152,5 +157,17 @@ export const adminDropRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
     const { id } = parse(dropParams, request.params);
     const b = parse(dropOfferNextBody, request.body);
     return entryJson(await drops.offerNext(id, adminActor(request), { sizeId: b.sizeId ?? null }), readsClientEmails(request));
+  });
+
+  // The CAMPAIGN tab (C2): no customer's email in it (counts and amounts; a link's author is a console login).
+  app.get('/api/admin/releases/:id/campaign', async (request) => {
+    const { id } = parse(dropParams, request.params);
+    return ctx.services.campaign.campaign(id);
+  });
+
+  app.post('/api/admin/releases/:id/campaign/links', async (request) => {
+    const { id } = parse(dropParams, request.params);
+    parse(emptyBody, request.body);
+    return ctx.services.campaign.makeLinks(id, adminActor(request));
   });
 };
