@@ -96,7 +96,7 @@
  */
 import { fork, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { Agent, request as httpRequest, type IncomingMessage } from 'node:http';
 import { createConnection, createServer, type Socket } from 'node:net';
 import { cpus, platform, release as osRelease, tmpdir, totalmem } from 'node:os';
@@ -1088,7 +1088,8 @@ interface LevelResult {
   pace: PacedResult | null;
   appErrors: number;
   messageErrors: number;
-  verdict: { action: boolean; fanOut: boolean; memory: boolean; cpu: boolean; clean: boolean; pace: boolean; pass: boolean };
+  /** pace: the queue held exactly (its batches, the PACE check, the phones); queueFanOut: its frames against the fan-out target. */
+  verdict: { action: boolean; fanOut: boolean; memory: boolean; cpu: boolean; clean: boolean; pace: boolean; queueFanOut: boolean; pass: boolean };
 }
 
 interface PacedResult {
@@ -1590,8 +1591,10 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
       // Everyone beyond the first batch waited (the first batch too, when a pulse came between T0 and its pass).
       paced.phones.waited >= viewersWanted - o.pace!.batch &&
       paced.phones.admitted === paced.phones.waited &&
-      paced.phones.orderBroken === 0 &&
-      (viewersWanted <= o.pace!.batch || (paced.fanOut.received.n > 0 && paced.fanOut.received.p95 * f < LIVE_LOAD_TARGETS.fanOutP95Ms)));
+      paced.phones.orderBroken === 0);
+  // The queue's frames held against the fan-out target, apart from the queue's exactness (none to read when no one waited).
+  const queueFanOut =
+    paced === null || viewersWanted <= o.pace!.batch || (paced.fanOut.received.n > 0 && paced.fanOut.received.p95 * f < LIVE_LOAD_TARGETS.fanOutP95Ms);
   const verdict = {
     action: vpsP95 < LIVE_LOAD_TARGETS.actionP95Ms,
     fanOut: fan.n > 0 && fan.p95 * f < LIVE_LOAD_TARGETS.fanOutP95Ms,
@@ -1599,9 +1602,10 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
     cpu: busiest * f < LIVE_LOAD_TARGETS.cpuCores,
     clean,
     pace: queueHeld,
+    queueFanOut,
     pass: false,
   };
-  verdict.pass = verdict.action && verdict.fanOut && verdict.memory && verdict.cpu && verdict.clean && verdict.pace;
+  verdict.pass = verdict.action && verdict.fanOut && verdict.memory && verdict.cpu && verdict.clean && verdict.pace && verdict.queueFanOut;
 
   return {
     viewers: viewersWanted,
@@ -1701,7 +1705,7 @@ function printLevel(r: LevelResult): void {
     `| Answers other than 200 · app errors | ${r.actions.unexpected.length} · ${r.appErrors} | none: ${yes(r.verdict.clean)} |`,
     ...(p
       ? [
-          `| The queue's frames, the pulse's time → the last waiting phone (${p.fanOut.full} full pulses of ${p.fanOut.pulses}) | p50 ${ms(p.fanOut.received.p50)} · **p95 ${ms(p.fanOut.received.p95)}**${vps(p.fanOut.received.p95)} · max ${ms(p.fanOut.received.max)} | p95 < ${LIVE_LOAD_TARGETS.fanOutP95Ms} ms |`,
+          `| The queue's frames, the pulse's time → the last waiting phone (${p.fanOut.full} full pulses of ${p.fanOut.pulses}) | p50 ${ms(p.fanOut.received.p50)} · **p95 ${ms(p.fanOut.received.p95)}**${vps(p.fanOut.received.p95)} · max ${ms(p.fanOut.received.max)} | p95 < ${LIVE_LOAD_TARGETS.fanOutP95Ms} ms: ${yes(r.verdict.queueFanOut)} |`,
           `| The batches on the server (${p.batches.length} of ${p.planned} planned) | ${p.batches.map((b) => b.entries).join(' · ')} admitted, the first at ${p.batches.length ? `${paris(p.batches[0]!.at)} Paris` : '—'} (T0), each ${p.pace.minutes} min after the last · the engine wrote each p95 ${ms(p.engineLag.p95)} · max ${ms(p.engineLag.max)} after its time · ${p.admitted} of ${p.placed} placed admitted | ${p.problem ?? 'exactly X every Y, on their times'} |`,
           `| The PACE check (TEST REPORT) | ${p.check.line} | ${p.check.pass ? 'passed' : 'FAILED'} |`,
           `| The queue on the phones | ${p.phones.waited} waited · ${p.phones.admitted} admitted, in ${p.phones.batchesSeen} batches · ${p.phones.orderBroken} from a place beyond ${p.pace.batch} · ${p.phones.etaKept} at the time first estimated · the admission on the phone p50 ${ms(p.phones.delivery.p50)} · p95 ${ms(p.phones.delivery.p95)} · max ${ms(p.phones.delivery.max)} after the batch's time | every one admitted, in the line's order |`,
@@ -1754,7 +1758,16 @@ async function drive(o: Options): Promise<void> {
 }
 
 // Run as a script (the driver, or the app's or the database's process it forks), never on import (its tests).
-const isMain = process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
+// Node resolves the main module to its real path: argv[1] is resolved the same way, so a symlinked path still runs it.
+const mainPath = (() => {
+  if (process.argv[1] === undefined) return null;
+  try {
+    return realpathSync(resolve(process.argv[1]));
+  } catch {
+    return resolve(process.argv[1]);
+  }
+})();
+const isMain = mainPath !== null && import.meta.url === pathToFileURL(mainPath).href;
 if (!isMain) {
   // Imported: its exports only.
 } else if (process.argv.includes('--database')) {

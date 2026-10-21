@@ -48,7 +48,8 @@ page. A local run of **5 000 people with a pace of 250 every minute**, twice on 
 of 250, each on its minute, the TEST REPORT's PACE check passed, all 4 750 people who waited let in by their own batch
 at the time their page first gave them, no answer other than 200, no stream lost. It did not hold the VPS profile's
 targets for one app container: the app's memory reached 964 and 1 149 MiB with 5 000 streams open, above the
-container's 768 MB, and its CPU about 1.9 cores on the VPS. The measured capacity of the room above (500) is unchanged.
+container's 768 MB, its CPU about 1.9 cores on the VPS, and the queue's frames reached the last waiting phone at
+p95 270 and 266 ms on the VPS profile, above the 100 ms fan-out target. The measured capacity of the room above (500) is unchanged.
 The real check is the TEST ENTRANTS run of 5 000 on production (§7.4).
 
 ## 1. The test
@@ -269,7 +270,10 @@ measurement, on PGlite, on this machine.** It is not a measurement of the VPS.
 Two runs on 2026-10-21, at 05:35 and 06:03 Paris, under the lock shared with the other workflow's browser suites.
 That workflow's other work ran at the same time (one-minute load averages 2.8–8.2 in run 1, 3.5–12.3 in run 2).
 
-**The queue.** It held exactly in both runs:
+**The queue.** It held exactly in both runs. The tool's row "The queue held" judges that exactness only (the
+batches, the PACE check, the phones) and reads met for both; the queue's frames have their own row against the fan-out
+target, below. Both runs printed NOT MET on "The queue held", because the tool then folded the frames' fan-out into it;
+it has since been split, and the figures in their results.json read met for the exactness.
 
 | | Run 1 | Run 2 |
 |---|---|---|
