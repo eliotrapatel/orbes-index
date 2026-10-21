@@ -250,7 +250,8 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
   });
 
   it('holds a draw\'s segment and a LANDING link by their CHECKs (0050: drops_draw_plus, links_destination_check), and a pre-registration by its own, with the same JS types as PGlite', async () => {
-    await db.insertInto('categories').values({ id: 23, code: 'F', name: 'Founding parity' }).execute();
+    // Its own letter: this database's categories already hold A to F (the parallel creates above), S, W and P.
+    await db.insertInto('categories').values({ id: 23, code: 'G', name: 'Founding parity' }).execute();
     const model = await db.insertInto('models').values({ category_id: 23, name: 'FOUNDING', type: 'RING', sku_prefix: 'FOUND-PG' }).returning('id').executeTakeFirstOrThrow();
     const segment = await db.insertInto('segments').values({ name: 'Founding list PG', criteria: JSON.stringify({ rule: 'FOUNDING_LIST' }) }).returning('id').executeTakeFirstOrThrow();
     // A draw opened to a segment's members; its other LIVE-only settings still refused; an after-room still without one.
