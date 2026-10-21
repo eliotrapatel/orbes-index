@@ -880,7 +880,8 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
 
     // PAUSE PACE: no batch while held; RESUME PACE: the next batch comes again.
     await p.click('[data-testid=live-pace-pause]');
-    await expect.poll(() => fig(p, 'live-pace-next').textContent(), { timeout: 10_000 }).toBe('PAUSED');
+    await expect.poll(() => note('live-pace-next'), { timeout: 10_000 }).toBe('PACE PAUSED');
+    expect(await fig(p, 'live-pace-next').textContent()).toBe('—');
     expect(await p.locator('[data-testid=live-pace]').textContent()).toContain('PACE PAUSED');
     await shot(p, 'pace-paused');
     await p.click('[data-testid=live-pace-resume]');
@@ -893,6 +894,8 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await expect.poll(() => fig(p, 'live-pace-waiting').textContent(), { timeout: 10_000 }).toBe('0');
     expect(await fig(p, 'live-pace-admitted').textContent()).toBe('5');
     expect(await fig(p, 'live-pace-batches').textContent()).toBe('2');
+    // Nobody left in the queue: no NEXT BATCH NOW.
+    await expect.poll(() => p.locator('[data-testid=live-pace-next-now]').count()).toBe(0);
     await expect.poll(() => admitted.allTextContents()).toEqual([expect.stringMatching(/^Batch 1/), expect.stringMatching(/^Batch 1/), expect.stringMatching(/^Batch 2/), expect.stringMatching(/^Batch 2/), expect.stringMatching(/^Batch 2/)]);
     const actions = await ctx.db.selectFrom('audit_logs').select('action').where('target_id', '=', r.id).where('action', 'like', 'drop.live.pace%').orderBy('id').execute();
     expect(actions.map((a) => a.action)).toEqual(['drop.live.pace', 'drop.live.pace.pause', 'drop.live.pace.resume', 'drop.live.pace.next']);

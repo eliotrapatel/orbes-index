@@ -540,7 +540,7 @@ describe('the console of a LIVE RELEASE’s pace (W4)', () => {
     expect(paceHint(null, null)).toBe('Buyers admitted from the line, 1 to 5\u2009000, every 1 to 60 minutes, counted across the release, in its order. Both blank: no pace, everyone admitted at T0.');
   });
 
-  it('draws the Pace block’s figures in Paris time, PAUSED while held, and offers its controls to an OPERATOR from T0 to the end', () => {
+  it('draws the Pace block’s figures in Paris time, a dash while held, and offers its controls to an OPERATOR from T0 to the end', () => {
     // 18:04 UTC in November is 19:04 in Paris; in July, 20:04.
     expect([parisClock('2026-11-10T18:04:09.000Z'), parisClock('2026-07-10T18:04:09.000Z', { seconds: true }), parisClock(null)]).toEqual(['19:04', '20:04:09', '—']);
     const pace = { batch: 250, minutes: 1, nextAt: '2026-11-10T18:04:00.000Z', pausedAt: null, paused: false, batches: 4, waiting: 4120, admitted: 1000 };
@@ -553,8 +553,8 @@ describe('the console of a LIVE RELEASE’s pace (W4)', () => {
     ]);
     const next = (b: Parameters<typeof livePaceFigures>[0]) => livePaceFigures(b)[3]!;
     expect(next({ ...live, phase: 'ROOM', pace: { ...pace, minutes: 5, batches: 0 } })).toMatchObject({ value: '19:04', note: 'PARIS · AT T0' });
-    expect(next({ ...live, pace: { ...pace, paused: true, pausedAt: '2026-11-10T18:03:00.000Z' } })).toMatchObject({ value: 'PAUSED', note: 'PACE PAUSED' });
-    expect(next({ ...live, paused: true })).toMatchObject({ value: 'PAUSED', note: 'RELEASE PAUSED' });
+    expect(next({ ...live, pace: { ...pace, paused: true, pausedAt: '2026-11-10T18:03:00.000Z' } })).toMatchObject({ value: '—', note: 'PACE PAUSED' });
+    expect(next({ ...live, paused: true })).toMatchObject({ value: '—', note: 'RELEASE PAUSED' });
     expect(next({ ...live, phase: 'ENDED', endedAt: '2026-11-10T18:30:00.000Z' })).toMatchObject({ value: '—', note: 'NONE AFTER THE END' });
     expect(livePaceFigures({ ...live, pace: { ...pace, minutes: 5 } })[2]!.note).toBe('250 EVERY 5 MINUTES');
 
@@ -562,6 +562,8 @@ describe('the console of a LIVE RELEASE’s pace (W4)', () => {
     expect(livePaceActions(live, 'OPERATOR', false)).toEqual({ set: true, pause: true, resume: false, next: true });
     expect(livePaceActions({ ...live, pace: { ...pace, paused: true } }, 'OPERATOR', false)).toEqual({ set: true, pause: false, resume: true, next: true });
     expect(livePaceActions({ ...live, pace: null }, 'OPERATOR', false)).toEqual({ set: true, pause: false, resume: false, next: false });
+    // Nobody in the queue: no NEXT BATCH NOW (an empty batch would admit nobody).
+    expect(livePaceActions({ ...live, pace: { ...pace, waiting: 0 } }, 'OPERATOR', false)).toEqual({ set: true, pause: true, resume: false, next: false });
     for (const phase of ['HIDDEN', 'ANNOUNCED', 'ROOM'] as const) expect([phase, livePaceActions({ ...live, phase }, 'OPERATOR', false)]).toEqual([phase, { set: true, pause: false, resume: false, next: false }]);
     expect(livePaceActions({ ...live, phase: 'ENDED', endedAt: '2026-11-10T18:30:00.000Z' }, 'ADMIN', false)).toEqual({ set: false, pause: false, resume: false, next: false });
     expect(livePaceActions({ ...live, endedAt: '2026-11-10T18:30:00.000Z' }, 'ADMIN', false)).toEqual({ set: false, pause: false, resume: false, next: false });
@@ -570,10 +572,12 @@ describe('the console of a LIVE RELEASE’s pace (W4)', () => {
     expect(livePaceActions({ ...live, pace: null }, 'ADMIN', true)).toEqual({ set: false, pause: false, resume: false, next: false });
 
     // The line's Admitted column: the batch and when, in Paris; WAITING for a batch; none before the line.
-    expect(liveEntryAdmission({ status: 'TURN', admittedAt: '2026-11-10T18:02:00.000Z', batch: 3 })).toEqual({ text: 'Batch 3', at: '19:02 Paris' });
-    expect(liveEntryAdmission({ status: 'QUEUED', admittedAt: '2026-11-10T18:00:00.000Z', batch: 0 })).toEqual({ text: 'At once', at: '19:00 Paris' });
-    expect(liveEntryAdmission({ status: 'QUEUED', admittedAt: null, batch: null })).toEqual({ text: 'Waiting', at: null });
-    expect(liveEntryAdmission({ status: 'WAITING', admittedAt: null, batch: null })).toEqual({ text: '—', at: null });
+    expect(liveEntryAdmission({ status: 'TURN', admittedAt: '2026-11-10T18:02:00.000Z', batch: 3, letIn: false })).toEqual({ text: 'Batch 3', at: '19:02 Paris' });
+    expect(liveEntryAdmission({ status: 'QUEUED', admittedAt: '2026-11-10T18:00:00.000Z', batch: 0, letIn: false })).toEqual({ text: 'At once', at: '19:00 Paris' });
+    // Let in by the console: said so, whatever the batch count was then.
+    expect(liveEntryAdmission({ status: 'TURN', admittedAt: '2026-11-10T18:02:30.000Z', batch: 3, letIn: true })).toEqual({ text: 'Let in', at: '19:02 Paris' });
+    expect(liveEntryAdmission({ status: 'QUEUED', admittedAt: null, batch: null, letIn: false })).toEqual({ text: 'Waiting', at: null });
+    expect(liveEntryAdmission({ status: 'WAITING', admittedAt: null, batch: null, letIn: false })).toEqual({ text: '—', at: null });
   });
 
   it('sends SET PACE, PAUSE PACE, RESUME PACE and NEXT BATCH NOW on their paths', async () => {

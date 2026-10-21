@@ -408,7 +408,7 @@ describe('the live sell-out forecast', () => {
       ['52', 'SELLS_OUT', 1, at(12 * MINUTE), null],
       ['54', 'LINE_SHORT', 0, null, 2],
     ]);
-    expect(f.reasoning[0]).toBe('The pace: the pieces secured since 02 NOV 2026 · 10:09:00 UTC, the latest RESUME (1 min of sales, the pause before it left out).');
+    expect(f.reasoning[0]).toBe('The rate of sales: the pieces secured since 02 NOV 2026 · 10:09:00 UTC, the latest RESUME (1 min of sales, the pause before it left out).');
     expect(f.sizes[0]!.reasoning[0]).toBe(
       '2 pieces to confirm; the line can still give 6 (1 held, 0 in a turn, 5 waiting, at those shares). At 1.0 secured a minute, 1.0 confirmed: sold out about 02 NOV 2026 · 10:12:00 UTC.',
     );
@@ -421,7 +421,7 @@ describe('the live sell-out forecast', () => {
     // Paused again at 10:09:30: the 30 s since the RESUME, that pause left out too.
     const again = sellOutForecast({ ...r, pausedAt: at(9.5 * MINUTE) }, xs, { resumedAt: at(9 * MINUTE) }, at(10 * MINUTE))!;
     expect(again.windowMs).toBe(30 * SECOND);
-    expect(again.reasoning[0]).toBe('The pace: the pieces secured since 02 NOV 2026 · 10:09:00 UTC, the latest RESUME (30 s of sales, the pause before it and the pause running now left out).');
+    expect(again.reasoning[0]).toBe('The rate of sales: the pieces secured since 02 NOV 2026 · 10:09:00 UTC, the latest RESUME (30 s of sales, the pause before it and the pause running now left out).');
   });
 });
 

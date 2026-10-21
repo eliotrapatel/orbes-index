@@ -425,44 +425,52 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   };
 
   // ── The pace (W4) ────────────────────────────────────────────────────────
+  // The block is built once: its line, mark and figures follow each board, while its controls are drawn again only when
+  // what may be done changes, so a focused control keeps its focus and a click is not lost to the next frame. They act
+  // on the latest board.
   let paceKey = '';
+  let paceToolsKey: string | null = null;
+  const paceText = h('span', { class: 'live__pace-text', data: { testid: 'live-pace-line' } });
+  const pacePausedMark = statusMark('PACE PAUSED', 'alert');
+  const paceTools = h('span', { class: 'live__pace-tools' });
+  const paceFigures = h('div', { class: ['kpis', 'live__pace-figures'] });
+  mount(paceBox, h('div', { class: 'live__pace-head' }, h('span', { class: 'live__message-label' }, 'Pace'), paceText, paceTools), paceFigures);
   function drawPace(b: LiveBoard): void {
     const p = b.pace ?? null;
     const ended = b.endedAt !== null || b.phase === 'ENDED';
     // A release that never had a pace and has ended: nothing to say or do.
     paceBox.hidden = !p && ended;
+    paceText.textContent = p ? paceLine(p) : 'None: everyone is admitted at T0';
+    if (p?.paused && !ended) {
+      if (!pacePausedMark.isConnected) paceTools.before(pacePausedMark);
+    } else pacePausedMark.remove();
     const a = livePaceActions(b, role, false);
-    const pausePace = button('Pause pace', { kind: 'secondary', testId: 'live-pace-pause' });
-    pausePace.addEventListener('click', () => void control(pausePace, () => ctx.api.pauseLivePace(r.id), 'Pace paused: no batch is admitted; the turns go on.'));
-    const resumePace = button('Resume pace', { kind: 'primary', testId: 'live-pace-resume' });
-    resumePace.addEventListener('click', () => void control(resumePace, () => ctx.api.resumeLivePace(r.id), 'Pace resumed: the next batch moves later by the time paused.'));
-    const tools = [
-      a.set ? button('Set pace', { kind: 'ghost', testId: 'live-pace-set', onClick: () => setPace(b) }) : null,
-      a.pause ? pausePace : null,
-      a.resume ? resumePace : null,
-      a.next ? button('Next batch now', { kind: 'ghost', testId: 'live-pace-next-now', onClick: () => nextBatch(b) }) : null,
-    ].filter((x): x is HTMLButtonElement => x !== null);
+    const toolsKey = JSON.stringify(a);
+    if (toolsKey !== paceToolsKey) {
+      paceToolsKey = toolsKey;
+      const pausePace = button('Pause pace', { kind: 'secondary', testId: 'live-pace-pause' });
+      pausePace.addEventListener('click', () => void control(pausePace, () => ctx.api.pauseLivePace(r.id), 'Pace paused: no batch is admitted; the turns go on.'));
+      const resumePace = button('Resume pace', { kind: 'primary', testId: 'live-pace-resume' });
+      resumePace.addEventListener('click', () => void control(resumePace, () => ctx.api.resumeLivePace(r.id), 'Pace resumed: the next batch moves later by the time paused.'));
+      const tools = [
+        a.set ? button('Set pace', { kind: 'ghost', testId: 'live-pace-set', onClick: () => board && setPace(board) }) : null,
+        a.pause ? pausePace : null,
+        a.resume ? resumePace : null,
+        a.next ? button('Next batch now', { kind: 'ghost', testId: 'live-pace-next-now', onClick: () => board && nextBatch(board) }) : null,
+      ].filter((x): x is HTMLButtonElement => x !== null);
+      mount(paceTools, ...tools);
+      paceTools.hidden = tools.length === 0;
+    }
+    paceFigures.hidden = !p;
     mount(
-      paceBox,
-      h(
-        'div',
-        { class: 'live__pace-head' },
-        h('span', { class: 'live__message-label' }, 'Pace'),
-        h('span', { class: 'live__pace-text', data: { testid: 'live-pace-line' } }, p ? paceLine(p) : 'None: everyone is admitted at T0'),
-        p?.paused && !ended ? statusMark('PACE PAUSED', 'alert') : null,
-        tools.length ? h('span', { class: 'live__pace-tools' }, ...tools) : null,
-      ),
-      p
-        ? h(
-            'div',
-            { class: ['kpis', 'live__pace-figures'] },
-            ...livePaceFigures({ ...b, pace: p }).map((f) => {
-              const el = kpi(f.label, f.value, f.note);
-              el.setAttribute('data-testid', f.testId);
-              return el;
-            }),
-          )
-        : null,
+      paceFigures,
+      ...(p
+        ? livePaceFigures({ ...b, pace: p }).map((f) => {
+            const el = kpi(f.label, f.value, f.note);
+            el.setAttribute('data-testid', f.testId);
+            return el;
+          })
+        : []),
     );
     const said = p ? `Pace: ${paceLine(p)}${p.paused ? ', paused' : ''}.` : '';
     if (said !== paceKey) {

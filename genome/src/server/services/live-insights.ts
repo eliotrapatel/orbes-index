@@ -938,7 +938,7 @@ export function sellOutForecast(r: InsightRelease, entries: readonly InsightEntr
   const windowMs = Math.max(0, t - start - Math.max(0, pausedInWindow));
   const outOfSale = [fromResume ? 'the pause before it' : '', pausedInWindow > 0 ? (fromResume ? 'the pause running now' : 'the pause') : ''].filter(Boolean).join(' and ');
   const why: string[] = [
-    `The pace: the pieces secured since ${utc(new Date(start))}${fromResume ? ', the latest RESUME' : ''} (${duration(windowMs)} of sales${outOfSale ? `, ${outOfSale} left out` : ''}).`,
+    `The rate of sales: the pieces secured since ${utc(new Date(start))}${fromResume ? ', the latest RESUME' : ''} (${duration(windowMs)} of sales${outOfSale ? `, ${outOfSale} left out` : ''}).`,
     rates.turnsEnded || rates.holdsEnded
       ? `So far ${percent(s)} of the turns that ended were secured and ${percent(c)} of the holds that ended confirmed.`
       : 'No turn or hold has ended yet: each is assumed to be secured and confirmed.',

@@ -798,7 +798,8 @@ export function parisClock(v: string | Date | null | undefined, opts: { seconds?
 
 /**
  * The Pace block's figures, in the order the board shows them: those in the queue, those admitted, the batches so far,
- * and the next batch in Paris time (PAUSED while the pace's own pause or the release's PAUSE holds it).
+ * and the next batch in Paris time (an em dash, its note PACE PAUSED or RELEASE PAUSED, while either pause holds it: the
+ * figure keeps a time's width).
  */
 export function livePaceFigures(b: Pick<LiveBoard, 'phase' | 'paused' | 'endedAt'> & { pace: LivePaceState }): { label: string; value: string; note: string; testId: string }[] {
   const p = b.pace;
@@ -806,9 +807,9 @@ export function livePaceFigures(b: Pick<LiveBoard, 'phase' | 'paused' | 'endedAt
   const next = ended
     ? { value: '—', note: 'NONE AFTER THE END' }
     : p.paused
-      ? { value: 'PAUSED', note: 'PACE PAUSED' }
+      ? { value: '—', note: 'PACE PAUSED' }
       : b.paused
-        ? { value: 'PAUSED', note: 'RELEASE PAUSED' }
+        ? { value: '—', note: 'RELEASE PAUSED' }
         : { value: parisClock(p.nextAt), note: b.phase === 'LIVE' ? 'PARIS TIME' : 'PARIS · AT T0' };
   return [
     { label: 'In the queue', value: formatCount(p.waiting), note: 'WAITING FOR THEIR BATCH', testId: 'live-pace-waiting' },
@@ -820,7 +821,8 @@ export function livePaceFigures(b: Pick<LiveBoard, 'phase' | 'paused' | 'endedAt
 
 /**
  * What `role` may do to the pace now (the server checks again): SET PACE until the end, on a release that is not an
- * after-room; PAUSE PACE or RESUME PACE and NEXT BATCH NOW from T0 to the end, on a paced release (OPERATOR). No control
+ * after-room; PAUSE PACE or RESUME PACE from T0 to the end, on a paced release, and NEXT BATCH NOW there while someone
+ * waits in the queue (OPERATOR: an empty batch would admit nobody). No control
  * takes a pace away: a pace left blank in the settings before the announcement is no pace.
  */
 export function livePaceActions(b: Pick<LiveBoard, 'phase' | 'endedAt'> & { pace?: LivePaceState | null }, role: AdminRole | null | undefined, afterRoom: boolean): { set: boolean; pause: boolean; resume: boolean; next: boolean } {
@@ -828,11 +830,15 @@ export function livePaceActions(b: Pick<LiveBoard, 'phase' | 'endedAt'> & { pace
   const running = b.endedAt === null && hasBoard(b.phase) && b.phase !== 'ENDED';
   const live = running && b.phase === 'LIVE';
   const p = b.pace ?? null;
-  return { set: manage && running, pause: manage && live && p !== null && !p.paused, resume: manage && live && p !== null && p.paused, next: manage && live && p !== null };
+  return { set: manage && running, pause: manage && live && p !== null && !p.paused, resume: manage && live && p !== null && p.paused, next: manage && live && p !== null && p.waiting > 0 };
 }
 
-/** An entry's admission, as the line's Admitted column says it: its batch and when (Paris), WAITING for its batch, or none. */
-export function liveEntryAdmission(e: Pick<LiveEntry, 'status' | 'admittedAt' | 'batch'>): { text: string; at: string | null } {
+/**
+ * An entry's admission, as the line's Admitted column says it: LET IN by the console, its batch, or at once, and when
+ * (Paris); WAITING for its batch; or none.
+ */
+export function liveEntryAdmission(e: Pick<LiveEntry, 'status' | 'admittedAt' | 'batch' | 'letIn'>): { text: string; at: string | null } {
+  if (e.admittedAt && e.letIn) return { text: 'Let in', at: `${parisClock(e.admittedAt)} Paris` };
   if (e.admittedAt) return { text: e.batch ? `Batch ${formatCount(e.batch)}` : 'At once', at: `${parisClock(e.admittedAt)} Paris` };
   return { text: e.status === 'QUEUED' ? 'Waiting' : '—', at: null };
 }
