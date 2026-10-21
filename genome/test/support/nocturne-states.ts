@@ -1541,6 +1541,12 @@ export const PHONE_STATES: readonly UiState[] = [
     path: release('drawSizes'),
     ready: '.view--release .release__sizes',
   },
+  // Plan MACRO M1 §3.3 (F4; lot M1, step M1.13): the October draw opened to the segment Founding list (draw-selected
+  // demo): FOR SELECTED COLLECTORS in THE RELEASE; for you, on the list, ENTER THE DRAW; for the guest, not on it, the
+  // refusal in its place, as a LIVE RELEASE's; signed out, the sign-in's lead says the release is for selected collectors.
+  { id: 'draw-selected', title: 'A draw FOR SELECTED COLLECTORS, open, for a collector among them: the rule in THE RELEASE, ENTER THE DRAW', refs: ['F4'], variant: 'draw-selected', as: you, path: release('draw'), ready: '.view--release:has(.release__for) .release__enter' },
+  { id: 'draw-selected-not-eligible', title: 'A draw FOR SELECTED COLLECTORS, open, for a collector not among them: FOR SELECTED COLLECTORS, why, and that the account does not meet the rule, in place of ENTER THE DRAW', refs: ['F4'], variant: 'draw-selected', as: 'guest', path: release('draw'), ready: '.view--release:has(.release__for) .release__refusal' },
+  { id: 'draw-selected-signed-out', title: 'A draw FOR SELECTED COLLECTORS, signed out: the rule in THE RELEASE, the sign-in says the release is for selected collectors', refs: ['F4'], variant: 'draw-selected', path: release('draw'), ready: '.view--release:has(.release__for) :is(form, .d-signin-line)' },
   {
     id: 'pieces-draws',
     title: 'MY PIECES of a collector with a draw in each state (PLACE HELD, WAITING LIST, LAPSED, CONCLUDED, ENTERED, WITHDRAWN, CANCELLED) and an order PAID',
@@ -2445,6 +2451,8 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
     ...desk(1440, 'result-unknown', 'result-revoked', 'result-unreadable'),
     ...desk(1440, 'piece-stolen', 'piece-transfer', 'piece-in-service', 'model-salon-sizes'),
     ...desk(1440, 'draw-soon', 'draw-early', 'draw-sizes', 'pieces-draws', 'draw-open-calendar'),
+    // Plan MACRO M1 §3.3 (F4; lot M1, step M1.13): a draw FOR SELECTED COLLECTORS, for one of them and for another.
+    ...desk(1440, 'draw-selected', 'draw-selected-not-eligible'),
     ...desk(1440, 'circle-failed', 'post-failed', 'post-not-found', 'model-not-found', 'draw-not-found'),
     ...desk(1024, 'pieces-orders'),
     ...desk(1440, 'result-transfer-code', 'result-ceremony', 'result-received', 'model-salon-requested', 'draw-entered'),

@@ -63,6 +63,9 @@
  *   claim-waiting     the full story; its one state (claim-waiting, test/support/nocturne-states.ts) then writes, on its
  *                     own stage, a shipped order of MONOLITHE in blue for you and a new claim code waiting on it (plan
  *                     NEXT LOT §3.4), so no other state sees them
+ *   draw-selected     the full story, the October draw then opened to the segment Founding list (plan MACRO M1 §3.3,
+ *                     F4): you joined the founding list on theorbes.com before the draw (matched to your account),
+ *                     the guest (h.morel) did not (seedDrawSelected)
  *   orders-delivery   the full story; its one state writes (plan NEXT LOT §3.6.B, C): an engraving price in euros, a
  *   orders-case       saved default address for you, put on the reserved LIVE order with the add-on's words, and a
  *   account-addresses paid order of MONOLITHE in blue with a priced engraving, packing begun; orders-case's, a delivered
@@ -128,6 +131,7 @@ export type DemoVariant =
   | 'pairs'
   | 'claim-waiting'
   | 'draw-sizes'
+  | 'draw-selected'
   | 'orders-delivery'
   | 'orders-case'
   | 'account-addresses'
@@ -156,6 +160,7 @@ export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'pairs',
   'claim-waiting',
   'draw-sizes',
+  'draw-selected',
   'orders-delivery',
   'orders-case',
   'account-addresses',
@@ -267,7 +272,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
   // claim-waiting stage (plan NEXT LOT §3.4) tells the full story, its state writing the rest.
   // The draw-sizes stage (plan NEXT LOT §3.6.F) tells the full story, then adds a draw in sizes, open. The stages of the
   // collector's side of an order (plan NEXT LOT §3.6) tell the full story, their state writing the rest.
-  const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes', 'birthday-credit', 'care-used', 'orbes-care', 'gallery'] as const;
+  const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'draw-selected', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes', 'birthday-credit', 'care-used', 'orbes-care', 'gallery'] as const;
   const story = ((OWN_STAGES as readonly DemoVariant[]).includes(variant) ? 'full' : variant) as Exclude<DemoVariant, (typeof OWN_STAGES)[number]>;
   if (story === 'empty') await seedEmpty(w);
   else if (story === 'stress') await seedStress(w);
@@ -287,6 +292,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
     if (story === 'full' || story === 'room') await seedSizes(w, story);
     if (variant === 'pairs') await seedPairs(w);
     if (variant === 'draw-sizes') await seedDrawSizes(w);
+    if (variant === 'draw-selected') await seedDrawSelected(w);
     if (variant === 'care-used') await seedCareUsed(w);
     if (variant === 'orbes-care') await seedOrbesCare(w);
     if (variant === 'gallery') await seedGallery(w);
@@ -1315,6 +1321,21 @@ async function seedDrawSizes(w: World): Promise<void> {
   const platine = demo.accounts.platine!;
   await ctx.services.drops.reserve(platine.id, d.id, platine.actor, { sizeId: d.sizes.find((z) => z.label === '18')!.id });
   demo.releases.drawSizes = d.id;
+}
+
+/**
+ * Plan MACRO M1 §3.3 (F4): the October draw opened to a segment, FOR SELECTED COLLECTORS. You joined the founding list on
+ * theorbes.com on 20 September (the form's own path, matched to your account at once); ORBES made the segment Founding
+ * list (the FOUNDING_LIST rule) on 28 September. The draw is already published by the story, so its segment is written
+ * as the console would have set it before the publication (a draw's segment no longer changes once published).
+ */
+async function seedDrawSelected(w: World): Promise<void> {
+  const { ctx, admin, clock, demo } = w;
+  clock.set(at('2026-09-20T18:00:00Z'));
+  await ctx.services.founding.register({ email: demo.accounts.you!.email, firstName: 'Camille', country: 'FR', consent: true, website: '' }, { type: 'system', id: 'public' });
+  clock.set(at('2026-09-28T09:00:00Z'));
+  const segment = await ctx.services.segments.create({ name: 'Founding list', criteria: { match: 'ALL', rules: [{ kind: 'FOUNDING_LIST' }] } }, admin);
+  await ctx.db.updateTable('drops').set({ access_segment_id: segment.id }).where('id', '=', demo.releases.draw!).execute();
 }
 
 async function seedSizes(w: World, variant: 'full' | 'room'): Promise<void> {

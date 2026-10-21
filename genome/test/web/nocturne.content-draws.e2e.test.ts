@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
 import { describe, expect, it } from 'vitest';
-import { LIVE, STORY } from '../../src/web/verify/copy.js';
+import { LIVE, RELEASES, STORY } from '../../src/web/verify/copy.js';
 import { eachState } from '../support/nocturne-stage.js';
 import { openState, stateById } from '../support/nocturne-states.js';
 import { contentSuite, HAS_CHROMIUM, hiddenGuaranteeSuite, SHARD_TIMEOUT_MS } from './nocturne.content.harness.js';
@@ -165,6 +165,47 @@ describe.skipIf(!HAS_CHROMIUM)('ADD TO CALENDAR on a draw\'s page (macro scope C
             if (!/^text\/calendar/.test(res.headers()['content-type'] ?? '')) found.push(`type ${res.headers()['content-type']}`);
             const body = await res.text();
             if (!body.startsWith('BEGIN:VCALENDAR') || !/BEGIN:VEVENT/.test(body)) found.push('not a calendar');
+          } finally {
+            await opened.close();
+          }
+        },
+        () => {},
+      );
+      expect(found).toEqual([]);
+    },
+    SHARD_TIMEOUT_MS,
+  );
+});
+
+// Plan MACRO M1 §3.3 (F4; lot M1, step M1.13): a draw opened to a segment says FOR SELECTED COLLECTORS in THE RELEASE;
+// a collector among them is offered ENTER THE DRAW, one who is not reads the refusal in its place (as a LIVE RELEASE's),
+// with no ENTER THE DRAW anywhere on the page; signed out, the sign-in's lead says the release is for selected collectors.
+describe.skipIf(!HAS_CHROMIUM)('a draw FOR SELECTED COLLECTORS (plan MACRO M1 §3.3, F4, Chromium)', () => {
+  it(
+    'shows the rule to all, ENTER THE DRAW to a collector among them, the refusal in its place to another',
+    async () => {
+      const found: string[] = [];
+      await eachState(
+        ['draw-selected', 'draw-selected-not-eligible', 'draw-selected-signed-out'].map((id) => stateById(id)),
+        async (state, { stage, demo, browser }) => {
+          const opened = await openState(browser, stage, demo, state);
+          try {
+            const page = opened.page;
+            const rule = (await page.locator('.view--release .release__for').allTextContents()).map((t) => t.trim());
+            if (rule.join('|') !== RELEASES.selected) found.push(`${state.id}: rule ${JSON.stringify(rule)}`);
+            const enter = await page.getByRole('button', { name: RELEASES.enter }).count();
+            const refusal = page.locator('.view--release .release__entry .release__refusal');
+            if (state.id === 'draw-selected') {
+              if (enter === 0) found.push(`${state.id}: no ${RELEASES.enter}`);
+              if ((await refusal.count()) !== 0) found.push(`${state.id}: refused`);
+            } else if (state.id === 'draw-selected-not-eligible') {
+              if (enter !== 0) found.push(`${state.id}: ${RELEASES.enter} offered`);
+              const words = (await refusal.locator('p').allTextContents()).map((t) => t.trim());
+              const want = [RELEASES.selected, RELEASES.notEligible, LIVE.edge.notEligible.text];
+              if (JSON.stringify(words) !== JSON.stringify(want)) found.push(`${state.id}: refusal ${JSON.stringify(words)}`);
+            } else if (!(await page.locator('.view--release').innerText()).includes(RELEASES.signInSelected)) {
+              found.push(`${state.id}: lead`);
+            }
           } finally {
             await opened.close();
           }

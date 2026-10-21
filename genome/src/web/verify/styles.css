@@ -2381,6 +2381,12 @@ body.nocturne .view--release.n-release {
   outline-offset: 2px;
 }
 
+/* FOR SELECTED COLLECTORS (plan MACRO M1 §3.3, F4): a draw opened to a segment, under the model's line in ivory, as a
+   LIVE RELEASE's page says its rule. */
+.n-release__for {
+  margin-top: 12px;
+}
+
 .n-release__rows {
   margin-top: 16px;
   border-top: 1px solid var(--vault-hairline);
@@ -2407,6 +2413,12 @@ body.nocturne .view--release.n-release {
 }
 
 .n-release__entry-id {
+  margin-top: 8px;
+}
+
+/* The refusal (plan MACRO M1 §3.3, F4): FOR SELECTED COLLECTORS, why, then that the account does not meet the rule, as a
+   LIVE RELEASE's (.n-live__refusal-note). */
+.n-release__refusal-note {
   margin-top: 8px;
 }
 

@@ -141,13 +141,14 @@ const PHONE_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> = Object.f
   room: (s) => ROOM_VARIANTS.includes(s.variant),
   // ORBES CARE (plan ORBES CARE, step 5.1), on its own stage (orbes-care), its states in order.
   care: orbesCare,
-  // The draws in every state; a draw in sizes (plan NEXT LOT §3.6.F), on its own stage.
-  draws: (s) => s.variant === 'draws' || s.variant === 'draw-sizes',
+  // The draws in every state; a draw in sizes (plan NEXT LOT §3.6.F) and a draw FOR SELECTED COLLECTORS (plan MACRO M1
+  // §3.3, F4), each on its own stage.
+  draws: (s) => s.variant === 'draws' || s.variant === 'draw-sizes' || s.variant === 'draw-selected',
   stress: (s) => s.variant === 'stress' && !named('account')(s),
   // The queue of a paced release (macro scope of 2026-10-20, W2, W5, W6; lot M1, step M1.5), on its own stage: the room's
   // shard holds its limit of states.
   queue: (s) => s.variant === 'queue',
-  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'queue' && s.variant !== 'draws' && s.variant !== 'draw-sizes' && s.variant !== 'stress' && s.variant !== 'pairs' && !ORDER_STAGES.includes(s.variant) && !named('account')(s) && !profile(s) && !wishlist(s) && !birthday(s) && !careUsed(s) && !orbesCare(s),
+  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'queue' && s.variant !== 'draws' && s.variant !== 'draw-sizes' && s.variant !== 'draw-selected' && s.variant !== 'stress' && s.variant !== 'pairs' && !ORDER_STAGES.includes(s.variant) && !named('account')(s) && !profile(s) && !wishlist(s) && !birthday(s) && !careUsed(s) && !orbesCare(s),
 });
 
 /** A computer's state (desktop: test/support/nocturne-states.ts DESK_STATES), never in a phone's shard. */

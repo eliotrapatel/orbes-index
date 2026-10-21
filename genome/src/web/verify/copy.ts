@@ -1335,6 +1335,16 @@ export const RELEASES = Object.freeze({
   photosLabel: (title: string) => `The model of ${title}, photographed by ORBES`,
   /** Signed out, on a release's page: any ORBES account may enter, the sign-in and CREATE ACCOUNT follow. */
   signIn: 'Enter the draw with your ORBES account: sign in, or create one. Any account may enter, one entry per person.',
+  /**
+   * Plan MACRO M1 §3.3 (F4), a draw opened to a segment: its rule in THE RELEASE, as a LIVE RELEASE's page says it
+   * (LIVE.forWhom('selected collectors'), the segment never named); the sign-in's lead, signed out; signed in and not
+   * among them, YOUR ENTRY's refusal in place of ENTER THE DRAW, as a LIVE RELEASE's (the server's DRAW_NOT_ELIGIBLE,
+   * then LIVE.edge.notEligible).
+   */
+  selected: 'FOR SELECTED COLLECTORS',
+  signInSelected: 'Enter the draw with your ORBES account: sign in, or create one. This release is for selected collectors, one entry per person.',
+  notEligible: 'This release is for selected collectors.',
+  notEligibleNote: 'Your ORBES account does not meet the rule of this release.',
   enter: 'ENTER THE DRAW',
   withdraw: 'WITHDRAW',
   /** P-X02: the page's hairline button during the early access, for a PLATINE or PALLADIUM account. */

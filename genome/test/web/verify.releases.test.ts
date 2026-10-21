@@ -9,7 +9,8 @@
  */
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { dropNotFound, drawOrder } from '../../src/server/services/drops.js';
+import { drawNotEligible, dropNotFound, drawOrder } from '../../src/server/services/drops.js';
+import { liveRefusal, liveRuleText } from '../../src/server/services/live.js';
 import { HOW, LIVE, RELEASES } from '../../src/web/verify/copy.js';
 import { guaranteedLines } from '../../src/web/verify/guarantee-model.js';
 import {
@@ -215,6 +216,16 @@ describe('the releases\' list and pages (P-R03)', () => {
     expect(LIVE.calendar).toBe('ADD TO CALENDAR');
   });
 
+  it('says FOR SELECTED COLLECTORS in THE RELEASE of a draw opened to a segment, worded as a LIVE RELEASE\'s rule (plan MACRO M1 §3.3, F4)', () => {
+    const rule = { minTier: 0, models: [], collection: null, segment: true } as unknown as Parameters<typeof liveRuleText>[0];
+    expect(RELEASES.selected).toBe(LIVE.forWhom(liveRuleText(rule)));
+    expect(RELEASES.selected).toBe('FOR SELECTED COLLECTORS');
+    for (const state of ['UPCOMING', 'OPEN', 'CLOSED', 'CANCELLED'] as const) expect(releaseSheet(sheet({ state, rule: 'SELECTED' }), 0).selected).toBe(RELEASES.selected);
+    expect(releaseSheet(sheet({ rule: null }), 0).selected).toBeNull();
+    // A sheet of before the founding list carries no rule: open to everyone.
+    expect(releaseSheet(sheet(), 0).selected).toBeNull();
+  });
+
   it('lists the draw\'s entries by rank, tier and seniority, the account\'s own marked', () => {
     expect([0, 1, 2, 3].map(tierLabel)).toEqual(['NO TIER', 'TITANE', 'PLATINE', 'PALLADIUM']);
     const lines = drawLines(
@@ -246,6 +257,31 @@ describe('an account\'s entry (P-R03)', () => {
     expect(entryModel(release, entry({ status: 'WITHDRAWN' }), opts)).toMatchObject({ label: 'WITHDRAWN', canEnter: true, canWithdraw: false });
     expect(entryModel({ ...release, state: 'CLOSED' }, entry({ status: 'WITHDRAWN' }), opts)).toMatchObject({ canEnter: false, sentence: 'You withdrew from this draw.' });
     expect(entryModel({ ...release, state: 'CANCELLED' }, entry(), opts)).toMatchObject({ canEnter: false, canWithdraw: false, sentence: 'This release has been cancelled: there will be no draw.' });
+  });
+
+  it('refuses an account not among a draw\'s selected collectors in place of ENTER THE DRAW and RESERVE A PLACE, as a LIVE RELEASE\'s refusal (plan MACRO M1 §3.3, F4)', () => {
+    const refusal = { label: RELEASES.selected, sentence: RELEASES.notEligible, note: RELEASES.notEligibleNote, entryId: null, canEnter: false, canReserve: false, canWithdraw: false, write: null };
+    // The words: the server's DRAW_NOT_ELIGIBLE, a LIVE RELEASE's refusal for a segment, then its not-eligible note.
+    const rule = { minTier: 0, models: [], collection: null, segment: true } as unknown as Parameters<typeof liveRefusal>[0];
+    expect(RELEASES.notEligible).toBe(drawNotEligible().message);
+    expect(RELEASES.notEligible).toBe(liveRefusal(rule));
+    expect(RELEASES.notEligibleNote).toBe(LIVE.edge.notEligible.text);
+    const out = { ...release, eligible: false };
+    expect(entryModel(out, null, opts)).toEqual(refusal);
+    expect(entryModel({ ...out, state: 'UPCOMING' }, null, opts)).toEqual(refusal);
+    // During the early access, a PLATINE account not among them reserves no place either.
+    expect(entryModel({ ...out, state: 'UPCOMING', earlyAccess: early('2026-10-10T10:00:00.000Z', true) }, null, { ...opts, tier: 2 })).toEqual(refusal);
+    // Withdrawn while entries are open: no ENTER THE DRAW again; its label and id stay.
+    expect(entryModel(out, entry({ status: 'WITHDRAWN' }), opts)).toEqual({ ...refusal, label: 'WITHDRAWN', entryId: ENTRY });
+    // An entry it holds reads as ever (WITHDRAW stays), and once entries close nothing is refused.
+    expect(entryModel(out, entry(), opts)).toMatchObject({ label: 'ENTERED', canWithdraw: true });
+    expect(entryModel(out, entry(), opts).note).toBeUndefined();
+    expect(entryModel({ ...out, state: 'CLOSED' }, null, opts)).toMatchObject({ sentence: 'Entries are closed. The draw follows.' });
+    expect(entryModel({ ...out, state: 'CLOSED' }, null, opts).note).toBeUndefined();
+    expect(entryModel({ ...out, state: 'DRAWN' }, null, opts).sentence).toBe('The draw has taken place.');
+    // Among them (or not known): as any draw.
+    expect(entryModel({ ...release, eligible: true }, null, opts)).toMatchObject({ canEnter: true, sentence: RELEASES.status.open });
+    expect(entryModel(release, null, opts)).toMatchObject({ canEnter: true, sentence: RELEASES.status.open });
   });
 
   it('holds a place until its time, ORBES Client Services will contact the account, with WRITE TO ORBES CLIENT SERVICES; then the waiting list, the sale, the lapse', () => {

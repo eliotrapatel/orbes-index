@@ -261,6 +261,11 @@ export interface ReleaseSheetModel {
    * close), while entries are to open or open; null once closed, drawn or cancelled (the server has none then).
    */
   calendarHref: string | null;
+  /**
+   * Plan MACRO M1 §3.3 (F4): FOR SELECTED COLLECTORS, THE RELEASE's line for a draw opened to a segment (the server's
+   * `rule: 'SELECTED'`, the segment never named), as a LIVE RELEASE's page says its rule; null for a draw open to all.
+   */
+  selected: string | null;
 }
 
 /** Hexadecimal in groups of four, for reading and comparing by eye. */
@@ -332,6 +337,7 @@ export function releaseSheet(s: DropSheet, offsetMinutes: number): ReleaseSheetM
     sizes,
     rule: sizes.length > 0 ? RELEASES.ruleSizes : RELEASES.rule,
     calendarHref: state === 'UPCOMING' || state === 'OPEN' ? `/api/v1/drops/${encodeURIComponent(s.id)}/calendar.ics` : null,
+    selected: s.rule === 'SELECTED' ? RELEASES.selected : null,
   };
 }
 
@@ -418,6 +424,11 @@ export interface EntryModel {
    * (`{dropId, label}`, plan NEXT-NINE CS-01); null otherwise.
    */
   write: WriteContext | null;
+  /**
+   * Plan MACRO M1 §3.3 (F4): a draw opened to a segment the account is not among, while entries are to open or open:
+   * the refusal's second line under its sentence (LIVE.edge.notEligible's words), as a LIVE RELEASE's refusal says it.
+   */
+  note?: string | null;
 }
 
 /** A time inside a sentence (a place held until it, entries opening on it): on the phone's clock, its offset named. */
@@ -436,7 +447,7 @@ function reservingTier(tier: number | undefined): string | null {
  * is the account's tier now (the club's status; 0 or absent: none), which decides RESERVE A PLACE during the early access.
  */
 export function entryModel(
-  release: { id: string; title: string; state: DropState; opensAt: string; earlyAccess?: EarlyAccess | null; full?: boolean },
+  release: { id: string; title: string; state: DropState; opensAt: string; earlyAccess?: EarlyAccess | null; full?: boolean; eligible?: boolean },
   entry: (Pick<ClubEntry, 'id' | 'status' | 'rank' | 'respondBy'> & { reserved?: boolean; size?: DrawSizeRef | null }) | null,
   opts: { offsetMinutes: number; tier?: number },
 ): EntryModel {
@@ -444,6 +455,22 @@ export function entryModel(
   const none = (sentence: string, canEnter = false, canReserve = false): EntryModel => ({ label: null, sentence, entryId: null, canEnter, canWithdraw: false, canReserve, write: null });
   const open = release.state === 'OPEN';
   const opens = inSentence(release.opensAt, opts.offsetMinutes);
+  // Plan MACRO M1 §3.3 (F4): a draw opened to a segment the account is not among (the server's `eligible`), while entries
+  // are to open or open: FOR SELECTED COLLECTORS, why, and that the account does not meet the rule, in place of ENTER
+  // THE DRAW or RESERVE A PLACE, as a LIVE RELEASE's refusal (the segment never named). An entry it holds reads as ever.
+  const refused = release.eligible === false && (open || release.state === 'UPCOMING');
+  if (refused && (!entry || entry.status === 'WITHDRAWN')) {
+    return {
+      label: entry ? RELEASES.statusLabel.WITHDRAWN : RELEASES.selected,
+      sentence: RELEASES.notEligible,
+      note: RELEASES.notEligibleNote,
+      entryId: entry && isReleaseId(entry.id) ? entry.id : null,
+      canEnter: false,
+      canWithdraw: false,
+      canReserve: false,
+      write: null,
+    };
+  }
   if (!entry) {
     switch (release.state) {
       case 'OPEN':

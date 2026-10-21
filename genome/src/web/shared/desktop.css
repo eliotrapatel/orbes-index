@@ -2323,6 +2323,10 @@
     padding: var(--d-s3) 0;
   }
 
+  html:not(.d-touch) body.nocturne .n-release__section .n-release__for {
+    margin-top: var(--d-s4);
+  }
+
   html:not(.d-touch) body.nocturne .n-release__section .n-release__rows {
     margin-top: var(--d-s6);
   }
@@ -2384,6 +2388,10 @@
 
   html:not(.d-touch) body.nocturne .release__entry > .n-release__status > .n-release__sentence:first-child {
     margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .release__entry > .n-release__status > .n-release__refusal-note {
+    margin-top: var(--d-s3);
   }
 
   html:not(.d-touch) body.nocturne .release__entry > :is(.n-release__waiting, .n-release__signin, .n-release__error) {

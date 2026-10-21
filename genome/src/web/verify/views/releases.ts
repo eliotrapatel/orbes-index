@@ -795,6 +795,11 @@ class ReleasePage {
   /** The size picked in YOUR SIZE (preselected, or tapped), and where a preselection came from. */
   private picked: string | null = null;
   private pickedFrom: 'entry' | 'saved' | 'only' | 'hand' | null = null;
+  /**
+   * Plan MACRO M1 §3.3 (F4): whether the account may enter a draw opened to a segment (the server's `eligible`, read
+   * with the entry; a DRAW_NOT_ELIGIBLE answer sets it false). True until known otherwise, the server refusing anyway.
+   */
+  private eligible = true;
 
   constructor(private readonly deps: ReleaseDeps) {
     this.root = viewRoot('release', 'release-title');
@@ -862,6 +867,7 @@ class ReleasePage {
       this.savedSize = null;
       this.picked = null;
       this.pickedFrom = null;
+      this.eligible = true;
     }
     this.render();
   }
@@ -874,18 +880,21 @@ class ReleasePage {
     this.render();
     try {
       // Drawn, the release is over: the account's part in it too (left unsaid should it not be read). Plan NEXT LOT §3.6.F:
-      // a draw with sizes open to an entry, the size YOUR SIZES suggests (left out should it not be read).
+      // a draw with sizes open to an entry, the size YOUR SIZES suggests (left out should it not be read). Plan MACRO M1
+      // §3.3 (F4): a draw opened to a segment, whether the account is among it (as eligible should it not be read).
       const sized = this.load.sheet.sizes.length > 0 && !this.load.sheet.drawn;
+      const gated = this.load.sheet.selected !== null && !this.load.sheet.drawn;
       const [status, part, read] = await Promise.all([
         this.deps.api.clubStatus(),
         this.load.sheet.drawn ? this.deps.api.participation().catch(() => null) : null,
-        sized ? this.deps.api.drawEntry(id).catch(() => null) : null,
+        sized || gated ? this.deps.api.drawEntry(id).catch(() => null) : null,
       ]);
       if (gen !== this.entryGen || this.disposed) return;
       this.part = part ? (participationModel(part).marks.get(id) ?? null) : null;
       this.tier = Number(status.tier?.level) || 0;
       this.guarantee = guaranteeFor(status, id);
-      this.savedSize = read?.savedSize ?? null;
+      this.savedSize = sized ? (read?.savedSize ?? null) : null;
+      this.eligible = read?.eligible !== false;
       const entry = status.entries.find((e) => e.dropId === id) ?? null;
       this.entry = { kind: 'ready', entry };
       this.preselect(entry);
@@ -1001,7 +1010,9 @@ class ReleasePage {
     } catch (e) {
       if (this.disposed) return;
       this.deps.session.noteError(e);
-      this.actionError = messageOf(e);
+      // Plan MACRO M1 §3.3 (F4): no longer among the draw's segment: YOUR ENTRY says so in place of its action.
+      if (e instanceof ApiError && e.code === 'DRAW_NOT_ELIGIBLE') this.eligible = false;
+      else this.actionError = messageOf(e);
     } finally {
       this.busy = false;
     }
@@ -1078,6 +1089,8 @@ class ReleasePage {
         h('h2', { class: 'n-g n-t3', id: 'release-facts', text: RELEASES.section.release }),
         description,
         h('p', { class: 'n-g n-lb n-release__model release__model' }, ...withNumerals(s.model), see ? '   ' : null, see),
+        // Plan MACRO M1 §3.3 (F4): FOR SELECTED COLLECTORS, a draw opened to a segment, as a LIVE RELEASE's page says its rule.
+        s.selected ? h('p', { class: 'n-g n-lb n-ivc n-release__for release__for', text: s.selected }) : null,
         releaseRows(s.rows),
         s.earlyNote ? h('p', { class: 'n-sm n-release__early release__early', text: s.earlyNote }) : null,
       ),
@@ -1151,7 +1164,7 @@ class ReleasePage {
     const sheet = this.load.kind === 'ready' ? this.load.sheet : null;
     const signedOut = this.deps.session.state.status !== 'signed-in' && sheet !== null && (sheet.state === 'OPEN' || sheet.state === 'UPCOMING');
     if (!main && signedOut && isDesktop()) {
-      if (!slot.querySelector(':scope > .d-signin-line')) slot.replaceChildren(signInLine(RELEASES.signIn));
+      if (!slot.querySelector(':scope > .d-signin-line')) slot.replaceChildren(signInLine(sheet.selected ? RELEASES.signInSelected : RELEASES.signIn));
       slot.classList.add('n-release__frame-action--pair');
       slot.hidden = false;
       return;
@@ -1198,7 +1211,7 @@ class ReleasePage {
     if (session.status !== 'signed-in') {
       // No account needed to read; ENTER THE DRAW needs one (any): the OWNERSHIP panel's sign-in and CREATE ACCOUNT.
       if (s.state === 'OPEN' || s.state === 'UPCOMING') {
-        this.signIn ??= new OwnershipPanel({ kind: 'account', lead: RELEASES.signIn }, { api: this.deps.api, session: this.deps.session, onRescan: () => this.deps.onScan() });
+        this.signIn ??= new OwnershipPanel({ kind: 'account', lead: s.selected ? RELEASES.signInSelected : RELEASES.signIn }, { api: this.deps.api, session: this.deps.session, onRescan: () => this.deps.onScan() });
         out.push(h('div', { class: 'n-release__signin release__signin' }, this.signIn.root));
       } else {
         out.push(this.sentence(entryModel(this.releaseOf(s), null, this.entryOpts())));
@@ -1307,13 +1320,21 @@ class ReleasePage {
   /** What the entry means now: its status (ENTERED, PLACE HELD…) in ivory capitals, then its sentence. */
   private sentence(m: EntryModel): HTMLElement {
     // A label with its size (plan NEXT LOT §3.6.F: ENTERED · SIZE 17) sets its figures in the reading face.
-    return h('div', { class: 'n-release__status release__status' }, m.label ? h('p', { class: 'n-g n-t3 n-ivc n-release__status-label ownership__status' }, ...withNumerals(m.label)) : null, h('p', { class: 'n-tx n-release__sentence release__sentence', text: m.sentence }));
+    // Plan MACRO M1 §3.3 (F4): a refusal (FOR SELECTED COLLECTORS, why, then that the account does not meet the rule) is
+    // laid out as a LIVE RELEASE's.
+    return h(
+      'div',
+      { class: ['n-release__status', 'release__status', m.note ? 'n-release__refusal release__refusal' : null] },
+      m.label ? h('p', { class: 'n-g n-t3 n-ivc n-release__status-label ownership__status' }, ...withNumerals(m.label)) : null,
+      h('p', { class: 'n-tx n-release__sentence release__sentence', text: m.sentence }),
+      m.note ? h('p', { class: 'n-sm n-release__refusal-note', text: m.note }) : null,
+    );
   }
 
   private releaseOf(s: ReleaseSheetModel) {
     // Full counts the pieces the house guarantees: the holder of a guarantee shown and set aside for this release may
     // still reserve its own place with it (the server answers DROP_FULL when it cannot).
-    return { id: s.id, title: s.title, state: s.state, opensAt: s.opensAt, earlyAccess: s.earlyAccess, full: s.full && this.guarantee === null };
+    return { id: s.id, title: s.title, state: s.state, opensAt: s.opensAt, earlyAccess: s.earlyAccess, full: s.full && this.guarantee === null, eligible: this.eligible };
   }
 
   private entryOpts() {
