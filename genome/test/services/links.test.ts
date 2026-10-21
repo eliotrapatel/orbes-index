@@ -235,6 +235,9 @@ describe('LinkService (§3.4 A.7.1, step 4.3)', () => {
     expect(await links.resolve('no-such-link')).toBeNull();
     expect(await links.resolve('<script>')).toBeNull();
     expect(destinationPath('MODEL', null, null)).toBe('/verify/lookbook');
+    // LANDING (migration 0050) is not made before its redirect to theorbes.com (step M1.11); one written by hand leads to NOW.
+    await expect(links.create({ name: 'Founding list', channelId: instagram, destination: 'LANDING' }, actor)).rejects.toMatchObject({ httpStatus: 400, publicMessage: 'Choose where the link goes.' });
+    expect(destinationPath('LANDING', null, null)).toBe('/verify');
   });
 
   it('offers the published releases not cancelled, and the active models', async () => {

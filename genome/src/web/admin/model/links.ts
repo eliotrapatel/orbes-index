@@ -544,9 +544,10 @@ export const DESTINATION_LABELS: Readonly<Record<LinkDestination, string>> = Obj
   MODEL: 'A model’s sheet',
   CLUB: 'THE CLUB',
   HOW: 'HOW RELEASES WORK',
+  LANDING: 'theorbes.com (founding list)',
 });
 
-/** The order of the Goes to select. */
+/** The order of the Goes to select (LANDING, migration 0050, is offered with the founding list's console, step M1.12). */
 export const DESTINATION_ORDER: readonly LinkDestination[] = Object.freeze(['NOW', 'RELEASES', 'RELEASE', 'COLLECTION', 'MODEL', 'CLUB', 'HOW'] as const satisfies readonly LinkDestination[]);
 
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];

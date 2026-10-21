@@ -61,6 +61,7 @@ import * as m0046 from './migrations/0046_engagement_scores.js';
 import * as m0047 from './migrations/0047_collector_history.js';
 import * as m0048 from './migrations/0048_orbes_care.js';
 import * as m0049 from './migrations/0049_live_pace.js';
+import * as m0050 from './migrations/0050_founding_list.js';
 
 /** Ordered by name; append new migrations here. Never edit an applied one. */
 export const MIGRATIONS: Readonly<Record<string, Migration>> = Object.freeze({
@@ -114,6 +115,7 @@ export const MIGRATIONS: Readonly<Record<string, Migration>> = Object.freeze({
   '0047_collector_history': m0047,
   '0048_orbes_care': m0048,
   '0049_live_pace': m0049,
+  '0050_founding_list': m0050,
 });
 
 class StaticMigrationProvider implements MigrationProvider {

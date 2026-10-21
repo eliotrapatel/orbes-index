@@ -362,10 +362,10 @@ export const LINK_VIAS = ['SIGN_UP', 'SIGN_IN', 'SESSION'] as const;
 export type LinkVia = (typeof LINK_VIAS)[number];
 
 /**
- * Where a console link leads in the app (links.destination, migration 0043, plan CUSTOMER INTELLIGENCE §3.4 A.6): NOW,
- * THE RELEASES, a release (links.drop_id), THE COLLECTION, a model's sheet (links.model_id), THE CLUB, HOW RELEASES WORK.
+ * Where a console link leads (links.destination, migration 0043, §3.4 A.6): NOW, THE RELEASES, a release (drop_id), THE
+ * COLLECTION, a model's sheet (model_id), THE CLUB, HOW RELEASES WORK; LANDING (0050, F3), theorbes.com's founding list.
  */
-export const LINK_DESTINATIONS = ['NOW', 'RELEASES', 'RELEASE', 'COLLECTION', 'MODEL', 'CLUB', 'HOW'] as const;
+export const LINK_DESTINATIONS = ['NOW', 'RELEASES', 'RELEASE', 'COLLECTION', 'MODEL', 'CLUB', 'HOW', 'LANDING'] as const;
 export type LinkDestination = (typeof LINK_DESTINATIONS)[number];
 
 /**
@@ -641,6 +641,9 @@ export type ReportStatus = (typeof REPORT_STATUSES)[number];
  */
 export const LIVE_PACE_BATCH = Object.freeze({ min: 1, max: 5000 } as const);
 export const LIVE_PACE_MINUTES = Object.freeze({ min: 1, max: 60 } as const);
+
+/** A pre-registration's first name, in characters (preregistrations.first_name, migration 0050, F2): 1 to 80. */
+export const FOUNDING_FIRST_NAME_MAX = 80;
 
 // ── Column helpers ─────────────────────────────────────────────────────────
 
@@ -1206,7 +1209,7 @@ export interface DropsTable {
   surprise_text: ColumnType<string | null, string | null | undefined, string | null>;
   /** A5: the releases (1..100) a collector has taken part in to enter. */
   min_participations: ColumnType<number | null, number | null | undefined, number | null>;
-  /** N5: the segment whose members may enter (segments.id). */
+  /** N5: the segment whose members may enter (segments.id); from migration 0050 (F4) a DRAW's too, never an after-room's. */
   access_segment_id: ColumnType<string | null, string | null | undefined, string | null>;
   /** How every access rule of the release combines; NULL: AND. */
   access_combine: ColumnType<AccessCombine | null, AccessCombine | null | undefined, AccessCombine | null>;
@@ -2053,6 +2056,28 @@ export interface AcquisitionDailyTable {
   visits: number;
   first_visits: number;
   arrivals: number;
+}
+
+/**
+ * One address on the founding list (migration 0050, macro scope F2 and F3), from the theorbes.com form: the address once
+ * by its lookup key, a first name (1..FOUNDING_FIRST_NAME_MAX) and a country, the consent's time and LEGAL_VERSION,
+ * where the person came from (never NULL: DIRECT when nothing), the ORBES account with the same address once matched
+ * (both or neither), and the unsubscribe that keeps the row. Its identity, address, consent, source and creation never
+ * change (`preregistrations_immutable_identity`); removal on request deletes it.
+ */
+export interface PreregistrationsTable {
+  id: Generated<string>;
+  email: string;                       // as typed, trimmed, ≤ 254 characters
+  email_normalized: string;            // the lookup key, unique
+  first_name: string;                  // 1..80 characters, trimmed, no control character nor < >
+  country: string;                     // two capital letters
+  consent_at: Timestamp;
+  consent_version: string;             // the LEGAL_VERSION shown, 'YYYY-MM-DD'
+  source_id: number;                   // acquisition_sources.id
+  account_id: ColumnType<string | null, string | null | undefined, string | null>;
+  matched_at: TimestampNullable;
+  unsubscribed_at: TimestampNullable;
+  created_at: TimestampDefault;
 }
 
 /**
@@ -3004,6 +3029,7 @@ export interface Database {
   acquisition_conversions: AcquisitionConversionsTable;
   acquisition_daily: AcquisitionDailyTable;
   acquisition_state: AcquisitionStateTable;
+  preregistrations: PreregistrationsTable;
   account_notes: AccountNotesTable;
   account_tags: AccountTagsTable;
   account_scores: AccountScoresTable;

@@ -1182,6 +1182,51 @@ describe('schema', () => {
     await expect(t.db.updateTable('live_entries').set({ admitted_batch: null }).where('id', '=', entry.id).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'live_entries_admitted'));
   });
 
+  it('the founding list (0050): a first name\'s bound is schema.ts\'s FOUNDING_FIRST_NAME_MAX; the mirror at work: a pre-registration from its source, matched to its account, unsubscribed; a LANDING link; a draw with a segment', async () => {
+    const def = (await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = 'preregistrations'::regclass AND conname = 'preregistrations_first_name_check'`.execute(t.db)).rows[0].def;
+    expect(/length\(first_name\) >= 1\) AND \(length\(first_name\) <= (\d+)\)/.exec(def)?.[1], def).toBe(String(S.FOUNDING_FIRST_NAME_MAX));
+    const source = await t.db.insertInto('acquisition_sources').values({ kind: 'DIRECT', key: 'DIRECT' }).onConflict((oc) => oc.column('key').doNothing()).returning('id').executeTakeFirst();
+    const sourceId = source?.id ?? (await t.db.selectFrom('acquisition_sources').select('id').where('key', '=', 'DIRECT').executeTakeFirstOrThrow()).id;
+    const account = await t.db.insertInto('accounts').values({ email: 'lea-s0050@example.com', email_normalized: 'lea-s0050@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const consentAt = new Date('2026-10-21T08:00:00Z');
+    const row = await t.db
+      .insertInto('preregistrations')
+      .values({ email: 'Lea-S0050@example.com', email_normalized: 'lea-s0050@example.com', first_name: 'Léa', country: 'FR', consent_at: consentAt, consent_version: '2026-10-21', source_id: sourceId })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(row).toEqual({
+      id: expect.any(String), email: 'Lea-S0050@example.com', email_normalized: 'lea-s0050@example.com', first_name: 'Léa', country: 'FR', consent_at: consentAt, consent_version: '2026-10-21',
+      source_id: sourceId, account_id: null, matched_at: null, unsubscribed_at: null, created_at: expect.any(Date),
+    });
+    const at = new Date('2026-10-22T09:00:00Z');
+    const matched = await t.db.updateTable('preregistrations').set({ account_id: account.id, matched_at: at, unsubscribed_at: at }).where('id', '=', row.id).returning(['account_id', 'matched_at', 'unsubscribed_at']).executeTakeFirstOrThrow();
+    expect(matched).toEqual({ account_id: account.id, matched_at: at, unsubscribed_at: at });
+    await expect(t.db.updateTable('preregistrations').set({ consent_version: '2026-10-22' }).where('id', '=', row.id).execute()).rejects.toSatisfy(isGuardViolation);
+    await expect(
+      t.db.insertInto('preregistrations').values({ email: 'LEA-S0050@EXAMPLE.COM', email_normalized: 'lea-s0050@example.com', first_name: 'Léa', country: 'FR', consent_at: consentAt, consent_version: '2026-10-21', source_id: sourceId }).execute(),
+    ).rejects.toSatisfy((e) => isUniqueViolation(e, 'preregistrations_email_normalized_key'));
+
+    // LANDING, one of schema.ts's destinations, names neither a release nor a model.
+    expect(S.LINK_DESTINATIONS).toContain('LANDING');
+    const admin = await t.db.insertInto('admin_users').values({ email: 'links-s0050@orbes.test', email_normalized: 'links-s0050@orbes.test', password_hash: 'scrypt$x', role: 'OPERATOR' }).returning('id').executeTakeFirstOrThrow();
+    const channel = await t.db.insertInto('link_channels').values({ name: 'Founding s0050' }).returning('id').executeTakeFirstOrThrow();
+    const link = await t.db.insertInto('links').values({ code: 'founding-s0050', name: 'theorbes.com', channel_id: channel.id, destination: 'LANDING', created_by: admin.id }).returning(['destination', 'drop_id', 'model_id']).executeTakeFirstOrThrow();
+    expect(link).toEqual({ destination: 'LANDING', drop_id: null, model_id: null });
+
+    // A draw opened to a segment's members.
+    const { model } = await seedProduct(t.db);
+    const segment = await t.db.insertInto('segments').values({ name: 'Founding list s0050', criteria: JSON.stringify({ rule: 'FOUNDING_LIST' }) }).returning('id').executeTakeFirstOrThrow();
+    const draw = await t.db
+      .insertInto('drops')
+      .values({
+        model_id: model.id, title: 'DRAW 0050', quantity: 1, opens_at: new Date('2026-12-01T10:00:00Z'), closes_at: new Date('2026-12-02T10:00:00Z'), seed_enc: `v1.${'A'.repeat(16)}.${'B'.repeat(64)}`,
+        seed_hash: new Uint8Array(32), access_segment_id: segment.id,
+      })
+      .returning(['mode', 'access_segment_id'])
+      .executeTakeFirstOrThrow();
+    expect(draw).toEqual({ mode: 'DRAW', access_segment_id: segment.id });
+  });
+
   it('audit_logs is append-only at the database level', async () => {
     const h = (b: number) => new Uint8Array(32).fill(b);
     await t.db

@@ -25,7 +25,7 @@ import { SaleService } from '../../src/server/services/sale.js';
 import { createScanToken } from '../../src/server/services/scan-tokens.js';
 import type { VerificationService } from '../../src/server/services/verification.js';
 import { WarrantyService } from '../../src/server/services/warranty.js';
-import { isCheckViolation, isGuardViolation } from '../../src/server/db/pg-errors.js';
+import { isCheckViolation, isGuardViolation, isUniqueViolation } from '../../src/server/db/pg-errors.js';
 
 const adminUrl = process.env.ORBES_TEST_POSTGRES_URL;
 
@@ -247,5 +247,58 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await expect(admit({ admitted_at: next, admitted_batch: -1 })).rejects.toSatisfy((e) => isCheckViolation(e, 'live_entries_admitted_batch_check'));
     await admit({ admitted_at: next, admitted_batch: 1 });
     expect(await db.selectFrom('live_entries').select(['admitted_at', 'admitted_batch']).where('id', '=', entry.id).executeTakeFirstOrThrow()).toEqual({ admitted_at: next, admitted_batch: 1 });
+  });
+
+  it('holds a draw\'s segment and a LANDING link by their CHECKs (0050: drops_draw_plus, links_destination_check), and a pre-registration by its own, with the same JS types as PGlite', async () => {
+    await db.insertInto('categories').values({ id: 23, code: 'F', name: 'Founding parity' }).execute();
+    const model = await db.insertInto('models').values({ category_id: 23, name: 'FOUNDING', type: 'RING', sku_prefix: 'FOUND-PG' }).returning('id').executeTakeFirstOrThrow();
+    const segment = await db.insertInto('segments').values({ name: 'Founding list PG', criteria: JSON.stringify({ rule: 'FOUNDING_LIST' }) }).returning('id').executeTakeFirstOrThrow();
+    // A draw opened to a segment's members; its other LIVE-only settings still refused; an after-room still without one.
+    const draw = await db
+      .insertInto('drops')
+      .values({
+        model_id: model.id, title: 'FOUNDING PG', quantity: 1, opens_at: new Date('2026-12-01T10:00:00Z'), closes_at: new Date('2026-12-02T10:00:00Z'), seed_enc: `v1.${'A'.repeat(16)}.${'B'.repeat(64)}`,
+        seed_hash: new Uint8Array(32), access_segment_id: segment.id,
+      })
+      .returning(['id', 'mode', 'access_segment_id'])
+      .executeTakeFirstOrThrow();
+    expect(draw).toEqual({ id: expect.any(String), mode: 'DRAW', access_segment_id: segment.id });
+    await expect(db.updateTable('drops').set({ access_combine: 'AND' }).where('id', '=', draw.id).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_draw_plus'));
+    await expect(db.updateTable('drops').set({ min_participations: 1 }).where('id', '=', draw.id).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_draw_plus'));
+    const live = {
+      model_id: model.id, title: 'FOUNDING LIVE PG', quantity: 1, opens_at: new Date('2026-12-01T10:00:00Z'), closes_at: new Date('2026-12-01T11:00:00Z'), seed_enc: `v1.${'A'.repeat(16)}.${'B'.repeat(64)}`,
+      seed_hash: new Uint8Array(32), early_access_hours: 0, mode: 'LIVE' as const, live_min_tier: 0, tier_priority: true, room_opens_minutes: 5, turn_seconds: 30, pay_minutes: 5, per_account: 1,
+      price_minor: 1000, currency: 'EUR' as const, quantity_line: '1 PIECE',
+    };
+    const parent = await db.insertInto('drops').values({ ...live, access_segment_id: segment.id }).returning('id').executeTakeFirstOrThrow();
+    await expect(
+      db.insertInto('drops').values({ ...live, parent_drop_id: parent.id, after_room_delay_minutes: 10, after_room_length_minutes: 15, surprise_enabled: false, question_enabled: false, access_segment_id: segment.id }).execute(),
+    ).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_after_room'));
+
+    // A LANDING link names neither a release nor a model; an unknown destination is refused.
+    const admin = await db.insertInto('admin_users').values({ email: 'links-pg0050@orbes.test', email_normalized: 'links-pg0050@orbes.test', password_hash: 'scrypt$x', role: 'OPERATOR' }).returning('id').executeTakeFirstOrThrow();
+    const channel = await db.insertInto('link_channels').values({ name: 'Founding PG' }).returning('id').executeTakeFirstOrThrow();
+    const link = { code: 'founding-pg', name: 'theorbes.com', channel_id: channel.id, destination: 'LANDING' as const, created_by: admin.id };
+    await expect(db.insertInto('links').values({ ...link, model_id: model.id }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'links_destination'));
+    await expect(sql`INSERT INTO links (code, name, channel_id, destination, created_by) VALUES ('founding-pg', 'x', ${channel.id}, 'THEORBES', ${admin.id})`.execute(db)).rejects.toSatisfy((e) => isCheckViolation(e, 'links_destination_check'));
+    expect(await db.insertInto('links').values(link).returning(['destination', 'drop_id', 'model_id']).executeTakeFirstOrThrow()).toEqual({ destination: 'LANDING', drop_id: null, model_id: null });
+
+    // A pre-registration: its address once, its CHECKs, its identity guarded; the same types as PGlite.
+    const source = await db.insertInto('acquisition_sources').values({ kind: 'SITE', site: 'founding-pg.test', key: 'S:founding-pg.test' }).returning('id').executeTakeFirstOrThrow();
+    const consentAt = new Date('2026-10-21T08:00:00Z');
+    const prereg = { email: 'Lea-PG@example.com', email_normalized: 'lea-pg@example.com', first_name: 'Léa', country: 'FR', consent_at: consentAt, consent_version: '2026-10-21', source_id: source.id };
+    for (const [bad, constraint] of [
+      [{ first_name: ' Léa' }, 'preregistrations_first_name_check'],
+      [{ first_name: 'é'.repeat(81) }, 'preregistrations_first_name_check'],
+      [{ country: 'fr' }, 'preregistrations_country_check'],
+      [{ consent_version: '21/10/2026' }, 'preregistrations_consent_version_check'],
+      [{ matched_at: consentAt }, 'preregistrations_matched'],
+    ] as const) {
+      await expect(db.insertInto('preregistrations').values({ ...prereg, ...bad }).execute(), constraint).rejects.toSatisfy((e) => isCheckViolation(e, constraint));
+    }
+    const row = await db.insertInto('preregistrations').values(prereg).returningAll().executeTakeFirstOrThrow();
+    expect(row).toEqual({ ...prereg, id: expect.any(String), account_id: null, matched_at: null, unsubscribed_at: null, created_at: expect.any(Date) });
+    await expect(db.insertInto('preregistrations').values({ ...prereg, email: 'LEA-PG@EXAMPLE.COM' }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'preregistrations_email_normalized_key'));
+    await expect(db.updateTable('preregistrations').set({ email_normalized: 'other-pg@example.com' }).where('id', '=', row.id).execute()).rejects.toSatisfy(isGuardViolation);
   });
 });

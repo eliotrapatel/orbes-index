@@ -49,8 +49,8 @@ export const LINK_COST_MAX = 100_000_000_000;
 /** The releases the dialog offers, at most. */
 export const DESTINATION_RELEASES = 50;
 
-/** Where each destination of the app leads, but a release's and a model's own pages. */
-const PAGE_PATHS: Readonly<Record<Exclude<LinkDestination, 'RELEASE' | 'MODEL'>, string>> = {
+/** Where each destination of the app leads, but a release's and a model's own pages and LANDING (theorbes.com). */
+const PAGE_PATHS: Readonly<Record<Exclude<LinkDestination, 'RELEASE' | 'MODEL' | 'LANDING'>, string>> = {
   NOW: '/verify',
   RELEASES: '/verify/releases',
   COLLECTION: '/verify/lookbook',
@@ -166,6 +166,9 @@ interface LinkRowJoined {
 export function destinationPath(destination: LinkDestination, dropId: string | null, modelSlug: string | null): string {
   if (destination === 'RELEASE') return dropId ? `/verify/releases/${dropId}` : PAGE_PATHS.RELEASES;
   if (destination === 'MODEL') return modelSlug ? `/verify/lookbook/${modelSlug}` : PAGE_PATHS.COLLECTION;
+  // LANDING (migration 0050) goes to theorbes.com; its redirect comes with the founding list's server (lot M1, step
+  // M1.11). Until then the service makes no LANDING link (`destination` below), and one written by hand leads to NOW.
+  if (destination === 'LANDING') return PAGE_PATHS.NOW;
   return PAGE_PATHS[destination];
 }
 
@@ -543,6 +546,8 @@ export class LinkService {
   private async destination(tx: Db, destination: unknown, dropId: unknown, modelId: unknown): Promise<{ destination: LinkDestination; dropId: string | null; modelId: string | null }> {
     if (typeof destination !== 'string' || !(LINK_DESTINATIONS as readonly string[]).includes(destination)) throw noDestination();
     const d = destination as LinkDestination;
+    // LANDING is not offered before its redirect to theorbes.com (step M1.11, see destinationPath).
+    if (d === 'LANDING') throw noDestination();
     const given = (v: unknown) => v !== undefined && v !== null;
     if (d === 'RELEASE') {
       if (given(modelId) || typeof dropId !== 'string' || !UUID_RE.test(dropId)) throw noDestination();

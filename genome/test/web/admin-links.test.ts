@@ -447,7 +447,9 @@ describe('New link and Edit (plan CUSTOMER INTELLIGENCE §3.4 A.10.2)', () => {
 
   it('names where a link goes: the pages, a release with its opening in Paris, a model and its variant', () => {
     expect(DESTINATION_ORDER.map((d) => DESTINATION_LABELS[d])).toEqual(['NOW', 'THE RELEASES', 'A release', 'THE COLLECTION', 'A model’s sheet', 'THE CLUB', 'HOW RELEASES WORK']);
-    expect([...DESTINATION_ORDER].sort()).toEqual([...LINK_DESTINATIONS].sort());
+    // LANDING (migration 0050) has its words for a link that names it; the select offers it from step M1.12.
+    expect(DESTINATION_LABELS.LANDING).toBe('theorbes.com (founding list)');
+    expect([...DESTINATION_ORDER].sort()).toEqual(LINK_DESTINATIONS.filter((d) => d !== 'LANDING').sort());
     // 14 October 2026 18:00 UTC is 20:00 in Paris (summer time); 3 November 19:00 UTC is 20:00 (winter time).
     expect(releaseLabel({ id: 'd', title: 'MONOLITHE', mode: 'LIVE', opensAt: '2026-10-14T18:00:00.000Z', model: 'MONOLITHE' })).toBe('MONOLITHE — LIVE · 14 OCT 2026 · 20:00 Paris');
     expect(parisDateTime('2026-11-03T19:00:00.000Z')).toBe('03 NOV 2026 · 20:00 Paris');
