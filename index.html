@@ -361,8 +361,7 @@ body { background: var(--vault-light) no-repeat 50% 0 / 100% 480px, var(--vault-
   }
 }
 
-/* ══ FOUNDING ACCESS: the founding list's form (F1, F2). It posts the email, the first name, the country and the
-   consent to the platform, with where the visit came from; this browser keeps only whether the form was sent. ══ */
+/* ══ FOUNDING ACCESS: the founding list's form. ══ */
 #promo-overlay {
   position: fixed; inset: 0; z-index: 9000;
   background: var(--n-scrim);
@@ -1161,18 +1160,13 @@ html.dust.dust-settled .open__mono { opacity: .4; }
 
 
 <script>
-/* ── FOUNDING ACCESS: the founding list (macro scope F1, F2, F3, F5). The form sends the email, the first name, the
-      country and the consent to the platform (POST https://verify.theorbes.com/api/v1/founding, JSON, no cookie), with
-      where the visit came from: the console link's code `o` and the five `utm_` tags of this page's address, and the
-      referring site (its address cut to the site). The platform answers 202 whether the address was new or already on
-      the list, 400 with each refused field in its words, 429 when the network has tried too often. This browser keeps
-      only that the form was sent (localStorage, in try/catch), so ACCESS shows YOU ARE ON THE LIST again. ── */
+/* ── FOUNDING ACCESS: the founding list. This browser keeps only that the form was sent. ── */
 (function () {
   var ENDPOINT = 'https://verify.theorbes.com/api/v1/founding';
   var JOINED_KEY = 'orbes_founding';
   var TIMEOUT_MS = 15000;
   var FIELDS = ['email', 'firstName', 'country', 'consent'];
-  // the platform's words (services/founding.ts FOUNDING_WORDS), shown before sending as after
+  // the form's words
   var WORDS = {
     email: 'Enter your email.',
     firstName: 'Enter your first name.',
@@ -1210,7 +1204,7 @@ html.dust.dust-settled .open__mono { opacity: .4; }
   function read(key) { try { return window.localStorage.getItem(key); } catch (e) { return null; } }
   function write(key, value) { try { window.localStorage.setItem(key, value); } catch (e) { /* kept for this visit only */ } }
 
-  // What the code reveal of the Google Sheet left in this browser (F5: the Sheet is retired) is cleared once.
+  // Older keys left in this browser are cleared once.
   (function () {
     try {
       ['orbes_promo_state', 'orbes_promo_code', 'orbes_promo_slots', 'orbes_promo_email', 'orbes_promo_claimed',
@@ -1222,7 +1216,7 @@ html.dust.dust-settled .open__mono { opacity: .4; }
   var joined = read(JOINED_KEY) === '1';
   var sending = false;
 
-  // ── where the visit came from, as the platform keeps it (http/schemas.ts arrivalShape): left out when it would not
+  // ── where the visit came from
   var TAG_RE = (function () { try { return new RegExp('^[^\\p{C}]{1,100}$', 'u'); } catch (e) { return /^[^\u0000-\u001f\u007f-\u009f]{1,100}$/; } })();
   function arrival() {
     var a = {};
@@ -1276,7 +1270,7 @@ html.dust.dust-settled .open__mono { opacity: .4; }
       consent: !!(input.consent && input.consent.checked)
     };
   }
-  // the platform's own checks (services/founding.ts cleanFounding), so a refusal shows before anything is sent
+  // the form's checks, before anything is sent
   function check(v) {
     var f = {}, any = false;
     if (!v.email || v.email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.email)) { f.email = WORDS.email; any = true; }
