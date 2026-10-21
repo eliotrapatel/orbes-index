@@ -338,4 +338,41 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     });
     expect(await db.insertInto('email_preferences').values({ account_id: account.id }).returning(['release_notices']).executeTakeFirstOrThrow()).toEqual({ release_notices: false });
   });
+  it('holds house messages and their deliveries by their CHECKs and guards (0052)', async () => {
+    const admin = await db.insertInto('admin_users').values({ email: 'house-pg0052@orbes.test', email_normalized: 'house-pg0052@orbes.test', password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow();
+    const account = await db.insertInto('accounts').values({ email: 'lea-pg0052@example.com', email_normalized: 'lea-pg0052@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    // A moment's setting: off by default, on exactly with its time, its title one line.
+    expect(await db.insertInto('house_moment_settings').values({ moment: 'NINETY_DAYS', updated_by: admin.id }).returning(['enabled', 'enabled_at', 'title', 'body']).executeTakeFirstOrThrow()).toEqual({
+      enabled: false, enabled_at: null, title: null, body: null,
+    });
+    await expect(db.insertInto('house_moment_settings').values({ moment: 'OWNERSHIP_YEAR', enabled: true, updated_by: admin.id }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'house_moment_settings_enabled'));
+    await expect(db.insertInto('house_moment_settings').values({ moment: 'OWNERSHIP_YEAR', title: 'ONE\nYEAR', updated_by: admin.id }).execute()).rejects.toSatisfy((e) =>
+      isCheckViolation(e, 'house_moment_settings_title_check'),
+    );
+    // A custom message: a segment or a tier while a draft, then sent and frozen; only a draft is deleted.
+    const base = { title: 'A word from ORBES', body: 'Thank you.', created_by: admin.id, updated_by: admin.id };
+    await expect(db.insertInto('house_messages').values(base).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'house_messages_audience'));
+    const message = await db.insertInto('house_messages').values({ ...base, audience_min_tier: 3 }).returning(['id', 'status']).executeTakeFirstOrThrow();
+    expect(message.status).toBe('DRAFT');
+    const at = new Date('2026-10-21T16:00:00Z');
+    await expect(db.updateTable('house_messages').set({ status: 'SENT', send_at: at, sent_at: at, reach: 0, sent_by: admin.id }).where('id', '=', message.id).execute()).rejects.toSatisfy((e) =>
+      isCheckViolation(e, 'house_messages_label'),
+    );
+    expect(
+      await db.updateTable('house_messages').set({ status: 'SENT', send_at: at, sent_at: at, reach: 1, sent_by: admin.id, audience_label: 'PALLADIUM' }).where('id', '=', message.id).returning(['reach', 'sent_at']).executeTakeFirstOrThrow(),
+    ).toEqual({ reach: 1, sent_at: at });
+    await expect(db.updateTable('house_messages').set({ title: 'Other' }).where('id', '=', message.id).execute()).rejects.toSatisfy(isGuardViolation);
+    await expect(db.deleteFrom('house_messages').where('id', '=', message.id).execute()).rejects.toSatisfy(isGuardViolation);
+    // A delivery once per key; a moment with its words and piece; never changed but its reading; never deleted nor truncated.
+    const delivery = { account_id: account.id, source: 'MOMENT' as const, moment: 'OWNERSHIP_YEAR' as const, title: 'ONE YEAR', body: 'A year today.', piece_ref: 'O26-J-00184', dedupe_key: 'OWNERSHIP_YEAR:pg0052' };
+    await expect(db.insertInto('house_deliveries').values({ ...delivery, piece_ref: null }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'house_deliveries_piece'));
+    const row = await db.insertInto('house_deliveries').values(delivery).returning(['id', 'read_at', 'delivered_at']).executeTakeFirstOrThrow();
+    expect(row).toEqual({ id: expect.any(String), read_at: null, delivered_at: expect.any(Date) });
+    await expect(db.insertInto('house_deliveries').values(delivery).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'house_deliveries_dedupe_key'));
+    await db.insertInto('house_deliveries').values({ account_id: account.id, source: 'CUSTOM', house_message_id: message.id, dedupe_key: `CUSTOM:${message.id}:${account.id}` }).execute();
+    await db.updateTable('house_deliveries').set({ read_at: sql<Date>`now()` }).where('id', '=', row.id).execute();
+    await expect(db.updateTable('house_deliveries').set({ body: 'Other.' }).where('id', '=', row.id).execute()).rejects.toSatisfy(isGuardViolation);
+    await expect(db.deleteFrom('house_deliveries').where('id', '=', row.id).execute()).rejects.toSatisfy(isGuardViolation);
+    await expect(sql`TRUNCATE house_deliveries`.execute(db)).rejects.toSatisfy(isGuardViolation);
+  });
 });

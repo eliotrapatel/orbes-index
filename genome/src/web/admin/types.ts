@@ -342,6 +342,18 @@ export type EmailStatus = (typeof EMAIL_STATUSES)[number];
 export const EMAIL_TEMPLATE_SUBJECT_MAX = 150;
 export const EMAIL_TEMPLATE_BODY_MAX = 5000;
 
+/** The automatic house messages (house_moment_settings.moment, migration 0052, macro scope D24 M1), each with its own switch, off by default. */
+export const HOUSE_MOMENTS = ['FIRST_REGISTRATION', 'BIRTHDAY_CREDIT', 'CREDIT_EXPIRING', 'PRIVATE_CARE', 'OWNERSHIP_YEAR', 'NINETY_DAYS'] as const;
+export type HouseMoment = (typeof HOUSE_MOMENTS)[number];
+
+/** A custom house message (house_messages.status, migration 0052, D24 M2). */
+export const HOUSE_MESSAGE_STATUSES = ['DRAFT', 'SCHEDULED', 'SENT', 'CANCELLED'] as const;
+export type HouseMessageStatus = (typeof HOUSE_MESSAGE_STATUSES)[number];
+
+/** A house message's title and words, at most, in characters (migration 0052). */
+export const HOUSE_TITLE_MAX = 80;
+export const HOUSE_BODY_MAX = 2000;
+
 /** How the access rules of a LIVE RELEASE combine (drops.access_combine): every rule met, or any one of them. */
 export const ACCESS_COMBINES = ['AND', 'OR'] as const;
 export type AccessCombine = (typeof ACCESS_COMBINES)[number];

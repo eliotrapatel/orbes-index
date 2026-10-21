@@ -673,6 +673,35 @@ export const EMAIL_SUBJECT_MAX = 300;
 export const EMAIL_DEDUPE_MAX = 200;
 export const EMAIL_ERROR_MAX = 300;
 
+/**
+ * The automatic house messages (house_moment_settings.moment, house_deliveries.moment, migration 0052, macro scope D24
+ * M1; lot M2 plan §1.2), each with its own switch, off by default: a) the day after a first registration, b) the
+ * birthday credit opened, c) a credit ending in 7 days, d) PRIVATE CARE becoming available, e) one year of ownership of
+ * a piece, f) 90 days without a visit.
+ */
+export const HOUSE_MOMENTS = ['FIRST_REGISTRATION', 'BIRTHDAY_CREDIT', 'CREDIT_EXPIRING', 'PRIVATE_CARE', 'OWNERSHIP_YEAR', 'NINETY_DAYS'] as const;
+export type HouseMoment = (typeof HOUSE_MOMENTS)[number];
+
+/** A custom house message (house_messages.status, migration 0052, M2): written, scheduled, sent (then never changed) or cancelled. */
+export const HOUSE_MESSAGE_STATUSES = ['DRAFT', 'SCHEDULED', 'SENT', 'CANCELLED'] as const;
+export type HouseMessageStatus = (typeof HOUSE_MESSAGE_STATUSES)[number];
+
+/** Where a house delivery comes from (house_deliveries.source, migration 0052): a moment (its words rendered) or a custom message. */
+export const HOUSE_DELIVERY_SOURCES = ['MOMENT', 'CUSTOM'] as const;
+export type HouseDeliverySource = (typeof HOUSE_DELIVERY_SOURCES)[number];
+
+/**
+ * House messages' words, in characters (migration 0052): the title (one line) and words the console writes, a moment's or
+ * a custom message's; an audience's name written at sending; a moment's title and words as delivered, placeholders
+ * rendered (a model's name in {piece} has no bound of its own, so the service clips its rendering to these); a key.
+ */
+export const HOUSE_TITLE_MAX = 80;
+export const HOUSE_BODY_MAX = 2000;
+export const HOUSE_AUDIENCE_LABEL_MAX = 80;
+export const HOUSE_DELIVERED_TITLE_MAX = 400;
+export const HOUSE_DELIVERED_BODY_MAX = 8000;
+export const HOUSE_DEDUPE_MAX = 200;
+
 // ── Column helpers ─────────────────────────────────────────────────────────
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -2163,6 +2192,67 @@ export interface EmailStateTable {
 }
 
 /**
+ * The console's switch and words of one house moment (migration 0052, D24 M1): no row is the default (off, the default
+ * words); `title` or `body` NULL is that part's default words. `enabled_at` is set exactly while enabled, moved to now at
+ * each switch-on: a moment delivers only what falls due from then on. Written by the console only.
+ */
+export interface HouseMomentSettingsTable {
+  moment: HouseMoment;
+  enabled: WithDefault<boolean>;       // DEFAULT false
+  enabled_at: TimestampNullable;       // exactly while enabled
+  title: ColumnType<string | null, string | null | undefined, string | null>; // 1..80 characters, trimmed, one line
+  body: ColumnType<string | null, string | null | undefined, string | null>;  // 1..2 000 characters
+  updated_by: string;                  // admin_users.id
+  updated_at: TimestampDefault;
+}
+
+/**
+ * A custom house message (migration 0052, D24 M2), to a segment or a tier and above (exactly one while DRAFT or
+ * SCHEDULED). `send_at` exactly while SCHEDULED or SENT; `sent_at` and `reach` exactly when SENT, with `audience_label`;
+ * `cancelled_at` and `cancelled_by` exactly when CANCELLED; `sent_by` on a SCHEDULED or SENT message, none on a DRAFT.
+ * Once SENT nothing changes but the segment's id, which may only be cleared; only a DRAFT is deleted.
+ */
+export interface HouseMessagesTable {
+  id: Generated<string>;
+  title: string;                       // 1..80 characters, trimmed, one line
+  body: string;                        // 1..2 000 characters, plain paragraphs
+  status: WithDefault<HouseMessageStatus>; // DEFAULT DRAFT
+  audience_segment_id: ColumnType<string | null, string | null | undefined, string | null>; // segments.id
+  audience_min_tier: ColumnType<number | null, number | null | undefined, number | null>;   // 1 TITANE, 2 PLATINE, 3 PALLADIUM: this tier and above
+  audience_label: ColumnType<string | null, string | null | undefined, string | null>;      // ≤ 80 characters, written at sending
+  send_at: TimestampNullable;
+  sent_at: TimestampNullable;
+  reach: ColumnType<number | null, number | null | undefined, number | null>; // ≥ 0, exactly when SENT
+  sent_by: ColumnType<string | null, string | null | undefined, string | null>; // admin_users.id: who scheduled or sent it
+  cancelled_at: TimestampNullable;
+  cancelled_by: ColumnType<string | null, string | null | undefined, string | null>; // admin_users.id
+  created_by: string;                  // admin_users.id
+  created_at: TimestampDefault;
+  updated_by: string;                  // admin_users.id
+  updated_at: TimestampDefault;
+}
+
+/**
+ * One house message an account received (migration 0052, D24 M1 to M4), once per `dedupe_key`. A MOMENT holds its
+ * `moment`, its `title` and `body` rendered at delivery and, for a first registration or a year of ownership, the
+ * piece's `piece_ref`; a CUSTOM names its `house_message_id` only (its words are the message's). Every column but
+ * `read_at` never changes; never deleted.
+ */
+export interface HouseDeliveriesTable {
+  id: Generated<string>;
+  account_id: string;
+  source: HouseDeliverySource;
+  moment: ColumnType<HouseMoment | null, HouseMoment | null | undefined, HouseMoment | null>;
+  house_message_id: ColumnType<string | null, string | null | undefined, string | null>;
+  title: ColumnType<string | null, string | null | undefined, string | null>; // MOMENT: ≤ 400 characters, one line
+  body: ColumnType<string | null, string | null | undefined, string | null>;  // MOMENT: ≤ 8 000 characters
+  piece_ref: ColumnType<string | null, string | null | undefined, string | null>; // O26-J-00184, for a) and e)
+  dedupe_key: string;                  // 1..200 characters, unique
+  delivered_at: TimestampDefault;
+  read_at: TimestampNullable;          // never before delivered_at
+}
+
+/**
  * One row (id 1, migration 0043, plan CUSTOMER INTELLIGENCE §3.4 A.6 item 9): the recording's start (« Before tracking »
  * before it) and the job's watermarks. Inserted by AcquisitionService.prepare at the first boot, never by the migration.
  */
@@ -3116,6 +3206,9 @@ export interface Database {
   email_outbox: EmailOutboxTable;
   email_preferences: EmailPreferencesTable;
   email_state: EmailStateTable;
+  house_moment_settings: HouseMomentSettingsTable;
+  house_messages: HouseMessagesTable;
+  house_deliveries: HouseDeliveriesTable;
   account_notes: AccountNotesTable;
   account_tags: AccountTagsTable;
   account_scores: AccountScoresTable;

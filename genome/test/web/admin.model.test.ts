@@ -468,6 +468,8 @@ describe('admin enums mirror the server', () => {
       'WARRANTY_CLAIM_REFUSALS',
       'EMAIL_KINDS',
       'EMAIL_STATUSES',
+      'HOUSE_MOMENTS',
+      'HOUSE_MESSAGE_STATUSES',
     ] as const) {
       expect([...web[name]], name).toEqual([...serverSchema[name]]);
     }
@@ -480,6 +482,9 @@ describe('admin enums mirror the server', () => {
     // A template's bounds (macro scope E0, migration 0051), as the server holds them.
     expect(web.EMAIL_TEMPLATE_SUBJECT_MAX).toBe(serverSchema.EMAIL_TEMPLATE_SUBJECT_MAX);
     expect(web.EMAIL_TEMPLATE_BODY_MAX).toBe(serverSchema.EMAIL_TEMPLATE_BODY_MAX);
+    // A house message's bounds (macro scope D24, migration 0052), as the server holds them.
+    expect(web.HOUSE_TITLE_MAX).toBe(serverSchema.HOUSE_TITLE_MAX);
+    expect(web.HOUSE_BODY_MAX).toBe(serverSchema.HOUSE_BODY_MAX);
     expect([...web.AUTH_POLICY_KINDS]).toEqual([...SERVER_POLICY_KINDS]);
     expect([...web.ANOMALY_SORTS]).toEqual([...SERVER_ANOMALY_SORTS]);
     expect([...web.SCAN_STAT_EVENT_TYPES]).toEqual([...serverSchema.SCAN_STAT_EVENT_TYPES]);

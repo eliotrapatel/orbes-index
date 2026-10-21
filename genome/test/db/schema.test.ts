@@ -1328,6 +1328,91 @@ describe('schema', () => {
     expect(emailed).toEqual({ issued_via: 'EMAIL', created_by: null });
   });
 
+  it('house messages (0052): the moments, the statuses, the sources and every bound are schema.ts\'s; the mirror at work: a moment\'s setting off with the default words, then on with its time; a custom message to a tier, scheduled then sent with its reach and audience\'s name, then frozen; a moment delivered with its words and piece, a custom message by reference, then read', async () => {
+    const def = async (table: string, constraint: string) =>
+      (await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = ${table}::regclass AND conname = ${constraint}`.execute(t.db)).rows[0].def;
+    const literals = async (table: string, constraint: string) => [...(await def(table, constraint)).matchAll(/'([A-Z_]+)'::text/g)].map((m) => m[1]);
+    expect(await literals('house_moment_settings', 'house_moment_settings_moment_check')).toEqual([...S.HOUSE_MOMENTS]);
+    expect(await literals('house_deliveries', 'house_deliveries_moment_check')).toEqual([...S.HOUSE_MOMENTS]);
+    expect(await literals('house_messages', 'house_messages_status_check')).toEqual([...S.HOUSE_MESSAGE_STATUSES]);
+    expect(await literals('house_deliveries', 'house_deliveries_source_check')).toEqual([...S.HOUSE_DELIVERY_SOURCES]);
+    const max = async (table: string, constraint: string, column: string) => {
+      const d = await def(table, constraint);
+      return Number(new RegExp(`char_length\\(${column}\\) <= (\\d+)\\)`).exec(d)?.[1] ?? NaN);
+    };
+    expect(await max('house_moment_settings', 'house_moment_settings_title_check', 'title')).toBe(S.HOUSE_TITLE_MAX);
+    expect(await max('house_moment_settings', 'house_moment_settings_body_check', 'body')).toBe(S.HOUSE_BODY_MAX);
+    expect(await max('house_messages', 'house_messages_title_check', 'title')).toBe(S.HOUSE_TITLE_MAX);
+    expect(await max('house_messages', 'house_messages_body_check', 'body')).toBe(S.HOUSE_BODY_MAX);
+    expect(await max('house_messages', 'house_messages_audience_label_check', 'audience_label')).toBe(S.HOUSE_AUDIENCE_LABEL_MAX);
+    expect(await max('house_deliveries', 'house_deliveries_title_check', 'title')).toBe(S.HOUSE_DELIVERED_TITLE_MAX);
+    expect(await max('house_deliveries', 'house_deliveries_body_check', 'body')).toBe(S.HOUSE_DELIVERED_BODY_MAX);
+    expect(await max('house_deliveries', 'house_deliveries_dedupe_key_check', 'dedupe_key')).toBe(S.HOUSE_DEDUPE_MAX);
+
+    const admin = await t.db.insertInto('admin_users').values({ email: 'house-s0052@orbes.test', email_normalized: 'house-s0052@orbes.test', password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow();
+    const account = await t.db.insertInto('accounts').values({ email: 'lea-s0052@example.com', email_normalized: 'lea-s0052@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+
+    // A moment's setting: off, with the default words, until the console switches it on.
+    const setting = await t.db.insertInto('house_moment_settings').values({ moment: 'CREDIT_EXPIRING', updated_by: admin.id }).returningAll().executeTakeFirstOrThrow();
+    expect(setting).toEqual({ moment: 'CREDIT_EXPIRING', enabled: false, enabled_at: null, title: null, body: null, updated_by: admin.id, updated_at: expect.any(Date) });
+    const on = new Date('2026-10-21T09:00:00Z');
+    const switched = await t.db
+      .updateTable('house_moment_settings')
+      .set({ enabled: true, enabled_at: on, title: 'A CREDIT ENDS SOON', body: '{amount} of your credit ends on {expires}.', updated_at: on })
+      .where('moment', '=', 'CREDIT_EXPIRING')
+      .returning(['enabled', 'enabled_at', 'title', 'body'])
+      .executeTakeFirstOrThrow();
+    expect(switched).toEqual({ enabled: true, enabled_at: on, title: 'A CREDIT ENDS SOON', body: '{amount} of your credit ends on {expires}.' });
+    await expect(t.db.updateTable('house_moment_settings').set({ enabled_at: null }).where('moment', '=', 'CREDIT_EXPIRING').execute()).rejects.toSatisfy((e) =>
+      isCheckViolation(e, 'house_moment_settings_enabled'),
+    );
+
+    // A custom message to PLATINE and above: a draft, scheduled, then sent.
+    const message = await t.db
+      .insertInto('house_messages')
+      .values({ title: 'A word from ORBES', body: 'Dear {firstName},\nthank you.', audience_min_tier: 2, created_by: admin.id, updated_by: admin.id })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(message).toEqual({
+      id: expect.any(String), title: 'A word from ORBES', body: 'Dear {firstName},\nthank you.', status: 'DRAFT', audience_segment_id: null, audience_min_tier: 2, audience_label: null, send_at: null, sent_at: null,
+      reach: null, sent_by: null, cancelled_at: null, cancelled_by: null, created_by: admin.id, created_at: expect.any(Date), updated_by: admin.id, updated_at: expect.any(Date),
+    });
+    const at = new Date('2026-10-21T16:00:00Z');
+    await t.db.updateTable('house_messages').set({ status: 'SCHEDULED', send_at: at, sent_by: admin.id }).where('id', '=', message.id).execute();
+    const sent = await t.db
+      .updateTable('house_messages')
+      .set({ status: 'SENT', sent_at: new Date('2026-10-21T16:00:12Z'), reach: 1204, audience_label: 'PLATINE' })
+      .where('id', '=', message.id)
+      .returning(['status', 'send_at', 'sent_at', 'reach', 'audience_label'])
+      .executeTakeFirstOrThrow();
+    expect(sent).toEqual({ status: 'SENT', send_at: at, sent_at: new Date('2026-10-21T16:00:12Z'), reach: 1204, audience_label: 'PLATINE' });
+    await expect(t.db.updateTable('house_messages').set({ body: 'Other.' }).where('id', '=', message.id).execute()).rejects.toSatisfy(isGuardViolation);
+
+    // A moment delivered with its words and piece; the custom message by reference; then read.
+    const moment = await t.db
+      .insertInto('house_deliveries')
+      .values({
+        account_id: account.id, source: 'MOMENT', moment: 'FIRST_REGISTRATION', title: 'YOUR FIRST PIECE', body: 'MONOLITHE IN STEEL is registered to you.', piece_ref: 'O26-J-00184',
+        dedupe_key: `FIRST_REGISTRATION:${account.id}`,
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(moment).toEqual({
+      id: expect.any(String), account_id: account.id, source: 'MOMENT', moment: 'FIRST_REGISTRATION', house_message_id: null, title: 'YOUR FIRST PIECE', body: 'MONOLITHE IN STEEL is registered to you.',
+      piece_ref: 'O26-J-00184', dedupe_key: `FIRST_REGISTRATION:${account.id}`, delivered_at: expect.any(Date), read_at: null,
+    });
+    const custom = await t.db
+      .insertInto('house_deliveries')
+      .values({ account_id: account.id, source: 'CUSTOM', house_message_id: message.id, dedupe_key: `CUSTOM:${message.id}:${account.id}`, delivered_at: new Date('2026-10-21T16:00:12Z') })
+      .returning(['moment', 'title', 'body', 'piece_ref'])
+      .executeTakeFirstOrThrow();
+    expect(custom).toEqual({ moment: null, title: null, body: null, piece_ref: null });
+    const read = new Date(Date.now() + 60_000);
+    expect(await t.db.updateTable('house_deliveries').set({ read_at: read }).where('account_id', '=', account.id).returning('read_at').execute()).toEqual([{ read_at: read }, { read_at: read }]);
+    await expect(t.db.updateTable('house_deliveries').set({ title: 'Other' }).where('id', '=', moment.id).execute()).rejects.toSatisfy(isGuardViolation);
+    await expect(t.db.deleteFrom('house_deliveries').where('id', '=', moment.id).execute()).rejects.toSatisfy(isGuardViolation);
+  });
+
   it('product_status_history is append-only; genomes and keys are never deleted (key ids never reused)', async () => {
     const { product } = await seedProduct(t.db);
     const h = await t.db
