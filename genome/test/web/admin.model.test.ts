@@ -470,6 +470,8 @@ describe('admin enums mirror the server', () => {
       'EMAIL_STATUSES',
       'HOUSE_MOMENTS',
       'HOUSE_MESSAGE_STATUSES',
+      'WORN_STATUSES',
+      'WORN_REFUSALS',
     ] as const) {
       expect([...web[name]], name).toEqual([...serverSchema[name]]);
     }

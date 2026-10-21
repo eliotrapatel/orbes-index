@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'kysely';
 import { createTestDb, type TestDb } from '../support/db.js';
@@ -1411,6 +1412,67 @@ describe('schema', () => {
     expect(await t.db.updateTable('house_deliveries').set({ read_at: read }).where('account_id', '=', account.id).returning('read_at').execute()).toEqual([{ read_at: read }, { read_at: read }]);
     await expect(t.db.updateTable('house_deliveries').set({ title: 'Other' }).where('id', '=', moment.id).execute()).rejects.toSatisfy(isGuardViolation);
     await expect(t.db.deleteFrom('house_deliveries').where('id', '=', moment.id).execute()).rejects.toSatisfy(isGuardViolation);
+  });
+
+  it('WORN (0053): the statuses, the refusals, the types and every bound are schema.ts\'s; the mirror at work: a photograph sent with its bytes, credit and consent, published, then withdrawn and erased; one live per piece', async () => {
+    const def = async (constraint: string) =>
+      (await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = 'worn_photos'::regclass AND conname = ${constraint}`.execute(t.db)).rows[0].def;
+    const literals = async (constraint: string) => [...(await def(constraint)).matchAll(/'([A-Za-z_/]+)'::text/g)].map((m) => m[1]);
+    expect(await literals('worn_photos_status_check')).toEqual([...S.WORN_STATUSES]);
+    expect(await literals('worn_photos_refusal_check')).toEqual([...S.WORN_REFUSALS]);
+    expect(await literals('worn_photos_photo_mime_check')).toEqual([...S.MEDIA_MIME_TYPES]);
+    // The live statuses: those whose photograph is kept, and the one-per-piece index's.
+    expect(await def('worn_photos_ended')).toBe(`CHECK (((status = ANY (ARRAY[${S.WORN_LIVE_STATUSES.map((s) => `'${s}'::text`).join(', ')}])) = (ended_at IS NULL)))`);
+    const live = (await sql<{ def: string }>`SELECT pg_get_indexdef('worn_photos_live_once'::regclass) AS def`.execute(t.db)).rows[0].def;
+    expect(live).toContain(`WHERE (status = ANY (ARRAY[${S.WORN_LIVE_STATUSES.map((s) => `'${s}'::text`).join(', ')}]))`);
+    expect(await def('worn_photos_photo_check')).toContain(`<= ${S.WORN_PHOTO_MAX_BYTES}`);
+    expect(await def('worn_photos_width_check')).toContain(`<= ${S.WORN_PHOTO_MAX_SIDE}`);
+    expect(await def('worn_photos_height_check')).toContain(`<= ${S.WORN_PHOTO_MAX_SIDE}`);
+    expect(await def('worn_photos_credit_first_name_check')).toContain(`<= ${S.WORN_CREDIT_FIRST_NAME_MAX}`);
+    // As account_profiles.first_name (0040) and media_objects (0012) hold theirs.
+    expect((await def('worn_photos_credit_first_name_check')).replaceAll('credit_first_name', 'first_name')).toBe(
+      (await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = 'account_profiles_first_name_check'`.execute(t.db)).rows[0].def,
+    );
+
+    const { product, model } = await seedProduct(t.db);
+    const admin = await t.db.insertInto('admin_users').values({ email: 'worn-s0053@orbes.test', email_normalized: 'worn-s0053@orbes.test', password_hash: 'scrypt$x', role: 'OPERATOR' }).returning('id').executeTakeFirstOrThrow();
+    const account = await t.db.insertInto('accounts').values({ email: 'lea-s0053@example.com', email_normalized: 'lea-s0053@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const ownership = await t.db.insertInto('ownership').values({ product_id: product.id, account_id: account.id, acquired_via: 'FIRST_REGISTRATION' }).returning('id').executeTakeFirstOrThrow();
+    const photo = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
+    const sha = createHash('sha256').update(photo).digest('hex');
+    const consentAt = new Date('2026-10-22T09:00:00Z');
+    const sent = await t.db
+      .insertInto('worn_photos')
+      .values({
+        product_id: product.id, ownership_id: ownership.id, account_id: account.id, model_id: model.id, photo, photo_mime: 'image/jpeg', photo_sha256: sha, width: 1600, height: 2000,
+        credit_first_name: 'Léa', credit_country: 'FR', credit_instagram: 'lea.m', consent_at: consentAt, consent_version: '2026-10-22',
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(sent).toEqual({
+      id: expect.any(String), product_id: product.id, ownership_id: ownership.id, account_id: account.id, model_id: model.id, photo, photo_mime: 'image/jpeg', photo_sha256: sha, width: 1600, height: 2000,
+      credit_first_name: 'Léa', credit_country: 'FR', credit_instagram: 'lea.m', consent_at: consentAt, consent_version: '2026-10-22', status: 'PENDING', refusal: null, reviewed_by: null, reviewed_at: null,
+      published_at: null, ended_at: null, created_at: expect.any(Date),
+    });
+    expect(sent.photo?.constructor).toBe(Uint8Array);
+    // One live photograph per piece.
+    await expect(
+      t.db.insertInto('worn_photos').values({ ...sent, id: undefined, status: undefined, created_at: undefined }).execute(),
+    ).rejects.toSatisfy((e) => isUniqueViolation(e, 'worn_photos_live_once'));
+    // Published by staff, then withdrawn by its owner: its photograph erased, its record kept.
+    const at = new Date('2026-10-22T10:00:00Z');
+    await t.db.updateTable('worn_photos').set({ status: 'PUBLISHED', reviewed_by: admin.id, reviewed_at: at, published_at: at }).where('id', '=', sent.id).execute();
+    const withdrawn = await t.db
+      .updateTable('worn_photos')
+      .set({ status: 'WITHDRAWN', ended_at: new Date('2026-10-23T10:00:00Z'), photo: null, photo_mime: null, photo_sha256: null, width: null, height: null })
+      .where('id', '=', sent.id)
+      .returning(['status', 'photo', 'published_at', 'ended_at', 'credit_first_name'])
+      .executeTakeFirstOrThrow();
+    expect(withdrawn).toEqual({ status: 'WITHDRAWN', photo: null, published_at: at, ended_at: new Date('2026-10-23T10:00:00Z'), credit_first_name: 'Léa' });
+    await expect(t.db.updateTable('worn_photos').set({ refusal: 'QUALITY' }).where('id', '=', sent.id).execute()).rejects.toSatisfy(isGuardViolation);
+    await expect(t.db.deleteFrom('worn_photos').where('id', '=', sent.id).execute()).rejects.toSatisfy(isGuardViolation);
+    // Once withdrawn, the piece sends another.
+    await t.db.insertInto('worn_photos').values({ ...sent, id: undefined, status: undefined, created_at: undefined, credit_instagram: null }).execute();
   });
 
   it('product_status_history is append-only; genomes and keys are never deleted (key ids never reused)', async () => {

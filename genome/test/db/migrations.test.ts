@@ -18,6 +18,7 @@ import {
   IN_APPS,
   LINK_DESTINATIONS,
   LINK_VIAS,
+  MEDIA_MIME_TYPES,
   OPENED_IN,
   RECOVERY_ISSUED_VIA,
   SCORE_ACT_KINDS,
@@ -28,6 +29,8 @@ import {
   VIEW_PAGE_CODES,
   VIEW_PAGE_MAX,
   VIEW_PAGES,
+  WORN_REFUSALS,
+  WORN_STATUSES,
 } from '../../src/server/db/schema.js';
 import * as m0007 from '../../src/server/db/migrations/0007_print_batch_indexes.js';
 import * as m0009 from '../../src/server/db/migrations/0009_scan_daily_stats.js';
@@ -46,7 +49,7 @@ const EXPECTED_TABLES = [
   'live_tier_windows', 'media_objects', 'model_images', 'model_pairs', 'model_wish_months', 'models', 'order_alert_settings', 'order_cases', 'order_events', 'orders', 'ownership',
   'ownership_certificates', 'ownership_transfers', 'preregistrations', 'product_status_history', 'products', 'reception_lines', 'receptions', 'release_answers', 'retailers', 'returns', 'revocations',
   'scan_daily_stats', 'scan_events', 'scan_reports', 'scan_tokens', 'segments', 'service_records', 'sessions', 'shipment_items', 'shipments', 'shipping_rates', 'shop_requests',
-  'sku_thresholds', 'skus', 'stock_corrections', 'stock_locations', 'stock_movements', 'supplier_order_lines', 'supplier_orders', 'supplier_returns', 'suppliers', 'test_entrants', 'test_run_entrants', 'test_runs', 'tier_grants', 'tracking_device_accounts', 'tracking_devices', 'tracking_state', 'view_daily_stats', 'warranties', 'warranty_claims', 'wish_months_counted',
+  'sku_thresholds', 'skus', 'stock_corrections', 'stock_locations', 'stock_movements', 'supplier_order_lines', 'supplier_orders', 'supplier_returns', 'suppliers', 'test_entrants', 'test_run_entrants', 'test_runs', 'tier_grants', 'tracking_device_accounts', 'tracking_devices', 'tracking_state', 'view_daily_stats', 'warranties', 'warranty_claims', 'wish_months_counted', 'worn_photos',
 ];
 
 describe('migrations', () => {
@@ -444,6 +447,12 @@ describe('migrations', () => {
     expect(has(/INDEX house_deliveries_message_idx ON public\.house_deliveries USING btree \(house_message_id\)$/)).toBe(true);
     expect(has(/INDEX house_deliveries_moment_idx ON public\.house_deliveries USING btree \(moment, delivered_at\)$/)).toBe(true);
     expect(has(/INDEX house_messages_due ON public\.house_messages USING btree \(status, send_at\)$/)).toBe(true);
+    // 0053: one live WORN photograph per piece; a model's published ones newest first; the review queue; an account's
+    // photographs over time.
+    expect(has(/UNIQUE INDEX worn_photos_live_once ON public\.worn_photos USING btree \(product_id\) WHERE \(status = ANY \(ARRAY\['PENDING'::text, 'PUBLISHED'::text\]\)\)$/)).toBe(true);
+    expect(has(/INDEX worn_photos_sheet ON public\.worn_photos USING btree \(model_id, published_at DESC\) WHERE \(status = 'PUBLISHED'::text\)$/)).toBe(true);
+    expect(has(/INDEX worn_photos_queue ON public\.worn_photos USING btree \(status, created_at\)$/)).toBe(true);
+    expect(has(/INDEX worn_photos_account_idx ON public\.worn_photos USING btree \(account_id, created_at\)$/)).toBe(true);
   });
 
   /**
@@ -2673,6 +2682,7 @@ describe('migrations', () => {
     await expect(run(`DELETE FROM credit_uses WHERE id = '${open}'`)).rejects.toSatisfy(isGuardViolation);
     // The down step refuses while a GIFT order or a credit use exists: neither can be removed, so this database stays at
     // 0027 (0047, 0046, 0045, 0044, 0043, 0042, 0041, 0040, 0039, 0038, 0037, 0036, 0035, 0034, 0033, 0032, 0031, 0030, 0029 and 0028, which hold nothing here, go down first).
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0051_emails']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0050_founding_list']);
@@ -2705,7 +2715,7 @@ describe('migrations', () => {
     await run(`DELETE FROM credit_uses`);
     await run(`ALTER TABLE credit_uses ENABLE TRIGGER credit_uses_no_delete`);
     await run(`DELETE FROM orders WHERE channel = 'GIFT'`);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0028_yearly_care', '0029_house_guarantee', '0030_account_sizes', '0031_model_pairs', '0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals', '0035_logistics_access', '0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0028_yearly_care', '0029_house_guarantee', '0030_account_sizes', '0031_model_pairs', '0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals', '0035_logistics_access', '0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
   });
 
   /** What names an object of 0028 in a snapshot: its table and its objects. */
@@ -2802,6 +2812,7 @@ describe('migrations', () => {
     await insert({ year: '2027' });
     // The down step refuses while a request or a YEARLY_CARE record exists: neither can be removed, so this database stays at
     // 0028 (0047, 0046, 0045, 0044, 0043, 0042, 0041, 0040, 0039, 0038, 0037, 0036, 0035, 0034, 0033, 0032, 0031, 0030 and 0029, which hold nothing here, go down first).
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0051_emails']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0050_founding_list']);
@@ -2833,7 +2844,7 @@ describe('migrations', () => {
     await run(`DELETE FROM care_requests`);
     await run(`ALTER TABLE care_requests ENABLE TRIGGER care_requests_no_delete`);
     await run(`DELETE FROM service_records WHERE type = 'YEARLY_CARE'`);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0029_house_guarantee', '0030_account_sizes', '0031_model_pairs', '0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals', '0035_logistics_access', '0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0029_house_guarantee', '0030_account_sizes', '0031_model_pairs', '0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals', '0035_logistics_access', '0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
   });
 
   /** What names an object of 0029 in a snapshot: its two tables, the entries' new columns and constraints, and its indexes. */
@@ -2984,6 +2995,7 @@ describe('migrations', () => {
     await check(order({ channel: `'SALON'`, drop_entry_id: 'NULL', drop_id: 'NULL', shop_request_id: `'${request}'`, piece: '2' }), 'a second piece of a salon order', 'orders_source');
     // The down step refuses while a DRAW order of a second piece exists: it cannot be removed, so this database stays at 0029
     // (0047, 0046, 0045, 0044, 0043, 0042, 0041, 0040, 0039, 0038, 0037, 0036, 0035, 0034, 0033, 0032, 0031 and 0030, which hold nothing here, go down first).
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0051_emails']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0050_founding_list']);
@@ -3014,7 +3026,7 @@ describe('migrations', () => {
     await run(`DELETE FROM drop_entries WHERE drop_id IN ('${drop}', '${other_drop}')`);
     await run(`DELETE FROM house_guarantees`);
     await run(`DELETE FROM guarantee_settings`);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes', '0031_model_pairs', '0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals', '0035_logistics_access', '0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes', '0031_model_pairs', '0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals', '0035_logistics_access', '0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
   });
 
   /** What names an object of 0030 in a snapshot: its table, the models' size kind, the SKUs' fit and the requests' size. */
@@ -3049,7 +3061,7 @@ describe('migrations', () => {
       expect(added.some((o) => c.test(o)), String(c)).toBe(true);
     }
     expect(added.filter((o) => o.startsWith('trigger '))).toEqual([]);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes', '0031_model_pairs', '0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals', '0035_logistics_access', '0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes', '0031_model_pairs', '0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals', '0035_logistics_access', '0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect(await snapshot()).toEqual(latest);
     // The trigger of the same name guards the size in 0030 and not in 0029: its function's arguments say so.
     const args = async () =>
@@ -3057,6 +3069,7 @@ describe('migrations', () => {
         await sql<{ args: string }>`SELECT encode(tgargs, 'escape') AS args FROM pg_trigger WHERE tgname = 'shop_requests_immutable_identity'`.execute(t.db)
       ).rows[0]!.args.split('\\000').filter(Boolean);
     expect(await args()).toEqual(['id', 'account_id', 'model_id', 'created_at', 'note', 'size_label']);
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0051_emails']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0050_founding_list']);
@@ -3081,7 +3094,7 @@ describe('migrations', () => {
     expect((await migrateDown(t.db)).reverted).toEqual(['0031_model_pairs']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0030_account_sizes']);
     expect(await args()).toEqual(['id', 'account_id', 'model_id', 'created_at', 'note']);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes', '0031_model_pairs', '0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals', '0035_logistics_access', '0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes', '0031_model_pairs', '0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals', '0035_logistics_access', '0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
   });
 
   it('0030: a size of each kind in its range and step, once per account and kind, cleared by deleting it; a model\'s size kind one of the four; a size\'s fit both or neither, from 1 to 1 000, never reversed; a request\'s size of 1 to 100 characters, trimmed, never changed', async () => {
@@ -3163,7 +3176,7 @@ describe('migrations', () => {
       expect(added.some((o) => c.test(o)), String(c)).toBe(true);
     }
     expect(added.filter((o) => o.startsWith('trigger '))).toEqual([]);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0031_model_pairs', '0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals', '0035_logistics_access', '0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0031_model_pairs', '0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals', '0035_logistics_access', '0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect(await snapshot()).toEqual(latest);
   });
 
@@ -3207,7 +3220,7 @@ describe('migrations', () => {
       'index CREATE INDEX ownership_account_started_idx ON public.ownership USING btree (account_id, started_at)',
     ]);
     expect(before.filter((o) => !withIt.includes(o))).toEqual([]);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals', '0035_logistics_access', '0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals', '0035_logistics_access', '0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect(await snapshot()).toEqual(latest);
   });
 
@@ -3242,7 +3255,7 @@ describe('migrations', () => {
     await sql`INSERT INTO categories (id, code, name) VALUES (25, 'Y', 'Sizes before') ON CONFLICT DO NOTHING`.execute(t.db);
     const model = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix, size_kind) VALUES (25, 'BEFORE', 'SIGNET RING', 'SZB-RG', 'RING') RETURNING id`.execute(t.db)).rows[0].id;
     await sql`INSERT INTO skus (model_id, size_label, code) VALUES (${model}, 'SIZE 52', 'SZB-RG-SIZE-52'), (${model}, '54', 'SZB-RG-54'), (${model}, NULL, 'SZB-RG')`.execute(t.db);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0033_model_sizes', '0034_claim_code_renewals', '0035_logistics_access', '0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0033_model_sizes', '0034_claim_code_renewals', '0035_logistics_access', '0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect(await snapshot()).toEqual(latest);
     expect((await sql<{ size_type: string | null; size_kind: string | null }>`SELECT size_type, size_kind FROM models WHERE id = ${model}`.execute(t.db)).rows).toEqual([{ size_type: null, size_kind: 'RING' }]);
     expect(
@@ -3326,7 +3339,7 @@ describe('migrations', () => {
       'trigger claim_code_renewals claim_code_renewals_no_truncate',
     ]);
     // Existing data: no row is written; every piece keeps its hash.
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0034_claim_code_renewals', '0035_logistics_access', '0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0034_claim_code_renewals', '0035_logistics_access', '0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect(await snapshot()).toEqual(latest);
     expect(Number((await sql<{ n: string }>`SELECT count(*) AS n FROM claim_code_renewals`.execute(t.db)).rows[0].n)).toBe(0);
   });
@@ -3373,7 +3386,7 @@ describe('migrations', () => {
       'trigger suppliers suppliers_no_truncate',
     ]);
     // Existing data: no row is written; every location keeps no address, every model and size no supplier.
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0035_logistics_access', '0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0035_logistics_access', '0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect(await snapshot()).toEqual(latest);
     for (const table of ['admin_user_locations', 'suppliers']) {
       expect(Number((await sql<{ n: string }>`SELECT count(*) AS n FROM ${sql.table(table)}`.execute(t.db)).rows[0].n), table).toBe(0);
@@ -3427,6 +3440,7 @@ describe('migrations', () => {
     await run(`INSERT INTO skus (model_id, size_label, code, supplier_id) VALUES ('${model}', '52', 'SUP-RG-52', '${supplier}')`);
     await expect(run(`UPDATE models SET supplier_id = '00000000-0000-4000-8000-000000000000' WHERE id = '${model}'`)).rejects.toSatisfy(isForeignKeyViolation);
     // The down step refuses while a LOGISTICS login exists, and names the count (0047, 0046, 0045, 0044, 0043, 0042, 0041, 0040, 0039, 0038, 0037 and 0036, which hold nothing here, go down first).
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0051_emails']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0050_founding_list']);
@@ -3456,7 +3470,7 @@ describe('migrations', () => {
     await run(`DELETE FROM stock_locations WHERE id = '${location}'`);
     await run(`DELETE FROM admin_users WHERE id IN ('${agent}', '${admin}')`);
     expect((await migrateDown(t.db)).reverted).toEqual(['0035_logistics_access']);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0035_logistics_access', '0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0035_logistics_access', '0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
   });
 
   /** What names an object of 0036 in a snapshot: its seven tables, the ledger's reception line and RECEIVED, the pieces' reception and entry. */
@@ -3533,7 +3547,7 @@ describe('migrations', () => {
     await move(-1, 'ADJUSTED', null, '2026-09-21T10:00:00Z');
     await move(1, 'PRODUCED', made, '2026-09-22T10:00:00Z');
     await move(3, 'ADJUSTED', null, '2026-09-23T10:00:00Z');
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect(await snapshot()).toEqual(latest);
     const entered = async (id: string) => (await sql<{ at: Date | null; line: string | null }>`SELECT stock_entered_at AS at, reception_line_id AS line FROM products WHERE id = ${id}`.execute(t.db)).rows[0];
     expect(await entered(made)).toEqual({ at: new Date('2026-09-20T10:00:00Z'), line: null });
@@ -3652,6 +3666,7 @@ describe('migrations', () => {
     }
     // The down step refuses while any supplier order, reception or correction exists, and names the counts (0047 to 0037,
     // which hold nothing here, go down first).
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0051_emails']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0050_founding_list']);
@@ -3696,7 +3711,7 @@ describe('migrations', () => {
     await run(`ALTER TABLE suppliers ENABLE TRIGGER suppliers_no_delete`);
     await run(`DELETE FROM admin_users WHERE id = '${admin}'`);
     expect((await migrateDown(t.db)).reverted).toEqual(['0036_supplier_orders']);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
   });
 
   /** What names an object of 0037 in a snapshot: its three tables, the orders' new columns and constraints, the queue's index. */
@@ -3762,7 +3777,7 @@ describe('migrations', () => {
     ).rows[0].id;
     const bench = (await sql<{ id: string }>`INSERT INTO bench_items (order_id, sku_id, location_id, product_id, status, started_at) VALUES (${order}, ${sku}, ${location}, ${identity}, 'IN_PROGRESS', now()) RETURNING id`.execute(t.db)).rows[0].id;
     await sql`INSERT INTO order_alert_settings (id, ready_days) VALUES (1, 3) ON CONFLICT (id) DO UPDATE SET ready_days = 3`.execute(t.db);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect(await snapshot()).toEqual(latest);
     expect((await sql<{ reservation: string; queue_first: boolean }>`SELECT reservation, queue_first FROM orders WHERE id = ${order}`.execute(t.db)).rows[0]).toEqual({ reservation: 'AWAITING', queue_first: false });
     expect((await sql<{ status: string; cancelled: boolean }>`SELECT status, cancelled_at IS NOT NULL AS cancelled FROM bench_items WHERE id = ${bench}`.execute(t.db)).rows[0]).toEqual({ status: 'CANCELLED', cancelled: true });
@@ -3876,6 +3891,7 @@ describe('migrations', () => {
     }
     // The down step refuses while an AWAITING or EXCHANGE order, a shipment or a case exists, and names the counts (0047
     // to 0038, which hold nothing here, go down first).
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0051_emails']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0050_founding_list']);
@@ -3913,7 +3929,7 @@ describe('migrations', () => {
       await run(q);
     }
     expect((await migrateDown(t.db)).reverted).toEqual(['0037_fulfilment']);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0037_fulfilment', '0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
   });
 
   /** What names an object of 0038 in a snapshot: the entries' size, its foreign key and its index. */
@@ -3943,10 +3959,11 @@ describe('migrations', () => {
         VALUES (${model}, 'ONE POOL', 3, now() + interval '1 day', now() + interval '2 days', ${`v1.${'A'.repeat(16)}.${'B'.repeat(64)}`}, ${new Uint8Array(32)}, ${admin}, now()) RETURNING id`.execute(t.db)
     ).rows[0].id;
     const entry = (await sql<{ id: string }>`INSERT INTO drop_entries (drop_id, account_id) VALUES (${drop}, ${account}) RETURNING id`.execute(t.db)).rows[0].id;
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect(await snapshot()).toEqual(latest);
     expect((await sql<{ size_id: string | null }>`SELECT size_id FROM drop_entries WHERE id = ${entry}`.execute(t.db)).rows[0].size_id).toBeNull();
     // A published draw without sizes does not hold the down step.
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0051_emails']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0050_founding_list']);
@@ -3962,7 +3979,7 @@ describe('migrations', () => {
     expect((await migrateDown(t.db)).reverted).toEqual(['0040_account_profiles']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0039_order_delivery']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0038_draw_sizes']);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     await sql`DELETE FROM drop_entries WHERE id = ${entry}`.execute(t.db);
     await sql`DELETE FROM drops WHERE id = ${drop}`.execute(t.db);
     await sql`DELETE FROM models WHERE id = ${model}`.execute(t.db);
@@ -3996,6 +4013,7 @@ describe('migrations', () => {
     await expect(run(`DELETE FROM drop_sizes WHERE id = '${size}'`)).rejects.toSatisfy(isForeignKeyViolation);
     // The down step refuses while a published draw has sizes, and names the count; the draft with sizes does not count
     // (0047 to 0039, which hold nothing here, go down first).
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0051_emails']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0050_founding_list']);
@@ -4015,7 +4033,7 @@ describe('migrations', () => {
     await run(`DELETE FROM drop_entries WHERE id = '${entry}'`);
     await run(`DELETE FROM drop_sizes WHERE drop_id = '${drop}'`);
     expect((await migrateDown(t.db)).reverted).toEqual(['0038_draw_sizes']);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0038_draw_sizes', '0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     for (const q of [`DELETE FROM drop_sizes WHERE drop_id = '${other}'`, `DELETE FROM drops WHERE id IN ('${drop}', '${other}')`, `DELETE FROM models WHERE id = '${model}'`, `DELETE FROM accounts WHERE id = '${account}'`, `DELETE FROM admin_users WHERE id = '${admin}'`]) {
       await run(q);
     }
@@ -4097,7 +4115,7 @@ describe('migrations', () => {
          VALUES ('CREDIT_NOTE', 2026, 990001, '${parent}', '${invoice}', '{}', '{}', '[{"kind":"PIECE","label":"DELIVERY","amountMinor":1000}]', 'EUR', 1000, 1000) RETURNING id`,
       )
     ).id;
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect(await snapshot()).toEqual(latest);
     const orderRow = (id: string) =>
       one<Record<string, unknown>>(`SELECT buyer_name, buyer_address, buyer_country, buyer_phone, address_by, address_at, address_changed_at, engraving_text, engraving_minor, engraving_by FROM orders WHERE id = '${id}'`);
@@ -4116,6 +4134,7 @@ describe('migrations', () => {
     const bare = (await one<{ id: string }>(`INSERT INTO orders (channel, shop_request_id, account_id, model_id, location_id) VALUES ('SALON', '${(await one<{ id: string }>(`INSERT INTO shop_requests (account_id, model_id, status, handled_at, outcome) VALUES ('${account}', '${model}', 'CLOSED', now(), 'ACCEPTED') RETURNING id`)).id}', '${account}', '${model}', '${location}') RETURNING id`)).id;
     expect(await orderRow(bare)).toMatchObject({ address_by: null, address_at: null });
     // Down and up again with that data (no supplementary invoice, no credit note for single lines): it passes.
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0051_emails']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0050_founding_list']);
@@ -4130,7 +4149,7 @@ describe('migrations', () => {
     expect((await migrateDown(t.db)).reverted).toEqual(['0041_account_wishes']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0040_account_profiles']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0039_order_delivery']);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect((await one<{ credit_scope: string | null }>(`SELECT credit_scope FROM invoices WHERE id = '${credit}'`)).credit_scope).toBe('FULL');
     // Cleared by hand for the roll-backs that follow (an invoice is never deleted).
     await run(`ALTER TABLE invoices DISABLE TRIGGER invoices_immutable`);
@@ -4245,6 +4264,7 @@ describe('migrations', () => {
 
     // The down step refuses while a supplementary invoice or a credit note for single lines exists, and names the counts.
     // 0047, 0046, 0045, 0044, 0043, 0042, 0041 and 0040, which hold nothing here, go down first.
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0051_emails']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0050_founding_list']);
@@ -4271,7 +4291,7 @@ describe('migrations', () => {
     await run(`DELETE FROM orders WHERE id = '${follower}'`);
     await run(`DELETE FROM orders WHERE id = '${parent}'`);
     expect((await migrateDown(t.db)).reverted).toEqual(['0039_order_delivery']);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0039_order_delivery', '0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     for (const q of [
       `DELETE FROM shop_requests WHERE account_id = '${account}'`,
       `DELETE FROM stock_locations WHERE id = '${location}'`,
@@ -4325,7 +4345,7 @@ describe('migrations', () => {
       'trigger heard_options heard_options_touch_updated_at',
     ]);
     // Existing data: no row is written, no account is changed.
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect(await snapshot()).toEqual(latest);
     for (const table of ['heard_options', 'account_profiles', 'account_tastes']) {
       expect(Number((await sql<{ n: string }>`SELECT count(*) AS n FROM ${sql.table(table)}`.execute(t.db)).rows[0].n), table).toBe(0);
@@ -4434,6 +4454,7 @@ describe('migrations', () => {
     await run(`DELETE FROM account_tastes`);
     await run(`DELETE FROM account_profiles`);
     await run(`DELETE FROM heard_options`);
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0051_emails']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0050_founding_list']);
@@ -4447,7 +4468,7 @@ describe('migrations', () => {
     expect((await migrateDown(t.db)).reverted).toEqual(['0042_collector_views']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0041_account_wishes']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0040_account_profiles']);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0040_account_profiles', '0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     await run(`DELETE FROM accounts WHERE id IN ('${account}', '${other}')`);
   });
 
@@ -4480,7 +4501,7 @@ describe('migrations', () => {
     }
     expect(added.filter((o) => o.startsWith('trigger '))).toEqual(['trigger account_wishes account_wishes_immutable']);
     // Existing data: no row is written.
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect(await snapshot()).toEqual(latest);
     for (const table of ['account_wishes', 'model_wish_months', 'wish_months_counted']) {
       expect(Number((await sql<{ n: string }>`SELECT count(*) AS n FROM ${sql.table(table)}`.execute(t.db)).rows[0].n), table).toBe(0);
@@ -4549,6 +4570,7 @@ describe('migrations', () => {
     await run(`DELETE FROM wish_months_counted`);
     await run(`DELETE FROM model_wish_months`);
     await run(`DELETE FROM account_wishes`);
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0051_emails']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0050_founding_list']);
@@ -4561,7 +4583,7 @@ describe('migrations', () => {
     expect((await migrateDown(t.db)).reverted).toEqual(['0043_acquisition']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0042_collector_views']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0041_account_wishes']);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0041_account_wishes', '0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     await run(`DELETE FROM models WHERE id IN ('${model}', '${second}')`);
     await run(`DELETE FROM accounts WHERE id IN ('${account}', '${other}')`);
   });
@@ -4637,7 +4659,7 @@ describe('migrations', () => {
         .map((m) => m[1])
         .sort();
     // Up again: the database as it was, and no row written (tracking_state's row is the first boot's, never the migration's).
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect(await snapshot()).toEqual(latest);
     for (const [constraint, values] of [
       ['tracking_devices_kind_check', DEVICE_KINDS],
@@ -4817,6 +4839,7 @@ describe('migrations', () => {
 
     // Down and up again: the ten tables go and come back empty.
     for (const table of TABLES_0042) await run(`DELETE FROM ${table}`);
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0051_emails']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0050_founding_list']);
@@ -4828,7 +4851,7 @@ describe('migrations', () => {
     expect((await migrateDown(t.db)).reverted).toEqual(['0044_client_notes']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0043_acquisition']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0042_collector_views']);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0042_collector_views', '0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     await run(`DELETE FROM accounts WHERE id IN ('${account}', '${other}')`);
   });
 
@@ -4910,7 +4933,7 @@ describe('migrations', () => {
         .map((m) => m[1])
         .sort();
     // Up again: the database as it was, and no row written (the presets and the state row are the first boot's).
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect(await snapshot()).toEqual(latest);
     for (const [constraint, values] of [
       ['links_destination_check', LINK_DESTINATIONS],
@@ -5102,6 +5125,7 @@ describe('migrations', () => {
     await run(`DELETE FROM acquisition_sources`);
     await run(`DELETE FROM links`);
     await run(`DELETE FROM link_channels`);
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0051_emails']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0050_founding_list']);
@@ -5112,7 +5136,7 @@ describe('migrations', () => {
     expect((await migrateDown(t.db)).reverted).toEqual(['0045_birthday_credit']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0044_client_notes']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0043_acquisition']);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0043_acquisition', '0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect((await one<{ n: number }>(`SELECT count(*)::int AS n FROM link_channels`)).n).toBe(0);
     await run(`DELETE FROM tracking_devices WHERE id = ${device}`);
     await run(`DELETE FROM models WHERE id = '${model2}'`);
@@ -5157,7 +5181,7 @@ describe('migrations', () => {
     }
     expect(added.filter((o) => o.startsWith('trigger '))).toEqual(['trigger account_notes account_notes_immutable']);
     // Up again: the database as it was, orbes_fold IMMUTABLE and STRICT, and no row written.
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect(await snapshot()).toEqual(latest);
     expect(await foldFunctions()).toEqual([{ volatile: 'i', strict: true }]);
     for (const table of ['account_notes', 'account_tags']) {
@@ -5218,6 +5242,7 @@ describe('migrations', () => {
     // Down and up again: the two tables go and come back empty.
     await run(`DELETE FROM account_tags`);
     await run(`DELETE FROM account_notes`);
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0051_emails']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0050_founding_list']);
@@ -5227,7 +5252,7 @@ describe('migrations', () => {
     expect((await migrateDown(t.db)).reverted).toEqual(['0046_engagement_scores']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0045_birthday_credit']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0044_client_notes']);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0044_client_notes', '0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect((await one<{ n: number }>(`SELECT count(*)::int AS n FROM account_notes`)).n).toBe(0);
     await run(`DELETE FROM accounts WHERE id IN ('${account}', '${other}')`);
     await run(`DELETE FROM admin_users WHERE id = '${admin}'`);
@@ -5275,7 +5300,7 @@ describe('migrations', () => {
     expect(added.filter((o) => o.startsWith('trigger '))).toEqual([]);
     expect(await grantGuard()).toEqual(['id', 'account_id', 'tier', 'kind', 'granted_at', 'amount_minor', 'currency', 'expires_at']);
     // Up again: the database as it was, and no row written.
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect(await snapshot()).toEqual(latest);
     expect(await grantGuard()).toEqual(['id', 'account_id', 'tier', 'kind', 'granted_at', 'amount_minor', 'currency', 'expires_at', 'birthday_on']);
     expect(Number((await sql<{ n: string }>`SELECT count(*) AS n FROM tier_grants WHERE kind = 'BIRTHDAY'`.execute(t.db)).rows[0].n)).toBe(0);
@@ -5340,6 +5365,7 @@ describe('migrations', () => {
 
     // The down step refuses while a BIRTHDAY grant exists, naming the count; this database stays at 0045 (0047 and 0046,
     // which hold nothing here, go down first).
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0051_emails']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0050_founding_list']);
@@ -5354,7 +5380,7 @@ describe('migrations', () => {
     await run(`DELETE FROM tier_grants WHERE account_id IN ('${account}', '${other}')`);
     await run(`ALTER TABLE tier_grants ENABLE TRIGGER tier_grants_no_delete`);
     expect((await migrateDown(t.db)).reverted).toEqual(['0045_birthday_credit']);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0045_birthday_credit', '0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     await run(`DELETE FROM accounts WHERE id IN ('${account}', '${other}')`);
   });
 
@@ -5411,7 +5437,7 @@ describe('migrations', () => {
     expect(literals('account_scores_other_currencies_check').sort()).toEqual([...SCORE_OTHER_CURRENCIES].sort());
     expect([...SCORE_OTHER_CURRENCIES].sort()).toEqual(HOUSE_CURRENCIES.filter((c) => c !== 'EUR').sort());
     // Up again: the database as it was, and no row written.
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect(await snapshot()).toEqual(latest);
     for (const table of ['account_scores', 'engagement_runs']) {
       expect(Number((await sql<{ n: string }>`SELECT count(*) AS n FROM ${sql.table(table)}`.execute(t.db)).rows[0].n), table).toBe(0);
@@ -5505,6 +5531,7 @@ describe('migrations', () => {
     expect(await one(`SELECT day, formula, accounts, changed, bands, duration_ms FROM engagement_runs`)).toEqual({ day: '2026-11-02', formula: 1, accounts: 8, changed: 3, bands: [4, 0, 1, 0, 0, 2, 0, 0, 0, 1], duration_ms: 412 });
 
     // Down with its rows (derived data: nothing refuses) and up again: the two tables come back empty.
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0051_emails']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0050_founding_list']);
@@ -5512,7 +5539,7 @@ describe('migrations', () => {
     expect((await migrateDown(t.db)).reverted).toEqual(['0048_orbes_care']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0047_collector_history']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0046_engagement_scores']);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0046_engagement_scores', '0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect((await one<{ n: number }>(`SELECT (SELECT count(*) FROM account_scores)::int + (SELECT count(*) FROM engagement_runs)::int AS n`)).n).toBe(0);
     await run(`DELETE FROM accounts WHERE id IN ('${account}', '${other}')`);
   });
@@ -5548,7 +5575,7 @@ describe('migrations', () => {
     // One index (the key); derived data: no trigger.
     expect(added.filter((o) => o.startsWith('index '))).toHaveLength(1);
     expect(added.filter((o) => o.startsWith('trigger '))).toEqual([]);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect(await snapshot()).toEqual(latest);
     expect(Number((await sql<{ n: string }>`SELECT count(*) AS n FROM collector_history`.execute(t.db)).rows[0].n)).toBe(0);
   });
@@ -5581,13 +5608,14 @@ describe('migrations', () => {
     await expect(row({})).rejects.toSatisfy((e) => isUniqueViolation(e, 'collector_history_pkey'));
     await expect(run(`DELETE FROM accounts WHERE id = '${account}'`)).rejects.toSatisfy((e) => isForeignKeyViolation(e));
     // Down with its rows (derived data: nothing refuses) and up again: the table comes back empty.
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0051_emails']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0050_founding_list']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0049_live_pace']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0048_orbes_care']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0047_collector_history']);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0047_collector_history', '0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect((await one<{ n: number }>(`SELECT count(*)::int AS n FROM collector_history`)).n).toBe(0);
     await run(`DELETE FROM accounts WHERE id = '${account}'`);
   });
@@ -5675,7 +5703,7 @@ describe('migrations', () => {
     expect(added.filter((o) => o.startsWith('trigger warranty_claims '))).toEqual(['trigger warranty_claims warranty_claims_immutable', 'trigger warranty_claims warranty_claims_no_delete']);
     // Its function dropped with its trigger; up again: the database as it was, and no row written.
     expect(await fn()).toBe(0);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect(await snapshot()).toEqual(latest);
     expect(await fn()).toBe(1);
     expect(await claimGuard()).toEqual(['id', 'product_id', 'root_product_id', 'account_id', 'conversation_id', 'basis', 'opened_at', 'opened_by', 'continues_claim_id']);
@@ -5896,6 +5924,7 @@ describe('migrations', () => {
     // The down step refuses while a claim or a WARRANTY grant exists, naming the counts; this database stays at 0048.
     const claims = (await one<{ n: number }>(`SELECT count(*)::int AS n FROM warranty_claims`)).n;
     expect(claims).toBe(14);
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0051_emails']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0050_founding_list']);
@@ -5911,7 +5940,7 @@ describe('migrations', () => {
     await run(`DELETE FROM tier_grants WHERE account_id = '${account}'`);
     await run(`ALTER TABLE tier_grants ENABLE TRIGGER tier_grants_no_delete`);
     expect((await migrateDown(t.db)).reverted).toEqual(['0048_orbes_care']);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     await run(`DELETE FROM service_records WHERE product_id IN (${pieces.map((p) => `'${p}'`).join(', ')})`);
     await run(`DELETE FROM client_conversations WHERE id = '${conversation}'`);
   });
@@ -5930,6 +5959,7 @@ describe('migrations', () => {
     expect(at(/^ALTER TABLE warranties DROP COLUMN IF EXISTS lifetime$/)).toBeLessThan(at(/^ALTER TABLE models DROP COLUMN IF EXISTS warranty_lifetime$/));
 
     // The data of before, at 0047.
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0051_emails']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0050_founding_list']);
@@ -5962,7 +5992,7 @@ describe('migrations', () => {
     const before = (await ends()).map((w) => ({ product_id: w.product_id, duration_months: w.duration_months, end_date: w.end_date }));
 
     // Up: every model Lifetime; every warranty not VOID lifetime with no end date, its months kept; VOID untouched.
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect((await one<{ n: number }>(`SELECT count(*)::int AS n FROM models WHERE NOT warranty_lifetime`)).n).toBe(0);
     const w = (p: string) => one<{ lifetime: boolean; duration_months: number; end_date: string | null; voided: boolean }>(`SELECT lifetime, duration_months, end_date::text AS end_date, voided_at IS NOT NULL AS voided FROM warranties WHERE product_id = '${p}'`);
     expect(await w(pieces[0])).toEqual({ lifetime: true, duration_months: 1, end_date: null, voided: false });
@@ -6006,6 +6036,7 @@ describe('migrations', () => {
     // Down, in its order: each started lifetime warranty's end date given back from its months (February's last day, the
     // extension kept, the expired one expired again), the not-started one without, the VOID one as it was; the place and
     // PLATINE's 1 given back.
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0051_emails']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0050_founding_list']);
@@ -6022,7 +6053,7 @@ describe('migrations', () => {
     expect(await one(`SELECT care_pieces_platine FROM club_program_settings WHERE id = 1`)).toEqual({ care_pieces_platine: 1 });
 
     // Up again, then the rows of this test taken away.
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0048_orbes_care', '0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     await run(`DELETE FROM service_records WHERE id IN ('${careAtelier}', '${careTyped}', '${inspection}')`);
     if (had.n === 0) await run(`DELETE FROM club_program_settings`);
   });
@@ -6061,7 +6092,7 @@ describe('migrations', () => {
     ]);
     expect(added.filter((o) => o.startsWith('index '))).toHaveLength(1);
     expect(added.filter((o) => o.startsWith('trigger '))).toEqual([]);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect(await snapshot()).toEqual(latest);
   });
 
@@ -6140,7 +6171,8 @@ describe('migrations', () => {
     await check(run(`UPDATE live_entries SET admitted_at = NULL WHERE id = '${first.id}'`), 'the time taken away, its batch kept', 'live_entries_admitted');
 
     // Down refuses while a release has a pace or an entry was admitted by a batch, naming the counts; this database stays at 0049.
-    // 0052, 0051 and 0050, which hold nothing here, go down first.
+    // 0053, 0052, 0051 and 0050, which hold nothing here, go down first.
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0051_emails']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0050_founding_list']);
@@ -6151,7 +6183,7 @@ describe('migrations', () => {
     // Without a pace (taken away, as only a test does) and with batch 0 admissions only, it passes; the admissions go with their columns.
     await set(`pace_batch = NULL, pace_minutes = NULL, pace_next_at = NULL, pace_paused_at = NULL, pace_batches = 0`);
     expect((await migrateDown(t.db)).reverted).toEqual(['0049_live_pace']);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0049_live_pace', '0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect(await one(`SELECT count(*)::int AS n FROM live_entries WHERE admitted_at IS NOT NULL`)).toEqual({ n: 0 });
     for (const id of [draw, live, child, unpaced]) expect(await pace(id)).toEqual({ pace_batch: null, pace_minutes: null, pace_paused_at: null, pace_next_at: null, pace_batches: 0 });
 
@@ -6221,7 +6253,7 @@ describe('migrations', () => {
     expect(added.filter((o) => o.startsWith('constraint preregistrations '))).toHaveLength(10);
     expect(added.filter((o) => o.startsWith('index '))).toHaveLength(4);
     expect(added.filter((o) => o.startsWith('trigger '))).toEqual(['trigger preregistrations preregistrations_immutable_identity']);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
     expect(await snapshot()).toEqual(latest);
   });
 
@@ -6305,7 +6337,8 @@ describe('migrations', () => {
     await link({});
 
     // Down refuses while a pre-registration, a LANDING link or a draw with a segment exists, naming the counts (the LIVE
-    // release's segment does not count); this database stays at 0050 (0052 and 0051, which hold nothing here, go down first).
+    // release's segment does not count); this database stays at 0050 (0053, 0052 and 0051, which hold nothing here, go down first).
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0051_emails']);
     await expect(migrateDown(t.db)).rejects.toThrow(/0050_founding_list cannot be rolled back: 2 pre-registrations, 1 LANDING links and 1 draws with a segment exist/);
@@ -6319,7 +6352,7 @@ describe('migrations', () => {
     // At 0049 again: no LANDING, and a draw's segment refused, as 0043 and 0023 held them.
     await check(link({}), 'LANDING at 0049', 'links_destination_check');
     await check(set(`access_segment_id = '${segment}'`), 'a draw\'s segment at 0049', 'drops_draw_plus');
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0050_founding_list', '0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0050_founding_list', '0051_emails', '0052_house_messages', '0053_worn']);
 
     // The rows of this test taken away.
     await run(`DELETE FROM drops WHERE id = '${child}'`);
@@ -6421,7 +6454,7 @@ describe('migrations', () => {
       'email_outbox_account_idx', 'email_outbox_dedupe_key', 'email_outbox_due', 'email_outbox_pkey', 'email_outbox_preregistration_idx', 'email_preferences_pkey', 'email_state_pkey', 'email_templates_pkey', 'email_templates_updated_by_idx',
     ]);
     expect(added.filter((o) => o.startsWith('trigger '))).toEqual(['trigger email_outbox email_outbox_immutable_content']);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0051_emails', '0052_house_messages', '0053_worn']);
     expect(await snapshot()).toEqual(latest);
   });
 
@@ -6545,7 +6578,8 @@ describe('migrations', () => {
     await expect(code(other, { created_by: `'${admin}'` })).rejects.toSatisfy((e) => isUniqueViolation(e, 'account_recovery_codes_single_open'));
 
     // Down refuses while a template, an email, a preference or a code sent by email exists, naming the counts; the state
-    // row does not count; this database stays at 0051 (0052, which holds nothing here, goes down first).
+    // row does not count; this database stays at 0051 (0053 and 0052, which hold nothing here, go down first).
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
     await expect(migrateDown(t.db)).rejects.toThrow(/0051_emails cannot be rolled back: 2 email templates, 3 emails, 1 email preferences and 1 recovery codes sent by email exist/);
     expect((await migrationStatus(t.db)).find((m) => m.name === '0051_emails')?.executedAt).toBeDefined();
@@ -6561,7 +6595,7 @@ describe('migrations', () => {
     // At 0050 again: the Client Services code kept with its ADMIN, and a code by no one refused, as 0005 held it.
     expect(await one(`SELECT created_by FROM account_recovery_codes WHERE account_id = '${account}'`)).toEqual({ created_by: admin });
     await nullRefused(code(other), 'a code by no one at 0050');
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0051_emails', '0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0051_emails', '0052_house_messages', '0053_worn']);
     expect(await one(`SELECT issued_via FROM account_recovery_codes WHERE account_id = '${account}'`)).toEqual({ issued_via: 'STAFF' });
 
     // The rows of this test taken away.
@@ -6691,7 +6725,7 @@ describe('migrations', () => {
     // Up again: a delivery's guard holds every column but read_at; a sent message's every column but its segment.
     const args = async (name: string) =>
       (await sql<{ args: string }>`SELECT encode(tgargs, 'escape') AS args FROM pg_trigger WHERE tgname = ${name}`.execute(t.db)).rows[0]!.args.split('\\000').filter(Boolean);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0052_house_messages', '0053_worn']);
     expect(await snapshot()).toEqual(latest);
     expect(await args('house_deliveries_immutable')).toEqual(['id', 'account_id', 'source', 'moment', 'house_message_id', 'title', 'body', 'piece_ref', 'dedupe_key', 'delivered_at']);
     expect((await args('house_messages_sent_immutable')).sort()).toEqual(columns('house_messages').map((c) => c.split(' ')[0]).filter((c) => c !== 'audience_segment_id').sort());
@@ -6854,6 +6888,8 @@ describe('migrations', () => {
     await expect(run(`TRUNCATE house_deliveries`)).rejects.toSatisfy(isGuardViolation);
 
     // Down refuses while a setting, a message or a delivery exists, naming the counts; this database stays at 0052.
+    // 0053, which holds nothing here, goes down first.
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
     await expect(migrateDown(t.db)).rejects.toThrow(/0052_house_messages cannot be rolled back: 2 moment settings, 2 house messages and 3 house deliveries exist/);
     expect((await migrationStatus(t.db)).find((m) => m.name === '0052_house_messages')?.executedAt).toBeDefined();
     await run(`DELETE FROM house_moment_settings`);
@@ -6867,10 +6903,250 @@ describe('migrations', () => {
     await run(`DELETE FROM house_messages`);
     await run(`ALTER TABLE house_messages ENABLE TRIGGER house_messages_no_delete`);
     expect((await migrateDown(t.db)).reverted).toEqual(['0052_house_messages']);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0052_house_messages']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0052_house_messages', '0053_worn']);
 
     // The rows of this test taken away.
     await run(`DELETE FROM segments WHERE id = '${other}'`);
+    await run(`DELETE FROM accounts WHERE id = '${account}'`);
+    await run(`DELETE FROM admin_users WHERE id = '${admin}'`);
+  });
+
+  it('0053 adds WORN (worn_photos, its indexes and guards), and nothing else; down restores 0052 exactly, and up again', async () => {
+    const latest = await snapshot();
+    const { with: withIt, without: before } = await rollBackTo('0053_worn');
+    // A PostgreSQL that lists NOT NULL as a constraint (PGlite's does) names the new table's too, as in 0048's test.
+    const notNull = (o: string) => /^constraint \S+ \S+_not_null NOT NULL \w+$/.test(o);
+    const ofTable = (o: string) => /\bworn_photos\b/.test(o);
+    const added = withIt.filter((o) => !before.includes(o) && !notNull(o));
+    const removed = before.filter((o) => !withIt.includes(o) && !notNull(o));
+    expect(before.filter(ofTable)).toEqual([]);
+    // Nothing outside the table changed.
+    expect(removed).toEqual([]);
+    expect(added.filter((o) => !ofTable(o))).toEqual([]);
+    // The statuses: schema.ts's WORN_STATUSES; the refusals: WORN_REFUSALS; the types: MEDIA_MIME_TYPES.
+    const literals = (name: string) => [...added.find((o) => o.split(' ')[2] === name)!.matchAll(/'([A-Za-z_/]+)'::text/g)].map((m) => m[1]);
+    expect(literals('worn_photos_status_check')).toEqual([...WORN_STATUSES]);
+    expect(literals('worn_photos_refusal_check')).toEqual([...WORN_REFUSALS]);
+    expect(literals('worn_photos_photo_mime_check')).toEqual([...MEDIA_MIME_TYPES]);
+    // Its columns.
+    expect(added.filter((o) => o.startsWith('table worn_photos ')).map((o) => o.split(' ').slice(2).join(' ')).sort()).toEqual([
+      'account_id uuid NO ',
+      'consent_at timestamp with time zone NO ',
+      'consent_version text NO ',
+      'created_at timestamp with time zone NO now()',
+      'credit_country character NO ',
+      'credit_first_name text NO ',
+      'credit_instagram text YES ',
+      'ended_at timestamp with time zone YES ',
+      'height integer YES ',
+      'id uuid NO gen_random_uuid()',
+      'model_id uuid NO ',
+      'ownership_id uuid NO ',
+      'photo bytea YES ',
+      'photo_mime text YES ',
+      'photo_sha256 text YES ',
+      'product_id uuid NO ',
+      'published_at timestamp with time zone YES ',
+      'refusal text YES ',
+      'reviewed_at timestamp with time zone YES ',
+      'reviewed_by uuid YES ',
+      'status text NO \'PENDING\'::text',
+      'width integer YES ',
+    ]);
+    // Its constraints, indexes and guards.
+    for (const c of [
+      /^constraint worn_photos worn_photos_pkey PRIMARY KEY \(id\)$/,
+      /^constraint worn_photos worn_photos_product_id_fkey FOREIGN KEY \(product_id\) REFERENCES products\(id\) ON DELETE RESTRICT$/,
+      /^constraint worn_photos worn_photos_ownership_id_fkey FOREIGN KEY \(ownership_id\) REFERENCES ownership\(id\) ON DELETE RESTRICT$/,
+      /^constraint worn_photos worn_photos_account_id_fkey FOREIGN KEY \(account_id\) REFERENCES accounts\(id\) ON DELETE RESTRICT$/,
+      /^constraint worn_photos worn_photos_model_id_fkey FOREIGN KEY \(model_id\) REFERENCES models\(id\) ON DELETE RESTRICT$/,
+      /^constraint worn_photos worn_photos_reviewed_by_fkey FOREIGN KEY \(reviewed_by\) REFERENCES admin_users\(id\) ON DELETE RESTRICT$/,
+      /^constraint worn_photos worn_photos_photo_check CHECK .*1048576/,
+      /^constraint worn_photos worn_photos_photo_sha256_check CHECK /,
+      /^constraint worn_photos worn_photos_width_check CHECK .*4096/,
+      /^constraint worn_photos worn_photos_height_check CHECK .*4096/,
+      /^constraint worn_photos worn_photos_credit_first_name_check CHECK .*50/,
+      /^constraint worn_photos worn_photos_credit_country_check CHECK /,
+      /^constraint worn_photos worn_photos_credit_instagram_check CHECK /,
+      /^constraint worn_photos worn_photos_consent_version_check CHECK /,
+      /^constraint worn_photos worn_photos_photo CHECK /,
+      /^constraint worn_photos worn_photos_sha256_consistent CHECK \(\(photo_sha256 = encode\(sha256\(photo\), 'hex'::text\)\)\)$/,
+      /^constraint worn_photos worn_photos_refusal CHECK /,
+      /^constraint worn_photos worn_photos_reviewed CHECK /,
+      /^constraint worn_photos worn_photos_published CHECK /,
+      /^constraint worn_photos worn_photos_ended CHECK /,
+    ]) {
+      expect(added.some((o) => c.test(o)), String(c)).toBe(true);
+    }
+    expect(added.filter((o) => o.startsWith('constraint worn_photos '))).toHaveLength(23);
+    expect(added.filter((o) => o.startsWith('index ')).map((o) => o.split(' ').find((w, i, all) => all[i - 1] === 'INDEX')).sort()).toEqual([
+      'worn_photos_account_idx', 'worn_photos_live_once', 'worn_photos_model_idx', 'worn_photos_ownership_idx', 'worn_photos_pkey', 'worn_photos_product_idx', 'worn_photos_queue',
+      'worn_photos_reviewed_by_idx', 'worn_photos_sheet',
+    ]);
+    expect(added.filter((o) => o.startsWith('trigger ')).sort()).toEqual([
+      'trigger worn_photos worn_photos_forward',
+      'trigger worn_photos worn_photos_immutable_identity',
+      'trigger worn_photos worn_photos_no_delete',
+      'trigger worn_photos worn_photos_no_truncate',
+      'trigger worn_photos worn_photos_photo_kept',
+      'trigger worn_photos worn_photos_published_kept',
+      'trigger worn_photos worn_photos_settled_immutable',
+    ]);
+    // Up again: the identity's guard holds the piece, the sender, the credit and the consent; a settled row's every column.
+    const args = async (name: string) =>
+      (await sql<{ args: string }>`SELECT encode(tgargs, 'escape') AS args FROM pg_trigger WHERE tgname = ${name}`.execute(t.db)).rows[0]!.args.split('\\000').filter(Boolean);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0053_worn']);
+    expect(await snapshot()).toEqual(latest);
+    expect(await args('worn_photos_immutable_identity')).toEqual([
+      'id', 'product_id', 'ownership_id', 'account_id', 'model_id', 'credit_first_name', 'credit_country', 'credit_instagram', 'consent_at', 'consent_version', 'created_at',
+    ]);
+    expect((await args('worn_photos_settled_immutable')).sort()).toEqual(
+      added.filter((o) => o.startsWith('table worn_photos ')).map((o) => o.split(' ')[2]).sort(),
+    );
+  });
+
+  it('0053: a WORN photograph with its piece, ownership, sender and model; its bytes, type, hash and sides exactly while PENDING or PUBLISHED, its hash its bytes\', erased and never replaced; the credit (first name, country, Instagram when chosen) and the consent written once; one live per piece; the status only forward, refused or taken down with a reason, reviewed and published with their times, ended when settled, a settled row never changed; never deleted; down refused while any exists, naming the count', async () => {
+    await sql`INSERT INTO categories (id, code, name) VALUES (13, 'C', 'Claim checks') ON CONFLICT DO NOTHING`.execute(t.db);
+    const run = (q: string) => sql.raw(q).execute(t.db);
+    const one = async <T,>(q: string) => (await sql.raw<T>(q).execute(t.db)).rows[0] as T;
+    const check = (p: Promise<unknown>, label: string, constraint?: string) => expect(p, label).rejects.toSatisfy((e) => isCheckViolation(e, constraint));
+    const nullRefused = (p: Promise<unknown>, label: string) => expect(p, label).rejects.toSatisfy((e) => pgError(e)?.code === PG_ERROR.NOT_NULL_VIOLATION);
+    const guarded = (p: Promise<unknown>, label: string) => expect(p, label).rejects.toSatisfy(isGuardViolation);
+    const admin = (await one<{ id: string }>(`INSERT INTO admin_users (email_normalized, email, password_hash, role) VALUES ('worn-0053@orbes.test', 'worn-0053@orbes.test', 'scrypt$x', 'OPERATOR') RETURNING id`)).id;
+    const account = (await one<{ id: string }>(`INSERT INTO accounts (email, email_normalized, password_hash) VALUES ('lea-0053@example.com', 'lea-0053@example.com', 'scrypt$x') RETURNING id`)).id;
+    const model = (await one<{ id: string }>(`INSERT INTO models (category_id, name, type, sku_prefix) VALUES (13, 'HALO', 'RING', 'WORN0053') RETURNING id`)).id;
+    const piece = async (n: number) => {
+      const product = (await one<{ id: string }>(`INSERT INTO products (product_id, packed_identity, year, category_id, serial, sku, model_id, material)
+        VALUES ('O26-C-${String(n).padStart(5, '0')}', ${(26 << 25) | (13 << 20) | n}, 2026, 13, ${n}, 'WORN0053-${n}', '${model}', 'SILVER') RETURNING id`)).id;
+      const ownership = (await one<{ id: string }>(`INSERT INTO ownership (product_id, account_id, acquired_via) VALUES ('${product}', '${account}', 'FIRST_REGISTRATION') RETURNING id`)).id;
+      return { product, ownership };
+    };
+    const [p1, p2, p3] = [await piece(901), await piece(902), await piece(903)];
+    const bytes = (hex: string) => `decode('${hex}', 'hex')`;
+    const JPEG = 'ffd8ffe000104a46494600';
+    const PHOTO = { photo: bytes(JPEG), photo_mime: `'image/jpeg'`, photo_sha256: `encode(sha256(${bytes(JPEG)}), 'hex')`, width: '1600', height: '2000' };
+    const ERASED = `photo = NULL, photo_mime = NULL, photo_sha256 = NULL, width = NULL, height = NULL`;
+    const RESTORED = Object.entries(PHOTO).map(([k, v]) => `${k} = ${v}`).join(', ');
+    const sending = (p: { product: string; ownership: string }, cols: Record<string, string> = {}) => {
+      const all: Record<string, string> = {
+        product_id: `'${p.product}'`, ownership_id: `'${p.ownership}'`, account_id: `'${account}'`, model_id: `'${model}'`, ...PHOTO, credit_first_name: `'Léa'`, credit_country: `'FR'`,
+        consent_at: 'now()', consent_version: `'2026-10-22'`, ...cols,
+      };
+      return sql.raw<{ id: string }>(`INSERT INTO worn_photos (${Object.keys(all).join(', ')}) VALUES (${Object.values(all).join(', ')}) RETURNING id`).execute(t.db);
+    };
+    const set = (id: string, sets: string) => run(`UPDATE worn_photos SET ${sets} WHERE id = '${id}'`);
+    const REVIEWED = `reviewed_by = '${admin}', reviewed_at = now()`;
+
+    // A sending: its photograph whole, its credit and consent as their columns hold them.
+    for (const [cols, label, constraint] of [
+      [{ status: `'DRAFT'`, ended_at: 'now()', photo: 'NULL', photo_mime: 'NULL', photo_sha256: 'NULL', width: 'NULL', height: 'NULL' }, 'an unknown status', 'worn_photos_status_check'],
+      [{ photo: 'NULL', photo_mime: 'NULL', photo_sha256: 'NULL', width: 'NULL', height: 'NULL' }, 'in review without its photograph', 'worn_photos_photo'],
+      [{ photo_mime: 'NULL' }, 'a photograph without its type', 'worn_photos_photo'],
+      [{ width: 'NULL' }, 'a photograph without its width', 'worn_photos_photo'],
+      [{ photo_mime: `'image/png'` }, 'a PNG', 'worn_photos_photo_mime_check'],
+      [{ photo_sha256: `'${'0'.repeat(64)}'` }, 'a hash not its bytes\'', 'worn_photos_sha256_consistent'],
+      [{ photo: `decode(repeat('ab', 1048577), 'hex')`, photo_sha256: `encode(sha256(decode(repeat('ab', 1048577), 'hex')), 'hex')` }, 'a photograph over 1 MiB', 'worn_photos_photo_check'],
+      [{ width: '0' }, 'a width of 0', 'worn_photos_width_check'],
+      [{ height: '4097' }, 'a height of 4 097', 'worn_photos_height_check'],
+      [{ credit_first_name: `''` }, 'an empty first name', 'worn_photos_credit_first_name_check'],
+      [{ credit_first_name: `' Léa'` }, 'a first name not trimmed', 'worn_photos_credit_first_name_check'],
+      [{ credit_first_name: `'Léa<b>'` }, 'a first name with markup', 'worn_photos_credit_first_name_check'],
+      [{ credit_first_name: `'${'é'.repeat(51)}'` }, 'a first name of 51 characters', 'worn_photos_credit_first_name_check'],
+      [{ credit_country: `'fr'` }, 'a country in lower case', 'worn_photos_credit_country_check'],
+      [{ credit_instagram: `'Lea.M'` }, 'an Instagram name with capitals', 'worn_photos_credit_instagram_check'],
+      [{ credit_instagram: `'@lea.m'` }, 'an Instagram name with its @', 'worn_photos_credit_instagram_check'],
+      [{ credit_instagram: `'${'l'.repeat(31)}'` }, 'an Instagram name of 31 characters', 'worn_photos_credit_instagram_check'],
+      [{ consent_version: `'22/10/2026'` }, 'a consent version not a date', 'worn_photos_consent_version_check'],
+      [{ refusal: `'QUALITY'` }, 'a refusal in review', 'worn_photos_refusal'],
+      [{ reviewed_by: `'${admin}'`, reviewed_at: 'now()' }, 'reviewed while in review', 'worn_photos_reviewed'],
+      [{ published_at: 'now()' }, 'published while in review', 'worn_photos_published'],
+      [{ ended_at: 'now()' }, 'ended while in review', 'worn_photos_ended'],
+      [{ status: `'PUBLISHED'`, reviewed_by: `'${admin}'`, reviewed_at: 'now()' }, 'published without its time', 'worn_photos_published'],
+      [{ status: `'PUBLISHED'`, reviewed_at: 'now()', published_at: 'now()' }, 'reviewed by no one', 'worn_photos_reviewed'],
+      [{ status: `'ENDED'`, ended_at: 'now()' }, 'ended with its photograph', 'worn_photos_photo'],
+    ] as const) {
+      await check(sending(p1, cols), label, constraint);
+    }
+    await expect(sending(p1, { refusal: `'BLURRY'`, status: `'REFUSED'` }), 'an unknown refusal').rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(sending(p1, { photo_sha256: `'${'A'.repeat(64)}'` }), 'a hash in capitals').rejects.toSatisfy((e) => isCheckViolation(e));
+    await nullRefused(sending(p1, { consent_at: 'NULL' }), 'a sending without its consent');
+    await nullRefused(sending(p1, { credit_country: 'NULL' }), 'a sending without its country');
+    await expect(sending({ product: '00000000-0000-4000-8000-000000000000', ownership: p1.ownership })).rejects.toSatisfy(isForeignKeyViolation);
+
+    // In review: PENDING by default, with its photograph and its credit; one live photograph per piece.
+    const first = (await sending(p1, { credit_instagram: `'lea.m'` })).rows[0].id;
+    expect(await one(`SELECT status, photo_mime, width, height, octet_length(photo) AS bytes, photo_sha256 = encode(sha256(photo), 'hex') AS hashed, credit_first_name, credit_country, credit_instagram, consent_version, refusal, reviewed_by, published_at, ended_at, created_at <= now() AS created FROM worn_photos WHERE id = '${first}'`)).toEqual({
+      status: 'PENDING', photo_mime: 'image/jpeg', width: 1600, height: 2000, bytes: 11, hashed: true, credit_first_name: 'Léa', credit_country: 'FR', credit_instagram: 'lea.m', consent_version: '2026-10-22',
+      refusal: null, reviewed_by: null, published_at: null, ended_at: null, created: true,
+    });
+    await expect(sending(p1)).rejects.toSatisfy((e) => isUniqueViolation(e, 'worn_photos_live_once'));
+    // Its identity, its credit and its consent never change; its photograph is erased, never replaced.
+    for (const sets of [`credit_first_name = 'Camille'`, `credit_country = 'BE'`, `credit_instagram = NULL`, `consent_version = '2026-10-23'`, `consent_at = now() - interval '1 day'`, `account_id = gen_random_uuid()`, `model_id = gen_random_uuid()`, `product_id = '${p2.product}'`, `ownership_id = '${p2.ownership}'`, `created_at = now() - interval '1 day'`]) {
+      await guarded(set(first, sets), sets);
+    }
+    for (const sets of [`photo = ${bytes('ffd8ffe1')}, photo_sha256 = encode(sha256(${bytes('ffd8ffe1')}), 'hex')`, `photo_mime = 'image/webp'`, `width = 1200`]) {
+      await guarded(set(first, sets), sets);
+    }
+    // Published: reviewed, with its time, its photograph kept.
+    await check(set(first, `status = 'PUBLISHED', published_at = now()`), 'published by no one', 'worn_photos_reviewed');
+    await check(set(first, `status = 'PUBLISHED', ${REVIEWED}`), 'published without its time', 'worn_photos_published');
+    await check(set(first, `status = 'PUBLISHED', ${REVIEWED}, published_at = now(), ${ERASED}`), 'published without its photograph', 'worn_photos_photo');
+    await set(first, `status = 'PUBLISHED', ${REVIEWED}, published_at = '2026-10-22T10:00:00Z'`);
+    // Only forward: never back in review; never refused once published; its publication kept.
+    await guarded(set(first, `status = 'PENDING', reviewed_by = NULL, reviewed_at = NULL, published_at = NULL`), 'back in review');
+    await guarded(set(first, `status = 'REFUSED', refusal = 'QUALITY', ended_at = now(), ${ERASED}`), 'refused once published');
+    await guarded(set(first, `published_at = '2026-10-22T11:00:00Z'`), 'its publication moved');
+    // Withdrawn by its owner: its photograph erased, its publication and review kept.
+    await check(set(first, `status = 'WITHDRAWN', ended_at = now()`), 'withdrawn with its photograph', 'worn_photos_photo');
+    await check(set(first, `status = 'WITHDRAWN', ${ERASED}`), 'withdrawn without its end', 'worn_photos_ended');
+    await set(first, `status = 'WITHDRAWN', ended_at = now(), ${ERASED}`);
+    expect(await one(`SELECT status, photo, photo_mime, photo_sha256, width, height, published_at, reviewed_by FROM worn_photos WHERE id = '${first}'`)).toEqual({
+      status: 'WITHDRAWN', photo: null, photo_mime: null, photo_sha256: null, width: null, height: null, published_at: new Date('2026-10-22T10:00:00Z'), reviewed_by: admin,
+    });
+    // Settled: never changed again, not even its status.
+    for (const sets of [`status = 'PUBLISHED', ${RESTORED}, ended_at = NULL`, `ended_at = now() + interval '1 day'`, `reviewed_at = now()`, `status = 'TAKEN_DOWN', refusal = 'NOT_SUITABLE'`]) {
+      await guarded(set(first, sets), sets);
+    }
+
+    // Once withdrawn, the piece sends again; refused in review with its reason: its photograph erased, never published.
+    const second = (await sending(p1)).rows[0].id;
+    await check(set(second, `status = 'REFUSED', ${REVIEWED}, ended_at = now(), ${ERASED}`), 'refused without its reason', 'worn_photos_refusal');
+    await check(set(second, `status = 'REFUSED', refusal = 'QUALITY', ended_at = now(), ${ERASED}`), 'refused by no one', 'worn_photos_reviewed');
+    await set(second, `status = 'REFUSED', refusal = 'QUALITY', ${REVIEWED}, ended_at = now(), ${ERASED}`);
+    await guarded(set(second, `refusal = 'NOT_SUITABLE'`), 'its reason changed once refused');
+
+    // Taken down only once published, with its reason, by the one who took it down.
+    const third = (await sending(p2)).rows[0].id;
+    await guarded(set(third, `status = 'TAKEN_DOWN', refusal = 'NOT_SUITABLE', ${REVIEWED}, published_at = now(), ended_at = now(), ${ERASED}`), 'taken down while in review');
+    await set(third, `status = 'PUBLISHED', ${REVIEWED}, published_at = now()`);
+    await check(set(third, `status = 'TAKEN_DOWN', ended_at = now(), ${ERASED}`), 'taken down without its reason', 'worn_photos_refusal');
+    await set(third, `status = 'TAKEN_DOWN', refusal = 'NOT_SUITABLE', ${REVIEWED}, ended_at = now(), ${ERASED}`);
+
+    // Ended in review when its piece left its owner; a refusal only on a refused or taken-down photograph.
+    const fourth = (await sending(p3, { photo: bytes('52494646'), photo_mime: `'image/webp'`, photo_sha256: `encode(sha256(${bytes('52494646')}), 'hex')` })).rows[0].id;
+    await check(set(fourth, `status = 'ENDED', refusal = 'QUALITY', ended_at = now(), ${ERASED}`), 'ended with a refusal', 'worn_photos_refusal');
+    await set(fourth, `status = 'ENDED', ended_at = now(), ${ERASED}`);
+    expect((await one<{ n: number }>(`SELECT count(*)::int AS n FROM worn_photos WHERE status IN ('PENDING', 'PUBLISHED')`)).n).toBe(0);
+
+    // Never deleted nor truncated: the record stays with the account.
+    await guarded(run(`DELETE FROM worn_photos WHERE id = '${first}'`), 'a photograph deleted');
+    await guarded(run(`TRUNCATE worn_photos`), 'the photographs truncated');
+    await expect(run(`DELETE FROM ownership WHERE id = '${p1.ownership}'`)).rejects.toSatisfy(isForeignKeyViolation);
+
+    // Down refuses while any photograph exists, naming the count; this database stays at 0053.
+    await expect(migrateDown(t.db)).rejects.toThrow(/0053_worn cannot be rolled back: 4 WORN photographs exist/);
+    expect((await migrationStatus(t.db)).find((m) => m.name === '0053_worn')?.executedAt).toBeDefined();
+    // Cleared by hand (a photograph's record is never deleted).
+    await run(`ALTER TABLE worn_photos DISABLE TRIGGER worn_photos_no_delete`);
+    await run(`DELETE FROM worn_photos`);
+    await run(`ALTER TABLE worn_photos ENABLE TRIGGER worn_photos_no_delete`);
+    expect((await migrateDown(t.db)).reverted).toEqual(['0053_worn']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0053_worn']);
+
+    // The rows of this test taken away.
+    await run(`DELETE FROM ownership WHERE account_id = '${account}'`);
+    await run(`DELETE FROM products WHERE model_id = '${model}'`);
+    await run(`DELETE FROM models WHERE id = '${model}'`);
     await run(`DELETE FROM accounts WHERE id = '${account}'`);
     await run(`DELETE FROM admin_users WHERE id = '${admin}'`);
   });
@@ -6983,6 +7259,8 @@ describe('migrations', () => {
       '0051_emails',
       // Lot M2: house messages, the moments' settings, the custom messages and their deliveries.
       '0052_house_messages',
+      // WORN, the owners' gallery: the photographs sent from a piece.
+      '0053_worn',
     ]);
     // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.
     const built = new Map<string, string[]>();

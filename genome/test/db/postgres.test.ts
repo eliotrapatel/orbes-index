@@ -11,7 +11,7 @@
  * token), then drops it.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { sql } from 'kysely';
 import { closeDb, createDb, type Db } from '../../src/server/db/connection.js';
 import { migrateToLatest } from '../../src/server/db/migrate.js';
@@ -374,5 +374,42 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await expect(db.updateTable('house_deliveries').set({ body: 'Other.' }).where('id', '=', row.id).execute()).rejects.toSatisfy(isGuardViolation);
     await expect(db.deleteFrom('house_deliveries').where('id', '=', row.id).execute()).rejects.toSatisfy(isGuardViolation);
     await expect(sql`TRUNCATE house_deliveries`.execute(db)).rejects.toSatisfy(isGuardViolation);
+  });
+  it('holds WORN photographs by their CHECKs, one live per piece (0053)', async () => {
+    await db.insertInto('categories').values({ id: 24, code: 'G', name: 'WORN parity' }).execute();
+    const model = await db.insertInto('models').values({ category_id: 24, name: 'WORN', type: 'RING', sku_prefix: 'WORN-PG' }).returning('id').executeTakeFirstOrThrow();
+    const product = await db
+      .insertInto('products')
+      .values({ product_id: 'O26-G-00001', packed_identity: (26 << 25) | (24 << 20) | 1, year: 2026, category_id: 24, serial: 1, sku: 'WORN-PG-1', model_id: model.id, material: 'SILVER' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const admin = await db.insertInto('admin_users').values({ email: 'worn-pg0053@orbes.test', email_normalized: 'worn-pg0053@orbes.test', password_hash: 'scrypt$x', role: 'OPERATOR' }).returning('id').executeTakeFirstOrThrow();
+    const account = await db.insertInto('accounts').values({ email: 'lea-pg0053@example.com', email_normalized: 'lea-pg0053@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const ownership = await db.insertInto('ownership').values({ product_id: product.id, account_id: account.id, acquired_via: 'FIRST_REGISTRATION' }).returning('id').executeTakeFirstOrThrow();
+    const photo = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
+    const sha = createHash('sha256').update(photo).digest('hex');
+    const sending = {
+      product_id: product.id, ownership_id: ownership.id, account_id: account.id, model_id: model.id, photo, photo_mime: 'image/jpeg' as const, photo_sha256: sha, width: 1600, height: 2000,
+      credit_first_name: 'Léa', credit_country: 'FR', consent_at: new Date('2026-10-22T09:00:00Z'), consent_version: '2026-10-22',
+    };
+    // Its hash its bytes'; its photograph whole while in review.
+    await expect(db.insertInto('worn_photos').values({ ...sending, photo_sha256: '0'.repeat(64) }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'worn_photos_sha256_consistent'));
+    await expect(db.insertInto('worn_photos').values({ ...sending, width: null }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'worn_photos_photo'));
+    const row = await db.insertInto('worn_photos').values(sending).returning(['id', 'status', 'photo']).executeTakeFirstOrThrow();
+    expect(row).toEqual({ id: expect.any(String), status: 'PENDING', photo });
+    expect(row.photo?.constructor).toBe(Uint8Array);
+    await expect(db.insertInto('worn_photos').values(sending).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'worn_photos_live_once'));
+    // Published, then never back in review; withdrawn with its photograph erased; then settled.
+    const at = new Date('2026-10-22T10:00:00Z');
+    await db.updateTable('worn_photos').set({ status: 'PUBLISHED', reviewed_by: admin.id, reviewed_at: at, published_at: at }).where('id', '=', row.id).execute();
+    await expect(db.updateTable('worn_photos').set({ status: 'PENDING', reviewed_by: null, reviewed_at: null, published_at: null }).where('id', '=', row.id).execute()).rejects.toSatisfy(isGuardViolation);
+    await expect(db.updateTable('worn_photos').set({ credit_first_name: 'Camille' }).where('id', '=', row.id).execute()).rejects.toSatisfy(isGuardViolation);
+    await expect(db.updateTable('worn_photos').set({ status: 'WITHDRAWN', ended_at: at }).where('id', '=', row.id).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'worn_photos_photo'));
+    await db.updateTable('worn_photos').set({ status: 'WITHDRAWN', ended_at: at, photo: null, photo_mime: null, photo_sha256: null, width: null, height: null }).where('id', '=', row.id).execute();
+    await expect(db.updateTable('worn_photos').set({ ended_at: new Date() }).where('id', '=', row.id).execute()).rejects.toSatisfy(isGuardViolation);
+    await expect(db.deleteFrom('worn_photos').where('id', '=', row.id).execute()).rejects.toSatisfy(isGuardViolation);
+    await expect(sql`TRUNCATE worn_photos`.execute(db)).rejects.toSatisfy(isGuardViolation);
+    // The piece sends again once the first is withdrawn.
+    expect(await db.insertInto('worn_photos').values(sending).returning('status').executeTakeFirstOrThrow()).toEqual({ status: 'PENDING' });
   });
 });

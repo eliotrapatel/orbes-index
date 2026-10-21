@@ -702,6 +702,32 @@ export const HOUSE_DELIVERED_TITLE_MAX = 400;
 export const HOUSE_DELIVERED_BODY_MAX = 8000;
 export const HOUSE_DEDUPE_MAX = 200;
 
+/**
+ * A WORN photograph (worn_photos.status, migration 0053, macro scope D31 G1 and G2; lot M2 plan §2.1): in review, published
+ * on the model's sheet, refused by staff, withdrawn by its owner, taken down by staff, or ended when its piece left its
+ * owner. Only PENDING and PUBLISHED keep the photograph's bytes; at most one of them per piece.
+ */
+export const WORN_STATUSES = ['PENDING', 'PUBLISHED', 'REFUSED', 'WITHDRAWN', 'TAKEN_DOWN', 'ENDED'] as const;
+export type WornStatus = (typeof WORN_STATUSES)[number];
+
+/** The statuses in which a WORN photograph is live (its bytes kept; `worn_photos_live_once`: one per piece). */
+export const WORN_LIVE_STATUSES = ['PENDING', 'PUBLISHED'] as const satisfies readonly WornStatus[];
+
+/**
+ * Why staff refuse or take down a WORN photograph (worn_photos.refusal, migration 0053, G2), shown to its owner in words:
+ * the piece not clearly visible, the photograph not sharp enough, a photograph that cannot be shown in WORN.
+ */
+export const WORN_REFUSALS = ['PIECE_NOT_VISIBLE', 'QUALITY', 'NOT_SUITABLE'] as const;
+export type WornRefusal = (typeof WORN_REFUSALS)[number];
+
+/**
+ * A WORN photograph's bounds (migration 0053, G1), as media/image.ts sanitizes every image: its bytes and sides, at most;
+ * the credit's first name, at most, as account_profiles.first_name holds it (migration 0040).
+ */
+export const WORN_PHOTO_MAX_BYTES = 1_048_576;
+export const WORN_PHOTO_MAX_SIDE = 4096;
+export const WORN_CREDIT_FIRST_NAME_MAX = 50;
+
 // ── Column helpers ─────────────────────────────────────────────────────────
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -2253,6 +2279,40 @@ export interface HouseDeliveriesTable {
 }
 
 /**
+ * A photograph an owner sent from their piece for WORN (migration 0053, D31 G1 to G3): the piece, the period of ownership
+ * it was sent in, its sender and the piece's model at sending. The photograph (bytes, type, hash, sides) is present
+ * exactly while PENDING or PUBLISHED, erased otherwise and never replaced. The credit (first name, country, the Instagram
+ * name only when chosen) and the consent (time and LEGAL_VERSION) are written at sending and never change. `refusal`
+ * exactly when REFUSED or TAKEN_DOWN; `reviewed_by`/`reviewed_at` once published, refused or taken down; `published_at`
+ * once published, kept after; `ended_at` exactly when settled. The status only moves forward; a settled row never
+ * changes; never deleted.
+ */
+export interface WornPhotosTable {
+  id: Generated<string>;
+  product_id: string;                  // products.id
+  ownership_id: string;                // ownership.id: the period it was sent in
+  account_id: string;                  // accounts.id: its sender
+  model_id: string;                    // models.id: the sheet it appears on
+  photo: ColumnType<Uint8Array | null, Uint8Array | null | undefined, Uint8Array | null>; // 1..1 048 576 bytes, while live
+  photo_mime: ColumnType<MediaMimeType | null, MediaMimeType | null | undefined, MediaMimeType | null>;
+  photo_sha256: ColumnType<string | null, string | null | undefined, string | null>; // hex SHA-256 of `photo`
+  width: ColumnType<number | null, number | null | undefined, number | null>;   // 1..4096
+  height: ColumnType<number | null, number | null | undefined, number | null>;  // 1..4096
+  credit_first_name: string;           // 1..50 characters, trimmed, no control character nor < >
+  credit_country: string;              // two capital letters
+  credit_instagram: ColumnType<string | null, string | null | undefined, string | null>; // ^[a-z0-9._]{1,30}$, when chosen
+  consent_at: Timestamp;
+  consent_version: string;             // the LEGAL_VERSION shown, YYYY-MM-DD
+  status: WithDefault<WornStatus>;     // DEFAULT PENDING
+  refusal: ColumnType<WornRefusal | null, WornRefusal | null | undefined, WornRefusal | null>;
+  reviewed_by: ColumnType<string | null, string | null | undefined, string | null>; // admin_users.id
+  reviewed_at: TimestampNullable;
+  published_at: TimestampNullable;
+  ended_at: TimestampNullable;
+  created_at: TimestampDefault;
+}
+
+/**
  * One row (id 1, migration 0043, plan CUSTOMER INTELLIGENCE §3.4 A.6 item 9): the recording's start (« Before tracking »
  * before it) and the job's watermarks. Inserted by AcquisitionService.prepare at the first boot, never by the migration.
  */
@@ -3209,6 +3269,7 @@ export interface Database {
   house_moment_settings: HouseMomentSettingsTable;
   house_messages: HouseMessagesTable;
   house_deliveries: HouseDeliveriesTable;
+  worn_photos: WornPhotosTable;
   account_notes: AccountNotesTable;
   account_tags: AccountTagsTable;
   account_scores: AccountScoresTable;

@@ -354,6 +354,14 @@ export type HouseMessageStatus = (typeof HOUSE_MESSAGE_STATUSES)[number];
 export const HOUSE_TITLE_MAX = 80;
 export const HOUSE_BODY_MAX = 2000;
 
+/** A WORN photograph (worn_photos.status, migration 0053, macro scope D31 G2): in review, published, then settled. */
+export const WORN_STATUSES = ['PENDING', 'PUBLISHED', 'REFUSED', 'WITHDRAWN', 'TAKEN_DOWN', 'ENDED'] as const;
+export type WornStatus = (typeof WORN_STATUSES)[number];
+
+/** Why staff refuse or take down a WORN photograph (worn_photos.refusal, migration 0053, G2). */
+export const WORN_REFUSALS = ['PIECE_NOT_VISIBLE', 'QUALITY', 'NOT_SUITABLE'] as const;
+export type WornRefusal = (typeof WORN_REFUSALS)[number];
+
 /** How the access rules of a LIVE RELEASE combine (drops.access_combine): every rule met, or any one of them. */
 export const ACCESS_COMBINES = ['AND', 'OR'] as const;
 export type AccessCombine = (typeof ACCESS_COMBINES)[number];
