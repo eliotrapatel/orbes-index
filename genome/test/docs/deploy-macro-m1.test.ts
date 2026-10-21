@@ -149,7 +149,14 @@ describe('the runbook of lot MACRO M1 (docs/launch/DEPLOY-MACRO-M1.md)', () => {
     expect(block('A\tgenome/src/server/db/migrations/')).toEqual(DEPLOY.map((n) => `A\tgenome/src/server/db/migrations/${n}.ts`));
     expect(commands).toContain(`git -C /opt/orbes/orbes-index diff --name-status ${PROD_COMMIT} HEAD -- genome/src/server/db/migrations`);
     const added = git(['diff', '--name-status', PROD_COMMIT, '--', 'genome/src/server/db/migrations']);
-    if (added !== null) expect(added.trim().split('\n')).toEqual(DEPLOY.map((n) => `A\tgenome/src/server/db/migrations/${n}.ts`));
+    if (added !== null) {
+      // M1's range is exactly 0049 to 0051; a later lot's migration (0052 on) is only ever added after it.
+      const prefix = 'A\tgenome/src/server/db/migrations/';
+      const lines = added.trim().split('\n');
+      const lotNumber = (line: string) => (line.startsWith(prefix) ? Number(line.slice(prefix.length, prefix.length + 4)) : NaN);
+      expect(lines.filter((l) => !(lotNumber(l) >= 52))).toEqual(DEPLOY.map((n) => `${prefix}${n}.ts`));
+      expect(lines.filter((l) => lotNumber(l) >= 52).every((l) => /^A\tgenome\/src\/server\/db\/migrations\/\d{4}_[a-z0-9_]+\.ts$/.test(l))).toBe(true);
+    }
     // db.ts migrate, then deploy.sh's end and its log line.
     expect(readDoc('genome/scripts/db.ts')).toContain("`Applied ${applied.length} migration(s): ${applied.join(', ')}`");
     expect(runbook).toContain(`Applied ${DEPLOY.length} migration(s): ${DEPLOY.join(', ')}`);
