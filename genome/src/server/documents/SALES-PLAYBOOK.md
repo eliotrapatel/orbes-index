@@ -39,6 +39,7 @@ Ce guide ne décrit que ce que fait le logiciel. Ses sources :
 - **Les coordonnées d'ORBES Client Services** sont configurées (`CLIENT_SERVICES_EMAIL`, `CLIENT_SERVICES_PHONE`, `CLIENT_SERVICES_HOURS`, LAUNCH §10). L'application des collectionneurs ne les montre plus : partout où elle renvoie vers ORBES Client Services, elle montre `WRITE TO ORBES CLIENT SERVICES`, dont les messages arrivent dans `Messages` (§3). Seul `FORGOTTEN PASSWORD` garde l'adresse e-mail, pour un client qui a aussi perdu son code de récupération ; les pages légales gardent l'adresse, le téléphone et les horaires.
 - **La carte certificat.** Fait : le propriétaire a validé la carte 79t, MINT CERTIFICATE, le 2026-10-07, et aucune carte ne porte plus la mention PROOF (kit, §2).
 - **Le claim code.** Toute pièce destinée à la vente est émise avec son claim code : dans `Generator`, la case `Issue a one-time claim code (shown once, stored as a hash)` (pour un lot : `Issue a one-time claim code for each piece (shown once, stored as a hash)`) reste cochée, comme par défaut. C'est lui qui prouve, à l'enregistrement, que le client tient la carte. Une pièce émise sans claim code s'enregistre sans preuve : une fois sa garantie activée, le premier compte connecté qui la scanne peut l'enregistrer à son nom. Si une telle pièce est vendue, le client l'enregistre au comptoir, aussitôt la garantie activée ; puis un OPERATOR, la facture vue, confirme la propriété sur la fiche de la pièce (`Actions`, groupe `Ownership` → `Confirm ownership`, API §14.10).
+- **Les e-mails** (lot M1). La plateforme sait envoyer des e-mails, mais tout reste coupé tant que le propriétaire n'a pas choisi un prestataire ; ensuite, chaque e-mail s'allume à part, par un ADMIN, dans la page `Emails` (depuis `Settings`). Tant qu'ils sont coupés, rien ne part : ni lien pour changer de mot de passe, ni annonce de sortie, ni e-mail de commande. Les messages du client et vos réponses restent dans l'application (`Messages`), jamais par e-mail.
 - **La checklist du §9**, une fois, par chaque personne qui vendra ou répondra aux clients.
 
 **Les chiffres à connaître.**
@@ -55,6 +56,19 @@ Ce guide ne décrit que ce que fait le logiciel. Ses sources :
 | Longueur minimale d'un mot de passe | 12 caractères | `PASSWORD_MIN_LENGTH` |
 | Échecs de connexion avant le verrouillage d'un compte de la console | 10 | `ADMIN_LOCKOUT_THRESHOLD` |
 | Durée de ce verrouillage | 15 minutes | `ADMIN_LOCKOUT_MS` |
+
+
+### La liste fondatrice (theorbes.com)
+
+La fenêtre FOUNDING ACCESS de theorbes.com inscrit une personne sur la liste fondatrice : son adresse e-mail, son prénom, son pays et son accord, avec d'où elle vient (un lien de la console, une campagne, un site). Elle arrive dans la console, `Founding list` (groupe `Clients`, après `Links`). Si un compte ORBES a la même adresse, la ligne lui est rattachée, aussitôt ou à son inscription. `Make the segment` fait d'un clic un segment de la liste, qu'un tirage ou une LIVE RELEASE peut ouvrir en premier (`Access` : la page publique dit FOR SELECTED COLLECTORS, jamais le nom du segment). `Download (CSV)` (OPERATOR) donne la liste dans les colonnes d'un import de clients Shopify. Un lien de la console peut mener à la fenêtre elle-même : `theorbes.com (founding list)` dans `Links`, sa provenance comptée comme celle d'une visite. Un AUDITOR lit les adresses masquées.
+
+- **La même adresse envoyée deux fois** ne change rien : sa ligne reste telle quelle, et la fenêtre répond la même chose à tout le monde ; vous non plus ne dites jamais à quelqu'un si une adresse est sur la liste.
+- **Retirer quelqu'un sur sa demande** (un ADMIN) : vérifiez d'abord que la demande vient bien de la personne (par exemple un e-mail envoyé depuis cette adresse), puis `Founding list` → la personne → `Remove`, et tapez la phrase demandée (REMOVE et les 8 premiers caractères). La ligne et ses e-mails sont effacés ; l'inscription n'a rien donné de durable.
+- **Ne plus rien recevoir** : l'e-mail de la liste porte en bas STOP THESE EMAILS. Un clic suffit ; la personne reste sur la liste, mais plus rien ne part jamais vers cette adresse (`Unsubscribed` dans la console). Pour être effacée, elle vous le demande (ci-dessus).
+- **L'annonce de la liste** (`Send the founding announcement`, sous `The segment`, un ADMIN) : `Send now` ou `Send at the opening` d'une sortie publiée, une fois par personne et par sortie, aux personnes qui ne se sont pas désinscrites ; `Cancel scheduled` tant qu'elle n'est pas partie. Rien ne part tant que les e-mails sont coupés.
+- **Les annonces de sortie** d'un compte (EMAIL ME WHEN A RELEASE IS ANNOUNCED, dans YOUR PROFILE) sont le choix du client, coupées par défaut ; il les arrête par le même lien STOP THESE EMAILS ou dans YOUR PROFILE.
+
+> Vous êtes sur la liste fondatrice : nous vous écrirons quand la première sortie ouvrira. Chaque e-mail porte en bas STOP THESE EMAILS ; un clic, et plus rien ne vous sera envoyé. Si vous préférez que votre inscription soit effacée, je m'en occupe.
 
 ---
 
@@ -156,6 +170,14 @@ Le client demande un retour ou un échange de taille dans les 14 jours qui suive
 ### Sur un ordinateur : la page d'une commande
 
 Sur un ordinateur (une fenêtre d'au moins 1024 px, avec une souris ou un pavé tactile), MY PIECES → ORDERS liste les commandes du client en lignes, et chaque ligne ouvre la page de sa commande. Elle montre ce que la carte de la commande montre sur un téléphone, avec les mêmes mots et les mêmes règles : les étapes, DELIVERY ADDRESS et ENGRAVING jusqu'à `Start packing`, RETURNS AND EXCHANGES pendant les 14 jours qui suivent la livraison, YOUR NEW CLAIM CODE, et DOCUMENTS avec ORBES CARE CONDITIONS · PDF. Un client qui vous écrit depuis un ordinateur se guide donc comme sur son téléphone.
+
+### Une LIVE RELEASE à son rythme : la file d'attente
+
+Une LIVE RELEASE peut faire entrer sa file à un rythme, X acheteurs toutes les Y minutes (lot M1) : `Pace` dans ses réglages avant l'annonce, puis, sur le tableau en direct (OPERATOR), `Set pace`, `Pause pace`, `Resume pace` et `Next batch now`. Aucun bouton ne retire le rythme. Dans la salle, rien ne change : un tour par taille, le temps de payer.
+
+Le client qui attend son lot voit THE QUEUE : sa place, l'heure d'entrée estimée à l'heure de Paris et le temps qui reste, ou THE QUEUE IS PAUSED quand le rythme est en pause ; jamais le rythme lui-même. Sa place est gardée quoi qu'il arrive, même s'il ferme la page et revient. Absent quand son lot entre, il entre quand même ; si son tour passe sans lui, la pièce va au suivant dans sa taille, comme dans la salle. Dans MY PIECES, il lit IN THE QUEUE et sa place. `Let in` fait entrer une personne tout de suite, hors de son ordre : à réserver à un cas que vous pouvez expliquer, il est inscrit au journal.
+
+> Votre place est gardée : vous pouvez fermer la page et revenir, elle ne change pas. L'heure affichée est une estimation, à l'heure de Paris. Si vous n'êtes pas là quand votre tour arrive, il passe à la personne suivante dans votre taille.
 
 ### Commandes fournisseur
 
@@ -439,7 +461,7 @@ Un modèle se crée avec sa garantie (`New model`, champ `Warranty`) : `Lifetime
 
 ## 6. Mot de passe oublié
 
-Il n'y a pas d'e-mail de réinitialisation : un client qui a oublié son mot de passe passe par ORBES Client Services (C-04, A-06). Après la vérification de son identité, un ADMIN lui donne un **code de récupération** : à usage unique, valable 30 minutes.
+Tant que les e-mails sont coupés (§0), il n'y a pas d'e-mail de réinitialisation : un client qui a oublié son mot de passe passe par ORBES Client Services (C-04, A-06). Une fois l'e-mail `Password reset` allumé, il peut aussi recevoir un lien (ci-dessous) ; votre voie reste la même pour qui n'a plus accès à son adresse. Après la vérification de son identité, un ADMIN lui donne un **code de récupération** : à usage unique, valable 30 minutes.
 
 ### Vérification d'identité (ébauche, à finaliser avec le juriste)
 
@@ -466,11 +488,17 @@ SECURITY-MODEL §3.6 : un code de récupération, un verrouillage à la demande 
 
 ### Ce que vous dites
 
-> Nous n'envoyons jamais de lien par e-mail pour changer un mot de passe. Après avoir vérifié votre identité, je vous lis un code de récupération : il ne sert qu'une fois et reste valable 30 minutes. Sur theorbes.com/verify, touchez MY PIECES (ou, après un scan, l'onglet OWNERSHIP), puis FORGOTTEN PASSWORD? sous le formulaire de connexion, puis I HAVE A RECOVERY CODE, et saisissez l'adresse e-mail de votre compte, ce code et un nouveau mot de passe de 12 caractères au moins.
+> Je ne vous envoie jamais ce code par e-mail. Après avoir vérifié votre identité, je vous lis un code de récupération : il ne sert qu'une fois et reste valable 30 minutes. Sur theorbes.com/verify, touchez MY PIECES (ou, après un scan, l'onglet OWNERSHIP), puis FORGOTTEN PASSWORD? sous le formulaire de connexion, puis I HAVE A RECOVERY CODE, et saisissez l'adresse e-mail de votre compte, ce code et un nouveau mot de passe de 12 caractères au moins.
 
 > Pour votre sécurité, toutes vos sessions se ferment, vos transferts en attente sont annulés, les liens de certificat de propriété que vous aviez partagés sont retirés, et aucun nouveau transfert n'est possible depuis votre compte pendant 72 heures.
 
 Un client connecté qui veut seulement changer son mot de passe le fait lui-même : `CHANGE PASSWORD`, dans `MY PIECES`, à côté de `SIGN OUT` (sur l'accueil de theorbes.com/verify, ou par `MY PIECES` dans la ligne de son compte de l'onglet `OWNERSHIP`).
+
+### Un lien par e-mail (une fois les e-mails allumés)
+
+Quand les e-mails sont allumés et l'e-mail `Password reset` aussi (page `Emails`, un ADMIN), FORGOTTEN PASSWORD? propose RESET BY EMAIL : le client saisit l'adresse de son compte et touche SEND LINK. Il lit toujours la même phrase, que l'adresse ait un compte ou non. Le lien vaut 30 minutes, une seule fois ; il l'ouvre, choisit deux fois son nouveau mot de passe, SAVE. L'effet est celui d'un code de récupération : ses sessions se ferment, ses transferts en attente sont annulés, ses liens de certificat sont retirés, et aucun transfert n'est possible pendant 72 heures. Au plus 3 liens par heure pour un compte. Un lien expiré ou déjà servi : il en demande un autre (SEND A NEW LINK). Sans accès à cette adresse (NO ACCESS TO THIS EMAIL?) : votre voie, la vérification d'identité et le code, comme ci-dessus. Vous ne voyez jamais le lien d'un client dans la console.
+
+> Touchez FORGOTTEN PASSWORD?, saisissez l'adresse e-mail de votre compte, puis SEND LINK. Le lien reçu vaut 30 minutes, une seule fois. Si vous n'avez plus accès à cette adresse, je vous aide à récupérer votre compte autrement, après avoir vérifié votre identité.
 
 ### Corriger la date de naissance ou le profil d'un client
 

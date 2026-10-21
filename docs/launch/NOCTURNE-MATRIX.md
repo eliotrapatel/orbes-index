@@ -50,7 +50,7 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
   free replacement; refused after inspection; a 2-year piece repaired). Since the desktop plan (step 12, D11, test
   support only), `gallery` tells the full story, then gives MONOLITHE in steel a gallery of the demo's own photographs in
   gold and in blue (two: the media store refuses a model's cover in its own gallery), for a computer's gallery and its
-  viewer.
+  viewer. Since lot M1 (2026-10-21, test support only): `queue` tells the live story with two paced releases instead (MONOLITHE IN BLUE, 40 every minute, 5 240 entries, 200 let in: `admitted` at place 150 of the line, `queued` at place 412 of the queue, `queueFar` at 4999; MONOLITHE IN GOLD, its pace paused: `queuePaused` at place 12); `draw-selected` tells the full story, then you join the founding list and the October draw is opened to the segment *Founding list*; and `email` is the full story on a stage whose emails' channel is on (below, the emails' pages). Their phone states are in the shards `queue` (`nocturne.content-queue.e2e.test.ts`, new: the room's shard holds its 28), `draws` and `email` (new), their computer twins in `desk-10`, `desk-11` and `desk-13` (new).
 - **Where the demo differs from the boards** (live data excepted: times, ids, a countdown's digits, the GENOME's glyphs):
   - Since N1, MONOLITHE in steel is a model and gold and blue its variants (ADD A VARIANT; the dots Steel · Gold · Blue):
     the lookbook's list gives them as one entry, which THE COLLECTION shows as one model with its dots since N6.
@@ -416,6 +416,7 @@ THE RELEASES and THE CIRCLE the rail's. The content test looks for what the one 
 | `pieces-question-after` | AFTER THE RELEASES, *You said you would be there …*, ONE QUESTION, *release · date*, WHAT WOULD YOU HAVE WANTED?, the three answers, *One tap. You may change your answer until …* | said I'LL BE THERE, did not come | C30, plus-14 |
 | `pieces-turn-passed` | YOUR RELEASES: *release*, LIVE RELEASE · TURN PASSED, *Your turn passed before the seal was held.* | a turn passed | C31 (2) |
 | `live-pieces-turn` | YOUR RELEASES: LIVE NOW · YOUR TURN, *It is your turn. Open the release to secure your piece.* | a turn now | C31 (2) |
+| `live-pieces-queued` | (lot M1, W5) YOUR RELEASES: IN THE QUEUE · PLACE *412*, *You are in the queue. Open the release to follow your place.* | waiting for its batch (`queue`) | macro scope W5 |
 | `pieces-empty` | THE CLUB, *A piece registered … opens TITANE …*, its benefits, *No piece is registered …*, EARLY ACCESS and its recall | an account without a piece | C40 (3) |
 | `pieces-loading` | ONE MOMENT… | the pieces being read | C40 (1) |
 | `pieces-failed` | *Your pieces could not be shown just now.* *the reason*, TRY AGAIN | the pieces could not be read | C40 (2) |
@@ -489,6 +490,10 @@ ORBES; the sheet's foot link THE COLLECTION to its crumb.
 | `draw-full` | EARLY ACCESS · EVERY PIECE RESERVED, RESERVED DIRECTLY *1 OF 1 PIECE*, *Every piece of this release has been reserved. Entries open to everyone on …: the draw then ranks a waiting list …* | its early access, every piece reserved | C42 (2) |
 | `draw-place-reserved` | PLACE RESERVED, *You reserved a place directly. It is held until … — ORBES Client Services will contact you.*, the contact | a PLATINE account's direct reservation | C42 (2) |
 | `draw-open-full` | ENTRIES OPEN · EVERY PIECE RESERVED, *Every piece of this release has been reserved. You may still enter: …*, ENTER THE DRAW | open, every piece reserved | same pieces (C19) |
+| `draw-open-calendar` | (lot M1, C1) ENTRIES OPEN, ADD TO CALENDAR under the state (its `.ics`, `orbes-draw.ics`), ENTER THE DRAW; the same link on every draw to open or open (early access included), recorded in their states | a draw open, not entered (`draws`) | macro scope C1 |
+| `draw-selected` | (lot M1, F4) the October draw opened to the segment *Founding list*: FOR SELECTED COLLECTORS under the model's line in THE RELEASE, ENTER THE DRAW | `draw-selected`, you (on the list) | macro scope F4 |
+| `draw-selected-not-eligible` | FOR SELECTED COLLECTORS, *This release is for selected collectors.*, *Your ORBES account does not meet the rule of this release.* in place of ENTER THE DRAW | `draw-selected`, the guest (not on it) | macro scope F4 |
+| `draw-selected-signed-out` | FOR SELECTED COLLECTORS; the sign-in's lead *Enter the draw with your ORBES account: sign in, or create one. This release is for selected collectors, one entry per person.* | signed out | macro scope F4 |
 | `live-announced` | LIVE RELEASE, *name*, *type · collection*, *price*, SEE THE MODEL, OPENS IN *dd : hh : mm* (DAYS · HOURS · MINUTES), *day · time* PARIS, FOR *rule*, *quantity · per collector*, THE ROOM OPENS *n* MINUTES BEFORE, *n* COLLECTORS WILL BE THERE, YOUR SIZE, *sizes*, its sentence, I'LL BE THERE, *description*, ADD TO CALENDAR, the drawing rule, THE RELEASES, SOUND ON | announced, signed in | C20, live-04 |
 | `live-announced-signed-out` | the same, I'LL BE THERE opening the sign-in, *Sign in to say you will be there, with your size.* | signed out | C28 (2) |
 | `live-there` | YOU'LL BE THERE · SIZE 17, the sizes, *Another size changes it …*, WITHDRAW | I'LL BE THERE said | C28 (1) |
@@ -537,6 +542,12 @@ button).
 | `room-sign-in` | SIGN IN TO ENTER, *The room is open to …*, the sign-in | live-13 |
 | `room-not-eligible` | the rule and why | live-14 |
 | `live-join` | LIVE NOW, *price · quantity*, *n* IN THE ROOM, *left OF quantity* LEFT, its sentence, YOUR SIZE, ENTER THE LINE | same pieces (no before-capture shows it) |
+| `live-queue` | (lot M1, W2, W5, W6) THE QUEUE, *name*, YOUR PLACE *412*, ESTIMATED ENTRY *19:00* PARIS, ABOUT *11* MIN, *Keep this page open. Your place is kept if you leave and come back.*, LEAVE THE LINE; never a batch, an interval or a batch count | macro scope W5 |
+| `live-queue-paused` | THE QUEUE, YOUR PLACE *12*, THE QUEUE IS PAUSED, *Your place is kept.* | macro scope W5 |
+| `live-queue-admitted` | let in by its batch: the line, YOUR PLACE *150*, *n* AHEAD OF YOU (the line's screen, `live-line`) | macro scope W2 |
+| `live-queue-error` | LEAVE THE LINE tapped twice and refused: the server's words under the place | macro scope W6 |
+| `live-queue-stress` | YOUR PLACE *4999*, ESTIMATED ENTRY *20:54* PARIS, ABOUT *2 H 05* | same pieces |
+| `live-queue-loading` | READING YOUR PLACE, in the place's space (ENTER THE LINE just pressed after the opening, the state's read held) | macro scope W2 |
 | `live-line` | YOUR PLACE *n*, YOU ARE NEXT IN SIZE *s* / *n* AHEAD OF YOU, *left OF quantity LEFT · n IN SIZE s*, *n* HELD PIECES MAY RETURN, its note | live-09 |
 | `live-turn` | YOUR TURN, PRESS AND HOLD THE SEAL, the turn's ring and *mm:ss*, TO SECURE YOUR PIECE, *name · size · price*, *Let go too early …* | live-10 |
 | `live-secured` | SECURED, YOUR PIECE, SECURED AT *time*, *name*, *collection · size*, ADD-ONS (*label*, + *price*, *line*), PAY · *total*, *mm:ss* TO CONFIRM, its note, RELEASE MY PLACE | live-11 |
@@ -586,6 +597,24 @@ Since N8 (C8, C22, C34): the feed's own foot (SCAN ORBES CODE, THE RELEASES, THE
 (SCAN ORBES CODE, THE CIRCLE) gave way to the chrome (the SCAN ring, the rail, the crumb ‹ THE CIRCLE), and the small
 wordmark to the header; on an invitation's card, while answers are taken, YOU ANSWERED is the YES or NO pressed
 (addition 6, views/invitation.ts, N3's card on NOW). The content test lists both (`circleMoves`).
+
+## The emails' pages (lot M1, the stage `email`)
+
+On the demo stage `email` (`NOCTURNE_EMAIL_CONFIG`: the emails' channel on, an SMTP host nothing reaches; a stage never starts the sender), the screens a collector reaches from an email or the sign-in once the emails are on. In the app's chrome on a phone; on a computer in the sign-in page's photograph frame (`views/mail-frame.ts`). The states that write come last: stopped, then the new password, which ends you's sessions.
+
+| State | What it shows | Shown when | Reference |
+|---|---|---|---|
+| `signin-reset-email` | FORGOTTEN PASSWORD, *Enter the email of your ORBES account: a link to choose a new password is sent to it.*, EMAIL, SEND LINK; NO ACCESS TO THIS EMAIL? and ORBES Client Services' way under it | MY PIECES signed out, FORGOTTEN PASSWORD? | macro scope E3 |
+| `signin-reset-sent` | *If an account uses this address, a link is on its way. It works for 30 minutes.* (the same for any address) | SEND LINK | E3 |
+| `reset-new-password` | SET A NEW PASSWORD, *For the ORBES account …*, NEW PASSWORD, NEW PASSWORD, AGAIN, SAVE | `/verify/reset#<email>/<code>` | E3 |
+| `reset-incomplete` | *This link is incomplete. …*, *Ask for a new link: it works once, for 30 minutes.*, SEND A NEW LINK | the page without its fragment (a reload) | E3 |
+| `reset-expired` | the recovery's refusal (`RECOVERY_CODE_INVALID`'s words), SEND A NEW LINK | a link refused | E3 |
+| `reset-done` | *Sign in with your new password.*, SIGN IN with the email filled, the recovery's own sentence | SAVE | E3 |
+| `profile-release-notices` | YOUR PROFILE's last group, EMAILS: EMAIL ME WHEN A RELEASE IS ANNOUNCED (on), its hint | the account sheet, YOUR PROFILE | E2 |
+| `unsubscribe` | STOP THESE EMAILS?, *Release notices: an email each time ORBES announces a release.*, STOP | a release notice's link | E2 |
+| `unsubscribe-founding` | STOP THESE EMAILS?, *The email of the ORBES founding list, which announces the first release.*, STOP | the founding announcement's link | E1 |
+| `unsubscribe-invalid` | *This link could not be read. Open it again from the email it came in.* | a link not the server's | E1, E2 |
+| `unsubscribe-done` | EMAILS STOPPED, *You will no longer receive release notices.*, *To receive them again, switch them on in YOUR PROFILE.* | STOP | E2 |
 
 ## Kept as they are (out of NOCTURNE's look)
 
@@ -642,7 +671,10 @@ verification app's own.
 | RESERVE A PLACE | a PLATINE or PALLADIUM account in a draw's early access |
 | ENTER THE DRAW / WITHDRAW | entries open / entered |
 | I'LL BE THERE / WITHDRAW | an account the rule lets in, before T0 / said |
-| ADD TO CALENDAR | a LIVE RELEASE announced |
+| ADD TO CALENDAR | a LIVE RELEASE announced; a draw to open or open (lot M1) |
+| LEAVE THE LINE (the queue) | an entry waiting for its batch on a paced release (lot M1) |
+| RESET BY EMAIL (EMAIL, SEND LINK under FORGOTTEN PASSWORD) | the emails' channel and PASSWORD_RESET on (lot M1; off: the step as before) |
+| EMAILS, EMAIL ME WHEN A RELEASE IS ANNOUNCED (YOUR PROFILE) | the emails' channel on (lot M1) |
 | VOTE | a poll option chosen, not voted |
 | YES · NO | an invitation open, a place left (YES disabled when none) |
 | SHOW MORE | more than a page (THE RELEASES' PAST, the circle, a draw's entries) |
@@ -655,12 +687,12 @@ verification app's own.
 ## The desktop states (`desk-*`, since the desktop plan of 2026-10-16)
 
 The same screens on a computer (the stage's **Computer**, above): `DESK_GROUPS` in
-`genome/test/support/nocturne-states.ts`, 248 states beside the phone's 261, after them in `UI_STATES`. Each is either a
+`genome/test/support/nocturne-states.ts`, 272 states beside the phone's 283 (since lot M1), after them in `UI_STATES`. Each is either a
 phone state opened on a computer's window (the same demo, account, address, routes and acts, its `refs` naming its phone
 twin, `phone: <id>`), or a state made for a computer (`refs: ['desktop']`). Its id is `desk-`, then `light-` in light, its
 name, then its window's width unless it is 1440 × 900 (`desk-pieces-orbes-care-1024`, `desk-light-model-1920`). A
 state's `light` stores LIGHT MODE as the app does (`orbes.mode`) before the page opens. Their values are recorded in the
-same baseline (`nocturne-baseline.json`, the desk-* entries), the phone's 261 entries byte for byte as production's.
+same baseline (`nocturne-baseline.json`, the desk-* entries), the phone's entries byte for byte as production's but where lot M1 changed them on purpose (ADD TO CALENDAR on the draws to open or open, the legal pages of `2026-10-21`) and its 22 new states.
 
 | Shard | States | Windows | What it holds |
 |---|---|---|---|
@@ -673,9 +705,10 @@ same baseline (`nocturne-baseline.json`, the desk-* entries), the phone's 261 en
 | `desk-7` | 23 | the three | ORBES CARE and I2 at 1920 × 1080; YOUR PROFILE (`account-profile`) entered, its tastes, and two retired tastes side by side |
 | `desk-8` | 24 | the three, in light | CINEMA in white: NOW, THE RELEASES, THE COLLECTION, a model, a draw, a LIVE RELEASE, a piece's ORBES CARE, IN USE |
 | `desk-9` | 16 | 1440 × 900, in light | The states the review preview could not show, in light: the service failing, the scan's window closing, the three order writes, an answer in MESSAGES and on NOW, THE PRIVATE SALON locked, YOUR WISHLIST signed out and failed, the certificate NO LONGER VALID and NOT FOUND, 600 entries, two retired tastes |
-| `desk-10` | 19 | 1440 × 900 | The room's other screens (the line, secured, CONFIRMED, sold out in a size, its five ends, ENTER THE LINE), a LIVE RELEASE's rules and not eligible, the room not eligible and ready, the after-room's join and its ends |
-| `desk-11` | 22 | 1440 × 900, ORDERS also 1024 × 768 | A result's other answers, a piece's incidents, THE PRIVATE SALON in sizes, the draw's other states, the failures and the pages not found; the full demo's writes last (a transfer code, the ceremony, a piece received, REQUESTED, a draw entered) |
+| `desk-10` | 21 | 1440 × 900 | The room's other screens (the line, secured, CONFIRMED, sold out in a size, its five ends, ENTER THE LINE), a LIVE RELEASE's rules and not eligible, the room not eligible and ready, the after-room's join and its ends; the queue of a paced release, its place and estimate, then paused (lot M1: `desk-live-queue`, `desk-live-queue-paused`, `queue`) |
+| `desk-11` | 25 | 1440 × 900, ORDERS also 1024 × 768 | A result's other answers, a piece's incidents, THE PRIVATE SALON in sizes, the draw's other states (lot M1: ADD TO CALENDAR, `desk-draw-open-calendar`; FOR SELECTED COLLECTORS for one among them and for another, `desk-draw-selected`, `desk-draw-selected-not-eligible`), the failures and the pages not found; the full demo's writes last (a transfer code, the ceremony, a piece received, REQUESTED, a draw entered) |
 | `desk-12` | 20 | 1440 × 900 | The extreme content (`stress`, its ceremony last) and the empty demo |
+| `desk-13` | 19 | 1440 × 900, some in light, two at 1024 × 768 | Lot M1's emails' pages (the stage `email`): RESET BY EMAIL and its sentence, SET A NEW PASSWORD and its incomplete, refused and saved states, YOUR PROFILE's release notices, STOP THESE EMAILS (both links, not recognised, stopped); RESET BY EMAIL, the link's page, the release notices and STOP THESE EMAILS also in light, the link's page and STOP THESE EMAILS at 1024 × 768; the writes last (stopped, then the new password) |
 
 Routes (Playwright's, in the test only) make five states the demo cannot reach: the certificate NO LONGER VALID, THE
 PRIVATE SALON locked (the server's own shape: PLATINE, from 5 pieces), YOUR WISHLIST that could not be read, a warranty
@@ -715,5 +748,5 @@ From `genome/`, with `ORBES_CHROMIUM` set:
 - `npx tsx scripts/parity.ts --stress` — the extreme cases and what overflows in each.
 - `npx tsx scripts/parity.ts --baseline` — the content baseline (recorded once, at N0); `--baseline --states <id,…>`
   records those states only (a state added, or one whose way there changed), every other entry's values kept: the
-  `desk-*` states are recorded this way (`--baseline --states <desk ids>`), the phone's 261 entries checked byte-equal
+  `desk-*` states are recorded this way (`--baseline --states <desk ids>`), the phone's entries checked byte-equal
   after.
