@@ -14,7 +14,8 @@
  *                             never an after-room), to the ACTIVE accounts that asked for them in YOUR PROFILE
  *                             (`email_preferences.release_notices`), test entrants left out (`E2:<release>:<account>`).
  *                             The watermark starts at the scan's first run (set the overlap ahead, so no scan looks
- *                             back before it): nothing announced before is written. Its
+ *                             back before it): nothing announced before is written; it starts so again when the scan
+ *                             has not run for over RELEASE_NOTICE_RESUME_MS (the channel switched off, then on). Its
  *                             words are the release's as its stage has made them public (a LIVE RELEASE is « A LIVE
  *                             RELEASE » before its name's stage), its access rule in words.
  *   E3 PASSWORD_RESET         services/account-recovery.ts requestByEmail.
@@ -50,6 +51,12 @@ import { orderReference, trackingLink } from './orders.js';
 
 /** How far back each scan of the release notices looks behind its watermark (a publication committed late is still seen). */
 export const RELEASE_NOTICE_OVERLAP_MS = 10 * 60_000;
+/**
+ * A watermark this far behind the clock means the scan has not run for that long (the channel switched off, or the
+ * server down): the scan starts again as at its first run, so a channel switched on again never sends a burst of
+ * notices for the releases announced while it was off.
+ */
+export const RELEASE_NOTICE_RESUME_MS = 60 * 60_000;
 /** The releases the founding announcement's panel offers, at most. */
 export const ANNOUNCEMENT_RELEASES = 50;
 
@@ -243,20 +250,24 @@ export class EmailTriggers {
   /**
    * The sender's scan (run first in each of its passes while the channel is on): the releases announced since the
    * watermark (less RELEASE_NOTICE_OVERLAP_MS), each to the accounts that asked and have not had its notice; then the
-   * watermark moves to now. Its first run only sets the watermark.
+   * watermark moves to now. Its first run only sets the watermark, as does a run after more than
+   * RELEASE_NOTICE_RESUME_MS without one.
    */
   readonly releaseNotices = async (): Promise<void> => {
     if (!this.email.on) return;
     const now = this.clock();
     const state = await this.db.selectFrom('email_state').select('releases_until').where('id', '=', 1).executeTakeFirst();
+    const ahead = new Date(now.getTime() + RELEASE_NOTICE_OVERLAP_MS);
     if (!state) {
       // Its first run: the watermark set the overlap ahead, so that no scan ever looks back before this one (nothing
       // announced before the channel and the scan existed is written); it moves on with the clock once passed.
-      await this.db
-        .insertInto('email_state')
-        .values({ id: 1, releases_until: new Date(now.getTime() + RELEASE_NOTICE_OVERLAP_MS) })
-        .onConflict((oc) => oc.column('id').doNothing())
-        .execute();
+      await this.db.insertInto('email_state').values({ id: 1, releases_until: ahead }).onConflict((oc) => oc.column('id').doNothing()).execute();
+      return;
+    }
+    if (now.getTime() - state.releases_until.getTime() > RELEASE_NOTICE_RESUME_MS) {
+      // Not run for over an hour (the channel was off, or the server down): started again as at its first run, so
+      // nothing announced meanwhile is written (a release announced during an outage that long gets no notice either).
+      await this.db.updateTable('email_state').set({ releases_until: ahead }).where('id', '=', 1).where('releases_until', '=', state.releases_until).execute();
       return;
     }
     if ((await this.email.kind('RELEASE_NOTICE')).enabled) {

@@ -91,7 +91,7 @@ import { mediaUrl } from './media.js';
 import { knownLocation, linkDropSizes } from './stock.js';
 import { cleanQuestionWords, QuestionService, type AdminQuestion } from './question.js';
 import { releaseFeasibility, type Feasibility, type FeasibilitySize } from './release-stock.js';
-import { cancelReleaseEmails } from './email.js';
+import { cancelMovedAnnouncements, cancelReleaseEmails } from './email.js';
 import { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES, afterRoomTimes, afterRoomTitle, cancelAfterRoom, type AfterRoomSkip } from './after-room.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
@@ -1043,8 +1043,9 @@ export class LiveConsoleService {
   /**
    * Change a LIVE RELEASE until its announcement (409 LIVE_ANNOUNCED after, DROP_CANCELLED once cancelled): any setting;
    * a list given (sizes, add-ons, models, per-tier windows) replaces the release's. The same checks as a creation. A
-   * post of the circle the publication scheduled follows the new times and rule. Audited `drop.live.update` with each
-   * setting before and after; nothing changed, nothing written.
+   * post of the circle the publication scheduled follows the new times and rule; a new opening cancels the founding
+   * announcements queued for the old one (cancelMovedAnnouncements). Audited `drop.live.update` with each setting before
+   * and after (and `emailsCancelled`); nothing changed, nothing written.
    */
   async update(dropId: string, change: LiveSettingsChange, actor: Actor): Promise<AdminLiveRelease> {
     const admin = assertStaff(actor, 'change a release');
@@ -1081,13 +1082,20 @@ export class LiveConsoleService {
       await this.writeLists(tx, id, after, before);
       // The after-room follows: its own settings, and what it takes from the release (written again whatever changed).
       await this.saveAfterRoom(tx, { id, ...this.columns(after) }, after.afterRoom, admin, now);
+      // Its founding announcements queued for the old opening (M1.17, F6) would go at it and say it: cancelled, to be
+      // sent again for the new one.
+      const emails = this.columns(after).opens_at.getTime() !== d.opens_at.getTime() ? await cancelMovedAnnouncements(tx, id, now) : 0;
       const notes: AuditRecordInput[] = [
         {
           actor,
           action: 'drop.live.update',
           targetType: 'drop',
           targetId: id,
-          details: { before: Object.fromEntries(changed.map((k) => [k, a[k]])), after: Object.fromEntries(changed.map((k) => [k, b[k]])) },
+          details: {
+            before: Object.fromEntries(changed.map((k) => [k, a[k]])),
+            after: Object.fromEntries(changed.map((k) => [k, b[k]])),
+            ...(emails > 0 ? { emailsCancelled: emails } : {}),
+          },
         },
       ];
       if (d.published_at) await this.syncCirclePosts(tx, { ...d, ...this.columns(after) } as DropRow, now, actor, notes);

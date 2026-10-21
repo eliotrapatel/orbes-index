@@ -29,10 +29,12 @@
  *
  *   cancel      at send time (lot M1 step M1.17), a row is CANCELLED instead of sent when its person no longer wants it
  *               or can no longer have it: its account is not ACTIVE (locked, or any later deletion path), a release
- *               notice's account stopped them, a founding announcement's pre-registration unsubscribed, or the release
- *               a founding announcement or release notice is about is cancelled, gone or over. OwnerService.lock
- *               cancels the account's QUEUED rows in its own transaction (cancelAccountEmails), the unsubscribe the
- *               person's QUEUED rows of that kind, a release's cancel its QUEUED E1 and E2 rows (cancelReleaseEmails).
+ *               notice's account stopped them, a founding announcement's pre-registration unsubscribed, a reset's
+ *               code is used, replaced or expired, or the release a founding announcement or release notice is about
+ *               is cancelled, gone or over. OwnerService.lock cancels the account's QUEUED rows in its own transaction
+ *               (cancelAccountEmails), the unsubscribe the person's QUEUED rows of that kind, a release's cancel its
+ *               QUEUED E1 and E2 rows (cancelReleaseEmails), a LIVE RELEASE's new opening its QUEUED E1 rows
+ *               (cancelMovedAnnouncements).
  *   scans       the sender's pass first runs the scans registered (addScan): the release notices' watermark (E2,
  *               services/email-triggers.ts), only while the channel is on.
  *   console     the kinds' switches (ADMIN, audited `email.kind.enable` / `.disable`) and words (OPERATOR, audited
@@ -202,6 +204,23 @@ export async function cancelReleaseEmails(tx: Db, dropId: string, now: Date): Pr
   return Number(r.numUpdatedRows ?? 0);
 }
 
+/**
+ * The QUEUED founding announcements of a LIVE RELEASE whose opening moved before its announcement
+ * (LiveConsoleService.update, in its transaction): written for the old opening, at it and saying it, they are CANCELLED
+ * (CANCELLED_WORDS.openingMoved), so the panel shows the release as not scheduled and the ADMIN sends it again. The
+ * number cancelled.
+ */
+export async function cancelMovedAnnouncements(tx: Db, dropId: string, now: Date): Promise<number> {
+  const r = await tx
+    .updateTable('email_outbox')
+    .set({ status: 'CANCELLED', settled_at: now, last_error: CANCELLED_WORDS.openingMoved })
+    .where('status', '=', 'QUEUED')
+    .where('kind', '=', 'FOUNDING_ANNOUNCEMENT')
+    .where('dedupe_key', 'like', `E1:${dropId.toLowerCase()}:%`)
+    .executeTakeFirst();
+  return Number(r.numUpdatedRows ?? 0);
+}
+
 /** Why a row was cancelled (its `last_error`, as the console shows it). */
 export const CANCELLED_WORDS = Object.freeze({
   notActive: 'Cancelled: the account is not active.',
@@ -210,14 +229,18 @@ export const CANCELLED_WORDS = Object.freeze({
   announcement: 'Cancelled: the scheduled announcement was cancelled.',
   releaseCancelled: 'Cancelled: the release was cancelled.',
   releaseOver: 'Cancelled: the release is over.',
+  openingMoved: 'Cancelled: the release’s opening moved.',
+  resetInvalid: 'Cancelled: the reset code is no longer valid.',
 });
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** The release an email is about, from its dedupe key: a founding announcement's (`E1:<id>:…`) or a release notice's (`E2:<id>:…`). */
 function releaseOfRow(row: Pick<OutboxRow, 'kind' | 'dedupe_key'>): string | null {
   const prefix = row.kind === 'FOUNDING_ANNOUNCEMENT' ? 'E1:' : row.kind === 'RELEASE_NOTICE' ? 'E2:' : null;
   if (prefix === null || !row.dedupe_key.startsWith(prefix)) return null;
   const id = row.dedupe_key.slice(prefix.length).split(':')[0] ?? '';
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ? id.toLowerCase() : null;
+  return UUID_RE.test(id) ? id.toLowerCase() : null;
 }
 
 /** A scan the sender runs first in each pass while the channel is on (the release notices' watermark, E2). */
@@ -481,8 +504,9 @@ export class EmailService {
 
   /**
    * Why a claimed row must not go now, or null: its account is no longer ACTIVE (locked, or deleted by any later path),
-   * a release notice's account stopped them, a founding announcement's pre-registration unsubscribed, or the release a
-   * founding announcement or release notice is about is cancelled, gone or over.
+   * a release notice's account stopped them, a founding announcement's pre-registration unsubscribed, a reset's code
+   * (`PASSWORD_RESET:<code>`) is used, revoked or expired, or the release a founding announcement or release notice is
+   * about is cancelled, gone or over.
    */
   private async cancelReason(row: OutboxRow): Promise<string | null> {
     if (row.account_id !== null) {
@@ -498,6 +522,12 @@ export class EmailService {
     if (row.preregistration_id !== null) {
       const p = await this.db.selectFrom('preregistrations').select('unsubscribed_at').where('id', '=', row.preregistration_id).executeTakeFirst();
       if (!p || p.unsubscribed_at !== null) return CANCELLED_WORDS.unsubscribed;
+    }
+    // A reset's code used, replaced (a later request, Client Services' code) or past its 30 minutes: its link is dead.
+    const codeId = row.kind === 'PASSWORD_RESET' ? row.dedupe_key.slice('PASSWORD_RESET:'.length) : null;
+    if (codeId !== null && UUID_RE.test(codeId)) {
+      const c = await this.db.selectFrom('account_recovery_codes').select(['used_at', 'revoked_at', 'expires_at']).where('id', '=', codeId).executeTakeFirst();
+      if (!c || c.used_at !== null || c.revoked_at !== null || c.expires_at.getTime() <= this.clock().getTime()) return CANCELLED_WORDS.resetInvalid;
     }
     const releaseId = releaseOfRow(row);
     if (releaseId !== null) {

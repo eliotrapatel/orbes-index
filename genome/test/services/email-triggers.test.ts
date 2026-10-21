@@ -12,7 +12,9 @@
  *  - E1: now or at the opening, once per release and pre-registration, unsubscribed ones left out, the phrase, the
  *    refusals, CANCEL SCHEDULED, sent again after a cancel; the unsubscribe link; a removal takes its emails with it;
  *  - E1 and E2: a release cancelled (a draw, a LIVE RELEASE) cancels its queued emails; the sender cancels one whose
- *    release is cancelled or over;
+ *    release is cancelled or over; a LIVE RELEASE's opening moved cancels its queued announcements; the watermark left
+ *    over an hour behind starts again;
+ *  - E3: the sender cancels a reset whose code was replaced, used or expired;
  *  - E6: no kind exists for house messages.
  */
 import { randomBytes } from 'node:crypto';
@@ -452,6 +454,73 @@ describe('the emails’ triggers (E1 to E6)', () => {
     await emails().queueAnnouncement(late.id, { when: 'NOW', phrase: announcementPhrase(late.id) }, admin);
     expect(await sendAt(new Date(opensAt.getTime() + 25 * HOUR)).sendDue()).toEqual({ sent: 0, retried: 0, failed: 0, cancelled: 1 });
     expect((await outbox('FOUNDING_ANNOUNCEMENT')).find((r) => r.dedupe_key === `E1:${late.id}:${lea.id}`)).toMatchObject({ status: 'CANCELLED', last_error: CANCELLED_WORDS.releaseOver, sent_at: null });
+  });
+
+  it('E1: a LIVE RELEASE’s opening moved before its announcement cancels the founding announcements queued for the old one; nothing goes at the old opening', async () => {
+    await t.db.deleteFrom('preregistrations').execute();
+    await on('FOUNDING_ANNOUNCEMENT');
+    const lea = await register('Léa');
+    const opensAt = new Date(clock.now().getTime() + 72 * HOUR);
+    const live = await createLiveRelease(f, { opensAt, announceAt: new Date(clock.now().getTime() + 24 * HOUR) });
+    const phrase = announcementPhrase(live.id);
+    expect(await emails().queueAnnouncement(live.id, { when: 'OPENING', phrase }, admin)).toEqual({ queued: 1, notBefore: opensAt });
+    // Another change keeps them.
+    await ctx.services.liveConsole.update(live.id, { title: 'NIGHT II' }, admin);
+    expect((await outbox('FOUNDING_ANNOUNCEMENT')).map((r) => r.status)).toEqual(['QUEUED']);
+    const moved = new Date(opensAt.getTime() + 24 * HOUR);
+    await ctx.services.liveConsole.update(live.id, { opensAt: moved, closesAt: new Date(moved.getTime() + HOUR) }, admin);
+    expect((await outbox('FOUNDING_ANNOUNCEMENT')).map((r) => [r.dedupe_key, r.status, r.last_error, r.settled_at])).toEqual([[`E1:${live.id}:${lea.id}`, 'CANCELLED', CANCELLED_WORDS.openingMoved, clock.now()]]);
+    const updates = (await audits('drop.live.update')).filter((x) => x.target_id === live.id);
+    expect(updates.map((x) => (x.details as { emailsCancelled?: number }).emailsCancelled)).toEqual([undefined, 1]);
+    expect((await emails().announcement()).releases.find((r) => r.id === live.id)).toMatchObject({ emails: { queued: 0, sent: 0, failed: 0, cancelled: 1 }, scheduledAt: null });
+    const sendAt = (at: Date) => new EmailService({ db: t.db, config: { publicOrigin: ORIGIN, email: ON }, unsubscribeKey: new Uint8Array(32), clock: () => at, transport: async () => undefined });
+    expect(await sendAt(opensAt).sendDue()).toEqual({ sent: 0, retried: 0, failed: 0, cancelled: 0 });
+    // Sent again for the new opening: at it, saying it.
+    expect(await emails().queueAnnouncement(live.id, { when: 'OPENING', phrase }, admin)).toEqual({ queued: 1, notBefore: moved });
+    expect((await outbox('FOUNDING_ANNOUNCEMENT')).find((r) => r.status === 'QUEUED')).toMatchObject({ dedupe_key: `E1:${live.id}:${lea.id}:2`, not_before: moved });
+  });
+
+  it('E3: the sender cancels a reset whose code was replaced, used or is past its 30 minutes; it sends the open one', async () => {
+    await on('PASSWORD_RESET');
+    const a = await collector('Iris');
+    await ctx.services.recovery.requestByEmail(a.email);
+    clock.advance(MINUTE);
+    await ctx.services.recovery.requestByEmail(a.email);
+    const sendAt = (at: Date) => new EmailService({ db: t.db, config: { publicOrigin: ORIGIN, email: ON }, unsubscribeKey: new Uint8Array(32), clock: () => at, transport: async () => undefined });
+    expect(await sendAt(clock.now()).sendDue()).toEqual({ sent: 1, retried: 0, failed: 0, cancelled: 1 });
+    let rows = await outbox('PASSWORD_RESET');
+    expect(rows.map((r) => [r.status, r.last_error])).toEqual([
+      ['CANCELLED', CANCELLED_WORDS.resetInvalid],
+      ['SENT', null],
+    ]);
+    // Past its 30 minutes when it is due (a retry late): not sent.
+    clock.advance(MINUTE);
+    await ctx.services.recovery.requestByEmail(a.email);
+    expect(await sendAt(new Date(clock.now().getTime() + 31 * MINUTE)).sendDue()).toEqual({ sent: 0, retried: 0, failed: 0, cancelled: 1 });
+    rows = await outbox('PASSWORD_RESET');
+    expect(rows[2]).toMatchObject({ status: 'CANCELLED', last_error: CANCELLED_WORDS.resetInvalid, sent_at: null });
+  });
+
+  it('E2: a watermark left over an hour behind (the channel switched off, then on) starts again as at the first scan: no burst for the releases announced meanwhile', async () => {
+    await on('RELEASE_NOTICE');
+    const reader = await collector('Iris');
+    await emails().setPreferences(reader.id, { releaseNotices: true }, reader.actor);
+    await t.db.deleteFrom('email_state').execute();
+    await t.db.insertInto('email_state').values({ id: 1, releases_until: new Date(clock.now().getTime() - 3 * HOUR) }).execute();
+    const meanwhile = await poolDraw(f.drops, t.db, { modelId: f.modelId, title: 'The quiet draw', quantity: 3, opensAt: new Date(clock.now().getTime() + 24 * HOUR), closesAt: new Date(clock.now().getTime() + 48 * HOUR), earlyAccessHours: 0 }, admin);
+    clock.advance(1_000);
+    await email().sendDue();
+    expect(await outbox('RELEASE_NOTICE')).toEqual([]);
+    expect((await t.db.selectFrom('email_state').selectAll().executeTakeFirstOrThrow()).releases_until).toEqual(new Date(clock.now().getTime() + RELEASE_NOTICE_OVERLAP_MS));
+    clock.advance(RELEASE_NOTICE_OVERLAP_MS + MINUTE);
+    const next = await poolDraw(f.drops, t.db, { modelId: f.modelId, title: 'The next draw', quantity: 3, opensAt: new Date(clock.now().getTime() + 24 * HOUR), closesAt: new Date(clock.now().getTime() + 48 * HOUR), earlyAccessHours: 0 }, admin);
+    clock.advance(1_000);
+    await email().sendDue();
+    // Every account that asked (earlier cases' too) has the next release's notice; none has the one announced meanwhile.
+    const keys = (await outbox('RELEASE_NOTICE')).map((r) => r.dedupe_key);
+    expect(keys).toContain(`E2:${next.id}:${reader.id}`);
+    expect(keys.every((k) => k.startsWith(`E2:${next.id}:`))).toBe(true);
+    expect(meanwhile.id).not.toBe(next.id);
   });
 
   it('the unsubscribe link: a pre-registration unsubscribed (its queued announcements cancelled), an account’s release notices off; a forged token does nothing; a removal takes its emails with it', async () => {
