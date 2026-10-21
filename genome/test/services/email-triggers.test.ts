@@ -10,7 +10,8 @@
  *    a LIVE RELEASE unnamed before its name's stage, the access rule in words, once per release and account, YOUR
  *    PROFILE's choice turned off cancelling what is queued, the sender cancelling a notice whose account stopped them;
  *  - E1: now or at the opening, once per release and pre-registration, unsubscribed ones left out, the phrase, the
- *    refusals, CANCEL SCHEDULED, sent again after a cancel; the unsubscribe link; a removal takes its emails with it;
+ *    refusals, CANCEL SCHEDULED, sent again after a cancel; one release ever (409 FOUNDING_ALREADY_ANNOUNCED, a cancelled
+ *    one replaced); the unsubscribe link; a removal takes its emails with it;
  *  - E1 and E2: a release cancelled (a draw, a LIVE RELEASE) cancels its queued emails; the sender cancels one whose
  *    release is cancelled or over; a LIVE RELEASE's opening moved cancels its queued announcements; the watermark left
  *    over an hour behind starts again;
@@ -402,6 +403,32 @@ describe('the emails’ triggers (E1 to E6)', () => {
     expect(JSON.stringify(queued)).not.toContain(lea.email);
   });
 
+  it('E1: goes for one release ever: once sent for one, another is refused 409 and the panel offers that one only; cancelled (its release, or every email of it), another may go (lot M1 review)', async () => {
+    await t.db.deleteFrom('preregistrations').execute();
+    await on('FOUNDING_ANNOUNCEMENT');
+    await register('Léa');
+    const opensAt = new Date(clock.now().getTime() + 48 * HOUR);
+    const draw = (title: string) => poolDraw(f.drops, t.db, { modelId: f.modelId, title, quantity: 3, opensAt, closesAt: new Date(opensAt.getTime() + 24 * HOUR), earlyAccessHours: 0 }, admin);
+    const a = await draw('The first');
+    const b = await draw('The second');
+    expect((await emails().announcement()).releases.map((r) => r.id)).toEqual(expect.arrayContaining([a.id, b.id]));
+    expect((await emails().queueAnnouncement(a.id, { when: 'NOW', phrase: announcementPhrase(a.id) }, admin)).queued).toBe(1);
+    // Sent (not only queued): still the one.
+    await t.db.updateTable('email_outbox').set({ status: 'SENT', sent_at: clock.now(), settled_at: clock.now() }).execute();
+    const refused = await refusal(emails().queueAnnouncement(b.id, { when: 'NOW', phrase: announcementPhrase(b.id) }, admin));
+    expect([refused.code, refused.httpStatus]).toEqual(['FOUNDING_ALREADY_ANNOUNCED', 409]);
+    expect((await emails().announcement()).releases.map((r) => r.id)).toEqual([a.id]);
+    // Its own release again: allowed (nobody new is written to twice).
+    expect((await emails().queueAnnouncement(a.id, { when: 'NOW', phrase: announcementPhrase(a.id) }, admin)).queued).toBe(0);
+    // Every email of it cancelled: another release may go.
+    await t.db.updateTable('email_outbox').set({ status: 'CANCELLED', sent_at: null, settled_at: clock.now() }).execute();
+    expect((await emails().queueAnnouncement(b.id, { when: 'OPENING', phrase: announcementPhrase(b.id) }, admin)).queued).toBe(1);
+    expect((await refusal(emails().queueAnnouncement(a.id, { when: 'NOW', phrase: announcementPhrase(a.id) }, admin))).code).toBe('FOUNDING_ALREADY_ANNOUNCED');
+    // Its release cancelled: another may go.
+    await f.drops.cancel(b.id, admin);
+    expect((await emails().queueAnnouncement(a.id, { when: 'NOW', phrase: announcementPhrase(a.id) }, admin)).queued).toBe(1);
+  });
+
   it('E1: refuses a LIVE RELEASE not announced yet sent now (at its opening it may go), an after-room, an unknown or a cancelled release; 409 EMAIL_OFF while the channel is off', async () => {
     await on('FOUNDING_ANNOUNCEMENT');
     const live = await createLiveRelease(f, { opensAt: new Date(clock.now().getTime() + 72 * HOUR), announceAt: new Date(clock.now().getTime() + 24 * HOUR) });
@@ -431,12 +458,17 @@ describe('the emails’ triggers (E1 to E6)', () => {
     const d = await poolDraw(f.drops, t.db, { modelId: f.modelId, title: 'The cancelled draw', quantity: 3, opensAt, closesAt: new Date(opensAt.getTime() + 24 * HOUR), earlyAccessHours: 0 }, admin);
     const live = await createLiveRelease(f, { opensAt: new Date(clock.now().getTime() + 72 * HOUR) });
     const kept = await poolDraw(f.drops, t.db, { modelId: f.modelId, title: 'The kept draw', quantity: 3, opensAt, closesAt: new Date(opensAt.getTime() + 24 * HOUR), earlyAccessHours: 0 }, admin);
-    for (const r of [d, live, kept]) {
+    const queue = async (r: { id: string }) => {
       expect((await emails().queueAnnouncement(r.id, { when: 'OPENING', phrase: announcementPhrase(r.id) }, admin)).queued).toBe(1);
       await email().enqueue(t.db, { kind: 'RELEASE_NOTICE', to: reader.email, accountId: reader.id, dedupeKey: `E2:${r.id}:${reader.id}`, values: {} });
-    }
+    };
+    // One release at a time: the founding announcement goes for one release ever, a cancelled one replaced (lot M1 review).
+    await queue(d);
+    expect((await refusal(emails().queueAnnouncement(live.id, { when: 'OPENING', phrase: announcementPhrase(live.id) }, admin))).code).toBe('FOUNDING_ALREADY_ANNOUNCED');
     await f.drops.cancel(d.id, admin);
+    await queue(live);
     await ctx.services.liveConsole.cancel(live.id, admin);
+    await queue(kept);
     const rows = await outbox();
     const of = (id: string) => rows.filter((r) => r.dedupe_key.includes(id)).map((r) => [r.kind, r.status, r.last_error, r.settled_at]);
     for (const id of [d.id, live.id])

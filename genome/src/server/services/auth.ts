@@ -48,7 +48,7 @@ import { conflict, DomainError, isDomainError, notFound, unauthorized, validatio
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import { randomCrockford } from './claim-codes.js';
-import { matchPreregistration } from './founding-match.js';
+import { lockFoundingAddress, matchPreregistration } from './founding-match.js';
 import type { IssuedSession, SessionInfo, SessionService } from './sessions.js';
 import { insertSignUpProfile, signUpNames, type SignUpHeard } from './sign-up.js';
 import { knownLocation } from './stock.js';
@@ -289,6 +289,8 @@ export class AuthService {
     const now = this.clock();
     try {
       return await inTransaction(this.db, async (tx) => {
+        // The founding list's registration of the same address at the same instant waits, or is waited for (F3).
+        await lockFoundingAddress(tx, email.normalized);
         const row = await tx
           .insertInto('accounts')
           .values({

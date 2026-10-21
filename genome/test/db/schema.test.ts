@@ -1316,7 +1316,7 @@ describe('schema', () => {
     const expiresAt = new Date(Date.now() + 30 * 60_000);
     const staff = await t.db
       .insertInto('account_recovery_codes')
-      .values({ account_id: account.id, code_hash: 'scrypt$x', created_by: admin.id, expires_at: expiresAt, used_at: new Date() })
+      .values({ account_id: account.id, code_hash: 'scrypt$x', created_by: admin.id, expires_at: expiresAt, used_at: sql<Date>`now()` })
       .returning(['issued_via', 'created_by'])
       .executeTakeFirstOrThrow();
     expect(staff).toEqual({ issued_via: 'STAFF', created_by: admin.id });

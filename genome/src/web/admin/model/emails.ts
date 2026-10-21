@@ -42,7 +42,7 @@ export const EMAILS_COPY = Object.freeze({
   subject: 'Subject',
   subjectHint: `One line, at most ${EMAIL_TEMPLATE_SUBJECT_MAX} characters.`,
   body: 'Words',
-  bodyHint: 'Paragraphs apart by an empty line. A paragraph that is only [WORDS]({link}) is the email’s button.',
+  bodyHint: 'Paragraphs apart by an empty line. A paragraph that is only [WORDS]({link}) is the email’s button: its address is one of the links listed, never one written here.',
   placeholders: 'Filled when it is written',
   placeholdersNote: 'Choose one to place it where the cursor is.',
   save: 'Save the words',

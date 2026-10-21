@@ -198,8 +198,15 @@ export const ADVISORY_LOCK = Object.freeze({
   RECEPTION_LINE: 0x4f52_0601,
   /** An account's saved addresses (services/addresses.ts): its limit and its one default, with the account id's first 32 bits as its second part. */
   ACCOUNT_ADDRESSES: 0x4f52_0701,
-  /** A release's links made in one click (services/campaign.ts makeLinks), with the release id's first 32 bits as its second part. */
+  /** The releases' links made in one click (services/campaign.ts makeLinks), one at a time across releases (their codes may share a base). */
   RELEASE_CAMPAIGN: 0x4f52_0801,
+  /** The founding announcement's sends (services/email-triggers.ts queueAnnouncement): one at a time, it goes for one release ever. */
+  FOUNDING_ANNOUNCEMENT: 0x4f52_0901,
+  /**
+   * An address's founding list registration and its account's sign-up (services/founding-match.ts lockFoundingAddress),
+   * with the normalized address's SHA-256, its first 32 bits, as its second part: the two never miss each other.
+   */
+  FOUNDING_ADDRESS: 0x4f52_0902,
 });
 
 /**

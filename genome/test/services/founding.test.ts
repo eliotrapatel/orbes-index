@@ -12,12 +12,14 @@
  *  - the console's reads: the list (filters, emails masked for an AUDITOR), the summary, the CSV in a Shopify import's
  *    columns; the right of access's `foundingList`;
  *  - F4: the segment rule FOUNDING_LIST (matched, live, never a test entrant, negated);
- *  - concurrent registrations of one address make one row (on PGlite always; on PostgreSQL with
- *    ORBES_TEST_POSTGRES_URL, a pool of 8: genome-ci).
+ *  - concurrent registrations of one address make one row, and a registration and a sign-up of one address at once
+ *    are matched (on PGlite always; on PostgreSQL with ORBES_TEST_POSTGRES_URL, a pool of 8: genome-ci).
  */
 import { randomBytes } from 'node:crypto';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { testConfig } from '../../src/server/config.js';
+import { createContext } from '../../src/server/context.js';
 import { closeDb, createDb, type Db } from '../../src/server/db/connection.js';
 import { migrateToLatest } from '../../src/server/db/migrate.js';
 import { AcquisitionService } from '../../src/server/services/acquisition.js';
@@ -87,6 +89,12 @@ describe('FoundingService (plan MACRO M1 §3.1, F2 to F5)', () => {
       [{ ...ok, firstName: '   ' }, { firstName: FOUNDING_WORDS.firstName }],
       [{ ...ok, firstName: 'x'.repeat(81) }, { firstName: FOUNDING_WORDS.firstName }],
       [{ ...ok, firstName: '<b>Léa</b>' }, { firstName: FOUNDING_WORDS.firstName }],
+      // Never an address's shape: it opens every email (lot M1 review).
+      [{ ...ok, firstName: 'https://evil.example/claim' }, { firstName: FOUNDING_WORDS.firstName }],
+      [{ ...ok, firstName: 'WWW.evil.example' }, { firstName: FOUNDING_WORDS.firstName }],
+      [{ ...ok, firstName: 'evil.example/claim' }, { firstName: FOUNDING_WORDS.firstName }],
+      [{ ...ok, firstName: 'Léa 0612' }, { firstName: FOUNDING_WORDS.firstName }],
+      [{ ...ok, firstName: 'lea@evil.example' }, { firstName: FOUNDING_WORDS.firstName }],
       [{ ...ok, country: 'XX' }, { country: FOUNDING_WORDS.country }],
       [{ ...ok, country: 'France' }, { country: FOUNDING_WORDS.country }],
       // Only a ticked box: never a string, never false.
@@ -300,9 +308,11 @@ describe('FoundingService (plan MACRO M1 §3.1, F2 to F5)', () => {
     const lines = csv.body.replace(/^\uFEFF/, '').trim().split(/\r?\n/).map((l) => l.replace(/^"|"$/g, '').split('","').join(','));
     expect(lines[0]).toBe('First Name,Last Name,Email,Accepts Email Marketing,Default Address Country Code,Tags,Note');
     expect(lines).toHaveLength(page.total + 1);
-    expect(lines.some((l) => /,no,FR,founding-list,/.test(l))).toBe(true);
+    // Never a marketing subscriber: the consent covers the founding announcement only (lot M1 review).
+    expect(lines.slice(1).every((l) => /^[^,]*,,[^,]+,no,[A-Z]{2},founding-list,Joined /.test(l))).toBe(true);
+    expect(lines.some((l) => / · unsubscribed \d{4}-\d{2}-\d{2} \d{2}:\d{2} Paris$/.test(l))).toBe(true);
     // A row of the first registrations (several share the harness's first instant, so their order among them is the ids').
-    const first = new RegExp(`^Léa,,[^,]+@example\\.com,(yes|no),FR,founding-list,Joined 2026-10-21 10:00 Paris · consent ${FOUNDING_CONSENT_VERSION} · Direct$`, 'i');
+    const first = new RegExp(`^Léa,,[^,]+@example\\.com,no,FR,founding-list,Joined 2026-10-21 10:00 Paris · consent ${FOUNDING_CONSENT_VERSION}: founding announcement only · Direct( · unsubscribed .*)?$`, 'i');
     expect(lines.slice(1).some((l) => first.test(l))).toBe(true);
     // Removal: ADMIN only.
     const any = page.items[0] as unknown as { id: string };
@@ -386,6 +396,24 @@ for (const backend of BACKENDS) {
       expect(outs.filter((o) => o.outcome === 'ALREADY')).toHaveLength(7);
       expect(await db.selectFrom('preregistrations').select('id').where('email_normalized', '=', 'same@example.com').execute()).toHaveLength(1);
       expect(await db.selectFrom('audit_logs').select('id').where('action', '=', 'founding.register').execute()).toHaveLength(1);
+    });
+
+    it('a registration and a sign-up of one address at once: the row takes the account, whichever commits first (lot M1 review)', async () => {
+      const clock = createManualClock('2026-10-21T08:00:00.000Z');
+      const ctx = await createContext(testConfig(), { db, clock: clock.now });
+      try {
+        for (let i = 0; i < 4; i++) {
+          const address = `race-${i}-${randomBytes(3).toString('hex')}@example.com`;
+          const [, signUp] = await Promise.all([
+            ctx.services.founding.register(person(address), PUBLIC),
+            ctx.services.auth.registerAccount({ email: address, password: PASSWORD, firstName: 'Léa', lastName: 'Martin', country: 'FR' }),
+          ]);
+          const row = await db.selectFrom('preregistrations').select('account_id').where('email_normalized', '=', address).executeTakeFirstOrThrow();
+          expect(row.account_id, address).toBe(signUp.account.id);
+        }
+      } finally {
+        await ctx.close();
+      }
     });
   });
 }

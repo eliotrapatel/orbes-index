@@ -2115,7 +2115,7 @@ export const PHONE_STATES: readonly UiState[] = [
   },
   {
     id: 'reset-expired',
-    title: 'SET A NEW PASSWORD, a link refused (expired, used or replaced): the recovery’s words, SEND A NEW LINK',
+    title: 'SET A NEW PASSWORD, a link refused (expired, used or replaced): said of the link, SEND A NEW LINK',
     refs: ['E3'],
     variant: 'email',
     // An address no account uses: the server's one answer for every refusal, and no guess counted against you's code.
@@ -2597,8 +2597,10 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
     ...desk(1440, 'live-line', 'live-secured', 'live-confirmed', 'live-sold-out-size', 'live-missed', 'live-expired', 'live-released', 'live-left', 'live-removed', 'live-join'),
     ...desk(1440, 'live-rules', 'live-rules-not-eligible', 'room-not-eligible', 'room-ready'),
     ...desk(1440, 'after-room-join', 'after-room-sold-out', 'after-room-closed', 'after-room-ended', 'after-room-over'),
-    // The queue of a paced release (lot M1, W2, W5): the place and its estimate, then paused.
-    ...desk(1440, 'live-queue', 'live-queue-paused'),
+    // The queue of a paced release (lot M1, W2, W5): the place and its estimate, then paused; MY PIECES' long label
+    // (LIVE RELEASE · IN THE QUEUE · PLACE 412) in the computer's column, at both widths.
+    ...desk(1440, 'live-queue', 'live-queue-paused', 'live-pieces-queued'),
+    ...desk(1024, 'live-pieces-queued'),
   ],
   // ── A result's other answers, a piece's incidents, THE PRIVATE SALON in sizes, the draw's other states, the failures ──
   // The full demo's writes (a transfer code, the ceremony, a piece received, REQUESTED, a draw entered) last, in this order;

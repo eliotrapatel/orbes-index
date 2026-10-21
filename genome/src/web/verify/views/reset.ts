@@ -9,7 +9,7 @@
  *   NEW PASSWORD, AGAIN     The same password, to be sure of it.
  *   [ SAVE ]                the code checked by the server (POST /api/v1/account/recover, the recovery's own rules)
  *
- *   refused (expired, used, or replaced by a newer link): the server's RECOVERY_CODE_INVALID words, then SEND A NEW
+ *   refused (expired, used, or replaced by a newer link): ACCOUNT_RESET.refused (said of the link), then SEND A NEW
  *   LINK to the address of the link (RESET BY EMAIL's request, the same sentence for any address); a link without its
  *   address and code says it is incomplete and asks for the address. While RESET BY EMAIL is not offered, ORBES Client
  *   Services' way in its place (FORGOTTEN PASSWORD's sentence and their email).
@@ -47,7 +47,7 @@ export interface ResetView {
 
 type State =
   | { kind: 'form' }
-  /** The link refused by the server (its words), or incomplete (`words` null). */
+  /** The link refused by the server (ACCOUNT_RESET.refused), or incomplete (`words` null). */
   | { kind: 'refused'; words: string | null }
   | { kind: 'sent' }
   | { kind: 'done' };
@@ -156,11 +156,12 @@ class ResetPage {
           const r = await this.deps.api.recoverAccount(link.email, link.code, password.value);
           until = r.transfersPausedUntil;
         } catch (e) {
-          // Expired, used or replaced: the server's words, and a new link offered in the form's place.
+          // Expired, used or replaced: said of the link (the server's words speak of a typed code), and a new link
+          // offered in the form's place.
           if (e instanceof ApiError && e.code === 'RECOVERY_CODE_INVALID') {
             password.value = '';
             again.value = '';
-            this.show({ kind: 'refused', words: e.message });
+            this.show({ kind: 'refused', words: ACCOUNT_RESET.refused });
             return;
           }
           throw e;

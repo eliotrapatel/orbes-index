@@ -198,7 +198,9 @@ export class CampaignService {
   async makeLinks(dropId: string, actor: Actor): Promise<{ made: LinkView[]; campaign: ReleaseCampaign }> {
     const id = this.idOf(dropId);
     const made = await inTransaction(this.db, async (tx) => {
-      await advisoryXactLock(tx, ADVISORY_LOCK.RELEASE_CAMPAIGN, Number.parseInt(id.replace(/-/g, '').slice(0, 8), 16) | 0);
+      // One lock for every release (lot M1 review): two releases opening the same Paris day share their codes' base, so
+      // MAKE THE LINKS on both at once would compute the same free code.
+      await advisoryXactLock(tx, ADVISORY_LOCK.RELEASE_CAMPAIGN);
       const d = await this.release(tx, id);
       if (d.published_at === null) throw notPublished();
       if (d.cancelled_at !== null) throw cancelledRelease();

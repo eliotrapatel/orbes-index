@@ -440,6 +440,35 @@ describe('the emails: outbox, sender, purge, unsubscribe', () => {
     expect(await email.purge(clock.now())).toBe(0);
   });
 
+  it('keeps the links out of the console’s words: a button only on its kind’s bare link placeholder, a link placeholder nowhere else; stored words render without it (lot M1 review)', async () => {
+    const email = service(null);
+    const actor = { type: 'admin' as const, id: adminId };
+    const evil = ['[X](https://evil.example/?{resetLink})', 'Go to https://evil.example/?{resetLink}', '[CHOOSE](https://evil.example/reset)', '[GO {resetLink}]({resetLink})', '[GO]({link})'];
+    for (const body of evil) {
+      await expect(email.setWords('PASSWORD_RESET', { body: `{firstName},\n\n${body}` }, actor), body).rejects.toMatchObject({ code: 'VALIDATION_FAILED', httpStatus: 400 });
+      await expect(email.preview('PASSWORD_RESET', { body }), body).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    }
+    await expect(email.setWords('PASSWORD_RESET', { subject: 'Reset {resetLink}' }, actor)).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(await db.selectFrom('email_templates').selectAll().where('kind', '=', 'PASSWORD_RESET').executeTakeFirst()).toBeUndefined();
+    // The kind's own placeholder, bare, is a button.
+    const kept = await email.setWords('PASSWORD_RESET', { body: '{firstName},\n\n[NEW PASSWORD]({resetLink})' }, actor);
+    expect(kept.words.body).toBe('{firstName},\n\n[NEW PASSWORD]({resetLink})');
+    expect((await email.preview('ORDER_SHIPPED', { body: '[TRACK]({trackingUrl})\n\n[ORDER]({link})' })).text).toContain('TRACK: https://www.laposte.fr/');
+
+    // Words stored before the rule (or written in the database) render without the outside button and without the link.
+    await switchOn('PASSWORD_RESET', { body: `{firstName},\n\n${evil[0]}\n\n${evil[1]}\n\n${evil[2]}\n\n[CHOOSE]({resetLink})` });
+    const reset = `${ORIGIN}/verify/reset#c%40example.com/ABCD-EFGH`;
+    const a = await account();
+    expect(await email.enqueue(db, { kind: 'PASSWORD_RESET', to: a.email, accountId: a.id, dedupeKey: 'E3:r1', values: { firstName: 'Camille', resetLink: reset } })).toMatchObject({ queued: true });
+    const [row] = await outbox();
+    expect(row!.body_html).not.toContain('evil.example/?ABCD');
+    expect(row!.body_html).not.toContain('href="https://evil.example');
+    expect(row!.body_text).toContain('Go to https://evil.example/?\n');
+    expect(row!.body_text.split(reset)).toHaveLength(2);
+    expect(row!.body_text).toContain(`CHOOSE: ${reset}`);
+    expect(row!.body_text).not.toContain('X: ');
+  });
+
   it('signs the unsubscribe links: the kind and the person’s id under the server’s key, refused when changed', () => {
     const email = service(null);
     const id = randomUUID();
@@ -501,7 +530,9 @@ describe('the emails’ words and look (email/render.ts, email/copy.ts)', () => 
     const r = render('DRAW_SELECTED', { firstName: '<img src=x onerror=alert(1)>"&', release: 'The <b>November</b> release', heldUntil: new Date('2026-11-07T18:00:00Z'), link: 'javascript:alert(1)' });
     expect(r.html).not.toContain('<img src=x');
     expect(r.html).not.toContain('<b>November</b>');
-    expect(r.html).toContain('&lt;img src=x onerror=alert(1)&gt;&quot;&amp;,');
+    expect(r.html).toContain('The &lt;b&gt;November&lt;/b&gt; release is drawn');
+    // A first name that is not a name's shape is never written: the greeting reads Hello (lot M1 review).
+    expect(r.text).toContain('\n\nHello,\n\n');
     expect(r.html).not.toContain('javascript:');
     expect(r.html).not.toContain('SEE THE RELEASE');
     expect(r.text).not.toContain('SEE THE RELEASE');
@@ -509,6 +540,12 @@ describe('the emails’ words and look (email/render.ts, email/copy.ts)', () => 
     // A value never breaks the subject's line.
     const s = render('ORDER_CONFIRMED', { orderRef: 'OR-1\r\nBcc: x@example.com' });
     expect(s.subject).toBe('Your order OR-1 Bcc: x@example.com is confirmed');
+  });
+
+  it('writes a first name only in a name’s shape: an address, a link or digits typed as one read Hello (lot M1 review)', () => {
+    const greeting = (firstName: string) => render('RELEASE_NOTICE', { ...EMAIL_SAMPLE_VALUES, firstName }).text.split('\n\n')[1];
+    for (const bad of ['https://evil.example/claim', 'www.evil.example', 'evil.example/x', 'Call 0612345678', 'a@evil.example', 'Visit: evil', '-Camille', 'x'.repeat(41)]) expect(greeting(bad), bad).toBe('Hello,');
+    for (const good of ['Camille', 'Anne-Marie', 'O’Neil', "D'Arcy", 'J. Paul', 'Zoë', '李', 'x'.repeat(40)]) expect(greeting(good), good).toBe(`${good},`);
   });
 
   it('uses the console’s words when it has some: placeholders, paragraphs, line breaks and its own button', () => {

@@ -8,11 +8,23 @@
  *   - Never a test entrant's account (TEST ENTRANTS' pool), never a DELETED one.
  *   - Audited `founding.match` with the pre-registration's id and the account's, never the address (the audit log is
  *     permanent: AuthService's rule).
+ *   - The registration and the sign-up of one address take lockFoundingAddress first, so they never miss each other.
  */
+import { createHash } from 'node:crypto';
 import { sql } from 'kysely';
-import type { Db } from '../db/connection.js';
+import { ADVISORY_LOCK, advisoryXactLock, type Db } from '../db/connection.js';
 import type { Actor } from '../types.js';
 import type { AuditService } from './audit.js';
+
+/**
+ * Serialises, inside `tx`, the founding list's registration of an address and the sign-up of an account with it, taken
+ * before either reads: under READ COMMITTED the two committing at once would otherwise both miss the match (lot M1
+ * review). The lock is keyed on the normalized address's hash, never the address.
+ */
+export async function lockFoundingAddress(tx: Db, emailNormalized: string): Promise<void> {
+  const key = createHash('sha256').update(emailNormalized, 'utf8').digest().readInt32BE(0);
+  await advisoryXactLock(tx, ADVISORY_LOCK.FOUNDING_ADDRESS, key);
+}
 
 /** Where a match was made: at the account's sign-up, or at once when the address registered with an account already. */
 export type FoundingMatchAt = 'SIGN_UP' | 'REGISTER';

@@ -124,10 +124,11 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
   });
 
   // EMAIL ME WHEN A RELEASE IS ANNOUNCED (lot M1 step M1.17, E2): the account's own choice, off until asked; 409
-  // EMAIL_OFF while the channel is off. Turned off, its release notices still queued are cancelled.
+  // EMAIL_OFF while the channel or RELEASE_NOTICE is off (nothing promised that is not delivered). Turned off, its
+  // release notices still queued are cancelled.
   app.get('/api/v1/account/email-preferences', async (request, reply) => {
     const { account } = requireAccount(request);
-    if (!ctx.services.email.on) throw emailOff();
+    if (!(await ctx.services.emails.releaseNoticesOffered())) throw emailOff();
     reply.header('cache-control', 'no-store');
     return ctx.services.emails.preferences(account.id);
   });
@@ -135,7 +136,7 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
   app.put('/api/v1/account/email-preferences', async (request, reply) => {
     const { account } = requireAccount(request);
     const b = parse(emailPreferencesBody, request.body);
-    if (!ctx.services.email.on) throw emailOff();
+    if (!(await ctx.services.emails.releaseNoticesOffered())) throw emailOff();
     reply.header('cache-control', 'no-store');
     return ctx.services.emails.setPreferences(account.id, { releaseNotices: b.releaseNotices }, accountActor(request));
   });

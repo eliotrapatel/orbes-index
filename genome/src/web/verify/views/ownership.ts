@@ -664,7 +664,8 @@ export class OwnershipPanel {
     if (step === 'contact') {
       return [
         title,
-        ...(this.resetByEmail ? [this.text(ACCOUNT_RESET.lead), this.resetSentLine() ?? this.resetForm(), h('p', { class: 'n-g n-lb n-own__other', text: ACCOUNT_RESET.other })] : []),
+        // Once sent, the field's lead goes with the field: the sentence alone says what happens.
+        ...(this.resetByEmail ? [this.state.resetSent ? null : this.text(ACCOUNT_RESET.lead), this.resetSentLine() ?? this.resetForm(), h('p', { class: 'n-g n-lb n-own__other', text: ACCOUNT_RESET.other })] : []),
         this.text(ACCOUNT_PASSWORD.forgottenLead),
         this.deps.contact ? contactLines(this.deps.contact, CONTACT) : null,
         this.action(ACCOUNT_PASSWORD.haveCode, () => this.setRecover('code'), { outline: true, extraClass: 'n-own__action--recover' }),
@@ -714,7 +715,8 @@ export class OwnershipPanel {
     if (step === 'contact') {
       return [
         title,
-        ...(this.resetByEmail ? [this.text(ACCOUNT_RESET.lead), this.resetSentLine() ?? this.resetForm(), h('p', { class: 'ownership__meta micro soft ownership__other', text: ACCOUNT_RESET.other })] : []),
+        // Once sent, the field's lead goes with the field: the sentence alone says what happens.
+        ...(this.resetByEmail ? [this.state.resetSent ? null : this.text(ACCOUNT_RESET.lead), this.resetSentLine() ?? this.resetForm(), h('p', { class: 'ownership__meta micro soft ownership__other', text: ACCOUNT_RESET.other })] : []),
         this.text(ACCOUNT_PASSWORD.forgottenLead),
         this.deps.contact ? contactBlock(this.deps.contact) : null,
         h('div', { class: 'ownership__actions ownership__actions--stack' }, this.vaultTextButton(ACCOUNT_PASSWORD.haveCode, () => this.setRecover('code')), back),

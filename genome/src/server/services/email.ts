@@ -45,7 +45,7 @@
  * services/owners.ts's; the console's Emails page is lot M1 step M1.18's.
  */
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
-import { sql, type Selectable } from 'kysely';
+import { sql, type Insertable, type Selectable } from 'kysely';
 import { fromBase64Url, utf8 } from '../../core/bytes.js';
 import type { AppConfig } from '../config.js';
 import { deriveSubkey } from '../crypto/secretbox.js';
@@ -54,7 +54,7 @@ import { EMAIL_DEDUPE_MAX, EMAIL_ERROR_MAX, EMAIL_KINDS, EMAIL_TEMPLATE_BODY_MAX
 import { conflict, forbidden, notFound, validationError } from '../errors.js';
 import type { AuditService } from './audit.js';
 import { EMAIL_DEFAULTS, EMAIL_SAMPLE_VALUES, OPT_IN_KINDS, type EmailWords } from '../email/copy.js';
-import { renderEmail, type EmailValues, type RenderedEmail } from '../email/render.js';
+import { linkRuleBreak, renderEmail, type EmailValues, type RenderedEmail } from '../email/render.js';
 import { buildMessage, isMailAddress, SmtpError, sendSmtp, type SmtpEnvelope, type SmtpOptions } from '../email/smtp.js';
 import { makePage, noopLogger, pageOffset, systemClock, type Actor, type Clock, type Logger, type Page, type PageRequest } from '../types.js';
 
@@ -69,6 +69,9 @@ export const EMAIL_SENDER = Object.freeze({
   /** A pass tries no further email once this long has passed since its claim (half the lease); the rest are given back. */
   passMs: 5 * 60_000,
 });
+
+/** Rows a multi-row INSERT of enqueueMany writes at most (about 5,500 parameters, far under PostgreSQL's 65,535). */
+export const ENQUEUE_CHUNK = 500;
 
 /** An email is erased this many days after it was sent, failed or was cancelled (the privacy policy's 90 days). */
 export const EMAIL_RETENTION_DAYS = 90;
@@ -325,6 +328,7 @@ export class EmailService {
    */
   async preview(kind: EmailKind, words?: Partial<EmailWords>, values?: EmailValues): Promise<RenderedEmail> {
     knownKind(kind);
+    linksKept(kind, words ?? {});
     const current = (await this.kind(kind)).words;
     const sampleId = '00000000-0000-4000-8000-000000000000';
     return renderEmail({
@@ -348,7 +352,9 @@ export class EmailService {
 
   /**
    * Several emails at once (a draw's places, the founding announcement), in `db`'s transaction: each kind's switch and
-   * words read once. One result per input, in their order.
+   * words read once, then the rows written ENQUEUE_CHUNK at a time (one multi-row INSERT … ON CONFLICT (dedupe_key) DO
+   * NOTHING each, so a list of thousands is a few statements, lot M1 review). One result per input, in their order; a key
+   * given twice is written once, its second a DUPLICATE.
    */
   async enqueueMany(db: Db, inputs: readonly EnqueueInput[]): Promise<EnqueueResult[]> {
     const checked = inputs.map((input) => {
@@ -363,21 +369,40 @@ export class EmailService {
     if (inputs.length === 0) return [];
     return inTransaction(db, async (tx) => {
       const kinds = new Map<EmailKind, EmailKindWords>();
-      const out: EnqueueResult[] = [];
-      for (const { input, subjectId } of checked) {
+      const out: EnqueueResult[] = new Array(checked.length);
+      const rows: { at: number; row: Insertable<EmailOutboxTable> }[] = [];
+      const now = this.clock();
+      for (const [at, { input, subjectId }] of checked.entries()) {
         let kind = kinds.get(input.kind);
         if (!kind) {
           kind = await this.kind(input.kind, tx);
           kinds.set(input.kind, kind);
         }
-        out.push(await this.write(tx, input, subjectId, kind));
+        const row = this.rowOf(input, subjectId, kind, now);
+        if ('reason' in row) out[at] = row;
+        else rows.push({ at, row });
+      }
+      for (let i = 0; i < rows.length; i += ENQUEUE_CHUNK) {
+        const chunk = rows.slice(i, i + ENQUEUE_CHUNK);
+        const written = await tx
+          .insertInto('email_outbox')
+          .values(chunk.map((c) => c.row))
+          .onConflict((oc) => oc.column('dedupe_key').doNothing())
+          .returning(['id', 'dedupe_key'])
+          .execute();
+        const ids = new Map(written.map((w) => [w.dedupe_key, w.id]));
+        for (const c of chunk) {
+          const id = ids.get(c.row.dedupe_key);
+          ids.delete(c.row.dedupe_key);
+          out[c.at] = id !== undefined ? { queued: true, id } : { queued: false, reason: 'DUPLICATE' };
+        }
       }
       return out;
     });
   }
 
-  /** One email rendered and written, unless its kind is off, its address cannot be carried or its key was used. */
-  private async write(tx: Db, input: EnqueueInput, subjectId: string | null, kind: EmailKindWords): Promise<EnqueueResult> {
+  /** One email's row, rendered, or why it is not written: its kind is off or its address cannot be carried. */
+  private rowOf(input: EnqueueInput, subjectId: string | null, kind: EmailKindWords, now: Date): Insertable<EmailOutboxTable> | Extract<EnqueueResult, { queued: false }> {
     if (!kind.enabled) return { queued: false, reason: 'KIND_OFF' };
     const to = input.to.trim();
     if (!isMailAddress(to)) return { queued: false, reason: 'ADDRESS' };
@@ -389,24 +414,18 @@ export class EmailService {
       origin: this.config.publicOrigin,
       unsubscribeUrl: unsubscribe,
     });
-    const row = await tx
-      .insertInto('email_outbox')
-      .values({
-        kind: input.kind,
-        dedupe_key: input.dedupeKey,
-        account_id: input.accountId ?? null,
-        preregistration_id: input.preregistrationId ?? null,
-        to_address: to,
-        subject: rendered.subject,
-        body_text: rendered.text,
-        body_html: rendered.html,
-        not_before: input.notBefore ?? this.clock(),
-        created_at: this.clock(),
-      })
-      .onConflict((oc) => oc.column('dedupe_key').doNothing())
-      .returning('id')
-      .executeTakeFirst();
-    return row ? { queued: true, id: row.id } : { queued: false, reason: 'DUPLICATE' };
+    return {
+      kind: input.kind,
+      dedupe_key: input.dedupeKey,
+      account_id: input.accountId ?? null,
+      preregistration_id: input.preregistrationId ?? null,
+      to_address: to,
+      subject: rendered.subject,
+      body_text: rendered.text,
+      body_html: rendered.html,
+      not_before: input.notBefore ?? now,
+      created_at: now,
+    };
   }
 
   /** The id an email one may stop is keyed by (its unsubscribe link): the pre-registration's (E1), the account's (E2). */
@@ -672,13 +691,16 @@ export class EmailService {
 
   /**
    * A kind's words (OPERATOR): a subject (one line, 1 to 150 characters) and a body (1 to 5,000 characters), each null
-   * for the default words; a part left out is kept. Audited `email.template.update` with which parts changed.
+   * for the default words; a part left out is kept. Links are not editable: a button's address is exactly one of the
+   * kind's link placeholders and a link placeholder is nowhere else (400 VALIDATION_FAILED otherwise, email/render.ts
+   * linkRuleBreak). Audited `email.template.update` with which parts changed.
    */
   async setWords(kind: EmailKind, input: { subject?: string | null; body?: string | null }, actor: Actor): Promise<EmailKindWords> {
     const by = adminOf(actor);
     const k = knownKind(kind);
     const subject = input.subject === undefined ? undefined : input.subject === null ? null : cleanSubject(input.subject);
     const body = input.body === undefined ? undefined : input.body === null ? null : cleanBody(input.body);
+    linksKept(k, { subject, body });
     return inTransaction(this.db, async (tx) => {
       const row = await tx.selectFrom('email_templates').select(['subject', 'body']).where('kind', '=', k).forUpdate().executeTakeFirst();
       const next = { subject: subject === undefined ? row?.subject ?? null : subject, body: body === undefined ? row?.body ?? null : body };
@@ -838,6 +860,12 @@ function cleanBody(v: unknown): string {
   const t = typeof v === 'string' ? v.replace(/\r\n?/g, '\n').trim() : '';
   if (t.length < 1 || t.length > EMAIL_TEMPLATE_BODY_MAX) throw validationError(`A body has 1 to ${EMAIL_TEMPLATE_BODY_MAX.toLocaleString('en-GB')} characters.`);
   return t;
+}
+
+/** 400 VALIDATION_FAILED when the console's words would put an address of their own in the email (linkRuleBreak). */
+function linksKept(kind: EmailKind, words: Partial<{ subject: string | null; body: string | null }>): void {
+  const why = linkRuleBreak(kind, { subject: words.subject ?? undefined, body: words.body ?? undefined });
+  if (why !== null) throw validationError(why);
 }
 
 function outboxEntry(r: Pick<OutboxRow, 'id' | 'kind' | 'to_address' | 'subject' | 'status' | 'attempts' | 'last_error' | 'not_before' | 'created_at' | 'sent_at' | 'settled_at' | 'account_id' | 'preregistration_id'>): OutboxEntry {

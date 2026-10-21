@@ -212,7 +212,7 @@ describe('an email’s HTML in the console, never as markup (model/email-frame.t
   const rendered = renderEmail({
     kind: 'FOUNDING_ANNOUNCEMENT',
     words: EMAIL_DEFAULTS.FOUNDING_ANNOUNCEMENT,
-    values: { firstName: 'Léa <b>&', release: 'The first draw', opensAt: new Date('2026-11-05T18:00:00.000Z'), link: 'https://verify.theorbes.com/verify/releases/x' },
+    values: { firstName: 'Léa', release: 'The <b>first</b> & only draw', opensAt: new Date('2026-11-05T18:00:00.000Z'), link: 'https://verify.theorbes.com/verify/releases/x' },
     origin: 'https://verify.theorbes.com',
     unsubscribeUrl: 'https://verify.theorbes.com/verify/unsubscribe#f.x',
   });
@@ -226,8 +226,8 @@ describe('an email’s HTML in the console, never as markup (model/email-frame.t
     expect(body.attrs.class).toBe('o-ground');
     expect(body.attrs.style).toContain('background:#0a0a0a');
     const words = texts(body);
-    expect(words).toContain('Léa <b>&,');
-    expect(words).toContain('The first draw opens Thursday 5 November at 19:00, Paris time.');
+    expect(words).toContain('Léa,');
+    expect(words).toContain('The <b>first</b> & only draw opens Thursday 5 November at 19:00, Paris time.');
     expect(all(body, 'a').map((a) => a.attrs.href)).toEqual(['https://verify.theorbes.com/verify/releases/x', 'https://verify.theorbes.com/verify/unsubscribe#f.x']);
     expect(all(body, 'img').map((i) => i.attrs.src)).toEqual(['https://verify.theorbes.com/api/v1/email/monogram.png']);
     expect(all(doc, 'script')).toEqual([]);

@@ -48,7 +48,8 @@
  *            answer (202) for any address. For an ACTIVE account that is no
  *            test entrant, at most RESET_REQUEST_LIMIT (3) per rolling hour
  *            (counted from the audit `account.recovery_code.request`, under
- *            the account's row lock): the open code revoked, a new one issued
+ *            the account's row lock): the open code revoked (never Client
+ *            Services' while it is open: then nothing), a new one issued
  *            `issued_via` EMAIL (by no one), and the email PASSWORD_RESET
  *            written in the same transaction with the link
  *            …/verify/reset#<email>/<code> (in the fragment: never in a log
@@ -223,7 +224,9 @@ export class AccountRecoveryService {
    * offered (the same for every address). The code is hashed first, whatever the address, so the slowest part of a
    * request (scrypt) is the same for every address; a known ACTIVE account's request still does more (its row lock, the
    * hourly count, the code and the email written), so the response time is not claimed to be the same. A request revokes
-   * the account's open code, an ADMIN's included: one code is open per account (R14), at most RESET_REQUEST_LIMIT times an hour.
+   * the account's open code (one code is open per account, R14), at most RESET_REQUEST_LIMIT times an hour, except an
+   * open code of Client Services (STAFF, not expired): then nothing is issued nor sent, so whoever knows the address
+   * cannot cancel the code being read to the collector (lot M1 review, THREAT-MODEL AG).
    */
   async requestByEmail(address: unknown, meta: ClientMeta = {}): Promise<void> {
     if (!(await this.resetByEmail())) throw emailOff();
@@ -249,6 +252,17 @@ export class AccountRecoveryService {
         .where('occurred_at', '>', since)
         .executeTakeFirstOrThrow();
       if (Number(asked.n) >= RESET_REQUEST_LIMIT) return;
+      // Client Services' code, open and not expired, stays: the request issues nothing.
+      const staff = await tx
+        .selectFrom('account_recovery_codes')
+        .select('id')
+        .where('account_id', '=', a.id)
+        .where('issued_via', '=', 'STAFF')
+        .where('used_at', 'is', null)
+        .where('revoked_at', 'is', null)
+        .where('expires_at', '>', now)
+        .executeTakeFirst();
+      if (staff) return;
       const replaced = await tx
         .updateTable('account_recovery_codes')
         .set({ revoked_at: now })

@@ -6,9 +6,13 @@
  *
  *   E1 FOUNDING_ANNOUNCEMENT  the console's Send the founding announcement (ADMIN, the phrase SEND <8>): one published
  *                             release, sent now or at its opening (`not_before` its `opens_at`, a draw's entries' opening
- *                             too), to every pre-registration not unsubscribed, once per release and pre-registration
- *                             (`E1:<release>:<pre-registration>`; again after a cancel, `…:<n>`). CANCEL SCHEDULED cancels
- *                             what is still QUEUED. Audited `email.announcement.queue` / `.cancel` with the counts (F6).
+ *                             too), to every pre-registration not unsubscribed, once per pre-registration
+ *                             (`E1:<release>:<pre-registration>`; again after a cancel, `…:<n>`). It goes for ONE release
+ *                             ever, the first (E1, F6 and the consent: « when the first release opens »; lot M1 review):
+ *                             once a release that is not cancelled has one not CANCELLED, another release is refused
+ *                             (409 FOUNDING_ALREADY_ANNOUNCED) and the panel offers that release only. CANCEL SCHEDULED
+ *                             cancels what is still QUEUED. Audited `email.announcement.queue` / `.cancel` with the
+ *                             counts (F6).
  *   E2 RELEASE_NOTICE         the sender's scan (EmailService.addScan): each release announced since the watermark
  *                             (`email_state.releases_until`; a draw at its publication, a LIVE RELEASE at its announcement,
  *                             never an after-room), to the ACTIVE accounts that asked for them in YOUR PROFILE
@@ -39,7 +43,7 @@
  * notices stopped, their QUEUED emails cancelled) are here too. The same answer for any token.
  */
 import { sql } from 'kysely';
-import { inTransaction, uuidArray, type Db } from '../db/connection.js';
+import { ADVISORY_LOCK, advisoryXactLock, inTransaction, uuidArray, type Db } from '../db/connection.js';
 import type { DropRow, EmailKind, OrderRow, OrderStatus } from '../db/schema.js';
 import { conflict, notFound, validationError } from '../errors.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
@@ -145,6 +149,14 @@ export class EmailTriggers {
     this.audit = deps.audit;
     this.origin = deps.publicOrigin;
     this.clock = deps.clock ?? systemClock;
+  }
+
+  /**
+   * Whether YOUR PROFILE offers EMAIL ME WHEN A RELEASE IS ANNOUNCED: the channel on and RELEASE_NOTICE switched on, so
+   * nothing is promised that is not delivered (the routes answer 409 EMAIL_OFF otherwise, as RESET BY EMAIL does).
+   */
+  async releaseNoticesOffered(): Promise<boolean> {
+    return this.writes(this.db, 'RELEASE_NOTICE');
   }
 
   /** Whether a kind would be written now: the channel on and the kind switched on (read in `tx`). */
@@ -405,13 +417,35 @@ export class EmailTriggers {
 
   // ── E1: the founding announcement ────────────────────────────────────────
 
-  /** The founding announcement's panel: the channel, the switch, its reach, and the releases it may announce. */
+  /**
+   * The release the founding announcement went for, if any: a release not cancelled with a founding announcement that is
+   * not CANCELLED (it goes for one release ever). Rows are erased 90 days after they settle (EMAIL_RETENTION_DAYS): by
+   * then that first release is long over.
+   */
+  private async announcedRelease(db: Db): Promise<string | null> {
+    const r = await db
+      .selectFrom('email_outbox as o')
+      .innerJoin('drops as d', (j) => j.on(sql<boolean>`d.id::text = split_part(o.dedupe_key, ':', 2)`))
+      .select('d.id')
+      .where('o.kind', '=', 'FOUNDING_ANNOUNCEMENT')
+      .where('o.dedupe_key', 'like', 'E1:%')
+      .where('o.status', '<>', 'CANCELLED')
+      .where('d.cancelled_at', 'is', null)
+      .orderBy('o.created_at')
+      .limit(1)
+      .executeTakeFirst();
+    return r?.id ?? null;
+  }
+
+  /** The founding announcement's panel: the channel, the switch, its reach, and the releases it may announce (only the one it went for, once it went). */
   async announcement(): Promise<AnnouncementState> {
     const now = this.clock();
     const reach = await this.db.selectFrom('preregistrations').select((eb) => eb.fn.countAll<number>().as('n')).where('unsubscribed_at', 'is', null).executeTakeFirstOrThrow();
+    const announced = await this.announcedRelease(this.db);
     const rows = await this.db
       .selectFrom('drops')
       .select(RELEASE_COLUMNS)
+      .$if(announced !== null, (q) => q.where('id', '=', announced!))
       .where('published_at', 'is not', null)
       .where('cancelled_at', 'is', null)
       .where('parent_drop_id', 'is', null)
@@ -471,8 +505,14 @@ export class EmailTriggers {
   /**
    * Send the founding announcement (ADMIN, the phrase SEND <8>): to every pre-registration not unsubscribed that has not
    * had it for this release (queued, sent or failed), now or at the release's opening. 409 EMAIL_OFF, EMAIL_KIND_OFF, a
-   * release not published, cancelled or over, or a LIVE RELEASE not announced yet sent now; 404 for an after-room or an
-   * unknown release. Audited `email.announcement.queue` with the counts, never an address.
+   * release not published, cancelled or over, a LIVE RELEASE not announced yet sent now, or FOUNDING_ALREADY_ANNOUNCED
+   * when it went for another release that is not cancelled (one release ever); 404 for an after-room or an unknown
+   * release. Audited `email.announcement.queue` with the counts, never an address.
+   *
+   * The release's row is read FOR KEY SHARE, never FOR UPDATE: a draw's ENTER and a LIVE RELEASE's engine and entries
+   * keep going while the list is written (DropService.cancel and LiveConsoleService.lock, FOR UPDATE, still wait for it,
+   * and the sender cancels at send time what a later change makes wrong). Two sends wait for each other on the
+   * FOUNDING_ANNOUNCEMENT advisory lock; the rows go in chunks (EmailService.enqueueMany).
    */
   async queueAnnouncement(dropId: string, input: { when: 'NOW' | 'OPENING'; phrase: unknown }, actor: Actor): Promise<{ queued: number; notBefore: Date }> {
     if (typeof dropId !== 'string' || !UUID_RE.test(dropId)) throw releaseNotFound();
@@ -482,14 +522,19 @@ export class EmailTriggers {
     if (input.when !== 'NOW' && input.when !== 'OPENING') throw validationError('Send it now or at the release’s opening.');
     if (!this.email.on) throw emailOff();
     return inTransaction(this.db, async (tx) => {
+      await advisoryXactLock(tx, ADVISORY_LOCK.FOUNDING_ANNOUNCEMENT);
       const now = this.clock();
-      const d = await tx.selectFrom('drops').select(RELEASE_COLUMNS).where('id', '=', id).forUpdate().executeTakeFirst();
+      const d = await tx.selectFrom('drops').select(RELEASE_COLUMNS).where('id', '=', id).forKeyShare().executeTakeFirst();
       if (!d || d.parent_drop_id !== null) throw releaseNotFound();
       if (!d.published_at) throw conflict('RELEASE_NOT_PUBLISHED', 'Publish the release first.');
       if (d.cancelled_at) throw conflict('DROP_CANCELLED', 'This release is cancelled.');
       if (d.closes_at.getTime() <= now.getTime() || d.ended_at || d.drawn_at) throw conflict('RELEASE_OVER', 'This release is over.');
       if (input.when === 'NOW' && d.mode === 'LIVE' && !isAnnouncedRow(d, now)) throw conflict('RELEASE_NOT_ANNOUNCED', 'This release is not announced yet: send it at its opening.');
       if (!(await this.email.kind('FOUNDING_ANNOUNCEMENT', tx)).enabled) throw kindOff('the founding announcement');
+      const announced = await this.announcedRelease(tx);
+      if (announced !== null && announced !== d.id) {
+        throw conflict('FOUNDING_ALREADY_ANNOUNCED', 'The founding announcement went for another release: it goes for one release only, the first.');
+      }
       const notBefore = input.when === 'OPENING' && d.opens_at.getTime() > now.getTime() ? d.opens_at : now;
       const prefix = `E1:${d.id}:`;
       const people = await tx

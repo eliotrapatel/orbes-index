@@ -5,7 +5,8 @@
  *    409 EMAIL_OFF while it is not, then 202 for any address; an ACTIVE account's code issued `EMAIL` by no one and sent
  *    as a link with the code in the fragment, entered through the existing /recover; at most 3 an hour; a LOCKED account
  *    and a test entrant get nothing; Client Services' path unchanged;
- *  - E2, YOUR PROFILE: GET and PUT /api/v1/account/email-preferences (409 EMAIL_OFF while off, signed in only);
+ *  - E2, YOUR PROFILE: GET and PUT /api/v1/account/email-preferences (409 EMAIL_OFF while the channel or RELEASE_NOTICE
+ *    is off, signed in only);
  *  - unsubscribe: GET reads a token's kind, POST stops it, from the page (JSON) or a mail client's one click (a form, any
  *    origin, no cookie), the same answer for any token;
  *  - the console's routes: roles, the words, the switch, the preview, a test to oneself (409 EMAIL_OFF while off), the
@@ -118,7 +119,7 @@ describe('the emails’ routes while the channel is on', () => {
     expect(errorOf(await anon.post('/api/v1/account/recover', { email: link.email, recoveryCode: link.code, newPassword: `${NEW_PASSWORD} again` })).code).toBe('RECOVERY_CODE_INVALID');
   });
 
-  it('E3: at most 3 an hour per account; a new one revokes the open one; a LOCKED account and a test entrant get nothing; Client Services’ code still works', async () => {
+  it('E3: at most 3 an hour per account; a new one revokes the open one; a LOCKED account and a test entrant get nothing; Client Services’ code still works and a reset by email never cancels it', async () => {
     const anon = h.client({ ip: '198.51.100.22' });
     const { email } = await accountClient(h);
     const account = await h.ctx.db.selectFrom('accounts').select('id').where('email', '=', email).executeTakeFirstOrThrow();
@@ -144,6 +145,12 @@ describe('the emails’ routes while the channel is on', () => {
     const issued = safeJson(await cs.post(`/api/admin/owners/${account.id}/recovery-code`)) as { recoveryCode: string };
     expect(issued.recoveryCode).toMatch(/^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
     expect((await h.ctx.db.selectFrom('account_recovery_codes').select('issued_via').where('account_id', '=', account.id).where('revoked_at', 'is', null).where('used_at', 'is', null).execute()).map((c) => c.issued_via)).toEqual(['STAFF']);
+    // While it is open, a reset by email issues nothing: it neither cancels it nor sends anything (lot M1 review).
+    h.clock.advance(60_000);
+    const sentBefore = (await outbox('PASSWORD_RESET')).length;
+    expect((await anon.post('/api/v1/account/reset-request', { email })).statusCode).toBe(202);
+    expect((await outbox('PASSWORD_RESET')).length).toBe(sentBefore);
+    expect((await h.ctx.db.selectFrom('account_recovery_codes').select('issued_via').where('account_id', '=', account.id).where('revoked_at', 'is', null).where('used_at', 'is', null).execute()).map((c) => c.issued_via)).toEqual(['STAFF']);
     expect((await anon.post('/api/v1/account/recover', { email, recoveryCode: issued.recoveryCode, newPassword: NEW_PASSWORD })).statusCode).toBe(200);
 
     // Locked: nothing. A test entrant: nothing.
@@ -158,9 +165,15 @@ describe('the emails’ routes while the channel is on', () => {
     expect((await outbox('PASSWORD_RESET')).length).toBe(count);
   });
 
-  it('E2: YOUR PROFILE’s release notices, signed in only, off until asked', async () => {
+  it('E2: YOUR PROFILE’s release notices, signed in only, off until asked; offered only once RELEASE_NOTICE is on (409 EMAIL_OFF before)', async () => {
     expect((await h.client().get('/api/v1/account/email-preferences')).statusCode).toBe(401);
     const { client } = await accountClient(h);
+    // The channel on, RELEASE_NOTICE off: nothing is promised (lot M1 review).
+    for (const res of [await client.get('/api/v1/account/email-preferences'), await client.request('PUT', '/api/v1/account/email-preferences', { body: { releaseNotices: true } })]) {
+      expect([res.statusCode, errorOf(res).code]).toEqual([409, 'EMAIL_OFF']);
+    }
+    const admin = await adminClient(h, 'ADMIN');
+    expect((await admin.request('PUT', '/api/admin/email/kinds/RELEASE_NOTICE/enabled', { body: { enabled: true } })).statusCode).toBe(200);
     const read = await client.get('/api/v1/account/email-preferences');
     expect(read.statusCode).toBe(200);
     expect(read.headers['cache-control']).toBe('no-store');
@@ -176,6 +189,7 @@ describe('the emails’ routes while the channel is on', () => {
   it('unsubscribe: GET names what a token stops; POST stops it from the page or a mail client’s one click, the same answer for any token', async () => {
     const { client, email } = await accountClient(h);
     const id = (await h.ctx.db.selectFrom('accounts').select('id').where('email', '=', email).executeTakeFirstOrThrow()).id;
+    expect((await (await adminClient(h, 'ADMIN')).request('PUT', '/api/admin/email/kinds/RELEASE_NOTICE/enabled', { body: { enabled: true } })).statusCode).toBe(200);
     await client.request('PUT', '/api/v1/account/email-preferences', { body: { releaseNotices: true } });
     const token = h.ctx.services.email.unsubscribeToken('RELEASE_NOTICE', id);
     const anon = h.client({ origin: null });

@@ -14,12 +14,17 @@
  *
  * Every value and every word is escaped: a placeholder never adds markup (a first name comes from a public form). A
  * link value must be an absolute http(s) address, or its button is left out.
+ *
+ * Links are not editable (lot M1 review): a button's address is exactly one of its kind's link placeholders
+ * (`[WORDS]({link})`, `({resetLink})`, `({trackingUrl})`…), never an address written in the words nor a placeholder
+ * inside one, and a link placeholder fills nothing but a button. The console's words that break this are refused
+ * (linkRuleBreak, services/email.ts); stored ones render without the button or the link.
  */
 import { MONOGRAM_BOUNDS, MONOGRAM_PATHS } from '../../core/render/monogram.js';
 import { EMAIL_SUBJECT_MAX, type EmailKind } from '../db/schema.js';
 import { svgToPng } from '../render/png.js';
 import { PARIS_TIME_ZONE } from '../services/schedule.js';
-import { EMAIL_DEFAULTS, EMAIL_FRAME, OPT_IN_KINDS, type EmailWords } from './copy.js';
+import { EMAIL_DEFAULTS, EMAIL_FRAME, EMAIL_PLACEHOLDERS, OPT_IN_KINDS, type EmailWords } from './copy.js';
 
 /** The house's colours in an email (web/shared/brand.css: the vault's ground, ink, soft and hairline; light.css's). */
 export const EMAIL_COLOURS = Object.freeze({
@@ -72,6 +77,46 @@ export function emailWhen(at: Date): string {
 /** Whether a placeholder holds an address (its button, its link). */
 const isLinkName = (name: string): boolean => name === 'link' || /(?:Link|Url)$/.test(name);
 
+/** The link placeholders a kind's trigger fills: a button's only possible addresses. */
+export function linkPlaceholders(kind: EmailKind): readonly string[] {
+  return EMAIL_PLACEHOLDERS[kind].filter(isLinkName);
+}
+
+const BUTTON = /^\[([^\]\n]{1,80})\]\(([^)\s]+)\)$/;
+const PLACEHOLDER = /\{([A-Za-z][A-Za-z0-9]*)\}/g;
+const usesLink = (t: string): boolean => [...t.matchAll(PLACEHOLDER)].some((m) => isLinkName(m[1]!));
+/** A button's link placeholder when its address is exactly one of the kind's (`({link})`), else null. */
+function buttonLink(kind: EmailKind, href: string): string | null {
+  const m = /^\{([A-Za-z][A-Za-z0-9]*)\}$/.exec(href);
+  return m && linkPlaceholders(kind).includes(m[1]!) ? m[1]! : null;
+}
+const paragraphsOf = (body: string): string[] =>
+  body
+    .replace(/\r\n?/g, '\n')
+    .split(/\n[ \t]*\n/)
+    .map((p) => p.trim())
+    .filter((p) => p !== '');
+
+/**
+ * Why the console's words would put an address of their own in an email, or null when they do not: a button whose
+ * address is not exactly one of the kind's link placeholders, or a link placeholder anywhere but a button's address.
+ */
+export function linkRuleBreak(kind: EmailKind, words: Partial<EmailWords>): string | null {
+  const links = linkPlaceholders(kind).map((n) => `({${n}})`).join(', ');
+  if (words.subject != null && usesLink(words.subject)) return 'A subject carries no link.';
+  if (words.body == null) return null;
+  for (const paragraph of paragraphsOf(words.body)) {
+    const button = BUTTON.exec(paragraph);
+    if (button) {
+      if (buttonLink(kind, button[2]!) === null) return `A button’s address is one of this email’s links, as written: ${links}.`;
+      if (usesLink(button[1]!)) return 'A button’s words carry no link.';
+      continue;
+    }
+    if (usesLink(paragraph)) return `A link is only a button’s address, alone in its paragraph: [WORDS] then one of ${links}.`;
+  }
+  return null;
+}
+
 /** An absolute http(s) address without credentials or space, or null. */
 export function safeLink(value: string): string | null {
   if (!/^https?:\/\/[^\s<>"'`]+$/.test(value) || value.length > 2_048) return null;
@@ -82,6 +127,9 @@ export function safeLink(value: string): string | null {
     return null;
   }
 }
+
+/** A first name an email writes: a letter first, then letters, marks, apostrophes, spaces, dots, hyphens. */
+const FIRST_NAME = /^[\p{L}\p{M}][\p{L}\p{M}'’ .-]{0,39}$/u;
 
 /** The values as words: an instant in Paris time, every control character a space, at most VALUE_MAX characters. */
 function words(values: EmailValues): Map<string, string> {
@@ -96,14 +144,20 @@ function words(values: EmailValues): Map<string, string> {
       out.set(name, text);
     }
   }
-  // The greeting never reads « , »: without a first name, Hello.
-  if (!out.get('firstName')) out.set('firstName', EMAIL_FRAME.noName);
+  // The greeting never reads « , »: without a first name, Hello. A first name opens the email, so only a name's shape
+  // is written there (letters, marks, apostrophe, space, dot, hyphen; 40 at most; no `www`, no dot before a letter),
+  // never an address an account or a public form typed in its place (lot M1 review, THREAT-MODEL AH).
+  const first = out.get('firstName');
+  if (!first || !FIRST_NAME.test(first) || /www|\.\p{L}/iu.test(first)) out.set('firstName', EMAIL_FRAME.noName);
   return out;
 }
 
-/** `{name}` filled with its value; a placeholder without one stays as it is written. */
+/**
+ * `{name}` filled with its value; a placeholder without one stays as it is written. A link placeholder fills nothing
+ * here (words never carry a link: only a button's address does), it is left out.
+ */
 function fill(template: string, values: Map<string, string>): string {
-  return template.replace(/\{([A-Za-z][A-Za-z0-9]*)\}/g, (whole, name: string) => values.get(name) ?? whole);
+  return template.replace(PLACEHOLDER, (whole, name: string) => (isLinkName(name) ? '' : values.get(name) ?? whole));
 }
 
 const escapeHtml = (s: string): string => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -111,18 +165,20 @@ const escapeHtml = (s: string): string => s.replace(/[&<>"']/g, (c) => ({ '&': '
 /** A body's blocks: its paragraphs, and its buttons (`[WORDS]({link})` alone in a paragraph). */
 type Block = { kind: 'p'; text: string } | { kind: 'button'; label: string; href: string };
 
-function blocks(body: string, values: Map<string, string>): Block[] {
+function blocks(kind: EmailKind, body: string, values: Map<string, string>): Block[] {
   const out: Block[] = [];
-  for (const raw of body.replace(/\r\n?/g, '\n').split(/\n[ \t]*\n/)) {
-    const paragraph = raw.trim();
-    if (paragraph === '') continue;
-    const button = /^\[([^\]\n]{1,80})\]\(([^)\s]+)\)$/.exec(paragraph);
+  for (const paragraph of paragraphsOf(body)) {
+    const button = BUTTON.exec(paragraph);
     if (button) {
-      const href = safeLink(fill(button[2]!, values));
-      if (href !== null) out.push({ kind: 'button', label: fill(button[1]!, values).trim().toUpperCase(), href });
+      // Only a bare link placeholder of the kind: an address written in the words is never a button.
+      const name = buttonLink(kind, button[2]!);
+      const href = name === null ? undefined : values.get(name);
+      const label = fill(button[1]!, values).trim().toUpperCase();
+      if (href !== undefined && label !== '') out.push({ kind: 'button', label, href });
       continue;
     }
-    out.push({ kind: 'p', text: fill(paragraph, values) });
+    const text = fill(paragraph, values);
+    if (text.trim() !== '') out.push({ kind: 'p', text });
   }
   return out;
 }
@@ -145,7 +201,7 @@ const FONT = `'Helvetica Neue', Helvetica, Arial, sans-serif`;
 export function renderEmail(input: RenderInput): RenderedEmail {
   const values = words(input.values);
   const subject = subjectOf(input.kind, input.words.subject, values);
-  const body = blocks(input.words.body, values);
+  const body = blocks(input.kind, input.words.body, values);
   const unsubscribe = OPT_IN_KINDS.has(input.kind) && input.unsubscribeUrl !== null ? safeLink(input.unsubscribeUrl) : null;
   const reason = reasonOf(input.kind);
 

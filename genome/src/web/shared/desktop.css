@@ -967,6 +967,26 @@
     }
   }
 
+  /* A short window (1024 × 768, a 1280 window at 125 %): a draw's frame signed out, its right block grown with ADD TO
+     CALENDAR and SIGN IN over CREATE ACCOUNT (lot M1), lifts its state (ENTRIES OPEN, 11 px, on-photo ivory) onto the
+     lit ground; in the dark its veil holds longer and one step darker, as NOW's and THE RELEASES' do, so the state
+     keeps 4.5 : 1 against what is behind it (§10.32; lot M1 review). */
+  @media (max-height: 800px) {
+    html:not([data-mode="light"]):not(.d-touch) body.nocturne .n-release__hero.d-pframe:has(.n-release__frame-action--pair) {
+      --d-scrim-foot: linear-gradient(
+        0deg,
+        var(--d-photo-shade) 0%,
+        color-mix(in srgb, var(--d-photo-shade) 94%, transparent) 18%,
+        color-mix(in srgb, var(--d-photo-shade) 88%, transparent) 36%,
+        color-mix(in srgb, var(--d-photo-shade) 80%, transparent) 50%,
+        color-mix(in srgb, var(--d-photo-shade) 66%, transparent) 60%,
+        color-mix(in srgb, var(--d-photo-shade) 38%, transparent) 68%,
+        color-mix(in srgb, var(--d-photo-shade) 12%, transparent) 76%,
+        transparent 84%
+      );
+    }
+  }
+
   /* The photograph: the frame's ground while it loads; its box sized by the frame, never by the file. */
   html:not(.d-touch) body.nocturne :is(.now__hero, .d-pframe, .n-releases__release, .n-lookbook__model:not(:where(.n-wishlist__card))) > .n-ph,
   html:not(.d-touch) body.nocturne .view--now > .n-sec > .now__teaser-photo,

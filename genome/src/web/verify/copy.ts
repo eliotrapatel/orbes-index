@@ -1233,7 +1233,8 @@ export const LOOKBOOK = Object.freeze({
  * each entered from its page with an ORBES account (any: an account that holds no piece is drawn after the tiers),
  * then drawn: by tier, then seniority, then the order of a seed whose fingerprint is published with the release and
  * which the draw reveals, with every entry by its id, tier, seniority and rank. A place drawn is held until a time;
- * ORBES Client Services concludes each sale and sends no email: the account's page says it. Reached from the landing
+ * ORBES Client Services concludes each sale (an email says a place is drawn only once DRAW_SELECTED is switched on,
+ * lot M1): the account's page says it. Reached from the landing
  * and from MY PIECES, which groups the account's entries. The word is DRAW, never another (BRAND §4.5).
  *
  * The early access (P-X02), by tier (plan NEXT-NINE, BP-19 T3): before entries open to everyone (PALLADIUM 4 hours and
@@ -1391,8 +1392,8 @@ export const RELEASES = Object.freeze({
   statusLabel: Object.freeze({ ENTERED: 'ENTERED', SELECTED: 'PLACE HELD', WAITLISTED: 'WAITING LIST', CONFIRMED: 'CONCLUDED', LAPSED: 'LAPSED', WITHDRAWN: 'WITHDRAWN' }),
   /** P-X02: a place held by a direct reservation (SELECTED, not drawn). */
   reservedLabel: 'PLACE RESERVED',
-  /** A selection obliges no one; no email is sent. */
-  noObligation: 'A place drawn obliges you to nothing: ORBES Client Services concludes each sale with you, and sends no email. Your entries are followed in MY PIECES.',
+  /** A selection obliges no one (no word of emails: DRAW_SELECTED and DRAW_OFFERED may send one, lot M1 review). */
+  noObligation: 'A place drawn obliges you to nothing: ORBES Client Services concludes each sale with you. Your entries are followed in MY PIECES.',
   /** The rule of the draw, exactly as the server applies it (services/drops.ts drawOrder). */
   rule:
     'The entries are ranked by tier, from PALLADIUM to PLATINE to TITANE, then the accounts that hold no piece; then by seniority, the full years since the account’s first piece, the most first; then by the SHA-256 of the 32 bytes of the seed followed by the entry’s identifier in lower-case letters, in increasing hexadecimal order. The tier and the seniority are those of the moment of the draw. The first ranks, as many as there are pieces left after the direct reservations of PLATINE and PALLADIUM owners, are selected; the next are on the waiting list, in that order. Places guaranteed by ORBES are selected first, for the pieces they cover, and listed apart without a rank.',
@@ -1977,7 +1978,7 @@ export const LIVE = Object.freeze({
     about: (minutes: number) => (minutes < 60 ? `ABOUT ${minutes} MIN` : `ABOUT ${Math.floor(minutes / 60)} H ${String(minutes % 60).padStart(2, '0')}`),
     soon: 'ANY MOMENT NOW',
     paused: 'THE QUEUE IS PAUSED',
-    pausedLine: 'Your place is kept.',
+    pausedLine: 'It resumes from where it stopped.',
     /** W6: the place is kept whatever happens; the turn passes on only once it has come. */
     keep: 'Keep this page open. Your place is kept if you leave and come back.',
     leave: 'LEAVE THE LINE',
@@ -2421,6 +2422,8 @@ export const ACCOUNT_RESET = Object.freeze({
   save: 'SAVE',
   /** A link opened without its address and code (cut, or opened again after the page took them out of the address). */
   incomplete: 'This link is incomplete. Open it again from its email, or ask for a new one.',
+  /** A link the server refused (RECOVERY_CODE_INVALID): what may have happened to it, never the typed form's words. */
+  refused: 'This link has expired, was already used or was replaced by a newer one.',
   /** A link refused or incomplete: a new one, to the address it was for (or the one typed). */
   againLead: 'Ask for a new link: it works once, for 30 minutes.',
   again: 'SEND A NEW LINK',

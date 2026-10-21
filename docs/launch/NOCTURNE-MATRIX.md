@@ -543,7 +543,7 @@ button).
 | `room-not-eligible` | the rule and why | live-14 |
 | `live-join` | LIVE NOW, *price · quantity*, *n* IN THE ROOM, *left OF quantity* LEFT, its sentence, YOUR SIZE, ENTER THE LINE | same pieces (no before-capture shows it) |
 | `live-queue` | (lot M1, W2, W5, W6) THE QUEUE, *name*, YOUR PLACE *412*, ESTIMATED ENTRY *19:00* PARIS, ABOUT *11* MIN, *Keep this page open. Your place is kept if you leave and come back.*, LEAVE THE LINE; never a batch, an interval or a batch count | macro scope W5 |
-| `live-queue-paused` | THE QUEUE, YOUR PLACE *12*, THE QUEUE IS PAUSED, *Your place is kept.* | macro scope W5 |
+| `live-queue-paused` | THE QUEUE, YOUR PLACE *12*, THE QUEUE IS PAUSED, *It resumes from where it stopped.* | macro scope W5 |
 | `live-queue-admitted` | let in by its batch: the line, YOUR PLACE *150*, *n* AHEAD OF YOU (the line's screen, `live-line`) | macro scope W2 |
 | `live-queue-error` | LEAVE THE LINE tapped twice and refused: the server's words under the place | macro scope W6 |
 | `live-queue-stress` | YOUR PLACE *4999*, ESTIMATED ENTRY *20:54* PARIS, ABOUT *2 H 05* | same pieces |
@@ -605,10 +605,10 @@ On the demo stage `email` (`NOCTURNE_EMAIL_CONFIG`: the emails' channel on, an S
 | State | What it shows | Shown when | Reference |
 |---|---|---|---|
 | `signin-reset-email` | FORGOTTEN PASSWORD, *Enter the email of your ORBES account: a link to choose a new password is sent to it.*, EMAIL, SEND LINK; NO ACCESS TO THIS EMAIL? and ORBES Client Services' way under it | MY PIECES signed out, FORGOTTEN PASSWORD? | macro scope E3 |
-| `signin-reset-sent` | *If an account uses this address, a link is on its way. It works for 30 minutes.* (the same for any address) | SEND LINK | E3 |
+| `signin-reset-sent` | *If an account uses this address, a link is on its way. It works for 30 minutes.* (the same for any address), in place of the field and its lead | SEND LINK | E3 |
 | `reset-new-password` | SET A NEW PASSWORD, *For the ORBES account …*, NEW PASSWORD, NEW PASSWORD, AGAIN, SAVE | `/verify/reset#<email>/<code>` | E3 |
 | `reset-incomplete` | *This link is incomplete. …*, *Ask for a new link: it works once, for 30 minutes.*, SEND A NEW LINK | the page without its fragment (a reload) | E3 |
-| `reset-expired` | the recovery's refusal (`RECOVERY_CODE_INVALID`'s words), SEND A NEW LINK | a link refused | E3 |
+| `reset-expired` | *This link has expired, was already used or was replaced by a newer one.* (said of the link, for `RECOVERY_CODE_INVALID`), SEND A NEW LINK | a link refused | E3 |
 | `reset-done` | *Sign in with your new password.*, SIGN IN with the email filled, the recovery's own sentence | SAVE | E3 |
 | `profile-release-notices` | YOUR PROFILE's last group, EMAILS: EMAIL ME WHEN A RELEASE IS ANNOUNCED (on), its hint | the account sheet, YOUR PROFILE | E2 |
 | `unsubscribe` | STOP THESE EMAILS?, *Release notices: an email each time ORBES announces a release.*, STOP | a release notice's link | E2 |
@@ -705,7 +705,7 @@ same baseline (`nocturne-baseline.json`, the desk-* entries), the phone's entrie
 | `desk-7` | 23 | the three | ORBES CARE and I2 at 1920 × 1080; YOUR PROFILE (`account-profile`) entered, its tastes, and two retired tastes side by side |
 | `desk-8` | 24 | the three, in light | CINEMA in white: NOW, THE RELEASES, THE COLLECTION, a model, a draw, a LIVE RELEASE, a piece's ORBES CARE, IN USE |
 | `desk-9` | 16 | 1440 × 900, in light | The states the review preview could not show, in light: the service failing, the scan's window closing, the three order writes, an answer in MESSAGES and on NOW, THE PRIVATE SALON locked, YOUR WISHLIST signed out and failed, the certificate NO LONGER VALID and NOT FOUND, 600 entries, two retired tastes |
-| `desk-10` | 21 | 1440 × 900 | The room's other screens (the line, secured, CONFIRMED, sold out in a size, its five ends, ENTER THE LINE), a LIVE RELEASE's rules and not eligible, the room not eligible and ready, the after-room's join and its ends; the queue of a paced release, its place and estimate, then paused (lot M1: `desk-live-queue`, `desk-live-queue-paused`, `queue`) |
+| `desk-10` | 23 | 1440 × 900, MY PIECES in the queue also 1024 × 768 | The room's other screens (the line, secured, CONFIRMED, sold out in a size, its five ends, ENTER THE LINE), a LIVE RELEASE's rules and not eligible, the room not eligible and ready, the after-room's join and its ends; the queue of a paced release, its place and estimate, then paused, and MY PIECES' IN THE QUEUE · PLACE 412 (lot M1: `desk-live-queue`, `desk-live-queue-paused`, `desk-live-pieces-queued` and its 1024 twin, `queue`) |
 | `desk-11` | 25 | 1440 × 900, ORDERS also 1024 × 768 | A result's other answers, a piece's incidents, THE PRIVATE SALON in sizes, the draw's other states (lot M1: ADD TO CALENDAR, `desk-draw-open-calendar`; FOR SELECTED COLLECTORS for one among them and for another, `desk-draw-selected`, `desk-draw-selected-not-eligible`), the failures and the pages not found; the full demo's writes last (a transfer code, the ceremony, a piece received, REQUESTED, a draw entered) |
 | `desk-12` | 20 | 1440 × 900 | The extreme content (`stress`, its ceremony last) and the empty demo |
 | `desk-13` | 19 | 1440 × 900, some in light, two at 1024 × 768 | Lot M1's emails' pages (the stage `email`): RESET BY EMAIL and its sentence, SET A NEW PASSWORD and its incomplete, refused and saved states, YOUR PROFILE's release notices, STOP THESE EMAILS (both links, not recognised, stopped); RESET BY EMAIL, the link's page, the release notices and STOP THESE EMAILS also in light, the link's page and STOP THESE EMAILS at 1024 × 768; the writes last (stopped, then the new password) |

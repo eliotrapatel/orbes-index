@@ -18,7 +18,8 @@
  *   list / summary / csv   the console's Founding list (lot M1, step M1.12): the rows by their joining, newest first,
  *                filtered (matched, country, kind of source, unsubscribed), the routes masking the address for an
  *                AUDITOR; the counts by country and by source (kind, channel, link, campaign, site); the CSV an OPERATOR
- *                downloads, in the columns of a Shopify customers import (S1, S6: the future store), every address.
+ *                downloads, in the columns of a Shopify customers import (S1, S6: the future store), every address,
+ *                never as a marketing subscriber (the consent covers the founding announcement only).
  *   remove       erasure on request (ADMIN, the phrase `REMOVE <8>`): the row is deleted. Audited `founding.remove`.
  *   unsubscribe  the person asked to receive nothing more (E1's one-click link, lot M1 step M1.17): `unsubscribed_at` set
  *                once, the row kept, so the address is never written to again (§11 note 9). Audited
@@ -43,7 +44,7 @@ import { sourceWords } from './acquisition-reads.js';
 import type { AuditService } from './audit.js';
 import { normalizeEmail } from './auth.js';
 import { CANCELLED_WORDS } from './email.js';
-import { matchPreregistration } from './founding-match.js';
+import { lockFoundingAddress, matchPreregistration } from './founding-match.js';
 import { parisDateTime } from './schedule.js';
 
 /** The only site whose form may post to the founding list (CORS and the server's own Origin check, routes/founding.ts). */
@@ -200,13 +201,17 @@ export function removePhrase(id: string): string {
   return `REMOVE ${id.slice(0, 8).toUpperCase()}`;
 }
 
+/** What a first name never holds: a digit, `/`, `:`, `@` or `www` (a link's or an address's shape). */
+const LINK_SHAPED = /[\p{Nd}/:@]|www/iu;
+
 /** The form's fields checked (F2): the values as stored, or every field refused in the collector's words. */
 export function cleanFounding(input: FoundingInput): { email: string; normalized: string; firstName: string; country: string } {
   const fields: Partial<Record<FoundingField, string>> = {};
   const email = normalizeEmail(input?.email);
   if (!email) fields.email = FOUNDING_WORDS.email;
   const name = cleanWords(input?.firstName, FOUNDING_FIRST_NAME_MAX);
-  if (!name.ok || name.value === null) fields.firstName = FOUNDING_WORDS.firstName;
+  // A first name opens the emails (`{firstName},`): never an address's shape (lot M1 review, THREAT-MODEL AF).
+  if (!name.ok || name.value === null || LINK_SHAPED.test(name.value)) fields.firstName = FOUNDING_WORDS.firstName;
   const country = typeof input?.country === 'string' ? input.country.trim().toUpperCase() : '';
   if (!isCountryCode(country)) fields.country = FOUNDING_WORDS.country;
   if (input?.consent !== true) fields.consent = FOUNDING_WORDS.consent;
@@ -266,6 +271,8 @@ export class FoundingService {
     const now = this.clock();
     try {
       return await inTransaction(this.db, async (tx) => {
+        // An account signing up with this address at the same instant waits, or is waited for: the match is never missed.
+        await lockFoundingAddress(tx, clean.normalized);
         // An address already on the list: nothing read, nothing written, nothing audited (its source is not even made).
         const known = await tx.selectFrom('preregistrations').select('id').where('email_normalized', '=', clean.normalized).executeTakeFirst();
         if (known) return { outcome: 'ALREADY' as const };
@@ -361,8 +368,10 @@ export class FoundingService {
 
   /**
    * The CSV an OPERATOR downloads, every row, oldest first, in the columns of a Shopify customers import (S1, S6):
-   * First Name, Last Name (empty: the form asks for none), Email, Accepts Email Marketing (no once unsubscribed), Default
-   * Address Country Code, Tags (`founding-list`), Note (joined, in Paris; the consent's version; the source in words).
+   * First Name, Last Name (empty: the form asks for none), Email, Accepts Email Marketing (always `no`: the consent of F2
+   * covers the founding announcement only, never a store's general marketing; lot M1 review), Default Address Country
+   * Code, Tags (`founding-list`), Note (joined, in Paris; the consent's version and what it covers; the source in words;
+   * the unsubscribe, if any, in Paris).
    */
   async csv(view: { email: (stored: string) => string }): Promise<{ filename: string; contentType: string; body: string }> {
     const rows = await this.rows(this.db).orderBy('p.created_at').orderBy('p.id').execute();
@@ -372,10 +381,10 @@ export class FoundingService {
         r.first_name,
         '',
         view.email(r.email),
-        r.unsubscribed_at ? 'no' : 'yes',
+        'no',
         r.country,
         'founding-list',
-        `Joined ${parisDateTime(r.created_at)} Paris · consent ${r.consent_version} · ${sourceWords(r)}`,
+        `Joined ${parisDateTime(r.created_at)} Paris · consent ${r.consent_version}: founding announcement only · ${sourceWords(r)}${r.unsubscribed_at ? ` · unsubscribed ${parisDateTime(r.unsubscribed_at)} Paris` : ''}`,
       ]),
     ]);
     return { filename: `orbes-founding-list-${parisDateTime(this.clock()).slice(0, 10)}.csv`, contentType: CSV_CONTENT_TYPE, body };

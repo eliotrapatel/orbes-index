@@ -1052,6 +1052,11 @@
     margin-top: var(--d-s5);
   }
 
+  /* Once sent, the sentence stands alone under the title (its field's lead gone with the field), as a lead does. */
+  html:not(.d-touch) body.nocturne .d-signin__panel .n-own__heading + .n-own__sent {
+    margin-top: var(--d-s4);
+  }
+
   html:not(.d-touch) body.nocturne .d-signin__panel .n-own__other {
     margin-top: var(--d-s7);
     padding-top: var(--d-s6);
