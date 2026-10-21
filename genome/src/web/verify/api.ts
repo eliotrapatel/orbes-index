@@ -421,14 +421,17 @@ export class ApiClient {
     return r.now;
   }
 
-  /** The room and the account's own standing (401 signed out, 403 LIVE_NOT_ELIGIBLE with the rule in words). */
+  /**
+   * The room (or, while the account's entry waits for its batch, the queue's frame: W2) and the account's own standing
+   * (401 signed out, 403 LIVE_NOT_ELIGIBLE with the rule in words).
+   */
   async liveState(id: string): Promise<LiveState> {
     const r = await this.request<LiveState>('GET', `/api/v1/live/${encodeURIComponent(id)}/state`, undefined, { timeoutMs: LIVE_STATE_TIMEOUT_MS });
-    if (!r?.room || typeof r.now !== 'string' || !r.access) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    if (!(r?.room || r?.queue) || typeof r.now !== 'string' || !r.access) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
     return r;
   }
 
-  /** The address of a release's stream (SSE: `room` and `you` events), for an EventSource. */
+  /** The address of a release's stream (SSE: `room` and `you` events, `queue` in place of `room` while it waits), for an EventSource. */
   liveStreamUrl(id: string): string {
     return `${this.base}/api/v1/live/${encodeURIComponent(id)}/stream`;
   }

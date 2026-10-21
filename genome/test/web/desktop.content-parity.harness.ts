@@ -181,7 +181,7 @@ export const DESKTOP_MOVED: readonly DesktopMoved[] = [
     removed: true,
   },
   {
-    states: ['after-room-door', 'room-not-eligible'],
+    states: ['after-room-door', 'room-not-eligible', 'live-queue', 'live-queue-paused'],
     values: ['·'],
     reason: 'Decision 7: the room’s foot is one row on a computer, its links spaced, without the phone’s dot between PRIVACY and TERMS.',
     now: 'Nowhere: PRIVACY, TERMS, LEGAL and HELP stand in the room’s foot.',

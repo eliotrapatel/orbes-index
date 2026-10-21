@@ -908,6 +908,46 @@
     color: var(--ink);
   }
 
+  /* ── 7b. The queue (W2, W5, W6): its place large in the centre, the line on leaving and coming back under it; the
+        estimated entry time (or PAUSED) bottom right; the release's name and LEAVE THE LINE bottom left ──────────── */
+
+  html:not(.d-touch) .d-room .d-room__body > .live__place-label {
+    margin: 0;
+  }
+
+  html:not(.d-touch) .d-room .d-room__body > .live__place {
+    margin-top: var(--d-s3);
+    font-size: var(--d-fs-d1);
+  }
+
+  /* READING YOUR PLACE in the room of the place's label and figure, so nothing moves once it is read. */
+  html:not(.d-touch) .d-room .d-room__body > .live__queue-reading {
+    min-height: calc(var(--d-fs-label) * 1.6 + var(--d-s3) + var(--d-fs-d1));
+    margin: 0;
+    color: var(--ink);
+  }
+
+  html:not(.d-touch) .d-room .d-room__body > .live__queue-note {
+    max-width: min(100%, 26em);
+    margin-top: var(--d-s6);
+  }
+
+  html:not(.d-touch) .d-room .d-room__br > :is(.live__queue-eta, .live__queue-paused) {
+    color: var(--ink);
+  }
+
+  html:not(.d-touch) .d-room .d-room__br > :is(.live__queue-about, .live__queue-local) {
+    margin-top: var(--d-s1);
+  }
+
+  html:not(.d-touch) .d-room .d-room__br > .live__queue-paused-line {
+    margin-top: var(--d-s2);
+  }
+
+  html:not(.d-touch) .d-room .d-room__bl > .btn.live__leave-line {
+    margin-top: var(--d-s5);
+  }
+
   /* ── 8. Sold out in its size: the title over the centre, its sentence and LEAVE THE LINE; the place bottom right ── */
 
   html:not(.d-touch) .d-room .d-room__screen--soldOut .d-room__body > .live__note,

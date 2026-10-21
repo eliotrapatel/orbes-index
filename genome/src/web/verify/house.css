@@ -1493,6 +1493,52 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   margin-top: 20px;
 }
 
+/* W2, W5: the queue, before the line lets the entry in: its place as the line draws it, then when it should come in. */
+.live__queue-eta,
+.live__queue-paused {
+  margin-top: 18px;
+  color: var(--ink);
+}
+
+.live__queue-about,
+.live__queue-local {
+  margin-top: 2px;
+}
+
+.live__queue-paused-line {
+  margin-top: 6px;
+}
+
+/* READING YOUR PLACE: in the place's room (its label, its figure, the estimate under it), so nothing moves once it is
+   read; breathing slowly (still when motion is reduced). */
+.live__queue-reading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 184px;
+  margin-top: 40px;
+  color: var(--ink);
+  animation: live-reading 2.4s var(--ease) infinite alternate;
+}
+
+/* Ivory at its faintest still reads at more than 7 : 1 on the vault's ground. */
+@keyframes live-reading {
+  from { opacity: 1; }
+  to { opacity: 0.6; }
+}
+
+.live__queue .live__rule {
+  margin-top: 36px;
+}
+
+.live__queue-note {
+  margin-top: 20px;
+}
+
+.live__queue .btn.live__action {
+  margin-top: 30px;
+}
+
 /* B4: the turn. The seal is the button: the turn's ring runs out around it, the hold's ring fills inside. */
 .btn.live-hold {
   position: relative;
@@ -2273,6 +2319,7 @@ body[data-screen="board"] .corners {
   .live__dot,
   .board__status.is-live .live__dot,
   .live__sweep,
+  .live__queue-reading,
   .live-banner-host {
     animation: none;
     transition: none;

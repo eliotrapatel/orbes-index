@@ -20,6 +20,10 @@
  *  - Every edge page: not signed in, not eligible, turn passed, hold ended, place released, left the line, removed, sold
  *    out in your size, the release closed before your turn; past its end, its final state for one not in it (plan LIVE
  *    RELEASE+, decision 30); the release's end said once the room says its reason, when the entry's end is read first.
+ *  - A paced release (macro scope of 2026-10-20, W2, W5, W6): the queue page while the entry waits for its batch (its
+ *    place, its estimated entry time in Paris and how long until it, the place kept, LEAVE THE LINE; never the pace),
+ *    its state read every 10 s without a stream (the server's pollMs), PAUSED while ORBES holds the pace; let in by a
+ *    batch, the line in its place, said aloud, and the state read every 2 s again.
  *  - A collector entered on another phone, back in the room: a tap there makes the ten ticks heard; untouched, silence.
  *  - The LIVE RELEASES refused (429, their own rate group): THE RELEASES still shows the draws and says the LIVE half is
  *    missing; a draw's address shows its draw; a LIVE one says its failure, TRY AGAIN reading it again.
@@ -42,7 +46,7 @@ import type { LiveEngine } from '../../src/server/services/live-engine.js';
 import { sessionCookieName } from '../../src/server/services/sessions.js';
 import { createManualClock, SYSTEM_ACTOR } from '../../src/server/types.js';
 import { LIVE, RELEASES, STORY } from '../../src/web/verify/copy.js';
-import { countdown } from '../../src/web/verify/live-model.js';
+import { countdown, PARIS, zonedTime } from '../../src/web/verify/live-model.js';
 import { jpegPhoto } from '../support/images.js';
 import { createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture, type LiveRelease, type LiveReleaseOptions } from '../support/live.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
@@ -505,6 +509,59 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     expect(reads.length).toBe(before);
     expect(problems).toEqual([]);
   }, 60_000);
+
+  it('a paced release: the queue page (the place, the estimate in Paris, never the pace), read every 10 s without a stream, PAUSED, then let in by a batch into the line', async () => {
+    const r = await release({ opensAt: new Date(Date.now() + 3_000), sizes: [{ label: '52', stock: 1 }], pace: { batch: 1, minutes: 60 }, turnSeconds: 120 });
+    // Two collectors in the room before T0, the higher tier first in the line: the first batch (at T0) lets it in alone.
+    const first = await account(5);
+    await srv.ctx.services.live.enter(first.id, r.id, { sizeId: r.sizes[0]!.id }, first.actor);
+    const me = await account(1);
+    await srv.ctx.services.live.enter(me.id, r.id, { sizeId: r.sizes[0]!.id }, me.actor);
+    const { page, problems } = await phone(me.token, { noStream: true });
+    const polls: number[] = [];
+    page.on('request', (req) => {
+      if (new URL(req.url()).pathname === `/api/v1/live/${r.id}/state`) polls.push(Date.now());
+    });
+    await page.goto(`${srv.origin}/verify/releases/${r.id}`);
+    // The queue: place 1, the next batch an hour after T0, in Paris.
+    await visible(page.locator('.live__queue[data-state="eta"]'), 30_000);
+    await textOf(page.locator('.live__queue > .live__overline').first(), LIVE.queue.kind);
+    await textOf(page.locator('.live__queue .live__place-figure'), '1');
+    const next = (await srv.ctx.db.selectFrom('drops').select('pace_next_at').where('id', '=', r.id).executeTakeFirstOrThrow()).pace_next_at!;
+    await textOf(page.locator('.live__queue-eta'), LIVE.queue.eta(zonedTime(new Date(next).getTime(), PARIS)!.time));
+    await textOf(page.locator('.live__queue-about'), /^ABOUT (59 MIN|1 H 00)$/);
+    await textOf(page.locator('.live__queue-note'), LIVE.queue.keep);
+    expect(await page.getByRole('button', { name: LIVE.queue.leave }).isEnabled()).toBe(true);
+    // Never the pace: no batch, no figure of buyers, no interval.
+    expect(norm(await page.locator('.view--live').innerText())).not.toMatch(/BATCH|EVERY|BUYERS|PACE/i);
+    await keepsVault(page, null, [LIVE.queue.leave]);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-live-queue.png'), fullPage: true });
+    // Without a stream, the queue reads its state every 10 seconds (the server's pollMs), not every 2: from here to its
+    // batch (checked below).
+    const from = polls.length;
+    // ORBES holds the pace: PAUSED, the place kept; then it runs again.
+    await srv.ctx.services.live.pausePace(r.id, f.admin);
+    await visible(page.locator('.live__queue[data-state="paused"]'), 30_000);
+    await textOf(page.locator('.live__queue-paused'), LIVE.queue.paused);
+    await textOf(page.locator('.live__queue-paused-line'), LIVE.queue.pausedLine);
+    expect(await page.locator('.live__queue-eta').isVisible()).toBe(false);
+    await srv.ctx.services.live.resumePace(r.id, f.admin);
+    await visible(page.locator('.live__queue[data-state="eta"]'), 30_000);
+    // NEXT BATCH NOW lets it in: the line takes the queue's place (its place 2, behind the first collector's turn), said.
+    await srv.ctx.services.live.nextBatch(r.id, f.admin);
+    await textOf(page.locator('.live__line .live__place-figure'), '2');
+    const queued = polls.slice(from - 1);
+    expect(queued.length).toBeGreaterThanOrEqual(3);
+    for (let i = 1; i < queued.length; i++) expect(queued[i]! - queued[i - 1]!).toBeGreaterThan(9_000);
+    await textOf(page.locator('.live__held'), '1 HELD PIECE MAY RETURN');
+    await expect.poll(() => page.locator('.view--live > p[role="status"]').textContent(), POLL).toMatch(new RegExp(`^${LIVE.announce.admitted} Your place: 2\\. `));
+    expect(await page.locator('.live__queue').count()).toBe(0);
+    // In the line, the state is read every 2 seconds again.
+    const inLine = polls.length;
+    await sleep(4_500);
+    expect(polls.length - inLine).toBeGreaterThanOrEqual(2);
+    expect(problems).toEqual([]);
+  }, 120_000);
 
   it('offers SHARE TO STORIES under CONFIRMED (BP-10), its card CONFIRMED, when this confirmation sells the release out too; never on its final page', async () => {
     const t0 = new Date(Date.now() + 3_000);

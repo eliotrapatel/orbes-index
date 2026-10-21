@@ -1105,10 +1105,35 @@ export interface LiveInterest {
   since: string;
 }
 
-/** GET /api/v1/live/:id/state: the server's time, the room, the account's standing, entry and interest. */
+/**
+ * The queue's frame (W2, W5): what a page whose entry waits for its batch reads in place of the room (the stream's
+ * `queue` event, the state's `queue`), the same for every one of them: the next batch, the pace, whether it is held.
+ * The pace (`batch` every `minutes`) only serves to estimate the entry time on the device; it is never shown.
+ */
+export interface LiveQueueFrame {
+  phase: LivePhase | 'ENDED';
+  /** When the next batch is due. */
+  nextBatchAt: string;
+  batch: number;
+  minutes: number;
+  /** The pace held (by ORBES, or the release paused): no batch comes, every place is kept. */
+  paused: boolean;
+  batches: number;
+  waiting: number;
+}
+
+/**
+ * GET /api/v1/live/:id/state: the server's time, the room (or, while the entry waits for its batch, the queue's frame),
+ * the account's standing, entry and interest, and how soon to read it again while the stream is lost.
+ */
 export interface LiveState {
   now: string;
-  room: LiveRoom;
+  /** The room; absent while the account's entry waits for its batch (`queue` then). */
+  room?: LiveRoom;
+  /** W2: the queue's frame while the account's entry waits for its batch on a paced release. */
+  queue?: LiveQueueFrame;
+  /** How soon to read the state again while the stream is lost (2 s in the room, 10 s in the queue). */
+  pollMs?: number;
   access: LiveAccess;
   entry: LiveEntry | null;
   interest: LiveInterest | null;

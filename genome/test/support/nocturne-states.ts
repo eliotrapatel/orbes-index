@@ -1645,6 +1645,47 @@ export const PHONE_STATES: readonly UiState[] = [
   { id: 'room-stress', title: 'A room open with the longest host message, a 24-character name, a price of € 125 400', refs: ['same pieces'], variant: 'stress', as: you, path: release('soon'), ready: '.view--live', stress: true },
   { id: 'live-far-stress', title: 'A LIVE RELEASE more than 9 days away, in USD', refs: ['same pieces'], variant: 'stress', as: you, path: release('far'), ready: '.view--live', stress: true },
 
+  // ── The queue (macro scope of 2026-10-20, W2, W5, W6; lot M1, step M1.5): a paced release, before its batch lets the entry in ──
+  { id: 'live-queue', title: 'The queue: YOUR PLACE 412, ESTIMATED ENTRY 19:00 PARIS, ABOUT 11 MIN, the place kept, LEAVE THE LINE', refs: ['W5', 'W6'], variant: 'queue', as: 'queued', path: release('queue'), ready: '.view--live .live__queue[data-state="eta"]' },
+  { id: 'live-queue-paused', title: 'The queue paused by ORBES: YOUR PLACE 12, THE QUEUE IS PAUSED, your place kept', refs: ['W5'], variant: 'queue', as: 'queuePaused', path: release('queuePaused'), ready: '.view--live .live__queue[data-state="paused"]' },
+  { id: 'live-queue-admitted', title: 'Let in from the queue by its batch: the line, YOUR PLACE 150, ahead in your size', refs: ['W2'], variant: 'queue', as: 'admitted', path: release('queue'), ready: '.view--live .live__ahead' },
+  {
+    id: 'live-queue-error',
+    title: 'The queue, LEAVE THE LINE refused: the refusal as the server words it',
+    refs: ['W6'],
+    variant: 'queue',
+    as: 'queued',
+    path: release('queue'),
+    routes: (page) => page.route('**/api/v1/live/*/leave', (r) => r.fulfill({ status: 429, contentType: 'application/json', body: JSON.stringify({ error: { code: 'RATE_LIMITED', message: 'Too many requests.' } }) })),
+    act: async (run) => {
+      await run.page.locator('.view--live .live__queue[data-state="eta"]').waitFor({ timeout: 20_000 });
+      // A second tap within a few seconds confirms it; the server refuses it.
+      await button(run, 'LEAVE THE LINE').click();
+      await run.page.locator('.live__queue .live__leave-line', { hasText: /AGAIN TO LEAVE/ }).click();
+    },
+    ready: '.view--live .live__queue .live__error:not([hidden])',
+  },
+  { id: 'live-pieces-queued', title: 'MY PIECES of a collector in the queue: IN THE QUEUE · PLACE 412', refs: ['W5'], variant: 'queue', as: 'queued', path: at('/verify/pieces'), act: (run) => piecesTab(run, 'RELEASES'), ready: '.view--pieces .pieces__releases' },
+  { id: 'live-queue-stress', title: 'The queue at its longest: YOUR PLACE 4999, ESTIMATED ENTRY 20:54 PARIS, ABOUT 2 H 05', refs: ['same pieces'], variant: 'queue', as: 'queueFar', path: release('queue'), ready: '.view--live .live__queue[data-state="eta"]', stress: true },
+  {
+    id: 'live-queue-loading',
+    title: 'The queue just entered after the opening, its figures being read: READING YOUR PLACE',
+    refs: ['W2'],
+    variant: 'queue',
+    as: you,
+    path: release('queue'),
+    mutates: true,
+    // No stream: the page reads the state; once ENTER THE LINE is offered, every read of it is held.
+    routes: (page) => page.route('**/api/v1/live/*/stream', (r) => r.abort('internetdisconnected')),
+    act: async (run, hold) => {
+      await run.page.locator('.view--live .live__join').waitFor({ timeout: 20_000 });
+      hold.hold('**/api/v1/live/*/state');
+      await run.page.locator('.live__picker button.live__size', { hasText: /^17$/ }).click();
+      await button(run, 'ENTER THE LINE').click();
+    },
+    ready: '.view--live .live__queue[data-state="reading"]',
+  },
+
   // ── THE CIRCLE ──
   { id: 'circle', title: 'THE CIRCLE: the invitation answered YES, the note', refs: ['C8'], variant: 'full', as: you, path: at('/verify/circle'), ready: '.view--circle article' },
   { id: 'circle-platine', title: 'THE CIRCLE of a PLATINE account: the poll too', refs: ['C8'], variant: 'full', as: 'platine', path: at('/verify/circle'), ready: '.view--circle article' },
@@ -2386,11 +2427,14 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
   'desk-9': UNSHOWN_IN_PREVIEW.map(inLight),
   // ── The room's other screens at 1440 × 900, each staged for a computer (HANDOVER §5.4) ──
   // The line, secured with PAY, CONFIRMED, sold out in a size, the five ends, ENTER THE LINE; a LIVE RELEASE's rules and
-  // not eligible; the room not eligible, then entered (its write, last of its stage); the after-room's join and its ends.
+  // not eligible; the room not eligible, then entered (its write, last of its stage); the after-room's join and its ends;
+  // the queue (lot M1).
   'desk-10': [
     ...desk(1440, 'live-line', 'live-secured', 'live-confirmed', 'live-sold-out-size', 'live-missed', 'live-expired', 'live-released', 'live-left', 'live-removed', 'live-join'),
     ...desk(1440, 'live-rules', 'live-rules-not-eligible', 'room-not-eligible', 'room-ready'),
     ...desk(1440, 'after-room-join', 'after-room-sold-out', 'after-room-closed', 'after-room-ended', 'after-room-over'),
+    // The queue of a paced release (lot M1, W2, W5): the place and its estimate, then paused.
+    ...desk(1440, 'live-queue', 'live-queue-paused'),
   ],
   // ── A result's other answers, a piece's incidents, THE PRIVATE SALON in sizes, the draw's other states, the failures ──
   // The full demo's writes (a transfer code, the ceremony, a piece received, REQUESTED, a draw entered) last, in this order;

@@ -437,6 +437,16 @@ describe('ApiClient', () => {
     for (const c of acts) expect(c.headers['x-csrf-token']).toBe('tok');
   });
 
+  it('LIVE RELEASE: the state of an entry waiting for its batch carries the queue\'s frame in place of the room (W2); neither is a bad response', async () => {
+    const ID = '8a1d0c55-4b2e-4f3a-9c1d-0e5f6a7b8c9d';
+    const queue = { phase: 'LIVE', nextBatchAt: '2026-10-11T17:01:00.000Z', batch: 40, minutes: 1, paused: false, batches: 6, waiting: 5040 };
+    const base = { now: '2026-10-11T17:00:00.000Z', access: { allowed: true, tier: 1, missing: null }, entry: null, interest: null };
+    const f = fakeFetch([() => json(200, { ...base, queue, pollMs: 10_000 }), () => json(200, base)]);
+    const api = new ApiClient({ fetch: f.impl });
+    expect(await api.liveState(ID)).toMatchObject({ queue, pollMs: 10_000 });
+    await expect(api.liveState(ID)).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+  });
+
   it('LIVE RELEASE: the after-room read through the release it follows, a session\'s answer; anything else is a bad response', async () => {
     const PARENT = '8a1d0c55-4b2e-4f3a-9c1d-0e5f6a7b8c9d';
     const CHILD = '8a1e0c55-4b2e-4f3a-9c1d-0e5f6a7b8c9d';

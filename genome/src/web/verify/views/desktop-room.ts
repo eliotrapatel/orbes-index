@@ -4,7 +4,8 @@
  * wordmark top left and the count in the room top right; in the centre the door, the countdown, the line, the seal to
  * hold, the piece secured, with the host's messages under them; in the corners, bottom left the release's name and its
  * choice, bottom right the collector's own part (READY CHECK and ENTER THE ROOM, YOUR PLACE and how many are ahead of
- * them, the add-ons and PAY). The room's own foot (HOW RELEASES WORK, THE RELEASES, SOUND, the legal pages) under the
+ * them, the add-ons and PAY). The queue (macro scope W2, W5): its place in the centre, its estimate bottom right, LEAVE
+ * THE LINE under the name. The room's own foot (HOW RELEASES WORK, THE RELEASES, SOUND, the legal pages) under the
  * window, in one row. CONFIRMED comes out into the light: the photograph gives way to the house's ivory, its words
  * beside its receipt. No menu, no SCAN, no account button (the phone's room hides them too); its controls are the room's
  * own, the tab order with them.
@@ -46,7 +47,7 @@ type Place = 'head' | 'body' | 'bl' | 'br' | 'a' | 'b';
 const END: ReadonlySet<Kind> = new Set<Kind>(['missed', 'expired', 'released', 'left', 'removed', 'ended', 'over']);
 
 /** The room's screens the Cinema room stages: the others are NOCTURNE's pages (views/desktop-release.ts). */
-const STAGED: ReadonlySet<Kind> = new Set<Kind>(['loading', 'signin', 'notEligible', 'room', 'join', 'line', 'soldOut', 'turn', 'secured', 'confirmed', 'afterRoom', ...END]);
+const STAGED: ReadonlySet<Kind> = new Set<Kind>(['loading', 'signin', 'notEligible', 'room', 'join', 'queue', 'line', 'soldOut', 'turn', 'secured', 'confirmed', 'afterRoom', ...END]);
 
 /** The screens with the room under way: its count top right, the host's messages under the centre. */
 const RUNNING: ReadonlySet<Kind> = new Set<Kind>(['room', 'join', 'line', 'soldOut', 'turn', 'secured']);
@@ -97,6 +98,24 @@ const PLAN: Partial<Record<Kind, readonly [Place, string][]>> = {
     ['br', ':scope > .live__join-line'],
     ['br', ':scope > .live__error'],
     ['br', ':scope > .live__enter'],
+  ],
+  // W2, W5: the queue as the line is drawn, its place large in the centre, READING YOUR PLACE there until it is read,
+  // the W6 line under it; the estimate (or PAUSED) bottom right; the release's name and LEAVE THE LINE bottom left.
+  queue: [
+    ['head', ':scope > .live__overline:not(.live__place-label)'],
+    ['body', ':scope > .live__place-label'],
+    ['body', ':scope > .live__place'],
+    ['body', ':scope > .live__queue-reading'],
+    ['body', ':scope > .live__rule'],
+    ['body', ':scope > .live__queue-note'],
+    ['bl', ':scope > .live__title'],
+    ['bl', ':scope > .live__error'],
+    ['bl', ':scope > .live__leave-line'],
+    ['br', ':scope > .live__queue-eta'],
+    ['br', ':scope > .live__queue-about'],
+    ['br', ':scope > .live__queue-local'],
+    ['br', ':scope > .live__queue-paused'],
+    ['br', ':scope > .live__queue-paused-line'],
   ],
   line: [
     ['head', ':scope > .live__overline:not(.live__place-label)'],
@@ -184,6 +203,7 @@ const NAMED: Partial<Record<Kind, string>> = {
   ...Object.fromEntries([...END].map((k) => [k, ':scope > .d-room__bl > .n-live__title'])),
   room: ':scope > .d-room__bl > .live__title',
   join: ':scope > .d-room__bl > .live__title',
+  queue: ':scope > .d-room__bl > .live__title',
   line: ':scope > .d-room__bl > .live__title',
   secured: ':scope > .d-room__bl > .live__title',
   soldOut: ':scope > .d-room__bl > .live__overline',

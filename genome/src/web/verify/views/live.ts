@@ -24,6 +24,11 @@
  *               sound, its preference); at T0, on the server's second, the lock aligns, the door opens and the piece
  *               appears under a light sweep: DRAWING THE PLACES
  *   join        after T0, an account not in the line: the piece, its size, ENTER THE LINE (behind those in it)
+ *   queue       macro scope of 2026-10-20 (W2, W5, W6): after T0 on a release that lets its line in at a pace, while
+ *               the entry waits for its batch: THE QUEUE, YOUR PLACE, the estimated entry time in Paris (then on this
+ *               phone when its zone differs) and how long until it, or THE QUEUE IS PAUSED; the place kept if the
+ *               collector leaves and comes back; LEAVE THE LINE on a second tap. Never the pace itself. READING YOUR
+ *               PLACE until the queue's frame is read. Let in by its batch, the line cross-fades in, YOU'RE IN said
  *   line        YOUR PLACE, who is ahead in your size, the pieces left overall and in your size, the held pieces
  *               that may return; sold out in your size: stay in case one returns, or LEAVE THE LINE
  *   turn        PRESS AND HOLD THE SEAL: the turn's ring runs out, the hold's ring fills in 1.5 s, letting go
@@ -57,9 +62,10 @@
  * The room's foot (its screens out of NOCTURNE): HOW RELEASES WORK first (plan NEXT-NINE, FT-01; in a new tab while the
  * collector holds an entry, so the room stays), THE RELEASES, SOUND, the legal pages.
  *
- * Real time: the stream (EventSource, `room` and `you` events) while it is open; its state polled every 2 s while it
- * is not (LIVE_POLL_MS), the stream tried again later. Every countdown counts on the server's clock, synced by three
- * round trips (clockOffset). Every action is a same-origin JSON call through ApiClient (the session, the CSRF token);
+ * Real time: the stream (EventSource, `room` and `you` events; `queue` in place of `room` while the entry waits for its
+ * batch) while it is open; its state polled while it is not, as often as the server's `pollMs` says (2 s in the room,
+ * LIVE_POLL_MS by default; 10 s in the queue), the stream tried again later. Every countdown counts on the server's
+ * clock, synced by three round trips (clockOffset). Every action is a same-origin JSON call through ApiClient (the session, the CSRF token);
  * the server's refusals read as it wrote them. Reduced motion: cross-fades only. aria-live: the place, the turn, the
  * piece secured. One primary action per screen (filled ivory): ENTER, the size chosen, PAY.
  */
@@ -95,6 +101,7 @@ import {
   pastDay,
   pictureOf,
   placeAnnouncement,
+  queueModel,
   PRESS_GAP_MS,
   readyChecks,
   revealCalendar,
@@ -114,7 +121,7 @@ import { participationModel, RELEASES_PATH, zonedDate } from '../releases-model.
 import { lookbookSheetPath } from '../lookbook-model.js';
 import type { SessionStore } from '../session.js';
 import type { SoundSignature } from '../sound.js';
-import type { AccountQuestion, LiveAccess, LiveEndedSheet, LiveEntry, LiveInterest, LiveRoom, LiveSheet, LiveState } from '../types.js';
+import type { AccountQuestion, LiveAccess, LiveEndedSheet, LiveEntry, LiveInterest, LiveQueueFrame, LiveRoom, LiveSheet, LiveState } from '../types.js';
 import { formatMoney as money, upper } from '../view-model.js';
 import { referenceWords, releaseContext } from '../messages-model.js';
 import { dayAndHour, legalLinks, lookbookLink, PIECES_PATH, piecesLink, releasesLink, soundToggle, toneMark, viewRoot, withNumerals } from './common.js';
@@ -128,8 +135,10 @@ import { storyButton } from './story.js';
 import { StoryCards } from '../story-card.js';
 import { DesktopRoom, type RoomFacts } from './desktop-room.js';
 
-/** The state read while the stream is lost. */
+/** The state read while the stream is lost (in the room; the server says how often in the queue: `pollMs`). */
 export const LIVE_POLL_MS = 2000;
+/** The bounds of the server's `pollMs`: any other figure is not taken. */
+const POLL_BOUNDS = Object.freeze({ min: 1000, max: 60_000 });
 /** A stream refused or closed is asked for again after this long (the state is polled meanwhile). */
 export const LIVE_STREAM_RETRY_MS = 15_000;
 /** The page's own pulse: the countdowns, the lock, the ticks. */
@@ -247,6 +256,10 @@ class LivePage {
   private readonly assertive = h('p', { class: 'visually-hidden', attrs: { 'aria-live': 'assertive' } });
   private sheet: LiveSheet | LiveEndedSheet | null;
   private room: LiveRoom | null = null;
+  /** W2: the queue's frame, read while the account's entry waits for its batch (the stream's `queue`, the state's); null otherwise. */
+  private queueFrame: LiveQueueFrame | null = null;
+  /** How often the state is read while the stream is lost: the server's `pollMs` (10 s in the queue), 2 s by default. */
+  private pollMs = LIVE_POLL_MS;
   private entry: LiveEntry | null = null;
   private access: LiveAccess | null = null;
   /** IN-01: the house's guarantee set aside for this release, shown to the account (its pieces), or null. */
@@ -486,9 +499,23 @@ class LivePage {
     this.interest = state.interest;
     this.guarantee = state.guarantee ?? null;
     this.savedSize = state.savedSize ?? null;
-    this.setRoom(state.room);
+    // W2: while the entry waits for its batch the state carries the queue's frame in place of the room.
+    if (state.room) this.setRoom(state.room);
+    this.queueFrame = state.queue ?? null;
+    this.setPollMs(state.pollMs);
     this.setEntry(state.entry);
     this.settle();
+  }
+
+  /** The server's `pollMs` (within its bounds, LIVE_POLL_MS otherwise): a polling under way takes it at once. */
+  private setPollMs(ms: unknown): void {
+    const next = typeof ms === 'number' && Number.isFinite(ms) && ms >= POLL_BOUNDS.min && ms <= POLL_BOUNDS.max ? ms : LIVE_POLL_MS;
+    if (next === this.pollMs) return;
+    this.pollMs = next;
+    if (this.pollTimer) {
+      this.stopPolling();
+      this.startPolling();
+    }
   }
 
   /** The release is an after-room: its page is read through the release it follows. */
@@ -523,6 +550,9 @@ class LivePage {
     if (entry?.status !== 'TURN') this.securing = false;
     if (entry?.status !== 'QUEUED' && entry?.status !== 'TURN') this.sizeWasFull = false;
     this.entry = entry;
+    // W2: in the queue without its frame (entered after the opening, the stream lost): the frame read now, not at the
+    // next poll; the page reads its place meanwhile.
+    if (entry?.queue && !this.queueFrame && this.connection !== 'live' && this.viewer === 'ready' && !this.done()) void this.readState(false);
     const held = heldEntry(entry);
     if (held) {
       this.picked = { sizeId: held.size.id, quantity: held.quantity };
@@ -579,7 +609,7 @@ class LivePage {
 
   // ── Real time ────────────────────────────────────────────────────────────
 
-  /** Follow the room: its stream, or its state every LIVE_POLL_MS while the stream is lost. */
+  /** Follow the room: its stream, or its state every `pollMs` while the stream is lost. */
   private follow(): void {
     if (this.disposed || this.viewer !== 'ready' || this.done()) return;
     if (this.stream) return;
@@ -600,6 +630,13 @@ class LivePage {
       if (!data || this.stream !== es) return;
       this.setRoom(data, true);
       this.settle();
+      this.render();
+    });
+    // W2: while the entry waits for its batch, the queue's frame in place of the room's.
+    es.addEventListener('queue', (ev) => {
+      const data = parse<LiveQueueFrame & { now: string }>(ev);
+      if (!data || this.stream !== es) return;
+      this.queueFrame = data;
       this.render();
     });
     es.addEventListener('you', (ev) => {
@@ -647,7 +684,7 @@ class LivePage {
 
   private startPolling(): void {
     if (this.pollTimer || this.done()) return;
-    this.pollTimer = setInterval(() => void this.readState(false), LIVE_POLL_MS);
+    this.pollTimer = setInterval(() => void this.readState(false), this.pollMs);
   }
 
   private stopPolling(): void {
@@ -701,7 +738,7 @@ class LivePage {
     if (this.gone) return 'over';
     const kind = liveScreen({ sheet, viewer: this.viewer, room: this.room, entry: this.entry, now: this.now() });
     // The opening at T0 plays to its end before the line (or the late arrivals' size) takes its place.
-    if (this.screen?.kind === 'room' && (kind === 'line' || kind === 'turn' || kind === 'join' || kind === 'soldOut' || kind === 'room')) {
+    if (this.screen?.kind === 'room' && (kind === 'line' || kind === 'queue' || kind === 'turn' || kind === 'join' || kind === 'soldOut' || kind === 'room')) {
       if (this.opening === null || performance.now() - this.opening < OPENING_MS) return 'room';
     }
     return kind;
@@ -818,6 +855,12 @@ class LivePage {
     if (kind !== previous && kind === 'turn') this.say(this.returned ? LIVE.announce.returned : LIVE.announce.turn, true);
     if (kind !== previous && revealing) this.say(LIVE.announce.secured(this.name()));
     if (kind !== previous && kind === 'afterRoom') this.say(LIVE.afterRoom.announce);
+    // W2: let in from the queue, the line in its place (a cross-fade, as every screen comes in): said, then the place.
+    if (previous === 'queue' && kind === 'line' && this.entry) {
+      const place = placeAnnouncement(this.entry);
+      this.lastPlace = place;
+      this.say([LIVE.announce.admitted, place].filter(Boolean).join(' '));
+    }
   }
 
   /** Whether screen `kind` is one of NOCTURNE's, with its chrome: announced, failed, the final page, an end page (or loading it). */
@@ -894,6 +937,8 @@ class LivePage {
         return this.roomScreen();
       case 'join':
         return this.joinScreen();
+      case 'queue':
+        return this.queueScreen();
       case 'line':
         return this.lineScreen();
       case 'soldOut':
@@ -1706,6 +1751,77 @@ class LivePage {
           this.lastPlace = said;
           this.say(said);
         }
+      },
+    };
+  }
+
+  /**
+   * W2, W5, W6: the queue, between the opening and the batch that lets the entry in (a paced release): its place, then
+   * when it should come in (Paris first, then this phone's clock when its zone says it otherwise) and how long until
+   * then, or PAUSED; the place kept if the collector leaves and comes back; LEAVE THE LINE on a second tap. Never the
+   * pace itself. READING YOUR PLACE until the queue's figures are read. Once let in, the line takes its place.
+   */
+  private queueScreen(): Screen {
+    const id = this.sheet!.id;
+    const label = h('p', { class: 'live__overline live__place-label', attrs: { 'aria-hidden': 'true' }, text: LIVE.yourPlace });
+    // The figure read with its words (a paragraph cannot be named): the label above is the eye's, hidden from readers.
+    const figure = h('span', { class: 'live__place-figure' });
+    const place = h('p', { class: 'live__place' }, h('span', { class: 'visually-hidden', text: `${LIVE.queue.placeSaid} ` }), figure);
+    const reading = h('p', { class: 'live__fact live__queue-reading', attrs: { role: 'status' }, text: LIVE.queue.reading });
+    const eta = this.fact('', 'live__queue-eta');
+    const about = this.fact('', 'live__queue-about');
+    const local = this.fact('', 'live__queue-local');
+    const paused = this.fact(LIVE.queue.paused, 'live__queue-paused');
+    const pausedLine = this.note(LIVE.queue.pausedLine, 'live__queue-paused-line');
+    const errorLine = this.errorLine();
+    const leave = this.action(LIVE.queue.leave, () => this.armed(() => this.act(() => this.deps.api.liveLeave(id))), 'live__leave-line');
+    const el = h(
+      'section',
+      { class: 'live__queue' },
+      this.overline(LIVE.queue.kind),
+      this.title(this.name()),
+      label,
+      place,
+      reading,
+      eta,
+      about,
+      local,
+      paused,
+      pausedLine,
+      this.hairline(),
+      this.note(LIVE.queue.keep, 'live__queue-note'),
+      errorLine,
+      leave,
+    );
+    return {
+      kind: 'queue',
+      el,
+      update: () => {
+        const q = this.entry?.queue;
+        if (!q) return;
+        const m = queueModel(q, this.queueFrame, this.now(), this.deps.localZone);
+        el.dataset.state = m.kind;
+        const known = m.kind !== 'reading';
+        reading.hidden = known;
+        label.hidden = !known;
+        place.hidden = !known;
+        if (known && figure.textContent !== String(m.place)) figure.textContent = String(m.place);
+        for (const x of [eta, about, local]) x.hidden = m.kind !== 'eta';
+        paused.hidden = m.kind !== 'paused';
+        pausedLine.hidden = m.kind !== 'paused';
+        if (m.kind === 'eta') {
+          setFact(eta, m.eta);
+          setFact(about, m.about);
+          setFact(local, m.local ?? '');
+          local.hidden = m.local === null;
+        }
+        if (known && m.announce !== this.lastPlace) {
+          this.lastPlace = m.announce;
+          this.say(m.announce);
+        }
+        this.showError(errorLine);
+        leave.disabled = this.busy;
+        leave.textContent = this.armedUntil ? LIVE.queue.leaveConfirm : LIVE.queue.leave;
       },
     };
   }

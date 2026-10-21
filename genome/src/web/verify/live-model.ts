@@ -4,7 +4,8 @@
  * confirmed, its edge pages, its card in THE RELEASES and its entries in MY PIECES. Pure (no DOM) and unit-tested.
  *
  *  - Which screen: from the release's page, the account's standing (signed out, outside the rule, allowed), the room and
- *    the account's entry, at the server's time (`liveScreen`); once over, its final state (`livePastModel`). The size never changes after T0: the picker is only
+ *    the account's entry, at the server's time (`liveScreen`; the queue while the entry waits for its batch, W2, whose
+ *    place and estimated entry time `queueModel` says, never the pace); once over, its final state (`livePastModel`). The size never changes after T0: the picker is only
  *    offered before it (and, after it, to an account that is not in the line yet, which joins behind).
  *  - The server's time: three round trips to /api/v1/live/clock, the offset of the shortest kept (`clockOffset`); every
  *    countdown counts on it, so the door opens on every phone at the same second.
@@ -28,6 +29,8 @@ import type {
   LiveEndedSheet,
   LiveEntry,
   LiveInterest,
+  LiveQueue,
+  LiveQueueFrame,
   LiveRoom,
   LiveRoomSize,
   LiveSheet,
@@ -223,6 +226,7 @@ export type LiveScreenKind =
   | 'notEligible'
   | 'room'
   | 'join'
+  | 'queue'
   | 'line'
   | 'soldOut'
   | 'turn'
@@ -315,6 +319,8 @@ export function liveScreen(i: LiveScreenInput): LiveScreenKind {
       case 'LEFT':
         return 'left';
       case 'QUEUED': {
+        // W2: waiting for its batch on a paced release, the queue (its place, its estimated entry time) until let in.
+        if (entry.queue) return 'queue';
         // Sold out in its size: not enough pieces free nor held (which may return) to serve it.
         const left = servable(roomSize(i.room, entry.size.id));
         return left !== null && left < entry.quantity ? 'soldOut' : 'line';
@@ -472,6 +478,59 @@ export function placeAnnouncement(entry: LiveEntry): string | null {
 
 export function aheadLine(entry: LiveEntry): string {
   return LIVE.ahead(entry.ahead ?? 0, entry.size.label);
+}
+
+// ── The queue (W2, W5, W6) ─────────────────────────────────────────────────
+
+/**
+ * The queue page as it reads now: `reading` until the queue's frame has been read (the figures it follows), then the
+ * place and either PAUSED or the estimated entry time in Paris (then on this phone when its zone says it otherwise) and
+ * how long until it. Never the pace itself: its batch and its minutes only serve the estimate.
+ */
+export type QueueModel =
+  | { kind: 'reading' }
+  | { kind: 'paused'; place: number; announce: string }
+  | { kind: 'eta'; place: number; eta: string; local: string | null; about: string; announce: string };
+
+/**
+ * The estimated entry time of the `place`-th entry waiting (1 is let in next) at the server's time `now`, as the server
+ * estimates it (services/live.ts liveQueueEta): the next batch (never before now), then one batch every `minutes`;
+ * null while the queue is paused or its pace is not one.
+ */
+export function queueEta(place: number, frame: Pick<LiveQueueFrame, 'nextBatchAt' | 'batch' | 'minutes' | 'paused'>, now: number): number | null {
+  const next = Date.parse(frame.nextBatchAt);
+  if (frame.paused || !Number.isFinite(next) || !(frame.batch >= 1) || !(frame.minutes >= 1)) return null;
+  return Math.max(next, now) + (Math.ceil(Math.max(1, place) / frame.batch) - 1) * frame.minutes * MINUTE;
+}
+
+/** How long until the estimate: ANY MOMENT NOW within half a minute; ABOUT 12 MIN; ABOUT 2 H 05 from an hour. */
+export function queueAbout(ms: number): string {
+  if (ms <= 30 * SECOND) return LIVE.queue.soon;
+  return LIVE.queue.about(Math.max(1, Math.round(ms / MINUTE)));
+}
+
+/**
+ * The queue page's model: the entry's place (`queue`, its own) and the queue's frame (shared, read with it or after it);
+ * without the frame, `reading`. The estimate is the frame's (it follows each batch and pause); the entry's own when the
+ * frame cannot give one while the queue is not paused.
+ */
+export function queueModel(queue: LiveQueue, frame: LiveQueueFrame | null, now: number, localZone: string): QueueModel {
+  if (!frame) return { kind: 'reading' };
+  const place = queue.place;
+  if (frame.paused) return { kind: 'paused', place, announce: LIVE.announce.queue(place, null) };
+  const at = queueEta(place, frame, now) ?? (queue.etaAt ? Date.parse(queue.etaAt) : Number.NaN);
+  const paris = Number.isFinite(at) ? zonedTime(at, PARIS) : null;
+  if (!paris) return { kind: 'reading' };
+  const local = zonedTime(at, localZone);
+  const onThis = onComputer() ? LIVE.queue.onThisComputer : LIVE.queue.onThisPhone;
+  return {
+    kind: 'eta',
+    place,
+    eta: LIVE.queue.eta(paris.time),
+    local: !local || (local.day === paris.day && local.time === paris.time) ? null : onThis(local.time),
+    about: queueAbout(at - now),
+    announce: LIVE.announce.queue(place, paris.time),
+  };
 }
 
 // ── The turn and the hold ──────────────────────────────────────────────────
@@ -821,9 +880,11 @@ export function myLiveEntries(list: readonly LiveAccountEntry[]): MyEntryModel[]
     .map((x) => {
       const e = x.entry;
       const title = upper(x.release.title ?? x.release.name ?? '') || LIVE.kind;
-      const label = LIVE.statusLabel[e.status];
+      // W5: an entry waiting in the queue says so, with its place.
+      const queued = e.status === 'QUEUED' && e.queue && Number.isInteger(e.queue.place) ? e.queue : null;
+      const label = queued ? LIVE.queue.inPieces(queued.place) : LIVE.statusLabel[e.status];
       const reference = liveReference(e.id);
-      const sentence = e.status === 'CONFIRMED' ? LIVE.securedInPieces(e.size.label, e.quantity) : LIVE.sentence[e.status];
+      const sentence = e.status === 'CONFIRMED' ? LIVE.securedInPieces(e.size.label, e.quantity) : queued ? LIVE.queue.sentence : LIVE.sentence[e.status];
       // An after-room's entry: read through the release it follows.
       const parent = isReleaseId(x.release.afterRoomOf) ? x.release.afterRoomOf : null;
       const entry: EntryModel = {

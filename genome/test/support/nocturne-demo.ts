@@ -34,6 +34,10 @@
  *   collection-leads  nothing announced: the newest public model leads NOW (C43)
  *   room              a LIVE RELEASE whose room is open, three minutes before its opening (C21)
  *   live              a LIVE RELEASE live now, a collector at each step of the line and each end (the room's screens)
+ *   queue             the live story without its release live now: two LIVE RELEASES that let their line in at a pace
+ *                     (macro scope of 2026-10-20, W2, W5; lot M1), live now: one at 40 buyers a minute, a collector let
+ *                     in and two in its queue (places 412 and 4999, the crowd ahead of them written in bulk), and one
+ *                     whose pace ORBES paused, a collector in its queue (seedQueue)
  *   afterroom         a LIVE RELEASE sold out a few minutes ago, its after-room open (C26)
  *   afterroom-ends    three LIVE RELEASES of the last two hours whose after-rooms ended with a guest still in their
  *                     line: sold out, closed at their time, ended by ORBES; and a guest who never entered one
@@ -115,6 +119,7 @@ export type DemoVariant =
   | 'collection-leads'
   | 'room'
   | 'live'
+  | 'queue'
   | 'afterroom'
   | 'afterroom-ends'
   | 'draws'
@@ -142,6 +147,7 @@ export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'collection-leads',
   'room',
   'live',
+  'queue',
   'afterroom',
   'afterroom-ends',
   'draws',
@@ -267,11 +273,13 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
   else if (story === 'stress') await seedStress(w);
   else {
     await seedCatalogue(w);
-    await seedStory(w, story);
+    // The queue's stage tells the live story, its own releases in place of the live one.
+    await seedStory(w, story === 'queue' ? 'live' : story);
     if (story === 'full' || story === 'rules') await seedScanCases(w);
     if (story === 'full') await seedYearlyCare(w);
     if (story === 'room') await seedRoom(w);
     if (story === 'live') await seedLive(w);
+    if (story === 'queue') await seedQueue(w);
     if (story === 'afterroom') await seedAfterRoom(w);
     if (story === 'afterroom-ends') await seedAfterRoomEnds(w);
     if (story === 'draws') await seedDraws(w);
@@ -868,6 +876,111 @@ async function seedLive(w: World): Promise<void> {
   await live.setAddons(securedA.id, r.id, [r.addons[0]!.id], securedA.actor);
   await step(1_000);
   await live.message(r.id, 'The door is open. Take your time at the seal.', w.admin);
+}
+
+/** `n` accounts of a crowd, written in bulk (no password to sign in with: they are never signed in). */
+async function crowdOf(w: World, n: number, tag: string): Promise<string[]> {
+  const ids: string[] = [];
+  for (let i = 0; i < n; i += 500) {
+    const values = Array.from({ length: Math.min(500, n - i) }, (_, k) => {
+      const email = `${tag}.${i + k + 1}@example.com`;
+      return { email, email_normalized: email, password_hash: 'unused' };
+    });
+    ids.push(...(await w.ctx.db.insertInto('accounts').values(values).returning('id').execute()).map((a) => a.id));
+  }
+  return ids;
+}
+
+/**
+ * A paced release's line written in bulk, after its T0, in arrival order: `accounts[i]` at place i + 1, joined at `at`,
+ * its size the release's sizes in turn (each demo account's own given by `sizeOf`).
+ */
+async function bulkLine(w: World, dropId: string, sizes: readonly { id: string }[], accounts: readonly string[], at: Date, sizeOf: ReadonlyMap<string, string>): Promise<void> {
+  for (let i = 0; i < accounts.length; i += 500) {
+    const values = accounts.slice(i, i + 500).map((accountId, k) => ({
+      drop_id: dropId,
+      account_id: accountId,
+      size_id: sizeOf.get(accountId) ?? sizes[(i + k) % sizes.length]!.id,
+      quantity: 1,
+      tier: sizeOf.has(accountId) ? 1 : 0,
+      status: 'QUEUED' as const,
+      position: i + k + 1,
+      joined_at: at,
+      queued_at: at,
+    }));
+    await w.ctx.db.insertInto('live_entries').values(values).execute();
+  }
+}
+
+/**
+ * W2, W5, W6 (lot M1): two LIVE RELEASES live now that let their line in at a pace. MONOLITHE IN BLUE, 40 buyers every
+ * minute from its T0 five minutes ago: its line (5 240, written in bulk half a minute after T0) let in 200 by five
+ * batches, its next batch due in a minute; `admitted` let in with the fourth (place 150, the line), `queued` at place 412
+ * of the queue (19:00 PARIS, about 11 minutes), `queueFar` at place 4999 (about 2 h 05). MONOLITHE IN GOLD, 10 every
+ * two minutes from its T0 four minutes ago, its pace paused by ORBES a minute ago: `queuePaused` at place 12.
+ */
+async function seedQueue(w: World): Promise<void> {
+  const { ctx, clock, demo } = w;
+  const live = ctx.services.live;
+  clock.set(at('2026-10-04T12:00:00Z'));
+  const t0 = new Date(NOCTURNE_NOW.getTime() - 5 * MINUTE);
+  const r = await createLiveRelease(w.f, {
+    modelId: w.models.blue!,
+    opensAt: t0,
+    closesAt: new Date(t0.getTime() + 3 * HOUR),
+    minTier: 1,
+    turnSeconds: 300,
+    payMinutes: 10,
+    sizes: [{ label: '16', stock: 3 }, { label: '17', stock: 3 }, { label: '18', stock: 3 }],
+    quantityLine: '9 PIECES',
+    priceMinor: 505_000,
+    pace: { batch: 40, minutes: 1 },
+  });
+  await titled(w, r.id, 'MONOLITHE IN BLUE', 'The blue of MONOLITHE, released live: nine pieces, in the sizes of the house.');
+  demo.releases.queue = r.id;
+  const admitted = await account(w, 'admitted', 'admitted@example.com', 1, w.models.blue);
+  const queued = await account(w, 'queued', 'queued@example.com', 1, w.models.blue);
+  const far = await account(w, 'queueFar', 'queue.far@example.com', 1, w.models.blue);
+  // T0: the line formed (nobody in the room), the first batch lets nobody in.
+  clock.set(t0);
+  await live.advance(r.id);
+  const line = await crowdOf(w, 5240 - 3, 'queue');
+  line.splice(149, 0, admitted.id);
+  line.splice(611, 0, queued.id);
+  line.splice(5198, 0, far.id);
+  const s17 = r.sizes[1]!.id;
+  await bulkLine(w, r.id, r.sizes, line, new Date(t0.getTime() + 30_000), new Map([admitted.id, queued.id, far.id].map((id) => [id, s17])));
+  for (let k = 1; k <= 5; k++) {
+    clock.set(new Date(t0.getTime() + k * MINUTE));
+    await live.advance(r.id);
+  }
+
+  clock.set(at('2026-10-04T12:00:00Z'));
+  const t1 = new Date(NOCTURNE_NOW.getTime() - 4 * MINUTE);
+  const g = await createLiveRelease(w.f, {
+    modelId: w.models.gold!,
+    opensAt: t1,
+    closesAt: new Date(t1.getTime() + 2 * HOUR),
+    minTier: 1,
+    turnSeconds: 300,
+    payMinutes: 10,
+    sizes: [{ label: '16', stock: 2 }, { label: '17', stock: 2 }, { label: '18', stock: 2 }],
+    quantityLine: '6 PIECES',
+    priceMinor: 505_000,
+    pace: { batch: 10, minutes: 2 },
+  });
+  await titled(w, g.id, 'MONOLITHE IN GOLD', 'The gold of MONOLITHE, released live: six pieces, in the sizes of the house.');
+  demo.releases.queuePaused = g.id;
+  const paused = await account(w, 'queuePaused', 'queue.paused@example.com', 1, w.models.gold);
+  clock.set(t1);
+  await live.advance(g.id);
+  const second = await crowdOf(w, 60 - 1, 'paused');
+  second.splice(21, 0, paused.id);
+  await bulkLine(w, g.id, g.sizes, second, new Date(t1.getTime() + 20_000), new Map([[paused.id, g.sizes[1]!.id]]));
+  clock.set(new Date(t1.getTime() + 2 * MINUTE));
+  await live.advance(g.id);
+  clock.set(new Date(NOCTURNE_NOW.getTime() - MINUTE));
+  await live.pausePace(g.id, w.admin);
 }
 
 /** A LIVE RELEASE of one piece, sold out five minutes ago with you still in the line: its after-room is open. */

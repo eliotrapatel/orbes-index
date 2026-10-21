@@ -1949,6 +1949,36 @@ export const LIVE = Object.freeze({
   inSize: (n: number, size: string) => `${n} ${inSizeLabel(size)}`,
   held: (n: number) => (n === 1 ? '1 HELD PIECE MAY RETURN' : `${n} HELD PIECES MAY RETURN`),
   lineNote: 'When your turn comes, the seal appears here: press and hold it to secure your piece. Keep this page open.',
+  /**
+   * The queue (macro scope of 2026-10-20, W2, W5, W6): after the opening, on a release that lets its line in at a pace,
+   * an entry waiting to be let into the room reads its place and when it should come in, in Paris, never the pace itself.
+   */
+  queue: Object.freeze({
+    kind: 'THE QUEUE',
+    /** The place's label as a screen reader says it, before the figure. */
+    placeSaid: 'Your place in the queue',
+    /** While the queue's figures are read (the page's first read of them, or after it lost them). */
+    reading: 'READING YOUR PLACE',
+    /** The estimated entry time in Paris, then on this phone (computer) when its zone says it otherwise. */
+    eta: (time: string) => `ESTIMATED ENTRY ${time} PARIS`,
+    onThisPhone: (time: string) => `${time} ON THIS PHONE`,
+    onThisComputer: (time: string) => `${time} ON THIS COMPUTER`,
+    /** How long until then: `ABOUT 12 MIN`, `ABOUT 2 H 05`; within half a minute, ANY MOMENT NOW. */
+    about: (minutes: number) => (minutes < 60 ? `ABOUT ${minutes} MIN` : `ABOUT ${Math.floor(minutes / 60)} H ${String(minutes % 60).padStart(2, '0')}`),
+    soon: 'ANY MOMENT NOW',
+    paused: 'THE QUEUE IS PAUSED',
+    pausedLine: 'Your place is kept.',
+    /** W6: the place is kept whatever happens; the turn passes on only once it has come. */
+    keep: 'Keep this page open. Your place is kept if you leave and come back.',
+    leave: 'LEAVE THE LINE',
+    /** LEAVE THE LINE gives the place up: a second tap (click, on a computer) within a few seconds confirms it. */
+    get leaveConfirm() {
+      return forDevice('TAP AGAIN TO LEAVE', 'CLICK AGAIN TO LEAVE');
+    },
+    /** MY PIECES: the entry's status while it waits in the queue, with its place, and what it means now. */
+    inPieces: (place: number) => `IN THE QUEUE · PLACE ${place}`,
+    sentence: 'You are in the queue. Open the release to follow your place.',
+  }),
   // The turn
   yourTurn: 'YOUR TURN',
   returned: 'A PIECE HAS RETURNED',
@@ -2018,6 +2048,11 @@ export const LIVE = Object.freeze({
   /** What the page says aloud as it changes (aria-live). */
   announce: Object.freeze({
     place: (place: number, ahead: number, size: string) => `Your place: ${place}. ${ahead === 0 ? `You are next ${inSizeWords(size)}` : `${ahead} ahead of you ${inSizeWords(size)}`}.`,
+    /** The queue (W5): its place, then when it should come in, Paris time; or that it is paused. */
+    queue: (place: number, time: string | null) =>
+      `Your place in the queue: ${place}. ${time === null ? 'The queue is paused. Your place is kept.' : `Estimated entry at ${time}, Paris time.`}`,
+    /** Let into the room from the queue: then its place in the line, as the line says it. */
+    admitted: 'You’re in.',
     turn: 'Your turn. Press and hold the seal until the ring is full.',
     returned: 'A piece has returned: your turn. Press and hold the seal until the ring is full.',
     secured: (name: string) => `Secured: ${name} is held for you.`,
