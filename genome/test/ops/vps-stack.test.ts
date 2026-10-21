@@ -12,7 +12,8 @@
  *    secrets filled in) is a valid production configuration (GEO_MODE=mmdb);
  *  - every app setting of genome/.env.example reaches the app (the ORBES
  *    Client Services contact included, empty until the brand supplies it,
- *    and the ORBES Care subscription page, empty until it opens),
+ *    the ORBES Care subscription page, empty until it opens, and the
+ *    emails' channel, empty and so off until a provider is chosen),
  *    and every variable compose interpolates is documented in
  *    deploy/vps/.env.example;
  *  - the Caddyfile forwards exactly one X-Forwarded-For entry ({client_ip}),
@@ -217,8 +218,6 @@ describe('deploy/vps/compose.yaml', () => {
     const notForTheApp = new Set([
       'POSTGRES_DB', 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'APP_BIND', 'APP_PORT', 'ORBES_IMAGE_TAG', 'ORBES_ENV_FILE',
       'DEMO_ACCOUNT_PASSWORD', 'ADMIN_PASSWORD', 'ADMIN_TOTP_SECRET', 'ORBES_DEMO', 'GEO_COUNTRY_HEADER', 'GEO_LAT_HEADER', 'GEO_LON_HEADER',
-      // The emails' channel (plan MACRO M1 §4.1, E0), off: compose.yaml passes it once lot M1 step M1.16 lands (§11 note 8).
-      'EMAIL_TRANSPORT', 'EMAIL_FROM', 'EMAIL_REPLY_TO', 'SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURITY', 'SMTP_USER', 'SMTP_PASSWORD',
     ]);
     const missing = [...genomeVars].filter((n) => !notForTheApp.has(n) && !appEnv.has(n)).sort();
     expect(missing).toEqual([]);
@@ -303,6 +302,43 @@ describe('deploy/vps/compose.yaml', () => {
     expect(build().careSubscribeUrl).toBeNull();
     vars.set('CARE_SUBSCRIBE_URL', 'https://whop.com/orbes/care');
     expect(build().careSubscribeUrl).toBe('https://whop.com/orbes/care');
+  });
+
+  it("hands the emails' channel (E0) from .env to the app, empty by default, so the channel stays off and nothing else changes", () => {
+    const appEnv = environment(svc.get('app')!);
+    const names = ['EMAIL_TRANSPORT', 'EMAIL_FROM', 'EMAIL_REPLY_TO', 'SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURITY', 'SMTP_USER', 'SMTP_PASSWORD'];
+    for (const name of names) {
+      // Passed through with an empty default, never a value of compose's own; documented, commented, in the template.
+      expect(appEnv.get(name), name).toBe(`\${${name}:-}`);
+      expect(example.documented.has(name), name).toBe(true);
+      expect(example.active.has(name), name).toBe(false);
+    }
+    expect(compose).not.toMatch(/EMAIL_TRANSPORT:\s*['"]?smtp/);
+    const vars = new Map(example.active);
+    vars.set('POSTGRES_APP_PASSWORD', randomBytes(24).toString('hex'));
+    vars.set('COOKIE_SECRET', randomBytes(48).toString('base64url'));
+    vars.set('IP_HASH_PEPPER', randomBytes(48).toString('base64url'));
+    vars.set('KEY_ENCRYPTION_KEY', randomBytes(32).toString('base64url'));
+    const build = (keep: (name: string) => boolean) => {
+      const env: Record<string, string> = {};
+      for (const [k, v] of appEnv) if (keep(k)) env[k] = interpolate(v, vars);
+      return loadConfig(env);
+    };
+    // Empty, the eight change nothing: the configuration is the one built without them.
+    const off = build(() => true);
+    expect(off.email).toEqual({ transport: 'off' });
+    expect(off).toEqual(build((k) => !names.includes(k)));
+    // Filled in on the server, they reach the app as its SMTP channel.
+    vars.set('EMAIL_TRANSPORT', 'smtp');
+    vars.set('EMAIL_FROM', 'ORBES <hello@theorbes.com>');
+    vars.set('SMTP_HOST', 'smtp.example.com');
+    vars.set('SMTP_USER', 'orbes');
+    vars.set('SMTP_PASSWORD', randomBytes(24).toString('base64url'));
+    const on = build(() => true).email;
+    expect(on).toMatchObject({ transport: 'smtp', from: { address: 'hello@theorbes.com', name: 'ORBES' }, replyTo: null, smtp: { host: 'smtp.example.com', port: 465, security: 'tls', user: 'orbes' } });
+    expect(on.transport === 'smtp' && on.smtp.password).toBe(vars.get('SMTP_PASSWORD'));
+    vars.set('SMTP_PORT', '587');
+    expect(build(() => true).email).toMatchObject({ smtp: { port: 587, security: 'starttls' } });
   });
 
   it('migrates as the schema owner and grants the app role DML only (scripts)', () => {

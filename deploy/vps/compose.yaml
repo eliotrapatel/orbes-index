@@ -123,6 +123,17 @@ services:
       CLIENT_SERVICES_HOURS: ${CLIENT_SERVICES_HOURS:-}
       # ORBES Care (P-M02): the subscription page of SUBSCRIBE; unset = "Subscriptions open soon".
       CARE_SUBSCRIBE_URL: ${CARE_SUBSCRIBE_URL:-}
+      # Emails (macro scope E0): empty = off, nothing queued or sent. The keys go in .env on the server,
+      # never in chat (genome/.env.example). The app's networks have no route out: the deployment that
+      # turns emails on also gives the app a way to the SMTP host.
+      EMAIL_TRANSPORT: ${EMAIL_TRANSPORT:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      EMAIL_REPLY_TO: ${EMAIL_REPLY_TO:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_SECURITY: ${SMTP_SECURITY:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       # Optional tunables (genome/.env.example); unset = the app's defaults.
       LOG_LEVEL: ${LOG_LEVEL:-info}
       ADMIN_REQUIRE_MFA: ${ADMIN_REQUIRE_MFA:-}
