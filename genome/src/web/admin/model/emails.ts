@@ -71,7 +71,7 @@ export const EMAILS_COPY = Object.freeze({
   sentAs: 'As it was sent',
   // The founding announcement's panel (the Founding list page).
   announcement: 'The founding announcement',
-  announcementLead: 'One email to everyone on the list who has not unsubscribed, to tell them the first release is open (F6). It is prepared now and goes once the server has an email provider and the email is switched on.',
+  announcementLead: 'One email to everyone on the list who has not unsubscribed, to tell them the first release is open. It is prepared now and goes once the server has an email provider and the email is switched on.',
   announcementUnread: 'The founding announcement could not be read. Reload the page.',
   noRelease: 'No release to announce: a published release that is not over appears here.',
   release: 'Release',
