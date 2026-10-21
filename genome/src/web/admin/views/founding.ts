@@ -188,7 +188,7 @@ function segmentSection(ctx: ViewContext, segments: Segment[] | null, canMake: b
     ]);
     tools = [linkButton(C.openSegment, href('segment', { segmentId: made.id }), 'ghost')];
   } else {
-    body = defList([{ label: 'Segment', value: h('span', { data: { testid: 'founding-segment-none' } }, canMake || segments === null ? C.noSegment : C.noSegmentAuditor) }]);
+    body = defList([{ label: 'Segment', value: h('span', { data: { testid: 'founding-segment-none' } }, segments === null ? C.segmentsUnread : canMake ? C.noSegment : C.noSegmentAuditor) }]);
     if (canMake && segments) {
       const b = button(C.makeSegment, { kind: 'primary', testId: 'founding-make-segment' });
       b.addEventListener('click', () =>

@@ -36,6 +36,7 @@ export const FOUNDING_COPY = Object.freeze({
   segmentMade: 'Segment made.',
   noSegment: 'None yet.',
   noSegmentAuditor: 'None yet. An OPERATOR makes it.',
+  segmentsUnread: 'The segments could not be read. Reload the page.',
   remove: 'Remove',
   removeTitle: 'Remove from the list',
   removeBody: 'Erasure on request: the row is deleted with its consent and its source. An ORBES account with the same email is not touched. This cannot be undone.',
@@ -209,7 +210,7 @@ export function removePhrase(id: string): string {
 
 /** The count of the list under the table: `3 people`, `1 person`, with the filters said. */
 export function peopleLine(total: number, isFiltered: boolean): string {
-  return `${formatCount(total)} ${total === 1 ? 'person' : 'people'}${isFiltered ? ' match the filters' : ''}`;
+  return `${formatCount(total)} ${total === 1 ? 'person' : 'people'}${isFiltered ? (total === 1 ? ' matches the filters' : ' match the filters') : ''}`;
 }
 
 // ── What the reader may do ───────────────────────────────────────────────────────────────────────────────────────

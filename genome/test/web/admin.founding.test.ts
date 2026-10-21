@@ -161,7 +161,12 @@ describe('the Founding list (plan MACRO M1 §3.2)', () => {
     expect(statusText({ unsubscribedAt: '2026-10-21T23:30:00.000Z' })).toBe('Unsubscribed');
     expect(unsubscribedDay({ unsubscribedAt: '2026-10-21T23:30:00.000Z' })).toBe('22 OCT 2026');
     expect(unsubscribedDay(ENTRY)).toBeNull();
-    expect([peopleLine(1, false), peopleLine(1240, false), peopleLine(2, true)]).toEqual(['1 person', `${formatCount(1240)} people`, '2 people match the filters']);
+    expect([peopleLine(1, false), peopleLine(1240, false), peopleLine(2, true), peopleLine(1, true)]).toEqual([
+      '1 person',
+      `${formatCount(1240)} people`,
+      '2 people match the filters',
+      '1 person matches the filters',
+    ]);
     expect(FOUNDING_COPY.empty).toBe('Nobody yet. The theorbes.com form adds people here.');
   });
 
