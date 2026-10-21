@@ -707,7 +707,7 @@ describe('the export and the new claim codes (plan NEXT LOT §3.4)', () => {
 });
 
 describe('the account’s email data through its life (lot M1 step M1.17)', () => {
-  it('exports its release notices’ choice and its emails by kind, status and dates (never an address, subject or words), states the 90 days, and a lock cancels what is still queued', async () => {
+  it('exports its release notices’ choice and its emails (its matched founding list entry’s too) by kind, status and dates (never an address, subject or words), states the 90 days, and a lock cancels what is still queued', async () => {
     const { createContext } = await import('../../src/server/context.js');
     const { MemoryKeyProvider } = await import('../../src/server/keys/memory-provider.js');
     const { CANCELLED_WORDS, EMAIL_RETENTION_DAYS } = await import('../../src/server/services/email.js');
@@ -722,7 +722,7 @@ describe('the account’s email data through its life (lot M1 step M1.17)', () =
       const a = await createAccount(t.db);
       const other = await createAccount(t.db);
       const email = ctx.services.email;
-      for (const kind of ['ORDER_CONFIRMED', 'RELEASE_NOTICE'] as const) await email.setEnabled(kind, true, f.admin);
+      for (const kind of ['ORDER_CONFIRMED', 'RELEASE_NOTICE', 'FOUNDING_ANNOUNCEMENT'] as const) await email.setEnabled(kind, true, f.admin);
       await ctx.services.emails.setPreferences(a.id, { releaseNotices: true }, a.actor);
       const chosenAt = clock.now();
       // One sent, one still queued, and another account's.
@@ -733,12 +733,22 @@ describe('the account’s email data through its life (lot M1 step M1.17)', () =
       clock.advance(1_000);
       await email.enqueue(t.db, { kind: 'RELEASE_NOTICE', to: a.email, accountId: a.id, dedupeKey: 'E2:r:a', values: { release: 'The November release' } });
       await email.enqueue(t.db, { kind: 'ORDER_CONFIRMED', to: other.email, accountId: other.id, dedupeKey: 'ORDER_CONFIRMED:other', values: {} });
+      // A founding announcement to its founding list entry matched to it (M1.17 verification), and one to someone else's entry.
+      clock.advance(1_000);
+      const SYSTEM = { type: 'system' as const, id: 'public' };
+      for (const [address, name] of [[a.email, 'Ada'], ['stranger@example.com', 'Grace']] as const) await ctx.services.founding.register({ email: address, firstName: name, country: 'FR', consent: true }, SYSTEM);
+      await t.db.updateTable('preregistrations').set({ account_id: a.id, matched_at: clock.now() }).where('email_normalized', '=', a.email.toLowerCase()).where('account_id', 'is', null).execute();
+      for (const [address, key] of [[a.email, 'E1:r:p'], ['stranger@example.com', 'E1:r:s']] as const) {
+        const p = await t.db.selectFrom('preregistrations').select('id').where('email_normalized', '=', address.toLowerCase()).executeTakeFirstOrThrow();
+        expect((await email.enqueue(t.db, { kind: 'FOUNDING_ANNOUNCEMENT', to: address, preregistrationId: p.id, dedupeKey: key, values: { release: 'The November release' } })).queued).toBe(true);
+      }
 
       const x = await ctx.services.owners.exportData(a.id, f.admin);
       expect(x.emailPreferences).toEqual({ releaseNotices: true, changedAt: chosenAt });
       expect(x.emails.map((e) => [e.kind, e.status, e.sentAt !== null, e.settledAt !== null])).toEqual([
         ['ORDER_CONFIRMED', 'SENT', true, true],
         ['RELEASE_NOTICE', 'QUEUED', false, false],
+        ['FOUNDING_ANNOUNCEMENT', 'QUEUED', false, false],
       ]);
       for (const e of x.emails) expect(Object.keys(e).sort()).toEqual(['createdAt', 'kind', 'sentAt', 'settledAt', 'status']);
       const text = JSON.stringify({ ...x, account: null, activity: null });
@@ -751,7 +761,7 @@ describe('the account’s email data through its life (lot M1 step M1.17)', () =
         'The address, subject and words of each email: the emails list gives each one by its kind, status and dates. Each email sent, with its address, subject and words, is kept 90 days after it is sent or fails, then erased.',
       );
       expect(x.activity.filter((e) => e.action === 'account.email_preferences')).toEqual([expect.objectContaining({ by: 'account' })]);
-      expect((await t.db.selectFrom('audit_logs').select('details').where('action', '=', 'account.export').executeTakeFirstOrThrow()).details).toMatchObject({ emails: 2 });
+      expect((await t.db.selectFrom('audit_logs').select('details').where('action', '=', 'account.export').executeTakeFirstOrThrow()).details).toMatchObject({ emails: 3 });
 
       // The lock: the queued one cancelled in its transaction, the sent one kept as it is, another account's untouched.
       clock.advance(1_000);
@@ -759,6 +769,8 @@ describe('the account’s email data through its life (lot M1 step M1.17)', () =
       expect(locked.emailsCancelled).toBe(1);
       const rows = await t.db.selectFrom('email_outbox').select(['dedupe_key', 'status', 'last_error', 'settled_at']).orderBy('dedupe_key').execute();
       expect(rows).toEqual([
+        { dedupe_key: 'E1:r:p', status: 'QUEUED', last_error: null, settled_at: null },
+        { dedupe_key: 'E1:r:s', status: 'QUEUED', last_error: null, settled_at: null },
         { dedupe_key: 'E2:r:a', status: 'CANCELLED', last_error: CANCELLED_WORDS.notActive, settled_at: clock.now() },
         { dedupe_key: 'ORDER_CONFIRMED:one', status: 'SENT', last_error: null, settled_at: expect.any(Date) },
         { dedupe_key: 'ORDER_CONFIRMED:other', status: 'QUEUED', last_error: null, settled_at: null },

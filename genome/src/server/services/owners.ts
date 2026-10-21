@@ -518,9 +518,9 @@ export interface AccountExport {
    */
   emailPreferences: { releaseNotices: boolean; changedAt: Date | null };
   /**
-   * The emails written to the account still kept (lot M1 step M1.17; each is erased 90 days after it was sent, failed or
-   * was cancelled), oldest first: its kind, status, when it was written, sent and settled. Never its address, subject or
-   * words: they repeat what this export holds, and the kind names the email.
+   * The emails written to the account, or to its matched founding list entry, still kept (lot M1 step M1.17; each erased
+   * 90 days after it was sent, failed or was cancelled), oldest first: its kind, status, when it was written, sent and
+   * settled. Never its address, subject or words: they repeat what this export holds, and the kind names the email.
    */
   emails: ExportedEmail[];
   /**
@@ -1053,7 +1053,7 @@ export class OwnerService {
       const emails = await tx
         .selectFrom('email_outbox')
         .select(['kind', 'status', 'created_at', 'sent_at', 'settled_at'])
-        .where('account_id', '=', a.id)
+        .where((eb) => eb.or([eb('account_id', '=', a.id), eb('preregistration_id', 'in', eb.selectFrom('preregistrations').select('id').where('account_id', '=', a.id))]))
         .orderBy('created_at')
         .orderBy('id')
         .execute();

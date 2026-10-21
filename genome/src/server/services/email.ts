@@ -29,9 +29,10 @@
  *
  *   cancel      at send time (lot M1 step M1.17), a row is CANCELLED instead of sent when its person no longer wants it
  *               or can no longer have it: its account is not ACTIVE (locked, or any later deletion path), a release
- *               notice's account stopped them, a founding announcement's pre-registration unsubscribed. OwnerService.lock
+ *               notice's account stopped them, a founding announcement's pre-registration unsubscribed, or the release
+ *               a founding announcement or release notice is about is cancelled, gone or over. OwnerService.lock
  *               cancels the account's QUEUED rows in its own transaction (cancelAccountEmails), the unsubscribe the
- *               person's QUEUED rows of that kind.
+ *               person's QUEUED rows of that kind, a release's cancel its QUEUED E1 and E2 rows (cancelReleaseEmails).
  *   scans       the sender's pass first runs the scans registered (addScan): the release notices' watermark (E2,
  *               services/email-triggers.ts), only while the channel is on.
  *   console     the kinds' switches (ADMIN, audited `email.kind.enable` / `.disable`) and words (OPERATOR, audited
@@ -180,13 +181,44 @@ export async function cancelAccountEmails(tx: Db, accountId: string, now: Date, 
   return Number(r.numUpdatedRows ?? 0);
 }
 
+/**
+ * The QUEUED emails about a release cancelled (DropService.cancel and LiveConsoleService.cancel, in their transaction):
+ * its founding announcements (`E1:<release>:…`) and release notices (`E2:<release>:…`), CANCELLED, settled now. The
+ * number cancelled; the sender also cancels at send time a row whose release is cancelled, gone or over (cancelReason).
+ */
+export async function cancelReleaseEmails(tx: Db, dropId: string, now: Date): Promise<number> {
+  const id = dropId.toLowerCase();
+  const r = await tx
+    .updateTable('email_outbox')
+    .set({ status: 'CANCELLED', settled_at: now, last_error: CANCELLED_WORDS.releaseCancelled })
+    .where('status', '=', 'QUEUED')
+    .where((eb) =>
+      eb.or([
+        eb.and([eb('kind', '=', 'FOUNDING_ANNOUNCEMENT'), eb('dedupe_key', 'like', `E1:${id}:%`)]),
+        eb.and([eb('kind', '=', 'RELEASE_NOTICE'), eb('dedupe_key', 'like', `E2:${id}:%`)]),
+      ]),
+    )
+    .executeTakeFirst();
+  return Number(r.numUpdatedRows ?? 0);
+}
+
 /** Why a row was cancelled (its `last_error`, as the console shows it). */
 export const CANCELLED_WORDS = Object.freeze({
   notActive: 'Cancelled: the account is not active.',
   releaseNotices: 'Cancelled: release notices were stopped.',
   unsubscribed: 'Cancelled: unsubscribed from the founding list.',
   announcement: 'Cancelled: the scheduled announcement was cancelled.',
+  releaseCancelled: 'Cancelled: the release was cancelled.',
+  releaseOver: 'Cancelled: the release is over.',
 });
+
+/** The release an email is about, from its dedupe key: a founding announcement's (`E1:<id>:…`) or a release notice's (`E2:<id>:…`). */
+function releaseOfRow(row: Pick<OutboxRow, 'kind' | 'dedupe_key'>): string | null {
+  const prefix = row.kind === 'FOUNDING_ANNOUNCEMENT' ? 'E1:' : row.kind === 'RELEASE_NOTICE' ? 'E2:' : null;
+  if (prefix === null || !row.dedupe_key.startsWith(prefix)) return null;
+  const id = row.dedupe_key.slice(prefix.length).split(':')[0] ?? '';
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ? id.toLowerCase() : null;
+}
 
 /** A scan the sender runs first in each pass while the channel is on (the release notices' watermark, E2). */
 export type EmailScan = () => Promise<void>;
@@ -449,7 +481,8 @@ export class EmailService {
 
   /**
    * Why a claimed row must not go now, or null: its account is no longer ACTIVE (locked, or deleted by any later path),
-   * a release notice's account stopped them, a founding announcement's pre-registration unsubscribed.
+   * a release notice's account stopped them, a founding announcement's pre-registration unsubscribed, or the release a
+   * founding announcement or release notice is about is cancelled, gone or over.
    */
   private async cancelReason(row: OutboxRow): Promise<string | null> {
     if (row.account_id !== null) {
@@ -465,6 +498,12 @@ export class EmailService {
     if (row.preregistration_id !== null) {
       const p = await this.db.selectFrom('preregistrations').select('unsubscribed_at').where('id', '=', row.preregistration_id).executeTakeFirst();
       if (!p || p.unsubscribed_at !== null) return CANCELLED_WORDS.unsubscribed;
+    }
+    const releaseId = releaseOfRow(row);
+    if (releaseId !== null) {
+      const d = await this.db.selectFrom('drops').select(['cancelled_at', 'closes_at', 'ended_at', 'drawn_at']).where('id', '=', releaseId).executeTakeFirst();
+      if (!d || d.cancelled_at !== null) return CANCELLED_WORDS.releaseCancelled;
+      if (d.ended_at !== null || d.drawn_at !== null || d.closes_at.getTime() <= this.clock().getTime()) return CANCELLED_WORDS.releaseOver;
     }
     return null;
   }

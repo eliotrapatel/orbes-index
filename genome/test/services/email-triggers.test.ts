@@ -11,6 +11,8 @@
  *    PROFILE's choice turned off cancelling what is queued, the sender cancelling a notice whose account stopped them;
  *  - E1: now or at the opening, once per release and pre-registration, unsubscribed ones left out, the phrase, the
  *    refusals, CANCEL SCHEDULED, sent again after a cancel; the unsubscribe link; a removal takes its emails with it;
+ *  - E1 and E2: a release cancelled (a draw, a LIVE RELEASE) cancels its queued emails; the sender cancels one whose
+ *    release is cancelled or over;
  *  - E6: no kind exists for house messages.
  */
 import { randomBytes } from 'node:crypto';
@@ -403,6 +405,53 @@ describe('the emails’ triggers (E1 to E6)', () => {
     } finally {
       await off.close();
     }
+  });
+
+  it('E1 and E2: a release cancelled cancels its queued founding announcements and release notices (a draw and a LIVE RELEASE); the sender cancels one whose release was cancelled or is over', async () => {
+    await t.db.deleteFrom('preregistrations').execute();
+    await on('FOUNDING_ANNOUNCEMENT', 'RELEASE_NOTICE');
+    const lea = await register('Léa');
+    const reader = await collector('Iris');
+    await emails().setPreferences(reader.id, { releaseNotices: true }, reader.actor);
+    const opensAt = new Date(clock.now().getTime() + 48 * HOUR);
+    const d = await poolDraw(f.drops, t.db, { modelId: f.modelId, title: 'The cancelled draw', quantity: 3, opensAt, closesAt: new Date(opensAt.getTime() + 24 * HOUR), earlyAccessHours: 0 }, admin);
+    const live = await createLiveRelease(f, { opensAt: new Date(clock.now().getTime() + 72 * HOUR) });
+    const kept = await poolDraw(f.drops, t.db, { modelId: f.modelId, title: 'The kept draw', quantity: 3, opensAt, closesAt: new Date(opensAt.getTime() + 24 * HOUR), earlyAccessHours: 0 }, admin);
+    for (const r of [d, live, kept]) {
+      expect((await emails().queueAnnouncement(r.id, { when: 'OPENING', phrase: announcementPhrase(r.id) }, admin)).queued).toBe(1);
+      await email().enqueue(t.db, { kind: 'RELEASE_NOTICE', to: reader.email, accountId: reader.id, dedupeKey: `E2:${r.id}:${reader.id}`, values: {} });
+    }
+    await f.drops.cancel(d.id, admin);
+    await ctx.services.liveConsole.cancel(live.id, admin);
+    const rows = await outbox();
+    const of = (id: string) => rows.filter((r) => r.dedupe_key.includes(id)).map((r) => [r.kind, r.status, r.last_error, r.settled_at]);
+    for (const id of [d.id, live.id])
+      expect(of(id).sort()).toEqual(
+        [
+          ['FOUNDING_ANNOUNCEMENT', 'CANCELLED', CANCELLED_WORDS.releaseCancelled, clock.now()],
+          ['RELEASE_NOTICE', 'CANCELLED', CANCELLED_WORDS.releaseCancelled, clock.now()],
+        ].sort(),
+      );
+    expect(of(kept.id).map((r) => r[1])).toEqual(['QUEUED', 'QUEUED']);
+    expect((await audits('drop.cancel')).find((x) => x.target_id === d.id)!.details).toMatchObject({ emailsCancelled: 2 });
+    expect((await audits('drop.live.cancel')).find((x) => x.target_id === live.id)!.details).toMatchObject({ emailsCancelled: 2 });
+    // The panel no longer lists them; the kept release's are still scheduled.
+    const panel = await emails().announcement();
+    expect(panel.releases.map((r) => r.id)).not.toContain(d.id);
+    expect(panel.releases.find((r) => r.id === kept.id)).toMatchObject({ emails: { queued: 1, sent: 0, failed: 0, cancelled: 0 }, scheduledAt: opensAt });
+
+    // At send time: a release cancelled by a write that did not go through the services, and one over, are not told.
+    const sendAt = (at: Date) => new EmailService({ db: t.db, config: { publicOrigin: ORIGIN, email: ON }, unsubscribeKey: new Uint8Array(32), clock: () => at, transport: async () => undefined });
+    await t.db.updateTable('drops').set({ cancelled_at: clock.now() }).where('id', '=', kept.id).execute();
+    expect(await sendAt(opensAt).sendDue()).toEqual({ sent: 0, retried: 0, failed: 0, cancelled: 2 });
+    expect((await outbox()).filter((r) => r.dedupe_key.includes(kept.id)).map((r) => [r.status, r.last_error, r.sent_at])).toEqual([
+      ['CANCELLED', CANCELLED_WORDS.releaseCancelled, null],
+      ['CANCELLED', CANCELLED_WORDS.releaseCancelled, null],
+    ]);
+    const late = await poolDraw(f.drops, t.db, { modelId: f.modelId, title: 'The late draw', quantity: 3, opensAt, closesAt: new Date(opensAt.getTime() + 24 * HOUR), earlyAccessHours: 0 }, admin);
+    await emails().queueAnnouncement(late.id, { when: 'NOW', phrase: announcementPhrase(late.id) }, admin);
+    expect(await sendAt(new Date(opensAt.getTime() + 25 * HOUR)).sendDue()).toEqual({ sent: 0, retried: 0, failed: 0, cancelled: 1 });
+    expect((await outbox('FOUNDING_ANNOUNCEMENT')).find((r) => r.dedupe_key === `E1:${late.id}:${lea.id}`)).toMatchObject({ status: 'CANCELLED', last_error: CANCELLED_WORDS.releaseOver, sent_at: null });
   });
 
   it('the unsubscribe link: a pre-registration unsubscribed (its queued announcements cancelled), an account’s release notices off; a forged token does nothing; a removal takes its emails with it', async () => {

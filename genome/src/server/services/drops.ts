@@ -138,6 +138,7 @@ import { savedSizeAmong } from './sizes.js';
 import { linkDropSizes } from './stock.js';
 import { isSegmentMember } from './segments.js';
 import type { EmailTriggers } from './email-triggers.js';
+import { cancelReleaseEmails } from './email.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -1850,7 +1851,12 @@ export class DropService {
       // IN-01: its guarantees not used, carried to the next release of their model or collection, or expired.
       const notes: AuditRecordInput[] = [];
       await releaseCovered(tx, id, 'CANCELLED', now, actor, notes);
-      await this.audit.record({ actor, action: 'drop.cancel', targetType: 'drop', targetId: id, details: { published: d.published_at !== null, entered: counts.ENTERED } }, tx);
+      // Its founding announcements and release notices still queued are not sent (M1.17).
+      const emails = await cancelReleaseEmails(tx, id, now);
+      await this.audit.record(
+        { actor, action: 'drop.cancel', targetType: 'drop', targetId: id, details: { published: d.published_at !== null, entered: counts.ENTERED, ...(emails > 0 ? { emailsCancelled: emails } : {}) } },
+        tx,
+      );
       for (const n of notes) await this.audit.record(n, tx);
       return this.adminDrop(tx, id);
     });

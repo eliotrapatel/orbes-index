@@ -36,9 +36,13 @@ import { clientEmail, readsClientEmails } from './serialize.js';
 const OPERATOR = { guard: { minRole: 'OPERATOR' as const } };
 const ADMIN = { guard: { minRole: 'ADMIN' as const } };
 
-/** A reset link's code (`/verify/reset#<email>/<code>`) as the console shows an email: never the fragment. */
-export function withoutResetCode(words: string): string {
-  return words.replace(/(\/verify\/reset)#[^\s"'<>)]*/g, '$1#…');
+/**
+ * An email's links as the console shows it: a reset link's code (`/verify/reset#<email>/<code>`) and an unsubscribe
+ * link's token (`/verify/unsubscribe#<token>`, `/api/v1/email/unsubscribe?t=<token>`), never their secret part, so that
+ * no staff member can use them.
+ */
+export function withoutLinkSecrets(words: string): string {
+  return words.replace(/(\/verify\/(?:reset|unsubscribe))#[^\s"'<>)]*/g, '$1#…').replace(/(\/api\/v1\/email\/unsubscribe\?t=)[^\s"'<>)&]*/g, '$1…');
 }
 
 /** A kind as the console reads it: its switch and words, the placeholders its trigger fills, its default words. */
@@ -104,7 +108,7 @@ export const adminEmailRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
   app.get('/api/admin/email/outbox/:id', async (request) => {
     const { id } = parse(emailOutboxParams, request.params);
     const e = await email.outboxEmail(id);
-    return { ...e, to: clientEmail(e.to, readsClientEmails(request)), text: withoutResetCode(e.text), html: withoutResetCode(e.html) };
+    return { ...e, to: clientEmail(e.to, readsClientEmails(request)), text: withoutLinkSecrets(e.text), html: withoutLinkSecrets(e.html) };
   });
 
   app.get('/api/admin/email/announcement', async () => emails.announcement());

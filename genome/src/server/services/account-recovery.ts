@@ -220,7 +220,10 @@ export class AccountRecoveryService {
 
   /**
    * RESET BY EMAIL (see the file header): nothing is said of the address. 409 EMAIL_OFF while the reset by email is not
-   * offered (the same for every address). The code is hashed first, whatever the address, so every request costs the same.
+   * offered (the same for every address). The code is hashed first, whatever the address, so the slowest part of a
+   * request (scrypt) is the same for every address; a known ACTIVE account's request still does more (its row lock, the
+   * hourly count, the code and the email written), so the response time is not claimed to be the same. A request revokes
+   * the account's open code, an ADMIN's included: one code is open per account (R14), at most RESET_REQUEST_LIMIT times an hour.
    */
   async requestByEmail(address: unknown, meta: ClientMeta = {}): Promise<void> {
     if (!(await this.resetByEmail())) throw emailOff();

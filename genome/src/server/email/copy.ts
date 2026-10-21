@@ -97,7 +97,7 @@ export const EMAIL_DEFAULTS: Readonly<Record<EmailKind, EmailWords>> = Object.fr
   },
   ORDER_DELIVERED: {
     subject: 'Your order {orderRef} is delivered',
-    body: ['{firstName},', 'Your order {orderRef} is delivered. Scan your piece with ORBES to register it in your name.', '[SEE YOUR ORDER]({link})'].join('\n\n'),
+    body: ['{firstName},', 'Your order {orderRef} is delivered. If your piece is not registered in your name yet, scan it with ORBES and enter the claim code from its certificate card.', '[SEE YOUR ORDER]({link})'].join('\n\n'),
   },
   ORDER_CANCELLED: {
     subject: 'Your order {orderRef} is cancelled',

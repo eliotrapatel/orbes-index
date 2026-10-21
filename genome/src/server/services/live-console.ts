@@ -91,6 +91,7 @@ import { mediaUrl } from './media.js';
 import { knownLocation, linkDropSizes } from './stock.js';
 import { cleanQuestionWords, QuestionService, type AdminQuestion } from './question.js';
 import { releaseFeasibility, type Feasibility, type FeasibilitySize } from './release-stock.js';
+import { cancelReleaseEmails } from './email.js';
 import { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES, afterRoomTimes, afterRoomTitle, cancelAfterRoom, type AfterRoomSkip } from './after-room.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
@@ -1248,7 +1249,18 @@ export class LiveConsoleService {
       const interest = await tx.selectFrom('live_interest').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', id).executeTakeFirstOrThrow();
       // IN-01: its guarantees not used, carried to the next release of their model or collection, or expired.
       await releaseCovered(tx, id, 'CANCELLED', now, actor, afterRoom);
-      await this.audit.record({ actor, action: 'drop.live.cancel', targetType: 'drop', targetId: id, details: { published: d.published_at !== null, announced: isAnnounced(d, now), interest: Number(interest.n) } }, tx);
+      // Its founding announcements and release notices still queued are not sent (M1.17), as its posts are withdrawn.
+      const emails = await cancelReleaseEmails(tx, id, now);
+      await this.audit.record(
+        {
+          actor,
+          action: 'drop.live.cancel',
+          targetType: 'drop',
+          targetId: id,
+          details: { published: d.published_at !== null, announced: isAnnounced(d, now), interest: Number(interest.n), ...(emails > 0 ? { emailsCancelled: emails } : {}) },
+        },
+        tx,
+      );
       for (const p of withdrawn) await this.audit.record({ actor, action: 'circle.post.unpublish', targetType: 'circle_post', targetId: p.id, details: { dropId: id, by: 'drop.live.cancel' } }, tx);
       for (const n of afterRoom) await this.audit.record(n, tx);
       return this.release(tx, id);

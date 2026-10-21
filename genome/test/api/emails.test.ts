@@ -9,7 +9,8 @@
  *  - unsubscribe: GET reads a token's kind, POST stops it, from the page (JSON) or a mail client's one click (a form, any
  *    origin, no cookie), the same answer for any token;
  *  - the console's routes: roles, the words, the switch, the preview, a test to oneself (409 EMAIL_OFF while off), the
- *    outbox with addresses masked for an AUDITOR and a reset link's code never shown, the founding announcement.
+ *    outbox with addresses masked for an AUDITOR and a reset link's code or an unsubscribe token never shown, the founding
+ *    announcement.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { EmailConfig } from '../../src/server/config.js';
@@ -248,6 +249,23 @@ describe('the emails’ routes while the channel is on', () => {
     expect(one.text).toContain('/verify/reset#…');
     expect(one.text).not.toMatch(/\/verify\/reset#[^…]/);
     expect(one.html).not.toMatch(/\/verify\/reset#[^…]/);
+    // An email one may stop: its unsubscribe link's token never shown either (M1.17 verification).
+    expect((await admin.request('PUT', '/api/admin/email/kinds/RELEASE_NOTICE/enabled', { body: { enabled: true } })).statusCode).toBe(200);
+    const { email: holder } = await accountClient(h);
+    const holderId = (await h.ctx.db.selectFrom('accounts').select('id').where('email', '=', holder).executeTakeFirstOrThrow()).id;
+    const notice = await h.ctx.services.email.enqueue(h.ctx.db, {
+      kind: 'RELEASE_NOTICE',
+      to: holder,
+      accountId: holderId,
+      dedupeKey: `E2:00000000-0000-4000-8000-000000000001:${holderId}`,
+      values: { firstName: 'Owner', release: 'A release', opensAt: new Date(), access: 'It is open to every ORBES account.', link: `${ORIGIN}/verify/releases/x` },
+    });
+    expect(notice.queued).toBe(true);
+    const noticeRow = await h.ctx.db.selectFrom('email_outbox').select(['body_text']).where('id', '=', notice.queued ? notice.id : '').executeTakeFirstOrThrow();
+    expect(noticeRow.body_text).toMatch(/\/verify\/unsubscribe#r\.[0-9a-f-]{36}\.[A-Za-z0-9_-]{8}/);
+    const shown = safeJson(await auditor.get(`/api/admin/email/outbox/${notice.queued ? notice.id : ''}`)) as { text: string; html: string };
+    expect(shown.text).toContain('/verify/unsubscribe#…');
+    for (const words of [shown.text, shown.html]) expect(words).not.toMatch(/\/verify\/unsubscribe#[^…]|\/api\/v1\/email\/unsubscribe\?t=[^…]/);
     expect((await auditor.get('/api/admin/email/outbox/00000000-0000-4000-8000-000000000000')).statusCode).toBe(404);
     const counts = (safeJson(await auditor.get('/api/admin/email')) as { outbox: { queued: number } }).outbox;
     expect(counts.queued).toBeGreaterThan(0);
