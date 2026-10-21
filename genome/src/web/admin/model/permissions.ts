@@ -174,6 +174,14 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   exportFounding: 'OPERATOR',
   /** A person removed from the Founding list on request (erasure): ADMIN, with a phrase to type. */
   removeFounding: 'ADMIN',
+  /** The Emails page (plan MACRO M1 §4.3, E0): the channel, each kind's switch and words, the outbox (addresses masked for an AUDITOR). */
+  readEmails: 'AUDITOR',
+  /** A kind's words written, previewed as they are written, and brought back to the default words. */
+  editEmailWords: 'OPERATOR',
+  /** A kind switched on or off, and a test to oneself: what sends. */
+  switchEmails: 'ADMIN',
+  /** The Founding list's announcement (E1, F6): sent now or at the opening with a phrase, and CANCEL SCHEDULED. */
+  sendAnnouncement: 'ADMIN',
   /** The Collectors page (plan CUSTOMER INTELLIGENCE §3.6 C.6.1, C.9): the counted collectors' figures over a period. */
   readCollectors: 'AUDITOR',
   /** The Collectors page's Export (CSV) (§3.6 C.7): one row per collector with everything held, audited. */

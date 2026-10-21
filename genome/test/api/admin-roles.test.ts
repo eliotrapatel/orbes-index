@@ -455,6 +455,7 @@ const PROBES: Probe[] = [
   { group: 'email', method: 'GET', url: '/api/admin/email/outbox', min: 'AUDITOR' },
   { group: 'email', method: 'GET', url: `/api/admin/email/outbox/${UUID}`, min: 'AUDITOR' },
   { group: 'email', method: 'GET', url: '/api/admin/email/announcement', min: 'AUDITOR' },
+  { group: 'email', method: 'GET', url: `/api/admin/email/announcement/${UUID}/preview`, min: 'AUDITOR' },
   { group: 'email', method: 'POST', url: `/api/admin/email/announcement/${UUID}`, body: INVALID, min: 'ADMIN' },
   { group: 'email', method: 'POST', url: `/api/admin/email/announcement/${UUID}/cancel`, body: INVALID, min: 'ADMIN' },
   { group: 'links', method: 'GET', url: '/api/admin/link-channels', min: 'AUDITOR' },

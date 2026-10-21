@@ -90,6 +90,8 @@ export const ROUTES = [
   { name: 'documents', path: '/documents' },
   /** The settings of the orders (plan LIVE RELEASE+): the delays of their alerts, the locations, the carriers; from the Orders board and the Atelier. */
   { name: 'settings', path: '/settings' },
+  /** The Emails page (plan MACRO M1 §4.3, E0): from the Settings page and the Founding list, no link of its own in the sidebar. */
+  { name: 'emailSettings', path: '/settings/emails' },
   { name: 'document', path: '/documents/:docId' },
 ] as const;
 

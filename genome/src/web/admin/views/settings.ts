@@ -21,6 +21,7 @@
  *    (ADMIN) sets them whole, audited `order.engraving_prices.update`; an order keeps the price it took.
  *  - House guarantee (plan NEXT-NINE, IN-01): the Grant dialog's defaults, valid for 90 days (1 to 730), 1 piece (1 to
  *    5), shown to the client; who set them and when. Changed by an ADMIN, audited `guarantee.settings`.
+ * Its header leads to the Orders board, Logistics and the Emails page (plan MACRO M1 §4.3, views/emails.ts).
  */
 import { h } from '../../shared/dom.js';
 import { formatDateTime } from '../format.js';
@@ -62,7 +63,7 @@ export async function settingsView(ctx: ViewContext): Promise<HTMLElement> {
       eyebrow: 'Clients · Orders',
       title: 'Settings',
       lead: 'How the orders are followed: when one stands out as late, where pieces are kept, which carriers ship them. Everyone reads these settings; an ADMIN changes them.',
-      actions: [linkButton('Orders', href('orders'), 'ghost'), linkButton('Logistics', href('logistics'), 'ghost')],
+      actions: [linkButton('Orders', href('orders'), 'ghost'), linkButton('Logistics', href('logistics'), 'ghost'), linkButton('Emails', href('emailSettings'), 'ghost')],
     }),
     alertsSection(ctx, alerts, admin, done),
     locationsSection(ctx, locations.items, admin, done),

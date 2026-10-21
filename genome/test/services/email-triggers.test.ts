@@ -23,6 +23,8 @@ import { testConfig, type EmailConfig } from '../../src/server/config.js';
 import { createContext, type AppContext } from '../../src/server/context.js';
 import { inTransaction } from '../../src/server/db/connection.js';
 import { EMAIL_KINDS, type EmailKind, type OrderRow } from '../../src/server/db/schema.js';
+import { EMAIL_DEFAULTS, EMAIL_SAMPLE_VALUES } from '../../src/server/email/copy.js';
+import { emailWhen } from '../../src/server/email/render.js';
 import { DomainError } from '../../src/server/errors.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import { CANCELLED_WORDS, EmailService } from '../../src/server/services/email.js';
@@ -378,6 +380,14 @@ describe('the emails’ triggers (E1 to E6)', () => {
     const panel = await emails().announcement();
     expect(panel).toMatchObject({ channel: true, enabled: true, reach: 2 });
     expect(panel.releases.find((r) => r.id === d.id)).toMatchObject({ emails: { queued: 2, sent: 0, failed: 0, cancelled: 0 }, scheduledAt: opensAt, announced: true, words: 'The first draw' });
+    // The panel's preview: the release chosen, its opening in Paris and its page; an example first name, never a person's.
+    const preview = await emails().announcementPreview(d.id);
+    expect(preview.subject).toBe(EMAIL_DEFAULTS.FOUNDING_ANNOUNCEMENT.subject);
+    expect(preview.text).toContain(`The first draw opens ${emailWhen(opensAt)}, Paris time.`);
+    expect(preview.text).toContain(`${ORIGIN}/verify/releases/${d.id}`);
+    expect(preview.text).toContain(`${EMAIL_SAMPLE_VALUES.firstName},`);
+    expect(preview.text).not.toContain('Léa');
+    expect(preview.html).toContain('The first draw opens');
 
     // CANCEL SCHEDULED, then sent again now: new keys, the cancelled kept as the record.
     expect(await emails().cancelAnnouncement(d.id, admin)).toEqual({ cancelled: 2 });
@@ -398,6 +408,8 @@ describe('the emails’ triggers (E1 to E6)', () => {
     const phrase = announcementPhrase(live.id);
     expect((await refusal(emails().queueAnnouncement(live.id, { when: 'NOW', phrase }, admin))).code).toBe('RELEASE_NOT_ANNOUNCED');
     expect((await emails().announcement()).releases.find((r) => r.id === live.id)).toMatchObject({ announced: false, words: 'A LIVE RELEASE' });
+    expect((await emails().announcementPreview(live.id)).text).toContain('A LIVE RELEASE opens');
+    expect((await refusal(emails().announcementPreview('00000000-0000-4000-8000-000000000000'))).code).toBe('DROP_NOT_FOUND');
     await emails().queueAnnouncement(live.id, { when: 'OPENING', phrase }, admin);
     expect((await refusal(emails().queueAnnouncement('00000000-0000-4000-8000-000000000000', { when: 'NOW', phrase: 'SEND 00000000' }, admin))).code).toBe('DROP_NOT_FOUND');
     const off = await createContext(testConfig({ publicOrigin: ORIGIN }), { db: t.db, clock: clock.now, keyProvider: new MemoryKeyProvider({ env: 'test' }) });

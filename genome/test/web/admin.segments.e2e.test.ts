@@ -19,6 +19,12 @@
  *     an account), a filter; MAKE THE SEGMENT in one click, then its link, the segment's members; the CSV in clear; a
  *     draw opened to the segment in its Edit dialog (Access) and listed under the segment's Used by; an AUDITOR reads
  *     the emails masked with nothing to change; an ADMIN removes a person with the phrase.
+ *  7. The Emails page and the founding announcement (plan MACRO M1 §4.3, E0, E1, F6), the channel on (an SMTP server no
+ *     test reaches: the sender's timers are off, nothing is sent): from the Settings page; an OPERATOR writes a kind's
+ *     words, the preview drawn again as written (its HTML in a shadow root, DARK and LIGHT), a placeholder placed, one
+ *     this email does not fill named, the page held while unsaved, then saved; an ADMIN switches a kind on (asked first),
+ *     sends a test to themself and opens it in the outbox; on the Founding list, the panel previews a release's
+ *     announcement, sends it at the opening with the phrase, then cancels it; an AUDITOR reads, masked, nothing to do.
  * No CSP violation, no page error, no figure in the display face.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -138,7 +144,8 @@ describe.skipIf(!HAS_CHROMIUM)('the Segments page and the access rules in the co
     const port = await freePort();
     origin = `http://127.0.0.1:${port}`;
     t = await createTestDb();
-    const config = testConfig({ publicOrigin: origin, host: '127.0.0.1', port, bootstrapAdmin: ADMIN });
+    // The emails' channel on (step 7): an SMTP server no test reaches; with ORBES_ENV=test the sender never starts.
+    const config = testConfig({ publicOrigin: origin, host: '127.0.0.1', port, bootstrapAdmin: ADMIN, email: { transport: 'smtp', from: { address: 'hello@theorbes.com', name: 'ORBES' }, replyTo: null, smtp: { host: 'smtp.invalid', port: 465, security: 'tls', user: 'u', password: 'p' } } });
     ctx = await createContext(config, { db: t.db, keyProvider: new MemoryKeyProvider({ env: 'test' }), ensureActiveKey: true });
     await ctx.categories.create({ code: 'J', name: 'Jewelry', warrantyMonths: 24 }, SYSTEM_ACTOR);
     modelId = (
@@ -473,6 +480,106 @@ describe.skipIf(!HAS_CHROMIUM)('the Segments page and the access rules in the co
     await confirmDialog(r);
     await expect.poll(() => text(r, '#founding-people'), POLL).toContain('Nobody on the list matches these filters.');
     expect(await ctx.db.selectFrom('preregistrations').select('id').execute()).toHaveLength(1);
+    expect(await csp(r)).toEqual([]);
+    expect(problems).toEqual([]);
+    await r.context().close();
+  }, STEP_TIMEOUT);
+
+  it('the Emails page: an OPERATOR writes a kind\'s words beside its preview, an ADMIN switches it on and tests it; the founding announcement sent at the opening, then cancelled; an AUDITOR reads', async () => {
+    // A published draw for the founding announcement (the list holds the matched collector of the case before).
+    const halo = (await ctx.db.selectFrom('models').select('id').where('name', '=', 'HALO').executeTakeFirstOrThrow()).id;
+    const opensAt = new Date(Date.now() + 72 * HOUR);
+    const draw = await ctx.services.drops.create({ modelId: halo, title: 'HALO — second draw', sizes: [{ label: '54', pieces: 1 }], opensAt, closesAt: new Date(opensAt.getTime() + 24 * HOUR), earlyAccessHours: 0, earlyAccessPlatineHours: 0 }, admin);
+    await ctx.services.drops.publish(draw.id, admin);
+    const shadowBackground = (p: Page, scope: string) =>
+      p.locator(`${scope} [data-testid=email-frame]`).evaluate((host) => getComputedStyle(host.shadowRoot!.querySelector('[part=body]')!).backgroundColor);
+
+    // An OPERATOR, from the Settings page.
+    const o = await open(OPERATOR);
+    await go(o, '#/settings', 'Settings');
+    await o.click('a.cbtn:has-text("Emails")');
+    await expect.poll(async () => (await title(o).textContent())?.trim(), POLL).toBe('Emails');
+    expect(await text(o, '[data-testid=emails-channel]')).toBe('ON');
+    expect(await o.locator('[data-testid=emails-kind]').count()).toBe(11);
+    expect(await o.locator('[data-testid=emails-switch]').count()).toBe(0);
+    await o.locator('[data-testid=emails-kind]', { hasText: 'Order shipped' }).click();
+    await o.waitForSelector('#emails-editor [data-testid=email-frame]');
+    expect(await text(o, '#emails-editor [data-testid=email-subject]')).toBe('Your order OR-7F3A21C9 is on its way');
+    expect(await o.locator('#emails-editor [data-testid=email-frame]').evaluate((host) => host.shadowRoot!.textContent)).toContain('has left ORBES with Colissimo.');
+    expect(await shadowBackground(o, '#emails-editor')).toBe('rgb(10, 10, 10)');
+    await o.click('#emails-editor [data-testid=email-view-light]');
+    await expect.poll(() => shadowBackground(o, '#emails-editor'), POLL).toBe('rgb(255, 255, 255)');
+    await o.fill('[data-testid=emails-subject]', 'On its way: ');
+    await o.click('[data-testid=emails-place-orderRef]');
+    expect(await o.inputValue('[data-testid=emails-subject]')).toBe('On its way: {orderRef}');
+    await o.locator('[data-testid=emails-body]').focus();
+    await o.keyboard.press('End');
+    await o.keyboard.type('\n\nWith {giftWrap}.');
+    expect(await text(o, '[data-testid=emails-unknown]')).toBe('{giftWrap} is not filled by this email: it stays as written.');
+    await expect.poll(() => text(o, '#emails-editor [data-testid=email-subject]'), POLL).toBe('On its way: OR-7F3A21C9');
+    // Unsaved, the page is held: Stay keeps the words.
+    await o.evaluate(() => (location.hash = '#/dashboard'));
+    await o.waitForSelector('dialog.dialog');
+    expect(await text(o, 'dialog .dialog__eyebrow')).toBe('Emails');
+    await o.click('[data-testid=dialog-cancel]');
+    expect(await o.inputValue('[data-testid=emails-subject]')).toBe('On its way: {orderRef}');
+    await o.click('[data-testid=emails-save]');
+    await expect.poll(() => text(o, '[data-testid=emails-words-state] >> nth=4'), POLL).toBe('Edited');
+    expect((await ctx.services.email.kind('ORDER_SHIPPED')).words.subject).toBe('On its way: {orderRef}');
+    expect(await figuresInDisplayFace(o)).toEqual([]);
+    await shot(o, 'emails-editor');
+    expect(await csp(o)).toEqual([]);
+    await o.context().close();
+
+    // An ADMIN: switches the founding announcement on (asked first), sends a test of Order shipped, opens it.
+    const a = await open(ADMIN);
+    await go(a, '#/settings/emails', 'Emails');
+    await a.locator('tr', { hasText: 'Founding announcement' }).locator('[data-testid=emails-switch]').click();
+    await a.waitForSelector('dialog.dialog');
+    await confirmDialog(a);
+    await expect.poll(() => a.locator('tr', { hasText: 'Founding announcement' }).locator('[data-testid=emails-switch-state]').textContent(), POLL).toContain('Sends at its moment.');
+    await go(a, '#/settings/emails?kind=ORDER_SHIPPED', 'Emails');
+    await a.waitForSelector('#emails-editor [data-testid=email-frame]');
+    await a.click('[data-testid=emails-test]');
+    await expect.poll(() => a.locator('[data-testid=emails-to]').allTextContents(), POLL).toContain(ADMIN.email);
+    const test = await ctx.db.selectFrom('email_outbox').select(['kind', 'subject', 'status']).where('to_address', '=', ADMIN.email).execute();
+    expect(test).toEqual([{ kind: 'ORDER_SHIPPED', subject: 'On its way: OR-7F3A21C9', status: 'QUEUED' }]);
+    await a.locator('tr', { hasText: ADMIN.email }).locator('[data-testid=emails-open]').click();
+    await a.waitForSelector('dialog [data-testid=email-frame]');
+    expect(await a.locator('dialog [data-testid=email-frame]').evaluate((host) => host.shadowRoot!.textContent)).toContain('With {giftWrap}.');
+    await shot(a, 'emails-opened');
+    await confirmDialog(a);
+
+    // The founding announcement: the release chosen, its preview, sent at the opening with the phrase, then cancelled.
+    await go(a, '#/founding', 'Founding list');
+    await a.waitForSelector('[data-testid=founding-announcement-preview] [data-testid=email-frame]');
+    expect(await text(a, '[data-testid=founding-announcement-reach]')).toBe('1 person on the list');
+    await a.selectOption('[data-testid=founding-announcement-release]', draw.id);
+    await expect.poll(() => a.locator('[data-testid=founding-announcement-preview] [data-testid=email-frame]').evaluate((host) => host.shadowRoot!.textContent ?? ''), POLL).toContain('HALO — second draw opens');
+    await a.click('[data-testid=founding-announcement-opening]');
+    await a.fill('dialog [name=__phrase]', `SEND ${draw.id.slice(0, 8).toUpperCase()}`);
+    await confirmDialog(a);
+    await expect.poll(() => text(a, '[data-testid=founding-announcement-emails]'), POLL).toBe('1 queued');
+    expect(await text(a, '[data-testid=founding-announcement-scheduled]')).toMatch(/Paris$/);
+    const queued = await ctx.db.selectFrom('email_outbox').select(['not_before', 'status']).where('kind', '=', 'FOUNDING_ANNOUNCEMENT').execute();
+    expect(queued).toEqual([{ not_before: opensAt, status: 'QUEUED' }]);
+    await shot(a, 'founding-announcement');
+    await a.click('[data-testid=founding-announcement-cancel]');
+    await confirmDialog(a);
+    await expect.poll(() => text(a, '[data-testid=founding-announcement-emails]'), POLL).toBe('1 cancelled');
+    expect(await csp(a)).toEqual([]);
+    await a.context().close();
+
+    // An AUDITOR: reads, the addresses masked, nothing to change.
+    const r = await open(AUDITOR);
+    await go(r, '#/settings/emails?kind=ORDER_SHIPPED', 'Emails');
+    await r.waitForSelector('#emails-editor [data-testid=email-frame]');
+    expect(await r.locator('[data-testid=emails-switch], [data-testid=emails-save], [data-testid=emails-test]').count()).toBe(0);
+    expect(await r.locator('[data-testid=emails-subject]').evaluate((x) => (x as HTMLInputElement).readOnly)).toBe(true);
+    expect(await r.locator('[data-testid=emails-to]').allTextContents()).not.toContain(ADMIN.email);
+    await go(r, '#/founding', 'Founding list');
+    await r.waitForSelector('[data-testid=founding-announcement-preview] [data-testid=email-frame]');
+    expect(await r.locator('[data-testid=founding-announcement-now]').count()).toBe(0);
     expect(await csp(r)).toEqual([]);
     expect(problems).toEqual([]);
     await r.context().close();

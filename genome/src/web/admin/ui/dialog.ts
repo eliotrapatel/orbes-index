@@ -54,6 +54,8 @@ export interface DialogOptions {
   body?: Child | Child[];
   confirmLabel: string;
   cancelLabel?: string;
+  /** Nothing to cancel (an email of the outbox, read): Confirm alone closes it. */
+  noCancel?: boolean;
   /** Destructive: the oxblood rule and a danger confirm; a function decides from the fields. */
   danger?: boolean | ((values: DialogValues) => boolean);
   /** Typed confirmation phrase for irreversible actions; a function decides from the fields (null: none needed). */
@@ -140,6 +142,7 @@ export function openDialog(o: DialogOptions): Promise<DialogValues | null> {
     const dangerOf: (values: DialogValues) => boolean = typeof dangerSpec === 'function' ? dangerSpec : () => dangerSpec === true;
     const confirm = button(o.confirmLabel, { kind: 'primary', type: 'submit', testId: 'dialog-confirm' });
     const cancel = button(o.cancelLabel ?? 'Cancel', { kind: 'ghost', testId: 'dialog-cancel' });
+    cancel.hidden = o.noCancel === true;
 
     const controls = (o.fields ?? []).map((f) => {
       if (f.kind === 'checkbox') return checkboxField(f);

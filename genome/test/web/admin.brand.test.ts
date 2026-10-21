@@ -232,6 +232,18 @@ describe('console: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
     }
   });
 
+  it('writes the Emails page and the founding announcement\'s panel calmly (plan MACRO M1 §4.3): no atelier, handmade or craft, no exclamation mark, never « product », no piece named', () => {
+    for (const f of ['model/emails.ts', 'views/emails.ts', 'ui/email-frame.ts', 'model/email-frame.ts'].map((x) => join(WEB, 'admin', x))) {
+      const code = readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+      expect(code, f).not.toMatch(/atelier|handmade|hand-made|craft/i);
+      const words = [...code.matchAll(/'([^'\n]*)'|`([^`\n]*)`/g)].map((m) => m[1] ?? m[2] ?? '').join('\n');
+      expect(words, f).not.toMatch(/!(?!==?|\s*important)/);
+      expect(words, f).not.toMatch(/\bproducts?\b|MONOLITHE/i);
+    }
+    // An email's HTML is never set as markup in the console (shared/dom.ts): no innerHTML, no DOMParser, no frame.
+    for (const f of ['views/emails.ts', 'ui/email-frame.ts', 'views/founding.ts'].map((x) => join(WEB, 'admin', x))) expect(readFileSync(f, 'utf8'), f).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|DOMParser|srcdoc|setAttribute\('style'/);
+  });
+
   it('writes the client sheet\'s Profile, Tags and private notes and Intelligence calmly (plan CUSTOMER INTELLIGENCE §3.6 C.4, §0.7): no atelier, handmade or craft, no exclamation mark, never « product »', () => {
     const files = ['model', 'views'].flatMap((dir) =>
       readdirSync(join(WEB, 'admin', dir))

@@ -1604,6 +1604,104 @@ export interface FoundingSummary {
   sources: (OriginSource & { count: number })[];
 }
 
+// ── The emails (plan MACRO M1 §4.3, scope E0, E1, F6; routes/admin/email.ts, API §16.41) ──────────────────────────────
+
+/** The channel: off (no provider in the server's .env, nothing sent), or on with the server's host and the sender. */
+export type EmailChannel = { on: false } | { on: true; host: string; from: string };
+
+/** A kind's words (email/copy.ts EmailWords): its subject, one line, and its body, plain text with `{placeholders}`. */
+export interface EmailWords {
+  subject: string;
+  body: string;
+}
+
+/** A kind as the Emails page reads it: its switch, its words and which part is edited, its placeholders, its default words. */
+export interface EmailKindView {
+  kind: EmailKind;
+  enabled: boolean;
+  words: EmailWords;
+  edited: { subject: boolean; body: boolean };
+  placeholders: { name: string; words: string }[];
+  defaults: EmailWords;
+}
+
+/** The outbox's rows by status and its last errors (services/email.ts OutboxCounts). */
+export interface EmailOutboxCounts {
+  queued: number;
+  sent: number;
+  failed: number;
+  cancelled: number;
+  lastErrors: { id: string; kind: EmailKind; status: EmailStatus; lastError: string; at: Iso }[];
+}
+
+/** GET /api/admin/email. */
+export interface EmailsState {
+  channel: EmailChannel;
+  kinds: EmailKindView[];
+  outbox: EmailOutboxCounts;
+}
+
+/** An email as it is (or would be) sent: its subject, its plain text, its HTML (shown only through ui/email-frame.ts). */
+export interface RenderedEmail {
+  subject: string;
+  text: string;
+  html: string;
+}
+
+/** An outbox row (services/email.ts OutboxEntry): never its words; `to` masked for an AUDITOR. */
+export interface OutboxEmail {
+  id: string;
+  kind: EmailKind;
+  to: string;
+  subject: string;
+  status: EmailStatus;
+  attempts: number;
+  lastError: string | null;
+  notBefore: Iso;
+  createdAt: Iso;
+  sentAt: Iso | null;
+  settledAt: Iso | null;
+  accountId: string | null;
+  preregistrationId: string | null;
+}
+
+/** One email of the outbox as it was sent: its row, its text and its HTML (a reset link's code never shown). */
+export interface OutboxEmailWords extends OutboxEmail {
+  text: string;
+  html: string;
+}
+
+/** The filters of GET /api/admin/email/outbox. */
+export interface OutboxFilters {
+  status?: EmailStatus;
+  kind?: EmailKind;
+}
+
+/** A release the founding announcement may announce (services/email-triggers.ts AnnouncementRelease). */
+export interface AnnouncementRelease {
+  id: string;
+  mode: 'DRAW' | 'LIVE';
+  title: string;
+  /** What the email says of it now (its stage's words). */
+  words: string;
+  opensAt: Iso;
+  closesAt: Iso;
+  /** A LIVE RELEASE before its announcement can be sent only at its opening. */
+  announced: boolean;
+  emails: { queued: number; sent: number; failed: number; cancelled: number };
+  /** The earliest time a queued announcement of it goes, or null. */
+  scheduledAt: Iso | null;
+}
+
+/** The founding announcement's panel (GET /api/admin/email/announcement): the channel, the switch, its reach, the releases. */
+export interface AnnouncementState {
+  channel: boolean;
+  enabled: boolean;
+  /** The people on the list it would reach: those not unsubscribed. */
+  reach: number;
+  releases: AnnouncementRelease[];
+}
+
 /** The Origin block (§3.4 A.10.5): the first visit, the sign-up's last link, the latest purchase's. */
 export interface OwnerOrigin {
   firstVisit: { at: Iso | null; source: OriginSource };

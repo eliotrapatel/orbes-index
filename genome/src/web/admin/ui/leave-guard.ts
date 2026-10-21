@@ -1,6 +1,8 @@
 /**
  * Holding a page while leaving it would lose something that exists nowhere
- * else: the claim codes of a batch, shown once, until they are saved.
+ * else: the claim codes of a batch, shown once, until they are saved; the
+ * words of an email being written, until they are saved (the Emails page,
+ * its eyebrow its own).
  *
  * While a page is held, the browser asks before the tab is closed or
  * reloaded (`beforeunload`), and the console asks, in its own dialog,
@@ -14,7 +16,7 @@ import { h } from '../../shared/dom.js';
 import { openDialog } from './dialog.js';
 
 /** The hold in force: its own object, so that a release only ever clears the hold it was given for. */
-let held: { message: string } | null = null;
+let held: { message: string; eyebrow: string } | null = null;
 
 function onBeforeUnload(ev: BeforeUnloadEvent): void {
   ev.preventDefault();
@@ -23,12 +25,12 @@ function onBeforeUnload(ev: BeforeUnloadEvent): void {
 }
 
 /**
- * Hold the page with the message the console's dialog shows. Returns the release of this hold only:
+ * Hold the page with the message (and the eyebrow) the console's dialog shows. Returns the release of this hold only:
  * a batch left while its last request was in flight never releases the batch started after it.
  */
-export function holdPage(message: string): () => void {
+export function holdPage(message: string, eyebrow = 'Claim codes'): () => void {
   if (held === null) window.addEventListener('beforeunload', onBeforeUnload);
-  const mine = { message };
+  const mine = { message, eyebrow };
   held = mine;
   return () => {
     if (held === mine) releasePage();
@@ -56,7 +58,7 @@ export async function confirmLeave(): Promise<boolean> {
   if (message === null) return true;
   const ok = await openDialog({
     title: 'Leave this page?',
-    eyebrow: 'Claim codes',
+    eyebrow: held?.eyebrow ?? 'Claim codes',
     body: h('p', { class: 'dialog__text' }, message),
     confirmLabel: 'Leave',
     cancelLabel: 'Stay',

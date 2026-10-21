@@ -282,5 +282,10 @@ describe('the emails’ routes while the channel is on', () => {
     expect(res.statusCode).toBe(404);
     expect((await admin.post(`/api/admin/email/announcement/${unknown}`, { when: 'LATER', phrase: 'SEND 00000000' })).statusCode).toBe(400);
     expect(safeJson(await admin.post(`/api/admin/email/announcement/${unknown}/cancel`, {}))).toMatchObject({ error: { code: 'DROP_NOT_FOUND' } });
+    // The panel's preview of a release (AUDITOR): an unknown one 404 (the release's words: email-triggers.test.ts).
+    const preview = await auditor.get(`/api/admin/email/announcement/${unknown}/preview`);
+    expect(preview.statusCode).toBe(404);
+    expect(preview.headers['cache-control']).toBe('no-store');
+    expect((await auditor.get('/api/admin/email/announcement/nope/preview')).statusCode).toBe(400);
   });
 });

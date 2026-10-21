@@ -319,15 +319,18 @@ export class EmailService {
     };
   }
 
-  /** An email as it would be sent (the console's preview): the words given, or the kind's, with example values. */
-  async preview(kind: EmailKind, words?: Partial<EmailWords>): Promise<RenderedEmail> {
+  /**
+   * An email as it would be sent (the console's preview): the words given, or the kind's, with example values; `values`
+   * replace some of them (the founding announcement's panel: the release chosen, its opening, its page).
+   */
+  async preview(kind: EmailKind, words?: Partial<EmailWords>, values?: EmailValues): Promise<RenderedEmail> {
     knownKind(kind);
     const current = (await this.kind(kind)).words;
     const sampleId = '00000000-0000-4000-8000-000000000000';
     return renderEmail({
       kind,
       words: { subject: words?.subject ?? current.subject, body: words?.body ?? current.body },
-      values: { ...EMAIL_SAMPLE_VALUES, unsubscribeLink: OPT_IN_KINDS.has(kind) ? this.unsubscribeLinks(kind, sampleId).page : null },
+      values: { ...EMAIL_SAMPLE_VALUES, ...values, unsubscribeLink: OPT_IN_KINDS.has(kind) ? this.unsubscribeLinks(kind, sampleId).page : null },
       origin: this.config.publicOrigin,
       unsubscribeUrl: OPT_IN_KINDS.has(kind) ? this.unsubscribeLinks(kind, sampleId).page : null,
     });

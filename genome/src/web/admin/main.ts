@@ -77,6 +77,7 @@ import { orderView } from './views/order.js';
 import { ordersView } from './views/orders.js';
 import { invoicesView } from './views/invoices.js';
 import { foundingView } from './views/founding.js';
+import { emailsView } from './views/emails.js';
 import { segmentsView, segmentView } from './views/segments.js';
 import { supplierOrderView } from './views/supplier-order.js';
 import { supplierOrdersView } from './views/supplier-orders.js';
@@ -214,6 +215,8 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   sale: { view: saleView, title: 'Sale mode', nav: 'sale' },
   documents: { view: documentsView, title: 'Documents', nav: 'documents' },
   settings: { view: settingsView, title: 'Settings', nav: 'orders' },
+  // Plan MACRO M1 §4.3: the Emails page, from Settings and the Founding list; the sidebar marks the Founding list.
+  emailSettings: { view: emailsView, title: 'Emails', nav: 'founding' },
   orders: { view: ordersView, title: 'Orders', nav: 'orders' },
   order: { view: orderView, title: 'Order', nav: 'orders' },
   packingSlip: { view: packingSlipView, title: 'Packing slip', nav: 'orders' },

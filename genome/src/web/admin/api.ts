@@ -16,7 +16,16 @@
  * - Artifacts are attachments: they are fetched as blobs and saved by the UI.
  */
 import type {
+  AnnouncementState,
   CollectorPanel,
+  EmailKind,
+  EmailKindView,
+  EmailsState,
+  EmailWords,
+  OutboxEmail,
+  OutboxEmailWords,
+  OutboxFilters,
+  RenderedEmail,
   FoundingEntry,
   FoundingFilters,
   FoundingSummary,
@@ -1321,6 +1330,64 @@ export class AdminApi {
   /** Erasure on request (ADMIN): the row deleted, the phrase `REMOVE <8>` typed. */
   removeFounding(id: string, phrase: string): Promise<void> {
     return this.post(`/api/admin/founding/${encodeURIComponent(id)}/remove`, { phrase });
+  }
+
+  // ── The emails (plan MACRO M1 §4.3, E0, E1, F6; API §16.41) ──────────────────
+
+  /** The Emails page: the channel, each kind's switch and words, the outbox's counts and last errors. */
+  emails(): Promise<EmailsState> {
+    return this.get('/api/admin/email');
+  }
+
+  /** A kind switched on or off (ADMIN). */
+  async setEmailEnabled(kind: EmailKind, enabled: boolean): Promise<EmailKindView> {
+    return (await this.request<{ kind: EmailKindView }>('PUT', `/api/admin/email/kinds/${encodeURIComponent(kind)}/enabled`, { body: { enabled } })).kind;
+  }
+
+  /** A kind's words (OPERATOR): a part left out is kept, null brings back the default words. */
+  async setEmailWords(kind: EmailKind, words: { subject?: string | null; body?: string | null }): Promise<EmailKindView> {
+    return (await this.request<{ kind: EmailKindView }>('PUT', `/api/admin/email/kinds/${encodeURIComponent(kind)}/words`, { body: words })).kind;
+  }
+
+  /** The kind as sent, with example values: its own words (AUDITOR), or those being written (OPERATOR, nothing stored). */
+  emailPreview(kind: EmailKind, draft?: Partial<EmailWords>): Promise<RenderedEmail> {
+    const path = `/api/admin/email/kinds/${encodeURIComponent(kind)}/preview`;
+    return draft ? this.post(path, draft) : this.get(path);
+  }
+
+  /** A test to the console member's own address (ADMIN, only while the channel is on), the words being written or the kind's. */
+  sendTestEmail(kind: EmailKind, draft: Partial<EmailWords> = {}): Promise<{ id: string }> {
+    return this.post(`/api/admin/email/kinds/${encodeURIComponent(kind)}/test`, draft);
+  }
+
+  /** The outbox, newest first (addresses masked for an AUDITOR). */
+  emailOutbox(q: OutboxFilters & { page?: number; pageSize?: number } = {}): Promise<Paged<OutboxEmail>> {
+    return this.get('/api/admin/email/outbox', { ...q });
+  }
+
+  /** One email of the outbox as it was sent. */
+  outboxEmail(id: string): Promise<OutboxEmailWords> {
+    return this.get(`/api/admin/email/outbox/${encodeURIComponent(id)}`);
+  }
+
+  /** The founding announcement's panel (E1, F6): the channel, the switch, its reach, the releases it may announce. */
+  announcement(): Promise<AnnouncementState> {
+    return this.get('/api/admin/email/announcement');
+  }
+
+  /** The founding announcement of a release as it would go now. */
+  announcementPreview(dropId: string): Promise<RenderedEmail> {
+    return this.get(`/api/admin/email/announcement/${encodeURIComponent(dropId)}/preview`);
+  }
+
+  /** Send it (ADMIN): now or at the release's opening, the phrase `SEND <8>` typed. */
+  sendAnnouncement(dropId: string, when: 'NOW' | 'OPENING', phrase: string): Promise<{ queued: number; notBefore: string }> {
+    return this.post(`/api/admin/email/announcement/${encodeURIComponent(dropId)}`, { when, phrase });
+  }
+
+  /** CANCEL SCHEDULED (ADMIN): its announcements still queued, cancelled. */
+  cancelAnnouncement(dropId: string): Promise<{ cancelled: number }> {
+    return this.post(`/api/admin/email/announcement/${encodeURIComponent(dropId)}/cancel`, {});
   }
 
   orderAlerts(): Promise<OrderAlertSettings> {

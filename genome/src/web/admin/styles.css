@@ -6723,3 +6723,271 @@ a.collectors__kpi-link:focus-visible {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* ── The Emails page and the founding announcement (plan MACRO M1 §4.3) ────
+   The channel, the emails with their switch, a kind's words beside its preview, the outbox. An email is drawn as a
+   mail client shows it (ui/email-frame.ts): on its own ground, its own styles inside a shadow root, never the
+   console's; DARK · LIGHT · PLAIN TEXT as the countdown image's choice (range__tab buttons). */
+
+.emails__lead {
+  margin: 0 0 14px;
+  max-width: 62ch;
+  color: var(--ink-soft);
+}
+
+.emails__value {
+  overflow-wrap: anywhere;
+}
+
+.emails__kind {
+  display: grid;
+  gap: 2px;
+}
+
+.emails__kind .idlink {
+  justify-self: start;
+  white-space: normal;
+}
+
+.emails__switch {
+  display: grid;
+  justify-items: start;
+}
+
+.emails__editor {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  gap: 0 48px;
+  align-items: start;
+}
+
+.emails__form .cinput--area {
+  min-height: 268px;
+}
+
+/* The switch over the fields: its mark and words, then Switch on / off. */
+.emails__state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+  margin: 4px 0 26px;
+}
+
+.emails__sub {
+  margin: 0 0 10px;
+  font-size: var(--fs-nano);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.emails__warn:empty {
+  display: none;
+}
+
+.emails__warn {
+  margin: -8px 0 18px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--ink);
+}
+
+/* The placeholders: each one a ghost button in the reading face, its words beside it. */
+.emails__placeholders {
+  margin: 4px 0 26px;
+  padding-top: 18px;
+  border-top: 1px solid var(--hairline);
+}
+
+.emails__tokens {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+}
+
+.emails__token {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.emails__token dt .cbtn,
+.emails__token dt .mono {
+  justify-content: flex-start;
+  padding: 0;
+  font-family: var(--mono);
+  font-size: var(--fs-mono);
+  letter-spacing: 0.02em;
+  text-indent: 0;
+  text-transform: none;
+}
+
+.emails__token dd {
+  margin: 0;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
+.emails__hint {
+  margin: 10px 0 0;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
+.emails__actions,
+.founding__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+}
+
+.emails__kpis {
+  margin-bottom: 26px;
+}
+
+.emails__errors {
+  margin-bottom: 26px;
+}
+
+.emails__error {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.emails__subject {
+  overflow-wrap: anywhere;
+}
+
+/* The email, its subject over it and its version's choice. */
+.email-view {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.email-view__head {
+  display: grid;
+  gap: 4px;
+}
+
+.email-view__subject {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.email-view__label {
+  font-size: var(--fs-nano);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.email-view__choice[aria-pressed="true"] {
+  color: var(--ink);
+}
+
+.email-view__choice[aria-pressed="true"]::after {
+  transform: scaleX(1);
+}
+
+.email-view__frame {
+  max-height: 720px;
+  overflow: auto;
+  border: 1px solid var(--hairline);
+  background: var(--vault-ground);
+}
+
+.email-view__frame--light {
+  background: var(--white);
+}
+
+/* The shadow root's host: nothing of the console's type reaches the email. */
+.email-frame__host {
+  all: initial;
+  display: block;
+}
+
+.email-view__text {
+  max-height: 720px;
+  margin: 0;
+  padding: 22px 24px;
+  overflow: auto;
+  border: 1px solid var(--hairline);
+  background: var(--ivory);
+  font-family: var(--mono);
+  font-size: var(--fs-mono);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.email-view__note {
+  margin: 0;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
+/* An email of the outbox opened: the dialog takes the email's width. */
+.dialog:has(.email-view) {
+  width: min(720px, calc(100vw - 48px));
+}
+
+.dialog .email-view {
+  margin-top: 22px;
+}
+
+/* The founding announcement: its facts, then the release chosen beside the email as it would go. */
+.founding__release {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  gap: 0 48px;
+  align-items: start;
+  margin-top: 30px;
+}
+
+.founding__send {
+  margin-top: 24px;
+}
+
+.founding__why {
+  margin: 12px 0 0;
+  max-width: 52ch;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
+@media (max-width: 1180px) {
+  .emails__editor,
+  .founding__release {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .emails__preview,
+  .founding__preview {
+    margin-top: 30px;
+  }
+}
+
+@media (max-width: 599px) {
+  .emails__token {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    padding: 4px 0;
+  }
+  .emails__form .cinput--area {
+    min-height: 220px;
+  }
+  .dialog:has(.email-view) {
+    width: calc(100vw - 24px);
+  }
+}

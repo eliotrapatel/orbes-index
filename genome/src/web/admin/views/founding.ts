@@ -10,9 +10,14 @@
  *  - Download (CSV) (OPERATOR), in a Shopify customers import's columns (S1, S6).
  *  - The segment: Make the segment (OPERATOR) creates « Founding list » with the FOUNDING_LIST rule when none exists, in
  *    one click; then the page links to it. Nothing lasting is given: its members are read live (F4).
- * Model in model/founding.ts. Each change is audited by the server.
+ *  - The founding announcement (plan MACRO M1 §4.3, E1, F6), after the segment: the channel and the email's switch, the
+ *    people it reaches, a release chosen among those published and not over (what the email says of it, its opening,
+ *    its emails, when the queued ones go), the email as it would go now (ui/email-frame.ts); Send now or Send at the
+ *    opening (ADMIN, the phrase SEND <8>), Cancel scheduled while some wait; each refusal said beside its button. Read
+ *    from GET /api/admin/email/announcement (routes/admin/email.ts); its words are the Emails page's.
+ * Model in model/founding.ts and model/emails.ts. Each change is audited by the server.
  */
-import { h } from '../../shared/dom.js';
+import { h, mount } from '../../shared/dom.js';
 import {
   channelBars,
   countryBars,
@@ -41,11 +46,24 @@ import {
   UNSUBSCRIBED_CHOICES,
   type SourceRow,
 } from '../model/founding.js';
+import {
+  announcementEmailsText,
+  announcementOffer,
+  announcementPhrase,
+  chosenRelease,
+  EMAILS_COPY as E,
+  reachText,
+  releaseChoiceLabel,
+  sendBody,
+  sentText,
+} from '../model/emails.js';
+import { parisDateTime } from '../model/links.js';
 import { membersLine } from '../model/segments.js';
 import { can } from '../model/permissions.js';
 import { href } from '../router.js';
-import type { FoundingEntry, FoundingSummary, Segment, SegmentGroup } from '../types.js';
-import { barList, busy, button, defList, emptyState, field, filterBar, kpi, linkButton, pageHeader, pager, section, select, table } from '../ui/components.js';
+import type { AnnouncementRelease, AnnouncementState, FoundingEntry, FoundingSummary, Segment, SegmentGroup } from '../types.js';
+import { barList, busy, button, defList, emptyState, failure, field, filterBar, kpi, linkButton, loading, pageHeader, pager, section, select, statusMark, table } from '../ui/components.js';
+import { emailViewer, type EmailView } from '../ui/email-frame.js';
 import { openDialog } from '../ui/dialog.js';
 import { saveDownload } from '../ui/download.js';
 import { notify, notifyError } from '../ui/toast.js';
@@ -53,10 +71,11 @@ import { pageParam, type ViewContext } from './context.js';
 
 export async function foundingView(ctx: ViewContext): Promise<HTMLElement> {
   const params = foundingParams(ctx.route.query);
-  const [summary, list, segments] = await Promise.all([
+  const [summary, list, segments, announcement] = await Promise.all([
     ctx.api.foundingSummary(),
     ctx.api.founding({ ...foundingFilters(params), page: pageParam(ctx), pageSize: FOUNDING_PAGE_SIZE }),
     ctx.api.segments().catch((): Segment[] | null => null),
+    ctx.api.announcement().catch((): AnnouncementState | null => null),
   ]);
   const role = ctx.session.admin.role;
   const acts = foundingActions(role);
@@ -65,7 +84,14 @@ export async function foundingView(ctx: ViewContext): Promise<HTMLElement> {
   const header = pageHeader({ eyebrow: 'Clients', title: 'Founding list', lead: C.lead, actions: csv && summary.total > 0 ? [csv] : [] });
 
   if (summary.total === 0) {
-    return h('div', { class: 'view view--founding' }, header, section(C.people, emptyState(C.empty), { id: 'founding-people' }), segmentSection(ctx, segments, acts.makeSegment));
+    return h(
+      'div',
+      { class: 'view view--founding' },
+      header,
+      section(C.people, emptyState(C.empty), { id: 'founding-people' }),
+      segmentSection(ctx, segments, acts.makeSegment),
+      announcementSection(ctx, announcement, can(role, 'sendAnnouncement')),
+    );
   }
 
   return h(
@@ -74,6 +100,7 @@ export async function foundingView(ctx: ViewContext): Promise<HTMLElement> {
     header,
     h('div', { class: 'kpis', data: { testid: 'founding-kpis' } }, ...foundingKpis(summary).map((k) => kpi(k.label, k.value, k.note, k.tone))),
     segmentSection(ctx, segments, acts.makeSegment),
+    announcementSection(ctx, announcement, can(role, 'sendAnnouncement')),
     h(
       'div',
       { class: ['grid', 'grid--2', 'founding__grid'] },
@@ -222,4 +249,144 @@ function csvButton(ctx: ViewContext): HTMLButtonElement {
     }),
   );
   return b;
+}
+
+// ── The founding announcement (E1, F6) ───────────────────────────────────────────────────────────────────────────
+
+/** The version of its preview chosen (DARK · LIGHT · PLAIN TEXT), kept while the console is open. */
+let announcementView: EmailView = 'dark';
+
+/**
+ * The founding announcement: the channel, the email's switch and its reach, then a release chosen, the email as it
+ * would go, and what may be done (ADMIN). Drawn again in place after a send or a cancel, the release kept.
+ */
+function announcementSection(ctx: ViewContext, first: AnnouncementState | null, canSend: boolean): HTMLElement {
+  const emailsLink = linkButton(E.emailsPage, href('emailSettings', {}, { kind: 'FOUNDING_ANNOUNCEMENT' }), 'ghost');
+  if (first === null) {
+    return section(E.announcement, [h('p', { class: 'founding__lead' }, E.announcementLead), defList([{ label: 'Announcement', value: h('span', { data: { testid: 'founding-announcement-unread' } }, E.announcementUnread) }])], {
+      id: 'founding-announcement',
+      tools: [emailsLink],
+    });
+  }
+  const body = h('div', { class: 'founding__announcement' });
+  let state = first;
+  let chosen: string | null = null;
+  let previewTurn = 0;
+
+  const draw = () => {
+    const r = chosenRelease(state, chosen);
+    chosen = r?.id ?? null;
+    const facts = defList([
+      { label: 'Channel', value: h('span', { data: { testid: 'founding-announcement-channel' } }, statusMark(state.channel ? 'ON' : 'OFF', state.channel ? 'solid' : 'muted')), note: state.channel ? undefined : E.channelOff },
+      {
+        label: 'The email',
+        value: h('span', { data: { testid: 'founding-announcement-switch' } }, statusMark(state.enabled ? 'ON' : 'OFF', state.enabled ? (state.channel ? 'solid' : 'outline') : 'muted')),
+        note: state.enabled ? (state.channel ? undefined : E.willSend) : 'Switched on and worded on the Emails page.',
+      },
+      { label: 'Reach', value: h('span', { data: { testid: 'founding-announcement-reach' } }, reachText(state.reach)), note: 'Those who have not unsubscribed.' },
+    ]);
+    if (!r) {
+      mount(body, facts, h('div', { data: { testid: 'founding-announcement-none' } }, emptyState(E.noRelease)));
+      return;
+    }
+    const pick = select('release', state.releases.map((x) => ({ value: x.id, label: releaseChoiceLabel(x) })), r.id);
+    pick.setAttribute('data-testid', 'founding-announcement-release');
+    pick.addEventListener('change', () => {
+      chosen = pick.value;
+      draw();
+    });
+    const preview = h('div', { class: 'founding__preview', data: { testid: 'founding-announcement-preview' } }, loading());
+    const mine = ++previewTurn;
+    void ctx.api.announcementPreview(r.id).then(
+      (email) => {
+        if (mine === previewTurn) mount(preview, emailViewer(email, { view: announcementView, onView: (v) => (announcementView = v), note: 'As it would go now, with an example first name.' }));
+      },
+      () => {
+        if (mine === previewTurn) mount(preview, failure(E.previewFailed));
+      },
+    );
+    mount(
+      body,
+      facts,
+      h(
+        'div',
+        { class: 'founding__release' },
+        h(
+          'div',
+          { class: 'founding__release-side' },
+          field(E.release, pick, { wide: true }),
+          defList([
+            { label: 'It says', value: h('span', { data: { testid: 'founding-announcement-words' } }, r.words), note: r.mode === 'LIVE' && !r.announced ? 'Not announced yet.' : undefined },
+            { label: 'Opens', value: parisDateTime(r.opensAt) },
+            { label: 'Emails', value: h('span', { data: { testid: 'founding-announcement-emails' } }, announcementEmailsText(r.emails)) },
+            { label: 'Scheduled', value: h('span', { data: { testid: 'founding-announcement-scheduled' } }, r.scheduledAt ? parisDateTime(r.scheduledAt) : '—') },
+          ]),
+          canSend ? actions(r) : h('p', { class: 'founding__why' }, E.adminSends),
+        ),
+        preview,
+      ),
+    );
+  };
+
+  const reread = async () => {
+    try {
+      state = await ctx.api.announcement();
+    } catch {
+      /* the panel stays as read; the next visit reads it again */
+    }
+    draw();
+  };
+
+  const actions = (r: AnnouncementRelease): HTMLElement => {
+    const offer = announcementOffer(state, r, ctx.now());
+    const send = (when: 'NOW' | 'OPENING') =>
+      void openDialog({
+        title: E.sendTitle,
+        eyebrow: r.title,
+        body: h('p', { class: 'dialog__text' }, sendBody(state, r, when)),
+        phrase: announcementPhrase(r.id),
+        confirmLabel: when === 'NOW' ? E.sendNow : E.sendAtOpening,
+        working: 'Sending…',
+        submit: async () => {
+          const res = await ctx.api.sendAnnouncement(r.id, when, announcementPhrase(r.id));
+          notify(sentText(res.queued, res.notBefore, ctx.now()));
+        },
+      }).then((v) => {
+        if (v) void reread();
+      });
+    const now = button(E.sendNow, { kind: 'primary', testId: 'founding-announcement-now', disabled: !offer.now.ok, onClick: () => send('NOW') });
+    const opening = offer.atOpening.shown ? button(E.sendAtOpening, { kind: 'secondary', testId: 'founding-announcement-opening', disabled: !offer.atOpening.ok, onClick: () => send('OPENING') }) : null;
+    const cancel = offer.cancel
+      ? button(E.cancel, {
+          kind: 'ghost',
+          testId: 'founding-announcement-cancel',
+          onClick: () =>
+            void openDialog({
+              title: E.cancelTitle,
+              eyebrow: r.title,
+              danger: true,
+              body: h('p', { class: 'dialog__text' }, E.cancelBody),
+              confirmLabel: E.cancel,
+              cancelLabel: 'Keep',
+              submit: async () => {
+                const res = await ctx.api.cancelAnnouncement(r.id);
+                notify(`${res.cancelled} ${res.cancelled === 1 ? 'email' : 'emails'} cancelled.`);
+              },
+            }).then((v) => {
+              if (v) void reread();
+            }),
+        })
+      : null;
+    // Why a button waits: the channel, the switch, nobody on the list, a LIVE RELEASE not announced.
+    const why = offer.now.why ?? (offer.atOpening.shown ? offer.atOpening.why : null);
+    return h(
+      'div',
+      { class: 'founding__send' },
+      h('div', { class: 'founding__buttons' }, now, opening, cancel),
+      why ? h('p', { class: 'founding__why', data: { testid: 'founding-announcement-why' } }, why) : null,
+    );
+  };
+
+  draw();
+  return section(E.announcement, [h('p', { class: 'founding__lead' }, E.announcementLead), body], { id: 'founding-announcement', tools: [emailsLink] });
 }

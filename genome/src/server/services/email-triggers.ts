@@ -44,6 +44,7 @@ import type { DropRow, EmailKind, OrderRow, OrderStatus } from '../db/schema.js'
 import { conflict, notFound, validationError } from '../errors.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
+import type { RenderedEmail } from '../email/render.js';
 import { CANCELLED_WORDS, emailOff, type EmailService, type EnqueueInput } from './email.js';
 import { unsubscribePreregistration } from './founding.js';
 import { announcedAt, liveAccessRule, liveRuleText, liveStages, stagesAt } from './live.js';
@@ -452,6 +453,19 @@ export class EmailTriggers {
       });
     }
     return { channel: this.email.on, enabled: (await this.email.kind('FOUNDING_ANNOUNCEMENT')).enabled, reach: Number(reach.n), releases };
+  }
+
+  /**
+   * The founding announcement of a release as it would go now (the panel's preview): the kind's words, the release in the
+   * words its stage has made public, its opening and its page; an example first name and unsubscribe link, never a
+   * person's. 404 for an after-room or an unknown release.
+   */
+  async announcementPreview(dropId: string): Promise<RenderedEmail> {
+    if (typeof dropId !== 'string' || !UUID_RE.test(dropId)) throw releaseNotFound();
+    const d = await this.db.selectFrom('drops').select(RELEASE_COLUMNS).where('id', '=', dropId.toLowerCase()).executeTakeFirst();
+    if (!d || d.parent_drop_id !== null) throw releaseNotFound();
+    const release = await this.releaseWords(this.db, d, this.clock());
+    return this.email.preview('FOUNDING_ANNOUNCEMENT', undefined, { release, opensAt: d.opens_at, link: this.link(`/verify/releases/${d.id}`) });
   }
 
   /**

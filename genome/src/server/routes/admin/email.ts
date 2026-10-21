@@ -18,6 +18,7 @@
  *                                                                  in a sandboxed frame only); a reset link's code is
  *                                                                  never shown
  *   GET    /api/admin/email/announcement                AUDITOR   the founding announcement's panel (E1, F6)
+ *   GET    /api/admin/email/announcement/:id/preview    AUDITOR   the announcement of the release :id as it would go now
  *   POST   /api/admin/email/announcement/:id            ADMIN     send it for the release :id, now or at its opening,
  *                                                                  the phrase SEND <8>          email.announcement.queue
  *   POST   /api/admin/email/announcement/:id/cancel     ADMIN     CANCEL SCHEDULED            email.announcement.cancel
@@ -112,6 +113,11 @@ export const adminEmailRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
   });
 
   app.get('/api/admin/email/announcement', async () => emails.announcement());
+
+  app.get('/api/admin/email/announcement/:id/preview', async (request) => {
+    const { id } = parse(dropParams, request.params);
+    return emails.announcementPreview(id);
+  });
 
   app.post('/api/admin/email/announcement/:id', { config: ADMIN }, async (request, reply) => {
     const { id } = parse(dropParams, request.params);
