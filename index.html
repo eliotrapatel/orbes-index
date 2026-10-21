@@ -206,14 +206,6 @@ body { background: var(--vault-light) no-repeat 50% 0 / 100% 480px, var(--vault-
   padding-left: var(--n-track-micro);
 }
 .open__act { position: relative; margin-top: 34px; }
-#orbes-code-badge {
-  position: absolute; left: 0; right: 0; top: calc(100% + 16px);
-  font-size: 11px; letter-spacing: 0.18em; line-height: 1.4; text-transform: uppercase; white-space: nowrap;
-  font-variant-numeric: tabular-nums; color: var(--vault-soft);
-  opacity: 0; pointer-events: none; transition: opacity var(--d-dur-state) var(--d-ease);
-}
-/* while FOUNDING ACCESS is open the panel shows the code: the badge fades with the scrim, never cut by the founding bar */
-html.n-locked #orbes-code-badge { opacity: 0 !important; }
 /* The ACCESS button: its fade-in at 3.5 s is the pop-up's own (kept); the hover joins it. */
 #promo-trigger { transition: opacity 1.2s ease, background-color var(--d-dur-hover) var(--d-ease) !important; }
 
@@ -312,7 +304,6 @@ html.n-locked #orbes-code-badge { opacity: 0 !important; }
     color: var(--vault-ink); font-size: 12px; letter-spacing: 0.2em; line-height: 2;
   }
   .open__act { grid-column: 7 / -1; grid-row: 3; justify-self: end; width: min(340px, 100%); margin-top: 0; }
-  #orbes-code-badge { text-align: center; }
 
   /* The arc on one 12-column grid, every part on the edge; the words that follow a title start on the seventh column
      (the second half), so the releases' detail, the GENOME's words and THE CLUB share one axis. */
@@ -370,7 +361,8 @@ html.n-locked #orbes-code-badge { opacity: 0 !important; }
   }
 }
 
-/* ══ FOUNDING ACCESS (behaviour, words, requests and storage kept as they were; restyled only) ══ */
+/* ══ FOUNDING ACCESS: the founding list's form (F1, F2). It posts the email, the first name, the country and the
+   consent to the platform, with where the visit came from; this browser keeps only whether the form was sent. ══ */
 #promo-overlay {
   position: fixed; inset: 0; z-index: 9000;
   background: var(--n-scrim);
@@ -386,16 +378,16 @@ html.n-locked #orbes-code-badge { opacity: 0 !important; }
   max-height: calc(100% - 40px);
   overflow-y: auto; overscroll-behavior: contain;
   scrollbar-width: thin; scrollbar-color: var(--vault-hairline-strong) transparent;
-  padding: 26px var(--n-margin) calc(40px + 36px + env(safe-area-inset-bottom));
+  padding: 26px var(--n-margin) calc(40px + env(safe-area-inset-bottom));
   background: var(--vault-plate); border-radius: 16px 16px 0 0;
   text-align: left; cursor: default;
-  transform: none !important;
 }
 #promo-inner::before {
   content: ''; position: absolute; top: 10px; left: 50%; width: 40px; height: 4px; margin-left: -20px;
   border-radius: 2px; background: var(--vault-hairline-strong);
 }
 #promo-inner:focus { outline: none; }
+#promo-inner [hidden] { display: none !important; }
 .promo-x {
   position: absolute; top: 32px; right: 10px;
   display: flex; align-items: center; justify-content: center;
@@ -411,192 +403,96 @@ html.n-locked #orbes-code-badge { opacity: 0 !important; }
 #promo-logo-wrap { display: flex; align-items: center; height: 44px; margin-top: 6px; }
 #promo-logo-wrap .n-wm { font-size: 13px; }
 
-/* shared: the step titles and the hairlines */
-#promo-eyebrow, #promo-eyebrow-2, #promo-eyebrow-3 {
+/* the titles, the hairlines and the words under them */
+#promo-eyebrow, #promo-done-title {
   margin-top: 22px;
   font-family: var(--font-display); font-weight: 500; text-transform: uppercase;
   font-size: 24px; line-height: 1.15; letter-spacing: 0.08em; color: var(--vault-ink);
 }
+#promo-done-title:focus { outline: none; }
+#promo-done-title .ln { display: inline-block; white-space: nowrap; }
 #promo-divider-top, .promo-divider { height: 1px; margin-top: 22px; background: var(--vault-hairline); }
-
-/* STEP 1 */
-#promo-gate-text {
+#promo-gate-text, #promo-done-text {
   margin-top: 22px;
-  font-size: var(--n-fs-tx); line-height: var(--n-lh-tx); color: var(--vault-soft) !important;
-  transition: opacity 0.5s ease;
+  font-size: var(--n-fs-tx); line-height: var(--n-lh-tx); color: var(--vault-soft); text-wrap: pretty;
 }
-.promo-form { display: grid; margin-top: 26px; }
-.promo-form > * { grid-area: 1 / 1; }
-/* The verifying line sits under the form, and takes the form's place only while the form is faded out (the kept
-   script sets the form's opacity to 0 or 1 only), so the two never draw over each other. */
-.promo-form > #promo-verify-wrap { grid-area: 2 / 1; margin-top: 16px; }
-#promo-email-wrap[style*="opacity: 0"] + #promo-verify-wrap { grid-area: 1 / 1; margin-top: 0; }
-/* While verifying, FOUNDING ACCESS and its hairline stay above the line. */
-#promo-eyebrow, #promo-divider-top { opacity: 1 !important; }
-#promo-email-wrap { display: flex; flex-direction: column; }
-#promo-email {
+
+/* The form: each field's name in the label voice over its line; the line turns ivory and doubles on focus */
+.promo-form { margin-top: 26px; }
+.promo-field + .promo-field { margin-top: 20px; }
+.promo-label {
+  display: block;
+  font-family: var(--font-display); font-weight: 500; text-transform: uppercase;
+  font-size: var(--n-fs-lb); letter-spacing: var(--n-track-lb); line-height: 1.5; color: var(--vault-soft);
+}
+.promo-input {
   display: block; width: 100%; height: 44px; padding: 0;
   border: 0; border-bottom: 1px solid var(--vault-hairline-strong); border-radius: 0;
   background: none; color: var(--vault-ink); caret-color: var(--vault-ink);
   font-family: var(--font); font-size: 16px;
   appearance: none; -webkit-appearance: none;
 }
-#promo-email::placeholder { color: var(--vault-soft); opacity: 1; }
-/* the field's focus is its line turning ivory and doubling, not a box */
-#promo-email:focus, #promo-email:focus-visible { outline: none; border-bottom: 2px solid var(--vault-ink); }
-#promo-email.invalid { border-bottom: 2px solid var(--vault-ink); }
-#promo-email:disabled { opacity: 0.6; }
-#promo-email:-webkit-autofill, #promo-email:-webkit-autofill:hover, #promo-email:-webkit-autofill:focus {
+.promo-input:focus, .promo-input:focus-visible { outline: none; border-bottom-color: var(--vault-ink); box-shadow: 0 1px 0 var(--vault-ink); }
+.promo-input[aria-invalid="true"] { border-bottom-color: var(--vault-ink); }
+.promo-input:-webkit-autofill, .promo-input:-webkit-autofill:hover, .promo-input:-webkit-autofill:focus {
   -webkit-box-shadow: 0 0 0 1000px var(--vault-plate) inset; -webkit-text-fill-color: var(--vault-ink);
   caret-color: var(--vault-ink); transition: background-color 9999s;
 }
-#promo-email-error {
-  min-height: 18px; margin-top: 12px;
+/* COUNTRY: the same line, a fine chevron at its end; « Choose your country » in the soft voice until one is chosen */
+select.promo-input {
+  padding-right: 28px; cursor: pointer; text-overflow: ellipsis;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%23a7a29a' stroke-width='1.2'/%3E%3C/svg%3E") no-repeat right 2px center / 12px 8px;
+}
+select.promo-input:invalid { color: var(--vault-soft); }
+select.promo-input option { color: var(--vault-ink); background: var(--vault-plate); }
+.promo-error, #promo-form-msg {
+  margin-top: 10px;
   font-family: var(--font-display); font-weight: 500; text-transform: uppercase;
-  font-size: var(--n-fs-micro); letter-spacing: var(--n-track-micro); line-height: 18px; color: var(--vault-ink);
-  opacity: 0; transition: opacity var(--d-dur-state) var(--d-ease);
+  font-size: var(--n-fs-micro); letter-spacing: var(--n-track-micro); line-height: 1.8; color: var(--vault-ink);
 }
-#promo-email-btn { margin-top: 14px; font-family: var(--font-display); font-weight: 500; text-transform: uppercase; }
-#promo-email-btn.loading { opacity: 0.5; pointer-events: none; }
-#promo-email-btn.loading:disabled { opacity: 0.5; }
-#promo-verify-wrap { align-self: center; position: relative; }
-#promo-verify-bar { position: relative; height: 1px; overflow: hidden; background: var(--vault-hairline); }
-#promo-verify-fill { position: absolute; top: 0; left: 0; bottom: 0; width: 0%; background: var(--vault-ink); }
-#promo-verify-step {
-  min-height: 18px; margin-top: 16px;
-  font-family: var(--font-display); font-weight: 500; text-transform: uppercase;
-  font-size: var(--n-fs-micro); letter-spacing: var(--n-track-micro); line-height: 1.8;
-  color: var(--vault-ink) !important;
+.promo-error:empty, #promo-form-msg:empty { display: none; }
+
+/* The consent: a hairline square ticked in ivory (its hit area 44 px), then the line and the privacy policy's link */
+.promo-consent { display: flex; align-items: flex-start; gap: 14px; margin-top: 26px; }
+.promo-check { position: relative; flex: none; width: 20px; height: 20px; margin-top: 1px; }
+.promo-check input {
+  position: absolute; left: -12px; top: -12px; width: 44px; height: 44px; margin: 0;
+  opacity: 0; cursor: pointer; appearance: none; -webkit-appearance: none;
 }
-#promo-social-proof {
-  display: flex; align-items: center; gap: 10px; margin-top: 22px;
+.promo-check__box {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  box-shadow: inset 0 0 0 1px var(--vault-hairline-strong); color: var(--vault-plate); pointer-events: none;
 }
-#promo-dot { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--vault-ink); }
-#promo-social-text, #promo-footer-gate, #promo-footer, #promo-reopen-hint, #promo-confirm-footer, #promo-referral-label {
+.promo-check__box svg { width: 12px; height: 10px; opacity: 0; }
+.promo-check input:checked + .promo-check__box { background: var(--vault-ink); box-shadow: none; }
+.promo-check input:checked + .promo-check__box svg { opacity: 1; }
+.promo-check input[aria-invalid="true"]:not(:checked) + .promo-check__box { box-shadow: inset 0 0 0 1px var(--vault-ink); }
+.promo-check input:focus-visible + .promo-check__box { outline: 2px solid var(--vault-ink); outline-offset: 2px; }
+.promo-consent__text { color: var(--vault-soft); font-size: 13.5px; line-height: 1.55; cursor: pointer; text-wrap: pretty; }
+.promo-consent__text a {
+  color: var(--vault-ink); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px;
+  text-decoration-color: var(--vault-hairline-strong); white-space: nowrap;
+}
+@media (hover: hover) and (pointer: fine) {
+  .promo-consent__text a { transition: text-decoration-color var(--d-dur-hover) var(--d-ease); }
+  .promo-consent__text a:hover { text-decoration-color: var(--vault-ink); }
+  .promo-check input:not(:checked):hover + .promo-check__box { box-shadow: inset 0 0 0 1px var(--vault-ink); }
+}
+/* the honeypot: out of sight and out of reach, for people; a script that fills every field fills it */
+.promo-hp { position: absolute; left: -10000px; top: 0; width: 1px; height: 1px; overflow: hidden; }
+
+#promo-submit { margin-top: 26px; font-family: var(--font-display); font-weight: 500; text-transform: uppercase; }
+#promo-submit[aria-disabled="true"] { opacity: 0.5; cursor: default; pointer-events: none; }
+#promo-form-msg { margin-top: 14px; }
+#promo-footer-gate {
+  margin-top: 18px;
   font-family: var(--font-display); font-weight: 500; text-transform: uppercase;
   font-size: var(--n-fs-lb); letter-spacing: var(--n-track-lb); line-height: 1.6; color: var(--vault-soft);
 }
-#promo-footer-gate { margin-top: 14px; }
 
-/* STEP 2 */
-#promo-code-wrap {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 16px; align-items: baseline;
-  row-gap: 14px; margin-top: 26px;
-}
-#promo-code, #promo-confirm-code {
-  font-family: var(--font); font-weight: 300; font-variant-numeric: tabular-nums;
-  color: var(--vault-ink) !important; line-height: 1.1; letter-spacing: 0.06em;
-  overflow-wrap: anywhere;
-}
-#promo-code { grid-column: 1 / -1; min-height: 40px; font-size: 34px; transform: none !important; }
-.code-prefix, .code-suffix { font-size: 1em; color: inherit; }
-/* When the slot expires, the code fades out as one line (no glyph by glyph), and the line that replaces it takes the
-   label voice of the pop-up's other status lines. */
-#promo-code { transition: opacity var(--d-dur-state) var(--d-ease) !important; }
-#promo-code > span[style] { opacity: 1 !important; transform: none !important; transition: none !important; }
-#promo-code:has(> span[style*="opacity: 0"]) { opacity: 0; }
-#promo-code[style*="font-size: 11px"] { font-family: var(--font-display); font-weight: 500; }
-#promo-timestamp { justify-self: end; }
-#promo-serial, #promo-timestamp {
-  font-size: 11px; letter-spacing: 0.16em; line-height: 1.4; text-transform: uppercase;
-  font-variant-numeric: tabular-nums; color: var(--vault-soft); white-space: nowrap;
-}
-#promo-timer-bar { position: relative; height: 1px; margin-top: 22px; overflow: hidden; background: var(--vault-hairline); }
-#promo-timer-fill { position: absolute; top: 0; left: 0; bottom: 0; width: 100%; background: var(--vault-hairline-strong); transform-origin: left; }
-#promo-timer-bar.urgent #promo-timer-fill { background: var(--vault-ink); }
-#promo-copy-btn { margin-top: 26px; }
-#promo-tier-wrap { margin-top: 30px; }
-#promo-divider-tier { height: 1px; background: var(--vault-hairline); }
-.promo-tier-row {
-  position: relative; display: flex; align-items: center; gap: 12px;
-  min-height: 48px; padding: 12px 0 12px 14px;
-  border-bottom: 1px solid var(--vault-hairline);
-  color: var(--vault-soft);
-}
-.promo-tier-row.active { color: var(--vault-ink); }
-.promo-tier-row.active::before { content: ''; position: absolute; left: 0; top: 14px; bottom: 14px; width: 2px; background: var(--vault-ink); }
-.tier-glyph { flex: none; font-size: 9px; line-height: 1; }
-.tier-name {
-  flex: none; min-width: 7.6em;
-  font-family: var(--font-display); font-weight: 500; text-transform: uppercase;
-  font-size: 11px; letter-spacing: 0.2em; line-height: 1.4;
-}
-.promo-tier-row.active .tier-name::after { content: ' \2713'; font-family: var(--font); font-size: 10px; letter-spacing: 0; }
-.tier-discount { flex: none; font-size: 13px; letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
-.tier-status {
-  margin-left: auto; text-align: right; white-space: nowrap;
-  font-family: var(--font-display); font-weight: 500; text-transform: uppercase;
-  font-size: 9.5px; letter-spacing: 0.16em; line-height: 1.4;
-}
-/* narrow phones: the rows keep one line and one height */
-@media (max-width: 389px) {
-  .promo-tier-row { gap: 10px; }
-  .tier-name { min-width: 6.9em; letter-spacing: 0.16em; }
-  .tier-status { letter-spacing: 0.1em; }
-}
-@media (max-width: 359px) {
-  .tier-status { white-space: normal; }
-}
-#promo-referral-tier-copy { margin-top: 24px; }
-#promo-scarcity-line { display: none !important; }
-#promo-reopen-hint { margin-top: 18px; opacity: 0; transition: opacity var(--d-dur-state) var(--d-ease); }
-#promo-reopen-hint:empty { margin-top: 0; }
-#promo-footer-sep { height: 1px; margin-top: 26px; background: var(--vault-hairline); }
-#promo-footer { margin-top: 16px; }
-
-/* STEP 3 */
-#promo-confirm-code { margin-top: 26px; font-size: 34px; }
-#promo-confirm-sub {
-  margin-top: 22px;
-  font-family: var(--font-display); font-weight: 500; text-transform: uppercase;
-  font-size: var(--n-fs-t3); letter-spacing: var(--n-track-t3); line-height: 1.4; color: var(--vault-ink);
-}
-#promo-confirm-hint { margin-top: 10px; color: var(--vault-soft); font-size: var(--n-fs-tx); line-height: var(--n-lh-tx); }
-#promo-referral-wrap { margin-top: 22px; }
-#promo-referral-url {
-  margin-top: 10px; color: var(--vault-ink); font-size: 14px; line-height: 1.5;
-  overflow-wrap: anywhere; font-variant-numeric: tabular-nums;
-}
-#promo-referral-copy { margin-top: 18px; }
-#promo-confirm-footer { margin-top: 22px; }
-
-/* The buttons of the pop-up take the brand's voice; a figure inside them stays in the reading face. */
-#promo-copy-btn, #promo-referral-tier-copy, #promo-referral-copy { font-family: var(--font-display); font-weight: 500; text-transform: uppercase; }
-
-/* The toast and the founding bar. The toast shows in the empty band under the header, never over the words. */
-#promo-toast {
-  position: fixed; left: 50%; top: calc(var(--n-header) + 16px + env(safe-area-inset-top)); z-index: 9999;
-  max-width: calc(100vw - 48px); margin-left: 0; translate: -50% 0;
-  padding: 15px 20px;
-  background: var(--vault-plate); box-shadow: 0 0 0 1px var(--vault-hairline);
-  color: var(--vault-ink); font-size: 11px; letter-spacing: 0.16em; line-height: 1.4; text-transform: uppercase;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums;
-  opacity: 0; pointer-events: none; transition: opacity var(--d-dur-state) var(--d-ease);
-}
-#promo-toast:empty { visibility: hidden; }
-#promo-toast.active { opacity: 1; }
-/* Opened from the second ACCESS (the call at the foot of the page), the toast shows in the empty band under that
-   ACCESS instead, so it never covers the words above it, when it fits whole on screen there; the script sets
-   --toast-top (the band's middle) and the class, else the toast keeps its place above. */
-html.toast-at-call #promo-toast { position: absolute; top: var(--toast-top, 0px); translate: -50% -50%; }
-/* a phone under 360 px: tighter, so the code and SAVED TO CLIPBOARD stay whole on one line */
-@media (max-width: 359px) { #promo-toast { padding-left: 16px; padding-right: 16px; letter-spacing: 0.08em; } }
-#founding-bar {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 9100;
-  padding: 12px 24px calc(12px + env(safe-area-inset-bottom));
-  background: var(--vault-plate); box-shadow: 0 -1px 0 var(--vault-hairline);
-  font-family: var(--font-display); font-weight: 500; text-transform: uppercase;
-  font-size: var(--n-fs-lb); letter-spacing: var(--n-track-lb); line-height: 1.3; color: var(--vault-soft);
-  text-align: center; padding-left: calc(24px + var(--n-track-lb));
-  opacity: 0; visibility: hidden; pointer-events: none;
-  transition: opacity 200ms var(--d-ease), visibility 0s linear 200ms;
-}
-#founding-bar.active { opacity: 1; visibility: visible; transition: opacity 200ms var(--d-ease), visibility 0s; }
-
-/* Computer: a solid panel, 440 px, centred, clear of the founding bar (46 px) at the foot. Every space is a step of
-   4, 8, 12, 16, 24, 32, 48, 72. */
+/* Computer: a solid panel, 440 px, centred. Every space is a step of 4, 8, 12, 16, 24, 32, 48, 72. */
 @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
-  #promo-overlay { display: flex; align-items: center; justify-content: center; padding: 48px 24px 72px; }
+  #promo-overlay { display: flex; align-items: center; justify-content: center; padding: 32px 24px; }
   #promo-inner {
     position: relative; left: auto; right: auto; bottom: auto;
     width: 440px; max-width: 100%; margin: 0;
@@ -609,57 +505,40 @@ html.toast-at-call #promo-toast { position: absolute; top: var(--toast-top, 0px)
   .promo-x { top: 24px; right: 17px; }
   #promo-logo-wrap { margin-top: 0; }
   #promo-logo-wrap .n-wm { font-size: 14px; }
-  #promo-eyebrow, #promo-eyebrow-2, #promo-eyebrow-3 { margin-top: 16px; font-size: 28px; }
+  #promo-eyebrow, #promo-done-title { margin-top: 16px; font-size: 28px; }
   #promo-divider-top, .promo-divider { margin-top: 24px; }
-  #promo-gate-text, #promo-confirm-hint { font-size: 16.5px; line-height: 1.6; }
-  #promo-gate-text { margin-top: 24px; }
+  #promo-gate-text, #promo-done-text { margin-top: 24px; font-size: 16.5px; line-height: 1.6; }
   .promo-form { margin-top: 24px; }
-  #promo-email { height: 52px; font-size: 16.5px; }
-  #promo-email-error { margin-top: 12px; min-height: 16px; line-height: 16px; }
-  #promo-email-btn { margin-top: 16px; }
-  #promo-email-error, #promo-verify-step { font-size: 11px; letter-spacing: 0.2em; }
-  #promo-social-proof { margin-top: 24px; }
-  #promo-footer-gate { margin-top: 12px; }
-  #promo-social-text, #promo-footer-gate, #promo-footer, #promo-reopen-hint, #promo-confirm-footer, #promo-referral-label { font-size: 11px; letter-spacing: 0.2em; }
-  #promo-code-wrap { margin-top: 24px; row-gap: 12px; }
-  #promo-code, #promo-confirm-code { font-size: 40px; }
-  #promo-timer-bar, #promo-copy-btn, #promo-tier-wrap, #promo-referral-tier-copy, #promo-footer-sep { margin-top: 24px; }
-  .promo-tier-row { min-height: 44px; padding: 8px 0 8px 12px; }
-  .tier-name { font-size: 12px; }
-  .tier-status { font-size: 10.5px; }
-  #promo-reopen-hint { margin-top: 16px; }
-  #promo-footer { margin-top: 16px; }
-  #promo-confirm-code, #promo-confirm-sub, #promo-referral-wrap, #promo-confirm-footer { margin-top: 24px; }
-  #promo-confirm-hint, #promo-referral-url { margin-top: 8px; }
-  #promo-referral-copy { margin-top: 16px; }
-  #founding-bar { background: var(--vault-ground); font-size: 11px; letter-spacing: 0.2em; padding-top: 16px; padding-bottom: 16px; padding-left: calc(24px + 0.2em); }
-  /* the toast sits in the middle of the top bar, which is empty there, wherever ACCESS was pressed */
-  #promo-toast, html.toast-at-call #promo-toast { position: fixed; top: calc(var(--d-bar) / 2); translate: -50% -50%; }
+  .promo-field + .promo-field { margin-top: 24px; }
+  .promo-label { font-size: 11px; letter-spacing: 0.2em; }
+  .promo-input { height: 48px; font-size: 16.5px; }
+  .promo-error, #promo-form-msg { margin-top: 8px; font-size: 11px; letter-spacing: 0.2em; line-height: 16px; }
+  .promo-consent { margin-top: 24px; }
+  .promo-consent__text { font-size: 14px; }
+  #promo-submit { margin-top: 24px; }
+  #promo-form-msg { margin-top: 12px; }
+  #promo-footer-gate { margin-top: 16px; font-size: 11px; letter-spacing: 0.2em; }
 }
-/* A shorter window (a laptop): the same panel, tighter, so the code step never scrolls. */
+/* A shorter window (a laptop): the same panel, tighter, so the form never scrolls. */
 @media (min-width: 1024px) and (hover: hover) and (pointer: fine) and (max-height: 899px) {
-  #promo-overlay { padding-top: 24px; }
+  #promo-overlay { padding-top: 24px; padding-bottom: 24px; }
   #promo-inner { padding-top: 16px; padding-bottom: 24px; }
   .promo-x { top: 16px; }
-  #promo-eyebrow, #promo-eyebrow-2, #promo-eyebrow-3 { margin-top: 8px; font-size: 24px; }
-  #promo-divider-top, .promo-divider, #promo-gate-text, .promo-form, #promo-social-proof { margin-top: 16px; }
-  #promo-footer-gate { margin-top: 8px; }
-  #promo-code-wrap { margin-top: 16px; row-gap: 8px; }
-  #promo-code, #promo-confirm-code { min-height: 36px; font-size: 32px; }
-  #promo-timer-bar, #promo-copy-btn, #promo-tier-wrap, #promo-referral-tier-copy, #promo-footer-sep { margin-top: 16px; }
-  .promo-tier-row { min-height: 40px; }
-  .promo-tier-row.active::before { top: 12px; bottom: 12px; }
-  #promo-reopen-hint, #promo-footer { margin-top: 12px; }
-  #promo-confirm-code, #promo-confirm-sub, #promo-referral-wrap, #promo-confirm-footer { margin-top: 16px; }
+  #promo-eyebrow, #promo-done-title { margin-top: 8px; font-size: 24px; }
+  #promo-divider-top, .promo-divider, #promo-gate-text, #promo-done-text, .promo-form, .promo-field + .promo-field { margin-top: 16px; }
+  .promo-input { height: 44px; }
+  .promo-consent, #promo-submit { margin-top: 16px; }
+  #promo-footer-gate { margin-top: 12px; }
 }
 @media (min-width: 1024px) and (hover: hover) and (pointer: fine) and (max-height: 760px) {
-  #promo-overlay { padding-top: 16px; padding-bottom: 64px; }
+  #promo-overlay { padding-top: 16px; padding-bottom: 16px; }
   #promo-inner { --n-button: 52px; padding-bottom: 16px; }
   #promo-logo-wrap { height: 36px; }
   .promo-x { top: 12px; }
-  .promo-tier-row { min-height: 36px; padding-top: 4px; padding-bottom: 4px; }
-  .promo-tier-row.active::before { top: 10px; bottom: 10px; }
+  #promo-gate-text { line-height: 1.5; }
+  .promo-input { height: 40px; }
 }
+
 
 
 /* The opening's monogram, OUT OF THE DARK, drawn in dust: after ENTER the dust rises out of the dark and gathers into
@@ -674,7 +553,7 @@ html.dust .open__mono { opacity: 0; }
 html.dust.dust-settled .open__mono { opacity: .4; }
 .open__dust { position: absolute; pointer-events: none; }
 
-/* Reduced motion: every transition is instant, except the slot's 30 s line, which is information, not motion. */
+/* Reduced motion: every transition is instant. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.001ms !important; animation-delay: 0s !important; animation-iteration-count: 1 !important;
@@ -683,8 +562,6 @@ html.dust.dust-settled .open__mono { opacity: .4; }
   #promo-trigger, #access-close { transition: none !important; }
   .gate__enter::before { display: none; }
   .gate__wm, .gate__enter { opacity: 1; transform: none; }
-  #promo-code { transition-duration: 0.001ms !important; }
-  #promo-timer-fill { transition-duration: 30s !important; }
 }
 </style>
 <noscript><style>
@@ -727,7 +604,6 @@ html.dust.dust-settled .open__mono { opacity: .4; }
           WHO CURATE THEIR OWN EXISTENCE.</p>
           <div class="open__act" id="promo-trigger-wrap">
             <button id="promo-trigger" class="n-g n-btn" type="button">ACCESS</button>
-            <div id="orbes-code-badge"></div>
           </div>
         </div>
       </section>
@@ -781,103 +657,306 @@ html.dust.dust-settled .open__mono { opacity: .4; }
   </footer>
 </div>
 
-<!-- ══ FOUNDING ACCESS ══ -->
+<!-- ══ FOUNDING ACCESS: the founding list ══ -->
 <div id="promo-overlay">
   <div id="promo-inner" role="dialog" aria-modal="true" aria-label="Founding access" tabindex="-1">
     <button class="promo-x" type="button" aria-label="Close"><svg viewBox="0 0 14 14" aria-hidden="true" focusable="false"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.2" fill="none"/></svg></button>
-
-    <!-- STEP 1: email gate -->
     <div id="promo-logo-wrap">
       <span class="n-g n-wm">ORBES</span>
     </div>
-    <div id="promo-step-1">
-      <div id="promo-eyebrow">FOUNDING ACCESS</div>
+
+    <!-- The form -->
+    <div id="promo-step-form">
+      <h2 id="promo-eyebrow">FOUNDING ACCESS</h2>
       <div id="promo-divider-top"></div>
-      <div id="promo-gate-text">A unique code is being reserved.<br>Enter your email to claim it.</div>
-      <div class="promo-form">
-        <div id="promo-email-wrap">
-          <input id="promo-email" type="email" placeholder="" autocomplete="off" spellcheck="false" aria-label="Email" />
-          <div id="promo-email-error" aria-hidden="true">Invalid format.</div>
-          <button id="promo-email-btn" class="n-btn" type="button">CLAIM</button>
+      <p id="promo-gate-text">Join the founding list to hear when the first release opens.</p>
+      <form id="promo-form" class="promo-form" novalidate>
+        <div class="promo-field">
+          <label class="promo-label" for="promo-email">EMAIL</label>
+          <input id="promo-email" class="promo-input" name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" maxlength="254">
+          <p class="promo-error" id="promo-email-error"></p>
         </div>
-        <div id="promo-verify-wrap" style="display:none">
-          <div id="promo-verify-bar"><div id="promo-verify-fill"></div></div>
-          <div id="promo-verify-step" aria-live="polite"></div>
+        <div class="promo-field">
+          <label class="promo-label" for="promo-first-name">FIRST NAME</label>
+          <input id="promo-first-name" class="promo-input" name="firstName" type="text" autocomplete="given-name" autocapitalize="words" spellcheck="false" maxlength="80">
+          <p class="promo-error" id="promo-first-name-error"></p>
         </div>
-      </div>
-      <div id="promo-social-proof">
-        <span id="promo-dot"></span>
-        <span id="promo-social-text">3 people viewing this right now</span>
-      </div>
+        <div class="promo-field">
+          <label class="promo-label" for="promo-country">COUNTRY</label>
+          <select id="promo-country" class="promo-input" name="country" autocomplete="country" required>
+            <option value="">Choose your country</option>
+            <option value="AF">Afghanistan</option>
+            <option value="AX">Åland Islands</option>
+            <option value="AL">Albania</option>
+            <option value="DZ">Algeria</option>
+            <option value="AS">American Samoa</option>
+            <option value="AD">Andorra</option>
+            <option value="AO">Angola</option>
+            <option value="AI">Anguilla</option>
+            <option value="AQ">Antarctica</option>
+            <option value="AG">Antigua &amp; Barbuda</option>
+            <option value="AR">Argentina</option>
+            <option value="AM">Armenia</option>
+            <option value="AW">Aruba</option>
+            <option value="AU">Australia</option>
+            <option value="AT">Austria</option>
+            <option value="AZ">Azerbaijan</option>
+            <option value="BS">Bahamas</option>
+            <option value="BH">Bahrain</option>
+            <option value="BD">Bangladesh</option>
+            <option value="BB">Barbados</option>
+            <option value="BY">Belarus</option>
+            <option value="BE">Belgium</option>
+            <option value="BZ">Belize</option>
+            <option value="BJ">Benin</option>
+            <option value="BM">Bermuda</option>
+            <option value="BT">Bhutan</option>
+            <option value="BO">Bolivia</option>
+            <option value="BA">Bosnia &amp; Herzegovina</option>
+            <option value="BW">Botswana</option>
+            <option value="BV">Bouvet Island</option>
+            <option value="BR">Brazil</option>
+            <option value="IO">British Indian Ocean Territory</option>
+            <option value="VG">British Virgin Islands</option>
+            <option value="BN">Brunei</option>
+            <option value="BG">Bulgaria</option>
+            <option value="BF">Burkina Faso</option>
+            <option value="BI">Burundi</option>
+            <option value="KH">Cambodia</option>
+            <option value="CM">Cameroon</option>
+            <option value="CA">Canada</option>
+            <option value="CV">Cape Verde</option>
+            <option value="BQ">Caribbean Netherlands</option>
+            <option value="KY">Cayman Islands</option>
+            <option value="CF">Central African Republic</option>
+            <option value="TD">Chad</option>
+            <option value="CL">Chile</option>
+            <option value="CN">China</option>
+            <option value="CX">Christmas Island</option>
+            <option value="CC">Cocos (Keeling) Islands</option>
+            <option value="CO">Colombia</option>
+            <option value="KM">Comoros</option>
+            <option value="CG">Congo - Brazzaville</option>
+            <option value="CD">Congo - Kinshasa</option>
+            <option value="CK">Cook Islands</option>
+            <option value="CR">Costa Rica</option>
+            <option value="CI">Côte d&rsquo;Ivoire</option>
+            <option value="HR">Croatia</option>
+            <option value="CU">Cuba</option>
+            <option value="CW">Curaçao</option>
+            <option value="CY">Cyprus</option>
+            <option value="CZ">Czechia</option>
+            <option value="DK">Denmark</option>
+            <option value="DJ">Djibouti</option>
+            <option value="DM">Dominica</option>
+            <option value="DO">Dominican Republic</option>
+            <option value="EC">Ecuador</option>
+            <option value="EG">Egypt</option>
+            <option value="SV">El Salvador</option>
+            <option value="GQ">Equatorial Guinea</option>
+            <option value="ER">Eritrea</option>
+            <option value="EE">Estonia</option>
+            <option value="SZ">Eswatini</option>
+            <option value="ET">Ethiopia</option>
+            <option value="FK">Falkland Islands</option>
+            <option value="FO">Faroe Islands</option>
+            <option value="FJ">Fiji</option>
+            <option value="FI">Finland</option>
+            <option value="FR">France</option>
+            <option value="GF">French Guiana</option>
+            <option value="PF">French Polynesia</option>
+            <option value="TF">French Southern Territories</option>
+            <option value="GA">Gabon</option>
+            <option value="GM">Gambia</option>
+            <option value="GE">Georgia</option>
+            <option value="DE">Germany</option>
+            <option value="GH">Ghana</option>
+            <option value="GI">Gibraltar</option>
+            <option value="GR">Greece</option>
+            <option value="GL">Greenland</option>
+            <option value="GD">Grenada</option>
+            <option value="GP">Guadeloupe</option>
+            <option value="GU">Guam</option>
+            <option value="GT">Guatemala</option>
+            <option value="GG">Guernsey</option>
+            <option value="GN">Guinea</option>
+            <option value="GW">Guinea-Bissau</option>
+            <option value="GY">Guyana</option>
+            <option value="HT">Haiti</option>
+            <option value="HM">Heard &amp; McDonald Islands</option>
+            <option value="HN">Honduras</option>
+            <option value="HK">Hong Kong SAR China</option>
+            <option value="HU">Hungary</option>
+            <option value="IS">Iceland</option>
+            <option value="IN">India</option>
+            <option value="ID">Indonesia</option>
+            <option value="IR">Iran</option>
+            <option value="IQ">Iraq</option>
+            <option value="IE">Ireland</option>
+            <option value="IM">Isle of Man</option>
+            <option value="IL">Israel</option>
+            <option value="IT">Italy</option>
+            <option value="JM">Jamaica</option>
+            <option value="JP">Japan</option>
+            <option value="JE">Jersey</option>
+            <option value="JO">Jordan</option>
+            <option value="KZ">Kazakhstan</option>
+            <option value="KE">Kenya</option>
+            <option value="KI">Kiribati</option>
+            <option value="KW">Kuwait</option>
+            <option value="KG">Kyrgyzstan</option>
+            <option value="LA">Laos</option>
+            <option value="LV">Latvia</option>
+            <option value="LB">Lebanon</option>
+            <option value="LS">Lesotho</option>
+            <option value="LR">Liberia</option>
+            <option value="LY">Libya</option>
+            <option value="LI">Liechtenstein</option>
+            <option value="LT">Lithuania</option>
+            <option value="LU">Luxembourg</option>
+            <option value="MO">Macao SAR China</option>
+            <option value="MG">Madagascar</option>
+            <option value="MW">Malawi</option>
+            <option value="MY">Malaysia</option>
+            <option value="MV">Maldives</option>
+            <option value="ML">Mali</option>
+            <option value="MT">Malta</option>
+            <option value="MH">Marshall Islands</option>
+            <option value="MQ">Martinique</option>
+            <option value="MR">Mauritania</option>
+            <option value="MU">Mauritius</option>
+            <option value="YT">Mayotte</option>
+            <option value="MX">Mexico</option>
+            <option value="FM">Micronesia</option>
+            <option value="MD">Moldova</option>
+            <option value="MC">Monaco</option>
+            <option value="MN">Mongolia</option>
+            <option value="ME">Montenegro</option>
+            <option value="MS">Montserrat</option>
+            <option value="MA">Morocco</option>
+            <option value="MZ">Mozambique</option>
+            <option value="MM">Myanmar (Burma)</option>
+            <option value="NA">Namibia</option>
+            <option value="NR">Nauru</option>
+            <option value="NP">Nepal</option>
+            <option value="NL">Netherlands</option>
+            <option value="NC">New Caledonia</option>
+            <option value="NZ">New Zealand</option>
+            <option value="NI">Nicaragua</option>
+            <option value="NE">Niger</option>
+            <option value="NG">Nigeria</option>
+            <option value="NU">Niue</option>
+            <option value="NF">Norfolk Island</option>
+            <option value="KP">North Korea</option>
+            <option value="MK">North Macedonia</option>
+            <option value="MP">Northern Mariana Islands</option>
+            <option value="NO">Norway</option>
+            <option value="OM">Oman</option>
+            <option value="PK">Pakistan</option>
+            <option value="PW">Palau</option>
+            <option value="PS">Palestinian Territories</option>
+            <option value="PA">Panama</option>
+            <option value="PG">Papua New Guinea</option>
+            <option value="PY">Paraguay</option>
+            <option value="PE">Peru</option>
+            <option value="PH">Philippines</option>
+            <option value="PN">Pitcairn Islands</option>
+            <option value="PL">Poland</option>
+            <option value="PT">Portugal</option>
+            <option value="PR">Puerto Rico</option>
+            <option value="QA">Qatar</option>
+            <option value="RE">Réunion</option>
+            <option value="RO">Romania</option>
+            <option value="RU">Russia</option>
+            <option value="RW">Rwanda</option>
+            <option value="WS">Samoa</option>
+            <option value="SM">San Marino</option>
+            <option value="ST">São Tomé &amp; Príncipe</option>
+            <option value="SA">Saudi Arabia</option>
+            <option value="SN">Senegal</option>
+            <option value="RS">Serbia</option>
+            <option value="SC">Seychelles</option>
+            <option value="SL">Sierra Leone</option>
+            <option value="SG">Singapore</option>
+            <option value="SX">Sint Maarten</option>
+            <option value="SK">Slovakia</option>
+            <option value="SI">Slovenia</option>
+            <option value="SB">Solomon Islands</option>
+            <option value="SO">Somalia</option>
+            <option value="ZA">South Africa</option>
+            <option value="GS">South Georgia &amp; South Sandwich Islands</option>
+            <option value="KR">South Korea</option>
+            <option value="SS">South Sudan</option>
+            <option value="ES">Spain</option>
+            <option value="LK">Sri Lanka</option>
+            <option value="BL">St. Barthélemy</option>
+            <option value="SH">St. Helena</option>
+            <option value="KN">St. Kitts &amp; Nevis</option>
+            <option value="LC">St. Lucia</option>
+            <option value="MF">St. Martin</option>
+            <option value="PM">St. Pierre &amp; Miquelon</option>
+            <option value="VC">St. Vincent &amp; Grenadines</option>
+            <option value="SD">Sudan</option>
+            <option value="SR">Suriname</option>
+            <option value="SJ">Svalbard &amp; Jan Mayen</option>
+            <option value="SE">Sweden</option>
+            <option value="CH">Switzerland</option>
+            <option value="SY">Syria</option>
+            <option value="TW">Taiwan</option>
+            <option value="TJ">Tajikistan</option>
+            <option value="TZ">Tanzania</option>
+            <option value="TH">Thailand</option>
+            <option value="TL">Timor-Leste</option>
+            <option value="TG">Togo</option>
+            <option value="TK">Tokelau</option>
+            <option value="TO">Tonga</option>
+            <option value="TT">Trinidad &amp; Tobago</option>
+            <option value="TN">Tunisia</option>
+            <option value="TR">Türkiye</option>
+            <option value="TM">Turkmenistan</option>
+            <option value="TC">Turks &amp; Caicos Islands</option>
+            <option value="TV">Tuvalu</option>
+            <option value="UM">U.S. Outlying Islands</option>
+            <option value="VI">U.S. Virgin Islands</option>
+            <option value="UG">Uganda</option>
+            <option value="UA">Ukraine</option>
+            <option value="AE">United Arab Emirates</option>
+            <option value="GB">United Kingdom</option>
+            <option value="US">United States</option>
+            <option value="UY">Uruguay</option>
+            <option value="UZ">Uzbekistan</option>
+            <option value="VU">Vanuatu</option>
+            <option value="VA">Vatican City</option>
+            <option value="VE">Venezuela</option>
+            <option value="VN">Vietnam</option>
+            <option value="WF">Wallis &amp; Futuna</option>
+            <option value="EH">Western Sahara</option>
+            <option value="YE">Yemen</option>
+            <option value="ZM">Zambia</option>
+            <option value="ZW">Zimbabwe</option>
+          </select>
+          <p class="promo-error" id="promo-country-error"></p>
+        </div>
+        <div class="promo-consent">
+          <span class="promo-check"><input id="promo-consent" name="consent" type="checkbox"><span class="promo-check__box" aria-hidden="true"><svg viewBox="0 0 12 10" focusable="false"><path d="M1 5.2l3.4 3.3L11 1.5" stroke="currentColor" stroke-width="1.5" fill="none"/></svg></span></span>
+          <label class="promo-consent__text" for="promo-consent">I agree that ORBES keeps my details to tell me when the first release opens. <a href="https://verify.theorbes.com/legal/privacy#founding-list" target="_blank" rel="noopener">Privacy policy</a>.</label>
+        </div>
+        <p class="promo-error" id="promo-consent-error"></p>
+        <div class="promo-hp" aria-hidden="true"><label for="promo-website">Website</label><input id="promo-website" name="website" type="text" tabindex="-1" autocomplete="off"></div>
+        <button id="promo-submit" class="n-btn" type="submit">JOIN THE LIST</button>
+        <p id="promo-form-msg" role="status" aria-live="polite"></p>
+      </form>
       <div id="promo-footer-gate">This offer will not appear again.</div>
     </div>
 
-    <!-- STEP 2: code reveal -->
-    <div id="promo-step-2" style="display:none">
-      <div id="promo-eyebrow-2">FOUNDING ACCESS</div>
+    <!-- Sent -->
+    <div id="promo-step-done" hidden>
+      <h2 id="promo-done-title" tabindex="-1"><span class="ln">YOU ARE</span> <span class="ln">ON THE LIST</span></h2>
       <div class="promo-divider"></div>
-      <div id="promo-code-wrap">
-        <div id="promo-code"></div>
-        <div id="promo-serial"></div>
-        <div id="promo-timestamp"></div>
-      </div>
-      <div id="promo-timer-bar"><div id="promo-timer-fill"></div></div>
-      <button id="promo-copy-btn" class="n-btn" type="button">CLAIM</button>
-      <div id="promo-tier-wrap" style="display:none">
-        <div id="promo-divider-tier"></div>
-        <div class="promo-tier-row" id="tier-bronze">
-          <span class="tier-glyph">◈</span>
-          <span class="tier-name">BRONZE</span>
-          <span class="tier-discount">10%</span>
-          <span class="tier-status" id="tier-bronze-status"></span>
-        </div>
-        <div class="promo-tier-row" id="tier-silver">
-          <span class="tier-glyph">◈</span>
-          <span class="tier-name">SILVER</span>
-          <span class="tier-discount">20%</span>
-          <span class="tier-status" id="tier-silver-status"></span>
-        </div>
-        <div class="promo-tier-row" id="tier-gold">
-          <span class="tier-glyph">◈</span>
-          <span class="tier-name">GOLD</span>
-          <span class="tier-discount">40%</span>
-          <span class="tier-status" id="tier-gold-status"></span>
-        </div>
-        <div class="promo-tier-row" id="tier-platinum">
-          <span class="tier-glyph">◈</span>
-          <span class="tier-name">PLATINUM</span>
-          <span class="tier-discount">50%</span>
-          <span class="tier-status" id="tier-platinum-status"></span>
-        </div>
-        <button id="promo-referral-tier-copy" class="n-btn n-btn--ol" type="button">COPY REFERRAL LINK</button>
-      </div>
-      <div id="promo-scarcity-line"><span id="promo-dot-live"></span><span id="promo-codes-left"></span></div>
-      <div id="promo-reopen-hint"></div>
-      <div id="promo-footer-sep"></div>
-      <div id="promo-footer">One use only · Not shown again.</div>
+      <p id="promo-done-text">We will write to you when the first release opens.</p>
     </div>
-
-    <!-- STEP 3: confirmation -->
-    <div id="promo-step-3" style="display:none">
-      <div id="promo-eyebrow-3">CODE SECURED</div>
-      <div class="promo-divider"></div>
-      <div id="promo-confirm-code"></div>
-      <div id="promo-confirm-sub">Check your inbox.</div>
-      <div id="promo-confirm-hint">Your founding access code has been sent<br>to your email address.</div>
-      <div class="promo-divider"></div>
-      <div id="promo-referral-wrap">
-        <div id="promo-referral-label">YOUR REFERRAL LINK</div>
-        <div id="promo-referral-url"></div>
-        <button id="promo-referral-copy" class="n-btn n-btn--ol" type="button">COPY LINK</button>
-      </div>
-      <div id="promo-confirm-footer">theorbes.com</div>
-    </div>
-
   </div>
 </div>
-
-<div id="promo-toast" role="status"></div>
-<div id="founding-bar">FOUNDING ACCESS · VALID UNTIL JULY 2026</div>
 
 <script>
 /* ── THE ENTER GATE: shown on every visit, stores nothing, sends nothing ── */
@@ -911,10 +990,9 @@ html.dust.dust-settled .open__mono { opacity: .4; }
   }, { rootMargin: '-84px 0px 0px 0px', threshold: [0, 1] }).observe(mark);
 })();
 
-/* ── FOUNDING ACCESS, keyboard and focus only (its behaviour, words and requests are the kept script below):
-      Escape and the close button close it as a click on the backdrop does; focus moves into it, stays in it,
-      and returns to the ACCESS that opened it; the page behind is inert while it is open. The second ACCESS, in
-      the call at the foot of the page, opens it through the kept ACCESS (a click on it), so nothing else changes. ── */
+/* ── FOUNDING ACCESS, keyboard and focus: Escape and the close button close it as a click on the backdrop does; focus
+      moves into it, stays in it, and returns to the ACCESS that opened it; the page behind is inert while it is open.
+      The second ACCESS, in the call at the foot of the page, opens it through the first (a click on it). ── */
 (function () {
   var overlay = document.getElementById('promo-overlay');
   var inner = document.getElementById('promo-inner');
@@ -932,8 +1010,8 @@ html.dust.dust-settled .open__mono { opacity: .4; }
     if (e.key === 'Escape') { e.preventDefault(); closeLikeBackdrop(); return; }
     if (e.key !== 'Tab') return;
     var items = Array.prototype.filter.call(
-      inner.querySelectorAll('button, input, [tabindex="0"]'),
-      function (el) { return !el.disabled && el.offsetParent !== null && getComputedStyle(el).visibility !== 'hidden'; }
+      inner.querySelectorAll('button, input, select, a[href], [tabindex="0"]'),
+      function (el) { return !el.disabled && el.tabIndex >= 0 && !el.closest('.promo-hp') && el.offsetParent !== null && getComputedStyle(el).visibility !== 'hidden'; }
     );
     if (!items.length) { e.preventDefault(); inner.focus(); return; }
     var firstEl = items[0], lastEl = items[items.length - 1];
@@ -954,24 +1032,11 @@ html.dust.dust-settled .open__mono { opacity: .4; }
     else {
       var back = opener || trigger;
       opener = trigger;
-      // the kept close() may show its toast now: under the second ACCESS when that one opened the pop-up, only if
-      // the whole toast is on screen there; otherwise in its kept place under the header
-      var atCall = !!again && back === again;
-      if (atCall) {
-        var band = document.querySelector('.foot');
-        var b = again.getBoundingClientRect().bottom;
-        var f = band ? band.getBoundingClientRect().top : b + 96;
-        var mid = (b + f) / 2;
-        // the toast is about 46 px tall
-        atCall = mid - 32 >= 0 && mid + 32 <= window.innerHeight;
-        if (atCall) root.style.setProperty('--toast-top', Math.round(mid + window.scrollY) + 'px');
-      }
-      root.classList.toggle('toast-at-call', atCall);
       if (back) back.focus({ preventScroll: true });
     }
   }).observe(overlay, { attributes: true, attributeFilter: ['class'] });
 
-  // ACCESS can be reached only once it is shown (the kept script fades it in at 3.5 s); the second ACCESS with it
+  // ACCESS can be reached only once it is shown (it fades in at 3.5 s); the second ACCESS with it
   if (again) again.inert = true;
   if (trigger) {
     trigger.inert = true;
@@ -989,35 +1054,6 @@ html.dust.dust-settled .open__mono { opacity: .4; }
       trigger.click();
       if (!overlay.classList.contains('active')) opener = trigger;
     });
-  }
-
-  // When a step replaces the one that held focus, or CLAIM disables the form, focus returns to the pop-up itself
-  function keepFocusInside() {
-    setTimeout(function () {
-      if (!overlay.classList.contains('active')) return;
-      var a = document.activeElement;
-      if (!a || a === document.body || !inner.contains(a) || a.disabled || a.offsetParent === null) inner.focus({ preventScroll: true });
-    }, 60);
-  }
-  ['promo-step-1', 'promo-step-2', 'promo-step-3'].forEach(function (id) {
-    var el = document.getElementById(id);
-    if (el) new MutationObserver(keepFocusInside).observe(el, { attributes: true, attributeFilter: ['style'] });
-  });
-  var claimBtn = document.getElementById('promo-email-btn');
-  if (claimBtn) new MutationObserver(keepFocusInside).observe(claimBtn, { attributes: true, attributeFilter: ['disabled'] });
-
-  // The field is described by its error only while the error is shown
-  var err = document.getElementById('promo-email-error');
-  var em = document.getElementById('promo-email');
-  if (err && em) {
-    var syncErr = function () {
-      var on = err.style.opacity === '1';
-      err.setAttribute('aria-hidden', on ? 'false' : 'true');
-      if (on) { em.setAttribute('aria-invalid', 'true'); em.setAttribute('aria-describedby', 'promo-email-error'); }
-      else { em.removeAttribute('aria-invalid'); em.removeAttribute('aria-describedby'); }
-    };
-    new MutationObserver(syncErr).observe(err, { attributes: true, attributeFilter: ['style'] });
-    syncErr();
   }
 })();
 </script>
@@ -1125,882 +1161,221 @@ html.dust.dust-settled .open__mono { opacity: .4; }
 
 
 <script>
-/* ── PROMO EASTER EGG ──────────────────────────────────────────── */
-document.addEventListener("DOMContentLoaded", function() {
-(function() {
-  // Simple fetch — worked before
-  function gsCall(params, callback) {
-    if (APPS_SCRIPT_URL === 'YOUR_APPS_SCRIPT_URL_HERE') return;
-    var url = APPS_SCRIPT_URL + '?' + Object.keys(params).map(function(k) {
-      return encodeURIComponent(k) + '=' + encodeURIComponent(params[k] !== undefined ? params[k] : '');
-    }).join('&');
+/* ── FOUNDING ACCESS: the founding list (macro scope F1, F2, F3, F5). The form sends the email, the first name, the
+      country and the consent to the platform (POST https://verify.theorbes.com/api/v1/founding, JSON, no cookie), with
+      where the visit came from: the console link's code `o` and the five `utm_` tags of this page's address, and the
+      referring site (its address cut to the site). The platform answers 202 whether the address was new or already on
+      the list, 400 with each refused field in its words, 429 when the network has tried too often. This browser keeps
+      only that the form was sent (localStorage, in try/catch), so ACCESS shows YOU ARE ON THE LIST again. ── */
+(function () {
+  var ENDPOINT = 'https://verify.theorbes.com/api/v1/founding';
+  var JOINED_KEY = 'orbes_founding';
+  var TIMEOUT_MS = 15000;
+  var FIELDS = ['email', 'firstName', 'country', 'consent'];
+  // the platform's words (services/founding.ts FOUNDING_WORDS), shown before sending as after
+  var WORDS = {
+    email: 'Enter your email.',
+    firstName: 'Enter your first name.',
+    country: 'Choose your country.',
+    consent: 'Tick the box to join the list.',
+    failed: 'Something went wrong. Please try again.',
+    tooMany: 'Too many tries. Please wait a minute.'
+  };
+  var SENDING = 'SENDING', JOIN = 'JOIN THE LIST';
 
-    if (!callback) {
-      fetch(url, { method: 'GET', redirect: 'follow' }).catch(function() {});
-      return;
-    }
+  var trigger = document.getElementById('promo-trigger');
+  var overlay = document.getElementById('promo-overlay');
+  var inner = document.getElementById('promo-inner');
+  var stepForm = document.getElementById('promo-step-form');
+  var stepDone = document.getElementById('promo-step-done');
+  var doneTitle = document.getElementById('promo-done-title');
+  var form = document.getElementById('promo-form');
+  var submit = document.getElementById('promo-submit');
+  var msg = document.getElementById('promo-form-msg');
+  var input = {
+    email: document.getElementById('promo-email'),
+    firstName: document.getElementById('promo-first-name'),
+    country: document.getElementById('promo-country'),
+    consent: document.getElementById('promo-consent')
+  };
+  var error = {
+    email: document.getElementById('promo-email-error'),
+    firstName: document.getElementById('promo-first-name-error'),
+    country: document.getElementById('promo-country-error'),
+    consent: document.getElementById('promo-consent-error')
+  };
+  var website = document.getElementById('promo-website');
+  if (!trigger || !overlay || !inner || !form || !submit) return;
 
-    fetch(url, { method: 'GET', redirect: 'follow' })
-      .then(function(r) { return r.text(); })
-      .then(function(t) {
-        try { callback(JSON.parse(t)); }
-        catch(e) { callback({ error: 'parse' }); }
-      })
-      .catch(function() { callback({ error: 'network' }); });
-  }
+  function read(key) { try { return window.localStorage.getItem(key); } catch (e) { return null; } }
+  function write(key, value) { try { window.localStorage.setItem(key, value); } catch (e) { /* kept for this visit only */ } }
 
-
-  // ── Core constants & element refs ─────────────────────────────
-  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbx6caX0FjcqhZt0FKgRuIYxRuG7PVwtjZV6gWnJINVLbMDW84aDfNjK11DyzlmcfIhy/exec';
-  const DURATION = 30;
-  const CHARS    = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  const LS_STATE  = 'orbes_promo_state';
-  const LS_CODE   = 'orbes_promo_code';
-  const LS_SLOTS  = 'orbes_promo_slots';
-  const LS_EMAIL  = 'orbes_promo_email';
-  const LS_UUID   = 'orbes_session_uuid';
-  const LS_VISITS = 'orbes_visit_count';
-  const LS_REF    = 'orbes_referral';
-
-  const trigger  = document.getElementById('promo-trigger');
-  const overlay  = document.getElementById('promo-overlay');
-  const inner    = document.getElementById('promo-inner');
-  const step1    = document.getElementById('promo-step-1');
-  const step2    = document.getElementById('promo-step-2');
-  const codeEl   = document.getElementById('promo-code');
-  const secEl    = null; // removed
-  const emailEl  = document.getElementById('promo-email');
-  const emailBtn = document.getElementById('promo-email-btn');
-  const copyBtn  = document.getElementById('promo-copy-btn');
-  if (!trigger || !overlay) return;
-
-  // Session state
-  var savedState = localStorage.getItem(LS_STATE) || 'fresh';
-  var savedCode  = localStorage.getItem(LS_CODE)  || '';
-  var savedSlots = parseInt(localStorage.getItem(LS_SLOTS) || '0', 10);
-  if (!savedSlots || savedSlots < 1) {
-    savedSlots = Math.floor(Math.random() * 8) + 4;
-    localStorage.setItem(LS_SLOTS, savedSlots);
-  }
-  var sessionUUID = localStorage.getItem(LS_UUID);
-  if (!sessionUUID) {
-    sessionUUID = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-      var r = Math.random() * 16 | 0;
-      return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
-    });
-    localStorage.setItem(LS_UUID, sessionUUID);
-  }
-  var visitCount = parseInt(localStorage.getItem(LS_VISITS) || '0', 10) + 1;
-  localStorage.setItem(LS_VISITS, visitCount);
-  (function() {
-    var urlRef = new URLSearchParams(window.location.search).get('ref');
-    if (urlRef) {
-      localStorage.setItem(LS_REF, urlRef);
-      // Log referral_used event
-      setTimeout(function() {
-        gsCall({ action: 'event', type: 'referral_used', uuid: sessionUUID, ref: urlRef }, null);
-      }, 1000);
-    }
+  // What the code reveal of the Google Sheet left in this browser (F5: the Sheet is retired) is cleared once.
+  (function () {
+    try {
+      ['orbes_promo_state', 'orbes_promo_code', 'orbes_promo_slots', 'orbes_promo_email', 'orbes_promo_claimed',
+        'orbes_session_uuid', 'orbes_visit_count', 'orbes_referral'].forEach(function (k) { window.localStorage.removeItem(k); });
+    } catch (e) { /* nothing to clear */ }
+    if (/(?:^|;\s*)orbes_code=/.test(document.cookie)) document.cookie = 'orbes_code=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax';
   })();
-  // Show claimed code badge on return
-  (function() {
-    var cookieCode = getCookie('orbes_code');
-    var lsState    = localStorage.getItem(LS_STATE);
-    if (cookieCode && lsState === 'copied') {
-      setTimeout(function() {
-        var badge = document.getElementById('orbes-code-badge');
-        if (badge) { badge.textContent = cookieCode; badge.style.opacity = '1'; }
-      }, 2000);
-    }
-  })();
-  // Fetch real slot count
-  if (APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
-    gsCall({ action: 'slots' }, function(sd) {
-      if (sd && sd.slots_remaining !== undefined) {
-        savedSlots = sd.slots_remaining;
-        localStorage.setItem(LS_SLOTS, savedSlots);
-        if (sd.claimed !== undefined) localStorage.setItem('orbes_promo_claimed', sd.claimed);
+
+  var joined = read(JOINED_KEY) === '1';
+  var sending = false;
+
+  // ── where the visit came from, as the platform keeps it (http/schemas.ts arrivalShape): left out when it would not
+  var TAG_RE = (function () { try { return new RegExp('^[^\\p{C}]{1,100}$', 'u'); } catch (e) { return /^[^\u0000-\u001f\u007f-\u009f]{1,100}$/; } })();
+  function arrival() {
+    var a = {};
+    try {
+      var q = new URLSearchParams(window.location.search);
+      var o = (q.get('o') || '').trim();
+      if (/^[a-z0-9-]{3,32}$/i.test(o)) a.o = o.toLowerCase();
+      var utm = {}, any = false;
+      ['source', 'medium', 'campaign', 'content', 'term'].forEach(function (k) {
+        var v = (q.get('utm_' + k) || '').trim();
+        if (TAG_RE.test(v)) { utm[k] = v; any = true; }
+      });
+      if (any) a.utm = utm;
+    } catch (e) { /* the address could not be read */ }
+    try {
+      var r = document.referrer;
+      if (r && r.length <= 500) {
+        var u = new URL(r);
+        // only the site: its scheme and host, never the page or its query; this site itself is no referrer
+        if (['http:', 'https:', 'android-app:'].indexOf(u.protocol) !== -1 && u.host && u.host !== window.location.host) a.referrer = u.protocol + '//' + u.host + '/';
       }
+    } catch (e) { /* no referring site */ }
+    return a;
+  }
+
+  // ── the form's words under each field, and the line under JOIN THE LIST
+  function setError(name, words) {
+    var el = error[name], field = input[name];
+    if (!el || !field) return;
+    el.textContent = words || '';
+    if (words) { field.setAttribute('aria-invalid', 'true'); field.setAttribute('aria-describedby', el.id); }
+    else { field.removeAttribute('aria-invalid'); field.removeAttribute('aria-describedby'); }
+  }
+  function clearErrors() { FIELDS.forEach(function (n) { setError(n, ''); }); if (msg) msg.textContent = ''; }
+  function showFields(fields) {
+    var first = null;
+    FIELDS.forEach(function (n) {
+      var w = fields[n];
+      if (typeof w === 'string' && w) { setError(n, w.slice(0, 200)); if (!first) first = n; }
     });
+    if (first && input[first]) input[first].focus();
+    return !!first;
+  }
+  function showMessage(words) { if (msg) msg.textContent = words; }
+
+  function values() {
+    return {
+      email: input.email ? input.email.value.trim() : '',
+      firstName: input.firstName ? input.firstName.value.trim() : '',
+      country: input.country ? input.country.value : '',
+      consent: !!(input.consent && input.consent.checked)
+    };
+  }
+  // the platform's own checks (services/founding.ts cleanFounding), so a refusal shows before anything is sent
+  function check(v) {
+    var f = {}, any = false;
+    if (!v.email || v.email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.email)) { f.email = WORDS.email; any = true; }
+    if (!v.firstName || /[<>\u0000-\u001f\u007f]/.test(v.firstName)) { f.firstName = WORDS.firstName; any = true; }
+    if (!/^[A-Z]{2}$/.test(v.country)) { f.country = WORDS.country; any = true; }
+    if (!v.consent) { f.consent = WORDS.consent; any = true; }
+    return any ? f : null;
   }
 
-  let generatedCode = savedCode || '';
-  let timer = null;
-  let remaining = DURATION;
-  let revealed = false;
-  let codeCopied = (savedState === 'copied');
-  let codeRevealed = (savedState === 'revealed' || savedState === 'copied');
-  let codeFromSheet = false;
-
-  // Tier system helpers
-  function getTierFromReferrals(count) {
-    if (count >= 10) return 'platinum';
-    if (count >= 5)  return 'gold';
-    if (count >= 2)  return 'silver';
-    return 'bronze';
+  function busy(on) {
+    sending = on;
+    // the button stays focusable while it waits, so focus never leaves the form
+    submit.setAttribute('aria-disabled', on ? 'true' : 'false');
+    submit.textContent = on ? SENDING : JOIN;
+    form.setAttribute('aria-busy', on ? 'true' : 'false');
   }
 
-  function renderTierDisplay(referralCount, currentTier) {
-    var wrap = document.getElementById('promo-tier-wrap');
-    if (!wrap) return;
-    wrap.style.display = 'block';
-    var tiers      = ['bronze', 'silver', 'gold', 'platinum'];
-    var thresholds = { bronze: 0, silver: 2, gold: 5, platinum: 10 };
-    var discounts  = { bronze: '10%', silver: '20%', gold: '40%', platinum: '50%' };
-    tiers.forEach(function(t) {
-      var row    = document.getElementById('tier-' + t);
-      var status = document.getElementById('tier-' + t + '-status');
-      if (!row || !status) return;
-      row.classList.toggle('active', t === currentTier);
-      if (t === currentTier) {
-        var idx = tiers.indexOf(t);
-        var nextTier = tiers[idx + 1];
-        if (nextTier) {
-          var left = thresholds[nextTier] - referralCount;
-          status.textContent = left > 0 ? left + ' referral' + (left > 1 ? 's' : '') + ' to upgrade' : 'Active';
-        } else {
-          status.textContent = 'Max tier';
-        }
-      } else if (thresholds[t] > referralCount) {
-        var needed = thresholds[t];
-        status.textContent = needed + ' referral' + (needed > 1 ? 's' : '');
-      } else {
-        status.textContent = 'Unlocked';
+  function show(done) {
+    if (stepForm) stepForm.hidden = done;
+    if (stepDone) stepDone.hidden = !done;
+  }
+
+  function joinedNow() {
+    joined = true;
+    write(JOINED_KEY, '1');
+    show(true);
+    inner.scrollTop = 0;
+    if (doneTitle) doneTitle.focus({ preventScroll: true });
+  }
+
+  function send(v) {
+    var body = { email: v.email, firstName: v.firstName, country: v.country, consent: v.consent, website: website ? website.value : '' };
+    var a = arrival();
+    if (a.o) body.o = a.o;
+    if (a.utm) body.utm = a.utm;
+    if (a.referrer) body.referrer = a.referrer;
+    busy(true);
+    var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, TIMEOUT_MS);
+    var settled = function () { clearTimeout(timer); busy(false); };
+    fetch(ENDPOINT, {
+      method: 'POST', mode: 'cors', credentials: 'omit', cache: 'no-store',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: ctrl ? ctrl.signal : undefined
+    }).then(function (r) {
+      if (r.status === 202) { settled(); joinedNow(); return; }
+      if (r.status === 429) { settled(); showMessage(WORDS.tooMany); return; }
+      if (r.status === 400) {
+        return r.json().then(function (b) {
+          settled();
+          var fields = b && b.error && b.error.fields;
+          if (!(fields && typeof fields === 'object' && showFields(fields))) showMessage(WORDS.failed);
+        }, function () { settled(); showMessage(WORDS.failed); });
       }
-    });
-    var refTierCopy = document.getElementById('promo-referral-tier-copy');
-    if (refTierCopy && generatedCode) {
-      var refLink = 'https://theorbes.com?ref=' + encodeURIComponent(generatedCode);
-      refTierCopy.onclick = function() {
-        if (navigator.clipboard) navigator.clipboard.writeText(refLink);
-        refTierCopy.textContent = 'COPIED ❆';
-        setTimeout(function() { refTierCopy.textContent = 'COPY REFERRAL LINK'; }, 2000);
-      };
-    }
+      settled(); showMessage(WORDS.failed);
+    }, function () { settled(); showMessage(WORDS.failed); });
   }
 
-  function generateCode() {
-    var lang = (navigator.language || 'en').toUpperCase().split('-');
-    var country = lang.length > 1 ? lang[1].slice(0,2) : lang[0].slice(0,2);
-    var digits = Array.from({length:3}, function() { return Math.floor(Math.random()*10); }).join('');
-    return 'OB-' + digits + '-' + country;
-  }
-
-  function randChar() {
-    return CHARS[Math.floor(Math.random() * CHARS.length)];
-  }
-
-  function scrambleReveal(target, finalText, duration, onDone) {
-    const len = finalText.length;
-    const resolved = new Array(len).fill(false);
-    let lastResolvedCount = 0;
-    let start = null;
-    function playTick(charIndex) {
-      try {
-        var ctx = new (window.AudioContext || window.webkitAudioContext)();
-        var o = ctx.createOscillator(), g = ctx.createGain();
-        o.connect(g); g.connect(ctx.destination);
-        o.frequency.value = 600 + (charIndex / (len - 1 || 1)) * 500;
-        o.type = 'sine';
-        g.gain.setValueAtTime(0.04, ctx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.07);
-        o.start(ctx.currentTime); o.stop(ctx.currentTime + 0.08);
-      } catch(e) {}
-    }
-    function step(ts) {
-      if (!start) start = ts;
-      const progress = Math.min((ts - start) / duration, 1);
-      const resolvedCount = Math.floor(progress * len);
-      for (let i = lastResolvedCount; i < resolvedCount; i++) {
-        if (!resolved[i] && finalText[i] !== '\u00B7' && finalText[i] !== ' ' && finalText[i] !== '-') playTick(i);
-        resolved[i] = true;
-      }
-      lastResolvedCount = resolvedCount;
-      let display = '';
-      for (let i = 0; i < len; i++) {
-        if (resolved[i]) display += finalText[i];
-        else display += (finalText[i] === '\u00B7' || finalText[i] === ' ' || finalText[i] === '-') ? finalText[i] : randChar();
-      }
-      target.textContent = display;
-      if (progress < 1) requestAnimationFrame(step);
-      else { target.textContent = finalText; if (onDone) onDone(); }
-    }
-    requestAnimationFrame(step);
-  }
-
-  // E: log funnel events to Sheets
-  function logEvent(type) {
-    if (APPS_SCRIPT_URL === 'YOUR_APPS_SCRIPT_URL_HERE') return;
-    gsCall({ action: 'event', type: type, uuid: sessionUUID }, null);
-  }
-
-  // E: cookie helpers
-  function setCookie(name, value, days) {
-    var expires = new Date(Date.now() + days * 864e5).toUTCString();
-    document.cookie = name + '=' + encodeURIComponent(value) + '; expires=' + expires + '; path=/; SameSite=Lax';
-  }
-  function getCookie(name) {
-    var match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
-    return match ? decodeURIComponent(match[1]) : null;
-  }
-
-  function fallbackLocal() {
-    // API failed — show error, don't show random code
-    var vs = document.getElementById('promo-verify-step');
-    var vf = document.getElementById('promo-verify-fill');
-    if (vf) vf.style.width = '0%';
-    if (vs) { vs.textContent = 'Connection error. Please retry.'; vs.style.color = 'rgba(255,100,100,0.80)'; }
-    var emailBtn2 = document.getElementById('promo-email-btn');
-    if (emailBtn2) {
-      emailBtn2.textContent = 'RETRY';
-      emailBtn2.classList.remove('loading');
-      emailBtn2.disabled = false;
-    }
-    var emailEl2 = document.getElementById('promo-email');
-    if (emailEl2) emailEl2.disabled = false;
-    // Re-show email form
-    setTimeout(function() {
-      var verifyWrap2 = document.getElementById('promo-verify-wrap');
-      var emailWrap2  = document.getElementById('promo-email-wrap');
-      var socialEl3   = document.getElementById('promo-social-proof');
-      var eyebrow2    = document.getElementById('promo-eyebrow');
-      var divider2    = document.getElementById('promo-divider-top');
-      var fg2         = document.getElementById('promo-footer-gate');
-      var gt3         = document.getElementById('promo-gate-text');
-      if (verifyWrap2) verifyWrap2.style.display = 'none';
-      [emailWrap2, socialEl3, eyebrow2, divider2, fg2].forEach(function(el) {
-        if (el) { el.style.opacity = '1'; el.style.display = ''; }
-      });
-      if (gt3) { gt3.style.opacity = '1'; }
-    }, 2000);
-  }
-
-  // Called when API returns a real code
-  function showStep2WithCode(code) {
-    generatedCode = code;
-    showStep2();
-  }
-
-  function showStep2() {
-    step1.style.opacity = '0';
-    step1.style.transition = 'opacity 0.35s ease';
-    setTimeout(function() {
-      step1.style.display = 'none';
-      step2.style.opacity = '0';
-      step2.style.display = 'block';
-      requestAnimationFrame(function() {
-        step2.style.transition = 'opacity 0.45s ease';
-        step2.style.opacity = '1';
-      });
-    }, 350);
-    // Only generate local code if NO API configured AND no code yet
-    if (!generatedCode) {
-      if (APPS_SCRIPT_URL === 'YOUR_APPS_SCRIPT_URL_HERE') {
-        generatedCode = generateCode();
-        localStorage.setItem(LS_CODE, generatedCode);
-      } else {
-        // API is configured but no code yet — don't show anything, wait for API
-        return;
-      }
-    }
-    localStorage.setItem(LS_STATE, 'revealed');
-    // F: decrement slots counter
-    savedSlots = Math.max(1, savedSlots - 1);
-    localStorage.setItem(LS_SLOTS, savedSlots);
-    // C: assign serial number
-    var serialEl = document.getElementById('promo-serial');
-    if (serialEl) {
-      var n = Math.floor(Math.random() * 80) + 12;
-      serialEl.textContent = '#' + String(n).padStart(4,'0') + ' / 500';
-    }
-    // D: timestamp
-    var tsEl = document.getElementById('promo-timestamp');
-    if (tsEl) {
-      var now = new Date();
-      var hh = String(now.getHours()).padStart(2,'0');
-      var mm = String(now.getMinutes()).padStart(2,'0');
-      var ss = String(now.getSeconds()).padStart(2,'0');
-      tsEl.textContent = 'Generated · ' + hh + ':' + mm + ':' + ss;
-    }
-    // F: show code in button
-    if (copyBtn) copyBtn.textContent = 'CLAIM';
-    // Scarcity counter — decrements slowly while open
-    var codesLeftEl = document.getElementById('promo-codes-left');
-    var startCodes = savedSlots;
-    if (codesLeftEl) {
-      var claimedCount = 500 - startCodes;
-      codesLeftEl.textContent = startCodes + ' codes remaining' + (claimedCount > 0 ? ' · ' + claimedCount + ' claimed' : '');
-      // Refresh from Sheets once after popup opens
-      if (APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
-        setTimeout(function() {
-          gsCall({ action: 'slots' }, function(pd) {
-              if (pd && pd.slots_remaining !== undefined) {
-                startCodes = pd.slots_remaining;
-                savedSlots = startCodes;
-                localStorage.setItem(LS_SLOTS, startCodes);
-                var claimed = pd.claimed || (500 - startCodes);
-                if (codesLeftEl) codesLeftEl.textContent = startCodes + ' codes remaining · ' + claimed + ' claimed';
-              }
-            });
-        }, 800);
-      }
-    }
-    codeEl.textContent = '';
-    // G: unlock sound
-    (function() {
-      try {
-        var ctx = new (window.AudioContext || window.webkitAudioContext)();
-        [
-          { freq: 120, gain: 0.18, dur: 0.08, t: 0 },
-          { freq: 1800, gain: 0.06, dur: 0.18, t: 0.04 },
-          { freq: 2400, gain: 0.04, dur: 0.12, t: 0.08 }
-        ].forEach(function(s) {
-          var o = ctx.createOscillator();
-          var g = ctx.createGain();
-          o.connect(g); g.connect(ctx.destination);
-          o.frequency.value = s.freq;
-          o.type = 'sine';
-          g.gain.setValueAtTime(0, ctx.currentTime + s.t);
-          g.gain.linearRampToValueAtTime(s.gain, ctx.currentTime + s.t + 0.01);
-          g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + s.t + s.dur);
-          o.start(ctx.currentTime + s.t);
-          o.stop(ctx.currentTime + s.t + s.dur + 0.02);
-        });
-      } catch(e) {}
-    })();
-    setTimeout(function() {
-      scrambleReveal(codeEl, generatedCode, 950, function() {
-        // C: pulse on arrival
-        codeEl.style.transition = 'transform 0.3s cubic-bezier(0.34,1.56,0.64,1)';
-        // K: split code into two-tone spans
-        var parts = generatedCode.split('·');
-        if (parts.length === 2) {
-          codeEl.innerHTML =
-            '<span class="code-prefix">' + parts[0] + '·</span>' +
-            '<span class="code-suffix">' + parts[1] + '</span>';
-        }
-        codeEl.style.transform = 'scale(1.04)';
-        setTimeout(function() { codeEl.style.transform = 'scale(1)'; }, 300);
-        codeRevealed = true;
-        // Show tiers immediately — always start with bronze, update if we get real data
-        renderTierDisplay(0, 'bronze');
-        var emailForTier0 = localStorage.getItem(LS_EMAIL) || '';
-        if (emailForTier0 && APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
-          gsCall({ action: 'getstatus', email: emailForTier0 }, function(d) {
-            if (d && d.referrals !== undefined) {
-              renderTierDisplay(d.referrals, getTierFromReferrals(d.referrals));
-            }
-          });
-        }
-        startTimer();
-      });
-    }, 80);
-  }
-
-  function updateSocialProof() {
-    var el = document.getElementById('promo-social-text');
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (sending) return;
+    clearErrors();
+    var v = values();
+    var refused = check(v);
+    if (refused) { showFields(refused); return; }
+    send(v);
+  });
+  // a field's words go as soon as it is changed
+  FIELDS.forEach(function (n) {
+    var el = input[n];
     if (!el) return;
-    var n = Math.floor(Math.random() * 4) + 2;
-    el.textContent = n + ' people viewing this right now';
-    var dot = document.getElementById('promo-dot');
-    if (dot) dot.style.animationDuration = n >= 4 ? '0.8s' : '1.4s';
-    setTimeout(updateSocialProof, Math.random() * 8000 + 6000);
-  }
-
-  function startTimer() {
-    remaining = DURATION;
-    const fill = document.getElementById('promo-timer-fill');
-    const bar  = document.getElementById('promo-timer-bar');
-    if (fill) {
-      fill.style.transition = 'none';
-      fill.style.transform = 'scaleX(1)';
-      setTimeout(function() {
-        fill.style.transition = 'transform ' + DURATION + 's linear';
-        fill.style.transform = 'scaleX(0)';
-      }, 500);
-    }
-    timer = setInterval(function() {
-      remaining--;
-      if (remaining === 10 && bar) bar.classList.add('urgent');
-      if (remaining <= 0) {
-        clearInterval(timer);
-        // Disintegrate code
-        var freshCE = document.getElementById('promo-code');
-        if (freshCE) {
-          var chars = freshCE.textContent.split('');
-          var spans = chars.map(function(c) {
-            var s = document.createElement('span');
-            s.textContent = c;
-            s.style.display = 'inline-block';
-            s.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
-            return s;
-          });
-          freshCE.innerHTML = '';
-          spans.forEach(function(s) { freshCE.appendChild(s); });
-          spans.forEach(function(sp, idx) {
-            setTimeout(function() {
-              sp.style.opacity = '0';
-              sp.style.transform = 'translateY(-4px)';
-            }, idx * 80 + 100);
-          });
-          setTimeout(function() {
-            freshCE.innerHTML = '';
-            freshCE.style.fontSize = '11px';
-            freshCE.style.letterSpacing = '0.20em';
-            freshCE.style.color = 'rgba(255,255,255,0.55)';
-            freshCE.textContent = 'YOUR SLOT HAS BEEN REASSIGNED';
-          }, 600);
-        }
-        // Reset state
-        setTimeout(function() {
-          localStorage.removeItem(LS_CODE);
-          localStorage.setItem(LS_STATE, 'fresh');
-          generatedCode = '';
-          codeRevealed = false;
-          codeCopied = false;
-          codeFromSheet = false;
-          close();
-        }, 2800);
-      }
-    }, 1000);
-  }
-
-  function open() {
-    if (revealed) return;
-    revealed = true;
-    trigger.style.pointerEvents = 'none';
-    step1.style.display = 'block';
-    step2.style.display = 'none';
-    overlay.classList.add('active');
-    logEvent('popup_open');
-    // D: update engagement score on every open
-    if (APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
-      var openTz  = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
-      var openScore = 0;
-      if (visitCount >= 2) openScore += 1;
-      if (visitCount >= 5) openScore += 1;
-      if (openTz.indexOf('Europe') !== -1) openScore += 1;
-      if ((document.referrer||'').indexOf('instagram') !== -1 || (document.referrer||'').indexOf('tiktok') !== -1) openScore += 2;
-      gsCall({ action: 'update_score', uuid: sessionUUID, score: openScore, visits: visitCount }, null);
-    }
-    var fbar = document.getElementById('founding-bar');
-    if (fbar) {
-      // A: calculate days remaining to July 1 2026
-      var deadline = new Date('2026-07-01T00:00:00');
-      var now = new Date();
-      var daysLeft = Math.ceil((deadline - now) / (1000 * 60 * 60 * 24));
-      var barText = 'FOUNDING ACCESS · VALID UNTIL JULY 2026';
-      if (daysLeft <= 30 && daysLeft > 1) barText = 'FOUNDING ACCESS · CLOSES IN ' + daysLeft + ' DAYS';
-      else if (daysLeft === 1) barText = 'FOUNDING ACCESS · CLOSES TOMORROW';
-      else if (daysLeft <= 0) barText = 'FOUNDING ACCESS · NOW CLOSED';
-      fbar.textContent = barText;
-      fbar.classList.add('active');
-    }
-    updateSocialProof();
-    // A: visitor detected message (only for truly fresh visitors)
-    var gt = document.getElementById('promo-gate-text');
-    if (gt && !codeRevealed && savedState === 'fresh') {
-      gt.style.opacity = '1';
-      gt.innerHTML = 'Visitor detected.<br>Slot held for 90 seconds.';
-      gt.style.color = 'rgba(255,255,255,0.55)';
-      setTimeout(function() {
-        gt.style.transition = 'opacity 0.5s ease';
-        gt.style.opacity = '0';
-        setTimeout(function() {
-          gt.innerHTML = 'A unique code is being reserved.<br>Enter your email to claim it.';
-          gt.style.color = '';
-          gt.style.opacity = '1';
-        }, 500);
-      }, 1800);
-    }
-    // C: terminal cursor effect on email
-    if (emailEl) {
-      emailEl.placeholder = '_';
-      var cursorBlink = setInterval(function() {
-        emailEl.placeholder = emailEl.placeholder === '_' ? '' : '_';
-      }, 500);
-      setTimeout(function() {
-        clearInterval(cursorBlink);
-        emailEl.placeholder = 'hello@';
-      }, 1500);
-    }
-    // Reset hint
-    var hint = document.getElementById('promo-reopen-hint');
-    if (hint) { hint.textContent = ''; hint.style.opacity = '0'; }
-  }
-
-  function close() {
-    // G: asymmetric close — slide inner up
-    inner.style.transition = 'transform 0.45s cubic-bezier(0.4,0,1,1), opacity 0.45s ease';
-    inner.style.transform = 'translateY(-12px) scale(0.98)';
-    inner.style.opacity = '0';
-    setTimeout(function() {
-      inner.style.transition = '';
-      inner.style.transform = '';
-      inner.style.opacity = '';
-    }, 500);
-    overlay.classList.remove('active');
-    var fbar2 = document.getElementById('founding-bar');
-    if (fbar2) fbar2.classList.remove('active');
-    overlay.classList.remove('expired');
-    clearInterval(timer);
-    var bar = document.getElementById('promo-timer-bar');
-    if (bar) bar.classList.remove('urgent');
-    // H: toast if copied
-    if (codeCopied) {
-      var toast = document.getElementById('promo-toast');
-      if (toast) {
-        toast.textContent = generatedCode + ' — saved to clipboard';
-        toast.classList.add('active');
-        setTimeout(function() { toast.classList.remove('active'); }, 3000);
-      }
-    }
-    setTimeout(function() {
-      revealed = false;
-      codeFromSheet = false;
-      trigger.style.pointerEvents = 'all';
-      step1.style.display = 'block';
-      step2.style.display = 'none';
-      if (emailEl) emailEl.value = '';
-      if (emailBtn) { emailBtn.textContent = 'CLAIM'; emailBtn.classList.remove('loading'); }
-      var ew = document.getElementById('promo-email-wrap'); if (ew) { ew.style.display = ''; ew.style.opacity = '1'; }
-      var sp = document.getElementById('promo-social-proof'); if (sp) { sp.style.opacity = '1'; }
-      var gt2 = document.getElementById('promo-gate-text'); if (gt2) { gt2.style.opacity = '1'; }
-      var s3r = document.getElementById('promo-step-3'); if (s3r) { s3r.style.display = 'none'; s3r.style.opacity = '0'; }
-      var s2r = document.getElementById('promo-step-2'); if (s2r) { s2r.style.display = 'none'; s2r.style.opacity = '1'; }
-      var ey = document.getElementById('promo-eyebrow'); if (ey) ey.style.opacity = '1';
-      var dv = document.getElementById('promo-divider-top'); if (dv) dv.style.opacity = '1';
-      var sp2 = document.getElementById('promo-social-proof'); if (sp2) sp2.style.opacity = '1';
-      var fg = document.getElementById('promo-footer-gate'); if (fg) fg.style.opacity = '1';
-      var err2 = document.getElementById('promo-email-error'); if (err2) err2.style.opacity = '0';
-    }, 500);
-  }
-
-  // Statuses: available → generated (seen) → claimed (copied)
-
-  trigger.addEventListener('click', function(e) {
-    e.stopPropagation();
-    if (revealed) return; // already open
-    var currentState = localStorage.getItem(LS_STATE) || 'fresh';
-    var currentCode  = localStorage.getItem(LS_CODE) || '';
-    if ((currentState === 'revealed' || currentState === 'copied') && currentCode) {
-      // Returning visitor — show their code directly
-      codeRevealed = true;
-      generatedCode = currentCode;
-      codeCopied = (currentState === 'copied');
-      reopenCode();
-    } else {
-      open();
-    }
+    el.addEventListener(n === 'consent' || n === 'country' ? 'change' : 'input', function () { if (error[n] && error[n].textContent) setError(n, ''); });
   });
 
-  function reopenCode() {
-    // Always sync from localStorage in case this is a new session
-    var persisted = localStorage.getItem(LS_CODE) || '';
-    if (persisted) {
-      generatedCode = persisted;
-      codeFromSheet = true; // code came from Sheet originally
-    }
-
-    // If no code at all, fall back to full open flow
-    if (!generatedCode) { open(); return; }
-
-    revealed = true;
-    trigger.style.pointerEvents = 'none';
-    step1.style.display = 'none';
-    step2.style.opacity = '0';
-    step2.style.display = 'block';
+  function open() {
+    if (overlay.classList.contains('active')) return;
+    show(joined);
+    if (msg && !sending) msg.textContent = '';
     overlay.classList.add('active');
-    var fbarR = document.getElementById('founding-bar');
-    if (fbarR) fbarR.classList.add('active');
-    // Set content AFTER step2 is visible in DOM
-    requestAnimationFrame(function() {
-      // Reset and fill code element
-      var freshCode = document.getElementById('promo-code');
-      if (freshCode) {
-        freshCode.style.transition = 'none';
-        freshCode.style.fontSize = '';
-        freshCode.style.letterSpacing = '';
-        freshCode.style.color = '';
-        freshCode.innerHTML = '';
-        freshCode.textContent = generatedCode;
-      }
-      // Update copy btn
-      var freshCopyBtn2 = document.getElementById('promo-copy-btn');
-      if (freshCopyBtn2) {
-        freshCopyBtn2.textContent = codeCopied ? 'COPIED • ' + generatedCode : 'COPY ' + generatedCode;
-      }
-      step2.style.transition = 'opacity 0.45s ease';
-      step2.style.opacity = '1';
-    });
-    // Reset serial/timestamp
-    var serialEl2 = document.getElementById('promo-serial');
-    if (serialEl2) {
-      if (!serialEl2.textContent) {
-        var n2 = Math.floor(Math.random() * 80) + 12;
-        serialEl2.textContent = '#' + String(n2).padStart(4,'0') + ' / 500';
-      }
-    }
-    var tsEl2 = document.getElementById('promo-timestamp');
-    if (tsEl2 && !tsEl2.textContent) {
-      var now2 = new Date();
-      var hh2 = String(now2.getHours()).padStart(2,'0');
-      var mm2 = String(now2.getMinutes()).padStart(2,'0');
-      var ss2 = String(now2.getSeconds()).padStart(2,'0');
-      tsEl2.textContent = 'Generated · ' + hh2 + ':' + mm2 + ':' + ss2;
-    }
-    // Show tiers on reopen — bronze immediately, update from API
-    renderTierDisplay(0, 'bronze');
-    var emailForReopen = localStorage.getItem(LS_EMAIL) || '';
-    if (emailForReopen && APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
-      gsCall({ action: 'getstatus', email: emailForReopen }, function(d) {
-        if (d && d.referrals !== undefined) {
-          renderTierDisplay(d.referrals, getTierFromReferrals(d.referrals));
-        }
-      });
-    }
-    // Update copy btn based on state
-    var freshCopyBtn = document.getElementById('promo-copy-btn');
-    if (freshCopyBtn) {
-      freshCopyBtn.textContent = codeCopied ? 'COPIED — ' + generatedCode : 'COPY ' + generatedCode;
-    }
-    // Show hint message
-    var hint = document.getElementById('promo-reopen-hint');
-    if (hint) {
-      hint.textContent = codeCopied
-        ? ''
-        : 'Your code is still active. Copy it before it expires.';
-      hint.style.opacity = '1';
-    }
-    // Don't restart timer — just show bar frozen
-    var fill = document.getElementById('promo-timer-fill');
-    if (fill) fill.style.transition = 'none';
+  }
+  function close() {
+    if (!overlay.classList.contains('active')) return;
+    overlay.classList.remove('active');
   }
 
-  if (emailBtn) {
-    emailBtn.addEventListener('click', function(e) {
-      e.stopPropagation();
-      var val = emailEl ? emailEl.value.trim() : '';
-      if (!val) { if (emailEl) emailEl.focus(); return; }
-      // Validate email format before proceeding
-      if (!/^[^@]+@[^@]+\.[^@]+$/.test(val)) {
-        emailEl.classList.add('invalid');
-        var errEl = document.getElementById('promo-email-error');
-        if (errEl) errEl.style.opacity = '1';
-        emailEl.focus();
-        return;
-      }
-      // J: mechanical click sound
-      (function() {
-        try {
-          var ctx = new (window.AudioContext || window.webkitAudioContext)();
-          var o = ctx.createOscillator(); var g = ctx.createGain();
-          o.connect(g); g.connect(ctx.destination);
-          o.frequency.value = 800; o.type = 'square';
-          g.gain.setValueAtTime(0.06, ctx.currentTime);
-          g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.06);
-          o.start(ctx.currentTime); o.stop(ctx.currentTime + 0.07);
-        } catch(e) {}
-      })();
-      logEvent('claim_attempt');
-      emailBtn.textContent = 'VERIFYING';
-      emailBtn.classList.add('loading');
-      // D: progress bar with steps
-      var verifyWrap = document.getElementById('promo-verify-wrap');
-      var verifyFill = document.getElementById('promo-verify-fill');
-      var verifyStep = document.getElementById('promo-verify-step');
-      var gateText   = document.getElementById('promo-gate-text');
-      // Hide all step 1 content except verify bar
-      var step1Inner = document.getElementById('promo-step-1');
-      var emailWrap = document.getElementById('promo-email-wrap');
-      var socialEl2 = document.getElementById('promo-social-proof');
-      var eyebrow = document.getElementById('promo-eyebrow');
-      var divider = document.getElementById('promo-divider-top');
-      var footerGate = document.getElementById('promo-footer-gate');
-      var errEl2 = document.getElementById('promo-email-error');
-      [emailWrap, socialEl2, eyebrow, divider, footerGate, errEl2].forEach(function(el) {
-        if (el) { el.style.transition = 'opacity 0.25s ease'; el.style.opacity = '0'; }
-      });
-      if (gateText) { gateText.style.transition = 'opacity 0.25s ease'; gateText.style.opacity = '0'; }
-      if (gateText) gateText.style.opacity = '0.3';
-      if (verifyWrap) verifyWrap.style.display = 'block';
-      // Minimal: hide gate text, social proof too
-      var socialEl = document.getElementById('promo-social-proof');
-      if (socialEl) { socialEl.style.transition='opacity 0.3s ease'; socialEl.style.opacity='0'; }
-      if (gateText) { gateText.style.transition='opacity 0.3s ease'; gateText.style.opacity='0'; }
-      // Bar animation steps (visual)
-      var steps = [
-        { pct: 0.30, label: 'Verifying eligibility…' },
-        { pct: 0.65, label: 'Generating your code…' },
-        { pct: 0.90, label: 'Almost there…' }
-      ];
-      steps.forEach(function(s, i) {
-        setTimeout(function() {
-          if (verifyFill) verifyFill.style.width = (s.pct * 100) + '%';
-          if (verifyStep) verifyStep.textContent = s.label;
-        }, i * 500);
-      });
-
-      // Call Sheets API
-      if (APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
-        var claimEmail = val || localStorage.getItem(LS_EMAIL) || 'unknown';
-        // Apps Script requires fetch with redirect:follow
-        var tz  = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
-        // F: local time at claim
-        var localNow = new Date();
-        var localTime = String(localNow.getHours()).padStart(2,'0') + ':' + String(localNow.getMinutes()).padStart(2,'0');
-        var localDate = localNow.toLocaleDateString('fr-FR', { timeZone: tz || undefined });
-        // F: engagement score
-        var score = 0;
-        if (codeCopied) score += 1;
-        if ((localStorage.getItem('orbes_visit_count')||0) >= 2) score += 1;
-        if (tz.indexOf('Paris') !== -1 || tz.indexOf('Europe') !== -1) score += 1;
-        var visitRef = document.referrer || '';
-        if (visitRef.indexOf('instagram') !== -1 || visitRef.indexOf('tiktok') !== -1) score += 2;
-        var ref = document.referrer || 'direct';
-        var referralCode = localStorage.getItem(LS_REF) || '';
-        // Lock form completely during claim process
-        emailBtn.disabled = true;
-        if (emailEl) emailEl.disabled = true;
-        // Sauvegarder l'email pour getstatus (tier) et les sessions suivantes
-        localStorage.setItem(LS_EMAIL, claimEmail);
-        // Step 1: fire claim (no callback — Sheet writes fine without JSONP)
-        gsCall({
-          action: 'claim', email: claimEmail,
-          tz: tz, ref: ref, uuid: sessionUUID,
-          score: score, referral: referralCode,
-          localtime: localTime, localdate: localDate
-        }, null);
-
-        // Step 2: after 2.5s poll getcode by email to retrieve assigned code
-        setTimeout(function() {
-          gsCall({ action: 'getcode', email: claimEmail }, function(d) {
-            if (d && d.success && d.code) {
-              generatedCode = d.code;
-              codeFromSheet = true;
-              localStorage.setItem(LS_CODE, generatedCode);
-              localStorage.setItem(LS_STATE, 'revealed');
-              if (d.slots_remaining !== undefined) {
-                savedSlots = d.slots_remaining;
-                localStorage.setItem(LS_SLOTS, savedSlots);
-              }
-              if (verifyFill) verifyFill.style.width = '100%';
-              if (verifyStep) { verifyStep.textContent = 'Access confirmed.'; verifyStep.style.color = 'rgba(255,255,255,0.90)'; }
-              setTimeout(function() { showStep2WithCode(generatedCode); }, 400);
-            } else if (d && d.error === 'no codes remaining') {
-              if (verifyStep) verifyStep.textContent = 'All codes have been claimed.';
-              emailBtn.textContent = 'SOLD OUT';
-            } else {
-              // Retry once after 3 more seconds
-              setTimeout(function() {
-                gsCall({ action: 'getcode', email: claimEmail }, function(d2) {
-                  if (d2 && d2.success && d2.code) {
-                    generatedCode = d2.code;
-                    codeFromSheet = true;
-                    localStorage.setItem(LS_CODE, generatedCode);
-                    localStorage.setItem(LS_STATE, 'revealed');
-                    if (verifyFill) verifyFill.style.width = '100%';
-                    if (verifyStep) { verifyStep.textContent = 'Access confirmed.'; verifyStep.style.color = 'rgba(255,255,255,0.90)'; }
-                    setTimeout(function() { showStep2WithCode(generatedCode); }, 400);
-                  } else {
-                    fallbackLocal();
-                  }
-                });
-              }, 3000);
-            }
-          });
-        }, 2500);
-      } else {
-        // No API configured — local fallback
-        var fbSteps = [{ pct: 1.0, label: 'Access confirmed.' }];
-        setTimeout(function() {
-          if (verifyFill) verifyFill.style.width = '100%';
-          if (verifyStep) { verifyStep.textContent = 'Access confirmed.'; verifyStep.style.color = 'rgba(255,255,255,0.90)'; }
-        }, 1400);
-        setTimeout(showStep2, 1900);
-      }
-    });
-  }
-  if (emailEl) {
-    emailEl.addEventListener('focus', function() { logEvent('email_focus'); }, { once: true });
-    emailEl.addEventListener('blur', function() {
-      var v = emailEl.value.trim();
-      var valid = !v || /^[^@]+@[^@]+\.[^@]+$/.test(v);
-      emailEl.classList.toggle('invalid', !valid && v.length > 0);
-      var err = document.getElementById('promo-email-error');
-      if (err) err.style.opacity = (!valid && v.length > 0) ? '1' : '0';
-    });
-    emailEl.addEventListener('input', function() {
-      emailEl.classList.remove('invalid');
-      var err = document.getElementById('promo-email-error');
-      if (err) err.style.opacity = '0';
-    });
-    emailEl.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter' && emailBtn) emailBtn.click();
-    });
-    emailEl.addEventListener('click', function(e) { e.stopPropagation(); });
-  }
-
-  if (copyBtn) {
-    copyBtn.addEventListener('click', function(e) {
-      e.stopPropagation();
-      if (navigator.clipboard) navigator.clipboard.writeText(generatedCode);
-      // Stop timer — code is claimed
-      if (timer) { clearInterval(timer); timer = null; }
-      codeCopied = true;
-      localStorage.setItem(LS_STATE, 'copied');
-      // Set permanent cookie (valid 365 days)
-      setCookie('orbes_code', generatedCode, 365);
-      logEvent('code_copied');
-      if (generatedCode && codeFromSheet && APPS_SCRIPT_URL !== 'YOUR_APPS_SCRIPT_URL_HERE') {
-        gsCall({ action: 'claim_confirm', code: generatedCode }, null);
-      }
-      // Transition vers step 3
-      var step3 = document.getElementById('promo-step-3');
-      var step2El = document.getElementById('promo-step-2');
-      var confirmCodeEl = document.getElementById('promo-confirm-code');
-      var referralUrlEl = document.getElementById('promo-referral-url');
-      var referralCopyEl = document.getElementById('promo-referral-copy');
-      var refLink = 'https://theorbes.com?ref=' + encodeURIComponent(generatedCode);
-      if (confirmCodeEl) confirmCodeEl.textContent = generatedCode;
-      if (referralUrlEl) referralUrlEl.textContent = refLink;
-      if (referralCopyEl) {
-        referralCopyEl.addEventListener('click', function() {
-          if (navigator.clipboard) navigator.clipboard.writeText(refLink);
-          referralCopyEl.textContent = 'COPIED ❆';
-          setTimeout(function() { referralCopyEl.textContent = 'COPY LINK'; }, 2000);
-        });
-      }
-      if (step2El && step3) {
-        step2El.style.transition = 'opacity 0.35s ease';
-        step2El.style.opacity = '0';
-        setTimeout(function() {
-          step2El.style.display = 'none';
-          step3.style.opacity = '0';
-          step3.style.display = 'block';
-          requestAnimationFrame(function() {
-            step3.style.transition = 'opacity 0.45s ease';
-            step3.style.opacity = '1';
-          });
-        }, 350);
-      }
-    });
-  }
-
+  trigger.addEventListener('click', function (e) { e.stopPropagation(); open(); });
   overlay.addEventListener('click', close);
-  inner.addEventListener('click', function(e) { e.stopPropagation(); });
+  inner.addEventListener('click', function (e) { e.stopPropagation(); });
 
-  // Rec #7 — button appears after 3.5s
+  // ACCESS appears after 3.5 s
   trigger.style.opacity = '0';
   trigger.style.pointerEvents = 'none';
-  setTimeout(function() {
+  setTimeout(function () {
     trigger.style.transition = 'opacity 1.2s ease';
     trigger.style.opacity = '1';
     trigger.style.pointerEvents = 'all';
   }, 3500);
-
 })();
-});
 </script>
 </body>
 </html>
