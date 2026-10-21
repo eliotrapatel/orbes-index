@@ -31,6 +31,7 @@ import { formatMoney, liveStateLabel, newLiveInput, newLiveProblem, newLiveValue
 import {
   CLUB_TABS,
   clubTab,
+  DRAW_ACCESS_HINT,
   DRAW_SIZES_HINT,
   DRAW_SIZES_LEAD,
   drawSizeValues,
@@ -51,7 +52,7 @@ import { sizeMixEmptyLine } from '../model/sizes.js';
 import { toneOf } from '../model/tone.js';
 import { modelChoice } from '../model/variants.js';
 import { href } from '../router.js';
-import { ORDER_CURRENCIES, type Drop, type LiveCard, type LiveSizeMix, type Model } from '../types.js';
+import { ORDER_CURRENCIES, type Drop, type LiveCard, type LiveSizeMix, type Model, type SegmentName } from '../types.js';
 import type { Child } from '../../shared/dom.js';
 import type { AdminApi } from '../api.js';
 import { button, pageHeader, pager, section, statusMark, table } from '../ui/components.js';
@@ -79,8 +80,11 @@ export function drawSizeFields(labels: readonly string[], values: Record<string,
   return labels.map((l) => ({ name: sizeField(l), label: sizeFieldLabel(l), maxlength: 5, value: values[sizeField(l)] ?? '' }));
 }
 
-/** The fields of a drop's dialog: the active models to choose from, its values, its model's sizes (plan NEXT LOT §3.6.F). */
-export function dropFields(models: readonly Model[], values: Record<string, string>, opts: { model: boolean; sizes: readonly string[] }): DialogField[] {
+/**
+ * The fields of a drop's dialog: the active models to choose from, its values, its model's sizes (plan NEXT LOT §3.6.F),
+ * and its Access (plan MACRO M1 §3.2, F4) when the segments are given: everyone, or a segment.
+ */
+export function dropFields(models: readonly Model[], values: Record<string, string>, opts: { model: boolean; sizes: readonly string[]; segments?: readonly SegmentName[] }): DialogField[] {
   return [
     ...(opts.model ? [dropModelField(models, values.modelId ?? '')] : []),
     { name: 'title', label: 'Title', required: true, maxlength: DROP_LIMITS.title, value: values.title, hint: 'As the release’s page names it on /verify.' },
@@ -105,6 +109,18 @@ export function dropFields(models: readonly Model[], values: Record<string, stri
       value: values.earlyAccessPlatineHours,
       hint: 'Before entries open, PALLADIUM owners, then PLATINE owners, reserve a place directly, first come, first served, within the pieces. PALLADIUM’s window is at least PLATINE’s; 0 for none. The draw gives the places left.',
     },
+    ...(opts.segments
+      ? [
+          {
+            name: 'accessSegmentId',
+            label: 'Access',
+            kind: 'select' as const,
+            options: [{ value: '', label: 'Everyone' }, ...opts.segments.map((x) => ({ value: x.id, label: `Segment ${x.name}` }))],
+            value: values.accessSegmentId ?? '',
+            hint: DRAW_ACCESS_HINT,
+          },
+        ]
+      : []),
     // NOCTURNE (addition 5): the price shown on the draw's card and page, which its orders take.
     { name: 'price', label: 'Price', maxlength: 14, value: values.price, hint: 'Per piece, in units: 4200, or 4200.50. Shown on the release’s card and page; each order of the draw takes it. Empty: none (the order’s price is entered by Client Services).' },
     { name: 'currency', label: 'Currency', kind: 'select', options: ORDER_CURRENCIES.map((c) => ({ value: c, label: c })), value: values.currency },
@@ -280,7 +296,8 @@ async function dropsTab(ctx: ViewContext): Promise<HTMLElement> {
   // Plan NEXT LOT §3.6.F: two dialogs, the model first (a draw's sizes are its model's), then its fields.
   const newDrop = async () => {
     // The early access by default: THE PROGRAM's (BP-19 T3), read when the dialog opens.
-    const program = await ctx.api.clubProgram();
+    // Plan MACRO M1 §3.2 (F4): the segments a draw may be opened to, read with it.
+    const [program, segments] = await Promise.all([ctx.api.clubProgram(), ctx.api.segmentNames()]);
     const chosen = await openDialog({
       title: 'New release',
       eyebrow: 'Club · Drops',
@@ -304,7 +321,7 @@ async function dropsTab(ctx: ViewContext): Promise<HTMLElement> {
         ),
         ...drawSizesBody(labels),
       ],
-      fields: dropFields(models.items, { ...dropFormValues(null, ctx.now(), { palladium: program.earlyAccessPalladiumHours, platine: program.earlyAccessPlatineHours }), ...drawSizeValues(labels, null) }, { model: false, sizes: labels }),
+      fields: dropFields(models.items, { ...dropFormValues(null, ctx.now(), { palladium: program.earlyAccessPalladiumHours, platine: program.earlyAccessPlatineHours }), ...drawSizeValues(labels, null) }, { model: false, sizes: labels, segments }),
       live: (v) => (labels.length > 0 ? drawSizesPreview(v, available) : []),
       validate: (v) => dropProblem({ ...v, modelId }),
       confirmLabel: 'Create release',

@@ -59,7 +59,7 @@ import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
 
 const LEAD =
-  'Saved groups of collectors, read live wherever they decide: the access rule of a LIVE RELEASE (its page says FOR SELECTED COLLECTORS, never the name) and the audience of a post of the circle.';
+  'Saved groups of collectors, read live wherever they decide: the access rule of a LIVE RELEASE or a draw (its page says FOR SELECTED COLLECTORS, never the name) and the audience of a post of the circle.';
 
 /** The count is read again this long after the last change of the rules. */
 const COUNT_DELAY_MS = 300;
@@ -593,9 +593,10 @@ function usedSection(s: Segment): HTMLElement {
   return section(
     'Used by',
     none
-      ? h('p', { class: 'notice' }, 'Nothing yet: choose it in a LIVE RELEASE’s access, or as a post’s audience in the circle.')
+      ? h('p', { class: 'notice' }, 'Nothing yet: choose it in a release’s access, a LIVE RELEASE’s or a draw’s, or as a post’s audience in the circle.')
       : defList([
-          ...s.usedBy.releases.map((r) => ({ label: 'Release', value: h('a', { class: 'idlink', attrs: { href: href('liveRelease', { dropId: r.id }) } }, r.title), note: 'Its access rule' })),
+          // Plan MACRO M1 §3.2 (F4): a draw may be opened to a segment too; each release opens its own page.
+          ...s.usedBy.releases.map((r) => ({ label: 'Release', value: h('a', { class: 'idlink', attrs: { href: r.mode === 'DRAW' ? href('drop', { dropId: r.id }) : href('liveRelease', { dropId: r.id }) } }, r.title), note: 'Its access rule' })),
           ...s.usedBy.posts.map((p) => ({ label: 'Circle', value: h('a', { class: 'idlink', attrs: { href: href('circlePost', { postId: p.id }) } }, p.title), note: 'Its audience' })),
         ]),
     { id: 'segment-used' },

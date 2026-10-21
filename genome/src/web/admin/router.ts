@@ -53,6 +53,8 @@ export const ROUTES = [
   { name: 'links', path: '/links' },
   { name: 'linkCollectors', path: '/links/collectors' },
   { name: 'link', path: '/links/:linkId' },
+  /** The Founding list (plan MACRO M1 §3.2, F3, F4): theorbes.com's pre-registrations, under Links in Clients. */
+  { name: 'founding', path: '/founding' },
   /** Warranties: the warranties, and their Claims tab (`?tab=claims`, plan ORBES CARE); a claim's page from its row. */
   { name: 'warranties', path: '/warranties' },
   { name: 'warrantyClaim', path: '/warranty-claims/:claimId' },

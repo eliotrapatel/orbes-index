@@ -17,6 +17,9 @@
  */
 import type {
   CollectorPanel,
+  FoundingEntry,
+  FoundingFilters,
+  FoundingSummary,
   CollectorsList,
   CollectorsOptions,
   CollectorsQuery,
@@ -1295,6 +1298,29 @@ export class AdminApi {
   async segmentCsv(id: string): Promise<Download> {
     const res = await this.request<Response>('GET', `/api/admin/segments/${encodeURIComponent(id)}/members.csv`, { raw: true });
     return toDownload(res, 'orbes-segment.csv');
+  }
+
+  // ── The founding list (plan MACRO M1 §3.2, F3, F4; API §16.40) ─────────────
+
+  /** The people theorbes.com's form added, newest first, filtered (emails masked for an AUDITOR). */
+  founding(q: FoundingFilters & { page?: number; pageSize?: number } = {}): Promise<Paged<FoundingEntry>> {
+    return this.get('/api/admin/founding', { ...q });
+  }
+
+  /** The Founding list's figures: on the list, matched, unsubscribed; by country; by source. */
+  foundingSummary(): Promise<FoundingSummary> {
+    return this.get('/api/admin/founding/summary');
+  }
+
+  /** Every row, in a Shopify customers import's columns (OPERATOR). */
+  async foundingCsv(): Promise<Download> {
+    const res = await this.request<Response>('GET', '/api/admin/founding.csv', { raw: true });
+    return toDownload(res, 'orbes-founding-list.csv');
+  }
+
+  /** Erasure on request (ADMIN): the row deleted, the phrase `REMOVE <8>` typed. */
+  removeFounding(id: string, phrase: string): Promise<void> {
+    return this.post(`/api/admin/founding/${encodeURIComponent(id)}/remove`, { phrase });
   }
 
   orderAlerts(): Promise<OrderAlertSettings> {

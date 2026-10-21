@@ -343,7 +343,7 @@ describe('taking part, and the segments', () => {
       await t.db.updateTable('drops').set({ access_segment_id: s.id }).where('id', '=', releases.later).execute();
       const post = await circle.create({ kind: 'NOTE', title: 'For the buyers', segmentId: s.id }, f.admin);
       const used = await segments.get(s.id);
-      expect(used.usedBy).toEqual({ releases: [{ id: releases.later, title: 'LIVE' }], posts: [{ id: post.id, title: 'For the buyers' }] });
+      expect(used.usedBy).toEqual({ releases: [{ id: releases.later, title: 'LIVE', mode: 'LIVE' }], posts: [{ id: post.id, title: 'For the buyers' }] });
       await rejects(segments.remove(s.id, f.admin), 'SEGMENT_IN_USE', 409);
       await t.db.updateTable('drops').set({ access_segment_id: null }).where('id', '=', releases.later).execute();
       await circle.update(post.id, { segmentId: null }, f.admin);
@@ -936,7 +936,7 @@ describe('the customer intelligence criteria (plan CUSTOMER INTELLIGENCE §3.0 (
       f.clock.advance(SECOND);
       const scored = await segments.update(s.id, { criteria: { match: 'ALL', rules: [{ kind: 'WISHES_MODEL', modelIds: [m.orbit] }, { match: 'ANY', rules: [{ kind: 'SCORE', min: 60, max: 100 }] }] } }, f.admin);
       expect(scored.count).toBe(1);
-      expect(scored.usedBy.releases).toEqual([{ id: r.id, title: expect.any(String) }]);
+      expect(scored.usedBy.releases).toEqual([{ id: r.id, title: expect.any(String), mode: 'LIVE' }]);
       // names() keeps its shape: id and name, no mark for a segment that reads the score.
       expect(await segments.names()).toEqual(before);
       expect(Object.keys((await segments.names()).find((x) => x.id === s.id)!).sort()).toEqual(['id', 'name']);

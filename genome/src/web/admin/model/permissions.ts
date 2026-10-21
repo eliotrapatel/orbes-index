@@ -168,6 +168,12 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   readLinks: 'AUDITOR',
   /** Links: New link, Edit, Archive and Unarchive, the Channels (added, renamed, moved, removed while unused). */
   manageLinks: 'OPERATOR',
+  /** The Founding list (plan MACRO M1 §3.2, F3): its figures and its people, the emails masked for an AUDITOR. */
+  readFounding: 'AUDITOR',
+  /** The Founding list's CSV, in a Shopify customers import's columns (server: OPERATOR). */
+  exportFounding: 'OPERATOR',
+  /** A person removed from the Founding list on request (erasure): ADMIN, with a phrase to type. */
+  removeFounding: 'ADMIN',
   /** The Collectors page (plan CUSTOMER INTELLIGENCE §3.6 C.6.1, C.9): the counted collectors' figures over a period. */
   readCollectors: 'AUDITOR',
   /** The Collectors page's Export (CSV) (§3.6 C.7): one row per collector with everything held, audited. */

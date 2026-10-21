@@ -77,17 +77,19 @@ body {
   display: block;
   /* 24 and 20 px: the room the Segments link of an ADMIN's sidebar needed (plan LIVE RELEASE+), then Growth under
      Overview (plan NEXT-NINE, BP-29), with the foot's and the monogram's; 20 and 14 px for Supplier orders under
-     Registry (plan NEXT LOT §3.5.4.2); 14 and 8 px for Links under Segments (plan CUSTOMER INTELLIGENCE §3.4 A.10). */
-  padding: 14px 32px 8px;
+     Registry (plan NEXT LOT §3.5.4.2); 14 and 8 px for Links under Segments (plan CUSTOMER INTELLIGENCE §3.4 A.10); 10 and
+     6 px for the Founding list under Links (plan MACRO M1 §3.2). */
+  padding: 10px 32px 6px;
   text-decoration: none;
   border-bottom: 1px solid var(--hairline);
 }
 
 /* The monogram over the word, left-aligned with it (brand.css .monogram); 10 px under it since Links (plan CUSTOMER
-   INTELLIGENCE §3.4 A.10), so an ADMIN's sidebar still fits a 900 px screen. */
+   INTELLIGENCE §3.4 A.10), 8 px since the Founding list (plan MACRO M1 §3.2), so an ADMIN's sidebar still fits a 900 px
+   screen. */
 .side__monogram {
   width: 44px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 /* The shared .wordmark spec (brand.css: --track-wordmark), at sidebar size; left-aligned, so no centring indent. */
@@ -96,11 +98,11 @@ body {
   text-indent: 0;
 }
 
-/* 8 px over it (12 before Collectors under Owners, plan CUSTOMER INTELLIGENCE §3.6 C.6.1): an ADMIN's sidebar fits a
-   900 px screen with its foot. */
+/* 6 px over it (12 before Collectors under Owners, plan CUSTOMER INTELLIGENCE §3.6 C.6.1; 8 before the Founding list,
+   plan MACRO M1 §3.2): an ADMIN's sidebar fits a 900 px screen with its foot. */
 .side__product {
   display: block;
-  margin-top: 8px;
+  margin-top: 6px;
   font-size: var(--fs-nano);
   letter-spacing: 0.34em;
   text-transform: uppercase;
@@ -112,13 +114,15 @@ body {
    it). The Club took the 2 px a link gave up: the next link of a group needs room found elsewhere. */
 .side__nav {
   flex: 1;
-  /* 2 px under it (6 before Collectors under Owners, plan CUSTOMER INTELLIGENCE §3.6 C.6.1). */
-  padding: 2px 0 2px;
+  /* 2 px under it (6 before Collectors under Owners, plan CUSTOMER INTELLIGENCE §3.6 C.6.1); none over it since the
+     Founding list (plan MACRO M1 §3.2): the first group's own 5 px. */
+  padding: 0 0 2px;
 }
 
-/* 6 px over each group (8 before Supplier orders, plan NEXT LOT §3.5.4.2): an ADMIN's sidebar fits a 900 px screen with its foot. */
+/* 5 px over each group (8 before Supplier orders, plan NEXT LOT §3.5.4.2; 6 before the Founding list, plan MACRO M1
+   §3.2): an ADMIN's sidebar fits a 900 px screen with its foot. */
 .side__group {
-  padding: 6px 32px 2px;
+  padding: 5px 32px 2px;
 }
 
 .side__group-title {
@@ -195,10 +199,10 @@ body {
   background: var(--ink);
 }
 
-/* 12 px above and 10 under (16 and 18 before Collectors under Owners, plan CUSTOMER INTELLIGENCE §3.6 C.6.1): an
-   ADMIN's sidebar fits a 900 px screen with its foot. */
+/* 10 px above and 8 under (16 and 18 before Collectors under Owners, plan CUSTOMER INTELLIGENCE §3.6 C.6.1; 12 and 10
+   before the Founding list, plan MACRO M1 §3.2): an ADMIN's sidebar fits a 900 px screen with its foot. */
 .side__foot {
-  padding: 12px 32px 10px;
+  padding: 10px 32px 8px;
   border-top: 1px solid var(--hairline);
 }
 
@@ -222,8 +226,8 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 12px 18px;
-  /* 10 px (14 before Collectors under Owners, plan CUSTOMER INTELLIGENCE §3.6 C.6.1). */
-  margin-top: 10px;
+  /* 8 px (14 before Collectors under Owners, plan CUSTOMER INTELLIGENCE §3.6 C.6.1; 10 before the Founding list). */
+  margin-top: 8px;
 }
 
 .side__small,
@@ -6687,5 +6691,35 @@ a.collectors__kpi-link:focus-visible {
   .campaign__preview {
     justify-self: center;
     width: min(270px, 100%);
+  }
+}
+
+/* The Founding list (plan MACRO M1 §3.2): the lead of its segment part, and the channels' heading under the kinds of
+   source, set as the panel's note is. */
+
+.founding__lead {
+  margin: 0 0 14px;
+  max-width: 62ch;
+  color: var(--ink-soft);
+}
+
+/* A long link's name wraps in Sources, so the table keeps its People and Share in view at 1 024 px. */
+.founding__source {
+  white-space: normal;
+}
+
+.founding__sub {
+  margin: 28px 0 10px;
+  font-size: var(--fs-nano);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+/* By country and By source stack under 1 180 px: beside the menu, half the width is narrower than a bar's label, track,
+   count and share (as the Collectors page's lists). */
+@media (max-width: 1180px) {
+  .founding__grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

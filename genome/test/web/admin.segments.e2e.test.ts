@@ -15,6 +15,10 @@
  *     after the four; the engagement score's From and To with its notice, refused first when From is above To; a city
  *     and a tag typed; the model picker's hint; a device's checkboxes, negated; the words, the count; saved, then listed
  *     in a LIVE RELEASE's Segment select like any other (question 15).
+ *  6. The Founding list (plan MACRO M1 §3.2, F3 and F4): from the sidebar's Clients, its KPIs and people (one matched to
+ *     an account), a filter; MAKE THE SEGMENT in one click, then its link, the segment's members; the CSV in clear; a
+ *     draw opened to the segment in its Edit dialog (Access) and listed under the segment's Used by; an AUDITOR reads
+ *     the emails masked with nothing to change; an ADMIN removes a person with the phrase.
  * No CSP violation, no page error, no figure in the display face.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -32,6 +36,7 @@ import { createContext, type AppContext } from '../../src/server/context.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import { SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
+import { giveSizes } from '../support/draws.js';
 import { createAccount, holdPieces } from '../support/live.js';
 import { seedScore } from '../support/scores.js';
 
@@ -379,5 +384,97 @@ describe.skipIf(!HAS_CHROMIUM)('the Segments page and the access rules in the co
     expect(await csp(p)).toEqual([]);
     expect(problems).toEqual([]);
     await p.context().close();
+  }, STEP_TIMEOUT);
+
+  it('reads the Founding list, makes its segment in one click, opens a draw to it; an AUDITOR reads masked; an ADMIN removes on request', async () => {
+    // Two people from theorbes.com: the first collector's email (matched at once), and someone without an account.
+    const stranger = `founding.${Date.now()}@example.com`;
+    await ctx.services.founding.register({ email: members.in, firstName: 'Ada', country: 'FR', consent: true }, SYSTEM_ACTOR);
+    await ctx.services.founding.register({ email: stranger, firstName: 'Grace', country: 'GB', consent: true, referrer: 'https://www.vogue.fr/article' }, SYSTEM_ACTOR);
+    // A draft draw of a model in sizes.
+    const halo = (
+      await ctx.db
+        .insertInto('models')
+        .values({ category_id: (await ctx.categories.getByCode('J'))!.index, name: 'HALO', type: 'RING', sku_prefix: 'HAL-RG', default_material: '925 STERLING SILVER' })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    ).id;
+    await giveSizes(ctx.db, halo, ['52', '54']);
+    const opensAt = new Date(Date.now() + 48 * HOUR);
+    const draw = await ctx.services.drops.create({ modelId: halo, title: 'HALO — draw', sizes: [{ label: '52', pieces: 2 }], opensAt, closesAt: new Date(opensAt.getTime() + 24 * HOUR), earlyAccessHours: 0, earlyAccessPlatineHours: 0 }, admin);
+
+    const p = await open(OPERATOR);
+    const clients = p.locator('.side__group', { hasText: 'Clients' }).locator('.side__link');
+    expect(await clients.evaluateAll((links) => links.map((x) => x.getAttribute('data-route')))).toEqual(expect.arrayContaining(['links', 'founding']));
+    await p.locator('.side__link', { hasText: 'Founding list' }).click();
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Founding list');
+    const kpis = await p.locator('[data-testid=founding-kpis] .kpi__value').allTextContents();
+    expect(kpis.map((x) => x.trim())).toEqual(['2', '1', '0', '2']);
+    expect(await p.locator('[data-testid=founding-email]').allTextContents()).toEqual([stranger, members.in]);
+    expect(await text(p, '#founding-sources')).toContain('vogue.fr');
+    expect(await p.locator('[data-testid=founding-account]').count()).toBe(1);
+    expect(await p.locator('[data-testid=founding-remove]').count()).toBe(0);
+    await p.selectOption('[data-testid=founding-filter-matched]', 'yes');
+    await expect.poll(async () => p.locator('[data-testid=founding-email]').allTextContents(), POLL).toEqual([members.in]);
+    expect(p.url()).toContain('matched=yes');
+    // The segment: none yet, then one click.
+    expect(await text(p, '[data-testid=founding-segment-none]')).toBe('None yet.');
+    await p.click('[data-testid=founding-make-segment]');
+    await expect.poll(() => text(p, '[data-testid=founding-segment]'), POLL).toBe('Founding list');
+    expect(await p.locator('[data-testid=founding-make-segment]').count()).toBe(0);
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'founding');
+    const [download] = await Promise.all([p.waitForEvent('download'), p.click('[data-testid=founding-csv]')]);
+    expect(download.suggestedFilename()).toMatch(/^orbes-founding-list-\d{4}-\d{2}-\d{2}\.csv$/);
+    const csv = readFileSync((await download.path())!, 'utf8');
+    expect(csv.split('\n')[0]).toContain('First Name');
+    expect(csv).toContain(stranger);
+    await p.click('[data-testid=founding-segment]');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Founding list');
+    expect(await text(p, '[data-testid=segment-words]')).toBe('ALL OF on the founding list');
+    await expect.poll(() => text(p, '[data-testid=segment-count]'), POLL).toBe('1 COLLECTOR');
+    const foundingSegment = p.url().split('/segments/')[1]!.split('?')[0]!;
+
+    // A draw's Access, in its Edit dialog until the publication.
+    await go(p, `#/club/drops/${draw.id}`, 'HALO — draw');
+    expect(await text(p, '[data-testid=drop-access]')).toBe('Everyone');
+    await p.click('[data-testid=drop-edit]');
+    await p.click('[data-testid=dialog-confirm]');
+    await p.waitForSelector('dialog [name=accessSegmentId]');
+    expect(await p.locator('dialog [name=accessSegmentId] option').allTextContents()).toEqual(['Everyone', 'Segment Engaged in Lyon', 'Segment Founding list', 'Segment Size 58']);
+    await p.selectOption('dialog [name=accessSegmentId]', { label: 'Segment Founding list' });
+    await confirmDialog(p);
+    await expect.poll(() => text(p, '[data-testid=drop-access]'), POLL).toBe('Segment Founding list');
+    expect(await p.locator('[data-testid=drop-access]').getAttribute('href')).toBe(`#/segments/${foundingSegment}`);
+    await shot(p, 'draw-access');
+    await go(p, `#/segments/${foundingSegment}`, 'Founding list');
+    expect(await p.locator('#segment-used a', { hasText: 'HALO — draw' }).getAttribute('href')).toBe(`#/club/drops/${draw.id}`);
+    expect(await csp(p)).toEqual([]);
+    await p.context().close();
+
+    // An AUDITOR: the emails masked, no CSV, no Remove, the segment's link.
+    const a = await open(AUDITOR);
+    await go(a, '#/founding', 'Founding list');
+    const masked = await a.locator('[data-testid=founding-email]').allTextContents();
+    expect(masked).not.toContain(members.in);
+    expect(masked).toContain(`${members.in[0]}***@${members.in.split('@')[1]}`);
+    expect(await a.locator('[data-testid=founding-csv]').count()).toBe(0);
+    expect(await a.locator('[data-testid=founding-remove]').count()).toBe(0);
+    expect(await text(a, '[data-testid=founding-segment]')).toBe('Founding list');
+    expect(await csp(a)).toEqual([]);
+    await a.context().close();
+
+    // An ADMIN removes the stranger on request, with the phrase.
+    const r = await open(ADMIN);
+    await go(r, '#/founding?matched=no', 'Founding list');
+    await r.click('[data-testid=founding-remove]');
+    const row = await ctx.db.selectFrom('preregistrations').select('id').where('account_id', 'is', null).executeTakeFirstOrThrow();
+    await r.fill('dialog [name=__phrase]', `REMOVE ${row.id.slice(0, 8).toUpperCase()}`);
+    await confirmDialog(r);
+    await expect.poll(() => text(r, '#founding-people'), POLL).toContain('Nobody on the list matches these filters.');
+    expect(await ctx.db.selectFrom('preregistrations').select('id').execute()).toHaveLength(1);
+    expect(await csp(r)).toEqual([]);
+    expect(problems).toEqual([]);
+    await r.context().close();
   }, STEP_TIMEOUT);
 });

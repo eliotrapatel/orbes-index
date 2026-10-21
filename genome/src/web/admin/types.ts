@@ -411,7 +411,8 @@ export interface Segment {
   name: string;
   criteria: SegmentGroup;
   count: number;
-  usedBy: { releases: { id: string; title: string }[]; posts: { id: string; title: string }[] };
+  /** The releases whose access rule it is (a LIVE RELEASE or, plan MACRO M1 §3.2, a draw), the posts whose audience. */
+  usedBy: { releases: { id: string; title: string; mode: DropMode }[]; posts: { id: string; title: string }[] };
   createdAt: Iso;
   createdBy: { id: string; email: string } | null;
   updatedAt: Iso;
@@ -1549,6 +1550,45 @@ export interface OriginSource {
   linkId: string | null;
 }
 
+/**
+ * A person of the founding list (plan MACRO M1 §3.2, F3; GET /api/admin/founding, services/founding.ts FoundingEntry):
+ * the email masked for an AUDITOR, where they came from, the ORBES account once matched, and the unsubscribe.
+ */
+export interface FoundingEntry {
+  id: string;
+  email: string;
+  firstName: string;
+  country: string;
+  source: OriginSource;
+  joinedAt: Iso;
+  consentAt: Iso;
+  consentVersion: string;
+  /** The ORBES account with the same address, once matched (its client sheet). */
+  accountId: string | null;
+  matchedAt: Iso | null;
+  unsubscribedAt: Iso | null;
+}
+
+/** The filters of GET /api/admin/founding. */
+export interface FoundingFilters {
+  matched?: boolean;
+  unsubscribed?: boolean;
+  country?: string;
+  sourceKind?: SourceKind;
+}
+
+/** The Founding list's figures (GET /api/admin/founding/summary): the KPIs, by country, by source. */
+export interface FoundingSummary {
+  total: number;
+  matched: number;
+  unsubscribed: number;
+  countries: { country: string; name: string; count: number }[];
+  kinds: { kind: SourceKind; count: number }[];
+  channels: { name: string | null; count: number }[];
+  /** The sources one by one, the most joined first (50 at most). */
+  sources: (OriginSource & { count: number })[];
+}
+
 /** The Origin block (§3.4 A.10.5): the first visit, the sign-up's last link, the latest purchase's. */
 export interface OwnerOrigin {
   firstVisit: { at: Iso | null; source: OriginSource };
@@ -1879,6 +1919,8 @@ export interface DropInput {
   /** NOCTURNE (addition 5): its price in minor units with its currency, together; null for both: none. */
   priceMinor?: number | null;
   currency?: OrderCurrency | null;
+  /** Plan MACRO M1 §3.2 (F4): the segment the draw is opened to, a DRAFT's only; null: everyone. */
+  accessSegmentId?: string | null;
 }
 
 export type DropChange = Partial<DropInput>;

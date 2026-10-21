@@ -35,6 +35,9 @@
  *  - Test entrants (plan TEST ENTRANTS, views/test-entrants.ts): SEND TEST
  *    ENTRANTS while the draw is open (ADMIN), the test not ended, PAST TESTS;
  *    on the right, the server's status (views/server-status.ts).
+ *  - Its Access (plan MACRO M1 §3.2, F4): everyone, or a segment's members
+ *    alone (the page says FOR SELECTED COLLECTORS), chosen in Edit until the
+ *    publication; its row links to the segment.
  *  - Two tabs under its header (plan MACRO M1 §2.2): RELEASE, all of the
  *    above, and CAMPAIGN (`?tab=campaign`, views/campaign.ts): its links made
  *    in one click, its countdown image, its readout.
@@ -50,6 +53,7 @@ import {
   dropPhrase,
   dropProblem,
   dropWindow,
+  drawAccessText,
   drawOutcomeText,
   drawPriceText,
   drawSizesChange,
@@ -118,12 +122,13 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
     });
     if (!chosen) return;
     const modelId = chosen.modelId;
-    const { labels, available } = await drawSizesOfModel(ctx.api, modelId);
+    // Plan MACRO M1 §3.2 (F4): its Access, everyone or a segment, among the fields until the publication.
+    const [{ labels, available }, segments] = await Promise.all([drawSizesOfModel(ctx.api, modelId), ctx.api.segmentNames()]);
     await openDialog({
       title: 'Edit the release',
       eyebrow,
       body: [h('p', { class: 'dialog__text' }, 'A draft changes freely. Once published, only its description does.'), ...drawSizesBody(labels)],
-      fields: dropFields(models.items, { ...dropFormValues(d, ctx.now()), ...drawSizeValues(labels, modelId === d.model.id ? d : null) }, { model: false, sizes: labels }),
+      fields: dropFields(models.items, { ...dropFormValues(d, ctx.now()), ...drawSizeValues(labels, modelId === d.model.id ? d : null) }, { model: false, sizes: labels, segments }),
       live: (v) => (labels.length > 0 ? drawSizesPreview(v, available) : []),
       validate: (v) => dropProblem({ ...v, modelId }) ?? (Object.keys(dropChange(d, { ...v, modelId })).length === 0 ? 'Nothing has changed.' : null),
       confirmLabel: 'Save release',
@@ -268,6 +273,14 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
       note: d.earlyAccessOpensAt ? 'PLATINE and PALLADIUM owners reserve a place directly until entries open, first come, first served.' : undefined,
     },
     ...(d.earlyAccessOpensAt || d.reserved > 0 ? [{ label: 'Reserved directly', value: h('span', { data: { testid: 'drop-reserved' } }, `${formatCount(d.reserved)} of ${formatCount(d.quantity)}`), note: 'Places held or sold by a direct reservation: the draw gives the others.' }] : []),
+    // Plan MACRO M1 §3.2 (F4): who it is for, everyone or a segment's members (the page says FOR SELECTED COLLECTORS).
+    {
+      label: 'Access',
+      value: d.accessSegment
+        ? h('a', { class: 'idlink', attrs: { href: href('segment', { segmentId: d.accessSegment.id }), 'data-testid': 'drop-access' } }, drawAccessText(d))
+        : h('span', { data: { testid: 'drop-access' } }, drawAccessText(d)),
+      note: d.accessSegment ? 'Its members alone enter and reserve. Said FOR SELECTED COLLECTORS, never its name.' : undefined,
+    },
     // IN-01: the places the house guarantees, apart from those reserved directly.
     ...(d.guaranteed.places > 0 ? [{ label: 'Guaranteed', value: h('span', { data: { testid: 'drop-guaranteed' } }, guaranteedText(d.guaranteed)), note: 'Selected first at the draw, listed apart on the public page.' }] : []),
     { label: 'Entries open', value: formatDateTime(d.opensAt) },

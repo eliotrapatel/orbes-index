@@ -211,14 +211,14 @@ describe('the builder', () => {
     expect(ruleWords({ kind: 'ACTIVE', days: 1 }, OPTIONS)).toBe('active in the last 1 day');
     expect(ruleWords({ kind: 'TIER', tiers: [0] }, OPTIONS)).toBe('tier NO TIER');
     expect([membersLine(0), membersLine(1), membersLine(1240)]).toEqual(['0 COLLECTORS', '1 COLLECTOR', `${formatCount(1240)} COLLECTORS`]);
-    const used = { usedBy: { releases: [{ id: 'r', title: 'R' }], posts: [{ id: 'p', title: 'P' }, { id: 'q', title: 'Q' }] } };
+    const used = { usedBy: { releases: [{ id: 'r', title: 'R', mode: 'LIVE' as const }], posts: [{ id: 'p', title: 'P' }, { id: 'q', title: 'Q' }] } };
     expect(usedByLine(used)).toBe('1 release · 2 posts of the circle');
     expect(usedByLine({ usedBy: { releases: [], posts: [] } })).toBeNull();
   });
 
   it('lets an OPERATOR build, change and delete a segment nothing uses; an AUDITOR reads', () => {
     const free = { usedBy: { releases: [], posts: [] } };
-    const used = { usedBy: { releases: [{ id: 'r', title: 'R' }], posts: [] } };
+    const used = { usedBy: { releases: [{ id: 'r', title: 'R', mode: 'LIVE' as const }], posts: [] } };
     expect(segmentActions(free, 'AUDITOR')).toEqual({ edit: false, remove: false });
     expect(segmentActions(free, 'OPERATOR')).toEqual({ edit: true, remove: true });
     expect(segmentActions(used, 'ADMIN')).toEqual({ edit: true, remove: false });

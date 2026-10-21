@@ -115,6 +115,8 @@ export function dropFormValues(d: Drop | null, now: Date, early: EarlyAccessDefa
       earlyAccessPlatineHours: String(d.earlyAccessPlatineHours),
       price: d.priceMinor === null ? '' : moneyField(d.priceMinor),
       currency: d.currency ?? 'EUR',
+      // Plan MACRO M1 §3.2 (F4): the segment it is opened to; empty: everyone.
+      accessSegmentId: d.accessSegment?.id ?? '',
     };
   }
   const opens = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 10));
@@ -130,6 +132,7 @@ export function dropFormValues(d: Drop | null, now: Date, early: EarlyAccessDefa
     earlyAccessPlatineHours: String(Math.min(early.platine, early.palladium)),
     price: '',
     currency: 'EUR',
+    accessSegmentId: '',
   };
 }
 
@@ -189,6 +192,8 @@ export function dropInput(v: Record<string, string>): DropInput {
     earlyAccessPlatineHours: Number(v.earlyAccessPlatineHours),
     // NOCTURNE (addition 5): the price with its currency, or neither.
     ...((v.price ?? '').trim() === '' ? { priceMinor: null, currency: null } : { priceMinor: parseMoney(v.price)!, currency: v.currency as OrderCurrency }),
+    // Plan MACRO M1 §3.2 (F4): opened to a segment's members alone; sent only when one is chosen (none: everyone).
+    ...(v.accessSegmentId ? { accessSegmentId: v.accessSegmentId } : {}),
   };
 }
 
@@ -210,8 +215,19 @@ export function dropChange(d: Drop, v: Record<string, string>): DropChange {
     out.priceMinor = next.priceMinor ?? null;
     out.currency = next.currency ?? null;
   }
+  // Plan MACRO M1 §3.2 (F4): the segment, when the dialog shows it and it changed (null: everyone again).
+  if (v.accessSegmentId !== undefined && (v.accessSegmentId || null) !== (d.accessSegment?.id ?? null)) out.accessSegmentId = v.accessSegmentId || null;
   return out;
 }
+
+/** Plan MACRO M1 §3.2 (F4): who a draw is for, as the console reads it: Everyone, or its segment's name. */
+export function drawAccessText(d: Pick<Drop, 'accessSegment'>): string {
+  return d.accessSegment ? `Segment ${d.accessSegment.name}` : 'Everyone';
+}
+
+/** The Access field's hint in a draw's dialog (as a LIVE RELEASE's Segment). */
+export const DRAW_ACCESS_HINT =
+  'Everyone, or a segment’s members alone: they enter, reserve during the early access and change size, read at each step. The page says FOR SELECTED COLLECTORS, never its name. Fixed once published.';
 
 // ── A draw's sizes (plan NEXT LOT §3.6.F) ─────────────────────────────────
 

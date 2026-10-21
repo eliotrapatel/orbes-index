@@ -72,6 +72,7 @@ import {
   type Database,
   type DeviceKind,
   type DeviceSystem,
+  type DropMode,
   type InApp,
   type JsonObject,
   type OpenedIn,
@@ -602,8 +603,8 @@ export interface AdminSegment {
   criteria: SegmentGroup;
   /** Its members now, the test accounts left out. */
   count: number;
-  /** The releases whose access rule it is, the posts of the circle whose audience it is. */
-  usedBy: { releases: { id: string; title: string }[]; posts: { id: string; title: string }[] };
+  /** The releases whose access rule it is (a LIVE RELEASE, or a draw: plan MACRO M1 §3.1, F4), the posts of the circle whose audience it is. */
+  usedBy: { releases: { id: string; title: string; mode: DropMode }[]; posts: { id: string; title: string }[] };
   createdAt: Date;
   createdBy: { id: string; email: string } | null;
   updatedAt: Date;
@@ -989,7 +990,7 @@ export class SegmentService {
 
   private async usedBy(db: Db, sid: string): Promise<AdminSegment['usedBy']> {
     const [releases, posts] = await Promise.all([
-      db.selectFrom('drops').select(['id', 'title']).where('access_segment_id', '=', sid).orderBy('opens_at', 'desc').orderBy('id').execute(),
+      db.selectFrom('drops').select(['id', 'title', 'mode']).where('access_segment_id', '=', sid).orderBy('opens_at', 'desc').orderBy('id').execute(),
       db.selectFrom('circle_posts').select(['id', 'title']).where('segment_id', '=', sid).orderBy('created_at', 'desc').orderBy('id').execute(),
     ]);
     return { releases, posts };

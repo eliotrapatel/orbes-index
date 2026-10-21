@@ -547,8 +547,8 @@ export const DESTINATION_LABELS: Readonly<Record<LinkDestination, string>> = Obj
   LANDING: 'theorbes.com (founding list)',
 });
 
-/** The order of the Goes to select (LANDING, migration 0050, is offered with the founding list's console, step M1.12). */
-export const DESTINATION_ORDER: readonly LinkDestination[] = Object.freeze(['NOW', 'RELEASES', 'RELEASE', 'COLLECTION', 'MODEL', 'CLUB', 'HOW'] as const satisfies readonly LinkDestination[]);
+/** The order of the Goes to select: the app's pages, then theorbes.com's founding list (LANDING, plan MACRO M1 §3.2, F3). */
+export const DESTINATION_ORDER: readonly LinkDestination[] = Object.freeze(['NOW', 'RELEASES', 'RELEASE', 'COLLECTION', 'MODEL', 'CLUB', 'HOW', 'LANDING'] as const satisfies readonly LinkDestination[]);
 
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 

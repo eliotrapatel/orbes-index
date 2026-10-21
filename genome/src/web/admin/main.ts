@@ -76,6 +76,7 @@ import { messagesView } from './views/messages.js';
 import { orderView } from './views/order.js';
 import { ordersView } from './views/orders.js';
 import { invoicesView } from './views/invoices.js';
+import { foundingView } from './views/founding.js';
 import { segmentsView, segmentView } from './views/segments.js';
 import { supplierOrderView } from './views/supplier-order.js';
 import { supplierOrdersView } from './views/supplier-orders.js';
@@ -149,6 +150,8 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { route: 'segments', label: 'Segments' },
       // Plan CUSTOMER INTELLIGENCE §3.4 A.10: Links under Segments.
       { route: 'links', label: 'Links', cap: 'readLinks' },
+      // Plan MACRO M1 §3.2: the Founding list under Links.
+      { route: 'founding', label: 'Founding list', cap: 'readFounding' },
       { route: 'orders', label: 'Orders' },
       { route: 'invoices', label: 'Invoices' },
       { route: 'warranties', label: 'Warranties' },
@@ -221,6 +224,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   links: { view: linksView, title: 'Links', nav: 'links' },
   link: { view: linkView, title: 'Link', nav: 'links' },
   linkCollectors: { view: linkCollectorsView, title: 'Collectors', nav: 'links' },
+  founding: { view: foundingView, title: 'Founding list', nav: 'founding' },
   logistics: { view: logisticsView, title: 'Logistics', nav: 'logistics' },
   logisticsOrder: { view: shippingView, title: 'Parcel', nav: 'logistics' },
   logisticsSlip: { view: shippingSlipView, title: 'Packing slip', nav: 'logistics' },
