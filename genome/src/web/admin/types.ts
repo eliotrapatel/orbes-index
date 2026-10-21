@@ -327,6 +327,21 @@ export type LiveResolution = (typeof LIVE_RESOLUTIONS)[number];
 export const LIVE_PACE_BATCH = Object.freeze({ min: 1, max: 5000 } as const);
 export const LIVE_PACE_MINUTES = Object.freeze({ min: 1, max: 60 } as const);
 
+/** The emails (email_templates.kind, migration 0051, macro scope E0; lot M1 plan §4.2), each with its own switch, off by default. */
+export const EMAIL_KINDS = [
+  'FOUNDING_ANNOUNCEMENT', 'RELEASE_NOTICE', 'PASSWORD_RESET', 'ORDER_CONFIRMED', 'ORDER_SHIPPED', 'ORDER_DELIVERED', 'ORDER_CANCELLED', 'DRAW_SELECTED',
+  'DRAW_OFFERED', 'WARRANTY_LABEL', 'CARE_LABEL',
+] as const;
+export type EmailKind = (typeof EMAIL_KINDS)[number];
+
+/** An email in the outbox (email_outbox.status, migration 0051). */
+export const EMAIL_STATUSES = ['QUEUED', 'SENT', 'FAILED', 'CANCELLED'] as const;
+export type EmailStatus = (typeof EMAIL_STATUSES)[number];
+
+/** A template's subject and body, at most, in characters (migration 0051). */
+export const EMAIL_TEMPLATE_SUBJECT_MAX = 150;
+export const EMAIL_TEMPLATE_BODY_MAX = 5000;
+
 /** How the access rules of a LIVE RELEASE combine (drops.access_combine): every rule met, or any one of them. */
 export const ACCESS_COMBINES = ['AND', 'OR'] as const;
 export type AccessCombine = (typeof ACCESS_COMBINES)[number];

@@ -1245,6 +1245,89 @@ describe('schema', () => {
     ).rejects.toSatisfy((e) => isUniqueViolation(e, 'audit_logs_prev_hash_key'));
   });
 
+  it('the emails (0051): the kinds, the statuses, the ways a recovery code is issued and every bound are schema.ts\'s; the mirror at work: a template off with the default words, then edited; an email queued then sent; a collector\'s release notices; the state row; a code sent by email by no one', async () => {
+    const def = async (table: string, constraint: string) =>
+      (await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = ${table}::regclass AND conname = ${constraint}`.execute(t.db)).rows[0].def;
+    const literals = async (table: string, constraint: string) => [...(await def(table, constraint)).matchAll(/'([A-Z_]+)'::text/g)].map((m) => m[1]);
+    expect(await literals('email_templates', 'email_templates_kind_check')).toEqual([...S.EMAIL_KINDS]);
+    expect(await literals('email_outbox', 'email_outbox_kind_check')).toEqual([...S.EMAIL_KINDS]);
+    expect(await literals('email_outbox', 'email_outbox_status_check')).toEqual([...S.EMAIL_STATUSES]);
+    expect(await literals('account_recovery_codes', 'account_recovery_codes_issued_via_check')).toEqual([...S.RECOVERY_ISSUED_VIA]);
+    const max = async (table: string, constraint: string, column: string) => {
+      const d = await def(table, constraint);
+      return Number(new RegExp(`char_length\\(${column}\\) <= (\\d+)\\)`).exec(d)?.[1] ?? NaN);
+    };
+    expect(await max('email_templates', 'email_templates_subject_check', 'subject')).toBe(S.EMAIL_TEMPLATE_SUBJECT_MAX);
+    expect(await max('email_templates', 'email_templates_body_check', 'body')).toBe(S.EMAIL_TEMPLATE_BODY_MAX);
+    expect(await max('email_outbox', 'email_outbox_subject_check', 'subject')).toBe(S.EMAIL_SUBJECT_MAX);
+    expect(await max('email_outbox', 'email_outbox_dedupe_key_check', 'dedupe_key')).toBe(S.EMAIL_DEDUPE_MAX);
+    expect(await max('email_outbox', 'email_outbox_last_error_check', 'last_error')).toBe(S.EMAIL_ERROR_MAX);
+
+    const admin = await t.db.insertInto('admin_users').values({ email: 'emails-s0051@orbes.test', email_normalized: 'emails-s0051@orbes.test', password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow();
+    const account = await t.db.insertInto('accounts').values({ email: 'lea-s0051@example.com', email_normalized: 'lea-s0051@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+
+    // A template: off, with the default words, until the console edits it.
+    const template = await t.db.insertInto('email_templates').values({ kind: 'ORDER_SHIPPED', updated_by: admin.id }).returningAll().executeTakeFirstOrThrow();
+    expect(template).toEqual({ kind: 'ORDER_SHIPPED', enabled: false, subject: null, body: null, updated_by: admin.id, updated_at: expect.any(Date) });
+    const edited = await t.db
+      .updateTable('email_templates')
+      .set({ enabled: true, subject: 'Your order {orderRef} is on its way', body: 'Follow it: {trackingUrl}', updated_at: new Date('2026-10-21T09:00:00Z') })
+      .where('kind', '=', 'ORDER_SHIPPED')
+      .returning(['enabled', 'subject', 'body'])
+      .executeTakeFirstOrThrow();
+    expect(edited).toEqual({ enabled: true, subject: 'Your order {orderRef} is on its way', body: 'Follow it: {trackingUrl}' });
+
+    // An email, queued then sent.
+    const notBefore = new Date('2026-10-21T09:00:00Z');
+    const email = await t.db
+      .insertInto('email_outbox')
+      .values({
+        kind: 'ORDER_SHIPPED', dedupe_key: 'E4:SHIPPED:s0051', account_id: account.id, to_address: 'lea-s0051@example.com', subject: 'Your order is on its way', body_text: 'Your order is on its way.',
+        body_html: '<p>Your order is on its way.</p>', not_before: notBefore,
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(email).toEqual({
+      id: expect.any(String), kind: 'ORDER_SHIPPED', dedupe_key: 'E4:SHIPPED:s0051', account_id: account.id, preregistration_id: null, to_address: 'lea-s0051@example.com', subject: 'Your order is on its way',
+      body_text: 'Your order is on its way.', body_html: '<p>Your order is on its way.</p>', not_before: notBefore, status: 'QUEUED', attempts: 0, last_error: null, created_at: expect.any(Date), sent_at: null,
+      settled_at: null,
+    });
+    const at = new Date('2026-10-21T09:00:05Z');
+    const sent = await t.db
+      .updateTable('email_outbox')
+      .set({ status: 'SENT', attempts: 1, sent_at: at, settled_at: at })
+      .where('id', '=', email.id)
+      .returning(['status', 'attempts', 'sent_at', 'settled_at'])
+      .executeTakeFirstOrThrow();
+    expect(sent).toEqual({ status: 'SENT', attempts: 1, sent_at: at, settled_at: at });
+    await expect(t.db.updateTable('email_outbox').set({ subject: 'Other' }).where('id', '=', email.id).execute()).rejects.toSatisfy(isGuardViolation);
+    await expect(t.db.updateTable('email_outbox').set({ status: 'FAILED', last_error: '550 mailbox unavailable' }).where('id', '=', email.id).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'email_outbox_sent'));
+
+    // A collector's release notices: off until asked for.
+    const preferences = await t.db.insertInto('email_preferences').values({ account_id: account.id }).returningAll().executeTakeFirstOrThrow();
+    expect(preferences).toEqual({ account_id: account.id, release_notices: false, changed_at: expect.any(Date) });
+
+    // The state row: id 1.
+    const until = new Date('2026-10-21T08:00:00Z');
+    expect(await t.db.insertInto('email_state').values({ releases_until: until }).returningAll().executeTakeFirstOrThrow()).toEqual({ id: 1, releases_until: until });
+    await expect(t.db.insertInto('email_state').values({ id: 2, releases_until: until }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'email_state_id_check'));
+
+    // A code by Client Services (STAFF by default, its ADMIN), then one sent by email, by no one.
+    const expiresAt = new Date(Date.now() + 30 * 60_000);
+    const staff = await t.db
+      .insertInto('account_recovery_codes')
+      .values({ account_id: account.id, code_hash: 'scrypt$x', created_by: admin.id, expires_at: expiresAt, used_at: new Date() })
+      .returning(['issued_via', 'created_by'])
+      .executeTakeFirstOrThrow();
+    expect(staff).toEqual({ issued_via: 'STAFF', created_by: admin.id });
+    const emailed = await t.db
+      .insertInto('account_recovery_codes')
+      .values({ account_id: account.id, code_hash: 'scrypt$x', issued_via: 'EMAIL', expires_at: expiresAt })
+      .returning(['issued_via', 'created_by'])
+      .executeTakeFirstOrThrow();
+    expect(emailed).toEqual({ issued_via: 'EMAIL', created_by: null });
+  });
+
   it('product_status_history is append-only; genomes and keys are never deleted (key ids never reused)', async () => {
     const { product } = await seedProduct(t.db);
     const h = await t.db

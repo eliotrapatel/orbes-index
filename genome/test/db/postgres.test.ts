@@ -301,4 +301,41 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await expect(db.insertInto('preregistrations').values({ ...prereg, email: 'LEA-PG@EXAMPLE.COM' }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'preregistrations_email_normalized_key'));
     await expect(db.updateTable('preregistrations').set({ email_normalized: 'other-pg@example.com' }).where('id', '=', row.id).execute()).rejects.toSatisfy(isGuardViolation);
   });
+
+  it('holds a recovery code sent by email by its CHECKs (0051: issued_via, account_recovery_codes_issued_by), with the previous image\'s staff insert STAFF by DEFAULT, and the outbox, the templates and the preferences by theirs, with the same JS types as PGlite', async () => {
+    const admin = await db.insertInto('admin_users').values({ email: 'emails-pg0051@orbes.test', email_normalized: 'emails-pg0051@orbes.test', password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow();
+    const account = await db.insertInto('accounts').values({ email: 'lea-pg0051@example.com', email_normalized: 'lea-pg0051@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const expiresAt = new Date(Date.now() + 30 * 60_000);
+    // Issued as the previous image issues it: its ADMIN, no issued_via.
+    const staff = await sql<{ issued_via: string; created_by: string | null }>`
+      INSERT INTO account_recovery_codes (account_id, code_hash, created_by, expires_at, used_at) VALUES (${account.id}, 'scrypt$x', ${admin.id}, ${expiresAt}, now()) RETURNING issued_via, created_by`.execute(db);
+    expect(staff.rows[0]).toEqual({ issued_via: 'STAFF', created_by: admin.id });
+    const code = (v: Record<string, unknown>) => db.insertInto('account_recovery_codes').values({ account_id: account.id, code_hash: 'scrypt$x', expires_at: expiresAt, ...v }).execute();
+    await expect(code({})).rejects.toSatisfy((e) => isCheckViolation(e, 'account_recovery_codes_issued_by'));
+    await expect(code({ issued_via: 'EMAIL', created_by: admin.id })).rejects.toSatisfy((e) => isCheckViolation(e, 'account_recovery_codes_issued_by'));
+    await expect(sql`INSERT INTO account_recovery_codes (account_id, code_hash, expires_at, issued_via) VALUES (${account.id}, 'scrypt$x', ${expiresAt}, 'SMS')`.execute(db)).rejects.toSatisfy((e) =>
+      isCheckViolation(e, 'account_recovery_codes_issued_via_check'),
+    );
+    const emailed = await db.insertInto('account_recovery_codes').values({ account_id: account.id, code_hash: 'scrypt$x', expires_at: expiresAt, issued_via: 'EMAIL' }).returning(['issued_via', 'created_by']).executeTakeFirstOrThrow();
+    expect(emailed).toEqual({ issued_via: 'EMAIL', created_by: null });
+
+    // A template off with the default words; an email queued, its words guarded, then sent; release notices off.
+    expect(await db.insertInto('email_templates').values({ kind: 'PASSWORD_RESET', updated_by: admin.id }).returning(['enabled', 'subject', 'body']).executeTakeFirstOrThrow()).toEqual({ enabled: false, subject: null, body: null });
+    await expect(db.insertInto('email_templates').values({ kind: 'ORDER_SHIPPED', updated_by: admin.id, subject: 'On its way\r\nBcc: x@example.com' }).execute()).rejects.toSatisfy((e) =>
+      isCheckViolation(e, 'email_templates_subject_check'),
+    );
+    const email = {
+      kind: 'PASSWORD_RESET' as const, dedupe_key: 'E3:pg0051', account_id: account.id, to_address: 'lea-pg0051@example.com', subject: 'Your password', body_text: 'Your link.', body_html: '<p>Your link.</p>',
+    };
+    await expect(db.insertInto('email_outbox').values({ ...email, settled_at: new Date() }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'email_outbox_settled'));
+    const row = await db.insertInto('email_outbox').values(email).returning(['id', 'status', 'attempts', 'not_before', 'sent_at']).executeTakeFirstOrThrow();
+    expect(row).toEqual({ id: expect.any(String), status: 'QUEUED', attempts: 0, not_before: expect.any(Date), sent_at: null });
+    await expect(db.insertInto('email_outbox').values(email).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'email_outbox_dedupe_key'));
+    await expect(db.updateTable('email_outbox').set({ to_address: 'other-pg0051@example.com' }).where('id', '=', row.id).execute()).rejects.toSatisfy(isGuardViolation);
+    const at = new Date('2026-10-21T09:00:00Z');
+    expect(await db.updateTable('email_outbox').set({ status: 'SENT', attempts: 1, sent_at: at, settled_at: at }).where('id', '=', row.id).returning(['status', 'attempts', 'sent_at']).executeTakeFirstOrThrow()).toEqual({
+      status: 'SENT', attempts: 1, sent_at: at,
+    });
+    expect(await db.insertInto('email_preferences').values({ account_id: account.id }).returning(['release_notices']).executeTakeFirstOrThrow()).toEqual({ release_notices: false });
+  });
 });

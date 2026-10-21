@@ -645,6 +645,34 @@ export const LIVE_PACE_MINUTES = Object.freeze({ min: 1, max: 60 } as const);
 /** A pre-registration's first name, in characters (preregistrations.first_name, migration 0050, F2): 1 to 80. */
 export const FOUNDING_FIRST_NAME_MAX = 80;
 
+/**
+ * The emails (email_templates.kind, email_outbox.kind, migration 0051, macro scope E0; lot M1 plan §4.2), each with its
+ * own switch, off by default: E1 the founding announcement, E2 the new release notice (opt-in), E3 the password reset,
+ * E4 the platform order's confirmation (PAID), shipping and delivery, and E5's five: the order cancelled, a draw's place
+ * drawn, a place offered from the waiting list, a warranty claim's label and a PRIVATE CARE label. House messages (E6)
+ * stay in the app: no kind.
+ */
+export const EMAIL_KINDS = [
+  'FOUNDING_ANNOUNCEMENT', 'RELEASE_NOTICE', 'PASSWORD_RESET', 'ORDER_CONFIRMED', 'ORDER_SHIPPED', 'ORDER_DELIVERED', 'ORDER_CANCELLED', 'DRAW_SELECTED',
+  'DRAW_OFFERED', 'WARRANTY_LABEL', 'CARE_LABEL',
+] as const;
+export type EmailKind = (typeof EMAIL_KINDS)[number];
+
+/** An email in the outbox (email_outbox.status, migration 0051): to send, sent, given up after its retries, or cancelled. */
+export const EMAIL_STATUSES = ['QUEUED', 'SENT', 'FAILED', 'CANCELLED'] as const;
+export type EmailStatus = (typeof EMAIL_STATUSES)[number];
+
+/** How a recovery code was issued (account_recovery_codes.issued_via, migration 0051, E3): by Client Services, or by email. */
+export const RECOVERY_ISSUED_VIA = ['STAFF', 'EMAIL'] as const;
+export type RecoveryIssuedVia = (typeof RECOVERY_ISSUED_VIA)[number];
+
+/** An email's words, in characters (migration 0051): a template's subject and body, an outbox row's subject, key and last error. */
+export const EMAIL_TEMPLATE_SUBJECT_MAX = 150;
+export const EMAIL_TEMPLATE_BODY_MAX = 5000;
+export const EMAIL_SUBJECT_MAX = 300;
+export const EMAIL_DEDUPE_MAX = 200;
+export const EMAIL_ERROR_MAX = 300;
+
 // ── Column helpers ─────────────────────────────────────────────────────────
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -879,13 +907,15 @@ export interface AccountsTable {
 
 /**
  * A one-time recovery code issued by an ADMIN of ORBES Client Services (migration 0005): scrypt hash only,
- * 30 minutes, used once; one open (neither used nor revoked) per account.
+ * 30 minutes, used once; one open (neither used nor revoked) per account. From migration 0051 (E3) a code may also be
+ * sent by email at the collector's request: `issued_via` EMAIL, by no one (`created_by` NULL exactly then).
  */
 export interface AccountRecoveryCodesTable {
   id: Generated<string>;
   account_id: string;
   code_hash: string;                   // scrypt$15$8$1$<salt>$<hash> of the canonical 12-character code
-  created_by: string;                  // admin_users.id
+  created_by: ColumnType<string | null, string | null | undefined, string | null>; // admin_users.id; NULL exactly when sent by email
+  issued_via: WithDefault<RecoveryIssuedVia>; // STAFF (DEFAULT) or EMAIL
   created_at: TimestampDefault;
   expires_at: Timestamp;
   used_at: TimestampNullable;
@@ -2081,6 +2111,58 @@ export interface PreregistrationsTable {
 }
 
 /**
+ * The console's wording and switch of one email kind (migration 0051, E0): no row is the default (off, the default
+ * words); `subject` or `body` NULL is that part's default words. Written by the console only.
+ */
+export interface EmailTemplatesTable {
+  kind: EmailKind;
+  enabled: WithDefault<boolean>;       // DEFAULT false
+  subject: ColumnType<string | null, string | null | undefined, string | null>; // 1..150 characters, trimmed, one line
+  body: ColumnType<string | null, string | null | undefined, string | null>;    // 1..5 000 characters
+  updated_by: string;                  // admin_users.id
+  updated_at: TimestampDefault;
+}
+
+/**
+ * One email (migration 0051, E0), written in the transaction of the act that causes it, once per `dedupe_key`, rendered
+ * at enqueue; its kind, key, recipient, address, subject, words and creation never change
+ * (`email_outbox_immutable_content`). For an account or a pre-registration, at most one (neither: the console's test).
+ * `sent_at` exactly when SENT; `settled_at` exactly when no longer QUEUED (the 90 days of the purge count from it); a
+ * FAILED row has its `last_error`, never the credentials.
+ */
+export interface EmailOutboxTable {
+  id: Generated<string>;
+  kind: EmailKind;
+  dedupe_key: string;                  // 1..200 characters, unique
+  account_id: ColumnType<string | null, string | null | undefined, string | null>;
+  preregistration_id: ColumnType<string | null, string | null | undefined, string | null>;
+  to_address: string;                  // ≤ 254 characters, trimmed
+  subject: string;                     // 1..300 characters, trimmed, one line
+  body_text: string;
+  body_html: string;
+  not_before: TimestampDefault;
+  status: WithDefault<EmailStatus>;    // DEFAULT QUEUED
+  attempts: WithDefault<number>;       // smallint ≥ 0
+  last_error: ColumnType<string | null, string | null | undefined, string | null>; // ≤ 300 characters
+  created_at: TimestampDefault;
+  sent_at: TimestampNullable;
+  settled_at: TimestampNullable;
+}
+
+/** A collector's email choices (migration 0051, E2): the new release notices, opt-in (DEFAULT false). */
+export interface EmailPreferencesTable {
+  account_id: string;
+  release_notices: WithDefault<boolean>;
+  changed_at: TimestampDefault;
+}
+
+/** One row (id 1, migration 0051, E2): the release notices' watermark. Written by the sender, never by the migration. */
+export interface EmailStateTable {
+  id: WithDefault<number>;             // smallint, always 1
+  releases_until: Timestamp;
+}
+
+/**
  * One row (id 1, migration 0043, plan CUSTOMER INTELLIGENCE §3.4 A.6 item 9): the recording's start (« Before tracking »
  * before it) and the job's watermarks. Inserted by AcquisitionService.prepare at the first boot, never by the migration.
  */
@@ -3030,6 +3112,10 @@ export interface Database {
   acquisition_daily: AcquisitionDailyTable;
   acquisition_state: AcquisitionStateTable;
   preregistrations: PreregistrationsTable;
+  email_templates: EmailTemplatesTable;
+  email_outbox: EmailOutboxTable;
+  email_preferences: EmailPreferencesTable;
+  email_state: EmailStateTable;
   account_notes: AccountNotesTable;
   account_tags: AccountTagsTable;
   account_scores: AccountScoresTable;
