@@ -575,10 +575,12 @@ async function messageEditor(ctx: ViewContext, params: HouseParams, acts: HouseA
 
   const draft = () => ({ title: title.value, body: body.value });
   const saved = () => ({ title: m?.title ?? '', body: m?.body ?? '' });
+  // A new message starts from the default audience (PLATINE and above): opening one and leaving it untouched is no change.
+  const savedAudience = m ? (m.audience.segmentId ? { segmentId: m.audience.segmentId } : m.audience.tier ? { tier: m.audience.tier } : null) : audienceOf(audienceDraftOf(null));
   const changed = () => {
     const d = draft();
     const s = saved();
-    return d.title.trim() !== s.title || d.body.replace(/\r\n?/g, '\n').trim() !== s.body || !sameAudience(audienceOf(audienceDraft), m ? (m.audience.segmentId ? { segmentId: m.audience.segmentId } : m.audience.tier ? { tier: m.audience.tier } : null) : null);
+    return d.title.trim() !== s.title || d.body.replace(/\r\n?/g, '\n').trim() !== s.body || !sameAudience(audienceOf(audienceDraft), savedAudience);
   };
   const problems = () => {
     const d = draft();

@@ -282,6 +282,12 @@ describe.skipIf(!HAS_CHROMIUM)('the Messages board in the console (E2E, Chromium
     await expect.poll(() => p.locator('#house-messages .empty__text').textContent(), POLL).toBe('No message yet.');
     await p.locator('#house-messages a', { hasText: 'New message' }).click();
     await p.waitForSelector('[data-testid=house-title]');
+    // Opened and left untouched, it closes without asking.
+    await p.locator('#house-message-editor a', { hasText: 'Close' }).click();
+    await expect.poll(() => p.locator('[data-testid=house-title]').count(), POLL).toBe(0);
+    expect(await p.locator('dialog.dialog').count()).toBe(0);
+    await p.locator('#house-messages a', { hasText: 'New message' }).click();
+    await p.waitForSelector('[data-testid=house-title]');
     await p.fill('[data-testid=house-title]', 'THE WINTER PIECES');
     await p.fill('[data-testid=house-body]', 'Dear {firstName},\n\nThe winter pieces are in THE COLLECTION.');
     await p.selectOption('[data-testid=house-audience]', 'tier:2');
