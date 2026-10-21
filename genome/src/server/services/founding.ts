@@ -42,6 +42,7 @@ import type { AcquisitionService, ArrivalTags } from './acquisition.js';
 import { sourceWords } from './acquisition-reads.js';
 import type { AuditService } from './audit.js';
 import { normalizeEmail } from './auth.js';
+import { CANCELLED_WORDS } from './email.js';
 import { matchPreregistration } from './founding-match.js';
 import { parisDateTime } from './schedule.js';
 
@@ -171,6 +172,28 @@ export interface FoundingServiceDeps {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const entryNotFound = () => notFound('Pre-registration', 'PREREGISTRATION_NOT_FOUND');
+
+/**
+ * A pre-registration unsubscribed, in `tx` (FoundingService.unsubscribe; the founding announcement's link, lot M1 step
+ * M1.17): `unsubscribed_at` set once, the row kept; its founding announcements still QUEUED cancelled. True when this
+ * call set it; false when it was set already or the row no longer exists. Audited `founding.unsubscribe` when it sets it.
+ */
+export async function unsubscribePreregistration(tx: Db, audit: AuditService, id: string, actor: Actor, now: Date): Promise<boolean> {
+  if (typeof id !== 'string' || !UUID_RE.test(id)) return false;
+  const r = await tx.updateTable('preregistrations').set({ unsubscribed_at: now }).where('id', '=', id.toLowerCase()).where('unsubscribed_at', 'is', null).returning('id').executeTakeFirst();
+  if (!r) return false;
+  const cancelled = await tx
+    .updateTable('email_outbox')
+    .set({ status: 'CANCELLED', settled_at: now, last_error: CANCELLED_WORDS.unsubscribed })
+    .where('preregistration_id', '=', r.id)
+    .where('status', '=', 'QUEUED')
+    .executeTakeFirst();
+  await audit.record(
+    { actor, action: 'founding.unsubscribe', targetType: 'preregistration', targetId: r.id, details: { preregistrationId: r.id, emailsCancelled: Number(cancelled.numUpdatedRows ?? 0) } },
+    tx,
+  );
+  return true;
+}
 
 /** The phrase Remove asks for: `REMOVE 1A2B3C4D` (the row's id, its first 8 characters). */
 export function removePhrase(id: string): string {
@@ -366,6 +389,9 @@ export class FoundingService {
     await inTransaction(this.db, async (tx) => {
       const row = await tx.selectFrom('preregistrations').select(['id', 'account_id']).where('id', '=', rowId).forUpdate().executeTakeFirst();
       if (!row) throw entryNotFound();
+      // Its emails go with it (lot M1 step M1.17): the founding announcements written to it, sent or not (the outbox's
+      // foreign key is RESTRICT, as every other).
+      await tx.deleteFrom('email_outbox').where('preregistration_id', '=', rowId).execute();
       await tx.deleteFrom('preregistrations').where('id', '=', rowId).execute();
       await this.audit.record(
         { actor, action: 'founding.remove', targetType: 'preregistration', targetId: rowId, details: { preregistrationId: rowId, matched: row.account_id !== null } },
@@ -380,14 +406,7 @@ export class FoundingService {
    * same. Audited `founding.unsubscribe` when it sets it.
    */
   async unsubscribe(id: string, actor: Actor): Promise<boolean> {
-    if (typeof id !== 'string' || !UUID_RE.test(id)) return false;
-    return inTransaction(this.db, async (tx) => {
-      const now = this.clock();
-      const r = await tx.updateTable('preregistrations').set({ unsubscribed_at: now }).where('id', '=', id.toLowerCase()).where('unsubscribed_at', 'is', null).returning('id').executeTakeFirst();
-      if (!r) return false;
-      await this.audit.record({ actor, action: 'founding.unsubscribe', targetType: 'preregistration', targetId: r.id, details: { preregistrationId: r.id } }, tx);
-      return true;
-    });
+    return inTransaction(this.db, (tx) => unsubscribePreregistration(tx, this.audit, id, actor, this.clock()));
   }
 
   // ── internals ────────────────────────────────────────────────────────────

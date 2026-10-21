@@ -301,7 +301,8 @@ describe('FoundingService (plan MACRO M1 §3.1, F2 to F5)', () => {
     expect(lines[0]).toBe('First Name,Last Name,Email,Accepts Email Marketing,Default Address Country Code,Tags,Note');
     expect(lines).toHaveLength(page.total + 1);
     expect(lines.some((l) => /,no,FR,founding-list,/.test(l))).toBe(true);
-    expect(lines[1]).toMatch(/^Léa,,[^,]+@example\.com,(yes|no),FR,founding-list,Joined 2026-10-21 10:00 Paris · consent 2026-10-15 · Direct$/i);
+    // A row of the first registrations (several share the harness's first instant, so their order among them is the ids').
+    expect(lines.slice(1).some((l) => /^Léa,,[^,]+@example\.com,(yes|no),FR,founding-list,Joined 2026-10-21 10:00 Paris · consent 2026-10-15 · Direct$/i.test(l))).toBe(true);
     // Removal: ADMIN only.
     const any = page.items[0] as unknown as { id: string };
     expect((await operator.post(`/api/admin/founding/${any.id}/remove`, { phrase: removePhrase(any.id) })).statusCode).toBe(403);

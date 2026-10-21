@@ -27,21 +27,33 @@
  *               instance computes it again. The page (/verify/unsubscribe) and the one-click address (RFC 8058, the
  *               `List-Unsubscribe` header) carry it; their routes are lot M1 step M1.17's.
  *
- * The account's email data through its life (its export, its lock, the cancel at send time for an account no longer
- * ACTIVE), the triggers and the routes are step M1.17's; the console's Emails page M1.18's.
+ *   cancel      at send time (lot M1 step M1.17), a row is CANCELLED instead of sent when its person no longer wants it
+ *               or can no longer have it: its account is not ACTIVE (locked, or any later deletion path), a release
+ *               notice's account stopped them, a founding announcement's pre-registration unsubscribed. OwnerService.lock
+ *               cancels the account's QUEUED rows in its own transaction (cancelAccountEmails), the unsubscribe the
+ *               person's QUEUED rows of that kind.
+ *   scans       the sender's pass first runs the scans registered (addScan): the release notices' watermark (E2,
+ *               services/email-triggers.ts), only while the channel is on.
+ *   console     the kinds' switches (ADMIN, audited `email.kind.enable` / `.disable`) and words (OPERATOR, audited
+ *               `email.template.update`), the outbox read back (its counts, its rows, one row as it was sent), and a
+ *               test to oneself (ADMIN, only while the channel is on, audited `email.test`), for routes/admin/email.ts.
+ *
+ * The triggers (E1 to E5) and the account's email data (its export, its lock) are services/email-triggers.ts's and
+ * services/owners.ts's; the console's Emails page is lot M1 step M1.18's.
  */
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import { sql, type Selectable } from 'kysely';
 import { fromBase64Url, utf8 } from '../../core/bytes.js';
 import type { AppConfig } from '../config.js';
 import { deriveSubkey } from '../crypto/secretbox.js';
 import { inTransaction, type Db } from '../db/connection.js';
-import { EMAIL_DEDUPE_MAX, EMAIL_ERROR_MAX, EMAIL_KINDS, type EmailKind, type EmailOutboxTable } from '../db/schema.js';
-import { validationError } from '../errors.js';
+import { EMAIL_DEDUPE_MAX, EMAIL_ERROR_MAX, EMAIL_KINDS, EMAIL_TEMPLATE_BODY_MAX, EMAIL_TEMPLATE_SUBJECT_MAX, type EmailKind, type EmailOutboxTable, type EmailStatus } from '../db/schema.js';
+import { conflict, forbidden, notFound, validationError } from '../errors.js';
+import type { AuditService } from './audit.js';
 import { EMAIL_DEFAULTS, EMAIL_SAMPLE_VALUES, OPT_IN_KINDS, type EmailWords } from '../email/copy.js';
 import { renderEmail, type EmailValues, type RenderedEmail } from '../email/render.js';
 import { buildMessage, isMailAddress, SmtpError, sendSmtp, type SmtpEnvelope, type SmtpOptions } from '../email/smtp.js';
-import { noopLogger, systemClock, type Clock, type Logger } from '../types.js';
-import type { Selectable } from 'kysely';
+import { makePage, noopLogger, pageOffset, systemClock, type Actor, type Clock, type Logger, type Page, type PageRequest } from '../types.js';
 
 /** The sender's rhythm: a pass every 15 s, 50 emails at most a pass, the retries' delays, a claim's lease. */
 export const EMAIL_SENDER = Object.freeze({
@@ -78,6 +90,8 @@ export type EmailTransport = (envelope: SmtpEnvelope) => Promise<void>;
 
 export interface EmailServiceDeps {
   db: Db;
+  /** The console's changes are audited (the kinds' switches and words, a test to oneself). */
+  audit?: AuditService;
   config: Pick<AppConfig, 'email' | 'publicOrigin'>;
   /** The unsubscribe links' key (deriveEmailUnsubscribeKey). */
   unsubscribeKey: Uint8Array;
@@ -120,12 +134,69 @@ export interface SendReport {
   sent: number;
   retried: number;
   failed: number;
+  /** Not sent: its person no longer wants it or can no longer have it (see cancelReason). */
+  cancelled: number;
 }
+
+/** An outbox row as the console reads it: never its words (outboxEmail gives one email as it was sent). */
+export interface OutboxEntry {
+  id: string;
+  kind: EmailKind;
+  to: string;
+  subject: string;
+  status: EmailStatus;
+  attempts: number;
+  lastError: string | null;
+  notBefore: Date;
+  createdAt: Date;
+  sentAt: Date | null;
+  settledAt: Date | null;
+  /** Whom it is for: an account, a pre-registration, or neither (a test the console sent to itself). */
+  accountId: string | null;
+  preregistrationId: string | null;
+}
+
+/** The outbox's rows by status, and the last errors. */
+export interface OutboxCounts {
+  queued: number;
+  sent: number;
+  failed: number;
+  cancelled: number;
+  /** The 5 latest rows that failed or are being tried again, newest first. */
+  lastErrors: { id: string; kind: EmailKind; status: EmailStatus; lastError: string; at: Date }[];
+}
+
+/**
+ * The QUEUED rows of an account cancelled (OwnerService.lock, in its transaction): CANCELLED, settled now, with the
+ * reason in `last_error`. The number cancelled; rows already sent, failed or cancelled are left as they are.
+ */
+export async function cancelAccountEmails(tx: Db, accountId: string, now: Date, reason = CANCELLED_WORDS.notActive): Promise<number> {
+  const r = await tx
+    .updateTable('email_outbox')
+    .set({ status: 'CANCELLED', settled_at: now, last_error: reason })
+    .where('account_id', '=', accountId)
+    .where('status', '=', 'QUEUED')
+    .executeTakeFirst();
+  return Number(r.numUpdatedRows ?? 0);
+}
+
+/** Why a row was cancelled (its `last_error`, as the console shows it). */
+export const CANCELLED_WORDS = Object.freeze({
+  notActive: 'Cancelled: the account is not active.',
+  releaseNotices: 'Cancelled: release notices were stopped.',
+  unsubscribed: 'Cancelled: unsubscribed from the founding list.',
+  announcement: 'Cancelled: the scheduled announcement was cancelled.',
+});
+
+/** A scan the sender runs first in each pass while the channel is on (the release notices' watermark, E2). */
+export type EmailScan = () => Promise<void>;
 
 type OutboxRow = Selectable<EmailOutboxTable>;
 
 export class EmailService {
   private readonly db: Db;
+  private readonly audit: AuditService | null;
+  private readonly scans: EmailScan[] = [];
   private readonly config: EmailServiceDeps['config'];
   private readonly key: Uint8Array;
   private readonly clock: Clock;
@@ -139,6 +210,7 @@ export class EmailService {
 
   constructor(deps: EmailServiceDeps) {
     this.db = deps.db;
+    this.audit = deps.audit ?? null;
     this.config = deps.config;
     this.key = deps.unsubscribeKey;
     this.clock = deps.clock ?? systemClock;
@@ -194,6 +266,7 @@ export class EmailService {
 
   /** An email as it would be sent (the console's preview): the words given, or the kind's, with example values. */
   async preview(kind: EmailKind, words?: Partial<EmailWords>): Promise<RenderedEmail> {
+    knownKind(kind);
     const current = (await this.kind(kind)).words;
     const sampleId = '00000000-0000-4000-8000-000000000000';
     return renderEmail({
@@ -212,45 +285,70 @@ export class EmailService {
    * from `notBefore`. Writes nothing while the channel or the kind is off, or when its key was used.
    */
   async enqueue(db: Db, input: EnqueueInput): Promise<EnqueueResult> {
-    const key = input.dedupeKey;
-    if (typeof key !== 'string' || key.length < 1 || key.length > EMAIL_DEDUPE_MAX || key !== key.trim() || /[\p{Cc}]/u.test(key)) {
-      throw validationError('An email’s key is one line of 1 to 200 characters.');
-    }
-    if (input.accountId && input.preregistrationId) throw validationError('An email is for an account or a pre-registration, not both.');
-    const subjectId = this.subjectOf(input.kind, input.accountId ?? null, input.preregistrationId ?? null);
-    if (!this.on) return { queued: false, reason: 'OFF' };
-    return inTransaction(db, async (tx) => {
-      const kind = await this.kind(input.kind, tx);
-      if (!kind.enabled) return { queued: false, reason: 'KIND_OFF' } as const;
-      const to = input.to.trim();
-      if (!isMailAddress(to)) return { queued: false, reason: 'ADDRESS' } as const;
-      const unsubscribe = subjectId === null ? null : this.unsubscribeLinks(input.kind, subjectId).page;
-      const rendered = renderEmail({
-        kind: input.kind,
-        words: kind.words,
-        values: { ...input.values, unsubscribeLink: unsubscribe },
-        origin: this.config.publicOrigin,
-        unsubscribeUrl: unsubscribe,
-      });
-      const row = await tx
-        .insertInto('email_outbox')
-        .values({
-          kind: input.kind,
-          dedupe_key: key,
-          account_id: input.accountId ?? null,
-          preregistration_id: input.preregistrationId ?? null,
-          to_address: to,
-          subject: rendered.subject,
-          body_text: rendered.text,
-          body_html: rendered.html,
-          not_before: input.notBefore ?? this.clock(),
-          created_at: this.clock(),
-        })
-        .onConflict((oc) => oc.column('dedupe_key').doNothing())
-        .returning('id')
-        .executeTakeFirst();
-      return row ? ({ queued: true, id: row.id } as const) : ({ queued: false, reason: 'DUPLICATE' } as const);
+    return (await this.enqueueMany(db, [input]))[0]!;
+  }
+
+  /**
+   * Several emails at once (a draw's places, the founding announcement), in `db`'s transaction: each kind's switch and
+   * words read once. One result per input, in their order.
+   */
+  async enqueueMany(db: Db, inputs: readonly EnqueueInput[]): Promise<EnqueueResult[]> {
+    const checked = inputs.map((input) => {
+      const key = input.dedupeKey;
+      if (typeof key !== 'string' || key.length < 1 || key.length > EMAIL_DEDUPE_MAX || key !== key.trim() || /[\p{Cc}]/u.test(key)) {
+        throw validationError('An email’s key is one line of 1 to 200 characters.');
+      }
+      if (input.accountId && input.preregistrationId) throw validationError('An email is for an account or a pre-registration, not both.');
+      return { input, subjectId: this.subjectOf(input.kind, input.accountId ?? null, input.preregistrationId ?? null) };
     });
+    if (!this.on) return inputs.map(() => ({ queued: false, reason: 'OFF' }) as const);
+    if (inputs.length === 0) return [];
+    return inTransaction(db, async (tx) => {
+      const kinds = new Map<EmailKind, EmailKindWords>();
+      const out: EnqueueResult[] = [];
+      for (const { input, subjectId } of checked) {
+        let kind = kinds.get(input.kind);
+        if (!kind) {
+          kind = await this.kind(input.kind, tx);
+          kinds.set(input.kind, kind);
+        }
+        out.push(await this.write(tx, input, subjectId, kind));
+      }
+      return out;
+    });
+  }
+
+  /** One email rendered and written, unless its kind is off, its address cannot be carried or its key was used. */
+  private async write(tx: Db, input: EnqueueInput, subjectId: string | null, kind: EmailKindWords): Promise<EnqueueResult> {
+    if (!kind.enabled) return { queued: false, reason: 'KIND_OFF' };
+    const to = input.to.trim();
+    if (!isMailAddress(to)) return { queued: false, reason: 'ADDRESS' };
+    const unsubscribe = subjectId === null ? null : this.unsubscribeLinks(input.kind, subjectId).page;
+    const rendered = renderEmail({
+      kind: input.kind,
+      words: kind.words,
+      values: { ...input.values, unsubscribeLink: unsubscribe },
+      origin: this.config.publicOrigin,
+      unsubscribeUrl: unsubscribe,
+    });
+    const row = await tx
+      .insertInto('email_outbox')
+      .values({
+        kind: input.kind,
+        dedupe_key: input.dedupeKey,
+        account_id: input.accountId ?? null,
+        preregistration_id: input.preregistrationId ?? null,
+        to_address: to,
+        subject: rendered.subject,
+        body_text: rendered.text,
+        body_html: rendered.html,
+        not_before: input.notBefore ?? this.clock(),
+        created_at: this.clock(),
+      })
+      .onConflict((oc) => oc.column('dedupe_key').doNothing())
+      .returning('id')
+      .executeTakeFirst();
+    return row ? { queued: true, id: row.id } : { queued: false, reason: 'DUPLICATE' };
   }
 
   /** The id an email one may stop is keyed by (its unsubscribe link): the pre-registration's (E1), the account's (E2). */
@@ -273,8 +371,15 @@ export class EmailService {
 
   /** A pass, and whether more may be due at once (a full batch, or rows given back). */
   private async pass(): Promise<{ report: SendReport; more: boolean }> {
-    const report: SendReport = { sent: 0, retried: 0, failed: 0 };
+    const report: SendReport = { sent: 0, retried: 0, failed: 0, cancelled: 0 };
     if (!this.on || this.transport === null || this.stopping) return { report, more: false };
+    for (const scan of this.scans) {
+      try {
+        await scan();
+      } catch (e) {
+        this.log.error({ err: { message: (e as Error)?.message } }, 'emails: a scan before the sender’s pass failed');
+      }
+    }
     const rows = await this.claim();
     const claimedAt = this.clock().getTime();
     for (const [i, row] of rows.entries()) {
@@ -337,9 +442,47 @@ export class EmailService {
     return rows.sort((a, b) => a.created_at.getTime() - b.created_at.getTime() || a.id.localeCompare(b.id));
   }
 
+  /** A scan the sender runs first in each of its passes, while the channel is on (context.ts: the release notices). */
+  addScan(scan: EmailScan): void {
+    this.scans.push(scan);
+  }
+
+  /**
+   * Why a claimed row must not go now, or null: its account is no longer ACTIVE (locked, or deleted by any later path),
+   * a release notice's account stopped them, a founding announcement's pre-registration unsubscribed.
+   */
+  private async cancelReason(row: OutboxRow): Promise<string | null> {
+    if (row.account_id !== null) {
+      const a = await this.db
+        .selectFrom('accounts as a')
+        .leftJoin('email_preferences as p', 'p.account_id', 'a.id')
+        .select(['a.status', 'p.release_notices'])
+        .where('a.id', '=', row.account_id)
+        .executeTakeFirst();
+      if (!a || a.status !== 'ACTIVE') return CANCELLED_WORDS.notActive;
+      if (row.kind === 'RELEASE_NOTICE' && a.release_notices !== true) return CANCELLED_WORDS.releaseNotices;
+    }
+    if (row.preregistration_id !== null) {
+      const p = await this.db.selectFrom('preregistrations').select('unsubscribed_at').where('id', '=', row.preregistration_id).executeTakeFirst();
+      if (!p || p.unsubscribed_at !== null) return CANCELLED_WORDS.unsubscribed;
+    }
+    return null;
+  }
+
   private async sendOne(row: OutboxRow): Promise<keyof SendReport> {
     const email = this.config.email;
     if (email.transport !== 'smtp' || this.transport === null) return 'retried';
+    const reason = await this.cancelReason(row);
+    if (reason !== null) {
+      await this.db
+        .updateTable('email_outbox')
+        .set({ status: 'CANCELLED', settled_at: this.clock(), last_error: reason })
+        .where('id', '=', row.id)
+        .where('status', '=', 'QUEUED')
+        .execute();
+      this.log.info({ kind: row.kind, id: row.id }, 'email cancelled');
+      return 'cancelled';
+    }
     const subjectId = OPT_IN_KINDS.has(row.kind) ? (row.kind === 'FOUNDING_ANNOUNCEMENT' ? row.preregistration_id : row.account_id) : null;
     try {
       const data = buildMessage({
@@ -436,6 +579,123 @@ export class EmailService {
     this.schedule(full ? 0 : EMAIL_SENDER.intervalMs);
   }
 
+  // ── The console ──────────────────────────────────────────────────────────
+
+  /** A kind switched on or off (ADMIN). Audited `email.kind.enable` / `email.kind.disable`; nothing when unchanged. */
+  async setEnabled(kind: EmailKind, enabled: boolean, actor: Actor): Promise<EmailKindWords> {
+    const by = adminOf(actor);
+    const k = knownKind(kind);
+    return inTransaction(this.db, async (tx) => {
+      const before = await this.kind(k, tx);
+      if (before.enabled === enabled) return before;
+      await tx
+        .insertInto('email_templates')
+        .values({ kind: k, enabled, updated_by: by, updated_at: this.clock() })
+        .onConflict((oc) => oc.column('kind').doUpdateSet({ enabled, updated_by: by, updated_at: this.clock() }))
+        .execute();
+      await this.audit?.record({ actor, action: enabled ? 'email.kind.enable' : 'email.kind.disable', targetType: 'email_kind', targetId: k, details: { kind: k } }, tx);
+      return this.kind(k, tx);
+    });
+  }
+
+  /**
+   * A kind's words (OPERATOR): a subject (one line, 1 to 150 characters) and a body (1 to 5,000 characters), each null
+   * for the default words; a part left out is kept. Audited `email.template.update` with which parts changed.
+   */
+  async setWords(kind: EmailKind, input: { subject?: string | null; body?: string | null }, actor: Actor): Promise<EmailKindWords> {
+    const by = adminOf(actor);
+    const k = knownKind(kind);
+    const subject = input.subject === undefined ? undefined : input.subject === null ? null : cleanSubject(input.subject);
+    const body = input.body === undefined ? undefined : input.body === null ? null : cleanBody(input.body);
+    return inTransaction(this.db, async (tx) => {
+      const row = await tx.selectFrom('email_templates').select(['subject', 'body']).where('kind', '=', k).forUpdate().executeTakeFirst();
+      const next = { subject: subject === undefined ? row?.subject ?? null : subject, body: body === undefined ? row?.body ?? null : body };
+      const changed = { subject: next.subject !== (row?.subject ?? null), body: next.body !== (row?.body ?? null) };
+      if (!changed.subject && !changed.body) return this.kind(k, tx);
+      await tx
+        .insertInto('email_templates')
+        .values({ kind: k, subject: next.subject, body: next.body, updated_by: by, updated_at: this.clock() })
+        .onConflict((oc) => oc.column('kind').doUpdateSet({ subject: next.subject, body: next.body, updated_by: by, updated_at: this.clock() }))
+        .execute();
+      await this.audit?.record(
+        { actor, action: 'email.template.update', targetType: 'email_kind', targetId: k, details: { kind: k, subject: changed.subject, body: changed.body, defaults: { subject: next.subject === null, body: next.body === null } } },
+        tx,
+      );
+      return this.kind(k, tx);
+    });
+  }
+
+  /** The outbox's rows by status and its last errors. */
+  async outboxCounts(): Promise<OutboxCounts> {
+    const rows = await this.db.selectFrom('email_outbox').select(['status', (eb) => eb.fn.countAll<number>().as('n')]).groupBy('status').execute();
+    const n = (status: EmailStatus) => Number(rows.find((r) => r.status === status)?.n ?? 0);
+    const errors = await this.db
+      .selectFrom('email_outbox')
+      .select(['id', 'kind', 'status', 'last_error', 'settled_at', 'created_at'])
+      .where('last_error', 'is not', null)
+      .where('status', 'in', ['QUEUED', 'FAILED'])
+      .orderBy(sql`coalesce(settled_at, created_at)`, 'desc')
+      .orderBy('id', 'desc')
+      .limit(5)
+      .execute();
+    return {
+      queued: n('QUEUED'),
+      sent: n('SENT'),
+      failed: n('FAILED'),
+      cancelled: n('CANCELLED'),
+      lastErrors: errors.map((e) => ({ id: e.id, kind: e.kind, status: e.status, lastError: e.last_error!, at: e.settled_at ?? e.created_at })),
+    };
+  }
+
+  /** The outbox, newest first, filtered by status and kind; never the words (outboxEmail). */
+  async outbox(filter: { status?: EmailStatus; kind?: EmailKind }, page: PageRequest): Promise<Page<OutboxEntry>> {
+    const scoped = this.db
+      .selectFrom('email_outbox')
+      .$if(filter.status !== undefined, (q) => q.where('status', '=', filter.status!))
+      .$if(filter.kind !== undefined, (q) => q.where('kind', '=', filter.kind!));
+    const total = await scoped.select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
+    const rows = await scoped
+      .select(['id', 'kind', 'to_address', 'subject', 'status', 'attempts', 'last_error', 'not_before', 'created_at', 'sent_at', 'settled_at', 'account_id', 'preregistration_id'])
+      .orderBy('created_at', 'desc')
+      .orderBy('id', 'desc')
+      .limit(page.pageSize)
+      .offset(pageOffset(page))
+      .execute();
+    return makePage(rows.map(outboxEntry), Number(total.n), page);
+  }
+
+  /** One email as it was sent (or will be): its row and its words, text and HTML. 404 EMAIL_NOT_FOUND. */
+  async outboxEmail(id: string): Promise<OutboxEntry & { text: string; html: string }> {
+    if (typeof id !== 'string' || !UUID.test(id.toLowerCase())) throw emailNotFound();
+    const r = await this.db.selectFrom('email_outbox').selectAll().where('id', '=', id.toLowerCase()).executeTakeFirst();
+    if (!r) throw emailNotFound();
+    return { ...outboxEntry(r), text: r.body_text, html: r.body_html };
+  }
+
+  /**
+   * A test to oneself (ADMIN, only while the channel is on: 409 EMAIL_OFF): the kind's words (or those given) filled
+   * with the example values, to the console member's own address, due now, whether the kind is on or not. Audited
+   * `email.test` with the kind and the row, never the address.
+   */
+  async sendTest(kind: EmailKind, to: string, actor: Actor, words?: Partial<EmailWords>): Promise<{ id: string }> {
+    adminOf(actor);
+    const k = knownKind(kind);
+    if (!this.on) throw emailOff();
+    const address = typeof to === 'string' ? to.trim() : '';
+    if (!isMailAddress(address)) throw validationError('Your console address cannot receive an email.');
+    const rendered = await this.preview(k, words);
+    const now = this.clock();
+    return inTransaction(this.db, async (tx) => {
+      const row = await tx
+        .insertInto('email_outbox')
+        .values({ kind: k, dedupe_key: `TEST:${k}:${randomUUID()}`, to_address: address, subject: rendered.subject, body_text: rendered.text, body_html: rendered.html, not_before: now, created_at: now })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      await this.audit?.record({ actor, action: 'email.test', targetType: 'email_kind', targetId: k, details: { kind: k, emailId: row.id } }, tx);
+      return { id: row.id };
+    });
+  }
+
   // ── Housekeeping ─────────────────────────────────────────────────────────
 
   /** Erases the emails settled (sent, failed, cancelled) more than 90 days before `now`; the number erased. */
@@ -476,4 +736,52 @@ export class EmailService {
   private mac(kind: EmailKind, id: string): Buffer {
     return createHmac('sha256', this.key).update(`${UNSUBSCRIBE_KEY_INFO}\u0000${kind}\u0000${id}`, 'utf8').digest().subarray(0, 16);
   }
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+/** 409 EMAIL_OFF: no email provider in the server's .env, nothing can be sent. */
+export const emailOff = () => conflict('EMAIL_OFF', 'No email provider in the server’s .env: nothing is sent.');
+const emailNotFound = () => notFound('Email', 'EMAIL_NOT_FOUND');
+
+function adminOf(actor: Actor): string {
+  if (actor?.type !== 'admin' || typeof actor.id !== 'string' || !UUID.test(actor.id.toLowerCase())) throw forbidden('Only ORBES staff change the emails.');
+  return actor.id;
+}
+
+function knownKind(kind: unknown): EmailKind {
+  if (!(EMAIL_KINDS as readonly unknown[]).includes(kind)) throw notFound('Email kind', 'EMAIL_KIND_NOT_FOUND');
+  return kind as EmailKind;
+}
+
+/** A subject as the console writes it: one line, 1 to 150 characters, trimmed (the CHECK's rule). */
+function cleanSubject(v: unknown): string {
+  const t = typeof v === 'string' ? v.trim() : '';
+  if (t.length < 1 || t.length > EMAIL_TEMPLATE_SUBJECT_MAX || /[\p{Cc}]/u.test(t)) throw validationError(`A subject is one line of 1 to ${EMAIL_TEMPLATE_SUBJECT_MAX} characters.`);
+  return t;
+}
+
+/** A body as the console writes it: 1 to 5,000 characters, its line breaks kept (CR LF read as LF). */
+function cleanBody(v: unknown): string {
+  const t = typeof v === 'string' ? v.replace(/\r\n?/g, '\n').trim() : '';
+  if (t.length < 1 || t.length > EMAIL_TEMPLATE_BODY_MAX) throw validationError(`A body has 1 to ${EMAIL_TEMPLATE_BODY_MAX.toLocaleString('en-GB')} characters.`);
+  return t;
+}
+
+function outboxEntry(r: Pick<OutboxRow, 'id' | 'kind' | 'to_address' | 'subject' | 'status' | 'attempts' | 'last_error' | 'not_before' | 'created_at' | 'sent_at' | 'settled_at' | 'account_id' | 'preregistration_id'>): OutboxEntry {
+  return {
+    id: r.id,
+    kind: r.kind,
+    to: r.to_address,
+    subject: r.subject,
+    status: r.status,
+    attempts: r.attempts,
+    lastError: r.last_error,
+    notBefore: r.not_before,
+    createdAt: r.created_at,
+    sentAt: r.sent_at,
+    settledAt: r.settled_at,
+    accountId: r.account_id,
+    preregistrationId: r.preregistration_id,
+  };
 }

@@ -10,7 +10,15 @@
  * Password (C-04): a signed-in customer changes it with the current one
  * (keeping this session, ending the others); one who forgot it sets a new
  * one with the recovery code ORBES Client Services issued
- * (services/account-recovery.ts).
+ * (services/account-recovery.ts), or, once the emails are on (lot M1 step
+ * M1.17, E3), with the same code sent by email as a link: GET
+ * /api/v1/account/reset says whether that is offered now, POST
+ * /api/v1/account/reset-request asks for it (202 for any address; 409
+ * EMAIL_OFF while not offered).
+ *
+ * Emails (lot M1 step M1.17, E2): GET and PUT /api/v1/account/email-preferences,
+ * YOUR PROFILE's EMAIL ME WHEN A RELEASE IS ANNOUNCED (409 EMAIL_OFF while the
+ * channel is off, so nothing is promised that is not delivered).
  *
  * Responses never expose internal ids of other people, product statuses or
  * staff data; the account itself is described by email and display name.
@@ -20,9 +28,10 @@ import { forbidden } from '../errors.js';
 import { connectionPlace } from '../geo/place.js';
 import { userAgentOf } from '../http/client.js';
 import { rateLimitHook } from '../http/rate-limit.js';
-import { accountAddressBody, accountAddressParams, accountAddressUpdateBody, accountClaimCodeBody, accountDocumentParams, accountEngravingBody, accountOrderCaseBody, accountOrderAddressBody, accountOrderParams, accountProfileBody, accountSizesBody, careParams, careRequestBody, changePasswordBody, emptyBody, loginBody, lookbookParams, parse, productParams, recoverAccountBody, registerAccountBody, warrantyClaimParams } from '../http/schemas.js';
+import { accountAddressBody, accountAddressParams, accountAddressUpdateBody, accountClaimCodeBody, accountDocumentParams, accountEngravingBody, accountOrderCaseBody, accountOrderAddressBody, accountOrderParams, accountProfileBody, accountSizesBody, careParams, careRequestBody, changePasswordBody, emailPreferencesBody, emptyBody, loginBody, lookbookParams, parse, productParams, recoverAccountBody, registerAccountBody, resetRequestBody, warrantyClaimParams } from '../http/schemas.js';
 import { accountActor, clearSessionCookie, clientMeta, requireAccount, sessionGuard, sessionToken, setSessionCookie } from '../http/sessions.js';
 import type { AccountProfile } from '../services/auth.js';
+import { emailOff } from '../services/email.js';
 import { findProduct } from '../services/lifecycle.js';
 import { requireSignUp } from '../services/sign-up.js';
 import { WISHLIST_MAX } from '../services/wishlist.js';
@@ -97,6 +106,38 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
       { ipHash: request.orbes.ipHash, userAgent: userAgentOf(request) },
     );
     return { ok: true, transfersPausedUntil: r.transfersFrozenUntil };
+  });
+
+  // RESET BY EMAIL (lot M1 step M1.17, E3): whether it is offered now (the channel on and PASSWORD_RESET switched on);
+  // the sign-in shows it only then. The same for everyone, never stored by a cache.
+  app.get('/api/v1/account/reset', { config: { guard: { session: 'none' } } }, async (_request, reply) => {
+    reply.header('cache-control', 'no-store');
+    return { email: await recovery.resetByEmail() };
+  });
+
+  // One answer (202) for any address: whether it has an account, is locked or was asked for too often is never said.
+  app.post('/api/v1/account/reset-request', { config: { guard: { session: 'none' }, rateGroup: 'auth' } }, async (request, reply) => {
+    const b = parse(resetRequestBody, request.body);
+    await recovery.requestByEmail(b.email, { ipHash: request.orbes.ipHash, userAgent: userAgentOf(request) });
+    reply.header('cache-control', 'no-store');
+    return reply.code(202).send({ ok: true });
+  });
+
+  // EMAIL ME WHEN A RELEASE IS ANNOUNCED (lot M1 step M1.17, E2): the account's own choice, off until asked; 409
+  // EMAIL_OFF while the channel is off. Turned off, its release notices still queued are cancelled.
+  app.get('/api/v1/account/email-preferences', async (request, reply) => {
+    const { account } = requireAccount(request);
+    if (!ctx.services.email.on) throw emailOff();
+    reply.header('cache-control', 'no-store');
+    return ctx.services.emails.preferences(account.id);
+  });
+
+  app.put('/api/v1/account/email-preferences', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const b = parse(emailPreferencesBody, request.body);
+    if (!ctx.services.email.on) throw emailOff();
+    reply.header('cache-control', 'no-store');
+    return ctx.services.emails.setPreferences(account.id, { releaseNotices: b.releaseNotices }, accountActor(request));
   });
 
   // Session probe for pages that only want to know whether someone is signed in: an anonymous visitor

@@ -62,7 +62,7 @@ import { lockPieces, peekClaimRenewals, withdrawWaiting } from './claim-renewals
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
 import { LifecycleService } from './lifecycle.js';
-import { createExchangeOrder, hold, lockOrder, orderReference, recordChange, returnInTransaction, serveWaiting, step, updateOrder } from './orders.js';
+import { createExchangeOrder, hold, lockOrder, type OrderMail, orderReference, recordChange, returnInTransaction, serveWaiting, step, updateOrder } from './orders.js';
 import { parcelKeyOf, parcelOrders } from './parcels.js';
 import type { LocationScope } from './receptions.js';
 import { sizesForExchange } from './sizes.js';
@@ -216,6 +216,8 @@ export interface OrderCaseServiceDeps {
   clock?: Clock;
   /** Writes a collector's request into its MESSAGES (plan NEXT LOT §3.6.D). */
   messages?: MessageService;
+  /** The buyer's emails when an order moves (lot M1 step M1.17, orders.ts `step`'s `mail`). */
+  mail?: OrderMail;
 }
 
 /** What the collector asks (POST /api/v1/account/orders/:id/case). */
@@ -229,6 +231,7 @@ export interface RequestCaseInput {
 
 export class OrderCaseService {
   private readonly db: Db;
+  private readonly mail: OrderMail;
   private readonly audit: AuditService;
   private readonly lifecycle: LifecycleService;
   private readonly clock: Clock;
@@ -239,6 +242,7 @@ export class OrderCaseService {
     this.audit = deps.audit;
     this.clock = deps.clock ?? systemClock;
     this.messages = deps.messages;
+    this.mail = deps.mail ?? null;
     this.lifecycle = deps.lifecycle ?? new LifecycleService({ db: deps.db, audit: deps.audit, clock: this.clock });
   }
 
@@ -543,7 +547,7 @@ export class OrderCaseService {
       if (d.decision === 'EXCHANGE') {
         // The size asked, still one of the model's (in stock or not: the exchange order then waits like any order).
         const sku = await tx.selectFrom('skus').select(['id', 'size_label']).where('id', '=', fresh.exchange_sku_id!).executeTakeFirstOrThrow();
-        exchangeOrderId = (await createExchangeOrder(tx, done.after, { id: sku.id, label: sku.size_label }, actor, now, notes, done.credit)).id;
+        exchangeOrderId = (await createExchangeOrder(tx, done.after, { id: sku.id, label: sku.size_label }, actor, now, notes, this.mail, done.credit)).id;
       }
       await tx
         .updateTable('order_cases')
@@ -670,7 +674,7 @@ export class OrderCaseService {
         for (const o of reshipped) {
           const current = await tx.selectFrom('orders').selectAll().where('id', '=', o.id).executeTakeFirstOrThrow();
           if (current.status !== 'PAID') continue; // a welcome gift its order's cancellation already ended
-          await step(tx, current, { to: 'CANCELLED', note: 'Refunded: its parcel did not arrive.', claimHashes }, actor, now, notes);
+          await step(tx, current, { to: 'CANCELLED', note: 'Refunded: its parcel did not arrive.', claimHashes }, actor, now, notes, this.mail);
         }
       }
       await tx

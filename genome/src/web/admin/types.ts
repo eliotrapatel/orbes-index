@@ -1738,6 +1738,8 @@ export interface OwnerLock {
   liveEntriesRemoved: number;
   /** The account's interest in LIVE RELEASES not opened yet the lock withdrew. */
   liveInterestWithdrawn: number;
+  /** The account's emails still QUEUED the lock cancelled (lot M1). */
+  emailsCancelled: number;
 }
 
 /** POST /api/admin/owners/:id/recovery-code: the code, in this response only. */

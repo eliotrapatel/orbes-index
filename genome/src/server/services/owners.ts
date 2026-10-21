@@ -83,7 +83,7 @@
  */
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
-import type { AccountStatus, AcquiredVia, ClaimRenewalStatus, ClientConversationStatus, JsonObject, OwnershipState, ProductStatus, ReportChannel, TransferStatus } from '../db/schema.js';
+import type { AccountStatus, AcquiredVia, ClaimRenewalStatus, ClientConversationStatus, EmailKind, EmailStatus, JsonObject, OwnershipState, ProductStatus, ReportChannel, TransferStatus } from '../db/schema.js';
 import { conflict, forbidden, notFound, validationError } from '../errors.js';
 import { makePage, pageOffset, systemClock, type Actor, type ActorType, type Clock, type Page, type PageRequest } from '../types.js';
 import { recoveryThrottledUntil } from './account-recovery.js';
@@ -119,6 +119,7 @@ import type { OwnershipService } from './ownership.js';
 import { accountShopRequests, auditClosedShopRequests, closeAccountShopRequests, type ExportedShopRequest } from './salon.js';
 import { accountCertificates, auditWithdrawnCertificates, withdrawAccountCertificates, type AccountCertificate } from './ownership-certificates.js';
 import type { SessionService } from './sessions.js';
+import { cancelAccountEmails, EMAIL_RETENTION_DAYS } from './email.js';
 
 /** Latest scans shown on an owner's sheet. */
 export const OWNER_SHEET_SCANS = 20;
@@ -363,6 +364,8 @@ export interface LockOutcome {
   liveEntriesRemoved: number;
   /** The account's interest (I'LL BE THERE) in LIVE RELEASES not opened yet the lock withdrew. */
   liveInterestWithdrawn: number;
+  /** The account's emails still QUEUED the lock cancelled (lot M1 step M1.17). */
+  emailsCancelled: number;
 }
 
 /**
@@ -510,6 +513,17 @@ export interface AccountExport {
    */
   foundingList: ExportedFounding | null;
   /**
+   * The account's email choice (lot M1 step M1.17, E2): whether it asked, in YOUR PROFILE, to be told when a release is
+   * announced, and when it last changed (null: never chosen, so off).
+   */
+  emailPreferences: { releaseNotices: boolean; changedAt: Date | null };
+  /**
+   * The emails written to the account still kept (lot M1 step M1.17; each is erased 90 days after it was sent, failed or
+   * was cancelled), oldest first: its kind, status, when it was written, sent and settled. Never its address, subject or
+   * words: they repeat what this export holds, and the kind names the email.
+   */
+  emails: ExportedEmail[];
+  /**
    * The new claim codes ORBES Client Services made for the account's orders (plan NEXT LOT §3.4), oldest first: the
    * order, when it was made, where it stands and when it was read; never the code, sealed or clear, nor who made it.
    */
@@ -542,11 +556,21 @@ export interface AccountExport {
   notIncluded: string[];
 }
 
+/** An email written to the account, as its export gives it (lot M1 step M1.17). */
+export interface ExportedEmail {
+  kind: EmailKind;
+  status: EmailStatus;
+  createdAt: Date;
+  sentAt: Date | null;
+  settledAt: Date | null;
+}
+
 export const EXPORT_NOT_INCLUDED: readonly string[] = Object.freeze([
   'The password and the recovery codes, stored only as one-way scrypt hashes.',
   'The links to ownership certificates: only a one-way SHA-256 of their token is stored.',
   'The IP address and device cookie behind each scan, session and audit entry: never stored; only keyed one-way pseudonyms (HMAC) are kept, which identify nothing on their own.',
   'The network behind each entry of a LIVE RELEASE: only a keyed one-way hash of its prefix is kept, and erased 30 days after the release.',
+  `The address, subject and words of each email: the emails list gives each one by its kind, status and dates. Each email sent, with its address, subject and words, is kept ${EMAIL_RETENTION_DAYS} days after it is sent or fails, then erased.`,
 ]);
 
 export interface OwnerServiceDeps {
@@ -862,7 +886,8 @@ export class OwnerService {
    * Lock an ACTIVE account (an ADMIN of ORBES Client Services): every session ends, the pending transfers
    * it offered are cancelled, its open certificate links are withdrawn, its open entries in the drops withdrawn, its
    * open requests of the private salon closed, its open entries in the LIVE RELEASES removed and its interest in those
-   * not opened yet withdrawn, and its open recovery code is revoked, in one transaction.
+   * not opened yet withdrawn, its open recovery code revoked and its emails still QUEUED cancelled (lot M1 step
+   * M1.17: the sender also cancels, at send time, an email whose account is no longer ACTIVE), in one transaction.
    * 409 ACCOUNT_ALREADY_LOCKED, ACCOUNT_NOT_ACTIVE (deleted).
    */
   async lock(accountId: string, actor: Actor): Promise<LockOutcome> {
@@ -888,6 +913,8 @@ export class OwnerService {
         .returning('id')
         .execute();
       const recoveryCodesRevoked = revoked.length;
+      // Lot M1 step M1.17: nothing more is emailed to it (an email already sent stays in the outbox, its record).
+      const emailsCancelled = await cancelAccountEmails(tx, account.id, now);
       // Links to ownership certificates created by whoever held the account stop showing the record (THREAT-MODEL Y).
       const certificates = await withdrawAccountCertificates(tx, account.id, now);
       // Its entries in drops not drawn yet leave their draw (P-R03): the drops FOR SHARE, as ENTER and WITHDRAW take them.
@@ -922,11 +949,12 @@ export class OwnerService {
             shopRequestsClosed,
             liveEntriesRemoved,
             liveInterestWithdrawn,
+            emailsCancelled,
           },
         },
         tx,
       );
-      return { sessionsRevoked, transfersCancelled, recoveryCodesRevoked, certificatesRevoked, dropEntriesWithdrawn, shopRequestsClosed, liveEntriesRemoved, liveInterestWithdrawn };
+      return { sessionsRevoked, transfersCancelled, recoveryCodesRevoked, certificatesRevoked, dropEntriesWithdrawn, shopRequestsClosed, liveEntriesRemoved, liveInterestWithdrawn, emailsCancelled };
     });
   }
 
@@ -1021,6 +1049,14 @@ export class OwnerService {
       const browsing = await exportedBrowsing(tx, a.id, now);
       const origin = await exportedOrigin(tx, a.id);
       const foundingList = await exportedFounding(tx, a.id);
+      const preference = await tx.selectFrom('email_preferences').select(['release_notices', 'changed_at']).where('account_id', '=', a.id).executeTakeFirst();
+      const emails = await tx
+        .selectFrom('email_outbox')
+        .select(['kind', 'status', 'created_at', 'sent_at', 'settled_at'])
+        .where('account_id', '=', a.id)
+        .orderBy('created_at')
+        .orderBy('id')
+        .execute();
       const claimCodes = await accountClaimCodes(tx, a.id);
       const tierGrants = await accountTierGrants(tx, a.id);
       // Every entry that names the account: about it (target), or made by it (actor: claim codes tried, incidents
@@ -1117,6 +1153,8 @@ export class OwnerService {
         browsing,
         origin,
         foundingList,
+        emailPreferences: { releaseNotices: preference?.release_notices ?? false, changedAt: preference?.changed_at ?? null },
+        emails: emails.map((e) => ({ kind: e.kind, status: e.status, createdAt: e.created_at, sentAt: e.sent_at, settledAt: e.settled_at })),
         claimCodes,
         tierGrants,
         activity: activity.slice(0, EXPORT_LIST_LIMIT).map((e) => ({
@@ -1164,6 +1202,7 @@ export class OwnerService {
             browsing: exportedBrowsingCount(out.browsing),
             origin: exportedOriginCount(out.origin),
             foundingList: out.foundingList ? 1 : 0,
+            emails: out.emails.length,
             claimCodes: out.claimCodes.length,
             tierGrants: out.tierGrants.length,
             activity: out.activity.length,

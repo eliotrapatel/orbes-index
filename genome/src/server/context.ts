@@ -82,6 +82,7 @@ import { LinkService } from './services/links.js';
 import { CampaignService } from './services/campaign.js';
 import { FoundingService } from './services/founding.js';
 import { deriveEmailUnsubscribeKey, EmailService } from './services/email.js';
+import { EmailTriggers } from './services/email-triggers.js';
 import { TrackingService } from './services/tracking.js';
 import { SalonService } from './services/salon.js';
 import { ShopifyExportService } from './services/shopify.js';
@@ -213,6 +214,8 @@ export interface AppServices {
   founding: FoundingService;
   /** The emails (plan MACRO M1 §4.1, E0): the outbox, its sender every 15 s while EMAIL_TRANSPORT=smtp, the 90-day purge, the unsubscribe links. */
   email: EmailService;
+  /** The emails' triggers (plan MACRO M1 §4.2, E1 to E5): the order and draw emails, the labels', the release notices, the founding announcement, YOUR PROFILE's choice and the unsubscribe links. */
+  emails: EmailTriggers;
   /** The lot's growing tables' bytes as last measured (plan CUSTOMER INTELLIGENCE §3.3 T.10, §3.4 A.10.7): the `intelligence sizes` line and Server status's « Visitor data ». */
   intelligenceSizes: IntelligenceSizes;
   /** The suppliers (plan NEXT LOT §3.5.6.2): who makes ORBES's pieces, and the supplier of each model and size. */
@@ -296,6 +299,11 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
 
     // ── Services ───────────────────────────────────────────────────────────
     const audit = new AuditService({ db, clock });
+    // The emails (plan MACRO M1 §4.1, §4.2): the outbox first, so that every act that causes an email writes it in its
+    // own transaction (EmailTriggers: E1 to E5); off until EMAIL_TRANSPORT is set and each kind is switched on.
+    const email = new EmailService({ db, audit, config, unsubscribeKey: deriveEmailUnsubscribeKey(config), clock, log });
+    const emails = new EmailTriggers({ db, email, audit, publicOrigin: config.publicOrigin, clock });
+    email.addScan(emails.releaseNotices);
     const categories = new CategoryRegistry({ db, audit, clock });
     await categories.load();
 
@@ -313,6 +321,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       clock,
       transferKey: deriveTransferCodeKey(config),
       requireScannedPiece: config.transferAcceptRequireProduct,
+      mail: emails.orderStep,
     });
     const ownershipCertificates = new OwnershipCertificateService({ db, audit, ownership, publicOrigin: config.publicOrigin, clock });
     const warranty = new WarrantyService({ db, audit, lifecycle, clock });
@@ -321,14 +330,14 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const certificates = new CertificateService({ db, audit, issuance, clock });
     const anomaly = new AnomalyService({ db, config: config.anomaly, audit, clock, log });
     const reports = new ScanReportService({ db, audit, clock, log });
-    const recovery = new AccountRecoveryService({ db, audit, sessions, ownership, clock });
+    const recovery = new AccountRecoveryService({ db, audit, sessions, ownership, clock, email, publicOrigin: config.publicOrigin });
     const authenticators = AuthenticatorRegistry.withDefaults();
     const verification = new VerificationService({ db, keys, anomaly, config, authenticators, clock, log });
     const retailers = new RetailerService({ db, audit, clock });
     const sale = new SaleService({ db, verification, warranty, clock });
     const media = new MediaService({ db, audit, clock, log });
     const lookbook = new LookbookService({ db, clock });
-    const drops = new DropService({ db, audit, seedKey: deriveDropSeedKey(config), clock });
+    const drops = new DropService({ db, audit, seedKey: deriveDropSeedKey(config), clock, emails });
     const club = new ClubService({ db, drops, audit, clock });
     const salon = new SalonService({ db, audit, lookbook, club, clock });
     const circle = new CircleService({ db, audit, clock, log });
@@ -341,7 +350,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const activity = new ActivityService({ db, clock });
     const liveConsole = new LiveConsoleService({ db, audit, seedKey: deriveDropSeedKey(config), publicOrigin: config.publicOrigin, insights: liveInsights, questions, clock });
     const stock = new StockService({ db, audit, clock });
-    const orders = new OrderService({ db, audit, lifecycle, clock, log });
+    const orders = new OrderService({ db, audit, lifecycle, clock, log, mail: emails.orderStep });
     const invoices = new InvoiceService({ db, clock });
     const fulfilment = new FulfilmentService({ db, audit, orders, clock });
     const segments = new SegmentService({ db, audit, clock });
@@ -351,8 +360,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const tierGrants = new TierGrantService({ db, audit, clock, log });
     const birthdayCredits = new BirthdayCreditService({ db, audit, clock, log });
     const engagement = new EngagementService({ db, clock, log });
-    const care = new CareService({ db, audit, warranty, clock, claimOf: collectorClaim });
-    const warrantyClaims = new WarrantyClaimService({ db, audit, warranty, lifecycle, clock });
+    const care = new CareService({ db, audit, warranty, clock, claimOf: collectorClaim, emails });
+    const warrantyClaims = new WarrantyClaimService({ db, audit, warranty, lifecycle, clock, emails });
     const guarantees = new GuaranteeService({ db, audit, clock });
     const sizes = new SizeService({ db, audit, clock });
     const addresses = new AddressService({ db, audit, clock });
@@ -369,7 +378,6 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const acquisitionReport = new AcquisitionReportService({ db, links });
     const campaign = new CampaignService({ db, audit, links, clock });
     const founding = new FoundingService({ db, audit, acquisition, clock });
-    const email = new EmailService({ db, config, unsubscribeKey: deriveEmailUnsubscribeKey(config), clock, log });
     const intelligenceSizes = new IntelligenceSizes(db, clock, log);
     // The page load's arrival rides in the views' batches (§3.0 (c), §3.4 A.7.2): the same route, the same exclusions.
     // The link attaches the device's visits in its own transaction (§3.3 T.8.4 step 7, §3.4 A.4).
@@ -386,8 +394,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     });
     const suppliers = new SupplierService({ db, audit, clock });
     const supplierOrders = new SupplierOrderService({ db, audit, clock });
-    const logistics = new LogisticsService({ db, audit, stock, verification, warranty, clock });
-    const orderCases = new OrderCaseService({ db, audit, lifecycle, clock, messages });
+    const logistics = new LogisticsService({ db, audit, stock, verification, warranty, clock, mail: emails.orderStep });
+    const orderCases = new OrderCaseService({ db, audit, lifecycle, clock, messages, mail: emails.orderStep });
     const receptions = new ReceptionService({ db, audit, issuance, certificates, cardKey: deriveCardClaimKey(config), clock, log });
     const growth = new GrowthService({ db, clock });
     const collectorInsights = new CollectorInsightsService({ db, audit, links, clock, log });
@@ -452,6 +460,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       campaign,
       founding,
       email,
+      emails,
       intelligenceSizes,
       suppliers,
       supplierOrders,

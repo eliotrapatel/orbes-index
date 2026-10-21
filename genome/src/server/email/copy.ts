@@ -89,7 +89,7 @@ export const EMAIL_DEFAULTS: Readonly<Record<EmailKind, EmailWords>> = Object.fr
   },
   ORDER_CONFIRMED: {
     subject: 'Your order {orderRef} is confirmed',
-    body: ['{firstName},', 'Your order {orderRef} is paid and confirmed. We will write again when it leaves ORBES.', '[SEE YOUR ORDER]({link})'].join('\n\n'),
+    body: ['{firstName},', 'Your order {orderRef} is paid and confirmed. Its progress is in ORBES, under MY PIECES.', '[SEE YOUR ORDER]({link})'].join('\n\n'),
   },
   ORDER_SHIPPED: {
     subject: 'Your order {orderRef} is on its way',
@@ -105,11 +105,11 @@ export const EMAIL_DEFAULTS: Readonly<Record<EmailKind, EmailWords>> = Object.fr
   },
   DRAW_SELECTED: {
     subject: 'A place is yours',
-    body: ['{firstName},', 'You were drawn for {release}. Your place is held until {heldUntil}, Paris time.', '[CONFIRM YOUR PLACE]({link})'].join('\n\n'),
+    body: ['{firstName},', '{release} is drawn, and a place is yours. It is held until {heldUntil}, Paris time. ORBES Client Services will contact you.', '[SEE THE RELEASE]({link})'].join('\n\n'),
   },
   DRAW_OFFERED: {
     subject: 'A place is offered to you',
-    body: ['{firstName},', 'A place in {release} has come free and is offered to you. It is held until {heldUntil}, Paris time.', '[CONFIRM YOUR PLACE]({link})'].join('\n\n'),
+    body: ['{firstName},', '{release}: a place has come free and is offered to you. It is held until {heldUntil}, Paris time. ORBES Client Services will contact you.', '[SEE THE RELEASE]({link})'].join('\n\n'),
   },
   WARRANTY_LABEL: {
     subject: 'Your prepaid label is ready',

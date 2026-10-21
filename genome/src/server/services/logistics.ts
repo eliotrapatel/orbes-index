@@ -69,7 +69,7 @@ import { sanitizeImage } from '../media/image.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
 import type { ImageUpload } from './media.js';
-import { addressOf, attachPiece, checkStep, lockOrder, ORDER_AMOUNT_MAX_MINOR, orderNotPacked, type CheckedStep, recordChange, serveWaiting, shippable, step, updateOrder } from './orders.js';
+import { addressOf, attachPiece, checkStep, lockOrder, ORDER_AMOUNT_MAX_MINOR, orderNotPacked, type CheckedStep, type OrderMail, recordChange, serveWaiting, shippable, step, updateOrder } from './orders.js';
 import {
   checklistOf,
   onItsWay,
@@ -252,6 +252,8 @@ export interface LogisticsServiceDeps {
   /** The warranty started at SHIP (step 5.9, question 14). */
   warranty?: Pick<WarrantyService, 'activate'>;
   clock?: Clock;
+  /** The buyer's emails when a parcel ships and arrives (lot M1 step M1.17, orders.ts `step`'s `mail`). */
+  mail?: OrderMail;
 }
 
 /** The agent's and ORBES's lists of parcels (GET /api/admin/logistics/orders). */
@@ -277,6 +279,7 @@ export interface PackingScan {
 
 export class LogisticsService {
   private readonly db: Db;
+  private readonly mail: OrderMail;
   private readonly audit: AuditService;
   private readonly stockService: Pick<StockService, 'transfer'>;
   private readonly verification: Pick<VerificationService, 'staffScan'> | undefined;
@@ -290,6 +293,7 @@ export class LogisticsService {
     this.verification = deps.verification;
     this.warranty = deps.warranty;
     this.clock = deps.clock ?? systemClock;
+    this.mail = deps.mail ?? null;
   }
 
   // ── The stock ────────────────────────────────────────────────────────────
@@ -840,7 +844,7 @@ export class LogisticsService {
       for (const o of members) {
         const s = checkStep({ to: 'SHIPPED', carrierId: carrier.id, trackingNumber: tracking, declaredValueMinor: declared.get(o.id) ?? null });
         // The SHIPPED gate (step 5.12): the step names the parcel's shipment, PACKED and checked above.
-        await step(tx, o, { ...(s as Extract<CheckedStep, { to: 'SHIPPED' }>), shipmentId: shipment.id }, actor, now, notes);
+        await step(tx, o, { ...(s as Extract<CheckedStep, { to: 'SHIPPED' }>), shipmentId: shipment.id }, actor, now, notes, this.mail);
       }
       await tx
         .updateTable('shipments')
@@ -875,7 +879,7 @@ export class LogisticsService {
       if (members.length === 0) throw notShipped();
       const now = this.clock();
       const notes: AuditRecordInput[] = [];
-      for (const o of members) await step(tx, o, { to: 'DELIVERED', note: null, details: { by: 'logistics' } }, actor, now, notes);
+      for (const o of members) await step(tx, o, { to: 'DELIVERED', note: null, details: { by: 'logistics' } }, actor, now, notes, this.mail);
       for (const n of notes) await this.audit.record(n, tx);
     });
     return this.parcel(key, scope);

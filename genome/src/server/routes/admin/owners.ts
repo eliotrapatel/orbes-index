@@ -94,6 +94,7 @@ export const adminOwnerRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
       shopRequestsClosed: r.shopRequestsClosed,
       liveEntriesRemoved: r.liveEntriesRemoved,
       liveInterestWithdrawn: r.liveInterestWithdrawn,
+      emailsCancelled: r.emailsCancelled,
     };
   });
 

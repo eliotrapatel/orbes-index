@@ -21,7 +21,7 @@ import { migrateToLatest } from '../../src/server/db/migrate.js';
 import { EMAIL_KINDS, type EmailKind } from '../../src/server/db/schema.js';
 import { EMAIL_DEFAULTS, EMAIL_PLACEHOLDERS, EMAIL_SAMPLE_VALUES, OPT_IN_KINDS } from '../../src/server/email/copy.js';
 import { emailMonogramPng, emailWhen, renderEmail } from '../../src/server/email/render.js';
-import { deriveEmailUnsubscribeKey, EMAIL_RETENTION_DAYS, EMAIL_SENDER, EmailService, type EmailTransport } from '../../src/server/services/email.js';
+import { CANCELLED_WORDS, deriveEmailUnsubscribeKey, EMAIL_RETENTION_DAYS, EMAIL_SENDER, EmailService, type EmailTransport } from '../../src/server/services/email.js';
 import { createManualClock, type Logger, type ManualClock } from '../../src/server/types.js';
 import { createTestDb } from '../support/db.js';
 import { startFakeSmtp, type FakeSmtp, type FakeSmtpOptions } from '../support/fake-smtp.js';
@@ -106,6 +106,8 @@ describe('the emails: outbox, sender, purge, unsubscribe', () => {
   }
 
   const outbox = () => db.selectFrom('email_outbox').selectAll().orderBy('created_at').execute();
+  /** The account asked for the release notices in YOUR PROFILE (else the sender cancels one, lot M1 step M1.17). */
+  const optIn = (accountId: string) => db.insertInto('email_preferences').values({ account_id: accountId, release_notices: true }).onConflict((oc) => oc.column('account_id').doNothing()).execute();
 
   it('queues nothing while the channel is off (the default), whatever the kind', async () => {
     expect(ctx.config.email).toEqual({ transport: 'off' });
@@ -115,7 +117,7 @@ describe('the emails: outbox, sender, purge, unsubscribe', () => {
     const a = await account();
     expect(await ctx.services.email.enqueue(db, { kind: 'ORDER_CONFIRMED', to: a.email, accountId: a.id, dedupeKey: 'ORDER_CONFIRMED:x' })).toEqual({ queued: false, reason: 'OFF' });
     expect(await outbox()).toEqual([]);
-    expect(await ctx.services.email.sendDue()).toEqual({ sent: 0, retried: 0, failed: 0 });
+    expect(await ctx.services.email.sendDue()).toEqual({ sent: 0, retried: 0, failed: 0, cancelled: 0 });
   });
 
   it('queues a kind only once it is switched on, once per key, in the transaction of the act that causes it', async () => {
@@ -174,11 +176,12 @@ describe('the emails: outbox, sender, purge, unsubscribe', () => {
     const a = await account();
     await switchOn('RELEASE_NOTICE');
     await switchOn('ORDER_CONFIRMED');
+    await optIn(a.id);
     const notice = await email.enqueue(db, { kind: 'RELEASE_NOTICE', to: a.email, accountId: a.id, dedupeKey: 'E2:r1:a', values: { firstName: 'Camille', release: 'The November release', opensAt: new Date('2026-11-05T18:00:00Z'), access: 'It is open to every ORBES account.', link: `${ORIGIN}/verify/releases` } });
     const later = await email.enqueue(db, { kind: 'ORDER_CONFIRMED', to: a.email, accountId: a.id, dedupeKey: 'E4:o9', notBefore: new Date(clock.now().getTime() + 60_000), values: { orderRef: 'OR-1' } });
     if (!notice.queued || !later.queued) throw new Error('not queued');
 
-    expect(await email.sendDue()).toEqual({ sent: 1, retried: 0, failed: 0 });
+    expect(await email.sendDue()).toEqual({ sent: 1, retried: 0, failed: 0, cancelled: 0 });
     expect(s.messages).toHaveLength(1);
     const m = s.messages[0]!;
     expect(m.to).toEqual([a.email]);
@@ -197,11 +200,11 @@ describe('the emails: outbox, sender, purge, unsubscribe', () => {
     expect(sent.body_text).toContain(`STOP THESE EMAILS: ${ORIGIN}/verify/unsubscribe#${token}`);
 
     // The order's email waits for its time.
-    expect(await email.sendDue()).toEqual({ sent: 0, retried: 0, failed: 0 });
+    expect(await email.sendDue()).toEqual({ sent: 0, retried: 0, failed: 0, cancelled: 0 });
     clock.advance(60_000);
-    expect(await email.sendDue()).toEqual({ sent: 1, retried: 0, failed: 0 });
+    expect(await email.sendDue()).toEqual({ sent: 1, retried: 0, failed: 0, cancelled: 0 });
     expect(s.messages[1]!.data).not.toMatch(/List-Unsubscribe/);
-    expect(await email.sendDue()).toEqual({ sent: 0, retried: 0, failed: 0 });
+    expect(await email.sendDue()).toEqual({ sent: 0, retried: 0, failed: 0, cancelled: 0 });
     expect(s.messages).toHaveLength(2);
 
     // The log names the kind and the row, never the address.
@@ -225,22 +228,22 @@ describe('the emails: outbox, sender, purge, unsubscribe', () => {
     const delays = [...EMAIL_SENDER.retryMs];
     expect(delays).toEqual([60_000, 300_000, 1_800_000, 7_200_000]);
     for (const [i, delay] of delays.entries()) {
-      expect(await email.sendDue()).toEqual({ sent: 0, retried: 1, failed: 0 });
+      expect(await email.sendDue()).toEqual({ sent: 0, retried: 1, failed: 0, cancelled: 0 });
       const r = await row();
       expect(r).toMatchObject({ status: 'QUEUED', attempts: i + 1, settled_at: null });
       expect(r.last_error).toMatch(/^message: 451 4\.3\.0 Mailbox busy/);
       expect(r.not_before.getTime() - clock.now().getTime()).toBe(delay);
       clock.advance(delay - 1);
-      expect(await email.sendDue()).toEqual({ sent: 0, retried: 0, failed: 0 });
+      expect(await email.sendDue()).toEqual({ sent: 0, retried: 0, failed: 0, cancelled: 0 });
       clock.advance(1);
     }
-    expect(await email.sendDue()).toEqual({ sent: 0, retried: 0, failed: 1 });
+    expect(await email.sendDue()).toEqual({ sent: 0, retried: 0, failed: 1, cancelled: 0 });
     const failed = await row();
     expect(failed).toMatchObject({ status: 'FAILED', attempts: 5, sent_at: null });
     expect(failed.settled_at?.toISOString()).toBe(clock.now().toISOString());
     expect(s.connections).toBe(5);
     clock.advance(24 * 3_600_000);
-    expect(await email.sendDue()).toEqual({ sent: 0, retried: 0, failed: 0 });
+    expect(await email.sendDue()).toEqual({ sent: 0, retried: 0, failed: 0, cancelled: 0 });
     expect(log.lines.filter((l) => l.m === 'email failed').map((l) => (l.o as { final: boolean }).final)).toEqual([false, false, false, false, true]);
     expect(JSON.stringify(log.lines)).not.toContain(a.email);
 
@@ -249,7 +252,7 @@ describe('the emails: outbox, sender, purge, unsubscribe', () => {
     const leaky = service(wrong, { email: smtpConfig({ port: wrong.port, user: wrong.user, password: 'a-wrong-password-42' }) });
     const q2 = await leaky.enqueue(db, { kind: 'PASSWORD_RESET', to: a.email, accountId: a.id, dedupeKey: 'E3:2', values: {} });
     if (!q2.queued) throw new Error('not queued');
-    expect(await leaky.sendDue()).toEqual({ sent: 0, retried: 1, failed: 0 });
+    expect(await leaky.sendDue()).toEqual({ sent: 0, retried: 1, failed: 0, cancelled: 0 });
     const r2 = await db.selectFrom('email_outbox').selectAll().where('id', '=', q2.id).executeTakeFirstOrThrow();
     expect(r2.last_error).toMatch(/^auth: 535/);
     expect(r2.last_error).not.toContain(wrong.user);
@@ -258,10 +261,11 @@ describe('the emails: outbox, sender, purge, unsubscribe', () => {
     // A message that cannot even be written (an unsubscribe link on http, a dev origin) is refused alike on every try:
     // FAILED at once, never tried again.
     await switchOn('RELEASE_NOTICE');
+    await optIn(a.id);
     const dev = new EmailService({ db, config: { publicOrigin: 'http://localhost:8080', email: smtpConfig(s) }, unsubscribeKey: KEY, clock: clock.now, transport: async () => {} });
     const q3 = await dev.enqueue(db, { kind: 'RELEASE_NOTICE', to: a.email, accountId: a.id, dedupeKey: 'E2:dev1', values: {} });
     if (!q3.queued) throw new Error('not queued');
-    expect(await dev.sendDue()).toEqual({ sent: 0, retried: 0, failed: 1 });
+    expect(await dev.sendDue()).toEqual({ sent: 0, retried: 0, failed: 1, cancelled: 0 });
     expect(await db.selectFrom('email_outbox').selectAll().where('id', '=', q3.id).executeTakeFirstOrThrow()).toMatchObject({
       status: 'FAILED',
       attempts: 1,
@@ -275,8 +279,38 @@ describe('the emails: outbox, sender, purge, unsubscribe', () => {
     const a = await account();
     await switchOn('ORDER_DELIVERED');
     await email.enqueue(db, { kind: 'ORDER_DELIVERED', to: a.email, accountId: a.id, dedupeKey: 'E4:d1', values: {} });
-    expect(await email.sendDue()).toEqual({ sent: 0, retried: 0, failed: 1 });
+    expect(await email.sendDue()).toEqual({ sent: 0, retried: 0, failed: 1, cancelled: 0 });
     expect((await outbox())[0]).toMatchObject({ status: 'FAILED', attempts: 1, last_error: expect.stringMatching(/^rcpt: 550 5\.1\.1/) });
+  });
+
+  it('cancels at send time, without sending, an email whose account is no longer ACTIVE or whose pre-registration unsubscribed (lot M1 step M1.17)', async () => {
+    const sent: string[] = [];
+    const email = service(null, { transport: async (e) => void sent.push(e.to) });
+    await switchOn('ORDER_CONFIRMED');
+    await switchOn('FOUNDING_ANNOUNCEMENT');
+    const kept = await account();
+    const locked = await account();
+    for (const [a, key] of [[kept, 'E4:k'], [locked, 'E4:l']] as const) {
+      await email.enqueue(db, { kind: 'ORDER_CONFIRMED', to: a.email, accountId: a.id, dedupeKey: key, values: {} });
+      clock.advance(10);
+    }
+    await db.updateTable('accounts').set({ status: 'LOCKED' }).where('id', '=', locked.id).execute();
+    const p = (await ctx.services.founding.register({ email: `unsub-${randomBytes(3).toString('hex')}@example.com`, firstName: 'Léa', country: 'FR', consent: true }, { type: 'system', id: 'public' })) as { id: string };
+    const row = await db.selectFrom('preregistrations').select('email').where('id', '=', p.id).executeTakeFirstOrThrow();
+    await email.enqueue(db, { kind: 'FOUNDING_ANNOUNCEMENT', to: row.email, preregistrationId: p.id, dedupeKey: `E1:x:${p.id}`, values: {} });
+    await db.updateTable('preregistrations').set({ unsubscribed_at: clock.now() }).where('id', '=', p.id).execute();
+    const log = capture();
+    const logged = service(null, { log, transport: async (e) => void sent.push(e.to) });
+    expect(await logged.sendDue()).toEqual({ sent: 1, retried: 0, failed: 0, cancelled: 2 });
+    expect(sent).toEqual([kept.email]);
+    const rows = await outbox();
+    expect(rows.map((r) => [r.dedupe_key, r.status, r.last_error, r.sent_at === null, r.settled_at?.toISOString()])).toEqual([
+      ['E4:k', 'SENT', null, false, clock.now().toISOString()],
+      ['E4:l', 'CANCELLED', CANCELLED_WORDS.notActive, true, clock.now().toISOString()],
+      [`E1:x:${p.id}`, 'CANCELLED', CANCELLED_WORDS.unsubscribed, true, clock.now().toISOString()],
+    ]);
+    expect(log.lines.filter((l) => l.m === 'email cancelled')).toHaveLength(2);
+    expect(JSON.stringify(log.lines)).not.toContain('@example.com');
   });
 
   it('two senders at once never send one email twice, and a pass takes 50 at most, the oldest first', async () => {
@@ -298,7 +332,7 @@ describe('the emails: outbox, sender, purge, unsubscribe', () => {
     expect(Math.max(r1.sent, r2.sent)).toBeLessThanOrEqual(EMAIL_SENDER.batch);
     expect(new Set(sent).size).toBe(60);
     expect(sent).toHaveLength(60);
-    expect(await one.sendDue()).toEqual({ sent: 0, retried: 0, failed: 0 });
+    expect(await one.sendDue()).toEqual({ sent: 0, retried: 0, failed: 0, cancelled: 0 });
     expect((await outbox()).every((r) => r.status === 'SENT' && r.attempts === 1)).toBe(true);
   });
 
@@ -339,7 +373,7 @@ describe('the emails: outbox, sender, purge, unsubscribe', () => {
     expect(rest.every((r) => r.attempts === 0 && r.not_before.getTime() === clock.now().getTime())).toBe(true);
     // The next process sends them at once, each once.
     const next = service(null, { transport: async (e) => void sent.push(idOf(e.data)) });
-    expect(await next.sendDue()).toEqual({ sent: 4, retried: 0, failed: 0 });
+    expect(await next.sendDue()).toEqual({ sent: 4, retried: 0, failed: 0, cancelled: 0 });
     expect(new Set(sent).size).toBe(5);
     expect(sent).toHaveLength(5);
 
@@ -351,11 +385,11 @@ describe('the emails: outbox, sender, purge, unsubscribe', () => {
       },
     });
     for (let i = 0; i < 6; i++) await slow.enqueue(db, { kind: 'ORDER_CANCELLED', to: a.email, accountId: a.id, dedupeKey: `E5:t${i}`, values: {} });
-    expect(await slow.sendDue()).toEqual({ sent: 3, retried: 0, failed: 0 });
+    expect(await slow.sendDue()).toEqual({ sent: 3, retried: 0, failed: 0, cancelled: 0 });
     const back = (await outbox()).filter((r) => r.status === 'QUEUED');
     expect(back).toHaveLength(3);
     expect(back.every((r) => r.attempts === 0 && r.not_before.getTime() === clock.now().getTime())).toBe(true);
-    expect(await slow.sendDue()).toEqual({ sent: 3, retried: 0, failed: 0 });
+    expect(await slow.sendDue()).toEqual({ sent: 3, retried: 0, failed: 0, cancelled: 0 });
     expect(new Set(sent).size).toBe(11);
     expect(sent).toHaveLength(11);
     expect((await outbox()).every((r) => r.status === 'SENT' && r.attempts === 1)).toBe(true);
@@ -469,9 +503,9 @@ describe('the emails’ words and look (email/render.ts, email/copy.ts)', () => 
     expect(r.html).not.toContain('<b>November</b>');
     expect(r.html).toContain('&lt;img src=x onerror=alert(1)&gt;&quot;&amp;,');
     expect(r.html).not.toContain('javascript:');
-    expect(r.html).not.toContain('CONFIRM YOUR PLACE');
-    expect(r.text).not.toContain('CONFIRM YOUR PLACE');
-    expect(r.text).toContain('Your place is held until Saturday 7 November at 19:00, Paris time.');
+    expect(r.html).not.toContain('SEE THE RELEASE');
+    expect(r.text).not.toContain('SEE THE RELEASE');
+    expect(r.text).toContain('It is held until Saturday 7 November at 19:00, Paris time. ORBES Client Services will contact you.');
     // A value never breaks the subject's line.
     const s = render('ORDER_CONFIRMED', { orderRef: 'OR-1\r\nBcc: x@example.com' });
     expect(s.subject).toBe('Your order OR-1 Bcc: x@example.com is confirmed');

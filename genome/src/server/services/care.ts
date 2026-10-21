@@ -50,6 +50,7 @@ import { trackingLink } from './orders.js';
 import { TRANSFERABLE_STATUSES } from './ownership.js';
 import type { WarrantyService } from './warranty.js';
 import type { CollectorClaim } from './warranty-claims.js';
+import type { EmailTriggers } from './email-triggers.js';
 
 /** The label's PDF: at most 2 MiB (the CHECK of migration 0028; the console's upload route takes as much). */
 export const CARE_LABEL_MAX_BYTES = 2 * 1024 * 1024;
@@ -389,6 +390,8 @@ export interface CareServiceDeps {
   clock?: Clock;
   /** The piece's warranty claim for the account (services/warranty-claims.ts collectorClaim, given by context.ts); none without it. */
   claimOf?: (db: Db, accountId: string, productUuid: string, now: Date) => Promise<CollectorClaim | null>;
+  /** The label's email when switched on (lot M1 step M1.17, E5: CARE_LABEL). */
+  emails?: Pick<EmailTriggers, 'label'>;
 }
 
 export class CareService {
@@ -396,6 +399,7 @@ export class CareService {
   private readonly audit: AuditService;
   private readonly warranty: WarrantyService;
   private readonly clock: Clock;
+  private readonly emails: Pick<EmailTriggers, 'label'> | null;
   private readonly claimOf: NonNullable<CareServiceDeps['claimOf']>;
 
   constructor(deps: CareServiceDeps) {
@@ -404,6 +408,7 @@ export class CareService {
     this.warranty = deps.warranty;
     this.clock = deps.clock ?? systemClock;
     this.claimOf = deps.claimOf ?? (async () => null);
+    this.emails = deps.emails ?? null;
   }
 
   // ── The collector ────────────────────────────────────────────────────────
@@ -622,6 +627,7 @@ export class CareService {
         .set({ status: 'LABEL_SENT', label_pdf: pdf, label_carrier_id: carrier, label_tracking: tracking, label_at: now < r.requested_at ? r.requested_at : now, handled_by: by })
         .where('id', '=', r.id)
         .execute();
+      await this.emails?.label(tx, 'CARE_LABEL', { id: r.id, accountId: r.account_id, productUuid: r.product_id });
       return { carrierId: carrier, bytes: pdf.byteLength };
     });
   }

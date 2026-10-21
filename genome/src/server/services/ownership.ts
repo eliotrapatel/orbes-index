@@ -51,7 +51,7 @@ import { tierOf } from './club.js';
 import { formatGrouped, normalizeClaimCode, normalizeCrockford, randomCrockford, verifyClaimCode } from './claim-codes.js';
 import { findProduct, loadStatusHistory, requireProduct, returnTargetOf, TRANSITIONS, type LifecycleService, type StatusChange } from './lifecycle.js';
 import { mediaUrl } from './media.js';
-import { deliverOnRegistration, orderReference } from './orders.js';
+import { deliverOnRegistration, type OrderMail, orderReference } from './orders.js';
 import { latestRenewalAt, withdrawWaiting } from './claim-renewals.js';
 import { ensureGrants } from './tier-grants.js';
 import { consumeScanToken, inspectScanToken, TRANSFER_TOKEN_TTL_MS, type ScanTokenFailure, type ScanTokenResult } from './scan-tokens.js';
@@ -434,6 +434,7 @@ export async function readActingAccount(tx: Db, accountId: string): Promise<{ st
 
 export class OwnershipService {
   private readonly db: Db;
+  private readonly mail: OrderMail;
   private readonly audit: AuditService;
   private readonly lifecycle: LifecycleService;
   private readonly clock: Clock;
@@ -447,7 +448,7 @@ export class OwnershipService {
    * piece and carry the transfer token of that scan; false makes both optional (an acceptance assisted by ORBES
    * Client Services).
    */
-  constructor(deps: { db: Db; audit: AuditService; lifecycle: LifecycleService; clock?: Clock; transferKey?: Uint8Array; requireScannedPiece?: boolean }) {
+  constructor(deps: { db: Db; audit: AuditService; lifecycle: LifecycleService; clock?: Clock; transferKey?: Uint8Array; requireScannedPiece?: boolean; mail?: OrderMail }) {
     const key = deps.transferKey ?? new Uint8Array(randomBytes(32));
     if (!(key instanceof Uint8Array) || key.length !== 32) throw new RangeError('transferKey must be 32 bytes');
     this.transferKey = key;
@@ -456,6 +457,7 @@ export class OwnershipService {
     this.lifecycle = deps.lifecycle;
     this.clock = deps.clock ?? systemClock;
     this.requireScannedPiece = deps.requireScannedPiece ?? true;
+    this.mail = deps.mail ?? null;
   }
 
   /**
@@ -569,7 +571,7 @@ export class OwnershipService {
       .execute();
     // The piece of an order shipped to this buyer, registered by them: the order is DELIVERED (services/orders.ts),
     // its row locked before any audit entry of this transaction.
-    const delivered = await deliverOnRegistration(tx, p.id, accountId, actor, now);
+    const delivered = await deliverOnRegistration(tx, p.id, accountId, actor, now, this.mail);
     const withdrawn = await withdrawWaiting(tx, p.id, 'REGISTERED', actor, now);
     // The tiers' grants this piece may open (plan NEXT-NINE, BP-19 T5), before any audit entry.
     const granted = await ensureGrants(tx, accountId, now);

@@ -31,6 +31,8 @@ import {
   SHIPPING_FREE_LEVELS,
   SHIPPING_SERVICES,
   DROP_ENTRY_STATUSES,
+  EMAIL_KINDS,
+  EMAIL_STATUSES,
   GUARANTEE_SCOPES,
   INVOICE_KINDS,
   LIVE_ENTRY_STATUSES,
@@ -1130,6 +1132,25 @@ export const foundingQuery = z.object({
 });
 export const foundingParams = z.object({ id: uuid });
 export const foundingRemoveBody = body({ phrase: z.string().max(40) });
+
+// ── Emails (plan MACRO M1 §4.2, step M1.17) ───────────────────────────────
+
+/** POST /api/v1/account/reset-request (E3): the address only; the same answer for any. */
+export const resetRequestBody = body({ email });
+/** PUT /api/v1/account/email-preferences (E2): EMAIL ME WHEN A RELEASE IS ANNOUNCED, on or off. */
+export const emailPreferencesBody = body({ releaseNotices: z.boolean() });
+
+/** The console's emails (routes/admin/email.ts): a kind by its name (404 EMAIL_KIND_NOT_FOUND for any other). */
+export const emailKindParams = z.object({ kind: z.string().max(40) });
+export const emailEnabledBody = body({ enabled: z.boolean() });
+/** A kind's words: a subject and a body, each null for the default words, left out to keep them (the service checks their bounds). */
+export const emailWordsBody = body({ subject: z.string().max(2_000).nullable().optional(), body: z.string().max(20_000).nullable().optional() });
+/** The preview and the test to oneself: the words being written, or the kind's own. */
+export const emailDraftBody = body({ subject: z.string().max(2_000).optional(), body: z.string().max(20_000).optional() });
+export const emailOutboxQuery = z.object({ status: queryOptional(z.enum(EMAIL_STATUSES)), kind: queryOptional(z.enum(EMAIL_KINDS)) });
+export const emailOutboxParams = z.object({ id: uuid });
+/** Send the founding announcement (E1): now or at the release's opening, the phrase SEND <8>. */
+export const announcementBody = body({ when: z.enum(['NOW', 'OPENING']), phrase: z.string().max(40) });
 
 const segmentCount = whole(SEGMENT_LIMITS.count.min, SEGMENT_LIMITS.count.max, 'releases or pieces');
 const segmentItems = <T extends z.ZodType>(item: T) => z.array(item).min(1, 'Name at least one').max(SEGMENT_LIMITS.items, `At most ${SEGMENT_LIMITS.items}`);

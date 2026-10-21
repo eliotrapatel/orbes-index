@@ -579,7 +579,7 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'an order for a salon request ACCEPTED (choice 6)': "const order = input.outcome === 'ACCEPTED' ? await orderForShopRequest(tx, requestId, actor, at) : { order: null, notes: [] };",
   'the legal steps of an order (Interconnection)': 'if (!isOrderTransitionAllowed(o.status, s.to)) throw stepNotAllowed(o.status, s.to);',
   'a piece in stock, or waiting for supplier stock (plan NEXT LOT §3.5)': "return updateOrder(tx, o.id, { reservation: level.available >= 1 ? 'STOCK' : 'AWAITING' });",
-  'DELIVERED by itself at the buyer\'s registration (Interconnection)': 'const delivered = await deliverOnRegistration(tx, p.id, accountId, actor, now);',
+  'DELIVERED by itself at the buyer\'s registration (Interconnection)': 'const delivered = await deliverOnRegistration(tx, p.id, accountId, actor, now, this.mail);',
   'a cancellation frees its piece for the next order waiting (plan NEXT LOT §3.5)': 'notes.push(...(await serveWaiting(tx, o.sku_id!, o.location_id, actor, now)));',
   'a return takes the ownership back (choice 20)': "await tx.updateTable('ownership').set({ ended_at: endedAt, ended_reason: 'RETURNED' }).where('id', '=', owner.id).execute();",
   'the invoice issued by CONGLOMERAT LLC, without VAT (choice 22)': 'issuer: jsonText({ name: INVOICE_ISSUER.name, address: [...INVOICE_ISSUER.address] }),',
@@ -642,7 +642,12 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
     // The console's own routes (a staff member's second factor, /api/admin) are not the customer's.
     const customerRoutes = ROUTES.filter((r) => !r.path.startsWith('/api/admin/'));
     expect(customerRoutes.length).toBeGreaterThan(20);
-    expect(customerRoutes.filter((r) => /reset|forgot|magic|verify-email|confirm-email/i.test(r.path))).toEqual([]);
+    expect(customerRoutes.filter((r) => /forgot|magic|verify-email|confirm-email/i.test(r.path))).toEqual([]);
+    // The reset by email (plan MACRO M1 §4.2, E3) is prepared and switched off: its two routes, and its request refused
+    // (409 EMAIL_OFF) unless the channel is on (N1: off by default) and PASSWORD_RESET is switched on in the console.
+    expect(customerRoutes.filter((r) => /reset/i.test(r.path)).map((r) => `${r.method} ${r.path}`).sort()).toEqual(['get /api/v1/account/reset', 'post /api/v1/account/reset-request']);
+    expect(matches(/if \(!\(await this\.resetByEmail\(\)\)\) throw emailOff\(\);/g).map((m) => m.file)).toEqual([join('src', 'server', 'services', 'account-recovery.ts')]);
+    expect(matches(/this\.email\.on && \(await this\.email\.kind\('PASSWORD_RESET'\)\)\.enabled/g)).toHaveLength(1);
     // The customer's only password routes: the change (signed in, with the current one) and the assisted recovery (R12).
     const customer = ROUTES.filter((r) => r.path.startsWith('/api/v1/') && /password|recover/i.test(r.path)).map((r) => `${r.method} ${r.path}`);
     expect(customer.sort()).toEqual(['post /api/v1/account/password', 'post /api/v1/account/recover']);

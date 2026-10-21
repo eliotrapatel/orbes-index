@@ -107,6 +107,7 @@ import { readProgram } from './club-program.js';
 import { findProduct, TRANSITIONS, type LifecycleService } from './lifecycle.js';
 import { addUtcMonths } from './tier-grants.js';
 import { addMonthsClamped, computeWarrantyStatus, utcDate, type WarrantyService, type WarrantyStatus } from './warranty.js';
+import type { EmailTriggers } from './email-triggers.js';
 
 /** A warranty credit is valid this long from its decision (D5; the terms state it). */
 export const WARRANTY_CREDIT_VALIDITY_MONTHS = 12;
@@ -589,6 +590,8 @@ export interface WarrantyClaimServiceDeps {
   warranty: WarrantyService;
   lifecycle: LifecycleService;
   clock?: Clock;
+  /** The label's email when switched on (lot M1 step M1.17, E5: WARRANTY_LABEL). */
+  emails?: Pick<EmailTriggers, 'label'>;
 }
 
 export class WarrantyClaimService {
@@ -597,6 +600,7 @@ export class WarrantyClaimService {
   private readonly warranty: WarrantyService;
   private readonly lifecycle: LifecycleService;
   private readonly clock: Clock;
+  private readonly emails: Pick<EmailTriggers, 'label'> | null;
 
   constructor(deps: WarrantyClaimServiceDeps) {
     this.db = deps.db;
@@ -604,6 +608,7 @@ export class WarrantyClaimService {
     this.warranty = deps.warranty;
     this.lifecycle = deps.lifecycle;
     this.clock = deps.clock ?? systemClock;
+    this.emails = deps.emails ?? null;
   }
 
   // ── The collector ────────────────────────────────────────────────────────
@@ -879,6 +884,7 @@ export class WarrantyClaimService {
         .set({ status: 'LABEL_SENT', label_pdf: pdf, label_carrier_id: carrier, label_tracking: tracking, label_at: notBefore(now, c.opened_at) })
         .where('id', '=', c.id)
         .execute();
+      await this.emails?.label(tx, 'WARRANTY_LABEL', { id: c.id, accountId: c.account_id, productUuid: c.product_id });
       return { carrierId: carrier, bytes: pdf.byteLength };
     });
   }

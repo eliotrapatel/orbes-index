@@ -74,7 +74,8 @@
  * `respond_by` has passed: 409 before), and OFFER NEXT (the first of the
  * waiting list by rank, only while SELECTED and CONFIRMED stay under
  * `quantity`). A selection obliges no one: ORBES Client Services concludes
- * each sale; no email is sent (the account's page says it).
+ * each sale; the account's page says it, and an email too once DRAW_SELECTED
+ * and DRAW_OFFERED are switched on (lot M1 step M1.17, services/email-triggers.ts).
  *
  * THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01; services/guarantees.ts, migration 0029): a place granted by ORBES
  * Client Services and set aside for the release. Its holder's entry uses it (ENTER: `guarantee_id` and its `pieces`,
@@ -136,6 +137,7 @@ import { releaseFeasibility, type Feasibility } from './release-stock.js';
 import { savedSizeAmong } from './sizes.js';
 import { linkDropSizes } from './stock.js';
 import { isSegmentMember } from './segments.js';
+import type { EmailTriggers } from './email-triggers.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -1136,6 +1138,8 @@ export interface DropServiceDeps {
   /** 32-byte key sealing the seeds (deriveDropSeedKey; the context always passes it). Without it a random per-instance key, for single-instance tests only. */
   seedKey?: Uint8Array;
   clock?: Clock;
+  /** The places drawn and offered, emailed when switched on (lot M1 step M1.17, E5: DRAW_SELECTED, DRAW_OFFERED). */
+  emails?: Pick<EmailTriggers, 'drawPlaces'>;
 }
 
 type DropReadRow = DropRow & {
@@ -1156,6 +1160,7 @@ export class DropService {
   private readonly audit: AuditService;
   private readonly seedKey: Uint8Array;
   private readonly clock: Clock;
+  private readonly emails: Pick<EmailTriggers, 'drawPlaces'> | null;
 
   constructor(deps: DropServiceDeps) {
     const key = deps.seedKey ?? new Uint8Array(randomBytes(32));
@@ -1164,6 +1169,7 @@ export class DropService {
     this.audit = deps.audit;
     this.seedKey = key;
     this.clock = deps.clock ?? systemClock;
+    this.emails = deps.emails ?? null;
   }
 
   // ── Public ───────────────────────────────────────────────────────────────
@@ -1938,6 +1944,14 @@ export class DropService {
            WHERE e.id = v.id AND e.drop_id = ${id} AND e.status = 'ENTERED'`.execute(tx);
       }
       await tx.updateTable('drops').set({ seed, drawn_at: now }).where('id', '=', id).execute();
+      // Lot M1 step M1.17 (E5): each place selected, guaranteed or drawn, emailed with how long it is held.
+      await this.emails?.drawPlaces(
+        tx,
+        'DRAW_SELECTED',
+        d,
+        [...guaranteedEntries, ...entered.filter((e) => selectedIds.has(e.id))].map((e) => ({ id: e.id, accountId: e.account_id })),
+        respondBy,
+      );
       // IN-01: the guarantees set aside for it and not used: a model's or a collection's carried, a chosen release's expired.
       await releaseCovered(tx, id, 'ENDED', now, actor, notes);
       const perSize = [...bySize.values()];
@@ -2047,7 +2061,7 @@ export class DropService {
       if (size && (await this.heldPieces(tx, id, size.id)) >= size.stock) throw dropFull();
       const next = await tx
         .selectFrom('drop_entries')
-        .select(['id', 'rank'])
+        .select(['id', 'rank', 'account_id'])
         .where('drop_id', '=', id)
         .where('status', '=', 'WAITLISTED')
         .$if(size !== null, (q) => q.where('size_id', '=', size!.id))
@@ -2058,6 +2072,8 @@ export class DropService {
       if (!next) throw waitlistEmpty();
       const respondBy = new Date(now.getTime() + d.purchase_window_hours * HOUR_MS);
       await tx.updateTable('drop_entries').set({ status: 'SELECTED', respond_by: respondBy }).where('id', '=', next.id).execute();
+      // Lot M1 step M1.17 (E5): the place offered, emailed with how long it is held.
+      await this.emails?.drawPlaces(tx, 'DRAW_OFFERED', d, [{ id: next.id, accountId: next.account_id }], respondBy);
       await this.audit.record(
         {
           actor,

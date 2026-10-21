@@ -444,6 +444,19 @@ const PROBES: Probe[] = [
   { group: 'founding', method: 'GET', url: '/api/admin/founding/summary', min: 'AUDITOR' },
   { group: 'founding', method: 'GET', url: '/api/admin/founding.csv', min: 'OPERATOR' },
   { group: 'founding', method: 'POST', url: `/api/admin/founding/${UUID}/remove`, body: INVALID, min: 'ADMIN' },
+  // The emails (plan MACRO M1 §4.2, step M1.17): read from AUDITOR (addresses masked), the words OPERATOR, the switches, a
+  // test to oneself and the founding announcement ADMIN only (test/api/emails.test.ts).
+  { group: 'email', method: 'GET', url: '/api/admin/email', min: 'AUDITOR' },
+  { group: 'email', method: 'PUT', url: '/api/admin/email/kinds/ORDER_SHIPPED/enabled', body: INVALID, min: 'ADMIN' },
+  { group: 'email', method: 'PUT', url: '/api/admin/email/kinds/ORDER_SHIPPED/words', body: INVALID, min: 'OPERATOR' },
+  { group: 'email', method: 'GET', url: '/api/admin/email/kinds/ORDER_SHIPPED/preview', min: 'AUDITOR' },
+  { group: 'email', method: 'POST', url: '/api/admin/email/kinds/ORDER_SHIPPED/preview', body: INVALID, min: 'OPERATOR' },
+  { group: 'email', method: 'POST', url: '/api/admin/email/kinds/ORDER_SHIPPED/test', body: INVALID, min: 'ADMIN' },
+  { group: 'email', method: 'GET', url: '/api/admin/email/outbox', min: 'AUDITOR' },
+  { group: 'email', method: 'GET', url: `/api/admin/email/outbox/${UUID}`, min: 'AUDITOR' },
+  { group: 'email', method: 'GET', url: '/api/admin/email/announcement', min: 'AUDITOR' },
+  { group: 'email', method: 'POST', url: `/api/admin/email/announcement/${UUID}`, body: INVALID, min: 'ADMIN' },
+  { group: 'email', method: 'POST', url: `/api/admin/email/announcement/${UUID}/cancel`, body: INVALID, min: 'ADMIN' },
   { group: 'links', method: 'GET', url: '/api/admin/link-channels', min: 'AUDITOR' },
   { group: 'links', method: 'POST', url: '/api/admin/link-channels', body: INVALID, min: 'OPERATOR' },
   { group: 'links', method: 'PATCH', url: `/api/admin/link-channels/${UUID}`, body: INVALID, min: 'OPERATOR' },
@@ -558,6 +571,7 @@ describe('admin role enforcement', () => {
       'sign-up',
       'links',
       'founding',
+      'email',
       'client-sheet',
       'collectors',
     ]) {

@@ -1534,8 +1534,15 @@ function checkReturn(input: OrderReturnInput): { outcome: ReturnOutcome; locatio
   return { outcome: input.outcome, locationId: locationId?.toLowerCase() ?? null, note };
 }
 
-/** Move a locked order one step (the step's own rules); returns the order after it. */
-export async function step(tx: Db, o: OrderRow, s: CheckedStep, actor: Actor, now: Date, notes: AuditRecordInput[]): Promise<OrderRow> {
+/**
+ * What an order's step writes for its buyer (lot M1 step M1.17: the emails E4 and ORDER_CANCELLED, services/email-triggers.ts
+ * EmailTriggers.orderStep), in the step's transaction, once the order has moved; null writes nothing (the boot's
+ * backfill of sales made before the orders existed). Required by `step`, so that no path that moves an order forgets it.
+ */
+export type OrderMail = ((tx: Db, order: OrderRow, to: OrderStatus) => Promise<void>) | null;
+
+/** Move a locked order one step (the step's own rules); returns the order after it. Its buyer's email through `mail`. */
+export async function step(tx: Db, o: OrderRow, s: CheckedStep, actor: Actor, now: Date, notes: AuditRecordInput[], mail: OrderMail): Promise<OrderRow> {
   if (!isOrderTransitionAllowed(o.status, s.to)) throw stepNotAllowed(o.status, s.to);
   const extra: AuditRecordInput[] = [];
   let after: OrderRow;
@@ -1595,10 +1602,11 @@ export async function step(tx: Db, o: OrderRow, s: CheckedStep, actor: Actor, no
   // BP-19 T5: its welcome gift follows it: paid with it, cancelled with it (its grant then waits again).
   if (o.channel !== 'GIFT' && (s.to === 'PAID' || s.to === 'CANCELLED')) {
     for (const g of await openGifts(tx, o.id, { forUpdate: true })) {
-      if (s.to === 'PAID' && g.status === 'RESERVED') await step(tx, g, { to: 'PAID', note: null }, actor, now, notes);
-      if (s.to === 'CANCELLED' && (g.status === 'RESERVED' || g.status === 'PAID')) await step(tx, g, { to: 'CANCELLED', note: 'Its order was cancelled.', claimHashes: s.claimHashes }, actor, now, notes);
+      if (s.to === 'PAID' && g.status === 'RESERVED') await step(tx, g, { to: 'PAID', note: null }, actor, now, notes, mail);
+      if (s.to === 'CANCELLED' && (g.status === 'RESERVED' || g.status === 'PAID')) await step(tx, g, { to: 'CANCELLED', note: 'Its order was cancelled.', claimHashes: s.claimHashes }, actor, now, notes, mail);
     }
   }
+  if (mail) await mail(tx, after, s.to);
   return after;
 }
 
@@ -1622,7 +1630,7 @@ async function assertPacked(tx: Db, o: OrderRow, shipmentId: string | undefined)
  * it is SHIPPED, in the transaction of the registration (the piece's row held), before its audit entries. Returns the
  * audit entries to write; none when no such order exists.
  */
-export async function deliverOnRegistration(tx: Db, productUuid: string, accountId: string, actor: Actor, now: Date): Promise<AuditRecordInput[]> {
+export async function deliverOnRegistration(tx: Db, productUuid: string, accountId: string, actor: Actor, now: Date, mail: OrderMail): Promise<AuditRecordInput[]> {
   const o = await tx
     .selectFrom('orders')
     .selectAll()
@@ -1636,7 +1644,7 @@ export async function deliverOnRegistration(tx: Db, productUuid: string, account
   // Plan NEXT LOT §3.5.6.7: a parcel reported lost, damaged or back to sender, whose piece its buyer registers meanwhile,
   // arrived: its order case, not yet recorded back by the agent, is cancelled ('Registered by its buyer.'), never decided.
   await cancelParcelProblem(tx, o, now, notes);
-  await step(tx, o, { to: 'DELIVERED', note: null, details: { by: 'registration' } }, actor, now, notes);
+  await step(tx, o, { to: 'DELIVERED', note: null, details: { by: 'registration' } }, actor, now, notes, mail);
   return notes;
 }
 
@@ -1826,6 +1834,7 @@ export async function createExchangeOrder(
   actor: Actor,
   now: Date,
   notes: AuditRecordInput[],
+  mail: OrderMail,
   credit: readonly CarriedCredit[] = [],
 ): Promise<OrderRow> {
   let o = await createOrder(
@@ -1883,7 +1892,7 @@ export async function createExchangeOrder(
     const amountMinor = credit.reduce((n, c) => n + c.amountMinor, 0);
     notes.push(await recordChange(tx, o, o, 'order.credit.apply', { details: { amountMinor, currency: o.currency, uses, exchangeOfOrderId: original.id } }, actor, now));
   }
-  const paid = await step(tx, o, { to: 'PAID', note: null }, actor, now, notes);
+  const paid = await step(tx, o, { to: 'PAID', note: null }, actor, now, notes, mail);
   notes.push(await recordChange(tx, original, original, 'order.exchange', { details: { exchangeOrderId: paid.id, skuId: sku.id } }, actor, now));
   return paid;
 }
@@ -2042,11 +2051,15 @@ export interface OrderServiceDeps {
   lifecycle?: LifecycleService;
   clock?: Clock;
   log?: Logger;
+  /** The buyer's emails at each step (lot M1 step M1.17, EmailTriggers.orderStep); none when not given. */
+  mail?: OrderMail;
 }
 
 export class OrderService {
   private readonly db: Db;
   private readonly audit: AuditService;
+  /** The buyer's emails at each step (`step`'s `mail`). */
+  readonly mail: OrderMail;
   private readonly lifecycle: LifecycleService;
   private readonly clock: Clock;
   private readonly log: Logger;
@@ -2057,6 +2070,7 @@ export class OrderService {
     this.clock = deps.clock ?? systemClock;
     this.lifecycle = deps.lifecycle ?? new LifecycleService({ db: deps.db, audit: deps.audit, clock: this.clock });
     this.log = deps.log ?? noopLogger;
+    this.mail = deps.mail ?? null;
   }
 
   /** An order with its model, location, shipment and history (404 ORDER_NOT_FOUND). */
@@ -2616,7 +2630,7 @@ export class OrderService {
       async (tx, o, now, notes) => {
         // A welcome gift is paid with its order (BP-19 T5), never alone.
         if (o.channel === 'GIFT' && checked.to === 'PAID') throw stepNotAllowed(o.status, checked.to);
-        await step(tx, o, checked, actor, now, notes);
+        await step(tx, o, checked, actor, now, notes, this.mail);
       },
       first,
     );
@@ -3033,9 +3047,10 @@ export class OrderService {
         const created = await ordersForLiveEntry(tx, e.id, SYSTEM_ACTOR, now, { hold: entry.resolution !== 'CANCELLED', reservedAt: e.confirmed_at ?? now });
         notes.push(...created.notes);
         for (const o of created.orders) {
-          if (entry.resolution === 'CONCLUDED') await step(tx, o, { to: 'PAID', note: entry.resolution_note }, SYSTEM_ACTOR, now, notes);
+          // A sale of the past, written now: no email (null).
+          if (entry.resolution === 'CONCLUDED') await step(tx, o, { to: 'PAID', note: entry.resolution_note }, SYSTEM_ACTOR, now, notes, null);
           // Its orders are new: none can hold a new claim code (plan NEXT LOT §3.4), so no hash is prepared.
-          if (entry.resolution === 'CANCELLED') await step(tx, o, { to: 'CANCELLED', note: entry.resolution_note ?? 'Cancelled by ORBES Client Services.', claimHashes: NO_CLAIM_HASHES }, SYSTEM_ACTOR, now, notes);
+          if (entry.resolution === 'CANCELLED') await step(tx, o, { to: 'CANCELLED', note: entry.resolution_note ?? 'Cancelled by ORBES Client Services.', claimHashes: NO_CLAIM_HASHES }, SYSTEM_ACTOR, now, notes, null);
         }
         return created.orders.length;
       });

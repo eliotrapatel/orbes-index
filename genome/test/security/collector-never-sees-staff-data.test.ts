@@ -215,6 +215,9 @@ describe('the collector never sees staff data (§3.6 C.9, §3.0 (k); step 9.13)'
     /** Each GET of the collector's route files, as read here. */
     const URLS: Record<string, string> = {
       '/api/v1/account/sign-up': '/api/v1/account/sign-up',
+      // Lot M1 step M1.17: whether RESET BY EMAIL is offered, and YOUR PROFILE's release notices (409 EMAIL_OFF here).
+      '/api/v1/account/reset': '/api/v1/account/reset',
+      '/api/v1/account/email-preferences': '/api/v1/account/email-preferences',
       '/api/v1/account/session': '/api/v1/account/session',
       '/api/v1/account/me': '/api/v1/account/me',
       '/api/v1/account/products': '/api/v1/account/products',

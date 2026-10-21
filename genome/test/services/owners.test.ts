@@ -705,3 +705,69 @@ describe('the export and the new claim codes (plan NEXT LOT §3.4)', () => {
     }
   });
 });
+
+describe('the account’s email data through its life (lot M1 step M1.17)', () => {
+  it('exports its release notices’ choice and its emails by kind, status and dates (never an address, subject or words), states the 90 days, and a lock cancels what is still queued', async () => {
+    const { createContext } = await import('../../src/server/context.js');
+    const { MemoryKeyProvider } = await import('../../src/server/keys/memory-provider.js');
+    const { CANCELLED_WORDS, EMAIL_RETENTION_DAYS } = await import('../../src/server/services/email.js');
+    const { EXPORT_NOT_INCLUDED } = await import('../../src/server/services/owners.js');
+    const { createAccount, liveFixtureOn } = await import('../support/live.js');
+    const t = await createTestDb();
+    const clock = createManualClock('2026-11-05T09:00:00.000Z');
+    const on = { transport: 'smtp' as const, from: { address: 'hello@theorbes.com', name: 'ORBES' }, replyTo: null, smtp: { host: 'smtp.invalid', port: 465, security: 'tls' as const, user: 'u', password: 'p' } };
+    const ctx = await createContext(testConfig({ email: on }), { db: t.db, clock: clock.now, keyProvider: new MemoryKeyProvider({ env: 'test' }) });
+    try {
+      const f = await liveFixtureOn(ctx, clock);
+      const a = await createAccount(t.db);
+      const other = await createAccount(t.db);
+      const email = ctx.services.email;
+      for (const kind of ['ORDER_CONFIRMED', 'RELEASE_NOTICE'] as const) await email.setEnabled(kind, true, f.admin);
+      await ctx.services.emails.setPreferences(a.id, { releaseNotices: true }, a.actor);
+      const chosenAt = clock.now();
+      // One sent, one still queued, and another account's.
+      const sent = await email.enqueue(t.db, { kind: 'ORDER_CONFIRMED', to: a.email, accountId: a.id, dedupeKey: 'ORDER_CONFIRMED:one', values: { orderRef: 'OR-11111111' } });
+      clock.advance(1_000);
+      if (!sent.queued) throw new Error('not queued');
+      await t.db.updateTable('email_outbox').set({ status: 'SENT', sent_at: clock.now(), settled_at: clock.now() }).where('id', '=', sent.id).execute();
+      clock.advance(1_000);
+      await email.enqueue(t.db, { kind: 'RELEASE_NOTICE', to: a.email, accountId: a.id, dedupeKey: 'E2:r:a', values: { release: 'The November release' } });
+      await email.enqueue(t.db, { kind: 'ORDER_CONFIRMED', to: other.email, accountId: other.id, dedupeKey: 'ORDER_CONFIRMED:other', values: {} });
+
+      const x = await ctx.services.owners.exportData(a.id, f.admin);
+      expect(x.emailPreferences).toEqual({ releaseNotices: true, changedAt: chosenAt });
+      expect(x.emails.map((e) => [e.kind, e.status, e.sentAt !== null, e.settledAt !== null])).toEqual([
+        ['ORDER_CONFIRMED', 'SENT', true, true],
+        ['RELEASE_NOTICE', 'QUEUED', false, false],
+      ]);
+      for (const e of x.emails) expect(Object.keys(e).sort()).toEqual(['createdAt', 'kind', 'sentAt', 'settledAt', 'status']);
+      const text = JSON.stringify({ ...x, account: null, activity: null });
+      expect(text).not.toContain(a.email);
+      expect(text).not.toContain('The November release');
+      expect(text).not.toContain('OR-11111111');
+      expect(EMAIL_RETENTION_DAYS).toBe(90);
+      expect(x.notIncluded).toEqual([...EXPORT_NOT_INCLUDED]);
+      expect(x.notIncluded).toContain(
+        'The address, subject and words of each email: the emails list gives each one by its kind, status and dates. Each email sent, with its address, subject and words, is kept 90 days after it is sent or fails, then erased.',
+      );
+      expect(x.activity.filter((e) => e.action === 'account.email_preferences')).toEqual([expect.objectContaining({ by: 'account' })]);
+      expect((await t.db.selectFrom('audit_logs').select('details').where('action', '=', 'account.export').executeTakeFirstOrThrow()).details).toMatchObject({ emails: 2 });
+
+      // The lock: the queued one cancelled in its transaction, the sent one kept as it is, another account's untouched.
+      clock.advance(1_000);
+      const locked = await ctx.services.owners.lock(a.id, f.admin);
+      expect(locked.emailsCancelled).toBe(1);
+      const rows = await t.db.selectFrom('email_outbox').select(['dedupe_key', 'status', 'last_error', 'settled_at']).orderBy('dedupe_key').execute();
+      expect(rows).toEqual([
+        { dedupe_key: 'E2:r:a', status: 'CANCELLED', last_error: CANCELLED_WORDS.notActive, settled_at: clock.now() },
+        { dedupe_key: 'ORDER_CONFIRMED:one', status: 'SENT', last_error: null, settled_at: expect.any(Date) },
+        { dedupe_key: 'ORDER_CONFIRMED:other', status: 'QUEUED', last_error: null, settled_at: null },
+      ]);
+      const audit = await t.db.selectFrom('audit_logs').select('details').where('action', '=', 'account.lock').executeTakeFirstOrThrow();
+      expect(audit.details).toMatchObject({ emailsCancelled: 1 });
+    } finally {
+      await ctx.close();
+      await t.close();
+    }
+  });
+});

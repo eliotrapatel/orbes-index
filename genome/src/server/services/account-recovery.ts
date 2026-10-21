@@ -2,11 +2,13 @@
  * AccountRecoveryService — assisted recovery of a customer account (C-04;
  * API §10.8 and §16.10, SECURITY-MODEL §3.3).
  *
- * There is no email channel, so a forgotten password goes through ORBES
- * Client Services: after checking the customer's identity (the procedure is
- * written with counsel), an ADMIN issues a one-time code in the console,
- * reads it to the customer, and the customer enters it on /verify with a new
- * password.
+ * A forgotten password goes through ORBES Client Services: after checking
+ * the customer's identity (the procedure is written with counsel), an ADMIN
+ * issues a one-time code in the console, reads it to the customer, and the
+ * customer enters it on /verify with a new password. Once the emails are on
+ * (lot M1 step M1.17, macro scope E3), the customer may also ask for it by
+ * email (`requestByEmail`): the same code, sent as a link; Client Services'
+ * path stays for those without access to their email.
  *
  *   issue    POST /api/admin/owners/:id/recovery-code (ADMIN): 12 Crockford
  *            base32 characters (60 bits), shown once as XXXX-XXXX-XXXX and
@@ -41,6 +43,21 @@
  *            the lock itself (A-06, services/owners.ts) revokes the open
  *            code, so a code checked just before a lock fails after it.
  *
+ *   request  POST /api/v1/account/reset-request (public, rate group `auth`,
+ *            only while the channel and PASSWORD_RESET are on): the same
+ *            answer (202) for any address. For an ACTIVE account that is no
+ *            test entrant, at most RESET_REQUEST_LIMIT (3) per rolling hour
+ *            (counted from the audit `account.recovery_code.request`, under
+ *            the account's row lock): the open code revoked, a new one issued
+ *            `issued_via` EMAIL (by no one), and the email PASSWORD_RESET
+ *            written in the same transaction with the link
+ *            …/verify/reset#<email>/<code> (in the fragment: never in a log
+ *            nor a referrer), entered through `recover` above. A code is
+ *            hashed whatever the address, so every answer costs the same. A
+ *            LOCKED account, an unknown address or a throttled request gets
+ *            nothing. Audited `account.recovery_code.request`, never with the
+ *            code nor the address.
+ *
  * Lock order: the account row, its open certificate links, then the products
  * of its pending transfers (OwnershipService.cancelPendingTransfersFrom), as
  * in initiateTransfer.
@@ -59,6 +76,15 @@ import { formatGrouped, normalizeCrockford, randomCrockford } from './claim-code
 import type { OwnershipService } from './ownership.js';
 import { auditWithdrawnCertificates, withdrawAccountCertificates } from './ownership-certificates.js';
 import type { SessionService } from './sessions.js';
+import { emailOff, type EmailService } from './email.js';
+
+/**
+ * The link of a reset by email (lot M1 step M1.17, E3): the app's reset page, the account's address and the code in the
+ * fragment (`/verify/reset#<email>/<code>`), which a browser never sends: no log nor referrer ever holds them.
+ */
+export function resetLink(origin: string, email: string, code: string): string {
+  return `${origin}/verify/reset#${encodeURIComponent(email)}/${code}`;
+}
 
 /** A recovery code lives 30 minutes (the same delay as the A-06 brief, the safer of the two briefs). */
 export const RECOVERY_CODE_TTL_MS = 30 * 60_000;
@@ -68,6 +94,10 @@ export const RECOVERY_ATTEMPT_LIMIT = 5;
 export const RECOVERY_ATTEMPT_WINDOW_MS = 60 * 60_000;
 /** New transfers out of a recovered account are paused this long. */
 export const TRANSFER_FREEZE_MS = 72 * 60 * 60_000;
+/** Requests of a reset by email per account and rolling hour (RECOVERY_ATTEMPT_WINDOW_MS); more get nothing. */
+export const RESET_REQUEST_LIMIT = 3;
+/** Audit action of a code sent by email at the collector's request; they count towards RESET_REQUEST_LIMIT. */
+export const RESET_REQUEST_ACTION = 'account.recovery_code.request';
 /** Audit action of a refused attempt; those naming the open code (`details.recoveryCodeId`) count towards RECOVERY_ATTEMPT_LIMIT. */
 export const RECOVERY_FAILED_ACTION = 'account.recover_failed';
 
@@ -158,6 +188,9 @@ export interface AccountRecoveryServiceDeps {
   sessions: SessionService;
   ownership: OwnershipService;
   clock?: Clock;
+  /** The reset by email (lot M1 step M1.17, E3): its outbox, and the origin its link opens. None: never offered. */
+  email?: Pick<EmailService, 'on' | 'kind' | 'enqueue'>;
+  publicOrigin?: string;
 }
 
 export class AccountRecoveryService {
@@ -166,6 +199,8 @@ export class AccountRecoveryService {
   private readonly sessions: SessionService;
   private readonly ownership: OwnershipService;
   private readonly clock: Clock;
+  private readonly email: Pick<EmailService, 'on' | 'kind' | 'enqueue'> | null;
+  private readonly origin: string;
   private dummyHash: Promise<string> | undefined;
 
   constructor(deps: AccountRecoveryServiceDeps) {
@@ -174,6 +209,74 @@ export class AccountRecoveryService {
     this.sessions = deps.sessions;
     this.ownership = deps.ownership;
     this.clock = deps.clock ?? systemClock;
+    this.email = deps.email ?? null;
+    this.origin = deps.publicOrigin ?? '';
+  }
+
+  /** Whether the reset by email is offered now: the channel on and PASSWORD_RESET switched on (GET /api/v1/account/reset). */
+  async resetByEmail(): Promise<boolean> {
+    return this.email !== null && this.email.on && (await this.email.kind('PASSWORD_RESET')).enabled;
+  }
+
+  /**
+   * RESET BY EMAIL (see the file header): nothing is said of the address. 409 EMAIL_OFF while the reset by email is not
+   * offered (the same for every address). The code is hashed first, whatever the address, so every request costs the same.
+   */
+  async requestByEmail(address: unknown, meta: ClientMeta = {}): Promise<void> {
+    if (!(await this.resetByEmail())) throw emailOff();
+    const email = normalizeEmail(address);
+    const canonical = randomCrockford(RECOVERY_CODE_LENGTH);
+    const codeHash = await hashSecret(canonical);
+    if (!email) return;
+    const found = await this.db.selectFrom('accounts').select(['id', 'status']).where('email_normalized', '=', email.normalized).executeTakeFirst();
+    if (!found || found.status !== 'ACTIVE') return;
+    const sent = new Error('not sent');
+    await inTransaction(this.db, async (tx) => {
+      const now = this.clock();
+      const a = await tx.selectFrom('accounts').select(['id', 'email', 'status']).where('id', '=', found.id).forUpdate().executeTakeFirstOrThrow();
+      if (a.status !== 'ACTIVE') return;
+      if (await tx.selectFrom('test_entrants').select('account_id').where('account_id', '=', a.id).executeTakeFirst()) return;
+      const since = new Date(now.getTime() - RECOVERY_ATTEMPT_WINDOW_MS);
+      const asked = await tx
+        .selectFrom('audit_logs')
+        .select((eb) => eb.fn.countAll<number>().as('n'))
+        .where('target_type', '=', 'account')
+        .where('target_id', '=', a.id)
+        .where('action', '=', RESET_REQUEST_ACTION)
+        .where('occurred_at', '>', since)
+        .executeTakeFirstOrThrow();
+      if (Number(asked.n) >= RESET_REQUEST_LIMIT) return;
+      const replaced = await tx
+        .updateTable('account_recovery_codes')
+        .set({ revoked_at: now })
+        .where('account_id', '=', a.id)
+        .where('used_at', 'is', null)
+        .where('revoked_at', 'is', null)
+        .returning('id')
+        .execute();
+      const expiresAt = new Date(now.getTime() + RECOVERY_CODE_TTL_MS);
+      const row = await tx
+        .insertInto('account_recovery_codes')
+        .values({ account_id: a.id, code_hash: codeHash, issued_via: 'EMAIL', created_by: null, created_at: now, expires_at: expiresAt })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      const profile = await tx.selectFrom('account_profiles').select('first_name').where('account_id', '=', a.id).executeTakeFirst();
+      const queued = await this.email!.enqueue(tx, {
+        kind: 'PASSWORD_RESET',
+        to: a.email,
+        accountId: a.id,
+        dedupeKey: `PASSWORD_RESET:${row.id}`,
+        values: { firstName: profile?.first_name ?? null, resetLink: resetLink(this.origin, a.email, formatGrouped(canonical)) },
+      });
+      // A code nobody receives (an address the envelope cannot carry, the kind switched off meanwhile) is not issued.
+      if (!queued.queued) throw sent;
+      await this.audit.record(
+        { actor: accountActor(a.id, meta), action: RESET_REQUEST_ACTION, targetType: 'account', targetId: a.id, details: { recoveryCodeId: row.id, expiresAt, replaced: replaced.length, via: 'EMAIL' } },
+        tx,
+      );
+    }).catch((e) => {
+      if (e !== sent) throw e;
+    });
   }
 
   /**
