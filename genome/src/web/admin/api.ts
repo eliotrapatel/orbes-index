@@ -26,6 +26,7 @@ import type {
   GuaranteeGrant,
   GuaranteeInput,
   GuaranteeSettings,
+  ReleaseCampaign,
   ReleaseGuarantee,
   AdminProfile,
   BestTime,
@@ -1494,6 +1495,18 @@ export class AdminApi {
   /** OPERATOR+: removed while no link names it (409 CHANNEL_IN_USE otherwise). */
   async deleteLinkChannel(id: string): Promise<void> {
     await this.del(`/api/admin/link-channels/${encodeURIComponent(id)}`);
+  }
+
+  // ── A release's CAMPAIGN tab (plan MACRO M1 §2.1, C2) ──
+
+  /** AUDITOR+: a draw's or a LIVE RELEASE's links by channel, the channels without one, the readout (404 for an after-room). */
+  releaseCampaign(dropId: string): Promise<ReleaseCampaign> {
+    return this.get(`/api/admin/releases/${encodeURIComponent(dropId)}/campaign`);
+  }
+
+  /** OPERATOR+: MAKE THE LINKS, one per channel still without one; 409 CAMPAIGN_NOT_PUBLISHED or CAMPAIGN_CANCELLED. */
+  makeCampaignLinks(dropId: string): Promise<{ made: LinkView[]; campaign: ReleaseCampaign }> {
+    return this.post(`/api/admin/releases/${encodeURIComponent(dropId)}/campaign/links`);
   }
 
   // ── Logistics (plan NEXT LOT §3.5.6.9; the agent's locations only, for a LOGISTICS login) ──

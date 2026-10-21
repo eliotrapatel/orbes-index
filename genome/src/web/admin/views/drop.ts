@@ -35,6 +35,9 @@
  *  - Test entrants (plan TEST ENTRANTS, views/test-entrants.ts): SEND TEST
  *    ENTRANTS while the draw is open (ADMIN), the test not ended, PAST TESTS;
  *    on the right, the server's status (views/server-status.ts).
+ *  - Two tabs under its header (plan MACRO M1 §2.2): RELEASE, all of the
+ *    above, and CAMPAIGN (`?tab=campaign`, views/campaign.ts): its links made
+ *    in one click, its countdown image, its readout.
  */
 import { h } from '../../shared/dom.js';
 import { formatCount, formatDateTime, groupChars, humanize } from '../format.js';
@@ -62,6 +65,7 @@ import {
   sizeOfferable,
   tierName,
 } from '../model/club.js';
+import { releaseTab } from '../model/campaign.js';
 import { drawGuaranteeLine, GUARANTEE_STATE_LABELS, guaranteedText, placesLeftForDraw, validUntilText } from '../model/guarantees.js';
 import { drawTestStart } from '../model/test-entrants.js';
 import { toneOf } from '../model/tone.js';
@@ -70,6 +74,7 @@ import { DROP_ENTRY_STATUSES, type DrawSize, type Drop, type DropEntry, type Dro
 import { button, defList, field, filterBar, linkButton, mono, pageHeader, pager, section, select, statusMark, table } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { notify } from '../ui/toast.js';
+import { campaignTab, releaseTabs } from './campaign.js';
 import { drawSizeFields, drawSizesBody, drawSizesOfModel, drawSizesPreview, dropFields, dropModelField } from './club.js';
 import { pageParam, type ViewContext } from './context.js';
 import { serverStatusPanel, withServerPanel } from './server-status.js';
@@ -78,6 +83,7 @@ import { loadTestReads, testEntrantsSection, testTag } from './test-entrants.js'
 
 export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
   const id = ctx.route.params.dropId ?? '';
+  if (releaseTab(ctx.route.query) === 'campaign') return dropCampaignView(ctx, id);
   const status = DROP_ENTRY_STATUSES.find((s) => s === ctx.route.query.status) as DropEntryStatus | undefined;
   // Plan NEXT LOT §3.6.F: one size's entries (a UUID only; the server checks it is one of the draw's).
   const sizeId = /^[0-9a-f-]{36}$/i.test(ctx.route.query.size ?? '') ? ctx.route.query.size : undefined;
@@ -418,18 +424,44 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
   return h(
     'div',
     { class: 'view view--drop' },
-    pageHeader({
-      eyebrow: 'Clients · Club · Drops',
-      title: d.title,
-      // A title may hold a figure: it is then set in the reading face, as a record's id is.
-      identifier: /\d/.test(d.title),
-      lead: dropLead(d),
-      actions: [linkButton('All drops', href('club', {}, { tab: 'drops' }), 'ghost')],
-    }),
+    dropHeader(d),
+    releaseTabs('drop', d.id, 'release'),
     withServerPanel(
       [release, ...(sizesSection ? [sizesSection] : []), testEntrantsSection(ctx, { mode: 'DRAW', dropId: d.id, eyebrow, start: drawTestStart(d, ctx.now()), sizes: d.sizes.map((z) => ({ id: z.id, label: z.label })) }, tests), guaranteesSection(guarantees.items), list],
       serverStatusPanel(ctx),
     ),
+  );
+}
+
+/** The draw's page header, on both tabs. */
+function dropHeader(d: Drop): HTMLElement {
+  return pageHeader({
+    eyebrow: 'Clients · Club · Drops',
+    title: d.title,
+    // A title may hold a figure: it is then set in the reading face, as a record's id is.
+    identifier: /\d/.test(d.title),
+    lead: dropLead(d),
+    actions: [linkButton('All drops', href('club', {}, { tab: 'drops' }), 'ghost')],
+  });
+}
+
+/** The CAMPAIGN tab (plan MACRO M1 §2.2): the draw's name and photograph are public from its publication. */
+async function dropCampaignView(ctx: ViewContext, id: string): Promise<HTMLElement> {
+  const d = await ctx.api.drop(id);
+  const model = await ctx.api.model(d.model.id).catch(() => null);
+  return h(
+    'div',
+    { class: 'view view--drop view--campaign' },
+    dropHeader(d),
+    releaseTabs('drop', d.id, 'campaign'),
+    campaignTab(ctx, d.id, {
+      mode: 'DRAW',
+      opensAt: d.opensAt,
+      published: d.publishedAt !== null,
+      cancelled: d.cancelledAt !== null,
+      publicAt: d.publishedAt,
+      model: { name: d.model.name, variant: d.model.variant, photo: model?.imageUrl ?? null },
+    }),
   );
 }
 

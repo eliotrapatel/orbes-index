@@ -42,6 +42,9 @@
  *  - Test entrants (plan TEST ENTRANTS, views/test-entrants.ts): SEND TEST ENTRANTS once the room is open (ADMIN), the
  *    test not ended, PAST TESTS, on the release's own page (not its after-room's); a test entrant's account carries TEST
  *    in the line, the entries and the bot radar. On the right, the server's status (views/server-status.ts).
+ *  - Two tabs under the header of a release (plan MACRO M1 §2.2), never of an after-room: RELEASE, all of the above,
+ *    and CAMPAIGN (`?tab=campaign`, views/campaign.ts): its links made in one click, its countdown image, its readout;
+ *    no board is read nor followed there.
  */
 import { h, mount, type Child } from '../../shared/dom.js';
 import { formatCount, formatDateTime, groupChars, humanize } from '../format.js';
@@ -86,6 +89,7 @@ import {
   windowLine,
   type LivePart,
 } from '../model/live.js';
+import { livePublicAt, releaseTab } from '../model/campaign.js';
 import { guaranteedText, stockWarning } from '../model/guarantees.js';
 import { liveTestStart } from '../model/test-entrants.js';
 import { toneOf } from '../model/tone.js';
@@ -99,6 +103,7 @@ import { photoDialog, photoThumb } from '../ui/photo.js';
 import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
 import { bestTimePanel } from './best-time.js';
+import { campaignTab, releaseTabs } from './campaign.js';
 import { guaranteesSection } from './drop.js';
 import { loadLiveIntelligence, liveIntelligenceSections, liveSignals, sizeSellOut } from './live-intelligence.js';
 import { serverStatusPanel, withServerPanel } from './server-status.js';
@@ -187,6 +192,10 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   const id = ctx.route.params.dropId ?? '';
   const status = (['OPEN', ...LIVE_ENTRY_STATUSES] as const).find((s) => s === ctx.route.query.status) as LiveEntryStatus | 'OPEN' | undefined;
   const entriesPage = Math.max(1, Number(ctx.route.query.page) || 1);
+  if (releaseTab(ctx.route.query) === 'campaign') {
+    const shown = await liveCampaignView(ctx, id);
+    if (shown) return shown;
+  }
   const [r, models, collections, segments, locations] = await Promise.all([ctx.api.liveRelease(id), ctx.api.models(), ctx.api.collections(), ctx.api.segmentNames(), ctx.api.locations().catch(() => ({ items: [] }))]);
   const published = hasBoard(r.phase);
   // The best time to open while T0 may still move (its settings change); the after-room has none of its own.
@@ -1172,13 +1181,9 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   const root = h(
     'div',
     { class: 'view view--live' },
-    pageHeader({
-      eyebrow: 'Clients · Club · Drops',
-      title: r.title,
-      identifier: /\d/.test(r.title),
-      lead: liveLead(r),
-      actions: [...(parent ? [linkButton('The release', href('liveRelease', { dropId: parent.id }), 'ghost')] : []), linkButton('All drops', href('club', {}, { tab: 'drops' }), 'ghost')],
-    }),
+    liveHeader(r),
+    // An after-room has no campaign of its own: its sales are its release's.
+    parent ? null : releaseTabs('liveRelease', r.id, 'release'),
     withServerPanel(
       [
         // Once published, the board leads, its test entrants under it, the intelligence of the release's stage after its
@@ -1201,6 +1206,44 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
     follower.start(board);
   }
   return root;
+}
+
+/** A LIVE RELEASE's page header (an after-room's with the way to its release), on both tabs. */
+function liveHeader(r: LiveRelease): HTMLElement {
+  const parent = r.afterRoomOf;
+  return pageHeader({
+    eyebrow: 'Clients · Club · Drops',
+    title: r.title,
+    identifier: /\d/.test(r.title),
+    lead: liveLead(r),
+    actions: [...(parent ? [linkButton('The release', href('liveRelease', { dropId: parent.id }), 'ghost')] : []), linkButton('All drops', href('club', {}, { tab: 'drops' }), 'ghost')],
+  });
+}
+
+/**
+ * The CAMPAIGN tab (plan MACRO M1 §2.2): a release's name and photograph are public at the later of its NAME and PHOTO
+ * stages. Null for an after-room, whose page then opens as ever.
+ */
+async function liveCampaignView(ctx: ViewContext, id: string): Promise<HTMLElement | null> {
+  const asked = screens;
+  const r = await ctx.api.liveRelease(id);
+  if (r.afterRoomOf) return null;
+  const model = await ctx.api.model(r.model.id).catch(() => null);
+  if (asked !== screens) return h('div', { class: 'view view--live' });
+  return h(
+    'div',
+    { class: 'view view--live view--campaign' },
+    liveHeader(r),
+    releaseTabs('liveRelease', r.id, 'campaign'),
+    campaignTab(ctx, r.id, {
+      mode: 'LIVE',
+      opensAt: r.opensAt,
+      published: r.publishedAt !== null,
+      cancelled: r.cancelledAt !== null,
+      publicAt: livePublicAt(r.stages),
+      model: { name: model?.name ?? r.model.name, variant: model?.variantLabel ?? null, photo: model?.imageUrl ?? null },
+    }),
+  );
 }
 
 /**

@@ -6535,3 +6535,157 @@ a.collectors__kpi-link:focus-visible {
     max-width: 100%;
   }
 }
+
+/* ── A release's CAMPAIGN tab (plan MACRO M1 §2.2) ─────────────────────────
+   RELEASE · CAMPAIGN under the header, as the house's local tabs; the links one row per channel, the countdown image's
+   preview at a quarter of its size beside its choice and DOWNLOAD, the readout's OTHER SOURCES and TOTAL set apart. */
+
+.release__tabs {
+  margin: -6px 0 26px;
+}
+
+.campaign__line {
+  margin: 0 0 14px;
+  max-width: 62ch;
+  color: var(--ink-soft);
+}
+
+.campaign__foot {
+  margin: 12px 0 0;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+}
+
+.campaign__channel {
+  display: block;
+}
+
+/* The channel's column at a name's width, the link's taking the rest. */
+.campaign__links .table th:first-child,
+.campaign__links .table td:first-child {
+  width: 180px;
+}
+
+.campaign__links .table .col--wide {
+  width: auto;
+}
+
+/* A link's name (80 characters at most) on two lines rather than past a phone's width. */
+.campaign .idlink {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.campaign__link {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.campaign__name {
+  justify-self: start;
+}
+
+.campaign__address {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  min-width: 0;
+}
+
+.campaign__address .mono {
+  overflow-wrap: anywhere;
+  color: var(--ink-soft);
+}
+
+.campaign__image-box {
+  display: grid;
+  grid-template-columns: 270px minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+
+.campaign__preview {
+  display: grid;
+  place-items: center;
+  width: 270px;
+  aspect-ratio: 9 / 16;
+  background: var(--vault-ground);
+}
+
+.campaign__preview .loading,
+.campaign__preview .failure {
+  min-height: 0;
+  padding: 16px;
+  color: var(--vault-ink);
+}
+
+.campaign__preview .failure__text,
+.campaign__preview .loading__text {
+  color: var(--vault-soft);
+}
+
+.campaign__image {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.campaign__image-side {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
+
+.campaign__choices {
+  margin-bottom: 10px;
+}
+
+/* TEASER · FULL: buttons set as tabs (button.range__tab, as the Collectors page's), the one chosen underlined. */
+.campaign__choice[aria-pressed="true"] {
+  color: var(--ink);
+}
+
+.campaign__choice[aria-pressed="true"]::after {
+  transform: scaleX(1);
+}
+
+.campaign__choice:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.campaign__download {
+  margin-top: 10px;
+}
+
+.campaign__heading {
+  font-size: var(--fs-micro);
+  letter-spacing: 0.24em;
+  color: var(--ink);
+}
+
+.campaign__readout tr:has(.campaign__row-name--other) td {
+  border-top: 1px solid var(--hairline);
+}
+
+.campaign__readout tr:has(.campaign__row-name--total) td {
+  border-top: 1px solid var(--ink);
+  color: var(--ink);
+}
+
+@media (max-width: 599px) {
+  .campaign__links .table th:first-child,
+  .campaign__links .table td:first-child {
+    width: 96px;
+  }
+  .campaign__image-box {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+  .campaign__preview {
+    justify-self: center;
+    width: min(270px, 100%);
+  }
+}

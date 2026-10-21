@@ -16,9 +16,13 @@
  *     figure's collectors (#/links/collectors) to the client sheet; Edit (the address never changes), Archive
  *     confirmed and Unarchive; a link that brought nothing yet; the phone.
  *  5. An AUDITOR reads it all, without New link, Channels, Edit nor Archive, the emails masked; RETAIL has no Links.
+ *  6. A release's CAMPAIGN tab (plan MACRO M1 §2.2 and §2.4, C2 and C3): on a draw's page, RELEASE · CAMPAIGN; « No
+ *     link yet » per channel, MAKE THE LINKS in one click, each channel's link with its address; the countdown image,
+ *     TEASER by default then FULL once the name and photograph are public, each downloaded as a 1080 × 1920 PNG; the
+ *     readout « Figures appear once entries open. »; a LIVE RELEASE's tab with its readout FINAL; the phone.
  * Screens with ORBES_SCREENSHOTS=1 (genome/out/admin-links-*.png). No CSP violation, no page error.
  */
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -35,6 +39,7 @@ import { SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
 import { LINKS_COPY as C } from '../../src/web/admin/model/links.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { GrowthWorld } from '../support/growth.js';
+import { jpegPhoto } from '../support/images.js';
 
 const CHROMIUM = process.env.ORBES_CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const HAS_CHROMIUM = existsSync(CHROMIUM);
@@ -484,6 +489,103 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Links page (plan CUSTOMER INTELLI
       const r = await open(RETAIL, 1440, 'Sale mode');
       expect(await r.locator('.side__link[data-route=links]').count()).toBe(0);
       await r.context().close();
+    },
+    STEP_TIMEOUT,
+  );
+
+  it(
+    'gives a release a CAMPAIGN tab: its links made in one click, the countdown image TEASER then FULL downloaded as a 1080 × 1920 PNG, the readout (C2, C3)',
+    async () => {
+      const operator = (await ctx.db.selectFrom('admin_users').select('id').where('email', '=', ADMIN.email).executeTakeFirstOrThrow()).id;
+      const actor: Actor = { type: 'admin', id: operator };
+      const w = await new GrowthWorld(ctx.db).prepare();
+      const model = await w.model('HALO');
+      await ctx.services.media.setModelImage(model, { mime: 'image/jpeg', bytes: jpegPhoto(600, 600) }, SYSTEM_ACTOR);
+      // A draw in two weeks, published an hour ago (its name and photograph public from then); a LIVE RELEASE opened two days ago.
+      const draw = await w.drop({ mode: 'DRAW', modelId: model, title: 'The November draw', opens: dayFromNow(14), quantity: 10 });
+      await ctx.db.updateTable('drops').set({ published_at: new Date(Date.now() - 3_600_000) }).where('id', '=', draw.id).execute();
+      const live = await w.drop({ mode: 'LIVE', modelId: model, title: 'The October release', opens: dayFromNow(-2), quantity: 3 });
+      const channels = await ctx.services.links.channels();
+      const pngSize = (b: Buffer) => ({ png: b.subarray(1, 4).toString('latin1'), width: b.readUInt32BE(16), height: b.readUInt32BE(20) });
+      const paris = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(`${dayFromNow(14)}T12:00:00.000Z`));
+
+      const p = await open(ADMIN);
+      await p.evaluate((h) => (location.hash = h), `#/club/drops/${draw.id}`);
+      await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('The November draw');
+      expect(await p.locator('[data-testid=release-tab-release]').getAttribute('aria-current')).toBe('page');
+      await p.click('[data-testid=release-tab-campaign]');
+      await p.locator('[data-testid=campaign-make-links]').waitFor({ timeout: 15_000 });
+      expect(await p.locator('[data-testid=release-tab-campaign]').getAttribute('aria-current')).toBe('page');
+      expect(await p.locator('[data-testid=campaign-no-link]').count()).toBe(channels.length);
+      expect(await p.locator('[data-testid=campaign-readout-empty] .empty__text').textContent()).toBe('Figures appear once entries open.');
+      // TEASER by default, drawn in Chromium; FULL can be chosen (published, a photograph).
+      await p.locator('[data-testid=campaign-image]').waitFor({ timeout: 15_000 });
+      expect(await p.locator('[data-testid=campaign-image-teaser]').getAttribute('aria-pressed')).toBe('true');
+      expect(await p.locator('[data-testid=campaign-image]').getAttribute('data-filename')).toBe(`orbes-${paris}-teaser.png`);
+      expect(await p.locator('[data-testid=campaign-image]').getAttribute('alt')).not.toMatch(/HALO/);
+      await shot(p, 'campaign-draw');
+
+      await p.click('[data-testid=campaign-make-links]');
+      await toast(p, `${channels.length} links made.`);
+      await expect.poll(() => p.locator('[data-testid=campaign-link-address]').count(), { timeout: 15_000 }).toBe(channels.length);
+      expect(await p.locator('[data-testid=campaign-no-link]').count()).toBe(0);
+      expect(await p.locator('[data-testid=campaign-make-links]').count()).toBe(0);
+      const day = Number(paris.slice(8));
+      const month = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'][Number(paris.slice(5, 7)) - 1];
+      expect(await p.locator('[data-testid=campaign-link-address]').first().textContent()).toBe(`${new URL(origin).host}/go/release-${day}-${month}-instagram`);
+      expect(await ctx.db.selectFrom('audit_logs').select('action').where('action', '=', 'drop.campaign.links').where('target_id', '=', draw.id).execute()).toHaveLength(1);
+      await shot(p, 'campaign-draw-links');
+
+      const teaser = p.waitForEvent('download');
+      await p.click('[data-testid=campaign-download]');
+      const t = await teaser;
+      expect(t.suggestedFilename()).toBe(`orbes-${paris}-teaser.png`);
+      const teaserPng = readFileSync((await t.path())!);
+      expect(pngSize(teaserPng)).toEqual({ png: 'PNG', width: 1080, height: 1920 });
+
+      await p.click('[data-testid=campaign-image-full]');
+      await expect.poll(() => p.locator('[data-testid=campaign-image]').getAttribute('data-filename'), { timeout: 15_000 }).toBe(`orbes-${paris}-full.png`);
+      expect(await p.locator('[data-testid=campaign-image]').getAttribute('alt')).toMatch(/HALO/);
+      const full = p.waitForEvent('download');
+      await p.click('[data-testid=campaign-download]');
+      const f = await full;
+      expect(f.suggestedFilename()).toBe(`orbes-${paris}-full.png`);
+      const fullPng = readFileSync((await f.path())!);
+      expect(pngSize(fullPng)).toEqual({ png: 'PNG', width: 1080, height: 1920 });
+      if (SCREENSHOTS) {
+        writeFileSync(join(OUT_DIR, 'admin-links-campaign-teaser.png'), teaserPng);
+        writeFileSync(join(OUT_DIR, 'admin-links-campaign-full.png'), fullPng);
+      }
+      await shot(p, 'campaign-draw-full');
+      await p.context().close();
+
+      // A LIVE RELEASE opened two days ago: its links made by the service, one with a cost; its readout FINAL (its close passed).
+      const made = await ctx.services.campaign.makeLinks(live.id, actor);
+      await ctx.services.links.update(made.made[0]!.id, { cost: { minor: 20_000, currency: 'EUR' } }, actor);
+      await w.liveEntry(live, await w.account(dayFromNow(-20).slice(0, 10), 'FR'), dayFromNow(-2));
+      const phone = await open(ADMIN, 390);
+      await phone.evaluate((h) => (location.hash = h), `#/club/live/${live.id}?tab=campaign`);
+      await phone.locator('[data-testid=campaign-readout]').waitFor({ timeout: 15_000 });
+      expect(await phone.locator('#campaign-readout .panel__note').textContent()).toBe('Final · Last link · counted collectors only');
+      expect(await phone.locator('[data-testid=campaign-readout-row]').evaluateAll((rows) => rows.map((r) => (r as HTMLElement).dataset.kind))).toEqual([...made.made.map(() => 'link'), 'other', 'total']);
+      await phone.locator('[data-testid=campaign-image]').waitFor({ timeout: 15_000 });
+      await fits(phone);
+      await shot(phone, 'campaign-live-phone');
+      await phone.context().close();
+      const desk = await open(ADMIN);
+      await desk.evaluate((h) => (location.hash = h), `#/club/live/${live.id}?tab=campaign`);
+      await desk.locator('[data-testid=campaign-readout]').waitFor({ timeout: 15_000 });
+      await desk.locator('[data-testid=campaign-image]').waitFor({ timeout: 15_000 });
+      await shot(desk, 'campaign-live');
+      await desk.context().close();
+      if (SCREENSHOTS) {
+        const tight = await open(ADMIN, 1024);
+        await tight.evaluate((h) => (location.hash = h), `#/club/drops/${draw.id}?tab=campaign`);
+        await tight.locator('[data-testid=campaign-image]').waitFor({ timeout: 15_000 });
+        await fits(tight);
+        await shot(tight, 'campaign-draw-1024');
+        await tight.context().close();
+      }
     },
     STEP_TIMEOUT,
   );

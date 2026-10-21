@@ -4129,6 +4129,55 @@ export interface LinkReport {
   days: LinkDay[];
 }
 
+// ── A release's CAMPAIGN tab (plan MACRO M1 §2.1, C2; server/services/campaign.ts) ──
+
+/** Where a release's readout stands: before its first entry, from then, once it has ended or was cancelled. */
+export const CAMPAIGN_STAGES = ['UPCOMING', 'SO_FAR', 'FINAL'] as const;
+export type CampaignStage = (typeof CAMPAIGN_STAGES)[number];
+
+/** What a row of the readout brought in, under the last link. */
+export interface CampaignFigures {
+  entries: number;
+  buyers: number;
+  revenueMinor: number;
+}
+
+/** One link of the release in the readout: its figures, and its return when its cost is in the readout's currency. */
+export interface CampaignLinkRow {
+  link: LinkView;
+  figures: CampaignFigures;
+  returns: LinkReturn | null;
+}
+
+export interface CampaignReadout {
+  stage: CampaignStage;
+  /** When the release opens to its first entry (a draw's early access, else its opening; a LIVE RELEASE's room). */
+  opensAt: Iso;
+  currency: HouseCurrency;
+  links: CampaignLinkRow[];
+  /** OTHER SOURCES: every entry, buyer and revenue whose last link is not one of the release's. */
+  other: CampaignFigures;
+  /** TOTAL: the rows added up. */
+  total: CampaignFigures;
+}
+
+/** A channel with the release's links in it (archived ones included); covered: one of them is active. */
+export interface CampaignChannel {
+  id: string;
+  name: string;
+  position: number;
+  links: LinkView[];
+  covered: boolean;
+}
+
+/** GET /api/admin/releases/:id/campaign (AUDITOR); 404 DROP_NOT_FOUND for an after-room. */
+export interface ReleaseCampaign {
+  release: { id: string; mode: 'DRAW' | 'LIVE'; title: string; opensAt: Iso; closesAt: Iso; published: boolean; cancelled: boolean };
+  channels: CampaignChannel[];
+  missing: { id: string; name: string }[];
+  readout: CampaignReadout;
+}
+
 export const LINK_ATTRIBUTIONS = ['first', 'last'] as const;
 export type LinkAttribution = (typeof LINK_ATTRIBUTIONS)[number];
 export const LINK_MEASURES = ['signups', 'entries', 'purchases', 'revenue'] as const;
