@@ -30,11 +30,33 @@
  * the write sheet's own line on where the answer will appear, its context kept in the entry (a reload keeps it), and
  * CANCEL leaves it. Signed out, the sign-in page first, then here
  * on that subject (main.ts). No email address, phone or hours anywhere.
+ *
+ * FROM ORBES (macro scope D24, M3 and M4; lot M2 plan §1.5; /verify/messages/from-orbes): once the account has a house
+ * message, a subject of its own, placed by its newest message like any other, NEW while one is unread. Its messages
+ * oldest first like a conversation (SHOW EARLIER over them past a page of 30), each with its title, words and links; in
+ * place of the reply, the line that no reply is written there and WRITE TO ORBES CLIENT SERVICES, which opens GENERAL.
+ * Opening it reads it (NOW's line goes). Unreadable, the sentence, the server's words and TRY AGAIN in its part.
  */
 import { h } from '../../shared/dom.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { DESKTOP, LOOKBOOK, MESSAGES, PIECES, RELEASES } from '../copy.js';
-import { concerningTarget, messageProblem, messageText, orderContext, orderReference, pieceContext, threadItem, type ConcerningTarget, type ThreadItem, type WriteContext } from '../messages-model.js';
+import { DESKTOP, FROM_ORBES, LOOKBOOK, MESSAGES, PIECES, RELEASES } from '../copy.js';
+import {
+  concerningTarget,
+  houseList,
+  houseReadUpTo,
+  messageProblem,
+  messageText,
+  orderContext,
+  orderReference,
+  pieceContext,
+  threadItem,
+  type ConcerningTarget,
+  type HouseItem,
+  type HouseList,
+  type HouseTarget,
+  type ThreadItem,
+  type WriteContext,
+} from '../messages-model.js';
 import { seen } from '../seen.js';
 import type { SessionStore } from '../session.js';
 import type { AccountMessage, AccountThread, MessageContextInput, MessageContextKind } from '../types.js';
@@ -85,11 +107,14 @@ function subjectLine(text: string): (string | HTMLSpanElement)[] {
 }
 
 const GENERAL = 'general';
+/** FROM ORBES' subject: its address, /verify/messages/from-orbes (NOW's line of a house message opens it). */
+export const FROM_ORBES_KEY = 'from-orbes';
 
 /** A subject of the conversation: what its messages concern, and what a reply on it attaches. */
 interface Subject {
   key: string;
-  kind: MessageContextKind | 'GENERAL';
+  /** HOUSE: FROM ORBES, the house messages (lot M2), never answered. */
+  kind: MessageContextKind | 'GENERAL' | 'HOUSE';
   /** As its latest message names it (the server's label), or GENERAL. */
   title: string;
   /** The place it names in the app (its CONCERNING link), null for none (a scan, GENERAL). */
@@ -188,7 +213,7 @@ function subjectsOf(t: AccountThread, unreadCount: number, offsetMinutes: number
 }
 
 export interface MessagesPageDeps {
-  api: Pick<ApiClient, 'messages' | 'messagesUnreadCount' | 'readMessages' | 'writeMessage' | 'orders' | 'products'>;
+  api: Pick<ApiClient, 'messages' | 'messagesUnreadCount' | 'readMessages' | 'writeMessage' | 'orders' | 'products' | 'houseMessages' | 'readHouseMessages' | 'messagesUnread'>;
   session: SessionStore;
   /** The subject the address names, null for the page itself (the newest subject). */
   subject: string | null;
@@ -206,6 +231,8 @@ export interface MessagesPageDeps {
   onSignIn(): void;
   /** The conversation was read up to its latest message (NOW's line goes). */
   onRead(): void;
+  /** A house message's link (FROM ORBES): its place in the app. */
+  onHouse(target: HouseTarget): void;
 }
 
 export interface MessagesPageView {
@@ -232,6 +259,15 @@ class MessagesPage {
   private loadGen = 0;
   private thread: AccountThread | null = null;
   private subjects: Subject[] = [];
+  /**
+   * FROM ORBES: the house messages read (pages joined, newest first), null when the account has none or they could not
+   * be read (`houseError`, with `houseKnown` when one is known to be unread: its subject then says so).
+   */
+  private house: HouseList | null = null;
+  private houseError: string | null = null;
+  private houseKnown = false;
+  /** SHOW EARLIER: reading the next page, or why it could not be read. */
+  private earlier: { busy: boolean; error: string | null } = { busy: false, error: null };
   private selected: string | null;
   /** A subject opened from a place before its first message (its context), null for none. */
   private pending: WriteContext | null;
@@ -307,15 +343,24 @@ class MessagesPage {
     await this.read({ first: true });
   }
 
-  /** The conversation read (and how many answers are unread, on the first read), its subjects drawn. */
+  /**
+   * The conversation read (and, on the first read, how many answers are unread and FROM ORBES' first page), its subjects
+   * drawn.
+   */
   private async read(opts: { first?: boolean; select?: string } = {}): Promise<void> {
     const gen = ++this.loadGen;
     try {
-      const [t, count] = await Promise.all([this.deps.api.messages(), opts.first ? this.deps.api.messagesUnreadCount().catch(() => 0) : Promise.resolve(0)]);
+      const [t, count] = await Promise.all([
+        this.deps.api.messages(),
+        opts.first ? this.deps.api.messagesUnreadCount().catch(() => 0) : Promise.resolve(0),
+        opts.first ? this.readHouse() : Promise.resolve(),
+      ]);
       if (gen !== this.loadGen || this.disposed) return;
       this.thread = t;
       const before = new Map(this.subjects.map((s) => [s.key, s.unread]));
-      this.subjects = subjectsOf(t, count, -new Date().getTimezoneOffset());
+      // The count holds the house messages unread too (GET …/unread-count): the answers' NEW counts the answers alone.
+      const houseUnread = this.house ? this.house.unread : this.houseKnown ? 1 : 0;
+      this.subjects = this.withHouse(subjectsOf(t, Math.max(0, count - houseUnread), -new Date().getTimezoneOffset()));
       // NEW stays on a subject for the visit (the conversation is read as the page opens), until it is opened.
       if (!opts.first) for (const s of this.subjects) s.unread = (before.get(s.key) ?? false) && !this.opened.has(s.key);
       await this.place(opts.select ?? null);
@@ -333,6 +378,81 @@ class MessagesPage {
     }
     this.render();
     if (opts.first) this.toLatest();
+  }
+
+  /** FROM ORBES' first page; unreadable, whether one is unread (its subject is then listed with the failure). */
+  private async readHouse(): Promise<void> {
+    try {
+      const page = await this.deps.api.houseMessages(1);
+      this.house = page.total > 0 ? houseList(page, -new Date().getTimezoneOffset()) : null;
+      this.houseError = null;
+    } catch (e) {
+      this.deps.session.noteError(e);
+      this.house = null;
+      this.houseError = messageOf(e);
+      this.houseKnown = this.houseKnown || (await this.deps.api.messagesUnread().then((u) => u.house, () => false));
+    }
+  }
+
+  /** The subjects with FROM ORBES among them, by its newest message (first while it cannot be read); GENERAL empty last. */
+  private withHouse(list: Subject[]): Subject[] {
+    const list2 = list.filter((s) => s.key !== FROM_ORBES_KEY);
+    if (!this.house && !(this.houseError && this.houseKnown)) return list2;
+    const newest = this.house?.items[0]?.at ?? null;
+    const house: Subject = { key: FROM_ORBES_KEY, kind: 'HOUSE', title: FROM_ORBES.title, target: null, context: null, items: [], lastAt: newest, unread: this.house ? this.house.unread > 0 : this.houseKnown, pending: false };
+    if (!newest) return [house, ...list2];
+    const dated = list2.filter((s) => s.lastAt);
+    const at = dated.findIndex((s) => Date.parse(s.lastAt!) < Date.parse(newest));
+    if (at < 0) dated.push(house);
+    else dated.splice(at, 0, house);
+    return [...dated, ...list2.filter((s) => !s.lastAt)];
+  }
+
+  /** FROM ORBES opened: read up to its newest message (NOW's line goes); its messages keep their NEW for the visit. */
+  private readHouseShown(): void {
+    const upTo = houseReadUpTo(this.house);
+    if (!upTo || !this.house) return;
+    this.house = { ...this.house, unread: 0 };
+    void this.deps.api.readHouseMessages(upTo).then(() => this.deps.onRead(), () => undefined);
+  }
+
+  /** FROM ORBES read again (TRY AGAIN in its part). */
+  private async retryHouse(): Promise<void> {
+    const gen = this.loadGen;
+    await this.readHouse();
+    if (gen !== this.loadGen || this.disposed) return;
+    this.subjects = this.withHouse(this.subjects);
+    const s = this.subjects.find((x) => x.key === FROM_ORBES_KEY);
+    if (s) s.unread = false;
+    if (this.selected === FROM_ORBES_KEY) this.readHouseShown();
+    this.render();
+    this.toLatest();
+  }
+
+  /** SHOW EARLIER: FROM ORBES' next page, over what is shown; the conversation keeps its place under it. */
+  private async houseMore(): Promise<void> {
+    const list = this.house;
+    if (!list || this.earlier.busy) return;
+    const gen = this.loadGen;
+    this.earlier = { busy: true, error: null };
+    this.render();
+    try {
+      const page = await this.deps.api.houseMessages(list.pages + 1);
+      if (gen !== this.loadGen || this.disposed || this.house !== list) return;
+      this.house = { ...houseList(page, -new Date().getTimezoneOffset(), list), unread: list.unread };
+      this.earlier = { busy: false, error: null };
+    } catch (e) {
+      this.deps.session.noteError(e);
+      if (gen !== this.loadGen || this.disposed) return;
+      this.earlier = { busy: false, error: messageOf(e) };
+    }
+    const box = this.root.querySelector<HTMLElement>('.d-msg__conversation');
+    const fromEnd = box ? box.scrollHeight - box.scrollTop : 0;
+    this.render();
+    const again = this.root.querySelector<HTMLElement>('.d-msg__conversation');
+    if (again) again.scrollTop = again.scrollHeight - fromEnd;
+    this.root.querySelector<HTMLElement>('.d-msg__earlier .n-tl')?.focus({ preventScroll: true });
+    this.keepEnds();
   }
 
   /**
@@ -356,6 +476,7 @@ class MessagesPage {
     this.opened.add(this.selected);
     const s = this.subjects.find((x) => x.key === this.selected);
     if (s) s.unread = false;
+    if (this.selected === FROM_ORBES_KEY) this.readHouseShown();
     this.deps.onSubject(this.selected, this.pending);
   }
 
@@ -398,11 +519,18 @@ class MessagesPage {
     this.opened.add(key);
     const s = this.subjects.find((x) => x.key === key);
     if (s) s.unread = false;
+    if (key === FROM_ORBES_KEY) this.readHouseShown();
     if (this.pending && key !== this.pendingKey(this.pending)) this.pending = null;
     this.deps.onSubject(key, this.pending);
     this.render();
     this.toLatest();
     this.root.querySelector<HTMLElement>(`.d-msg__subject[data-key="${CSS.escape(key)}"]`)?.focus({ preventScroll: true });
+  }
+
+  /** WRITE TO ORBES CLIENT SERVICES under FROM ORBES: GENERAL, its reply ready to write. */
+  private toGeneral(): void {
+    this.choose(GENERAL);
+    this.root.querySelector<HTMLElement>('#messages-reply')?.focus({ preventScroll: true });
   }
 
   /**
@@ -494,7 +622,8 @@ class MessagesPage {
 
   /** A subject in the list: its name, its latest message's date and time, NEW while an unread answer stands on it. */
   private row(s: Subject, current: boolean): HTMLElement {
-    const at = s.items.at(-1)?.author.split(' · ').slice(1).join(' · ') ?? '';
+    const latest = s.kind === 'HOUSE' ? this.house?.items[0]?.author : s.items.at(-1)?.author;
+    const at = latest?.split(' · ').slice(1).join(' · ') ?? '';
     const a = appAnchor(
       messagesPath(s.key),
       ['d-msg__subject', current ? 'is-current' : null, s.unread ? 'is-unread' : null],
@@ -517,7 +646,7 @@ class MessagesPage {
     return h(
       'header',
       { class: 'd-msg__head' },
-      h('div', { class: 'd-msg__head-line' }, s.kind === 'GENERAL' ? null : h('p', { class: 'n-g n-lb d-msg__concerning', text: MESSAGES.concerning }), see),
+      h('div', { class: 'd-msg__head-line' }, s.kind === 'GENERAL' || s.kind === 'HOUSE' ? null : h('p', { class: 'n-g n-lb d-msg__concerning', text: MESSAGES.concerning }), see),
       h('h2', { class: 'n-g d-msg__subject-title', id: 'messages-subject' }, ...subjectLine(s.title)),
     );
   }
@@ -529,6 +658,7 @@ class MessagesPage {
 
   /** The conversation (or what is said before its first message), then the reply at its foot. */
   private pane(s: Subject): HTMLElement {
+    if (s.kind === 'HOUSE') return this.housePane();
     const conversation =
       s.items.length > 0
         ? h(
@@ -552,6 +682,56 @@ class MessagesPage {
             h('p', { class: 'n-tx d-msg__none', text: s.pending ? MESSAGES.where : MESSAGES.emptyThread }),
           );
     return h('section', { class: 'd-msg__pane', attrs: { 'aria-labelledby': 'messages-subject' } }, conversation, this.reply(s));
+  }
+
+  /**
+   * FROM ORBES: its messages oldest first (SHOW EARLIER over them past a page), each its author line (ORBES and when, NEW
+   * on one unread as the page opened), title, words and links; at its foot, in place of the reply, the line that no
+   * reply is written there and WRITE TO ORBES CLIENT SERVICES (GENERAL).
+   */
+  private housePane(): HTMLElement {
+    const list = this.house;
+    const earlier = this.earlier;
+    const conversation = list
+      ? h(
+          'ol',
+          { class: 'd-msg__conversation d-msg__house', attrs: { 'aria-labelledby': 'messages-subject', tabindex: 0 } },
+          list.more || earlier.busy || earlier.error
+            ? h(
+                'li',
+                { class: 'd-msg__earlier' },
+                earlier.error ? h('p', { class: 'n-err d-msg__earlier-error', attrs: { role: 'alert' } }, `${FROM_ORBES.earlierFailed} ${earlier.error}`) : null,
+                earlier.busy
+                  ? h('p', { class: 'n-g n-lb n-ivc', attrs: { role: 'status' }, text: FROM_ORBES.loading })
+                  : textLink(earlier.error ? FROM_ORBES.retry : FROM_ORBES.earlier, { onOpen: () => void this.houseMore() }),
+              )
+            : null,
+          ...[...list.items].reverse().map((m) => this.houseMessage(m)),
+        )
+      : h(
+          'div',
+          { class: 'd-msg__conversation d-msg__conversation--none d-msg__house-failed' },
+          failedState({ sentence: FROM_ORBES.unreadable, reason: this.houseError ?? '', retry: FROM_ORBES.retry, onRetry: () => void this.retryHouse() }),
+        );
+    const foot = h(
+      'div',
+      { class: 'd-msg__reply d-msg__noreply' },
+      h('p', { class: 'n-sm d-msg__noreply-text', text: FROM_ORBES.noReply }),
+      button(MESSAGES.write, { outline: true, onClick: () => this.toGeneral(), extraClass: 'd-msg__noreply-write' }),
+    );
+    return h('section', { class: 'd-msg__pane', attrs: { 'aria-labelledby': 'messages-subject' } }, conversation, foot);
+  }
+
+  /** A house message of FROM ORBES. */
+  private houseMessage(m: HouseItem): HTMLElement {
+    return h(
+      'li',
+      { class: ['d-msg__message', 'n-messages__item', 'd-msg__message--house', 'd-msg__house-message'], attrs: { 'data-testid': 'house-message' } },
+      h('p', { class: 'n-g n-lb n-messages__author d-msg__author' }, h('span', {}, ...withNumerals(m.author)), m.unread ? h('span', { class: 'd-msg__house-new', text: MESSAGES.new }) : null),
+      h('p', { class: 'n-g n-t3 n-ivc d-msg__house-title' }, ...withNumerals(m.title)),
+      h('p', { class: 'n-tx n-messages__body d-msg__body', text: m.body }),
+      m.links.length > 0 ? h('p', { class: 'd-msg__house-links' }, ...m.links.map((l) => textLink(l.label, { onOpen: () => this.deps.onHouse(l.target), extraClass: 'd-msg__house-link' }))) : null,
+    );
   }
 
   /** YOUR REPLY (YOUR MESSAGE before the first), its hint, SEND; CANCEL too on a subject not written yet. */

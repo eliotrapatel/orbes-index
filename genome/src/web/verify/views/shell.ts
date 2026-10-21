@@ -25,7 +25,7 @@
  */
 import { h } from '../../shared/dom.js';
 import type { ApiClient } from '../api.js';
-import type { ConcerningTarget, WriteContext } from '../messages-model.js';
+import type { ConcerningTarget, HouseTarget, WriteContext } from '../messages-model.js';
 import type { ContactModel } from '../view-model.js';
 import { CHROME, DESKTOP } from '../copy.js';
 import { accountButton, chapterOf, railLive, type ChapterId } from '../nocturne-model.js';
@@ -40,7 +40,7 @@ import { CHAPTER_PATHS, showRailLive } from '../../shared/chapters.js';
 import { LANDING_PATH, PIECES_PATH } from './common.js';
 import { appAnchor, CHAPTERS, drawSound, footer, icon, monogram } from './nocturne.js';
 import { OrderSheet, registerOrderSheet } from './order-sheet.js';
-import { registerMessages, registerWriteSheet, WriteSheet } from './write.js';
+import { registerMessages, registerWriteSheet, WriteSheet, type MessagesPart } from './write.js';
 import { closeStoryPreview } from './story.js';
 import { dockRail, isDesktop, onDesktopChange, wordmarkLink } from '../../shared/desktop.js';
 import { SCAN_PAGE_PATH } from './desktop-scan.js';
@@ -57,8 +57,8 @@ export interface ShellDeps {
   onSignIn(): void;
   /** Desktop (decision 5): the account button opens YOUR ACCOUNT's page on a computer. */
   onAccount(): void;
-  /** Desktop: SEE MESSAGES and NOW's READ open MESSAGES' page on a computer. */
-  onMessagesPage(): void;
+  /** Desktop: SEE MESSAGES and NOW's READ open MESSAGES' page on a computer (on FROM ORBES for `part` 'house'). */
+  onMessagesPage(part?: MessagesPart): void;
   /** Desktop (decision 5): WRITE TO ORBES CLIENT SERVICES on a computer, MESSAGES on what it attaches. */
   onWrite(context: WriteContext | null): void;
   /** Desktop: what the account's pages ask of the app (their addresses, YOUR WISHLIST, NOW after SIGN OUT). */
@@ -73,8 +73,10 @@ export interface ShellDeps {
   onScanPage(): void;
   /** MESSAGES' CONCERNING link: the place a message concerned, in the app. */
   onConcerning(target: ConcerningTarget): void;
-  /** NOW's line follows MESSAGES once read. */
-  onMessagesRead(): void;
+  /** NOW's line follows MESSAGES once read: the conversation, or FROM ORBES (lot M2). */
+  onMessagesRead(part: MessagesPart): void;
+  /** A house message's link (lot M2, FROM ORBES): its place in the app (the sheet keeps YOUR SIZES and IN USE). */
+  onHouse(target: HouseTarget): void;
   /** FORGOTTEN PASSWORD? of the write sheet's sign-in: ORBES Client Services' email. */
   recoveryContact(): Promise<ContactModel | undefined>;
 }
@@ -238,7 +240,8 @@ export class Shell {
       },
       outside: () => [this.column, this.ring],
       onConcerning: (target) => deps.onConcerning(target),
-      onRead: () => deps.onMessagesRead(),
+      onHouse: (target) => deps.onHouse(target),
+      onRead: (part) => deps.onMessagesRead(part),
     });
     this.page = new AccountPage({
       api: deps.api,
@@ -255,7 +258,8 @@ export class Shell {
       },
       outside: () => [],
       onConcerning: (target) => deps.onConcerning(target),
-      onRead: () => deps.onMessagesRead(),
+      onHouse: (target) => deps.onHouse(target),
+      onRead: (part) => deps.onMessagesRead(part),
       host: deps.accountHost,
     });
     this.write = new WriteSheet({
@@ -278,10 +282,10 @@ export class Shell {
       if (this.write.isOpen) this.write.close();
       this.orderSheet.open(request);
     });
-    registerMessages((trigger) => {
+    registerMessages((trigger, part) => {
       if (this.write.isOpen) this.write.close();
-      if (isDesktop()) deps.onMessagesPage();
-      else this.sheet.openMessages(trigger);
+      if (isDesktop()) deps.onMessagesPage(part);
+      else this.sheet.openMessages(trigger, part);
     });
     document.body.append(this.ring, this.sheet.el, this.write.el, this.orderSheet.el);
 
@@ -321,8 +325,8 @@ export class Shell {
    * scan mark SCAN; on a phone the scan lives on NOW, which a result keeps marking.
    */
   /** Desktop: the account sheet on one of its views (a window narrowed to a phone's on that page, main.ts). */
-  openAccountSheet(view: AccountView): void {
-    this.sheet.openOn(view, this.account);
+  openAccountSheet(view: AccountView, part?: MessagesPart): void {
+    this.sheet.openOn(view, this.account, part);
   }
 
   /** Desktop: the account sheet closed, the view it showed (null: it was not open). */

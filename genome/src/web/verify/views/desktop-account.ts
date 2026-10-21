@@ -378,7 +378,7 @@ export class AccountPage extends AccountSheet {
       a.dataset.key = key;
       return h('li', { class: 'd-acct__cell' }, a);
     };
-    const unread = this.unreadCount !== null ? (this.unreadCount > 0 ? DESKTOP.account.unread(this.unreadCount) : null) : this.unread ? MESSAGES.new : null;
+    const unread = this.unreadCount !== null ? (this.unreadCount > 0 ? DESKTOP.account.unread(this.unreadCount) : null) : this.unread || this.houseUnread ? MESSAGES.new : null;
     return h(
       'ul',
       { class: 'd-acct__cards', attrs: { 'aria-label': ACCOUNT.title } },

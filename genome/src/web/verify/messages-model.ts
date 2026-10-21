@@ -9,8 +9,9 @@
  * modelId (never the slug); SCAN its scanId, `about` WARRANTY in ORBES CARE only. The server checks each and
  * writes its own label; the one here is what the collector reads before sending.
  */
-import { MESSAGES } from './copy.js';
-import type { AccountMessage, AccountThread, MessageContextInput, MessageContextKind } from './types.js';
+import { HOUSE_MOMENT_LINKS, type HouseLinkKind, type HouseMomentName } from '../../shared/house-words.js';
+import { FROM_ORBES, HOUSE, MESSAGES } from './copy.js';
+import type { AccountHouseMessage, AccountMessage, AccountThread, MessageContextInput, MessageContextKind } from './types.js';
 import { formatDateTime } from './view-model.js';
 
 /** What a button attaches to a message, and the label the sheet shows under CONCERNING. */
@@ -160,7 +161,107 @@ export function threadModel(t: AccountThread, offsetMinutes: number): ThreadMode
   };
 }
 
-/** NOW's line while an answer is unread: MESSAGES, its sentence and READ; null otherwise. */
-export function nowMessagesLine(unread: boolean): { label: string; sentence: string; action: string } | null {
-  return unread ? { label: MESSAGES.now.label, sentence: MESSAGES.now.sentence, action: MESSAGES.now.read } : null;
+/**
+ * NOW's line: while an answer is unread, MESSAGES, its sentence and READ (the conversation); else while a house message
+ * is (lot M2, M4), «A new message from ORBES.» and READ (FROM ORBES); null otherwise.
+ */
+export function nowMessagesLine(unread: boolean, houseUnread = false): { label: string; sentence: string; action: string; house: boolean } | null {
+  if (unread) return { label: MESSAGES.now.label, sentence: MESSAGES.now.sentence, action: MESSAGES.now.read, house: false };
+  if (houseUnread) return { label: FROM_ORBES.now.label, sentence: FROM_ORBES.now.sentence, action: FROM_ORBES.now.read, house: true };
+  return null;
+}
+
+// ── FROM ORBES (macro scope D24, M3 and M4; lot M2 plan §1.5) ─────────────────────────────────────────────────────
+
+/**
+ * Where a house message's link leads in the app: a piece (on its ORBES CARE tab for CARING FOR YOUR PIECE), MY PIECES,
+ * YOUR SIZES, the tier's IN USE (the account), THE COLLECTION.
+ */
+export type HouseTarget = { to: 'piece'; id: string; tab?: 'care' } | { to: 'my-pieces' } | { to: 'sizes' } | { to: 'in-use' } | { to: 'collection' };
+
+export interface HouseLink {
+  kind: HouseLinkKind;
+  label: string;
+  target: HouseTarget;
+}
+
+/**
+ * A moment's links (fixed by its kind, src/shared/house-words.ts HOUSE_MOMENT_LINKS), each to its place: CARING FOR
+ * YOUR PIECE to the piece's ORBES CARE tab, the piece itself, and both to MY PIECES once the piece is no longer held (the
+ * piece's own link then says MY PIECES). A custom message, or a moment the app does not know, has none.
+ */
+export function houseLinks(moment: string | null, pieceRef: string | null, pieceHeld: boolean | null): HouseLink[] {
+  if (!moment || !Object.hasOwn(HOUSE_MOMENT_LINKS, moment)) return [];
+  const piece = pieceRef && pieceHeld === true && /^O\d{2}-[A-Z]-\d{5,6}$/i.test(pieceRef) ? pieceRef.toUpperCase() : null;
+  return HOUSE_MOMENT_LINKS[moment as HouseMomentName].map((kind): HouseLink => {
+    switch (kind) {
+      case 'CARE':
+        return { kind, label: HOUSE.links.CARE, target: piece ? { to: 'piece', id: piece, tab: 'care' } : { to: 'my-pieces' } };
+      case 'PIECE':
+        return piece ? { kind, label: HOUSE.links.PIECE, target: { to: 'piece', id: piece } } : { kind: 'MY_PIECES', label: HOUSE.links.MY_PIECES, target: { to: 'my-pieces' } };
+      case 'SIZES':
+        return { kind, label: HOUSE.links.SIZES, target: { to: 'sizes' } };
+      case 'IN_USE':
+        return { kind, label: HOUSE.links.IN_USE, target: { to: 'in-use' } };
+      case 'MY_PIECES':
+        return { kind, label: HOUSE.links.MY_PIECES, target: { to: 'my-pieces' } };
+      case 'COLLECTION':
+        return { kind, label: HOUSE.links.COLLECTION, target: { to: 'collection' } };
+    }
+  });
+}
+
+/** A house message as MESSAGES draws it. */
+export interface HouseItem {
+  id: string;
+  /** `ORBES · 21 OCT 2026 · 10:02`, at this device's offset. */
+  author: string;
+  title: string;
+  /** Plain paragraphs, their line breaks kept. */
+  body: string;
+  links: HouseLink[];
+  /** Unread when the list was read: NEW beside its author line for the visit. */
+  unread: boolean;
+  /** When it was delivered (ISO). */
+  at: string;
+}
+
+export function houseItem(m: AccountHouseMessage, offsetMinutes: number): HouseItem {
+  return {
+    id: m.id,
+    author: `${HOUSE.author} · ${formatDateTime(m.at, offsetMinutes)}`,
+    title: m.title,
+    body: m.body,
+    links: houseLinks(m.moment, m.pieceRef, m.pieceHeld),
+    unread: m.unread,
+    at: m.at,
+  };
+}
+
+/** The house messages read so far (pages joined, newest first): their items, whether earlier ones remain, and how many are unread. */
+export interface HouseList {
+  items: HouseItem[];
+  /** The pages read (1 for the first). */
+  pages: number;
+  total: number;
+  unread: number;
+  /** More than read: SHOW EARLIER. */
+  more: boolean;
+}
+
+/** The first page read, or a further page joined to what was read (an item already listed is not listed again). */
+export function houseList(page: { messages: AccountHouseMessage[]; unread: number; total: number }, offsetMinutes: number, before: HouseList | null = null): HouseList {
+  const seen = new Set(before?.items.map((i) => i.id) ?? []);
+  const items = [...(before?.items ?? []), ...page.messages.filter((m) => !seen.has(m.id)).map((m) => houseItem(m, offsetMinutes))];
+  return { items, pages: (before?.pages ?? 0) + 1, total: page.total, unread: page.unread, more: page.messages.length > 0 && items.length < page.total };
+}
+
+/** The time a list's opening reads it up to (its newest item), while something is unread; null otherwise. */
+export function houseReadUpTo(list: HouseList | null): string | null {
+  return list && list.unread > 0 ? (list.items[0]?.at ?? null) : null;
+}
+
+/** The tab MESSAGES opens on: the one with an unread item, the conversation first when both or neither (plan §1.5). */
+export function messagesOpensOn(answerUnread: boolean, houseUnread: boolean): 'conversation' | 'house' {
+  return houseUnread && !answerUnread ? 'house' : 'conversation';
 }

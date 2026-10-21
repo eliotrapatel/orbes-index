@@ -142,6 +142,8 @@ export interface TabItem {
   label: string;
   /** The count beside the label (`.tabs sup`, in the reading face). */
   count?: number;
+  /** A mark beside the label (MESSAGES' NEW, lot M2: the part holds something unread), in ink. */
+  mark?: string;
 }
 
 /**
@@ -159,11 +161,21 @@ export function tabs(items: readonly TabItem[], opts: { selected: string; label:
         class: ['n-g', `n-${kind}__tab`],
         id: `${opts.idPrefix}-${t.id}`,
         // With its count, its name says both apart (« ORDERS 4 »), as the eye reads them.
-        attrs: { type: 'button', role: 'tab', 'aria-selected': String(t.id === opts.selected), 'aria-controls': `${opts.idPrefix}-${t.id}-panel`, 'aria-label': t.count !== undefined ? `${t.label} ${t.count}` : undefined, tabindex: t.id === opts.selected ? 0 : -1 },
+        attrs: {
+          type: 'button',
+          role: 'tab',
+          'aria-selected': String(t.id === opts.selected),
+          'aria-controls': `${opts.idPrefix}-${t.id}-panel`,
+          'aria-label': t.count !== undefined || t.mark ? [t.label, t.count, t.mark].filter((x) => x !== undefined).join(' ') : undefined,
+          tabindex: t.id === opts.selected ? 0 : -1,
+        },
         on: { click: () => opts.onSelect(t.id) },
       },
       t.label,
       t.count !== undefined ? h('span', { class: 'n-tabs__count n-num', text: String(t.count) }) : null,
+      // Apart from the word by a space too, so it reads as a word of its own (FROM ORBES NEW).
+      t.mark ? ' ' : null,
+      t.mark ? h('span', { class: 'n-tabs__mark', text: t.mark }) : null,
     ),
   );
   list.addEventListener('keydown', (ev) => {

@@ -35,7 +35,9 @@ import { OwnershipPanel } from './ownership.js';
 
 type Opener = (context: WriteContext | null, trigger: HTMLElement) => void;
 let opener: Opener | null = null;
-let messagesOpener: ((trigger: HTMLElement | null) => void) | null = null;
+/** Which part of MESSAGES opens: the conversation (its newest subject on a computer), or FROM ORBES (lot M2). */
+export type MessagesPart = 'conversation' | 'house';
+let messagesOpener: ((trigger: HTMLElement | null, part?: MessagesPart) => void) | null = null;
 
 /** The app's write sheet, which every WRITE TO ORBES CLIENT SERVICES opens (null: none, the button does nothing). */
 export function registerWriteSheet(open: Opener | null): void {
@@ -43,13 +45,16 @@ export function registerWriteSheet(open: Opener | null): void {
 }
 
 /** The account sheet on MESSAGES (SEE MESSAGES, NOW's READ). */
-export function registerMessages(open: ((trigger: HTMLElement | null) => void) | null): void {
+export function registerMessages(open: ((trigger: HTMLElement | null, part?: MessagesPart) => void) | null): void {
   messagesOpener = open;
 }
 
-/** Open the account sheet on MESSAGES, `trigger` getting the focus back when it closes. */
-export function openMessages(trigger: HTMLElement | null): void {
-  messagesOpener?.(trigger);
+/**
+ * Open the account sheet on MESSAGES, `trigger` getting the focus back when it closes; on FROM ORBES with `part` 'house'
+ * (NOW's line of a house message).
+ */
+export function openMessages(trigger: HTMLElement | null, part?: MessagesPart): void {
+  messagesOpener?.(trigger, part);
 }
 
 /**

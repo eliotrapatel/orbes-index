@@ -2474,3 +2474,29 @@ export const RELEASE_NOTICES = Object.freeze({
  * still lives here.
  */
 export { HOUSE } from '../../shared/house-words.js';
+
+/**
+ * FROM ORBES (macro scope D24, M3 and M4; lot M2 plan §1.5, step M2.5): the house messages in MESSAGES, read-only. On a
+ * phone, MESSAGES gains two tabs once the account has one (ORBES CLIENT SERVICES, the conversation as before, and FROM
+ * ORBES), each with NEW while it holds something unread; on a computer, FROM ORBES is a subject of the messages page,
+ * WRITE TO ORBES CLIENT SERVICES in place of the reply. NOW's line says a new one while no answer is unread. The author
+ * line and each link's words are HOUSE's (src/shared/house-words.ts), the console's preview draws the same.
+ */
+export const FROM_ORBES = Object.freeze({
+  /** The tab, the subject and the list's name. */
+  title: 'FROM ORBES',
+  /** The other tab: the conversation with ORBES Client Services (MESSAGES' own words for its author). */
+  conversation: 'ORBES CLIENT SERVICES',
+  /** Under the list (M3): no reply; the phone's way to write is the conversation's tab, a computer's the button. */
+  noReply: 'Messages from ORBES cannot be answered.',
+  toWrite: 'To write, open',
+  /** NOW's line while a house message is unread and no answer is. */
+  now: Object.freeze({ label: 'MESSAGES', sentence: 'A new message from ORBES.', read: 'READ' }),
+  loading: 'ONE MOMENT…',
+  /** The list could not be read: followed by the server's message, then TRY AGAIN. */
+  unreadable: 'Messages from ORBES could not be shown just now.',
+  retry: 'TRY AGAIN',
+  /** More than a page (30): the next one, older. */
+  earlier: 'SHOW EARLIER',
+  earlierFailed: 'Earlier messages could not be shown just now.',
+});

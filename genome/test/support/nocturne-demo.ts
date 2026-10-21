@@ -117,6 +117,7 @@ import type { DecideClaimInput } from '../../src/server/services/warranty-claims
 import { packAndShip, stockPieces } from './fulfil.js';
 import { createLiveRelease, holdPieces, type LiveFixture, type LiveReleaseOptions } from './live.js';
 import { poolDraw, withDrawSizes } from './draws.js';
+import { HOUSE_DEFAULT_WORDS, houseDate, houseMoney, renderHouseWords, type HouseMomentName, type HouseValues } from '../../src/shared/house-words.js';
 
 export type DemoVariant =
   | 'full'
@@ -146,7 +147,8 @@ export type DemoVariant =
   | 'birthday-credit'
   | 'care-used'
   | 'orbes-care'
-  | 'gallery';
+  | 'gallery'
+  | 'house';
 
 export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'full',
@@ -177,6 +179,7 @@ export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'care-used',
   'orbes-care',
   'gallery',
+  'house',
 ]);
 
 /** NOW: Monday 5 October 2026, 18:49 in Paris (16:49 UTC), the boards' afternoon. Every clock of the stage is fixed here. */
@@ -280,7 +283,8 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
   // The draw-sizes stage (plan NEXT LOT §3.6.F) tells the full story, then adds a draw in sizes, open. The stages of the
   // collector's side of an order (plan NEXT LOT §3.6) tell the full story, their state writing the rest.
   const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'draw-selected', 'email', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes', 'birthday-credit', 'care-used', 'orbes-care', 'gallery'] as const;
-  const story = ((OWN_STAGES as readonly DemoVariant[]).includes(variant) ? 'full' : variant) as Exclude<DemoVariant, (typeof OWN_STAGES)[number]>;
+  // The house messages' stage (lot M2, FROM ORBES) tells the draw-leads story, MESSAGES' own.
+  const story = (variant === 'house' ? 'draw-leads' : (OWN_STAGES as readonly DemoVariant[]).includes(variant) ? 'full' : variant) as Exclude<DemoVariant, (typeof OWN_STAGES)[number] | 'house'>;
   if (story === 'empty') await seedEmpty(w);
   else if (story === 'stress') await seedStress(w);
   else {
@@ -304,6 +308,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
     if (variant === 'care-used') await seedCareUsed(w);
     if (variant === 'orbes-care') await seedOrbesCare(w);
     if (variant === 'gallery') await seedGallery(w);
+    if (variant === 'house') await seedHouse(w);
   }
   clock.set(NOCTURNE_NOW);
   // Every account's session opened now: a capture signs in with its cookie.
@@ -1369,6 +1374,57 @@ async function seedEmail(w: World): Promise<void> {
   demo.links.reset = link[1]!;
   demo.links.unsubscribe = ctx.services.email.unsubscribeToken('RELEASE_NOTICE', you.id);
   demo.links.unsubscribeFounding = ctx.services.email.unsubscribeToken('FOUNDING_ANNOUNCEMENT', founding.id);
+}
+
+/**
+ * Lot M2 (macro scope D24, M3 and M4; plan §1.5), the stage `house`: MESSAGES of you with three house messages and no
+ * conversation. YOUR FIRST PIECE (a moment, the day after its first registration: CARING FOR YOUR PIECE and YOUR SIZES)
+ * and A CREDIT ENDS SOON (IN USE), both read; then, this morning, a message of ORBES to TITANE and above, unread.
+ */
+async function seedHouse(w: World): Promise<void> {
+  const { ctx, admin, clock, demo } = w;
+  const you = demo.accounts.you!;
+  const yours = demo.pieces.yours;
+  if (!yours) throw new Error('seedHouse: no piece yours');
+  const moment = (m: HouseMomentName, values: HouseValues) => ({
+    title: renderHouseWords(HOUSE_DEFAULT_WORDS[m].title, values),
+    body: renderHouseWords(HOUSE_DEFAULT_WORDS[m].body, values),
+  });
+  await ctx.db
+    .insertInto('house_deliveries')
+    .values([
+      {
+        account_id: you.id,
+        source: 'MOMENT',
+        moment: 'FIRST_REGISTRATION',
+        ...moment('FIRST_REGISTRATION', { piece: 'MONOLITHE IN STEEL' }),
+        piece_ref: yours,
+        dedupe_key: `FIRST_REGISTRATION:${you.id}`,
+        delivered_at: at('2026-09-16T07:30:00Z'),
+        read_at: at('2026-09-16T19:02:00Z'),
+      },
+      {
+        account_id: you.id,
+        source: 'MOMENT',
+        moment: 'CREDIT_EXPIRING',
+        ...moment('CREDIT_EXPIRING', { amount: houseMoney(5000, 'EUR'), expires: houseDate('2026-10-10') }),
+        dedupe_key: `CREDIT_EXPIRING:demo:${you.id}`,
+        delivered_at: at('2026-10-03T07:30:00Z'),
+        read_at: at('2026-10-03T12:41:00Z'),
+      },
+    ])
+    .execute();
+  clock.set(at('2026-10-05T08:10:00Z'));
+  const message = await ctx.services.houseMessages.create(
+    {
+      title: 'THE AUTUMN RELEASES',
+      body: 'The autumn releases open in the coming weeks. Each one is announced in THE RELEASES first, with its date and its hour in Paris.\n\nThank you for being part of ORBES.',
+      audience: { tier: 1 },
+    },
+    admin,
+  );
+  await ctx.services.houseMessages.send(message.id, { phrase: 'SEND' }, admin);
+  await ctx.services.houseMessages.deliverDue(at('2026-10-05T08:15:00Z'));
 }
 
 async function seedSizes(w: World, variant: 'full' | 'room'): Promise<void> {

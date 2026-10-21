@@ -386,6 +386,87 @@
     margin-top: var(--d-s2);
   }
 
+  /* FROM ORBES (lot M2): a house message's author line (NEW at the end of its measure while it was unread), its title
+     12 px under it in ink, its words, its links 18 px under them, side by side. */
+  html:not(.d-touch) body.nocturne .d-msg__house-message > .d-msg__author {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--d-s4);
+    max-width: 36em;
+  }
+
+  html:not(.d-touch) body.nocturne .d-msg__house-new {
+    flex: none;
+  }
+
+  html:not(.d-touch) body.nocturne .d-msg__house-title {
+    max-width: 36em;
+    margin: var(--d-s3) 0 0;
+    overflow-wrap: anywhere;
+  }
+
+  html:not(.d-touch) body.nocturne .d-msg__house-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--d-s3) var(--d-s5);
+    margin: 18px 0 0;
+  }
+
+  /* SHOW EARLIER over the oldest message shown, past a page of 30. */
+  html:not(.d-touch) body.nocturne .d-msg__earlier {
+    padding: var(--d-s5) 0;
+    border-bottom: 1px solid var(--vault-hairline);
+  }
+
+  html:not(.d-touch) body.nocturne .d-msg__earlier > .n-err {
+    margin: 0 0 var(--d-s3);
+  }
+
+  /* FROM ORBES unreadable: its sentence and reason on the edge, TRY AGAIN under them (§10.24). */
+  html:not(.d-touch) body.nocturne .d-msg__house-failed > .n-failed {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    max-width: 36em;
+    margin: 0;
+    text-align: left;
+  }
+
+  html:not(.d-touch) body.nocturne .d-msg__house-failed > .n-failed > .n-failed__reason {
+    margin-top: var(--d-s2);
+  }
+
+  html:not(.d-touch) body.nocturne .d-msg__house-failed > .n-failed > .n-btn {
+    width: auto;
+    min-width: 280px;
+    margin-top: var(--d-s6);
+    padding: 0 var(--d-s6);
+  }
+
+  /* In place of the reply: no reply here, and WRITE TO ORBES CLIENT SERVICES at the foot's right, as SEND stands. */
+  html:not(.d-touch) body.nocturne .d-msg__noreply {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--d-s4) var(--d-s5);
+  }
+
+  /* The sentence keeps its line: in a narrow part the button goes under it, at its width. */
+  html:not(.d-touch) body.nocturne .d-msg__noreply-text {
+    flex: 1 1 18em;
+    min-width: 0;
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-msg__noreply > .n-btn {
+    flex: none;
+    width: auto;
+    min-width: 280px;
+    margin: 0;
+    padding: 0 var(--d-s7);
+  }
+
   /* Below 1280 the subjects take a column more (1–5) and the conversation 6–12, so a subject's name holds its line. */
   @media (max-width: 1279.98px) {
     html:not(.d-touch) body.nocturne :is(.d-msg__top, .d-msg__list) {

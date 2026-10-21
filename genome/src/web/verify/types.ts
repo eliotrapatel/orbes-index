@@ -1382,6 +1382,40 @@ export interface AccountThread {
   unread: boolean;
 }
 
+/**
+ * A house message (macro scope D24, M3 and M4; lot M2 plan §1.5; GET /api/v1/account/house-messages): written by ORBES,
+ * read-only. A moment's words were rendered at its delivery; its links are fixed by its kind (src/shared/house-words.ts
+ * HOUSE_MOMENT_LINKS); a custom message has none.
+ */
+export interface AccountHouseMessage {
+  id: string;
+  source: 'MOMENT' | 'CUSTOM';
+  /** A moment's kind (FIRST_REGISTRATION…); null for a custom message. */
+  moment: string | null;
+  title: string;
+  body: string;
+  /** The piece a first registration or a year of ownership names (O26-J-00184); null otherwise. */
+  pieceRef: string | null;
+  /** Whether the account still holds that piece (its link then opens it, else MY PIECES); null without a piece. */
+  pieceHeld: boolean | null;
+  /** When it was delivered (ISO). */
+  at: string;
+  unread: boolean;
+}
+
+/** A page of the account's house messages, newest first (30 a page), with how many are unread and how many in all. */
+export interface AccountHousePage {
+  messages: AccountHouseMessage[];
+  unread: number;
+  total: number;
+}
+
+/** GET /api/v1/account/messages/unread: an answer unread (`unread`), a house message unread (`house`). */
+export interface MessagesUnread {
+  unread: boolean;
+  house: boolean;
+}
+
 /** YOUR SIZES (AC-01; GET and PUT /api/v1/account/sizes): a ring size, and centimetres for the others; null: not set. */
 export type SizeKind = 'RING' | 'BRACELET' | 'WRIST' | 'NECKLACE';
 export type AccountSizes = Record<SizeKind, number | null>;

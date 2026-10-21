@@ -3605,6 +3605,71 @@ body.nocturne[data-screen="live"] {
   margin-top: 8px;
 }
 
+/* MESSAGES' two parts (lot M2, FROM ORBES): ORBES CLIENT SERVICES and FROM ORBES, underlined tabs under the title; each
+   part's first list stands right under their hairline. */
+.n-messages__parts {
+  margin-top: 30px;
+}
+
+/* Each tab on one line; on the narrowest phones (under 375 px) a little less tracking, so ORBES CLIENT SERVICES and
+   FROM ORBES with its NEW still stand side by side. */
+.n-messages__parts .n-tabsx__tab {
+  white-space: nowrap;
+}
+
+@media (max-width: 374.98px) {
+  .n-messages__parts .n-tabsx__tab {
+    letter-spacing: 0.12em;
+  }
+}
+
+.n-messages__part > .n-messages__list:first-child {
+  margin-top: 0;
+  border-top: 0;
+}
+
+/* A house message: its author line (NEW at its right while it was unread), its title in ink, its words, its links. */
+.n-house__author {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.n-house__new {
+  flex: none;
+}
+
+.n-house__title {
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+
+.n-house__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  margin-top: 18px;
+}
+
+.n-house__more,
+.n-house__earlier-wait {
+  margin-top: 22px;
+}
+
+.n-house__earlier-error {
+  margin-top: 18px;
+}
+
+.n-house__failed {
+  margin-top: 32px;
+}
+
+/* Under the list: no reply here, the conversation's tab named in the sentence, a link in its face (the terms' links'
+   own: underlined, a 44 px zone that leaves the line be). */
+.n-house__note {
+  margin-top: 18px;
+}
+
 /* NOW's line under the hero, before YOUR PIECES, while an answer is unread. */
 .now__messages {
   align-items: center;

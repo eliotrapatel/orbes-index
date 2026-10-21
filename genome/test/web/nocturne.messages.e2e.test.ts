@@ -345,6 +345,73 @@ const CASES: { state: UiState; check: Check }[] = [
       expect(sent.stored).toBe(sent.sheet);
     },
   },
+  // ── FROM ORBES (lot M2, macro scope D24 M3 and M4), on the stage `house`: NOW's line, READ, read; the way to write;
+  // a moment's links. The phone, then a computer (the house messages made unread again first). ──
+  {
+    state: writing('now-messages-house', 'messages-house-phone'),
+    check: async (page, demo, stage) => {
+      const you = demo.accounts.you!;
+      const unread = () => stage.ctx.db.selectFrom('house_deliveries').select('id').where('account_id', '=', you.id).where('read_at', 'is', null).execute().then((r) => r.length);
+      expect(await unread()).toBe(1);
+      const line = page.locator('.now__messages');
+      expect(await line.innerText()).toContain('A new message from ORBES.');
+      await line.getByRole('button', { name: 'READ' }).click();
+      // MESSAGES opens on FROM ORBES: its tab selected, the unread message NEW for the visit; read on the server.
+      const sheet = page.locator('.n-account:not([hidden])');
+      await sheet.locator('.n-house__list').waitFor({ timeout: 15_000 });
+      expect(await sheet.locator('#messages-part-house').getAttribute('aria-selected')).toBe('true');
+      expect(await sheet.locator('.n-house__item').first().locator('.n-house__new').innerText()).toBe('NEW');
+      expect(await sheet.locator('.n-house__item').allInnerTexts()).toHaveLength(3);
+      await expect.poll(unread).toBe(0);
+      // No reply under them (M3): no field; the line's link opens the conversation, its reply ready to write.
+      expect(await sheet.locator('.n-messages__part textarea').count()).toBe(0);
+      await sheet.locator('.n-house__note').getByRole('button', { name: 'ORBES CLIENT SERVICES' }).click();
+      expect(await sheet.locator('#messages-part-conversation').getAttribute('aria-selected')).toBe('true');
+      expect(await page.evaluate(() => document.activeElement?.id)).toBe('messages-reply');
+      // NOW's line went once read.
+      await page.keyboard.press('Escape');
+      await expect.poll(() => page.locator('.now__messages').count()).toBe(0);
+      // Nothing unread: MESSAGES opens on the conversation, FROM ORBES a tab away; a moment's link opens its place.
+      await page.locator('.n-hd .n-acct:has(> .n-mono):not([hidden])').click();
+      const row = sheet.locator('[data-key="messages"]');
+      await row.waitFor();
+      await expect.poll(() => row.innerText()).not.toContain('NEW');
+      await row.click();
+      await sheet.locator('.n-messages__parts').waitFor({ timeout: 15_000 });
+      expect(await sheet.locator('#messages-part-conversation').getAttribute('aria-selected')).toBe('true');
+      await sheet.locator('#messages-part-house').click();
+      await sheet.getByRole('button', { name: 'CARING FOR YOUR PIECE' }).click();
+      await page.waitForURL(`**/verify/pieces/${demo.pieces.yours}`);
+      await page.locator('.view--piece [role="tab"][aria-selected="true"]', { hasText: 'ORBES CARE' }).waitFor({ timeout: 15_000 });
+    },
+  },
+  {
+    state: writing('now-messages-house', 'messages-house-computer', { size: { width: 1440, height: 900 }, ready: '.view--now[data-ready]' }),
+    check: async (page, demo, stage) => {
+      const you = demo.accounts.you!;
+      await stage.ctx.db.updateTable('house_deliveries').set({ read_at: null }).where('account_id', '=', you.id).where('source', '=', 'CUSTOM').execute();
+      await page.reload();
+      const line = page.locator('.now__messages');
+      await line.waitFor({ timeout: 15_000 });
+      await line.getByRole('button', { name: 'READ' }).click();
+      // MESSAGES on its subject FROM ORBES (its address), read on the server.
+      await page.waitForURL('**/verify/messages/from-orbes');
+      await page.locator('.d-msg ol.d-msg__house').waitFor({ timeout: 15_000 });
+      expect(await page.locator('.d-msg__subject.is-current').getAttribute('data-key')).toBe('from-orbes');
+      expect(await page.locator('.d-msg__house-new').count()).toBe(1);
+      await expect.poll(() => stage.ctx.db.selectFrom('house_deliveries').select('id').where('account_id', '=', you.id).where('read_at', 'is', null).execute().then((r) => r.length)).toBe(0);
+      // In place of the reply: the sentence and WRITE TO ORBES CLIENT SERVICES, which opens GENERAL ready to write.
+      expect(await page.locator('.d-msg__pane textarea').count()).toBe(0);
+      expect(await page.locator('.d-msg__noreply').innerText()).toContain('Messages from ORBES cannot be answered.');
+      await page.locator('.d-msg__noreply').getByRole('button', { name: WRITE }).click();
+      await page.waitForURL('**/verify/messages/general');
+      expect(await page.evaluate(() => document.activeElement?.id)).toBe('messages-reply');
+      // A moment's IN USE: the account's page.
+      await page.locator('.d-msg__subject[data-key="from-orbes"]').click();
+      await page.getByRole('button', { name: 'IN USE' }).click();
+      await page.waitForURL('**/verify/account');
+    },
+  },
 ];
 
 describe.skipIf(!HAS_CHROMIUM)('WRITE TO ORBES CLIENT SERVICES and MESSAGES (CS-01, Chromium)', () => {

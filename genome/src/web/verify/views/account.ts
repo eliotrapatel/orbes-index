@@ -73,7 +73,7 @@ import { LEGAL_PATH } from '../../shared/legal.js';
 import { ApiError, type ApiClient } from '../api.js';
 import { addressesSummary, addressLines, mayAddAddress } from '../addresses-model.js';
 import { countryName } from '../../../shared/countries.js';
-import { ACCOUNT, ACCOUNT_ADDRESSES, ACCOUNT_PASSWORD, ACCOUNT_PROFILE, ACCOUNT_SIZES, MESSAGES, MODE, PIECES, RELEASE_NOTICES, SIGN_UP, SOUND, TASTES, TIER, WISHLIST } from '../copy.js';
+import { ACCOUNT, ACCOUNT_ADDRESSES, ACCOUNT_PASSWORD, ACCOUNT_PROFILE, ACCOUNT_SIZES, FROM_ORBES, MESSAGES, MODE, PIECES, RELEASE_NOTICES, SIGN_UP, SOUND, TASTES, TIER, WISHLIST } from '../copy.js';
 import { CLUB_PATH } from '../club-model.js';
 import { countryOptions } from '../addresses-model.js';
 import { guaranteeBlocks } from '../guarantee-model.js';
@@ -96,7 +96,7 @@ import {
   type ProfileDraft,
   type TasteChoice,
 } from '../profile-model.js';
-import { messageProblem, threadModel, type ConcerningTarget, type ThreadModel } from '../messages-model.js';
+import { houseList, houseReadUpTo, messageProblem, messagesOpensOn, threadModel, type ConcerningTarget, type HouseItem, type HouseList, type HouseTarget, type ThreadModel } from '../messages-model.js';
 import type { SessionStore } from '../session.js';
 import { SIZE_FIELDS, sizeFieldValue, sizeOptions, sizesFromForm, sizesSummary } from '../sizes-model.js';
 import type { SoundSwitch } from '../sound.js';
@@ -108,7 +108,8 @@ import { accountPageOf } from '../seen-model.js';
 import type { AccountAddresses, AccountProfileView, AccountSizes, ClubStatus, SavedAddress, SizeKind } from '../types.js';
 import { addressFields } from './address.js';
 import { FormError, messageOf, MIN_PASSWORD, nocturneForm } from './forms.js';
-import { button, definitionList, field, finishDot, icon, leadRow, selectField, switchControl, textLink, tierDots } from './nocturne.js';
+import { button, definitionList, failedState, field, finishDot, icon, leadRow, selectField, switchControl, tabs, textLink, tierDots } from './nocturne.js';
+import type { MessagesPart } from './write.js';
 import { PIECES_PATH, withNumerals } from './common.js';
 
 /** Today in Paris, 'YYYY-MM-DD' (YEAR's latest choice is 13 years before it; the server is the judge). */
@@ -131,6 +132,8 @@ export interface AccountSheetDeps {
     | 'writeMessage'
     | 'readMessages'
     | 'messagesUnread'
+    | 'houseMessages'
+    | 'readHouseMessages'
     | 'sizes'
     | 'saveSizes'
     | 'addresses'
@@ -162,8 +165,13 @@ export interface AccountSheetDeps {
   outside(): HTMLElement[];
   /** A message's place in the app (MESSAGES' CONCERNING link): the sheet closes, the app opens it. */
   onConcerning(target: ConcerningTarget): void;
-  /** NEW was read here (MESSAGES opened): NOW's line follows. */
-  onRead?(): void;
+  /**
+   * A house message's link (FROM ORBES, lot M2): the sheet closes, the app opens its place (YOUR SIZES and IN USE stay in
+   * the sheet).
+   */
+  onHouse(target: HouseTarget): void;
+  /** NEW was read here (MESSAGES opened: the conversation, or FROM ORBES): NOW's line follows. */
+  onRead?(part: MessagesPart): void;
 }
 
 export type AccountSheetView = 'account' | 'password' | 'messages' | 'sizes' | 'addresses' | 'profile';
@@ -183,6 +191,24 @@ export class AccountSheet {
   protected soundInput: HTMLInputElement | null = null;
   /** An answer is unread (MESSAGES' NEW); false until read. */
   protected unread = false;
+  /** A house message is unread (MESSAGES' NEW too, lot M2); false until read. */
+  protected houseUnread = false;
+  /**
+   * FROM ORBES (macro scope D24, M3 and M4; lot M2): the house messages read for this opening of MESSAGES (pages joined),
+   * null while they read, when the account has none (its MESSAGES as before: no tabs), or unreadable (`houseError`).
+   */
+  protected house: HouseList | null = null;
+  protected houseError: string | null = null;
+  /** SHOW EARLIER: reading the next page, or why it could not be read. */
+  protected houseEarlier: { busy: boolean; error: string | null } = { busy: false, error: null };
+  /** The part of MESSAGES shown (its tabs once the account has a house message), and the part asked for at opening. */
+  protected part: MessagesPart = 'conversation';
+  protected askedPart: MessagesPart | null = null;
+  /** The parts shown during this opening of MESSAGES: their NEW goes, and each is read as it is shown. */
+  protected readonly partsShown = new Set<MessagesPart>();
+  /** The conversation held an unread answer when MESSAGES opened (its tab's NEW), and the time to read it up to. */
+  protected threadNew = false;
+  protected threadUpTo: string | null = null;
   /** MESSAGES: the conversation as read, null while it reads (or unreadable: `threadError`). */
   protected thread: ThreadModel | null = null;
   protected threadError: string | null = null;
@@ -284,11 +310,14 @@ export class AccountSheet {
     this.club = club;
   }
 
-  /** The sheet, opened on MESSAGES (SEE MESSAGES, NOW's READ); `trigger` gets the focus back when it closes. */
-  openMessages(trigger: HTMLElement | null): void {
+  /**
+   * The sheet, opened on MESSAGES (SEE MESSAGES, NOW's READ); `trigger` gets the focus back when it closes. `part`
+   * 'house' opens it on FROM ORBES (NOW's line of a house message).
+   */
+  openMessages(trigger: HTMLElement | null, part?: MessagesPart): void {
     if (this.deps.session.state.status !== 'signed-in') return;
     if (!this.isOpen) this.open(trigger ?? document.body);
-    this.openThread();
+    this.openThread(part);
   }
 
   /** Desktop: the view the sheet shows (a phone's window widened to a computer's: that page, main.ts). */
@@ -300,9 +329,9 @@ export class AccountSheet {
    * Desktop: the sheet opened on one of its views (a computer's window narrowed to a phone's while that page
    * of the account was shown, main.ts).
    */
-  openOn(view: View, trigger: HTMLElement): void {
+  openOn(view: View, trigger: HTMLElement, part?: MessagesPart): void {
     if (view === 'messages') {
-      this.openMessages(trigger);
+      this.openMessages(trigger, part);
       return;
     }
     this.open(trigger);
@@ -395,7 +424,7 @@ export class AccountSheet {
         return null;
       }),
       this.deps.api.products().catch(() => null),
-      this.deps.api.messagesUnread().catch(() => false),
+      this.deps.api.messagesUnread().catch(() => ({ unread: false, house: false })),
       this.deps.api.sizes().catch(() => null),
       this.deps.api.addresses().catch(() => null),
       this.deps.api.profile().catch(() => null),
@@ -416,8 +445,11 @@ export class AccountSheet {
       this.profile = profile;
       if (this.view === 'profile') this.showProfile();
     }
-    // MESSAGES opened meanwhile has read it: NEW stays off.
-    this.unread = this.view === 'messages' ? false : unread;
+    // MESSAGES opened meanwhile has read them: NEW stays off.
+    if (this.view !== 'messages') {
+      this.unread = unread.unread;
+      this.houseUnread = unread.house;
+    }
     this.listed = pieces?.length ?? 0;
     this.wishCount = wishlistCount(wishlist);
     this.deps.onClub(club);
@@ -589,21 +621,31 @@ export class AccountSheet {
 
   // ── MESSAGES (plan NEXT-NINE, CS-01) ─────────────────────────────────────
 
-  /** The first row: MESSAGES, NEW at its right while an answer is unread (no number, no badge on the header). */
+  /**
+   * The first row: MESSAGES, NEW at its right while an answer or a house message is unread (no number, no badge on the
+   * header).
+   */
   protected messagesRow(): HTMLElement {
     const row = leadRow(MESSAGES.title, { onOpen: () => this.openThread(), attrs: { 'data-key': 'messages' }, extraClass: 'n-account__messages' });
-    if (this.unread) row.insertBefore(h('span', { class: 'n-g n-lb n-ivc n-row__new', text: MESSAGES.new }), row.lastChild);
+    if (this.unread || this.houseUnread) row.insertBefore(h('span', { class: 'n-g n-lb n-ivc n-row__new', text: MESSAGES.new }), row.lastChild);
     return row;
   }
 
-  protected openThread(): void {
+  protected openThread(part?: MessagesPart): void {
     this.view = 'messages';
     this.notice = null;
     this.thread = null;
     this.threadError = null;
+    this.house = null;
+    this.houseError = null;
+    this.houseEarlier = { busy: false, error: null };
+    this.askedPart = part ?? null;
+    this.partsShown.clear();
+    this.threadNew = false;
+    this.threadUpTo = null;
     this.render();
     this.focusView();
-    void this.readThread();
+    void this.readThread(false, true);
   }
 
   protected closeThread(): void {
@@ -612,31 +654,148 @@ export class AccountSheet {
     this.panel.querySelector<HTMLElement>('[data-key="messages"]')?.focus({ preventScroll: true });
   }
 
-  /** The conversation, read; then read up to its latest message (NEW and NOW's line go). */
-  protected async readThread(focusReply = false): Promise<void> {
+  /**
+   * The conversation, read (and, as MESSAGES opens, the first page of FROM ORBES beside it); the part MESSAGES opens on
+   * chosen (the one with something unread, the conversation first when both or neither), then read as it is shown (NEW
+   * and NOW's line go).
+   */
+  protected async readThread(focusReply = false, opening = false): Promise<void> {
     const gen = ++this.readGen;
-    try {
-      const t = await this.deps.api.messages();
-      if (gen !== this.readGen || !this.isOpen || this.view !== 'messages') return;
-      this.thread = threadModel(t, -new Date().getTimezoneOffset());
+    const offset = -new Date().getTimezoneOffset();
+    const [conversation, house] = await Promise.all([
+      this.deps.api.messages().then(
+        (v) => ({ v }),
+        (e: unknown) => ({ e }),
+      ),
+      opening
+        ? this.deps.api.houseMessages(1).then(
+            (v) => ({ v }),
+            (e: unknown) => ({ e }),
+          )
+        : Promise.resolve(null),
+    ]);
+    if (gen !== this.readGen || !this.isOpen || this.view !== 'messages') return;
+    if ('v' in conversation) {
+      const t = conversation.v;
+      this.thread = threadModel(t, offset);
       this.threadError = null;
       this.unread = false;
-      if (this.thread.readUpTo && t.unread) {
-        void this.deps.api.readMessages(this.thread.readUpTo).then(
-          () => this.deps.onRead?.(),
-          () => undefined,
-        );
+      if (opening) this.threadNew = t.unread;
+      this.threadUpTo = t.unread ? this.thread.readUpTo : null;
+    } else {
+      this.deps.session.noteError(conversation.e);
+      if (this.deps.session.state.status !== 'signed-in') return;
+      this.threadError = messageOf(conversation.e);
+    }
+    if (house) {
+      if ('v' in house) {
+        this.house = house.v.total > 0 ? houseList(house.v, offset) : null;
+        this.houseError = null;
+        if (house.v.total === 0) this.houseUnread = false;
+      } else {
+        this.deps.session.noteError(house.e);
+        this.houseError = messageOf(house.e);
       }
+    }
+    if (opening) {
+      const asked = this.askedPart === 'house' && this.hasHouse();
+      // FROM ORBES unreadable while one is known unread: it opens there, on its failure and TRY AGAIN.
+      const houseNew = this.house ? this.house.unread > 0 : this.houseError !== null && this.houseUnread;
+      this.part = asked ? 'house' : messagesOpensOn(this.threadNew, houseNew);
+    }
+    this.showPart(this.part);
+    this.render();
+    if (this.part === 'conversation') {
+      const list = this.panel.querySelector<HTMLElement>('.n-messages__list');
+      list?.lastElementChild?.scrollIntoView({ block: 'end' });
+    }
+    if (focusReply) this.panel.querySelector<HTMLElement>('textarea')?.focus({ preventScroll: true });
+    else this.focusView();
+  }
+
+  /** Whether MESSAGES has its two parts: the account has a house message (or one is unread while they cannot be read). */
+  protected hasHouse(): boolean {
+    return this.house !== null || (this.houseError !== null && (this.houseUnread || this.askedPart === 'house'));
+  }
+
+  /** A part shown: its NEW goes, and what it holds unread is read (up to the latest answer, or the newest house message). */
+  protected showPart(part: MessagesPart): void {
+    this.part = part;
+    this.partsShown.add(part);
+    if (part === 'conversation' && this.threadUpTo) {
+      const upTo = this.threadUpTo;
+      this.threadUpTo = null;
+      void this.deps.api.readMessages(upTo).then(
+        () => this.deps.onRead?.('conversation'),
+        () => undefined,
+      );
+    }
+    const houseUpTo = part === 'house' ? houseReadUpTo(this.house) : null;
+    if (houseUpTo && this.house) {
+      this.house = { ...this.house, unread: 0 };
+      this.houseUnread = false;
+      void this.deps.api.readHouseMessages(houseUpTo).then(
+        () => this.deps.onRead?.('house'),
+        () => undefined,
+      );
+    }
+  }
+
+  /** A tab chosen: its part drawn in place, the tab keeping the focus. */
+  protected choosePart(part: MessagesPart, focus: 'tab' | 'reply' = 'tab'): void {
+    if (part === this.part) return;
+    this.showPart(part);
+    this.render();
+    if (focus === 'reply') this.panel.querySelector<HTMLElement>('#messages-reply')?.focus({ preventScroll: true });
+    else this.panel.querySelector<HTMLElement>(`#messages-part-${part}`)?.focus({ preventScroll: true });
+  }
+
+  /** FROM ORBES read again (TRY AGAIN), its first page. */
+  protected async readHouse(): Promise<void> {
+    const gen = this.readGen;
+    this.houseError = null;
+    this.render();
+    try {
+      const page = await this.deps.api.houseMessages(1);
+      if (gen !== this.readGen || !this.isOpen || this.view !== 'messages') return;
+      this.house = houseList(page, -new Date().getTimezoneOffset());
+      this.houseError = null;
+      if (this.part === 'house') this.showPart('house');
     } catch (e) {
       this.deps.session.noteError(e);
       if (gen !== this.readGen || !this.isOpen) return;
-      this.threadError = messageOf(e);
+      this.houseError = messageOf(e);
     }
     this.render();
-    const list = this.panel.querySelector<HTMLElement>('.n-messages__list');
-    list?.lastElementChild?.scrollIntoView({ block: 'end' });
-    if (focusReply) this.panel.querySelector<HTMLElement>('textarea')?.focus({ preventScroll: true });
-    else this.focusView();
+    this.panel.querySelector<HTMLElement>('#messages-part-house')?.focus({ preventScroll: true });
+  }
+
+  /** SHOW EARLIER: the next page of FROM ORBES, under what is shown. */
+  protected async houseMore(): Promise<void> {
+    const list = this.house;
+    if (!list || this.houseEarlier.busy) return;
+    const gen = this.readGen;
+    const first = list.items.length;
+    this.houseEarlier = { busy: true, error: null };
+    this.render();
+    try {
+      const page = await this.deps.api.houseMessages(list.pages + 1);
+      if (gen !== this.readGen || !this.isOpen || this.view !== 'messages' || this.house !== list) return;
+      this.house = { ...houseList(page, -new Date().getTimezoneOffset(), list), unread: list.unread };
+      this.houseEarlier = { busy: false, error: null };
+    } catch (e) {
+      this.deps.session.noteError(e);
+      if (gen !== this.readGen || !this.isOpen) return;
+      this.houseEarlier = { busy: false, error: messageOf(e) };
+    }
+    this.render();
+    // The first message of the page read gets the focus (or SHOW EARLIER again, after a failure).
+    const items = this.panel.querySelectorAll<HTMLElement>('.n-house__item');
+    const next = items[first] ?? this.panel.querySelector<HTMLElement>('.n-house__earlier');
+    if (next) {
+      if (next.classList.contains('n-house__item')) next.tabIndex = -1;
+      next.focus({ preventScroll: true });
+    }
   }
 
   protected messagesView(): HTMLElement[] {
@@ -650,11 +809,37 @@ export class AccountSheet {
     const out: (HTMLElement | null)[] = [
       h('div', { class: 'n-px n-messages__head' }, back, h('h3', { class: 'n-g n-t3 n-ivc n-messages__title', id: 'account-messages-title', attrs: { tabindex: -1 }, text: MESSAGES.title })),
     ];
-    if (this.threadError) out.push(h('p', { class: 'n-px n-err n-messages__error', attrs: { role: 'alert' }, text: this.threadError }));
-    if (!t) {
-      if (!this.threadError) out.push(h('p', { class: 'n-px n-g n-lb n-messages__loading', attrs: { role: 'status' }, text: PIECES.loading }));
+    if (!t && !this.threadError) {
+      out.push(h('p', { class: 'n-px n-g n-lb n-messages__loading', attrs: { role: 'status' }, text: PIECES.loading }));
       return out.filter((x): x is HTMLElement => x !== null);
     }
+    // An account without a house message: the conversation as before, no tabs (lot M2 plan §1.5).
+    if (!this.hasHouse()) return [...out, ...this.conversationPart()].filter((x): x is HTMLElement => x !== null);
+    const parts: { id: MessagesPart; label: string; mark?: string }[] = [
+      { id: 'conversation', label: FROM_ORBES.conversation, mark: this.threadNew && !this.partsShown.has('conversation') ? MESSAGES.new : undefined },
+      { id: 'house', label: FROM_ORBES.title, mark: (this.house?.unread ?? 0) > 0 && !this.partsShown.has('house') ? MESSAGES.new : undefined },
+    ];
+    out.push(
+      h(
+        'div',
+        { class: 'n-px n-messages__parts' },
+        tabs(parts, { selected: this.part, label: MESSAGES.title, idPrefix: 'messages-part', kind: 'tabsx', onSelect: (id) => this.choosePart(id as MessagesPart) }),
+      ),
+      h(
+        'div',
+        { class: 'n-messages__part', id: `messages-part-${this.part}-panel`, attrs: { role: 'tabpanel', 'aria-labelledby': `messages-part-${this.part}` } },
+        ...(this.part === 'house' ? this.housePart() : this.conversationPart()).filter((x): x is HTMLElement => x !== null),
+      ),
+    );
+    return out.filter((x): x is HTMLElement => x !== null);
+  }
+
+  /** The conversation with ORBES Client Services, as MESSAGES always showed it: the list, then YOUR REPLY. */
+  protected conversationPart(): (HTMLElement | null)[] {
+    const t = this.thread;
+    const out: (HTMLElement | null)[] = [];
+    if (this.threadError) out.push(h('p', { class: 'n-px n-err n-messages__error', attrs: { role: 'alert' }, text: this.threadError }));
+    if (!t) return out;
     if (t.empty) out.push(h('p', { class: 'n-px n-sm n-messages__empty', text: t.empty }));
     if (t.items.length > 0) {
       out.push(
@@ -683,7 +868,77 @@ export class AccountSheet {
       );
     }
     out.push(this.replyForm(t.replyLabel));
-    return out.filter((x): x is HTMLElement => x !== null);
+    return out;
+  }
+
+  /**
+   * FROM ORBES (macro scope D24, M3): the house messages, newest first, each its author line (ORBES and when, NEW on one
+   * unread when MESSAGES opened), its title, its words and its links; SHOW EARLIER past a page; then, as no reply is
+   * written under them, the line that leads to the conversation.
+   */
+  protected housePart(): (HTMLElement | null)[] {
+    const list = this.house;
+    if (!list) {
+      return [
+        h(
+          'div',
+          { class: 'n-px n-house__failed' },
+          failedState({ sentence: FROM_ORBES.unreadable, reason: this.houseError ?? '', retry: FROM_ORBES.retry, onRetry: () => void this.readHouse(), retryClass: 'n-house__retry' }),
+        ),
+      ];
+    }
+    const earlier = this.houseEarlier;
+    return [
+      h('ol', { class: 'n-px n-messages__list n-house__list', attrs: { 'aria-label': FROM_ORBES.title } }, ...list.items.map((m) => this.houseRow(m))),
+      earlier.error ? h('p', { class: 'n-px n-err n-house__earlier-error', attrs: { role: 'alert' } }, `${FROM_ORBES.earlierFailed} ${earlier.error}`) : null,
+      earlier.busy
+        ? h('p', { class: 'n-px n-g n-lb n-ivc n-ctr n-house__earlier-wait', attrs: { role: 'status' }, text: FROM_ORBES.loading })
+        : list.more
+          ? h('p', { class: 'n-px n-ctr n-house__more' }, h('button', { class: 'n-g n-tl n-house__earlier', attrs: { type: 'button' }, on: { click: () => void this.houseMore() }, text: earlier.error ? FROM_ORBES.retry : FROM_ORBES.earlier }))
+          : null,
+      h(
+        'p',
+        { class: 'n-px n-sm n-house__note' },
+        `${FROM_ORBES.noReply} ${FROM_ORBES.toWrite} `,
+        h('button', { class: 'n-own__terms-link n-house__to', attrs: { type: 'button' }, on: { click: () => this.choosePart('conversation', 'reply') }, text: FROM_ORBES.conversation }),
+        '.',
+      ),
+    ];
+  }
+
+  /** A house message of the list. */
+  protected houseRow(m: HouseItem): HTMLElement {
+    return h(
+      'li',
+      { class: ['n-messages__item', 'n-house__item'], attrs: { 'data-testid': 'house-message' } },
+      h(
+        'p',
+        { class: 'n-g n-lb n-messages__author n-house__author' },
+        h('span', {}, ...withNumerals(m.author)),
+        m.unread ? h('span', { class: 'n-ivc n-house__new', text: MESSAGES.new }) : null,
+      ),
+      h('p', { class: 'n-g n-t3 n-ivc n-house__title' }, ...withNumerals(m.title)),
+      h('p', { class: 'n-tx n-messages__body', text: m.body }),
+      m.links.length > 0 ? h('p', { class: 'n-house__links' }, ...m.links.map((l) => textLink(l.label, { onOpen: () => this.toHouse(l.target), extraClass: 'n-house__link' }))) : null,
+    );
+  }
+
+  /** A house message's link: YOUR SIZES and IN USE in the sheet; anywhere else, the sheet closes and the app opens it. */
+  protected toHouse(target: HouseTarget): void {
+    if (target.to === 'sizes') {
+      this.openSizes();
+      return;
+    }
+    if (target.to === 'in-use') {
+      this.view = 'account';
+      this.render();
+      const inUse = this.panel.querySelector<HTMLElement>('.n-account__in-use') ?? this.panel.querySelector<HTMLElement>('#account-title');
+      inUse?.scrollIntoView({ block: 'start' });
+      this.focusTitle();
+      return;
+    }
+    this.close();
+    this.deps.onHouse(target);
   }
 
   protected toConcerning(target: ConcerningTarget): void {

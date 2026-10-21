@@ -142,6 +142,41 @@ export const DESKTOP_MOVED: readonly DesktopMoved[] = [
     now: 'In MESSAGES, under each subject, opened in turn; NOW’s own words on NOW.',
     where: ['subjects', 'under'],
   },
+  {
+    states: ['account-messages-house-unread'],
+    values: ['CONCERNING MONOLITHE IN STEEL · O26-J-00184'],
+    reason: 'Decision 5 (D14, HANDOVER §3): MESSAGES gathers a subject’s messages on a computer, its name in the list of subjects and CONCERNING said once at the head of its conversation, not over each message.',
+    now: 'CONCERNING at the head of the conversation, MONOLITHE IN STEEL · O26-J-00184 in the list of subjects.',
+    shownAs: ['CONCERNING', 'MONOLITHE IN STEEL · O26-J-00184'],
+  },
+  {
+    // Lot M2 (M3): a computer has no tabs; under FROM ORBES the button WRITE TO ORBES CLIENT SERVICES opens GENERAL.
+    states: ['account-messages-house', 'account-messages-house-stress'],
+    values: ['Messages from ORBES cannot be answered. To write, open ORBES CLIENT SERVICES.'],
+    reason: 'Decision 5 (D14) and lot M2 (M3): FROM ORBES is a subject of MESSAGES on a computer, no tabs; in place of the reply, its sentence and the button WRITE TO ORBES CLIENT SERVICES, which opens GENERAL.',
+    now: 'At the foot of FROM ORBES: the sentence, and WRITE TO ORBES CLIENT SERVICES beside it.',
+    shownAs: ['Messages from ORBES cannot be answered.', 'WRITE TO ORBES CLIENT SERVICES'],
+  },
+  {
+    states: ['account-messages-house'],
+    values: ['NEW'],
+    reason: 'The run, not the desktop: FROM ORBES is read as it opens, so on the stage only its first opening (desk-messages-house) shows the message unread; its light and 1024 twins open it after.',
+    now: 'NEW beside the unread message’s author line the first time FROM ORBES opens (desk-messages-house).',
+    run: true,
+  },
+  {
+    states: ['account-messages-house', 'account-messages-house-stress'],
+    reason: 'Decision 5 (D14) and lot M2: MESSAGES is a page in two parts on a computer, FROM ORBES and the conversation’s subjects beside the one chosen; the phone’s sheet stood over NOW.',
+    now: 'In MESSAGES, under each subject (FROM ORBES among them), opened in turn; NOW’s own words on NOW.',
+    where: ['subjects', 'under'],
+  },
+  {
+    // Read on NOW alone: opening FROM ORBES there would read it, and NOW's line of a house message would go.
+    states: ['account-messages-house-unread'],
+    reason: 'Decision 5 (D14) and lot M2: MESSAGES is a page of its own on a computer, opened on the newest subject (the conversation, FROM ORBES with NEW in the list); the phone’s sheet stood over NOW.',
+    now: 'NOW’s own words on NOW, its line of the message from ORBES still unread.',
+    where: 'under',
+  },
   ...[['draw-drawn'], ['draw-place-held', '2 · NO TIER · 0 YEARS']].map(([id, more]) => ({
     states: [id!],
     values: ['1 · TITANE · 0 YEARS', 'YOURS', ...(more ? [more] : [])],

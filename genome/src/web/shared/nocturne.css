@@ -1065,6 +1065,12 @@ body.nocturne .n-column > * {
   vertical-align: top;
 }
 
+/* A tab's mark (MESSAGES' NEW, lot M2): beside its word, in ink, the tab's own type. */
+.n-tabs__mark {
+  margin-left: 4px;
+  color: var(--vault-ink);
+}
+
 /* ── The tier as a row of dots, one per piece up to PALLADIUM (C .meter; plan NEXT-NINE, BP-19 T1: ten, in one row) ── */
 
 .n-meter {

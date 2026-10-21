@@ -13,7 +13,8 @@
  *                                        variant dots, You own N, SEE THE MODEL
  *   MESSAGES                             signed in, while an answer of ORBES Client Services is unread (plan NEXT-NINE,
  *   ORBES Client Services has answered   CS-01): one line, read once per render, and READ, which opens MESSAGES in
- *   you.                         READ    the account sheet; it goes once they are read
+ *   you.                         READ    the account sheet; it goes once they are read. Else, while a house message
+ *                                        is (lot M2, M4): «A new message from ORBES.» and READ, on FROM ORBES
  *   YOUR PIECES              MY PIECES   an owner: two pieces side by side, their model's photographs (decision 9),
  *   TITANE  2 pieces held. …             the tier in one line (decision 10)
  *   THE CIRCLE              THE CIRCLE   the next invitation as a plate card: YES / NO (addition 6), its places left
@@ -48,11 +49,11 @@ import {
 } from '../now-model.js';
 import { lookbookSheetPath } from '../lookbook-model.js';
 import type { SessionStore } from '../session.js';
-import type { CircleCard, ClubStatus, DropCard, LiveCard, LookbookCard, OwnedPiece } from '../types.js';
+import type { CircleCard, ClubStatus, DropCard, LiveCard, LookbookCard, MessagesUnread, OwnedPiece } from '../types.js';
 import { CIRCLE_PATH, computerClock, listLine, LOOKBOOK_PATH, PIECES_PATH, viewRoot, withNumerals } from './common.js';
 import { CircleCardLines } from './invitation.js';
 import { appAnchor, countdown, fadedPhoto, icon, lift, loadingState, modelTitle, plateCard, textLink, variantDots } from './nocturne.js';
-import { openMessages } from './write.js';
+import { openMessages, type MessagesPart } from './write.js';
 
 export interface NowDeps {
   api: Pick<ApiClient, 'liveReleases' | 'drops' | 'lookbook' | 'products' | 'clubStatus' | 'circle' | 'circleAnswer' | 'liveClock' | 'messagesUnread'>;
@@ -78,8 +79,8 @@ export interface NowDeps {
 export interface NowView {
   root: HTMLElement;
   dispose(): void;
-  /** MESSAGES was read (the account sheet): the line goes. */
-  messagesRead(): void;
+  /** MESSAGES was read (the account sheet: the conversation, or FROM ORBES): the line follows. */
+  messagesRead(part?: MessagesPart): void;
 }
 
 export function nowView(deps: NowDeps): NowView {
@@ -100,6 +101,8 @@ interface NowData {
   circle: CircleCard[] | null;
   /** CS-01: an answer of ORBES Client Services is unread (false signed out, or unreadable). */
   unread: boolean;
+  /** Lot M2 (M4): a house message is unread (FROM ORBES; false signed out, or unreadable). */
+  house: boolean;
 }
 
 /** The countdown is drawn again this often (its seconds within the last day). */
@@ -173,12 +176,12 @@ class Now implements NowView {
       // The next invitation: the feed read without counting a visit of the circle (403 without a piece: no circle).
       owner<CircleCard[] | null>(async () => (await api.circle(1, 50, { visit: false })).items, null),
       measureClock(() => api.liveClock(), 1).catch(() => null),
-      owner<boolean>(() => api.messagesUnread(), false),
+      owner<MessagesUnread>(() => api.messagesUnread(), { unread: false, house: false }),
     ]);
     if (this.disposed || reading !== this.reading) return;
     if (clock) this.offset = clock.offset;
     this.signedIn = signedIn;
-    this.data = { signedIn, sessionKnown, top: nowTop(live, drops, collection), collection, pieces, club, circle, unread };
+    this.data = { signedIn, sessionKnown, top: nowTop(live, drops, collection), collection, pieces, club, circle, unread: unread.unread, house: unread.house };
     this.render();
   }
 
@@ -253,22 +256,32 @@ class Now implements NowView {
     }
   }
 
-  /** MESSAGES was read in the account sheet: the line goes, the page as it is. */
-  messagesRead(): void {
-    if (!this.data || !this.data.unread) return;
-    this.data = { ...this.data, unread: false };
-    this.root.querySelector('.now__messages')?.remove();
+  /**
+   * MESSAGES was read in the account sheet (the conversation, or FROM ORBES): the line follows, the page as it is (an
+   * answer read while a house message is still unread: the house's line in its place).
+   */
+  messagesRead(part: MessagesPart = 'conversation'): void {
+    const d = this.data;
+    if (!d || !(part === 'house' ? d.house : d.unread)) return;
+    this.data = part === 'house' ? { ...d, house: false } : { ...d, unread: false };
+    const line = this.messagesLine(this.data);
+    const old = this.root.querySelector('.now__messages');
+    if (old && line) old.replaceWith(line);
+    else old?.remove();
   }
 
-  /** CS-01: one line under the hero, before YOUR PIECES, while an answer is unread; READ opens MESSAGES. */
+  /**
+   * CS-01: one line under the hero, before YOUR PIECES, while an answer is unread; READ opens MESSAGES. Lot M2 (M4): else
+   * while a house message is, its own sentence, READ opening MESSAGES on FROM ORBES.
+   */
   private messagesLine(d: NowData): HTMLElement | null {
-    const m = nowMessagesLine(d.unread);
+    const m = nowMessagesLine(d.unread, d.house);
     if (!m) return null;
     return h(
       'section',
       { class: 'n-px n-sb now__messages', attrs: { 'aria-label': MESSAGES.title } },
       h('div', { class: 'now__messages-text' }, h('p', { class: 'n-g n-lb', text: m.label }), h('p', { class: 'n-sm now__messages-sentence', text: m.sentence })),
-      textLink(m.action, { onOpen: () => openMessages(this.root.querySelector<HTMLElement>('.now__messages .n-tl')), extraClass: 'now__messages-read' }),
+      textLink(m.action, { onOpen: () => openMessages(this.root.querySelector<HTMLElement>('.now__messages .n-tl'), m.house ? 'house' : 'conversation'), extraClass: 'now__messages-read' }),
     );
   }
 

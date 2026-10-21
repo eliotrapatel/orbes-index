@@ -30,6 +30,8 @@ import type {
   EmailPreferences,
   OrderCaseRequest,
   AccountThread,
+  AccountHousePage,
+  MessagesUnread,
   MessageContextInput,
   AccountOrder,
   AccountQuestion,
@@ -924,6 +926,22 @@ export class ApiClient {
     await this.request('POST', '/api/v1/account/messages/read', { upTo }, { csrf: true });
   }
 
+  /**
+   * FROM ORBES (macro scope D24, M3 and M4; lot M2): the account's house messages, newest first, 30 a page (`page` from
+   * 1), with how many are unread and how many there are in all (401 signed out).
+   */
+  async houseMessages(page = 1): Promise<AccountHousePage> {
+    const r = await this.request<{ messages?: unknown; unread?: unknown; total?: unknown }>('GET', `/api/v1/account/house-messages?page=${Math.max(1, Math.floor(page))}`);
+    const count = (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v >= 0;
+    if (!Array.isArray(r?.messages) || !count(r.unread) || !count(r.total)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return { messages: r.messages as AccountHousePage['messages'], unread: r.unread as number, total: r.total as number };
+  }
+
+  /** The house messages read up to `upTo` (the newest one shown). */
+  async readHouseMessages(upTo: string): Promise<void> {
+    await this.request('POST', '/api/v1/account/house-messages/read', { upTo }, { csrf: true });
+  }
+
   /** YOUR SIZES (AC-01): the sizes the account saved, in its units; null where none is. */
   async sizes(): Promise<AccountSizes> {
     const r = await this.request<{ sizes?: AccountSizes }>('GET', '/api/v1/account/sizes');
@@ -1029,14 +1047,17 @@ export class ApiClient {
     }
   }
 
-  /** Whether an answer is unread: NOW's line and the account sheet's NEW. */
-  async messagesUnread(): Promise<boolean> {
-    const r = await this.request<{ unread?: unknown }>('GET', '/api/v1/account/messages/unread');
-    if (typeof r?.unread !== 'boolean') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
-    return r.unread;
+  /**
+   * Whether an answer is unread (`unread`) and whether a house message is (`house`, lot M2: FROM ORBES): NOW's line and
+   * the account sheet's NEW.
+   */
+  async messagesUnread(): Promise<MessagesUnread> {
+    const r = await this.request<{ unread?: unknown; house?: unknown }>('GET', '/api/v1/account/messages/unread');
+    if (typeof r?.unread !== 'boolean' || (r.house !== undefined && typeof r.house !== 'boolean')) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return { unread: r.unread, house: r.house === true };
   }
 
-  /** How many answers are unread (on a computer: the account page's MESSAGES card, «1 UNREAD»). */
+  /** How many answers and house messages are unread (on a computer: the account page's MESSAGES card, «1 UNREAD»). */
   async messagesUnreadCount(): Promise<number> {
     const r = await this.request<{ count?: unknown }>('GET', '/api/v1/account/messages/unread-count');
     if (typeof r?.count !== 'number' || !Number.isInteger(r.count) || r.count < 0) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');

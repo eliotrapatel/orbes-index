@@ -89,7 +89,8 @@ import { lookbookRouteOf, lookbookSheetPath } from './lookbook-model.js';
 import { boardTokenOf } from './board-model.js';
 import { afterRoomPath, releasePath, releasesRouteOf, RELEASES_PATH } from './releases-model.js';
 import { recoveryContactModel, resultViewModel } from './view-model.js';
-import { orderReference, type ConcerningTarget, type WriteContext } from './messages-model.js';
+import { orderReference, type ConcerningTarget, type HouseTarget, type WriteContext } from './messages-model.js';
+import type { PieceTabId } from './pieces-model.js';
 import { isResetPath, isUnsubscribePath, RESET_PATH, resetLinkOf, UNSUBSCRIBE_PATH, unsubscribeTokenOf, type ResetLink } from './reset-model.js';
 import { boardView } from './views/board.js';
 import { certificateView } from './views/certificate.js';
@@ -127,7 +128,7 @@ import { piecesArrangement } from './views/desktop-pieces.js';
 import { isScanPagePath, SCAN_PAGE_PATH, scanPageView } from './views/desktop-scan.js';
 import { ACCOUNT_PATH, ACCOUNT_WISHLIST_PATH, accountPath, accountRouteOf, isAccountView, type AccountView } from './views/desktop-account.js';
 import { isSignInPath, registerSignInPage, SIGN_IN_PATH, signInPageView, type SignInPageView, type SignInRequest, type SignInTab } from './views/desktop-signin.js';
-import { isMessagesPath, isWriteContext, messagesPageView, messagesPath, messagesSubjectOf, subjectKey } from './views/desktop-messages.js';
+import { FROM_ORBES_KEY, isMessagesPath, isWriteContext, messagesPageView, messagesPath, messagesSubjectOf, subjectKey } from './views/desktop-messages.js';
 import { isOrdersPath, orderPagePath, orderPageView, orderReferenceOf } from './views/desktop-order.js';
 
 type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'live' | 'board' | 'circle' | 'circlePost' | 'club' | 'how' | 'wishlist' | 'scanPage' | 'account' | 'signIn' | 'messages' | 'order' | 'reset' | 'unsubscribe';
@@ -333,6 +334,8 @@ class App {
   private postId: string | null = null;
   /** The id of the piece on show (C4), to tell another piece from the same one. */
   private pieceId: string | null = null;
+  /** The tab the next piece opens on (a house message's CARING FOR YOUR PIECE: ORBES CARE), once. */
+  private pieceTab: PieceTabId | null = null;
   /** MY PIECES' tab on show: the banner is the PIECES tab's (C3; C24 and C31 go without it). */
   private piecesTab: PiecesTab = 'pieces';
   /** ORDER OR-… from a piece's page: MY PIECES opens on ORDERS with it in view once back on its entry. */
@@ -474,7 +477,7 @@ class App {
         },
         onSignIn: () => this.signIn(),
         onAccount: () => this.openAccount(),
-        onMessagesPage: () => this.openMessages(),
+        onMessagesPage: (part) => this.openMessages({ house: part === 'house' }),
         onWrite: (context) => this.openMessages({ context }),
         accountHost: {
           navigate: (view) => this.navigateAccount(view),
@@ -488,9 +491,10 @@ class App {
         onScan: () => void this.startScan(),
         onScanPage: () => this.openScanPage(),
         onConcerning: (target) => this.openConcerning(target),
-        onMessagesRead: () => {
-          if (this.screen === 'landing') (this.live as NowView | null)?.messagesRead();
+        onMessagesRead: (part) => {
+          if (this.screen === 'landing') (this.live as NowView | null)?.messagesRead(part);
         },
+        onHouse: (target) => this.openHouse(target),
         recoveryContact: async () => recoveryContactModel(await this.contactDetails(), '') ?? undefined,
       },
       this.host,
@@ -766,10 +770,24 @@ class App {
   }
 
   /**
-   * A piece of MY PIECES (C4), over MY PIECES' entry: back from it returns to the list. On a computer, from MESSAGES or an
-   * order's page, over that page: back returns to it in one step.
+   * A house message's link (FROM ORBES, lot M2): the piece (on its ORBES CARE tab for CARING FOR YOUR PIECE), MY PIECES,
+   * THE COLLECTION; on a computer also YOUR SIZES and the account's IN USE, pages of their own (a phone's sheet keeps
+   * those two).
    */
-  private openPiece(id: string): void {
+  private openHouse(target: HouseTarget): void {
+    if (target.to === 'piece') this.openPiece(target.id, target.tab);
+    else if (target.to === 'my-pieces') this.openPieces({ tab: 'pieces' });
+    else if (target.to === 'collection') this.openLookbook();
+    else if (isDesktop()) this.openAccountSection(target.to === 'sizes' ? 'sizes' : 'account');
+  }
+
+  /**
+   * A piece of MY PIECES (C4), over MY PIECES' entry: back from it returns to the list. On a computer, from MESSAGES or an
+   * order's page, over that page: back returns to it in one step. `tab` opens it on that tab (a house message's CARING FOR
+   * YOUR PIECE: ORBES CARE), once.
+   */
+  private openPiece(id: string, tab?: PieceTabId): void {
+    this.pieceTab = tab ?? null;
     const entry = entryOf(history.state);
     const address = piecePath(id);
     const under = pageUnder(entry);
@@ -964,10 +982,10 @@ class App {
    * is opened from (back returns there). Signed out, the sign-in page first, the place kept as it stands; once signed in,
    * this page on that subject in the sign-in page's place.
    */
-  private openMessages(opts: { context?: WriteContext | null } = {}): void {
+  private openMessages(opts: { context?: WriteContext | null; house?: boolean } = {}): void {
     if (!isDesktop()) return;
     const context = opts.context ?? null;
-    const path = messagesPath(context ? subjectKey(context) : null);
+    const path = messagesPath(context ? subjectKey(context) : opts.house ? FROM_ORBES_KEY : null);
     if (this.session.state.status === 'anonymous') {
       this.openSignIn({ lead: MESSAGES.signedOut }, { screen: 'messages', path, context });
       return;
@@ -1216,10 +1234,13 @@ class App {
     this.stopCamera();
     this.pieceId = id;
     const gen = this.generation;
+    const tab = this.pieceTab;
+    this.pieceTab = null;
     const view = pieceView({
       api: this.api,
       session: this.session,
       productId: id,
+      tab: tab ?? undefined,
       clientServices: () => this.contactDetails(),
       onPieces: () => this.openPieces(),
       // Not the account's (passed on, or never its): MY PIECES in its place, at its address.
@@ -1381,7 +1402,7 @@ class App {
     if (!isDesktop()) {
       replaceEntry({ screen: 'landing' }, LANDING_PATH);
       await this.showLanding(focus);
-      if (this.screen === 'landing') this.shell?.openAccountSheet('messages');
+      if (this.screen === 'landing') this.shell?.openAccountSheet('messages', messagesSubjectOf(location.pathname) === FROM_ORBES_KEY ? 'house' : undefined);
       return;
     }
     this.generation++;
@@ -1400,6 +1421,7 @@ class App {
       onCancel: () => history.back(),
       onSignIn: () => this.pageSignIn('messages', MESSAGES.signedOut),
       onRead: () => undefined,
+      onHouse: (target) => this.openHouse(target),
     });
     if (await this.swap(view.root, 'messages', focus)) this.live = view;
     else view.dispose();

@@ -7,11 +7,19 @@
 import { describe, expect, it } from 'vitest';
 import { MESSAGE_LIMITS } from '../../src/server/services/messages.js';
 import { orderReference as serverOrderReference } from '../../src/server/services/orders.js';
-import { MESSAGES } from '../../src/web/verify/copy.js';
+import { FROM_ORBES, HOUSE, MESSAGES } from '../../src/web/verify/copy.js';
+import { HOUSE_MOMENT_LINKS, HOUSE_MOMENT_NAMES } from '../../src/shared/house-words.js';
+import { HOUSE_PAGE_SIZE } from '../../src/server/services/house-messages.js';
+import type { AccountHouseMessage } from '../../src/web/verify/types.js';
 import {
   concerningTarget,
   contextInput,
+  houseItem,
+  houseLinks,
+  houseList,
+  houseReadUpTo,
   messageProblem,
+  messagesOpensOn,
   modelContext,
   nowMessagesLine,
   orderContext,
@@ -99,8 +107,12 @@ describe('MESSAGES', () => {
   });
 
   it('says on NOW, while an answer is unread, that ORBES Client Services has answered, with READ', () => {
-    expect(nowMessagesLine(true)).toEqual({ label: 'MESSAGES', sentence: 'ORBES Client Services has answered you.', action: 'READ' });
+    expect(nowMessagesLine(true)).toEqual({ label: 'MESSAGES', sentence: 'ORBES Client Services has answered you.', action: 'READ', house: false });
     expect(nowMessagesLine(false)).toBeNull();
+    // Lot M2 (M4): an answer first; else a house message, its own sentence, READ opening FROM ORBES.
+    expect(nowMessagesLine(true, true)).toMatchObject({ sentence: 'ORBES Client Services has answered you.', house: false });
+    expect(nowMessagesLine(false, true)).toEqual({ label: 'MESSAGES', sentence: 'A new message from ORBES.', action: 'READ', house: true });
+    expect(nowMessagesLine(false, false)).toBeNull();
   });
 
   it('writes its words calmly: no exclamation mark, the button and the sheet as the plan names them', () => {
@@ -110,5 +122,75 @@ describe('MESSAGES', () => {
     expect(MESSAGES.sentText).toBe('Your message is with ORBES Client Services. Their answer will appear in your account, under MESSAGES.');
     expect(MESSAGES.signedOut).toBe('Sign in or create an ORBES account to write to ORBES Client Services. Their answer will appear in your account.');
     expect(MESSAGES.hint).toBe('Please leave out passwords and card numbers.');
+  });
+});
+
+describe('FROM ORBES (lot M2: macro scope D24, M3 and M4)', () => {
+  const at = (day: number, hm: string) => `2026-10-${String(day).padStart(2, '0')}T${hm}:00.000Z`;
+  const msg = (n: number, over: Partial<AccountHouseMessage> = {}): AccountHouseMessage => ({
+    id: `h${n}`,
+    source: 'CUSTOM',
+    moment: null,
+    title: 'THE AUTUMN RELEASES',
+    body: 'The autumn releases open soon.\n\nThank you.',
+    pieceRef: null,
+    pieceHeld: null,
+    at: at(21 - n, '08:02'),
+    unread: false,
+    ...over,
+  });
+
+  it('signs each message ORBES with its time on this device, keeps its words, and marks NEW what was unread', () => {
+    const i = houseItem(msg(0, { unread: true }), 120);
+    expect(i).toMatchObject({ id: 'h0', author: 'ORBES · 21 OCT 2026 · 10:02', title: 'THE AUTUMN RELEASES', body: 'The autumn releases open soon.\n\nThank you.', unread: true, links: [] });
+    expect(HOUSE.author).toBe('ORBES');
+  });
+
+  it("links each moment to its places, the piece's ORBES CARE tab while it is held, MY PIECES once it is not", () => {
+    expect(houseLinks('FIRST_REGISTRATION', 'o26-j-00184', true)).toEqual([
+      { kind: 'CARE', label: 'CARING FOR YOUR PIECE', target: { to: 'piece', id: 'O26-J-00184', tab: 'care' } },
+      { kind: 'SIZES', label: 'YOUR SIZES', target: { to: 'sizes' } },
+    ]);
+    expect(houseLinks('FIRST_REGISTRATION', 'O26-J-00184', false)[0]).toEqual({ kind: 'CARE', label: 'CARING FOR YOUR PIECE', target: { to: 'my-pieces' } });
+    expect(houseLinks('OWNERSHIP_YEAR', 'O26-J-00184', true)).toEqual([{ kind: 'PIECE', label: 'SEE THE PIECE', target: { to: 'piece', id: 'O26-J-00184' } }]);
+    expect(houseLinks('OWNERSHIP_YEAR', 'O26-J-00184', false)).toEqual([{ kind: 'MY_PIECES', label: 'MY PIECES', target: { to: 'my-pieces' } }]);
+    expect(houseLinks('OWNERSHIP_YEAR', '../x', true)).toEqual([{ kind: 'MY_PIECES', label: 'MY PIECES', target: { to: 'my-pieces' } }]);
+    expect(houseLinks('BIRTHDAY_CREDIT', null, null)).toEqual([{ kind: 'IN_USE', label: 'IN USE', target: { to: 'in-use' } }]);
+    expect(houseLinks('CREDIT_EXPIRING', null, null).map((l) => l.target)).toEqual([{ to: 'in-use' }]);
+    expect(houseLinks('PRIVATE_CARE', null, null).map((l) => l.target)).toEqual([{ to: 'my-pieces' }]);
+    expect(houseLinks('NINETY_DAYS', null, null)).toEqual([{ kind: 'COLLECTION', label: 'THE COLLECTION', target: { to: 'collection' } }]);
+    // A custom message, or a moment the app does not know: none.
+    expect(houseLinks(null, null, null)).toEqual([]);
+    expect(houseLinks('SOMETHING_NEW', 'O26-J-00184', true)).toEqual([]);
+    // Every moment's links are drawn, as the shared list fixes them.
+    for (const m of HOUSE_MOMENT_NAMES) expect(houseLinks(m, 'O26-J-00184', true).map((l) => l.kind), m).toEqual([...HOUSE_MOMENT_LINKS[m]]);
+  });
+
+  it('joins pages newest first, says when earlier ones remain, and reads up to the newest while one is unread', () => {
+    expect(HOUSE_PAGE_SIZE).toBe(30);
+    const first = houseList({ messages: Array.from({ length: 30 }, (_, n) => msg(n, { unread: n < 2, at: at(20, `${String(23 - Math.floor(n / 2)).padStart(2, '0')}:${n % 2 ? '00' : '30'}`) })), unread: 2, total: 45 }, 0);
+    expect(first).toMatchObject({ pages: 1, total: 45, unread: 2, more: true });
+    expect(houseReadUpTo(first)).toBe(first.items[0]!.at);
+    const both = houseList({ messages: [msg(29), ...Array.from({ length: 15 }, (_, n) => msg(30 + n))], unread: 0, total: 45 }, 0, first);
+    expect(both.items.map((i) => i.id)).toEqual(Array.from({ length: 45 }, (_, n) => `h${n}`));
+    expect(both).toMatchObject({ pages: 2, more: false });
+    expect(houseReadUpTo({ ...first, unread: 0 })).toBeNull();
+    expect(houseReadUpTo(null)).toBeNull();
+    // An empty page past the end never asks for more.
+    expect(houseList({ messages: [], unread: 0, total: 45 }, 0, first).more).toBe(false);
+  });
+
+  it('opens MESSAGES on the part with something unread, the conversation first when both or neither', () => {
+    expect(messagesOpensOn(false, true)).toBe('house');
+    expect(messagesOpensOn(true, true)).toBe('conversation');
+    expect(messagesOpensOn(true, false)).toBe('conversation');
+    expect(messagesOpensOn(false, false)).toBe('conversation');
+  });
+
+  it('writes its words calmly, no reply offered (M3), each link as the app names its place', () => {
+    expect(JSON.stringify(FROM_ORBES)).not.toContain('!');
+    expect(FROM_ORBES).toMatchObject({ title: 'FROM ORBES', conversation: MESSAGES.house, noReply: 'Messages from ORBES cannot be answered.', toWrite: 'To write, open' });
+    expect(FROM_ORBES.now.sentence).toBe('A new message from ORBES.');
+    expect(FROM_ORBES.now.read).toBe(MESSAGES.now.read);
   });
 });

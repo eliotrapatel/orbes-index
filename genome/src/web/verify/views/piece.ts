@@ -60,6 +60,8 @@ export interface PieceDeps {
   session: SessionStore;
   /** The piece's id, from its address. */
   productId: string;
+  /** The tab it opens on (OWNERSHIP by default; ORBES CARE from a house message's CARING FOR YOUR PIECE, lot M2). */
+  tab?: PieceTabId;
   /** How ORBES Client Services is reached (`{}` when not configured); never rejects, never more than a second late. */
   clientServices(): Promise<ClientServices>;
   /** ‹ MY PIECES. */
@@ -177,6 +179,7 @@ class PiecePage {
         onRelease: this.deps.onRelease,
         onOrder: this.deps.onOrder,
         onModel: this.deps.onModel,
+        tab: this.deps.tab,
       });
       this.load = { kind: 'ready' };
     } catch (e) {
@@ -219,6 +222,7 @@ interface CardDeps {
   onRelease?(id: string): void;
   onOrder?(reference: string): void;
   onModel?(slug: string): void;
+  tab?: PieceTabId;
 }
 
 type Confirm = null | 'report' | 'found';
@@ -270,7 +274,7 @@ class PieceCard {
       h('ul', { class: 'n-lines n-result__line-list piece__lines' }, ...m.pieceLines.map((line) => h('li', { class: 'n-g n-lines__line' }, ...withNumerals(line)))),
       slug ? h('p', { class: 'n-result__model-line' }, textLink(LOOKBOOK.seeModel, { href: lookbookSheetPath(slug), onOpen: deps.onModel ? () => deps.onModel!(slug) : undefined, extraClass: 'n-piece__model-link' })) : null,
     );
-    const tabs = tabsView<PieceTabId>(PIECE_TABS, (id) => this.build(id), 'ownership', {
+    const tabs = tabsView<PieceTabId>(PIECE_TABS, (id) => this.build(id), deps.tab ?? 'ownership', {
       labels: PIECE_TAB_LABELS,
       idPrefix: `${key}-`,
       label: `${m.productId} information`,

@@ -281,6 +281,53 @@ async function messageAndAnswer(run: StateRun): Promise<void> {
 }
 
 /**
+ * FROM ORBES (lot M2, macro scope D24 M3 and M4): MESSAGES opened (the phone's sheet, a computer's page), then on a
+ * computer its subject FROM ORBES chosen (a computer's page opens on the newest subject).
+ */
+async function openFromOrbes(run: StateRun, ready: string): Promise<void> {
+  await openMessages(run, ':is(.n-messages__parts, .n-messages__list, .n-messages__empty, .n-house__list, .d-msg__subjects)');
+  if (await onComputer(run)) await run.page.locator('.d-msg__subject[data-key="from-orbes"]').click();
+  else {
+    // Nothing unread: MESSAGES opens on the conversation; its tab FROM ORBES then.
+    const tab = run.page.locator('.n-account:not([hidden]) #messages-part-house[aria-selected="false"]');
+    if (await tab.count()) await tab.click();
+  }
+  await run.page.locator(ready).first().waitFor({ timeout: 20_000 });
+  await fitSheet(run.page);
+}
+
+/** A long model name, as a moment's {piece} may write it (stress). */
+const LONG_PIECE = 'MONOLITHE, THE ARCHITECTURE OF THE WRIST IN BRUSHED STEEL AND MIDNIGHT LACQUER';
+
+/**
+ * FROM ORBES at its longest (stress, lot M2): a page of 30 of 45 house messages, as the server would give them (two
+ * unread): an 80-character title, 2,000 characters of words, a long model name in a moment's words, every kind of link;
+ * the next page of 15 behind SHOW EARLIER. Reading is answered here, so the stage is never written.
+ */
+async function houseStress(page: Page): Promise<void> {
+  const total = 45;
+  const day = 86_400_000;
+  const words = 'Each piece of ORBES is registered to its owner, and its care, its sizes and its releases are kept with the account. ';
+  const long = (words.repeat(Math.ceil(2000 / words.length)).slice(0, 1990).trimEnd() + ' Thank you.').slice(0, 2000);
+  const item = (i: number) => {
+    const at = new Date(NOCTURNE_NOW.getTime() - i * day - 3_600_000).toISOString();
+    const moments = ['FIRST_REGISTRATION', 'OWNERSHIP_YEAR', 'BIRTHDAY_CREDIT', 'PRIVATE_CARE', 'NINETY_DAYS', null] as const;
+    const moment = i === 0 ? null : i === 1 ? 'FIRST_REGISTRATION' : moments[i % moments.length]!;
+    const title = i === 0 ? 'A LETTER FROM THE HOUSE TO EVERY COLLECTOR OF THE FIRST SEASON OF ORBES, IN FULL' : i === 1 ? 'YOUR FIRST PIECE' : `A MESSAGE FROM ORBES, NUMBER ${total - i}`;
+    const body = i === 0 ? long : i === 1 ? `${LONG_PIECE} is registered to you. How to care for it is in its ORBES CARE tab, and YOUR SIZES keeps your sizes for the releases to come.` : 'Since your last visit, THE COLLECTION and THE RELEASES have moved on.';
+    const piece = moment === 'FIRST_REGISTRATION' || moment === 'OWNERSHIP_YEAR';
+    return { id: `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`, source: moment ? 'MOMENT' : 'CUSTOM', moment, title, body, pieceRef: piece ? 'O26-J-00184' : null, pieceHeld: piece ? i !== 7 : null, at, unread: i < 2 };
+  };
+  await page.route('**/api/v1/account/house-messages?*', async (route) => {
+    const at = Math.max(1, Number(new URL(route.request().url()).searchParams.get('page')) || 1);
+    const messages = [];
+    for (let i = (at - 1) * 30; i < Math.min(total, at * 30); i++) messages.push(item(i));
+    await route.fulfill({ json: { messages, unread: 2, total } });
+  });
+  await page.route('**/api/v1/account/house-messages/read', (route) => route.fulfill({ status: 204, body: '' }));
+}
+
+/**
  * Plan NEXT LOT §3.4, the state claim-waiting (its own stage, the full story): ORBES Client Services sells you a
  * MONOLITHE in blue through THE PRIVATE SALON (size 17, € 4 200), marks it PAID; a Generator piece counted in is packed
  * and shipped through the agent's steps with Colissimo (its warranty started by hand, ORBES PARIS), unregistered; then the piece's card is lost and New claim code makes
@@ -1374,6 +1421,61 @@ export const PHONE_STATES: readonly UiState[] = [
       await openMessages(run, ':is(.n-messages__list, ol.d-msg__conversation)');
     },
     ready: ':is(.n-account:not([hidden]) .n-messages__list, .d-msg ol.d-msg__conversation)',
+    viewport: true,
+    mutates: true,
+  },
+
+  // ── FROM ORBES (lot M2, macro scope D24 M3 and M4) on the stage `house`: you's three house messages, the newest unread,
+  // no conversation yet. NOW's line, FROM ORBES at its longest (routed, nothing written), then the writes in this order:
+  // an answer too (the conversation first, FROM ORBES with NEW), then FROM ORBES opened (read). ──
+  {
+    id: 'now-messages-house',
+    title: 'NOW, a message from ORBES unread and no answer: MESSAGES, A new message from ORBES., READ (lot M2, M4)',
+    refs: ['M2'],
+    variant: 'house',
+    as: you,
+    path: at('/verify'),
+    ready: '.view--now[data-ready] .now__messages',
+  },
+  {
+    id: 'account-messages-house-stress',
+    title: 'FROM ORBES at its longest: an 80-character title, 2,000 characters of words, a long model name, 30 of 45 and SHOW EARLIER (lot M2)',
+    refs: ['M2'],
+    variant: 'house',
+    as: you,
+    path: at('/verify'),
+    routes: houseStress,
+    act: (run) => openFromOrbes(run, ':is(.n-account:not([hidden]) .n-house__list, .d-msg ol.d-msg__house)'),
+    ready: ':is(.n-account:not([hidden]) .n-house__list, .d-msg ol.d-msg__house)',
+    viewport: true,
+    stress: true,
+  },
+  {
+    id: 'account-messages-house-unread',
+    title: 'MESSAGES, an answer and a message from ORBES unread: the tabs, ORBES CLIENT SERVICES first, FROM ORBES with NEW (lot M2)',
+    refs: ['M2'],
+    variant: 'house',
+    as: you,
+    path: at('/verify'),
+    act: async (run) => {
+      await messageAndAnswer(run);
+      await run.page.reload();
+      await run.page.locator('.view--now[data-ready]').waitFor();
+      await openMessages(run, ':is(.n-account:not([hidden]) .n-messages__parts, .d-msg ol.d-msg__conversation)');
+    },
+    ready: ':is(.n-account:not([hidden]) .n-messages__parts, .d-msg ol.d-msg__conversation)',
+    viewport: true,
+    mutates: true,
+  },
+  {
+    id: 'account-messages-house',
+    title: 'MESSAGES on FROM ORBES: three messages newest first, the unread one NEW, their links, no reply, the way to write (lot M2, M3)',
+    refs: ['M2'],
+    variant: 'house',
+    as: you,
+    path: at('/verify'),
+    act: (run) => openFromOrbes(run, ':is(.n-account:not([hidden]) .n-house__list, .d-msg ol.d-msg__house)'),
+    ready: ':is(.n-account:not([hidden]) .n-house__list, .d-msg ol.d-msg__house)',
     viewport: true,
     mutates: true,
   },
@@ -2629,6 +2731,14 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
     onDesk(phoneState('unsubscribe-done'), 1440, { light: true }),
     ...desk(1440, 'reset-done'),
     onDesk(phoneState('reset-done'), 1440, { light: true }),
+    // FROM ORBES (lot M2, M3 and M4) on the stage `house`: NOW's line, the subject at its longest, then the writes in their
+    // order (an answer too: FROM ORBES NEW in the list; FROM ORBES opened), the subject also in light and at 1024 × 768.
+    ...desk(1440, 'now-messages-house'),
+    onDesk(phoneState('account-messages-house-stress'), 1440, { name: 'messages-house-stress' }),
+    onDesk(phoneState('account-messages-house-unread'), 1440, { name: 'messages-house-unread' }),
+    onDesk(phoneState('account-messages-house'), 1440, { name: 'messages-house' }),
+    onDesk(phoneState('account-messages-house'), 1440, { name: 'messages-house', light: true }),
+    onDesk(phoneState('account-messages-house'), 1024, { name: 'messages-house' }),
   ],
 });
 
