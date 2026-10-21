@@ -89,7 +89,7 @@ const segment = (id: string, name: string, criteria: web.SegmentGroup, createdAt
   name,
   criteria,
   count: 3,
-  usedBy: { releases: [], posts: [] },
+  usedBy: { releases: [], posts: [], houseMessages: [] },
   createdAt,
   createdBy: null,
   updatedAt: createdAt,

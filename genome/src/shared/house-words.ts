@@ -81,10 +81,27 @@ export const HOUSE_DEFAULT_WORDS: Readonly<Record<HouseMomentName, Readonly<Hous
   NINETY_DAYS: Object.freeze({ title: 'WHAT IS NEW', body: 'Since your last visit, THE COLLECTION and THE RELEASES have moved on.' }),
 });
 
+/**
+ * The words of each link a moment's message carries (HOUSE_MOMENT_LINKS), as the app writes its places: the console's
+ * preview draws them too (lot M2 step M2.4), so the two never differ.
+ */
+export const HOUSE_LINK_WORDS: Readonly<Record<HouseLinkKind, string>> = Object.freeze({
+  CARE: 'CARING FOR YOUR PIECE',
+  SIZES: 'YOUR SIZES',
+  IN_USE: 'IN USE',
+  MY_PIECES: 'MY PIECES',
+  PIECE: 'SEE THE PIECE',
+  COLLECTION: 'THE COLLECTION',
+});
+
 /** The house's words as the collector app reads them (web/verify/copy.ts re-exports it). */
 export const HOUSE = Object.freeze({
   /** Each moment's default title and words (the console's RESET TO DEFAULT; what a moment says until edited). */
   moments: HOUSE_DEFAULT_WORDS,
+  /** A house message's author on its author line (`ORBES · 21 OCT 2026 · 10:02`). */
+  author: 'ORBES',
+  /** Each link's words. */
+  links: HOUSE_LINK_WORDS,
 });
 
 const PLACEHOLDER_RE = /\{([A-Za-z]+)\}/g;

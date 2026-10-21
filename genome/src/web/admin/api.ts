@@ -17,6 +17,13 @@
  */
 import type {
   AnnouncementState,
+  HouseAudience,
+  HouseMessage,
+  HouseMessageDetail,
+  HouseMessageStatus,
+  HouseMoment,
+  HouseMomentPreview,
+  HouseMomentView,
   CollectorPanel,
   EmailKind,
   EmailKindView,
@@ -1388,6 +1395,69 @@ export class AdminApi {
   /** CANCEL SCHEDULED (ADMIN): its announcements still queued, cancelled. */
   cancelAnnouncement(dropId: string): Promise<{ cancelled: number }> {
     return this.post(`/api/admin/email/announcement/${encodeURIComponent(dropId)}/cancel`, {});
+  }
+
+  // ── House messages (plan MACRO M2 §1.6, D24 M1 and M2; routes/admin/house.ts) ─────────────────────────────
+
+  /** The six moments: each switch, its words and defaults, its placeholders and links, delivered and read. */
+  async houseMoments(): Promise<HouseMomentView[]> {
+    return (await this.get<{ moments: HouseMomentView[] }>('/api/admin/house/moments')).moments;
+  }
+
+  /** A moment switched on (from now on: nothing is sent for the past) or off (ADMIN). */
+  async setHouseMomentEnabled(moment: HouseMoment, enabled: boolean): Promise<HouseMomentView> {
+    return (await this.request<{ moment: HouseMomentView }>('PUT', `/api/admin/house/moments/${encodeURIComponent(moment)}/enabled`, { body: { enabled } })).moment;
+  }
+
+  /** A moment's title and words (OPERATOR): a part left out is kept, null brings back the default's. */
+  async setHouseMomentWords(moment: HouseMoment, words: { title?: string | null; body?: string | null }): Promise<HouseMomentView> {
+    return (await this.request<{ moment: HouseMomentView }>('PUT', `/api/admin/house/moments/${encodeURIComponent(moment)}/words`, { body: words })).moment;
+  }
+
+  /** A moment as a collector would read it, with example values: its own words (AUDITOR), or those being written (OPERATOR). */
+  houseMomentPreview(moment: HouseMoment, draft?: { title?: string | null; body?: string | null }): Promise<HouseMomentPreview> {
+    const path = `/api/admin/house/moments/${encodeURIComponent(moment)}/preview`;
+    return draft ? this.post(path, draft) : this.get(path);
+  }
+
+  /** The custom messages, newest first, of one status or all. */
+  houseMessages(q: { status?: HouseMessageStatus; page?: number; pageSize?: number } = {}): Promise<Paged<HouseMessage>> {
+    return this.get('/api/admin/house/messages', { ...q });
+  }
+
+  /** One custom message, with the reach its audience has now while it has not gone. */
+  houseMessage(id: string): Promise<HouseMessageDetail> {
+    return this.get(`/api/admin/house/messages/${encodeURIComponent(id)}`);
+  }
+
+  /** A new draft (OPERATOR). */
+  createHouseMessage(input: { title: string; body: string; audience: HouseAudience }): Promise<HouseMessageDetail> {
+    return this.post('/api/admin/house/messages', input);
+  }
+
+  /** A draft's or a scheduled message's title, words or audience (OPERATOR). */
+  updateHouseMessage(id: string, change: { title?: string; body?: string; audience?: HouseAudience }): Promise<HouseMessageDetail> {
+    return this.patch(`/api/admin/house/messages/${encodeURIComponent(id)}`, change);
+  }
+
+  /** A draft deleted (OPERATOR). */
+  deleteHouseMessage(id: string): Promise<void> {
+    return this.del(`/api/admin/house/messages/${encodeURIComponent(id)}`);
+  }
+
+  /** How many an audience reaches now (OPERATOR); a background read, as the editor asks it at each change. */
+  houseReach(audience: HouseAudience): Promise<{ count: number }> {
+    return this.request('POST', '/api/admin/house/count', { body: { audience }, background: true });
+  }
+
+  /** Send now (no `at`) or at a date and time in Paris (`YYYY-MM-DDTHH:MM`), the phrase SEND typed (ADMIN). */
+  sendHouseMessage(id: string, phrase: string, at: string | null): Promise<HouseMessageDetail> {
+    return this.post(`/api/admin/house/messages/${encodeURIComponent(id)}/send`, { phrase, ...(at ? { at } : {}) });
+  }
+
+  /** A scheduled message cancelled (ADMIN): it is kept, never sent. */
+  cancelHouseMessage(id: string): Promise<HouseMessageDetail> {
+    return this.post(`/api/admin/house/messages/${encodeURIComponent(id)}/cancel`, {});
   }
 
   orderAlerts(): Promise<OrderAlertSettings> {

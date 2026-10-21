@@ -10,6 +10,10 @@
  *     conversation after its confirmation; the client writes again and it reopens, To answer.
  *  3. The client sheet's Messages line opens the conversation. An AUDITOR reads the board, the email masked, without
  *     one action.
+ *  4. House messages (plan MACRO M2 §1.6, D24 M1 and M2), under Messages: the six moments OFF, one switched on after
+ *     the no-back-fill sentence; a custom message to PLATINE and above, its reach (the PALLADIUM and PLATINE clients),
+ *     its preview in the collector's look (DARK · LIGHT, PHONE · COMPUTER), saved, scheduled in Paris with SEND typed,
+ *     then cancelled: nothing delivered.
  * No CSP violation, no page error.
  */
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -253,5 +257,90 @@ describe.skipIf(!HAS_CHROMIUM)('the Messages board in the console (E2E, Chromium
     await p.waitForSelector('[data-testid=thread]');
     for (const id of ['take-conversation', 'close-conversation', 'answer-form', 'assign-conversation']) expect(await p.locator(`[data-testid=${id}]`).count(), id).toBe(0);
     await p.context().close();
+  }, STEP_TIMEOUT);
+  it('writes house messages: a moment switched on, a message to a tier with its reach and preview, scheduled in Paris, then cancelled', async () => {
+    const p = await open(ADMIN);
+    // The sidebar: House messages right under Messages.
+    const clientsNav = p.locator('.side__group', { hasText: 'Clients' }).locator('.side__link');
+    expect((await clientsNav.evaluateAll((links) => links.map((x) => x.getAttribute('data-route')))).slice(0, 2)).toEqual(['messages', 'houseMessages']);
+    await p.locator('.side__link[data-route=houseMessages]').click();
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('House messages');
+    // MOMENTS: the six, each OFF; one switched on after the no-back-fill sentence.
+    await expect.poll(() => p.locator('[data-testid=house-moment]').count(), POLL).toBe(6);
+    expect(await p.locator('[data-testid=house-switch-state] .status__text').allTextContents()).toEqual(['OFF', 'OFF', 'OFF', 'OFF', 'OFF', 'OFF']);
+    await p.locator('[data-testid=house-switch]').first().click();
+    expect(await p.locator('dialog .dialog__text').textContent()).toContain('From now on: nothing is sent for what happened before.');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('[data-testid=house-switch-state] .status__text').first().textContent(), POLL).toBe('ON');
+    await p.locator('[data-testid=house-moment]').first().click();
+    await expect.poll(() => p.locator('[data-testid=house-moment-preview] [data-testid=house-frame-title]').textContent(), POLL).toBe('YOUR FIRST PIECE');
+    expect(await p.locator('[data-testid=house-moment-preview] [data-testid=house-frame-link]').allTextContents()).toEqual(['CARING FOR YOUR PIECE', 'YOUR SIZES']);
+    await shot(p, 'house-moment', { phone: true });
+
+    // MESSAGES: a new message to PLATINE and above, its reach and its preview.
+    await p.click('[data-testid=house-tab-messages]');
+    await expect.poll(() => p.locator('#house-messages .empty__text').textContent(), POLL).toBe('No message yet.');
+    await p.locator('#house-messages a', { hasText: 'New message' }).click();
+    await p.waitForSelector('[data-testid=house-title]');
+    await p.fill('[data-testid=house-title]', 'THE WINTER PIECES');
+    await p.fill('[data-testid=house-body]', 'Dear {firstName},\n\nThe winter pieces are in THE COLLECTION.');
+    await p.selectOption('[data-testid=house-audience]', 'tier:2');
+    await expect.poll(() => p.locator('[data-testid=house-reach]').textContent(), POLL).toBe('Reaches 2 collectors now.');
+    const frame = p.locator('[data-testid=house-message-preview] [data-testid=house-frame]');
+    await expect.poll(() => frame.locator('[data-testid=house-frame-body]').textContent(), POLL).toBe('Dear Camille,\n\nThe winter pieces are in THE COLLECTION.');
+    await p.click('[data-testid=house-view-light]');
+    await p.click('[data-testid=house-view-computer]');
+    expect([await frame.getAttribute('data-mode'), await frame.getAttribute('data-width')]).toEqual(['light', 'computer']);
+    expect(await frame.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(255, 255, 255)');
+    await shot(p, 'house-preview-light');
+    await p.click('[data-testid=house-view-dark]');
+    await p.click('[data-testid=house-view-phone]');
+    expect(await frame.evaluate((el) => [getComputedStyle(el).backgroundColor, getComputedStyle(el).width])).toEqual(['rgb(10, 10, 10)', '390px']);
+    await shot(p, 'house-new', { phone: true });
+    if (SCREENSHOTS) {
+      // A computer's tight layout: the editor over its preview.
+      await p.setViewportSize({ width: 1024, height: 768 });
+      await p.waitForTimeout(300);
+      await p.screenshot({ path: join(OUT_DIR, 'admin-messages-house-new-1024.png'), fullPage: true });
+      await p.setViewportSize({ width: 1440, height: 900 });
+    }
+    await p.click('[data-testid=house-save]');
+    await expect.poll(() => p.locator('[data-testid=house-editor-status]').textContent(), POLL).toBe('Draft');
+
+    // Send…: SCHEDULE tomorrow at 18:00 in Paris, SEND typed.
+    const tomorrow = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(Date.now() + 86_400_000));
+    await p.click('[data-testid=house-send]');
+    await p.selectOption('dialog [name=when]', 'SCHEDULE');
+    await p.fill('dialog [name=at]', `${tomorrow}T18:00`);
+    await expect.poll(() => p.locator('[data-testid=house-send-line]').textContent(), POLL).toContain('Reaches 2 collectors now. It goes ');
+    expect(await p.locator('[data-testid=house-send-line]').textContent()).toContain('· 18:00 Paris.');
+    expect(await p.locator('[data-testid=dialog-confirm]').isDisabled()).toBe(true);
+    await p.fill('[data-testid=dialog-phrase]', 'SEND');
+    await shot(p, 'house-send');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('[data-testid=house-editor-status]').textContent(), POLL).toBe('Scheduled');
+    expect(await p.locator('#house-message-editor .deflist__note').first().textContent()).toMatch(/^Goes \d{2} [A-Z]{3} \d{4} · 18:00 Paris$/);
+    const row = await ctx.db.selectFrom('house_messages').select(['id', 'status', 'send_at', 'audience_min_tier']).executeTakeFirstOrThrow();
+    expect([row.status, row.audience_min_tier, new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(row.send_at!)]).toEqual(['SCHEDULED', 2, '18:00']);
+
+    // Cancel the message: kept, CANCELLED, nothing delivered.
+    await p.click('[data-testid=house-cancel]');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('[data-testid=house-editor-status]').textContent(), POLL).toBe('Cancelled');
+    expect(await p.locator('[data-testid=house-message-status] .status__text').allTextContents()).toEqual(['Cancelled']);
+    expect(await p.locator('[data-testid=house-send], [data-testid=house-reschedule], [data-testid=house-cancel]').count()).toBe(0);
+    await shot(p, 'house-cancelled', { phone: true });
+    expect((await ctx.db.selectFrom('house_messages').select('status').where('id', '=', row.id).executeTakeFirstOrThrow()).status).toBe('CANCELLED');
+    expect(Number((await ctx.db.selectFrom('house_deliveries').select((eb) => eb.fn.countAll().as('n')).executeTakeFirstOrThrow()).n)).toBe(0);
+    await p.context().close();
+    // An AUDITOR reads the message and the moments, without one action.
+    const r = await open(AUDITOR);
+    await go(r, `#/house-messages?message=${row.id}`, 'House messages');
+    await expect.poll(() => r.locator('[data-testid=house-editor-status]').textContent(), POLL).toBe('Cancelled');
+    expect(await r.locator('[data-testid=house-message-preview] [data-testid=house-frame-title]').textContent()).toBe('THE WINTER PIECES');
+    await go(r, '#/house-messages', 'House messages');
+    await expect.poll(() => r.locator('[data-testid=house-moment]').count(), POLL).toBe(6);
+    for (const id of ['house-title', 'house-save', 'house-send', 'house-cancel', 'house-switch']) expect(await r.locator(`[data-testid=${id}]`).count(), id).toBe(0);
+    await r.context().close();
   }, STEP_TIMEOUT);
 });

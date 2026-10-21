@@ -182,6 +182,15 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   switchEmails: 'ADMIN',
   /** The Founding list's announcement (E1, F6): sent now or at the opening with a phrase, and CANCEL SCHEDULED. */
   sendAnnouncement: 'ADMIN',
+  /**
+   * The House messages page (plan MACRO M2 §1.6, D24 M1 and M2): a moment's words, a custom message written, saved,
+   * deleted while a draft, and its reach read as it is written (server: OPERATOR). An AUDITOR reads the page.
+   */
+  editHouseMessages: 'OPERATOR',
+  /** A moment switched on (from then on: nothing for the past) or off: what writes to collectors. */
+  switchHouseMoments: 'ADMIN',
+  /** A custom message sent now or scheduled in Paris (the phrase SEND), rescheduled or cancelled. */
+  sendHouseMessages: 'ADMIN',
   /** The Collectors page (plan CUSTOMER INTELLIGENCE §3.6 C.6.1, C.9): the counted collectors' figures over a period. */
   readCollectors: 'AUDITOR',
   /** The Collectors page's Export (CSV) (§3.6 C.7): one row per collector with everything held, audited. */

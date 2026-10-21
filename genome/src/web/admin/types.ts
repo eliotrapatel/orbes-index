@@ -438,8 +438,15 @@ export interface Segment {
   name: string;
   criteria: SegmentGroup;
   count: number;
-  /** The releases whose access rule it is (a LIVE RELEASE or, plan MACRO M1 §3.2, a draw), the posts whose audience. */
-  usedBy: { releases: { id: string; title: string; mode: DropMode }[]; posts: { id: string; title: string }[] };
+  /**
+   * The releases whose access rule it is (a LIVE RELEASE or, plan MACRO M1 §3.2, a draw), the posts whose audience, and
+   * (plan MACRO M2 §1.6) the house messages not sent yet whose audience it is.
+   */
+  usedBy: {
+    releases: { id: string; title: string; mode: DropMode }[];
+    posts: { id: string; title: string }[];
+    houseMessages: { id: string; title: string; status: 'DRAFT' | 'SCHEDULED' }[];
+  };
   createdAt: Iso;
   createdBy: { id: string; email: string } | null;
   updatedAt: Iso;
@@ -1712,6 +1719,73 @@ export interface AnnouncementState {
   /** The people on the list it would reach: those not unsubscribed. */
   reach: number;
   releases: AnnouncementRelease[];
+}
+
+// ── House messages (plan MACRO M2 §1.6, D24 M1 and M2; routes/admin/house.ts) ─────────────────────────────────────
+
+/** The places of the app a moment's message links to, fixed by its kind (src/shared/house-words.ts HOUSE_LINK_KINDS). */
+export type HouseLinkKind = 'CARE' | 'SIZES' | 'IN_USE' | 'MY_PIECES' | 'PIECE' | 'COLLECTION';
+
+/** A placeholder a moment's words may hold (src/shared/house-words.ts HOUSE_PLACEHOLDER_NAMES). */
+export type HousePlaceholderName = 'firstName' | 'piece' | 'amount' | 'expires' | 'tier';
+
+/** A moment as MOMENTS lists it (GET /api/admin/house/moments, services/house-moments.ts moments()). */
+export interface HouseMomentView {
+  moment: HouseMoment;
+  enabled: boolean;
+  /** Since when it is on (what falls due from then on is delivered); null while off. */
+  enabledAt: Iso | null;
+  /** The console's title and words; null: the default's. */
+  title: string | null;
+  body: string | null;
+  defaults: { title: string; body: string };
+  placeholders: HousePlaceholderName[];
+  links: HouseLinkKind[];
+  updatedAt: Iso | null;
+  /** Delivered and read: over the last 30 days (delivered since then) and in all. */
+  figures: { delivered30: number; read30: number; delivered: number; read: number };
+}
+
+/** A moment as a collector would read it, with example values (GET or POST …/moments/:moment/preview). */
+export interface HouseMomentPreview {
+  moment: HouseMoment;
+  title: string;
+  body: string;
+  links: HouseLinkKind[];
+  values: Record<string, string>;
+}
+
+/** A custom message's audience as written: a segment's id or a tier (1 TITANE, 2 PLATINE, 3 PALLADIUM), exactly one. */
+export type HouseAudience = { segmentId: string; tier?: undefined } | { tier: 1 | 2 | 3; segmentId?: undefined };
+
+/** A custom house message as the console reads it (services/house-messages.ts AdminHouseMessage). */
+export interface HouseMessage {
+  id: string;
+  title: string;
+  body: string;
+  status: HouseMessageStatus;
+  /** The segment's id (null once deleted after sending) or the tier, and its name (« PLATINE and above »). */
+  audience: { segmentId: string | null; tier: 1 | 2 | 3 | null; label: string };
+  /** When it goes or went (SCHEDULED, SENT). */
+  sendAt: Iso | null;
+  sentAt: Iso | null;
+  /** How many it reached (SENT), how many of them read it, and their share (0 to 1). */
+  reach: number | null;
+  read: number | null;
+  shareRead: number | null;
+  createdAt: Iso;
+  createdBy: { id: string; email: string } | null;
+  updatedAt: Iso;
+  updatedBy: { id: string; email: string } | null;
+  /** Who scheduled or sent it. */
+  sentBy: { id: string; email: string } | null;
+  cancelledAt: Iso | null;
+  cancelledBy: { id: string; email: string } | null;
+}
+
+/** One custom message (GET /api/admin/house/messages/:id): while a DRAFT or SCHEDULED, the reach its audience has now. */
+export interface HouseMessageDetail extends HouseMessage {
+  reachNow: number | null;
 }
 
 /** The Origin block (§3.4 A.10.5): the first visit, the sign-up's last link, the latest purchase's. */

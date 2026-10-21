@@ -6991,3 +6991,202 @@ a.collectors__kpi-link:focus-visible {
     width: calc(100vw - 24px);
   }
 }
+
+/* ── House messages (plan MACRO M2 §1.6): MOMENTS · MESSAGES, a moment's words or a message beside its preview. The
+   editor, its fields, placeholders and buttons are the Emails page's (.emails__*); what follows is the page's own. ── */
+
+.house__tabs {
+  margin: 0 0 28px;
+}
+
+.house__links {
+  display: grid;
+  gap: 2px;
+  margin: 0 0 26px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--ink);
+}
+
+.house__links .emails__sub {
+  margin: 0;
+}
+
+.deflist.house__facts {
+  margin: 0 0 26px;
+}
+
+/* The reach of the audience chosen, read live: a figure in the reading face, under the fields. */
+.house__reach {
+  margin: -8px 0 22px;
+  font-size: var(--fs-body);
+  color: var(--ink);
+}
+
+.house__reach:empty {
+  display: none;
+}
+
+/* A sent message's title and words, as written. */
+.house__words {
+  margin: 0 0 26px;
+  padding-top: 18px;
+  border-top: 1px solid var(--hairline);
+}
+
+.house__words-title {
+  margin: 0 0 18px;
+  overflow-wrap: anywhere;
+}
+
+.house__words-body {
+  margin: 0;
+  max-width: 62ch;
+  color: var(--ink-soft);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.house__title-link {
+  overflow-wrap: anywhere;
+}
+
+.house__send-line {
+  margin-top: 18px;
+}
+
+/* The preview: DARK · LIGHT and PHONE · COMPUTER over the item on the collector's ground. */
+.house-view {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+}
+
+/* A moment's words are short: the field keeps a lower height than an email's. */
+.house__editor .emails__form .cinput--area {
+  min-height: 168px;
+}
+
+.house-view__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 36px;
+}
+
+.house-view__choice[aria-pressed="true"] {
+  color: var(--ink);
+}
+
+.house-view__choice[aria-pressed="true"]::after {
+  transform: scaleX(1);
+}
+
+/* The ground around the frame: the collector's, so a phone's width stands on it as on a screen. */
+.house-view__ground {
+  display: flex;
+  justify-content: center;
+  padding: 28px 0;
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  background: var(--vault-ground);
+}
+
+.house-view__ground--light {
+  background: var(--white);
+}
+
+.house-view__note {
+  margin: 0;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
+/* The item, value for value the collector's (ui/house-preview.ts HOUSE_PREVIEW sets every --hp-* through the CSSOM). */
+.house-frame {
+  box-sizing: border-box;
+  flex: 0 1 auto;
+  width: var(--hp-width);
+  min-width: 0;
+  max-width: 100%;
+  padding: 0 var(--hp-margin);
+  background: var(--hp-ground);
+  color: var(--hp-ink);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+.house-frame__item {
+  padding: var(--hp-item) 0;
+  border-top: 1px solid var(--hp-hairline);
+  border-bottom: 1px solid var(--hp-hairline);
+}
+
+.house-frame__author,
+.house-frame__title,
+.house-frame__link {
+  font-family: var(--font-display);
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.house-frame__author {
+  margin: 0;
+  color: var(--hp-author);
+  font-size: var(--hp-author-size);
+  letter-spacing: var(--hp-author-track);
+  line-height: 1.5;
+}
+
+.house-frame__title {
+  margin: var(--hp-title-gap) 0 0;
+  color: var(--hp-ink);
+  font-size: var(--hp-title-size);
+  letter-spacing: var(--hp-title-track);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.house-frame__numeral {
+  font-family: var(--font);
+}
+
+.house-frame__body {
+  max-width: var(--hp-measure);
+  margin: var(--hp-text-gap) 0 0;
+  color: var(--hp-ink);
+  font-size: var(--hp-text-size);
+  line-height: var(--hp-text-leading);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.house-frame__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  margin: 18px 0 0;
+}
+
+.house-frame__link {
+  padding: 0 0 5px;
+  border-bottom: 1px solid currentColor;
+  color: var(--hp-ink);
+  font-size: var(--hp-link-size);
+  letter-spacing: var(--hp-link-track);
+  line-height: 1.5;
+}
+
+@media (max-width: 1180px) {
+  .house__preview {
+    margin-top: 30px;
+  }
+}
+
+@media (max-width: 599px) {
+  .house-view__ground {
+    padding: 16px 0;
+  }
+}

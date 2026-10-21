@@ -244,6 +244,17 @@ describe('console: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
     for (const f of ['views/emails.ts', 'ui/email-frame.ts', 'views/founding.ts'].map((x) => join(WEB, 'admin', x))) expect(readFileSync(f, 'utf8'), f).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|DOMParser|srcdoc|setAttribute\('style'/);
   });
 
+  it('writes the House messages page calmly (plan MACRO M2 §1.6): no atelier, handmade or craft, no exclamation mark, never « product », no piece named, no markup', () => {
+    for (const f of ['model/house-messages.ts', 'views/house-messages.ts', 'ui/house-preview.ts'].map((x) => join(WEB, 'admin', x))) {
+      const code = readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+      expect(code, f).not.toMatch(/atelier|handmade|hand-made|craft/i);
+      const words = [...code.matchAll(/'([^'\n]*)'|`([^`\n]*)`/g)].map((m) => m[1] ?? m[2] ?? '').join('\n');
+      expect(words, f).not.toMatch(/!(?!==?)/);
+      expect(words, f).not.toMatch(/\bproducts?\b|MONOLITHE/i);
+      expect(readFileSync(f, 'utf8'), f).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|DOMParser|srcdoc|setAttribute\('style'/);
+    }
+  });
+
   it('writes the client sheet\'s Profile, Tags and private notes and Intelligence calmly (plan CUSTOMER INTELLIGENCE §3.6 C.4, §0.7): no atelier, handmade or craft, no exclamation mark, never « product »', () => {
     const files = ['model', 'views'].flatMap((dir) =>
       readdirSync(join(WEB, 'admin', dir))

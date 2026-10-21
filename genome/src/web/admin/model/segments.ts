@@ -537,11 +537,13 @@ export function membersLine(count: number): string {
   return `${formatCount(count)} ${count === 1 ? 'COLLECTOR' : 'COLLECTORS'}`;
 }
 
-/** What uses a segment: `2 releases · 1 post`, or null when nothing does. */
+/** What uses a segment: `2 releases · 1 post of the circle · 1 house message`, or null when nothing does. */
 export function usedByLine(s: Pick<Segment, 'usedBy'>): string | null {
   const parts = [
     s.usedBy.releases.length ? plural(s.usedBy.releases.length, 'release', 'releases') : null,
     s.usedBy.posts.length ? plural(s.usedBy.posts.length, 'post of the circle', 'posts of the circle') : null,
+    // Plan MACRO M2 §1.6: a house message not sent yet (draft or scheduled) whose audience it is.
+    s.usedBy.houseMessages.length ? plural(s.usedBy.houseMessages.length, 'house message', 'house messages') : null,
   ].filter((x): x is string => x !== null);
   return parts.length ? parts.join(' · ') : null;
 }

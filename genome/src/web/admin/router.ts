@@ -23,6 +23,8 @@ export const ROUTES = [
   /** The Messages board (CS-01): one conversation per client; a conversation's page from its row. */
   { name: 'messages', path: '/messages' },
   { name: 'conversation', path: '/messages/:conversationId' },
+  /** House messages (plan MACRO M2 §1.6): MOMENTS and MESSAGES, under Messages in the sidebar; a moment or a message by its query. */
+  { name: 'houseMessages', path: '/house-messages' },
   { name: 'owner', path: '/owners/:accountId' },
   /** The Sign-up page (plan CUSTOMER INTELLIGENCE §3.1 P.10): from the Owners page's header, no link of its own in the sidebar. */
   { name: 'signUp', path: '/sign-up' },

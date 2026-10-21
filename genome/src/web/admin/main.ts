@@ -78,6 +78,7 @@ import { ordersView } from './views/orders.js';
 import { invoicesView } from './views/invoices.js';
 import { foundingView } from './views/founding.js';
 import { emailsView } from './views/emails.js';
+import { houseMessagesView } from './views/house-messages.js';
 import { segmentsView, segmentView } from './views/segments.js';
 import { supplierOrderView } from './views/supplier-order.js';
 import { supplierOrdersView } from './views/supplier-orders.js';
@@ -144,6 +145,8 @@ const NAV: { group: string; items: NavItem[] }[] = [
     group: 'Clients',
     items: [
       { route: 'messages', label: 'Messages' },
+      // Plan MACRO M2 §1.6: House messages under Messages.
+      { route: 'houseMessages', label: 'House messages' },
       { route: 'owners', label: 'Owners' },
       // Plan CUSTOMER INTELLIGENCE §3.6 C.6.1: Collectors right after Owners.
       { route: 'collectors', label: 'Collectors', cap: 'readCollectors' },
@@ -194,6 +197,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   cases: { view: casesView, title: 'Cases', nav: 'cases' },
   messages: { view: messagesView, title: 'Messages', nav: 'messages' },
   conversation: { view: conversationView, title: 'Conversation', nav: 'messages' },
+  houseMessages: { view: houseMessagesView, title: 'House messages', nav: 'houseMessages' },
   owners: { view: ownersView, title: 'Owners', nav: 'owners' },
   owner: { view: ownerView, title: 'Owner', nav: 'owners' },
   signUp: { view: signUpView, title: 'Sign-up', nav: 'owners' },

@@ -140,7 +140,7 @@ function builder(ctx: ViewContext, segment: Segment | null, options: SegmentOpti
   const scoreNotice = h('p', { class: 'notice segment__notice', data: { testid: 'segment-score-notice' } }, SEGMENT_COPY.scoreNotice);
   const save = button(segment ? 'Save' : 'Create segment', { kind: 'primary', testId: 'segment-save' });
   const remove = segment
-    ? button('Delete', { kind: 'ghost', testId: 'segment-delete', disabled: !segmentActions(segment, ctx.session.admin.role).remove, title: usedByLine(segment) ? 'A release or a post of the circle uses it.' : undefined })
+    ? button('Delete', { kind: 'ghost', testId: 'segment-delete', disabled: !segmentActions(segment, ctx.session.admin.role).remove, title: usedByLine(segment) ? 'A release, a post of the circle or a house message not sent yet uses it.' : undefined })
     : null;
 
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -587,17 +587,24 @@ function csvButton(ctx: ViewContext, s: Segment): HTMLButtonElement {
   return b;
 }
 
-/** The releases whose access rule it is, the posts of the circle whose audience it is. */
+/** The releases whose access rule it is, the posts of the circle and the house messages not sent yet whose audience it is. */
 function usedSection(s: Segment): HTMLElement {
-  const none = s.usedBy.releases.length + s.usedBy.posts.length === 0;
+  const houseMessages = s.usedBy.houseMessages;
+  const none = s.usedBy.releases.length + s.usedBy.posts.length + houseMessages.length === 0;
   return section(
     'Used by',
     none
-      ? h('p', { class: 'notice' }, 'Nothing yet: choose it in a release’s access, a LIVE RELEASE’s or a draw’s, or as a post’s audience in the circle.')
+      ? h('p', { class: 'notice' }, 'Nothing yet: choose it in a release’s access, a LIVE RELEASE’s or a draw’s, as a post’s audience in the circle, or as a house message’s audience.')
       : defList([
           // Plan MACRO M1 §3.2 (F4): a draw may be opened to a segment too; each release opens its own page.
           ...s.usedBy.releases.map((r) => ({ label: 'Release', value: h('a', { class: 'idlink', attrs: { href: r.mode === 'DRAW' ? href('drop', { dropId: r.id }) : href('liveRelease', { dropId: r.id }) } }, r.title), note: 'Its access rule' })),
           ...s.usedBy.posts.map((p) => ({ label: 'Circle', value: h('a', { class: 'idlink', attrs: { href: href('circlePost', { postId: p.id }) } }, p.title), note: 'Its audience' })),
+          // Plan MACRO M2 §1.6: a house message's audience, until it is sent (a sent one keeps the segment's name).
+          ...houseMessages.map((m) => ({
+            label: 'House message',
+            value: h('a', { class: 'idlink', attrs: { href: href('houseMessages', {}, { tab: 'messages', message: m.id }), 'data-testid': 'segment-used-house' } }, m.title),
+            note: `Its audience · ${m.status === 'SCHEDULED' ? 'Scheduled' : 'Draft'}`,
+          })),
         ]),
     { id: 'segment-used' },
   );
