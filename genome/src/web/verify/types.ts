@@ -613,6 +613,8 @@ export interface DropSheet extends DropCard {
   guaranteed?: { id: string; pieces: number; size?: DrawSizeRef | null; reserved?: boolean }[];
   /** Plan NEXT LOT §3.6.F: a draw's sizes, each with its pieces, in order; empty for a draw without sizes (one pool). */
   sizes?: DrawSheetSize[];
+  /** Plan MACRO M1 §3.1 (F4): SELECTED when the draw is opened to a segment (FOR SELECTED COLLECTORS), null otherwise. */
+  rule?: 'SELECTED' | null;
 }
 
 /** A size of a draw as an entry and the draw's list name it (plan NEXT LOT §3.6.F). */
@@ -642,6 +644,8 @@ export interface DrawEntry {
 export interface DrawEntryRead {
   entry: ClubEntry | null;
   savedSize: DrawSizeRef | null;
+  /** Plan MACRO M1 §3.1 (F4): whether the account may enter now (a draw opened to a segment: its members only). */
+  eligible?: boolean;
 }
 
 /** A release of THE RELEASES' PAST (GET /api/v1/releases/past, plan LIVE RELEASE+ choice 5): what was announced, no end figure. */

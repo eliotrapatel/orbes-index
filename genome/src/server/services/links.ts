@@ -10,7 +10,7 @@
  *   list / get    the links, the archived ones only when asked, each with its addresses: the short one and the direct
  *                 one « for places that refuse a redirect » (A.3), which counts the same.
  *   create        a name, a channel, a destination (a release that exists and is published, a model that is active,
- *                 or a page of the app), an address (by default the name's suggestion, `-2`, `-3`… when taken: the
+ *                 a page of the app, or theorbes.com), an address (by default the name's suggestion, `-2`, `-3`… when taken: the
  *                 console's own rule, src/shared/link-code.ts), an optional cost in one of the house's currencies and a
  *                 note. The link and its LINK source in one transaction; two staff taking one address at once: the
  *                 unique index decides, 409 LINK_CODE_TAKEN. Audited `link.create`.
@@ -21,13 +21,14 @@
  *                 counting. Audited `link.archive`, `link.unarchive`.
  *   resolve       `GET /go/<code>`'s destination, read at each request (a model's current slug, so a renamed sheet never
  *                 breaks a link): `/verify/releases/<id>`, `/verify/lookbook/<slug>`, `/verify`, `/verify/releases`,
- *                 `/verify/lookbook`, `/verify/club`, `/verify/releases/how`; null for an unknown code. One read by the
+ *                 `/verify/lookbook`, `/verify/club`, `/verify/releases/how`, or theorbes.com for LANDING (LANDING_ADDRESS, the
+ *                 founding list's page, plan MACRO M1 §3.1); null for an unknown code. One read by the
  *                 unique index, no write: a visit is counted by the app's arrival, never here (preview robots fetch
  *                 links too).
  *   destinations  what the dialog offers: the published releases (DRAW or LIVE, not cancelled), the latest 50 by their
  *                 opening, and the active models, main models and variants, by name.
  *
- * Only ORBES pages are ever destinations: `/go` is no open redirect.
+ * Only ORBES pages are ever destinations (the app's, and theorbes.com, ORBES's own site): `/go` is no open redirect.
  */
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
@@ -57,6 +58,12 @@ const PAGE_PATHS: Readonly<Record<Exclude<LinkDestination, 'RELEASE' | 'MODEL' |
   CLUB: '/verify/club',
   HOW: '/verify/releases/how',
 };
+
+/**
+ * Where a LANDING link leads (plan MACRO M1 §3.1, F3): theorbes.com, whose form reads the `o` code and sends it with the
+ * person's pre-registration (services/founding.ts). A constant, ORBES's own site: `/go` stays no open redirect.
+ */
+export const LANDING_ADDRESS = 'https://theorbes.com/';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -166,9 +173,8 @@ interface LinkRowJoined {
 export function destinationPath(destination: LinkDestination, dropId: string | null, modelSlug: string | null): string {
   if (destination === 'RELEASE') return dropId ? `/verify/releases/${dropId}` : PAGE_PATHS.RELEASES;
   if (destination === 'MODEL') return modelSlug ? `/verify/lookbook/${modelSlug}` : PAGE_PATHS.COLLECTION;
-  // LANDING (migration 0050) goes to theorbes.com; its redirect comes with the founding list's server (lot M1, step
-  // M1.11). Until then the service makes no LANDING link (`destination` below), and one written by hand leads to NOW.
-  if (destination === 'LANDING') return PAGE_PATHS.NOW;
+  // LANDING (migration 0050, plan MACRO M1 §3.1): theorbes.com, the founding list's page, ORBES's own site.
+  if (destination === 'LANDING') return LANDING_ADDRESS;
   return PAGE_PATHS[destination];
 }
 
@@ -522,7 +528,8 @@ export class LinkService {
       cost: r.cost_minor === null || r.cost_currency === null ? null : { minor: Number(r.cost_minor), currency: r.cost_currency },
       note: r.note,
       address: `${this.origin}/go/${r.code}`,
-      directAddress: `${this.origin}${path}?o=${r.code}`,
+      // LANDING's path is theorbes.com's whole address; the app's own pages are paths on its origin.
+      directAddress: `${path.startsWith('https://') ? '' : this.origin}${path}?o=${r.code}`,
       archivedAt: r.archived_at,
       createdBy: { id: r.created_by, email: r.created_by_email },
       createdAt: r.created_at,
@@ -546,8 +553,6 @@ export class LinkService {
   private async destination(tx: Db, destination: unknown, dropId: unknown, modelId: unknown): Promise<{ destination: LinkDestination; dropId: string | null; modelId: string | null }> {
     if (typeof destination !== 'string' || !(LINK_DESTINATIONS as readonly string[]).includes(destination)) throw noDestination();
     const d = destination as LinkDestination;
-    // LANDING is not offered before its redirect to theorbes.com (step M1.11, see destinationPath).
-    if (d === 'LANDING') throw noDestination();
     const given = (v: unknown) => v !== undefined && v !== null;
     if (d === 'RELEASE') {
       if (given(modelId) || typeof dropId !== 'string' || !UUID_RE.test(dropId)) throw noDestination();

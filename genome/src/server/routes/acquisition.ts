@@ -7,7 +7,9 @@
  *   - Nothing is written here: a visit is counted by the app's arrival, never at the redirect, so the preview robots of
  *     Instagram, WhatsApp or iMessage, which fetch a link to draw its card, count nothing.
  *   - One read by `links_code_key` and the model's current slug (LinkService.resolve): a renamed sheet never breaks a
- *     link. Destinations are ORBES pages only: no open redirect.
+ *     link. Destinations are ORBES pages only: no open redirect. A LANDING link (plan MACRO M1 §3.1) answers 302
+ *     `https://theorbes.com/?o=<code>`, ORBES's own site, whose founding list form carries the code (a constant,
+ *     links.ts LANDING_ADDRESS); its referrer policy is the same.
  *   - `cache-control: no-store` (a link moved to another release redirects there at once), `x-robots-tag: noindex,
  *     nofollow`, and `Referrer-Policy: strict-origin-when-cross-origin` on this 302 only, over helmet's `no-referrer`:
  *     under the Fetch standard a redirect's own policy applies to the redirected request, so the referring site's origin

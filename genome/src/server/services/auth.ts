@@ -48,6 +48,7 @@ import { conflict, DomainError, isDomainError, notFound, unauthorized, validatio
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import { randomCrockford } from './claim-codes.js';
+import { matchPreregistration } from './founding-match.js';
 import type { IssuedSession, SessionInfo, SessionService } from './sessions.js';
 import { insertSignUpProfile, signUpNames, type SignUpHeard } from './sign-up.js';
 import { knownLocation } from './stock.js';
@@ -308,6 +309,8 @@ export class AuthService {
         );
         const profile = names ? await insertSignUpProfile(tx, row.id, names, input.heard, now) : null;
         await this.audit.record({ actor: accountActor(row.id, meta), action: 'account.register', targetType: 'account', targetId: row.id, ...(profile ? { details: { profile: true, heardOptionId: profile.heardOptionId } } : {}) }, tx);
+        // The founding list (plan MACRO M1 §3.1, F3): the address's pre-registration takes the account, in its transaction.
+        await matchPreregistration(tx, this.audit, { accountId: row.id, emailNormalized: email.normalized, now, at: 'SIGN_UP' }, accountActor(row.id, meta));
         return { account: accountProfile(row), session };
       });
     } catch (e) {

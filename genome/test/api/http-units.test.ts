@@ -4,7 +4,7 @@ import { DomainError } from '../../src/server/errors.js';
 import { canonicalIp, ipHashOf, pseudonymize, rateLimitKeyOf, userAgentFamily } from '../../src/server/http/client.js';
 import { mapError, zodMessage } from '../../src/server/http/errors.js';
 import { createForwardingLogger, loggerOptions } from '../../src/server/http/logging.js';
-import { groupLimits, RATE_GROUPS, SEEN_RATE_FACTOR } from '../../src/server/http/rate-limit.js';
+import { FOUNDING_RATE_DIVISOR, groupLimits, RATE_GROUPS, SEEN_RATE_FACTOR } from '../../src/server/http/rate-limit.js';
 import { testConfig } from '../../src/server/config.js';
 import { body, emptyBody, pageOf, parse, productRef, verifyBody } from '../../src/server/http/schemas.js';
 import { hasRole, originAllowed } from '../../src/server/http/sessions.js';
@@ -51,12 +51,19 @@ describe('client pseudonyms', () => {
 
 describe('rate groups', () => {
   it('give the views of POST /api/v1/seen their own group, `seen`, at twice the api budget (plan CUSTOMER INTELLIGENCE §3.3 T.8.7)', () => {
-    expect(RATE_GROUPS).toEqual(['verify', 'auth', 'admin', 'api', 'media', 'live', 'seen']);
+    expect(RATE_GROUPS).toEqual(['verify', 'auth', 'admin', 'api', 'media', 'live', 'seen', 'founding']);
     expect(SEEN_RATE_FACTOR).toBe(2);
     const limits = groupLimits(testConfig({ rateLimits: { apiPerMinute: 120 } }));
     expect(limits.seen).toBe(240);
     expect(limits.api).toBe(120);
     expect(Object.keys(limits).sort()).toEqual([...RATE_GROUPS].sort());
+  });
+
+  it('give theorbes.com\'s form, POST /api/v1/founding, its own narrow group, `founding`, the api budget ÷ 12 (plan MACRO M1 §3.1, F2)', () => {
+    expect(FOUNDING_RATE_DIVISOR).toBe(12);
+    expect(groupLimits(testConfig({ rateLimits: { apiPerMinute: 120 } })).founding).toBe(10);
+    // Never 0, which would refuse every registration.
+    expect(groupLimits(testConfig({ rateLimits: { apiPerMinute: 7 } })).founding).toBe(1);
   });
 });
 

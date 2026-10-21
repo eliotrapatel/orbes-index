@@ -19,6 +19,9 @@
  *   GET   /api/admin/releases/:id/campaign                  AUDITOR   its links by channel, the channels without one, the readout
  *   POST  /api/admin/releases/:id/campaign/links            OPERATOR  one link per channel still without one   drop.campaign.links
  *
+ * Plan MACRO M1 §3.1 (F4): a draw may be opened to a segment's members (`accessSegmentId` on POST and PATCH, a DRAFT's
+ * only; null: everyone), read back as `accessSegment` ({ id, name }); its members alone enter, reserve and change size.
+ *
  * Plan NEXT LOT §3.6.F: a draw has its sizes and their pieces (`sizes` on POST and PATCH, its quantity their sum; a
  * `quantity` sent is refused), each size with its counts (`sizes`), each entry its size, OFFER NEXT per size; its stock
  * check (`feasibility`, §3.5.4.3), as a LIVE RELEASE's.
@@ -74,6 +77,7 @@ export const adminDropRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
         ...(b.earlyAccessHours !== undefined ? { earlyAccessHours: b.earlyAccessHours } : {}),
         ...(b.earlyAccessPlatineHours !== undefined ? { earlyAccessPlatineHours: b.earlyAccessPlatineHours } : {}),
         ...(b.priceMinor !== undefined ? { priceMinor: b.priceMinor, currency: b.currency } : {}),
+        ...(b.accessSegmentId !== undefined ? { accessSegmentId: b.accessSegmentId } : {}),
       },
       adminActor(request),
     );
@@ -109,6 +113,7 @@ export const adminDropRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
         ...(b.earlyAccessHours !== undefined ? { earlyAccessHours: b.earlyAccessHours } : {}),
         ...(b.earlyAccessPlatineHours !== undefined ? { earlyAccessPlatineHours: b.earlyAccessPlatineHours } : {}),
         ...(b.priceMinor !== undefined ? { priceMinor: b.priceMinor, currency: b.currency } : {}),
+        ...(b.accessSegmentId !== undefined ? { accessSegmentId: b.accessSegmentId } : {}),
       },
       adminActor(request),
     );

@@ -80,6 +80,7 @@ import { AcquisitionService } from './services/acquisition.js';
 import { AcquisitionReportService } from './services/acquisition-report.js';
 import { LinkService } from './services/links.js';
 import { CampaignService } from './services/campaign.js';
+import { FoundingService } from './services/founding.js';
 import { TrackingService } from './services/tracking.js';
 import { SalonService } from './services/salon.js';
 import { ShopifyExportService } from './services/shopify.js';
@@ -207,6 +208,8 @@ export interface AppServices {
   acquisitionReport: AcquisitionReportService;
   /** A release's CAMPAIGN tab (plan MACRO M1 §2.1, C2): its links, one per channel in one click, and what each brought in, last link. */
   campaign: CampaignService;
+  /** The founding list (plan MACRO M1 §3.1, F2 to F5): theorbes.com's form, its sources, the match at sign-up, the console's reads. */
+  founding: FoundingService;
   /** The lot's growing tables' bytes as last measured (plan CUSTOMER INTELLIGENCE §3.3 T.10, §3.4 A.10.7): the `intelligence sizes` line and Server status's « Visitor data ». */
   intelligenceSizes: IntelligenceSizes;
   /** The suppliers (plan NEXT LOT §3.5.6.2): who makes ORBES's pieces, and the supplier of each model and size. */
@@ -362,6 +365,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const links = new LinkService({ db, audit, publicOrigin: config.publicOrigin, clock });
     const acquisitionReport = new AcquisitionReportService({ db, links });
     const campaign = new CampaignService({ db, audit, links, clock });
+    const founding = new FoundingService({ db, audit, acquisition, clock });
     const intelligenceSizes = new IntelligenceSizes(db, clock, log);
     // The page load's arrival rides in the views' batches (§3.0 (c), §3.4 A.7.2): the same route, the same exclusions.
     // The link attaches the device's visits in its own transaction (§3.3 T.8.4 step 7, §3.4 A.4).
@@ -442,6 +446,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       links,
       acquisitionReport,
       campaign,
+      founding,
       intelligenceSizes,
       suppliers,
       supplierOrders,

@@ -101,6 +101,7 @@ import { exportedProfile, ProfileService, type ExportedProfile, type ExportedTas
 import { accountPrivateNotes, accountTags, CLIENT_NOTE_ACTIONS, type PrivateNotes } from './client-notes.js';
 import { TasteService } from './tastes.js';
 import { exportedOrigin, exportedOriginCount, type ExportedOrigin } from './acquisition-reads.js';
+import { exportedFounding, type ExportedFounding } from './founding.js';
 import { exportedBrowsing, exportedBrowsingCount, type ExportedBrowsing } from './tracking-reads.js';
 import { exportedWishes, type ExportedWish } from './wishlist.js';
 import { collectorValue, type LifetimeValue } from './growth.js';
@@ -502,6 +503,12 @@ export interface AccountExport {
    * channel, campaign tags, a site, Direct, Before tracking; never who on staff made a link.
    */
   origin: ExportedOrigin;
+  /**
+   * The founding list (plan MACRO M1 §3.1, F3), once the account is matched to its pre-registration: when it joined
+   * through theorbes.com's form, the first name and country it gave, the version of the terms it consented under, where
+   * it came from (in words) and when it unsubscribed; null when it is not on the list.
+   */
+  foundingList: ExportedFounding | null;
   /**
    * The new claim codes ORBES Client Services made for the account's orders (plan NEXT LOT §3.4), oldest first: the
    * order, when it was made, where it stands and when it was read; never the code, sealed or clear, nor who made it.
@@ -1013,6 +1020,7 @@ export class OwnerService {
       const wishlist = await exportedWishes(tx, a.id);
       const browsing = await exportedBrowsing(tx, a.id, now);
       const origin = await exportedOrigin(tx, a.id);
+      const foundingList = await exportedFounding(tx, a.id);
       const claimCodes = await accountClaimCodes(tx, a.id);
       const tierGrants = await accountTierGrants(tx, a.id);
       // Every entry that names the account: about it (target), or made by it (actor: claim codes tried, incidents
@@ -1108,6 +1116,7 @@ export class OwnerService {
         wishlist,
         browsing,
         origin,
+        foundingList,
         claimCodes,
         tierGrants,
         activity: activity.slice(0, EXPORT_LIST_LIMIT).map((e) => ({
@@ -1154,6 +1163,7 @@ export class OwnerService {
             wishlist: out.wishlist.length,
             browsing: exportedBrowsingCount(out.browsing),
             origin: exportedOriginCount(out.origin),
+            foundingList: out.foundingList ? 1 : 0,
             claimCodes: out.claimCodes.length,
             tierGrants: out.tierGrants.length,
             activity: out.activity.length,

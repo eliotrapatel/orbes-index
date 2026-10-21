@@ -17,7 +17,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { closeDb, createDb, type Db } from '../../src/server/db/connection.js';
 import { migrateToLatest } from '../../src/server/db/migrate.js';
 import { AuditService } from '../../src/server/services/audit.js';
-import { destinationPath, LinkService } from '../../src/server/services/links.js';
+import { FOUNDING_ORIGIN } from '../../src/server/services/founding.js';
+import { destinationPath, LANDING_ADDRESS, LinkService } from '../../src/server/services/links.js';
 import { freeCode, LINK_CODE_RE, suggestCode } from '../../src/shared/link-code.js';
 import type { Actor } from '../../src/server/types.js';
 import { createAdmin, createHarness, seedCatalog, type Harness } from '../api/support.js';
@@ -235,9 +236,16 @@ describe('LinkService (§3.4 A.7.1, step 4.3)', () => {
     expect(await links.resolve('no-such-link')).toBeNull();
     expect(await links.resolve('<script>')).toBeNull();
     expect(destinationPath('MODEL', null, null)).toBe('/verify/lookbook');
-    // LANDING (migration 0050) is not made before its redirect to theorbes.com (step M1.11); one written by hand leads to NOW.
-    await expect(links.create({ name: 'Founding list', channelId: instagram, destination: 'LANDING' }, actor)).rejects.toMatchObject({ httpStatus: 400, publicMessage: 'Choose where the link goes.' });
-    expect(destinationPath('LANDING', null, null)).toBe('/verify');
+    // LANDING (migration 0050, plan MACRO M1 §3.1): theorbes.com, ORBES's own site, a constant; it names nothing else.
+    expect(destinationPath('LANDING', null, null)).toBe('https://theorbes.com/');
+    expect(LANDING_ADDRESS).toBe(`${FOUNDING_ORIGIN}/`);
+    const landing = await links.create({ name: 'Founding list', channelId: instagram, destination: 'LANDING' }, actor);
+    expect(landing).toMatchObject({ destination: 'LANDING', dropId: null, modelId: null, code: 'founding-list', directAddress: 'https://theorbes.com/?o=founding-list' });
+    expect(await links.resolve('founding-list')).toBe('https://theorbes.com/');
+    await expect(links.create({ name: 'Founding list 2', channelId: instagram, destination: 'LANDING', dropId: published }, actor)).rejects.toMatchObject({ httpStatus: 400, publicMessage: 'Choose where the link goes.' });
+    // A link moves to theorbes.com and back, as any page.
+    expect(await links.update(landing.id, { destination: 'NOW' }, actor)).toMatchObject({ destination: 'NOW', directAddress: expect.stringMatching(/\/verify\?o=founding-list$/) });
+    expect(await links.update(landing.id, { destination: 'LANDING' }, actor)).toMatchObject({ destination: 'LANDING', directAddress: 'https://theorbes.com/?o=founding-list' });
   });
 
   it('offers the published releases not cancelled, and the active models', async () => {

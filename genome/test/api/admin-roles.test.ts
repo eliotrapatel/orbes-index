@@ -438,6 +438,12 @@ const PROBES: Probe[] = [
   { group: 'sign-up', method: 'PUT', url: '/api/admin/heard-options/order', body: INVALID, min: 'ADMIN' },
   // Links (plan CUSTOMER INTELLIGENCE §3.4 A.7.2): the channels and what the dialog offers read from AUDITOR; links and
   // channels made, changed, archived and removed by an OPERATOR.
+  // The founding list (plan MACRO M1 §3.1, §3.2): read from AUDITOR (emails masked), its CSV from OPERATOR, a row removed
+  // on request by an ADMIN only (founding.test.ts).
+  { group: 'founding', method: 'GET', url: '/api/admin/founding', min: 'AUDITOR' },
+  { group: 'founding', method: 'GET', url: '/api/admin/founding/summary', min: 'AUDITOR' },
+  { group: 'founding', method: 'GET', url: '/api/admin/founding.csv', min: 'OPERATOR' },
+  { group: 'founding', method: 'POST', url: `/api/admin/founding/${UUID}/remove`, body: INVALID, min: 'ADMIN' },
   { group: 'links', method: 'GET', url: '/api/admin/link-channels', min: 'AUDITOR' },
   { group: 'links', method: 'POST', url: '/api/admin/link-channels', body: INVALID, min: 'OPERATOR' },
   { group: 'links', method: 'PATCH', url: `/api/admin/link-channels/${UUID}`, body: INVALID, min: 'OPERATOR' },
@@ -551,6 +557,7 @@ describe('admin role enforcement', () => {
       'order-cases',
       'sign-up',
       'links',
+      'founding',
       'client-sheet',
       'collectors',
     ]) {

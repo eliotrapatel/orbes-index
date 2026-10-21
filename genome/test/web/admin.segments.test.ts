@@ -129,7 +129,7 @@ describe('the Segments page mirrors the server', () => {
       ['City, age, how they heard and tags', ['CITY', 'AGE', 'HEARD_FROM', 'TAGGED']],
       ['Wishlist and favourite pieces and finishes', ['WISHES_MODEL', 'WISHES_COLLECTION', 'FAVOURITE_PIECE', 'FAVOURITE_FINISH']],
       ['What they look at, devices and places', ['VIEWED_MODEL', 'VIEWED_RELEASE', 'DEVICE', 'PLACE']],
-      ['Where they come from', ['FIRST_SOURCE', 'LAST_SOURCE']],
+      ['Where they come from', ['FIRST_SOURCE', 'LAST_SOURCE', 'FOUNDING_LIST']],
       ['Engagement score', ['SCORE']],
     ]);
     expect(SEGMENT_RULE_KINDS.slice(12).map((k) => SEGMENT_RULE_LABELS[k])).toEqual([
@@ -147,6 +147,7 @@ describe('the Segments page mirrors the server', () => {
       'Seen from',
       'Came first through',
       'Came last through',
+      'On the founding list',
       'Engagement score from … to …',
     ]);
     // The lists the builder offers are the server's: every kind of source FIRST_SOURCE takes, every device list.
@@ -246,6 +247,8 @@ describe('the builder: the customer intelligence criteria (plan CUSTOMER INTELLI
     // The newest link, before either act.
     expect(defaultRule('LAST_SOURCE', OPTIONS)).toEqual({ kind: 'LAST_SOURCE', linkIds: ['l2'], at: 'EITHER' });
     expect(defaultRule('SCORE', OPTIONS)).toEqual({ kind: 'SCORE', min: 60, max: 100 });
+    // Plan MACRO M1 §3.1 (F4): nothing to choose, nothing to refuse.
+    expect(defaultRule('FOUNDING_LIST', OPTIONS)).toEqual({ kind: 'FOUNDING_LIST' });
     // Nothing to choose from yet: an empty choice, which the problem names.
     const bare: SegmentOptions = { ...OPTIONS, cities: [], heardOptions: [], tags: [], tastes: { pieces: [], finishes: [] }, channels: [], links: [] };
     expect(defaultRule('CITY', bare)).toEqual({ kind: 'CITY', cities: [] });
@@ -316,6 +319,8 @@ describe('the builder: the customer intelligence criteria (plan CUSTOMER INTELLI
     expect(ruleWords({ kind: 'LAST_SOURCE', linkIds: ['l1'], kinds: ['SITE'], at: 'EITHER' }, OPTIONS)).toBe('came last through Press feature or Referring sites (sign-up or purchase)');
     expect(ruleWords({ kind: 'LAST_SOURCE', channelIds: ['ch2'], at: 'PURCHASE', not: true }, OPTIONS)).toBe('not came last through Press (purchase)');
     expect(ruleWords({ kind: 'HEARD_FROM', optionIds: ['h1', 'h2'] }, OPTIONS)).toBe('how they heard: A friend or The press');
+    expect(ruleWords({ kind: 'FOUNDING_LIST' }, OPTIONS)).toBe('on the founding list');
+    expect(ruleWords({ kind: 'FOUNDING_LIST', not: true }, OPTIONS)).toBe('not on the founding list');
   });
 
   it('names the choices of the controls, keeps a city folded and a tag in capitals, and knows when the score is read', () => {

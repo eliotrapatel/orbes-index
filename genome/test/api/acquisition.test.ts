@@ -229,6 +229,7 @@ describe('GET /go/<code> and GET / (§3.4 A.3, A.7.2, step 4.3)', () => {
     await make('the-collection', 'COLLECTION');
     await make('the-club', 'CLUB');
     await make('how-it-works', 'HOW');
+    await make('founding-list', 'LANDING');
   });
   afterAll(async () => {
     await h?.close();
@@ -247,6 +248,8 @@ describe('GET /go/<code> and GET / (§3.4 A.3, A.7.2, step 4.3)', () => {
       ['the-collection', '/verify/lookbook?o=the-collection'],
       ['the-club', '/verify/club?o=the-club'],
       ['how-it-works', '/verify/releases/how?o=how-it-works'],
+      // Plan MACRO M1 §3.1 (F3): theorbes.com, ORBES's own site, whose founding list form carries the code.
+      ['founding-list', 'https://theorbes.com/?o=founding-list'],
     ] as const) {
       const res = await go(`/go/${code}`);
       expect(res.statusCode, code).toBe(302);

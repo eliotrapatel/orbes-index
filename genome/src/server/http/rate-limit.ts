@@ -14,6 +14,7 @@
  *   live    the LIVE RELEASES (/api/v1/live…), per network  apiPerMinute × LIVE_NETWORK_RATE_FACTOR
  *           and, for a signed-in account, per account too   apiPerMinute (`liveAccount`)
  *   seen    POST /api/v1/seen (the views the app records)    apiPerMinute × SEEN_RATE_FACTOR
+ *   founding POST /api/v1/founding (theorbes.com's form)    apiPerMinute ÷ FOUNDING_RATE_DIVISOR
  *
  * The photographs have their own, higher budget (P-R02): a lookbook sheet
  * shows up to nine of them, and the customers of a boutique share its wifi
@@ -23,6 +24,10 @@
  *
  * The views (plan CUSTOMER INTELLIGENCE §3.3 T.8.7) have their own budget too: the customers of a boutique share one
  * address, and views drawn from `api` would refuse their other requests. It follows RATE_LIMIT_API_PER_MINUTE.
+ *
+ * The founding list's form (plan MACRO M1 §3.1, F2; routes/founding.ts) has its own, narrow budget: about 10 a minute
+ * per network, enough for a household, too little to fill the list with addresses. It follows RATE_LIMIT_API_PER_MINUTE
+ * too (no variable of its own, as `seen` and `live`).
  *
  * The LIVE RELEASES (routes/live.ts) draw on two budgets at once: their
  * network's, before anything else, wide enough for the collectors of a
@@ -45,7 +50,7 @@ import type { AppConfig } from '../config.js';
 import { tooManyRequests } from '../errors.js';
 import { pseudonymize, rateLimitKeyOf } from './client.js';
 
-export const RATE_GROUPS = ['verify', 'auth', 'admin', 'api', 'media', 'live', 'seen'] as const;
+export const RATE_GROUPS = ['verify', 'auth', 'admin', 'api', 'media', 'live', 'seen', 'founding'] as const;
 export type RateGroup = (typeof RATE_GROUPS)[number];
 
 /** The `media` group's budget, as a multiple of the `api` one (120 → 600 photographs a minute per client). */
@@ -56,6 +61,9 @@ export const LIVE_NETWORK_RATE_FACTOR = 10;
 
 /** The `seen` group's budget, as a multiple of the `api` one (120 → 240 batches of views a minute per client). */
 export const SEEN_RATE_FACTOR = 2;
+
+/** The `founding` group's budget, as a fraction of the `api` one (120 → 10 registrations a minute per network). */
+export const FOUNDING_RATE_DIVISOR = 12;
 
 const WINDOW_MS = 60_000;
 /** Clients tracked per group (LRU). Larger than the plugin default so a wide botnet cannot evict counters cheaply. */
@@ -82,6 +90,7 @@ export function groupLimits(config: Pick<AppConfig, 'rateLimits'>): Record<RateG
     media: config.rateLimits.apiPerMinute * MEDIA_RATE_FACTOR,
     live: config.rateLimits.apiPerMinute * LIVE_NETWORK_RATE_FACTOR,
     seen: config.rateLimits.apiPerMinute * SEEN_RATE_FACTOR,
+    founding: Math.max(1, Math.floor(config.rateLimits.apiPerMinute / FOUNDING_RATE_DIVISOR)),
   };
 }
 

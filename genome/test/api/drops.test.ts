@@ -1154,7 +1154,7 @@ describe('draws in sizes over HTTP (plan NEXT LOT §3.6.F)', () => {
     for (const id of ['nope', '5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6', draft.id]) expect(errorOf(await me.client.get(url(id, 'entry'))).code, id).toBe('DROP_NOT_FOUND');
     const empty = await me.client.get(url(d.id, 'entry'));
     expect(empty.headers['cache-control']).toBe('no-store');
-    expect(safeJson(empty)).toEqual({ entry: null, savedSize: null });
+    expect(safeJson(empty)).toEqual({ entry: null, savedSize: null, eligible: true });
     // The early access: a PLATINE account reserves in a size.
     const platine = await accountClient(h);
     await holdPieces(h.ctx.db, await accountIdOf(platine.email), 5, catalog.modelId);
@@ -1291,5 +1291,130 @@ describe('a draw’s ADD TO CALENDAR over HTTP (plan MACRO M1 §2.1, C1)', () =>
     const plain = await draw({ earlyAccessHours: 0 }, 24 * HOUR);
     expect((await operator.post(`/api/admin/drops/${plain.id}/publish`)).statusCode).toBe(200);
     expect([...(await ics(plain.id)).body.matchAll(/TRIGGER:([^\r]+)/g)].map((m) => m[1])).toEqual(['-PT10M']);
+  });
+});
+
+describe('a draw opened to a segment (plan MACRO M1 §3.1, F4: the founding list first)', () => {
+  let h: Harness;
+  let catalog: Catalog;
+  let operator: Client;
+  let segmentId: string;
+  const admin = { type: 'system' as const, id: 'test' };
+
+  const at = (offsetMs: number) => new Date(h.clock.now().getTime() + offsetMs).toISOString();
+  const idOf = async (email: string) => (await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', email.toLowerCase()).executeTakeFirstOrThrow()).id;
+  /** A collector, on the founding list (matched at once) or not. */
+  async function collector(listed: boolean, pieces = 0): Promise<{ client: Client; id: string; email: string }> {
+    const { client, email } = await accountClient(h);
+    const id = await idOf(email);
+    if (listed) await h.ctx.services.founding.register({ email, firstName: 'Léa', country: 'FR', consent: true }, admin);
+    if (pieces > 0) await holdPieces(h.ctx.db, id, pieces, catalog.modelId);
+    return { client, id, email };
+  }
+  async function draw(body: Record<string, unknown>, opensIn: number, early = 0): Promise<AdminDropJson & { accessSegment: { id: string; name: string } | null }> {
+    const res = await operator.post('/api/admin/drops', {
+      modelId: catalog.modelId,
+      title: 'MONOLITHE — FOUNDING',
+      sizes: [
+        { label: '52', pieces: 3 },
+        { label: '54', pieces: 3 },
+      ],
+      opensAt: at(opensIn),
+      closesAt: at(opensIn + 48 * HOUR),
+      earlyAccessHours: early,
+      earlyAccessPlatineHours: 0,
+      ...body,
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    return safeJson(res) as AdminDropJson & { accessSegment: { id: string; name: string } | null };
+  }
+  const sizesOf = async (id: string) => Object.fromEntries(((safeJson(await h.client().get(`/api/v1/drops/${id}`)) as { sizes: { id: string; label: string }[] }).sizes).map((s) => [s.label, s.id]));
+
+  beforeAll(async () => {
+    h = await createHarness();
+    catalog = await seedCatalog(h.ctx);
+    await giveSizes(h.ctx.db, catalog.modelId, ['52', '54']);
+    operator = await adminClient(h, 'OPERATOR');
+    const created = await operator.post('/api/admin/segments', { name: 'Founding list', criteria: { match: 'ALL', rules: [{ kind: 'FOUNDING_LIST' }] } });
+    expect(created.statusCode, created.body).toBe(201);
+    segmentId = (safeJson(created) as { id: string }).id;
+  });
+  afterAll(() => h?.close());
+
+  it('is set and changed while a DRAFT, read back by its name, never after the publication; an unknown segment is refused; the page says SELECTED, never the segment', async () => {
+    const unknown = await operator.post('/api/admin/drops', { modelId: catalog.modelId, title: 'X', sizes: one(1), opensAt: at(HOUR), closesAt: at(2 * HOUR), accessSegmentId: '00000000-0000-4000-8000-000000000000' });
+    expect([unknown.statusCode, errorOf(unknown).code]).toEqual([404, 'SEGMENT_NOT_FOUND']);
+    const open = await draw({}, HOUR);
+    expect(open.accessSegment).toBeNull();
+    const d = await draw({ accessSegmentId: segmentId }, HOUR);
+    expect(d.accessSegment).toEqual({ id: segmentId, name: 'Founding list' });
+    const cleared = await operator.patch(`/api/admin/drops/${d.id}`, { accessSegmentId: null });
+    expect((safeJson(cleared) as { accessSegment: unknown }).accessSegment).toBeNull();
+    const set = await operator.patch(`/api/admin/drops/${d.id}`, { accessSegmentId: segmentId });
+    expect((safeJson(set) as { accessSegment: unknown }).accessSegment).toEqual({ id: segmentId, name: 'Founding list' });
+    const audit = await h.ctx.db.selectFrom('audit_logs').select('details').where('action', '=', 'drop.update').where('target_id', '=', d.id).orderBy('id').execute();
+    expect(audit.map((a) => a.details)).toEqual([
+      { before: { accessSegmentId: segmentId }, after: { accessSegmentId: null } },
+      { before: { accessSegmentId: null }, after: { accessSegmentId: segmentId } },
+    ]);
+    expect((await operator.post(`/api/admin/drops/${d.id}/publish`)).statusCode).toBe(200);
+    expect((await operator.post(`/api/admin/drops/${open.id}/publish`)).statusCode).toBe(200);
+    const late = await operator.patch(`/api/admin/drops/${d.id}`, { accessSegmentId: null });
+    expect([late.statusCode, errorOf(late).code]).toEqual([409, 'DROP_PUBLISHED']);
+    const page = await h.client().get(`/api/v1/drops/${d.id}`);
+    expect((safeJson(page) as { rule: unknown }).rule).toBe('SELECTED');
+    expect(page.body).not.toContain('Founding list');
+    expect(page.body).not.toContain(segmentId);
+    expect((safeJson(await h.client().get(`/api/v1/drops/${open.id}`)) as { rule: unknown }).rule).toBeNull();
+    // SEGMENT_IN_USE counts the draw.
+    const del = await operator.request('DELETE', `/api/admin/segments/${segmentId}`);
+    expect([del.statusCode, errorOf(del).code]).toEqual([409, 'SEGMENT_IN_USE']);
+    expect((safeJson(await operator.get(`/api/admin/segments/${segmentId}`)) as { usedBy: { releases: { id: string }[] } }).usedBy.releases.map((r) => r.id)).toContain(d.id);
+  });
+
+  it('lets its members alone ENTER and CHANGE SIZE (403 DRAW_NOT_ELIGIBLE, worded as LIVE’s), reads `eligible`, and lets anyone withdraw', async () => {
+    const d = await draw({ accessSegmentId: segmentId }, HOUR);
+    expect((await operator.post(`/api/admin/drops/${d.id}/publish`)).statusCode).toBe(200);
+    const member = await collector(true);
+    const outsider = await collector(false);
+    h.clock.advance(HOUR + 60_000);
+    const sizes = await sizesOf(d.id);
+    expect((safeJson(await member.client.get(`/api/v1/club/drops/${d.id}/entry`)) as { eligible: boolean }).eligible).toBe(true);
+    expect((safeJson(await outsider.client.get(`/api/v1/club/drops/${d.id}/entry`)) as { eligible: boolean }).eligible).toBe(false);
+    const refused = await outsider.client.post(`/api/v1/club/drops/${d.id}/enter`, { sizeId: sizes['52'] });
+    expect([refused.statusCode, errorOf(refused).code, errorOf(refused).message]).toEqual([403, 'DRAW_NOT_ELIGIBLE', 'This release is for selected collectors.']);
+    expect(await h.ctx.db.selectFrom('drop_entries').select('id').where('drop_id', '=', d.id).where('account_id', '=', outsider.id).execute()).toEqual([]);
+    const entered = await member.client.post(`/api/v1/club/drops/${d.id}/enter`, { sizeId: sizes['52'] });
+    expect(entered.statusCode, entered.body).toBe(200);
+    // Taken off the list (live, nothing lasting): no more size changes, its entry kept, its withdrawal allowed.
+    const row = await h.ctx.db.selectFrom('preregistrations').select('id').where('account_id', '=', member.id).executeTakeFirstOrThrow();
+    await h.ctx.services.founding.remove(row.id, `REMOVE ${row.id.slice(0, 8).toUpperCase()}`, { type: 'admin', id: (await createAdmin(h.ctx, 'ADMIN')).id });
+    const change = await member.client.post(`/api/v1/club/drops/${d.id}/size`, { sizeId: sizes['54'] });
+    expect([change.statusCode, errorOf(change).code]).toEqual([403, 'DRAW_NOT_ELIGIBLE']);
+    expect((safeJson(await member.client.get(`/api/v1/club/drops/${d.id}/entry`)) as { eligible: boolean; entry: { status: string } }).eligible).toBe(false);
+    expect((await member.client.post(`/api/v1/club/drops/${d.id}/withdraw`)).statusCode).toBe(200);
+    // A draw open to everyone: anyone enters, `eligible` true.
+    const open = await draw({}, 60_000);
+    expect((await operator.post(`/api/admin/drops/${open.id}/publish`)).statusCode).toBe(200);
+    h.clock.advance(2 * 60_000);
+    expect((safeJson(await outsider.client.get(`/api/v1/club/drops/${open.id}/entry`)) as { eligible: boolean }).eligible).toBe(true);
+    expect((await outsider.client.post(`/api/v1/club/drops/${open.id}/enter`, { sizeId: (await sizesOf(open.id))['52'] })).statusCode).toBe(200);
+  });
+
+  it('holds its early access to its members too, before the tier: a PALLADIUM outsider is refused DRAW_NOT_ELIGIBLE, a TITANE member DROP_TIER_REQUIRED', async () => {
+    const d = await draw({ accessSegmentId: segmentId }, 24 * HOUR, 4);
+    expect((await operator.post(`/api/admin/drops/${d.id}/publish`)).statusCode).toBe(200);
+    const palladiumOut = await collector(false, 10);
+    const palladiumIn = await collector(true, 10);
+    const titaneIn = await collector(true, 1);
+    h.clock.advance(21 * HOUR);
+    const sizes = await sizesOf(d.id);
+    const out = await palladiumOut.client.post(`/api/v1/club/drops/${d.id}/reserve`, { sizeId: sizes['52'] });
+    expect([out.statusCode, errorOf(out).code]).toEqual([403, 'DRAW_NOT_ELIGIBLE']);
+    const tier = await titaneIn.client.post(`/api/v1/club/drops/${d.id}/reserve`, { sizeId: sizes['52'] });
+    expect([tier.statusCode, errorOf(tier).code]).toEqual([403, 'DROP_TIER_REQUIRED']);
+    const held = await palladiumIn.client.post(`/api/v1/club/drops/${d.id}/reserve`, { sizeId: sizes['52'] });
+    expect(held.statusCode, held.body).toBe(200);
+    expect((safeJson(held) as { entry: { status: string } }).entry.status).toBe('SELECTED');
   });
 });

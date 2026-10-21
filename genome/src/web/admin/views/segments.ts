@@ -486,6 +486,9 @@ function builder(ctx: ViewContext, segment: Segment | null, options: SegmentOpti
         ];
       case 'FIRST_SOURCE':
         return sources(r);
+      // Plan MACRO M1 §3.1 (F4): nothing to choose, the founding list's matched accounts.
+      case 'FOUNDING_LIST':
+        return [];
       case 'LAST_SOURCE': {
         const at = select(
           'at',

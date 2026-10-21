@@ -343,7 +343,7 @@ export const SEGMENT_CRITERIA = {
   PERSON: ['CITY', 'AGE', 'HEARD_FROM', 'TAGGED'],
   TASTES: ['WISHES_MODEL', 'WISHES_COLLECTION', 'FAVOURITE_PIECE', 'FAVOURITE_FINISH'],
   BROWSING: ['VIEWED_MODEL', 'VIEWED_RELEASE', 'DEVICE', 'PLACE'],
-  ORIGIN: ['FIRST_SOURCE', 'LAST_SOURCE'],
+  ORIGIN: ['FIRST_SOURCE', 'LAST_SOURCE', 'FOUNDING_LIST'],
   ENGAGEMENT: ['SCORE'],
 } as const;
 export type SegmentCriterionGroup = keyof typeof SEGMENT_CRITERIA;
@@ -394,6 +394,8 @@ export type SegmentRule = { not?: boolean } & (
   | { kind: 'PLACE'; countries?: string[]; placeIds?: number[]; days: number }
   | { kind: 'FIRST_SOURCE'; channelIds?: string[]; linkIds?: string[]; kinds?: SourceKind[] }
   | { kind: 'LAST_SOURCE'; channelIds?: string[]; linkIds?: string[]; kinds?: SourceKind[]; at: LastSourceAt }
+  /** Plan MACRO M1 §3.1 (F4): matched to a pre-registration of theorbes.com's founding list. */
+  | { kind: 'FOUNDING_LIST' }
   | { kind: 'SCORE'; min: number; max: number }
 );
 
@@ -1833,6 +1835,8 @@ export interface Drop {
   guaranteedEntered: { places: number; pieces: number };
   /** Plan NEXT LOT §3.6.F: its sizes with their counts, in order; [] for a draw without sizes (one published before). */
   sizes: DrawSize[];
+  /** Plan MACRO M1 §3.1 (F4): the segment the draw is opened to (its console name); null: everyone. */
+  accessSegment?: { id: string; name: string } | null;
 }
 
 /** A draw's size as the console reads it (plan NEXT LOT §3.6.F): its pieces, then its entries counted. */

@@ -308,6 +308,25 @@ export const arrivalShape = z.strictObject({
 export type ArrivalBody = z.infer<typeof arrivalShape>;
 
 /**
+ * POST /api/v1/founding (plan MACRO M1 §3.1, F2 and F3): theorbes.com's form. The person's fields are read by
+ * FoundingService, which refuses each in the collector's words (`email`, `firstName`, `country`, `consent` true); here
+ * only their size is bounded (the route's body is 2 KB at most anyway). `website` is the honeypot. Where the person came
+ * from rides as an arrival's does, each invalid field dropped rather than refused: the console link's code `o` read
+ * from theorbes.com's address, its five `utm_` tags and `document.referrer`. Strict about its keys, like every body.
+ */
+const foundingText = z.string().max(400).optional();
+export const foundingBody = body({
+  email: foundingText,
+  firstName: foundingText,
+  country: foundingText,
+  consent: z.boolean().optional(),
+  website: foundingText,
+  o: arrivalShape.shape.link,
+  utm: arrivalShape.shape.utm,
+  referrer: arrivalShape.shape.referrer,
+});
+
+/**
  * POST /api/v1/seen (plan CUSTOMER INTELLIGENCE §3.3 T.8.7, §3.4 A.7.2): the collector app's views, `v` 1. `d` is the
  * device (`s` standalone on the home screen, `t` touch points, `w` the screen's short side in CSS pixels); `a`, once
  * per page load in its first batch, the arrival (arrivalShape); `e` holds 0 to BATCH_MAX_EVENTS views, at least one
@@ -803,6 +822,8 @@ export const createDropBody = body({
   earlyAccessPlatineHours: earlyAccessHours.optional(),
   priceMinor: drawPrice.nullable().optional(),
   currency: z.preprocess((v) => (v === '' ? null : v), drawCurrency.nullable().optional()),
+  /** Plan MACRO M1 §3.1 (F4): the segment the draw is opened to, until its publication ('' and null: everyone). */
+  accessSegmentId: z.preprocess((v) => (v === '' ? null : v), uuid.nullable().optional()),
 })
   .refine((b) => b.closesAt.getTime() > b.opensAt.getTime(), { message: 'Entries close after they open', path: ['closesAt'] })
   .refine(drawPriceTogether, { message: 'A price is sent with its currency, or both are cleared (null)', path: ['priceMinor'] });
@@ -825,6 +846,8 @@ export const updateDropBody = body({
   earlyAccessPlatineHours: earlyAccessHours.optional(),
   priceMinor: drawPrice.nullable().optional(),
   currency: z.preprocess((v) => (v === '' ? null : v), drawCurrency.nullable().optional()),
+  /** Plan MACRO M1 §3.1 (F4): the segment the draw is opened to, until its publication ('' and null: everyone). */
+  accessSegmentId: z.preprocess((v) => (v === '' ? null : v), uuid.nullable().optional()),
 })
   .refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one field of the release to change')
   .refine(drawPriceTogether, { message: 'A price is sent with its currency, or both are cleared (null)', path: ['priceMinor'] });
@@ -1098,6 +1121,16 @@ export const updateCirclePostBody = body(circleFields).refine((b) => Object.valu
 
 export const segmentParams = z.object({ id: uuid });
 
+/** The founding list's rows (plan MACRO M1 §3.2): GET /api/admin/founding's filters, a row's id, Remove's phrase. */
+export const foundingQuery = z.object({
+  matched: queryBool,
+  unsubscribed: queryBool,
+  country: queryOptional(country),
+  sourceKind: queryOptional(z.enum(SOURCE_KINDS)),
+});
+export const foundingParams = z.object({ id: uuid });
+export const foundingRemoveBody = body({ phrase: z.string().max(40) });
+
 const segmentCount = whole(SEGMENT_LIMITS.count.min, SEGMENT_LIMITS.count.max, 'releases or pieces');
 const segmentItems = <T extends z.ZodType>(item: T) => z.array(item).min(1, 'Name at least one').max(SEGMENT_LIMITS.items, `At most ${SEGMENT_LIMITS.items}`);
 const negated = { not: z.boolean().optional() };
@@ -1148,6 +1181,8 @@ const segmentRule = z.discriminatedUnion('kind', [
   }),
   z.strictObject({ kind: z.literal('FIRST_SOURCE'), ...segmentSources, ...negated }),
   z.strictObject({ kind: z.literal('LAST_SOURCE'), ...segmentSources, at: z.enum(LAST_SOURCE_AT), ...negated }),
+  /** Plan MACRO M1 §3.1 (F4): matched to a pre-registration of theorbes.com's founding list. */
+  z.strictObject({ kind: z.literal('FOUNDING_LIST'), ...negated }),
   z.strictObject({ kind: z.literal('SCORE'), min: whole(SEGMENT_LIMITS.score.min, SEGMENT_LIMITS.score.max, 'points'), max: whole(SEGMENT_LIMITS.score.min, SEGMENT_LIMITS.score.max, 'points'), ...negated }),
 ]);
 const segmentRules = <T extends z.ZodType>(item: T) => z.array(item).min(1, 'At least one rule').max(SEGMENT_LIMITS.rules, `At most ${SEGMENT_LIMITS.rules} rules`);

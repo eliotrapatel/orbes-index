@@ -8,7 +8,8 @@
  * the draw of a drop, a model discontinued or reinstated, a LIVE RELEASE
  * ended now or an entry removed from it, the delays of the order alerts,
  * a location or a carrier added or changed, a conversation of the Messages board
- * assigned, the defaults of THE HOUSE'S GUARANTEE, the answers to « How did you hear about ORBES? »); every
+ * assigned, the defaults of THE HOUSE'S GUARANTEE, the answers to « How did you hear about ORBES? », a
+ * pre-registration removed from the founding list); every
  * mutation needs the CSRF token and a same-origin
  * request. Each mutation is audited by the service it calls (or by the route
  * for the few table writes without a service), with the admin's id and the
@@ -32,6 +33,7 @@ import { adminCareRoutes } from './care.js';
 import { adminGuaranteeRoutes } from './guarantees.js';
 import { adminDocumentRoutes } from './documents.js';
 import { adminDropRoutes } from './drops.js';
+import { adminFoundingRoutes } from './founding.js';
 import { adminAuthRoutes } from './auth.js';
 import { adminAuditRoutes } from './audit.js';
 import { adminCatalogRoutes } from './catalog.js';
@@ -105,6 +107,7 @@ export const adminRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, deps)
   await app.register(adminLogisticsRoutes, deps);
   await app.register(adminSupplierOrderRoutes, deps);
   await app.register(adminSegmentRoutes, deps);
+  await app.register(adminFoundingRoutes, deps);
   await app.register(adminShopifyRoutes, deps);
   await app.register(adminCircleRoutes, deps);
   await app.register(adminClubRoutes, deps);

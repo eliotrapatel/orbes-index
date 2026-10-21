@@ -135,6 +135,7 @@ import { readActingAccount } from './ownership.js';
 import { releaseFeasibility, type Feasibility } from './release-stock.js';
 import { savedSizeAmong } from './sizes.js';
 import { linkDropSizes } from './stock.js';
+import { isSegmentMember } from './segments.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -320,6 +321,12 @@ const dropNotOpen = () => conflict('DROP_NOT_OPEN', 'Entries to this release are
 const dropNotDrawn = () => conflict('DROP_NOT_DRAWN', 'This release has not been drawn yet.');
 const alreadyEntered = () => conflict('DROP_ALREADY_ENTERED', 'You are already entered in this draw.');
 const alreadyReserved = () => conflict('DROP_ALREADY_RESERVED', 'You have already reserved a place in this release.');
+/**
+ * Plan MACRO M1 §3.1 (F4): a draw opened to a segment, for an account that is not one of its members. Worded as a LIVE
+ * RELEASE's refusal (live.ts liveRefusal): the segment is never named (decision 32).
+ */
+export const drawNotEligible = () => new DomainError('DRAW_NOT_ELIGIBLE', 403, 'This release is for selected collectors.');
+const segmentNotFound = () => notFound('Segment', 'SEGMENT_NOT_FOUND');
 /** A time of a refusal: `2026-10-10 10:00 UTC`. */
 const utcMinute = (t: Date) => `${t.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
 const earlyAccessNotOpen = (from: Date) => conflict('DROP_EARLY_ACCESS_NOT_OPEN', `Direct reservations for this release open on ${utcMinute(from)}.`);
@@ -399,6 +406,8 @@ export interface CreateDropInput {
   /** NOCTURNE (addition 5): its price in minor units with its currency, both or neither (null: none, the default). */
   priceMinor?: number | null;
   currency?: string | null;
+  /** Plan MACRO M1 §3.1 (F4): the segment the draw is opened to (null: everyone, the default). */
+  accessSegmentId?: string | null;
 }
 
 /** A change of a drop: any field while it is a DRAFT; once published, `description` only. */
@@ -418,6 +427,8 @@ export interface DropChange {
   /** Its price and currency, given together; null for both clears it. */
   priceMinor?: number | null;
   currency?: string | null;
+  /** Plan MACRO M1 §3.1 (F4): the segment the draw is opened to, while it is a DRAFT; null: everyone. */
+  accessSegmentId?: string | null;
 }
 
 export function cleanTitle(v: unknown): string {
@@ -598,6 +609,11 @@ export interface DropSheet extends DropCard {
   guaranteed: { id: string; pieces: number; size: DrawSizeRef | null; reserved: boolean }[];
   /** Plan NEXT LOT §3.6.F: its sizes, each with its pieces, in order; empty for a draw without sizes (one pool). */
   sizes: DrawSheetSize[];
+  /**
+   * Plan MACRO M1 §3.1 (F4): SELECTED when the draw is opened to a segment's members (the page says FOR SELECTED
+   * COLLECTORS, as a LIVE RELEASE's rule does; the segment is never named), null when it is open to every account.
+   */
+  rule: 'SELECTED' | null;
 }
 
 /** An entry as the drawn drop's page lists it (GET /api/v1/drops/:id/entries): never its account. */
@@ -615,6 +631,12 @@ export interface AccountDrawEntry {
   entry: AccountDropEntry | null;
   /** Among the draw's sizes with pieces, the one the account's saved size matches (AC-01); null otherwise. */
   savedSize: DrawSizeRef | null;
+  /**
+   * Plan MACRO M1 §3.1 (F4): whether the account may enter the draw now: always for a draw open to everyone; for a draw
+   * opened to a segment, while it is one of its members (ENTER, RESERVE and CHANGE SIZE answer 403 DRAW_NOT_ELIGIBLE
+   * otherwise). The segment is never named.
+   */
+  eligible: boolean;
 }
 
 /** An entry of the signed-in account (GET /api/v1/club/status): its own id is the one the draw's list publishes. */
@@ -704,6 +726,8 @@ export interface AdminDrop {
   guaranteedEntered: ReleaseGuaranteed;
   /** Plan NEXT LOT §3.6.F: its sizes with their counts, in order; empty for a draw without sizes. */
   sizes: AdminDrawSize[];
+  /** Plan MACRO M1 §3.1 (F4): the segment the draw is opened to, by its id and console name; null: everyone. */
+  accessSegment: { id: string; name: string } | null;
 }
 
 /** An entry as the console lists it; the routes mask the email for an AUDITOR. */
@@ -954,6 +978,20 @@ export async function accountDropEntries(db: Db, accountId: string): Promise<Exp
 type DrawSizeRow = { id: string; label: string; stock: number };
 
 /** A draw's sizes, in order; none for a draw without sizes (one published before this lot keeps one pool). */
+/**
+ * Plan MACRO M1 §3.1 (F4): a draw opened to a segment admits its members only, read now (services/segments.ts
+ * isSegmentMember: live, never stored; the test entrants read as any account, as a LIVE RELEASE's rule reads them); 403
+ * DRAW_NOT_ELIGIBLE otherwise. A draw open to everyone: nothing read.
+ */
+/** A segment a draw is opened to, held FOR KEY SHARE until the transaction ends (as live-console.ts); 404 SEGMENT_NOT_FOUND. */
+async function existingSegment(tx: Db, id: string): Promise<void> {
+  if (!(await tx.selectFrom('segments').select('id').where('id', '=', id).forKeyShare().executeTakeFirst())) throw segmentNotFound();
+}
+
+async function assertDrawEligible(tx: Db, d: Pick<DropRow, 'access_segment_id'>, accountId: string, now: Date): Promise<void> {
+  if (d.access_segment_id && !(await isSegmentMember(tx, d.access_segment_id, accountId, now))) throw drawNotEligible();
+}
+
 async function drawSizesOf(db: Db, dropId: string): Promise<DrawSizeRow[]> {
   return db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', dropId).orderBy('position').execute();
 }
@@ -1109,6 +1147,8 @@ type DropReadRow = DropRow & {
   model_lookbook: string;
   model_variant: string | null;
   collection: string | null;
+  /** Plan MACRO M1 §3.1 (F4): the console name of the segment the draw is opened to (the console only). */
+  segment_name: string | null;
 };
 
 export class DropService {
@@ -1199,6 +1239,7 @@ export class DropService {
       full,
       guaranteed,
       sizes,
+      rule: r.access_segment_id ? 'SELECTED' : null,
     };
   }
 
@@ -1264,7 +1305,7 @@ export class DropService {
   async entryFor(accountId: string, dropId: string): Promise<AccountDrawEntry> {
     assertAccount(accountId);
     const id = knownId(dropId, dropNotFound);
-    const d = await this.db.selectFrom('drops').select(['id', 'model_id']).where('id', '=', id).where('published_at', 'is not', null).where('mode', '=', 'DRAW').executeTakeFirst();
+    const d = await this.db.selectFrom('drops').select(['id', 'model_id', 'access_segment_id']).where('id', '=', id).where('published_at', 'is not', null).where('mode', '=', 'DRAW').executeTakeFirst();
     if (!d) throw dropNotFound();
     const r = await this.accountEntryRows(this.db).where('e.drop_id', '=', id).where('e.account_id', '=', accountId).executeTakeFirst();
     const sizes = await this.db
@@ -1281,7 +1322,8 @@ export class DropService {
       d.model_id,
       sizes.map((z) => ({ id: z.id, label: z.label, fitMinMm: z.fit_min_mm ?? null, fitMaxMm: z.fit_max_mm ?? null, stock: z.stock })),
     );
-    return { entry: r ? accountEntryView(r, this.clock()) : null, savedSize: match ? { id: match.id, label: match.label } : null };
+    const eligible = d.access_segment_id === null || (await isSegmentMember(this.db, d.access_segment_id, accountId, this.clock()));
+    return { entry: r ? accountEntryView(r, this.clock()) : null, savedSize: match ? { id: match.id, label: match.label } : null, eligible };
   }
 
   /**
@@ -1305,6 +1347,7 @@ export class DropService {
       if (d.cancelled_at) throw dropCancelled();
       if (d.drawn_at) throw dropDrawn();
       if (dropState(d, now) !== 'OPEN') throw dropNotOpen();
+      await assertDrawEligible(tx, d, accountId, now);
       const existing = await tx.selectFrom('drop_entries').select(['id', 'status', 'tier', 'rank', 'guarantee_id']).where('drop_id', '=', id).where('account_id', '=', accountId).forUpdate().executeTakeFirst();
       // A place reserved directly (IN-01: with the house's guarantee too, then without a tier) is not entered again.
       if (existing && (isReservation(existing) || (existing.guarantee_id !== null && existing.status !== 'ENTERED' && existing.status !== 'WITHDRAWN'))) throw alreadyReserved();
@@ -1363,6 +1406,7 @@ export class DropService {
       if (d.cancelled_at) throw dropCancelled();
       if (d.drawn_at) throw dropDrawn();
       if (dropState(d, now) !== 'OPEN') throw dropNotOpen();
+      await assertDrawEligible(tx, d, accountId, now);
       const sizes = await drawSizesOf(tx, id);
       if (sizes.length === 0) throw sizeUnknown();
       const e = await tx.selectFrom('drop_entries').select(['id', 'status', 'size_id', 'guarantee_id']).where('drop_id', '=', id).where('account_id', '=', accountId).forUpdate().executeTakeFirst();
@@ -1444,6 +1488,8 @@ export class DropService {
       if (d.drawn_at) throw dropDrawn();
       const first = earlyAccessOpensAt(d);
       if (first === null || now.getTime() >= d.opens_at.getTime()) throw earlyAccessClosed(first === null);
+      // Plan MACRO M1 §3.1 (F4): a draw opened to a segment, its early access too, before the tier.
+      await assertDrawEligible(tx, d, accountId, now);
       // The tier first, then its own window (BP-19 T3): PALLADIUM from its time, PLATINE from its own.
       const standing = await tierOf(tx, accountId, now);
       if (standing.tier < EARLY_ACCESS_MIN_TIER) throw tierRequired();
@@ -1567,8 +1613,10 @@ export class DropService {
     const givenPlatine = input.earlyAccessPlatineHours === undefined ? undefined : cleanEarlyAccess(input.earlyAccessPlatineHours);
     const price = cleanDrawPrice(input.priceMinor ?? null, input.currency ?? null);
     const modelId = knownId(input.modelId, () => notFound('Model', 'MODEL_NOT_FOUND'));
+    const segmentId = input.accessSegmentId === undefined || input.accessSegmentId === null || input.accessSegmentId === '' ? null : knownId(input.accessSegmentId, segmentNotFound);
     return inTransaction(this.db, async (tx) => {
       const now = this.clock();
+      if (segmentId) await existingSegment(tx, segmentId);
       const program = await readProgram(tx);
       const early = givenEarly ?? program.earlyAccessPalladiumHours;
       // PLATINE's window as given, or THE PROGRAM's, never longer than PALLADIUM's.
@@ -1597,6 +1645,7 @@ export class DropService {
           early_access_platine_hours: platine,
           price_minor: price?.minor ?? null,
           currency: price?.currency ?? null,
+          access_segment_id: segmentId,
           seed_enc: sealed,
           seed_hash: seedHash,
           created_by: actor.id!,
@@ -1623,6 +1672,7 @@ export class DropService {
             currency: price?.currency ?? null,
             seedHash: toHex(seedHash),
             sizes: await auditedSizes(tx, id),
+            ...(segmentId ? { accessSegmentId: segmentId } : {}),
           },
         },
         tx,
@@ -1654,7 +1704,7 @@ export class DropService {
         after[key] = shown(to);
       };
       if (change.description !== undefined) note('description', 'description', d.description, cleanDescription(change.description), (v) => describedAs((v as string | null) ?? null));
-      const structural = (['modelId', 'title', 'quantity', 'sizes', 'opensAt', 'closesAt', 'purchaseWindowHours', 'earlyAccessHours', 'earlyAccessPlatineHours', 'priceMinor', 'currency'] as const).filter(
+      const structural = (['modelId', 'title', 'quantity', 'sizes', 'opensAt', 'closesAt', 'purchaseWindowHours', 'earlyAccessHours', 'earlyAccessPlatineHours', 'priceMinor', 'currency', 'accessSegmentId'] as const).filter(
         (k) => change[k] !== undefined,
       );
       let resized = false;
@@ -1692,6 +1742,12 @@ export class DropService {
           const price = cleanDrawPrice(change.priceMinor ?? null, change.currency ?? null);
           note('priceMinor', 'price_minor', d.price_minor, price?.minor ?? null);
           note('currency', 'currency', d.currency, price?.currency ?? null);
+        }
+        if (change.accessSegmentId !== undefined) {
+          // Plan MACRO M1 §3.1 (F4): everyone (null), or a segment that exists, until the publication.
+          const next = change.accessSegmentId === null || change.accessSegmentId === '' ? null : knownId(change.accessSegmentId, segmentNotFound);
+          if (next) await existingSegment(tx, next);
+          note('accessSegmentId', 'access_segment_id', d.access_segment_id, next);
         }
         const opensAt = change.opensAt !== undefined ? cleanTime(change.opensAt, 'The opening') : d.opens_at;
         const closesAt = change.closesAt !== undefined ? cleanTime(change.closesAt, 'The close') : d.closes_at;
@@ -2126,8 +2182,10 @@ export class DropService {
       .selectFrom('drops as d')
       .innerJoin('models as m', 'm.id', 'd.model_id')
       .leftJoin('collections as c', 'c.id', 'm.collection_id')
+      .leftJoin('segments as sg', 'sg.id', 'd.access_segment_id')
       .selectAll('d')
       .select([
+        'sg.name as segment_name',
         'm.name as model_name',
         'm.type as model_type',
         'm.active as model_active',
@@ -2248,6 +2306,7 @@ export class DropService {
       heldPieces: tally?.heldPieces ?? 0,
       guaranteedEntered: tally?.guaranteedEntered ?? { places: 0, pieces: 0 },
       sizes: sizes ?? [],
+      accessSegment: r.access_segment_id ? { id: r.access_segment_id, name: r.segment_name ?? '' } : null,
     };
   }
 

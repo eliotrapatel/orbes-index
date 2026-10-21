@@ -349,7 +349,8 @@ export class EngagementService {
 
   /**
    * The releases of the window open to every collector at `now`, the oldest first: published, never cancelled, an
-   * after-room left out (it counts as the release it follows); every draw, and a LIVE RELEASE without any access rule.
+   * after-room left out (it counts as the release it follows); every draw but one opened to a segment (plan MACRO M1
+   * §3.1, F4), and a LIVE RELEASE without any access rule.
    * Read once per run, not per batch.
    */
   async openReleases(db: Db, now: Date): Promise<OpenRelease[]> {
@@ -358,7 +359,7 @@ export class EngagementService {
         FROM drops d
        WHERE d.published_at IS NOT NULL AND d.cancelled_at IS NULL AND d.parent_drop_id IS NULL
          AND d.opens_at > ${windowStart(now)} AND d.opens_at <= ${now}
-         AND (d.mode = 'DRAW'
+         AND ((d.mode = 'DRAW' AND d.access_segment_id IS NULL)
               OR (d.live_min_tier = 0 AND d.access_segment_id IS NULL AND d.access_collection_id IS NULL AND d.min_participations IS NULL
                   AND NOT EXISTS (SELECT 1 FROM live_access_models am WHERE am.drop_id = d.id)))
        ORDER BY d.opens_at, d.id`.execute(db);

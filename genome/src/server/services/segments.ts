@@ -27,7 +27,9 @@
  *   origin     (§3.4 A.5, A.10.6: services/acquisition-report.ts) the first source, or the last link before the sign-up,
  *              before a paid order that is not GIFT, or either, in some channels, links (archived ones too) or kinds of
  *              source, with the reports' fallbacks (Before tracking, Direct). A test entrant never matches one: it
- *              makes no visit and no conversion, and the fallbacks would read it Direct;
+ *              makes no visit and no conversion, and the fallbacks would read it Direct. And FOUNDING_LIST (plan MACRO
+ *              M1 §3.1, F4): the account is matched to a pre-registration of theorbes.com's founding list (services/
+ *              founding.ts), read live (nothing lasting is given), a test entrant never;
  *   engagement (§3.5 SB.3.4) the engagement score of the latest morning run (account_scores, by its key) from … to …: an
  *              account with no score yet (created since the run, a test entrant) never matches but through a NOT. A
  *              segment that reads it may be a LIVE RELEASE's access rule or a post's audience like any other (question
@@ -105,7 +107,7 @@ export const SEGMENT_CRITERIA = Object.freeze({
   PERSON: Object.freeze(['CITY', 'AGE', 'HEARD_FROM', 'TAGGED'] as const),
   TASTES: Object.freeze(['WISHES_MODEL', 'WISHES_COLLECTION', 'FAVOURITE_PIECE', 'FAVOURITE_FINISH'] as const),
   BROWSING: Object.freeze(['VIEWED_MODEL', 'VIEWED_RELEASE', 'DEVICE', 'PLACE'] as const),
-  ORIGIN: Object.freeze(['FIRST_SOURCE', 'LAST_SOURCE'] as const),
+  ORIGIN: Object.freeze(['FIRST_SOURCE', 'LAST_SOURCE', 'FOUNDING_LIST'] as const),
   ENGAGEMENT: Object.freeze(['SCORE'] as const),
 });
 export type SegmentCriterionGroup = keyof typeof SEGMENT_CRITERIA;
@@ -180,6 +182,7 @@ export type SegmentRule = { not?: boolean } & (
   | { kind: 'PLACE'; countries?: string[]; placeIds?: number[]; days: number }
   | { kind: 'FIRST_SOURCE'; channelIds?: string[]; linkIds?: string[]; kinds?: SourceKind[] }
   | { kind: 'LAST_SOURCE'; channelIds?: string[]; linkIds?: string[]; kinds?: SourceKind[]; at: LastSourceAt }
+  | { kind: 'FOUNDING_LIST' }
   | { kind: 'SCORE'; min: number; max: number }
 );
 
@@ -332,6 +335,8 @@ function cleanRule(v: unknown): SegmentRule {
       if (r.kind === 'FIRST_SOURCE') return { kind: 'FIRST_SOURCE', ...lists, ...not };
       return { kind: 'LAST_SOURCE', ...lists, at: oneOf(LAST_SOURCE_AT, 'Came last through: before')(r.at), ...not };
     }
+    case 'FOUNDING_LIST':
+      return { kind: 'FOUNDING_LIST', ...not };
     case 'PLACE': {
       const lists = someLists(r, { countries: country, placeIds: placeId }, 'Seen from');
       return { kind: 'PLACE', ...(lists as Pick<Extract<SegmentRule, { kind: 'PLACE' }>, 'countries' | 'placeIds'>), days: whole(r.days, SEGMENT_LIMITS.viewDays, 'Seen from: in the last N days'), ...not };
@@ -540,6 +545,11 @@ function ruleSql(db: Db, eb: Accounts, r: SegmentRule, now: Date): Expression<Sq
       break;
     case 'LAST_SOURCE':
       x = sql<SqlBool>`(${lastSourceFilter('a.id', r, r.at)} and ${notTestEntrant('a.id')})`;
+      break;
+    case 'FOUNDING_LIST':
+      // On preregistrations_account_idx (migration 0050): matched to a pre-registration, unsubscribed or not (an
+      // unsubscribe stops the emails, not the early access); never a test entrant.
+      x = sql<SqlBool>`(exists (select 1 from preregistrations as fp where fp.account_id = ${account}) and ${notTestEntrant('a.id')})`;
       break;
     case 'SCORE':
       // account_scores by its primary key: the score of the latest morning run. No row (created since, a test entrant,

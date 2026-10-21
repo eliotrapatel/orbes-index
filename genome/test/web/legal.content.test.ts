@@ -48,6 +48,7 @@ import { UP as LIVE_MIGRATION } from '../../src/server/db/migrations/0021_live_r
 import { UP as ORDERS_MIGRATION } from '../../src/server/db/migrations/0022_orders_stock.js';
 import { UP as COLLECTORS_MIGRATION } from '../../src/server/db/migrations/0023_releases_collectors.js';
 import { CARE_CONDITIONS, CARE_CONDITIONS_VERSION } from '../../src/server/render/care-conditions.js';
+import { FOUNDING_CONSENT_VERSION } from '../../src/server/services/founding.js';
 import { CARE_LABEL_RETENTION_MS } from '../../src/server/services/care.js';
 import { INVOICE_ISSUER } from '../../src/server/services/invoices.js';
 import { RECOVERY_CODE_TTL_MS, TRANSFER_FREEZE_MS } from '../../src/server/services/account-recovery.js';
@@ -334,6 +335,11 @@ describe('legal pages: the terms of use and the legal notice, published from the
     expect(CARE_CONDITIONS.en.blocks.join('\n')).not.toMatch(/\]\(|\*Code/);
     // The PDF prints the version of the terms in force.
     expect(CARE_CONDITIONS_VERSION).toBe(LEGAL_VERSION);
+  });
+
+  it('records each consent to the founding list with the version in force (plan MACRO M1 §3.1, F2: FOUNDING_CONSENT_VERSION)', () => {
+    // The server cannot read this file: services/founding.ts writes the date, held here to LEGAL_VERSION.
+    expect(FOUNDING_CONSENT_VERSION).toBe(LEGAL_VERSION);
   });
 });
 

@@ -281,6 +281,21 @@ export class AcquisitionService {
   }
 
   /**
+   * The source of signals read outside the app (plan MACRO M1 §3.1, F3: theorbes.com's founding list form), classified
+   * as an arrival is (`classify`, the day's cap and its fallbacks), inside the caller's transaction `tx`. `ownHost` is
+   * the host whose referrer is an inner move (theorbes.com for its own form). Nothing about a device is written, and the
+   * ids learnt are not kept in memory, since the caller's transaction may still roll back.
+   */
+  async sourceFor(tx: Db, signals: ArrivalSignals, ownHost: string, now: Date): Promise<{ id: number; kind: ArrivalOutcome['kind'] }> {
+    const learnt = new Map<string, number>();
+    for (const candidate of classify(signals, ownHost)) {
+      const id = await this.sourceOf(tx, candidate, now, learnt);
+      if (id !== null) return { id, kind: candidate.kind };
+    }
+    throw new Error('the DIRECT source is missing');
+  }
+
+  /**
    * The id of a candidate's source row, or null when it cannot be used: a link code no link has, a new campaign or site
    * past the day's cap. A link's source is made with the link (LinkService.create); one found missing is made here.
    */

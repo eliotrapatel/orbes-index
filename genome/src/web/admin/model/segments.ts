@@ -92,6 +92,7 @@ export const SEGMENT_RULE_LABELS: Readonly<Record<SegmentRuleKind, string>> = Ob
   PLACE: 'Seen from',
   FIRST_SOURCE: 'Came first through',
   LAST_SOURCE: 'Came last through',
+  FOUNDING_LIST: 'On the founding list',
   SCORE: 'Engagement score from … to …',
 });
 
@@ -260,6 +261,8 @@ export function defaultRule(kind: SegmentRuleKind, o: SegmentOptions): SegmentRu
       return { kind, channelIds: o.channels[0] ? [o.channels[0].id] : [] };
     case 'LAST_SOURCE':
       return { kind, linkIds: o.links[0] ? [o.links[0].id] : [], at: 'EITHER' };
+    case 'FOUNDING_LIST':
+      return { kind };
     case 'SCORE':
       return { kind, min: 60, max: 100 };
   }
@@ -355,6 +358,8 @@ export function ruleProblem(r: SegmentRule, o: SegmentOptions): string | null {
       if (lists.every((x) => x.length === 0)) return `${label}: choose at least one channel, link or source.`;
       return lists.some((x) => x.length > SEGMENT_LIMITS.items) ? `${label}: at most ${SEGMENT_LIMITS.items}.` : null;
     }
+    case 'FOUNDING_LIST':
+      return null;
     case 'SCORE':
       return inRange(r.min, SEGMENT_LIMITS.score) && inRange(r.max, SEGMENT_LIMITS.score) && r.min <= r.max
         ? null
@@ -473,6 +478,9 @@ export function ruleWords(r: SegmentRule, o: SegmentOptions): string {
       break;
     case 'LAST_SOURCE':
       w = `came last through ${either(sourceNames(r, o))} (${LAST_SOURCE_AT_WORDS[r.at]})`;
+      break;
+    case 'FOUNDING_LIST':
+      w = 'on the founding list';
       break;
     case 'SCORE':
       w = `engagement score ${r.min} to ${r.max}`;
