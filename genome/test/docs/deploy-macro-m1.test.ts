@@ -17,10 +17,11 @@
  *  - the post-check: the box read only (no pace, the founding list empty, no email on or written, every recovery code
  *    the staff's), then from the Mac the founding route's CORS for https://theorbes.com only (204 and its headers, 403
  *    for another site), the reset by email answering off, the emails' monogram;
- *  - one real check per element, the 5 000 TEST ENTRANTS run first (5 presses of 1 000, a pace of 250 a minute, the
- *    report's PACE check), in the console's and the app's words as the code has them; Client Services told (the
- *    playbook's M1 lines, both copies); one command per shell block, relative links that resolve, and the runbook linked
- *    from DEPLOYMENT and COMPLIANCE.
+ *  - one real check per element, the 5 000 TEST ENTRANTS run first (the test model at 1 EUR, open to its owners only,
+ *    said public until its end and in PAST after; 5 presses of 1 000, a pace of 250 a minute, the report's PACE check),
+ *    in the console's and the app's words as the code has them; Client Services told (the playbook's M1 lines, both
+ *    copies); one command per shell block, relative links that resolve, and the runbook linked from DEPLOYMENT and
+ *    COMPLIANCE.
  *
  * <SHA_M1> and <TAG_M1> stay placeholders until the main session hands the commit over.
  */
@@ -319,6 +320,16 @@ describe('the runbook of lot MACRO M1 (docs/launch/DEPLOY-MACRO-M1.md)', () => {
     const live = readDoc('genome/src/web/admin/views/live.ts');
     const club = readDoc('genome/src/web/admin/views/club.ts');
     const tests = readDoc('genome/src/web/admin/views/test-entrants.ts');
+    // The test release: the test model at a nominal price, open to that model's owners only (test entrants count as
+    // owners, the house test account holds its piece), and said public until its end and then in PAST for ever (the
+    // console refuses a name or photograph stage after the room opens).
+    expect(checks).toContain("`Model` le modèle d'essai dont le compte d'essai de la maison détient une pièce (jamais une vraie pièce), `Title` `TEST PACE`, `Price of a piece` `1`, `Currency` `EUR`, une taille, `ONE SIZE = 25`");
+    expect(checks).toContain("`Access` → `Edit` : `Owners of <le modèle d'essai>` coché, rien d'autre");
+    for (const label of ["label: 'Model'", "label: 'Title'", "label: 'Price of a piece'", "label: 'Currency'", "editPart('access', 'Access'", 'label: `Owners of ${humanize(m.name)}`']) expect(live, label).toContain(label);
+    expect(readDoc('genome/src/server/services/test-entrants.ts')).toContain("it counts as owning the release's models");
+    expect(checks).toContain("**Visible de tous** : elle paraît dans THE RELEASES et la bannière de sa publication à sa fin, puis pour toujours dans PAST et sur la fiche du modèle d'essai");
+    expect(checks).toContain('fais-la à une heure creuse');
+    expect(readDoc('genome/src/server/services/live-console.ts')).toContain('is revealed before the room opens.');
     const quoted: ReadonlyArray<readonly [label: string, text: string]> = [
       ['New live release', club],
       ['Times (UTC)', live],
@@ -404,6 +415,9 @@ describe('the runbook of lot MACRO M1 (docs/launch/DEPLOY-MACRO-M1.md)', () => {
     // A draw's Access.
     expect(readDoc('genome/src/web/admin/views/drop.ts')).toContain("label: 'Access'");
     expect(checks).toContain('Le champ `Access` : `Everyone`');
+    // New release is two dialogs: the model, Next, then the fields with Access.
+    expect(checks).toContain('`New release`, choisis un modèle, `Next`, puis ferme sans enregistrer');
+    expect(readDoc('genome/src/web/admin/views/club.ts')).toContain("confirmLabel: 'Next',");
     // The founding list: one person sent by curl with theorbes.com's Origin, the segment made, then removed.
     const add = fenced(checks, 'bash');
     expect(add).toEqual([
