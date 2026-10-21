@@ -217,6 +217,8 @@ describe('deploy/vps/compose.yaml', () => {
     const notForTheApp = new Set([
       'POSTGRES_DB', 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'APP_BIND', 'APP_PORT', 'ORBES_IMAGE_TAG', 'ORBES_ENV_FILE',
       'DEMO_ACCOUNT_PASSWORD', 'ADMIN_PASSWORD', 'ADMIN_TOTP_SECRET', 'ORBES_DEMO', 'GEO_COUNTRY_HEADER', 'GEO_LAT_HEADER', 'GEO_LON_HEADER',
+      // The emails' channel (plan MACRO M1 §4.1, E0), off: compose.yaml passes it once lot M1 step M1.16 lands (§11 note 8).
+      'EMAIL_TRANSPORT', 'EMAIL_FROM', 'EMAIL_REPLY_TO', 'SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURITY', 'SMTP_USER', 'SMTP_PASSWORD',
     ]);
     const missing = [...genomeVars].filter((n) => !notForTheApp.has(n) && !appEnv.has(n)).sort();
     expect(missing).toEqual([]);

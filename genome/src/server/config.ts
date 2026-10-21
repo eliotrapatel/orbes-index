@@ -80,7 +80,41 @@ export interface AppConfig {
    * for a signed-in scan of the piece. Production warns while it is false.
    */
   transferAcceptRequireProduct: boolean;
+  /**
+   * The emails' channel (macro scope E0; lot M1 plan §4.1): EMAIL_TRANSPORT `off` (the default, unset or empty: nothing
+   * is queued, nothing is sent) or `smtp`, through any provider's SMTP server (SMTP_HOST, SMTP_PORT, SMTP_SECURITY
+   * `tls` on 465 or `starttls` on 587, SMTP_USER, SMTP_PASSWORD), from EMAIL_FROM, answered to EMAIL_REPLY_TO.
+   * `smtp` without its host, sender, user or password is refused at start, the variable named. The keys live in the
+   * server's .env only; the log says which are set, never their values (redactConfig).
+   */
+  email: EmailConfig;
 }
+
+/** Who the emails come from (EMAIL_FROM): an address, with the name the inbox shows when one is given. */
+export interface EmailSender {
+  address: string;
+  name: string | null;
+}
+
+/** An SMTP server (server/email/smtp.ts): implicit TLS (465) or STARTTLS (587), its certificate always verified. */
+export interface SmtpSettings {
+  host: string;
+  port: number;
+  security: SmtpSecurity;
+  user: string;
+  password: string;
+}
+
+export const SMTP_SECURITIES = ['tls', 'starttls'] as const;
+export type SmtpSecurity = (typeof SMTP_SECURITIES)[number];
+
+/** The emails' channel: off, or SMTP with its sender and server. */
+export type EmailConfig =
+  | { transport: 'off' }
+  | { transport: 'smtp'; from: EmailSender; replyTo: string | null; smtp: SmtpSettings };
+
+/** The default port of each SMTP security (SMTP_PORT unset). */
+export const SMTP_DEFAULT_PORT: Readonly<Record<SmtpSecurity, number>> = Object.freeze({ tls: 465, starttls: 587 });
 
 /** Public contact details of ORBES Client Services (all optional, validated at start). */
 export interface ClientServicesConfig {
@@ -203,6 +237,29 @@ const zHours = z
   .string()
   .max(120, 'must be at most 120 characters')
   .regex(/^[^\p{Cc}]+$/u, 'must be one line of plain text');
+/**
+ * An address an email is sent from or answered to: plain ASCII, one `@`, a dotted domain, no character that could break
+ * a header or an SMTP command (no space, `<`, `>`, `"`, `,`, `;`, `:`, `\\` or control character).
+ */
+export const EMAIL_ADDRESS_PATTERN = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63})+$/;
+const zEmailAddress = z.string().max(254).regex(EMAIL_ADDRESS_PATTERN, 'must be an email address (ASCII, no spaces)');
+/** EMAIL_FROM: `hello@theorbes.com` or `ORBES <hello@theorbes.com>` (a name of 1 to 64 letters, digits, spaces and . - ' &). */
+const zEmailFrom = z
+  .string()
+  .max(330)
+  .transform((s, ctx): EmailSender => {
+    const named = /^([A-Za-z0-9 .'&-]{1,64}?)\s*<([^<>]+)>$/.exec(s);
+    const address = named ? named[2]! : s;
+    if (address.length > 254 || !EMAIL_ADDRESS_PATTERN.test(address)) {
+      ctx.addIssue({ code: 'custom', message: 'must be an address, or a name and an address as ORBES <hello@theorbes.com>' });
+      return z.NEVER;
+    }
+    const name = named ? named[1]!.trim() : '';
+    return { address, name: name === '' ? null : name };
+  });
+/** SMTP_USER / SMTP_PASSWORD: one line of printable characters. */
+const zSmtpSecret = (max: number) => z.string().max(max, `must be at most ${max} characters`).regex(/^[^\p{Cc}]+$/u, 'must be one line without control characters');
+
 /** A public https link, opened as it is in a new tab: no credentials, no space, at most 2 048 characters. */
 const zHttpsLink = z
   .string()
@@ -428,6 +485,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   // Transfers (F-03): the scanned piece and its scan, required unless ORBES Client Services assists an acceptance.
   const transferAcceptRequireProduct = field('TRANSFER_ACCEPT_REQUIRE_PRODUCT', zSwitch, e.TRANSFER_ACCEPT_REQUIRE_PRODUCT) ?? true;
 
+  // The emails' channel (E0): off unless EMAIL_TRANSPORT=smtp; every SMTP_* / EMAIL_* set is checked either way.
+  const email = parseEmailConfig(e, field, issues);
+
   if (issues.length > 0) throw new ConfigError(issues);
 
   const config: AppConfig = {
@@ -452,6 +512,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     clientServices,
     careSubscribeUrl,
     transferAcceptRequireProduct,
+    email: email!,
   };
 
   if (prod) {
@@ -587,10 +648,59 @@ export function redactConfig(c: AppConfig): Record<string, unknown> {
     },
     careSubscribeUrl: c.careSubscribeUrl ? '[set]' : undefined,
     transferAcceptRequireProduct: c.transferAcceptRequireProduct,
+    // The SMTP server's address and mode are not secrets; who sends, the user and the password are kept out.
+    email:
+      c.email.transport === 'off'
+        ? { transport: 'off' }
+        : {
+            transport: 'smtp',
+            host: c.email.smtp.host,
+            port: c.email.smtp.port,
+            security: c.email.smtp.security,
+            from: '[set]',
+            replyTo: c.email.replyTo ? '[set]' : undefined,
+            user: '[set]',
+            password: '[set]',
+          },
   };
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
+
+type FieldParser = <T>(name: string, schema: z.ZodType<T>, value: string | undefined) => T | undefined;
+
+/**
+ * EMAIL_TRANSPORT and its settings (E0). Each variable that is set is validated whatever the transport, so a typo shows
+ * before the day the channel is switched on; `smtp` needs its host, sender, user and password.
+ */
+function parseEmailConfig(e: Record<string, string | undefined>, field: FieldParser, issues: string[]): EmailConfig | undefined {
+  const transport =
+    field('EMAIL_TRANSPORT', z.string().transform((s) => s.toLowerCase()).pipe(z.enum(['off', 'smtp'], { error: 'must be off or smtp' })), e.EMAIL_TRANSPORT) ??
+    (e.EMAIL_TRANSPORT === undefined ? 'off' : undefined);
+  const from = field('EMAIL_FROM', zEmailFrom, e.EMAIL_FROM);
+  const replyTo = field('EMAIL_REPLY_TO', zEmailAddress, e.EMAIL_REPLY_TO);
+  const host = field('SMTP_HOST', zHost, e.SMTP_HOST);
+  const port = field('SMTP_PORT', zPort, e.SMTP_PORT);
+  const security = field('SMTP_SECURITY', z.string().transform((s) => s.toLowerCase()).pipe(z.enum(SMTP_SECURITIES, { error: 'must be tls or starttls' })), e.SMTP_SECURITY);
+  const user = field('SMTP_USER', zSmtpSecret(254), e.SMTP_USER);
+  const password = field('SMTP_PASSWORD', zSmtpSecret(1024), e.SMTP_PASSWORD);
+  if (transport === undefined) return undefined;
+  if (transport === 'off') return { transport: 'off' };
+  for (const [name, raw] of [
+    ['SMTP_HOST', e.SMTP_HOST],
+    ['EMAIL_FROM', e.EMAIL_FROM],
+    ['SMTP_USER', e.SMTP_USER],
+    ['SMTP_PASSWORD', e.SMTP_PASSWORD],
+  ] as const) {
+    if (raw === undefined) issues.push(`${name}: required when EMAIL_TRANSPORT=smtp`);
+  }
+  if (host === undefined || from === undefined || user === undefined || password === undefined) return undefined;
+  if (e.SMTP_PORT !== undefined && port === undefined) return undefined;
+  if (e.SMTP_SECURITY !== undefined && security === undefined) return undefined;
+  // Unset, the security follows the port (587 and 25 speak STARTTLS), and the port the security.
+  const sec: SmtpSecurity = security ?? (port === 587 || port === 25 ? 'starttls' : 'tls');
+  return { transport: 'smtp', from, replyTo: replyTo ?? null, smtp: { host, port: port ?? SMTP_DEFAULT_PORT[sec], security: sec, user, password } };
+}
 
 /** Trim values and drop empty ones, so `FOO=` behaves like an unset variable. */
 function normaliseEnv(env: NodeJS.ProcessEnv): Record<string, string | undefined> {

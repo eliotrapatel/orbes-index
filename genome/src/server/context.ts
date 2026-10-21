@@ -81,6 +81,7 @@ import { AcquisitionReportService } from './services/acquisition-report.js';
 import { LinkService } from './services/links.js';
 import { CampaignService } from './services/campaign.js';
 import { FoundingService } from './services/founding.js';
+import { deriveEmailUnsubscribeKey, EmailService } from './services/email.js';
 import { TrackingService } from './services/tracking.js';
 import { SalonService } from './services/salon.js';
 import { ShopifyExportService } from './services/shopify.js';
@@ -210,6 +211,8 @@ export interface AppServices {
   campaign: CampaignService;
   /** The founding list (plan MACRO M1 §3.1, F2 to F5): theorbes.com's form, its sources, the match at sign-up, the console's reads. */
   founding: FoundingService;
+  /** The emails (plan MACRO M1 §4.1, E0): the outbox, its sender every 15 s while EMAIL_TRANSPORT=smtp, the 90-day purge, the unsubscribe links. */
+  email: EmailService;
   /** The lot's growing tables' bytes as last measured (plan CUSTOMER INTELLIGENCE §3.3 T.10, §3.4 A.10.7): the `intelligence sizes` line and Server status's « Visitor data ». */
   intelligenceSizes: IntelligenceSizes;
   /** The suppliers (plan NEXT LOT §3.5.6.2): who makes ORBES's pieces, and the supplier of each model and size. */
@@ -366,6 +369,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const acquisitionReport = new AcquisitionReportService({ db, links });
     const campaign = new CampaignService({ db, audit, links, clock });
     const founding = new FoundingService({ db, audit, acquisition, clock });
+    const email = new EmailService({ db, config, unsubscribeKey: deriveEmailUnsubscribeKey(config), clock, log });
     const intelligenceSizes = new IntelligenceSizes(db, clock, log);
     // The page load's arrival rides in the views' batches (§3.0 (c), §3.4 A.7.2): the same route, the same exclusions.
     // The link attaches the device's visits in its own transaction (§3.3 T.8.4 step 7, §3.4 A.4).
@@ -447,6 +451,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       acquisitionReport,
       campaign,
       founding,
+      email,
       intelligenceSizes,
       suppliers,
       supplierOrders,
@@ -476,6 +481,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
         if (closed) return;
         closed = true;
         await services.receptions.stop();
+        await services.email.stop();
         // The views still in memory are written before the database closes (§3.3 T.8.3).
         await services.tracking.stop();
         if (ownsDb) await closeDb(db);
@@ -515,6 +521,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     // The views' buffer writes every 2 s on its own unref'd interval (§3.0 (f)), and the past scans are recorded in the
     // background (§3.3 T.11); tests drive both themselves.
     if (overrides.timers ?? config.env !== 'test') services.tracking.start();
+    // The emails' sender (plan MACRO M1 §4.1, E0): a pass every 15 s, only while the channel is on; tests drive sendDue.
+    if (overrides.timers ?? config.env !== 'test') services.email.start();
     return ctx;
   } catch (e) {
     if (ownsDb) await closeDb(db).catch(() => {});
@@ -548,6 +556,7 @@ export interface Housekeeping {
     liveNetworks: number;
     careLabels: number;
     packingPhotos: number;
+    emailPurge: number;
     sizes: number;
   }>;
   /** Stop the timer and wait for a running pass to finish. */
@@ -563,8 +572,9 @@ export interface Housekeeping {
  * period, and erases the network hashes of the LIVE RELEASES' entries 30 days
  * after their release ended (services/live.ts), and the prepaid labels of the
  * yearly care 30 days after their request ended (services/care.ts), and the
- * packing photos of the parcels past their keeping (services/parcels.ts), every
- * `intervalMs` (default 10 min).
+ * packing photos of the parcels past their keeping (services/parcels.ts), and
+ * the emails 90 days after they were sent, failed or were cancelled
+ * (services/email.ts, `emailPurge`), every `intervalMs` (default 10 min).
  *
  * The daily statistics and the hourly activity always run before the purge,
  * and a pass where either failed purges nothing: no scan leaves the history
@@ -615,7 +625,7 @@ export interface Housekeeping {
  *                wishes past their 13 months whose month is counted;
  *   devicePurge  the devices never linked, unseen for 13 months, with no view
  *                and no visit left (TrackingService.purgeDevices);
- *   (liveNetworks, careLabels, packingPhotos, as above)
+ *   (liveNetworks, careLabels, packingPhotos, emailPurge, as above)
  *   sizes        once a Paris day, the `intelligence sizes` log line: the bytes
  *                of the lot's growing tables (the 50 MB backup watch, §8).
  */
@@ -656,6 +666,7 @@ export function startHousekeeping(
       liveNetworks: 0,
       careLabels: 0,
       packingPhotos: 0,
+      emailPurge: 0,
       sizes: 0,
     };
     /** Runs one job; false when it failed (logged). */
@@ -728,6 +739,8 @@ export function startHousekeeping(
     await job('careLabels', () => eraseCareLabels(ctx.db, ctx.clock()));
     // Plan NEXT LOT §3.5.6.8: the packing photos, 14 days after delivery (or after a return opened in time is closed).
     await job('packingPhotos', () => purgePackingPhotos(ctx.db, ctx.clock()));
+    // Plan MACRO M1 §4.1 (E0): each email 90 days after it was sent, failed or was cancelled, whether the channel is on or not.
+    await job('emailPurge', () => ctx.services.email.purge(ctx.clock()));
     // Once a Paris day in the window: the bytes of the lot's growing tables, for the 50 MB backup watch (§3.3 T.10, §8).
     const today = parisDay(ctx.clock());
     if (morning && sizesDay !== today) {

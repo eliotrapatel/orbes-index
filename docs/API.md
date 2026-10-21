@@ -743,6 +743,7 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | GET | `/go/:code` | — | — | api | 8.15 |
 | OPTIONS | `/api/v1/founding` | — | Origin `https://theorbes.com` only | api | 8.16 |
 | POST | `/api/v1/founding` | — | Origin `https://theorbes.com` only (CORS) | founding | 8.16 |
+| GET | `/api/v1/email/monogram.png` | — | — | media | 8.17 |
 | POST | `/api/v1/certificates/lookup` | — | — | verify | 8.7 |
 | POST | `/api/v1/certificates/pdf` | — | — | verify | 8.7 |
 | POST | `/api/v1/account/register` | — | origin only | auth | 10.1 |
@@ -1676,6 +1677,10 @@ Plan MACRO M1 §3.1 (macro scope F2, F3, F5; `routes/founding.ts`, `services/fou
 **202** `{ "ok": true }` whether the person was added, was on the list already (in any case of the address: the row is left exactly as it was, nothing audited) or filled the honeypot (nothing stored): nobody learns whether an address is on the list. A new row records the address (trimmed; its lookup key in lower case), the first name (1–80 characters, trimmed, NFC, no control character nor `<` `>`), the country, the consent's time and the legal version in force (`FOUNDING_CONSENT_VERSION`, held to the legal pages' `LEGAL_VERSION`), and its **source**, classified as an arrival's: the link of `o` (archived ones included), then the campaign tags, then the referring site (theorbes.com itself is no site), then Direct, with the day's cap of new sources. The ORBES account that already has the address is **matched at once**; an address that signs up later is matched in the account's own transaction (§10.1). Audited `founding.register` (`{ preregistrationId, sourceKind }`) and `founding.match` (`{ preregistrationId, accountId, at: REGISTER | SIGN_UP }`), never the address. The Google Sheet of the old form is not imported (F5).
 
 **400 VALIDATION_FAILED** with every refused field in the collector's words, the first one's as the message: `{ "error": { "code": "VALIDATION_FAILED", "message": "Enter your email.", "fields": { "email": "Enter your email.", "firstName": "Enter your first name.", "country": "Choose your country.", "consent": "Tick the box to join the list." } } }`. An unknown key or a wrong type is the house's `400 VALIDATION_FAILED` without `fields`.
+
+### 8.17 `GET /api/v1/email/monogram.png`: the emails' monogram (extension of the contract)
+
+Plan MACRO M1 §4.1 (macro scope E0; `routes/email.ts`, `email/render.ts` `emailMonogramPng`). The image at the head of every email the platform sends (the channel is off until `EMAIL_TRANSPORT=smtp`): the monogram's master outlines in ivory on an ink disc, a 96 × 96 PNG drawn once by the server, shown at 44 px. **200** `image/png`, `Cache-Control: public, max-age=86400`, `Cross-Origin-Resource-Policy: cross-origin` (a mail client loads it from anywhere); no cookie read or set; rate group `media`.
 
 ## 9. Verification: `POST /api/v1/verify`
 

@@ -42,7 +42,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_SESSION_TTL_HOURS } from '../../src/server/config.js';
+import { DEFAULT_SESSION_TTL_HOURS, loadConfig } from '../../src/server/config.js';
 import { WARRANTY_CLAIM_OUTCOMES_BY_BASIS, WARRANTY_CLAIM_REFUSALS_BY_BASIS } from '../../src/server/db/schema.js';
 import { registerAccountBody } from '../../src/server/http/schemas.js';
 import { CARE_CONDITIONS_VERSION } from '../../src/server/render/care-conditions.js';
@@ -627,7 +627,15 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
     const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
     expect(deps.length).toBeGreaterThan(5);
     expect(deps.filter((d) => /mail|smtp|sendgrid|postmark|mailgun|mandrill|sparkpost|resend|client-ses/i.test(d))).toEqual([]);
-    expect(matches(/\b(?:smtp|nodemailer|createTransport|sendMail)\b/gi).map((m) => m.file)).toEqual([]);
+    expect(matches(/\b(?:nodemailer|createTransport|sendMail)\b/gi).map((m) => m.file)).toEqual([]);
+    // The emails' channel (plan MACRO M1 §4.1, E0) is prepared and switched off: the server's one SMTP client
+    // (server/email/smtp.ts, the only file that opens a TLS connection) is called by the outbox's sender alone, which
+    // sends nothing unless EMAIL_TRANSPORT is smtp; off by default, and commented out in the production template.
+    expect(matches(/(?<!function )\bsendSmtp\(/g).map((m) => m.file)).toEqual([join('src', 'server', 'services', 'email.ts')]);
+    expect(matches(/from 'node:tls'/g).map((m) => m.file)).toEqual([join('src', 'server', 'email', 'smtp.ts')]);
+    expect(loadConfig({}).email).toEqual({ transport: 'off' });
+    expect(readDoc('deploy/vps/.env.example')).not.toMatch(/^EMAIL_TRANSPORT=/m);
+    expect(readDoc('deploy/vps/compose.yaml')).not.toMatch(/EMAIL_TRANSPORT:\s*['"]?smtp/);
   },
   N2: () => {
     expect(ROUTES.length).toBeGreaterThan(50);

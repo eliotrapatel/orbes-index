@@ -330,6 +330,55 @@ describe('loadConfig — operations settings', () => {
     expect(redactConfig(loadConfig({})).careSubscribeUrl).toBeUndefined();
   });
 
+  it('EMAIL_TRANSPORT (macro scope E0): off by default and when empty; smtp needs its host, sender, user and password, named; masked in the log', () => {
+    expect(loadConfig({}).email).toEqual({ transport: 'off' });
+    expect(loadConfig(PROD).email).toEqual({ transport: 'off' });
+    expect(loadConfig({ EMAIL_TRANSPORT: '' }).email).toEqual({ transport: 'off' });
+    expect(loadConfig({ EMAIL_TRANSPORT: 'OFF', SMTP_HOST: 'smtp.example.com' }).email).toEqual({ transport: 'off' });
+    expect(testConfig().email).toEqual({ transport: 'off' });
+    const SMTP = { EMAIL_TRANSPORT: 'smtp', EMAIL_FROM: 'ORBES <hello@theorbes.com>', SMTP_HOST: 'smtp.example.com', SMTP_USER: 'apikey', SMTP_PASSWORD: 'smtp-Secret-0123456789' };
+    expect(loadConfig({ ...PROD, ...SMTP }).email).toEqual({
+      transport: 'smtp',
+      from: { address: 'hello@theorbes.com', name: 'ORBES' },
+      replyTo: null,
+      smtp: { host: 'smtp.example.com', port: 465, security: 'tls', user: 'apikey', password: 'smtp-Secret-0123456789' },
+    });
+    // The security follows the port, the port the security; a plain sender and a reply-to.
+    expect(loadConfig({ ...SMTP, SMTP_PORT: '587' }).email).toMatchObject({ smtp: { port: 587, security: 'starttls' } });
+    expect(loadConfig({ ...SMTP, SMTP_SECURITY: 'STARTTLS' }).email).toMatchObject({ smtp: { port: 587, security: 'starttls' } });
+    expect(loadConfig({ ...SMTP, SMTP_SECURITY: 'tls', SMTP_PORT: '2465' }).email).toMatchObject({ smtp: { port: 2465, security: 'tls' } });
+    expect(loadConfig({ ...SMTP, EMAIL_FROM: 'hello@theorbes.com', EMAIL_REPLY_TO: 'clientservices@theorbes.com' }).email).toMatchObject({
+      from: { address: 'hello@theorbes.com', name: null },
+      replyTo: 'clientservices@theorbes.com',
+    });
+    // Each missing piece is named; values never appear.
+    expect(issues({ EMAIL_TRANSPORT: 'smtp' })).toEqual([
+      'SMTP_HOST: required when EMAIL_TRANSPORT=smtp',
+      'EMAIL_FROM: required when EMAIL_TRANSPORT=smtp',
+      'SMTP_USER: required when EMAIL_TRANSPORT=smtp',
+      'SMTP_PASSWORD: required when EMAIL_TRANSPORT=smtp',
+    ]);
+    expect(issues({ ...SMTP, SMTP_PASSWORD: undefined })).toEqual(['SMTP_PASSWORD: required when EMAIL_TRANSPORT=smtp']);
+    expect(issues({ EMAIL_TRANSPORT: 'sendgrid' })).toEqual(['EMAIL_TRANSPORT: must be off or smtp']);
+    // Set values are checked even while the channel is off, so a typo shows before the day it is switched on.
+    expect(issues({ SMTP_SECURITY: 'ssl' })).toEqual(['SMTP_SECURITY: must be tls or starttls']);
+    expect(issues({ SMTP_PORT: '0' }).map((i) => i.split(':')[0])).toEqual(['SMTP_PORT']);
+    for (const from of ['ORBES', 'hello@theorbes', 'ORBES <hello@theorbes.com', 'Ünïcode <hello@theorbes.com>', 'a b@theorbes.com', 'hello@theorbes.com\r\nBcc: x@example.com', '"ORBES" <hello@theorbes.com>']) {
+      expect(issues({ ...SMTP, EMAIL_FROM: from }).map((i) => i.split(':')[0]), from).toEqual(['EMAIL_FROM']);
+    }
+    expect(issues({ EMAIL_REPLY_TO: 'Client Services <cs@theorbes.com>' }).map((i) => i.split(':')[0])).toEqual(['EMAIL_REPLY_TO']);
+    expect(issues({ SMTP_HOST: 'smtp.example.com/path' }).map((i) => i.split(':')[0])).toEqual(['SMTP_HOST']);
+    expect(issues({ ...SMTP, SMTP_PASSWORD: 'line\u0007bell' }).map((i) => i.split(':')[0])).toEqual(['SMTP_PASSWORD']);
+    for (const issue of issues({ ...SMTP, SMTP_PASSWORD: 'x\u0007-secret-value', EMAIL_FROM: 'secret-from' })) expect(issue).not.toMatch(/secret-value|secret-from/);
+    // The log: the server and its mode; the sender, the user and the password only as [set].
+    const c = loadConfig({ ...SMTP, EMAIL_REPLY_TO: 'clientservices@theorbes.com' });
+    expect(redactConfig(c).email).toEqual({ transport: 'smtp', host: 'smtp.example.com', port: 465, security: 'tls', from: '[set]', replyTo: '[set]', user: '[set]', password: '[set]' });
+    const text = JSON.stringify(redactConfig(c));
+    for (const value of ['hello@theorbes.com', 'clientservices@theorbes.com', 'apikey', 'smtp-Secret-0123456789']) expect(text).not.toContain(value);
+    expect(redactConfig(loadConfig({})).email).toEqual({ transport: 'off' });
+    expect(configWarnings(loadConfig({ ...PROD, ...SMTP }))).toEqual([]);
+  });
+
   it('RATE_LIMIT_API_PER_MINUTE is the budget of the api route group, separate from the admin one', () => {
     const c = loadConfig({ RATE_LIMIT_API_PER_MINUTE: '42', RATE_LIMIT_ADMIN_PER_MINUTE: '500' });
     expect(c.rateLimits).toMatchObject({ apiPerMinute: 42, adminPerMinute: 500 });
