@@ -54,7 +54,7 @@ export const FOUNDING_HOST = 'theorbes.com';
  * The legal version in force (src/web/legal/content/index.ts LEGAL_VERSION), recorded with each consent. The server
  * cannot read the web's files (Dockerfile), so it is written here; test/web/legal.content.test.ts holds the two equal.
  */
-export const FOUNDING_CONSENT_VERSION = '2026-10-15';
+export const FOUNDING_CONSENT_VERSION = '2026-10-21';
 
 /** The form's fields that can be refused, in the form's order. */
 export const FOUNDING_FIELDS = ['email', 'firstName', 'country', 'consent'] as const;

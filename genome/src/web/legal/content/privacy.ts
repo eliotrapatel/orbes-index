@@ -116,8 +116,27 @@
  *    `orbes.sound`: "off", written only by SOUND OFF and removed by SOUND
  *    ON; no expiry, never sent to ORBES. The ceremony's share image (P-D01)
  *    is drawn on the device and sent nowhere by ORBES: nothing to declare;
+ *  - a paced LIVE RELEASE (lot M1 of the macro plan, W4, migration 0049):
+ *    each entry's admission to the room (`admitted_at`, `admitted_batch`,
+ *    in the export), each batch audited `drop.live.admit` as counts only;
+ *    a draw opened to a segment (F4) as a LIVE RELEASE is;
+ *  - the founding list (F2-F4, services/founding.ts, migration 0050): the
+ *    theorbes.com form's email, first name, country, consent with its time
+ *    and FOUNDING_CONSENT_VERSION, and its source; matched to the account of
+ *    the same address; the FOUNDING_LIST segment rule; read masked for an
+ *    AUDITOR, its CSV in Shopify's customer columns; audited by id, never by
+ *    address; kept until removed on request (the row and its emails
+ *    deleted); an unsubscribe sets `unsubscribed_at`, keeps the row and
+ *    cancels its emails (the plan's §11 note 9: "kept until a request to
+ *    erase; unsubscribed rows receive nothing");
+ *  - the emails (E0-E6, services/email.ts, email-triggers.ts, migration
+ *    0051): the eleven EMAIL_KINDS, off until the provider is set; the
+ *    outbox keeps each email's address, subject and words, a reset link's
+ *    code included, EMAIL_RETENTION_DAYS (90) after it settles (`emailPurge`);
+ *    the export lists them by kind, status and dates; STOP THESE EMAILS and
+ *    YOUR PROFILE's switch stop the two opt-in kinds;
  *  - the hosting: OVHcloud in Canada (COMPLIANCE §7, H2), Vercel Inc. for
- *    theorbes.com.
+ *    theorbes.com; the email provider ORBES chooses, once emails are on.
  *
  * Its scope is the verification service and the ORBES account: the other
  * pages of theorbes.com (index.html, outside this system) are not described.
@@ -130,7 +149,7 @@ const EN: LegalDocument = {
   title: 'Privacy policy',
   summary: 'What the verification service records when you verify a piece or use your ORBES account, why, for how long, and your rights.',
   intro: [
-    'This policy describes the personal data processed by the ORBES GENOME CODE service: the verification of ORBES pieces at theorbes.com/verify, served by verify.theorbes.com, and the ORBES account. It does not cover the other pages of theorbes.com.',
+    'This policy describes the personal data processed by the ORBES GENOME CODE service: the verification of ORBES pieces at theorbes.com/verify, served by verify.theorbes.com, and the ORBES account. It does not cover the other pages of theorbes.com, but for the form of the founding list (see [The founding list](#founding-list)).',
   ],
   sections: [
     {
@@ -171,9 +190,9 @@ const EN: LegalDocument = {
       id: 'account',
       title: 'Your ORBES account',
       blocks: [
-        'To register, transfer or follow your pieces, you create an ORBES account with an email address, a password and, if you wish, a name. ORBES does not check the address and sends no email. ORBES processes these data to provide the account you create, under the [terms of use](/legal/terms).',
+        'To register, transfer or follow your pieces, you create an ORBES account with an email address, a password and, if you wish, a name. ORBES does not check the address. ORBES processes these data to provide the account you create, under the [terms of use](/legal/terms).',
         'Your password is stored only as a hash (scrypt): ORBES cannot read it.',
-        'ORBES records what is done with your account: the pieces registered to it and since when, the transfers, the reports of loss or theft, the links to ownership certificates (of each link, only a fingerprint), and the recovery codes ORBES Client Services gives you (only as a hash).',
+        'ORBES records what is done with your account: the pieces registered to it and since when, the transfers, the reports of loss or theft, the links to ownership certificates (of each link, only a fingerprint), and the recovery codes ORBES Client Services gives you or a reset link sends you (only as a hash).',
         'Each sign-in opens a session of 30 days at most. It is kept with a pseudonym of your IP address and the identification string of your browser (its user agent), for the security of your account.',
         "The service's audit log, which records every change, names your account by its identifier and a pseudonym of the IP address, never by your email address or your name.",
         'The sizes you save in YOUR SIZES are kept with your account until you clear them, and only preselect a size you then confirm.',
@@ -186,7 +205,7 @@ const EN: LegalDocument = {
       blocks: [
         'When you enter a release with your ORBES account, ORBES records your entry: the account, the release, the time, and what becomes of the entry (entered, withdrawn, place held, waiting list, sale concluded, place lapsed), with the note ORBES Client Services may add when it records the sale concluded or the place lapsed. A sale concluded becomes an order (see [Your orders](#orders)). ORBES processes these data to run the release you enter, under the [terms of use](/legal/terms).',
         'At the draw, ORBES records with each entry the tier and the seniority of its account, read from the pieces registered to it, and its rank. The page of the release then publishes, for each entry, its identifier, its tier, its seniority and its rank, so that anyone can check the order of the draw: never the account, its email address or its name. MY PIECES shows you the identifier of your entry.',
-        'ORBES Client Services reads the entries of a release with the email address of their account, to conclude each sale with the accounts selected; a staff member with read-only access sees it masked. The service sends no email.',
+        'ORBES Client Services reads the entries of a release with the email address of their account, to conclude each sale with the accounts selected; a staff member with read-only access sees it masked.',
         'During the early access of a release, a PLATINE or PALLADIUM account may reserve a place directly. ORBES then records an entry, as for the draw: the account, the release, the time, the tier and seniority of the account at the moment of the request, and until when the place is held. It is kept like the other entries, and is in the copy of your data.',
         "The number of releases you have taken part in, which THE RELEASES' PAST tab shows you with the releases in which you secured a piece, and which a LIVE RELEASE may require, is computed from your entries in the releases and the LIVE RELEASES each time it is needed: it is not stored.",
       ],
@@ -208,11 +227,11 @@ const EN: LegalDocument = {
       blocks: [
         'A LIVE RELEASE is entered signed in to your ORBES account. ORBES processes the data below to run the release you enter, under the [terms of use](/legal/terms), and, for the fingerprint of your network and the length of your hold, for its legitimate interest in keeping each release fair against automated entries.',
         "When you say I'LL BE THERE, ORBES records the account, the release, the size and the time. Withdrawing it deletes it. The page of the release shows only how many accounts said so.",
-        'When you enter, ORBES records your entry: the account, the release, the size and the quantity, your tier when you enter and at the opening, your place in the line, the time of each step (entering, the line, your turn, the start of your press, the piece secured, its confirmation, the end), the length of your hold on the ORBES CODE of the room, in milliseconds, the options you choose with their price, and what becomes of the entry. A reservation you confirm with PAY becomes an order, with the steps and the notes ORBES Client Services records on it (see [Your orders](#orders)).',
+        'When you enter, ORBES records your entry: the account, the release, the size and the quantity, your tier when you enter and at the opening, your place in the line, the time of each step (entering, the line, your admission to the room when the release admits its line in batches, your turn, the start of your press, the piece secured, its confirmation, the end), the length of your hold on the ORBES CODE of the room, in milliseconds, the options you choose with their price, and what becomes of the entry. A reservation you confirm with PAY becomes an order, with the steps and the notes ORBES Client Services records on it (see [Your orders](#orders)).',
         "When a release sells out and an after-room follows it, ORBES records the accounts still waiting in its line at that moment, each with its place in the after-room's line: they alone are its guests, and may see it. An entry in the after-room is recorded like any other entry.",
         "Once a release has ended, if ORBES asks you its question after, it records your answer: the account, the release, the answer you chose and when; changing it replaces it. Your answer is written to the service's audit log as the position of the answer only. ORBES staff read the answers of a release as counts, and those of a collector on their client sheet (see [Segments, the client sheet and activity](#segments)).",
         'From your connection when you enter, ORBES records its country, found from the IP address in the location database installed on its server, and a keyed fingerprint of your network (HMAC-SHA-256 of the first three parts of an IPv4 address, or of the first three groups of an IPv6 one, made with a secret only ORBES holds), never the address itself. The fingerprint lets ORBES see many entries coming from one network; it is erased 30 days after the end of the release.',
-        "ORBES staff read the entries of a release with the email address of their account, to follow the release and to conclude each reservation; a staff member with read-only access sees it masked. The console computes from them counts by tier and by country, and lists the accounts that came without securing a piece. Your actions in a release (I'LL BE THERE and its withdrawal, entering, changing size, leaving, securing the piece with the length of your hold, the options, PAY, giving the piece back) and those of ORBES staff on your entry (letting you in, freeing your piece, removing your entry, concluding or cancelling your reservation, never its note) are written to the service's audit log, which names your account and your entry by their identifiers only. The line formed at the opening and the end of a release are written there as counts only.",
+        "ORBES staff read the entries of a release with the email address of their account, to follow the release and to conclude each reservation; a staff member with read-only access sees it masked. The console computes from them counts by tier and by country, and lists the accounts that came without securing a piece. Your actions in a release (I'LL BE THERE and its withdrawal, entering, changing size, leaving, securing the piece with the length of your hold, the options, PAY, giving the piece back) and those of ORBES staff on your entry (letting you in, freeing your piece, removing your entry, concluding or cancelling your reservation, never its note) are written to the service's audit log, which names your account and your entry by their identifiers only. The line formed at the opening, each batch of it admitted to the room and the end of a release are written there as counts only.",
         'In the room, the other accounts see only counts: the people in the room, the length of the line, the pieces left. Your own entry, and the secret of your turn, reach your own screen only. A screen in a boutique may show the countdown and the pieces left of a release, never a person.',
         "Your entries, their options, your places in an after-room, your answers to the questions after and your I'LL BE THERE are kept as long as the account exists, and are in the copy of your data (see [Your rights](#rights)), the fingerprint of your network excepted.",
       ],
@@ -236,7 +255,7 @@ const EN: LegalDocument = {
       title: 'Your requests in the private salon',
       blocks: [
         'In the private salon, the owner of a piece may request a model ORBES reserves for the owners. ORBES then records the request: the account, the model requested, the note you may write (at most 500 characters), whether it is open or closed, when it was made and when it was closed, whether it was accepted or declined, and the note ORBES Client Services writes when it closes it. A request accepted becomes an order (see [Your orders](#orders)). ORBES processes these data to answer the request you make, under the [terms of use](/legal/terms).',
-        "ORBES Client Services reads the requests with the email address of their account, to contact you and conclude the sale, outside the service; a staff member with read-only access sees it masked. The service sends no email and takes no payment. Neither your note nor that of ORBES Client Services is written to the service's audit log, which records a request with the model, its outcome and your account's identifier only.",
+        "ORBES Client Services reads the requests with the email address of their account, to contact you and conclude the sale, outside the service; a staff member with read-only access sees it masked. The service takes no payment. Neither your note nor that of ORBES Client Services is written to the service's audit log, which records a request with the model, its outcome and your account's identifier only.",
         'A request is kept with your account, open or closed, and is in the copy of your data. When ORBES Client Services locks an account, its open requests are closed.',
       ],
     },
@@ -244,10 +263,38 @@ const EN: LegalDocument = {
       id: 'segments',
       title: 'Segments, the client sheet and activity',
       blocks: [
-        "ORBES staff may group collectors in segments, from what the service already records: the releases taken part in and the pieces secured; the tier and the models and collections of the pieces held; the sizes (of the pieces held, chosen in a LIVE RELEASE or ordered) and the country (the one the account gave, or the one its latest entry in a LIVE RELEASE came from); I'LL BE THERE, the answers to the questions after, and the last activity (a sign-in, a session in use, a scan). A segment is a rule: its members are computed each time it is used, from the accounts as they are then, and are never stored with an account.",
-        'A segment may decide who may enter a LIVE RELEASE, whose page then says FOR SELECTED COLLECTORS and never names the segment, and who reads a post of the circle. ORBES staff may also download the members of a segment as a list with their email addresses, masked for a staff member with read-only access. ORBES processes these data for its legitimate interest in offering its releases and its circle to the collectors they suit; a segment sends no message, and the service sends no email.',
+        "ORBES staff may group collectors in segments, from what the service already records: the releases taken part in and the pieces secured; the tier and the models and collections of the pieces held; the sizes (of the pieces held, chosen in a LIVE RELEASE or ordered) and the country (the one the account gave, or the one its latest entry in a LIVE RELEASE came from); I'LL BE THERE, the answers to the questions after, and the last activity (a sign-in, a session in use, a scan); and a place on the founding list (see [The founding list](#founding-list)). A segment is a rule: its members are computed each time it is used, from the accounts as they are then, and are never stored with an account.",
+        'A segment may decide who may enter a LIVE RELEASE or a release, whose page then says FOR SELECTED COLLECTORS and never names the segment, and who reads a post of the circle. ORBES staff may also download the members of a segment as a list with their email addresses, masked for a staff member with read-only access. ORBES processes these data for its legitimate interest in offering its releases and its circle to the collectors they suit; a segment sends no message itself.',
         "ORBES Client Services reads, on the sheet of a collector in the console, its orders and their steps, the releases it took part in and the pieces it secured there, its answers to the questions after, its I'LL BE THERE, its tier, the segments it belongs to at that moment, and the notes ORBES Client Services wrote on its orders, entries and requests; a staff member with read-only access sees its email address masked. The sheet never shows the buyer's details nor the words of an engraving.",
         'To choose the hour a release opens, the service counts, for each hour, the sign-ins and the scans by country and tier: the country an account gave or the one a scan came from, and the tier its account holds when the hour is counted. These counts name no account, no address and no device, and are kept as counts.',
+      ],
+    },
+    {
+      id: 'founding-list',
+      title: "The founding list",
+      blocks: [
+        "On theorbes.com, the form of the founding list asks for your email address, your first name, your country and your consent. ORBES records them in the service with the time of your consent and the version of this policy then in force, and where you came from: the tracked link you followed, the campaign tags of the page's address, or the site that led you there. ORBES processes these data on your consent, to tell you when the first release opens.",
+        "If an ORBES account uses the same email address, or is created with it later, your place on the list is linked to that account. ORBES may open a release first, or only, to the accounts on the list (see [Segments, the client sheet and activity](#segments)). Once linked, your place is in the copy of your account's data.",
+        "ORBES staff read the list in the console, the email addresses masked for a staff member with read-only access, and may download it as a file in the format of Shopify's customer import, an online store ORBES may open; the service itself sends nothing to Shopify. The service's audit log names each place on the list by its identifier, never by its email address.",
+        "Your place is kept until you ask ORBES Client Services to erase it. To receive nothing more, use the STOP THESE EMAILS link in its email, or write to ORBES Client Services: your place stays, with the date you stopped, so that nothing is ever sent to your address again (see [Emails](#emails)).",
+      ],
+    },
+    {
+      id: 'emails',
+      title: "Emails",
+      blocks: [
+        "Once ORBES has chosen the provider that sends them, the service may send these emails, each in English:",
+        [
+          "- the founding announcement, to the founding list (see [The founding list](#founding-list));",
+          "- a notice when a release is announced, only if you ask for it in YOUR PROFILE;",
+          "- a link to set a new password, when you ask for one;",
+          "- about your orders: confirmed, shipped, delivered or cancelled;",
+          "- about your entries in releases: a place held at the draw, or a place offered from the waiting list;",
+          "- the prepaid label of a warranty claim or of PRIVATE CARE.",
+        ].join('\n'),
+        "The founding announcement and the release notices are sent on your consent; the other emails, to carry out what you asked for, under the [terms of use](/legal/terms). The email provider ORBES chooses receives each email, to deliver it.",
+        "Each email, with its address, subject and words, is kept 90 days after it is sent, or fails, then erased. The copy of your data lists the emails of your account by their kind, their status and their dates.",
+        "To stop the founding announcement or the release notices, use the STOP THESE EMAILS link in each of them; the release notices also stop when you switch them off in YOUR PROFILE.",
       ],
     },
     {
@@ -273,6 +320,7 @@ const EN: LegalDocument = {
           '- Vercel Inc., a company based in the United States, which hosts the theorbes.com website.',
           "- The carrier ORBES chooses for a shipment, and the logistics partner that keeps and ships pieces for ORBES: the buyer's name, address and phone and the contents of the parcel.",
           "- ORBES's accountant, who receives the invoices, the credit notes and their table of each month, with the buyer's name, address and email address.",
+          '- The email provider ORBES chooses, once the service sends emails: the address, subject and words of each email.',
         ].join('\n'),
         'DB-IP supplies the location database, which ORBES installs on its own server: nothing is sent to DB-IP. ORBES sells no data and shares none for advertising.',
       ],
@@ -299,6 +347,8 @@ const EN: LegalDocument = {
           "- **Answers to the circle's invitations and votes in its polls**: as long as the account exists. The daily count of the circle's visits names no one, and is kept.",
           '- **Requests in the private salon**, with their notes: as long as the account exists, open or closed.',
           '- **Your messages with ORBES Client Services**, and their answers: as long as the account exists.',
+          '- **The founding list**: kept until a request to erase; unsubscribed rows receive nothing.',
+          '- **Emails**, with their address, subject and words: 90 days after they are sent, or fail, then erased. **Your choice of release notices**: as long as the account exists.',
           '- **Findings of unusual activity**, which ORBES staff review: kept with the piece they concern.',
           '- **The audit log**: permanent; it names accounts by their identifier only.',
           '- **The device cookie**: 2 years on your device.',
@@ -318,7 +368,7 @@ const EN: LegalDocument = {
       id: 'security',
       title: 'Security',
       blocks: [
-        'The service is reached over HTTPS only. Passwords, claim codes and recovery codes are stored only as hashes; IP addresses and device identifiers only as pseudonyms.',
+        'The service is reached over HTTPS only. Passwords, claim codes and recovery codes are stored only as hashes; IP addresses and device identifiers only as pseudonyms. The email of a reset link holds its code, valid once and for 30 minutes, until the email is erased.',
       ],
     },
     {
@@ -333,7 +383,7 @@ const FR: LegalDocument = {
   title: 'Politique de confidentialité',
   summary: 'Ce que le service de vérification enregistre quand vous vérifiez une pièce ou utilisez votre compte ORBES, pourquoi, combien de temps, et vos droits.',
   intro: [
-    "Cette politique décrit les données personnelles traitées par le service ORBES GENOME CODE : la vérification des pièces ORBES à l'adresse theorbes.com/verify, servie par verify.theorbes.com, et le compte ORBES. Elle ne couvre pas les autres pages de theorbes.com.",
+    "Cette politique décrit les données personnelles traitées par le service ORBES GENOME CODE : la vérification des pièces ORBES à l'adresse theorbes.com/verify, servie par verify.theorbes.com, et le compte ORBES. Elle ne couvre pas les autres pages de theorbes.com, sauf le formulaire de la liste fondatrice (voir [La liste fondatrice](#founding-list)).",
   ],
   sections: [
     {
@@ -374,9 +424,9 @@ const FR: LegalDocument = {
       id: 'account',
       title: 'Votre compte ORBES',
       blocks: [
-        "Pour enregistrer, transférer ou suivre vos pièces, vous créez un compte ORBES avec une adresse e-mail, un mot de passe et, si vous le souhaitez, un nom. ORBES ne vérifie pas l'adresse et n'envoie aucun e-mail. ORBES traite ces données pour fournir le compte que vous créez, selon les [conditions générales d'utilisation](/legal/terms).",
+        "Pour enregistrer, transférer ou suivre vos pièces, vous créez un compte ORBES avec une adresse e-mail, un mot de passe et, si vous le souhaitez, un nom. ORBES ne vérifie pas l'adresse. ORBES traite ces données pour fournir le compte que vous créez, selon les [conditions générales d'utilisation](/legal/terms).",
         "Votre mot de passe n'est conservé que sous forme d'empreinte (scrypt) : ORBES ne peut pas le lire.",
-        "ORBES enregistre ce qui est fait avec votre compte : les pièces qui y sont enregistrées et depuis quand, les transferts, les déclarations de perte ou de vol, les liens vers des certificats de propriété (de chaque lien, une empreinte seulement), et les codes de récupération que vous remet ORBES Client Services (sous forme d'empreinte seulement).",
+        "ORBES enregistre ce qui est fait avec votre compte : les pièces qui y sont enregistrées et depuis quand, les transferts, les déclarations de perte ou de vol, les liens vers des certificats de propriété (de chaque lien, une empreinte seulement), et les codes de récupération que vous remet ORBES Client Services ou que vous envoie un lien de réinitialisation (sous forme d'empreinte seulement).",
         "Chaque connexion ouvre une session de 30 jours au plus. Elle est gardée avec un pseudonyme de votre adresse IP et la chaîne d'identification de votre navigateur (son user agent), pour la sécurité de votre compte.",
         "Le journal d'audit du service, qui enregistre chaque modification, désigne votre compte par son identifiant et un pseudonyme de l'adresse IP, jamais par votre adresse e-mail ni par votre nom.",
         "Les tailles que vous enregistrez dans YOUR SIZES sont conservées avec votre compte jusqu'à ce que vous les effaciez, et ne font que présélectionner une taille que vous confirmez ensuite.",
@@ -389,7 +439,7 @@ const FR: LegalDocument = {
       blocks: [
         "Quand vous vous inscrivez à une sortie avec votre compte ORBES, ORBES enregistre votre inscription : le compte, la sortie, l'heure, et ce que devient l'inscription (inscrite, retirée, place réservée, liste d'attente, vente conclue, place expirée), avec la note qu'ORBES Client Services peut y ajouter quand il enregistre la vente conclue ou la place expirée. Une vente conclue devient une commande (voir [Vos commandes](#orders)). ORBES traite ces données pour organiser la sortie à laquelle vous vous inscrivez, selon les [conditions générales d'utilisation](/legal/terms).",
         "Au tirage, ORBES enregistre avec chaque inscription le palier et l'ancienneté de son compte, lus sur les pièces qui y sont enregistrées, et son rang. La page de la sortie publie alors, pour chaque inscription, son identifiant, son palier, son ancienneté et son rang, pour que chacun puisse vérifier l'ordre du tirage : jamais le compte, son adresse e-mail ni son nom. MY PIECES vous montre l'identifiant de votre inscription.",
-        "ORBES Client Services lit les inscriptions d'une sortie avec l'adresse e-mail de leur compte, pour conclure chaque vente avec les comptes sélectionnés ; un membre du personnel en lecture seule la voit masquée. Le service n'envoie aucun e-mail.",
+        "ORBES Client Services lit les inscriptions d'une sortie avec l'adresse e-mail de leur compte, pour conclure chaque vente avec les comptes sélectionnés ; un membre du personnel en lecture seule la voit masquée.",
         "Pendant l'accès anticipé d'une sortie, un compte PLATINE ou PALLADIUM peut réserver directement une place. ORBES enregistre alors une inscription, comme pour le tirage : le compte, la sortie, l'heure, le palier et l'ancienneté du compte au moment de la demande, et l'heure jusqu'à laquelle la place est tenue. Elle est conservée comme les autres inscriptions, et figure dans la copie de vos données.",
         "Le nombre de sorties auxquelles vous avez pris part, que vous montre l'onglet PAST de THE RELEASES avec les sorties où vous avez obtenu une pièce, et qu'une LIVE RELEASE peut exiger, est calculé à partir de vos inscriptions aux sorties et de vos entrées aux LIVE RELEASES chaque fois qu'il en est besoin : il n'est pas conservé.",
       ],
@@ -411,11 +461,11 @@ const FR: LegalDocument = {
       blocks: [
         "On entre dans une LIVE RELEASE connecté à son compte ORBES. ORBES traite les données ci-dessous pour faire vivre la sortie dans laquelle vous entrez, selon les [conditions générales d'utilisation](/legal/terms), et, pour l'empreinte de votre réseau et la durée de votre appui, pour son intérêt légitime à garder chaque sortie équitable face aux entrées automatisées.",
         "Quand vous dites I'LL BE THERE, ORBES enregistre le compte, la sortie, la taille et l'heure. Le retirer le supprime. La page de la sortie n'affiche que le nombre de comptes qui l'ont dit.",
-        "Quand vous entrez, ORBES enregistre votre entrée : le compte, la sortie, la taille et la quantité, votre palier à l'entrée et à l'ouverture, votre place dans la file, l'heure de chaque étape (l'entrée, la file, votre tour, le début de votre appui, la pièce sécurisée, sa confirmation, la fin), la durée de votre appui sur l'ORBES CODE de la salle, en millisecondes, les options que vous choisissez avec leur prix, et ce que devient l'entrée. Une réservation que vous confirmez avec PAY devient une commande, avec les étapes et les notes qu'ORBES Client Services y enregistre (voir [Vos commandes](#orders)).",
+        "Quand vous entrez, ORBES enregistre votre entrée : le compte, la sortie, la taille et la quantité, votre palier à l'entrée et à l'ouverture, votre place dans la file, l'heure de chaque étape (l'entrée, la file, votre admission dans la salle quand la sortie admet sa file par lots, votre tour, le début de votre appui, la pièce sécurisée, sa confirmation, la fin), la durée de votre appui sur l'ORBES CODE de la salle, en millisecondes, les options que vous choisissez avec leur prix, et ce que devient l'entrée. Une réservation que vous confirmez avec PAY devient une commande, avec les étapes et les notes qu'ORBES Client Services y enregistre (voir [Vos commandes](#orders)).",
         "Quand une sortie est épuisée et qu'une salle d'après la suit, ORBES enregistre les comptes qui attendaient encore dans sa file à cet instant, chacun avec sa place dans la file de la salle d'après : eux seuls en sont les invités, et peuvent la voir. Une entrée dans la salle d'après s'enregistre comme toute autre entrée.",
         "Une fois une sortie terminée, si ORBES vous pose sa question d'après, il enregistre votre réponse : le compte, la sortie, la réponse choisie et l'heure ; la changer la remplace. Votre réponse est inscrite au journal d'audit du service sous la seule position de la réponse. Le personnel d'ORBES lit les réponses d'une sortie en nombres, et celles d'un collectionneur sur sa fiche client (voir [Segments, fiche client et activité](#segments)).",
         "De votre connexion au moment où vous entrez, ORBES enregistre son pays, déduit de l'adresse IP dans la base de localisation installée sur son serveur, et une empreinte à clé de votre réseau (HMAC-SHA-256 des trois premières parties d'une adresse IPv4, ou des trois premiers groupes d'une adresse IPv6, calculée avec un secret que seul ORBES détient), jamais l'adresse elle-même. L'empreinte permet à ORBES de voir de nombreuses entrées venues d'un même réseau ; elle est effacée 30 jours après la fin de la sortie.",
-        "Le personnel d'ORBES lit les entrées d'une sortie avec l'adresse e-mail de leur compte, pour suivre la sortie et conclure chaque réservation ; un membre du personnel en lecture seule la voit masquée. La console en tire des comptes par palier et par pays, et la liste des comptes venus sans sécuriser de pièce. Vos gestes dans une sortie (I'LL BE THERE et son retrait, l'entrée, le changement de taille, le départ, la pièce sécurisée avec la durée de votre appui, les options, PAY, la pièce rendue) et ceux du personnel d'ORBES sur votre entrée (vous faire entrer, libérer votre pièce, retirer votre entrée, conclure ou annuler votre réservation, jamais sa note) sont inscrits au journal d'audit du service, qui ne désigne votre compte et votre entrée que par leurs identifiants. La file formée à l'ouverture et la fin d'une sortie n'y sont inscrites qu'en nombres.",
+        "Le personnel d'ORBES lit les entrées d'une sortie avec l'adresse e-mail de leur compte, pour suivre la sortie et conclure chaque réservation ; un membre du personnel en lecture seule la voit masquée. La console en tire des comptes par palier et par pays, et la liste des comptes venus sans sécuriser de pièce. Vos gestes dans une sortie (I'LL BE THERE et son retrait, l'entrée, le changement de taille, le départ, la pièce sécurisée avec la durée de votre appui, les options, PAY, la pièce rendue) et ceux du personnel d'ORBES sur votre entrée (vous faire entrer, libérer votre pièce, retirer votre entrée, conclure ou annuler votre réservation, jamais sa note) sont inscrits au journal d'audit du service, qui ne désigne votre compte et votre entrée que par leurs identifiants. La file formée à l'ouverture, chaque lot de celle-ci admis dans la salle et la fin d'une sortie n'y sont inscrits qu'en nombres.",
         "Dans la salle, les autres comptes ne voient que des nombres : les personnes dans la salle, la longueur de la file, les pièces restantes. Votre propre entrée, et le secret de votre tour, n'arrivent que sur votre écran. Un écran en boutique peut montrer le compte à rebours et les pièces restantes d'une sortie, jamais une personne.",
         "Vos entrées, leurs options, vos places dans une salle d'après, vos réponses aux questions d'après et votre I'LL BE THERE sont conservés tant que le compte existe, et figurent dans la copie de vos données (voir [Vos droits](#rights)), l'empreinte de votre réseau exceptée.",
       ],
@@ -439,7 +489,7 @@ const FR: LegalDocument = {
       title: 'Vos demandes au salon privé',
       blocks: [
         "Dans le salon privé, le propriétaire d'une pièce peut demander un modèle qu'ORBES réserve aux propriétaires. ORBES enregistre alors la demande : le compte, le modèle demandé, la note que vous pouvez écrire (500 caractères au plus), si elle est ouverte ou close, quand elle a été faite et quand elle a été close, si elle a été acceptée ou refusée, et la note qu'ORBES Client Services écrit en la clôturant. Une demande acceptée devient une commande (voir [Vos commandes](#orders)). ORBES traite ces données pour répondre à la demande que vous faites, selon les [conditions générales d'utilisation](/legal/terms).",
-        "ORBES Client Services lit les demandes avec l'adresse e-mail de leur compte, pour vous contacter et conclure la vente, hors du service ; un membre du personnel en lecture seule la voit masquée. Le service n'envoie aucun e-mail et n'encaisse aucun paiement. Ni votre note ni celle d'ORBES Client Services ne sont inscrites au journal d'audit du service, qui n'enregistre d'une demande que le modèle, son issue et l'identifiant de votre compte.",
+        "ORBES Client Services lit les demandes avec l'adresse e-mail de leur compte, pour vous contacter et conclure la vente, hors du service ; un membre du personnel en lecture seule la voit masquée. Le service n'encaisse aucun paiement. Ni votre note ni celle d'ORBES Client Services ne sont inscrites au journal d'audit du service, qui n'enregistre d'une demande que le modèle, son issue et l'identifiant de votre compte.",
         "Une demande est conservée avec votre compte, ouverte ou close, et figure dans la copie de vos données. Quand ORBES Client Services verrouille un compte, ses demandes ouvertes sont closes.",
       ],
     },
@@ -447,10 +497,38 @@ const FR: LegalDocument = {
       id: 'segments',
       title: 'Segments, fiche client et activité',
       blocks: [
-        "Le personnel d'ORBES peut regrouper des collectionneurs en segments, à partir de ce que le service enregistre déjà : les sorties auxquelles ils ont pris part et les pièces obtenues ; le palier et les modèles et collections des pièces détenues ; les tailles (des pièces détenues, choisies dans une LIVE RELEASE ou commandées) et le pays (celui que le compte a donné, ou celui d'où venait sa dernière entrée à une LIVE RELEASE) ; I'LL BE THERE, les réponses aux questions d'après, et la dernière activité (une connexion, une session en cours, un scan). Un segment est une règle : ses membres sont calculés à chaque usage, à partir des comptes tels qu'ils sont alors, et ne sont jamais conservés avec un compte.",
-        "Un segment peut décider qui peut entrer dans une LIVE RELEASE, dont la page dit alors FOR SELECTED COLLECTORS sans jamais nommer le segment, et qui lit une publication du cercle. Le personnel d'ORBES peut aussi télécharger les membres d'un segment en une liste avec leurs adresses e-mail, masquées pour un membre du personnel en lecture seule. ORBES traite ces données pour son intérêt légitime à proposer ses sorties et son cercle aux collectionneurs à qui ils conviennent ; un segment n'envoie aucun message, et le service n'envoie aucun e-mail.",
+        "Le personnel d'ORBES peut regrouper des collectionneurs en segments, à partir de ce que le service enregistre déjà : les sorties auxquelles ils ont pris part et les pièces obtenues ; le palier et les modèles et collections des pièces détenues ; les tailles (des pièces détenues, choisies dans une LIVE RELEASE ou commandées) et le pays (celui que le compte a donné, ou celui d'où venait sa dernière entrée à une LIVE RELEASE) ; I'LL BE THERE, les réponses aux questions d'après, et la dernière activité (une connexion, une session en cours, un scan) ; et une place sur la liste fondatrice (voir [La liste fondatrice](#founding-list)). Un segment est une règle : ses membres sont calculés à chaque usage, à partir des comptes tels qu'ils sont alors, et ne sont jamais conservés avec un compte.",
+        "Un segment peut décider qui peut entrer dans une LIVE RELEASE ou s'inscrire à une sortie, dont la page dit alors FOR SELECTED COLLECTORS sans jamais nommer le segment, et qui lit une publication du cercle. Le personnel d'ORBES peut aussi télécharger les membres d'un segment en une liste avec leurs adresses e-mail, masquées pour un membre du personnel en lecture seule. ORBES traite ces données pour son intérêt légitime à proposer ses sorties et son cercle aux collectionneurs à qui ils conviennent ; un segment n'envoie lui-même aucun message.",
         "ORBES Client Services lit, sur la fiche d'un collectionneur dans la console, ses commandes et leurs étapes, les sorties auxquelles il a pris part et les pièces qu'il y a obtenues, ses réponses aux questions d'après, ses I'LL BE THERE, son palier, les segments dont il est membre à ce moment, et les notes qu'ORBES Client Services a écrites sur ses commandes, ses entrées et ses demandes ; un membre du personnel en lecture seule voit son adresse e-mail masquée. La fiche ne montre jamais les données de l'acheteur ni les mots d'une gravure.",
         "Pour choisir l'heure d'ouverture d'une sortie, le service compte, pour chaque heure, les connexions et les scans par pays et par palier : le pays qu'un compte a donné ou celui d'où venait un scan, et le palier de son compte au moment où l'heure est comptée. Ces nombres ne désignent aucun compte, aucune adresse ni aucun appareil, et sont conservés comme tels.",
+      ],
+    },
+    {
+      id: 'founding-list',
+      title: "La liste fondatrice",
+      blocks: [
+        "Sur theorbes.com, le formulaire de la liste fondatrice demande votre adresse e-mail, votre prénom, votre pays et votre consentement. ORBES les enregistre dans le service avec l'heure de votre consentement et la version de cette politique alors en vigueur, et votre provenance : le lien suivi que vous avez ouvert, les balises de campagne de l'adresse de la page, ou le site qui vous y a mené. ORBES traite ces données sur votre consentement, pour vous dire quand la première sortie ouvre.",
+        "Si un compte ORBES utilise la même adresse e-mail, ou est créé plus tard avec elle, votre place sur la liste est rattachée à ce compte. ORBES peut ouvrir une sortie d'abord, ou seulement, aux comptes de la liste (voir [Segments, fiche client et activité](#segments)). Une fois rattachée, votre place figure dans la copie des données de votre compte.",
+        "Le personnel d'ORBES lit la liste dans la console, les adresses e-mail masquées pour un membre du personnel en lecture seule, et peut la télécharger sous forme de fichier au format d'import des clients de Shopify, une boutique en ligne qu'ORBES pourrait ouvrir ; le service lui-même n'envoie rien à Shopify. Le journal d'audit du service désigne chaque place sur la liste par son identifiant, jamais par son adresse e-mail.",
+        "Votre place est conservée jusqu'à ce que vous demandiez à ORBES Client Services de l'effacer. Pour ne plus rien recevoir, utilisez le lien STOP THESE EMAILS de son e-mail, ou écrivez à ORBES Client Services : votre place reste, avec la date de votre désinscription, pour que rien ne soit plus jamais envoyé à votre adresse (voir [E-mails](#emails)).",
+      ],
+    },
+    {
+      id: 'emails',
+      title: "E-mails",
+      blocks: [
+        "Une fois qu'ORBES a choisi le prestataire qui les envoie, le service peut envoyer ces e-mails, chacun en anglais :",
+        [
+          "- l'annonce fondatrice, à la liste fondatrice (voir [La liste fondatrice](#founding-list)) ;",
+          "- un avis quand une sortie est annoncée, seulement si vous le demandez dans YOUR PROFILE ;",
+          "- un lien pour choisir un nouveau mot de passe, quand vous en demandez un ;",
+          "- sur vos commandes : confirmée, expédiée, livrée ou annulée ;",
+          "- sur vos inscriptions aux sorties : une place réservée au tirage, ou une place offerte depuis la liste d'attente ;",
+          "- l'étiquette prépayée d'une demande de garantie ou de PRIVATE CARE.",
+        ].join('\n'),
+        "L'annonce fondatrice et les avis de sortie sont envoyés sur votre consentement ; les autres e-mails, pour exécuter ce que vous avez demandé, selon les [conditions générales d'utilisation](/legal/terms). Le prestataire d'e-mails qu'ORBES choisit reçoit chaque e-mail, pour le remettre.",
+        "Chaque e-mail, avec son adresse, son objet et ses mots, est conservé 90 jours après son envoi, ou son échec, puis effacé. La copie de vos données liste les e-mails de votre compte par leur type, leur statut et leurs dates.",
+        "Pour arrêter l'annonce fondatrice ou les avis de sortie, utilisez le lien STOP THESE EMAILS de chacun d'eux ; les avis de sortie s'arrêtent aussi quand vous les désactivez dans YOUR PROFILE.",
       ],
     },
     {
@@ -476,6 +554,7 @@ const FR: LegalDocument = {
           '- Vercel Inc., société établie aux États-Unis, qui héberge le site theorbes.com.',
           "- Le transporteur qu'ORBES choisit pour un envoi, et le partenaire logistique qui garde et expédie des pièces pour ORBES : le nom, l'adresse et le téléphone de l'acheteur et le contenu du colis.",
           "- Le comptable d'ORBES, qui reçoit les factures, les avoirs et leur tableau de chaque mois, avec le nom, l'adresse et l'adresse e-mail de l'acheteur.",
+          "- Le prestataire d'e-mails qu'ORBES choisit, une fois que le service envoie des e-mails : l'adresse, l'objet et les mots de chaque e-mail.",
         ].join('\n'),
         "DB-IP fournit la base de localisation, qu'ORBES installe sur son propre serveur : rien n'est envoyé à DB-IP. ORBES ne vend aucune donnée et n'en partage aucune à des fins publicitaires.",
       ],
@@ -502,6 +581,8 @@ const FR: LegalDocument = {
           '- **Réponses aux invitations du cercle et votes de ses sondages** : tant que le compte existe. Le compte quotidien des visites du cercle ne désigne personne, et il est conservé.',
           '- **Demandes au salon privé**, avec leurs notes : tant que le compte existe, ouvertes ou closes.',
           '- **Vos messages avec ORBES Client Services**, et leurs réponses : tant que le compte existe.',
+          "- **La liste fondatrice** : conservée jusqu'à une demande d'effacement ; les lignes désinscrites ne reçoivent rien.",
+          '- **E-mails**, avec leur adresse, leur objet et leurs mots : 90 jours après leur envoi, ou leur échec, puis effacés. **Votre choix des avis de sortie** : tant que le compte existe.',
           "- **Constats d'activité inhabituelle**, examinés par le personnel d'ORBES : conservés avec la pièce qu'ils concernent.",
           "- **Journal d'audit** : permanent ; il ne désigne les comptes que par leur identifiant.",
           "- **Cookie d'appareil** : 2 ans sur votre appareil.",
@@ -521,7 +602,7 @@ const FR: LegalDocument = {
       id: 'security',
       title: 'Sécurité',
       blocks: [
-        "Le service n'est accessible qu'en HTTPS. Les mots de passe, les claim codes et les codes de récupération ne sont conservés que sous forme d'empreinte ; les adresses IP et les identifiants d'appareil, que sous forme de pseudonyme.",
+        "Le service n'est accessible qu'en HTTPS. Les mots de passe, les claim codes et les codes de récupération ne sont conservés que sous forme d'empreinte ; les adresses IP et les identifiants d'appareil, que sous forme de pseudonyme. L'e-mail d'un lien de réinitialisation garde son code, valable une seule fois et 30 minutes, jusqu'à ce que l'e-mail soit effacé.",
       ],
     },
     {

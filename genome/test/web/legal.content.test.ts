@@ -47,7 +47,9 @@ import { CONTENT_SECURITY_POLICY } from '../../src/server/http/security.js';
 import { UP as LIVE_MIGRATION } from '../../src/server/db/migrations/0021_live_release.js';
 import { UP as ORDERS_MIGRATION } from '../../src/server/db/migrations/0022_orders_stock.js';
 import { UP as COLLECTORS_MIGRATION } from '../../src/server/db/migrations/0023_releases_collectors.js';
+import { EMAIL_KINDS } from '../../src/server/db/schema.js';
 import { CARE_CONDITIONS, CARE_CONDITIONS_VERSION } from '../../src/server/render/care-conditions.js';
+import { EMAIL_RETENTION_DAYS } from '../../src/server/services/email.js';
 import { FOUNDING_CONSENT_VERSION } from '../../src/server/services/founding.js';
 import { CARE_LABEL_RETENTION_MS } from '../../src/server/services/care.js';
 import { INVOICE_ISSUER } from '../../src/server/services/invoices.js';
@@ -333,8 +335,17 @@ describe('legal pages: the terms of use and the legal notice, published from the
     // A link survives only as its words: the PDF has no link.
     expect(asWords('in the [legal notice](/legal/notice), and')).toBe('in the legal notice, and');
     expect(CARE_CONDITIONS.en.blocks.join('\n')).not.toMatch(/\]\(|\*Code/);
-    // The PDF prints the version of the terms in force.
-    expect(CARE_CONDITIONS_VERSION).toBe(LEGAL_VERSION);
+    // The PDF prints the version of the terms that wrote the article 11 in force: a version at or before LEGAL_VERSION,
+    // whose article 11 (both languages) is pinned here. Lot M1 (2026-10-21) left article 11 as ORBES CARE's 2026-10-15
+    // wrote it, so the PDF still prints 2026-10-15; a change of article 11 without a new CARE_CONDITIONS_VERSION (and
+    // its line here, at the LEGAL_VERSION that changes it) fails.
+    const ARTICLE_11: Readonly<Record<string, string>> = { '2026-10-15': '1c7338cf20b687d5' };
+    const article11 = createHash('sha256')
+      .update(JSON.stringify(LANGS.map((lang) => DOCUMENTS.terms[lang].sections.find((x) => x.id === 'article-11'))))
+      .digest('hex')
+      .slice(0, 16);
+    expect({ version: CARE_CONDITIONS_VERSION, article11 }).toEqual({ version: CARE_CONDITIONS_VERSION, article11: ARTICLE_11[CARE_CONDITIONS_VERSION] });
+    expect(CARE_CONDITIONS_VERSION <= LEGAL_VERSION).toBe(true);
   });
 
   it('records each consent to the founding list with the version in force (plan MACRO M1 §3.1, F2: FOUNDING_CONSENT_VERSION)', () => {
@@ -439,8 +450,8 @@ describe('legal pages: the privacy policy, written from the code', () => {
     expect(CONTENT_SECURITY_POLICY).toMatch(/script-src 'self';/);
     expect(CONTENT_SECURITY_POLICY).not.toMatch(/https?:/);
     for (const [text, says] of [
-      [en, ['loads no script from another site', 'Canada', 'outside the European Union', 'Vercel Inc.', 'OVHcloud', 'CNIL', 'theorbes.com/verify', 'It does not cover the other pages of theorbes.com']],
-      [fr, ["ne charge aucun script d'un autre site", 'Canada', "hors de l'Union européenne", 'Vercel Inc.', 'OVHcloud', 'CNIL', 'theorbes.com/verify', 'Elle ne couvre pas les autres pages de theorbes.com']],
+      [en, ['loads no script from another site', 'Canada', 'outside the European Union', 'Vercel Inc.', 'OVHcloud', 'CNIL', 'theorbes.com/verify', 'It does not cover the other pages of theorbes.com, but for the form of the founding list']],
+      [fr, ["ne charge aucun script d'un autre site", 'Canada', "hors de l'Union européenne", 'Vercel Inc.', 'OVHcloud', 'CNIL', 'theorbes.com/verify', 'Elle ne couvre pas les autres pages de theorbes.com, sauf le formulaire de la liste fondatrice']],
     ] as const) {
       for (const s of says) expect(text, s).toContain(s);
     }
@@ -552,7 +563,9 @@ describe('legal pages: the privacy policy, written from the code', () => {
     // (IN-01: the places guaranteed by the house among them, a count too.)
     expect(details.get('drop.live.queue')).toEqual([' entries: placed.length, guaranteed ']);
     expect(details.get('drop.live.end')!.join()).not.toMatch(/entryId|account/);
-    for (const [lang, i, counts] of [['en', 1, 'The line formed at the opening and the end of a release are written there as counts only.'], ['fr', 2, "La file formée à l'ouverture et la fin d'une sortie n'y sont inscrites qu'en nombres."]] as const) {
+    // A paced release's batches (lot M1, W4): each batch admitted, as its number, time and count, naming no entry.
+    expect(details.get('drop.live.admit')).toEqual([' batch: batches, at: at.toISOString(), entries ']);
+    for (const [lang, i, counts] of [['en', 1, 'The line formed at the opening, each batch of it admitted to the room and the end of a release are written there as counts only.'], ['fr', 2, "La file formée à l'ouverture, chaque lot de celle-ci admis dans la salle et la fin d'une sortie n'y sont inscrits qu'en nombres."]] as const) {
       const text = sectionText(DOCUMENTS.privacy[lang], 'live');
       for (const row of NAMED) expect(text, `${lang}: ${row[0]}`).toContain(row[i]);
       expect(text).toContain(RESOLVED[i - 1]!);
@@ -635,9 +648,73 @@ describe('legal pages: the privacy policy, written from the code', () => {
     expect(sectionText(DOCUMENTS.privacy.en, 'releases')).toContain('is computed from your entries in the releases and the LIVE RELEASES each time it is needed: it is not stored.');
   });
 
+  it('describes the founding list and the emails as the code keeps them (lot M1, L2): the consent and its version, kept until erased, unsubscribed rows receive nothing, each email erased after 90 days', () => {
+    // The anchors the theorbes.com form's consent links to (privacy#founding-list), after the segments, in both languages.
+    for (const lang of LANGS) {
+      const ids = DOCUMENTS.privacy[lang].sections.map((x) => x.id);
+      expect(ids.slice(ids.indexOf('segments'), ids.indexOf('cookies')), lang).toEqual(['segments', 'founding-list', 'emails']);
+    }
+    // What the form records (services/founding.ts register): the consent with the legal version, the source; an
+    // unsubscribe keeps the row (sets unsubscribed_at, never deletes); only a removal on request deletes it, its emails first.
+    const founding = readDoc('genome/src/server/services/founding.ts');
+    for (const column of ['email: clean.email,', 'first_name: clean.firstName,', 'country: clean.country,', 'consent_at: now,', 'consent_version: FOUNDING_CONSENT_VERSION,', 'source_id: source.id,']) expect(founding).toContain(column);
+    const unsubscribe = /export async function unsubscribePreregistration\([\s\S]*?\n\}\n/.exec(founding)?.[0] ?? '';
+    expect(unsubscribe).toContain("updateTable('preregistrations').set({ unsubscribed_at: now })");
+    expect(unsubscribe).not.toMatch(/deleteFrom\('preregistrations'\)/);
+    expect(founding.match(/deleteFrom\('preregistrations'\)/g)).toHaveLength(1);
+    expect(founding).toContain("await tx.deleteFrom('email_outbox').where('preregistration_id', '=', rowId).execute();");
+    // The emails: every kind the outbox carries is named, the 90 days are EMAIL_RETENTION_DAYS.
+    const KINDS: Readonly<Record<(typeof EMAIL_KINDS)[number], readonly [string, string]>> = {
+      FOUNDING_ANNOUNCEMENT: ['the founding announcement, to the founding list', "l'annonce fondatrice, à la liste fondatrice"],
+      RELEASE_NOTICE: ['a notice when a release is announced, only if you ask for it in YOUR PROFILE', 'un avis quand une sortie est annoncée, seulement si vous le demandez dans YOUR PROFILE'],
+      PASSWORD_RESET: ['a link to set a new password, when you ask for one', 'un lien pour choisir un nouveau mot de passe, quand vous en demandez un'],
+      ORDER_CONFIRMED: ['about your orders: confirmed', 'sur vos commandes : confirmée'],
+      ORDER_SHIPPED: ['shipped', 'expédiée'],
+      ORDER_DELIVERED: ['delivered', 'livrée'],
+      ORDER_CANCELLED: ['or cancelled', 'ou annulée'],
+      DRAW_SELECTED: ['a place held at the draw', 'une place réservée au tirage'],
+      DRAW_OFFERED: ['a place offered from the waiting list', "une place offerte depuis la liste d'attente"],
+      WARRANTY_LABEL: ['the prepaid label of a warranty claim', "l'étiquette prépayée d'une demande de garantie"],
+      CARE_LABEL: ['or of PRIVATE CARE', 'ou de PRIVATE CARE'],
+    };
+    expect(Object.keys(KINDS).sort()).toEqual([...EMAIL_KINDS].sort());
+    expect(EMAIL_RETENTION_DAYS).toBe(90);
+    for (const [lang, i, says, retention, recipient] of [
+      ['en', 0, [`is kept ${EMAIL_RETENTION_DAYS} days after it is sent, or fails, then erased`, 'The email provider ORBES chooses receives each email', 'use the STOP THESE EMAILS link in each of them', 'switch them off in YOUR PROFILE'],
+        ['- **The founding list**: kept until a request to erase; unsubscribed rows receive nothing.', `- **Emails**, with their address, subject and words: ${EMAIL_RETENTION_DAYS} days after they are sent, or fail, then erased.`],
+        '- The email provider ORBES chooses, once the service sends emails: the address, subject and words of each email.'],
+      ['fr', 1, [`est conservé ${EMAIL_RETENTION_DAYS} jours après son envoi, ou son échec, puis effacé`, "Le prestataire d'e-mails qu'ORBES choisit reçoit chaque e-mail", 'utilisez le lien STOP THESE EMAILS de chacun', 'quand vous les désactivez dans YOUR PROFILE'],
+        ["- **La liste fondatrice** : conservée jusqu'à une demande d'effacement ; les lignes désinscrites ne reçoivent rien.", `- **E-mails**, avec leur adresse, leur objet et leurs mots : ${EMAIL_RETENTION_DAYS} jours après leur envoi, ou leur échec, puis effacés.`],
+        "- Le prestataire d'e-mails qu'ORBES choisit, une fois que le service envoie des e-mails : l'adresse, l'objet et les mots de chaque e-mail."],
+    ] as const) {
+      const emails = sectionText(DOCUMENTS.privacy[lang], 'emails');
+      for (const words of Object.values(KINDS)) expect(emails, `${lang}: ${words[i]}`).toContain(words[i]);
+      for (const x of says) expect(emails, `${lang}: ${x}`).toContain(x);
+      for (const x of retention) expect(sectionText(DOCUMENTS.privacy[lang], 'retention'), `${lang}: ${x}`).toContain(x);
+      expect(sectionText(DOCUMENTS.privacy[lang], 'recipients')).toContain(recipient);
+    }
+    // The list: what the form sends, linked at sign-up, kept until erased, its unsubscribe keeping the row.
+    for (const [lang, says] of [
+      ['en', ['your email address, your first name, your country and your consent', 'the version of this policy then in force', 'your place on the list is linked to that account', 'Your place is kept until you ask ORBES Client Services to erase it', 'your place stays, with the date you stopped, so that nothing is ever sent to your address again']],
+      ['fr', ['votre adresse e-mail, votre prénom, votre pays et votre consentement', 'la version de cette politique alors en vigueur', 'votre place sur la liste est rattachée à ce compte', "Votre place est conservée jusqu'à ce que vous demandiez à ORBES Client Services de l'effacer", 'votre place reste, avec la date de votre désinscription, pour que rien ne soit plus jamais envoyé à votre adresse']],
+    ] as const) {
+      const text = sectionText(DOCUMENTS.privacy[lang], 'founding-list');
+      for (const x of says) expect(text, `${lang}: ${x}`).toContain(x);
+    }
+    // A reset link's email keeps its code (the outbox's body) until erased: the security section says so, with R14's 30 minutes.
+    expect(RECOVERY_CODE_TTL_MS).toBe(30 * MIN);
+    expect(sectionText(DOCUMENTS.privacy.en, 'security')).toContain('The email of a reset link holds its code, valid once and for 30 minutes, until the email is erased.');
+    expect(sectionText(DOCUMENTS.privacy.fr, 'security')).toContain("L'e-mail d'un lien de réinitialisation garde son code, valable une seule fois et 30 minutes, jusqu'à ce que l'e-mail soit effacé.");
+    // No legal page still says the service sends no email at all; the terms keep one, about the end of a LIVE RELEASE.
+    for (const lang of LANGS) {
+      const all = (['privacy', 'terms', 'faq'] as const).map((page) => readText(DOCUMENTS[page][lang], lang)).join('\n');
+      expect(all.match(/sends no email\b(?! about its end)|n'envoie aucun e-mail(?! sur sa fin)|no reset link|ni lien de réinitialisation/g), lang).toBeNull();
+    }
+  });
+
   it('covers what the plan names: data collected, the IP hash, the device cookie, the location, accounts, retention, hosting, DB-IP', () => {
     const ids = DOCUMENTS.privacy.en.sections.map((s) => s.id);
-    expect(ids).toEqual(expect.arrayContaining(['controller', 'verification', 'account', 'cookies', 'recipients', 'location', 'retention', 'rights', 'live', 'orders', 'segments']));
+    expect(ids).toEqual(expect.arrayContaining(['controller', 'verification', 'account', 'cookies', 'recipients', 'location', 'retention', 'rights', 'live', 'orders', 'segments', 'founding-list', 'emails']));
     // The contact of ORBES Client Services, where the page asks the reader to write to them.
     for (const lang of LANGS) expect(DOCUMENTS.privacy[lang].sections[0].blocks).toContainEqual({ contact: true });
   });
@@ -813,6 +890,11 @@ describe('legal pages: both languages, links, lexicon', () => {
       // warranty claim; the next date after I2's 2026-10-10 (the customer intelligence moved no text). The finish step
       // moves it to the date of the build's final commit.
       '2026-10-15': '7eb71749de28069d',
+      // Lot M1 of the macro plan (owner's decisions of 2026-10-20, L2; step M1.20): the privacy policy's founding list and
+      // emails, its "sends no email" sentences edited to the minimum, a LIVE RELEASE's batches and a draw opened to a
+      // segment; the terms' article 6 (the reset link), 12 (selected collectors) and 13 (the pace); the FAQ's forgotten
+      // password. The date of the lot's legal commit, after ORBES CARE's published 2026-10-15; article 11 unchanged.
+      '2026-10-21': '77f448f6b51c1dc9',
     };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
     expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });

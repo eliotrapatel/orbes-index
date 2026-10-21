@@ -41,6 +41,8 @@ const outputs = fenced(runbook, 'text');
 /** What production runs when the desktop starts: ORBES CARE (the plan's base), deployed after I2. */
 const PROD_COMMIT = 'c3d25c207a9429aa927ef1b9ba39404e208c2f2e';
 const PROD_TAG = PROD_COMMIT.slice(0, 12);
+/** The legal version this deployment kept (Q3); a later lot (macro M1, 2026-10-21) moves LEGAL_VERSION past it. */
+const DESKTOP_LEGAL_VERSION = '2026-10-15';
 /** I2's image, ORBES CARE's previous one, as ORBES CARE's deployment log line names it (DEPLOY-ORBES-CARE §1.6). */
 const I2_TAG = '90d9d3007e20';
 
@@ -167,10 +169,10 @@ describe('the runbook of the desktop (docs/launch/DEPLOY-DESKTOP.md)', () => {
     expect(wrong).toContain(`**ne retire jamais l'image \`${PROD_TAG}\`**`);
     expect(readDoc('deploy/vps/scripts/deploy.sh')).toContain('rolling out the existing image $IMAGE (no build)');
     // The legal pages (Q3): no new version, the conditions' PDF with them.
-    expect(LEGAL_VERSION).toBe('2026-10-15');
-    expect(CARE_CONDITIONS_VERSION).toBe(LEGAL_VERSION);
-    expect(rules).toContain(`la version reste \`${LEGAL_VERSION}\` (ta réponse Q3)`);
-    expect(section(runbook, '### 1.3')).toContain(`Sortie attendue : \`export const LEGAL_VERSION = '${LEGAL_VERSION}';\`, la version d'aujourd'hui, inchangée.`);
+    expect(LEGAL_VERSION >= DESKTOP_LEGAL_VERSION).toBe(true);
+    expect(CARE_CONDITIONS_VERSION).toBe(DESKTOP_LEGAL_VERSION);
+    expect(rules).toContain(`la version reste \`${DESKTOP_LEGAL_VERSION}\` (ta réponse Q3)`);
+    expect(section(runbook, '### 1.3')).toContain(`Sortie attendue : \`export const LEGAL_VERSION = '${DESKTOP_LEGAL_VERSION}';\`, la version d'aujourd'hui, inchangée.`);
   });
 
   it('checks from the Mac the new route, signed out, and the two desktop stylesheets the page links', () => {
@@ -227,7 +229,7 @@ describe('the runbook of the desktop (docs/launch/DEPLOY-DESKTOP.md)', () => {
     expect(checks).toContain(`${ORBES_CARE.warranty.label} à gauche`);
     expect(checks).toContain(ORBES_CARE.careLabel);
     expect(checks).toContain(`${ORDERS.documents.title} avec ${ORDERS.documents.careConditions} · PDF`);
-    expect(checks).toContain(`« ${WORDS.en.version(LEGAL_VERSION)} »`);
+    expect(checks).toContain(`« ${WORDS.en.version(DESKTOP_LEGAL_VERSION)} »`);
     expect(checks).toContain('SOUND OFF');
     for (const words of ['NOW · RELEASES · COLLECTION · CIRCLE · PIECES', 'WRITE TO ORBES CLIENT SERVICES', 'LIGHT MODE', 'PRIVATE CARE']) expect(checks, words).toContain(words);
     // His real photographs, first seen here (D17).

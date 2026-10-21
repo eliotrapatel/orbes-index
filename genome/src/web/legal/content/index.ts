@@ -51,9 +51,17 @@ export { LANGS, type Block, type Lang, type LegalDocument, type LegalSection } f
  * warranty claim in place of the subscription's page; the build's date, after I2's published 2026-10-10, set
  * mechanically. The server's CARE_CONDITIONS_VERSION (src/server/render/care-conditions.ts), the version the ORBES
  * CARE CONDITIONS PDF prints, moves with it (test/web/legal.content.test.ts holds the two equal); the finish step moves
- * both to the date of the build's final commit. Its date never holds the deployment.
+ * both to the date of the build's final commit. Its date never holds the deployment. 2026-10-21 is the version of lot M1
+ * of the macro scope (owner's decisions of 2026-10-20, L2; plan step M1.20): the privacy policy's founding list and
+ * emails (sections founding-list and emails, the email provider among the recipients, their retention), its sentences
+ * that said the service sends no email edited to the minimum, a LIVE RELEASE's admission in batches, a draw opened to a
+ * segment; the terms' article 6 (a forgotten password replaced with a link sent by email, where the service offers it),
+ * article 12 (a release reserved for selected collectors; no longer "sends no email") and article 13 (the pace; no
+ * email about the end); the FAQ's forgotten password. The date of the lot's legal commit, after ORBES CARE's published
+ * 2026-10-15. Article 11 did not change: CARE_CONDITIONS_VERSION stays 2026-10-15, the version whose article 11 the
+ * ORBES CARE CONDITIONS print (test/web/legal.content.test.ts pins article 11 to it).
  */
-export const LEGAL_VERSION = '2026-10-15';
+export const LEGAL_VERSION = '2026-10-21';
 
 export const DOCUMENTS: Readonly<Record<LegalPage, Readonly<Record<Lang, LegalDocument>>>> = Object.freeze({
   privacy: PRIVACY,

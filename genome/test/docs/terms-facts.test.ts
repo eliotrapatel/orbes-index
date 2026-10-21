@@ -13,11 +13,14 @@
  *    LIVE RELEASES and the days their networks' fingerprints are kept, the
  *    steps of the orders, the issuer of their invoices and when their
  *    certificate is offered, the after-room's times, the releases a rule may
- *    require and the week of the question after), and every absence of §10
- *    (no email, no reset link, no undoing an accepted transfer, no account
+ *    require and the week of the question after; the reset links an hour, the
+ *    founding list's consent at the version in force, the emails' 90 days),
+ *    and every absence of §10 (no email but through the outbox, no reset but
+ *    with a recovery code, no undoing an accepted transfer, no account
  *    deletion, no age check, no vote of the circle and no note of the private
  *    salon in the audit log, no payment taken, no public view of a LIVE
- *    RELEASE's room, no call to an online store) holding in the code;
+ *    RELEASE's room, no call to an online store, SMTP the one connection
+ *    out) holding in the code;
  *  - the two production settings that would change a rule
  *    (SESSION_TTL_ACCOUNT_HOURS, TRANSFER_ACCEPT_REQUIRE_PRODUCT) left
  *    commented out in deploy/vps/.env.example and empty in compose.yaml;
@@ -46,7 +49,7 @@ import { DEFAULT_SESSION_TTL_HOURS, loadConfig } from '../../src/server/config.j
 import { WARRANTY_CLAIM_OUTCOMES_BY_BASIS, WARRANTY_CLAIM_REFUSALS_BY_BASIS } from '../../src/server/db/schema.js';
 import { registerAccountBody } from '../../src/server/http/schemas.js';
 import { CARE_CONDITIONS_VERSION } from '../../src/server/render/care-conditions.js';
-import { RECOVERY_ATTEMPT_LIMIT, RECOVERY_ATTEMPT_WINDOW_MS, RECOVERY_CODE_TTL_MS, TRANSFER_FREEZE_MS } from '../../src/server/services/account-recovery.js';
+import { RECOVERY_ATTEMPT_LIMIT, RECOVERY_ATTEMPT_WINDOW_MS, RECOVERY_CODE_TTL_MS, RESET_REQUEST_LIMIT, TRANSFER_FREEZE_MS } from '../../src/server/services/account-recovery.js';
 import { ACCOUNT_LOGIN_THROTTLE, PASSWORD_MIN_LENGTH } from '../../src/server/services/auth.js';
 import { CARE_LABEL_RETENTION_MS } from '../../src/server/services/care.js';
 import { CIRCLE_LINK_HOSTS } from '../../src/server/services/circle.js';
@@ -55,6 +58,8 @@ import { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES } from '../../src/s
 import { VERIFICATION_COPY } from '../../src/server/services/copy.js';
 import { DROP_SEED_BYTES, EARLY_ACCESS_HOURS, EARLY_ACCESS_MIN_TIER, PURCHASE_WINDOW_HOURS } from '../../src/server/services/drops.js';
 import { DEFAULT_PROGRAM, PROGRAM_LIMITS } from '../../src/server/services/club-program.js';
+import { EMAIL_RETENTION_DAYS } from '../../src/server/services/email.js';
+import { FOUNDING_CONSENT_VERSION } from '../../src/server/services/founding.js';
 import { INVOICE_ISSUER } from '../../src/server/services/invoices.js';
 import { normalizeMinTier, PRICE_LABEL_MAX } from '../../src/server/services/lookbook.js';
 import {
@@ -503,8 +508,28 @@ const CONSTANTS: Record<string, ConstantSpec> = {
   },
   CARE_CONDITIONS_VERSION: {
     value: '—',
-    // R164: the ORBES CARE CONDITIONS PDF prints the version of the terms in force.
-    holds: () => expect(CARE_CONDITIONS_VERSION).toBe(LEGAL_VERSION),
+    // R164: the ORBES CARE CONDITIONS PDF prints the version of the terms that wrote the article 11 in force: a version
+    // of the terms published at or before LEGAL_VERSION (2026-10-21, lot M1, left article 11 as 2026-10-15 wrote it;
+    // test/web/legal.content.test.ts pins article 11 to its version).
+    holds: () => {
+      expect(CARE_CONDITIONS_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(CARE_CONDITIONS_VERSION <= LEGAL_VERSION).toBe(true);
+    },
+  },
+  // Lot M1 of the macro plan (scope of 2026-10-20). R167: a reset link asked at most 3 times an hour per account, the
+  // hour the recovery code's own window (R15).
+  RESET_REQUEST_LIMIT: {
+    value: `${RESET_REQUEST_LIMIT} par heure`,
+    holds: () => expect(RECOVERY_ATTEMPT_WINDOW_MS).toBe(HOUR),
+  },
+  // R168: each consent to the founding list is recorded with the version of the legal texts in force.
+  FOUNDING_CONSENT_VERSION: {
+    value: '—',
+    holds: () => expect(FOUNDING_CONSENT_VERSION).toBe(LEGAL_VERSION),
+  },
+  // R170: every email of the outbox erased 90 days after it settles (the privacy policy says so).
+  EMAIL_RETENTION_DAYS: {
+    value: `${EMAIL_RETENTION_DAYS} jours`,
   },
   LIVE_QUESTION_OPEN_DAYS: {
     value: `${LIVE_QUESTION_OPEN_DAYS} jours`,
@@ -518,7 +543,7 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'one pending transfer': "'TRANSFER_ALREADY_PENDING'",
   'acceptance is final': "ended_reason: 'TRANSFERRED_OUT'",
   'confirmation by ORBES Client Services': 'set({ verified: true })',
-  'no reset by email, the assisted recovery (C-04)': "app.post('/api/v1/account/recover'",
+  'a new password only with a recovery code, given by Client Services or sent in a reset link (C-04, E3)': "app.post('/api/v1/account/recover'",
   'the 72-hour pause (C-04)': 'new Date(now.getTime() + TRANSFER_FREEZE_MS)',
   'the transfer bound to the scan (F-03)': 'throw transferProductMismatch()',
   'the shareable certificate (F-06)': 'days > CERTIFICATE_MAX_DAYS',
@@ -546,7 +571,7 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'the tiers\' words set from the console, the thresholds never (P-X04)': "app.patch('/api/admin/club/tiers/:tier'",
   'the reserved models shown from their tier, 404 below (P-X08)': "if (m.lookbook === 'RESERVED' && m.private_min_tier > tier) throw lookbookNotFound();",
   'the price of the salon, a text of the console (P-X08)': 'if (s.length > PRICE_LABEL_MAX) throw validationError(',
-  'a request on demand, concluded by ORBES Client Services, no payment and no email (P-X08)': ".insertInto('shop_requests')",
+  'a request on demand, concluded by ORBES Client Services, no payment (P-X08)': ".insertInto('shop_requests')",
   'one open request per account and model (P-X08)': "if (isUniqueViolation(e, 'shop_requests_one_open')) throw shopRequestOpen();",
   'the console closes a request with a note (P-X08)': "if (words === null) throw validationError('Say in the note what was done for the client.');",
   'the export lists the requests (P-X08)': 'shopRequests,',
@@ -599,6 +624,13 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'activity counted per hour without any account (choice 10)': ".insertInto('activity_hourly')",
   // The next nine (plan of 2026-10-06), IN-01.
   'the house\'s guarantee, always within the release\'s pieces (IN-01)': 'if (room.taken + pieces > room.capacity) throw exceedsRelease(room.capacity, room.taken);',
+  // Lot M1 of the macro plan (scope of 2026-10-20, L2).
+  'a LIVE RELEASE admits its line in batches, at its pace (W4)': 'const entries = await this.admitBatch(tx, d, at, batches);',
+  'a draw reserved for a segment\'s members (F4)': 'if (d.access_segment_id && !(await isSegmentMember(tx, d.access_segment_id, accountId, now))) throw drawNotEligible();',
+  'a reset link at most 3 times an hour (E3)': 'if (Number(asked.n) >= RESET_REQUEST_LIMIT) return;',
+  'the founding list\'s consent with its version (F2)': 'consent_version: FOUNDING_CONSENT_VERSION,',
+  'an unsubscribed row kept, never written to again (F3, E1)': 'set({ unsubscribed_at: now })',
+  'each email erased 90 days after it settles (E0)': 'const cutoff = new Date(now.getTime() - EMAIL_RETENTION_DAYS * DAY_MS);',
 };
 
 // ── Sources, for the absences of §10 ───────────────────────────────────────
@@ -632,6 +664,13 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
     // (server/email/smtp.ts, the only file that opens a TLS connection) is called by the outbox's sender alone, which
     // sends nothing unless EMAIL_TRANSPORT is smtp; off by default, and commented out in the production template.
     expect(matches(/(?<!function )\bsendSmtp\(/g).map((m) => m.file)).toEqual([join('src', 'server', 'services', 'email.ts')]);
+    // Only the outbox's service writes an email (lot M1 §4.1, the rule of N1): nothing while the channel is off or the
+    // kind switched off, and an ADMIN's test to themselves only with the channel on.
+    expect(new Set(matches(/insertInto\('email_outbox'\)|INSERT INTO email_outbox/g).map((m) => m.file))).toEqual(new Set([join('src', 'server', 'services', 'email.ts')]));
+    const email = readDoc('genome/src/server/services/email.ts');
+    expect(email).toContain("if (!this.on) return inputs.map(() => ({ queued: false, reason: 'OFF' }) as const);");
+    expect(email).toContain("if (!kind.enabled) return { queued: false, reason: 'KIND_OFF' };");
+    expect(/\n {2}async sendTest\([\s\S]*?\n {2}\}\n/.exec(email)?.[0] ?? '').toContain('if (!this.on) throw emailOff();');
     expect(matches(/from 'node:tls'/g).map((m) => m.file)).toEqual([join('src', 'server', 'email', 'smtp.ts')]);
     expect(loadConfig({}).email).toEqual({ transport: 'off' });
     expect(readDoc('deploy/vps/.env.example')).not.toMatch(/^EMAIL_TRANSPORT=/m);
@@ -648,6 +687,10 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
     expect(customerRoutes.filter((r) => /reset/i.test(r.path)).map((r) => `${r.method} ${r.path}`).sort()).toEqual(['get /api/v1/account/reset', 'post /api/v1/account/reset-request']);
     expect(matches(/if \(!\(await this\.resetByEmail\(\)\)\) throw emailOff\(\);/g).map((m) => m.file)).toEqual([join('src', 'server', 'services', 'account-recovery.ts')]);
     expect(matches(/this\.email\.on && \(await this\.email\.kind\('PASSWORD_RESET'\)\)\.enabled/g)).toHaveLength(1);
+    // The link's code is a recovery code (the rule of N2): issued EMAIL, with R14's 30 minutes, entered by R12's route.
+    const request = /\n {2}async requestByEmail\([\s\S]*?\n {2}\}\n/.exec(readDoc('genome/src/server/services/account-recovery.ts'))?.[0] ?? '';
+    expect(request).toContain("issued_via: 'EMAIL'");
+    expect(request).toContain('new Date(now.getTime() + RECOVERY_CODE_TTL_MS)');
     // The customer's only password routes: the change (signed in, with the current one) and the assisted recovery (R12).
     const customer = ROUTES.filter((r) => r.path.startsWith('/api/v1/') && /password|recover/i.test(r.path)).map((r) => `${r.method} ${r.path}`);
     expect(customer.sort()).toEqual(['post /api/v1/account/password', 'post /api/v1/account/recover']);
@@ -750,6 +793,9 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
     const server = SOURCES.filter(({ file }) => file.startsWith(join('src', 'server')));
     expect(server.length).toBeGreaterThan(50);
     expect(server.filter(({ text }) => /\bfetch\(|\bhttps?\.request\(|\bhttps?\.get\(/.test(text)).map(({ file }) => file)).toEqual([]);
+    // Its one connection out is the emails' SMTP client (lot M1 §5): no other file opens a socket.
+    const opens = /import \{[^}]*\b(?:connect|createConnection)\b[^}]*\} from 'node:(?:net|tls)'|\b(?:net|tls)\.(?:connect|createConnection)\(/;
+    expect(server.filter(({ text }) => opens.test(text)).map(({ file }) => file)).toEqual([join('src', 'server', 'email', 'smtp.ts')]);
     // The exports exist, as files of the console.
     expect(ROUTES).toContainEqual({ method: 'get', path: '/api/admin/shopify/orders.csv' });
     expect(ROUTES).toContainEqual({ method: 'get', path: '/api/admin/shopify/products.csv' });

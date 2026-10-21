@@ -44,6 +44,8 @@ const outputs = fenced(runbook, 'text');
 /** What production runs when ORBES CARE starts: I2 (the plan's base), deployed after the light mode 427546e. */
 const PROD_COMMIT = '90d9d3007e20cdc37c30bd6f0e93affdd7871e23';
 const PROD_TAG = PROD_COMMIT.slice(0, 12);
+/** The legal version this deployment published (step 4.1); a later lot (macro M1, 2026-10-21) moves LEGAL_VERSION past it. */
+const CARE_LEGAL_VERSION = '2026-10-15';
 /** The light mode's image, I2's previous one, as I2's deployment log line names it (DEPLOY-CUSTOMER-INTELLIGENCE §2.6). */
 const LIGHT_TAG = '427546ea62a1';
 
@@ -166,11 +168,12 @@ describe('the runbook of ORBES CARE (docs/launch/DEPLOY-ORBES-CARE.md)', () => {
     expect(section(runbook, '### 1.5')).toContain(`**jamais \`scripts/deploy.sh --image ${PROD_TAG}\`**`);
     expect(section(runbook, '### 1.4')).toContain("**Note le nom de l'archive et sa taille en octets**");
     // The legal pages' new version (step 4.1), the one the code publishes, and the conditions' PDF with it; counsel never holds the deploy.
-    expect(CARE_CONDITIONS_VERSION).toBe(LEGAL_VERSION);
-    expect(rules).toContain(`une seule nouvelle version, \`${LEGAL_VERSION}\``);
+    expect(LEGAL_VERSION >= CARE_LEGAL_VERSION).toBe(true);
+    expect(CARE_CONDITIONS_VERSION).toBe(CARE_LEGAL_VERSION);
+    expect(rules).toContain(`une seule nouvelle version, \`${CARE_LEGAL_VERSION}\``);
     expect(rules).toContain('ne retient jamais le déploiement');
-    expect(section(runbook, '### 1.3')).toContain(`Sortie attendue : \`export const LEGAL_VERSION = '${LEGAL_VERSION}';\`, la nouvelle version.`);
-    expect(section(runbook, '### 1.0')).toContain(`une nouvelle version, \`${LEGAL_VERSION}\``);
+    expect(section(runbook, '### 1.3')).toContain(`Sortie attendue : \`export const LEGAL_VERSION = '${CARE_LEGAL_VERSION}';\`, la nouvelle version.`);
+    expect(section(runbook, '### 1.0')).toContain(`une nouvelle version, \`${CARE_LEGAL_VERSION}\``);
   });
 
   it("reads §4's post-check on the box, read only, against the migration's columns", () => {
@@ -294,7 +297,7 @@ describe('the runbook of ORBES CARE (docs/launch/DEPLOY-ORBES-CARE.md)', () => {
     // The terms: article 11's title and the version line, as the legal pages write them; the PDF's head.
     expect(TERMS.en.sections.find((s) => s.title.startsWith('Article 11'))?.title).toBe('Article 11 — ORBES CARE and the warranties');
     expect(checks).toContain('« Article 11 — ORBES CARE and the warranties »');
-    expect(checks).toContain(`« ${WORDS.en.version(LEGAL_VERSION)} »`);
+    expect(checks).toContain(`« ${WORDS.en.version(CARE_LEGAL_VERSION)} »`);
     expect(checks).toContain(`« ${CARE_CONDITIONS_COPY.rows.version} ${dateInWords(CARE_CONDITIONS_VERSION, 'en').toUpperCase()} »`);
     expect(checks).toContain(`le PDF s'ouvre sur ${CARE_CONDITIONS_COPY.title}`);
   });

@@ -1,6 +1,6 @@
 # Terms of use of the ORBES GENOME CODE service
 
-**Draft for legal review, not validated.** Version: 15 October 2026. [Version française](terms.fr.md).
+**Draft for legal review, not validated.** Version: 21 October 2026. [Version française](terms.fr.md).
 
 Each article ends with a *Code: …* line that points to the rules of the code it describes ([TERMS-FACTS](TERMS-FACTS.md)). These lines are for the review and are not published. The [À COMPLÉTER: …] fields await the legal identity of ORBES and counsel's choices ([note for counsel](counsel-note.fr.md), in French). Every field keeps the French marker, so that one search finds them all in both languages.
 
@@ -78,7 +78,7 @@ ORBES endeavours to keep the service available, without committing to it: it may
 
 ## Article 6 — Forgotten password
 
-**No reset by email.** The service sends no email and no reset link. A forgotten password is replaced with the help of ORBES Client Services.
+**Reset.** A forgotten password is replaced with a link sent to your email address, where the service offers it, or with the help of ORBES Client Services. The link holds a recovery code, under the rules below.
 
 **Recovery code.** ORBES Client Services checks your identity according to its procedure, then gives you a recovery code. The code works once and is valid for 30 minutes. A new code cancels the previous one. You enter it at theorbes.com/verify with your email address and a new password.
 
@@ -86,7 +86,7 @@ ORBES endeavours to keep the service available, without committing to it: it may
 
 **Effects.** The new password ends every session of the account, cancels its pending transfers and withdraws its certificate links. To protect you from a takeover of your account, the creation of new transfer codes is then paused for 72 hours.
 
-*Code: R12, R13, R14, R15, R16, R17, R18, N1, N2.*
+*Code: R12, R13, R14, R15, R16, R17, R18, R167, N1, N2.*
 
 ## Article 7 — Registering a piece
 
@@ -190,7 +190,7 @@ A report in the ORBES registry does not replace a complaint to the authorities. 
 
 ORBES may offer a model in a limited number of pieces in a release, announced on the service (THE RELEASES) with its number of pieces, the dates of its entries and the rule of its draw. ORBES may cancel a release until its draw.
 
-**Entering.** Any ORBES account may enter a release while its entries are open, whether or not pieces are registered to it. Entering is free and obliges you to nothing. In a release with sizes, an entry chooses its size, and may change it while entries are open; a place reserved directly keeps its size. An account enters a release once: it may withdraw its entry until the draw, and enter again, under the same entry, while entries are open. One entry per person: ORBES Client Services may decline to conclude the sale of a second account of the same person.
+**Entering.** Any ORBES account may enter a release while its entries are open, whether or not pieces are registered to it. A release may be reserved for selected collectors, a group of accounts ORBES composes without naming it: only they may enter it or reserve a place in it. Entering is free and obliges you to nothing. In a release with sizes, an entry chooses its size, and may change it while entries are open; a place reserved directly keeps its size. An account enters a release once: it may withdraw its entry until the draw, and enter again, under the same entry, while entries are open. One entry per person: ORBES Client Services may decline to conclude the sale of a second account of the same person.
 
 **Tiers and seniority.** The tier of an account is read from the pieces registered to it: TITANE from 1 piece, PLATINE from 5, PALLADIUM from 10. A piece revoked, set aside by ORBES after review, or withdrawn does not count. The seniority of an account is the number of full years since a piece was first registered to it.
 
@@ -200,15 +200,15 @@ ORBES may offer a model in a limited number of pieces in a release, announced on
 
 **The draw.** After its entries close, ORBES runs the draw of a release once. It ranks the entries by the tier of their account, then by its seniority, both read at the time of the draw, then by the SHA-256 of a seed of 32 bytes followed by the identifier of the entry, in increasing order. The seed is drawn when the release is created, and its fingerprint is published with the release. The seed itself is published after the draw, with the identifier, the tier, the seniority and the rank of each entry, never its account: anyone can check the order. MY PIECES shows each account the identifier of its entry.
 
-**Place held.** The first ranks, as many as there are pieces left after the direct reservations of the early access, are selected; the next are on the waiting list, in their order. In a release with sizes, each size is filled in that order, with the pieces left in it, and the others form the waiting list of their size. When fewer accounts enter than there are pieces, every entry is selected. The place of a selected entry is held for the time its release states, 48 hours unless it states otherwise. The service sends no email: MY PIECES shows the status of each entry, and ORBES Client Services contacts the selected accounts.
+**Place held.** The first ranks, as many as there are pieces left after the direct reservations of the early access, are selected; the next are on the waiting list, in their order. In a release with sizes, each size is filled in that order, with the pieces left in it, and the others form the waiting list of their size. When fewer accounts enter than there are pieces, every entry is selected. The place of a selected entry is held for the time its release states, 48 hours unless it states otherwise. MY PIECES shows the status of each entry, and ORBES Client Services contacts the selected accounts.
 
 **No obligation.** A place held obliges you to nothing: ORBES Client Services concludes each sale with you, outside the service. Once its time has passed, a place that has not been concluded lapses, and ORBES may offer it to the next entry on the waiting list. When ORBES Client Services confirms the sale of a place, MY PIECES shows its order (article 14).
 
 **PAST.** Once drawn, a release moves to the PAST tab of THE RELEASES, with its photograph, its name, the day its entries opened and its number of pieces, never how many entries it had; its page keeps what its draw publishes. Signed in, you read there, for each release, whether you took part (an entry not withdrawn when the draw ran, or a place reserved directly) and whether you secured a piece (your entry confirmed), and how many releases you have taken part in.
 
-**The private salon.** ORBES may reserve models for the owners of a piece (THE PRIVATE SALON). Each model is shown, with an indicative price, to the signed-in accounts whose tier reaches the one ORBES sets for it (TITANE, PLATINE or PALLADIUM); below that tier, it is not shown. From the page of a model, an account may request it, with an optional note of at most 500 characters. A request obliges neither the account nor ORBES and creates no contract: ORBES Client Services contacts the account and concludes any sale with it, outside the service. Nothing is paid on the service, and it sends no email. An account holds one open request per model; once ORBES Client Services has closed it, accepted or declined, with a note of what was done, the account may request the model again. A request accepted becomes an order (article 14). Neither your note nor that of ORBES Client Services is written to the service's audit log.
+**The private salon.** ORBES may reserve models for the owners of a piece (THE PRIVATE SALON). Each model is shown, with an indicative price, to the signed-in accounts whose tier reaches the one ORBES sets for it (TITANE, PLATINE or PALLADIUM); below that tier, it is not shown. From the page of a model, an account may request it, with an optional note of at most 500 characters. A request obliges neither the account nor ORBES and creates no contract: ORBES Client Services contacts the account and concludes any sale with it, outside the service. Nothing is paid on the service. An account holds one open request per model; once ORBES Client Services has closed it, accepted or declined, with a note of what was done, the account may request the model again. A request accepted becomes an order (article 14). Neither your note nor that of ORBES Client Services is written to the service's audit log.
 
-*Code: R58, R59, R60, R61, R62, R63, R64, R65, R66, R67, R68, R69, R70, R71, R72, R73, R74, R75, R84, R85, R86, R87, R88, R89, R119, R120, R137, R140, R141, R147, R148, R149, R150, R155, N7.*
+*Code: R58, R59, R60, R61, R62, R63, R64, R65, R66, R67, R68, R69, R70, R71, R72, R73, R74, R75, R84, R85, R86, R87, R88, R89, R119, R120, R137, R140, R141, R147, R148, R149, R150, R155, R166, N7.*
 
 ## Article 13 — LIVE RELEASES
 
@@ -222,6 +222,8 @@ A LIVE RELEASE is a release that takes place live, without a draw: ORBES announc
 
 **The line.** At the opening, the accounts in the room form the line. Unless the release provides otherwise, the line follows the tier first, read at the opening: PALLADIUM, PLATINE, TITANE, then the accounts without a tier. Within a tier, or for every account when the release does not follow the tiers, the order is that of the SHA-256 of a seed of the release followed by the identifier of the entry: the seed is drawn and sealed when the release is created, and is never published. An account that leaves the room before the opening may enter it again; an entry that has had its place in the line never returns to it. An account that enters after the opening chooses its size as it enters and joins the line behind, in the order of arrival.
 
+**The pace.** A release may admit its line in batches, a number of accounts every few minutes, in the line's order; the page shows your place and an estimated time; your place is kept.
+
 **Your turn.** When enough pieces of your size are free for the quantity you chose and you are next in the line for that size, it is your turn. You then have 30 seconds, unless the release sets another time (from 10 to 300 seconds, which may differ by tier), to press and hold, on your screen, the ORBES CODE of the room, a specimen that is no piece's code, until its ring is full. The service secures the piece only for a hold of at least 1.4 seconds, measured by its own clock. A turn not taken in time passes, and its piece goes to the next in line.
 
 **Your piece.** Once secured, the piece is held for you for 5 minutes, unless the release sets another time (from 1 to 60 minutes, which may differ by tier). Meanwhile you may choose the options the release offers, at most 6, for example an engraving or a gift box, each at the price the release sets, kept as it was when you chose it; then press PAY, or give the piece back with RELEASE MY PLACE. A piece not confirmed in time is no longer held, and its options lapse with it.
@@ -234,7 +236,7 @@ A LIVE RELEASE is a release that takes place live, without a draw: ORBES announc
 
 **No piece guaranteed.** Saying I'LL BE THERE, entering the room or the line, being a guest of an after-room, and even a turn, give no right to a piece until it is secured: the pieces are limited, and go to the line in its order.
 
-**The end.** A LIVE RELEASE ends once every piece is confirmed (SOLD OUT), at the end time its page gives, or when ORBES ends it. From then, no turn is given and the accounts still waiting leave the line; when ORBES ends it, a turn under way ends too. At the end time, a turn under way may still be secured until its time; in every case, a piece held may still be confirmed until its own. A reservation cancelled after the end does not return to the line: ORBES Client Services handles it. The release then moves to PAST in THE RELEASES, as it was announced; your entry and its outcome stay in MY PIECES. Its page then reads THIS RELEASE IS OVER, without any figure of its end, and, signed in, says whether you took part and whether you secured a piece. The service sends no email.
+**The end.** A LIVE RELEASE ends once every piece is confirmed (SOLD OUT), at the end time its page gives, or when ORBES ends it. From then, no turn is given and the accounts still waiting leave the line; when ORBES ends it, a turn under way ends too. At the end time, a turn under way may still be secured until its time; in every case, a piece held may still be confirmed until its own. A reservation cancelled after the end does not return to the line: ORBES Client Services handles it. The release then moves to PAST in THE RELEASES, as it was announced; your entry and its outcome stay in MY PIECES. Its page then reads THIS RELEASE IS OVER, without any figure of its end, and, signed in, says whether you took part and whether you secured a piece. The service sends no email about its end.
 
 **The after-room.** ORBES may follow a LIVE RELEASE with an after-room (THE AFTER-ROOM), set for that release: its own model, price, sizes, pieces and options, with the turn and hold times, the pieces per person and the surprise of the release. It opens only if the release sells out (SOLD OUT): the accounts then still waiting in its line are its guests, in the order they had there, and no one else may see it. It opens 10 minutes after the sell-out, unless the release sets another time (from 1 to 60 minutes), and stays open 15 minutes, unless it sets another length (from 5 to 120 minutes), or until its own pieces are all confirmed. A guest enters it with a size and takes the place their order gives in its line; turns, PAY and the rest of this article then apply to it as to any LIVE RELEASE. If the release ends otherwise, or nobody is waiting at its sell-out, there is no after-room. It is announced nowhere else, and asks no question after.
 
@@ -242,7 +244,7 @@ A LIVE RELEASE is a release that takes place live, without a draw: ORBES announc
 
 **What is recorded.** For each entry, the service records the account, the size and the quantity, the tier, the place in the line, the time of each step, the length of the hold, the options chosen, the outcome of the reservation, the place of a guest in an after-room and the answer to the question after; and, from the connection, its country and a keyed fingerprint of its network, never its address. That fingerprint is erased 30 days after the end of the release. These data serve to run the release and to spot automated entries; the privacy policy says more (article 17).
 
-*Code: R93, R94, R95, R96, R97, R98, R99, R100, R101, R102, R103, R104, R105, R106, R107, R108, R109, R110, R111, R112, R113, R114, R115, R118, R134, R135, R136, R137, R138, R140, R141, R142, R143, N8, N9.*
+*Code: R93, R94, R95, R96, R97, R98, R99, R100, R101, R102, R103, R104, R105, R106, R107, R108, R109, R110, R111, R112, R113, R114, R115, R118, R134, R135, R136, R137, R138, R140, R141, R142, R143, R165, N8, N9.*
 
 ## Article 14 — Orders
 
@@ -290,7 +292,7 @@ The lock ends every session of the account, revokes its recovery code, withdraws
 
 ORBES processes the data of the service (account, registrations, scans, entries and reservations in releases, entries, options and reservations in the LIVE RELEASES, answers to the question after, orders and their invoices, answers and votes in the circle, requests in the private salon) as its privacy policy describes, which also says how ORBES groups collectors and counts their activity by hour. The service sends your orders to no online store. You can ask ORBES Client Services for a copy of everything the ORBES registry holds about your account. Your requests in the private salon, with your notes, are in that copy. Your entries in the LIVE RELEASES, with their options, and your I'LL BE THERE are in that copy. Your orders, with the buyer's name and address, their steps and their invoices, and your answers to the questions after are in that copy.
 
-*Code: R21, R90, R117, R133, R139, R144, R145, R151, R162, N10.*
+*Code: R21, R90, R117, R133, R139, R144, R145, R151, R162, R168, R169, R170, N10.*
 
 ## Article 18 — Liability
 

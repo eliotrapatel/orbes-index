@@ -1,6 +1,6 @@
 # Conditions générales d'utilisation du service ORBES GENOME CODE
 
-**Brouillon pour revue juridique, non validé.** Version : 15 octobre 2026. [English version](terms.en.md).
+**Brouillon pour revue juridique, non validé.** Version : 21 octobre 2026. [English version](terms.en.md).
 
 Chaque article se termine par une ligne *Code : …* qui renvoie aux règles du code qu'il décrit ([TERMS-FACTS](TERMS-FACTS.md)). Ces lignes servent à la revue et ne sont pas publiées. Les champs [À COMPLÉTER : …] attendent l'identité légale d'ORBES et les choix de l'avocat ([note pour l'avocat](counsel-note.fr.md)).
 
@@ -78,7 +78,7 @@ ORBES s'efforce de maintenir le service accessible, sans s'y engager : il peut �
 
 ## Article 6 — Mot de passe oublié
 
-**Pas de réinitialisation par e-mail.** Le service n'envoie aucun e-mail, ni lien de réinitialisation. Un mot de passe oublié se remplace avec l'aide d'ORBES Client Services.
+**Réinitialisation.** Un mot de passe oublié se remplace avec un lien envoyé à votre adresse e-mail, quand le service le propose, ou avec l'aide d'ORBES Client Services. Le lien porte un code de récupération, selon les règles ci-dessous.
 
 **Code de récupération.** ORBES Client Services vérifie votre identité selon sa procédure, puis vous remet un code de récupération. Ce code sert une seule fois et vaut 30 minutes. Un nouveau code annule le précédent. Vous le saisissez sur theorbes.com/verify avec votre adresse e-mail et un nouveau mot de passe.
 
@@ -86,7 +86,7 @@ ORBES s'efforce de maintenir le service accessible, sans s'y engager : il peut �
 
 **Effets.** Le nouveau mot de passe ferme toutes les sessions du compte, annule ses transferts en attente et retire ses liens de certificat. Pour vous protéger d'une prise de contrôle de votre compte, la création de nouveaux codes de transfert est ensuite suspendue pendant 72 heures.
 
-*Code : R12, R13, R14, R15, R16, R17, R18, N1, N2.*
+*Code : R12, R13, R14, R15, R16, R17, R18, R167, N1, N2.*
 
 ## Article 7 — Enregistrement d'une pièce
 
@@ -190,7 +190,7 @@ La déclaration dans le registre ORBES ne remplace pas une plainte auprès des a
 
 ORBES peut proposer un modèle en un nombre limité de pièces lors d'une sortie, annoncée sur le service (THE RELEASES) avec son nombre de pièces, les dates de ses inscriptions et la règle de son tirage. ORBES peut annuler une sortie tant que son tirage n'a pas eu lieu.
 
-**Inscription.** Tout compte ORBES peut s'inscrire à une sortie pendant que ses inscriptions sont ouvertes, que des pièces y soient enregistrées ou non. L'inscription est gratuite et ne vous oblige à rien. Dans une sortie en tailles, une inscription choisit sa taille, et peut la changer tant que les inscriptions sont ouvertes ; une place réservée directement garde la sienne. Un compte s'inscrit une fois à une sortie : il peut retirer son inscription jusqu'au tirage, et s'inscrire de nouveau, sous la même inscription, tant que les inscriptions sont ouvertes. Une inscription par personne : ORBES Client Services peut refuser de conclure la vente d'un second compte de la même personne.
+**Inscription.** Tout compte ORBES peut s'inscrire à une sortie pendant que ses inscriptions sont ouvertes, que des pièces y soient enregistrées ou non. Une sortie peut être réservée à des collectionneurs choisis, un groupe de comptes qu'ORBES compose sans le nommer : eux seuls peuvent alors s'y inscrire ou y réserver une place. L'inscription est gratuite et ne vous oblige à rien. Dans une sortie en tailles, une inscription choisit sa taille, et peut la changer tant que les inscriptions sont ouvertes ; une place réservée directement garde la sienne. Un compte s'inscrit une fois à une sortie : il peut retirer son inscription jusqu'au tirage, et s'inscrire de nouveau, sous la même inscription, tant que les inscriptions sont ouvertes. Une inscription par personne : ORBES Client Services peut refuser de conclure la vente d'un second compte de la même personne.
 
 **Paliers et ancienneté.** Le palier d'un compte se lit sur les pièces qui y sont enregistrées : TITANE dès 1 pièce, PLATINE dès 5, PALLADIUM dès 10. Une pièce révoquée, écartée par ORBES après examen ou retirée ne compte pas. L'ancienneté d'un compte est le nombre d'années pleines depuis qu'une pièce y a été enregistrée pour la première fois.
 
@@ -200,15 +200,15 @@ ORBES peut proposer un modèle en un nombre limité de pièces lors d'une sortie
 
 **Tirage.** Après la clôture de ses inscriptions, ORBES procède au tirage d'une sortie, une seule fois. Il classe les inscriptions selon le palier de leur compte, puis selon son ancienneté, tous deux lus au moment du tirage, puis selon le SHA-256 d'une graine de 32 octets suivie de l'identifiant de l'inscription, par ordre croissant. La graine est tirée à la création de la sortie, et son empreinte est publiée avec la sortie. La graine elle-même est publiée après le tirage, avec l'identifiant, le palier, l'ancienneté et le rang de chaque inscription, jamais son compte : chacun peut vérifier l'ordre. MY PIECES montre à chaque compte l'identifiant de son inscription.
 
-**Place réservée.** Les premiers rangs, autant qu'il reste de pièces après les réservations directes de l'accès anticipé, sont sélectionnés ; les suivants sont sur la liste d'attente, dans leur ordre. Dans une sortie en tailles, chaque taille se remplit dans cet ordre, avec les pièces qui y restent, et les autres forment la liste d'attente de leur taille. Quand moins de comptes s'inscrivent qu'il n'y a de pièces, toutes les inscriptions sont sélectionnées. La place d'une inscription sélectionnée est réservée pendant la durée que fixe sa sortie, 48 heures sauf mention contraire. Le service n'envoie aucun e-mail : MY PIECES montre le statut de chaque inscription, et ORBES Client Services contacte les comptes sélectionnés.
+**Place réservée.** Les premiers rangs, autant qu'il reste de pièces après les réservations directes de l'accès anticipé, sont sélectionnés ; les suivants sont sur la liste d'attente, dans leur ordre. Dans une sortie en tailles, chaque taille se remplit dans cet ordre, avec les pièces qui y restent, et les autres forment la liste d'attente de leur taille. Quand moins de comptes s'inscrivent qu'il n'y a de pièces, toutes les inscriptions sont sélectionnées. La place d'une inscription sélectionnée est réservée pendant la durée que fixe sa sortie, 48 heures sauf mention contraire. MY PIECES montre le statut de chaque inscription, et ORBES Client Services contacte les comptes sélectionnés.
 
 **Aucune obligation.** Une place réservée ne vous oblige à rien : ORBES Client Services conclut chaque vente avec vous, hors du service. Passé son délai, une place qui n'a pas été conclue expire, et ORBES peut la proposer à l'inscription suivante de la liste d'attente. Quand ORBES Client Services confirme la vente d'une place, MY PIECES en montre la commande (article 14).
 
 **PAST.** Une fois tirée, une sortie passe dans l'onglet PAST de THE RELEASES, avec sa photographie, son nom, le jour de l'ouverture de ses inscriptions et son nombre de pièces, jamais le nombre de ses inscriptions ; sa page garde ce que publie son tirage. Connecté, vous y lisez, pour chaque sortie, si vous y avez pris part (une inscription non retirée au moment du tirage, ou une place réservée directement) et si vous y avez obtenu une pièce (votre inscription confirmée), et à combien de sorties vous avez pris part.
 
-**Le salon privé.** ORBES peut réserver des modèles aux propriétaires d'une pièce (THE PRIVATE SALON). Chaque modèle est présenté, avec un prix indicatif, aux comptes connectés dont le palier atteint celui qu'ORBES fixe pour lui (TITANE, PLATINE ou PALLADIUM) ; au-dessous de ce palier, il n'est pas présenté. Depuis la fiche d'un modèle, un compte peut le demander, avec une note facultative de 500 caractères au plus. Une demande n'engage ni le compte ni ORBES et ne forme aucun contrat : ORBES Client Services contacte le compte et conclut avec lui toute vente, hors du service. Rien n'est payé sur le service, et il n'envoie aucun e-mail. Un compte a une seule demande ouverte par modèle ; une fois qu'ORBES Client Services l'a close, acceptée ou refusée, avec une note de ce qui a été fait, le compte peut demander le modèle de nouveau. Une demande acceptée devient une commande (article 14). Ni votre note ni celle d'ORBES Client Services ne sont inscrites au journal d'audit du service.
+**Le salon privé.** ORBES peut réserver des modèles aux propriétaires d'une pièce (THE PRIVATE SALON). Chaque modèle est présenté, avec un prix indicatif, aux comptes connectés dont le palier atteint celui qu'ORBES fixe pour lui (TITANE, PLATINE ou PALLADIUM) ; au-dessous de ce palier, il n'est pas présenté. Depuis la fiche d'un modèle, un compte peut le demander, avec une note facultative de 500 caractères au plus. Une demande n'engage ni le compte ni ORBES et ne forme aucun contrat : ORBES Client Services contacte le compte et conclut avec lui toute vente, hors du service. Rien n'est payé sur le service. Un compte a une seule demande ouverte par modèle ; une fois qu'ORBES Client Services l'a close, acceptée ou refusée, avec une note de ce qui a été fait, le compte peut demander le modèle de nouveau. Une demande acceptée devient une commande (article 14). Ni votre note ni celle d'ORBES Client Services ne sont inscrites au journal d'audit du service.
 
-*Code : R58, R59, R60, R61, R62, R63, R64, R65, R66, R67, R68, R69, R70, R71, R72, R73, R74, R75, R84, R85, R86, R87, R88, R89, R119, R120, R137, R140, R141, R147, R148, R149, R150, R155, N7.*
+*Code : R58, R59, R60, R61, R62, R63, R64, R65, R66, R67, R68, R69, R70, R71, R72, R73, R74, R75, R84, R85, R86, R87, R88, R89, R119, R120, R137, R140, R141, R147, R148, R149, R150, R155, R166, N7.*
 
 ## Article 13 — LIVE RELEASES
 
@@ -222,6 +222,8 @@ Une LIVE RELEASE est une sortie qui se vit en direct, sans tirage : ORBES l'anno
 
 **La file.** À l'ouverture, les comptes de la salle forment la file. Sauf si la sortie en dispose autrement, la file suit d'abord le palier, lu à l'ouverture : PALLADIUM, PLATINE, TITANE, puis les comptes sans palier. Dans un palier, ou pour tous les comptes quand la sortie ne suit pas les paliers, l'ordre est celui du SHA-256 d'une graine de la sortie suivie de l'identifiant de l'entrée : la graine est tirée et scellée à la création de la sortie, et n'est jamais publiée. Un compte qui quitte la salle avant l'ouverture peut y entrer de nouveau ; une entrée qui a eu sa place dans la file n'y revient jamais. Un compte qui entre après l'ouverture choisit sa taille en entrant et prend place derrière la file, dans l'ordre d'arrivée.
 
+**Le rythme.** Une sortie peut admettre sa file par lots, un nombre de comptes toutes les quelques minutes, dans l'ordre de la file ; la page montre votre place et une heure estimée ; votre place est gardée.
+
 **Votre tour.** Quand assez de pièces de votre taille sont libres pour la quantité choisie et que vous êtes le suivant de la file dans cette taille, c'est votre tour. Vous avez alors 30 secondes, sauf si la sortie fixe un autre délai (de 10 à 300 secondes, qui peut varier selon le palier), pour appuyer à l'écran sur l'ORBES CODE de la salle, un spécimen qui n'est le code d'aucune pièce, et le maintenir jusqu'à ce que son anneau soit plein. Le service ne sécurise la pièce que pour un appui d'au moins 1,4 seconde, mesuré par sa propre horloge. Un tour qui n'est pas pris à temps passe, et sa pièce va au suivant de la file.
 
 **Votre pièce.** Une fois sécurisée, la pièce vous est tenue pendant 5 minutes, sauf si la sortie fixe un autre délai (de 1 à 60 minutes, qui peut varier selon le palier). Pendant ce temps, vous pouvez choisir les options que propose la sortie, 6 au plus, par exemple une gravure ou un coffret, chacune au prix que fixe la sortie, gardé tel qu'il était quand vous l'avez choisie ; puis presser PAY, ou rendre la pièce avec RELEASE MY PLACE. Une pièce qui n'est pas confirmée à temps n'est plus tenue, et ses options tombent avec elle.
@@ -234,7 +236,7 @@ Une LIVE RELEASE est une sortie qui se vit en direct, sans tirage : ORBES l'anno
 
 **Aucune pièce garantie.** Dire I'LL BE THERE, entrer dans la salle ou la file, être invité d'une salle d'après, et même un tour, ne donnent droit à aucune pièce tant qu'elle n'est pas sécurisée : les pièces sont limitées, et vont à la file dans son ordre.
 
-**La fin.** Une LIVE RELEASE prend fin quand toutes ses pièces sont confirmées (SOLD OUT), à l'heure de fin que donne sa page, ou quand ORBES y met fin. Dès lors, aucun tour n'est donné et les comptes qui attendent encore quittent la file ; quand ORBES y met fin, un tour en cours prend fin aussi. À l'heure de fin, un tour en cours peut encore être sécurisé jusqu'à son échéance ; dans tous les cas, une pièce tenue peut encore être confirmée jusqu'à la sienne. Une réservation annulée après la fin ne revient pas à la file : ORBES Client Services s'en occupe. La sortie passe alors dans l'onglet PAST de THE RELEASES, telle qu'elle a été annoncée ; votre entrée et son issue restent dans MY PIECES. Sa page affiche alors THIS RELEASE IS OVER, sans aucun chiffre de sa fin, et, connecté, dit si vous y avez pris part et si vous y avez obtenu une pièce. Le service n'envoie aucun e-mail.
+**La fin.** Une LIVE RELEASE prend fin quand toutes ses pièces sont confirmées (SOLD OUT), à l'heure de fin que donne sa page, ou quand ORBES y met fin. Dès lors, aucun tour n'est donné et les comptes qui attendent encore quittent la file ; quand ORBES y met fin, un tour en cours prend fin aussi. À l'heure de fin, un tour en cours peut encore être sécurisé jusqu'à son échéance ; dans tous les cas, une pièce tenue peut encore être confirmée jusqu'à la sienne. Une réservation annulée après la fin ne revient pas à la file : ORBES Client Services s'en occupe. La sortie passe alors dans l'onglet PAST de THE RELEASES, telle qu'elle a été annoncée ; votre entrée et son issue restent dans MY PIECES. Sa page affiche alors THIS RELEASE IS OVER, sans aucun chiffre de sa fin, et, connecté, dit si vous y avez pris part et si vous y avez obtenu une pièce. Le service n'envoie aucun e-mail sur sa fin.
 
 **La salle d'après.** ORBES peut faire suivre une LIVE RELEASE d'une salle d'après (THE AFTER-ROOM), réglée pour cette sortie : son propre modèle, son prix, ses tailles, ses pièces et ses options, avec les délais du tour et de la tenue, les pièces par personne et la surprise de la sortie. Elle n'ouvre que si la sortie est épuisée (SOLD OUT) : les comptes qui attendaient encore dans sa file à cet instant en sont les invités, dans l'ordre qu'ils y avaient, et personne d'autre ne peut la voir. Elle ouvre 10 minutes après l'épuisement, sauf si la sortie fixe un autre délai (de 1 à 60 minutes), et reste ouverte 15 minutes, sauf si elle fixe une autre durée (de 5 à 120 minutes), ou jusqu'à ce que ses propres pièces soient toutes confirmées. Un invité y entre avec une taille et prend dans sa file la place que lui donne son ordre ; les tours, PAY et le reste du présent article s'y appliquent alors comme à toute LIVE RELEASE. Si la sortie prend fin autrement, ou si personne n'attend à son épuisement, il n'y a pas de salle d'après. Elle n'est annoncée nulle part ailleurs, et ne pose pas de question après.
 
@@ -242,7 +244,7 @@ Une LIVE RELEASE est une sortie qui se vit en direct, sans tirage : ORBES l'anno
 
 **Ce qui est enregistré.** Pour chaque entrée, le service enregistre le compte, la taille et la quantité, le palier, la place dans la file, l'heure de chaque étape, la durée de l'appui, les options choisies, l'issue de la réservation, la place d'un invité dans une salle d'après et la réponse à la question d'après ; et, de la connexion, son pays et une empreinte à clé de son réseau, jamais son adresse. Cette empreinte est effacée 30 jours après la fin de la sortie. Ces données servent à faire vivre la sortie et à repérer les entrées automatisées ; la politique de confidentialité en dit plus (article 17).
 
-*Code : R93, R94, R95, R96, R97, R98, R99, R100, R101, R102, R103, R104, R105, R106, R107, R108, R109, R110, R111, R112, R113, R114, R115, R118, R134, R135, R136, R137, R138, R140, R141, R142, R143, N8, N9.*
+*Code : R93, R94, R95, R96, R97, R98, R99, R100, R101, R102, R103, R104, R105, R106, R107, R108, R109, R110, R111, R112, R113, R114, R115, R118, R134, R135, R136, R137, R138, R140, R141, R142, R143, R165, N8, N9.*
 
 ## Article 14 — Commandes
 
@@ -290,7 +292,7 @@ Le verrouillage ferme toutes les sessions du compte, révoque son code de récup
 
 ORBES traite les données du service (compte, enregistrements, scans, inscriptions et réservations aux sorties, entrées, options et réservations des LIVE RELEASES, réponses aux questions d'après, commandes et leurs factures, réponses et votes du cercle, demandes du salon privé) comme le décrit sa politique de confidentialité, qui dit aussi comment ORBES regroupe les collectionneurs et compte leur activité par heure. Le service ne transmet vos commandes à aucune boutique en ligne. Vous pouvez demander à ORBES Client Services une copie de tout ce que le registre ORBES garde de votre compte. Vos demandes au salon privé, avec vos notes, figurent dans cette copie. Vos entrées aux LIVE RELEASES, avec leurs options, et votre I'LL BE THERE figurent dans cette copie. Vos commandes, avec le nom et l'adresse de l'acheteur, leurs étapes et leurs factures, et vos réponses aux questions d'après figurent dans cette copie.
 
-*Code : R21, R90, R117, R133, R139, R144, R145, R151, R162, N10.*
+*Code : R21, R90, R117, R133, R139, R144, R145, R151, R162, R168, R169, R170, N10.*
 
 ## Article 18 — Responsabilité
 

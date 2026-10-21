@@ -78,7 +78,7 @@ const EN: LegalDocument = {
       id: 'password',
       title: 'I forgot my password',
       blocks: [
-        'The service sends no email: ask ORBES Client Services. Once they have checked that you hold the account, they give you a recovery code, valid once and for 30 minutes. Enter it at theorbes.com/verify under FORGOTTEN PASSWORD?, with your email address and a new password.',
+        'Where the service offers it, choose FORGOTTEN PASSWORD? and enter your email address: a link to set a new password reaches you, valid once and for 30 minutes. Otherwise, ask ORBES Client Services. Once they have checked that you hold the account, they give you a recovery code, valid once and for 30 minutes. Enter it at theorbes.com/verify under FORGOTTEN PASSWORD?, with your email address and a new password.',
         'Every session of the account then ends, and the creation of transfer codes pauses for 72 hours, to protect you from a takeover of your account.',
       ],
     },
@@ -161,7 +161,7 @@ const FR: LegalDocument = {
       id: 'password',
       title: "J'ai oublié mon mot de passe",
       blocks: [
-        "Le service n'envoie aucun e-mail : adressez-vous à ORBES Client Services. Après avoir vérifié que vous êtes le titulaire du compte, il vous remet un code de récupération, qui sert une seule fois et vaut 30 minutes. Saisissez-le sur theorbes.com/verify sous FORGOTTEN PASSWORD?, avec votre adresse e-mail et un nouveau mot de passe.",
+        "Quand le service le propose, choisissez FORGOTTEN PASSWORD? et saisissez votre adresse e-mail : un lien pour choisir un nouveau mot de passe vous parvient, qui sert une seule fois et vaut 30 minutes. Sinon, adressez-vous à ORBES Client Services. Après avoir vérifié que vous êtes le titulaire du compte, il vous remet un code de récupération, qui sert une seule fois et vaut 30 minutes. Saisissez-le sur theorbes.com/verify sous FORGOTTEN PASSWORD?, avec votre adresse e-mail et un nouveau mot de passe.",
         "Toutes les sessions du compte prennent alors fin, et la création de codes de transfert est suspendue pendant 72 heures, pour vous protéger d'une prise de contrôle de votre compte.",
       ],
     },
