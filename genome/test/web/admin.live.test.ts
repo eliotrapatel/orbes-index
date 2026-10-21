@@ -46,8 +46,11 @@ import {
   liveActions,
   liveBoardFigures,
   liveEntryActions,
+  liveEntryAdmission,
   liveEntryDeadline,
   liveLead,
+  livePaceActions,
+  livePaceFigures,
   livePageKey,
   livePartChange,
   livePartProblem,
@@ -59,6 +62,10 @@ import {
   newLiveInput,
   newLiveProblem,
   newLiveValues,
+  paceHint,
+  paceLine,
+  paceProblem,
+  parisClock,
   parseAddons,
   parseMoney,
   surpriseLine,
@@ -495,6 +502,95 @@ describe('the console of the LIVE RELEASES', () => {
     expect(windowLine({ tier: 3, turnSeconds: null, payMinutes: 10 })).toBe('PALLADIUM · 10 min to pay');
     expect(windowLine({ tier: 0, turnSeconds: 60, payMinutes: 2 })).toBe('NO TIER · 60 s to hold · 2 min to pay');
     expect(priorityLine(false)).toBe('At random for all');
+  });
+});
+
+describe('the console of a LIVE RELEASE’s pace (W4)', () => {
+  it('holds the pace in the times part: both figures or neither (blank: no pace), sending only what changed', () => {
+    const r = release();
+    expect(LIVE_LIMITS.pace).toEqual({ batch: { min: 1, max: 5000 }, minutes: { min: 1, max: 60 } });
+    expect(livePartValues(r, 'times')).toMatchObject({ paceBatch: '', paceMinutes: '' });
+    const paced = release({ pace: { batch: 250, minutes: 1 } });
+    const v = livePartValues(paced, 'times');
+    expect(v).toMatchObject({ paceBatch: '250', paceMinutes: '1' });
+    expect(livePartProblem(paced, 'times', v)).toBeNull();
+    expect(livePartChange(paced, 'times', v)).toEqual({});
+    expect(livePartChange(r, 'times', { ...livePartValues(r, 'times'), paceBatch: ' 90 ', paceMinutes: '2' })).toEqual({ pace: { batch: 90, minutes: 2 } });
+    expect(livePartChange(paced, 'times', { ...v, paceBatch: '', paceMinutes: '' })).toEqual({ pace: null });
+    expect(livePartChange(paced, 'times', { ...v, paceMinutes: '5' })).toEqual({ pace: { batch: 250, minutes: 5 } });
+    for (const [batch, minutes] of [['250', ''], ['', '1'], ['0', '1'], ['5001', '1'], ['250', '61'], ['2.5', '1'], ['250', 'soon']]) {
+      expect([batch, minutes, livePartProblem(r, 'times', { ...livePartValues(r, 'times'), paceBatch: batch, paceMinutes: minutes })]).toEqual([
+        batch,
+        minutes,
+        'A pace admits 1 to 5\u2009000 buyers every 1 to 60 minutes; leave both blank for none.',
+      ]);
+    }
+    // SET PACE never takes a pace away: both figures are needed there.
+    expect(paceProblem('', '', false)).toBe('Say how many buyers are admitted, every how many minutes.');
+    expect(paceProblem('5001', '1', false)).toBe('A pace admits 1 to 5\u2009000 buyers every 1 to 60 minutes.');
+    expect(paceProblem('5000', '60', false)).toBeNull();
+    expect([paceLine({ batch: 250, minutes: 1 }), paceLine({ batch: 1, minutes: 5 }), paceLine({ batch: 5000, minutes: 60 })]).toEqual([
+      '250 buyers every minute',
+      '1 buyer every 5 minutes',
+      '5\u2009000 buyers every 60 minutes',
+    ]);
+    expect(paceHint(500, { batch: 90, minutes: 1 })).toBe(
+      'Buyers admitted from the line, 1 to 5\u2009000, every 1 to 60 minutes, counted across the release, in its order. Both blank: no pace, everyone admitted at T0. The room holds 500, as the load test measured. The planner suggests 90 buyers every minute.',
+    );
+    expect(paceHint(null, null)).toBe('Buyers admitted from the line, 1 to 5\u2009000, every 1 to 60 minutes, counted across the release, in its order. Both blank: no pace, everyone admitted at T0.');
+  });
+
+  it('draws the Pace block’s figures in Paris time, PAUSED while held, and offers its controls to an OPERATOR from T0 to the end', () => {
+    // 18:04 UTC in November is 19:04 in Paris; in July, 20:04.
+    expect([parisClock('2026-11-10T18:04:09.000Z'), parisClock('2026-07-10T18:04:09.000Z', { seconds: true }), parisClock(null)]).toEqual(['19:04', '20:04:09', '—']);
+    const pace = { batch: 250, minutes: 1, nextAt: '2026-11-10T18:04:00.000Z', pausedAt: null, paused: false, batches: 4, waiting: 4120, admitted: 1000 };
+    const live = { phase: 'LIVE' as const, paused: false, endedAt: null, pace };
+    expect(livePaceFigures(live).map((f) => [f.label, f.value, f.note, f.testId])).toEqual([
+      ['In the queue', '4\u2009120', 'WAITING FOR THEIR BATCH', 'live-pace-waiting'],
+      ['Admitted', '1\u2009000', 'MAY TAKE A TURN', 'live-pace-admitted'],
+      ['Batches', '4', '250 EVERY MINUTE', 'live-pace-batches'],
+      ['Next batch', '19:04', 'PARIS TIME', 'live-pace-next'],
+    ]);
+    const next = (b: Parameters<typeof livePaceFigures>[0]) => livePaceFigures(b)[3]!;
+    expect(next({ ...live, phase: 'ROOM', pace: { ...pace, minutes: 5, batches: 0 } })).toMatchObject({ value: '19:04', note: 'PARIS · AT T0' });
+    expect(next({ ...live, pace: { ...pace, paused: true, pausedAt: '2026-11-10T18:03:00.000Z' } })).toMatchObject({ value: 'PAUSED', note: 'PACE PAUSED' });
+    expect(next({ ...live, paused: true })).toMatchObject({ value: 'PAUSED', note: 'RELEASE PAUSED' });
+    expect(next({ ...live, phase: 'ENDED', endedAt: '2026-11-10T18:30:00.000Z' })).toMatchObject({ value: '—', note: 'NONE AFTER THE END' });
+    expect(livePaceFigures({ ...live, pace: { ...pace, minutes: 5 } })[2]!.note).toBe('250 EVERY 5 MINUTES');
+
+    // SET PACE until the end (a release with no pace too); PAUSE or RESUME PACE and NEXT BATCH NOW from T0, paced.
+    expect(livePaceActions(live, 'OPERATOR', false)).toEqual({ set: true, pause: true, resume: false, next: true });
+    expect(livePaceActions({ ...live, pace: { ...pace, paused: true } }, 'OPERATOR', false)).toEqual({ set: true, pause: false, resume: true, next: true });
+    expect(livePaceActions({ ...live, pace: null }, 'OPERATOR', false)).toEqual({ set: true, pause: false, resume: false, next: false });
+    for (const phase of ['HIDDEN', 'ANNOUNCED', 'ROOM'] as const) expect([phase, livePaceActions({ ...live, phase }, 'OPERATOR', false)]).toEqual([phase, { set: true, pause: false, resume: false, next: false }]);
+    expect(livePaceActions({ ...live, phase: 'ENDED', endedAt: '2026-11-10T18:30:00.000Z' }, 'ADMIN', false)).toEqual({ set: false, pause: false, resume: false, next: false });
+    expect(livePaceActions({ ...live, endedAt: '2026-11-10T18:30:00.000Z' }, 'ADMIN', false)).toEqual({ set: false, pause: false, resume: false, next: false });
+    expect(livePaceActions(live, 'AUDITOR', false)).toEqual({ set: false, pause: false, resume: false, next: false });
+    // An after-room never has a pace.
+    expect(livePaceActions({ ...live, pace: null }, 'ADMIN', true)).toEqual({ set: false, pause: false, resume: false, next: false });
+
+    // The line's Admitted column: the batch and when, in Paris; WAITING for a batch; none before the line.
+    expect(liveEntryAdmission({ status: 'TURN', admittedAt: '2026-11-10T18:02:00.000Z', batch: 3 })).toEqual({ text: 'Batch 3', at: '19:02 Paris' });
+    expect(liveEntryAdmission({ status: 'QUEUED', admittedAt: '2026-11-10T18:00:00.000Z', batch: 0 })).toEqual({ text: 'At once', at: '19:00 Paris' });
+    expect(liveEntryAdmission({ status: 'QUEUED', admittedAt: null, batch: null })).toEqual({ text: 'Waiting', at: null });
+    expect(liveEntryAdmission({ status: 'WAITING', admittedAt: null, batch: null })).toEqual({ text: '—', at: null });
+  });
+
+  it('sends SET PACE, PAUSE PACE, RESUME PACE and NEXT BATCH NOW on their paths', async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const fetch: FetchLike = async (url, init = {}) => {
+      calls.push({ url, init });
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    const api = new AdminApi({ fetch, onUnauthorized: () => {} });
+    api.setCsrf('tok');
+    await api.setLivePace(ID, { batch: 250, minutes: 1 });
+    await api.pauseLivePace(ID);
+    await api.resumeLivePace(ID);
+    await api.nextLiveBatch(ID);
+    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual([`PUT /api/admin/live/${ID}/pace`, `POST /api/admin/live/${ID}/pace/pause`, `POST /api/admin/live/${ID}/pace/resume`, `POST /api/admin/live/${ID}/pace/next`]);
+    expect(JSON.parse(calls[0]!.init.body as string)).toEqual({ batch: 250, minutes: 1 });
+    expect(calls.every((c) => (c.init.headers as Record<string, string>)['x-csrf-token'] === 'tok')).toBe(true);
   });
 });
 

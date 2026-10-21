@@ -25,6 +25,10 @@
  *     question after rewritten (choice 11); the best time to open beside its settings and in Analytics, by tier and
  *     country (choice 10); PUBLISH shows the feasibility check per size and publishes all the same (choice 12); once a
  *     release has ended, who was asked where and each answer counted.
+ *  7. The pace (plan MACRO M1, W4): blank in the times part (no pace), then X every Y; the board's Pace block, the next
+ *     batch in Paris time; at T0 the first batch admits X in the line's order, the line says each entry's batch; SET PACE
+ *     during the release keeps the next batch's time; PAUSE PACE shows PAUSED, RESUME PACE; NEXT BATCH NOW admits the
+ *     rest, each control audited.
  * No CSP violation, no page error, no figure in the display face.
  */
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -46,6 +50,7 @@ import { inTransaction } from '../../src/server/db/connection.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { holdPieces } from '../support/live.js';
+import { parisClock } from '../../src/web/admin/model/live.js';
 
 const CHROMIUM = process.env.ORBES_CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const HAS_CHROMIUM = existsSync(CHROMIUM);
@@ -808,6 +813,91 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     expect(await p.locator('[data-testid=live-question-tally] .bar__label').allTextContents()).toEqual(['ANOTHER SIZE', 'ANOTHER FINISH', 'ANOTHER PRICE BAND']);
     expect(await figuresInDisplayFace(p)).toEqual([]);
     await shot(p, 'question-counted');
+    expect(await csp(p)).toEqual([]);
+    await p.context().close();
+  }, STEP_TIMEOUT);
+
+  it('sets a release’s pace (W4): blank in its times, then X every Y; the board’s Pace block in Paris time, SET PACE, PAUSE and RESUME PACE, NEXT BATCH NOW, the line’s admission', async () => {
+    const r = await ctx.services.liveConsole.create(
+      { modelId, title: 'THE PACED RING', announceAt: new Date(Date.now() + 2 * HOUR), opensAt: new Date(Date.now() + 4 * HOUR), closesAt: new Date(Date.now() + 5 * HOUR), priceMinor: 100_000, turnSeconds: 300, sizes: [{ label: '52', stock: 10 }] },
+      admin,
+    );
+    await ctx.services.liveConsole.publish(r.id, {}, admin);
+    const move = (set: { announce_at?: Date; opens_at?: Date }) => ctx.db.updateTable('drops').set(set).where('id', '=', r.id).execute();
+    const p = await open(ADMIN);
+    await go(p, `#/club/live/${r.id}`, 'THE PACED RING');
+    const paceLine = () => p.locator('[data-testid=live-pace-line]').textContent();
+    const note = (id: string) => p.locator(`[data-testid=${id}] .kpi__note`).textContent();
+
+    // No pace: everyone admitted at T0, as before; the times part holds it, blank.
+    await expect.poll(paceLine).toBe('None: everyone is admitted at T0');
+    expect(await p.locator('[data-testid=live-pace-setting]').textContent()).toBe('None: everyone admitted at T0');
+    expect(await p.locator('[data-testid=live-pace] .kpi').count()).toBe(0);
+    await shot(p, 'pace-none');
+    await p.click('[data-testid=live-edit-times]');
+    await p.fill('dialog input[name=paceBatch]', '2');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toContain('leave both blank for none');
+    await p.fill('dialog input[name=paceMinutes]', '5');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('[data-testid=live-pace-setting]').textContent()).toBe('2 buyers every 5 minutes');
+    await expect.poll(paceLine).toBe('2 buyers every 5 minutes');
+    // Before T0 the first batch is due at T0, said in Paris time.
+    expect(await fig(p, 'live-pace-next').textContent()).toBe(parisClock(r.opensAt));
+    expect(await note('live-pace-next')).toBe('PARIS · AT T0');
+    for (const [id, n] of [['live-pace-set', 1], ['live-pace-pause', 0], ['live-pace-next-now', 0]] as const) expect(await p.locator(`[data-testid=${id}]`).count(), id).toBe(n);
+
+    // Five in the room, then T0: the first batch admits two, in the line's order; three wait for theirs.
+    await move({ announce_at: new Date(Date.now() - HOUR), opens_at: new Date(Date.now() + 2 * 60_000) });
+    const size = (await ctx.services.liveConsole.get(r.id)).sizes[0]!.id;
+    for (const n of [71, 72, 73, 74, 75]) {
+      const c = await collector(n, 0);
+      await ctx.services.live.enter(c.id, r.id, { sizeId: size }, c.actor);
+    }
+    // They came a minute before T0 (the line's times are T0 for those there before it).
+    await ctx.db.updateTable('live_entries').set({ joined_at: new Date(Date.now() - 60_000) }).where('drop_id', '=', r.id).execute();
+    const t0 = new Date(Date.now() - 1000);
+    await move({ opens_at: t0 });
+    await ctx.services.live.advance(r.id);
+    await expect.poll(() => p.locator('[data-testid=live-state]').textContent(), { timeout: 15_000 }).toBe('LIVE');
+    await expect.poll(() => fig(p, 'live-pace-admitted').textContent(), { timeout: 10_000 }).toBe('2');
+    expect(await fig(p, 'live-pace-waiting').textContent()).toBe('3');
+    expect(await fig(p, 'live-pace-batches').textContent()).toBe('1');
+    const due = parisClock(new Date(t0.getTime() + 5 * 60_000));
+    expect(await fig(p, 'live-pace-next').textContent()).toBe(due);
+    const admitted = p.locator('#live-entries [data-testid=live-entry-admitted]');
+    await expect.poll(() => admitted.allTextContents()).toEqual([expect.stringMatching(/^Batch 1\d{2}:\d{2} Paris$/), expect.stringMatching(/^Batch 1/), 'Waiting', 'Waiting', 'Waiting']);
+
+    // SET PACE during the release: from the next batch, which keeps its time.
+    await p.click('[data-testid=live-pace-set]');
+    await expect.poll(() => p.locator('dialog [data-testid=live-pace-effect]').textContent()).toBe(`The change takes effect from the next batch, which keeps its time (${due} Paris).`);
+    await p.fill('dialog input[name=batch]', '3');
+    await p.fill('dialog input[name=minutes]', '2');
+    await confirmDialog(p);
+    await expect.poll(paceLine, { timeout: 10_000 }).toBe('3 buyers every 2 minutes');
+    expect(await fig(p, 'live-pace-next').textContent()).toBe(due);
+    expect(await note('live-pace-batches')).toBe('3 EVERY 2 MINUTES');
+
+    // PAUSE PACE: no batch while held; RESUME PACE: the next batch comes again.
+    await p.click('[data-testid=live-pace-pause]');
+    await expect.poll(() => fig(p, 'live-pace-next').textContent(), { timeout: 10_000 }).toBe('PAUSED');
+    expect(await p.locator('[data-testid=live-pace]').textContent()).toContain('PACE PAUSED');
+    await shot(p, 'pace-paused');
+    await p.click('[data-testid=live-pace-resume]');
+    await expect.poll(() => fig(p, 'live-pace-next').textContent(), { timeout: 10_000 }).toMatch(/^\d{2}:\d{2}$/);
+
+    // NEXT BATCH NOW: the three waiting admitted at once, an extra batch.
+    await p.click('[data-testid=live-pace-next-now]');
+    await expect.poll(() => p.locator('dialog [data-testid=live-pace-next-text]').textContent()).toMatch(/^The next 3 of the 3 waiting in the queue are admitted now/);
+    await confirmDialog(p);
+    await expect.poll(() => fig(p, 'live-pace-waiting').textContent(), { timeout: 10_000 }).toBe('0');
+    expect(await fig(p, 'live-pace-admitted').textContent()).toBe('5');
+    expect(await fig(p, 'live-pace-batches').textContent()).toBe('2');
+    await expect.poll(() => admitted.allTextContents()).toEqual([expect.stringMatching(/^Batch 1/), expect.stringMatching(/^Batch 1/), expect.stringMatching(/^Batch 2/), expect.stringMatching(/^Batch 2/), expect.stringMatching(/^Batch 2/)]);
+    const actions = await ctx.db.selectFrom('audit_logs').select('action').where('target_id', '=', r.id).where('action', 'like', 'drop.live.pace%').orderBy('id').execute();
+    expect(actions.map((a) => a.action)).toEqual(['drop.live.pace', 'drop.live.pace.pause', 'drop.live.pace.resume', 'drop.live.pace.next']);
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'pace');
     expect(await csp(p)).toEqual([]);
     await p.context().close();
   }, STEP_TIMEOUT);

@@ -109,6 +109,7 @@ import type {
   LiveReleaseComparison,
   LiveReleasePlan,
   LiveReleaseReport,
+  LivePace,
   LiveSettings,
   LiveSettingsChange,
   LiveState,
@@ -1114,6 +1115,25 @@ export class AdminApi {
 
   extendLive(id: string, minutes: number): Promise<LiveState> {
     return this.post(`/api/admin/live/${encodeURIComponent(id)}/extend`, { minutes });
+  }
+
+  /** W4, SET PACE: X buyers admitted every Y minutes, until the end (no request takes a pace away). */
+  setLivePace(id: string, pace: LivePace): Promise<LiveState> {
+    return this.request('PUT', `/api/admin/live/${encodeURIComponent(id)}/pace`, { body: { batch: pace.batch, minutes: pace.minutes } });
+  }
+
+  /** PAUSE PACE: no batch admitted until RESUME PACE; the turns of those admitted go on. */
+  pauseLivePace(id: string): Promise<LiveState> {
+    return this.post(`/api/admin/live/${encodeURIComponent(id)}/pace/pause`);
+  }
+
+  resumeLivePace(id: string): Promise<LiveState> {
+    return this.post(`/api/admin/live/${encodeURIComponent(id)}/pace/resume`);
+  }
+
+  /** NEXT BATCH NOW: one batch admitted at once, the clock of the batches kept. */
+  nextLiveBatch(id: string): Promise<LiveState> {
+    return this.post(`/api/admin/live/${encodeURIComponent(id)}/pace/next`);
   }
 
   /** ADD PIECES to a size. */

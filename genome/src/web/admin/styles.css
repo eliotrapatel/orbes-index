@@ -3245,6 +3245,35 @@ fieldset.cfield--checks > .cfield__label {
   margin-top: 22px;
 }
 
+/* W4, the pace: its line and controls, then its four figures, under the board's. */
+.live__pace {
+  margin-top: 22px;
+}
+
+.live__pace[hidden] {
+  display: none;
+}
+
+.live__pace-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin-bottom: 12px;
+}
+
+.live__pace-text {
+  font-size: var(--fs-body);
+  font-variant-numeric: tabular-nums;
+}
+
+.live__pace-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+
 /* A size's label is a value (52, 54, ONE SIZE): the reading face, its figures aligned. */
 .live__size {
   font-variant-numeric: tabular-nums;
@@ -4592,16 +4621,19 @@ fieldset.cfield--checks > .cfield__label {
     padding-left: 0;
     border-left: 0;
   }
-  /* The live board's eight figures, two by two. */
-  .live__figures .kpi:nth-child(odd) {
+  /* The live board's eight figures, and the pace's four (W4), two by two. */
+  .live__figures .kpi:nth-child(odd),
+  .live__pace-figures .kpi:nth-child(odd) {
     padding-left: 0;
     border-left: 0;
   }
-  .live__figures .kpi:nth-child(even) {
+  .live__figures .kpi:nth-child(even),
+  .live__pace-figures .kpi:nth-child(even) {
     padding-left: 28px;
     border-left: 1px solid var(--hairline);
   }
-  .live__figures .kpi:nth-child(n + 3) {
+  .live__figures .kpi:nth-child(n + 3),
+  .live__pace-figures .kpi:nth-child(n + 3) {
     border-top: 1px solid var(--hairline);
     padding-top: 18px;
   }
