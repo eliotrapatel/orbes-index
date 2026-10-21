@@ -680,11 +680,11 @@ describe('legal pages: the privacy policy, written from the code', () => {
     expect(Object.keys(KINDS).sort()).toEqual([...EMAIL_KINDS].sort());
     expect(EMAIL_RETENTION_DAYS).toBe(90);
     for (const [lang, i, says, retention, recipient] of [
-      ['en', 0, [`is kept ${EMAIL_RETENTION_DAYS} days after it is sent, or fails, then erased`, 'The email provider ORBES chooses receives each email', 'use the STOP THESE EMAILS link in each of them', 'switch them off in YOUR PROFILE'],
-        ['- **The founding list**: kept until a request to erase; unsubscribed rows receive nothing.', `- **Emails**, with their address, subject and words: ${EMAIL_RETENTION_DAYS} days after they are sent, or fail, then erased.`],
+      ['en', 0, [`is kept ${EMAIL_RETENTION_DAYS} days after it is sent, fails or is cancelled, then erased`, 'The email provider ORBES chooses receives each email', 'use the STOP THESE EMAILS link in each of them', 'switch them off in YOUR PROFILE'],
+        ['- **The founding list**: kept until a request to erase; unsubscribed rows receive nothing.', `- **Emails**, with their address, subject and words: ${EMAIL_RETENTION_DAYS} days after they are sent, fail or are cancelled, then erased.`],
         '- The email provider ORBES chooses, once the service sends emails: the address, subject and words of each email.'],
-      ['fr', 1, [`est conservé ${EMAIL_RETENTION_DAYS} jours après son envoi, ou son échec, puis effacé`, "Le prestataire d'e-mails qu'ORBES choisit reçoit chaque e-mail", 'utilisez le lien STOP THESE EMAILS de chacun', 'quand vous les désactivez dans YOUR PROFILE'],
-        ["- **La liste fondatrice** : conservée jusqu'à une demande d'effacement ; les lignes désinscrites ne reçoivent rien.", `- **E-mails**, avec leur adresse, leur objet et leurs mots : ${EMAIL_RETENTION_DAYS} jours après leur envoi, ou leur échec, puis effacés.`],
+      ['fr', 1, [`est conservé ${EMAIL_RETENTION_DAYS} jours après son envoi, son échec ou son annulation, puis effacé`, "Le prestataire d'e-mails qu'ORBES choisit reçoit chaque e-mail", 'utilisez le lien STOP THESE EMAILS de chacun', 'quand vous les désactivez dans YOUR PROFILE'],
+        ["- **La liste fondatrice** : conservée jusqu'à une demande d'effacement ; les lignes désinscrites ne reçoivent rien.", `- **E-mails**, avec leur adresse, leur objet et leurs mots : ${EMAIL_RETENTION_DAYS} jours après leur envoi, leur échec ou leur annulation, puis effacés.`],
         "- Le prestataire d'e-mails qu'ORBES choisit, une fois que le service envoie des e-mails : l'adresse, l'objet et les mots de chaque e-mail."],
     ] as const) {
       const emails = sectionText(DOCUMENTS.privacy[lang], 'emails');
@@ -695,8 +695,8 @@ describe('legal pages: the privacy policy, written from the code', () => {
     }
     // The list: what the form sends, linked at sign-up, kept until erased, its unsubscribe keeping the row.
     for (const [lang, says] of [
-      ['en', ['your email address, your first name, your country and your consent', 'the version of this policy then in force', 'your place on the list is linked to that account', 'Your place is kept until you ask ORBES Client Services to erase it', 'your place stays, with the date you stopped, so that nothing is ever sent to your address again']],
-      ['fr', ['votre adresse e-mail, votre prénom, votre pays et votre consentement', 'la version de cette politique alors en vigueur', 'votre place sur la liste est rattachée à ce compte', "Votre place est conservée jusqu'à ce que vous demandiez à ORBES Client Services de l'effacer", 'votre place reste, avec la date de votre désinscription, pour que rien ne soit plus jamais envoyé à votre adresse']],
+      ['en', ['your email address, your first name, your country and your consent', 'the version of this policy then in force', 'your place on the list is linked to that account', 'Your place is kept until you ask ORBES Client Services to erase it', 'use the STOP THESE EMAILS link in its email: your place stays, with the date you stopped, so that nothing is ever sent to your address again', 'ORBES Client Services can also erase your place on request']],
+      ['fr', ['votre adresse e-mail, votre prénom, votre pays et votre consentement', 'la version de cette politique alors en vigueur', 'votre place sur la liste est rattachée à ce compte', "Votre place est conservée jusqu'à ce que vous demandiez à ORBES Client Services de l'effacer", 'utilisez le lien STOP THESE EMAILS de son e-mail : votre place reste, avec la date de votre désinscription, pour que rien ne soit plus jamais envoyé à votre adresse', 'ORBES Client Services peut aussi effacer votre place sur demande']],
     ] as const) {
       const text = sectionText(DOCUMENTS.privacy[lang], 'founding-list');
       for (const x of says) expect(text, `${lang}: ${x}`).toContain(x);
@@ -894,7 +894,9 @@ describe('legal pages: both languages, links, lexicon', () => {
       // emails, its "sends no email" sentences edited to the minimum, a LIVE RELEASE's batches and a draw opened to a
       // segment; the terms' article 6 (the reset link), 12 (selected collectors) and 13 (the pace); the FAQ's forgotten
       // password. The date of the lot's legal commit, after ORBES CARE's published 2026-10-15; article 11 unchanged.
-      '2026-10-21': '77f448f6b51c1dc9',
+      // The step's verification, the same day: the founding list's unsubscribe by its link only (Client Services erases),
+      // an email kept 90 days after it is sent, fails or is cancelled, and "a release by draw" in the segments.
+      '2026-10-21': 'd15232f011eb617d',
     };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
     expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });
