@@ -115,7 +115,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await srv?.close();
   });
 
-  /** An ORBES account holding `pieces` pieces (its tier: 1 TITANE, 3 PLATINE, 5 PALLADIUM). */
+  /** An ORBES account holding `pieces` pieces (its tier, CLUB_TIER_THRESHOLDS: from 1 TITANE, from 5 PLATINE, from 10 PALLADIUM). */
   async function account(pieces: number) {
     const { account: a, session } = await srv.ctx.services.auth.registerAccount({ email: `live.e2e.${++n}@example.com`, password: PASSWORD }, {});
     if (pieces > 0) await holdPieces(srv.ctx.db, a.id, pieces, f.modelId);
@@ -566,8 +566,9 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
 
   it('a paced release (W2): behind the next batch, its stream ended at T0 and its state read instead; its batch the next one, the stream again, then let in through it', async () => {
     const r = await release({ opensAt: new Date(Date.now() + 3_000), sizes: [{ label: '52', stock: 1 }], pace: { batch: 1, minutes: 60 }, turnSeconds: 120 });
-    // Three in the room before T0, by tier: the first let in at T0, the second next, this phone behind the next batch.
-    for (const pieces of [5, 3]) {
+    // Three in the room before T0, by tier (PALLADIUM, PLATINE, then this phone's TITANE: one tier each, so no draw
+    // orders them): the first let in at T0, the second next, this phone behind the next batch.
+    for (const pieces of [10, 5]) {
       const a = await account(pieces);
       await srv.ctx.services.live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id }, a.actor);
     }
