@@ -494,6 +494,9 @@ describe('admin enums mirror the server', () => {
     for (const name of ['ADDON_NAME_MAX', 'ADDON_LINE_MAX', 'ADDON_WEIGHT_G_MAX', 'ADDON_POSITION_MAX', 'ADDON_PRICE_MINOR_MAX', 'ADDON_UNITS_MAX'] as const) expect(web[name], name).toBe(serverSchema[name]);
     expect([...web.ORDER_ADDON_STATUSES]).toEqual([...serverSchema.ORDER_ADDON_STATUSES]);
     expect([...web.ORDER_ADDON_ADDED_BY]).toEqual([...serverSchema.ORDER_ADDON_ADDED_BY]);
+    // THE SET's bounds (macro scope K44, migration 0057), as the server holds them.
+    for (const name of ['SET_NAME_MAX', 'SET_PIECES_MIN', 'SET_PIECES_MAX', 'SET_PRICE_MINOR_MAX', 'DROP_SIZE_POSITION_MAX'] as const) expect(web[name], name).toBe(serverSchema[name]);
+    expect(web.SET_CODE_PATTERN.source).toBe(serverSchema.SET_CODE_PATTERN.source);
     expect([...web.AUTH_POLICY_KINDS]).toEqual([...SERVER_POLICY_KINDS]);
     expect([...web.ANOMALY_SORTS]).toEqual([...SERVER_ANOMALY_SORTS]);
     expect([...web.SCAN_STAT_EVENT_TYPES]).toEqual([...serverSchema.SCAN_STAT_EVENT_TYPES]);

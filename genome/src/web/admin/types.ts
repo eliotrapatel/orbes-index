@@ -389,6 +389,18 @@ export type OrderAddonStatus = (typeof ORDER_ADDON_STATUSES)[number];
 export const ORDER_ADDON_ADDED_BY = ['PURCHASE', 'COLLECTOR', 'STAFF'] as const;
 export type OrderAddonAddedBy = (typeof ORDER_ADDON_ADDED_BY)[number];
 
+/**
+ * THE SET's bounds (sets, set_models, drop_sizes, migration 0057, macro scope K44 T1): a set's name, at most, and its code
+ * (its reference and future Shopify handle); its pieces, 2 to 4 distinct models; its price, at most; a release's sizes,
+ * at most 24 per piece, so 96 on a set's.
+ */
+export const SET_NAME_MAX = 60;
+export const SET_CODE_PATTERN = /^[A-Z0-9][A-Z0-9-]{1,39}$/;
+export const SET_PIECES_MIN = 2;
+export const SET_PIECES_MAX = 4;
+export const SET_PRICE_MINOR_MAX = 100_000_000;
+export const DROP_SIZE_POSITION_MAX = 96;
+
 /** How the access rules of a LIVE RELEASE combine (drops.access_combine): every rule met, or any one of them. */
 export const ACCESS_COMBINES = ['AND', 'OR'] as const;
 export type AccessCombine = (typeof ACCESS_COMBINES)[number];

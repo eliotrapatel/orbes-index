@@ -156,6 +156,7 @@ import { tierOf } from './club.js';
 import { engravingPrice, engravingPrices, giftModelOf, readProgram, shippingRate } from './club-program.js';
 import { creditBalances, creditKindOrder, ensureGrants, usableAt, type CreditKind } from './tier-grants.js';
 import { modelSizeCandidates, offeredSku, savedSizeAmong, savedSizeHint, sizesForExchange } from './sizes.js';
+import { releaseModelId } from './release-offer.js';
 import { parcelOrders, RETURN_WINDOW_DAYS } from './parcels.js';
 import {
   accountAddonItems,
@@ -1327,7 +1328,7 @@ export async function ordersForLiveEntry(
   let skuId = e.sku_id;
   if (skuId === null) {
     // The size was offered when the release was made (plan NEXT LOT §3.3): a size set aside since stays its own.
-    skuId = (await offeredSku(tx, e.model_id, e.label, { allowSetAside: true })).skuId;
+    skuId = (await offeredSku(tx, releaseModelId(e), e.label, { allowSetAside: true })).skuId;
     await tx.updateTable('drop_sizes').set({ sku_id: skuId }).where('id', '=', e.size_id).execute();
   }
   const addons = await tx
@@ -1353,7 +1354,7 @@ export async function ordersForLiveEntry(
         piece,
         dropId: e.drop_id,
         accountId: e.account_id,
-        modelId: e.model_id,
+        modelId: releaseModelId(e),
         sizeLabel: sizeLabelOf(e.label),
         skuId,
         priceMinor: e.price_minor,
@@ -1417,7 +1418,7 @@ export async function orderForDrawEntry(
   if (e.size_id !== null && e.size_label !== null && e.size_label !== undefined) {
     let skuId = e.sku_id ?? null;
     if (skuId === null) {
-      skuId = (await offeredSku(tx, e.model_id, e.size_label, { allowSetAside: true })).skuId;
+      skuId = (await offeredSku(tx, releaseModelId(e), e.size_label, { allowSetAside: true })).skuId;
       await tx.updateTable('drop_sizes').set({ sku_id: skuId }).where('id', '=', e.size_id).execute();
     }
     sized = { label: sizeLabelOf(e.size_label), skuId };
@@ -1441,7 +1442,7 @@ export async function orderForDrawEntry(
         piece,
         dropId: e.drop_id,
         accountId: e.account_id,
-        modelId: e.model_id,
+        modelId: releaseModelId(e),
         sizeLabel: sized?.label ?? null,
         skuId: sized?.skuId ?? null,
         priceMinor: priced ? e.price_minor : null,

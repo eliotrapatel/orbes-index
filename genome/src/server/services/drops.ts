@@ -136,6 +136,7 @@ import { ORDER_AMOUNT_MAX_MINOR, ORDER_CURRENCIES, orderForDrawEntry } from './o
 import { readActingAccount } from './ownership.js';
 import { releaseFeasibility, type Feasibility } from './release-stock.js';
 import { savedSizeAmong } from './sizes.js';
+import { releaseModelId } from './release-offer.js';
 import { defaultLocationId, linkDropSizes } from './stock.js';
 import { isSegmentMember } from './segments.js';
 import type { EmailTriggers } from './email-triggers.js';
@@ -1346,7 +1347,7 @@ export class DropService {
     const match = await savedSizeAmong(
       this.db,
       accountId,
-      d.model_id,
+      releaseModelId(d),
       sizes.map((z) => ({ id: z.id, label: z.label, fitMinMm: z.fit_min_mm ?? null, fitMaxMm: z.fit_max_mm ?? null, stock: z.stock })),
     );
     const eligible = d.access_segment_id === null || (await isSegmentMember(this.db, d.access_segment_id, accountId, this.clock()));
@@ -1781,7 +1782,7 @@ export class DropService {
           const floor = (await this.heldPieces(tx, id)) + (await guaranteedPieces(tx, id));
           if (quantity < floor) throw guaranteesExceed(await guaranteedPieces(tx, id));
           const was = await auditedSizes(tx, id);
-          await writeDrawSizes(tx, id, change.modelId !== undefined ? knownId(change.modelId, () => notFound('Model', 'MODEL_NOT_FOUND')) : d.model_id, sizes);
+          await writeDrawSizes(tx, id, change.modelId !== undefined ? knownId(change.modelId, () => notFound('Model', 'MODEL_NOT_FOUND')) : releaseModelId(d), sizes);
           const next = await auditedSizes(tx, id);
           if (JSON.stringify(was) !== JSON.stringify(next)) {
             before.sizes = was;
@@ -2373,7 +2374,7 @@ export class DropService {
       id: r.id,
       title: r.title,
       description: r.description,
-      model: { id: r.model_id, name: r.model_name, type: r.model_type, active: r.model_active, variant: r.model_variant },
+      model: { id: releaseModelId(r), name: r.model_name, type: r.model_type, active: r.model_active, variant: r.model_variant },
       quantity: r.quantity,
       opensAt: r.opens_at,
       closesAt: r.closes_at,

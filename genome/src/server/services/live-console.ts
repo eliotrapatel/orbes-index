@@ -91,6 +91,7 @@ import { mediaUrl } from './media.js';
 import { knownLocation, linkDropSizes } from './stock.js';
 import { cleanQuestionWords, QuestionService, type AdminQuestion } from './question.js';
 import { releaseFeasibility, type Feasibility, type FeasibilitySize } from './release-stock.js';
+import { releaseModelId } from './release-offer.js';
 import { cancelMovedAnnouncements, cancelReleaseEmails } from './email.js';
 import { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES, afterRoomTimes, afterRoomTitle, cancelAfterRoom, type AfterRoomSkip } from './after-room.js';
 
@@ -1493,7 +1494,7 @@ export class LiveConsoleService {
         })
         .execute();
     }
-    await this.writeOffer(tx, id, a, child ? { modelId: child.model_id, ...(await this.offer(tx, id)) } : null);
+    await this.writeOffer(tx, id, a, child ? { modelId: releaseModelId(child), ...(await this.offer(tx, id)) } : null);
   }
 
   /** A release's after-room settings as stored; null without one. */
@@ -1505,7 +1506,7 @@ export class LiveConsoleService {
       .executeTakeFirst();
     if (!c) return null;
     return {
-      modelId: c.model_id,
+      modelId: releaseModelId(c),
       priceMinor: c.price_minor ?? 0,
       ...(await this.offer(db, c.id)),
       delayMinutes: c.after_room_delay_minutes ?? AFTER_ROOM_DELAY_MINUTES.default,
@@ -1535,7 +1536,7 @@ export class LiveConsoleService {
             : 'OPEN';
     return {
       id: c.id,
-      model: { id: c.model_id, name: c.model_name, type: c.model_type, active: c.model_active },
+      model: { id: releaseModelId(c), name: c.model_name, type: c.model_type, active: c.model_active },
       priceMinor: c.price_minor ?? 0,
       currency: c.currency ?? 'EUR',
       sizes: offer.sizes.map((x) => ({ id: x.id!, label: x.label, stock: x.stock })),
@@ -1563,7 +1564,7 @@ export class LiveConsoleService {
       db.selectFrom('live_tier_windows').select(['tier', 'turn_seconds', 'pay_minutes']).where('drop_id', '=', d.id).orderBy('tier').execute(),
     ]);
     return {
-      modelId: d.model_id,
+      modelId: releaseModelId(d),
       title: d.title,
       description: d.description,
       opensAt: d.opens_at,
@@ -1675,7 +1676,7 @@ export class LiveConsoleService {
     return {
       id: r.id,
       title: r.title,
-      model: { id: r.model_id, name: r.model_name, type: r.model_type, active: r.model_active },
+      model: { id: releaseModelId(r), name: r.model_name, type: r.model_type, active: r.model_active },
       phase,
       over: r.ended_at !== null && !holding,
       announcedAt: announcedAt(r),

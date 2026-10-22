@@ -70,6 +70,7 @@ import {
 } from './live.js';
 import { mediaUrl } from './media.js';
 import { savedSizeAmong } from './sizes.js';
+import { releaseModelId } from './release-offer.js';
 
 /** THE RELEASES' LIVE half lists at most this many releases. */
 export const LIVE_LIST_LIMIT = 50;
@@ -611,7 +612,7 @@ export class LiveRoomService {
     const match = await savedSizeAmong(
       this.db,
       accountId,
-      d.model_id,
+      releaseModelId(d),
       sizes.map((z) => ({ id: z.id, label: z.label, fitMinMm: z.fit_min_mm ?? null, fitMaxMm: z.fit_max_mm ?? null, stock: z.stock })),
     );
     return match ? { id: match.id, label: match.label } : null;

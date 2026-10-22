@@ -768,6 +768,18 @@ export const ORDER_ADDON_ADDED_BY = ['PURCHASE', 'COLLECTOR', 'STAFF'] as const;
 export type OrderAddonAddedBy = (typeof ORDER_ADDON_ADDED_BY)[number];
 /** What a hold of `stock_holds` is (migration 0056): an order's piece, or an add-on's unit. */
 export const STOCK_HOLD_KINDS = ['PIECE', 'ADD_ON'] as const;
+
+/**
+ * THE SET (migration 0057, macro scope K44 T1 to T4; lot M3 plan §5.2): a set's name, at most, and its code (its
+ * reference and future Shopify handle); its pieces, 2 to 4 distinct models (`set_models.position` 1..4); its base price
+ * and a set sale's price, at most; a release's sizes, at most 24 per piece, so 96 on a set's (`drop_sizes.position`).
+ */
+export const SET_NAME_MAX = 60;
+export const SET_CODE_PATTERN = /^[A-Z0-9][A-Z0-9-]{1,39}$/;
+export const SET_PIECES_MIN = 2;
+export const SET_PIECES_MAX = 4;
+export const SET_PRICE_MINOR_MAX = 100_000_000;
+export const DROP_SIZE_POSITION_MAX = 96;
 export type StockHoldKind = (typeof STOCK_HOLD_KINDS)[number];
 
 // ── Column helpers ─────────────────────────────────────────────────────────
@@ -1260,7 +1272,13 @@ export interface MediaObjectsTable {
  */
 export interface DropsTable {
   id: Generated<string>;
-  model_id: string;
+  /**
+   * The model the release sells; since migration 0057 (THE SET, T1) NULL on a set's release, which names its set instead
+   * (`drops_one_offer`: exactly one of the two).
+   */
+  model_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Migration 0057 (T1): the set the release sells (sets.id), or NULL on a model's; a set's release is never an after-room. */
+  set_id: ColumnType<string | null, string | null | undefined, string | null>;
   title: string;                       // 1..120 characters
   description: ColumnType<string | null, string | null | undefined, string | null>; // ≤ 2 000 characters
   quantity: number;                    // int ≥ 1
@@ -1501,13 +1519,17 @@ export interface ShopRequestsTable {
 /**
  * A size of a LIVE RELEASE (migration 0021), and since 0038 of a DRAW (plan NEXT LOT §3.6.F): 1 to 24 per drop
  * (`position`), a `label` of 1..12 characters unique per drop, its `stock` (≥ 0; a draw's size: its pieces). The
- * release's quantity is the sum of its stock. id and drop_id never change.
+ * release's quantity is the sum of its stock. id and drop_id never change. Since 0057 (THE SET, T1) a set's release
+ * gives its sizes per piece (`piece`, 1..24 each, positions 1..96), a label once per piece; id, drop_id and piece never
+ * change.
  */
 export interface DropSizesTable {
   id: Generated<string>;
   drop_id: string;
+  /** Migration 0057: the set's piece (set_models.position, 1..4) on a set's release; NULL on a model's. */
+  piece: ColumnType<number | null, number | null | undefined, number | null>;
   label: string;
-  position: number;                    // smallint 1..24
+  position: number;                    // smallint 1..96 (1..24 per piece)
   stock: number;                       // integer 0..10 000
   /** Migration 0022: the SKU on sale (skus.id, the release's model in this size); NULL until linked. */
   sku_id: ColumnType<string | null, string | null | undefined, string | null>;
@@ -2628,6 +2650,67 @@ export interface AddonChoicesTable {
 }
 
 /**
+ * A set (migration 0057, macro scope K44 T1; lot M3 plan §5.2): 2 to 4 models sold together at one price, as its own
+ * release. Its name (1..60, unique whatever the case), code (its reference and future Shopify handle, unique), base
+ * price and currency (both or neither, as a model's; a release carries its own), `active` (set aside when false, never
+ * deleted) and its one Shopify product (S5). id, created_at and created_by never change.
+ */
+export interface SetsTable {
+  id: Generated<string>;
+  name: string;
+  code: string;
+  base_price_minor: ColumnType<number | null, number | null | undefined, number | null>;
+  base_currency: ColumnType<string | null, string | null | undefined, string | null>;
+  active: WithDefault<boolean>;
+  shopify_product_id: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: TimestampDefault;
+  created_by: ColumnType<string | null, string | null | undefined, never>; // admin_users.id; NULL for a script
+  updated_at: TimestampDefault;
+}
+
+/** A set's piece (migration 0057, T1): its position 1..4 and its model (a model or a variant), each model once per set. */
+export interface SetModelsTable {
+  set_id: string;
+  position: number;                    // smallint 1..4
+  model_id: string;
+}
+
+/**
+ * The size a set release's entry chose for one piece (migration 0057, T1): a draw entry's (`drop_entry_sizes`) or a LIVE
+ * entry's (`live_entry_sizes`), a size of its release and of that piece; entry, release and piece never change.
+ */
+export interface EntrySizesTable {
+  entry_id: ColumnType<string, string, never>;
+  drop_id: ColumnType<string, string, never>;
+  piece: ColumnType<number, number, never>; // 1..4
+  size_id: string;                     // drop_sizes.id of the same release and piece
+}
+
+/** The size I'LL BE THERE chose for one piece of a set's LIVE (migration 0057, T1); release, account and piece never change. */
+export interface LiveInterestSizesTable {
+  drop_id: ColumnType<string, string, never>;
+  account_id: ColumnType<string, string, never>;
+  piece: ColumnType<number, number, never>; // 1..4
+  size_id: string;
+}
+
+/**
+ * A set sold (migration 0057, T1 and T2): its set, its release (NULL for a sale on the future Shopify store, S2), its
+ * account, the one price and currency (both or neither), its Shopify line item (S5); one order per piece names it.
+ * id, set, release, account and creation never change.
+ */
+export interface SetSalesTable {
+  id: Generated<string>;
+  set_id: ColumnType<string, string, never>;
+  drop_id: ColumnType<string | null, string | null | undefined, never>;
+  account_id: ColumnType<string, string, never>;
+  price_minor: ColumnType<number | null, number | null | undefined, number | null>;
+  currency: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: ColumnType<Date, Date | string | undefined, never>;
+  shopify_line_item_id: ColumnType<string | null, string | null | undefined, string | null>;
+}
+
+/**
  * Read-only view (migration 0056): every hold on stock from one source, the orders' (`orders.reservation` STOCK or
  * AWAITING, kind PIECE, `id` the order's) and the add-on units HELD (as STOCK, kind ADD_ON, `id` the unit's).
  */
@@ -2717,6 +2800,12 @@ export interface OrdersTable {
   queue_first: WithDefault<boolean>;
   /** An EXCHANGE order's original (unique, never changed). */
   exchange_of_order_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /**
+   * Migration 0057 (THE SET, T2): the set sale this order is a piece of (set_sales.id, of the order's account) and that
+   * piece (set_models.position, 1..4), both or neither, never changed; an EXCHANGE order joins it in its piece's place.
+   */
+  set_sale_id: ColumnType<string | null, string | null | undefined, string | null>;
+  set_piece: ColumnType<number | null, number | null | undefined, number | null>;
   /** Start packing: set on every order of a parcel, never cleared (the collector's address and engraving lock). */
   packing_started_at: TimestampNullable;
   /**
@@ -2815,6 +2904,8 @@ export interface OrderCasesTable {
   cancelled_at: TimestampNullable;
   cancelled_by: ColumnType<string | null, string | null | undefined, string | null>;
   cancel_note: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Migration 0057 (THE SET, T3): the cases of one set's return, opened and decided together (RETURN only), never changed. */
+  group_id: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
 /** An order's history (migration 0022), append-only: each change as its audit action, the status after it, a note, who. */
@@ -3411,6 +3502,12 @@ export interface Database {
   addon_item_prices: AddonItemPricesTable;
   order_addon_items: OrderAddonItemsTable;
   addon_choices: AddonChoicesTable;
+  sets: SetsTable;
+  set_models: SetModelsTable;
+  drop_entry_sizes: EntrySizesTable;
+  live_entry_sizes: EntrySizesTable;
+  live_interest_sizes: LiveInterestSizesTable;
+  set_sales: SetSalesTable;
   orders: OrdersTable;
   order_events: OrderEventsTable;
   bench_items: BenchItemsTable;
@@ -3561,6 +3658,8 @@ export type CircleRsvpRow = Selectable<CircleRsvpsTable>;
 export type CirclePollVoteRow = Selectable<CirclePollVotesTable>;
 export type ClubTierRow = Selectable<ClubTiersTable>;
 export type DropSizeRow = Selectable<DropSizesTable>;
+export type SetRow = Selectable<SetsTable>;
+export type SetSaleRow = Selectable<SetSalesTable>;
 export type LiveEntryRow = Selectable<LiveEntriesTable>;
 export type LiveEntryUpdate = Updateable<LiveEntriesTable>;
 export type LiveAddonRow = Selectable<LiveAddonsTable>;

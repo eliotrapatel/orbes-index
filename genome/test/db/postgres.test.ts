@@ -526,4 +526,75 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     expect(await db.insertInto('addon_choices').values({ shop_request_id: request.id, addon_id: cloth.id, units: 3 }).returning(['units']).executeTakeFirstOrThrow()).toEqual({ units: 3 });
     await expect(db.insertInto('addon_choices').values({ shop_request_id: request.id, addon_id: cloth.id, units: 1 }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'addon_choices_shop_request_key'));
   });
+
+  it('holds sets, set releases, entry sizes, set sales and grouped cases by their CHECKs (0057)', async () => {
+    // Its own letter: this database's categories already hold A to F, S, W, P, H, G, K and N (the tests above); the demo seed's are J, L, W, F and A.
+    await db.insertInto('categories').values({ id: 27, code: 'Q', name: 'Sets parity' }).execute();
+    const [ring, chain] = await db
+      .insertInto('models')
+      .values([{ category_id: 27, name: 'SET RING', type: 'RING', sku_prefix: 'SET-PG-R' }, { category_id: 27, name: 'SET CHAIN', type: 'NECKLACE', sku_prefix: 'SET-PG-C' }])
+      .returning('id')
+      .execute();
+    const account = await db.insertInto('accounts').values({ email: 'set-pg0057@example.com', email_normalized: 'set-pg0057@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const location = await db.insertInto('stock_locations').values({ name: 'SETS PG 0057' }).returning('id').executeTakeFirstOrThrow();
+    // A set: its name once whatever the case, its code, its price with its currency; its pieces, each model once.
+    const set = await db.insertInto('sets').values({ name: 'THE PAIR', code: 'THE-PAIR-PG', base_price_minor: 90000, base_currency: 'EUR' }).returning(['id', 'active']).executeTakeFirstOrThrow();
+    expect(set.active).toBe(true);
+    await expect(db.insertInto('sets').values({ name: 'the pair', code: 'OTHER-PG' }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'sets_name_key'));
+    await expect(db.insertInto('sets').values({ name: 'LOWER', code: 'lower' }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'sets_code_check'));
+    await expect(db.insertInto('sets').values({ name: 'HALF', code: 'HALF-PG', base_price_minor: 1 }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'sets_base_price'));
+    const pieces = await db.insertInto('set_models').values([{ set_id: set.id, position: 1, model_id: ring.id }, { set_id: set.id, position: 2, model_id: chain.id }]).returning('position').execute();
+    expect(pieces.map((p) => p.position)).toEqual([1, 2]);
+    await expect(db.insertInto('set_models').values({ set_id: set.id, position: 3, model_id: ring.id }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'set_models_model_key'));
+    // A release of the set, never of a model too; its sizes per piece, a label once per piece, positions to 96.
+    const release = { title: 'THE PAIR', quantity: 2, opens_at: new Date('2026-12-01T10:00:00Z'), closes_at: new Date('2026-12-02T10:00:00Z'), seed_enc: `v1.${'A'.repeat(16)}.${'B'.repeat(64)}`, seed_hash: new Uint8Array(32) };
+    await expect(db.insertInto('drops').values({ ...release, model_id: ring.id, set_id: set.id }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_one_offer'));
+    await expect(db.insertInto('drops').values(release).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_one_offer'));
+    const draw = await db.insertInto('drops').values({ ...release, set_id: set.id }).returning(['id', 'model_id']).executeTakeFirstOrThrow();
+    expect(draw.model_id).toBeNull();
+    const [ring52, chain45] = await db
+      .insertInto('drop_sizes')
+      .values([{ drop_id: draw.id, piece: 1, label: '52', position: 1, stock: 2 }, { drop_id: draw.id, piece: 2, label: '45', position: 96, stock: 2 }])
+      .returning(['id', 'piece'])
+      .execute();
+    expect(ring52.piece).toBe(1);
+    await db.insertInto('drop_sizes').values({ drop_id: draw.id, piece: 2, label: '52', position: 25, stock: 0 }).execute();
+    await expect(db.insertInto('drop_sizes').values({ drop_id: draw.id, piece: 1, label: '52', position: 2, stock: 0 }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'drop_sizes_label_key'));
+    await expect(db.insertInto('drop_sizes').values({ drop_id: draw.id, piece: 1, label: '56', position: 97, stock: 0 }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'drop_sizes_position_check'));
+    // An entry's size per piece, of its release and that piece.
+    const entry = await db.insertInto('drop_entries').values({ drop_id: draw.id, account_id: account.id }).returning('id').executeTakeFirstOrThrow();
+    await expect(db.insertInto('drop_entry_sizes').values({ entry_id: entry.id, drop_id: draw.id, piece: 2, size_id: ring52.id }).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e, 'drop_entry_sizes_size_fkey'));
+    const chosen = await db
+      .insertInto('drop_entry_sizes')
+      .values([{ entry_id: entry.id, drop_id: draw.id, piece: 1, size_id: ring52.id }, { entry_id: entry.id, drop_id: draw.id, piece: 2, size_id: chain45.id }])
+      .returning('piece')
+      .execute();
+    expect(chosen.map((c) => c.piece)).toEqual([1, 2]);
+    await expect(sql`UPDATE drop_entry_sizes SET piece = 3 WHERE entry_id = ${entry.id} AND piece = 2`.execute(db)).rejects.toSatisfy(isGuardViolation);
+    // A set sale of a release of its set, its price with its currency; its orders of the buyer's account, both columns or neither.
+    await expect(db.insertInto('set_sales').values({ set_id: set.id, drop_id: draw.id, account_id: account.id, price_minor: 90000 }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'set_sales_price'));
+    const sale = await db.insertInto('set_sales').values({ set_id: set.id, drop_id: draw.id, account_id: account.id, price_minor: 90000, currency: 'EUR' }).returning(['id', 'price_minor']).executeTakeFirstOrThrow();
+    expect(sale.price_minor).toBe(90000);
+    const store = await db.insertInto('set_sales').values({ set_id: set.id, account_id: account.id }).returning('drop_id').executeTakeFirstOrThrow();
+    expect(store.drop_id).toBeNull();
+    await db.updateTable('drop_entries').set({ status: 'CONFIRMED', tier: 0, seniority: 0, rank: 1, respond_by: new Date(), handled_at: new Date() }).where('id', '=', entry.id).execute();
+    const order = { channel: 'DRAW' as const, drop_entry_id: entry.id, drop_id: draw.id, account_id: account.id, location_id: location.id, price_minor: 45000, currency: 'EUR' };
+    await expect(db.insertInto('orders').values({ ...order, piece: 1, model_id: ring.id, set_sale_id: sale.id }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'orders_set_sale'));
+    const [first, second] = await db
+      .insertInto('orders')
+      .values([{ ...order, piece: 1, model_id: ring.id, set_sale_id: sale.id, set_piece: 1 }, { ...order, piece: 2, model_id: chain.id, set_sale_id: sale.id, set_piece: 2 }])
+      .returning(['id', 'set_piece'])
+      .execute();
+    expect([first.set_piece, second.set_piece]).toEqual([1, 2]);
+    await expect(sql`UPDATE orders SET set_piece = 2 WHERE id = ${first.id}`.execute(db)).rejects.toSatisfy(isGuardViolation);
+    // Its return: a group of RETURN cases.
+    const group = '00000000-0000-4000-8000-000000000057';
+    const kases = await db
+      .insertInto('order_cases')
+      .values([first, second].map((o) => ({ order_id: o.id, kind: 'RETURN' as const, reason: 'SIZE' as const, opened_by_type: 'account' as const, opened_by_id: account.id, group_id: group })))
+      .returning('group_id')
+      .execute();
+    expect(kases.map((k) => k.group_id)).toEqual([group, group]);
+    await expect(sql`UPDATE order_cases SET group_id = NULL WHERE order_id = ${first.id}`.execute(db)).rejects.toSatisfy(isGuardViolation);
+  });
 });

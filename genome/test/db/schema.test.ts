@@ -1610,6 +1610,83 @@ describe('schema', () => {
     await expect(t.db.deleteFrom('addon_items').where('id', '=', addon.id).execute()).rejects.toSatisfy(isForeignKeyViolation);
   });
 
+  it('sets (0057): every bound is schema.ts\'s; the mirror at work: a set of two models, its draw with sizes per piece, an entry\'s size per piece, a set sale with one order per piece, a grouped return', async () => {
+    const def = async (table: string, constraint: string) =>
+      (await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = ${table}::regclass AND conname = ${constraint}`.execute(t.db)).rows[0].def;
+    expect(await def('sets', 'sets_name_check')).toContain(`<= ${S.SET_NAME_MAX}`);
+    expect(await def('sets', 'sets_code_check')).toContain(S.SET_CODE_PATTERN.source);
+    expect(await def('sets', 'sets_base_price_minor_check')).toContain(`<= ${S.SET_PRICE_MINOR_MAX}`);
+    expect(await def('set_sales', 'set_sales_price_minor_check')).toContain(`<= ${S.SET_PRICE_MINOR_MAX}`);
+    for (const [table, constraint] of [['set_models', 'set_models_position_check'], ['drop_sizes', 'drop_sizes_piece_check'], ['drop_entry_sizes', 'drop_entry_sizes_piece_check'], ['live_entry_sizes', 'live_entry_sizes_piece_check'], ['live_interest_sizes', 'live_interest_sizes_piece_check'], ['orders', 'orders_set_piece_check']] as const) {
+      expect(await def(table, constraint), constraint).toContain(`<= ${S.SET_PIECES_MAX}`);
+    }
+    expect(await def('drop_sizes', 'drop_sizes_position_check')).toContain(`<= ${S.DROP_SIZE_POSITION_MAX}`);
+
+    const { model: ring } = await seedProduct(t.db);
+    const { model: chain } = await seedProduct(t.db);
+    const admin = await t.db.insertInto('admin_users').values({ email: 'set-s0057@orbes.test', email_normalized: 'set-s0057@orbes.test', password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow();
+    const account = await t.db.insertInto('accounts').values({ email: 'set-s0057@example.com', email_normalized: 'set-s0057@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const location = await t.db.insertInto('stock_locations').values({ name: 'SETS S0057' }).returning('id').executeTakeFirstOrThrow();
+    const set = await t.db.insertInto('sets').values({ name: 'THE PAIR', code: 'THE-PAIR-S0057', base_price_minor: 90000, base_currency: 'EUR', created_by: admin.id }).returningAll().executeTakeFirstOrThrow();
+    expect(set).toEqual({
+      id: expect.any(String), name: 'THE PAIR', code: 'THE-PAIR-S0057', base_price_minor: 90000, base_currency: 'EUR', active: true, shopify_product_id: null,
+      created_at: expect.any(Date), created_by: admin.id, updated_at: expect.any(Date),
+    });
+    await t.db.insertInto('set_models').values([{ set_id: set.id, position: 1, model_id: ring.id }, { set_id: set.id, position: 2, model_id: chain.id }]).execute();
+    await expect(t.db.insertInto('set_models').values({ set_id: set.id, position: 3, model_id: ring.id }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'set_models_model_key'));
+
+    // The set's draw: no model; its sizes per piece, a label once per piece.
+    const draw = await t.db
+      .insertInto('drops')
+      .values({ set_id: set.id, title: 'THE PAIR S0057', quantity: 4, opens_at: new Date('2026-11-01T10:00:00Z'), closes_at: new Date('2026-11-02T10:00:00Z'), seed_enc: `v1.${'A'.repeat(16)}.${'B'.repeat(64)}`, seed_hash: new Uint8Array(32), created_by: admin.id })
+      .returning(['id', 'model_id', 'set_id'])
+      .executeTakeFirstOrThrow();
+    expect(draw).toEqual({ id: expect.any(String), model_id: null, set_id: set.id });
+    const size = (piece: number, label: string, position: number) =>
+      t.db.insertInto('drop_sizes').values({ drop_id: draw.id, piece, label, position, stock: 2 }).returning(['id', 'piece']).executeTakeFirstOrThrow();
+    const ring52 = await size(1, '52', 1);
+    await size(1, '54', 2);
+    const chain45 = await size(2, '45', 25);
+    await size(2, '52', 96);
+    expect(ring52).toEqual({ id: expect.any(String), piece: 1 });
+    await expect(size(2, '45', 26)).rejects.toSatisfy((e) => isUniqueViolation(e, 'drop_sizes_label_key'));
+
+    // An entry: no size of its own, one per piece.
+    const entry = await t.db.insertInto('drop_entries').values({ drop_id: draw.id, account_id: account.id }).returning('id').executeTakeFirstOrThrow();
+    await t.db.insertInto('drop_entry_sizes').values([{ entry_id: entry.id, drop_id: draw.id, piece: 1, size_id: ring52.id }, { entry_id: entry.id, drop_id: draw.id, piece: 2, size_id: chain45.id }]).execute();
+    await expect(t.db.updateTable('drop_entry_sizes').set({ size_id: chain45.id }).where('entry_id', '=', entry.id).where('piece', '=', 1).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e, 'drop_entry_sizes_size_fkey'));
+    expect(await t.db.selectFrom('drop_entry_sizes').select(['piece', 'size_id']).where('entry_id', '=', entry.id).orderBy('piece').execute()).toEqual([
+      { piece: 1, size_id: ring52.id },
+      { piece: 2, size_id: chain45.id },
+    ]);
+
+    // The set sale and one order per piece, travelling with the first.
+    const sale = await t.db.insertInto('set_sales').values({ set_id: set.id, drop_id: draw.id, account_id: account.id, price_minor: 90000, currency: 'EUR' }).returningAll().executeTakeFirstOrThrow();
+    expect(sale).toEqual({ id: expect.any(String), set_id: set.id, drop_id: draw.id, account_id: account.id, price_minor: 90000, currency: 'EUR', created_at: expect.any(Date), shopify_line_item_id: null });
+    await t.db.updateTable('drop_entries').set({ status: 'CONFIRMED', tier: 0, seniority: 0, rank: 1, respond_by: new Date(), handled_at: new Date() }).where('id', '=', entry.id).execute();
+    const order = (piece: number, modelId: string, withOrderId: string | null) =>
+      t.db
+        .insertInto('orders')
+        .values({ channel: 'DRAW', drop_entry_id: entry.id, piece, drop_id: draw.id, account_id: account.id, model_id: modelId, location_id: location.id, price_minor: piece === 1 ? 50000 : 40000, currency: 'EUR', set_sale_id: sale.id, set_piece: piece, with_order_id: withOrderId })
+        .returning(['id', 'set_sale_id', 'set_piece'])
+        .executeTakeFirstOrThrow();
+    const first = await order(1, ring.id, null);
+    const second = await order(2, chain.id, first.id);
+    expect(second).toEqual({ id: expect.any(String), set_sale_id: sale.id, set_piece: 2 });
+    await expect(sql`UPDATE orders SET set_piece = 1 WHERE id = ${second.id}`.execute(t.db)).rejects.toSatisfy(isGuardViolation);
+
+    // Its return: one case per piece, sharing a group.
+    const group = '00000000-0000-4000-8000-000000000057';
+    const kases = await t.db
+      .insertInto('order_cases')
+      .values([first, second].map((o) => ({ order_id: o.id, kind: 'RETURN' as const, reason: 'SIZE' as const, opened_by_type: 'account' as const, opened_by_id: account.id, group_id: group })))
+      .returning('group_id')
+      .execute();
+    expect(kases).toEqual([{ group_id: group }, { group_id: group }]);
+    await expect(t.db.insertInto('order_cases').values({ order_id: first.id, kind: 'EXCHANGE', reason: 'SIZE', exchange_sku_id: null, opened_by_type: 'admin', opened_by_id: admin.id, group_id: group }).execute()).rejects.toSatisfy((e) => isCheckViolation(e));
+    await expect(t.db.deleteFrom('sets').where('id', '=', set.id).execute()).rejects.toSatisfy(isForeignKeyViolation);
+  });
+
   it('product_status_history is append-only; genomes and keys are never deleted (key ids never reused)', async () => {
     const { product } = await seedProduct(t.db);
     const h = await t.db

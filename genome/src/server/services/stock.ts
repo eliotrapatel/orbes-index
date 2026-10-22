@@ -51,6 +51,7 @@ import type { AuditService } from './audit.js';
 import { writeJournal } from './journal.js';
 import { serveWaiting } from './orders.js';
 import { offeredSku } from './sizes.js';
+import { releaseModelId } from './release-offer.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -395,7 +396,7 @@ export async function linkSkus(db: Db): Promise<{ products: number; sizes: numbe
     .execute();
   for (const s of onSale) {
     sizes += await inTransaction(db, async (tx) => {
-      const skuId = await ensureSku(tx, s.model_id, s.label);
+      const skuId = await ensureSku(tx, releaseModelId(s), s.label);
       const r = await tx.updateTable('drop_sizes').set({ sku_id: skuId }).where('id', '=', s.id).where('sku_id', 'is', null).executeTakeFirst();
       return Number(r.numUpdatedRows);
     });
