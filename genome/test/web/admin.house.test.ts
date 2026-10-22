@@ -153,7 +153,7 @@ describe('MOMENTS in words', () => {
     expect(momentSwitch(moment())).toEqual({ text: 'OFF', tone: 'muted', note: 'Not sent.' });
     expect(momentSwitch(moment({ enabled: true, enabledAt: '2026-10-21T08:00:00.000Z' }))).toEqual({ text: 'ON', tone: 'solid', note: 'Since 21 OCT 2026 · 10:00 Paris' });
     expect(switchOnBody('NINETY_DAYS')).toBe(
-      '90 days away: Ninety days without a visit: no sign-in, session or scan, ORBES writes this message in the collector’s MESSAGES. From now on: nothing is sent for what happened before.',
+      '90 days away: Ninety days without a visit: no sign-in, session, scan or page viewed, ORBES writes this message in the collector’s MESSAGES. From now on: nothing is sent for what happened before.',
     );
     expect(momentWordsState(moment())).toBe('Default words');
     expect(momentWordsState(moment({ title: 'X' }))).toBe('Edited: title');

@@ -129,7 +129,7 @@ export const HOUSE_MOMENT_INFO: Readonly<Record<HouseMoment, { name: string; whe
   CREDIT_EXPIRING: { name: 'Credit ending', when: 'A credit with a balance left ends in 7 days.' },
   PRIVATE_CARE: { name: 'PRIVATE CARE', when: 'A collector reaches the tier PRIVATE CARE opens from, with a piece held.' },
   OWNERSHIP_YEAR: { name: 'One year', when: 'A piece has been its owner’s for one year.' },
-  NINETY_DAYS: { name: '90 days away', when: 'Ninety days without a visit: no sign-in, session or scan.' },
+  NINETY_DAYS: { name: '90 days away', when: 'Ninety days without a visit: no sign-in, session, scan or page viewed.' },
 });
 
 export const momentName = (m: HouseMoment): string => HOUSE_MOMENT_INFO[m]?.name ?? m;
