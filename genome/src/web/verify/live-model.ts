@@ -19,7 +19,7 @@
 import { onComputer } from '../shared/desktop.js';
 import { isLookbookSlug } from '../shared/lookbook.js';
 import { LIVE, RELEASES, SETS } from './copy.js';
-import { afterRoomPath, isReleaseId, releasePath, setCard, tierLabel, zonedDate, type EntryModel, type MyEntryModel, type SetCardModel } from './releases-model.js';
+import { afterRoomPath, entrySizes, isReleaseId, releasePath, setCard, tierLabel, zonedDate, type EntryModel, type MyEntryModel, type SetCardModel } from './releases-model.js';
 import type {
   AfterRoomDoor,
   LiveAccess,
@@ -34,6 +34,7 @@ import type {
   LiveRoom,
   LiveRoomSize,
   LiveSheet,
+  PieceSizeRef,
 } from './types.js';
 import { formatMoney, modelWithVariant, upper } from './view-model.js';
 import { referenceWords, releaseContext } from './messages-model.js';
@@ -321,7 +322,8 @@ export function liveScreen(i: LiveScreenInput): LiveScreenKind {
       case 'QUEUED': {
         // W2: waiting for its batch on a paced release, the queue (its place, its estimated entry time) until let in.
         if (entry.queue) return 'queue';
-        // Sold out in its size: not enough pieces free nor held (which may return) to serve it.
+        // Sold out in its size (a set's: in one of its sizes): not enough pieces free nor held (which may return) to serve it.
+        if (isSetEntry(entry)) return setShort(i.room, entry) ? 'soldOut' : 'line';
         const left = servable(roomSize(i.room, entry.size.id));
         return left !== null && left < entry.quantity ? 'soldOut' : 'line';
       }
@@ -358,14 +360,15 @@ export interface ReadyCheck {
  * READY CHECK: signed in · access · size · connection live · clock synced to ORBES. A size preselected from YOUR SIZES
  * (AC-01, `toConfirm`) reads `52 · TO CONFIRM`, not ready until the collector taps a size or enters.
  */
-export function readyChecks(o: { access: LiveAccess | null; size: string | null; toConfirm?: boolean; connection: 'live' | 'reconnecting'; synced: boolean }): ReadyCheck[] {
+export function readyChecks(o: { access: LiveAccess | null; size: string | null; toConfirm?: boolean; connection: 'live' | 'reconnecting'; synced: boolean; set?: boolean }): ReadyCheck[] {
   const r = LIVE.ready;
   const tier = o.access?.tier ?? 0;
   const confirming = o.size !== null && o.toConfirm === true;
   return [
     { label: r.signedIn, value: '', ok: true },
     { label: r.access, value: o.access?.allowed ? (tier >= 1 ? tierLabel(tier) : r.granted) : '', ok: o.access?.allowed === true },
-    { label: r.size, value: o.size === null ? r.choose : confirming ? `${o.size} · ${r.toConfirm}` : o.size, ok: o.size !== null && !confirming },
+    // Macro scope K44 T1: a set's sizes on one line (`SIZE 17 · 52 · 45`), ready once every piece has one.
+    { label: o.set ? SETS.live.readySizes : r.size, value: o.size === null ? r.choose : confirming ? `${o.size} · ${r.toConfirm}` : o.size, ok: o.size !== null && !confirming },
     { label: r.connection, value: o.connection === 'live' ? r.live : r.reconnecting, ok: o.connection === 'live' },
     { label: r.clock, value: o.synced ? r.synced : r.syncing, ok: o.synced },
   ];
@@ -422,6 +425,118 @@ export function initialSize(sheet: LiveSheet, entry: LiveEntry | null, interest:
   return initialPick(sheet, entry, interest, savedSize).sizeId;
 }
 
+// ── A set's release (macro scope K44 T1, T4) ───────────────────────────────
+
+/** An entry (or an interest) of a set's release: its size per piece. */
+export function isSetEntry(e: { sizes?: readonly PieceSizeRef[] | null } | null | undefined): boolean {
+  return Array.isArray(e?.sizes) && e.sizes.length > 0;
+}
+
+/** A piece of a set's LIVE RELEASE on its page: its place in the set, its name (`HALO`, else PIECE 2), its line, its sizes with stock. */
+export interface LivePieceModel {
+  piece: number;
+  name: string;
+  /** `HALO · RING`. */
+  line: string;
+  sizes: { id: string; label: string }[];
+}
+
+/** A set's pieces with their sizes, in the set's order (each from its stage); none on a model's release. */
+export function livePieces(s: Pick<LiveSheet, 'set' | 'sizes'>): LivePieceModel[] {
+  const pieces = Array.isArray(s.set?.pieces) ? s.set.pieces : [];
+  return pieces
+    .filter((p) => p && Number.isInteger(p.piece))
+    .map((p) => {
+      const name = typeof p.name === 'string' && p.name.trim() ? upper(modelWithVariant(p.name, p.variant ?? null)) : SETS.piece(p.piece);
+      return {
+        piece: p.piece,
+        name,
+        line: [name, upper(p.type ?? '')].filter((x) => x.length > 0).join(' · '),
+        sizes: (Array.isArray(s.sizes) ? s.sizes : []).filter((z) => z.piece === p.piece && z.stock > 0).map((z) => ({ id: z.id, label: z.label })),
+      };
+    })
+    .filter((p) => p.sizes.length > 0);
+}
+
+/** One piece's sizes as its picker offers them: `available` while the room says a piece of it can still be served. */
+export function pieceSizeChoices(p: LivePieceModel, room: LiveRoom | null, selected: string | null): SizeChoice[] {
+  return p.sizes.map((z) => ({ id: z.id, label: z.label, available: (servable(roomSize(room, z.id)) ?? 1) >= 1, selected: z.id === selected }));
+}
+
+/**
+ * Each piece's size preselected, as a model's (initialPick): the entry's, the one said with I'LL BE THERE, the one YOUR
+ * SIZES preselects for that piece (the server's `savedSizes`; to be confirmed), the only size of the piece; none otherwise.
+ */
+export function initialSetPick(
+  pieces: readonly LivePieceModel[],
+  entry: LiveEntry | null,
+  interest: LiveInterest | null,
+  saved: readonly PieceSizeRef[] | null | undefined,
+): Map<number, { sizeId: string; from: InitialSizeFrom }> {
+  const out = new Map<number, { sizeId: string; from: InitialSizeFrom }>();
+  const held = heldEntry(entry);
+  const of = (list: readonly PieceSizeRef[] | null | undefined, piece: number) => (Array.isArray(list) ? list.find((x) => x?.piece === piece) : undefined);
+  for (const p of pieces) {
+    const known = (id: string | undefined) => typeof id === 'string' && p.sizes.some((z) => z.id === id);
+    const own = of(held?.sizes, p.piece);
+    const there = of(interest?.sizes, p.piece);
+    const yours = of(saved, p.piece);
+    if (own && known(own.id)) out.set(p.piece, { sizeId: own.id, from: 'entry' });
+    else if (there && known(there.id)) out.set(p.piece, { sizeId: there.id, from: 'interest' });
+    else if (yours && known(yours.id)) out.set(p.piece, { sizeId: yours.id, from: 'saved' });
+    else if (p.sizes.length === 1) out.set(p.piece, { sizeId: p.sizes[0]!.id, from: 'only' });
+  }
+  return out;
+}
+
+/** The sizes a set's entry (or I'LL BE THERE) sends, in the set's order, once every piece has one of its own; null while one is missing. */
+export function liveSetChoice(pieces: readonly LivePieceModel[], picked: ReadonlyMap<number, { sizeId: string }>): { piece: number; sizeId: string }[] | null {
+  const out = pieces.map((p) => ({ piece: p.piece, sizeId: picked.get(p.piece)?.sizeId ?? '' }));
+  return out.length > 0 && out.every((x) => pieces.find((p) => p.piece === x.piece)!.sizes.some((z) => z.id === x.sizeId)) ? out : null;
+}
+
+/** The labels of the sizes picked, in the set's order (`17`, `52`, `45`), once every piece has one; null otherwise. */
+export function pickedLabels(pieces: readonly LivePieceModel[], picked: ReadonlyMap<number, { sizeId: string }>): string[] | null {
+  const choice = liveSetChoice(pieces, picked);
+  return choice ? choice.map((x) => pieces.find((p) => p.piece === x.piece)!.sizes.find((z) => z.id === x.sizeId)!.label) : null;
+}
+
+/** An entry's or an interest's sizes in the set's order: `SIZE 17 · 52 · 45`; '' without them. */
+export function setSizesLine(e: { sizes?: readonly PieceSizeRef[] | null } | null | undefined): string {
+  const labels = entrySizes(e ?? null);
+  return labels.length > 0 ? SETS.live.sizes(labels) : '';
+}
+
+/**
+ * The first of a set entry's sizes that cannot serve it (its pieces free or held, which may return, fewer than its sets),
+ * with its piece's name from the room; null while every one can. Null without the room.
+ */
+export function setShort(room: LiveRoom | null, entry: LiveEntry): { piece: number; label: string; name: string; held: number } | null {
+  if (!room) return null;
+  for (const z of [...(entry.sizes ?? [])].sort((a, b) => a.piece - b.piece)) {
+    const size = roomSize(room, z.id);
+    const n = servable(size);
+    if (n !== null && n < entry.quantity) {
+      const p = room.pieces?.find((x) => x.piece === z.piece);
+      const name = p?.name ? upper(modelWithVariant(p.name, p.variant)) : SETS.piece(z.piece);
+      return { piece: z.piece, label: z.label, name, held: size?.held ?? 0 };
+    }
+  }
+  return null;
+}
+
+/** The hold's pieces (macro scope K44 T1): each its name and the size chosen for it (`HALO`, `SIZE 52`), in the set's order. */
+export function heldPieces(entry: LiveEntry, room: LiveRoom | null, sheet: Pick<LiveSheet, 'set'> | null): { name: string; size: string }[] {
+  return [...(entry.sizes ?? [])]
+    .filter((z) => z && Number.isInteger(z.piece))
+    .sort((a, b) => a.piece - b.piece)
+    .map((z) => {
+      const p = sheet?.set?.pieces.find((x) => x.piece === z.piece) ?? room?.pieces?.find((x) => x.piece === z.piece);
+      const name = p?.name ? upper(modelWithVariant(p.name, p.variant ?? null)) : SETS.piece(z.piece);
+      return { name, size: LIVE.size(z.label) };
+    });
+}
+
 /** The last minute: the lock's orbits turn back into alignment. */
 export const LOCK_MS = 60 * SECOND;
 
@@ -470,13 +585,26 @@ export function lineFacts(room: LiveRoom, sizeId: string, sizeLabel: string): Li
   };
 }
 
+/** A set's line (macro scope K44 T1): its figures in sets, read in no one size (the entry's place is read in every one). */
+export function setLineFacts(room: LiveRoom): LineFacts {
+  const gone = Math.max(0, room.quantity - room.left - room.held);
+  return {
+    left: SETS.live.left(room.left, room.quantity),
+    held: room.held > 0 ? SETS.live.held(room.held) : null,
+    cells: room.quantity > 0 && room.quantity <= METER_CELLS ? Array.from({ length: room.quantity }, (_, i) => (i < gone ? 'gone' : i < gone + room.held ? 'held' : 'free')) : null,
+    taken: room.quantity > 0 ? Math.min(1, (gone + room.held) / room.quantity) : 0,
+  };
+}
+
 /** What the page says aloud of the account's place. */
 export function placeAnnouncement(entry: LiveEntry): string | null {
   if (entry.status !== 'QUEUED' || entry.position === null) return null;
+  if (isSetEntry(entry)) return SETS.live.announcePlace(entry.position, entry.ahead ?? 0);
   return LIVE.announce.place(entry.position, entry.ahead ?? 0, entry.size.label);
 }
 
 export function aheadLine(entry: LiveEntry): string {
+  if (isSetEntry(entry)) return SETS.live.ahead(entry.ahead ?? 0);
   return LIVE.ahead(entry.ahead ?? 0, entry.size.label);
 }
 
@@ -655,7 +783,7 @@ export interface LiveSheetModel {
   /** `RING · ORBIT` once the name is revealed. */
   line: string | null;
   price: string;
-  /** `€ 5 050 · 25 PIECES`: the price and the quantity line, as the room and the release's card say them. */
+  /** `€ 5 050 · 25 PIECES`: the price and the quantity line, as the room and the release's card say them; a set's with `1 SET PER PERSON` after it. */
   offer: string;
   when: { paris: string; local: string | null };
   /** `FOR OWNERS FROM PLATINE`, `FOR COLLECTORS WHO HAVE TAKEN PART IN 3 RELEASES`, `FOR SELECTED COLLECTORS` */
@@ -671,10 +799,13 @@ export interface LiveSheetModel {
   lookbook: string | null;
   calendarHref: string;
   description: string | null;
+  /** Macro scope K44 T1: a set's release, its line, its pieces' names and photographs, each from its stage; null for a model's. */
+  set: SetCardModel | null;
 }
 
 export function liveSheetModel(s: LiveSheet, localZone: string): LiveSheetModel {
   const name = s.name ? upper(s.name) : null;
+  const set = liveSet(s);
   return {
     id: s.id,
     name: name ?? LIVE.unnamed,
@@ -682,20 +813,23 @@ export function liveSheetModel(s: LiveSheet, localZone: string): LiveSheetModel 
     heading: liveHeading(s) ?? LIVE.unnamed,
     rules: accessRules(s.access.text),
     pieces: upper(s.quantityLine),
-    perAccount: LIVE.perAccount(s.perAccount),
-    line: name ? [upper(s.type), upper(s.collection)].filter((x) => x.length > 0).join(' · ') || null : null,
+    perAccount: perAccountLine(s),
+    // A set's: THE SET · 3 PIECES, its pieces named under it (never its type, SET).
+    line: set ? set.line : name ? [upper(s.type), upper(s.collection)].filter((x) => x.length > 0).join(' · ') || null : null,
     price: formatMoney(s.priceMinor, s.currency),
-    offer: offerLine(s),
+    // A set's, its limit per person after it (T4: `€ 12 000 · 5 SETS · 1 SET PER PERSON`).
+    offer: set ? [offerLine(s), perAccountLine(s)].join(' · ') : offerLine(s),
     when: releaseTime(s.opensAt, localZone),
     access: LIVE.forWhom(s.access.text),
     surprise: s.surprise === true ? LIVE.surprise : null,
-    quantity: [upper(s.quantityLine), LIVE.perAccount(s.perAccount)].filter((x) => x.length > 0).join(' · '),
+    quantity: [upper(s.quantityLine), perAccountLine(s)].filter((x) => x.length > 0).join(' · '),
     roomOpens: LIVE.roomOpens(s.roomOpensMinutes),
     rule: LIVE.rule(s.tierPriority),
     picture: pictureOf(s),
     lookbook: isLookbookSlug(s.lookbook) ? s.lookbook : null,
     calendarHref: `/api/v1/live/${encodeURIComponent(s.id)}/calendar.ics`,
     description: s.description && s.description.trim() ? s.description.trim() : null,
+    set,
   };
 }
 
@@ -718,21 +852,25 @@ export interface LivePastModel {
   picture: LivePicture | null;
   lookbook: string | null;
   description: string | null;
+  /** Macro scope K44 T1: a set's release, its line, its pieces' names and photographs; null for a model's. */
+  set: SetCardModel | null;
 }
 
 export function livePastModel(s: LiveSheet | LiveEndedSheet, localZone: string, now: number = Date.now()): LivePastModel {
   const name = s.name ? upper(s.name) : null;
+  const set = liveSet(s);
   return {
     name: name ?? LIVE.kind,
     heading: liveHeading(s) ?? LIVE.kind,
     model: name,
     day: pastDay(s.opensAt, localZone, now),
     pieces: upper(s.quantityLine),
-    line: name ? [upper(s.type), upper(s.collection)].filter((x) => x.length > 0).join(' · ') || null : null,
+    line: set ? set.line : name ? [upper(s.type), upper(s.collection)].filter((x) => x.length > 0).join(' · ') || null : null,
     facts: RELEASES.past.line(zonedDate(s.opensAt, localZone), upper(s.quantityLine)),
     picture: pictureOf(s),
     lookbook: isLookbookSlug(s.lookbook) ? s.lookbook : null,
     description: s.description && s.description.trim() ? s.description.trim() : null,
+    set,
   };
 }
 
@@ -909,9 +1047,16 @@ export function myLiveEntries(list: readonly LiveAccountEntry[]): MyEntryModel[]
     .map((x) => {
       const e = x.entry;
       const title = upper(x.release.title ?? x.release.name ?? '') || LIVE.kind;
-      const label = LIVE.statusLabel[e.status];
+      // Macro scope K44 T1: a set's entry says its set (SET HELD, your set secured), never « the piece ».
+      const set = !!x.release.set || isSetEntry(e);
+      const label = (set ? SETS.live.statusLabel[e.status] : undefined) ?? LIVE.statusLabel[e.status];
       const reference = liveReference(e.id);
-      const sentence = e.status === 'CONFIRMED' ? LIVE.securedInPieces(e.size.label, e.quantity) : LIVE.sentence[e.status];
+      const sentence =
+        e.status === 'CONFIRMED'
+          ? set
+            ? SETS.live.securedInPieces(e.quantity)
+            : LIVE.securedInPieces(e.size.label, e.quantity)
+          : ((set ? SETS.live.sentence[e.status] : undefined) ?? LIVE.sentence[e.status]);
       // An after-room's entry: read through the release it follows.
       const parent = isReleaseId(x.release.afterRoomOf) ? x.release.afterRoomOf : null;
       const entry: EntryModel = {

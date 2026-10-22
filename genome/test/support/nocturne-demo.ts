@@ -171,7 +171,8 @@ export type DemoVariant =
   | 'house'
   | 'worn'
   | 'addons'
-  | 'set';
+  | 'set'
+  | 'set-live';
 
 export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'full',
@@ -206,6 +207,7 @@ export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'worn',
   'addons',
   'set',
+  'set-live',
 ]);
 
 /** NOW: Monday 5 October 2026, 18:49 in Paris (16:49 UTC), the boards' afternoon. Every clock of the stage is fixed here. */
@@ -308,7 +310,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
   // claim-waiting stage (plan NEXT LOT §3.4) tells the full story, its state writing the rest.
   // The draw-sizes stage (plan NEXT LOT §3.6.F) tells the full story, then adds a draw in sizes, open. The stages of the
   // collector's side of an order (plan NEXT LOT §3.6) tell the full story, their state writing the rest.
-  const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'draw-selected', 'email', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes', 'birthday-credit', 'care-used', 'orbes-care', 'gallery', 'worn', 'set'] as const;
+  const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'draw-selected', 'email', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes', 'birthday-credit', 'care-used', 'orbes-care', 'gallery', 'worn', 'set', 'set-live'] as const;
   // The house messages' stage (lot M2, FROM ORBES) tells the draw-leads story, MESSAGES' own.
   // The add-ons' stage (lot M3, D2) tells the live story (a hold secured), then its own (seedAddons).
   const story = (variant === 'house' ? 'draw-leads' : variant === 'addons' ? 'live' : (OWN_STAGES as readonly DemoVariant[]).includes(variant) ? 'full' : variant) as Exclude<
@@ -342,6 +344,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
     if (variant === 'worn') await seedWorn(w);
     if (variant === 'addons') await seedAddons(w);
     if (variant === 'set') await seedSet(w);
+    if (variant === 'set-live') await seedSetLive(w);
   }
   clock.set(NOCTURNE_NOW);
   // Every account's session opened now: a capture signs in with its cookie.
@@ -1629,13 +1632,15 @@ export const NOCTURNE_SET = Object.freeze({ name: 'THE ORBITAL SET', code: 'ORBI
  * entered in 16 · 54 · 42; you's YOUR SIZES a bracelet of 17 and a ring of 52). Its LIVE RELEASES: of 7 October, at its
  * photograph's stage (it leads NOW), and of 20 October, not revealed yet.
  */
-async function seedSet(w: World): Promise<void> {
+/**
+ * THE ORBITAL SET (plan MACRO M3 §5.4, K44 T1): CONSTELLATION ORBITALE (a necklace, the longest name) added to the
+ * collection, MONOLITHE in gold, HALO and the necklace given their sizes, the set of the three at € 12 000; you's YOUR
+ * SIZES a bracelet of 17 and a ring of 52, the necklace unsaved. On 1 September (the set and LIVE stages' first act).
+ */
+async function orbitalSet(w: World): Promise<{ id: string }> {
   const { ctx, admin, clock, demo } = w;
   const db = ctx.db;
   const you = demo.accounts.you!;
-  const newcomer = demo.accounts.newcomer!;
-  const platine = demo.accounts.platine!;
-  const sizer = demo.accounts.sizer!;
   clock.set(at('2026-09-01T08:00:00Z'));
   const care = 'Store this piece on its own, away from humidity, perfume and cosmetics. Wipe it with a soft, dry cloth after wearing. ORBES Client Services offers inspection, cleaning and polishing.';
   const neck = (await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: NOCTURNE_SET.necklace, type: 'NECKLACE', skuPrefix: 'CST-NK', defaultMaterial: '18K YELLOW GOLD', careInstructions: care }, admin)).id;
@@ -1646,6 +1651,17 @@ async function seedSet(w: World): Promise<void> {
   await giveSizes(db, neck, ['42', '45', '50'], 'NECKLACE');
   const set = await ctx.services.sets.create({ name: NOCTURNE_SET.name, code: NOCTURNE_SET.code, modelIds: [w.models.gold!, w.models.halo!, neck], basePriceMinor: NOCTURNE_SET.priceMinor, baseCurrency: 'EUR' }, admin);
   await ctx.services.sizes.set(you.id, { BRACELET: 17, RING: 52 }, you.actor);
+  return set;
+}
+
+async function seedSet(w: World): Promise<void> {
+  const { ctx, admin, clock, demo } = w;
+  const db = ctx.db;
+  const you = demo.accounts.you!;
+  const newcomer = demo.accounts.newcomer!;
+  const platine = demo.accounts.platine!;
+  const sizer = demo.accounts.sizer!;
+  const set = await orbitalSet(w);
   const location = await defaultLocationId(db);
   type Sizes = readonly [string, string, string];
   // A set's draw: its sizes per piece, published; each size's id by piece and label.
@@ -1806,6 +1822,110 @@ async function seedSet(w: World): Promise<void> {
   );
   await ctx.services.liveConsole.publish(veiled.id, {}, admin);
   demo.releases.setVeiled = veiled.id;
+}
+
+/**
+ * THE SET's LIVE RELEASES in the room and live now (plan MACRO M3 §5.4, K44 T1 and T4; seedSetLive), on the full story:
+ * THE ORBITAL SET (orbitalSet), five sets of a bracelet, a ring and a necklace each in its size (HALO 56 and MONOLITHE 16
+ * one piece each), € 12 000, one per person. In its room (`setRoom`, T0 three minutes from now): you's YOUR SIZES
+ * preselect the bracelet's 17 and the ring's 52, the necklace to choose; PLATINE entered with 18 · 54 · 42, ready; two
+ * of the crowd in the room. Live now (`setNow`, T0 twenty minutes ago, the GIFT BOX offered with a set), a collector at
+ * each step: a set confirmed with its GIFT BOX (17 · 56 · 45, the last 56), one sold out in HALO 56 behind it, a set held
+ * (17 · 52 · 45) with the GIFT BOX chosen, one at its turn (16 · 54 · 42, the last 16) and one in the line behind it in 16;
+ * 2 of the 5 sets left, 2 held.
+ */
+async function seedSetLive(w: World): Promise<void> {
+  const { ctx, admin, clock, demo } = w;
+  const live = ctx.services.live;
+  const set = await orbitalSet(w);
+  const sizes = [
+    { piece: 1, label: '16', stock: 1 },
+    { piece: 1, label: '17', stock: 2 },
+    { piece: 1, label: '18', stock: 2 },
+    { piece: 2, label: '52', stock: 2 },
+    { piece: 2, label: '54', stock: 2 },
+    { piece: 2, label: '56', stock: 1 },
+    { piece: 3, label: '42', stock: 2 },
+    { piece: 3, label: '45', stock: 3 },
+  ];
+  type Sizes = readonly [string, string, string];
+  const chooser = (r: { sizes: readonly { id: string; label: string; piece?: number }[] }) => (labels: Sizes) => ({
+    sizes: labels.map((label, i) => ({ piece: i + 1, sizeId: r.sizes.find((z) => z.piece === i + 1 && z.label === label)!.id })),
+  });
+  const description = 'THE ORBITAL SET released live: five sets, a bracelet, a ring and a necklace, each in its size.';
+
+  // ── In its room: T0 three minutes from now ──
+  clock.set(at('2026-10-04T09:00:00Z'));
+  const room = await ctx.services.liveConsole.create(
+    { setId: set.id, title: 'THE ORBITAL SET, RELEASED LIVE', description, opensAt: new Date(NOCTURNE_NOW.getTime() + 3 * MINUTE), closesAt: new Date(NOCTURNE_NOW.getTime() + 63 * MINUTE), roomOpensMinutes: 10, minTier: 1, sizes, priceMinor: NOCTURNE_SET.priceMinor, currency: 'EUR' },
+    admin,
+  );
+  await ctx.services.liveConsole.publish(room.id, {}, admin);
+  demo.releases.setRoom = room.id;
+  const inRoom = chooser(room);
+  clock.set(new Date(NOCTURNE_NOW.getTime() - 2 * MINUTE));
+  const platine = demo.accounts.platine!;
+  await live.enter(platine.id, room.id, inRoom(['18', '54', '42']), platine.actor);
+  for (const key of ['crowd1', 'crowd2']) {
+    const c = demo.accounts[key]!;
+    await live.enter(c.id, room.id, inRoom(['17', '52', '45']), c.actor);
+  }
+
+  // ── Live now: T0 twenty minutes ago ──
+  const t0 = new Date(NOCTURNE_NOW.getTime() - 20 * MINUTE);
+  clock.set(at('2026-10-04T10:00:00Z'));
+  const r = await ctx.services.liveConsole.create(
+    {
+      setId: set.id,
+      title: 'THE ORBITAL SET, LIVE NOW',
+      description,
+      opensAt: t0,
+      closesAt: new Date(t0.getTime() + 2 * HOUR),
+      minTier: 1,
+      turnSeconds: 300,
+      payMinutes: 10,
+      sizes,
+      priceMinor: NOCTURNE_SET.priceMinor,
+      currency: 'EUR',
+      addons: [{ label: 'GIFT BOX', line: 'One box for the three pieces', priceMinor: 9_000 }],
+    },
+    admin,
+  );
+  await ctx.services.liveConsole.publish(r.id, {}, admin);
+  demo.releases.setNow = r.id;
+  const choose = chooser(r);
+  clock.set(t0);
+  await live.advance(r.id);
+  const step = async (ms: number) => {
+    clock.advance(ms);
+    await live.advance(r.id);
+  };
+  const join = async (key: string, labels: Sizes) => {
+    const a = await account(w, key, `${key}@example.com`, 1, w.models.blue);
+    await live.enter(a.id, r.id, choose(labels), a.actor);
+    await step(1_000);
+    return a;
+  };
+  const secure = async (a: DemoAccount) => {
+    const token = (await live.entry(a.id, r.id))?.turn?.token ?? null;
+    if (!token) throw new Error(`no turn for ${a.email}`);
+    await live.press(a.id, r.id, token);
+    clock.advance(1_500);
+    await live.secure(a.id, r.id, token, a.actor);
+  };
+  const gift = (await ctx.db.selectFrom('live_addons').select('id').where('drop_id', '=', r.id).executeTakeFirstOrThrow()).id;
+  clock.set(new Date(NOCTURNE_NOW.getTime() - 3 * MINUTE));
+  const buyer = await join('setBuyer', ['17', '56', '45']);
+  await join('setSoldout', ['18', '56', '42']);
+  await secure(buyer);
+  await live.setAddons(buyer.id, r.id, [gift], buyer.actor);
+  await live.confirm(buyer.id, r.id, buyer.actor);
+  const held = await join('setSecured', ['17', '52', '45']);
+  await join('setTurn', ['16', '54', '42']);
+  await join('setLine', ['16', '52', '45']);
+  await secure(held);
+  await live.setAddons(held.id, r.id, [gift], held.actor);
+  await step(1_000);
 }
 
 async function seedSizes(w: World, variant: 'full' | 'room'): Promise<void> {

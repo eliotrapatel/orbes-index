@@ -25,6 +25,8 @@ import { listLine, withNumerals } from './common.js';
 export interface RoomFacts {
   /** The release's model (variant) photograph, the window's ground; null without one (the room's ground alone). */
   photo: string | null;
+  /** Macro scope K44 T1: a set's pieces' photographs, side by side as the window's ground (in place of `photo`); null otherwise. */
+  photos?: string[] | null;
   /** The model's name as the phone's room says it (MONOLITHE; LIVE RELEASE where the page has no live sheet). */
   name: string;
   /** The model's name itself (MONOLITHE), where the title's variant begins. */
@@ -153,6 +155,7 @@ const PLAN: Partial<Record<Kind, readonly [Place, string][]>> = {
     ['body', ':scope > .live__deadline'],
     ['bl', ':scope > .live__title'],
     ['bl', ':scope > .live__detail'],
+    ['bl', ':scope > .live__set-pieces'],
     ['br', ':scope > .live__addons-title'],
     ['br', ':scope > .live__addons'],
     ['br', ':scope > .live__items-title'],
@@ -167,6 +170,7 @@ const PLAN: Partial<Record<Kind, readonly [Place, string][]>> = {
     ['a', ':scope > .live__mark'],
     ['a', ':scope > .live__title'],
     ['a', ':scope > .live__confirmed-of'],
+    ['a', ':scope > .live__set-reserved'],
     ['a', ':scope > .live__confirmed-text'],
     ['a', ':scope > .live__left-out'],
     ['a', ':scope > .n-story__open'],
@@ -229,7 +233,9 @@ const SENTENCES = ':is(.live__note, .live__confirmed-text, .live__addon-line, .n
 
 export class DesktopRoom {
   /** The window's ground: the release's photograph, its veils over it. */
-  private readonly ground = h('div', { class: 'd-room__photo', attrs: { 'aria-hidden': 'true' } }, h('img', { class: 'd-room__img', attrs: { alt: '', decoding: 'async', fetchpriority: 'high' } }));
+  private readonly ground = h('div', { class: 'd-room__photo', attrs: { 'aria-hidden': 'true' } }, groundImage());
+  /** The photographs the ground shows now, joined (a set's several side by side). */
+  private groundKey = '';
   /** The count in the room, top right. */
   private readonly count = h('p', { class: 'd-room__count', attrs: { hidden: true } }, h('span', { class: 'live__dot', attrs: { 'aria-hidden': 'true' } }), h('span', { class: 'd-room__count-text' }));
   /** Each element moved, and the mark left where it stood. */
@@ -329,13 +335,15 @@ export class DesktopRoom {
   /** The corners' words and the ground, from the room's facts now (nothing is drawn again when they are the same). */
   update(facts: RoomFacts): void {
     if (!this.screen || !this.kind || !STAGED.has(this.kind)) return;
-    const was = this.facts;
     this.facts = facts;
-    const img = this.ground.firstElementChild as HTMLImageElement;
-    if (facts.photo !== (was?.photo ?? undefined)) {
-      if (facts.photo) img.src = facts.photo;
-      else img.removeAttribute('src');
-      this.ground.classList.toggle('is-bare', !facts.photo);
+    // The ground: the release's photograph; a set's pieces' photographs side by side (macro scope K44 T1).
+    const photos = facts.photos && facts.photos.length > 1 ? facts.photos : facts.photo ? [facts.photo] : [];
+    const key = photos.join('|');
+    if (key !== this.groundKey || this.ground.childElementCount === 0) {
+      this.groundKey = key;
+      this.ground.replaceChildren(...(photos.length > 0 ? photos.map((src) => groundImage(src)) : [groundImage()]));
+      this.ground.classList.toggle('is-bare', photos.length === 0);
+      this.ground.classList.toggle('d-room__photo--tiles', photos.length > 1);
     }
     const n = RUNNING.has(this.kind) ? (facts.count ?? 0) : 0;
     this.count.hidden = n <= 0;
@@ -491,6 +499,11 @@ export class DesktopRoom {
     el.replaceChildren(...titleParts(own ? text : facts.heading, facts.model));
     el.classList.add('d-room__name');
   }
+}
+
+/** An image of the window's ground (decorative: the corners name the release). */
+function groundImage(src?: string): HTMLImageElement {
+  return h('img', { class: 'd-room__img', attrs: { alt: '', decoding: 'async', fetchpriority: 'high', src: src ?? null } });
 }
 
 /**

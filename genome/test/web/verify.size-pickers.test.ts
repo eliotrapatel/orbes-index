@@ -22,10 +22,11 @@ const VIEWS = join(dirname(fileURLToPath(import.meta.url)), '../../src/web/verif
 
 /**
  * Each view that draws a size picker, and the way each of its pickers reads YOUR SIZES (a name its code calls or reads):
- * a draw's page has two, a model's draw's (`drawPick`) and a set's per piece (`setPick`, lot M3, K44 T1).
+ * a draw's page has two, a model's draw's (`drawPick`) and a set's per piece (`setPick`, lot M3, K44 T1); so has a LIVE
+ * RELEASE's, a model's (`initialPick`) and a set's per piece under I'LL BE THERE (`initialSetPick`, lot M3, K44 T1).
  */
 const PRESELECTION: Readonly<Record<string, readonly RegExp[]>> = Object.freeze({
-  'live.ts': [/\binitialPick\(/],
+  'live.ts': [/\binitialPick\(/, /\binitialSetPick\(/],
   'lookbook.ts': [/\bsalonSizePick\(/],
   'releases.ts': [/\bdrawPick\(/, /\bsetPick\(/],
   'order-sheet.ts': [/\breturns\.savedSize\b/],

@@ -3057,6 +3057,31 @@ body.nocturne[data-screen="live"] {
   margin-top: 12px;
 }
 
+/* THE SET (lot M3): its pieces' names under THE SET · 3 PIECES, ONE PRICE FOR THE SET under the price; YOUR SIZES a
+   picker per piece, its name over its sizes; CONFIRMED's YOUR SET IS RESERVED. */
+.n-live__set-names,
+.n-live__one-price,
+.n-live__receipt-set {
+  margin-top: 8px;
+}
+
+.n-live__set-names {
+  color: var(--vault-soft);
+}
+
+.n-live__piece {
+  margin-top: 18px;
+}
+
+.n-live__piece > .n-sizes,
+.n-live__piece > .n-live__yours {
+  margin-top: 10px;
+}
+
+.n-live__set-pickers > .n-live__yours-check {
+  margin-top: 12px;
+}
+
 /* The price in the reading face, 17 px (C20). */
 .n-live__price {
   margin-top: 12px;

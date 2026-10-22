@@ -2056,6 +2056,34 @@ export const PHONE_STATES: readonly UiState[] = [
     act: (run) => returnTheSet(run),
     ready: '.view--pieces .n-pieces__set .n-pieces__request-label, .view--order .n-pieces__request-label',
   },
+  // ── THE SET's LIVE RELEASE (lot M3, K44 T1, T4): announced at the photograph's stage, I'LL BE THERE with a picker per
+  // piece (the bracelet and the ring from YOUR SIZES, the necklace in its one size), then said with every size (its write, last
+  // on the set stage); on its own stage (set-live) the room (YOUR SIZES, READY CHECK SIZES, then entered and ready), the
+  // line late (a picker per piece, HALO 56 greyed), the line, the turn, the set held, CONFIRMED and sold out in HALO 56 ──
+  { id: 'set-live-there', title: 'THE SET’s LIVE RELEASE announced: its pieces side by side, THE SET · 3 PIECES, their names, ONE PRICE FOR THE SET, 1 SET PER PERSON; YOUR SIZES, a picker per piece, the bracelet and the ring from YOUR SIZES, the necklace’s one size, I’LL BE THERE (lot M3, T1, T4)', refs: ['M3'], variant: 'set', as: you, path: release('setLive'), ready: '.view--live .n-live__set-pickers .live__yours:not([hidden])' },
+  {
+    id: 'set-live-there-said',
+    title: 'THE SET’s LIVE RELEASE: I’LL BE THERE said with every size, YOU’LL BE THERE · SIZE 17 · 52 · 45, WITHDRAW (lot M3, T1)',
+    refs: ['M3'],
+    variant: 'set',
+    as: you,
+    path: release('setLive'),
+    mutates: true,
+    act: async (run) => {
+      await run.page.locator('.view--live .n-live__piece[data-piece="3"] button.live__size', { hasText: /^45$/ }).click();
+      await button(run, 'I’LL BE THERE').click();
+      await button(run, 'WITHDRAW').waitFor({ timeout: 20_000 });
+    },
+    ready: '.view--live .n-live__said',
+  },
+  { id: 'set-room', title: 'THE SET’s room: its pieces behind the door, READY CHECK SIZES TO CHOOSE, YOUR SIZES a picker per piece (17 and 52 from YOUR SIZES), ENTER THE ROOM waiting for the necklace (lot M3, T1)', refs: ['M3'], variant: 'set-live', as: you, path: release('setRoom'), ready: '.view--live .live__set-pickers .live__yours:not([hidden])' },
+  { id: 'set-room-ready', title: 'THE SET’s room, entered with SIZE 18 · 54 · 42: YOU’RE READY, each size to change until the opening (lot M3, T1)', refs: ['M3'], variant: 'set-live', as: 'platine', path: release('setRoom'), ready: '.view--live .live__ready:not([hidden])' },
+  { id: 'set-live-join', title: 'THE SET live now, not in the line: 2 OF 5 SETS LEFT, a picker per piece (HALO 56 greyed, sold), 1 SET PER PERSON, ENTER THE LINE (lot M3, T1, T4)', refs: ['M3'], variant: 'set-live', as: you, path: release('setNow'), ready: '.view--live .live__join .live__set-pickers' },
+  { id: 'set-live-line', title: 'THE SET’s line: YOUR PLACE, 1 AHEAD OF YOU IN YOUR SIZES, 2 OF 5 SETS LEFT, 2 HELD SETS MAY RETURN (lot M3, T1)', refs: ['M3'], variant: 'set-live', as: 'setLine', path: release('setNow'), ready: '.view--live .live__ahead' },
+  { id: 'set-live-turn', title: 'THE SET’s turn: PRESS AND HOLD THE SEAL, TO SECURE YOUR SET, THE ORBITAL SET · SIZE 16 · 54 · 42 · € 12 000 (lot M3, T1)', refs: ['M3'], variant: 'set-live', as: 'setTurn', path: release('setNow'), ready: '.view--live .live-hold' },
+  { id: 'set-live-secured', title: 'THE SET held: YOUR SET, THE SET · 3 PIECES, each piece in its size, the GIFT BOX chosen, PAY · total (lot M3, T1)', refs: ['M3'], variant: 'set-live', as: 'setSecured', path: release('setNow'), ready: '.view--live .live__set-pieces .live__set-piece' },
+  { id: 'set-live-confirmed', title: 'THE SET confirmed: CONFIRMED, YOUR SET IS RESERVED, each piece in its size on the receipt, the GIFT BOX, TOTAL, REFERENCE (lot M3, T1)', refs: ['M3'], variant: 'set-live', as: 'setBuyer', path: release('setNow'), ready: '.view--live .live__set-reserved' },
+  { id: 'set-live-sold-out', title: 'THE SET sold out in one of its sizes: HALO · SOLD OUT IN SIZE 56, stay or LEAVE THE LINE (lot M3, T1)', refs: ['M3'], variant: 'set-live', as: 'setSoldout', path: release('setNow'), ready: '.view--live .live__edge' },
   { id: 'draw-selected-signed-out', title: 'A draw FOR SELECTED COLLECTORS, signed out: the rule in THE RELEASE, the sign-in says the release is for selected collectors', refs: ['F4'], variant: 'draw-selected', path: release('draw'), ready: '.view--release:has(.release__for) :is(form, .d-signin-line)' },
   {
     id: 'pieces-draws',
@@ -3163,6 +3191,10 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
     setOrderAt(1440, true),
     setOrderAt(1024, false),
     ...desk(1440, 'set-orders-return'),
+    // Its LIVE RELEASE announced (lot M3, K44 T1, T4): I'LL BE THERE with a picker per piece, in dark and light; then said, last.
+    ...desk(1440, 'set-live-there'),
+    onDesk(phoneState('set-live-there'), 1440, { light: true }),
+    ...desk(1440, 'set-live-there-said'),
   ],
   // ── The room's other screens at 1440 × 900, each staged for a computer (HANDOVER §5.4) ──
   // The line, secured with PAY, CONFIRMED, sold out in a size, the five ends, ENTER THE LINE; a LIVE RELEASE's rules and
@@ -3193,6 +3225,8 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
     ...desk(1440, 'now-stress', 'result-stress', 'club-stress', 'pieces-stress', 'pieces-orders-stress', 'piece-stress', 'account-sheet-stress', 'collection-stress', 'model-stress'),
     ...desk(1440, 'releases-stress', 'room-stress', 'live-far-stress', 'circle-stress', 'post-stress', 'post-poll-stress', 'result-ceremony-stress'),
     ...desk(1440, 'pieces-empty', 'collection-empty', 'releases-empty', 'circle-empty'),
+    // THE SET's LIVE RELEASE in the Cinema room (lot M3, K44 T1, T4; the stage set-live): every screen of its room.
+    ...desk(1440, 'set-room', 'set-room-ready', 'set-live-join', 'set-live-line', 'set-live-turn', 'set-live-secured', 'set-live-confirmed', 'set-live-sold-out'),
   ],
   // ── The emails' screens (lot M1, step M1.19, E1–E3) on the stage `email`: each at 1440 × 900, RESET BY EMAIL, the
   // link's page, YOUR PROFILE's release notices and STOP THESE EMAILS also in light, the link's form and STOP THESE EMAILS

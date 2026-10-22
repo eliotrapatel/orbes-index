@@ -2727,6 +2727,69 @@ export const SETS = Object.freeze({
     title: 'THE SET',
     pieceLabel: (title: string, reference: string) => `${title}, order ${reference}`,
   }),
+  /**
+   * A set's LIVE RELEASE (K44 T1, T4): I'LL BE THERE and ENTER with a size picker per piece; the line and the turn as a
+   * model's, counted in sets, the place read in every size of the entry; the seal secures the set; the hold lists the
+   * pieces and their sizes, then the add-ons and PAY; CONFIRMED says YOUR SET IS RESERVED. A set counts as one toward the
+   * limit per person (SETS.perPerson).
+   */
+  live: Object.freeze({
+    /** Every size of an entry or an interest, in the set's order: `SIZE 17 · 52 · 45`. */
+    sizes: (sizes: readonly string[]) => sizesWords(sizes),
+    there: Object.freeze({
+      lead: 'Say you will be there, with a size for each piece: the room preselects them when it opens.',
+      said: (sizes: readonly string[]) => `YOU’LL BE THERE · ${sizesWords(sizes)}`,
+      signIn: 'Sign in to say you will be there, with your sizes.',
+    }),
+    /** READY CHECK's line for the sizes. */
+    readySizes: 'SIZES',
+    chooseLine: 'Choose a size for each piece, then enter the room. Each can change until the opening, never after.',
+    joinLine: 'The release is open. Choose a size for each piece to join the line: you take your place behind those already in it.',
+    /** The quantity, in sets (T4). */
+    quantity: 'SETS',
+    fewer: 'One set fewer',
+    more: 'One set more',
+    /** The line: the place read in every size of the entry (the most entries before it in any of them). */
+    ahead: (n: number) => (n === 0 ? 'YOU ARE NEXT IN YOUR SIZES' : `${n} AHEAD OF YOU IN YOUR SIZES`),
+    left: (left: number, sets: number) => `${left} OF ${sets === 1 ? '1 SET' : `${sets} SETS`} LEFT`,
+    held: (n: number) => (n === 1 ? '1 HELD SET MAY RETURN' : `${n} HELD SETS MAY RETURN`),
+    /** What the page says aloud of the place. */
+    announcePlace: (place: number, ahead: number) => `Your place: ${place}. ${ahead === 0 ? 'You are next in your sizes' : `${ahead} ahead of you in your sizes`}.`,
+    lineNote: 'When your turn comes, the seal appears here: press and hold it to secure your set. Keep this page open.',
+    /** One of the entry's sizes with no piece left to serve it: said with its piece. */
+    soldOut: Object.freeze({
+      title: (name: string, size: string) => `${name} · ${isOneSize(size) ? 'SOLD OUT' : `SOLD OUT IN SIZE ${bareSize(size)}`}`,
+      stay: (name: string, size: string) => `Every ${name} ${setInSize(size)} is taken. You keep your place in case one returns, or you may leave.`,
+      none: (name: string, size: string) => `Every ${name} ${setInSize(size)} is reserved. You keep your place should ORBES add one, or you may leave.`,
+    }),
+    /** The turn: the seal secures the set. */
+    toSecure: 'TO SECURE YOUR SET',
+    sealLabel: 'Press and hold the seal, or hold the space bar, to secure your set',
+    /** The hold: the set secured, its pieces each in its size. */
+    yourSet: 'YOUR SET',
+    pieces: 'THE PIECES',
+    sets: (n: number) => (n === 1 ? '1 SET' : `${n} SETS`),
+    /** CONFIRMED. */
+    reserved: (n: number) => (n > 1 ? `YOUR ${n} SETS ARE RESERVED` : 'YOUR SET IS RESERVED'),
+    reservedText: 'Each piece is reserved in the size you chose. ORBES Client Services will contact you to settle payment. Add your delivery address in YOUR ORDERS.',
+    /** MY PIECES' YOUR RELEASES. */
+    securedInPieces: (n: number) =>
+      n > 1 ? `You secured ${n} sets, each piece in its size. Their steps follow in YOUR ORDERS.` : 'You secured your set, each piece in its size. Its steps follow in YOUR ORDERS.',
+    statusLabel: Object.freeze({ SECURED: 'SET HELD' }) as Readonly<Record<string, string>>,
+    sentence: Object.freeze({
+      TURN: 'It is your turn. Open the release to secure your set.',
+      SECURED: 'Your set is held for you. Open the release to confirm it.',
+      ENDED: 'The release ended before your set was secured.',
+    }) as Readonly<Record<string, string>>,
+    /** The end of a visit, where a model's page says « the piece ». */
+    edge: Object.freeze({
+      missed: 'The set went to the next collector in line.',
+      expired: 'The set has returned to the line for the next collector.',
+      released: 'The set has returned to the line for the next collector.',
+      soldOut: 'Every set of this release is reserved.',
+      ended: 'ORBES has ended this release before your set was secured.',
+    }),
+  }),
 });
 
 /** A set's sizes in its pieces' order (`SIZE 17 · 52 · 45`), each without the word its label may carry. */

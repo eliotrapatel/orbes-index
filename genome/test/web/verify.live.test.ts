@@ -349,6 +349,8 @@ describe('which screen the page shows', () => {
       picture: { src: media(1), alt: 'The model of MONOLITHE, photographed by ORBES', kind: 'photo' },
       lookbook: 'monolithe',
       description: 'A ring cut from one block of silver.',
+      // Macro scope K44 T1: a set's release only.
+      set: null,
     });
     // The date on this phone's calendar: T0 at 17:00 UTC is the 12th in Tokyo.
     expect(livePastModel(over(), 'Asia/Tokyo', T0).facts).toBe('12 OCT 2026 · 25 PIECES');
@@ -364,6 +366,7 @@ describe('which screen the page shows', () => {
       picture: null,
       lookbook: null,
       description: null,
+      set: null,
     });
     // A whole page, ENDED while a hold runs to its deadline, reads the same for those not in it: no size, no stock.
     expect(livePastModel(sheet({ phase: 'ENDED', lookbook: 'monolithe' }), 'Europe/Paris')).toMatchObject({ name: 'MONOLITHE', facts: '11 OCT 2026 · 25 PIECES' });

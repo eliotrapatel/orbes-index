@@ -1065,7 +1065,8 @@ export interface LiveSetView {
 export interface LiveSheet extends Omit<LiveCard, 'phase'> {
   phase: LivePhase | 'ENDED';
   description: string | null;
-  sizes: { id: string; label: string; stock: number }[];
+  /** Its sizes in order, with their stock; on a set's release (macro scope K44 T1) each with its piece (1 to 4). */
+  sizes: { id: string; label: string; stock: number; piece?: number }[];
   addons: { id: string; label: string; line: string | null; priceMinor: number }[];
   roomOpensMinutes: number;
   turnSeconds: number;
@@ -1098,6 +1099,8 @@ export interface LiveEndedSheet {
   /** The quantity line as announced (« 25 PIECES »). */
   quantityLine: string;
   afterRoom?: AfterRoomOf;
+  /** Macro scope K44 T1: a set's release, as LiveCard's `set`, each part from its stage as it stood at the end; absent otherwise. */
+  set?: LiveSetView;
 }
 
 /** The release an after-room follows (plan LIVE RELEASE+, choice 2): its page is read through that release's. */
@@ -1144,13 +1147,16 @@ export interface LiveBoard {
   quantity: number;
   quantityLine: string;
   left: number;
-  release: { revealed: { silhouette: boolean; name: boolean; photo: boolean }; name: string | null; silhouetteUrl: string | null; imageUrl: string | null };
+  /** Macro scope K44 T1: on a set's release, `set` (its name, its pieces side by side), `imageUrl` null. */
+  release: { revealed: { silhouette: boolean; name: boolean; photo: boolean }; name: string | null; silhouetteUrl: string | null; imageUrl: string | null; set?: LiveSetView };
 }
 
 /** A size in the room: its stock, the pieces free now, and those in a turn or held that may return. */
 export interface LiveRoomSize {
   id: string;
   label: string;
+  /** Macro scope K44 T1: on a set's release, its piece (1 to 4); absent on a model's. */
+  piece?: number;
   stock: number;
   left: number;
   held: number;
@@ -1169,12 +1175,26 @@ export interface LiveRoom {
   closesAt: string;
   inRoom: number;
   line: number;
+  /** The sum of the stock; on a set's release, its sets on sale (the smallest of its pieces' totals). */
   quantity: number;
   quantityLine: string;
+  /** Free now; on a set's release, the sets its pieces can still make now. */
   left: number;
+  /** In a turn or held, which may return; on a set's release, the sets. */
   held: number;
   sizes: LiveRoomSize[];
+  /** Macro scope K44 T1: on a set's release, its pieces in the set's order, each from its stage, with its sizes; absent on a model's. */
+  pieces?: LiveRoomPiece[];
   message: { text: string; at: string } | null;
+}
+
+/** Macro scope K44 T1: a piece of a set's release in the room: its model's name and variant, its photograph, its sizes. */
+export interface LiveRoomPiece {
+  piece: number;
+  name: string | null;
+  variant: string | null;
+  imageUrl: string | null;
+  sizes: LiveRoomSize[];
 }
 
 /** The signed-in account's entry in a release (the stream's `you` event, the state's `entry`, every action's answer). */
@@ -1182,7 +1202,11 @@ export interface LiveEntry {
   id: string;
   dropId: string;
   status: LiveEntryStatus;
+  /** Its size; on a set's release, its first piece's (`sizes` gives every piece's). */
   size: { id: string; label: string };
+  /** Macro scope K44 T1: on a set's release, the size chosen for each piece, in the set's order; absent otherwise. */
+  sizes?: PieceSizeRef[];
+  /** Its pieces; on a set's release, its sets (T4: a set counts as one). */
   quantity: number;
   tier: number;
   /** The place in the line; null before T0. */
@@ -1240,7 +1264,10 @@ export interface LiveAccess {
 /** I'LL BE THERE, with a size. */
 export interface LiveInterest {
   dropId: string;
+  /** Its size; on a set's release, its first piece's (`sizes` gives every piece's). */
   size: { id: string; label: string };
+  /** Macro scope K44 T1: on a set's release, the size given for each piece; absent otherwise. */
+  sizes?: PieceSizeRef[];
   since: string;
 }
 
@@ -1280,6 +1307,8 @@ export interface LiveState {
   guarantee?: { pieces: number } | null;
   /** AC-01: the size YOUR SIZES preselects, only without an entry or an interest; null otherwise. The collector confirms it. */
   savedSize?: { id: string; label: string } | null;
+  /** Macro scope K44 T1: on a set's release, the size YOUR SIZES preselects for each piece that has one (none with an entry or an interest). */
+  savedSizes?: PieceSizeRef[];
 }
 
 /** An entry of the account in MY PIECES (GET /api/v1/live/mine), with its release, each part from its stage. */
@@ -1297,6 +1326,8 @@ export interface LiveAccountEntry {
     closesAt: string;
     /** An after-room's: the release it follows; null otherwise. */
     afterRoomOf: string | null;
+    /** Macro scope K44 T1: a set's release, as LiveCard's `set`; absent otherwise. */
+    set?: LiveSetView;
   };
   entry: LiveEntry;
 }

@@ -2968,6 +2968,29 @@
     margin-top: var(--d-s4);
   }
 
+  /* THE SET (lot M3): a picker per piece from the column's edge, its name over its sizes, YOUR SIZES' line under them. */
+  html:not(.d-touch) body.nocturne .d-live__b .n-live__set-pickers {
+    text-align: left;
+  }
+
+  html:not(.d-touch) body.nocturne .d-live__b .n-live__there-body > .n-live__set-pickers > .n-live__piece {
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .d-live__b .n-live__piece > :is(.n-sizes, .n-live__yours) {
+    justify-content: flex-start;
+    margin-top: var(--d-s3);
+  }
+
+  html:not(.d-touch) body.nocturne .d-live__b .n-live__set-pickers > .n-live__yours-check {
+    margin-top: var(--d-s4);
+  }
+
+  /* Its pieces' names and ONE PRICE FOR THE SET in the frame, a line each under the title's. */
+  html:not(.d-touch) body.nocturne .n-live__words .d-frame__main > :is(.n-live__set-names, .n-live__one-price) {
+    margin-top: var(--d-s3);
+  }
+
   html:not(.d-touch) body.nocturne .d-live__b .n-live__refusal > * + * {
     margin-top: var(--d-s3);
   }

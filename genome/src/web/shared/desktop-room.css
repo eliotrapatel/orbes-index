@@ -117,6 +117,18 @@
     display: none;
   }
 
+  /* THE SET (lot M3): its pieces' photographs side by side, each its tile of the window. */
+  html:not(.d-touch) .d-room > .d-room__photo.d-room__photo--tiles {
+    display: grid;
+    grid-auto-columns: minmax(0, 1fr);
+    grid-auto-flow: column;
+    gap: 2px;
+  }
+
+  html:not(.d-touch) .d-room > .d-room__photo--tiles > .d-room__img {
+    min-width: 0;
+  }
+
   html:not(.d-touch) .d-room > .d-room__photo::after {
     content: "";
     position: absolute;
@@ -676,6 +688,35 @@
 
   html:not(.d-touch) .d-room .live__yours-block--room > .live__overline {
     color: var(--ink);
+  }
+
+  /* THE SET (lot M3): a picker per piece on the corner's edge, its name over its sizes, YOUR SIZES' line under them;
+     the hold's pieces, each in its size, under the set's name. */
+  html:not(.d-touch) .d-room .d-room__bl .live__set-pickers {
+    text-align: left;
+  }
+
+  html:not(.d-touch) .d-room .d-room__bl .live__piece {
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) .d-room .d-room__bl :is(.live__piece-name, .live__piece > .live__yours) {
+    text-indent: 0;
+  }
+
+  html:not(.d-touch) .d-room .d-room__bl .live__piece > .live__yours {
+    margin-top: var(--d-s2);
+    color: var(--ink);
+  }
+
+  html:not(.d-touch) .d-room .d-room__bl .live__set-pickers > .live__yours-check {
+    max-width: none;
+    margin: var(--d-s3) 0 0;
+  }
+
+  html:not(.d-touch) .d-room .d-room__bl > .live__set-pieces {
+    max-width: 28em;
+    margin-top: var(--d-s5);
   }
 
   /* PIECES on the sizes' columns (§10.1): its label on a line of its own, as YOUR SIZE's; −, the figure and + three
@@ -1289,6 +1330,19 @@
   html:not(.d-touch) .d-room .d-room__a > .live__confirmed-of {
     margin-top: var(--d-s4);
     color: var(--ink-soft);
+  }
+
+  /* THE SET (lot M3): YOUR SET IS RESERVED, the sentence's own line over it, in ink. */
+  html:not(.d-touch) .d-room .d-room__a > .live__set-reserved {
+    margin: var(--d-s6) 0 0;
+    font-size: var(--d-fs-cap);
+    letter-spacing: var(--d-tr-label);
+    text-indent: 0;
+    color: var(--ink);
+  }
+
+  html:not(.d-touch) .d-room .d-room__a > .live__set-reserved + .live__confirmed-text {
+    margin-top: var(--d-s3);
   }
 
   /* Plan MACRO M3 §4.4 (D2): an add-on PAY could not add, under the sentence, in the label's capitals at a readable size. */

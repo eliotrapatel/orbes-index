@@ -76,7 +76,7 @@ import { addonRows, chosenRows, chosenUnits, leftOutLines, rowsChoice, rowsLimit
 import { h, prefersReducedMotion, s } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { DESKTOP, GUARANTEE, HOW, LIVE, LOOKBOOK, PIECES, RELEASES, TIER } from '../copy.js';
+import { DESKTOP, GUARANTEE, HOW, LIVE, LOOKBOOK, PIECES, RELEASES, SETS, TIER } from '../copy.js';
 import { CLUB_PATH } from '../club-model.js';
 import { isDesktop, onDesktopChange, touchLayout } from '../../shared/desktop.js';
 import { HOW_PATH } from '../how-model.js';
@@ -89,20 +89,27 @@ import {
   countdown,
   formatMoney,
   heldEntry,
+  heldPieces,
   HOLD_MS,
   initialPick,
+  initialSetPick,
   interestLine,
   isEndedSheet,
   lineFacts,
   liveReference,
   liveScreen,
+  liveSet,
+  liveSetChoice,
+  livePieces,
   liveSheetModel,
   livePastModel,
   liveHeading,
   liveStoryModel,
   lockAngle,
   pastDay,
+  pickedLabels,
   pictureOf,
+  pieceSizeChoices,
   placeAnnouncement,
   queueModel,
   PRESS_GAP_MS,
@@ -110,26 +117,31 @@ import {
   revealCalendar,
   roomSize,
   servable,
+  setLineFacts,
+  setShort,
+  setSizesLine,
   sizeChoices,
   tickSecond,
   windowLeft,
   zonedTime,
   type ClockSample,
+  type InitialSizeFrom,
   type LivePicture,
+  type LivePieceModel,
   type LiveScreenKind,
   type LiveViewer,
 } from '../live-model.js';
 import { sealSvg, turnRings } from '../live-seal.js';
-import { participationModel, RELEASES_PATH, zonedDate } from '../releases-model.js';
+import { entrySizes, participationModel, RELEASES_PATH, zonedDate, type SetCardModel } from '../releases-model.js';
 import { lookbookSheetPath } from '../lookbook-model.js';
 import type { SessionStore } from '../session.js';
 import type { SoundSignature } from '../sound.js';
-import type { AccountQuestion, LiveAccess, LiveEndedSheet, LiveEntry, LiveInterest, LiveQueueFrame, LiveRoom, LiveSheet, LiveState } from '../types.js';
+import type { AccountQuestion, LiveAccess, LiveEndedSheet, LiveEntry, LiveInterest, LiveQueueFrame, LiveRoom, LiveSheet, LiveState, PieceSizeRef } from '../types.js';
 import { formatMoney as money, upper } from '../view-model.js';
 import { referenceWords, releaseContext } from '../messages-model.js';
 import { dayAndHour, legalLinks, lookbookLink, PIECES_PATH, piecesLink, releasesLink, soundToggle, toneMark, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
-import { appAnchor, button, copyrightLine, countdown as countdownView, fadedPhoto, failedState, icon, loadingState, modelTitle, monogram, sizeButtons, textLink } from './nocturne.js';
+import { appAnchor, button, copyrightLine, countdown as countdownView, fadedPhoto, failedState, icon, loadingState, modelTitle, monogram, photoTiles, sizeButtons, textLink } from './nocturne.js';
 import { writeButton } from './write.js';
 import { OwnershipPanel } from './ownership.js';
 import { QuestionBlock } from './question.js';
@@ -277,6 +289,13 @@ class LivePage {
   private savedSize: { id: string; label: string } | null = null;
   /** AC-01: the size picked is YOUR SIZES' and not confirmed yet (no size tapped, nothing pressed). */
   private fromYours = false;
+  /** Macro scope K44 T1: on a set's release, the size YOUR SIZES preselects for each piece that has one (the server's). */
+  private savedSizes: PieceSizeRef[] = [];
+  /**
+   * Macro scope K44 T1: on a set's release, the size picked for each piece and where it comes from (`hand`: tapped; a
+   * size from YOUR SIZES is to be confirmed by a tap or by entering). The entry's own once entered.
+   */
+  private setPicked = new Map<number, { sizeId: string; from: InitialSizeFrom | 'hand' }>();
   private interest: LiveInterest | null = null;
   /** BP-10: the CONFIRMED story card of each entry, drawn once (a screen built again reuses it). */
   private readonly stories = new StoryCards();
@@ -516,6 +535,7 @@ class LivePage {
     this.interest = state.interest;
     this.guarantee = state.guarantee ?? null;
     this.savedSize = state.savedSize ?? null;
+    this.savedSizes = Array.isArray(state.savedSizes) ? state.savedSizes : [];
     // W2: while the entry waits for its batch the state carries the queue's frame in place of the room.
     if (state.room) this.setRoom(state.room);
     this.queueFrame = state.queue ?? null;
@@ -574,6 +594,9 @@ class LivePage {
     if (held) {
       this.picked = { sizeId: held.size.id, quantity: held.quantity };
       this.fromYours = false;
+      if (held.sizes?.length) this.setPicked = new Map(held.sizes.map((x) => [x.piece, { sizeId: x.id, from: 'entry' as const }]));
+    } else if (this.isSet()) {
+      this.preselectSet();
     } else if (this.picked.sizeId === null && this.sheet && !isEndedSheet(this.sheet)) {
       const first = initialPick(this.sheet, entry, this.interest, this.savedSize);
       this.picked = { sizeId: first.sizeId, quantity: this.picked.quantity };
@@ -603,6 +626,112 @@ class LivePage {
     if (!this.fromYours || this.interest || heldEntry(this.entry)) return null;
     const label = this.sizeLabel(this.picked.sizeId);
     return label === null ? null : { size: LIVE.there.fromYours(label), check: LIVE.there.checkSize };
+  }
+
+  // ── A set's release (macro scope K44 T1, T4) ─────────────────────────────
+
+  /** The release sells a set: a size per piece, its quantity in sets. */
+  private isSet(): boolean {
+    return !!this.sheet?.set;
+  }
+
+  /** A set's pieces with their sizes, in the set's order (none on a model's release, or once over). */
+  private pieces(): LivePieceModel[] {
+    const s = this.live();
+    return s?.set ? livePieces(s) : [];
+  }
+
+  /**
+   * Each piece's size preselected (initialSetPick: the entry's, I'LL BE THERE's, YOUR SIZES', the only one), a size
+   * tapped kept over it while it is still the piece's.
+   */
+  private preselectSet(): void {
+    const pieces = this.pieces();
+    const next = new Map<number, { sizeId: string; from: InitialSizeFrom | 'hand' }>(initialSetPick(pieces, this.entry, this.interest, this.savedSizes));
+    for (const [piece, v] of this.setPicked) {
+      if (v.from === 'hand' && pieces.some((p) => p.piece === piece && p.sizes.some((z) => z.id === v.sizeId))) next.set(piece, v);
+    }
+    this.setPicked = next;
+  }
+
+  /** The sizes the entry (or I'LL BE THERE) sends, once every piece has one; null while one is missing. */
+  private setChoice(): { piece: number; sizeId: string }[] | null {
+    return liveSetChoice(this.pieces(), this.setPicked);
+  }
+
+  /** The sizes picked on one line (`SIZE 17 · 52 · 45`), once every piece has one; null otherwise. */
+  private setPickedLine(): string | null {
+    const labels = pickedLabels(this.pieces(), this.setPicked);
+    return labels ? SETS.live.sizes(labels) : null;
+  }
+
+  /** AC-01 for a set: a piece's size is YOUR SIZES' and not confirmed yet (nothing said, nothing entered). */
+  private setFromYours(): boolean {
+    if (this.interest || heldEntry(this.entry)) return false;
+    return [...this.setPicked.values()].some((v) => v.from === 'saved');
+  }
+
+  /**
+   * The pickers of a set (macro scope K44 T1): for each piece its name and type over its sizes (a size with no piece left
+   * greyed, as a model's), the size YOUR SIZES preselects said under it while it stands; YOUR SIZES' check once under
+   * them all. `nocturne`: NOCTURNE's buttons, under I'LL BE THERE; `room`: the room's own (choice 4). `choosing` (the
+   * room): before ENTER, the sizes picked are outlined (ENTER is the one filled action); once entered, filled.
+   */
+  private setPickers(look: 'nocturne' | 'room', onPick: (piece: number, sizeId: string) => void): { el: HTMLElement; update(choosing?: boolean): void } {
+    const nocturne = look === 'nocturne';
+    const parts: { p: LivePieceModel; buttons: Map<string, HTMLButtonElement>; yours: HTMLElement }[] = [];
+    const blocks: HTMLElement[] = [];
+    for (const p of this.pieces()) {
+      const id = `live-piece-${p.piece}`;
+      const name = h('p', { class: nocturne ? 'n-g n-lb n-ivc n-live__piece-name' : 'live__overline live__piece-name', id }, ...withNumerals(p.line));
+      const buttons = new Map<string, HTMLButtonElement>();
+      let grid: HTMLElement;
+      if (nocturne) {
+        grid = sizeButtons(p.sizes, { selected: this.setPicked.get(p.piece)?.sizeId ?? null, label: SETS.pickerLabel(p.name), onSelect: (sizeId) => onPick(p.piece, sizeId) });
+        grid.classList.add('n-live__sizes');
+        grid.removeAttribute('aria-label');
+        grid.setAttribute('aria-labelledby', id);
+        [...grid.querySelectorAll<HTMLButtonElement>('button')].forEach((b, i) => {
+          b.classList.add('live__size');
+          buttons.set(p.sizes[i]!.id, b);
+        });
+      } else {
+        grid = h('div', { class: 'live__sizes', attrs: { role: 'group', 'aria-labelledby': id } });
+        for (const z of p.sizes) {
+          const b = h('button', { class: 'btn live__size', attrs: { type: 'button' }, on: { click: () => onPick(p.piece, z.id) } }, h('span', { class: 'live__size-label', text: z.label }));
+          buttons.set(z.id, b);
+          grid.append(b);
+        }
+      }
+      const yours = h('p', { class: nocturne ? 'n-g n-lb n-live__yours live__yours' : 'live__overline live__yours', attrs: { hidden: true } });
+      parts.push({ p, buttons, yours });
+      blocks.push(h('div', { class: nocturne ? 'n-live__piece live__piece' : 'live__piece', data: { piece: String(p.piece) } }, name, grid, yours));
+    }
+    const check = h('p', { class: nocturne ? 'n-sm n-live__yours-check live__yours-check' : 'live__note live__yours-check', attrs: { hidden: true }, text: SETS.checkSizes });
+    const el = h('div', { class: nocturne ? 'n-live__set-pickers live__set-pickers' : 'live__set-pickers' }, ...blocks, check);
+    return {
+      el,
+      update: (choosing?: boolean) => {
+        const fromYours = this.setFromYours();
+        for (const { p, buttons, yours } of parts) {
+          const picked = this.setPicked.get(p.piece) ?? null;
+          for (const c of pieceSizeChoices(p, this.room, picked?.sizeId ?? null)) {
+            const b = buttons.get(c.id);
+            if (!b) continue;
+            b.setAttribute('aria-pressed', String(c.selected));
+            b.disabled = this.busy || (!c.available && !c.selected);
+            if (!c.available) b.setAttribute('aria-label', LIVE.soldOutSize(c.label));
+            else b.removeAttribute('aria-label');
+            b.classList.toggle('is-gone', !c.available);
+          }
+          const saved = fromYours && picked?.from === 'saved' ? p.sizes.find((z) => z.id === picked.sizeId) : undefined;
+          yours.hidden = !saved;
+          setFact(yours, saved ? LIVE.there.fromYours(saved.label) : '');
+        }
+        check.hidden = !fromYours;
+        if (choosing !== undefined) el.classList.toggle('is-choosing', choosing);
+      },
+    };
   }
 
   /**
@@ -827,11 +956,15 @@ class LivePage {
     const kind = this.screen?.kind;
     let choice: string | null = null;
     if (e && (kind === 'line' || kind === 'soldOut' || kind === 'turn')) {
-      const parts = [LIVE.size(e.size.label), DESKTOP.room.pieces(e.quantity)];
+      // Macro scope K44 T1: a set's, every size and its sets (`SIZE 17 · 52 · 45 · 1 SET`).
+      const parts = e.sizes?.length ? [setSizesLine(e), SETS.live.sets(e.quantity)] : [LIVE.size(e.size.label), DESKTOP.room.pieces(e.quantity)];
       if (kind === 'turn') parts.push(formatMoney(e.priceMinor * e.quantity, e.currency));
       choice = parts.join(' · ');
     }
+    // A set's: its pieces' photographs side by side, the window's ground (from the photograph's stage).
+    const tiles = sheet ? liveSet(sheet) : null;
     return {
+      photos: tiles && tiles.images.length > 1 ? tiles.images.map((x) => x.src) : null,
       photo: picture?.kind === 'photo' ? picture.src : null,
       name: this.name(),
       model: sheet?.name ? upper(sheet.name) : this.name(),
@@ -1069,11 +1202,31 @@ class LivePage {
     return this.guarantee || this.entry?.guaranteed === true ? GUARANTEE.liveRoom(this.maxPieces(s)) : '';
   }
 
-  /** The piece on a plate: its photograph, else its silhouette, else the seal; a picture that fails takes the seal's place. */
-  private piece(picture: LivePicture | null, extra: string, sweep = false): HTMLElement {
+  /**
+   * The piece on a plate: its photograph, else its silhouette, else the seal; a picture that fails takes the seal's place.
+   * Macro scope K44 T1: a set's pieces, their photographs side by side on the plate (`set`, from the photograph's stage).
+   */
+  private piece(picture: LivePicture | null, extra: string, sweep = false, set: SetCardModel | null = null): HTMLElement {
     const plate = h('div', { class: ['live__plate', extra] });
     const seal = () => sealSvg('live__plate-seal');
-    if (picture) {
+    if (set && set.images.length > 1) {
+      plate.classList.add('live__plate--tiles');
+      for (const image of set.images) {
+        const img = h('img', { class: ['live__img', 'live__img--photo', 'live__img--tile'], attrs: { src: image.src, alt: image.alt, decoding: 'async' } });
+        img.addEventListener(
+          'error',
+          () => {
+            img.remove();
+            if (!plate.querySelector('img')) {
+              plate.classList.remove('live__plate--tiles');
+              plate.prepend(seal());
+            }
+          },
+          { once: true },
+        );
+        plate.append(img);
+      }
+    } else if (picture) {
       const img = h('img', { class: ['live__img', `live__img--${picture.kind}`], attrs: { src: picture.src, alt: picture.alt, decoding: 'async' } });
       img.addEventListener('error', () => img.replaceWith(seal()), { once: true });
       plate.append(img);
@@ -1157,7 +1310,21 @@ class LivePage {
    * The release's photograph (its silhouette before), whole and faded, and its words lifted onto its foot; without one
    * (or once it cannot be loaded) its seal, the words under it.
    */
-  private hero(picture: LivePicture | null, words: HTMLElement): HTMLElement[] {
+  private hero(picture: LivePicture | null, words: HTMLElement, set: SetCardModel | null = null): HTMLElement[] {
+    // Macro scope K44 T1: a set's pieces, their photographs side by side from the photograph's stage (the house's crop).
+    if (set && set.images.length > 1) {
+      words.classList.add('n-lift');
+      const tiles = photoTiles(set.images, {
+        eager: true,
+        extraClass: 'n-live__photo n-live__tiles',
+        onEmpty: () => {
+          tiles.replaceWith(this.seal());
+          words.classList.remove('n-lift');
+          words.classList.add('n-live__sealed');
+        },
+      });
+      return [tiles, words];
+    }
     if (!picture) {
       // Not revealed yet (or never): its seal, the monogram, as THE RELEASES draws it (C7); never the ORBES code.
       words.classList.add('n-live__sealed');
@@ -1219,7 +1386,9 @@ class LivePage {
       h('p', { class: 'n-g n-lb n-live__kind', text: LIVE.kind }),
       title,
       m.line ? h('p', { class: 'n-g n-lb n-live__type' }, ...withNumerals(m.line)) : null,
+      m.set?.names ? h('p', { class: 'n-g n-lb n-live__set-names' }, ...withNumerals(m.set.names)) : null,
       h('p', { class: 'n-num n-live__price', text: m.price }),
+      m.set ? h('p', { class: 'n-g n-lb n-live__one-price', text: SETS.onePrice }) : null,
       m.surprise ? h('p', { class: 'n-g n-live__surprise', text: m.surprise }) : null,
       see ? h('p', { class: 'n-live__see-line' }, see) : null,
       h('p', { class: 'n-g n-lb n-live__opens', id: 'live-opens', text: LIVE.opensIn }),
@@ -1253,7 +1422,7 @@ class LivePage {
       'section',
       { class: 'n-livepage n-live__announced live__announced' },
       this.crumb(),
-      ...this.hero(m.picture, words),
+      ...this.hero(m.picture, words, m.set),
       rules,
       several ? h('div', { class: 'n-px n-ctr n-live__after-rules' }, there.el, ...tail) : null,
       this.howLine(),
@@ -1292,10 +1461,12 @@ class LivePage {
       switch (next) {
         case 'signed-out': {
           const open = h('button', { class: 'n-g n-tl n-live__there-open', attrs: { type: 'button' }, text: LIVE.there.action });
-          const lead = h('p', { class: 'n-sm n-live__there-lead', text: LIVE.there.signIn });
+          // Macro scope K44 T1: a set's, with a size for each piece.
+          const signInLead = this.isSet() ? SETS.live.there.signIn : LIVE.there.signIn;
+          const lead = h('p', { class: 'n-sm n-live__there-lead', text: signInLead });
           const panel = h('div', { class: 'n-live__panel live__there-panel' });
           const show = (): void => {
-            this.thereSignIn ??= new OwnershipPanel({ kind: 'account', lead: LIVE.there.signIn }, { api: this.deps.api, session: this.deps.session, onRescan: () => this.deps.onScan() });
+            this.thereSignIn ??= new OwnershipPanel({ kind: 'account', lead: signInLead }, { api: this.deps.api, session: this.deps.session, onRescan: () => this.deps.onScan() });
             panel.replaceChildren(this.thereSignIn.root);
             // The sign-in says the same sentence: it stands alone.
             open.parentElement!.hidden = true;
@@ -1329,25 +1500,28 @@ class LivePage {
         case 'choose':
         case 'said': {
           const said = h('p', { class: 'n-g n-t3 n-ivc n-live__said live__there-said' });
-          const label = h('p', { class: 'n-g n-lb n-live__size-label', id: 'live-size', text: LIVE.yourSize });
-          const sizes = this.sizes();
+          // Macro scope K44 T1: a set's, YOUR SIZES over a picker per piece (each with YOUR SIZES' line), said with every size.
+          const set = this.isSet();
+          const label = h('p', { class: 'n-g n-lb n-live__size-label', id: 'live-size', text: set ? SETS.yourSizes : LIVE.yourSize });
+          const sizes = set ? this.setPickers('nocturne', (piece, id) => this.pickTherePiece(piece, id)) : this.sizes();
           // AC-01: the size YOUR SIZES preselects, to check before I'LL BE THERE.
           const yours = this.yoursBlock('nocturne');
-          const lead = h('p', { class: 'n-sm n-live__there-lead', text: next === 'said' ? LIVE.there.change : LIVE.there.lead });
+          const lead = h('p', { class: 'n-sm n-live__there-lead', text: next === 'said' ? LIVE.there.change : set ? SETS.live.there.lead : LIVE.there.lead });
           const errorLine = h('p', { class: 'n-sm n-ivc n-live__error form__error', attrs: { role: 'alert', hidden: true } });
           const action = button(LIVE.there.action, { extraClass: 'n-live__there-action', onClick: () => this.sayThere() });
           const withdraw = button(LIVE.there.withdraw, { outline: true, extraClass: 'n-live__withdraw', onClick: () => void this.setThere(null) });
           // Said: the size said stands in YOUR SIZE's place over the sizes (C28, state 1); the group keeps its name.
           // IN-01: under I'LL BE THERE, the house's guarantee shown to the account.
           const guaranteed = this.guarantee ? h('p', { class: 'n-sm n-live__there-lead live__guarantee', text: GUARANTEE.liveAnnounced }) : null;
-          body.replaceChildren(...[next === 'said' ? said : label, sizes.el, next === 'said' ? null : yours.el, lead, errorLine, next === 'said' ? withdraw : action, guaranteed].filter((x): x is HTMLElement => x !== null));
-          sizes.el.setAttribute('aria-label', LIVE.yourSize);
+          body.replaceChildren(...[next === 'said' ? said : label, sizes.el, next === 'said' || set ? null : yours.el, lead, errorLine, next === 'said' ? withdraw : action, guaranteed].filter((x): x is HTMLElement => x !== null));
+          if (!set) sizes.el.setAttribute('aria-label', LIVE.yourSize);
           refresh = () => {
-            setFact(said, this.interest ? LIVE.there.said(this.interest.size.label) : '');
+            const i = this.interest;
+            setFact(said, i ? (set && i.sizes?.length ? SETS.live.there.said(entrySizes(i)) : LIVE.there.said(i.size.label)) : '');
             sizes.update();
             yours.update();
             this.showError(errorLine);
-            action.disabled = this.busy || this.picked.sizeId === null;
+            action.disabled = this.busy || (set ? this.setChoice() === null : this.picked.sizeId === null);
             action.setAttribute('aria-busy', String(this.busy));
             withdraw.disabled = this.busy;
           };
@@ -1414,15 +1588,36 @@ class LivePage {
   }
 
   private sayThere(): void {
+    if (this.isSet()) {
+      const choice = this.setChoice();
+      if (choice) void this.setThere(choice);
+      return;
+    }
     const sizeId = this.picked.sizeId;
     if (sizeId) void this.setThere(sizeId);
+  }
+
+  /**
+   * Macro scope K44 T1: a piece's size picked under I'LL BE THERE: kept until it is said; once said, the interest changed
+   * to it (every piece's size sent again, this one changed).
+   */
+  private pickTherePiece(piece: number, sizeId: string): void {
+    if (this.busy) return;
+    const said = this.interest?.sizes;
+    if (this.interest && said?.length) {
+      if (said.find((x) => x.piece === piece)?.id === sizeId) return;
+      void this.setThere(said.map((x) => ({ piece: x.piece, sizeId: x.piece === piece ? sizeId : x.id })));
+      return;
+    }
+    this.setPicked.set(piece, { sizeId, from: 'hand' });
+    this.screen?.update();
   }
 
   /**
    * I'LL BE THERE with a size (null: withdrawn). The public count follows the account's own change at once (the next read
    * of the release brings everyone's); a refusal reads as the server wrote it, the rule's own (403) saying it instead.
    */
-  private async setThere(sizeId: string | null): Promise<void> {
+  private async setThere(choice: string | readonly { piece: number; sizeId: string }[] | null): Promise<void> {
     const s = this.live();
     if (!s || this.busy) return;
     this.busy = true;
@@ -1432,18 +1627,20 @@ class LivePage {
     const from = document.activeElement;
     try {
       let after: LiveInterest | null = null;
-      if (sizeId === null) await this.deps.api.liveWithdrawInterest(s.id);
-      else after = await this.deps.api.liveInterest(s.id, sizeId);
+      if (choice === null) await this.deps.api.liveWithdrawInterest(s.id);
+      else after = await this.deps.api.liveInterest(s.id, choice);
       if (this.disposed) return;
       this.interest = after;
       if (after) {
         this.picked = { ...this.picked, sizeId: after.size.id };
         this.fromYours = false;
+        // A set's: every piece's size as said.
+        for (const x of after.sizes ?? []) this.setPicked.set(x.piece, { sizeId: x.id, from: 'interest' });
       }
       const delta = (after ? 1 : 0) - (before ? 1 : 0);
       const sheet = this.live();
       if (delta !== 0 && sheet) this.sheet = { ...sheet, interest: Math.max(0, sheet.interest + delta) };
-      this.say(after ? LIVE.there.said(after.size.label) : LIVE.there.withdrawn);
+      this.say(after ? (after.sizes?.length ? SETS.live.there.said(entrySizes(after)) : LIVE.there.said(after.size.label)) : LIVE.there.withdrawn);
     } catch (e) {
       if (this.disposed) return;
       this.deps.session.noteError(e);
@@ -1528,16 +1725,43 @@ class LivePage {
     };
   }
 
+  /**
+   * Macro scope K44 T1, T4: a set's YOUR SIZES in the room and after T0 (a picker per piece, setPickers), then its
+   * quantity in sets (`1 SET PER PERSON`: no stepper; more, where the release allows them).
+   */
+  private setPicker(onPick: (piece: number, sizeId: string) => void, onQuantity: (q: number) => void): { el: HTMLElement; update(choosing: boolean): void } {
+    const s = this.live()!;
+    const label = h('p', { class: 'live__overline live__size-label', id: 'live-size', text: SETS.yourSizes });
+    const pickers = this.setPickers('room', onPick);
+    const max = this.maxPieces(s);
+    const value = h('span', { class: 'live__qty-value', attrs: { 'aria-live': 'polite' } });
+    const fewer = h('button', { class: 'btn live__step', attrs: { type: 'button', 'aria-label': SETS.live.fewer }, on: { click: () => onQuantity(this.picked.quantity - 1) }, text: '−' });
+    const more = h('button', { class: 'btn live__step', attrs: { type: 'button', 'aria-label': SETS.live.more }, on: { click: () => onQuantity(this.picked.quantity + 1) }, text: '+' });
+    const quantity = max > 1 ? h('div', { class: 'live__qty', attrs: { role: 'group', 'aria-labelledby': 'live-qty' } }, h('span', { class: 'live__overline', id: 'live-qty', text: SETS.live.quantity }), fewer, value, more) : null;
+    const el = h('div', { class: 'live__picker live__picker--set' }, label, pickers.el, quantity);
+    return {
+      el,
+      update: (choosing: boolean) => {
+        el.classList.toggle('is-choosing', choosing);
+        pickers.update();
+        value.textContent = String(this.picked.quantity);
+        fewer.disabled = this.busy || this.picked.quantity <= 1;
+        more.disabled = this.busy || this.picked.quantity >= max;
+      },
+    };
+  }
+
   /** B2: the room, its closed door, the countdown, the ready check, the size; at T0 the opening. */
   private roomScreen(): Screen {
     const s = this.live()!;
     const m = liveSheetModel(s, this.deps.localZone);
     const overline = this.overline(LIVE.phase.ROOM);
     const lock = sealSvg('live-door__seal');
+    const set = this.isSet();
     const door = h(
       'div',
       { class: 'live-door', attrs: { 'aria-hidden': 'true' } },
-      h('div', { class: 'live-door__inside' }, this.piece(m.picture, 'live-door__piece', true)),
+      h('div', { class: 'live-door__inside' }, this.piece(m.picture, 'live-door__piece', true, m.set)),
       h('div', { class: 'live-door__leaf live-door__leaf--left' }),
       h('div', { class: 'live-door__leaf live-door__leaf--right' }),
       h('div', { class: 'live-door__lock' }, lock),
@@ -1550,14 +1774,20 @@ class LivePage {
     const checks = h('dl', { class: 'live__checks-list' });
     const plate = bracket(h('div', { class: 'live__checks' }, h('p', { class: 'live__overline live__checks-title', text: LIVE.ready.title }), checks));
     const errorLine = this.errorLine();
-    const picker = this.picker(
-      (id) => this.pick(id),
-      (q) => this.pickQuantity(q),
-    );
+    // Macro scope K44 T1: a set's, a picker per piece.
+    const picker = set
+      ? this.setPicker(
+          (piece, id) => this.pickPiece(piece, id),
+          (q) => this.pickQuantity(q),
+        )
+      : this.picker(
+          (id) => this.pick(id),
+          (q) => this.pickQuantity(q),
+        );
     const enter = h('button', { class: 'btn live__primary live__enter', attrs: { type: 'button' }, on: { click: () => this.enter() }, text: LIVE.enter });
     const ready = h('p', { class: 'live__subtitle live__ready', text: LIVE.youreReady });
     const readyLine = this.note('', 'live__ready-line');
-    const choose = this.note(LIVE.chooseLine, 'live__choose');
+    const choose = this.note(set ? SETS.live.chooseLine : LIVE.chooseLine, 'live__choose');
     const leave = h('button', { class: 'textlink live__leave', attrs: { type: 'button' }, on: { click: () => void this.act(() => this.deps.api.liveLeave(s.id)) }, text: LIVE.leaveRoom });
     // IN-01: under the size chooser, the house's guarantee shown to the account.
     const guaranteed = this.note('', 'live__guarantee');
@@ -1609,7 +1839,9 @@ class LivePage {
         setTimeout(() => door.classList.add('is-open'), prefersReducedMotion() ? 0 : DOOR_DELAY_MS);
       }
       if (opened) return;
-      const checksNow = readyChecks({ access: this.access, size: this.sizeLabel(this.picked.sizeId), toConfirm: this.fromYoursLines() !== null, connection: this.connection, synced: this.synced });
+      const checksNow = set
+        ? readyChecks({ access: this.access, size: this.setPickedLine(), toConfirm: this.setFromYours(), connection: this.connection, synced: this.synced, set: true })
+        : readyChecks({ access: this.access, size: this.sizeLabel(this.picked.sizeId), toConfirm: this.fromYoursLines() !== null, connection: this.connection, synced: this.synced });
       const key = checksNow.map((c) => `${c.value}:${c.ok}`).join('|');
       if (checks.dataset.key !== key) {
         checks.dataset.key = key;
@@ -1631,7 +1863,7 @@ class LivePage {
       this.showError(errorLine);
       choose.hidden = entered;
       enter.hidden = entered;
-      enter.disabled = this.busy || this.picked.sizeId === null;
+      enter.disabled = this.busy || (set ? this.setChoice() === null : this.picked.sizeId === null);
       enter.setAttribute('aria-busy', String(this.busy));
       const allOk = checksNow.every((c) => c.ok);
       ready.hidden = !entered || !allOk;
@@ -1650,17 +1882,22 @@ class LivePage {
     const errorLine = this.errorLine();
     const left = this.fact('', 'live__left');
     const presence = h('p', { class: 'live__presence' }, h('span', { class: 'live__dot', attrs: { 'aria-hidden': 'true' } }), h('span', { class: 'live__presence-text' }));
-    const picker = this.picker(
-      (id) => {
-        this.fromYours = false;
-        this.picked = { ...this.picked, sizeId: id };
-        this.screen?.update();
-      },
-      (q) => {
-        this.picked = { ...this.picked, quantity: Math.min(this.maxPieces(s), Math.max(1, q)) };
-        this.screen?.update();
-      },
-    );
+    const quantity = (q: number): void => {
+      this.picked = { ...this.picked, quantity: Math.min(this.maxPieces(s), Math.max(1, q)) };
+      this.screen?.update();
+    };
+    // Macro scope K44 T1: a set's, a picker per piece (a size with no piece left greyed in its piece).
+    const set = this.isSet();
+    const picker = set
+      ? this.setPicker((piece, id) => {
+          this.setPicked.set(piece, { sizeId: id, from: 'hand' });
+          this.screen?.update();
+        }, quantity)
+      : this.picker((id) => {
+          this.fromYours = false;
+          this.picked = { ...this.picked, sizeId: id };
+          this.screen?.update();
+        }, quantity);
     const enter = h('button', { class: 'btn live__primary live__enter', attrs: { type: 'button' }, on: { click: () => this.enter() }, text: LIVE.enterLine });
     const el = h(
       'section',
@@ -1670,10 +1907,10 @@ class LivePage {
       // The price and the quantity, as the room says them: an after-room's guest reads its piece here first (choice 2).
       this.fact(m.offer, 'live__offer'),
       this.surprise(m.surprise),
-      this.piece(m.picture, 'live__plate--join', true),
+      this.piece(m.picture, 'live__plate--join', true, m.set),
       presence,
       left,
-      this.note(this.afterRoomOf() ? LIVE.afterRoom.joinLine : LIVE.joinLine, 'live__join-line'),
+      this.note(this.afterRoomOf() ? LIVE.afterRoom.joinLine : set ? SETS.live.joinLine : LIVE.joinLine, 'live__join-line'),
       picker.el,
       errorLine,
       enter,
@@ -1685,12 +1922,22 @@ class LivePage {
         const room = this.room;
         setFact(presence.lastChild as HTMLElement, LIVE.inRoom(room?.inRoom ?? 0));
         presence.hidden = !room?.inRoom;
-        setFact(left, room ? LIVE.left(room.left, room.quantity) : '');
+        setFact(left, room ? (set ? SETS.live.left(room.left, room.quantity) : LIVE.left(room.left, room.quantity)) : '');
         picker.update(true);
         this.showError(errorLine);
-        // The server's rule for a late entry: the pieces of the size not confirmed (held ones may return) serve it.
-        const pieces = servable(roomSize(room, this.picked.sizeId ?? undefined));
-        enter.disabled = this.busy || this.picked.sizeId === null || (pieces !== null && pieces < this.picked.quantity);
+        // The server's rule for a late entry: the pieces of the size not confirmed (held ones may return) serve it; a
+        // set's, in each of its sizes.
+        if (set) {
+          const choice = this.setChoice();
+          const short = choice?.some((x) => {
+            const n = servable(roomSize(room, x.sizeId));
+            return n !== null && n < this.picked.quantity;
+          });
+          enter.disabled = this.busy || choice === null || short === true;
+        } else {
+          const pieces = servable(roomSize(room, this.picked.sizeId ?? undefined));
+          enter.disabled = this.busy || this.picked.sizeId === null || (pieces !== null && pieces < this.picked.quantity);
+        }
         enter.setAttribute('aria-busy', String(this.busy));
       },
     };
@@ -1717,6 +1964,22 @@ class LivePage {
     this.screen?.update();
   }
 
+  /** Macro scope K44 T1: a piece's size picked: before entering, kept here; entered (before T0), that piece's size changed. */
+  private pickPiece(piece: number, sizeId: string): void {
+    this.deps.sound.prime();
+    const s = this.live();
+    const held = heldEntry(this.entry);
+    if (!s || this.busy) return;
+    if (held?.status === 'WAITING') {
+      if (held.sizes?.find((x) => x.piece === piece)?.id === sizeId) return;
+      void this.act(() => this.deps.api.liveSize(s.id, [{ piece, sizeId }], this.maxPieces(s) > 1 ? this.picked.quantity : undefined));
+      return;
+    }
+    // AC-01: a size tapped, the one YOUR SIZES preselected too, is the collector's confirmation of that piece's.
+    this.setPicked.set(piece, { sizeId, from: 'hand' });
+    this.screen?.update();
+  }
+
   private pickQuantity(q: number): void {
     this.deps.sound.prime();
     const s = this.live();
@@ -1724,7 +1987,9 @@ class LivePage {
     const quantity = Math.min(this.maxPieces(s), Math.max(1, q));
     const held = heldEntry(this.entry);
     if (held?.status === 'WAITING') {
-      if (held.quantity !== quantity) void this.act(() => this.deps.api.liveSize(s.id, held.size.id, quantity));
+      // A set's: its sizes sent again with its new number of sets.
+      const choice = held.sizes?.length ? held.sizes.map((x) => ({ piece: x.piece, sizeId: x.id })) : held.size.id;
+      if (held.quantity !== quantity) void this.act(() => this.deps.api.liveSize(s.id, choice, quantity));
       return;
     }
     this.picked = { ...this.picked, quantity };
@@ -1735,11 +2000,12 @@ class LivePage {
   private enter(): void {
     this.deps.sound.prime();
     const s = this.live();
-    const sizeId = this.picked.sizeId;
-    if (!s || !sizeId) return;
+    // Macro scope K44 T1: a set's, a size per piece.
+    const choice = this.isSet() ? this.setChoice() : this.picked.sizeId;
+    if (!s || !choice) return;
     const from = document.activeElement;
     void this.act(
-      () => this.deps.api.liveEnter(s.id, sizeId, this.maxPieces(s) > 1 ? this.picked.quantity : undefined),
+      () => this.deps.api.liveEnter(s.id, choice, this.maxPieces(s) > 1 ? this.picked.quantity : undefined),
       () => {
         // ENTER goes once entered: the keyboard's focus moves to the size now chosen, still changeable until T0.
         requestAnimationFrame(() => {
@@ -1771,7 +2037,7 @@ class LivePage {
       left,
       held,
       this.hairline(),
-      this.note(LIVE.lineNote, 'live__line-note'),
+      this.note(this.isSet() ? SETS.live.lineNote : LIVE.lineNote, 'live__line-note'),
     );
     let cells = '';
     return {
@@ -1783,7 +2049,8 @@ class LivePage {
         if (!e || !room) return;
         figure.textContent = e.position === null ? '' : String(e.position);
         setFact(ahead, aheadLine(e));
-        const facts = lineFacts(room, e.size.id, e.size.label);
+        // Macro scope K44 T1: a set's line in sets, its place read in every one of its sizes (aheadLine).
+        const facts = e.sizes?.length ? setLineFacts(room) : lineFacts(room, e.size.id, e.size.label);
         setFact(left, facts.left);
         setFact(held, facts.held ?? '');
         held.hidden = facts.held === null;
@@ -1887,14 +2154,20 @@ class LivePage {
     const place = this.fact('', 'live__ahead');
     const errorLine = this.errorLine();
     const leave = this.action(LIVE.edge.soldOut.leave, () => this.armed(() => this.act(() => this.deps.api.liveLeave(s.id))), 'live__leave-line');
-    const el = h('section', { class: 'live__edge' }, this.overline(this.name()), this.title(LIVE.edge.soldOut.title(this.entry?.size.label ?? '')), place, text, errorLine, leave);
+    // Macro scope K44 T1: a set's entry sold out in one of its sizes: that piece and size said.
+    const short = this.entry?.sizes?.length ? setShort(this.room, this.entry) : null;
+    const title = short ? SETS.live.soldOut.title(short.name, short.label) : LIVE.edge.soldOut.title(this.entry?.size.label ?? '');
+    const el = h('section', { class: 'live__edge' }, this.overline(this.name()), this.title(title), place, text, errorLine, leave);
     return {
       kind: 'soldOut',
       el,
       update: () => {
         const e = this.entry;
-        const size = e ? roomSize(this.room, e.size.id) : null;
-        text.textContent = size && size.held > 0 ? LIVE.edge.soldOut.stay : LIVE.edge.soldOut.none;
+        const now = e?.sizes?.length ? setShort(this.room, e) : null;
+        const sizeId = now ? e?.sizes?.find((x) => x.piece === now.piece)?.id : e?.size.id;
+        const size = e ? roomSize(this.room, sizeId) : null;
+        const held = size !== null && size.held > 0;
+        text.textContent = now ? (held ? SETS.live.soldOut.stay(now.name, now.label) : SETS.live.soldOut.none(now.name, now.label)) : held ? LIVE.edge.soldOut.stay : LIVE.edge.soldOut.none;
         setFact(place, size && size.held > 0 ? LIVE.held(size.held) : e?.position ? `${LIVE.yourPlace} ${e.position}` : '');
         this.showError(errorLine);
         leave.disabled = this.busy;
@@ -1922,7 +2195,9 @@ class LivePage {
     const ring = s('circle', { class: 'live-hold__turn', cx: 134, cy: 134, r: 128, transform: 'rotate(-90 134 134)', 'stroke-dasharray': TURN_RING.toFixed(2) });
     const fill = s('circle', { class: 'live-hold__fill', cx: 134, cy: 134, r: 116, transform: 'rotate(-90 134 134)', 'stroke-dasharray': HOLD_RING.toFixed(2), 'stroke-dashoffset': HOLD_RING.toFixed(2) });
     const svg = s('svg', { class: 'live-hold__rings', viewBox: '0 0 268 268', 'aria-hidden': 'true', focusable: 'false' }, s('circle', { class: 'live-hold__track', cx: 134, cy: 134, r: 128 }), ring, fill);
-    const button = h('button', { class: 'btn live-hold', attrs: { type: 'button', 'aria-label': LIVE.sealLabel, 'aria-describedby': 'live-turn-left' } }, svg, sealSvg('live-hold__seal'));
+    // Macro scope K44 T1: the seal secures the set.
+    const set = this.isSet();
+    const button = h('button', { class: 'btn live-hold', attrs: { type: 'button', 'aria-label': set ? SETS.live.sealLabel : LIVE.sealLabel, 'aria-describedby': 'live-turn-left' } }, svg, sealSvg('live-hold__seal'));
     const left = h('p', { class: 'live__turn-left', id: 'live-turn-left', attrs: { role: 'timer' } });
     const errorLine = this.errorLine();
     const el = h(
@@ -1932,7 +2207,7 @@ class LivePage {
       this.title(LIVE.pressHold),
       button,
       left,
-      this.fact(LIVE.toSecure, 'live__to-secure'),
+      this.fact(set ? SETS.live.toSecure : LIVE.toSecure, 'live__to-secure'),
       this.fact('', 'live__turn-piece'),
       this.note(LIVE.letGo, 'live__let-go'),
       errorLine,
@@ -1989,7 +2264,7 @@ class LivePage {
         } else this.frozenTurn = null;
         left.textContent = clockText(remainingMs);
         ring.setAttribute('stroke-dashoffset', (TURN_RING * (1 - fraction)).toFixed(2));
-        setFact(piece, `${this.name()} · ${LIVE.size(e.size.label)} · ${formatMoney(e.priceMinor * e.quantity, e.currency)}`);
+        setFact(piece, `${this.name()} · ${e.sizes?.length ? setSizesLine(e) : LIVE.size(e.size.label)} · ${formatMoney(e.priceMinor * e.quantity, e.currency)}`);
         // The pause alone: while the secure is sent (busy) the seal stays lit, its hold already done (startHold waits).
         button.setAttribute('aria-disabled', String(paused));
         el.classList.toggle('is-paused', paused);
@@ -2073,10 +2348,13 @@ class LivePage {
   /** B5: the piece secured, its reveal (`revealing`: secured on this page, just now), the add-ons, PAY. */
   private securedScreen(revealing: boolean): Screen {
     const s = this.live();
+    const set = this.isSet();
     const seal = sealSvg('live__piece-seal');
     const securedAt = this.fact('', 'live__secured-at');
-    const reveal = bracket(h('div', { class: 'live__plate live__reveal' }, h('p', { class: 'live__overline', text: LIVE.yourPiece }), seal, securedAt));
+    const reveal = bracket(h('div', { class: 'live__plate live__reveal' }, h('p', { class: 'live__overline', text: set ? SETS.live.yourSet : LIVE.yourPiece }), seal, securedAt));
     const detail = this.fact('', 'live__detail');
+    // Macro scope K44 T1: the set's pieces, each in its size, under its name (then the add-ons and PAY).
+    const setPieces = set ? h('dl', { class: 'live__set-pieces', attrs: { 'aria-label': SETS.live.pieces } }) : null;
     const addonsBox = h('div', { class: 'live__addons', attrs: { role: 'group', 'aria-labelledby': 'live-addons' } });
     const addonButtons = new Map<string, HTMLButtonElement>();
     const addons = s && s.addons.length > 0 && this.entry ? addonChoices(s, this.entry) : [];
@@ -2110,6 +2388,7 @@ class LivePage {
       reveal,
       this.title(this.name()),
       detail,
+      setPieces,
       addons.length > 0 ? h('p', { class: 'live__overline live__addons-title', id: 'live-addons', text: LIVE.addons }) : null,
       addons.length > 0 ? addonsBox : null,
       itemsTitle,
@@ -2135,8 +2414,18 @@ class LivePage {
         if (!e?.hold) return;
         const at = zonedTime(e.hold.securedAt, this.deps.localZone);
         setFact(securedAt, LIVE.securedAt(at?.clock ?? ''));
-        const collection = s?.collection ? `${upper(s.collection)} · ` : '';
-        setFact(detail, `${collection}${LIVE.size(e.size.label)}${e.quantity > 1 ? ` · ${e.quantity} ${LIVE.quantity}` : ''}`);
+        if (setPieces) {
+          setFact(detail, [SETS.line(s?.set?.pieces.length ?? e.sizes?.length ?? 0), e.quantity > 1 ? SETS.live.sets(e.quantity) : ''].filter(Boolean).join(' · '));
+          const rows = heldPieces(e, this.room, s);
+          const key = JSON.stringify(rows);
+          if (setPieces.dataset.key !== key) {
+            setPieces.dataset.key = key;
+            setPieces.replaceChildren(...rows.map((r) => h('div', { class: 'live__set-piece' }, h('dt', { class: 'live__set-piece-name' }, ...withNumerals(r.name)), h('dd', { class: 'live__set-piece-size' }, ...withNumerals(r.size)))));
+          }
+        } else {
+          const collection = s?.collection ? `${upper(s.collection)} · ` : '';
+          setFact(detail, `${collection}${LIVE.size(e.size.label)}${e.quantity > 1 ? ` · ${e.quantity} ${LIVE.quantity}` : ''}`);
+        }
         const chosen = new Set(e.addons.map((a) => a.id));
         for (const [id, b] of addonButtons) {
           b.setAttribute('aria-pressed', String(chosen.has(id)));
@@ -2231,12 +2520,14 @@ class LivePage {
     const reference = liveReference(e.id);
     const at = zonedTime(e.confirmedAt ?? e.hold?.securedAt ?? Date.now(), this.deps.localZone);
     const row = (label: string, value: string) => h('div', { class: 'rows__row' }, h('dt', { class: 'rows__label' }, ...withNumerals(label)), h('dd', { class: 'rows__value', text: value }));
+    // Macro scope K44 T1: a set's, each piece in its size (`HALO` · SIZE 52), then its sets when more than one.
+    const set = !!e.sizes?.length;
     const rows = h(
       'dl',
       { class: 'rows live__receipt' },
       row(LIVE.rows.reserved, at ? `${at.date} · ${at.clock}` : ''),
-      row(LIVE.rows.size, e.size.label),
-      e.quantity > 1 ? row(LIVE.rows.pieces, String(e.quantity)) : null,
+      ...(set ? heldPieces(e, this.room, this.live()).map((p) => row(p.name, p.size)) : [row(LIVE.rows.size, e.size.label)]),
+      e.quantity > 1 ? row(set ? SETS.rows.sets : LIVE.rows.pieces, String(e.quantity)) : null,
       ...e.addons.map((a) => row(upper(a.label), formatMoney(a.priceMinor * e.quantity, e.currency))),
       // Plan MACRO M3 §4.4 (D2): the catalogue add-ons carried onto its order, written as the release's just above
       // (POLISHING CLOTH × 2 · € 30).
@@ -2254,7 +2545,9 @@ class LivePage {
       h('div', { class: 'live__mark' }, toneMark('authentic')),
       this.title(LIVE.confirmed),
       this.fact(this.afterRoomOf() ? LIVE.afterRoom.confirmedOf(this.name()) : LIVE.confirmedOf(this.name()), 'live__confirmed-of'),
-      h('p', { class: 'prose live__confirmed-text', text: LIVE.reservedIn(e.size.label, e.quantity) }),
+      // Macro scope K44 T1: YOUR SET IS RESERVED, each piece in its size.
+      set ? this.fact(SETS.live.reserved(e.quantity), 'live__set-reserved') : null,
+      h('p', { class: 'prose live__confirmed-text', text: set ? SETS.live.reservedText : LIVE.reservedIn(e.size.label, e.quantity) }),
       // Plan MACRO M3 §4.4 (D2): PAY's add-ons that could not be added, each by its name and why (its answer may come
       // after the stream's CONFIRMED: drawn at each update).
       leftOut,
@@ -2346,6 +2639,7 @@ class LivePage {
       h('p', { class: 'n-g n-lb n-live__kind' }, ...withNumerals([LIVE.kind, m.day].filter(Boolean).join(' · '))),
       title,
       m.line ? h('p', { class: 'n-g n-lb n-live__type' }, ...withNumerals(m.line)) : null,
+      m.set?.names ? h('p', { class: 'n-g n-lb n-live__set-names' }, ...withNumerals(m.set.names)) : null,
       h('p', { class: 'n-g n-lb n-ivc n-live__pieces-line' }, ...withNumerals(m.pieces)),
       m.lookbook ? h('p', { class: 'n-live__see-line' }, textLink(LOOKBOOK.seeModel, { href: lookbookSheetPath(m.lookbook), onOpen: () => this.deps.onModel(m.lookbook!), extraClass: 'n-live__see' })) : null,
       part,
@@ -2355,7 +2649,7 @@ class LivePage {
       'section',
       { class: 'n-livepage n-live__past live__past' },
       this.crumb(),
-      ...this.hero(m.picture, words),
+      ...this.hero(m.picture, words, m.set),
       h('div', { class: 'n-nx n-live__over' }, h('p', { class: 'n-g n-t3 n-ivc n-live__over-text live__past-status', text: RELEASES.over })),
       receipt,
       ask.el,
@@ -2399,10 +2693,12 @@ class LivePage {
     const time = at ? zonedTime(at, this.deps.localZone) : null;
     const reserved = at && time ? `${zonedDate(at, this.deps.localZone)} · ${time.time}` : '';
     const row = (label: string, value: string): [string, string] => [label, value];
+    // Macro scope K44 T1: a set's, each piece in its size, then its sets.
+    const set = !!e.sizes?.length;
     const rows = [
       row(LIVE.rows.reserved, reserved),
-      row(LIVE.rows.size, e.size.label),
-      row(LIVE.rows.pieces, String(e.quantity)),
+      ...(set ? heldPieces(e, this.room, this.sheet && !isEndedSheet(this.sheet) ? this.sheet : null).map((p) => row(p.name, p.size)) : [row(LIVE.rows.size, e.size.label)]),
+      row(set ? SETS.rows.sets : LIVE.rows.pieces, String(e.quantity)),
       ...e.addons.map((a) => row(upper(a.label), LIVE.addonPrice(money(a.priceMinor * e.quantity, e.currency)))),
       ...chosenRows(e.addonItems, e.currency),
       row(LIVE.rows.total, money(e.totalMinor, e.currency)),
@@ -2413,7 +2709,8 @@ class LivePage {
       { class: 'n-rec n-live__receipt', attrs: { 'aria-labelledby': 'live-confirmed' } },
       h('p', { class: 'n-g n-lb n-live__receipt-of' }, ...withNumerals(LIVE.confirmedOf(heading))),
       h('h2', { class: 'n-g n-t1 n-live__receipt-title', id: 'live-confirmed', text: LIVE.confirmed }),
-      h('p', { class: 'n-live__receipt-text', text: LIVE.reservedIn(e.size.label, e.quantity) }),
+      set ? h('p', { class: 'n-g n-lb n-live__receipt-set' }, ...withNumerals(SETS.live.reserved(e.quantity))) : null,
+      h('p', { class: 'n-live__receipt-text', text: set ? SETS.live.reservedText : LIVE.reservedIn(e.size.label, e.quantity) }),
       h(
         'dl',
         { class: 'n-live__receipt-rows' },
@@ -2531,7 +2828,7 @@ class LivePage {
     const el = h(
       'section',
       { class: 'n-livepage n-live__end' },
-      ...this.hero(sheet ? pictureOf(sheet) : null, words),
+      ...this.hero(sheet ? pictureOf(sheet) : null, words, sheet ? liveSet(sheet) : null),
       h('section', { class: 'n-px n-ctr n-live__outcome-block', attrs: { 'aria-live': 'polite' } }, outcome, note),
       write ? h('div', { class: 'n-px n-live__contact' }, writeButton(write)) : null,
       ask?.el ?? null,
@@ -2551,6 +2848,23 @@ class LivePage {
 
   private edgeCopy(kind: LiveScreenKind): { title: string; text: string } {
     const e = LIVE.edge;
+    // Macro scope K44 T1: a set's end of a visit says « the set » where a model's says « the piece ».
+    if (this.isSet()) {
+      const x = SETS.live.edge;
+      const reason = this.room?.endedReason ?? 'ENDED';
+      switch (kind) {
+        case 'missed':
+          return { ...e.missed, text: x.missed };
+        case 'expired':
+          return { ...e.expired, text: x.expired };
+        case 'released':
+          return { ...e.released, text: x.released };
+        case 'ended':
+          return reason === 'SOLD_OUT' ? { ...e.ended.SOLD_OUT, text: x.soldOut } : reason === 'ENDED' ? { ...e.ended.ENDED, text: x.ended } : e.ended[reason];
+        default:
+          break;
+      }
+    }
     switch (kind) {
       case 'missed':
         return e.missed;

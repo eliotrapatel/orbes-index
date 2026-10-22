@@ -115,6 +115,16 @@ function drawSizesBody(v: DrawSizesBody): { sizeId: string } | { sizes: PieceSiz
   return typeof v === 'string' && v ? { sizeId: v } : undefined;
 }
 
+/**
+ * What I'LL BE THERE, ENTER and CHANGE SIZE of a LIVE RELEASE send: a model's release's size (`sizeId`), or (macro scope
+ * K44 T1) a set's size per piece (`sizes`; CHANGE SIZE may name some of its pieces).
+ */
+export type LiveSizeChoice = string | readonly PieceSize[];
+
+function liveSizeBody(v: LiveSizeChoice): { sizeId: string } | { sizes: PieceSize[] } {
+  return typeof v === 'string' ? { sizeId: v } : { sizes: v.map((x: PieceSize) => ({ piece: x.piece, sizeId: x.sizeId })) };
+}
+
 export type TransportCode = 'NETWORK' | 'TIMEOUT' | 'BAD_RESPONSE';
 
 export class ApiError extends Error {
@@ -491,9 +501,9 @@ export class ApiClient {
     return (r.release ?? null) as LiveBanner | null;
   }
 
-  /** I'LL BE THERE, with a size, until T0 (the same again with another size changes it). */
-  async liveInterest(id: string, sizeId: string): Promise<LiveInterest> {
-    const r = await this.request<{ interest?: LiveInterest }>('PUT', `/api/v1/live/${encodeURIComponent(id)}/interest`, { sizeId }, { csrf: true });
+  /** I'LL BE THERE, with a size (a set's: a size per piece), until T0 (the same again with another size changes it). */
+  async liveInterest(id: string, choice: LiveSizeChoice): Promise<LiveInterest> {
+    const r = await this.request<{ interest?: LiveInterest }>('PUT', `/api/v1/live/${encodeURIComponent(id)}/interest`, liveSizeBody(choice), { csrf: true });
     if (!r?.interest || typeof r.interest.size?.id !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
     return r.interest;
   }
@@ -539,14 +549,19 @@ export class ApiClient {
     return res.body;
   }
 
-  /** ENTER the room (before T0) or the line (after it), with a size and, where the release allows more, a quantity. */
-  liveEnter(id: string, sizeId: string, quantity?: number): Promise<LiveEntry> {
-    return this.liveAction('POST', id, 'enter', quantity === undefined ? { sizeId } : { sizeId, quantity });
+  /**
+   * ENTER the room (before T0) or the line (after it), with a size (a set's: a size per piece) and, where the release
+   * allows more, a quantity (a set's: its sets).
+   */
+  liveEnter(id: string, choice: LiveSizeChoice, quantity?: number): Promise<LiveEntry> {
+    const body = liveSizeBody(choice);
+    return this.liveAction('POST', id, 'enter', quantity === undefined ? body : { ...body, quantity });
   }
 
-  /** CHANGE SIZE (and quantity), before T0 only (409 LIVE_SIZE_LOCKED from T0 on). */
-  liveSize(id: string, sizeId: string, quantity?: number): Promise<LiveEntry> {
-    return this.liveAction('POST', id, 'size', quantity === undefined ? { sizeId } : { sizeId, quantity });
+  /** CHANGE SIZE (and quantity), before T0 only (409 LIVE_SIZE_LOCKED from T0 on); a set's: any of its pieces. */
+  liveSize(id: string, choice: LiveSizeChoice, quantity?: number): Promise<LiveEntry> {
+    const body = liveSizeBody(choice);
+    return this.liveAction('POST', id, 'size', quantity === undefined ? body : { ...body, quantity });
   }
 
   /** LEAVE the room or the line. */
