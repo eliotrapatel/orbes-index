@@ -16,7 +16,7 @@
  *    require and the week of the question after; the reset links an hour, the
  *    founding list's consent at the version in force, the emails' 90 days; a
  *    WORN photograph's consent at the version in force and its sendings in
- *    24 hours),
+ *    24 hours; at most 3 of each add-on on an order, a set of 2 to 4 models),
  *    and every absence of §10 (no email but through the outbox, no reset but
  *    with a recovery code, no undoing an accepted transfer, no account
  *    deletion, no age check, no vote of the circle and no note of the private
@@ -49,7 +49,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SESSION_TTL_HOURS, loadConfig } from '../../src/server/config.js';
-import { EMAIL_KINDS, WARRANTY_CLAIM_OUTCOMES_BY_BASIS, WARRANTY_CLAIM_REFUSALS_BY_BASIS } from '../../src/server/db/schema.js';
+import { ADDON_UNITS_MAX, EMAIL_KINDS, SET_PIECES_MAX, SET_PIECES_MIN, WARRANTY_CLAIM_OUTCOMES_BY_BASIS, WARRANTY_CLAIM_REFUSALS_BY_BASIS } from '../../src/server/db/schema.js';
 import { registerAccountBody } from '../../src/server/http/schemas.js';
 import { CARE_CONDITIONS_VERSION } from '../../src/server/render/care-conditions.js';
 import { RECOVERY_ATTEMPT_LIMIT, RECOVERY_ATTEMPT_WINDOW_MS, RECOVERY_CODE_TTL_MS, RESET_REQUEST_LIMIT, TRANSFER_FREEZE_MS } from '../../src/server/services/account-recovery.js';
@@ -75,6 +75,7 @@ import {
   LIVE_ROOM_OPENS_MINUTES,
   LIVE_TURN_SECONDS,
 } from '../../src/server/services/live.js';
+import { ADDON_LIMIT } from '../../src/server/services/order-addons.js';
 import { ORDER_CERTIFICATE_STATUSES, ORDER_TRANSITIONS } from '../../src/server/services/orders.js';
 import {
   CERTIFICATE_DEFAULT_DAYS,
@@ -546,6 +547,20 @@ const CONSTANTS: Record<string, ConstantSpec> = {
     value: `${WORN_RATE.max} en ${WORN_RATE.windowMs / HOUR} heures`,
     holds: () => expect(WORN_RATE.windowMs).toBe(DAY),
   },
+  // Lot M3 of the macro plan (scope of 2026-10-20, L2). R181: at most 3 of each add-on on an order (ADDON_UNITS_MAX, the
+  // CHECK of order_addon_items' choices), the terms' article 14 in both languages.
+  ADDON_LIMIT: {
+    value: `${ADDON_LIMIT} de chaque article par commande`,
+    fr: [`au plus ${ADDON_LIMIT} de chaque article complémentaire`],
+    en: [`at most ${ADDON_LIMIT} of each add-on`],
+    holds: () => expect(ADDON_LIMIT).toBe(ADDON_UNITS_MAX),
+  },
+  // R186: THE SET groups 2 to 4 different models (T1).
+  'SET_PIECES_MIN, SET_PIECES_MAX': {
+    value: `${SET_PIECES_MIN} à ${SET_PIECES_MAX} modèles`,
+    fr: [`${SET_PIECES_MIN} à ${SET_PIECES_MAX} modèles différents`],
+    en: [`${SET_PIECES_MIN} to ${SET_PIECES_MAX} different models`],
+  },
   LIVE_QUESTION_OPEN_DAYS: {
     value: `${LIVE_QUESTION_OPEN_DAYS} jours`,
     fr: [`pendant ${LIVE_QUESTION_OPEN_DAYS} jours`],
@@ -655,6 +670,18 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'WORN: shown to everyone once published, never before (G2, G5)': "if (reader.kind === 'public') q = q.where(shownSql);",
   'WORN: withdrawn at any time, erased at once (G2)': "set({ status: 'WITHDRAWN', ...ERASED",
   'WORN: the credit, first name and country, the Instagram name if chosen (G3)': 'instagram: r.credit_instagram,',
+  // Lot M3 of the macro plan (scope of 2026-10-20, L2).
+  'an add-on: no ORBES CODE, no identity, never toward the tier (D1)': 'const counted = lines.filter((l) => skus.get(l.sku_id)!.model === null);',
+  'add-ons offered at the purchase, carried if in stock, never holding the sale (D2)': 'const units = Math.max(0, Math.min(c.units, level.available, ADDON_LIMIT));',
+  'add-ons in YOUR ORDERS until packing begins (D2)': "if (o.packing_started_at !== null) return 'PACKING_STARTED';",
+  'an add-on added after payment has its own invoice (D2)': 'const invoice = await issueSupplementaryInvoice(tx, o, unitIds.map(() => addonLine(s.name, price)), by.actor, now);',
+  'saved sizes counted for supplier orders, never naming anyone (Z1)': 'SELECT c.account_id, s.value_mm, coalesce(ad.country, a.country) AS country',
+  'THE SET: 2 to 4 different models, one price, its own release (T1)': 'A set groups ${SET_PIECES_MIN} to ${SET_PIECES_MAX} different models',
+  'a set\'s draw: a size per piece, selected while every size has a piece (T1)': 'const fits = mine.length > 0 && mine.every((z) => (left.get(z) ?? 0) >= 1);',
+  'a set counts as one toward the pieces per person in LIVE (T4)': "${isSet ? 'sets' : 'pieces'}",
+  'each piece its own order and identity, its share on its invoice (T1, T2)': 'export const setLineWords = (name: string): string =>',
+  'a set cancelled whole (T3)': 'throw setShipped();',
+  'a set returned whole, a piece\'s size still exchanged (T3)': 'if (o.set_sale_id !== null) throw setReturnWhole();',
 };
 
 // ── Sources, for the absences of §10 ───────────────────────────────────────

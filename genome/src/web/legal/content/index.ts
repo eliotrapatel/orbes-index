@@ -66,8 +66,16 @@ export { LANGS, type Block, type Lang, type LegalDocument, type LegalSection } f
  * the licence with its credit, the review, the withdrawal); the terms gain no sentence on MESSAGES. The date of the lot's
  * final legal commit, never M1's 2026-10-21. Article 11 did not change: CARE_CONDITIONS_VERSION stays 2026-10-15. The
  * consents recorded with the version in force move with it (FOUNDING_CONSENT_VERSION, WORN_CONSENT_VERSION).
+ * 2026-10-23 is the version of lot M3 of the macro scope (L2; plan step M3.20): the privacy policy's YOUR SIZES sentence
+ * (saved sizes also counted, without naming anyone, with the account's country, to plan the sizes ORBES orders and
+ * where: Z1); the terms' article 14, its add-ons (no ORBES CODE, no tier, offered at the purchase and in YOUR ORDERS
+ * until packing, their documents after payment, returned with the order: D1, D2) and THE SET (one price, a size per
+ * piece at entry, one per person in a LIVE RELEASE, each piece's identity and tier, its share on each invoice, cancelled
+ * and returned whole, a piece's size still exchanged: T1 to T4), and the return paragraph's set returned whole. The date
+ * of the lot's final legal commit, never M1's 2026-10-21 nor M2's 2026-10-22. Article 11 did not change:
+ * CARE_CONDITIONS_VERSION stays 2026-10-15; the consents recorded with the version in force move with it.
  */
-export const LEGAL_VERSION = '2026-10-22';
+export const LEGAL_VERSION = '2026-10-23';
 
 export const DOCUMENTS: Readonly<Record<LegalPage, Readonly<Record<Lang, LegalDocument>>>> = Object.freeze({
   privacy: PRIVACY,

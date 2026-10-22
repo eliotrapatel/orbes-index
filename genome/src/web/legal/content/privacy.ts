@@ -109,8 +109,13 @@
  *    the sizes an account saves (`account_sizes`: a kind and a measure),
  *    kept until cleared (a cleared size is a deleted row), audited
  *    `account.sizes.update` with the kinds only, exported
- *    (AccountExport.sizes); they only preselect a size the collector
- *    confirms; the account section's sentence says so;
+ *    (AccountExport.sizes); they preselect a size the collector
+ *    confirms, and (lot M3 of the macro plan, Z1, services/size-split.ts)
+ *    ORDER A MODEL counts them, as counts by size and location only, never
+ *    naming an account, each collector at the location that serves their
+ *    country (their default address's, else their profile's), to propose
+ *    how many pieces of each size ORBES orders and where; the account
+ *    section's sentence says so;
  *  - the sound signature (P-D07, shared/prefs.ts): the one preference the
  *    verify app keeps on the device, in local storage, under SOUND_PREF_KEY
  *    `orbes.sound`: "off", written only by SOUND OFF and removed by SOUND
@@ -212,7 +217,7 @@ const EN: LegalDocument = {
         'ORBES records what is done with your account: the pieces registered to it and since when, the transfers, the reports of loss or theft, the links to ownership certificates (of each link, only a fingerprint), and the recovery codes ORBES Client Services gives you or a reset link sends you (only as a hash).',
         'Each sign-in opens a session of 30 days at most. It is kept with a pseudonym of your IP address and the identification string of your browser (its user agent), for the security of your account.',
         "The service's audit log, which records every change, names your account by its identifier and a pseudonym of the IP address, never by your email address or your name.",
-        'The sizes you save in YOUR SIZES are kept with your account until you clear them, and only preselect a size you then confirm.',
+        "The sizes you save in YOUR SIZES are kept with your account until you clear them. They preselect a size you then confirm, and are counted, without naming anyone, with the country of your account (that of your default address, else your profile's), to plan how many pieces of each size ORBES orders, and where to keep them.",
         'When you claim under the warranty or the legal guarantee, ORBES keeps the claim with your account: its steps, its outcome and any credit, which the copy of your data includes. The prepaid label, which carries your address, is erased 30 days after the claim ends.',
       ],
     },
@@ -468,7 +473,7 @@ const FR: LegalDocument = {
         "ORBES enregistre ce qui est fait avec votre compte : les pièces qui y sont enregistrées et depuis quand, les transferts, les déclarations de perte ou de vol, les liens vers des certificats de propriété (de chaque lien, une empreinte seulement), et les codes de récupération que vous remet ORBES Client Services ou que vous envoie un lien de réinitialisation (sous forme d'empreinte seulement).",
         "Chaque connexion ouvre une session de 30 jours au plus. Elle est gardée avec un pseudonyme de votre adresse IP et la chaîne d'identification de votre navigateur (son user agent), pour la sécurité de votre compte.",
         "Le journal d'audit du service, qui enregistre chaque modification, désigne votre compte par son identifiant et un pseudonyme de l'adresse IP, jamais par votre adresse e-mail ni par votre nom.",
-        "Les tailles que vous enregistrez dans YOUR SIZES sont conservées avec votre compte jusqu'à ce que vous les effaciez, et ne font que présélectionner une taille que vous confirmez ensuite.",
+        "Les tailles que vous enregistrez dans YOUR SIZES sont conservées avec votre compte jusqu'à ce que vous les effaciez. Elles présélectionnent une taille que vous confirmez ensuite, et sont comptées, sans nommer personne, avec le pays de votre compte (celui de votre adresse par défaut, sinon celui de votre profil), pour prévoir combien de pièces de chaque taille ORBES commande, et où les garder.",
         "Quand vous faites jouer la garantie ou la garantie légale, ORBES conserve la demande avec votre compte : ses étapes, son issue et l'éventuel crédit, que la copie de vos données comprend. L'étiquette prépayée, qui porte votre adresse, est effacée 30 jours après la fin de la demande.",
       ],
     },

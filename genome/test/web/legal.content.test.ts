@@ -47,16 +47,17 @@ import { CONTENT_SECURITY_POLICY } from '../../src/server/http/security.js';
 import { UP as LIVE_MIGRATION } from '../../src/server/db/migrations/0021_live_release.js';
 import { UP as ORDERS_MIGRATION } from '../../src/server/db/migrations/0022_orders_stock.js';
 import { UP as COLLECTORS_MIGRATION } from '../../src/server/db/migrations/0023_releases_collectors.js';
-import { EMAIL_KINDS, HOUSE_MOMENTS } from '../../src/server/db/schema.js';
+import { EMAIL_KINDS, HOUSE_MOMENTS, SET_PIECES_MAX, SET_PIECES_MIN } from '../../src/server/db/schema.js';
 import { CARE_CONDITIONS, CARE_CONDITIONS_VERSION } from '../../src/server/render/care-conditions.js';
 import { EMAIL_RETENTION_DAYS } from '../../src/server/services/email.js';
 import { FOUNDING_CONSENT_VERSION } from '../../src/server/services/founding.js';
 import { ABSENCE_DAYS, CREDIT_EXPIRING_DAYS } from '../../src/server/services/house-moments.js';
 import { WORN_CONSENT_VERSION } from '../../src/server/services/worn.js';
 import { CARE_LABEL_RETENTION_MS } from '../../src/server/services/care.js';
-import { INVOICE_ISSUER } from '../../src/server/services/invoices.js';
+import { INVOICE_ISSUER, setLineWords } from '../../src/server/services/invoices.js';
 import { RECOVERY_CODE_TTL_MS, TRANSFER_FREEZE_MS } from '../../src/server/services/account-recovery.js';
-import { LIVE_NETWORK_RETENTION_DAYS, liveNetworkHash, liveNetworkPrefix } from '../../src/server/services/live.js';
+import { LIVE_NETWORK_RETENTION_DAYS, LIVE_PER_ACCOUNT, liveNetworkHash, liveNetworkPrefix } from '../../src/server/services/live.js';
+import { ADDON_LIMIT, addonWindow } from '../../src/server/services/order-addons.js';
 import { CLAIM_ATTEMPT_LIMIT, CLAIM_ATTEMPT_WINDOW_MS, TRANSFER_TTL_MS } from '../../src/server/services/ownership.js';
 import { SCAN_TOKEN_TTL_MS, TRANSFER_TOKEN_TTL_MS } from '../../src/server/services/scan-tokens.js';
 import { SHOP_NOTE_MAX } from '../../src/server/services/salon.js';
@@ -779,6 +780,43 @@ describe('legal pages: the privacy policy, written from the code', () => {
     expect(readDoc('genome/src/web/verify/copy.ts')).toContain("consent: 'I took this photograph or have its author’s permission, and anyone recognisable in it agrees. ORBES may show it in WORN with my credit until I withdraw it.',");
   });
 
+  it('describes the saved sizes counted, the add-ons and THE SET as the code keeps them (lot M3, L2): counts without a name, no ORBES CODE nor tier, until packing, one price, cancelled and returned whole', () => {
+    // Z1 (services/size-split.ts): ORDER A MODEL counts each collector's saved size once, at the location of their
+    // country (the default address's, else the profile's), as counts by size and location; never a DELETED account.
+    const split = readDoc('genome/src/server/services/size-split.ts');
+    for (const x of ['SELECT c.account_id, s.value_mm, coalesce(ad.country, a.country) AS country', "JOIN accounts a ON a.id = c.account_id AND a.status <> 'DELETED'", 'JOIN account_sizes s ON s.account_id = c.account_id']) expect(split).toContain(x);
+    // The one sentence edited (MOVED in the content test until the baseline was recorded again): YOUR SIZES are also
+    // counted; no legal page says they only preselect a size any more.
+    expect(sectionText(DOCUMENTS.privacy.en, 'account')).toContain("The sizes you save in YOUR SIZES are kept with your account until you clear them. They preselect a size you then confirm, and are counted, without naming anyone, with the country of your account (that of your default address, else your profile's), to plan how many pieces of each size ORBES orders, and where to keep them.");
+    expect(sectionText(DOCUMENTS.privacy.fr, 'account')).toContain("Les tailles que vous enregistrez dans YOUR SIZES sont conservées avec votre compte jusqu'à ce que vous les effaciez. Elles présélectionnent une taille que vous confirmez ensuite, et sont comptées, sans nommer personne, avec le pays de votre compte (celui de votre adresse par défaut, sinon celui de votre profil), pour prévoir combien de pièces de chaque taille ORBES commande, et où les garder.");
+    for (const lang of LANGS) expect(readText(DOCUMENTS.privacy[lang], lang), lang).not.toMatch(/only preselect|ne font que présélectionner/);
+    // D1, D2 (services/order-addons.ts): at most 3 of each, carried while in stock, YOUR ORDERS until packing and
+    // never on a welcome gift or a size exchange, its own invoice after payment; no identity (services/receptions.ts).
+    expect(ADDON_LIMIT).toBe(3);
+    const open = { channel: 'LIVE', status: 'PAID', packing_started_at: null, shopify_order_id: null, currency: 'EUR' } as const;
+    expect(addonWindow(open)).toBeNull();
+    expect(addonWindow({ ...open, packing_started_at: new Date() })).toBe('PACKING_STARTED');
+    expect(addonWindow({ ...open, channel: 'GIFT' })).toBe('NOT_OFFERED');
+    expect(addonWindow({ ...open, channel: 'EXCHANGE' })).toBe('NOT_OFFERED');
+    expect(readDoc('genome/src/server/services/receptions.ts')).toContain('const counted = lines.filter((l) => skus.get(l.sku_id)!.model === null);');
+    // T1 to T4 (services/sets.ts, set-sales.ts, orders.ts, order-cases.ts, live-console.ts): 2 to 4 models, one price,
+    // its share named on each invoice, a set per person in a LIVE RELEASE, cancelled and returned whole.
+    expect([SET_PIECES_MIN, SET_PIECES_MAX]).toEqual([2, 4]);
+    expect(LIVE_PER_ACCOUNT.max).toBe(5);
+    expect(setLineWords('THE ORBITAL SET')).toBe('Part of THE SET THE ORBITAL SET');
+    expect(readDoc('genome/src/server/services/orders.ts')).toContain("export const setShipped = () => conflict('SET_SHIPPED', 'A piece of this set has shipped: a set is cancelled whole, never in part.');");
+    expect(readDoc('genome/src/server/services/order-cases.ts')).toContain('if (o.set_sale_id !== null) throw setReturnWhole();');
+    for (const [lang, says] of [
+      ['en', ['**Add-ons.** ORBES may offer add-ons: items sold with a piece', 'An add-on has no ORBES CODE and never counts toward the tier (article 12).', 'It is offered when you confirm a purchase: on a piece held in a LIVE RELEASE, on a place held in a release with a price, and in a request of the private salon.', 'otherwise it is left out, and the order goes ahead without it', 'until its packing begins, never on a welcome gift or a size exchange; ORBES Client Services may do so until it ships', `An order holds at most ${ADDON_LIMIT} of each add-on.`, 'Once the order is paid, an add-on added has its own invoice, and one removed a credit note.', 'An add-on ships with its order, is cancelled with it and is returned with it; a size exchange leaves it with you.',
+        `**THE SET.** ORBES may offer a set (THE SET): ${SET_PIECES_MIN} to ${SET_PIECES_MAX} different models sold together at one price, in a release of its own, by draw or as a LIVE RELEASE`, 'You choose the size of each piece when you enter', 'In a LIVE RELEASE, a set counts as one toward the pieces each person may take.', 'with its own ORBES identity, and counts toward the tier once registered (article 12)', "Its invoice shows its share of the set's price, and that it is part of the set.", 'A set is cancelled whole, and only until one of its pieces ships.', 'A set is returned whole: a return asked for one of its pieces is the return of the set', 'The size of one piece may still be exchanged.', 'A return is recorded once and is not undone. A set is returned whole (see THE SET).']],
+      ['fr', ['**Articles complémentaires.** ORBES peut proposer des articles complémentaires (add-ons) : des articles vendus avec une pièce', "Un article complémentaire n'a pas d'ORBES CODE et ne compte jamais pour le palier (article 12).", 'Il est proposé quand vous confirmez un achat : sur une pièce tenue dans une LIVE RELEASE, sur une place réservée dans une sortie avec un prix, et dans une demande du salon privé.', 'sinon il est laissé de côté, et la commande se fait sans lui', "jusqu'au début de son emballage, jamais sur un cadeau de bienvenue ni sur un échange de taille ; ORBES Client Services peut le faire jusqu'à son expédition", `Une commande compte au plus ${ADDON_LIMIT} de chaque article complémentaire.`, 'Une fois la commande payée, un article complémentaire ajouté a sa propre facture, et un article retiré un avoir.', 'Un article complémentaire est expédié avec sa commande, annulé avec elle et retourné avec elle ; un échange de taille vous le laisse.',
+        `**THE SET.** ORBES peut proposer un ensemble (THE SET) : ${SET_PIECES_MIN} à ${SET_PIECES_MAX} modèles différents vendus ensemble à un seul prix, dans une sortie qui lui est propre, par tirage ou en LIVE RELEASE`, "Vous choisissez la taille de chaque pièce à l'entrée", 'Dans une LIVE RELEASE, un ensemble compte pour un dans les pièces que chaque personne peut prendre.', 'avec sa propre identité ORBES, et compte pour le palier une fois enregistrée (article 12)', "Sa facture montre sa part du prix de l'ensemble, et qu'elle en fait partie.", "Un ensemble est annulé en entier, et seulement tant qu'aucune de ses pièces n'est expédiée.", "Un ensemble est retourné en entier : un retour demandé pour l'une de ses pièces est le retour de l'ensemble", "La taille d'une pièce peut toujours être échangée.", "Un retour s'enregistre une fois et ne se défait pas. Un ensemble est retourné en entier (voir THE SET)."]],
+    ] as const) {
+      const text = sectionText(DOCUMENTS.terms[lang], 'article-14');
+      for (const x of says) expect(text, `${lang}: ${x}`).toContain(x);
+    }
+  });
+
   it('covers what the plan names: data collected, the IP hash, the device cookie, the location, accounts, retention, hosting, DB-IP', () => {
     const ids = DOCUMENTS.privacy.en.sections.map((s) => s.id);
     expect(ids).toEqual(expect.arrayContaining(['controller', 'verification', 'account', 'cookies', 'recipients', 'location', 'retention', 'rights', 'live', 'orders', 'segments', 'founding-list', 'emails', 'house-messages', 'worn']));
@@ -971,6 +1009,11 @@ describe('legal pages: both languages, links, lexicon', () => {
       // copy of the data holds the read times), and the first piece registered to the account in EN as in FR. The lot's
       // audit, the same day: the house messages' last activity counts a page viewed, as NINETY_DAYS reads it.
       '2026-10-22': '57fb4fa6ef109e67',
+      // Lot M3 of the macro plan (L2; step M3.20): the privacy policy's YOUR SIZES sentence (saved sizes also counted,
+      // without naming anyone, with the account's country, for the sizes ORBES orders); the terms' article 14 (add-ons,
+      // THE SET, and a set returned whole in the return paragraph). The date of the lot's final legal commit, never M1's
+      // 2026-10-21 nor M2's 2026-10-22; article 11 unchanged.
+      '2026-10-23': '1cadcf1b5b2636ac',
     };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
     expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });
