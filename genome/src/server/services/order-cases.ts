@@ -34,6 +34,8 @@
  *               agent's record. LOST: each piece REVOKED (ADMIN), unbound. RESHIP after DAMAGED or LOST holds new
  *               pieces ahead of the queue (`queue_first`); REFUND cancels. Each order's `order.reship` event says what
  *               it holds after the decision (`reservation`), so its readiness restarts then (fulfilment.ts readySince).
+ *               Its add-ons come back to HELD with it (order-addons.ts reshipUnits); a reshipment never waits for one:
+ *               the units held beyond the stock are named in the answer (`addonsShort`) and the event.
  *   cancel    Client Services ends a case with no decision (a request refused or withdrawn; a damaged parcel that never
  *             came back, to report it lost): CANCELLED; a parcel problem's shipment SHIPPED again.
  *
@@ -187,6 +189,12 @@ export interface CaseDecided {
   claimCode?: string;
   productId?: string;
   claimCodes?: { productId: string; claimCode: string }[];
+  /**
+   * A parcel lost or damaged reshipped: the add-on units held again beyond what the order's location has (plan MACRO M3
+   * §4.2, never waiting for an add-on), by order and add-on, so Client Services counts them in, moves them or removes them
+   * before packing. Absent when none.
+   */
+  addonsShort?: { orderId: string; addonId: string; name: string; units: number }[];
 }
 
 // ── Checks ─────────────────────────────────────────────────────────────────
@@ -618,8 +626,10 @@ export class OrderCaseService {
       }
     }
     let claimCodes: { productId: string; claimCode: string }[] = [];
+    let addonsShort: NonNullable<CaseDecided['addonsShort']> = [];
     await inRetriedTransaction(this.db, async (tx) => {
       claimCodes = [];
+      addonsShort = [];
       // The pieces first (as a return), then the parcel's orders, the case and the shipment.
       if (claimHashes.size) await lockPieces(tx, claimHashes.keys());
       const pieceIds = items.map((i) => i.product_id).filter((p): p is string => p !== null);
@@ -656,7 +666,8 @@ export class OrderCaseService {
           queue_first: !keep && d.decision === 'RESHIP',
         });
         // Plan MACRO M3 §4.2: its add-ons come back to HELD with it (back to stock, or new ones taken for a reshipment).
-        await reshipUnits(tx, after, { cameBack: keep, reship: d.decision === 'RESHIP' }, actor, now);
+        const short = (await reshipUnits(tx, after, { cameBack: keep, reship: d.decision === 'RESHIP' }, actor, now)).short;
+        addonsShort.push(...short.map((a) => ({ orderId: o.id, ...a })));
         const reissuedHere = piece && !keep ? reissued.get(piece.id) : undefined;
         if (piece && !keep) {
           // Unbound: a buyer's new claim code waiting on it is withdrawn.
@@ -688,7 +699,16 @@ export class OrderCaseService {
             o,
             after,
             'order.reship',
-            { details: { caseId: c.id, shipmentId: shipment.id, reservation: after.reservation, ...(after.queue_first ? { queueFirst: true } : {}), ...(reissuedHere ? { claimCodeReissued: true } : {}) } },
+            {
+              details: {
+                caseId: c.id,
+                shipmentId: shipment.id,
+                reservation: after.reservation,
+                ...(after.queue_first ? { queueFirst: true } : {}),
+                ...(reissuedHere ? { claimCodeReissued: true } : {}),
+                ...(short.length ? { addonsShort: short.map((a) => ({ addonId: a.addonId, units: a.units })) } : {}),
+              },
+            },
             actor,
             now,
           ),
@@ -722,7 +742,7 @@ export class OrderCaseService {
       for (const n of notes) await this.audit.record(n, tx);
     });
     claimCodes.sort((a, b) => a.productId.localeCompare(b.productId));
-    return { case: await this.get(c.id), ...(claimCodes.length ? { claimCodes } : {}) };
+    return { case: await this.get(c.id), ...(claimCodes.length ? { claimCodes } : {}), ...(addonsShort.length ? { addonsShort } : {}) };
   }
 
   // ── Cancelling ───────────────────────────────────────────────────────────

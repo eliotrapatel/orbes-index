@@ -14,16 +14,23 @@
  *  - staff add and remove until SHIPPED;
  *  - the life: cancel releases, ship moves −1 per unit, a return takes them back (`returned_to_stock`), a size exchange
  *    leaves them with the collector (billed again on its EXCHANGE order), a location change moves them or is refused
- *    (ORDER_ADDON_NOT_AT_LOCATION);
+ *    (ORDER_ADDON_NOT_AT_LOCATION); a parcel problem brings them back (back to sender: to stock, then held or freed;
+ *    lost: held again without stock, named when short, or gone when refunded);
  *  - packing: one checklist line per add-on, the parcel's weight with each unit's;
- *  - the journal `order.addon.add` / `.remove`, the order CSV's line items, the account's export.
+ *  - the journal `order.addon.add` / `.remove`, the order CSV's line items, the account's export (its units and the
+ *    choices not on an order yet);
+ *  - under concurrency (PGlite always; PostgreSQL with ORBES_TEST_POSTGRES_URL, a pool of 8): two orders take the last
+ *    unit of an add-on at once, added or carried: one holds it, the other is told none is left.
  * The routes are test/api/account-orders.test.ts's, admin-orders.test.ts's, the-club's, live's and salon's.
  * CI: test/services/order-addons.test.ts on PostgreSQL > two orders take the last unit of an add-on at once.
  */
+import { randomBytes } from 'node:crypto';
+import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { testConfig } from '../../src/server/config.js';
 import { createContext, type AppContext } from '../../src/server/context.js';
-import { inTransaction } from '../../src/server/db/connection.js';
+import { closeDb, createDb, inTransaction, type Db } from '../../src/server/db/connection.js';
+import { migrateToLatest } from '../../src/server/db/migrate.js';
 import { DomainError } from '../../src/server/errors.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import { addonWindow, setChoices } from '../../src/server/services/order-addons.js';
@@ -448,6 +455,101 @@ describe('add-ons on orders (plan MACRO M3 §4.2, D1 and D2)', () => {
     expect(await addons().offerForAccount((await orderRow(exchange)).account_id, exchange)).toMatchObject({ canAdd: false, reason: 'NOT_OFFERED' });
   });
 
+  // ── Parcel problems ──────────────────────────────────────────────────────
+
+  it('parcel problems: back to sender brings the units back to stock, held again (RESHIP) or freed (REFUND); a lost parcel reshipped holds new ones (no movement, the units beyond the stock named, −1 again at the next ship) or, refunded, leaves them gone', async () => {
+    const bag = await ctx.services.addons.create({ name: 'GIFT BAG', skuCode: 'ADD-BAG', prices: { EUR: 1000 }, weightG: 10 }, admin);
+    const sku = bag.sku.id;
+    await countIn(sku, france, 2);
+    const level = async () => [await onHand(sku), await available(sku)];
+    const moves = async (orderId: string) =>
+      (await t.db.selectFrom('stock_movements').select(['reason', 'delta', 'order_addon_item_id']).where('order_id', '=', orderId).where('order_addon_item_id', 'is not', null).orderBy('id').execute()).map((m) => [
+        m.reason,
+        m.delta,
+        m.order_addon_item_id,
+      ]);
+    const shippedSale = async () => {
+      const { orders: [o] } = await liveSale({ items: [{ addonId: bag.id, units: 1 }] });
+      await stockFor(o!.id);
+      clock.advance(MINUTE);
+      await orders().transition(o!.id, { to: 'PAID' }, admin);
+      await packAndShip(o!.id);
+      const [unit] = await unitsOf(o!.id);
+      expect(unit!.status).toBe('SHIPPED');
+      return { id: o!.id, unit: unit!.id };
+    };
+    const cases = () => ctx.services.orderCases;
+
+    // Back to sender, refunded: RETURNED +1, held again, then cancelled with its order: the stock free again.
+    const a = await shippedSale();
+    expect(await level()).toEqual([1, 1]);
+    const ca = await cases().report(a.id, { kind: 'BACK_TO_SENDER', note: 'Address unknown.' }, admin, null);
+    await cases().receive(ca.id, { pieceState: 'OK' }, admin, null);
+    clock.advance(MINUTE);
+    const da = await cases().decide(ca.id, { decision: 'REFUND' }, admin, { admin: false });
+    expect(da.addonsShort).toBeUndefined();
+    expect((await orderRow(a.id)).status).toBe('CANCELLED');
+    expect((await unitsOf(a.id)).map((u) => [u.status, u.shipped_at])).toEqual([['CANCELLED', null]]);
+    expect(await moves(a.id)).toEqual([
+      ['SHIPPED', -1, a.unit],
+      ['RETURNED', 1, a.unit],
+    ]);
+    expect(await level()).toEqual([2, 2]);
+
+    // Back to sender, reshipped: RETURNED +1 and held again, to pack with its order.
+    const b = await shippedSale();
+    const cb = await cases().report(b.id, { kind: 'BACK_TO_SENDER', note: 'Refused.' }, admin, null);
+    await cases().receive(cb.id, { pieceState: 'OK' }, admin, null);
+    clock.advance(MINUTE);
+    expect((await cases().decide(cb.id, { decision: 'RESHIP' }, admin, { admin: false })).addonsShort).toBeUndefined();
+    expect((await unitsOf(b.id)).map((u) => [u.status, u.shipped_at, u.location_id])).toEqual([['HELD', null, france]]);
+    expect(await moves(b.id)).toEqual([
+      ['SHIPPED', -1, b.unit],
+      ['RETURNED', 1, b.unit],
+    ]);
+    expect(await level()).toEqual([2, 1]);
+    clock.advance(MINUTE);
+    await orders().transition(b.id, { to: 'CANCELLED', note: 'Test over.' }, admin);
+    expect(await level()).toEqual([2, 2]);
+
+    // Lost, reshipped when none is left: a new unit held with no movement (the first is gone with the parcel), the
+    // stock below zero, named in the answer and the order's event; counted in, then −1 again at the next ship.
+    const c = await shippedSale();
+    await ctx.services.stock.adjust({ skuId: sku, locationId: france, delta: -1, note: 'Damaged.' }, admin);
+    expect(await level()).toEqual([0, 0]);
+    const cc = await cases().report(c.id, { kind: 'LOST', note: 'No scan for 12 days.' }, admin, null);
+    clock.advance(MINUTE);
+    const dc = await cases().decide(cc.id, { decision: 'RESHIP', note: 'Another piece.' }, admin, { admin: true });
+    expect(dc.addonsShort).toEqual([{ orderId: c.id, addonId: bag.id, name: 'GIFT BAG', units: 1 }]);
+    const reship = (await eventsOf(c.id)).find((e) => e.action === 'order.reship')!;
+    expect(reship.details).toMatchObject({ addonsShort: [{ addonId: bag.id, units: 1 }] });
+    expect((await unitsOf(c.id)).map((u) => [u.id, u.status, u.shipped_at])).toEqual([[c.unit, 'HELD', null]]);
+    expect(await moves(c.id)).toEqual([['SHIPPED', -1, c.unit]]);
+    expect(await level()).toEqual([0, -1]);
+    await countIn(sku, france, 1);
+    expect(await level()).toEqual([1, 0]);
+    await stockFor(c.id);
+    clock.advance(MINUTE);
+    await packAndShip(c.id);
+    expect((await unitsOf(c.id)).map((u) => u.status)).toEqual(['SHIPPED']);
+    expect(await moves(c.id)).toEqual([
+      ['SHIPPED', -1, c.unit],
+      ['SHIPPED', -1, c.unit],
+    ]);
+    expect(await level()).toEqual([0, 0]);
+
+    // Lost, refunded: its unit stays SHIPPED (gone with the parcel) on the cancelled order, no movement back.
+    await countIn(sku, france, 1);
+    const d = await shippedSale();
+    const cd = await cases().report(d.id, { kind: 'LOST', note: 'No news.' }, admin, null);
+    clock.advance(MINUTE);
+    await cases().decide(cd.id, { decision: 'REFUND', note: 'Refunded.' }, admin, { admin: true });
+    expect((await orderRow(d.id)).status).toBe('CANCELLED');
+    expect((await unitsOf(d.id)).map((u) => u.status)).toEqual(['SHIPPED']);
+    expect(await moves(d.id)).toEqual([['SHIPPED', -1, d.unit]]);
+    expect(await level()).toEqual([0, 0]);
+  });
+
   // ── Location ─────────────────────────────────────────────────────────────
 
   it('a location change moves the units held with the order, or is refused when the new location has none (ORDER_ADDON_NOT_AT_LOCATION)', async () => {
@@ -490,8 +592,11 @@ describe('add-ons on orders (plan MACRO M3 §4.2, D1 and D2)', () => {
     // Confirm shows the choices; the order then carries them.
     const listed = await f.drops.entries(d.id, {}, { page: 1, pageSize: 10 });
     expect(listed.items.find((e) => e.id === ea)!.addonChoices.map((c) => [c.name, c.units])).toEqual([['POLISHING CLOTH', 3]]);
+    // The account's export names the choice while it is not on an order yet.
+    expect((await ctx.services.owners.exportData(a.id, admin)).addonChoices).toEqual([{ on: 'DRAW_ENTRY', sourceId: ea, addon: 'POLISHING CLOTH', units: 3, chosenAt: expect.any(Date) }]);
     const confirmed = await f.drops.confirm(d.id, ea, null, admin);
     expect(confirmed.addonsLeftOut).toBeUndefined();
+    expect((await ctx.services.owners.exportData(a.id, admin)).addonChoices).toEqual([]);
     const order = await t.db.selectFrom('orders').selectAll().where('drop_entry_id', '=', ea).executeTakeFirstOrThrow();
     expect((await unitsOf(order.id)).map((u) => [u.addon_id, u.price_minor, u.currency])).toEqual([
       [cloth.id, 1500, 'EUR'],
@@ -529,3 +634,116 @@ describe('add-ons on orders (plan MACRO M3 §4.2, D1 and D2)', () => {
     await countIn(extender.skuId, france, 3);
   });
 });
+
+// ── Under concurrency ──────────────────────────────────────────────────────
+
+const adminUrl = process.env.ORBES_TEST_POSTGRES_URL;
+
+/** PGlite always (it serialises the transactions); PostgreSQL with ORBES_TEST_POSTGRES_URL (a pool of 8: true parallelism). */
+const BACKENDS: { name: string; skip: boolean; open(): Promise<{ db: Db; close(): Promise<void> }> }[] = [
+  {
+    name: 'PGlite',
+    skip: false,
+    async open() {
+      const t = await createTestDb();
+      return { db: t.db, close: () => t.close() };
+    },
+  },
+  {
+    name: 'PostgreSQL',
+    skip: !adminUrl,
+    async open() {
+      const root = createDb(adminUrl!);
+      const name = `orbes_addons_${randomBytes(6).toString('hex')}`;
+      await sql`CREATE DATABASE ${sql.id(name)}`.execute(root);
+      const u = new URL(adminUrl!);
+      u.pathname = `/${name}`;
+      const db = createDb(u.toString(), { poolMax: 8 });
+      await migrateToLatest(db);
+      return {
+        db,
+        async close() {
+          await closeDb(db);
+          await sql`DROP DATABASE IF EXISTS ${sql.id(name)} WITH (FORCE)`.execute(root);
+          await closeDb(root);
+        },
+      };
+    },
+  },
+];
+
+/** Every outcome of calls made together: 'ok' or the code of the refusal. */
+async function together(calls: (() => Promise<unknown>)[]): Promise<string[]> {
+  const settled = await Promise.allSettled(calls.map((c) => c()));
+  return settled.map((x) => {
+    if (x.status === 'fulfilled') return 'ok';
+    if (x.reason instanceof DomainError) return x.reason.code;
+    throw x.reason;
+  });
+}
+
+for (const backend of BACKENDS) {
+  describe.skipIf(backend.skip)(`add-ons under concurrency, on ${backend.name}`, () => {
+    let handle: Awaited<ReturnType<(typeof BACKENDS)[number]['open']>>;
+    let ctx: AppContext;
+    let clock: ManualClock;
+    let f: LiveFixture;
+    let france: string;
+
+    beforeAll(async () => {
+      handle = await backend.open();
+      clock = createManualClock('2026-12-06T09:00:00.000Z');
+      ctx = await createContext(testConfig(), { db: handle.db, clock: clock.now, keyProvider: new MemoryKeyProvider({ env: 'test' }), ensureActiveKey: true });
+      f = await liveFixtureOn(ctx, clock);
+      france = (await handle.db.selectFrom('stock_locations').select('id').where('name', '=', 'FRANCE WAREHOUSE').executeTakeFirstOrThrow()).id;
+      await handle.db.updateTable('models').set({ base_price_minor: 400_000, base_currency: 'EUR' }).where('id', '=', f.modelId).execute();
+    });
+    afterAll(async () => {
+      await ctx?.close();
+      await handle?.close();
+    });
+
+    /** A salon request with its choices (in EUR), from a new account. */
+    async function request(items: { addonId: string; units: number }[]) {
+      const account = await createAccount(handle.db);
+      const r = await handle.db.insertInto('shop_requests').values({ account_id: account.id, model_id: f.modelId, created_at: clock.now() }).returning('id').executeTakeFirstOrThrow();
+      if (items.length) await inTransaction(handle.db, (tx) => setChoices(tx, { shopRequestId: r.id }, items, { locationId: france, currency: 'EUR' }, clock.now()));
+      return { account, id: r.id };
+    }
+    const lastUnit = async (code: string) => {
+      const a = await ctx.services.addons.create({ name: `LAST ${code}`, skuCode: `ADD-LAST-${code}`, prices: { EUR: 1500 }, weightG: 10 }, f.admin);
+      await ctx.services.stock.adjust({ skuId: a.sku.id, locationId: france, delta: 1, note: 'Counted.' }, f.admin);
+      return { id: a.id, skuId: a.sku.id };
+    };
+    const heldUnits = (skuId: string) => handle.db.selectFrom('order_addon_items').select('order_id').where('sku_id', '=', skuId).where('status', '=', 'HELD').execute();
+
+    it('two orders take the last unit of an add-on at once: one holds it, the other is told none is left', async () => {
+      // Added together in YOUR ORDERS: one ok, the other 409 ADDON_OUT_OF_STOCK.
+      const added = await lastUnit('A');
+      const buyers = [await request([]), await request([])];
+      await ctx.services.salon.close(buyers[0]!.id, { note: 'Sold.', outcome: 'ACCEPTED' }, f.admin);
+      await ctx.services.salon.close(buyers[1]!.id, { note: 'Sold.', outcome: 'ACCEPTED' }, f.admin);
+      const ids: string[] = [];
+      for (const b of buyers) {
+        const id = (await handle.db.selectFrom('orders').select('id').where('shop_request_id', '=', b.id).executeTakeFirstOrThrow()).id;
+        await ctx.services.orders.setTerms(id, { priceMinor: 400_000, currency: 'EUR' }, f.admin);
+        ids.push(id);
+      }
+      clock.advance(MINUTE);
+      const outcomes = await together(buyers.map((b, i) => () => ctx.services.orderAddons.addForAccount(b.account.id, ids[i]!, { addonId: added.id, units: 1 }, b.account.actor)));
+      expect([...outcomes].sort()).toEqual(['ADDON_OUT_OF_STOCK', 'ok']);
+      expect((await heldUnits(added.skuId)).map((u) => u.order_id)).toEqual([ids[outcomes.indexOf('ok')]]);
+      expect(await stockLevel(handle.db, added.skuId, france)).toEqual({ onHand: 1, reserved: 1, available: 0 });
+
+      // Carried together at ACCEPTED: one holds it, the other's sale goes on with it left out (NONE_LEFT).
+      const carried = await lastUnit('B');
+      const requests = [await request([{ addonId: carried.id, units: 1 }]), await request([{ addonId: carried.id, units: 1 }])];
+      clock.advance(MINUTE);
+      const closed = await Promise.all(requests.map((r) => ctx.services.salon.close(r.id, { note: 'Sold.', outcome: 'ACCEPTED' }, f.admin)));
+      expect(closed.map((c) => c.addonsLeftOut ?? []).flat()).toEqual([{ addonId: carried.id, name: 'LAST B', units: 1, reason: 'NONE_LEFT' }]);
+      expect(await heldUnits(carried.skuId)).toHaveLength(1);
+      expect(await stockLevel(handle.db, carried.skuId, france)).toEqual({ onHand: 1, reserved: 1, available: 0 });
+      expect(await handle.db.selectFrom('addon_choices').select('id').where('shop_request_id', 'in', requests.map((r) => r.id)).execute()).toEqual([]);
+    });
+  });
+}

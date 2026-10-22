@@ -449,8 +449,16 @@ describe('a draw end to end', () => {
     expect(confirmed.length + selectedReal.length).toBe(8);
     expect(selectedReal.every((s) => reals.some((r) => r.id === s.account_id))).toBe(true);
 
+    // An add-on chosen on a test entry and on a real one (plan MACRO M3 §4.2): END TEST clears the test's only.
+    const cloth = await w.h.ctx.services.addons.create({ name: 'POLISHING CLOTH', skuCode: 'ADD-TEST-CLOTH', prices: { EUR: 1500 }, weightG: 20 }, w.f.admin);
+    const waiting = await w.h.ctx.db.selectFrom('drop_entries').select(['id', 'account_id']).where('drop_id', '=', drop).where('status', 'in', ['SELECTED', 'WAITLISTED']).execute();
+    const testWaiting = waiting.find((e) => !reals.some((r) => r.id === e.account_id))!;
+    const realWaiting = waiting.find((e) => reals.some((r) => r.id === e.account_id))!;
+    for (const e of [testWaiting, realWaiting]) await w.h.ctx.db.insertInto('addon_choices').values({ drop_entry_id: e.id, addon_id: cloth.id, units: 1, chosen_at: w.h.clock.now() }).execute();
+
     // END TEST: the report first (5/5), then the test's orders cancelled, its places lapsed; the real ones untouched.
     const ended = await w.tests.end(run.id, testPhrase(drop, true), w.f.admin);
+    expect((await w.h.ctx.db.selectFrom('addon_choices').select('drop_entry_id').where('drop_entry_id', 'in', [testWaiting.id, realWaiting.id]).execute()).map((c) => c.drop_entry_id)).toEqual([realWaiting.id]);
     expect(ended.status).toBe('ENDED');
     expect(ended.report?.checks.map((c) => [c.id, c.pass])).toEqual([['ONE_ENTRY', true], ['ORDER', true], ['ONE_PLACE', true], ['STOCK', true], ['ORDERS', true]]);
     expect(ended.report?.passed).toBe(5);

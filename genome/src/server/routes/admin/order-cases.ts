@@ -8,7 +8,8 @@
  *   POST   /api/admin/order-cases/:id/decide    OPERATOR  ORBES's decision (a LOST parcel and the archive: ADMIN, 403
  *                                                         otherwise); the claim code of a piece back to stock (a
  *                                                         return's `claimCode`, a damaged parcel's `claimCodes`), once,
- *                                                         no-store
+ *                                                         no-store; a reshipment's add-on units held beyond the stock
+ *                                                         (`addonsShort`)
  *   POST   /api/admin/order-cases/:id/cancel    OPERATOR  ended with no decision, with a note
  *
  * A LOGISTICS login never reaches them (the default rule ranks it below AUDITOR).
@@ -50,7 +51,7 @@ export const adminOrderCaseRoutes: FastifyPluginAsync<AdminRouteDeps> = async (a
     const { admin } = requireAdmin(request);
     const r = await orderCases.decide(id, { decision: b.decision, pieceTo: b.pieceTo ?? null, locationId: b.locationId ?? null, note: b.note ?? null, addonsOut: b.addonsOut ?? null }, adminActor(request), { admin: hasRole(admin.role, 'ADMIN') });
     reply.header('cache-control', 'no-store');
-    return { case: orderCaseJson(request, r.case), ...(r.productId ? { productId: r.productId } : {}), ...(r.claimCode ? { claimCode: r.claimCode } : {}), ...(r.claimCodes ? { claimCodes: r.claimCodes } : {}) };
+    return { case: orderCaseJson(request, r.case), ...(r.productId ? { productId: r.productId } : {}), ...(r.claimCode ? { claimCode: r.claimCode } : {}), ...(r.claimCodes ? { claimCodes: r.claimCodes } : {}), ...(r.addonsShort ? { addonsShort: r.addonsShort } : {}) };
   });
 
   app.post('/api/admin/order-cases/:id/cancel', async (request) => {

@@ -83,6 +83,7 @@ import { isAfterRoom } from './after-room.js';
 import type { ClubTier } from './club.js';
 import { dropNotFound, dropState, drawOrder, earlyAccessOpensAt, inEarlyAccess, inSize } from './drops.js';
 import { isAnnounced, LIVE_OPEN_STATUSES, LIVE_PER_ACCOUNT, roomOpensAt } from './live.js';
+import { clearChoices } from './order-addons.js';
 import { orderReference } from './orders.js';
 import { sessionCookieName } from './sessions.js';
 import { stockLevel } from './stock.js';
@@ -1577,8 +1578,8 @@ export class TestEntrantService {
   /**
    * A draw's entries of the test's accounts closed, under the release's row lock (FOR UPDATE, as the console's actions
    * take it): ENTERED → WITHDRAWN; SELECTED, CONFIRMED and WAITLISTED → LAPSED with `respond_by` and `handled_at` now
-   * (`drop_entries_lapsed`: a place lapses at or after its time), the rank kept (the draw's public list is unchanged).
-   * Audited `drop.withdraw` and `drop.entry.lapse` with `reason: "test_ended"`.
+   * (`drop_entries_lapsed`: a place lapses at or after its time), the rank kept (the draw's public list is unchanged),
+   * their add-on choices cleared. Audited `drop.withdraw` and `drop.entry.lapse` with `reason: "test_ended"`.
    */
   private async closeDrawEntries(d: DropRow, accounts: readonly string[], actor: Actor): Promise<{ entriesWithdrawn: number; placesLapsed: number }> {
     return inTransaction(this.db, async (tx) => {
@@ -1602,6 +1603,8 @@ export class TestEntrantService {
             .set({ status: 'LAPSED', respond_by: now, handled_at: now, handled_by: actor.id!, note: END_NOTE })
             .where('id', 'in', before.map((e) => e.id))
             .execute();
+          // Plan MACRO M3 §4.2 (D2): a place lapsed takes no add-on (as DropService's LAPSED).
+          await clearChoices(tx, 'drop_entry_id', before.map((e) => e.id));
           lapsed.push(...before);
         }
       }

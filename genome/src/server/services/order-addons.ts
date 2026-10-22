@@ -707,20 +707,29 @@ export async function returnUnits(tx: Db, o: OrderRow, r: { keep: boolean; locat
  * A parcel problem decided (services/order-cases.ts decideParcel, the order back to PAID): its units SHIPPED come back
  * to HELD with it. A parcel back to its sender (`cameBack`) brings them back to stock (the ledger's RETURNED +1, then
  * held again); a parcel lost or damaged reshipped takes a new unit of each from the stock (held, no movement: the one
- * that left is gone with the parcel); refunded, they stay as they left (gone), credited with the order's cancellation.
+ * that left is gone with the parcel), never waiting for one: the units held beyond what the order's location has are
+ * returned (`short`, by add-on), for the decision's answer and its `order.reship` event, so Client Services counts them
+ * in, moves them there or removes them before packing; refunded, they stay as they left (gone), credited with the
+ * order's cancellation.
  */
-export async function reshipUnits(tx: Db, o: OrderRow, r: { cameBack: boolean; reship: boolean }, actor: Actor, now: Date): Promise<number> {
-  if (!r.cameBack && !r.reship) return 0;
+export async function reshipUnits(tx: Db, o: OrderRow, r: { cameBack: boolean; reship: boolean }, actor: Actor, now: Date): Promise<{ units: number; short: { addonId: string; name: string; units: number }[] }> {
+  if (!r.cameBack && !r.reship) return { units: 0, short: [] };
   const shipped = await unitsOf(tx, [o.id], ['SHIPPED']);
   const skus = bySku(shipped);
+  const short: { addonId: string; name: string; units: number }[] = [];
   for (const skuId of [...skus.keys()].sort()) {
     await lockSku(tx, skuId);
-    for (const u of skus.get(skuId)!.units) {
+    const g = skus.get(skuId)!;
+    for (const u of g.units) {
       if (r.cameBack) await recordMovement(tx, { skuId, locationId: u.location_id, delta: 1, reason: 'RETURNED', orderId: o.id, orderAddonItemId: u.id }, actor, now);
       await tx.updateTable('order_addon_items').set({ status: 'HELD', shipped_at: null, location_id: o.location_id }).where('id', '=', u.id).execute();
     }
+    if (!r.cameBack) {
+      const missing = Math.min(g.units.length, -(await stockLevel(tx, skuId, o.location_id)).available);
+      if (missing > 0) short.push({ addonId: g.units[0]!.addon_id, name: g.name, units: missing });
+    }
   }
-  return shipped.length;
+  return { units: shipped.length, short };
 }
 
 /**
