@@ -22,6 +22,12 @@
  * THE RELEASES OF THIS MODEL (plan NEXT-NINE of 2026-10-06, §3.6 CO-01): a model's sheet lists its past releases by the
  * same rule (`endedReleases`, the query PAST reads): `modelReleases` gives each one's id, kind, opening and variant,
  * nothing more (services/lookbook.ts, the sheet's `releases`).
+ *
+ * THE SET (macro scope K44 T1; plan MACRO M3 §5.2): a set's release is its own entry of PAST (ADAPTED), under its set's
+ * name (`set`), its pieces' names and photographs each at its stage as a model's are (a LIVE RELEASE's name and
+ * photograph stages; a draw's from its publication), its quantity line in sets (« 25 SETS »), its `model` all null:
+ * never attributed to one of its models. A model's sheet never lists a set's release (EXCLUDED: `modelReleases` reads
+ * a model's releases only; the set's releases are its own, Catalogue → Sets).
  */
 import { sql } from 'kysely';
 import type { Db } from '../db/connection.js';
@@ -31,6 +37,7 @@ import { liveStages, stagesAt } from './live.js';
 import { defaultQuantityLine } from './live-console.js';
 import { mediaUrl } from './media.js';
 import { releasesTakenPart, type ReleaseTakenPart } from './participation.js';
+import { releaseOffers, type ReleaseOffer } from './release-offer.js';
 
 /** A release of THE RELEASES' PAST. */
 export interface PastReleaseCard {
@@ -47,8 +54,13 @@ export interface PastReleaseCard {
   imageUrl: string | null;
   /** The opening: a LIVE RELEASE's T0, a draw's opening of its entries. */
   opensAt: Date;
-  /** The quantity as announced: a LIVE RELEASE's line (« 25 PIECES »), a draw's pieces. */
+  /** The quantity as announced: a LIVE RELEASE's line (« 25 PIECES »), a draw's pieces; a set's release, its sets (« 25 SETS »). */
   quantityLine: string;
+  /**
+   * Macro scope K44 T1: a set's release, its set's name and its pieces in order, each its model's name and variant (at the
+   * name stage, null before) and photograph (at the photo stage, null before or without one); absent on a model's release.
+   */
+  set?: { name: string | null; pieces: { name: string | null; variant: string | null; imageUrl: string | null }[] };
 }
 
 /** The releases an account took part in (GET /api/v1/account/participation). */
@@ -59,12 +71,15 @@ export interface AccountParticipation {
 }
 
 type PastRow = DropRow & {
-  model_name: string;
+  model_name: string | null;
   model_variant: string | null;
-  model_type: string;
+  model_type: string | null;
   model_image: string | null;
   collection: string | null;
 };
+
+/** A set's quantity line as announced (« 25 SETS »). */
+export const setQuantityLine = (quantity: number): string => `${quantity} ${quantity === 1 ? 'SET' : 'SETS'}`;
 
 export interface PastReleaseServiceDeps {
   db: Db;
@@ -85,8 +100,9 @@ export class PastReleaseService {
     const now = this.clock();
     const ended = endedReleases(this.db);
     const total = await ended.select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
+    // A model's release with its model; a set's (macro scope K44) with its set's pieces, read after.
     const rows = await ended
-      .innerJoin('models as m', 'm.id', 'd.model_id')
+      .leftJoin('models as m', 'm.id', 'd.model_id')
       .leftJoin('collections as c', 'c.id', 'm.collection_id')
       .selectAll('d')
       .select(['m.name as model_name', 'm.variant_label as model_variant', 'm.type as model_type', 'm.image_sha256 as model_image', 'c.name as collection'])
@@ -95,8 +111,9 @@ export class PastReleaseService {
       .limit(req.pageSize)
       .offset(pageOffset(req))
       .execute();
+    const offers = await releaseOffers(this.db, rows.filter((r) => r.set_id !== null));
     return makePage(
-      rows.map((r) => card(r, now)),
+      rows.map((r) => card(r, now, offers.get(r.id))),
       Number(total.n),
       req,
     );
@@ -156,6 +173,7 @@ export interface ModelRelease {
  */
 export async function modelReleases(db: Db, modelIds: readonly string[], now: Date): Promise<ModelRelease[]> {
   if (modelIds.length === 0) return [];
+  // A model's releases only (macro scope K44, EXCLUDED): a set's release names no model and is listed under its set.
   const rows = await endedReleases(db)
     .innerJoin('models as m', 'm.id', 'd.model_id')
     .where('d.model_id', 'in', [...modelIds])
@@ -169,7 +187,8 @@ export async function modelReleases(db: Db, modelIds: readonly string[], now: Da
     .map((r) => ({ id: r.id, kind: r.mode === 'LIVE' ? 'LIVE' : 'DRAW', opensAt: r.opens_at, variant: r.model_variant }));
 }
 
-function card(r: PastRow, now: Date): PastReleaseCard {
+function card(r: PastRow, now: Date, offer?: ReleaseOffer): PastReleaseCard {
+  if (offer && offer.kind === 'SET') return setCard(r, now, offer);
   if (r.mode === 'LIVE') {
     // Over, announced before its end (the query's rule): its stages as they stood at its end.
     const stages = liveStages(r, stagesAt(r, now))!;
@@ -196,5 +215,26 @@ function card(r: PastRow, now: Date): PastReleaseCard {
     imageUrl: mediaUrl(r.model_image),
     opensAt: r.opens_at,
     quantityLine: defaultQuantityLine(r.quantity),
+  };
+}
+
+/**
+ * A set's release in PAST (macro scope K44 T1, ADAPTED): its own entry under its set's name, its pieces' names at the name
+ * stage and photographs at the photo stage (a draw's both from its publication), its model all null, its line in sets.
+ */
+function setCard(r: PastRow, now: Date, offer: Extract<ReleaseOffer, { kind: 'SET' }>): PastReleaseCard {
+  const stages = r.mode === 'LIVE' ? liveStages(r, stagesAt(r, now))! : { name: true, photo: true };
+  return {
+    id: r.id,
+    kind: r.mode === 'LIVE' ? 'LIVE' : 'DRAW',
+    title: stages.name ? r.title : null,
+    model: { name: null, type: null, collection: null, variant: null },
+    imageUrl: null,
+    opensAt: r.opens_at,
+    quantityLine: r.mode === 'LIVE' ? (r.quantity_line ?? '') : setQuantityLine(r.quantity),
+    set: {
+      name: stages.name ? offer.set.name : null,
+      pieces: offer.pieces.map((p) => ({ name: stages.name ? p.model.name : null, variant: stages.name ? p.model.variant : null, imageUrl: stages.photo ? p.model.imageUrl : null })),
+    },
   };
 }

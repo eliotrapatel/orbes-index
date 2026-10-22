@@ -406,3 +406,64 @@ describe('GROWTH: an order with a supplementary invoice (plan NEXT LOT §3.6.C)'
     expect([page.invoiced, page.credited, page.net]).toEqual([124_000, 0, 124_000]);
   });
 });
+
+describe('GROWTH: a set\'s release and its sales (macro scope K44, plan MACRO M3 §5.2, KEPT)', () => {
+  let t: TestDb;
+  let ctx: AppContext;
+
+  beforeAll(async () => {
+    t = await createTestDb();
+    ctx = await createContext(testConfig(), { db: t.db, clock: createManualClock(GROWTH_NOW.toISOString()).now, keyProvider: new MemoryKeyProvider({ env: 'test' }), ensureActiveKey: true });
+  }, 60_000);
+  afterAll(async () => {
+    await ctx?.close();
+    await t?.close();
+  });
+
+  it('lists a set\'s release like any, its sets sold; counts its sales by release and by each piece\'s order under its own model with its share, never the set\'s price under one model', async () => {
+    const w = await new GrowthWorld(t.db).prepare();
+    // THE PAIR: HALO (EUR 600) and LINEA (EUR 300), sold at EUR 1 000.00: shares 666.67 and 333.33.
+    const halo = await w.model('HALO', { price: [60_000, 'EUR'] });
+    const linea = await w.model('LINEA', { price: [30_000, 'EUR'] });
+    const set = await t.db.insertInto('sets').values({ name: 'The Pair', code: 'THE-PAIR', base_price_minor: 100_000, base_currency: 'EUR' }).returning('id').executeTakeFirstOrThrow();
+    await t.db.insertInto('set_models').values([{ set_id: set.id, position: 1, model_id: halo }, { set_id: set.id, position: 2, model_id: linea }]).execute();
+    const draw = await w.drop({ mode: 'DRAW', setId: set.id, title: 'THE PAIR — DRAW', opens: '2026-10-05', quantity: 4 });
+    const model = await w.drop({ mode: 'DRAW', modelId: halo, title: 'HALO — DRAW', opens: '2026-10-03', quantity: 3 });
+    const [A, B, C, D, E] = await Promise.all(['FR', 'FR', 'GB', 'FR', 'FR'].map((c) => w.account('2026-09-01', c)));
+    // A and B bought a set each, B's returned whole; C entered; D withdrew. E bought a HALO of the model's draw.
+    const sale = async (account: string, rank: number, returned: boolean) => {
+      const entry = await w.drawEntry(draw.id, account, 'CONFIRMED', '2026-10-05', rank);
+      const s = await t.db.insertInto('set_sales').values({ set_id: set.id, drop_id: draw.id, account_id: account, price_minor: 100_000, currency: 'EUR' }).returning('id').executeTakeFirstOrThrow();
+      const end = returned ? { status: 'RETURNED' as const, ended: '2026-10-20' } : {};
+      const first = await w.order({ accountId: account, modelId: halo, channel: 'DRAW', dropId: draw.id, dropEntryId: entry, setSaleId: s.id, setPiece: 1, paid: '2026-10-06', total: 66_667, currency: 'EUR', ...end });
+      await w.order({ accountId: account, modelId: linea, channel: 'DRAW', dropId: draw.id, dropEntryId: entry, setSaleId: s.id, setPiece: 2, withOrderId: first, paid: '2026-10-07', total: 33_333, currency: 'EUR', ...end });
+    };
+    await sale(A, 1, false);
+    await sale(B, 2, true);
+    await w.drawEntry(draw.id, C, 'ENTERED', '2026-10-05');
+    await w.drawEntry(draw.id, D, 'WITHDRAWN', '2026-10-05');
+    const e = await w.drawEntry(model.id, E, 'CONFIRMED', '2026-10-03');
+    await w.order({ accountId: E, modelId: halo, channel: 'DRAW', dropId: model.id, dropEntryId: e, paid: '2026-10-04', total: 60_000, currency: 'EUR' });
+
+    // Latest releases: the set's like any, in sets: 4 announced, 1 sold (B's returned), 3 entries (D withdrew).
+    const releases = await ctx.services.growth.releases();
+    expect(releases.map((r) => r.id)).toEqual([draw.id, model.id]);
+    expect(releases[0]).toEqual({ id: draw.id, mode: 'DRAW', title: 'THE PAIR — DRAW', opensAt: expect.any(Date), pieces: 4, sold: 1, sellOutMs: null, entries: 3, set: { name: 'The Pair', pieces: 2 } });
+    expect(releases[1]).toMatchObject({ pieces: 3, sold: 1, entries: 1, set: null });
+
+    // Revenue: each piece's order under its own model at its share; B's set nets to zero on both.
+    const { revenue, ltv } = await ctx.services.growth.report();
+    expect(revenue.total).toEqual({ orders: 5, invoicedMinor: 260_000, creditedMinor: 100_000, netMinor: 160_000 });
+    expect(revenue.byChannel.find((g) => g.key === 'DRAW')).toMatchObject({ collectors: 3, orders: 5, netMinor: 160_000 });
+    // HALO: A's piece 666.67 and E's 600.00 (B's at zero), three collectors; LINEA: A's 333.33, two collectors (masked).
+    expect(revenue.byModel).toEqual([
+      { key: halo, label: 'HALO', collectors: 3, orders: 3, netMinor: 126_667 },
+      { key: linea, label: 'LINEA', collectors: 2, orders: 2, netMinor: null },
+    ]);
+    // Lifetime value: A's set is its two pieces (1 000.00), its first model HALO (the first piece paid first); E 600.00.
+    expect(ltv.perCollector).toMatchObject({ collectors: 2, totalMinor: 160_000 });
+    expect(ltv.byFirstModel).toEqual([{ key: halo, label: 'HALO', collectors: 2, totalMinor: null, averageMinor: null, medianMinor: null }]);
+    expect(await ctx.services.growth.collectorValue(A)).toEqual([{ currency: 'EUR', valueMinor: 100_000 }]);
+    expect(await ctx.services.growth.collectorValue(B)).toEqual([]);
+  });
+});

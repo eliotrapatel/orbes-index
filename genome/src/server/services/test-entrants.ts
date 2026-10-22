@@ -37,6 +37,9 @@
  *    does); some WITHDRAW a few seconds later. In a draw with sizes (plan NEXT LOT §3.6.F) each bot enters and reserves
  *    in a size: the Choices' size, else one of the draw's sizes with pieces at random (a reservation refused in a size
  *    full enters at the opening, as one refused in a release full);
+ *    A set's release (macro scope K44 T1; plan MACRO M3 §5.2, ADAPTED): each bot chooses a size per piece (`sizes`, the
+ *    Choices' size for a piece that offers it, else one of that piece's sizes with pieces at random), sent with each
+ *    ENTER, RESERVE and I'LL BE THERE; its pieces then count as sets (a LIVE's quantity at most its sizes' smallest stock);
  *  - a LIVE RELEASE: I'LL BE THERE first for its share (before T0), ENTER with its size and pieces; then it follows its
  *    turn as a phone whose stream is lost does, reading GET /state every POLL_MS (its turn's secret is there), or as
  *    often as the state's `pollMs` says while it waits for its batch on a paced release (W2: 10 s for the next batch, up
@@ -454,6 +457,8 @@ interface BotPlan {
    */
   interest?: boolean;
   sizeId?: string;
+  /** Macro scope K44 T1: on a set's release, its size for each piece (`sizeId` its first piece's). */
+  sizes?: { piece: number; sizeId: string }[];
   quantity?: number;
   addOns?: boolean;
   outcome?: TestOutcome;
@@ -948,7 +953,7 @@ export class TestEntrantService {
   private async press(tx: Db, runId: string, d: DropRow, s: TestRunSettings, already: number, now: Date): Promise<Bot[]> {
     const n = s.tiers.none + s.tiers.titane + s.tiers.platine + s.tiers.palladium;
     // A LIVE RELEASE's sizes, and a draw's (plan NEXT LOT §3.6.F: none for a draw published before, one pool).
-    const sizes = await tx.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', d.id).orderBy('position').execute();
+    const sizes = await tx.selectFrom('drop_sizes').select(['id', 'piece', 'label', 'stock']).where('drop_id', '=', d.id).orderBy('position').execute();
     let chosen: { id: string; stock: number } | null = null;
     if (sizes.length > 0 && s.choices.size !== null) {
       const want = s.choices.size.toLowerCase();
@@ -956,6 +961,17 @@ export class TestEntrantService {
       if (!chosen) throw validationError('Choose one of the sizes of this release.');
     }
     const offered = sizes.filter((z) => z.stock > 0);
+    // Macro scope K44 T1 (ADAPTED): a set's release takes a size per piece, the Choices' where the piece offers it.
+    const pieces = d.set_id === null ? [] : [...new Set(sizes.map((z) => z.piece).filter((x): x is number => x !== null))].sort((a, b) => a - b);
+    const want = s.choices.size?.toLowerCase() ?? null;
+    const perPiece = (): { piece: number; sizeId: string; stock: number }[] =>
+      pieces.map((piece) => {
+        const own = sizes.filter((z) => z.piece === piece);
+        const asked = want === null ? undefined : own.find((z) => z.id.toLowerCase() === want || z.label.toLowerCase() === want);
+        const withPieces = own.filter((z) => z.stock > 0);
+        const size = asked ?? (withPieces.length ? pick(withPieces) : own[0]!);
+        return { piece, sizeId: size.id, stock: size.stock };
+      });
     const perAccount = d.per_account ?? LIVE_PER_ACCOUNT.default;
     const accounts = await this.takePool(tx, d, n, now);
 
@@ -990,13 +1006,18 @@ export class TestEntrantService {
         plan.reserve = reserve.has(k);
         plan.withdraw = !plan.reserve && withdraw[k]!;
         plan.confirm = confirm[k]!;
-        // Plan NEXT LOT §3.6.F: its size, the Choices' or one with pieces at random.
-        if (sizes.length > 0) plan.sizeId = (chosen ?? (offered.length ? pick(offered) : sizes[0]!)).id;
+        // Plan NEXT LOT §3.6.F: its size, the Choices' or one with pieces at random; a set's, one per piece.
+        if (pieces.length > 0) {
+          plan.sizes = perPiece().map((z) => ({ piece: z.piece, sizeId: z.sizeId }));
+          plan.sizeId = plan.sizes[0]!.sizeId;
+        } else if (sizes.length > 0) plan.sizeId = (chosen ?? (offered.length ? pick(offered) : sizes[0]!)).id;
       } else {
-        const size = chosen ?? (offered.length ? pick(offered) : sizes[0]);
+        const set = pieces.length > 0 ? perPiece() : null;
+        const size = set ? { id: set[0]!.sizeId, stock: Math.min(...set.map((z) => z.stock)) } : (chosen ?? (offered.length ? pick(offered) : sizes[0]));
         const most = Math.max(1, Math.min(perAccount, size?.stock ?? 1));
         plan.interest = interest[k]!;
         plan.sizeId = size?.id ?? '';
+        if (set) plan.sizes = set.map((z) => ({ piece: z.piece, sizeId: z.sizeId }));
         plan.quantity = s.choices.quantity === null ? between(1, most) : Math.min(s.choices.quantity, most);
         plan.addOns = addOns[k]!;
         plan.outcome = outcomes[k]!;
@@ -1174,8 +1195,8 @@ export class TestEntrantService {
     const id = run.drop.id;
     const plan = bot.plan;
     if (run.mode === 'DRAW') {
-      // Plan NEXT LOT §3.6.F: ENTER and RESERVE in its size, in a draw with sizes.
-      const sized = plan.sizeId ? { sizeId: plan.sizeId } : undefined;
+      // Plan NEXT LOT §3.6.F: ENTER and RESERVE in its size, in a draw with sizes; a set's draw, a size per piece.
+      const sized = plan.sizes ? { sizes: plan.sizes } : plan.sizeId ? { sizeId: plan.sizeId } : undefined;
       if (bot.step === 'WITHDRAW') {
         const w = await this.call(run, bot, 'POST', `/api/v1/club/drops/${id}/withdraw`, 'WITHDRAW');
         return this.finish(run, bot, w.ok ? 'WITHDRAWN' : 'ENTERED');
@@ -1212,8 +1233,10 @@ export class TestEntrantService {
     const live = `/api/v1/live/${id}`;
     switch (bot.step) {
       case 'ARRIVE': {
-        if (plan.interest && now < run.drop.opens_at.getTime()) await this.call(run, bot, 'PUT', `${live}/interest`, 'I’LL BE THERE', { sizeId: plan.sizeId });
-        const e = await this.call(run, bot, 'POST', `${live}/enter`, 'ENTER', { sizeId: plan.sizeId, quantity: plan.quantity });
+        // Macro scope K44 T1: on a set's release, a size per piece.
+        const sized = plan.sizes ? { sizes: plan.sizes } : { sizeId: plan.sizeId };
+        if (plan.interest && now < run.drop.opens_at.getTime()) await this.call(run, bot, 'PUT', `${live}/interest`, 'I’LL BE THERE', sized);
+        const e = await this.call(run, bot, 'POST', `${live}/enter`, 'ENTER', { ...sized, quantity: plan.quantity });
         if (!e.ok) return this.finish(run, bot, 'REFUSED');
         bot.step = 'WATCH';
         if (plan.outcome === 'LEAVE') bot.leaveAt = this.now().getTime() + between(5000, 60_000);

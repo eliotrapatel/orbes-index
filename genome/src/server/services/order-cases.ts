@@ -39,11 +39,20 @@
  *   cancel    Client Services ends a case with no decision (a request refused or withdrawn; a damaged parcel that never
  *             came back, to report it lost): CANCELLED; a parcel problem's shipment SHIPPED again.
  *
+ * THE SET (macro scope K44 T3; plan MACRO M3 §5.1): a set is returned whole. A RETURN asked on one piece of a set (by
+ * the collector within its 14 days, or opened by Client Services) opens a RETURN case for every piece of its set sale
+ * still SHIPPED or DELIVERED, in one transaction, sharing one `group_id` (409 ORDER_CASE_OPEN when any of them has a case
+ * not ended); the collector's request is one message. Each piece is received by the agent as any; ORBES decides the group
+ * together once every piece is received (409 SET_RETURN_NOT_RECEIVED before), each piece's destination its own (`pieces`,
+ * else the decision's), each order's credit note following its return; cancelling one case of the group cancels the
+ * group. A size EXCHANGE of one piece stays a case of its own: its EXCHANGE order joins the set sale in its place.
+ *
  * One case not ended per order (409 ORDER_CASE_OPEN). Each method takes the order's row (a parcel's orders) FOR UPDATE,
  * then the case's; a decision takes the pieces first, as a return does. The note, the agent's and ORBES's words are
  * personal data: never in the audit log, the order's events nor the journal (`order.case.open`, `.receive`, `.decide`,
  * `.cancel` carry ids, kinds, states and outcomes). The agent reaches only the cases of its locations (404 outside).
  */
+import { randomUUID } from 'node:crypto';
 import { inRetriedTransaction, inTransaction, type Db } from '../db/connection.js';
 import type {
   OrderCaseKind,
@@ -108,6 +117,8 @@ const noShippedParcel = () => notFound('Shipment', 'SHIPMENT_NOT_FOUND');
 /** Plan NEXT LOT §3.6.D: the collector's own request. */
 export const returnWindowClosed = () => conflict('RETURN_WINDOW_CLOSED', 'The 14 days to return this piece have passed. ORBES Client Services can assist you.');
 const returnNotAllowed = () => conflict('RETURN_NOT_ALLOWED', 'This piece cannot be returned from here. ORBES Client Services can assist you.');
+/** Macro scope K44 T3: a set's return is decided once every piece of it is back. */
+export const setReturnNotReceived = () => conflict('SET_RETURN_NOT_RECEIVED', 'Every piece of the set is received before ORBES decides its return.');
 
 /** The reasons a collector gives, as its message in MESSAGES says them (plan NEXT LOT §3.6.D). */
 export const ORDER_CASE_REASON_WORDS: Readonly<Record<OrderCaseReason, string>> = Object.freeze({
@@ -144,6 +155,11 @@ export interface OrderCaseRecord {
   decision: { at: Date; outcome: OrderCaseOutcome; pieceTo: OrderCasePieceDestination | null; exchangeOrder: { id: string; reference: string } | null; note: string | null } | null;
   /** Its note withheld (null) from an AUDITOR, as every note of the case. */
   cancelled: { at: Date; note: string | null } | null;
+  /**
+   * Macro scope K44 T3: a set's return, its cases opened and decided together: the group and each of its cases (this one
+   * included), in the set's order; null for a case of its own.
+   */
+  group: { id: string; cases: { id: string; order: { id: string; reference: string }; status: OrderCaseStatus; received: boolean }[] } | null;
 }
 
 /** A case whose parcel the agent expects back (Logistics → Returns → To receive): no note, no price, no account. */
@@ -178,6 +194,11 @@ export interface DecideCaseInput {
    * with the collector.
    */
   addonsOut?: string[] | null;
+  /**
+   * Macro scope K44 T3, a set's return decided together: each piece's destination by its case (stock at a location, or
+   * the archive, ADMIN); a case of the group not named takes the decision's own `pieceTo` and `locationId`.
+   */
+  pieces?: { caseId: string; pieceTo: 'RESTOCKED' | 'ARCHIVED'; locationId?: string | null }[] | null;
 }
 
 /**
@@ -189,6 +210,8 @@ export interface CaseDecided {
   claimCode?: string;
   productId?: string;
   claimCodes?: { productId: string; claimCode: string }[];
+  /** Macro scope K44 T3: a set's return decided together, each piece's case and destination. */
+  group?: { caseId: string; productId: string; pieceTo: 'RESTOCKED' | 'ARCHIVED' }[];
   /**
    * A parcel lost or damaged reshipped: the add-on units held again beyond what the order's location has (plan MACRO M3
    * §4.2, never waiting for an add-on), by order and add-on, so Client Services counts them in, moves them or removes them
@@ -313,7 +336,22 @@ export class OrderCaseService {
           ? { at: c.closed_at, outcome: c.outcome, pieceTo: c.piece_to, exchangeOrder: c.exchange_order_id ? { id: c.exchange_order_id, reference: orderReference(c.exchange_order_id) } : null, note: c.decision_note }
           : null,
       cancelled: c.cancelled_at && c.cancel_note ? { at: c.cancelled_at, note: c.cancel_note } : null,
+      group: c.group_id ? await this.groupOf(db, c.group_id) : null,
     };
+  }
+
+  /** A set's return group (macro scope K44 T3): its cases in the set's order, each its order, status and whether its piece is back. */
+  private async groupOf(db: Db, groupId: string): Promise<NonNullable<OrderCaseRecord['group']>> {
+    const rows = await db
+      .selectFrom('order_cases as c')
+      .innerJoin('orders as o', 'o.id', 'c.order_id')
+      .select(['c.id', 'c.order_id', 'c.status', 'c.received_at'])
+      .where('c.group_id', '=', groupId)
+      .orderBy('o.set_piece')
+      .orderBy('o.reserved_at')
+      .orderBy('c.id')
+      .execute();
+    return { id: groupId, cases: rows.map((r) => ({ id: r.id, order: { id: r.order_id, reference: orderReference(r.order_id) }, status: r.status, received: r.received_at !== null })) };
   }
 
   /** Where a case's parcel comes back: its shipment's location, or its order's. */
@@ -371,6 +409,10 @@ export class OrderCaseService {
     const caseId = await inTransaction(this.db, async (tx) => {
       const o = await lockOrder(tx, id);
       if (o.status !== 'SHIPPED' && o.status !== 'DELIVERED') throw notShippedOrDelivered(o.status);
+      // Macro scope K44 T3: a RETURN of a set's piece is the set's return, opened for every piece.
+      if (input.kind === 'RETURN' && o.set_sale_id !== null) {
+        return this.openSetReturn(tx, o, { reason: input.reason, note, by: { type: 'admin', id: actor.id! }, messageId: null }, actor);
+      }
       await this.assertNoOpenCase(tx, [o.id]);
       let sizeLabel: string | null = null;
       if (exchangeSkuId) {
@@ -419,6 +461,14 @@ export class OrderCaseService {
       if (o.status !== 'DELIVERED' || o.channel === 'GIFT' || o.delivered_at === null) throw returnNotAllowed();
       const now = this.clock();
       if (now.getTime() >= o.delivered_at.getTime() + RETURN_WINDOW_DAYS * DAY_MS) throw returnWindowClosed();
+      // Macro scope K44 T3: a RETURN asked on a set's piece returns the set, every piece of it, as one request.
+      if (input.kind === 'RETURN' && o.set_sale_id !== null) {
+        const set = await tx.selectFrom('set_sales as s').innerJoin('sets as t', 't.id', 's.set_id').select('t.name').where('s.id', '=', o.set_sale_id).executeTakeFirstOrThrow();
+        await this.assertNoOpenCase(tx, (await this.setMembers(tx, o)).map((m) => m.id));
+        const head = `RETURN OF THE SET ${set.name} REQUESTED — ${ORDER_CASE_REASON_WORDS[input.reason]}.`;
+        const { message } = await messages.writeIn(tx, account, { body: note ? `${head}\n\n${note}` : head, context: { kind: 'ORDER', orderId: o.id } }, actor, { rate: false });
+        return this.openSetReturn(tx, o, { reason: input.reason, note, by: { type: 'account', id: account }, messageId: message.id }, actor);
+      }
       await this.assertNoOpenCase(tx, [o.id]);
       let exchange: { skuId: string; label: string } | null = null;
       if (asked !== null) {
@@ -537,8 +587,12 @@ export class OrderCaseService {
     if (pieceTo === 'ARCHIVED' && input.locationId) throw validationError('A piece archived goes to no location.');
     if ((c.kind === 'LOST' || pieceTo === 'ARCHIVED') && !opts.admin) throw forbidden(c.kind === 'LOST' ? 'Only an ADMIN decides a lost parcel: its pieces are revoked.' : 'Only an ADMIN can archive a returned piece.');
     if (!NOT_ENDED.includes(c.status)) throw caseEnded();
+    if (c.group_id !== null && c.status !== 'RECEIVED') throw setReturnNotReceived();
     if (c.kind !== 'LOST' && c.status !== 'RECEIVED') throw notReceived();
     const locationId = pieceTo === 'RESTOCKED' && input.locationId ? await knownLocation(this.db, input.locationId) : null;
+    // Macro scope K44 T3: a set's return is decided together.
+    if (c.group_id !== null) return this.decideSetReturn(c, { pieceTo: pieceTo!, locationId, note: note!, addonsOut: addonsOutOf(input.addonsOut), pieces: input.pieces ?? null }, actor, opts);
+    if (input.pieces) throw validationError('Only a set’s return names a destination for each piece.');
     return isParcelProblem(c.kind)
       ? this.decideParcel(c, { decision: decision as 'RESHIP' | 'REFUND', pieceTo, locationId, note }, actor)
       : this.decideReturn(c, { decision: decision as 'REFUND' | 'EXCHANGE', pieceTo: pieceTo!, locationId, note: note!, addonsOut: addonsOutOf(input.addonsOut) }, actor);
@@ -762,12 +816,176 @@ export class OrderCaseService {
       const c = await tx.selectFrom('order_cases').selectAll().where('id', '=', id).forUpdate().executeTakeFirstOrThrow();
       if (!NOT_ENDED.includes(c.status)) throw caseEnded();
       const now = this.clock();
-      await tx.updateTable('order_cases').set({ status: 'CANCELLED', cancelled_at: now < c.opened_at ? c.opened_at : now, cancelled_by: actor.id!, cancel_note: note }).where('id', '=', id).execute();
-      if (c.shipment_id && isParcelProblem(c.kind)) await tx.updateTable('shipments').set({ status: 'SHIPPED' }).where('id', '=', c.shipment_id).where('status', '=', c.kind).execute();
-      const n = await recordChange(tx, o, o, 'order.case.cancel', { details: { caseId: id, kind: c.kind } }, actor, now);
-      await this.audit.record(n, tx);
+      // Macro scope K44 T3: a set's return ends together: every case of its group not ended yet.
+      const group = c.group_id === null ? [] : await this.groupCases(tx, c.group_id, c.id);
+      for (const g of [{ c, o }, ...group]) {
+        await tx.updateTable('order_cases').set({ status: 'CANCELLED', cancelled_at: now < g.c.opened_at ? g.c.opened_at : now, cancelled_by: actor.id!, cancel_note: note }).where('id', '=', g.c.id).execute();
+        if (g.c.shipment_id && isParcelProblem(g.c.kind)) await tx.updateTable('shipments').set({ status: 'SHIPPED' }).where('id', '=', g.c.shipment_id).where('status', '=', g.c.kind).execute();
+        const n = await recordChange(tx, g.o, g.o, 'order.case.cancel', { details: { caseId: g.c.id, kind: g.c.kind, ...(c.group_id ? { groupId: c.group_id } : {}) } }, actor, now);
+        await this.audit.record(n, tx);
+      }
     });
     return this.get(id);
+  }
+
+  // ── THE SET's return (macro scope K44 T3) ────────────────────────────────
+
+  /** The orders of `o`'s set sale still SHIPPED or DELIVERED, each FOR UPDATE, in the set's order (`o` included). */
+  private async setMembers(tx: Db, o: OrderRow): Promise<OrderRow[]> {
+    return tx
+      .selectFrom('orders')
+      .selectAll()
+      .where('set_sale_id', '=', o.set_sale_id!)
+      .where('status', 'in', ['SHIPPED', 'DELIVERED'])
+      .orderBy('set_piece')
+      .orderBy('reserved_at')
+      .orderBy('id')
+      .forUpdate()
+      .execute();
+  }
+
+  /**
+   * A set's return opened (see the header), in the caller's transaction, `o` (one of its pieces) held: a RETURN case for
+   * every piece of its set sale still SHIPPED or DELIVERED, sharing one group, each with the reason, note and message
+   * given (409 ORDER_CASE_OPEN when one has a case not ended). Audited `order.case.open` per case with the group. Returns
+   * the case of `o`.
+   */
+  private async openSetReturn(
+    tx: Db,
+    o: OrderRow,
+    c: { reason: OrderCaseReason; note: string | null; by: { type: 'admin' | 'account'; id: string }; messageId: string | null },
+    actor: Actor,
+  ): Promise<string> {
+    const members = await this.setMembers(tx, o);
+    await this.assertNoOpenCase(tx, members.map((m) => m.id));
+    const groupId = randomUUID();
+    const now = this.clock();
+    let own = '';
+    for (const m of members) {
+      const row = await tx
+        .insertInto('order_cases')
+        .values({ order_id: m.id, kind: 'RETURN', opened_by_type: c.by.type, opened_by_id: c.by.id, opened_at: now, reason: c.reason, note: c.note, message_id: c.messageId, group_id: groupId })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      if (m.id === o.id) own = row.id;
+      const n = await recordChange(tx, m, m, 'order.case.open', { details: { caseId: row.id, kind: 'RETURN', reason: c.reason, groupId, setSaleId: m.set_sale_id, by: c.by.type } }, actor, now);
+      await this.audit.record(n, tx);
+    }
+    return own;
+  }
+
+  /** The other cases of a set's return group not ended, each with its order, both FOR UPDATE (the order first), in the set's order. */
+  private async groupCases(tx: Db, groupId: string, exceptId: string): Promise<{ c: OrderCaseRow; o: OrderRow }[]> {
+    const ids = await tx
+      .selectFrom('order_cases as c')
+      .innerJoin('orders as o', 'o.id', 'c.order_id')
+      .select(['c.id', 'c.order_id'])
+      .where('c.group_id', '=', groupId)
+      .where('c.id', '<>', exceptId)
+      .where('c.status', 'in', [...NOT_ENDED])
+      .orderBy('o.set_piece')
+      .orderBy('o.reserved_at')
+      .orderBy('c.id')
+      .execute();
+    const out: { c: OrderCaseRow; o: OrderRow }[] = [];
+    for (const r of ids) {
+      const o = await lockOrder(tx, r.order_id);
+      out.push({ c: await tx.selectFrom('order_cases').selectAll().where('id', '=', r.id).forUpdate().executeTakeFirstOrThrow(), o });
+    }
+    return out;
+  }
+
+  /**
+   * A set's return decided together (see the header): every case of the group not ended must be RECEIVED (409
+   * SET_RETURN_NOT_RECEIVED); each piece goes where `pieces` says (its case named), else where the decision says, the
+   * archive an ADMIN's (403); each order's return through the return's core (back to stock with a new claim code shown
+   * once, or the archive; the ownership taken back; its credit note), its case CLOSED with the outcome REFUND, in one
+   * transaction: the pieces first, then the orders, then the cases. Audited `order.case.decide` per case with the group.
+   */
+  private async decideSetReturn(
+    c: OrderCaseRow,
+    d: { pieceTo: 'RESTOCKED' | 'ARCHIVED'; locationId: string | null; note: string; addonsOut: string[]; pieces: DecideCaseInput['pieces'] },
+    actor: Actor,
+    opts: { admin: boolean },
+  ): Promise<CaseDecided> {
+    const groupId = c.group_id!;
+    const rows = await this.db
+      .selectFrom('order_cases as c')
+      .innerJoin('orders as o', 'o.id', 'c.order_id')
+      .leftJoin('ownership as w', (j) => j.onRef('w.product_id', '=', 'o.product_id').on('w.ended_at', 'is', null))
+      .select(['c.id', 'c.order_id', 'c.status', 'o.product_id', 'o.location_id', 'w.id as ownership_id'])
+      .where('c.group_id', '=', groupId)
+      .where('c.status', 'in', [...NOT_ENDED])
+      .orderBy('o.set_piece')
+      .orderBy('o.reserved_at')
+      .orderBy('c.id')
+      .execute();
+    if (rows.some((r) => r.status !== 'RECEIVED')) throw setReturnNotReceived();
+    // Each piece's destination: its own when named, else the decision's.
+    const named = new Map<string, { pieceTo: 'RESTOCKED' | 'ARCHIVED'; locationId: string | null }>();
+    for (const p of d.pieces ?? []) {
+      const id = known(p?.caseId, () => validationError('Name each piece by its case.'));
+      if (!rows.some((r) => r.id === id)) throw validationError('A piece named is not one of this set’s return.');
+      if (p.pieceTo !== 'RESTOCKED' && p.pieceTo !== 'ARCHIVED') throw validationError('The piece goes back to stock (RESTOCKED) or to the archive (ARCHIVED).');
+      if (p.pieceTo === 'ARCHIVED' && p.locationId) throw validationError('A piece archived goes to no location.');
+      named.set(id, { pieceTo: p.pieceTo, locationId: p.pieceTo === 'RESTOCKED' && p.locationId ? await knownLocation(this.db, p.locationId) : null });
+    }
+    const plan = rows.map((r) => ({ ...r, ...(named.get(r.id) ?? { pieceTo: d.pieceTo, locationId: d.locationId }) }));
+    if (plan.some((p) => p.pieceTo === 'ARCHIVED') && !opts.admin) throw forbidden('Only an ADMIN can archive a returned piece.');
+    const codes = new Map<string, { code: string; hash: string }>();
+    for (const p of plan) {
+      if (p.pieceTo !== 'RESTOCKED') continue;
+      const code = generateClaimCode();
+      codes.set(p.id, { code, hash: await hashClaimCode(code) });
+    }
+    const decided: NonNullable<CaseDecided['group']> = [];
+    const claimCodes: { productId: string; claimCode: string }[] = [];
+    await inRetriedTransaction(this.db, async (tx) => {
+      decided.length = 0;
+      claimCodes.length = 0;
+      // The pieces first (as a return), in a stable order; then the orders and the cases, in the set's order.
+      for (const pid of plan.map((p) => p.product_id).filter((x): x is string => x !== null).sort()) await tx.selectFrom('products').select('id').where('id', '=', pid).forUpdate().execute();
+      const held: { p: (typeof plan)[number]; o: OrderRow; fresh: OrderCaseRow }[] = [];
+      for (const p of plan) {
+        const o = await lockOrder(tx, p.order_id);
+        const fresh = await tx.selectFrom('order_cases').selectAll().where('id', '=', p.id).forUpdate().executeTakeFirstOrThrow();
+        if (!NOT_ENDED.includes(fresh.status)) throw caseEnded();
+        if (fresh.status !== 'RECEIVED') throw setReturnNotReceived();
+        held.push({ p, o, fresh });
+      }
+      // A case of the group opened since the plan was read (none can be: one case per order, the orders held).
+      const now = this.clock();
+      const notes: AuditRecordInput[] = [];
+      const finishes: (() => Promise<void>)[] = [];
+      for (const { p, o, fresh } of held) {
+        const location = p.pieceTo === 'RESTOCKED' ? (p.locationId ?? o.location_id) : null;
+        const code = codes.get(p.id);
+        const done = await returnInTransaction(
+          tx,
+          o,
+          { outcome: p.pieceTo, locationId: location, note: d.note, caseId: p.id, keepAddons: false, addonsOut: d.addonsOut },
+          { productId: p.product_id, reclaim: p.ownership_id !== null, claimHash: code?.hash ?? null },
+          actor,
+          now,
+          notes,
+          this.lifecycle,
+        );
+        await tx
+          .updateTable('order_cases')
+          .set({ status: 'CLOSED', outcome: 'REFUND', piece_to: p.pieceTo, decision_note: d.note, closed_at: now < fresh.opened_at ? fresh.opened_at : now, closed_by: actor.id! })
+          .where('id', '=', p.id)
+          .execute();
+        notes.push(await recordChange(tx, done.after, done.after, 'order.case.decide', { details: { caseId: p.id, kind: 'RETURN', outcome: 'REFUND', pieceTo: p.pieceTo, groupId } }, actor, now));
+        finishes.push(done.finish);
+        decided.push({ caseId: p.id, productId: done.productId, pieceTo: p.pieceTo });
+        if (code) claimCodes.push({ productId: done.productId, claimCode: code.code });
+      }
+      // Last: the pieces' statuses (LifecycleService audits at once), then the entries of the decision.
+      for (const f of finishes) await f();
+      for (const n of notes) await this.audit.record(n, tx);
+    });
+    claimCodes.sort((a, b) => a.productId.localeCompare(b.productId));
+    return { case: await this.get(c.id), group: [...decided], ...(claimCodes.length ? { claimCodes } : {}) };
   }
 
   /** 409 ORDER_CASE_OPEN when one of the orders has an order case not ended. */

@@ -22,6 +22,11 @@
  *                        MACRO M3 §4.2, S5): one product of a single variant, its SKU's code, its price and weight,
  *                        type « Add-on », a draft, a handle no model's product has. Its ids pasted back are the
  *                        add-on's (services/addons.ts setShopify), the same advisory lock as a model's.
+ *                        After the add-ons, each active set priced in the store's currency (macro scope K44 T1, S5): one
+ *                        product of a single variant, its code as SKU and handle, its base price, its pieces' packed
+ *                        weights added, type « Set », a draft, its pieces named in its description (« Description »,
+ *                        empty for the models and the add-ons); its id pasted back is the set's (services/sets.ts
+ *                        setShopify), the same advisory lock again.
  *   the ids pasted back  N2: once imported, the product's id and each variant's, from Shopify's admin, are kept on the
  *                        model's SKUs (`skus.shopify_product_id`, one product per model; `skus.shopify_variant_id`, unique):
  *                        both sides are linked. A size of the export without its SKU yet has it created (ensureSku), on
@@ -64,6 +69,7 @@ import { compareSizes, deriveSku, ensureSku, ONE_SIZE_LABEL } from './stock.js';
 export const SHOPIFY_PRODUCT_COLUMNS = Object.freeze([
   'Title',
   'URL handle',
+  'Description',
   'Vendor',
   'Type',
   'Published on online store',
@@ -129,6 +135,8 @@ export const SHOPIFY_VARIANT_OPTION = 'Variant';
 export const SHOPIFY_SINGLE_OPTION = Object.freeze({ name: 'Title', value: 'Default Title' });
 /** The product type of an add-on (macro scope K48 D1, S5). */
 export const SHOPIFY_ADDON_TYPE = 'Add-on';
+/** The product type of a set (macro scope K44 T1, S5). */
+export const SHOPIFY_SET_TYPE = 'Set';
 /** The longest period one order export covers, in days. */
 export const SHOPIFY_PERIOD_MAX_DAYS = 366;
 /** A Shopify id as its admin shows it: a positive decimal (the CHECK of migration 0022). */
@@ -315,6 +323,7 @@ export class ShopifyExportService {
         const row: Record<(typeof SHOPIFY_PRODUCT_COLUMNS)[number], string> = {
           Title: i === 0 ? main.name : '',
           'URL handle': handles.get(root)!,
+          Description: '',
           Vendor: i === 0 ? SHOPIFY_VENDOR : '',
           Type: i === 0 ? main.type : '',
           'Published on online store': i === 0 ? 'false' : '',
@@ -337,7 +346,12 @@ export class ShopifyExportService {
     }
     // Macro scope K48 D1 (plan MACRO M3 §4.2, S5): each active add-on priced in the store's currency, one product of one
     // variant after the models, its SKU, price and weight, a draft as the models are.
-    rows.push(...(await this.addonRows(currency, new Set(handles.values()))));
+    const taken = new Set(handles.values());
+    const addons = await this.addonRows(currency, taken);
+    rows.push(...addons.rows);
+    // Macro scope K44 T1 (plan MACRO M3 §5.2, S5): each active set priced in the store's currency, one product after the
+    // add-ons, its code the handle, its pieces named in its description.
+    rows.push(...(await this.setRows(currency, addons.taken)));
     const day = this.clock().toISOString().slice(0, 10);
     return { filename: `ORBES-shopify-products-${currency}-${day}.csv`, contentType: CSV_CONTENT_TYPE, body: csvDocument([[...SHOPIFY_PRODUCT_COLUMNS], ...rows]) };
   }
@@ -348,7 +362,7 @@ export class ShopifyExportService {
    * « Add-on », a draft, no image (an add-on has no photograph). Its handle is its name's words, never one a model's
    * product has (`taken`): its SKU code is added, then a number, until it is free.
    */
-  private async addonRows(currency: string, taken: Set<string>): Promise<string[][]> {
+  private async addonRows(currency: string, taken: Set<string>): Promise<{ rows: string[][]; taken: Set<string> }> {
     const addons = await this.db
       .selectFrom('addon_items as a')
       .innerJoin('skus as k', 'k.addon_id', 'a.id')
@@ -360,7 +374,7 @@ export class ShopifyExportService {
       .orderBy('a.id')
       .execute();
     const used = new Set(taken);
-    return addons.map((a) => {
+    const rows = addons.map((a) => {
       const base = shopifyHandle({ name: a.name, slug: null, skuPrefix: a.code });
       const withCode = `${base}-${shopifyHandle({ name: a.code, slug: null, skuPrefix: a.code })}`;
       let handle = used.has(base) ? withCode : base;
@@ -369,6 +383,7 @@ export class ShopifyExportService {
       const row: Record<(typeof SHOPIFY_PRODUCT_COLUMNS)[number], string> = {
         Title: a.name,
         'URL handle': handle,
+        Description: '',
         Vendor: SHOPIFY_VENDOR,
         Type: SHOPIFY_ADDON_TYPE,
         'Published on online store': 'false',
@@ -380,6 +395,68 @@ export class ShopifyExportService {
         'Option2 value': '',
         Price: majorUnits(Number(a.price_minor)),
         'Weight value (grams)': a.weight_g === null ? '' : String(a.weight_g),
+        'Requires shipping': 'true',
+        'Product image URL': '',
+        'Image position': '',
+        'Image alt text': '',
+        'Variant image URL': '',
+      };
+      return SHOPIFY_PRODUCT_COLUMNS.map((c) => row[c]);
+    });
+    return { rows, taken: used };
+  }
+
+  /**
+   * The product export's sets (macro scope K44 T1, S5): each active set priced in `currency` (its base price), by name, one
+   * product with Shopify's single variant, its code as its SKU, its price, its weight (its pieces' packed weights added,
+   * empty while one is unknown), type « Set », a draft, no image (a set has no photograph of its own, §15 note 13), its
+   * pieces named in its description in their order; the components are linked in the store by the Shopify lot. Its
+   * handle is its code in lower case, never one a model's or an add-on's product has (`taken`): « -set » is added, then a
+   * number, until it is free.
+   */
+  private async setRows(currency: string, taken: Set<string>): Promise<string[][]> {
+    const sets = await this.db
+      .selectFrom('sets')
+      .select(['id', 'name', 'code', 'base_price_minor'])
+      .where('active', '=', true)
+      .where('base_currency', '=', currency)
+      .where('base_price_minor', 'is not', null)
+      .orderBy(sql`lower(name)`)
+      .orderBy('id')
+      .execute();
+    if (sets.length === 0) return [];
+    const pieces = await this.db
+      .selectFrom('set_models as s')
+      .innerJoin('models as m', 'm.id', 's.model_id')
+      .select(['s.set_id', 's.model_id', 'm.name', 'm.variant_label', 'm.type'])
+      .where('s.set_id', 'in', sets.map((x) => x.id))
+      .orderBy('s.set_id')
+      .orderBy('s.position')
+      .execute();
+    const packings = await modelPackings(this.db, [...new Set(pieces.map((p) => p.model_id))]);
+    const used = new Set(taken);
+    return sets.map((x) => {
+      const own = pieces.filter((p) => p.set_id === x.id);
+      const base = x.code.toLowerCase();
+      let handle = used.has(base) ? `${base}-set` : base;
+      for (let n = 2; used.has(handle); n++) handle = `${base}-set-${n}`;
+      used.add(handle);
+      const weights = own.map((p) => packings.get(p.model_id)?.packedWeightG ?? null);
+      const row: Record<(typeof SHOPIFY_PRODUCT_COLUMNS)[number], string> = {
+        Title: x.name,
+        'URL handle': handle,
+        Description: `THE SET: ${own.map((p) => `${p.name}${p.variant_label ? ` in ${p.variant_label}` : ''} (${p.type})`).join(', ')}.`,
+        Vendor: SHOPIFY_VENDOR,
+        Type: SHOPIFY_SET_TYPE,
+        'Published on online store': 'false',
+        Status: 'draft',
+        SKU: x.code,
+        'Option1 name': SHOPIFY_SINGLE_OPTION.name,
+        'Option1 value': SHOPIFY_SINGLE_OPTION.value,
+        'Option2 name': '',
+        'Option2 value': '',
+        Price: majorUnits(Number(x.base_price_minor)),
+        'Weight value (grams)': weights.every((w): w is number => w !== null) ? String(weights.reduce((t, w) => t + w, 0)) : '',
         'Requires shipping': 'true',
         'Product image URL': '',
         'Image position': '',
@@ -448,7 +525,9 @@ export class ShopifyExportService {
             .where((eb) => eb.or([eb('model_id', 'not in', group), eb('model_id', 'is', null)]))
             .executeTakeFirst();
           const addon = await tx.selectFrom('addon_items').select('id').where('shopify_product_id', '=', productId).executeTakeFirst();
-          if (other || addon) throw shopifyProductTaken();
+          // Macro scope K44 T1 (S5): a set is one product of its own too.
+          const set = await tx.selectFrom('sets').select('id').where('shopify_product_id', '=', productId).executeTakeFirst();
+          if (other || addon || set) throw shopifyProductTaken();
         }
         // A size of the export without its SKU yet (a model in one size never issued nor sold) has it now, given or not:
         // the product's id is kept on the model's SKUs, so a linked model has at least one. A typed model's sizes are
@@ -642,4 +721,4 @@ function modelKey(modelId: string): string {
 }
 
 /** 409 SHOPIFY_PRODUCT_TAKEN: another model is linked to that Shopify product. */
-export const shopifyProductTaken = () => conflict('SHOPIFY_PRODUCT_TAKEN', 'Another model or add-on is already linked to this Shopify product.');
+export const shopifyProductTaken = () => conflict('SHOPIFY_PRODUCT_TAKEN', 'Another model, add-on or set is already linked to this Shopify product.');

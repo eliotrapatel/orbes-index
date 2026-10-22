@@ -240,12 +240,20 @@ export async function issueInvoice(tx: Db, o: OrderRow, actor: Actor, now: Date)
     .innerJoin('models as m', 'm.id', 'o.model_id')
     .innerJoin('accounts as a', 'a.id', 'o.account_id')
     .leftJoin('drops as d', 'd.id', 'o.drop_id')
-    .select(['m.name as model', 'a.email', 'd.title as release'])
+    // Macro scope K44 (plan MACRO M3 §5.1, §15 note 11): a piece of a set says so beneath it, its amount its share.
+    .leftJoin('set_sales as ss', 'ss.id', 'o.set_sale_id')
+    .leftJoin('sets as st', 'st.id', 'ss.set_id')
+    .select(['m.name as model', 'a.email', 'd.title as release', 'st.name as set_name'])
     .where('o.id', '=', o.id)
     .executeTakeFirstOrThrow();
   const size = o.size_label ? ` · SIZE ${o.size_label}` : o.sku_id !== null ? ' · ONE SIZE' : '';
   const lines: InvoiceLine[] = [
-    { kind: 'PIECE', label: `${facts.model}${size}`, detail: [CHANNEL_WORDS[o.channel], facts.release].filter(Boolean).join(' · '), amountMinor: o.price_minor },
+    {
+      kind: 'PIECE',
+      label: `${facts.model}${size}`,
+      detail: [CHANNEL_WORDS[o.channel], facts.release, facts.set_name ? setLineWords(facts.set_name) : null].filter(Boolean).join(' · '),
+      amountMinor: o.price_minor,
+    },
     ...o.addons.map((a): InvoiceLine => ({ kind: 'ADDON', label: a.label, detail: null, amountMinor: a.priceMinor })),
     // Plan NEXT LOT §3.6.C: an engraving priced from the settings (one bought as the release's add-on is its ADDON line).
     ...(o.engraving_minor !== null ? [engravingLine(o.engraving_minor)] : []),
@@ -313,6 +321,9 @@ export async function issueInvoice(tx: Db, o: OrderRow, actor: Actor, now: Date)
   await writeJournal(tx, [{ type: 'invoice.issue', entityType: 'invoice', entityId: row.id, payload: invoicePayload(row as InvoiceRow, null) }], now);
   return { actor, action: 'invoice.issue', targetType: 'invoice', targetId: row.id, details: { orderId: o.id, number, currency: o.currency, totalMinor: total } };
 }
+
+/** Macro scope K44 (plan MACRO M3 §5.1): the words beneath a set's piece on its invoice, « Part of THE SET <name> ». */
+export const setLineWords = (name: string): string => `Part of THE SET ${name}`;
 
 /** The ENGRAVING line of an engraving priced at `minor` (plan NEXT LOT §3.6.C): its label, never its words. */
 export function engravingLine(minor: number): InvoiceLine {

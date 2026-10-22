@@ -70,7 +70,7 @@ import {
 } from './live.js';
 import { mediaUrl } from './media.js';
 import { savedSizeAmong } from './sizes.js';
-import { releaseModelId } from './release-offer.js';
+import { releaseOffer, savedSizesByPiece } from './release-offer.js';
 
 /** THE RELEASES' LIVE half lists at most this many releases. */
 export const LIVE_LIST_LIMIT = 50;
@@ -598,24 +598,37 @@ export class LiveRoomService {
     return entry || interest ? null : this.matchSavedSize(accountId, dropId);
   }
 
-  /** The release's size the account's saved size matches, among its sizes with stock (services/sizes.ts matchSavedSize). */
+  /**
+   * The release's size the account's saved size matches, among its sizes with stock (services/sizes.ts matchSavedSize);
+   * none on a set's release, which preselects one per piece (`savedSizesByPiece`).
+   */
   private async matchSavedSize(accountId: string, dropId: string): Promise<LiveSavedSize | null> {
-    const d = await this.db.selectFrom('drops').select('model_id').where('id', '=', dropId).executeTakeFirst();
-    if (!d) return null;
+    const d = await this.db.selectFrom('drops').select(['model_id', 'set_id']).where('id', '=', dropId).executeTakeFirst();
+    if (!d || d.model_id === null) return null;
+    const match = await savedSizeAmong(this.db, accountId, d.model_id, await this.sizeCandidates(dropId));
+    return match ? { id: match.id, label: match.label } : null;
+  }
+
+  /**
+   * Macro scope K44 T1: on a set's LIVE RELEASE, the size YOUR SIZES preselects for each piece that has one, among each
+   * piece's sizes with stock (release-offer.ts savedSizesByPiece); none on a model's release. Reads only.
+   */
+  async savedSizesByPiece(accountId: string, dropId: string): Promise<{ piece: number; id: string; label: string }[]> {
+    const d = await this.db.selectFrom('drops').select(['model_id', 'set_id']).where('id', '=', dropId).executeTakeFirst();
+    if (!d || d.set_id === null) return [];
+    return savedSizesByPiece(this.db, accountId, await releaseOffer(this.db, d), await this.sizeCandidates(dropId));
+  }
+
+  /** A release's sizes as YOUR SIZES reads them: each its piece, label, fit and stock. */
+  private async sizeCandidates(dropId: string) {
     const sizes = await this.db
       .selectFrom('drop_sizes as s')
       .leftJoin('skus as k', 'k.id', 's.sku_id')
-      .select(['s.id', 's.label', 's.stock', 'k.fit_min_mm', 'k.fit_max_mm'])
+      .select(['s.id', 's.piece', 's.label', 's.stock', 'k.fit_min_mm', 'k.fit_max_mm'])
       .where('s.drop_id', '=', dropId)
       .orderBy('s.position')
       .execute();
-    const match = await savedSizeAmong(
-      this.db,
-      accountId,
-      releaseModelId(d),
-      sizes.map((z) => ({ id: z.id, label: z.label, fitMinMm: z.fit_min_mm ?? null, fitMaxMm: z.fit_max_mm ?? null, stock: z.stock })),
-    );
-    return match ? { id: match.id, label: match.label } : null;
+    return sizes.map((z) => ({ id: z.id, piece: z.piece, label: z.label, fitMinMm: z.fit_min_mm ?? null, fitMaxMm: z.fit_max_mm ?? null, stock: z.stock }));
   }
 
   /** The entries of the accounts following a release, by account id (one read for all of them). */

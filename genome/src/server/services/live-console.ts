@@ -91,7 +91,7 @@ import { mediaUrl } from './media.js';
 import { knownLocation, linkDropSizes } from './stock.js';
 import { cleanQuestionWords, QuestionService, type AdminQuestion } from './question.js';
 import { releaseFeasibility, type Feasibility, type FeasibilitySize } from './release-stock.js';
-import { releaseModelId } from './release-offer.js';
+import { afterRoomModelId, modelOfModelRelease } from './release-offer.js';
 import { cancelMovedAnnouncements, cancelReleaseEmails } from './email.js';
 import { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES, afterRoomTimes, afterRoomTitle, cancelAfterRoom, type AfterRoomSkip } from './after-room.js';
 
@@ -149,6 +149,8 @@ export function liveMoney(minor: number, currency: string): string {
 // ── Errors ─────────────────────────────────────────────────────────────────
 
 const liveCancelled = () => conflict('DROP_CANCELLED', 'This release has been cancelled.');
+/** Macro scope K44 (plan MACRO M3 §5.1): a set's release never has an after-room (the after-rooms stay a model's). */
+const afterRoomSet = () => conflict('AFTER_ROOM_SET', 'A set’s release has no after-room.');
 const liveAnnounced = () => conflict('LIVE_ANNOUNCED', 'This release is announced: its settings no longer change. Raise a size’s stock with ADD PIECES.');
 const alreadyPublished = () => conflict('DROP_ALREADY_PUBLISHED', 'This release is already published.');
 const notPublished = () => conflict('DROP_NOT_PUBLISHED', 'This release is not published: its post of the circle is chosen when it is published.');
@@ -1439,6 +1441,8 @@ export class LiveConsoleService {
     now: Date,
   ): Promise<void> {
     const child = await tx.selectFrom('drops').select(['id', 'model_id']).where('parent_drop_id', '=', parent.id).forUpdate().executeTakeFirst();
+    // Macro scope K44 (plan MACRO M3 §5.1, EXCLUDED): a set's release never has an after-room.
+    if (a && (await tx.selectFrom('drops').select('set_id').where('id', '=', parent.id).executeTakeFirst())?.set_id) throw afterRoomSet();
     if (!a) {
       if (child) {
         await tx.deleteFrom('live_addons').where('drop_id', '=', child.id).execute();
@@ -1494,7 +1498,7 @@ export class LiveConsoleService {
         })
         .execute();
     }
-    await this.writeOffer(tx, id, a, child ? { modelId: releaseModelId(child), ...(await this.offer(tx, id)) } : null);
+    await this.writeOffer(tx, id, a, child ? { modelId: afterRoomModelId(child), ...(await this.offer(tx, id)) } : null);
   }
 
   /** A release's after-room settings as stored; null without one. */
@@ -1506,7 +1510,7 @@ export class LiveConsoleService {
       .executeTakeFirst();
     if (!c) return null;
     return {
-      modelId: releaseModelId(c),
+      modelId: afterRoomModelId(c),
       priceMinor: c.price_minor ?? 0,
       ...(await this.offer(db, c.id)),
       delayMinutes: c.after_room_delay_minutes ?? AFTER_ROOM_DELAY_MINUTES.default,
@@ -1536,7 +1540,7 @@ export class LiveConsoleService {
             : 'OPEN';
     return {
       id: c.id,
-      model: { id: releaseModelId(c), name: c.model_name, type: c.model_type, active: c.model_active },
+      model: { id: afterRoomModelId(c), name: c.model_name, type: c.model_type, active: c.model_active },
       priceMinor: c.price_minor ?? 0,
       currency: c.currency ?? 'EUR',
       sizes: offer.sizes.map((x) => ({ id: x.id!, label: x.label, stock: x.stock })),
@@ -1564,7 +1568,8 @@ export class LiveConsoleService {
       db.selectFrom('live_tier_windows').select(['tier', 'turn_seconds', 'pay_minutes']).where('drop_id', '=', d.id).orderBy('tier').execute(),
     ]);
     return {
-      modelId: releaseModelId(d),
+      // A set's LIVE RELEASE has its settings from M3.16 on (its creation): until then a LIVE RELEASE sells a model.
+      modelId: modelOfModelRelease(d, 'M3.16'),
       title: d.title,
       description: d.description,
       opensAt: d.opens_at,
@@ -1676,7 +1681,8 @@ export class LiveConsoleService {
     return {
       id: r.id,
       title: r.title,
-      model: { id: releaseModelId(r), name: r.model_name, type: r.model_type, active: r.model_active },
+      // The console's LIVE views read a model's release (its rows joined to their model); a set's reaches them from M3.16.
+      model: { id: modelOfModelRelease(r, 'M3.16'), name: r.model_name, type: r.model_type, active: r.model_active },
       phase,
       over: r.ended_at !== null && !holding,
       announcedAt: announcedAt(r),

@@ -74,6 +74,8 @@ export const LIVE_PER_ACCOUNT_DEFAULT = 1;
 
 export const guaranteeNotFound = () => notFound('Guarantee', 'GUARANTEE_NOT_FOUND');
 const releaseOver = () => conflict('GUARANTEE_RELEASE_OVER', 'This release is over or cancelled: it cannot be guaranteed.');
+/** Macro scope K44 (plan MACRO M3 §5.1): the house's guarantee is for a release of its model or collection, never a set's. */
+const setRelease = () => conflict('GUARANTEE_SET_RELEASE', 'A set’s release is never guaranteed.');
 const releaseOpensLate = () => conflict('GUARANTEE_RELEASE_OPENS_LATE', 'This release opens after the guarantee’s validity: choose a later date.');
 const releaseClosed = (afterRoom: boolean) =>
   conflict('GUARANTEE_RELEASE_CLOSED', afterRoom ? 'An after-room is never covered by a guarantee.' : 'Entries to this release are closed: it cannot be guaranteed.');
@@ -169,22 +171,26 @@ export function guaranteeState(
 
 type ReleaseRow = Pick<
   DropRow,
-  'id' | 'mode' | 'title' | 'model_id' | 'quantity' | 'opens_at' | 'closes_at' | 'published_at' | 'cancelled_at' | 'drawn_at' | 'ended_at' | 'parent_drop_id' | 'name_at' | 'announce_at'
+  'id' | 'mode' | 'title' | 'model_id' | 'set_id' | 'quantity' | 'opens_at' | 'closes_at' | 'published_at' | 'cancelled_at' | 'drawn_at' | 'ended_at' | 'parent_drop_id' | 'name_at' | 'announce_at'
 >;
 
 const RELEASE_COLUMNS = [
-  'id', 'mode', 'title', 'model_id', 'quantity', 'opens_at', 'closes_at', 'published_at', 'cancelled_at', 'drawn_at', 'ended_at', 'parent_drop_id', 'name_at', 'announce_at',
+  'id', 'mode', 'title', 'model_id', 'set_id', 'quantity', 'opens_at', 'closes_at', 'published_at', 'cancelled_at', 'drawn_at', 'ended_at', 'parent_drop_id', 'name_at', 'announce_at',
 ] as const;
 
-/** Whether a release may still be covered at `now`: not cancelled, not over, entries not closed, not an after-room. */
+/**
+ * Whether a release may still be covered at `now`: not cancelled, not over, entries not closed, not an after-room, never
+ * a set's release (macro scope K44, plan MACRO M3 §5.1: a guarantee is never bound to a set's release).
+ */
 function coverable(d: ReleaseRow, now: Date): boolean {
-  if (d.cancelled_at || d.parent_drop_id) return false;
+  if (d.cancelled_at || d.parent_drop_id || d.set_id) return false;
   if (d.mode === 'DRAW' ? d.drawn_at !== null : d.ended_at !== null) return false;
   return now.getTime() < new Date(d.closes_at).getTime();
 }
 
 /** Why a chosen release cannot be guaranteed, or null. */
 function releaseRefusal(d: ReleaseRow, validUntil: Date, now: Date): DomainError | null {
+  if (d.set_id) return setRelease();
   if (d.parent_drop_id) return releaseClosed(true);
   if (d.cancelled_at || (d.mode === 'DRAW' ? d.drawn_at !== null : d.ended_at !== null)) return releaseOver();
   if (now.getTime() >= new Date(d.closes_at).getTime()) return releaseClosed(false);
@@ -241,6 +247,8 @@ async function holdsIn(db: Db, accountId: string, d: Pick<DropRow, 'id' | 'mode'
 
 /** The scope condition of the releases a MODEL or COLLECTION guarantee covers: the release's model, its main model, its collection. */
 async function releaseScopeOf(db: Db, d: Pick<DropRow, 'model_id'>): Promise<{ modelId: string; mainId: string | null; collectionId: string | null }> {
+  // A set's release is never coverable (`coverable`): only a model's reaches here.
+  if (d.model_id === null) throw new Error('releaseScopeOf: a set’s release is never guaranteed');
   const m = await db
     .selectFrom('models as m')
     .leftJoin('models as main', 'main.id', 'm.variant_of')
@@ -269,6 +277,7 @@ export async function coverNextRelease(
   opts: { except?: string } = {},
 ): Promise<ReleaseRow | null> {
   if (g.scope === 'RELEASE') return null;
+  // A model's releases only (joined to their model): a set's release is never guaranteed (macro scope K44).
   const candidates = await tx
     .selectFrom('drops as d')
     .innerJoin('models as m', 'm.id', 'd.model_id')

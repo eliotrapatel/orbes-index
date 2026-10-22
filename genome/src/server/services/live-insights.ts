@@ -10,7 +10,10 @@
  *                        unserved pieces at the turns' conversion; LIVE_INSIGHT_RULES.defaultDemandPerPerson without a
  *                        past release); the size mix, that quantity shared out (largest remainder) by the interest in
  *                        each size plus the eligible collectors whose latest piece of the model's type is in that size
- *                        (`products.variant`); the eligible collectors by tier. Eligible: what the release's rules let
+ *                        (`products.variant`); the eligible collectors by tier. A set's release (macro scope K44, plan
+ *                        MACRO M3 §5.2, ADAPTED) is planned per piece: its quantity in sets (a person asks for a set as
+ *                        for a piece), each piece's sizes shared by its own model's demand (the interest given for that
+ *                        piece, the eligible collectors whose latest piece of that model's type is in that size). Eligible: what the release's rules let
  *                        in now; with a rule of taking part or of a segment, or rules combined by OR (plan LIVE
  *                        RELEASE+), every rule read for every account as at the entry (live.ts accessAccounts).
  *   audience forecast    (`forecast`) the room at T0 as a range: from the interest (I'LL BE THERE) at the share of the
@@ -56,6 +59,7 @@ import { csvDocument, CSV_CONTENT_TYPE } from '../render/csv.js';
 import { systemClock, type Clock } from '../types.js';
 import { clubCounts, clubStandings, tierForPieces, tierName, type ClubTier } from './club.js';
 import { DROP_QUANTITY_MAX, dropNotFound } from './drops.js';
+import { releaseOffer, type ReleaseOffer } from './release-offer.js';
 import {
   accessAccounts,
   effectiveDeadline,
@@ -528,8 +532,25 @@ export interface ReleasePlan {
   /** Sizes the eligible collectors hold that the release does not offer. */
   otherSizes: { label: string; collectors: number }[];
   eligibleByTier: number[];
-  /** The model's type the sizes were read in (`models.type`). */
+  /** The model's type the sizes were read in (`models.type`); a set's release: its pieces' types, joined by « · ». */
   modelType: string;
+  reasoning: string[];
+  /**
+   * Macro scope K44 (plan MACRO M3 §5.2): a set's release planned per piece, in the set's order: each piece's model, the
+   * type its sizes were read in, its sizes with their suggestion (the release's sets shared by that piece's demand), the
+   * sizes its collectors hold that it does not offer, and its reasoning; null on a model's release. The release's `sizes`
+   * and `otherSizes` are then every piece's, in order.
+   */
+  pieces: ReleasePlanPiece[] | null;
+}
+
+/** One piece of a set's release in the planner (macro scope K44). */
+export interface ReleasePlanPiece {
+  piece: number;
+  model: { id: string; name: string; variant: string | null };
+  modelType: string;
+  sizes: ReleasePlan['sizes'];
+  otherSizes: ReleasePlan['otherSizes'];
   reasoning: string[];
 }
 
@@ -580,6 +601,7 @@ export function releasePlan(input: {
     eligibleByTier: f.eligibleByTier,
     modelType: input.modelType,
     reasoning: why,
+    pieces: null,
   };
 }
 
@@ -1518,10 +1540,13 @@ export class LiveInsightsService {
   /** The release planner: the quantity and size mix suggested for this release, now. */
   async plan(dropId: string): Promise<ReleasePlan> {
     const now = this.clock();
-    const { d, release, rule, modelType } = await this.release(dropId);
+    const { d, release, rule, offer } = await this.release(dropId);
     const [el, past, interest] = await Promise.all([this.eligibility(), this.past(d, now), this.interest(d.id)]);
     const forecast = audienceForecast({ interest: interest.length, eligibleByTier: eligibleOf(el, rule), past: past.map((p) => p.audience(el)), inRoom: await this.inRoom(d, now) });
     const eligible = new Set(el.holders.filter((h) => allowedBy(h, rule)).map((h) => h.accountId));
+    // Macro scope K44 (ADAPTED): a set's release per piece, each by its own model's demand, the release's sets.
+    if (offer.kind === 'SET') return this.setPlan(d.id, offer, { forecast, past: past.map((p) => p.summary), eligible });
+    const modelType = offer.pieces[0].model.type;
     const variants = await this.variants(modelType);
     const collectorsBySize = new Map<string, number>();
     for (const v of variants) if (eligible.has(v.accountId)) collectorsBySize.set(v.size, (collectorsBySize.get(v.size) ?? 0) + 1);
@@ -1535,6 +1560,48 @@ export class LiveInsightsService {
       collectorsBySize,
       modelType,
     });
+  }
+
+  /**
+   * The planner of a set's release (macro scope K44, ADAPTED): the release's sets as for a model's release (the forecast
+   * and the demand per person, a set counting as one), then each piece's sizes shared by that piece's demand: the interest
+   * given for it (`live_interest_sizes`) and the eligible collectors whose latest piece of its model's type is in that size.
+   */
+  private async setPlan(
+    dropId: string,
+    offer: Extract<ReleaseOffer, { kind: 'SET' }>,
+    base: { forecast: AudienceForecast; past: readonly { presentAtT0: number; demandPieces: number }[]; eligible: ReadonlySet<string> },
+  ): Promise<ReleasePlan> {
+    const sizes = await this.db.selectFrom('drop_sizes').select(['id', 'piece', 'label', 'stock']).where('drop_id', '=', dropId).orderBy('position').execute();
+    const interest = await this.db.selectFrom('live_interest_sizes').select(['piece', 'size_id']).where('drop_id', '=', dropId).execute();
+    const pieces: ReleasePlanPiece[] = [];
+    let first: ReleasePlan | null = null;
+    for (const p of offer.pieces) {
+      const variants = await this.variants(p.model.type);
+      const collectorsBySize = new Map<string, number>();
+      for (const v of variants) if (base.eligible.has(v.accountId)) collectorsBySize.set(v.size, (collectorsBySize.get(v.size) ?? 0) + 1);
+      const interestBySize = new Map<string, number>();
+      for (const i of interest) if (i.piece === p.piece) interestBySize.set(i.size_id, (interestBySize.get(i.size_id) ?? 0) + 1);
+      const plan = releasePlan({
+        sizes: sizes.filter((z) => z.piece === p.piece).map((z) => ({ id: z.id, label: z.label, stock: z.stock })),
+        forecast: base.forecast,
+        past: base.past,
+        interestBySize,
+        collectorsBySize,
+        modelType: p.model.type,
+      });
+      first ??= plan;
+      pieces.push({ piece: p.piece!, model: { id: p.model.id, name: p.model.name, variant: p.model.variant }, modelType: p.model.type, sizes: plan.sizes, otherSizes: plan.otherSizes, reasoning: plan.reasoning });
+    }
+    const head = first!;
+    return {
+      ...head,
+      sizes: pieces.flatMap((p) => p.sizes),
+      otherSizes: pieces.flatMap((p) => p.otherSizes),
+      modelType: pieces.map((p) => p.modelType).join(' · '),
+      reasoning: [`A set of ${pieces.length} pieces: its quantity in sets, a set counting as one per person; each piece's sizes by that piece's own demand.`, ...head.reasoning.slice(0, 2)],
+      pieces,
+    };
   }
 
   /**
@@ -1752,22 +1819,22 @@ export class LiveInsightsService {
 
   // ── Reads ────────────────────────────────────────────────────────────────
 
-  /** A LIVE RELEASE (404 DROP_NOT_FOUND for anything else), its sizes, its rule and its model's type. */
-  private async release(dropId: string): Promise<{ d: DropRow; release: InsightRelease; rule: Rule; modelType: string }> {
+  /** A LIVE RELEASE (404 DROP_NOT_FOUND for anything else), its sizes, its rule and what it sells (its model, or a set's pieces). */
+  private async release(dropId: string): Promise<{ d: DropRow; release: InsightRelease; rule: Rule; offer: ReleaseOffer }> {
     if (typeof dropId !== 'string' || !UUID_RE.test(dropId)) throw dropNotFound();
     const id = dropId.toLowerCase();
     const d = await this.db.selectFrom('drops').selectAll().where('id', '=', id).where('mode', '=', 'LIVE').executeTakeFirst();
     if (!d) throw dropNotFound();
-    const [sizes, models, model] = await Promise.all([
+    const [sizes, models, offer] = await Promise.all([
       this.sizes(id),
       this.db.selectFrom('live_access_models').select('model_id').where('drop_id', '=', id).execute(),
-      this.db.selectFrom('models').select('type').where('id', '=', d.model_id).executeTakeFirstOrThrow(),
+      releaseOffer(this.db, d),
     ]);
     return {
       d,
       release: insightRelease(d, sizes),
       rule: { minTier: d.live_min_tier ?? 0, models: models.map((m) => m.model_id), collectionId: d.access_collection_id, accounts: await accessAccounts(this.db, d, this.clock()) },
-      modelType: model.type,
+      offer,
     };
   }
 

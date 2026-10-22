@@ -13,6 +13,9 @@
  *    (archived once inactive); the handle its lookbook address or its name, never shared;
  *  - the add-ons (macro scope K48 D1, plan MACRO M3 §4.2, S5): each active add-on priced in the store's currency, one
  *    product of one variant after the models, its own handle;
+ *  - the sets (macro scope K44 T1, plan MACRO M3 §5.2, S5): each active set priced in the store's currency, one product
+ *    of one variant after the add-ons, its code its handle (« -set » when a model has it) and SKU, its pieces' weights
+ *    added, its pieces named in its description;
  *  - the ids pasted back: the number or the address of the page, on the model's SKUs, the SKU of a model never issued
  *    made for it, audited `model.shopify`; refusals: an unknown size, an id given twice, a variant without its product,
  *    another model's product, another size's variant; nothing written when nothing changes;
@@ -41,6 +44,7 @@ import {
 import { ensureSku } from '../../src/server/services/stock.js';
 import { createManualClock, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
+import { giveSizes } from '../support/draws.js';
 import { countPiecesIn, packAndShip } from '../support/fulfil.js';
 import { accountOfTier, createAccount, createLiveRelease, createModel, liveFixtureOn, type LiveFixture } from '../support/live.js';
 
@@ -542,6 +546,7 @@ describe('the Shopify exports and the ids pasted back (plan LIVE RELEASE+, S9)',
       {
         Title: 'Polishing Cloth',
         'URL handle': 'polishing-cloth',
+        Description: '',
         Vendor: 'ORBES',
         Type: 'Add-on',
         'Published on online store': 'false',
@@ -571,6 +576,55 @@ describe('the Shopify exports and the ids pasted back (plan LIVE RELEASE+, S9)',
       ['Travel Pouch', '30.00', ''],
     ]);
     expect(kit.sku.code).toBe('SH-KIT');
+  });
+
+  it('exports each active set priced in the store\'s currency after the add-ons (macro scope K44 T1, S5): one product of one variant, its code its handle and SKU, its price, its pieces\' weights added, type Set, a draft, its pieces named', async () => {
+    const ring = await createModel(t.db, 'ORBIT RING');
+    const chain = await createModel(t.db, 'ORBIT CHAIN', null, 'NECKLACE');
+    const cuff = await createModel(t.db, 'ORBIT CUFF', null, 'BRACELET');
+    await t.db.updateTable('models').set({ slug: null }).where('id', 'in', [ring, chain, cuff]).execute();
+    await giveSizes(t.db, ring, ['52']);
+    await giveSizes(t.db, chain, ['45'], 'NECKLACE');
+    await giveSizes(t.db, cuff, ['18'], 'BRACELET');
+    await ctx.services.catalog.setModelPacking(ring, { packedWeightG: 40 }, f.admin);
+    await ctx.services.catalog.setModelPacking(chain, { packedWeightG: 25 }, f.admin);
+    const sets = ctx.services.sets;
+    await sets.create({ name: 'The Orbit', code: 'ORBIT', modelIds: [ring, chain], basePriceMinor: 150_000, baseCurrency: 'EUR' }, f.admin);
+    // Its code is a model's handle already (ORBIT RING's): « -set » is added. A piece without its weight: none.
+    await sets.create({ name: 'Orbit Duo', code: 'ORBIT-RING', modelIds: [ring, cuff], basePriceMinor: 90_000, baseCurrency: 'EUR' }, f.admin);
+    const aside = await sets.create({ name: 'Orbit Aside', code: 'ORBIT-ASIDE', modelIds: [chain, cuff], basePriceMinor: 50_000, baseCurrency: 'EUR' }, f.admin);
+    await sets.setAside(aside.id, f.admin);
+    await sets.create({ name: 'Orbit Dollars', code: 'ORBIT-USD', modelIds: [cuff, chain], basePriceMinor: 70_000, baseCurrency: 'USD' }, f.admin);
+    await sets.create({ name: 'Orbit Unpriced', code: 'ORBIT-NONE', modelIds: [chain, ring] }, f.admin);
+    const rows = records((await shopify().productCsv('EUR')).body);
+    expect(rows.filter((r) => r.Type === 'Set')).toEqual([
+      expect.objectContaining({ Title: 'Orbit Duo', 'URL handle': 'orbit-ring-set', SKU: 'ORBIT-RING', Price: '900.00', 'Weight value (grams)': '', Description: 'THE SET: ORBIT RING (RING), ORBIT CUFF (BRACELET).' }),
+      {
+        Title: 'The Orbit',
+        'URL handle': 'orbit',
+        Description: 'THE SET: ORBIT RING (RING), ORBIT CHAIN (NECKLACE).',
+        Vendor: 'ORBES',
+        Type: 'Set',
+        'Published on online store': 'false',
+        Status: 'draft',
+        SKU: 'ORBIT',
+        'Option1 name': 'Title',
+        'Option1 value': 'Default Title',
+        'Option2 name': '',
+        'Option2 value': '',
+        Price: '1500.00',
+        'Weight value (grams)': '65',
+        'Requires shipping': 'true',
+        'Product image URL': '',
+        'Image position': '',
+        'Image alt text': '',
+        'Variant image URL': '',
+      },
+    ]);
+    // After the models and the add-ons; the models' and the add-ons' Description empty.
+    expect(rows.slice(-2).map((r) => r.Type)).toEqual(['Set', 'Set']);
+    expect(rows.filter((r) => r.Type !== 'Set').every((r) => r.Description === '')).toBe(true);
+    expect(records((await shopify().productCsv('USD')).body).filter((r) => r.Type === 'Set').map((r) => [r.Title, r.Price])).toEqual([['Orbit Dollars', '700.00']]);
   });
 
   it('exports the priced orders of a period in Shopify\'s order format: line items, statuses, dates, the buyer, the email', async () => {

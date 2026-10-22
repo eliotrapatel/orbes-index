@@ -43,6 +43,13 @@
  *
  * Revenue is read from the release's orders and invoices, never from a payment record: an order of the release paid
  * through a future Shopify checkout and invoiced by the platform counts the same (scope S1, S2).
+ *
+ * THE SET (macro scope K44 T1, C1 to C3; plan MACRO M3 §5.2, KEPT in full): a set's draw or LIVE RELEASE has its tab as
+ * a model's: its links made in one click, the `.ics` link, the readout per link, where a set sale's orders are the
+ * release's orders (each piece's share invoiced: the buyer counted once, the revenue the set's price). Its `offer` says
+ * what the countdown image may show: the set's name and each piece's name and photograph in the set's order, so FULL
+ * draws the pieces' photographs side by side (two to four tiles in the photo square, §15 note 13); TEASER stays the
+ * default, and FULL falls back to TEASER while a piece's photograph or name is not public (the console, model/campaign.ts).
  */
 import { sql } from 'kysely';
 import { advisoryXactLock, ADVISORY_LOCK, inTransaction, type Db } from '../db/connection.js';
@@ -57,6 +64,7 @@ import { currenciesOf } from './growth.js';
 import { LINK_NAME_MAX, type LinkService, type LinkView } from './links.js';
 import { livePhase, roomOpensAt } from './live.js';
 import { countedCollector } from './population.js';
+import { offerName, releaseOffer } from './release-offer.js';
 import { PARIS_TIME_ZONE } from './schedule.js';
 
 /** Where a release's readout stands. */
@@ -101,8 +109,20 @@ export interface CampaignChannel {
   covered: boolean;
 }
 
+/**
+ * What the release sells, for the countdown image (C3): a model's release has one piece, a set's (macro scope K44) its
+ * 2 to 4 pieces in the set's order; each its model's name, its variant's label and its reference photograph (this
+ * origin's media route, `/api/v1/media/<sha256>`; null without one). `name` is the model's or the set's.
+ */
+export interface CampaignOffer {
+  kind: 'MODEL' | 'SET';
+  name: string;
+  pieces: { piece: number | null; name: string; variant: string | null; photo: string | null }[];
+}
+
 export interface ReleaseCampaign {
   release: { id: string; mode: DropMode; title: string; opensAt: Date; closesAt: Date; published: boolean; cancelled: boolean };
+  offer: CampaignOffer;
   channels: CampaignChannel[];
   /** The channels still without an active link to the release, in their order. */
   missing: { id: string; name: string }[];
@@ -159,6 +179,8 @@ interface ReleaseRow {
   early_access_platine_hours: number | null;
   parent_drop_id: string | null;
   currency: string | null;
+  model_id: string | null;
+  set_id: string | null;
 }
 
 export class CampaignService {
@@ -185,8 +207,14 @@ export class CampaignService {
         const links = mine.filter((l) => l.channel.id === c.id);
         return { id: c.id, name: c.name, position: c.position, links, covered: links.some((l) => l.archivedAt === null) };
       });
+      const offer = await releaseOffer(tx, d);
       return {
         release: { id: d.id, mode: d.mode, title: d.title, opensAt: d.opens_at, closesAt: d.closes_at, published: d.published_at !== null, cancelled: d.cancelled_at !== null },
+        offer: {
+          kind: offer.kind,
+          name: offerName(offer),
+          pieces: offer.pieces.map((p) => ({ piece: p.piece, name: p.model.name, variant: p.model.variant, photo: p.model.imageUrl })),
+        },
         channels: grouped,
         missing: grouped.filter((c) => !c.covered).map((c) => ({ id: c.id, name: c.name })),
         readout: await this.readout(tx, d, grouped.flatMap((c) => c.links)),
@@ -247,6 +275,8 @@ export class CampaignService {
         'early_access_platine_hours',
         'parent_drop_id',
         'currency',
+        'model_id',
+        'set_id',
       ])
       .where('id', '=', id)
       .executeTakeFirst();

@@ -71,6 +71,7 @@ import {
   ADDON_PRICE_MINOR_MAX,
   ADDON_WEIGHT_G_MAX,
   PACKED_WEIGHT_G_MAX,
+  SET_NAME_MAX,
 } from '../db/schema.js';
 import { BASE_PRICE_MAX_MINOR, CARE_GUIDE_MAX, MODEL_IDENTITY_MESSAGE, VARIANT_LABEL_MAX } from '../services/catalog.js';
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
@@ -2569,6 +2570,12 @@ export const decideOrderCaseBody = body({
   note: z.preprocess(emptyToNull, text(ORDER_CASE_LIMITS.decisionNote).nullable().optional()),
   /** Plan MACRO M3 §4.2 (D2): the add-on units not to be sold again (a refund); the others go back to stock. */
   addonsOut: z.array(uuid).max(100, 'At most 100 add-on units').nullable().optional(),
+  /** Macro scope K44 T3: a set's return, each piece's destination by its case (the others take `pieceTo`). */
+  pieces: z
+    .array(z.strictObject({ caseId: uuid, pieceTo: z.enum(['RESTOCKED', 'ARCHIVED']), locationId: z.preprocess(emptyToNull, uuid.nullable().optional()) }))
+    .max(4, 'At most 4 pieces')
+    .nullable()
+    .optional(),
 });
 
 /** POST /api/admin/order-cases/:id/cancel: why it ends with no decision. */
@@ -2697,3 +2704,38 @@ export const addonPricesBody = body({ prices: addonPrices }).refine((b) => Objec
 
 /** PUT /api/admin/addons/:id/shopify: its Shopify product and variant, pasted back; null clears one. */
 export const addonShopifyBody = body({ productId: shopifyPasted, variantId: shopifyPasted });
+
+// ── Admin: the sets (routes/admin/sets.ts, plan MACRO M3 §5.2, T1) ──────
+
+export const setParams = z.object({ id: uuid });
+
+/** A set's pieces in order, model ids: their count (2 to 4) and their kind are SetService's (422 SET_MODELS). */
+const setModelIds = z.array(uuid).max(8, 'At most 8 models');
+const setBasePrice = z.number().int('Must be a whole number of cents').min(1, 'At least 1 cent').max(BASE_PRICE_MAX_MINOR, `At most ${BASE_PRICE_MAX_MINOR} cents`).nullable();
+const setBaseCurrency = z.preprocess((v) => (v === '' ? null : v), z.enum(ORDER_CURRENCIES).nullable());
+const bothOrNeither = (b: { basePriceMinor?: number | null; baseCurrency?: string | null }) =>
+  (b.basePriceMinor === undefined) === (b.baseCurrency === undefined) && (b.basePriceMinor === null) === (b.baseCurrency === null);
+const priceTogether = { message: 'A base price is sent with its currency, or both are cleared (null)', path: ['basePriceMinor'] };
+
+/** POST /api/admin/sets: its name, code, pieces in order and base price with its currency (optional). */
+export const createSetBody = body({
+  name: text(SET_NAME_MAX),
+  code: text(40),
+  modelIds: setModelIds,
+  basePriceMinor: setBasePrice.optional(),
+  baseCurrency: setBaseCurrency.optional(),
+}).refine(bothOrNeither, priceTogether);
+
+/** PATCH /api/admin/sets/:id: its name, code, pieces (while no release names it) and base price. At least one. */
+export const updateSetBody = body({
+  name: text(SET_NAME_MAX).optional(),
+  code: text(40).optional(),
+  modelIds: setModelIds.optional(),
+  basePriceMinor: setBasePrice.optional(),
+  baseCurrency: setBaseCurrency.optional(),
+})
+  .refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one field of the set to change')
+  .refine(bothOrNeither, priceTogether);
+
+/** PUT /api/admin/sets/:id/shopify: its Shopify product, pasted back; null clears it. */
+export const setShopifyBody = body({ productId: shopifyPasted });

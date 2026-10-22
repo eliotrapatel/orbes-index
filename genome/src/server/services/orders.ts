@@ -156,7 +156,7 @@ import { tierOf } from './club.js';
 import { engravingPrice, engravingPrices, giftModelOf, readProgram, shippingRate } from './club-program.js';
 import { creditBalances, creditKindOrder, ensureGrants, usableAt, type CreditKind } from './tier-grants.js';
 import { modelSizeCandidates, offeredSku, savedSizeAmong, savedSizeHint, sizesForExchange } from './sizes.js';
-import { releaseModelId } from './release-offer.js';
+import { ordersForSetSale } from './set-sales.js';
 import { parcelOrders, RETURN_WINDOW_DAYS } from './parcels.js';
 import {
   accountAddonItems,
@@ -279,6 +279,9 @@ const priceMissing = () => conflict('ORDER_PRICE_MISSING', 'Enter the order’s 
 const returnChanged = () => conflict('ORDER_RETURN_CHANGED', 'The piece changed during the return. Please try again.');
 const shippingFree = () => conflict('ORDER_SHIPPING_FREE', 'This order’s shipping is free with its tier: no fee is added to it.');
 const shippingWith = () => conflict('ORDER_SHIPPING_WITH', 'This order travels with another: its shipping is that order’s.');
+/** Macro scope K44 (plan MACRO M3 §5.1, §15 note 12): a set sold is cancelled whole, and returned whole. */
+export const setShipped = () => conflict('SET_SHIPPED', 'A piece of this set has shipped: a set is cancelled whole, never in part.');
+export const setReturnWhole = () => conflict('SET_RETURN_WHOLE', 'A set is returned whole: open the return of the set as an order case.');
 const giftSizeMissing = () => conflict('ORDER_GIFT_SIZE_MISSING', 'Choose the welcome gift’s size before marking it paid.');
 const giftTermsFixed = () => conflict('ORDER_TERMS_FIXED', 'A welcome gift has no price of its own: it travels with its order.');
 const creditNone = () => conflict('ORDER_CREDIT_NONE', 'This client has no credit to take off this order.');
@@ -513,6 +516,11 @@ export interface ExportedOrder {
   addons: { label: string; priceMinor: number }[];
   /** Plan MACRO M3 §4.2: its catalogue add-ons, unit by unit: each its name, price, state and times. */
   addonItems: { name: string; priceMinor: number; currency: string; status: string; addedAt: Date; endedAt: Date | null; returnedAt: Date | null }[];
+  /**
+   * Macro scope K44 (plan MACRO M3 §5.2): on a piece of a set, the set's name, this order's piece, and the set sale's one
+   * price and currency (each order's own price is its share); absent on an order of its own.
+   */
+  set?: { name: string; piece: number; salePriceMinor: number | null; saleCurrency: string | null; saleOrders: string[] };
   /** BP-19 T4: its shipping, all null for none. */
   shipping: OrderShipping;
   engravingText: string | null;
@@ -606,6 +614,13 @@ export interface AccountOrder {
   shipping: (OrderShipping & { withOrder: string | null }) | null;
   /** BP-19: the reference of the order it travels with (a welcome gift's, a LIVE entry's further pieces), or null. */
   withOrder: string | null;
+  /**
+   * Macro scope K44 (plan MACRO M3 §5.2, §5.4): the set sale this order is a piece of, so YOUR ORDERS groups the pieces
+   * of one set under « THE SET · <name> » with the set's one price: the sale, the set's name, the one price and currency
+   * (null until entered), this order's piece, and the set's orders in its order (an exchanged piece's EXCHANGE order
+   * after its original); null for an order of its own. Each order's own price is its share (§15 note 11).
+   */
+  set: AccountOrderSet | null;
   /** BP-19 T5: a welcome gift's tier (PLATINE, PALLADIUM); null for any other order. */
   giftTier: 'PLATINE' | 'PALLADIUM' | null;
   /** BP-19 T5: the credit taken off it (its open uses), in its currency; 0 for none. */
@@ -686,6 +701,17 @@ export interface AccountOrder {
   } | null;
 }
 
+/** A set's piece in YOUR ORDERS (macro scope K44, AccountOrder.set). */
+export interface AccountOrderSet {
+  saleId: string;
+  name: string;
+  priceMinor: number | null;
+  currency: string | null;
+  piece: number;
+  /** The set's orders (their ids), in the set's order. */
+  pieces: string[];
+}
+
 /** The documents of an order in MY PIECES (M6). */
 export interface AccountOrderDocuments {
   /** Its invoice (PDF), once PAID. */
@@ -758,6 +784,8 @@ export function orderPayload(o: OrderRow): JsonObject {
     shippingService: o.shipping_service,
     shippingMinor: o.shipping_minor,
     shippingBenefit: o.shipping_benefit,
+    // Macro scope K44 (S5): a set's piece names its set sale, the store's line item the future sync maps it to.
+    ...(o.set_sale_id ? { setSaleId: o.set_sale_id, setPiece: o.set_piece } : {}),
   };
 }
 
@@ -1204,13 +1232,17 @@ interface NewOrder {
   giftGrantId?: string;
   /** Plan NEXT LOT §3.5.6.7: an EXCHANGE order's original. */
   exchangeOfOrderId?: string;
+  /** Macro scope K44 T2 (plan MACRO M3 §5.2): the set sale this order is a piece of, and that piece (services/set-sales.ts). */
+  setSaleId?: string;
+  setPiece?: number;
 }
 
 /**
  * Create an order RESERVED, take what it holds (unless `hold` is false), and record its creation: its RESERVED step,
- * in its history too, at the time of the sale.
+ * in its history too, at the time of the sale. Exported for the set sale's core (services/set-sales.ts), whose orders
+ * are created as any.
  */
-async function createOrder(tx: Db, n: NewOrder, opts: { hold: boolean }, actor: Actor, now: Date, notes: AuditRecordInput[]): Promise<OrderRow> {
+export async function createOrder(tx: Db, n: NewOrder, opts: { hold: boolean }, actor: Actor, now: Date, notes: AuditRecordInput[]): Promise<OrderRow> {
   let o = await tx
     .insertInto('orders')
     .values({
@@ -1233,6 +1265,8 @@ async function createOrder(tx: Db, n: NewOrder, opts: { hold: boolean }, actor: 
       with_order_id: n.withOrderId ?? null,
       gift_grant_id: n.giftGrantId ?? null,
       exchange_of_order_id: n.exchangeOfOrderId ?? null,
+      set_sale_id: n.setSaleId ?? null,
+      set_piece: n.setSaleId ? (n.setPiece ?? null) : null,
       shipping_service: n.shipping?.service ?? null,
       shipping_minor: n.shipping?.service ? n.shipping.minor : null,
       shipping_benefit: n.shipping?.service ? n.shipping.benefit : null,
@@ -1273,6 +1307,8 @@ async function createOrder(tx: Db, n: NewOrder, opts: { hold: boolean }, actor: 
           reservation: o.reservation,
           ...(o.shipping_service ? { shipping: { service: o.shipping_service, minor: o.shipping_minor, benefit: o.shipping_benefit } } : {}),
           ...(o.with_order_id ? { withOrderId: o.with_order_id } : {}),
+          // Macro scope K44 T2: the set sale it is a piece of.
+          ...(o.set_sale_id ? { setSaleId: o.set_sale_id, setPiece: o.set_piece } : {}),
           // Its delivery address, the account's default (never its words).
           ...(o.address_by ? { address: { by: 'collector', country: o.buyer_country } } : {}),
         },
@@ -1313,7 +1349,7 @@ export async function ordersForLiveEntry(
     .leftJoin('drops as p', 'p.id', 'd.parent_drop_id')
     .innerJoin('drop_sizes as s', 's.id', 'e.size_id')
     .select((eb) => [
-      'e.id', 'e.account_id', 'e.quantity', 'e.status', 'd.id as drop_id', 'd.model_id', 'd.price_minor', 'd.currency', 's.id as size_id', 's.label', 's.sku_id',
+      'e.id', 'e.account_id', 'e.quantity', 'e.status', 'd.id as drop_id', 'd.model_id', 'd.set_id', 'd.price_minor', 'd.currency', 's.id as size_id', 's.label', 's.sku_id',
       eb.fn.coalesce('p.stock_location_id', 'd.stock_location_id').as('stock_location_id'),
       eb.fn.coalesce('p.surprise_enabled', 'd.surprise_enabled').as('surprise_enabled'),
       eb.fn.coalesce('p.surprise_text', 'd.surprise_text').as('surprise_text'),
@@ -1321,6 +1357,8 @@ export async function ordersForLiveEntry(
     .where('e.id', '=', entryId)
     .executeTakeFirst();
   if (!e || e.status !== 'CONFIRMED') throw new Error(`ordersForLiveEntry: entry ${entryId} is not CONFIRMED`);
+  // Macro scope K44 (plan MACRO M3 §5.2): a set's entry makes one set sale per set of its quantity.
+  if (e.set_id !== null) return setOrdersForLiveEntry(tx, { ...e, set_id: e.set_id }, actor, now, opts);
   const existing = new Set((await tx.selectFrom('orders').select('piece').where('live_entry_id', '=', e.id).execute()).map((r) => r.piece));
   const notes: AuditRecordInput[] = [];
   const orders: OrderRow[] = [];
@@ -1328,7 +1366,7 @@ export async function ordersForLiveEntry(
   let skuId = e.sku_id;
   if (skuId === null) {
     // The size was offered when the release was made (plan NEXT LOT §3.3): a size set aside since stays its own.
-    skuId = (await offeredSku(tx, releaseModelId(e), e.label, { allowSetAside: true })).skuId;
+    skuId = (await offeredSku(tx, e.model_id!, e.label, { allowSetAside: true })).skuId;
     await tx.updateTable('drop_sizes').set({ sku_id: skuId }).where('id', '=', e.size_id).execute();
   }
   const addons = await tx
@@ -1354,7 +1392,7 @@ export async function ordersForLiveEntry(
         piece,
         dropId: e.drop_id,
         accountId: e.account_id,
-        modelId: releaseModelId(e),
+        modelId: e.model_id!,
         sizeLabel: sizeLabelOf(e.label),
         skuId,
         priceMinor: e.price_minor,
@@ -1409,16 +1447,18 @@ export async function orderForDrawEntry(
     .selectFrom('drop_entries as e')
     .innerJoin('drops as d', 'd.id', 'e.drop_id')
     .leftJoin('drop_sizes as s', 's.id', 'e.size_id')
-    .select(['e.id', 'e.account_id', 'e.status', 'e.pieces', 'd.id as drop_id', 'd.model_id', 'd.stock_location_id', 'd.price_minor', 'd.currency', 'e.size_id', 's.label as size_label', 's.sku_id'])
+    .select(['e.id', 'e.account_id', 'e.status', 'e.pieces', 'd.id as drop_id', 'd.model_id', 'd.set_id', 'd.stock_location_id', 'd.price_minor', 'd.currency', 'e.size_id', 's.label as size_label', 's.sku_id'])
     .where('e.id', '=', entryId)
     .executeTakeFirst();
   if (!e || e.status !== 'CONFIRMED') throw new Error(`orderForDrawEntry: entry ${entryId} is not CONFIRMED`);
+  // Macro scope K44 (plan MACRO M3 §5.2): a set's entry makes its set sale, one order per piece.
+  if (e.set_id !== null) return setOrderForDrawEntry(tx, { ...e, set_id: e.set_id }, actor, now, opts);
   // Plan NEXT LOT §3.6.F: the entry's size and its SKU (offered when the draw was made: a size set aside since stays its own).
   let sized: { label: string | null; skuId: string } | null = null;
   if (e.size_id !== null && e.size_label !== null && e.size_label !== undefined) {
     let skuId = e.sku_id ?? null;
     if (skuId === null) {
-      skuId = (await offeredSku(tx, releaseModelId(e), e.size_label, { allowSetAside: true })).skuId;
+      skuId = (await offeredSku(tx, e.model_id!, e.size_label, { allowSetAside: true })).skuId;
       await tx.updateTable('drop_sizes').set({ sku_id: skuId }).where('id', '=', e.size_id).execute();
     }
     sized = { label: sizeLabelOf(e.size_label), skuId };
@@ -1442,7 +1482,7 @@ export async function orderForDrawEntry(
         piece,
         dropId: e.drop_id,
         accountId: e.account_id,
-        modelId: releaseModelId(e),
+        modelId: e.model_id!,
         sizeLabel: sized?.label ?? null,
         skuId: sized?.skuId ?? null,
         priceMinor: priced ? e.price_minor : null,
@@ -1473,6 +1513,127 @@ export async function orderForDrawEntry(
     addonsLeftOut = carried.leftOut;
   }
   return { order: orders[0] ?? null, orders, notes, addonsLeftOut };
+}
+
+/**
+ * A set's LIVE entry CONFIRMED (macro scope K44 T1, T2, T4; plan MACRO M3 §5.2): one set sale per set of its quantity
+ * (services/set-sales.ts `ordersForSetSale`), each set's orders its pieces in the sizes the entry chose
+ * (`live_entry_sizes`), every order travelling with the entry's first (its shipping), the release's add-ons on each
+ * set's first piece, the welcome gift and the catalogue add-ons chosen on the entry's first order. Idempotent: only the
+ * sets without their orders get them (a set's pieces are its orders `(set - 1) × pieces + piece`).
+ */
+async function setOrdersForLiveEntry(
+  tx: Db,
+  e: {
+    id: string;
+    account_id: string;
+    quantity: number;
+    drop_id: string;
+    set_id: string;
+    price_minor: number | null;
+    currency: string | null;
+    stock_location_id: string | null;
+    surprise_enabled: boolean | null;
+    surprise_text: string | null;
+  },
+  actor: Actor,
+  now: Date,
+  opts: { hold?: boolean; reservedAt?: Date },
+): Promise<{ orders: OrderRow[]; notes: AuditRecordInput[]; addonsLeftOut: LeftOutAddon[] }> {
+  const sizes = await tx.selectFrom('live_entry_sizes').select(['piece', 'size_id']).where('entry_id', '=', e.id).orderBy('piece').execute();
+  const pieces = Number((await tx.selectFrom('set_models').select((eb) => eb.fn.countAll<number>().as('n')).where('set_id', '=', e.set_id).executeTakeFirstOrThrow()).n);
+  const existing = await tx.selectFrom('orders').selectAll().where('live_entry_id', '=', e.id).orderBy('piece').execute();
+  const done = new Set(existing.map((o) => Math.ceil(o.piece / pieces)));
+  const notes: AuditRecordInput[] = [];
+  const orders: OrderRow[] = [];
+  if (done.size >= e.quantity) return { orders, notes, addonsLeftOut: [] };
+  const addons = await tx
+    .selectFrom('live_entry_addons as x')
+    .innerJoin('live_addons as l', 'l.id', 'x.addon_id')
+    .select(['l.id', 'l.label', 'x.price_minor'])
+    .where('x.entry_id', '=', e.id)
+    .orderBy('l.position')
+    .execute();
+  const locationId = await releaseLocation(tx, e.stock_location_id);
+  notes.push(...(await ensureGrants(tx, e.account_id, now)));
+  let parent: OrderRow | null = existing.find((o) => o.piece === 1) ?? null;
+  for (let set = 1; set <= e.quantity; set++) {
+    if (done.has(set)) continue;
+    const sold = await ordersForSetSale(
+      tx,
+      {
+        setId: e.set_id,
+        dropId: e.drop_id,
+        accountId: e.account_id,
+        source: { channel: 'LIVE', liveEntryId: e.id, set },
+        sizes: sizes.map((z) => ({ piece: z.piece, sizeId: z.size_id })),
+        priceMinor: e.price_minor,
+        currency: e.currency,
+        locationId,
+        addons: addons.map((a) => ({ id: a.id, label: a.label, priceMinor: a.price_minor })),
+        surprise: e.surprise_enabled === true ? e.surprise_text : null,
+        parent,
+        reservedAt: opts.reservedAt,
+        hold: opts.hold ?? true,
+      },
+      actor,
+      now,
+    );
+    orders.push(...sold.orders);
+    notes.push(...sold.notes);
+    if (parent === null) parent = sold.orders[0]!;
+  }
+  // BP-19 T5 and plan MACRO M3 §4.2 (D2): the welcome gift and the catalogue add-ons chosen, on the entry's first order.
+  const first = orders.find((o) => o.piece === 1);
+  if (first) notes.push(...(await attachGifts(tx, first, actor, now)).notes);
+  let addonsLeftOut: LeftOutAddon[] = [];
+  if (first && (opts.hold ?? true)) {
+    const carried = await carryChoices(tx, first, { liveEntryId: e.id }, houseCurrencyOf(e.currency), actor, now);
+    notes.push(...carried.notes);
+    addonsLeftOut = carried.leftOut;
+  }
+  return { orders, notes, addonsLeftOut };
+}
+
+/**
+ * A set's draw entry confirmed (macro scope K44 T1, T2; plan MACRO M3 §5.2): its one set sale (services/set-sales.ts
+ * `ordersForSetSale`) in the sizes it chose (`drop_entry_sizes`), the draw's price shared over its pieces when it has
+ * one; the welcome gift and the add-ons chosen on its first order. A set's draw is never guaranteed, so an entry is one
+ * set. Idempotent: an entry with its orders gets none.
+ */
+async function setOrderForDrawEntry(
+  tx: Db,
+  e: { id: string; account_id: string; drop_id: string; set_id: string; stock_location_id: string | null; price_minor: number | null; currency: string | null },
+  actor: Actor,
+  now: Date,
+  opts: { reservedAt?: Date },
+): Promise<{ order: OrderRow | null; orders: OrderRow[]; notes: AuditRecordInput[]; addonsLeftOut: LeftOutAddon[] }> {
+  if (await tx.selectFrom('orders').select('id').where('drop_entry_id', '=', e.id).executeTakeFirst()) return { order: null, orders: [], notes: [], addonsLeftOut: [] };
+  const sizes = await tx.selectFrom('drop_entry_sizes').select(['piece', 'size_id']).where('entry_id', '=', e.id).orderBy('piece').execute();
+  const priced = e.price_minor !== null && e.currency !== null && e.price_minor <= ORDER_AMOUNT_MAX_MINOR;
+  const notes: AuditRecordInput[] = [...(await ensureGrants(tx, e.account_id, now))];
+  const sold = await ordersForSetSale(
+    tx,
+    {
+      setId: e.set_id,
+      dropId: e.drop_id,
+      accountId: e.account_id,
+      source: { channel: 'DRAW', dropEntryId: e.id },
+      sizes: sizes.map((z) => ({ piece: z.piece, sizeId: z.size_id })),
+      priceMinor: priced ? e.price_minor : null,
+      currency: priced ? e.currency : null,
+      locationId: await releaseLocation(tx, e.stock_location_id),
+      reservedAt: opts.reservedAt,
+    },
+    actor,
+    now,
+  );
+  notes.push(...sold.notes);
+  const first = sold.orders[0]!;
+  notes.push(...(await attachGifts(tx, first, actor, now)).notes);
+  const carried = await carryChoices(tx, first, { dropEntryId: e.id }, priced ? houseCurrencyOf(e.currency) : null, actor, now);
+  notes.push(...carried.notes);
+  return { order: first, orders: sold.orders, notes, addonsLeftOut: carried.leftOut };
 }
 
 /**
@@ -1936,6 +2097,8 @@ export async function createExchangeOrder(
     {
       channel: 'EXCHANGE',
       exchangeOfOrderId: original.id,
+      // Macro scope K44 T3: a piece of a set exchanged joins the set sale in its piece's place.
+      ...(original.set_sale_id ? { setSaleId: original.set_sale_id, setPiece: original.set_piece ?? undefined } : {}),
       dropId: original.drop_id,
       accountId: original.account_id,
       modelId: original.model_id,
@@ -1991,6 +2154,17 @@ export async function createExchangeOrder(
   return paid;
 }
 
+/** The set sales of `saleIds` as YOUR ORDERS and the account's export read them: each its set's name, price and orders in order. */
+export async function accountSets(db: Db, saleIds: readonly (string | null)[]): Promise<Map<string, Omit<AccountOrderSet, 'piece'>>> {
+  const ids = [...new Set(saleIds.filter((x): x is string => x !== null))];
+  const out = new Map<string, Omit<AccountOrderSet, 'piece'>>();
+  if (ids.length === 0) return out;
+  const sales = await db.selectFrom('set_sales as s').innerJoin('sets as t', 't.id', 's.set_id').select(['s.id', 't.name', 's.price_minor', 's.currency']).where('s.id', 'in', ids).execute();
+  const orders = await db.selectFrom('orders').select(['id', 'set_sale_id']).where('set_sale_id', 'in', ids).orderBy('set_piece').orderBy('reserved_at').orderBy('id').execute();
+  for (const x of sales) out.set(x.id, { saleId: x.id, name: x.name, priceMinor: x.price_minor, currency: x.currency, pieces: orders.filter((o) => o.set_sale_id === x.id).map((o) => o.id) });
+  return out;
+}
+
 /** Every order of an account, oldest first, for its right-of-access export (OwnerService.exportData). */
 export async function accountOrders(db: Db, accountId: string): Promise<ExportedOrder[]> {
   if (typeof accountId !== 'string' || !UUID_RE.test(accountId)) throw notFound('Account', 'ACCOUNT_NOT_FOUND');
@@ -2011,6 +2185,7 @@ export async function accountOrders(db: Db, accountId: string): Promise<Exported
   const invoices = await orderInvoices(db, rows.map((r) => r.id));
   const cases = rows.length ? await db.selectFrom('order_cases').selectAll().where('order_id', 'in', rows.map((r) => r.id)).orderBy('opened_at').orderBy('id').execute() : [];
   const addonItems = await exportedAddonItems(db, rows.map((r) => r.id));
+  const sets = await accountSets(db, rows.map((r) => r.set_sale_id));
   return rows.map((r) => ({
     reference: orderReference(r.id),
     channel: r.channel,
@@ -2022,6 +2197,12 @@ export async function accountOrders(db: Db, accountId: string): Promise<Exported
     currency: r.currency,
     addons: r.addons.map((a) => ({ label: a.label, priceMinor: a.priceMinor })),
     addonItems: addonItems.get(r.id) ?? [],
+    ...(r.set_sale_id !== null && sets.has(r.set_sale_id)
+      ? (() => {
+          const x = sets.get(r.set_sale_id)!;
+          return { set: { name: x.name, piece: r.set_piece!, salePriceMinor: x.priceMinor, saleCurrency: x.currency, saleOrders: x.pieces.map(orderReference) } };
+        })()
+      : {}),
     shipping: shippingOf(r),
     engravingText: r.engraving_text,
     buyer: { name: r.buyer_name, address: r.buyer_address, country: r.buyer_country, phone: r.buyer_phone },
@@ -2367,6 +2548,8 @@ export class OrderService {
         'o.engraving_minor',
         'o.shopify_order_id',
         'o.location_id',
+        'o.set_sale_id',
+        'o.set_piece',
         'm.name as model_name',
         'm.variant_label as model_variant',
         'm.image_sha256 as model_image',
@@ -2421,6 +2604,8 @@ export class OrderService {
     // ADD AN ADD-ON only while one is available for the order now (§4.1, §4.4).
     const addonOpen = await accountAddonOpen(this.db, rows);
     const deliveryOf = (r: (typeof rows)[number]): OrderAddress => (r.with_order_id === null ? ownAddress(r) : ownAddress(parents.get(r.with_order_id)!, r.with_order_id));
+    // Macro scope K44: each set sale's name, one price and orders, for its pieces' grouping.
+    const sets = await accountSets(this.db, rows.map((r) => r.set_sale_id));
     // The order's own invoice and the credit note that cancels it; the others (plan NEXT LOT §3.6.C) listed apart.
     const mainOf = (orderId: string) => invoices.find((x) => x.order.id === orderId && x.kind === 'INVOICE' && x.supplements === null);
     const documentOf = (orderId: string, kind: InvoiceKind) => {
@@ -2448,6 +2633,7 @@ export class OrderService {
       canAddAddons: addonOpen.has(r.id),
       shipping: r.shipping_service === null ? null : { ...shippingOf(r), withOrder: r.with_order_id ? orderReference(r.with_order_id) : null },
       withOrder: r.with_order_id ? orderReference(r.with_order_id) : null,
+      set: r.set_sale_id !== null && sets.has(r.set_sale_id) ? { ...sets.get(r.set_sale_id)!, piece: r.set_piece! } : null,
       giftTier: r.gift_grant_id ? (giftTiers.get(r.gift_grant_id) === 3 ? 'PALLADIUM' : 'PLATINE') : null,
       creditMinor: credits.get(r.id) ?? 0,
       status: r.status,
@@ -2719,10 +2905,14 @@ export class OrderService {
     // locked first (the piece before the order, as returns and registrations).
     let first: ((tx: Db) => Promise<void>) | undefined;
     if (s.to === 'CANCELLED') {
+      // Macro scope K44 (§15 note 12): a set's order is cancelled with its set's other orders, so their codes too.
+      const sale = await this.db.selectFrom('orders').select('set_sale_id').where('id', '=', id).executeTakeFirst();
+      const set = sale?.set_sale_id ? (await this.db.selectFrom('orders').select('id').where('set_sale_id', '=', sale.set_sale_id).execute()).map((r) => r.id) : [];
+      const ids = [...new Set([id, ...set])];
       const related = await this.db
         .selectFrom('orders')
         .select('id')
-        .where((eb) => eb.or([eb('id', '=', id), eb('with_order_id', '=', id)]))
+        .where((eb) => eb.or([eb('id', 'in', ids), eb('with_order_id', 'in', ids)]))
         .where('status', 'in', OPEN_STATUSES)
         .execute();
       const claimHashes = await peekClaimRenewals(this.db, related.map((r) => r.id));
@@ -2735,6 +2925,15 @@ export class OrderService {
       async (tx, o, now, notes) => {
         // A welcome gift is paid with its order (BP-19 T5), never alone.
         if (o.channel === 'GIFT' && checked.to === 'PAID') throw stepNotAllowed(o.status, checked.to);
+        // Macro scope K44 (plan MACRO M3 §5.1, §15 note 12): a set sold is cancelled whole, its other open orders in the
+        // same transaction (each locked, in the set's order), refused once one of its pieces has shipped.
+        if (checked.to === 'CANCELLED' && o.set_sale_id !== null) {
+          const others = await tx.selectFrom('orders').selectAll().where('set_sale_id', '=', o.set_sale_id).where('id', '<>', o.id).orderBy('set_piece').orderBy('reserved_at').orderBy('id').forUpdate().execute();
+          if (o.shipped_at !== null || others.some((x) => x.shipped_at !== null)) throw setShipped();
+          await step(tx, o, checked, actor, now, notes, this.mail);
+          for (const x of others) if (x.status === 'RESERVED' || x.status === 'PAID') await step(tx, x, checked, actor, now, notes, this.mail);
+          return;
+        }
         await step(tx, o, checked, actor, now, notes, this.mail);
       },
       first,
@@ -2777,6 +2976,8 @@ export class OrderService {
     await this.change(
       id,
       async (tx, o, now, notes) => {
+        // Macro scope K44 T3: a set is returned whole, as a group of order cases (services/order-cases.ts).
+        if (o.set_sale_id !== null) throw setReturnWhole();
         const done = await returnInTransaction(tx, o, r, { productId: peek.product_id, reclaim, claimHash }, actor, now, notes, this.lifecycle);
         // Last: the piece's status, which LifecycleService audits at once (the audit chain's lock: no row is locked after it).
         await done.finish();

@@ -16,7 +16,8 @@
  *               account, email (as stored: the route masks it for an AUDITOR, as on the owners' list), tier now,
  *               country, pieces counted, value and first piece. DELETED accounts are left out.
  *   releases    GET /api/admin/growth/releases (AUDITOR): the GROWTH_RELEASES latest releases past their opening, no
- *               draft, cancelled release or after-room; a LIVE RELEASE measured by live-insights `summarize`.
+ *               draft, cancelled release or after-room; a LIVE RELEASE measured by live-insights `summarize`. A set's
+ *               release (macro scope K44, plan MACRO M3 §5.2, KEPT) is one like any: its sets announced and sold.
  *   collectorValue  the client sheet's Lifetime value (OwnerService.sheet): the account's value per currency, by the
  *               rule of `collectors`.
  *
@@ -29,6 +30,9 @@
  *     piece is named by an order when an order not CANCELLED names it, for its buyer, or for anyone while not
  *     RETURNED: an ordered piece counts once, and a returned order nets to zero. TRANSFER, RESALE and ADMIN pieces never
  *     count, nor the replacement of a warranty claim registered by its claimant (plan ORBES CARE: not a sale). The Shopify store's pieces are ELSEWHERE until the sync (PIECE_SOURCES gains its channel then).
+ *   - THE SET (macro scope K44, §15 note 11): a set sale is one order per piece, each invoiced at its share of the set's
+ *     price, so every figure counts it by release and by order as any sale: a piece's purchase is its own order's, under
+ *     its own model, at its share (the first model bought, revenue by model), never the set's whole price under one model.
  *   - Revenue is invoices less credit notes, in the UTC month each was issued, app orders only: BP-19's shipping lines
  *     and credits are inside the totals, and a GIFT order (no invoice) adds nothing. Its orders are counted on their main
  *     invoice only: a supplementary invoice (an engraving after PAID) adds to the totals, never another order.
@@ -337,10 +341,15 @@ export interface GrowthRelease {
   mode: DropMode;
   title: string;
   opensAt: Date;
-  /** The pieces it announced: a draw's quantity, a LIVE RELEASE's stock. */
+  /** The pieces it announced: a draw's quantity, a LIVE RELEASE's stock; a set's release, its sets (a LIVE's: its smallest piece's stock). */
   pieces: number;
-  /** The pieces sold: a draw's paid orders not cancelled or returned; a LIVE RELEASE's confirmed pieces less those cancelled. */
+  /**
+   * The pieces sold: a draw's paid orders not cancelled or returned; a LIVE RELEASE's confirmed pieces less those
+   * cancelled; a set's release, its sets sold (a draw's set sales paid, a LIVE's set sales, not cancelled nor returned).
+   */
   sold: number;
+  /** Macro scope K44: a set's release names its set and its pieces' count; null for a model's. */
+  set: { name: string; pieces: number } | null;
   /** LIVE: from T0 to its last piece confirmed, when every piece was. */
   sellOutMs: number | null;
   /** DRAW: its entries, withdrawn ones left out. */
@@ -683,7 +692,7 @@ export class GrowthService {
     const now = this.clock();
     const drops = await this.db
       .selectFrom('drops')
-      .select(['id', 'mode', 'title', 'opens_at', 'quantity'])
+      .select(['id', 'mode', 'title', 'opens_at', 'quantity', 'set_id'])
       .where('published_at', 'is not', null)
       .where('cancelled_at', 'is', null)
       .where('parent_drop_id', 'is', null)
@@ -692,7 +701,8 @@ export class GrowthService {
       .orderBy('id')
       .limit(GROWTH_RELEASES)
       .execute();
-    const draws = drops.filter((d) => d.mode === 'DRAW').map((d) => d.id);
+    const draws = drops.filter((d) => d.mode === 'DRAW' && d.set_id === null).map((d) => d.id);
+    const sets = await this.setReleases(drops.filter((d) => d.set_id !== null).map((d) => d.id));
     const [summaries, entries, sold] = await Promise.all([
       this.insights.summaries(drops.filter((d) => d.mode === 'LIVE').map((d) => d.id)),
       draws.length
@@ -711,9 +721,24 @@ export class GrowthService {
         : [],
     ]);
     return drops.map((d) => {
+      const set = sets.get(d.id);
+      if (set) {
+        const s = d.mode === 'LIVE' ? summaries.get(d.id) : undefined;
+        return {
+          id: d.id,
+          mode: d.mode,
+          title: d.title,
+          opensAt: d.opens_at,
+          pieces: d.mode === 'LIVE' ? set.onSale : d.quantity,
+          sold: set.sold,
+          sellOutMs: s?.sellOutMs ?? null,
+          entries: d.mode === 'DRAW' ? set.entries : null,
+          set: { name: set.name, pieces: set.pieces },
+        };
+      }
       if (d.mode === 'LIVE') {
         const s = summaries.get(d.id);
-        return { id: d.id, mode: d.mode, title: d.title, opensAt: d.opens_at, pieces: s?.stock ?? d.quantity, sold: s ? s.confirmedPieces - s.cancelledPieces : 0, sellOutMs: s?.sellOutMs ?? null, entries: null };
+        return { id: d.id, mode: d.mode, title: d.title, opensAt: d.opens_at, pieces: s?.stock ?? d.quantity, sold: s ? s.confirmedPieces - s.cancelledPieces : 0, sellOutMs: s?.sellOutMs ?? null, entries: null, set: null };
       }
       return {
         id: d.id,
@@ -724,8 +749,33 @@ export class GrowthService {
         sold: Number(sold.find((x) => x.drop_id === d.id)?.n ?? 0),
         sellOutMs: null,
         entries: Number(entries.find((x) => x.drop_id === d.id)?.n ?? 0),
+        set: null,
       };
     });
+  }
+
+  /**
+   * The set's releases among `ids` (macro scope K44): each its set's name and pieces, its sets on sale (a LIVE's: its
+   * smallest piece's stock), its entries (a draw's, withdrawn ones left out) and its sets sold (its set sales with an
+   * order paid, for a draw, or confirmed, for a LIVE, not cancelled nor returned).
+   */
+  private async setReleases(ids: readonly string[]): Promise<Map<string, { name: string; pieces: number; onSale: number; entries: number; sold: number }>> {
+    const out = new Map<string, { name: string; pieces: number; onSale: number; entries: number; sold: number }>();
+    if (ids.length === 0) return out;
+    const rows = (
+      await sql<{ id: string; name: string; pieces: number; on_sale: number | null; entries: number; sold: number }>`
+        SELECT d.id, t.name,
+               (SELECT count(*) FROM set_models m WHERE m.set_id = d.set_id)::int AS pieces,
+               (SELECT min(x.n) FROM (SELECT sum(s.stock) AS n FROM drop_sizes s WHERE s.drop_id = d.id GROUP BY s.piece) x)::int AS on_sale,
+               (SELECT count(*) FROM drop_entries e WHERE e.drop_id = d.id AND e.status <> 'WITHDRAWN')::int AS entries,
+               (SELECT count(DISTINCT o.set_sale_id) FROM orders o
+                 WHERE o.drop_id = d.id AND o.set_sale_id IS NOT NULL AND o.channel IN ('DRAW', 'LIVE')
+                   AND (o.channel = 'LIVE' OR o.paid_at IS NOT NULL) AND o.status NOT IN ('CANCELLED', 'RETURNED'))::int AS sold
+          FROM drops d JOIN sets t ON t.id = d.set_id
+         WHERE d.id = ANY(${uuidArray(ids)})`.execute(this.db)
+    ).rows;
+    for (const r of rows) out.set(r.id, { name: r.name, pieces: Number(r.pieces), onSale: Number(r.on_sale ?? 0), entries: Number(r.entries), sold: Number(r.sold) });
+    return out;
   }
 
   /** The account's lifetime value per currency (the client sheet), by the rule of COLLECTORS BY VALUE; 404 ACCOUNT_NOT_FOUND. */

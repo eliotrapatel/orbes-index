@@ -51,7 +51,6 @@ import type { AuditService } from './audit.js';
 import { writeJournal } from './journal.js';
 import { serveWaiting } from './orders.js';
 import { offeredSku } from './sizes.js';
-import { releaseModelId } from './release-offer.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -388,15 +387,18 @@ export async function linkSkus(db: Db): Promise<{ products: number; sizes: numbe
       return Number(r.numUpdatedRows);
     });
   }
+  // A size on sale is its release's model's, or on a set's release (macro scope K44 T1) its piece's model's.
   const onSale = await db
     .selectFrom('drop_sizes as s')
     .innerJoin('drops as d', 'd.id', 's.drop_id')
-    .select(['s.id', 'd.model_id', 's.label'])
+    .leftJoin('set_models as p', (j) => j.onRef('p.set_id', '=', 'd.set_id').onRef('p.position', '=', 's.piece'))
+    .select((eb) => ['s.id', eb.fn.coalesce('d.model_id', 'p.model_id').as('model_id'), 's.label'])
     .where('s.sku_id', 'is', null)
     .execute();
   for (const s of onSale) {
+    if (s.model_id === null) continue;
     sizes += await inTransaction(db, async (tx) => {
-      const skuId = await ensureSku(tx, releaseModelId(s), s.label);
+      const skuId = await ensureSku(tx, s.model_id!, s.label);
       const r = await tx.updateTable('drop_sizes').set({ sku_id: skuId }).where('id', '=', s.id).where('sku_id', 'is', null).executeTakeFirst();
       return Number(r.numUpdatedRows);
     });
@@ -405,17 +407,22 @@ export async function linkSkus(db: Db): Promise<{ products: number; sizes: numbe
 }
 
 /**
- * Link every size of a release to its SKU (the release's model in that size): after its sizes or its model changed.
+ * Link every size of a release to its SKU (the release's model in that size; on a set's release, macro scope K44 T1,
+ * the model of the size's piece, `modelId` then unused): after its sizes or its model changed.
  * Through `offeredSku` (plan NEXT LOT §3.3): a model with no size type as before (its SKU created when missing); a typed
  * model's sizes must be its offered sizes (400 SIZE_NOT_DECLARED, 409 SIZE_SET_ASIDE), each label written again as the
  * declared one ('SIZE 52' is 52; a size of none 'ONE SIZE'). Two lines of one size ('52' and 'SIZE 52') are refused
- * before anything is written: 400 'The size 52 is listed twice.'
+ * before anything is written: 400 'The size 52 is listed twice.' (on a set's release, twice for one piece).
  */
-export async function linkDropSizes(tx: Db, dropId: string, modelId: string): Promise<void> {
-  const rows = await tx.selectFrom('drop_sizes').select(['id', 'label', 'sku_id']).where('drop_id', '=', dropId).orderBy('position').execute();
+export async function linkDropSizes(tx: Db, dropId: string, modelId: string | null): Promise<void> {
+  const rows = await tx.selectFrom('drop_sizes').select(['id', 'label', 'sku_id', 'piece']).where('drop_id', '=', dropId).orderBy('position').execute();
+  const d = await tx.selectFrom('drops').select(['set_id']).where('id', '=', dropId).executeTakeFirstOrThrow();
+  const pieces = d.set_id === null ? new Map<number, string>() : new Map((await tx.selectFrom('set_models').select(['position', 'model_id']).where('set_id', '=', d.set_id).execute()).map((p) => [p.position, p.model_id]));
   const resolved: { id: string; label: string; sku_id: string | null; skuId: string; declared: string | null; typed: boolean }[] = [];
   for (const r of rows) {
-    const s = await offeredSku(tx, modelId, r.label);
+    const of = d.set_id === null ? modelId : r.piece === null ? undefined : pieces.get(r.piece);
+    if (!of) throw validationError(d.set_id === null ? 'The release names no model.' : 'Give each size of a set’s release its piece.');
+    const s = await offeredSku(tx, of, r.label);
     resolved.push({ ...r, skuId: s.skuId, declared: s.label, typed: s.typed });
   }
   const seen = new Set<string>();

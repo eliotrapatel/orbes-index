@@ -136,7 +136,8 @@ import { ORDER_AMOUNT_MAX_MINOR, ORDER_CURRENCIES, orderForDrawEntry } from './o
 import { readActingAccount } from './ownership.js';
 import { releaseFeasibility, type Feasibility } from './release-stock.js';
 import { savedSizeAmong } from './sizes.js';
-import { releaseModelId } from './release-offer.js';
+import { modelOfModelRelease, offerName, releaseOffer, savedSizesByPiece } from './release-offer.js';
+import { entryPieceSizes } from './set-sales.js';
 import { defaultLocationId, linkDropSizes } from './stock.js';
 import { isSegmentMember } from './segments.js';
 import type { EmailTriggers } from './email-triggers.js';
@@ -634,8 +635,10 @@ export interface DrawEntry {
 /** GET /api/v1/club/drops/:id/entry (plan NEXT LOT §3.6.F): the account's entry in a draw, and the size YOUR SIZES suggests. */
 export interface AccountDrawEntry {
   entry: AccountDropEntry | null;
-  /** Among the draw's sizes with pieces, the one the account's saved size matches (AC-01); null otherwise. */
+  /** Among the draw's sizes with pieces, the one the account's saved size matches (AC-01); null otherwise (and on a set's draw). */
   savedSize: DrawSizeRef | null;
+  /** Macro scope K44 T1: on a set's draw, the size YOUR SIZES preselects for each piece that has one; absent otherwise. */
+  savedSizes?: { piece: number; id: string; label: string }[];
   /**
    * Plan MACRO M1 §3.1 (F4): whether the account may enter the draw now: always for a draw open to everyone; for a draw
    * opened to a segment, while it is one of its members (ENTER, RESERVE and CHANGE SIZE answer 403 DRAW_NOT_ELIGIBLE
@@ -964,6 +967,8 @@ export interface ExportedDropEntry {
   note: string | null;
   /** Plan NEXT LOT §3.6.F: the size the entry chose; null in a draw without sizes. */
   size: string | null;
+  /** Macro scope K44 T1: in a set's draw, the size chosen for each piece; absent otherwise. */
+  sizes?: { piece: number; size: string }[];
 }
 
 export async function accountDropEntries(db: Db, accountId: string): Promise<ExportedDropEntry[]> {
@@ -977,6 +982,7 @@ export async function accountDropEntries(db: Db, accountId: string): Promise<Exp
     .orderBy('e.created_at')
     .orderBy('e.id')
     .execute();
+  const pieces = await entryPieceSizes(db, 'drop_entry_sizes', rows.map((r) => r.id));
   return rows.map((r) => ({
     entryId: r.id,
     dropId: r.drop_id,
@@ -990,6 +996,7 @@ export async function accountDropEntries(db: Db, accountId: string): Promise<Exp
     handledAt: r.handled_at,
     note: r.note,
     size: r.size_label ?? null,
+    ...(pieces.has(r.id) ? { sizes: pieces.get(r.id)! } : {}),
   }));
 }
 
@@ -1295,11 +1302,19 @@ export class DropService {
    */
   async calendar(dropId: string, origin: string): Promise<{ filename: string; body: string }> {
     const id = knownId(dropId, dropNotFound);
-    const r = await this.reads(this.db).where('d.id', '=', id).where('d.published_at', 'is not', null).where('d.mode', '=', 'DRAW').executeTakeFirst();
+    const r = await this.db
+      .selectFrom('drops')
+      .select(['id', 'model_id', 'set_id', 'opens_at', 'closes_at', 'cancelled_at'])
+      .where('id', '=', id)
+      .where('published_at', 'is not', null)
+      .where('mode', '=', 'DRAW')
+      .executeTakeFirst();
     if (!r || r.cancelled_at) throw dropNotFound();
+    // Macro scope K44 (C1, KEPT): a set's draw has its .ics too, named by its set.
+    const name = offerName(await releaseOffer(this.db, r));
     return {
       filename: 'orbes-draw.ics',
-      body: drawCalendar({ id, name: r.model_name, opensAt: r.opens_at, closesAt: r.closes_at, now: this.clock(), origin }),
+      body: drawCalendar({ id, name, opensAt: r.opens_at, closesAt: r.closes_at, now: this.clock(), origin }),
     };
   }
 
@@ -1329,27 +1344,26 @@ export class DropService {
     const id = knownId(dropId, dropNotFound);
     const d = await this.db
       .selectFrom('drops')
-      .select(['id', 'model_id', 'access_segment_id', 'price_minor', 'currency', 'stock_location_id'])
+      .select(['id', 'model_id', 'set_id', 'access_segment_id', 'price_minor', 'currency', 'stock_location_id'])
       .where('id', '=', id)
       .where('published_at', 'is not', null)
       .where('mode', '=', 'DRAW')
       .executeTakeFirst();
     if (!d) throw dropNotFound();
+    const offer = await releaseOffer(this.db, d);
     const r = await this.accountEntryRows(this.db).where('e.drop_id', '=', id).where('e.account_id', '=', accountId).executeTakeFirst();
     const sizes = await this.db
       .selectFrom('drop_sizes as s')
       .leftJoin('skus as k', 'k.id', 's.sku_id')
-      .select(['s.id', 's.label', 's.stock', 'k.fit_min_mm', 'k.fit_max_mm'])
+      .select(['s.id', 's.piece', 's.label', 's.stock', 'k.fit_min_mm', 'k.fit_max_mm'])
       .where('s.drop_id', '=', id)
       .where('s.stock', '>', 0)
       .orderBy('s.position')
       .execute();
-    const match = await savedSizeAmong(
-      this.db,
-      accountId,
-      releaseModelId(d),
-      sizes.map((z) => ({ id: z.id, label: z.label, fitMinMm: z.fit_min_mm ?? null, fitMaxMm: z.fit_max_mm ?? null, stock: z.stock })),
-    );
+    const candidates = sizes.map((z) => ({ id: z.id, piece: z.piece, label: z.label, fitMinMm: z.fit_min_mm ?? null, fitMaxMm: z.fit_max_mm ?? null, stock: z.stock }));
+    // Macro scope K44 T1: a set's draw preselects a size per piece, each by its piece's model's kind.
+    const match = offer.kind === 'MODEL' ? await savedSizeAmong(this.db, accountId, offer.modelId, candidates) : null;
+    const savedSizes = offer.kind === 'SET' ? await savedSizesByPiece(this.db, accountId, offer, candidates) : null;
     const eligible = d.access_segment_id === null || (await isSegmentMember(this.db, d.access_segment_id, accountId, this.clock()));
     // Plan MACRO M3 §4.2 (D2): ADD TO YOUR ORDER while the place is held in a draw with a price.
     const currency = drawCurrency(d);
@@ -1361,7 +1375,7 @@ export class DropService {
             offer: await addonOffer(this.db, d.stock_location_id ?? (await defaultLocationId(this.db)), currency),
           }
         : null;
-    return { entry: r ? accountEntryView(r, this.clock()) : null, savedSize: match ? { id: match.id, label: match.label } : null, eligible, addons };
+    return { entry: r ? accountEntryView(r, this.clock()) : null, savedSize: match ? { id: match.id, label: match.label } : null, ...(savedSizes ? { savedSizes } : {}), eligible, addons };
   }
 
   /**
@@ -1782,7 +1796,8 @@ export class DropService {
           const floor = (await this.heldPieces(tx, id)) + (await guaranteedPieces(tx, id));
           if (quantity < floor) throw guaranteesExceed(await guaranteedPieces(tx, id));
           const was = await auditedSizes(tx, id);
-          await writeDrawSizes(tx, id, change.modelId !== undefined ? knownId(change.modelId, () => notFound('Model', 'MODEL_NOT_FOUND')) : releaseModelId(d), sizes);
+          // A set's draw gives its sizes per piece from M3.15 on (its creation): until then a draw sells a model.
+          await writeDrawSizes(tx, id, change.modelId !== undefined ? knownId(change.modelId, () => notFound('Model', 'MODEL_NOT_FOUND')) : modelOfModelRelease(d, 'M3.15'), sizes);
           const next = await auditedSizes(tx, id);
           if (JSON.stringify(was) !== JSON.stringify(next)) {
             before.sizes = was;
@@ -1818,6 +1833,8 @@ export class DropService {
         note('opensAt', 'opens_at', d.opens_at, opensAt);
         note('closesAt', 'closes_at', d.closes_at, closesAt);
         if (change.modelId !== undefined) {
+          // Macro scope K44 T1: a set's release sells its set, never a model instead.
+          if (d.set_id !== null) throw validationError('A set’s release sells its set: its pieces are the set’s.');
           const modelId = knownId(change.modelId, () => notFound('Model', 'MODEL_NOT_FOUND'));
           if (modelId !== d.model_id) {
             const model = await tx.selectFrom('models').select(['id', 'active']).where('id', '=', modelId).executeTakeFirst();
@@ -1857,7 +1874,8 @@ export class DropService {
       if (d.cancelled_at) throw dropCancelled();
       if (d.published_at) throw dropAlreadyPublished();
       if (now.getTime() >= d.closes_at.getTime()) throw dropWindowPast();
-      const model = await tx.selectFrom('models').select(['active', 'size_type']).where('id', '=', d.model_id).executeTakeFirstOrThrow();
+      // A set's draw is published by its own rules (the even rule per piece) from M3.15 on.
+      const model = await tx.selectFrom('models').select(['active', 'size_type']).where('id', '=', modelOfModelRelease(d, 'M3.15')).executeTakeFirstOrThrow();
       if (!model.active) throw modelInactive();
       const sizes = await auditedSizes(tx, id);
       if (sizes.length === 0) throw sizesRequired();
@@ -2374,7 +2392,8 @@ export class DropService {
       id: r.id,
       title: r.title,
       description: r.description,
-      model: { id: releaseModelId(r), name: r.model_name, type: r.model_type, active: r.model_active, variant: r.model_variant },
+      // The draw's views read a model's release (its rows joined to their model); a set's draw reaches them from M3.15.
+      model: { id: modelOfModelRelease(r, 'M3.15'), name: r.model_name, type: r.model_type, active: r.model_active, variant: r.model_variant },
       quantity: r.quantity,
       opensAt: r.opens_at,
       closesAt: r.closes_at,

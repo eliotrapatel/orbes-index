@@ -459,10 +459,12 @@ export class LinkService {
   /** The releases and the models the dialog offers (see the header). */
   async destinations(): Promise<LinkDestinations> {
     const [releases, models] = await Promise.all([
+      // A model's release names its model; a set's (macro scope K44, KEPT: its links as any release's) its set.
       this.db
         .selectFrom('drops as d')
-        .innerJoin('models as m', 'm.id', 'd.model_id')
-        .select(['d.id', 'd.title', 'd.mode', 'd.opens_at', 'm.name as model'])
+        .leftJoin('models as m', 'm.id', 'd.model_id')
+        .leftJoin('sets as st', 'st.id', 'd.set_id')
+        .select((eb) => ['d.id', 'd.title', 'd.mode', 'd.opens_at', eb.fn.coalesce('m.name', 'st.name').as('model')])
         .where('d.published_at', 'is not', null)
         .where('d.cancelled_at', 'is', null)
         .orderBy('d.opens_at', 'desc')
@@ -481,7 +483,7 @@ export class LinkService {
         .execute(),
     ]);
     return {
-      releases: releases.map((r) => ({ id: r.id, title: r.title, mode: r.mode, opensAt: r.opens_at, model: r.model })),
+      releases: releases.map((r) => ({ id: r.id, title: r.title, mode: r.mode, opensAt: r.opens_at, model: r.model ?? '' })),
       models: models.map((m) => ({ id: m.id, name: m.main_name ?? m.name, variantLabel: m.variant_label, variantOf: m.variant_of, slug: m.slug })),
     };
   }

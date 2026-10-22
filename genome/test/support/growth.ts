@@ -128,14 +128,27 @@ export class GrowthWorld {
     await this.db.insertInto('warranties').values({ product_id: productId, retailer, duration_months: 24, purchase_date: '2026-02-15', start_date: '2026-02-15' }).execute();
   }
 
-  async drop(o: { mode: 'DRAW' | 'LIVE'; modelId: string; title: string; opens: string; quantity: number; published?: boolean; cancelled?: boolean; parentId?: string; stock?: number }): Promise<{ id: string; sizeId: string | null }> {
+  /** A release of a model, or (macro scope K44) of a set (`setId`, its model then none). */
+  async drop(o: {
+    mode: 'DRAW' | 'LIVE';
+    modelId?: string;
+    setId?: string;
+    title: string;
+    opens: string;
+    quantity: number;
+    published?: boolean;
+    cancelled?: boolean;
+    parentId?: string;
+    stock?: number;
+  }): Promise<{ id: string; sizeId: string | null }> {
     const opens = at(o.opens);
     const live = o.mode === 'LIVE';
     const id = (
       await this.db
         .insertInto('drops')
         .values({
-          model_id: o.modelId,
+          model_id: o.setId ? null : o.modelId!,
+          set_id: o.setId ?? null,
           title: o.title,
           quantity: o.quantity,
           opens_at: opens,
@@ -231,6 +244,9 @@ export class GrowthWorld {
     liveEntryId?: string;
     withOrderId?: string;
     giftGrantId?: string;
+    /** Macro scope K44: the set sale it is a piece of, and that piece. */
+    setSaleId?: string;
+    setPiece?: number;
     lines?: { kind: string; label: string; detail: string | null; amountMinor: number }[];
   }): Promise<string> {
     const paid = at(o.paid);
@@ -260,6 +276,10 @@ export class GrowthWorld {
           live_entry_id: o.liveEntryId ?? null,
           with_order_id: o.withOrderId ?? null,
           gift_grant_id: o.giftGrantId ?? null,
+          set_sale_id: o.setSaleId ?? null,
+          set_piece: o.setSaleId ? (o.setPiece ?? 1) : null,
+          // A set's pieces of one entry: one order per piece (orders_drop_entry_key, orders_live_entry_key).
+          piece: o.setSaleId ? (o.setPiece ?? 1) : 1,
           price_minor: o.channel === 'GIFT' ? 0 : o.total,
           currency: o.currency,
           status,

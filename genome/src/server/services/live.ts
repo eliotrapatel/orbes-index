@@ -115,6 +115,7 @@ import { DROP_QUANTITY_MAX, drawKey, dropNotFound, openDropSeed } from './drops.
 import { holderGuarantee, holdsGuaranteeFor, releaseCovered, sizeServesGuarantee, useGuarantees, visibleGuaranteeIds } from './guarantees.js';
 import { addonOffer, choicesOf, cleanAddonItems, clearChoices, setChoices, type AddonOfferItem, type AddonUnitsInput, type ChosenAddon, type LeftOutAddon } from './order-addons.js';
 import { ordersForLiveEntry } from './orders.js';
+import { entryPieceSizes } from './set-sales.js';
 import { defaultLocationId } from './stock.js';
 import { readActingAccount } from './ownership.js';
 import { participationCount, participations } from './participation.js';
@@ -917,7 +918,10 @@ export interface ExportedLiveEntry {
   entryId: string;
   dropId: string;
   title: string;
+  /** Its size; on a set's release, its first piece's (`sizes` gives every piece's). */
   size: string;
+  /** Macro scope K44 T1: on a set's release, the size chosen for each piece; absent otherwise. */
+  sizes?: { piece: number; size: string }[];
   quantity: number;
   status: LiveEntryStatus;
   tier: number;
@@ -951,6 +955,8 @@ export interface ExportedLiveInterest {
   title: string;
   size: string;
   since: Date;
+  /** Macro scope K44 T1: on a set's release, the size given for each piece; absent otherwise. */
+  sizes?: { piece: number; size: string }[];
 }
 
 export async function accountLiveData(db: Db, accountId: string): Promise<{ entries: ExportedLiveEntry[]; interest: ExportedLiveInterest[] }> {
@@ -980,6 +986,7 @@ export async function accountLiveData(db: Db, accountId: string): Promise<{ entr
   const guests = rows.length
     ? await db.selectFrom('after_room_guests').select(['entry_id', 'position']).where('entry_id', 'in', rows.map((r) => r.id)).execute()
     : [];
+  const pieces = await entryPieceSizes(db, 'live_entry_sizes', rows.map((r) => r.id));
   const interest = await db
     .selectFrom('live_interest as i')
     .innerJoin('drops as d', 'd.id', 'i.drop_id')
@@ -988,6 +995,15 @@ export async function accountLiveData(db: Db, accountId: string): Promise<{ entr
     .where('i.account_id', '=', account)
     .orderBy('i.created_at')
     .orderBy('i.drop_id')
+    .execute();
+  // Macro scope K44 T1: an interest in a set's release gives a size per piece.
+  const interestPieces = await db
+    .selectFrom('live_interest_sizes as x')
+    .innerJoin('drop_sizes as s', 's.id', 'x.size_id')
+    .select(['x.drop_id', 'x.piece', 's.label'])
+    .where('x.account_id', '=', account)
+    .orderBy('x.drop_id')
+    .orderBy('x.piece')
     .execute();
   return {
     entries: rows.map((r) => ({
@@ -1019,8 +1035,12 @@ export async function accountLiveData(db: Db, accountId: string): Promise<{ entr
       handledAt: r.handled_at,
       resolutionNote: r.resolution_note,
       afterRoomPlace: guests.find((g) => g.entry_id === r.id)?.position ?? null,
+      ...(pieces.has(r.id) ? { sizes: pieces.get(r.id)! } : {}),
     })),
-    interest: interest.map((i) => ({ dropId: i.drop_id, title: i.title, size: i.label, since: i.created_at })),
+    interest: interest.map((i) => {
+      const own = interestPieces.filter((x) => x.drop_id === i.drop_id);
+      return { dropId: i.drop_id, title: i.title, size: i.label, since: i.created_at, ...(own.length ? { sizes: own.map((x) => ({ piece: x.piece, size: x.label })) } : {}) };
+    }),
   };
 }
 

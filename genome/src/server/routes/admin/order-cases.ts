@@ -9,7 +9,10 @@
  *                                                         otherwise); the claim code of a piece back to stock (a
  *                                                         return's `claimCode`, a damaged parcel's `claimCodes`), once,
  *                                                         no-store; a reshipment's add-on units held beyond the stock
- *                                                         (`addonsShort`)
+ *                                                         (`addonsShort`); a set's return (macro scope K44 T3) decided
+ *                                                         together, each piece's destination by its case (`pieces`, 409
+ *                                                         SET_RETURN_NOT_RECEIVED until every piece is back), its
+ *                                                         pieces' `claimCodes` and `group`
  *   POST   /api/admin/order-cases/:id/cancel    OPERATOR  ended with no decision, with a note
  *
  * A LOGISTICS login never reaches them (the default rule ranks it below AUDITOR).
@@ -49,9 +52,21 @@ export const adminOrderCaseRoutes: FastifyPluginAsync<AdminRouteDeps> = async (a
     const { id } = parse(orderCaseParams, request.params);
     const b = parse(decideOrderCaseBody, request.body);
     const { admin } = requireAdmin(request);
-    const r = await orderCases.decide(id, { decision: b.decision, pieceTo: b.pieceTo ?? null, locationId: b.locationId ?? null, note: b.note ?? null, addonsOut: b.addonsOut ?? null }, adminActor(request), { admin: hasRole(admin.role, 'ADMIN') });
+    const r = await orderCases.decide(
+      id,
+      { decision: b.decision, pieceTo: b.pieceTo ?? null, locationId: b.locationId ?? null, note: b.note ?? null, addonsOut: b.addonsOut ?? null, pieces: b.pieces ?? null },
+      adminActor(request),
+      { admin: hasRole(admin.role, 'ADMIN') },
+    );
     reply.header('cache-control', 'no-store');
-    return { case: orderCaseJson(request, r.case), ...(r.productId ? { productId: r.productId } : {}), ...(r.claimCode ? { claimCode: r.claimCode } : {}), ...(r.claimCodes ? { claimCodes: r.claimCodes } : {}), ...(r.addonsShort ? { addonsShort: r.addonsShort } : {}) };
+    return {
+      case: orderCaseJson(request, r.case),
+      ...(r.productId ? { productId: r.productId } : {}),
+      ...(r.claimCode ? { claimCode: r.claimCode } : {}),
+      ...(r.claimCodes ? { claimCodes: r.claimCodes } : {}),
+      ...(r.addonsShort ? { addonsShort: r.addonsShort } : {}),
+      ...(r.group ? { group: r.group } : {}),
+    };
   });
 
   app.post('/api/admin/order-cases/:id/cancel', async (request) => {

@@ -21,8 +21,8 @@
  *                Never deleted.
  *   Shopify      (S5) one Shopify product per add-on with one variant: `setShopify` keeps the ids pasted back from
  *                Shopify's admin, the product on the add-on (`addon_items.shopify_product_id`, once) and on its SKU,
- *                the variant on its SKU (`skus.shopify_variant_id`, once); a product another add-on or a model is
- *                linked to answers 409 SHOPIFY_PRODUCT_TAKEN, a variant another SKU has 409 SHOPIFY_VARIANT_TAKEN. The
+ *                the variant on its SKU (`skus.shopify_variant_id`, once); a product another add-on, a model or a set
+ *                (macro scope K44) is linked to answers 409 SHOPIFY_PRODUCT_TAKEN, a variant another SKU has 409 SHOPIFY_VARIANT_TAKEN. The
  *                product export lists each active add-on (services/shopify.ts).
  *   available    `availableAt(location, currency)`: the active add-ons priced in that currency with at least one
  *                available at that location now (on hand less what is held: `stock_holds`), in their order.
@@ -425,7 +425,9 @@ export class AddonService {
           await advisoryXactLock(tx, ADVISORY_LOCK.SHOPIFY_PRODUCT, lockKeyOf(productId));
           const model = await tx.selectFrom('skus').select('id').where('shopify_product_id', '=', productId).where('id', '<>', sku.id).executeTakeFirst();
           const other = await tx.selectFrom('addon_items').select('id').where('shopify_product_id', '=', productId).where('id', '<>', id).executeTakeFirst();
-          if (model || other) throw shopifyProductTaken();
+          // Macro scope K44 T1 (S5): a set's product is its own too.
+          const set = await tx.selectFrom('sets').select('id').where('shopify_product_id', '=', productId).executeTakeFirst();
+          if (model || other || set) throw shopifyProductTaken();
         }
         await tx.updateTable('addon_items').set({ shopify_product_id: productId, updated_at: this.clock() }).where('id', '=', id).execute();
         await tx.updateTable('skus').set({ shopify_product_id: productId, shopify_variant_id: variantId }).where('id', '=', sku.id).execute();

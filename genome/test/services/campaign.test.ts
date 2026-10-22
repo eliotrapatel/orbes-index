@@ -377,6 +377,69 @@ describe('CampaignService (plan MACRO M1 §2.1, C2)', () => {
     });
   });
 
+  describe('a set\'s draw (macro scope K44, plan MACRO M3 §5.2: KEPT in full)', () => {
+    let S: { id: string };
+    let pair: string;
+    let halo: string;
+    let linea: string;
+    const sha: Record<string, string> = {};
+
+    beforeAll(async () => {
+      halo = await w.model('HALO', { price: [60_000, 'EUR'] });
+      linea = await w.model('LINEA', { price: [40_000, 'EUR'] });
+      // Each piece's reference photograph (the countdown image's FULL draws them side by side).
+      for (const [id, name] of [[halo, 'halo'], [linea, 'linea']] as const) {
+        const bytes = randomBytes(64);
+        sha[name] = createHash('sha256').update(bytes).digest('hex');
+        await h.t.db.insertInto('media_objects').values({ sha256: sha[name]!, mime: 'image/jpeg', bytes, width: 4, height: 5 }).execute();
+        await h.t.db.updateTable('models').set({ image_sha256: sha[name]! }).where('id', '=', id).execute();
+      }
+      pair = (await h.t.db.insertInto('sets').values({ name: 'The Pair', code: 'THE-PAIR', base_price_minor: 100_000, base_currency: 'EUR' }).returning('id').executeTakeFirstOrThrow()).id;
+      await h.t.db.insertInto('set_models').values([{ set_id: pair, position: 1, model_id: halo }, { set_id: pair, position: 2, model_id: linea }]).execute();
+      S = await w.drop({ mode: 'DRAW', setId: pair, title: 'THE PAIR — DRAW', opens: '2026-11-20', quantity: 4 });
+    });
+
+    it('serves what the countdown image may show: the set\'s name and each piece\'s name and photograph in order; a model\'s release its one piece', async () => {
+      const c = await svc().campaign(S.id);
+      expect(c.release).toMatchObject({ id: S.id, mode: 'DRAW', title: 'THE PAIR — DRAW', published: true, cancelled: false });
+      expect(c.offer).toEqual({
+        kind: 'SET',
+        name: 'The Pair',
+        pieces: [
+          { piece: 1, name: 'HALO', variant: null, photo: `/api/v1/media/${sha.halo}` },
+          { piece: 2, name: 'LINEA', variant: null, photo: `/api/v1/media/${sha.linea}` },
+        ],
+      });
+      expect(c.missing).toHaveLength(7);
+      const M = await w.drop({ mode: 'DRAW', modelId: model, title: 'MONOLITHE ONE', opens: '2026-11-21', quantity: 1 });
+      expect((await svc().campaign(M.id)).offer).toEqual({ kind: 'MODEL', name: 'MONOLITHE', pieces: [{ piece: null, name: 'MONOLITHE', variant: null, photo: null }] });
+    });
+
+    it('makes its links in one click and reads each: a set sale\'s buyer once, its revenue the set\'s price over its pieces\' orders; its .ics names the set', async () => {
+      const { made } = await svc().makeLinks(S.id, actor);
+      expect(made.map((l) => l.code)).toEqual(['instagram', 'tiktok', 'influencers', 'press', 'shops', 'search', 'other'].map((c) => `release-20-nov-${c}`));
+      expect(made.map((l) => l.name)).toContain('THE PAIR — DRAW · Instagram');
+      const instagram = made[0]!.id;
+      // A entered from the Instagram link and bought the set: one set sale, one order per piece at its share.
+      const a = await w.drawEntry(S.id, acc.A!, 'CONFIRMED', '2026-11-20');
+      await convert('DRAW_ENTRY', a, acc.A!, instagram);
+      const sale = await h.t.db.insertInto('set_sales').values({ set_id: pair, drop_id: S.id, account_id: acc.A!, price_minor: 100_000, currency: 'EUR' }).returning('id').executeTakeFirstOrThrow();
+      const first = await w.order({ accountId: acc.A!, modelId: halo, channel: 'DRAW', dropId: S.id, dropEntryId: a, setSaleId: sale.id, setPiece: 1, paid: '2026-11-21', total: 60_000, currency: 'EUR' });
+      const second = await w.order({ accountId: acc.A!, modelId: linea, channel: 'DRAW', dropId: S.id, dropEntryId: a, setSaleId: sale.id, setPiece: 2, withOrderId: first, paid: '2026-11-21', total: 40_000, currency: 'EUR' });
+      for (const o of [first, second]) await convert('ORDER', o, acc.A!, instagram);
+      // B entered from nowhere known.
+      await w.drawEntry(S.id, acc.B!, 'ENTERED', '2026-11-20');
+      const r = (await svc().campaign(S.id)).readout;
+      expect(r.currency).toBe('EUR');
+      expect(r.links.find((x) => x.link.id === instagram)!.figures).toEqual(F(1, 1, 100_000));
+      expect(r.other).toEqual(F(1, 0, 0));
+      expect(r.total).toEqual(F(2, 1, 100_000));
+      const ics = await h.ctx.services.drops.calendar(S.id, 'https://verify.orbes.test');
+      expect(ics.body).toContain('SUMMARY:DRAW · The Pair · ORBES');
+      expect(ics.body).not.toContain('HALO');
+    });
+  });
+
   describe('over HTTP (routes/admin/drops.ts)', () => {
     it('reads for an AUDITOR, makes for an OPERATOR only, with its CSRF token; 404 for an unknown release, 400 for a malformed id', async () => {
       const R = await w.drop({ mode: 'DRAW', modelId: model, title: 'OVER HTTP', opens: '2026-11-25', quantity: 1 });

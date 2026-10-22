@@ -174,6 +174,7 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       shipping: null,
       // BP-19 T5: travelling with no order, not a welcome gift, no credit taken off it.
       withOrder: null,
+      set: null,
       giftTier: null,
       creditMinor: 0,
       status: 'RESERVED',
@@ -218,6 +219,7 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       canAddAddons: false,
       shipping: null,
       withOrder: null,
+      set: null,
       giftTier: null,
       creditMinor: 0,
       status: 'DELIVERED',
@@ -257,7 +259,7 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
     const list = (safeJson(res) as { orders: Json[] }).orders;
     for (const o of list) {
       expect(Object.keys(o).sort()).toEqual(
-        ['addonItems', 'addons', 'address', 'canAddAddons', 'addressOf', 'cancelledAt', 'case', 'channel', 'claimCode', 'creditMinor', 'currency', 'deliveredAt', 'deliveryIssue', 'documents', 'editable', 'engraving', 'engravingOffer', 'giftTier', 'id', 'imageUrl', 'model', 'modelVariant', 'paidAt', 'preparingAt', 'priceMinor', 'reference', 'release', 'reservedAt', 'returnable', 'returnedAt', 'shipment', 'shippedAt', 'shipping', 'size', 'status', 'withOrder'].sort(),
+        ['addonItems', 'addons', 'address', 'canAddAddons', 'addressOf', 'cancelledAt', 'case', 'channel', 'claimCode', 'creditMinor', 'currency', 'deliveredAt', 'deliveryIssue', 'documents', 'editable', 'engraving', 'engravingOffer', 'giftTier', 'id', 'imageUrl', 'model', 'modelVariant', 'paidAt', 'preparingAt', 'priceMinor', 'reference', 'release', 'reservedAt', 'returnable', 'returnedAt', 'shipment', 'shippedAt', 'shipping', 'set', 'size', 'status', 'withOrder'].sort(),
       );
       expect(Object.keys(o.documents).sort()).toEqual(['careConditions', 'careGuide', 'certificate', 'creditNote', 'invoice', 'others']);
       for (const a of o.addons) expect(Object.keys(a).sort()).toEqual(['label', 'priceMinor']);
