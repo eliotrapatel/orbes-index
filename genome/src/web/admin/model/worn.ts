@@ -215,7 +215,7 @@ export function endedWhy(p: Pick<AdminWornPhoto, 'status' | 'refusal'>): string 
 /** Who ended it: the reviewer's email, the owner, or the housekeeping. */
 export function endedWho(p: Pick<AdminWornPhoto, 'status' | 'reviewedBy'>): string {
   if (p.status === 'REFUSED' || p.status === 'TAKEN_DOWN') return p.reviewedBy?.email ?? '—';
-  if (p.status === 'WITHDRAWN') return 'The owner';
+  if (p.status === 'WITHDRAWN') return 'its owner';
   if (p.status === 'ENDED') return 'ORBES, automatically';
   return '—';
 }

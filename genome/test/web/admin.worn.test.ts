@@ -119,7 +119,7 @@ describe('the WORN page (plan MACRO M2 §2.4)', () => {
     const by = { id: 'x', email: 'staff@orbes.test' };
     expect([endedWhy(photo({ status: 'REFUSED', refusal: 'QUALITY' })), endedWho(photo({ status: 'REFUSED', reviewedBy: by }))]).toEqual(['Not sharp enough', 'staff@orbes.test']);
     expect([endedWhy(photo({ status: 'TAKEN_DOWN', refusal: 'NOT_SUITABLE' })), endedWho(photo({ status: 'TAKEN_DOWN', reviewedBy: by }))]).toEqual(['Cannot be shown in WORN', 'staff@orbes.test']);
-    expect([endedWhy(photo({ status: 'WITHDRAWN' })), endedWho(photo({ status: 'WITHDRAWN' }))]).toEqual(['Withdrawn by its owner', 'The owner']);
+    expect([endedWhy(photo({ status: 'WITHDRAWN' })), endedWho(photo({ status: 'WITHDRAWN' }))]).toEqual(['Withdrawn by its owner', 'its owner']);
     expect([endedWhy(photo({ status: 'ENDED' })), endedWho(photo({ status: 'ENDED' }))]).toEqual(['The piece left its owner', 'ORBES, automatically']);
   });
 
