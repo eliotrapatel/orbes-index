@@ -488,14 +488,23 @@ export const liveParams = z.object({ id: z.string().max(64) });
 /** An id the service checks against the release's own (a size, an add-on): one that is not answers 400 LIVE_SIZE_UNKNOWN or LIVE_ADDON_UNKNOWN. */
 const liveRef = z.string().max(64);
 
-/** PUT /api/v1/live/:id/interest: I'LL BE THERE, in this size. */
-export const liveInterestBody = body({ sizeId: liveRef });
+/** Macro scope K44 T1: a LIVE RELEASE's size (`sizeId`, a model's), or a size per piece (`sizes`, a set's): exactly one. */
+const oneLiveChoice = (b: { sizeId?: string; sizes?: unknown }) => (b.sizeId === undefined) !== (b.sizes === undefined);
+const liveChoiceMessage = { message: 'Send the size, or a size per piece of a set', path: ['sizes'] };
 
-/** POST /api/v1/live/:id/enter and /size: the size, and the pieces (1 by default; up to the release's own limit, at most 5). */
+/** PUT /api/v1/live/:id/interest: I'LL BE THERE, in this size; on a set's release (K44 T1), a size per piece (`sizes`). */
+export const liveInterestBody = body({ sizeId: liveRef.optional(), sizes: pieceSizes.optional() }).refine(oneLiveChoice, liveChoiceMessage);
+
+/**
+ * POST /api/v1/live/:id/enter and /size: the size, and the pieces (1 by default; up to the release's own limit, at most
+ * 5). Macro scope K44 T1 and T4: on a set's release, a size per piece (`sizes`; CHANGE SIZE may name some of its pieces),
+ * its quantity in sets.
+ */
 export const liveEntryBody = body({
-  sizeId: liveRef,
+  sizeId: liveRef.optional(),
+  sizes: pieceSizes.optional(),
   quantity: z.number().int('Must be a whole number of pieces').min(1, 'At least 1 piece').max(LIVE_PER_ACCOUNT.max, `At most ${LIVE_PER_ACCOUNT.max} pieces`).optional(),
-});
+}).refine(oneLiveChoice, liveChoiceMessage);
 
 /** POST /api/v1/live/:id/press and /secure: the turn's secret, as the account's state gave it. */
 export const liveTurnBody = body({ token: z.string().trim().min(1, 'Required').max(128, 'Invalid turn').regex(BASE64URL_RE, 'Invalid turn') });
@@ -950,10 +959,21 @@ const livePaceFields = {
   batch: whole(LIVE_PACE_BATCH.min, LIVE_PACE_BATCH.max, 'buyers'),
   minutes: whole(LIVE_PACE_MINUTES.min, LIVE_PACE_MINUTES.max, 'minutes'),
 };
+/**
+ * A release's sizes; macro scope K44 T1: a set's release names each size's piece (1 to 4; 24 sizes per piece), the
+ * service checks them against its set (a model's never names one).
+ */
 const liveSizes = z
-  .array(z.strictObject({ id: uuid.nullable().optional(), label: text(LIVE_SIZES.label), stock: whole(0, LIVE_SIZE_STOCK_MAX, 'pieces') }))
+  .array(
+    z.strictObject({
+      id: uuid.nullable().optional(),
+      label: text(LIVE_SIZES.label),
+      stock: whole(0, LIVE_SIZE_STOCK_MAX, 'pieces'),
+      piece: z.number().int('Must be a whole number').min(1, 'At least 1').max(SET_PIECES_MAX, `At most ${SET_PIECES_MAX}`).nullable().optional(),
+    }),
+  )
   .min(LIVE_SIZES.min, `At least ${LIVE_SIZES.min} size`)
-  .max(LIVE_SIZES.max, `At most ${LIVE_SIZES.max} sizes`);
+  .max(LIVE_SIZES.max * SET_PIECES_MAX, `At most ${LIVE_SIZES.max * SET_PIECES_MAX} sizes`);
 const liveAddons = z
   .array(
     z.strictObject({
@@ -964,9 +984,13 @@ const liveAddons = z
     }),
   )
   .max(LIVE_ADDONS_MAX, `At most ${LIVE_ADDONS_MAX} add-ons`);
-/** The settings of a LIVE RELEASE (services/live-console.ts holds their rules: the times' order, the totals, the lists' ids). */
+/**
+ * The settings of a LIVE RELEASE (services/live-console.ts holds their rules: the times' order, the totals, the lists'
+ * ids). Macro scope K44 T1: what it sells, its model or its set (`setId`, its sizes per piece).
+ */
 const liveSettingsFields = {
-  modelId: uuid,
+  modelId: uuid.optional(),
+  setId: uuid.optional(),
   title: dropTitle,
   description: z.preprocess(emptyToNull, text(DROP_DESCRIPTION_MAX).nullable().optional()),
   opensAt: isoDateTime,
@@ -1031,8 +1055,10 @@ const liveSettingsFields = {
     .optional(),
 };
 
-/** POST /api/admin/live: a LIVE RELEASE, a DRAFT, with its settings (the defaults for those left out). */
-export const createLiveBody = body(liveSettingsFields).refine((b) => b.closesAt.getTime() > b.opensAt.getTime(), { message: 'The release ends after T0', path: ['closesAt'] });
+/** POST /api/admin/live: a LIVE RELEASE, a DRAFT, with its settings (the defaults for those left out); its model or (K44 T1) its set. */
+export const createLiveBody = body(liveSettingsFields)
+  .refine((b) => b.closesAt.getTime() > b.opensAt.getTime(), { message: 'The release ends after T0', path: ['closesAt'] })
+  .refine((b) => (b.modelId === undefined) !== (b.setId === undefined), { message: 'Send the model, or the set, the release sells', path: ['modelId'] });
 
 /** PATCH /api/admin/live/:id: any setting until the announcement; a list given replaces the release's. At least one. */
 export const updateLiveBody = body(Object.fromEntries(Object.entries(liveSettingsFields).map(([k, v]) => [k, (v as z.ZodType).optional()])) as {
@@ -1055,7 +1081,9 @@ export const liveStockBody = body({ sizeId: uuid, pieces: whole(LIVE_ADD_PIECES.
 export const liveMessageBody = body({ text: text(LIVE_MESSAGE_MAX).refine((s) => !/[\r\n]/.test(s), 'One line') });
 
 /** GET /api/admin/live/size-mix (plan LIVE RELEASE+, choice 13): the model of a new release, and the location (none: the default). */
-export const liveSizeMixQuery = z.object({ modelId: uuid, locationId: queryOptional(uuid) });
+export const liveSizeMixQuery = z
+  .object({ modelId: queryOptional(uuid), setId: queryOptional(uuid), locationId: queryOptional(uuid) })
+  .refine((q) => (q.modelId === undefined) !== (q.setId === undefined), { message: 'Send the model, or the set (K44 T1: a size mix per piece)', path: ['modelId'] });
 
 const bestTimeDays = queryOptional(
   z.preprocess(

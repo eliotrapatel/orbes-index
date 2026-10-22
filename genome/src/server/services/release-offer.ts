@@ -33,9 +33,11 @@
  *     - the draw's own flows (services/drops.ts, M3.15): created with its set and its sizes per piece, its entries' sizes
  *       per piece, the fill and OFFER NEXT by every size, its public page's and the console's `set` (the set itself in
  *       the card's `model`, never one of its models);
- *     - the LIVE RELEASE's own views and settings (services/live-console.ts `settings` and its cards, services/live-room.ts):
- *       a set's LIVE RELEASE reaches them with its creation (M3.16); until then they read a model's release only, through
- *       `modelOfModelRelease`, which names the step.
+ *     - the LIVE RELEASE's own flows (services/live.ts, live-room.ts, live-console.ts, release-stock.ts, live-insights.ts,
+ *       test-entrants.ts, M3.16): created with its set and its sizes per piece, I'LL BE THERE, ENTER and CHANGE SIZE with a
+ *       size per piece, the turns by every size, its sets per person (T4), PAY's set sales, its sell-out by sets, ADD
+ *       PIECES per piece's size, its feasibility, size mix and boards per piece; its public and console views carry `set`
+ *       (the set itself in the card's `model`, never one of its models).
  */
 import type { Db } from '../db/connection.js';
 import type { SizeKind, SizeType } from '../db/schema.js';
@@ -170,16 +172,6 @@ export const offerName = (offer: ReleaseOffer): string => (offer.kind === 'SET' 
  */
 export function afterRoomModelId(d: { readonly model_id: string | null }): string {
   if (d.model_id === null) throw new Error('afterRoomModelId: an after-room always sells a model (drops_set_no_after_room)');
-  return d.model_id;
-}
-
-/**
- * The model of a release that a view of the LIVE RELEASE's own flows reads (SET-AWARE, see the header): those views read
- * a model's release until a set's LIVE RELEASE can be made (M3.16); the rows they read are joined to their model, so a
- * set's release does not reach them, and this says so if one did.
- */
-export function modelOfModelRelease(d: { readonly model_id: string | null }, step: 'M3.16'): string {
-  if (d.model_id === null) throw new Error(`This view reads a set's release from ${step} on.`);
   return d.model_id;
 }
 

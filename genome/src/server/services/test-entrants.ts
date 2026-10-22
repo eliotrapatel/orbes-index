@@ -40,6 +40,7 @@
  *    A set's release (macro scope K44 T1; plan MACRO M3 §5.2, ADAPTED): each bot chooses a size per piece (`sizes`, the
  *    Choices' size for a piece that offers it, else one of that piece's sizes with pieces at random), sent with each
  *    ENTER, RESERVE and I'LL BE THERE; its pieces then count as sets (a LIVE's quantity at most its sizes' smallest stock);
+ *    the TEST REPORT reads a set's entries in each of their sizes and its orders as one per piece of each set (M3.16);
  *  - a LIVE RELEASE: I'LL BE THERE first for its share (before T0), ENTER with its size and pieces; then it follows its
  *    turn as a phone whose stream is lost does, reading GET /state every POLL_MS (its turn's secret is there), or as
  *    often as the state's `pollMs` says while it waits for its batch on a paced release (W2: 10 s for the next batch, up
@@ -1579,7 +1580,11 @@ export class TestEntrantService {
         .orderBy('reserved_at')
         .orderBy('id')
         .execute();
-      for (const o of open) if ((await cancel(o.id)) && o.channel !== 'GIFT') out.ordersCancelled++;
+      for (const o of open) await cancel(o.id);
+      // Every order of the test cancelled now (macro scope K44 T3: cancelling one of a set's orders closes its set's
+      // others in the same transition), GIFT orders apart.
+      const sales = open.filter((o) => o.channel !== 'GIFT').map((o) => o.id);
+      if (sales.length) out.ordersCancelled += (await this.db.selectFrom('orders').select('id').where('id', 'in', sales).where('status', '=', 'CANCELLED').execute()).length;
       // The check: no GIFT order of the test left open, no credit left on a cancelled order of the test.
       for (const g of await ofTest(ids).select('id').where('channel', '=', 'GIFT').where('status', 'in', ['RESERVED', 'PAID']).orderBy('reserved_at').orderBy('id').execute()) await cancel(g.id);
       const credited = await this.db
@@ -1676,6 +1681,8 @@ export class TestEntrantService {
     return inTransaction(this.db, async (tx) => {
       let n = 0;
       for (const ids of chunks(accounts)) {
+        // Macro scope K44 T1: a set's interest, its sizes per piece first (they name it: ON DELETE RESTRICT).
+        await tx.deleteFrom('live_interest_sizes').where('drop_id', '=', d.id).where('account_id', 'in', ids).execute();
         const gone = await tx.deleteFrom('live_interest').where('drop_id', '=', d.id).where('account_id', 'in', ids).returning('account_id').execute();
         for (const _ of gone) await this.ctx.audit.record({ actor, action: 'drop.live.interest.withdraw', targetType: 'drop', targetId: d.id, details: { reason: 'test_ended' } }, tx);
         n += gone.length;
@@ -1697,6 +1704,10 @@ export class TestEntrantService {
     const entries = await this.db.selectFrom('drop_entries').select(['id', 'account_id', 'status', 'tier', 'seniority', 'rank', 'pieces', 'size_id']).where('drop_id', '=', d.id).execute();
     // Plan NEXT LOT §3.6.F: a draw's sizes (none for a draw published before, one pool).
     const sizes = await this.db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', d.id).orderBy('position').execute();
+    // Macro scope K44 T1: a set's draw, each entry in each of its sizes, a place one set (one order per piece of it).
+    const setSizes = d.set_id !== null ? await this.entrySizeIds('drop_entry_sizes', d.id) : null;
+    const perSet = d.set_id !== null ? await this.setPieceCount(d.set_id) : 1;
+    const inSizeOf = (e: { id: string; size_id: string | null }, sizeId: string) => (setSizes ? (setSizes.get(e.id) ?? []).includes(sizeId) : e.size_id === sizeId);
     // IN-01: a place guaranteed by the house holds its guarantee's pieces (1 to 5), one order each.
     const piecesOf = (e: { pieces: number }) => Math.max(1, Number(e.pieces) || 1);
     const checks: TestReportCheck[] = [oneEntry(entries)];
@@ -1747,19 +1758,21 @@ export class TestEntrantService {
       .where('e.drop_id', '=', d.id)
       .execute();
     const forConfirmed = orders.filter((o) => confirmed.some((e) => e.id === o.drop_entry_id)).length;
+    // A set's place: one order per piece of its set.
+    const owed = confirmedPieces * perSet;
     const negative = await this.negativeStock(orders);
     // Plan NEXT LOT §3.6.F: in a draw with sizes, held or sold within each size's pieces.
-    const heldIn = (sizeId: string) => entries.filter((e) => e.size_id === sizeId && (e.status === 'SELECTED' || e.status === 'CONFIRMED')).reduce((n, e) => n + piecesOf(e), 0);
+    const heldIn = (sizeId: string) => entries.filter((e) => inSizeOf(e, sizeId) && (e.status === 'SELECTED' || e.status === 'CONFIRMED')).reduce((n, e) => n + piecesOf(e), 0);
     const overSize = sizes.find((z) => heldIn(z.id) > z.stock);
     checks.push(
       stock(
-        held <= d.quantity && !overSize && forConfirmed === confirmedPieces && negative === 0,
+        held <= d.quantity && !overSize && forConfirmed === owed && negative === 0,
         held > d.quantity
           ? `${count(held, 'place')} held or sold for ${count(d.quantity, 'piece')}.`
           : overSize
             ? `${sizeAtStart(overSize.label)}: ${count(heldIn(overSize.id), 'place')} held or sold for ${count(overSize.stock, 'piece')}.`
-          : forConfirmed !== confirmedPieces
-            ? `${count(confirmed.length, 'place')} confirmed${confirmedPieces !== confirmed.length ? ` for ${count(confirmedPieces, 'piece')}` : ''}, ${count(forConfirmed, 'order')}.`
+          : forConfirmed !== owed
+            ? `${count(confirmed.length, 'place')} confirmed${owed !== confirmed.length ? ` for ${count(owed, 'piece')}` : ''}, ${count(forConfirmed, 'order')}.`
             : negative > 0
               ? `${negative} stock ${negative === 1 ? 'line is' : 'lines are'} below zero.`
               : `${held} of ${count(d.quantity, 'place')} held or sold${sizes.length > 0 ? ', within each size’s pieces' : ''}, ${confirmed.length} confirmed with ${count(forConfirmed, 'order')}; no stock below zero.`,
@@ -1767,9 +1780,21 @@ export class TestEntrantService {
     );
 
     // 5. Every confirmed place has its orders, one per piece.
-    const missing = confirmed.filter((e) => orders.filter((o) => o.drop_entry_id === e.id).length < piecesOf(e)).length;
+    const missing = confirmed.filter((e) => orders.filter((o) => o.drop_entry_id === e.id).length < piecesOf(e) * perSet).length;
     checks.push(ordersCheck(missing, confirmed.length));
     return checks;
+  }
+
+  /** Macro scope K44 T1: the sizes per piece of a set's release's entries, by entry id. */
+  private async entrySizeIds(table: 'drop_entry_sizes' | 'live_entry_sizes', dropId: string): Promise<Map<string, string[]>> {
+    const out = new Map<string, string[]>();
+    for (const r of await this.db.selectFrom(table).select(['entry_id', 'size_id']).where('drop_id', '=', dropId).execute()) out.set(r.entry_id, [...(out.get(r.entry_id) ?? []), r.size_id]);
+    return out;
+  }
+
+  /** Macro scope K44 T1: a set's pieces, how many. */
+  private async setPieceCount(setId: string): Promise<number> {
+    return Number((await this.db.selectFrom('set_models').select((eb) => eb.fn.countAll<number>().as('n')).where('set_id', '=', setId).executeTakeFirstOrThrow()).n);
   }
 
   private async liveChecks(d: DropRow, now: Date): Promise<TestReportCheck[]> {
@@ -1818,10 +1843,14 @@ export class TestEntrantService {
     );
 
     // 4. Stock: per size, the pieces in a turn, held or sold within its stock; one order per piece confirmed; no stock below zero.
+    // Macro scope K44 T1: a set's entry in each of its sizes, its quantity its sets, one order per piece of each set.
     const sizes = await this.db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', d.id).execute();
-    const over = sizes.filter((z) => entries.filter((e) => e.size_id === z.id && (e.status === 'TURN' || e.status === 'SECURED' || e.status === 'CONFIRMED')).reduce((n, e) => n + e.quantity, 0) > z.stock);
+    const setSizes = d.set_id !== null ? await this.entrySizeIds('live_entry_sizes', d.id) : null;
+    const perSet = d.set_id !== null ? await this.setPieceCount(d.set_id) : 1;
+    const inSizeOf = (e: { id: string; size_id: string }, sizeId: string) => (setSizes ? (setSizes.get(e.id) ?? []).includes(sizeId) : e.size_id === sizeId);
+    const over = sizes.filter((z) => entries.filter((e) => inSizeOf(e, z.id) && (e.status === 'TURN' || e.status === 'SECURED' || e.status === 'CONFIRMED')).reduce((n, e) => n + e.quantity, 0) > z.stock);
     const confirmed = entries.filter((e) => e.status === 'CONFIRMED');
-    const pieces = confirmed.reduce((n, e) => n + e.quantity, 0);
+    const pieces = confirmed.reduce((n, e) => n + e.quantity * perSet, 0);
     const orders = await this.db
       .selectFrom('orders as o')
       .innerJoin('live_entries as e', 'e.id', 'o.live_entry_id')
@@ -1844,7 +1873,7 @@ export class TestEntrantService {
     );
 
     // 5. Every confirmed place has its orders, one per piece.
-    const missing = confirmed.filter((e) => orders.filter((o) => o.live_entry_id === e.id).length < e.quantity).length;
+    const missing = confirmed.filter((e) => orders.filter((o) => o.live_entry_id === e.id).length < e.quantity * perSet).length;
     checks.push(ordersCheck(missing, confirmed.length));
 
     // 6. W4, a release with a pace: its batches, from its entries and its audit log.

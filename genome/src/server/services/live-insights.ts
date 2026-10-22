@@ -59,7 +59,7 @@ import { csvDocument, CSV_CONTENT_TYPE } from '../render/csv.js';
 import { systemClock, type Clock } from '../types.js';
 import { clubCounts, clubStandings, tierForPieces, tierName, type ClubTier } from './club.js';
 import { DROP_QUANTITY_MAX, dropNotFound } from './drops.js';
-import { releaseOffer, type ReleaseOffer } from './release-offer.js';
+import { releaseOffer, setPieces, type ReleaseOffer } from './release-offer.js';
 import {
   accessAccounts,
   effectiveDeadline,
@@ -67,7 +67,9 @@ import {
   LIVE_GESTURE_MIN_MS,
   LIVE_NETWORK_RETENTION_DAYS,
   LIVE_OPEN_STATUSES,
+  onSaleOf,
   roomOpensAt,
+  setTurns,
   type LivePhase,
 } from './live.js';
 import { defaultQuantityLine, liveMoney, majorUnits } from './live-console.js';
@@ -198,6 +200,8 @@ export interface InsightSize {
   id: string;
   label: string;
   stock: number;
+  /** Macro scope K44 T1: a set's release's piece (1 to 4); null or absent on a model's. */
+  piece?: number | null;
 }
 
 /** A release as the rules read it. */
@@ -253,7 +257,25 @@ export interface InsightEntry {
    * Omitted (fixtures, entries before 0049): admitted, as with no pace.
    */
   admittedAt?: Date | null;
+  /**
+   * Macro scope K44 T1: a set's entry, its size for each piece (`sizeId` its first piece's): it counts in each of them,
+   * its quantity its sets. Absent on a model's release.
+   */
+  sizeIds?: readonly string[];
 }
+
+/** Whether an entry counts in size `id`: its size, or (a set's, macro scope K44 T1) one of its sizes per piece. */
+export const inSize = (e: Pick<InsightEntry, 'sizeId' | 'sizeIds'>, id: string): boolean => (e.sizeIds ? e.sizeIds.includes(id) : e.sizeId === id);
+
+/** An entry's sizes in words: its size, or (a set's) each piece's joined (« 52 · M »). */
+export const sizeWords = (e: Pick<InsightEntry, 'sizeId' | 'sizeIds'>, label: ReadonlyMap<string, string>): string =>
+  (e.sizeIds ?? [e.sizeId]).map((id) => label.get(id) ?? '').join(' · ');
+
+/** The sizes a release's figures overall read: a model's, every size; a set's (macro scope K44 T1), its first piece's, where each entry counts once. */
+const countedSizes = <S extends { piece?: number | null }>(sizes: readonly S[]): S[] => {
+  const first = Math.min(...sizes.map((s) => s.piece ?? 0));
+  return sizes.filter((s) => (s.piece ?? 0) === first);
+};
 
 /**
  * The outcome of a LIVE entry from its orders (services/orders.ts), as SQL over `live_entries` aliased `e`: CANCELLED
@@ -283,7 +305,7 @@ export function insightRelease(d: DropRow, sizes: readonly InsightSize[]): Insig
     priceMinor: d.price_minor ?? 0,
     currency: d.currency ?? 'EUR',
     quantityLine: d.quantity_line ?? defaultQuantityLine(d.quantity),
-    sizes: sizes.map((s) => ({ id: s.id, label: s.label, stock: s.stock })),
+    sizes: sizes.map((s) => ({ id: s.id, label: s.label, stock: s.stock, ...(s.piece !== null && s.piece !== undefined ? { piece: s.piece } : {}) })),
   };
 }
 
@@ -379,7 +401,8 @@ export function summarize(r: InsightRelease, entries: readonly InsightEntry[], i
   const confirmedPieces = sumQ(confirmed);
   const cancelled = confirmed.filter((e) => e.resolution === 'CANCELLED');
   const unservedPieces = sumQ(entries.filter(unserved));
-  const stock = r.sizes.reduce((n, s) => n + s.stock, 0);
+  // Its pieces on sale; a set's release (macro scope K44 T1), its sets on sale, as its entries' quantities count sets.
+  const stock = onSaleOf(r.sizes);
   const cohort = entries.filter((e) => atT0(r, e));
   const last = confirmed.reduce<number | null>((m, e) => (m === null || e.confirmedAt!.getTime() > m ? e.confirmedAt!.getTime() : m), null);
   return {
@@ -610,6 +633,8 @@ export function releasePlan(input: {
 export interface RadarSize {
   id: string;
   label: string;
+  /** Macro scope K44 T1: a set's release's piece (1 to 4); absent on a model's. */
+  piece?: number;
   stock: number;
   interest: number;
   /** In the room in this size: people and the pieces they ask for. */
@@ -650,7 +675,8 @@ export function demandRadar(input: {
   release: InsightRelease;
   /** The entries in the room (WAITING). */
   room: readonly InsightEntry[];
-  interest: readonly { sizeId: string; tier: number }[];
+  /** I'LL BE THERE: one per account; a set's release (macro scope K44 T1), one per account and piece (`piece`). */
+  interest: readonly { sizeId: string; tier: number; piece?: number | null }[];
   /** The rates of past releases, pooled. */
   past: LineRates | null;
   now: Date;
@@ -678,7 +704,7 @@ export function demandRadar(input: {
     `A size sells out when its demand at that conversion reaches its stock: its pieces go at T0, ${rounds === 1 ? 'in one round' : `in ${count(rounds)} rounds, each returned piece going to the next in line after a turn of ${duration(r.turnSeconds * SECOND)}`}: T0 + ${duration(roundMs)}.`,
   );
   const sizes: RadarSize[] = r.sizes.map((s) => {
-    const room = input.room.filter((e) => e.sizeId === s.id);
+    const room = input.room.filter((e) => inSize(e, s.id));
     const interest = input.interest.filter((i) => i.sizeId === s.id).length;
     const roomPieces = sumQ(room);
     const demand = roomOpen ? roomPieces : interest;
@@ -688,6 +714,7 @@ export function demandRadar(input: {
     return {
       id: s.id,
       label: s.label,
+      ...(s.piece !== null && s.piece !== undefined ? { piece: s.piece } : {}),
       stock: s.stock,
       interest,
       inRoom: room.length,
@@ -700,8 +727,11 @@ export function demandRadar(input: {
       addPieces: suggest,
     };
   });
-  const stock = r.sizes.reduce((n, s) => n + s.stock, 0);
-  const demand = sizes.reduce((n, s) => n + s.demand, 0);
+  // Overall, a set's release (macro scope K44 T1) reads sets: its sets on sale, the demand of its first piece's sizes.
+  const stock = onSaleOf(r.sizes);
+  const demand = countedSizes(sizes).reduce((n, s) => n + s.demand, 0);
+  const firstPiece = Math.min(...r.sizes.map((s) => s.piece ?? 0));
+  const interested = input.interest.filter((i) => (i.piece ?? 0) === firstPiece || firstPiece === 0);
   for (const s of sizes) {
     if (s.stock === 0) continue;
     why.push(
@@ -722,10 +752,10 @@ export function demandRadar(input: {
     formed,
     inRoom: input.room.length,
     stock,
-    interest: input.interest.length,
+    interest: interested.length,
     pressure: stock > 0 ? demand / stock : null,
     sizes,
-    byTier: TIERS.map((t) => ({ tier: t, interest: input.interest.filter((i) => i.tier === t).length, inRoom: input.room.filter((e) => e.tier === t).length })),
+    byTier: TIERS.map((t) => ({ tier: t, interest: interested.filter((i) => i.tier === t).length, inRoom: input.room.filter((e) => e.tier === t).length })),
     conversion,
     sellOutAt: all.length > 0 && all.every((s) => s.sellsOut) ? new Date(r.opensAt.getTime() + roundMs) : null,
     quantityLine: r.quantityLine,
@@ -770,17 +800,32 @@ export function dueTurns(r: InsightRelease, entries: readonly InsightEntry[], no
   const t = now.getTime();
   if (t < r.opensAt.getTime() || r.endedAt || r.pausedAt || t >= r.closesAt.getTime()) return [];
   const out: StallCandidate[] = [];
+  const running = (e: InsightEntry) => (e.status === 'TURN' && !lapsed(e.turnExpiresAt, r, now)) || (e.status === 'SECURED' && !lapsed(e.holdExpiresAt, r, now));
+  const totals = new Map(
+    r.sizes.map((s) => {
+      const own = entries.filter((e) => inSize(e, s.id));
+      const confirmed = sumQ(own.filter((e) => e.status === 'CONFIRMED'));
+      return [s.id, { free: s.stock - confirmed - sumQ(own.filter(running)), servable: s.stock - confirmed }] as const;
+    }),
+  );
+  // Macro scope K44 T1: a set's release gives its turns by the set rule (services/live.ts setTurns): the head of a size is
+  // the first entry in it that rule would serve now.
+  const granted = r.sizes.some((s) => s.piece !== null && s.piece !== undefined)
+    ? setTurns(
+        entries.filter((e) => e.status === 'QUEUED' && e.admittedAt !== null).sort((a, b) => (a.position ?? 0) - (b.position ?? 0)).map((e) => ({ ...e, sizeIds: e.sizeIds ?? [e.sizeId] })),
+        totals,
+      )
+    : null;
   for (const s of r.sizes) {
-    const own = entries.filter((e) => e.sizeId === s.id);
-    const running = (e: InsightEntry) => (e.status === 'TURN' && !lapsed(e.turnExpiresAt, r, now)) || (e.status === 'SECURED' && !lapsed(e.holdExpiresAt, r, now));
-    const confirmed = sumQ(own.filter((e) => e.status === 'CONFIRMED'));
-    const free = s.stock - confirmed - sumQ(own.filter(running));
-    const servable = s.stock - confirmed;
-    const head = own
-      // W4: only an admitted entry takes a turn; one waiting for its batch is due nothing yet.
-      .filter((e) => e.status === 'QUEUED' && e.admittedAt !== null && e.quantity <= servable)
-      // IN-01: the places guaranteed by the house first in their size, as the engine gives the turns.
-      .sort((a, b) => Number(b.guaranteed === true) - Number(a.guaranteed === true) || (a.position ?? 0) - (b.position ?? 0))[0];
+    const own = entries.filter((e) => inSize(e, s.id));
+    const { free, servable } = totals.get(s.id)!;
+    const head = granted
+      ? granted.find((e) => inSize(e, s.id))
+      : own
+          // W4: only an admitted entry takes a turn; one waiting for its batch is due nothing yet.
+          .filter((e) => e.status === 'QUEUED' && e.admittedAt !== null && e.quantity <= servable)
+          // IN-01: the places guaranteed by the house first in their size, as the engine gives the turns.
+          .sort((a, b) => Number(b.guaranteed === true) - Number(a.guaranteed === true) || (a.position ?? 0) - (b.position ?? 0))[0];
     if (!head || head.quantity > free) continue;
     // The clock moves only on what makes this turn due or shows the engine at work: T0, the head's own place in the line,
     // a turn given, pieces returned (a turn or a hold that ended), a place ahead of the head left, a confirmation that
@@ -811,10 +856,10 @@ export function liveAlerts(r: InsightRelease, entries: readonly InsightEntry[], 
   // 1. A size sells out: every piece of it confirmed.
   for (const s of r.sizes) {
     if (s.stock < 1) continue;
-    const confirmed = entries.filter((e) => e.sizeId === s.id && e.status === 'CONFIRMED');
+    const confirmed = entries.filter((e) => inSize(e, s.id) && e.status === 'CONFIRMED');
     if (sumQ(confirmed) < s.stock) continue;
     const since = new Date(Math.max(...confirmed.map((e) => e.confirmedAt!.getTime())));
-    const waiting = entries.filter((e) => e.sizeId === s.id && (e.status === 'QUEUED' || e.status === 'WAITING')).length;
+    const waiting = entries.filter((e) => inSize(e, s.id) && (e.status === 'QUEUED' || e.status === 'WAITING')).length;
     out.push({
       kind: 'SIZE_SOLD_OUT',
       size: { id: s.id, label: s.label },
@@ -853,7 +898,7 @@ export function liveAlerts(r: InsightRelease, entries: readonly InsightEntry[], 
     for (const d of [controls.resumedAt, controls.stockAt]) if (d && d.getTime() > since && d.getTime() <= t) since = d.getTime();
     const waited = t - since;
     if (waited < LIVE_INSIGHT_RULES.stallSeconds * SECOND) continue;
-    const queued = entries.filter((e) => e.sizeId === c.size.id && e.status === 'QUEUED').length;
+    const queued = entries.filter((e) => inSize(e, c.size.id) && e.status === 'QUEUED').length;
     out.push({
       kind: 'LINE_STALLED',
       size: { id: c.size.id, label: c.size.label },
@@ -925,7 +970,7 @@ export function sellOutForecast(r: InsightRelease, entries: readonly InsightEntr
   const sizes: SizeSellOut[] = [];
   for (const z of r.sizes) {
     if (z.stock < 1) continue;
-    const own = entries.filter((e) => e.sizeId === z.id);
+    const own = entries.filter((e) => inSize(e, z.id));
     const confirmed = own.filter((e) => e.status === 'CONFIRMED');
     const remaining = Math.max(0, z.stock - sumQ(confirmed));
     const pace = windowMs > 0 ? sumQ(own.filter((e) => e.securedAt !== null && e.securedAt.getTime() >= start)) / (windowMs / MINUTE) : 0;
@@ -1066,7 +1111,7 @@ export function botRadar(r: InsightRelease, facts: readonly BotEntryFacts[]): Bo
       accountId: e.accountId,
       email: f.email,
       status: e.status,
-      size: { id: e.sizeId, label: label.get(e.sizeId) ?? '' },
+      size: { id: e.sizeId, label: sizeWords(e, label) },
       tier: e.tier,
       position: e.position,
       open: (LIVE_OPEN_STATUSES as readonly string[]).includes(e.status),
@@ -1129,6 +1174,8 @@ export interface ReleaseReport {
   sizes: {
     id: string;
     label: string;
+    /** Macro scope K44 T1: a set's release's piece (1 to 4); absent on a model's. */
+    piece?: number;
     stock: number;
     added: number;
     confirmedPieces: number;
@@ -1177,7 +1224,7 @@ export function releaseReport(input: {
   ];
   const funnel = steps.map(([step, n], i) => ({ step, people: n, share: i === 0 ? null : steps[i - 1]![1] > 0 ? n / steps[i - 1]![1] : null }));
   const sizes = r.sizes.map((s) => {
-    const own = input.entries.filter((e) => e.sizeId === s.id);
+    const own = input.entries.filter((e) => inSize(e, s.id));
     const confirmed = own.filter((e) => e.status === 'CONFIRMED');
     const confirmedPieces = sumQ(confirmed);
     const lost = own.filter(unserved);
@@ -1186,6 +1233,7 @@ export function releaseReport(input: {
     return {
       id: s.id,
       label: s.label,
+      ...(s.piece !== null && s.piece !== undefined ? { piece: s.piece } : {}),
       stock: s.stock,
       added: input.additions.filter((a) => a.sizeId === s.id).reduce((n, a) => n + a.pieces, 0),
       confirmedPieces,
@@ -1213,7 +1261,8 @@ export function releaseReport(input: {
   });
   const piecesRevenueMinor = (sum.confirmedPieces - sum.cancelledPieces) * r.priceMinor;
   const addonsRevenueMinor = addons.reduce((n, a) => n + a.revenueMinor, 0);
-  const stock = sizes.reduce((n, s) => n + s.stock, 0);
+  // A set's release (macro scope K44 T1): its sets on sale, as its confirmed figures count sets.
+  const stock = onSaleOf(sizes);
   why.push(
     input.over ? 'The release is over: these figures are final.' : 'The release is not over yet: these figures are the ones so far.',
     sum.sellOutMs !== null
@@ -1235,7 +1284,7 @@ export function releaseReport(input: {
   } else {
     why.push(`No piece was added after the announcement (« ${r.quantityLine} »).`);
   }
-  const nextTotal = sizes.reduce((n, s) => n + s.nextDemand, 0);
+  const nextTotal = countedSizes(sizes).reduce((n, s) => n + s.nextDemand, 0);
   const next = { quantity: Math.min(DROP_QUANTITY_MAX, nextTotal), sizes: sizes.map((s) => ({ label: s.label, pieces: s.nextDemand })) };
   why.push(
     `Next time, by the release planner's rule applied to what this release measured: each size's pieces confirmed plus its unserved pieces at that conversion, ${next.sizes.map((s) => `${s.label} × ${count(s.pieces)}`).join(', ')}: ${pieces(next.quantity)} for an audience like this one.`,
@@ -1383,7 +1432,7 @@ export function collectorInsights(r: InsightRelease, all: readonly InsightEntry[
         accountId: e.accountId,
         email: emails.get(e.accountId) ?? '',
         tier: e.tier,
-        size: label.get(e.sizeId) ?? '',
+        size: sizeWords(e, label),
         status: e.status,
         position: e.position,
         country: e.country,
@@ -1526,6 +1575,15 @@ export interface LiveInsightsServiceDeps {
   clock?: Clock;
 }
 
+/** Macro scope K44 T1: a new set release's size mix, per piece (LiveInsightsService.setSizeMix). */
+export interface SetSizeMix {
+  set: { id: string; name: string };
+  pieces: { piece: number; mix: SizeMix }[];
+  /** The sets the proposal makes: the smallest of its pieces' totals. */
+  sets: number;
+  reasoning: string[];
+}
+
 export class LiveInsightsService {
   private readonly db: Db;
   private readonly clock: Clock;
@@ -1666,6 +1724,25 @@ export class LiveInsightsService {
     });
   }
 
+  /**
+   * Macro scope K44 T1 (plan MACRO M3 §5.2): the size mix of a new release of a set, one per piece in the set's order,
+   * each its piece's model's (`sizeMix`), and the sets the proposal makes: the smallest of the pieces' totals (a LIVE
+   * sells as many sets as its scarcest piece). 404 SET_NOT_FOUND.
+   */
+  async setSizeMix(setId: string, locationId: string | null): Promise<SetSizeMix> {
+    if (typeof setId !== 'string' || !UUID_RE.test(setId)) throw notFound('Set', 'SET_NOT_FOUND');
+    const set = await this.db.selectFrom('sets').select(['id', 'name']).where('id', '=', setId.toLowerCase()).executeTakeFirst();
+    if (!set) throw notFound('Set', 'SET_NOT_FOUND');
+    const pieces: SetSizeMix['pieces'] = [];
+    for (const p of await setPieces(this.db, set.id)) pieces.push({ piece: p.piece!, mix: await this.sizeMix(p.model.id, locationId) });
+    return {
+      set: { id: set.id, name: set.name },
+      pieces,
+      sets: pieces.length ? Math.min(...pieces.map((p) => p.mix.quantity)) : 0,
+      reasoning: [`Each piece's sizes from its own model's stock and demand; the release sells as many sets as its scarcest piece: ${pieces.map((p) => `${p.mix.model.name} ${count(p.mix.quantity)}`).join(', ')}.`],
+    };
+  }
+
   /** The audience forecast: the room expected at T0. */
   async forecast(dropId: string): Promise<AudienceForecast> {
     const now = this.clock();
@@ -1678,13 +1755,13 @@ export class LiveInsightsService {
   async radar(dropId: string): Promise<DemandRadar> {
     const now = this.clock();
     const { d, release } = await this.release(dropId);
-    const [entries, interest, past] = await Promise.all([this.entries([d.id]), this.interest(d.id), this.past(d, now)]);
-    const standings = await clubStandings(this.db, interest.map((i) => i.accountId), now);
+    const [entries, interest, past] = await Promise.all([this.entries([d.id]), this.interestBySize(d), this.past(d, now)]);
+    const standings = await clubStandings(this.db, [...new Set(interest.map((i) => i.accountId))], now);
     const pastEntries = past.flatMap((p) => p.entries);
     return demandRadar({
       release,
       room: entries.filter((e) => e.status === 'WAITING'),
-      interest: interest.map((i) => ({ sizeId: i.sizeId, tier: standings.get(i.accountId)?.tier ?? 0 })),
+      interest: interest.map((i) => ({ sizeId: i.sizeId, tier: standings.get(i.accountId)?.tier ?? 0, piece: i.piece })),
       past: pastEntries.length ? lineRates(pastEntries) : null,
       now,
     });
@@ -1840,14 +1917,14 @@ export class LiveInsightsService {
 
 
   private sizes(dropId: string): Promise<InsightSize[]> {
-    return this.db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', dropId).orderBy('position').execute();
+    return this.db.selectFrom('drop_sizes').select(['id', 'label', 'stock', 'piece']).where('drop_id', '=', dropId).orderBy('position').execute();
   }
 
   private async sizesOf(ids: readonly string[]): Promise<Map<string, InsightSize[]>> {
     const out = new Map<string, InsightSize[]>();
     if (ids.length === 0) return out;
-    const rows = await this.db.selectFrom('drop_sizes').select(['drop_id', 'id', 'label', 'stock']).where('drop_id', 'in', [...ids]).orderBy('drop_id').orderBy('position').execute();
-    for (const r of rows) out.set(r.drop_id, [...(out.get(r.drop_id) ?? []), { id: r.id, label: r.label, stock: r.stock }]);
+    const rows = await this.db.selectFrom('drop_sizes').select(['drop_id', 'id', 'label', 'stock', 'piece']).where('drop_id', 'in', [...ids]).orderBy('drop_id').orderBy('position').execute();
+    for (const r of rows) out.set(r.drop_id, [...(out.get(r.drop_id) ?? []), { id: r.id, label: r.label, stock: r.stock, piece: r.piece }]);
     return out;
   }
 
@@ -1868,11 +1945,25 @@ export class LiveInsightsService {
       .orderBy('joined_at')
       .orderBy('id')
       .execute();
+    // Macro scope K44 T1: a set's entries, their sizes per piece (each counts in every one).
+    const pieces = new Map<string, string[]>();
+    const sets = await this.db.selectFrom('drops').select('id').where('id', 'in', [...dropIds]).where('set_id', 'is not', null).execute();
+    if (sets.length > 0) {
+      const sized = await this.db
+        .selectFrom('live_entry_sizes')
+        .select(['entry_id', 'size_id'])
+        .where('drop_id', 'in', sets.map((s) => s.id))
+        .orderBy('entry_id')
+        .orderBy('piece')
+        .execute();
+      for (const x of sized) pieces.set(x.entry_id, [...(pieces.get(x.entry_id) ?? []), x.size_id]);
+    }
     return rows.map((r) => ({
       id: r.id,
       dropId: r.drop_id,
       accountId: r.account_id,
       sizeId: r.size_id,
+      ...(pieces.has(r.id) ? { sizeIds: pieces.get(r.id)! } : {}),
       quantity: r.quantity,
       status: r.status,
       tier: r.tier,
@@ -1895,6 +1986,12 @@ export class LiveInsightsService {
 
   private interest(dropId: string): Promise<{ accountId: string; sizeId: string }[]> {
     return this.db.selectFrom('live_interest').select(['account_id as accountId', 'size_id as sizeId']).where('drop_id', '=', dropId).execute();
+  }
+
+  /** I'LL BE THERE by size: one per account; a set's release (macro scope K44 T1), one per account and piece. */
+  private async interestBySize(d: Pick<DropRow, 'id' | 'set_id'>): Promise<{ accountId: string; sizeId: string; piece: number | null }[]> {
+    if (d.set_id === null) return (await this.interest(d.id)).map((i) => ({ ...i, piece: null }));
+    return this.db.selectFrom('live_interest_sizes').select(['account_id as accountId', 'size_id as sizeId', 'piece']).where('drop_id', '=', d.id).execute();
   }
 
   private async interestCounts(ids: readonly string[]): Promise<Map<string, number>> {

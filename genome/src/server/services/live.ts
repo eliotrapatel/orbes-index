@@ -51,6 +51,17 @@
  * a size straight into its line, at the place it was given (its order in the parent's line); then the turns, the hold,
  * the add-ons and PAY as above, with the parent's per-tier windows. It has no boutique board.
  *
+ * THE SET (macro scope of 2026-10-20, K44 T1, T2 and T4; plan MACRO M3 §5.1 and §5.2; migration 0057): a LIVE RELEASE
+ * may sell a set (`set_id`, its sizes given per piece, `drop_sizes.piece`): I'LL BE THERE, ENTER and CHANGE SIZE name a
+ * size per piece (`sizes`, 422 LIVE_SET_SIZES otherwise), its first piece's kept in `size_id`, every piece's in
+ * `live_entry_sizes` and `live_interest_sizes`; an entry's quantity is its sets, a set counting as one toward
+ * `per_account` (T4, at most LIVE_PER_ACCOUNT.max ÷ its pieces: liveSetPerAccountMax). An entry counts in each of its
+ * sizes (`sizeTotals`); it takes its turn when each of its sizes has free pieces for its sets, one that does not fit yet
+ * holding back every size it needs (`setTurns`); LET IN within each of its sizes; PAY makes one set sale per set, one order
+ * per piece (orders.ts ordersForLiveEntry, set-sales.ts ordersForSetSale: T2, each piece its own ORBES identity); its sets
+ * on sale are the smallest of its pieces' totals (`onSaleOf`, its `quantity`), SOLD_OUT once they are confirmed; ADD
+ * PIECES raises one size of one piece. A set's release is never guaranteed and never has an after-room.
+ *
  * THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01; services/guarantees.ts, migration 0029): a holder of a guarantee set
  * aside for the release is let in whatever its rule (`accessOf`), takes up to max(`per_account`, its pieces), in a size
  * that can still serve it (409 LIVE_GUARANTEE_SIZE_FULL, at ENTER and CHANGE SIZE; a guarantee not shown leaves no mark
@@ -115,6 +126,7 @@ import { DROP_QUANTITY_MAX, drawKey, dropNotFound, openDropSeed } from './drops.
 import { holderGuarantee, holdsGuaranteeFor, releaseCovered, sizeServesGuarantee, useGuarantees, visibleGuaranteeIds } from './guarantees.js';
 import { addonOffer, choicesOf, cleanAddonItems, clearChoices, setChoices, type AddonOfferItem, type AddonUnitsInput, type ChosenAddon, type LeftOutAddon } from './order-addons.js';
 import { ordersForLiveEntry } from './orders.js';
+import { setPieces, type ReleasePiece } from './release-offer.js';
 import { entryPieceSizes } from './set-sales.js';
 import { defaultLocationId } from './stock.js';
 import { readActingAccount } from './ownership.js';
@@ -158,6 +170,53 @@ export const LIVE_BOARD_TOKEN_BYTES = 32;
 export const LIVE_NETWORK_RETENTION_DAYS = 30;
 /** The pace (W4, the CHECKs of migration 0049): X buyers admitted every Y minutes, X 1 to 5 000, Y 1 to 60. */
 export { LIVE_PACE_BATCH, LIVE_PACE_MINUTES };
+
+/**
+ * Macro scope K44 T4: on a set's release `per_account` counts sets (a set counts as one), and an entry's orders are its
+ * sets × the set's pieces, each numbered within LIVE_PER_ACCOUNT.max (`orders.piece` 1..5): a set of 2 pieces is sold up
+ * to 2 per person, a set of 3 or 4 one per person.
+ */
+export function liveSetPerAccountMax(pieces: number): number {
+  return Math.max(1, Math.floor(LIVE_PER_ACCOUNT.max / Math.max(1, pieces)));
+}
+
+/**
+ * What a release has on sale (macro scope K44 T1): a model's, its sizes' stock summed; a set's, its sets, the smallest of
+ * its pieces' totals (each piece's sizes summed: a set takes one piece of each).
+ */
+export function onSaleOf(sizes: readonly { piece?: number | null; stock: number }[]): number {
+  const byPiece = new Map<number, number>();
+  let plain = 0;
+  for (const s of sizes) {
+    if (s.piece === null || s.piece === undefined) plain += s.stock;
+    else byPiece.set(s.piece, (byPiece.get(s.piece) ?? 0) + s.stock);
+  }
+  return byPiece.size === 0 ? plain : Math.min(...byPiece.values());
+}
+
+/**
+ * The turns a set's release gives now (macro scope K44 T1; pure, the engine's `giveTurnsNow` on a set's release): in the
+ * line's order, an entry takes its turn when each of its sizes has free pieces for its quantity. One that wants more than
+ * one of its sizes can ever give (its stock less its confirmed pieces) is passed over, as for a model; one that does not
+ * fit yet, or waits behind a size held back, holds back every size it needs, so an entry behind it needing one of them
+ * waits (each size keeps its line's order), while entries needing other sizes go on. A model's release is the same rule
+ * with one size per entry.
+ */
+export function setTurns<E extends { quantity: number; sizeIds: readonly string[] }>(queued: readonly E[], sizes: ReadonlyMap<string, { free: number; servable: number }>): E[] {
+  const free = new Map([...sizes].map(([id, s]) => [id, s.free]));
+  const held = new Set<string>();
+  const out: E[] = [];
+  for (const e of queued) {
+    if (e.sizeIds.length === 0 || e.sizeIds.some((id) => e.quantity > (sizes.get(id)?.servable ?? 0))) continue;
+    if (e.sizeIds.some((id) => held.has(id) || e.quantity > (free.get(id) ?? 0))) {
+      for (const id of e.sizeIds) held.add(id);
+      continue;
+    }
+    out.push(e);
+    for (const id of e.sizeIds) free.set(id, free.get(id)! - e.quantity);
+  }
+  return out;
+}
 
 /** The entries that hold pieces of their size, by their quantity. */
 export const LIVE_HOLDING_STATUSES = Object.freeze(['TURN', 'SECURED', 'CONFIRMED'] as const);
@@ -383,7 +442,11 @@ const sizeUnknown = () => new DomainError('LIVE_SIZE_UNKNOWN', 400, 'Choose one 
 const sizeSoldOut = () => conflict('LIVE_SIZE_SOLD_OUT', 'Every piece in this size is reserved.');
 /** IN-01: the size cannot serve the house's guarantee of the entry (verify/copy.ts GUARANTEE.sizeFull). */
 const guaranteeSizeFull = () => conflict('LIVE_GUARANTEE_SIZE_FULL', 'Your guaranteed place cannot be given in this size: choose another size.');
-const quantityInvalid = (max: number) => new DomainError('LIVE_QUANTITY_INVALID', 400, max === 1 ? 'This release offers one piece per person.' : `This release offers 1 to ${max} pieces per person.`);
+const quantityInvalid = (max: number, sets = false) =>
+  new DomainError('LIVE_QUANTITY_INVALID', 400, max === 1 ? `This release offers one ${sets ? 'set' : 'piece'} per person.` : `This release offers 1 to ${max} ${sets ? 'sets' : 'pieces'} per person.`);
+/** Macro scope K44 T1: 422 LIVE_SET_SIZES, an entry or an interest of a set's release names one size per piece, of that piece. */
+const setSizes = (message: string) => new DomainError('LIVE_SET_SIZES', 422, message);
+const notASet = () => validationError('This release sells one model: choose its size.');
 const sizeLocked = () => conflict('LIVE_SIZE_LOCKED', 'Sizes are fixed once the release opens.');
 const notYourTurn = () => conflict('LIVE_NOT_YOUR_TURN', 'It is not your turn.');
 const turnChanged = () => conflict('LIVE_TURN_CHANGED', 'This turn is no longer the one on your screen. Refresh the page.');
@@ -521,7 +584,7 @@ export const LIVE_UNNAMED_COLLECTION = 'this model’s collection';
  */
 export async function liveAccessRule(
   db: Db,
-  d: Pick<DropRow, 'id' | 'model_id' | 'live_min_tier' | 'access_collection_id' | 'min_participations' | 'access_segment_id' | 'access_combine' | 'ended_at'> & LiveStageRow,
+  d: Pick<DropRow, 'id' | 'model_id' | 'live_min_tier' | 'access_collection_id' | 'min_participations' | 'access_segment_id' | 'access_combine' | 'ended_at'> & { set_id?: string | null } & LiveStageRow,
   now: Date,
   unnamed = false,
 ): Promise<LiveAccessRule> {
@@ -537,10 +600,15 @@ export async function liveAccessRule(
     ? ((await db.selectFrom('collections').select(['id', 'name']).where('id', '=', d.access_collection_id).executeTakeFirst()) ?? null)
     : null;
   const named = !unnamed && (liveStages(d, stagesAt(d, now))?.name ?? false);
-  const own = collection && !named ? await db.selectFrom('models').select('collection_id').where('id', '=', d.model_id).executeTakeFirst() : undefined;
+  // The release's own models: its model's, or (macro scope K44 T1) each of its set's pieces', unnamed until the name's stage.
+  const ownModels = named ? [] : d.set_id ? (await setPieces(db, d.set_id)).map((p) => p.model.id) : d.model_id ? [d.model_id] : [];
+  const own =
+    collection && !named && ownModels.length
+      ? await db.selectFrom('models').select('collection_id').where('id', 'in', ownModels).where('collection_id', '=', collection.id).executeTakeFirst()
+      : undefined;
   return {
     minTier: Math.min(3, Math.max(0, d.live_min_tier ?? 0)) as ClubTier,
-    models: named ? models : models.map((m) => (m.id === d.model_id ? { id: m.id, name: LIVE_UNNAMED_MODEL } : m)),
+    models: named ? models : models.map((m) => (ownModels.includes(m.id) ? { id: m.id, name: LIVE_UNNAMED_MODEL } : m)),
     collection: collection && own?.collection_id === collection.id ? { id: collection.id, name: LIVE_UNNAMED_COLLECTION } : collection,
     minParticipations: d.min_participations ?? null,
     segment: d.access_segment_id !== null && d.access_segment_id !== undefined,
@@ -648,6 +716,20 @@ export interface LiveSizeRef {
   label: string;
 }
 
+/** Macro scope K44 T1: the size an entry or an interest of a set's release chose for one piece (1 to 4, the set's order). */
+export interface LivePieceSize extends LiveSizeRef {
+  piece: number;
+}
+
+/**
+ * What ENTER, CHANGE SIZE and I'LL BE THERE name: a model's release's size (`sizeId`), or (macro scope K44 T1) a set's
+ * size per piece (`sizes`, each piece once; CHANGE SIZE may name some of them, the others kept).
+ */
+export interface LiveSizeChoice {
+  sizeId?: string | null;
+  sizes?: readonly { piece: number; sizeId: string }[] | null;
+}
+
 export interface LiveEntryAddon {
   id: string;
   label: string;
@@ -660,13 +742,20 @@ export interface LiveEntryView {
   id: string;
   dropId: string;
   status: LiveEntryStatus;
+  /** Its size; on a set's release, its first piece's (`sizes` gives every piece's). */
   size: LiveSizeRef;
+  /** Macro scope K44 T1: on a set's release, the size chosen for each piece, in the set's order; absent otherwise. */
+  sizes?: LivePieceSize[];
+  /** Its pieces; on a set's release, its sets (T4: a set counts as one). */
   quantity: number;
   /** The club's tier at entry, then at T0. */
   tier: number;
   /** The place in the line; null before T0. */
   position: number | null;
-  /** While QUEUED: the entries of its size before it in the line (0: it is next); null otherwise. */
+  /**
+   * While QUEUED: the entries of its size before it in the line (0: it is next); on a set's release, the most before it
+   * in any of its sizes. Null otherwise.
+   */
   ahead: number | null;
   joinedAt: Date;
   /** The turn: its deadline as it stands now (a pause in progress moves it); `token` only while it is TURN. */
@@ -725,7 +814,10 @@ export interface LiveQueueView {
 /** An account's interest (I'LL BE THERE). */
 export interface LiveInterestView {
   dropId: string;
+  /** Its size; on a set's release, its first piece's (`sizes` gives every piece's). */
   size: LiveSizeRef;
+  /** Macro scope K44 T1: on a set's release, the size given for each piece; absent otherwise. */
+  sizes?: LivePieceSize[];
   since: Date;
 }
 
@@ -740,10 +832,11 @@ export interface LiveReleaseState {
   pausedMs: number;
   endedAt: Date | null;
   endedReason: LiveEndReason | null;
-  /** The sum of the sizes' stock. */
+  /** The sum of the sizes' stock; on a set's release, its sets on sale (the smallest of its pieces' totals). */
   quantity: number;
   quantityLine: string;
-  sizes: (LiveSizeRef & { stock: number })[];
+  /** Each size with its stock; on a set's release, with its piece (1 to 4). */
+  sizes: (LiveSizeRef & { stock: number; piece?: number })[];
   /** W4: the pace, null without one. */
   pace: LivePaceState | null;
 }
@@ -774,7 +867,11 @@ export interface AdminLiveEntry {
   /** As stored. */
   email: string;
   status: LiveEntryStatus;
+  /** Its size; on a set's release, its first piece's (`sizes` gives every piece's). */
   size: LiveSizeRef;
+  /** Macro scope K44 T1: on a set's release, the size chosen for each piece; absent otherwise. */
+  sizes?: LivePieceSize[];
+  /** Its pieces; on a set's release, its sets. */
   quantity: number;
   tier: number;
   position: number | null;
@@ -874,22 +971,19 @@ export async function removeAccountLiveEntries(
       .map((e) => ({ dropId: e.drop_id, entryId: e.id, from: e.status }))
       .sort((a, b) => compare(`${a.dropId} ${a.entryId}`, `${b.dropId} ${b.entryId}`));
   }
-  const withdrawn = await tx
-    .deleteFrom('live_interest')
-    .where('account_id', '=', account)
-    .where((eb) =>
-      eb.exists(
-        eb
-          .selectFrom('drops as d')
-          .select('d.id')
-          .whereRef('d.id', '=', 'live_interest.drop_id')
-          .where('d.opens_at', '>', now)
-          .where('d.ended_at', 'is', null)
-          .where('d.cancelled_at', 'is', null),
-      ),
-    )
-    .returning('drop_id')
+  const pending = await tx
+    .selectFrom('live_interest as i')
+    .innerJoin('drops as d', 'd.id', 'i.drop_id')
+    .select('i.drop_id')
+    .where('i.account_id', '=', account)
+    .where('d.opens_at', '>', now)
+    .where('d.ended_at', 'is', null)
+    .where('d.cancelled_at', 'is', null)
     .execute();
+  const pendingIds = pending.map((r) => r.drop_id);
+  // Macro scope K44 T1: an interest in a set's release, its sizes per piece first (they name it: ON DELETE RESTRICT).
+  if (pendingIds.length > 0) await tx.deleteFrom('live_interest_sizes').where('account_id', '=', account).where('drop_id', 'in', pendingIds).execute();
+  const withdrawn = pendingIds.length > 0 ? await tx.deleteFrom('live_interest').where('account_id', '=', account).where('drop_id', 'in', pendingIds).returning('drop_id').execute() : [];
   return { entries, interest: withdrawn.map((r) => ({ dropId: r.drop_id })).sort((a, b) => compare(a.dropId, b.dropId)) };
 }
 
@@ -1087,6 +1181,7 @@ export async function liveEntryViews(
       'e.id', 'e.drop_id', 'e.account_id', 'e.status', 'e.size_id', 's.label', 'e.quantity', 'e.tier', 'e.position', 'e.joined_at', 'e.turn_at',
       'e.turn_expires_at', 'e.secured_at', 'e.hold_expires_at', 'e.confirmed_at', 'e.ended_at', 'e.let_in_by', 'd.paused_at', 'd.price_minor', 'd.currency',
       'e.guarantee_id', 'e.admitted_at', 'd.opens_at', 'd.pace_batch', 'd.pace_minutes', 'd.pace_paused_at', 'd.pace_next_at', 'd.stock_location_id', 'd.parent_drop_id',
+      'd.set_id',
     ])
     .where('d.mode', '=', 'LIVE')
     .where('d.published_at', 'is not', null);
@@ -1115,7 +1210,7 @@ export async function liveEntryViews(
   const ahead = new Map<string, number>();
   // Only the line before them counts: their releases and sizes, up to the last of their places (one entry's own read, at
   // each of its actions, never sorts the whole line: docs/reports/live-load.md).
-  for (const part of chunks(queued)) {
+  for (const part of chunks(queued.filter((r) => r.set_id === null))) {
     const drops = [...new Set(part.map((r) => r.drop_id))];
     const sizes = [...new Set(part.map((r) => r.size_id))];
     const last = Math.max(...part.map((r) => r.position ?? 0));
@@ -1126,6 +1221,19 @@ export async function liveEntryViews(
                 FROM live_entries
                WHERE drop_id IN (${sql.join(drops)}) AND size_id IN (${sql.join(sizes)}) AND status = 'QUEUED' AND (position <= ${last} OR guarantee_id IS NOT NULL)) AS q
        WHERE q.id IN (${sql.join(part.map((x) => x.id))})`.execute(db);
+    for (const a of r.rows) ahead.set(a.id, Number(a.ahead));
+  }
+  // Macro scope K44 T1: a set's entry, the most before it in any of its sizes (a set's release has no guaranteed place).
+  for (const part of chunks(queued.filter((r) => r.set_id !== null))) {
+    const drops = [...new Set(part.map((r) => r.drop_id))];
+    const last = Math.max(...part.map((r) => r.position ?? 0));
+    const r = await sql<{ id: string; ahead: number }>`
+      SELECT q.entry_id AS id, max(q.ahead)::int AS ahead
+        FROM (SELECT x.entry_id, (row_number() OVER (PARTITION BY x.size_id ORDER BY e.position) - 1)::int AS ahead
+                FROM live_entry_sizes x JOIN live_entries e ON e.id = x.entry_id
+               WHERE e.drop_id IN (${sql.join(drops)}) AND e.status = 'QUEUED' AND e.position <= ${last}) AS q
+       WHERE q.entry_id IN (${sql.join(part.map((x) => x.id))})
+       GROUP BY q.entry_id`.execute(db);
     for (const a of r.rows) ahead.set(a.id, Number(a.ahead));
   }
   // W5: on a paced release, the entries waiting for their batch read their place among those waiting, in the order the
@@ -1145,6 +1253,8 @@ export async function liveEntryViews(
   }
   // Plan MACRO M3 §4.2 (D2): the catalogue add-ons chosen with a hold, and the units carried onto a confirmed entry's order.
   const items = await liveAddonItems(db, rows);
+  // Macro scope K44 T1: a set's entries, their sizes per piece.
+  const pieceSizes = await livePieceSizes(db, rows.filter((r) => r.set_id !== null).map((r) => r.id));
   for (const r of rows) {
     const own = addons.filter((a) => a.entry_id === r.id);
     const price = r.price_minor ?? 0;
@@ -1155,6 +1265,7 @@ export async function liveEntryViews(
       dropId: r.drop_id,
       status: r.status,
       size: { id: r.size_id, label: r.label },
+      ...(pieceSizes.has(r.id) ? { sizes: pieceSizes.get(r.id)! } : {}),
       quantity: r.quantity,
       tier: r.tier,
       position: r.position,
@@ -1187,6 +1298,35 @@ export async function liveEntryViews(
     });
   }
   return out;
+}
+
+/** The sizes per piece of entries of a set's release (macro scope K44 T1), by entry id, in the set's order; none for a model's. Reads only. */
+export async function livePieceSizes(db: Db, entryIds: readonly string[]): Promise<Map<string, LivePieceSize[]>> {
+  const out = new Map<string, LivePieceSize[]>();
+  for (const ids of chunks([...new Set(entryIds)])) {
+    const rows = await db
+      .selectFrom('live_entry_sizes as x')
+      .innerJoin('drop_sizes as s', 's.id', 'x.size_id')
+      .select(['x.entry_id', 'x.piece', 's.id', 's.label'])
+      .where('x.entry_id', 'in', ids)
+      .orderBy('x.entry_id')
+      .orderBy('x.piece')
+      .execute();
+    for (const r of rows) out.set(r.entry_id, [...(out.get(r.entry_id) ?? []), { piece: r.piece, id: r.id, label: r.label }]);
+  }
+  return out;
+}
+
+/** The sizes per piece of an account's interest in a set's release (macro scope K44 T1), in the set's order; none otherwise. Reads only. */
+export async function liveInterestPieceSizes(db: Db, dropId: string, accountId: string): Promise<LivePieceSize[]> {
+  return db
+    .selectFrom('live_interest_sizes as x')
+    .innerJoin('drop_sizes as s', 's.id', 'x.size_id')
+    .select(['x.piece', 's.id', 's.label'])
+    .where('x.drop_id', '=', dropId)
+    .where('x.account_id', '=', accountId)
+    .orderBy('x.piece')
+    .execute();
 }
 
 /** Where a LIVE release's add-ons are held and offered: its location (an after-room's, its parent's), else the default. */
@@ -1244,6 +1384,22 @@ function queueOf(d: LivePaceRow, place: number, now: Date): LiveQueueView {
   return { place, etaAt: liveQueueEta(d, place, now), paused: paceHeld(d), next: typeof d.pace_batch === 'number' && place <= d.pace_batch };
 }
 
+/** A set's entry's or interest's size for one piece (macro scope K44 T1), as chosen: its piece and its size with its stock. */
+type ChosenPiece = { piece: number; size: { id: string; stock: number } };
+
+/** An entry's sizes per piece written (a set's release): every piece's, replacing those it had. */
+async function writeLiveEntrySizes(tx: Db, dropId: string, entryId: string, set: readonly ChosenPiece[]): Promise<void> {
+  await tx.deleteFrom('live_entry_sizes').where('entry_id', '=', entryId).execute();
+  await tx.insertInto('live_entry_sizes').values(set.map((c) => ({ entry_id: entryId, drop_id: dropId, piece: c.piece, size_id: c.size.id }))).execute();
+}
+
+/** A set's sizes per piece as the audit log records them, or nothing. */
+const auditedSizes = (set: readonly ChosenPiece[] | null) => (set ? { sizes: set.map((c) => ({ piece: c.piece, sizeId: c.size.id })) } : {});
+
+/** Whether a set's sizes chosen are those stored (each piece in the same size). */
+const sameSizes = (set: readonly ChosenPiece[], stored: readonly { piece: number; size_id: string }[]) =>
+  set.length === stored.length && set.every((c) => stored.some((x) => x.piece === c.piece && x.size_id === c.size.id));
+
 // ── Service ────────────────────────────────────────────────────────────────
 
 export interface LiveServiceDeps {
@@ -1259,6 +1415,8 @@ export interface LiveServiceDeps {
 interface SizeTotal {
   id: string;
   label: string;
+  /** Macro scope K44 T1: a set's release's piece (1 to 4); null on a model's. */
+  piece: number | null;
   stock: number;
   turn: number;
   secured: number;
@@ -1349,12 +1507,15 @@ export class LiveService {
    * LEFT entry that never had a place (it left the room) enters again, the same row. Refused: a LOCKED account (403),
    * not announced (404), cancelled (409), over (409 LIVE_OVER), before the room (409 LIVE_ROOM_NOT_OPEN), the rule
    * (403 LIVE_NOT_ELIGIBLE), a size or quantity outside the release's (400), an entry already (409
-   * LIVE_ALREADY_ENTERED). Audited `drop.live.enter` with the entry, size and quantity.
+   * LIVE_ALREADY_ENTERED). Audited `drop.live.enter` with the entry, size and quantity. Macro scope K44 T1 and T4: on a
+   * set's release, a size per piece (`sizes`; 422 LIVE_SET_SIZES otherwise), its first piece's kept in `size_id`, every
+   * piece's in `live_entry_sizes`, its quantity in sets (1 to `per_account`), never a guarantee; after T0, refused in a
+   * size of any of its pieces whose pieces are all confirmed.
    */
   async enter(
     accountId: string,
     dropId: string,
-    input: { sizeId: string; quantity?: number },
+    input: LiveSizeChoice & { quantity?: number },
     actor: Actor,
     client: { networkHash?: Uint8Array | null; country?: string | null } = {},
   ): Promise<LiveEntryView> {
@@ -1377,14 +1538,15 @@ export class LiveService {
       // IN-01: the house's guarantee set aside for this release, after the entry's row (the lock order): up to its pieces,
       // the size still serving it; never in an after-room. One not shown that the size cannot serve leaves no mark: the
       // entry is an ordinary one and the guarantee stays set aside.
-      const held = await holderGuarantee(tx, account, d);
-      const { size, quantity } = await this.choice(tx, d, input.sizeId, input.quantity, held?.pieces);
+      // Macro scope K44 (plan MACRO M3 §5.1): a set's release is never guaranteed.
+      const held = d.set_id === null ? await holderGuarantee(tx, account, d) : null;
+      const { size, quantity, set } = await this.chosen(tx, d, input, input?.quantity, now, held?.pieces);
       const g = held ? await this.guaranteeInSize(tx, d, held, size.id, quantity, existing?.id ?? null) : null;
       const late = now.getTime() >= d.opens_at.getTime();
       if (late) {
         await this.formLine(tx, d, now, notes);
-        const total = (await this.sizeTotals(tx, d.id)).find((s) => s.id === size.id)!;
-        if (quantity > servableOf(total)) throw sizeSoldOut();
+        const totals = await this.sizeTotals(tx, d);
+        for (const sid of set ? set.map((c) => c.size.id) : [size.id]) if (quantity > servableOf(totals.find((s) => s.id === sid)!)) throw sizeSoldOut();
       }
       // An after-room's guest takes the place it was given at the sell-out (its order in the parent's line); anyone after
       // T0 the next place behind the line.
@@ -1406,12 +1568,21 @@ export class LiveService {
           throw e;
         }
       }
+      if (set) await writeLiveEntrySizes(tx, id, entryId, set);
       notes.push({
         actor,
         action: 'drop.live.enter',
         targetType: 'drop',
         targetId: id,
-        details: { entryId, sizeId: size.id, quantity, ...(late ? { position: slot.position } : {}), ...(existing ? { again: true } : {}), ...(g ? { guaranteeId: g.id } : {}) },
+        details: {
+          entryId,
+          sizeId: size.id,
+          ...auditedSizes(set),
+          quantity,
+          ...(late ? { position: slot.position } : {}),
+          ...(existing ? { again: true } : {}),
+          ...(g ? { guaranteeId: g.id } : {}),
+        },
       });
       await this.record(tx, notes);
     });
@@ -1420,9 +1591,10 @@ export class LiveService {
 
   /**
    * CHANGE SIZE (and quantity) while WAITING, before T0 only (409 LIVE_SIZE_LOCKED from T0 on, the size never changes
-   * after). Audited `drop.live.size`.
+   * after). Audited `drop.live.size`. Macro scope K44 T1: on a set's release, the size of any of its pieces (`sizes`, the
+   * others kept) and its sets.
    */
-  async changeSize(accountId: string, dropId: string, input: { sizeId: string; quantity?: number }, actor: Actor): Promise<LiveEntryView> {
+  async changeSize(accountId: string, dropId: string, input: LiveSizeChoice & { quantity?: number }, actor: Actor): Promise<LiveEntryView> {
     const account = assertAccount(accountId);
     const id = knownId(dropId, dropNotFound);
     await inTransaction(this.db, async (tx) => {
@@ -1434,12 +1606,17 @@ export class LiveService {
       if (!e || e.status === 'LEFT') throw notEntered();
       if (now.getTime() >= d.opens_at.getTime() || e.position !== null) throw sizeLocked();
       if (e.status !== 'WAITING') throw notInLine();
+      if (d.set_id !== null) {
+        await this.changeSetSizes(tx, d, e, input, now, actor);
+        return;
+      }
       // IN-01: the entry's guarantee, or the one set aside for the account when the entry is not bound (its size could not
       // serve it): the new size is checked again, and binds it when it can.
       const held = e.guarantee_id
         ? await tx.selectFrom('house_guarantees').select(['id', 'pieces', 'visible']).where('id', '=', e.guarantee_id).forUpdate().executeTakeFirst()
         : await holderGuarantee(tx, account, d);
-      const { size, quantity } = await this.choice(tx, d, input.sizeId, input.quantity ?? e.quantity, held?.pieces);
+      if (input?.sizes !== undefined && input?.sizes !== null) throw notASet();
+      const { size, quantity } = await this.choice(tx, d, input?.sizeId, input?.quantity ?? e.quantity, held?.pieces);
       if (size.id === e.size_id && quantity === e.quantity) return;
       const g = held ? await this.guaranteeInSize(tx, d, held, size.id, quantity, e.id) : null;
       const bound = g?.id ?? null;
@@ -1494,9 +1671,12 @@ export class LiveService {
 
   /**
    * I'LL BE THERE with a size, from the announcement to T0, for an account allowed in: one per account and release, its
-   * size changed in place. Audited `drop.live.interest` with the size.
+   * size changed in place. Audited `drop.live.interest` with the size. Macro scope K44 T1: on a set's release, a size per
+   * piece (`sizes`, every piece; 422 LIVE_SET_SIZES otherwise), its first piece's kept in `size_id`, every piece's in
+   * `live_interest_sizes`.
    */
-  async setInterest(accountId: string, dropId: string, sizeId: string, actor: Actor): Promise<LiveInterestView> {
+  async setInterest(accountId: string, dropId: string, choice: string | LiveSizeChoice, actor: Actor): Promise<LiveInterestView> {
+    const given: LiveSizeChoice = typeof choice === 'string' ? { sizeId: choice } : (choice ?? {});
     const account = assertAccount(accountId);
     const id = knownId(dropId, dropNotFound);
     const early = await this.accessAhead(id, account);
@@ -1507,15 +1687,34 @@ export class LiveService {
       if (d.ended_at || now.getTime() >= d.opens_at.getTime()) throw interestClosed();
       const access = early ?? (await accessOf(tx, d, account, now));
       if (!access.allowed) throw notEligible(await liveAccessRule(tx, d, now), access);
-      const { size } = await this.choice(tx, d, sizeId, 1);
+      const { size, set } = await this.chosen(tx, d, given, 1, now);
       const before = await tx.selectFrom('live_interest').select('size_id').where('drop_id', '=', id).where('account_id', '=', account).forUpdate().executeTakeFirst();
-      if (before?.size_id === size.id) return;
+      const sizesBefore = set && before ? await tx.selectFrom('live_interest_sizes').select(['piece', 'size_id']).where('drop_id', '=', id).where('account_id', '=', account).orderBy('piece').execute() : [];
+      if (before?.size_id === size.id && (!set || sameSizes(set, sizesBefore))) return;
       await tx
         .insertInto('live_interest')
         .values({ drop_id: id, account_id: account, size_id: size.id, created_at: now })
         .onConflict((oc) => oc.columns(['drop_id', 'account_id']).doUpdateSet({ size_id: size.id }))
         .execute();
-      await this.audit.record({ actor, action: 'drop.live.interest', targetType: 'drop', targetId: id, details: { sizeId: size.id, ...(before ? { before: before.size_id } : {}) } }, tx);
+      if (set) {
+        await tx.deleteFrom('live_interest_sizes').where('drop_id', '=', id).where('account_id', '=', account).execute();
+        await tx.insertInto('live_interest_sizes').values(set.map((c) => ({ drop_id: id, account_id: account, piece: c.piece, size_id: c.size.id }))).execute();
+      }
+      await this.audit.record(
+        {
+          actor,
+          action: 'drop.live.interest',
+          targetType: 'drop',
+          targetId: id,
+          details: {
+            sizeId: size.id,
+            ...auditedSizes(set),
+            ...(before ? { before: before.size_id } : {}),
+            ...(set && before ? { sizesBefore: sizesBefore.map((x) => ({ piece: x.piece, sizeId: x.size_id })) } : {}),
+          },
+        },
+        tx,
+      );
     });
     return (await this.interestView(this.db, account, id))!;
   }
@@ -1528,6 +1727,8 @@ export class LiveService {
       await this.actingAccount(tx, account);
       const { d, now } = await this.lockAnnouncedLive(tx, id, 'share', account);
       if (now.getTime() >= d.opens_at.getTime()) throw interestClosed();
+      // Macro scope K44 T1: a set's interest, its sizes per piece first (they name it: ON DELETE RESTRICT).
+      await tx.deleteFrom('live_interest_sizes').where('drop_id', '=', id).where('account_id', '=', account).execute();
       const r = await tx.deleteFrom('live_interest').where('drop_id', '=', id).where('account_id', '=', account).returning('size_id').executeTakeFirst();
       if (!r) throw notInterested();
       await this.audit.record({ actor, action: 'drop.live.interest.withdraw', targetType: 'drop', targetId: id, details: { sizeId: r.size_id } }, tx);
@@ -1711,7 +1912,8 @@ export class LiveService {
    * ADD PIECES to a size (LIVE_ADD_PIECES), from the announcement (409 LIVE_NOT_ANNOUNCED before: the sizes are a
    * setting until then) to the end: its stock and the release's quantity raised; a turn goes at
    * once to whoever they serve. Audited `drop.live.stock` with the stock before and after, and the quantity line the
-   * announcement promised (the plan's choice 36: every addition reported).
+   * announcement promised (the plan's choice 36: every addition reported). Macro scope K44 T1: on a set's release, one
+   * size of one piece; its quantity is then its sets on sale, the smallest of its pieces' totals (the entry's `quantity`).
    */
   async addPieces(dropId: string, sizeId: string, pieces: number, actor: Actor): Promise<LiveReleaseState> {
     assertStaff(actor, 'add pieces to a release');
@@ -1723,13 +1925,18 @@ export class LiveService {
       // Before the announcement the stock is a setting (its quantity line following it): ADD PIECES comes after.
       if (!isAnnounced(d, now)) throw liveNotAnnounced();
       if (d.ended_at || now.getTime() >= d.closes_at.getTime()) throw liveEnded();
-      const s = await tx.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', d.id).where('id', '=', size).forUpdate().executeTakeFirst();
+      const s = await tx.selectFrom('drop_sizes').select(['id', 'label', 'stock', 'piece']).where('drop_id', '=', d.id).where('id', '=', size).forUpdate().executeTakeFirst();
       if (!s) throw sizeUnknown();
-      if (s.stock + pieces > LIVE_SIZE_STOCK_MAX || d.quantity + pieces > DROP_QUANTITY_MAX) {
+      // Macro scope K44 T1: a set's piece holds at most a release's pieces; the release's quantity is then its sets on sale.
+      const all = s.piece === null ? [] : await tx.selectFrom('drop_sizes').select(['id', 'piece', 'stock']).where('drop_id', '=', d.id).execute();
+      const inPiece = s.piece === null ? d.quantity : all.filter((x) => x.piece === s.piece).reduce((n, x) => n + x.stock, 0);
+      if (s.stock + pieces > LIVE_SIZE_STOCK_MAX || inPiece + pieces > DROP_QUANTITY_MAX) {
         throw validationError(`A size holds at most ${LIVE_SIZE_STOCK_MAX} pieces, a release ${DROP_QUANTITY_MAX}.`);
       }
+      const quantity = s.piece === null ? d.quantity + pieces : onSaleOf(all.map((x) => (x.id === s.id ? { ...x, stock: x.stock + pieces } : x)));
       await tx.updateTable('drop_sizes').set({ stock: s.stock + pieces }).where('id', '=', s.id).execute();
-      await tx.updateTable('drops').set({ quantity: d.quantity + pieces }).where('id', '=', d.id).execute();
+      if (quantity !== d.quantity) await tx.updateTable('drops').set({ quantity }).where('id', '=', d.id).execute();
+      d.quantity = quantity;
       const notes: AuditRecordInput[] = [];
       await this.giveTurnsNow(tx, d, now, notes);
       await this.audit.record(
@@ -1738,7 +1945,16 @@ export class LiveService {
           action: 'drop.live.stock',
           targetType: 'drop',
           targetId: d.id,
-          details: { sizeId: s.id, size: s.label, pieces, before: s.stock, after: s.stock + pieces, quantity: d.quantity + pieces, quantityLine: d.quantity_line },
+          details: {
+            sizeId: s.id,
+            size: s.label,
+            ...(s.piece !== null ? { piece: s.piece } : {}),
+            pieces,
+            before: s.stock,
+            after: s.stock + pieces,
+            quantity,
+            quantityLine: d.quantity_line,
+          },
         },
         tx,
       );
@@ -1768,7 +1984,8 @@ export class LiveService {
   /**
    * LET IN: a QUEUED entry takes its turn now, out of order, within the free pieces of its size (409
    * LIVE_NO_FREE_PIECE), while the release is live and not paused; one still waiting for its batch is admitted now
-   * (W4: with the batches admitted so far as its batch). Audited `drop.live.let_in` with its place.
+   * (W4: with the batches admitted so far as its batch). Audited `drop.live.let_in` with its place. Macro scope K44 T1:
+   * a set's entry, within the free pieces of each of its sizes.
    */
   async letIn(dropId: string, entryId: string, actor: Actor): Promise<AdminLiveEntry> {
     const admin = assertStaff(actor, 'let an entry in');
@@ -1780,8 +1997,9 @@ export class LiveService {
       const notes: AuditRecordInput[] = [];
       const entry = e.status === 'WAITING' && (await this.formLine(tx, d, now, notes)) > 0 ? (await this.entryRow(tx, e.id))! : e;
       if (entry.status !== 'QUEUED') throw entryNotQueued();
-      const total = (await this.sizeTotals(tx, d.id)).find((s) => s.id === entry.size_id)!;
-      if (entry.quantity > freeOf(total)) throw noFreePiece();
+      const totals = await this.sizeTotals(tx, d);
+      const sizeIds = d.set_id === null ? [entry.size_id] : (await tx.selectFrom('live_entry_sizes').select('size_id').where('entry_id', '=', entry.id).execute()).map((x) => x.size_id);
+      for (const sid of sizeIds) if (entry.quantity > freeOf(totals.find((s) => s.id === sid)!)) throw noFreePiece();
       const admitted = entry.admitted_at === null;
       if (admitted) {
         await tx.updateTable('live_entries').set({ admitted_at: now, admitted_batch: d.pace_batches }).where('id', '=', entry.id).where('status', '=', 'QUEUED').execute();
@@ -2162,11 +2380,100 @@ export class LiveService {
   }
 
   /**
+   * What an entry or an interest names (macro scope K44 T1): a model's release's size (`choice`; `sizes` there, 400), or a
+   * set's size per piece (`setChoice`; `sizeId` alone there, 422 LIVE_SET_SIZES), its first piece's as `size`.
+   */
+  private async chosen(
+    tx: Db,
+    d: LiveDrop,
+    input: LiveSizeChoice | undefined,
+    quantity: number | undefined,
+    now: Date,
+    guaranteedPieces?: number,
+  ): Promise<{ size: { id: string; stock: number }; quantity: number; set: ChosenPiece[] | null }> {
+    if (d.set_id === null) {
+      if (input?.sizes !== undefined && input?.sizes !== null) throw notASet();
+      return { ...(await this.choice(tx, d, input?.sizeId, quantity, guaranteedPieces)), set: null };
+    }
+    const { set, quantity: q } = await this.setChoice(tx, d, input?.sizes, quantity, now);
+    return { size: set[0]!.size, quantity: q, set };
+  }
+
+  /**
+   * A set's sizes per piece (macro scope K44 T1, T4): `given`, each piece of the set once, each a size of that piece with
+   * stock (every piece, unless `base`, the sizes an entry has, keeps those not given); 422 LIVE_SET_SIZES otherwise, the
+   * piece named by its model once the release's name is revealed (« piece 2 » before). Its quantity in sets, 1 to
+   * `per_account` (LIVE_QUANTITY_INVALID), each size's stock at least that (LIVE_SIZE_SOLD_OUT). In the set's order.
+   */
+  private async setChoice(
+    tx: Db,
+    d: LiveDrop,
+    given: LiveSizeChoice['sizes'] | undefined,
+    quantity: number | undefined,
+    now: Date,
+    base?: readonly { piece: number; size_id: string }[],
+  ): Promise<{ set: ChosenPiece[]; quantity: number }> {
+    const pieces: ReleasePiece[] = await setPieces(tx, d.set_id!);
+    const named = liveStages(d, stagesAt(d, now))?.name ?? false;
+    const nameOf = (piece: number) => (named ? (pieces.find((p) => p.piece === piece)?.model.name ?? `piece ${piece}`) : `piece ${piece}`);
+    const sizes = await tx.selectFrom('drop_sizes').select(['id', 'piece', 'stock']).where('drop_id', '=', d.id).execute();
+    if (!Array.isArray(given) || given.length === 0) throw setSizes('Choose a size for each piece of the set.');
+    const out: ChosenPiece[] = [];
+    for (const x of given as unknown[]) {
+      const piece = (x as { piece?: unknown } | null)?.piece;
+      const sizeId = (x as { sizeId?: unknown } | null)?.sizeId;
+      if (typeof piece !== 'number' || !pieces.some((p) => p.piece === piece)) throw setSizes('This set has no such piece.');
+      if (out.some((c) => c.piece === piece)) throw setSizes(`Choose one size for ${nameOf(piece)}.`);
+      const id = typeof sizeId === 'string' && UUID_RE.test(sizeId) ? sizeId.toLowerCase() : null;
+      const size = id === null ? undefined : sizes.find((z) => z.id === id && z.piece === piece);
+      if (!size) throw setSizes(`This size is not offered for ${nameOf(piece)}.`);
+      out.push({ piece, size: { id: size.id, stock: size.stock } });
+    }
+    for (const b of base ?? []) {
+      const size = sizes.find((z) => z.id === b.size_id);
+      if (size && !out.some((c) => c.piece === b.piece)) out.push({ piece: b.piece, size: { id: size.id, stock: size.stock } });
+    }
+    for (const p of pieces) if (!out.some((c) => c.piece === p.piece)) throw setSizes(`Choose a size for ${nameOf(p.piece!)}.`);
+    out.sort((a, b) => a.piece - b.piece);
+    const max = Math.min(d.per_account ?? LIVE_PER_ACCOUNT.default, liveSetPerAccountMax(pieces.length));
+    const q = quantity ?? 1;
+    if (!Number.isInteger(q) || q < 1 || q > max) throw quantityInvalid(max, true);
+    for (const c of out) if (c.size.stock < 1 || q > c.size.stock) throw sizeSoldOut();
+    return { set: out, quantity: q };
+  }
+
+  /** CHANGE SIZE on a set's release (macro scope K44 T1): any of its pieces' sizes and its sets, in the caller's transaction. */
+  private async changeSetSizes(tx: Db, d: LiveDrop, e: EntryRow, input: (LiveSizeChoice & { quantity?: number }) | undefined, now: Date, actor: Actor): Promise<void> {
+    if (input?.sizes === undefined || input?.sizes === null) throw setSizes('Choose a size for each piece of the set.');
+    const before = await tx.selectFrom('live_entry_sizes').select(['piece', 'size_id']).where('entry_id', '=', e.id).orderBy('piece').execute();
+    const { set, quantity } = await this.setChoice(tx, d, input.sizes, input.quantity ?? e.quantity, now, before);
+    if (quantity === e.quantity && sameSizes(set, before)) return;
+    await tx.updateTable('live_entries').set({ size_id: set[0]!.size.id, quantity }).where('id', '=', e.id).where('status', '=', 'WAITING').execute();
+    await writeLiveEntrySizes(tx, d.id, e.id, set);
+    await this.audit.record(
+      {
+        actor,
+        action: 'drop.live.size',
+        targetType: 'drop',
+        targetId: d.id,
+        details: {
+          entryId: e.id,
+          sizeId: set[0]!.size.id,
+          ...auditedSizes(set),
+          quantity,
+          before: { sizeId: e.size_id, sizes: before.map((x) => ({ piece: x.piece, sizeId: x.size_id })), quantity: e.quantity },
+        },
+      },
+      tx,
+    );
+  }
+
+  /**
    * A size of the release (with stock) and a quantity within `per_account` and that stock; IN-01: a holder of the house's
    * guarantee up to max(per_account, its pieces).
    */
-  private async choice(tx: Db, d: LiveDrop, sizeId: string, quantity: number | undefined, guaranteedPieces?: number): Promise<{ size: { id: string; stock: number }; quantity: number }> {
-    const sid = knownId(sizeId, sizeUnknown);
+  private async choice(tx: Db, d: LiveDrop, sizeId: string | null | undefined, quantity: number | undefined, guaranteedPieces?: number): Promise<{ size: { id: string; stock: number }; quantity: number }> {
+    const sid = knownId(sizeId as string, sizeUnknown);
     const size = await tx.selectFrom('drop_sizes').select(['id', 'stock']).where('drop_id', '=', d.id).where('id', '=', sid).executeTakeFirst();
     if (!size) throw sizeUnknown();
     if (size.stock < 1) throw sizeSoldOut();
@@ -2201,19 +2508,32 @@ export class LiveService {
     return tx.selectFrom('live_tier_windows').select(['tier', 'turn_seconds', 'pay_minutes']).where('drop_id', '=', d.parent_drop_id ?? d.id).execute();
   }
 
-  /** Each size of the release with the quantities of its entries in TURN, SECURED and CONFIRMED. */
-  private async sizeTotals(tx: Db, dropId: string): Promise<SizeTotal[]> {
-    const sizes = await tx.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', dropId).orderBy('position').execute();
-    const held = await tx
-      .selectFrom('live_entries')
-      .select((eb) => ['size_id', 'status', eb.fn.sum<number>('quantity').as('n')])
-      .where('drop_id', '=', dropId)
-      .where('status', 'in', [...LIVE_HOLDING_STATUSES])
-      .groupBy(['size_id', 'status'])
-      .execute();
+  /**
+   * Each size of the release with the quantities of its entries in TURN, SECURED and CONFIRMED; macro scope K44 T1: on a
+   * set's release, an entry counts in each of its sizes (`live_entry_sizes`), its quantity its sets.
+   */
+  private async sizeTotals(tx: Db, d: Pick<LiveDrop, 'id' | 'set_id'>): Promise<SizeTotal[]> {
+    const sizes = await tx.selectFrom('drop_sizes').select(['id', 'label', 'piece', 'stock']).where('drop_id', '=', d.id).orderBy('position').execute();
+    const held =
+      d.set_id === null
+        ? await tx
+            .selectFrom('live_entries')
+            .select((eb) => ['size_id', 'status', eb.fn.sum<number>('quantity').as('n')])
+            .where('drop_id', '=', d.id)
+            .where('status', 'in', [...LIVE_HOLDING_STATUSES])
+            .groupBy(['size_id', 'status'])
+            .execute()
+        : await tx
+            .selectFrom('live_entry_sizes as x')
+            .innerJoin('live_entries as e', 'e.id', 'x.entry_id')
+            .select((eb) => ['x.size_id', 'e.status', eb.fn.sum<number>('e.quantity').as('n')])
+            .where('e.drop_id', '=', d.id)
+            .where('e.status', 'in', [...LIVE_HOLDING_STATUSES])
+            .groupBy(['x.size_id', 'e.status'])
+            .execute();
     return sizes.map((s) => {
       const of = (status: LiveEntryStatus) => Number(held.find((h) => h.size_id === s.id && h.status === status)?.n ?? 0);
-      return { id: s.id, label: s.label, stock: s.stock, turn: of('TURN'), secured: of('SECURED'), confirmed: of('CONFIRMED') };
+      return { id: s.id, label: s.label, piece: s.piece, stock: s.stock, turn: of('TURN'), secured: of('SECURED'), confirmed: of('CONFIRMED') };
     });
   }
 
@@ -2268,9 +2588,11 @@ export class LiveService {
    */
   private async settleEnd(tx: Db, d: LiveDrop, now: Date, notes: AuditRecordInput[]): Promise<LiveEndReason | null> {
     if (d.ended_at) return null;
-    const totals = await this.sizeTotals(tx, d.id);
-    const stock = totals.reduce((n, s) => n + s.stock, 0);
-    const confirmed = totals.reduce((n, s) => n + s.confirmed, 0);
+    const totals = await this.sizeTotals(tx, d);
+    // Macro scope K44 T1: a set's release sells out by sets, its sets on sale confirmed (each counted once, in its first piece).
+    const stock = onSaleOf(totals);
+    const first = Math.min(...totals.map((s) => s.piece ?? 0));
+    const confirmed = totals.filter((s) => (s.piece ?? 0) === first).reduce((n, s) => n + s.confirmed, 0);
     let soldOutAt: Date | null = null;
     if (stock > 0 && confirmed >= stock) {
       const last = await tx.selectFrom('live_entries').select((eb) => eb.fn.max('confirmed_at').as('at')).where('drop_id', '=', d.id).executeTakeFirstOrThrow();
@@ -2350,14 +2672,44 @@ export class LiveService {
    * The turns due now, when the release is live (T0 passed, not ended, not paused, before its close): the admissions
    * due first (admitDue, counted on `out`), then for each size with free pieces, its admitted QUEUED entries by place;
    * one that wants more than the size can still give is passed over, the first that fits takes a turn, one that does
-   * not fit yet stops the size. Returns the turns given.
+   * not fit yet stops the size. Macro scope K44 T1: on a set's release, the set rule (`setTurns`): an entry takes its
+   * turn when each of its sizes has free pieces for its sets, one that does not fit yet holds back its sizes. Returns
+   * the turns given.
    */
   private async giveTurnsNow(tx: Db, d: LiveDrop, now: Date, notes: AuditRecordInput[], out?: LiveAdvance): Promise<number> {
     if (now.getTime() < d.opens_at.getTime() || d.ended_at || d.paused_at || now.getTime() >= d.closes_at.getTime()) return 0;
     const admitted = await this.admitDue(tx, d, now, notes);
     if (out) out.admitted += admitted;
-    const open = (await this.sizeTotals(tx, d.id)).filter((s) => freeOf(s) > 0);
+    const totals = await this.sizeTotals(tx, d);
+    const open = totals.filter((s) => freeOf(s) > 0);
     if (open.length === 0) return 0;
+    if (d.set_id !== null) {
+      const waiting = await tx
+        .selectFrom('live_entries')
+        .select([...ENTRY_COLUMNS])
+        .where('drop_id', '=', d.id)
+        .where('status', '=', 'QUEUED')
+        .where('admitted_at', 'is not', null)
+        .orderBy('position')
+        .execute();
+      if (waiting.length === 0) return 0;
+      const rows = await tx
+        .selectFrom('live_entry_sizes as x')
+        .innerJoin('live_entries as e', 'e.id', 'x.entry_id')
+        .select(['x.entry_id', 'x.size_id'])
+        .where('e.drop_id', '=', d.id)
+        .where('e.status', '=', 'QUEUED')
+        .where('e.admitted_at', 'is not', null)
+        .execute();
+      const sizeIds = new Map<string, string[]>();
+      for (const r of rows) sizeIds.set(r.entry_id, [...(sizeIds.get(r.entry_id) ?? []), r.size_id]);
+      const grants = setTurns(
+        waiting.map((e) => ({ ...e, sizeIds: sizeIds.get(e.id) ?? [] })),
+        new Map(totals.map((s) => [s.id, { free: freeOf(s), servable: servableOf(s) }])),
+      );
+      if (grants.length) await this.grant(tx, d, grants, now, null, notes);
+      return grants.length;
+    }
     const queued = await tx
       .selectFrom('live_entries')
       .select([...ENTRY_COLUMNS])
@@ -2520,7 +2872,7 @@ export class LiveService {
 
   private async releaseState(db: Db, id: string): Promise<LiveReleaseState> {
     const d = await db.selectFrom('drops').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
-    const sizes = await db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', id).orderBy('position').execute();
+    const sizes = await db.selectFrom('drop_sizes').select(['id', 'label', 'stock', 'piece']).where('drop_id', '=', id).orderBy('position').execute();
     return {
       id,
       roomOpensAt: roomOpensAt(d),
@@ -2532,7 +2884,7 @@ export class LiveService {
       endedReason: d.ended_reason,
       quantity: d.quantity,
       quantityLine: d.quantity_line ?? '',
-      sizes: sizes.map((s) => ({ id: s.id, label: s.label, stock: s.stock })),
+      sizes: sizes.map((s) => ({ id: s.id, label: s.label, stock: s.stock, ...(s.piece !== null ? { piece: s.piece } : {}) })),
       pace: await livePaceState(db, d),
     };
   }
@@ -2550,12 +2902,14 @@ export class LiveService {
       .where('e.id', '=', entryId)
       .executeTakeFirstOrThrow();
     const running = await db.selectFrom('drops').select('paused_at').where('id', '=', d.id).executeTakeFirstOrThrow();
+    const pieces = d.set_id !== null ? await livePieceSizes(db, [r.id]) : new Map<string, LivePieceSize[]>();
     return {
       id: r.id,
       accountId: r.account_id,
       email: r.email,
       status: r.status,
       size: { id: r.size_id, label: r.label },
+      ...(pieces.has(r.id) ? { sizes: pieces.get(r.id)! } : {}),
       quantity: r.quantity,
       tier: r.tier,
       position: r.position,
@@ -2586,7 +2940,10 @@ export class LiveService {
       .where('i.drop_id', '=', dropId)
       .where('i.account_id', '=', accountId)
       .executeTakeFirst();
-    return r ? { dropId: r.drop_id, size: { id: r.size_id, label: r.label }, since: r.created_at } : null;
+    if (!r) return null;
+    // Macro scope K44 T1: an interest in a set's release, its size per piece.
+    const sizes = await liveInterestPieceSizes(db, dropId, accountId);
+    return { dropId: r.drop_id, size: { id: r.size_id, label: r.label }, ...(sizes.length ? { sizes } : {}), since: r.created_at };
   }
 }
 

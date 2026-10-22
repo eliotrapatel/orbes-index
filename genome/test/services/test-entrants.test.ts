@@ -24,7 +24,10 @@
  *    size of the release set aside during the test (plan NEXT LOT §3.3): END TEST puts the stock back on its SKU;
  *  - the report's checks find a fault planted; the sweeper resumes a confirmation due after a restart;
  *  - a LIVE RELEASE with a pace (W2, W4): the bots wait in the queue, reading their state as its `pollMs` says, and
- *    are admitted batch by batch; END TEST: the report 6/6 with its PACE check.
+ *    are admitted batch by batch; END TEST: the report 6/6 with its PACE check;
+ *  - a set's LIVE RELEASE (macro scope K44 T1, M3.16): the bots say I'LL BE THERE and enter with a size per piece, pay
+ *    one set each (a set sale, an order per piece); END TEST cancels every order of every set, the report 5/5 reading
+ *    each entry in each of its sizes; ended before T0, their interest is withdrawn with its sizes per piece.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { sql } from 'kysely';
@@ -39,7 +42,7 @@ import { creditBalances } from '../../src/server/services/tier-grants.js';
 import { shareOf, splitOf, testPhrase, testRunSettings, TEST_RUN_DEFAULTS, TestEntrantService, type TestRunSettingsInput } from '../../src/server/services/test-entrants.js';
 import { createHarness, type Harness } from '../api/support.js';
 import { countPiecesIn, scanIntoParcel } from '../support/fulfil.js';
-import { createAccount, createCollection, createLiveRelease, createModel, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { createAccount, createCollection, createLiveRelease, createModel, createSet, createSetLiveRelease, holdPieces, liveFixtureOn, sizedModel, type LiveFixture } from '../support/live.js';
 import { poolDraw, withDrawSizes } from '../support/draws.js';
 
 const MINUTE = 60_000;
@@ -1099,5 +1102,84 @@ describe('a LIVE RELEASE end to end', () => {
     await rejects(w.tests.releaseEntrant(drawRun.id, bot.account_id, w.f.admin), 'TEST_DRAW_NO_RELEASE', 409);
     await rejects(w.tests.confirmEntrant(drawRun.id, bot.account_id, w.f.admin), 'TEST_PLACE_NOT_HELD', 409);
     await rejects(w.tests.confirmEntrant(drawRun.id, w.f.admin.id, w.f.admin), 'TEST_ENTRANT_NOT_FOUND', 404);
+  });
+});
+
+describe('a set\'s LIVE RELEASE (macro scope K44 T1, plan MACRO M3 §5.2, M3.16)', () => {
+  let w: World;
+  let setId: string;
+  beforeAll(async () => {
+    w = await world();
+    const ring = await sizedModel(w.h.ctx.db, 'HALO', ['52', '54']);
+    const chain = await sizedModel(w.h.ctx.db, 'LINEA', ['45', '50'], 'NECKLACE');
+    setId = await createSet(w.f, [ring, chain]);
+  });
+  afterAll(() => w?.h.close());
+
+  const setRelease = (t0: Date) =>
+    createSetLiveRelease(w.f, {
+      setId,
+      opensAt: t0,
+      sizes: [{ piece: 1, label: '52', stock: 4 }, { piece: 1, label: '54', stock: 4 }, { piece: 2, label: '45', stock: 4 }, { piece: 2, label: '50', stock: 4 }],
+    });
+
+  it('the bots say I\'LL BE THERE and enter with a size per piece, pay one set each; END TEST cancels every order of every set; the report 5/5', async () => {
+    const t0 = new Date(w.h.clock.now().getTime() + 10 * MINUTE);
+    const r = await setRelease(t0);
+    w.h.clock.set(t0.getTime() - 4 * MINUTE);
+    const run = await w.tests.start(
+      r.id,
+      press(r.id, { titane: 4 }, {
+        arrival: { mode: 'all', interestPct: 100 },
+        behaviour: { payPct: 100, releasePct: 0, missPct: 0, leavePct: 0, holdSeconds: 1.5 },
+        // The Choices' size where a piece offers it (the ring's 52), one of the others' at random.
+        choices: { size: '52', quantity: 1, addOnsPct: 0 },
+      }),
+      w.f.admin,
+    );
+    await drive(w, 0, 500, r.id);
+    const sized = await w.h.ctx.db.selectFrom('live_entry_sizes as x').innerJoin('drop_sizes as s', 's.id', 'x.size_id').select(['x.piece', 's.label']).where('x.drop_id', '=', r.id).execute();
+    expect(sized).toHaveLength(8);
+    expect(sized.filter((x) => x.piece === 1).every((x) => x.label === '52')).toBe(true);
+    expect(await w.h.ctx.db.selectFrom('live_interest_sizes').select('piece').where('drop_id', '=', r.id).execute()).toHaveLength(8);
+    w.h.clock.set(t0);
+    await drive(w, 20_000, 500, r.id);
+    expect(await statusOf(w, run.id)).toBe('DONE');
+    // Four sets sold (of eight on sale): one set sale each, an order per piece.
+    expect(await w.h.ctx.db.selectFrom('set_sales').select('id').where('drop_id', '=', r.id).execute()).toHaveLength(4);
+    expect(await w.h.ctx.db.selectFrom('orders').select('id').where('drop_id', '=', r.id).execute()).toHaveLength(8);
+    expect((await w.h.ctx.db.selectFrom('drops').select('quantity').where('id', '=', r.id).executeTakeFirstOrThrow()).quantity).toBe(8);
+    const row = await w.h.ctx.db.selectFrom('drops').selectAll().where('id', '=', r.id).executeTakeFirstOrThrow();
+    const report = await w.tests.report(row, w.h.clock.now());
+    expect(report.checks.find((c) => c.id === 'STOCK')?.line).toMatch(/^8 pieces confirmed with 8 orders, every size within its stock/);
+    expect(report.checks.map((c) => [c.id, c.pass])).toEqual([
+      ['ONE_ENTRY', true],
+      ['ORDER', true],
+      ['ONE_PLACE', true],
+      ['STOCK', true],
+      ['ORDERS', true],
+    ]);
+
+    const ended = await w.tests.end(run.id, testPhrase(r.id, true), w.f.admin);
+    expect(ended.report?.checks.map((c) => c.pass)).toEqual([true, true, true, true, true]);
+    expect((await w.h.ctx.db.selectFrom('orders').select('status').where('drop_id', '=', r.id).execute()).every((o) => o.status === 'CANCELLED')).toBe(true);
+    const endAudit = await w.h.ctx.db.selectFrom('audit_logs').select('details').where('action', '=', 'test_run.end').where('target_id', '=', run.id).executeTakeFirstOrThrow();
+    // Every order of every set, though cancelling one of a set's closes its other in the same transition.
+    expect((endAudit.details as { cleaned: Record<string, number> }).cleaned).toMatchObject({ ordersCancelled: 8, confirmedRemoved: 4 });
+  });
+
+  it('ended before T0, the bots\' interest in a set\'s release is withdrawn with its sizes per piece', async () => {
+    const t0 = new Date(w.h.clock.now().getTime() + 10 * MINUTE);
+    const r = await setRelease(t0);
+    w.h.clock.set(t0.getTime() - 4 * MINUTE);
+    const run = await w.tests.start(r.id, press(r.id, { titane: 3 }, { arrival: { mode: 'all', interestPct: 100 } }), w.f.admin);
+    await drive(w, 0, 500, r.id);
+    expect(await w.h.ctx.db.selectFrom('live_interest_sizes').select('piece').where('drop_id', '=', r.id).execute()).toHaveLength(6);
+    await w.tests.stop(run.id, w.f.admin);
+    const ended = await w.tests.end(run.id, testPhrase(r.id, true), w.f.admin);
+    expect(ended.status).toBe('ENDED');
+    expect(await w.h.ctx.db.selectFrom('live_interest').select('account_id').where('drop_id', '=', r.id).execute()).toEqual([]);
+    expect(await w.h.ctx.db.selectFrom('live_interest_sizes').select('piece').where('drop_id', '=', r.id).execute()).toEqual([]);
+    expect((await w.h.ctx.db.selectFrom('live_entries').select('status').where('drop_id', '=', r.id).execute()).every((e) => e.status === 'REMOVED')).toBe(true);
   });
 });

@@ -44,6 +44,14 @@
  * The sizes of a release are linked to their SKUs (the release's model in each size, services/stock.ts) whenever they
  * or the model change.
  *
+ * THE SET (macro scope K44 T1 and T4; plan MACRO M3 §5.2): a LIVE RELEASE sells a model or a set (`setId` in place of
+ * `modelId`, exactly one, for good: a set's release may take another set, with its sizes, until its announcement). A
+ * set's sizes are given per piece (each `piece` 1 to the set's pieces, 1 to 24 sizes each, each one of its piece's
+ * model's sizes, every piece with at least one piece on sale), its quantity its sets on sale (the smallest of its
+ * pieces' totals), « 25 SETS » by default; `perAccount` counts sets, at most LIVE_PER_ACCOUNT.max ÷ its pieces (live.ts
+ * liveSetPerAccountMax); it never has an after-room (409 AFTER_ROOM_SET) nor the house's guarantee. Its console views
+ * carry `set` (its pieces) and the set itself in `model`; its sizes, entries and board read per piece.
+ *
  * Audited (dotted lowercase, ids only, a description or a body as its length and SHA-256): `drop.live.create`,
  * `drop.live.update` (each setting before and after), `drop.live.publish`, `drop.live.cancel`, and the circle's own `circle.post.create`, `circle.post.update`, `circle.post.unpublish` for the
  * release's post.
@@ -53,12 +61,12 @@ import { sql } from 'kysely';
 import { toHex } from '../../core/bytes.js';
 import { inTransaction, type Db } from '../db/connection.js';
 import type { AccessCombine, AdminRole, DropRow, LiveEndReason, LiveEntryStatus } from '../db/schema.js';
-import { ACCESS_COMBINES, LIVE_ENTRY_STATUSES } from '../db/schema.js';
+import { ACCESS_COMBINES, LIVE_ENTRY_STATUSES, SET_PIECES_MAX } from '../db/schema.js';
 import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
 import { makePage, pageOffset, systemClock, type Actor, type Clock, type Page, type PageRequest } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
 import type { LiveAlert, LiveSellOut, LiveSignals } from './live-insights.js';
-import { cleanDescription, cleanTime, cleanTitle, DROP_QUANTITY_MAX, dropNotFound, newSealedSeed, PURCHASE_WINDOW_HOURS } from './drops.js';
+import { cleanDescription, cleanTime, cleanTitle, DROP_QUANTITY_MAX, dropNotFound, newSealedSeed, offeredSet, PURCHASE_WINDOW_HOURS } from './drops.js';
 import {
   announcedAt,
   effectiveDeadline,
@@ -66,8 +74,11 @@ import {
   liveAccessRule,
   livePaceState,
   livePhase,
+  livePieceSizes,
   liveRuleText,
+  liveSetPerAccountMax,
   liveStages,
+  onSaleOf,
   roomOpensAt,
   LIVE_ADDONS_MAX,
   LIVE_MIN_PARTICIPATIONS,
@@ -82,6 +93,7 @@ import {
   LIVE_TURN_SECONDS,
   type AdminLiveEntry,
   type LiveAccessRule,
+  type LivePieceSize,
   type LivePaceState,
   type LivePhase,
 } from './live.js';
@@ -91,7 +103,7 @@ import { mediaUrl } from './media.js';
 import { knownLocation, linkDropSizes } from './stock.js';
 import { cleanQuestionWords, QuestionService, type AdminQuestion } from './question.js';
 import { releaseFeasibility, type Feasibility, type FeasibilitySize } from './release-stock.js';
-import { afterRoomModelId, modelOfModelRelease } from './release-offer.js';
+import { afterRoomModelId, setPieces } from './release-offer.js';
 import { cancelMovedAnnouncements, cancelReleaseEmails } from './email.js';
 import { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES, afterRoomTimes, afterRoomTitle, cancelAfterRoom, type AfterRoomSkip } from './after-room.js';
 
@@ -127,9 +139,9 @@ export function liveReference(entryId: string): string {
   return `LR-${entryId.replace(/-/g, '').slice(0, 8).toUpperCase()}`;
 }
 
-/** The quantity line a release says by default: « 25 PIECES ». */
-export function defaultQuantityLine(quantity: number): string {
-  return `${quantity} ${quantity === 1 ? 'PIECE' : 'PIECES'}`;
+/** The quantity line a release says by default: « 25 PIECES »; a set's release (macro scope K44 T1), « 25 SETS ». */
+export function defaultQuantityLine(quantity: number, set = false): string {
+  return set ? `${quantity} ${quantity === 1 ? 'SET' : 'SETS'}` : `${quantity} ${quantity === 1 ? 'PIECE' : 'PIECES'}`;
 }
 
 /** A price in minor units, as a CSV holds it: `4800.00`. */
@@ -158,6 +170,14 @@ const circlePosted = () => conflict('LIVE_CIRCLE_POSTED', 'This release’s post
 const noCirclePost = () => conflict('LIVE_NO_CIRCLE_POST', 'This release has no post of the circle waiting for its announcement.');
 const roomOpen = () => conflict('LIVE_ROOM_OPEN', 'The room of this release is open: an ADMIN ends it with END NOW.');
 const roomPast = () => validationError('The room would already be open: set T0 later.');
+// Macro scope K44 T1 (plan MACRO M3 §5.1): a set's LIVE RELEASE.
+const oneOffer = () => validationError('A release sells a model or a set: give one of them.');
+const setNotFound = () => notFound('Set', 'SET_NOT_FOUND');
+const setOfferFixed = () => validationError('A set’s release sells its set: its pieces are the set’s.');
+const modelOfferFixed = () => validationError('A model’s release sells its model: a set is sold by a release of its own.');
+const setSizesGiven = () => validationError('Give the sizes of the new set’s pieces with it.');
+const setPerAccount = (pieces: number, max: number) =>
+  validationError(max === 1 ? `A set of ${pieces} pieces is sold one per person.` : `A set of ${pieces} pieces is sold 1 to ${max} per person.`);
 const modelInactive = () => conflict('MODEL_INACTIVE', 'This model is no longer offered for new products.');
 const entryNotFound = () => notFound('Entry', 'LIVE_ENTRY_NOT_FOUND');
 const afterRoomModelInactive = () => conflict('MODEL_INACTIVE', 'The after-room’s model is no longer offered for new products: choose another in its settings.');
@@ -180,6 +200,8 @@ export interface LiveSizeInput {
   id?: string | null;
   label: string;
   stock: number;
+  /** Macro scope K44 T1: on a set's release, the piece (1 to 4, the set's order) the size is of; never on a model's. */
+  piece?: number | null;
 }
 
 export interface LiveAddonInput {
@@ -204,7 +226,9 @@ export interface LivePaceInput {
 
 /** Every setting of a LIVE RELEASE; those not given take their defaults (the plan's choices 15 and 16). */
 export interface LiveSettingsInput {
-  modelId: string;
+  /** What it sells: a model, or (macro scope K44 T1) a set (`setId`): exactly one. */
+  modelId?: string;
+  setId?: string;
   title: string;
   description?: string | null;
   /** T0. */
@@ -270,7 +294,9 @@ export interface AfterRoomInput {
 export type LiveSettingsChange = Partial<LiveSettingsInput>;
 
 interface Settings {
-  modelId: string;
+  /** A model's release: its model; a set's (macro scope K44 T1): null, and `setId` its set. */
+  modelId: string | null;
+  setId: string | null;
   title: string;
   description: string | null;
   opensAt: Date;
@@ -291,7 +317,8 @@ interface Settings {
   accessCombine: AccessCombine;
   surpriseEnabled: boolean;
   surpriseText: string | null;
-  sizes: { id: string | null; label: string; stock: number }[];
+  /** Each its piece on a set's release (macro scope K44 T1), null on a model's. */
+  sizes: { id: string | null; label: string; stock: number; piece: number | null }[];
   quantityLine: string;
   addons: { id: string | null; label: string; line: string | null; priceMinor: number }[];
   announceAt: Date | null;
@@ -310,7 +337,7 @@ interface Settings {
 export interface AfterRoomSettings {
   modelId: string;
   priceMinor: number;
-  sizes: { id: string | null; label: string; stock: number }[];
+  sizes: { id: string | null; label: string; stock: number; piece: number | null }[];
   addons: { id: string | null; label: string; line: string | null; priceMinor: number }[];
   delayMinutes: number;
   lengthMinutes: number;
@@ -341,8 +368,41 @@ function optionalTime(v: unknown, label: string): Date | null {
 
 const price = (v: unknown, what: string) => wholeIn(v, 0, LIVE_PRICE_MAX_MINOR, `${what} is 0 to ${majorUnits(LIVE_PRICE_MAX_MINOR)}, in cents.`);
 
-function cleanSizes(v: unknown): Settings['sizes'] {
-  if (!Array.isArray(v) || v.length < LIVE_SIZES.min || v.length > LIVE_SIZES.max) throw validationError(`A release has ${LIVE_SIZES.min} to ${LIVE_SIZES.max} sizes.`);
+/**
+ * A release's sizes: 1 to 24, each a label once, 0 to 10 000 pieces, 1 to 10 000 in all. Macro scope K44 T1, `set`: each
+ * names its piece (1 to SET_PIECES_MAX; the set's own count is checked with the set, `checkOffer`), and the rule holds
+ * per piece (1 to 24 sizes, a label once, 1 to 10 000 pieces); a model's never names one.
+ */
+function cleanSizes(v: unknown, set = false): Settings['sizes'] {
+  if (!set) {
+    if (Array.isArray(v) && v.some((x) => (x as LiveSizeInput | null)?.piece !== undefined && (x as LiveSizeInput | null)?.piece !== null)) {
+      throw validationError('A model’s release gives its sizes without a piece.');
+    }
+    return cleanSizeList(v, null);
+  }
+  if (!Array.isArray(v) || v.length < 1 || v.length > LIVE_SIZES.max * SET_PIECES_MAX) throw validationError(`Each piece of a set’s release has ${LIVE_SIZES.min} to ${LIVE_SIZES.max} sizes.`);
+  const byPiece = new Map<number, unknown[]>();
+  for (const x of v as unknown[]) {
+    const piece = (x as LiveSizeInput | null)?.piece;
+    if (typeof piece !== 'number' || !Number.isInteger(piece) || piece < 1 || piece > SET_PIECES_MAX) throw validationError(`Each size of a set’s release names its piece, 1 to ${SET_PIECES_MAX}.`);
+    byPiece.set(piece, [...(byPiece.get(piece) ?? []), x]);
+  }
+  const out: Settings['sizes'] = [];
+  const ids = new Set<string>();
+  for (const piece of [...byPiece.keys()].sort((a, b) => a - b)) {
+    for (const s of cleanSizeList(byPiece.get(piece), piece)) {
+      if (s.id && ids.has(s.id)) throw validationError('A size is listed twice.');
+      if (s.id) ids.add(s.id);
+      out.push(s);
+    }
+  }
+  return out;
+}
+
+/** One list of sizes cleaned (a model's release, or one piece of a set's: `piece`). */
+function cleanSizeList(v: unknown, piece: number | null): Settings['sizes'] {
+  const what = piece === null ? 'A release has' : 'Each piece of a set’s release has';
+  if (!Array.isArray(v) || v.length < LIVE_SIZES.min || v.length > LIVE_SIZES.max) throw validationError(`${what} ${LIVE_SIZES.min} to ${LIVE_SIZES.max} sizes.`);
   const seen = new Set<string>();
   const ids = new Set<string>();
   const out = v.map((s: LiveSizeInput) => {
@@ -354,10 +414,12 @@ function cleanSizes(v: unknown): Settings['sizes'] {
     const id = s?.id === undefined || s?.id === null ? null : knownId(s.id, () => validationError('A size to keep is one of the release’s.'));
     if (id && ids.has(id)) throw validationError('A size is listed twice.');
     if (id) ids.add(id);
-    return { id, label, stock };
+    return { id, label, stock, piece };
   });
   const total = out.reduce((n, s) => n + s.stock, 0);
-  if (total < 1 || total > DROP_QUANTITY_MAX) throw validationError(`A release offers 1 to ${DROP_QUANTITY_MAX} pieces in all.`);
+  if (total < 1 || total > DROP_QUANTITY_MAX) {
+    throw validationError(piece === null ? `A release offers 1 to ${DROP_QUANTITY_MAX} pieces in all.` : `Each piece of a set’s release offers 1 to ${DROP_QUANTITY_MAX} pieces in all.`);
+  }
   return out;
 }
 
@@ -405,9 +467,28 @@ function cleanSurpriseText(v: unknown): string | null {
   return t;
 }
 
-function cleanQuantityLine(v: unknown, quantity: number): string {
-  if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) return defaultQuantityLine(quantity);
+function cleanQuantityLine(v: unknown, quantity: number, set = false): string {
+  if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) return defaultQuantityLine(quantity, set);
   return oneLine(v, LIVE_QUANTITY_LINE_MAX, 'The quantity line');
+}
+
+/**
+ * What a release sells as a change gives it (macro scope K44 T1): a new release, exactly one of `modelId` and `setId`
+ * (400); a model's release keeps selling a model (its model may change), a set's a set (another set may be given).
+ */
+function offerOf(base: Settings | null, change: LiveSettingsChange): Pick<Settings, 'modelId' | 'setId'> {
+  const model = change.modelId !== undefined ? knownId(change.modelId, () => notFound('Model', 'MODEL_NOT_FOUND')) : null;
+  const set = change.setId !== undefined ? knownId(change.setId, setNotFound) : null;
+  if (!base) {
+    if ((model === null) === (set === null)) throw oneOffer();
+    return { modelId: model, setId: set };
+  }
+  if (base.setId !== null) {
+    if (change.modelId !== undefined) throw setOfferFixed();
+    return { modelId: null, setId: set ?? base.setId };
+  }
+  if (change.setId !== undefined) throw modelOfferFixed();
+  return { modelId: model ?? base.modelId, setId: null };
 }
 
 /**
@@ -421,7 +502,7 @@ export function cleanAfterRoom(v: unknown, base: AfterRoomSettings | null): Afte
   return {
     modelId: knownId(a.modelId, () => notFound('Model', 'MODEL_NOT_FOUND')),
     priceMinor: price(a.priceMinor, 'The after-room’s price'),
-    sizes: cleanSizes(a.sizes),
+    sizes: cleanSizes(a.sizes, false),
     addons: a.addons === undefined ? (base?.addons ?? []) : cleanAddons(a.addons),
     delayMinutes: wholeIn(
       a.delayMinutes ?? base?.delayMinutes ?? AFTER_ROOM_DELAY_MINUTES.default,
@@ -467,16 +548,20 @@ function cleanQuestion(change: LiveSettingsChange, base: Settings | null): Pick<
 /** The settings a change gives, over the release's (or the defaults of a new one), each cleaned. */
 function settingsOf(base: Settings | null, change: LiveSettingsChange): Settings {
   const pick = <K extends keyof LiveSettingsInput>(k: K): LiveSettingsInput[K] | undefined => (change[k] !== undefined ? change[k] : undefined);
-  const sizes = pick('sizes') !== undefined ? cleanSizes(change.sizes) : base ? base.sizes : cleanSizes(undefined);
-  const quantity = sizes.reduce((n, s) => n + s.stock, 0);
-  // A quantity line left at its default follows the stock.
-  const followsStock = base !== null && base.quantityLine === defaultQuantityLine(base.sizes.reduce((n, s) => n + s.stock, 0));
+  const offer = offerOf(base, change);
+  const isSet = offer.setId !== null;
+  // A set's release given another set takes the new set's sizes with it.
+  if (base?.setId && offer.setId !== base.setId && change.sizes === undefined) throw setSizesGiven();
+  const sizes = pick('sizes') !== undefined ? cleanSizes(change.sizes, isSet) : base ? base.sizes : cleanSizes(undefined, isSet);
+  const quantity = onSaleOf(sizes);
+  // A quantity line left at its default follows the stock (a set's, its sets).
+  const followsStock = base !== null && base.quantityLine === defaultQuantityLine(onSaleOf(base.sizes), base.setId !== null);
   const quantityLine =
-    change.quantityLine !== undefined ? cleanQuantityLine(change.quantityLine, quantity) : base && !followsStock ? base.quantityLine : defaultQuantityLine(quantity);
+    change.quantityLine !== undefined ? cleanQuantityLine(change.quantityLine, quantity, isSet) : base && !followsStock ? base.quantityLine : defaultQuantityLine(quantity, isSet);
   const currency = change.currency !== undefined ? change.currency : (base?.currency ?? 'EUR');
   if (!(LIVE_CURRENCIES as readonly string[]).includes(currency as string)) throw validationError(`A release is priced in ${LIVE_CURRENCIES.join(', ')}.`);
   return {
-    modelId: change.modelId !== undefined ? knownId(change.modelId, () => notFound('Model', 'MODEL_NOT_FOUND')) : base ? base.modelId : knownId(undefined, () => notFound('Model', 'MODEL_NOT_FOUND')),
+    ...offer,
     title: change.title !== undefined || !base ? cleanTitle(change.title) : base.title,
     description: change.description !== undefined ? cleanDescription(change.description) : (base?.description ?? null),
     opensAt: change.opensAt !== undefined || !base ? cleanTime(change.opensAt, 'T0') : base.opensAt,
@@ -560,6 +645,7 @@ function auditSettings(s: Settings): Record<string, unknown> {
   const t = (d: Date | null) => (d ? d.toISOString() : null);
   return {
     modelId: s.modelId,
+    ...(s.setId !== null ? { setId: s.setId } : {}),
     title: s.title,
     description: storyFingerprint(s.description),
     opensAt: t(s.opensAt),
@@ -580,7 +666,8 @@ function auditSettings(s: Settings): Record<string, unknown> {
     accessCombine: s.accessCombine,
     surpriseEnabled: s.surpriseEnabled,
     surprise: storyFingerprint(s.surpriseText),
-    sizes: s.sizes.map((x) => `${x.label}:${x.stock}`),
+    // A set's size names its piece first (« 2:52:10 »).
+    sizes: s.sizes.map((x) => (x.piece !== null ? `${x.piece}:${x.label}:${x.stock}` : `${x.label}:${x.stock}`)),
     quantityLine: s.quantityLine,
     addons: s.addons.map((a) => ({ label: a.label, line: a.line, priceMinor: a.priceMinor })),
     announceAt: t(s.announceAt),
@@ -622,7 +709,10 @@ function consoleRule(s: Settings, models: { id: string; name: string }[], collec
 export interface AdminLiveCard {
   id: string;
   title: string;
+  /** Its model; a set's release (macro scope K44 T1): the set itself (its id and name, type SET, whether it is offered). */
   model: { id: string; name: string; type: string; active: boolean };
+  /** Macro scope K44 T1: a set's release, its set and its pieces in order (each its model); absent on a model's. */
+  set?: AdminLiveSet;
   phase: LivePhase;
   /** Ended, no turn or hold left. */
   over: boolean;
@@ -638,6 +728,15 @@ export interface AdminLiveCard {
   /** The entries by status. */
   entries: Record<LiveEntryStatus, number>;
   interest: number;
+}
+
+/** A set's LIVE RELEASE's set in the console (macro scope K44 T1). */
+export interface AdminLiveSet {
+  id: string;
+  name: string;
+  code: string;
+  active: boolean;
+  pieces: { piece: number; model: { id: string; name: string; variant: string | null; type: string; active: boolean } }[];
 }
 
 /** A LIVE RELEASE as the console reads and edits it: every setting, never its sealed seed. */
@@ -676,7 +775,8 @@ export interface AdminLiveRelease extends AdminLiveCard {
   location: { id: string; name: string } | null;
   /** The question after (plan LIVE RELEASE+, choice 11), its answers counted; null for an after-room, which asks none. */
   question: AdminQuestion | null;
-  sizes: { id: string; label: string; stock: number }[];
+  /** Its sizes in order; on a set's release, each with its piece (1 to 4). */
+  sizes: { id: string; label: string; stock: number; piece?: number }[];
   addons: { id: string; label: string; line: string | null; priceMinor: number }[];
   tierWindows: { tier: number; turnSeconds: number | null; payMinutes: number | null }[];
   /** As set (null: at the publication; a NULL stage: at the announcement). */
@@ -742,6 +842,8 @@ export interface AdminAfterRoom {
 export interface AdminLiveBoardSize {
   id: string;
   label: string;
+  /** Macro scope K44 T1: on a set's release, its piece (1 to 4; an entry counts in each of its sizes); absent on a model's. */
+  piece?: number;
   stock: number;
   /** Pieces free now. */
   left: number;
@@ -772,11 +874,18 @@ export interface AdminLiveBoard {
   roomOpensAt: Date;
   opensAt: Date;
   closesAt: Date;
+  /** Its pieces on sale; a set's release (macro scope K44 T1): its sets on sale, the smallest of its pieces' totals. */
   quantity: number;
   quantityLine: string;
-  /** The sizes summed, and the people who are out of the release: places given back, left, removed, ended by its end. */
-  totals: Omit<AdminLiveBoardSize, 'id' | 'label'> & { inRoom: number; released: number; departed: number; removed: number; ended: number };
+  /**
+   * The sizes summed, and the people who are out of the release: places given back, left, removed, ended by its end. A
+   * set's release (macro scope K44 T1): in sets, its people counted once (its first piece's sizes), its stock its sets on
+   * sale, `left` the sets its pieces can still make (each piece's free pieces, the smallest).
+   */
+  totals: Omit<AdminLiveBoardSize, 'id' | 'label' | 'piece'> & { inRoom: number; released: number; departed: number; removed: number; ended: number };
   sizes: AdminLiveBoardSize[];
+  /** Macro scope K44 T1: a set's release, each piece (its model) and its pieces on sale in all; absent on a model's. */
+  pieces?: { piece: number; name: string; variant: string | null; stock: number }[];
   message: { text: string; at: Date } | null;
   /** The open entries (in their turn, holding, in the line, in the room), by place then arrival: the first LIVE_CONSOLE_LINE_MAX. */
   line: AdminLiveEntry[];
@@ -795,7 +904,15 @@ export interface AdminLiveBoard {
 
 const EMPTY_COUNTS = (): Record<LiveEntryStatus, number> => Object.fromEntries(LIVE_ENTRY_STATUSES.map((s) => [s, 0])) as Record<LiveEntryStatus, number>;
 
-type ReadRow = DropRow & { model_name: string; model_type: string; model_active: boolean };
+/** A release with its model's (null on a set's release: macro scope K44 T1) and its set's (null on a model's). */
+type ReadRow = DropRow & {
+  model_name: string | null;
+  model_type: string | null;
+  model_active: boolean | null;
+  set_name: string | null;
+  set_code: string | null;
+  set_active: boolean | null;
+};
 
 // ── Service ────────────────────────────────────────────────────────────────
 
@@ -846,8 +963,13 @@ export class LiveConsoleService {
     const rows = await this.reads(this.db).where('d.mode', '=', 'LIVE').where('d.parent_drop_id', 'is', null).orderBy('d.created_at', 'desc').orderBy('d.id').limit(page.pageSize).offset(pageOffset(page)).execute();
     const now = this.clock();
     const [counts, interest, open] = await Promise.all([this.counts(this.db, rows.map((r) => r.id)), this.interest(this.db, rows.map((r) => r.id)), this.openHolds(this.db, rows.map((r) => r.id))]);
+    const sets = new Map<string, AdminLiveSet>();
+    for (const r of rows) {
+      const s = await this.setOf(this.db, r);
+      if (s) sets.set(r.id, s);
+    }
     return makePage(
-      rows.map((r) => this.card(r, now, counts.get(r.id), interest.get(r.id) ?? 0, open.has(r.id))),
+      rows.map((r) => ({ ...this.card(r, now, counts.get(r.id), interest.get(r.id) ?? 0, open.has(r.id)), ...(sets.has(r.id) ? { set: sets.get(r.id)! } : {}) })),
       Number(total.n),
       page,
     );
@@ -881,8 +1003,9 @@ export class LiveConsoleService {
     const d = await this.db.selectFrom('drops').selectAll().where('id', '=', id).where('mode', '=', 'LIVE').executeTakeFirst();
     if (!d) return null;
     const now = this.clock();
-    const [sizes, counts, interest, message] = await Promise.all([
-      this.db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', id).orderBy('position').execute(),
+    const isSet = d.set_id !== null;
+    const [sizes, counts, interest, message, bySize, interestBySize, setOf] = await Promise.all([
+      this.db.selectFrom('drop_sizes').select(['id', 'label', 'stock', 'piece']).where('drop_id', '=', id).orderBy('position').execute(),
       this.db
         .selectFrom('live_entries')
         .select((eb) => ['size_id', 'status', eb.fn.countAll<number>().as('n'), eb.fn.sum<number>('quantity').as('q')])
@@ -891,16 +1014,30 @@ export class LiveConsoleService {
         .execute(),
       this.db.selectFrom('live_interest').select((eb) => ['size_id', eb.fn.countAll<number>().as('n')]).where('drop_id', '=', id).groupBy('size_id').execute(),
       this.db.selectFrom('live_messages').select(['text', 'created_at']).where('drop_id', '=', id).orderBy('created_at', 'desc').orderBy('id', 'desc').limit(1).executeTakeFirst(),
+      // Macro scope K44 T1: a set's entry and interest count in each of their sizes.
+      isSet
+        ? this.db
+            .selectFrom('live_entry_sizes as x')
+            .innerJoin('live_entries as e', 'e.id', 'x.entry_id')
+            .select((eb) => ['x.size_id', 'e.status', eb.fn.countAll<number>().as('n'), eb.fn.sum<number>('e.quantity').as('q')])
+            .where('e.drop_id', '=', id)
+            .groupBy(['x.size_id', 'e.status'])
+            .execute()
+        : Promise.resolve(null),
+      isSet ? this.db.selectFrom('live_interest_sizes').select((eb) => ['size_id', eb.fn.countAll<number>().as('n')]).where('drop_id', '=', id).groupBy('size_id').execute() : Promise.resolve(null),
+      isSet ? setPieces(this.db, d.set_id!) : Promise.resolve(null),
     ]);
+    const perSize = bySize ?? counts;
     const people = (sizeId: string | null, statuses: readonly string[]) =>
-      counts.filter((c) => (sizeId === null || c.size_id === sizeId) && statuses.includes(c.status)).reduce((n, c) => n + Number(c.n), 0);
-    const pieces = (sizeId: string, statuses: readonly string[]) => counts.filter((c) => c.size_id === sizeId && statuses.includes(c.status)).reduce((n, c) => n + Number(c.q ?? 0), 0);
+      (sizeId === null ? counts : perSize).filter((c) => (sizeId === null || c.size_id === sizeId) && statuses.includes(c.status)).reduce((n, c) => n + Number(c.n), 0);
+    const pieces = (sizeId: string, statuses: readonly string[]) => perSize.filter((c) => c.size_id === sizeId && statuses.includes(c.status)).reduce((n, c) => n + Number(c.q ?? 0), 0);
     const boardSizes: AdminLiveBoardSize[] = sizes.map((s) => {
       const held = pieces(s.id, ['TURN', 'SECURED']);
       const sold = pieces(s.id, ['CONFIRMED']);
       return {
         id: s.id,
         label: s.label,
+        ...(s.piece !== null ? { piece: s.piece } : {}),
         stock: s.stock,
         left: Math.max(0, s.stock - held - sold),
         held,
@@ -912,10 +1049,17 @@ export class LiveConsoleService {
         confirmed: people(s.id, ['CONFIRMED']),
         missed: people(s.id, ['MISSED']),
         expired: people(s.id, ['EXPIRED']),
-        interest: Number(interest.find((i) => i.size_id === s.id)?.n ?? 0),
+        interest: Number((interestBySize ?? interest).find((i) => i.size_id === s.id)?.n ?? 0),
       };
     });
-    const sum = (k: keyof AdminLiveBoardSize) => boardSizes.reduce((n, s) => n + (s[k] as number), 0);
+    // A set's release: its people and sets counted once, in its first piece's sizes; its sets left, each piece's, the smallest.
+    const first = Math.min(...boardSizes.map((s) => s.piece ?? 0));
+    const counted = boardSizes.filter((s) => (s.piece ?? 0) === first);
+    const sum = (k: keyof AdminLiveBoardSize) => counted.reduce((n, s) => n + (s[k] as number), 0);
+    const boardPieces = setOf
+      ? setOf.map((p) => ({ piece: p.piece!, name: p.model.name, variant: p.model.variant, stock: boardSizes.filter((s) => s.piece === p.piece).reduce((n, s) => n + s.stock, 0) }))
+      : null;
+    const leftSets = setOf ? Math.min(...setOf.map((p) => boardSizes.filter((s) => s.piece === p.piece).reduce((n, s) => n + s.left, 0))) : sum('left');
     const holding = people(null, ['TURN', 'SECURED']);
     const phase = livePhase(d, now);
     // Over on the recorded end (the clock alone may run ahead of the engine's pass), with no turn or hold left.
@@ -938,11 +1082,11 @@ export class LiveConsoleService {
       roomOpensAt: roomOpensAt(d),
       opensAt: d.opens_at,
       closesAt: d.closes_at,
-      quantity: sizes.reduce((n, s) => n + s.stock, 0),
+      quantity: onSaleOf(sizes),
       quantityLine: d.quantity_line ?? '',
       totals: {
-        stock: sum('stock'),
-        left: sum('left'),
+        stock: setOf ? onSaleOf(sizes) : sum('stock'),
+        left: leftSets,
         held: sum('held'),
         sold: sum('sold'),
         inRoom: people(null, LIVE_OPEN_STATUSES),
@@ -960,6 +1104,7 @@ export class LiveConsoleService {
         interest: sum('interest'),
       },
       sizes: boardSizes,
+      ...(boardPieces ? { pieces: boardPieces } : {}),
       message: message ? { text: message.text, at: message.created_at } : null,
       line,
       lineTotal: Number(lineTotal.n),
@@ -1017,7 +1162,7 @@ export class LiveConsoleService {
     return inTransaction(this.db, async (tx) => {
       const now = this.clock();
       checkTimes(s, now, null);
-      await this.checkModel(tx, s.modelId);
+      await this.checkOffer(tx, s);
       await this.checkAccess(tx, s);
       if (s.afterRoom) await this.checkModel(tx, s.afterRoom.modelId);
       const id = randomUUID();
@@ -1078,7 +1223,10 @@ export class LiveConsoleService {
       // IN-01: never fewer pieces than the house guarantees for the release.
       const guaranteed = await guaranteedPieces(tx, id);
       if (after.sizes.reduce((n, x) => n + x.stock, 0) < guaranteed) throw guaranteesExceed(guaranteed);
-      if (after.modelId !== before.modelId) await this.checkModel(tx, after.modelId);
+      // Its model or set offered; a set's sizes per piece and its sets per person checked again when they change.
+      if (after.modelId !== before.modelId || after.setId !== before.setId || (after.setId !== null && (changed.includes('sizes') || changed.includes('perAccount')))) {
+        await this.checkOffer(tx, after);
+      }
       if (after.afterRoom && after.afterRoom.modelId !== before.afterRoom?.modelId) await this.checkModel(tx, after.afterRoom.modelId);
       await this.checkAccess(tx, after);
       await tx.updateTable('drops').set(this.columns(after)).where('id', '=', id).execute();
@@ -1125,8 +1273,9 @@ export class LiveConsoleService {
       if (d.published_at) throw alreadyPublished();
       const settings = await this.settings(tx, d);
       checkTimes(settings, now, null);
-      const model = await tx.selectFrom('models').select('active').where('id', '=', d.model_id).executeTakeFirstOrThrow();
-      if (!model.active) throw modelInactive();
+      // Its model offered; a set's release (macro scope K44 T1): its set offered and each piece's model.
+      if (d.set_id !== null) await offeredSet(tx, d.set_id);
+      else if (!(await tx.selectFrom('models').select('active').where('id', '=', d.model_id!).executeTakeFirstOrThrow()).active) throw modelInactive();
       if (settings.afterRoom) {
         const own = await tx.selectFrom('models').select('active').where('id', '=', settings.afterRoom.modelId).executeTakeFirstOrThrow();
         if (!own.active) throw afterRoomModelInactive();
@@ -1280,12 +1429,14 @@ export class LiveConsoleService {
 
   // ── internals ────────────────────────────────────────────────────────────
 
+  /** The releases with their model, or (macro scope K44 T1) their set. */
   private reads(db: Db) {
     return db
       .selectFrom('drops as d')
-      .innerJoin('models as m', 'm.id', 'd.model_id')
+      .leftJoin('models as m', 'm.id', 'd.model_id')
+      .leftJoin('sets as t', 't.id', 'd.set_id')
       .selectAll('d')
-      .select(['m.name as model_name', 'm.type as model_type', 'm.active as model_active']);
+      .select(['m.name as model_name', 'm.type as model_type', 'm.active as model_active', 't.name as set_name', 't.code as set_code', 't.active as set_active']);
   }
 
   /** A LIVE RELEASE's row FOR UPDATE; 404 for anything else. */
@@ -1305,9 +1456,11 @@ export class LiveConsoleService {
   private columns(s: Settings) {
     return {
       model_id: s.modelId,
+      set_id: s.setId,
       title: s.title,
       description: s.description,
-      quantity: s.sizes.reduce((n, x) => n + x.stock, 0),
+      // Its pieces on sale; a set's, its sets (the smallest of its pieces' totals).
+      quantity: onSaleOf(s.sizes),
       opens_at: s.opensAt,
       closes_at: s.closesAt,
       live_min_tier: s.minTier,
@@ -1336,6 +1489,21 @@ export class LiveConsoleService {
       question_text: s.questionText,
       question_answers: s.questionAnswers,
     };
+  }
+
+  /**
+   * What a release offers (macro scope K44 T1): its model (`checkModel`), or its set offered (drops.ts offeredSet: 404
+   * SET_NOT_FOUND, 409 SET_SET_ASIDE, each piece's model active), every piece of the set given sizes and no other piece
+   * (400), and its pieces per person within LIVE_PER_ACCOUNT.max ÷ its pieces (live.ts liveSetPerAccountMax, 400).
+   */
+  private async checkOffer(tx: Db, s: Settings): Promise<void> {
+    if (s.setId === null) return this.checkModel(tx, s.modelId!);
+    const set = await offeredSet(tx, s.setId);
+    const n = set.pieces.length;
+    for (const z of s.sizes) if (z.piece === null || z.piece > n) throw validationError(`Each size of a set’s release names its piece, 1 to ${n}.`);
+    for (const p of set.pieces) if (!s.sizes.some((z) => z.piece === p.piece)) throw validationError(`Give ${p.model.name} its sizes: each piece of a set’s release has 1 to ${LIVE_SIZES.max} sizes.`);
+    const max = liveSetPerAccountMax(n);
+    if (s.perAccount > max) throw setPerAccount(n, max);
   }
 
   /** A model a release (or its after-room) offers: known (404 MODEL_NOT_FOUND) and still offered (409 MODEL_INACTIVE). */
@@ -1389,7 +1557,12 @@ export class LiveConsoleService {
    * keeps kept (an id it names must be one of the release's: 400). Each size on sale is its model's SKU in that size
    * (migration 0022): linked again when the sizes or the model change.
    */
-  private async writeOffer(tx: Db, id: string, s: Pick<Settings, 'modelId' | 'sizes' | 'addons'>, before: Pick<Settings, 'modelId' | 'sizes' | 'addons'> | null): Promise<void> {
+  private async writeOffer(
+    tx: Db,
+    id: string,
+    s: Pick<Settings, 'modelId' | 'sizes' | 'addons'> & { setId?: string | null },
+    before: (Pick<Settings, 'modelId' | 'sizes' | 'addons'> & { setId?: string | null }) | null,
+  ): Promise<void> {
     const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
     if (!before || !same(before.sizes, s.sizes)) {
       const known = new Set((before?.sizes ?? []).map((x) => x.id));
@@ -1397,10 +1570,11 @@ export class LiveConsoleService {
       await tx.deleteFrom('drop_sizes').where('drop_id', '=', id).execute();
       await tx
         .insertInto('drop_sizes')
-        .values(s.sizes.map((x, i) => ({ ...(x.id ? { id: x.id } : {}), drop_id: id, label: x.label, position: i + 1, stock: x.stock })))
+        .values(s.sizes.map((x, i) => ({ ...(x.id ? { id: x.id } : {}), drop_id: id, piece: x.piece, label: x.label, position: i + 1, stock: x.stock })))
         .execute();
     }
-    if (!before || !same(before.sizes, s.sizes) || before.modelId !== s.modelId) await linkDropSizes(tx, id, s.modelId);
+    // Each size its model's SKU in that size; a set's, its piece's model's (stock.ts linkDropSizes reads the release's set).
+    if (!before || !same(before.sizes, s.sizes) || before.modelId !== s.modelId || (before.setId ?? null) !== (s.setId ?? null)) await linkDropSizes(tx, id, s.modelId);
     if (!before || !same(before.addons, s.addons)) {
       const known = new Set((before?.addons ?? []).map((x) => x.id));
       for (const x of s.addons) if (x.id && !known.has(x.id)) throw validationError('An add-on to keep is one of the release’s.');
@@ -1421,7 +1595,7 @@ export class LiveConsoleService {
       db.selectFrom('live_addons').select(['id', 'label', 'line', 'price_minor']).where('drop_id', '=', id).orderBy('position').execute(),
     ]);
     return {
-      sizes: sizes.map((x) => ({ id: x.id, label: x.label, stock: x.stock })),
+      sizes: sizes.map((x) => ({ id: x.id, label: x.label, stock: x.stock, piece: null })),
       addons: addons.map((a) => ({ id: a.id, label: a.label, line: a.line, priceMinor: a.price_minor })),
     };
   }
@@ -1540,7 +1714,7 @@ export class LiveConsoleService {
             : 'OPEN';
     return {
       id: c.id,
-      model: { id: afterRoomModelId(c), name: c.model_name, type: c.model_type, active: c.model_active },
+      model: { id: afterRoomModelId(c), name: c.model_name ?? '', type: c.model_type ?? '', active: c.model_active === true },
       priceMinor: c.price_minor ?? 0,
       currency: c.currency ?? 'EUR',
       sizes: offer.sizes.map((x) => ({ id: x.id!, label: x.label, stock: x.stock })),
@@ -1562,14 +1736,15 @@ export class LiveConsoleService {
   /** A release's settings as stored. */
   private async settings(db: Db, d: DropRow): Promise<Settings> {
     const [sizes, addons, models, windows] = await Promise.all([
-      db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', d.id).orderBy('position').execute(),
+      db.selectFrom('drop_sizes').select(['id', 'label', 'stock', 'piece']).where('drop_id', '=', d.id).orderBy('position').execute(),
       db.selectFrom('live_addons').select(['id', 'label', 'line', 'price_minor']).where('drop_id', '=', d.id).orderBy('position').execute(),
       db.selectFrom('live_access_models').select('model_id').where('drop_id', '=', d.id).orderBy('model_id').execute(),
       db.selectFrom('live_tier_windows').select(['tier', 'turn_seconds', 'pay_minutes']).where('drop_id', '=', d.id).orderBy('tier').execute(),
     ]);
     return {
-      // A set's LIVE RELEASE has its settings from M3.16 on (its creation): until then a LIVE RELEASE sells a model.
-      modelId: modelOfModelRelease(d, 'M3.16'),
+      // Macro scope K44 T1: what it sells, a model or a set.
+      modelId: d.model_id,
+      setId: d.set_id,
       title: d.title,
       description: d.description,
       opensAt: d.opens_at,
@@ -1590,8 +1765,8 @@ export class LiveConsoleService {
       accessCombine: d.access_combine ?? 'AND',
       surpriseEnabled: d.surprise_enabled === true,
       surpriseText: d.surprise_text ?? null,
-      sizes: sizes.map((s) => ({ id: s.id, label: s.label, stock: s.stock })),
-      quantityLine: d.quantity_line ?? defaultQuantityLine(d.quantity),
+      sizes: sizes.map((s) => ({ id: s.id, label: s.label, stock: s.stock, piece: s.piece })),
+      quantityLine: d.quantity_line ?? defaultQuantityLine(d.quantity, d.set_id !== null),
       addons: addons.map((a) => ({ id: a.id, label: a.label, line: a.line, priceMinor: a.price_minor })),
       announceAt: d.announce_at,
       silhouetteAt: d.silhouette_at,
@@ -1681,8 +1856,11 @@ export class LiveConsoleService {
     return {
       id: r.id,
       title: r.title,
-      // The console's LIVE views read a model's release (its rows joined to their model); a set's reaches them from M3.16.
-      model: { id: modelOfModelRelease(r, 'M3.16'), name: r.model_name, type: r.model_type, active: r.model_active },
+      // Macro scope K44 T1: a set's release names the set itself in its model's place, never one of its models.
+      model:
+        r.set_id !== null
+          ? { id: r.set_id, name: r.set_name ?? '', type: 'SET', active: r.set_active === true }
+          : { id: r.model_id!, name: r.model_name ?? '', type: r.model_type ?? '', active: r.model_active === true },
       phase,
       over: r.ended_at !== null && !holding,
       announcedAt: announcedAt(r),
@@ -1690,12 +1868,25 @@ export class LiveConsoleService {
       opensAt: r.opens_at,
       closesAt: r.closes_at,
       quantity: r.quantity,
-      quantityLine: r.quantity_line ?? defaultQuantityLine(r.quantity),
+      quantityLine: r.quantity_line ?? defaultQuantityLine(r.quantity, r.set_id !== null),
       priceMinor: r.price_minor ?? 0,
       currency: r.currency ?? 'EUR',
       endedReason: r.ended_reason,
       entries: counts ?? EMPTY_COUNTS(),
       interest,
+    };
+  }
+
+  /** Macro scope K44 T1: a set's release's set and its pieces, for its console views; null on a model's. */
+  private async setOf(db: Db, r: ReadRow): Promise<AdminLiveSet | null> {
+    if (r.set_id === null) return null;
+    const pieces = await setPieces(db, r.set_id);
+    return {
+      id: r.set_id,
+      name: r.set_name ?? '',
+      code: r.set_code ?? '',
+      active: r.set_active === true,
+      pieces: pieces.map((p) => ({ piece: p.piece!, model: { id: p.model.id, name: p.model.name, variant: p.model.variant, type: p.model.type, active: p.model.active } })),
     };
   }
 
@@ -1715,8 +1906,9 @@ export class LiveConsoleService {
 
   /** A release's (or an after-room's) sizes as the feasibility check reads them: each with its SKU and its pieces on sale. */
   private async sizesOnSale(db: Db, dropId: string): Promise<FeasibilitySize[]> {
-    const rows = await db.selectFrom('drop_sizes').select(['id', 'label', 'stock', 'sku_id']).where('drop_id', '=', dropId).orderBy('position').execute();
-    return rows.map((r) => ({ sizeId: r.id, label: r.label, skuId: r.sku_id, onSale: r.stock }));
+    const rows = await db.selectFrom('drop_sizes').select(['id', 'label', 'stock', 'sku_id', 'piece']).where('drop_id', '=', dropId).orderBy('position').execute();
+    // Macro scope K44 T1: a set's size with its piece (each piece's SKU is its own model's).
+    return rows.map((r) => ({ sizeId: r.id, label: r.label, skuId: r.sku_id, onSale: r.stock, ...(r.piece !== null ? { piece: r.piece } : {}) }));
   }
 
   private async checkFeasibility(db: Db, d: DropRow): Promise<Feasibility> {
@@ -1748,10 +1940,12 @@ export class LiveConsoleService {
       r.parent_drop_id ? Promise.resolve(null) : this.questions.tally(r, db),
     ]);
     const guaranteed = (await releaseGuaranteed(db, [id])).get(id) ?? { places: 0, pieces: 0 };
+    const set = await this.setOf(db, r);
     const stages = liveStages(r, now);
     const silhouette = r.silhouette_sha256 ? { sha256: r.silhouette_sha256, url: mediaUrl(r.silhouette_sha256)! } : null;
     return {
       ...this.card(r, now, counts.get(id), interest.get(id) ?? 0, holding.has(id)),
+      ...(set ? { set } : {}),
       description: r.description,
       // An after-room is set with its release, never on its own.
       editable: !r.cancelled_at && !isAnnounced(r, now) && !r.parent_drop_id,
@@ -1774,7 +1968,7 @@ export class LiveConsoleService {
       locationId: s.stockLocationId,
       location,
       question,
-      sizes: s.sizes.map((x) => ({ id: x.id!, label: x.label, stock: x.stock })),
+      sizes: s.sizes.map((x) => ({ id: x.id!, label: x.label, stock: x.stock, ...(x.piece !== null ? { piece: x.piece } : {}) })),
       addons: s.addons.map((x) => ({ id: x.id!, label: x.label, line: x.line, priceMinor: x.priceMinor })),
       tierWindows: s.tierWindows,
       announceAt: r.announce_at,
@@ -1822,12 +2016,15 @@ export class LiveConsoleService {
       .limit(limit)
       .offset(offset)
       .execute();
+    // Macro scope K44 T1: a set's entries, their sizes per piece.
+    const pieces = d.set_id !== null ? await livePieceSizes(db, rows.map((r) => r.id)) : new Map<string, LivePieceSize[]>();
     return rows.map((r) => ({
       id: r.id,
       accountId: r.account_id,
       email: r.email,
       status: r.status,
       size: { id: r.size_id, label: r.label },
+      ...(pieces.has(r.id) ? { sizes: pieces.get(r.id)! } : {}),
       quantity: r.quantity,
       tier: r.tier,
       position: r.position,

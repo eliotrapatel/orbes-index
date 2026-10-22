@@ -1337,7 +1337,7 @@ async function auditedSizes(db: Db, dropId: string): Promise<{ piece?: number; l
  * release names it: SetService.update takes it FOR UPDATE), active (409 SET_SET_ASIDE), each piece's model active (409
  * MODEL_INACTIVE); its pieces in order. 404 SET_NOT_FOUND.
  */
-async function offeredSet(tx: Db, setId: string): Promise<{ id: string; name: string; pieces: ReleasePiece[] }> {
+export async function offeredSet(tx: Db, setId: string): Promise<{ id: string; name: string; pieces: ReleasePiece[] }> {
   const s = await tx.selectFrom('sets').select(['id', 'name', 'active']).where('id', '=', setId).forShare().executeTakeFirst();
   if (!s) throw setNotFound();
   if (!s.active) throw setSetAside(s.name);

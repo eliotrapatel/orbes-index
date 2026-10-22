@@ -23,10 +23,12 @@
  *                                           a minute behind the next batch, whose entry holds no stream)
  *   GET    /api/v1/live/:id/stream          the room and its own entry in real time (SSE), at most two per account (204
  *                                           while its entry waits behind the next batch, W2)
- *   PUT    /api/v1/live/:id/interest        I'LL BE THERE, with a size
+ *   PUT    /api/v1/live/:id/interest        I'LL BE THERE, with a size ({ sizeId }; a set's release, macro scope K44 T1:
+ *                                           a size per piece, { sizes: [{ piece, sizeId }] })
  *   DELETE /api/v1/live/:id/interest        withdrawn
- *   POST   /api/v1/live/:id/enter           ENTER the room (or, after T0, the line), with a size and a quantity
- *   POST   /api/v1/live/:id/size            CHANGE SIZE, before T0
+ *   POST   /api/v1/live/:id/enter           ENTER the room (or, after T0, the line), with a size and a quantity (a set's:
+ *                                           { sizes }, its quantity in sets, T4)
+ *   POST   /api/v1/live/:id/size            CHANGE SIZE, before T0 (a set's: { sizes }, any of its pieces)
  *   POST   /api/v1/live/:id/leave           LEAVE
  *   POST   /api/v1/live/:id/press           the seal pressed (the turn's secret)
  *   POST   /api/v1/live/:id/secure          the seal held (the turn's secret)
@@ -57,8 +59,14 @@ import { rateLimitHook } from '../http/rate-limit.js';
 import { emptyBody, liveAddonsBody, liveAnswerBody, liveBoardBody, liveEntryBody, liveInterestBody, liveParams, liveTurnBody, parse } from '../http/schemas.js';
 import { accountActor, requireAccount, sessionGuard } from '../http/sessions.js';
 import { dropNotFound } from '../services/drops.js';
-import { liveNetworkHash } from '../services/live.js';
+import { liveNetworkHash, type LiveSizeChoice } from '../services/live.js';
 import type { RouteDeps } from './public.js';
+
+/** Macro scope K44 T1: the size a body names (a model's release), or its size per piece (a set's). */
+const choiceOf = (b: { sizeId?: string; sizes?: { piece: number; sizeId: string }[] }): LiveSizeChoice => ({
+  ...(b.sizeId !== undefined ? { sizeId: b.sizeId } : {}),
+  ...(b.sizes !== undefined ? { sizes: b.sizes } : {}),
+});
 
 /** The public reads (list, banner, page, .ics): the same for everyone, kept 15 seconds. */
 export const LIVE_PUBLIC_CACHE_CONTROL = 'public, max-age=15';
@@ -168,8 +176,8 @@ export const liveRoutes: FastifyPluginAsync<LiveRouteDeps> = async (app, { ctx, 
   app.put('/api/v1/live/:id/interest', async (request) => {
     const { account } = requireAccount(request);
     const { id } = parse(liveParams, request.params);
-    const { sizeId } = parse(liveInterestBody, request.body);
-    return { interest: await live.setInterest(account.id, id, sizeId, accountActor(request)) };
+    const b = parse(liveInterestBody, request.body);
+    return { interest: await live.setInterest(account.id, id, choiceOf(b), accountActor(request)) };
   });
 
   app.delete('/api/v1/live/:id/interest', async (request) => {
@@ -186,14 +194,14 @@ export const liveRoutes: FastifyPluginAsync<LiveRouteDeps> = async (app, { ctx, 
     const b = parse(liveEntryBody, request.body);
     // The bot radar's inputs: the network's keyed hash (never the address) and the country, nothing finer.
     const client = { networkHash: liveNetworkHash(ctx.config.ipHashPepper, request.ip), country: ctx.geo.resolve(request).country ?? null };
-    return { entry: await live.enter(account.id, id, { sizeId: b.sizeId, ...(b.quantity !== undefined ? { quantity: b.quantity } : {}) }, accountActor(request), client) };
+    return { entry: await live.enter(account.id, id, { ...choiceOf(b), ...(b.quantity !== undefined ? { quantity: b.quantity } : {}) }, accountActor(request), client) };
   });
 
   app.post('/api/v1/live/:id/size', async (request) => {
     const { account } = requireAccount(request);
     const { id } = parse(liveParams, request.params);
     const b = parse(liveEntryBody, request.body);
-    return { entry: await live.changeSize(account.id, id, { sizeId: b.sizeId, ...(b.quantity !== undefined ? { quantity: b.quantity } : {}) }, accountActor(request)) };
+    return { entry: await live.changeSize(account.id, id, { ...choiceOf(b), ...(b.quantity !== undefined ? { quantity: b.quantity } : {}) }, accountActor(request)) };
   });
 
   app.post('/api/v1/live/:id/leave', async (request) => {

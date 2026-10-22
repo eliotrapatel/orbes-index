@@ -33,7 +33,20 @@ import { LIVE_NETWORK_RATE_FACTOR } from '../../src/server/http/rate-limit.js';
 import { LIVE_GESTURE_MIN_MS, liveNetworkHash } from '../../src/server/services/live.js';
 import { foldIcsLine, liveStages } from '../../src/server/services/live-room.js';
 import { jpegPhoto } from '../support/images.js';
-import { createCollection, createLiveRelease, createModel, holdPieces, liveFixtureOn, type LiveFixture, type LiveRelease, type LiveReleaseOptions } from '../support/live.js';
+import {
+  createCollection,
+  createLiveRelease,
+  createModel,
+  createSet,
+  createSetLiveRelease,
+  holdPieces,
+  liveFixtureOn,
+  pieceSize,
+  sizedModel,
+  type LiveFixture,
+  type LiveRelease,
+  type LiveReleaseOptions,
+} from '../support/live.js';
 import { openSse, type Sse } from '../support/sse.js';
 import { accountClient, adminClient, createHarness, errorOf, ORIGIN, safeJson, type Client, type Harness } from './support.js';
 import { poolDraw } from '../support/draws.js';
@@ -624,6 +637,47 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       const stream = await b.client.get(`/api/v1/live/${r.id}/stream`);
       expect(stream.statusCode).toBe(403);
       expect(errorOf(stream).code).toBe('LIVE_REMOVED');
+    });
+
+    it('a set\'s release (macro scope K44 T1, T4): I\'LL BE THERE, ENTER and CHANGE SIZE take a size per piece; the page, the state and the room read per piece', async () => {
+      const ring = await sizedModel(h.ctx.db, 'HALO', ['52', '54']);
+      const chain = await sizedModel(h.ctx.db, 'LINEA', ['45', '50'], 'NECKLACE');
+      const r = await createSetLiveRelease(f, {
+        setId: await createSet(f, [ring, chain]),
+        opensAt: new Date(h.clock.now().getTime() + 30 * MINUTE),
+        sizes: [{ piece: 1, label: '52', stock: 2 }, { piece: 1, label: '54', stock: 2 }, { piece: 2, label: '45', stock: 2 }, { piece: 2, label: '50', stock: 1 }],
+      });
+      const sizes = (a: string, b: string) => [{ piece: 1, sizeId: pieceSize(r, 1, a) }, { piece: 2, sizeId: pieceSize(r, 2, b) }];
+      const page = safeJson(await h.client().get(`/api/v1/live/${r.id}`)) as Record<string, any>;
+      expect(page).toMatchObject({ type: 'SET', quantityLine: '3 SETS', imageUrl: null, set: { pieces: [{ piece: 1 }, { piece: 2 }] } });
+      expect(page.sizes.map((s: { piece: number; label: string }) => [s.piece, s.label])).toEqual([[1, '52'], [1, '54'], [2, '45'], [2, '50']]);
+      const a = await member(h, f, 1);
+      // The size, or a size per piece: never both, never neither.
+      expect(errorOf(await a.client.request('PUT', `/api/v1/live/${r.id}/interest`, { body: { sizeId: pieceSize(r, 1, '52'), sizes: sizes('52', '45') } })).code).toBe('VALIDATION_FAILED');
+      expect(errorOf(await a.client.request('PUT', `/api/v1/live/${r.id}/interest`, { body: {} })).code).toBe('VALIDATION_FAILED');
+      expect(errorOf(await a.client.request('PUT', `/api/v1/live/${r.id}/interest`, { body: { sizeId: pieceSize(r, 1, '52') } })).code).toBe('LIVE_SET_SIZES');
+      let state = safeJson(await a.client.get(`/api/v1/live/${r.id}/state`)) as Record<string, any>;
+      expect(state).toMatchObject({ savedSize: null, savedSizes: [], room: { quantity: 3, left: 3 } });
+      expect(state.room.pieces.map((p: { piece: number; sizes: unknown[] }) => [p.piece, p.sizes.length])).toEqual([[1, 2], [2, 2]]);
+      const put = safeJson(await a.client.request('PUT', `/api/v1/live/${r.id}/interest`, { body: { sizes: sizes('52', '45') } })) as Record<string, any>;
+      expect(put.interest).toMatchObject({ size: { label: '52' }, sizes: [{ piece: 1, label: '52' }, { piece: 2, label: '45' }] });
+      state = safeJson(await a.client.get(`/api/v1/live/${r.id}/state`)) as Record<string, any>;
+      expect(state.interest.sizes.map((s: { label: string }) => s.label)).toEqual(['52', '45']);
+      // The room: ENTER in sets (one per person), then CHANGE SIZE of one piece.
+      h.clock.advance(26 * MINUTE);
+      expect(errorOf(await a.client.post(`/api/v1/live/${r.id}/enter`, { sizes: sizes('52', '45'), quantity: 2 })).code).toBe('LIVE_QUANTITY_INVALID');
+      const enter = safeJson(await a.client.post(`/api/v1/live/${r.id}/enter`, { sizes: sizes('52', '45') })) as Record<string, any>;
+      expect(enter.entry).toMatchObject({ status: 'WAITING', quantity: 1, sizes: [{ piece: 1, label: '52' }, { piece: 2, label: '45' }] });
+      const changed = safeJson(await a.client.post(`/api/v1/live/${r.id}/size`, { sizes: [{ piece: 2, sizeId: pieceSize(r, 2, '50') }] })) as Record<string, any>;
+      expect(changed.entry.sizes.map((s: { label: string }) => s.label)).toEqual(['52', '50']);
+      expect(errorOf(await a.client.post(`/api/v1/live/${r.id}/size`, { sizes: [{ piece: 3, sizeId: pieceSize(r, 2, '50') }] }))).toEqual({ code: 'LIVE_SET_SIZES', message: 'This set has no such piece.' });
+      expect(errorOf(await a.client.post(`/api/v1/live/${r.id}/size`, { sizes: [{ piece: 5, sizeId: pieceSize(r, 2, '50') }] })).code).toBe('VALIDATION_FAILED');
+      // T0: its turn, held in each of its sizes in the room.
+      h.clock.advance(4 * MINUTE);
+      await advance(h, r.id);
+      state = safeJson(await a.client.get(`/api/v1/live/${r.id}/state`)) as Record<string, any>;
+      expect(state).toMatchObject({ entry: { status: 'TURN', sizes: [{ label: '52' }, { label: '50' }] }, room: { quantity: 3, held: 1, left: 2 } });
+      expect(state.room.sizes.filter((s: { held: number }) => s.held === 1).map((s: { label: string }) => s.label)).toEqual(['52', '50']);
     });
   });
 

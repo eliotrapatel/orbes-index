@@ -4,7 +4,8 @@
  *   viewers   GET /api/v1/live/:id/stream (routes/live.ts), a signed-in account allowed to enter the release (or holding
  *             an entry in it): `room` events, the room as LiveRoomService.frame builds it, and `you` events, the
  *             account's own entry (with its turn's secret while it is its turn), each sent when it changed; the first
- *             `you` event also carries `savedSize` (AC-01: the size YOUR SIZES preselects, or null). On a paced release
+ *             `you` event also carries `savedSize` (AC-01: the size YOUR SIZES preselects, or null), and on a set's
+ *             release `savedSizes` (macro scope K44 T1: one per piece that has one). On a paced release
  *             (W2, W5), a viewer whose entry waits for its batch (its `queue` set) gets `queue` events in place of the
  *             room's: the queue's one small frame shared by all of them (LiveQueueFrame: the next batch, the pace, held
  *             or not, the batches, those waiting), with its own `you` events (its place, its estimated entry time); once
@@ -266,10 +267,12 @@ export class LiveHub {
       }
       // AC-01: the first frame says which size YOUR SIZES preselects, while the account holds no entry nor interest.
       const savedSize = views.has(accountId) ? null : await this.room.savedSize(accountId, dropId);
+      // Macro scope K44 T1: a set's release, YOUR SIZES' size per piece.
+      const savedSizes = frame.room.pieces ? (views.has(accountId) ? [] : await this.room.savedSizesNow(accountId, dropId)) : undefined;
       const stream: ViewerStream = { kind: 'viewer', dropId, accountId, sessionId, res: this.begin(request, reply), lastWrite: 0, sent: undefined, you: undefined, closed: false };
       this.register(stream);
       registered = true;
-      this.deliver(stream, this.outgoing(frame), views, { savedSize });
+      this.deliver(stream, this.outgoing(frame), views, { savedSize, ...(savedSizes ? { savedSizes } : {}) });
     } finally {
       if (!registered) this.release(accountId);
     }
@@ -507,7 +510,12 @@ export class LiveHub {
    * room (or, while its entry waits for its batch, the queue's frame), so a page that stops following at a room that is
    * over has already read its final entry.
    */
-  private deliver(s: ViewerStream | BoardStream, out: Outgoing, views: ReadonlyMap<string, LiveEntryView>, first?: { savedSize: LiveSavedSize | null }): void {
+  private deliver(
+    s: ViewerStream | BoardStream,
+    out: Outgoing,
+    views: ReadonlyMap<string, LiveEntryView>,
+    first?: { savedSize: LiveSavedSize | null; savedSizes?: { piece: number; id: string; label: string }[] },
+  ): void {
     if (s.closed) return;
     const entry = s.kind === 'viewer' ? (views.get(s.accountId) ?? null) : null;
     const shared = this.shared(out, s.kind === 'board' ? 'board' : entry?.queue && out.frame.queue ? 'queue' : 'room');
@@ -517,7 +525,7 @@ export class LiveHub {
       if (you !== s.you) {
         s.you = you;
         // The first frame alone carries the size YOUR SIZES preselects (AC-01).
-        const saved = first ? `,"savedSize":${JSON.stringify(first.savedSize)}` : '';
+        const saved = first ? `,"savedSize":${JSON.stringify(first.savedSize)}${first.savedSizes ? `,"savedSizes":${JSON.stringify(first.savedSizes)}` : ''}` : '';
         chunk = `event: you\ndata: {"now":${out.now},"entry":${you}${saved}}\n\n`;
       }
     }

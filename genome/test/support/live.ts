@@ -3,7 +3,8 @@
  * models and collections, and a LIVE release made as the console makes one: a drop with its sealed seed
  * (DropService.create), then its LIVE settings, sizes, add-ons, per-tier windows and access rule, its after-room as the
  * console writes one (LiveConsoleService), published; the stock locations of the first boot, where a confirmed entry's
- * orders go.
+ * orders go. Macro scope K44 T1 (M3.16): a set of sized models and its LIVE RELEASE, made by the console with its sizes
+ * per piece.
  */
 import { randomUUID } from 'node:crypto';
 import { packIdentity } from '../../src/core/identity.js';
@@ -14,9 +15,10 @@ import { CLUB_TIER_THRESHOLDS } from '../../src/server/services/club.js';
 import { deriveDropSeedKey, DropService } from '../../src/server/services/drops.js';
 import { deriveLiveTurnKey, LiveService } from '../../src/server/services/live.js';
 import { LiveConsoleService, type AfterRoomInput } from '../../src/server/services/live-console.js';
+import { SetService } from '../../src/server/services/sets.js';
 import { ensureStockSetup } from '../../src/server/services/stock.js';
 import { createManualClock, SYSTEM_ACTOR, type Actor, type ManualClock } from '../../src/server/types.js';
-import { poolDraw } from './draws.js';
+import { giveSizes, poolDraw } from './draws.js';
 
 export interface LiveFixture {
   db: Db;
@@ -276,3 +278,67 @@ export async function entriesOf(db: Db, dropId: string) {
     .orderBy('id')
     .execute();
 }
+
+// ── THE SET (macro scope K44 T1, M3.16) ────────────────────────────────────
+
+/** A model of `type` whose sizes `labels` are declared (its size type and kind), each its own SKU. */
+export async function sizedModel(db: Db, name: string, labels: readonly string[], type: 'RING' | 'NECKLACE' = 'RING'): Promise<string> {
+  const id = await createModel(db, `${name} ${randomUUID().slice(0, 6).toUpperCase()}`, null, type);
+  await giveSizes(db, id, labels, type);
+  return id;
+}
+
+/** A set of `modelIds` (2 to 4 sized models), offered, created as the console creates one. */
+export async function createSet(f: Pick<LiveFixture, 'db' | 'audit' | 'clock' | 'admin'>, modelIds: readonly string[], name = 'THE PAIR'): Promise<string> {
+  const sets = new SetService({ db: f.db, audit: f.audit, clock: f.clock.now });
+  const tag = randomUUID().slice(0, 6).toUpperCase();
+  return (await sets.create({ name: `${name} ${tag}`, code: `SET-${tag}`, modelIds: [...modelIds] }, f.admin)).id;
+}
+
+export interface SetLiveOptions {
+  setId: string;
+  opensAt: Date;
+  closesAt?: Date;
+  /** Its sizes per piece (each one of its piece's model's sizes). */
+  sizes: { piece: number; label: string; stock: number }[];
+  perAccount?: number;
+  pace?: { batch: number; minutes: number } | null;
+  priceMinor?: number;
+  turnSeconds?: number;
+  payMinutes?: number;
+  title?: string;
+  /** Published now unless false (the console's PUBLISH: the clock must be before its room). */
+  published?: boolean;
+}
+
+export interface SetLiveRelease {
+  id: string;
+  /** Its sizes in order, each with its piece. */
+  sizes: { id: string; label: string; stock: number; piece: number }[];
+}
+
+/** A set's LIVE RELEASE made and published by the console (LiveConsoleService), its room 5 minutes before T0. */
+export async function createSetLiveRelease(f: LiveFixture, o: SetLiveOptions): Promise<SetLiveRelease> {
+  const created = await f.liveConsole.create(
+    {
+      setId: o.setId,
+      title: o.title ?? 'THE PAIR — LIVE',
+      opensAt: o.opensAt,
+      closesAt: o.closesAt ?? new Date(o.opensAt.getTime() + 3_600_000),
+      roomOpensMinutes: 5,
+      sizes: o.sizes,
+      priceMinor: o.priceMinor ?? 200_000,
+      currency: 'EUR',
+      ...(o.perAccount !== undefined ? { perAccount: o.perAccount } : {}),
+      ...(o.pace !== undefined ? { pace: o.pace } : {}),
+      ...(o.turnSeconds !== undefined ? { turnSeconds: o.turnSeconds } : {}),
+      ...(o.payMinutes !== undefined ? { payMinutes: o.payMinutes } : {}),
+    },
+    f.admin,
+  );
+  if (o.published !== false) await f.liveConsole.publish(created.id, {}, f.admin);
+  return { id: created.id, sizes: created.sizes.map((s) => ({ id: s.id, label: s.label, stock: s.stock, piece: s.piece! })) };
+}
+
+/** The size `label` of piece `piece` of a set's release. */
+export const pieceSize = (r: SetLiveRelease, piece: number, label: string): string => r.sizes.find((s) => s.piece === piece && s.label === label)!.id;

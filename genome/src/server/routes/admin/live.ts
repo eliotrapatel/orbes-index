@@ -45,7 +45,8 @@
  * The release and the stock, and when to open (plan LIVE RELEASE+, choices 10, 12 and 13):
  *
  *   GET    /api/admin/live/size-mix?modelId&locationId       AUDITOR   the sizes a new release of a model is proposed:
- *                                                                     the stock at the location first, then the planner
+ *                                                                     the stock at the location first, then the planner;
+ *          /api/admin/live/size-mix?setId&locationId                  a set's (macro scope K44 T1): one per piece
  *   GET    /api/admin/live/:id/feasibility                   AUDITOR   per size, the pieces on sale against the stock
  *                                                                     (the rest waits for supplier stock): a warning, never a refusal
  *   GET    /api/admin/live/:id/best-time?days&country        AUDITOR   the activity of its tiers by hour, Paris time,
@@ -333,7 +334,8 @@ export const adminLiveRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
 
   app.get('/api/admin/live/size-mix', async (request) => {
     const q = parse(liveSizeMixQuery, request.query);
-    return liveInsights.sizeMix(q.modelId, q.locationId ?? null);
+    // Macro scope K44 T1: a set's release, a size mix per piece (each piece's model, the release's sets).
+    return q.setId !== undefined ? liveInsights.setSizeMix(q.setId, q.locationId ?? null) : liveInsights.sizeMix(q.modelId!, q.locationId ?? null);
   });
 
   app.get('/api/admin/live/:id/feasibility', async (request) => {

@@ -2,7 +2,8 @@
  * A LIVE RELEASE and the stock (plan LIVE RELEASE+ of 2026-10-04): the arithmetic of two of the console's readings, each
  * in a pure function tested on known figures, and the one read of the stock both need.
  *
- *   feasibility (K5, choice 12)   before publishing, per size: the pieces on sale against what the stock can give them at
+ *   feasibility (K5, choice 12)   before publishing, per size (a set's release, macro scope K44 T1: each piece's sizes,
+ *                                 each its piece's model's SKU, `piece` on each line): the pieces on sale against what the stock can give them at
  *                                 the release's location (services/stock.ts: on hand less what orders hold, never below
  *                                 0). The release's sizes first, then its after-room's from what the release leaves
  *                                 (the same SKU draws on one stock). The orders the stock does not cover wait for
@@ -58,6 +59,8 @@ export async function stockSupply(db: Db, skuIds: readonly string[], locationId:
 export interface FeasibilitySize {
   sizeId: string;
   label: string;
+  /** Macro scope K44 T1: a set's release's piece (1 to 4); absent on a model's. */
+  piece?: number;
   /** Its SKU (null: not linked yet, nothing in stock for it). */
   skuId: string | null;
   /** The pieces on sale in it. */
@@ -68,6 +71,8 @@ export interface FeasibilitySize {
 export interface FeasibilityLine {
   sizeId: string;
   label: string;
+  /** Macro scope K44 T1: a set's release's piece (1 to 4); absent on a model's. */
+  piece?: number;
   onSale: number;
   /** Pieces available at the location, from what the sizes before it on the same SKU left. */
   available: number;
@@ -111,7 +116,7 @@ export function feasibilityCheck(input: {
     const available = s.skuId ? (left.get(s.skuId)?.available ?? 0) : 0;
     const fromStock = Math.min(s.onSale, available);
     if (s.skuId) left.set(s.skuId, { available: available - fromStock });
-    return { sizeId: s.sizeId, label: s.label, onSale: s.onSale, available, fromStock, short: s.onSale - fromStock };
+    return { sizeId: s.sizeId, label: s.label, ...(s.piece !== undefined ? { piece: s.piece } : {}), onSale: s.onSale, available, fromStock, short: s.onSale - fromStock };
   };
   const sizes = input.sizes.map(take);
   const afterRoom = input.afterRoom ? input.afterRoom.map(take) : null;

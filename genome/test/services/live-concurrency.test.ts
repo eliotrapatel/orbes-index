@@ -1,7 +1,7 @@
 /**
  * The LIVE RELEASE under concurrency (plan of 2026-10-04, Quality bar 2): simultaneous secures and confirms, the
  * engine's pass racing a customer's action at a deadline, entries racing the line's formation at T0, double presses,
- * a restart mid-turn, and the engine's advisory lock.
+ * a restart mid-turn, and the engine's advisory lock; macro scope K44 T1 (M3.16): two set entries at the last set.
  *
  * On PGlite (always) the calls are issued together and the database serialises their transactions: every order must
  * give a correct result. On PostgreSQL (opt-in, a pool of 8: true parallelism) the same cases run, and two engines on
@@ -19,7 +19,7 @@ import { GuaranteeService } from '../../src/server/services/guarantees.js';
 import { LiveEngine } from '../../src/server/services/live-engine.js';
 import { LiveService } from '../../src/server/services/live.js';
 import { createTestDb } from '../support/db.js';
-import { accountOfTier, createLiveRelease, entriesOf, liveFixture, type LiveFixture, type LiveRelease } from '../support/live.js';
+import { accountOfTier, createLiveRelease, createSet, createSetLiveRelease, entriesOf, liveFixture, pieceSize, sizedModel, type LiveFixture, type LiveRelease } from '../support/live.js';
 import { poolDraw } from '../support/draws.js';
 
 const adminUrl = process.env.ORBES_TEST_POSTGRES_URL;
@@ -433,6 +433,37 @@ for (const backend of BACKENDS) {
         expect(status).toBe('USED');
         expect(entry).toEqual({ status: 'SELECTED', rank: null, guarantee_id: gb.id });
       }
+    });
+
+    it('two set entries at the last set: one turn, the other waits', async () => {
+      // Macro scope K44 T1 (M3.16): one set on sale (one size of each piece, one piece each); two entries enter together,
+      // then two engine passes and a LET IN of the second race at T0: exactly one turn, held in each of the set's sizes.
+      f.clock.set('2026-12-06T09:00:00.000Z');
+      const ring = await sizedModel(handle.db, 'HALO', ['52']);
+      const chain = await sizedModel(handle.db, 'LINEA', ['45'], 'NECKLACE');
+      const r = await createSetLiveRelease(f, { setId: await createSet(f, [ring, chain]), opensAt: T0, sizes: [{ piece: 1, label: '52', stock: 1 }, { piece: 2, label: '45', stock: 1 }] });
+      const sizes = { sizes: [{ piece: 1, sizeId: pieceSize(r, 1, '52') }, { piece: 2, sizeId: pieceSize(r, 2, '45') }] };
+      f.clock.set(at(-60 * SECOND));
+      const [a, b] = [await accountOfTier(f, 2), await accountOfTier(f, 1)];
+      expect(await together([() => f.live.enter(a.id, r.id, sizes, a.actor), () => f.live.enter(b.id, r.id, sizes, b.actor)])).toEqual(['ok', 'ok']);
+      const entryB = (await handle.db.selectFrom('live_entries').select('id').where('drop_id', '=', r.id).where('account_id', '=', b.id).executeTakeFirstOrThrow()).id;
+      f.clock.set(T0);
+      const outcomes = await together([() => f.live.advance(r.id), () => f.live.letIn(r.id, entryB, f.admin), () => f.live.advance(r.id)]);
+      expect(['ok', 'LIVE_NO_FREE_PIECE']).toContain(outcomes[1]);
+      expect([outcomes[0], outcomes[2]]).toEqual(['ok', 'ok']);
+      const rows = await entriesOf(handle.db, r.id);
+      expect(rows.map((x) => x.status).sort()).toEqual(['QUEUED', 'TURN']);
+      // The turn went to B only by its LET IN; otherwise to A, first in the line.
+      expect(rows.find((x) => x.status === 'TURN')!.account_id).toBe(outcomes[1] === 'ok' ? b.id : a.id);
+      const inTurn = await handle.db
+        .selectFrom('live_entry_sizes as x')
+        .innerJoin('live_entries as e', 'e.id', 'x.entry_id')
+        .select(['x.size_id'])
+        .where('e.drop_id', '=', r.id)
+        .where('e.status', '=', 'TURN')
+        .execute();
+      expect(inTurn.map((x) => x.size_id).sort()).toEqual([pieceSize(r, 1, '52'), pieceSize(r, 2, '45')].sort());
+      expect(await held({ id: r.id } as LiveRelease)).toBe(1);
     });
 
     it('the engine leads under its advisory lock, ticks, and hands the lock back when it stops', async () => {

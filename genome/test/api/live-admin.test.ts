@@ -26,7 +26,7 @@ import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { LIVE_CIRCLE_TITLE, liveReference } from '../../src/server/services/live-console.js';
 import { jpegPhoto } from '../support/images.js';
-import { createAccount, createCollection, createModel, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { createAccount, createCollection, createModel, createSet, holdPieces, liveFixtureOn, sizedModel, type LiveFixture } from '../support/live.js';
 import { openSse } from '../support/sse.js';
 import { accountClient, adminClient, createAdmin, createHarness, errorOf, ORIGIN, safeJson, type Client, type Harness } from './support.js';
 import { poolDraw } from '../support/draws.js';
@@ -851,6 +851,40 @@ describe('LIVE RELEASES: the console', () => {
       const opId = (await h.ctx.db.selectFrom('audit_logs').select('actor_id').where('action', '=', 'drop.live.pace').where('target_id', '=', r.id).executeTakeFirstOrThrow()).actor_id;
       expect(opId).not.toBeNull();
       for (const action of ['drop.live.pace', 'drop.live.pace.pause', 'drop.live.pace.resume', 'drop.live.pace.next']) expect(await audits(action, r.id), action).toHaveLength(1);
+    });
+  });
+
+  describe('a set\'s LIVE RELEASE (macro scope K44 T1, T4; plan MACRO M3 §5.2, M3.16)', () => {
+    it('is created with its set and its sizes per piece, read with its set, its board and size mix per piece; ADD PIECES to one piece\'s size raises its sets', async () => {
+      const ring = await sizedModel(h.ctx.db, 'HALO', ['52', '54']);
+      const chain = await sizedModel(h.ctx.db, 'LINEA', ['45', '50'], 'NECKLACE');
+      const setId = await createSet(f, [ring, chain]);
+      const body = settings({ modelId: undefined, setId, perAccount: 2, sizes: [{ piece: 1, label: '52', stock: 2 }, { piece: 1, label: '54', stock: 1 }, { piece: 2, label: '45', stock: 2 }] });
+      delete body.modelId;
+      // A model and a set together, or neither: refused by the body; a set of two sold at most two per person.
+      expect(errorOf(await op.post('/api/admin/live', { ...body, modelId: ring })).code).toBe('VALIDATION_FAILED');
+      expect(errorOf(await op.post('/api/admin/live', { ...body, perAccount: 3 })).message).toBe('A set of 2 pieces is sold 1 to 2 per person.');
+      const res = await op.post('/api/admin/live', body);
+      expect(res.statusCode, res.body).toBe(201);
+      const r = safeJson(res) as Json;
+      expect(r).toMatchObject({ quantity: 2, quantityLine: '2 SETS', perAccount: 2, model: { id: setId, type: 'SET' }, set: { id: setId, pieces: [{ piece: 1, model: { id: ring } }, { piece: 2, model: { id: chain } }] } });
+      expect(r.sizes.map((s: Json) => [s.piece, s.label, s.stock])).toEqual([[1, '52', 2], [1, '54', 1], [2, '45', 2]]);
+      const read = await op.get(`/api/admin/live/${r.id}`);
+      expect(read.statusCode, read.body).toBe(200);
+      expect((safeJson(read) as Json).set.id).toBe(setId);
+      // The size mix of a new release of the set: one per piece; a model or a set, never both.
+      const mix = safeJson(await op.get(`/api/admin/live/size-mix?setId=${setId}`)) as Json;
+      expect(mix.pieces.map((p: Json) => [p.piece, p.mix.model.id])).toEqual([[1, ring], [2, chain]]);
+      expect((await op.get(`/api/admin/live/size-mix?setId=${setId}&modelId=${ring}`)).statusCode).toBe(400);
+      expect(((safeJson(await op.get(`/api/admin/live/${r.id}/feasibility`)) as Json).sizes as Json[]).map((l) => l.piece)).toEqual([1, 1, 2]);
+      // Published and announced: ADD PIECES to the chain's 45, three sets on sale; the board per piece.
+      expect((await op.post(`/api/admin/live/${r.id}/publish`, {})).statusCode).toBe(200);
+      const added = await op.post(`/api/admin/live/${r.id}/stock`, { sizeId: r.sizes[2].id, pieces: 1 });
+      expect(added.statusCode, added.body).toBe(200);
+      expect(safeJson(added)).toMatchObject({ quantity: 3, sizes: [{ piece: 1 }, { piece: 1 }, { piece: 2, stock: 3 }] });
+      const { board } = safeJson(await op.get(`/api/admin/live/${r.id}/board`)) as Json;
+      expect(board).toMatchObject({ quantity: 3, totals: { stock: 3, left: 3 }, pieces: [{ piece: 1, stock: 3 }, { piece: 2, stock: 3 }] });
+      expect(board.sizes.map((s: Json) => [s.piece, s.label])).toEqual([[1, '52'], [1, '54'], [2, '45']]);
     });
   });
 });

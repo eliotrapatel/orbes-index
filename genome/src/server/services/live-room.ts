@@ -21,7 +21,8 @@
  * wherever it is said, a 403 LIVE_NOT_ELIGIBLE included (live.ts liveAccessRule: a model the rule names that is the
  * release's own is « this model », and its model's collection « this model’s collection », until its name is
  * revealed). The room's snapshots and an account's entry name no
- * stage at all.
+ * stage at all, but for a set's release (macro scope K44 T1): its room's `pieces` name each piece's model from the name's
+ * stage and show its photograph from the photograph's, as its card's `set` does.
  *
  * The room (`frame`): built once for all of a release's viewers (routes/live.ts fans it out once a second): its phase,
  * the pieces left and held per size, the people in the room and in the line, the latest host message; and the board's
@@ -51,6 +52,7 @@ import {
   liveAccessRule,
   liveBoardTokenHash,
   liveEntryViews,
+  liveInterestPieceSizes,
   liveNotEligible,
   livePhase,
   liveRuleText,
@@ -59,6 +61,7 @@ import {
   paceNextAt,
   roomOpensAt,
   stagesAt,
+  onSaleOf,
   LIVE_OPEN_STATUSES,
   LIVE_PAY_MINUTES,
   LIVE_PER_ACCOUNT,
@@ -67,10 +70,12 @@ import {
   type LiveAccess,
   type LiveEntryView,
   type LiveInterestView,
+  type LivePieceSize,
+  type LiveStages,
 } from './live.js';
 import { mediaUrl } from './media.js';
 import { savedSizeAmong } from './sizes.js';
-import { releaseOffer, savedSizesByPiece } from './release-offer.js';
+import { releaseOffer, savedSizesByPiece, type ReleaseOffer } from './release-offer.js';
 
 /** THE RELEASES' LIVE half lists at most this many releases. */
 export const LIVE_LIST_LIMIT = 50;
@@ -138,6 +143,31 @@ export interface LiveCard {
   surprise: boolean;
   /** I'LL BE THERE: how many accounts said so (« 428 COLLECTORS WILL BE THERE »), public. */
   interest: number;
+  /**
+   * Macro scope K44 T1: a set's release, its set and its pieces in the set's order, each part from its stage (`name`,
+   * `variant`, `type` and `collection` then are the set's: its name, null, SET, null; `imageUrl` and `lookbook` null: its
+   * pieces' photographs side by side, no photograph of its own); `quantity` lines, `priceMinor` and `perAccount` are per
+   * set (T4). Absent on a model's release.
+   */
+  set?: LiveSetView;
+}
+
+/** Macro scope K44 T1: a set's release as the public reads it, each part from its stage. */
+export interface LiveSetView {
+  /** The set's name, from the name's stage; null before. */
+  name: string | null;
+  /** Its pieces in the set's order: each its model's name, variant, type and collection from the name's stage, its photograph and lookbook sheet from the photograph's. */
+  pieces: LiveSetPiece[];
+}
+
+export interface LiveSetPiece {
+  piece: number;
+  name: string | null;
+  variant: string | null;
+  type: string | null;
+  collection: string | null;
+  imageUrl: string | null;
+  lookbook: string | null;
 }
 
 /**
@@ -148,8 +178,8 @@ export interface LiveSheet extends Omit<LiveCard, 'phase'> {
   phase: LivePublicPhase | 'ENDED';
   /** From the name's stage. */
   description: string | null;
-  /** Its sizes in order, with their stock. */
-  sizes: { id: string; label: string; stock: number }[];
+  /** Its sizes in order, with their stock; on a set's release each with its piece (1 to 4). */
+  sizes: { id: string; label: string; stock: number; piece?: number }[];
   /** The add-ons offered with a piece held, in order, their price per piece. */
   addons: { id: string; label: string; line: string | null; priceMinor: number }[];
   roomOpensMinutes: number;
@@ -184,6 +214,8 @@ export interface LiveEndedSheet {
   opensAt: Date;
   /** The quantity as the console wrote it and the announcement said it (« 25 PIECES »), even after pieces added live. */
   quantityLine: string;
+  /** Macro scope K44 T1: a set's release, as LiveCard's `set`, each part from its stage as it stood at the end; absent otherwise. */
+  set?: LiveSetView;
 }
 
 /** An after-room's page, as its guest reads it (`afterRoomSheet`): its own page, and the release it follows. */
@@ -208,9 +240,21 @@ export interface LiveBanner {
 export interface LiveRoomSize {
   id: string;
   label: string;
+  /** Macro scope K44 T1: on a set's release, its piece (1 to 4); absent on a model's. */
+  piece?: number;
   stock: number;
   left: number;
   held: number;
+}
+
+/** Macro scope K44 T1: a piece of a set's release in the room: its model from its stage, its sizes. */
+export interface LiveRoomPiece {
+  piece: number;
+  /** Its model's name and variant from the name's stage, its photograph from the photograph's; null before. */
+  name: string | null;
+  variant: string | null;
+  imageUrl: string | null;
+  sizes: LiveRoomSize[];
 }
 
 /** The room of a release as its viewers read it, once a second (no stage, no personal data). */
@@ -229,14 +273,16 @@ export interface LiveRoom {
   inRoom: number;
   /** The people in the line (QUEUED). */
   line: number;
-  /** The sum of the stock. */
+  /** The sum of the stock; on a set's release, its sets on sale (the smallest of its pieces' totals). */
   quantity: number;
   quantityLine: string;
-  /** Pieces free now, overall. */
+  /** Pieces free now, overall; on a set's release, the sets its pieces can still make now (each piece's free pieces, the smallest). */
   left: number;
-  /** Pieces in a turn or held, which may return. */
+  /** Pieces in a turn or held, which may return; on a set's release, the sets. */
   held: number;
   sizes: LiveRoomSize[];
+  /** Macro scope K44 T1: on a set's release, its pieces in the set's order, each with its sizes; absent on a model's. */
+  pieces?: LiveRoomPiece[];
   /** The latest host message. */
   message: { text: string; at: Date } | null;
 }
@@ -253,8 +299,11 @@ export interface LiveBoard {
   quantity: number;
   quantityLine: string;
   left: number;
-  /** The piece, each part from its stage (the board shows the door, then the piece behind it). */
-  release: { revealed: LiveCard['revealed']; name: string | null; silhouetteUrl: string | null; imageUrl: string | null };
+  /**
+   * The piece, each part from its stage (the board shows the door, then the piece behind it); macro scope K44 T1: a set's
+   * release, its set's name and its pieces (`set`, their photographs side by side), `imageUrl` null.
+   */
+  release: { revealed: LiveCard['revealed']; name: string | null; silhouetteUrl: string | null; imageUrl: string | null; set?: LiveSetView };
 }
 
 /**
@@ -297,6 +346,8 @@ export interface LiveViewer {
   access: LiveAccess;
   /** Its entry's status, when it holds one. */
   entry: LiveEntryView['status'] | null;
+  /** Macro scope K44 T1: the release sells a set (its own state then reads its sizes per piece). */
+  set?: boolean;
 }
 
 /** An account's own entry in a release, and its interest (GET /api/v1/live/:id/state, with the room). */
@@ -315,6 +366,11 @@ export interface LiveOwnState {
    * written here.
    */
   savedSize: LiveSavedSize | null;
+  /**
+   * Macro scope K44 T1: on a set's release, the size YOUR SIZES preselects for each piece that has one (each by its
+   * model's size kind), on the same terms as `savedSize` (null there); absent on a model's release.
+   */
+  savedSizes?: { piece: number; id: string; label: string }[];
 }
 
 /** A size of a release preselected from YOUR SIZES (AC-01). */
@@ -338,6 +394,8 @@ export interface LiveAccountEntry {
     closesAt: Date;
     /** An after-room's: the release it follows (its page is read through that release's); null otherwise. */
     afterRoomOf: string | null;
+    /** Macro scope K44 T1: a set's release, as LiveCard's `set` (its `name` then the set's, `imageUrl` null); absent otherwise. */
+    set?: LiveSetView;
   };
   entry: LiveEntryView;
 }
@@ -347,14 +405,37 @@ const streamRefused = () => new DomainError('LIVE_REMOVED', 403, 'Your entry in 
 type ReadRow = DropRow & {
   /** An after-room's: its parent's surprise, which it inherits; null for a release. */
   parent_surprise: boolean | null;
-  model_name: string;
+  /** Its model's (null on a set's release: macro scope K44 T1, its pieces are read with `releaseOffer`). */
+  model_name: string | null;
   model_variant: string | null;
-  model_type: string;
+  model_type: string | null;
   model_image: string | null;
   model_slug: string | null;
-  model_lookbook: string;
+  model_lookbook: string | null;
   collection: string | null;
 };
+
+/** Macro scope K44 T1: what a set's release sells, its pieces' collections named, read once per release. */
+type SetOffer = { offer: Extract<ReleaseOffer, { kind: 'SET' }>; collections: Map<string, string> };
+
+/** A set's release as the public reads it at `stages` (LiveSetView): each part from its stage. */
+function setView(o: SetOffer, stages: Pick<LiveStages, 'name' | 'photo'>): LiveSetView {
+  return {
+    name: stages.name ? o.offer.set.name : null,
+    pieces: o.offer.pieces.map((p) => ({
+      piece: p.piece!,
+      name: stages.name ? p.model.name : null,
+      variant: stages.name ? p.model.variant : null,
+      type: stages.name ? p.model.type : null,
+      collection: stages.name && p.model.collectionId ? (o.collections.get(p.model.collectionId) ?? null) : null,
+      imageUrl: stages.photo ? p.model.imageUrl : null,
+      lookbook: stages.photo && p.model.lookbook === 'PUBLIC' && p.model.slug ? p.model.slug : null,
+    })),
+  };
+}
+
+/** The name a release goes by at its name's stage: its model's, or its set's. */
+const nameOf = (r: ReadRow, set: SetOffer | undefined): string | null => (set ? set.offer.set.name : r.model_name);
 
 const MINUTE_MS = 60_000;
 
@@ -424,8 +505,8 @@ export class LiveRoomService {
   async list(): Promise<LiveCard[]> {
     const now = this.clock();
     const rows = await this.current(now);
-    const interest = await this.interestCounts(rows.map((r) => r.id));
-    return Promise.all(rows.map((r) => this.card(r, now, interest.get(r.id) ?? 0)));
+    const [interest, sets] = await Promise.all([this.interestCounts(rows.map((r) => r.id)), this.setOffers(rows)]);
+    return Promise.all(rows.map((r) => this.card(r, now, interest.get(r.id) ?? 0, sets.get(r.id))));
   }
 
   /**
@@ -455,6 +536,7 @@ export class LiveRoomService {
   private async sheetOf(r: ReadRow, now: Date): Promise<LiveSheet | LiveEndedSheet> {
     const id = r.id;
     const stages = liveStages(r, now)!;
+    const set = (await this.setOffers([r])).get(id);
     if (livePhase(r, now) === 'ENDED' && r.ended_at !== null) {
       const open = await this.db.selectFrom('live_entries').select('id').where('drop_id', '=', id).where('status', 'in', ['TURN', 'SECURED']).limit(1).executeTakeFirst();
       if (!open) {
@@ -465,30 +547,31 @@ export class LiveRoomService {
           kind: 'LIVE',
           phase: 'ENDED',
           title: atEnd.name ? r.title : null,
-          name: atEnd.name ? r.model_name : null,
-          variant: atEnd.name ? r.model_variant : null,
-          type: atEnd.name ? r.model_type : null,
-          collection: atEnd.name ? r.collection : null,
+          name: atEnd.name ? nameOf(r, set) : null,
+          variant: atEnd.name && !set ? r.model_variant : null,
+          type: atEnd.name ? (set ? 'SET' : r.model_type) : null,
+          collection: atEnd.name && !set ? r.collection : null,
           description: atEnd.name ? r.description : null,
           silhouetteUrl: atEnd.silhouette ? mediaUrl(r.silhouette_sha256) : null,
-          imageUrl: atEnd.photo ? mediaUrl(r.model_image) : null,
-          lookbook: atEnd.photo && r.model_lookbook === 'PUBLIC' && r.model_slug ? r.model_slug : null,
+          imageUrl: atEnd.photo && !set ? mediaUrl(r.model_image) : null,
+          lookbook: atEnd.photo && !set && r.model_lookbook === 'PUBLIC' && r.model_slug ? r.model_slug : null,
           opensAt: r.opens_at,
           quantityLine: r.quantity_line ?? '',
+          ...(set ? { set: setView(set, atEnd) } : {}),
         };
       }
     }
     const [sizes, addons, interest] = await Promise.all([
-      this.db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', id).orderBy('position').execute(),
+      this.db.selectFrom('drop_sizes').select(['id', 'label', 'stock', 'piece']).where('drop_id', '=', id).orderBy('position').execute(),
       this.db.selectFrom('live_addons').select(['id', 'label', 'line', 'price_minor']).where('drop_id', '=', id).orderBy('position').execute(),
       this.interestCounts([id]),
     ]);
-    const card = await this.card(r, now, interest.get(id) ?? 0);
+    const card = await this.card(r, now, interest.get(id) ?? 0, set);
     return {
       ...card,
       phase: livePhase(r, now) as LiveSheet['phase'],
       description: stages.name ? r.description : null,
-      sizes,
+      sizes: sizes.map((z) => ({ id: z.id, label: z.label, stock: z.stock, ...(z.piece !== null ? { piece: z.piece } : {}) })),
       addons: addons.map((a) => ({ id: a.id, label: a.label, line: a.line, priceMinor: a.price_minor })),
       roomOpensMinutes: r.room_opens_minutes ?? LIVE_ROOM_OPENS_MINUTES.default,
       turnSeconds: r.turn_seconds ?? LIVE_TURN_SECONDS.default,
@@ -507,11 +590,12 @@ export class LiveRoomService {
       .sort((a, b) => rank[a.phase] - rank[b.phase] || a.r.opens_at.getTime() - b.r.opens_at.getTime())[0];
     if (!pick) return null;
     const stages = liveStages(pick.r, now)!;
+    const set = (await this.setOffers([pick.r])).get(pick.r.id);
     return {
       id: pick.r.id,
       phase: pick.phase,
-      name: stages.name ? pick.r.model_name : null,
-      variant: stages.name ? pick.r.model_variant : null,
+      name: stages.name ? nameOf(pick.r, set) : null,
+      variant: stages.name && !set ? pick.r.model_variant : null,
       nameAt: stages.nameAt,
       roomOpensAt: roomOpensAt(pick.r),
       opensAt: pick.r.opens_at,
@@ -526,9 +610,10 @@ export class LiveRoomService {
     const r = await this.publicRow(id, now);
     if (livePhase(r, now) === 'ENDED') throw dropNotFound();
     const stages = liveStages(r, now)!;
+    const set = (await this.setOffers([r])).get(id);
     return {
       filename: 'orbes-live-release.ics',
-      body: liveCalendar({ id, name: stages.name ? r.model_name : null, roomOpensAt: roomOpensAt(r), opensAt: r.opens_at, closesAt: r.closes_at, now, origin: this.origin }),
+      body: liveCalendar({ id, name: stages.name ? nameOf(r, set) : null, roomOpensAt: roomOpensAt(r), opensAt: r.opens_at, closesAt: r.closes_at, now, origin: this.origin }),
     };
   }
 
@@ -552,7 +637,7 @@ export class LiveRoomService {
     ]);
     if (!entry && !access.allowed) throw liveNotEligible(await liveAccessRule(this.db, d, now), access);
     if (purpose === 'stream' && entry?.status === 'REMOVED') throw streamRefused();
-    return { dropId: id, access, entry: entry?.status ?? null };
+    return { dropId: id, access, entry: entry?.status ?? null, set: d.set_id !== null };
   }
 
   /** The account's own entry and interest in a release it may read (`viewer` first). */
@@ -577,12 +662,18 @@ export class LiveRoomService {
         .executeTakeFirst(),
     ]);
     const entry = views.get(accountId) ?? null;
+    // Macro scope K44 T1: on a set's release, the interest's size per piece and YOUR SIZES' preselection per piece.
+    const isSet = viewer.set ?? (await this.db.selectFrom('drops').select('set_id').where('id', '=', viewer.dropId).executeTakeFirst())?.set_id != null;
+    const interestSizes: LivePieceSize[] = interest && isSet ? await liveInterestPieceSizes(this.db, viewer.dropId, accountId) : [];
     return {
       access: viewer.access,
       entry,
-      interest: interest ? { dropId: interest.drop_id, size: { id: interest.size_id, label: interest.label }, since: interest.created_at } : null,
+      interest: interest
+        ? { dropId: interest.drop_id, size: { id: interest.size_id, label: interest.label }, ...(interestSizes.length ? { sizes: interestSizes } : {}), since: interest.created_at }
+        : null,
       guarantee: guarantee ? { pieces: guarantee.pieces } : null,
       savedSize: entry || interest ? null : await this.matchSavedSize(accountId, viewer.dropId),
+      ...(isSet ? { savedSizes: entry || interest ? [] : await this.savedSizesByPiece(accountId, viewer.dropId) } : {}),
     };
   }
 
@@ -596,6 +687,18 @@ export class LiveRoomService {
       this.db.selectFrom('live_interest').select('size_id').where('drop_id', '=', dropId).where('account_id', '=', accountId).executeTakeFirst(),
     ]);
     return entry || interest ? null : this.matchSavedSize(accountId, dropId);
+  }
+
+  /**
+   * Macro scope K44 T1: on a set's release, YOUR SIZES' size per piece (`savedSizesByPiece`) while the account holds
+   * neither an entry nor an interest there (the stream's first frame, as `savedSize`); empty otherwise. Reads only.
+   */
+  async savedSizesNow(accountId: string, dropId: string): Promise<{ piece: number; id: string; label: string }[]> {
+    const [entry, interest] = await Promise.all([
+      this.db.selectFrom('live_entries').select('id').where('drop_id', '=', dropId).where('account_id', '=', accountId).executeTakeFirst(),
+      this.db.selectFrom('live_interest').select('size_id').where('drop_id', '=', dropId).where('account_id', '=', accountId).executeTakeFirst(),
+    ]);
+    return entry || interest ? [] : this.savedSizesByPiece(accountId, dropId);
   }
 
   /**
@@ -648,8 +751,9 @@ export class LiveRoomService {
     const r = await this.reads().where('d.id', '=', id).where('d.mode', '=', 'LIVE').where('d.published_at', 'is not', null).executeTakeFirst();
     if (!r || r.cancelled_at || !isAnnounced(r, stagesAt(r, now))) return null;
     const paced = r.pace_batch !== null && r.pace_minutes !== null;
-    const [sizes, counts, message, waiting] = await Promise.all([
-      this.db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', id).orderBy('position').execute(),
+    const isSet = r.set_id !== null;
+    const [sizes, counts, message, waiting, bySize, set] = await Promise.all([
+      this.db.selectFrom('drop_sizes').select(['id', 'label', 'stock', 'piece']).where('drop_id', '=', id).orderBy('position').execute(),
       this.db
         .selectFrom('live_entries')
         .select((eb) => ['size_id', 'status', eb.fn.countAll<number>().as('n'), eb.fn.sum<number>('quantity').as('q')])
@@ -667,19 +771,42 @@ export class LiveRoomService {
             .where('admitted_at', 'is', null)
             .executeTakeFirstOrThrow()
         : Promise.resolve(null),
+      // Macro scope K44 T1: a set's entry counts in each of its sizes (its quantity its sets).
+      isSet
+        ? this.db
+            .selectFrom('live_entry_sizes as x')
+            .innerJoin('live_entries as e', 'e.id', 'x.entry_id')
+            .select((eb) => ['x.size_id', 'e.status', eb.fn.countAll<number>().as('n'), eb.fn.sum<number>('e.quantity').as('q')])
+            .where('e.drop_id', '=', id)
+            .where('e.status', 'in', ['TURN', 'SECURED', 'CONFIRMED'])
+            .groupBy(['x.size_id', 'e.status'])
+            .execute()
+        : Promise.resolve(null),
+      isSet ? this.setOffers([r]).then((m) => m.get(id)) : Promise.resolve(undefined),
     ]);
     const people = (statuses: readonly string[]) => counts.filter((c) => statuses.includes(c.status)).reduce((n, c) => n + Number(c.n), 0);
     const pieces = (sizeId: string, statuses: readonly string[]) =>
-      counts.filter((c) => c.size_id === sizeId && statuses.includes(c.status)).reduce((n, c) => n + Number(c.q ?? 0), 0);
+      (bySize ?? counts).filter((c) => c.size_id === sizeId && statuses.includes(c.status)).reduce((n, c) => n + Number(c.q ?? 0), 0);
     const roomSizes: LiveRoomSize[] = sizes.map((s) => {
       const held = pieces(s.id, ['TURN', 'SECURED']);
-      return { id: s.id, label: s.label, stock: s.stock, left: Math.max(0, s.stock - held - pieces(s.id, ['CONFIRMED'])), held };
+      return { id: s.id, label: s.label, ...(s.piece !== null ? { piece: s.piece } : {}), stock: s.stock, left: Math.max(0, s.stock - held - pieces(s.id, ['CONFIRMED'])), held };
     });
+    const stages = liveStages(r, now)!;
+    // A set's release: its pieces, each with its sizes; its figures in sets (each piece's sizes summed, the smallest).
+    const roomPieces: LiveRoomPiece[] | null = set
+      ? set.offer.pieces.map((p) => ({
+          piece: p.piece!,
+          name: stages.name ? p.model.name : null,
+          variant: stages.name ? p.model.variant : null,
+          imageUrl: stages.photo ? p.model.imageUrl : null,
+          sizes: roomSizes.filter((z) => z.piece === p.piece),
+        }))
+      : null;
+    const perPiece = (k: 'left' | 'held') => (roomPieces ? Math.min(...roomPieces.map((p) => p.sizes.reduce((n, z) => n + z[k], 0))) : roomSizes.reduce((n, z) => n + z[k], 0));
     const phase = livePhase(r, now) as LiveRoom['phase'];
     // Over once the engine has recorded the end (with the waiting and queued entries ENDED in the same transaction) and
     // no turn or hold remains: the clock alone (`phase`, for display) may run ahead of the engine's pass.
     const over = r.ended_at !== null && people(['TURN', 'SECURED']) === 0;
-    const stages = liveStages(r, now)!;
     const room: LiveRoom = {
       id,
       phase,
@@ -691,11 +818,13 @@ export class LiveRoomService {
       closesAt: r.closes_at,
       inRoom: people(LIVE_OPEN_STATUSES),
       line: people(['QUEUED']),
-      quantity: sizes.reduce((n, s) => n + s.stock, 0),
+      quantity: onSaleOf(sizes),
       quantityLine: r.quantity_line ?? '',
-      left: roomSizes.reduce((n, s) => n + s.left, 0),
-      held: roomSizes.reduce((n, s) => n + s.held, 0),
+      left: perPiece('left'),
+      // A set's held sets: each counted once, in its first piece.
+      held: roomPieces ? (roomPieces[0]?.sizes.reduce((n, z) => n + z.held, 0) ?? 0) : roomSizes.reduce((n, s) => n + s.held, 0),
       sizes: roomSizes,
+      ...(roomPieces ? { pieces: roomPieces } : {}),
       message: message ? { text: message.text, at: message.created_at } : null,
     };
     const board: LiveBoard = {
@@ -711,9 +840,10 @@ export class LiveRoomService {
       left: room.left,
       release: {
         revealed: { silhouette: stages.silhouette, name: stages.name, photo: stages.photo },
-        name: stages.name ? r.model_name : null,
+        name: stages.name ? nameOf(r, set) : null,
         silhouetteUrl: stages.silhouette ? mediaUrl(r.silhouette_sha256) : null,
-        imageUrl: stages.photo ? mediaUrl(r.model_image) : null,
+        imageUrl: stages.photo && !set ? mediaUrl(r.model_image) : null,
+        ...(set ? { set: setView(set, stages) } : {}),
       },
     };
     const queue: LiveQueueFrame | null = paced
@@ -790,20 +920,23 @@ export class LiveRoomService {
       .orderBy('d.id')
       .limit(LIVE_MINE_LIMIT)
       .execute();
+    const sets = await this.setOffers(rows);
     return rows.map((r) => {
       const stages = liveStages(r, now);
+      const set = sets.get(r.id);
       return {
         release: {
           id: r.id,
           phase: livePhase(r, now),
           endedReason: r.ended_reason,
           title: stages?.name ? r.title : null,
-          name: stages?.name ? r.model_name : null,
-          variant: stages?.name ? r.model_variant : null,
-          imageUrl: stages?.photo ? mediaUrl(r.model_image) : null,
+          name: stages?.name ? nameOf(r, set) : null,
+          variant: stages?.name && !set ? r.model_variant : null,
+          imageUrl: stages?.photo && !set ? mediaUrl(r.model_image) : null,
           opensAt: r.opens_at,
           closesAt: r.closes_at,
           afterRoomOf: r.parent_drop_id,
+          ...(set ? { set: setView(set, stages ?? { name: false, photo: false }) } : {}),
         },
         entry: views.get(r.id)!,
       };
@@ -812,10 +945,11 @@ export class LiveRoomService {
 
   // ── internals ────────────────────────────────────────────────────────────
 
+  /** The releases with their model (macro scope K44 T1: none on a set's release, read with `setOffers`). */
   private reads() {
     return this.db
       .selectFrom('drops as d')
-      .innerJoin('models as m', 'm.id', 'd.model_id')
+      .leftJoin('models as m', 'm.id', 'd.model_id')
       .leftJoin('collections as c', 'c.id', 'm.collection_id')
       .leftJoin('drops as pd', 'pd.id', 'd.parent_drop_id')
       .selectAll('d')
@@ -855,6 +989,20 @@ export class LiveRoomService {
     return r;
   }
 
+  /** Macro scope K44 T1: what each set's release among `rows` sells (release-offer.ts), its pieces' collections named. */
+  private async setOffers(rows: readonly ReadRow[]): Promise<Map<string, SetOffer>> {
+    const out = new Map<string, SetOffer>();
+    for (const r of rows) {
+      if (r.set_id === null) continue;
+      const offer = await releaseOffer(this.db, r);
+      if (offer.kind !== 'SET') continue;
+      const ids = [...new Set(offer.pieces.map((p) => p.model.collectionId).filter((x): x is string => x !== null))];
+      const collections = new Map(ids.length ? (await this.db.selectFrom('collections').select(['id', 'name']).where('id', 'in', ids).execute()).map((c) => [c.id, c.name]) : []);
+      out.set(r.id, { offer, collections });
+    }
+    return out;
+  }
+
   /** I'LL BE THERE, counted per release: one read for all of them. */
   private async interestCounts(ids: readonly string[]): Promise<Map<string, number>> {
     if (ids.length === 0) return new Map();
@@ -867,9 +1015,13 @@ export class LiveRoomService {
     return new Map(rows.map((x) => [x.drop_id, Number(x.n)]));
   }
 
-  private async card(r: ReadRow, now: Date, interest: number): Promise<LiveCard> {
+  private async card(r: ReadRow, now: Date, interest: number, set?: SetOffer): Promise<LiveCard> {
     const stages = liveStages(r, now)!;
     const rule = await liveAccessRule(this.db, r, now);
+    // A photograph to reveal: its model's or its lookbook sheet; a set's, one of its pieces'.
+    const pictured = set
+      ? set.offer.pieces.some((p) => p.model.imageUrl || (p.model.lookbook === 'PUBLIC' && p.model.slug))
+      : r.model_image || (r.model_lookbook === 'PUBLIC' && r.model_slug);
     return {
       id: r.id,
       kind: 'LIVE',
@@ -879,16 +1031,16 @@ export class LiveRoomService {
       reveals: [
         ...(!stages.silhouette && r.silhouette_sha256 ? [{ stage: 'SILHOUETTE' as const, at: stages.silhouetteAt }] : []),
         ...(!stages.name ? [{ stage: 'NAME' as const, at: stages.nameAt }] : []),
-        ...(!stages.photo && (r.model_image || (r.model_lookbook === 'PUBLIC' && r.model_slug)) ? [{ stage: 'PHOTO' as const, at: stages.photoAt }] : []),
+        ...(!stages.photo && pictured ? [{ stage: 'PHOTO' as const, at: stages.photoAt }] : []),
       ],
       title: stages.name ? r.title : null,
-      name: stages.name ? r.model_name : null,
-      variant: stages.name ? r.model_variant : null,
-      type: stages.name ? r.model_type : null,
-      collection: stages.name ? r.collection : null,
+      name: stages.name ? nameOf(r, set) : null,
+      variant: stages.name && !set ? r.model_variant : null,
+      type: stages.name ? (set ? 'SET' : r.model_type) : null,
+      collection: stages.name && !set ? r.collection : null,
       silhouetteUrl: stages.silhouette ? mediaUrl(r.silhouette_sha256) : null,
-      imageUrl: stages.photo ? mediaUrl(r.model_image) : null,
-      lookbook: stages.photo && r.model_lookbook === 'PUBLIC' && r.model_slug ? r.model_slug : null,
+      imageUrl: stages.photo && !set ? mediaUrl(r.model_image) : null,
+      lookbook: stages.photo && !set && r.model_lookbook === 'PUBLIC' && r.model_slug ? r.model_slug : null,
       announcedAt: announcedAt(r)!,
       roomOpensAt: roomOpensAt(r),
       opensAt: r.opens_at,
@@ -901,6 +1053,7 @@ export class LiveRoomService {
       // An after-room's boxes hold its release's surprise (services/after-room.ts).
       surprise: (r.parent_drop_id ? r.parent_surprise : r.surprise_enabled) === true,
       interest,
+      ...(set ? { set: setView(set, stages) } : {}),
     };
   }
 }

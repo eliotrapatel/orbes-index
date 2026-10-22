@@ -296,15 +296,18 @@ export class QuestionService {
 
   // ── internals ────────────────────────────────────────────────────────────
 
+  /** The LIVE RELEASES with the name they go by: their model's, or (macro scope K44 T1, M3.16) their set's. */
   private reads(db: Db) {
     return db
       .selectFrom('drops as d')
-      .innerJoin('models as m', 'm.id', 'd.model_id')
+      .leftJoin('models as m', 'm.id', 'd.model_id')
+      .leftJoin('sets as t', 't.id', 'd.set_id')
       // Its after-room once opened (published at the sell-out): the question waits for it to end.
       .leftJoin('drops as ar', (j) => j.onRef('ar.parent_drop_id', '=', 'd.id').on('ar.published_at', 'is not', null).on('ar.cancelled_at', 'is', null))
       .select([
         'd.id', 'd.mode', 'd.parent_drop_id', 'd.published_at', 'd.cancelled_at', 'd.ended_at', 'd.announce_at', 'd.silhouette_at', 'd.name_at', 'd.photo_at', 'd.opens_at',
-        'd.room_opens_minutes', 'd.question_enabled', 'd.question_text', 'd.question_answers', 'm.name as model_name',
+        'd.room_opens_minutes', 'd.question_enabled', 'd.question_text', 'd.question_answers',
+        sql<string>`coalesce(m.name, t.name)`.as('model_name'),
         'ar.id as after_room_id', 'ar.ended_at as after_room_ended_at', 'ar.closes_at as after_room_closes_at',
       ])
       .where('d.mode', '=', 'LIVE')
