@@ -1768,6 +1768,105 @@ body.nocturne .view--piece {
   margin-top: 28.25px;
 }
 
+/* WORN in OWNERSHIP (lot M2, D31 G1 to G3; views/worn.ts), after OWNERSHIP CERTIFICATE: its heading and sentence as the
+   certificate's; the photograph cropped 4:5 as the sheet shows it, 240 px wide on a phone, its credit under it in the
+   label face (the Instagram name in the reading face, as written); the choices in rows with their switches, without the
+   rows' side padding (the panel has its margin); SEND · CANCEL as the panel's other pairs. */
+.n-worn__state {
+  margin-top: 18px;
+}
+
+.n-worn__state + .n-piece__text {
+  margin-top: 8px;
+}
+
+.n-worn__figure {
+  margin: 18px 0 0;
+}
+
+.n-worn__state + .n-worn__figure {
+  margin-top: 12px;
+}
+
+.n-worn__frame {
+  width: 240px;
+  max-width: 100%;
+  aspect-ratio: 4 / 5;
+  overflow: hidden;
+  background: var(--vault-plate);
+}
+
+.n-worn__img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.n-worn__credit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 10px;
+  row-gap: 2px;
+  margin-top: 10px;
+}
+
+.n-worn__name,
+.n-worn__handle {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.n-worn__handle {
+  color: var(--vault-soft);
+}
+
+.n-worn__figure + .n-piece__text {
+  margin-top: 14px;
+}
+
+.n-worn__zone {
+  display: grid;
+  justify-items: stretch;
+}
+
+.n-worn__row {
+  margin-top: 6px;
+  padding: 14px 0;
+}
+
+.n-worn__figure + .n-worn__row {
+  margin-top: 14px;
+}
+
+.n-worn__row-handle {
+  font-family: var(--font);
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.n-worn__consent-text {
+  margin-top: 14px;
+}
+
+.n-worn__figure + .n-worn__consent-text {
+  margin-top: 18px;
+}
+
+.n-worn__ask {
+  margin-top: 18px;
+}
+
+.n-worn__see {
+  margin-top: 18px;
+}
+
+.n-worn__notice {
+  margin-top: 14px;
+}
+
 /* ══ THE COLLECTION, a model's sheet and THE PRIVATE SALON (plan NOCTURNE, screen 5, step N6; C5, C6, C33) ═══════════════
    THE COLLECTION: its title and sentence, each collection's name, each model full width on its photograph, faded, its
    words lifted onto its foot (its dots, You own N, SEE THE MODEL); THE PRIVATE SALON for an owner, its teaser as a plate

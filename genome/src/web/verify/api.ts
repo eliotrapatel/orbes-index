@@ -89,6 +89,7 @@ import type {
   WishAdded,
   Wishlist,
   WishRemoved,
+  PieceWorn,
 } from './types.js';
 import type { SeenBatchBody, SeenSendResult } from './seen-model.js';
 
@@ -132,6 +133,8 @@ interface RequestOptions {
 }
 
 const DEFAULT_TIMEOUT_MS = 15_000;
+/** A WORN photograph (up to 1 MiB) sent from a phone on a slow network: its own, longer timeout. */
+export const WORN_SEND_TIMEOUT_MS = 60_000;
 /** The contact of ORBES Client Services is optional: its read gives up early, and is tried again with the next result. */
 export const CONTACT_TIMEOUT_MS = 4_000;
 /** A LIVE RELEASE's clock sync gives up on a slow round trip (it is no use for the sync), and its state polled every 2 s on one that hangs. */
@@ -1064,6 +1067,29 @@ export class ApiClient {
     return r.count;
   }
 
+  // ── WORN (macro scope D31, G1 to G3; lot M2 plan §2.2) ──────────────────
+
+  /** The piece's WORN for its owner: its photograph, whether one may be sent and why not, the credit it would carry. */
+  async wornOfPiece(productId: string): Promise<PieceWorn> {
+    return checkedWorn(await this.request<PieceWorn>('GET', `/api/v1/account/products/${encodeURIComponent(productId)}/worn`));
+  }
+
+  /**
+   * SEND: the photograph (re-encoded on the device, shared/photo.ts) as the body itself, the Instagram choice and the
+   * consent's version in the address; answers the piece's WORN, its photograph in review.
+   */
+  async sendWorn(productId: string, photo: Blob, opts: { instagram: boolean; consent: string }): Promise<PieceWorn> {
+    const q = new URLSearchParams({ instagram: opts.instagram ? '1' : '0', consent: opts.consent });
+    return checkedWorn(
+      await this.request<PieceWorn>('POST', `/api/v1/account/products/${encodeURIComponent(productId)}/worn?${q.toString()}`, photo, { csrf: true, timeoutMs: WORN_SEND_TIMEOUT_MS }),
+    );
+  }
+
+  /** WITHDRAW: the photograph leaves WORN (or its review) at once, its bytes erased. */
+  async withdrawWorn(id: string): Promise<void> {
+    await this.request('DELETE', `/api/v1/account/worn/${encodeURIComponent(id)}`, undefined, { csrf: true });
+  }
+
   // ── Transport ────────────────────────────────────────────────────────────
 
   private remember(s: SessionInfo): void {
@@ -1073,7 +1099,9 @@ export class ApiClient {
   /** One request on the wire: transport failures become NETWORK or TIMEOUT. The response is the caller's to read. */
   private async send(method: Method, path: string, body: unknown, opts: RequestOptions): Promise<Response> {
     const headers: Record<string, string> = { accept: 'application/json' };
-    if (body !== undefined) headers['content-type'] = 'application/json';
+    // A photograph (WORN) is sent as itself, its type its own; anything else as JSON.
+    const raw = typeof Blob !== 'undefined' && body instanceof Blob;
+    if (body !== undefined) headers['content-type'] = raw ? (body as Blob).type || 'application/octet-stream' : 'application/json';
     if (opts.csrf && this.csrfToken) headers['x-csrf-token'] = this.csrfToken;
 
     const controller = new AbortController();
@@ -1082,7 +1110,7 @@ export class ApiClient {
       const res = await this.fetchImpl(this.base + path, {
         method,
         headers,
-        body: body === undefined ? undefined : JSON.stringify(body),
+        body: body === undefined ? undefined : raw ? (body as Blob) : JSON.stringify(body),
         credentials: 'same-origin',
         cache: opts.cache ?? 'no-store',
         redirect: 'error',
@@ -1123,6 +1151,21 @@ function checkedProfile(r: AccountProfileView | null | undefined): AccountProfil
   if (!r || !r.profile || typeof r.profile.version !== 'number' || !r.options || !Array.isArray(r.options.heard) || !r.completion || typeof r.completion.percent !== 'number') {
     throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
   }
+  return r;
+}
+
+/** A piece's WORN as the server answers it, or BAD_RESPONSE. */
+function checkedWorn(r: PieceWorn | undefined): PieceWorn {
+  const p = r?.photo;
+  const ok =
+    !!r &&
+    typeof r.canSend === 'boolean' &&
+    typeof r.consentVersion === 'string' &&
+    (r.sheet === null || typeof r.sheet?.slug === 'string') &&
+    (r.reason === null || typeof r.reason === 'string') &&
+    !!r.credit &&
+    (p === null || (typeof p?.id === 'string' && typeof p.status === 'string' && typeof p.sentAt === 'string' && !!p.credit && typeof p.credit.firstName === 'string'));
+  if (!ok) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
   return r;
 }
 

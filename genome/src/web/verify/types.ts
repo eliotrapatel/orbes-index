@@ -1555,3 +1555,48 @@ export interface WishRemoved {
   wished: false;
   count: number;
 }
+
+// ── WORN (macro scope D31, G1 to G3; lot M2 plan §2.2, §2.3) ────────────────
+
+/** A WORN photograph's status (worn_photos.status). */
+export type WornStatus = 'PENDING' | 'PUBLISHED' | 'REFUSED' | 'WITHDRAWN' | 'TAKEN_DOWN' | 'ENDED';
+/** Why ORBES refused or took a photograph down: one of three, shown in words (copy.ts WORN.refusal). */
+export type WornRefusal = 'PIECE_NOT_VISIBLE' | 'QUALITY' | 'NOT_SUITABLE';
+/** Why a piece sends no photograph now (LIVE: one is in review or published). */
+export type WornBlock = 'NO_SHEET' | 'TEST_ENTRANT' | 'NOT_HELD' | 'STATUS' | 'TRANSFER_PENDING' | 'PROFILE_INCOMPLETE' | 'LIVE';
+
+/** The credit under a photograph (G3): the first name, the country's English name, and the Instagram name when chosen. */
+export interface WornCredit {
+  firstName: string;
+  country: string;
+  instagram: string | null;
+}
+
+/** A piece's photograph as its owner reads it (in review, published, refused or taken down). */
+export interface OwnerWornPhoto {
+  id: string;
+  status: WornStatus;
+  sentAt: string;
+  publishedAt: string | null;
+  endedAt: string | null;
+  refusal: WornRefusal | null;
+  /** The credit as it was sent, and as it reads under the photograph. */
+  credit: WornCredit;
+  /** GET /api/v1/account/worn/:id/photo while in review or published; null once erased. */
+  url: string | null;
+  width: number | null;
+  height: number | null;
+}
+
+/** GET /api/v1/account/products/:productId/worn (and the POST's answer): the piece's WORN for its owner. */
+export interface PieceWorn {
+  /** The sheet the photograph appears on (SEE IT ON THE SHEET); null: the model has none, the block is not drawn. */
+  sheet: { slug: string } | null;
+  photo: OwnerWornPhoto | null;
+  canSend: boolean;
+  reason: WornBlock | null;
+  /** The credit a sending would carry now (YOUR PROFILE's first name, the country's name, the Instagram name it may show). */
+  credit: { firstName: string | null; country: string | null; instagram: string | null };
+  /** The consent's version a sending carries. */
+  consentVersion: string;
+}

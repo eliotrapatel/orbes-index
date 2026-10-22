@@ -1252,6 +1252,8 @@ class App {
       onRelease: (releaseId) => this.openRelease(releaseId),
       onOrder: (reference) => this.openPieces({ order: reference }),
       onModel: (slug) => this.openSheet(slug),
+      // WORN's YOUR PROFILE (lot M2): its page on a computer, over the piece; the account sheet over it on a phone.
+      onProfile: () => (isDesktop() ? this.openAccountSection('profile') : this.shell?.openAccountSheet('profile')),
       onScan: () => void this.startScan(),
     });
     if (await this.swap(view.root, 'piece', focus)) this.live = view;

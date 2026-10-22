@@ -2500,3 +2500,60 @@ export const FROM_ORBES = Object.freeze({
   earlier: 'SHOW EARLIER',
   earlierFailed: 'Earlier messages could not be shown just now.',
 });
+
+/**
+ * WORN, sending from the piece (macro scope D31, G1 to G3; lot M2 plan §2.3, step M2.10): the block of a piece's
+ * OWNERSHIP tab, after OWNERSHIP CERTIFICATE (views/worn.ts; worn-model.ts says which state it shows). The owner chooses
+ * a photograph, sees it as it will be shown with its credit (exactly the first name and the country, plus the Instagram
+ * name when chosen; never a variant), agrees, and sends it; ORBES looks at it before it appears on the model's sheet.
+ * The refusals' words are the console's (admin/model/worn.ts WORN_REFUSAL_WORDS[*].owner, held equal by a test).
+ */
+export const WORN = Object.freeze({
+  title: 'WORN',
+  lead: 'Show how you wear it. ORBES looks at each photograph before it appears on the model’s sheet, with your first name and country.',
+  choose: 'CHOOSE A PHOTOGRAPH',
+  chooseAnother: 'CHOOSE ANOTHER PHOTOGRAPH',
+  /** On a computer the block is also a drop zone, its line under CHOOSE A PHOTOGRAPH. */
+  drop: 'or drop it here',
+  preparing: 'PREPARING…',
+  /** The chosen photograph, re-encoded on the device, as it will be sent. */
+  previewAlt: 'Your photograph, as it will be sent',
+  /** The photograph sent, in review or published. */
+  photoAlt: 'Your photograph for WORN',
+  instagram: 'SHOW MY INSTAGRAM',
+  consent: 'I took this photograph or have its author’s permission, and anyone recognisable in it agrees. ORBES may show it in WORN with my credit until I withdraw it.',
+  consentLabel: 'I AGREE',
+  consentMissing: 'Agree to how WORN shows your photograph to send it.',
+  send: 'SEND',
+  sending: 'SENDING…',
+  cancel: 'CANCEL',
+  review: 'IN REVIEW',
+  reviewText: 'ORBES is looking at your photograph.',
+  published: 'PUBLISHED',
+  publishedSince: (date: string) => `In WORN since ${date}.`,
+  seeOnSheet: 'SEE IT ON THE SHEET',
+  withdraw: 'WITHDRAW',
+  /** WITHDRAW, confirmed in place: a published photograph, then one in review. */
+  withdrawAsk: 'Remove it from WORN?',
+  withdrawAskReview: 'Withdraw it from review?',
+  withdrawn: 'Your photograph is withdrawn and erased.',
+  notPublished: 'NOT PUBLISHED',
+  /** Why ORBES did not publish it, or took it down (one of three, never free text). */
+  refusal: Object.freeze({
+    PIECE_NOT_VISIBLE: 'The piece is not clearly visible.',
+    QUALITY: 'The photograph is not sharp enough.',
+    NOT_SUITABLE: 'This photograph cannot be shown in WORN.',
+  }),
+  /** No first name or country in YOUR PROFILE: the credit cannot be written. */
+  profile: 'Add your first name and country in YOUR PROFILE to sign your photograph.',
+  profileLink: 'YOUR PROFILE',
+  /** A piece reported lost or stolen, or in service; a transfer pending: one calm sentence, no button. */
+  status: 'No photograph can be sent while the piece is reported, or in service.',
+  transfer: 'No photograph can be sent while the piece’s transfer is pending.',
+  get unreadable() {
+    return forDevice('This photograph cannot be read. Choose a JPEG or a photograph from your library.', 'This photograph cannot be read. Choose a JPEG or another photograph.');
+  },
+  noCanvas: 'This browser cannot prepare the photograph. Open the piece in another browser.',
+  tooLarge: 'This photograph stays over 1 MB once prepared. Choose another one.',
+  retry: 'TRY AGAIN',
+});

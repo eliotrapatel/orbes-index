@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ACCOUNT_ADDRESSES, DESKTOP, LIVE, ORDERS, QUESTION, RELEASES, resultMessage, STORY } from '../../src/web/verify/copy.js';
+import { ACCOUNT_ADDRESSES, DESKTOP, LIVE, ORDERS, QUESTION, RELEASES, resultMessage, STORY, WORN } from '../../src/web/verify/copy.js';
 import { releaseTime } from '../../src/web/verify/live-model.js';
 import { twoClocks } from '../../src/web/verify/releases-model.js';
 import { brandForbiddenTerms, EXTRA_FORBIDDEN_EN, findForbidden } from '../docs/lexicon.js';
@@ -67,6 +67,13 @@ const PAIRS: readonly { where: string; read: () => string; phone: string; comput
     read: () => STORY.cannotShare,
     phone: 'This browser cannot share an image. Save it, then add it to your story from your photos.',
     computer: 'This browser cannot share an image. Save it, then add it to your story from your phone.',
+  },
+  // WORN's photograph that cannot be read (lot M2, step M2.10): a phone's library, a computer's other photograph.
+  {
+    where: 'WORN.unreadable',
+    read: () => WORN.unreadable,
+    phone: 'This photograph cannot be read. Choose a JPEG or a photograph from your library.',
+    computer: 'This photograph cannot be read. Choose a JPEG or another photograph.',
   },
 ];
 

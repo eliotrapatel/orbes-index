@@ -4,7 +4,8 @@
  * that re-encodes what the operator chooses, and the thumbnails of the
  * catalogue and the product page.
  *
- * Re-encoding: the chosen file is decoded by the browser (createImageBitmap,
+ * Re-encoding (shared/photo.ts, the collector's WORN uses it too): the chosen
+ * file is decoded by the browser (createImageBitmap,
  * EXIF orientation applied), drawn on white at most PHOTO_MAX_SIDE pixels on
  * its longer side, and sent as a JPEG whose quality steps down until it fits
  * the server's 1 MiB (the packing photo: smaller sides in turn too, until it
@@ -14,53 +15,33 @@
  */
 import { h, mount, type Child } from '../../shared/dom.js';
 import { ApiError } from '../api.js';
-import { encodeAttempts, PHOTO_LIMITS, PHOTO_SENT_AS, photoFacts, type PhotoLimits } from '../model/photo.js';
+import { PhotoError, reencodePhoto as encodePhoto, type EncodedPhoto } from '../../shared/photo.js';
+import { PHOTO_LIMITS, PHOTO_SENT_AS, photoFacts, type PhotoLimits } from '../model/photo.js';
 import { button } from './components.js';
 import { openDialog } from './dialog.js';
 
-export interface EncodedPhoto {
-  blob: Blob;
-  width: number;
-  height: number;
-}
+export type { EncodedPhoto };
+
+/** What the console says when a photograph cannot be prepared (shared/photo.ts asks each app for its words). */
+const CONSOLE_PHOTO_WORDS = Object.freeze({
+  unreadable: 'This file could not be opened as a photograph. Choose a JPEG, PNG or WebP image.',
+  empty: 'This photograph is empty.',
+  noCanvas: 'This browser cannot prepare the photograph.',
+});
 
 /**
  * Decode `file`, draw it at each longer side of `limits` in turn (by default PHOTO_MAX_SIDE; the packing photo's
  * 1 600 px down to 1 024 px, plan NEXT LOT §3.5.3) and encode it as a JPEG whose quality steps down at each side,
- * until it fits `limits.maxBytes`; refused with `limits.tooLarge` otherwise, before anything is sent.
+ * until it fits `limits.maxBytes`; refused with `limits.tooLarge` otherwise, before anything is sent. The encoder is
+ * shared/photo.ts's (moved there unchanged, lot MACRO M2, step M2.10); its refusals reach the console as before, an
+ * ApiError of status 0 with the same code and words.
  */
 export async function reencodePhoto(file: Blob, limits: PhotoLimits = PHOTO_LIMITS): Promise<EncodedPhoto> {
-  let bitmap: ImageBitmap;
   try {
-    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
-  } catch {
-    throw new ApiError(0, 'PHOTO_UNREADABLE', 'This file could not be opened as a photograph. Choose a JPEG, PNG or WebP image.');
-  }
-  try {
-    const attempts = encodeAttempts(bitmap.width, bitmap.height, limits);
-    if (attempts.length === 0) throw new ApiError(0, 'PHOTO_UNREADABLE', 'This photograph is empty.');
-    const canvas = document.createElement('canvas');
-    const g = canvas.getContext('2d');
-    if (!g) throw new ApiError(0, 'PHOTO_UNREADABLE', 'This browser cannot prepare the photograph.');
-    let drawn = '';
-    for (const { width, height, quality } of attempts) {
-      if (drawn !== `${width}x${height}`) {
-        drawn = `${width}x${height}`;
-        canvas.width = width;
-        canvas.height = height;
-        // A JPEG has no transparency: a cut-out piece sits on white paper.
-        g.fillStyle = '#ffffff';
-        g.fillRect(0, 0, width, height);
-        g.imageSmoothingEnabled = true;
-        g.imageSmoothingQuality = 'high';
-        g.drawImage(bitmap, 0, 0, width, height);
-      }
-      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
-      if (blob && blob.size <= limits.maxBytes) return { blob, width, height };
-    }
-    throw new ApiError(0, 'PHOTO_TOO_LARGE', limits.tooLarge);
-  } finally {
-    bitmap.close();
+    return await encodePhoto(file, limits, CONSOLE_PHOTO_WORDS);
+  } catch (e) {
+    if (e instanceof PhotoError) throw new ApiError(0, e.code, e.message);
+    throw e;
   }
 }
 

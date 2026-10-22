@@ -18,7 +18,7 @@ import { PNG } from 'pngjs';
 import type { Browser, BrowserContext, Page, Route } from 'playwright-core';
 import { sessionCookieName } from '../../src/server/services/sessions.js';
 import { countPiecesIn, packAndShip } from './fulfil.js';
-import { NOCTURNE_NOW, type DemoVariant, type NocturneDemo } from './nocturne-demo.js';
+import { NOCTURNE_NOW, nocturnePhoto, type DemoVariant, type NocturneDemo } from './nocturne-demo.js';
 import { codePhoto, gate, hideGrain, mobileContext, sleep, type UiStage } from './ui-stage.js';
 
 /** A camera that refuses to open, the way a browser says it (getUserMedia's DOMException names). */
@@ -126,6 +126,33 @@ async function piecesTab(run: StateRun, name: 'PIECES' | 'ORDERS' | 'RELEASES'):
 async function orbesCare(run: StateRun): Promise<void> {
   await tab(run, 'ORBES CARE').click();
   await run.page.locator('.view--piece .piece__yearly-care:not([hidden])').waitFor();
+}
+
+/** WORN of a piece (lot M2, D31): its block in OWNERSHIP, read with the piece. */
+const WORN_BLOCK = '.view--piece .piece__worn:not([hidden])';
+
+/**
+ * WORN's CHOOSE A PHOTOGRAPH given a photograph of the demo (MONOLITHE in steel, WebP) through the block's own file
+ * input, its preview then drawn (re-encoded by the page's canvas); SHOW MY INSTAGRAM switched on, so the credit reads
+ * the Instagram name; with `agree`, the consent too.
+ */
+async function chooseWorn(run: StateRun, agree = false): Promise<void> {
+  await run.page.locator(`${WORN_BLOCK} .n-worn__choose`).waitFor();
+  await run.page.setInputFiles(`${WORN_BLOCK} input[type=file]`, { name: 'worn.webp', mimeType: 'image/webp', buffer: Buffer.from(nocturnePhoto('steel')) });
+  await run.page.locator(`${WORN_BLOCK} .n-worn__figure img`).waitFor();
+  await run.page.locator(`${WORN_BLOCK} .n-worn__instagram`).click();
+  await run.page.locator(`${WORN_BLOCK} .n-worn__credit .n-worn__handle`).waitFor();
+  if (agree) await run.page.locator(`${WORN_BLOCK} .n-worn__consent`).click();
+  await run.page.evaluate(() => new Promise<void>((resolve) => {
+    const img = document.querySelector<HTMLImageElement>('.piece__worn .n-worn__figure img');
+    if (!img || img.complete) resolve();
+    else img.addEventListener('load', () => resolve(), { once: true });
+  }));
+}
+
+/** The photographs of WORN's block shown whole (a photograph sent is read from the owner's own address). */
+async function wornPhotoLoaded(run: StateRun): Promise<void> {
+  await run.page.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>('.piece__worn img')].every((i) => i.complete && i.naturalWidth > 0));
 }
 
 /** A result read from a photo of `role`'s code, then `then` on it. */
@@ -1480,6 +1507,80 @@ export const PHONE_STATES: readonly UiState[] = [
     mutates: true,
   },
 
+  // ── WORN, sending from the piece (lot M2, macro scope D31 G1 to G3) on the stage `worn`: you's profile signs (Camille,
+  // France, camille.m); a piece with no photograph, a photograph chosen (its preview and credit), one in review, one
+  // published, one not published, a collector without a first name or country, and the 24-hour limit said under the
+  // preview (the sending answered by the stage's route, nothing written). ──
+  { id: 'piece-worn', title: 'A piece: OWNERSHIP, WORN, CHOOSE A PHOTOGRAPH (lot M2, G1)', refs: ['M2'], variant: 'worn', as: you, path: piece('yours'), ready: `${WORN_BLOCK} .n-worn__choose` },
+  {
+    id: 'piece-worn-chosen',
+    title: 'A piece: WORN, a photograph chosen: its preview, CAMILLE · FRANCE @camille.m, SHOW MY INSTAGRAM, the consent, SEND · CANCEL (lot M2, G1, G3)',
+    refs: ['M2'],
+    variant: 'worn',
+    as: you,
+    path: piece('yours'),
+    act: (run) => chooseWorn(run),
+    ready: `${WORN_BLOCK} .n-worn__send`,
+  },
+  {
+    id: 'piece-worn-review',
+    title: 'A piece: WORN, IN REVIEW, its photograph and credit, ORBES is looking at your photograph., WITHDRAW (lot M2, G2)',
+    refs: ['M2'],
+    variant: 'worn',
+    as: you,
+    path: piece('wornReview'),
+    act: (run) => wornPhotoLoaded(run),
+    ready: `${WORN_BLOCK} .n-worn__withdraw`,
+  },
+  {
+    id: 'piece-worn-published',
+    title: 'A piece: WORN, PUBLISHED, In WORN since 4 OCT 2026., SEE IT ON THE SHEET, WITHDRAW (lot M2, G2)',
+    refs: ['M2'],
+    variant: 'worn',
+    as: you,
+    path: piece('wornPublished'),
+    act: (run) => wornPhotoLoaded(run),
+    ready: `${WORN_BLOCK} .n-worn__see-link`,
+  },
+  {
+    id: 'piece-worn-refused',
+    title: 'A piece: WORN, NOT PUBLISHED, The piece is not clearly visible., CHOOSE ANOTHER PHOTOGRAPH (lot M2, G2)',
+    refs: ['M2'],
+    variant: 'worn',
+    as: you,
+    path: piece('wornRefused'),
+    ready: `${WORN_BLOCK} .n-worn__reason`,
+  },
+  {
+    id: 'piece-worn-profile',
+    title: 'A piece of a collector without a first name or country: WORN, its sentence and YOUR PROFILE (lot M2, G3)',
+    refs: ['M2'],
+    variant: 'worn',
+    as: 'wornNewcomer',
+    path: piece('wornProfile'),
+    ready: `${WORN_BLOCK} .n-worn__profile`,
+  },
+  {
+    id: 'piece-worn-error',
+    title: 'A piece: WORN, SEND refused by the 24-hour limit: the server\u2019s words under the preview, kept, SEND again (lot M2, G1)',
+    refs: ['M2'],
+    variant: 'worn',
+    as: you,
+    path: piece('yours'),
+    routes: async (page) =>
+      page.route('**/api/v1/account/products/*/worn?*', (route) =>
+        route.request().method() === 'POST'
+          ? route.fulfill({ status: 429, json: { error: { code: 'WORN_LIMIT', message: 'You can send 5 photographs in 24 hours. Try again later.' } } })
+          : route.fallback(),
+      ),
+    act: async (run) => {
+      await chooseWorn(run, true);
+      await run.page.locator(`${WORN_BLOCK} .n-worn__send`).click();
+      await run.page.locator(`${WORN_BLOCK} .n-worn__error`).waitFor();
+    },
+    ready: `${WORN_BLOCK} .n-worn__error`,
+  },
+
   // ── THE COLLECTION ──
   { id: 'collection-signed-out', title: 'THE COLLECTION, signed out', refs: ['C5'], variant: 'full', path: at('/verify/lookbook'), ready: '.view--lookbook[data-state="ready"] .lookbook__group' },
   { id: 'collection', title: 'THE COLLECTION, signed in: THE PRIVATE SALON', refs: ['C5'], variant: 'full', as: you, path: at('/verify/lookbook'), ready: '.view--lookbook[data-state="ready"] .lookbook__reserved' },
@@ -2739,6 +2840,14 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
     onDesk(phoneState('account-messages-house'), 1440, { name: 'messages-house' }),
     onDesk(phoneState('account-messages-house'), 1440, { name: 'messages-house', light: true }),
     onDesk(phoneState('account-messages-house'), 1024, { name: 'messages-house' }),
+  ],
+  // ── WORN (lot M2, D31) on the stage `worn`: a piece's block with no photograph, a photograph chosen (the drop zone's
+  // preview), in review and published at 1440 × 900; no photograph and published also in light; chosen at 1024 × 768 ──
+  'desk-14': [
+    ...desk(1440, 'piece-worn', 'piece-worn-chosen', 'piece-worn-review', 'piece-worn-published'),
+    onDesk(phoneState('piece-worn'), 1440, { light: true }),
+    onDesk(phoneState('piece-worn-published'), 1440, { light: true }),
+    ...desk(1024, 'piece-worn-chosen'),
   ],
 });
 

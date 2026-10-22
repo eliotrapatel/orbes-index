@@ -713,6 +713,92 @@
     max-width: 440px;
     margin-top: var(--d-s6);
   }
+
+  /* WORN (lot M2, D31; views/worn.ts) in the right column, after the certificate, on its scale: its heading 72 px under
+     what comes before it, its sentence 12 px under it, words to their action 32 px; the photograph 280 px wide (4:5),
+     its credit 16 px under it; the choices and SEND · CANCEL a form's column (440 px at most). CHOOSE A PHOTOGRAPH stands
+     in a drop zone (a hairline frame, its line under the button), drawn stronger while a file is held over it. */
+  html:not(.d-touch) body.nocturne .d-own__actions > .n-piece__worn:not(:first-child) {
+    margin-top: var(--d-s8);
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__worn > .n-piece__heading {
+    margin-top: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__worn > .n-piece__text {
+    margin-top: var(--d-s3);
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__worn > .n-worn__state {
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__worn > .n-worn__figure {
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__worn > .n-worn__state + .n-worn__figure {
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne .n-worn__frame {
+    width: 280px;
+  }
+
+  html:not(.d-touch) body.nocturne .n-worn__credit {
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__worn > .n-worn__figure + .n-piece__text {
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__worn > :is(.n-piece__action, .n-piece__duo, .n-piece__action-line) {
+    margin-top: var(--d-s6);
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__worn > :is(.n-worn__row, .n-worn__consent-text, .n-worn__choice) {
+    max-width: 440px;
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__worn > .n-worn__figure + .n-worn__row,
+  html:not(.d-touch) body.nocturne .n-piece__worn > .n-worn__figure + .n-worn__consent-text {
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__worn > .n-worn__consent-text {
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__worn > .n-worn__ask {
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .n-worn__zone {
+    justify-items: center;
+    row-gap: var(--d-s3);
+    padding: var(--d-s6) var(--d-s5);
+    box-shadow: inset 0 0 0 1px var(--vault-hairline);
+    transition: box-shadow 160ms ease, background-color 160ms ease;
+  }
+
+  html:not(.d-touch) body.nocturne .n-piece__worn .n-worn__zone > .n-btn {
+    justify-self: center;
+  }
+
+  html:not(.d-touch) body.nocturne .n-worn__zone.is-over {
+    background-color: var(--vault-plate);
+    box-shadow: inset 0 0 0 1px var(--vault-ink);
+  }
+
+  html:not(.d-touch) body.nocturne .n-worn__drop {
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-worn__choice > .n-worn__error {
+    margin-top: var(--d-s4);
+  }
 }
 
 /* ══ The shared certificate (/verify/c#…): its paper in both modes, laid out for a computer ══════════════════════ */

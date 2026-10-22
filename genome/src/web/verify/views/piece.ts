@@ -42,7 +42,7 @@ import { nocturneGenome } from '../genome-view.js';
 import { lookbookSheetPath } from '../lookbook-model.js';
 import { PIECE_TAB_LABELS, PIECE_TABS, pieceModel, serviceRows, type PieceModel, type PieceTabId } from '../pieces-model.js';
 import type { SessionStore } from '../session.js';
-import type { CertificateOffer, ClientServices, IncidentType, OwnedPiece, OwnerCertificate, ServiceRecord } from '../types.js';
+import type { CertificateOffer, ClientServices, IncidentType, OwnedPiece, OwnerCertificate, PieceWorn, ServiceRecord } from '../types.js';
 import { formatDate, recoveryContactModel } from '../view-model.js';
 import { pieceContext } from '../messages-model.js';
 import { listLine, orderPagePath, PIECES_PATH, viewRoot, withNumerals } from './common.js';
@@ -54,6 +54,7 @@ import { YearlyCareBlock } from './yearly-care.js';
 import { OwnershipPanel } from './ownership.js';
 import { modelPhoto } from './result.js';
 import { tabsView } from './tabs.js';
+import { WornBlock } from './worn.js';
 
 export interface PieceDeps {
   api: ApiClient;
@@ -72,8 +73,10 @@ export interface PieceDeps {
   onRelease?(id: string): void;
   /** ORDER OR-… (WHERE IT COMES FROM): ORDERS of MY PIECES, the order in view. */
   onOrder?(reference: string): void;
-  /** SEE THE MODEL: its sheet in THE COLLECTION. */
+  /** SEE THE MODEL: its sheet in THE COLLECTION (and WORN's SEE IT ON THE SHEET). */
   onModel?(slug: string): void;
+  /** WORN's YOUR PROFILE (lot M2): the account sheet's on a phone, its page on a computer. */
+  onProfile?(): void;
   onScan(): void;
 }
 
@@ -118,6 +121,7 @@ class PiecePage {
     this.unsubscribe = null;
     this.signIn?.dispose();
     this.signIn = null;
+    this.card?.dispose();
   }
 
   private async start(): Promise<void> {
@@ -157,10 +161,15 @@ class PiecePage {
     this.load = { kind: 'loading' };
     this.render();
     try {
-      // Its open certificate links with it (F-06); without them, the piece still shows, and its section says so.
-      const [list, certificates] = await Promise.all([
+      // Its open certificate links with it (F-06); without them, the piece still shows, and its section says so. Its
+      // WORN too (lot M2), so OWNERSHIP is drawn whole at once; without it, the piece shows no WORN block.
+      const [list, certificates, worn] = await Promise.all([
         this.deps.api.products(),
         this.deps.api.certificates().catch((e: unknown) => {
+          this.deps.session.noteError(e);
+          return null;
+        }),
+        this.deps.api.wornOfPiece(this.deps.productId).catch((e: unknown) => {
           this.deps.session.noteError(e);
           return null;
         }),
@@ -171,6 +180,7 @@ class PiecePage {
         this.deps.onMissing();
         return;
       }
+      this.card?.dispose();
       this.card = new PieceCard(piece, {
         api: this.deps.api,
         session: this.deps.session,
@@ -179,6 +189,8 @@ class PiecePage {
         onRelease: this.deps.onRelease,
         onOrder: this.deps.onOrder,
         onModel: this.deps.onModel,
+        onProfile: this.deps.onProfile,
+        worn,
         tab: this.deps.tab,
       });
       this.load = { kind: 'ready' };
@@ -222,6 +234,9 @@ interface CardDeps {
   onRelease?(id: string): void;
   onOrder?(reference: string): void;
   onModel?(slug: string): void;
+  onProfile?(): void;
+  /** The piece's WORN, read with it (lot M2); null when it could not be read. */
+  worn: PieceWorn | null;
   tab?: PieceTabId;
 }
 
@@ -253,6 +268,8 @@ class PieceCard {
   private creating = false;
   private days: CertificateDays = 30;
   private certificateError: string | null = null;
+  /** WORN (lot M2, D31): sending a photograph of the piece worn, after OWNERSHIP CERTIFICATE. */
+  private readonly worn: WornBlock;
 
   constructor(
     private piece: OwnedPiece,
@@ -262,6 +279,7 @@ class PieceCard {
     this.certificates = deps.certificates;
     this.claim = new WarrantyClaimBlock({ api: deps.api, session: deps.session });
     this.yearlyCare = new YearlyCareBlock({ api: deps.api, session: deps.session, productId: piece.productId, onCare: (care) => this.claim.show(care?.claim ?? null) });
+    this.worn = new WornBlock({ api: deps.api, session: deps.session, productId: piece.productId, worn: deps.worn, onProfile: deps.onProfile, onSheet: deps.onModel });
     const m = this.model;
     const key = m.key || 'piece';
     const slug = m.lookbook;
@@ -292,6 +310,11 @@ class PieceCard {
       tabs.root,
     );
     this.render();
+  }
+
+  dispose(): void {
+    this.worn.dispose();
+    this.yearlyCare.dispose();
   }
 
   /** WHERE IT COMES FROM (addition 2, C4): its release, a link to its page; its order, ORDERS with it in view. */
@@ -437,6 +460,8 @@ class PieceCard {
     // it answers, not under the report; a phone keeps every notice at the panel's foot.
     const ofCertificate = certificate && isDesktop() && (this.notice === PIECES.copied || this.notice === PIECES.withdrawn);
     if (certificate) actions.push(...this.certificateBlock(ofCertificate ? notice : null));
+    // WORN (lot M2), after the certificate; set aside, as the certificate is, while a report is confirmed.
+    if (this.confirm === null) actions.push(this.worn.root);
     actions.push(...this.incidentBlock());
     if (!ofCertificate) actions.push(notice);
     const write = writeButton(pieceContext(this.piece));
@@ -771,6 +796,8 @@ class PieceCard {
 
   private async done(notice: string, guess: (p: OwnedPiece) => OwnedPiece): Promise<void> {
     await this.refresh(guess);
+    // WORN follows the piece's status (a report, PIECE FOUND, a transfer cancelled), read again with it.
+    await this.worn.refresh();
     this.confirm = null;
     this.choice = null;
     this.notice = notice;

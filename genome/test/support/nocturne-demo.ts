@@ -97,6 +97,10 @@
  *   gallery           the full story, then a gallery on MONOLITHE in steel (desktop, D11: for the desktop states and the
  *                     owner's look only): the demo's own photographs of it in gold and in blue, after its cover, so a
  *                     model's page on a computer shows its grid of tiles and the viewer they open
+ *   worn              the full story, then WORN (lot M2, D31 G1 to G3; seedWorn): you's profile signs a photograph
+ *                     (Camille, France, the Instagram name camille.m), and three more pieces of MONOLITHE in steel hold
+ *                     one each: in review, published, not published (the piece not clearly visible); a collector
+ *                     without a first name or a country holds one piece of it (YOUR PROFILE first)
  *
  * Ids written by the server (scan references, order and entry references, genomes, invoice numbers) are the server's;
  * the parity tool's comparisons treat them as live data.
@@ -118,6 +122,7 @@ import { packAndShip, stockPieces } from './fulfil.js';
 import { createLiveRelease, holdPieces, type LiveFixture, type LiveReleaseOptions } from './live.js';
 import { poolDraw, withDrawSizes } from './draws.js';
 import { HOUSE_DEFAULT_WORDS, houseDate, houseMoney, renderHouseWords, type HouseMomentName, type HouseValues } from '../../src/shared/house-words.js';
+import { WORN_CONSENT_VERSION } from '../../src/server/services/worn.js';
 
 export type DemoVariant =
   | 'full'
@@ -148,7 +153,8 @@ export type DemoVariant =
   | 'care-used'
   | 'orbes-care'
   | 'gallery'
-  | 'house';
+  | 'house'
+  | 'worn';
 
 export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'full',
@@ -180,6 +186,7 @@ export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'orbes-care',
   'gallery',
   'house',
+  'worn',
 ]);
 
 /** NOW: Monday 5 October 2026, 18:49 in Paris (16:49 UTC), the boards' afternoon. Every clock of the stage is fixed here. */
@@ -282,7 +289,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
   // claim-waiting stage (plan NEXT LOT §3.4) tells the full story, its state writing the rest.
   // The draw-sizes stage (plan NEXT LOT §3.6.F) tells the full story, then adds a draw in sizes, open. The stages of the
   // collector's side of an order (plan NEXT LOT §3.6) tell the full story, their state writing the rest.
-  const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'draw-selected', 'email', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes', 'birthday-credit', 'care-used', 'orbes-care', 'gallery'] as const;
+  const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'draw-selected', 'email', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes', 'birthday-credit', 'care-used', 'orbes-care', 'gallery', 'worn'] as const;
   // The house messages' stage (lot M2, FROM ORBES) tells the draw-leads story, MESSAGES' own.
   const story = (variant === 'house' ? 'draw-leads' : (OWN_STAGES as readonly DemoVariant[]).includes(variant) ? 'full' : variant) as Exclude<DemoVariant, (typeof OWN_STAGES)[number] | 'house'>;
   if (story === 'empty') await seedEmpty(w);
@@ -309,6 +316,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
     if (variant === 'orbes-care') await seedOrbesCare(w);
     if (variant === 'gallery') await seedGallery(w);
     if (variant === 'house') await seedHouse(w);
+    if (variant === 'worn') await seedWorn(w);
   }
   clock.set(NOCTURNE_NOW);
   // Every account's session opened now: a capture signs in with its cookie.
@@ -1425,6 +1433,42 @@ async function seedHouse(w: World): Promise<void> {
   );
   await ctx.services.houseMessages.send(message.id, { phrase: 'SEND' }, admin);
   await ctx.services.houseMessages.deliverDue(at('2026-10-05T08:15:00Z'));
+}
+
+/**
+ * Lot M2 (macro scope D31, G1 to G3; plan §2.3, step M2.10), the stage `worn`: you's profile with its first name,
+ * country and Instagram name; three more pieces of MONOLITHE in steel for you, their photographs sent on 3 October (the
+ * demo's own photographs of the model: no person in them), one left in review, one published on 4 October, one not
+ * published (PIECE_NOT_VISIBLE); a collector without a first name or a country (l.bernard) holding one piece of it. The
+ * pieces' roles: wornReview, wornPublished, wornRefused, wornProfile; `yours` sends none (CHOOSE A PHOTOGRAPH).
+ */
+async function seedWorn(w: World): Promise<void> {
+  const { ctx, admin, clock, demo } = w;
+  const you = demo.accounts.you!;
+  await ctx.db.updateTable('accounts').set({ country: 'FR' }).where('id', '=', you.id).execute();
+  await ctx.db
+    .insertInto('account_profiles')
+    .values({ account_id: you.id, first_name: 'Camille', instagram: 'camille.m' })
+    .onConflict((oc) => oc.column('account_id').doUpdateSet({ first_name: 'Camille', instagram: 'camille.m' }))
+    .execute();
+  const since = at('2026-09-20T10:00:00Z');
+  const held = await holdPieces(ctx.db, you.id, 3, w.models.steel!, { variant: '17', startedAt: since });
+  const roles = ['wornReview', 'wornPublished', 'wornRefused'] as const;
+  const serial = async (id: string) => (await ctx.db.selectFrom('products').select('product_id').where('id', '=', id).executeTakeFirstOrThrow()).product_id;
+  const photos = [nocturnePhoto('steel'), nocturnePhoto('gold'), nocturnePhoto('blue')];
+  const sent: string[] = [];
+  for (const [i, role] of roles.entries()) {
+    demo.pieces[role] = await serial(held[i]!);
+    clock.set(at(`2026-10-03T1${i}:00:00Z`));
+    const r = await ctx.services.worn.send(you.id, demo.pieces[role]!, { mime: 'image/webp', bytes: photos[i]! }, { instagram: role !== 'wornRefused', consent: WORN_CONSENT_VERSION }, you.actor);
+    sent.push(r.photo!.id);
+  }
+  clock.set(at('2026-10-04T09:12:00Z'));
+  await ctx.services.worn.publish(sent[1]!, admin);
+  await ctx.services.worn.refuse(sent[2]!, 'PIECE_NOT_VISIBLE', admin);
+  const newcomer = await account(w, 'wornNewcomer', 'l.bernard@example.com');
+  const [piece] = await holdPieces(ctx.db, newcomer.id, 1, w.models.steel!, { variant: '17', startedAt: since });
+  demo.pieces.wornProfile = await serial(piece!);
 }
 
 async function seedSizes(w: World, variant: 'full' | 'room'): Promise<void> {
