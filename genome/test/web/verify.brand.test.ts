@@ -937,7 +937,9 @@ describe('verify app: the lexicon of BRAND-DESIGN-SYSTEM §4.5, and the second-h
     expect(lines).toContain(RESALE_ACTION);
     // MY PIECES is the owner's own page (F-01): it names the owner's own declaration in their words, LOST or STOLEN
     // (§4.5, LOST and STOLEN in MY PIECES), and no other word of the table.
-    const ownPage = new Set(linesOf(verifyCopy.PIECES));
+    // WORN's calm sentence for a piece that cannot send (lot M2) sits in the same piece's OWNERSHIP tab of MY PIECES,
+    // under OWNERSHIP CERTIFICATE, and names the same declaration as the certificate's lead does.
+    const ownPage = new Set([...linesOf(verifyCopy.PIECES), verifyCopy.WORN.status]);
     expect(ownPage.size).toBeGreaterThan(20);
     expect(findForbidden([...ownPage].join('\n'), terms.filter((t) => t !== 'STOLEN'))).toEqual([]);
     // §4.5 forbids GENUINE as a verdict: the footnote's one use is the limitation itself (§4.6).
