@@ -102,7 +102,9 @@ describe.skipIf(!HAS_CHROMIUM)('the Segments page and the access rules in the co
     await p.fill('input[name=email]', who.email);
     await p.fill('input[name=password]', who.password);
     await p.click('[data-testid=login-submit]');
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    // The heading waits for the sign-in (its scrypt check), then the dashboard's figures behind the sidebar's badge
+    // requests: the file's budget like every other wait here, not expect.poll's 1 s default, which a slow CI runner overran.
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dashboard');
     return p;
   }
 
