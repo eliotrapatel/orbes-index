@@ -19,9 +19,9 @@
  *                          (`careOpens` null), once ever (`PRIVATE_CARE:<account>`).
  *   e) OWNERSHIP_YEAR      due the Paris day one year after an open ownership began (29 February on 28 February, as
  *                          `birthdayIn` does), the first year only (`OWNERSHIP_YEAR:<ownership>`).
- *   f) NINETY_DAYS         due 90 days after the account's last activity, read as the segments' ACTIVE criterion reads it
- *                          (a sign-in, a session in use, a scan; the account's creation when there is none), once per
- *                          absence: never while a NINETY_DAYS message reached the account since that activity
+ *   f) NINETY_DAYS         due 90 days after the account's last activity: the segments' ACTIVE criterion (a sign-in, a
+ *                          session in use, a scan) and a page viewed; the account's creation when there is none; once
+ *                          per absence: never while a NINETY_DAYS message reached the account since that activity
  *                          (`NINETY_DAYS:<account>:<the Paris day of the last activity>`).
  *
  * The switch-on rule (plan §1.2, §11 note 1): a moment delivers only what falls due at or after its switch-on

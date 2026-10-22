@@ -19,7 +19,8 @@
  *    a real photograph over 64 KB, never by a session-less curl the app refuses before reading its body;
  *  - one real check per element, in the console's and the app's words as the code has them: a message scheduled to the
  *    owner's own segment, read on the phone and on a computer; a moment switched on and off; a WORN photograph sent,
- *    published, seen signed out and withdrawn; the legal pages; Client Services told (the playbook's M2 lines, both
+ *    published, seen signed out on a computer and on the phone and once in light mode, its photo address 200 then,
+ *    after WITHDRAW, 404; the legal pages; Client Services told (the playbook's M2 lines, both
  *    copies); one command per shell block, relative links that resolve, and the runbook linked from DEPLOYMENT and
  *    COMPLIANCE.
  *
@@ -41,7 +42,7 @@ import { WORN_COPY, statusWords as wornStatusWords } from '../../src/web/admin/m
 import { LEGAL_VERSION, WORDS } from '../../src/web/legal/content/index.js';
 import { PRIVACY } from '../../src/web/legal/content/privacy.js';
 import { PHOTO_MAX_BYTES } from '../../src/web/shared/photo.js';
-import { FROM_ORBES, LOOKBOOK, MESSAGES as APP_MESSAGES, PIECES, WORN } from '../../src/web/verify/copy.js';
+import { ACCOUNT, FROM_ORBES, LOOKBOOK, MESSAGES as APP_MESSAGES, MODE, PIECES, SOUND, WORN } from '../../src/web/verify/copy.js';
 import { LOOKBOOK_PATH } from '../../src/web/verify/lookbook-model.js';
 import { REPO, readDoc, section } from './lexicon.js';
 import { anchors, fenced } from './runbook.js';
@@ -374,6 +375,21 @@ describe('the runbook of lot MACRO M2 (docs/launch/DEPLOY-MACRO-M2.md)', () => {
     expect(checks).toContain(`\`${WORN_COPY.title}\` → \`${WORN_COPY.ended}\` : ta photo lit \`${wornStatusWords('WITHDRAWN').text}\``);
     expect(readDoc('genome/src/server/routes/public.ts')).toContain("export const LOOKBOOK_CACHE_CONTROL = 'public, max-age=300';");
     expect(checks).toContain('5 minutes au plus');
+    // Signed out on the phone too, once in light mode (YOUR ACCOUNT's LIGHT MODE, under SOUND, kept on the device), and
+    // the photo's own address: its id read only before WITHDRAW, 200, then after it WORN_NOT_FOUND's 404 at once (the
+    // public route reads the database on every request; only a 200 carries a cache header).
+    expect(checks).toContain('**Sans compte, sur ton téléphone** : un onglet de navigation privée');
+    expect(checks).toContain(`${ACCOUNT.title}, ${MODE.label} (sous ${SOUND.label}), allumé`);
+    expect(readDoc('genome/src/web/verify/views/account.ts')).toContain('text: MODE.label');
+    expect(fenced(checks, 'bash')).toContain(psql('select id from worn_photos where photo is not null order by created_at desc limit 1'));
+    const photo = 'https://verify.theorbes.com/api/v1/worn/<id>/photo';
+    expect(fenced(checks, 'bash')).toContain(`curl -sS -o /dev/null -w '%{http_code}\\n' ${photo}`);
+    expect(fenced(checks, 'bash')).toContain(`curl -s -w '\\n%{http_code}\\n' ${photo}`);
+    const gone = wornNotFound();
+    const withdrawn = checks.slice(checks.indexOf(`**Retirée.**`));
+    expect(withdrawn).toContain(`Sortie attendue : \`${JSON.stringify(errorBody(gone.code, gone.publicMessage))}\`, puis \`404\``);
+    expect(checks.indexOf(photo)).toBeLessThan(checks.indexOf(`${WORN.withdraw} : « ${WORN.withdrawAsk} »`));
+    expect(readDoc('genome/src/server/services/worn.ts')).toContain(".where('w.status', 'in', [...LIVE]);");
     // The legal pages: the version line and the two new sections.
     expect(checks).toContain(`« ${WORDS.en.version(M2_LEGAL_VERSION)} »`);
     const titles = PRIVACY.en.sections.map((s) => s.title);
@@ -397,6 +413,11 @@ describe('the runbook of lot MACRO M2 (docs/launch/DEPLOY-MACRO-M2.md)', () => {
     const open = section(runbook, '## 2.');
     expect([...open.matchAll(/^(\d+)\. \*\*/gm)].map((m) => Number(m[1]))).toEqual([1, 2, 3, 4, 5, 6]);
     expect(open).toContain('la note au juriste, points 33 et 34');
+    // The defaults to confirm say NINETY_DAYS as absences() reads it (a page viewed counts), and WORN narrowed by variant
+    // since the review (a hidden variant sends nothing, a reserved one's photographs only to its tier, by the club).
+    expect(readDoc('genome/src/server/services/house-moments.ts')).toContain('(SELECT max(cv.at) FROM collector_views cv WHERE cv.account_id = a.id)');
+    expect(open).toContain('« 90 jours sans visite » se lit sans connexion, sans session, sans scan et sans page vue');
+    expect(open).toContain("WORN ne montre et n'accepte que les variantes que le lecteur peut voir : la pièce d'une variante cachée n'envoie rien, et seuls les propriétaires de son palier voient, par le club, les photos d'une variante réservée");
     expect(readDoc('docs/COMPLIANCE.md')).toContain('(la note au juriste, points 33 et 34)');
   });
 

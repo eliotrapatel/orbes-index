@@ -537,7 +537,7 @@ docker compose exec -T postgres sh -c 'exec psql -X -U "$POSTGRES_USER" -d "$POS
 
 Sortie attendue : `0`.
 
-**3. Une photo de WORN envoyée, publiée, vue sans compte, retirée.** Choisis une pièce de ton compte dont le modèle a une fiche **publique** (une fiche réservée ne se voit pas sans compte). Sans fiche, la pièce n'a pas de bloc WORN : prends-en une autre, ou garde ce contrôle pour le jour où une fiche est publiée. La photo sera visible de tous pendant quelques minutes : une vraie photo de la pièce portée, sans personne d'autre que toi.
+**3. Une photo de WORN envoyée, publiée, vue sans compte, retirée.** Choisis une pièce de ton compte dont le modèle a une fiche **publique**, et dont la variante n'est ni cachée ni réservée (une fiche ou une variante réservée ne se voit pas sans compte). Sans fiche, la pièce n'a pas de bloc WORN : prends-en une autre, ou garde ce contrôle pour le jour où une fiche est publiée. La photo sera visible de tous pendant quelques minutes : une vraie photo de la pièce portée, sans personne d'autre que toi.
 
 1. **Sur ton téléphone**, MY PIECES, la pièce, l'onglet OWNERSHIP : le bloc WORN sous OWNERSHIP CERTIFICATE. CHOOSE A PHOTOGRAPH, une vraie photo (pas une capture d'écran) ; l'aperçu porte ta signature, `<PRÉNOM> · <PAYS>`. I AGREE, puis SEND : IN REVIEW, « ORBES is looking at your photograph. »
 2. **La photo a passé la nouvelle limite de Caddy.** Sur le serveur, en lecture seule, sa taille en octets :
@@ -551,7 +551,28 @@ Sortie attendue : `0`.
 3. **Dans la console**, le lien `WORN` porte 1 : `To review`, ta photo, `The credit, as it will read` avec ta signature, la pièce, le modèle, ton compte, l'envoi et le consentement à l'heure de Paris. `Publish` : « Published: it is on the model’s sheet. »
 4. **Sur ton téléphone** : PUBLISHED, « In WORN since <date>. », SEE IT ON THE SHEET.
 5. **Sans compte, sur ton ordinateur** : une fenêtre de navigation privée, la fiche du modèle (la même adresse que SEE IT ON THE SHEET, `https://verify.theorbes.com/verify/lookbook/…`). Au pied de la fiche, après PAIRS WELL WITH : WORN, ta photo et ta signature ; un clic l'ouvre en grand.
-6. **Retirée.** Sur ton téléphone, WITHDRAW : « Remove it from WORN? », puis WITHDRAW encore : « Your photograph is withdrawn and erased. » Dans la console, `WORN` → `Ended` : ta photo lit `Withdrawn`, sans image. Sur ton ordinateur, une **nouvelle** fenêtre privée, la même fiche : plus de section WORN (une fenêtre déjà ouverte peut la garder 5 minutes au plus).
+6. **Sans compte, sur ton téléphone** : un onglet de navigation privée dans Safari, la même adresse. Au pied de la fiche : WORN, ta photo et ta signature ; un toucher l'ouvre en grand.
+7. **En mode clair, une fois.** Sur ton ordinateur, dans ta fenêtre habituelle (connecté) : YOUR ACCOUNT, LIGHT MODE (sous SOUND), allumé ; puis la même fiche : WORN, ta photo et ta signature se lisent sur le fond clair. Ce choix reste sur cet appareil : éteins LIGHT MODE ensuite si tu préfères le sombre.
+8. **L'adresse de la photo**, avant de la retirer. Sur le serveur, en lecture seule, son identifiant :
+
+   ```bash
+   docker compose exec -T postgres sh -c 'exec psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select id from worn_photos where photo is not null order by created_at desc limit 1"'
+   ```
+
+   Sortie attendue : un identifiant de la forme `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`. Garde-le : c'est le `<id>` des deux commandes suivantes. Depuis ton Mac, en remplaçant `<id>` :
+
+   ```bash
+   curl -sS -o /dev/null -w '%{http_code}\n' https://verify.theorbes.com/api/v1/worn/<id>/photo
+   ```
+
+   Sortie attendue : `200` : la photo est servie à tous.
+9. **Retirée.** Sur ton téléphone, WITHDRAW : « Remove it from WORN? », puis WITHDRAW encore : « Your photograph is withdrawn and erased. » Dans la console, `WORN` → `Ended` : ta photo lit `Withdrawn`, sans image. Sur ton ordinateur, une **nouvelle** fenêtre privée, la même fiche : plus de section WORN (une fenêtre déjà ouverte peut la garder 5 minutes au plus). Depuis ton Mac, la même adresse de photo, avec le même `<id>` :
+
+   ```bash
+   curl -s -w '\n%{http_code}\n' https://verify.theorbes.com/api/v1/worn/<id>/photo
+   ```
+
+   Sortie attendue : `{"error":{"code":"WORN_NOT_FOUND","message":"This photograph is not in WORN."}}`, puis `404` : l'adresse ne mène plus à rien, tout de suite.
 
 **4. Les pages légales.** Sur ton téléphone, PRIVACY et TERMS au pied de page : « Version of 22 October 2026 » sous le titre ; la politique de confidentialité a « House messages » et « WORN ».
 
@@ -568,7 +589,7 @@ Sortie attendue : `0`.
 ## 2. Ce qui reste à ta décision (sans bloquer)
 
 1. **Les moments, un par un** : tous sont coupés au déploiement. Tu allumes chacun quand tu le veux, dans `House messages` ; il n'envoie rien pour le passé. Leurs mots par défaut sont dans le playbook (§0 « Les messages d'ORBES (FROM ORBES) ») ; un OPERATOR peut les changer avant.
-2. **Les choix par défaut** de tes décisions et du plan, que tu peux changer : aucune copie par e-mail des messages de la maison (M4, E6) ; une photo à la fois par pièce (G1) ; un palier choisi comme audience atteint aussi les paliers au-dessus ; « 90 jours sans visite » se lit sans connexion, sans session et sans scan ; la signature d'une photo est celle de l'envoi, sans variante ; une pièce qui change de mains retire la photo de son ancien propriétaire ; un modèle sans fiche publiée n'a pas de WORN ; les comptes de test n'envoient ni ne reçoivent rien.
+2. **Les choix par défaut** de tes décisions et du plan, que tu peux changer : aucune copie par e-mail des messages de la maison (M4, E6) ; une photo à la fois par pièce (G1) ; un palier choisi comme audience atteint aussi les paliers au-dessus ; « 90 jours sans visite » se lit sans connexion, sans session, sans scan et sans page vue ; la signature d'une photo est celle de l'envoi, sans variante ; une pièce qui change de mains retire la photo de son ancien propriétaire ; un modèle sans fiche publiée n'a pas de WORN, et WORN ne montre et n'accepte que les variantes que le lecteur peut voir : la pièce d'une variante cachée n'envoie rien, et seuls les propriétaires de son palier voient, par le club, les photos d'une variante réservée ; les comptes de test n'envoient ni ne reçoivent rien.
 3. **Quand annoncer WORN** : rien ne s'y voit tant que l'équipe n'a rien publié. Avant l'annonce, décide qui lit la file chaque jour.
 4. **L'avocat** : la licence et le consentement de WORN, et la base des messages de la maison (l'intérêt légitime), partent avec la version `2026-10-22` (la note au juriste, points 33 et 34). Sa réponse ne retient pas le déploiement.
 5. **WORN sur la future boutique Shopify** : la licence que donne le propriétaire nomme la fiche du modèle sur ce service seulement ; montrer WORN sur Shopify demandera une phrase de plus dans les conditions, ce jour-là.

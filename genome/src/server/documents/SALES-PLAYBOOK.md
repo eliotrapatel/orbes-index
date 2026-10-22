@@ -83,7 +83,7 @@ ORBES écrit aussi à ses collectionneurs (lot M2), **dans l'application seuleme
 | Un crédit qui finit | 7 jours avant la fin d'un crédit qui a encore un solde | A CREDIT ENDS SOON : *€ 20 of your credit ends on 12 November 2026.* | IN USE |
 | PRIVATE CARE | quand le compte atteint le palier qui l'ouvre (PLATINE par défaut, §5c) | PRIVATE CARE : *From PLATINE, ORBES offers PRIVATE CARE for your pieces. Ask from the piece, in its ORBES CARE tab.* | MY PIECES |
 | Un an | un an après l'enregistrement d'une pièce encore détenue | ONE YEAR : *MONOLITHE IN STEEL has been yours for a year today.* | SEE THE PIECE |
-| 90 jours | 90 jours sans connexion ni scan, une fois par absence | WHAT IS NEW : *Since your last visit, THE COLLECTION and THE RELEASES have moved on.* | THE COLLECTION |
+| 90 jours | 90 jours sans connexion, ni scan, ni page vue, une fois par absence | WHAT IS NEW : *Since your last visit, THE COLLECTION and THE RELEASES have moved on.* | THE COLLECTION |
 
 - **Les messages écrits** (`New message`, un OPERATOR) : un titre et quelques paragraphes, sans lien, le prénom seul comme champ à remplir, pour un segment ou pour un palier et les paliers au-dessus. Un ADMIN les envoie (`Send…` : `Send now` ou `Schedule` à l'heure de Paris, en tapant SEND) ; ils arrivent dans les 30 secondes. Une fois partis, ils ne changent plus et ne se retirent pas : relisez l'aperçu avant. La page montre combien de personnes chacun a atteintes et combien l'ont lu, jamais qui.
 
