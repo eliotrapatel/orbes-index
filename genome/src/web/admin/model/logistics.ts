@@ -11,6 +11,7 @@
  */
 import { countryName } from '../../../shared/countries.js';
 import { formatCount, formatDateTime } from '../format.js';
+import { parcelAddonWords } from './addons.js';
 import { slipParcel } from './boxes.js';
 import { parseMoney } from './live.js';
 import type { PhotoLimits } from './photo.js';
@@ -71,10 +72,21 @@ export function sizeText(sizeLabel: string | null): string {
   return sizeLabel ?? 'ONE SIZE';
 }
 
-/** A size as Logistics names it: `MONOLITHE · BLUE · 52`, `MONOLITHE · ONE SIZE`. */
-export function skuWords(sku: Pick<LogisticsSku, 'model' | 'variant' | 'sizeLabel'> | { model: string; variant: string | null; sizeLabel: string | null }): string {
+/**
+ * A size as Logistics names it: `MONOLITHE · BLUE · 52`, `MONOLITHE · ONE SIZE`; an add-on's SKU by its add-on alone
+ * (plan MACRO M3 §4.3, D1): `POLISHING CLOTH`.
+ */
+export function skuWords(
+  sku: (Pick<LogisticsSku, 'model' | 'variant' | 'sizeLabel'> & { addon?: LogisticsSku['addon'] }) | { model: string; variant: string | null; sizeLabel: string | null },
+): string {
+  if (sku.model === null) return ('addon' in sku ? sku.addon?.name : null) ?? '';
   const model = typeof sku.model === 'string' ? sku.model : sku.model.name;
   return [model, sku.variant, sizeText(sku.sizeLabel)].filter((x): x is string => !!x).join(' · ');
+}
+
+/** A size's cell (`52`, ONE SIZE), or '—' for an add-on's SKU, which has none. */
+export function skuSizeText(sku: Pick<LogisticsSku, 'model' | 'sizeLabel'>): string {
+  return sku.model === null ? '—' : sizeText(sku.sizeLabel);
 }
 
 /** The mark of a size whose count no ORBES identity backs: `NO PIECE · 3` (ORBES staff only); null otherwise. */
@@ -466,7 +478,8 @@ export function shippingSlip(view: ShippingOrderView): ShippingSlip {
       piece: pieceWords(o),
       serial: o.piece?.productId ?? null,
       size: sizeText(o.sizeLabel),
-      addons: o.addons,
+      // Plan MACRO M3 §4.3 (D2): the catalogue add-ons with their units after the release's, never a price.
+      addons: parcelAddonWords(o),
       engraving: o.engraving,
       surprise: o.surprise,
     })),
@@ -547,13 +560,17 @@ export function supplierReturnLine(x: SupplierReturnItem): string {
 }
 
 /** What confirming a reception does, said in its dialog (§3.5.4.1). */
-export function confirmReceptionText(v: Pick<ReceptionView, 'supplierOrder' | 'accepted' | 'rejected' | 'location'>): string {
+export function confirmReceptionText(v: Pick<ReceptionView, 'supplierOrder' | 'accepted' | 'rejected' | 'location'> & { lines?: Pick<ReceptionView['lines'][number], 'sku' | 'accepted'>[] }): string {
   const out: string[] = [];
-  if (v.accepted > 0) {
+  // Plan MACRO M3 §4.2 (D1): an add-on's units are counted into stock without an identity or a card.
+  const units = (v.lines ?? []).filter((l) => l.sku.model === null).reduce((n, l) => n + l.accepted, 0);
+  const accepted = v.accepted - units;
+  if (accepted > 0) {
     out.push(
-      `${pieces(v.accepted)} ${v.accepted === 1 ? 'gets its' : 'get their'} ORBES identity now: a serial, a signed ORBES code and a claim code each. ${v.accepted === 1 ? 'It enters' : 'They enter'} the stock at ${v.location.name} and ${v.accepted === 1 ? 'goes' : 'go'} to the orders waiting for ${v.accepted === 1 ? 'it' : 'them'}, the oldest first. The agent then prints their cards.`,
+      `${pieces(accepted)} ${accepted === 1 ? 'gets its' : 'get their'} ORBES identity now: a serial, a signed ORBES code and a claim code each. ${accepted === 1 ? 'It enters' : 'They enter'} the stock at ${v.location.name} and ${accepted === 1 ? 'goes' : 'go'} to the orders waiting for ${accepted === 1 ? 'it' : 'them'}, the oldest first. The agent then prints their cards.`,
     );
   }
+  if (units > 0) out.push(`${formatCount(units)} ${units === 1 ? 'add-on enters' : 'add-ons enter'} the stock at ${v.location.name} as counted, with no ORBES CODE and no card.`);
   if (v.rejected > 0) out.push(`${formatCount(v.rejected)} rejected ${v.rejected === 1 ? 'piece gets' : 'pieces get'} no identity: ${v.rejected === 1 ? 'it is' : 'they are'} listed TO RETURN on ${v.supplierOrder.reference}.`);
   return out.join(' ');
 }

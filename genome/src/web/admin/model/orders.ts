@@ -16,6 +16,7 @@ import { COUNTRY_CODES, countryName, isCountryCode, PHONE_RE } from '../../../sh
 import { formatCount, formatDate, formatDateTime, humanize } from '../format.js';
 import { can } from './permissions.js';
 import { CASE_KIND_LABELS, slipBuyer, type SlipBuyer } from './logistics.js';
+import { orderPackedAddons } from './addons.js';
 import { formatMoney, moneyField, parseMoney } from './live.js';
 import {
   ORDER_CHANNELS,
@@ -348,6 +349,9 @@ export const EVENT_LABELS: Readonly<Record<string, string>> = Object.freeze({
   // Plan NEXT LOT §3.6.B, C: the delivery address and the engraving the client entered on the order.
   'order.address': 'Delivery address entered',
   'order.engraving': 'Engraving entered',
+  // Plan MACRO M3 §4.2 (D2): a catalogue add-on added or removed.
+  'order.addon.add': 'Add-on added',
+  'order.addon.remove': 'Add-on removed',
 });
 
 /** Who made a change of an order: a console user by email, the collector, or ORBES itself. */
@@ -685,7 +689,8 @@ export function packingSlip(d: OrderDetail): PackingSlip {
     model: o.model.variant ? `${o.model.name} · ${o.model.variant}` : o.model.name,
     piece: o.productId,
     size: sizeText({ sizeLabel: o.sizeLabel, skuKnown: o.skuId !== null }),
-    addons: o.addons.map((a) => a.label),
+    // Plan MACRO M3 §4.3 (D2): the catalogue add-ons it packs, with their units, after the release's; never a price.
+    addons: [...o.addons.map((a) => a.label), ...orderPackedAddons(o.addonItems ?? [])],
     engraving: o.engravingText,
     surprise: o.surprise,
     // ADDRESS CHANGED while the change mark is set and the order is not shipped (plan NEXT LOT §3.6.B).

@@ -82,7 +82,7 @@ const ID = '0f0e0d0c-0b0a-4908-8706-050403020100';
 const LOC = '1f0e0d0c-0b0a-4908-8706-050403020100';
 const OTHER = '2f0e0d0c-0b0a-4908-8706-050403020100';
 const BOX = '3f0e0d0c-0b0a-4908-8706-050403020100';
-const SKU: LogisticsSku = { id: ID, code: 'MNL-BLU-52', model: { id: ID, name: 'MONOLITHE' }, variant: 'BLUE', sizeLabel: '52', setAside: false };
+const SKU: LogisticsSku = { id: ID, code: 'MNL-BLU-52', model: { id: ID, name: 'MONOLITHE' }, addon: null, variant: 'BLUE', sizeLabel: '52', setAside: false };
 
 describe('the mirrors of the server', () => {
   it('holds the server\'s bounds of a correction, a minimum, a count in and a parcel back', () => {
@@ -220,8 +220,8 @@ const PARCEL: ShippingOrderView = {
   readySince: '2026-11-03T09:00:00.000Z',
   late: false,
   orders: [
-    { orderId: ID, reference: 'OR-0F0E0D0C', status: 'PAID', model: 'MONOLITHE', variant: 'BLUE', sizeLabel: '52', skuCode: 'MNL-BLU-52', addons: ['INITIALS'], engraving: 'A. & L.', surprise: null, piece: { productId: 'O26-J-00184', scanned: true } },
-    { orderId: OTHER, reference: 'OR-2F0E0D0C', status: 'PAID', model: 'ORBITE', variant: null, sizeLabel: null, skuCode: 'ORB', addons: [], engraving: null, surprise: 'A silk pouch', piece: null },
+    { orderId: ID, reference: 'OR-0F0E0D0C', status: 'PAID', model: 'MONOLITHE', variant: 'BLUE', sizeLabel: '52', skuCode: 'MNL-BLU-52', addons: ['INITIALS'], addonItems: [], engraving: 'A. & L.', surprise: null, piece: { productId: 'O26-J-00184', scanned: true } },
+    { orderId: OTHER, reference: 'OR-2F0E0D0C', status: 'PAID', model: 'ORBITE', variant: null, sizeLabel: null, skuCode: 'ORB', addons: [], addonItems: [], engraving: null, surprise: 'A silk pouch', piece: null },
   ],
   shipTo: { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris', country: null, phone: null },
   addressChanged: null,

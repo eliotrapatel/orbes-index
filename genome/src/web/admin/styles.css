@@ -7888,3 +7888,42 @@ a.collectors__kpi-link:focus-visible {
     flex-basis: 100%;
   }
 }
+
+/* ── Add-ons (plan MACRO M3 §4.3, D1 and D2) ─────────────────────────────── */
+
+/* Catalogue → Add-ons: the name, its SKU and its line keep room beside the figures. */
+.addons__table .col--wide {
+  width: auto;
+  min-width: 220px;
+}
+
+/* A cell of several short lines: an add-on's prices, its stock and minimum per location. */
+.addon-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.addon-lines__line {
+  white-space: nowrap;
+}
+
+/* The collector's choices in the draw's Confirm and the salon's Accept, and what was left out after. */
+.addon-choices {
+  margin-top: 16px;
+}
+
+.addon-choices__list {
+  margin: 8px 0 10px;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--hairline);
+}
+
+.addon-choices__line {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--hairline);
+  font-size: var(--fs-line);
+  letter-spacing: 0.06em;
+  overflow-wrap: break-word;
+}

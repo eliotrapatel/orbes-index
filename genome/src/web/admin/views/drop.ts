@@ -69,6 +69,7 @@ import {
   sizeOfferable,
   tierName,
 } from '../model/club.js';
+import { CHOICES_TEXT } from '../model/addons.js';
 import { releaseTab } from '../model/campaign.js';
 import { drawGuaranteeLine, GUARANTEE_STATE_LABELS, guaranteedText, placesLeftForDraw, validUntilText } from '../model/guarantees.js';
 import { drawTestStart } from '../model/test-entrants.js';
@@ -80,6 +81,7 @@ import { openDialog } from '../ui/dialog.js';
 import { notify } from '../ui/toast.js';
 import { campaignTab, releaseTabs } from './campaign.js';
 import { drawSizeFields, drawSizesBody, drawSizesOfModel, drawSizesPreview, dropFields, dropModelField } from './club.js';
+import { choicesBlock, leftOutDialog } from './addons.js';
 import { pageParam, type ViewContext } from './context.js';
 import { serverStatusPanel, withServerPanel } from './server-status.js';
 import { feasibilityBlock, stockBlock } from './stock-check.js';
@@ -340,26 +342,37 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
       : null;
 
   // ── Entries ──────────────────────────────────────────────────────────────
-  const conclude = (e: DropEntry, to: 'confirm' | 'lapse') =>
+  const conclude = (e: DropEntry, to: 'confirm' | 'lapse') => {
+    const eyebrow = `${e.email} · ${e.reserved ? 'RESERVED DIRECTLY' : `RANK ${e.rank ?? '—'}`}`;
+    let confirmed: DropEntry | null = null;
     void openDialog({
       title: to === 'confirm' ? 'Sale concluded' : 'Place lapsed',
-      eyebrow: `${e.email} · ${e.reserved ? 'RESERVED DIRECTLY' : `RANK ${e.rank ?? '—'}`}`,
-      body: h(
-        'p',
-        { class: 'dialog__text' },
-        to === 'confirm'
-          ? 'ORBES Client Services concluded the sale of a piece of this release with this entrant: the entry reads CONFIRMED.'
-          : e.reserved && !d.drawnAt
-            ? 'The place reserved was not taken up in time: the entry reads LAPSED, and the place goes to the draw.'
-            : 'The place held was not taken up in time: the entry reads LAPSED, and the place can be offered to the next of the waiting list.',
-      ),
+      eyebrow,
+      body: [
+        h(
+          'p',
+          { class: 'dialog__text' },
+          to === 'confirm'
+            ? 'ORBES Client Services concluded the sale of a piece of this release with this entrant: the entry reads CONFIRMED.'
+            : e.reserved && !d.drawnAt
+              ? 'The place reserved was not taken up in time: the entry reads LAPSED, and the place goes to the draw.'
+              : 'The place held was not taken up in time: the entry reads LAPSED, and the place can be offered to the next of the waiting list.',
+        ),
+        // Plan MACRO M3 §4.3 (D2): the add-ons the collector chose on the place held, carried onto the order if in stock.
+        to === 'confirm' ? choicesBlock(e.addonChoices ?? [], d.currency, CHOICES_TEXT.drawLead) : null,
+      ],
       fields: [{ name: 'note', label: 'Note', kind: 'textarea', maxlength: DROP_LIMITS.note, hint: 'For ORBES Client Services: kept with the entry, never in the audit log. Optional.' }],
       confirmLabel: to === 'confirm' ? 'Confirm the sale' : 'Lapse the place',
       submit: async (v) => {
-        if (to === 'confirm') await ctx.api.confirmDropEntry(d.id, e.id, v.note.trim());
+        if (to === 'confirm') confirmed = await ctx.api.confirmDropEntry(d.id, e.id, v.note.trim());
         else await ctx.api.lapseDropEntry(d.id, e.id, v.note.trim());
       },
-    }).then(done(to === 'confirm' ? 'Sale confirmed.' : 'Place lapsed.'));
+    }).then(async (r) => {
+      // After: what could not be added, said before the page is read again.
+      if (r) await leftOutDialog((confirmed as DropEntry | null)?.addonsLeftOut, eyebrow);
+      done(to === 'confirm' ? 'Sale confirmed.' : 'Place lapsed.')(r);
+    });
+  };
 
   const statusFilter = select('status', [{ value: '', label: 'All' }, ...DROP_ENTRY_STATUSES.map((s) => ({ value: s, label: humanize(s) }))], status ?? '');
   statusFilter.addEventListener('change', () => ctx.setQuery({ status: statusFilter.value, page: undefined }));

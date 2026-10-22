@@ -25,6 +25,7 @@ import type { DecodeReply } from '../../verify/protocol.js';
 import { Camera, CameraError, DecoderClient, DecoderUnavailableError, PhotoError, readPhoto, ScanSession, workerUrl } from '../../verify/scanner.js';
 import { ApiError } from '../api.js';
 import { formatDateTime } from '../format.js';
+import { parcelAddonWords } from '../model/addons.js';
 import { changeBoxOptions, PARCEL_BOX_TEXT, parcelBoxRow, parcelWeightRow } from '../model/boxes.js';
 import { parseMoney } from '../model/live.js';
 import {
@@ -107,7 +108,8 @@ export function parcelSections(ctx: ViewContext, view: ShippingOrderView, opts: 
         ...(several ? [{ label: 'Order', cell: (o: ShippingOrderView['orders'][number]) => h('span', { class: 'mono' }, o.reference), kind: ['nowrap' as const] }] : []),
         { label: 'Piece', cell: (o) => h('span', { data: { testid: 'parcel-piece' } }, pieceWords(o)) },
         { label: 'Size', cell: (o) => sizeText(o.sizeLabel), kind: ['nowrap'] },
-        { label: 'Add-ons', cell: (o) => (o.addons.length ? o.addons.join(' · ') : '—') },
+        // Plan MACRO M3 §4.3 (D2): the catalogue add-ons with their units after the release's, never a price.
+        { label: 'Add-ons', cell: (o) => h('span', { data: { testid: 'parcel-addons' } }, parcelAddonWords(o).join(' · ') || '—') },
         { label: 'Engraving', cell: (o) => o.engraving ?? '—' },
         { label: 'Surprise', cell: (o) => o.surprise ?? '—' },
       ],

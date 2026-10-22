@@ -15,7 +15,7 @@
  */
 import { h, type Child } from '../../shared/dom.js';
 import { formatCount, formatDate, formatDateTime } from '../format.js';
-import { RECEPTION_STATUS_LABELS, sizeText, skuWords } from '../model/logistics.js';
+import { RECEPTION_STATUS_LABELS, skuSizeText, skuWords } from '../model/logistics.js';
 import { can } from '../model/permissions.js';
 import {
   amountField,
@@ -41,6 +41,7 @@ import { button, defList, linkButton, pageHeader, section, statusMark, table, ty
 import { openDialog } from '../ui/dialog.js';
 import { saveDownload } from '../ui/download.js';
 import { notify, notifyError } from '../ui/toast.js';
+import { skuOwnerCell } from './addons.js';
 import type { ViewContext } from './context.js';
 
 export async function supplierOrderView(ctx: ViewContext): Promise<HTMLElement> {
@@ -188,11 +189,11 @@ export async function supplierOrderView(ctx: ViewContext): Promise<HTMLElement> 
       },
     }).then(after(ORDER_TEXT.lineRemoved));
   const lineColumns: Column<SupplierOrderLine>[] = [
-    { label: 'Model', cell: (l) => l.sku.model.name },
+    { label: 'Model', cell: (l) => skuOwnerCell(l.sku) },
     { label: 'Variant', cell: (l) => l.sku.variant ?? '—', kind: ['nowrap'] },
     {
       label: 'Size',
-      cell: (l) => h('span', null, sizeText(l.sku.sizeLabel), o.status === 'DRAFT' && expectedElsewhereLine(l.expectedElsewhere) ? h('span', { class: 'cell-sub', data: { testid: 'line-elsewhere' } }, expectedElsewhereLine(l.expectedElsewhere)!) : null),
+      cell: (l) => h('span', null, skuSizeText(l.sku), o.status === 'DRAFT' && expectedElsewhereLine(l.expectedElsewhere) ? h('span', { class: 'cell-sub', data: { testid: 'line-elsewhere' } }, expectedElsewhereLine(l.expectedElsewhere)!) : null),
       kind: ['nowrap'],
     },
     { label: 'SKU', cell: (l) => h('span', { class: 'mono' }, l.sku.code), kind: ['nowrap'] },
@@ -229,9 +230,9 @@ export async function supplierOrderView(ctx: ViewContext): Promise<HTMLElement> 
         ORDER_TEXT.extrasTitle,
         table(
           [
-            { label: 'Model', cell: (x) => x.sku.model.name },
+            { label: 'Model', cell: (x) => skuOwnerCell(x.sku) },
             { label: 'Variant', cell: (x) => x.sku.variant ?? '—', kind: ['nowrap'] },
-            { label: 'Size', cell: (x) => sizeText(x.sku.sizeLabel), kind: ['nowrap'] },
+            { label: 'Size', cell: (x) => skuSizeText(x.sku), kind: ['nowrap'] },
             { label: 'SKU', cell: (x) => h('span', { class: 'mono' }, x.sku.code), kind: ['nowrap'] },
             { label: 'Received', cell: (x) => formatCount(x.received), kind: ['num'] },
             { label: 'Rejected', cell: (x) => formatCount(x.rejected), kind: ['num'] },

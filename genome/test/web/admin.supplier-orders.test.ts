@@ -34,7 +34,7 @@ import { ADMIN_ROLES, SUPPLIER_ORDER_STATUSES, type LogisticsSku } from '../../s
 
 const ID = '0f0e0d0c-0b0a-4908-8706-050403020100';
 const LOC = '1f0e0d0c-0b0a-4908-8706-050403020100';
-const SKU: LogisticsSku = { id: ID, code: 'MNL-BLU-52', model: { id: ID, name: 'MONOLITHE' }, variant: 'BLUE', sizeLabel: '52', setAside: false };
+const SKU: LogisticsSku = { id: ID, code: 'MNL-BLU-52', model: { id: ID, name: 'MONOLITHE' }, addon: null, variant: 'BLUE', sizeLabel: '52', setAside: false };
 
 describe('the mirrors of the server', () => {
   it('holds the server\'s bounds and names every status', () => {

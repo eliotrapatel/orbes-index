@@ -19,12 +19,14 @@
 import { h } from '../../shared/dom.js';
 import { formatDateTime, humanize } from '../format.js';
 import { acceptedSizeLine, canCloseRequest, closeRequestProblem, requestModelLine, requestSizeText, SHOP_REQUEST_LIMITS, SHOP_REQUEST_OUTCOME_OPTIONS, shopRequestStatusOf } from '../model/club.js';
+import { CHOICES_TEXT } from '../model/addons.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
 import { SHOP_REQUEST_STATUSES, type ShopRequest, type ShopRequestOutcome } from '../types.js';
 import { button, field, filterBar, pager, section, select, statusMark, table } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { notify } from '../ui/toast.js';
+import { choicesBlock, leftOutDialog } from './addons.js';
 import { pageParam, type ViewContext } from './context.js';
 
 /** The Requests tab: the requests of the private salon, OPEN first. */
@@ -36,15 +38,17 @@ export async function requestsTab(ctx: ViewContext): Promise<HTMLElement> {
   const filter = select('status', [{ value: '', label: 'All' }, ...SHOP_REQUEST_STATUSES.map((s) => ({ value: s, label: humanize(s) }))], status ?? '');
   filter.addEventListener('change', () => ctx.setQuery({ tab: 'requests', status: filter.value, page: undefined }));
 
-  const close = (r: ShopRequest) =>
-    canCloseRequest(role, r)
+  const close = (r: ShopRequest) => {
+    let closed: ShopRequest | null = null;
+    const eyebrow = `${humanize(r.model.name)} · ${r.account.email}`;
+    return canCloseRequest(role, r)
       ? button('Close', {
           kind: 'ghost',
           testId: 'close-request',
           onClick: () =>
             void openDialog({
               title: 'Close request',
-              eyebrow: `${humanize(r.model.name)} · ${r.account.email}`,
+              eyebrow,
               body: r.note ? h('p', { class: 'dialog__text' }, r.note) : undefined,
               fields: [
                 {
@@ -68,20 +72,27 @@ export async function requestsTab(ctx: ViewContext): Promise<HTMLElement> {
               // AC-01: an accepted request's order takes the size the client asked.
               live: (v) => {
                 const line = acceptedSizeLine(r, v.outcome);
-                return line ? h('p', { class: 'dialog__text', data: { testid: 'request-order-size' } }, line) : null;
+                return [
+                  line ? h('p', { class: 'dialog__text', data: { testid: 'request-order-size' } }, line) : null,
+                  // Plan MACRO M3 §4.3 (D2): the add-ons chosen with the request, carried onto its order at ACCEPTED if in stock.
+                  v.outcome === 'ACCEPTED' ? choicesBlock(r.addonChoices ?? [], null, CHOICES_TEXT.salonLead) : null,
+                ];
               },
               validate: (v) => closeRequestProblem(v.note, v.outcome),
               confirmLabel: 'Close request',
               submit: async (v) => {
-                await ctx.api.closeShopRequest(r.id, v.note.trim(), v.outcome as ShopRequestOutcome);
+                closed = await ctx.api.closeShopRequest(r.id, v.note.trim(), v.outcome as ShopRequestOutcome);
               },
-            }).then((done) => {
+            }).then(async (done) => {
               if (!done) return;
+              // After: what could not be added, said before the tab is read again.
+              await leftOutDialog((closed as ShopRequest | null)?.addonsLeftOut, eyebrow);
               notify('Request closed.');
               ctx.reload();
             }),
         })
       : null;
+  };
 
   return section(
     'Requests',

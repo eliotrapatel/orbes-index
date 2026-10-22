@@ -29,8 +29,9 @@ export const LIST_TEXT = Object.freeze({
   empty: 'No supplier order yet: the console proposes one under To order.',
 });
 
-/** A size the proposal cannot order: it has no supplier. */
-export function noSupplierLine(sku: Pick<LogisticsSku, 'model' | 'variant' | 'sizeLabel'>): string {
+/** A size the proposal cannot order: it has no supplier; (plan MACRO M3 §4.3, D1) an add-on's, set in Catalogue → Add-ons. */
+export function noSupplierLine(sku: Pick<LogisticsSku, 'model' | 'variant' | 'sizeLabel'> & { addon?: LogisticsSku['addon'] }): string {
+  if (sku.model === null) return `No supplier set for ${skuWords(sku)}: set it in Catalogue → Add-ons.`;
   return noSupplierWords(skuWords(sku));
 }
 

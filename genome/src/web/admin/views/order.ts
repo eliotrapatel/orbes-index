@@ -28,7 +28,9 @@
  *    ADMIN, to the archive; back to stock, the claim code of the piece's new card shown once, with its card to
  *    download; CANCEL THE ORDER CASE with a note.
  *  - Its return: where the piece went, the note, whether ORBES took the ownership back.
- *  - Its documents (M7): the invoice and the credit note, each with its PDF.
+ *  - Its add-ons (plan MACRO M3 §4.3, D2; views/addons.ts): each unit grouped, its price, who added it, its status; Add
+ *    an add-on and Remove (OPERATOR, until SHIPPED); a refund's add-ons kept out of the stock when ticked.
+ *  - Its documents (M7): the invoice and the credit note, each with its PDF; an add-on's own invoice said so.
  *  - Its history: each change, its note, who made it.
  * PACKING SLIP opens the printable slip (views/slip.ts). Each request is audited by the server; the page is read again.
  */
@@ -89,6 +91,7 @@ import {
   outcomeOptions,
   pastReturnWindow,
 } from '../model/order-cases.js';
+import { documentAddonLine, ORDER_ADDONS_TEXT, shippedUnits } from '../model/addons.js';
 import { CASE_KIND_LABELS } from '../model/logistics.js';
 import { can } from '../model/permissions.js';
 import { noCardNotice, orderClaimCodeRow } from '../model/product.js';
@@ -96,10 +99,11 @@ import { toneOf } from '../model/tone.js';
 import { href, productHref } from '../router.js';
 import { ORDER_CURRENCIES, type OrderCaseRecord, type OrderDetail, type OrderDocument, type OrderStatus, type OrderTransitionInput, type ShippingOrderView, type StockLocation } from '../types.js';
 import { button, defList, linkButton, mono, pageHeader, section, statusMark, table, type DefRow } from '../ui/components.js';
-import { openDialog, type DialogField } from '../ui/dialog.js';
+import { checkedOf, openDialog, type DialogField } from '../ui/dialog.js';
 import { claimCodeDialog } from '../ui/claim-code.js';
 import { saveDownload } from '../ui/download.js';
 import { notify, notifyError } from '../ui/toast.js';
+import { orderAddonsSection } from './addons.js';
 import type { ViewContext } from './context.js';
 import { parcelSections } from './shipping.js';
 
@@ -514,7 +518,14 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
     table(
       [
         { label: 'Number', cell: (x) => mono(x.number), kind: ['nowrap'] },
-        { label: 'Document', cell: (x) => DOCUMENT_LABELS[x.kind] },
+        {
+          label: 'Document',
+          cell: (x) => {
+            // Plan MACRO M3 §4.3 (D2): an add-on added after payment has its own invoice.
+            const forAddon = documentAddonLine(o.addonItems ?? [], x.id);
+            return forAddon ? h('span', null, DOCUMENT_LABELS[x.kind], h('span', { class: 'cell-sub', data: { testid: 'document-addon' } }, forAddon)) : DOCUMENT_LABELS[x.kind];
+          },
+        },
         { label: 'Issued', cell: (x) => formatDateTime(x.issuedAt), kind: ['nowrap'] },
         { label: 'Total', cell: (x) => formatMoney(x.totalMinor, x.currency), kind: ['nowrap', 'num'] },
         { label: '', cell: (x) => pdf(x), kind: ['actions'] },
@@ -542,7 +553,10 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
     { id: 'order-history' },
   );
 
-  const sections: Child[] = [stepSection, orderSection, buyerSection, pieceSection, ...shippingSections, caseSection, returnSection, documentsSection, historySection];
+  // ── Add-ons (plan MACRO M3 §4.3, D2) ─────────────────────────────────────
+  const addonsSection = orderAddonsSection(ctx, d, eyebrow);
+
+  const sections: Child[] = [stepSection, orderSection, buyerSection, pieceSection, addonsSection, ...shippingSections, caseSection, returnSection, documentsSection, historySection];
   return h(
     'div',
     { class: 'view view--order' },
@@ -614,6 +628,7 @@ function orderCaseSection(ctx: ViewContext, d: OrderDetail, locations: StockLoca
       },
     }).then(done(CASE_TEXT.opened));
   // The sizes out of stock stay listed, never chosen.
+  const shipped = shippedUnits(o.addonItems ?? []);
   const decide = (c: OrderCaseRecord) => {
     let result: Awaited<ReturnType<typeof ctx.api.decideOrderCase>> | null = null;
     const archive = can(role, 'archiveReturn');
@@ -640,6 +655,10 @@ function orderCaseSection(ctx: ViewContext, d: OrderDetail, locations: StockLoca
             ]
           : []),
         { name: 'note', label: 'Note', kind: 'textarea', maxlength: ORDER_CASE_LIMITS.decisionNote, required: c.kind === 'RETURN' || c.kind === 'EXCHANGE' },
+        // Plan MACRO M3 §4.2 (D2): a refund returns the add-ons shipped with the piece, back to stock unless ticked here.
+        ...(decidesPiece(c.kind) && shipped.length > 0
+          ? [{ name: 'addonsOut', label: ORDER_ADDONS_TEXT.notToSell, kind: 'checklist' as const, options: shipped, value: '', hint: ORDER_ADDONS_TEXT.notToSellHint, shown: (v: Record<string, string>) => v.decision === 'REFUND' }]
+          : []),
       ],
       live: (v) => (v.decision === 'RESHIP' && (c.kind === 'LOST' || c.kind === 'DAMAGED') ? h('p', { class: 'dialog__text' }, CASE_TEXT.reshipText) : []),
       danger: (v) => v.pieceTo === 'ARCHIVED' || c.kind === 'LOST',
@@ -647,7 +666,8 @@ function orderCaseSection(ctx: ViewContext, d: OrderDetail, locations: StockLoca
       validate: (v) => decideProblem(c, v),
       confirmLabel: CASE_TEXT.decide,
       submit: async (v) => {
-        result = await ctx.api.decideOrderCase(c.id, decideInput(c, v));
+        const out = v.decision === 'REFUND' ? checkedOf(v, 'addonsOut') : [];
+        result = await ctx.api.decideOrderCase(c.id, { ...decideInput(c, v), ...(out.length ? { addonsOut: out } : {}) });
       },
     }).then(async (v) => {
       const r = result as Awaited<ReturnType<typeof ctx.api.decideOrderCase>> | null;

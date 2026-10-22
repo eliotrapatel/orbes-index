@@ -16,6 +16,10 @@
  * - Artifacts are attachments: they are fetched as blobs and saved by the UI.
  */
 import type {
+  AddonCreateInput,
+  AddonInput,
+  AddonView,
+  OrderAddonOffer,
   AnnouncementState,
   HouseAudience,
   HouseMessage,
@@ -705,6 +709,43 @@ export class AdminApi {
     return this.request('PUT', `/api/admin/models/${encodeURIComponent(id)}/supplier`, { body: change });
   }
 
+  // ── The add-ons' catalogue (plan MACRO M3 §4.3, D1) ──────────────────────
+
+  /** AUDITOR: every add-on, the active ones first, with its SKU, prices and stock per location. */
+  addons(): Promise<Items<AddonView>> {
+    return this.get('/api/admin/addons');
+  }
+
+  /** OPERATOR: an add-on listed with its SKU code and prices (409 ADDON_NAME_TAKEN, SKU_CODE_TAKEN). */
+  createAddon(input: AddonCreateInput): Promise<AddonView> {
+    return this.post('/api/admin/addons', input);
+  }
+
+  /** OPERATOR: its name, line, supplier, weight or position (its SKU code never changes). */
+  updateAddon(id: string, change: AddonInput): Promise<AddonView> {
+    return this.patch(`/api/admin/addons/${encodeURIComponent(id)}`, change);
+  }
+
+  /** OPERATOR: its prices by currency, each set or removed (null). */
+  setAddonPrices(id: string, prices: Partial<Record<HouseCurrency, number | null>>): Promise<AddonView> {
+    return this.request('PUT', `/api/admin/addons/${encodeURIComponent(id)}/prices`, { body: { prices } });
+  }
+
+  /** OPERATOR: offered nowhere again; its stock and history kept. */
+  setAddonAside(id: string): Promise<AddonView> {
+    return this.post(`/api/admin/addons/${encodeURIComponent(id)}/set-aside`, {});
+  }
+
+  /** OPERATOR: offered again. */
+  reinstateAddon(id: string): Promise<AddonView> {
+    return this.post(`/api/admin/addons/${encodeURIComponent(id)}/reinstate`, {});
+  }
+
+  /** OPERATOR (S5): its Shopify product and variant, pasted back; null clears one. */
+  linkAddonShopify(id: string, input: { productId: string | null; variantId: string | null }): Promise<AddonView> {
+    return this.request('PUT', `/api/admin/addons/${encodeURIComponent(id)}/shopify`, { body: input });
+  }
+
   // ── Suppliers (plan NEXT LOT §3.5.6.2) ───────────────────────────────────
 
   /** AUDITOR: every supplier, by name. */
@@ -1282,6 +1323,21 @@ export class AdminApi {
     return this.request('PUT', `/api/admin/orders/${encodeURIComponent(id)}/buyer`, { body: buyer });
   }
 
+  /** AUDITOR (plan MACRO M3 §4.2, D2): the add-ons Add an add-on offers on the order now, at its location in its currency. */
+  orderAddonOffer(id: string): Promise<OrderAddonOffer> {
+    return this.get(`/api/admin/orders/${encodeURIComponent(id)}/addons`);
+  }
+
+  /** OPERATOR: units of an add-on held on the order (409 ADDON_OUT_OF_STOCK, ADDON_LIMIT, ADDON_NOT_OFFERED); after PAID, its own invoice. */
+  addOrderAddon(id: string, input: { addonId: string; units: number }): Promise<OrderDetail> {
+    return this.post(`/api/admin/orders/${encodeURIComponent(id)}/addons`, input);
+  }
+
+  /** OPERATOR: one unit held removed, until SHIPPED; after PAID, a credit note for its line. */
+  removeOrderAddon(id: string, unitId: string): Promise<OrderDetail> {
+    return this.request('DELETE', `/api/admin/orders/${encodeURIComponent(id)}/addons/${encodeURIComponent(unitId)}`);
+  }
+
   /** OPERATOR: Open a return (plan NEXT LOT §3.5.4.4): a return or a size exchange, its reason and Client Services' note. */
   openOrderCase(id: string, input: { kind: 'RETURN' | 'EXCHANGE'; reason: OrderCaseReason; exchangeSkuId?: string | null; note: string }): Promise<OrderCaseRecord> {
     return this.post(`/api/admin/orders/${encodeURIComponent(id)}/case`, input);
@@ -1293,7 +1349,10 @@ export class AdminApi {
   }
 
   /** OPERATOR (a lost parcel and the archive: ADMIN): ORBES's decision; a piece back to stock's new claim code, once. */
-  decideOrderCase(id: string, input: { decision: 'REFUND' | 'EXCHANGE' | 'RESHIP'; pieceTo?: 'RESTOCKED' | 'ARCHIVED' | null; locationId?: string | null; note?: string | null }): Promise<OrderCaseDecided> {
+  decideOrderCase(
+    id: string,
+    input: { decision: 'REFUND' | 'EXCHANGE' | 'RESHIP'; pieceTo?: 'RESTOCKED' | 'ARCHIVED' | null; locationId?: string | null; note?: string | null; addonsOut?: string[] | null },
+  ): Promise<OrderCaseDecided> {
     return this.post(`/api/admin/order-cases/${encodeURIComponent(id)}/decide`, input);
   }
 

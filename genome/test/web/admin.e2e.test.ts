@@ -3690,6 +3690,114 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await c.close();
   }, STEP_TIMEOUT);
 
+  it('lists an add-on in Catalogue → Add-ons (plan MACRO M3 §4.3, D1 and D2): created with its price, counted in by a correction in Logistics\' ADD-ONS, added to a paid order and one removed, read on the order, its documents and its parcel\'s checklist', async () => {
+    // A ring of 52 with one piece in stock at the default location, and a paid salon order of it held there.
+    const adminId = (await ctx.db.selectFrom('admin_users').select('id').where('email_normalized', '=', ADMIN.email).executeTakeFirstOrThrow()).id;
+    const staff = { type: 'admin' as const, id: adminId };
+    const ring = (
+      await ctx.db
+        .insertInto('models')
+        .values({ category_id: (await ctx.categories.getByCode('J'))!.index, name: 'ECLAT', type: 'RING', sku_prefix: 'ECL-RG', default_material: '925 STERLING SILVER' })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    ).id;
+    await ctx.services.sizes.declare(ring, { sizeType: 'RING', ticked: ['52'] }, staff);
+    const france = await defaultLocationId(ctx.db);
+    const sku52 = (await ctx.db.selectFrom('skus').select('id').where('model_id', '=', ring).where('size_label', '=', '52').executeTakeFirstOrThrow()).id;
+    await stockPieces(ctx, { skuId: sku52, locationId: france, count: 1, material: '925 STERLING SILVER' }, staff);
+    const buyer = await createAccount(ctx.db);
+    const request = await ctx.db.insertInto('shop_requests').values({ account_id: buyer.id, model_id: ring, created_at: new Date() }).returning('id').executeTakeFirstOrThrow();
+    await ctx.services.salon.close(request.id, { note: 'Accepted.', outcome: 'ACCEPTED' }, staff);
+    const orderId = (await ctx.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
+    await ctx.services.orders.setTerms(orderId, { sizeLabel: '52', priceMinor: 420_000, currency: 'EUR' }, staff);
+    await ctx.services.orders.setBuyer(orderId, { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris', country: 'FR', phone: '+33 6 12 34 56 78' }, staff);
+    await ctx.services.orders.transition(orderId, { to: 'PAID' }, staff);
+
+    const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'reduce' });
+    const p = await c.newPage();
+    await watch(p);
+    await signIn(p, ADMIN.email, ADMIN.password);
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+
+    // Catalogue → Add-ons, after Models: empty, then New add-on with its SKU code and a price in EUR.
+    await go(p, '#/catalogue', 'Catalogue');
+    expect(await p.locator('#addons .empty__text').textContent()).toBe('No add-on yet.');
+    await p.click('[data-testid=addon-add]');
+    await p.fill('dialog input[name=name]', 'POLISHING CLOTH');
+    await p.fill('dialog input[name=line]', 'For silver and gold.');
+    await p.fill('dialog input[name=skuCode]', 'add-cloth');
+    await p.fill('dialog input[name=weightG]', '20');
+    await p.fill('dialog input[name=EUR]', '15');
+    await confirmDialog(p);
+    await p.waitForSelector('.toast:has-text("Add-on added.")');
+    const row = p.locator('#addons tbody tr');
+    await expect.poll(() => row.count()).toBe(1);
+    expect(await p.locator('#addons thead th').allTextContents()).toEqual(['Add-on', 'Prices', 'Supplier', 'Weight', 'Available · minimum', 'Status · Shopify', '']);
+    expect(await row.locator('[data-testid=addon-sku]').textContent()).toBe('ADD-CLOTH');
+    expect(await row.locator('[data-testid=addon-prices]').textContent()).toBe('€ 15');
+    expect(await row.locator('[data-testid=addon-stock]').textContent()).toContain('FRANCE WAREHOUSE · 0');
+    expect(await row.locator('[data-testid=addon-state]').textContent()).toBe('ACTIVE');
+    expect(await row.locator('[data-testid=addon-shopify]').textContent()).toBe('NOT LINKED');
+    const addon = await ctx.db.selectFrom('addon_items as a').innerJoin('skus as k', 'k.addon_id', 'a.id').select(['a.id', 'k.id as sku_id']).where('a.name', '=', 'POLISHING CLOTH').executeTakeFirstOrThrow();
+    await shot(p, 'catalogue-addons', { phone: true });
+
+    // Logistics → Stock: the ADD-ONS group; Correct counts five in at the default location.
+    await go(p, `#/logistics?tab=stock&locationId=${france}`, 'Logistics');
+    const stockRow = p.locator('#logistics-addons tbody tr');
+    await expect.poll(() => stockRow.count()).toBe(1);
+    expect(await stockRow.locator('[data-testid=stock-addon]').textContent()).toBe('POLISHING CLOTHADD-CLOTH');
+    expect(await p.locator('#logistics-stock [data-testid=stock-addon]').count()).toBe(0);
+    await stockRow.locator('[data-testid=stock-correct]').click();
+    await p.fill('dialog input[name=delta]', '5');
+    await p.fill('dialog textarea[name=reason]', 'Counted on the shelf.');
+    await confirmDialog(p);
+    await p.waitForSelector('.toast:has-text("Count corrected.")');
+    await expect.poll(() => stockRow.locator('td').evaluateAll((tds) => tds.map((td) => td.textContent)), { timeout: 15_000 }).toEqual(expect.arrayContaining(['5']));
+    await shot(p, 'logistics-addons', { phone: true });
+
+    // The order page: Add-ons, empty; Add an add-on, two units, its total and its own invoice once paid.
+    const reference = (await ctx.services.orders.get(orderId)).reference;
+    await go(p, `#/orders/${orderId}`, reference);
+    expect(await p.locator('#order-addons .empty__text').textContent()).toBe('No add-on on this order.');
+    await p.click('[data-testid=order-addon-add]');
+    await p.waitForSelector('dialog select[name=addonId]');
+    expect(await p.locator('dialog select[name=addonId] option').allTextContents()).toEqual(['Choose an add-on', 'POLISHING CLOTH · € 15 · up to 3']);
+    expect(await p.locator('dialog [data-testid=order-addon-paid]').textContent()).toBe(' The order is paid: the add-on is added with its own invoice, in Documents.');
+    await p.selectOption('dialog select[name=units]', '2');
+    expect(await p.locator('dialog [data-testid=order-addon-total]').textContent()).toBe('Total: 2 × € 15 = € 30');
+    await confirmDialog(p);
+    await p.waitForSelector('.toast:has-text("Add-on added.")');
+    const added = p.locator('#order-addons tbody tr');
+    await expect.poll(() => added.locator('[data-testid=order-addon-name]').allTextContents(), { timeout: 15_000 }).toEqual(['POLISHING CLOTH × 2']);
+    expect(await added.locator('[data-testid=order-addon-price]').textContent()).toBe('€ 15 each · € 30');
+    expect(await added.locator('[data-testid=order-addon-by]').textContent()).toBe(ADMIN.email);
+    expect(await added.locator('[data-testid=order-addon-status]').textContent()).toBe('HELD');
+    expect(await added.locator('[data-testid=order-addon-invoice]').textContent()).toMatch(/^Its invoice /);
+    expect(await p.locator('#order-documents [data-testid=document-addon]').allTextContents()).toEqual(['For POLISHING CLOTH × 2']);
+    // Remove one: a credit note for its line; one unit stays held.
+    await added.locator('[data-testid=order-addon-remove]').click();
+    expect(await p.locator('dialog [data-testid=order-addon-paid-remove]').textContent()).toBe(' The order is paid: a credit note is issued for its line, in Documents.');
+    await confirmDialog(p);
+    await p.waitForSelector('.toast:has-text("Add-on removed.")');
+    await expect.poll(() => p.locator('#order-addons [data-testid=order-addon-status]').allTextContents(), { timeout: 15_000 }).toEqual(['HELD', 'REMOVED']);
+    const units = await ctx.db.selectFrom('order_addon_items').select(['status', 'price_minor', 'added_by_type']).where('order_id', '=', orderId).orderBy('status').execute();
+    expect(units).toEqual([
+      { status: 'HELD', price_minor: 1500, added_by_type: 'STAFF' },
+      { status: 'REMOVED', price_minor: 1500, added_by_type: 'STAFF' },
+    ]);
+    expect((await ctx.services.addons.get(addon.id)).stock.find((s) => s.location.id === france)).toMatchObject({ onHand: 5, reserved: 1, available: 4 });
+    expect(await p.locator('#order-documents tbody tr').count()).toBe(3);
+    await shot(p, 'order-addons', { full: true, phone: true });
+
+    // Packing begun: its parcel's checklist has the add-on's line, ticked by hand.
+    await ctx.services.logistics.startPacking(orderId, staff, null);
+    await p.reload();
+    await expect.poll(() => p.locator('[data-testid=parcel-checklist] [data-testid=parcel-check]').allTextContents(), { timeout: 15_000 }).toContain('Add-on: POLISHING CLOTH × 1');
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    expect(await cspViolations(p)).toEqual([]);
+    await c.close();
+  }, STEP_TIMEOUT);
+
   it('raised no page error or CSP violation', () => {
     expect(problems).toEqual([]);
   });

@@ -75,6 +75,7 @@ import {
   type LogisticsCounts,
   type LogisticsTab,
 } from '../model/logistics.js';
+import { ADDON_SKU_TEXT, isAddonSku, skuOwnerName } from '../model/addons.js';
 import { can, logisticsOnly } from '../model/permissions.js';
 import { addQuantityProblem } from '../model/supplier-orders.js';
 import type { Tone } from '../model/tone.js';
@@ -138,7 +139,7 @@ export async function logisticsView(ctx: ViewContext): Promise<HTMLElement> {
   else if (tab === 'receptions') body = receptionsTab(ctx, board, locations, locationId);
   else if (tab === 'returns') body = [returnsTab(ctx, toReceive, locations)];
   else if (tab === 'corrections') body = [correctionsTab(ctx, listed, locations)];
-  else body = [stockTab(ctx, await ctx.api.logisticsStock(locationId ? { locationId } : {}))];
+  else body = stockTab(ctx, await ctx.api.logisticsStock(locationId ? { locationId } : {}));
 
   let filter: HTMLElement | null = null;
   if (offersLocationFilter(locations)) {
@@ -429,7 +430,7 @@ function receptionsTab(ctx: ViewContext, board: ReceptionsBoard, locations: read
 
 // ── Stock ──────────────────────────────────────────────────────────────────
 
-function stockTab(ctx: ViewContext, stock: LogisticsStock): HTMLElement {
+function stockTab(ctx: ViewContext, stock: LogisticsStock): HTMLElement[] {
   const role = ctx.session.admin.role;
   const agent = logisticsOnly(role);
   const manage = !agent && (can(role, 'manageStock') || can(role, 'manageSupplierOrders'));
@@ -540,7 +541,7 @@ function stockTab(ctx: ViewContext, stock: LogisticsStock): HTMLElement {
   };
 
   const columns: Column<LogisticsStockRow>[] = [
-    { label: 'Model', cell: (r) => r.sku.model.name },
+    { label: 'Model', cell: (r) => skuOwnerName(r.sku) },
     { label: 'Variant', cell: (r) => r.sku.variant ?? '—', kind: ['nowrap'] },
     {
       label: 'Size',
@@ -578,16 +579,46 @@ function stockTab(ctx: ViewContext, stock: LogisticsStock): HTMLElement {
         ]),
     ...(propose || manage ? [{ label: '', cell: actions, kind: ['actions', 'wrap'] } satisfies Column<LogisticsStockRow>] : []),
   ];
+  // Plan MACRO M3 §4.3 (D1): the add-ons in a group of their own, ADD-ONS, after the models' sizes: available, reserved
+  // and the minimum per location; corrections, transfers, minimums and supplier orders as for a size, never a count in.
+  const addonColumns: Column<LogisticsStockRow>[] = [
+    {
+      label: 'Add-on',
+      cell: (r) =>
+        h(
+          'span',
+          { data: { testid: 'stock-addon' } },
+          skuOwnerName(r.sku),
+          h('span', { class: 'cell-sub mono' }, r.sku.code),
+          r.sku.setAside ? h('span', { class: 'cell-sub', data: { testid: 'stock-set-aside' } }, STOCK_TEXT.setAside) : null,
+        ),
+    },
+    ...(showLocation ? [{ label: 'Location', cell: (r) => r.location.name, kind: ['nowrap'] } satisfies Column<LogisticsStockRow>] : []),
+    { label: 'On hand', cell: (r) => formatCount(r.onHand), kind: ['num'] },
+    { label: 'Reserved', cell: (r) => formatCount(r.reserved), kind: ['num'] },
+    { label: 'Available', cell: (r) => formatCount(r.available), kind: ['num'] },
+    { label: 'Minimum', cell: (r) => (r.minimum === null ? '—' : formatCount(r.minimum)), kind: ['num'] },
+    ...columns.filter((c) => c.label === 'Expected' || c.label === 'To order' || c.label === ''),
+  ];
+  const pieces = stock.rows.filter((r) => !isAddonSku(r.sku));
+  const addons = stock.rows.filter((r) => isAddonSku(r.sku));
   const notice = agent ? null : unbackedNotice(stock.unbackedSizes);
-  return section(
-    'Stock',
-    [
-      h('p', { class: 'panel__text' }, agent ? STOCK_TEXT.leadAgent : STOCK_TEXT.leadStaff),
-      notice ? h('p', { class: 'notice', data: { testid: 'stock-unbacked' } }, notice) : null,
-      table(columns, stock.rows, { caption: 'Stock', empty: agent ? STOCK_TEXT.emptyAgent : STOCK_TEXT.emptyStaff }),
-    ],
-    { id: 'logistics-stock', note: `${formatCount(stock.rows.reduce((n, r) => n + r.available, 0))} available` },
-  );
+  return [
+    section(
+      'Stock',
+      [
+        h('p', { class: 'panel__text' }, agent ? STOCK_TEXT.leadAgent : STOCK_TEXT.leadStaff),
+        notice ? h('p', { class: 'notice', data: { testid: 'stock-unbacked' } }, notice) : null,
+        table(columns, pieces, { caption: 'Stock', empty: agent ? STOCK_TEXT.emptyAgent : STOCK_TEXT.emptyStaff }),
+      ],
+      { id: 'logistics-stock', note: `${formatCount(pieces.reduce((n, r) => n + r.available, 0))} available` },
+    ),
+    section(
+      ADDON_SKU_TEXT.group,
+      [h('p', { class: 'panel__text' }, ADDON_SKU_TEXT.groupLead), table(addonColumns, addons, { caption: ADDON_SKU_TEXT.group, empty: ADDON_SKU_TEXT.groupEmpty })],
+      { id: 'logistics-addons', note: `${formatCount(addons.reduce((n, r) => n + r.available, 0))} available` },
+    ),
+  ];
 }
 
 // ── Returns ────────────────────────────────────────────────────────────────

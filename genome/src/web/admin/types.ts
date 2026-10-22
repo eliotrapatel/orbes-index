@@ -2231,6 +2231,10 @@ export interface DropEntry {
   handledBy: { id: string; email: string } | null;
   handledAt: Iso | null;
   note: string | null;
+  /** Plan MACRO M3 §4.2 (D2): while SELECTED, the catalogue add-ons its collector chose on the place held. */
+  addonChoices: ChosenAddon[];
+  /** CONFIRMED's answer only: the add-ons chosen that could not be added to its order. */
+  addonsLeftOut?: LeftOutAddon[];
 }
 
 /** POST /api/admin/drops/:id/draw. */
@@ -2923,6 +2927,10 @@ export interface ShopRequest {
   resolutionNote: string | null;
   /** ACCEPTED (an order was created) or DECLINED once closed; null while open, or closed before the orders. */
   outcome: ShopRequestOutcome | null;
+  /** Plan MACRO M3 §4.2 (D2): while OPEN, the catalogue add-ons chosen with it (priced in the model's base currency). */
+  addonChoices: ChosenAddon[];
+  /** ACCEPTED's answer only: the add-ons chosen that could not be added to its order. */
+  addonsLeftOut?: LeftOutAddon[];
 }
 
 // ── A model's Sizes (plan NEXT-NINE, AC-01; plan NEXT LOT §3.3) ────────────
@@ -3008,6 +3016,59 @@ export interface Supplier {
   active: boolean;
   models: number;
   createdAt: Iso;
+}
+
+// ── The add-ons' catalogue (plan MACRO M3 §4.2 and §4.3, D1; routes/admin/addons.ts) ─────
+
+/** An add-on's price in a house currency, in minor units. */
+export interface AddonPrice {
+  currency: HouseCurrency;
+  priceMinor: number;
+}
+
+/** An add-on's stock at a location (every location listed, 0 included). */
+export interface AddonStock {
+  location: { id: string; name: string; isDefault: boolean };
+  onHand: number;
+  /** The units held on orders. */
+  reserved: number;
+  available: number;
+  minimum: number | null;
+}
+
+/** GET /api/admin/addons: an add-on as Catalogue → Add-ons reads it. */
+export interface AddonView {
+  id: string;
+  name: string;
+  line: string | null;
+  supplier: { id: string; name: string; active: boolean } | null;
+  weightG: number | null;
+  position: number;
+  active: boolean;
+  /** Its SKU: its code (given at the creation, never changed) and its Shopify variant. */
+  sku: { id: string; code: string; shopifyVariantId: string | null };
+  shopifyProductId: string | null;
+  /** Its prices in the house currencies' order; a currency without one is absent (not offered in it). */
+  prices: AddonPrice[];
+  /** Its stock per location, the default first, then by name. */
+  stock: AddonStock[];
+  createdAt: Iso;
+  updatedAt: Iso;
+}
+
+/** POST /api/admin/addons (`skuCode` and `prices` at the creation only) and PATCH /api/admin/addons/:id. */
+export interface AddonInput {
+  name?: string;
+  line?: string | null;
+  supplierId?: string | null;
+  weightG?: number | null;
+  position?: number;
+}
+
+export interface AddonCreateInput extends AddonInput {
+  name: string;
+  skuCode: string;
+  prices?: Partial<Record<HouseCurrency, number | null>>;
 }
 
 /** POST /api/admin/suppliers and PATCH …/:id: the fields given (null or '' clears an optional one). */
@@ -3452,6 +3513,71 @@ export interface OrderView {
   /** Its invoice and credit note, in order of issue. */
   invoices: OrderDocument[];
   events: { action: string; status: OrderStatus; note: string | null; at: Iso; actor: { type: string; id: string | null } }[];
+  /** Plan MACRO M3 §4.2 (D2): its catalogue add-ons, one row per unit, in the order they were added. */
+  addonItems: AdminOrderAddonUnit[];
+}
+
+/** A unit of a catalogue add-on on an order (plan MACRO M3 §4.2, D2), as the order page reads it. */
+export interface AdminOrderAddonUnit {
+  id: string;
+  addon: { id: string; name: string };
+  skuCode: string;
+  /** Per unit, as it was added, in the order's currency. */
+  priceMinor: number;
+  currency: HouseCurrency;
+  status: OrderAddonStatus;
+  addedAt: Iso;
+  /** PURCHASE (carried from the collector's choice), COLLECTOR (YOUR ORDERS) or STAFF (`id`, the admin). */
+  addedBy: { type: OrderAddonAddedBy; id: string | null };
+  removedAt: Iso | null;
+  cancelledAt: Iso | null;
+  shippedAt: Iso | null;
+  returnedAt: Iso | null;
+  returnedToStock: boolean | null;
+  location: { id: string; name: string };
+  /** Its supplementary invoice (added after PAID); null otherwise. */
+  invoiceId: string | null;
+}
+
+/** One add-on offered on an order now: its price in the order's currency and the units it can still take. */
+export interface AddonOfferItem {
+  addonId: string;
+  name: string;
+  line: string | null;
+  priceMinor: number;
+  currency: HouseCurrency;
+  maxUnits: number;
+}
+
+/** Why an order takes no add-on now. */
+export type AddonWindowReason = 'NOT_OFFERED' | 'CLOSED' | 'PACKING_STARTED' | 'NO_CURRENCY';
+
+/** GET /api/admin/orders/:id/addons: what Add an add-on offers on the order now (packing begun or not, for staff). */
+export interface OrderAddonOffer {
+  canAdd: boolean;
+  reason: AddonWindowReason | null;
+  /** The order is paid: an add-on added has its own invoice. */
+  paid: boolean;
+  currency: HouseCurrency | null;
+  offer: AddonOfferItem[];
+}
+
+/** An add-on chosen before its order (a draw's place held, a salon request), priced now in where it was chosen. */
+export interface ChosenAddon {
+  addonId: string;
+  name: string;
+  line: string | null;
+  units: number;
+  /** Per unit; null when it is no longer priced in that currency. */
+  priceMinor: number | null;
+}
+
+/** A choice that could not be carried onto the order: none left, or no longer offered. */
+export interface LeftOutAddon {
+  addonId: string;
+  name: string;
+  units: number;
+  reason: 'NONE_LEFT' | 'NOT_OFFERED';
 }
 
 /** An invoice or a credit note of an order, as its page lists it. */
@@ -3533,7 +3659,7 @@ export interface Invoice {
   issuer: { name: string; address: string[] };
   buyer: { name: string | null; address: string | null; email: string | null };
   /** BP-19: a SHIPPING, a CREDIT (negative) and a welcome GIFT line beside the piece and its add-ons. */
-  lines: { kind: 'PIECE' | 'ADDON' | 'SHIPPING' | 'CREDIT' | 'GIFT'; label: string; detail: string | null; amountMinor: number }[];
+  lines: { kind: 'PIECE' | 'ADDON' | 'SHIPPING' | 'CREDIT' | 'GIFT' | 'ADD_ON_ITEM'; label: string; detail: string | null; amountMinor: number }[];
   currency: OrderCurrency;
   subtotalMinor: number;
   vatRateBp: number | null;
@@ -3607,14 +3733,20 @@ export interface StockLevel {
   available: number;
 }
 
-/** A size as Logistics and the supplier orders name it: its model, the model's variant, its size and its SKU code. */
+/**
+ * A size as Logistics and the supplier orders name it: its model, the model's variant, its size and its SKU code; or
+ * (plan MACRO M3 §4.2, D1) an add-on's SKU, named by its add-on (`model` null, no variant, no size).
+ */
 export interface LogisticsSku {
   id: string;
   code: string;
-  model: { id: string; name: string };
+  /** The model it is a size of; null for an add-on's SKU. */
+  model: { id: string; name: string } | null;
+  /** The add-on it is; null for a model's size. */
+  addon: { id: string; name: string } | null;
   /** The variant's label (BLUE) of a variant model; null otherwise. */
   variant: string | null;
-  /** Null: one size. */
+  /** Null: one size (and an add-on). */
   sizeLabel: string | null;
   setAside: boolean;
 }
@@ -3712,6 +3844,8 @@ export interface ParcelPiece {
   skuCode: string | null;
   /** The add-ons' labels only. */
   addons: string[];
+  /** Plan MACRO M3 §4.2 (D2): its catalogue add-ons to pack, each with its units (POLISHING CLOTH × 2), never a price. */
+  addonItems: { name: string; units: number }[];
   engraving: string | null;
   surprise: string | null;
   /** The piece bound by its packing scan, and whether it is scanned in the current shipment. */

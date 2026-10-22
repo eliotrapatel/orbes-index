@@ -11,7 +11,7 @@
  */
 import { h } from '../../shared/dom.js';
 import { can } from '../model/permissions.js';
-import { sizeText } from '../model/logistics.js';
+import { skuSizeText } from '../model/logistics.js';
 import { invoiceCell, LIST_TEXT, listFilters, money, noSupplierLine, piecesLine, PROPOSAL_TEXT, statusOptions, SUPPLIER_ORDER_STATUS_LABELS } from '../model/supplier-orders.js';
 import { SPLIT_TEXT } from '../model/size-split.js';
 import { contactLines, SUPPLIER_ORDERS_TEXT, supplierFormValues, supplierInputOf } from '../model/suppliers.js';
@@ -22,6 +22,7 @@ import { busy, button, emptyState, field, filterBar, pageHeader, section, select
 import { openDialog, type DialogField } from '../ui/dialog.js';
 import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
+import { skuOwnerCell } from './addons.js';
 import { openOrderAModel } from './order-a-model.js';
 
 /** A supplier's fields in its dialog (the server's bounds, §3.5.5.1). */
@@ -163,9 +164,9 @@ function proposalSection(ctx: ViewContext, proposal: SupplierOrderProposal, canM
       g.supplier
         ? table(
             [
-              { label: 'Model', cell: (r) => r.sku.model.name },
+              { label: 'Model', cell: (r) => skuOwnerCell(r.sku) },
               { label: 'Variant', cell: (r) => r.sku.variant ?? '—', kind: ['nowrap'] },
-              { label: 'Size', cell: (r) => h('span', null, sizeText(r.sku.sizeLabel), h('span', { class: 'cell-sub mono' }, r.sku.code)), kind: ['nowrap'] },
+              { label: 'Size', cell: (r) => h('span', null, skuSizeText(r.sku), h('span', { class: 'cell-sub mono' }, r.sku.code)), kind: ['nowrap'] },
               { label: 'Waiting orders', cell: (r) => formatCount(r.waiting), kind: ['num'] },
               { label: 'Under the minimum', cell: (r) => formatCount(r.underMinimum), kind: ['num'] },
               { label: 'Expected', cell: (r) => formatCount(r.expected), kind: ['num'] },
@@ -175,7 +176,7 @@ function proposalSection(ctx: ViewContext, proposal: SupplierOrderProposal, canM
             g.rows,
             { caption: g.supplier.name },
           )
-        : h('ul', { class: 'proposal__none' }, ...g.rows.map((r) => h('li', { class: 'panel__text', data: { testid: 'proposal-no-supplier' } }, h('a', { class: 'idlink', attrs: { href: href('model', { modelId: r.sku.model.id }) } }, noSupplierLine(r.sku))))),
+        : h('ul', { class: 'proposal__none' }, ...g.rows.map((r) => h('li', { class: 'panel__text', data: { testid: 'proposal-no-supplier' } }, h('a', { class: 'idlink', attrs: { href: r.sku.model ? href('model', { modelId: r.sku.model.id }) : href('catalogue') } }, noSupplierLine(r.sku))))),
     );
   });
   return section(PROPOSAL_TEXT.title, groups.length ? groups : emptyState(PROPOSAL_TEXT.empty), { id: 'proposal', note: proposal.toOrder > 0 ? `${formatCount(proposal.toOrder)} to order` : undefined });

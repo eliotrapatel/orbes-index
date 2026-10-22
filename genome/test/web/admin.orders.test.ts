@@ -114,6 +114,7 @@ const view = (o: Partial<OrderView> = {}): OrderView => ({
   return: null,
   invoices: [],
   events: [],
+  addonItems: [],
   ...o,
 });
 

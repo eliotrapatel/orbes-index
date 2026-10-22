@@ -20,15 +20,17 @@ import {
   RECEPTION_TEXT,
   receptionInputOf,
   receptionProblem,
+  skuSizeText,
   skuWords,
-  sizeText,
 } from '../model/logistics.js';
+import { ADDON_SKU_TEXT } from '../model/addons.js';
 import { can, logisticsOnly } from '../model/permissions.js';
 import { href } from '../router.js';
 import type { LogisticsSku, ReceptionOrder, ReceptionView } from '../types.js';
 import { button, defList, field, input, linkButton, pageHeader, section, select, statusMark, table, textarea } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { notify, notifyError } from '../ui/toast.js';
+import { skuOwnerCell } from './addons.js';
 import type { ViewContext } from './context.js';
 
 const back = () => linkButton('Back to the list', href('logistics', {}, { tab: 'receptions' }), 'ghost');
@@ -62,9 +64,9 @@ export async function receptionView(ctx: ViewContext): Promise<HTMLElement> {
   ]);
   const lines = table(
     [
-      { label: 'Model', cell: (l) => l.sku.model.name },
+      { label: 'Model', cell: (l) => skuOwnerCell(l.sku, ADDON_SKU_TEXT.receptionLine) },
       { label: 'Variant', cell: (l) => l.sku.variant ?? '—', kind: ['nowrap'] },
-      { label: 'Size', cell: (l) => h('span', null, sizeText(l.sku.sizeLabel), h('span', { class: 'cell-sub mono' }, l.sku.code), l.onOrder ? null : h('span', { class: 'cell-sub' }, RECEPTION_TEXT.notOnOrder)), kind: ['nowrap'] },
+      { label: 'Size', cell: (l) => h('span', null, skuSizeText(l.sku), h('span', { class: 'cell-sub mono' }, l.sku.code), l.onOrder ? null : h('span', { class: 'cell-sub' }, RECEPTION_TEXT.notOnOrder)), kind: ['nowrap'] },
       { label: 'Received OK', cell: (l) => formatCount(l.accepted), kind: ['num'] },
       { label: 'Rejected', cell: (l) => formatCount(l.rejected), kind: ['num'] },
       { label: 'Note', cell: (l) => (l.note ? h('span', { class: 'prewrap' }, l.note) : '—'), kind: ['wide'] },
@@ -161,9 +163,9 @@ function countForm(ctx: ViewContext, order: ReceptionOrder, current: ReceptionVi
         h(
           'tr',
           { data: { testid: 'reception-line' } },
-          h('td', null, l.sku.model.name),
+          h('td', null, skuOwnerCell(l.sku, ADDON_SKU_TEXT.receptionLine)),
           h('td', null, l.sku.variant ?? '—'),
-          h('td', { class: 'col--nowrap' }, sizeText(l.sku.sizeLabel), h('span', { class: 'cell-sub mono' }, l.sku.code)),
+          h('td', { class: 'col--nowrap' }, skuSizeText(l.sku), h('span', { class: 'cell-sub mono' }, l.sku.code)),
           h('td', { class: 'col--num' }, formatCount(l.ordered)),
           h('td', { class: 'col--num' }, formatCount(l.alreadyReceived)),
           h('td', { class: 'col--nowrap' }, order.expectedOn ? formatDate(order.expectedOn) : '—'),
@@ -176,9 +178,9 @@ function countForm(ctx: ViewContext, order: ReceptionOrder, current: ReceptionVi
         h(
           'tr',
           { data: { testid: 'reception-extra' } },
-          h('td', null, k.model.name),
+          h('td', null, skuOwnerCell(k, ADDON_SKU_TEXT.receptionLine)),
           h('td', null, k.variant ?? '—'),
-          h('td', { class: 'col--nowrap' }, sizeText(k.sizeLabel), h('span', { class: 'cell-sub mono' }, k.code), h('span', { class: 'cell-sub' }, RECEPTION_TEXT.notOnOrder)),
+          h('td', { class: 'col--nowrap' }, skuSizeText(k), h('span', { class: 'cell-sub mono' }, k.code), h('span', { class: 'cell-sub' }, RECEPTION_TEXT.notOnOrder)),
           h('td', { class: 'col--num' }, '—'),
           h('td', { class: 'col--num' }, '—'),
           h('td', null, '—'),
