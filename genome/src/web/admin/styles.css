@@ -7484,3 +7484,87 @@ a.collectors__kpi-link:focus-visible {
     max-height: 440px;
   }
 }
+
+/* ── Orders → Returns (plan MACRO M3 §2.3, R1) ───────────────────────────── */
+
+/* The summary sits under the filter bar, as the board's. */
+.returns__summary {
+  margin-top: 0;
+}
+
+/* Custom's Show sits on the date fields' line; its problem under them. */
+.filters .returns__apply {
+  min-width: 0;
+}
+
+.returns__problem {
+  flex-basis: 100%;
+  margin: -12px 0 0;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--critical);
+}
+
+.returns__problem:empty {
+  display: none;
+}
+
+/* The flag: its mark, then « 9 of 12 exchanges to a larger size » under it. */
+.returns__flag {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+
+/* The line wraps under its mark when the table is tight (1 024 px), never past the page. */
+.returns__flag .cell-sub {
+  margin-top: 0;
+  min-width: 17ch;
+  max-width: 24ch;
+  white-space: normal;
+}
+
+/* The rule, written under the By model table. */
+.returns__rule {
+  margin: 14px 0 0;
+  max-width: 72ch;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
+/* The flag's twin under the model's name: a phone's only (the Flag column is then hidden). */
+.returns__flag--phone {
+  display: none;
+}
+
+@media (max-width: 599px) {
+  .returns__flag--phone {
+    display: inline-flex;
+    margin-top: 6px;
+  }
+
+  .returns__models .table th:last-child,
+  .returns__models .table td:last-child {
+    display: none;
+  }
+
+  /* Tighter columns, so the reasons and the sizes keep their figures in view. */
+  .returns__reasons .table th,
+  .returns__reasons .table td,
+  .returns__sizes .table th,
+  .returns__sizes .table td,
+  .returns__models .table th,
+  .returns__models .table td {
+    padding-right: 12px;
+  }
+
+  .returns__reasons .table th:last-child,
+  .returns__reasons .table td:last-child,
+  .returns__sizes .table th:last-child,
+  .returns__sizes .table td:last-child {
+    padding-right: 0;
+  }
+}

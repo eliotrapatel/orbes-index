@@ -4971,3 +4971,49 @@ export interface CollectorsList {
   pageSize: number;
   rows: CollectorsListRow[];
 }
+
+// ── The returns and exchanges report (plan MACRO M3 §2, R1; services/returns-report.ts) ─────────────────────────────
+
+/** A reason as the report counts it: the four, and none. */
+export const RETURN_REASONS = [...ORDER_CASE_REASONS, 'NOT_GIVEN'] as const;
+export type ReturnReason = (typeof RETURN_REASONS)[number];
+export type ReturnsFlag = 'RUNS_SMALL' | 'RUNS_LARGE';
+
+/** A model row: a model, or a variant on its own row (its main model's name, its label). */
+export interface ReturnsModel {
+  id: string;
+  name: string;
+  variant: string | null;
+  variantOf: string | null;
+}
+
+/** GET /api/admin/orders/returns: counts only, nothing personal. */
+export interface ReturnsReport {
+  /** Both null: all time. */
+  period: { from: string | null; to: string | null };
+  modelId: string | null;
+  test: boolean;
+  summary: { requests: number; returns: number; exchanges: number };
+  byReason: { reason: ReturnReason; returns: number; exchanges: number; total: number; share: number }[];
+  byModel: {
+    model: ReturnsModel;
+    cases: number;
+    returns: number;
+    exchanges: number;
+    reasons: Record<ReturnReason, number>;
+    toLarger: number;
+    toSmaller: number;
+    flag: ReturnsFlag | null;
+  }[];
+  bySize: { model: ReturnsModel; size: string | null; returns: number; exchanges: number; toLarger: number; toSmaller: number }[];
+  models: ReturnsModel[];
+}
+
+/** The report's filters as the API takes them. */
+export interface ReturnsReportQuery {
+  modelId?: string | null;
+  from?: string | null;
+  to?: string | null;
+  all?: boolean;
+  test?: boolean;
+}

@@ -8,6 +8,11 @@
  *                                                         the test accounts' orders left out unless `test=true`
  *                                                         (Show test orders), each then marked `test`
  *   GET    /api/admin/orders.csv                AUDITOR   every order the same filters keep, as a CSV
+ *   GET    /api/admin/orders/returns            AUDITOR   the returns and exchanges report (plan MACRO M3 §2, R1;
+ *                                                         services/returns-report.ts): ?modelId=&from=&to=&all=&test=,
+ *                                                         by reason, model and size with the runs small / runs large
+ *                                                         flag; counts only (nothing personal)
+ *   GET    /api/admin/orders/returns.csv        AUDITOR   its by-model and by-size tables as a CSV
  *   GET    /api/admin/orders/alerts             AUDITOR   the delays after which an order stands out (M3)
  *   PUT    /api/admin/orders/alerts             ADMIN     those delays, changed (the console's settings)
  *   GET    /api/admin/orders/shipping-rates     AUDITOR   SHIPPING (plan NEXT-NINE, BP-19 T2): the optional rates below the
@@ -57,6 +62,7 @@ import {
   orderCreditBody,
   orderTransitionBody,
   parse,
+  returnsReportQuery,
   shippingRatesBody,
 } from '../../http/schemas.js';
 import { adminActor } from '../../http/sessions.js';
@@ -115,6 +121,16 @@ export const adminOrderRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
     const filter = boardFilter(request.query);
     const inClear = readsClientEmails(request);
     const file = await fulfilment.csv(filter, { email: (e) => clientEmail(e, inClear), buyer: (b) => orderBuyer(b, inClear) });
+    reply.header('cache-control', 'no-store');
+    reply.header('content-disposition', `attachment; filename="${file.filename}"`);
+    return reply.type(file.contentType).send(file.body);
+  });
+
+  // Plan MACRO M3 §2.2 (R1): Orders → Returns, read only.
+  app.get('/api/admin/orders/returns', async (request) => ctx.services.returnsReport.report(parse(returnsReportQuery, request.query)));
+
+  app.get('/api/admin/orders/returns.csv', async (request, reply) => {
+    const file = await ctx.services.returnsReport.csv(parse(returnsReportQuery, request.query));
     reply.header('cache-control', 'no-store');
     reply.header('content-disposition', `attachment; filename="${file.filename}"`);
     return reply.type(file.contentType).send(file.body);

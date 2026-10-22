@@ -24,6 +24,9 @@
  *     open, Next on …, No date of birth, Off in THE PROGRAM.
  *  8. A test account's order: out of the board, its counts and its CSV by default; Show test orders brings it back,
  *     marked TEST; its page opens by its address; never in the Shopify export.
+ *  9. Orders → Returns (plan MACRO M3 §2.3, R1), from the board's header, read by an AUDITOR: filtered by a model, its
+ *     RUNS SMALL flag with « 3 of 3 exchanges to a larger size », its sizes and reasons, the CSV, all time, an empty
+ *     Custom period.
  * No CSP violation, no page error, no figure in the display face.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -53,6 +56,7 @@ import { writePng } from '../support/image-io.js';
 import { jpegPhoto } from '../support/images.js';
 import { createAccount, holdPieces } from '../support/live.js';
 import { poolDraw } from '../support/draws.js';
+import { ReturnsWorld } from '../support/returns.js';
 
 const CHROMIUM = process.env.ORBES_CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const HAS_CHROMIUM = existsSync(CHROMIUM);
@@ -1070,5 +1074,68 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await expect.poll(() => a.locator(`[data-order="${test.id}"] [data-testid=order-card-test]`).count()).toBe(1);
     expect(await a.locator('label.ccheck', { hasText: 'Show test orders' }).locator('input').isChecked()).toBe(true);
     await a.context().close();
+  }, STEP_TIMEOUT);
+
+  it('opens Orders → Returns from the board (plan MACRO M3 §2.3, R1): filtered by a model, its flag read with its line, the by-size rows, the CSV, all time, an empty period', async () => {
+    // HALO: three exchanges from 52 to a larger size and a return, opened now (its rows as order-cases.ts leaves them).
+    const world = await new ReturnsWorld(ctx.db, admin.id!).prepare();
+    const halo = await world.model('HALO');
+    for (const to of ['54', '56', '54']) await world.case({ modelId: halo, size: '52', kind: 'EXCHANGE', to, opened: ctx.clock() });
+    await world.case({ modelId: halo, size: '54', kind: 'RETURN', reason: 'NOT_AS_EXPECTED', opened: ctx.clock() });
+
+    // An AUDITOR: counts only, nothing personal.
+    const p = await open(AUDITOR);
+    await go(p, '#/orders', 'Orders');
+    await p.click('.page-head__actions a.cbtn:text-is("Returns")');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), { timeout: 15_000 }).toBe('Returns');
+    expect(await p.evaluate(() => location.hash)).toBe('#/orders/returns');
+    const today = parisDay(new Date());
+    const period = (await p.locator('[data-testid=returns-period]').textContent())!.trim();
+    expect(period).toMatch(/^\d{2} [A-Z]{3} \d{4} – \d{2} [A-Z]{3} \d{4}$/);
+    expect(await p.locator('[data-testid=returns-period-choice]').inputValue()).toBe('12m');
+    // Every model: HALO among the order cases of this file's orders.
+    await expect.poll(() => p.locator('[data-testid=returns-by-model] tbody tr', { hasText: 'HALO' }).count()).toBe(1);
+    expect(await p.locator('[data-testid=returns-rule]').textContent()).toContain('RUNS SMALL: at least 3 size exchanges');
+    await shot(p, 'returns', { phone: true });
+
+    // Filtered by HALO: its flag, its line, its sizes.
+    await p.selectOption('[data-testid=returns-model]', halo);
+    await expect.poll(() => p.evaluate(() => location.hash)).toBe(`#/orders/returns?model=${halo}`);
+    await expect.poll(async () => (await p.locator('[data-testid=returns-summary] .board__figures').textContent())?.trim()).toBe('4 requests · 1 return · 3 exchanges');
+    const row = p.locator('[data-testid=returns-by-model] tbody tr');
+    expect(await row.count()).toBe(1);
+    expect((await row.locator('[data-testid=returns-flag] .status__text').textContent())!.trim()).toBe('RUNS SMALL');
+    expect((await row.locator('[data-testid=returns-flag-line]').textContent())!.trim()).toBe('3 of 3 exchanges to a larger size');
+    const sizes = await p.locator('[data-testid=returns-by-size] tbody tr').allInnerTexts();
+    expect(sizes.map((x) => x.replace(/\s+/g, ' ').trim())).toEqual(['52 0 3 3 0', '54 1 0 0 0']);
+    const reasons = await p.locator('[data-testid=returns-by-reason] tbody tr').allInnerTexts();
+    expect(reasons.map((x) => x.replace(/\s+/g, ' ').trim())).toEqual(['The size does not fit 0 3 3 75 %', 'Not as expected 1 0 1 25 %', 'Arrived damaged 0 0 0 0 %', 'Another reason 0 0 0 0 %']);
+    const [download] = await Promise.all([p.waitForEvent('download'), p.click('[data-testid=returns-csv]')]);
+    expect(download.suggestedFilename()).toMatch(new RegExp(`^orbes-returns-\\d{4}-\\d{2}-\\d{2}-to-${today}\\.csv$`));
+    const csv = readFileSync((await download.path())!, 'utf8').trim().split('\r\n');
+    expect(csv[1]).toBe('"By model","HALO","","","4","1","3","3","1","0","0","0","3","0","RUNS SMALL"');
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'returns-model', { phone: true });
+    if (SCREENSHOTS) {
+      await p.setViewportSize({ width: 1024, height: 768 });
+      await shot(p, 'returns-model-1024');
+      await p.setViewportSize({ width: 1440, height: 900 });
+    }
+
+    // All time, then a Custom period with nothing in it.
+    await p.selectOption('[data-testid=returns-period-choice]', 'all');
+    await expect.poll(async () => (await p.locator('[data-testid=returns-period]').textContent())?.trim()).toBe('All time');
+    expect(await p.evaluate(() => location.hash)).toBe(`#/orders/returns?model=${halo}&period=all`);
+    await p.selectOption('[data-testid=returns-period-choice]', 'custom');
+    await p.waitForSelector('[data-testid=returns-from]');
+    await p.fill('[data-testid=returns-from]', '2020-01-01');
+    await p.fill('[data-testid=returns-to]', '2020-01-31');
+    await p.click('[data-testid=returns-apply]');
+    await expect.poll(async () => (await p.locator('[data-testid=returns-empty]').textContent())?.trim()).toBe('No return or exchange in this period.');
+    expect((await p.locator('[data-testid=returns-period]').textContent())!.trim()).toBe('01 JAN 2020 – 31 JAN 2020');
+    expect(await p.locator('[data-testid=returns-csv]').count()).toBe(0);
+    await shot(p, 'returns-empty', { phone: true });
+    expect(await csp(p)).toEqual([]);
+    await p.context().close();
   }, STEP_TIMEOUT);
 });

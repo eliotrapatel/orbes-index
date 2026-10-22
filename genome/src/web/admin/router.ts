@@ -42,6 +42,8 @@ export const ROUTES = [
   { name: 'circlePost', path: '/club/circle/:postId' },
   /** The orders (plan LIVE RELEASE+): the board; an order's page and its packing slip, from its card. */
   { name: 'orders', path: '/orders' },
+  /** Orders → Returns (plan MACRO M3 §2.3, R1): from the board's header, before an order's page so its path is never read as an order's id. */
+  { name: 'orderReturns', path: '/orders/returns' },
   { name: 'order', path: '/orders/:orderId' },
   { name: 'packingSlip', path: '/orders/:orderId/slip' },
   /** The invoices and credit notes (plan LIVE RELEASE+, M7): a month's, their PDFs and the accountant's CSV. */

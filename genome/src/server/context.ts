@@ -107,6 +107,7 @@ import { OrderCaseService } from './services/order-cases.js';
 import { purgePackingPhotos } from './services/parcels.js';
 import { SupplierService } from './services/suppliers.js';
 import { BoxService } from './services/boxes.js';
+import { ReturnsReportService } from './services/returns-report.js';
 import { VerificationService } from './services/verification.js';
 import { WarrantyService } from './services/warranty.js';
 import { noopLogger, SYSTEM_ACTOR, systemClock, type Clock, type Logger } from './types.js';
@@ -226,6 +227,8 @@ export interface AppServices {
   suppliers: SupplierService;
   /** The standard boxes (plan MACRO M3 §1.2, B1): Orders → Settings' Boxes, the box each model and parcel uses. */
   boxes: BoxService;
+  /** The returns and exchanges report (plan MACRO M3 §2, R1): Orders → Returns, by reason, model and size, with the runs small / runs large flag; reads only. */
+  returnsReport: ReturnsReportService;
   /** The supplier orders (plan NEXT LOT §3.5.6.3): the proposal, the drafts, their steps, invoices and PDFs; ORBES's only. */
   supplierOrders: SupplierOrderService;
   /** The receptions (plan NEXT LOT §3.5.6.5): a delivery counted by the agent, confirmed by ORBES, its identities issued by a worker, its cards printed. */
@@ -416,6 +419,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const suppliers = new SupplierService({ db, audit, clock });
     const supplierOrders = new SupplierOrderService({ db, audit, clock });
     const boxes = new BoxService({ db, audit, clock });
+    const returnsReport = new ReturnsReportService({ db, clock });
     const logistics = new LogisticsService({ db, audit, stock, verification, warranty, clock, mail: emails.orderStep });
     const orderCases = new OrderCaseService({ db, audit, lifecycle, clock, messages, mail: emails.orderStep });
     const receptions = new ReceptionService({ db, audit, issuance, certificates, cardKey: deriveCardClaimKey(config), clock, log });
@@ -486,6 +490,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       intelligenceSizes,
       suppliers,
       boxes,
+      returnsReport,
       supplierOrders,
       receptions,
       logistics,

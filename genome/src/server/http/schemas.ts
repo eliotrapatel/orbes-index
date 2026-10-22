@@ -1824,6 +1824,20 @@ export const orderBoardQuery = z.object({
   q: queryOptional(z.string().trim().max(BOARD_SEARCH_MAX, `At most ${BOARD_SEARCH_MAX} characters`)),
 });
 
+/**
+ * The returns and exchanges report (plan MACRO M3 §2.2, R1; GET /api/admin/orders/returns and .csv): a model (one, a
+ * main model with its variants), the period's Paris days `from` and `to` (both or neither: the last 12 months), or
+ * `all` for all time, and `test` for the test entrants' orders too. The period's rules answer from the service (422
+ * PERIOD_INVALID), an unknown model too (404 MODEL_NOT_FOUND).
+ */
+export const returnsReportQuery = z.object({
+  modelId: queryOptional(z.string().trim().max(64, 'At most 64 characters')),
+  from: queryOptional(isoDate),
+  to: queryOptional(isoDate),
+  all: queryBool,
+  test: queryBool,
+});
+
 const orderNote = z.preprocess(emptyToNull, text(ORDER_TEXT_LIMITS.note).nullable().optional());
 const orderAmount = z.number().int('Must be a whole number of cents').min(0, 'At least 0').max(ORDER_AMOUNT_MAX_MINOR, `At most ${ORDER_AMOUNT_MAX_MINOR} cents`);
 

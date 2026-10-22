@@ -95,7 +95,7 @@ export async function ordersView(ctx: ViewContext): Promise<HTMLElement> {
   return h(
     'div',
     { class: 'view view--orders' },
-    pageHeader({ eyebrow: 'Clients', title: 'Orders', lead: LEAD, actions: [linkButton('Settings', href('settings'), 'ghost'), shopify, csv] }),
+    pageHeader({ eyebrow: 'Clients', title: 'Orders', lead: LEAD, actions: [linkButton('Returns', href('orderReturns'), 'ghost'), linkButton('Settings', href('settings'), 'ghost'), shopify, csv] }),
     filterBar(field('Channel', channel), field('Release', release), field('Location', location), field('Search', search), h('div', { class: 'cfield cfield--checks' }, late, test)),
     h(
       'p',

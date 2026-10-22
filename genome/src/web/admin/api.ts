@@ -75,6 +75,8 @@ import type {
   OrderAlertSettings,
   OrderBoard,
   OrderBoardFilters,
+  ReturnsReport,
+  ReturnsReportQuery,
   OrderDetail,
   OrderCaseDecided,
   OrderCaseRecord,
@@ -347,6 +349,15 @@ export interface CertificateOptions {
   /** PDF only: 'card' (default, 95 × 62 mm pages) or 'sheet' (A4, eight cards). */
   layout?: 'card' | 'sheet';
 }
+
+/** The returns report's query: only what is given. */
+const returnsQuery = (q: ReturnsReportQuery): Record<string, string | undefined> => ({
+  modelId: q.modelId ?? undefined,
+  from: q.from ?? undefined,
+  to: q.to ?? undefined,
+  all: q.all ? 'true' : undefined,
+  test: q.test ? 'true' : undefined,
+});
 
 export interface Download {
   blob: Blob;
@@ -1199,6 +1210,17 @@ export class AdminApi {
   /** The fulfilment board: every order the filters keep, by step (the emails masked for an AUDITOR); the test accounts' orders only with `test`. */
   orderBoard(f: OrderBoardFilters = {}): Promise<OrderBoard> {
     return this.get('/api/admin/orders', { channel: f.channel, dropId: f.dropId, locationId: f.locationId, late: f.late ? 'true' : undefined, q: f.q, test: f.test ? 'true' : undefined });
+  }
+
+  /** Orders → Returns (plan MACRO M3 §2, R1): the returns and exchanges by reason, model and size; counts only. */
+  returnsReport(q: ReturnsReportQuery = {}): Promise<ReturnsReport> {
+    return this.get('/api/admin/orders/returns', returnsQuery(q));
+  }
+
+  /** Its by-model and by-size tables, as a CSV named by the period's Paris days. */
+  async returnsCsv(q: ReturnsReportQuery = {}): Promise<Download> {
+    const res = await this.request<Response>('GET', '/api/admin/orders/returns.csv', { raw: true, query: returnsQuery(q) });
+    return toDownload(res, 'orbes-returns.csv');
   }
 
   /** Every order the same filters keep, as a CSV (the emails and the buyers masked for an AUDITOR). */
