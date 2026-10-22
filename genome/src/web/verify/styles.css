@@ -2308,6 +2308,153 @@ body.nocturne .view--wishlist.n-wishlist {
   margin-top: 2px;
 }
 
+/* WORN at the foot of the sheet (lot M2, D31 G3 to G5; views/worn-sheet.ts): its heading and sentence on the margin,
+   then two columns 12 px apart, each photograph cropped 4:5 on the mode's plate (a light sheet: the light plate), its
+   credit under it: the first name and country in the label face, in ink, then the Instagram name in the reading face, a
+   link; 28 px between two rows. A lone photograph keeps a column's width. SHOW MORE centred under the grid. */
+.n-model__worn-lead {
+  margin-top: 8px;
+}
+
+.n-model__worn-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 12px;
+  row-gap: 28px;
+  margin: 18px 0 0;
+  padding: 0 var(--n-margin);
+  list-style: none;
+}
+
+.n-model__worn-item {
+  min-width: 0;
+}
+
+.n-model__worn-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+}
+
+.n-model__worn-open:focus-visible {
+  outline: 2px solid var(--vault-ink);
+  outline-offset: 2px;
+}
+
+.n-model__worn-frame {
+  aspect-ratio: 4 / 5;
+  overflow: hidden;
+  background: var(--vault-plate);
+}
+
+.n-model__worn-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.n-model__worn-credit,
+.n-wv__credit {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  row-gap: 2px;
+  margin: 10px 0 0;
+}
+
+.n-model__worn-name,
+.n-model__worn-handle,
+.n-wv__name,
+.n-wv__handle {
+  max-width: 100%;
+  overflow-wrap: break-word;
+}
+
+.n-model__worn-handle,
+.n-wv__handle {
+  color: var(--vault-soft);
+  text-decoration: underline 1px;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--vault-hairline-strong);
+}
+
+.n-model__worn-handle:focus-visible,
+.n-wv__handle:focus-visible {
+  outline: 2px solid var(--vault-ink);
+  outline-offset: 2px;
+}
+
+.n-model__worn-foot {
+  margin-top: 30px;
+  text-align: center;
+}
+
+.n-model__worn-loading:focus {
+  outline: none;
+}
+
+.n-model__worn-failed-reason {
+  margin-top: 4px;
+}
+
+.n-model__worn-retry {
+  margin-top: 4px;
+}
+
+/* A photograph opened whole on a phone: the whole screen on the mode's ground, CLOSE at the right of its head, the
+   photograph whole (never cropped) in what remains, its credit under it on the column's margin. */
+.n-wv {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--safe-top) var(--n-margin) calc(16px + var(--safe-bottom));
+  background: var(--vault-ground);
+  color: var(--vault-ink);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.n-wv__head {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+  max-width: calc(var(--n-column) - 2 * var(--n-margin));
+  flex: none;
+}
+
+.n-wv__figure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: calc(var(--n-column) - 2 * var(--n-margin));
+  /* Centred in the screen: the head's 44 px given back under it. */
+  margin: auto 0;
+  padding: 4px 0 44px;
+}
+
+.n-wv__photo {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: calc(100vh - 150px);
+  max-height: calc(100dvh - 150px);
+  background: var(--vault-plate);
+}
+
+.n-wv__credit {
+  align-self: stretch;
+  margin-top: 14px;
+}
+
 /* ══ THE RELEASES, a draw's page and a LIVE RELEASE's pages before and after the room (plan NOCTURNE, screen 6, step
    N7; C7, C19, C20, C25, C27–C30) ════════════════════════════════════════════════════════════════════════════════════
    THE RELEASES: its title and sentence, LIVE · PAST underlined, each release at the column's full width on its

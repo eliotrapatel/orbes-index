@@ -14,7 +14,7 @@
  */
 import { PHOTO_MAX_BYTES, PHOTO_QUALITIES, PHOTO_MAX_SIDE, type PhotoLimits, type PhotoWords } from '../shared/photo.js';
 import { WORN } from './copy.js';
-import type { OwnerWornPhoto, PieceWorn, WornRefusal } from './types.js';
+import type { OwnerWornPhoto, PieceWorn, SheetWornPhoto, WornRefusal } from './types.js';
 import { formatDate } from './view-model.js';
 
 /** A credit as it reads under a photograph: the line, and the Instagram name with its address when shown. */
@@ -123,4 +123,92 @@ export const WORN_PHOTO_LIMITS: PhotoLimits = Object.freeze({
 /** What the collector reads when a photograph cannot be prepared (read each time: a computer's words differ). */
 export function wornPhotoWords(): PhotoWords {
   return { unreadable: WORN.unreadable, empty: WORN.unreadable, noCanvas: WORN.noCanvas };
+}
+
+// ── WORN at the foot of a model's sheet (G3, G4, G5; lot M2 plan §2.3, step M2.11) ───────────────────────────────────
+
+/** The photographs a page of a sheet's WORN holds (services/worn.ts WORN_PAGE_SIZE): the sheet carries the first. */
+export const WORN_PAGE_SIZE = 12;
+/** The photographs shown first: two columns of three on a phone, two rows of four on a computer. */
+export const WORN_FIRST_PHONE = 6;
+export const WORN_FIRST_DESK = 8;
+/** SHOW MORE shows this many more, reading the next page when they are not read yet. */
+export const WORN_MORE = 12;
+
+/** A photograph of the sheet's WORN, as the grid and the enlarged photograph show it. */
+export interface SheetWornItem {
+  id: string;
+  src: string;
+  /** `Worn by Camille, France`. */
+  alt: string;
+  /** Its button's name: `Open the photograph worn by Camille, France`. */
+  open: string;
+  credit: CreditLine;
+  /** The Instagram name's link name, or null. */
+  instagramLabel: string | null;
+}
+
+/** The sheet's WORN as the server sent it: its photographs read, and how many it has. */
+export interface SheetWornModel {
+  items: SheetWornItem[];
+  total: number;
+}
+
+/** A WORN photograph's own address on this origin (GET /api/v1/worn/:id/photo); anything else is not shown. */
+const WORN_SRC = /^\/api\/v1\/worn\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/photo$/i;
+const text = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+
+/**
+ * The photographs of a page as the sheet shows them (G3): each with its credit, exactly the first name and the country
+ * (plus the Instagram name when its owner chose it), never a variant or a serial whatever else came; one without its
+ * own address, a first name or a country is left out.
+ */
+export function sheetWornItems(list: unknown): SheetWornItem[] {
+  const out: SheetWornItem[] = [];
+  for (const p of Array.isArray(list) ? (list as (Partial<SheetWornPhoto> | null)[]) : []) {
+    if (!p || typeof p.id !== 'string' || typeof p.url !== 'string' || !WORN_SRC.test(p.url)) continue;
+    const firstName = text(p.credit?.firstName);
+    const country = text(p.credit?.country);
+    if (!firstName || !country) continue;
+    const instagram = text(p.credit?.instagram);
+    const credit = creditLine({ firstName, country, instagram: /^[a-z0-9._]{1,30}$/.test(instagram) ? instagram : null });
+    out.push({
+      id: p.id,
+      src: p.url,
+      alt: WORN.sheet.alt(firstName, country),
+      open: WORN.sheet.open(firstName, country),
+      credit,
+      instagramLabel: credit.handle ? WORN.sheet.instagram(credit.handle) : null,
+    });
+  }
+  return out;
+}
+
+/** The sheet's WORN (its first page): none at all while it has no photograph (the section is then not drawn). */
+export function sheetWornModel(w: unknown): SheetWornModel {
+  const v = (w ?? {}) as { photos?: unknown; total?: unknown };
+  const items = sheetWornItems(v.photos);
+  const total = typeof v.total === 'number' && Number.isInteger(v.total) && v.total > 0 ? v.total : 0;
+  return { items, total: items.length === 0 ? 0 : Math.max(total, items.length) };
+}
+
+/** The photographs read so far with a page's added after them, each once (one published meanwhile shifts the pages). */
+export function withPage(have: readonly SheetWornItem[], page: readonly SheetWornItem[]): SheetWornItem[] {
+  const seen = new Set(have.map((i) => i.id));
+  return [...have, ...page.filter((i) => !seen.has(i.id))];
+}
+
+/** How many photographs are to be shown: the first ones, then WORN_MORE more for each SHOW MORE; never past the total. */
+export function wornTarget(total: number, desk: boolean, more: number): number {
+  return Math.min(total, (desk ? WORN_FIRST_DESK : WORN_FIRST_PHONE) + Math.max(0, more) * WORN_MORE);
+}
+
+/**
+ * The page to read so that `target` photographs can be shown, having read `pages` pages and `read` photographs; null
+ * when they are read already (or every page is: the total was counted before a photograph left).
+ */
+export function wornPageToRead(read: number, pages: number, target: number, total: number): number | null {
+  if (read >= target) return null;
+  if (pages * WORN_PAGE_SIZE >= total) return null;
+  return pages + 1;
 }

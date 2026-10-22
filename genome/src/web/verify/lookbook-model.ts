@@ -49,6 +49,7 @@ import { DEFAULT_CARE, DISCONTINUED, LOOKBOOK, PHOTOS } from './copy.js';
 import { isReleaseId, releasePath, zonedDate } from './releases-model.js';
 import type { LookbookCard, LookbookSheet, LookbookSheetVariant, ModelPair, ModelRelease, OwnedPiece } from './types.js';
 import { discontinuedYearOf, upper, type Row } from './view-model.js';
+import { sheetWornModel, type SheetWornModel } from './worn-model.js';
 
 /** The account's note on a request of the private salon (P-X08): as the server holds it (services/salon.ts SHOP_NOTE_MAX). */
 export const SALON_NOTE_MAX = 500;
@@ -300,6 +301,8 @@ export interface SheetModel extends SheetFace {
   releases: ModelReleaseRow[];
   /** BP-34: PAIRS WELL WITH, the same whichever dot is selected; none: no section. */
   pairs: PairCard[];
+  /** Lot M2 (G4): WORN, its first page, the same whichever dot is selected (the whole group's); none: no section. */
+  worn: SheetWornModel;
 }
 
 /** A card of PAIRS WELL WITH (BP-34): another model's sheet, its photograph and its words; never a price. */
@@ -425,19 +428,19 @@ export function sheetModel(s: LookbookSheet, localZone = 'UTC'): SheetModel {
   const dots: SheetDot[] = (Array.isArray(s.variants) ? s.variants : [])
     .filter((v) => isLookbookSlug(v?.slug) && typeof v.label === 'string' && v.label.trim() !== '' && SWATCH.test(v.swatch ?? ''))
     .map((v) => ({ slug: v.slug, label: v.label.trim(), swatch: v.swatch, face: v.slug === s.slug ? face : faceOf(v, category, v.label, s.story) }));
-  return { ...face, sizes: sizesLine(s.sizes), dots: dots.length > 1 ? dots : [], releases: modelReleaseRows(s.releases, localZone), pairs: pairCards(s.pairs) };
+  return { ...face, sizes: sizesLine(s.sizes), dots: dots.length > 1 ? dots : [], releases: modelReleaseRows(s.releases, localZone), pairs: pairCards(s.pairs), worn: sheetWornModel(s.worn) };
 }
 
 /** The sheet with another of its dots selected (N6): that model's face; the sheet as it is for a slug it has no dot of. */
 export function selectDot(m: SheetModel, slug: string): SheetModel {
   const d = m.dots.find((x) => x.slug === slug);
-  return d ? { ...d.face, sizes: m.sizes, dots: m.dots, releases: m.releases, pairs: m.pairs } : m;
+  return d ? { ...d.face, sizes: m.sizes, dots: m.dots, releases: m.releases, pairs: m.pairs, worn: m.worn } : m;
 }
 
 /** The sheet once the account requested the model of the dot `slug` (REQUEST THIS PIECE): REQUESTED on it, and on its dot. */
 export function withRequest(m: SheetModel, slug: string, id: string, modelId: string, size: string | null = null): SheetModel {
   const requested = (f: SheetFace): SheetFace => (f.slug === slug && f.salon ? { ...f, salon: { ...f.salon, request: { id, modelId, size } } } : f);
-  return { ...requested(m), sizes: m.sizes, dots: m.dots.map((d) => ({ ...d, face: requested(d.face) })), releases: m.releases, pairs: m.pairs };
+  return { ...requested(m), sizes: m.sizes, dots: m.dots.map((d) => ({ ...d, face: requested(d.face) })), releases: m.releases, pairs: m.pairs, worn: m.worn };
 }
 
 /** The salon of a reserved sheet; null when the server sent none (a tier it does not name: nothing to request from). */

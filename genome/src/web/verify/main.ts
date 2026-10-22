@@ -102,6 +102,7 @@ import { messageOf } from './views/forms.js';
 import { liveView } from './views/live.js';
 import { liveBannerView } from './views/live-banner.js';
 import { lookbookView, sheetView } from './views/lookbook.js';
+import { WORN_ENTRY_MARK } from './views/worn-sheet.js';
 import { messageView } from './views/message.js';
 import { nowView, type NowView } from './views/now.js';
 import { pieceView } from './views/piece.js';
@@ -1548,6 +1549,9 @@ class App {
       onSheet: (slug) => this.openSheet(slug),
       localZone: localZone(),
       focus,
+      // WORN (lot M2, G4): a photograph opened whole on a phone, over this sheet in its own entry (the back gesture
+      // closes it; the popstate onto the sheet's entry finds the sheet shown and leaves it).
+      pushEntry: () => pushEntry({ ...(history.state as object | null), [WORN_ENTRY_MARK]: true }, location.pathname + location.search),
     });
     if (await this.swap(view.root, 'sheet', focus)) this.live = view;
     else view.dispose();

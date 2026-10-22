@@ -100,7 +100,9 @@
  *   worn              the full story, then WORN (lot M2, D31 G1 to G3; seedWorn): you's profile signs a photograph
  *                     (Camille, France, the Instagram name camille.m), and three more pieces of MONOLITHE in steel hold
  *                     one each: in review, published, not published (the piece not clearly visible); a collector
- *                     without a first name or a country holds one piece of it (YOUR PROFILE first)
+ *                     without a first name or a country holds one piece of it (YOUR PROFILE first); seven more owners of
+ *                     MONOLITHE in its three variants each a photograph published (eight on its sheet with you's), and
+ *                     one of ZENITH one alone on its sheet (G4, G5)
  *
  * Ids written by the server (scan references, order and entry references, genomes, invoice numbers) are the server's;
  * the parity tool's comparisons treat them as live data.
@@ -1469,7 +1471,35 @@ async function seedWorn(w: World): Promise<void> {
   const newcomer = await account(w, 'wornNewcomer', 'l.bernard@example.com');
   const [piece] = await holdPieces(ctx.db, newcomer.id, 1, w.models.steel!, { variant: '17', startedAt: since });
   demo.pieces.wornProfile = await serial(piece!);
+  // Step M2.11 (G3 to G5), WORN on the sheets: seven more owners of MONOLITHE, in each of its variants, each a photograph
+  // published (with you's, eight on its sheet, the newest first; some show their Instagram name), and one owner of ZENITH
+  // (THE PRIVATE SALON) a photograph alone on its sheet.
+  for (const [i, o] of WORN_OWNERS.entries()) {
+    const a = await account(w, o.key, o.email);
+    await ctx.db.updateTable('accounts').set({ country: o.country }).where('id', '=', a.id).execute();
+    await ctx.db.insertInto('account_profiles').values({ account_id: a.id, first_name: o.firstName, instagram: o.instagram }).execute();
+    const [held] = await holdPieces(ctx.db, a.id, 1, w.models[o.model]!, { variant: '17', startedAt: since });
+    clock.set(at(o.published));
+    const r = await ctx.services.worn.send(a.id, await serial(held!), { mime: 'image/webp', bytes: nocturnePhoto(o.photo) }, { instagram: o.instagram !== null, consent: WORN_CONSENT_VERSION }, a.actor);
+    clock.set(new Date(at(o.published).getTime() + (i + 1) * MINUTE));
+    await ctx.services.worn.publish(r.photo!.id, admin);
+  }
 }
+
+/**
+ * The owners whose photographs WORN shows on the stage `worn` (step M2.11): MONOLITHE's in steel, gold and blue (the
+ * sheet shows them alike, never a variant), ZENITH's alone; each published on its day (newest first on the sheet).
+ */
+const WORN_OWNERS: readonly { key: string; email: string; firstName: string; country: string; instagram: string | null; model: 'steel' | 'gold' | 'blue' | 'zenith'; photo: 'steel' | 'gold' | 'blue'; published: string }[] = [
+  { key: 'wornLea', email: 'lea.moretti@example.com', firstName: 'Léa', country: 'IT', instagram: 'lea.moretti', model: 'gold', photo: 'gold', published: '2026-10-05T07:40:00Z' },
+  { key: 'wornYuki', email: 'yuki.tanaka@example.com', firstName: 'Yuki', country: 'JP', instagram: null, model: 'blue', photo: 'blue', published: '2026-10-03T08:10:00Z' },
+  { key: 'wornAmara', email: 'amara.okafor@example.com', firstName: 'Amara', country: 'GB', instagram: 'amara.wears', model: 'steel', photo: 'steel', published: '2026-10-02T09:30:00Z' },
+  { key: 'wornSofia', email: 'sofia.ruiz@example.com', firstName: 'Sofía', country: 'ES', instagram: null, model: 'gold', photo: 'gold', published: '2026-09-30T16:05:00Z' },
+  { key: 'wornNoah', email: 'noah.keller@example.com', firstName: 'Noah', country: 'US', instagram: 'noah.k', model: 'blue', photo: 'blue', published: '2026-09-28T11:20:00Z' },
+  { key: 'wornInes', email: 'ines.benali@example.com', firstName: 'Inès', country: 'MA', instagram: null, model: 'steel', photo: 'steel', published: '2026-09-26T14:45:00Z' },
+  { key: 'wornJonas', email: 'jonas.weber@example.com', firstName: 'Jonas', country: 'DE', instagram: 'jonas.weber', model: 'gold', photo: 'gold', published: '2026-09-24T10:00:00Z' },
+  { key: 'wornHana', email: 'hana.seo@example.com', firstName: 'Hana', country: 'KR', instagram: 'hana.seo', model: 'zenith', photo: 'gold', published: '2026-10-01T12:00:00Z' },
+];
 
 async function seedSizes(w: World, variant: 'full' | 'room'): Promise<void> {
   const { ctx, admin, clock } = w;

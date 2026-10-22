@@ -30,8 +30,9 @@
  * with WRITE TO ORBES CLIENT SERVICES (plan NEXT-NINE, CS-01); THE STORY, the gallery full width, SPECIFICATIONS, CARE;
  * then THE RELEASES OF THIS MODEL (plan NEXT-NINE, CO-01), once the model has a past release: each one of the model and
  * its variants whatever the dot, the newest first, its date and its kind and variant (LIVE RELEASE · IN STEEL), a row to
- * its page, the six newest then SHOW ALL N RELEASES; and, last, PAIRS WELL WITH (plan NEXT-NINE, BP-34), one row of
- * cards that scrolls sideways, each another model's photograph, name and type, opening its sheet in this history entry.
+ * its page, the six newest then SHOW ALL N RELEASES; PAIRS WELL WITH (plan NEXT-NINE, BP-34), one row of cards that
+ * scrolls sideways, each another model's photograph, name and type, opening its sheet in this history entry; and, at the
+ * foot, WORN (lot M2, G3 to G5; views/worn-sheet.ts), the owners' photographs of every variant, once one is published.
  *
  * The grid's card (modelCard) is YOUR WISHLIST's too (plan CUSTOMER INTELLIGENCE §3.2 W.10.2, views/wishlist.ts).
  *
@@ -77,6 +78,7 @@ import { listLine, LOOKBOOK_PATH, PIECES_PATH, viewRoot, withNumerals } from './
 import { messageOf } from './forms.js';
 import { accLink, appAnchor, button, definitionList, failedState, fadedPhoto, icon, lift, loadingState, plateCard, quietLine, sizeButtons, textLink, variantDots } from './nocturne.js';
 import { writeButton } from './write.js';
+import { WornSheet } from './worn-sheet.js';
 
 export interface LookbookView {
   root: HTMLElement;
@@ -97,7 +99,7 @@ export interface LookbookDeps {
 }
 
 export interface SheetDeps {
-  api: Pick<ApiClient, 'lookbookSheet' | 'clubLookbookSheet' | 'requestPiece' | 'products' | 'liveReleases' | 'drops' | 'wishlist' | 'wish' | 'unwish'>;
+  api: Pick<ApiClient, 'lookbookSheet' | 'clubLookbookSheet' | 'requestPiece' | 'products' | 'liveReleases' | 'drops' | 'wishlist' | 'wish' | 'unwish' | 'sheetWorn'>;
   session: Session;
   /** The heart's SIGN IN, signed out (plan CUSTOMER INTELLIGENCE §3.2 W.10.1): MY PIECES' sign-in, as the header's SIGN IN. */
   onSignIn(): void;
@@ -115,6 +117,8 @@ export interface SheetDeps {
   localZone?: string;
   /** Opened as a screen change: once read, focus comes to its title (the model's name), as it came to the sheet's before. */
   focus?: boolean;
+  /** WORN (lot M2, G4): a photograph opened whole on a phone gets its own history entry, so the back gesture closes it. */
+  pushEntry?(): void;
 }
 
 /**
@@ -453,6 +457,11 @@ class SheetPage {
   private heartBusy = false;
   /** The heart's status line after a tap, until the next tap, a dot chosen or the sheet left. */
   private heartLine: { text: string; signIn?: boolean } | null = null;
+  /**
+   * WORN at the foot (lot M2, G4): made once a sheet is read, kept across a render (its SHOW MORE, its pages read) and a
+   * dot chosen (the whole group's photographs); none while the sheet has no photograph.
+   */
+  private worn: WornSheet | null = null;
 
   constructor(private readonly deps: SheetDeps) {
     this.focusPending = deps.focus === true;
@@ -476,6 +485,7 @@ class SheetPage {
   dispose(): void {
     this.disposed = true;
     this.unsubscribe();
+    this.worn?.dispose();
   }
 
   /**
@@ -527,6 +537,8 @@ class SheetPage {
     this.heartLine = null;
     this.releases = { live, drops };
     this.load = load;
+    this.worn?.dispose();
+    this.worn = null;
     this.render();
   }
 
@@ -628,11 +640,27 @@ class SheetPage {
     );
     // CO-01: THE RELEASES OF THIS MODEL, after CARE, only once the model has a past release.
     if (s.releases.length > 0) sections.push(this.releasesSection(s));
-    // BP-34: PAIRS WELL WITH, the very last section, only when it has a card.
+    // BP-34: PAIRS WELL WITH, only when it has a card.
     if (s.pairs.length > 0) sections.push(this.pairsSection(s.pairs));
+    // Lot M2 (G4, G5): WORN at the foot of the sheet, for everyone, only once a photograph is published.
+    if (s.worn.items.length > 0) sections.push(this.wornSection(s));
     this.body.replaceChildren(...sections.filter((x): x is HTMLElement => x !== null));
     if (hadFocus && !this.body.contains(document.activeElement)) this.body.querySelector<HTMLElement>('#sheet-salon')?.focus({ preventScroll: true });
     this.focusTitle();
+  }
+
+  /** WORN (lot M2, G3 to G5): the sheet's own, read once; its next pages from the dot shown (the club's when RESERVED). */
+  private wornSection(s: SheetModel): HTMLElement {
+    this.worn ??= new WornSheet(s.worn, {
+      api: this.deps.api,
+      source: () => {
+        const now = this.load.kind === 'ready' ? this.load.sheet : s;
+        return { slug: now.slug, club: now.reserved };
+      },
+      quietly: (change) => quietly(this.body, change),
+      pushEntry: this.deps.pushEntry,
+    });
+    return this.worn.root;
   }
 
   /** Opened as a screen change, once read: the focus, left on <body> while it read, comes to the page's title. */
@@ -807,7 +835,7 @@ class SheetPage {
   }
 
   /**
-   * BP-34, PAIRS WELL WITH: the very last section, its heading on the margin, then one row of cards that scrolls sideways
+   * BP-34, PAIRS WELL WITH: the last section but WORN, its heading on the margin, then one row of cards that scrolls sideways
    * (only the row, never the page), each 72 % of the column so the next one peeks (a lone card the column whole): the
    * model's photograph whole and square, lazy, without a fade (a broken one hides, the words stay), its name and a ›,
    * its type. A card opens that model's sheet in this sheet's history entry.

@@ -180,6 +180,14 @@ export const DESKTOP_MOVED: readonly DesktopMoved[] = [
     now: 'NOW’s own words on NOW, its line of the message from ORBES still unread.',
     where: 'under',
   },
+  {
+    // Lot M2 (step M2.11, G4): the first ones of WORN are a phone's 6 in two columns, a computer's 8 in four.
+    states: ['sheet-worn'],
+    values: ['SHOW MORE'],
+    reason: 'Lot M2 (G4): on a computer WORN shows its first 8 photographs at once, two rows of its four columns; the stage’s sheet has 8, so there is nothing more to show.',
+    now: 'Every photograph of the sheet on the computer’s grid; SHOW MORE under it once a sheet has more than 8.',
+    removed: true,
+  },
   ...[['draw-drawn'], ['draw-place-held', '2 · NO TIER · 0 YEARS']].map(([id, more]) => ({
     states: [id!],
     values: ['1 · TITANE · 0 YEARS', 'YOURS', ...(more ? [more] : [])],

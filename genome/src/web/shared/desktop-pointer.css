@@ -252,6 +252,26 @@
     transition-duration: var(--d-dur-press, 80ms);
   }
 
+  /* A photograph of WORN (lot M2, G4): lighter under the pointer, a little more pressed; it enlarges. Its Instagram
+     name: ink under the pointer. */
+  html:not(.d-touch) body.nocturne .n-model__worn-img {
+    transition: opacity var(--d-dur-hover, 160ms) var(--d-ease, ease);
+  }
+
+  html:not(.d-touch) body.nocturne .n-model__worn-open:hover .n-model__worn-img {
+    opacity: 0.88;
+  }
+
+  html:not(.d-touch) body.nocturne .n-model__worn-open:active .n-model__worn-img {
+    opacity: 0.8;
+    transition-duration: var(--d-dur-press, 80ms);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.n-model__worn-handle, .d-viewer__handle):hover {
+    color: var(--vault-ink);
+    text-decoration-color: currentColor;
+  }
+
   html:not(.d-touch) body.nocturne :is(.now__piece, .n-model__pair):hover :is(.n-cap, .n-model__pair-name) {
     text-decoration: underline 1px;
     text-underline-offset: 4px;

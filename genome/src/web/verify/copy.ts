@@ -2556,4 +2556,24 @@ export const WORN = Object.freeze({
   noCanvas: 'This browser cannot prepare the photograph. Open the piece in another browser.',
   tooLarge: 'This photograph stays over 1 MB once prepared. Choose another one.',
   retry: 'TRY AGAIN',
+  /**
+   * WORN at the foot of a model's sheet (lot M2, G3 to G5), after PAIRS WELL WITH, for everyone: the photographs of every
+   * variant of the model alike, each credited with exactly the first name and the country (and the Instagram name when
+   * its owner chose to show it), never a variant; the first ones, then SHOW MORE; a photograph opened whole.
+   */
+  sheet: Object.freeze({
+    title: 'WORN',
+    lead: 'Worn by the owners of ORBES pieces.',
+    /** A photograph's words for a screen reader, from its credit (the first name and the country as written). */
+    alt: (firstName: string, country: string) => `Worn by ${firstName}, ${country}`,
+    /** Its button: the photograph opened whole. */
+    open: (firstName: string, country: string) => `Open the photograph worn by ${firstName}, ${country}`,
+    /** The Instagram name, a link opened apart. */
+    instagram: (handle: string) => `${handle} on Instagram (opens in a new tab)`,
+    more: 'SHOW MORE',
+    loading: 'ONE MOMENT…',
+    failed: 'The next photographs cannot be shown now.',
+    retry: 'TRY AGAIN',
+    close: 'CLOSE',
+  }),
 });

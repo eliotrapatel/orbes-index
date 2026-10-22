@@ -87,20 +87,29 @@ export const modelArrangement: Arrangement = {
 
 // ── The viewer (§10.21) ──────────────────────────────────────────────────────
 
+/** A photograph the viewer shows: its address and words, and what is said under it (WORN's credit), if anything. */
+export interface ViewerPhoto {
+  src: string;
+  alt: string;
+  /** Drawn under the photograph each time it is shown (lot M2: WORN's credit, its Instagram link a stop of the focus). */
+  caption?: () => HTMLElement | null;
+}
+
 interface Shown {
   root: HTMLElement;
   stage: HTMLElement;
-  photos: { src: string; alt: string }[];
+  photos: ViewerPhoto[];
   at: number;
   position: HTMLElement;
-  opener: HTMLElement | null;
-  buttons: HTMLButtonElement[];
+  caption: HTMLElement;
+  /** The control to focus again once closed, from the photograph shown last. */
+  opener: (at: number) => HTMLElement | null;
 }
 
 let shown: Shown | null = null;
 const FADE_MS = 200;
 
-function photosOf(gallery: HTMLElement): { tiles: HTMLElement[]; photos: { src: string; alt: string }[] } {
+function photosOf(gallery: HTMLElement): { tiles: HTMLElement[]; photos: ViewerPhoto[] } {
   const tiles = [...gallery.querySelectorAll<HTMLElement>(`:scope > .${TILE}:not([hidden])`)];
   const photos = tiles.map((t) => {
     const img = t.querySelector('img');
@@ -109,7 +118,7 @@ function photosOf(gallery: HTMLElement): { tiles: HTMLElement[]; photos: { src: 
   return { tiles, photos };
 }
 
-function photo(p: { src: string; alt: string }): HTMLImageElement {
+function photo(p: ViewerPhoto): HTMLImageElement {
   return h('img', { class: 'd-viewer__photo', attrs: { src: p.src, alt: p.alt, decoding: 'async' } });
 }
 
@@ -123,9 +132,27 @@ function readAhead(v: Shown): void {
 }
 
 function openViewer(gallery: HTMLElement, tile: HTMLElement): void {
-  if (shown) return;
   const { tiles, photos } = photosOf(gallery);
-  const at = Math.max(0, tiles.indexOf(tile));
+  const opener = tile.querySelector<HTMLElement>(`.${OPEN}`);
+  openPhotoViewer({ photos, at: Math.max(0, tiles.indexOf(tile)), label: gallery.getAttribute('aria-label') ?? '', opener: () => opener });
+}
+
+/** The caption of the photograph shown (none: the line stays empty, out of the way). */
+function drawCaption(v: Pick<Shown, 'caption' | 'photos' | 'at'>): void {
+  const c = v.photos[v.at]?.caption?.() ?? null;
+  v.caption.replaceChildren(...(c ? [c] : []));
+  v.caption.hidden = c === null;
+}
+
+/**
+ * The viewer, open on photograph `at` of `photos`: the gallery's (§10.21), and WORN's at the foot of a sheet (lot M2,
+ * G4), each photograph's caption under it. Named `label`; once closed, the focus goes back to `opener` of the photograph
+ * shown last.
+ */
+export function openPhotoViewer(o: { photos: ViewerPhoto[]; at: number; label: string; opener: (at: number) => HTMLElement | null; extraClass?: string }): void {
+  if (shown) return;
+  const { photos } = o;
+  const at = Math.min(Math.max(0, o.at), photos.length - 1);
   const first = photos[at];
   if (!first) return;
   const many = photos.length > 1;
@@ -134,12 +161,12 @@ function openViewer(gallery: HTMLElement, tile: HTMLElement): void {
   const previous = h('button', { class: 'n-g d-viewer__nav d-viewer__previous', attrs: { type: 'button' }, on: { click: () => step(-1) } }, icon('back', { small: true }), h('span', { text: DESKTOP.viewer.previous }));
   const next = h('button', { class: 'n-g d-viewer__nav d-viewer__next', attrs: { type: 'button' }, on: { click: () => step(1) } }, h('span', { text: DESKTOP.viewer.next }), icon('chev', { small: true }));
   const close = h('button', { class: 'n-g d-viewer__close', attrs: { type: 'button' }, on: { click: () => closeViewer(true) } }, h('span', { text: DESKTOP.viewer.close }), icon('close', { small: true }));
-  const buttons = many ? [previous, next, close] : [close];
+  const caption = h('div', { class: 'd-viewer__caption', attrs: { hidden: true } });
   const root = h(
     'div',
     {
-      class: 'd-viewer',
-      attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-label': gallery.getAttribute('aria-label') ?? '' },
+      class: ['d-viewer', o.extraClass],
+      attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-label': o.label },
       on: {
         // A click on the ground closes; on the photograph, or a control, it does nothing more.
         click: (ev: Event) => {
@@ -151,9 +178,11 @@ function openViewer(gallery: HTMLElement, tile: HTMLElement): void {
     stage,
     ...(many ? [previous, next] : []),
     close,
+    caption,
     ...(many ? [position] : []),
   );
-  shown = { root, stage, photos, at, position, opener: tile.querySelector<HTMLElement>(`.${OPEN}`), buttons };
+  shown = { root, stage, photos, at, position, caption, opener: o.opener };
+  drawCaption(shown);
   document.documentElement.classList.add('d-viewer-open');
   document.addEventListener('keydown', onKey, true);
   document.body.append(root);
@@ -171,6 +200,10 @@ function step(by: number): void {
   const next = photo(v.photos[v.at]!);
   const old = [...v.stage.querySelectorAll<HTMLElement>('.d-viewer__photo')];
   v.position.textContent = DESKTOP.viewer.position(v.at + 1, n);
+  // The caption's link had the focus: it stays in the viewer, on CLOSE.
+  const lost = v.caption.contains(document.activeElement);
+  drawCaption(v);
+  if (lost) v.root.querySelector<HTMLElement>('.d-viewer__close')?.focus({ preventScroll: true });
   if (prefersReducedMotion()) {
     v.stage.replaceChildren(next);
   } else {
@@ -199,17 +232,17 @@ function onKey(ev: KeyboardEvent): void {
     ev.preventDefault();
     step(1);
   } else if (ev.key === 'Tab') {
-    // The focus cycles among the viewer's controls (from wherever a click left it).
-    const list = v.buttons;
-    const i = list.indexOf(document.activeElement as HTMLButtonElement);
+    // The focus cycles among the viewer's controls, in their order (from wherever a click left it).
+    const list = [...v.root.querySelectorAll<HTMLElement>('button, a[href]')].filter((el) => !el.closest('[hidden]'));
+    const i = list.indexOf(document.activeElement as HTMLElement);
     const to = ev.shiftKey ? (i <= 0 ? list.length - 1 : i - 1) : i === list.length - 1 ? 0 : i + 1;
     ev.preventDefault();
     list[to]?.focus();
   }
 }
 
-/** Closes the viewer (fading, unless at once), its tile's button focused again when `back`. */
-function closeViewer(back: boolean): void {
+/** Closes the viewer (fading, unless at once), the photograph's button focused again when `back`. */
+export function closeViewer(back: boolean): void {
   const v = shown;
   if (!v) return;
   shown = null;
@@ -219,5 +252,6 @@ function closeViewer(back: boolean): void {
   const done = () => v.root.remove();
   if (prefersReducedMotion() || !back) done();
   else window.setTimeout(done, FADE_MS);
-  if (back && v.opener?.isConnected) v.opener.focus({ preventScroll: true });
+  const opener = back ? v.opener(v.at) : null;
+  if (opener?.isConnected) opener.focus({ preventScroll: true });
 }

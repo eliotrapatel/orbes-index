@@ -155,6 +155,62 @@ async function wornPhotoLoaded(run: StateRun): Promise<void> {
   await run.page.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>('.piece__worn img')].every((i) => i.complete && i.naturalWidth > 0));
 }
 
+/** WORN at the foot of a sheet (lot M2, step M2.11; G3 to G5). */
+const SHEET_WORN = '.view--sheet[data-state="ready"] .n-model__worn';
+
+/** The photographs of the sheet's WORN shown whole (each read from its public address). */
+async function sheetWornLoaded(run: StateRun): Promise<void> {
+  await run.page.locator(`${SHEET_WORN} .n-model__worn-img`).first().waitFor();
+  await run.page.evaluate(() => {
+    for (const img of document.querySelectorAll<HTMLImageElement>('.n-model__worn-img')) img.loading = 'eager';
+  });
+  await run.page.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>('.n-model__worn-img')].every((i) => i.complete && i.naturalWidth > 0));
+}
+
+/** SHOW MORE pressed `times` times, each time until the photographs it adds are drawn. */
+async function wornShowMore(run: StateRun, times: number): Promise<void> {
+  for (let i = 0; i < times; i++) {
+    const before = await run.page.locator(`${SHEET_WORN} .n-model__worn-item`).count();
+    await run.page.locator(`${SHEET_WORN} .n-model__worn-more`).click();
+    await run.page.waitForFunction((n) => document.querySelectorAll('.n-model__worn .n-model__worn-item').length > n, before);
+  }
+}
+
+/**
+ * The stress of WORN (fidelity rule 5): MONOLITHE's sheet, read signed out, said to hold 40 photographs, their credits
+ * the longest the app takes (a first name of 50 characters, the longest English name of a country, an Instagram name of
+ * 30), 12 a page as the server pages them; each photograph one of the eight the stage published (their own addresses).
+ */
+const WORN_STRESS_TOTAL = 40;
+const WORN_STRESS_CREDITS: readonly { firstName: string; country: string; instagram: string | null }[] = [
+  { firstName: 'Maximiliane-Alexandrine Bénédicte Héloïse Anastase', country: 'South Georgia & South Sandwich Islands', instagram: 'maximiliane.alexandrine.anasta' },
+  { firstName: 'Jo', country: 'Chad', instagram: null },
+  { firstName: 'Marie-Bénédicte Anastasia Héloïse de Montmorency', country: 'British Indian Ocean Territory', instagram: null },
+  { firstName: 'Léa', country: 'Italy', instagram: 'lea.moretti' },
+  { firstName: 'Bartholomew', country: 'Central African Republic', instagram: 'bartholomew.and.the.long.name' },
+  { firstName: 'Yuki', country: 'Japan', instagram: null },
+];
+
+async function wornStressRoutes(page: Page): Promise<void> {
+  const ids = Array.from({ length: WORN_STRESS_TOTAL }, (_, i) => `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`);
+  let urls: string[] = [];
+  const photos = (from: number, to: number) =>
+    ids.slice(from, to).map((id, k) => {
+      const i = from + k;
+      return { id, url: urls[i % urls.length]!, width: 1600, height: 2000, credit: WORN_STRESS_CREDITS[i % WORN_STRESS_CREDITS.length]! };
+    });
+  await page.route('**/api/v1/lookbook/monolithe', async (route) => {
+    const res = await route.fetch();
+    const sheet = (await res.json()) as { worn: { photos: { url: string }[]; total: number } };
+    urls = sheet.worn.photos.map((p) => p.url);
+    await route.fulfill({ response: res, json: { ...sheet, worn: { photos: photos(0, 12), total: WORN_STRESS_TOTAL } } });
+  });
+  await page.route('**/api/v1/lookbook/monolithe/worn?*', async (route) => {
+    const n = Number(new URL(route.request().url()).searchParams.get('page'));
+    await route.fulfill({ json: { photos: photos((n - 1) * 12, n * 12), total: WORN_STRESS_TOTAL, page: n, pageSize: 12 } });
+  });
+}
+
 /** A result read from a photo of `role`'s code, then `then` on it. */
 function result(role: string, then?: (run: StateRun) => Promise<void>): Pick<UiState, 'path' | 'act' | 'ready'> {
   return {
@@ -1581,6 +1637,95 @@ export const PHONE_STATES: readonly UiState[] = [
     ready: `${WORN_BLOCK} .n-worn__error`,
   },
 
+  // ── WORN at the foot of a model's sheet (lot M2, step M2.11; macro scope D31 G3 to G5) on the stage `worn`, the same for
+  // everyone: MONOLITHE's eight photographs of its three variants signed out (the first 6, then SHOW MORE; credits of
+  // the first name and country, the Instagram name when chosen, never a variant), ZENITH's one alone to an owner (a
+  // RESERVED sheet), a photograph opened whole, and, on the stress's 40, the next page being read, unreadable, and every
+  // photograph shown. ──
+  {
+    id: 'sheet-worn',
+    title: 'A model’s sheet, signed out: WORN at its foot, the first 6 of its 8 photographs (every variant alike), CAMILLE · FRANCE @camille.m, SHOW MORE (lot M2, G3–G5)',
+    refs: ['M2'],
+    variant: 'worn',
+    path: sheet('steel'),
+    act: (run) => sheetWornLoaded(run),
+    ready: `${SHEET_WORN} .n-model__worn-item`,
+  },
+  {
+    id: 'sheet-worn-one',
+    title: 'A RESERVED model’s sheet, to an owner: WORN with one photograph alone, HANA · SOUTH KOREA @hana.seo (lot M2, G4, G5)',
+    refs: ['M2'],
+    variant: 'worn',
+    as: you,
+    path: sheet('zenith'),
+    act: (run) => sheetWornLoaded(run),
+    ready: `${SHEET_WORN} .n-model__worn-grid--one`,
+  },
+  {
+    id: 'sheet-worn-enlarged',
+    title: 'A model’s sheet: WORN, SHOW MORE pressed (all 8), then a photograph opened whole with its credit and CLOSE (lot M2, G4)',
+    refs: ['M2'],
+    variant: 'worn',
+    path: sheet('steel'),
+    act: async (run) => {
+      await sheetWornLoaded(run);
+      if (await run.page.locator(`${SHEET_WORN} .n-model__worn-more`).count()) await wornShowMore(run, 1);
+      await run.page.locator(`${SHEET_WORN} .n-model__worn-open`).nth(2).click();
+      await run.page.locator(':is(.n-wv, .d-viewer.is-open) :is(.n-wv__photo, .d-viewer__photo)').first().waitFor();
+      await run.page.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>('.n-wv__photo, .d-viewer__photo')].every((i) => i.complete && i.naturalWidth > 0));
+    },
+    ready: ':is(.n-wv, .d-viewer.is-open) :is(.n-wv__credit, .d-viewer__credit)',
+  },
+  {
+    id: 'sheet-worn-loading',
+    title: 'A model’s sheet: WORN of 40, SHOW MORE pressed, its next page being read: ONE MOMENT… (lot M2, G4)',
+    refs: ['M2'],
+    variant: 'worn',
+    path: sheet('steel'),
+    routes: async (page, hold) => {
+      await wornStressRoutes(page);
+      hold.hold('**/api/v1/lookbook/monolithe/worn?page=2');
+    },
+    act: async (run) => {
+      await sheetWornLoaded(run);
+      await run.page.locator(`${SHEET_WORN} .n-model__worn-more`).click();
+    },
+    ready: `${SHEET_WORN} .n-model__worn-loading`,
+    stress: true,
+  },
+  {
+    id: 'sheet-worn-error',
+    title: 'A model’s sheet: WORN of 40, its next page unreadable: its sentence and TRY AGAIN, the photographs shown kept (lot M2, G4)',
+    refs: ['M2'],
+    variant: 'worn',
+    path: sheet('steel'),
+    routes: async (page) => {
+      await wornStressRoutes(page);
+      await page.route('**/api/v1/lookbook/monolithe/worn?page=2', (route) => route.fulfill({ status: 503, json: { error: { code: 'UNAVAILABLE', message: 'The service is busy. Try again in a moment.' } } }));
+    },
+    act: async (run) => {
+      await sheetWornLoaded(run);
+      await run.page.locator(`${SHEET_WORN} .n-model__worn-more`).click();
+    },
+    ready: `${SHEET_WORN} .n-model__worn-retry`,
+    stress: true,
+  },
+  {
+    id: 'sheet-worn-stress',
+    title: 'A model’s sheet: WORN of 40, every page read: a first name of 50 characters, the longest country, an Instagram name of 30 (lot M2, G3, G4)',
+    refs: ['M2'],
+    variant: 'worn',
+    path: sheet('steel'),
+    routes: (page) => wornStressRoutes(page),
+    act: async (run) => {
+      await sheetWornLoaded(run);
+      while (await run.page.locator(`${SHEET_WORN} .n-model__worn-more`).count()) await wornShowMore(run, 1);
+      await sheetWornLoaded(run);
+    },
+    ready: `${SHEET_WORN} .n-model__worn-foot[hidden]`,
+    stress: true,
+  },
+
   // ── THE COLLECTION ──
   { id: 'collection-signed-out', title: 'THE COLLECTION, signed out', refs: ['C5'], variant: 'full', path: at('/verify/lookbook'), ready: '.view--lookbook[data-state="ready"] .lookbook__group' },
   { id: 'collection', title: 'THE COLLECTION, signed in: THE PRIVATE SALON', refs: ['C5'], variant: 'full', as: you, path: at('/verify/lookbook'), ready: '.view--lookbook[data-state="ready"] .lookbook__reserved' },
@@ -2842,12 +2987,19 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
     onDesk(phoneState('account-messages-house'), 1024, { name: 'messages-house' }),
   ],
   // ── WORN (lot M2, D31) on the stage `worn`: a piece's block with no photograph, a photograph chosen (the drop zone's
-  // preview), in review and published at 1440 × 900; no photograph and published also in light; chosen at 1024 × 768 ──
+  // preview), in review and published at 1440 × 900; no photograph and published also in light; chosen at 1024 × 768;
+  // and the sheet's WORN (step M2.11) ──
   'desk-14': [
     ...desk(1440, 'piece-worn', 'piece-worn-chosen', 'piece-worn-review', 'piece-worn-published'),
     onDesk(phoneState('piece-worn'), 1440, { light: true }),
     onDesk(phoneState('piece-worn-published'), 1440, { light: true }),
     ...desk(1024, 'piece-worn-chosen'),
+    // WORN at the foot of a sheet (step M2.11): four columns, the first 8 and SHOW MORE, in dark and in light; a
+    // photograph enlarged in the sheet's viewer with its credit; the one photograph of a RESERVED sheet; at 1024 × 768.
+    ...desk(1440, 'sheet-worn', 'sheet-worn-enlarged', 'sheet-worn-one'),
+    onDesk(phoneState('sheet-worn'), 1440, { light: true }),
+    onDesk(phoneState('sheet-worn-enlarged'), 1440, { light: true }),
+    ...desk(1024, 'sheet-worn'),
   ],
 });
 

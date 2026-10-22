@@ -90,6 +90,7 @@ import type {
   Wishlist,
   WishRemoved,
   PieceWorn,
+  SheetWornPage,
 } from './types.js';
 import type { SeenBatchBody, SeenSendResult } from './seen-model.js';
 
@@ -1090,6 +1091,17 @@ export class ApiClient {
   /** WITHDRAW: the photograph leaves WORN (or its review) at once, its bytes erased. */
   async withdrawWorn(id: string): Promise<void> {
     await this.request('DELETE', `/api/v1/account/worn/${encodeURIComponent(id)}`, undefined, { csrf: true });
+  }
+
+  /**
+   * The page `page` of a sheet's WORN (G4, G5): a PUBLIC sheet's for everyone, a RESERVED one's through the club for the
+   * owners who reach it (`club`). The photographs of the sheet's whole group, the newest first.
+   */
+  async sheetWorn(slug: string, page: number, opts: { club?: boolean } = {}): Promise<SheetWornPage> {
+    const base = opts.club ? '/api/v1/club/lookbook' : '/api/v1/lookbook';
+    const r = await this.request<SheetWornPage>('GET', `${base}/${encodeURIComponent(slug)}/worn?page=${encodeURIComponent(String(page))}`, undefined, opts.club ? {} : { cache: 'default' });
+    if (!r || !Array.isArray(r.photos) || typeof r.total !== 'number') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r;
   }
 
   // ── Transport ────────────────────────────────────────────────────────────

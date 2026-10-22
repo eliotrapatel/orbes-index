@@ -531,6 +531,11 @@ export interface LookbookSheet {
   releases?: ModelRelease[];
   /** Plan NEXT-NINE, BP-34 (PAIRS WELL WITH): the models its very last section shows; absent from an older server. */
   pairs?: ModelPair[];
+  /**
+   * Lot M2 (macro scope D31, G4 and G5): WORN, the first page of the photographs published of its whole group (every
+   * variant), the newest first, each with its credit only; absent from an older server.
+   */
+  worn?: SheetWorn;
 }
 
 /** A card of PAIRS WELL WITH (BP-34): a model's address, name, type, its label when it is a variant, its photograph. */
@@ -1599,4 +1604,26 @@ export interface PieceWorn {
   credit: { firstName: string | null; country: string | null; instagram: string | null };
   /** The consent's version a sending carries. */
   consentVersion: string;
+}
+
+/** A photograph of a sheet's WORN, as everyone reads it (G3, G5): its address and its credit, never a variant or a serial. */
+export interface SheetWornPhoto {
+  id: string;
+  /** GET /api/v1/worn/:id/photo. */
+  url: string;
+  width: number;
+  height: number;
+  credit: WornCredit;
+}
+
+/** A sheet's WORN (G4): a page of its photographs and how many there are. */
+export interface SheetWorn {
+  photos: SheetWornPhoto[];
+  total: number;
+}
+
+/** GET /api/v1/lookbook/:slug/worn?page= (and the club's): the page `page` of WORN, 12 a page. */
+export interface SheetWornPage extends SheetWorn {
+  page: number;
+  pageSize: number;
 }

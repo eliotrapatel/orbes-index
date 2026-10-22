@@ -210,6 +210,8 @@ describe('a model\'s sheet (P-R02)', () => {
       dots: [],
       releases: [],
       pairs: [],
+      // Lot M2 (G4): no photograph published, no WORN.
+      worn: { items: [], total: 0 },
     });
     // The model's own care; a RESERVED sheet; no story, no photograph from elsewhere, none twice.
     const reserved = sheetModel(sheet({ lookbook: 'RESERVED', care: '  Polish with a soft cloth. ', story: ' \n ', coverUrl: null, gallery: [{ url: media(2), alt: '' }, { url: media(2), alt: null }, { url: 'https://evil.example/a.jpg', alt: 'x' }] }));

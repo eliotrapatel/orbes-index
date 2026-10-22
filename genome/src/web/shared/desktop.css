@@ -4041,6 +4041,86 @@
     pointer-events: none;
   }
 
+  /* WORN at the foot of a sheet (lot M2, D31 G3 to G5; verify/views/worn-sheet.ts): its label and sentence on the left
+     edge, then four columns across the canvas a gutter apart, 48 px between two rows, each photograph cropped 4:5 on
+     the mode's plate, its credit under it (the name in the label face, the Instagram name under it); SHOW MORE on the
+     left edge under the grid. Hover and pressed: shared/desktop-pointer.css. */
+  html:not(.d-touch) body.nocturne .n-model__body > .n-model__worn {
+    margin-top: var(--d-s10);
+    padding: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-model__body > .n-model__worn > .n-px {
+    padding: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-model__body .n-model__worn-lead {
+    margin-top: var(--d-s3);
+  }
+
+  html:not(.d-touch) body.nocturne .n-model__body .n-model__worn-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    column-gap: var(--d-gutter);
+    row-gap: var(--d-s7);
+    margin-top: var(--d-s5);
+    padding: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-model__body .n-model__worn-credit {
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne .n-model__body .n-model__worn-open:focus-visible {
+    outline: 1px solid var(--vault-ink);
+    outline-offset: 4px;
+  }
+
+  html:not(.d-touch) body.nocturne .n-model__body .n-model__worn-foot {
+    margin-top: var(--d-s7);
+    padding: 0;
+    text-align: left;
+  }
+
+  /* The viewer opened from WORN: the photograph a little shorter, so its credit stands under it on the left edge, on the
+     line of PREVIOUS's words; where it stands (3 / 18) centred at the foot as in the gallery's. */
+  html:not(.d-touch) body.nocturne .d-viewer--worn .d-viewer__photo {
+    max-height: calc(100vh - 2 * var(--d-bar));
+  }
+
+  html:not(.d-touch) body.nocturne .d-viewer__caption {
+    position: absolute;
+    bottom: var(--d-s5);
+    left: var(--d-edge);
+    max-width: calc(50vw - var(--d-edge) - 60px);
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-viewer__credit {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: var(--d-s4);
+    row-gap: var(--d-s1);
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne :is(.d-viewer__name, .d-viewer__handle) {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  html:not(.d-touch) body.nocturne .d-viewer__handle {
+    color: var(--vault-soft);
+    text-decoration: underline 1px;
+    text-underline-offset: 4px;
+    text-decoration-color: var(--vault-hairline-strong);
+  }
+
+  html:not(.d-touch) body.nocturne .d-viewer__handle:focus-visible {
+    outline: 1px solid var(--vault-ink);
+    outline-offset: 4px;
+  }
+
   /* THE RELEASES OF THIS MODEL: SHOW ALL N RELEASES on the left edge under the two columns. */
   html:not(.d-touch) body.nocturne .n-model__body .n-model__releases-more {
     margin-top: var(--d-s5);
