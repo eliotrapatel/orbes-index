@@ -26,7 +26,9 @@
  * refresh is a background request: it never signs the admin out. The
  * Messages link (CS-01) carries a second badge, the conversations To answer
  * (GET /api/admin/messages/summary), refreshed the same way by a second poll;
- * the tab title's count stays the Anomalies'.
+ * the tab title's count stays the Anomalies'. The WORN link (plan MACRO M2 §2.4)
+ * carries a third, the owners' photographs to review (GET /api/admin/worn/summary),
+ * refreshed the same way by a third poll.
  *
  * A view may hold its page (ui/leave-guard.ts: a batch's claim codes not yet
  * saved): navigating away or signing out then asks first. A session that
@@ -40,6 +42,7 @@ import { AdminApi, ApiError } from './api.js';
 import { formatDateTime } from './format.js';
 import { badgeText, consoleTitle } from './model/anomalies.js';
 import { messagesBadge } from './model/messages.js';
+import { WORN_COPY, wornBadge } from './model/worn.js';
 import { can, logisticsOnly, saleOnly, type Capability } from './model/permissions.js';
 import { href, parseHash, type Route, type RouteName } from './router.js';
 import type { AdminSession } from './types.js';
@@ -79,6 +82,7 @@ import { invoicesView } from './views/invoices.js';
 import { foundingView } from './views/founding.js';
 import { emailsView } from './views/emails.js';
 import { houseMessagesView } from './views/house-messages.js';
+import { wornView } from './views/worn.js';
 import { segmentsView, segmentView } from './views/segments.js';
 import { supplierOrderView } from './views/supplier-order.js';
 import { supplierOrdersView } from './views/supplier-orders.js';
@@ -147,6 +151,8 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { route: 'messages', label: 'Messages' },
       // Plan MACRO M2 §1.6: House messages under Messages.
       { route: 'houseMessages', label: 'House messages' },
+      // Plan MACRO M2 §2.4: WORN under House messages, its badge the photographs to review.
+      { route: 'worn', label: 'WORN' },
       { route: 'owners', label: 'Owners' },
       // Plan CUSTOMER INTELLIGENCE §3.6 C.6.1: Collectors right after Owners.
       { route: 'collectors', label: 'Collectors', cap: 'readCollectors' },
@@ -198,6 +204,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   messages: { view: messagesView, title: 'Messages', nav: 'messages' },
   conversation: { view: conversationView, title: 'Conversation', nav: 'messages' },
   houseMessages: { view: houseMessagesView, title: 'House messages', nav: 'houseMessages' },
+  worn: { view: wornView, title: 'WORN', nav: 'worn' },
   owners: { view: ownersView, title: 'Owners', nav: 'owners' },
   owner: { view: ownerView, title: 'Owner', nav: 'owners' },
   signUp: { view: signUpView, title: 'Sign-up', nav: 'owners' },
@@ -263,6 +270,8 @@ let shell: {
   badge: HTMLElement | null;
   /** The count of conversations To answer on the Messages link (CS-01). */
   messagesBadge: HTMLElement | null;
+  /** The count of WORN photographs to review on the WORN link (plan MACRO M2 §2.4). */
+  wornBadge: HTMLElement | null;
   forced: boolean;
 } | null = null;
 let clockTimer: ReturnType<typeof setInterval> | null = null;
@@ -273,6 +282,9 @@ let attentionPoll: AttentionPoll | null = null;
 /** Conversations To answer, as last read (0 when signed out), and their refresh. */
 let toAnswer = 0;
 let messagesPoll: AttentionPoll | null = null;
+/** WORN photographs to review, as last read (0 when signed out), and their refresh. */
+let toReview = 0;
+let wornPoll: AttentionPoll | null = null;
 /** The session ended while a page was held: that page stays until it is left, then the sign-in says why. */
 let endedWhileHeld = false;
 /** The notice that said so: taken down with the page. */
@@ -313,6 +325,32 @@ function showMessages(count: number): void {
     shell.messagesBadge.hidden = text === '';
     shell.messagesBadge.querySelector('.side__badge-count')!.textContent = text;
   }
+}
+
+/** Show the count of WORN photographs to review on the WORN link (never in the tab title). */
+function showWorn(count: number): void {
+  toReview = count;
+  const text = wornBadge(count);
+  if (shell?.wornBadge) {
+    shell.wornBadge.hidden = text === '';
+    shell.wornBadge.querySelector('.side__badge-count')!.textContent = text;
+  }
+}
+
+/** Start the WORN badge's refresh, or ask again after a navigation (a third poll, as the Messages one). */
+function watchWorn(): void {
+  if (wornPoll) {
+    void wornPoll.refresh();
+    return;
+  }
+  const poll: AttentionPoll = startAttentionPoll({
+    load: async () => (await api.wornSummary({ background: true })).toReview,
+    apply: showWorn,
+    onEnded: () => {
+      if (wornPoll === poll) wornPoll = null;
+    },
+  });
+  wornPoll = poll;
 }
 
 /** Start the Messages badge's refresh, or ask again after a navigation (a second poll, as the Anomalies one). */
@@ -360,6 +398,9 @@ function forgetAttention(): void {
   messagesPoll?.stop();
   messagesPoll = null;
   showMessages(0);
+  wornPoll?.stop();
+  wornPoll = null;
+  showWorn(0);
 }
 
 /** Navigate to `hash`, re-rendering even when it is already current (hashchange would not fire). */
@@ -425,7 +466,7 @@ function buildSaleShell(s: AdminSession): NonNullable<typeof shell> {
       h('div', { class: 'saleshell__links' }, h('a', { class: 'saleshell__link', attrs: { href: href('security') } }, 'Security'), passwordButton(s, 'saleshell__link'), signOut),
     ),
   );
-  return { kind: 'sale', root, view, nav: null, crumb: null, badge: null, messagesBadge: null, forced: s.admin.passwordChangeRequired };
+  return { kind: 'sale', root, view, nav: null, crumb: null, badge: null, messagesBadge: null, wornBadge: null, forced: s.admin.passwordChangeRequired };
 }
 
 function buildShell(s: AdminSession): NonNullable<typeof shell> {
@@ -442,6 +483,13 @@ function buildShell(s: AdminSession): NonNullable<typeof shell> {
     h('span', { class: 'side__badge-count' }),
     h('span', { class: 'visually-hidden' }, ' to answer'),
   );
+  const toReviewBadge = h(
+    'span',
+    { class: 'side__badge', attrs: { hidden: true, 'data-testid': 'worn-badge' } },
+    h('span', { class: 'side__badge-count' }),
+    h('span', { class: 'visually-hidden' }, WORN_COPY.badgeLabel),
+  );
+  const badgeOf = (route: RouteName) => (route === 'anomalies' ? badge : route === 'messages' ? toAnswerBadge : route === 'worn' ? toReviewBadge : null);
   const nav = h(
     'nav',
     { class: 'side__nav', attrs: { 'aria-label': 'Console' } },
@@ -455,7 +503,7 @@ function buildShell(s: AdminSession): NonNullable<typeof shell> {
         h(
           'ul',
           { class: 'side__list' },
-          ...items.map((i) => h('li', null, h('a', { class: 'side__link', attrs: { href: href(i.route) }, data: { route: i.route } }, i.label, i.route === 'anomalies' ? badge : i.route === 'messages' ? toAnswerBadge : null))),
+          ...items.map((i) => h('li', null, h('a', { class: 'side__link', attrs: { href: href(i.route) }, data: { route: i.route } }, i.label, badgeOf(i.route)))),
         ),
       );
     }),
@@ -498,7 +546,7 @@ function buildShell(s: AdminSession): NonNullable<typeof shell> {
     ),
     h('div', { class: 'main' }, h('header', { class: 'topbar' }, crumb, h('span', { class: 'topbar__env' }, 'Internal'), clock), view),
   );
-  return { kind: 'console', root, view, nav, crumb, badge, messagesBadge: toAnswerBadge, forced };
+  return { kind: 'console', root, view, nav, crumb, badge, messagesBadge: toAnswerBadge, wornBadge: toReviewBadge, forced };
 }
 
 function ensureShell(s: AdminSession, kind: ShellKind = 'console'): NonNullable<typeof shell> {
@@ -507,6 +555,7 @@ function ensureShell(s: AdminSession, kind: ShellKind = 'console'): NonNullable<
     mount(app, shell.root);
     showAttention(attention);
     showMessages(toAnswer);
+    showWorn(toReview);
   }
   return shell;
 }
@@ -693,6 +742,7 @@ async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
   // whose sale shell has no such link.
   if (sh.nav && sh.badge && sh.nav.contains(sh.badge)) watchAttention(r.name === 'anomalies');
   if (sh.nav && sh.messagesBadge && sh.nav.contains(sh.messagesBadge)) watchMessages();
+  if (sh.nav && sh.wornBadge && sh.nav.contains(sh.wornBadge)) watchWorn();
 
   if (r.name === 'security') {
     markNav(null);

@@ -191,6 +191,11 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   switchHouseMoments: 'ADMIN',
   /** A custom message sent now or scheduled in Paris (the phrase SEND), rescheduled or cancelled. */
   sendHouseMessages: 'ADMIN',
+  /**
+   * The WORN page (plan MACRO M2 §2.4, D31 G2): PUBLISH or REFUSE a photograph to review, TAKE DOWN a published one
+   * (server: OPERATOR). An AUDITOR reads the page, the owners' emails masked.
+   */
+  reviewWorn: 'OPERATOR',
   /** The Collectors page (plan CUSTOMER INTELLIGENCE §3.6 C.6.1, C.9): the counted collectors' figures over a period. */
   readCollectors: 'AUDITOR',
   /** The Collectors page's Export (CSV) (§3.6 C.7): one row per collector with everything held, audited. */

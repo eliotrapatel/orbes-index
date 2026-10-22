@@ -75,6 +75,7 @@ import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import { ANOMALY_TYPES } from '../../src/server/services/anomaly.js';
 import { CLUB_TIER_DEFAULT_BENEFITS } from '../../src/server/services/club.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
+import { WORN_CONSENT_VERSION } from '../../src/server/services/worn.js';
 import { aggregateScanStats, daySpan, lastCompleteDay, utcDay } from '../../src/server/services/scan-stats.js';
 import { inTransaction } from '../../src/server/db/connection.js';
 import { defaultLocationId, ensureSku } from '../../src/server/services/stock.js';
@@ -84,6 +85,7 @@ import { giveSizes } from '../support/draws.js';
 import { countPiecesIn, scanIntoParcel, stockPieces } from '../support/fulfil.js';
 import { seedGrowth } from '../support/growth.js';
 import { jpegPhoto } from '../support/images.js';
+import { createAccount, holdPieces } from '../support/live.js';
 import { svgToGray } from '../support/raster.js';
 import { writePng } from '../support/image-io.js';
 import { writeY4m } from '../support/y4m.js';
@@ -2211,10 +2213,11 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await registry.allTextContents()).not.toContain('Atelier');
     const clients = p.locator('.side__group', { hasText: 'Clients' }).locator('.side__link');
     // Links under Segments (plan CUSTOMER INTELLIGENCE §3.4 A.10), Collectors right after Owners (§3.6 C.6.1).
-    expect(await clients.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['messages', 'owners', 'collectors', 'club', 'segments', 'links', 'founding', 'orders', 'invoices', 'warranties', 'care', 'retailers', 'sale']);
+    expect(await clients.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['messages', 'houseMessages', 'worn', 'owners', 'collectors', 'club', 'segments', 'links', 'founding', 'orders', 'invoices', 'warranties', 'care', 'retailers', 'sale']);
     // 28 with Supplier orders under Registry (plan NEXT LOT §3.5.4.2), 29 with Links (plan CUSTOMER INTELLIGENCE §3.4 A.10),
-    // 30 with Collectors (§3.6 C.6.1), 31 with the Founding list under Links (plan MACRO M1 §3.2).
-    expect(await p.locator('.side__link').count()).toBe(31);
+    // 30 with Collectors (§3.6 C.6.1), 31 with the Founding list under Links (plan MACRO M1 §3.2), 33 with House messages
+    // and WORN under Messages (plan MACRO M2 §1.6, §2.4).
+    expect(await p.locator('.side__link').count()).toBe(33);
     // Every link one height, its count badges (Anomalies, Messages) shown or not, whatever font the system falls back to.
     expect(new Set(await p.locator('.side__link').evaluateAll((links) => links.map((a) => a.getBoundingClientRect().height))).size).toBe(1);
     for (const id of ['sign-out', 'change-password']) {
@@ -3290,8 +3293,9 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const overview = p.locator('.side__group', { hasText: 'Overview' }).locator('.side__link');
     expect(await overview.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['dashboard', 'growth', 'generator', 'documents']);
     // 28 with Supplier orders under Registry (plan NEXT LOT §3.5.4.2), 29 with Links (plan CUSTOMER INTELLIGENCE §3.4 A.10),
-    // 30 with Collectors (§3.6 C.6.1), 31 with the Founding list under Links (plan MACRO M1 §3.2).
-    expect(await p.locator('.side__link').count()).toBe(31);
+    // 30 with Collectors (§3.6 C.6.1), 31 with the Founding list under Links (plan MACRO M1 §3.2), 33 with House messages
+    // and WORN under Messages (plan MACRO M2 §1.6, §2.4).
+    expect(await p.locator('.side__link').count()).toBe(33);
     // Every link one height, its count badges (Anomalies, Messages) shown or not, whatever font the system falls back to.
     expect(new Set(await p.locator('.side__link').evaluateAll((links) => links.map((a) => a.getBoundingClientRect().height))).size).toBe(1);
     for (const id of ['sign-out', 'change-password']) {
@@ -3618,6 +3622,70 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.locator('dialog').textContent()).not.toContain('It does not block publishing');
     await p.click('dialog [data-testid=dialog-cancel]');
     await p.waitForSelector('dialog.dialog', { state: 'detached' });
+    expect(await cspViolations(p)).toEqual([]);
+    await c.close();
+  }, STEP_TIMEOUT);
+
+  it('reviews WORN from Clients → WORN (plan MACRO M2 §2.4, D31 G2): the badge, a photograph TO REVIEW with its credit as it will read, PUBLISH, then the sheet\'s public route lists it and the model\'s page counts it', async () => {
+    // A model with a public sheet, and an owner of one of its pieces who sends a photograph with their Instagram name.
+    const worn = (
+      await ctx.db
+        .insertInto('models')
+        .values({ category_id: (await ctx.categories.getByCode('J'))!.index, name: 'ORBIT CUFF', type: 'BRACELET', sku_prefix: 'ORB-CF', slug: 'orbit-cuff', lookbook: 'PUBLIC', published_at: new Date('2026-01-01T00:00:00Z') })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    ).id;
+    const owner = await createAccount(ctx.db);
+    await ctx.db.updateTable('accounts').set({ country: 'FR' }).where('id', '=', owner.id).execute();
+    await ctx.db.insertInto('account_profiles').values({ account_id: owner.id, first_name: 'Camille', instagram: 'camille.m' }).execute();
+    const [pieceId] = await holdPieces(ctx.db, owner.id, 1, worn);
+    const sent = await ctx.services.worn.send(owner.id, pieceId!, { bytes: jpegPhoto(400, 500), mime: 'image/jpeg' }, { instagram: true, consent: WORN_CONSENT_VERSION }, owner.actor);
+    const photoId = sent.photo!.id;
+    expect(sent.photo!.status).toBe('PENDING');
+
+    const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'reduce' });
+    const p = await c.newPage();
+    await watch(p);
+    await signIn(p, ADMIN.email, ADMIN.password);
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    // The sidebar's WORN, under House messages, counts the photograph to review.
+    await expect.poll(() => p.locator('[data-testid=worn-badge] .side__badge-count').textContent(), { timeout: 15_000 }).toBe('1');
+    await p.click('.side__link[data-route=worn]');
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('WORN');
+    expect(await p.locator('[data-testid=worn-tab-review]').getAttribute('aria-current')).toBe('page');
+    const card = p.locator(`[data-testid=worn-card][data-id="${photoId}"]`);
+    await card.waitFor();
+    // The credit exactly as it will read; the piece, the model and the owner for staff; the photograph itself.
+    expect(await card.locator('.worn-credit__line').textContent()).toBe('CAMILLE · FRANCE');
+    expect(await card.locator('.worn-credit__handle').textContent()).toBe('@camille.m');
+    expect(await card.locator('[data-testid=worn-piece]').getAttribute('href')).toMatch(/^#\/products\/O\d{2}-J-\d{5}$/);
+    expect(await card.locator('[data-testid=worn-model]').textContent()).toBe('ORBIT CUFF');
+    expect(await card.locator('[data-testid=worn-owner]').textContent()).toBe(owner.email);
+    expect(await card.locator('[data-testid=worn-sent]').textContent()).toMatch(/ Paris$/);
+    await expect.poll(() => card.locator('img[data-testid=worn-photo]').evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth), { timeout: 15_000 }).toBe(400);
+    // J moves to the card; then PUBLISH: nothing left to review, the badge gone.
+    await p.keyboard.press('j');
+    expect(await p.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.id)).toBe(photoId);
+    await shot(p, 'worn-review', { phone: true });
+    await card.locator('[data-testid=worn-publish]').click();
+    await p.waitForSelector('.toast:has-text("Published: it is on the model’s sheet.")');
+    await expect.poll(() => p.locator('[data-testid=worn-empty]').textContent(), { timeout: 15_000 }).toBe('Nothing to review.');
+    await expect.poll(() => p.locator('[data-testid=worn-badge]').isHidden()).toBe(true);
+    // The sheet's public route lists it with its credit, and serves its photograph to everyone.
+    const sheet = (await (await fetch(`${origin}/api/v1/lookbook/orbit-cuff/worn`)).json()) as { photos: { id: string; url: string; credit: unknown }[]; total: number };
+    expect(sheet.total).toBe(1);
+    expect(sheet.photos.map((x) => [x.id, x.credit])).toEqual([[photoId, { firstName: 'Camille', country: 'France', instagram: 'camille.m' }]]);
+    expect((await fetch(`${origin}${sheet.photos[0]!.url}`)).status).toBe(200);
+    // PUBLISHED by model, from the model's page and its line.
+    await go(p, `#/catalogue/${worn}`, 'ORBIT CUFF');
+    expect(await p.locator('[data-testid=lookbook-worn]').textContent()).toBe('1 published');
+    await p.click('[data-testid=lookbook-worn]');
+    await expect.poll(() => p.locator('[data-testid=worn-tab-published]').getAttribute('aria-current')).toBe('page');
+    expect(await p.locator('[data-testid=worn-filter-model]').inputValue()).toBe(worn);
+    expect(await p.locator('[data-testid=worn-tile]').evaluateAll((tiles) => tiles.map((t) => (t as HTMLElement).dataset.id))).toEqual([photoId]);
+    expect(await p.locator('[data-testid=worn-take-down]').count()).toBe(1);
+    await shot(p, 'worn-published', { phone: true });
+    expect(await figuresInDisplayFace(p)).toEqual([]);
     expect(await cspViolations(p)).toEqual([]);
     await c.close();
   }, STEP_TIMEOUT);

@@ -1796,6 +1796,49 @@ export interface HouseMessageDetail extends HouseMessage {
   reachNow: number | null;
 }
 
+/** The WORN page's three lists (services/worn.ts WORN_QUEUES, plan MACRO M2 §2.4). */
+export const WORN_QUEUES = ['TO_REVIEW', 'PUBLISHED', 'ENDED'] as const;
+export type WornQueue = (typeof WORN_QUEUES)[number];
+
+/** The credit under a WORN photograph (G3): the first name, the country's English name, the Instagram name when chosen. */
+export interface WornCredit {
+  firstName: string;
+  country: string;
+  instagram: string | null;
+}
+
+/** A WORN photograph in the console (GET /api/admin/worn, services/worn.ts AdminWornPhoto): the owner's email masked for an AUDITOR. */
+export interface AdminWornPhoto {
+  id: string;
+  status: WornStatus;
+  /** The piece's row id and its serial (the product page's address). */
+  piece: { id: string; productId: string };
+  model: { id: string; name: string; slug: string | null; variantLabel: string | null };
+  owner: { accountId: string; email: string };
+  credit: WornCredit & { countryCode: string };
+  consentVersion: string;
+  consentAt: Iso;
+  sentAt: Iso;
+  reviewedAt: Iso | null;
+  reviewedBy: { id: string; email: string } | null;
+  publishedAt: Iso | null;
+  endedAt: Iso | null;
+  refusal: WornRefusal | null;
+  /** GET /api/admin/worn/:id/photo while live; null once erased. */
+  photoUrl: string | null;
+  width: number | null;
+  height: number | null;
+  /** Whether everyone sees it now (PUBLISHED, its ownership open, its piece not revoked, its account active). */
+  shown: boolean;
+}
+
+/** The WORN badge and figures (GET /api/admin/worn/summary). */
+export interface WornSummary {
+  toReview: number;
+  published: number;
+  oldestToReviewAt: Iso | null;
+}
+
 /** The Origin block (§3.4 A.10.5): the first visit, the sign-up's last link, the latest purchase's. */
 export interface OwnerOrigin {
   firstVisit: { at: Iso | null; source: OriginSource };

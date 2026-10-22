@@ -24,6 +24,10 @@ import type {
   HouseMoment,
   HouseMomentPreview,
   HouseMomentView,
+  AdminWornPhoto,
+  WornQueue,
+  WornRefusal,
+  WornSummary,
   CollectorPanel,
   EmailKind,
   EmailKindView,
@@ -1458,6 +1462,33 @@ export class AdminApi {
   /** A scheduled message cancelled (ADMIN): it is kept, never sent. */
   cancelHouseMessage(id: string): Promise<HouseMessageDetail> {
     return this.post(`/api/admin/house/messages/${encodeURIComponent(id)}/cancel`, {});
+  }
+
+  // ── WORN (plan MACRO M2 §2.4, D31 G2; routes/admin/worn.ts) ──────────────────────────────────────────────────────
+
+  /** A list of the WORN page: TO REVIEW oldest first, PUBLISHED (of a model's group) or ENDED newest first. */
+  worn(q: { queue: WornQueue; model?: string | null; page?: number; pageSize?: number }): Promise<Paged<AdminWornPhoto>> {
+    return this.get('/api/admin/worn', { queue: q.queue, model: q.model ?? undefined, page: q.page, pageSize: q.pageSize });
+  }
+
+  /** The badge: how many to review, how many published, the oldest waiting; `background` for the sidebar's refresh. */
+  wornSummary(opts: { background?: boolean } = {}): Promise<WornSummary> {
+    return this.request('GET', '/api/admin/worn/summary', { background: opts.background === true });
+  }
+
+  /** PUBLISH a photograph in review (OPERATOR): everyone sees it on the model's sheet. */
+  publishWorn(id: string): Promise<void> {
+    return this.post(`/api/admin/worn/${encodeURIComponent(id)}/publish`, {});
+  }
+
+  /** REFUSE a photograph in review with one of the three reasons (OPERATOR): its bytes erased. */
+  refuseWorn(id: string, refusal: WornRefusal): Promise<void> {
+    return this.post(`/api/admin/worn/${encodeURIComponent(id)}/refuse`, { refusal });
+  }
+
+  /** TAKE DOWN a published photograph with one of the three reasons (OPERATOR): it leaves WORN, its bytes erased. */
+  takeDownWorn(id: string, refusal: WornRefusal): Promise<void> {
+    return this.post(`/api/admin/worn/${encodeURIComponent(id)}/take-down`, { refusal });
   }
 
   orderAlerts(): Promise<OrderAlertSettings> {

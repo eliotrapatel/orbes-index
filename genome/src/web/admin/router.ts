@@ -25,6 +25,8 @@ export const ROUTES = [
   { name: 'conversation', path: '/messages/:conversationId' },
   /** House messages (plan MACRO M2 §1.6): MOMENTS and MESSAGES, under Messages in the sidebar; a moment or a message by its query. */
   { name: 'houseMessages', path: '/house-messages' },
+  /** WORN (plan MACRO M2 §2.4, D31 G2): the owners' photographs TO REVIEW, PUBLISHED by model, ENDED, by `?tab=`; under House messages. */
+  { name: 'worn', path: '/worn' },
   { name: 'owner', path: '/owners/:accountId' },
   /** The Sign-up page (plan CUSTOMER INTELLIGENCE §3.1 P.10): from the Owners page's header, no link of its own in the sidebar. */
   { name: 'signUp', path: '/sign-up' },

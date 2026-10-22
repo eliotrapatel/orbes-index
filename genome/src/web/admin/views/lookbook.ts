@@ -68,6 +68,7 @@ import {
 } from '../model/lookbook.js';
 import { can } from '../model/permissions.js';
 import { modelPhotoImpact } from '../model/photo.js';
+import { modelWornText, WORN_COPY, wornGroupOf } from '../model/worn.js';
 import { lookbookWord, pairFormValues, pairModelLabel, pairOptions, pairsChange, pairsNote, pairsProblem, PAIRS_TEXT, shownLabel, shownNow } from '../model/pairs.js';
 import {
   canTick,
@@ -125,6 +126,12 @@ export function tickSizesOnOpen(modelId: string): void {
 export async function lookbookView(ctx: ViewContext): Promise<HTMLElement> {
   const id = ctx.route.params.modelId ?? '';
   const [m, sizing] = await Promise.all([ctx.api.model(id), ctx.api.modelSizes(id)]);
+  // WORN (plan MACRO M2 §2.4): the published photographs of its group, as its sheet shows them; the page stands without.
+  const wornGroup = wornGroupOf(m);
+  const wornPublished = await ctx.api
+    .worn({ queue: 'PUBLISHED', model: wornGroup, pageSize: 1 })
+    .then((p) => p.total)
+    .catch(() => null);
   const role = ctx.session.admin.role;
   const canEdit = can(role, 'editCatalog');
   const canPhotograph = can(role, 'photograph');
@@ -174,6 +181,11 @@ export async function lookbookView(ctx: ViewContext): Promise<HTMLElement> {
         note: m.publishedAt ? 'Fixed since its first publication: links to its sheet are out.' : undefined,
       },
       { label: 'First published', value: m.publishedAt ? formatDate(m.publishedAt) : 'Never' },
+      {
+        label: WORN_COPY.modelLine,
+        value: h('a', { class: 'idlink', attrs: { href: href('worn', {}, { tab: 'published', model: wornGroup }), 'data-testid': 'lookbook-worn' } }, modelWornText(wornPublished)),
+        note: m.variantOf || m.variants.length > 0 ? WORN_COPY.modelNote : undefined,
+      },
     ]),
     { id: 'publication', tools: canEdit ? [button('Edit', { kind: 'ghost', testId: 'lookbook-edit', onClick: editPublication })] : [] },
   );

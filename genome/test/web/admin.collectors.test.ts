@@ -43,7 +43,8 @@ describe('the Collectors page (§3.6 C.6.1)', () => {
     const main = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../src/web/admin/main.ts'), 'utf8');
     const clients = main.slice(main.indexOf("group: 'Clients'"), main.indexOf("group: 'Security'"));
     const routes = [...clients.matchAll(/route: '(\w+)'/g)].map((m) => m[1]);
-    expect(routes.slice(0, 4)).toEqual(['messages', 'owners', 'collectors', 'club']);
+    // House messages and WORN under Messages (plan MACRO M2 §1.6, §2.4), then Owners and Collectors.
+    expect(routes.slice(0, 6)).toEqual(['messages', 'houseMessages', 'worn', 'owners', 'collectors', 'club']);
     expect(clients).toContain("{ route: 'collectors', label: 'Collectors', cap: 'readCollectors' }");
   });
 

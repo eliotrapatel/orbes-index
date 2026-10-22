@@ -78,18 +78,19 @@ body {
   /* 24 and 20 px: the room the Segments link of an ADMIN's sidebar needed (plan LIVE RELEASE+), then Growth under
      Overview (plan NEXT-NINE, BP-29), with the foot's and the monogram's; 20 and 14 px for Supplier orders under
      Registry (plan NEXT LOT §3.5.4.2); 14 and 8 px for Links under Segments (plan CUSTOMER INTELLIGENCE §3.4 A.10); 10 and
-     6 px for the Founding list under Links (plan MACRO M1 §3.2). */
-  padding: 10px 32px 6px;
+     6 px for the Founding list under Links (plan MACRO M1 §3.2); 6 and 4 px for House messages and WORN under Messages
+     (plan MACRO M2 §1.6, §2.4). */
+  padding: 6px 32px 4px;
   text-decoration: none;
   border-bottom: 1px solid var(--hairline);
 }
 
 /* The monogram over the word, left-aligned with it (brand.css .monogram); 10 px under it since Links (plan CUSTOMER
-   INTELLIGENCE §3.4 A.10), 8 px since the Founding list (plan MACRO M1 §3.2), so an ADMIN's sidebar still fits a 900 px
-   screen. */
+   INTELLIGENCE §3.4 A.10), 8 px since the Founding list (plan MACRO M1 §3.2), 6 px since WORN (plan MACRO M2 §2.4), so an
+   ADMIN's sidebar still fits a 900 px screen. */
 .side__monogram {
   width: 44px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 /* The shared .wordmark spec (brand.css: --track-wordmark), at sidebar size; left-aligned, so no centring indent. */
@@ -98,11 +99,11 @@ body {
   text-indent: 0;
 }
 
-/* 6 px over it (12 before Collectors under Owners, plan CUSTOMER INTELLIGENCE §3.6 C.6.1; 8 before the Founding list,
-   plan MACRO M1 §3.2): an ADMIN's sidebar fits a 900 px screen with its foot. */
+/* 4 px over it (12 before Collectors under Owners, plan CUSTOMER INTELLIGENCE §3.6 C.6.1; 8 before the Founding list,
+   plan MACRO M1 §3.2; 6 before WORN, plan MACRO M2 §2.4): an ADMIN's sidebar fits a 900 px screen with its foot. */
 .side__product {
   display: block;
-  margin-top: 6px;
+  margin-top: 4px;
   font-size: var(--fs-nano);
   letter-spacing: 0.34em;
   text-transform: uppercase;
@@ -119,14 +120,16 @@ body {
   padding: 0 0 2px;
 }
 
-/* 5 px over each group (8 before Supplier orders, plan NEXT LOT §3.5.4.2; 6 before the Founding list, plan MACRO M1
-   §3.2): an ADMIN's sidebar fits a 900 px screen with its foot. */
+/* 3 px over each group (8 before Supplier orders, plan NEXT LOT §3.5.4.2; 6 before the Founding list, plan MACRO M1
+   §3.2; 5 before House messages and WORN, plan MACRO M2 §1.6, §2.4): an ADMIN's sidebar fits a 900 px screen with its
+   foot. */
 .side__group {
-  padding: 5px 32px 2px;
+  padding: 3px 32px 2px;
 }
 
+/* 4 px under it (6 before House messages and WORN, plan MACRO M2). */
 .side__group-title {
-  margin-bottom: 6px;
+  margin-bottom: 4px;
   font-size: var(--fs-nano);
   letter-spacing: 0.34em;
   text-transform: uppercase;
@@ -199,10 +202,11 @@ body {
   background: var(--ink);
 }
 
-/* 10 px above and 8 under (16 and 18 before Collectors under Owners, plan CUSTOMER INTELLIGENCE §3.6 C.6.1; 12 and 10
-   before the Founding list, plan MACRO M1 §3.2): an ADMIN's sidebar fits a 900 px screen with its foot. */
+/* 8 px above and 6 under (16 and 18 before Collectors under Owners, plan CUSTOMER INTELLIGENCE §3.6 C.6.1; 12 and 10
+   before the Founding list, plan MACRO M1 §3.2; 10 and 8 before House messages and WORN, plan MACRO M2): an ADMIN's
+   sidebar fits a 900 px screen with its foot. */
 .side__foot {
-  padding: 10px 32px 8px;
+  padding: 8px 32px 6px;
   border-top: 1px solid var(--hairline);
 }
 
@@ -225,9 +229,11 @@ body {
 .side__foot-links {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px 18px;
-  /* 8 px (14 before Collectors under Owners, plan CUSTOMER INTELLIGENCE §3.6 C.6.1; 10 before the Founding list). */
-  margin-top: 8px;
+  /* 8 px between its two lines (12 before House messages and WORN, plan MACRO M2). */
+  gap: 8px 18px;
+  /* 6 px (14 before Collectors under Owners, plan CUSTOMER INTELLIGENCE §3.6 C.6.1; 10 before the Founding list; 8 before
+     House messages and WORN, plan MACRO M2). */
+  margin-top: 6px;
 }
 
 .side__small,
@@ -7188,5 +7194,287 @@ a.collectors__kpi-link:focus-visible {
 @media (max-width: 599px) {
   .house-view__ground {
     padding: 16px 0;
+  }
+}
+
+/* ── WORN (plan MACRO M2 §2.4, D31 G2): TO REVIEW's cards, PUBLISHED's grid by model, ENDED's rows. The photograph on
+   the ivory ground, the credit in the display face as the sheet sets it, every fact in --font. ── */
+
+.worn__tabs {
+  margin: 0 0 28px;
+}
+
+.worn__tab-count {
+  margin-left: 10px;
+  letter-spacing: 0.04em;
+}
+
+.worn__lead,
+.worn__read-only {
+  margin: 0 0 22px;
+  font-size: var(--fs-line);
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
+.worn__queue {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A card: the photograph large on the left, its facts and actions on the right; a hairline between cards. */
+.worn-card {
+  display: grid;
+  grid-template-columns: minmax(0, 520px) minmax(0, 1fr);
+  gap: 40px;
+  padding: 32px 0;
+  border-top: 1px solid var(--hairline);
+  scroll-margin-top: 24px;
+}
+
+.worn__queue > li:first-child .worn-card {
+  padding-top: 8px;
+  border-top: 0;
+}
+
+.worn-card:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 12px;
+}
+
+.worn-card__ground {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+  background: var(--ivory);
+}
+
+.worn-photo {
+  display: block;
+  max-width: 100%;
+}
+
+.worn-photo--large {
+  width: auto;
+  height: auto;
+  max-height: 620px;
+  object-fit: contain;
+}
+
+.worn-photo--erased {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 160px;
+  font-size: var(--fs-line);
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
+.worn-card__facts {
+  min-width: 0;
+}
+
+.worn-card__label,
+.worn__group-title,
+.worn-credit__line,
+.worn__owner-reads-label {
+  font-family: var(--font-display);
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.worn-card__label {
+  margin: 0 0 12px;
+  font-size: var(--fs-nano);
+  letter-spacing: 0.34em;
+  color: var(--ink-soft);
+}
+
+/* The credit as the sheet sets it under the photograph: the first name and country tracked, the Instagram name under. */
+.worn-credit {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  min-width: 0;
+}
+
+.worn-credit__line {
+  font-size: var(--fs-micro);
+  letter-spacing: 0.24em;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.worn-credit__handle {
+  align-self: flex-start;
+  font-size: var(--fs-line);
+  letter-spacing: 0.02em;
+  color: var(--ink-soft);
+  text-decoration: none;
+  border-bottom: 1px solid var(--hairline-strong);
+  overflow-wrap: anywhere;
+}
+
+.worn-credit__handle:hover,
+.worn-credit__handle:focus-visible {
+  color: var(--ink);
+  border-bottom-color: currentColor;
+}
+
+.worn-card__facts > .worn-credit .worn-credit__line {
+  font-size: var(--fs-lead);
+}
+
+.worn-card__note {
+  margin: 10px 0 26px;
+  max-width: 52ch;
+  font-size: var(--fs-line);
+  letter-spacing: 0.02em;
+  color: var(--ink-soft);
+}
+
+.deflist.worn-card__list {
+  margin: 0 0 28px;
+}
+
+/* An owner's email, however long, wraps inside its column rather than past the page. */
+.worn-card__list .deflist__value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.worn__by {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  max-width: 22em;
+}
+
+.idlink.worn__email {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.worn-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+/* The words the owner will read, under the reason chosen. */
+.worn__owner-reads {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 0;
+  padding: 14px 16px;
+  background: var(--ivory);
+  font-size: var(--fs-body);
+}
+
+.worn__owner-reads-label {
+  font-size: var(--fs-nano);
+  letter-spacing: 0.34em;
+  color: var(--ink-soft);
+}
+
+/* PUBLISHED: a group per model, its photographs in a grid cropped 4:5 as the sheet crops them. */
+.worn__groups {
+  display: grid;
+  gap: 36px;
+  margin-top: 8px;
+}
+
+.worn__group-title {
+  margin: 0 0 16px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.24em;
+  color: var(--ink);
+}
+
+.worn__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 32px 24px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.worn-tile {
+  margin: 0;
+  min-width: 0;
+}
+
+.worn-tile__frame {
+  aspect-ratio: 4 / 5;
+  overflow: hidden;
+  background: var(--ivory);
+}
+
+.worn-photo--tile {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.worn-tile__caption {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 12px;
+  font-size: var(--fs-line);
+  min-width: 0;
+}
+
+.worn-tile__caption .worn-credit {
+  margin-bottom: 6px;
+}
+
+.worn-tile__line {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.worn-tile__date {
+  color: var(--ink-soft);
+}
+
+.worn-tile__hidden {
+  margin-top: 4px;
+}
+
+.worn-tile__actions {
+  margin-top: 10px;
+}
+
+@media (max-width: 1100px) {
+  .worn-card {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
+
+  .worn-photo--large {
+    max-height: 520px;
+  }
+}
+
+@media (max-width: 599px) {
+  .worn__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px 16px;
+  }
+
+  .worn-card__ground {
+    min-height: 220px;
+  }
+
+  .worn-photo--large {
+    max-height: 440px;
   }
 }
