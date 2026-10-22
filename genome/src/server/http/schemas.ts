@@ -59,6 +59,7 @@ import {
   WARRANTY_CLAIM_REFUSALS,
   WARRANTY_CLAIM_STATUSES,
   HOUSE_MESSAGE_STATUSES,
+  WORN_REFUSALS,
 } from '../db/schema.js';
 import { BASE_PRICE_MAX_MINOR, CARE_GUIDE_MAX, MODEL_IDENTITY_MESSAGE, VARIANT_LABEL_MAX } from '../services/catalog.js';
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
@@ -119,6 +120,7 @@ import { BATCH_MAX_EVENTS, SEEN_PAGES } from '../services/tracking.js';
 import { ATTRIBUTIONS, MEASURES, REPORT_MAX_DAYS, REPORT_VIEWS } from '../services/acquisition-report.js';
 import { PERIOD_KEYS, SCOPES } from '../services/insights-scope.js';
 import { LAST_SOURCE_AT } from '../services/acquisition-filters.js';
+import { WORN_QUEUES } from '../services/worn.js';
 import { pageRequest, type PageRequest } from '../types.js';
 import { TASTE_KEY_MAX } from '../../shared/profile-rules.js';
 import { fromZod } from './errors.js';
@@ -2029,6 +2031,38 @@ export const houseSendBody = body({
   at: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, 'A date and time in Paris, YYYY-MM-DDTHH:MM').nullable().optional(),
   phrase: z.string().max(40),
 });
+
+// ── WORN (plan MACRO M2 §2.2, D31) ─────────────────────────────────────────
+
+/**
+ * GET/DELETE /api/v1/account/worn/:id(/photo), GET /api/v1/worn/:id/photo and the console's /api/admin/worn/:id…: a
+ * photograph's id. Any string the router passes (≤ 64 characters): one that is no id answers like an unknown photograph,
+ * 404 WORN_NOT_FOUND.
+ */
+export const wornParams = z.object({ id: z.string().max(64) });
+
+/**
+ * POST /api/v1/account/products/:productId/worn: SHOW MY INSTAGRAM (`instagram=1`; 0 or absent: not shown) and the
+ * consent's version ticked (`consent=`, the one the piece's WORN gave; checked by services/worn.ts, 422 WORN_CONSENT).
+ */
+export const wornSendQuery = z.object({
+  instagram: z.enum(['0', '1']).optional(),
+  consent: z.string().max(10).optional(),
+});
+
+/** GET …/lookbook/:slug/worn?page=: the page of a sheet's WORN (12 a page); garbage reads page 1. */
+export function wornPageOf(query: unknown): number {
+  return pageOf(query).page;
+}
+
+/** GET /api/admin/worn: one of the three lists (TO_REVIEW by default) and, for PUBLISHED, a model's group. */
+export const adminWornQuery = z.object({
+  queue: queryOptional(z.enum(WORN_QUEUES)),
+  model: queryOptional(uuid),
+});
+
+/** POST /api/admin/worn/:id/refuse and …/take-down: why, one of the three reasons shown to the owner in words. */
+export const wornRefusalBody = body({ refusal: z.enum(WORN_REFUSALS) });
 
 /** GET /api/admin/messages: To answer by default, or Answered, Closed, All; Mine or Unassigned; an email or a REF. */
 export const adminMessagesQuery = z.object({

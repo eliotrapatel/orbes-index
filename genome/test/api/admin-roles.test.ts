@@ -31,7 +31,8 @@
  * tags and private notes, read by an AUDITOR, written by an OPERATOR, CUSTOMER INTELLIGENCE §3.6 C.9; the Collectors page's
  * options and panels read by an AUDITOR, CUSTOMER INTELLIGENCE §3.6 C.9; the house messages, plan MACRO M2 §1.4, read by an
  * AUDITOR, the moments' words and the custom messages written by an OPERATOR, a moment switched and a message sent or
- * cancelled by an ADMIN);
+ * cancelled by an ADMIN; WORN, plan MACRO M2 §2.2, read by an AUDITOR, its photographs published, refused and taken down by
+ * an OPERATOR);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. LOGISTICS (plan NEXT LOT §3.5.6.1),
@@ -476,6 +477,14 @@ const PROBES: Probe[] = [
   { group: 'house', method: 'POST', url: '/api/admin/house/count', body: INVALID, min: 'OPERATOR' },
   { group: 'house', method: 'POST', url: `/api/admin/house/messages/${UUID}/send`, body: INVALID, min: 'ADMIN' },
   { group: 'house', method: 'POST', url: `/api/admin/house/messages/${UUID}/cancel`, body: INVALID, min: 'ADMIN' },
+  // WORN (plan MACRO M2 §2.2, step M2.7): its lists, badge and photographs read from AUDITOR, each photograph published,
+  // refused or taken down by an OPERATOR (test/api/admin-worn.test.ts).
+  { group: 'worn', method: 'GET', url: '/api/admin/worn', min: 'AUDITOR' },
+  { group: 'worn', method: 'GET', url: '/api/admin/worn/summary', min: 'AUDITOR' },
+  { group: 'worn', method: 'GET', url: `/api/admin/worn/${UUID}/photo`, min: 'AUDITOR' },
+  { group: 'worn', method: 'POST', url: `/api/admin/worn/${UUID}/publish`, body: INVALID, min: 'OPERATOR' },
+  { group: 'worn', method: 'POST', url: `/api/admin/worn/${UUID}/refuse`, body: INVALID, min: 'OPERATOR' },
+  { group: 'worn', method: 'POST', url: `/api/admin/worn/${UUID}/take-down`, body: INVALID, min: 'OPERATOR' },
   { group: 'links', method: 'GET', url: '/api/admin/link-channels', min: 'AUDITOR' },
   { group: 'links', method: 'POST', url: '/api/admin/link-channels', body: INVALID, min: 'OPERATOR' },
   { group: 'links', method: 'PATCH', url: `/api/admin/link-channels/${UUID}`, body: INVALID, min: 'OPERATOR' },
@@ -592,6 +601,7 @@ describe('admin role enforcement', () => {
       'founding',
       'email',
       'house',
+      'worn',
       'client-sheet',
       'collectors',
     ]) {

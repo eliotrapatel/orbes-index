@@ -30,7 +30,7 @@ describe('createContext', () => {
       expect(admins).toEqual([{ email: 'root@orbes.test', role: 'ADMIN' }]);
       expect((await ctx.keys.list()).filter((k) => k.status === 'ACTIVE')).toHaveLength(1);
       expect(Object.keys(ctx.services).sort()).toEqual(
-        ['acquisition', 'acquisitionReport', 'activity', 'addresses', 'anomaly', 'auth', 'authenticators', 'birthdayCredits', 'campaign', 'care', 'catalog', 'certificates', 'circle', 'claimRenewals', 'clientNotes', 'club', 'collectorInsights', 'clubProgram', 'drops', 'email', 'emails', 'engagement', 'founding', 'fulfilment', 'growth', 'guarantees', 'houseMessages', 'houseMoments', 'houseSender', 'intelligenceSizes', 'invoices', 'issuance', 'lifecycle', 'likes', 'links', 'live', 'liveConsole', 'liveInsights', 'liveRoom', 'logistics', 'lookbook', 'media', 'messages', 'orderCases', 'orders', 'owners', 'ownership', 'ownershipCertificates', 'pastReleases', 'places', 'profiles', 'questions', 'recovery', 'reports', 'retailers', 'sale', 'salon', 'segments', 'shopify', 'sizes', 'receptions', 'stock', 'supplierOrders', 'suppliers', 'tastes', 'tierGrants', 'tracking', 'verification', 'warranty', 'warrantyClaims', 'wishlist'].sort(),
+        ['acquisition', 'acquisitionReport', 'activity', 'addresses', 'anomaly', 'auth', 'authenticators', 'birthdayCredits', 'campaign', 'care', 'catalog', 'certificates', 'circle', 'claimRenewals', 'clientNotes', 'club', 'collectorInsights', 'clubProgram', 'drops', 'email', 'emails', 'engagement', 'founding', 'fulfilment', 'growth', 'guarantees', 'houseMessages', 'houseMoments', 'houseSender', 'intelligenceSizes', 'invoices', 'issuance', 'lifecycle', 'likes', 'links', 'live', 'liveConsole', 'liveInsights', 'liveRoom', 'logistics', 'lookbook', 'media', 'messages', 'orderCases', 'orders', 'owners', 'ownership', 'ownershipCertificates', 'pastReleases', 'places', 'profiles', 'questions', 'recovery', 'reports', 'retailers', 'sale', 'salon', 'segments', 'shopify', 'sizes', 'receptions', 'stock', 'supplierOrders', 'suppliers', 'tastes', 'tierGrants', 'tracking', 'verification', 'warranty', 'warrantyClaims', 'wishlist', 'worn'].sort(),
       );
       // Nothing secret in the startup log.
       const text = JSON.stringify(log.lines);
@@ -125,6 +125,8 @@ describe('housekeeping', () => {
       expect(first.packingPhotos).toBe(0);
       // The emails are erased 90 days after they were sent, failed or were cancelled (plan MACRO M1 §4.1, services/email.ts): none here.
       expect(first.emailPurge).toBe(0);
+      // The WORN photographs whose piece left its owner are ended (plan MACRO M2 §2.1, services/worn.ts): none here.
+      expect(first.wornEnded).toBe(0);
       clock.advance(ctx.config.sessionTtlHours.account * 3_600_000 + 1);
       const r = await hk.runOnce();
       expect(r.sessions).toBe(1);

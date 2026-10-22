@@ -47,6 +47,11 @@
  * PAIRS WELL WITH (§3.7 BP-34): a sheet carries the models its very last section shows (`pairs`, `pairsOf`): the two or
  * three the console picked on its main model (`model_pairs`, CatalogService.setPairs), each the reader may see, else up
  * to three of its collection; never a price.
+
+ * WORN (plan MACRO M2 §2.2, D31 G4 and G5): a sheet carries the first page of its owners' photographs (`worn`,
+ * services/worn.ts sheetWorn): those published and shown of its whole group (every variant, whichever dot is asked, as
+ * THE RELEASES OF THIS MODEL), newest first, each with its credit only; `worn(slug, page)` reads the next pages for the
+ * same reader the sheet answers.
  */
 import { createHash } from 'node:crypto';
 import { sql } from 'kysely';
@@ -57,6 +62,7 @@ import { systemClock, type Clock } from '../types.js';
 import { mediaUrl } from './media.js';
 import { modelReleases, type ModelRelease } from './past-releases.js';
 import { sizesOnce, skuSizes } from './stock.js';
+import { sheetWorn, type WornSheet, type WornSheetPage } from './worn.js';
 
 /** The address of a sheet: lower-case letters and digits, words joined by single hyphens. */
 export const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -301,6 +307,12 @@ export interface LookbookSheet {
    * (`pairsOf`); empty: no section.
    */
   pairs: ModelPair[];
+  /**
+   * Plan MACRO M2, D31 (WORN, at the foot of the sheet): the first page of its owners' photographs published and shown,
+   * of its whole group, newest first, each with its credit (first name, country, Instagram name when chosen), and how
+   * many there are; `{ photos: [], total: 0 }`: no section.
+   */
+  worn: WornSheet;
 }
 
 /** The fallback of PAIRS WELL WITH (BP-34): at most this many models of the sheet's collection when none is picked or shown. */
@@ -476,11 +488,12 @@ export class LookbookService {
     // BP-34: the pairs of its main model, the fallback from the main model's collection.
     const whole = await this.db.selectFrom('models').select(['id', 'collection_id']).where((eb) => eb.or([eb('id', '=', root), eb('variant_of', '=', root)])).execute();
     const collectionId = whole.find((g) => g.id === root)?.collection_id ?? null;
-    const [galleries, sizes, releases, pairs] = await Promise.all([
+    const [galleries, sizes, releases, pairs, worn] = await Promise.all([
       this.db.selectFrom('model_images').select(['model_id', 'sha256', 'alt']).where('model_id', 'in', ids).orderBy('model_id').orderBy('position').execute(),
       skuSizes(this.db, group.map((g) => g.id)),
       modelReleases(this.db, whole.map((g) => g.id), this.clock()),
       pairsOf(this.db, root, collectionId, tier),
+      sheetWorn(this.db, whole.map((g) => g.id), 1),
     ]);
     const galleryOf = (r: SheetRow): LookbookImage[] =>
       // The cover is shown once: a gallery photograph made the reference photograph since is left out here.
@@ -526,8 +539,26 @@ export class LookbookService {
       sizes: sizesOnce(group.flatMap((g) => sizes.get(g.id) ?? [])),
       releases,
       pairs,
+      worn: { photos: worn.photos, total: worn.total },
     };
     return { modelId: m.id, sheet, variantIds: Object.fromEntries(dotted(group).map((g) => [g.slug!, g.id])) };
+  }
+
+  /**
+   * WORN, page `page` of a sheet the reader may see (GET /api/v1/lookbook/:slug/worn, the club's for an owner's `tier`):
+   * the photographs of its whole group, as the sheet's first page reads them; the sheet's own 404 LOOKBOOK_NOT_FOUND
+   * otherwise.
+   */
+  async worn(slug: string, page: number, opts: { tier?: number } = {}): Promise<WornSheetPage> {
+    const key = typeof slug === 'string' ? slug.trim().toLowerCase() : '';
+    if (key.length > SLUG_MAX || !SLUG_RE.test(key)) throw lookbookNotFound();
+    const tier = opts.tier ?? 0;
+    const m = await this.sheetRows(tier).where('m.slug', '=', key).executeTakeFirst();
+    if (!m || !m.slug || m.lookbook === 'HIDDEN') throw lookbookNotFound();
+    if (m.lookbook === 'RESERVED' && m.private_min_tier > tier) throw lookbookNotFound();
+    const root = m.variant_of ?? m.id;
+    const whole = await this.db.selectFrom('models').select('id').where((eb) => eb.or([eb('id', '=', root), eb('variant_of', '=', root)])).execute();
+    return sheetWorn(this.db, whole.map((g) => g.id), page);
   }
 
   /**

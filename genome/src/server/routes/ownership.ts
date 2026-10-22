@@ -15,6 +15,22 @@
  * service's own per-product claim-attempt limit and the account's sign-in
  * throttle.
  *
+ * WORN (plan MACRO M2 §2.2, D31 G1 to G3; services/worn.ts), the owner's
+ * photograph of a piece for the model's sheet:
+ *
+ *   GET    /api/v1/account/products/:productId/worn   the piece's photograph, whether one may be sent and why not,
+ *                                                     the credit it would carry, the consent's version
+ *   POST   /api/v1/account/products/:productId/worn   ?instagram=0|1&consent=<version>, the body the image itself
+ *                                                     (image/jpeg or image/webp, at most 1 MiB); 201 the piece's WORN
+ *   DELETE /api/v1/account/worn/:id                   WITHDRAW, its bytes erased (204)
+ *   GET    /api/v1/account/worn/:id/photo             its own photograph while in review or published (no-store)
+ *
+ * The POST is the only route here that takes an image: its parsers live in its own encapsulation context
+ * (routes/admin/media.ts acceptImageBodies), so no other route accepts one. Its answers, the piece's WORN and the
+ * photograph, are the owner's: never stored by a cache. Errors: 403 WORN_NOT_ALLOWED, 409 WORN_PROFILE_INCOMPLETE and
+ * WORN_ALREADY, 429 WORN_LIMIT, 422 WORN_CONSENT, 404 WORN_NOT_FOUND, and the images' 400 IMAGE_INVALID, IMAGE_ANIMATED,
+ * 413 PAYLOAD_TOO_LARGE, 415 UNSUPPORTED_MEDIA_TYPE.
+ *
  * Responses describe the ownership, never the product's internal status.
  */
 import type { FastifyPluginAsync } from 'fastify';
@@ -26,12 +42,16 @@ import {
   createCertificateBody,
   incidentBody,
   parse,
+  productParams,
   productRefBody,
   registerOwnershipBody,
   resolveIncidentBody,
+  wornParams,
+  wornSendQuery,
 } from '../http/schemas.js';
 import { accountActor, requireAccount, sessionGuard } from '../http/sessions.js';
 import type { OwnershipResult } from '../services/ownership.js';
+import { acceptImageBodies, imageOf, MEDIA_BODY_LIMIT_BYTES } from './admin/media.js';
 import type { RouteDeps } from './public.js';
 
 function ownershipJson(r: OwnershipResult) {
@@ -41,7 +61,7 @@ function ownershipJson(r: OwnershipResult) {
 export const ownershipRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limiters }) => {
   app.addHook('onRequest', rateLimitHook(limiters, 'api'));
   app.addHook('onRequest', sessionGuard(ctx, { kind: 'account' }));
-  const { auth, ownership, ownershipCertificates } = ctx.services;
+  const { auth, ownership, ownershipCertificates, worn } = ctx.services;
   // F-03: the scanned piece is required, unless ORBES Client Services assists acceptances (TRANSFER_ACCEPT_REQUIRE_PRODUCT=false).
   const acceptBody = ctx.config.transferAcceptRequireProduct ? acceptTransferBody : assistedAcceptTransferBody;
 
@@ -118,5 +138,45 @@ export const ownershipRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx,
     const { id } = parse(certificateParams, request.params);
     await ownershipCertificates.revoke(account.id, id, accountActor(request));
     return { ok: true };
+  });
+
+  // ── WORN (plan MACRO M2 §2.2) ──────────────────────────────────────────────
+
+  app.get('/api/v1/account/products/:productId/worn', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { productId } = parse(productParams, request.params);
+    reply.header('cache-control', 'no-store');
+    return worn.ofPiece(account.id, productId);
+  });
+
+  // The sending: the only image this file takes, in its own context (the session, CSRF and same-origin checks inherited).
+  await app.register(async (app) => {
+    acceptImageBodies(app);
+    app.post('/api/v1/account/products/:productId/worn', { bodyLimit: MEDIA_BODY_LIMIT_BYTES }, async (request, reply) => {
+      const { account } = requireAccount(request);
+      const { productId } = parse(productParams, request.params);
+      const q = parse(wornSendQuery, request.query);
+      const out = await worn.send(account.id, productId, imageOf(request.body), { instagram: q.instagram === '1', consent: q.consent }, accountActor(request));
+      reply.header('cache-control', 'no-store');
+      reply.code(201);
+      return out;
+    });
+  });
+
+  // WITHDRAW: another account's photograph, or one not live, is the same 404 as an unknown one.
+  app.delete('/api/v1/account/worn/:id', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(wornParams, request.params);
+    await worn.withdraw(account.id, id, accountActor(request));
+    return reply.code(204).send();
+  });
+
+  app.get('/api/v1/account/worn/:id/photo', { config: { rateGroup: 'media' } }, async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(wornParams, request.params);
+    const p = await worn.photo(id, { kind: 'owner', accountId: account.id });
+    reply.header('cache-control', 'no-store');
+    const bytes = p.bytes!;
+    return reply.type(p.mime).send(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
   });
 };

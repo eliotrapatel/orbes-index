@@ -19,13 +19,16 @@
  *    routes (GET /api/v1/account/sign-up, /profile, /wishlist; the replies of PUT /api/v1/account/profile and PUT
  *    /api/v1/account/wishlist/:slug; POST /api/v1/seen; GET /go/:code). The route files are read, so a GET added to them
  *    without being read here fails the sentinel; the few left out are named with their reason (a PDF, a stored photograph,
- *    the LIVE room's event stream, which carries the state its own GET carries);
+ *    the LIVE room's event stream, which carries the state its own GET carries). Lot M2 step M2.7: the piece's WORN, a
+ *    sheet's WORN pages (public and the club's), with another collector's photograph published on the public sheet, so
+ *    its credit is read and its account never is;
  *  - the right-of-access JSON of that account (GET /api/admin/owners/:id/export, ADMIN), which goes to the collector.
  *
  * Every reply is scanned: no key `tags`, `privateNotes`, `score`, `scores`, `engagement`, the parts' names or the
  * history's, nor who opened or decided a claim; no tag's or note's words (the claim's note too); no email of a console
  * login; no email nor id of another account.
  */
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -52,6 +55,9 @@ const NOT_READ: Readonly<Record<string, string>> = Object.freeze({
   '/api/v1/account/warranty-claims/:id/label.pdf': 'a PDF label of a warranty claim',
   '/api/v1/media/:sha256': 'a stored photograph',
   '/api/v1/live/:id/stream': 'the LIVE room’s event stream, the state GET /api/v1/live/:id/state carries',
+  // Lot M2 step M2.7 (WORN): photographs' bytes.
+  '/api/v1/account/worn/:id/photo': 'a WORN photograph, the collector’s own',
+  '/api/v1/worn/:id/photo': 'a WORN photograph published',
 });
 
 /** Keys staff data would sit under: tags, private notes, the score and its parts, the monthly history, a team mark. */
@@ -230,6 +236,8 @@ describe('the collector never sees staff data (§3.6 C.9, §3.0 (k); step 9.13)'
       '/api/v1/account/questions': '/api/v1/account/questions',
       '/api/v1/account/orders/:id/care-guide': `/api/v1/account/orders/${order.id}/care-guide`,
       '/api/v1/account/products/:productId/care': `/api/v1/account/products/${piece.product_id}/care`,
+      // Lot M2 step M2.7: the piece's WORN.
+      '/api/v1/account/products/:productId/worn': `/api/v1/account/products/${piece.product_id}/worn`,
       '/api/v1/products/:productId/service-history': `/api/v1/products/${piece.product_id}/service-history`,
       '/api/v1/health': '/api/v1/health',
       '/api/v1/keys': '/api/v1/keys',
@@ -238,6 +246,7 @@ describe('the collector never sees staff data (§3.6 C.9, §3.0 (k); step 9.13)'
       '/api/v1/client-services': '/api/v1/client-services',
       '/api/v1/lookbook': '/api/v1/lookbook',
       '/api/v1/lookbook/:slug': `/api/v1/lookbook/${publicModel.slug}`,
+      '/api/v1/lookbook/:slug/worn': `/api/v1/lookbook/${publicModel.slug}/worn`,
       '/api/v1/drops': '/api/v1/drops',
       '/api/v1/drops/:id': `/api/v1/drops/${draw.id}`,
       '/api/v1/drops/:id/entries': `/api/v1/drops/${draw.id}/entries`,
@@ -247,6 +256,7 @@ describe('the collector never sees staff data (§3.6 C.9, §3.0 (k); step 9.13)'
       '/api/v1/releases/rules': '/api/v1/releases/rules',
       '/api/v1/club/lookbook': '/api/v1/club/lookbook',
       '/api/v1/club/lookbook/:slug': `/api/v1/club/lookbook/${reserved.slug}`,
+      '/api/v1/club/lookbook/:slug/worn': `/api/v1/club/lookbook/${reserved.slug}/worn`,
       '/api/v1/club/status': '/api/v1/club/status',
       '/api/v1/club/drops/:id/entry': `/api/v1/club/drops/${draw.id}/entry`,
       '/api/v1/club/circle': '/api/v1/club/circle',
@@ -276,6 +286,32 @@ describe('the collector never sees staff data (§3.6 C.9, §3.0 (k); step 9.13)'
       .onConflict((oc) => oc.column('dedupe_key').doNothing())
       .execute();
 
+    // WORN (lot M2 step M2.7): another collector's photograph published on the public sheet, its credit only to be read.
+    const theirs = await db
+      .selectFrom('ownership as o')
+      .innerJoin('accounts as a', 'a.id', 'o.account_id')
+      .innerJoin('products as p', 'p.id', 'o.product_id')
+      .select(['o.id', 'o.account_id', 'o.product_id'])
+      .where('o.ended_at', 'is', null)
+      .where('o.account_id', '<>', youId)
+      .where('a.status', '=', 'ACTIVE')
+      .where('p.status', '<>', 'REVOKED')
+      .orderBy('o.started_at')
+      .executeTakeFirstOrThrow();
+    const sheetModel = await db.selectFrom('models').select('id').where('slug', '=', publicModel.slug).executeTakeFirstOrThrow();
+    const photo = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+    const reviewer = await db.selectFrom('admin_users').select('id').executeTakeFirstOrThrow();
+    const at = h.clock.now();
+    await db
+      .insertInto('worn_photos')
+      .values({
+        product_id: theirs.product_id, ownership_id: theirs.id, account_id: theirs.account_id, model_id: sheetModel.id,
+        photo, photo_mime: 'image/jpeg', photo_sha256: createHash('sha256').update(photo).digest('hex'), width: 4, height: 5,
+        credit_first_name: 'Sentinel', credit_country: 'FR', consent_at: at, consent_version: '2026-10-21',
+        status: 'PUBLISHED', reviewed_by: reviewer.id, reviewed_at: at, published_at: at, created_at: at,
+      })
+      .execute();
+
     // The route files read: every GET they declare is read here or named in NOT_READ.
     const declared = COLLECTOR_FILES.flatMap(getPaths);
     expect(declared.length).toBeGreaterThan(40);
@@ -292,6 +328,9 @@ describe('the collector never sees staff data (§3.6 C.9, §3.0 (k); step 9.13)'
       expect(replies.get(`GET ${path}`)!.statusCode, path).toBe(200);
     }
     expect(replies.get('GET /go/:code')!.statusCode).toBe(302);
+    // WORN's replies are real ones: the piece's, and the public sheet's with another collector's photograph credited.
+    for (const path of ['/api/v1/account/products/:productId/worn', '/api/v1/lookbook/:slug/worn']) expect(replies.get(`GET ${path}`)!.statusCode, path).toBe(200);
+    expect((safeJson(replies.get('GET /api/v1/lookbook/:slug/worn')!) as { photos: { credit: { firstName: string } }[] }).photos.map((p) => p.credit.firstName)).toContain('Sentinel');
     // The piece's care status carries its claim (plan ORBES CARE): the sentinel reads a real one.
     expect((safeJson(replies.get('GET /api/v1/account/products/:productId/care')!) as { claim: { id: string } | null }).claim?.id).toBe(claimId);
     // MESSAGES carries each context's `ref` (desktop: a reply on a subject attaches it again): the sentinel reads real

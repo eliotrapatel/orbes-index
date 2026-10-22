@@ -20,7 +20,7 @@
  * The edge in front of the VPS lets these upload paths, and only them, carry
  * 1 200 KB instead of 64 KB (deploy/vps/Caddyfile, DEPLOYMENT §15).
  */
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { DomainError } from '../../errors.js';
 import { catalogParams, circlePhotoOrderBody, circlePhotoParams, circlePostParams, emptyBody, galleryImageParams, galleryOrderBody, liveAdminParams, orderParams, parse, productParams } from '../../http/schemas.js';
 import { adminActor } from '../../http/sessions.js';
@@ -61,14 +61,19 @@ class ImageBody implements ImageUpload {
 const unsupportedType = () =>
   new DomainError('UNSUPPORTED_MEDIA_TYPE', 415, 'Send the image itself, as image/jpeg or image/webp (at most 1 MB).');
 
-function imageOf(body: unknown): ImageUpload {
+/** The image a route of a context with `acceptImageBodies` received; 415 for anything else (JSON included). */
+export function imageOf(body: unknown): ImageUpload {
   if (!(body instanceof ImageBody)) throw unsupportedType();
   return body;
 }
 
-export const adminMediaRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
-  const { media, catalog, circle, liveConsole, logistics } = ctx.services;
-
+/**
+ * Let the routes of `app`'s encapsulation context take an image body (`image/jpeg` or `image/webp`, at most 1 MiB, read
+ * by `imageOf`) and refuse any other type unread (415), JSON reaching the handler to be refused there the same way. The
+ * console's photograph routes here; the collector's WORN sending (routes/ownership.ts, plan MACRO M2 §2.2) in its own
+ * context, so no other route of the API accepts an image.
+ */
+export function acceptImageBodies(app: FastifyInstance): void {
   for (const mime of IMAGE_MIME_TYPES) {
     app.addContentTypeParser(mime, { parseAs: 'buffer', bodyLimit: MEDIA_BODY_LIMIT_BYTES }, (_request, body, done) => {
       const b = body as Buffer;
@@ -78,6 +83,12 @@ export const adminMediaRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
   // Any other type (image/svg+xml, image/png, a form…) is refused here without being read; JSON, inherited, reaches
   // the handler and is refused there with the same answer.
   app.addContentTypeParser('*', (_request, _payload, done) => done(unsupportedType(), undefined));
+}
+
+export const adminMediaRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
+  const { media, catalog, circle, liveConsole, logistics } = ctx.services;
+
+  acceptImageBodies(app);
 
   // ── A model's reference photograph ───────────────────────────────────────
 

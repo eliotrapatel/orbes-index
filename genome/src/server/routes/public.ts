@@ -10,6 +10,10 @@
  * (plan NEXT-NINE, FT-01: their figures), the report a customer may attach
  * to a scan that was not authentic, and the ownership certificate an owner
  * shares (F-06: its live record and its PDF, by the token of the link).
+ * WORN (plan MACRO M2 §2.2, D31 G4 and G5): a PUBLIC sheet's owners'
+ * photographs a page at a time (its first page rides in the sheet), and a
+ * photograph's bytes only while it is shown, kept 5 minutes (never
+ * "immutable": a withdrawal stops being served within that time).
  *
  * The photographs draw on their own budget, `media` (rate-limit.ts): a
  * lookbook sheet shows up to nine of them. The lookbook's answers depend on
@@ -46,13 +50,14 @@ import type { AppContext } from '../context.js';
 import { pseudonymize, userAgentFamily, userAgentOf } from '../http/client.js';
 import { ensureDevice } from '../http/device.js';
 import { rateLimitHook, type RateLimiters } from '../http/rate-limit.js';
-import { certificateTokenBody, lookbookParams, mediaParams, pageOf, parse, publicDropParams, reportBody, verifyBody } from '../http/schemas.js';
+import { certificateTokenBody, lookbookParams, mediaParams, pageOf, parse, publicDropParams, reportBody, verifyBody, wornPageOf, wornParams } from '../http/schemas.js';
 import { assertSameOrigin, loadAccount, loadStaff } from '../http/sessions.js';
 import { notFound } from '../errors.js';
 import type { Actor } from '../types.js';
 import type { ScanMeta } from '../services/verification.js';
 import type { SeenMeta } from '../services/tracking.js';
 import { releaseRules } from '../services/release-rules.js';
+import { WORN_PHOTO_CACHE_CONTROL } from '../services/worn.js';
 import { safeFilename } from './admin/codes.js';
 
 export interface RouteDeps {
@@ -182,6 +187,29 @@ export const publicRoutes: FastifyPluginAsync<PublicRouteDeps> = async (app, { c
     const sheet = await ctx.services.lookbook.sheet(slug);
     reply.header('cache-control', LOOKBOOK_CACHE_CONTROL);
     return sheet;
+  });
+
+  // WORN (plan MACRO M2 §2.2, G4 and G5): a PUBLIC sheet's owners' photographs, page `page` of 12, as its first page in
+  // the sheet; the sheet's own 404 LOOKBOOK_NOT_FOUND otherwise (never cached). The same for everyone: 5 minutes.
+  app.get('/api/v1/lookbook/:slug/worn', async (request, reply) => {
+    const { slug } = parse(lookbookParams, request.params);
+    const page = await ctx.services.lookbook.worn(slug, wornPageOf(request.query));
+    reply.header('cache-control', LOOKBOOK_CACHE_CONTROL);
+    return page;
+  });
+
+  // A WORN photograph (G5: everyone), only while it is shown (published, its piece still its sender's, the account
+  // active); one 404 WORN_NOT_FOUND for anything else, never cached. Kept 5 minutes, its ETag the hash of its bytes.
+  app.get('/api/v1/worn/:id/photo', { config: { rateGroup: 'media' } }, async (request, reply) => {
+    const { id } = parse(wornParams, request.params);
+    const header = request.headers['if-none-match'];
+    const head = await ctx.services.worn.photo(id, { kind: 'public' }, { withBytes: !header });
+    const etag = `"${head.sha256}"`;
+    reply.header('cache-control', WORN_PHOTO_CACHE_CONTROL);
+    reply.header('etag', etag);
+    if (matchesEtag(header, etag)) return reply.code(304).send();
+    const bytes = head.bytes ?? (await ctx.services.worn.photo(id, { kind: 'public' })).bytes!;
+    return reply.type(head.mime).send(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
   });
 
   // The drops (P-R03, §8.9): the published releases to come (THE RELEASES' LIVE tab: neither drawn nor cancelled), the

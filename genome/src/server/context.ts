@@ -43,6 +43,7 @@ import { TierGrantService } from './services/tier-grants.js';
 import { BirthdayCreditService } from './services/birthday-credits.js';
 import { HouseMessageService, HouseSender } from './services/house-messages.js';
 import { HouseMomentService } from './services/house-moments.js';
+import { WornService } from './services/worn.js';
 import { EngagementService } from './services/engagement.js';
 import { runCollectorHistory, type HistoryMemo } from './services/collector-history.js';
 import { LikesService } from './services/likes.js';
@@ -245,6 +246,8 @@ export interface AppServices {
    * console's custom messages to a segment or a tier, sent now or scheduled in Paris, and their deliveries (deliverDue).
    */
   houseMessages: HouseMessageService;
+  /** WORN, the owners' gallery (plan MACRO M2 §2.2, D31): a piece's photograph sent, reviewed, shown on its sheet, withdrawn; the job `wornEnded`. */
+  worn: WornService;
   /** The custom messages' sender (plan MACRO M2 §1.3): a pass of houseMessages.deliverDue every 30 s, always on; tests drive deliverDue. */
   houseSender: HouseSender;
 }
@@ -373,6 +376,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const houseMoments = new HouseMomentService({ db, audit, clock, log });
     const houseMessages = new HouseMessageService({ db, audit, clock, log });
     const houseSender = new HouseSender({ messages: houseMessages, clock, log });
+    const worn = new WornService({ db, audit, clock });
     const engagement = new EngagementService({ db, clock, log });
     const care = new CareService({ db, audit, warranty, clock, claimOf: collectorClaim, emails });
     const warrantyClaims = new WarrantyClaimService({ db, audit, warranty, lifecycle, clock, emails });
@@ -487,6 +491,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       claimRenewals,
       houseMoments,
       houseMessages,
+      worn,
       houseSender,
       ...overrides.services,
     };
@@ -587,6 +592,7 @@ export interface Housekeeping {
     careLabels: number;
     packingPhotos: number;
     emailPurge: number;
+    wornEnded: number;
     sizes: number;
   }>;
   /** Stop the timer and wait for a running pass to finish. */
@@ -604,7 +610,9 @@ export interface Housekeeping {
  * yearly care 30 days after their request ended (services/care.ts), and the
  * packing photos of the parcels past their keeping (services/parcels.ts), and
  * the emails 90 days after they were sent, failed or were cancelled
- * (services/email.ts, `emailPurge`), every `intervalMs` (default 10 min).
+ * (services/email.ts, `emailPurge`), and ends the WORN photographs whose piece
+ * left its owner, their bytes erased (services/worn.ts, `wornEnded`, plan
+ * MACRO M2 §2.1), every `intervalMs` (default 10 min).
  *
  * The daily statistics and the hourly activity always run before the purge,
  * and a pass where either failed purges nothing: no scan leaves the history
@@ -659,7 +667,7 @@ export interface Housekeeping {
  *                wishes past their 13 months whose month is counted;
  *   devicePurge  the devices never linked, unseen for 13 months, with no view
  *                and no visit left (TrackingService.purgeDevices);
- *   (liveNetworks, careLabels, packingPhotos, emailPurge, as above)
+ *   (liveNetworks, careLabels, packingPhotos, emailPurge, wornEnded, as above)
  *   sizes        once a Paris day, the `intelligence sizes` log line: the bytes
  *                of the lot's growing tables (the 50 MB backup watch, §8).
  */
@@ -702,6 +710,7 @@ export function startHousekeeping(
       careLabels: 0,
       packingPhotos: 0,
       emailPurge: 0,
+      wornEnded: 0,
       sizes: 0,
     };
     /** Runs one job; false when it failed (logged). */
@@ -779,6 +788,9 @@ export function startHousekeeping(
     await job('packingPhotos', () => purgePackingPhotos(ctx.db, ctx.clock()));
     // Plan MACRO M1 §4.1 (E0): each email 90 days after it was sent, failed or was cancelled, whether the channel is on or not.
     await job('emailPurge', () => ctx.services.email.purge(ctx.clock()));
+    // Plan MACRO M2 §2.1 (D31 G2): a WORN photograph whose piece left its owner (a transfer, a return, a revocation) is
+    // no longer shown from that moment; here it is ENDED and its bytes erased.
+    await job('wornEnded', () => ctx.services.worn.endLeft(ctx.clock()));
     // Once a Paris day in the window: the bytes of the lot's growing tables, for the 50 MB backup watch (§3.3 T.10, §8).
     const today = parisDay(ctx.clock());
     if (morning && sizesDay !== today) {

@@ -59,8 +59,9 @@ export const VIEW_PURGE_MAX_DAYS = 7;
 
 /**
  * The lot's growing tables (§3.3 T.10): the `intelligence sizes` line measures those that exist (the acquisition's since
- * migration 0043), and the house messages' deliveries (plan MACRO M2 §1.4, migration 0052: one row per message an
- * account received, never deleted), for the same 50 MB backup watch.
+ * migration 0043), the house messages' deliveries (plan MACRO M2 §1.4, migration 0052: one row per message an
+ * account received, never deleted) and WORN's photographs (plan MACRO M2 §2.2, migration 0053: each up to 1 MiB while
+ * live, the rows kept), for the same 50 MB backup watch.
  */
 export const INTELLIGENCE_TABLES = [
   'collector_views',
@@ -72,6 +73,7 @@ export const INTELLIGENCE_TABLES = [
   'account_profiles',
   'account_tastes',
   'house_deliveries',
+  'worn_photos',
 ] as const;
 
 /** The Paris day before `YYYY-MM-DD`. */
@@ -281,7 +283,7 @@ export interface VisitorData {
 
 /**
  * The « Visitor data » parts of an `intelligence sizes` measure (a table not there yet counts 0), in all the sum of its
- * parts: the house messages' deliveries, measured on the same line, are no visitor data.
+ * parts: the house messages' deliveries and WORN's photographs, measured on the same line, are no visitor data.
  */
 export function visitorDataOf(tables: Readonly<Record<string, number>>, at: Date): VisitorData {
   const of = (...names: (typeof INTELLIGENCE_TABLES)[number][]) => names.reduce((n, t) => n + (tables[t] ?? 0), 0);

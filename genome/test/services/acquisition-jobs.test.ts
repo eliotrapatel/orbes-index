@@ -462,7 +462,7 @@ describe('acquisitionDaily, acquisitionPurge and the housekeeping (§3.4 A.8 ite
     try {
       const failed = await hk.runOnce();
       expect(Object.keys(failed)).toEqual([
-        'sessions', 'transfers', 'scanTokens', 'scanStats', 'activity', 'birthdayCredits', 'houseMoments', 'acquisitionConversions', 'viewStats', 'viewMonths', 'acquisitionDaily', 'wishMonths', 'engagement', 'collectorHistory', 'scanHistory', 'viewPurge', 'acquisitionPurge', 'wishHistory', 'devicePurge', 'liveNetworks', 'careLabels', 'packingPhotos', 'emailPurge', 'sizes',
+        'sessions', 'transfers', 'scanTokens', 'scanStats', 'activity', 'birthdayCredits', 'houseMoments', 'acquisitionConversions', 'viewStats', 'viewMonths', 'acquisitionDaily', 'wishMonths', 'engagement', 'collectorHistory', 'scanHistory', 'viewPurge', 'acquisitionPurge', 'wishHistory', 'devicePurge', 'liveNetworks', 'careLabels', 'packingPhotos', 'emailPurge', 'wornEnded', 'sizes',
       ]);
       expect(failed).toMatchObject({ acquisitionDaily: 0, acquisitionPurge: 0 });
       // The conversions run every pass: the new account's SIGNUP.

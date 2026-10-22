@@ -110,6 +110,7 @@ import { nextBirthday } from './birthday-credits.js';
 import { readProgram } from './club-program.js';
 import { accountConversation, accountMessages, type ExportedMessage } from './messages.js';
 import { accountHouseMessages, type ExportedHouseMessage } from './house-messages.js';
+import { accountWornPhotos, type ExportedWornPhoto } from './worn.js';
 import { accountLiveData, auditRemovedLiveEntries, removeAccountLiveEntries, type ExportedLiveEntry, type ExportedLiveInterest } from './live.js';
 import { participatedReleases, releasesTakenPart } from './participation.js';
 import { accountReleaseAnswers, type ExportedReleaseAnswer } from './question.js';
@@ -531,6 +532,12 @@ export interface AccountExport {
    */
   houseMessages: ExportedHouseMessage[];
   /**
+   * The photographs the account sent for WORN (plan MACRO M2 §2.2, D31), oldest first: the piece and its model, the
+   * status, when it was sent, published and ended, the reason of a refusal or a take-down, the credit as sent and the
+   * consent's version and time; never the bytes (kept only while in review or published, and shown on the piece then).
+   */
+  wornPhotos: ExportedWornPhoto[];
+  /**
    * The new claim codes ORBES Client Services made for the account's orders (plan NEXT LOT §3.4), oldest first: the
    * order, when it was made, where it stands and when it was read; never the code, sealed or clear, nor who made it.
    */
@@ -578,6 +585,7 @@ export const EXPORT_NOT_INCLUDED: readonly string[] = Object.freeze([
   'The IP address and device cookie behind each scan, session and audit entry: never stored; only keyed one-way pseudonyms (HMAC) are kept, which identify nothing on their own.',
   'The network behind each entry of a LIVE RELEASE: only a keyed one-way hash of its prefix is kept, and erased 30 days after the release.',
   `The address, subject and words of each email: the emails list gives each one by its kind, status and dates. Each email sent, with its address, subject and words, is kept ${EMAIL_RETENTION_DAYS} days after it is sent or fails, then erased.`,
+  'The photographs sent for WORN: the wornPhotos list gives each one by its piece, status and dates. A photograph is kept only while it is in review or published, shown on its piece then, and erased when it is withdrawn, refused, taken down or its piece passes on.',
 ]);
 
 export interface OwnerServiceDeps {
@@ -1163,6 +1171,7 @@ export class OwnerService {
         emailPreferences: { releaseNotices: preference?.release_notices ?? false, changedAt: preference?.changed_at ?? null },
         emails: emails.map((e) => ({ kind: e.kind, status: e.status, createdAt: e.created_at, sentAt: e.sent_at, settledAt: e.settled_at })),
         houseMessages: await accountHouseMessages(tx, a.id),
+        wornPhotos: await accountWornPhotos(tx, a.id),
         claimCodes,
         tierGrants,
         activity: activity.slice(0, EXPORT_LIST_LIMIT).map((e) => ({
@@ -1212,6 +1221,7 @@ export class OwnerService {
             foundingList: out.foundingList ? 1 : 0,
             emails: out.emails.length,
             houseMessages: out.houseMessages.length,
+            wornPhotos: out.wornPhotos.length,
             claimCodes: out.claimCodes.length,
             tierGrants: out.tierGrants.length,
             activity: out.activity.length,

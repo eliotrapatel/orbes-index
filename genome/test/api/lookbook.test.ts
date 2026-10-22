@@ -75,6 +75,8 @@ interface Sheet {
   releases: unknown[];
   /** Plan NEXT-NINE, BP-34: PAIRS WELL WITH. */
   pairs: unknown[];
+  /** Plan MACRO M2, D31: WORN, its first page and how many in all. */
+  worn: { photos: unknown[]; total: number };
 }
 
 const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
@@ -342,6 +344,8 @@ describe('the lookbook of the models (P-R02)', () => {
       releases: [],
       // Plan NEXT-NINE, BP-34: no pick, no other model shown in its collection.
       pairs: [],
+      // Plan MACRO M2, D31: no owner's photograph published, no WORN.
+      worn: { photos: [], total: 0 },
     } satisfies Sheet);
     // A RESERVED or HIDDEN model, an unknown or malformed address: one 404, never cached.
     for (const slug of ['zenith', 'nope', 'Not an address', '-x']) {

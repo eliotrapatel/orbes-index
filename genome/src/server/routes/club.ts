@@ -8,6 +8,8 @@
  *
  *   GET  /api/v1/club/lookbook                  the RESERVED models the account's tier reaches, with their prices (no story)
  *   GET  /api/v1/club/lookbook/:slug            a sheet, PUBLIC or RESERVED (its price, its tier, the account's open request)
+ *   GET  /api/v1/club/lookbook/:slug/worn       plan MACRO M2 §2.2 (D31 G4, G5): its WORN, page `page` of 12, as its first
+ *                                               page in the sheet (its photographs' bytes are public: routes/public.ts)
  *   POST /api/v1/club/lookbook/:slug/request    REQUEST THIS PIECE, with an optional note and size (AC-01); ORBES Client Services concludes
  *
  * P-R03, the drops (any ORBES account: one that holds no piece is drawn after
@@ -42,7 +44,7 @@
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { rateLimitHook } from '../http/rate-limit.js';
-import { circleRsvpBody, circleVoteBody, dropChangeSizeBody, dropSizeBody, emptyBody, lookbookParams, parse, publicCircleParams, publicDropParams, salonRequestBody } from '../http/schemas.js';
+import { circleRsvpBody, circleVoteBody, dropChangeSizeBody, dropSizeBody, emptyBody, lookbookParams, parse, publicCircleParams, publicDropParams, salonRequestBody, wornPageOf } from '../http/schemas.js';
 import { accountActor, requireAccount, sessionGuard } from '../http/sessions.js';
 import { circleFeedPage, circleFeedVisit } from '../services/circle.js';
 import type { RouteDeps } from './public.js';
@@ -67,6 +69,12 @@ export const clubRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limi
     const { account } = requireAccount(request);
     const { slug } = parse(lookbookParams, request.params);
     return salon.sheet(account.id, slug);
+  });
+
+  app.get('/api/v1/club/lookbook/:slug/worn', async (request) => {
+    const { account } = requireAccount(request);
+    const { slug } = parse(lookbookParams, request.params);
+    return salon.worn(account.id, slug, wornPageOf(request.query));
   });
 
   app.post('/api/v1/club/lookbook/:slug/request', async (request, reply) => {

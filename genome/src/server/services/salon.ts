@@ -53,6 +53,7 @@ import { CLUB_TIER_NAMES, CLUB_TIER_THRESHOLDS, ownersOnly, type ClubService, ty
 import type { LookbookService, LookbookSheet, SalonCard, SalonFacts } from './lookbook.js';
 import { orderForShopRequest } from './orders.js';
 import { matchSavedSize, modelSizeCandidates, savedMm, sizeKindOf } from './sizes.js';
+import type { WornSheetPage } from './worn.js';
 
 /** The account's note on a request (shop_requests.note): at most this many characters once trimmed. */
 export const SHOP_NOTE_MAX = 500;
@@ -288,6 +289,15 @@ export class SalonService {
     }
     if (!sheet.salon) return { ...sheet, variants } as SalonSheet;
     return { ...sheet, salon: await this.requestFacts(accountId, modelId, sheet.salon), variants };
+  }
+
+  /**
+   * WORN, page `page` of a sheet for an owner (GET /api/v1/club/lookbook/:slug/worn, plan MACRO M2 §2.2): the sheet's
+   * photographs as `sheet` reads its first page, for the same reader (403 OWNERS_ONLY, 404 LOOKBOOK_NOT_FOUND alike).
+   */
+  async worn(accountId: string, slug: string, page: number): Promise<WornSheetPage> {
+    const tier = await this.ownerTier(accountId);
+    return this.lookbook.worn(slug, page, { tier });
   }
 
   /**
