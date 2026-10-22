@@ -7040,6 +7040,12 @@ a.collectors__kpi-link:focus-visible {
   border-top: 1px solid var(--hairline);
 }
 
+/* Right under the facts, whose last row already draws the rule: no second rule (it read as an empty row). */
+.deflist.house__facts + .house__words {
+  padding-top: 0;
+  border-top: 0;
+}
+
 .house__words-title {
   margin: 0 0 18px;
   overflow-wrap: anywhere;

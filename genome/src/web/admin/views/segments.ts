@@ -59,7 +59,7 @@ import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
 
 const LEAD =
-  'Saved groups of collectors, read live wherever they decide: the access rule of a LIVE RELEASE or a draw (its page says FOR SELECTED COLLECTORS, never the name) and the audience of a post of the circle.';
+  'Saved groups of collectors, read live wherever they decide: the access rule of a LIVE RELEASE or a draw (its page says FOR SELECTED COLLECTORS, never the name) and the audience of a post of the circle or of a house message.';
 
 /** The count is read again this long after the last change of the rules. */
 const COUNT_DELAY_MS = 300;
