@@ -84,6 +84,9 @@ import type {
   OrderTermsChange,
   OrderTransitionInput,
   StockLocation,
+  LocationCountriesResult,
+  SizeSplitProposal,
+  SplitDraftsResult,
   AdminSession,
   AdminSessionInfo,
   AdminUser,
@@ -727,6 +730,19 @@ export class AdminApi {
   /** OPERATOR: pieces of a size added to its supplier's draft to a location (the draft made when there is none). */
   addToSupplierDraft(input: { skuId: string; locationId: string; quantity: number; from?: 'PROPOSAL' | 'RELEASE' }): Promise<SupplierOrderDetail> {
     return this.post('/api/admin/supplier-orders/draft-lines', input);
+  }
+
+  /**
+   * OPERATOR, ORDER A MODEL (plan MACRO M3 §3.2, Z1): the pieces of a model or a variant split by size and location
+   * (every location when `locationIds` is omitted), counts only; 409 MODEL_NO_SIZES.
+   */
+  supplierSplit(input: { modelId: string; quantity: number; locationIds?: readonly string[] }): Promise<SizeSplitProposal> {
+    return this.post('/api/admin/supplier-orders/split', input);
+  }
+
+  /** OPERATOR, ADD TO DRAFTS (Z2): the split's lines as staff left them, in their suppliers' drafts, all or nothing. */
+  supplierSplitDrafts(lines: readonly { skuId: string; locationId: string; quantity: number }[]): Promise<SplitDraftsResult> {
+    return this.post('/api/admin/supplier-orders/split/drafts', { lines });
   }
 
   /** AUDITOR: one supplier order, its lines, receptions, returns, invoice and history. */
@@ -1563,6 +1579,11 @@ export class AdminApi {
   /** ADMIN: renamed, made the default, or its postal address (null clears it; plan NEXT LOT §3.5.4.5). */
   updateLocation(id: string, change: { name?: string; isDefault?: true; address?: string | null }): Promise<StockLocation> {
     return this.patch(`/api/admin/locations/${encodeURIComponent(id)}`, change);
+  }
+
+  /** ADMIN: the countries a location serves, as a whole (plan MACRO M3 §3.2, Z1); `moved`: those taken from another location. */
+  setLocationCountries(id: string, countries: readonly string[]): Promise<LocationCountriesResult> {
+    return this.request('PUT', `/api/admin/locations/${encodeURIComponent(id)}/countries`, { body: { countries } });
   }
 
   carriers(): Promise<Items<Carrier>> {

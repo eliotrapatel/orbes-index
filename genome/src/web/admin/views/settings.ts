@@ -8,7 +8,9 @@
  *    delivered and not registered 30 by default), and who set them.
  *  - Locations: FRANCE WAREHOUSE and LOGISTICS WAREHOUSE from the first boot, more added; renamed; one is the default,
  *    where the orders of draws and of the private salon go; each with its postal address (plan NEXT LOT §3.5.4.5), the
- *    Deliver to of its supplier orders' PDF.
+ *    Deliver to of its supplier orders' PDF; each with the countries it SERVES (plan MACRO M3 §3.3, Z1), set by Edit
+ *    countries (a country another location served moves here, said before and after saving): where a collector counts
+ *    when ORBES orders a model by size (views/order-a-model.ts).
  *  - Carriers: Colissimo, Chronopost, DHL Express and UPS from the first boot, more added; each with its tracking link,
  *    `{tracking}` where the number goes (an example shown); set aside (never offered for a shipment again) or offered
  *    again.
@@ -28,16 +30,18 @@
  *    5), shown to the client; who set them and when. Changed by an ADMIN, audited `guarantee.settings`.
  * Its header leads to the Orders board, Logistics and the Emails page (plan MACRO M1 §4.3, views/emails.ts).
  */
-import { h } from '../../shared/dom.js';
+import { countryName } from '../../../shared/countries.js';
+import { h, mount } from '../../shared/dom.js';
 import { formatCount, formatDateTime } from '../format.js';
 import { BOX_LIMITS, BOXES_TEXT, boxChange, boxCostText, boxFormValues, boxInput, boxProblem, boxSides, boxState, CARD_RULE, grams } from '../model/boxes.js';
 import { alertsInput, alertsProblem, ALERT_LIMITS, carrierProblem, engravingPricesInput, engravingPricesProblem, engravingPricesValues, engravingPriceText, LOGISTICS_LIMITS, locationProblem, TRACKING_PLACEHOLDER, trackingLink } from '../model/orders.js';
 import { GUARANTEE_LIMITS, PIECES_OPTIONS, piecesText, settingsInput, settingsProblem, settingsValues } from '../model/guarantees.js';
+import { countriesMovingHere, countriesSavedToast, countryAddOptions, LOCATION_COUNTRIES_TEXT, movingLine, sameCountries, servedNames } from '../model/location-countries.js';
 import { can } from '../model/permissions.js';
 import { rateField, rateText, ratesChanged, ratesInput, ratesProblem, ratesValues, SHIPPING_SERVICE_LABELS } from '../model/program.js';
-import { HOUSE_CURRENCIES, SHIPPING_SERVICES, type BoxView, type Carrier, type EngravingPricesSheet, type GuaranteeSettings, type HouseCurrency, type OrderAlertSettings, type ShippingRatesSheet, type StockLocation } from '../types.js';
+import { HOUSE_CURRENCIES, SHIPPING_SERVICES, type BoxView, type Carrier, type EngravingPricesSheet, type GuaranteeSettings, type HouseCurrency, type LocationCountriesResult, type OrderAlertSettings, type ShippingRatesSheet, type StockLocation } from '../types.js';
 import { href } from '../router.js';
-import { button, defList, emptyState, linkButton, mono, pageHeader, section, statusMark, table } from '../ui/components.js';
+import { button, defList, emptyState, field, linkButton, mono, pageHeader, section, select, statusMark, table } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { notify } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
@@ -229,10 +233,13 @@ function locationsSection(ctx: ViewContext, items: StockLocation[], admin: boole
     }).then(done('Default location changed.'));
   return section(
     'Locations',
+    [
+      h('p', { class: 'notice', data: { testid: 'locations-lead' } }, LOCATION_COUNTRIES_TEXT.lead),
     table<StockLocation>(
       [
         { label: 'Location', cell: (l) => h('span', { data: { testid: 'location-name' } }, l.name), kind: ['wide'] },
         { label: 'Address', cell: (l) => h('span', { class: 'prewrap', data: { testid: 'location-address' } }, l.address ?? '—') },
+        { label: LOCATION_COUNTRIES_TEXT.serves, cell: (l) => servesCell(l) },
         { label: 'Default', cell: (l) => (l.isDefault ? statusMark('DEFAULT', 'solid') : '—'), kind: ['nowrap'] },
         { label: 'Shopify', cell: (l) => (l.shopifyLocationId ? mono(l.shopifyLocationId) : '—'), kind: ['nowrap'] },
         {
@@ -244,6 +251,7 @@ function locationsSection(ctx: ViewContext, items: StockLocation[], admin: boole
                   { class: 'row-actions' },
                   button('Rename', { kind: 'ghost', testId: 'location-rename', onClick: () => nameDialog('Rename the location', l.name, (name) => ctx.api.updateLocation(l.id, { name }), 'Location renamed.') }),
                   button('Address', { kind: 'ghost', testId: 'location-address-edit', onClick: () => addressDialog(l) }),
+                  button(LOCATION_COUNTRIES_TEXT.edit, { kind: 'ghost', testId: 'location-countries-edit', onClick: () => countriesDialog(ctx, l, items, done) }),
                   l.isDefault ? null : button('Make default', { kind: 'ghost', testId: 'location-default', onClick: () => makeDefault(l) }),
                 )
               : null,
@@ -253,11 +261,78 @@ function locationsSection(ctx: ViewContext, items: StockLocation[], admin: boole
       items,
       { caption: 'Locations', empty: 'No location yet: they are created at the first boot.' },
     ),
+    ],
     {
       id: 'settings-locations',
       tools: admin ? [button('Add location', { kind: 'ghost', testId: 'location-add', onClick: () => nameDialog('Add a location', '', (name) => ctx.api.createLocation(name), 'Location added.') })] : [],
     },
   );
+}
+
+/** SERVES (plan MACRO M3 §3.3, Z1): the countries a location serves, in English, alphabetically; '—' for none. */
+function servesCell(l: StockLocation): HTMLElement {
+  const names = servedNames(l.countries);
+  return names.length
+    ? h('span', { class: 'chips', data: { testid: 'location-serves' } }, ...names.map((n) => h('span', { class: 'chip' }, n)))
+    : h('span', { data: { testid: 'location-serves' } }, '—');
+}
+
+/**
+ * Edit countries (ADMIN): the countries chosen one by one (Add a country, each removed by its ×), a country another
+ * location serves said to move here before saving and in the toast after; the list saved as a whole.
+ */
+function countriesDialog(ctx: ViewContext, l: StockLocation, all: readonly StockLocation[], done: (msg: string) => (v: unknown) => void): void {
+  const T = LOCATION_COUNTRIES_TEXT;
+  let chosen = [...l.countries];
+  let moved: LocationCountriesResult['moved'] = [];
+  // The list travels in the form as one value, so the dialog's live line and its check read it as any field.
+  const value = h('input', { attrs: { type: 'hidden', name: 'countries', hidden: true } });
+  const add = select('add', countryAddOptions(chosen), '');
+  add.setAttribute('data-testid', 'countries-add');
+  const chips = h('div', { class: 'chips chips--edit', attrs: { role: 'list', 'aria-label': T.chosen }, data: { testid: 'countries-chosen' } });
+  const draw = (focus: HTMLElement | null = null) => {
+    value.value = chosen.join(',');
+    mount(add, ...countryAddOptions(chosen).map((o) => h('option', { attrs: { value: o.value } }, o.label)));
+    add.value = '';
+    const names = [...chosen].sort((a, b) => countryName(a).localeCompare(countryName(b), 'en'));
+    mount(
+      chips,
+      ...(names.length
+        ? names.map((c) => {
+            const x = h('button', { class: 'chip__remove', attrs: { type: 'button', 'aria-label': `Remove ${countryName(c)}` }, data: { testid: 'countries-remove' } }, '×');
+            x.addEventListener('click', () => {
+              chosen = chosen.filter((y) => y !== c);
+              draw(add);
+            });
+            return h('span', { class: 'chip', attrs: { role: 'listitem' }, data: { country: c } }, countryName(c), x);
+          })
+        : [h('span', { class: 'chips__none' }, l.isDefault ? T.noneDefault : T.none)]),
+    );
+    value.dispatchEvent(new Event('input', { bubbles: true }));
+    focus?.focus();
+  };
+  add.addEventListener('change', () => {
+    if (add.value && !chosen.includes(add.value)) chosen = [...chosen, add.value];
+    draw(add);
+  });
+  draw();
+  void openDialog({
+    title: T.title,
+    eyebrow: l.name,
+    body: [
+      h('p', { class: 'dialog__text' }, T.body),
+      h('div', { class: 'countries__pick' }, value, field(T.add, add, { wide: true }), h('div', { class: 'cfield cfield--wide' }, h('span', { class: 'cfield__label' }, T.chosen), chips)),
+    ],
+    live: () => {
+      const line = movingLine(countriesMovingHere(chosen, l, all));
+      return h('p', { class: 'dialog__text countries__moving', attrs: { 'aria-live': 'polite' }, data: { testid: 'countries-moving' } }, line ?? '');
+    },
+    validate: () => (sameCountries(chosen, l.countries) ? 'Nothing has changed.' : null),
+    confirmLabel: 'Save',
+    submit: async () => {
+      moved = (await ctx.api.setLocationCountries(l.id, chosen)).moved;
+    },
+  }).then((v) => done(countriesSavedToast(moved))(v));
 }
 
 function carriersSection(ctx: ViewContext, items: Carrier[], admin: boolean, done: (msg: string) => (v: unknown) => void): HTMLElement {

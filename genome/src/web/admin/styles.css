@@ -7568,3 +7568,323 @@ a.collectors__kpi-link:focus-visible {
     padding-right: 0;
   }
 }
+
+/* ── The countries a location serves (plan MACRO M3 §3.3, Z1): SERVES as small hairline chips, Edit countries' chosen
+   list with a × on each. ── */
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 34ch;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 9px 4px;
+  border: 1px solid var(--hairline-strong);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* In a table cell, room for a few names side by side before they wrap. */
+.table .chips {
+  min-width: 20ch;
+}
+
+.countries__pick {
+  margin-top: 24px;
+}
+
+.chips--edit {
+  max-width: none;
+  min-height: 30px;
+  padding-top: 6px;
+}
+
+.chip__remove {
+  margin: -3px -5px -3px 0;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: var(--fs-line);
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--t-fast) var(--ease);
+}
+
+.chip__remove:hover,
+.chip__remove:focus-visible {
+  color: var(--ink);
+}
+
+.chips__none {
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
+.countries__moving:empty {
+  display: none;
+}
+
+.countries__moving {
+  margin-bottom: 14px;
+  color: var(--ink);
+}
+
+/* ── Order a model (plan MACRO M3 §3.3, Z1 and Z2): a dialog wide enough for the split's table. ── */
+
+.dialog--split {
+  width: min(1040px, calc(100vw - 48px));
+}
+
+.split__ask {
+  margin-top: 24px;
+}
+
+.split__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px;
+  gap: 0 32px;
+}
+
+.split__locations {
+  min-width: 0;
+  margin: 0 0 18px;
+  padding: 0;
+  border: 0;
+}
+
+.split__locations > .cfield__label {
+  padding: 0;
+}
+
+.split__checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  padding-top: 8px;
+}
+
+.split__go {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+
+.split__ask-error {
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--critical);
+}
+
+.split__result:not(:empty) {
+  margin-top: 30px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline);
+}
+
+.split__table .table td {
+  height: 52px;
+}
+
+/* A TO ORDER: the figure typed right-aligned under its column's head. */
+.split__qty.cinput {
+  width: 84px;
+  margin-left: auto;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.split__qty.is-invalid {
+  border-bottom-color: var(--critical);
+  color: var(--critical);
+}
+
+/* A line at 0 is left out of the drafts: its words recede, its field stays to be filled. */
+.split__table tr.is-zero td:not(:last-child) {
+  color: var(--ink-soft);
+}
+
+/* The buttons and the total under the table, held at the dialog's foot while its lines scroll. */
+.dialog--split .dialog__form {
+  padding-bottom: 0;
+}
+
+.split__actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  align-items: center;
+  margin-top: 22px;
+  padding-bottom: 24px;
+  background: var(--white);
+}
+
+.split__figures {
+  display: flex;
+  flex: 1 1 0;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 22px;
+  min-width: 0;
+  margin-right: auto;
+}
+
+.split__total {
+  font-size: var(--fs-line);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+}
+
+.split__stale {
+  color: var(--critical);
+}
+
+.split__total.is-invalid {
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--critical);
+}
+
+/* A refusal of PROPOSE or ADD TO DRAFTS: over the total, in the footer, so it is never under the table. */
+.split__actions {
+  flex-wrap: wrap;
+}
+
+.split__error {
+  flex: 1 0 100%;
+  min-height: 0;
+}
+
+.split__error:empty {
+  display: none;
+}
+
+.split__phone {
+  display: none;
+}
+
+.split__warning,
+.split__stale {
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+}
+
+.split__warning:empty,
+.split__stale:empty {
+  display: none;
+}
+
+/* The warning is said, never alarming: a hollow mark, as a status. */
+.split__warning::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 9px;
+  border: 1px solid var(--ink);
+  vertical-align: 1px;
+}
+
+.split__notes {
+  margin-top: 14px;
+}
+
+.split__note {
+  max-width: 78ch;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
+.split__note + .split__note {
+  margin-top: 4px;
+}
+
+.split__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.split__added-title {
+  font-size: var(--fs-nano);
+  font-weight: 400;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.split__drafts {
+  margin: 12px 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.split__draft {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.split__draft-words {
+  font-size: var(--fs-line);
+  letter-spacing: 0.03em;
+}
+
+@media (max-width: 599px) {
+  .dialog--split {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+  }
+
+  .dialog--split .dialog__form {
+    padding: 26px 20px 22px;
+  }
+
+  .split__row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* A phone: the size with its location and figures under it, then TO ORDER; the other columns hidden. */
+  .split__table .table th:nth-child(n + 2):nth-child(-n + 5),
+  .split__table .table td:nth-child(n + 2):nth-child(-n + 5),
+  .split__code {
+    display: none;
+  }
+
+  .split__phone {
+    display: block;
+    white-space: normal;
+  }
+
+  .split__table .table td {
+    height: auto;
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+
+  .split__qty.cinput {
+    width: 64px;
+  }
+
+  .split__figures {
+    flex-basis: 100%;
+  }
+}

@@ -10,6 +10,11 @@
  *  3. An AUDITOR reads the page and the order without one action; a LOGISTICS login never reaches them.
  *  4. A size nothing calls for keeps Add to supplier order (pieces ordered in advance, typed); never for an AUDITOR or
  *     the agent.
+ *  5. ORDER A MODEL (plan MACRO M3 §3.3, Z1 and Z2): Settings → Locations' SERVES set by Edit countries (a country moved
+ *     from another location said before and after); Order a model: a model without an offered size, then a model's
+ *     pieces proposed by size and location from its orders, two lines edited (the total and its warning), Escape asking
+ *     before the changes are discarded, ADD TO DRAFTS naming and linking the two drafts, the draft read; never for an
+ *     AUDITOR.
  * No CSP violation, no page error, no figure in the display face.
  */
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -115,10 +120,10 @@ describe.skipIf(!HAS_CHROMIUM)('Supplier orders in the console (plan NEXT LOT §
     await p.screenshot({ path: join(OUT_DIR, `admin-supplier-orders-${name}.png`), fullPage: !opts.dialog });
   }
 
-  /** A salon order of a size at FRANCE WAREHOUSE, priced. */
-  async function salonOrder(size: string): Promise<string> {
+  /** A salon order of a size at FRANCE WAREHOUSE, priced (of MONOLITHE unless another model is given). */
+  async function salonOrder(size: string, modelId = catalog.modelId): Promise<string> {
     const account = await createAccount(h.t.db);
-    const request = await h.t.db.insertInto('shop_requests').values({ account_id: account.id, model_id: catalog.modelId, created_at: h.clock.now() }).returning('id').executeTakeFirstOrThrow();
+    const request = await h.t.db.insertInto('shop_requests').values({ account_id: account.id, model_id: modelId, created_at: h.clock.now() }).returning('id').executeTakeFirstOrThrow();
     await h.ctx.services.salon.close(request.id, { note: 'Accepted.', outcome: 'ACCEPTED' }, admin);
     const id = (await h.t.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
     await h.ctx.services.orders.setTerms(id, { sizeLabel: size, priceMinor: 420_000, currency: 'EUR' }, admin);
@@ -311,5 +316,138 @@ describe.skipIf(!HAS_CHROMIUM)('Supplier orders in the console (plan NEXT LOT §
       expect(await p.locator('[data-testid=stock-add-to-order]').count()).toBe(0);
     }
     for (const p of [a, r, g]) await p.context().close();
+  }, STEP_TIMEOUT);
+
+  it('sets the countries each location serves, then orders a model by size and location, its lines edited, into the drafts', async () => {
+    // ECLIPSE: 50, 52 and 54 offered, from MAISON SUD; two orders of 52 at FRANCE WAREHOUSE, one of 54 at LOGISTICS WAREHOUSE.
+    const sud = await h.ctx.services.suppliers.create({ name: 'MAISON SUD', currency: 'EUR' }, admin);
+    const eclipse = (await seedCatalog(h.ctx)).modelId;
+    await h.t.db.updateTable('models').set({ name: 'ECLIPSE' }).where('id', '=', eclipse).execute();
+    const sizes: Record<string, string> = {};
+    for (const size of ['50', '52', '54']) sizes[size] = await h.ctx.db.transaction().execute((tx) => ensureSku(tx, eclipse, size));
+    await h.ctx.services.suppliers.setModelSupplier(eclipse, { supplierId: sud.id }, admin);
+    await salonOrder('52', eclipse);
+    await salonOrder('52', eclipse);
+    const far = await salonOrder('54', eclipse);
+    await h.t.db.updateTable('orders').set({ location_id: warehouse }).where('id', '=', far).execute();
+    // NOVA: no size declared.
+    const nova = (await seedCatalog(h.ctx)).modelId;
+    await h.t.db.updateTable('models').set({ name: 'NOVA' }).where('id', '=', nova).execute();
+
+    // Settings → Locations: the lead, SERVES empty; LOGISTICS WAREHOUSE serves Belgium; FRANCE WAREHOUSE takes it, with France.
+    const a = await open(ADMIN, 'Dashboard');
+    await go(a, '#/settings', 'Settings');
+    expect(await a.locator('[data-testid=locations-lead]').textContent()).toBe(
+      'A collector counts at the location that serves their country when ORBES orders a model by size. A country no location serves counts at the default location.',
+    );
+    expect(await a.locator('#settings-locations thead th').allTextContents()).toEqual(['Location', 'Address', 'Serves', 'Default', 'Shopify', '']);
+    expect(await a.locator('[data-testid=location-serves]').allTextContents()).toEqual(['—', '—']);
+    const row = (name: string) => a.locator('#settings-locations tbody tr', { hasText: name });
+    await row('LOGISTICS WAREHOUSE').locator('[data-testid=location-countries-edit]').click();
+    await a.selectOption('dialog [data-testid=countries-add]', 'BE');
+    await expect.poll(() => a.locator('dialog [data-testid=countries-chosen] .chip').allTextContents()).toEqual(['Belgium×']);
+    await confirmDialog(a);
+    await a.waitForSelector('.toast:has-text("Countries saved.")');
+    await expect.poll(() => row('LOGISTICS WAREHOUSE').locator('[data-testid=location-serves] .chip').allTextContents()).toEqual(['Belgium']);
+    await row('FRANCE WAREHOUSE').locator('[data-testid=location-countries-edit]').click();
+    expect(await a.locator('dialog [data-testid=countries-chosen]').textContent()).toBe('None chosen: as the default location, it counts every country no other location serves.');
+    await a.selectOption('dialog [data-testid=countries-add]', 'FR');
+    await a.selectOption('dialog [data-testid=countries-add]', 'BE');
+    await expect.poll(() => a.locator('dialog [data-testid=countries-moving]').textContent()).toBe('Belgium moves here from LOGISTICS WAREHOUSE.');
+    await shot(a, 'countries', { dialog: true });
+    await confirmDialog(a);
+    await a.waitForSelector('.toast:has-text("Countries saved. Belgium moved here from LOGISTICS WAREHOUSE.")');
+    await expect.poll(() => row('FRANCE WAREHOUSE').locator('[data-testid=location-serves] .chip').allTextContents()).toEqual(['Belgium', 'France']);
+    expect(await row('LOGISTICS WAREHOUSE').locator('[data-testid=location-serves]').textContent()).toBe('—');
+    expect(await h.t.db.selectFrom('stock_location_countries').select(['country', 'location_id']).orderBy('country').execute()).toEqual([
+      { country: 'BE', location_id: france },
+      { country: 'FR', location_id: france },
+    ]);
+    await shot(a, 'locations');
+
+    // Order a model: NOVA has no offered size.
+    await go(a, '#/supplier-orders', 'Supplier orders');
+    await a.click('[data-testid=split-open]');
+    const panel = a.locator('dialog[data-testid=split-dialog]');
+    await panel.waitFor();
+    expect(await panel.locator('[data-testid=split-location]').count()).toBe(2);
+    await a.click('[data-testid=split-propose]');
+    expect(await panel.locator('[data-testid=split-ask-error]').textContent()).toBe('Choose a model.');
+    await a.selectOption('[data-testid=split-model]', nova);
+    await a.fill('[data-testid=split-pieces]', '10');
+    await a.click('[data-testid=split-propose]');
+    await expect.poll(() => panel.locator('[data-testid=split-no-sizes] .empty__text').textContent()).toBe('This model has no offered size: declare its sizes in the Catalogue.');
+    expect(await panel.locator('[data-testid=split-add]').isDisabled()).toBe(true);
+
+    // ECLIPSE, 10 pieces at both locations: 52 at FRANCE weighs 2, 54 at LOGISTICS 1: 7 and 3.
+    await a.selectOption('[data-testid=split-model]', eclipse);
+    await a.click('[data-testid=split-propose]');
+    const rows = panel.locator('[data-testid=split-row]');
+    await expect.poll(() => rows.count()).toBe(6);
+    expect(await panel.locator('thead th').allTextContents()).toEqual(['Size', 'Location', 'Orders', 'Saved sizes', 'Proposed', 'To order']);
+    const cells = async () => (await rows.evaluateAll((trs) => trs.map((tr) => [...tr.querySelectorAll('td')].slice(1, 5).map((td) => td.textContent).join(' | '))));
+    expect(await cells()).toEqual([
+      'FRANCE WAREHOUSE | 0 | 0 | 0',
+      'LOGISTICS WAREHOUSE | 0 | 0 | 0',
+      'FRANCE WAREHOUSE | 2 | 0 | 7',
+      'LOGISTICS WAREHOUSE | 0 | 0 | 0',
+      'FRANCE WAREHOUSE | 0 | 0 | 0',
+      'LOGISTICS WAREHOUSE | 1 | 0 | 3',
+    ]);
+    expect(await panel.locator('[data-testid=split-to-order]').evaluateAll((xs) => xs.map((x) => (x as HTMLInputElement).value))).toEqual(['0', '0', '7', '0', '0', '3']);
+    expect(await panel.locator('[data-testid=split-total]').textContent()).toBe('10 of 10 pieces');
+    expect(await panel.locator('[data-testid=split-warning]').isVisible()).toBe(false);
+    expect(await panel.locator('[data-testid=split-source]').textContent()).toMatch(/^From 3 orders, net of size exchanges, and 0 saved sizes\./);
+    expect(await panel.locator('[data-testid=split-unmatched]').count()).toBe(0);
+
+    // Two lines changed: 54 at LOGISTICS to 4, 50 at FRANCE to 2: 13 of 10, said, never refused.
+    const qty = (i: number) => panel.locator('[data-testid=split-to-order]').nth(i);
+    await qty(5).fill('4');
+    await expect.poll(() => panel.locator('[data-testid=split-total]').textContent()).toBe('11 of 10 pieces');
+    await qty(0).fill('2');
+    await expect.poll(() => panel.locator('[data-testid=split-warning]').textContent()).toBe('3 more than the 10 asked.');
+    expect(await panel.locator('[data-testid=split-total]').textContent()).toBe('13 of 10 pieces');
+    expect(await panel.locator('[data-testid=split-add]').isDisabled()).toBe(false);
+    await shot(a, 'order-a-model', { dialog: true });
+    // Escape asks before the changed lines are discarded; staying keeps them.
+    await a.keyboard.press('Escape');
+    await expect.poll(() => a.locator('dialog.dialog .dialog__title').allTextContents()).toContain('Discard the split?');
+    await a.click('[data-testid=dialog-cancel]');
+    expect(await qty(0).inputValue()).toBe('2');
+
+    // ADD TO DRAFTS: MAISON SUD's draft at each location, named in the toast and linked in the panel.
+    await a.click('[data-testid=split-add]');
+    await expect.poll(() => panel.locator('[data-testid=split-draft]').count()).toBe(2);
+    const refs = await panel.locator('[data-testid=split-draft]').allTextContents();
+    for (const ref of refs) expect(ref).toMatch(/^SO-[0-9A-F]{8}$/);
+    await a.waitForSelector(`.toast:has-text("13 pieces added to 2 drafts: ${refs.join(', ')}.")`);
+    expect(await panel.locator('.split__draft-words').allTextContents()).toEqual(['MAISON SUD · FRANCE WAREHOUSE · 9 pieces on 2 lines', 'MAISON SUD · LOGISTICS WAREHOUSE · 4 pieces on 1 line']);
+    const drafted = await h.t.db
+      .selectFrom('supplier_order_lines as l')
+      .innerJoin('supplier_orders as o', 'o.id', 'l.supplier_order_id')
+      .select(['l.sku_id', 'l.quantity', 'o.location_id', 'o.status'])
+      .where('o.supplier_id', '=', sud.id)
+      .orderBy('l.quantity')
+      .execute();
+    expect(drafted).toEqual([
+      { sku_id: sizes['50'], quantity: 2, location_id: france, status: 'DRAFT' },
+      { sku_id: sizes['54'], quantity: 4, location_id: warehouse, status: 'DRAFT' },
+      { sku_id: sizes['52'], quantity: 7, location_id: france, status: 'DRAFT' },
+    ]);
+    await shot(a, 'order-a-model-added', { dialog: true });
+    // The draft read: its link closes the panel and opens it.
+    await panel.locator('[data-testid=split-draft]').first().click();
+    await expect.poll(async () => (await title(a).textContent())?.trim()).toBe(refs[0]);
+    expect(await a.locator('dialog[data-testid=split-dialog]').count()).toBe(0);
+    await expect.poll(() => a.locator('#supplier-order-lines tbody tr').count()).toBe(2);
+    expect(await a.locator('[data-testid=supplier-order-mark]').textContent()).toBe('DRAFT');
+    expect(await figuresInDisplayFace(a)).toEqual([]);
+    expect(await csp(a)).toEqual([]);
+
+    // An AUDITOR reads the page without Order a model.
+    const r = await open(auditorLogin, 'Dashboard');
+    await go(r, '#/supplier-orders', 'Supplier orders');
+    expect(await r.locator('[data-testid=split-open]').count()).toBe(0);
+    for (const p of [a, r]) await p.context().close();
   }, STEP_TIMEOUT);
 });

@@ -6,11 +6,14 @@
  *    minimum, less what is expected or in a draft; Add to the draft (OPERATOR); the sizes without a supplier apart.
  *  - Supplier orders: filtered by status and supplier, each to its page (views/supplier-order.ts).
  *  - Suppliers: added and changed by an OPERATOR, read by an AUDITOR.
+ *  - Order a model (plan MACRO M3 §3.3, Z1 and Z2; OPERATOR): a model's pieces split by size and location, every line
+ *    changed by staff, then added to the drafts (views/order-a-model.ts).
  */
 import { h } from '../../shared/dom.js';
 import { can } from '../model/permissions.js';
 import { sizeText } from '../model/logistics.js';
 import { invoiceCell, LIST_TEXT, listFilters, money, noSupplierLine, piecesLine, PROPOSAL_TEXT, statusOptions, SUPPLIER_ORDER_STATUS_LABELS } from '../model/supplier-orders.js';
+import { SPLIT_TEXT } from '../model/size-split.js';
 import { contactLines, SUPPLIER_ORDERS_TEXT, supplierFormValues, supplierInputOf } from '../model/suppliers.js';
 import { href } from '../router.js';
 import { formatCount, formatDate } from '../format.js';
@@ -19,6 +22,7 @@ import { busy, button, emptyState, field, filterBar, pageHeader, section, select
 import { openDialog, type DialogField } from '../ui/dialog.js';
 import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
+import { openOrderAModel } from './order-a-model.js';
 
 /** A supplier's fields in its dialog (the server's bounds, §3.5.5.1). */
 function supplierFields(s: Supplier | null): DialogField[] {
@@ -69,6 +73,19 @@ export async function supplierOrdersView(ctx: ViewContext): Promise<HTMLElement>
       })
     : null;
 
+  // ORDER A MODEL (plan MACRO M3 §3.3, Z1 and Z2): its panel reads the models and the locations when it opens.
+  const orderModel = canManage ? button(SPLIT_TEXT.open, { kind: 'secondary', testId: 'split-open' }) : null;
+  orderModel?.addEventListener('click', () =>
+    void busy(orderModel, async () => {
+      try {
+        const [models, locations] = await Promise.all([ctx.api.models(), ctx.api.locations()]);
+        openOrderAModel(ctx, models.items, locations.items);
+      } catch (e) {
+        notifyError(e);
+      }
+    }),
+  );
+
   const edit = (s: Supplier) =>
     void act(
       openDialog({
@@ -111,7 +128,7 @@ export async function supplierOrdersView(ctx: ViewContext): Promise<HTMLElement>
   return h(
     'div',
     { class: 'view view--supplier-orders', data: { testid: 'supplier-orders' } },
-    pageHeader({ eyebrow: 'Registry', title: 'Supplier orders', lead: SUPPLIER_ORDERS_TEXT.lead, actions: add ? [add] : [] }),
+    pageHeader({ eyebrow: 'Registry', title: 'Supplier orders', lead: SUPPLIER_ORDERS_TEXT.lead, actions: [orderModel, add].filter((b): b is HTMLButtonElement => b !== null) }),
     proposalSection(ctx, proposal, canManage),
     ordersSection(ctx, orders, suppliers, filters),
     section('Suppliers', list, { id: 'suppliers' }),
