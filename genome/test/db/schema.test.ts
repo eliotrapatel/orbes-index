@@ -7,6 +7,7 @@ import { ACTOR_TYPES } from '../../src/server/types.js';
 import { isCheckViolation, isForeignKeyViolation, isGuardViolation, isUniqueViolation, pgError } from '../../src/server/db/pg-errors.js';
 import { packIdentity } from '../../src/core/identity.js';
 import type { Db } from '../../src/server/db/connection.js';
+import { CERTIFICATE_CARD } from '../../src/server/render/certificate.js';
 
 /**
  * Quoted literals of the CHECK constraint(s) on table.column alone: a constraint across columns (a LIVE-only setting
@@ -1473,6 +1474,48 @@ describe('schema', () => {
     await expect(t.db.deleteFrom('worn_photos').where('id', '=', sent.id).execute()).rejects.toSatisfy(isGuardViolation);
     // Once withdrawn, the piece sends another.
     await t.db.insertInto('worn_photos').values({ ...sent, id: undefined, status: undefined, created_at: undefined, credit_instagram: null }).execute();
+  });
+
+  it('boxes and weights (0054): every bound and the card rule are schema.ts\'s, the card render/certificate.ts\'s; the mirror at work: a box listed, given to a model with its packed weight, then set aside', async () => {
+    const def = async (table: string, constraint: string) =>
+      (await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = ${table}::regclass AND conname = ${constraint}`.execute(t.db)).rows[0].def;
+    expect(await def('boxes', 'boxes_name_check')).toContain(`<= ${S.BOX_NAME_MAX}`);
+    for (const side of ['length', 'width', 'height']) expect(await def('boxes', `boxes_inside_${side}_mm_check`)).toContain(`<= ${S.BOX_INSIDE_MM_MAX}`);
+    expect(await def('boxes', 'boxes_empty_weight_g_check')).toContain(`<= ${S.BOX_EMPTY_WEIGHT_G_MAX}`);
+    expect(await def('boxes', 'boxes_cost_minor_check')).toContain(`<= ${S.BOX_COST_MINOR_MAX}`);
+    expect(await def('models', 'models_packed_weight_g_check')).toContain(`<= ${S.PACKED_WEIGHT_G_MAX}`);
+    expect(await def('shipments', 'shipments_weight_g_check')).toContain(`<= ${S.SHIPMENT_WEIGHT_G_MAX}`);
+    expect(await def('shipments', 'shipments_weight_missing_check')).toContain(`<= ${S.SHIPMENT_WEIGHT_MISSING_MAX}`);
+    // The card rule: the certificate card 79t as render/certificate.ts draws it, flat in either orientation.
+    expect(S.CERTIFICATE_CARD_MM).toEqual({ long: Math.max(CERTIFICATE_CARD.widthMm, CERTIFICATE_CARD.heightMm), short: Math.min(CERTIFICATE_CARD.widthMm, CERTIFICATE_CARD.heightMm) });
+    expect(await def('boxes', 'boxes_card_fits')).toBe(
+      `CHECK (((GREATEST(inside_length_mm, inside_width_mm) >= ${S.CERTIFICATE_CARD_MM.long}) AND (LEAST(inside_length_mm, inside_width_mm) >= ${S.CERTIFICATE_CARD_MM.short})))`,
+    );
+
+    const { model } = await seedProduct(t.db);
+    const admin = await t.db.insertInto('admin_users').values({ email: 'box-s0054@orbes.test', email_normalized: 'box-s0054@orbes.test', password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow();
+    const box = await t.db
+      .insertInto('boxes')
+      .values({ name: 'MEDIUM', inside_length_mm: 120, inside_width_mm: 95, inside_height_mm: 45, empty_weight_g: 110, cost_minor: 85, currency: 'EUR', created_by: admin.id })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(box).toEqual({
+      id: expect.any(String), name: 'MEDIUM', inside_length_mm: 120, inside_width_mm: 95, inside_height_mm: 45, empty_weight_g: 110, cost_minor: 85, currency: 'EUR', active: true,
+      created_at: expect.any(Date), created_by: admin.id, updated_at: expect.any(Date),
+    });
+    await expect(t.db.insertInto('boxes').values({ name: 'Medium', inside_length_mm: 100, inside_width_mm: 70, inside_height_mm: 40, empty_weight_g: 80 }).execute()).rejects.toSatisfy(
+      (e) => isUniqueViolation(e, 'boxes_name_key'),
+    );
+    await expect(t.db.insertInto('boxes').values({ name: 'FLAT', inside_length_mm: 90, inside_width_mm: 90, inside_height_mm: 20, empty_weight_g: 40 }).execute()).rejects.toSatisfy(
+      (e) => isCheckViolation(e, 'boxes_card_fits'),
+    );
+    expect(
+      await t.db.updateTable('models').set({ box_id: box.id, packed_weight_g: 140 }).where('id', '=', model.id).returning(['box_id', 'packed_weight_g']).executeTakeFirstOrThrow(),
+    ).toEqual({ box_id: box.id, packed_weight_g: 140 });
+    await expect(t.db.deleteFrom('boxes').where('id', '=', box.id).execute()).rejects.toSatisfy(isForeignKeyViolation);
+    // Set aside: kept for the models and parcels that name it.
+    expect(await t.db.updateTable('boxes').set({ active: false }).where('id', '=', box.id).returning('active').executeTakeFirstOrThrow()).toEqual({ active: false });
+    await t.db.updateTable('models').set({ box_id: null, packed_weight_g: null }).where('id', '=', model.id).execute();
   });
 
   it('product_status_history is append-only; genomes and keys are never deleted (key ids never reused)', async () => {

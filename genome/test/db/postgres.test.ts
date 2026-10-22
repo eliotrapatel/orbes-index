@@ -25,7 +25,7 @@ import { SaleService } from '../../src/server/services/sale.js';
 import { createScanToken } from '../../src/server/services/scan-tokens.js';
 import type { VerificationService } from '../../src/server/services/verification.js';
 import { WarrantyService } from '../../src/server/services/warranty.js';
-import { isCheckViolation, isGuardViolation, isUniqueViolation } from '../../src/server/db/pg-errors.js';
+import { isCheckViolation, isForeignKeyViolation, isGuardViolation, isUniqueViolation } from '../../src/server/db/pg-errors.js';
 
 const adminUrl = process.env.ORBES_TEST_POSTGRES_URL;
 
@@ -412,5 +412,47 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await expect(sql`TRUNCATE worn_photos`.execute(db)).rejects.toSatisfy(isGuardViolation);
     // The piece sends again once the first is withdrawn.
     expect(await db.insertInto('worn_photos').values(sending).returning('status').executeTakeFirstOrThrow()).toEqual({ status: 'PENDING' });
+  });
+  it('holds boxes and packed weights by their CHECKs (0054)', async () => {
+    // Its own letter: this database's categories already hold A to F, S, W, P, H and G (the tests above).
+    await db.insertInto('categories').values({ id: 25, code: 'K', name: 'Boxes parity' }).execute();
+    const model = await db.insertInto('models').values({ category_id: 25, name: 'BOXED', type: 'RING', sku_prefix: 'BOX-PG' }).returning('id').executeTakeFirstOrThrow();
+    const admin = await db.insertInto('admin_users').values({ email: 'box-pg0054@orbes.test', email_normalized: 'box-pg0054@orbes.test', password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow();
+    const account = await db.insertInto('accounts').values({ email: 'box-pg0054@example.com', email_normalized: 'box-pg0054@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const location = await db.insertInto('stock_locations').values({ name: 'BOXES PG 0054' }).returning('id').executeTakeFirstOrThrow();
+    const sides = { inside_length_mm: 95, inside_width_mm: 62, inside_height_mm: 30, empty_weight_g: 60 };
+    // The 95 × 62 mm card flat, in either orientation; a cost with its currency; a name once whatever the case.
+    await expect(db.insertInto('boxes').values({ name: 'NARROW', ...sides, inside_width_mm: 61 }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'boxes_card_fits'));
+    await expect(db.insertInto('boxes').values({ name: 'SHORT', ...sides, inside_length_mm: 62, inside_width_mm: 94 }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'boxes_card_fits'));
+    await expect(db.insertInto('boxes').values({ name: 'PRICED', ...sides, cost_minor: 120 }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'boxes_cost'));
+    const box = await db.insertInto('boxes').values({ name: 'CARD', ...sides, inside_length_mm: 62, inside_width_mm: 95, cost_minor: 100000000, currency: 'EUR', created_by: admin.id }).returningAll().executeTakeFirstOrThrow();
+    expect(box).toMatchObject({ cost_minor: 100000000, active: true, created_by: admin.id });
+    expect(typeof box.cost_minor).toBe('number');
+    await expect(db.insertInto('boxes').values({ name: 'card', ...sides }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'boxes_name_key'));
+    await expect(sql`UPDATE boxes SET created_by = NULL WHERE id = ${box.id}`.execute(db)).rejects.toSatisfy(isGuardViolation);
+    // A model's box and packed weight; a box named is never deleted.
+    await expect(db.updateTable('models').set({ packed_weight_g: 30001 }).where('id', '=', model.id).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'models_packed_weight_g_check'));
+    await db.updateTable('models').set({ box_id: box.id, packed_weight_g: 140 }).where('id', '=', model.id).execute();
+    await expect(db.deleteFrom('boxes').where('id', '=', box.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    // A parcel's weight or what was missing only once packed, never both; the list comes back as an array.
+    const request = await db.insertInto('shop_requests').values({ account_id: account.id, model_id: model.id, status: 'CLOSED', handled_at: new Date(), outcome: 'ACCEPTED' }).returning('id').executeTakeFirstOrThrow();
+    const order = await db
+      .insertInto('orders')
+      .values({ channel: 'SALON', shop_request_id: request.id, account_id: account.id, model_id: model.id, location_id: location.id, price_minor: 1000, currency: 'EUR' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const now = new Date();
+    await db.updateTable('orders').set({ status: 'PAID', paid_at: now, packing_started_at: now }).where('id', '=', order.id).execute();
+    const parcel = await db.insertInto('shipments').values({ order_id: order.id, location_id: location.id, packing_started_by: admin.id, box_id: box.id }).returning('id').executeTakeFirstOrThrow();
+    await expect(db.updateTable('shipments').set({ weight_g: 200 }).where('id', '=', parcel.id).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'shipments_weight'));
+    const packed = { status: 'PACKED' as const, packed_at: new Date(Date.now() + 1000), packed_by: admin.id };
+    await expect(db.updateTable('shipments').set({ ...packed, weight_g: 200, weight_missing: ['BOXED'] }).where('id', '=', parcel.id).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'shipments_weight'));
+    await expect(db.updateTable('shipments').set({ ...packed, weight_missing: [] }).where('id', '=', parcel.id).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'shipments_weight_missing_check'));
+    expect(
+      await db.updateTable('shipments').set({ ...packed, weight_missing: ['BOXED', 'box'] }).where('id', '=', parcel.id).returning(['box_id', 'weight_g', 'weight_missing']).executeTakeFirstOrThrow(),
+    ).toEqual({ box_id: box.id, weight_g: null, weight_missing: ['BOXED', 'box'] });
+    expect(
+      await db.updateTable('shipments').set({ weight_g: 200, weight_missing: null }).where('id', '=', parcel.id).returning(['weight_g', 'weight_missing']).executeTakeFirstOrThrow(),
+    ).toEqual({ weight_g: 200, weight_missing: null });
   });
 });

@@ -487,6 +487,9 @@ describe('admin enums mirror the server', () => {
     // A house message's bounds (macro scope D24, migration 0052), as the server holds them.
     expect(web.HOUSE_TITLE_MAX).toBe(serverSchema.HOUSE_TITLE_MAX);
     expect(web.HOUSE_BODY_MAX).toBe(serverSchema.HOUSE_BODY_MAX);
+    // A box's and a packed weight's bounds, and the card every box takes (macro scope D16, migration 0054), as the server holds them.
+    for (const name of ['BOX_NAME_MAX', 'BOX_INSIDE_MM_MAX', 'BOX_EMPTY_WEIGHT_G_MAX', 'BOX_COST_MINOR_MAX', 'PACKED_WEIGHT_G_MAX'] as const) expect(web[name], name).toBe(serverSchema[name]);
+    expect(web.CERTIFICATE_CARD_MM).toEqual(serverSchema.CERTIFICATE_CARD_MM);
     expect([...web.AUTH_POLICY_KINDS]).toEqual([...SERVER_POLICY_KINDS]);
     expect([...web.ANOMALY_SORTS]).toEqual([...SERVER_ANOMALY_SORTS]);
     expect([...web.SCAN_STAT_EVENT_TYPES]).toEqual([...serverSchema.SCAN_STAT_EVENT_TYPES]);

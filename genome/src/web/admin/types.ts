@@ -362,6 +362,17 @@ export type WornStatus = (typeof WORN_STATUSES)[number];
 export const WORN_REFUSALS = ['PIECE_NOT_VISIBLE', 'QUALITY', 'NOT_SUITABLE'] as const;
 export type WornRefusal = (typeof WORN_REFUSALS)[number];
 
+/**
+ * A standard box's and a packed weight's bounds (boxes, models.packed_weight_g, migration 0054, macro scope D16 B1 and
+ * B2), and the certificate card every box takes flat, 95 × 62 mm in either orientation (`boxes_card_fits`).
+ */
+export const BOX_NAME_MAX = 60;
+export const BOX_INSIDE_MM_MAX = 2000;
+export const BOX_EMPTY_WEIGHT_G_MAX = 30_000;
+export const BOX_COST_MINOR_MAX = 100_000_000;
+export const PACKED_WEIGHT_G_MAX = 30_000;
+export const CERTIFICATE_CARD_MM = Object.freeze({ long: 95, short: 62 });
+
 /** How the access rules of a LIVE RELEASE combine (drops.access_combine): every rule met, or any one of them. */
 export const ACCESS_COMBINES = ['AND', 'OR'] as const;
 export type AccessCombine = (typeof ACCESS_COMBINES)[number];

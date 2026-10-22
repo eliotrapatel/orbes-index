@@ -728,6 +728,25 @@ export const WORN_PHOTO_MAX_BYTES = 1_048_576;
 export const WORN_PHOTO_MAX_SIDE = 4096;
 export const WORN_CREDIT_FIRST_NAME_MAX = 50;
 
+/**
+ * Standard boxes and packed weights (migration 0054, macro scope D16 B1 and B2; lot M3 plan §1.1): a box's name and inside
+ * sides, its empty weight and cost, at most; a model's packed weight (the piece as it is packed, with its pouch and card,
+ * without the box), a parcel's weight and what its unknown weight lists, at most.
+ */
+export const BOX_NAME_MAX = 60;
+export const BOX_INSIDE_MM_MAX = 2000;
+export const BOX_EMPTY_WEIGHT_G_MAX = 30_000;
+export const BOX_COST_MINOR_MAX = 100_000_000;
+export const PACKED_WEIGHT_G_MAX = 30_000;
+export const SHIPMENT_WEIGHT_G_MAX = 100_000;
+export const SHIPMENT_WEIGHT_MISSING_MAX = 64;
+
+/**
+ * The certificate card 79t, flat (render/certificate.ts CERTIFICATE_CARD, 95 × 62 mm): every box takes it, its longer
+ * inside side at least `long` and its shorter at least `short` (`boxes_card_fits`, migration 0054, B1).
+ */
+export const CERTIFICATE_CARD_MM = Object.freeze({ long: 95, short: 62 });
+
 // ── Column helpers ─────────────────────────────────────────────────────────
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -833,6 +852,16 @@ export interface ModelsTable {
    * service's default for a new model is Lifetime. Every model of before was backfilled true.
    */
   warranty_lifetime: WithDefault<boolean>;
+  /**
+   * Migration 0054 (macro scope D16 B1): the box its pieces are packed in (boxes.id); NULL: none, or on a variant its
+   * main model's.
+   */
+  box_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /**
+   * Migration 0054 (B2): the piece as it is packed, with its pouch and card, without the box, 1..30 000 g; NULL: unknown,
+   * or on a variant its main model's.
+   */
+  packed_weight_g: ColumnType<number | null, number | null | undefined, number | null>;
   created_at: TimestampDefault;
 }
 
@@ -2460,6 +2489,28 @@ export interface SkuThresholdsTable {
   updated_at: TimestampDefault;
 }
 
+/**
+ * A standard box (migration 0054, macro scope D16 B1; lot M3 plan §1.1): its name (1..60, unique whatever the case), its
+ * inside sides (1..2 000 mm each, taking the 95 × 62 mm certificate card flat in either orientation, `boxes_card_fits`),
+ * its empty weight (1..30 000 g) and its cost with its currency (both or neither), `active` (a box set aside is offered
+ * for no model nor parcel; a shipment keeps the one it used). id, created_at and created_by never change.
+ */
+export interface BoxesTable {
+  id: Generated<string>;
+  name: string;
+  inside_length_mm: number;
+  inside_width_mm: number;
+  inside_height_mm: number;
+  empty_weight_g: number;
+  cost_minor: ColumnType<number | null, number | null | undefined, number | null>; // bigint 0..100 000 000
+  /** An ISO 4217 code (^[A-Z]{3}$), with cost_minor. */
+  currency: ColumnType<string | null, string | null | undefined, string | null>;
+  active: WithDefault<boolean>;
+  created_at: TimestampDefault;
+  created_by: ColumnType<string | null, string | null | undefined, never>; // admin_users.id; NULL for a script
+  updated_at: TimestampDefault;
+}
+
 /** A carrier (migration 0022, M1): its tracking link, https with `{tracking}` where the number goes. id and created_at never change. */
 export interface CarriersTable {
   id: Generated<string>;
@@ -2583,6 +2634,15 @@ export interface ShipmentsTable {
   delivered_at: TimestampNullable;
   cancelled_at: TimestampNullable;
   created_at: TimestampDefault;
+  /** Migration 0054 (macro scope D16 B1): the box chosen while packing, or the one suggested, written at PACKED (boxes.id). */
+  box_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /**
+   * Migration 0054 (B2): the parcel's weight, 1..100 000 g, written at PACKED: the box's empty weight plus each piece's
+   * packed weight (and each add-on's). NULL before PACKED, and when unknown.
+   */
+  weight_g: ColumnType<number | null, number | null | undefined, number | null>;
+  /** Migration 0054: what was missing at PACKED when the weight is unknown (model names, « box »), 1..64 entries; never with weight_g. */
+  weight_missing: ColumnType<string[] | null, string[] | null | undefined, string[] | null>;
 }
 
 /** An order of a parcel, and the piece its packing scan bound (migration 0037). */
@@ -3216,6 +3276,7 @@ export interface Database {
   stock_movements: StockMovementsTable;
   sku_thresholds: SkuThresholdsTable;
   carriers: CarriersTable;
+  boxes: BoxesTable;
   orders: OrdersTable;
   order_events: OrderEventsTable;
   bench_items: BenchItemsTable;
