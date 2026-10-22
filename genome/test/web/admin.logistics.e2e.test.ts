@@ -17,6 +17,10 @@
  *     refused), counts the delivery (more than ordered with a note, a rejected piece); ORBES reads it Expected, then
  *     confirms it; while the identities are issued the cards wait; then they print in their run, and Cards attached;
  *     the rejected piece goes back to the supplier.
+ *  5. Boxes and weights (plan MACRO M3 §1.3, B1 and B2): ORBES adds a box in Orders → Settings (one that cannot take
+ *     the 95 × 62 mm card flat refused first), gives it to the model on its page with its packed weight (the
+ *     Catalogue's Box column reads it); the parcel being packed reads the piece's box and its weight, CHANGE BOX picks
+ *     another, and once packed the box and weight read as recorded, on the parcel and on its packing slip.
  * No CSP violation, no page error, no figure in the display face.
  */
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -34,9 +38,9 @@ import type { Actor } from '../../src/server/types.js';
 import { PACKING_PHOTO_EDGE_BYTES } from '../../src/web/admin/model/logistics.js';
 import { createAdmin, createHarness, seedCatalog, type Catalog, type Harness } from '../api/support.js';
 import { codeSource, phonePhoto } from '../e2e/support.js';
-import { packAndShip, stockPieces, type StockedPiece } from '../support/fulfil.js';
+import { packAndShip, scanIntoParcel, stockPieces, type StockedPiece } from '../support/fulfil.js';
 import { writePng } from '../support/image-io.js';
-import { jpegPixels, texturedPhoto } from '../support/images.js';
+import { jpegPhoto, jpegPixels, texturedPhoto } from '../support/images.js';
 import { createAccount } from '../support/live.js';
 
 const CHROMIUM = process.env.ORBES_CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
@@ -624,5 +628,98 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
       expect(await csp(p)).toEqual([]);
       await p.context().close();
     }
+  }, STEP_TIMEOUT);
+
+  it('boxes and weights: a box added in Settings and given to the model, the parcel\'s box and weight while packing, CHANGE BOX, then as recorded on the parcel and its slip', async () => {
+    const a = await open(ADMIN, 'Dashboard');
+    await go(a, '#/settings', 'Settings');
+    expect(await a.locator('#settings-boxes [data-testid=boxes-empty] .empty__text').textContent()).toBe('No box yet. Add your boxes: each model is then given its box.');
+    await shot(a, 'boxes-empty');
+
+    // New box: the card's rule said under the sides; a box the card cannot lie flat in is refused, in the server's words.
+    await a.click('[data-testid=box-add]');
+    expect(await a.locator('dialog [data-field=insideHeightMm] .cfield__hint').textContent()).toBe('Inside, it must take the 95 × 62 mm certificate card flat.');
+    for (const [name, value] of [['name', 'CUBE 80'], ['insideLengthMm', '94'], ['insideWidthMm', '90'], ['insideHeightMm', '40'], ['emptyWeightG', '85'], ['cost', '1.20'], ['currency', 'EUR']] as const) await a.fill(`dialog input[name=${name}]`, value);
+    await a.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => a.locator('dialog .dialog__error').textContent()).toBe('This box cannot take the 95 × 62 mm certificate card flat.');
+    await a.fill('dialog input[name=insideLengthMm]', '120');
+    await shot(a, 'box-new', { dialog: true });
+    await confirmDialog(a);
+    await a.waitForSelector('.toast:has-text("Box added.")');
+    const boxRow = a.locator('#settings-boxes tbody tr');
+    await expect.poll(() => boxRow.count()).toBe(1);
+    expect(await a.locator('#settings-boxes thead th').allTextContents()).toEqual(['Box', 'Inside (L × W × H)', 'Empty weight', 'Cost', 'Models', 'Status', '']);
+    expect(await boxRow.locator('td').evaluateAll((tds) => tds.slice(0, 6).map((td) => td.textContent))).toEqual(['CUBE 80', '120 × 90 × 40 mm', '85 g', expect.stringMatching(/^€.1\.20$/), '0', 'ACTIVE']);
+    const cube = (await h.t.db.selectFrom('boxes').select('id').where('name', '=', 'CUBE 80').executeTakeFirstOrThrow()).id;
+    const flat = (await h.ctx.services.boxes.create({ name: 'FLAT 140', insideLengthMm: 160, insideWidthMm: 110, insideHeightMm: 30, emptyWeightG: 120 }, admin)).id;
+    await shot(a, 'boxes');
+
+    // The model's Packing: its box and its packed weight; the Catalogue's Box column.
+    await go(a, `#/catalogue/${catalog.modelId}`, 'MONOLITHE');
+    expect(await a.locator('[data-testid=model-packing-box]').textContent()).toBe('No box yet.');
+    expect(await a.locator('[data-testid=model-packing-weight]').textContent()).toBe('Not set');
+    await a.click('[data-testid=model-packing-edit]');
+    await a.waitForSelector('dialog select[name=boxId]');
+    expect(await a.locator('dialog select[name=boxId] option').allTextContents()).toEqual(['None', 'CUBE 80 · 120 × 90 × 40 mm', 'FLAT 140 · 160 × 110 × 30 mm']);
+    expect(await a.locator('dialog [data-field=packedWeightG] .cfield__hint').textContent()).toBe('The piece as it is packed, with its pouch and card, without the box.');
+    await a.selectOption('dialog select[name=boxId]', cube);
+    await a.fill('dialog input[name=packedWeightG]', '140');
+    await shot(a, 'model-packing-edit', { dialog: true });
+    await confirmDialog(a);
+    await a.waitForSelector('.toast:has-text("Packing saved.")');
+    await expect.poll(() => a.locator('[data-testid=model-packing-box]').textContent()).toBe('CUBE 80 · 120 × 90 × 40 mm');
+    expect(await a.locator('[data-testid=model-packing-weight]').textContent()).toBe('140 g');
+    await shot(a, 'model-packing');
+    await go(a, '#/catalogue', 'Catalogue');
+    expect(await a.locator('#models tbody tr', { hasText: 'MONOLITHE' }).first().locator('[data-testid=model-box]').textContent()).toBe('CUBE 80');
+
+    // A parcel being packed: the piece's box and the parcel's weight (85 g + 140 g), the checklist naming the box.
+    const orderId = await salonOrder('52');
+    h.clock.advance(MINUTE);
+    await h.ctx.services.orders.transition(orderId, { to: 'PAID' }, admin);
+    await stockPieces(h.ctx, { skuId: sku52, locationId: france, count: 1, material: '925 STERLING SILVER' }, admin);
+    await scanIntoParcel(h.ctx, orderId, {}, admin);
+    const reference = orderReference(orderId);
+    await go(a, `#/logistics/orders/${orderId}`, reference);
+    expect(await a.locator('[data-testid=parcel-box]').textContent()).toBe('CUBE 80 · 120 × 90 × 40 mm');
+    expect(await a.locator('[data-testid=parcel-box-note]').textContent()).toBe('The piece’s box.');
+    expect(await a.locator('[data-testid=parcel-weight]').textContent()).toBe('225 g');
+    expect(await a.locator('[data-testid=parcel-checklist] .ccheck__label').allTextContents()).toContain('The box: CUBE 80, and the pouch');
+    expect(await a.locator('#parcel-packing').textContent()).not.toMatch(/€|EUR|1\.20/);
+
+    // CHANGE BOX while packing: another active box; the weight follows it (120 g + 140 g).
+    await a.click('[data-testid=parcel-change-box]');
+    await a.selectOption('dialog select[name=boxId]', flat);
+    await shot(a, 'parcel-change-box', { dialog: true });
+    await confirmDialog(a);
+    await a.waitForSelector('.toast:has-text("Box changed.")');
+    await expect.poll(() => a.locator('[data-testid=parcel-box]').textContent()).toBe('FLAT 140 · 160 × 110 × 30 mm');
+    expect(await a.locator('[data-testid=parcel-box-note]').textContent()).toBe('Chosen while packing.');
+    expect(await a.locator('[data-testid=parcel-weight]').textContent()).toBe('260 g');
+    await shot(a, 'parcel-packing-box');
+    await shot(a, 'parcel-packing-box-phone', { phone: true });
+
+    // Packed: the box and the weight written with it, read as recorded; CHANGE BOX gone.
+    await h.ctx.services.logistics.setPhoto(orderId, { mime: 'image/jpeg', bytes: jpegPhoto(16, 12) }, admin, null);
+    const view = await h.ctx.services.logistics.parcel(orderId, null);
+    await h.ctx.services.logistics.checkPacked(orderId, { ticked: view.checklist.filter((l) => !l.byScan).map((l) => l.key) }, admin, null);
+    expect(await h.t.db.selectFrom('shipments').select(['box_id', 'weight_g', 'weight_missing']).where('order_id', '=', orderId).executeTakeFirstOrThrow()).toEqual({ box_id: flat, weight_g: 260, weight_missing: null });
+    await a.reload();
+    await expect.poll(() => a.locator('[data-testid=parcel-step]').textContent()).toBe('PACKED');
+    expect(await a.locator('[data-testid=parcel-box]').textContent()).toBe('FLAT 140 · 160 × 110 × 30 mm');
+    expect(await a.locator('[data-testid=parcel-box-note]').textContent()).toBe('As recorded when the parcel was packed.');
+    expect(await a.locator('[data-testid=parcel-weight]').textContent()).toBe('260 g');
+    expect(await a.locator('[data-testid=parcel-change-box]').count()).toBe(0);
+
+    // The packing slip prints both, never a cost.
+    await a.click('a:has-text("Packing slip")');
+    await expect.poll(() => a.locator('[data-testid=slip-reference]').textContent()).toBe(reference);
+    expect(await a.locator('[data-testid=slip-box]').textContent()).toBe('FLAT 140 · 160 × 110 × 30 mm');
+    expect(await a.locator('[data-testid=slip-weight]').textContent()).toBe('260 g');
+    expect(await a.locator('[data-testid=packing-slip]').textContent()).not.toMatch(/€|EUR|1\.20/);
+    await shot(a, 'slip-box-weight');
+    expect(await figuresInDisplayFace(a)).toEqual([]);
+    expect(await csp(a)).toEqual([]);
+    await a.context().close();
   }, STEP_TIMEOUT);
 });

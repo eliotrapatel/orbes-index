@@ -55,6 +55,8 @@ import type {
   BestTime,
   LiveFeasibility,
   LiveSizeMix,
+  BoxInput,
+  BoxView,
   Carrier,
   HeardOptionView,
   LinkAttribution,
@@ -677,6 +679,11 @@ export class AdminApi {
   /** Plan NEXT LOT §3.3, OPERATOR: one size taken off a model: removed when nothing uses it, otherwise set aside. */
   removeModelSize(id: string, skuId: string): Promise<ModelSizeRemoved> {
     return this.post(`/api/admin/models/${encodeURIComponent(id)}/sizes/${encodeURIComponent(skuId)}/remove`, {});
+  }
+
+  /** Plan MACRO M3 §1.2, OPERATOR: a model's box and packed weight (null: none, or a variant's main model's). */
+  setModelPacking(id: string, input: { boxId: string | null; packedWeightG: number | null }): Promise<Model> {
+    return this.request('PUT', `/api/admin/models/${encodeURIComponent(id)}/packing`, { body: input });
   }
 
   /** Plan NEXT LOT §3.5.4.5, OPERATOR: a model's supplier and its sizes' own; answers its Sizes section. */
@@ -1550,6 +1557,33 @@ export class AdminApi {
     return this.patch(`/api/admin/carriers/${encodeURIComponent(id)}`, change);
   }
 
+  // ── Standard boxes (plan MACRO M3 §1.3, B1) ──────────────────────────────
+
+  /** AUDITOR: every box, the active ones first, each with how many models name it. */
+  boxes(): Promise<Items<BoxView>> {
+    return this.get('/api/admin/boxes');
+  }
+
+  /** ADMIN: a box added (422 BOX_TOO_SMALL_FOR_CARD, 409 BOX_NAME_TAKEN). */
+  createBox(input: BoxInput): Promise<BoxView> {
+    return this.post('/api/admin/boxes', input);
+  }
+
+  /** ADMIN: any of its fields; the cost and its currency together. */
+  updateBox(id: string, change: BoxInput): Promise<BoxView> {
+    return this.patch(`/api/admin/boxes/${encodeURIComponent(id)}`, change);
+  }
+
+  /** ADMIN: offered for no model nor parcel (409 BOX_IN_USE while an active model packs in it). */
+  setBoxAside(id: string): Promise<BoxView> {
+    return this.post(`/api/admin/boxes/${encodeURIComponent(id)}/set-aside`, {});
+  }
+
+  /** ADMIN: offered again. */
+  reinstateBox(id: string): Promise<BoxView> {
+    return this.post(`/api/admin/boxes/${encodeURIComponent(id)}/reinstate`, {});
+  }
+
   // ── The client sheet's Profile (plan CUSTOMER INTELLIGENCE §3.1 P.6.5, P.6.6, P.9.2; API §16.36) ──
 
   /** OPERATOR+: Edit the profile, with the `version` read (409 PROFILE_CHANGED when the client saved in between). */
@@ -1832,6 +1866,11 @@ export class AdminApi {
   /** LOGISTICS and OPERATOR+: the packed parcel's photo, a JPEG of at most 1 MiB (seen by ORBES only). */
   setPackingPhoto(orderId: string, photo: Blob): Promise<ShippingOrderView> {
     return this.request('PUT', `/api/admin/logistics/orders/${encodeURIComponent(orderId)}/packing/photo`, { upload: { type: 'image/jpeg', data: photo } });
+  }
+
+  /** LOGISTICS and OPERATOR+: CHANGE BOX while packing (plan MACRO M3 §1.1), an active box. */
+  chooseParcelBox(orderId: string, boxId: string): Promise<ShippingOrderView> {
+    return this.post(`/api/admin/logistics/orders/${encodeURIComponent(orderId)}/packing/box`, { boxId });
   }
 
   /** LOGISTICS and OPERATOR+: Packed, the checklist's lines ticked by key. */

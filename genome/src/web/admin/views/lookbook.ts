@@ -29,6 +29,12 @@
  *    Reinstate; which saved size of a collector (YOUR SIZES) preselects the
  *    model's size, and the measures each of its sizes fits. ADD A VARIANT
  *    copies its offered sizes (and asks its size type when it has none).
+ *  - Packing (plan MACRO M3 §1.3, B1 and B2), after Sizes: the box its pieces
+ *    are packed in (one of Orders → Settings' boxes, with its inside sides)
+ *    and their packed weight (the piece as it is packed, with its pouch and
+ *    card, without the box); a variant without its own reads its main
+ *    model's, « As MONOLITHE ». Edit: a select of the active boxes and the
+ *    grams, saved by OPERATOR (PUT …/packing, audited model.packing).
  *  - Pairs well with (plan NEXT-NINE, BP-34), last as on the sheet: the two
  *    or three models its sheet ends with, in their order, each with whether
  *    the sheet shows it; none picked, what it shows now; Edit pairs, three
@@ -36,7 +42,7 @@
  *
  * OPERATOR edits (editCatalog, photograph), an AUDITOR reads. Each change is
  * one request, audited by the server (model.update, model.gallery.*,
- * model.sizes.update, model.sizes.declare, model.pairs), then
+ * model.sizes.update, model.sizes.declare, model.packing, model.pairs), then
  * the page is read again.
  */
 import { h } from '../../shared/dom.js';
@@ -66,6 +72,7 @@ import {
   textChange,
   type PublicationForm,
 } from '../model/lookbook.js';
+import { MODEL_PACKING_TEXT, modelBoxRow, modelWeightRow, packingBoxOptions, packingChanged, packingFormValues, packingInput, packingProblem } from '../model/boxes.js';
 import { can } from '../model/permissions.js';
 import { modelPhotoImpact } from '../model/photo.js';
 import { modelWornText, WORN_COPY, wornGroupOf } from '../model/worn.js';
@@ -499,6 +506,58 @@ export async function lookbookView(ctx: ViewContext): Promise<HTMLElement> {
     },
   );
 
+  // ── Packing (plan MACRO M3 §1.3, B1 and B2) ─────────────────────────────
+  const editPacking = async () => {
+    let boxes;
+    try {
+      boxes = (await ctx.api.boxes()).items;
+    } catch (e) {
+      notifyError(e, 'The boxes could not be loaded.');
+      return;
+    }
+    const values = packingFormValues(m);
+    const options = packingBoxOptions(boxes, m);
+    void openDialog({
+      title: MODEL_PACKING_TEXT.title,
+      eyebrow,
+      body: h('p', { class: 'dialog__text' }, options.length > 1 ? MODEL_PACKING_TEXT.lead : MODEL_PACKING_TEXT.noBoxes),
+      fields: [
+        { name: 'boxId', label: 'Box', kind: 'select', options, value: values.boxId },
+        {
+          name: 'packedWeightG',
+          label: 'Packed weight (g)',
+          maxlength: 6,
+          value: values.packedWeightG,
+          hint: m.variantOf ? `${MODEL_PACKING_TEXT.weightHint} Empty: as ${m.variantOf.name}.` : MODEL_PACKING_TEXT.weightHint,
+        },
+      ],
+      validate: (v) => packingProblem(v) ?? (packingChanged(m, v) ? null : MODEL_PACKING_TEXT.unchanged),
+      confirmLabel: 'Save packing',
+      submit: async (v) => {
+        await ctx.api.setModelPacking(m.id, packingInput(v));
+      },
+    }).then(done(MODEL_PACKING_TEXT.saved));
+  };
+  const boxRow = modelBoxRow(m);
+  const weightRow = modelWeightRow(m);
+  const packingSection = section(
+    MODEL_PACKING_TEXT.title,
+    [
+      h('p', { class: 'prose', data: { testid: 'model-packing-lead' } }, MODEL_PACKING_TEXT.lead),
+      defList([
+        {
+          label: 'Box',
+          value: h('span', null, h('span', { data: { testid: 'model-packing-box' } }, boxRow.value), boxRow.note ? h('span', { class: 'deflist__note', data: { testid: 'model-packing-box-note' } }, boxRow.note) : null),
+        },
+        {
+          label: 'Packed weight',
+          value: h('span', null, h('span', { data: { testid: 'model-packing-weight' } }, weightRow.value), h('span', { class: 'deflist__note', data: { testid: 'model-packing-weight-note' } }, weightRow.note)),
+        },
+      ]),
+    ],
+    { id: 'packing', tools: canEdit ? [button('Edit', { kind: 'ghost', testId: 'model-packing-edit', onClick: () => void editPacking() })] : [] },
+  );
+
   // ── Private salon (P-X08) ────────────────────────────────────────────────
   const editSalon = () => {
     const form = salonForm(m);
@@ -746,6 +805,7 @@ export async function lookbookView(ctx: ViewContext): Promise<HTMLElement> {
     publication,
     variants,
     sizesSection,
+    packingSection,
     salon,
     story,
     specs,

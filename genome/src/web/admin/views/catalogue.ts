@@ -72,6 +72,7 @@ import {
   warrantyReach,
   type ModelForm,
 } from '../model/catalogue.js';
+import { catalogueBoxCell } from '../model/boxes.js';
 import { can } from '../model/permissions.js';
 import { basePriceText, productExportSummary, SHOPIFY_CURRENCY_OPTIONS, shopifyLinkInput, shopifyLinkProblem, shopifyStatus, shopifyValues, variantField } from '../model/shopify.js';
 import { modelPhotoImpact } from '../model/photo.js';
@@ -390,6 +391,15 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
     // Plan ORBES CARE (answer 12, D16): each row its own, a variant's beside its main model's.
     { label: 'Warranty', cell: (m) => h('span', { data: { testid: 'model-warranty' } }, modelWarrantyText(m)), kind: ['nowrap'] },
     { label: 'Collection', cell: (m) => humanize(m.collection?.name) },
+    // Plan MACRO M3 §1.3 (B1): the box its pieces are packed in, a variant's main model's said under it.
+    {
+      label: 'Box',
+      cell: (m) => {
+        const c = catalogueBoxCell(m);
+        return h('span', null, h('span', { data: { testid: 'model-box' } }, c.value), c.sub ? h('span', { class: 'cell-sub', data: { testid: 'model-box-sub' } }, c.sub) : null);
+      },
+      kind: ['nowrap'],
+    },
     { label: 'SKU prefix', cell: (m) => mono(m.skuPrefix), kind: ['nowrap'] },
     { label: 'Default material', cell: (m) => humanize(m.defaultMaterial), kind: ['wide'] },
     { label: 'Status', cell: (m) => h('span', { data: { testid: 'model-active' } }, modelStatusMark(m)), kind: ['nowrap'] },

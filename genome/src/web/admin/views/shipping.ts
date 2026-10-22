@@ -6,7 +6,9 @@
  *
  *  - Parcel: per order, the piece (MONOLITHE · BLUE), its size, add-ons, engraving and surprise.
  *  - Ship to: the name, the address, the country and the phone; ADDRESS CHANGED when the address was replaced.
- *  - Packing: Start packing (the address and the engraving lock for the collector); the checklist, each card ticked by
+ *  - Packing: the box to use (its name and inside sides) with where it comes from, and THE PARCEL'S WEIGHT or what it
+ *    misses (plan MACRO M3 §1.3, B1 and B2; never a cost); CHANGE BOX while PACKING (an active box); once PACKED, the box
+ *    and the weight as recorded. Start packing (the address and the engraving lock for the collector); the checklist, each card ticked by
  *    its scan only; Scan the card (the sale mode's camera and photo reader, verify/scanner.ts); Add the photo (a JPEG
  *    of at most 64 KB, the edge's limit on its path: its quality, then its side, stepped down from 1 600 px to
  *    1 024 px, PACKING_PHOTO_LIMITS; seen by ORBES only); Packed, once every line is ticked, every card scanned
@@ -23,6 +25,7 @@ import type { DecodeReply } from '../../verify/protocol.js';
 import { Camera, CameraError, DecoderClient, DecoderUnavailableError, PhotoError, readPhoto, ScanSession, workerUrl } from '../../verify/scanner.js';
 import { ApiError } from '../api.js';
 import { formatDateTime } from '../format.js';
+import { changeBoxOptions, PARCEL_BOX_TEXT, parcelBoxRow, parcelWeightRow } from '../model/boxes.js';
 import { parseMoney } from '../model/live.js';
 import {
   addressChangedLine,
@@ -199,12 +202,31 @@ export function parcelSections(ctx: ViewContext, view: ShippingOrderView, opts: 
   scanner?.dispose();
   scanner = cardScanner;
 
+  // The box and the parcel's weight (plan MACRO M3 §1.3): live while packing, as recorded once PACKED.
+  const boxRow = parcelBoxRow(view.packing);
+  const weightRow = parcelWeightRow(view.packing);
+  const valueWithNote = (value: string, note: string | null, testid: string) =>
+    h('span', null, h('span', { data: { testid } }, value), note ? h('span', { class: 'deflist__note', data: { testid: `${testid}-note` } }, note) : null);
   const packingRows = [
     { label: 'Step', value: h('span', { data: { testid: 'parcel-step' } }, statusMark(PARCEL_STEP_LABELS[view.step], view.step === 'READY_TO_PACK' || view.step === 'PACKING' ? 'outline' : 'solid')) },
     ...(view.readySince
       ? [{ label: 'Ready since', value: h('span', null, formatDateTime(view.readySince), view.late ? h('span', { data: { testid: 'parcel-late' } }, ' ', statusMark('LATE', 'alert')) : null) }]
       : []),
+    { label: PARCEL_BOX_TEXT.box, value: valueWithNote(boxRow.value, boxRow.note, 'parcel-box') },
+    { label: PARCEL_BOX_TEXT.weight, value: valueWithNote(weightRow.value, weightRow.note, 'parcel-weight') },
   ];
+  const changeBox = () =>
+    void openDialog({
+      title: PARCEL_BOX_TEXT.changeTitle,
+      eyebrow,
+      body: h('p', { class: 'dialog__text' }, PARCEL_BOX_TEXT.changeText),
+      fields: [{ name: 'boxId', label: 'Box', kind: 'select', required: true, options: changeBoxOptions(view.packing), value: view.packing.box?.id ?? view.packing.boxes[0]?.id ?? '' }],
+      validate: (v) => (!v.boxId ? 'Choose a box.' : v.boxId === view.packing.box?.id ? PARCEL_BOX_TEXT.unchanged : null),
+      confirmLabel: PARCEL_BOX_TEXT.change,
+      submit: async (v) => {
+        await ctx.api.chooseParcelBox(view.id, v.boxId);
+      },
+    }).then(after(PARCEL_BOX_TEXT.changed));
   const packingBody: Child[] = [defList(packingRows)];
   if (view.shipment && view.shipment.status !== 'CANCELLED') {
     packingBody.push(checklist);
@@ -222,6 +244,7 @@ export function parcelSections(ctx: ViewContext, view: ShippingOrderView, opts: 
   }
   const packingTools = [
     acts.start ? button(PACKING_TEXT.startTitle, { kind: 'primary', testId: 'parcel-start', onClick: start }) : null,
+    acts.check && !view.packing.recorded && view.packing.boxes.length > 0 ? button(PARCEL_BOX_TEXT.change, { kind: 'ghost', testId: 'parcel-change-box', onClick: changeBox }) : null,
     acts.check ? packed : null,
   ].filter((b): b is HTMLButtonElement => b !== null);
   const packing = section('Packing', packingBody, { id: 'parcel-packing', tools: packingTools });

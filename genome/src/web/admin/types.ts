@@ -714,6 +714,11 @@ export interface Model {
   variantSwatch: string | null;
   /** N1: a main model's variants, in the order they were added; none for a variant, nor for a model alone. */
   variants: ModelVariant[];
+  /**
+   * Plan MACRO M3 §1.2 (B1, B2): the box its pieces are packed in and their packed weight, its own else (a variant) its
+   * main model's; `inherited` says which of the two come from the main model (services/catalog.ts ModelPacking).
+   */
+  packing: ModelPacking;
   /** Plan NEXT LOT §3.3: its size type (null: to give), and how many of its declared sizes are offered. */
   sizeType: SizeType | null;
   sizesOffered: number;
@@ -3671,6 +3676,68 @@ export interface ChecklistLine {
   ticked: boolean;
 }
 
+// ── Standard boxes and weights (plan MACRO M3 §1.1 to §1.3, D16 B1 and B2; routes/admin/boxes.ts) ─
+
+/** A box as packing names it (services/boxes.ts BoxRef): never its cost. */
+export interface BoxRef {
+  id: string;
+  name: string;
+  insideLengthMm: number;
+  insideWidthMm: number;
+  insideHeightMm: number;
+  emptyWeightG: number;
+  active: boolean;
+}
+
+/** A box as Orders → Settings reads it (GET /api/admin/boxes, services/boxes.ts BoxView). */
+export interface BoxView extends BoxRef {
+  /** Its cost in minor units and its currency, both or neither. */
+  costMinor: number | null;
+  currency: string | null;
+  /** How many models name it as their own box. */
+  models: number;
+  createdAt: Iso;
+  updatedAt: Iso;
+}
+
+/** What a box is created or changed with (POST and PATCH /api/admin/boxes); the cost and its currency go together. */
+export interface BoxInput {
+  name?: string;
+  insideLengthMm?: number;
+  insideWidthMm?: number;
+  insideHeightMm?: number;
+  emptyWeightG?: number;
+  costMinor?: number | null;
+  currency?: string | null;
+}
+
+/** A model's box and packed weight as its page and the Catalogue read them (services/catalog.ts ModelPacking). */
+export interface ModelPacking {
+  box: BoxRef | null;
+  packedWeightG: number | null;
+  /** On a variant: its main model, and which of the two come from it; null on a model alone or a main model. */
+  inherited: { from: { id: string; name: string }; box: boolean; packedWeightG: boolean } | null;
+}
+
+/** Where the box a parcel uses comes from (services/parcels.ts ParcelBoxSource). */
+export type ParcelBoxSource = 'MODELS' | 'LARGEST' | 'CHOSEN';
+
+/** A parcel's box and weight (services/parcels.ts ParcelPacking): never a cost. */
+export interface ParcelPacking {
+  box: BoxRef | null;
+  boxSource: ParcelBoxSource | null;
+  pieces: number;
+  /** The words of each model of the parcel without a box. */
+  modelsWithoutBox: string[];
+  weightG: number | null;
+  /** What the weight misses: each model's words, « box », or « over 100000 g ». */
+  missing: string[];
+  /** PACKED or after: the box and weight are those written at PACKED. */
+  recorded: boolean;
+  /** The active boxes CHANGE BOX offers (while PACKING). */
+  boxes: BoxRef[];
+}
+
 /** Who made a change of a parcel, as its history says it: a role, never a name. */
 export type ParcelActor = 'ORBES' | 'LOGISTICS' | 'COLLECTOR' | 'SYSTEM';
 
@@ -3699,6 +3766,8 @@ export interface ShippingOrderView {
     trackingNumber: string | null;
     trackingUrl: string | null;
   } | null;
+  /** Plan MACRO M3 §1.1: the box to use and the parcel's weight (none of a cost). */
+  packing: ParcelPacking;
   checklist: ChecklistLine[];
   history: { action: string; at: Iso; by: ParcelActor; order: string }[];
   /** The active carriers, for Ship (the agent never reads the carriers' route). */

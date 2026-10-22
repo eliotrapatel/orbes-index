@@ -11,6 +11,7 @@
  */
 import { countryName } from '../../../shared/countries.js';
 import { formatCount, formatDateTime } from '../format.js';
+import { slipParcel } from './boxes.js';
 import { parseMoney } from './live.js';
 import type { PhotoLimits } from './photo.js';
 import type { CaseToReceive, LogisticsLocation, LogisticsSku, OrderCaseKind, ParcelActor, ParcelStep, ReceptionInput, ReceptionOrder, ReceptionStatus, ReceptionView, ShippingOrderView, StockCorrectionStatus, SupplierReturnItem, ToShipRow } from '../types.js';
@@ -450,6 +451,8 @@ export interface ShippingSlip {
   reference: string;
   /** Where it ships: the country by its English name, the phone ('Not entered' without one), ADDRESS CHANGED's line until it ships. */
   buyer: SlipBuyer;
+  /** Plan MACRO M3 §1.3: the box to use with its inside sides, and the parcel's weight (or what it misses); never a cost. */
+  parcel: { box: string; weight: string };
   pieces: { reference: string; piece: string; serial: string | null; size: string; addons: string[]; engraving: string | null; surprise: string | null }[];
 }
 
@@ -457,6 +460,7 @@ export function shippingSlip(view: ShippingOrderView): ShippingSlip {
   return {
     reference: view.reference,
     buyer: slipBuyer(view.shipTo, view.addressChanged),
+    parcel: slipParcel(view.packing),
     pieces: view.orders.map((o) => ({
       reference: o.reference,
       piece: pieceWords(o),

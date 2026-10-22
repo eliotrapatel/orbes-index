@@ -7,14 +7,28 @@
  * The agent's slip of a parcel, `#/logistics/orders/:orderId/slip` (plan NEXT LOT §3.5.3): built from the parcel's own
  * reply (ShippingOrderView, no price, no email), the same rows without Channel, Release and Source, one block per
  * piece of the parcel. A LOGISTICS login reads only this one.
+ *
+ * Both print The parcel (plan MACRO M3 §1.3, B1 and B2): the box to use with its inside sides, and the parcel's weight
+ * (or what it misses), as the parcel's packing reads them, recorded once it is packed; never a cost.
  */
 import { h } from '../../shared/dom.js';
 import { formatDate } from '../format.js';
+import { slipParcel } from '../model/boxes.js';
 import { shippingSlip, type SlipBuyer } from '../model/logistics.js';
 import { packingSlip } from '../model/orders.js';
 import { href } from '../router.js';
 import { button, linkButton, statusMark } from '../ui/components.js';
 import type { ViewContext } from './context.js';
+
+/** The parcel block (plan MACRO M3 §1.3): the box and the parcel's weight. */
+function parcelBlock(p: { box: string; weight: string }, row: (label: string, value: string | null, testid: string) => HTMLElement): HTMLElement {
+  return h(
+    'section',
+    { class: 'printdoc__block', data: { testid: 'slip-parcel' } },
+    h('h2', { class: 'printdoc__heading' }, 'The parcel'),
+    h('dl', { class: 'printdoc__list' }, row('Box', p.box, 'slip-box'), row('Weight', p.weight, 'slip-weight')),
+  );
+}
 
 /**
  * The For block (plan NEXT LOT §3.6.B, §1.1 (d)): ADDRESS CHANGED with its line while the address was replaced after
@@ -33,7 +47,9 @@ function forBlock(b: SlipBuyer): (HTMLElement | null)[] {
 }
 
 export async function packingSlipView(ctx: ViewContext): Promise<HTMLElement> {
-  const d = await ctx.api.order(ctx.route.params.orderId ?? '');
+  const id = ctx.route.params.orderId ?? '';
+  // The parcel's box and weight; the slip stands without them should its parcel not be read.
+  const [d, parcel] = await Promise.all([ctx.api.order(id), ctx.api.parcel(id).catch(() => null)]);
   const s = packingSlip(d);
   const print = button('Print', { kind: 'primary', testId: 'slip-print', onClick: () => window.print() });
   const row = (label: string, value: string | null, testid: string) =>
@@ -68,6 +84,7 @@ export async function packingSlipView(ctx: ViewContext): Promise<HTMLElement> {
         { class: 'printdoc__block' },
         ...forBlock(s.buyer),
       ),
+      parcel ? parcelBlock(slipParcel(parcel.packing), row) : null,
       h(
         'section',
         { class: 'printdoc__block' },
@@ -113,6 +130,7 @@ export async function shippingSlipView(ctx: ViewContext): Promise<HTMLElement> {
         { class: 'printdoc__block' },
         ...forBlock(s.buyer),
       ),
+      parcelBlock(s.parcel, row),
       ...s.pieces.map((p) =>
         h(
           'section',

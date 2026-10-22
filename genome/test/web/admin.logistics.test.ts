@@ -81,6 +81,7 @@ import { ADMIN_ROLES, ORDER_CASE_KINDS, SHIPMENT_STATUSES, STOCK_CORRECTION_STAT
 const ID = '0f0e0d0c-0b0a-4908-8706-050403020100';
 const LOC = '1f0e0d0c-0b0a-4908-8706-050403020100';
 const OTHER = '2f0e0d0c-0b0a-4908-8706-050403020100';
+const BOX = '3f0e0d0c-0b0a-4908-8706-050403020100';
 const SKU: LogisticsSku = { id: ID, code: 'MNL-BLU-52', model: { id: ID, name: 'MONOLITHE' }, variant: 'BLUE', sizeLabel: '52', setAside: false };
 
 describe('the mirrors of the server', () => {
@@ -224,6 +225,16 @@ const PARCEL: ShippingOrderView = {
   ],
   shipTo: { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris', country: null, phone: null },
   addressChanged: null,
+  packing: {
+    box: { id: BOX, name: 'CUBE 80', insideLengthMm: 120, insideWidthMm: 90, insideHeightMm: 40, emptyWeightG: 85, active: true },
+    boxSource: 'LARGEST',
+    pieces: 2,
+    modelsWithoutBox: [],
+    weightG: 1240,
+    missing: [],
+    recorded: false,
+    boxes: [],
+  },
   shipment: { id: ID, status: 'PACKING', packingStartedAt: '2026-11-03T10:00:00.000Z', packedAt: null, shippedAt: null, deliveredAt: null, photo: false, carrier: null, trackingNumber: null, trackingUrl: null },
   checklist: [
     { key: `piece:${ID}`, label: 'The right piece: its card scanned (1 of 2)', byScan: true, ticked: true },
@@ -291,6 +302,8 @@ describe('To ship and a parcel', () => {
       reference: 'OR-0F0E0D0C',
       // Plan NEXT LOT §3.6.B, §1.1 (d): no country nor phone entered yet; no change.
       buyer: { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris', country: null, phone: 'Not entered', changed: null },
+      // Plan MACRO M3 §1.3: the box with its inside sides and the parcel's weight; never a cost.
+      parcel: { box: 'CUBE 80 · 120 × 90 × 40 mm', weight: '1\u2009240 g' },
       pieces: [
         { reference: 'OR-0F0E0D0C', piece: 'MONOLITHE · BLUE', serial: 'O26-J-00184', size: '52', addons: ['INITIALS'], engraving: 'A. & L.', surprise: null },
         { reference: 'OR-2F0E0D0C', piece: 'ORBITE', serial: null, size: 'ONE SIZE', addons: [], engraving: null, surprise: 'A silk pouch' },

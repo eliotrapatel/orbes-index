@@ -12,6 +12,11 @@
  *  - Carriers: Colissimo, Chronopost, DHL Express and UPS from the first boot, more added; each with its tracking link,
  *    `{tracking}` where the number goes (an example shown); set aside (never offered for a shipment again) or offered
  *    again.
+ *  - Boxes (plan MACRO M3 §1.3, B1): the house's standard boxes, none at first: each its name, inside length × width ×
+ *    height in mm, empty weight, cost (optional, with its currency) and how many models pack in it, ACTIVE or SET
+ *    ASIDE. New box and Edit (the 95 × 62 mm certificate card must lie flat inside, said under the sides; 422
+ *    BOX_TOO_SMALL_FOR_CARD), Set aside (409 BOX_IN_USE while an active model packs in it) and Reinstate. Each model is
+ *    given its box on its page (views/lookbook.ts); Logistics reads it on every parcel (views/shipping.ts).
  *  - SHIPPING (plan NEXT-NINE, BP-19 T2), optional: what an order's delivery costs below the free shipping of PLATINE
  *    and PALLADIUM, per currency and service, '—' for none (none preset: the order then carries no shipping, as
  *    before, unless Client Services enters a fee on it). Edit shipping (ADMIN) sets them whole, audited
@@ -24,14 +29,15 @@
  * Its header leads to the Orders board, Logistics and the Emails page (plan MACRO M1 §4.3, views/emails.ts).
  */
 import { h } from '../../shared/dom.js';
-import { formatDateTime } from '../format.js';
+import { formatCount, formatDateTime } from '../format.js';
+import { BOX_LIMITS, BOXES_TEXT, boxChange, boxCostText, boxFormValues, boxInput, boxProblem, boxSides, boxState, CARD_RULE, grams } from '../model/boxes.js';
 import { alertsInput, alertsProblem, ALERT_LIMITS, carrierProblem, engravingPricesInput, engravingPricesProblem, engravingPricesValues, engravingPriceText, LOGISTICS_LIMITS, locationProblem, TRACKING_PLACEHOLDER, trackingLink } from '../model/orders.js';
 import { GUARANTEE_LIMITS, PIECES_OPTIONS, piecesText, settingsInput, settingsProblem, settingsValues } from '../model/guarantees.js';
 import { can } from '../model/permissions.js';
 import { rateField, rateText, ratesChanged, ratesInput, ratesProblem, ratesValues, SHIPPING_SERVICE_LABELS } from '../model/program.js';
-import { HOUSE_CURRENCIES, SHIPPING_SERVICES, type Carrier, type EngravingPricesSheet, type GuaranteeSettings, type HouseCurrency, type OrderAlertSettings, type ShippingRatesSheet, type StockLocation } from '../types.js';
+import { HOUSE_CURRENCIES, SHIPPING_SERVICES, type BoxView, type Carrier, type EngravingPricesSheet, type GuaranteeSettings, type HouseCurrency, type OrderAlertSettings, type ShippingRatesSheet, type StockLocation } from '../types.js';
 import { href } from '../router.js';
-import { button, defList, linkButton, mono, pageHeader, section, statusMark, table } from '../ui/components.js';
+import { button, defList, emptyState, linkButton, mono, pageHeader, section, statusMark, table } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { notify } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
@@ -42,10 +48,11 @@ const EXAMPLE_TRACKING = '6A12345678901';
 const days = (n: number) => `${n} ${n === 1 ? 'day' : 'days'}`;
 
 export async function settingsView(ctx: ViewContext): Promise<HTMLElement> {
-  const [alerts, locations, carriers, rates, engraving, guarantee] = await Promise.all([
+  const [alerts, locations, carriers, boxes, rates, engraving, guarantee] = await Promise.all([
     ctx.api.orderAlerts(),
     ctx.api.locations(),
     ctx.api.carriers(),
+    ctx.api.boxes(),
     ctx.api.shippingRates(),
     ctx.api.engravingPrices(),
     ctx.api.guaranteeSettings(),
@@ -62,12 +69,13 @@ export async function settingsView(ctx: ViewContext): Promise<HTMLElement> {
     pageHeader({
       eyebrow: 'Clients · Orders',
       title: 'Settings',
-      lead: 'How the orders are followed: when one stands out as late, where pieces are kept, which carriers ship them. Everyone reads these settings; an ADMIN changes them.',
+      lead: 'How the orders are followed: when one stands out as late, where pieces are kept, which carriers ship them and in which boxes. Everyone reads these settings; an ADMIN changes them.',
       actions: [linkButton('Orders', href('orders'), 'ghost'), linkButton('Logistics', href('logistics'), 'ghost'), linkButton('Emails', href('emailSettings'), 'ghost')],
     }),
     alertsSection(ctx, alerts, admin, done),
     locationsSection(ctx, locations.items, admin, done),
     carriersSection(ctx, carriers.items, admin, done),
+    boxesSection(ctx, boxes.items, admin, done),
     shippingSection(ctx, rates, admin, done),
     engravingSection(ctx, engraving, admin, done),
     guaranteeSection(ctx, guarantee, can(ctx.session.admin.role, 'manageGuaranteeSettings'), done),
@@ -326,6 +334,80 @@ function carriersSection(ctx: ViewContext, items: Carrier[], admin: boolean, don
       { caption: 'Carriers', empty: 'No carrier yet: they are created at the first boot.' },
     ),
     { id: 'settings-carriers', tools: admin ? [button('Add carrier', { kind: 'ghost', testId: 'carrier-add', onClick: () => edit(null) })] : [] },
+  );
+}
+
+/**
+ * BOXES (plan MACRO M3 §1.3, B1), after Carriers and like them: the house's standard boxes; an ADMIN adds, edits, sets
+ * aside and reinstates them, the others read. A box's cost is the house's own: Logistics never reads it.
+ */
+function boxesSection(ctx: ViewContext, items: BoxView[], admin: boolean, done: (msg: string) => (v: unknown) => void): HTMLElement {
+  const edit = (b: BoxView | null) => {
+    const values = boxFormValues(b);
+    void openDialog({
+      title: b ? BOXES_TEXT.editTitle : BOXES_TEXT.addTitle,
+      eyebrow: b ? b.name : BOXES_TEXT.eyebrow,
+      fields: [
+        { name: 'name', label: 'Name', required: true, maxlength: BOX_LIMITS.name, value: values.name, hint: 'As the team says it: CUBE 80.' },
+        { name: 'insideLengthMm', label: 'Inside length (mm)', required: true, maxlength: 5, value: values.insideLengthMm },
+        { name: 'insideWidthMm', label: 'Inside width (mm)', required: true, maxlength: 5, value: values.insideWidthMm },
+        { name: 'insideHeightMm', label: 'Inside height (mm)', required: true, maxlength: 5, value: values.insideHeightMm, hint: CARD_RULE },
+        { name: 'emptyWeightG', label: 'Empty weight (g)', required: true, maxlength: 6, value: values.emptyWeightG, hint: 'The box alone, as it is used: lid and filling included.' },
+        { name: 'cost', label: 'Cost', maxlength: 12, value: values.cost, hint: BOXES_TEXT.costHint },
+        { name: 'currency', label: 'Currency', maxlength: 3, value: values.currency, hint: BOXES_TEXT.currencyHint },
+      ],
+      validate: (v) => boxProblem(v) ?? (b && boxChange(b, v as typeof values) === null ? BOXES_TEXT.unchanged : null),
+      confirmLabel: 'Save',
+      submit: async (v) => {
+        if (b) await ctx.api.updateBox(b.id, boxChange(b, v as typeof values)!);
+        else await ctx.api.createBox(boxInput(v as typeof values));
+      },
+    }).then(done(b ? BOXES_TEXT.saved : BOXES_TEXT.added));
+  };
+  const toggle = (b: BoxView) =>
+    void openDialog({
+      title: b.active ? BOXES_TEXT.setAsideTitle : BOXES_TEXT.reinstateTitle,
+      eyebrow: b.name,
+      body: h('p', { class: 'dialog__text' }, b.active ? BOXES_TEXT.setAsideText : BOXES_TEXT.reinstateText),
+      confirmLabel: b.active ? BOXES_TEXT.setAside : BOXES_TEXT.reinstate,
+      submit: async () => {
+        if (b.active) await ctx.api.setBoxAside(b.id);
+        else await ctx.api.reinstateBox(b.id);
+      },
+    }).then(done(b.active ? BOXES_TEXT.setAsideDone : BOXES_TEXT.reinstateDone));
+  return section(
+    'Boxes',
+    [
+      h('p', { class: 'notice' }, BOXES_TEXT.lead),
+      items.length
+        ? table<BoxView>(
+            [
+              { label: 'Box', cell: (b) => h('span', { data: { testid: 'box-name' } }, b.name), kind: ['wide'] },
+              { label: 'Inside (L × W × H)', cell: (b) => h('span', { data: { testid: 'box-sides' } }, boxSides(b)), kind: ['nowrap'] },
+              { label: 'Empty weight', cell: (b) => h('span', { data: { testid: 'box-weight' } }, grams(b.emptyWeightG)), kind: ['num', 'nowrap'] },
+              { label: 'Cost', cell: (b) => h('span', { data: { testid: 'box-cost' } }, boxCostText(b)), kind: ['num', 'nowrap'] },
+              { label: 'Models', cell: (b) => h('span', { data: { testid: 'box-models' } }, formatCount(b.models)), kind: ['num'] },
+              { label: 'Status', cell: (b) => h('span', { data: { testid: 'box-state' } }, statusMark(boxState(b), b.active ? 'solid' : 'muted')), kind: ['nowrap'] },
+              {
+                label: '',
+                cell: (b) =>
+                  admin
+                    ? h(
+                        'span',
+                        { class: 'row-actions' },
+                        button('Edit', { kind: 'ghost', testId: 'box-edit', onClick: () => edit(b) }),
+                        button(b.active ? BOXES_TEXT.setAside : BOXES_TEXT.reinstate, { kind: 'ghost', testId: 'box-toggle', onClick: () => toggle(b) }),
+                      )
+                    : null,
+                kind: ['actions'],
+              },
+            ],
+            items,
+            { caption: 'Boxes' },
+          )
+        : h('div', { data: { testid: 'boxes-empty' } }, emptyState(BOXES_TEXT.empty)),
+    ],
+    { id: 'settings-boxes', tools: admin ? [button(BOXES_TEXT.add, { kind: 'ghost', testId: 'box-add', onClick: () => edit(null) })] : [] },
   );
 }
 
