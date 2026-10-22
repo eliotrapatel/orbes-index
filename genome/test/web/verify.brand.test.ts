@@ -225,6 +225,8 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
     '.n-scan__ring',
     '.n-sizes__option',
     '.n-snd',
+    // The add-ons' steppers (lot M3, step M3.12, D2): − and +, each 44 px.
+    '.n-step__btn',
     '.n-sw__input',
     '.n-switch2__tab',
     '.n-tabs__tab',

@@ -47,7 +47,7 @@
 import { isLookbookSlug, storyParagraphs } from '../shared/lookbook.js';
 import { DEFAULT_CARE, DISCONTINUED, LOOKBOOK, PHOTOS } from './copy.js';
 import { isReleaseId, releasePath, zonedDate } from './releases-model.js';
-import type { LookbookCard, LookbookSheet, LookbookSheetVariant, ModelPair, ModelRelease, OwnedPiece } from './types.js';
+import type { AddonOfferItem, ChosenAddon, LookbookCard, LookbookSheet, LookbookSheetVariant, ModelPair, ModelRelease, OwnedPiece } from './types.js';
 import { discontinuedYearOf, upper, type Row } from './view-model.js';
 import { sheetWornModel, type SheetWornModel } from './worn-model.js';
 
@@ -232,7 +232,12 @@ export interface SalonModel {
    * CLIENT SERVICES attaches it) and the size asked (AC-01, REQUESTED · SIZE 52; null: none); null: REQUEST THIS PIECE
    * is offered.
    */
-  request: { id: string; modelId: string; size: string | null } | null;
+  request: { id: string; modelId: string; size: string | null; addons?: ChosenAddon[] } | null;
+  /**
+   * Plan MACRO M3 §4.4 (D2): the catalogue add-ons the request form offers (in stock, priced in the model's base
+   * currency); null for none.
+   */
+  addons: { currency: string; offer: AddonOfferItem[] } | null;
   /** AC-01: the model's sizes (the picker shows from two, with NOT SURE YET); none for a model of one size. */
   sizes: string[];
   /** AC-01: the size YOUR SIZES suggests, one of `sizes`; null for none. The collector confirms it by its own press. */
@@ -438,8 +443,8 @@ export function selectDot(m: SheetModel, slug: string): SheetModel {
 }
 
 /** The sheet once the account requested the model of the dot `slug` (REQUEST THIS PIECE): REQUESTED on it, and on its dot. */
-export function withRequest(m: SheetModel, slug: string, id: string, modelId: string, size: string | null = null): SheetModel {
-  const requested = (f: SheetFace): SheetFace => (f.slug === slug && f.salon ? { ...f, salon: { ...f.salon, request: { id, modelId, size } } } : f);
+export function withRequest(m: SheetModel, slug: string, id: string, modelId: string, size: string | null = null, addons: ChosenAddon[] = []): SheetModel {
+  const requested = (f: SheetFace): SheetFace => (f.slug === slug && f.salon ? { ...f, salon: { ...f.salon, request: { id, modelId, size, addons } } } : f);
   return { ...requested(m), sizes: m.sizes, dots: m.dots.map((d) => ({ ...d, face: requested(d.face) })), releases: m.releases, pairs: m.pairs, worn: m.worn };
 }
 
@@ -456,8 +461,9 @@ function salonModel(v: LookbookSheet['salon']): SalonModel | null {
     tier,
     request:
       r && typeof r.id === 'string' && typeof r.modelId === 'string' && r.status === 'OPEN'
-        ? { id: r.id, modelId: r.modelId, size: typeof r.size === 'string' && r.size.trim() !== '' ? r.size : null }
+        ? { id: r.id, modelId: r.modelId, size: typeof r.size === 'string' && r.size.trim() !== '' ? r.size : null, addons: Array.isArray(r.addons) ? r.addons : [] }
         : null,
+    addons: v.addons && typeof v.addons === 'object' && typeof v.addons.currency === 'string' && Array.isArray(v.addons.offer) ? { currency: v.addons.currency, offer: v.addons.offer } : null,
     sizes,
     suggested,
   };

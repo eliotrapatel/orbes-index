@@ -1165,6 +1165,60 @@
     font-size: var(--d-fs-cap);
   }
 
+  /* Plan MACRO M3 §4.4 (D2): the catalogue add-ons under the release's, in the same corner and width; each stepper's
+     buttons answer the pointer with the room's hover ground. */
+  html:not(.d-touch) .d-room .d-room__br > .live__items-title {
+    margin: var(--d-s5) calc(-1 * var(--d-tr-label)) 0 0;
+  }
+
+  html:not(.d-touch) .d-room .d-room__br > .live__items {
+    width: 100%;
+    max-width: none;
+    margin-top: var(--d-s3);
+  }
+
+  html:not(.d-touch) .d-room .n-addons--room {
+    gap: var(--d-s2);
+  }
+
+  html:not(.d-touch) .d-room .n-addons--room .n-addons__item {
+    padding: var(--d-s3) var(--d-s2) var(--d-s3) var(--d-s4);
+  }
+
+  html:not(.d-touch) .d-room .n-addons--room .n-addons__name {
+    font-size: var(--n-fs-micro);
+    letter-spacing: var(--d-tr-label);
+  }
+
+  html:not(.d-touch) .d-room .n-addons--room .n-addons__line {
+    font-size: var(--d-fs-cap);
+  }
+
+  html:not(.d-touch) .d-room .n-addons--room .n-addons__price {
+    font-size: var(--d-fs-small);
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  html:not(.d-touch) .d-room .n-addons--room .n-step__btn {
+    transition: background-color var(--d-dur-hover) var(--d-ease);
+  }
+
+  html:not(.d-touch) .d-room .n-addons--room .n-step__btn:not(:disabled):hover {
+    background-color: color-mix(in srgb, var(--ink) 6%, transparent);
+  }
+
+  html:not(.d-touch) .d-room .n-addons--room .n-step__btn:not(:disabled):active {
+    background-color: color-mix(in srgb, var(--ink) 12%, transparent);
+    transition-duration: var(--d-dur-press);
+  }
+
+  html:not(.d-touch) .d-room .d-room__br > .live__items-note {
+    max-width: none;
+    margin-top: var(--d-s3);
+    font-size: var(--d-fs-cap);
+  }
+
   html:not(.d-touch) .d-room .d-room__br > .btn.live__pay {
     margin-top: var(--d-s5);
   }
@@ -1235,6 +1289,20 @@
   html:not(.d-touch) .d-room .d-room__a > .live__confirmed-of {
     margin-top: var(--d-s4);
     color: var(--ink-soft);
+  }
+
+  /* Plan MACRO M3 §4.4 (D2): an add-on PAY could not add, under the sentence, in the label's capitals at a readable size. */
+  html:not(.d-touch) .d-room .d-room__a > .live__left-out {
+    max-width: 640px;
+    margin: var(--d-s4) 0 0;
+    text-align: left;
+  }
+
+  html:not(.d-touch) .d-room .d-room__a > .live__left-out .live__left-out-line {
+    font-family: var(--font-display);
+    font-size: var(--d-fs-cap);
+    letter-spacing: var(--d-tr-label);
+    line-height: 1.7;
   }
 
   html:not(.d-touch) .d-room .d-room__a > .live__confirmed-text {

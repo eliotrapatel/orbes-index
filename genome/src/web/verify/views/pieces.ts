@@ -66,6 +66,7 @@ import { orderContext } from '../messages-model.js';
 import { myLiveEntries } from '../live-model.js';
 import { orderDate, orderModels, type OrderClaimModel, type OrderModel } from '../orders-model.js';
 import { openOrderSheet } from './order-sheet.js';
+import { orderAddonsBlock } from './order-addons.js';
 import { pieceModel, type PieceModel } from '../pieces-model.js';
 import { myEntries, type MyEntryModel } from '../releases-model.js';
 import type { SessionStore } from '../session.js';
@@ -653,6 +654,8 @@ function orderCard(m: OrderModel, deps: OrderDeps, claim: HTMLElement | null = n
     m.request ? requestBlock(m) : null,
     rows.length > 0 ? h('div', { class: 'n-pieces__order-rows' }, definitionList(rows, { kind: 'kv' })) : null,
     m.engraving ? engravingBlock(m, deps) : null,
+    // Plan MACRO M3 §4.4 (D2): its add-ons' REMOVE and ADD AN ADD-ON, or the line once packing has begun.
+    m.addons ? addonsBlock(m, deps) : null,
     m.shipment?.href
       ? h(
           'p',
@@ -756,6 +759,15 @@ function engravingBlock(m: OrderModel, deps: OrderDeps): HTMLElement {
   link.dataset.focus = 'engraving';
   link.setAttribute('aria-haspopup', 'dialog');
   return h('p', { class: 'n-pieces__engraving' }, link);
+}
+
+/** ADD-ONS (plan MACRO M3 §4.4, D2): each REMOVE, ADD AN ADD-ON (its sheet), or the line once packing has begun. */
+function addonsBlock(m: OrderModel, deps: OrderDeps): HTMLElement {
+  return h(
+    'div',
+    { class: 'n-pieces__addons' },
+    ...orderAddonsBlock({ order: m, deps, onAdd: (trigger) => openOrderSheet({ kind: 'addons', order: m, trigger, onDone: (o) => deps.onChanged?.(o, 'addons') ?? null }) }),
+  );
 }
 
 /** DELIVERY ADDRESS (§3.6.B): the address and CHANGE, ADD THE DELIVERY ADDRESS, the address once packing has begun, or the order it travels with. */

@@ -15,7 +15,8 @@
  *                  REGISTER THIS PIECE offered once the order is shipped;
  *   its request    (plan NEXT LOT §3.6.D) a return or a size exchange asked: RETURN REQUESTED or EXCHANGE REQUESTED, the
  *                  RETURN ADDRESS, PIECE RECEIVED, EXCHANGED FOR, or the answer in MESSAGES;
- *   the terms      SIZE, PRICE, each add-on at its price, its ENGRAVING (plan NEXT LOT §3.6.C: its words, with the price
+ *   the terms      SIZE, PRICE, each add-on at its price (plan MACRO M3 §4.4: then each catalogue add-on with its units,
+ *                  POLISHING CLOTH × 2 · + € 30, REMOVE until packing begins and ADD AN ADD-ON under the rows), its ENGRAVING (plan NEXT LOT §3.6.C: its words, with the price
  *                  of the settings or none when the release's add-on paid for it; ADD AN ENGRAVING or CHANGE THE
  *                  ENGRAVING under the rows until packing begins), its SHIPPING (plan NEXT-NINE, BP-19 T4: free by its tier, at
  *                  its fee, or with the order it travels with; no row without shipping), the CREDIT taken off it (BP-19
@@ -36,6 +37,7 @@
  *                  addition 3), never a piece's own (decision 9); none when the model has none.
  * An order the app cannot read (an unknown step or channel, a reference that is not one) is left out, never guessed.
  */
+import { orderAddonRows, orderAddons, orderAddonsMinor, type OrderAddonsModel } from './addons-model.js';
 import { LIVE, ORDERS } from './copy.js';
 import { formatMoney } from './live-model.js';
 import type { OrderDocumentKind } from './api.js';
@@ -81,6 +83,8 @@ export interface OrderModel {
   rows: Row[];
   /** Its engraving under the rows (plan NEXT LOT §3.6.C): its link and its sheet, or the line once packing has begun; null for none. */
   engraving: OrderEngravingModel | null;
+  /** Its ADD-ONS (plan MACRO M3 §4.4, D2): REMOVE each until packing begins, ADD AN ADD-ON, or the line once packing has begun; null for none. */
+  addons: OrderAddonsModel | null;
   /** DELIVERY ADDRESS (plan NEXT LOT §3.6.B); null for none (a cancelled order, or nothing to say). */
   address: OrderAddressModel | null;
   /** RETURNS AND EXCHANGES (plan NEXT LOT §3.6.D), while they may be asked; null otherwise. */
@@ -276,6 +280,8 @@ export function orderRows(o: AccountOrder): Row[] {
     ...(gift ? [[ORDERS.rows.price, ORDERS.gift.price] as Row] : cancelled && !priced ? [] : [[ORDERS.rows.price, priced ? money(o.priceMinor!) : ORDERS.toConfirm] as Row]),
     // An add-on adds to the price: « + € 150 » (C24), its words the app's.
     ...(cancelled && o.currency === null ? [] : o.addons).map((a): Row => [upper(a.label), o.currency ? `+ ${money(a.priceMinor)}` : money(a.priceMinor)]),
+    // Plan MACRO M3 §4.4 (D2): its catalogue add-ons, each with its units (POLISHING CLOTH × 2 · + € 30).
+    ...orderAddonRows(o),
   ];
   const engraving = engravingOf(o);
   const engravingMinor = engraving?.priceMinor && o.currency ? engraving.priceMinor : 0;
@@ -285,7 +291,8 @@ export function orderRows(o: AccountOrder): Row[] {
   const fee = shippingFee(o);
   const credit = !gift && priced && typeof o.creditMinor === 'number' && Number.isInteger(o.creditMinor) && o.creditMinor > 0 ? o.creditMinor : 0;
   if (credit > 0) rows.push([ORDERS.rows.credit, ORDERS.credit(money(credit))]);
-  if (!gift && priced && (o.addons.length > 0 || engravingMinor > 0 || fee > 0 || credit > 0)) rows.push([ORDERS.rows.total, money(o.addons.reduce((n, a) => n + a.priceMinor, o.priceMinor! + engravingMinor + fee - credit))]);
+  const items = orderAddonsMinor(o);
+  if (!gift && priced && (o.addons.length > 0 || items > 0 || engravingMinor > 0 || fee > 0 || credit > 0)) rows.push([ORDERS.rows.total, money(o.addons.reduce((n, a) => n + a.priceMinor, o.priceMinor! + items + engravingMinor + fee - credit))]);
   return rows;
 }
 
@@ -492,6 +499,7 @@ export function orderModel(o: AccountOrder, offsetMinutes?: number, opts: { pare
     request: orderRequest(o, offsetMinutes),
     rows: orderRows(o),
     engraving: orderEngraving(o),
+    addons: orderAddons(o),
     address: orderAddress(o, opts),
     returns: orderReturns(o, offsetMinutes),
     concerning: orderContext({ id: o.id, model: o.model, modelVariant: o.modelVariant }).label,

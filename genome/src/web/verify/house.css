@@ -1767,6 +1767,62 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   color: var(--ink-soft);
 }
 
+/* Plan MACRO M3 §4.4 (D2): the catalogue add-ons on the hold, under the release's: NOCTURNE's rows (views/addon-rows.ts)
+   in the room's tokens and type, the width of the release's add-ons; the note under them says when they are added. */
+.live__items-title {
+  margin-top: 24px;
+}
+
+.live__items,
+.live__items-note,
+.live__left-out {
+  width: 100%;
+  max-width: 326px;
+  margin-top: 10px;
+}
+
+.n-addons--room {
+  --a-ink: var(--ink);
+  --a-line: var(--hairline-strong);
+  --a-faint: var(--metal);
+}
+
+.n-addons--room .is-chosen {
+  --a-line: var(--ink);
+}
+
+.n-addons--room .n-addons__item {
+  padding: 10px 6px 10px 14px;
+}
+
+.n-addons--room :is(.n-addons__name, .n-addons__line, .n-addons__price, .n-step__count) {
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-micro);
+}
+
+.n-addons--room :is(.n-addons__line, .n-addons__price, .n-step__count) {
+  font-family: var(--font);
+  letter-spacing: 0.02em;
+}
+
+.n-addons--room :is(.n-addons__price, .n-step__count) {
+  font-size: var(--fs-line);
+}
+
+.live__items-note {
+  color: var(--ink-soft);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+}
+
+/* CONFIRMED (in ivory): an add-on PAY could not add, by its name and why, above the receipt. */
+.live__left-out {
+  margin-top: 18px;
+  font-size: var(--fs-micro);
+  line-height: 1.6;
+  letter-spacing: var(--track-micro);
+}
+
 .live__deadline {
   display: flex;
   align-items: baseline;

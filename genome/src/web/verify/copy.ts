@@ -525,6 +525,40 @@ export const ORDERS = Object.freeze({
     failed: 'The engraving could not be saved just now.',
   }),
   /**
+   * ADD-ONS (plan MACRO M3 §4.4, D2): the catalogue add-ons of an order, each REMOVE until packing begins (a second tap
+   * or click confirms it), and ADD AN ADD-ON, which opens their sheet (a page part on a computer): the add-ons available,
+   * their units, the total, ADD. After payment an add-on added has its own invoice, one removed a credit note.
+   */
+  addons: Object.freeze({
+    title: 'ADD-ONS',
+    /** What the add-ons are, under the section's label on a computer and at the head of the sheet. */
+    lead: 'Sent with your piece, in its parcel.',
+    add: 'ADD AN ADD-ON',
+    remove: 'REMOVE',
+    get removeConfirm() {
+      return forDevice('TAP AGAIN TO REMOVE', 'CLICK AGAIN TO REMOVE');
+    },
+    /** Accessible names of REMOVE, with what it removes: `Remove POLISHING CLOTH × 2 from order OR-3F9A21C4`. */
+    removeLabel: (name: string, reference: string) => `Remove ${name} from order ${reference}`,
+    removeConfirmLabel: (name: string) => forDevice(`Tap again to remove ${name}`, `Click again to remove ${name}`),
+    paidAdd: 'Your order is paid: the add-on is added with its own invoice, in DOCUMENTS.',
+    paidRemove: 'Your order is paid: a credit note for the add-on will be in DOCUMENTS.',
+    locked: 'Packing has begun. Add-ons can no longer be added.',
+    none: 'No add-on is available for this order just now.',
+    loading: 'ONE MOMENT…',
+    /** The sheet's group of rows, as a screen reader names it. */
+    choices: 'The add-ons available for this order',
+    total: 'TOTAL',
+    save: 'ADD',
+    cancel: 'CANCEL',
+    /** Said before the server says it. */
+    choose: 'Choose an add-on.',
+    /** Failures, each followed by the server's message. */
+    loadFailed: 'The add-ons could not be shown just now.',
+    failed: 'The add-on could not be added just now.',
+    removeFailed: 'The add-on could not be removed just now.',
+  }),
+  /**
    * RETURNS AND EXCHANGES (plan NEXT LOT §3.6.D): on a delivered order for 14 days, REQUEST A RETURN and EXCHANGE THE
    * SIZE (only the sizes in stock), a reason and a note; the order case opens at once, written into MESSAGES; then what
    * it is now, on the card: requested, the return address, received, exchanged, or answered in MESSAGES.
@@ -620,6 +654,30 @@ export const ORDERS = Object.freeze({
     downloadFailed: 'This document could not be downloaded just now.',
     careFailed: 'The care guide could not be shown just now.',
   }),
+});
+
+/**
+ * The catalogue add-ons' rows (plan MACRO M3 §4.4, D2), wherever they are chosen: the LIVE hold, a draw's PLACE HELD, a
+ * salon request and ADD AN ADD-ON. Each row: its name, its line, its price per unit (`+ € 15`), its units from 0 to what
+ * may be taken (at most 3 of each), between − and +. An add-on chosen that could not be added when the order was made
+ * is said by its name and why (none left, no longer offered); the sale goes on without it.
+ */
+export const ADDONS = Object.freeze({
+  /** Its price per unit, as it adds to the order. */
+  price: (price: string) => `+ ${price}`,
+  /** An add-on and its units: `POLISHING CLOTH × 2` (one: its name alone). */
+  units: (name: string, units: number) => (units > 1 ? `${name} × ${units}` : name),
+  /** Accessible names of the stepper's buttons and its figure. */
+  fewer: (name: string) => `One fewer ${name}`,
+  more: (name: string) => `One more ${name}`,
+  count: (name: string, units: number) => `${name}, ${units} chosen`,
+  /** Under the rows, while one of them is at what may be taken. */
+  limit: 'At most 3 of each, while available.',
+  /** `THE POLISHING CLOTH COULD NOT BE ADDED: NONE LEFT.` (a name that begins with THE keeps it once). */
+  leftOut: (name: string, reason: 'NONE_LEFT' | 'NOT_OFFERED') =>
+    `${/^THE\s/i.test(name.trim()) ? name.trim() : `THE ${name.trim()}`} COULD NOT BE ADDED: ${reason === 'NONE_LEFT' ? 'NONE LEFT' : 'NO LONGER OFFERED'}.`.toUpperCase(),
+  /** A choice that could not be saved, followed by the server's message. */
+  failed: 'Your add-ons could not be saved just now.',
 });
 
 /**
@@ -1147,6 +1205,16 @@ export const LOOKBOOK = Object.freeze({
     notSure: 'NOT SURE YET',
     sizeHint: 'ORBES Client Services confirms it with you.',
     requestedSize: (size: string) => `SIZE ${size}`,
+    /**
+     * Plan MACRO M3 §4.4 (D2): the catalogue add-ons offered with the request (the model priced in a currency), sent with
+     * it and added when ORBES Client Services accepts it, each while available; under REQUESTED, those chosen.
+     */
+    addons: Object.freeze({
+      title: 'ADD TO YOUR ORDER',
+      note: 'Added when ORBES Client Services accepts your request, while available.',
+      /** Under REQUESTED: the add-ons sent with it. */
+      chosen: 'YOUR ADD-ONS',
+    }),
   }),
   /** The text link of each card, and the one under an authentic result. */
   seeModel: 'SEE THE MODEL',
@@ -1389,6 +1457,14 @@ export const RELEASES = Object.freeze({
     reservedIn: (size: string, until: string) => `You reserved a place directly ${drawInSize(size)}. It is held until ${until} — ORBES Client Services will contact you.`,
   }),
   /** The status of an entry, as MY PIECES and a release's page name it. */
+  /**
+   * Plan MACRO M3 §4.4 (D2), ADD TO YOUR ORDER on a place held of a draw with a price: the catalogue add-ons, each with
+   * its units, saved at once and added when ORBES Client Services confirms the order (each while available).
+   */
+  addons: Object.freeze({
+    title: 'ADD TO YOUR ORDER',
+    note: 'Your add-ons will be added when ORBES Client Services confirms your order.',
+  }),
   statusLabel: Object.freeze({ ENTERED: 'ENTERED', SELECTED: 'PLACE HELD', WAITLISTED: 'WAITING LIST', CONFIRMED: 'CONCLUDED', LAPSED: 'LAPSED', WITHDRAWN: 'WITHDRAWN' }),
   /** P-X02: a place held by a direct reservation (SELECTED, not drawn). */
   reservedLabel: 'PLACE RESERVED',
@@ -2003,6 +2079,14 @@ export const LIVE = Object.freeze({
   addons: 'ADD-ONS',
   /** An add-on's price, per piece. */
   addonPrice: (price: string) => `+ ${price}`,
+  /**
+   * Plan MACRO M3 §4.4 (D2): the catalogue add-ons under the release's, each with its units, carried onto the order at
+   * PAY; those none left of by then are said on CONFIRMED.
+   */
+  addonItems: Object.freeze({
+    title: 'ADD TO YOUR ORDER',
+    note: 'Added to your order at PAY, while available.',
+  }),
   pay: (total: string) => `PAY · ${total}`,
   toConfirm: 'TO CONFIRM',
   /** Plan NEXT LOT §3.6.B: the delivery address is the collector's own, added in YOUR ORDERS. */

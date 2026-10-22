@@ -188,7 +188,8 @@ export const DESKTOP_MOVED: readonly DesktopMoved[] = [
     now: 'Every photograph of the sheet on the computer’s grid; SHOW MORE under it once a sheet has more than 8.',
     removed: true,
   },
-  ...[['draw-drawn'], ['draw-place-held', '2 · NO TIER · 0 YEARS']].map(([id, more]) => ({
+  // Lot M3 (step M3.12): the add-ons' stage's draw with a price, its one entry the account's place held.
+  ...[['draw-drawn'], ['draw-place-held', '2 · NO TIER · 0 YEARS'], ['addons-place-held']].map(([id, more]) => ({
     states: [id!],
     values: ['1 · TITANE · 0 YEARS', 'YOURS', ...(more ? [more] : [])],
     reason: 'Desktop (§10.30): THE ENTRIES is a table on a computer, its rows drawn as they near the window (content-visibility), the first window showing its head.',
@@ -209,7 +210,8 @@ export const DESKTOP_MOVED: readonly DesktopMoved[] = [
     where: 'sign-in',
   },
   {
-    states: ['pieces-orders', 'pieces-orders-stress', 'claim-waiting', 'orders-delivery', 'orders-case'],
+    // Lot M3 (step M3.12, D2): YOUR ORDERS with add-ons, and ADD AN ADD-ON (its form in an order's page on a computer).
+    states: ['pieces-orders', 'pieces-orders-stress', 'claim-waiting', 'orders-delivery', 'orders-case', 'addons-orders', 'addons-sheet', 'addons-sheet-none', 'addons-sheet-error'],
     reason: 'Decision 5: MY PIECES’ ORDERS lists rows on a computer, each opening its order’s page.',
     now: 'On MY PIECES’ ORDERS rows and on each order’s page (/verify/orders/OR-…).',
     where: 'orders',

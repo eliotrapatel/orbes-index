@@ -75,6 +75,14 @@ const PAIRS: readonly { where: string; read: () => string; phone: string; comput
     phone: 'This photograph cannot be read. Choose a JPEG or a photograph from your library.',
     computer: 'This photograph cannot be read. Choose a JPEG or another photograph.',
   },
+  // YOUR ORDERS' REMOVE of an add-on (lot M3, step M3.12, D2), armed for its second press.
+  { where: 'ORDERS.addons.removeConfirm', read: () => ORDERS.addons.removeConfirm, phone: 'TAP AGAIN TO REMOVE', computer: 'CLICK AGAIN TO REMOVE' },
+  {
+    where: 'ORDERS.addons.removeConfirmLabel',
+    read: () => ORDERS.addons.removeConfirmLabel('POLISHING CLOTH × 2'),
+    phone: 'Tap again to remove POLISHING CLOTH × 2',
+    computer: 'Click again to remove POLISHING CLOTH × 2',
+  },
 ];
 
 /** The devices each pair is read on, and whose words they read. */

@@ -72,6 +72,7 @@
  * piece secured. One primary action per screen (filled ivory): ENTER, the size chosen, PAY.
  */
 import { bracket } from '../../shared/corners.js';
+import { addonRows, chosenRows, chosenUnits, leftOutLines, rowsChoice, rowsLimit, withUnits, type AddonRowModel } from '../addons-model.js';
 import { h, prefersReducedMotion, s } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
@@ -136,6 +137,7 @@ import { CEREMONY_VIBRATION } from './result.js';
 import { storyButton } from './story.js';
 import { StoryCards } from '../story-card.js';
 import { DesktopRoom, type RoomFacts } from './desktop-room.js';
+import { addonRowsList, focusedStep, refocusStep } from './addon-rows.js';
 
 /** The state read while the stream is lost (in the room; the server says how often in the queue: `pollMs`). */
 export const LIVE_POLL_MS = 2000;
@@ -318,6 +320,12 @@ class LivePage {
   private hold: Hold | null = null;
   /** RELEASE MY PLACE or LEAVE THE LINE armed for its second tap until this time (performance.now). */
   private armedUntil = 0;
+  /**
+   * Plan MACRO M3 §4.4 (D2): the catalogue add-ons' units as the collector set them on the hold while their choice is
+   * being sent (the entry's own once it answers); and PAY's answer of what could not be added, kept for its entry.
+   */
+  private itemUnits: Map<string, number> | null = null;
+  private leftOut: { entryId: string; lines: string[] } | null = null;
   private lastTick: number | null = null;
   private lastPlace: string | null = null;
   private frozenTurn: number | null = null;
@@ -2086,6 +2094,11 @@ class LivePage {
       addonButtons.set(a.id, b);
       addonsBox.append(h('div', { class: 'live__addon-item' }, b, a.line ? h('p', { class: 'live__addon-line', id: lineId, text: a.line }) : null));
     }
+    // Plan MACRO M3 §4.4 (D2): the catalogue add-ons under the release's, drawn from the entry at each change (none: nothing).
+    const itemsTitle = h('p', { class: 'live__overline live__items-title', id: 'live-items', attrs: { hidden: true }, text: LIVE.addonItems.title });
+    const items = h('div', { class: 'live__items', attrs: { role: 'group', 'aria-labelledby': 'live-items', hidden: true } });
+    const itemsNote = h('p', { class: 'live__items-note', attrs: { hidden: true } });
+    let itemsKey = '';
     const errorLine = this.errorLine();
     const pay = h('button', { class: 'btn live__primary live__pay', attrs: { type: 'button' }, on: { click: () => this.payNow() } });
     const deadline = h('p', { class: 'live__deadline' }, h('span', { class: 'live__deadline-time', attrs: { role: 'timer' } }), h('span', { class: 'live__deadline-label', text: LIVE.toConfirm }));
@@ -2099,6 +2112,9 @@ class LivePage {
       detail,
       addons.length > 0 ? h('p', { class: 'live__overline live__addons-title', id: 'live-addons', text: LIVE.addons }) : null,
       addons.length > 0 ? addonsBox : null,
+      itemsTitle,
+      items,
+      itemsNote,
       errorLine,
       pay,
       deadline,
@@ -2125,6 +2141,17 @@ class LivePage {
         for (const [id, b] of addonButtons) {
           b.setAttribute('aria-pressed', String(chosen.has(id)));
           b.disabled = this.busy;
+        }
+        const rows = this.itemRows(e);
+        const key = JSON.stringify([rows, this.busy]);
+        if (key !== itemsKey) {
+          itemsKey = key;
+          const focus = focusedStep(items);
+          items.replaceChildren(...(rows.length > 0 ? [addonRowsList({ rows, label: LIVE.addonItems.title, idPrefix: 'live-item', disabled: this.busy, room: true, onChange: (id, n) => this.setItem(rows, id, n) })] : []));
+          if (focus) refocusStep(items, focus.addonId, focus.which);
+          const limit = rowsLimit(rows);
+          itemsNote.textContent = limit ? `${LIVE.addonItems.note} ${limit}` : LIVE.addonItems.note;
+          itemsTitle.hidden = items.hidden = itemsNote.hidden = rows.length === 0;
         }
         const total = formatMoney(e.totalMinor, e.currency);
         if (pay.dataset.total !== total) {
@@ -2160,10 +2187,42 @@ class LivePage {
     void this.act(() => this.deps.api.liveAddons(s.id, s.addons.filter((a) => ids.has(a.id)).map((a) => a.id)));
   }
 
+  /** The catalogue add-ons of the hold (plan MACRO M3 §4.4): what is offered now, then what was chosen and is no longer. */
+  private itemRows(e: LiveEntry): AddonRowModel[] {
+    return addonRows(e.addonOffer, this.itemUnits ?? chosenUnits(e.addonItems), e.addonItems ?? [], e.currency);
+  }
+
+  /** A stepper pressed: the hold's whole choice sent at once (the release's add-ons kept as they are). */
+  private setItem(rows: readonly AddonRowModel[], addonId: string, units: number): void {
+    const s = this.live();
+    const e = this.entry;
+    if (!s || !e || this.busy) return;
+    const next = withUnits(rows, addonId, units);
+    this.itemUnits = new Map(next.map((r) => [r.addonId, r.units]));
+    void this.act(
+      () => this.deps.api.liveAddons(s.id, s.addons.filter((a) => e.addons.some((x) => x.id === a.id)).map((a) => a.id), rowsChoice(next)),
+    ).finally(() => {
+      this.itemUnits = null;
+      this.screen?.update();
+    });
+  }
+
   private payNow(): void {
     const s = this.live();
     if (!s) return;
-    void this.act(() => this.deps.api.liveConfirm(s.id));
+    // Plan MACRO M3 §4.4 (D2): PAY's answer names the add-ons that could not be added; CONFIRMED says them.
+    void this.act(
+      () => this.deps.api.liveConfirm(s.id),
+      (e) => {
+        const lines = leftOutLines(e.addonsLeftOut);
+        this.leftOut = lines.length > 0 ? { entryId: e.id, lines } : null;
+      },
+    );
+  }
+
+  /** What could not be added at PAY, for the entry `e` (said on CONFIRMED); none otherwise. */
+  private leftOutOf(e: LiveEntry): string[] {
+    return this.leftOut && this.leftOut.entryId === e.id ? this.leftOut.lines : [];
   }
 
   /** B6: CONFIRMED, out into the light (the ivory house style). */
@@ -2179,12 +2238,15 @@ class LivePage {
       row(LIVE.rows.size, e.size.label),
       e.quantity > 1 ? row(LIVE.rows.pieces, String(e.quantity)) : null,
       ...e.addons.map((a) => row(upper(a.label), formatMoney(a.priceMinor * e.quantity, e.currency))),
+      // Plan MACRO M3 §4.4 (D2): the catalogue add-ons carried onto its order (POLISHING CLOTH × 2 · + € 30).
+      ...chosenRows(e.addonItems, e.currency).map(([label, value]) => row(label, value)),
       row(LIVE.rows.total, formatMoney(e.totalMinor, e.currency)),
       row(LIVE.rows.reference, reference),
     );
     // WRITE TO ORBES CLIENT SERVICES under the CLIENT SERVICES overline, the release and its reference attached (CS-01): the
     // house's full-width hairline button on this ivory screen, where the contact stood.
     const write = this.sheet ? releaseContext(this.sheet.id, this.releaseTitle(), LIVE.statusLabel.CONFIRMED, referenceWords(reference)) : null;
+    const leftOut = h('div', { class: 'live__left-out', attrs: { role: 'status', hidden: true } });
     const el = h(
       'section',
       { class: 'live__confirmed' },
@@ -2192,13 +2254,28 @@ class LivePage {
       this.title(LIVE.confirmed),
       this.fact(this.afterRoomOf() ? LIVE.afterRoom.confirmedOf(this.name()) : LIVE.confirmedOf(this.name()), 'live__confirmed-of'),
       h('p', { class: 'prose live__confirmed-text', text: LIVE.reservedIn(e.size.label, e.quantity) }),
+      // Plan MACRO M3 §4.4 (D2): PAY's add-ons that could not be added, each by its name and why (its answer may come
+      // after the stream's CONFIRMED: drawn at each update).
+      leftOut,
       bracket(h('div', { class: 'live__receipt-plate' }, rows)),
       this.storyOpen(e),
       h('p', { class: 'live__overline live__cs-title', text: LIVE.clientServices }),
       writeButton(write, { house: true }),
       piecesLink(() => this.deps.onPieces(), 'live__pieces'),
     );
-    return { kind: 'confirmed', el, update: () => undefined };
+    let said = '';
+    return {
+      kind: 'confirmed',
+      el,
+      update: () => {
+        const lines = this.entry ? this.leftOutOf(this.entry) : [];
+        const key = JSON.stringify(lines);
+        if (key === said) return;
+        said = key;
+        leftOut.replaceChildren(...lines.map((line) => h('p', { class: 'live__left-out-line' }, ...withNumerals(line))));
+        leftOut.hidden = lines.length === 0;
+      },
+    };
   }
 
   /**
@@ -2299,7 +2376,7 @@ class LivePage {
         part.hidden = this.part === null;
         // A piece secured: its reservation, as CONFIRMED said it in the room (C29).
         const e = this.deps.session.state.status === 'signed-in' && this.entry?.status === 'CONFIRMED' ? this.entry : null;
-        const key = e ? JSON.stringify([e.id, e.size, e.quantity, e.addons, e.totalMinor, e.currency, e.confirmedAt]) : '';
+        const key = e ? JSON.stringify([e.id, e.size, e.quantity, e.addons, e.addonItems, e.totalMinor, e.currency, e.confirmedAt]) : '';
         if (key !== drawn) {
           drawn = key;
           receipt.replaceChildren(...(e ? [this.receipt(e, m.heading)] : []));
@@ -2326,6 +2403,7 @@ class LivePage {
       row(LIVE.rows.size, e.size.label),
       row(LIVE.rows.pieces, String(e.quantity)),
       ...e.addons.map((a) => row(upper(a.label), LIVE.addonPrice(money(a.priceMinor * e.quantity, e.currency)))),
+      ...chosenRows(e.addonItems, e.currency),
       row(LIVE.rows.total, money(e.totalMinor, e.currency)),
       row(LIVE.rows.reference, reference),
     ];

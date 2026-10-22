@@ -21,6 +21,7 @@
  *   board's is a POST (its secret in the body), read as a stream of bytes.
  */
 import type {
+  AccountAddonOffer,
   AccountAddresses,
   AccountProfileInput,
   AccountProfileView,
@@ -93,6 +94,12 @@ import type {
   SheetWornPage,
 } from './types.js';
 import type { SeenBatchBody, SeenSendResult } from './seen-model.js';
+
+/** One catalogue add-on and its units, as a choice or an addition sends it (plan MACRO M3 §4.2, D2). */
+export interface AddonUnits {
+  addonId: string;
+  units: number;
+}
 
 export type TransportCode = 'NETWORK' | 'TIMEOUT' | 'BAD_RESPONSE';
 
@@ -249,9 +256,9 @@ export class ApiClient {
   }
 
   /** P-X08, REQUEST THIS PIECE: a model of THE PRIVATE SALON, with the account's optional note (409 SHOP_REQUEST_OPEN while one is open). */
-  async requestPiece(slug: string, note: string | null, size: string | null = null): Promise<ShopRequest> {
-    // AC-01: the size asked, or none (NOT SURE YET, a model of one size).
-    const body = { ...(note ? { note } : {}), ...(size ? { size } : {}) };
+  async requestPiece(slug: string, note: string | null, size: string | null = null, addons: readonly AddonUnits[] = []): Promise<ShopRequest> {
+    // AC-01: the size asked, or none (NOT SURE YET, a model of one size); plan MACRO M3 §4.2 (D2): the add-ons chosen, if any.
+    const body = { ...(note ? { note } : {}), ...(size ? { size } : {}), ...(addons.length > 0 ? { addons: addons.map((a) => ({ addonId: a.addonId, units: a.units })) } : {}) };
     const r = await this.request<{ request?: ShopRequest }>('POST', `/api/v1/club/lookbook/${encodeURIComponent(slug)}/request`, body, { csrf: true });
     if (!r?.request || typeof r.request.id !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
     return r.request;
@@ -362,6 +369,16 @@ export class ApiClient {
   async drawEntry(id: string): Promise<DrawEntryRead> {
     const r = await this.request<DrawEntryRead>('GET', `/api/v1/club/drops/${encodeURIComponent(id)}/entry`);
     if (!r || typeof r !== 'object' || !('entry' in r) || !('savedSize' in r)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r;
+  }
+
+  /**
+   * Plan MACRO M3 §4.2 (D2), ADD TO YOUR ORDER on a place held: the catalogue add-ons chosen, all of them at once (none:
+   * an empty list); the entry and its add-ons back, as GET …/entry reads them.
+   */
+  async drawAddons(id: string, items: readonly AddonUnits[]): Promise<DrawEntryRead> {
+    const r = await this.request<DrawEntryRead>('PUT', `/api/v1/club/drops/${encodeURIComponent(id)}/addons`, { items: items.map((i) => ({ addonId: i.addonId, units: i.units })) }, { csrf: true });
+    if (!r || typeof r !== 'object' || !('entry' in r)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
     return r;
   }
 
@@ -533,9 +550,12 @@ export class ApiClient {
     return this.liveAction('POST', id, 'secure', { token });
   }
 
-  /** The add-ons of the piece held, all of them at once (none: an empty list). */
-  liveAddons(id: string, addonIds: readonly string[]): Promise<LiveEntry> {
-    return this.liveAction('PUT', id, 'addons', { addonIds: [...addonIds] });
+  /**
+   * The add-ons of the piece held, all of them at once (none: an empty list); plan MACRO M3 §4.2 (D2): with `items`, the
+   * catalogue add-ons chosen with it and their units (left out: kept as they are).
+   */
+  liveAddons(id: string, addonIds: readonly string[], items?: readonly AddonUnits[]): Promise<LiveEntry> {
+    return this.liveAction('PUT', id, 'addons', { addonIds: [...addonIds], ...(items ? { items: items.map((i) => ({ addonId: i.addonId, units: i.units })) } : {}) });
   }
 
   /** PAY (a placeholder): the piece held becomes a reservation ORBES Client Services concludes. */
@@ -761,6 +781,27 @@ export class ApiClient {
   async setEngraving(orderId: string, text: string | null): Promise<AccountOrder> {
     const path = `/api/v1/account/orders/${encodeURIComponent(orderId)}/engraving`;
     const r = text === null ? await this.request<{ order?: AccountOrder }>('DELETE', path, undefined, { csrf: true }) : await this.request<{ order?: AccountOrder }>('PUT', path, { text }, { csrf: true });
+    if (!r?.order || typeof r.order.id !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.order;
+  }
+
+  /** ADD AN ADD-ON (plan MACRO M3 §4.2, D2): what can be added to one of the account's orders now, with its prices. */
+  async orderAddonOffer(orderId: string): Promise<AccountAddonOffer> {
+    const r = await this.request<AccountAddonOffer>('GET', `/api/v1/account/orders/${encodeURIComponent(orderId)}/addons`);
+    if (!r || typeof r !== 'object' || typeof r.canAdd !== 'boolean' || !Array.isArray(r.offer)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r;
+  }
+
+  /** One add-on and its units added to an order (held at once; after payment, its own invoice); the order after it. */
+  async addOrderAddon(orderId: string, addonId: string, units: number): Promise<AccountOrder> {
+    const r = await this.request<{ order?: AccountOrder }>('POST', `/api/v1/account/orders/${encodeURIComponent(orderId)}/addons`, { addonId, units }, { csrf: true });
+    if (!r?.order || typeof r.order.id !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.order;
+  }
+
+  /** REMOVE: every unit of an add-on taken off an order until packing begins (after payment, a credit note); the order after it. */
+  async removeOrderAddon(orderId: string, addonId: string): Promise<AccountOrder> {
+    const r = await this.request<{ order?: AccountOrder }>('DELETE', `/api/v1/account/orders/${encodeURIComponent(orderId)}/addons/${encodeURIComponent(addonId)}`, undefined, { csrf: true });
     if (!r?.order || typeof r.order.id !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
     return r.order;
   }

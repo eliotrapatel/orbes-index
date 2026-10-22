@@ -128,6 +128,9 @@ async function orbesCare(run: StateRun): Promise<void> {
   await run.page.locator('.view--piece .piece__yearly-care:not([hidden])').waitFor();
 }
 
+/** ADD AN ADD-ON's rows: the phone's sheet, or the order page's part on a computer. */
+const ADDON_FORM = ':is(.n-osheet, .d-oform) form.form--order-addons';
+
 /** WORN of a piece (lot M2, D31): its block in OWNERSHIP, read with the piece. */
 const WORN_BLOCK = '.view--piece .piece__worn:not([hidden])';
 
@@ -1726,6 +1729,106 @@ export const PHONE_STATES: readonly UiState[] = [
     stress: true,
   },
 
+  // ── The catalogue add-ons (lot M3, D2), on their own stage (addons): the LIVE hold's rows, a draw's PLACE HELD, the
+  // salon request, YOUR ORDERS' rows with REMOVE and ADD AN ADD-ON, its sheet (chosen, none available, could not be
+  // read); then their writes: PAY with an add-on none is left of, a request sent with one ──
+  { id: 'addons-hold', title: 'The hold of a LIVE RELEASE: the release’s add-ons, then ADD TO YOUR ORDER, a POLISHING CLOTH × 2 and a CHAIN EXTENDER chosen, the longest name, PAY · total (lot M3, D2)', refs: ['M3'], variant: 'addons', as: 'secured', path: release('live'), ready: '.view--live .live__items .n-addons__item.is-chosen' },
+  { id: 'addons-place-held', title: 'A draw drawn with a price, the account’s place held: ADD TO YOUR ORDER, a POLISHING CLOTH chosen, added when Client Services confirms (lot M3, D2)', refs: ['M3'], variant: 'addons', as: you, path: release('autumn'), ready: '.view--release .release__addons .n-addons__item.is-chosen' },
+  {
+    id: 'addons-salon',
+    title: 'THE PRIVATE SALON: ZENITH’s request with ADD TO YOUR ORDER, a POLISHING CLOTH chosen (lot M3, D2)',
+    refs: ['M3'],
+    variant: 'addons',
+    as: you,
+    path: sheet('zenith'),
+    act: async (run) => {
+      await run.page.locator('.view--sheet .sheet__addons .n-addons').waitFor();
+      await button(run, 'One more POLISHING CLOTH').click();
+    },
+    ready: '.view--sheet .sheet__addons .n-addons__item.is-chosen',
+  },
+  {
+    id: 'addons-orders',
+    title: 'MY PIECES, ORDERS: the reserved order’s POLISHING CLOTH × 2 with REMOVE and ADD AN ADD-ON; a paid order’s CHAIN EXTENDER and its own invoice; packing begun with a TRAVEL POUCH (lot M3, D2)',
+    refs: ['M3'],
+    variant: 'addons',
+    as: you,
+    path: at('/verify/pieces'),
+    act: (run) => piecesTab(run, 'ORDERS'),
+    ready: '.view--pieces :is(.pieces__addons-locked, .d-orows)',
+  },
+  {
+    id: 'addons-sheet',
+    title: 'ADD AN ADD-ON on the reserved order: the add-ons available, a TRAVEL POUCH chosen, the total, ADD (lot M3, D2)',
+    refs: ['M3'],
+    variant: 'addons',
+    as: you,
+    path: at('/verify/pieces'),
+    act: async (run) => {
+      await openAddons(run);
+      await button(run, 'One more TRAVEL POUCH').click();
+    },
+    ready: `${ADDON_FORM} .n-addons__item.is-chosen`,
+  },
+  {
+    id: 'addons-sheet-none',
+    title: 'ADD AN ADD-ON when none is available for the order: its sentence, CANCEL (lot M3, D2)',
+    refs: ['M3'],
+    variant: 'addons',
+    as: you,
+    path: at('/verify/pieces'),
+    routes: (page) =>
+      page.route('**/api/v1/account/orders/*/addons', (route) =>
+        route.request().method() === 'GET' ? route.fulfill({ json: { canAdd: true, reason: null, paid: false, currency: 'EUR', offer: [] } }) : route.continue(),
+      ),
+    act: (run) => openAddons(run),
+    ready: ':is(.n-osheet, .d-oform) .n-osheet__none',
+  },
+  {
+    id: 'addons-sheet-error',
+    title: 'ADD AN ADD-ON whose add-ons could not be read: the sentence and the reason, TRY AGAIN, CANCEL (lot M3, D2)',
+    refs: ['M3'],
+    variant: 'addons',
+    as: you,
+    path: at('/verify/pieces'),
+    routes: (page) => page.route('**/api/v1/account/orders/*/addons', (route) => (route.request().method() === 'GET' ? route.abort('failed') : route.continue())),
+    act: (run) => openAddons(run),
+    ready: ':is(.n-osheet, .d-oform) .n-osheet__unreadable',
+  },
+  {
+    id: 'addons-pay',
+    title: 'PAY with a CHAIN EXTENDER none is left of: CONFIRMED, THE CHAIN EXTENDER COULD NOT BE ADDED: NONE LEFT., the receipt with the POLISHING CLOTH × 2 (lot M3, D2)',
+    refs: ['M3'],
+    variant: 'addons',
+    as: 'secured',
+    path: release('live'),
+    mutates: true,
+    act: async (run) => {
+      await run.page.locator('.view--live .live__items .n-addons').waitFor();
+      await noneLeft(run, 'CHAIN EXTENDER');
+      await run.page.locator('.view--live .live__pay').click();
+      await run.page.locator('.view--live .live__left-out:not([hidden])').waitFor({ timeout: 20_000 });
+    },
+    ready: '.view--live .live__left-out:not([hidden])',
+  },
+  {
+    id: 'addons-salon-requested',
+    title: 'THE PRIVATE SALON: REQUESTED with a POLISHING CLOTH, ORBES Client Services will contact you (lot M3, D2)',
+    refs: ['M3'],
+    variant: 'addons',
+    as: you,
+    path: sheet('zenith'),
+    mutates: true,
+    act: async (run) => {
+      await run.page.locator('.view--sheet .sheet__addons .n-addons').waitFor();
+      await button(run, 'One more POLISHING CLOTH').click();
+      await run.page.locator('.view--sheet .sheet__addons .n-addons__item.is-chosen').waitFor();
+      await button(run, 'REQUEST THIS PIECE').click();
+      await run.page.locator('.view--sheet .n-model__requested-addons').waitFor({ timeout: 20_000 });
+    },
+    ready: '.view--sheet .n-model__requested-addons',
+  },
+
   // ── THE COLLECTION ──
   { id: 'collection-signed-out', title: 'THE COLLECTION, signed out', refs: ['C5'], variant: 'full', path: at('/verify/lookbook'), ready: '.view--lookbook[data-state="ready"] .lookbook__group' },
   { id: 'collection', title: 'THE COLLECTION, signed in: THE PRIVATE SALON', refs: ['C5'], variant: 'full', as: you, path: at('/verify/lookbook'), ready: '.view--lookbook[data-state="ready"] .lookbook__reserved' },
@@ -2654,6 +2757,32 @@ async function openOrderPage(run: StateRun, row: RegExp): Promise<void> {
   await run.page.locator('.view--order .d-order__head').waitFor({ timeout: 20_000 });
 }
 
+/**
+ * ADD AN ADD-ON on you's reserved order (the add-ons' stage): on a phone, MY PIECES' ORDERS and its card's link (the
+ * sheet); on a computer, the order's own page and its ADD-ONS part's link (the form in its place); read once open.
+ */
+async function openAddons(run: StateRun): Promise<void> {
+  if (await onComputer(run)) {
+    await openOrderPage(run, /RESERVED/);
+    await run.page.locator('.view--order .pieces__addons-add').click();
+  } else {
+    await piecesTab(run, 'ORDERS');
+    await run.page.locator('.view--pieces article.n-pieces__order[data-status="RESERVED"] .pieces__addons-add').first().click();
+  }
+  await run.page.locator(':is(.n-osheet, .d-oform) :is(form.form--order-addons, .n-osheet__none, .n-osheet__unreadable)').first().waitFor({ timeout: 20_000 });
+}
+
+/** No unit left of the add-on `name` at the default location (written once per stage): a correction down to 0. */
+async function noneLeft(run: StateRun, name: string): Promise<void> {
+  const { db, services } = run.stage.ctx;
+  const sku = await db.selectFrom('addon_items as a').innerJoin('skus as k', 'k.addon_id', 'a.id').select('k.id').where('a.name', '=', name).executeTakeFirstOrThrow();
+  const location = (await db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
+  const row = await db.selectFrom('stock_movements').select((eb) => eb.fn.sum<number>('delta').as('n')).where('sku_id', '=', sku.id).where('location_id', '=', location).executeTakeFirst();
+  const held = await db.selectFrom('stock_holds').select((eb) => eb.fn.countAll<number>().as('n')).where('sku_id', '=', sku.id).where('location_id', '=', location).where('reservation', '=', 'STOCK').executeTakeFirst();
+  const n = Number(row?.n ?? 0) - Number(held?.n ?? 0);
+  if (n > 0) await services.stock.adjust({ skuId: sku.id, locationId: location, delta: -n, note: 'None left.' }, await demoAdmin(run));
+}
+
 /** The scan's answer with its warranty VOID (no demo piece has a void warranty and a code to read): NO LONGER VALID, WRITE. */
 async function voidWarranty(page: Page): Promise<void> {
   await page.route('**/api/v1/verify', async (route) => {
@@ -2707,6 +2836,9 @@ const voidWarrantyAt = (w: DeskWidth): UiState =>
 /** The paid order IN BLUE's own page, packing begun (orders-delivery's writes): DELIVERY ADDRESS, ENGRAVING, DOCUMENTS with ORBES CARE CONDITIONS · PDF. */
 const orderDeliveryAt = (w: DeskWidth): UiState =>
   onDesk(phoneState('orders-delivery'), w, { name: 'order-delivery', extra: { ...andThen(phoneState('orders-delivery'), (run) => openOrderPage(run, /IN BLUE/)), ready: '.view--order .pieces__engraving-locked' } });
+/** The add-ons' stage's reserved order on its own page (lot M3, D2): REMOVE and ADD AN ADD-ON in its ADD-ONS part. */
+const addonsOrderAt = (light: boolean): UiState =>
+  onDesk(phoneState('addons-orders'), 1440, { name: 'addons-order', light, extra: { ...andThen(phoneState('addons-orders'), (run) => openOrderPage(run, /RESERVED/)), ready: '.view--order .pieces__addons-add' } });
 /** PRIVATE CARE's steps in the full demo (ORBES CARE, plan §2(d) item 2), beside CARE_FULL. */
 const PRIVATE_CARE = ['piece-care-available', 'piece-care-requested', 'piece-care-returning', 'piece-care-done'] as const;
 
@@ -3000,6 +3132,18 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
     onDesk(phoneState('sheet-worn'), 1440, { light: true }),
     onDesk(phoneState('sheet-worn-enlarged'), 1440, { light: true }),
     ...desk(1024, 'sheet-worn'),
+    // The catalogue add-ons (lot M3, D2) on their stage: the hold in the room, a draw's PLACE HELD (also in light), the
+    // salon request; each order's own page (the reserved one also in light, the paid one with its own invoice, packing
+    // begun); ADD AN ADD-ON's part of the page chosen (also in light), none available, could not be read; PAY, last.
+    ...desk(1440, 'addons-hold', 'addons-place-held', 'addons-salon'),
+    onDesk(phoneState('addons-place-held'), 1440, { light: true }),
+    addonsOrderAt(false),
+    addonsOrderAt(true),
+    onDesk(phoneState('addons-orders'), 1440, { name: 'addons-order-paid', extra: { ...andThen(phoneState('addons-orders'), (run) => openOrderPage(run, /IN BLUE/)), ready: '.view--order .pieces__addon-remove' } }),
+    onDesk(phoneState('addons-orders'), 1440, { name: 'addons-order-packing', extra: { ...andThen(phoneState('addons-orders'), (run) => openOrderPage(run, /IN GOLD/)), ready: '.view--order .pieces__addons-locked' } }),
+    ...desk(1440, 'addons-sheet', 'addons-sheet-none', 'addons-sheet-error'),
+    onDesk(phoneState('addons-sheet'), 1440, { light: true }),
+    ...desk(1440, 'addons-pay'),
   ],
 });
 

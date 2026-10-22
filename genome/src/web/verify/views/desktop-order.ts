@@ -15,6 +15,8 @@
  *   ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  *   DELIVERY ADDRESS           its address and CHANGE (the form in its place), ADD THE DELIVERY ADDRESS, or packing begun
  *   ENGRAVING                  what it is, ADD AN ENGRAVING or CHANGE THE ENGRAVING (the form), or packing begun
+ *   ADD-ONS                    what they are, each REMOVE, ADD AN ADD-ON (the form: the add-ons available, their units,
+ *                              the total, ADD), or packing begun (plan MACRO M3 §4.4, D2)
  *   RETURNS AND EXCHANGES      a request as it stands, or (delivered, 14 days) REQUEST A RETURN and EXCHANGE THE SIZE
  *   DOCUMENTS                  INVOICE, ORBES CARE CONDITIONS, CREDIT NOTE, CARE GUIDE, OWNERSHIP CERTIFICATE
  *
@@ -34,6 +36,7 @@ import { listLine, PIECES_PATH, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
 import { appAnchor, button, definitionList, failedState, icon, loadingState, orderSteps, textLink } from './nocturne.js';
 import { OrderSheet, type OrderSheetRequest } from './order-sheet.js';
+import { orderAddonsBlock } from './order-addons.js';
 import { ClaimBlock, lines, orderDocumentsBlock, requestBlock, type OrderDeps } from './pieces.js';
 import { writeButton } from './write.js';
 
@@ -263,6 +266,7 @@ class OrderPage {
     const out: HTMLElement[] = [];
     if (m.address) out.push(this.section('address', ORDERS.address.label, this.addressPart(m)));
     if (m.engraving) out.push(this.section('engraving', ORDERS.engraving.title, this.engravingPart(m)));
+    if (m.addons) out.push(this.section('addons', ORDERS.addons.title, this.addonsPart(m)));
     if (m.returns || m.request) out.push(this.section('returns', ORDERS.returns.label, this.returnsPart(m)));
     if (m.documents.length > 0) out.push(this.section('documents', ORDERS.documents.title, this.documentsPart(m)));
     return out;
@@ -306,6 +310,16 @@ class OrderPage {
     const link = textLink(e.action, { extraClass: 'd-order__change pieces__engraving', onOpen: () => this.edit({ kind: 'engraving' }) });
     link.dataset.focus = 'engraving';
     return [h('p', { class: 'n-tx d-order__text', text: ORDERS.engraving.lead }), h('p', { class: 'd-order__do' }, link)];
+  }
+
+  /**
+   * ADD-ONS (plan MACRO M3 §4.4, D2): what they are, each REMOVE, ADD AN ADD-ON (the form in their place: the add-ons
+   * available, their units, the total, ADD), or the line once packing has begun.
+   */
+  private addonsPart(m: OrderModel): (HTMLElement | null)[] {
+    if (this.editing === 'addons') return [this.editor.el];
+    const block = orderAddonsBlock({ order: m, deps: this.orderDeps(), onAdd: () => this.edit({ kind: 'addons' }), desktop: true });
+    return [m.addons?.locked ? null : h('p', { class: 'n-tx d-order__text', text: ORDERS.addons.lead }), ...block];
   }
 
   /**
@@ -359,6 +373,7 @@ class OrderPage {
     let req: OrderSheetRequest | null = null;
     if (what.kind === 'address') req = { kind: 'address', order: m, trigger, onDone };
     else if (what.kind === 'engraving' && m.engraving) req = { kind: 'engraving', order: m, engraving: m.engraving, trigger, onDone };
+    else if (what.kind === 'addons' && m.addons?.canAdd) req = { kind: 'addons', order: m, trigger, onDone };
     else if ((what.kind === 'RETURN' || what.kind === 'EXCHANGE') && m.returns) req = { kind: what.kind, order: m, returns: m.returns, trigger, onDone };
     if (!req) return;
     this.editing = req.kind;

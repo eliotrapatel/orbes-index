@@ -290,10 +290,11 @@ describe('a model\'s sheet (P-R02)', () => {
     expect(selectDot(s, 'elsewhere')).toBe(s);
     // REQUEST THIS PIECE on a dot: REQUESTED on it and on its dot, nowhere else.
     const requested = withRequest(selectDot(s, 'monolithe-onyx'), 'monolithe-onyx', 'r-1', 'm-1');
-    expect(requested.salon!.request).toEqual({ id: 'r-1', modelId: 'm-1', size: null });
-    expect(selectDot(selectDot(requested, 'monolithe'), 'monolithe-onyx').salon!.request).toEqual({ id: 'r-1', modelId: 'm-1', size: null });
+    // Plan MACRO M3 §4.4 (D2): with the add-ons chosen with it (none here).
+    expect(requested.salon!.request).toEqual({ id: 'r-1', modelId: 'm-1', size: null, addons: [] });
+    expect(selectDot(selectDot(requested, 'monolithe'), 'monolithe-onyx').salon!.request).toEqual({ id: 'r-1', modelId: 'm-1', size: null, addons: [] });
     // AC-01: requested with a size, REQUESTED says it.
-    expect(withRequest(selectDot(s, 'monolithe-onyx'), 'monolithe-onyx', 'r-1', 'm-1', '52').salon!.request).toEqual({ id: 'r-1', modelId: 'm-1', size: '52' });
+    expect(withRequest(selectDot(s, 'monolithe-onyx'), 'monolithe-onyx', 'r-1', 'm-1', '52').salon!.request).toEqual({ id: 'r-1', modelId: 'm-1', size: '52', addons: [] });
     expect(requested.dots[0]!.face.salon).toBeNull();
     // One dot alone is no choice: none.
     expect(sheetModel(sheet({ variants: [variant('monolithe', 'Steel', '#9D9B96', { selected: true })] })).dots).toEqual([]);
@@ -438,12 +439,14 @@ describe('THE PRIVATE SALON on /verify (P-X08)', () => {
 
   it('gives a reserved sheet read through the club its price, its tier and the account\'s open request; nothing on a public sheet', () => {
     const salon = (extra: Partial<NonNullable<LookbookSheet['salon']>> = {}) => sheetModel(sheet({ lookbook: 'RESERVED', salon: { priceLabel: '€ 4 800', minTier: 2, request: null, ...extra } })).salon;
-    expect(salon()).toEqual({ price: '€ 4 800', tier: 'PLATINE', request: null, sizes: [], suggested: null });
-    expect(salon({ priceLabel: null, minTier: 1 })).toEqual({ price: null, tier: 'TITANE', request: null, sizes: [], suggested: null });
+    // Plan MACRO M3 §4.4 (D2): no add-on offered with its request (none sent).
+    expect(salon()).toEqual({ price: '€ 4 800', tier: 'PLATINE', request: null, addons: null, sizes: [], suggested: null });
+    expect(salon({ priceLabel: null, minTier: 1 })).toEqual({ price: null, tier: 'TITANE', request: null, addons: null, sizes: [], suggested: null });
     expect(salon({ minTier: 3, request: { id: 'r-1', status: 'OPEN', createdAt: '2026-10-04T10:00:00.000Z', modelId: 'm-1' } })).toEqual({
       price: '€ 4 800',
       tier: 'PALLADIUM',
-      request: { id: 'r-1', modelId: 'm-1', size: null },
+      request: { id: 'r-1', modelId: 'm-1', size: null, addons: [] },
+      addons: null,
       sizes: [],
       suggested: null,
     });
@@ -476,7 +479,7 @@ describe('THE PRIVATE SALON on /verify (P-X08)', () => {
     expect(salonSizePick(salon({ sizes: ['50', '52'] }), null)).toEqual({ size: null, fromYours: false });
     expect(salonSizePick(salon({ sizes: ['52'], suggestedSize: '52' }), null)).toEqual({ size: null, fromYours: false });
     // REQUESTED with its size, as the server keeps it.
-    expect(salon({ request: { id: 'r', status: 'OPEN', createdAt: '2026-10-04T10:00:00.000Z', modelId: 'm', size: '52' } })!.request).toEqual({ id: 'r', modelId: 'm', size: '52' });
+    expect(salon({ request: { id: 'r', status: 'OPEN', createdAt: '2026-10-04T10:00:00.000Z', modelId: 'm', size: '52' } })!.request).toEqual({ id: 'r', modelId: 'm', size: '52', addons: [] });
     // The words: YOUR SIZE, NOT SURE YET, its hint, and SIZE 52 under REQUESTED.
     expect([LOOKBOOK.salon.size, LOOKBOOK.salon.notSure, LOOKBOOK.salon.sizeHint, LOOKBOOK.salon.requestedSize('52')]).toEqual([
       'YOUR SIZE',

@@ -103,6 +103,13 @@
  *                     without a first name or a country holds one piece of it (YOUR PROFILE first); seven more owners of
  *                     MONOLITHE in its three variants each a photograph published (eight on its sheet with you's), and
  *                     one of ZENITH one alone on its sheet (G4, G5)
+ *   addons            the live story, then the catalogue add-ons (plan MACRO M3 §4.4, D2; seedAddons): POLISHING CLOTH
+ *                     (€ 15), CHAIN EXTENDER (€ 30), TRAVEL POUCH (€ 45) and THE TRAVEL CASE FOR TWO PIECES, LINED
+ *                     (€ 12 450.50: the longest name, the largest price), in stock at the default location; the secured
+ *                     collector's hold with a CLOTH × 2 and an EXTENDER; you's place held in MONOLITHE IN GOLD, THE AUTUMN
+ *                     DRAW (€ 4 200) with a CLOTH chosen; ZENITH priced € 4 800 for the salon's request; you's orders: the
+ *                     morning's RESERVED with a CLOTH × 2, a MONOLITHE in blue PAID then given an EXTENDER (its own
+ *                     invoice), a MONOLITHE in gold PAID with a TRAVEL POUCH, packing begun
  *
  * Ids written by the server (scan references, order and entry references, genomes, invoice numbers) are the server's;
  * the parity tool's comparisons treat them as live data.
@@ -117,10 +124,10 @@ import { encodePayload, frameCodeData, signingMessage, unframeCodeData } from '.
 import type { AppContext } from '../../src/server/context.js';
 import { deriveDropSeedKey } from '../../src/server/services/drops.js';
 import { deriveLiveTurnKey } from '../../src/server/services/live.js';
-import { ensureSku } from '../../src/server/services/stock.js';
+import { defaultLocationId, ensureSku } from '../../src/server/services/stock.js';
 import { SYSTEM_ACTOR, type Actor, type ManualClock } from '../../src/server/types.js';
 import type { DecideClaimInput } from '../../src/server/services/warranty-claims.js';
-import { packAndShip, stockPieces } from './fulfil.js';
+import { countPiecesIn, packAndShip, stockPieces } from './fulfil.js';
 import { createLiveRelease, holdPieces, type LiveFixture, type LiveReleaseOptions } from './live.js';
 import { poolDraw, withDrawSizes } from './draws.js';
 import { HOUSE_DEFAULT_WORDS, houseDate, houseMoney, renderHouseWords, type HouseMomentName, type HouseValues } from '../../src/shared/house-words.js';
@@ -156,7 +163,8 @@ export type DemoVariant =
   | 'orbes-care'
   | 'gallery'
   | 'house'
-  | 'worn';
+  | 'worn'
+  | 'addons';
 
 export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'full',
@@ -189,6 +197,7 @@ export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'gallery',
   'house',
   'worn',
+  'addons',
 ]);
 
 /** NOW: Monday 5 October 2026, 18:49 in Paris (16:49 UTC), the boards' afternoon. Every clock of the stage is fixed here. */
@@ -293,7 +302,11 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
   // collector's side of an order (plan NEXT LOT §3.6) tell the full story, their state writing the rest.
   const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'draw-selected', 'email', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes', 'birthday-credit', 'care-used', 'orbes-care', 'gallery', 'worn'] as const;
   // The house messages' stage (lot M2, FROM ORBES) tells the draw-leads story, MESSAGES' own.
-  const story = (variant === 'house' ? 'draw-leads' : (OWN_STAGES as readonly DemoVariant[]).includes(variant) ? 'full' : variant) as Exclude<DemoVariant, (typeof OWN_STAGES)[number] | 'house'>;
+  // The add-ons' stage (lot M3, D2) tells the live story (a hold secured), then its own (seedAddons).
+  const story = (variant === 'house' ? 'draw-leads' : variant === 'addons' ? 'live' : (OWN_STAGES as readonly DemoVariant[]).includes(variant) ? 'full' : variant) as Exclude<
+    DemoVariant,
+    (typeof OWN_STAGES)[number] | 'house' | 'addons'
+  >;
   if (story === 'empty') await seedEmpty(w);
   else if (story === 'stress') await seedStress(w);
   else {
@@ -319,6 +332,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
     if (variant === 'gallery') await seedGallery(w);
     if (variant === 'house') await seedHouse(w);
     if (variant === 'worn') await seedWorn(w);
+    if (variant === 'addons') await seedAddons(w);
   }
   clock.set(NOCTURNE_NOW);
   // Every account's session opened now: a capture signs in with its cookie.
@@ -1500,6 +1514,98 @@ const WORN_OWNERS: readonly { key: string; email: string; firstName: string; cou
   { key: 'wornJonas', email: 'jonas.weber@example.com', firstName: 'Jonas', country: 'DE', instagram: 'jonas.weber', model: 'gold', photo: 'gold', published: '2026-09-24T10:00:00Z' },
   { key: 'wornHana', email: 'hana.seo@example.com', firstName: 'Hana', country: 'KR', instagram: 'hana.seo', model: 'zenith', photo: 'gold', published: '2026-10-01T12:00:00Z' },
 ];
+
+/** The catalogue add-ons of the demo (plan MACRO M3 §4.4, D2), by role → their id. */
+export const NOCTURNE_ADDONS = Object.freeze({
+  cloth: { name: 'POLISHING CLOTH', line: 'A soft cloth to keep the metal bright.', skuCode: 'ADD-CLOTH', priceMinor: 1_500 },
+  extender: { name: 'CHAIN EXTENDER', line: 'Five centimetres more, to wear it longer.', skuCode: 'ADD-EXTENDER', priceMinor: 3_000 },
+  pouch: { name: 'TRAVEL POUCH', line: null, skuCode: 'ADD-POUCH', priceMinor: 4_500 },
+  // The longest name and the largest price of the stage (its rows wrap, never cut).
+  case: { name: 'THE TRAVEL CASE FOR TWO PIECES, LINED', line: 'Lined to keep two pieces apart, with its own cloth, for the longest journeys.', skuCode: 'ADD-CASE', priceMinor: 1_245_050 },
+});
+
+/**
+ * The add-ons' stage (plan MACRO M3 §4.4, D2), after the live story: the four add-ons, priced in euros, ten of each
+ * counted in at the default location; the secured collector's hold given a CLOTH × 2 and an EXTENDER (the release's
+ * ENGRAVING kept); you's place held in a draw with a price (THE AUTUMN DRAW, € 4 200), a CLOTH chosen on it; ZENITH
+ * priced € 4 800 (its salon request offers them); you's orders: the morning's LIVE order (RESERVED) given a CLOTH × 2,
+ * a MONOLITHE in blue sold by Client Services, PAID, then given an EXTENDER (its own invoice), and a MONOLITHE in gold,
+ * PAID with a TRAVEL POUCH, the agent's packing begun.
+ */
+async function seedAddons(w: World): Promise<void> {
+  const { ctx, admin, clock, demo } = w;
+  const you = demo.accounts.you!;
+  const secured = demo.accounts.secured!;
+  const location = await defaultLocationId(ctx.db);
+  clock.set(new Date(NOCTURNE_NOW.getTime() - 90_000));
+  const ids: Record<string, string> = {};
+  for (const [role, a] of Object.entries(NOCTURNE_ADDONS)) {
+    const made = await ctx.services.addons.create({ name: a.name, line: a.line, skuCode: a.skuCode, weightG: 40, prices: { EUR: a.priceMinor } }, admin);
+    await ctx.services.stock.adjust({ skuId: made.sku.id, locationId: location, delta: 10, note: 'Counted in.' }, admin);
+    ids[role] = made.id;
+  }
+  // The hold: the release's ENGRAVING as chosen, and two add-ons of the catalogue.
+  const live = demo.releases.live!;
+  const held = await ctx.services.live.entry(secured.id, live);
+  await ctx.services.live.setAddons(secured.id, live, (held?.addons ?? []).map((a) => a.id), secured.actor, [
+    { addonId: ids.cloth!, units: 2 },
+    { addonId: ids.extender!, units: 1 },
+  ]);
+  // ZENITH priced in euros: the salon's request offers the add-ons.
+  await ctx.services.catalog.updateModel(w.models.zenith!, { basePriceMinor: 480_000, baseCurrency: 'EUR' }, admin);
+  // A draw with a price, you's place held in it, a CLOTH chosen on it.
+  clock.set(at('2026-10-01T09:00:00Z'));
+  const autumn = await poolDraw(
+    ctx.services.drops,
+    ctx.db,
+    {
+      modelId: w.models.gold!,
+      title: 'MONOLITHE IN GOLD, THE AUTUMN DRAW',
+      quantity: 1,
+      opensAt: at('2026-10-02T10:00:00Z'),
+      closesAt: at('2026-10-04T18:00:00Z'),
+      purchaseWindowHours: 72,
+      earlyAccessHours: 0,
+      earlyAccessPlatineHours: 0,
+      priceMinor: 420_000,
+      currency: 'EUR',
+    },
+    admin,
+  );
+  demo.releases.autumn = autumn.id;
+  clock.set(at('2026-10-03T10:00:00Z'));
+  await ctx.services.drops.enter(you.id, autumn.id, you.actor);
+  clock.set(at('2026-10-04T18:01:00Z'));
+  await ctx.services.drops.draw(autumn.id, admin);
+  clock.set(at('2026-10-05T09:00:00Z'));
+  await ctx.services.drops.setAddonChoices(you.id, autumn.id, [{ addonId: ids.cloth!, units: 1 }], you.actor);
+  // You's orders: the morning's, reserved, given a CLOTH × 2 (removable, before packing).
+  clock.set(new Date(NOCTURNE_NOW.getTime() - 60_000));
+  const morning = await ctx.db.selectFrom('orders').select('id').where('account_id', '=', you.id).where('channel', '=', 'LIVE').where('status', '=', 'RESERVED').executeTakeFirstOrThrow();
+  await ctx.services.orderAddons.addForAccount(you.id, morning.id, { addonId: ids.cloth!, units: 2 }, you.actor);
+  // A MONOLITHE in blue and one in gold, sold by ORBES Client Services and paid, each holding its piece.
+  const paid = async (model: 'blue' | 'gold', material: string) => {
+    const request = await ctx.db.insertInto('shop_requests').values({ account_id: you.id, model_id: w.models[model]!, created_at: clock.now() }).returning('id').executeTakeFirstOrThrow();
+    await ctx.services.salon.close(request.id, { note: 'A MONOLITHE, size 17.', outcome: 'ACCEPTED' }, admin);
+    const order = await ctx.db.selectFrom('orders').select(['id', 'location_id']).where('shop_request_id', '=', request.id).executeTakeFirstOrThrow();
+    const sku = (await ctx.db.selectFrom('skus').select('id').where('model_id', '=', w.models[model]!).where('size_label', '=', '17').executeTakeFirstOrThrow()).id;
+    const piece = await ctx.services.issuance.issueProduct(
+      { categoryCode: 'J', year: 2026, modelId: w.models[model]!, variant: '17', material, productionBatch: 'B-2026-10', productionDate: '2026-10-01', withClaimSecret: true },
+      admin,
+    );
+    await countPiecesIn(ctx, { skuId: sku, locationId: order.location_id, productRefs: [piece.product.productId] }, admin);
+    await ctx.services.orders.setTerms(order.id, { sizeLabel: '17', priceMinor: 420_000, currency: 'EUR' }, admin);
+    await ctx.services.orders.transition(order.id, { to: 'PAID' }, admin);
+    return order.id;
+  };
+  const gold = await paid('gold', '18K YELLOW GOLD');
+  await ctx.services.orderAddons.addForAccount(you.id, gold, { addonId: ids.pouch!, units: 1 }, you.actor);
+  await ctx.services.orders.setAddress(you.id, gold, { address: { name: 'Camille Laurent', address: '8 rue Saint-Honoré\n75001 Paris', country: 'FR', phone: '+33 6 12 34 56 78' }, save: false }, you.actor);
+  await ctx.services.logistics.startPacking(gold, admin, null);
+  clock.advance(MINUTE / 2);
+  const blue = await paid('blue', '925 STERLING SILVER, BLUE LACQUER');
+  await ctx.services.orderAddons.addForAccount(you.id, blue, { addonId: ids.extender!, units: 1 }, you.actor);
+}
 
 async function seedSizes(w: World, variant: 'full' | 'room'): Promise<void> {
   const { ctx, admin, clock } = w;

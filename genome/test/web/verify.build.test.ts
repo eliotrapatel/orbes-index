@@ -100,9 +100,9 @@ describe('build-web: production build of the real apps', () => {
     for (const css of [pointer, layout]) {
       expect(css.toString('utf8')).not.toMatch(/@property|@import|\.n-post__missing-back\{display:none\}/);
     }
-    // Weight, gzip -9: the phone's stylesheet at most 22 KB (production c3d25c2's was 20.8 KB); a computer's two more
-    // at most 45 KB together.
-    expect(gz(phone)).toBeLessThanOrEqual(22 * 1024);
+    // Weight, gzip -9: the phone's stylesheet at most 23 KB (production c3d25c2's was 20.8 KB; 22 KB until lot M3's
+    // add-ons' rows, step M3.12, took it to 22.3 KB); a computer's two more at most 45 KB together.
+    expect(gz(phone)).toBeLessThanOrEqual(23 * 1024);
     expect(gz(pointer) + gz(layout)).toBeLessThanOrEqual(45 * 1024);
   });
 

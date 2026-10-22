@@ -51,8 +51,9 @@
  */
 import { h } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
+import { addonRows, chosenUnits, rowsChoice, rowsLimit, withUnits, type AddonRowModel } from '../addons-model.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { GUARANTEE, HOW, LIVE, LOOKBOOK, RELEASES } from '../copy.js';
+import { ADDONS, GUARANTEE, HOW, LIVE, LOOKBOOK, RELEASES } from '../copy.js';
 import { HOW_PATH } from '../how-model.js';
 import { guaranteeBox, guaranteedLines, guaranteeFor } from '../guarantee-model.js';
 import { CHANGE_RETRY_MS, countdown as countdownGroups, liveCards, measureClock, nextChange, type LiveCardModel } from '../live-model.js';
@@ -77,7 +78,7 @@ import {
   type ReleaseSheetModel,
 } from '../releases-model.js';
 import type { SessionStore } from '../session.js';
-import type { ClubEntry, ClubGuarantee, DrawEntry, DrawSizeRef } from '../types.js';
+import type { ClubEntry, ClubGuarantee, DrawEntry, DrawEntryRead, DrawSizeRef } from '../types.js';
 import { lookbookSheetPath } from '../lookbook-model.js';
 import { dayAndHour, RELEASES_PATH, viewRoot, withNumerals } from './common.js';
 import { appAnchor, button, countdown, fadedPhoto, failedState, icon, loadingState, modelTitle, monogram, quietLine, sizeButtons, textLink } from './nocturne.js';
@@ -90,6 +91,7 @@ import { OwnershipPanel } from './ownership.js';
 import { signInLine } from './desktop-signin.js';
 import { isDesktop, touchLayout } from '../../shared/desktop.js';
 import { tabsView } from './tabs.js';
+import { addonRowsList, focusedStep, refocusStep } from './addon-rows.js';
 
 /**
  * A seed's figures as two halves with a break between them: a computer's column too narrow for the 64 figures at the
@@ -800,6 +802,14 @@ class ReleasePage {
    * with the entry; a DRAW_NOT_ELIGIBLE answer sets it false). True until known otherwise, the server refusing anyway.
    */
   private eligible = true;
+  /**
+   * Plan MACRO M3 §4.4 (D2), ADD TO YOUR ORDER on a place held in a draw with a price: the add-ons chosen and offered as
+   * the server reads them (null: none to offer, or not read), the units being sent, and a choice refused.
+   */
+  private addons: NonNullable<DrawEntryRead['addons']> | null = null;
+  private addonUnits: Map<string, number> | null = null;
+  private addonsBusy = false;
+  private addonsError: string | null = null;
 
   constructor(private readonly deps: ReleaseDeps) {
     this.root = viewRoot('release', 'release-title');
@@ -868,6 +878,8 @@ class ReleasePage {
       this.picked = null;
       this.pickedFrom = null;
       this.eligible = true;
+      this.addons = null;
+      this.addonsError = null;
     }
     this.render();
   }
@@ -896,6 +908,10 @@ class ReleasePage {
       this.savedSize = sized ? (read?.savedSize ?? null) : null;
       this.eligible = read?.eligible !== false;
       const entry = status.entries.find((e) => e.dropId === id) ?? null;
+      // Plan MACRO M3 §4.4 (D2): a place held, its add-ons read with it (left out should they not be read).
+      const held = entry?.status === 'SELECTED' ? (read ?? (await this.deps.api.drawEntry(id).catch(() => null))) : null;
+      if (gen !== this.entryGen || this.disposed) return;
+      this.addons = held?.addons ?? null;
       this.entry = { kind: 'ready', entry };
       this.preselect(entry);
     } catch (e) {
@@ -1239,6 +1255,8 @@ class ReleasePage {
           ),
         );
       }
+      // Plan MACRO M3 §4.4 (D2): ADD TO YOUR ORDER while the place is held, in a draw with a price.
+      if (this.entry.entry?.status === 'SELECTED') out.push(this.addonsBlock());
       // Plan NEXT LOT §3.6.F: YOUR SIZE and its picker, right above the actions it serves.
       const entered = this.entry.entry?.status === 'ENTERED' && s.state === 'OPEN';
       const sized = s.sizes.length > 0 && (m.canEnter || m.canReserve || entered);
@@ -1267,6 +1285,59 @@ class ReleasePage {
     this.entrySection.replaceChildren(...out.filter((x): x is HTMLElement => x !== null));
     if (hadFocus && !this.entrySection.contains(document.activeElement)) (this.entrySection.querySelector<HTMLElement>('input, button:not([disabled])') ?? heading).focus({ preventScroll: true });
     this.syncFrameAction();
+  }
+
+  /**
+   * ADD TO YOUR ORDER (plan MACRO M3 §4.4, D2): on a place held in a draw with a price, the catalogue add-ons offered (and
+   * those chosen no longer offered), each with its units, saved at once; the sentence that they are added when ORBES
+   * Client Services confirms the order. Nothing when none is offered nor chosen.
+   */
+  private addonsBlock(): HTMLElement | null {
+    const a = this.addons;
+    if (!a) return null;
+    const rows = this.addonRowsNow();
+    if (rows.length === 0) return null;
+    const limit = rowsLimit(rows);
+    return h(
+      'div',
+      { class: 'n-release__addons release__addons', attrs: { role: 'group', 'aria-labelledby': 'release-addons' } },
+      h('p', { class: 'n-g n-lb n-release__addons-title', id: 'release-addons', text: RELEASES.addons.title }),
+      addonRowsList({ rows, label: RELEASES.addons.title, idPrefix: 'release-addon', disabled: this.addonsBusy || this.busy, onChange: (id, n) => void this.setAddon(rows, id, n) }),
+      h('p', { class: 'n-sm n-addons-note', text: limit ? `${RELEASES.addons.note} ${limit}` : RELEASES.addons.note }),
+      this.addonsError ? h('p', { class: 'n-sm n-ivc n-release__error form__error', attrs: { role: 'alert' }, text: `${ADDONS.failed} ${this.addonsError}` }) : null,
+    );
+  }
+
+  private addonRowsNow(): AddonRowModel[] {
+    const a = this.addons;
+    return a ? addonRows(a.offer, this.addonUnits ?? chosenUnits(a.chosen), a.chosen, a.currency) : [];
+  }
+
+  /** A stepper pressed: the place's whole choice sent at once; the server's answer drawn (a refusal said, the choice kept as it was). */
+  private async setAddon(rows: readonly AddonRowModel[], addonId: string, units: number): Promise<void> {
+    if (this.addonsBusy || this.load.kind !== 'ready') return;
+    const id = this.load.sheet.id;
+    const next = withUnits(rows, addonId, units);
+    const focus = focusedStep(this.entrySection);
+    this.addonUnits = new Map(next.map((r) => [r.addonId, r.units]));
+    this.addonsBusy = true;
+    this.addonsError = null;
+    this.renderEntry();
+    try {
+      const read = await this.deps.api.drawAddons(id, rowsChoice(next));
+      if (this.disposed) return;
+      this.addons = read.addons ?? null;
+    } catch (e) {
+      if (this.disposed) return;
+      this.deps.session.noteError(e);
+      this.addonsError = messageOf(e);
+    } finally {
+      this.addonsBusy = false;
+      this.addonUnits = null;
+    }
+    if (this.disposed) return;
+    this.renderEntry();
+    if (focus) refocusStep(this.entrySection, focus.addonId, focus.which);
   }
 
   /**

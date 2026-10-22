@@ -20,6 +20,7 @@ import type { CircleCard as ServerCircleCard, CirclePostView as ServerCirclePost
 import type { ClubStatus as ServerClubStatus } from '../../src/server/services/club.js';
 import {
   DROP_STATES as SERVER_DROP_STATES,
+  type AccountDrawEntry as ServerAccountDrawEntry,
   type AccountDropEntry as ServerAccountDropEntry,
   type DrawEntry as ServerDrawEntry,
   type DropCard as ServerDropCard,
@@ -46,6 +47,7 @@ import type {
 import type { LookbookCard as ServerLookbookCard, LookbookSheet as ServerLookbookSheet, ModelPair as ServerModelPair, SalonCard as ServerSalonCard } from '../../src/server/services/lookbook.js';
 import type { SalonSheet as ServerSalonSheet, ShopRequestView as ServerShopRequest } from '../../src/server/services/salon.js';
 import type { AccountOrder as ServerAccountOrder, OrderCareGuide as ServerOrderCareGuide } from '../../src/server/services/orders.js';
+import type { AccountAddonOffer as ServerAccountAddonOffer } from '../../src/server/services/order-addons.js';
 import type { VerifyInput as ServerVerifyInput, VerifyOutcome as ServerVerifyOutcome } from '../../src/server/services/verification.js';
 import type { CollectorProfileView as ServerProfileView, HeardChoice as ServerHeardChoice } from '../../src/server/services/profiles.js';
 import type { WishlistItem as ServerWishlistItem } from '../../src/server/services/wishlist.js';
@@ -61,7 +63,9 @@ import {
   ORDER_STATUSES,
   REPORT_CHANNELS,
   VERIFICATION_STATES,
+  type AccountAddonOffer,
   type AccountOrder,
+  type DrawEntryRead,
   type AccountProfileView,
   type HeardOption,
   type WishlistItem,
@@ -155,6 +159,9 @@ export const liveInterestFits = (i: Json<ServerLiveInterest>): LiveInterest => i
 export const liveMineFits = (e: Json<ServerLiveAccountEntry>): LiveAccountEntry => e;
 // …and MY PIECES' orders (plan LIVE RELEASE+, choice 6): an order of GET /api/v1/account/orders.
 export const accountOrderFits = (o: Json<ServerAccountOrder>): AccountOrder => o;
+// Plan MACRO M3 §4.4 (D2): ADD AN ADD-ON's offer, and a place held's entry with its add-ons.
+export const addonOfferFits = (o: Json<ServerAccountAddonOffer>): AccountAddonOffer => o;
+export const drawEntryReadFits = (e: Json<ServerAccountDrawEntry>): DrawEntryRead => e;
 // …and an order's care guide (M6): GET /api/v1/account/orders/:id/care-guide.
 export const careGuideFits = (g: Json<ServerOrderCareGuide>): OrderCareGuide => g;
 // …and THE RELEASES' PAST (plan LIVE RELEASE+, choice 5): a page of the releases ended, and the account's part in them.
@@ -210,7 +217,7 @@ describe('verify wire types', () => {
     expect(typeof cardFits).toBe('function');
     expect(typeof sheetFits).toBe('function');
     for (const fits of [dropCardFits, dropSheetFits, drawEntryFits, drawPageFits, clubEntryFits, clubStatusFits, circleCardFits, circleFeedFits, circlePostFits]) expect(typeof fits).toBe('function');
-    for (const fits of [liveCardFits, liveSheetFits, liveEndedFits, liveRoomFits, liveEntryFits, liveAccessFits, liveInterestFits, liveMineFits, accountOrderFits, careGuideFits]) expect(typeof fits).toBe('function');
+    for (const fits of [liveCardFits, liveSheetFits, liveEndedFits, liveRoomFits, liveEntryFits, liveAccessFits, liveInterestFits, liveMineFits, accountOrderFits, careGuideFits, addonOfferFits, drawEntryReadFits]) expect(typeof fits).toBe('function');
     expect(productKeysMatch).toBe(true);
   });
 });

@@ -1471,6 +1471,55 @@ body.nocturne .view--piece {
   margin-top: -12.25px;
 }
 
+/* Plan MACRO M3 §4.4 (D2): an order's ADD-ONS under its terms: each add-on a hairline row with REMOVE at its end (a
+   44 px zone), then ADD AN ADD-ON; the credit note's line and a refusal under the rows; the line once packing has begun. */
+.n-pieces__addons {
+  margin-top: 14px;
+}
+
+.n-pieces__addon-list {
+  margin: 4px 0 6px;
+  padding: 0;
+  list-style: none;
+}
+
+.n-pieces__addon {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 48px;
+  border-bottom: 1px solid var(--vault-hairline);
+}
+
+.n-pieces__addon-words {
+  min-width: 0;
+  color: var(--vault-ink);
+  overflow-wrap: anywhere;
+}
+
+.n-pieces__addon .n-tl {
+  flex: none;
+  margin-top: -22.25px;
+  margin-bottom: -5px;
+}
+
+.n-pieces__addons-label,
+.n-pieces__addons-note,
+.n-pieces__addons-error {
+  margin-top: 10px;
+}
+
+.n-pieces__addons-add,
+.n-pieces__addons-locked {
+  margin-top: 14px;
+}
+
+.n-pieces__addons-add .n-tl,
+.n-osheet__retry .n-tl {
+  margin-top: -12.25px;
+}
+
 .n-pieces__address-add,
 .n-pieces__returns-actions {
   margin-top: 16px;
@@ -2194,6 +2243,21 @@ body.nocturne .view--wishlist.n-wishlist {
 
 .n-model__requested-size {
   margin-top: 8px;
+}
+
+/* Plan MACRO M3 §4.4 (D2): the add-ons offered with a request, under YOUR SIZE; once requested, those chosen; ADD TO
+   YOUR ORDER on a draw's place held. */
+.n-model__addons,
+.n-release__addons {
+  margin-top: 22px;
+}
+
+.n-model__requested-addons {
+  margin-top: 18px;
+}
+
+:is(.n-model__addons, .n-release__addons) .n-addons {
+  margin-top: 12px;
 }
 
 /* REQUESTED (C33, state 2): its word in ivory, its sentence, then the contact of ORBES Client Services. */
@@ -3709,6 +3773,16 @@ body.nocturne[data-screen="live"] {
 .n-osheet__remove,
 .n-osheet__cancel {
   margin-top: 14px;
+}
+
+/* ADD AN ADD-ON (plan MACRO M3 §4.4, D2): its rows under the lead, the total, once paid its own invoice; TRY AGAIN. */
+.n-osheet__addons {
+  margin-top: 18px;
+}
+
+.n-osheet__none,
+.n-osheet__retry {
+  margin-top: 18px;
 }
 
 .n-osheet__remove-error {

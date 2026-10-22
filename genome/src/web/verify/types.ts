@@ -472,7 +472,65 @@ export interface LookbookSheetVariant extends VariantDot {
     /** AC-01: the model's sizes (the picker shows from two), and the one YOUR SIZES suggests; absent from an older server. */
     sizes?: string[];
     suggestedSize?: string | null;
+    /**
+     * Plan MACRO M3 §4.4 (D2): the catalogue add-ons the request form offers (in stock, priced in the model's base
+     * currency); null or absent: none.
+     */
+    addons?: { currency: string; offer: AddonOfferItem[] } | null;
   };
+}
+
+/**
+ * Plan MACRO M3 §4.2 (D2), a catalogue add-on (POLISHING CLOTH, CHAIN EXTENDER…) as the collector reads it: chosen before
+ * the order exists (a LIVE hold, a draw's place held, a salon request), priced in the currency of where it was chosen
+ * now (`priceMinor` null: no longer priced in it).
+ */
+export interface ChosenAddon {
+  addonId: string;
+  name: string;
+  line: string | null;
+  units: number;
+  priceMinor: number | null;
+}
+
+/** A catalogue add-on offered now (in stock where the order is held, priced in its currency), with the units it may still take. */
+export interface AddonOfferItem {
+  addonId: string;
+  name: string;
+  line: string | null;
+  priceMinor: number;
+  currency: string;
+  /** The units that can be chosen or added now (at most 3 of each on an order, less those it holds). */
+  maxUnits: number;
+}
+
+/** A choice carried onto an order that could not be added: none left (NONE_LEFT), or no longer offered (NOT_OFFERED). */
+export interface LeftOutAddon {
+  addonId: string;
+  name: string;
+  units: number;
+  reason: 'NONE_LEFT' | 'NOT_OFFERED';
+}
+
+/** An order's catalogue add-on in YOUR ORDERS: one row per add-on and price, removable until packing begins. */
+export interface AccountOrderAddonItem {
+  addonId: string;
+  name: string;
+  units: number;
+  /** Per unit, as it was added. */
+  priceMinor: number;
+  currency: string;
+  canRemove: boolean;
+}
+
+/** GET /api/v1/account/orders/:id/addons: what ADD AN ADD-ON offers on the order now. */
+export interface AccountAddonOffer {
+  canAdd: boolean;
+  reason: 'NOT_OFFERED' | 'CLOSED' | 'PACKING_STARTED' | 'NO_CURRENCY' | null;
+  /** The order is paid: an add-on added has its own invoice. */
+  paid: boolean;
+  currency: string | null;
+  offer: AddonOfferItem[];
 }
 
 /** An account's request for a model of the private salon (P-X08), as its sheet and REQUEST THIS PIECE give it. */
@@ -484,6 +542,8 @@ export interface ShopRequest {
   modelId: string;
   /** AC-01: the size asked (REQUESTED · SIZE 52); null or absent: none. */
   size?: string | null;
+  /** Plan MACRO M3 §4.2 (D2): the catalogue add-ons chosen with it; absent from a server before them: none. */
+  addons?: ChosenAddon[];
 }
 
 /** A model's sheet (P-R02: GET /api/v1/lookbook/:slug, or the club's for an owner). */
@@ -517,6 +577,8 @@ export interface LookbookSheet {
     /** AC-01: the model's sizes (the picker shows from two), and the one YOUR SIZES suggests; absent from an older server. */
     sizes?: string[];
     suggestedSize?: string | null;
+    /** Plan MACRO M3 §4.4 (D2): the catalogue add-ons the request form offers; null or absent: none. */
+    addons?: { currency: string; offer: AddonOfferItem[] } | null;
   };
   /** NOCTURNE N1: this model's own dot among its variants, or null. */
   variant?: VariantDot | null;
@@ -663,6 +725,11 @@ export interface DrawEntryRead {
   savedSize: DrawSizeRef | null;
   /** Plan MACRO M1 §3.1 (F4): whether the account may enter now (a draw opened to a segment: its members only). */
   eligible?: boolean;
+  /**
+   * Plan MACRO M3 §4.2 (D2), ADD TO YOUR ORDER: while its place is held in a draw with a price, the add-ons chosen and
+   * those offered now; null or absent otherwise.
+   */
+  addons?: { currency: string; chosen: ChosenAddon[]; offer: AddonOfferItem[] } | null;
 }
 
 /** A release of THE RELEASES' PAST (GET /api/v1/releases/past, plan LIVE RELEASE+ choice 5): what was announced, no end figure. */
@@ -1098,6 +1165,14 @@ export interface LiveEntry {
   guaranteed?: boolean;
   /** W5: while it waits for its batch on a paced release, its place among those waiting and its estimated entry time. */
   queue?: LiveQueue | null;
+  /**
+   * Plan MACRO M3 §4.2 (D2): the catalogue add-ons of the entry (while SECURED those chosen with the hold, priced now;
+   * once CONFIRMED those on its order), what the hold offers now, and PAY's answer only, those that could not be added.
+   * Absent from a server before them: none.
+   */
+  addonItems?: ChosenAddon[];
+  addonOffer?: AddonOfferItem[];
+  addonsLeftOut?: LeftOutAddon[];
 }
 
 /** The queue page's figures (W2, W5). */
@@ -1219,6 +1294,12 @@ export interface AccountOrder {
   currency: string | null;
   /** Each at its price per piece. */
   addons: { label: string; priceMinor: number }[];
+  /**
+   * Plan MACRO M3 §4.2 (D2): its catalogue add-ons (POLISHING CLOTH × 2), each removable until packing begins, and whether
+   * ADD AN ADD-ON is offered on it now; absent from a server before them: none.
+   */
+  addonItems?: AccountOrderAddonItem[];
+  canAddAddons?: boolean;
   /**
    * BP-19 T4: its shipping (STANDARD or EXPRESS, the fee in its currency, the tier that made it free) and, travelling
    * with another order, that order's reference (which carries the fee); null or absent: no shipping.

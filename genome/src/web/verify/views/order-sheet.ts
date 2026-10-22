@@ -25,11 +25,13 @@
 import { h } from '../../shared/dom.js';
 import type { ApiClient } from '../api.js';
 import { mayAddAddress, sameAddress, savedChoice } from '../addresses-model.js';
-import { ACCOUNT_ADDRESSES, LIVE, MESSAGES, ORDERS } from '../copy.js';
+import { addonSheet, addonPrice, rowsChoice, rowsLimit, rowsTotal, withUnits, type AddonRowModel, type AddonSheetModel } from '../addons-model.js';
+import { ACCOUNT_ADDRESSES, LIVE, MESSAGES, ORDERS, PIECES } from '../copy.js';
 import { savedSizeLine, type OrderEngravingModel, type OrderModel, type OrderReturnsModel } from '../orders-model.js';
 import type { SessionStore } from '../session.js';
 import type { AccountAddresses, AccountOrder, OrderCaseRequest } from '../types.js';
 import { addressFields } from './address.js';
+import { addonRowsList, focusedStep, refocusStep } from './addon-rows.js';
 import { withNumerals } from './common.js';
 import { FormError, messageOf, nocturneForm } from './forms.js';
 import { button, icon, selectField, sizeButtons, switchControl, textLink } from './nocturne.js';
@@ -38,6 +40,7 @@ import { button, icon, selectField, sizeButtons, switchControl, textLink } from 
 export type OrderSheetRequest =
   | { kind: 'address'; order: OrderModel; trigger: HTMLElement; onDone(order: AccountOrder): HTMLElement | null }
   | { kind: 'engraving'; order: OrderModel; engraving: OrderEngravingModel; trigger: HTMLElement; onDone(order: AccountOrder): HTMLElement | null }
+  | { kind: 'addons'; order: OrderModel; trigger: HTMLElement; onDone(order: AccountOrder): HTMLElement | null }
   | { kind: 'RETURN' | 'EXCHANGE'; order: OrderModel; returns: OrderReturnsModel; trigger: HTMLElement; onDone(order: AccountOrder): HTMLElement | null };
 
 let opener: ((r: OrderSheetRequest) => void) | null = null;
@@ -53,7 +56,7 @@ export function openOrderSheet(r: OrderSheetRequest): void {
 }
 
 export interface OrderSheetDeps {
-  api: Pick<ApiClient, 'addresses' | 'setOrderAddress' | 'setEngraving' | 'requestOrderCase'>;
+  api: Pick<ApiClient, 'addresses' | 'setOrderAddress' | 'setEngraving' | 'requestOrderCase' | 'orderAddonOffer' | 'addOrderAddon'>;
   session: SessionStore;
   /** What the page holds outside the sheet, made inert while it is open. */
   outside(): HTMLElement[];
@@ -84,6 +87,15 @@ export class OrderSheet {
   /** A size tapped in THE NEW SIZE: YOUR SIZES' lines go. */
   private sizeTapped = false;
   private busy = false;
+  /**
+   * ADD AN ADD-ON (plan MACRO M3 §4.4, D2): what the order may take, as read when the sheet opened (null while read;
+   * `offerError` when it could not be), the units chosen, and an order the server answered for add-ons already added
+   * when a later one was refused (drawn on its card when the sheet closes).
+   */
+  private offer: AddonSheetModel | null = null;
+  private offerError: string | null = null;
+  private addonUnits = new Map<string, number>();
+  private addedOrder: AccountOrder | null = null;
   private unsubscribe: (() => void) | null = null;
 
   constructor(private readonly deps: OrderSheetDeps) {
@@ -117,6 +129,10 @@ export class OrderSheet {
     this.sizeTapped = false;
     this.busy = false;
     this.choice = 'new';
+    this.offer = null;
+    this.offerError = null;
+    this.addonUnits = new Map();
+    this.addedOrder = null;
     this.el.hidden = false;
     if (!this.deps.inline) {
       document.documentElement.classList.add('n-locked');
@@ -129,6 +145,7 @@ export class OrderSheet {
     this.render();
     this.focusStart();
     if (req.kind === 'address') void this.readSaved();
+    if (req.kind === 'addons') void this.readOffer();
   }
 
   /** The keyboard focus on the sheet's title; in a page's section (desktop), on its heading or first field. */
@@ -140,6 +157,10 @@ export class OrderSheet {
   /** Closed: the focus back on `focus` (the card drawn again), else on the control that opened it. */
   close(focus: HTMLElement | null = null): void {
     if (!this.isOpen) return;
+    // Add-ons added before one was refused: the card drawn with them as the sheet closes.
+    const added = this.addedOrder;
+    this.addedOrder = null;
+    if (added && this.req && focus === null) focus = this.req.onDone(added);
     this.readGen++;
     this.unsubscribe?.();
     this.unsubscribe = null;
@@ -173,7 +194,16 @@ export class OrderSheet {
   private render(): void {
     const req = this.req;
     if (!req) return;
-    const title = req.kind === 'address' ? ORDERS.address.title : req.kind === 'engraving' ? ORDERS.engraving.title : req.kind === 'RETURN' ? ORDERS.returns.requestReturn : ORDERS.returns.exchange;
+    const title =
+      req.kind === 'address'
+        ? ORDERS.address.title
+        : req.kind === 'engraving'
+          ? ORDERS.engraving.title
+          : req.kind === 'addons'
+            ? ORDERS.addons.add
+            : req.kind === 'RETURN'
+              ? ORDERS.returns.requestReturn
+              : ORDERS.returns.exchange;
     const concerning = req.kind === 'RETURN' || req.kind === 'EXCHANGE' ? req.returns.concerning : req.order.concerning;
     const head = h(
       'div',
@@ -182,7 +212,8 @@ export class OrderSheet {
       h('button', { class: 'n-account__close', attrs: { type: 'button', 'aria-label': MESSAGES.close }, on: { click: () => this.close() } }, icon('close')),
     );
     const about = h('div', { class: 'n-px n-write__concerning' }, h('p', { class: 'n-g n-ivc n-write__label n-osheet__concerning', attrs: { 'data-testid': 'order-sheet-concerning' } }, ...withNumerals(concerning)));
-    const body = req.kind === 'address' ? this.addressView() : req.kind === 'engraving' ? this.engravingView(req.engraving) : this.requestView(req.kind, req.returns);
+    const body =
+      req.kind === 'address' ? this.addressView() : req.kind === 'engraving' ? this.engravingView(req.engraving) : req.kind === 'addons' ? this.addonsView() : this.requestView(req.kind, req.returns);
     if (this.deps.inline) {
       // Desktop: the form in its section, under the section's own label (the page is the order's: what it
       // concerns goes without saying); a request titled by what it asks; CANCEL beside the main action (§10.22).
@@ -373,6 +404,111 @@ export class OrderSheet {
       throw new FormError(`${ORDERS.engraving.failed} ${messageOf(e)}`);
     }
     this.done(order);
+  }
+
+  // ── ADD AN ADD-ON (plan MACRO M3 §4.4, D2) ───────────────────────────────
+
+  /** What the order may take now, read once as the sheet opens (TRY AGAIN reads it again). */
+  private async readOffer(): Promise<void> {
+    const req = this.req;
+    if (!req || req.kind !== 'addons') return;
+    const gen = ++this.readGen;
+    this.offer = null;
+    this.offerError = null;
+    this.render();
+    try {
+      const offer = await this.deps.api.orderAddonOffer(req.order.id);
+      if (gen !== this.readGen || !this.isOpen) return;
+      this.offer = addonSheet(offer);
+    } catch (e) {
+      this.deps.session.noteError(e);
+      if (gen !== this.readGen || !this.isOpen) return;
+      this.offerError = messageOf(e);
+    }
+    this.render();
+    this.focusStart();
+  }
+
+  /**
+   * The add-ons the order may take: ONE MOMENT… while they are read; could not be shown (the server's words, TRY AGAIN);
+   * none available, or packing begun; else their rows, the total they add, once paid that each has its own invoice, ADD
+   * and CANCEL.
+   */
+  private addonsView(): HTMLElement[] {
+    const A = ORDERS.addons;
+    const req = this.req;
+    if (!req || req.kind !== 'addons') return [];
+    const lead = h('p', { class: 'n-tx n-osheet__lead', text: A.lead });
+    if (this.offer === null && this.offerError === null) return [lead, h('p', { class: 'n-g n-lb n-osheet__loading', attrs: { role: 'status' }, text: A.loading }), this.cancel()];
+    if (this.offerError !== null) {
+      return [
+        lead,
+        h('p', { class: 'n-err n-osheet__unreadable', attrs: { role: 'alert' }, text: `${A.loadFailed} ${this.offerError}` }),
+        h('p', { class: 'n-osheet__retry' }, textLink(PIECES.retry, { onOpen: () => void this.readOffer(), extraClass: 'n-osheet__retry-link' })),
+        this.cancel(),
+      ];
+    }
+    const m = this.offer!;
+    if (m.empty !== null) return [lead, h('p', { class: 'n-tx n-osheet__none', attrs: { role: 'status' }, text: m.empty }), this.cancel()];
+    const list = h('div', { class: 'n-osheet__addons' });
+    const total = h('p', { class: 'n-g n-lb n-addons-total', attrs: { 'aria-live': 'polite' } });
+    const limit = h('p', { class: 'n-sm n-addons-note', attrs: { hidden: true } });
+    const draw = () => {
+      const rows = this.addonRowsNow(m);
+      const focus = focusedStep(list);
+      list.replaceChildren(addonRowsList({ rows, label: A.choices, idPrefix: 'order-addon', disabled: this.busy, onChange: (id, n) => this.setUnits(rows, id, n, draw) }));
+      if (focus) refocusStep(list, focus.addonId, focus.which);
+      const minor = rowsTotal(rows);
+      total.replaceChildren(h('span', { text: A.total }), h('span', { class: 'n-num n-addons-total__value', text: minor > 0 && m.currency ? addonPrice(minor, m.currency) : '—' }));
+      const note = rowsLimit(rows);
+      limit.textContent = note ?? '';
+      limit.hidden = note === null;
+    };
+    draw();
+    const form = nocturneForm(
+      this.deps.session,
+      'order-addons',
+      [list, limit, total, ...(m.paidNote ? [h('p', { class: 'n-sm n-osheet__note', text: m.paidNote })] : [])],
+      A.save,
+      async () => {
+        const chosen = rowsChoice(this.addonRowsNow(m));
+        if (chosen.length === 0) {
+          list.querySelector<HTMLElement>('.n-step__btn[data-step="more"]:not(:disabled)')?.setAttribute('aria-invalid', 'true');
+          throw new FormError(A.choose);
+        }
+        this.busy = true;
+        draw();
+        let order: AccountOrder | null = null;
+        try {
+          // One add-on at a time, as the server takes them; each added is kept, should a later one be refused.
+          for (const c of chosen) {
+            order = await this.deps.api.addOrderAddon(req.order.id, c.addonId, c.units);
+            this.addedOrder = order;
+            this.addonUnits.delete(c.addonId);
+          }
+        } catch (e) {
+          this.deps.session.noteError(e);
+          this.busy = false;
+          draw();
+          throw new FormError(`${A.failed} ${messageOf(e)}`);
+        }
+        this.busy = false;
+        this.addedOrder = null;
+        if (order) this.done(order);
+      },
+    );
+    return [lead, form, this.cancel()];
+  }
+
+  private addonRowsNow(m: AddonSheetModel): AddonRowModel[] {
+    return m.rows.map((r) => ({ ...r, units: Math.min(r.max, this.addonUnits.get(r.addonId) ?? 0) }));
+  }
+
+  private setUnits(rows: readonly AddonRowModel[], addonId: string, units: number, draw: () => void): void {
+    if (this.busy) return;
+    for (const r of withUnits(rows, addonId, units)) this.addonUnits.set(r.addonId, r.units);
+    this.panel.querySelector('.n-step__btn[aria-invalid="true"]')?.removeAttribute('aria-invalid');
+    draw();
   }
 
   // ── REQUEST A RETURN, EXCHANGE THE SIZE (§3.6.D) ─────────────────────────

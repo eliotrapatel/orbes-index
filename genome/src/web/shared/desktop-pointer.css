@@ -405,6 +405,20 @@
     transition-duration: var(--d-dur-press);
   }
 
+  /* A stepper's − and + (plan MACRO M3 §4.4, the add-ons' rows): the hover's ground, then the pressed one; disabled, none. */
+  html:not(.d-touch) body.nocturne .n-step__btn {
+    transition: background-color var(--d-dur-hover) var(--d-ease);
+  }
+
+  html:not(.d-touch) body.nocturne .n-step__btn:not(:disabled):hover {
+    background-color: var(--d-hover-ground);
+  }
+
+  html:not(.d-touch) body.nocturne .n-step__btn:not(:disabled):active {
+    background-color: var(--d-press-ground);
+    transition-duration: var(--d-dur-press);
+  }
+
   html:not(.d-touch) body.nocturne .n-opt2__option[aria-pressed="true"]:not(:disabled, [aria-disabled="true"]):hover {
     background-color: color-mix(in srgb, var(--vault-ink) 88%, var(--vault-ground));
   }

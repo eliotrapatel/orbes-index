@@ -48,6 +48,7 @@
 import { isDesktop } from '../../shared/desktop.js';
 import { h } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
+import { addonRows, chosenRows, rowsChoice, rowsLimit, withUnits } from '../addons-model.js';
 import { ApiError, type ApiClient } from '../api.js';
 import { LIVE, LOOKBOOK, WISHLIST } from '../copy.js';
 import { modelContext } from '../messages-model.js';
@@ -79,6 +80,7 @@ import { messageOf } from './forms.js';
 import { accLink, appAnchor, button, definitionList, failedState, fadedPhoto, icon, lift, loadingState, plateCard, quietLine, sizeButtons, textLink, variantDots } from './nocturne.js';
 import { writeButton } from './write.js';
 import { WornSheet } from './worn-sheet.js';
+import { addonRowsList, focusedStep, refocusStep } from './addon-rows.js';
 
 export interface LookbookView {
   root: HTMLElement;
@@ -439,6 +441,8 @@ class SheetPage {
    * render; none tapped yet: the size YOUR SIZES suggests is preselected, to confirm.
    */
   private sizeTapped: { slug: string; size: string | null } | null = null;
+  /** Plan MACRO M3 §4.4 (D2): the add-ons' units chosen for the request of the dot `slug`, kept across a render until it is sent. */
+  private addonUnits: { slug: string; units: Map<string, number> } | null = null;
   private readonly note = h('textarea', {
     class: 'n-model__note sheet__note',
     attrs: { id: 'sheet-note', name: 'note', rows: 3, maxlength: SALON_NOTE_MAX, 'aria-describedby': 'sheet-note-hint' },
@@ -910,6 +914,8 @@ class SheetPage {
           salon.request.size ? h('p', { class: 'n-g n-lb n-model__requested-size' }, ...withNumerals(LOOKBOOK.salon.requestedSize(salon.request.size))) : null,
           h('p', { class: 'n-tx n-model__requested-text sheet__requested-text', text: LOOKBOOK.salon.requested }),
         ),
+        // Plan MACRO M3 §4.4 (D2): the add-ons chosen with it, each with its units and price.
+        this.requestedAddons(salon.request.addons ?? [], salon.addons?.currency ?? null),
         // WRITE TO ORBES CLIENT SERVICES, the model and its request attached (CS-01).
         writeButton(modelContext(salon.request.modelId, s.name, s.variant)),
       );
@@ -917,6 +923,7 @@ class SheetPage {
       out.push(
         h('p', { class: 'n-tx n-model__salon-lead', text: LOOKBOOK.salon.lead }),
         this.salonSizes(s),
+        this.salonAddons(s),
         h(
           'div',
           { class: 'n-fld-group n-model__note-field' },
@@ -988,6 +995,50 @@ class SheetPage {
     );
   }
 
+  /**
+   * ADD TO YOUR ORDER (plan MACRO M3 §4.4, D2): the catalogue add-ons offered with the request, each with its units, kept
+   * on this page until REQUEST THIS PIECE sends them; the sentence that they are added at its acceptance. None offered:
+   * nothing.
+   */
+  private salonAddons(s: SheetModel): HTMLElement | null {
+    const offer = s.salon?.addons;
+    if (!offer) return null;
+    const units = this.addonUnits?.slug === s.slug ? this.addonUnits.units : new Map<string, number>();
+    const rows = addonRows(offer.offer, units);
+    if (rows.length === 0) return null;
+    const limit = rowsLimit(rows);
+    return h(
+      'div',
+      { class: 'n-model__addons sheet__addons', attrs: { role: 'group', 'aria-labelledby': 'sheet-addons' } },
+      h('p', { class: 'n-g n-lb n-model__addons-title', id: 'sheet-addons', text: LOOKBOOK.salon.addons.title }),
+      addonRowsList({
+        rows,
+        label: LOOKBOOK.salon.addons.title,
+        idPrefix: 'sheet-addon',
+        disabled: this.busy,
+        onChange: (id, n) => {
+          const focus = focusedStep(this.body);
+          this.addonUnits = { slug: s.slug, units: new Map(withUnits(rows, id, n).map((r) => [r.addonId, r.units])) };
+          quietly(this.body, () => this.render());
+          if (focus) refocusStep(this.body, focus.addonId, focus.which);
+        },
+      }),
+      h('p', { class: 'n-sm n-addons-note', text: limit ? `${LOOKBOOK.salon.addons.note} ${limit}` : LOOKBOOK.salon.addons.note }),
+    );
+  }
+
+  /** Under REQUESTED: the add-ons chosen with the request (`POLISHING CLOTH × 2` · `+ € 30`); none: nothing. */
+  private requestedAddons(chosen: Parameters<typeof chosenRows>[0], currency: string | null): HTMLElement | null {
+    const rows = chosenRows(chosen, currency);
+    if (rows.length === 0) return null;
+    return h(
+      'div',
+      { class: 'n-model__requested-addons' },
+      h('p', { class: 'n-g n-lb n-model__addons-title', text: LOOKBOOK.salon.addons.chosen }),
+      definitionList(rows.map(([l, v]) => [l, v] as [string, string]), { kind: 'kv', extraClass: 'n-model__facts' }),
+    );
+  }
+
   /** REQUEST THIS PIECE: the request recorded, then the sheet says ORBES Client Services will contact you. */
   private async requestPiece(): Promise<void> {
     if (this.busy || this.load.kind !== 'ready' || !this.load.sheet.salon) return;
@@ -999,11 +1050,15 @@ class SheetPage {
       const note = this.note.value.trim();
       // AC-01: the size picked (YOUR SIZES' suggestion is confirmed by this press), or none.
       const size = this.salonSizeOf(sheet).size;
-      const request = await this.deps.api.requestPiece(sheet.slug, note.length > 0 ? note : null, size);
+      // Plan MACRO M3 §4.4 (D2): the add-ons chosen with it, if any.
+      const offer = sheet.salon?.addons ?? null;
+      const addons = offer && this.addonUnits?.slug === sheet.slug ? rowsChoice(addonRows(offer.offer, this.addonUnits.units)) : [];
+      const request = await this.deps.api.requestPiece(sheet.slug, note.length > 0 ? note : null, size, addons);
       if (this.disposed) return;
       this.note.value = '';
       this.sizeTapped = null;
-      this.load = { kind: 'ready', sheet: withRequest(this.load.kind === 'ready' ? this.load.sheet : sheet, sheet.slug, request.id, request.modelId, request.size ?? size) };
+      this.addonUnits = null;
+      this.load = { kind: 'ready', sheet: withRequest(this.load.kind === 'ready' ? this.load.sheet : sheet, sheet.slug, request.id, request.modelId, request.size ?? size, request.addons ?? []) };
     } catch (e) {
       if (this.disposed) return;
       this.deps.session.noteError(e);
