@@ -212,6 +212,15 @@ export function contentSuite(name: string): void {
               // MY PIECES split (N5): what its one page showed is shown in one of its parts.
               const parts = unseen.length > 0 && SPLIT.states.includes(state.id) ? await myPiecesTexts(opened) : null;
               for (const u of unseen) if (!parts || !shows(parts, u.text)) missing.push(`${state.id}: ${u.label}`);
+              // The Cinema room's ground (desktop-room.ts): marked bare exactly when it shows no photograph, from the
+              // room's first screen on (M3.19's verification: a first screen without one kept the frame's ground).
+              const ground = await opened.page.evaluate(() => {
+                const g = document.querySelector('.d-room__photo');
+                if (!g) return null;
+                const shown = [...g.querySelectorAll('img')].some((i) => i.hasAttribute('src'));
+                return g.classList.contains('is-bare') === shown ? (shown ? 'its ground has a photograph but is marked bare' : 'its ground has no photograph but is not marked bare') : null;
+              });
+              if (ground) missing.push(`${state.id}: ${ground}`);
               // A computer's state (desk-*) made from a phone's: every word of the phone's state is shown on the computer
               // too, or moved on purpose (desktop.content-parity.harness.ts DESKTOP_MOVED); read last, as it may leave
               // the state for the page a value moved to.

@@ -342,9 +342,10 @@ export class DesktopRoom {
     if (key !== this.groundKey || this.ground.childElementCount === 0) {
       this.groundKey = key;
       this.ground.replaceChildren(...(photos.length > 0 ? photos.map((src) => groundImage(src)) : [groundImage()]));
-      this.ground.classList.toggle('is-bare', photos.length === 0);
-      this.ground.classList.toggle('d-room__photo--tiles', photos.length > 1);
     }
+    // Marked on every update (a room's first screen without a photograph is bare too, whatever the key it starts from).
+    this.ground.classList.toggle('is-bare', photos.length === 0);
+    this.ground.classList.toggle('d-room__photo--tiles', photos.length > 1);
     const n = RUNNING.has(this.kind) ? (facts.count ?? 0) : 0;
     this.count.hidden = n <= 0;
     const text = this.count.lastElementChild as HTMLElement;
