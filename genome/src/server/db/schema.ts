@@ -747,6 +747,29 @@ export const SHIPMENT_WEIGHT_MISSING_MAX = 64;
  */
 export const CERTIFICATE_CARD_MM = Object.freeze({ long: 95, short: 62 });
 
+/**
+ * Add-ons (migration 0056, macro scope K48 D1 and D2; lot M3 plan §4.2): an add-on's name and line, weight, position and
+ * price, at most; the units of one add-on chosen or on one order, at most (3).
+ */
+export const ADDON_NAME_MAX = 40;
+export const ADDON_LINE_MAX = 120;
+export const ADDON_WEIGHT_G_MAX = 30_000;
+export const ADDON_POSITION_MAX = 10_000;
+export const ADDON_PRICE_MINOR_MAX = 100_000_000;
+export const ADDON_UNITS_MAX = 3;
+/**
+ * A unit of an add-on on an order (order_addon_items.status, migration 0056): HELD (in stock at its location) →
+ * SHIPPED → RETURNED, or REMOVED (taken off before packing) or CANCELLED (with its order).
+ */
+export const ORDER_ADDON_STATUSES = ['HELD', 'SHIPPED', 'REMOVED', 'CANCELLED', 'RETURNED'] as const;
+export type OrderAddonStatus = (typeof ORDER_ADDON_STATUSES)[number];
+/** Who added a unit (order_addon_items.added_by_type): at the PURCHASE (from the choice), the COLLECTOR in YOUR ORDERS, or STAFF. */
+export const ORDER_ADDON_ADDED_BY = ['PURCHASE', 'COLLECTOR', 'STAFF'] as const;
+export type OrderAddonAddedBy = (typeof ORDER_ADDON_ADDED_BY)[number];
+/** What a hold of `stock_holds` is (migration 0056): an order's piece, or an add-on's unit. */
+export const STOCK_HOLD_KINDS = ['PIECE', 'ADD_ON'] as const;
+export type StockHoldKind = (typeof STOCK_HOLD_KINDS)[number];
+
 // ── Column helpers ─────────────────────────────────────────────────────────
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -1802,7 +1825,13 @@ export interface StockCorrectionsTable {
  */
 export interface SkusTable {
   id: Generated<string>;
-  model_id: string;
+  /**
+   * The model this SKU is a size of; NULL for an add-on's SKU (migration 0056: exactly one of model_id and addon_id,
+   * `skus_owner`). Read through `skuModelId` (services/sku-owner.ts) where a model's SKU is meant.
+   */
+  model_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Migration 0056 (D1): the add-on this SKU is (addon_items.id, one SKU per add-on); NULL for a model's size. No size, no fit. */
+  addon_id: ColumnType<string | null, string | null | undefined, string | null>;
   size_label: string | null;           // 1..100 characters
   code: string;                        // the model's SKU prefix and the size (issuance.ts deriveSku), unique
   shopify_product_id: ColumnType<string | null, string | null | undefined, string | null>;
@@ -2492,6 +2521,8 @@ export interface StockMovementsTable {
   created_at: TimestampDefault;
   /** Migration 0036: the reception line a RECEIVED movement brings in, exactly for RECEIVED (`stock_movements_received`). */
   reception_line_id: ColumnType<string | null, string | null | undefined, never>;
+  /** Migration 0056 (D2): the add-on's unit a SHIPPED or RETURNED movement moves, with its order and SKU; never with a piece. */
+  order_addon_item_id: ColumnType<string | null, string | null | undefined, never>;
 }
 
 /** A minimum of a SKU at a location (migration 0022, L2): below it, the atelier is told what to make. */
@@ -2523,6 +2554,90 @@ export interface BoxesTable {
   created_at: TimestampDefault;
   created_by: ColumnType<string | null, string | null | undefined, never>; // admin_users.id; NULL for a script
   updated_at: TimestampDefault;
+}
+
+/**
+ * An add-on (migration 0056, macro scope K48 D1; lot M3 plan §4.1): a catalogue item with real stock, sold with a piece,
+ * its name (1..40, unique whatever the case, as the collector reads it) and line (1..120), its supplier and weight
+ * (1..30 000 g), the order it is offered in, `active` (set aside when false, never deleted) and its Shopify product (S5).
+ * No ORBES CODE, no identity, never counted toward the tier. Its SKU is a `skus` row with `addon_id`. id, created_at
+ * and created_by never change.
+ */
+export interface AddonItemsTable {
+  id: Generated<string>;
+  name: string;
+  line: ColumnType<string | null, string | null | undefined, string | null>;
+  supplier_id: ColumnType<string | null, string | null | undefined, string | null>; // suppliers.id
+  weight_g: ColumnType<number | null, number | null | undefined, number | null>;
+  position: WithDefault<number>;       // 0..10 000
+  active: WithDefault<boolean>;
+  shopify_product_id: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: TimestampDefault;
+  created_by: ColumnType<string | null, string | null | undefined, never>; // admin_users.id; NULL for a script
+  updated_at: TimestampDefault;
+}
+
+/** An add-on's price in a house currency (migration 0056, D1): no row, not offered in that currency. */
+export interface AddonItemPricesTable {
+  addon_id: ColumnType<string, string, never>;
+  currency: ColumnType<HouseCurrency, HouseCurrency, never>;
+  price_minor: number;                 // 0..100 000 000
+  updated_by: ColumnType<string | null, string | null | undefined, string | null>; // admin_users.id
+  updated_at: TimestampDefault;
+}
+
+/**
+ * A unit of an add-on on an order (migration 0056, D1 and D2): its add-on's SKU held at `location_id` while HELD, its
+ * price and currency when added (kept), its state with its times (`order_addon_items_status_times`), who added it
+ * (PURCHASE: no one named; COLLECTOR: their account; STAFF: an admin, NULL for a script), `returned_to_stock` with
+ * RETURNED only, its supplementary invoice and its Shopify line item. Identity, price and addition never change.
+ */
+export interface OrderAddonItemsTable {
+  id: Generated<string>;
+  order_id: ColumnType<string, string, never>;
+  addon_id: ColumnType<string, string, never>;
+  sku_id: ColumnType<string, string, never>; // the add-on's SKU (skus.addon_id = addon_id)
+  location_id: string;
+  price_minor: ColumnType<number, number, never>;
+  currency: ColumnType<HouseCurrency, HouseCurrency, never>;
+  status: WithDefault<OrderAddonStatus>;
+  added_at: ColumnType<Date, Date | string | undefined, never>;
+  removed_at: TimestampNullable;
+  shipped_at: TimestampNullable;
+  cancelled_at: TimestampNullable;
+  returned_at: TimestampNullable;
+  added_by_type: ColumnType<OrderAddonAddedBy, OrderAddonAddedBy, never>;
+  added_by: ColumnType<string | null, string | null | undefined, never>;
+  returned_to_stock: ColumnType<boolean | null, boolean | null | undefined, boolean | null>;
+  invoice_id: ColumnType<string | null, string | null | undefined, string | null>;
+  shopify_line_item_id: ColumnType<string | null, string | null | undefined, string | null>;
+}
+
+/**
+ * An add-on chosen before the order exists (migration 0056, D2): on exactly one LIVE entry, draw entry or salon request
+ * (`addon_choices_owner`), 1..3 units, once per owner and add-on; carried onto the order at its creation, then deleted.
+ */
+export interface AddonChoicesTable {
+  id: Generated<string>;
+  live_entry_id: ColumnType<string | null, string | null | undefined, never>;
+  drop_entry_id: ColumnType<string | null, string | null | undefined, never>;
+  shop_request_id: ColumnType<string | null, string | null | undefined, never>;
+  addon_id: ColumnType<string, string, never>;
+  units: number;                       // 1..3
+  chosen_at: TimestampDefault;
+}
+
+/**
+ * Read-only view (migration 0056): every hold on stock from one source, the orders' (`orders.reservation` STOCK or
+ * AWAITING, kind PIECE, `id` the order's) and the add-on units HELD (as STOCK, kind ADD_ON, `id` the unit's).
+ */
+export interface StockHoldsView {
+  sku_id: string;
+  location_id: string;
+  reservation: OrderReservation;
+  reserved_at: Date;
+  kind: StockHoldKind;
+  id: string;
 }
 
 /** A carrier (migration 0022, M1): its tracking link, https with `{tracking}` where the number goes. id and created_at never change. */
@@ -3292,6 +3407,10 @@ export interface Database {
   sku_thresholds: SkuThresholdsTable;
   carriers: CarriersTable;
   boxes: BoxesTable;
+  addon_items: AddonItemsTable;
+  addon_item_prices: AddonItemPricesTable;
+  order_addon_items: OrderAddonItemsTable;
+  addon_choices: AddonChoicesTable;
   orders: OrdersTable;
   order_events: OrderEventsTable;
   bench_items: BenchItemsTable;
@@ -3365,6 +3484,7 @@ export interface Database {
   revocations: RevocationsTable;
   audit_logs: AuditLogsTable;
   product_overview: ProductOverviewView;
+  stock_holds: StockHoldsView;
 }
 
 // ── Row aliases ────────────────────────────────────────────────────────────

@@ -23,6 +23,7 @@ import { toBase64Url } from '../../src/core/bytes.js';
 import type { AppContext } from '../../src/server/context.js';
 import type { LogisticsService } from '../../src/server/services/logistics.js';
 import { parcelKeyOf } from '../../src/server/services/parcels.js';
+import { skuModelId } from '../../src/server/services/sku-owner.js';
 import type { Actor, ManualClock } from '../../src/server/types.js';
 import { jpegPhoto } from './images.js';
 
@@ -75,7 +76,7 @@ export async function stockPieces(ctx: AppContext, input: StockPiecesInput, admi
     const issued = await ctx.services.issuance.issueProduct(
       {
         categoryCode: sku.category.trim(),
-        modelId: sku.model_id,
+        modelId: skuModelId(sku),
         ...(sku.size_label !== null ? { variant: sku.size_label } : {}),
         material,
         ...(input.productionBatch ? { productionBatch: input.productionBatch } : {}),

@@ -490,6 +490,10 @@ describe('admin enums mirror the server', () => {
     // A box's and a packed weight's bounds, and the card every box takes (macro scope D16, migration 0054), as the server holds them.
     for (const name of ['BOX_NAME_MAX', 'BOX_INSIDE_MM_MAX', 'BOX_EMPTY_WEIGHT_G_MAX', 'BOX_COST_MINOR_MAX', 'PACKED_WEIGHT_G_MAX'] as const) expect(web[name], name).toBe(serverSchema[name]);
     expect(web.CERTIFICATE_CARD_MM).toEqual(serverSchema.CERTIFICATE_CARD_MM);
+    // An add-on's bounds, a unit's states and who added it (macro scope K48, migration 0056), as the server holds them.
+    for (const name of ['ADDON_NAME_MAX', 'ADDON_LINE_MAX', 'ADDON_WEIGHT_G_MAX', 'ADDON_POSITION_MAX', 'ADDON_PRICE_MINOR_MAX', 'ADDON_UNITS_MAX'] as const) expect(web[name], name).toBe(serverSchema[name]);
+    expect([...web.ORDER_ADDON_STATUSES]).toEqual([...serverSchema.ORDER_ADDON_STATUSES]);
+    expect([...web.ORDER_ADDON_ADDED_BY]).toEqual([...serverSchema.ORDER_ADDON_ADDED_BY]);
     expect([...web.AUTH_POLICY_KINDS]).toEqual([...SERVER_POLICY_KINDS]);
     expect([...web.ANOMALY_SORTS]).toEqual([...SERVER_ANOMALY_SORTS]);
     expect([...web.SCAN_STAT_EVENT_TYPES]).toEqual([...serverSchema.SCAN_STAT_EVENT_TYPES]);

@@ -49,6 +49,7 @@ import type { AuditService } from './audit.js';
 import { writeJournal } from './journal.js';
 import { serveWaiting } from './orders.js';
 import { offeredSku } from './sizes.js';
+import { skuModelId } from './sku-owner.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -130,7 +131,11 @@ export async function skuSizes(db: Db, modelIds: readonly string[]): Promise<Map
   const out = new Map<string, string[]>();
   if (modelIds.length === 0) return out;
   const rows = await db.selectFrom('skus').select(['model_id', 'size_label']).where('model_id', 'in', [...modelIds]).where('set_aside_at', 'is', null).orderBy('created_at').orderBy('id').execute();
-  for (const r of rows) if (r.size_label !== null) out.set(r.model_id, [...(out.get(r.model_id) ?? []), r.size_label]);
+  for (const r of rows) {
+    if (r.size_label === null) continue;
+    const modelId = skuModelId(r);
+    out.set(modelId, [...(out.get(modelId) ?? []), r.size_label]);
+  }
   for (const [id, sizes] of out) out.set(id, sizesOnce(sizes));
   return out;
 }

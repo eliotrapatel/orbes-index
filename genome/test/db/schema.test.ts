@@ -190,6 +190,10 @@ describe('schema', () => {
       ['warranty_claims', 'outcome', S.WARRANTY_CLAIM_OUTCOMES],
       ['warranty_claims', 'refusal_reason', S.WARRANTY_CLAIM_REFUSALS],
       ['warranty_claims', 'currency', S.HOUSE_CURRENCIES],
+      ['addon_item_prices', 'currency', S.HOUSE_CURRENCIES],
+      ['order_addon_items', 'currency', S.HOUSE_CURRENCIES],
+      ['order_addon_items', 'status', S.ORDER_ADDON_STATUSES],
+      ['order_addon_items', 'added_by_type', S.ORDER_ADDON_ADDED_BY],
     ];
     for (const [table, column, values] of cases) {
       expect(await checkValues(t.db, table, column), `${table}.${column}`).toEqual(sorted(values));
@@ -1537,6 +1541,73 @@ describe('schema', () => {
     await expect(t.db.deleteFrom('stock_locations').where('id', '=', usa.id).execute()).rejects.toSatisfy(isForeignKeyViolation);
     await t.db.deleteFrom('stock_location_countries').execute();
     await t.db.deleteFrom('stock_locations').where('id', 'in', [france.id, usa.id]).execute();
+  });
+
+  it('add-ons (0056): every bound is schema.ts\'s; the mirror at work: an add-on priced, its SKU beside a model\'s, a unit held on an order and read in stock_holds with the order\'s own hold, a choice on a salon request', async () => {
+    const def = async (table: string, constraint: string) =>
+      (await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = ${table}::regclass AND conname = ${constraint}`.execute(t.db)).rows[0].def;
+    expect(await def('addon_items', 'addon_items_name_check')).toContain(`<= ${S.ADDON_NAME_MAX}`);
+    expect(await def('addon_items', 'addon_items_line_check')).toContain(`<= ${S.ADDON_LINE_MAX}`);
+    expect(await def('addon_items', 'addon_items_weight_g_check')).toContain(`<= ${S.ADDON_WEIGHT_G_MAX}`);
+    expect(await def('addon_items', 'addon_items_position_check')).toContain(`<= ${S.ADDON_POSITION_MAX}`);
+    expect(await def('addon_item_prices', 'addon_item_prices_price_minor_check')).toContain(`<= ${S.ADDON_PRICE_MINOR_MAX}`);
+    expect(await def('order_addon_items', 'order_addon_items_price_minor_check')).toContain(`<= ${S.ADDON_PRICE_MINOR_MAX}`);
+    expect(await def('addon_choices', 'addon_choices_units_check')).toContain(`<= ${S.ADDON_UNITS_MAX}`);
+
+    const { model } = await seedProduct(t.db);
+    const admin = await t.db.insertInto('admin_users').values({ email: 'addon-s0056@orbes.test', email_normalized: 'addon-s0056@orbes.test', password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow();
+    const account = await t.db.insertInto('accounts').values({ email: 'addon-s0056@example.com', email_normalized: 'addon-s0056@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const location = await t.db.insertInto('stock_locations').values({ name: 'ADD-ONS S0056' }).returning('id').executeTakeFirstOrThrow();
+    const addon = await t.db.insertInto('addon_items').values({ name: 'CARE KIT', line: 'Everything the piece needs.', weight_g: 120, created_by: admin.id }).returningAll().executeTakeFirstOrThrow();
+    expect(addon).toEqual({
+      id: expect.any(String), name: 'CARE KIT', line: 'Everything the piece needs.', supplier_id: null, weight_g: 120, position: 0, active: true, shopify_product_id: null,
+      created_at: expect.any(Date), created_by: admin.id, updated_at: expect.any(Date),
+    });
+    expect(
+      await t.db.insertInto('addon_item_prices').values({ addon_id: addon.id, currency: 'EUR', price_minor: 2500, updated_by: admin.id }).returning(['currency', 'price_minor']).executeTakeFirstOrThrow(),
+    ).toEqual({ currency: 'EUR', price_minor: 2500 });
+    // Its SKU: no model, no size; a model's SKU keeps its model.
+    const sku = await t.db.insertInto('skus').values({ addon_id: addon.id, code: 'CARE-KIT-S0056' }).returningAll().executeTakeFirstOrThrow();
+    expect(sku).toMatchObject({ model_id: null, addon_id: addon.id, size_label: null, fit_min_mm: null, fit_max_mm: null });
+    const sized = await t.db.insertInto('skus').values({ model_id: model.id, size_label: '54', code: 'MON-S0056-54' }).returning(['model_id', 'addon_id', 'id']).executeTakeFirstOrThrow();
+    expect(sized).toMatchObject({ model_id: model.id, addon_id: null });
+    await expect(t.db.insertInto('skus').values({ model_id: model.id, addon_id: addon.id, code: 'BOTH-S0056' }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'skus_owner'));
+    // A unit held on an order, read in stock_holds beside the order's own hold.
+    const request = await t.db.insertInto('shop_requests').values({ account_id: account.id, model_id: model.id, status: 'CLOSED', handled_at: new Date(), outcome: 'ACCEPTED' }).returning('id').executeTakeFirstOrThrow();
+    const order = await t.db
+      .insertInto('orders')
+      .values({ channel: 'SALON', shop_request_id: request.id, account_id: account.id, model_id: model.id, location_id: location.id, sku_id: sized.id, reservation: 'STOCK', price_minor: 1000, currency: 'EUR' })
+      .returning(['id', 'reserved_at'])
+      .executeTakeFirstOrThrow();
+    const unit = await t.db
+      .insertInto('order_addon_items')
+      .values({ order_id: order.id, addon_id: addon.id, sku_id: sku.id, location_id: location.id, price_minor: 2500, currency: 'EUR', added_by_type: 'COLLECTOR', added_by: account.id })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(unit).toEqual({
+      id: expect.any(String), order_id: order.id, addon_id: addon.id, sku_id: sku.id, location_id: location.id, price_minor: 2500, currency: 'EUR', status: 'HELD',
+      added_at: expect.any(Date), removed_at: null, shipped_at: null, cancelled_at: null, returned_at: null, added_by_type: 'COLLECTOR', added_by: account.id,
+      returned_to_stock: null, invoice_id: null, shopify_line_item_id: null,
+    });
+    const holds = await t.db.selectFrom('stock_holds').selectAll().where('location_id', '=', location.id).orderBy('kind', 'desc').execute();
+    expect(holds).toEqual([
+      { sku_id: sized.id, location_id: location.id, reservation: 'STOCK', reserved_at: order.reserved_at, kind: 'PIECE', id: order.id },
+      { sku_id: sku.id, location_id: location.id, reservation: 'STOCK', reserved_at: unit.added_at, kind: 'ADD_ON', id: unit.id },
+    ]);
+    await expect(sql`UPDATE order_addon_items SET price_minor = 2400 WHERE id = ${unit.id}`.execute(t.db)).rejects.toSatisfy(isGuardViolation);
+    const removed = await t.db
+      .updateTable('order_addon_items')
+      .set({ status: 'REMOVED', removed_at: new Date(unit.added_at.getTime() + 1000) })
+      .where('id', '=', unit.id)
+      .returning('status')
+      .executeTakeFirstOrThrow();
+    expect(removed).toEqual({ status: 'REMOVED' });
+    expect(await t.db.selectFrom('stock_holds').select('kind').where('location_id', '=', location.id).execute()).toEqual([{ kind: 'PIECE' }]);
+    // A choice on the request, 1 to 3 units.
+    const choice = await t.db.insertInto('addon_choices').values({ shop_request_id: request.id, addon_id: addon.id, units: 3 }).returningAll().executeTakeFirstOrThrow();
+    expect(choice).toEqual({ id: expect.any(String), live_entry_id: null, drop_entry_id: null, shop_request_id: request.id, addon_id: addon.id, units: 3, chosen_at: expect.any(Date) });
+    await expect(t.db.insertInto('addon_choices').values({ shop_request_id: request.id, addon_id: addon.id, units: 1 }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'addon_choices_shop_request_key'));
+    await expect(t.db.deleteFrom('addon_items').where('id', '=', addon.id).execute()).rejects.toSatisfy(isForeignKeyViolation);
   });
 
   it('product_status_history is append-only; genomes and keys are never deleted (key ids never reused)', async () => {

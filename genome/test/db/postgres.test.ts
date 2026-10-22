@@ -474,4 +474,56 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await expect(sql`UPDATE stock_location_countries SET country = 'DE' WHERE country = 'FR'`.execute(db)).rejects.toSatisfy(isGuardViolation);
     await expect(db.deleteFrom('stock_locations').where('id', '=', usa.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e));
   });
+  it('holds add-ons, their SKUs, units and choices by their CHECKs, and stock_holds (0056)', async () => {
+    // Its own letter: this database's categories already hold A to F, S, W, P, H, G and K (the tests above); the demo seed's are J, L, W, F and A.
+    await db.insertInto('categories').values({ id: 26, code: 'N', name: 'Add-ons parity' }).execute();
+    const model = await db.insertInto('models').values({ category_id: 26, name: 'ADDED', type: 'RING', sku_prefix: 'ADD-PG' }).returning('id').executeTakeFirstOrThrow();
+    const account = await db.insertInto('accounts').values({ email: 'addon-pg0056@example.com', email_normalized: 'addon-pg0056@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const location = await db.insertInto('stock_locations').values({ name: 'ADD-ONS PG 0056' }).returning('id').executeTakeFirstOrThrow();
+    // An add-on, its prices, and its SKU beside a model's: one owner each, no size on an add-on's, two add-ons' SKUs side by side.
+    const [cloth, pouch] = await db.insertInto('addon_items').values([{ name: 'POLISHING CLOTH', position: 1 }, { name: 'TRAVEL POUCH', position: 2 }]).returning(['id', 'position']).execute();
+    expect(typeof cloth.position).toBe('number');
+    await expect(db.insertInto('addon_items').values({ name: 'polishing cloth' }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'addon_items_name_key'));
+    expect(await db.insertInto('addon_item_prices').values({ addon_id: cloth.id, currency: 'EUR', price_minor: 1500 }).returning(['price_minor']).executeTakeFirstOrThrow()).toEqual({ price_minor: 1500 });
+    const clothSku = await db.insertInto('skus').values({ addon_id: cloth.id, code: 'CLOTH-PG0056' }).returning('id').executeTakeFirstOrThrow();
+    await db.insertInto('skus').values({ addon_id: pouch.id, code: 'POUCH-PG0056' }).execute();
+    const sized = await db.insertInto('skus').values({ model_id: model.id, size_label: '52', code: 'ADD-PG-52' }).returning('id').executeTakeFirstOrThrow();
+    await expect(db.insertInto('skus').values({ model_id: model.id, addon_id: cloth.id, code: 'BOTH-PG0056' }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'skus_owner'));
+    await expect(db.insertInto('skus').values({ code: 'NONE-PG0056' }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'skus_owner'));
+    await expect(db.insertInto('skus').values({ addon_id: cloth.id, size_label: 'M', code: 'SIZED-PG0056' }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'skus_addon_plain'));
+    await expect(db.insertInto('skus').values({ addon_id: cloth.id, code: 'CLOTH-PG0056-B' }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'skus_addon_id_key'));
+    await expect(sql`UPDATE skus SET addon_id = ${pouch.id} WHERE id = ${clothSku.id}`.execute(db)).rejects.toSatisfy(isGuardViolation);
+    // An order holding its piece, and a unit of the add-on held with it; its state with its own time.
+    const request = await db.insertInto('shop_requests').values({ account_id: account.id, model_id: model.id, status: 'CLOSED', handled_at: new Date(), outcome: 'ACCEPTED' }).returning('id').executeTakeFirstOrThrow();
+    const order = await db
+      .insertInto('orders')
+      .values({ channel: 'SALON', shop_request_id: request.id, account_id: account.id, model_id: model.id, location_id: location.id, sku_id: sized.id, reservation: 'STOCK', price_minor: 1000, currency: 'EUR' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    await expect(db.updateTable('orders').set({ sku_id: clothSku.id }).where('id', '=', order.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    const unit = { order_id: order.id, addon_id: cloth.id, sku_id: clothSku.id, location_id: location.id, price_minor: 1500, currency: 'EUR' as const, added_by_type: 'PURCHASE' as const };
+    await expect(db.insertInto('order_addon_items').values({ ...unit, status: 'SHIPPED' }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'order_addon_items_status_times'));
+    await expect(db.insertInto('order_addon_items').values({ ...unit, added_by: account.id }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'order_addon_items_added_by'));
+    await expect(db.insertInto('order_addon_items').values({ ...unit, returned_to_stock: true }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'order_addon_items_returned'));
+    const held = await db.insertInto('order_addon_items').values(unit).returning(['id', 'price_minor', 'status']).executeTakeFirstOrThrow();
+    expect(held).toEqual({ id: expect.any(String), price_minor: 1500, status: 'HELD' });
+    await expect(sql`UPDATE order_addon_items SET price_minor = 1400 WHERE id = ${held.id}`.execute(db)).rejects.toSatisfy(isGuardViolation);
+    // stock_holds: the order's piece and the unit held, as STOCK.
+    const holds = await db.selectFrom('stock_holds').select(['kind', 'id', 'sku_id', 'reservation']).where('location_id', '=', location.id).orderBy('kind', 'desc').execute();
+    expect(holds).toEqual([
+      { kind: 'PIECE', id: order.id, sku_id: sized.id, reservation: 'STOCK' },
+      { kind: 'ADD_ON', id: held.id, sku_id: clothSku.id, reservation: 'STOCK' },
+    ]);
+    // Shipped with its movement: of its order and SKU, never with a piece.
+    await db.updateTable('order_addon_items').set({ status: 'SHIPPED', shipped_at: new Date(Date.now() + 1000) }).where('id', '=', held.id).execute();
+    const move = { sku_id: clothSku.id, location_id: location.id, delta: -1, reason: 'SHIPPED' as const, order_id: order.id, order_addon_item_id: held.id, actor_type: 'system' as const };
+    await expect(db.insertInto('stock_movements').values({ ...move, sku_id: sized.id }).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    expect(await db.insertInto('stock_movements').values(move).returning(['order_addon_item_id']).executeTakeFirstOrThrow()).toEqual({ order_addon_item_id: held.id });
+    expect((await db.selectFrom('stock_holds').select('kind').where('location_id', '=', location.id).execute()).map((h) => h.kind)).toEqual(['PIECE']);
+    // A choice on exactly one owner, 1 to 3 units, once per add-on; smallint comes back as a number.
+    await expect(db.insertInto('addon_choices').values({ addon_id: cloth.id, units: 1 }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'addon_choices_owner'));
+    await expect(db.insertInto('addon_choices').values({ shop_request_id: request.id, addon_id: cloth.id, units: 4 }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'addon_choices_units_check'));
+    expect(await db.insertInto('addon_choices').values({ shop_request_id: request.id, addon_id: cloth.id, units: 3 }).returning(['units']).executeTakeFirstOrThrow()).toEqual({ units: 3 });
+    await expect(db.insertInto('addon_choices').values({ shop_request_id: request.id, addon_id: cloth.id, units: 1 }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'addon_choices_shop_request_key'));
+  });
 });

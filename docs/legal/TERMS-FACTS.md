@@ -312,7 +312,7 @@ La salle d'après d'une LIVE RELEASE (THE AFTER-ROOM), la surprise, l'accès par
 
 | Id | Règle | Valeur | Constante | Code | Ligne |
 |---|---|---|---|---|---|
-| R151 | Les tailles qu'un compte enregistre dans YOUR SIZES (`account_sizes`) sont gardées avec le compte jusqu'à ce qu'il les efface, et figurent dans la copie de ses données (R21) ; elles ne font que présélectionner une taille que le collectionneur confirme ensuite. Le journal d'audit n'en garde que les types enregistrés et effacés, jamais les mesures. | — | — | `details: { set: [...set], cleared: [...cleared] }` | [server/services/sizes.ts:629](../../genome/src/server/services/sizes.ts#L629) |
+| R151 | Les tailles qu'un compte enregistre dans YOUR SIZES (`account_sizes`) sont gardées avec le compte jusqu'à ce qu'il les efface, et figurent dans la copie de ses données (R21) ; elles ne font que présélectionner une taille que le collectionneur confirme ensuite. Le journal d'audit n'en garde que les types enregistrés et effacés, jamais les mesures. | — | — | `details: { set: [...set], cleared: [...cleared] }` | [server/services/sizes.ts:632](../../genome/src/server/services/sizes.ts#L632) |
 
 ## 25. Le côté du collectionneur (plan NEXT LOT du 2026-10-07, §3.6)
 

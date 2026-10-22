@@ -373,6 +373,22 @@ export const BOX_COST_MINOR_MAX = 100_000_000;
 export const PACKED_WEIGHT_G_MAX = 30_000;
 export const CERTIFICATE_CARD_MM = Object.freeze({ long: 95, short: 62 });
 
+/**
+ * An add-on's bounds (addon_items, addon_item_prices, order_addon_items, addon_choices, migration 0056, macro scope K48
+ * D1 and D2): its name and line, weight, position and price, at most, and the units of one add-on on an order (3); a
+ * unit's states and who added it.
+ */
+export const ADDON_NAME_MAX = 40;
+export const ADDON_LINE_MAX = 120;
+export const ADDON_WEIGHT_G_MAX = 30_000;
+export const ADDON_POSITION_MAX = 10_000;
+export const ADDON_PRICE_MINOR_MAX = 100_000_000;
+export const ADDON_UNITS_MAX = 3;
+export const ORDER_ADDON_STATUSES = ['HELD', 'SHIPPED', 'REMOVED', 'CANCELLED', 'RETURNED'] as const;
+export type OrderAddonStatus = (typeof ORDER_ADDON_STATUSES)[number];
+export const ORDER_ADDON_ADDED_BY = ['PURCHASE', 'COLLECTOR', 'STAFF'] as const;
+export type OrderAddonAddedBy = (typeof ORDER_ADDON_ADDED_BY)[number];
+
 /** How the access rules of a LIVE RELEASE combine (drops.access_combine): every rule met, or any one of them. */
 export const ACCESS_COMBINES = ['AND', 'OR'] as const;
 export type AccessCombine = (typeof ACCESS_COMBINES)[number];

@@ -53,6 +53,7 @@ import { badRequest, conflict, forbidden, notFound, validationError } from '../e
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import { compareSizes, ensureSku, ONE_SIZE_LABEL, sizeLabelOf, stockLevel } from './stock.js';
+import { skuModelId } from './sku-owner.js';
 import { modelSupplier, type ModelSupplier } from './suppliers.js';
 
 export { SIZE_KINDS, SIZE_TYPES, type SizeKind, type SizeType };
@@ -239,6 +240,8 @@ export const SKU_USES = Object.freeze({
     Object.freeze({ table: 'stock_corrections', column: 'sku_id' }),
     // Migration 0037: the size a size exchange asks for.
     Object.freeze({ table: 'order_cases', column: 'exchange_sku_id' }),
+    // Migration 0056 (macro scope K48 D1): a unit of an add-on on an order names its add-on's SKU.
+    Object.freeze({ table: 'order_addon_items', column: 'sku_id' }),
   ]),
   others: Object.freeze([
     'an OPEN salon request (shop_requests) of the model in the same size, whatever its case',
@@ -357,7 +360,7 @@ export async function assertSkuOffered(tx: Db, skuId: string): Promise<void> {
   const k = await tx.selectFrom('skus').select(['model_id', 'size_label', 'set_aside_at']).where('id', '=', skuId).forKeyShare().executeTakeFirst();
   if (!k) throw notFound('SKU', 'SKU_NOT_FOUND');
   if (k.set_aside_at === null) return;
-  const model = await sizedModel(tx, k.model_id);
+  const model = await sizedModel(tx, skuModelId(k));
   throw sizeSetAside(k.size_label, model?.named ?? 'its model');
 }
 
