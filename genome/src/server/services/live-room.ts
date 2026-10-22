@@ -75,10 +75,15 @@ import {
 } from './live.js';
 import { mediaUrl } from './media.js';
 import { savedSizeAmong } from './sizes.js';
-import { releaseOffer, savedSizesByPiece, type ReleaseOffer } from './release-offer.js';
+import { releaseOffer, savedSizesByPiece, setPiecesOf, type ReleaseOffer } from './release-offer.js';
 
 /** THE RELEASES' LIVE half lists at most this many releases. */
 export const LIVE_LIST_LIMIT = 50;
+/**
+ * The frame (built once a second) keeps a set's release's offer this long (macro scope K44 T1): its set and pieces never
+ * change once it is announced (SetService, live-console.ts), so only a piece's renamed model or new photograph waits for it.
+ */
+export const LIVE_FRAME_SET_OFFER_MS = 60_000;
 /** MY PIECES lists an account's latest entries, at most this many. */
 export const LIVE_MINE_LIMIT = 50;
 /** The .ics alarm: this many minutes before the room opens (services/calendar.ts, a draw's before its entries open too). */
@@ -490,6 +495,8 @@ export class LiveRoomService {
   private readonly turnKey: Uint8Array;
   private readonly origin: string;
   private readonly clock: Clock;
+  /** The frame's set offers, by release (LIVE_FRAME_SET_OFFER_MS). */
+  private readonly frameSets = new Map<string, { setId: string; at: number; set: SetOffer }>();
 
   constructor(deps: LiveRoomServiceDeps) {
     if (!(deps.turnKey instanceof Uint8Array) || deps.turnKey.length !== 32) throw new RangeError('turnKey must be 32 bytes');
@@ -782,7 +789,7 @@ export class LiveRoomService {
             .groupBy(['x.size_id', 'e.status'])
             .execute()
         : Promise.resolve(null),
-      isSet ? this.setOffers([r]).then((m) => m.get(id)) : Promise.resolve(undefined),
+      isSet ? this.frameSetOffer(r, now) : Promise.resolve(undefined),
     ]);
     const people = (statuses: readonly string[]) => counts.filter((c) => statuses.includes(c.status)).reduce((n, c) => n + Number(c.n), 0);
     const pieces = (sizeId: string, statuses: readonly string[]) =>
@@ -989,18 +996,37 @@ export class LiveRoomService {
     return r;
   }
 
-  /** Macro scope K44 T1: what each set's release among `rows` sells (release-offer.ts), its pieces' collections named. */
+  /**
+   * Macro scope K44 T1: what each set's release among `rows` sells (release-offer.ts), its pieces' collections named:
+   * three reads whatever their number.
+   */
   private async setOffers(rows: readonly ReadRow[]): Promise<Map<string, SetOffer>> {
     const out = new Map<string, SetOffer>();
+    const setIds = [...new Set(rows.flatMap((r) => (r.set_id === null ? [] : [r.set_id])))];
+    if (setIds.length === 0) return out;
+    const [sets, pieces] = await Promise.all([this.db.selectFrom('sets').select(['id', 'name', 'code', 'active']).where('id', 'in', setIds).execute(), setPiecesOf(this.db, setIds)]);
+    const collectionIds = [...new Set([...pieces.values()].flat().flatMap((p) => (p.model.collectionId === null ? [] : [p.model.collectionId])))];
+    const names = new Map(collectionIds.length ? (await this.db.selectFrom('collections').select(['id', 'name']).where('id', 'in', collectionIds).execute()).map((c) => [c.id, c.name]) : []);
     for (const r of rows) {
-      if (r.set_id === null) continue;
-      const offer = await releaseOffer(this.db, r);
-      if (offer.kind !== 'SET') continue;
-      const ids = [...new Set(offer.pieces.map((p) => p.model.collectionId).filter((x): x is string => x !== null))];
-      const collections = new Map(ids.length ? (await this.db.selectFrom('collections').select(['id', 'name']).where('id', 'in', ids).execute()).map((c) => [c.id, c.name]) : []);
-      out.set(r.id, { offer, collections });
+      const set = r.set_id === null ? undefined : sets.find((x) => x.id === r.set_id);
+      if (!set) continue;
+      const own = pieces.get(set.id) ?? [];
+      const collections = new Map(own.flatMap((p) => (p.model.collectionId !== null && names.has(p.model.collectionId) ? [[p.model.collectionId, names.get(p.model.collectionId)!] as const] : [])));
+      out.set(r.id, { offer: { kind: 'SET', modelId: null, set, pieces: own }, collections });
     }
     return out;
+  }
+
+  /** A set's release's offer for its frame: read again once LIVE_FRAME_SET_OFFER_MS have passed (or its set changed). */
+  private async frameSetOffer(r: ReadRow, now: Date): Promise<SetOffer | undefined> {
+    const at = now.getTime();
+    const fresh = (x: { at: number }) => at >= x.at && at - x.at < LIVE_FRAME_SET_OFFER_MS;
+    const hit = this.frameSets.get(r.id);
+    if (hit && hit.setId === r.set_id && fresh(hit)) return hit.set;
+    const set = (await this.setOffers([r])).get(r.id);
+    for (const [id, x] of this.frameSets) if (!fresh(x)) this.frameSets.delete(id);
+    if (set && r.set_id !== null) this.frameSets.set(r.id, { setId: r.set_id, at, set });
+    return set;
   }
 
   /** I'LL BE THERE, counted per release: one read for all of them. */

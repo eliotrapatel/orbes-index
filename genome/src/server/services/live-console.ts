@@ -48,8 +48,8 @@
  * `modelId`, exactly one, for good: a set's release may take another set, with its sizes, until its announcement). A
  * set's sizes are given per piece (each `piece` 1 to the set's pieces, 1 to 24 sizes each, each one of its piece's
  * model's sizes, every piece with at least one piece on sale), its quantity its sets on sale (the smallest of its
- * pieces' totals), « 25 SETS » by default; `perAccount` counts sets, at most LIVE_PER_ACCOUNT.max ÷ its pieces (live.ts
- * liveSetPerAccountMax); it never has an after-room (409 AFTER_ROOM_SET) nor the house's guarantee. Its console views
+ * pieces' totals), « 25 SETS » by default; `perAccount` counts sets (T4: a set counts as one), 1 to LIVE_PER_ACCOUNT.max
+ * as a model's pieces; it never has an after-room (409 AFTER_ROOM_SET) nor the house's guarantee. Its console views
  * carry `set` (its pieces) and the set itself in `model`; its sizes, entries and board read per piece.
  *
  * Audited (dotted lowercase, ids only, a description or a body as its length and SHA-256): `drop.live.create`,
@@ -76,7 +76,6 @@ import {
   livePhase,
   livePieceSizes,
   liveRuleText,
-  liveSetPerAccountMax,
   liveStages,
   onSaleOf,
   roomOpensAt,
@@ -103,7 +102,7 @@ import { mediaUrl } from './media.js';
 import { knownLocation, linkDropSizes } from './stock.js';
 import { cleanQuestionWords, QuestionService, type AdminQuestion } from './question.js';
 import { releaseFeasibility, type Feasibility, type FeasibilitySize } from './release-stock.js';
-import { afterRoomModelId, setPieces } from './release-offer.js';
+import { afterRoomModelId, setPieces, setPiecesOf, type ReleasePiece } from './release-offer.js';
 import { cancelMovedAnnouncements, cancelReleaseEmails } from './email.js';
 import { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES, afterRoomTimes, afterRoomTitle, cancelAfterRoom, type AfterRoomSkip } from './after-room.js';
 
@@ -176,8 +175,6 @@ const setNotFound = () => notFound('Set', 'SET_NOT_FOUND');
 const setOfferFixed = () => validationError('A set’s release sells its set: its pieces are the set’s.');
 const modelOfferFixed = () => validationError('A model’s release sells its model: a set is sold by a release of its own.');
 const setSizesGiven = () => validationError('Give the sizes of the new set’s pieces with it.');
-const setPerAccount = (pieces: number, max: number) =>
-  validationError(max === 1 ? `A set of ${pieces} pieces is sold one per person.` : `A set of ${pieces} pieces is sold 1 to ${max} per person.`);
 const modelInactive = () => conflict('MODEL_INACTIVE', 'This model is no longer offered for new products.');
 const entryNotFound = () => notFound('Entry', 'LIVE_ENTRY_NOT_FOUND');
 const afterRoomModelInactive = () => conflict('MODEL_INACTIVE', 'The after-room’s model is no longer offered for new products: choose another in its settings.');
@@ -570,7 +567,7 @@ function settingsOf(base: Settings | null, change: LiveSettingsChange): Settings
     pace: change.pace !== undefined ? cleanPace(change.pace) : (base?.pace ?? null),
     turnSeconds: wholeIn(change.turnSeconds ?? base?.turnSeconds ?? LIVE_TURN_SECONDS.default, LIVE_TURN_SECONDS.min, LIVE_TURN_SECONDS.max, `A turn lasts ${LIVE_TURN_SECONDS.min} to ${LIVE_TURN_SECONDS.max} seconds.`),
     payMinutes: wholeIn(change.payMinutes ?? base?.payMinutes ?? LIVE_PAY_MINUTES.default, LIVE_PAY_MINUTES.min, LIVE_PAY_MINUTES.max, `The time to pay is ${LIVE_PAY_MINUTES.min} to ${LIVE_PAY_MINUTES.max} minutes.`),
-    perAccount: wholeIn(change.perAccount ?? base?.perAccount ?? LIVE_PER_ACCOUNT.default, LIVE_PER_ACCOUNT.min, LIVE_PER_ACCOUNT.max, `A person secures ${LIVE_PER_ACCOUNT.min} to ${LIVE_PER_ACCOUNT.max} pieces.`),
+    perAccount: wholeIn(change.perAccount ?? base?.perAccount ?? LIVE_PER_ACCOUNT.default, LIVE_PER_ACCOUNT.min, LIVE_PER_ACCOUNT.max, `A person secures ${LIVE_PER_ACCOUNT.min} to ${LIVE_PER_ACCOUNT.max} ${isSet ? 'sets' : 'pieces'}.`),
     priceMinor: price(change.priceMinor !== undefined ? change.priceMinor : base?.priceMinor, 'The price'),
     currency: currency as string,
     minTier: wholeIn(change.minTier ?? base?.minTier ?? 0, 0, 3, 'The tier is 0 (every ORBES account) to 3 (PALLADIUM).'),
@@ -914,6 +911,15 @@ type ReadRow = DropRow & {
   set_active: boolean | null;
 };
 
+/** A set's release's set (`setId`, its words read with the release `r`) and its pieces (release-offer.ts), for its console views. */
+const adminSetOf = (setId: string, r: ReadRow, pieces: readonly ReleasePiece[]): AdminLiveSet => ({
+  id: setId,
+  name: r.set_name ?? '',
+  code: r.set_code ?? '',
+  active: r.set_active === true,
+  pieces: pieces.map((p) => ({ piece: p.piece!, model: { id: p.model.id, name: p.model.name, variant: p.model.variant, type: p.model.type, active: p.model.active } })),
+});
+
 // ── Service ────────────────────────────────────────────────────────────────
 
 export interface LiveConsoleServiceDeps {
@@ -963,11 +969,10 @@ export class LiveConsoleService {
     const rows = await this.reads(this.db).where('d.mode', '=', 'LIVE').where('d.parent_drop_id', 'is', null).orderBy('d.created_at', 'desc').orderBy('d.id').limit(page.pageSize).offset(pageOffset(page)).execute();
     const now = this.clock();
     const [counts, interest, open] = await Promise.all([this.counts(this.db, rows.map((r) => r.id)), this.interest(this.db, rows.map((r) => r.id)), this.openHolds(this.db, rows.map((r) => r.id))]);
+    // A set's release names its set and pieces: every set of the page in one read.
+    const pieces = await setPiecesOf(this.db, rows.flatMap((r) => (r.set_id === null ? [] : [r.set_id])));
     const sets = new Map<string, AdminLiveSet>();
-    for (const r of rows) {
-      const s = await this.setOf(this.db, r);
-      if (s) sets.set(r.id, s);
-    }
+    for (const r of rows) if (r.set_id !== null) sets.set(r.id, adminSetOf(r.set_id, r, pieces.get(r.set_id) ?? []));
     return makePage(
       rows.map((r) => ({ ...this.card(r, now, counts.get(r.id), interest.get(r.id) ?? 0, open.has(r.id)), ...(sets.has(r.id) ? { set: sets.get(r.id)! } : {}) })),
       Number(total.n),
@@ -1494,7 +1499,7 @@ export class LiveConsoleService {
   /**
    * What a release offers (macro scope K44 T1): its model (`checkModel`), or its set offered (drops.ts offeredSet: 404
    * SET_NOT_FOUND, 409 SET_SET_ASIDE, each piece's model active), every piece of the set given sizes and no other piece
-   * (400), and its pieces per person within LIVE_PER_ACCOUNT.max ÷ its pieces (live.ts liveSetPerAccountMax, 400).
+   * (400); its sets per person are any of 1 to LIVE_PER_ACCOUNT.max (T4, as a model's pieces, read in `settingsOf`).
    */
   private async checkOffer(tx: Db, s: Settings): Promise<void> {
     if (s.setId === null) return this.checkModel(tx, s.modelId!);
@@ -1502,8 +1507,6 @@ export class LiveConsoleService {
     const n = set.pieces.length;
     for (const z of s.sizes) if (z.piece === null || z.piece > n) throw validationError(`Each size of a set’s release names its piece, 1 to ${n}.`);
     for (const p of set.pieces) if (!s.sizes.some((z) => z.piece === p.piece)) throw validationError(`Give ${p.model.name} its sizes: each piece of a set’s release has 1 to ${LIVE_SIZES.max} sizes.`);
-    const max = liveSetPerAccountMax(n);
-    if (s.perAccount > max) throw setPerAccount(n, max);
   }
 
   /** A model a release (or its after-room) offers: known (404 MODEL_NOT_FOUND) and still offered (409 MODEL_INACTIVE). */
@@ -1879,15 +1882,7 @@ export class LiveConsoleService {
 
   /** Macro scope K44 T1: a set's release's set and its pieces, for its console views; null on a model's. */
   private async setOf(db: Db, r: ReadRow): Promise<AdminLiveSet | null> {
-    if (r.set_id === null) return null;
-    const pieces = await setPieces(db, r.set_id);
-    return {
-      id: r.set_id,
-      name: r.set_name ?? '',
-      code: r.set_code ?? '',
-      active: r.set_active === true,
-      pieces: pieces.map((p) => ({ piece: p.piece!, model: { id: p.model.id, name: p.model.name, variant: p.model.variant, type: p.model.type, active: p.model.active } })),
-    };
+    return r.set_id === null ? null : adminSetOf(r.set_id, r, await setPieces(db, r.set_id));
   }
 
   /** Where a release's orders hold or make their pieces: the location it names (an after-room: its release's), else the default; null before any location exists. */

@@ -7921,7 +7921,7 @@ describe('migrations', () => {
   const of0057 = (o: string) =>
     /\b(sets|set_models|set_sales|drop_entry_sizes|live_entry_sizes|live_interest_sizes)\b/.test(o) ||
     /^table (drops (model_id|set_id)|drop_sizes piece|orders (set_sale_id|set_piece)|order_cases group_id) /.test(o) ||
-    /\b(drops_(set_id_fkey|set_id_idx|set_key|one_offer|set_no_after_room)|drop_sizes_(piece_check|piece_key|position_check|label_key)|(drop|live)_entries_entry_drop_key|orders_set_(piece_check|sale|sale_fkey|sale_idx)|order_cases_group(_idx)?)\b/.test(o);
+    /\b(drops_(set_id_fkey|set_id_idx|set_key|one_offer|set_no_after_room)|drop_sizes_(piece_check|piece_key|position_check|label_key)|(drop|live)_entries_entry_drop_key|orders_(piece_check|set_piece_check|set_sale|set_sale_fkey|set_sale_idx)|order_cases_group(_idx)?)\b/.test(o);
   /** The identity guards 0057 widens, as 0037 (orders, order cases) and 0021 (drop sizes) left them. */
   const ORDER_IDENTITY_0037 = ['id', 'channel', 'live_entry_id', 'piece', 'drop_entry_id', 'shop_request_id', 'drop_id', 'account_id', 'model_id', 'reserved_at', 'with_order_id', 'gift_grant_id', 'exchange_of_order_id'];
   const ORDER_CASE_IDENTITY_0037 = ['id', 'order_id', 'shipment_id', 'kind', 'opened_by_type', 'opened_by_id', 'opened_at', 'reason', 'note', 'exchange_sku_id', 'exchange_size_label', 'message_id'];
@@ -7932,10 +7932,12 @@ describe('migrations', () => {
     // A PostgreSQL that lists NOT NULL as a constraint (PGlite's does) names the new tables' too, as in 0054's test.
     const notNull = (o: string) => /^constraint \S+ \S+_not_null NOT NULL "?\w+"?$/.test(o);
     const added = withIt.filter((o) => !before.includes(o) && !notNull(o));
-    // What 0057 changes of 0056: drops.model_id NULL-able, a size's label once per piece, its position up to 96.
+    // What 0057 changes of 0056: drops.model_id NULL-able, a size's label once per piece, its position up to 96, an
+    // order's piece up to 20 on a set sale's (T4).
     const changed = [
       'constraint drop_sizes drop_sizes_label_key UNIQUE (drop_id, label)',
       'constraint drop_sizes drop_sizes_position_check CHECK ((("position" >= 1) AND ("position" <= 24)))',
+      'constraint orders orders_piece_check CHECK (((piece >= 1) AND (piece <= 5)))',
       'index CREATE UNIQUE INDEX drop_sizes_label_key ON public.drop_sizes USING btree (drop_id, label)',
       'table drops model_id uuid NO ',
     ];
@@ -7963,7 +7965,7 @@ describe('migrations', () => {
       'live_entries live_entries_entry_drop_key',
       'live_entry_sizes live_entry_sizes_entry_fkey', 'live_entry_sizes live_entry_sizes_piece_check', 'live_entry_sizes live_entry_sizes_pkey', 'live_entry_sizes live_entry_sizes_size_fkey',
       'live_interest_sizes live_interest_sizes_interest_fkey', 'live_interest_sizes live_interest_sizes_piece_check', 'live_interest_sizes live_interest_sizes_pkey', 'live_interest_sizes live_interest_sizes_size_fkey',
-      'order_cases order_cases_group', 'orders orders_set_piece_check', 'orders orders_set_sale', 'orders orders_set_sale_fkey',
+      'order_cases order_cases_group', 'orders orders_piece_check', 'orders orders_set_piece_check', 'orders orders_set_sale', 'orders orders_set_sale_fkey',
       'set_models set_models_model_id_fkey', 'set_models set_models_model_key', 'set_models set_models_pkey', 'set_models set_models_position_check', 'set_models set_models_set_id_fkey',
       'set_sales set_sales_account_id_fkey', 'set_sales set_sales_currency_check', 'set_sales set_sales_drop_fkey', 'set_sales set_sales_pkey', 'set_sales set_sales_price', 'set_sales set_sales_price_minor_check',
       'set_sales set_sales_sale_account_key', 'set_sales set_sales_set_id_fkey', 'set_sales set_sales_shopify_line_item_id_check', 'set_sales set_sales_shopify_line_item_key',
@@ -7981,6 +7983,7 @@ describe('migrations', () => {
       'constraint set_sales set_sales_drop_fkey FOREIGN KEY (drop_id, set_id) REFERENCES drops(id, set_id) ON DELETE RESTRICT',
       'constraint set_sales set_sales_price CHECK (((price_minor IS NULL) = (currency IS NULL)))',
       'constraint orders orders_set_sale CHECK (((set_sale_id IS NULL) = (set_piece IS NULL)))',
+      'constraint orders orders_piece_check CHECK ((((piece >= 1) AND (piece <= 20)) AND ((piece <= 5) OR (set_sale_id IS NOT NULL))))',
       'constraint orders orders_set_sale_fkey FOREIGN KEY (set_sale_id, account_id) REFERENCES set_sales(id, account_id) ON DELETE RESTRICT',
       "constraint order_cases order_cases_group CHECK (((group_id IS NULL) OR (kind = 'RETURN'::text)))",
       "constraint sets sets_code_check CHECK ((code ~ '^[A-Z0-9][A-Z0-9-]{1,39}$'::text))",
@@ -8225,6 +8228,14 @@ describe('migrations', () => {
       await expect(run(`UPDATE orders SET ${sets} WHERE id = '${second}'`), sets).rejects.toSatisfy(isGuardViolation);
     }
     await fk(run(`DELETE FROM set_sales WHERE id = '${sold}'`), 'a set sale with its orders deleted');
+    // A LIVE entry's orders: pieces 1 to 5, to 20 on a set sale's (T4: up to 5 sets of up to 4 pieces).
+    const liveOrder = (cols: Record<string, string>) =>
+      insert('orders', { channel: `'LIVE'`, live_entry_id: `'${liveEntry}'`, drop_id: `'${setLive}'`, account_id: `'${account}'`, model_id: `'${ring}'`, location_id: `'${location}'`, price_minor: '50000', currency: `'EUR'`, ...cols });
+    await check(liveOrder({ piece: '6' }), 'a sixth piece without a set sale', 'orders_piece_check');
+    await check(liveOrder({ piece: '21', set_sale_id: `'${sold}'`, set_piece: '1' }), 'a 21st piece', 'orders_piece_check');
+    await check(liveOrder({ piece: '0', set_sale_id: `'${sold}'`, set_piece: '1' }), 'a piece 0', 'orders_piece_check');
+    const twentieth = await id(liveOrder({ piece: '20', set_sale_id: `'${sold}'`, set_piece: '4' }));
+    await run(`DELETE FROM orders WHERE id = '${twentieth}'`);
 
     // Its return: the pieces' cases in one group, RETURN only, the group fixed.
     const group = '00000000-0000-4000-8000-000000000057';

@@ -137,6 +137,23 @@ export async function setPieces(db: Db, setId: string): Promise<ReleasePiece[]> 
   return rows.map((r) => ({ piece: r.position, model: modelOf(r as ModelRow) }));
 }
 
+/** The pieces of several sets at once (each as `setPieces` reads it), by set id: one read whatever their number. */
+export async function setPiecesOf(db: Db, setIds: readonly string[]): Promise<Map<string, ReleasePiece[]>> {
+  const out = new Map<string, ReleasePiece[]>();
+  const ids = [...new Set(setIds)];
+  if (ids.length === 0) return out;
+  const rows = await db
+    .selectFrom('set_models as s')
+    .innerJoin('models as m', 'm.id', 's.model_id')
+    .select(['s.set_id', 's.position', ...MODEL_COLUMNS])
+    .where('s.set_id', 'in', ids)
+    .orderBy('s.set_id')
+    .orderBy('s.position')
+    .execute();
+  for (const r of rows) out.set(r.set_id, [...(out.get(r.set_id) ?? []), { piece: r.position, model: modelOf(r as unknown as ModelRow) }]);
+  return out;
+}
+
 /** What the release `d` sells (see the header): its model, or its set and the set's pieces in order. */
 export async function releaseOffer(db: Db, d: { readonly model_id: string | null; readonly set_id: string | null }): Promise<ReleaseOffer> {
   if (d.set_id !== null) {

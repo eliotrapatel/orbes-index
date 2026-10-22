@@ -780,6 +780,11 @@ export const SET_PIECES_MIN = 2;
 export const SET_PIECES_MAX = 4;
 export const SET_PRICE_MINOR_MAX = 100_000_000;
 export const DROP_SIZE_POSITION_MAX = 96;
+/**
+ * An order's piece, at most (`orders.piece`, migration 0057; 5 before): a set sale's orders of a LIVE entry are numbered
+ * across its sets (T4: up to LIVE_PER_ACCOUNT.max sets of up to SET_PIECES_MAX pieces); every other order's stays 1..5.
+ */
+export const ORDER_PIECE_MAX = 20;
 export type StockHoldKind = (typeof STOCK_HOLD_KINDS)[number];
 
 // ── Column helpers ─────────────────────────────────────────────────────────
@@ -2751,7 +2756,7 @@ export interface OrdersTable {
   id: Generated<string>;
   channel: OrderChannel;
   live_entry_id: ColumnType<string | null, string | null | undefined, string | null>;
-  /** The piece of a LIVE entry, 1..its quantity; 1 for the other channels. */
+  /** The piece of a LIVE entry, 1..its quantity (1..its sets × the set's pieces on a set sale's, migration 0057); 1 for the other channels. */
   piece: WithDefault<number>;
   drop_entry_id: ColumnType<string | null, string | null | undefined, string | null>;
   shop_request_id: ColumnType<string | null, string | null | undefined, string | null>;

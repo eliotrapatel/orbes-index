@@ -16,7 +16,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { inTransaction } from '../../src/server/db/connection.js';
 import { DomainError } from '../../src/server/errors.js';
-import { liveSetPerAccountMax, onSaleOf, removeAccountLiveEntries, setTurns } from '../../src/server/services/live.js';
+import { onSaleOf, removeAccountLiveEntries, setTurns } from '../../src/server/services/live.js';
 import { LiveInsightsService } from '../../src/server/services/live-insights.js';
 import { LiveRoomService } from '../../src/server/services/live-room.js';
 import { createTestDb, type TestDb } from '../support/db.js';
@@ -62,10 +62,9 @@ describe('the set rule of the turns (pure)', () => {
     expect(setTurns([e('E1', ['A'], 2), e('E2', ['A']), e('E3', ['B'])], sizes({ A: [1, 2], B: [1, 1] })).map((t) => t.id)).toEqual(['E3']);
   });
 
-  it('sells a set as its scarcest piece: the sets on sale, and the sets per person within 5 pieces', () => {
+  it('sells a set as its scarcest piece: the sets on sale', () => {
     expect(onSaleOf([{ piece: 1, stock: 2 }, { piece: 1, stock: 1 }, { piece: 2, stock: 5 }])).toBe(3);
     expect(onSaleOf([{ piece: null, stock: 2 }, { piece: null, stock: 3 }])).toBe(5);
-    expect([2, 3, 4].map(liveSetPerAccountMax)).toEqual([2, 1, 1]);
   });
 });
 
@@ -128,7 +127,7 @@ describe('a set\'s LIVE RELEASE (macro scope K44 T1, T2, T4; plan MACRO M3 §5.1
       message: `Give ${await nameOf(chain)} its sizes: each piece of a set’s release has 1 to 24 sizes.`,
     });
     expect(await refusal(lc.create({ ...base, setId, sizes: [{ piece: 1, label: '45', stock: 1 }, { piece: 2, label: '45', stock: 1 }] }, f.admin))).toMatchObject({ code: 'SIZE_NOT_DECLARED' });
-    expect(await refusal(lc.create({ ...base, setId, sizes, perAccount: 3 }, f.admin))).toMatchObject({ message: 'A set of 2 pieces is sold 1 to 2 per person.' });
+    expect(await refusal(lc.create({ ...base, setId, sizes, perAccount: 6 }, f.admin))).toMatchObject({ message: 'A person secures 1 to 5 sets.' });
     expect(await refusal(lc.create({ ...base, setId: '00000000-0000-4000-8000-000000000000', sizes }, f.admin))).toMatchObject({ code: 'SET_NOT_FOUND', status: 404 });
     expect(await refusal(lc.create({ ...base, setId, sizes, afterRoom: { modelId: ring, priceMinor: 1, sizes: [{ label: '52', stock: 1 }] } }, f.admin))).toMatchObject({ code: 'AFTER_ROOM_SET', status: 409 });
     expect(await t.db.selectFrom('drops').select('id').where('set_id', '=', setId).where('mode', '=', 'LIVE').execute()).toEqual([]);
@@ -330,5 +329,26 @@ describe('a set\'s LIVE RELEASE (macro scope K44 T1, T2, T4; plan MACRO M3 §5.1
     const d = await t.db.selectFrom('drops').selectAll().where('id', '=', r.id).executeTakeFirstOrThrow();
     const signals = await insights.signals(d, f.clock.now());
     expect(signals.alerts.filter((x) => x.kind === 'SIZE_SOLD_OUT').map((x) => x.size?.label)).toEqual(['52']);
+  });
+
+  it('counts a set as one per person (T4): a set of three pieces sold 5 per person, two sets making six orders, numbered past the fifth', async () => {
+    const third = await sizedModel(t.db, 'ORBIT', ['48', '50']);
+    const trio = await createSet(f, [ring, chain, third], 'THE TRIO');
+    hour += 2;
+    const t0 = new Date(Date.UTC(2026, 11, 2, hour));
+    f.clock.set(t0.getTime() - 60 * MINUTE);
+    const r = await createSetLiveRelease(f, { setId: trio, opensAt: t0, perAccount: 5, sizes: [{ piece: 1, label: '52', stock: 3 }, { piece: 2, label: '45', stock: 3 }, { piece: 3, label: '48', stock: 3 }] });
+    expect(await f.liveConsole.get(r.id)).toMatchObject({ perAccount: 5, quantity: 3 });
+    const a = await accountOfTier(f, 2);
+    const sizes = { sizes: [{ piece: 1, sizeId: pieceSize(r, 1, '52') }, { piece: 2, sizeId: pieceSize(r, 2, '45') }, { piece: 3, sizeId: pieceSize(r, 3, '48') }] };
+    f.clock.set(t0.getTime() - 4 * MINUTE);
+    expect(await refusal(f.live.enter(a.id, r.id, { ...sizes, quantity: 6 }, a.actor))).toMatchObject({ code: 'LIVE_QUANTITY_INVALID', message: 'This release offers 1 to 5 sets per person.' });
+    await f.live.enter(a.id, r.id, { ...sizes, quantity: 2 }, a.actor);
+    f.clock.set(t0);
+    await f.live.advance(r.id);
+    expect(await pay(r, a)).toMatchObject({ status: 'CONFIRMED', quantity: 2 });
+    const orders = await t.db.selectFrom('orders').select(['piece', 'set_piece', 'model_id']).where('drop_id', '=', r.id).orderBy('piece').execute();
+    expect(orders.map((o) => [o.piece, o.set_piece, o.model_id])).toEqual([[1, 1, ring], [2, 2, chain], [3, 3, third], [4, 1, ring], [5, 2, chain], [6, 3, third]]);
+    expect(await t.db.selectFrom('set_sales').select('id').where('drop_id', '=', r.id).execute()).toHaveLength(2);
   });
 });

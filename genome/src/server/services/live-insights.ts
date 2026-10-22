@@ -304,7 +304,7 @@ export function insightRelease(d: DropRow, sizes: readonly InsightSize[]): Insig
     perAccount: d.per_account ?? 1,
     priceMinor: d.price_minor ?? 0,
     currency: d.currency ?? 'EUR',
-    quantityLine: d.quantity_line ?? defaultQuantityLine(d.quantity),
+    quantityLine: d.quantity_line ?? defaultQuantityLine(d.quantity, d.set_id !== null),
     sizes: sizes.map((s) => ({ id: s.id, label: s.label, stock: s.stock, ...(s.piece !== null && s.piece !== undefined ? { piece: s.piece } : {}) })),
   };
 }

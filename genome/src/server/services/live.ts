@@ -55,7 +55,7 @@
  * may sell a set (`set_id`, its sizes given per piece, `drop_sizes.piece`): I'LL BE THERE, ENTER and CHANGE SIZE name a
  * size per piece (`sizes`, 422 LIVE_SET_SIZES otherwise), its first piece's kept in `size_id`, every piece's in
  * `live_entry_sizes` and `live_interest_sizes`; an entry's quantity is its sets, a set counting as one toward
- * `per_account` (T4, at most LIVE_PER_ACCOUNT.max ÷ its pieces: liveSetPerAccountMax). An entry counts in each of its
+ * `per_account` (T4, 1 to LIVE_PER_ACCOUNT.max sets: its orders' `orders.piece` up to 20). An entry counts in each of its
  * sizes (`sizeTotals`); it takes its turn when each of its sizes has free pieces for its sets, one that does not fit yet
  * holding back every size it needs (`setTurns`); LET IN within each of its sizes; PAY makes one set sale per set, one order
  * per piece (orders.ts ordersForLiveEntry, set-sales.ts ordersForSetSale: T2, each piece its own ORBES identity); its sets
@@ -170,15 +170,6 @@ export const LIVE_BOARD_TOKEN_BYTES = 32;
 export const LIVE_NETWORK_RETENTION_DAYS = 30;
 /** The pace (W4, the CHECKs of migration 0049): X buyers admitted every Y minutes, X 1 to 5 000, Y 1 to 60. */
 export { LIVE_PACE_BATCH, LIVE_PACE_MINUTES };
-
-/**
- * Macro scope K44 T4: on a set's release `per_account` counts sets (a set counts as one), and an entry's orders are its
- * sets × the set's pieces, each numbered within LIVE_PER_ACCOUNT.max (`orders.piece` 1..5): a set of 2 pieces is sold up
- * to 2 per person, a set of 3 or 4 one per person.
- */
-export function liveSetPerAccountMax(pieces: number): number {
-  return Math.max(1, Math.floor(LIVE_PER_ACCOUNT.max / Math.max(1, pieces)));
-}
 
 /**
  * What a release has on sale (macro scope K44 T1): a model's, its sizes' stock summed; a set's, its sets, the smallest of
@@ -2435,7 +2426,8 @@ export class LiveService {
     }
     for (const p of pieces) if (!out.some((c) => c.piece === p.piece)) throw setSizes(`Choose a size for ${nameOf(p.piece!)}.`);
     out.sort((a, b) => a.piece - b.piece);
-    const max = Math.min(d.per_account ?? LIVE_PER_ACCOUNT.default, liveSetPerAccountMax(pieces.length));
+    // T4: a set counts as one, so its sets per person are the release's per_account (1..5); its orders reach 5 × 4 pieces.
+    const max = d.per_account ?? LIVE_PER_ACCOUNT.default;
     const q = quantity ?? 1;
     if (!Number.isInteger(q) || q < 1 || q > max) throw quantityInvalid(max, true);
     for (const c of out) if (c.size.stock < 1 || q > c.size.stock) throw sizeSoldOut();

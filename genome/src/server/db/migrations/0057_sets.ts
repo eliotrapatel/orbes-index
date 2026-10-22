@@ -49,6 +49,9 @@
  * `orders.set_sale_id` and `orders.set_piece` (1 to 4), both or neither (`orders_set_sale`): the piece of a set sale an
  * order is (an EXCHANGE order joins the set sale in its piece's place); `orders_set_sale_fkey` (set_sale_id, account_id)
  * to `set_sales (id, account_id)`: a set sale's orders are its buyer's. The order's identity guard gains both.
+ * `orders.piece` (0022's `orders_piece_check`, 1 to 5: a LIVE entry's pieces) reaches 20 on a set sale's orders (T4: a
+ * set counts as one toward the pieces per person, so a LIVE entry of up to 5 sets of up to 4 pieces numbers its orders
+ * 1 to 20); every other order keeps 1 to 5.
  *
  * `order_cases.group_id`: the cases of one set's return, opened and decided together (RETURN only, `order_cases_group`);
  * its identity guard gains it.
@@ -73,6 +76,9 @@ const PRICE_MAX = 100000000;
 /** A release's sizes, at most: 24 per piece (schema.ts DROP_SIZE_POSITION_MAX); 24 before this migration. */
 const POSITION_MAX = 96;
 const POSITION_MAX_0021 = 24;
+/** An order's piece, at most (schema.ts ORDER_PIECE_MAX): 5 sets of 4 pieces on a set sale's; 5 before this migration. */
+const ORDER_PIECE_MAX = 20;
+const ORDER_PIECE_MAX_0022 = 5;
 /** A Shopify id, as 0022's. */
 const SHOPIFY_ID = `'^[1-9][0-9]{0,19}$'`;
 
@@ -209,6 +215,8 @@ export const UP: readonly string[] = [
   `ALTER TABLE orders ADD COLUMN set_piece smallint NULL CONSTRAINT orders_set_piece_check CHECK (set_piece BETWEEN 1 AND ${PIECES_MAX})`,
   `ALTER TABLE orders ADD CONSTRAINT orders_set_sale CHECK ((set_sale_id IS NULL) = (set_piece IS NULL))`,
   `ALTER TABLE orders ADD CONSTRAINT orders_set_sale_fkey FOREIGN KEY (set_sale_id, account_id) REFERENCES set_sales (id, account_id) ON DELETE RESTRICT`,
+  `ALTER TABLE orders DROP CONSTRAINT orders_piece_check`,
+  `ALTER TABLE orders ADD CONSTRAINT orders_piece_check CHECK (piece BETWEEN 1 AND ${ORDER_PIECE_MAX} AND (piece <= ${ORDER_PIECE_MAX_0022} OR set_sale_id IS NOT NULL))`,
   `CREATE INDEX orders_set_sale_idx ON orders (set_sale_id)`,
   `DROP TRIGGER orders_immutable_identity ON orders`,
   `CREATE TRIGGER orders_immutable_identity BEFORE UPDATE ON orders
@@ -247,6 +255,9 @@ export const DOWN: readonly string[] = [
   `CREATE TRIGGER orders_immutable_identity BEFORE UPDATE ON orders
      FOR EACH ROW EXECUTE FUNCTION orbes_guard_immutable_columns(${quoted(ORDER_IDENTITY_0037)})`,
   `DROP INDEX IF EXISTS orders_set_sale_idx`,
+  // No order past its 5th piece is left: each is a set sale's, refused above.
+  `ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_piece_check`,
+  `ALTER TABLE orders ADD CONSTRAINT orders_piece_check CHECK (piece BETWEEN 1 AND ${ORDER_PIECE_MAX_0022})`,
   `ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_set_sale_fkey`,
   `ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_set_sale`,
   `ALTER TABLE orders DROP COLUMN IF EXISTS set_piece`,

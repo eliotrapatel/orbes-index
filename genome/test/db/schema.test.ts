@@ -1621,6 +1621,7 @@ describe('schema', () => {
       expect(await def(table, constraint), constraint).toContain(`<= ${S.SET_PIECES_MAX}`);
     }
     expect(await def('drop_sizes', 'drop_sizes_position_check')).toContain(`<= ${S.DROP_SIZE_POSITION_MAX}`);
+    expect(await def('orders', 'orders_piece_check')).toContain(`<= ${S.ORDER_PIECE_MAX}`);
 
     const { model: ring } = await seedProduct(t.db);
     const { model: chain } = await seedProduct(t.db);

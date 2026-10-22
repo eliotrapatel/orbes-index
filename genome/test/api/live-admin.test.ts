@@ -861,9 +861,9 @@ describe('LIVE RELEASES: the console', () => {
       const setId = await createSet(f, [ring, chain]);
       const body = settings({ modelId: undefined, setId, perAccount: 2, sizes: [{ piece: 1, label: '52', stock: 2 }, { piece: 1, label: '54', stock: 1 }, { piece: 2, label: '45', stock: 2 }] });
       delete body.modelId;
-      // A model and a set together, or neither: refused by the body; a set of two sold at most two per person.
+      // A model and a set together, or neither: refused by the body; a set counts as one, 1 to 5 sets per person (T4).
       expect(errorOf(await op.post('/api/admin/live', { ...body, modelId: ring })).code).toBe('VALIDATION_FAILED');
-      expect(errorOf(await op.post('/api/admin/live', { ...body, perAccount: 3 })).message).toBe('A set of 2 pieces is sold 1 to 2 per person.');
+      expect(errorOf(await op.post('/api/admin/live', { ...body, perAccount: 6 })).code).toBe('VALIDATION_FAILED');
       const res = await op.post('/api/admin/live', body);
       expect(res.statusCode, res.body).toBe(201);
       const r = safeJson(res) as Json;
