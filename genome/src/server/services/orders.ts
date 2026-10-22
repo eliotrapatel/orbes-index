@@ -1027,6 +1027,15 @@ export async function lockOrder(tx: Db, orderId: string): Promise<OrderRow> {
   return o;
 }
 
+/**
+ * Every order of a set sale FOR UPDATE, in the set's order (set_piece, reserved_at, id): the one order every path that
+ * holds more than one of a set's orders locks them in (a set cancelled whole, a set's return opened), so two of them on
+ * different pieces of one set never deadlock.
+ */
+export async function lockSetSale(tx: Db, setSaleId: string): Promise<OrderRow[]> {
+  return tx.selectFrom('orders').selectAll().where('set_sale_id', '=', setSaleId).orderBy('set_piece').orderBy('reserved_at').orderBy('id').forUpdate().execute();
+}
+
 /** Update an order and read it back. */
 export async function updateOrder(tx: Db, id: string, set: OrderUpdate): Promise<OrderRow> {
   return tx.updateTable('orders').set(set).where('id', '=', id).returningAll().executeTakeFirstOrThrow();
@@ -2905,9 +2914,11 @@ export class OrderService {
     // locked first (the piece before the order, as returns and registrations).
     let first: ((tx: Db) => Promise<void>) | undefined;
     if (s.to === 'CANCELLED') {
-      // Macro scope K44 (§15 note 12): a set's order is cancelled with its set's other orders, so their codes too.
-      const sale = await this.db.selectFrom('orders').select('set_sale_id').where('id', '=', id).executeTakeFirst();
-      const set = sale?.set_sale_id ? (await this.db.selectFrom('orders').select('id').where('set_sale_id', '=', sale.set_sale_id).execute()).map((r) => r.id) : [];
+      // Macro scope K44 (§15 note 12): a set's order is cancelled with its set's other orders, so their codes too. A size
+      // exchange's EXCHANGE order, made once the set had shipped, is cancelled alone.
+      const sale = await this.db.selectFrom('orders').select(['set_sale_id', 'channel']).where('id', '=', id).executeTakeFirst();
+      const saleId = sale?.set_sale_id && sale.channel !== 'EXCHANGE' ? sale.set_sale_id : null;
+      const set = saleId ? (await this.db.selectFrom('orders').select('id').where('set_sale_id', '=', saleId).where('channel', '<>', 'EXCHANGE').execute()).map((r) => r.id) : [];
       const ids = [...new Set([id, ...set])];
       const related = await this.db
         .selectFrom('orders')
@@ -2917,7 +2928,14 @@ export class OrderService {
         .execute();
       const claimHashes = await peekClaimRenewals(this.db, related.map((r) => r.id));
       s = { ...s, claimHashes };
-      if (claimHashes.size) first = (tx) => lockPieces(tx, claimHashes.keys());
+      // The pieces first, then the set's orders in the set's order (set_piece, reserved_at, id) before the order itself,
+      // so two cancellations on different pieces of one set lock them in one order.
+      if (claimHashes.size || saleId) {
+        first = async (tx) => {
+          if (claimHashes.size) await lockPieces(tx, claimHashes.keys());
+          if (saleId) await lockSetSale(tx, saleId);
+        };
+      }
     }
     const checked = s;
     await this.change(
@@ -2927,8 +2945,8 @@ export class OrderService {
         if (o.channel === 'GIFT' && checked.to === 'PAID') throw stepNotAllowed(o.status, checked.to);
         // Macro scope K44 (plan MACRO M3 §5.1, §15 note 12): a set sold is cancelled whole, its other open orders in the
         // same transaction (each locked, in the set's order), refused once one of its pieces has shipped.
-        if (checked.to === 'CANCELLED' && o.set_sale_id !== null) {
-          const others = await tx.selectFrom('orders').selectAll().where('set_sale_id', '=', o.set_sale_id).where('id', '<>', o.id).orderBy('set_piece').orderBy('reserved_at').orderBy('id').forUpdate().execute();
+        if (checked.to === 'CANCELLED' && o.set_sale_id !== null && o.channel !== 'EXCHANGE') {
+          const others = (await lockSetSale(tx, o.set_sale_id)).filter((x) => x.id !== o.id && x.channel !== 'EXCHANGE');
           if (o.shipped_at !== null || others.some((x) => x.shipped_at !== null)) throw setShipped();
           await step(tx, o, checked, actor, now, notes, this.mail);
           for (const x of others) if (x.status === 'RESERVED' || x.status === 'PAID') await step(tx, x, checked, actor, now, notes, this.mail);

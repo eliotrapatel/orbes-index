@@ -74,7 +74,7 @@ import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
 import { LifecycleService } from './lifecycle.js';
 import { reshipUnits } from './order-addons.js';
-import { createExchangeOrder, hold, lockOrder, type OrderMail, orderReference, recordChange, returnInTransaction, serveWaiting, step, updateOrder } from './orders.js';
+import { createExchangeOrder, hold, lockOrder, lockSetSale, type OrderMail, orderReference, recordChange, returnInTransaction, serveWaiting, setReturnWhole, step, updateOrder } from './orders.js';
 import { parcelKeyOf, parcelOrders } from './parcels.js';
 import type { LocationScope } from './receptions.js';
 import { sizesForExchange } from './sizes.js';
@@ -407,6 +407,7 @@ export class OrderCaseService {
     const exchangeSkuId = input.kind === 'EXCHANGE' ? known(input.exchangeSkuId, () => validationError('Choose the new size.')) : null;
     if (input.kind === 'RETURN' && input.exchangeSkuId) throw validationError('A return names no new size.');
     const caseId = await inTransaction(this.db, async (tx) => {
+      if (input.kind === 'RETURN') await this.lockSetFirst(tx, id);
       const o = await lockOrder(tx, id);
       if (o.status !== 'SHIPPED' && o.status !== 'DELIVERED') throw notShippedOrDelivered(o.status);
       // Macro scope K44 T3: a RETURN of a set's piece is the set's return, opened for every piece.
@@ -456,6 +457,7 @@ export class OrderCaseService {
       const a = await tx.selectFrom('accounts').select('status').where('id', '=', account).forShare().executeTakeFirst();
       if (!a) throw orderNotFound();
       if (a.status !== 'ACTIVE') throw customerAccountLocked();
+      if (input.kind === 'RETURN') await this.lockSetFirst(tx, id, account);
       const o = await tx.selectFrom('orders').selectAll().where('id', '=', id).where('account_id', '=', account).forUpdate().executeTakeFirst();
       if (!o) throw orderNotFound();
       if (o.status !== 'DELIVERED' || o.channel === 'GIFT' || o.delivered_at === null) throw returnNotAllowed();
@@ -593,6 +595,12 @@ export class OrderCaseService {
     // Macro scope K44 T3: a set's return is decided together.
     if (c.group_id !== null) return this.decideSetReturn(c, { pieceTo: pieceTo!, locationId, note: note!, addonsOut: addonsOutOf(input.addonsOut), pieces: input.pieces ?? null }, actor, opts);
     if (input.pieces) throw validationError('Only a set’s return names a destination for each piece.');
+    // Macro scope K44 T3: a set is returned whole. A size exchange of one of its pieces is decided EXCHANGE; refunding it
+    // would return that piece alone (409 SET_RETURN_WHOLE): Client Services cancels the case and opens the set's return.
+    if (c.kind === 'EXCHANGE' && decision === 'REFUND') {
+      const o = await this.db.selectFrom('orders').select('set_sale_id').where('id', '=', c.order_id).executeTakeFirstOrThrow();
+      if (o.set_sale_id !== null) throw setReturnWhole();
+    }
     return isParcelProblem(c.kind)
       ? this.decideParcel(c, { decision: decision as 'RESHIP' | 'REFUND', pieceTo, locationId, note }, actor)
       : this.decideReturn(c, { decision: decision as 'REFUND' | 'EXCHANGE', pieceTo: pieceTo!, locationId, note: note!, addonsOut: addonsOutOf(input.addonsOut) }, actor);
@@ -809,9 +817,10 @@ export class OrderCaseService {
     assertStaff(actor);
     const id = known(caseId, caseNotFound);
     const note = cleanText(input?.note, ORDER_CASE_LIMITS.cancelNote, 'The note', true)!;
-    const peek = await this.db.selectFrom('order_cases').select('order_id').where('id', '=', id).executeTakeFirst();
+    const peek = await this.db.selectFrom('order_cases').select(['order_id', 'group_id']).where('id', '=', id).executeTakeFirst();
     if (!peek) throw caseNotFound();
     await inTransaction(this.db, async (tx) => {
+      if (peek.group_id !== null) await this.lockSetFirst(tx, peek.order_id);
       const o = await lockOrder(tx, peek.order_id);
       const c = await tx.selectFrom('order_cases').selectAll().where('id', '=', id).forUpdate().executeTakeFirstOrThrow();
       if (!NOT_ENDED.includes(c.status)) throw caseEnded();
@@ -829,6 +838,18 @@ export class OrderCaseService {
   }
 
   // ── THE SET's return (macro scope K44 T3) ────────────────────────────────
+
+  /**
+   * Before a path that holds several of a set's orders locks its own: when the order (the account's, if named) is a set's,
+   * every order of its set sale FOR UPDATE in the set's order (orders.ts `lockSetSale`, as a set cancelled whole), so two
+   * of these paths on different pieces of one set never deadlock.
+   */
+  private async lockSetFirst(tx: Db, orderId: string, accountId?: string): Promise<void> {
+    let q = tx.selectFrom('orders').select('set_sale_id').where('id', '=', orderId);
+    if (accountId !== undefined) q = q.where('account_id', '=', accountId);
+    const r = await q.executeTakeFirst();
+    if (r?.set_sale_id) await lockSetSale(tx, r.set_sale_id);
+  }
 
   /** The orders of `o`'s set sale still SHIPPED or DELIVERED, each FOR UPDATE, in the set's order (`o` included). */
   private async setMembers(tx: Db, o: OrderRow): Promise<OrderRow[]> {

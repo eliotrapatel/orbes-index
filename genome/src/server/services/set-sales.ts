@@ -21,11 +21,13 @@
  *                  set, on its first piece's order.
  *   cancel         a set sold is cancelled whole (§15 note 12): cancelling one of its orders cancels its set's other open
  *                  orders in the same transaction, refused (409 SET_SHIPPED) once one of them has shipped
- *                  (services/orders.ts transition).
+ *                  (services/orders.ts transition); a size exchange's EXCHANGE order, made after it shipped, is cancelled
+ *                  alone. Every path holding several of a set's orders locks them first in the set's order (`lockSetSale`).
  *   return         a set is returned whole (T3): a RETURN asked on one of its pieces opens one for each piece still
  *                  shipped or delivered, as one group, decided together once every piece is back (services/order-cases.ts);
  *                  a size exchange of one piece stays possible, its EXCHANGE order joining the set sale in its piece's
- *                  place (`createExchangeOrder` carries `set_sale_id` and `set_piece`).
+ *                  place (`createExchangeOrder` carries `set_sale_id` and `set_piece`), and is decided EXCHANGE, never
+ *                  REFUND (409 SET_RETURN_WHOLE: the case cancelled, the set's return opened instead).
  *
  * `ordersForSetSale` is the core the set's draw (services/drops.ts via orders.ts `orderForDrawEntry`, M3.15) and its LIVE
  * RELEASE (services/live.ts via orders.ts `ordersForLiveEntry`, M3.16) call in the transaction that confirms an entry;

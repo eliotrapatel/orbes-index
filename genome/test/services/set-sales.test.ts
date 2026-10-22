@@ -11,10 +11,12 @@
  *  - T2: each piece bound by the scan of its own card at packing, registered by its buyer, the tier counting every piece;
  *  - each piece's invoice its share with « Part of THE SET <name> »; YOUR ORDERS' `set` (its name, one price, its pieces);
  *  - cancelled whole: one order cancelled cancels the set's others, refused once a piece has shipped (409 SET_SHIPPED);
+ *    a size exchange's EXCHANGE order, made after the set shipped, cancelled alone;
  *  - returned whole (T3): a RETURN asked on one piece opens one for every piece as one group (the collector's one
  *    message), decided together once every piece is back (409 SET_RETURN_NOT_RECEIVED before), each piece's
  *    destination its own, each order's credit note; a group cancelled together; a direct return refused (409
- *    SET_RETURN_WHOLE); a size exchange of one piece keeps the set (its EXCHANGE order joins the set sale);
+ *    SET_RETURN_WHOLE, and for an exchange case of one piece decided REFUND); a size exchange of one piece keeps the set
+ *    (its EXCHANGE order joins the set sale);
  *  - the account's export: its set sales, each order's set, an entry's size per piece.
  */
 import { randomUUID } from 'node:crypto';
@@ -408,6 +410,13 @@ describe('the set sold (plan MACRO M3 §5.2, T1 to T3)', () => {
     const ex = await cases().open(ids[0]!, { kind: 'EXCHANGE', reason: 'SIZE', exchangeSkuId: sizes.id, note: 'One size up.' }, operator);
     expect(ex.group).toBeNull();
     await cases().receive(ex.id, { pieceState: 'OK' }, operator, null);
+    // Refunding the exchange would return one piece alone: a set is returned whole.
+    expect(await refusal(cases().decide(ex.id, { decision: 'REFUND', pieceTo: 'RESTOCKED', note: 'Refunded.' }, operator, { admin: false }))).toEqual({
+      code: 'SET_RETURN_WHOLE',
+      status: 409,
+      message: 'A set is returned whole: open the return of the set as an order case.',
+    });
+    expect((await row(ids[0]!)).status).toBe('SHIPPED');
     const done = await cases().decide(ex.id, { decision: 'EXCHANGE', pieceTo: 'RESTOCKED', note: 'Exchanged.' }, operator, { admin: false });
     const exchange = await row(done.case.decision!.exchangeOrder!.id);
     expect([exchange.channel, exchange.set_sale_id, exchange.set_piece, exchange.size_label, exchange.price_minor]).toEqual(['EXCHANGE', sold.sale.id, 1, '54', 66_667]);
@@ -417,8 +426,10 @@ describe('the set sold (plan MACRO M3 §5.2, T1 to T3)', () => {
     const lines = (await db().selectFrom('invoices').select('lines').where('order_id', '=', exchange.id).where('kind', '=', 'INVOICE').executeTakeFirstOrThrow()).lines as { kind: string; detail: string | null }[];
     expect(lines.find((l) => l.kind === 'PIECE')!.detail).toContain('SIZE EXCHANGE');
     expect(lines.find((l) => l.kind === 'PIECE')!.detail).toContain('Part of THE SET The Pair');
-    // The set has shipped: its EXCHANGE order, not shipped yet, is never cancelled alone.
-    expect(await refusal(orders().transition(exchange.id, { to: 'CANCELLED', note: 'No.' }, operator))).toMatchObject({ code: 'SET_SHIPPED' });
+    // The set has shipped: its EXCHANGE order is cancelled alone (§15 note 12 is the set's cancellation before shipping).
+    await orders().transition(exchange.id, { to: 'CANCELLED', note: 'The new size cannot be made.' }, operator);
+    expect((await row(exchange.id)).status).toBe('CANCELLED');
+    expect((await Promise.all(ids.map(row))).map((o) => o.status)).toEqual(['RETURNED', 'SHIPPED']);
   });
 
   it('the account\'s export lists its set sales, each order\'s set and an entry\'s size per piece', async () => {
