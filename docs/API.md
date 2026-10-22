@@ -417,7 +417,7 @@ The releases (P-R03, §8.9, §10.10, §16.19):
 | `DROP_NOT_ENTERED` | 409 | (§10.10) The account has no entry to withdraw (none, or withdrawn already). |
 | `DROP_ENTRY_NOT_SELECTED` | 409 | (§16.19) Only an entry whose place is held (`SELECTED`) is concluded or lapses. |
 | `DROP_PLACE_HELD` | 409 | (§16.19) The place is held until its `respondBy` (said in the message, UTC): it lapses only after that time. |
-| `DROP_FULL` | 409 | (§10.10, §16.19) Every piece of the release is held or sold (`SELECTED` and `CONFIRMED` reach `quantity`): no place to reserve directly (P-X02) nor to offer. |
+| `DROP_FULL` | 409 | (§10.10, §16.19) Every piece of the release is held or sold (`SELECTED` and `CONFIRMED` reach `quantity`): no place to reserve directly (P-X02) nor to offer. On a set's draw (lot M3, K44 T1; §16.49), its sets; and OFFER NEXT when no entry of the waiting list fits the pieces left: *No entry on the waiting list fits the pieces left: each of its sizes needs one.* |
 | `DROP_WAITLIST_EMPTY` | 409 | (§16.19) No entry is left on the waiting list. |
 | `DROP_ALREADY_RESERVED` | 409 | (§10.10, P-X02) The account already holds an entry or a direct reservation in this release (one per account and release): a reservation is not entered again, nor reserved twice. |
 | `DROP_EARLY_ACCESS_NOT_OPEN` | 409 | (§10.10, P-X02) The early access of the account's tier has not begun (BP-19 T3: PALLADIUM's, then PLATINE's): *Direct reservations for this release open on YYYY-MM-DD HH:MM UTC.*, that tier's time. |
@@ -458,7 +458,7 @@ The LIVE RELEASES (§8.10, §10.12, §16.23). A LIVE RELEASE not announced (or a
 | `LIVE_NOT_IN_LINE` | 409 | (§10.12) The entry is no longer in the room or the line. |
 | `LIVE_SIZE_UNKNOWN` | 400 | (§10.12, §16.23) Not one of the release's sizes. |
 | `LIVE_SIZE_SOLD_OUT` | 409 | (§10.12) No piece in this size: no stock, more pieces than its stock, or, after T0, every piece of the size confirmed. |
-| `LIVE_QUANTITY_INVALID` | 400 | (§10.12) A quantity outside 1 to the release's `perAccount`. |
+| `LIVE_QUANTITY_INVALID` | 400 | (§10.12) A quantity outside 1 to the release's `perAccount`: *This release offers 1 to 3 pieces per person.* (one: *This release offers one piece per person.*); on a set's LIVE RELEASE (lot M3, T4) in sets: *This release offers one set per person.* |
 | `LIVE_SIZE_LOCKED` | 409 | (§10.12) From T0 on, the size no longer changes. |
 | `LIVE_NOT_YOUR_TURN` | 409 | (§10.12) The entry is not in its turn. |
 | `LIVE_TURN_CHANGED` | 409 | (§10.12) The secret sent is not the turn's: *Refresh the page.* |
@@ -603,8 +603,8 @@ The orders, the stock, the invoices, the segments and Shopify (plan LIVE RELEASE
 | `SEGMENT_NOT_FOUND` | 404 | No segment with this id. |
 | `SEGMENT_NAME_TAKEN` | 409 | A segment already has this name. |
 | `SEGMENT_IN_USE` | 409 | The segment is the access rule of a release or the audience of a post of the circle or of a house message not sent yet (a DRAFT or SCHEDULED one, lot M2, §16.42): *This segment is the access rule of a release or the audience of a post of the circle or of a house message: choose another there first.* |
-| `SHOPIFY_PRODUCT_TAKEN` | 409 | Another model is already linked to this Shopify product. |
-| `SHOPIFY_VARIANT_TAKEN` | 409 | Another size already has this Shopify variant id. |
+| `SHOPIFY_PRODUCT_TAKEN` | 409 | *Another model, add-on or set is already linked to this Shopify product.* (lot M3: a model, an add-on, §16.47, and a set, §16.49, never share a product; checked under one advisory lock). |
+| `SHOPIFY_VARIANT_TAKEN` | 409 | Another size already has this Shopify variant id; from an add-on's link (§16.47): *Another size or add-on already has this Shopify variant id.* |
 
 MESSAGES (plan NEXT-NINE, CS-01; §10.17, §16.28):
 
@@ -639,6 +639,51 @@ WORN, the owners' gallery (plan MACRO M2 §2.2, macro scope D31; §8.19, §11.8,
 | `WORN_CONSENT` | 422 | (§11.8) `consent` is not the version in force (`WORN_CONSENT_VERSION`, the `LEGAL_VERSION`): *Tick the box to agree to how WORN shows your photograph.* |
 | `WORN_NOT_FOUND` | 404 | (§8.19, §11.8, §16.43) No photograph with this id for this reader: the public's, one not shown now (in review, withdrawn, refused, taken down, ended, its piece passed on or revoked, its account locked); the owner's, another account's or one no longer live; staff's, one no longer live: *This photograph is not in WORN.* |
 | `WORN_STATE` | 409 | (§16.43) PUBLISH or REFUSE of a photograph reviewed meanwhile, TAKE DOWN of one not published: the console reads the list again. |
+
+Boxes and weights, the returns report, supplier orders by size (plan MACRO M3 §1 to §3, macro scope B1, B2, R1, Z1, Z2; §16.44 to §16.46):
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `BOX_NOT_FOUND` | 404 | No box with this id (§16.44). |
+| `BOX_NAME_TAKEN` | 409 | *Another box has this name.* (whatever the case). |
+| `BOX_TOO_SMALL_FOR_CARD` | 422 | *This box cannot take the 95 × 62 mm certificate card flat.*: its inside length and width, in either orientation, under 95 × 62 mm (`CERTIFICATE_CARD_MM`, held equal to the card 79t's `CERTIFICATE_CARD`; the CHECK `boxes_card_fits` holds it too). |
+| `BOX_IN_USE` | 409 | Set aside while active models pack in it (their own box, or a variant's main model's): *2 active models pack in this box: give them another box first.* |
+| `BOX_SET_ASIDE` | 409 | A box set aside given to a model or chosen for a parcel: *This box is set aside: reinstate it in Orders → Settings, or choose another.* |
+| `PERIOD_INVALID` | 422 | (§16.45) The returns report's period: *Give the first and the last day, or neither.*, *The last day is before the first.*, *A day is YYYY-MM-DD.*, *All time takes no first or last day.* |
+| `MODEL_NO_SIZES` | 409 | (§16.46) ORDER A MODEL on a model with no size offered: *This model has no offered size: declare its sizes in the Catalogue.* |
+
+Add-ons (plan MACRO M3 §4, macro scope K48 D1 and D2; §10.30, §16.47, §16.48):
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `ADDON_NOT_FOUND` | 404 | No add-on with this id; on an order, no unit or add-on of that order. |
+| `ADDON_NAME_TAKEN` | 409 | *Another add-on has this name.* (whatever the case). |
+| `SKU_CODE_TAKEN` | 409 | *Another SKU has this code.*: an add-on's SKU code is unique among every SKU, the models' sizes included. |
+| `ADDON_SET_ASIDE` | 409 | An add-on set aside named for a minimum, a supplier order or a correction: *POLISHING CLOTH is set aside. Reinstate it in Catalogue → Add-ons to offer it again.* |
+| `ADDON_NOT_OFFERED` | 409 | Not offered there now: set aside or without a price in the currency (*POLISHING CLOTH is not offered here.*, *… on this order.*); an order without its price yet (*Add-ons are offered once the order’s price is entered.*); a welcome gift, a size exchange or an order paid on the Shopify store (the platform takes no second payment it cannot take, scope S2). |
+| `ADDON_OUT_OF_STOCK` | 409 | Fewer units available at the order's (or the entry's) location than asked, under the SKU's lock: *POLISHING CLOTH could not be added: none left.* |
+| `ADDON_LIMIT` | 409 | More than 3 units of one add-on on an order or a choice: *At most 3 of each add-on on an order.* (`ADDON_LIMIT`). |
+| `ORDER_ADDON_NOT_AT_LOCATION` | 409 | (§16.24) An order moved to a location that does not hold its add-on units: *POLISHING CLOTH is not in stock at the new location: move its stock there first, or remove the add-on.* |
+| `ORDER_ADDON_CURRENCY` | 409 | (§16.24) A price entered in another currency than the order's held units: *The add-ons on this order are priced in EUR: enter its price in EUR, or remove them first.* |
+
+THE SET (plan MACRO M3 §5, macro scope K44 T1 to T4; §10.31, §16.49):
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `SET_NOT_FOUND` | 404 | No set with this id. |
+| `SET_NAME_TAKEN` | 409 | *Another set has this name.* (whatever the case). |
+| `SET_CODE_TAKEN` | 409 | *Another set has this code.* |
+| `SET_MODELS` | 422 | The pieces are not 2 to 4 different models, each active with its sizes declared: *A set groups 2 to 4 different models, each active with its sizes declared.* and what is wrong (*It has 1 piece.*, *A model is chosen twice.*, *HALO is not active.*, *HALO has no size declared: declare its sizes in the Catalogue.*). |
+| `SET_IN_USE` | 409 | Its pieces changed once a release names it: *A release already names this set: its pieces no longer change.* |
+| `SET_SET_ASIDE` | 409 | A release of a set set aside created or published: *THE ORBITAL SET is set aside. Reinstate it in Catalogue → Sets to release it.* |
+| `DROP_SET_SIZES` | 422 | (§10.31) A set's draw entered, reserved or resized without a size for each piece, or with a size of another piece: *Choose a size for each piece of the set.*, *Choose a size for HALO.*, *Choose one size for HALO.*, *This size is not offered for HALO.*, *This set has no such piece.* |
+| `LIVE_SET_SIZES` | 422 | (§10.31) The same on a set's LIVE RELEASE (I'LL BE THERE, ENTER, CHANGE SIZE). |
+| `DROP_SET_SIZES_UNEVEN` | 409 | (§16.49) A set's draw published while its pieces' sizes do not add up to the same number of sets: *Each piece’s sizes add up to the same number of sets: MONOLITHE 6, HALO 5, CONSTELLATION ORBITALE 6.* |
+| `AFTER_ROOM_SET` | 409 | (§16.23) An after-room asked of a set's release: *A set’s release has no after-room.* |
+| `GUARANTEE_SET_RELEASE` | 409 | (§16.30) A house guarantee bound to a set's release: *A set’s release is never guaranteed.* |
+| `SET_SHIPPED` | 409 | (§16.24) An order of a set cancelled once one of its pieces has shipped: *A piece of this set has shipped: a set is cancelled whole, never in part.* |
+| `SET_RETURN_WHOLE` | 409 | (§16.24, §16.34) A piece of a set returned alone (a direct RETURNED, or a size exchange's case decided REFUND): *A set is returned whole: open the return of the set as an order case.* |
+| `SET_RETURN_NOT_RECEIVED` | 409 | (§16.34) A set's return decided before every piece is back: *Every piece of the set is received before ORBES decides its return.* |
 
 THE PROGRAM (plan NEXT-NINE, BP-19 T2; §16.21):
 
@@ -830,6 +875,9 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | PUT | `/api/v1/account/orders/:id/address` | Account | yes | api | 10.21 |
 | PUT | `/api/v1/account/orders/:id/engraving` | Account | yes | auth | 10.22 |
 | DELETE | `/api/v1/account/orders/:id/engraving` | Account | yes | auth | 10.22 |
+| GET | `/api/v1/account/orders/:id/addons` | Account | — | api | 10.30 |
+| POST | `/api/v1/account/orders/:id/addons` | Account | yes | auth | 10.30 |
+| DELETE | `/api/v1/account/orders/:id/addons/:addonId` | Account | yes | auth | 10.30 |
 | POST | `/api/v1/account/orders/:id/case` | Account | yes | api | 10.23 |
 | GET | `/api/v1/account/messages` | Account | — | api | 10.17 |
 | POST | `/api/v1/account/messages` | Account | yes | api | 10.17 |
@@ -860,6 +908,7 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | POST | `/api/v1/club/drops/:id/enter` | Account | yes | api | 10.10 |
 | POST | `/api/v1/club/drops/:id/withdraw` | Account | yes | api | 10.10 |
 | POST | `/api/v1/club/drops/:id/reserve` | Account (PLATINE or PALLADIUM now) | yes | api | 10.10 |
+| PUT | `/api/v1/club/drops/:id/addons` | Account (a place held in a priced draw) | yes | api | 10.30 |
 | GET | `/api/v1/club/circle` | Account (an owner of a piece) | — | api | 10.11 |
 | GET | `/api/v1/club/circle/:id` | Account (an owner, from the post's tier) | — | api | 10.11 |
 | POST | `/api/v1/club/circle/:id/rsvp` | Account (an owner, from the post's tier) | yes | api | 10.11 |
@@ -909,6 +958,7 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | POST | `/api/admin/models/:id/warranty` | **ADMIN** | yes | admin | 13.4 |
 | GET | `/api/admin/models/:id/sizes` | AUDITOR | — | admin | 13.4 |
 | PUT | `/api/admin/models/:id/sizes` | OPERATOR | yes | admin | 13.4 |
+| PUT | `/api/admin/models/:id/packing` | OPERATOR | yes | admin | 16.44 |
 | PUT | `/api/admin/models/:id/supplier` | OPERATOR (never LOGISTICS) | yes | admin | 16.33 |
 | GET | `/api/admin/suppliers` | AUDITOR (never LOGISTICS) | — | admin | 16.33 |
 | POST | `/api/admin/suppliers` | OPERATOR | yes | admin | 16.33 |
@@ -916,6 +966,8 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | GET | `/api/admin/supplier-orders` | AUDITOR (never LOGISTICS) | — | admin | 16.33 |
 | GET | `/api/admin/supplier-orders/proposal` | AUDITOR (never LOGISTICS) | — | admin | 16.33 |
 | POST | `/api/admin/supplier-orders/draft-lines` | OPERATOR | yes | admin | 16.33 |
+| POST | `/api/admin/supplier-orders/split` | OPERATOR | yes | admin | 16.46 |
+| POST | `/api/admin/supplier-orders/split/drafts` | OPERATOR | yes | admin | 16.46 |
 | GET | `/api/admin/supplier-orders/:id` | AUDITOR (never LOGISTICS) | — | admin | 16.33 |
 | PATCH | `/api/admin/supplier-orders/:id` | OPERATOR | yes | admin | 16.33 |
 | DELETE | `/api/admin/supplier-orders/:id` | OPERATOR | yes | admin | 16.33 |
@@ -950,6 +1002,7 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | POST | `/api/admin/logistics/orders/:id/packing` | LOGISTICS, OPERATOR, ADMIN | yes | admin | 16.33 |
 | POST | `/api/admin/logistics/orders/:id/packing/scan` | LOGISTICS, OPERATOR, ADMIN | yes | verify | 16.33 |
 | PUT | `/api/admin/logistics/orders/:id/packing/photo` | LOGISTICS, OPERATOR, ADMIN | yes | media | 16.33 |
+| POST | `/api/admin/logistics/orders/:id/packing/box` | LOGISTICS, OPERATOR, ADMIN | yes | admin | 16.44 |
 | POST | `/api/admin/logistics/orders/:id/packing/check` | LOGISTICS, OPERATOR, ADMIN | yes | admin | 16.33 |
 | POST | `/api/admin/logistics/orders/:id/ship` | LOGISTICS, OPERATOR, ADMIN | yes | admin | 16.33 |
 | POST | `/api/admin/logistics/orders/:id/delivered` | LOGISTICS, OPERATOR, ADMIN | yes | admin | 16.33 |
@@ -1184,6 +1237,8 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | GET | `/api/admin/live/:id/best-time` | AUDITOR | — | admin | 16.23 |
 | GET | `/api/admin/orders` | AUDITOR | — | admin | 16.24 |
 | GET | `/api/admin/orders.csv` | AUDITOR | — | admin | 16.24 |
+| GET | `/api/admin/orders/returns` | AUDITOR | — | admin | 16.45 |
+| GET | `/api/admin/orders/returns.csv` | AUDITOR | — | admin | 16.45 |
 | GET | `/api/admin/orders/alerts` | AUDITOR | — | admin | 16.24 |
 | PUT | `/api/admin/orders/alerts` | **ADMIN** | yes | admin | 16.24 |
 | GET | `/api/admin/orders/shipping-rates` | AUDITOR | — | admin | 16.24 |
@@ -1193,6 +1248,9 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | POST | `/api/admin/orders/:id/location` | OPERATOR | yes | admin | 16.24 |
 | POST | `/api/admin/orders/:id/credit` | OPERATOR | yes | admin | 16.24 |
 | DELETE | `/api/admin/orders/:id/credit` | OPERATOR | yes | admin | 16.24 |
+| GET | `/api/admin/orders/:id/addons` | AUDITOR | — | admin | 16.48 |
+| POST | `/api/admin/orders/:id/addons` | OPERATOR | yes | admin | 16.48 |
+| DELETE | `/api/admin/orders/:id/addons/:lineId` | OPERATOR | yes | admin | 16.48 |
 | PATCH | `/api/admin/orders/:id/terms` | OPERATOR | yes | admin | 16.24 |
 | PUT | `/api/admin/orders/:id/buyer` | OPERATOR | yes | admin | 16.24 |
 | GET | `/api/admin/orders/engraving-prices` | AUDITOR | — | admin | 16.24 |
@@ -1200,6 +1258,27 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | GET | `/api/admin/locations` | AUDITOR | — | admin | 16.24 |
 | POST | `/api/admin/locations` | **ADMIN** | yes | admin | 16.24 |
 | PATCH | `/api/admin/locations/:id` | **ADMIN** | yes | admin | 16.24 |
+| PUT | `/api/admin/locations/:id/countries` | **ADMIN** | yes | admin | 16.46 |
+| GET | `/api/admin/boxes` | AUDITOR | — | admin | 16.44 |
+| POST | `/api/admin/boxes` | **ADMIN** | yes | admin | 16.44 |
+| PATCH | `/api/admin/boxes/:id` | **ADMIN** | yes | admin | 16.44 |
+| POST | `/api/admin/boxes/:id/set-aside` | **ADMIN** | yes | admin | 16.44 |
+| POST | `/api/admin/boxes/:id/reinstate` | **ADMIN** | yes | admin | 16.44 |
+| GET | `/api/admin/addons` | AUDITOR | — | admin | 16.47 |
+| GET | `/api/admin/addons/:id` | AUDITOR | — | admin | 16.47 |
+| POST | `/api/admin/addons` | OPERATOR | yes | admin | 16.47 |
+| PATCH | `/api/admin/addons/:id` | OPERATOR | yes | admin | 16.47 |
+| PUT | `/api/admin/addons/:id/prices` | OPERATOR | yes | admin | 16.47 |
+| POST | `/api/admin/addons/:id/set-aside` | OPERATOR | yes | admin | 16.47 |
+| POST | `/api/admin/addons/:id/reinstate` | OPERATOR | yes | admin | 16.47 |
+| PUT | `/api/admin/addons/:id/shopify` | OPERATOR | yes | admin | 16.47 |
+| GET | `/api/admin/sets` | AUDITOR | — | admin | 16.49 |
+| GET | `/api/admin/sets/:id` | AUDITOR | — | admin | 16.49 |
+| POST | `/api/admin/sets` | OPERATOR | yes | admin | 16.49 |
+| PATCH | `/api/admin/sets/:id` | OPERATOR | yes | admin | 16.49 |
+| POST | `/api/admin/sets/:id/set-aside` | OPERATOR | yes | admin | 16.49 |
+| POST | `/api/admin/sets/:id/reinstate` | OPERATOR | yes | admin | 16.49 |
+| PUT | `/api/admin/sets/:id/shopify` | OPERATOR | yes | admin | 16.49 |
 | GET | `/api/admin/carriers` | AUDITOR | — | admin | 16.24 |
 | POST | `/api/admin/carriers` | **ADMIN** | yes | admin | 16.24 |
 | PATCH | `/api/admin/carriers/:id` | **ADMIN** | yes | admin | 16.24 |
@@ -2700,6 +2779,7 @@ MY PIECES' orders (plan LIVE RELEASE+ of 2026-10-04, choice 6; `routes/account.t
 - `engraving` (plan NEXT LOT §3.6.C, §10.22): its words and the price it was taken at (`priceMinor`, in its currency; `null` for one bought as the release's add-on, whose price is on its add-on row, and for one entered before this lot), or `null`. `engravingOffer`: the engraving it may carry, `{ priceMinor, included, maxLength: 20 }`: the release's add-on (`included`, no price), or the price of its currency from Orders → Settings (the one its engraving took, when it has one); `null` on a welcome gift, or without a price for its currency (or a currency not entered yet). `editable.engraving`: whether the collector may add, change or remove it now (`RESERVED` or `PAID`, packing not started, one offered). MY PIECES' TOTAL counts a settings-priced engraving; an add-on's is already its add-on row.
 - `imageUrl` (plan NOCTURNE, addition 3): the cover photograph of the order's model, or of its variant (itself a model), as §10.5 names it, or `null`; never a piece's own photograph (decision 9).
 - `documents` (§10.14): its `invoice` once paid and the `creditNote` that cancels it once cancelled after it was paid or returned (each its number and time of issue, §16.25), `null` before; `others` (plan NEXT LOT §3.6.C), its other documents in order of issue, `{ kind, number, issuedAt }`: a supplementary invoice (an engraving added after PAID), a credit note for single lines (an engraving removed after PAID), the credit note of a supplementary invoice; `careGuide` while the piece is on its way or kept (neither cancelled nor returned); `certificate` once the piece that fulfils it is registered to the account, while a certificate may be created for it (not lost, stolen, revoked, flagged nor retired); `careConditions` (plan ORBES CARE of 2026-10-15, answer 14) `true` on every order, whatever its status: its ORBES CARE CONDITIONS.
+- `addonItems`, `canAddAddons` (plan MACRO M3 §4.2, D2; §10.30): the catalogue add-ons on the order, one row per add-on and price (`{ "addonId", "name", "units", "priceMinor", "currency", "canRemove" }`: every unit but those removed, a cancelled order's as they were ordered; `canRemove` while a unit is held and the order takes add-ons), and whether ADD AN ADD-ON is offered on it now. `set` (macro scope K44 T1 to T3; §10.31): for a piece of a set, `{ "saleId", "name", "priceMinor", "currency", "piece", "pieces" }`, the set's one price and its orders; `null` otherwise.
 
 Never in it: where the order is served from, what it holds (a piece in stock or waiting, the piece linked), the surprise, the engraving's words (entered by Client Services; in the right-of-access export, §16.13), the value declared for the insurance, the notes of its history, nor who handled it or entered its address. Its delivery address is the collector's own (`address`, since plan NEXT LOT §3.6.B).
 
@@ -2989,6 +3069,45 @@ House messages are kept with the account, never deleted (the database refuses it
 **In the verify app:** on a phone, once the account has one, MESSAGES gains two tabs, ORBES CLIENT SERVICES (the conversation, as before) and FROM ORBES, each with NEW while it holds something unread; each message *ORBES · 21 OCT 2026 · 10:02*, its title, its words and its links, then *Messages from ORBES cannot be answered. To write, open ORBES CLIENT SERVICES.*; SHOW EARLIER after 30. On a computer FROM ORBES is a subject of the messages page (`/verify/messages/from-orbes`), with WRITE TO ORBES CLIENT SERVICES in place of the reply.
 
 Errors: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 CSRF_FAILED`, `429 RATE_LIMITED`.
+
+### 10.30 Add-ons: chosen at the purchase, and ADD AN ADD-ON in YOUR ORDERS (extension of the contract)
+
+Plan MACRO M3 §4.1 and §4.2 (macro scope K48 D1 and D2; `routes/account.ts`, `routes/club.ts`, `routes/live.ts`, `services/order-addons.ts`; DATABASE §5.131 to §5.134). A catalogue add-on (a care kit, a polishing cloth, a chain extender…, §16.47) is sold with a piece, unit by unit: **no ORBES CODE, no identity, never counted toward the tier**. Each request names add-ons by id with their units (`items` or the body below: `{ "addonId", "units" }`, each add-on once); the server prices each one itself, in the currency of where it is chosen, and checks it against what is offered there now: active and priced in that currency (`409 ADDON_NOT_OFFERED`), that many available at the location (`409 ADDON_OUT_OF_STOCK`), **at most 3 of each** (`409 ADDON_LIMIT`). The release add-ons of a LIVE RELEASE (`addonIds`, the gift box, the engraving…) are unchanged.
+
+**Chosen before the order exists**, then carried onto the sale's first order when it is made (PAY, a draw's CONFIRMED, a salon's ACCEPTED), each unit taken under its SKU's lock, or **left out** with its reason (`NONE_LEFT`, `NOT_OFFERED`) without holding the sale back:
+
+- **A LIVE hold** (§10.12): `PUT /api/v1/live/:id/addons` takes `items` beside `addonIds` (left out, the choice stays as it was; `[]` clears it), while the entry is SECURED. The entry's view gains `addonOffer` (`[ { "addonId", "name", "line", "priceMinor", "currency", "maxUnits" } ]`, in stock at the release's location, in its currency), `addonItems` (the choice, priced: `{ "addonId", "name", "line", "units", "priceMinor" }`) and, after PAY, `addonsLeftOut` (`[ { "addonId", "name", "units", "reason" } ]`); `total` adds them.
+- **A draw's place held** (ADD TO YOUR ORDER): **`PUT /api/v1/club/drops/:id/addons`** with `{ "items" }` (`[]` clears) on the account's SELECTED entry of a draw with a price (`409 DROP_ENTRY_NOT_SELECTED` otherwise) → **200** the account's entry with its `addons` (the choice and the offer); added when ORBES Client Services confirms the order. The club's one PUT.
+- **A salon request** (§10.9): `POST /api/v1/club/lookbook/:slug/request` takes `addons` (`[ { "addonId", "units" } ]`), priced in the model's base currency; the request's view names them (`addons`), and they are added when the request is accepted.
+
+The choices of an entry or a request are cleared when it lapses, is declined or ends without a sale, and when the account is locked. The account's export carries the choices not yet on an order (§16.13).
+
+**YOUR ORDERS** (the collector's own orders only; `404 ORDER_NOT_FOUND` for another's):
+
+- **`GET /api/v1/account/orders/:id/addons`** → **200** `{ "canAdd", "reason", "paid", "currency", "offer" }`: whether add-ons can be added to the order now, and why not (`reason` `NOT_OFFERED`: a welcome gift, a size exchange or an order paid on the Shopify store; `CLOSED`: not RESERVED nor PAID; `PACKING_STARTED`; `NO_CURRENCY`: its price not entered yet); `paid`, an add-on added gets its own invoice; `offer`, the add-ons in stock at the order's location in its currency, each with the units it may still take. `no-store`. Rate group `api`.
+- **`POST /api/v1/account/orders/:id/addons`** with `{ "addonId", "units": 1–99 }` → **200** `{ "order" }` (§10.13): the units held at once at the order's location, at the add-on's price now (kept), until packing starts (`409 ORDER_PACKING_STARTED`); after PAID, a supplementary invoice of its lines (§16.25). Rate group `auth`, as the engraving: each addition after payment issues a legal document.
+- **`DELETE /api/v1/account/orders/:id/addons/:addonId`** → **200** `{ "order" }`: every unit of that add-on still held taken off (REMOVED, its stock free again), until packing starts; after PAID, a credit note for its lines. Rate group `auth`.
+- Refused besides: a locked account (`403 ACCOUNT_LOCKED`), an order closed (`409 ORDER_CLOSED`). Journaled `order.addon.add` and `order.addon.remove`, audited with ids and counts.
+
+`GET /api/v1/account/orders` (§10.13) gives each order its `addonItems` (`[ { "addonId", "name", "units", "priceMinor", "currency", "canRemove" } ]`, one row per add-on and price) and `canAddAddons`. In the verify app: each order's ADD-ONS rows with REMOVE (a second tap or click confirms it), ADD AN ADD-ON (a sheet on a phone, a part of the order's page on a computer), *Packing has begun. Add-ons can no longer be added.* once packing has begun (BRAND §5, lot M3).
+
+Errors: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 CSRF_FAILED`, `403 ACCOUNT_LOCKED`, `404 ORDER_NOT_FOUND`, `404 ADDON_NOT_FOUND`, `409 ORDER_CLOSED`, `409 ORDER_PACKING_STARTED`, `409 ADDON_NOT_OFFERED`, `409 ADDON_OUT_OF_STOCK`, `409 ADDON_LIMIT`, `429 RATE_LIMITED`.
+
+### 10.31 THE SET: a size per piece, and a set in YOUR ORDERS (extension of the contract)
+
+Plan MACRO M3 §5.1 and §5.2 (macro scope K44 T1 to T4; `routes/club.ts`, `routes/live.ts`, `services/drops.ts`, `services/live.ts`, `services/set-sales.ts`; DATABASE §5.135 to §5.138). A release sells a model or **a set** of 2 to 4 models at one price (§16.49); its entry chooses **a size for each piece**, in the set's order.
+
+- **The bodies.** On a set's release, `sizes: [ { "piece": 1–4, "sizeId" } ]` replaces `sizeId` (never both, `400` otherwise): `POST /api/v1/club/drops/:id/enter` and `…/reserve` (a size for every piece), `POST /api/v1/club/drops/:id/size` (CHANGE SIZE: any of its pieces, the others kept), `PUT /api/v1/live/:id/interest`, `POST /api/v1/live/:id/enter` (every piece) and `POST /api/v1/live/:id/size` (any of them). Each size must be one the release gives for that piece: `422 DROP_SET_SIZES` on a draw, `422 LIVE_SET_SIZES` on a LIVE RELEASE (§5.2). A model's release keeps `sizeId` and refuses `sizes`.
+- **The quantities.** A set's draw counts its pieces in sets (`quantity`, the same number of sets in every piece once published). In a LIVE RELEASE **a set counts as one** toward `perAccount` (T4): 1 to 5 sets per person, `quantity` in sets (`400 LIVE_QUANTITY_INVALID`, *This release offers one set per person.*).
+- **What the views carry** (absent on a model's release, so every earlier answer is unchanged): a release's card and page `set` (`{ "name", "pieces": [ { "piece", "id", "name", "type", "variant", "imageUrl" } ] }` at their stages; the card's `model` is then the set itself, type `SET`, never one of its models; `quantity` and `priceMinor` per set); each size its `piece`; an entry, an interest and a drawn entry their `sizes` (`[ { "piece", "id", "label" } ]`); a LIVE room's `pieces` (each piece's sizes, its figures in sets) and the account's `savedSizes` (YOUR SIZES, one per piece) in `/state` and the stream's first `you` frame; a draw entry's `savedSizes` (`GET /api/v1/club/drops/:id/entry`).
+- **The draw** (§8.9): filling it in its order, an entry is SELECTED while every one of its sizes still has a piece left, else WAITLISTED; OFFER NEXT gives the place to the first waiting entry whose sizes all have a piece left. **The LIVE RELEASE**: an entry takes its turn when each of its sizes has free pieces for its sets; one that does not fit yet holds back every size it needs, so each size keeps its line's order (ARCHITECTURE B.18). The house's guarantee never covers a set's release, which never has an after-room.
+- **The set sold.** CONFIRMED (a draw) or PAY (a LIVE RELEASE) makes one **set sale** per set and **one order per piece**, each in its model and the size chosen for it, all in one parcel; each piece takes its own ORBES identity at packing and counts toward the tier once registered (T2). Each order carries its **share** of the set's price (by the pieces' base prices, else equally; the remainder on the first), so each piece's invoice reads *Part of THE SET <name>* at its share.
+
+`GET /api/v1/account/orders` (§10.13) gives each order of a set its `set`: `{ "saleId", "name", "priceMinor", "currency", "piece", "pieces" }` (the one price of the set, this order's place among its pieces, the references of the set's orders in order). In the verify app the pieces of one set are grouped under THE SET · <name> with ONE PRICE FOR THE SET; each piece reads PART OF THE SET in its PRICE row, never its share.
+
+- **Cancelled whole**: cancelling one order of a set cancels its other open orders; refused once a piece has shipped (`409 SET_SHIPPED`).
+- **Returned whole** (T3): RETURN THE SET posts the existing `POST /api/v1/account/orders/:id/case` (§10.23) with `{ "kind": "RETURN", … }` on any of its pieces; the server opens one case per piece shipped or delivered, as one group, with one message in MESSAGES; the set's other pieces then read RETURN REQUESTED. A size **exchange** of one piece stays its own case, and its EXCHANGE order keeps its place in the set.
+- The account's export (§16.13) carries `setSales`, each order's `set` and each entry's size per piece.
 
 ## 11. Ownership endpoints
 
@@ -4446,6 +4565,8 @@ In the console: *Lock account* and *Unlock account* on the owner's sheet, each b
 | `emails` | (plan MACRO M1 §4.2) The emails written to the account still kept, oldest first: `{ kind, status, createdAt, sentAt, settledAt }`. Never the address, subject or words (they repeat what the export holds, and the kind names the email): `notIncluded` says so, and that each email is erased 90 days after it is sent, fails or is cancelled (`emailPurge`). `account.export` counts them (`emails`). |
 | `houseMessages` | (plan MACRO M2 §1.4, D24) Every house message the account received in MESSAGES (§10.29), oldest first: `source` (`MOMENT`, `CUSTOM`), `moment` (`null` for a custom message), `title` and `body` as the collector reads them, `pieceRef`, `deliveredAt`, `readAt`. |
 | `wornPhotos` | (plan MACRO M2 §2.2, D31) Every photograph the account sent for WORN (§11.8), oldest first: `piece` (its serial), `model`, `status`, `sentAt`, `publishedAt`, `endedAt`, `refusal`, `credit` (`firstName`, `country`, `instagram`, as sent), `consentVersion`, `consentAt`. Never the bytes: a photograph is kept only while it is in review or published, and its piece shows it to its owner then; `notIncluded` says so. |
+| `setSales` | (plan MACRO M3 §5.2, K44) Every set the account bought (§10.31), oldest first: `set` (its name), `release`, `priceMinor`, `currency`, `soldAt`, `orders` (the references of its orders, one per piece). Each order of `orders` carries its `set` (the set's name, its piece, the sale's price and orders) and `addonItems` (§10.30: each unit's name, price, status and dates); each draw and LIVE entry of a set its size per piece. |
+| `addonChoices` | (plan MACRO M3 §4.2, D2) The add-ons chosen and not on an order yet, oldest first: `on` (`LIVE_ENTRY`, `DRAW_ENTRY`, `SALON_REQUEST`), `sourceId`, `addon`, `units`, `chosenAt`. |
 | `claimCodes` | (plan NEXT LOT §3.4) Every new claim code ORBES Client Services made for one of the account's orders (§10.20), oldest first: `order` (its reference), `madeAt`, `status` (`WAITING`, `READ`, `WITHDRAWN`), `readAt`. Never the code, sealed or clear, nor who made it. Its reading is in `activity` (`claim_code.read`, made by the account). `account.export` counts them (`claimCodes`). |
 | `guarantees` | (plan NEXT-NINE, IN-01) Every house's guarantee granted to the account, oldest first, shown to it or not: `id`, `scope`, `target` (the model's or the collection's name, or the release's title), `pieces`, `validUntil`, `visible`, `note`, `revokeNote` (Client Services' note at a revocation, or `null`), `status`, `releaseId`, `grantedAt`, `usedAt`, `closedAt`. Never who granted or revoked it. `account.export` counts them (`guarantees`). |
 | `warrantyClaims` | (plan ORBES CARE of 2026-10-15, §16.39) Every warranty claim of the account, oldest first: `id`, `productId`, `basis` (`LIFETIME`, `TWO_YEARS`, `LEGAL`), `status`, `openedAt`, `labelAt`, `receivedAt`, `outcome`, `refusalReason`, `value` (`amountMinor`, `currency`) or `null`, `creditPercent`, `replacementProductId`, `decidedAt`, `returnShippedAt`, `doneAt`, `cancelledAt`. Never its staff note, its label, nor who opened or decided it. `account.export` counts them (`warrantyClaims`). |
@@ -4921,6 +5042,8 @@ An **AUDITOR** reads the buyer masked (the name `J*** D***`, the address `***`, 
 
 **The lines** (plan NEXT-NINE, BP-19 T4 and T5): each `{ kind, label, detail, amountMinor }`, `kind` one of `PIECE`, `ADDON`, `SHIPPING` (*SHIPPING · STANDARD*, its detail *FREE · PLATINE* when its tier made it free; none for an order travelling with another), `CREDIT` (*CREDIT · PLATINE*, a negative amount, the PDF printing it with its minus sign; *CREDIT · BIRTHDAY* for the birthday credit, plan CUSTOMER INTELLIGENCE §3.5 SB.4.3, first of the CREDIT lines; *CREDIT · WARRANTY* for a warranty credit, plan ORBES CARE, next) and `GIFT` (*WELCOME GIFT · MODEL*, its detail *ORDER OR-…*, at 0), read back with its own kind (an unknown stored kind reads as `PIECE`); a credit note repeats them. A GIFT order has no invoice of its own: its order's carries its line. A page holds fifteen lines (`INVOICE_LINE_BUDGET`, `INVOICE_MAX_LINES`, `render/invoice.ts`: the piece, six add-ons, the engraving, its shipping, four CREDIT lines (the birthday credit's, the warranty credit's and one per tier) and a GIFT line per tier), the table sharing its height beyond seven; at the fourteenth and fifteenth a line's detail sits a little closer under it (`invoiceTablePitch`), so the order carrying every line still prints on one page.
 
+Lot M3 (plan MACRO M3 §4.2 and §5.2; §16.48, §16.49): a catalogue add-on's unit is an `ADD_ON_ITEM` line (its name and price, never its SKU) on the invoice issued at PAID; added after PAID, a supplementary invoice of its lines; removed after PAID, a credit note for its lines (§10.30). Each order of a set carries its share of the set's price, its PIECE line's detail ending *Part of THE SET <name>*.
+
 In the console: **Invoices** (Clients): the month (the last 24 offered), the kind, a search; the month's totals; each document with its order's page and its PDF; DOWNLOAD THE MONTH (CSV). An order's page lists its documents with their PDFs.
 
 Errors of this section: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 FORBIDDEN`, `404 INVOICE_NOT_FOUND`.
@@ -4996,6 +5119,8 @@ The store is not decided (plan LIVE RELEASE+ of 2026-10-04, choices 9, 24 and 25
 | GET | `/api/admin/models/:id/shopify` | AUDITOR | The model's Shopify product: `{ "model": { "id", "name", "skuPrefix" }, "handle" (the one the product export writes: a variant's, its main model's), "productId", "variants": [{ "size", "sku", "known", "variantId" }] }`, its sizes as the export gives them (`known` `false`: the SKU of a model never issued nor sold, made when its id is pasted) |
 | PUT | `/api/admin/models/:id/shopify` | OPERATOR | `{ "productId", "variants": [{ "size", "variantId" }] }`, the ids Shopify gave once the export is imported, each the number or the address of its page in Shopify's admin (`…/products/8123456789`, `…/variants/44012345678`); `null` or `""` clears one. The product's id goes on every SKU of the model (a model never issued nor sold has its one-size SKU made, variant given or not), each size's variant on its SKU (a size not given keeps its own); without the product no variant stands. Two links of one product run one after the other. Each size one of the export's, once; a variant id once; a variant with its product (`400 VALIDATION_FAILED` otherwise); `409 SHOPIFY_PRODUCT_TAKEN` when a model outside its group is linked to that product (a model and its variants share their product, N1), `409 SHOPIFY_VARIANT_TAKEN` when another size has that variant. Audited `model.shopify` with the product's id and each variant's before and after (nothing written when nothing changes). Answers the model's Shopify product |
 | GET | `/api/admin/shopify/orders.csv` | AUDITOR | `?from=YYYY-MM-DD&to=YYYY-MM-DD` (UTC days, both included, at most 366): the orders reserved then whose price is entered, never an order of a test account (the test entrants' pool; no parameter brings them in), the oldest first, as Shopify's order CSV: `Name` (its OR- reference), `Email` (the collector's account: how the store will match its customers to the accounts, N3), `Financial Status` (`pending` while reserved, `paid`, `refunded` once returned or cancelled after it was paid, `voided` cancelled before), `Paid at`, `Fulfillment Status` (`fulfilled` once shipped) and `Fulfilled at`, `Currency`, `Subtotal` (the piece and its add-ons), `Shipping` (its shipping fee, plan NEXT-NINE, BP-19 T4: `0.00` when free, when the order has none, or when it travels with another, whose row carries it), `Taxes` `0.00` (no VAT), `Total` (the subtotal and the shipping), `Shipping Method` (the carrier), `Created at` (reserved), the piece as the first line item (`Lineitem quantity` 1, `Lineitem name` `MONOLITHE - 54`, `Lineitem price`, `Lineitem SKU`, `Lineitem requires shipping` `true`, `Lineitem taxable` `false`, `Lineitem fulfillment status`), each add-on as the next ones (a row with the order's `Name` and its line item only), the buyer Client Services entered as billing and shipping (`… Name`, `… Street` the whole address, `… Address1` its first line, `… Address2` the rest), `Canceled at`, `Refunded Amount`, `Vendor` `ORBES`, `Location`, `Id` (its Shopify id once it has one) and `Source` (`orbes-live`, `orbes-draw`, `orbes-salon`, `orbes-gift`: a welcome gift, its own order at `0.00` once its order has its currency). Dates read `2026-11-02 09:00:00 +0000`. An AUDITOR reads the emails masked (`j***@example.com`) and the buyer masked (`J*** D***`, the address `***`). `ORBES-shopify-orders-2026-11-01-to-2026-11-30.csv` |
+
+Lot M3 (plan MACRO M3 §1.6, §4.6, §5.6; scope S5): the product CSV gains *Weight value (grams)* (each variant's packed weight, §16.44) and Shopify's *Description* column, then, after the models, one product per active **add-on** priced in the store's currency (one variant, its SKU code, price and weight, type *Add-on*, §16.47) and one per active **set** (its code the handle and the SKU, the pieces' packed weights added, type *Set*, its pieces named in *Description*, §16.49), each a draft. The order CSV carries each add-on unit as a line item (§16.48).
 
 A size **set aside** (plan NEXT LOT §3.3, §13.4) is left out of the product export, the model's Shopify product (`GET …/shopify`, the Catalogue's *Price · Shopify* count) and the link (unknown there: `400`); its ids stay on its SKU as they are. On a model with its size type no SKU is made by the link: its sizes are declared in the Catalogue.
 
@@ -5514,6 +5639,114 @@ Each review runs under the photograph's row lock: a photograph reviewed meanwhil
 In the console: TO REVIEW, a card each with the photograph large, the credit exactly as it will read (*CAMILLE · FRANCE*, *@camille.m*), the piece's serial, the model and variant, the owner (the client sheet), sent and the consent's version in Paris time, PUBLISH and REFUSE… (one of the three reasons, the owner's words shown); J and K move between cards. PUBLISHED, a grid by model with TAKE DOWN…; ENDED, rows without photographs. A model's page in the Catalogue gains a row WORN, *8 published* (*None published*) for its group, linking to PUBLISHED filtered to it.
 
 Errors of this section: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 CSRF_FAILED`, `403 FORBIDDEN`, `404 WORN_NOT_FOUND`, `409 WORN_STATE`.
+
+### 16.44 Boxes, a model's packing and a parcel's box and weight (extension of the contract)
+
+Plan MACRO M3 §1 (macro scope D16 B1 and B2; `routes/admin/boxes.ts`, `routes/admin/catalog.ts`, `routes/admin/logistics.ts`, `services/boxes.ts`, `services/parcels.ts`; DATABASE §5.129). The owner's real boxes in Orders → Settings (**Boxes**, after Carriers), each model's (or variant's) box and packed weight, and the parcel's box and weight read while it is packed and written when it is PACKED. Nothing here reaches a collector; the agent (LOGISTICS) reads a box by its name and inside sides, **never its cost**.
+
+| Method | Path | Role | Effect |
+|---|---|---|---|
+| GET | `/api/admin/boxes` | AUDITOR | `{ items }`, the active boxes first, then those set aside, by name: `{ id, name, insideLengthMm, insideWidthMm, insideHeightMm, emptyWeightG, active, costMinor, currency, models, createdAt, updatedAt }` (`models`: how many models name it as their own) |
+| POST | `/api/admin/boxes` | **ADMIN** | **201** a box: `{ "name": 1–60, "insideLengthMm", "insideWidthMm", "insideHeightMm": 1–2 000, "emptyWeightG": 1–30 000, "costMinor"?: 0–100 000 000, "currency"? }` (the cost with its currency of two decimals, both or neither). Its inside length and width take the **95 × 62 mm certificate card flat**, in either orientation (`422 BOX_TOO_SMALL_FOR_CARD`); `409 BOX_NAME_TAKEN`. Audited `box.create` |
+| PATCH | `/api/admin/boxes/:id` | **ADMIN** | Any of its fields (at least one; the cost and its currency together, `null` both to clear); a parcel already packed in it keeps it. Audited `box.update` |
+| POST | `/api/admin/boxes/:id/set-aside` | **ADMIN** | Offered for no model nor parcel again (`409 BOX_IN_USE` while an active model packs in it, its own or a variant's main model's). Audited `box.set_aside` |
+| POST | `/api/admin/boxes/:id/reinstate` | **ADMIN** | Offered again. Audited `box.reinstate` |
+| PUT | `/api/admin/models/:id/packing` | OPERATOR | `{ "boxId": uuid \| null, "packedWeightG": 1–30 000 \| null }`: the box its pieces are packed in and their packed weight (the piece with its pouch and card, without the box); `null`, none, or on a variant its main model's (`409 BOX_SET_ASIDE`, `404 BOX_NOT_FOUND`). The model back; a model's `packing` reads `{ box, packedWeightG, inherited }` (`inherited.from`, the main model a variant reads either from). Audited `model.packing` |
+| POST | `/api/admin/logistics/orders/:id/packing/box` | LOGISTICS_ACT | CHANGE BOX: `{ "boxId" }`, an active box, while the parcel is PACKING (`409 PACKING_NOT_STARTED` before, `409 PACKING_PACKED` after, `409 BOX_SET_ASIDE`). The parcel back. Audited `shipment.box` |
+
+**The parcel's `packing`** (`GET /api/admin/logistics/orders/:id`, §16.33): `{ box, boxSource, pieces, modelsWithoutBox, weightG, missing, recorded, boxes }`. The box is the one chosen while packing (`CHOSEN`), else the box every piece shares (`MODELS`), else the largest of the pieces' boxes by inside volume (`LARGEST`: check the fit), else none (`modelsWithoutBox` named). The weight is the box's empty weight plus every piece's packed weight and every add-on unit's weight (§16.48); while something is missing it is `null` and `missing` names it (a model, an add-on, « box »): packing is never blocked. `boxes`, the active boxes to choose from, never with a cost. At **Packed** the box, the weight (or its missing list) are written on the shipment in the same transaction (`recorded` true from then on, journaled with `shipment.pack`, in `order.pack.check`); a parcel over 100 000 g is recorded unknown. The checklist's box line reads *The box: <name>, and the pouch* (its key `box` unchanged; a parcel packed before keeps its line), and both packing slips print *The parcel* with its box and weight. The Shopify product export gains *Weight value (grams)* per variant (§16.27).
+
+Errors of this section: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 CSRF_FAILED`, `403 FORBIDDEN`, `404 BOX_NOT_FOUND`, `404 MODEL_NOT_FOUND`, `409 BOX_NAME_TAKEN`, `409 BOX_IN_USE`, `409 BOX_SET_ASIDE`, `409 PACKING_NOT_STARTED`, `409 PACKING_PACKED`, `422 BOX_TOO_SMALL_FOR_CARD`.
+
+### 16.45 The returns and exchanges report (extension of the contract)
+
+Plan MACRO M3 §2 (macro scope K12 R1; `routes/admin/orders.ts`, `services/returns-report.ts`). Orders → **Returns** (`#/orders/returns`): the order cases RETURN and EXCHANGE not CANCELLED, opened in the period, by the collector or by Client Services, whatever channel the order came from (never a parcel problem). It only reads, in one REPEATABLE READ, READ ONLY transaction, and holds **counts only** (no account is named), so an AUDITOR reads it all. R2: no size confirmation exists anywhere, and nothing here reads a collector's saved sizes.
+
+| Method | Path | Role | Effect |
+|---|---|---|---|
+| GET | `/api/admin/orders/returns` | AUDITOR | `?modelId=&from=&to=&all=&test=` → `{ period: { from, to }, modelId, test, summary: { requests, returns, exchanges }, byReason, byModel, bySize, models }` |
+| GET | `/api/admin/orders/returns.csv` | AUDITOR | The by-model and by-size tables as a CSV attachment (`no-store`), `orbes-returns-<from>-to-<to>.csv` (all time: `orbes-returns-all-time-to-<today>.csv`) |
+
+- **Filters:** `modelId`, a main model with its variants, or a variant alone (`404 MODEL_NOT_FOUND`); the period in **Paris days** of the case's opening: the last 12 months to today by default, `from` and `to` both or neither, `all=true` for all time (`422 PERIOD_INVALID`); the test entrants' orders left out unless `test=true`.
+- **`byReason`:** SIZE, NOT_AS_EXPECTED, DAMAGED, OTHER, and NOT_GIVEN when a case has none, each `{ reason, returns, exchanges, total, share }`.
+- **`byModel`:** a variant on its own row: `{ model, cases, returns, exchanges, reasons, toLarger, toSmaller, flag }`, an exchange's direction read by comparing the order's size and the size asked (`compareSizes`). **`flag`** `RUNS_SMALL` with at least 3 size exchanges in the period and two thirds or more of them to a larger size, `RUNS_LARGE` to a smaller one, else `null`. **`bySize`:** each model row's ordered sizes (`null`: ONE SIZE), `{ returns, exchanges, toLarger, toSmaller }`. A piece of a set counts under its own model.
+
+Errors of this section: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `404 MODEL_NOT_FOUND`, `422 PERIOD_INVALID`.
+
+### 16.46 The countries each location serves, and ORDER A MODEL by size (extension of the contract)
+
+Plan MACRO M3 §3 (macro scope K11 Z1 and Z2; `routes/admin/locations.ts`, `routes/admin/supplier-orders.ts`, `services/stock.ts`, `services/size-split.ts`, `services/supplier-orders.ts`; DATABASE §5.130).
+
+| Method | Path | Role | Effect |
+|---|---|---|---|
+| PUT | `/api/admin/locations/:id/countries` | **ADMIN** | `{ "countries": ["FR", "BE", …] }` (ISO 3166-1 alpha-2, `[]` for none), the location's whole list: a country another location served **moves** here and is named → `{ location, moved: [ { country, from: { id, name } } ] }`. The same list again changes nothing. Audited `stock.location.countries` (added, removed, moved). Every location is read with its `countries` (`GET /api/admin/locations`) |
+| POST | `/api/admin/supplier-orders/split` | OPERATOR | ORDER A MODEL: `{ "modelId", "quantity": 1–10 000, "locationIds"? }` (a model or a variant; every location when omitted) → `{ model, sizeKind, quantity, locations, lines, totals, unmatched, source }`. One line per offered size and location, `{ sku, location, orders, savedSizes, proposed }`; `source` `DATA`, or `EVEN` with no data (an even split at the default location). `409 MODEL_NO_SIZES`. It writes nothing |
+| POST | `/api/admin/supplier-orders/split/drafts` | OPERATOR | ADD TO DRAFTS: `{ "lines": [ { "skuId", "locationId", "quantity": 1–10 000 } ] }`, the split as staff left it (each size and location once) → `{ drafts: [ { id, reference, supplier, location, lines, pieces } ], pieces }`: each line in its supplier's draft for that location, **all or nothing** in one transaction (`409 SKU_NO_SUPPLIER`, `409 SIZE_SET_ASIDE`: nothing added). Each line audited `supplier_order.draft` with `from: 'SPLIT'` |
+
+**The proposal** reads, for each offered size (a size set aside left out) at each location considered: the **orders** of that size, any channel, test orders included, at the order's own location, net of size exchanges (an order CANCELLED or RETURNED does not count, an EXCHANGE order counts in its new size); and the **saved sizes** of the collectors who wish for or own that kind of piece (an open wish on a model of the ordered model's size kind, or a piece held now of one), each collector once, at the location that serves their country (their default address's, else their profile's; a country no location serves counts at the default location), a DELETED account never; a saved size matching no offered size is counted apart (`unmatched`). The pieces are shared in proportion to `orders + savedSizes` by the largest remainder. **Counts only**: the answer never names an account (SECURITY-MODEL §3.6). Staff change any line before ADD TO DRAFTS; nothing is applied without them (Z2).
+
+Errors of this section: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 CSRF_FAILED`, `403 FORBIDDEN`, `404 STOCK_LOCATION_NOT_FOUND`, `404 MODEL_NOT_FOUND`, `404 SKU_NOT_FOUND`, `409 MODEL_NO_SIZES`, `409 SKU_NO_SUPPLIER`, `409 SIZE_SET_ASIDE`.
+
+### 16.47 Add-ons: the catalogue and their stock (extension of the contract)
+
+Plan MACRO M3 §4.1 and §4.2 (macro scope K48 D1; `routes/admin/addons.ts`, `services/addons.ts`, `services/sku-owner.ts`; DATABASE §5.131, §5.132, §5.47). Catalogue → **Add-ons**, after Models. An add-on has **its own SKU** (`skus.addon_id`: no size, no fit), stock in the same ledger as the pieces, minimums, supplier orders and receptions; never an ORBES CODE, never a product row. An AUDITOR reads, an OPERATOR writes.
+
+| Method | Path | Role | Effect |
+|---|---|---|---|
+| GET | `/api/admin/addons` | AUDITOR | `{ items }`, the active first, by position then name: `{ id, name, line, supplier, weightG, position, active, sku: { id, code, shopifyVariantId }, shopifyProductId, prices: [ { currency, priceMinor } ], stock: [ per location ], createdAt, updatedAt }` |
+| GET | `/api/admin/addons/:id` | AUDITOR | One add-on (`404 ADDON_NOT_FOUND`) |
+| POST | `/api/admin/addons` | OPERATOR | **201**: `{ "name": 1–40, "skuCode", "line"?: ≤ 120, "supplierId"?, "weightG"?: 1–30 000, "position"?: 0–10 000, "prices"?: { "EUR"?, "GBP"?, "USD"?, "CHF"? } }`: its SKU code given once, never changed (`^[A-Z0-9][A-Z0-9-]{1,63}$`, unique among every SKU: `409 SKU_CODE_TAKEN`); `409 ADDON_NAME_TAKEN`; `404 SUPPLIER_NOT_FOUND`. Audited `addon.create` |
+| PATCH | `/api/admin/addons/:id` | OPERATOR | Its name, line, supplier, weight, position (at least one). Audited `addon.update` |
+| PUT | `/api/admin/addons/:id/prices` | OPERATOR | `{ "prices": { "EUR": 1500, "GBP": null } }`: a price per house currency, 0 to 1 000 000.00 in minor units, `null` removes one (not offered in that currency). Audited `addon.prices` |
+| POST | `/api/admin/addons/:id/set-aside` | OPERATOR | Offered nowhere again (no order, minimum, supplier order: `409 ADDON_SET_ASIDE`); its stock, units and history kept. Audited `addon.set_aside` |
+| POST | `/api/admin/addons/:id/reinstate` | OPERATOR | Offered again. Audited `addon.reinstate` |
+| PUT | `/api/admin/addons/:id/shopify` | OPERATOR | `{ "productId", "variantId" }` pasted back from Shopify (`null` clears one): its one product and variant (`409 SHOPIFY_PRODUCT_TAKEN`, `409 SHOPIFY_VARIANT_TAKEN`). Audited `addon.shopify` |
+
+**Its stock** goes through the routes of §16.33: Logistics' stock lists every active add-on's SKU after the models' sizes, named by its add-on (`LogisticsSku.addon`, `model` `null`), with corrections, transfers and minimums as a size's, never a count in; the supplier proposal, drafts, orders and their PDF name it (`SupplierOrderSku.addon`); a reception's add-on line enters stock at the confirmation as one RECEIVED movement, **without identity or card** (`reception.confirm`'s `countedIn`; no material asked). Every reserved count reads one source, the view `stock_holds` (the orders' holds and the add-on units held, DATABASE §6.1). The Shopify product export (§16.27) adds one product per active add-on priced in the store's currency: one variant, its SKU code, price and weight, type *Add-on*, a draft.
+
+Errors of this section: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 CSRF_FAILED`, `403 FORBIDDEN`, `404 ADDON_NOT_FOUND`, `404 SUPPLIER_NOT_FOUND`, `409 ADDON_NAME_TAKEN`, `409 SKU_CODE_TAKEN`, `409 ADDON_SET_ASIDE`, `409 SHOPIFY_PRODUCT_TAKEN`, `409 SHOPIFY_VARIANT_TAKEN`.
+
+### 16.48 Add-ons on an order (extension of the contract)
+
+Plan MACRO M3 §4.2 (macro scope K48 D2; `routes/admin/orders.ts`, `services/order-addons.ts`, `services/invoices.ts`; DATABASE §5.133, §5.134). An order's catalogue add-ons, **unit by unit**, each holding one of its SKU at the order's location from the moment it is added; the collector's side is §10.30.
+
+| Method | Path | Role | Effect |
+|---|---|---|---|
+| GET | `/api/admin/orders/:id/addons` | AUDITOR | What the order can take now, for *Add an add-on*: `{ canAdd, reason, paid, currency, offer }` (§10.30) |
+| POST | `/api/admin/orders/:id/addons` | OPERATOR | `{ "addonId", "units" }` on an order RESERVED or PAID, not a welcome gift, a size exchange nor a Shopify order, its currency entered, until **SHIPPED** → the order (§16.24). After PAID, a supplementary invoice |
+| DELETE | `/api/admin/orders/:id/addons/:lineId` | OPERATOR | **One unit** HELD taken off (REMOVED) until SHIPPED → the order; after PAID, a credit note for its line |
+
+- **The order's view** (`GET /api/admin/orders/:id`) gains `addonItems`, one per unit: `{ id, addon: { id, name }, skuCode, priceMinor, currency, status, addedAt, addedBy, removedAt, cancelledAt, shippedAt, returnedAt, returnedToStock, location, invoiceId }`, `status` HELD, SHIPPED, REMOVED, CANCELLED or RETURNED; `addedBy.type` PURCHASE (carried from the collector's choice), COLLECTOR or STAFF.
+- **Carried at the purchase**: a draw's Confirm and a salon's Accept list the collector's choices (`addonChoices` on the console's draw entries and salon requests) and answer what was left out (`addonsLeftOut`, `NONE_LEFT` or `NOT_OFFERED`); the release's LIVE entries likewise at PAY. Never blocking the sale; audited.
+- **Documents** (§16.25): each unit is an `ADD_ON_ITEM` line (its name and price, never its SKU): added before PAID, on the invoice issued at PAID; added after, a supplementary invoice of its lines (named on the unit); removed after PAID, a credit note for its lines; credited in full with the order when it is cancelled or returned.
+- **The order's life**: cancelled with it (the stock free again); shipped with it (the ledger's SHIPPED −1 per unit, the movement naming its unit); returned with it (back to stock, RETURNED +1, unless a refund's `addonsOut` on `POST /api/admin/order-cases/:id/decide` marks units not to be sold again, `returnedToStock` false); a size exchange leaves them with the collector (the EXCHANGE order's invoice bills them again as the original's return credits them); the order moved to another location moves them, or is refused (`409 ORDER_ADDON_NOT_AT_LOCATION`); a price entered in another currency than its units' is refused (`409 ORDER_ADDON_CURRENCY`); a parcel problem brings them back to HELD (a reshipment names the units held beyond the stock, `addonsShort`).
+- **Packing** (§16.33): one checklist line per add-on of each order, `addon-item:<orderId>:<addonId>`, *Add-on: POLISHING CLOTH × 2*, ticked by hand (no scan: no identity); the parcel's pieces list their add-ons, the slips too; each unit's weight joins the parcel's (§16.44).
+- **History**: each addition and removal is one event of the order, one journal entry (`order.addon.add`, `order.addon.remove`) and one audit entry. The Shopify order export (§16.27) carries each unit as a line item; the account's export (§16.13) the add-ons of each order and the choices not yet on an order.
+
+Errors of this section: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 CSRF_FAILED`, `403 FORBIDDEN`, `404 ORDER_NOT_FOUND`, `404 ADDON_NOT_FOUND`, `409 ORDER_CLOSED`, `409 ADDON_NOT_OFFERED`, `409 ADDON_OUT_OF_STOCK`, `409 ADDON_LIMIT`, `409 ORDER_ADDON_NOT_AT_LOCATION`, `409 ORDER_ADDON_CURRENCY`.
+
+### 16.49 THE SET: the catalogue, its releases and its sales (extension of the contract)
+
+Plan MACRO M3 §5 (macro scope K44 T1 to T4; `routes/admin/sets.ts`, `routes/admin/drops.ts`, `routes/admin/live.ts`, `routes/admin/order-cases.ts`, `services/sets.ts`, `services/set-sales.ts`, `services/release-offer.ts`; DATABASE §5.135 to §5.138). Catalogue → **Sets**: 2 to 4 models grouped at **one price**, sold as their own release (a draw or a LIVE RELEASE), one entry and one price, each piece's size chosen at entry. An AUDITOR reads, an OPERATOR writes.
+
+| Method | Path | Role | Effect |
+|---|---|---|---|
+| GET | `/api/admin/sets` | AUDITOR | `{ items }`, the active first: `{ id, name, code, basePriceMinor, baseCurrency, active, shopifyProductId, pieces: [ { position, model, sizes, basePrice } ], releases, createdAt, updatedAt }` |
+| GET | `/api/admin/sets/:id` | AUDITOR | One set (`404 SET_NOT_FOUND`) |
+| POST | `/api/admin/sets` | OPERATOR | **201**: `{ "name": 1–60, "code", "modelIds": [2 to 4, in order], "basePriceMinor"?, "baseCurrency"? }` (the price with its currency, both or neither). Each piece a different model or variant, active, with a size offered (`422 SET_MODELS`, `404 MODEL_NOT_FOUND`); the code kept in capitals (its reference and future Shopify handle); `409 SET_NAME_TAKEN`, `409 SET_CODE_TAKEN`. Audited `set.create` |
+| PATCH | `/api/admin/sets/:id` | OPERATOR | Its name, code, base price; its pieces only while no release names it (`409 SET_IN_USE`). Audited `set.update` |
+| POST | `/api/admin/sets/:id/set-aside` | OPERATOR | No new release of it. Audited `set.set_aside` |
+| POST | `/api/admin/sets/:id/reinstate` | OPERATOR | Offered again. Audited `set.reinstate` |
+| PUT | `/api/admin/sets/:id/shopify` | OPERATOR | `{ "productId" }`, its one Shopify product (`409 SHOPIFY_PRODUCT_TAKEN`). Audited `set.shopify` |
+
+- **A set's draw** (§16.19): `POST /api/admin/drops` takes `setId` in place of `modelId` (exactly one; `404 SET_NOT_FOUND`, `409 SET_SET_ASIDE`, `409 MODEL_INACTIVE`), its sizes each with its `piece` (1 to the set's pieces; 1 to 24 sizes per piece, each linked to its piece's model's SKU); `quantity` in sets. `PATCH` moves a DRAFT to another set with its sizes, never to a model (nor a model's release to a set). **Publish** requires each piece's sizes to add up to the same number of sets (`409 DROP_SET_SIZES_UNEVEN`, naming each piece's total). OFFER NEXT's `sizeId` is optional and narrows the choice; `409 DROP_FULL` when no waiting entry fits. The release, its sizes and its entries carry `set`, `piece` and `sizes`; the card's `model` is the set itself (type `SET`).
+- **A set's LIVE RELEASE** (§16.23): `POST /api/admin/live` takes `setId` and sizes with their `piece`; its quantity is its sets on sale, the smallest of the pieces' totals (« 25 SETS » by default); `perAccount` counts sets, 1 to 5. It never has an after-room (`409 AFTER_ROOM_SET`). **`GET /api/admin/live/size-mix?setId=&locationId=`**: a size mix per piece. ADD PIECES raises one size of one piece; the board, the radar, the feasibility, the sell-out forecast and the report read per piece and count sets.
+- **Kept, excluded, adapted** (`services/release-offer.ts`): the CAMPAIGN tab (§16.19, its `offer`: the set's name and each piece's name and photograph, FULL drawing them side by side, TEASER by default) and GROWTH (`GrowthRelease.set`, a set sale's revenue by release and by each piece's order at its share) keep a set's release in full; a model's releases on its sheet and the house's guarantees (`409 GUARANTEE_SET_RELEASE`) leave it out; PAST, the planner and TEST ENTRANTS read it per piece.
+- **The set sale and its orders**: one order per piece at its share, in one parcel, the shipping and a release add-on on the first. **`GET /api/admin/orders/:id`** gains `set`: `{ saleId, setId, name, priceMinor, currency, piece, orders: [ { id, reference, piece, channel, status, model, variant, sizeLabel, priceMinor, currency } ] }`. Cancelling one order cancels its set's open orders (`409 SET_SHIPPED` once a piece has shipped); a piece is never returned alone (`409 SET_RETURN_WHOLE`).
+- **The group return** (§16.34): a RETURN on one piece, the collector's or Client Services', opens one case per piece shipped or delivered, as one group (`order_cases.group_id`). An order case carries `group` (`{ id, cases: [ { id, order, status, received } ] }`); **`POST /api/admin/order-cases/:id/decide`** on any case of the group decides it together once every piece is back (`409 SET_RETURN_NOT_RECEIVED`), each piece's destination by its case (`pieces: [ { "caseId", "pieceTo": "RESTOCKED" \| "ARCHIVED", "locationId"? } ]`, the others take `pieceTo`), and answers the group's decided cases and its pieces' `claimCodes`; each order gets its credit note. Cancelling one case cancels the group. A size exchange of one piece stays its own case, decided EXCHANGE.
+- **Shopify** (§16.27, S5): the product CSV gains Shopify's *Description* column (empty for models and add-ons) and one product per active set priced in the store's currency: its code the handle (with `-set` when a model already has it) and the SKU, its weight the pieces' packed weights added, type *Set*, its pieces named in the description. A set sale has its future `shopify_line_item_id`.
+
+Errors of this section: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 CSRF_FAILED`, `403 FORBIDDEN`, `404 SET_NOT_FOUND`, `404 MODEL_NOT_FOUND`, `409 SET_NAME_TAKEN`, `409 SET_CODE_TAKEN`, `409 SET_IN_USE`, `409 SET_SET_ASIDE`, `409 DROP_SET_SIZES_UNEVEN`, `409 AFTER_ROOM_SET`, `409 GUARANTEE_SET_RELEASE`, `409 SET_SHIPPED`, `409 SET_RETURN_WHOLE`, `409 SET_RETURN_NOT_RECEIVED`, `409 SHOPIFY_PRODUCT_TAKEN`, `422 SET_MODELS`.
 
 ## 17. Admin: keys, audit log and console users
 

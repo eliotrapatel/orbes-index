@@ -174,6 +174,12 @@ Dans l'e-mail d'expédition, ou sur la notice glissée dans le colis :
 
 > Votre pièce voyage avec sa carte certificat. À réception, ouvrez theorbes.com/verify, scannez l'ORBES CODE de la pièce, puis enregistrez-la à votre nom avec le claim code de la carte. Vérifiez uniquement sur theorbes.com/verify.
 
+### La boîte et le poids du colis
+
+Les boîtes de la maison se listent dans `Orders` → `Settings` → `Boxes` (un ADMIN, lot M3) : leur nom, leurs dimensions intérieures, leur poids à vide et leur coût. Une boîte qui ne peut pas recevoir à plat la carte certificat de 95 × 62 mm est refusée. Chaque modèle reçoit sa boîte et son poids emballé (la pièce avec sa pochette et sa carte, sans la boîte) sur sa page, section `Packing` (un OPERATOR) ; une variante prend ceux de son modèle principal tant qu'elle n'a pas les siens.
+
+Pendant l'emballage, la page du colis dit quelle boîte prendre (celle de la pièce, celle de toutes les pièces, ou la plus grande de leurs boîtes quand elles diffèrent : vérifiez que tout tient) et le poids du colis. `Change box` en choisit une autre tant que le colis n'est pas emballé. Un poids manquant ne bloque jamais l'emballage : la page dit ce qui manque. À `Packed`, la boîte et le poids sont inscrits sur le colis et imprimés sur le bordereau ; le prestataire ne voit jamais le coût d'une boîte.
+
 ### Recevoir une livraison et la confirmer
 
 - **Le prestataire.** `Logistics` → `Receptions` → `Receive a delivery` : la référence de la commande fournisseur (SO-…) lue sur le bon de livraison, puis `Open`. Quand le bon ne la porte pas, demandez-la à ORBES : le prestataire ne voit jamais la liste des commandes fournisseur ni leurs prix. Comptez chaque pièce : une pièce défectueuse va en `Rejected`, une pièce en trop ou hors commande s'accepte avec une note. Puis `Record the reception`.
@@ -193,12 +199,41 @@ Le colis revient à l'expéditeur, se perd ou arrive abîmé : le prestataire ou
 
 Le client demande un retour ou un échange de taille dans les 14 jours qui suivent la livraison, ou écrit dans `Messages`. ORBES Client Services peut aussi l'ouvrir depuis la page de la commande (`Open a return`), même après les 14 jours, par geste commercial. Le client renvoie la pièce à ses frais ; le prestataire l'enregistre à l'arrivée (`Received`, la pièce intacte ou abîmée) ; ORBES décide (`Decide`) : remboursement, ou l'autre taille, et la pièce retourne au stock ou à l'archive (un ADMIN). Rien n'annule une garantie commencée : une pièce remise en stock repart avec un nouveau claim code, montré une fois, pour sa nouvelle carte.
 
+**« Est-ce que ce modèle taille petit ? »** `Orders` → `Returns` (lot M3) compte les retours et les échanges de taille, par raison, par modèle (chaque variante sur sa ligne) et par taille, sur les 12 derniers mois par défaut (`Last 12 months`), les commandes de test à part (`Show test orders`). Un modèle marqué RUNS SMALL a eu au moins 3 échanges de taille dans la période, dont deux tiers au moins vers une taille plus grande ; RUNS LARGE, vers une plus petite. Ce ne sont que des nombres : aucun client n'y est nommé, et l'application ne demande jamais au client de confirmer sa taille.
+
+> Sur ce modèle, plusieurs clients ont préféré la taille au-dessus. Si vous hésitez entre deux tailles, je vous conseille la plus grande ; l'échange de taille reste possible pendant 14 jours après la livraison.
+
 ### L'adresse et la gravure du client
 
 - **L'adresse de livraison.** Le client la saisit lui-même sur sa commande, dans YOUR ORDERS (le nom, les lignes, le pays, le téléphone), ou en choisit une de YOUR ADDRESSES, où son adresse par défaut est mise sur chaque nouvelle commande. Il la change jusqu'à `Start packing`. Ensuite, il vous écrit : changez-la sur la page de la commande, section `Buyer` → `Edit` (le pays et le téléphone compris), jusqu'à l'expédition. Une adresse changée après sa première saisie est marquée ADDRESS CHANGED pour le prestataire et sur le bordereau : vérifiez l'étiquette. Une commande qui voyage avec une autre (un cadeau de bienvenue, les pièces suivantes d'une entrée) est livrée à l'adresse de celle-ci : changez celle de la commande principale.
 - **Une demande de retour ou d'échange depuis MESSAGES.** Le client qui demande un retour ou un échange depuis YOUR ORDERS ouvre aussitôt le cas : sa demande arrive aussi dans `Messages`, comme son propre message, qui commence par RETURN REQUESTED ou EXCHANGE REQUESTED et sa raison, avec la commande attachée. La section `Order case` de la commande montre sa raison, sa note et `Open in Messages`. Répondez dans la conversation ; le client voit sur sa commande l'adresse où renvoyer la pièce (l'adresse du lieu de la commande, réglée dans `Settings` → `Locations`).
 - **Le prix de la gravure.** `Orders` → `Settings` → `Engraving` (un ADMIN) : un prix par devise. Une devise sans prix n'offre aucune gravure aux clients. Une commande garde le prix qu'elle a pris. Ajoutée après le paiement, la gravure a sa propre facture ; retirée, un avoir pour sa ligne : les deux sont émis d'eux-mêmes, dans `DOCUMENTS` du client et sur la page de la commande.
 - **La gravure vendue par une LIVE RELEASE.** Quand une sortie vend la gravure parmi ses options, son libellé contient le mot ENGRAVING (par exemple la ligne d'option ENGRAVING, 150, Your initials, by hand) : ses acheteurs saisissent leurs mots sur la commande, sans second prix, jusqu'au début de l'emballage.
+
+### Les compléments (add-ons)
+
+Un complément (lot M3) est un article du catalogue vendu avec une pièce : un kit d'entretien, un chiffon de polissage, une rallonge de chaîne, un bracelet de rechange, une pochette de voyage… Il a son stock, son prix par devise et son fournisseur ; il **n'a pas d'ORBES CODE et ne compte jamais pour le palier**. Ils se créent dans `Catalogue` → `Add-ons` (`New add-on`, un OPERATOR : le nom tel que le client le lit, une ligne, le code SKU donné une fois pour toutes, le fournisseur, le poids, un prix par devise). Sans prix dans une devise, il n'est pas proposé dans cette devise ; `Set aside` le retire partout. Son stock se tient comme celui d'une taille : `Logistics` → `Stock`, section ADD-ONS, ses réceptions sans carte ni identité, ses commandes fournisseur.
+
+- **Quand le client le choisit.** Au moment de l'achat : sur la réservation d'une LIVE RELEASE, avant PAY ; sur une place tenue d'un tirage avec un prix (il est ajouté quand ORBES Client Services confirme la commande) ; dans une demande du salon privé (ajouté quand la demande est acceptée). Puis dans YOUR ORDERS, ADD AN ADD-ON, **jusqu'au début de l'emballage**. Au plus 3 de chaque. Il le retire lui-même (REMOVE, deux fois pour confirmer) jusqu'au début de l'emballage ; ensuite, il vous écrit.
+- **Pourquoi un complément peut manquer.** Il n'est proposé que s'il est en stock à l'entrepôt de la commande, dans sa devise. S'il n'en reste plus au moment où la commande se fait, la vente se fait sans lui et le client le lit sur CONFIRMED (*THE CHAIN EXTENDER COULD NOT BE ADDED: NONE LEFT.*) ; la commande n'attend jamais un complément. Il n'est jamais proposé sur un cadeau de bienvenue, un échange de taille ni une commande payée sur la boutique Shopify.
+- **Ce que vous faites.** Sur la page de la commande, section `Add-ons` : `Add an add-on` (un OPERATOR, de 1 à 3, sur une commande réservée ou payée) et `Remove` (une unité à la fois), **jusqu'à l'expédition**.
+- **Les factures.** Ajouté avant le paiement, il est sur la facture de la commande. Ajouté après le paiement, il a **sa propre facture** ; retiré après le paiement, **un avoir** pour sa ligne : les deux sont émis d'eux-mêmes, dans DOCUMENTS du client et sur la page de la commande. Il part, s'annule et revient avec sa commande ; au remboursement d'un retour, vous pouvez marquer une unité à ne pas revendre.
+- **L'emballage.** Une ligne de la liste par complément (*Add-on: POLISHING CLOTH × 2*), cochée à la main : il n'a pas de carte à scanner.
+
+> Vous pouvez ajouter ou retirer un complément depuis YOUR ORDERS jusqu'à ce que nous commencions à préparer votre colis. Il part avec votre pièce, dans le même colis. Si votre commande est déjà payée, il a sa propre facture, et un retrait donne un avoir.
+
+### THE SET
+
+THE SET (lot M3) réunit 2 à 4 modèles **à un seul prix**, vendus par une sortie à eux (un tirage ou une LIVE RELEASE) : une entrée, un prix, une taille par pièce choisie à l'entrée. Les sets se créent dans `Catalogue` → `Sets` (`New set`, un OPERATOR) ; une sortie d'un set se crée par `New release` ou `New live release`, en choisissant `A set`. Les pièces d'un set ne changent plus dès qu'une sortie le nomme.
+
+- **Les tailles.** Le client choisit une taille pour chaque pièce (YOUR SIZES les préremplit quand il les a enregistrées) et peut changer chacune tant que les entrées sont ouvertes. Au tirage, une entrée n'obtient sa place que si **chacune de ses tailles** a encore une pièce ; dans une LIVE RELEASE, son tour vient quand chacune de ses tailles en a une.
+- **Un par personne.** Dans une LIVE RELEASE, un set compte pour **un** dans la limite par personne, quel que soit son nombre de pièces (*1 SET PER PERSON*).
+- **La commande.** Chaque pièce a sa commande, son ORBES CODE et son claim code, et compte pour le palier une fois enregistrée ; elles voyagent dans un seul colis. Le client lit un seul prix, celui du set ; la facture de chaque pièce en porte sa part, avec *Part of THE SET* et le nom du set.
+- **Annulé en entier.** Annuler une commande du set annule les autres ; plus possible dès qu'une pièce est partie.
+- **Retourné en entier.** Le client demande RETURN THE SET sur l'une des pièces : un retour s'ouvre pour chaque pièce, ensemble, avec un seul message dans `Messages`. Il renvoie toutes les pièces dans un seul colis. Vous décidez le retour une fois toutes les pièces reçues (`Decide the set`, la destination de chaque pièce dans une seule fenêtre) ; chaque commande reçoit son avoir. Une pièce seule ne se retourne pas.
+- **L'échange d'une taille** reste possible pièce par pièce, comme pour toute commande : la pièce échangée reste dans le set.
+
+> Un set se retourne en entier : renvoyez toutes ses pièces ensemble, dans un seul colis, et nous vous remboursons le set. Si une seule taille ne vous va pas, vous pouvez échanger la taille de cette pièce, et garder le set.
 
 ### Sur un ordinateur : la page d'une commande
 
@@ -217,6 +252,8 @@ Le client qui attend son lot voit THE QUEUE : sa place, l'heure d'entrée estim�
 `Supplier orders` (ORBES seul) → `To order` : la console additionne ce qui manque (les commandes en attente et le stock sous son minimum) par fournisseur et par entrepôt. `Add to the draft`, ajustez quantités, prix, devise, frais de port et date attendue, puis `Mark sent` et envoyez vous-même le `PDF` au fournisseur : la console n'envoie aucun e-mail. Ensuite : `Confirmed by the supplier`, les réceptions, `Cancel the rest` quand le fournisseur ne livrera pas la suite, `Enter the invoice` et `Mark the invoice paid`. Les fournisseurs se créent dans `Suppliers` (`Add a supplier`) ; le fournisseur d'un modèle, ou d'une taille, se règle sur la page du modèle (`Edit supplier`).
 
 Pour commander d'avance, sans commande en attente ni minimum : `Logistics` → `Stock`, `Add to supplier order` sur la ligne de la taille (un OPERATOR), avec le nombre de pièces. Elles rejoignent le brouillon de son fournisseur pour cet entrepôt, que vous confirmez avant l'envoi.
+
+**Commander un modèle par taille** (lot M3). `Supplier orders` → `Order a model` (un OPERATOR) : le modèle (ou la variante), le nombre de pièces et les entrepôts, puis `Propose`. La console propose combien commander de chaque taille, et où, à partir des commandes passées de chaque taille (après les échanges de taille) et des tailles enregistrées des collectionneurs qui souhaitent ou possèdent ce genre de pièce, chacun compté dans l'entrepôt qui sert son pays. Ce ne sont que des nombres : personne n'y est nommé. Changez n'importe quelle ligne (0 la retire), puis `Add to drafts` : les lignes rejoignent les brouillons de leurs fournisseurs, que vous relisez et envoyez comme les autres ; rien n'est commandé sans vous. Les pays que sert chaque entrepôt se règlent dans `Orders` → `Settings` → `Locations` (`Edit countries`, un ADMIN) ; un pays qu'aucun entrepôt ne sert compte dans l'entrepôt par défaut.
 
 ---
 

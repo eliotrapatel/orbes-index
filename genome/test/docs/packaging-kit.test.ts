@@ -20,6 +20,8 @@
  *    printed code can be copied and names ORBES Client Services (BRAND §4.6),
  *    and each social post fits in 280 characters;
  *  - the kit linked from LAUNCH §10.
+ *  - the sign-off's card row notes, in both languages, that the console's box list refuses a box that cannot take
+ *    the card flat (lot M3, B1: BOX_TOO_SMALL_FOR_CARD, the card's own CERTIFICATE_CARD_MM), its print check still open.
  *
  * CUSTOMER_COPY lists the documents held to the lexicon; a new public-facing
  * document under docs/launch/ joins it. The staff's sales playbook
@@ -27,7 +29,9 @@
  * sales-playbook.test.ts, since its code spans quote the console.
  */
 import { describe, expect, it } from 'vitest';
-import { CERTIFICATE_COPY } from '../../src/server/render/certificate.js';
+import { CERTIFICATE_CARD_MM } from '../../src/server/db/schema.js';
+import { CERTIFICATE_CARD, CERTIFICATE_COPY } from '../../src/server/render/certificate.js';
+import { boxTooSmall } from '../../src/server/services/boxes.js';
 import { RESALE_GUIDANCE } from '../../src/web/verify/copy.js';
 import {
   EXTRA_FORBIDDEN_EN,
@@ -52,6 +56,7 @@ const parts = {
   resale: section(kit, '## 3. Second-hand purchase'),
   lexicon: section(kit, '## 4. French lexicon'),
   announcement: section(kit, '## 5. Announcement draft'),
+  signOff: section(kit, '## 6. Sign-off'),
 };
 
 /** The address the packaging and the card teach (the card 79t, plan NEXT LOT §3.2), and the "verify only" line's long forms. */
@@ -202,6 +207,21 @@ describe('packaging kit (docs/launch/PACKAGING-KIT.md)', () => {
     for (const post of [social.en.replace('[DATE]', '30 September 2027'), social.fr.replace('[DATE]', '30 septembre 2027')]) {
       expect([...post].length, post).toBeLessThanOrEqual(280);
     }
+  });
+
+  it("notes in the card's sign-off row that the console refuses a box that cannot take the card flat, the print check still open (lot M3, B1)", () => {
+    const card = `${CERTIFICATE_CARD_MM.long} × ${CERTIFICATE_CARD_MM.short} mm`;
+    // The size the kit names is the card's own, the one the box rule holds and the console's refusal says.
+    expect(CERTIFICATE_CARD_MM).toEqual({ long: Math.max(CERTIFICATE_CARD.widthMm, CERTIFICATE_CARD.heightMm), short: Math.min(CERTIFICATE_CARD.widthMm, CERTIFICATE_CARD.heightMm) });
+    const refusal = boxTooSmall();
+    expect(refusal.code).toBe('BOX_TOO_SMALL_FOR_CARD');
+    expect(refusal.message).toContain(card);
+    const row = parts.signOff.split('\n').find((l) => l.startsWith('| Card: the specimen of BRAND §7'));
+    expect(row, 'the card row of §6').toBeDefined();
+    expect(row).toContain(`since lot M3 the console's box list, Orders → Settings → Boxes, refuses a box whose inside cannot take the ${card} card flat; this print check stays open`);
+    expect(row).toContain(`depuis le lot M3, la liste des boîtes de la console, Orders → Settings → Boxes, refuse une boîte dont l'intérieur ne peut pas recevoir à plat la carte de ${card} ; ce contrôle d'impression reste ouvert`);
+    // The check itself stays open until a printed card is tried in the chosen box.
+    expect(row).toMatch(/print check open · Gabarit validé le 2026-10-07 ; contrôle d'impression ouvert \|$/);
   });
 
   it('is the packaging and website text of LAUNCH §10', () => {
