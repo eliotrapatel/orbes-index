@@ -172,6 +172,11 @@ describe('MOMENTS in words', () => {
     expect(bodyProblem('')).toBe('Write the message.');
     expect(bodyProblem('x'.repeat(2001))).toBe(`At most ${formatCount(2000)} characters.`);
     expect(bodyProblem('x'.repeat(2000))).toBeNull();
+    // {firstName} alone reads blank to a collector with no first name; a moment's blank is its default's.
+    expect(titleProblem(' {firstName} ')).toBe('Write a title.');
+    expect(bodyProblem('{firstName}\n\n{firstName}')).toBe('Write the message.');
+    expect(titleProblem('{firstName}', true)).toBeNull();
+    expect(titleProblem('FOR {firstName}')).toBeNull();
     expect(unknownPlaceholders({ title: '{piece}', body: '{amount} {firstName} {nope}' }, ['firstName', 'piece'])).toEqual(['{amount}', '{nope}']);
     expect(unknownLine(['{amount}'], ['firstName', 'piece'])).toBe('{amount} cannot be used here. The words may hold {firstName}, {piece}.');
     expect(unknownLine([], ['firstName'])).toBeNull();

@@ -227,17 +227,18 @@ function fingerprint(s: string): { length: number; sha256: string } {
   return { length: [...s].length, sha256: createHash('sha256').update(s, 'utf8').digest('hex') };
 }
 
-/** A custom message's title: one line of 1 to 80 characters, {firstName} its only placeholder. */
+/** A custom message's title: one line of 1 to 80 characters, {firstName} its only placeholder, never only it. */
 export function cleanCustomTitle(v: unknown): string {
   const t = cleanHouseTitle(v, HOUSE_CUSTOM_PLACEHOLDERS);
-  if (t === null) throw validationError('Write a title.');
+  // Blank once {firstName} is empty (a collector with no first name): nothing to read.
+  if (t === null || renderHouseWords(t, { firstName: '' }).trim() === '') throw validationError('Write a title.');
   return t;
 }
 
-/** A custom message's words: plain paragraphs of at most 2 000 characters, {firstName} their only placeholder. */
+/** A custom message's words: plain paragraphs of at most 2 000 characters, {firstName} their only placeholder, never only it. */
 export function cleanCustomBody(v: unknown): string {
   const t = cleanHouseBody(v, HOUSE_CUSTOM_PLACEHOLDERS);
-  if (t === null) throw validationError('Write the message.');
+  if (t === null || renderHouseWords(t, { firstName: '' }).trim() === '') throw validationError('Write the message.');
   return t;
 }
 

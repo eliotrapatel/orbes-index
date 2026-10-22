@@ -506,6 +506,30 @@ describe('the house’s moments delivered (HouseMomentService.runMoments)', () =
       await hk.stop();
     }
   });
+
+  it('f) counts a page viewed as a visit, so a session purged or signed out does not bring the message forward', async () => {
+    clock.set('2031-09-01T09:00:00Z');
+    await on('NINETY_DAYS');
+    const account = await createAccount(t.db);
+    await t.db.updateTable('accounts').set({ created_at: z('2031-09-01T09:30:00Z') }).where('id', '=', account.id).execute();
+    // Signed in on 1 September, the app used until 30 September, then its session gone.
+    clock.set('2031-09-01T10:00:00Z');
+    await ctx.audit.record({ actor: account.actor, action: 'account.login', targetType: 'account', targetId: account.id });
+    const sid = randomBytes(32);
+    await t.db.insertInto('sessions').values({ id_hash: sid, subject_type: 'account', subject_id: account.id, csrf_token: 'x', created_at: z('2031-09-01T10:00:00Z'), expires_at: z('2031-10-01T10:00:00Z'), last_seen_at: z('2031-09-30T10:00:00Z') }).execute();
+    const at = z('2031-09-30T10:00:00Z');
+    const device = await t.db.insertInto('tracking_devices').values({ device_hash: `H${randomBytes(21).toString('hex')}`, account_id: account.id, linked_at: at, first_seen_at: at, last_seen_at: at }).returning('id').executeTakeFirstOrThrow();
+    await t.db.insertInto('collector_views').values({ at, device_id: device.id, account_id: account.id, page: 1, subject: null, seconds: 30, place_id: null }).execute();
+    await t.db.deleteFrom('sessions').where('id_hash', '=', sid).execute();
+    // 90 days after the sign-in: not yet.
+    clock.set('2031-11-30T10:00:00Z');
+    await pass();
+    expect(await of(account.id)).toEqual([]);
+    // 90 days after the last page viewed: due.
+    clock.set('2031-12-29T10:00:00Z');
+    await pass();
+    expect((await of(account.id)).map((d) => d.dedupe_key)).toEqual([`NINETY_DAYS:${account.id}:2031-09-30`]);
+  });
 });
 
 // ── Under concurrency ──────────────────────────────────────────────────────

@@ -309,23 +309,22 @@ export class HouseMomentService {
     const body = input.body === undefined ? undefined : cleanHouseBody(input.body, allowed);
     const now = this.clock();
     return inTransaction(this.db, async (tx) => {
-      const before = await tx.selectFrom('house_moment_settings').selectAll().where('moment', '=', m).forUpdate().executeTakeFirst();
-      const wasOn = before?.enabled ?? false;
+      // A moment the console never touched has no row to lock: make it (off, no words) first, so two first writes at once
+      // read one after the other and neither overwrites the other's change.
+      await tx.insertInto('house_moment_settings').values({ moment: m, enabled: false, updated_by: actor.id!, updated_at: now }).onConflict((oc) => oc.column('moment').doNothing()).execute();
+      const before = await tx.selectFrom('house_moment_settings').selectAll().where('moment', '=', m).forUpdate().executeTakeFirstOrThrow();
+      const wasOn = before.enabled;
       const on = input.enabled === undefined ? wasOn : (input.enabled as boolean);
       const next = {
         enabled: on,
-        enabled_at: on ? (wasOn ? before!.enabled_at : now) : null,
-        title: title === undefined ? (before?.title ?? null) : title,
-        body: body === undefined ? (before?.body ?? null) : body,
+        enabled_at: on ? (wasOn ? before.enabled_at : now) : null,
+        title: title === undefined ? before.title : title,
+        body: body === undefined ? before.body : body,
       };
       const switched = on !== wasOn;
-      const changed = { title: next.title !== (before?.title ?? null), body: next.body !== (before?.body ?? null) };
-      if (!switched && !changed.title && !changed.body && before) return (await this.settings(tx)).find((v) => v.moment === m)!;
-      await tx
-        .insertInto('house_moment_settings')
-        .values({ moment: m, ...next, updated_by: actor.id!, updated_at: now })
-        .onConflict((oc) => oc.column('moment').doUpdateSet({ ...next, updated_by: actor.id!, updated_at: now }))
-        .execute();
+      const changed = { title: next.title !== before.title, body: next.body !== before.body };
+      if (!switched && !changed.title && !changed.body) return (await this.settings(tx)).find((v) => v.moment === m)!;
+      await tx.updateTable('house_moment_settings').set({ ...next, updated_by: actor.id!, updated_at: now }).where('moment', '=', m).execute();
       if (switched) await this.audit.record({ actor, action: on ? 'house.moment.enable' : 'house.moment.disable', targetType: 'house_moment', targetId: m, details: { moment: m } }, tx);
       if (changed.title || changed.body) {
         await this.audit.record(
@@ -542,8 +541,8 @@ export class HouseMomentService {
   }
 
   /**
-   * f) Each account whose last activity (a sign-in, a session in use, a scan: the segments' ACTIVE criterion; its creation
-   * when none) was 90 days ago since the switch-on, and that no NINETY_DAYS message reached since that activity.
+   * f) Each account whose last activity (a sign-in, a session in use, a scan: the segments' ACTIVE criterion; a page
+   * viewed, kept 13 months, so a purged or signed-out session does not bring it forward; its creation when none) was 90 days ago since the switch-on, and that no NINETY_DAYS message reached since that activity.
    */
   private async absences(enabledAt: Date, now: Date): Promise<Due[]> {
     const from = new Date(enabledAt.getTime() - ABSENCE_DAYS * DAY_MS);
@@ -556,7 +555,8 @@ export class HouseMomentService {
                  greatest(a.created_at,
                           (SELECT max(al.occurred_at) FROM audit_logs al WHERE al.action = 'account.login' AND al.target_type = 'account' AND al.target_id = a.id::text),
                           (SELECT max(ss.last_seen_at) FROM sessions ss WHERE ss.subject_type = 'account' AND ss.subject_id = a.id),
-                          (SELECT max(se.occurred_at) FROM scan_events se WHERE se.account_id = a.id)) AS last_at
+                          (SELECT max(se.occurred_at) FROM scan_events se WHERE se.account_id = a.id),
+                          (SELECT max(cv.at) FROM collector_views cv WHERE cv.account_id = a.id)) AS last_at
             FROM accounts a
            WHERE a.status = 'ACTIVE' AND a.created_at <= ${to} AND ${notTestEntrant('a.id')}
         ) x

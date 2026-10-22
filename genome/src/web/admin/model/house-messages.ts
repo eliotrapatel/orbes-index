@@ -230,10 +230,15 @@ export function switchOnBody(m: HouseMoment): string {
 
 // ── The words being written, checked as the server checks them ───────────────────────────────────────────────────
 
+/** Words as a collector with no first name reads them (the server's cleanCustomTitle / cleanCustomBody). */
+const withoutFirstName = (s: string): string => s.split('{firstName}').join('').trim();
+
 /** What is wrong with a title being written, or null; `blankOk` for a moment (blank: the default's). */
 export function titleProblem(title: string, blankOk = false): string | null {
   const s = title.trim();
   if (s === '') return blankOk ? null : 'Write a title.';
+  // A custom message's {firstName} alone reads blank to a collector with no first name: the server refuses it.
+  if (!blankOk && withoutFirstName(s) === '') return 'Write a title.';
   if (/[\r\n]/.test(s)) return 'One line.';
   if ([...s].length > HOUSE_TITLE_MAX) return `At most ${HOUSE_TITLE_MAX} characters.`;
   return null;
@@ -243,6 +248,7 @@ export function titleProblem(title: string, blankOk = false): string | null {
 export function bodyProblem(body: string, blankOk = false): string | null {
   const s = body.trim();
   if (s === '') return blankOk ? null : 'Write the message.';
+  if (!blankOk && withoutFirstName(s) === '') return 'Write the message.';
   if ([...s].length > HOUSE_BODY_MAX) return `At most ${formatCount(HOUSE_BODY_MAX)} characters.`;
   return null;
 }

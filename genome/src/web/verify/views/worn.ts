@@ -16,7 +16,8 @@
  *
  * A profile without its first name or country reads the sentence and YOUR PROFILE; a piece reported lost or stolen, in
  * service or with its transfer pending, one calm sentence. Nothing is drawn while the piece's WORN cannot be read, for a
- * model without a sheet, nor for a test account (worn-model.ts wornState). Sending shows SENDING… and keeps the preview;
+ * model without a sheet (but a live photograph, kept with its WITHDRAW), nor for a test account (worn-model.ts
+ * wornState). Sending shows SENDING… and keeps the preview;
  * a refusal of the server is said under it (the 24-hour limit in the server's words), a network failure with TRY AGAIN.
  * The preview is a blob: URL (img-src allows it), released when it is no longer shown.
  */
@@ -127,7 +128,7 @@ export class WornBlock {
           this.stateHead(WORN.published),
           this.figure(s.photo.url, WORN.photoAlt, s.credit),
           h('p', { class: 'n-sm n-piece__text n-num n-worn__since' }, ...withNumerals(WORN.publishedSince(s.since))),
-          this.confirm ? null : h('p', { class: 'n-piece__action-line n-worn__see' }, this.sheetLink(s.sheet)),
+          this.confirm || s.sheet === null ? null : h('p', { class: 'n-piece__action-line n-worn__see' }, this.sheetLink(s.sheet)),
           ...this.withdrawBlock(s.photo.id, WORN.withdrawAsk),
         );
         break;

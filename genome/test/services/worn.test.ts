@@ -3,7 +3,7 @@
  * services/worn.ts), on PGlite with the clock fixed:
  *
  *  - every sending rule: the piece held now (an open ownership), ACTIVE, not a test entrant, a held status, no transfer
- *    pending, a sheet for its model's group, YOUR PROFILE's first name and the account's country, the consent of the
+ *    pending, a sheet for its own model, YOUR PROFILE's first name and the account's country, the consent of the
  *    version in force; never held → 404;
  *  - the image through sanitizeImage exactly as media (EXIF and its GPS removed, an orientation other than 1 refused,
  *    another type refused, 1 MiB at most), the table's bounds the same as the sanitizer's;
@@ -13,7 +13,7 @@
  *    audit (never the credit's name), a stale review refused;
  *  - the read-time rule: a piece passed on, returned or revoked, a LOCKED account: no longer shown, at once; endLeft
  *    ends them (ENDED, bytes erased, audited by count), a new owner's sending as well;
- *  - the sheet's read: the whole group (every variant), newest first, 12 a page with the total, the credit exactly first
+ *  - the sheet's read: every variant of its group the reader may see, newest first, 12 a page with the total, the credit exactly first
  *    name, country and Instagram when chosen, never a serial, an account or a variant's label;
  *  - the photographs' readers (public, owner, staff), the console's queue and summary, the account's export.
  *
@@ -185,7 +185,8 @@ describe('WORN (plan MACRO M2 §2.1, §2.2)', () => {
 
   it('refuses each piece that cannot send, and says why on its WORN', async () => {
     const reasonOf = async (h: { id: string; serial: string }) => (await w.worn.ofPiece(h.id, h.serial)).reason;
-    // NO_SHEET: no model of its group is shown; a variant hidden whose main model is shown sends, to its group's sheet.
+    // NO_SHEET: the piece's own model is not shown; a variant hidden whose main model is shown sends nothing either
+    // (plan §2.1: its photograph would show an unrevealed piece on its group's sheet).
     const hidden = await sheetModel(t.db, 'HIDDEN', { lookbook: 'HIDDEN' });
     const a = await holder(hidden.id);
     expect(await reasonOf(a)).toBe('NO_SHEET');
@@ -193,8 +194,12 @@ describe('WORN (plan MACRO M2 §2.1, §2.2)', () => {
     expect(await codeOf(send(a))).toBe('WORN_NOT_ALLOWED');
     const hiddenVariant = await sheetModel(t.db, 'MONOLITHES', { of: ring.id, lookbook: 'HIDDEN', label: 'Steel' });
     const v = await holder(hiddenVariant.id);
-    expect((await w.worn.ofPiece(v.id, v.serial)).sheet).toEqual({ slug: ring.slug });
-    expect(await codeOf(send(v))).toBe('OK');
+    expect(await reasonOf(v)).toBe('NO_SHEET');
+    expect((await w.worn.ofPiece(v.id, v.serial)).sheet).toBeNull();
+    expect(await codeOf(send(v))).toBe('WORN_NOT_ALLOWED');
+    // A shown variant sends, to its own sheet.
+    const g = await holder(gold.id);
+    expect((await w.worn.ofPiece(g.id, g.serial)).sheet).toEqual({ slug: gold.slug });
     // A RESERVED sheet counts.
     const reserved = await sheetModel(t.db, 'ZENITH', { lookbook: 'RESERVED' });
     expect(await codeOf(send(await holder(reserved.id)))).toBe('OK');
@@ -365,6 +370,48 @@ describe('WORN (plan MACRO M2 §2.1, §2.2)', () => {
     for (const p of page1.photos) expect(Object.keys(p.credit).sort()).toEqual(['country', 'firstName', 'instagram']);
     // A RESERVED sheet or a hidden one: the lookbook's own 404 for the public.
     expect(await codeOf(w.lookbook.worn('nope', 1))).toBe('LOOKBOOK_NOT_FOUND');
+  });
+
+  it('shows on a sheet only the photographs of the variants its reader may see (P-X08)', async () => {
+    const main = await sheetModel(t.db, 'HALO');
+    const reserved = await sheetModel(t.db, 'HALOR', { of: main.id, lookbook: 'RESERVED', label: 'Rose' });
+    await t.db.updateTable('models').set({ private_min_tier: 2 }).where('id', '=', reserved.id).execute();
+    const later = await sheetModel(t.db, 'HALOH', { of: main.id, label: 'Steel' });
+    const published = async (model: string) => {
+      const h = await holder(model);
+      const p = (await send(h)).photo!;
+      w.clock.advance(60_000);
+      await w.worn.publish(p.id, w.admin);
+      return p.id;
+    };
+    const onMain = await published(main.id);
+    const onReserved = await published(reserved.id);
+    const onHidden = await published(later.id);
+    // The variant is hidden after its photograph was published: no longer on its group's sheet.
+    await t.db.updateTable('models').set({ lookbook: 'HIDDEN' }).where('id', '=', later.id).execute();
+    const idsOf = (page: { photos: { id: string }[] }) => page.photos.map((p) => p.id).sort();
+    // Signed out (tier 0): the main model's only, on the sheet and its next pages.
+    expect(idsOf((await w.lookbook.sheet(main.slug)).worn)).toEqual([onMain]);
+    expect((await w.lookbook.sheet(main.slug)).worn.total).toBe(1);
+    expect(idsOf(await w.lookbook.worn(main.slug, 1))).toEqual([onMain]);
+    // An owner below the RESERVED variant's tier: the same; from its tier: the RESERVED one's too, never the hidden one's.
+    expect(idsOf(await w.lookbook.worn(main.slug, 1, { tier: 1 }))).toEqual([onMain]);
+    expect(idsOf(await w.lookbook.worn(main.slug, 1, { tier: 2 }))).toEqual([onMain, onReserved].sort());
+    expect(idsOf((await w.lookbook.sheet(main.slug, { tier: 2 })).worn)).toEqual([onMain, onReserved].sort());
+    expect(JSON.stringify(await w.lookbook.worn(main.slug, 1, { tier: 3 }))).not.toContain(onHidden);
+  });
+
+  it('lets its owner withdraw a live photograph after the model’s sheet is hidden (terms article 15)', async () => {
+    const solo = await sheetModel(t.db, 'ECLIPSE');
+    const h = await holder(solo.id);
+    const p = (await send(h)).photo!;
+    await w.worn.publish(p.id, w.admin);
+    await t.db.updateTable('models').set({ lookbook: 'HIDDEN' }).where('id', '=', solo.id).execute();
+    const piece = await w.worn.ofPiece(h.id, h.serial);
+    expect(piece).toMatchObject({ sheet: null, reason: 'NO_SHEET', canSend: false, photo: { id: p.id, status: 'PUBLISHED' } });
+    await w.worn.withdraw(h.id, p.id, h.actor);
+    expect(await rowOf(t.db, p.id)).toMatchObject({ status: 'WITHDRAWN', photo: null });
+    expect((await w.worn.ofPiece(h.id, h.serial)).photo).toBeNull();
   });
 
   it('stops showing a photograph at once when its piece leaves its owner or its account is locked; endLeft ends it', async () => {

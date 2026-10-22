@@ -208,4 +208,30 @@ describe('WORN routes (plan MACRO M2 §2.2)', () => {
     expect([refused.statusCode, errorOf(refused).code]).toEqual([403, 'OWNERS_ONLY']);
     expect((await h.client().get(`/api/v1/club/lookbook/${reserved.slug}/worn`)).statusCode).toBe(401);
   });
+
+  it('shows a sheet’s WORN of the variants its reader may see only: a RESERVED one through the club, a hidden one nowhere', async () => {
+    const main = await sheetModel('AURA', 'PUBLIC');
+    const variant = async (name: string, label: string) => {
+      const v = await sheetModel(name, 'PUBLIC');
+      await h.ctx.db.updateTable('models').set({ variant_label: 'Silver', variant_swatch: '#8A8D8F' }).where('id', '=', main.id).execute();
+      await h.ctx.db.updateTable('models').set({ variant_of: main.id, variant_label: label, variant_swatch: '#C9A227' }).where('id', '=', v.id).execute();
+      return v;
+    };
+    const rose = await variant('AURAR', 'Rose');
+    const steel = await variant('AURAS', 'Steel');
+    const onMain = await published(await collector(main.id));
+    const owner = await collector(rose.id);
+    const onRose = await published(owner);
+    const onSteel = await published(await collector(steel.id));
+    await h.ctx.db.updateTable('models').set({ lookbook: 'RESERVED' }).where('id', '=', rose.id).execute();
+    await h.ctx.db.updateTable('models').set({ lookbook: 'HIDDEN' }).where('id', '=', steel.id).execute();
+    const idsOf = (body: unknown) => (body as { photos: { id: string }[] }).photos.map((p) => p.id).sort();
+    // Everyone: the main model's only, on the sheet and its pages.
+    expect(idsOf((safeJson(await h.client().get(`/api/v1/lookbook/${main.slug}`)) as { worn: unknown }).worn)).toEqual([onMain]);
+    expect(idsOf(safeJson(await h.client().get(`/api/v1/lookbook/${main.slug}/worn`)))).toEqual([onMain]);
+    // An owner whose tier reaches the RESERVED variant: its photograph too, never the hidden one's.
+    expect(idsOf(safeJson(await owner.client.get(`/api/v1/club/lookbook/${main.slug}/worn`)))).toEqual([onMain, onRose].sort());
+    expect(idsOf((safeJson(await owner.client.get(`/api/v1/club/lookbook/${main.slug}`)) as { worn: unknown }).worn)).toEqual([onMain, onRose].sort());
+    expect(JSON.stringify(safeJson(await owner.client.get(`/api/v1/club/lookbook/${main.slug}/worn`)))).not.toContain(onSteel);
+  });
 });

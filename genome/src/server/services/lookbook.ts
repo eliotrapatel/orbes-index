@@ -493,7 +493,8 @@ export class LookbookService {
       skuSizes(this.db, group.map((g) => g.id)),
       modelReleases(this.db, whole.map((g) => g.id), this.clock()),
       pairsOf(this.db, root, collectionId, tier),
-      sheetWorn(this.db, whole.map((g) => g.id), 1),
+      // WORN: the photographs of the models of its group the reader may see (P-X08), never a hidden or higher variant's.
+      sheetWorn(this.db, group.map((g) => g.id), 1),
     ]);
     const galleryOf = (r: SheetRow): LookbookImage[] =>
       // The cover is shown once: a gallery photograph made the reference photograph since is left out here.
@@ -546,7 +547,7 @@ export class LookbookService {
 
   /**
    * WORN, page `page` of a sheet the reader may see (GET /api/v1/lookbook/:slug/worn, the club's for an owner's `tier`):
-   * the photographs of its whole group, as the sheet's first page reads them; the sheet's own 404 LOOKBOOK_NOT_FOUND
+   * the photographs of the models of its group the reader may see, as the sheet's first page reads them; the sheet's own 404 LOOKBOOK_NOT_FOUND
    * otherwise.
    */
   async worn(slug: string, page: number, opts: { tier?: number } = {}): Promise<WornSheetPage> {
@@ -557,8 +558,8 @@ export class LookbookService {
     if (!m || !m.slug || m.lookbook === 'HIDDEN') throw lookbookNotFound();
     if (m.lookbook === 'RESERVED' && m.private_min_tier > tier) throw lookbookNotFound();
     const root = m.variant_of ?? m.id;
-    const whole = await this.db.selectFrom('models').select('id').where((eb) => eb.or([eb('id', '=', root), eb('variant_of', '=', root)])).execute();
-    return sheetWorn(this.db, whole.map((g) => g.id), page);
+    const group = await this.sheetRows(tier).where((eb) => eb.or([eb('m.id', '=', root), eb('m.variant_of', '=', root)])).execute();
+    return sheetWorn(this.db, group.map((g) => g.id), page);
   }
 
   /**

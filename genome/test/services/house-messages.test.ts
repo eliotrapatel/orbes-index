@@ -117,6 +117,10 @@ describe('the custom house messages (HouseMessageService)', () => {
     await bad({ title: 'T'.repeat(81) }, 'VALIDATION_FAILED', 400);
     await bad({ body: '   ' }, 'VALIDATION_FAILED', 400);
     await bad({ body: 'B'.repeat(2001) }, 'VALIDATION_FAILED', 400);
+    // Words that would read blank to a collector with no first name.
+    await bad({ title: '{firstName}' }, 'VALIDATION_FAILED', 400);
+    await bad({ title: ' {firstName} ' }, 'VALIDATION_FAILED', 400);
+    await bad({ body: '{firstName}\n\n{firstName}' }, 'VALIDATION_FAILED', 400);
     // {firstName} is a custom message's only placeholder.
     await bad({ body: '{piece} is yours.' }, 'HOUSE_PLACEHOLDER', 422);
     await bad({ audience: {} }, 'HOUSE_AUDIENCE', 422);

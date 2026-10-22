@@ -67,6 +67,14 @@ describe('the state a piece’s WORN shows (worn-model.ts wornState)', () => {
     expect(wornState(piece({ canSend: false, reason: 'STATUS', photo: photo({ status: 'PUBLISHED', publishedAt: '2026-10-04T09:12:00.000Z' }) })).kind).toBe('published');
   });
 
+  it('keeps a live photograph and its WITHDRAW when the model’s sheet has gone (terms article 15), without SEE IT ON THE SHEET', () => {
+    const published = wornState(piece({ sheet: null, canSend: false, reason: 'NO_SHEET', photo: photo({ status: 'PUBLISHED', publishedAt: '2026-10-20T09:00:00.000Z' }) }));
+    expect(published).toMatchObject({ kind: 'published', sheet: null });
+    expect(wornState(piece({ sheet: null, canSend: false, reason: 'NO_SHEET', photo: photo() })).kind).toBe('review');
+    // Settled photographs draw nothing without a sheet.
+    expect(wornState(piece({ sheet: null, canSend: false, reason: 'NO_SHEET', photo: photo({ status: 'REFUSED', refusal: 'QUALITY', url: null }) }))).toEqual({ kind: 'hidden' });
+  });
+
   it('says what stops a sending, in one calm sentence, and YOUR PROFILE for a credit that cannot be written', () => {
     expect(wornState(piece({ canSend: false, reason: 'STATUS' }))).toEqual({ kind: 'blocked', text: WORN.status, refused: null });
     expect(wornState(piece({ canSend: false, reason: 'TRANSFER_PENDING' }))).toEqual({ kind: 'blocked', text: WORN.transfer, refused: null });

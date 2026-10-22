@@ -4,7 +4,8 @@
  * Instagram address, the day a photograph was published (in Paris), and how a photograph is prepared before it is sent.
  *
  * The block is drawn only for a piece whose model has a sheet to show a photograph on, held by its owner now, and not
- * for a test account. A photograph in review or published shows first, with WITHDRAW; then what stops a sending (a piece
+ * for a test account; a live photograph (in review or published) is drawn whenever the piece is held, sheet or not, so
+ * it can always be withdrawn. A photograph in review or published shows first, with WITHDRAW; then what stops a sending (a piece
  * reported lost or stolen, or in service; a transfer pending; a profile without its first name or country); then CHOOSE
  * A PHOTOGRAPH, under the reason ORBES gave when it did not publish the last one.
  *
@@ -74,8 +75,8 @@ export type WornState =
   | { kind: 'hidden' }
   /** A photograph in review: WITHDRAW. */
   | { kind: 'review'; photo: OwnerWornPhoto; credit: CreditLine }
-  /** A photograph published: since when, SEE IT ON THE SHEET, WITHDRAW. */
-  | { kind: 'published'; photo: OwnerWornPhoto; credit: CreditLine; since: string; sheet: string }
+  /** A photograph published: since when, SEE IT ON THE SHEET (when the model still has a sheet), WITHDRAW. */
+  | { kind: 'published'; photo: OwnerWornPhoto; credit: CreditLine; since: string; sheet: string | null }
   /** The piece cannot send now: one calm sentence, no button. */
   | { kind: 'blocked'; text: string; refused: WornRefused | null }
   /** The credit cannot be written: YOUR PROFILE first. */
@@ -85,10 +86,12 @@ export type WornState =
 
 /** The piece's WORN, in the order the block reads it (see the header). */
 export function wornState(w: PieceWorn | null): WornState {
-  if (!w || !w.sheet || w.reason === 'NO_SHEET' || w.reason === 'TEST_ENTRANT' || w.reason === 'NOT_HELD') return { kind: 'hidden' };
+  if (!w || w.reason === 'NOT_HELD') return { kind: 'hidden' };
+  // A live photograph stays withdrawable from its piece even when the model's sheet has gone (terms article 15).
   const p = w.photo;
   if (p && p.status === 'PENDING') return { kind: 'review', photo: p, credit: creditLine(p.credit) };
-  if (p && p.status === 'PUBLISHED') return { kind: 'published', photo: p, credit: creditLine(p.credit), since: parisDay(p.publishedAt ?? p.sentAt), sheet: w.sheet.slug };
+  if (p && p.status === 'PUBLISHED') return { kind: 'published', photo: p, credit: creditLine(p.credit), since: parisDay(p.publishedAt ?? p.sentAt), sheet: w.sheet?.slug ?? null };
+  if (!w.sheet || w.reason === 'NO_SHEET' || w.reason === 'TEST_ENTRANT') return { kind: 'hidden' };
   const words = p && (p.status === 'REFUSED' || p.status === 'TAKEN_DOWN') ? refusalWords(p.refusal) : null;
   const refused: WornRefused | null = words ? { head: WORN.notPublished, text: words } : null;
   if (w.reason === 'STATUS') return { kind: 'blocked', text: WORN.status, refused };

@@ -2548,7 +2548,7 @@ export const WORN = Object.freeze({
   profile: 'Add your first name and country in YOUR PROFILE to sign your photograph.',
   profileLink: 'YOUR PROFILE',
   /** A piece reported lost or stolen, or in service; a transfer pending: one calm sentence, no button. */
-  status: 'No photograph can be sent while the piece is reported, or in service.',
+  status: 'No photograph can be sent while the piece is reported lost or stolen, or in service.',
   transfer: 'No photograph can be sent while the piece’s transfer is pending.',
   get unreadable() {
     return forDevice('This photograph cannot be read. Choose a JPEG or a photograph from your library.', 'This photograph cannot be read. Choose a JPEG or another photograph.');

@@ -303,23 +303,19 @@ export async function accountWornPhotos(db: Db, accountId: string): Promise<Expo
 }
 
 /**
- * The sheet a model's photographs appear on: the model itself when it has one (PUBLIC or RESERVED, with an address),
- * else its group's main model, else the first variant of its group that has one; null when none of its group has.
+ * The sheet a model's photographs appear on: the model itself, when it has one (PUBLIC or RESERVED, with an address);
+ * null otherwise (NO_SHEET), so a hidden variant never shows on its group's sheet (plan §2.1, P-X08).
  */
 async function sheetOfModel(db: Db, modelId: string): Promise<{ slug: string; groupIds: string[] } | null> {
-  const m = await db.selectFrom('models').select(['id', 'variant_of']).where('id', '=', modelId).executeTakeFirst();
-  if (!m) return null;
+  const m = await db.selectFrom('models').select(['id', 'slug', 'lookbook', 'variant_of']).where('id', '=', modelId).executeTakeFirst();
+  if (!m || m.slug === null || (m.lookbook !== 'PUBLIC' && m.lookbook !== 'RESERVED')) return null;
   const root = m.variant_of ?? m.id;
   const group = await db
     .selectFrom('models')
-    .select(['id', 'slug', 'lookbook', 'variant_of', 'created_at'])
+    .select('id')
     .where((eb) => eb.or([eb('id', '=', root), eb('variant_of', '=', root)]))
-    .orderBy('created_at')
-    .orderBy('id')
     .execute();
-  const shown = group.filter((g) => g.slug !== null && (g.lookbook === 'PUBLIC' || g.lookbook === 'RESERVED'));
-  const pick = shown.find((g) => g.id === m.id) ?? shown.find((g) => g.id === root) ?? shown[0];
-  return pick ? { slug: pick.slug!, groupIds: group.map((g) => g.id) } : null;
+  return { slug: m.slug, groupIds: group.map((g) => g.id) };
 }
 
 function cleanRef(id: unknown): string | null {
