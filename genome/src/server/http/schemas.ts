@@ -410,10 +410,29 @@ export const dropChangeSizeBody = body({ sizeId: uuid });
 export const publicCircleParams = z.object({ id: z.string().max(64) });
 
 /**
+ * Plan MACRO M3 §4.2 (D2): catalogue add-ons with their units (each once; the service holds 1 to 3, 409 ADDON_LIMIT
+ * above, and what is offered), on a LIVE hold, a draw's place held, a salon request and an order.
+ */
+export const addonUnitsItem = z.strictObject({ addonId: uuid, units: z.number().int('Must be a whole number').min(1, 'At least 1').max(99, 'At most 99') });
+export const addonUnitsList = z.array(addonUnitsItem).max(20, 'At most 20 add-ons');
+
+/** PUT /api/v1/club/drops/:id/addons (plan MACRO M3 §4.2, D2): the add-ons chosen on a place held; an empty list clears them. */
+export const drawAddonsBody = body({ items: addonUnitsList });
+
+/** POST and DELETE /api/v1/account/orders/:id/addons (plan MACRO M3 §4.2, D2), POST /api/admin/orders/:id/addons: one add-on and its units. */
+export const orderAddonBody = body({ addonId: uuid, units: z.number().int('Must be a whole number').min(1, 'At least 1').max(99, 'At most 99') });
+
+/** DELETE /api/v1/account/orders/:id/addons/:addonId; DELETE /api/admin/orders/:id/addons/:lineId. */
+export const accountOrderAddonParams = z.object({ id: uuid, addonId: uuid });
+export const adminOrderAddonParams = z.object({ id: uuid, lineId: uuid });
+
+/**
  * POST /api/v1/club/lookbook/:slug/request (P-X08, REQUEST THIS PIECE): the account's note for ORBES Client Services,
  * optional (blank text or `null`: none; the body itself may be left out), at most 500 characters once trimmed.
  */
 export const salonRequestBody = optionalBody({
+  /** Plan MACRO M3 §4.2 (D2): the catalogue add-ons chosen with the request, carried onto its order at ACCEPTED. */
+  addons: addonUnitsList.optional(),
   note: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), text(SHOP_NOTE_MAX).nullable().optional()),
   /** AC-01: the size asked, one of the model's (the service checks it: 400 otherwise); null or left out: NOT SURE YET. */
   size: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), text(100).nullable().optional()),
@@ -464,7 +483,11 @@ export const liveEntryBody = body({
 export const liveTurnBody = body({ token: z.string().trim().min(1, 'Required').max(128, 'Invalid turn').regex(BASE64URL_RE, 'Invalid turn') });
 
 /** PUT /api/v1/live/:id/addons: the add-ons chosen for the piece held, each once, at most six (none: an empty list). */
-export const liveAddonsBody = body({ addonIds: z.array(liveRef).max(LIVE_ADDONS_MAX, `At most ${LIVE_ADDONS_MAX} add-ons`) });
+export const liveAddonsBody = body({
+  addonIds: z.array(liveRef).max(LIVE_ADDONS_MAX, `At most ${LIVE_ADDONS_MAX} add-ons`),
+  /** Plan MACRO M3 §4.2 (D2): the catalogue add-ons chosen with the hold; left out, they stay as they were. */
+  items: addonUnitsList.optional(),
+});
 
 /**
  * POST /api/v1/live/:id/board and /board/stream: the board link's secret, from the fragment of its address (never in a
@@ -2544,6 +2567,8 @@ export const decideOrderCaseBody = body({
   pieceTo: z.enum(['RESTOCKED', 'ARCHIVED']).nullable().optional(),
   locationId: z.preprocess(emptyToNull, uuid.nullable().optional()),
   note: z.preprocess(emptyToNull, text(ORDER_CASE_LIMITS.decisionNote).nullable().optional()),
+  /** Plan MACRO M3 §4.2 (D2): the add-on units not to be sold again (a refund); the others go back to stock. */
+  addonsOut: z.array(uuid).max(100, 'At most 100 add-on units').nullable().optional(),
 });
 
 /** POST /api/admin/order-cases/:id/cancel: why it ends with no decision. */

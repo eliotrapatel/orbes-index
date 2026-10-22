@@ -30,7 +30,9 @@
  *   POST   /api/v1/live/:id/leave           LEAVE
  *   POST   /api/v1/live/:id/press           the seal pressed (the turn's secret)
  *   POST   /api/v1/live/:id/secure          the seal held (the turn's secret)
- *   PUT    /api/v1/live/:id/addons          the add-ons of the piece held
+ *   PUT    /api/v1/live/:id/addons          the add-ons of the piece held (plan MACRO M3 §4.2: `items`, the catalogue
+ *                                           add-ons chosen with it, each with its units, carried onto its order at PAY;
+ *                                           PAY's answer names any left out, `entry.addonsLeftOut`)
  *   POST   /api/v1/live/:id/confirm         PAY (a placeholder: the reservation confirmed)
  *   POST   /api/v1/live/:id/release         RELEASE MY PLACE
  *   GET    /api/v1/live/:id/question        the question after, once the release has ended, for an account that took
@@ -218,8 +220,8 @@ export const liveRoutes: FastifyPluginAsync<LiveRouteDeps> = async (app, { ctx, 
   app.put('/api/v1/live/:id/addons', async (request) => {
     const { account } = requireAccount(request);
     const { id } = parse(liveParams, request.params);
-    const { addonIds } = parse(liveAddonsBody, request.body);
-    return { entry: await live.setAddons(account.id, id, addonIds, accountActor(request)) };
+    const { addonIds, items } = parse(liveAddonsBody, request.body);
+    return { entry: await live.setAddons(account.id, id, addonIds, accountActor(request), items) };
   });
 
   app.post('/api/v1/live/:id/confirm', async (request) => {

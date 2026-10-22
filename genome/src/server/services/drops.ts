@@ -131,11 +131,12 @@ import { readProgram } from './club-program.js';
 import { coverOnPublish, guaranteedPieces, holderGuarantee, releaseCovered, releaseGuaranteed, sizeServesGuarantee, useGuarantees, type ReleaseGuaranteed } from './guarantees.js';
 import { storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
+import { addonOffer, choicesOf, cleanAddonItems, clearChoices, setChoices, type AddonOfferItem, type ChosenAddon, type LeftOutAddon } from './order-addons.js';
 import { ORDER_AMOUNT_MAX_MINOR, ORDER_CURRENCIES, orderForDrawEntry } from './orders.js';
 import { readActingAccount } from './ownership.js';
 import { releaseFeasibility, type Feasibility } from './release-stock.js';
 import { savedSizeAmong } from './sizes.js';
-import { linkDropSizes } from './stock.js';
+import { defaultLocationId, linkDropSizes } from './stock.js';
 import { isSegmentMember } from './segments.js';
 import type { EmailTriggers } from './email-triggers.js';
 import { cancelReleaseEmails } from './email.js';
@@ -640,6 +641,12 @@ export interface AccountDrawEntry {
    * otherwise). The segment is never named.
    */
   eligible: boolean;
+  /**
+   * Plan MACRO M3 §4.2 (D2), ADD TO YOUR ORDER on a place held: while the entry is SELECTED in a draw with a price, the
+   * catalogue add-ons chosen (`chosen`, priced in the draw's currency now) and those offered at the draw's location now
+   * (`offer`), added when ORBES Client Services confirms the order; null otherwise.
+   */
+  addons: { currency: string; chosen: ChosenAddon[]; offer: AddonOfferItem[] } | null;
 }
 
 /** An entry of the signed-in account (GET /api/v1/club/status): its own id is the one the draw's list publishes. */
@@ -756,6 +763,10 @@ export interface AdminDropEntry {
   handledBy: { id: string; email: string } | null;
   handledAt: Date | null;
   note: string | null;
+  /** Plan MACRO M3 §4.2 (D2): while SELECTED, the catalogue add-ons its collector chose on the place held (Confirm shows them). */
+  addonChoices: ChosenAddon[];
+  /** CONFIRMED's answer only: the add-ons chosen that could not be added to its order (none left, no longer offered). */
+  addonsLeftOut?: LeftOutAddon[];
 }
 
 /** An account's entry the lock withdrew, for its audit entry after the row locks. */
@@ -832,7 +843,13 @@ function entryView(r: EntryRow): AdminDropEntry {
     handledBy: r.handled_by && r.handled_email ? { id: r.handled_by, email: r.handled_email } : null,
     handledAt: r.handled_at,
     note: r.note,
+    addonChoices: [],
   };
+}
+
+/** A draw's currency as its add-ons are priced in (its price's, a house currency), or null: no add-on offered. */
+function drawCurrency(d: Pick<DropRow, 'price_minor' | 'currency'>): (typeof ORDER_CURRENCIES)[number] | null {
+  return d.price_minor !== null && d.currency !== null && (ORDER_CURRENCIES as readonly string[]).includes(d.currency) ? (d.currency as (typeof ORDER_CURRENCIES)[number]) : null;
 }
 
 type AccountEntryRow = Pick<DropRow, 'title' | 'opens_at' | 'closes_at' | 'published_at' | 'cancelled_at' | 'drawn_at'> & {
@@ -1309,7 +1326,13 @@ export class DropService {
   async entryFor(accountId: string, dropId: string): Promise<AccountDrawEntry> {
     assertAccount(accountId);
     const id = knownId(dropId, dropNotFound);
-    const d = await this.db.selectFrom('drops').select(['id', 'model_id', 'access_segment_id']).where('id', '=', id).where('published_at', 'is not', null).where('mode', '=', 'DRAW').executeTakeFirst();
+    const d = await this.db
+      .selectFrom('drops')
+      .select(['id', 'model_id', 'access_segment_id', 'price_minor', 'currency', 'stock_location_id'])
+      .where('id', '=', id)
+      .where('published_at', 'is not', null)
+      .where('mode', '=', 'DRAW')
+      .executeTakeFirst();
     if (!d) throw dropNotFound();
     const r = await this.accountEntryRows(this.db).where('e.drop_id', '=', id).where('e.account_id', '=', accountId).executeTakeFirst();
     const sizes = await this.db
@@ -1327,7 +1350,42 @@ export class DropService {
       sizes.map((z) => ({ id: z.id, label: z.label, fitMinMm: z.fit_min_mm ?? null, fitMaxMm: z.fit_max_mm ?? null, stock: z.stock })),
     );
     const eligible = d.access_segment_id === null || (await isSegmentMember(this.db, d.access_segment_id, accountId, this.clock()));
-    return { entry: r ? accountEntryView(r, this.clock()) : null, savedSize: match ? { id: match.id, label: match.label } : null, eligible };
+    // Plan MACRO M3 §4.2 (D2): ADD TO YOUR ORDER while the place is held in a draw with a price.
+    const currency = drawCurrency(d);
+    const addons =
+      r && r.status === 'SELECTED' && currency !== null
+        ? {
+            currency,
+            chosen: (await choicesOf(this.db, 'drop_entry_id', [r.id], () => currency)).get(r.id) ?? [],
+            offer: await addonOffer(this.db, d.stock_location_id ?? (await defaultLocationId(this.db)), currency),
+          }
+        : null;
+    return { entry: r ? accountEntryView(r, this.clock()) : null, savedSize: match ? { id: match.id, label: match.label } : null, eligible, addons };
+  }
+
+  /**
+   * ADD TO YOUR ORDER (PUT /api/v1/club/drops/:id/addons; plan MACRO M3 §4.2, D2): the catalogue add-ons the account
+   * chooses on its place held (its entry SELECTED: 409 DROP_ENTRY_NOT_SELECTED otherwise), replacing its choice, each
+   * offered at the draw's location in its currency now (409 ADDON_NOT_OFFERED in a draw without a price; 409
+   * ADDON_OUT_OF_STOCK, 409 ADDON_LIMIT; services/order-addons.ts setChoices); nothing is held until ORBES Client Services
+   * confirms the order, when each is added if still in stock. The account ACTIVE. Audited `drop.entry.addons`.
+   */
+  async setAddonChoices(accountId: string, dropId: string, items: unknown, actor: Actor): Promise<AccountDrawEntry> {
+    assertAccount(accountId);
+    const id = knownId(dropId, dropNotFound);
+    const wanted = cleanAddonItems(items);
+    await inTransaction(this.db, async (tx) => {
+      const account = await readActingAccount(tx, accountId);
+      if (!account || account.status !== 'ACTIVE') throw forbidden('This account cannot perform this action.');
+      const d = await this.lockPublished(tx, id);
+      const e = await tx.selectFrom('drop_entries').select(['id', 'status']).where('drop_id', '=', id).where('account_id', '=', accountId).forUpdate().executeTakeFirst();
+      if (!e) throw notEntered();
+      if (e.status !== 'SELECTED') throw conflict('DROP_ENTRY_NOT_SELECTED', 'Add-ons are chosen while your place is held.');
+      const now = this.clock();
+      const chosen = await setChoices(tx, { dropEntryId: e.id }, wanted, { locationId: d.stock_location_id ?? (await defaultLocationId(tx)), currency: drawCurrency(d) }, now);
+      await this.audit.record({ actor, action: 'drop.entry.addons', targetType: 'drop', targetId: id, details: { entryId: e.id, items: chosen } }, tx);
+    });
+    return this.entryFor(accountId, id);
   }
 
   /**
@@ -2024,10 +2082,20 @@ export class DropService {
       .offset(pageOffset(page))
       .execute();
     return makePage(
-      rows.map(entryView),
+      await this.withChoices(id, rows.map(entryView)),
       Number(total.n),
       page,
     );
+  }
+
+  /** Plan MACRO M3 §4.2 (D2): each SELECTED entry's catalogue add-ons chosen, priced in its draw's currency now. */
+  private async withChoices(dropId: string, entries: AdminDropEntry[]): Promise<AdminDropEntry[]> {
+    const selected = entries.filter((e) => e.status === 'SELECTED').map((e) => e.id);
+    if (selected.length === 0) return entries;
+    const d = await this.db.selectFrom('drops').select(['price_minor', 'currency']).where('id', '=', dropId).executeTakeFirstOrThrow();
+    const currency = drawCurrency(d);
+    const chosen = await choicesOf(this.db, 'drop_entry_id', selected, () => currency);
+    return entries.map((e) => ({ ...e, addonChoices: chosen.get(e.id) ?? [] }));
   }
 
   /**
@@ -2100,6 +2168,7 @@ export class DropService {
     const entry = knownId(entryId, dropEntryNotFound);
     const text = note === null || note === undefined ? null : note.trim() === '' ? null : note.trim();
     if (text !== null && (text.length > DROP_NOTE_MAX || CONTROL_CHARS.test(text))) throw validationError(`A note has at most ${DROP_NOTE_MAX} characters.`);
+    let leftOut: LeftOutAddon[] = [];
     await inTransaction(this.db, async (tx) => {
       const now = this.clock();
       const d = await this.lock(tx, id);
@@ -2111,6 +2180,9 @@ export class DropService {
       if (to === 'LAPSED' && e.respond_by && now.getTime() < e.respond_by.getTime()) throw placeHeld(e.respond_by);
       await tx.updateTable('drop_entries').set({ status: to, handled_by: actor.id!, handled_at: now, note: text }).where('id', '=', e.id).execute();
       const order = to === 'CONFIRMED' ? await orderForDrawEntry(tx, e.id, actor, now) : { order: null, orders: [], notes: [] };
+      // Plan MACRO M3 §4.2 (D2): a place lapsed takes no add-on; a confirmed one's were carried onto its order.
+      if (to === 'LAPSED') await clearChoices(tx, 'drop_entry_id', [e.id]);
+      leftOut = 'addonsLeftOut' in order ? order.addonsLeftOut : [];
       await this.audit.record(
         {
           actor,
@@ -2123,13 +2195,15 @@ export class DropService {
             ...(text !== null ? { noted: true } : {}),
             ...(order.order ? { orderId: order.order.id } : {}),
             ...(order.orders.length > 1 ? { orderIds: order.orders.map((o) => o.id) } : {}),
+            ...(leftOut.length > 0 ? { addonsLeftOut: leftOut.map((l) => ({ addonId: l.addonId, units: l.units, reason: l.reason })) } : {}),
           },
         },
         tx,
       );
       for (const n of order.notes) await this.audit.record(n, tx);
     });
-    return this.adminEntry(id, entry);
+    const view = await this.adminEntry(id, entry);
+    return leftOut.length > 0 ? { ...view, addonsLeftOut: leftOut } : view;
   }
 
   /**
@@ -2355,7 +2429,7 @@ export class DropService {
   private async adminEntry(dropId: string, entryId: string): Promise<AdminDropEntry> {
     const r = await this.entryRows(this.db).where('e.id', '=', entryId).where('e.drop_id', '=', dropId).executeTakeFirst();
     if (!r) throw dropEntryNotFound();
-    return entryView(r);
+    return (await this.withChoices(dropId, [entryView(r)]))[0]!;
   }
 
   /** The rows of an account's entries with their drops (the club's status, ENTER, WITHDRAW and RESERVE). */

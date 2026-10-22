@@ -218,7 +218,7 @@ describe('sizes in draws (plan NEXT LOT §3.6.F)', () => {
     const draft = await sizedDraw(ring, [{ label: '52', pieces: 1 }], { published: false });
     const a = await createAccount(t.db);
     for (const id of [randomUUID(), 'nope', draft.id]) await rejects(drops().entryFor(a.id, id), 'DROP_NOT_FOUND', 404);
-    expect(await drops().entryFor(a.id, d.id)).toEqual({ entry: null, savedSize: null, eligible: true });
+    expect(await drops().entryFor(a.id, d.id)).toEqual({ entry: null, savedSize: null, eligible: true, addons: null });
     // A saved ring size of 56 suggests 56; one of 54 (no pieces in it) suggests nothing.
     await t.db.insertInto('account_sizes').values({ account_id: a.id, kind: 'RING', value_mm: 56 }).execute();
     expect((await drops().entryFor(a.id, d.id)).savedSize).toEqual({ id: sizeId(d, '56'), label: '56' });

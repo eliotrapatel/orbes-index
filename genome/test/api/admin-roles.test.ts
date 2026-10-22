@@ -333,6 +333,10 @@ const PROBES: Probe[] = [
   // BP-19 T5: a tier's credit taken off an order, and given back, by an OPERATOR.
   { group: 'orders', method: 'POST', url: `/api/admin/orders/${UUID}/credit`, body: INVALID, min: 'OPERATOR' },
   { group: 'orders', method: 'DELETE', url: `/api/admin/orders/${UUID}/credit`, min: 'OPERATOR' },
+  // Plan MACRO M3 §4.2 (D2): an order's catalogue add-ons.
+  { group: 'orders', method: 'GET', url: `/api/admin/orders/${UUID}/addons`, min: 'AUDITOR' },
+  { group: 'orders', method: 'POST', url: `/api/admin/orders/${UUID}/addons`, body: INVALID, min: 'OPERATOR' },
+  { group: 'orders', method: 'DELETE', url: `/api/admin/orders/${UUID}/addons/${UUID}`, min: 'OPERATOR' },
   // Step S4: a return opened by an OPERATOR (to the archive by an ADMIN only: the case below); the invoices and credit notes read by an AUDITOR (the buyer masked).
   { group: 'invoices', method: 'GET', url: '/api/admin/invoices', min: 'AUDITOR' },
   { group: 'invoices', method: 'GET', url: '/api/admin/invoices?month=2026-11&kind=CREDIT_NOTE&q=INV-2026', min: 'AUDITOR' },

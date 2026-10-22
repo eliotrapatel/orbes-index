@@ -235,6 +235,8 @@ describe('the collector never sees staff data (§3.6 C.9, §3.0 (k); step 9.13)'
       '/api/v1/account/participation': '/api/v1/account/participation',
       '/api/v1/account/questions': '/api/v1/account/questions',
       '/api/v1/account/orders/:id/care-guide': `/api/v1/account/orders/${order.id}/care-guide`,
+      // Plan MACRO M3 §4.2 (D2): what can be added to the order now.
+      '/api/v1/account/orders/:id/addons': `/api/v1/account/orders/${order.id}/addons`,
       '/api/v1/account/products/:productId/care': `/api/v1/account/products/${piece.product_id}/care`,
       // Lot M2 step M2.7: the piece's WORN.
       '/api/v1/account/products/:productId/worn': `/api/v1/account/products/${piece.product_id}/worn`,

@@ -113,7 +113,9 @@ import type { AuditRecordInput, AuditService } from './audit.js';
 import { clubCounts, clubStandings, isTestEntrant, tierName, tierOf, type ClubTier } from './club.js';
 import { DROP_QUANTITY_MAX, drawKey, dropNotFound, openDropSeed } from './drops.js';
 import { holderGuarantee, holdsGuaranteeFor, releaseCovered, sizeServesGuarantee, useGuarantees, visibleGuaranteeIds } from './guarantees.js';
+import { addonOffer, choicesOf, cleanAddonItems, clearChoices, setChoices, type AddonOfferItem, type AddonUnitsInput, type ChosenAddon, type LeftOutAddon } from './order-addons.js';
 import { ordersForLiveEntry } from './orders.js';
+import { defaultLocationId } from './stock.js';
 import { readActingAccount } from './ownership.js';
 import { participationCount, participations } from './participation.js';
 import { cleanCriteria, isSegmentMember, segmentCondition, type SegmentGroup } from './segments.js';
@@ -678,8 +680,18 @@ export interface LiveEntryView {
   currency: string;
   /** Per piece. */
   priceMinor: number;
-  /** quantity × (price + the add-ons). */
+  /** quantity × (price + the add-ons), plus the catalogue add-ons (`addonItems`). */
   totalMinor: number;
+  /**
+   * Plan MACRO M3 §4.2 (D2): the catalogue add-ons of the entry: while SECURED, those chosen with the hold (each its units
+   * and its price per unit in the release's currency now, null when no longer priced); once CONFIRMED, those carried onto
+   * its first order (as added). Empty otherwise.
+   */
+  addonItems: ChosenAddon[];
+  /** While SECURED: the catalogue add-ons offered with the piece now (available at the release's location, priced in its currency). */
+  addonOffer: AddonOfferItem[];
+  /** PAY's answer only: the add-ons chosen that could not be added to the order (none left, no longer offered). */
+  addonsLeftOut?: LeftOutAddon[];
   /**
    * ENDED by the release's sell-out while in its line: its after-room's door (when it appears, when it closes), from the
    * sell-out until the after-room ends; null otherwise (and for anyone else: an entry's own).
@@ -847,6 +859,7 @@ export async function removeAccountLiveEntries(
     const ids = before.map((e) => e.id);
     if (ids.length > 0) {
       await tx.deleteFrom('live_entry_addons').where('entry_id', 'in', ids).execute();
+      await clearChoices(tx, 'live_entry_id', ids);
       await tx
         .updateTable('live_entries')
         .set({ status: 'REMOVED', removed_by: admin, removed_at: sql<Date>`greatest(${now}::timestamptz, joined_at)`, ended_at: sql<Date>`greatest(${now}::timestamptz, joined_at)` })
@@ -1053,7 +1066,7 @@ export async function liveEntryViews(
     .select([
       'e.id', 'e.drop_id', 'e.account_id', 'e.status', 'e.size_id', 's.label', 'e.quantity', 'e.tier', 'e.position', 'e.joined_at', 'e.turn_at',
       'e.turn_expires_at', 'e.secured_at', 'e.hold_expires_at', 'e.confirmed_at', 'e.ended_at', 'e.let_in_by', 'd.paused_at', 'd.price_minor', 'd.currency',
-      'e.guarantee_id', 'e.admitted_at', 'd.opens_at', 'd.pace_batch', 'd.pace_minutes', 'd.pace_paused_at', 'd.pace_next_at',
+      'e.guarantee_id', 'e.admitted_at', 'd.opens_at', 'd.pace_batch', 'd.pace_minutes', 'd.pace_paused_at', 'd.pace_next_at', 'd.stock_location_id', 'd.parent_drop_id',
     ])
     .where('d.mode', '=', 'LIVE')
     .where('d.published_at', 'is not', null);
@@ -1110,10 +1123,13 @@ export async function liveEntryViews(
        WHERE q.id IN (${sql.join(part.map((x) => x.id))})`.execute(db);
     for (const a of r.rows) place.set(a.id, Number(a.place));
   }
+  // Plan MACRO M3 §4.2 (D2): the catalogue add-ons chosen with a hold, and the units carried onto a confirmed entry's order.
+  const items = await liveAddonItems(db, rows);
   for (const r of rows) {
     const own = addons.filter((a) => a.entry_id === r.id);
     const price = r.price_minor ?? 0;
     const unit = price + own.reduce((n, a) => n + a.price_minor, 0);
+    const chosen = items.chosen.get(r.id) ?? [];
     out.set('accountId' in of ? r.drop_id : r.account_id, {
       id: r.id,
       dropId: r.drop_id,
@@ -1142,13 +1158,66 @@ export async function liveEntryViews(
       addons: own.map((a) => ({ id: a.id, label: a.label, priceMinor: a.price_minor })),
       currency: r.currency ?? 'EUR',
       priceMinor: price,
-      totalMinor: r.quantity * unit,
+      totalMinor: r.quantity * unit + chosen.reduce((n, a) => n + a.units * (a.priceMinor ?? 0), 0),
+      addonItems: chosen,
+      addonOffer: items.offer.get(r.id) ?? [],
       afterRoom: doors.get(r.id) ?? null,
       guaranteed: r.guarantee_id !== null && shown.has(r.guarantee_id),
       queue: place.has(r.id) ? queueOf(r, place.get(r.id)!, now) : null,
     });
   }
   return out;
+}
+
+/** Where a LIVE release's add-ons are held and offered: its location (an after-room's, its parent's), else the default. */
+export async function liveAddonLocation(db: Db, d: { stock_location_id: string | null; parent_drop_id: string | null }): Promise<string> {
+  if (d.stock_location_id) return d.stock_location_id;
+  if (d.parent_drop_id) {
+    const p = await db.selectFrom('drops').select('stock_location_id').where('id', '=', d.parent_drop_id).executeTakeFirst();
+    if (p?.stock_location_id) return p.stock_location_id;
+  }
+  return defaultLocationId(db);
+}
+
+const liveCurrency = (c: string | null): 'EUR' | 'GBP' | 'USD' | 'CHF' | null => (c === 'EUR' || c === 'GBP' || c === 'USD' || c === 'CHF' ? c : null);
+
+/**
+ * The catalogue add-ons of entries (plan MACRO M3 §4.2): a SECURED entry's choices (priced in its release's currency
+ * now) and what is offered with it, a CONFIRMED entry's units on its orders (one row per add-on and price).
+ */
+async function liveAddonItems(
+  db: Db,
+  rows: readonly { id: string; status: LiveEntryStatus; currency: string | null; stock_location_id: string | null; parent_drop_id: string | null }[],
+): Promise<{ chosen: Map<string, ChosenAddon[]>; offer: Map<string, AddonOfferItem[]> }> {
+  const secured = rows.filter((r) => r.status === 'SECURED');
+  const currencies = new Map(secured.map((r) => [r.id, liveCurrency(r.currency)]));
+  const chosen = await choicesOf(db, 'live_entry_id', secured.map((r) => r.id), (id) => currencies.get(id) ?? null);
+  const offer = new Map<string, AddonOfferItem[]>();
+  for (const r of secured) {
+    const currency = liveCurrency(r.currency);
+    if (currency !== null) offer.set(r.id, await addonOffer(db, await liveAddonLocation(db, r), currency));
+  }
+  const confirmed = rows.filter((r) => r.status === 'CONFIRMED');
+  if (confirmed.length > 0) {
+    const units = await db
+      .selectFrom('order_addon_items as u')
+      .innerJoin('orders as o', 'o.id', 'u.order_id')
+      .innerJoin('addon_items as a', 'a.id', 'u.addon_id')
+      .select(['o.live_entry_id', 'u.addon_id', 'a.name', 'a.line', 'u.price_minor'])
+      .where('o.live_entry_id', 'in', confirmed.map((r) => r.id))
+      .where('u.status', '<>', 'REMOVED')
+      .orderBy('u.added_at')
+      .orderBy('u.id')
+      .execute();
+    for (const u of units) {
+      const list = chosen.get(u.live_entry_id!) ?? [];
+      const row = list.find((x) => x.addonId === u.addon_id && x.priceMinor === u.price_minor);
+      if (row) row.units += 1;
+      else list.push({ addonId: u.addon_id, name: u.name, line: u.line, units: 1, priceMinor: u.price_minor });
+      chosen.set(u.live_entry_id!, list);
+    }
+  }
+  return { chosen, offer };
 }
 
 function queueOf(d: LivePaceRow, place: number, now: Date): LiveQueueView {
@@ -1493,13 +1562,17 @@ export class LiveService {
 
   /**
    * ADD-ONS: the add-ons of the release chosen for a held piece (at most LIVE_ADDONS_MAX, each once), replacing the
-   * previous choice, each with its price now. Audited `drop.live.addons` with their ids.
+   * previous choice, each with its price now. Plan MACRO M3 §4.2 (D2): `items`, when sent, replaces the catalogue
+   * add-ons chosen with it (services/order-addons.ts setChoices: offered at the release's location in its currency, that
+   * many available there, at most 3 of each), carried onto its order at PAY; left out, they stay as they were. Audited
+   * `drop.live.addons` with their ids (and the items, when sent).
    */
-  async setAddons(accountId: string, dropId: string, addonIds: readonly string[], actor: Actor): Promise<LiveEntryView> {
+  async setAddons(accountId: string, dropId: string, addonIds: readonly string[], actor: Actor, items?: readonly AddonUnitsInput[]): Promise<LiveEntryView> {
     const account = assertAccount(accountId);
     const id = knownId(dropId, dropNotFound);
     if (!Array.isArray(addonIds) || addonIds.length > LIVE_ADDONS_MAX) throw addonUnknown();
     const wanted = [...new Set(addonIds.map((a) => knownId(a, addonUnknown)))].sort();
+    const catalogue = items === undefined ? undefined : cleanAddonItems(items);
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
       const { d, now } = await this.lockAnnouncedLive(tx, id, 'share', account);
@@ -1508,7 +1581,9 @@ export class LiveService {
       if (addons.length !== wanted.length) throw addonUnknown();
       await tx.deleteFrom('live_entry_addons').where('entry_id', '=', e.id).execute();
       if (addons.length) await tx.insertInto('live_entry_addons').values(addons.map((a) => ({ entry_id: e.id, addon_id: a.id, price_minor: a.price_minor }))).execute();
-      await this.audit.record({ actor, action: 'drop.live.addons', targetType: 'drop', targetId: id, details: { entryId: e.id, addonIds: wanted } }, tx);
+      const chosen =
+        catalogue === undefined ? undefined : await setChoices(tx, { liveEntryId: e.id }, catalogue, { locationId: await liveAddonLocation(tx, d), currency: liveCurrency(d.currency) }, now);
+      await this.audit.record({ actor, action: 'drop.live.addons', targetType: 'drop', targetId: id, details: { entryId: e.id, addonIds: wanted, ...(chosen !== undefined ? { items: chosen } : {}) } }, tx);
     });
     return (await this.viewerEntry(this.db, account, id))!;
   }
@@ -1522,17 +1597,24 @@ export class LiveService {
   async confirm(accountId: string, dropId: string, actor: Actor): Promise<LiveEntryView> {
     const account = assertAccount(accountId);
     const id = knownId(dropId, dropNotFound);
+    let leftOut: LeftOutAddon[] = [];
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
       const { d, now } = await this.lockAnnouncedLive(tx, id, 'update', account);
       const e = await this.runningHold(tx, d, account, now);
       await tx.updateTable('live_entries').set({ status: 'CONFIRMED', confirmed_at: now }).where('id', '=', e.id).where('status', '=', 'SECURED').execute();
-      const notes: AuditRecordInput[] = [{ actor, action: 'drop.live.confirm', targetType: 'drop', targetId: id, details: { entryId: e.id, quantity: e.quantity } }];
+      const confirmed: AuditRecordInput = { actor, action: 'drop.live.confirm', targetType: 'drop', targetId: id, details: { entryId: e.id, quantity: e.quantity } };
+      const notes: AuditRecordInput[] = [confirmed];
       await this.settleEnd(tx, d, now, notes);
-      notes.push(...(await ordersForLiveEntry(tx, e.id, actor, now)).notes);
+      const created = await ordersForLiveEntry(tx, e.id, actor, now);
+      notes.push(...created.notes);
+      // Plan MACRO M3 §4.2 (D2): the add-ons that could not be added, said in PAY's answer and its audit entry.
+      leftOut = created.addonsLeftOut;
+      if (leftOut.length > 0) confirmed.details = { ...confirmed.details, addonsLeftOut: leftOut.map((l) => ({ addonId: l.addonId, units: l.units, reason: l.reason })) };
       await this.record(tx, notes);
     });
-    return (await this.viewerEntry(this.db, account, id))!;
+    const entry = (await this.viewerEntry(this.db, account, id))!;
+    return leftOut.length > 0 ? { ...entry, addonsLeftOut: leftOut } : entry;
   }
 
   /** RELEASE MY PLACE: the held piece given back (RELEASED, add-ons dropped); the next in line gets it. Audited `drop.live.release`. */
@@ -1544,6 +1626,7 @@ export class LiveService {
       const { d, now } = await this.lockAnnouncedLive(tx, id, 'update', account);
       const e = await this.runningHold(tx, d, account, now);
       await tx.deleteFrom('live_entry_addons').where('entry_id', '=', e.id).execute();
+      await clearChoices(tx, 'live_entry_id', [e.id]);
       await tx.updateTable('live_entries').set({ status: 'RELEASED', ended_at: now }).where('id', '=', e.id).where('status', '=', 'SECURED').execute();
       const notes: AuditRecordInput[] = [];
       await this.giveTurnsNow(tx, d, now, notes);
@@ -1653,6 +1736,7 @@ export class LiveService {
       if (e.status !== 'SECURED') throw entryNotSecured();
       const ranOut = effectiveDeadline(e.hold_expires_at!, d, now).getTime() <= now.getTime();
       await tx.deleteFrom('live_entry_addons').where('entry_id', '=', e.id).execute();
+      await clearChoices(tx, 'live_entry_id', [e.id]);
       await tx.updateTable('live_entries').set({ status: 'EXPIRED', ended_at: ranOut ? e.hold_expires_at : now }).where('id', '=', e.id).execute();
       const notes: AuditRecordInput[] = [];
       await this.giveTurnsNow(tx, d, now, notes);
@@ -1837,6 +1921,7 @@ export class LiveService {
       if (!(LIVE_OPEN_STATUSES as readonly string[]).includes(e.status)) throw entryClosed();
       const at = maxDate(now, e.joined_at);
       await tx.deleteFrom('live_entry_addons').where('entry_id', '=', e.id).execute();
+      await clearChoices(tx, 'live_entry_id', [e.id]);
       // IN-01: a guarantee not used yet (WAITING, QUEUED) is unbound and stays ACTIVE; one used at the turn stays used.
       const unbind = e.guarantee_id !== null && (e.status === 'WAITING' || e.status === 'QUEUED');
       await tx
@@ -1960,6 +2045,7 @@ export class LiveService {
       .returning('id')
       .execute();
     if (expired.length) await tx.deleteFrom('live_entry_addons').where('entry_id', 'in', expired.map((e) => e.id)).execute();
+    if (expired.length) await clearChoices(tx, 'live_entry_id', expired.map((e) => e.id));
     out.missed += missed.length;
     out.expired += expired.length;
   }

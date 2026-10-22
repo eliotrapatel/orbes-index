@@ -36,6 +36,11 @@
  *   POST   /api/admin/orders/:id/credit         OPERATOR  APPLY CREDIT (plan NEXT-NINE, BP-19 T5): a tier's credit taken off
  *                                                         a RESERVED order's invoice, within its balance and the price
  *   DELETE /api/admin/orders/:id/credit         OPERATOR  REMOVE CREDIT: what was taken off it, given back
+ *   GET    /api/admin/orders/:id/addons         AUDITOR   plan MACRO M3 §4.2 (D2): the add-ons an order can take now (at its
+ *                                                         location, in its currency), for Add an add-on
+ *   POST   /api/admin/orders/:id/addons         OPERATOR  Add an add-on: { addonId, units } on an order RESERVED or PAID,
+ *                                                         until SHIPPED (services/order-addons.ts)
+ *   DELETE /api/admin/orders/:id/addons/:lineId OPERATOR  Remove one unit HELD (after PAID, a credit note for its line)
  *   POST   /api/admin/orders/:id/case           OPERATOR  Open a return (plan NEXT LOT §3.5.4.4, step 5.10): a RETURN or a
  *                                                         size EXCHANGE opened by Client Services, with its reason and
  *                                                         note (201 the order case, services/order-cases.ts); ORBES
@@ -61,6 +66,8 @@ import {
   orderTermsBody,
   orderCreditBody,
   orderTransitionBody,
+  adminOrderAddonParams,
+  orderAddonBody,
   parse,
   returnsReportQuery,
   shippingRatesBody,
@@ -201,6 +208,25 @@ export const adminOrderRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
   app.delete('/api/admin/orders/:id/credit', async (request) => {
     const { id } = parse(orderParams, request.params);
     await orders.removeCredit(id, adminActor(request));
+    return detail(request, id);
+  });
+
+  // Plan MACRO M3 §4.2 (D2): an order's catalogue add-ons, added and removed by Client Services until SHIPPED.
+  app.get('/api/admin/orders/:id/addons', async (request) => {
+    const { id } = parse(orderParams, request.params);
+    return ctx.services.orderAddons.offerForStaff(id);
+  });
+
+  app.post('/api/admin/orders/:id/addons', async (request) => {
+    const { id } = parse(orderParams, request.params);
+    const b = parse(orderAddonBody, request.body);
+    await ctx.services.orderAddons.addForStaff(id, b, adminActor(request));
+    return detail(request, id);
+  });
+
+  app.delete('/api/admin/orders/:id/addons/:lineId', async (request) => {
+    const { id, lineId } = parse(adminOrderAddonParams, request.params);
+    await ctx.services.orderAddons.removeForStaff(id, lineId, adminActor(request));
     return detail(request, id);
   });
 

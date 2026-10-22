@@ -395,7 +395,7 @@ describe('invoices and credit notes (plan LIVE RELEASE+, S4)', () => {
 
   it('reads every line back with its own kind (plan NEXT-NINE, BP-19): SHIPPING, CREDIT and GIFT beside PIECE and ADDON, on the invoice, its credit note and MY PIECES\' documents; an old invoice unchanged', () => {
     // Plan NEXT LOT §3.6.C: and an engraving priced from the settings.
-    expect([...INVOICE_LINE_KINDS]).toEqual(['PIECE', 'ADDON', 'SHIPPING', 'CREDIT', 'GIFT', 'ENGRAVING']);
+    expect([...INVOICE_LINE_KINDS]).toEqual(['PIECE', 'ADDON', 'SHIPPING', 'CREDIT', 'GIFT', 'ENGRAVING', 'ADD_ON_ITEM']);
     const issued = [
       { kind: 'PIECE', label: 'MONOLITHE · SIZE 52', detail: 'DRAW · THE OCTOBER DRAW', amountMinor: 420_000 },
       { kind: 'SHIPPING', label: 'SHIPPING · STANDARD', detail: 'FREE · PLATINE', amountMinor: 0 },

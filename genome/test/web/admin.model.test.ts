@@ -1179,6 +1179,7 @@ describe('the Club\'s requests of the private salon (P-X08)', () => {
       handledAt: null,
       resolutionNote: null,
       outcome: null,
+      addonChoices: [],
     });
     expect(r.status).toBe('OPEN');
   });

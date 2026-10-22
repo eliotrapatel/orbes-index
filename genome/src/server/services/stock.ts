@@ -528,6 +528,8 @@ export interface MovementInput {
   transferId?: string | null;
   /** RECEIVED only (migration 0036): the reception line whose pieces enter the stock. */
   receptionLineId?: string | null;
+  /** SHIPPED or RETURNED of an add-on's unit (migration 0056, plan MACRO M3 §4.2): the unit moved, with its order. */
+  orderAddonItemId?: string | null;
   note?: string | null;
 }
 
@@ -542,6 +544,7 @@ export function movementPayload(m: {
   product_id: string | null;
   transfer_id: string | null;
   reception_line_id?: string | null;
+  order_addon_item_id?: string | null;
   created_at: Date;
 }): JsonObject {
   return {
@@ -554,6 +557,7 @@ export function movementPayload(m: {
     productId: m.product_id,
     transferId: m.transfer_id,
     ...(m.reception_line_id ? { receptionLineId: m.reception_line_id } : {}),
+    ...(m.order_addon_item_id ? { orderAddonItemId: m.order_addon_item_id } : {}),
     at: m.created_at.toISOString(),
   };
 }
@@ -571,12 +575,13 @@ export async function recordMovement(tx: Db, m: MovementInput, actor: Actor, now
       product_id: m.productId ?? null,
       transfer_id: m.transferId ?? null,
       reception_line_id: m.receptionLineId ?? null,
+      order_addon_item_id: m.orderAddonItemId ?? null,
       note: m.note ?? null,
       actor_type: actor.type,
       actor_id: actor.id ?? null,
       created_at: now,
     })
-    .returning(['id', 'sku_id', 'location_id', 'delta', 'reason', 'order_id', 'product_id', 'transfer_id', 'reception_line_id', 'created_at'])
+    .returning(['id', 'sku_id', 'location_id', 'delta', 'reason', 'order_id', 'product_id', 'transfer_id', 'reception_line_id', 'order_addon_item_id', 'created_at'])
     .executeTakeFirstOrThrow();
   const id = Number(row.id);
   await writeJournal(tx, [{ type: 'stock.move', entityType: 'stock_movement', entityId: String(id), payload: movementPayload({ ...row, id }) }], now);

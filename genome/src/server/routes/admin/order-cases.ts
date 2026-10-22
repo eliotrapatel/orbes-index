@@ -48,7 +48,7 @@ export const adminOrderCaseRoutes: FastifyPluginAsync<AdminRouteDeps> = async (a
     const { id } = parse(orderCaseParams, request.params);
     const b = parse(decideOrderCaseBody, request.body);
     const { admin } = requireAdmin(request);
-    const r = await orderCases.decide(id, { decision: b.decision, pieceTo: b.pieceTo ?? null, locationId: b.locationId ?? null, note: b.note ?? null }, adminActor(request), { admin: hasRole(admin.role, 'ADMIN') });
+    const r = await orderCases.decide(id, { decision: b.decision, pieceTo: b.pieceTo ?? null, locationId: b.locationId ?? null, note: b.note ?? null, addonsOut: b.addonsOut ?? null }, adminActor(request), { admin: hasRole(admin.role, 'ADMIN') });
     reply.header('cache-control', 'no-store');
     return { case: orderCaseJson(request, r.case), ...(r.productId ? { productId: r.productId } : {}), ...(r.claimCode ? { claimCode: r.claimCode } : {}), ...(r.claimCodes ? { claimCodes: r.claimCodes } : {}) };
   });

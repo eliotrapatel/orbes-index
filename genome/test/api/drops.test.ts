@@ -1154,7 +1154,7 @@ describe('draws in sizes over HTTP (plan NEXT LOT §3.6.F)', () => {
     for (const id of ['nope', '5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6', draft.id]) expect(errorOf(await me.client.get(url(id, 'entry'))).code, id).toBe('DROP_NOT_FOUND');
     const empty = await me.client.get(url(d.id, 'entry'));
     expect(empty.headers['cache-control']).toBe('no-store');
-    expect(safeJson(empty)).toEqual({ entry: null, savedSize: null, eligible: true });
+    expect(safeJson(empty)).toEqual({ entry: null, savedSize: null, eligible: true, addons: null });
     // The early access: a PLATINE account reserves in a size.
     const platine = await accountClient(h);
     await holdPieces(h.ctx.db, await accountIdOf(platine.email), 5, catalog.modelId);
@@ -1190,6 +1190,49 @@ describe('draws in sizes over HTTP (plan NEXT LOT §3.6.F)', () => {
     // MY PIECES' status names each entry's size.
     const status = safeJson(await me.client.get('/api/v1/club/status')) as { entries: { dropId: string; size: unknown }[] };
     expect(status.entries.find((e) => e.dropId === d.id)!.size).toEqual({ id: s54, label: '54' });
+  });
+
+  it('ADD TO YOUR ORDER on a place held (plan MACRO M3 §4.2, D2): PUT /api/v1/club/drops/:id/addons with the CSRF token, in a draw with a price; read back with the entry; carried at the confirmation', async () => {
+    await staff();
+    const d = await sized([{ label: '52', pieces: 1 }], 10 * HOUR, 2, { earlyAccessHours: 48, earlyAccessPlatineHours: 48, priceMinor: 480_000, currency: 'EUR' });
+    await publish(d.id);
+    const op = { type: 'admin' as const, id: (await h.ctx.db.selectFrom('admin_users').select('id').where('role', '=', 'OPERATOR').executeTakeFirstOrThrow()).id };
+    const cloth = await h.ctx.services.addons.create({ name: 'POLISHING CLOTH', skuCode: 'ADD-CLOTH-D', prices: { EUR: 1_500 } }, op);
+    const france = (await h.ctx.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
+    await h.ctx.services.stock.adjust({ skuId: cloth.sku.id, locationId: france, delta: 2, note: 'Counted.' }, op);
+    const url = `/api/v1/club/drops/${d.id}/addons`;
+    type Json = Record<string, any>;
+    const put = (c: Client, body: unknown, opts: { noCsrf?: boolean } = {}) => c.request('PUT', url, { body, ...opts });
+    const platine = await accountClient(h);
+    await holdPieces(h.ctx.db, await accountIdOf(platine.email), 5, catalog.modelId);
+    expect((await put(h.client(), { items: [] })).statusCode).toBe(401);
+    expect(errorOf(await put(platine.client, { items: [{ addonId: cloth.id, units: 1 }] })).code).toBe('DROP_NOT_ENTERED');
+    expect((await platine.client.post(`/api/v1/club/drops/${d.id}/reserve`, { sizeId: d.sizes[0]!.id })).statusCode).toBe(200);
+    // Offered while the place is held, the draw having a price.
+    expect((safeJson(await platine.client.get(`/api/v1/club/drops/${d.id}/entry`)) as Json).addons).toEqual({
+      currency: 'EUR',
+      chosen: [],
+      offer: [{ addonId: cloth.id, name: 'POLISHING CLOTH', line: null, priceMinor: 1_500, currency: 'EUR', maxUnits: 2 }],
+    });
+    expect((await put(platine.client, { items: [{ addonId: cloth.id, units: 1 }] }, { noCsrf: true })).statusCode).toBe(403);
+    expect(errorOf(await put(platine.client, { items: [{ addonId: cloth.id, units: 1, price: 0 }] })).code).toBe('VALIDATION_FAILED');
+    const tooMany = await put(platine.client, { items: [{ addonId: cloth.id, units: 3 }] });
+    expect([tooMany.statusCode, errorOf(tooMany)]).toEqual([409, { code: 'ADDON_OUT_OF_STOCK', message: 'POLISHING CLOTH could not be added: none left.' }]);
+    const chosen = await put(platine.client, { items: [{ addonId: cloth.id, units: 2 }] });
+    expect(chosen.statusCode, chosen.body).toBe(200);
+    expect(chosen.headers['cache-control']).toBe('no-store');
+    expect((safeJson(chosen) as Json).addons.chosen).toEqual([{ addonId: cloth.id, name: 'POLISHING CLOTH', line: null, units: 2, priceMinor: 1_500 }]);
+    // Client Services confirms: the order carries them; the Confirm dialog read them first.
+    const entries = safeJson(await auditor.get(`${adminUrl(d.id)}/entries`)) as { items: Json[] };
+    const entry = entries.items.find((e) => e.status === 'SELECTED')!;
+    expect(entry.addonChoices).toEqual([{ addonId: cloth.id, name: 'POLISHING CLOTH', line: null, units: 2, priceMinor: 1_500 }]);
+    const confirmed = await operator.post(`${adminUrl(d.id)}/entries/${entry.id}/confirm`, { note: 'Sold.' });
+    expect(confirmed.statusCode, confirmed.body).toBe(200);
+    const order = await h.ctx.db.selectFrom('orders').select('id').where('drop_entry_id', '=', entry.id).executeTakeFirstOrThrow();
+    expect(await h.ctx.db.selectFrom('order_addon_items').select(['addon_id', 'price_minor', 'currency']).where('order_id', '=', order.id).execute()).toEqual([
+      { addon_id: cloth.id, price_minor: 1_500, currency: 'EUR' },
+      { addon_id: cloth.id, price_minor: 1_500, currency: 'EUR' },
+    ]);
   });
 
   it('draws per size, lists each entry\'s size, filters the console\'s entries by size, and offers the next place per size', async () => {

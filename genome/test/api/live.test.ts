@@ -573,8 +573,24 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       expect(errorOf(await a.client.request('PUT', `/api/v1/live/${r.id}/addons`, { body: { addonIds: ['nope'] } })).code).toBe('LIVE_ADDON_UNKNOWN');
       const withBox = safeJson(await a.client.request('PUT', `/api/v1/live/${r.id}/addons`, { body: { addonIds: [r.addons[0]!.id] } })) as { entry: Record<string, unknown> };
       expect(withBox.entry).toMatchObject({ addons: [{ id: r.addons[0]!.id, label: 'GIFT BOX', priceMinor: 5_000 }], totalMinor: 510_000, currency: 'EUR' });
+      // Plan MACRO M3 §4.2 (D2): a catalogue add-on chosen with the hold (`items`), the release's add-ons kept; at PAY,
+      // the order carries it.
+      const op = { type: 'admin' as const, id: f.admin.id };
+      const cloth = await h.ctx.services.addons.create({ name: 'POLISHING CLOTH', skuCode: 'ADD-CLOTH-L', prices: { EUR: 1_500 } }, op);
+      const france = (await h.ctx.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
+      await h.ctx.services.stock.adjust({ skuId: cloth.sku.id, locationId: france, delta: 1, note: 'Counted.' }, op);
+      expect(errorOf(await a.client.request('PUT', `/api/v1/live/${r.id}/addons`, { body: { addonIds: [r.addons[0]!.id], items: [{ addonId: cloth.id, units: 4 }] } })).code).toBe('ADDON_LIMIT');
+      expect(errorOf(await a.client.request('PUT', `/api/v1/live/${r.id}/addons`, { body: { addonIds: [r.addons[0]!.id], items: [{ addonId: cloth.id }] } })).code).toBe('VALIDATION_FAILED');
+      const withCloth = safeJson(await a.client.request('PUT', `/api/v1/live/${r.id}/addons`, { body: { addonIds: [r.addons[0]!.id], items: [{ addonId: cloth.id, units: 1 }] } })) as { entry: Record<string, unknown> };
+      expect(withCloth.entry).toMatchObject({
+        addons: [{ id: r.addons[0]!.id }],
+        addonItems: [{ addonId: cloth.id, name: 'POLISHING CLOTH', line: null, units: 1, priceMinor: 1_500 }],
+        addonOffer: [{ addonId: cloth.id, maxUnits: 1 }],
+        totalMinor: 511_500,
+      });
       const paid = safeJson(await a.client.post(`/api/v1/live/${r.id}/confirm`, {})) as { entry: Record<string, unknown> };
-      expect(paid.entry).toMatchObject({ status: 'CONFIRMED', confirmedAt: h.clock.now().toISOString() });
+      expect(paid.entry).toMatchObject({ status: 'CONFIRMED', confirmedAt: h.clock.now().toISOString(), addonItems: [{ addonId: cloth.id, units: 1 }], addonOffer: [] });
+      expect(paid.entry.addonsLeftOut).toBeUndefined();
       expect(errorOf(await a.client.post(`/api/v1/live/${r.id}/confirm`, {})).code).toBe('LIVE_NOT_SECURED');
 
       // MY PIECES: the entry with its release.

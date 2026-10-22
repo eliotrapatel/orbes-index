@@ -288,4 +288,35 @@ describe('orders, the stock and their settings: the console\'s routes', () => {
     }
     h.clock.advance(MINUTE);
   });
+
+  it('adds and removes an order\'s add-ons (plan MACRO M3 §4.2, D2): an OPERATOR until SHIPPED, the order back with its units; an AUDITOR reads them and what can be added', async () => {
+    const strap = await h.ctx.services.addons.create({ name: 'SPARE STRAP', skuCode: 'ADD-STRAP', prices: { EUR: 2_500 } }, f.admin);
+    await h.ctx.services.stock.adjust({ skuId: strap.sku.id, locationId: france, delta: 3, note: 'Counted.' }, f.admin);
+    const id = await salonOrder();
+    // Without its currency entered, none is offered.
+    expect(errorOf(await op.post(`/api/admin/orders/${id}/addons`, { addonId: strap.id, units: 1 })).code).toBe('ADDON_NOT_OFFERED');
+    expect((await op.request('PATCH', `/api/admin/orders/${id}/terms`, { body: { priceMinor: 300_000, currency: 'EUR' } })).statusCode).toBe(200);
+    const offer = safeJson(await auditor.get(`/api/admin/orders/${id}/addons`)) as Json;
+    expect(offer).toMatchObject({ canAdd: true, currency: 'EUR', offer: [{ addonId: strap.id, name: 'SPARE STRAP', priceMinor: 2_500, maxUnits: 3 }] });
+    expect((await auditor.post(`/api/admin/orders/${id}/addons`, { addonId: strap.id, units: 1 })).statusCode).toBe(403);
+    expect(errorOf(await op.post(`/api/admin/orders/${id}/addons`, { addonId: strap.id })).code).toBe('VALIDATION_FAILED');
+    h.clock.advance(MINUTE);
+    const added = await op.post(`/api/admin/orders/${id}/addons`, { addonId: strap.id, units: 2 });
+    expect(added.statusCode, added.body).toBe(200);
+    const units = (safeJson(added) as Json).order.addonItems as Json[];
+    expect(units.map((u) => [u.addon.name, u.skuCode, u.priceMinor, u.status, u.addedBy.type])).toEqual([
+      ['SPARE STRAP', 'ADD-STRAP', 2_500, 'HELD', 'STAFF'],
+      ['SPARE STRAP', 'ADD-STRAP', 2_500, 'HELD', 'STAFF'],
+    ]);
+    expect((safeJson(await auditor.get(`/api/admin/orders/${id}`)) as Json).order.addonItems).toHaveLength(2);
+    h.clock.advance(MINUTE);
+    const removed = await op.request('DELETE', `/api/admin/orders/${id}/addons/${units[0]!.id}`);
+    expect(removed.statusCode, removed.body).toBe(200);
+    expect(((safeJson(removed) as Json).order.addonItems as Json[]).map((u) => u.status)).toEqual(['REMOVED', 'HELD']);
+    expect(errorOf(await op.request('DELETE', `/api/admin/orders/${id}/addons/${units[0]!.id}`)).code).toBe('ADDON_NOT_FOUND');
+    expect((await h.ctx.db.selectFrom('audit_logs').select('action').where('target_id', '=', id).where('action', 'like', 'order.addon.%').orderBy('id').execute()).map((a) => a.action)).toEqual([
+      'order.addon.add',
+      'order.addon.remove',
+    ]);
+  });
 });

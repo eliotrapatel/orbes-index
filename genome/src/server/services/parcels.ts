@@ -31,6 +31,7 @@ import { SHIPMENT_WEIGHT_G_MAX, SHIPMENT_WEIGHT_MISSING_MAX, type AdminRole, typ
 import { activeBoxes, boxRefs, insideVolume, modelPackings, type BoxRef } from './boxes.js';
 import { readySince, ORDER_ALERT_DEFAULTS } from './fulfilment.js';
 import { writeJournal } from './journal.js';
+import { parcelAddonItems } from './order-addons.js';
 import { orderReference, trackingLink } from './orders.js';
 import type { LocationScope } from './receptions.js';
 
@@ -83,6 +84,8 @@ export interface ParcelPiece {
   skuCode: string | null;
   /** The add-ons' labels only, never their prices. */
   addons: string[];
+  /** Plan MACRO M3 §4.2 (D2): its catalogue add-ons to pack, each with its units (POLISHING CLOTH × 2), never a price. */
+  addonItems: { name: string; units: number }[];
   /** The engraving's words, or null. */
   engraving: string | null;
   surprise: string | null;
@@ -269,6 +272,7 @@ export function checklistOf(
   ticked: ReadonlySet<string>,
   scanned: ReadonlySet<string>,
   box: { name: string } | null = null,
+  addonItems: ReadonlyMap<string, readonly { addonId: string; name: string; units: number }[]> = new Map(),
 ): ChecklistLine[] {
   const many = orders.length > 1;
   const lines: ChecklistLine[] = [];
@@ -280,6 +284,11 @@ export function checklistOf(
   lines.push({ key: 'box', label: box ? `The box: ${box.name}, and the pouch` : 'The box and the pouch', byScan: false, ticked: ticked.has('box') });
   for (const o of orders) {
     o.addons.forEach((a, j) => lines.push({ key: `addon:${o.id}:${j}`, label: `Add-on: ${a.label}`, byScan: false, ticked: ticked.has(`addon:${o.id}:${j}`) }));
+    // Plan MACRO M3 §4.1 (D2): one line per catalogue add-on with its units, ticked by hand (no identity, no scan).
+    for (const a of addonItems.get(o.id) ?? []) {
+      const key = `addon-item:${o.id}:${a.addonId}`;
+      lines.push({ key, label: `Add-on: ${a.name} × ${a.units}`, byScan: false, ticked: ticked.has(key) });
+    }
     if (o.engraving_text !== null) lines.push({ key: `engraving:${o.id}`, label: `Engraving done: "${o.engraving_text}"`, byScan: false, ticked: ticked.has(`engraving:${o.id}`) });
   }
   return lines;
@@ -294,6 +303,8 @@ export interface PackingSuggestion {
   weights: Map<string, number | null>;
   /** The words of each model without a packed weight. */
   modelsWithoutWeight: string[];
+  /** Plan MACRO M3 §4.2: the catalogue add-ons packed with the pieces, by order (each with its units and weight). */
+  addonItems: Map<string, { addonId: string; name: string; units: number; weightG: number | null }[]>;
 }
 
 /**
@@ -328,6 +339,7 @@ export async function packingSuggestion(db: Db, orders: readonly Pick<OrderRow, 
     modelsWithoutBox: [...withoutBox],
     weights,
     modelsWithoutWeight: [...withoutWeight],
+    addonItems: await parcelAddonItems(db, orders.map((o) => o.id)),
   };
 }
 
@@ -336,10 +348,17 @@ export async function packingSuggestion(db: Db, orders: readonly Pick<OrderRow, 
  * piece has no packed weight or no box is set, with what is missing (each model's words, « box »), never blocking packing.
  * A sum above what a shipment holds (100 000 g) is unknown too.
  */
-export function parcelWeight(box: BoxRef | null, s: Pick<PackingSuggestion, 'weights' | 'modelsWithoutWeight'>): { weightG: number | null; missing: string[] } {
-  const missing = [...s.modelsWithoutWeight, ...(box ? [] : ['box'])].slice(0, SHIPMENT_WEIGHT_MISSING_MAX);
+export function parcelWeight(
+  box: BoxRef | null,
+  s: Pick<PackingSuggestion, 'weights' | 'modelsWithoutWeight'> & { addonItems?: PackingSuggestion['addonItems'] },
+): { weightG: number | null; missing: string[] } {
+  // Plan MACRO M3 §4.2: each add-on unit's weight too; an add-on without one is missing by its name.
+  const addons = [...(s.addonItems?.values() ?? [])].flat();
+  const addonsWithoutWeight = [...new Set(addons.filter((a) => a.weightG === null).map((a) => a.name))];
+  const missing = [...s.modelsWithoutWeight, ...addonsWithoutWeight, ...(box ? [] : ['box'])].slice(0, SHIPMENT_WEIGHT_MISSING_MAX);
   if (missing.length > 0) return { weightG: null, missing };
-  const total = box!.emptyWeightG + [...s.weights.values()].reduce<number>((sum, w) => sum + (w ?? 0), 0);
+  const total =
+    box!.emptyWeightG + [...s.weights.values()].reduce<number>((sum, w) => sum + (w ?? 0), 0) + addons.reduce((sum, a) => sum + (a.weightG ?? 0) * a.units, 0);
   return total > SHIPMENT_WEIGHT_G_MAX ? { weightG: null, missing: [`over ${SHIPMENT_WEIGHT_G_MAX} g`] } : { weightG: total, missing: [] };
 }
 
@@ -449,7 +468,8 @@ export async function parcelView(db: Db, orderId: string, scope: LocationScope, 
   const packing = await parcelPacking(db, members, shipment);
   // A parcel packed keeps the box line it was packed with (a parcel packed before boxes existed: « The box and the pouch »).
   const stored = shipment?.packed_at ? (shipment.checklist ?? []).find((l) => l.key === 'box') : undefined;
-  const checklist = checklistOf(members, ticked, scanned, packing.box).map((l) => (stored && l.key === 'box' ? { ...l, label: stored.label } : l));
+  const addonItems = await parcelAddonItems(db, members.map((o) => o.id));
+  const checklist = checklistOf(members, ticked, scanned, packing.box, addonItems).map((l) => (stored && l.key === 'box' ? { ...l, label: stored.label } : l));
   return {
     id: key,
     reference: orderReference(key),
@@ -468,6 +488,7 @@ export async function parcelView(db: Db, orderId: string, scope: LocationScope, 
         sizeLabel: o.size_label,
         skuCode: m.skuCode,
         addons: o.addons.map((a) => a.label),
+        addonItems: (addonItems.get(o.id) ?? []).map((a) => ({ name: a.name, units: a.units })),
         engraving: o.engraving_text,
         surprise: o.surprise,
         piece: o.product_id ? { productId: pieceRef.get(o.product_id)!, scanned: scanned.has(o.id) } : null,

@@ -10,7 +10,8 @@
  *   GET  /api/v1/club/lookbook/:slug            a sheet, PUBLIC or RESERVED (its price, its tier, the account's open request)
  *   GET  /api/v1/club/lookbook/:slug/worn       plan MACRO M2 §2.2 (D31 G4, G5): its WORN, page `page` of 12, as its first
  *                                               page in the sheet (its photographs' bytes are public: routes/public.ts)
- *   POST /api/v1/club/lookbook/:slug/request    REQUEST THIS PIECE, with an optional note and size (AC-01); ORBES Client Services concludes
+ *   POST /api/v1/club/lookbook/:slug/request    REQUEST THIS PIECE, with an optional note and size (AC-01), and (plan MACRO M3
+ *                                               §4.2, D2) the add-ons chosen with it; ORBES Client Services concludes
  *
  * P-R03, the drops (any ORBES account: one that holds no piece is drawn after
  * the tiers):
@@ -25,6 +26,8 @@
  *   POST /api/v1/club/drops/:id/reserve     P-X02: a place held at once, during the early access, PLATINE and PALLADIUM
  *                                           (in a size of a draw with sizes, { sizeId })
  *   POST /api/v1/club/drops/:id/size        plan NEXT LOT §3.6.F: CHANGE SIZE of an entry, while entries are open
+ *   PUT  /api/v1/club/drops/:id/addons      plan MACRO M3 §4.2 (D2): ADD TO YOUR ORDER, the catalogue add-ons chosen on
+ *                                           a place held ({ items: [{ addonId, units }] }), added at its confirmation
  *
  * P-X01, the circle (services/circle.ts: an account that holds a piece now,
  * each post from its tier up):
@@ -39,12 +42,12 @@
  * and for an unsafe method the CSRF token and a same-origin request); what
  * the account holds now decides the rest (403 OWNERS_ONLY for an account
  * that holds no piece, on the lookbook's routes and the circle's). The club's
- * mutations are POSTs only. Its answers depend on the account, so they are
+ * mutations are POSTs, but for ADD TO YOUR ORDER's PUT (a choice replaced). Its answers depend on the account, so they are
  * never stored (`no-store`). Rate group `api`, like the account's other reads.
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { rateLimitHook } from '../http/rate-limit.js';
-import { circleRsvpBody, circleVoteBody, dropChangeSizeBody, dropSizeBody, emptyBody, lookbookParams, parse, publicCircleParams, publicDropParams, salonRequestBody, wornPageOf } from '../http/schemas.js';
+import { circleRsvpBody, circleVoteBody, drawAddonsBody, dropChangeSizeBody, dropSizeBody, emptyBody, lookbookParams, parse, publicCircleParams, publicDropParams, salonRequestBody, wornPageOf } from '../http/schemas.js';
 import { accountActor, requireAccount, sessionGuard } from '../http/sessions.js';
 import { circleFeedPage, circleFeedVisit } from '../services/circle.js';
 import type { RouteDeps } from './public.js';
@@ -81,7 +84,7 @@ export const clubRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limi
     const { account } = requireAccount(request);
     const { slug } = parse(lookbookParams, request.params);
     const b = parse(salonRequestBody, request.body);
-    const created = await salon.request(account.id, slug, b.note ?? null, accountActor(request), b.size ?? null);
+    const created = await salon.request(account.id, slug, b.note ?? null, accountActor(request), b.size ?? null, b.addons ?? []);
     reply.code(201);
     return created;
   });
@@ -113,6 +116,14 @@ export const clubRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limi
     const { id } = parse(publicDropParams, request.params);
     const b = parse(dropChangeSizeBody, request.body);
     return { entry: await drops.changeSize(account.id, id, { sizeId: b.sizeId }, accountActor(request)) };
+  });
+
+  // Plan MACRO M3 §4.2 (D2): ADD TO YOUR ORDER on a place held; the account's entry and its add-ons back.
+  app.put('/api/v1/club/drops/:id/addons', async (request) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(publicDropParams, request.params);
+    const b = parse(drawAddonsBody, request.body);
+    return drops.setAddonChoices(account.id, id, b.items, accountActor(request));
   });
 
   app.post('/api/v1/club/drops/:id/withdraw', async (request) => {

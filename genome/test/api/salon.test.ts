@@ -189,7 +189,8 @@ describe('the private salon (P-X08)', () => {
     expect(res.statusCode, res.body).toBe(201);
     expect(res.headers['cache-control']).toBe('no-store');
     const { request } = safeJson(res) as { request: RequestJson };
-    expect(request).toEqual({ id: expect.any(String), status: 'OPEN', createdAt: h.clock.now().toISOString(), size: null, modelId: solstice });
+    // Plan MACRO M3 §4.2 (D2): no add-on chosen with it.
+    expect(request).toEqual({ id: expect.any(String), status: 'OPEN', createdAt: h.clock.now().toISOString(), size: null, modelId: solstice, addons: [] });
     expect(await h.ctx.db.selectFrom('shop_requests').select(['account_id', 'model_id', 'note', 'status']).where('id', '=', request.id).executeTakeFirstOrThrow()).toEqual({
       account_id: titane.id,
       model_id: solstice,
@@ -202,7 +203,8 @@ describe('the private salon (P-X08)', () => {
     // Once while it is open; the sheet says it is requested.
     const again = await requestOf(titane.client, 'solstice');
     expect([again.statusCode, errorOf(again)]).toEqual([409, { code: 'SHOP_REQUEST_OPEN', message: 'You have already requested this piece: ORBES Client Services will contact you.' }]);
-    expect((safeJson(await titane.client.get('/api/v1/club/lookbook/solstice')) as SheetJson).salon).toEqual({ priceLabel: '€ 4 800', minTier: 1, request, sizes: [], suggestedSize: null });
+    // Plan MACRO M3 §4.2 (D2): a model without a base price offers no add-on with the request.
+    expect((safeJson(await titane.client.get('/api/v1/club/lookbook/solstice')) as SheetJson).salon).toEqual({ priceLabel: '€ 4 800', minTier: 1, request, sizes: [], suggestedSize: null, addons: null });
     // Another account requests another model a minute later; the body may be left out.
     h.clock.advance(60_000);
     const other = await requestOf(platine.client, 'eclipse');
@@ -424,5 +426,38 @@ describe('the private salon (P-X08)', () => {
       .where('o.shop_request_id', '=', requestId)
       .executeTakeFirstOrThrow();
     expect(order).toEqual({ size_label: '52', sku_label: '52', code: 'SL-GEM-52' });
+  });
+
+  it('a model with a base price offers the add-ons with REQUEST THIS PIECE (plan MACRO M3 §4.2 and §4.4, D2): chosen with the request in that currency, read back, shown to the console, carried onto the order ACCEPTED', async () => {
+    const operatorActor = { type: 'admin' as const, id: (await h.ctx.db.selectFrom('admin_users').select('id').where('role', '=', 'OPERATOR').executeTakeFirstOrThrow()).id };
+    const halo = await newModel('NIMBUS');
+    expect((await operator.patch(model(halo), { slug: 'nimbus', lookbook: 'RESERVED' })).statusCode).toBe(200);
+    await h.ctx.db.updateTable('models').set({ base_price_minor: 350_000, base_currency: 'EUR' }).where('id', '=', halo).execute();
+    const pouch = await h.ctx.services.addons.create({ name: 'TRAVEL POUCH', skuCode: 'ADD-POUCH-S', prices: { EUR: 2_000 }, weightG: 30 }, operatorActor);
+    const france = (await h.ctx.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
+    await h.ctx.services.stock.adjust({ skuId: pouch.sku.id, locationId: france, delta: 2, note: 'Counted.' }, operatorActor);
+    const owner = await member(1);
+    const sheet = (safeJson(await owner.client.get('/api/v1/club/lookbook/nimbus')) as SheetJson & { salon: { addons: unknown } }).salon;
+    expect(sheet.addons).toEqual({ currency: 'EUR', offer: [{ addonId: pouch.id, name: 'TRAVEL POUCH', line: null, priceMinor: 2_000, currency: 'EUR', maxUnits: 2 }] });
+    expect(errorOf(await requestOf(owner.client, 'nimbus', { addons: [{ addonId: pouch.id, units: 4 }] })).code).toBe('ADDON_LIMIT');
+    expect(errorOf(await requestOf(owner.client, 'nimbus', { addons: [{ addonId: pouch.id, units: 3 }] })).code).toBe('ADDON_OUT_OF_STOCK');
+    const asked = await requestOf(owner.client, 'nimbus', { addons: [{ addonId: pouch.id, units: 2 }] });
+    expect(asked.statusCode, asked.body).toBe(201);
+    const request = (safeJson(asked) as { request: RequestJson & { addons: unknown } }).request;
+    expect(request.addons).toEqual([{ addonId: pouch.id, name: 'TRAVEL POUCH', line: null, units: 2, priceMinor: 2_000 }]);
+    // The audit entry stays as it was (N7); the choice is the request's own (`addon_choices`).
+    expect((await audits('shop.request', request.id))[0]!.details).toEqual({ modelId: halo, sized: false });
+    // The console reads the choice before accepting; ACCEPTED, the order carries it in EUR, its price still to enter.
+    expect((await adminRequests(operator, '?status=OPEN')).items.find((r) => r.id === request.id)).toMatchObject({ addonChoices: [{ addonId: pouch.id, units: 2, priceMinor: 2_000 }] });
+    const closed = await operator.post(`/api/admin/club/requests/${request.id}/close`, { note: 'Accepted.', outcome: 'ACCEPTED' });
+    expect(closed.statusCode, closed.body).toBe(200);
+    expect((safeJson(closed) as Record<string, unknown>).addonsLeftOut).toBeUndefined();
+    const order = await h.ctx.db.selectFrom('orders').select(['id', 'currency']).where('shop_request_id', '=', request.id).executeTakeFirstOrThrow();
+    expect(order.currency).toBeNull();
+    expect(await h.ctx.db.selectFrom('order_addon_items').select(['addon_id', 'price_minor', 'currency', 'added_by_type']).where('order_id', '=', order.id).execute()).toEqual([
+      { addon_id: pouch.id, price_minor: 2_000, currency: 'EUR', added_by_type: 'PURCHASE' },
+      { addon_id: pouch.id, price_minor: 2_000, currency: 'EUR', added_by_type: 'PURCHASE' },
+    ]);
+    expect(await h.ctx.db.selectFrom('addon_choices').select('id').where('shop_request_id', '=', request.id).execute()).toEqual([]);
   });
 });

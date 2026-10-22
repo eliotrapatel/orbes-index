@@ -51,7 +51,9 @@ import { makePage, pageOffset, systemClock, type Actor, type Clock, type Page, t
 import type { AuditService } from './audit.js';
 import { CLUB_TIER_NAMES, CLUB_TIER_THRESHOLDS, ownersOnly, type ClubService, type ClubTierName } from './club.js';
 import type { LookbookService, LookbookSheet, SalonCard, SalonFacts } from './lookbook.js';
-import { orderForShopRequest } from './orders.js';
+import { addonOffer, choicesOf, cleanAddonItems, setChoices, type AddonOfferItem, type ChosenAddon, type LeftOutAddon } from './order-addons.js';
+import { baseCurrency, orderForShopRequest } from './orders.js';
+import { defaultLocationId } from './stock.js';
 import { matchSavedSize, modelSizeCandidates, savedMm, sizeKindOf } from './sizes.js';
 import type { WornSheetPage } from './worn.js';
 
@@ -93,6 +95,8 @@ export interface ShopRequestView {
   size: string | null;
   /** The model requested: what WRITE TO ORBES CLIENT SERVICES attaches on its sheet (plan NEXT-NINE, CS-01, MODEL). */
   modelId: string;
+  /** Plan MACRO M3 §4.2 (D2): the catalogue add-ons chosen with it, priced in the model's base currency now. */
+  addons: ChosenAddon[];
 }
 
 /**
@@ -115,7 +119,16 @@ export interface SalonGrid {
  * What the salon adds to a RESERVED model of a sheet: its price, its tier and the account's open request; and (AC-01) its
  * sizes, from its SKUs (the picker shows from two), with the one the account's saved size suggests, or null.
  */
-export type SalonRequestFacts = SalonFacts & { request: ShopRequestView | null; sizes: string[]; suggestedSize: string | null };
+export type SalonRequestFacts = SalonFacts & {
+  request: ShopRequestView | null;
+  sizes: string[];
+  suggestedSize: string | null;
+  /**
+   * Plan MACRO M3 §4.2 and §4.4 (D2): the catalogue add-ons the request form offers, when the model has a base price in a
+   * house currency: those available at the default location, priced in that currency; null otherwise.
+   */
+  addons: { currency: string; offer: AddonOfferItem[] } | null;
+};
 
 /**
  * A RESERVED sheet as the salon gives it to an owner: its price, its tier and the account's open request; and the same
@@ -144,6 +157,10 @@ export interface AdminShopRequest {
   resolutionNote: string | null;
   /** ACCEPTED (its order created) or DECLINED once closed; null while open, or closed before the orders (migration 0022). */
   outcome: ShopRequestOutcome | null;
+  /** Plan MACRO M3 §4.2 (D2): while OPEN, the catalogue add-ons chosen with it (Accept shows them). */
+  addonChoices: ChosenAddon[];
+  /** ACCEPTED's answer only: the add-ons chosen that could not be added to its order. */
+  addonsLeftOut?: LeftOutAddon[];
 }
 
 export interface ShopRequestFilters {
@@ -195,6 +212,8 @@ export async function closeAccountShopRequests(tx: Db, accountId: string, actor:
     .where('status', '=', 'OPEN')
     .returning(['id', 'model_id'])
     .execute();
+  // Plan MACRO M3 §4.2 (D2): a request declined takes no add-on.
+  if (rows.length > 0) await tx.deleteFrom('addon_choices').where('shop_request_id', 'in', rows.map((r) => r.id)).execute();
   return rows.map((r) => ({ requestId: r.id, modelId: r.model_id })).sort((a, b) => (a.requestId < b.requestId ? -1 : a.requestId > b.requestId ? 1 : 0));
 }
 
@@ -308,7 +327,9 @@ export class SalonService {
     const [request, sizes] = await Promise.all([this.openRequest(accountId, modelId), modelSizeCandidates(this.db, modelId, { offered: true })]);
     const kind = sizes.length >= 2 ? await sizeKindOf(this.db, modelId) : null;
     const suggested = kind === null ? null : matchSavedSize(kind, await savedMm(this.db, accountId.toLowerCase(), kind), sizes);
-    return { ...facts, request, sizes: sizes.map((z) => z.label), suggestedSize: suggested?.label ?? null };
+    const currency = await baseCurrency(this.db, modelId);
+    const addons = currency === null ? null : { currency, offer: await addonOffer(this.db, await defaultLocationId(this.db), currency) };
+    return { ...facts, request, sizes: sizes.map((z) => z.label), suggestedSize: suggested?.label ?? null, addons };
   }
 
   /** The account's open request for the model, or null. */
@@ -320,7 +341,10 @@ export class SalonService {
       .where('model_id', '=', modelId)
       .where('status', '=', 'OPEN')
       .executeTakeFirst();
-    return r ? { id: r.id, status: r.status, createdAt: r.created_at, size: r.size_label, modelId } : null;
+    if (!r) return null;
+    const currency = await baseCurrency(this.db, modelId);
+    const addons = (await choicesOf(this.db, 'shop_request_id', [r.id], () => currency)).get(r.id) ?? [];
+    return { id: r.id, status: r.status, createdAt: r.created_at, size: r.size_label, modelId, addons };
   }
 
   /**
@@ -331,8 +355,9 @@ export class SalonService {
    * is open for the model. Audited `shop.request` with the model and `sized`, never the note nor the size. The account's
    * row is read FOR SHARE: a lock under way finishes first, and closes it.
    */
-  async request(accountId: string, slug: string, note: unknown, actor: Actor, size: unknown = null): Promise<{ request: ShopRequestView }> {
+  async request(accountId: string, slug: string, note: unknown, actor: Actor, size: unknown = null, addons: unknown = []): Promise<{ request: ShopRequestView }> {
     assertAccount(accountId);
+    const items = cleanAddonItems(addons ?? []);
     const words = normalizeShopNote(note);
     const tier = await this.ownerTier(accountId);
     const { modelId, sheet } = await this.lookbook.sheetOf(slug, { tier });
@@ -349,10 +374,15 @@ export class SalonService {
           .values({ account_id: account, model_id: modelId, note: words, size_label: sizeLabel, created_at: this.clock() })
           .returning(['id', 'status', 'created_at'])
           .executeTakeFirstOrThrow();
+        // Plan MACRO M3 §4.2 (D2): the add-ons chosen with it, offered at the default location in the model's base currency.
+        // (Kept in `addon_choices`, read by the console's Requests and the account's export; the audit entry stays as it was.)
+        if (items.length > 0) await setChoices(tx, { shopRequestId: r.id }, items, { locationId: await defaultLocationId(tx), currency: await baseCurrency(tx, modelId) }, this.clock());
         await this.audit.record({ actor, action: 'shop.request', targetType: 'shop_request', targetId: r.id, details: { modelId, sized: sizeLabel !== null } }, tx);
         return r;
       });
-      return { request: { id: created.id, status: created.status, createdAt: created.created_at, size: sizeLabel, modelId } };
+      const currency = await baseCurrency(this.db, modelId);
+      const chosen = (await choicesOf(this.db, 'shop_request_id', [created.id], () => currency)).get(created.id) ?? [];
+      return { request: { id: created.id, status: created.status, createdAt: created.created_at, size: sizeLabel, modelId, addons: chosen } };
     } catch (e) {
       if (isUniqueViolation(e, 'shop_requests_one_open')) throw shopRequestOpen();
       throw e;
@@ -391,14 +421,24 @@ export class SalonService {
       .limit(page.pageSize)
       .offset(pageOffset(page))
       .execute();
-    return makePage(rows.map(toAdminRequest), Number(counted.total), page);
+    return makePage(await this.withChoices(rows.map(toAdminRequest)), Number(counted.total), page);
   }
 
   async get(id: string): Promise<AdminShopRequest> {
     if (typeof id !== 'string' || !UUID_RE.test(id)) throw shopRequestNotFound();
     const row = await this.query().where('r.id', '=', id.toLowerCase()).executeTakeFirst();
     if (!row) throw shopRequestNotFound();
-    return toAdminRequest(row);
+    return (await this.withChoices([toAdminRequest(row)]))[0]!;
+  }
+
+  /** Plan MACRO M3 §4.2 (D2): each OPEN request's catalogue add-ons chosen, priced in its model's base currency now. */
+  private async withChoices(requests: AdminShopRequest[]): Promise<AdminShopRequest[]> {
+    const open = requests.filter((r) => r.status === 'OPEN');
+    if (open.length === 0) return requests;
+    const currencies = new Map<string, Awaited<ReturnType<typeof baseCurrency>>>();
+    for (const r of open) currencies.set(r.id, await baseCurrency(this.db, r.model.id));
+    const chosen = await choicesOf(this.db, 'shop_request_id', open.map((r) => r.id), (id) => currencies.get(id) ?? null);
+    return requests.map((r) => ({ ...r, addonChoices: chosen.get(r.id) ?? [] }));
   }
 
   /**
@@ -415,6 +455,7 @@ export class SalonService {
     if (!(SHOP_REQUEST_OUTCOMES as readonly string[]).includes(input.outcome)) throw validationError('Say whether the request is ACCEPTED or DECLINED.');
     if (typeof id !== 'string' || !UUID_RE.test(id)) throw shopRequestNotFound();
     const requestId = id.toLowerCase();
+    let leftOut: LeftOutAddon[] = [];
     await inTransaction(this.db, async (tx) => {
       const row = await tx.selectFrom('shop_requests').select(['status', 'model_id', 'created_at']).where('id', '=', requestId).forUpdate().executeTakeFirst();
       if (!row) throw shopRequestNotFound();
@@ -427,11 +468,16 @@ export class SalonService {
         .where('id', '=', requestId)
         .execute();
       const order = input.outcome === 'ACCEPTED' ? await orderForShopRequest(tx, requestId, actor, at) : { order: null, notes: [] };
-      const orderId = order.order ? { orderId: order.order.id } : {};
+      // Plan MACRO M3 §4.2 (D2): a request declined takes no add-on; an accepted one's were carried onto its order.
+      if (input.outcome !== 'ACCEPTED') await tx.deleteFrom('addon_choices').where('shop_request_id', '=', requestId).execute();
+      leftOut = 'addonsLeftOut' in order ? order.addonsLeftOut : [];
+      const omitted = leftOut.length > 0 ? { addonsLeftOut: leftOut.map((l) => ({ addonId: l.addonId, units: l.units, reason: l.reason })) } : {};
+      const orderId = order.order ? { orderId: order.order.id, ...omitted } : {};
       await this.audit.record({ actor, action: 'shop.request.close', targetType: 'shop_request', targetId: requestId, details: { modelId: row.model_id, outcome: input.outcome, ...orderId } }, tx);
       for (const n of order.notes) await this.audit.record(n, tx);
     });
-    return this.get(requestId);
+    const view = await this.get(requestId);
+    return leftOut.length > 0 ? { ...view, addonsLeftOut: leftOut } : view;
   }
 
   /** A request with its account, its model and who closed it. */
@@ -496,5 +542,6 @@ function toAdminRequest(r: AdminRequestRow): AdminShopRequest {
     handledAt: r.handled_at,
     resolutionNote: r.resolution_note,
     outcome: r.outcome,
+    addonChoices: [],
   };
 }

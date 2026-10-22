@@ -614,7 +614,7 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'closed at the sell-out (choice 26)': "soldOutAt && soldOutAt.getTime() < d.closes_at.getTime() ? 'SOLD_OUT'",
   'the network\'s fingerprint erased after 30 days': 'const cutoff = new Date(now.getTime() - LIVE_NETWORK_RETENTION_DAYS * DAY_MS);',
   // LIVE RELEASE+ (plan of 2026-10-04).
-  'an order per piece at PAY (choice 6, Interconnection)': 'notes.push(...(await ordersForLiveEntry(tx, e.id, actor, now)).notes);',
+  'an order per piece at PAY (choice 6, Interconnection)': 'const created = await ordersForLiveEntry(tx, e.id, actor, now);',
   'an order for a draw\'s entry confirmed (choice 6)': "const order = to === 'CONFIRMED' ? await orderForDrawEntry(tx, e.id, actor, now) : { order: null, orders: [], notes: [] };",
   'an order for a salon request ACCEPTED (choice 6)': "const order = input.outcome === 'ACCEPTED' ? await orderForShopRequest(tx, requestId, actor, at) : { order: null, notes: [] };",
   'the legal steps of an order (Interconnection)': 'if (!isOrderTransitionAllowed(o.status, s.to)) throw stepNotAllowed(o.status, s.to);',
@@ -735,13 +735,15 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
   N4: () => {
     // Neither the customer's routes nor the console's: no tool deletes an account (counsel note §4, point 3). The DELETEs
     // under the account's routes remove one of its saved delivery addresses (YOUR ADDRESSES, plan NEXT LOT §3.6.B) and an
-    // order's engraving (§3.6.C) and withdraw a WORN photograph (plan MACRO M2 §2.2: its row kept, its bytes erased), never
-    // the account; those under the console's owner routes remove one of the client sheet's tags or hide one of its private
-    // notes (plan CUSTOMER INTELLIGENCE §3.6 C.4.3), never the account.
+    // order's engraving (§3.6.C) or one of its add-ons (plan MACRO M3 §4.2: its units REMOVED, kept) and withdraw a WORN
+    // photograph (plan MACRO M2 §2.2: its row kept, its bytes erased), never the account; those under the console's owner
+    // routes remove one of the client sheet's tags or hide one of its private notes (plan CUSTOMER INTELLIGENCE §3.6
+    // C.4.3), never the account.
     expect(ROUTES.filter((r) => r.method === 'delete' && (r.path.startsWith('/api/v1/account') || r.path.startsWith('/api/admin/owners')))).toEqual([
       { method: 'delete', path: '/api/v1/account/wishlist/:slug' },
       { method: 'delete', path: '/api/v1/account/addresses/:id' },
       { method: 'delete', path: '/api/v1/account/orders/:id/engraving' },
+      { method: 'delete', path: '/api/v1/account/orders/:id/addons/:addonId' },
       { method: 'delete', path: '/api/admin/owners/:id/tags/:tag' },
       { method: 'delete', path: '/api/admin/owners/:id/notes/:noteId' },
       { method: 'delete', path: '/api/v1/account/worn/:id' },

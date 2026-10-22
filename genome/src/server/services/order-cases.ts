@@ -62,6 +62,7 @@ import { lockPieces, peekClaimRenewals, withdrawWaiting } from './claim-renewals
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
 import { LifecycleService } from './lifecycle.js';
+import { reshipUnits } from './order-addons.js';
 import { createExchangeOrder, hold, lockOrder, type OrderMail, orderReference, recordChange, returnInTransaction, serveWaiting, step, updateOrder } from './orders.js';
 import { parcelKeyOf, parcelOrders } from './parcels.js';
 import type { LocationScope } from './receptions.js';
@@ -169,6 +170,12 @@ export interface DecideCaseInput {
   pieceTo?: 'RESTOCKED' | 'ARCHIVED' | null;
   locationId?: string | null;
   note?: string | null;
+  /**
+   * Plan MACRO M3 §4.2 (D2), a refund: the order's add-on units (their ids) ORBES marks not to be sold again; the others
+   * go back to stock with the piece (at its location, or the order's when it is archived). A size exchange leaves them
+   * with the collector.
+   */
+  addonsOut?: string[] | null;
 }
 
 /**
@@ -187,6 +194,13 @@ export interface CaseDecided {
 function known(id: unknown, err: () => DomainError): string {
   if (typeof id !== 'string' || !UUID_RE.test(id)) throw err();
   return id.toLowerCase();
+}
+
+/** The add-on units named not to be sold again (plan MACRO M3 §4.2), by id; none by default. */
+function addonsOutOf(v: unknown): string[] {
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v) || v.length > 100 || v.some((x) => typeof x !== 'string' || !UUID_RE.test(x))) throw validationError('Name the add-on units not to be sold again by their ids.');
+  return v.map((x: string) => x.toLowerCase());
 }
 
 function assertStaff(actor: Actor): void {
@@ -519,11 +533,15 @@ export class OrderCaseService {
     const locationId = pieceTo === 'RESTOCKED' && input.locationId ? await knownLocation(this.db, input.locationId) : null;
     return isParcelProblem(c.kind)
       ? this.decideParcel(c, { decision: decision as 'RESHIP' | 'REFUND', pieceTo, locationId, note }, actor)
-      : this.decideReturn(c, { decision: decision as 'REFUND' | 'EXCHANGE', pieceTo: pieceTo!, locationId, note: note! }, actor);
+      : this.decideReturn(c, { decision: decision as 'REFUND' | 'EXCHANGE', pieceTo: pieceTo!, locationId, note: note!, addonsOut: addonsOutOf(input.addonsOut) }, actor);
   }
 
   /** A return or an exchange decided: the return's core, then the EXCHANGE order. */
-  private async decideReturn(c: OrderCaseRow, d: { decision: 'REFUND' | 'EXCHANGE'; pieceTo: 'RESTOCKED' | 'ARCHIVED'; locationId: string | null; note: string }, actor: Actor): Promise<CaseDecided> {
+  private async decideReturn(
+    c: OrderCaseRow,
+    d: { decision: 'REFUND' | 'EXCHANGE'; pieceTo: 'RESTOCKED' | 'ARCHIVED'; locationId: string | null; note: string; addonsOut: string[] },
+    actor: Actor,
+  ): Promise<CaseDecided> {
     const peek = await this.db
       .selectFrom('orders as o')
       .leftJoin('ownership as w', (j) => j.onRef('w.product_id', '=', 'o.product_id').on('w.ended_at', 'is', null))
@@ -542,7 +560,17 @@ export class OrderCaseService {
       const now = this.clock();
       const notes: AuditRecordInput[] = [];
       const location = d.pieceTo === 'RESTOCKED' ? (d.locationId ?? o.location_id) : null;
-      const done = await returnInTransaction(tx, o, { outcome: d.pieceTo, locationId: location, note: d.note, caseId: c.id }, { productId: peek.product_id, reclaim: peek.ownership_id !== null, claimHash }, actor, now, notes, this.lifecycle);
+      const done = await returnInTransaction(
+        tx,
+        o,
+        // Plan MACRO M3 §4.2: a size exchange leaves the add-ons with the collector; a refund takes them back.
+        { outcome: d.pieceTo, locationId: location, note: d.note, caseId: c.id, keepAddons: d.decision === 'EXCHANGE', addonsOut: d.addonsOut },
+        { productId: peek.product_id, reclaim: peek.ownership_id !== null, claimHash },
+        actor,
+        now,
+        notes,
+        this.lifecycle,
+      );
       let exchangeOrderId: string | null = null;
       if (d.decision === 'EXCHANGE') {
         // The size asked, still one of the model's (in stock or not: the exchange order then waits like any order).
@@ -627,6 +655,8 @@ export class OrderCaseService {
           product_id: keep ? o.product_id : null,
           queue_first: !keep && d.decision === 'RESHIP',
         });
+        // Plan MACRO M3 §4.2: its add-ons come back to HELD with it (back to stock, or new ones taken for a reshipment).
+        await reshipUnits(tx, after, { cameBack: keep, reship: d.decision === 'RESHIP' }, actor, now);
         const reissuedHere = piece && !keep ? reissued.get(piece.id) : undefined;
         if (piece && !keep) {
           // Unbound: a buyer's new claim code waiting on it is withdrawn.

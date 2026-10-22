@@ -20,6 +20,10 @@
  * YOUR PROFILE's EMAIL ME WHEN A RELEASE IS ANNOUNCED (409 EMAIL_OFF while the
  * channel is off, so nothing is promised that is not delivered).
  *
+ * Add-ons (plan MACRO M3 §4.2, D2): GET /api/v1/account/orders/:id/addons
+ * lists what can be added to one's own order now, POST adds one with its
+ * units, DELETE …/addons/:addonId removes it, until packing starts.
+ *
  * Responses never expose internal ids of other people, product statuses or
  * staff data; the account itself is described by email and display name.
  */
@@ -28,7 +32,7 @@ import { forbidden } from '../errors.js';
 import { connectionPlace } from '../geo/place.js';
 import { userAgentOf } from '../http/client.js';
 import { rateLimitHook } from '../http/rate-limit.js';
-import { accountAddressBody, accountAddressParams, accountAddressUpdateBody, accountClaimCodeBody, accountDocumentParams, accountEngravingBody, accountOrderCaseBody, accountOrderAddressBody, accountOrderParams, accountProfileBody, accountSizesBody, careParams, careRequestBody, changePasswordBody, emailPreferencesBody, emptyBody, loginBody, lookbookParams, parse, productParams, recoverAccountBody, registerAccountBody, resetRequestBody, warrantyClaimParams } from '../http/schemas.js';
+import { accountAddressBody, accountAddressParams, accountAddressUpdateBody, accountClaimCodeBody, accountDocumentParams, accountEngravingBody, accountOrderAddonParams, accountOrderCaseBody, accountOrderAddressBody, accountOrderParams, orderAddonBody, accountProfileBody, accountSizesBody, careParams, careRequestBody, changePasswordBody, emailPreferencesBody, emptyBody, loginBody, lookbookParams, parse, productParams, recoverAccountBody, registerAccountBody, resetRequestBody, warrantyClaimParams } from '../http/schemas.js';
 import { accountActor, clearSessionCookie, clientMeta, requireAccount, sessionGuard, sessionToken, setSessionCookie } from '../http/sessions.js';
 import type { AccountProfile } from '../services/auth.js';
 import { emailOff } from '../services/email.js';
@@ -48,7 +52,7 @@ export function accountJson(a: AccountProfile): { email: string; displayName: st
 export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limiters }) => {
   app.addHook('onRequest', rateLimitHook(limiters, 'api'));
   app.addHook('onRequest', sessionGuard(ctx, { kind: 'account' }));
-  const { addresses, auth, care, claimRenewals, invoices, orders, ownership, ownershipCertificates, pastReleases, profiles, questions, recovery, sizes, warranty, warrantyClaims, wishlist } = ctx.services;
+  const { addresses, auth, care, claimRenewals, invoices, orderAddons, orders, ownership, ownershipCertificates, pastReleases, profiles, questions, recovery, sizes, warranty, warrantyClaims, wishlist } = ctx.services;
 
   // CREATE ACCOUNT (plan CUSTOMER INTELLIGENCE §3.1 P.4.2): the first and last name and the country required here, in the
   // collector's words; the optional answer to « How did you hear about ORBES? » never refuses a sign-up.
@@ -282,6 +286,33 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
     const { id } = parse(accountOrderParams, request.params);
     reply.header('cache-control', 'no-store');
     return { order: await orders.setEngraving(account.id, id, null, accountActor(request)) };
+  });
+
+  // ADD AN ADD-ON (plan MACRO M3 §4.2, D2): what can be added to the collector's own order now; added and removed until
+  // packing starts, the order as MY PIECES reads it back. Rate group `auth`, as the engraving: after PAID each addition
+  // and removal issues a legal document (a supplementary invoice, a credit note).
+  app.get('/api/v1/account/orders/:id/addons', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(accountOrderParams, request.params);
+    reply.header('cache-control', 'no-store');
+    return orderAddons.offerForAccount(account.id, id);
+  });
+
+  app.post('/api/v1/account/orders/:id/addons', { config: { rateGroup: 'auth' } }, async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(accountOrderParams, request.params);
+    const b = parse(orderAddonBody, request.body);
+    await orderAddons.addForAccount(account.id, id, b, accountActor(request));
+    reply.header('cache-control', 'no-store');
+    return { order: await orders.accountOrder(account.id, id) };
+  });
+
+  app.delete('/api/v1/account/orders/:id/addons/:addonId', { config: { rateGroup: 'auth' } }, async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id, addonId } = parse(accountOrderAddonParams, request.params);
+    await orderAddons.removeForAccount(account.id, id, addonId, accountActor(request));
+    reply.header('cache-control', 'no-store');
+    return { order: await orders.accountOrder(account.id, id) };
   });
 
   // RETURNS AND EXCHANGES (plan NEXT LOT §3.6.D; API §10.23): a return or a size exchange asked within 14 days of the

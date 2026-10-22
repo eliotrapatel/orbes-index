@@ -831,7 +831,7 @@ export class LogisticsService {
       const suggestion = await packingSuggestion(tx, members);
       const { box } = await packingBox(tx, shipment, suggestion);
       const weight = parcelWeight(box, suggestion);
-      const lines = checklistOf(members, ticked, scanned, box);
+      const lines = checklistOf(members, ticked, scanned, box, suggestion.addonItems);
       if (lines.some((l) => !l.ticked) || shipment.photo === null) throw packingIncomplete();
       const now = this.clock();
       const packedAt = now < shipment.packing_started_at ? shipment.packing_started_at : now;

@@ -420,16 +420,20 @@ describe('the lookbook of the models (P-R02)', () => {
     expect(await h.ctx.db.selectFrom('ownership').select('id').where('account_id', '=', ownerId).where('ended_at', 'is', null).execute()).toHaveLength(1);
   });
 
-  it('the club reads by GET and changes nothing but by POST: every route of routes/club.ts is one of the two, under /api/v1/club/', () => {
+  it('the club reads by GET and changes nothing but by POST: every route of routes/club.ts is one of the two, under /api/v1/club/ (but ADD TO YOUR ORDER\'s PUT, a choice replaced)', () => {
     const source = readDoc('genome/src/server/routes/club.ts');
     const routes = [...source.matchAll(/\bapp\.(\w+)\(\s*'([^']+)'/g)].map((m) => [m[1]!, m[2]!] as const).filter(([method]) => method !== 'addHook');
     expect(routes.map(([method, path]) => `${method} ${path}`)).toEqual(expect.arrayContaining(['get /api/v1/club/lookbook', 'get /api/v1/club/lookbook/:slug']));
+    // Plan MACRO M3 §4.2 (D2): the add-ons chosen on a place held are replaced whole, as a LIVE hold's (PUT /api/v1/live/:id/addons);
+    // an unsafe method all the same (the scope's guard: a session, the CSRF token, the same origin).
+    const PUTS = ['/api/v1/club/drops/:id/addons'];
     for (const [method, path] of routes) {
-      expect(['get', 'post'], `${method} ${path}`).toContain(method);
+      expect(method === 'put' ? PUTS : ['get', 'post'], `${method} ${path}`).toContain(method === 'put' ? path : method);
       expect(path, `${method} ${path}`).toMatch(/^\/api\/v1\/club\//);
     }
-    // No other way to declare a route there (app.route, app.all, a PUT, PATCH or DELETE).
-    expect(source).not.toMatch(/\bapp\.(route|all|put|patch|delete|head|options)\(/);
+    // No other way to declare a route there (app.route, app.all, another PUT, a PATCH or DELETE).
+    expect(source).not.toMatch(/\bapp\.(route|all|patch|delete|head|options)\(/);
+    expect([...source.matchAll(/\bapp\.put\(\s*'([^']+)'/g)].map((m) => m[1])).toEqual(PUTS);
   });
 
   it('serves the photographs on their own budget, five times the api one (a sheet shows up to nine)', async () => {

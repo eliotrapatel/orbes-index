@@ -166,6 +166,9 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       priceMinor: 480_000,
       currency: 'EUR',
       addons: [{ label: 'Engraving', priceMinor: 25_000 }],
+      // Plan MACRO M3 §4.2 (D2): no catalogue add-on on it; one may be added (RESERVED, packing not begun, its currency known).
+      addonItems: [],
+      canAddAddons: true,
       // BP-19 T4: an account below PLATINE, no rate set: no shipping, as before.
       shipping: null,
       // BP-19 T5: travelling with no order, not a welcome gift, no credit taken off it.
@@ -209,6 +212,9 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       priceMinor: 490_000,
       currency: 'EUR',
       addons: [],
+      // Plan MACRO M3 §4.2 (D2): none, and none to add once delivered.
+      addonItems: [],
+      canAddAddons: false,
       shipping: null,
       withOrder: null,
       giftTier: null,
@@ -250,7 +256,7 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
     const list = (safeJson(res) as { orders: Json[] }).orders;
     for (const o of list) {
       expect(Object.keys(o).sort()).toEqual(
-        ['addons', 'address', 'addressOf', 'cancelledAt', 'case', 'channel', 'claimCode', 'creditMinor', 'currency', 'deliveredAt', 'deliveryIssue', 'documents', 'editable', 'engraving', 'engravingOffer', 'giftTier', 'id', 'imageUrl', 'model', 'modelVariant', 'paidAt', 'preparingAt', 'priceMinor', 'reference', 'release', 'reservedAt', 'returnable', 'returnedAt', 'shipment', 'shippedAt', 'shipping', 'size', 'status', 'withOrder'].sort(),
+        ['addonItems', 'addons', 'address', 'canAddAddons', 'addressOf', 'cancelledAt', 'case', 'channel', 'claimCode', 'creditMinor', 'currency', 'deliveredAt', 'deliveryIssue', 'documents', 'editable', 'engraving', 'engravingOffer', 'giftTier', 'id', 'imageUrl', 'model', 'modelVariant', 'paidAt', 'preparingAt', 'priceMinor', 'reference', 'release', 'reservedAt', 'returnable', 'returnedAt', 'shipment', 'shippedAt', 'shipping', 'size', 'status', 'withOrder'].sort(),
       );
       expect(Object.keys(o.documents).sort()).toEqual(['careConditions', 'careGuide', 'certificate', 'creditNote', 'invoice', 'others']);
       for (const a of o.addons) expect(Object.keys(a).sort()).toEqual(['label', 'priceMinor']);
@@ -546,6 +552,56 @@ describe('YOUR ADDRESSES and an order\'s delivery address over HTTP (plan NEXT L
     expect((await other.get(`/api/v1/account/orders/${orderId}/documents/${order.documents.others[0].number}`)).statusCode).toBe(404);
     expect((await mine.get(`/api/v1/account/orders/${orderId}/documents/INV-2026-999999`)).statusCode).toBe(404);
     await h.ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: null, GBP: null, USD: null, CHF: null } }, op);
+  });
+
+  it('ADD AN ADD-ON (plan MACRO M3 §4.2, D2): what can be added, added and removed on one\'s own paid order with the CSRF token in rate group auth, its own invoice and credit note; the server\'s words for a refusal; another account\'s order 404', async () => {
+    const op = { type: 'admin' as const, id: f.admin.id };
+    const cloth = await h.ctx.services.addons.create({ name: 'POLISHING CLOTH', skuCode: 'ADD-CLOTH', prices: { EUR: 1_500 }, weightG: 20 }, op);
+    const france = (await h.ctx.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
+    await h.ctx.services.stock.adjust({ skuId: cloth.sku.id, locationId: france, delta: 2, note: 'Counted.' }, op);
+    const url = `/api/v1/account/orders/${orderId}/addons`;
+    expect((await h.client().get(url)).statusCode).toBe(401);
+    const offer = await mine.get(url);
+    expect(offer.statusCode).toBe(200);
+    expect(offer.headers['cache-control']).toBe('no-store');
+    expect(safeJson(offer)).toEqual({
+      canAdd: true,
+      reason: null,
+      paid: true,
+      currency: 'EUR',
+      offer: [{ addonId: cloth.id, name: 'POLISHING CLOTH', line: null, priceMinor: 1_500, currency: 'EUR', maxUnits: 2 }],
+    });
+    expect((await other.get(url)).statusCode).toBe(404);
+    expect(errorOf(await mine.request('POST', url, { body: { addonId: cloth.id, units: 1 }, noCsrf: true })).code).toBe('CSRF_FAILED');
+    expect(errorOf(await mine.request('POST', url, { body: { addonId: cloth.id, units: 1, price: 0 } })).code).toBe('VALIDATION_FAILED');
+    const limit = await mine.request('POST', url, { body: { addonId: cloth.id, units: 4 } });
+    expect([limit.statusCode, errorOf(limit)]).toEqual([409, { code: 'ADDON_LIMIT', message: 'At most 3 of each add-on on an order.' }]);
+    const none = await mine.request('POST', url, { body: { addonId: cloth.id, units: 3 } });
+    expect([none.statusCode, errorOf(none)]).toEqual([409, { code: 'ADDON_OUT_OF_STOCK', message: 'POLISHING CLOTH could not be added: none left.' }]);
+    h.clock.advance(MINUTE);
+    const added = await mine.request('POST', url, { body: { addonId: cloth.id, units: 2 } });
+    expect(added.statusCode, added.body).toBe(200);
+    expect(added.headers['cache-control']).toBe('no-store');
+    expect(added.headers['x-ratelimit-limit']).toBe('9002');
+    const order = (safeJson(added) as Json).order;
+    expect(order.addonItems).toEqual([{ addonId: cloth.id, name: 'POLISHING CLOTH', units: 2, priceMinor: 1_500, currency: 'EUR', canRemove: true }]);
+    // Paid: its own invoice, listed among the order's other documents.
+    expect(order.documents.others.map((d: Json) => d.kind)).toEqual(['CREDIT_NOTE', 'INVOICE']);
+    expect((await other.request('POST', url, { body: { addonId: cloth.id, units: 1 } })).statusCode).toBe(404);
+    expect((await other.request('DELETE', `${url}/${cloth.id}`)).statusCode).toBe(404);
+    expect(errorOf(await mine.request('DELETE', `${url}/${cloth.id}`, { noCsrf: true })).code).toBe('CSRF_FAILED');
+    h.clock.advance(MINUTE);
+    const removed = await mine.request('DELETE', `${url}/${cloth.id}`);
+    expect(removed.statusCode, removed.body).toBe(200);
+    expect(removed.headers['x-ratelimit-limit']).toBe('9002');
+    expect((safeJson(removed) as Json).order.addonItems).toEqual([]);
+    expect((safeJson(removed) as Json).order.documents.others.map((d: Json) => d.kind)).toEqual(['CREDIT_NOTE', 'INVOICE', 'CREDIT_NOTE']);
+    expect(errorOf(await mine.request('DELETE', `${url}/${cloth.id}`)).code).toBe('ADDON_NOT_FOUND');
+    // Once packing has begun: refused, in the server's words.
+    await h.ctx.db.updateTable('orders').set({ packing_started_at: h.clock.now() }).where('id', '=', orderId).execute();
+    const late = await mine.request('POST', url, { body: { addonId: cloth.id, units: 1 } });
+    expect([late.statusCode, errorOf(late)]).toEqual([409, { code: 'ORDER_PACKING_STARTED', message: 'Packing has begun: write to ORBES Client Services to change this order.' }]);
+    expect((safeJson(await mine.get(url)) as Json).reason).toBe('PACKING_STARTED');
   });
 });
 

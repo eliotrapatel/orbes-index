@@ -31,8 +31,9 @@
  *   the order export     N3: the orders reserved in a period (UTC days, at most SHOPIFY_PERIOD_MAX_DAYS), priced, in
  *                        Shopify's order CSV format (help.shopify.com, « Exporting orders », read 2026-10-05): one order
  *                        per ORBES order (one piece), its piece the first line item and each add-on the next ones (the
- *                        lines after the first carry only the order's name and the line item, as Shopify lays them
- *                        out), its steps as Shopify's financial and fulfilment statuses and their dates, its buyer
+ *                        release's add-ons, then each unit of a catalogue add-on not removed, with its SKU code, plan
+ *                        MACRO M3 §4.2; the lines after the first carry only the order's name and the line item, as
+ *                        Shopify lays them out), its steps as Shopify's financial and fulfilment statuses and their dates, its buyer
  *                        (Client Services' entry) as billing and shipping, and the collector's email, by which the
  *                        store matches its customers to the ORBES accounts once it exists. No VAT, no shipping fee:
  *                        taxes and shipping are 0.00. An AUDITOR reads the emails and the buyers masked (the routes).
@@ -52,6 +53,7 @@ import type { AuditService } from './audit.js';
 import { majorUnits } from './live-console.js';
 import { modelPackings } from './boxes.js';
 import { mediaUrl } from './media.js';
+import { exportAddonUnits } from './order-addons.js';
 import { ORDER_CURRENCIES, orderReference } from './orders.js';
 import { notTestEntrant } from './population.js';
 import { compareSizes, deriveSku, ensureSku, ONE_SIZE_LABEL } from './stock.js';
@@ -512,9 +514,12 @@ export class ShopifyExportService {
       .orderBy('o.reserved_at')
       .orderBy('o.id')
       .execute()) as OrderRow[];
+    // Plan MACRO M3 §4.2 (S5): each catalogue add-on unit (not removed) is a line item after the piece's.
+    const units = await exportAddonUnits(this.db, rows.map((r) => r.id));
     const out: string[][] = [];
     for (const r of rows) {
-      const subtotal = r.price_minor + r.addons.reduce((n, a) => n + a.priceMinor, 0);
+      const items = units.get(r.id) ?? [];
+      const subtotal = r.price_minor + r.addons.reduce((n, a) => n + a.priceMinor, 0) + items.reduce((n, u) => n + u.priceMinor, 0);
       // BP-19 T4: its shipping fee (0 when free by its tier); an order travelling with another carries none of its own.
       const shipping = r.with_order_id === null ? (r.shipping_minor ?? 0) : 0;
       const fulfilled = shopifyFulfilled(r.status);
@@ -567,6 +572,10 @@ export class ShopifyExportService {
       out.push(SHOPIFY_ORDER_COLUMNS.map((c) => first[c] ?? ''));
       for (const a of r.addons) {
         const next: Partial<Record<(typeof SHOPIFY_ORDER_COLUMNS)[number], string>> = { Name: name, ...line({ name: a.label, price: a.priceMinor, sku: '', shipping: false }), Vendor: SHOPIFY_VENDOR };
+        out.push(SHOPIFY_ORDER_COLUMNS.map((c) => next[c] ?? ''));
+      }
+      for (const u of items) {
+        const next: Partial<Record<(typeof SHOPIFY_ORDER_COLUMNS)[number], string>> = { Name: name, ...line({ name: u.name, price: u.priceMinor, sku: u.skuCode, shipping: true }), Vendor: SHOPIFY_VENDOR };
         out.push(SHOPIFY_ORDER_COLUMNS.map((c) => next[c] ?? ''));
       }
     }

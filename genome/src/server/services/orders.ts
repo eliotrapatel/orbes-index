@@ -136,6 +136,7 @@ import {
   type ReturnOutcome,
   type ShippingService,
   type CreditReleaseReason,
+  type HouseCurrency,
 } from '../db/schema.js';
 import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
 import { countryName } from '../../shared/countries.js';
@@ -156,6 +157,22 @@ import { engravingPrice, engravingPrices, giftModelOf, readProgram, shippingRate
 import { creditBalances, creditKindOrder, ensureGrants, usableAt, type CreditKind } from './tier-grants.js';
 import { modelSizeCandidates, offeredSku, savedSizeAmong, savedSizeHint, sizesForExchange } from './sizes.js';
 import { parcelOrders, RETURN_WINDOW_DAYS } from './parcels.js';
+import {
+  accountAddonItems,
+  addonCurrencyFixed,
+  addonWindow,
+  adminAddonUnits,
+  cancelUnits,
+  carryChoices,
+  exportedAddonItems,
+  heldCurrency,
+  moveUnits,
+  returnUnits,
+  shipUnits,
+  type AccountOrderAddonItem,
+  type AdminOrderAddonUnit,
+  type LeftOutAddon,
+} from './order-addons.js';
 import { defaultLocationId, ensureSku, ensureStockSetup, knownLocation, linkSkus, lockSku, recordMovement, sizeLabelOf, stockBalances, stockLevel } from './stock.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
@@ -284,6 +301,11 @@ export interface OrderReturnInput {
   outcome: ReturnOutcome;
   /** Where the piece goes back to stock (RESTOCKED only). */
   locationId?: string | null;
+  /**
+   * Plan MACRO M3 §4.2: the add-on units (their ids) ORBES marks not to be sold again; every other unit returned goes
+   * back to stock, at the piece's location or, the piece archived, at the order's.
+   */
+  addonsOut?: string[];
   note: string;
 }
 
@@ -462,6 +484,8 @@ export interface OrderView {
   invoices: OrderDocument[];
   /** Its history, oldest first. */
   events: { action: string; status: OrderStatus; note: string | null; at: Date; actor: { type: string; id: string | null } }[];
+  /** Plan MACRO M3 §4.2 (D1, D2): its catalogue add-ons, unit by unit, oldest first (services/order-addons.ts). */
+  addonItems: AdminOrderAddonUnit[];
 }
 
 /** An invoice or a credit note of an order, as its page lists it. */
@@ -486,6 +510,8 @@ export interface ExportedOrder {
   priceMinor: number | null;
   currency: string | null;
   addons: { label: string; priceMinor: number }[];
+  /** Plan MACRO M3 §4.2: its catalogue add-ons, unit by unit: each its name, price, state and times. */
+  addonItems: { name: string; priceMinor: number; currency: string; status: string; addedAt: Date; endedAt: Date | null; returnedAt: Date | null }[];
   /** BP-19 T4: its shipping, all null for none. */
   shipping: OrderShipping;
   engravingText: string | null;
@@ -564,6 +590,13 @@ export interface AccountOrder {
   currency: string | null;
   /** As sold, each at its price per piece. */
   addons: { label: string; priceMinor: number }[];
+  /**
+   * Plan MACRO M3 §4.2 (D2): its catalogue add-ons (POLISHING CLOTH × 2), one row per add-on and price, each removable
+   * while it may be (held, before packing); and whether ADD AN ADD-ON is offered on it now (`canAddAddons`: RESERVED or
+   * PAID, before packing, its currency entered; never on a welcome gift, a size exchange nor a Shopify order).
+   */
+  addonItems: AccountOrderAddonItem[];
+  canAddAddons: boolean;
   /**
    * BP-19 T4: its shipping (the service, the fee in its currency, the tier that made it free), and for an order
    * travelling with another the reference of that order (`withOrder`), which carries the fee; null without shipping.
@@ -1264,7 +1297,13 @@ async function releaseLocation(tx: Db, stockLocationId: string | null): Promise<
  * before its orders existed; `reservedAt`: the time of the sale, for one confirmed before its orders existed). Idempotent:
  * only the pieces without an order get one. Returns the orders created and the audit entries to write last.
  */
-export async function ordersForLiveEntry(tx: Db, entryId: string, actor: Actor, now: Date, opts: { hold?: boolean; reservedAt?: Date } = {}): Promise<{ orders: OrderRow[]; notes: AuditRecordInput[] }> {
+export async function ordersForLiveEntry(
+  tx: Db,
+  entryId: string,
+  actor: Actor,
+  now: Date,
+  opts: { hold?: boolean; reservedAt?: Date } = {},
+): Promise<{ orders: OrderRow[]; notes: AuditRecordInput[]; addonsLeftOut: LeftOutAddon[] }> {
   const e = await tx
     .selectFrom('live_entries as e')
     .innerJoin('drops as d', 'd.id', 'e.drop_id')
@@ -1283,7 +1322,7 @@ export async function ordersForLiveEntry(tx: Db, entryId: string, actor: Actor, 
   const existing = new Set((await tx.selectFrom('orders').select('piece').where('live_entry_id', '=', e.id).execute()).map((r) => r.piece));
   const notes: AuditRecordInput[] = [];
   const orders: OrderRow[] = [];
-  if (existing.size >= e.quantity) return { orders, notes };
+  if (existing.size >= e.quantity) return { orders, notes, addonsLeftOut: [] };
   let skuId = e.sku_id;
   if (skuId === null) {
     // The size was offered when the release was made (plan NEXT LOT §3.3): a size set aside since stays its own.
@@ -1336,7 +1375,15 @@ export async function ordersForLiveEntry(tx: Db, entryId: string, actor: Actor, 
   // BP-19 T5: the welcome gift, on the sale's first order only.
   const first = orders.find((o) => o.piece === 1);
   if (first) notes.push(...(await attachGifts(tx, first, actor, now)).notes);
-  return { orders, notes };
+  // Plan MACRO M3 §4.2 (D2): the catalogue add-ons chosen at the hold, on the sale's first order, in the release's
+  // currency, each unit held or left out (never blocking PAY); a reservation cancelled before its orders existed takes none.
+  let addonsLeftOut: LeftOutAddon[] = [];
+  if (first && (opts.hold ?? true)) {
+    const carried = await carryChoices(tx, first, { liveEntryId: e.id }, houseCurrencyOf(e.currency), actor, now);
+    notes.push(...carried.notes);
+    addonsLeftOut = carried.leftOut;
+  }
+  return { orders, notes, addonsLeftOut };
 }
 
 /**
@@ -1349,7 +1396,13 @@ export async function ordersForLiveEntry(tx: Db, entryId: string, actor: Actor, 
  * welcome gift; the others travel with it (its service, shipping 0). Idempotent (only the pieces without an order get
  * one; `order` is the first created, null when the entry has its orders).
  */
-export async function orderForDrawEntry(tx: Db, entryId: string, actor: Actor, now: Date, opts: { reservedAt?: Date } = {}): Promise<{ order: OrderRow | null; orders: OrderRow[]; notes: AuditRecordInput[] }> {
+export async function orderForDrawEntry(
+  tx: Db,
+  entryId: string,
+  actor: Actor,
+  now: Date,
+  opts: { reservedAt?: Date } = {},
+): Promise<{ order: OrderRow | null; orders: OrderRow[]; notes: AuditRecordInput[]; addonsLeftOut: LeftOutAddon[] }> {
   const e = await tx
     .selectFrom('drop_entries as e')
     .innerJoin('drops as d', 'd.id', 'e.drop_id')
@@ -1372,7 +1425,7 @@ export async function orderForDrawEntry(tx: Db, entryId: string, actor: Actor, n
   const priced = e.price_minor !== null && e.currency !== null && e.price_minor <= ORDER_AMOUNT_MAX_MINOR;
   const existing = new Set((await tx.selectFrom('orders').select('piece').where('drop_entry_id', '=', e.id).execute()).map((r) => r.piece));
   const pieces = Math.max(1, Number(e.pieces) || 1);
-  if (existing.size >= pieces) return { order: null, orders: [], notes: [] };
+  if (existing.size >= pieces) return { order: null, orders: [], notes: [], addonsLeftOut: [] };
   const notes: AuditRecordInput[] = [...(await ensureGrants(tx, e.account_id, now))];
   const locationId = await releaseLocation(tx, e.stock_location_id);
   let parent = existing.has(1) ? await tx.selectFrom('orders').selectAll().where('drop_entry_id', '=', e.id).where('piece', '=', 1).executeTakeFirst() : undefined;
@@ -1410,7 +1463,14 @@ export async function orderForDrawEntry(tx: Db, entryId: string, actor: Actor, n
   // BP-19 T5: the welcome gift, on the sale's first order only.
   const first = orders.find((o) => o.piece === 1);
   if (first) notes.push(...(await attachGifts(tx, first, actor, now)).notes);
-  return { order: orders[0] ?? null, orders, notes };
+  // Plan MACRO M3 §4.2 (D2): the add-ons chosen on the place held, on the first order, in the draw's currency.
+  let addonsLeftOut: LeftOutAddon[] = [];
+  if (first) {
+    const carried = await carryChoices(tx, first, { dropEntryId: e.id }, priced ? houseCurrencyOf(e.currency) : null, actor, now);
+    notes.push(...carried.notes);
+    addonsLeftOut = carried.leftOut;
+  }
+  return { order: orders[0] ?? null, orders, notes, addonsLeftOut };
 }
 
 /**
@@ -1418,10 +1478,10 @@ export async function orderForDrawEntry(tx: Db, entryId: string, actor: Actor, n
  * held): RESERVED at the default location, with the size the collector asked and its SKU (AC-01; held then as any
  * order's), its price, currency (and size, when none was asked) to be entered (`setTerms`). Idempotent.
  */
-export async function orderForShopRequest(tx: Db, requestId: string, actor: Actor, now: Date): Promise<{ order: OrderRow | null; notes: AuditRecordInput[] }> {
+export async function orderForShopRequest(tx: Db, requestId: string, actor: Actor, now: Date): Promise<{ order: OrderRow | null; notes: AuditRecordInput[]; addonsLeftOut: LeftOutAddon[] }> {
   const r = await tx.selectFrom('shop_requests').select(['id', 'account_id', 'model_id', 'status', 'outcome', 'size_label']).where('id', '=', requestId).executeTakeFirst();
   if (!r || r.status !== 'CLOSED' || r.outcome !== 'ACCEPTED') throw new Error(`orderForShopRequest: request ${requestId} is not ACCEPTED`);
-  if (await tx.selectFrom('orders').select('id').where('shop_request_id', '=', r.id).executeTakeFirst()) return { order: null, notes: [] };
+  if (await tx.selectFrom('orders').select('id').where('shop_request_id', '=', r.id).executeTakeFirst()) return { order: null, notes: [], addonsLeftOut: [] };
   const notes: AuditRecordInput[] = [...(await ensureGrants(tx, r.account_id, now))];
   // AC-01: the size the collector asked, with its SKU (held as any order's); none asked, entered later. Offered when it
   // was asked (plan NEXT LOT §3.3): a size set aside since stays its own. A typed model's order keeps the declared label
@@ -1450,7 +1510,29 @@ export async function orderForShopRequest(tx: Db, requestId: string, actor: Acto
     notes,
   );
   notes.push(...(await attachGifts(tx, order, actor, now)).notes);
-  return { order, notes };
+  // Plan MACRO M3 §4.2 (D2): the add-ons chosen with the request, in the currency of the model's base price (the one the
+  // collector read them in); Client Services then enters the piece's price in that currency (setTerms).
+  const carried = await carryChoices(tx, order, { shopRequestId: r.id }, await baseCurrency(tx, r.model_id), actor, now);
+  notes.push(...carried.notes);
+  return { order, notes, addonsLeftOut: carried.leftOut };
+}
+
+/** A house currency, or null (an amount in another currency offers no add-on). */
+const houseCurrencyOf = (c: string | null | undefined): HouseCurrency | null => (typeof c === 'string' && (ORDER_CURRENCIES as readonly string[]).includes(c) ? (c as HouseCurrency) : null);
+
+/**
+ * The currency of a model's base price (a variant's own, else its main model's), as a house currency; null without one.
+ * The salon's add-ons are offered and priced in it (plan MACRO M3 §4.4).
+ */
+export async function baseCurrency(db: Db, modelId: string): Promise<HouseCurrency | null> {
+  const m = await db
+    .selectFrom('models as m')
+    .leftJoin('models as mm', 'mm.id', 'm.variant_of')
+    .select(['m.base_price_minor', 'm.base_currency', 'mm.base_price_minor as main_minor', 'mm.base_currency as main_currency'])
+    .where('m.id', '=', modelId)
+    .executeTakeFirst();
+  if (!m) return null;
+  return houseCurrencyOf(m.base_price_minor !== null ? m.base_currency : m.main_minor !== null ? m.main_currency : null);
 }
 
 /**
@@ -1523,7 +1605,7 @@ export function checkStep(input: OrderTransitionInput): CheckedStep {
 }
 
 /** What a return requires, checked before the transaction: where the piece goes, and a note. */
-function checkReturn(input: OrderReturnInput): { outcome: ReturnOutcome; locationId: string | null; note: string } {
+function checkReturn(input: OrderReturnInput): { outcome: ReturnOutcome; locationId: string | null; note: string; addonsOut: string[] } {
   if (!input || typeof input !== 'object' || !(RETURN_OUTCOMES as readonly string[]).includes(input.outcome)) {
     throw validationError('A return goes back to stock (RESTOCKED) or to the archive (ARCHIVED).');
   }
@@ -1531,7 +1613,9 @@ function checkReturn(input: OrderReturnInput): { outcome: ReturnOutcome; locatio
   if (input.outcome === 'RESTOCKED' && (typeof locationId !== 'string' || !UUID_RE.test(locationId))) throw notFound('Location', 'STOCK_LOCATION_NOT_FOUND');
   if (input.outcome === 'ARCHIVED' && input.locationId) throw validationError('A piece archived goes to no location.');
   const note = cleanText(input.note, ORDER_TEXT_LIMITS.note, 'The note', { multiline: true, required: true })!;
-  return { outcome: input.outcome, locationId: locationId?.toLowerCase() ?? null, note };
+  const out = input.addonsOut ?? [];
+  if (!Array.isArray(out) || out.length > 100 || out.some((x) => typeof x !== 'string' || !UUID_RE.test(x))) throw validationError('Name the add-on units not to be sold again by their ids.');
+  return { outcome: input.outcome, locationId: locationId?.toLowerCase() ?? null, note, addonsOut: out.map((x) => x.toLowerCase()) };
 }
 
 /**
@@ -1564,6 +1648,8 @@ export async function step(tx: Db, o: OrderRow, s: CheckedStep, actor: Actor, no
       if (s.declaredValueMinor !== null && o.currency === null) throw validationError('Enter the order’s price and currency before declaring a value.');
       await lockSku(tx, o.sku_id!);
       await recordMovement(tx, { skuId: o.sku_id!, locationId: o.location_id, delta: -1, reason: 'SHIPPED', orderId: o.id, productId: o.product_id }, actor, now);
+      // Plan MACRO M3 §4.2: its add-ons leave with it, one movement per unit.
+      const addonUnits = await shipUnits(tx, o, actor, now);
       after = await updateOrder(tx, o.id, {
         status: 'SHIPPED',
         shipped_at: now,
@@ -1574,7 +1660,7 @@ export async function step(tx: Db, o: OrderRow, s: CheckedStep, actor: Actor, no
       });
       // `reservation`: what it holds now (nothing), as every change that moves it says (fulfilment.ts readySince), so a
       // parcel reshipped after a problem is ready again from its decision, not from its first sale.
-      details = { carrierId: carrier.id, reservation: null, ...(s.declaredValueMinor !== null ? { declaredValueMinor: s.declaredValueMinor } : {}) };
+      details = { carrierId: carrier.id, reservation: null, ...(s.declaredValueMinor !== null ? { declaredValueMinor: s.declaredValueMinor } : {}), ...(addonUnits > 0 ? { addonUnits } : {}) };
       break;
     }
     case 'DELIVERED':
@@ -1585,7 +1671,9 @@ export async function step(tx: Db, o: OrderRow, s: CheckedStep, actor: Actor, no
     case 'CANCELLED': {
       const released = await release(tx, o, actor, now, extra);
       after = await updateOrder(tx, released.id, { status: 'CANCELLED', cancelled_at: now });
-      details = { released: o.reservation };
+      // Plan MACRO M3 §4.2: its add-ons cancelled with it, the stock they held free again.
+      const addonUnits = await cancelUnits(tx, after, now);
+      details = { released: o.reservation, ...(addonUnits > 0 ? { addonUnits } : {}) };
       // Plan NEXT LOT §3.4: a buyer's new claim code withdrawn, and the piece given a code nobody sees.
       await withdrawOnCancel(tx, after, s.claimHashes ?? NO_CLAIM_HASHES, actor, now, extra);
       // BP-19 T5: the credit taken off it given back, its expiry unchanged.
@@ -1708,7 +1796,7 @@ export async function attachPiece(tx: Db, o: OrderRow, productUuid: string, via:
 export async function returnInTransaction(
   tx: Db,
   o: OrderRow,
-  r: { outcome: ReturnOutcome; locationId: string | null; note: string; caseId?: string },
+  r: { outcome: ReturnOutcome; locationId: string | null; note: string; caseId?: string; keepAddons?: boolean; addonsOut?: readonly string[] },
   expected: { productId: string | null; reclaim: boolean; claimHash: string | null },
   actor: Actor,
   now: Date,
@@ -1777,6 +1865,9 @@ export async function returnInTransaction(
     .values({ order_id: o.id, outcome: r.outcome, location_id: locationId, note: r.note, ownership_id: owner?.id ?? null, created_by: actor.type === 'admin' ? actor.id! : null, created_at: now })
     .execute();
   const after = await updateOrder(tx, o.id, { status: 'RETURNED', returned_at: now });
+  // Plan MACRO M3 §4.2: its add-ons come back with it (to stock at the return's location, else the order's, unless ORBES
+  // marks one not to be sold again); a size exchange leaves them with the collector.
+  const addons = await returnUnits(tx, after, { keep: r.keepAddons === true, locationId, out: new Set(r.addonsOut ?? []) }, actor, now);
   // Its parcel, shipped and never marked delivered, has reached the collector: once no order of it is still on its way,
   // DELIVERED, so it leaves the agent's On its way and its packing photo follows the delivered parcel's keeping.
   await settleShipmentDelivered(tx, o.id, now);
@@ -1787,6 +1878,7 @@ export async function returnInTransaction(
     ...(claimHash ? { claimCodeReissued: true } : {}),
     ...(to ? { pieceStatus: to } : {}),
     ...(r.caseId ? { caseId: r.caseId, noted: true } : {}),
+    ...(addons.returned > 0 ? { addonUnits: addons.returned, addonUnitsRestocked: addons.restocked } : {}),
   };
   notes.push(await recordChange(tx, o, after, ORDER_STEP_ACTIONS.RETURNED, { note: r.caseId ? null : r.note, details }, actor, now), ...extra, ...withdrawn);
   // BP-19 T5: the credit taken off it given back; its welcome gift stays as it is. A size exchange carries it onto its
@@ -1916,6 +2008,7 @@ export async function accountOrders(db: Db, accountId: string): Promise<Exported
     : [];
   const invoices = await orderInvoices(db, rows.map((r) => r.id));
   const cases = rows.length ? await db.selectFrom('order_cases').selectAll().where('order_id', 'in', rows.map((r) => r.id)).orderBy('opened_at').orderBy('id').execute() : [];
+  const addonItems = await exportedAddonItems(db, rows.map((r) => r.id));
   return rows.map((r) => ({
     reference: orderReference(r.id),
     channel: r.channel,
@@ -1926,6 +2019,7 @@ export async function accountOrders(db: Db, accountId: string): Promise<Exported
     priceMinor: r.price_minor,
     currency: r.currency,
     addons: r.addons.map((a) => ({ label: a.label, priceMinor: a.priceMinor })),
+    addonItems: addonItems.get(r.id) ?? [],
     shipping: shippingOf(r),
     engravingText: r.engraving_text,
     buyer: { name: r.buyer_name, address: r.buyer_address, country: r.buyer_country, phone: r.buyer_phone },
@@ -2219,6 +2313,7 @@ export class OrderService {
         : null,
       invoices: invoices.map((i) => ({ id: i.id, kind: i.kind, number: i.number, issuedAt: i.issuedAt, currency: i.currency, totalMinor: i.totalMinor })),
       events: events.map((e) => ({ action: e.action, status: e.status, note: e.note, at: e.created_at, actor: { type: e.actor_type, id: e.actor_id } })),
+      addonItems: await adminAddonUnits(this.db, id),
     };
   }
 
@@ -2268,6 +2363,7 @@ export class OrderService {
         'o.packing_started_at',
         'o.engraving_text',
         'o.engraving_minor',
+        'o.shopify_order_id',
         'm.name as model_name',
         'm.variant_label as model_variant',
         'm.image_sha256 as model_image',
@@ -2317,6 +2413,8 @@ export class OrderService {
     );
     const prices = await engravingPrices(this.db);
     const care = await this.accountCases(accountId.toLowerCase(), rows);
+    // Plan MACRO M3 §4.2 (D2): each order's catalogue add-ons.
+    const addonItems = await accountAddonItems(this.db, rows);
     const deliveryOf = (r: (typeof rows)[number]): OrderAddress => (r.with_order_id === null ? ownAddress(r) : ownAddress(parents.get(r.with_order_id)!, r.with_order_id));
     // The order's own invoice and the credit note that cancels it; the others (plan NEXT LOT §3.6.C) listed apart.
     const mainOf = (orderId: string) => invoices.find((x) => x.order.id === orderId && x.kind === 'INVOICE' && x.supplements === null);
@@ -2341,6 +2439,8 @@ export class OrderService {
       priceMinor: r.price_minor,
       currency: r.price_minor === null ? null : r.currency,
       addons: r.addons.map((a) => ({ label: a.label, priceMinor: a.priceMinor })),
+      addonItems: addonItems.get(r.id) ?? [],
+      canAddAddons: addonWindow(r) === null,
       shipping: r.shipping_service === null ? null : { ...shippingOf(r), withOrder: r.with_order_id ? orderReference(r.with_order_id) : null },
       withOrder: r.with_order_id ? orderReference(r.with_order_id) : null,
       giftTier: r.gift_grant_id ? (giftTiers.get(r.gift_grant_id) === 3 ? 'PALLADIUM' : 'PLATINE') : null,
@@ -2719,6 +2819,8 @@ export class OrderService {
         }
         for (const m of moving) {
           const r = released.find((x) => x.id === m.id)!;
+          // Plan MACRO M3 §4.2: its add-ons move with it, or the change is refused (ORDER_ADDON_NOT_AT_LOCATION).
+          await moveUnits(tx, r, to);
           const after = await hold(tx, await updateOrder(tx, r.id, { location_id: to }), actor, now, extra);
           notes.push(
             await recordChange(
@@ -2797,6 +2899,9 @@ export class OrderService {
         const credited = await openCreditUses(tx, o.id);
         if (credited.length > 0 && credited.some((u) => u.currency !== currency)) throw creditCurrency();
         if (credited.reduce((n, u) => n + u.amount_minor, 0) > (price ?? 0)) throw creditExceeds();
+        // Plan MACRO M3 §4.2: its add-ons keep the currency they were added in (a salon's, its model's base currency).
+        const held = await heldCurrency(tx, o.id);
+        if (held !== null && currency !== null && currency !== held) throw addonCurrencyFixed(held);
         // Plan NEXT LOT §3.6.C: a currency changed on a RESERVED order: an engraving priced from the settings takes the
         // new currency's price, or is removed (with its event) when that currency has none, a currency cleared included;
         // the add-on's (no price of its own) is not touched. Worked out first and written with the price in one update,

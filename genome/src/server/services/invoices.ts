@@ -41,6 +41,7 @@ import type { AuditRecordInput } from './audit.js';
 import { writeJournal } from './journal.js';
 import { majorUnits } from './live-console.js';
 import { addressOf, orderReference } from './orders.js';
+import { keptUnits } from './order-addons.js';
 import { creditKindOrder } from './tier-grants.js';
 import { countryName } from '../../shared/countries.js';
 
@@ -83,9 +84,10 @@ const CHANNEL_WORDS: Readonly<Record<OrderChannel, string>> = Object.freeze({ LI
 
 /**
  * The kinds of an invoice's lines: the piece, an add-on, and (BP-19) its shipping, a credit taken off it, a welcome gift;
- * (plan NEXT LOT §3.6.C) an engraving priced from Orders → Settings.
+ * (plan NEXT LOT §3.6.C) an engraving priced from Orders → Settings; (plan MACRO M3 §4.2, D1) a unit of a catalogue
+ * add-on (ADD_ON_ITEM: its name and price, never its SKU; services/order-addons.ts).
  */
-export const INVOICE_LINE_KINDS = Object.freeze(['PIECE', 'ADDON', 'SHIPPING', 'CREDIT', 'GIFT', 'ENGRAVING'] as const);
+export const INVOICE_LINE_KINDS = Object.freeze(['PIECE', 'ADDON', 'SHIPPING', 'CREDIT', 'GIFT', 'ENGRAVING', 'ADD_ON_ITEM'] as const);
 /** An engraving's line: its label only, never its words. */
 export const ENGRAVING_LINE_LABEL = 'Engraving';
 export type InvoiceLineKind = (typeof INVOICE_LINE_KINDS)[number];
@@ -247,6 +249,9 @@ export async function issueInvoice(tx: Db, o: OrderRow, actor: Actor, now: Date)
     ...o.addons.map((a): InvoiceLine => ({ kind: 'ADDON', label: a.label, detail: null, amountMinor: a.priceMinor })),
     // Plan NEXT LOT §3.6.C: an engraving priced from the settings (one bought as the release's add-on is its ADDON line).
     ...(o.engraving_minor !== null ? [engravingLine(o.engraving_minor)] : []),
+    // Plan MACRO M3 §4.2 (D1, D2): each unit of a catalogue add-on held on it, as added; a size exchange's, the units its
+    // original's return credited and that stay with the collector.
+    ...(await addonItemLines(tx, o)),
     // BP-19 T4: its shipping, free by its tier or at its fee; an order travelling with another has no line of its own.
     ...(o.shipping_service !== null && o.shipping_minor !== null && o.with_order_id === null
       ? [{ kind: 'SHIPPING' as const, label: `SHIPPING · ${o.shipping_service}`, detail: o.shipping_benefit === 2 || o.shipping_benefit === 3 ? `FREE · ${TIER_WORDS[o.shipping_benefit]}` : null, amountMinor: o.shipping_minor }]
@@ -312,6 +317,25 @@ export async function issueInvoice(tx: Db, o: OrderRow, actor: Actor, now: Date)
 /** The ENGRAVING line of an engraving priced at `minor` (plan NEXT LOT §3.6.C): its label, never its words. */
 export function engravingLine(minor: number): InvoiceLine {
   return { kind: 'ENGRAVING', label: ENGRAVING_LINE_LABEL, detail: null, amountMinor: minor };
+}
+
+/**
+ * The ADD_ON_ITEM lines an order's invoice carries at PAID (plan MACRO M3 §4.2): each unit HELD not invoiced yet, in the
+ * order it was added (its name and price, never its SKU); an EXCHANGE order's, the units its originals left with the
+ * collector (services/order-addons.ts keptUnits).
+ */
+async function addonItemLines(tx: Db, o: OrderRow): Promise<InvoiceLine[]> {
+  const units = await tx
+    .selectFrom('order_addon_items as u')
+    .innerJoin('addon_items as a', 'a.id', 'u.addon_id')
+    .select(['a.name', 'u.price_minor'])
+    .where('u.order_id', '=', o.id)
+    .where('u.status', '=', 'HELD')
+    .where('u.invoice_id', 'is', null)
+    .orderBy('u.added_at')
+    .orderBy('u.id')
+    .execute();
+  return [...units.map((u) => ({ name: u.name, priceMinor: u.price_minor })), ...(await keptUnits(tx, o))].map((u) => ({ kind: 'ADD_ON_ITEM', label: u.name, detail: null, amountMinor: u.priceMinor }));
 }
 
 const lineKey = (l: InvoiceLine) => JSON.stringify([l.kind, l.label, l.detail, l.amountMinor]);
@@ -412,14 +436,16 @@ export async function issueCreditNote(tx: Db, o: OrderRow, reason: 'cancel' | 'r
 }
 
 /**
- * A supplementary invoice of a PAID order (plan NEXT LOT §3.6.C: an engraving added after payment), in its transaction:
- * the next INV- number, naming the order's invoice (`supplements_invoice_id`), billed to the buyer as issued there, its
- * one line. Journaled `invoice.issue`; returns the audit entry (`supplements`: the invoice's number).
+ * A supplementary invoice of a PAID order (plan NEXT LOT §3.6.C: an engraving added after payment; plan MACRO M3 §4.2:
+ * the units of an add-on added after payment, one line each), in its transaction: the next INV- number, naming the
+ * order's invoice (`supplements_invoice_id`), billed to the buyer as issued there, its line or lines. Journaled
+ * `invoice.issue`; returns the audit entry (`supplements`: the invoice's number; `targetId` the new invoice's id).
  */
-export async function issueSupplementaryInvoice(tx: Db, o: OrderRow, line: InvoiceLine, actor: Actor, now: Date): Promise<AuditRecordInput> {
+export async function issueSupplementaryInvoice(tx: Db, o: OrderRow, line: InvoiceLine | readonly InvoiceLine[], actor: Actor, now: Date): Promise<AuditRecordInput> {
   const main = await tx.selectFrom('invoices').selectAll().where('order_id', '=', o.id).where('kind', '=', 'INVOICE').where('supplements_invoice_id', 'is', null).executeTakeFirst();
   if (!main) throw new Error(`issueSupplementaryInvoice: order ${o.id} has no invoice`);
-  const { row, number } = await insertDocument(tx, { kind: 'INVOICE', orderId: o.id, supplementsInvoiceId: main.id, buyer: main.buyer, lines: [line], currency: main.currency }, now);
+  const lines = Array.isArray(line) ? [...line] : [line as InvoiceLine];
+  const { row, number } = await insertDocument(tx, { kind: 'INVOICE', orderId: o.id, supplementsInvoiceId: main.id, buyer: main.buyer, lines, currency: main.currency }, now);
   const supplements = invoiceNumber('INVOICE', main.year, main.sequence);
   await writeJournal(tx, [{ type: 'invoice.issue', entityType: 'invoice', entityId: row.id, payload: invoicePayload(row, null) }], now);
   return { actor, action: 'invoice.issue', targetType: 'invoice', targetId: row.id, details: { orderId: o.id, number, currency: row.currency, totalMinor: row.total_minor, supplements } };
@@ -442,6 +468,41 @@ export async function issueLineCreditNote(tx: Db, o: OrderRow, kind: InvoiceLine
     return { actor, action: 'invoice.credit', targetType: 'invoice', targetId: row.id, details: { orderId: o.id, number, credits, reason: 'engraving', scope: 'LINES', currency: row.currency, totalMinor: row.total_minor } };
   }
   return null;
+}
+
+/**
+ * The credit notes of add-on units removed after PAID (plan MACRO M3 §4.2), in the order's transaction: each unit's line
+ * (ADD_ON_ITEM, its name and price) on the invoice that carries it (its supplementary invoice, `invoiceId`, or the
+ * order's own), one credit note for single lines (`credit_scope` LINES) per invoice, each line credited once. Journaled
+ * `invoice.credit`; returns the audit entries (`reason: 'addon'`). A line no longer found (credited already) is skipped.
+ */
+export async function issueAddonCreditNotes(tx: Db, o: OrderRow, units: readonly { invoiceId: string | null; line: InvoiceLine }[], actor: Actor, now: Date): Promise<AuditRecordInput[]> {
+  if (units.length === 0) return [];
+  const main = await tx.selectFrom('invoices').select('id').where('order_id', '=', o.id).where('kind', '=', 'INVOICE').where('supplements_invoice_id', 'is', null).executeTakeFirst();
+  const groups = new Map<string, InvoiceLine[]>();
+  for (const u of units) {
+    const id = u.invoiceId ?? main?.id;
+    if (!id) continue;
+    groups.set(id, [...(groups.get(id) ?? []), u.line]);
+  }
+  const notes: AuditRecordInput[] = [];
+  for (const [invoiceId, wanted] of groups) {
+    const invoice = await tx.selectFrom('invoices').selectAll().where('id', '=', invoiceId).where('order_id', '=', o.id).executeTakeFirst();
+    if (!invoice) continue;
+    const pool = await uncreditedLines(tx, invoice as unknown as InvoiceRow);
+    const lines: InvoiceLine[] = [];
+    for (const w of wanted) {
+      const at = pool.findIndex((l) => l.kind === w.kind && l.label === w.label && l.amountMinor === w.amountMinor);
+      if (at < 0) continue;
+      lines.push(pool.splice(at, 1)[0]!);
+    }
+    if (lines.length === 0) continue;
+    const { row, number } = await insertDocument(tx, { kind: 'CREDIT_NOTE', orderId: o.id, creditsInvoiceId: invoice.id, scope: 'LINES', buyer: invoice.buyer, lines, currency: invoice.currency }, now);
+    const credits = invoiceNumber('INVOICE', invoice.year, invoice.sequence);
+    await writeJournal(tx, [{ type: 'invoice.credit', entityType: 'invoice', entityId: row.id, payload: invoicePayload(row, credits) }], now);
+    notes.push({ actor, action: 'invoice.credit', targetType: 'invoice', targetId: row.id, details: { orderId: o.id, number, credits, reason: 'addon', scope: 'LINES', currency: row.currency, totalMinor: row.total_minor } });
+  }
+  return notes;
 }
 
 // ── Reading ────────────────────────────────────────────────────────────────

@@ -116,6 +116,7 @@ import { participatedReleases, releasesTakenPart } from './participation.js';
 import { accountReleaseAnswers, type ExportedReleaseAnswer } from './question.js';
 import { memberSegments } from './segments.js';
 import { accountOrders, orderReference, type ExportedOrder } from './orders.js';
+import { exportedAddonChoices, type ExportedAddonChoice } from './order-addons.js';
 import { accountClaimCodes } from './claim-renewals.js';
 import type { OwnershipService } from './ownership.js';
 import { accountShopRequests, auditClosedShopRequests, closeAccountShopRequests, type ExportedShopRequest } from './salon.js';
@@ -455,6 +456,11 @@ export interface AccountExport {
    * note, the carrier and the tracking number; never who handled it, nor where the piece is kept.
    */
   orders: ExportedOrder[];
+  /**
+   * Plan MACRO M3 §4.2 (D2): the catalogue add-ons chosen on a LIVE hold, a draw's place held or a salon request and not
+   * on an order yet, oldest first (those on an order are its `addonItems`).
+   */
+  addonChoices: ExportedAddonChoice[];
   /**
    * The account's messages with ORBES Client Services (plan NEXT-NINE, CS-01), oldest first: its words with what each
    * concerned, and the answers, signed ORBES Client Services; never who answered.
@@ -1053,6 +1059,7 @@ export class OwnerService {
       const live = await accountLiveData(tx, a.id);
       const releaseAnswers = await accountReleaseAnswers(tx, a.id);
       const orders = await accountOrders(tx, a.id);
+      const addonChoices = await exportedAddonChoices(tx, a.id);
       const messages = await accountMessages(tx, a.id);
       const careRequests = await accountCareRequests(tx, a.id);
       const warrantyClaims = await accountWarrantyClaims(tx, a.id);
@@ -1156,6 +1163,7 @@ export class OwnerService {
         liveInterest: live.interest,
         releaseAnswers,
         orders,
+        addonChoices,
         messages,
         careRequests,
         warrantyClaims,
