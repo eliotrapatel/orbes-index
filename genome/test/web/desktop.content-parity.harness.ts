@@ -188,9 +188,9 @@ export const DESKTOP_MOVED: readonly DesktopMoved[] = [
     now: 'Every photograph of the sheet on the computer’s grid; SHOW MORE under it once a sheet has more than 8.',
     removed: true,
   },
-  // Lot M3 (step M3.18, K44): THE SET's first draw, every entry with its sizes, the account's place held.
+  // Lot M3 (step M3.18, K44): THE SET's first draw, every entry with its sizes, the account's place held or its waiting list.
   {
-    states: ['set-draw-held'],
+    states: ['set-draw-held', 'set-draw-waiting'],
     values: ['1 · PLATINE · 0 YEARS · SIZE 18 · 54 · 45', '2 · TITANE · 0 YEARS · SIZE 17 · 52 · 45', '3 · NO TIER · 0 YEARS · SIZE 17 · 52 · 45', 'YOURS'],
     reason: 'Desktop (§10.30): THE ENTRIES is a table on a computer, its rows drawn as they near the window (content-visibility), the first window showing its head.',
     now: 'In THE ENTRIES’ rows, read as the page is scrolled to them: RANK, TIER, SENIORITY, SIZE (every piece’s), IDENTIFIER and YOURS in their cells.',

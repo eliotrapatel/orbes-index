@@ -289,18 +289,21 @@ class OrderPage {
 
   /**
    * THE SET (macro scope K44 T1 to T3): THE SET · <name> and its pieces, the set's one price and its total, then each of
-   * its pieces (its model, its size, its reference), a link to its own page, this one marked as the page's.
+   * its pieces (its model, its size, its reference, RETURNED or CANCELLED once it has left the set), a link to its own
+   * page, this one marked as the page's.
    */
   private setPart(m: OrderModel): (HTMLElement | null)[] {
     const set = m.set!;
     const rows = [...(set.price ? [[SETS.onePrice, set.price] as [string, string]] : []), ...(set.total ? [[SETS.orders.total, set.total] as [string, string]] : [])];
     const pieces = set.pieces.map((p) => {
       const reference = p.reference;
-      const words = [h('span', { class: 'n-g d-oset__piece-title' }, ...withNumerals(p.title)), h('span', { class: 'n-g n-lb d-oset__piece-line' }, ...listLine([p.size, reference].filter(Boolean).join(' · ')))];
-      if (p.id === m.id) return h('li', { class: 'd-oset__piece is-current', attrs: { 'aria-current': 'page' } }, ...words);
+      // A piece no longer of the set (returned, its exchange's new order beside it; cancelled) says so on its line.
+      const ended = p.status === 'RETURNED' || p.status === 'CANCELLED' ? ORDERS.step[p.status] : null;
+      const words = [h('span', { class: 'n-g d-oset__piece-title' }, ...withNumerals(p.title)), h('span', { class: 'n-g n-lb d-oset__piece-line' }, ...listLine([p.size, reference, ended].filter(Boolean).join(' · ')))];
+      if (p.id === m.id) return h('li', { class: `d-oset__piece is-current${ended ? ' is-ended' : ''}`, attrs: { 'aria-current': 'page' } }, ...words);
       const a = appAnchor(orderPagePath(reference), ['d-oset__piece-link'], this.deps.onOrder ? () => this.deps.onOrder!(reference) : undefined, ...words);
       a.setAttribute('aria-label', SETS.orders.pieceLabel(p.title, reference));
-      return h('li', { class: 'd-oset__piece' }, a);
+      return h('li', { class: ended ? 'd-oset__piece is-ended' : 'd-oset__piece' }, a);
     });
     return [
       h('p', { class: 'n-g n-t3 d-oset__heading' }, ...withNumerals(set.name)),

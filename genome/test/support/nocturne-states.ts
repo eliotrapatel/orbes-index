@@ -3033,13 +3033,13 @@ const DESK_SHARDS: Record<string, readonly UiState[]> = {
     // An answer of ORBES Client Services (HANDOVER §5.8), on NOW: it writes, after the full demo's other desktop states.
     ...desk(1440, 'now-messages'),
     // THE SET (lot M3, K44 T1) on its stage: THE RELEASES (also in light), NOW, PAST; the October draw's pickers (also in
-    // light and at 1024 × 768), every size chosen, an entry; the first draw's place held.
+    // light and at 1024 × 768), every size chosen, an entry; the first draw's place held and its waiting list.
     ...desk(1440, 'set-releases'),
     onDesk(phoneState('set-releases'), 1440, { light: true }),
     ...desk(1440, 'set-now', 'set-past', 'set-draw'),
     onDesk(phoneState('set-draw'), 1440, { light: true }),
     ...desk(1024, 'set-draw'),
-    ...desk(1440, 'set-draw-chosen', 'set-draw-entered', 'set-draw-held'),
+    ...desk(1440, 'set-draw-chosen', 'set-draw-entered', 'set-draw-held', 'set-draw-waiting'),
   ],
   'desk-4': [
     // ── The other stages at 1440 × 900 ──

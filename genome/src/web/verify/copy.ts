@@ -2692,6 +2692,8 @@ export const SETS = Object.freeze({
   pickerLabel: (name: string) => `Your size of ${name}`,
   /** Under the pickers while a piece has no size yet: ENTER THE DRAW waits for every one. */
   chooseEach: 'Choose a size for each piece of the set.',
+  /** Under the pickers once YOUR SIZES has chosen a piece's size (a model's draw says LIVE.there.checkSize). */
+  checkSizes: 'Check each size is right for its piece before you confirm.',
   /** An entry's label with every size, in the set's order: `ENTERED · SIZE 17 · 52 · 45`. */
   label: (status: string, sizes: readonly string[]) => `${status} · ${sizesWords(sizes)}`,
   /** A line of THE ENTRIES with the sizes the entry was drawn in: `12 · PLATINE · 2 YEARS · SIZE 17 · 52 · 45`. */

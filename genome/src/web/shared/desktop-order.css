@@ -224,6 +224,11 @@
     color: var(--vault-soft);
   }
 
+  /* A piece returned or cancelled: its name as soft as its line. */
+  html:not(.d-touch) body.nocturne .d-oset__piece.is-ended .d-oset__piece-title {
+    color: var(--vault-soft);
+  }
+
   /* Its reference (9–10) and its price (11–12), the chevron at the row's end. */
   html:not(.d-touch) body.nocturne .d-orow__end {
     display: contents;

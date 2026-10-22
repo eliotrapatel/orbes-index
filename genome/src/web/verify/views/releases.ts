@@ -1492,7 +1492,7 @@ class ReleasePage {
    * 17 · 52 · 45), then for each piece its name and type over its sizes in NOCTURNE's buttons (the one picked doubly
    * ringed; during the early access a size whose pieces are all reserved greyed out), the size YOUR SIZES preselects for
    * it said under them while it stands, or the sentence of a size picked whose pieces are all reserved; YOUR SIZES' check
-   * once under them all; while a piece has no size, that ENTER THE DRAW waits for every one.
+   * once under them all (each size right for its piece); while a piece has no size, that ENTER THE DRAW waits for every one.
    */
   private setPickers(s: ReleaseSheetModel, pieces: readonly SetPieceModel[], mode: 'enter' | 'reserve', entered: string[] | null, waits: boolean): HTMLElement[] {
     const said = entered && entered.length > 0 ? SETS.label(RELEASES.statusLabel.ENTERED, entered) : SETS.yourSizes;
@@ -1528,7 +1528,7 @@ class ReleasePage {
         ),
       );
     }
-    if (fromYours) out.push(h('p', { class: 'n-sm release__yours-check', text: LIVE.there.checkSize }));
+    if (fromYours) out.push(h('p', { class: 'n-sm release__yours-check', text: SETS.checkSizes }));
     if (waits && !entered) out.push(h('p', { class: 'n-sm release__size-note release__choose-each', text: SETS.chooseEach }));
     return out;
   }
