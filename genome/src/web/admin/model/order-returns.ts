@@ -28,6 +28,10 @@ export const RETURNS_COPY = Object.freeze({
   customProblem: 'Choose a first and a last day, the last on or after the first.',
   rule: 'RUNS SMALL: at least 3 size exchanges in the period, two thirds or more of them to a larger size. RUNS LARGE: the same, to a smaller size. A model in one size is never flagged.',
   sizeNote: 'The size ordered.',
+  /** A main model with variants, chosen whole: « AURA · every variant ». */
+  everyVariant: 'every variant',
+  /** A variant's choice under its main model: « — Steel » (an option's leading spaces are not shown). */
+  variantMark: '—',
 });
 
 /** The period's choices: the last 12 months by default, all time, or two Paris days. */
@@ -115,9 +119,20 @@ export function returnsModelName(m: Pick<ReturnsModel, 'name' | 'variant'>): str
   return m.variant ? `${m.name} · ${m.variant}` : m.name;
 }
 
-/** The model filter's choices: Every model, then each main model and its variants under it. */
+/** Whether a main model has variants (it is then chosen with all of them: the server reads the main model and its variants). */
+const hasVariants = (m: Pick<ReturnsModel, 'id' | 'variantOf'>, models: readonly Pick<ReturnsModel, 'variantOf'>[]): boolean =>
+  m.variantOf === null && models.some((x) => x.variantOf === m.id);
+
+/** A choice's words: AURA · every variant for a main model with variants, — Steel for a variant under it, else the row's name. */
+function returnsModelChoiceLabel(m: ReturnsModel, models: readonly ReturnsModel[]): string {
+  if (hasVariants(m, models)) return `${m.name} · ${RETURNS_COPY.everyVariant}`;
+  if (m.variantOf) return `${RETURNS_COPY.variantMark} ${m.variant ?? returnsModelName(m)}`;
+  return returnsModelName(m);
+}
+
+/** The model filter's choices: Every model, then each main model (with every variant when it has some) and its variants under it. */
 export function returnsModelChoices(models: readonly ReturnsModel[]): { value: string; label: string }[] {
-  return [{ value: '', label: RETURNS_COPY.everyModel }, ...models.map((m) => ({ value: m.id, label: m.variantOf ? ` ${returnsModelName(m)}` : returnsModelName(m) }))];
+  return [{ value: '', label: RETURNS_COPY.everyModel }, ...models.map((m) => ({ value: m.id, label: returnsModelChoiceLabel(m, models) }))];
 }
 
 /** The summary line: « 42 requests · 30 returns · 12 exchanges ». */
@@ -151,8 +166,9 @@ export function returnsReasons(r: Pick<ReturnsReport, 'byReason'>): ReturnReason
 /** A size row's size: its label, or ONE SIZE. */
 export const returnsSizeLabel = (size: string | null): string => size ?? 'ONE SIZE';
 
-/** The By size section's note: the model chosen, or every model. */
+/** The By size section's note: the model chosen (a main model with variants: with every variant), or every model. */
 export function returnsSizeNote(r: Pick<ReturnsReport, 'modelId' | 'models'>): string {
   const m = r.modelId ? r.models.find((x) => x.id === r.modelId) : null;
-  return `${m ? returnsModelName(m) : RETURNS_COPY.ofEveryModel} · ${RETURNS_COPY.sizeNote}`;
+  const name = !m ? RETURNS_COPY.ofEveryModel : hasVariants(m, r.models) ? `${m.name} · ${RETURNS_COPY.everyVariant}` : returnsModelName(m);
+  return `${name} · ${RETURNS_COPY.sizeNote}`;
 }

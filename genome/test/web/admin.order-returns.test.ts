@@ -64,7 +64,7 @@ describe('Orders → Returns (plan MACRO M3 §2.3)', () => {
     expect(returnsSizeLabel('52')).toBe('52');
   });
 
-  it('shows Not given only when a case has no reason; a variant under its main model in the filter', () => {
+  it('shows Not given only when a case has no reason; a main model with every variant, then each variant marked under it, in the filter', () => {
     const reasons = (notGiven: number) =>
       ({ byReason: ['SIZE', 'NOT_AS_EXPECTED', 'DAMAGED', 'OTHER', 'NOT_GIVEN'].map((reason) => ({ reason, returns: 0, exchanges: 0, total: reason === 'NOT_GIVEN' ? notGiven : 1, share: 0 })) }) as Pick<ReturnsReport, 'byReason'>;
     expect(returnsReasons(reasons(0))).toEqual(['SIZE', 'NOT_AS_EXPECTED', 'DAMAGED', 'OTHER']);
@@ -76,11 +76,17 @@ describe('Orders → Returns (plan MACRO M3 §2.3)', () => {
     ];
     expect(returnsModelChoices(models)).toEqual([
       { value: '', label: 'Every model' },
-      { value: 'a', label: 'AURA · Silver' },
-      { value: 'b', label: ' AURA · Steel' },
+      { value: 'a', label: 'AURA · every variant' },
+      { value: 'b', label: '— Steel' },
       { value: 'c', label: 'HALO' },
     ]);
+    expect(returnsSizeNote({ modelId: 'a', models })).toBe('AURA · every variant · The size ordered.');
     expect(returnsSizeNote({ modelId: 'b', models })).toBe('AURA · Steel · The size ordered.');
+    expect(returnsSizeNote({ modelId: 'c', models })).toBe('HALO · The size ordered.');
+    // A main model with its own label but no variant left is chosen alone, by its own name.
+    const alone = [{ id: 'd', name: 'ORBIT', variant: 'Gold', variantOf: null }];
+    expect(returnsModelChoices(alone)[1]).toEqual({ value: 'd', label: 'ORBIT · Gold' });
+    expect(returnsSizeNote({ modelId: 'd', models: alone })).toBe('ORBIT · Gold · The size ordered.');
     expect(returnsSizeNote({ modelId: null, models })).toBe('Every model · The size ordered.');
   });
 });

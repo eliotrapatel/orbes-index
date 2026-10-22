@@ -33,7 +33,7 @@
  * options and panels read by an AUDITOR, CUSTOMER INTELLIGENCE §3.6 C.9; the house messages, plan MACRO M2 §1.4, read by an
  * AUDITOR, the moments' words and the custom messages written by an OPERATOR, a moment switched and a message sent or
  * cancelled by an ADMIN; WORN, plan MACRO M2 §2.2, read by an AUDITOR, its photographs published, refused and taken down by
- * an OPERATOR);
+ * an OPERATOR; the returns report and its CSV, plan MACRO M3 §2.2, read by an AUDITOR);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. LOGISTICS (plan NEXT LOT §3.5.6.1),
@@ -317,6 +317,9 @@ const PROBES: Probe[] = [
   // Plan NEXT LOT §3.6.C: the engraving's price per currency (Orders → Settings, Engraving).
   { group: 'orders', method: 'GET', url: '/api/admin/orders/engraving-prices', min: 'AUDITOR' },
   { group: 'orders', method: 'PUT', url: '/api/admin/orders/engraving-prices', body: INVALID, min: 'ADMIN' },
+  // Plan MACRO M3 §2.2: the returns report and its CSV, counts only, read by an AUDITOR.
+  { group: 'orders', method: 'GET', url: '/api/admin/orders/returns', min: 'AUDITOR' },
+  { group: 'orders', method: 'GET', url: '/api/admin/orders/returns.csv', min: 'AUDITOR' },
   { group: 'orders', method: 'GET', url: `/api/admin/orders/${UUID}`, min: 'AUDITOR' },
   { group: 'orders', method: 'POST', url: `/api/admin/orders/${UUID}/transition`, body: INVALID, min: 'OPERATOR' },
   { group: 'orders', method: 'POST', url: `/api/admin/orders/${UUID}/location`, body: INVALID, min: 'OPERATOR' },
