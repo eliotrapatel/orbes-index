@@ -164,12 +164,15 @@
 	# the image itself (at most 1 MiB in the app, routes/admin/media.ts MEDIA_UPLOAD_ROUTES),
 	# get 1200KB (1 200 000 bytes). The prepaid label of a yearly care (BP-19 T6), whose body is
 	# the PDF itself (at most 2 MiB in the app, routes/admin/care.ts CARE_LABEL_UPLOAD_ROUTE),
-	# gets 2200KB. The three matchers exclude each other, so exactly one limit applies to a
-	# request: a DELETE of a photograph or a silhouette, the order of a gallery or of a post's
-	# photographs (a PATCH), or any other path, keeps 64KB.
+	# gets 2200KB. The collector's photograph for WORN (a piece's owner sends it from the piece,
+	# MACRO M2 G1), whose body is the image itself (at most 1 MiB in the app, routes/ownership.ts
+	# WORN_UPLOAD_ROUTE), gets the photographs' 1200KB as well. The three matchers exclude each
+	# other, so exactly one limit applies to a request: a DELETE of a photograph or a silhouette,
+	# a WORN photograph's withdrawal (a DELETE of another path), the order of a gallery or of a
+	# post's photographs (a PATCH), or any other path, keeps 64KB.
 	@photo_upload {
 		method POST
-		path_regexp ^/api/admin/(models/[^/]+/(image|gallery)|products/[^/]+/photo|circle/posts/[^/]+/photos|live/[^/]+/silhouette)/?$
+		path_regexp ^/api/(admin/(models/[^/]+/(image|gallery)|products/[^/]+/photo|circle/posts/[^/]+/photos|live/[^/]+/silhouette)|v1/account/products/[^/]+/worn)/?$
 	}
 	request_body @photo_upload {
 		max_size 1200KB
@@ -184,7 +187,7 @@
 	@not_upload {
 		not {
 			method POST
-			path_regexp ^/api/admin/(models/[^/]+/(image|gallery)|products/[^/]+/photo|circle/posts/[^/]+/photos|live/[^/]+/silhouette|care/[^/]+/label)/?$
+			path_regexp ^/api/(admin/(models/[^/]+/(image|gallery)|products/[^/]+/photo|circle/posts/[^/]+/photos|live/[^/]+/silhouette|care/[^/]+/label)|v1/account/products/[^/]+/worn)/?$
 		}
 	}
 	request_body @not_upload {

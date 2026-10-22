@@ -22,8 +22,9 @@
  *    64 KB except the console's five image uploads (F-04: a model's
  *    reference photograph, a piece's; P-R02: a photograph of a model's
  *    lookbook gallery; P-X01: a photograph of a post of the owners' circle;
- *    the LIVE RELEASES: a release's silhouette; 1 200 KB, over the app's
- *    1 MiB); it compresses every response but the LIVE RELEASES' streams,
+ *    the LIVE RELEASES: a release's silhouette) and the collector's one
+ *    (MACRO M2 G1: a piece's photograph for WORN), 1 200 KB, over the app's
+ *    1 MiB; it compresses every response but the LIVE RELEASES' streams,
  *    which it passes on at once (LIVE_STREAM_ROUTES, the app's own list,
  *    itself checked against the routes the app registers);
  *  - the scripts are strict bash with --help, and the destructive ones have
@@ -46,6 +47,7 @@ import { loadConfig } from '../../src/server/config.js';
 import { CARE_LABEL_BODY_LIMIT_BYTES, CARE_LABEL_UPLOAD_ROUTE } from '../../src/server/routes/admin/care.js';
 import { MEDIA_BODY_LIMIT_BYTES, MEDIA_UPLOAD_ROUTES } from '../../src/server/routes/admin/media.js';
 import { LIVE_STREAM_ROUTES } from '../../src/server/http/live-stream.js';
+import { WORN_UPLOAD_ROUTE } from '../../src/server/routes/ownership.js';
 import { BODY_LIMIT_BYTES } from '../../src/server/app.js';
 
 const GENOME = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -421,7 +423,7 @@ describe('deploy/vps/Caddyfile', () => {
     expect(d).toMatch(/path \/admin \/admin\/\* \/api\/admin \/api\/admin\/\*/);
   });
 
-  it('limits every body to 64 KB, except the five image uploads of the console (F-04, P-R02, P-X01, the LIVE RELEASES): 1 200 KB, over the app\'s 1 MiB; and the yearly care\'s label (BP-19 T6): 2 200 KB, over the app\'s 2 MiB', () => {
+  it('limits every body to 64 KB, except the five image uploads of the console (F-04, P-R02, P-X01, the LIVE RELEASES) and the collector\'s WORN photograph (MACRO M2 G1): 1 200 KB, over the app\'s 1 MiB; and the yearly care\'s label (BP-19 T6): 2 200 KB, over the app\'s 2 MiB', () => {
     const d = directives(caddyfile);
     // Caddy reads KB as 1 000 bytes.
     const kb = (v: string) => Number(/^(\d+)KB$/.exec(v)![1]) * 1000;
@@ -453,14 +455,16 @@ describe('deploy/vps/Caddyfile', () => {
     const pattern = upload![1];
     const both = /@not_upload \{\n\t\tnot \{\n\t\t\tmethod POST\n\t\t\tpath_regexp (\S+)\n\t\t\}\n\t\}/.exec(d);
     expect(both, 'the @not_upload matcher').not.toBeNull();
-    expect(both![1]).toBe(pattern.replace(/\)\/\?\$$/, '|care/[^/]+/label)/?$'));
+    // The complement is the photographs' pattern with the label's path among the console's.
+    expect(pattern).toContain('|live/[^/]+/silhouette)|');
+    expect(both![1]).toBe(pattern.replace('|live/[^/]+/silhouette)|', '|live/[^/]+/silhouette|care/[^/]+/label)|'));
     const union = new RegExp(both![1]);
-    for (const route of [...MEDIA_UPLOAD_ROUTES, CARE_LABEL_UPLOAD_ROUTE]) {
+    for (const route of [...MEDIA_UPLOAD_ROUTES, CARE_LABEL_UPLOAD_ROUTE, WORN_UPLOAD_ROUTE]) {
       const path = route.replace(':id', '73c68b47-012d-4569-a59a-fd2effa613c1').replace(':productId', 'O26-J-00184');
       expect(union.test(path), route).toBe(true);
     }
     expect(union.test('/api/admin/care/73c68b47-012d-4569-a59a-fd2effa613c1/receive')).toBe(false);
-    // The pattern is RE2 and JavaScript alike here: it matches the app's five routes, with or without a trailing slash…
+    // The pattern is RE2 and JavaScript alike here: it matches the app's six routes, with or without a trailing slash…
     const re = new RegExp(pattern);
     const sample = (route: string) => route.replace(':id', '73c68b47-012d-4569-a59a-fd2effa613c1').replace(':productId', 'O26-J-00184');
     expect([...MEDIA_UPLOAD_ROUTES]).toEqual([
@@ -470,7 +474,10 @@ describe('deploy/vps/Caddyfile', () => {
       '/api/admin/circle/posts/:id/photos',
       '/api/admin/live/:id/silhouette',
     ]);
-    for (const route of MEDIA_UPLOAD_ROUTES) {
+    // The collector's WORN photograph (MACRO M2 G1): its body is an image of at most the console's MEDIA_BODY_LIMIT_BYTES.
+    expect(WORN_UPLOAD_ROUTE).toBe('/api/v1/account/products/:productId/worn');
+    expect(read(GENOME, 'src', 'server', 'routes', 'ownership.ts')).toContain('app.post(WORN_UPLOAD_ROUTE, { bodyLimit: MEDIA_BODY_LIMIT_BYTES }');
+    for (const route of [...MEDIA_UPLOAD_ROUTES, WORN_UPLOAD_ROUTE]) {
       expect(re.test(sample(route)), route).toBe(true);
       expect(re.test(`${sample(route)}/`), route).toBe(true);
     }
@@ -501,6 +508,22 @@ describe('deploy/vps/Caddyfile', () => {
       '/api/admin/live//silhouette',
       '/api/v1/live/73c68b47-012d-4569-a59a-fd2effa613c1/silhouette',
       '/api/v1/lookbook/monolithe-ring',
+      // WORN: only the owner's sending is an image; its withdrawal (a DELETE), its photograph, the sheet's photographs
+      // and the console's queue are not, and keep 64 KB (the piece's read is a GET of the sending's path: method POST).
+      '/api/v1/account/worn/73c68b47-012d-4569-a59a-fd2effa613c1',
+      '/api/v1/account/worn/73c68b47-012d-4569-a59a-fd2effa613c1/photo',
+      '/api/v1/account/products/O26-J-00184',
+      '/api/v1/account/products/O26-J-00184/worn/extra',
+      '/api/v1/account/products/O26-J-00184/wornx',
+      '/api/v1/account/products//worn',
+      '/api/v1/account/products/O26-J-00184/certificates',
+      '/api/v1/lookbook/monolithe-ring/worn',
+      '/api/v1/club/lookbook/monolithe-ring/worn',
+      '/api/v1/worn/73c68b47-012d-4569-a59a-fd2effa613c1/photo',
+      '/api/admin/worn',
+      '/api/admin/products/O26-J-00184/worn',
+      '/api/v1/products/O26-J-00184/worn',
+      '/api/v1/account/x/products/O26-J-00184/worn',
       '/api/admin/models//image',
       '/api/admin/x/models/1/image',
       '/api/v1/verify',
@@ -508,6 +531,8 @@ describe('deploy/vps/Caddyfile', () => {
       '/admin/api/admin/models/1/image',
     ]) {
       expect(re.test(path), path).toBe(false);
+      // …and the complement leaves it to 64 KB as well: exactly one limit applies.
+      expect(union.test(path), path).toBe(false);
     }
   });
 

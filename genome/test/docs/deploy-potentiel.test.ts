@@ -189,8 +189,8 @@ describe('the « Potentiel » runbook (docs/launch/DEPLOY-POTENTIEL-2026-10.md)'
     expect(commands).toContain(`curl -s -o /dev/null -D - https://verify.theorbes.com/api/v1/media/${'0'.repeat(64)}`);
     expect(runbook).toContain('`x-ratelimit-limit: 600`');
     // The Caddy exception covers the uploads of the gallery (P-R02) and of the circle's photographs (P-X01): deploy.sh recreates Caddy itself.
-    // Deployment D (the LIVE RELEASES) adds a release's silhouette to the same rule.
-    expect(stackFile('Caddyfile')).toContain('path_regexp ^/api/admin/(models/[^/]+/(image|gallery)|products/[^/]+/photo|circle/posts/[^/]+/photos|live/[^/]+/silhouette)/?$');
+    // Deployment D (the LIVE RELEASES) adds a release's silhouette to the same rule, and lot MACRO M2 the collector's WORN photograph.
+    expect(stackFile('Caddyfile')).toContain('path_regexp ^/api/(admin/(models/[^/]+/(image|gallery)|products/[^/]+/photo|circle/posts/[^/]+/photos|live/[^/]+/silhouette)|v1/account/products/[^/]+/worn)/?$');
   });
 
   it('gives one command per shell block, sets only the stack’s variables, and runs the tools as they are', () => {

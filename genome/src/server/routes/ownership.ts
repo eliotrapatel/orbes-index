@@ -54,6 +54,13 @@ import type { OwnershipResult } from '../services/ownership.js';
 import { acceptImageBodies, imageOf, MEDIA_BODY_LIMIT_BYTES } from './admin/media.js';
 import type { RouteDeps } from './public.js';
 
+/**
+ * The collector's WORN upload (POST): the only collector route whose body is an image. The edge gives it the console's
+ * photographs' limit (deploy/vps/Caddyfile @photo_upload, 1200KB over MEDIA_BODY_LIMIT_BYTES), every other collector
+ * route keeps 64KB; test/ops/vps-stack.test.ts holds the two together.
+ */
+export const WORN_UPLOAD_ROUTE = '/api/v1/account/products/:productId/worn';
+
 function ownershipJson(r: OwnershipResult) {
   return { productId: r.productId, verified: r.verified, since: r.since };
 }
@@ -152,7 +159,7 @@ export const ownershipRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx,
   // The sending: the only image this file takes, in its own context (the session, CSRF and same-origin checks inherited).
   await app.register(async (app) => {
     acceptImageBodies(app);
-    app.post('/api/v1/account/products/:productId/worn', { bodyLimit: MEDIA_BODY_LIMIT_BYTES }, async (request, reply) => {
+    app.post(WORN_UPLOAD_ROUTE, { bodyLimit: MEDIA_BODY_LIMIT_BYTES }, async (request, reply) => {
       const { account } = requireAccount(request);
       const { productId } = parse(productParams, request.params);
       const q = parse(wornSendQuery, request.query);

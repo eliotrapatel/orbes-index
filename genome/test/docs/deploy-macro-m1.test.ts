@@ -227,7 +227,8 @@ describe('the runbook of lot MACRO M1 (docs/launch/DEPLOY-MACRO-M1.md)', () => {
       expect(readDoc('genome/src/server/config.ts'), v).toContain(v);
     }
     const stack = git(['diff', '--name-status', PROD_COMMIT, '--', 'deploy/vps']);
-    if (stack !== null) expect(stack.trim().split('\n')).toEqual(['M\tdeploy/vps/.env.example', 'M\tdeploy/vps/compose.yaml']);
+    // Lot M2 changes the Caddyfile after M1 (its WORN upload, MACRO M2.8), told by its own runbook; M1's elements are these two.
+    if (stack !== null) expect(stack.trim().split('\n').filter((l) => l !== 'M\tdeploy/vps/Caddyfile')).toEqual(['M\tdeploy/vps/.env.example', 'M\tdeploy/vps/compose.yaml']);
     const composeDiff = git(['diff', PROD_COMMIT, '--', 'deploy/vps/compose.yaml']);
     if (composeDiff !== null) expect(composeDiff.split('\n').filter((l) => /^[-+][^-+]/.test(l))).toEqual(gained);
     // The server's .env keeps none of them: checked, never filled now.
