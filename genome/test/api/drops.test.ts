@@ -1273,6 +1273,105 @@ describe('draws in sizes over HTTP (plan NEXT LOT §3.6.F)', () => {
   });
 });
 
+describe('a set’s draw over HTTP (macro scope K44 T1, T2; plan MACRO M3 §5.2)', () => {
+  let h: Harness;
+  let operator: Client;
+  let auditor: Client;
+  let admin: Client;
+  let ringId: string;
+  let chainId: string;
+  let setId: string;
+
+  type SetDrawJson = AdminDropJson & { set: { id: string; pieces: { piece: number; model: { id: string } }[] }; sizes: { id: string; piece: number; label: string; pieces: number; entered: number }[] };
+  const adminUrl = (id = '') => `/api/admin/drops${id ? `/${id}` : ''}`;
+  const url = (id: string, what: string) => `/api/v1/club/drops/${id}/${what}`;
+  const at = (offsetMs: number) => new Date(h.clock.now().getTime() + offsetMs).toISOString();
+  const accountIdOf = async (email: string) => (await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', email.toLowerCase()).executeTakeFirstOrThrow()).id;
+
+  beforeAll(async () => {
+    h = await createHarness();
+    await seedCatalog(h.ctx);
+    operator = await adminClient(h, 'OPERATOR');
+    auditor = await adminClient(h, 'AUDITOR');
+    admin = await adminClient(h, 'ADMIN');
+    ringId = await createModel(h.ctx.db, 'HALO');
+    chainId = await createModel(h.ctx.db, 'LINEA', null, 'NECKLACE');
+    await giveSizes(h.ctx.db, ringId, ['52', '54']);
+    await giveSizes(h.ctx.db, chainId, ['45', '50'], 'NECKLACE');
+    const op = { type: 'admin' as const, id: (await h.ctx.db.selectFrom('admin_users').select('id').where('role', '=', 'OPERATOR').executeTakeFirstOrThrow()).id };
+    setId = (await h.ctx.services.sets.create({ name: 'THE PAIR', code: 'THE-PAIR', modelIds: [ringId, chainId] }, op)).id;
+  });
+  afterAll(() => h?.close());
+
+  it('creates a set’s draw (setId, sizes per piece), publishes it evened, lets an account enter, change and reserve with a size per piece, publishes each piece’s sizes and each entry’s, and confirms the set sale', async () => {
+    const opensAt = at(10 * HOUR);
+    const body = { title: 'THE PAIR — DRAW', opensAt, closesAt: at(12 * HOUR), earlyAccessHours: 48, earlyAccessPlatineHours: 48 };
+    const uneven = [{ piece: 1, label: '52', pieces: 1 }, { piece: 1, label: '54', pieces: 1 }, { piece: 2, label: '45', pieces: 1 }];
+    // One of a model and a set; the request's bounds on a size's piece.
+    for (const extra of [{ modelId: ringId, setId }, {}, { setId, sizes: [{ piece: 5, label: '52', pieces: 1 }] }]) {
+      expect((await operator.post(adminUrl(), { ...body, sizes: uneven, ...extra })).statusCode, JSON.stringify(extra)).toBe(400);
+    }
+    expect((await auditor.post(adminUrl(), { ...body, setId, sizes: uneven })).statusCode).toBe(403);
+    const created = await operator.post(adminUrl(), { ...body, setId, sizes: uneven });
+    expect(created.statusCode, created.body).toBe(201);
+    const d = safeJson(created) as SetDrawJson;
+    expect([d.model.type, d.set.id, d.set.pieces.map((p) => p.model.id), d.quantity]).toEqual(['SET', setId, [ringId, chainId], 1]);
+    const refused = await operator.post(`${adminUrl(d.id)}/publish`);
+    expect([refused.statusCode, errorOf(refused).code]).toEqual([409, 'DROP_SET_SIZES_UNEVEN']);
+    const evened = await operator.patch(adminUrl(d.id), { sizes: [...uneven, { piece: 2, label: '50', pieces: 1 }] });
+    expect(evened.statusCode, evened.body).toBe(200);
+    expect((await operator.post(`${adminUrl(d.id)}/publish`)).statusCode).toBe(200);
+    const sizes = (safeJson(evened) as SetDrawJson).sizes;
+    const sid = (piece: number, label: string) => sizes.find((z) => z.piece === piece && z.label === label)!.id;
+    const pick = (a: string, b: string) => ({ sizes: [{ piece: 1, sizeId: sid(1, a) }, { piece: 2, sizeId: sid(2, b) }] });
+
+    // The public page: the set and its pieces, each piece's sizes.
+    const page = safeJson(await h.client().get(`/api/v1/drops/${d.id}`)) as { model: { type: string }; set: { name: string; pieces: { piece: number; name: string }[] }; sizes: { piece: number; label: string; pieces: number }[] };
+    expect([page.model.type, page.set.name, page.set.pieces.map((p) => [p.piece, p.name])]).toEqual(['SET', 'THE PAIR', [[1, 'HALO'], [2, 'LINEA']]]);
+    expect(page.sizes.map((z) => [z.piece, z.label, z.pieces])).toEqual([[1, '52', 1], [1, '54', 1], [2, '45', 1], [2, '50', 1]]);
+    const card = (safeJson(await h.client().get('/api/v1/drops')) as { drops: { id: string; model: { name: string }; set?: { name: string } }[] }).drops.find((c) => c.id === d.id)!;
+    expect([card.model.name, card.set?.name]).toEqual(['THE PAIR', 'THE PAIR']);
+
+    // RESERVE during the early access, a size per piece.
+    const palladium = await accountClient(h);
+    await holdPieces(h.ctx.db, await accountIdOf(palladium.email), 10, ringId);
+    const r = await palladium.client.post(url(d.id, 'reserve'), pick('52', '45'));
+    expect(r.statusCode, r.body).toBe(200);
+    expect((safeJson(r) as { entry: { sizes: { label: string }[] } }).entry.sizes.map((z) => z.label)).toEqual(['52', '45']);
+
+    // ENTER: a size alone 422, both 400, a size per piece 200; CHANGE SIZE of one piece; the club's status names them.
+    h.clock.advance(10 * HOUR + 60_000);
+    const me = await accountClient(h);
+    const alone = await me.client.post(url(d.id, 'enter'), { sizeId: sid(1, '54') });
+    expect([alone.statusCode, errorOf(alone).code]).toEqual([422, 'DROP_SET_SIZES']);
+    expect((await me.client.post(url(d.id, 'enter'), { sizeId: sid(1, '54'), ...pick('54', '50') })).statusCode).toBe(400);
+    expect((await me.client.post(url(d.id, 'enter'), { sizes: [{ piece: 1, sizeId: 'x' }] })).statusCode).toBe(400);
+    expect((await me.client.post(url(d.id, 'enter'), pick('54', '50'), { noCsrf: true })).statusCode).toBe(403);
+    const entered = await me.client.post(url(d.id, 'enter'), pick('54', '45'));
+    expect(entered.statusCode, entered.body).toBe(200);
+    expect((await me.client.post(url(d.id, 'size'), {})).statusCode).toBe(400);
+    const moved = await me.client.post(url(d.id, 'size'), { sizes: [{ piece: 2, sizeId: sid(2, '50') }] });
+    expect(moved.statusCode, moved.body).toBe(200);
+    const status = safeJson(await me.client.get('/api/v1/club/status')) as { entries: { dropId: string; size: unknown; sizes: { label: string }[] }[] };
+    const mine = status.entries.find((e) => e.dropId === d.id)!;
+    expect([mine.size, mine.sizes.map((z) => z.label)]).toEqual([null, ['54', '50']]);
+
+    // The draw, then each entry's sizes on the page; CONFIRMED over HTTP makes the set sale (the console signed in again).
+    h.clock.advance(2 * HOUR);
+    [operator, auditor, admin] = [await adminClient(h, 'OPERATOR'), await adminClient(h, 'AUDITOR'), await adminClient(h, 'ADMIN')];
+    const drawn = await admin.post(`${adminUrl(d.id)}/draw`);
+    expect(drawn.statusCode, drawn.body).toBe(200);
+    const listed = safeJson(await h.client().get(`/api/v1/drops/${d.id}/entries`)) as { items: { size: unknown; sizes: { piece: number; label: string }[] }[] };
+    expect(listed.items.map((e) => [e.size, e.sizes.map((z) => z.label)])).toEqual([[null, ['54', '50']]]);
+    const entries = safeJson(await auditor.get(`${adminUrl(d.id)}/entries?status=SELECTED`)) as { items: { id: string; sizes: unknown[]; email: string }[] };
+    expect(entries.items.every((e) => e.sizes.length === 2 && e.email.includes('***'))).toBe(true);
+    for (const e of entries.items) expect((await operator.post(`${adminUrl(d.id)}/entries/${e.id}/confirm`)).statusCode).toBe(200);
+    const sales = await h.ctx.db.selectFrom('set_sales').select('id').where('drop_id', '=', d.id).execute();
+    expect(sales).toHaveLength(2);
+    expect(await h.ctx.db.selectFrom('orders').select('id').where('set_sale_id', 'in', sales.map((x) => x.id)).execute()).toHaveLength(4);
+  });
+});
+
 describe('a draw’s ADD TO CALENDAR over HTTP (plan MACRO M1 §2.1, C1)', () => {
   let h: Harness;
   let catalog: Catalog;

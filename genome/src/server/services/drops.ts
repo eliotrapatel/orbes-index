@@ -101,6 +101,29 @@
  * publishes each size's pieces, so anyone checks every status from the seed. A draw published before this lot keeps one
  * pool, drawn exactly as before.
  *
+ * THE SET (macro scope of 2026-10-20, K44 T1 and T2; plan MACRO M3 §5.1 and §5.2, step M3.15; migration 0057): a draw sells
+ * a model or a set (`setId` in place of `modelId`, one of the two), a set of 2 to 4 models sold at one price, one entry and
+ * one price, each piece's size chosen at entry.
+ *
+ *   its sizes      given per piece (each size its `piece`, 1 to n in the set's order), each one of its piece's model's
+ *                  sizes (stock.ts linkDropSizes), 1 to 24 with pieces per piece; its `quantity` is a number of sets, the
+ *                  smallest piece's total while a DRAFT; published only when each piece's sizes add up to the same number
+ *                  of sets (409 DROP_SET_SIZES_UNEVEN, naming each piece's total), the set and each piece offered.
+ *   an entry       ENTER, CHANGE SIZE and RESERVE take `sizes: [{ piece, sizeId }]`, one size per piece of that piece's
+ *                  (422 DROP_SET_SIZES otherwise; `sizeId` alone stays a model's), written in `drop_entry_sizes` (its
+ *                  `drop_entries.size_id` NULL); CHANGE SIZE changes any of them while entries are open; RESERVE counts
+ *                  every size it takes (409 DROP_SIZE_FULL naming the piece).
+ *   the draw       the same order (`drawOrder`); filling it, an entry is SELECTED while every one of its sizes still has a
+ *                  piece left, each size then one less, else WAITLISTED with its rank; OFFER NEXT gives the first of the
+ *                  waiting list by rank whose sizes all have a piece left (409 DROP_FULL when none fits).
+ *   the page       each piece's sizes with their pieces (`piece`), each drawn entry's sizes, and the set and its pieces
+ *                  (`set`): anyone checks every status from the seed. The card's `model` is the set itself (its name, type
+ *                  SET), never one of its models.
+ *   CONFIRMED      the set sale, one order per piece (orders.ts orderForDrawEntry, set-sales.ts ordersForSetSale).
+ *   no guarantee   the house's guarantee is never set aside for a set's release nor used in it (guarantees.ts).
+ * A set's release sells its set for good: `setId` changes only to another set (its sizes given again), never to a model,
+ * and a model's release never takes a set.
+ *
  * A LIVE RELEASE (services/live.ts, migration 0021) is a row of the same table, `mode` LIVE: the draw's public pages, its
  * entries (ENTER, WITHDRAW, RESERVE), the console's list, change, publication and cancellation, the draw and OFFER NEXT
  * know only the drops whose `mode` is DRAW: a LIVE one is left out of a list, a 404 or a refusal (409 DROP_LIVE).
@@ -136,7 +159,7 @@ import { ORDER_AMOUNT_MAX_MINOR, ORDER_CURRENCIES, orderForDrawEntry } from './o
 import { readActingAccount } from './ownership.js';
 import { releaseFeasibility, type Feasibility } from './release-stock.js';
 import { savedSizeAmong } from './sizes.js';
-import { modelOfModelRelease, offerName, releaseOffer, savedSizesByPiece } from './release-offer.js';
+import { offerName, releaseOffer, releaseOffers, savedSizesByPiece, setPieces, type ReleaseOffer, type ReleasePiece } from './release-offer.js';
 import { entryPieceSizes } from './set-sales.js';
 import { defaultLocationId, linkDropSizes } from './stock.js';
 import { isSegmentMember } from './segments.js';
@@ -361,6 +384,20 @@ const sizesRequired = () => conflict('DROP_SIZES_REQUIRED', 'Give the release it
 const modelSizesMissing = () => conflict('DROP_MODEL_SIZES_MISSING', 'No sizes yet: give this model its size type and its sizes in the Catalogue.');
 const sizesCount = () => validationError(`A release has 1 to ${DRAW_SIZES.max} sizes with pieces.`);
 const quantityPerSize = () => validationError('A draw’s pieces are given per size.');
+// Macro scope K44 (plan MACRO M3 §5.1): a set's draw.
+const oneOffer = () => validationError('A release sells a model or a set: give one of them.');
+const setNotFound = () => notFound('Set', 'SET_NOT_FOUND');
+const setSetAside = (name: string) => conflict('SET_SET_ASIDE', `${name} is set aside. Reinstate it in Catalogue → Sets to release it.`);
+const setOfferFixed = () => validationError('A set’s release sells its set: its pieces are the set’s.');
+const modelOfferFixed = () => validationError('A model’s release sells its model: a set is sold by a release of its own.');
+const setSizesGiven = () => validationError('Give the sizes of the new set’s pieces with it.');
+/** 422 DROP_SET_SIZES: an entry of a set's draw names one size per piece, of that piece. */
+const setSizes = (message: string) => new DomainError('DROP_SET_SIZES', 422, message);
+const notASet = () => validationError('This release sells one model: choose its size.');
+const setSizesUneven = (totals: readonly { name: string; pieces: number }[]) =>
+  conflict('DROP_SET_SIZES_UNEVEN', `Each piece’s sizes add up to the same number of sets: ${totals.map((t) => `${t.name} ${t.pieces}`).join(', ')}.`);
+const pieceSizeFull = (name: string, label: string) => conflict('DROP_SIZE_FULL', `Every ${name} in ${inSize(label)} has been reserved.`);
+const noneFits = () => conflict('DROP_FULL', 'No entry on the waiting list fits the pieces left: each of its sizes needs one.');
 
 /**
  * A size in a sentence: « size 17 », or a label that carries its word as written (« SIZE 52 », « ONE SIZE »), never
@@ -392,10 +429,15 @@ function knownId(id: string, missing: () => DomainError): string {
 export interface DrawSizeInput {
   label: string;
   pieces: number;
+  /** Macro scope K44 T1: on a set's draw, the set's piece (1 to n, its order) the size is of; absent on a model's. */
+  piece?: number;
 }
 
 export interface CreateDropInput {
-  modelId: string;
+  /** The model it sells, or (macro scope K44 T1) `setId`: one of the two. */
+  modelId?: string;
+  /** Macro scope K44 T1: the set it sells (its sizes then given per piece), in place of `modelId`. */
+  setId?: string;
   title: string;
   description?: string | null;
   /** Plan NEXT LOT §3.6.F: refused (400 'A draw’s pieces are given per size.'); a draw's quantity is the sum of its sizes. */
@@ -419,6 +461,8 @@ export interface CreateDropInput {
 /** A change of a drop: any field while it is a DRAFT; once published, `description` only. */
 export interface DropChange {
   modelId?: string;
+  /** Macro scope K44 T1: another set, on a set's draw only, its sizes given with it. */
+  setId?: string;
   title?: string;
   description?: string | null;
   /** Refused, as at the creation: a draw's pieces are given per size. */
@@ -460,7 +504,40 @@ export function cleanDescription(v: unknown): string | null {
  * case) refused. The labels are then matched to the model's sizes (stock.ts linkDropSizes).
  */
 export function cleanDrawSizes(v: unknown): { sizes: DrawSizeInput[]; quantity: number } {
-  if (!Array.isArray(v) || v.length > DRAW_SIZES.sent) throw sizesCount();
+  if (Array.isArray(v) && v.some((x) => (x as { piece?: unknown } | null)?.piece !== undefined && (x as { piece?: unknown } | null)?.piece !== null)) {
+    throw validationError('A model’s release gives its sizes without a piece.');
+  }
+  return cleanSizeList(v, sizesCount, 'A release has at most 10 000 pieces.');
+}
+
+/**
+ * A set's draw's sizes as given (macro scope K44 T1; plan MACRO M3 §5.1): each with its piece (1 to `pieces`, the set's
+ * order), each piece's sizes cleaned as a model's draw's are (`cleanDrawSizes`: 1 to 24 with pieces, a label once, 0 left
+ * out, 10 000 at most in all), in the piece's order; `totals` each piece's pieces, `quantity` the smallest of them (the
+ * sets on sale: the publication requires them even, DROP_SET_SIZES_UNEVEN).
+ */
+export function cleanSetDrawSizes(v: unknown, pieces: number): { sizes: (DrawSizeInput & { piece: number })[]; quantity: number; totals: number[] } {
+  if (!Array.isArray(v) || v.length > DRAW_SIZES.sent * pieces) throw setSizesCount();
+  const byPiece: unknown[][] = Array.from({ length: pieces }, () => []);
+  for (const x of v as unknown[]) {
+    const piece = (x as { piece?: unknown } | null)?.piece;
+    if (typeof piece !== 'number' || !Number.isInteger(piece) || piece < 1 || piece > pieces) throw validationError(`Each size of a set’s release names its piece, 1 to ${pieces}.`);
+    byPiece[piece - 1]!.push(x);
+  }
+  const sizes: (DrawSizeInput & { piece: number })[] = [];
+  const totals: number[] = [];
+  for (const [k, list] of byPiece.entries()) {
+    const cleaned = cleanSizeList(list, setSizesCount, 'A release has at most 10 000 sets.');
+    sizes.push(...cleaned.sizes.map((z) => ({ ...z, piece: k + 1 })));
+    totals.push(cleaned.quantity);
+  }
+  return { sizes, quantity: Math.min(...totals), totals };
+}
+
+const setSizesCount = () => validationError(`Each piece of a set’s release has 1 to ${DRAW_SIZES.max} sizes with pieces.`);
+
+function cleanSizeList(v: unknown, count: () => DomainError, tooMany: string): { sizes: DrawSizeInput[]; quantity: number } {
+  if (!Array.isArray(v) || v.length > DRAW_SIZES.sent) throw count();
   const sizes: DrawSizeInput[] = [];
   const seen = new Set<string>();
   for (const x of v as unknown[]) {
@@ -474,9 +551,9 @@ export function cleanDrawSizes(v: unknown): { sizes: DrawSizeInput[]; quantity: 
     seen.add(key);
     if (pieces > 0) sizes.push({ label, pieces });
   }
-  if (sizes.length < 1 || sizes.length > DRAW_SIZES.max) throw sizesCount();
+  if (sizes.length < 1 || sizes.length > DRAW_SIZES.max) throw count();
   const quantity = sizes.reduce((n, x) => n + x.pieces, 0);
-  if (quantity > DROP_QUANTITY_MAX) throw validationError('A release has at most 10 000 pieces.');
+  if (quantity > DROP_QUANTITY_MAX) throw validationError(tooMany);
   return { sizes, quantity };
 }
 
@@ -544,8 +621,21 @@ export interface DrawSizeRef {
   label: string;
 }
 
+/** Macro scope K44 T1: the size an entry of a set's draw chose for one piece (1 to n, the set's order). */
+export interface PieceSizeRef extends DrawSizeRef {
+  piece: number;
+}
+
+/** Macro scope K44 T1: a set's draw as the public reads it: the set's name and its pieces in order, each its model. */
+export interface PublicDropSet {
+  name: string;
+  pieces: (PublicDropModel & { piece: number })[];
+}
+
 /** A draw's size on its page (plan NEXT LOT §3.6.F): its pieces are public. */
 export interface DrawSheetSize extends DrawSizeRef {
+  /** Macro scope K44 T1: on a set's draw, the piece it is a size of (1 to n); absent on a model's. */
+  piece?: number;
   /** The size's pieces. */
   pieces: number;
   /** The pieces reserved directly in it during the early access (PLATINE and PALLADIUM, the house's guarantee included), held or sold. */
@@ -578,6 +668,11 @@ export interface DropCard {
   /** NOCTURNE (addition 5): the price of a piece in minor units, with its currency; null for both when ORBES gave none. */
   priceMinor: number | null;
   currency: string | null;
+  /**
+   * Macro scope K44 T1: a set's draw, its set and pieces (`model` is then the set itself: its name, type SET, nothing of
+   * one of its models); `quantity` and `priceMinor` are then per set. Absent on a model's draw.
+   */
+  set?: PublicDropSet;
 }
 
 /** A drop's page (GET /api/v1/drops/:id): its rule's commitment, then, once drawn, its seed and how many entries took part. */
@@ -628,8 +723,10 @@ export interface DrawEntry {
   tier: number;
   seniority: number;
   rank: number;
-  /** Plan NEXT LOT §3.6.F: the size it was drawn in; null in a draw without sizes. */
+  /** Plan NEXT LOT §3.6.F: the size it was drawn in; null in a draw without sizes (and in a set's draw). */
   size: DrawSizeRef | null;
+  /** Macro scope K44 T1: in a set's draw, the size it was drawn in for each piece; absent otherwise. */
+  sizes?: PieceSizeRef[];
 }
 
 /** GET /api/v1/club/drops/:id/entry (plan NEXT LOT §3.6.F): the account's entry in a draw, and the size YOUR SIZES suggests. */
@@ -680,6 +777,8 @@ export interface AccountDropEntry {
   drawnAt: Date | null;
   /** Plan NEXT LOT §3.6.F: the size it chose (kept when withdrawn, to preselect it again); null in a draw without sizes. */
   size: DrawSizeRef | null;
+  /** Macro scope K44 T1: in a set's draw (`size` null), the size it chose for each piece, kept as `size` is; absent otherwise. */
+  sizes?: PieceSizeRef[];
 }
 
 /** The entries of a drop by status (the console). */
@@ -687,6 +786,8 @@ export type DropEntryCounts = Record<DropEntryStatus, number>;
 
 /** A draw's size as the console reads it (plan NEXT LOT §3.6.F): its pieces, then its entries counted. */
 export interface AdminDrawSize extends DrawSizeRef {
+  /** Macro scope K44 T1: on a set's draw, the piece it is a size of (1 to n); absent on a model's. */
+  piece?: number;
   pieces: number;
   /** The pieces reserved directly in it, held or sold. */
   reserved: number;
@@ -742,6 +843,11 @@ export interface AdminDrop {
   sizes: AdminDrawSize[];
   /** Plan MACRO M1 §3.1 (F4): the segment the draw is opened to, by its id and console name; null: everyone. */
   accessSegment: { id: string; name: string } | null;
+  /**
+   * Macro scope K44 T1: a set's draw, its set and pieces in order (`model` is then the set itself: its id and name, type
+   * SET; its `quantity` sets). Absent on a model's draw.
+   */
+  set?: { id: string; name: string; code: string; active: boolean; pieces: { piece: number; model: { id: string; name: string; type: string; active: boolean; variant: string | null } }[] };
 }
 
 /** An entry as the console lists it; the routes mask the email for an AUDITOR. */
@@ -762,8 +868,10 @@ export interface AdminDropEntry {
   guaranteed: boolean;
   /** IN-01: the pieces of its place (1, or its guarantee's). */
   pieces: number;
-  /** Plan NEXT LOT §3.6.F: its size; null in a draw without sizes. */
+  /** Plan NEXT LOT §3.6.F: its size; null in a draw without sizes (and in a set's draw). */
   size: DrawSizeRef | null;
+  /** Macro scope K44 T1: in a set's draw, its size for each piece; absent otherwise. */
+  sizes?: PieceSizeRef[];
   handledBy: { id: string; email: string } | null;
   handledAt: Date | null;
   note: string | null;
@@ -792,7 +900,7 @@ export interface DrawOutcome {
   guaranteed: number;
   guaranteedPieces: number;
   /** Plan NEXT LOT §3.6.F: per size, the places it drew, the entries selected and waitlisted; empty for a draw without sizes. */
-  sizes: { id: string; label: string; places: number; selected: number; waitlisted: number }[];
+  sizes: { id: string; label: string; piece?: number; places: number; selected: number; waitlisted: number }[];
 }
 
 /** A drop's entries counted (the console): by status, the direct reservations, the pieces held or sold, the guaranteed entries waiting for the draw. */
@@ -1002,8 +1110,8 @@ export async function accountDropEntries(db: Db, accountId: string): Promise<Exp
 
 // ── Sizes (plan NEXT LOT §3.6.F) ──────────────────────────────────────────
 
-/** A draw's size as stored: its id, label and pieces (`drop_sizes.stock`). */
-type DrawSizeRow = { id: string; label: string; stock: number };
+/** A draw's size as stored: its id, label and pieces (`drop_sizes.stock`), and its piece on a set's draw (null on a model's). */
+type DrawSizeRow = { id: string; label: string; stock: number; piece: number | null };
 
 /** A draw's sizes, in order; none for a draw without sizes (one published before this lot keeps one pool). */
 /**
@@ -1021,7 +1129,90 @@ async function assertDrawEligible(tx: Db, d: Pick<DropRow, 'access_segment_id'>,
 }
 
 async function drawSizesOf(db: Db, dropId: string): Promise<DrawSizeRow[]> {
-  return db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', dropId).orderBy('position').execute();
+  return db.selectFrom('drop_sizes').select(['id', 'label', 'stock', 'piece']).where('drop_id', '=', dropId).orderBy('position').execute();
+}
+
+/**
+ * The sizes an entry of a set's draw names (macro scope K44 T1; ENTER, RESERVE and, `partial`, CHANGE SIZE): `given` a list
+ * of `{ piece, sizeId }`, each piece of the set once (every piece unless `partial`), each size one of that piece's with
+ * pieces; 422 DROP_SET_SIZES otherwise, naming the piece. In the set's order.
+ */
+function chosenSetSizes(sizes: readonly DrawSizeRow[], pieces: readonly ReleasePiece[], given: unknown, partial = false): { piece: number; size: DrawSizeRow }[] {
+  if (!Array.isArray(given) || given.length === 0) throw setSizes('Choose a size for each piece of the set.');
+  const nameOf = (piece: number) => pieces.find((p) => p.piece === piece)?.model.name ?? `piece ${piece}`;
+  const out: { piece: number; size: DrawSizeRow }[] = [];
+  for (const x of given as unknown[]) {
+    const piece = (x as { piece?: unknown } | null)?.piece;
+    const sizeId = (x as { sizeId?: unknown } | null)?.sizeId;
+    if (typeof piece !== 'number' || !pieces.some((p) => p.piece === piece)) throw setSizes('This set has no such piece.');
+    if (out.some((c) => c.piece === piece)) throw setSizes(`Choose one size for ${nameOf(piece)}.`);
+    const id = typeof sizeId === 'string' && UUID_RE.test(sizeId) ? sizeId.toLowerCase() : null;
+    const size = id === null ? undefined : sizes.find((z) => z.id === id && z.piece === piece && z.stock > 0);
+    if (!size) throw setSizes(`This size is not offered for ${nameOf(piece)}.`);
+    out.push({ piece, size });
+  }
+  if (!partial) for (const p of pieces) if (!out.some((c) => c.piece === p.piece)) throw setSizes(`Choose a size for ${nameOf(p.piece!)}.`);
+  return out.sort((a, b) => a.piece - b.piece);
+}
+
+/** An entry's sizes per piece written (a set's draw): those given replace the entry's for their pieces, the others kept. */
+async function writeEntrySizes(tx: Db, dropId: string, entryId: string, chosen: readonly { piece: number; size: DrawSizeRow }[]): Promise<void> {
+  if (chosen.length === 0) return;
+  await tx.deleteFrom('drop_entry_sizes').where('entry_id', '=', entryId).where('piece', 'in', chosen.map((c) => c.piece)).execute();
+  await tx.insertInto('drop_entry_sizes').values(chosen.map((c) => ({ entry_id: entryId, drop_id: dropId, piece: c.piece, size_id: c.size.id }))).execute();
+}
+
+/** The sizes per piece of entries of a set's draw, by entry id, in the piece's order; an entry of a model's draw has none. Reads only. */
+async function entrySizeRefs(db: Db, entryIds: readonly string[]): Promise<Map<string, PieceSizeRef[]>> {
+  const out = new Map<string, PieceSizeRef[]>();
+  if (entryIds.length === 0) return out;
+  const rows = await db
+    .selectFrom('drop_entry_sizes as x')
+    .innerJoin('drop_sizes as s', 's.id', 'x.size_id')
+    .select(['x.entry_id', 'x.piece', 's.id', 's.label'])
+    .where('x.entry_id', 'in', [...new Set(entryIds)])
+    .orderBy('x.entry_id')
+    .orderBy('x.piece')
+    .execute();
+  for (const r of rows) out.set(r.entry_id, [...(out.get(r.entry_id) ?? []), { piece: r.piece, id: r.id, label: r.label }]);
+  return out;
+}
+
+/** An entry (`drop_entries as e`) in a size: its size (a model's draw) or one of its sizes per piece (a set's, K44 T1). */
+const inSizeOf = (sizeId: string) => sql<boolean>`(e.size_id = ${sizeId} OR EXISTS (SELECT 1 FROM drop_entry_sizes x WHERE x.entry_id = e.id AND x.size_id = ${sizeId}))`;
+
+/** Views with their sizes per piece (a set's draw's entries), absent on the others. */
+async function withEntrySizes<V extends { id: string; size: DrawSizeRef | null }>(db: Db, views: V[]): Promise<V[]> {
+  const sizes = await entrySizeRefs(db, views.filter((v) => v.size === null).map((v) => v.id));
+  return views.map((v) => (sizes.has(v.id) ? { ...v, sizes: sizes.get(v.id)! } : v));
+}
+
+/** What ENTER, RESERVE and CHANGE SIZE name: a model's draw's size (`sizeId`), or (macro scope K44 T1) a set's sizes per piece. */
+export interface EntrySizesInput {
+  sizeId?: string | null;
+  sizes?: readonly { piece: number; sizeId: string }[] | null;
+}
+
+/**
+ * The size an entry names in its draw: a model's (`chosenSize`; `sizes` there, 400), or a set's one per piece
+ * (`chosenSetSizes`; `sizeId` alone there, 422 DROP_SET_SIZES), with each piece's model's name (for DROP_SIZE_FULL).
+ */
+async function entrySizes(tx: Db, d: Pick<DropRow, 'id' | 'set_id'>, input: EntrySizesInput): Promise<{ size: DrawSizeRow | null; set: { piece: number; size: DrawSizeRow }[] | null; names: Map<number, string> }> {
+  const sizes = await drawSizesOf(tx, d.id);
+  if (d.set_id === null) {
+    if (input?.sizes !== undefined && input?.sizes !== null) throw notASet();
+    return { size: chosenSize(sizes, input?.sizeId), set: null, names: new Map() };
+  }
+  const pieces = await setPieces(tx, d.set_id);
+  return { size: null, set: chosenSetSizes(sizes, pieces, input?.sizes), names: new Map(pieces.map((p) => [p.piece!, p.model.name])) };
+}
+
+/** A set's sizes per piece as the audit log records them, or nothing. */
+const auditedChoice = (set: readonly { piece: number; size: DrawSizeRow }[] | null) => (set ? { sizes: set.map((c) => ({ piece: c.piece, sizeId: c.size.id })) } : {});
+
+/** Each piece's pieces in all (a set's draw's sizes), in the set's order, named by its model. */
+function pieceTotals(sizes: readonly DrawSizeRow[], pieces: readonly ReleasePiece[]): { piece: number; name: string; pieces: number }[] {
+  return pieces.map((p) => ({ piece: p.piece!, name: p.model.name, pieces: sizes.filter((z) => z.piece === p.piece).reduce((n, z) => n + z.stock, 0) }));
 }
 
 /**
@@ -1062,8 +1253,9 @@ async function guaranteedEnteredPieces(db: Db, dropId: string, sizeId: string): 
 async function sizeTallies(db: Db, ids: readonly string[]): Promise<Map<string, AdminDrawSize[]>> {
   const out = new Map<string, AdminDrawSize[]>();
   if (ids.length === 0) return out;
-  const rows = await sql<{ drop_id: string; id: string; label: string; stock: number; held: number; reserved: number; entered: number; waitlisted: number; guaranteed_entered: number }>`
-    SELECT s.drop_id, s.id, s.label, s.stock,
+  // An entry counts in its size (a model's draw) or in each of its sizes per piece (a set's: drop_entry_sizes).
+  const rows = await sql<{ drop_id: string; id: string; label: string; piece: number | null; stock: number; held: number; reserved: number; entered: number; waitlisted: number; guaranteed_entered: number }>`
+    SELECT s.drop_id, s.id, s.label, s.piece, s.stock,
            coalesce(sum(e.pieces) FILTER (WHERE e.status IN ('SELECTED', 'CONFIRMED')), 0)::int AS held,
            coalesce(sum(e.pieces) FILTER (WHERE e.status IN ('SELECTED', 'CONFIRMED') AND e.rank IS NULL AND (e.tier IS NOT NULL OR g.used_at < d.opens_at)), 0)::int AS reserved,
            (count(e.id) FILTER (WHERE e.status = 'ENTERED'))::int AS entered,
@@ -1071,16 +1263,19 @@ async function sizeTallies(db: Db, ids: readonly string[]): Promise<Map<string, 
            coalesce(sum(e.pieces) FILTER (WHERE e.status = 'ENTERED' AND e.guarantee_id IS NOT NULL), 0)::int AS guaranteed_entered
       FROM drop_sizes s
       JOIN drops d ON d.id = s.drop_id
-      LEFT JOIN drop_entries e ON e.drop_id = s.drop_id AND e.size_id = s.id
+      LEFT JOIN (SELECT id AS entry_id, size_id FROM drop_entries WHERE size_id IS NOT NULL
+                 UNION ALL SELECT entry_id, size_id FROM drop_entry_sizes) c ON c.size_id = s.id
+      LEFT JOIN drop_entries e ON e.id = c.entry_id AND e.drop_id = s.drop_id
       LEFT JOIN house_guarantees g ON g.id = e.guarantee_id
      WHERE s.drop_id IN (${sql.join([...ids])})
-     GROUP BY s.drop_id, s.id, s.label, s.stock, s.position
+     GROUP BY s.drop_id, s.id, s.label, s.piece, s.stock, s.position
      ORDER BY s.drop_id, s.position`.execute(db);
   for (const r of rows.rows) {
     const list = out.get(r.drop_id) ?? [];
     list.push({
       id: r.id,
       label: r.label,
+      ...(r.piece !== null ? { piece: Number(r.piece) } : {}),
       pieces: Number(r.stock),
       reserved: Number(r.reserved),
       entered: Number(r.entered),
@@ -1094,19 +1289,25 @@ async function sizeTallies(db: Db, ids: readonly string[]): Promise<Map<string, 
 }
 
 /**
- * A draw's sizes as given, written again (a DRAFT's: no entry names one yet), a size of the same label keeping its id, and
- * linked to the model's SKUs.
+ * A draw's sizes as given, written again (a DRAFT's: no entry names one yet), a size of the same label (and piece) keeping
+ * its id, and linked to the model's SKUs; a set's draw's (`modelId` null, the release's `set_id` already its set) each to
+ * its piece's model's (macro scope K44 T1), every piece's model sized.
  */
-async function writeDrawSizes(tx: Db, dropId: string, modelId: string, sizes: readonly DrawSizeInput[]): Promise<void> {
-  await assertModelSized(tx, modelId);
-  const kept = new Map((await drawSizesOf(tx, dropId)).map((x) => [x.label.toUpperCase(), x.id]));
+async function writeDrawSizes(tx: Db, dropId: string, modelId: string | null, sizes: readonly DrawSizeInput[]): Promise<void> {
+  if (modelId !== null) await assertModelSized(tx, modelId);
+  else {
+    const d = await tx.selectFrom('drops').select('set_id').where('id', '=', dropId).executeTakeFirstOrThrow();
+    for (const p of await setPieces(tx, d.set_id!)) await assertModelSized(tx, p.model.id);
+  }
+  const key = (piece: number | null | undefined, label: string) => `${piece ?? ''}|${label.toUpperCase()}`;
+  const kept = new Map((await drawSizesOf(tx, dropId)).map((x) => [key(x.piece, x.label), x.id]));
   await tx.deleteFrom('drop_sizes').where('drop_id', '=', dropId).execute();
   await tx
     .insertInto('drop_sizes')
     .values(
       sizes.map((x, i) => {
-        const id = kept.get(x.label.toUpperCase());
-        return { ...(id ? { id } : {}), drop_id: dropId, label: x.label, position: i + 1, stock: x.pieces };
+        const id = kept.get(key(x.piece, x.label));
+        return { ...(id ? { id } : {}), drop_id: dropId, ...(x.piece !== undefined ? { piece: x.piece } : {}), label: x.label, position: i + 1, stock: x.pieces };
       }),
     )
     .execute();
@@ -1123,9 +1324,23 @@ async function assertModelSized(tx: Db, modelId: string): Promise<void> {
   if (m.size_type === null) throw modelSizesMissing();
 }
 
-/** A draw's sizes as the audit log records them: each label (as linked) and its pieces. */
-async function auditedSizes(db: Db, dropId: string): Promise<{ label: string; pieces: number }[]> {
-  return (await drawSizesOf(db, dropId)).map((x) => ({ label: x.label, pieces: x.stock }));
+/** A draw's sizes as the audit log records them: each label (as linked) and its pieces, and its piece on a set's draw. */
+async function auditedSizes(db: Db, dropId: string): Promise<{ piece?: number; label: string; pieces: number }[]> {
+  return (await drawSizesOf(db, dropId)).map((x) => ({ ...(x.piece !== null ? { piece: x.piece } : {}), label: x.label, pieces: x.stock }));
+}
+
+/**
+ * A set a draw sells, offered (macro scope K44 T1): held FOR SHARE until the transaction ends (its pieces are frozen once a
+ * release names it: SetService.update takes it FOR UPDATE), active (409 SET_SET_ASIDE), each piece's model active (409
+ * MODEL_INACTIVE); its pieces in order. 404 SET_NOT_FOUND.
+ */
+async function offeredSet(tx: Db, setId: string): Promise<{ id: string; name: string; pieces: ReleasePiece[] }> {
+  const s = await tx.selectFrom('sets').select(['id', 'name', 'active']).where('id', '=', setId).forShare().executeTakeFirst();
+  if (!s) throw setNotFound();
+  if (!s.active) throw setSetAside(s.name);
+  const pieces = await setPieces(tx, s.id);
+  if (pieces.some((p) => !p.model.active)) throw modelInactive();
+  return { id: s.id, name: s.name, pieces };
 }
 
 // ── The calendar (plan MACRO M1 §2.1, C1) ─────────────────────────────────
@@ -1165,13 +1380,14 @@ export interface DropServiceDeps {
   emails?: Pick<EmailTriggers, 'drawPlaces'>;
 }
 
+/** A draw's row with its model (all null on a set's draw: its set is read with `releaseOffers`). */
 type DropReadRow = DropRow & {
-  model_name: string;
-  model_type: string;
-  model_active: boolean;
+  model_name: string | null;
+  model_type: string | null;
+  model_active: boolean | null;
   model_image: string | null;
   model_slug: string | null;
-  model_lookbook: string;
+  model_lookbook: string | null;
   model_variant: string | null;
   collection: string | null;
   /** Plan MACRO M1 §3.1 (F4): the console name of the segment the draw is opened to (the console only). */
@@ -1213,7 +1429,8 @@ export class DropService {
       .orderBy('d.id')
       .limit(DROP_LIST_LIMIT)
       .execute();
-    return rows.map((r) => this.card(r, now));
+    const { offers, collections } = await this.offersOf(this.db, rows);
+    return rows.map((r) => this.card(r, now, { offer: offers.get(r.id), collections }));
   }
 
   /** A published drop's page; a DRAFT, an unknown or malformed id: one 404 DROP_NOT_FOUND. */
@@ -1248,15 +1465,18 @@ export class DropService {
       : [];
     // Plan NEXT LOT §3.6.F: each size's pieces are public; full before the draw as RESERVE refuses DROP_SIZE_FULL.
     const open = !r.drawn_at && !r.cancelled_at;
+    // Macro scope K44 T1: a set's draw publishes each piece's sizes (`piece`), each drawn entry's sizes (drawEntries).
     const sizes = ((await sizeTallies(this.db, [id])).get(id) ?? []).map((x) => ({
       id: x.id,
       label: x.label,
+      ...(x.piece !== undefined ? { piece: x.piece } : {}),
       pieces: x.pieces,
       reserved: x.reserved,
       full: open && x.held + x.guaranteedEntered >= x.pieces,
     }));
+    const { offers, collections } = await this.offersOf(this.db, [r]);
     return {
-      ...this.card(r, now),
+      ...this.card(r, now, { offer: offers.get(id), collections }),
       description: r.description,
       purchaseWindowHours: r.purchase_window_hours,
       publishedAt: r.published_at!,
@@ -1290,7 +1510,10 @@ export class DropService {
       .offset(pageOffset(page))
       .execute();
     return makePage(
-      rows.map((r) => ({ id: r.id, tier: r.tier ?? 0, seniority: r.seniority ?? 0, rank: r.rank!, size: sizeRef(r.size_id, r.size_label ?? null) })),
+      await withEntrySizes(
+        this.db,
+        rows.map((r) => ({ id: r.id, tier: r.tier ?? 0, seniority: r.seniority ?? 0, rank: r.rank!, size: sizeRef(r.size_id, r.size_label ?? null) })),
+      ),
       Number(total.n),
       page,
     );
@@ -1331,7 +1554,7 @@ export class DropService {
       .orderBy('e.id')
       .limit(ACCOUNT_ENTRIES_LIMIT)
       .execute();
-    return rows.map((r) => accountEntryView(r, now));
+    return withEntrySizes(this.db, rows.map((r) => accountEntryView(r, now)));
   }
 
   /**
@@ -1375,7 +1598,7 @@ export class DropService {
             offer: await addonOffer(this.db, d.stock_location_id ?? (await defaultLocationId(this.db)), currency),
           }
         : null;
-    return { entry: r ? accountEntryView(r, this.clock()) : null, savedSize: match ? { id: match.id, label: match.label } : null, ...(savedSizes ? { savedSizes } : {}), eligible, addons };
+    return { entry: r ? (await withEntrySizes(this.db, [accountEntryView(r, this.clock())]))[0]! : null, savedSize: match ? { id: match.id, label: match.label } : null, ...(savedSizes ? { savedSizes } : {}), eligible, addons };
   }
 
   /**
@@ -1411,9 +1634,11 @@ export class DropService {
    * one of its sizes with pieces (400 DROP_SIZE_REQUIRED, 404 DROP_SIZE_UNKNOWN; asked again after a withdrawal), even
    * one whose pieces are all reserved (the draw ranks a waiting list in each size); with the house's guarantee shown, the
    * size must still serve its pieces (409 DROP_GUARANTEE_SIZE_FULL; one not shown leaves an ordinary entry). Audited
-   * `drop.enter` with its size.
+   * `drop.enter` with its size. Macro scope K44 T1, a set's draw: `sizes`, one size per piece of that piece's (422
+   * DROP_SET_SIZES otherwise; `sizeId` alone there is one too), written per piece (`drop_entry_sizes`), never a guarantee;
+   * `sizes` on a model's draw: 400.
    */
-  async enter(accountId: string, dropId: string, actor: Actor, input: { sizeId?: string | null } = {}): Promise<AccountDropEntry> {
+  async enter(accountId: string, dropId: string, actor: Actor, input: EntrySizesInput = {}): Promise<AccountDropEntry> {
     assertAccount(accountId);
     const id = knownId(dropId, dropNotFound);
     const entryId = await inTransaction(this.db, async (tx) => {
@@ -1429,10 +1654,11 @@ export class DropService {
       // A place reserved directly (IN-01: with the house's guarantee too, then without a tier) is not entered again.
       if (existing && (isReservation(existing) || (existing.guarantee_id !== null && existing.status !== 'ENTERED' && existing.status !== 'WITHDRAWN'))) throw alreadyReserved();
       if (existing && existing.status !== 'WITHDRAWN') throw alreadyEntered();
-      const size = chosenSize(await drawSizesOf(tx, id), input.sizeId);
+      const sized = await entrySizes(tx, d, input);
+      const size = sized.size;
       // IN-01: the house's guarantee set aside for this release, after the entry's row (the lock order): the entry uses it,
-      // in a draw with sizes when its size can still serve its pieces.
-      const held = await holderGuarantee(tx, accountId, d);
+      // in a draw with sizes when its size can still serve its pieces. Never on a set's draw (macro scope K44).
+      const held = sized.set ? null : await holderGuarantee(tx, accountId, d);
       const g = held && size ? await this.guaranteeInSize(tx, id, held, size.id, existing?.id ?? null) : held;
       const bound = g ? { guarantee_id: g.id, pieces: g.pieces } : { guarantee_id: null, pieces: 1 };
       let entry: string;
@@ -1449,13 +1675,14 @@ export class DropService {
           throw e;
         }
       }
+      if (sized.set) await writeEntrySizes(tx, id, entry, sized.set);
       await this.audit.record(
         {
           actor,
           action: 'drop.enter',
           targetType: 'drop',
           targetId: id,
-          details: { entryId: entry, ...(size ? { sizeId: size.id } : {}), ...(again ? { again: true } : {}), ...(g ? { guaranteeId: g.id } : {}) },
+          details: { entryId: entry, ...(size ? { sizeId: size.id } : {}), ...auditedChoice(sized.set), ...(again ? { again: true } : {}), ...(g ? { guaranteeId: g.id } : {}) },
         },
         tx,
       );
@@ -1471,8 +1698,10 @@ export class DropService {
    * 409 DROP_NOT_ENTERED; a draw without sizes: 404 DROP_SIZE_UNKNOWN. IN-01: its guarantee (or the one set aside for the
    * account, when the entry is not bound) is checked again in the new size, bound when it serves, refused when shown and
    * it cannot (409 DROP_GUARANTEE_SIZE_FULL). The same size again changes nothing. Audited `drop.size` with the size before.
+   * Macro scope K44 T1, a set's draw: `sizes`, any of its pieces each once, each a size of that piece's (422
+   * DROP_SET_SIZES), the others kept; the same sizes again change nothing; audited with the sizes before and after.
    */
-  async changeSize(accountId: string, dropId: string, input: { sizeId: string }, actor: Actor): Promise<AccountDropEntry> {
+  async changeSize(accountId: string, dropId: string, input: EntrySizesInput, actor: Actor): Promise<AccountDropEntry> {
     assertAccount(accountId);
     const id = knownId(dropId, dropNotFound);
     const entryId = await inTransaction(this.db, async (tx) => {
@@ -1489,6 +1718,26 @@ export class DropService {
       const e = await tx.selectFrom('drop_entries').select(['id', 'status', 'size_id', 'guarantee_id']).where('drop_id', '=', id).where('account_id', '=', accountId).forUpdate().executeTakeFirst();
       if (!e || e.status === 'WITHDRAWN') throw notEntered();
       if (e.status !== 'ENTERED') throw sizeFixed();
+      if (d.set_id !== null) {
+        // Macro scope K44 T1: any of its pieces' sizes, the others kept.
+        const chosen = chosenSetSizes(sizes, await setPieces(tx, d.set_id), input?.sizes, true);
+        const before = await tx.selectFrom('drop_entry_sizes').select(['piece', 'size_id']).where('entry_id', '=', e.id).orderBy('piece').execute();
+        const changed = chosen.filter((c) => before.find((b) => b.piece === c.piece)?.size_id !== c.size.id);
+        if (changed.length === 0) return e.id;
+        await writeEntrySizes(tx, id, e.id, changed);
+        await this.audit.record(
+          {
+            actor,
+            action: 'drop.size',
+            targetType: 'drop',
+            targetId: id,
+            details: { entryId: e.id, sizes: changed.map((c) => ({ piece: c.piece, sizeId: c.size.id })), before: before.map((b) => ({ piece: b.piece, sizeId: b.size_id })) },
+          },
+          tx,
+        );
+        return e.id;
+      }
+      if (input?.sizes !== undefined) throw notASet();
       const size = chosenSize(sizes, input?.sizeId)!;
       if (size.id === e.size_id) return e.id;
       const held = e.guarantee_id
@@ -1552,8 +1801,10 @@ export class DropService {
    * size and those of its guaranteed entries waiting leave none (409 DROP_SIZE_FULL, the size named); with the house's
    * guarantee, the size must serve its pieces as for ENTER (guaranteeInSize: 409 DROP_GUARANTEE_SIZE_FULL when shown, an
    * ordinary place when not); the place keeps its size. Audited `drop.reserve` with the entry, its tier and its size.
+   * Macro scope K44 T1, a set's draw: `sizes` as ENTER's, refused once any of them is taken (409 DROP_SIZE_FULL, its
+   * piece named), the place keeping them; never a guarantee.
    */
-  async reserve(accountId: string, dropId: string, actor: Actor, input: { sizeId?: string | null } = {}): Promise<AccountDropEntry> {
+  async reserve(accountId: string, dropId: string, actor: Actor, input: EntrySizesInput = {}): Promise<AccountDropEntry> {
     assertAccount(accountId);
     const id = knownId(dropId, dropNotFound);
     const entryId = await inTransaction(this.db, async (tx) => {
@@ -1575,18 +1826,21 @@ export class DropService {
       if (now.getTime() < from.getTime()) throw earlyAccessNotOpen(from);
       const existing = await tx.selectFrom('drop_entries').select(['id', 'status']).where('drop_id', '=', id).where('account_id', '=', accountId).forUpdate().executeTakeFirst();
       if (existing && existing.status !== 'WITHDRAWN') throw alreadyReserved();
-      const size = chosenSize(await drawSizesOf(tx, id), input.sizeId);
+      const sized = await entrySizes(tx, d, input);
+      const size = sized.size;
       // IN-01: a holder's reservation uses the house's guarantee, after the entry's row (the lock order); the pieces the
       // house guarantees to others are never taken by an early access (DROP_FULL counts them). In a draw with sizes, as
       // ENTER: only where its size can serve its pieces (one shown refused, 409 DROP_GUARANTEE_SIZE_FULL; one not shown
       // leaves an ordinary place, no mark for its holder).
-      const own = await holderGuarantee(tx, accountId, d);
+      const own = sized.set ? null : await holderGuarantee(tx, accountId, d);
       const g = own && size ? await this.guaranteeInSize(tx, id, own, size.id, existing?.id ?? null) : own;
       const held = await this.heldPieces(tx, id);
       const guaranteed = await guaranteedPieces(tx, id, own?.id);
       if (held + guaranteed + (g?.pieces ?? 1) > d.quantity) throw dropFull();
       // Plan NEXT LOT §3.6.F: within its size too, first come, first served.
       if (size && (await this.heldPieces(tx, id, size.id)) + (await guaranteedEnteredPieces(tx, id, size.id)) + (g?.pieces ?? 1) > size.stock) throw sizeFull(size.label);
+      // Macro scope K44 T1: within each of a set's sizes, the piece named.
+      for (const c of sized.set ?? []) if ((await this.heldPieces(tx, id, c.size.id)) + 1 > c.size.stock) throw pieceSizeFull(sized.names.get(c.piece)!, c.size.label);
       const respondBy = new Date(now.getTime() + d.purchase_window_hours * HOUR_MS);
       const place = g
         ? { status: 'SELECTED' as const, tier: null, seniority: null, respond_by: respondBy, guarantee_id: g.id, pieces: g.pieces, size_id: size?.id ?? null }
@@ -1604,6 +1858,7 @@ export class DropService {
           throw e;
         }
       }
+      if (sized.set) await writeEntrySizes(tx, id, entry, sized.set);
       const notes: AuditRecordInput[] = [];
       if (g) await useGuarantees(tx, [g.id], id, now, actor, notes, 'reserve');
       await this.audit.record(
@@ -1612,7 +1867,7 @@ export class DropService {
           action: 'drop.reserve',
           targetType: 'drop',
           targetId: id,
-          details: { entryId: entry, tier: standing.tier, respondBy: place.respond_by.toISOString(), ...(size ? { sizeId: size.id } : {}), ...(g ? { guaranteeId: g.id, pieces: g.pieces } : {}) },
+          details: { entryId: entry, tier: standing.tier, respondBy: place.respond_by.toISOString(), ...(size ? { sizeId: size.id } : {}), ...auditedChoice(sized.set), ...(g ? { guaranteeId: g.id, pieces: g.pieces } : {}) },
         },
         tx,
       );
@@ -1632,9 +1887,10 @@ export class DropService {
     const creators = await this.staffEmails(this.db, rows.map((r) => r.created_by));
     const guaranteed = await releaseGuaranteed(this.db, rows.map((r) => r.id));
     const sizes = await sizeTallies(this.db, rows.map((r) => r.id));
+    const { offers } = await this.offersOf(this.db, rows);
     const now = this.clock();
     return makePage(
-      rows.map((r) => this.adminView(r, now, tallies.get(r.id), creators, guaranteed.get(r.id), sizes.get(r.id))),
+      rows.map((r) => this.adminView(r, now, tallies.get(r.id), creators, guaranteed.get(r.id), sizes.get(r.id), offers.get(r.id))),
       Number(total.n),
       page,
     );
@@ -1674,14 +1930,19 @@ export class DropService {
    * with pieces, 10 000 at most in all), each one of the model's sizes (linkDropSizes; a model with no size type has none,
    * 409 DROP_MODEL_SIZES_MISSING); its quantity is their sum, and a
    * quantity given is refused (400 'A draw’s pieces are given per size.'). OPERATOR; audited `drop.create` with the seed's
-   * SHA-256, both windows and the sizes.
+   * SHA-256, both windows and the sizes. Macro scope K44 T1: a set's draw (`setId` in place of `modelId`, one of the two:
+   * 400), the set offered (404 SET_NOT_FOUND, 409 SET_SET_ASIDE, each piece's model active: 409 MODEL_INACTIVE), its sizes
+   * given per piece (cleanSetDrawSizes), its quantity in sets (the smallest piece's total until its publication).
    */
   async create(input: CreateDropInput, actor: Actor): Promise<AdminDrop> {
     assertStaff(actor, 'create a release');
     const title = cleanTitle(input.title);
     const description = cleanDescription(input.description ?? null);
     if (input.quantity !== undefined) throw quantityPerSize();
-    const { sizes, quantity } = cleanDrawSizes(input.sizes);
+    const given = (v: string | null | undefined): v is string => v !== undefined && v !== null && v !== '';
+    if (given(input.modelId) === given(input.setId)) throw oneOffer();
+    const setId = given(input.setId) ? knownId(input.setId, setNotFound) : null;
+    const cleaned = setId === null ? cleanDrawSizes(input.sizes) : null;
     const opensAt = cleanTime(input.opensAt, 'The opening');
     const closesAt = cleanTime(input.closesAt, 'The close');
     checkWindow(opensAt, closesAt);
@@ -1689,7 +1950,7 @@ export class DropService {
     const givenEarly = input.earlyAccessHours === undefined ? undefined : cleanEarlyAccess(input.earlyAccessHours);
     const givenPlatine = input.earlyAccessPlatineHours === undefined ? undefined : cleanEarlyAccess(input.earlyAccessPlatineHours);
     const price = cleanDrawPrice(input.priceMinor ?? null, input.currency ?? null);
-    const modelId = knownId(input.modelId, () => notFound('Model', 'MODEL_NOT_FOUND'));
+    const modelId = setId === null ? knownId(input.modelId!, () => notFound('Model', 'MODEL_NOT_FOUND')) : null;
     const segmentId = input.accessSegmentId === undefined || input.accessSegmentId === null || input.accessSegmentId === '' ? null : knownId(input.accessSegmentId, segmentNotFound);
     return inTransaction(this.db, async (tx) => {
       const now = this.clock();
@@ -1699,9 +1960,18 @@ export class DropService {
       // PLATINE's window as given, or THE PROGRAM's, never longer than PALLADIUM's.
       const platine = givenPlatine ?? Math.min(program.earlyAccessPlatineHours, early);
       if (platine > early) throw earlyAccessOrder();
-      const model = await tx.selectFrom('models').select(['id', 'active']).where('id', '=', modelId).executeTakeFirst();
-      if (!model) throw notFound('Model', 'MODEL_NOT_FOUND');
-      if (!model.active) throw modelInactive();
+      let sizes: DrawSizeInput[];
+      let quantity: number;
+      if (modelId !== null) {
+        const model = await tx.selectFrom('models').select(['id', 'active']).where('id', '=', modelId).executeTakeFirst();
+        if (!model) throw notFound('Model', 'MODEL_NOT_FOUND');
+        if (!model.active) throw modelInactive();
+        ({ sizes, quantity } = cleaned!);
+      } else {
+        // Macro scope K44 T1: the set offered, its sizes per piece.
+        const set = await offeredSet(tx, setId!);
+        ({ sizes, quantity } = cleanSetDrawSizes(input.sizes, set.pieces.length));
+      }
       const id = randomUUID();
       const seed = new Uint8Array(randomBytes(DROP_SEED_BYTES));
       const seedHash = sha256(seed);
@@ -1712,6 +1982,7 @@ export class DropService {
         .values({
           id,
           model_id: modelId,
+          set_id: setId,
           title,
           description,
           quantity,
@@ -1737,7 +2008,7 @@ export class DropService {
           targetType: 'drop',
           targetId: id,
           details: {
-            modelId,
+            ...(setId !== null ? { setId } : { modelId }),
             title,
             quantity,
             opensAt: opensAt.toISOString(),
@@ -1781,7 +2052,7 @@ export class DropService {
         after[key] = shown(to);
       };
       if (change.description !== undefined) note('description', 'description', d.description, cleanDescription(change.description), (v) => describedAs((v as string | null) ?? null));
-      const structural = (['modelId', 'title', 'quantity', 'sizes', 'opensAt', 'closesAt', 'purchaseWindowHours', 'earlyAccessHours', 'earlyAccessPlatineHours', 'priceMinor', 'currency', 'accessSegmentId'] as const).filter(
+      const structural = (['modelId', 'setId', 'title', 'quantity', 'sizes', 'opensAt', 'closesAt', 'purchaseWindowHours', 'earlyAccessHours', 'earlyAccessPlatineHours', 'priceMinor', 'currency', 'accessSegmentId'] as const).filter(
         (k) => change[k] !== undefined,
       );
       let resized = false;
@@ -1789,15 +2060,32 @@ export class DropService {
         if (d.cancelled_at) throw dropCancelled();
         if (d.published_at) throw dropPublished();
         if (change.quantity !== undefined) throw quantityPerSize();
+        // Macro scope K44 T1: a release sells its model or its set for good; a set's draw may take another set.
+        if (d.set_id !== null && change.modelId !== undefined) throw setOfferFixed();
+        if (d.set_id === null && change.setId !== undefined) throw modelOfferFixed();
+        let setId = d.set_id;
+        if (d.set_id !== null && change.setId !== undefined) {
+          const next = knownId(change.setId, setNotFound);
+          if (next !== d.set_id) {
+            if (change.sizes === undefined) throw setSizesGiven();
+            await offeredSet(tx, next);
+            // Its sizes are written for the new set's pieces below (writeDrawSizes reads the release's set).
+            await tx.updateTable('drops').set({ set_id: next }).where('id', '=', id).execute();
+            before.setId = d.set_id;
+            after.setId = next;
+            setId = next;
+            resized = true;
+          }
+        }
         if (change.title !== undefined) note('title', 'title', d.title, cleanTitle(change.title));
         if (change.sizes !== undefined) {
-          const { sizes, quantity } = cleanDrawSizes(change.sizes);
+          const { sizes, quantity } = setId === null ? cleanDrawSizes(change.sizes) : cleanSetDrawSizes(change.sizes, (await setPieces(tx, setId)).length);
           // IN-01: never below the pieces held or guaranteed by the house.
           const floor = (await this.heldPieces(tx, id)) + (await guaranteedPieces(tx, id));
           if (quantity < floor) throw guaranteesExceed(await guaranteedPieces(tx, id));
           const was = await auditedSizes(tx, id);
-          // A set's draw gives its sizes per piece from M3.15 on (its creation): until then a draw sells a model.
-          await writeDrawSizes(tx, id, change.modelId !== undefined ? knownId(change.modelId, () => notFound('Model', 'MODEL_NOT_FOUND')) : modelOfModelRelease(d, 'M3.15'), sizes);
+          // A set's draw: its sizes per piece, each linked to its piece's model (macro scope K44 T1).
+          await writeDrawSizes(tx, id, setId !== null ? null : change.modelId !== undefined ? knownId(change.modelId, () => notFound('Model', 'MODEL_NOT_FOUND')) : d.model_id!, sizes);
           const next = await auditedSizes(tx, id);
           if (JSON.stringify(was) !== JSON.stringify(next)) {
             before.sizes = was;
@@ -1833,8 +2121,6 @@ export class DropService {
         note('opensAt', 'opens_at', d.opens_at, opensAt);
         note('closesAt', 'closes_at', d.closes_at, closesAt);
         if (change.modelId !== undefined) {
-          // Macro scope K44 T1: a set's release sells its set, never a model instead.
-          if (d.set_id !== null) throw validationError('A set’s release sells its set: its pieces are the set’s.');
           const modelId = knownId(change.modelId, () => notFound('Model', 'MODEL_NOT_FOUND'));
           if (modelId !== d.model_id) {
             const model = await tx.selectFrom('models').select(['id', 'active']).where('id', '=', modelId).executeTakeFirst();
@@ -1874,12 +2160,20 @@ export class DropService {
       if (d.cancelled_at) throw dropCancelled();
       if (d.published_at) throw dropAlreadyPublished();
       if (now.getTime() >= d.closes_at.getTime()) throw dropWindowPast();
-      // A set's draw is published by its own rules (the even rule per piece) from M3.15 on.
-      const model = await tx.selectFrom('models').select(['active', 'size_type']).where('id', '=', modelOfModelRelease(d, 'M3.15')).executeTakeFirstOrThrow();
-      if (!model.active) throw modelInactive();
       const sizes = await auditedSizes(tx, id);
-      if (sizes.length === 0) throw sizesRequired();
-      if (model.size_type === null) throw modelSizesMissing();
+      if (d.set_id !== null) {
+        // Macro scope K44 T1: the set and each piece offered and sized, each piece its sizes, adding up to the same sets.
+        const set = await offeredSet(tx, d.set_id);
+        if (set.pieces.some((p) => p.model.sizeType === null)) throw modelSizesMissing();
+        const totals = pieceTotals(await drawSizesOf(tx, id), set.pieces);
+        if (totals.some((t) => t.pieces === 0)) throw sizesRequired();
+        if (totals.some((t) => t.pieces !== totals[0]!.pieces)) throw setSizesUneven(totals);
+      } else {
+        const model = await tx.selectFrom('models').select(['active', 'size_type']).where('id', '=', d.model_id!).executeTakeFirstOrThrow();
+        if (!model.active) throw modelInactive();
+        if (sizes.length === 0) throw sizesRequired();
+        if (model.size_type === null) throw modelSizesMissing();
+      }
       await tx.updateTable('drops').set({ published_at: now }).where('id', '=', id).execute();
       const early = earlyAccessOpensAt({ ...d, published_at: now });
       const earlyPlatine = earlyAccessOpensAt({ ...d, published_at: now }, 2);
@@ -1991,9 +2285,29 @@ export class DropService {
       // The places left: the quantity less the pieces held or sold, and those the house's guarantees just took; with
       // sizes, each size's.
       const sizeOf = new Map(entered.map((e) => [e.id.toLowerCase(), e.size_id]));
-      const bySize = new Map(sizes.map((z) => [z.id, { id: z.id, label: z.label, places: Math.max(0, left.get(z.id)!), selected: 0, waitlisted: 0 }]));
+      // Macro scope K44 T1, a set's draw: each entry's sizes per piece.
+      const setSizesOf = new Map<string, string[]>();
+      if (d.set_id !== null) for (const [entryId, refs] of await entrySizeRefs(tx, entered.map((e) => e.id))) setSizesOf.set(entryId.toLowerCase(), refs.map((r) => r.id));
+      const bySize = new Map(
+        sizes.map((z) => [z.id, { id: z.id, label: z.label, ...(z.piece !== null ? { piece: z.piece } : {}), places: Math.max(0, left.get(z.id)!), selected: 0, waitlisted: 0 }]),
+      );
       const selectedIds = new Set<string>();
-      if (sizes.length === 0) {
+      if (d.set_id !== null) {
+        // An entry is SELECTED while every one of its sizes still has a piece left (each then one less), else WAITLISTED.
+        for (const e of order) {
+          const mine = setSizesOf.get(e.id.toLowerCase()) ?? [];
+          const fits = mine.length > 0 && mine.every((z) => (left.get(z) ?? 0) >= 1);
+          for (const z of mine) {
+            const tally = bySize.get(z);
+            if (!tally) continue;
+            if (fits) {
+              left.set(z, left.get(z)! - 1);
+              tally.selected++;
+            } else tally.waitlisted++;
+          }
+          if (fits) selectedIds.add(e.id);
+        }
+      } else if (sizes.length === 0) {
         const places = Math.max(0, d.quantity - held - guaranteedPieceCount);
         for (const e of order) if (e.rank <= places) selectedIds.add(e.id);
       } else {
@@ -2035,7 +2349,8 @@ export class DropService {
       // IN-01: the guarantees set aside for it and not used: a model's or a collection's carried, a chosen release's expired.
       await releaseCovered(tx, id, 'ENDED', now, actor, notes);
       const perSize = [...bySize.values()];
-      const places = sizes.length === 0 ? Math.max(0, d.quantity - held - guaranteedPieceCount) : perSize.reduce((n, z) => n + z.places, 0);
+      // A set's draw draws sets: its quantity less the sets held or sold.
+      const places = sizes.length === 0 || d.set_id !== null ? Math.max(0, d.quantity - held - guaranteedPieceCount) : perSize.reduce((n, z) => n + z.places, 0);
       const selected = selectedIds.size;
       const waitlisted = order.length - selected;
       await this.audit.record(
@@ -2051,7 +2366,7 @@ export class DropService {
             waitlisted,
             guaranteed: guaranteedEntries.length,
             guaranteedPieces: guaranteedPieceCount,
-            ...(perSize.length > 0 ? { sizes: perSize.map((z) => ({ sizeId: z.id, label: z.label, places: z.places, selected: z.selected, waitlisted: z.waitlisted })) } : {}),
+            ...(perSize.length > 0 ? { sizes: perSize.map((z) => ({ sizeId: z.id, ...(z.piece !== undefined ? { piece: z.piece } : {}), label: z.label, places: z.places, selected: z.selected, waitlisted: z.waitlisted })) } : {}),
             seed: toHex(seed),
           },
         },
@@ -2087,12 +2402,12 @@ export class DropService {
       .select((eb) => eb.fn.countAll<number>().as('n'))
       .where('e.drop_id', '=', id)
       .$if(filter.status !== undefined, (qb) => qb.where('e.status', '=', filter.status!))
-      .$if(sizeId !== undefined, (qb) => qb.where('e.size_id', '=', sizeId!))
+      .$if(sizeId !== undefined, (qb) => qb.where(inSizeOf(sizeId!)))
       .executeTakeFirstOrThrow();
     const rows = await this.entryRows(this.db)
       .where('e.drop_id', '=', id)
       .$if(filter.status !== undefined, (qb) => qb.where('e.status', '=', filter.status!))
-      .$if(sizeId !== undefined, (qb) => qb.where('e.size_id', '=', sizeId!))
+      .$if(sizeId !== undefined, (qb) => qb.where(inSizeOf(sizeId!)))
       .orderBy(sql`e.rank IS NULL`)
       .orderBy('e.rank')
       .orderBy('e.created_at')
@@ -2101,7 +2416,7 @@ export class DropService {
       .offset(pageOffset(page))
       .execute();
     return makePage(
-      await this.withChoices(id, rows.map(entryView)),
+      await this.withChoices(id, await withEntrySizes(this.db, rows.map(entryView))),
       Number(total.n),
       page,
     );
@@ -2136,7 +2451,10 @@ export class DropService {
    * while the places held and sold stay under `quantity` (409 DROP_FULL), and while one is left (409
    * DROP_WAITLIST_EMPTY). Plan NEXT LOT §3.6.F, a draw with sizes: per size (`sizeId` required: 400 DROP_SIZE_REQUIRED;
    * 404 DROP_SIZE_UNKNOWN), the first of that size's waiting list, while the pieces held or sold in it stay under its
-   * pieces (409 DROP_FULL). Under the drop's row lock. Audited `drop.entry.offer` (with the size).
+   * pieces (409 DROP_FULL). Under the drop's row lock. Audited `drop.entry.offer` (with the size). Macro scope K44 T1, a
+   * set's draw: the first of the waiting list by rank whose sizes all still have a piece left (409 DROP_FULL when none
+   * fits), while the sets held or sold stay under its quantity; `sizeId` optional there, one of its sizes (404
+   * DROP_SIZE_UNKNOWN), narrowing it to the entries in that size. Audited with the entry's sizes.
    */
   async offerNext(dropId: string, actor: Actor, input: { sizeId?: string | null } = {}): Promise<AdminDropEntry> {
     assertStaff(actor, 'offer a place');
@@ -2146,6 +2464,7 @@ export class DropService {
       const d = await this.lock(tx, id);
       if (d.mode === 'LIVE') throw dropLive();
       if (!d.drawn_at) throw dropNotDrawn();
+      if (d.set_id !== null) return this.offerNextSet(tx, d, actor, now, input.sizeId ?? null);
       const size = chosenSize(await drawSizesOf(tx, id), input.sizeId, () => sizeRequired('Choose the size whose place to offer.'));
       if ((await this.heldPieces(tx, id)) >= d.quantity) throw dropFull();
       if (size && (await this.heldPieces(tx, id, size.id)) >= size.stock) throw dropFull();
@@ -2180,6 +2499,41 @@ export class DropService {
   }
 
   // ── internals ────────────────────────────────────────────────────────────
+
+  /** OFFER NEXT in a set's draw (see offerNext), under the drop's row lock; the entry offered. */
+  private async offerNextSet(tx: Db, d: DropRow, actor: Actor, now: Date, sizeId: string | null): Promise<string> {
+    const sizes = await drawSizesOf(tx, d.id);
+    const narrowed = sizeId === null || sizeId === '' ? null : knownId(sizeId, sizeUnknown);
+    if (narrowed !== null && !sizes.some((z) => z.id === narrowed)) throw sizeUnknown();
+    if ((await this.heldPieces(tx, d.id)) >= d.quantity) throw dropFull();
+    const waiting = await tx.selectFrom('drop_entries').select(['id', 'rank', 'account_id']).where('drop_id', '=', d.id).where('status', '=', 'WAITLISTED').orderBy('rank').execute();
+    if (waiting.length === 0) throw waitlistEmpty();
+    const held = await this.heldBySize(tx, d.id);
+    const stock = new Map(sizes.map((z) => [z.id, z.stock]));
+    const theirs = await entrySizeRefs(tx, waiting.map((e) => e.id));
+    const next = waiting.find((e) => {
+      const mine = (theirs.get(e.id) ?? []).map((r) => r.id);
+      if (mine.length === 0 || (narrowed !== null && !mine.includes(narrowed))) return false;
+      return mine.every((z) => (held.get(z) ?? 0) < (stock.get(z) ?? 0));
+    });
+    if (!next) throw narrowed === null || waiting.some((e) => (theirs.get(e.id) ?? []).some((r) => r.id === narrowed)) ? noneFits() : waitlistEmpty();
+    await tx.selectFrom('drop_entries').select('id').where('id', '=', next.id).forUpdate().executeTakeFirstOrThrow();
+    const respondBy = new Date(now.getTime() + d.purchase_window_hours * HOUR_MS);
+    await tx.updateTable('drop_entries').set({ status: 'SELECTED', respond_by: respondBy }).where('id', '=', next.id).where('status', '=', 'WAITLISTED').execute();
+    // Lot M1 step M1.17 (E5): the place offered, emailed with how long it is held.
+    await this.emails?.drawPlaces(tx, 'DRAW_OFFERED', d, [{ id: next.id, accountId: next.account_id }], respondBy);
+    await this.audit.record(
+      {
+        actor,
+        action: 'drop.entry.offer',
+        targetType: 'drop',
+        targetId: d.id,
+        details: { entryId: next.id, rank: next.rank, respondBy: respondBy.toISOString(), sizes: (theirs.get(next.id) ?? []).map((r) => ({ piece: r.piece, sizeId: r.id })) },
+      },
+      tx,
+    );
+    return next.id;
+  }
 
   private async conclude(dropId: string, entryId: string, to: 'CONFIRMED' | 'LAPSED', note: string | null, actor: Actor): Promise<AdminDropEntry> {
     assertStaff(actor, to === 'CONFIRMED' ? 'confirm a sale' : 'lapse a place');
@@ -2231,13 +2585,26 @@ export class DropService {
    */
   private async heldPieces(db: Db, id: string, sizeId?: string): Promise<number> {
     const r = await db
-      .selectFrom('drop_entries')
-      .select((eb) => eb.fn.coalesce(eb.fn.sum<number>('pieces'), sql<number>`0`).as('n'))
-      .where('drop_id', '=', id)
-      .where('status', 'in', ['SELECTED', 'CONFIRMED'])
-      .$if(sizeId !== undefined, (q) => q.where('size_id', '=', sizeId!))
+      .selectFrom('drop_entries as e')
+      .select((eb) => eb.fn.coalesce(eb.fn.sum<number>('e.pieces'), sql<number>`0`).as('n'))
+      .where('e.drop_id', '=', id)
+      .where('e.status', 'in', ['SELECTED', 'CONFIRMED'])
+      // Macro scope K44 T1: an entry of a set's draw holds a piece in each of its sizes.
+      .$if(sizeId !== undefined, (q) => q.where(inSizeOf(sizeId!)))
       .executeTakeFirstOrThrow();
     return Number(r.n);
+  }
+
+  /** The pieces held or sold in each size of a draw (SELECTED, CONFIRMED), by size id: through its size or its sizes per piece. */
+  private async heldBySize(db: Db, id: string): Promise<Map<string, number>> {
+    const r = await sql<{ size_id: string; n: number }>`
+      SELECT c.size_id, coalesce(sum(e.pieces), 0)::int AS n
+        FROM drop_entries e
+        JOIN (SELECT id AS entry_id, size_id FROM drop_entries WHERE drop_id = ${id} AND size_id IS NOT NULL
+              UNION ALL SELECT entry_id, size_id FROM drop_entry_sizes WHERE drop_id = ${id}) c ON c.entry_id = e.id
+       WHERE e.drop_id = ${id} AND e.status IN ('SELECTED', 'CONFIRMED')
+       GROUP BY c.size_id`.execute(db);
+    return new Map(r.rows.map((x) => [x.size_id, Number(x.n)]));
   }
 
   /**
@@ -2289,10 +2656,11 @@ export class DropService {
     return d;
   }
 
+  /** The draws' rows with their model (left joined: a set's draw has none, macro scope K44 T1). */
   private reads(db: Db) {
     return db
       .selectFrom('drops as d')
-      .innerJoin('models as m', 'm.id', 'd.model_id')
+      .leftJoin('models as m', 'm.id', 'd.model_id')
       .leftJoin('collections as c', 'c.id', 'm.collection_id')
       .leftJoin('segments as sg', 'sg.id', 'd.access_segment_id')
       .selectAll('d')
@@ -2309,19 +2677,49 @@ export class DropService {
       ]);
   }
 
-  private card(r: DropReadRow, now: Date): DropCard {
+  /**
+   * The sets of the set's draws among `rows` (macro scope K44 T1), by draw id, with their pieces' collections' names (the
+   * public card's); none for a model's draw.
+   */
+  private async offersOf(db: Db, rows: readonly DropReadRow[]): Promise<{ offers: Map<string, ReleaseOffer>; collections: Map<string, string> }> {
+    const offers = await releaseOffers(db, rows.filter((r) => r.set_id !== null));
+    const ids = [...new Set([...offers.values()].flatMap((o) => o.pieces.map((p) => p.model.collectionId)).filter((x): x is string => x !== null))];
+    const collections = new Map(ids.length ? (await db.selectFrom('collections').select(['id', 'name']).where('id', 'in', ids).execute()).map((c) => [c.id, c.name]) : []);
+    return { offers, collections };
+  }
+
+  private card(r: DropReadRow, now: Date, set?: { offer: ReleaseOffer | undefined; collections: Map<string, string> }): DropCard {
+    const offer = set?.offer;
+    const pieces =
+      offer && offer.kind === 'SET'
+        ? {
+            name: offer.set.name,
+            pieces: offer.pieces.map((p) => ({
+              piece: p.piece!,
+              name: p.model.name,
+              type: p.model.type,
+              collection: p.model.collectionId ? (set!.collections.get(p.model.collectionId) ?? null) : null,
+              imageUrl: p.model.imageUrl,
+              lookbook: p.model.lookbook === 'PUBLIC' && p.model.slug ? p.model.slug : null,
+              variant: p.model.variant,
+            })),
+          }
+        : null;
     return {
       id: r.id,
       title: r.title,
       state: publicState(r, now),
-      model: {
-        name: r.model_name,
-        type: r.model_type,
-        collection: r.collection,
-        imageUrl: mediaUrl(r.model_image),
-        lookbook: r.model_lookbook === 'PUBLIC' && r.model_slug ? r.model_slug : null,
-        variant: r.model_variant,
-      },
+      // A set's draw: the set itself in the model's place, never one of its models (its pieces in `set`).
+      model: pieces
+        ? { name: pieces.name, type: 'SET', collection: null, imageUrl: null, lookbook: null, variant: null }
+        : {
+            name: r.model_name ?? '',
+            type: r.model_type ?? '',
+            collection: r.collection,
+            imageUrl: mediaUrl(r.model_image),
+            lookbook: r.model_lookbook === 'PUBLIC' && r.model_slug ? r.model_slug : null,
+            variant: r.model_variant,
+          },
       quantity: r.quantity,
       opensAt: r.opens_at,
       closesAt: r.closes_at,
@@ -2333,6 +2731,7 @@ export class DropService {
       earlyAccessPlatineOpen: inEarlyAccess(r, now, 2),
       priceMinor: r.price_minor !== null && r.currency !== null ? r.price_minor : null,
       currency: r.price_minor !== null && r.currency !== null ? r.currency : null,
+      ...(pieces ? { set: pieces } : {}),
     };
   }
 
@@ -2387,13 +2786,26 @@ export class DropService {
     creators: Map<string, string>,
     guaranteed: ReleaseGuaranteed | undefined,
     sizes: AdminDrawSize[] | undefined,
+    offer?: ReleaseOffer,
   ): AdminDrop {
+    // Macro scope K44 T1: a set's draw, the set itself in the model's place (its pieces in `set`), never one of its models.
+    const set =
+      offer && offer.kind === 'SET'
+        ? {
+            id: offer.set.id,
+            name: offer.set.name,
+            code: offer.set.code,
+            active: offer.set.active,
+            pieces: offer.pieces.map((p) => ({ piece: p.piece!, model: { id: p.model.id, name: p.model.name, type: p.model.type, active: p.model.active, variant: p.model.variant } })),
+          }
+        : null;
     return {
       id: r.id,
       title: r.title,
       description: r.description,
-      // The draw's views read a model's release (its rows joined to their model); a set's draw reaches them from M3.15.
-      model: { id: modelOfModelRelease(r, 'M3.15'), name: r.model_name, type: r.model_type, active: r.model_active, variant: r.model_variant },
+      model: set
+        ? { id: set.id, name: set.name, type: 'SET', active: set.active, variant: null }
+        : { id: r.model_id!, name: r.model_name ?? '', type: r.model_type ?? '', active: r.model_active ?? false, variant: r.model_variant },
       quantity: r.quantity,
       opensAt: r.opens_at,
       closesAt: r.closes_at,
@@ -2420,6 +2832,7 @@ export class DropService {
       guaranteedEntered: tally?.guaranteedEntered ?? { places: 0, pieces: 0 },
       sizes: sizes ?? [],
       accessSegment: r.access_segment_id ? { id: r.access_segment_id, name: r.segment_name ?? '' } : null,
+      ...(set ? { set } : {}),
     };
   }
 
@@ -2430,7 +2843,8 @@ export class DropService {
     const creators = await this.staffEmails(db, [r.created_by]);
     const guaranteed = await releaseGuaranteed(db, [id]);
     const sizes = await sizeTallies(db, [id]);
-    return this.adminView(r, this.clock(), tallies.get(id), creators, guaranteed.get(id), sizes.get(id));
+    const { offers } = await this.offersOf(db, [r]);
+    return this.adminView(r, this.clock(), tallies.get(id), creators, guaranteed.get(id), sizes.get(id), offers.get(id));
   }
 
   /** The rows of a drop's entries as the console reads them: the account's email, the console user who concluded it. */
@@ -2449,7 +2863,7 @@ export class DropService {
   private async adminEntry(dropId: string, entryId: string): Promise<AdminDropEntry> {
     const r = await this.entryRows(this.db).where('e.id', '=', entryId).where('e.drop_id', '=', dropId).executeTakeFirst();
     if (!r) throw dropEntryNotFound();
-    return (await this.withChoices(dropId, [entryView(r)]))[0]!;
+    return (await this.withChoices(dropId, await withEntrySizes(this.db, [entryView(r)])))[0]!;
   }
 
   /** The rows of an account's entries with their drops (the club's status, ENTER, WITHDRAW and RESERVE). */
@@ -2467,7 +2881,7 @@ export class DropService {
 
   private async accountEntry(accountId: string, entryId: string): Promise<AccountDropEntry> {
     const r = await this.accountEntryRows(this.db).where('e.id', '=', entryId).where('e.account_id', '=', accountId).executeTakeFirstOrThrow();
-    return accountEntryView(r, this.clock());
+    return (await withEntrySizes(this.db, [accountEntryView(r, this.clock())]))[0]!;
   }
 }
 

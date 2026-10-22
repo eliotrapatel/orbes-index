@@ -21,11 +21,13 @@
  *   GET  /api/v1/club/drops/:id/entry       plan NEXT LOT §3.6.F: the account's entry in a draw (or null) and the size
  *                                           YOUR SIZES suggests among its sizes
  *   POST /api/v1/club/drops/:id/enter       ENTER an open drop (the same entry again after a withdrawal), in a size of a
- *                                           draw with sizes ({ sizeId })
+ *                                           draw with sizes ({ sizeId }); a set's draw (K44 T1), a size per piece
+ *                                           ({ sizes: [{ piece, sizeId }] })
  *   POST /api/v1/club/drops/:id/withdraw    WITHDRAW, before the draw
  *   POST /api/v1/club/drops/:id/reserve     P-X02: a place held at once, during the early access, PLATINE and PALLADIUM
- *                                           (in a size of a draw with sizes, { sizeId })
- *   POST /api/v1/club/drops/:id/size        plan NEXT LOT §3.6.F: CHANGE SIZE of an entry, while entries are open
+ *                                           (in a size of a draw with sizes, { sizeId }; a set's: { sizes })
+ *   POST /api/v1/club/drops/:id/size        plan NEXT LOT §3.6.F: CHANGE SIZE of an entry, while entries are open ({ sizeId };
+ *                                           a set's draw: { sizes }, any of its pieces)
  *   PUT  /api/v1/club/drops/:id/addons      plan MACRO M3 §4.2 (D2): ADD TO YOUR ORDER, the catalogue add-ons chosen on
  *                                           a place held ({ items: [{ addonId, units }] }), added at its confirmation
  *
@@ -107,7 +109,7 @@ export const clubRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limi
     const { account } = requireAccount(request);
     const { id } = parse(publicDropParams, request.params);
     const b = parse(dropSizeBody, request.body);
-    return { entry: await drops.enter(account.id, id, accountActor(request), { sizeId: b.sizeId ?? null }) };
+    return { entry: await drops.enter(account.id, id, accountActor(request), { sizeId: b.sizeId ?? null, ...(b.sizes !== undefined ? { sizes: b.sizes } : {}) }) };
   });
 
   // Plan NEXT LOT §3.6.F: CHANGE SIZE of an entry in a draw with sizes, while entries are open.
@@ -115,7 +117,7 @@ export const clubRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limi
     const { account } = requireAccount(request);
     const { id } = parse(publicDropParams, request.params);
     const b = parse(dropChangeSizeBody, request.body);
-    return { entry: await drops.changeSize(account.id, id, { sizeId: b.sizeId }, accountActor(request)) };
+    return { entry: await drops.changeSize(account.id, id, { ...(b.sizeId !== undefined ? { sizeId: b.sizeId } : {}), ...(b.sizes !== undefined ? { sizes: b.sizes } : {}) }, accountActor(request)) };
   });
 
   // Plan MACRO M3 §4.2 (D2): ADD TO YOUR ORDER on a place held; the account's entry and its add-ons back.
@@ -138,7 +140,7 @@ export const clubRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limi
     const { account } = requireAccount(request);
     const { id } = parse(publicDropParams, request.params);
     const b = parse(dropSizeBody, request.body);
-    return { entry: await drops.reserve(account.id, id, accountActor(request), { sizeId: b.sizeId ?? null }) };
+    return { entry: await drops.reserve(account.id, id, accountActor(request), { sizeId: b.sizeId ?? null, ...(b.sizes !== undefined ? { sizes: b.sizes } : {}) }) };
   });
 
   // P-X01: the circle, for an account that holds a piece now; each post from its tier up.

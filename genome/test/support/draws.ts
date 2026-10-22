@@ -26,7 +26,7 @@ import { offeredSizes, SIZE_TYPE_KIND } from '../../src/server/services/sizes.js
 import { ensureSku, ONE_SIZE_LABEL, sizeLabelOf } from '../../src/server/services/stock.js';
 import type { Actor } from '../../src/server/types.js';
 
-export type PoolDrawInput = Omit<CreateDropInput, 'sizes' | 'quantity'> & { quantity: number };
+export type PoolDrawInput = Omit<CreateDropInput, 'sizes' | 'quantity' | 'modelId' | 'setId'> & { modelId: string; quantity: number };
 
 /** A label of one of the model's sizes: its first offered size, else ONE SIZE (a model without a type takes any). */
 export async function oneSizeOf(db: Db, modelId: string): Promise<string> {

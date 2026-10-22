@@ -30,10 +30,12 @@
  *       set sales (services/set-sales.ts `ordersForSetSale`); the SKU of a release's size (services/stock.ts
  *       `linkDropSizes`): its piece's model's; the size YOUR SIZES preselects (services/drops.ts `entryFor`,
  *       services/live-room.ts `savedSizes`): one per piece;
- *     - the draw's and the LIVE RELEASE's own views and settings (services/drops.ts `adminView`, `update`,
- *       services/live-console.ts `settings` and its cards, services/live-room.ts and the collector's draw pages): a set's
- *       release reaches them with its creation (M3.15 for a draw, M3.16 for a LIVE RELEASE); until then they read a
- *       model's release only, through `modelOfModelRelease`, which names the step.
+ *     - the draw's own flows (services/drops.ts, M3.15): created with its set and its sizes per piece, its entries' sizes
+ *       per piece, the fill and OFFER NEXT by every size, its public page's and the console's `set` (the set itself in
+ *       the card's `model`, never one of its models);
+ *     - the LIVE RELEASE's own views and settings (services/live-console.ts `settings` and its cards, services/live-room.ts):
+ *       a set's LIVE RELEASE reaches them with its creation (M3.16); until then they read a model's release only, through
+ *       `modelOfModelRelease`, which names the step.
  */
 import type { Db } from '../db/connection.js';
 import type { SizeKind, SizeType } from '../db/schema.js';
@@ -172,11 +174,11 @@ export function afterRoomModelId(d: { readonly model_id: string | null }): strin
 }
 
 /**
- * The model of a release that a view of the draw's or the LIVE RELEASE's own flows reads (SET-AWARE, see the header):
- * those views read a model's release until a set's release can be made (M3.15 for a draw, M3.16 for a LIVE RELEASE);
- * the rows they read are joined to their model, so a set's release does not reach them, and this says so if one did.
+ * The model of a release that a view of the LIVE RELEASE's own flows reads (SET-AWARE, see the header): those views read
+ * a model's release until a set's LIVE RELEASE can be made (M3.16); the rows they read are joined to their model, so a
+ * set's release does not reach them, and this says so if one did.
  */
-export function modelOfModelRelease(d: { readonly model_id: string | null }, step: 'M3.15' | 'M3.16'): string {
+export function modelOfModelRelease(d: { readonly model_id: string | null }, step: 'M3.16'): string {
   if (d.model_id === null) throw new Error(`This view reads a set's release from ${step} on.`);
   return d.model_id;
 }

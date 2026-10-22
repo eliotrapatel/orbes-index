@@ -72,6 +72,7 @@ import {
   ADDON_WEIGHT_G_MAX,
   PACKED_WEIGHT_G_MAX,
   SET_NAME_MAX,
+  SET_PIECES_MAX,
 } from '../db/schema.js';
 import { BASE_PRICE_MAX_MINOR, CARE_GUIDE_MAX, MODEL_IDENTITY_MESSAGE, VARIANT_LABEL_MAX } from '../services/catalog.js';
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
@@ -396,13 +397,29 @@ export const lookbookParams = z.object({ slug: z.string().max(128) });
 export const publicDropParams = z.object({ id: z.string().max(64) });
 
 /**
- * POST /api/v1/club/drops/:id/enter and /reserve (plan NEXT LOT §3.6.F): the size chosen, one of the draw's (required by
- * the service in a draw with sizes, none in a draw without); the body may be omitted, as before.
+ * Macro scope K44 T1: the sizes an entry of a set's release chooses, one per piece (`piece` 1 to 4, the set's order), each
+ * a size of the release given for that piece; which pieces and sizes, the service's (422 DROP_SET_SIZES).
  */
-export const dropSizeBody = optionalBody({ sizeId: uuid.optional() });
+export const pieceSizes = z
+  .array(z.strictObject({ piece: z.number().int('Must be a whole number').min(1, 'At least 1').max(SET_PIECES_MAX, `At most ${SET_PIECES_MAX}`), sizeId: uuid }))
+  .min(1, 'Choose a size for each piece')
+  .max(SET_PIECES_MAX, `At most ${SET_PIECES_MAX} sizes`);
 
-/** POST /api/v1/club/drops/:id/size (plan NEXT LOT §3.6.F): the entry's new size. */
-export const dropChangeSizeBody = body({ sizeId: uuid });
+/**
+ * POST /api/v1/club/drops/:id/enter and /reserve (plan NEXT LOT §3.6.F): the size chosen, one of the draw's (required by
+ * the service in a draw with sizes, none in a draw without); the body may be omitted, as before. Macro scope K44 T1: on a
+ * set's draw, `sizes`, one per piece, in place of `sizeId` (never both).
+ */
+export const dropSizeBody = optionalBody({ sizeId: uuid.optional(), sizes: pieceSizes.optional() }).refine((b) => b.sizeId === undefined || b.sizes === undefined, {
+  message: 'Send the size, or a size per piece of a set',
+  path: ['sizes'],
+});
+
+/** POST /api/v1/club/drops/:id/size (plan NEXT LOT §3.6.F): the entry's new size; on a set's draw (K44 T1), the new size of any of its pieces. */
+export const dropChangeSizeBody = body({ sizeId: uuid.optional(), sizes: pieceSizes.optional() }).refine((b) => (b.sizeId === undefined) !== (b.sizes === undefined), {
+  message: 'Send the size, or a size per piece of a set',
+  path: ['sizes'],
+});
 
 /**
  * GET /api/v1/club/circle/:id, POST …/rsvp and …/vote (P-X01): a post of the circle. Any string the router passes (≤ 64
@@ -832,8 +849,15 @@ const earlyAccessHours = z
  * the service requires 1 to 24 with pieces and 10 000 pieces at most in all, with worded refusals.
  */
 const drawSizes = z
-  .array(z.strictObject({ label: text(DRAW_SIZES.label), pieces: z.number().int('Must be a whole number of pieces').min(0, 'At least 0 pieces').max(DROP_QUANTITY_MAX, `At most ${DROP_QUANTITY_MAX} pieces`) }))
-  .max(DRAW_SIZES.sent, `At most ${DRAW_SIZES.sent} sizes`);
+  .array(
+    z.strictObject({
+      label: text(DRAW_SIZES.label),
+      pieces: z.number().int('Must be a whole number of pieces').min(0, 'At least 0 pieces').max(DROP_QUANTITY_MAX, `At most ${DROP_QUANTITY_MAX} pieces`),
+      // Macro scope K44 T1: on a set's draw, the piece (1 to 4, the set's order) the size is of; never on a model's.
+      piece: z.number().int('Must be a whole number').min(1, 'At least 1').max(SET_PIECES_MAX, `At most ${SET_PIECES_MAX}`).optional(),
+    }),
+  )
+  .max(DRAW_SIZES.sent * SET_PIECES_MAX, `At most ${DRAW_SIZES.sent * SET_PIECES_MAX} sizes`);
 
 /** NOCTURNE (addition 5): a draw's price in cents, 0 to 1 000 000.00, with its currency. */
 const drawPrice = z.number().int('Must be a whole number of cents').min(0, 'At least 0').max(DRAW_PRICE_MAX_MINOR, `At most ${DRAW_PRICE_MAX_MINOR} cents`);
@@ -848,10 +872,12 @@ const drawPriceTogether = (b: { priceMinor?: number | null; currency?: string | 
  * pieces are given per size.'), how long a place drawn is held (48 hours when omitted) and its early access by tier (P-X02, BP-19 T3: the
  * hours before the opening when PALLADIUM, `earlyAccessHours`, and PLATINE, `earlyAccessPlatineHours`, reserve a place
  * directly; THE PROGRAM's when omitted, 0 for none; PLATINE's never more than PALLADIUM's), and its price with its
- * currency (NOCTURNE, addition 5: optional, both or neither). The description is plain text ('' and null: none).
+ * currency (NOCTURNE, addition 5: optional, both or neither). The description is plain text ('' and null: none). Macro
+ * scope K44 T1: a set's draw, `setId` in place of `modelId` (exactly one), its sizes each with its `piece`.
  */
 export const createDropBody = body({
-  modelId: uuid,
+  modelId: uuid.optional(),
+  setId: uuid.optional(),
   title: dropTitle,
   description: z.preprocess((v) => (v === '' ? null : v), text(DROP_DESCRIPTION_MAX).nullable().optional()),
   quantity: dropQuantity.optional(),
@@ -867,15 +893,17 @@ export const createDropBody = body({
   accessSegmentId: z.preprocess((v) => (v === '' ? null : v), uuid.nullable().optional()),
 })
   .refine((b) => b.closesAt.getTime() > b.opensAt.getTime(), { message: 'Entries close after they open', path: ['closesAt'] })
+  .refine((b) => (b.modelId === undefined) !== (b.setId === undefined), { message: 'Send the model, or the set, the release sells', path: ['modelId'] })
   .refine(drawPriceTogether, { message: 'A price is sent with its currency, or both are cleared (null)', path: ['priceMinor'] });
 
 /**
  * PATCH /api/admin/drops/:id (§16.19): any field while the drop is a DRAFT; once published, `description` only (the
  * service's rule, 409 DROP_PUBLISHED). At least one field; '' and null clear the description; null for both clears the
- * price.
+ * price. Macro scope K44 T1: `setId`, another set for a set's draw (its sizes sent with it).
  */
 export const updateDropBody = body({
   modelId: uuid.optional(),
+  setId: uuid.optional(),
   title: dropTitle.optional(),
   description: z.preprocess((v) => (v === '' ? null : v), text(DROP_DESCRIPTION_MAX).nullable().optional()),
   quantity: dropQuantity.optional(),

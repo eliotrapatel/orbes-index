@@ -2,7 +2,8 @@
  * Drops (P-R03; API §16.19): the console's Club page, its Drops tab.
  *
  *   GET   /api/admin/drops                                  AUDITOR   every drop, the latest created first
- *   POST  /api/admin/drops                                  OPERATOR  a DRAFT, its seed drawn and committed (its price optional)
+ *   POST  /api/admin/drops                                  OPERATOR  a DRAFT, its seed drawn and committed (its price optional);
+ *                                                                     a model's, or (K44 T1) a set's: `setId`, sizes per piece
  *   GET   /api/admin/drops/:id                              AUDITOR   one drop, its entries counted by status
  *   GET   /api/admin/drops/:id/feasibility                  AUDITOR   per size, its pieces against the stock (a draw with sizes)
  *   PATCH /api/admin/drops/:id                              OPERATOR  any field of a DRAFT; the description after
@@ -66,7 +67,8 @@ export const adminDropRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
     const b = parse(createDropBody, request.body);
     const created = await drops.create(
       {
-        modelId: b.modelId,
+        ...(b.modelId !== undefined ? { modelId: b.modelId } : {}),
+        ...(b.setId !== undefined ? { setId: b.setId } : {}),
         title: b.title,
         description: b.description ?? null,
         ...(b.quantity !== undefined ? { quantity: b.quantity } : {}),
@@ -103,6 +105,7 @@ export const adminDropRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
       id,
       {
         ...(b.modelId !== undefined ? { modelId: b.modelId } : {}),
+        ...(b.setId !== undefined ? { setId: b.setId } : {}),
         ...(b.title !== undefined ? { title: b.title } : {}),
         ...(b.description !== undefined ? { description: b.description } : {}),
         ...(b.quantity !== undefined ? { quantity: b.quantity } : {}),
