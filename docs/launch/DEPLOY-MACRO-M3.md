@@ -274,7 +274,7 @@ Une liste qui s'arrête avant `0053_worn` : M2 n'est pas en production, arrête-
 
 ### 1.4 Déployer
 
-Hors des heures de la règle 2. Envoie au responsable de l'hôte une ligne au lancement, par exemple : « MACRO M3 : déploiement lancé à 14:05 Paris (12:05 UTC), image orbes-genome:<TAG_M3>, 4 migrations ; rien ne change sur l'hôte (ni Caddy, ni port, ni variable). Pré-contrôle : <les six résultats>. »
+Hors des heures de la règle 2. Envoie au responsable de l'hôte une ligne au lancement, par exemple : « MACRO M3 : déploiement lancé à 14:05 Paris (13:05 UTC), image orbes-genome:<TAG_M3>, 4 migrations ; rien ne change sur l'hôte (ni Caddy, ni port, ni variable). Pré-contrôle : <les six résultats>. »
 
 Le lancement est gardé (troisième condition) : `pgrep -a pg_dump` ne trouve rien, **puis seulement** `scripts/deploy.sh` démarre. Si une sauvegarde a commencé entre-temps, la commande affiche sa ligne `<numéro> pg_dump …` et ne déploie rien : attends qu'elle finisse, puis relance.
 
@@ -503,8 +503,8 @@ Dans la console, sur ton ordinateur, en ADMIN ; dans l'application, avec ton com
 
 1. **Créé.** `Catalogue` → `Add-ons` → `New add-on` : un de tes vrais compléments, `Name` tel que le client le lit (par exemple POLISHING CLOTH), `Line`, `SKU code` (il ne change plus), `Supplier`, `Weight`, `Price in EUR` (et les autres devises où tu le vends). `Add` : « Add-on added. »
 2. **Compté.** `Logistics` → `Stock`, section `Add-ons`, sa ligne à l'entrepôt de ta commande : `Correct`, « Correct the count », `Pieces` 1, `Why` le compte réel, `Correct` : « Count corrected. » Une seule unité, posée sur ton étagère.
-3. **Ajouté sur ton téléphone.** MY PIECES → YOUR ORDERS, ta commande : ADD AN ADD-ON ouvre la feuille, ton complément avec son prix, `+` jusqu'à 1, TOTAL, puis ADD. La commande lit ADD-ONS avec ton complément, REMOVE à côté, et son TOTAL le compte.
-4. **Dans la console**, la page de la commande, section `Add-ons` : ton complément, `HELD`, ajouté par toi, à l'heure de Paris.
+3. **Ajouté sur ton téléphone.** MY PIECES → ORDERS, ta commande : ADD AN ADD-ON ouvre la feuille, ton complément avec son prix, `+` jusqu'à 1, TOTAL, puis ADD. La commande lit ADD-ONS avec ton complément, REMOVE à côté, et son TOTAL le compte.
+4. **Dans la console**, la page de la commande, section `Add-ons` : ton complément, `HELD`, ajouté par « The collector, in YOUR ORDERS », à l'heure de Paris.
 5. **Sur ton ordinateur**, connecté au même compte : MY PIECES → ORDERS, la page de ta commande, ADD-ONS avec le même complément. **En mode clair, une fois** : YOUR ACCOUNT, LIGHT MODE (sous SOUND), allumé ; la même page se lit sur le fond clair (éteins LIGHT MODE ensuite si tu préfères le sombre).
 6. **Retiré sur ton ordinateur** : REMOVE, puis CLICK AGAIN TO REMOVE. Le complément disparaît de la commande et du TOTAL. Dans la console, la section `Add-ons` de la commande lit `REMOVED`, et `Logistics` → `Stock` rend l'unité disponible. Le complément et son unité restent : ce sont tes vraies données.
 

@@ -34,7 +34,7 @@ import { describe, expect, it } from 'vitest';
 import { MIGRATIONS } from '../../src/server/db/migrate.js';
 import { CARE_CONDITIONS_VERSION } from '../../src/server/render/care-conditions.js';
 import { boxTooSmall } from '../../src/server/services/boxes.js';
-import { ADDON_SKU_TEXT, ADDON_STATUS_LABELS, ADDONS_TEXT, ORDER_ADDONS_TEXT } from '../../src/web/admin/model/addons.js';
+import { ADDON_SKU_TEXT, ADDON_STATUS_LABELS, ADDONS_TEXT, addedByText, ORDER_ADDONS_TEXT } from '../../src/web/admin/model/addons.js';
 import { BOXES_TEXT, boxProblem, boxSourceLine, CARD_RULE, MODEL_PACKING_TEXT, PARCEL_BOX_TEXT } from '../../src/web/admin/model/boxes.js';
 import { dropPhrase } from '../../src/web/admin/model/club.js';
 import { countriesSavedToast, LOCATION_COUNTRIES_TEXT } from '../../src/web/admin/model/location-countries.js';
@@ -247,7 +247,7 @@ describe('the runbook of lot MACRO M3 (docs/launch/DEPLOY-MACRO-M3.md)', () => {
     expect(section(runbook, '### 1.0')).toContain('**Les variables** : aucune nouvelle. Ton `.env` ne change pas.');
     expect(section(runbook, '### 1.2')).toContain('Ton `.env` ne gagne aucune ligne avec ce déploiement : tu n\'y touches pas.');
     // The heads-up at launch and after: nothing changes on the host.
-    expect(section(runbook, '### 1.4')).toContain('« MACRO M3 : déploiement lancé à 14:05 Paris (12:05 UTC), image orbes-genome:<TAG_M3>, 4 migrations ; rien ne change sur l\'hôte');
+    expect(section(runbook, '### 1.4')).toContain('« MACRO M3 : déploiement lancé à 14:05 Paris (13:05 UTC), image orbes-genome:<TAG_M3>, 4 migrations ; rien ne change sur l\'hôte');
     expect(section(runbook, '### 1.6')).toContain("**Préviens le responsable de l'hôte**");
     // The box's figures before and after, the swap line read.
     for (const c of ['free -h', 'docker stats --no-stream', 'uptime', 'nproc', 'df -h /', 'du -sh /var/backups/orbes']) expect(commands.filter((x) => x === c).length, c).toBeGreaterThanOrEqual(2);
@@ -385,13 +385,13 @@ describe('the runbook of lot MACRO M3 (docs/launch/DEPLOY-MACRO-M3.md)', () => {
     expect(checks).toContain(`section ${word(ADDON_SKU_TEXT.group)}, sa ligne à l'entrepôt de ta commande : ${word(STOCK_TEXT.correct)}, ${said(STOCK_TEXT.correctTitle)}, \`Pieces\` 1, \`Why\``);
     expect(readDoc('genome/src/web/admin/views/logistics.ts')).toContain("const deltaField = { name: 'delta', label: 'Pieces'");
     expect(checks).toContain(`${word(STOCK_TEXT.correct)} : ${said(STOCK_TEXT.corrected)}`);
-    // The phone: MY PIECES → YOUR ORDERS, ADD AN ADD-ON, its sheet's TOTAL and ADD; the order's ADD-ONS with REMOVE.
+    // The phone: MY PIECES → ORDERS (its tab), ADD AN ADD-ON, its sheet's TOTAL and ADD; the order's ADD-ONS with REMOVE.
     const addons = ORDERS.addons;
-    expect(checks).toContain(`${PIECES.link} → ${ORDERS.title}, ta commande : ${addons.add} ouvre la feuille`);
+    expect(checks).toContain(`${PIECES.link} → ${PIECES.pageTabs.orders}, ta commande : ${addons.add} ouvre la feuille`);
     expect(checks).toContain(`${addons.total}, puis ${addons.save}. La commande lit ${addons.title} avec ton complément, ${addons.remove} à côté`);
     expect(checks).toContain(`de préférence ${ORDERS.step.RESERVED} (pas encore payée)`);
-    // The console: the order's Add-ons, the unit HELD.
-    expect(checks).toContain(`section ${word(ORDER_ADDONS_TEXT.title)} : ton complément, ${word(ADDON_STATUS_LABELS.HELD)}`);
+    // The console: the order's Add-ons, the unit HELD, added by the collector in the console's words.
+    expect(checks).toContain(`section ${word(ORDER_ADDONS_TEXT.title)} : ton complément, ${word(ADDON_STATUS_LABELS.HELD)}, ajouté par ${said(addedByText({ type: 'COLLECTOR', id: null }, {}))}, à l'heure de Paris.`);
     // The computer: MY PIECES → ORDERS, once in light mode, then REMOVE and CLICK AGAIN TO REMOVE; REMOVED.
     expect(checks).toContain(`${PIECES.link} → ${PIECES.pageTabs.orders}, la page de ta commande, ${addons.title}`);
     expect(checks).toContain(`${ACCOUNT.title}, ${MODE.label} (sous ${SOUND.label}), allumé`);
