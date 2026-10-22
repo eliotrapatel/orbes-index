@@ -23,8 +23,14 @@
  *   the photo      JPEG or WebP, at most 1 MiB, EXIF removed (media/image.ts sanitizeImage; 422 PACKING_PHOTO_INVALID),
  *                  kept on the shipment (never in media_objects, which /api/v1/media serves), replaced until packed;
  *                  audited `order.pack.photo` with its SHA-256 and size; served to the agent and AUDITOR+, no-store.
+ *   the box        (plan MACRO M3 §1.1, B1) the box to use is read on the parcel (services/parcels.ts ParcelPacking);
+ *                  CHANGE BOX while PACKING picks another active box (404 BOX_NOT_FOUND, 409 BOX_SET_ASIDE; 409
+ *                  PACKING_PACKED after), kept on the shipment (`shipments.box_id`). Audited `shipment.box`.
  *   packed         every line ticked, every card scanned, the photo added (422 PACKING_INCOMPLETE): PACKED, the lines'
- *                  keys kept. Audited `order.pack.check`.
+ *                  keys kept, the box line naming the box. With it, in its transaction (B2): the box used (the one
+ *                  chosen, else the suggestion), the parcel's weight (the box's empty weight plus each piece's packed
+ *                  weight) or, when one is missing, what is missing; never blocking. Audited `order.pack.check` with the
+ *                  box and weight, journaled `shipment.pack` (what a Shopify fulfilment will send back, S3).
  *   ship           PACKED (409 ORDER_NOT_PACKED), its address still entered (409 ORDER_ADDRESS_MISSING): every order of the parcel SHIPPED in one transaction with the parcel's
  *                  carrier and tracking number (an active carrier), and, from ORBES staff only, a declared value per
  *                  order in its currency (403 FORBIDDEN from the agent); each piece's warranty started if it has none
@@ -68,6 +74,8 @@ import { conflict, DomainError, forbidden, notFound, validationError } from '../
 import { sanitizeImage } from '../media/image.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
+import { boxNotFound, boxSetAside } from './boxes.js';
+import { writeJournal } from './journal.js';
 import type { ImageUpload } from './media.js';
 import { addressOf, attachPiece, checkStep, lockOrder, ORDER_AMOUNT_MAX_MINOR, orderNotPacked, type CheckedStep, type OrderMail, recordChange, serveWaiting, shippable, step, updateOrder } from './orders.js';
 import {
@@ -75,7 +83,10 @@ import {
   onItsWay,
   openOrders,
   openShipment,
+  packingBox,
+  packingSuggestion,
   PACKING_PHOTO_MAX_BYTES,
+  parcelWeight,
   parcelKeyOf,
   parcelOrders,
   parcelReady,
@@ -790,17 +801,64 @@ export class LogisticsService {
       const items = await tx.selectFrom('shipment_items').selectAll().where('shipment_id', '=', shipment.id).execute();
       const members = await this.itemOrders(tx, shipment, all);
       const scanned = new Set(items.filter((i) => i.product_id !== null).map((i) => i.order_id));
-      const lines = checklistOf(members, ticked, scanned);
+      // Plan MACRO M3 §1.1: the box used and the parcel's weight, written with PACKED (a missing weight never blocks).
+      const suggestion = await packingSuggestion(tx, members);
+      const { box } = await packingBox(tx, shipment, suggestion);
+      const weight = parcelWeight(box, suggestion);
+      const lines = checklistOf(members, ticked, scanned, box);
       if (lines.some((l) => !l.ticked) || shipment.photo === null) throw packingIncomplete();
       const now = this.clock();
+      const packedAt = now < shipment.packing_started_at ? shipment.packing_started_at : now;
+      const weightMissing = weight.missing.length > 0 ? weight.missing : null;
       await tx
         .updateTable('shipments')
-        .set({ status: 'PACKED', packed_at: now < shipment.packing_started_at ? shipment.packing_started_at : now, packed_by: actor.id!, checklist: jsonText(lines.map((l) => ({ key: l.key, label: l.label }))) })
+        .set({
+          status: 'PACKED',
+          packed_at: packedAt,
+          packed_by: actor.id!,
+          checklist: jsonText(lines.map((l) => ({ key: l.key, label: l.label }))),
+          box_id: box?.id ?? null,
+          weight_g: weight.weightG,
+          weight_missing: weightMissing,
+        })
         .where('id', '=', shipment.id)
         .execute();
+      const packed = { boxId: box?.id ?? null, weightG: weight.weightG, weightMissing };
+      await writeJournal(
+        tx,
+        [{ type: 'shipment.pack', entityType: 'shipment', entityId: shipment.id, payload: { id: shipment.id, orderId: key, orderIds: members.map((o) => o.id), ...packed, packedAt: packedAt.toISOString() } }],
+        now,
+      );
       const notes: AuditRecordInput[] = [];
-      for (const o of members) notes.push(await recordChange(tx, o, o, 'order.pack.check', { details: { shipmentId: shipment.id, keys: lines.map((l) => l.key) } }, actor, now));
+      for (const o of members) notes.push(await recordChange(tx, o, o, 'order.pack.check', { details: { shipmentId: shipment.id, keys: lines.map((l) => l.key), ...packed } }, actor, now));
       for (const n of notes) await this.audit.record(n, tx);
+    });
+    return this.parcel(key, scope);
+  }
+
+  /**
+   * CHANGE BOX (plan MACRO M3 §1.1, B1): the box the parcel is packed in, while PACKING (409 PACKING_NOT_STARTED before,
+   * 409 PACKING_PACKED after): an active box (404 BOX_NOT_FOUND, 409 BOX_SET_ASIDE), kept on the shipment and written
+   * with PACKED. The agent or ORBES. Audited `shipment.box` with the parcel and the box before and after; the same box
+   * again writes nothing.
+   */
+  async chooseBox(orderId: string, input: { boxId: string }, actor: Actor, scope: LocationScope): Promise<ShippingOrderView> {
+    assertStaff(actor);
+    const key = await this.parcelKey(orderId);
+    if (typeof input?.boxId !== 'string' || !UUID_RE.test(input.boxId)) throw boxNotFound();
+    const boxId = input.boxId.toLowerCase();
+    await inTransaction(this.db, async (tx) => {
+      const all = await parcelOrders(tx, key, { forUpdate: true });
+      const shipment = await openShipment(tx, key, { forUpdate: true });
+      this.assertParcelScope(all, shipment, scope);
+      if (!shipment) throw packingNotStarted();
+      if (shipment.status !== 'PACKING') throw packingPacked();
+      const box = await tx.selectFrom('boxes').select(['id', 'active']).where('id', '=', boxId).forShare().executeTakeFirst();
+      if (!box) throw boxNotFound();
+      if (!box.active) throw boxSetAside();
+      if (shipment.box_id === box.id) return;
+      await tx.updateTable('shipments').set({ box_id: box.id }).where('id', '=', shipment.id).execute();
+      await this.audit.record({ actor, action: 'shipment.box', targetType: 'shipment', targetId: shipment.id, details: { parcel: key, from: shipment.box_id, to: box.id } }, tx);
     });
     return this.parcel(key, scope);
   }

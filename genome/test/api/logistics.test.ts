@@ -261,6 +261,62 @@ describe('Logistics over HTTP (plan NEXT LOT §3.5.6.9)', () => {
       }
     });
   });
+  describe('the box and the weight (plan MACRO M3 §1.1, B1 and B2)', () => {
+    it('lets an OPERATOR give a model its box and packed weight, the agent read the parcel\'s box and weight without a cost and CHANGE BOX while packing; written at PACKED', async () => {
+      const catalog = await seedCatalog(h.ctx);
+      const sku = await h.ctx.db.transaction().execute((tx) => ensureSku(tx, catalog.modelId, '54'));
+      const ops = { type: 'admin' as const, id: (await createAdmin(h.ctx, 'OPERATOR')).id };
+      const cube = safeJson(await admin.post('/api/admin/boxes', { name: 'HTTP CUBE', insideLengthMm: 100, insideWidthMm: 70, insideHeightMm: 40, emptyWeightG: 120, costMinor: 85, currency: 'EUR' })) as Json;
+      const flat = safeJson(await admin.post('/api/admin/boxes', { name: 'HTTP FLAT', insideLengthMm: 160, insideWidthMm: 110, insideHeightMm: 20, emptyWeightG: 90 })) as Json;
+      // The model's packing: an OPERATOR's, never an AUDITOR's nor the agent's.
+      const url = `/api/admin/models/${catalog.modelId}/packing`;
+      expect(errorOf(await auditor.request('PUT', url, { body: { boxId: cube.id, packedWeightG: 85 } })).code).toBe('FORBIDDEN');
+      expect(errorOf(await agent.request('PUT', url, { body: { boxId: cube.id, packedWeightG: 85 } })).code).toBe('FORBIDDEN');
+      expect(errorOf(await operator.request('PUT', url, { body: { boxId: cube.id } })).code).toBe('VALIDATION_FAILED');
+      expect(errorOf(await operator.request('PUT', url, { body: { boxId: cube.id, packedWeightG: 30_001 } })).code).toBe('VALIDATION_FAILED');
+      const set = await operator.request('PUT', url, { body: { boxId: cube.id, packedWeightG: 85 } });
+      expect(set.statusCode, set.body).toBe(200);
+      expect((safeJson(set) as Json).packing).toEqual({
+        box: { id: cube.id, name: 'HTTP CUBE', insideLengthMm: 100, insideWidthMm: 70, insideHeightMm: 40, emptyWeightG: 120, active: true },
+        packedWeightG: 85,
+        inherited: null,
+      });
+      // A parcel at the agent's location.
+      const account = await createAccount(h.t.db);
+      const request = await h.t.db.insertInto('shop_requests').values({ account_id: account.id, model_id: catalog.modelId, created_at: h.clock.now() }).returning('id').executeTakeFirstOrThrow();
+      await h.ctx.services.salon.close(request.id, { note: 'Accepted.', outcome: 'ACCEPTED' }, ops);
+      const id = (await h.t.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
+      await h.ctx.services.orders.setTerms(id, { sizeLabel: '54', priceMinor: 420_000, currency: 'EUR' }, ops);
+      await h.ctx.services.orders.changeLocation(id, logistics, ops);
+      h.clock.advance(60_000);
+      await h.ctx.services.orders.transition(id, { to: 'PAID' }, ops);
+      const [piece] = await stockPieces(h.ctx, { skuId: sku, locationId: logistics, count: 1, forOrderIds: [id] }, ops);
+      await h.ctx.services.orders.setBuyer(id, { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris', country: 'FR' }, ops);
+      const box = `/api/admin/logistics/orders/${id}/packing/box`;
+      expect(errorOf(await agent.post(box, { boxId: flat.id })).code).toBe('PACKING_NOT_STARTED');
+      const started = safeJson(await agent.post(`/api/admin/logistics/orders/${id}/packing`)) as Json;
+      expect(started.packing).toMatchObject({ box: { id: cube.id, name: 'HTTP CUBE' }, boxSource: 'MODELS', weightG: 205, missing: [], recorded: false });
+      expect(started.packing.boxes.map((b: Json) => b.name)).toEqual(expect.arrayContaining(['HTTP CUBE', 'HTTP FLAT']));
+      for (const word of ['cost', 'currency', 'Minor', 'price']) expect(JSON.stringify(started)).not.toContain(word);
+      expect(errorOf(await auditor.post(box, { boxId: flat.id })).code).toBe('FORBIDDEN');
+      expect(errorOf(await agent.post(box, { boxId: 'nope' })).code).toBe('VALIDATION_FAILED');
+      expect(errorOf(await agent.post(box, { boxId: randomUUID() })).code).toBe('BOX_NOT_FOUND');
+      const chosen = await agent.post(box, { boxId: flat.id });
+      expect(chosen.statusCode, chosen.body).toBe(200);
+      expect((safeJson(chosen) as Json).packing).toMatchObject({ box: { id: flat.id }, boxSource: 'CHOSEN', weightG: 175 });
+      expect((safeJson(chosen) as Json).checklist.find((l: Json) => l.key === 'box').label).toBe('The box: HTTP FLAT, and the pouch');
+      // Packed: the box and weight written.
+      expect((await agent.post(`/api/admin/logistics/orders/${id}/packing/scan`, { code: piece!.data })).statusCode).toBe(200);
+      const put = await agent.request('PUT', `/api/admin/logistics/orders/${id}/packing/photo`, { body: Buffer.from(jpegPhoto(16, 12)), headers: { 'content-type': 'image/jpeg' } });
+      const keys = (safeJson(put) as Json).checklist.filter((l: Json) => !l.byScan).map((l: Json) => l.key);
+      const packed = safeJson(await agent.post(`/api/admin/logistics/orders/${id}/packing/check`, { ticked: keys })) as Json;
+      expect(packed).toMatchObject({ step: 'PACKED', packing: { box: { id: flat.id, name: 'HTTP FLAT' }, weightG: 175, recorded: true } });
+      expect(errorOf(await agent.post(box, { boxId: cube.id })).code).toBe('PACKING_PACKED');
+      // The model keeps its box: an ADMIN cannot set it aside while the model is active.
+      expect(errorOf(await admin.post(`/api/admin/boxes/${cube.id}/set-aside`)).code).toBe('BOX_IN_USE');
+    });
+  });
+
   describe('the order cases (step 5.10)', () => {
     it('lets the agent report a parcel back to sender and record it; an AUDITOR reads it without any of its notes; an OPERATOR decides it, no-store; Client Services opens a return', async () => {
       const catalog = await seedCatalog(h.ctx);

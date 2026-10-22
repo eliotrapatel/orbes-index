@@ -80,12 +80,13 @@
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
-import { LOOKBOOK_STATES, SIZE_TYPES, type LookbookState, type SizeType } from '../db/schema.js';
+import { LOOKBOOK_STATES, PACKED_WEIGHT_G_MAX, SIZE_TYPES, type LookbookState, type SizeType } from '../db/schema.js';
 import { conflict, notFound, validationError } from '../errors.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import type { CategoryRegistry } from './categories.js';
 import { normalizeMinTier, normalizePriceLabel, normalizeSlug, normalizeSpecs, normalizeStory, pairsFallbackOf, plainText, storyFingerprint } from './lookbook.js';
+import { boxNotFound, boxRefs, boxSetAside, type BoxRef } from './boxes.js';
 import { mediaUrl } from './media.js';
 import { ORDER_AMOUNT_MAX_MINOR, ORDER_CURRENCIES } from './orders.js';
 import { LISTED_SIZE_TYPES, SIZE_TYPE_KIND } from './sizes.js';
@@ -175,6 +176,12 @@ export interface ModelRecord {
   variantSwatch: string | null;
   /** N1: a main model's variants, in the order they were added; none for a variant, nor for a model alone. */
   variants: ModelVariantRecord[];
+  /**
+   * Plan MACRO M3 §1.2 (B1, B2): the box its pieces are packed in and their packed weight (the piece as it is packed,
+   * with its pouch and card, without the box), as packing reads them: its own, else for a variant its main model's.
+   * `inherited`: on a variant, which of the two come from its main model (named); null on a model alone or a main model.
+   */
+  packing: ModelPacking;
   /** Plan NEXT LOT §3.3: its size type (null: to give), and how many of its declared sizes are offered. */
   sizeType: SizeType | null;
   sizesOffered: number;
@@ -213,6 +220,13 @@ export type ModelPairShown = (typeof MODEL_PAIR_SHOWN)[number];
 
 /** PAIRS WELL WITH (BP-34): a model picks none, or two or three models. */
 export const MODEL_PAIRS_MAX = 3;
+
+/** A model's box and packed weight (plan MACRO M3 §1.2), as its page and the Catalogue read them. */
+export interface ModelPacking {
+  box: BoxRef | null;
+  packedWeightG: number | null;
+  inherited: { from: { id: string; name: string }; box: boolean; packedWeightG: boolean } | null;
+}
 
 /** A variant of a model as its main model's page lists it (VARIANTS). */
 export interface ModelVariantRecord {
@@ -457,7 +471,8 @@ export class CatalogService {
   async listModels(): Promise<ModelRecord[]> {
     const rows = await this.modelQuery().orderBy('c.code').orderBy('m.name').execute();
     const galleries = await this.galleries();
-    return rows.map((r) => toModelRecord(r, galleries.get(r.id) ?? [], rows));
+    const boxes = await boxRefs(this.db, rows.map((r) => r.box_id));
+    return rows.map((r) => toModelRecord(r, galleries.get(r.id) ?? [], rows, boxes));
   }
 
   async getModel(modelId: string): Promise<ModelRecord> {
@@ -474,8 +489,9 @@ export class CatalogService {
     const root = mainId ?? id;
     const rootCollection = mainId ? (related.find((r) => r.id === mainId)?.collection_id ?? null) : row.collection_id;
     const [pairs, fallback] = await Promise.all([this.pairRecords(root), pairsFallbackOf(this.db, root, rootCollection, 3)]);
+    const boxes = await boxRefs(this.db, [row.box_id, ...related.map((r) => r.box_id)]);
     return {
-      ...toModelRecord(row, (await this.galleries(id)).get(id) ?? [], related),
+      ...toModelRecord(row, (await this.galleries(id)).get(id) ?? [], related, boxes),
       pairs,
       pairsFallback: fallback.map((f) => ({ name: f.name, label: f.variant })),
     };
@@ -1027,6 +1043,42 @@ export class CatalogService {
   }
 
   /**
+   * A model's packing (PUT /api/admin/models/:id/packing, OPERATOR; plan MACRO M3 §1.2, B1 and B2): its box (`boxId`, an
+   * active box: 404 BOX_NOT_FOUND, 409 BOX_SET_ASIDE; null: none, or on a variant its main model's) and its packed
+   * weight (`packedWeightG`, whole grams 1 to 30 000; null: unknown, or on a variant its main model's); a field absent is
+   * left as it is. A box set aside that the model already names may stay. Under the model's row (FOR NO KEY UPDATE) and
+   * the box's (FOR SHARE: a box is set aside under FOR UPDATE, so it is never given while it is set aside). Audited
+   * `model.packing` with the box and the weight before and after; nothing changed, nothing written.
+   */
+  async setModelPacking(modelId: string, input: { boxId?: string | null; packedWeightG?: number | null }, actor: Actor): Promise<ModelRecord> {
+    const id = modelKey(modelId);
+    const boxId = input?.boxId === undefined ? undefined : input.boxId === null ? null : typeof input.boxId === 'string' && UUID_RE.test(input.boxId) ? input.boxId.toLowerCase() : undefined;
+    if (input?.boxId !== undefined && input.boxId !== null && boxId === undefined) throw boxNotFound();
+    const weight = input?.packedWeightG;
+    if (weight !== undefined && weight !== null && (typeof weight !== 'number' || !Number.isInteger(weight) || weight < 1 || weight > PACKED_WEIGHT_G_MAX)) {
+      throw validationError(`The packed weight is a whole number of grams, 1 to ${PACKED_WEIGHT_G_MAX.toLocaleString('en-US')}.`);
+    }
+    if (boxId === undefined && weight === undefined) throw validationError('Nothing to change.');
+    await inTransaction(this.db, async (tx) => {
+      const row = await tx.selectFrom('models').select(['box_id', 'packed_weight_g']).where('id', '=', id).forNoKeyUpdate().executeTakeFirst();
+      if (!row) throw notFound('Model', 'MODEL_NOT_FOUND');
+      const after = { boxId: boxId === undefined ? row.box_id : boxId, packedWeightG: weight === undefined ? row.packed_weight_g : weight };
+      if (after.boxId === row.box_id && after.packedWeightG === row.packed_weight_g) return;
+      if (after.boxId !== null && after.boxId !== row.box_id) {
+        const box = await tx.selectFrom('boxes').select('active').where('id', '=', after.boxId).forShare().executeTakeFirst();
+        if (!box) throw boxNotFound();
+        if (!box.active) throw boxSetAside();
+      }
+      await tx.updateTable('models').set({ box_id: after.boxId, packed_weight_g: after.packedWeightG }).where('id', '=', id).execute();
+      await this.audit.record(
+        { actor, action: 'model.packing', targetType: 'model', targetId: id, details: { before: { boxId: row.box_id, packedWeightG: row.packed_weight_g }, after } },
+        tx,
+      );
+    });
+    return this.getModel(id);
+  }
+
+  /**
    * Discontinue a model (POST /api/admin/models/:id/discontinue, ADMIN; P-R06): `discontinued_at` now, its author
    * (null for a script), and `active = false`, in one transaction. Its pieces verify as before, said DISCONTINUED with
    * the year; no new piece is issued with it (409 MODEL_INACTIVE). Audited `model.discontinue` with whether it was
@@ -1126,6 +1178,8 @@ export class CatalogService {
         'm.variant_label',
         'm.variant_swatch',
         'm.size_type',
+        'm.box_id',
+        'm.packed_weight_g',
         'm.created_at',
         'c.id as category_index',
         'c.code as category_code',
@@ -1268,6 +1322,8 @@ type ModelQueryRow = {
   sku_count: number | string | null;
   variants_linked: number | string | null;
   size_type: SizeType | null;
+  box_id: string | null;
+  packed_weight_g: number | null;
   sizes_offered: number | string | null;
   created_at: Date;
   category_index: number;
@@ -1295,8 +1351,23 @@ function toVariantRecord(r: ModelQueryRow): ModelVariantRecord {
   };
 }
 
-/** A model's record; `others` hold its main model and its variants (N1), when it has them. */
-function toModelRecord(r: ModelQueryRow, gallery: GalleryImageRecord[], others: readonly ModelQueryRow[]): ModelRecord {
+/**
+ * A model's packing (plan MACRO M3 §1.2): its own box and weight, else its main model's (`main`, a variant's); the boxes
+ * named, by id.
+ */
+function packingOf(r: Pick<ModelQueryRow, 'box_id' | 'packed_weight_g'>, main: Pick<ModelQueryRow, 'id' | 'name' | 'box_id' | 'packed_weight_g'> | undefined, boxes: ReadonlyMap<string, BoxRef>): ModelPacking {
+  const boxId = r.box_id ?? main?.box_id ?? null;
+  const inheritsBox = r.box_id === null && (main?.box_id ?? null) !== null;
+  const inheritsWeight = r.packed_weight_g === null && (main?.packed_weight_g ?? null) !== null;
+  return {
+    box: boxId ? (boxes.get(boxId) ?? null) : null,
+    packedWeightG: r.packed_weight_g ?? main?.packed_weight_g ?? null,
+    inherited: main ? { from: { id: main.id, name: main.name }, box: inheritsBox, packedWeightG: inheritsWeight } : null,
+  };
+}
+
+/** A model's record; `others` hold its main model and its variants (N1), when it has them; `boxes` the boxes they name. */
+function toModelRecord(r: ModelQueryRow, gallery: GalleryImageRecord[], others: readonly ModelQueryRow[], boxes: ReadonlyMap<string, BoxRef>): ModelRecord {
   const main = r.variant_of ? others.find((o) => o.id === r.variant_of) : undefined;
   const variants = others
     .filter((o) => o.variant_of === r.id)
@@ -1333,6 +1404,7 @@ function toModelRecord(r: ModelQueryRow, gallery: GalleryImageRecord[], others: 
     variantLabel: r.variant_label,
     variantSwatch: r.variant_swatch,
     variants,
+    packing: packingOf(r, main, boxes),
     sizeType: r.size_type,
     sizesOffered: Number(r.sizes_offered ?? 0),
     createdAt: r.created_at,

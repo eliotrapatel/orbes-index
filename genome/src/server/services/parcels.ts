@@ -16,8 +16,10 @@
  *                 surprise, the piece its scan bound), where it ships (the first order's delivery address: name, lines,
  *                 country and phone, §3.6.B; ADDRESS CHANGED while it was replaced after it was first entered and the
  *                 parcel has not shipped), the checklist, the shipment, its history (who
- *                 by their role only) and the active carriers for Ship. No price, no email, no account, no release: what
- *                 the agent may read, which also prints its packing slip.
+ *                 by their role only) and the active carriers for Ship; since plan MACRO M3 §1.1 (B1, B2) the box to use
+ *                 and the parcel's weight (`packing`: ParcelPacking, never a cost), the checklist's box line naming the
+ *                 box. No price, no email, no account, no release: what the agent may read, which also prints its packing
+ *                 slip (with the box and the weight).
  *   housekeeping  `purgePackingPhotos`: a parcel's photo erased 14 days after its delivery (RETURN_WINDOW_DAYS), unless a
  *                 return or an exchange of its orders is still open (it is erased once that case is closed or
  *                 cancelled); a parcel never delivered, 14 days after its parcel problem was decided or cancelled, or
@@ -25,7 +27,8 @@
  */
 import { sql } from 'kysely';
 import type { Db } from '../db/connection.js';
-import type { AdminRole, JsonObject, OrderRow, ShipmentRow, ShipmentStatus } from '../db/schema.js';
+import { SHIPMENT_WEIGHT_G_MAX, SHIPMENT_WEIGHT_MISSING_MAX, type AdminRole, type JsonObject, type OrderRow, type ShipmentRow, type ShipmentStatus } from '../db/schema.js';
+import { activeBoxes, boxRefs, insideVolume, modelPackings, type BoxRef } from './boxes.js';
 import { readySince, ORDER_ALERT_DEFAULTS } from './fulfilment.js';
 import { writeJournal } from './journal.js';
 import { orderReference, trackingLink } from './orders.js';
@@ -95,6 +98,34 @@ export interface ChecklistLine {
   ticked: boolean;
 }
 
+/** Where the box a parcel uses comes from (plan MACRO M3 §1.1). */
+export type ParcelBoxSource = 'MODELS' | 'LARGEST' | 'CHOSEN';
+
+/**
+ * A parcel's box and weight (plan MACRO M3 §1.1, B1 and B2), as the packing page and the slip read them: never a cost.
+ *
+ *   box         the box to use: chosen while packing (CHANGE BOX, `CHOSEN`), else every piece's box when they share one
+ *               (`MODELS`), else the largest of the pieces' boxes by inside volume (`LARGEST`: « for N pieces: check the
+ *               fit »), else none. Once PACKED, the box written on the shipment.
+ *   weightG     the box's empty weight plus every piece's packed weight; null while something is missing (`missing`:
+ *               the words of each model without a packed weight, and « box » without a box). Once PACKED, as written.
+ *   recorded    PACKED or after: the box and the weight are those written on the shipment at PACKED (a parcel packed
+ *               before boxes existed has neither).
+ *   boxes       the active boxes CHANGE BOX offers (while PACKING).
+ */
+export interface ParcelPacking {
+  box: BoxRef | null;
+  boxSource: ParcelBoxSource | null;
+  /** The pieces in the parcel. */
+  pieces: number;
+  /** The words of each model of the parcel that has no box (« No box is set for MONOLITHE · Steel: choose one »). */
+  modelsWithoutBox: string[];
+  weightG: number | null;
+  missing: string[];
+  recorded: boolean;
+  boxes: BoxRef[];
+}
+
 /** A parcel as the agent and ORBES read it (GET /api/admin/logistics/orders/:id). No price, email, account nor release. */
 export interface ShippingOrderView {
   /** The parcel's key: its first order. */
@@ -123,6 +154,8 @@ export interface ShippingOrderView {
     trackingNumber: string | null;
     trackingUrl: string | null;
   } | null;
+  /** Plan MACRO M3 §1.1: the box to use and the parcel's weight (none of a cost). */
+  packing: ParcelPacking;
   checklist: ChecklistLine[];
   history: { action: string; at: Date; by: ParcelActor; order: string }[];
   /** The active carriers, for Ship (the agent never reads the carriers' route). */
@@ -226,8 +259,17 @@ export async function parcelTiming(db: Db, open: readonly OrderRow[], now: Date,
   return { readySince: readySinceAt, late: now.getTime() > readySinceAt.getTime() + delay * DAY_MS };
 }
 
-/** The checklist a parcel's orders expect (question 12 as built: one card line per piece). */
-export function checklistOf(orders: readonly Pick<OrderRow, 'id' | 'addons' | 'engraving_text'>[], ticked: ReadonlySet<string>, scanned: ReadonlySet<string>): ChecklistLine[] {
+/**
+ * The checklist a parcel's orders expect (question 12 as built: one card line per piece). Its box line names the box to
+ * use (plan MACRO M3 §1.1: « The box: CUBE 80, and the pouch »), « The box and the pouch » without one; its key stays
+ * `box`, so a parcel packed before keeps its stored line.
+ */
+export function checklistOf(
+  orders: readonly Pick<OrderRow, 'id' | 'addons' | 'engraving_text'>[],
+  ticked: ReadonlySet<string>,
+  scanned: ReadonlySet<string>,
+  box: { name: string } | null = null,
+): ChecklistLine[] {
   const many = orders.length > 1;
   const lines: ChecklistLine[] = [];
   orders.forEach((o, i) => {
@@ -235,12 +277,105 @@ export function checklistOf(orders: readonly Pick<OrderRow, 'id' | 'addons' | 'e
     lines.push({ key: `piece:${o.id}`, label: `The right piece: its card scanned${which}`, byScan: true, ticked: scanned.has(o.id) });
     lines.push({ key: `card:${o.id}`, label: `The card, its claim code visible${which}`, byScan: false, ticked: ticked.has(`card:${o.id}`) });
   });
-  lines.push({ key: 'box', label: 'The box and the pouch', byScan: false, ticked: ticked.has('box') });
+  lines.push({ key: 'box', label: box ? `The box: ${box.name}, and the pouch` : 'The box and the pouch', byScan: false, ticked: ticked.has('box') });
   for (const o of orders) {
     o.addons.forEach((a, j) => lines.push({ key: `addon:${o.id}:${j}`, label: `Add-on: ${a.label}`, byScan: false, ticked: ticked.has(`addon:${o.id}:${j}`) }));
     if (o.engraving_text !== null) lines.push({ key: `engraving:${o.id}`, label: `Engraving done: "${o.engraving_text}"`, byScan: false, ticked: ticked.has(`engraving:${o.id}`) });
   }
   return lines;
+}
+
+/** The box and weight a parcel's pieces call for, before any choice (see ParcelPacking). */
+export interface PackingSuggestion {
+  box: BoxRef | null;
+  source: 'MODELS' | 'LARGEST' | null;
+  modelsWithoutBox: string[];
+  /** Each piece's packed weight, by order id (null: unknown). */
+  weights: Map<string, number | null>;
+  /** The words of each model without a packed weight. */
+  modelsWithoutWeight: string[];
+}
+
+/**
+ * The box and weights a parcel's orders call for (plan MACRO M3 §1.1): each piece's model's box and packed weight, its
+ * own else its main model's (services/boxes.ts modelPackings); a box set aside counts as none. Read in `db` (the packing
+ * transaction at PACKED).
+ */
+export async function packingSuggestion(db: Db, orders: readonly Pick<OrderRow, 'id' | 'model_id'>[]): Promise<PackingSuggestion> {
+  const packings = await modelPackings(db, orders.map((o) => o.model_id));
+  const boxes = await boxRefs(db, [...packings.values()].map((p) => p.boxId));
+  const usable = (id: string | null): BoxRef | null => {
+    const box = id ? boxes.get(id) : undefined;
+    return box?.active ? box : null;
+  };
+  const withoutBox = new Set<string>();
+  const withoutWeight = new Set<string>();
+  const chosen = new Map<string, BoxRef>();
+  const weights = new Map<string, number | null>();
+  for (const o of orders) {
+    const p = packings.get(o.model_id);
+    const box = usable(p?.boxId ?? null);
+    if (box) chosen.set(box.id, box);
+    else withoutBox.add(p?.words ?? 'A model');
+    weights.set(o.id, p?.packedWeightG ?? null);
+    if ((p?.packedWeightG ?? null) === null) withoutWeight.add(p?.words ?? 'A model');
+  }
+  const candidates = [...chosen.values()];
+  const largest = candidates.sort((a, b) => insideVolume(b) - insideVolume(a) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id))[0] ?? null;
+  return {
+    box: largest,
+    source: candidates.length === 0 ? null : candidates.length === 1 ? 'MODELS' : 'LARGEST',
+    modelsWithoutBox: [...withoutBox],
+    weights,
+    modelsWithoutWeight: [...withoutWeight],
+  };
+}
+
+/**
+ * A parcel's weight (plan MACRO M3 §1.1): the box's empty weight plus each piece's packed weight; unknown (null) while a
+ * piece has no packed weight or no box is set, with what is missing (each model's words, « box »), never blocking packing.
+ * A sum above what a shipment holds (100 000 g) is unknown too.
+ */
+export function parcelWeight(box: BoxRef | null, s: Pick<PackingSuggestion, 'weights' | 'modelsWithoutWeight'>): { weightG: number | null; missing: string[] } {
+  const missing = [...s.modelsWithoutWeight, ...(box ? [] : ['box'])].slice(0, SHIPMENT_WEIGHT_MISSING_MAX);
+  if (missing.length > 0) return { weightG: null, missing };
+  const total = box!.emptyWeightG + [...s.weights.values()].reduce<number>((sum, w) => sum + (w ?? 0), 0);
+  return total > SHIPMENT_WEIGHT_G_MAX ? { weightG: null, missing: [`over ${SHIPMENT_WEIGHT_G_MAX} g`] } : { weightG: total, missing: [] };
+}
+
+/**
+ * The box to use for a parcel being packed (see ParcelPacking): the one chosen on its shipment (CHANGE BOX), else the
+ * suggestion. Read in `db`.
+ */
+export async function packingBox(db: Db, shipment: Pick<ShipmentRow, 'box_id'> | undefined, s: PackingSuggestion): Promise<{ box: BoxRef | null; source: ParcelBoxSource | null }> {
+  if (shipment?.box_id) {
+    const box = (await boxRefs(db, [shipment.box_id])).get(shipment.box_id) ?? null;
+    if (box) return { box, source: s.box?.id === box.id ? s.source : 'CHOSEN' };
+  }
+  return { box: s.box, source: s.source };
+}
+
+/** A parcel's packing as its view reads it (see ParcelPacking). */
+async function parcelPacking(db: Db, members: readonly OrderRow[], shipment: ShipmentRow | undefined): Promise<ParcelPacking> {
+  const s = await packingSuggestion(db, members);
+  const recorded = shipment !== undefined && shipment.packed_at !== null;
+  const boxes = shipment === undefined || shipment.status === 'PACKING' ? await activeBoxes(db) : [];
+  if (recorded) {
+    const box = shipment.box_id ? ((await boxRefs(db, [shipment.box_id])).get(shipment.box_id) ?? null) : null;
+    return {
+      box,
+      boxSource: box === null ? null : s.box?.id === box.id ? s.source : 'CHOSEN',
+      pieces: members.length,
+      modelsWithoutBox: s.modelsWithoutBox,
+      weightG: shipment.weight_g,
+      missing: shipment.weight_missing ?? [],
+      recorded: true,
+      boxes,
+    };
+  }
+  const { box, source } = await packingBox(db, shipment, s);
+  const weight = parcelWeight(box, s);
+  return { box, boxSource: source, pieces: members.length, modelsWithoutBox: s.modelsWithoutBox, weightG: weight.weightG, missing: weight.missing, recorded: false, boxes };
 }
 
 /** Who a change was made by, as a parcel's history says it: a role, never a name. */
@@ -311,6 +446,10 @@ export async function parcelView(db: Db, orderId: string, scope: LocationScope, 
   const timing = ready ? await parcelTiming(db, open, now) : null;
   const step: ParcelStep = shipment ? (shipment.status as Exclude<ShipmentStatus, 'CANCELLED'>) : ready ? 'READY_TO_PACK' : 'NOT_READY';
   const ticked = new Set((shipment?.checklist ?? []).map((l) => l.key));
+  const packing = await parcelPacking(db, members, shipment);
+  // A parcel packed keeps the box line it was packed with (a parcel packed before boxes existed: « The box and the pouch »).
+  const stored = shipment?.packed_at ? (shipment.checklist ?? []).find((l) => l.key === 'box') : undefined;
+  const checklist = checklistOf(members, ticked, scanned, packing.box).map((l) => (stored && l.key === 'box' ? { ...l, label: stored.label } : l));
   return {
     id: key,
     reference: orderReference(key),
@@ -353,7 +492,8 @@ export async function parcelView(db: Db, orderId: string, scope: LocationScope, 
           trackingUrl: carrier && shipment.tracking_number ? trackingLink(carrier.tracking_url, shipment.tracking_number) : null,
         }
       : null,
-    checklist: checklistOf(members, ticked, scanned),
+    packing,
+    checklist,
     history: events.map((e) => ({
       action: e.action,
       at: e.created_at,

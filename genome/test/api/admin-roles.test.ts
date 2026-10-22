@@ -11,7 +11,8 @@
  * discontinued or reinstated (P-R06), a model's warranty changed (plan ORBES CARE, D16: it rewrites the warranties of
  * its pieces already sold), a LIVE RELEASE ended now or an entry removed from it (its creation, edits,
  * publication, cancellation, silhouette, board link and live controls: OPERATOR), and the settings of the orders: their
- * alerts' delays, the locations and the carriers (plan LIVE RELEASE+; the orders' steps, returns, terms, buyer and piece,
+ * alerts' delays, the locations, the carriers and the boxes (plan LIVE RELEASE+, plan MACRO M3 §1.2; a model's box and packed weight
+ * set by an OPERATOR, a parcel's box changed while packing by the agent and OPERATOR+; the orders' steps, returns, terms, buyer and piece,
  * and, since the atelier's removal (plan NEXT LOT step 5.13), Logistics' stock below: OPERATOR; the invoices and credit notes read by an AUDITOR;
  * the segments read by an AUDITOR, their members' CSV too, built, counted live, changed and deleted by an OPERATOR; the
  * size mix proposed at creation, the feasibility check and the best time to open read by an AUDITOR; the Shopify
@@ -373,6 +374,7 @@ const PROBES: Probe[] = [
   { group: 'packing', method: 'POST', url: `/api/admin/logistics/orders/${UUID}/packing`, body: INVALID, min: 'LOGISTICS', roles: LOGISTICS_ACT },
   { group: 'packing', method: 'POST', url: `/api/admin/logistics/orders/${UUID}/packing/scan`, body: INVALID, min: 'LOGISTICS', roles: LOGISTICS_ACT },
   { group: 'packing', method: 'PUT', url: `/api/admin/logistics/orders/${UUID}/packing/photo`, ...PHOTO, min: 'LOGISTICS', roles: LOGISTICS_ACT },
+  { group: 'packing', method: 'POST', url: `/api/admin/logistics/orders/${UUID}/packing/box`, body: INVALID, min: 'LOGISTICS', roles: LOGISTICS_ACT },
   { group: 'packing', method: 'POST', url: `/api/admin/logistics/orders/${UUID}/packing/check`, body: INVALID, min: 'LOGISTICS', roles: LOGISTICS_ACT },
   { group: 'packing', method: 'POST', url: `/api/admin/logistics/orders/${UUID}/ship`, body: INVALID, min: 'LOGISTICS', roles: LOGISTICS_ACT },
   { group: 'packing', method: 'POST', url: `/api/admin/logistics/orders/${UUID}/delivered`, body: INVALID, min: 'LOGISTICS', roles: LOGISTICS_ACT },
@@ -392,6 +394,14 @@ const PROBES: Probe[] = [
   { group: 'logistics', method: 'GET', url: '/api/admin/carriers', min: 'AUDITOR' },
   { group: 'logistics', method: 'POST', url: '/api/admin/carriers', body: INVALID, min: 'ADMIN' },
   { group: 'logistics', method: 'PATCH', url: `/api/admin/carriers/${UUID}`, body: INVALID, min: 'ADMIN' },
+  // Plan MACRO M3 §1.2 (B1): the standard boxes, beside the carriers: read by an AUDITOR, written by an ADMIN.
+  { group: 'boxes', method: 'GET', url: '/api/admin/boxes', min: 'AUDITOR' },
+  { group: 'boxes', method: 'POST', url: '/api/admin/boxes', body: INVALID, min: 'ADMIN' },
+  { group: 'boxes', method: 'PATCH', url: `/api/admin/boxes/${UUID}`, body: INVALID, min: 'ADMIN' },
+  { group: 'boxes', method: 'POST', url: `/api/admin/boxes/${UUID}/set-aside`, min: 'ADMIN' },
+  { group: 'boxes', method: 'POST', url: `/api/admin/boxes/${UUID}/reinstate`, min: 'ADMIN' },
+  // B1, B2: a model's box and packed weight, set by an OPERATOR.
+  { group: 'boxes', method: 'PUT', url: `/api/admin/models/${UUID}/packing`, body: INVALID, min: 'OPERATOR' },
   { group: 'analytics', method: 'GET', url: '/api/admin/analytics/circle', min: 'AUDITOR' },
   { group: 'analytics', method: 'GET', url: '/api/admin/analytics/circle?days=367', min: 'AUDITOR' },
   { group: 'analytics', method: 'GET', url: '/api/admin/analytics/best-time?days=367', min: 'AUDITOR' },
@@ -595,6 +605,7 @@ describe('admin role enforcement', () => {
       'receptions',
       'logistics-stock',
       'packing',
+      'boxes',
       'order-cases',
       'sign-up',
       'links',
@@ -705,6 +716,7 @@ describe('admin role enforcement', () => {
       ['GET', '/api/admin/drops'],
       ['GET', '/api/admin/locations'],
       ['GET', '/api/admin/carriers'],
+      ['GET', '/api/admin/boxes'],
       ['GET', '/api/admin/orders/alerts'],
       ['GET', `/api/admin/order-cases/${UUID}`],
       ['POST', `/api/admin/order-cases/${UUID}/decide`, INVALID],
@@ -744,6 +756,7 @@ describe('admin role enforcement', () => {
         `POST /api/admin/logistics/orders/${UUID}/packing`,
         `POST /api/admin/logistics/orders/${UUID}/packing/scan`,
         `PUT /api/admin/logistics/orders/${UUID}/packing/photo`,
+        `POST /api/admin/logistics/orders/${UUID}/packing/box`,
         `POST /api/admin/logistics/orders/${UUID}/packing/check`,
         `POST /api/admin/logistics/orders/${UUID}/ship`,
         `POST /api/admin/logistics/orders/${UUID}/delivered`,

@@ -450,3 +450,72 @@ describe('a model’s warranty (plan ORBES CARE, answer 12, D16, D17)', () => {
     expect((await domainError(catalog.setWarranty(m.id, 'no' as never, admin))).code).toBe('VALIDATION_FAILED');
   });
 });
+
+describe('a model’s packing (plan MACRO M3 §1.2, B1 and B2)', () => {
+  let t: TestDb;
+  let audit: AuditService;
+  let catalog: CatalogService;
+  const clock = createManualClock('2026-10-22T10:00:00.000Z');
+
+  beforeAll(async () => {
+    t = await createTestDb();
+    audit = new AuditService({ db: t.db, clock: clock.now });
+    const categories = new CategoryRegistry({ db: t.db, audit, clock: clock.now });
+    await categories.load();
+    await categories.create({ code: 'J', name: 'Jewelry', warrantyMonths: 24 }, admin);
+    catalog = new CatalogService({ db: t.db, audit, categories, clock: clock.now });
+  });
+  afterAll(() => t.close());
+
+  const box = async (name: string, active = true) =>
+    (await t.db.insertInto('boxes').values({ name, inside_length_mm: 100, inside_width_mm: 70, inside_height_mm: 40, empty_weight_g: 120, cost_minor: 85, currency: 'EUR', active }).returning('id').executeTakeFirstOrThrow()).id;
+  const ref = (id: string, name: string, active = true) => ({ id, name, insideLengthMm: 100, insideWidthMm: 70, insideHeightMm: 40, emptyWeightG: 120, active });
+
+  it('sets a model’s box and packed weight, read with the model and in the list, never its cost; audited model.packing; nothing changed, nothing written', async () => {
+    const cube = await box('CUBE');
+    const m = await catalog.createModel({ categoryCode: 'J', name: 'HALO', type: 'RING', skuPrefix: 'HAL-RG' }, admin);
+    expect(m.packing).toEqual({ box: null, packedWeightG: null, inherited: null });
+    const set = await catalog.setModelPacking(m.id, { boxId: cube, packedWeightG: 85 }, admin);
+    expect(set.packing).toEqual({ box: ref(cube, 'CUBE'), packedWeightG: 85, inherited: null });
+    expect(JSON.stringify(set.packing)).not.toContain('cost');
+    expect((await catalog.listModels()).find((x) => x.id === m.id)!.packing.box?.name).toBe('CUBE');
+    const entries = async () => (await audit.list({ action: 'model.packing', targetId: m.id })).items;
+    expect((await entries())[0]).toMatchObject({ details: { before: { boxId: null, packedWeightG: null }, after: { boxId: cube, packedWeightG: 85 } } });
+    // One field at a time; the same again writes nothing; null clears.
+    expect((await catalog.setModelPacking(m.id, { packedWeightG: 90 }, admin)).packing).toMatchObject({ box: { id: cube }, packedWeightG: 90 });
+    await catalog.setModelPacking(m.id, { boxId: cube, packedWeightG: 90 }, admin);
+    expect(await entries()).toHaveLength(2);
+    expect((await catalog.setModelPacking(m.id, { boxId: null, packedWeightG: null }, admin)).packing).toEqual({ box: null, packedWeightG: null, inherited: null });
+  });
+
+  it('refuses a box set aside or unknown, a weight out of 1 to 30 000 g, an unknown model; keeps a box set aside the model already names', async () => {
+    const kept = await box('KEPT');
+    const aside = await box('ASIDE', false);
+    const m = await catalog.createModel({ categoryCode: 'J', name: 'ORBIT', type: 'RING', skuPrefix: 'ORB-RG' }, admin);
+    expect(await domainError(catalog.setModelPacking(m.id, { boxId: aside }, admin))).toMatchObject({ code: 'BOX_SET_ASIDE', httpStatus: 409 });
+    expect(await domainError(catalog.setModelPacking(m.id, { boxId: '00000000-0000-4000-8000-000000000000' }, admin))).toMatchObject({ code: 'BOX_NOT_FOUND', httpStatus: 404 });
+    expect(await domainError(catalog.setModelPacking(m.id, { boxId: 'nope' }, admin))).toMatchObject({ code: 'BOX_NOT_FOUND', httpStatus: 404 });
+    for (const w of [0, 30_001, 12.5]) expect((await domainError(catalog.setModelPacking(m.id, { packedWeightG: w }, admin))).code).toBe('VALIDATION_FAILED');
+    expect((await domainError(catalog.setModelPacking(m.id, {}, admin))).code).toBe('VALIDATION_FAILED');
+    expect((await domainError(catalog.setModelPacking('00000000-0000-4000-8000-000000000000', { packedWeightG: 10 }, admin))).code).toBe('MODEL_NOT_FOUND');
+    expect((await catalog.setModelPacking(m.id, { boxId: kept, packedWeightG: 30_000 }, admin)).packing.packedWeightG).toBe(30_000);
+    await t.db.updateTable('boxes').set({ active: false }).where('id', '=', kept).execute();
+    // Its own box set aside meanwhile: its weight still changes.
+    expect((await catalog.setModelPacking(m.id, { boxId: kept, packedWeightG: 1 }, admin)).packing).toEqual({ box: ref(kept, 'KEPT', false), packedWeightG: 1, inherited: null });
+  });
+
+  it('a variant without its own box or weight reads its main model’s, named; its own wins, field by field', async () => {
+    const cube = await box('MAIN CUBE');
+    const tall = await box('VARIANT TALL');
+    const main = await catalog.createModel({ categoryCode: 'J', name: 'ECLIPSE', type: 'RING', skuPrefix: 'ECL-RG' }, admin);
+    const blue = await catalog.createVariant(main.id, { label: 'Blue', swatch: '#16224A', skuPrefix: 'ECL-BL', mainLabel: 'Silver', mainSwatch: '#D7D5D0' }, admin);
+    expect(blue.packing).toEqual({ box: null, packedWeightG: null, inherited: { from: { id: main.id, name: 'ECLIPSE' }, box: false, packedWeightG: false } });
+    await catalog.setModelPacking(main.id, { boxId: cube, packedWeightG: 70 }, admin);
+    expect((await catalog.getModel(blue.id)).packing).toEqual({ box: ref(cube, 'MAIN CUBE'), packedWeightG: 70, inherited: { from: { id: main.id, name: 'ECLIPSE' }, box: true, packedWeightG: true } });
+    await catalog.setModelPacking(blue.id, { boxId: tall, packedWeightG: null }, admin);
+    expect((await catalog.getModel(blue.id)).packing).toEqual({ box: ref(tall, 'VARIANT TALL'), packedWeightG: 70, inherited: { from: { id: main.id, name: 'ECLIPSE' }, box: false, packedWeightG: true } });
+    // The main model reads only its own.
+    expect((await catalog.getModel(main.id)).packing).toEqual({ box: ref(cube, 'MAIN CUBE'), packedWeightG: 70, inherited: null });
+    expect((await catalog.listModels()).find((x) => x.id === blue.id)!.packing).toMatchObject({ box: { id: tall }, packedWeightG: 70 });
+  });
+});

@@ -23,7 +23,10 @@
  * absent; OPERATOR, as creating a model), copied by ADD A VARIANT, and changed
  * afterwards by an ADMIN only (POST …/warranty, `{ lifetime }`), as the change
  * rewrites the warranties of its pieces already sold; never through the edit
- * (PATCH: 400). The services validate, write and audit; these routes only
+ * (PATCH: 400). Its packing (plan MACRO M3 §1.2, B1 and B2): the box its
+ * pieces are packed in and their packed weight, set by OPERATOR (PUT
+ * …/packing), read with the model (`packing`, a variant's main model's when it
+ * has none). The services validate, write and audit; these routes only
  * parse and shape.
  */
 import type { FastifyPluginAsync } from 'fastify';
@@ -36,6 +39,7 @@ import {
   createModelBody,
   createVariantBody,
   emptyBody,
+  modelPackingBody,
   modelPairsBody,
   modelWarrantyBody,
   modelSizeParams,
@@ -215,6 +219,13 @@ export const adminCatalogRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
     const { id } = parse(catalogParams, request.params);
     const b = parse(modelPairsBody, request.body);
     return catalog.setPairs(id, b.models, adminActor(request));
+  });
+
+  // Plan MACRO M3 §1.2 (B1, B2): the box its pieces are packed in and their packed weight (null: none, or a variant's main model's).
+  app.put('/api/admin/models/:id/packing', async (request) => {
+    const { id } = parse(catalogParams, request.params);
+    const b = parse(modelPackingBody, request.body);
+    return catalog.setModelPacking(id, { boxId: b.boxId, packedWeightG: b.packedWeightG }, adminActor(request));
   });
 
   // Plan ORBES CARE (answer 12, D16): ADMIN only, as it rewrites the warranties of the model's pieces already sold.

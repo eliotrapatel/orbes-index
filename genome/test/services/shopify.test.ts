@@ -361,6 +361,33 @@ describe('the Shopify exports and the ids pasted back (plan LIVE RELEASE+, S9)',
     await rejects(shopify().link(stranger, { productId: '6601', variants: [] }, f.admin), 'SHOPIFY_PRODUCT_TAKEN');
   });
 
+  it('gives each variant its model\'s packed weight in grams (plan MACRO M3 §1.2, B2): a variant without one its main model\'s, empty when unknown', async () => {
+    const main = await createModel(t.db, 'PESANT', null, 'BRACELET');
+    await t.db.updateTable('models').set({ slug: 'pesant' }).where('id', '=', main).execute();
+    const heavy = (await ctx.services.catalog.createVariant(main, { label: 'Heavy', swatch: '#B88A3A', skuPrefix: 'PES-HV', mainLabel: 'Steel', mainSwatch: '#9D9B96' }, f.admin)).id;
+    clock.advance(1000);
+    const same = (await ctx.services.catalog.createVariant(main, { label: 'Same', swatch: '#16224A', skuPrefix: 'PES-SM' }, f.admin)).id;
+    await skuOf(main, '16');
+    await skuOf(main, '17');
+    for (const m of [main, heavy, same]) await price(m, 100_00);
+    const weights = async () => records((await shopify().productCsv('EUR')).body).filter((r) => r['URL handle'] === 'pesant').map((r) => [r['Option1 value'], r['Option2 value'], r['Weight value (grams)']]);
+    // None given yet: the column is empty.
+    expect(await weights()).toEqual([
+      ['Steel', '16', ''],
+      ['Steel', '17', ''],
+      ['Heavy', 'ONE SIZE', ''],
+      ['Same', 'ONE SIZE', ''],
+    ]);
+    await ctx.services.catalog.setModelPacking(main, { packedWeightG: 85 }, f.admin);
+    await ctx.services.catalog.setModelPacking(heavy, { packedWeightG: 140 }, f.admin);
+    expect(await weights()).toEqual([
+      ['Steel', '16', '85'],
+      ['Steel', '17', '85'],
+      ['Heavy', 'ONE SIZE', '140'],
+      ['Same', 'ONE SIZE', '85'],
+    ]);
+  });
+
   it('keeps a main model\'s handle when variants are added (NOCTURNE N1): a variant never takes a handle nor shifts its main model\'s', async () => {
     const main = await createModel(t.db, 'UNSLUGGED');
     await price(main, 300_00);

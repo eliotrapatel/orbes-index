@@ -16,7 +16,8 @@
  *                        when every model of it is in one size), each model of it priced in the store's currency in its
  *                        order (the main model first, then its variants as they were added), each with its own SKUs,
  *                        base price and photographs, its cover as the image of its variants (« Variant image URL »);
- *                        archived once none of them is active.
+ *                        archived once none of them is active. Each variant carries its model's packed weight in grams
+ *                        (plan MACRO M3 §1.2, B2: its own, else a variant's main model's), empty when unknown.
  *   the ids pasted back  N2: once imported, the product's id and each variant's, from Shopify's admin, are kept on the
  *                        model's SKUs (`skus.shopify_product_id`, one product per model; `skus.shopify_variant_id`, unique):
  *                        both sides are linked. A size of the export without its SKU yet has it created (ensureSku), on
@@ -45,6 +46,7 @@ import { csvDocument, CSV_CONTENT_TYPE } from '../render/csv.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import { majorUnits } from './live-console.js';
+import { modelPackings } from './boxes.js';
 import { mediaUrl } from './media.js';
 import { ORDER_CURRENCIES, orderReference } from './orders.js';
 import { notTestEntrant } from './population.js';
@@ -66,6 +68,7 @@ export const SHOPIFY_PRODUCT_COLUMNS = Object.freeze([
   'Option2 name',
   'Option2 value',
   'Price',
+  'Weight value (grams)',
   'Requires shipping',
   'Product image URL',
   'Image position',
@@ -273,6 +276,8 @@ export class ShopifyExportService {
     const skus = ids.length ? await this.db.selectFrom('skus').select(['model_id', 'size_label', 'code', 'shopify_variant_id']).where('model_id', 'in', ids).where('set_aside_at', 'is', null).execute() : [];
     const gallery = ids.length ? await this.db.selectFrom('model_images').select(['model_id', 'sha256', 'alt']).where('model_id', 'in', ids).orderBy('model_id').orderBy('position').execute() : [];
     const handles = await handlesOf(this.db);
+    // Plan MACRO M3 §1.2 (B2): each variant's weight, its model's packed weight (a variant without one: its main model's).
+    const packings = await modelPackings(this.db, ids);
     const rows: string[][] = [];
     const done = new Set<string>();
     for (const first of priced) {
@@ -312,6 +317,7 @@ export class ShopifyExportService {
           'Option2 name': i === 0 && sized ? SHOPIFY_SIZE_OPTION : '',
           'Option2 value': v && sized ? (v.size ?? ONE_SIZE_LABEL) : '',
           Price: v ? majorUnits(v.model.base_price_minor!) : '',
+          'Weight value (grams)': v ? String(packings.get(v.model.id)?.packedWeightG ?? '') : '',
           'Requires shipping': v ? 'true' : '',
           'Product image URL': img ? `${this.publicOrigin}${img.url}` : '',
           'Image position': img ? String(i + 1) : '',

@@ -7,7 +7,7 @@
  * categories, console users, a customer's recovery code, lock and export,
  * the draw of a drop, a model discontinued or reinstated, a LIVE RELEASE
  * ended now or an entry removed from it, the delays of the order alerts,
- * a location or a carrier added or changed, a conversation of the Messages board
+ * a location, a carrier or a box added or changed, a conversation of the Messages board
  * assigned, the defaults of THE HOUSE'S GUARANTEE, the answers to « How did you hear about ORBES? », a
  * pre-registration removed from the founding list, an email kind switched on or off, a test email to oneself, the
  * founding announcement sent or cancelled, a house moment switched on or off, a house message sent, scheduled or
@@ -39,6 +39,7 @@ import { adminEmailRoutes } from './email.js';
 import { adminFoundingRoutes } from './founding.js';
 import { adminAuthRoutes } from './auth.js';
 import { adminAuditRoutes } from './audit.js';
+import { adminBoxRoutes } from './boxes.js';
 import { adminCatalogRoutes } from './catalog.js';
 import { adminCertificateRoutes } from './certificates.js';
 import { adminCircleRoutes } from './circle.js';
@@ -109,6 +110,7 @@ export const adminRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, deps)
   await app.register(adminOrderCaseRoutes, deps);
   await app.register(adminInvoiceRoutes, deps);
   await app.register(adminLocationRoutes, deps);
+  await app.register(adminBoxRoutes, deps);
   await app.register(adminLogisticsRoutes, deps);
   await app.register(adminSupplierOrderRoutes, deps);
   await app.register(adminSegmentRoutes, deps);

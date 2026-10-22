@@ -15,9 +15,12 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
+import { packingSuggestion, parcelWeight } from '../../src/server/services/parcels.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import type { Actor } from '../../src/server/types.js';
 import { createAdmin, createHarness, issue, seedCatalog, type Catalog, type Harness } from '../api/support.js';
+import { packParcel, scanIntoParcel, stockPieces } from '../support/fulfil.js';
+import { jpegPhoto } from '../support/images.js';
 import { createAccount } from '../support/live.js';
 
 async function refusal(p: Promise<unknown>): Promise<{ code: string; status: number; message: string }> {
@@ -256,5 +259,196 @@ describe('LogisticsService (plan NEXT LOT §3.5.6.6)', () => {
     await lg().transfer({ skuId: s50, fromLocationId: logistics, toLocationId: france, quantity: 1 }, admin);
     expect(await reservation(waiting)).toBe('STOCK');
     expect((await lg().stock({ modelId: model, locationId: france })).rows[0]).toMatchObject({ onHand: 1, reserved: 1, waiting: 0 });
+  });
+});
+
+/**
+ * A parcel's box and weight (macro scope D16 B1 and B2; plan MACRO M3 §1.1, step M3.2; services/parcels.ts and
+ * services/logistics.ts):
+ *
+ *  - the box to use: every piece's box when they share one (MODELS), else the largest of their boxes by inside volume
+ *    (LARGEST), none set: none, the models without one named; a variant reads its main model's box and weight; a box set
+ *    aside counts as none;
+ *  - the weight: the box's empty weight plus each piece's packed weight, live while packing; unknown with what is
+ *    missing (each model's words, « box »), never blocking;
+ *  - CHANGE BOX while PACKING only (PACKING_NOT_STARTED, PACKING_PACKED), an active box (BOX_SET_ASIDE, BOX_NOT_FOUND),
+ *    within the agent's locations, audited `shipment.box`;
+ *  - PACKED writes the box used, the weight or its missing list, in its transaction: journaled `shipment.pack`, the
+ *    audit `order.pack.check` naming them; the checklist's box line « The box: <name>, and the pouch », its key `box`;
+ *  - the agent never reads a box's cost.
+ */
+describe('a parcel\'s box and weight (plan MACRO M3 §1.1)', () => {
+  let h: Harness;
+  let admin: Actor;
+  let agent: Actor;
+  let outsider: Actor;
+  let france: string;
+  let serial = 0;
+  const scope = () => new Set([france]);
+
+  beforeAll(async () => {
+    h = await createHarness();
+    h.clock.set('2026-10-22T09:00:00.000Z');
+    await seedCatalog(h.ctx);
+    admin = { type: 'admin', id: (await createAdmin(h.ctx, 'OPERATOR')).id };
+    const locations = await h.t.db.selectFrom('stock_locations').select(['id', 'name']).execute();
+    france = locations.find((l) => l.name === 'FRANCE WAREHOUSE')!.id;
+    const elsewhere = locations.find((l) => l.name === 'LOGISTICS WAREHOUSE')!.id;
+    agent = { type: 'admin', id: (await createAdmin(h.ctx, 'LOGISTICS', { stockLocationIds: [france] })).id };
+    outsider = { type: 'admin', id: (await createAdmin(h.ctx, 'LOGISTICS', { stockLocationIds: [elsewhere] })).id };
+  });
+  afterAll(() => h?.close());
+
+  const lg = () => h.ctx.services.logistics;
+  const db = () => h.t.db;
+  const box = (name: string, sides: [number, number, number], emptyWeightG: number) =>
+    h.ctx.services.boxes.create({ name, insideLengthMm: sides[0], insideWidthMm: sides[1], insideHeightMm: sides[2], emptyWeightG, costMinor: 75, currency: 'EUR' }, admin);
+  async function model(name: string, packing: { boxId?: string | null; packedWeightG?: number | null } = {}, variantOf?: string): Promise<string> {
+    serial += 1;
+    const category = (await h.ctx.categories.getByCode('J'))!.index;
+    const id = (
+      await db()
+        .insertInto('models')
+        .values({
+          category_id: category,
+          name,
+          type: 'RING',
+          sku_prefix: `BX${serial}-RG`,
+          default_material: '925 STERLING SILVER',
+          ...(variantOf ? { variant_of: variantOf, variant_label: `V${serial}`, variant_swatch: '#1F3A93' } : {}),
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    ).id;
+    if (packing.boxId !== undefined || packing.packedWeightG !== undefined) await h.ctx.services.catalog.setModelPacking(id, packing, admin);
+    return id;
+  }
+  /** A salon order of a model in size 52, priced and paid, holding its piece at FRANCE WAREHOUSE. */
+  async function readyOrder(modelId: string): Promise<string> {
+    const account = await createAccount(db());
+    const request = await db().insertInto('shop_requests').values({ account_id: account.id, model_id: modelId, created_at: h.clock.now() }).returning('id').executeTakeFirstOrThrow();
+    h.clock.advance(1000);
+    await h.ctx.services.salon.close(request.id, { note: 'Accepted.', outcome: 'ACCEPTED' }, admin);
+    const id = (await db().selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
+    await h.ctx.services.orders.setTerms(id, { sizeLabel: '52', priceMinor: 420_000, currency: 'EUR' }, admin);
+    const sku = await h.ctx.db.transaction().execute((tx) => ensureSku(tx, modelId, '52'));
+    await stockPieces(h.ctx, { skuId: sku, locationId: france, count: 1, forOrderIds: [id] }, admin);
+    h.clock.advance(1000);
+    await h.ctx.services.orders.transition(id, { to: 'PAID' }, admin);
+    return id;
+  }
+  const shipmentOf = (key: string) => db().selectFrom('shipments').selectAll().where('order_id', '=', key).where('status', '<>', 'CANCELLED').executeTakeFirstOrThrow();
+
+  it('suggests the pieces\' shared box, weighs it live, and writes the box and weight at PACKED: journaled shipment.pack, audited with order.pack.check; the agent never reads a cost', async () => {
+    const cube = await box('CUBE 100', [100, 70, 40], 120);
+    const m = await model('HALO', { boxId: cube.id, packedWeightG: 85 });
+    const key = await readyOrder(m);
+    const ready = await lg().parcel(key, scope());
+    expect(ready.step).toBe('READY_TO_PACK');
+    expect(ready.packing).toMatchObject({
+      box: { id: cube.id, name: 'CUBE 100', insideLengthMm: 100, insideWidthMm: 70, insideHeightMm: 40, emptyWeightG: 120, active: true },
+      boxSource: 'MODELS',
+      pieces: 1,
+      modelsWithoutBox: [],
+      weightG: 205,
+      missing: [],
+      recorded: false,
+    });
+    expect(ready.packing.boxes.map((b) => b.name)).toContain('CUBE 100');
+    expect(JSON.stringify(ready)).not.toMatch(/cost|currency/i);
+    expect(ready.checklist.find((l) => l.key === 'box')).toEqual({ key: 'box', label: 'The box: CUBE 100, and the pouch', byScan: false, ticked: false });
+    await packParcel(h.ctx, key, {}, agent);
+    const s = await shipmentOf(key);
+    expect({ status: s.status, box_id: s.box_id, weight_g: s.weight_g, weight_missing: s.weight_missing }).toEqual({ status: 'PACKED', box_id: cube.id, weight_g: 205, weight_missing: null });
+    expect(s.checklist.find((l) => l.key === 'box')).toEqual({ key: 'box', label: 'The box: CUBE 100, and the pouch' });
+    const journal = await db().selectFrom('event_journal').select(['type', 'entity_type', 'payload']).where('entity_id', '=', s.id).execute();
+    expect(journal).toEqual([
+      { type: 'shipment.pack', entity_type: 'shipment', payload: { id: s.id, orderId: key, orderIds: [key], boxId: cube.id, weightG: 205, weightMissing: null, packedAt: s.packed_at!.toISOString() } },
+    ]);
+    expect((await h.ctx.audit.list({ action: 'order.pack.check', targetId: key })).items[0]).toMatchObject({ actorId: agent.id, details: { boxId: cube.id, weightG: 205, weightMissing: null } });
+    // The model's box and weight changed after: the parcel reads what was written.
+    await h.ctx.services.catalog.setModelPacking(m, { packedWeightG: 300 }, admin);
+    const packed = await lg().parcel(key, scope());
+    expect(packed.packing).toMatchObject({ box: { id: cube.id }, weightG: 205, missing: [], recorded: true, boxes: [] });
+    expect(packed.checklist.find((l) => l.key === 'box')!.label).toBe('The box: CUBE 100, and the pouch');
+  });
+
+  it('never blocks on a missing weight: no box and no packed weight are packed with what was missing, the box line as before', async () => {
+    const m = await model('BARE');
+    const key = await readyOrder(m);
+    const view = await lg().parcel(key, scope());
+    expect(view.packing).toMatchObject({ box: null, boxSource: null, modelsWithoutBox: ['BARE'], weightG: null, missing: ['BARE', 'box'], recorded: false });
+    expect(view.checklist.find((l) => l.key === 'box')!.label).toBe('The box and the pouch');
+    await packParcel(h.ctx, key, {}, admin);
+    const s = await shipmentOf(key);
+    expect({ box_id: s.box_id, weight_g: s.weight_g, weight_missing: s.weight_missing }).toEqual({ box_id: null, weight_g: null, weight_missing: ['BARE', 'box'] });
+    expect((await lg().parcel(key, scope())).packing).toMatchObject({ box: null, weightG: null, missing: ['BARE', 'box'], recorded: true });
+  });
+
+  it('a variant reads its main model\'s box and weight; several pieces sharing a box are weighed together; boxes of different sizes give the largest by volume; a box set aside counts as none', async () => {
+    const small = await box('SMALL', [100, 70, 30], 100);
+    const large = await box('LARGE', [200, 150, 80], 300);
+    const main = await model('ECLIPSE', { boxId: small.id, packedWeightG: 60 });
+    await db().updateTable('models').set({ variant_label: 'Silver', variant_swatch: '#D7D5D0' }).where('id', '=', main).execute();
+    const steel = await model('ECLIPSE', {}, main);
+    const gold = await model('ECLIPSE', { packedWeightG: 90 }, main);
+    // A main model and two of its variants in one parcel (as a LIVE entry's pieces travel together): one box shared,
+    // each piece's weight, a variant without its own reading its main model's.
+    const piece = (modelId: string, i: number) => ({ id: `00000000-0000-4000-8000-00000000000${i}`, model_id: modelId });
+    const shared = await packingSuggestion(db(), [piece(main, 1), piece(steel, 2), piece(gold, 3)]);
+    expect({ box: shared.box?.id, source: shared.source, without: shared.modelsWithoutBox }).toEqual({ box: small.id, source: 'MODELS', without: [] });
+    expect(parcelWeight(shared.box, shared)).toEqual({ weightG: 100 + 60 + 60 + 90, missing: [] });
+    // A piece of another box: the largest of the two by its inside volume; a model without a box is named.
+    const other = await model('ATLAS', { boxId: large.id, packedWeightG: 40 });
+    const bare = await model('NOBOX', { packedWeightG: 20 });
+    const mixed = await packingSuggestion(db(), [piece(main, 1), piece(other, 2), piece(bare, 3)]);
+    expect({ box: mixed.box?.id, source: mixed.source, without: mixed.modelsWithoutBox }).toEqual({ box: large.id, source: 'LARGEST', without: ['NOBOX'] });
+    expect(parcelWeight(mixed.box, mixed)).toEqual({ weightG: 300 + 60 + 40 + 20, missing: [] });
+    // Unknown: a piece without a packed weight, named once however many pieces of it.
+    const light = await model('NOWEIGHT', { boxId: small.id });
+    const unknown = await packingSuggestion(db(), [piece(light, 1), piece(light, 2), piece(main, 3)]);
+    expect(parcelWeight(unknown.box, unknown)).toEqual({ weightG: null, missing: ['NOWEIGHT'] });
+    expect(parcelWeight(null, shared)).toEqual({ weightG: null, missing: ['box'] });
+    // LARGE set aside (ATLAS made inactive first, as no active model may pack in a box set aside): it counts as none.
+    await db().updateTable('models').set({ active: false }).where('id', '=', other).execute();
+    await h.ctx.services.boxes.setAside(large.id, admin);
+    const after = await packingSuggestion(db(), [piece(main, 1), piece(other, 2), piece(bare, 3)]);
+    expect({ box: after.box?.id, source: after.source, without: after.modelsWithoutBox }).toEqual({ box: small.id, source: 'MODELS', without: ['ATLAS', 'NOBOX'] });
+    // On a parcel being packed, the variant's piece reads its main model's box and weight, and the box set aside is not offered.
+    const key = await readyOrder(steel);
+    const view = await lg().parcel(key, scope());
+    expect(view.packing).toMatchObject({ box: { id: small.id }, boxSource: 'MODELS', pieces: 1, weightG: 160, missing: [] });
+    expect(view.packing.boxes.map((b) => b.id)).toContain(small.id);
+    expect(view.packing.boxes.map((b) => b.id)).not.toContain(large.id);
+  });
+
+  it('CHANGE BOX while packing only: an active box of the house, kept and written at PACKED, audited shipment.box; refused before, after, set aside, unknown, or outside the agent\'s locations', async () => {
+    const cube = await box('CHANGE CUBE', [100, 70, 40], 120);
+    const flat = await box('CHANGE FLAT', [160, 110, 20], 90);
+    const aside = await box('CHANGE ASIDE', [160, 110, 20], 90);
+    await h.ctx.services.boxes.setAside(aside.id, admin);
+    const m = await model('PRISM', { boxId: cube.id, packedWeightG: 50 });
+    const key = await readyOrder(m);
+    expect(await refusal(lg().chooseBox(key, { boxId: flat.id }, agent, scope()))).toMatchObject({ code: 'PACKING_NOT_STARTED', status: 409 });
+    await scanIntoParcel(h.ctx, key, {}, admin);
+    expect(await refusal(lg().chooseBox(key, { boxId: aside.id }, agent, scope()))).toMatchObject({ code: 'BOX_SET_ASIDE', status: 409 });
+    expect(await refusal(lg().chooseBox(key, { boxId: '00000000-0000-4000-8000-000000000000' }, agent, scope()))).toMatchObject({ code: 'BOX_NOT_FOUND', status: 404 });
+    expect(await refusal(lg().chooseBox(key, { boxId: flat.id }, outsider, new Set(['00000000-0000-4000-8000-000000000001'])))).toMatchObject({ code: 'ORDER_NOT_FOUND', status: 404 });
+    const chosen = await lg().chooseBox(key, { boxId: flat.id }, agent, scope());
+    expect(chosen.packing).toMatchObject({ box: { id: flat.id, name: 'CHANGE FLAT' }, boxSource: 'CHOSEN', weightG: 90 + 50 });
+    expect(chosen.checklist.find((l) => l.key === 'box')!.label).toBe('The box: CHANGE FLAT, and the pouch');
+    const s = await shipmentOf(key);
+    expect((await h.ctx.audit.list({ action: 'shipment.box', targetId: s.id })).items[0]).toMatchObject({ actorId: agent.id, details: { parcel: key, from: null, to: flat.id } });
+    // The same box again: nothing written. Back to the models' box: read as theirs.
+    await lg().chooseBox(key, { boxId: flat.id }, agent, scope());
+    expect((await h.ctx.audit.list({ action: 'shipment.box', targetId: s.id })).items).toHaveLength(1);
+    expect((await lg().chooseBox(key, { boxId: cube.id }, admin, null)).packing).toMatchObject({ box: { id: cube.id }, boxSource: 'MODELS' });
+    await lg().chooseBox(key, { boxId: flat.id }, admin, null);
+    await lg().setPhoto(key, { mime: 'image/jpeg', bytes: jpegPhoto(16, 12) }, agent, scope());
+    const before = await lg().parcel(key, scope());
+    await lg().checkPacked(key, { ticked: before.checklist.filter((l) => !l.byScan).map((l) => l.key) }, agent, scope());
+    expect(await shipmentOf(key)).toMatchObject({ status: 'PACKED', box_id: flat.id, weight_g: 140, weight_missing: null });
+    expect((await lg().parcel(key, scope())).packing).toMatchObject({ box: { id: flat.id }, boxSource: 'CHOSEN', weightG: 140, recorded: true });
+    expect(await refusal(lg().chooseBox(key, { boxId: cube.id }, agent, scope()))).toMatchObject({ code: 'PACKING_PACKED', status: 409 });
   });
 });

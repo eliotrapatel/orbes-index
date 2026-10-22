@@ -84,8 +84,12 @@ describe('the packing photos\' keeping (§3.5.6.8)', () => {
     }
     expect(await photo(shipmentId)).toEqual({ photo_sha256: null, photo_erased_at: h.clock.now() });
     await expect(h.ctx.services.logistics.photo(shipmentId, null)).rejects.toMatchObject({ code: 'SHIPMENT_NOT_FOUND' });
-    const journal = await db().selectFrom('event_journal').select(['type', 'entity_type', 'payload']).where('entity_id', '=', shipmentId).execute();
-    expect(journal.map((j) => [j.type, j.entity_type, Object.keys(j.payload).sort()])).toEqual([['shipment.photo.erase', 'shipment', ['erasedAt', 'id', 'orderId']]]);
+    // The shipment's entries: PACKED (plan MACRO M3 §1.1: its box and weight), then the photo erased, never the photo.
+    const journal = await db().selectFrom('event_journal').select(['type', 'entity_type', 'payload']).where('entity_id', '=', shipmentId).orderBy('id').execute();
+    expect(journal.map((j) => [j.type, j.entity_type, Object.keys(j.payload).sort()])).toEqual([
+      ['shipment.pack', 'shipment', ['boxId', 'id', 'orderId', 'orderIds', 'packedAt', 'weightG', 'weightMissing']],
+      ['shipment.photo.erase', 'shipment', ['erasedAt', 'id', 'orderId']],
+    ]);
   });
 
   it('holds it while a return opened in the 14 days is open, and erases it once the return is closed', async () => {

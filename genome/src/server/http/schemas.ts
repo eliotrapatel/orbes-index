@@ -60,6 +60,11 @@ import {
   WARRANTY_CLAIM_STATUSES,
   HOUSE_MESSAGE_STATUSES,
   WORN_REFUSALS,
+  BOX_COST_MINOR_MAX,
+  BOX_EMPTY_WEIGHT_G_MAX,
+  BOX_INSIDE_MM_MAX,
+  BOX_NAME_MAX,
+  PACKED_WEIGHT_G_MAX,
 } from '../db/schema.js';
 import { BASE_PRICE_MAX_MINOR, CARE_GUIDE_MAX, MODEL_IDENTITY_MESSAGE, VARIANT_LABEL_MAX } from '../services/catalog.js';
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
@@ -2244,6 +2249,48 @@ export const updateCarrierBody = body({ name: text(CARRIER_NAME_MAX).optional(),
   'Send at least one field of the carrier to change',
 );
 
+// ── Admin: the standard boxes (routes/admin/boxes.ts, plan MACRO M3 §1.2, B1) ─
+
+export const boxParams = z.object({ id: uuid });
+
+const boxSide = whole(1, BOX_INSIDE_MM_MAX, 'millimetres');
+const boxEmptyWeight = whole(1, BOX_EMPTY_WEIGHT_G_MAX, 'grams');
+/** A box's cost in cents (0 to 1 000 000.00), with its currency (three capitals; BoxService refuses one without cents): both or neither. */
+const boxCost = z.number().int('Must be a whole number of cents').min(0, 'At least 0').max(BOX_COST_MINOR_MAX, `At most ${BOX_COST_MINOR_MAX} cents`).nullable();
+const boxCurrency = z.preprocess(emptyToNull, z.string().trim().regex(/^[A-Za-z]{3}$/, 'A three-letter code, such as EUR').nullable());
+const boxCostTogether = (b: { costMinor?: number | null; currency?: string | null }) =>
+  (b.costMinor === undefined) === (b.currency === undefined) && (b.costMinor === null) === (b.currency === null);
+
+/** POST /api/admin/boxes: its name, inside sides, empty weight, and its cost with its currency (both or neither, null for none). */
+export const createBoxBody = body({
+  name: text(BOX_NAME_MAX),
+  insideLengthMm: boxSide,
+  insideWidthMm: boxSide,
+  insideHeightMm: boxSide,
+  emptyWeightG: boxEmptyWeight,
+  costMinor: boxCost.optional(),
+  currency: boxCurrency.optional(),
+}).refine(boxCostTogether, { message: 'A cost is sent with its currency, or both are cleared (null)', path: ['currency'] });
+
+/** PATCH /api/admin/boxes/:id: any of its fields; the cost and its currency together. At least one. */
+export const updateBoxBody = body({
+  name: text(BOX_NAME_MAX).optional(),
+  insideLengthMm: boxSide.optional(),
+  insideWidthMm: boxSide.optional(),
+  insideHeightMm: boxSide.optional(),
+  emptyWeightG: boxEmptyWeight.optional(),
+  costMinor: boxCost.optional(),
+  currency: boxCurrency.optional(),
+})
+  .refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one field of the box to change')
+  .refine(boxCostTogether, { message: 'A cost is sent with its currency, or both are cleared (null)', path: ['currency'] });
+
+/** PUT /api/admin/models/:id/packing: its box (null: none, or a variant's main model's) and its packed weight in grams (null: unknown). */
+export const modelPackingBody = body({
+  boxId: uuid.nullable(),
+  packedWeightG: whole(1, PACKED_WEIGHT_G_MAX, 'grams').nullable(),
+});
+
 // ── Admin: the suppliers (routes/admin/supplier-orders.ts, plan NEXT LOT §3.5.6.2) ─
 
 export const supplierParams = z.object({ id: uuid });
@@ -2409,6 +2456,9 @@ export const shipmentParams = z.object({ id: uuid });
 
 /** POST /api/admin/logistics/orders/:id/packing/scan: what the console's decoder read of the card (the body of /verify). */
 export const packingScanBody = verifyBody;
+
+/** POST /api/admin/logistics/orders/:id/packing/box: CHANGE BOX (plan MACRO M3 §1.1), an active box. */
+export const packingBoxBody = body({ boxId: uuid });
 
 /** POST /api/admin/logistics/orders/:id/packing/check: the checklist's lines ticked, by key. */
 export const packingCheckBody = body({ ticked: z.array(z.string().trim().min(1, 'Required').max(120, 'At most 120 characters')).max(128, 'At most 128 lines') });

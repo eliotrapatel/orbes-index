@@ -52,7 +52,10 @@
  *                                                                               `verify`, as /api/v1/verify)
  *   PUT    /api/admin/logistics/orders/:id/packing/photo        LOGISTICS_ACT   the photo: registered in media.ts (its
  *                                                                               image parsers), rate group `media`
- *   POST   /api/admin/logistics/orders/:id/packing/check        LOGISTICS_ACT   Packed
+ *   POST   /api/admin/logistics/orders/:id/packing/box          LOGISTICS_ACT   CHANGE BOX: an active box, while PACKING
+ *                                                                               (plan MACRO M3 §1.1)
+ *   POST   /api/admin/logistics/orders/:id/packing/check        LOGISTICS_ACT   Packed: the box and the parcel's weight
+ *                                                                               written with it
  *   POST   /api/admin/logistics/orders/:id/ship                 LOGISTICS_ACT   Ship (declared values: ORBES staff only,
  *                                                                               403 from the agent)
  *   POST   /api/admin/logistics/orders/:id/delivered            LOGISTICS_ACT   Mark delivered
@@ -81,6 +84,7 @@ import {
   receiveOrderCaseBody,
   reportParcelBody,
   orderParams,
+  packingBoxBody,
   packingCheckBody,
   packingScanBody,
   parcelsQuery,
@@ -274,6 +278,13 @@ export const adminLogisticsRoutes: FastifyPluginAsync<AdminRouteDeps> = async (a
     const family = userAgentFamily(userAgentOf(request));
     if (family) meta.userAgentFamily = family;
     return logistics.scanCard(id, input, adminActor(request), meta, await scopeOf(request));
+  });
+
+  // Plan MACRO M3 §1.1 (B1): CHANGE BOX while packing.
+  app.post('/api/admin/logistics/orders/:id/packing/box', { config: ACT }, async (request) => {
+    const { id } = parse(orderParams, request.params);
+    const b = parse(packingBoxBody, request.body);
+    return logistics.chooseBox(id, { boxId: b.boxId }, adminActor(request), await scopeOf(request));
   });
 
   app.post('/api/admin/logistics/orders/:id/packing/check', { config: ACT }, async (request) => {
