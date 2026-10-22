@@ -228,8 +228,9 @@ describe.skipIf(!HAS_CHROMIUM)('the warranty claims in the console (E2E, Chromiu
     const p = await open(OPERATOR);
     await go(p, `#/messages/${conversationId}`, client.email);
     await p.click('[data-testid=open-claim]');
-    // First the piece: the three the client holds.
-    expect(await options(p, 'piece')).toEqual([`${serial.lifetime} · LUNE`, `${serial.lifetime2} · LUNE`, `${serial.twoYears} · SELLIER`]);
+    // First the piece: the three the client holds. The dialog opens once the client's sheet has loaded, so its options
+    // are awaited, not read at once.
+    await expect.poll(() => options(p, 'piece'), POLL).toEqual([`${serial.lifetime} · LUNE`, `${serial.lifetime2} · LUNE`, `${serial.twoYears} · SELLIER`]);
     await p.selectOption('dialog select[name=piece]', serial.lifetime);
     await p.click('[data-testid=dialog-confirm]');
     // Then what it is claimed under: the warranty named as the server records it, read from the piece.
