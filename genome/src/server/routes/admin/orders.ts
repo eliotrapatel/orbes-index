@@ -39,8 +39,9 @@
  *   GET    /api/admin/orders/:id/addons         AUDITOR   plan MACRO M3 §4.2 (D2): the add-ons an order can take now (at its
  *                                                         location, in its currency), for Add an add-on
  *   POST   /api/admin/orders/:id/addons         OPERATOR  Add an add-on: { addonId, units } on an order RESERVED or PAID,
- *                                                         until SHIPPED (services/order-addons.ts)
- *   DELETE /api/admin/orders/:id/addons/:lineId OPERATOR  Remove one unit HELD (after PAID, a credit note for its line)
+ *                                                         until its parcel is packed (services/order-addons.ts)
+ *   DELETE /api/admin/orders/:id/addons/:lineId OPERATOR  Remove one unit HELD until its parcel is packed (after PAID, a
+ *                                                         credit note for its line)
  *   POST   /api/admin/orders/:id/case           OPERATOR  Open a return (plan NEXT LOT §3.5.4.4, step 5.10): a RETURN or a
  *                                                         size EXCHANGE opened by Client Services, with its reason and
  *                                                         note (201 the order case, services/order-cases.ts); ORBES
@@ -211,7 +212,7 @@ export const adminOrderRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
     return detail(request, id);
   });
 
-  // Plan MACRO M3 §4.2 (D2): an order's catalogue add-ons, added and removed by Client Services until SHIPPED.
+  // Plan MACRO M3 §4.2 (D2): an order's catalogue add-ons, added and removed by Client Services until its parcel is packed.
   app.get('/api/admin/orders/:id/addons', async (request) => {
     const { id } = parse(orderParams, request.params);
     return ctx.services.orderAddons.offerForStaff(id);

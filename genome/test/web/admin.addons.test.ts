@@ -253,7 +253,7 @@ describe('the order page\'s Add-ons', () => {
     expect(documentAddonLine(units, 'other')).toBeNull();
   });
 
-  it('offers Add an add-on to OPERATOR on an order RESERVED or PAID that takes add-ons, Remove on a unit held until SHIPPED', () => {
+  it('offers Add an add-on to OPERATOR on an order RESERVED or PAID that takes add-ons, Remove on a unit held on an order RESERVED or PAID (the server refusing once the parcel is packed)', () => {
     const o = { channel: 'DRAW' as const, shopifyOrderId: null, status: 'PAID' as const, currency: 'EUR' as const };
     expect(orderTakesAddons(o)).toBe(true);
     expect(orderTakesAddons({ ...o, channel: 'GIFT' })).toBe(false);
@@ -280,6 +280,7 @@ describe('the order page\'s Add-ons', () => {
     expect(addAddonTotal(OFFER, { addonId: '', units: '2' })).toBeNull();
     expect(noOfferText({ ...OFFER, offer: [] }, 'FRANCE WAREHOUSE')).toBe('No add-on is in stock at FRANCE WAREHOUSE with a price in EUR just now.');
     expect(noOfferText({ ...OFFER, offer: [], canAdd: false, reason: 'NO_CURRENCY', currency: null }, 'FRANCE WAREHOUSE')).toBe('Add-ons are offered once the order’s price and currency are entered.');
+    expect(noOfferText({ ...OFFER, offer: [], canAdd: false, reason: 'PACKED' }, 'FRANCE WAREHOUSE')).toBe('The parcel is packed: it no longer changes.');
   });
 
   it('lists a refund\'s shipped units, one line each', () => {

@@ -1110,6 +1110,18 @@
     --d-clear-end: calc(var(--d-dis) * (100% + 100vw));
   }
 
+  /* THE SET in the dark (lot M3 review): its pieces' photographs a band above the words, as in the light, each tile
+     narrower than the window, so the vw crop above cannot place it: the band ends 24 px above the frame's words
+     (--d-words-top, shared/desktop.ts), its foot veil fading it into the frame, and each piece is cropped at a fixed
+     point, whole. */
+  html:not([data-mode="light"]):not(.d-touch) body.nocturne :is(.now__hero, .d-pframe, .n-releases__release) > .n-ph.n-tiles {
+    --d-ph-h: calc(var(--d-words-top, 62%) - var(--d-s5));
+  }
+
+  html:not([data-mode="light"]):not(.d-touch) body.nocturne :is(.now__hero, .d-pframe, .n-releases__release) > .n-ph.n-tiles > img {
+    object-position: 50% 40%;
+  }
+
   /* The veils: the top darkened for the bar, the foot for the words (in the light mode: the dissolve, no top veil). */
   html:not(.d-touch) body.nocturne :is(.now__hero, .d-pframe, .n-releases__release, .n-lookbook__model:not(:where(.n-wishlist__card))) > .n-ph::before,
   html:not(.d-touch) body.nocturne .n-model__body > .n-model__photo::before,

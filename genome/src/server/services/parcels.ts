@@ -284,9 +284,10 @@ export function checklistOf(
   lines.push({ key: 'box', label: box ? `The box: ${box.name}, and the pouch` : 'The box and the pouch', byScan: false, ticked: ticked.has('box') });
   for (const o of orders) {
     o.addons.forEach((a, j) => lines.push({ key: `addon:${o.id}:${j}`, label: `Add-on: ${a.label}`, byScan: false, ticked: ticked.has(`addon:${o.id}:${j}`) }));
-    // Plan MACRO M3 §4.1 (D2): one line per catalogue add-on with its units, ticked by hand (no identity, no scan).
+    // Plan MACRO M3 §4.1 (D2): one line per catalogue add-on with its units, ticked by hand (no identity, no scan). The
+    // key carries the units, so a line ticked at × 2 no longer counts once staff make it 3.
     for (const a of addonItems.get(o.id) ?? []) {
-      const key = `addon-item:${o.id}:${a.addonId}`;
+      const key = `addon-item:${o.id}:${a.addonId}:${a.units}`;
       lines.push({ key, label: `Add-on: ${a.name} × ${a.units}`, byScan: false, ticked: ticked.has(key) });
     }
     if (o.engraving_text !== null) lines.push({ key: `engraving:${o.id}`, label: `Engraving done: "${o.engraving_text}"`, byScan: false, ticked: ticked.has(`engraving:${o.id}`) });

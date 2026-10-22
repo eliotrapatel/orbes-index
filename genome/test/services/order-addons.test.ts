@@ -11,7 +11,8 @@
  *  - YOUR ORDERS: what can be added now, added before PAID (an ADD_ON_ITEM line of the invoice at PAID), after PAID (a
  *    supplementary invoice), removed after PAID (a credit note for its line); refused once packing starts, on a welcome
  *    gift, a size exchange and a Shopify order, without a currency, closed, for a locked account;
- *  - staff add and remove until SHIPPED;
+ *  - staff add and remove until the parcel is packed (409 PACKING_PACKED after; a tick at × 2 no longer counts at × 3),
+ *    ship then moving exactly the units packed;
  *  - the life: cancel releases, ship moves −1 per unit, a return takes them back (`returned_to_stock`), a size exchange
  *    leaves them with the collector (billed again on its EXCHANGE order), a location change moves them or is refused
  *    (ORDER_ADDON_NOT_AT_LOCATION); a parcel problem brings them back (back to sender: to stock, then held or freed;
@@ -352,7 +353,7 @@ describe('add-ons on orders (plan MACRO M3 §4.2, D1 and D2)', () => {
 
   // ── Staff ────────────────────────────────────────────────────────────────
 
-  it('staff add and remove until SHIPPED, packing begun or not; a unit removed by its id; cancel releases what it held', async () => {
+  it('staff add and remove while packing has begun or not; a unit removed by its id; cancel releases what it held', async () => {
     const { orders: [o] } = await liveSale();
     clock.advance(MINUTE);
     await orders().transition(o!.id, { to: 'PAID' }, admin);
@@ -377,6 +378,40 @@ describe('add-ons on orders (plan MACRO M3 §4.2, D1 and D2)', () => {
     expect(await refusal(addons().addForStaff(o!.id, { addonId: strap.id, units: 1 }, admin))).toMatchObject({ code: 'ORDER_CLOSED', status: 409 });
   });
 
+  it('staff change the add-ons until the parcel is packed: a line ticked at × 2 no longer counts at × 3; once packed, add and remove are refused (409 PACKING_PACKED) and ship moves exactly the packed units', async () => {
+    const { orders: [o] } = await liveSale({ items: [{ addonId: cloth.id, units: 2 }] });
+    await stockFor(o!.id);
+    clock.advance(MINUTE);
+    await orders().transition(o!.id, { to: 'PAID' }, admin);
+    await linkPiece(o!.id);
+    await ctx.services.logistics.setPhoto(o!.id, { mime: 'image/jpeg', bytes: jpegPhoto(16, 12) }, admin, null);
+    const stale = (await ctx.services.logistics.parcel(o!.id, null)).checklist.filter((l) => !l.byScan).map((l) => l.key);
+    expect(stale).toContain(`addon-item:${o!.id}:${cloth.id}:2`);
+    // While PACKING, staff may still add: the page ticked at × 2 no longer packs the parcel.
+    clock.advance(1000);
+    await addons().addForStaff(o!.id, { addonId: cloth.id, units: 1 }, admin);
+    expect(await refusal(ctx.services.logistics.checkPacked(o!.id, { ticked: stale }, admin, null))).toMatchObject({ code: 'PACKING_INCOMPLETE' });
+    const fresh = (await ctx.services.logistics.parcel(o!.id, null)).checklist.filter((l) => !l.byScan).map((l) => l.key);
+    expect(fresh).toContain(`addon-item:${o!.id}:${cloth.id}:3`);
+    await ctx.services.logistics.checkPacked(o!.id, { ticked: fresh }, admin, null);
+    const packed = await t.db.selectFrom('shipments').select(['status', 'checklist']).where('order_id', '=', o!.id).executeTakeFirstOrThrow();
+    expect(packed.status).toBe('PACKED');
+    expect((packed.checklist as { key: string; label: string }[]).filter((l) => l.key.startsWith('addon-item:'))).toEqual([{ key: `addon-item:${o!.id}:${cloth.id}:3`, label: 'Add-on: POLISHING CLOTH × 3' }]);
+    // Packed: the sealed parcel never changes.
+    const held = await unitsOf(o!.id);
+    expect(await refusal(addons().addForStaff(o!.id, { addonId: strap.id, units: 1 }, admin))).toMatchObject({ code: 'PACKING_PACKED', status: 409 });
+    expect(await refusal(addons().removeForStaff(o!.id, held[0]!.id, admin))).toMatchObject({ code: 'PACKING_PACKED', status: 409 });
+    expect(await addons().offerForStaff(o!.id)).toMatchObject({ canAdd: false, reason: 'PACKED', offer: [] });
+    expect((await unitsOf(o!.id)).map((u) => u.status)).toEqual(['HELD', 'HELD', 'HELD']);
+    // Shipped: exactly the three units packed leave the ledger.
+    const before = await onHand(cloth.skuId);
+    clock.advance(MINUTE);
+    await ctx.services.logistics.ship(o!.id, { carrierId: colissimo, trackingNumber: '6A12345678902' }, admin, null);
+    expect((await unitsOf(o!.id)).map((u) => u.status)).toEqual(['SHIPPED', 'SHIPPED', 'SHIPPED']);
+    expect(await onHand(cloth.skuId)).toBe(before - 3);
+    expect(await refusal(addons().addForStaff(o!.id, { addonId: strap.id, units: 1 }, admin))).toMatchObject({ code: 'ORDER_CLOSED', status: 409 });
+  });
+
   // ── Packing, shipping, returning ─────────────────────────────────────────
 
   it('packed with the order (one checklist line per add-on, its weight in the parcel\'s), shipped −1 per unit, returned with returned_to_stock, credited in full', async () => {
@@ -393,8 +428,8 @@ describe('add-ons on orders (plan MACRO M3 §4.2, D1 and D2)', () => {
     await linkPiece(o!.id);
     const parcel = await ctx.services.logistics.parcel(o!.id, null);
     expect(parcel.checklist.filter((l) => l.key.startsWith('addon-item:')).map((l) => [l.key, l.label])).toEqual([
-      [`addon-item:${o!.id}:${cloth.id}`, 'Add-on: POLISHING CLOTH × 2'],
-      [`addon-item:${o!.id}:${extender.id}`, 'Add-on: CHAIN EXTENDER × 1'],
+      [`addon-item:${o!.id}:${cloth.id}:2`, 'Add-on: POLISHING CLOTH × 2'],
+      [`addon-item:${o!.id}:${extender.id}:1`, 'Add-on: CHAIN EXTENDER × 1'],
     ]);
     expect(parcel.orders[0]!.addonItems).toEqual([
       { name: 'POLISHING CLOTH', units: 2 },
@@ -403,7 +438,7 @@ describe('add-ons on orders (plan MACRO M3 §4.2, D1 and D2)', () => {
     expect(parcel.packing.weightG).toBe(100 + 40 + 2 * 20 + 15);
     // A line left unticked: not packed.
     await ctx.services.logistics.setPhoto(o!.id, { mime: 'image/jpeg', bytes: jpegPhoto(16, 12) }, admin, null);
-    expect(await refusal(ctx.services.logistics.checkPacked(o!.id, { ticked: parcel.checklist.filter((l) => !l.byScan && l.key !== `addon-item:${o!.id}:${cloth.id}`).map((l) => l.key) }, admin, null))).toMatchObject({ code: 'PACKING_INCOMPLETE' });
+    expect(await refusal(ctx.services.logistics.checkPacked(o!.id, { ticked: parcel.checklist.filter((l) => !l.byScan && l.key !== `addon-item:${o!.id}:${cloth.id}:2`).map((l) => l.key) }, admin, null))).toMatchObject({ code: 'PACKING_INCOMPLETE' });
     const before = { cloth: await onHand(cloth.skuId), extender: await onHand(extender.skuId) };
     await packAndShip(o!.id);
     expect((await t.db.selectFrom('shipments').select('weight_g').where('order_id', '=', o!.id).executeTakeFirstOrThrow()).weight_g).toBe(195);

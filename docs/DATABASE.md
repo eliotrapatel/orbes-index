@@ -2708,7 +2708,7 @@ Migration `0056_addons` (macro scope K48 D2; [API §10.30, §16.48](API.md#1648-
 
 - **Indexes:** primary key; `order_addon_items_held_idx (sku_id, location_id) WHERE status = 'HELD'`, the units held (as `orders_stock_reservation_idx` reads the orders' holds); each foreign key at the head of an index.
 - **Triggers:** the identity, order, add-on, SKU, price, currency, addition and author never change.
-- **Written by:** `OrderAddonService` and the order flows (`services/order-addons.ts`): carried at PAY, a draw's CONFIRMED or a salon's ACCEPTED, added and removed in YOUR ORDERS until packing and by staff until SHIPPED, cancelled, shipped (with a SHIPPED movement naming the unit, §5.48), returned, moved; every unit taken under its SKU's lock (`lockSku`, §8.2).
+- **Written by:** `OrderAddonService` and the order flows (`services/order-addons.ts`): carried at PAY, a draw's CONFIRMED or a salon's ACCEPTED, added and removed in YOUR ORDERS until packing and by staff until the parcel is packed (its shipment PACKED), cancelled, shipped (with a SHIPPED movement naming the unit, §5.48), returned, moved; every unit taken under its SKU's lock (`lockSku`, §8.2).
 - **Read by:** `stock_holds` (§6.1), the order's page, YOUR ORDERS, the invoices, the packing checklist and slips, the parcel's weight, the order and account exports. **Privacy:** what a collector bought, with their order.
 
 ### 5.134 `addon_choices`

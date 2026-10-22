@@ -615,7 +615,7 @@ function stockTab(ctx: ViewContext, stock: LogisticsStock): HTMLElement[] {
     ),
     section(
       ADDON_SKU_TEXT.group,
-      [h('p', { class: 'panel__text' }, ADDON_SKU_TEXT.groupLead), table(addonColumns, addons, { caption: ADDON_SKU_TEXT.group, empty: ADDON_SKU_TEXT.groupEmpty })],
+      [h('p', { class: 'panel__text' }, ADDON_SKU_TEXT.groupLead), table(addonColumns, addons, { caption: ADDON_SKU_TEXT.group, empty: agent ? ADDON_SKU_TEXT.groupEmptyAgent : ADDON_SKU_TEXT.groupEmpty })],
       { id: 'logistics-addons', note: `${formatCount(addons.reduce((n, r) => n + r.available, 0))} available` },
     ),
   ];

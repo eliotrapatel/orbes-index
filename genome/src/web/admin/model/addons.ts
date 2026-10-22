@@ -255,6 +255,8 @@ export const ADDON_SKU_TEXT = Object.freeze({
   group: 'Add-ons',
   groupLead: 'The add-ons’ stock at each location: counted without an ORBES CODE, held by the orders they are added to.',
   groupEmpty: 'No add-on yet: list one in Catalogue → Add-ons.',
+  /** The LOGISTICS agent's, who has no Catalogue page. */
+  groupEmptyAgent: 'No add-on yet.',
   receptionLine: 'No ORBES CODE: counted into stock',
 });
 
@@ -363,12 +365,16 @@ export function orderTakesAddons(o: Pick<OrderView, 'channel' | 'shopifyOrderId'
   return o.channel !== 'GIFT' && o.channel !== 'EXCHANGE' && o.shopifyOrderId === null;
 }
 
-/** Add an add-on: offered to OPERATOR, on an order RESERVED or PAID that takes add-ons, its currency entered (packing begun or not). */
+/**
+ * Add an add-on: offered to OPERATOR, on an order RESERVED or PAID that takes add-ons, its currency entered (packing
+ * begun or not). Once its parcel is packed, the dialog says so (the offer's `PACKED`) and the server refuses (409
+ * PACKING_PACKED).
+ */
 export function canAddAddon(o: Pick<OrderView, 'channel' | 'shopifyOrderId' | 'status' | 'currency'>, manage: boolean): boolean {
   return manage && orderTakesAddons(o) && (o.status === 'RESERVED' || o.status === 'PAID') && o.currency !== null;
 }
 
-/** Remove: a group held, on an order RESERVED or PAID (until SHIPPED). */
+/** Remove: a group held, on an order RESERVED or PAID, until its parcel is packed (the server refuses after: 409 PACKING_PACKED). */
 export function canRemoveAddon(o: Pick<OrderView, 'status'>, g: Pick<AddonGroup, 'status'>, manage: boolean): boolean {
   return manage && g.status === 'HELD' && (o.status === 'RESERVED' || o.status === 'PAID');
 }
@@ -404,6 +410,7 @@ export function noOfferText(offer: OrderAddonOffer, location: string): string {
   if (offer.reason === 'NO_CURRENCY') return 'Add-ons are offered once the order’s price and currency are entered.';
   if (offer.reason === 'CLOSED') return 'This order can no longer change.';
   if (offer.reason === 'NOT_OFFERED') return 'Add-ons are not offered on this order.';
+  if (offer.reason === 'PACKED') return 'The parcel is packed: it no longer changes.';
   return `No add-on is in stock at ${location} with a price in ${offer.currency ?? 'its currency'} just now.`;
 }
 

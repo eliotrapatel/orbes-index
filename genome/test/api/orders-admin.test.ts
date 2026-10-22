@@ -289,7 +289,7 @@ describe('orders, the stock and their settings: the console\'s routes', () => {
     h.clock.advance(MINUTE);
   });
 
-  it('adds and removes an order\'s add-ons (plan MACRO M3 §4.2, D2): an OPERATOR until SHIPPED, the order back with its units; an AUDITOR reads them and what can be added', async () => {
+  it('adds and removes an order\'s add-ons (plan MACRO M3 §4.2, D2): an OPERATOR until the parcel is packed, the order back with its units; an AUDITOR reads them and what can be added', async () => {
     const strap = await h.ctx.services.addons.create({ name: 'SPARE STRAP', skuCode: 'ADD-STRAP', prices: { EUR: 2_500 } }, f.admin);
     await h.ctx.services.stock.adjust({ skuId: strap.sku.id, locationId: france, delta: 3, note: 'Counted.' }, f.admin);
     const id = await salonOrder();

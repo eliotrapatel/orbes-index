@@ -3703,10 +3703,10 @@ export interface AddonOfferItem {
 /** Why an order takes no add-on now. */
 export type AddonWindowReason = 'NOT_OFFERED' | 'CLOSED' | 'PACKING_STARTED' | 'NO_CURRENCY';
 
-/** GET /api/admin/orders/:id/addons: what Add an add-on offers on the order now (packing begun or not, for staff). */
+/** GET /api/admin/orders/:id/addons: what Add an add-on offers on the order now (packing begun or not, for staff; none once its parcel is packed). */
 export interface OrderAddonOffer {
   canAdd: boolean;
-  reason: AddonWindowReason | null;
+  reason: Exclude<AddonWindowReason, 'PACKING_STARTED'> | 'PACKED' | null;
   /** The order is paid: an add-on added has its own invoice. */
   paid: boolean;
   currency: HouseCurrency | null;

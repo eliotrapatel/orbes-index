@@ -1369,12 +1369,12 @@ export class AdminApi {
     return this.get(`/api/admin/orders/${encodeURIComponent(id)}/addons`);
   }
 
-  /** OPERATOR: units of an add-on held on the order (409 ADDON_OUT_OF_STOCK, ADDON_LIMIT, ADDON_NOT_OFFERED); after PAID, its own invoice. */
+  /** OPERATOR: units of an add-on held on the order (409 ADDON_OUT_OF_STOCK, ADDON_LIMIT, ADDON_NOT_OFFERED, PACKING_PACKED); after PAID, its own invoice. */
   addOrderAddon(id: string, input: { addonId: string; units: number }): Promise<OrderDetail> {
     return this.post(`/api/admin/orders/${encodeURIComponent(id)}/addons`, input);
   }
 
-  /** OPERATOR: one unit held removed, until SHIPPED; after PAID, a credit note for its line. */
+  /** OPERATOR: one unit held removed, until its parcel is packed (409 PACKING_PACKED); after PAID, a credit note for its line. */
   removeOrderAddon(id: string, unitId: string): Promise<OrderDetail> {
     return this.request('DELETE', `/api/admin/orders/${encodeURIComponent(id)}/addons/${encodeURIComponent(unitId)}`);
   }

@@ -34,7 +34,7 @@
  *    download; CANCEL THE ORDER CASE with a note.
  *  - Its return: where the piece went, the note, whether ORBES took the ownership back.
  *  - Its add-ons (plan MACRO M3 §4.3, D2; views/addons.ts): each unit grouped, its price, who added it, its status; Add
- *    an add-on and Remove (OPERATOR, until SHIPPED); a refund's add-ons kept out of the stock when ticked.
+ *    an add-on and Remove (OPERATOR, until the parcel is packed); a refund's add-ons kept out of the stock when ticked.
  *  - Its documents (M7): the invoice and the credit note, each with its PDF; an add-on's own invoice said so.
  *  - Its history: each change, its note, who made it.
  * PACKING SLIP opens the printable slip (views/slip.ts). Each request is audited by the server; the page is read again.

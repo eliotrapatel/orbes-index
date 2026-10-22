@@ -214,7 +214,7 @@ export function draftChange(v: Record<string, string>): SupplierDraftChange {
 
 /** A line's dialog: a size (when added), its quantity, its unit price (empty while not known). */
 export function lineProblem(v: Record<string, string>, needsSku: boolean): string | null {
-  if (needsSku && !UUID_RE.test(v.skuId ?? '')) return 'Choose the size.';
+  if (needsSku && !UUID_RE.test(v.skuId ?? '')) return 'Choose a size or an add-on.';
   if (wholeIn(v.quantity, 1, SUPPLIER_ORDER_LIMITS.quantity) === null) return `A line holds 1 to ${formatCount(SUPPLIER_ORDER_LIMITS.quantity)} pieces.`;
   if ((v.unitPrice ?? '').trim() && amountOf(v.unitPrice) === null) return 'A unit price reads 120, or 120.50.';
   return null;

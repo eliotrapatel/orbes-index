@@ -8,7 +8,7 @@
  *    (the ids pasted back, as a model's). OPERATOR writes; every role that reads the catalogue reads.
  *  - The order page's Add-ons (views/order.ts): each unit grouped (name × units, price, who added it, status), Add an
  *    add-on (the add-ons in stock at the order's location in its currency, 1 to 3 units, the total) and Remove one unit
- *    (OPERATOR, until SHIPPED); after PAID, their invoice and credit notes in Documents.
+ *    (OPERATOR, until the parcel is packed); after PAID, their invoice and credit notes in Documents.
  *  - A SKU's first cell in Logistics and the supplier orders: its model, or its add-on marked ADD-ON.
  *  - The draw's Confirm and the salon's Accept: the collector's choices, and after, what was left out.
  * The words are in model/addons.ts; the server audits each change.

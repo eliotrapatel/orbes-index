@@ -96,7 +96,7 @@ describe('the dialogs', () => {
   });
 
   it('checks a line and sends the draft\'s lines whole, one changed, added or removed', () => {
-    expect(lineProblem({ skuId: '', quantity: '1' }, true)).toBe('Choose the size.');
+    expect(lineProblem({ skuId: '', quantity: '1' }, true)).toBe('Choose a size or an add-on.');
     expect(lineProblem({ quantity: '0' }, false)).toMatch(/1 to 10/);
     expect(lineProblem({ quantity: '2', unitPrice: 'x' }, false)).toMatch(/unit price/);
     expect(lineProblem({ quantity: '2', unitPrice: '' }, false)).toBeNull();

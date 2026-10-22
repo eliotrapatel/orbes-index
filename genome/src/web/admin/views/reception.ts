@@ -199,7 +199,7 @@ function countForm(ctx: ViewContext, order: ReceptionOrder, current: ReceptionVi
   );
 
   const others = () => order.offered.filter((k) => !onOrder.has(k.id) && !extras.some((x) => x.id === k.id));
-  const extraSelect = select('extra', [{ value: '', label: 'Choose a size' }, ...others().map((k) => ({ value: k.id, label: `${skuWords(k)} · ${k.code}` }))], '');
+  const extraSelect = select('extra', [{ value: '', label: 'Choose a size or an add-on' }, ...others().map((k) => ({ value: k.id, label: `${skuWords(k)} · ${k.code}` }))], '');
   extraSelect.setAttribute('data-testid', 'reception-extra-select');
   const addExtra = button(RECEPTION_TEXT.addExtra, {
     kind: 'ghost',

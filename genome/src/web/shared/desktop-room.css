@@ -1254,6 +1254,19 @@
     transition-duration: var(--d-dur-press);
   }
 
+  /* A narrow computer window (1024 to 1279 px), whose hold column is about 270 px wide: each add-on's words take the
+     row's whole width, its stepper under them (lot M3 review), so a name never breaks word by word. */
+  @media (max-width: 1279.98px) {
+    html:not(.d-touch) .d-room .n-addons--room .n-addons__item {
+      grid-template-columns: minmax(0, 1fr);
+      row-gap: var(--d-s2);
+    }
+
+    html:not(.d-touch) .d-room .n-addons--room .n-step {
+      justify-self: start;
+    }
+  }
+
   html:not(.d-touch) .d-room .d-room__br > .live__items-note {
     max-width: none;
     margin-top: var(--d-s3);

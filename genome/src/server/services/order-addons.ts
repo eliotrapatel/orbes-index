@@ -20,7 +20,10 @@
  *                packing starts (409 ORDER_PACKING_STARTED), never on a welcome gift, a size exchange nor an order
  *                paid on the Shopify store (409 ADDON_NOT_OFFERED: the platform takes no second payment it cannot
  *                take, S2), the order's currency entered; the account ACTIVE (403 ACCOUNT_LOCKED).
- *   staff        Client Services adds and removes units until SHIPPED (`addForStaff`, `removeForStaff`, OPERATOR).
+ *   staff        Client Services adds and removes units until the parcel is packed (`addForStaff`, `removeForStaff`,
+ *                OPERATOR; 409 PACKING_PACKED once its shipment is PACKED: the sealed parcel, its checklist and its
+ *                weight never change, and Ship moves exactly the units packed). While PACKING, Packed rebuilds the
+ *                checklist and the weight from the units held then.
  *   price        the add-on's price in the unit's currency when it is added, kept (`price_minor`, `currency`).
  *   documents    (services/invoices.ts) each unit is an ADD_ON_ITEM line (its name and price): on the invoice issued at
  *                PAID; added after PAID, a supplementary invoice of its lines (`invoice_id`); removed after PAID, a
@@ -32,8 +35,9 @@
  *                again on the EXCHANGE order's invoice as its original's return credits them); the order's location
  *                changed, its units move with it or the change is refused (`moveUnits`, 409
  *                ORDER_ADDON_NOT_AT_LOCATION).
- *   packing      one checklist line per add-on of each order (`addon-item:<orderId>:<addonId>`, « Add-on: POLISHING
- *                CLOTH × 2 »), ticked by hand (no scan: no identity); the parcel's weight adds each unit's weight.
+ *   packing      one checklist line per add-on of each order (`addon-item:<orderId>:<addonId>:<units>`, « Add-on:
+ *                POLISHING CLOTH × 2 »: a line ticked at × 2 no longer counts once staff make it 3), ticked by hand (no
+ *                scan: no identity); the parcel's weight adds each unit's weight.
  *   history      each addition and removal is one event of the order, one journal entry (`order.addon.add`,
  *                `order.addon.remove`: the order as it stands with the add-on, its units and price, for the future
  *                Shopify sync) and one audit entry; the units' stock movements journal themselves (`stock.move`).
@@ -76,6 +80,7 @@ const orderNotFound = () => notFound('Order', 'ORDER_NOT_FOUND');
 const orderClosed = () => conflict('ORDER_CLOSED', 'This order can no longer change.');
 const packingStarted = () => conflict('ORDER_PACKING_STARTED', 'Packing has begun: write to ORBES Client Services to change this order.');
 const unitNotFound = () => notFound('Add-on', 'ADDON_NOT_FOUND');
+const parcelPacked = () => conflict('PACKING_PACKED', 'The parcel is packed: it no longer changes.');
 
 // ── Views ──────────────────────────────────────────────────────────────────
 
@@ -155,6 +160,11 @@ export interface AccountAddonOffer {
 
 /** Why an order takes no add-on now. */
 export type AddonWindowReason = 'NOT_OFFERED' | 'CLOSED' | 'PACKING_STARTED' | 'NO_CURRENCY';
+
+/** GET /api/admin/orders/:id/addons: as the collector's, packing begun or not; `PACKED` once its parcel is packed. */
+export interface StaffAddonOffer extends Omit<AccountAddonOffer, 'reason'> {
+  reason: Exclude<AddonWindowReason, 'PACKING_STARTED'> | 'PACKED' | null;
+}
 
 /** Who adds or removes: the purchase (carried, no one named), the collector, or staff (an admin, or a script). */
 export interface AddonBy {
@@ -528,6 +538,21 @@ function removalWindow(o: WindowFacts): AddonWindowReason | null {
 const windowError = (why: AddonWindowReason) =>
   why === 'CLOSED' ? orderClosed() : why === 'PACKING_STARTED' ? packingStarted() : why === 'NO_CURRENCY' ? addonNotOffered('Add-ons are offered once the order’s price is entered.') : addonNotOffered('Add-ons are not offered on this order.');
 
+/**
+ * Whether the order's parcel (its first order's shipment, services/parcels.ts openShipment) is PACKED: sealed, its
+ * checklist and weight written. A plain read after the order's FOR UPDATE is enough: Packed locks every order of the
+ * parcel before it writes PACKED (the logistics lock order, the orders then the shipment).
+ */
+async function packedShipment(db: Db, o: Pick<OrderRow, 'id' | 'with_order_id'>): Promise<boolean> {
+  const s = await db.selectFrom('shipments').select('id').where('order_id', '=', o.with_order_id ?? o.id).where('status', '=', 'PACKED').executeTakeFirst();
+  return s !== undefined;
+}
+
+/** Staff change an order's add-ons until its parcel is packed (409 PACKING_PACKED). */
+async function assertNotPacked(tx: Db, o: Pick<OrderRow, 'id' | 'with_order_id'>): Promise<void> {
+  if (await packedShipment(tx, o)) throw parcelPacked();
+}
+
 // ── The changes (inside the order's transaction) ───────────────────────────
 
 /**
@@ -866,8 +891,9 @@ export class OrderAddonService {
 
   /**
    * Add an add-on (POST /api/admin/orders/:id/addons, OPERATOR): `units` of it on any order RESERVED or PAID (409
-   * ORDER_CLOSED once shipped or ended), packing begun or not; never on a welcome gift, a size exchange nor a Shopify
-   * order (409 ADDON_NOT_OFFERED), its currency entered. Audited `order.addon.add` by the admin.
+   * ORDER_CLOSED once shipped or ended), packing begun or not, until its parcel is packed (409 PACKING_PACKED); never
+   * on a welcome gift, a size exchange nor a Shopify order (409 ADDON_NOT_OFFERED), its currency entered. Audited
+   * `order.addon.add` by the admin.
    */
   async addForStaff(orderId: string, input: AddonUnitsInput, actor: Actor): Promise<void> {
     const adminId = this.staff(actor);
@@ -878,6 +904,7 @@ export class OrderAddonService {
       if (!o) throw orderNotFound();
       const why = addonWindow(o);
       if (why !== null && why !== 'PACKING_STARTED') throw windowError(why);
+      await assertNotPacked(tx, o);
       const done = await addUnits(tx, o, item!.addonId, item!.units, o.currency as HouseCurrency, { type: 'STAFF', id: adminId, actor }, this.clock());
       for (const n of done.notes) await this.audit.record(n, tx);
     });
@@ -885,8 +912,8 @@ export class OrderAddonService {
 
   /**
    * Remove one unit (DELETE /api/admin/orders/:id/addons/:lineId, OPERATOR): a unit HELD of the order (404
-   * ADDON_NOT_FOUND otherwise), until SHIPPED (409 ORDER_CLOSED). After PAID, a credit note for its line. Audited
-   * `order.addon.remove` by the admin.
+   * ADDON_NOT_FOUND otherwise), on an order RESERVED or PAID (409 ORDER_CLOSED) until its parcel is packed (409
+   * PACKING_PACKED). After PAID, a credit note for its line. Audited `order.addon.remove` by the admin.
    */
   async removeForStaff(orderId: string, unitId: string, actor: Actor): Promise<void> {
     const adminId = this.staff(actor);
@@ -896,6 +923,7 @@ export class OrderAddonService {
       const o = await tx.selectFrom('orders').selectAll().where('id', '=', id).forUpdate().executeTakeFirst();
       if (!o) throw orderNotFound();
       if (!ORDER_HOLDING_STATUSES.includes(o.status)) throw orderClosed();
+      await assertNotPacked(tx, o);
       const unit = (await unitsOf(tx, [o.id], ['HELD'])).find((u) => u.id === unitId.toLowerCase());
       if (!unit) throw unitNotFound();
       const notes = await removeUnits(tx, o, [unit], { type: 'STAFF', id: adminId, actor }, this.clock());
@@ -903,13 +931,17 @@ export class OrderAddonService {
     });
   }
 
-  /** The add-ons offered at a location in a currency now, as the console's Add an add-on dialog lists them for an order. */
-  async offerForStaff(orderId: string): Promise<AccountAddonOffer> {
+  /**
+   * The add-ons offered at a location in a currency now, as the console's Add an add-on dialog lists them for an order;
+   * none once its parcel is packed (`PACKED`).
+   */
+  async offerForStaff(orderId: string): Promise<StaffAddonOffer> {
     const id = this.knownOrder(orderId);
     const o = await this.db.selectFrom('orders').selectAll().where('id', '=', id).executeTakeFirst();
     if (!o) throw orderNotFound();
     const why = addonWindow(o);
-    const reason = why === 'PACKING_STARTED' ? null : why;
+    const open = why === null || why === 'PACKING_STARTED';
+    const reason: StaffAddonOffer['reason'] = !open ? why : (await packedShipment(this.db, o)) ? 'PACKED' : null;
     const currency = isHouseCurrency(o.currency) ? o.currency : null;
     const offer = reason === null ? await addonOffer(this.db, o.location_id, currency, await heldByAddon(this.db, o.id)) : [];
     return { canAdd: reason === null, reason, paid: o.status === 'PAID', currency, offer };

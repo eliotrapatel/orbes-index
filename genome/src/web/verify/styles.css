@@ -2873,6 +2873,11 @@ body.nocturne .view--release.n-release {
   margin-top: 6px;
 }
 
+/* A set draw's check under its last piece (lot M3 review): the entry's own line, apart from that piece's. */
+.release__entry > .release__yours-check {
+  margin-top: 14px;
+}
+
 /* THE SET (lot M3): a picker per piece, its name over its sizes; the set's lines under a release's title. */
 .release__piece {
   margin-top: 18px;

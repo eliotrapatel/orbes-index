@@ -166,7 +166,7 @@ export async function supplierOrderView(ctx: ViewContext): Promise<HTMLElement> 
       title: line ? 'Edit the line' : ORDER_TEXT.addLine,
       eyebrow: line ? `${skuWords(line.sku)} · ${line.sku.code}` : eyebrow,
       fields: [
-        ...(line ? [] : [{ name: 'skuId', label: 'Size', kind: 'select' as const, required: true, options: [{ value: '', label: 'Choose a size' }, ...offered.map((k) => ({ value: k.id, label: `${skuWords(k)} · ${k.code}` }))], value: '' }]),
+        ...(line ? [] : [{ name: 'skuId', label: 'Size or add-on', kind: 'select' as const, required: true, options: [{ value: '', label: 'Choose a size or an add-on' }, ...offered.map((k) => ({ value: k.id, label: `${skuWords(k)} · ${k.code}` }))], value: '' }]),
         { name: 'quantity', label: 'Quantity', required: true, maxlength: 5, value: line ? String(line.quantity) : '' },
         { name: 'unitPrice', label: 'Unit price', maxlength: 14, value: amountField(line?.unitPriceMinor), hint: `In ${o.currency ?? 'the order’s currency'}: 120, or 120.50. Required to send.` },
       ],
