@@ -181,6 +181,8 @@ export class AccountSheet {
   readonly el: HTMLElement;
   protected readonly panel: HTMLElement;
   protected trigger: HTMLElement | null = null;
+  /** What opened the sheet wants to know it closed (a piece's WORN after YOUR PROFILE); null for the rest. */
+  protected onClosed: (() => void) | null = null;
   protected view: View = 'account';
   /** The club's status and the pieces listed (for the note of a piece that counts for none); null until read, or unreadable. */
   protected club: ClubStatus | null = null;
@@ -335,13 +337,14 @@ export class AccountSheet {
    * Desktop: the sheet opened on one of its views (a computer's window narrowed to a phone's while that page
    * of the account was shown, main.ts).
    */
-  openOn(view: View, trigger: HTMLElement, part?: MessagesPart): void {
+  openOn(view: View, trigger: HTMLElement, part?: MessagesPart, onClosed?: () => void): void {
     if (view === 'messages') {
       this.openMessages(trigger, part);
       return;
     }
     this.open(trigger);
     if (!this.isOpen) return;
+    this.onClosed = onClosed ?? null;
     if (view === 'sizes') this.openSizes();
     else if (view === 'profile') this.openProfile();
     else if (view === 'addresses') this.openAddresses();
@@ -351,6 +354,7 @@ export class AccountSheet {
   open(trigger: HTMLElement): void {
     if (this.deps.session.state.status !== 'signed-in') return;
     this.trigger = trigger;
+    this.onClosed = null;
     this.view = 'account';
     this.notice = null;
     this.el.hidden = false;
@@ -395,6 +399,9 @@ export class AccountSheet {
     const back = this.trigger;
     this.trigger = null;
     if (back?.isConnected) back.focus({ preventScroll: true });
+    const closed = this.onClosed;
+    this.onClosed = null;
+    closed?.();
   }
 
   /** The sound was switched elsewhere (the footer): the switch follows. */

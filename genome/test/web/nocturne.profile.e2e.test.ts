@@ -17,13 +17,15 @@
  *    next read, and no line once switched off;
  *  - the birthday credit in the account sheet of an account without a tier (the state birthday-credit): THE CLUB, what
  *    a first piece opens, then IN USE with BIRTHDAY CREDIT alone and the note; its YOUR PROFILE with the birthday line;
+ *  - WORN's YOUR PROFILE on a phone (lot M2, step M2.10): the sheet over the piece, the first name and country saved,
+ *    the sheet closed, and the piece's WORN read again: CHOOSE A PHOTOGRAPH in place of the sentence;
  *  - at 390, 375, 360 and 320 px: no sideways scroll, every control's 44 px zone and 10 px type.
  * No CSP violation, no page error.
  */
 import { existsSync } from 'node:fs';
 import type { Page, Request } from 'playwright-core';
 import { describe, expect, it } from 'vitest';
-import { ACCOUNT_PROFILE, MESSAGES, REQUEST_ERRORS, TASTES, TIER } from '../../src/web/verify/copy.js';
+import { ACCOUNT_PROFILE, MESSAGES, REQUEST_ERRORS, TASTES, TIER, WORN } from '../../src/web/verify/copy.js';
 import { NOCTURNE_ADMIN, NOCTURNE_PASSWORD, type NocturneDemo } from '../support/nocturne-demo.js';
 import { eachState } from '../support/nocturne-stage.js';
 import { openState, settle, stateById, type OpenedState, type UiState } from '../support/nocturne-states.js';
@@ -327,6 +329,26 @@ const CASES: { state: UiState; check: Check }[] = [
       await view(page).locator('form.form--profile').waitFor({ timeout: 20_000 });
       expect(norm(await view(page).locator('.n-profile__dob-date').innerText())).toBe('5 OCTOBER 1994');
       expect((await view(page).locator('.n-profile__dob-set .n-fld__hint').allInnerTexts()).map(norm)).toEqual([ACCOUNT_PROFILE.birthSet, ACCOUNT_PROFILE.birthCredit('€ 20', 30)]);
+    },
+  },
+  {
+    // WORN's YOUR PROFILE (lot M2, step M2.10) on a phone: the account sheet over the piece, the first name and country
+    // saved, the sheet closed; the block has read its WORN again and offers CHOOSE A PHOTOGRAPH, the piece never left.
+    state: { ...stateById('piece-worn-profile'), id: 'profile-e2e-worn', mutates: true },
+    check: async ({ page }) => {
+      const worn = page.locator('.view--piece .piece__worn:not([hidden])');
+      expect(norm(await worn.locator('.n-worn__profile').innerText())).toBe(WORN.profile);
+      await worn.locator('.n-worn__profile-link').click();
+      await view(page).locator('form.form--profile').waitFor({ timeout: 20_000 });
+      await view(page).locator('#profile-first-name').fill('Léa');
+      await view(page).locator('#profile-country').selectOption('FR');
+      await view(page).locator('form.form--profile button[type="submit"]').click();
+      await sheet(page).getByText(ACCOUNT_PROFILE.saved).waitFor({ timeout: 20_000 });
+      await page.keyboard.press('Escape');
+      await expect.poll(() => page.locator('.n-account:not([hidden])').count(), POLL).toBe(0);
+      await worn.locator('.n-worn__choose').waitFor({ timeout: 20_000 });
+      expect(await worn.locator('.n-worn__profile').count()).toBe(0);
+      expect(await page.locator('.view--piece').count()).toBe(1);
     },
   },
 ];

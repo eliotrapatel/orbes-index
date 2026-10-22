@@ -135,6 +135,8 @@ interface RequestOptions {
 const DEFAULT_TIMEOUT_MS = 15_000;
 /** A WORN photograph (up to 1 MiB) sent from a phone on a slow network: its own, longer timeout. */
 export const WORN_SEND_TIMEOUT_MS = 60_000;
+/** A piece's WORN is read with the piece and must not hold it: its read gives up early (no block shown, the piece is). */
+export const WORN_READ_TIMEOUT_MS = 5_000;
 /** The contact of ORBES Client Services is optional: its read gives up early, and is tried again with the next result. */
 export const CONTACT_TIMEOUT_MS = 4_000;
 /** A LIVE RELEASE's clock sync gives up on a slow round trip (it is no use for the sync), and its state polled every 2 s on one that hangs. */
@@ -1071,7 +1073,7 @@ export class ApiClient {
 
   /** The piece's WORN for its owner: its photograph, whether one may be sent and why not, the credit it would carry. */
   async wornOfPiece(productId: string): Promise<PieceWorn> {
-    return checkedWorn(await this.request<PieceWorn>('GET', `/api/v1/account/products/${encodeURIComponent(productId)}/worn`));
+    return checkedWorn(await this.request<PieceWorn>('GET', `/api/v1/account/products/${encodeURIComponent(productId)}/worn`, undefined, { timeoutMs: WORN_READ_TIMEOUT_MS }));
   }
 
   /**

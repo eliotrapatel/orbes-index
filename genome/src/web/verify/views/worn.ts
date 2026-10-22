@@ -39,8 +39,11 @@ export interface WornDeps {
   productId: string;
   /** The piece's WORN as read with the piece; null when it could not be read (nothing is drawn). */
   worn: PieceWorn | null;
-  /** YOUR PROFILE: the account sheet's on a phone, its page on a computer. */
-  onProfile?(): void;
+  /**
+   * YOUR PROFILE: the account sheet's on a phone, its page on a computer. `closed` runs as the sheet over the piece
+   * closes, and the block reads its WORN again (a first name and country saved: CHOOSE A PHOTOGRAPH).
+   */
+  onProfile?(closed: () => void): void;
   /** SEE IT ON THE SHEET: the model's sheet in THE COLLECTION. */
   onSheet?(slug: string): void;
 }
@@ -135,7 +138,7 @@ export class WornBlock {
         out.push(
           ...this.refusedLines(s.refused),
           this.text(s.text, 'n-worn__profile'),
-          this.deps.onProfile ? h('p', { class: 'n-piece__action-line' }, textLink(WORN.profileLink, { onOpen: () => this.deps.onProfile?.(), extraClass: 'n-worn__profile-link' })) : null,
+          this.deps.onProfile ? h('p', { class: 'n-piece__action-line' }, textLink(WORN.profileLink, { onOpen: () => this.deps.onProfile?.(() => this.afterProfile()), extraClass: 'n-worn__profile-link' })) : null,
         );
         break;
       case 'choose':
@@ -420,6 +423,11 @@ export class WornBlock {
       this.busy = false;
     }
     this.render(this.confirm ? 'confirm' : wornState(this.worn).kind === 'choose' ? 'choose' : 'title');
+  }
+
+  /** The account sheet opened by YOUR PROFILE closed (a phone): read again, so a profile now complete offers CHOOSE A PHOTOGRAPH. */
+  private afterProfile(): void {
+    if (this.deps.session.state.status === 'signed-in') void this.refresh();
   }
 
   /** After a change of the piece elsewhere on its page (a report, PIECE FOUND, a transfer cancelled): read again, drawn again. */

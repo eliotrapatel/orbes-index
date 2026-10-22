@@ -75,8 +75,8 @@ export interface PieceDeps {
   onOrder?(reference: string): void;
   /** SEE THE MODEL: its sheet in THE COLLECTION (and WORN's SEE IT ON THE SHEET). */
   onModel?(slug: string): void;
-  /** WORN's YOUR PROFILE (lot M2): the account sheet's on a phone, its page on a computer. */
-  onProfile?(): void;
+  /** WORN's YOUR PROFILE (lot M2): the account sheet's on a phone (`closed` as it closes), its page on a computer. */
+  onProfile?(closed: () => void): void;
   onScan(): void;
 }
 
@@ -234,7 +234,7 @@ interface CardDeps {
   onRelease?(id: string): void;
   onOrder?(reference: string): void;
   onModel?(slug: string): void;
-  onProfile?(): void;
+  onProfile?(closed: () => void): void;
   /** The piece's WORN, read with it (lot M2); null when it could not be read. */
   worn: PieceWorn | null;
   tab?: PieceTabId;
@@ -796,8 +796,9 @@ class PieceCard {
 
   private async done(notice: string, guess: (p: OwnedPiece) => OwnedPiece): Promise<void> {
     await this.refresh(guess);
-    // WORN follows the piece's status (a report, PIECE FOUND, a transfer cancelled), read again with it.
-    await this.worn.refresh();
+    // WORN follows the piece's status (a report, PIECE FOUND, a transfer cancelled), read again with it; the notice does
+    // not wait for it: the block draws itself again when its read comes back.
+    void this.worn.refresh();
     this.confirm = null;
     this.choice = null;
     this.notice = notice;

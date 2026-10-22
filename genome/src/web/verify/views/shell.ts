@@ -324,9 +324,12 @@ export class Shell {
    * §5.4): on a computer the scan lives under SCAN in the top bar, so its page, VERIFYING…, a result and a problem of the
    * scan mark SCAN; on a phone the scan lives on NOW, which a result keeps marking.
    */
-  /** Desktop: the account sheet on one of its views (a window narrowed to a phone's on that page, main.ts). */
-  openAccountSheet(view: AccountView, part?: MessagesPart): void {
-    this.sheet.openOn(view, this.account, part);
+  /**
+   * Desktop: the account sheet on one of its views (a window narrowed to a phone's on that page, main.ts); also a
+   * piece's WORN, YOUR PROFILE on a phone, whose `onClosed` runs as the sheet closes.
+   */
+  openAccountSheet(view: AccountView, part?: MessagesPart, onClosed?: () => void): void {
+    this.sheet.openOn(view, this.account, part, onClosed);
   }
 
   /** Desktop: the account sheet closed, the view it showed (null: it was not open). */
