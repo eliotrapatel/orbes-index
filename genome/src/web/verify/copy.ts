@@ -1456,7 +1456,6 @@ export const RELEASES = Object.freeze({
     waitlistedIn: (size: string, rank: number) => `You are on the waiting list of ${drawSizeWords(size)}, rank ${rank}. ORBES Client Services will contact you if a place opens.`,
     reservedIn: (size: string, until: string) => `You reserved a place directly ${drawInSize(size)}. It is held until ${until} — ORBES Client Services will contact you.`,
   }),
-  /** The status of an entry, as MY PIECES and a release's page name it. */
   /**
    * Plan MACRO M3 §4.4 (D2), ADD TO YOUR ORDER on a place held of a draw with a price: the catalogue add-ons, each with
    * its units, saved at once and added when ORBES Client Services confirms the order (each while available).
@@ -1465,6 +1464,7 @@ export const RELEASES = Object.freeze({
     title: 'ADD TO YOUR ORDER',
     note: 'Your add-ons will be added when ORBES Client Services confirms your order.',
   }),
+  /** The status of an entry, as MY PIECES and a release's page name it. */
   statusLabel: Object.freeze({ ENTERED: 'ENTERED', SELECTED: 'PLACE HELD', WAITLISTED: 'WAITING LIST', CONFIRMED: 'CONCLUDED', LAPSED: 'LAPSED', WITHDRAWN: 'WITHDRAWN' }),
   /** P-X02: a place held by a direct reservation (SELECTED, not drawn). */
   reservedLabel: 'PLACE RESERVED',

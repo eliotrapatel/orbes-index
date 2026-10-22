@@ -307,6 +307,19 @@ describe('add-ons on orders (plan MACRO M3 §4.2, D1 and D2)', () => {
     if (extenders !== 1) await ctx.services.stock.adjust({ skuId: extender.skuId, locationId: france, delta: 1 - extenders, note: 'Counted.' }, admin);
     expect(await refusal(addons().addForAccount(account.id, o!.id, { addonId: extender.id, units: 2 }, account.actor))).toEqual({ code: 'ADDON_OUT_OF_STOCK', status: 409, message: 'CHAIN EXTENDER could not be added: none left.' });
     await countIn(extender.skuId, france, 4);
+    // ADD AN ADD-ON only while one is available for the order now (§4.1, §4.4): the CLOTH alone offered, until the
+    // order holds 3 of it; then none offered at all.
+    const others = (await t.db.selectFrom('addon_items').select('id').where('active', '=', true).where('id', '!=', cloth.id).execute()).map((a) => a.id);
+    await t.db.updateTable('addon_items').set({ active: false }).where('id', 'in', others).execute();
+    expect((await orders().accountOrder(account.id, o!.id)).canAddAddons).toBe(true);
+    await addons().addForAccount(account.id, o!.id, { addonId: cloth.id, units: 3 }, account.actor);
+    expect((await orders().accountOrder(account.id, o!.id)).canAddAddons).toBe(false);
+    await addons().removeForAccount(account.id, o!.id, cloth.id, account.actor);
+    expect((await orders().accountOrder(account.id, o!.id)).canAddAddons).toBe(true);
+    await t.db.updateTable('addon_items').set({ active: false }).where('id', '=', cloth.id).execute();
+    expect((await orders().accountOrder(account.id, o!.id)).canAddAddons).toBe(false);
+    await t.db.updateTable('addon_items').set({ active: true }).where('id', 'in', [cloth.id, ...others]).execute();
+    expect((await orders().accountOrder(account.id, o!.id)).canAddAddons).toBe(true);
     // Packing begun (once paid).
     clock.advance(MINUTE);
     await orders().transition(o!.id, { to: 'PAID' }, admin);

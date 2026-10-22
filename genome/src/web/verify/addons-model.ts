@@ -108,16 +108,17 @@ export function rowsLimit(rows: readonly AddonRowModel[]): string | null {
 
 /**
  * Add-ons chosen or carried as a receipt's rows: `POLISHING CLOTH × 2` · `+ € 30` (their price for all their units); one
- * no longer priced reads its name alone (its value '').
+ * no longer priced reads its name alone (its value ''). `money` writes the price: `+ € 30` by default, `€ 30` on a
+ * plate whose other add-ons read without the sign (the room's CONFIRMED).
  */
-export function chosenRows(list: readonly ChosenAddon[] | null | undefined, currency: string | null): Row[] {
+export function chosenRows(list: readonly ChosenAddon[] | null | undefined, currency: string | null, money: (minor: number, currency: string) => string = addonPrice): Row[] {
   const out: Row[] = [];
   for (const c of Array.isArray(list) ? list : []) {
     const n = units(c?.units);
     const name = upper(c?.name);
     if (!name || n <= 0) continue;
     const p = price(c.priceMinor);
-    out.push([ADDONS.units(name, n), p !== null && currency ? addonPrice(p * n, currency) : '']);
+    out.push([ADDONS.units(name, n), p !== null && currency ? money(p * n, currency) : '']);
   }
   return out;
 }
@@ -182,12 +183,19 @@ function packingBegun(o: AccountOrder): boolean {
 export function orderAddons(o: AccountOrder): OrderAddonsModel | null {
   const reference = typeof o.reference === 'string' ? o.reference : '';
   const items = Array.isArray(o.addonItems) ? o.addonItems : [];
-  const removable = items
-    .filter((a) => a && a.canRemove === true && typeof a.addonId === 'string' && UUID.test(a.addonId) && upper(a.name) !== '' && units(a.units) > 0)
-    .map((a) => {
-      const w = ADDONS.units(upper(a.name), units(a.units));
-      return { addonId: a.addonId, words: w, label: ORDERS.addons.removeLabel(w, reference) };
-    });
+  // One REMOVE per add-on: its rows at two prices (added before and after a price change) are one add-on, and REMOVE
+  // takes every unit of it still held.
+  const byAddon = new Map<string, { name: string; units: number }>();
+  for (const a of items) {
+    if (!a || a.canRemove !== true || typeof a.addonId !== 'string' || !UUID.test(a.addonId) || upper(a.name) === '' || units(a.units) <= 0) continue;
+    const seen = byAddon.get(a.addonId);
+    if (seen) seen.units += units(a.units);
+    else byAddon.set(a.addonId, { name: upper(a.name), units: units(a.units) });
+  }
+  const removable = [...byAddon].map(([addonId, a]) => {
+    const w = ADDONS.units(a.name, a.units);
+    return { addonId, words: w, label: ORDERS.addons.removeLabel(w, reference) };
+  });
   const canAdd = o.canAddAddons === true;
   if (removable.length > 0 || canAdd) return { removable, canAdd, removeNote: o.status === 'PAID' ? ORDERS.addons.paidRemove : null, locked: null };
   // Packing begun on an order that carries add-ons: they stay, and none is added now.

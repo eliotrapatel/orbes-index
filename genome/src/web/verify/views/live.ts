@@ -2238,8 +2238,9 @@ class LivePage {
       row(LIVE.rows.size, e.size.label),
       e.quantity > 1 ? row(LIVE.rows.pieces, String(e.quantity)) : null,
       ...e.addons.map((a) => row(upper(a.label), formatMoney(a.priceMinor * e.quantity, e.currency))),
-      // Plan MACRO M3 §4.4 (D2): the catalogue add-ons carried onto its order (POLISHING CLOTH × 2 · + € 30).
-      ...chosenRows(e.addonItems, e.currency).map(([label, value]) => row(label, value)),
+      // Plan MACRO M3 §4.4 (D2): the catalogue add-ons carried onto its order, written as the release's just above
+      // (POLISHING CLOTH × 2 · € 30).
+      ...chosenRows(e.addonItems, e.currency, formatMoney).map(([label, value]) => row(label, value)),
       row(LIVE.rows.total, formatMoney(e.totalMinor, e.currency)),
       row(LIVE.rows.reference, reference),
     );

@@ -159,8 +159,8 @@ import { modelSizeCandidates, offeredSku, savedSizeAmong, savedSizeHint, sizesFo
 import { parcelOrders, RETURN_WINDOW_DAYS } from './parcels.js';
 import {
   accountAddonItems,
+  accountAddonOpen,
   addonCurrencyFixed,
-  addonWindow,
   adminAddonUnits,
   cancelUnits,
   carryChoices,
@@ -593,7 +593,8 @@ export interface AccountOrder {
   /**
    * Plan MACRO M3 §4.2 (D2): its catalogue add-ons (POLISHING CLOTH × 2), one row per add-on and price, each removable
    * while it may be (held, before packing); and whether ADD AN ADD-ON is offered on it now (`canAddAddons`: RESERVED or
-   * PAID, before packing, its currency entered; never on a welcome gift, a size exchange nor a Shopify order).
+   * PAID, before packing, its currency entered, and at least one add-on available at its location in its currency that
+   * it may still take; never on a welcome gift, a size exchange nor a Shopify order).
    */
   addonItems: AccountOrderAddonItem[];
   canAddAddons: boolean;
@@ -2364,6 +2365,7 @@ export class OrderService {
         'o.engraving_text',
         'o.engraving_minor',
         'o.shopify_order_id',
+        'o.location_id',
         'm.name as model_name',
         'm.variant_label as model_variant',
         'm.image_sha256 as model_image',
@@ -2415,6 +2417,8 @@ export class OrderService {
     const care = await this.accountCases(accountId.toLowerCase(), rows);
     // Plan MACRO M3 §4.2 (D2): each order's catalogue add-ons.
     const addonItems = await accountAddonItems(this.db, rows);
+    // ADD AN ADD-ON only while one is available for the order now (§4.1, §4.4).
+    const addonOpen = await accountAddonOpen(this.db, rows);
     const deliveryOf = (r: (typeof rows)[number]): OrderAddress => (r.with_order_id === null ? ownAddress(r) : ownAddress(parents.get(r.with_order_id)!, r.with_order_id));
     // The order's own invoice and the credit note that cancels it; the others (plan NEXT LOT §3.6.C) listed apart.
     const mainOf = (orderId: string) => invoices.find((x) => x.order.id === orderId && x.kind === 'INVOICE' && x.supplements === null);
@@ -2440,7 +2444,7 @@ export class OrderService {
       currency: r.price_minor === null ? null : r.currency,
       addons: r.addons.map((a) => ({ label: a.label, priceMinor: a.priceMinor })),
       addonItems: addonItems.get(r.id) ?? [],
-      canAddAddons: addonWindow(r) === null,
+      canAddAddons: addonOpen.has(r.id),
       shipping: r.shipping_service === null ? null : { ...shippingOf(r), withOrder: r.with_order_id ? orderReference(r.with_order_id) : null },
       withOrder: r.with_order_id ? orderReference(r.with_order_id) : null,
       giftTier: r.gift_grant_id ? (giftTiers.get(r.gift_grant_id) === 3 ? 'PALLADIUM' : 'PLATINE') : null,

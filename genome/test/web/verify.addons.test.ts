@@ -33,6 +33,7 @@ import {
 import { ApiClient } from '../../src/web/verify/api.js';
 import { ADDONS, ORDERS } from '../../src/web/verify/copy.js';
 import { orderModel, orderRows } from '../../src/web/verify/orders-model.js';
+import { formatMoney } from '../../src/web/verify/view-model.js';
 import type { AccountOrder, AddonOfferItem, ChosenAddon } from '../../src/web/verify/types.js';
 
 const CLOTH = '0b5e7d1a-1c2d-4e5f-9a8b-7c6d5e4f3a2b';
@@ -116,6 +117,11 @@ describe('the add-ons’ rows (addons-model.ts)', () => {
       ['POLISHING CLOTH × 2', '+ €\u00a030'],
       ['CHAIN EXTENDER', ''],
     ]);
+    // On the room's CONFIRMED, written as the release's add-ons there: without the sign.
+    expect(chosenRows(list, 'EUR', formatMoney)).toEqual([
+      ['POLISHING CLOTH × 2', '€\u00a030'],
+      ['CHAIN EXTENDER', ''],
+    ]);
     expect(chosenTotal(list)).toBe(3_000);
     expect(addonPrice(12_345_600, 'GBP')).toBe('+ £\u00a0123\u00a0456');
     expect(
@@ -160,6 +166,9 @@ describe('an order’s add-ons in YOUR ORDERS (orders-model.ts, addons-model.ts)
       locked: null,
     });
     expect(orderAddons(order({ status: 'PAID', addonItems: items }))!.removeNote).toBe(ORDERS.addons.paidRemove);
+    // One add-on at two prices (added before and after a price change): one REMOVE for all its units.
+    const twice = [items[0]!, { ...items[0]!, units: 1, priceMinor: 2_000 }];
+    expect(orderAddons(order({ addonItems: twice }))!.removable).toEqual([{ addonId: CLOTH, words: 'POLISHING CLOTH × 3', label: 'Remove POLISHING CLOTH × 3 from order OR-3F9A21C4' }]);
     expect(orderModel(order({ addonItems: items }))!.addons?.canAdd).toBe(true);
   });
 

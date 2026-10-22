@@ -166,9 +166,10 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       priceMinor: 480_000,
       currency: 'EUR',
       addons: [{ label: 'Engraving', priceMinor: 25_000 }],
-      // Plan MACRO M3 §4.2 (D2): no catalogue add-on on it; one may be added (RESERVED, packing not begun, its currency known).
+      // Plan MACRO M3 §4.2 (D2): no catalogue add-on on it; though RESERVED, packing not begun and its currency known,
+      // ADD AN ADD-ON is not offered: the catalogue holds no add-on (§4.1, §4.4).
       addonItems: [],
-      canAddAddons: true,
+      canAddAddons: false,
       // BP-19 T4: an account below PLATINE, no rate set: no shipping, as before.
       shipping: null,
       // BP-19 T5: travelling with no order, not a welcome gift, no credit taken off it.

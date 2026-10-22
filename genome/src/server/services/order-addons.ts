@@ -390,6 +390,38 @@ export async function accountAddonItems(db: Db, orders: readonly Pick<OrderRow, 
   return out;
 }
 
+/**
+ * The orders of `orders` on which YOUR ORDERS offers ADD AN ADD-ON now (plan MACRO M3 §4.1, §4.4, D2): the order takes
+ * add-ons (`addonWindow`) and at least one add-on is offered at its location in its currency with a unit it may still
+ * take (`addonOffer` less the units of it the order holds), as `OrderAddonService.offerForAccount` would list it. The
+ * offer is read once per location and currency. Stock that runs out between this read and the sheet's leaves the
+ * sheet's « none available ».
+ */
+export async function accountAddonOpen(db: Db, orders: readonly Pick<OrderRow, 'id' | 'channel' | 'status' | 'packing_started_at' | 'shopify_order_id' | 'currency' | 'location_id'>[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  const open = orders.filter((o) => addonWindow(o) === null);
+  if (open.length === 0) return out;
+  const held = new Map<string, Map<string, number>>();
+  for (const u of await unitsOf(db, open.map((o) => o.id), ['HELD'])) {
+    const byAddon = held.get(u.order_id) ?? new Map<string, number>();
+    byAddon.set(u.addon_id, (byAddon.get(u.addon_id) ?? 0) + 1);
+    held.set(u.order_id, byAddon);
+  }
+  const offers = new Map<string, AddonOfferItem[]>();
+  for (const o of open) {
+    if (!isHouseCurrency(o.currency)) continue;
+    const key = `${o.location_id} ${o.currency}`;
+    let offer = offers.get(key);
+    if (!offer) {
+      offer = await addonOffer(db, o.location_id, o.currency);
+      offers.set(key, offer);
+    }
+    const mine = held.get(o.id);
+    if (offer.some((a) => (mine?.get(a.addonId) ?? 0) < ADDON_LIMIT)) out.add(o.id);
+  }
+  return out;
+}
+
 /** An order's units as the console reads them, oldest first. */
 export async function adminAddonUnits(db: Db, orderId: string): Promise<AdminOrderAddonUnit[]> {
   const rows = await db
