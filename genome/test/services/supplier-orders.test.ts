@@ -320,6 +320,69 @@ describe('SupplierOrderService (plan NEXT LOT §3.5.6.3)', () => {
     expect(Buffer.from(pdf.body.subarray(0, 5)).toString()).toBe('%PDF-');
   });
 
+  it('ADD TO DRAFTS (plan MACRO M3 §3.2, Z2): every line of a split in its supplier\'s draft for its location, in one go, from SPLIT; a size without a supplier refuses the whole call', async () => {
+    const alpha = await h.ctx.services.suppliers.create({ name: 'Split Alpha Works', currency: 'EUR' }, admin);
+    const beta = await h.ctx.services.suppliers.create({ name: 'Split Beta Works', currency: 'GBP' }, admin);
+    const model = (await h.ctx.db.insertInto('models').values({ category_id: (await h.ctx.categories.getByCode('J'))!.index, name: 'SPLITRING', type: 'RING', sku_prefix: 'SPL-RG', default_material: 'SILVER', supplier_id: alpha.id }).returning('id').executeTakeFirstOrThrow()).id;
+    const [k50, k52] = [await skuOf('50', model), await skuOf('52', model)];
+    // 52's own supplier: BETA.
+    await h.ctx.services.suppliers.setModelSupplier(model, { sizes: { [k52]: beta.id } }, admin);
+    // ALPHA's draft to FRANCE already holds a 50.
+    const held = await so().addToDraft({ skuId: k50, locationId: france, quantity: 1 }, admin);
+    const r = await so().addSplitToDrafts(
+      {
+        lines: [
+          { skuId: k52, locationId: logistics, quantity: 1 },
+          { skuId: k50, locationId: france, quantity: 3 },
+          { skuId: k52, locationId: france, quantity: 4 },
+          { skuId: k50, locationId: logistics, quantity: 2 },
+        ],
+      },
+      admin,
+    );
+    expect(r.pieces).toBe(10);
+    expect(r.drafts.map((d) => [d.supplier.name, d.location.name, d.lines, d.pieces, d.reference === supplierOrderReference(d.id)])).toEqual([
+      ['Split Alpha Works', 'FRANCE WAREHOUSE', 1, 3, true],
+      ['Split Alpha Works', 'LOGISTICS WAREHOUSE', 1, 2, true],
+      ['Split Beta Works', 'FRANCE WAREHOUSE', 1, 4, true],
+      ['Split Beta Works', 'LOGISTICS WAREHOUSE', 1, 1, true],
+    ]);
+    expect(r.drafts[0]!.id).toBe(held.id);
+    expect((await lineOf(held.id, k50)).quantity).toBe(4);
+    const betaFrance = await so().get(r.drafts[2]!.id);
+    expect(betaFrance).toMatchObject({ status: 'DRAFT', currency: 'GBP', supplier: { id: beta.id }, location: { id: france }, lines: [{ sku: { id: k52 }, quantity: 4 }] });
+    expect((await auditsOf(held.id)).map((a) => [a.action, a.details])).toEqual([
+      ['supplier_order.create', expect.objectContaining({ supplierId: alpha.id, locationId: france })],
+      ['supplier_order.draft', expect.objectContaining({ skuId: k50, quantity: 1, from: 'PROPOSAL' })],
+      ['supplier_order.draft', expect.objectContaining({ skuId: k50, quantity: 3, from: 'SPLIT' })],
+    ]);
+    expect((await auditsOf(r.drafts[3]!.id)).map((a) => [a.action, a.details])).toEqual([
+      ['supplier_order.create', expect.objectContaining({ supplierId: beta.id, locationId: logistics, currency: 'GBP' })],
+      ['supplier_order.draft', expect.objectContaining({ skuId: k52, quantity: 1, from: 'SPLIT' })],
+    ]);
+
+    // A size without a supplier: the whole call refused, naming it, nothing added; a size set aside likewise.
+    const loose = (await h.ctx.db.insertInto('models').values({ category_id: (await h.ctx.categories.getByCode('J'))!.index, name: 'SPLITLOOSE', type: 'RING', sku_prefix: 'SPL-LS', default_material: 'SILVER' }).returning('id').executeTakeFirstOrThrow()).id;
+    const kLoose = await skuOf('54', loose);
+    const count = async () => (await h.t.db.selectFrom('supplier_order_lines').select((eb) => eb.fn.sum<number>('quantity').as('n')).executeTakeFirstOrThrow()).n;
+    const before = await count();
+    expect(await refusal(so().addSplitToDrafts({ lines: [{ skuId: k50, locationId: france, quantity: 5 }, { skuId: kLoose, locationId: france, quantity: 1 }] }, admin))).toEqual({
+      code: 'SKU_NO_SUPPLIER',
+      status: 409,
+      message: "Set the supplier of SPLITLOOSE · 54 on its model's page first.",
+    });
+    const k54 = await skuOf('54', model);
+    await h.ctx.db.updateTable('skus').set({ set_aside_at: h.clock.now(), set_aside_by: admin.id! }).where('id', '=', k54).execute();
+    expect((await refusal(so().addSplitToDrafts({ lines: [{ skuId: k50, locationId: france, quantity: 5 }, { skuId: k54, locationId: france, quantity: 1 }] }, admin))).code).toBe('SIZE_SET_ASIDE');
+    expect(await count()).toEqual(before);
+    expect((await lineOf(held.id, k50)).quantity).toBe(4);
+    // Each size and location once; at least one line; staff only.
+    expect((await refusal(so().addSplitToDrafts({ lines: [{ skuId: k50, locationId: france, quantity: 1 }, { skuId: k50, locationId: france, quantity: 2 }] }, admin))).code).toBe('VALIDATION_FAILED');
+    expect((await refusal(so().addSplitToDrafts({ lines: [] }, admin))).code).toBe('VALIDATION_FAILED');
+    expect((await refusal(so().addSplitToDrafts({ lines: [{ skuId: k50, locationId: france, quantity: 0 }] }, admin))).code).toBe('VALIDATION_FAILED');
+    expect((await refusal(so().addSplitToDrafts({ lines: [{ skuId: k50, locationId: france, quantity: 1 }] }, { type: 'system' } as Actor))).code).toBe('FORBIDDEN');
+  });
+
   it('takes a size nothing calls for, ordered in advance: no waiting order, no minimum, nothing to order, and its pieces in the draft', async () => {
     const east = await h.ctx.services.suppliers.create({ name: 'Eastern Foundry', currency: 'EUR' }, admin);
     const model = (await h.ctx.db.insertInto('models').values({ category_id: (await h.ctx.categories.getByCode('J'))!.index, name: 'AXIS', type: 'RING', sku_prefix: 'AXS-RG', default_material: 'SILVER', supplier_id: east.id }).returning('id').executeTakeFirstOrThrow()).id;

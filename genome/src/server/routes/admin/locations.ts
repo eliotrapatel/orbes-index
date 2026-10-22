@@ -7,15 +7,17 @@
  *   GET    /api/admin/locations         AUDITOR  every location, the default first, with its address
  *   POST   /api/admin/locations         ADMIN    a location added, with its address when given
  *   PATCH  /api/admin/locations/:id     ADMIN    renamed, made the default, or its address entered or cleared (null)
+ *   PUT    /api/admin/locations/:id/countries  ADMIN  the countries it serves, as a whole (plan MACRO M3 §3.2, Z1): a
+ *                                                     country served elsewhere moves here, said in `moved`
  *   GET    /api/admin/carriers          AUDITOR  every carrier, the active ones first
  *   POST   /api/admin/carriers          ADMIN    a carrier added with its tracking link
  *   PATCH  /api/admin/carriers/:id      ADMIN    its name, its tracking link, offered or set aside
  *
  * Audited by StockService (`stock.location.create`, `.update` — the address by `fields: ['address']`, never its words —,
- * `carrier.create`, `carrier.update`).
+ * `stock.location.countries`, `carrier.create`, `carrier.update`). Every location is read with the countries it serves.
  */
 import type { FastifyPluginAsync } from 'fastify';
-import { createCarrierBody, createLocationBody, logisticsParams, parse, updateCarrierBody, updateLocationBody } from '../../http/schemas.js';
+import { createCarrierBody, createLocationBody, locationCountriesBody, logisticsParams, parse, updateCarrierBody, updateLocationBody } from '../../http/schemas.js';
 import { adminActor } from '../../http/sessions.js';
 import type { AdminRouteDeps } from './index.js';
 
@@ -41,6 +43,12 @@ export const adminLocationRoutes: FastifyPluginAsync<AdminRouteDeps> = async (ap
       { ...(b.name !== undefined ? { name: b.name } : {}), ...(b.isDefault ? { isDefault: true as const } : {}), ...(b.address !== undefined ? { address: b.address } : {}) },
       adminActor(request),
     );
+  });
+
+  app.put('/api/admin/locations/:id/countries', { config: ADMIN }, async (request) => {
+    const { id } = parse(logisticsParams, request.params);
+    const b = parse(locationCountriesBody, request.body);
+    return stock.setLocationCountries(id, b.countries, adminActor(request));
   });
 
   app.get('/api/admin/carriers', async () => ({ items: await stock.carriers() }));

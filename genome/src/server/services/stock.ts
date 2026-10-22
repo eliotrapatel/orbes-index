@@ -23,6 +23,13 @@
  * name or tracking link changed, set aside (`active` false: never offered for a shipment again, the orders shipped with
  * it keep it). Audited `stock.location.create`, `stock.location.update`, `carrier.create`, `carrier.update`.
  *
+ * The countries a location serves (macro scope K11 Z1; plan MACRO M3 §3.2; migration 0055): when ORBES orders a model by
+ * size (services/size-split.ts), a collector counts at the location that serves their country, and a country no
+ * location serves at the default location (`locationForCountry`). Each country is served by one location at most: set
+ * by an ADMIN (`setLocationCountries`), a country served elsewhere moves to the location set and the answer says so.
+ * Audited `stock.location.countries` (the codes added, removed and moved). A future Shopify store routes its orders by
+ * country through each location's `shopify_location_id` and follows the same map (S3, S4).
+ *
  * Every change of a SKU's stock or of its reservations takes the SKU's row FOR NO KEY UPDATE first (`lockSku`), after
  * the rows of the order or the release it serves: two orders never take the same last piece, and a transfer never moves
  * a piece an order has just reserved. Each movement is journaled (`stock.move`, services/journal.ts) in its transaction; the
@@ -32,6 +39,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
+import { COUNTRY_CODES, isCountryCode } from '../../shared/countries.js';
 import { inRetriedTransaction, inTransaction, type Db } from '../db/connection.js';
 import type { JsonObject, StockMovementReason } from '../db/schema.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
@@ -160,6 +168,23 @@ export interface StockLocationView {
    * address; null while none is entered.
    */
   address: string | null;
+  /**
+   * The countries it serves (migration 0055, plan MACRO M3 §3.2): ISO 3166-1 alpha-2 codes in alphabetical order; empty
+   * when it serves none (its collectors then count at the default location).
+   */
+  countries: string[];
+}
+
+/** A country moved to a location from the location that served it (setLocationCountries' answer). */
+export interface MovedCountry {
+  country: string;
+  from: { id: string; name: string };
+}
+
+/** setLocationCountries' answer: the location with its countries, and the countries taken from another location. */
+export interface LocationCountriesResult {
+  location: StockLocationView;
+  moved: MovedCountry[];
 }
 
 /** A carrier as the console reads it. */
@@ -199,12 +224,13 @@ export function checkTrackingUrl(v: unknown): string {
   return s;
 }
 
-const locationView = (r: { id: string; name: string; is_default: boolean; shopify_location_id: string | null; address: string | null }): StockLocationView => ({
+const locationView = (r: { id: string; name: string; is_default: boolean; shopify_location_id: string | null; address: string | null }, countries: readonly string[] = []): StockLocationView => ({
   id: r.id,
   name: r.name,
   isDefault: r.is_default,
   shopifyLocationId: r.shopify_location_id,
   address: r.address,
+  countries: [...countries].sort(),
 });
 const LOCATION_COLUMNS = ['id', 'name', 'is_default', 'shopify_location_id', 'address'] as const;
 
@@ -223,6 +249,41 @@ export function cleanLocationAddress(v: unknown): string | null {
   return s;
 }
 const carrierView = (r: { id: string; name: string; tracking_url: string; active: boolean }): CarrierView => ({ id: r.id, name: r.name, trackingUrl: r.tracking_url, active: r.active });
+
+/**
+ * The countries a location is given (plan MACRO M3 §3.2), as the console sends them: a list of ISO 3166-1 alpha-2 codes
+ * (COUNTRY_CODES, any case, trimmed), each once, at most every country; an empty list serves none. 400 for anything else.
+ */
+export function cleanLocationCountries(v: unknown): string[] {
+  if (!Array.isArray(v)) throw validationError('Send the countries as a list.');
+  if (v.length > COUNTRY_CODES.length) throw validationError(`A location serves at most ${COUNTRY_CODES.length} countries.`);
+  const out = new Set<string>();
+  for (const c of v) {
+    const code = typeof c === 'string' ? c.trim().toUpperCase() : '';
+    if (!isCountryCode(code)) throw validationError(typeof c === 'string' && c.trim() !== '' ? `${c.trim().slice(0, 12)} is not a country.` : 'Choose a country.');
+    out.add(code);
+  }
+  return [...out].sort();
+}
+
+/** The countries served, each with the location that serves it (stock_location_countries). */
+export async function locationCountryMap(db: Db): Promise<Map<string, string>> {
+  const rows = await db.selectFrom('stock_location_countries').select(['country', 'location_id']).execute();
+  return new Map(rows.map((r) => [r.country, r.location_id]));
+}
+
+/**
+ * The location a collector of `country` counts at (plan MACRO M3 §3.1): the location that serves it, else the default
+ * location (a country no location serves, or none known); 503 STOCK_NOT_READY before the setup.
+ */
+export async function locationForCountry(db: Db, country: string | null | undefined): Promise<string> {
+  const code = typeof country === 'string' ? country.trim().toUpperCase() : '';
+  if (isCountryCode(code)) {
+    const row = await db.selectFrom('stock_location_countries').select('location_id').where('country', '=', code).executeTakeFirst();
+    if (row) return row.location_id;
+  }
+  return defaultLocationId(db);
+}
 
 // ── Setup ──────────────────────────────────────────────────────────────────
 
@@ -617,7 +678,71 @@ export class StockService {
   /** Every location, the default first, then by name. */
   async locations(): Promise<StockLocationView[]> {
     const rows = await this.db.selectFrom('stock_locations').select([...LOCATION_COLUMNS]).orderBy('is_default', 'desc').orderBy('name').execute();
-    return rows.map(locationView);
+    const served = await this.locationCountries();
+    return rows.map((r) => locationView(r, served.get(r.id)));
+  }
+
+  /** The countries each location serves (migration 0055): location id → its codes, in alphabetical order. */
+  async locationCountries(): Promise<Map<string, string[]>> {
+    const out = new Map<string, string[]>();
+    for (const [country, locationId] of await locationCountryMap(this.db)) out.set(locationId, [...(out.get(locationId) ?? []), country]);
+    for (const list of out.values()) list.sort();
+    return out;
+  }
+
+  /** The location a collector of `country` counts at: the one that serves it, else the default (locationForCountry). */
+  locationForCountry(country: string | null | undefined): Promise<string> {
+    return locationForCountry(this.db, country);
+  }
+
+  /**
+   * The countries a location serves, set as a whole (plan MACRO M3 §3.2, ADMIN): the list given becomes its countries
+   * (cleanLocationCountries; empty: none), a country it no longer lists stops being served (its collectors then count
+   * at the default location), and a country another location served moves to this one, said in the answer (`moved`,
+   * with the location it left). 404 STOCK_LOCATION_NOT_FOUND. Audited `stock.location.countries` with the codes added,
+   * removed and moved; the same list again changes nothing and is not audited.
+   */
+  async setLocationCountries(locationId: string, countries: readonly string[], actor: Actor): Promise<LocationCountriesResult> {
+    const id = await knownLocation(this.db, locationId);
+    const wanted = cleanLocationCountries(countries);
+    const updatedBy = actor?.type === 'admin' && typeof actor.id === 'string' && UUID_RE.test(actor.id) ? actor.id : null;
+    return inRetriedTransaction(this.db, async (tx) => {
+      // The location first, then the countries' rows: two ADMINs setting the same location queue here.
+      const row = await tx.selectFrom('stock_locations').select([...LOCATION_COLUMNS]).where('id', '=', id).forUpdate().executeTakeFirst();
+      if (!row) throw locationNotFound();
+      const mine = await tx.selectFrom('stock_location_countries').select('country').where('location_id', '=', id).forUpdate().execute();
+      const elsewhere = wanted.length
+        ? await tx
+            .selectFrom('stock_location_countries as c')
+            .innerJoin('stock_locations as l', 'l.id', 'c.location_id')
+            .select(['c.country', 'l.id', 'l.name'])
+            .where('c.country', 'in', wanted)
+            .where('c.location_id', '<>', id)
+            .forUpdate('c')
+            .execute()
+        : [];
+      const had = new Set(mine.map((r) => r.country));
+      const removed = [...had].filter((c) => !wanted.includes(c)).sort();
+      const moved: MovedCountry[] = elsewhere.map((r) => ({ country: r.country, from: { id: r.id, name: r.name } })).sort((a, b) => a.country.localeCompare(b.country));
+      const added = wanted.filter((c) => !had.has(c) && !moved.some((m) => m.country === c));
+      if (removed.length) await tx.deleteFrom('stock_location_countries').where('location_id', '=', id).where('country', 'in', removed).execute();
+      if (moved.length) await tx.updateTable('stock_location_countries').set({ location_id: id, updated_by: updatedBy }).where('country', 'in', moved.map((m) => m.country)).execute();
+      if (added.length) {
+        // A country served elsewhere at the same instant (by another ADMIN) moves here all the same.
+        await tx
+          .insertInto('stock_location_countries')
+          .values(added.map((country) => ({ country, location_id: id, updated_by: updatedBy })))
+          .onConflict((oc) => oc.column('country').doUpdateSet({ location_id: id, updated_by: updatedBy }))
+          .execute();
+      }
+      if (removed.length + moved.length + added.length > 0) {
+        await this.audit.record(
+          { actor, action: 'stock.location.countries', targetType: 'stock_location', targetId: id, details: { added, removed, moved: moved.map((m) => ({ country: m.country, from: m.from.id })) } },
+          tx,
+        );
+      }
+      return { location: locationView(row, wanted), moved };
+    });
   }
 
   /**
@@ -631,7 +756,7 @@ export class StockService {
       inTransaction(this.db, async (tx) => {
         const row = await tx.insertInto('stock_locations').values({ name, address, created_at: this.clock() }).returning([...LOCATION_COLUMNS]).executeTakeFirstOrThrow();
         await this.audit.record({ actor, action: 'stock.location.create', targetType: 'stock_location', targetId: row.id, details: { name, ...(address ? { fields: ['address'] } : {}) } }, tx);
-        return locationView(row);
+        return locationView(row, []);
       }),
     );
   }
@@ -670,7 +795,11 @@ export class StockService {
         }
         if (Object.keys(details).length === 0) throw validationError('Nothing to change.');
         await this.audit.record({ actor, action: 'stock.location.update', targetType: 'stock_location', targetId: id, details }, tx);
-        return locationView(await tx.selectFrom('stock_locations').select([...LOCATION_COLUMNS]).where('id', '=', id).executeTakeFirstOrThrow());
+        const countries = await tx.selectFrom('stock_location_countries').select('country').where('location_id', '=', id).execute();
+        return locationView(
+          await tx.selectFrom('stock_locations').select([...LOCATION_COLUMNS]).where('id', '=', id).executeTakeFirstOrThrow(),
+          countries.map((c) => c.country),
+        );
       }),
     );
   }

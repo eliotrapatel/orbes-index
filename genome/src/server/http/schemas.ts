@@ -10,6 +10,7 @@
  * about the values of the keys they know.
  */
 import { z } from 'zod';
+import { COUNTRY_CODES } from '../../shared/countries.js';
 import {
   ACCESS_COMBINES,
   ANOMALY_SEVERITIES,
@@ -115,7 +116,8 @@ import { BOARD_SEARCH_MAX, ORDER_ALERT_LIMITS } from '../services/fulfilment.js'
 import { ORDER_AMOUNT_MAX_MINOR, ORDER_CURRENCIES, ORDER_TEXT_LIMITS } from '../services/orders.js';
 import { CARRIER_NAME_MAX, LOCATION_ADDRESS_MAX, LOCATION_NAME_MAX, STOCK_MOVE_MAX, STOCK_NOTE_MAX, TRACKING_URL_MAX } from '../services/stock.js';
 import { SUPPLIER_LIMITS } from '../services/suppliers.js';
-import { SUPPLIER_ORDER_LIMITS } from '../services/supplier-orders.js';
+import { DRAFT_LINE_FROM, SUPPLIER_ORDER_LIMITS } from '../services/supplier-orders.js';
+import { SPLIT_LOCATIONS_MAX, SPLIT_QUANTITY_MAX } from '../services/size-split.js';
 import { RECEPTION_LIMITS } from '../services/receptions.js';
 import { LOGISTICS_LIMITS } from '../services/logistics.js';
 import { ORDER_CASE_LIMITS } from '../services/order-cases.js';
@@ -2255,6 +2257,14 @@ export const updateLocationBody = body({ name: text(LOCATION_NAME_MAX).optional(
   'Send at least one field of the location to change',
 );
 
+/**
+ * PUT /api/admin/locations/:id/countries (plan MACRO M3 §3.2): the countries it serves, as a whole (an empty list: none);
+ * each an ISO 3166-1 alpha-2 code, which StockService checks against the list of countries.
+ */
+export const locationCountriesBody = body({
+  countries: z.array(z.string().trim().min(1, 'Choose a country').max(12, 'A country is its two-letter code')).max(COUNTRY_CODES.length, `At most ${COUNTRY_CODES.length} countries`),
+});
+
 export const createCarrierBody = body({ name: text(CARRIER_NAME_MAX), trackingUrl: text(TRACKING_URL_MAX) });
 
 /** PATCH /api/admin/carriers/:id: its name, its tracking link, whether it is offered. At least one. */
@@ -2360,7 +2370,22 @@ export const supplierDraftLineBody = body({
   skuId: uuid,
   locationId: uuid,
   quantity: whole(1, SUPPLIER_ORDER_LIMITS.quantity, 'pieces'),
-  from: z.enum(['PROPOSAL', 'RELEASE']).optional(),
+  from: z.enum(DRAFT_LINE_FROM).optional(),
+});
+
+/** POST /api/admin/supplier-orders/split (plan MACRO M3 §3.2, Z1): a model or a variant, the pieces, the locations (every one when omitted). */
+export const supplierSplitBody = body({
+  modelId: uuid,
+  quantity: whole(1, SPLIT_QUANTITY_MAX, 'pieces'),
+  locationIds: z.array(uuid).min(1, 'Choose at least one location').max(SPLIT_LOCATIONS_MAX, `At most ${SPLIT_LOCATIONS_MAX} locations`).optional(),
+});
+
+/** POST /api/admin/supplier-orders/split/drafts (plan MACRO M3 §3.2, Z2): the split's lines as staff left them, each size and location once. */
+export const supplierSplitDraftsBody = body({
+  lines: z
+    .array(z.strictObject({ skuId: uuid, locationId: uuid, quantity: whole(1, SUPPLIER_ORDER_LIMITS.quantity, 'pieces') }))
+    .min(1, 'Add at least one line')
+    .max(SUPPLIER_ORDER_LIMITS.lines, `At most ${SUPPLIER_ORDER_LIMITS.lines} lines`),
 });
 
 /** PATCH /api/admin/supplier-orders/:id: a draft's lines (the list becomes its lines), currency, shipping, expected date, note. At least one. */

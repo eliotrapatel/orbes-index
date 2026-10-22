@@ -13,6 +13,11 @@
  *   GET    /api/admin/supplier-orders                          AUDITOR   the list (?status=&supplierId=), the latest first
  *   GET    /api/admin/supplier-orders/proposal                 AUDITOR   « the console proposes » (?locationId=&supplierId=)
  *   POST   /api/admin/supplier-orders/draft-lines              OPERATOR  pieces of a size added to its supplier's draft
+ *   POST   /api/admin/supplier-orders/split                    OPERATOR  ORDER A MODEL: the pieces split by size and
+ *                                                                        location (plan MACRO M3 §3.2, Z1; it reads
+ *                                                                        saved sizes, as counts only)
+ *   POST   /api/admin/supplier-orders/split/drafts             OPERATOR  ADD TO DRAFTS: the split's lines, as staff left
+ *                                                                        them, in their suppliers' drafts (Z2)
  *   GET    /api/admin/supplier-orders/:id                      AUDITOR   one order: lines, not on the order, receptions,
  *                                                                        returns, invoice, history
  *   PATCH  /api/admin/supplier-orders/:id                      OPERATOR  a draft's lines, currency, shipping, date, note
@@ -46,6 +51,8 @@ import {
   supplierParams,
   supplierProposalQuery,
   supplierReturnParams,
+  supplierSplitBody,
+  supplierSplitDraftsBody,
   updateSupplierBody,
   updateSupplierOrderBody,
 } from '../../http/schemas.js';
@@ -72,7 +79,7 @@ export function supplierJson(s: SupplierView) {
 }
 
 export const adminSupplierOrderRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
-  const { suppliers, sizes, supplierOrders } = ctx.services;
+  const { suppliers, sizes, sizeSplit, supplierOrders } = ctx.services;
 
   app.get('/api/admin/suppliers', async () => itemsOf((await suppliers.list()).map(supplierJson)));
 
@@ -115,6 +122,16 @@ export const adminSupplierOrderRoutes: FastifyPluginAsync<AdminRouteDeps> = asyn
   app.post('/api/admin/supplier-orders/draft-lines', async (request) => {
     const b = parse(supplierDraftLineBody, request.body);
     return supplierOrders.addToDraft(b, adminActor(request));
+  });
+
+  app.post('/api/admin/supplier-orders/split', async (request) => {
+    const b = parse(supplierSplitBody, request.body);
+    return sizeSplit.splitProposal({ modelId: b.modelId, quantity: b.quantity, ...(b.locationIds ? { locationIds: b.locationIds } : {}) });
+  });
+
+  app.post('/api/admin/supplier-orders/split/drafts', async (request) => {
+    const b = parse(supplierSplitDraftsBody, request.body);
+    return supplierOrders.addSplitToDrafts(b, adminActor(request));
   });
 
   app.get('/api/admin/supplier-orders/:id', async (request) => {

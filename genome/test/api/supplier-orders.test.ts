@@ -114,6 +114,61 @@ describe('supplier orders over HTTP (plan NEXT LOT §3.5.6.9)', () => {
     expect(errorOf(await operator.post(`/api/admin/supplier-returns/00000000-0000-4000-8000-000000000000/settle`, { settlement: 'CREDIT' })).code).toBe('VALIDATION_FAILED');
   });
 
+  it('ORDER A MODEL (plan MACRO M3 §3.2, Z1, Z2): the split proposed to an OPERATOR in counts only, its lines added to the drafts; a location\'s countries set by an ADMIN', async () => {
+    const logistics = (await h.t.db.selectFrom('stock_locations').select('id').where('name', '=', 'LOGISTICS WAREHOUSE').executeTakeFirstOrThrow()).id;
+    const body = { modelId: catalog.modelId, quantity: 5 };
+    expect(errorOf(await auditor.post('/api/admin/supplier-orders/split', body)).code).toBe('FORBIDDEN');
+    expect((await agent.post('/api/admin/supplier-orders/split', body)).statusCode).toBe(403);
+    expect(errorOf(await operator.post('/api/admin/supplier-orders/split', { ...body, quantity: 10_001 })).code).toBe('VALIDATION_FAILED');
+    expect(errorOf(await operator.post('/api/admin/supplier-orders/split', { ...body, locationIds: [] })).code).toBe('VALIDATION_FAILED');
+    const res = await operator.post('/api/admin/supplier-orders/split', body);
+    expect(res.statusCode).toBe(200);
+    const split = safeJson(res) as Json;
+    // MONOLITHE has no size kind: its two orders waiting at FRANCE, no saved size.
+    expect(split).toEqual({
+      model: { id: catalog.modelId, name: 'MONOLITHE', variant: null },
+      sizeKind: null,
+      quantity: 5,
+      locations: [
+        { id: france, name: 'FRANCE WAREHOUSE', isDefault: true },
+        { id: logistics, name: 'LOGISTICS WAREHOUSE', isDefault: false },
+      ],
+      lines: [
+        { sku: { id: sku, code: expect.any(String), sizeLabel: '52' }, location: { id: france, name: 'FRANCE WAREHOUSE' }, orders: 2, savedSizes: 0, proposed: 5 },
+        { sku: { id: sku, code: expect.any(String), sizeLabel: '52' }, location: { id: logistics, name: 'LOGISTICS WAREHOUSE' }, orders: 0, savedSizes: 0, proposed: 0 },
+      ],
+      totals: { orders: 2, savedSizes: 0, proposed: 5 },
+      unmatched: 0,
+      source: 'DATA',
+    });
+    for (const a of await h.t.db.selectFrom('accounts').select('id').execute()) expect(res.body).not.toContain(a.id);
+
+    const drafts = { lines: [{ skuId: sku, locationId: logistics, quantity: 3 }] };
+    expect(errorOf(await auditor.post('/api/admin/supplier-orders/split/drafts', drafts)).code).toBe('FORBIDDEN');
+    expect(errorOf(await operator.post('/api/admin/supplier-orders/split/drafts', { lines: [] })).code).toBe('VALIDATION_FAILED');
+    const added = safeJson(await operator.post('/api/admin/supplier-orders/split/drafts', drafts)) as Json;
+    expect(added).toEqual({
+      drafts: [{ id: expect.any(String), reference: expect.stringMatching(/^SO-[0-9A-F]{8}$/), supplier: { id: supplierId, name: 'Maison Nord' }, location: { id: logistics, name: 'LOGISTICS WAREHOUSE' }, lines: 1, pieces: 3 }],
+      pieces: 3,
+    });
+    expect(safeJson(await auditor.get(`/api/admin/supplier-orders/${added.drafts[0].id}`))).toMatchObject({ status: 'DRAFT', lines: [{ sku: { id: sku }, quantity: 3 }] });
+
+    // A location's countries: an ADMIN's, read by every role with the locations.
+    const boss = await adminClient(h, 'ADMIN');
+    expect(errorOf(await operator.request('PUT', `/api/admin/locations/${logistics}/countries`, { body: { countries: ['GB'] } })).code).toBe('FORBIDDEN');
+    expect(errorOf(await boss.request('PUT', `/api/admin/locations/${logistics}/countries`, { body: { countries: ['XX'] } })).code).toBe('VALIDATION_FAILED');
+    expect(errorOf(await boss.request('PUT', `/api/admin/locations/${logistics}/countries`, { body: {} })).code).toBe('VALIDATION_FAILED');
+    expect(safeJson(await boss.request('PUT', `/api/admin/locations/${france}/countries`, { body: { countries: ['GB', 'FR'] } }))).toMatchObject({ location: { id: france, countries: ['FR', 'GB'] }, moved: [] });
+    expect(safeJson(await boss.request('PUT', `/api/admin/locations/${logistics}/countries`, { body: { countries: ['gb'] } }))).toEqual({
+      location: { id: logistics, name: 'LOGISTICS WAREHOUSE', isDefault: false, shopifyLocationId: null, address: null, countries: ['GB'] },
+      moved: [{ country: 'GB', from: { id: france, name: 'FRANCE WAREHOUSE' } }],
+    });
+    expect((safeJson(await auditor.get('/api/admin/locations')) as { items: Json[] }).items.map((l) => [l.name, l.countries])).toEqual([
+      ['FRANCE WAREHOUSE', ['FR']],
+      ['LOGISTICS WAREHOUSE', ['GB']],
+    ]);
+  });
+
   it('never lets a LOGISTICS login read a supplier order, a proposal, a PDF or a price', async () => {
     const order = (await h.t.db.selectFrom('supplier_orders').select('id').executeTakeFirstOrThrow()).id;
     for (const url of ['/api/admin/supplier-orders', '/api/admin/supplier-orders/proposal', `/api/admin/supplier-orders/${order}`, `/api/admin/supplier-orders/${order}/pdf`, '/api/admin/suppliers']) {

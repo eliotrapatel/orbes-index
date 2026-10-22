@@ -108,6 +108,7 @@ import { purgePackingPhotos } from './services/parcels.js';
 import { SupplierService } from './services/suppliers.js';
 import { BoxService } from './services/boxes.js';
 import { ReturnsReportService } from './services/returns-report.js';
+import { SizeSplitService } from './services/size-split.js';
 import { VerificationService } from './services/verification.js';
 import { WarrantyService } from './services/warranty.js';
 import { noopLogger, SYSTEM_ACTOR, systemClock, type Clock, type Logger } from './types.js';
@@ -231,6 +232,8 @@ export interface AppServices {
   returnsReport: ReturnsReportService;
   /** The supplier orders (plan NEXT LOT §3.5.6.3): the proposal, the drafts, their steps, invoices and PDFs; ORBES's only. */
   supplierOrders: SupplierOrderService;
+  /** ORDER A MODEL's split by size and location (plan MACRO M3 §3.2, Z1): counts only, read-only. */
+  sizeSplit: SizeSplitService;
   /** The receptions (plan NEXT LOT §3.5.6.5): a delivery counted by the agent, confirmed by ORBES, its identities issued by a worker, its cards printed. */
   receptions: ReceptionService;
   /** Logistics (plan NEXT LOT §3.5.6.6): the stock as the agent and ORBES read it, corrections, transfers, minimums, pieces counted in. */
@@ -420,6 +423,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const supplierOrders = new SupplierOrderService({ db, audit, clock });
     const boxes = new BoxService({ db, audit, clock });
     const returnsReport = new ReturnsReportService({ db, clock });
+    const sizeSplit = new SizeSplitService({ db });
     const logistics = new LogisticsService({ db, audit, stock, verification, warranty, clock, mail: emails.orderStep });
     const orderCases = new OrderCaseService({ db, audit, lifecycle, clock, messages, mail: emails.orderStep });
     const receptions = new ReceptionService({ db, audit, issuance, certificates, cardKey: deriveCardClaimKey(config), clock, log });
@@ -492,6 +496,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       boxes,
       returnsReport,
       supplierOrders,
+      sizeSplit,
       receptions,
       logistics,
       orderCases,

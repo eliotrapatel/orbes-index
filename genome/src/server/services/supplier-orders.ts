@@ -14,6 +14,8 @@
  *   the draft     one per supplier and location (`supplier_orders_one_draft`): `addToDraft` (the proposal's Add to the
  *                 draft, a release's Add to supplier order) creates it in its supplier's currency and adds the pieces
  *                 to the SKU's line, its unit price prefilled from the last sent line of that SKU with that supplier;
+ *                 `addSplitToDrafts` (ORDER A MODEL's ADD TO DRAFTS, plan MACRO M3 §3.2, services/size-split.ts) adds
+ *                 every line of a split the same way in one transaction, all or nothing (`from: 'SPLIT'`);
  *                 `updateDraft` changes its lines, currency (two decimals only), shipping (NULL: none, printed « — »),
  *                 expected date and note; `discardDraft` deletes it (a draft never left ORBES).
  *   its steps     DRAFT → SENT (`send`: at least one line, every unit price, its currency and its expected date; its
@@ -34,7 +36,7 @@
  * first too).
  */
 import { sql } from 'kysely';
-import { inTransaction, type Db } from '../db/connection.js';
+import { inRetriedTransaction, inTransaction, type Db } from '../db/connection.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
 import type { JsonObject, SupplierOrderRow, SupplierOrderStatus, SupplierReturnSettlement } from '../db/schema.js';
 import { SUPPLIER_ORDER_STATUSES } from '../db/schema.js';
@@ -52,6 +54,13 @@ import { ONE_SIZE_LABEL } from './stock.js';
 
 /** The statuses in which a supplier order still owes pieces to its location. */
 export const SUPPLIER_ORDER_OPEN: readonly SupplierOrderStatus[] = Object.freeze(['SENT', 'EXPECTED', 'PARTLY_RECEIVED']);
+/**
+ * Where a draft line comes from (audited `supplier_order.draft`): the proposal's Add to the draft, a release's Add to
+ * supplier order, or ORDER A MODEL's ADD TO DRAFTS (plan MACRO M3 §3.2).
+ */
+export const DRAFT_LINE_FROM = Object.freeze(['PROPOSAL', 'RELEASE', 'SPLIT'] as const);
+export type DraftLineFrom = (typeof DRAFT_LINE_FROM)[number];
+
 /** The bounds of a supplier order's fields (the CHECKs of migration 0036). */
 export const SUPPLIER_ORDER_LIMITS = Object.freeze({
   quantity: 10_000,
@@ -233,6 +242,13 @@ export interface SupplierOrderProposal {
   groups: ProposalGroup[];
   /** Pieces to order in all (the sizes without a supplier included). */
   toOrder: number;
+}
+
+/** ADD TO DRAFTS' answer (addSplitToDrafts): each draft written, with what this call added to it. */
+export interface SplitDraftsResult {
+  drafts: { id: string; reference: string; supplier: { id: string; name: string }; location: { id: string; name: string }; lines: number; pieces: number }[];
+  /** Pieces added in all. */
+  pieces: number;
 }
 
 export interface DraftLineInput {
@@ -501,53 +517,120 @@ export class SupplierOrderService {
    * line (created when there is none, its unit price prefilled from the last sent line of that SKU with that supplier).
    * Audited `supplier_order.draft` with where it came from.
    */
-  async addToDraft(input: { skuId: string; locationId: string; quantity: number; from?: 'PROPOSAL' | 'RELEASE' }, actor: Actor): Promise<SupplierOrderView> {
+  async addToDraft(input: { skuId: string; locationId: string; quantity: number; from?: DraftLineFrom }, actor: Actor): Promise<SupplierOrderView> {
     assertStaff(actor);
     const skuId = known(input?.skuId, skuNotFound);
     const locationId = known(input?.locationId, locationNotFound);
     const quantity = cleanQuantity(input?.quantity);
     const from = input?.from ?? 'PROPOSAL';
-    if (from !== 'PROPOSAL' && from !== 'RELEASE') throw validationError('A draft line comes from the proposal or from a release.');
+    if (!DRAFT_LINE_FROM.includes(from)) throw validationError('A draft line comes from the proposal, a release or ORDER A MODEL.');
     const id = await this.retryDraft(() =>
       inTransaction(this.db, async (tx) => {
-        const now = this.clock();
-        const loc = await tx.selectFrom('stock_locations').select('id').where('id', '=', locationId).executeTakeFirst();
-        if (!loc) throw locationNotFound();
-        await assertSkuOffered(tx, skuId);
-        const sku = (await skusOf(tx, [skuId])).get(skuId);
-        if (!sku) throw skuNotFound();
-        const supplier = await sql<{ id: string | null; currency: string | null }>`
-          SELECT s.id, s.currency FROM skus k JOIN models m ON m.id = k.model_id LEFT JOIN models main ON main.id = m.variant_of
-            LEFT JOIN suppliers s ON s.id = coalesce(k.supplier_id, m.supplier_id, main.supplier_id) AND s.active
-           WHERE k.id = ${skuId}`.execute(tx);
-        const s = supplier.rows[0];
-        if (!s?.id) throw noSupplier(sku);
         const notes: AuditRecordInput[] = [];
-        let o = await tx.selectFrom('supplier_orders').selectAll().where('supplier_id', '=', s.id).where('location_id', '=', locationId).where('status', '=', 'DRAFT').forUpdate().executeTakeFirst();
-        if (!o) {
-          o = await tx
-            .insertInto('supplier_orders')
-            .values({ supplier_id: s.id, location_id: locationId, currency: s.currency, created_by: actor.id!, created_at: now, updated_at: now })
-            .returningAll()
-            .executeTakeFirstOrThrow();
-          notes.push(await recordOrderChange(tx, o, 'supplier_order.create', { supplierId: s.id, locationId, currency: s.currency }, actor, now));
-        }
-        const line = await tx.selectFrom('supplier_order_lines').selectAll().where('supplier_order_id', '=', o.id).where('sku_id', '=', skuId).forUpdate().executeTakeFirst();
-        if (line) {
-          if (line.quantity + quantity > SUPPLIER_ORDER_LIMITS.quantity) throw validationError(`A line orders at most ${SUPPLIER_ORDER_LIMITS.quantity} pieces.`);
-          await tx.updateTable('supplier_order_lines').set({ quantity: line.quantity + quantity }).where('id', '=', line.id).execute();
-        } else {
-          const count = await tx.selectFrom('supplier_order_lines').select((eb) => eb.fn.countAll<number>().as('n')).where('supplier_order_id', '=', o.id).executeTakeFirstOrThrow();
-          if (Number(count.n) >= SUPPLIER_ORDER_LIMITS.lines) throw validationError(`A supplier order holds at most ${SUPPLIER_ORDER_LIMITS.lines} lines.`);
-          await tx.insertInto('supplier_order_lines').values({ supplier_order_id: o.id, sku_id: skuId, quantity, unit_price_minor: await this.lastPrice(tx, s.id, skuId), created_at: now }).execute();
-        }
-        o = await tx.updateTable('supplier_orders').set({ updated_at: now }).where('id', '=', o.id).returningAll().executeTakeFirstOrThrow();
-        notes.push(await recordOrderChange(tx, o, 'supplier_order.draft', { skuId, quantity, from }, actor, now));
+        const draftId = await this.draftLine(tx, { skuId, locationId, quantity, from }, actor, this.clock(), notes);
         for (const n of notes) await this.audit.record(n, tx);
-        return o.id;
+        return draftId;
       }),
     );
     return this.get(id);
+  }
+
+  /**
+   * ORDER A MODEL's ADD TO DRAFTS (macro scope K11 Z2; plan MACRO M3 §3.2): every line of the split, as staff left it,
+   * added to its supplier's draft for its location in one transaction, each through addToDraft's own core (`from:
+   * 'SPLIT'`, audited `supplier_order.draft` per line). Each size and location once, 1 to SUPPLIER_ORDER_LIMITS.lines
+   * lines; a size without an active supplier refuses the whole call (409 SKU_NO_SUPPLIER, naming it), as does a size set
+   * aside (409 SIZE_SET_ASIDE): nothing is added. Answers the drafts written, by supplier and location, with the lines
+   * and pieces this call added to each.
+   */
+  async addSplitToDrafts(input: { lines: readonly { skuId: string; locationId: string; quantity: number }[] }, actor: Actor): Promise<SplitDraftsResult> {
+    assertStaff(actor);
+    const raw = input?.lines;
+    if (!Array.isArray(raw) || raw.length === 0) throw validationError('Add at least one line.');
+    if (raw.length > SUPPLIER_ORDER_LIMITS.lines) throw validationError(`Add at most ${SUPPLIER_ORDER_LIMITS.lines} lines at a time.`);
+    const lines = raw.map((l) => ({ skuId: known(l?.skuId, skuNotFound), locationId: known(l?.locationId, locationNotFound), quantity: cleanQuantity(l?.quantity) }));
+    const seen = new Set<string>();
+    for (const l of lines) {
+      const k = `${l.skuId}:${l.locationId}`;
+      if (seen.has(k)) throw validationError('Each size and location comes once.');
+      seen.add(k);
+    }
+    // The same order every time (location, then SKU): two calls lock their drafts and lines in one order.
+    lines.sort((a, b) => a.locationId.localeCompare(b.locationId) || a.skuId.localeCompare(b.skuId));
+    const added = await this.retryDraft(() =>
+      inRetriedTransaction(this.db, async (tx) => {
+        const now = this.clock();
+        const notes: AuditRecordInput[] = [];
+        const byDraft = new Map<string, { lines: number; pieces: number }>();
+        for (const l of lines) {
+          const draftId = await this.draftLine(tx, { ...l, from: 'SPLIT' }, actor, now, notes);
+          const d = byDraft.get(draftId) ?? { lines: 0, pieces: 0 };
+          byDraft.set(draftId, { lines: d.lines + 1, pieces: d.pieces + l.quantity });
+        }
+        for (const n of notes) await this.audit.record(n, tx);
+        return byDraft;
+      }),
+    );
+    const rows = await this.db
+      .selectFrom('supplier_orders as o')
+      .innerJoin('suppliers as s', 's.id', 'o.supplier_id')
+      .innerJoin('stock_locations as l', 'l.id', 'o.location_id')
+      .select(['o.id', 's.id as supplier_id', 's.name as supplier', 'l.id as location_id', 'l.name as location'])
+      .where('o.id', 'in', [...added.keys()])
+      .execute();
+    const natural = (a: string, b: string) => a.localeCompare(b, 'en', { numeric: true, sensitivity: 'base' });
+    const drafts = rows
+      .map((r) => ({
+        id: r.id,
+        reference: supplierOrderReference(r.id),
+        supplier: { id: r.supplier_id, name: r.supplier },
+        location: { id: r.location_id, name: r.location },
+        lines: added.get(r.id)!.lines,
+        pieces: added.get(r.id)!.pieces,
+      }))
+      .sort((a, b) => natural(a.supplier.name, b.supplier.name) || natural(a.location.name, b.location.name));
+    return { drafts, pieces: lines.reduce((n, l) => n + l.quantity, 0) };
+  }
+
+  /**
+   * addToDraft's core, in the caller's transaction: the size checked (offered, its active supplier), its supplier's
+   * draft to the location found or created (`supplier_order.create`), the pieces added to the SKU's line; the audit
+   * entries pushed to `notes` for the caller to write last. Returns the draft's id.
+   */
+  private async draftLine(tx: Db, l: { skuId: string; locationId: string; quantity: number; from: DraftLineFrom }, actor: Actor, now: Date, notes: AuditRecordInput[]): Promise<string> {
+    const { skuId, locationId, quantity, from } = l;
+    const loc = await tx.selectFrom('stock_locations').select('id').where('id', '=', locationId).executeTakeFirst();
+    if (!loc) throw locationNotFound();
+    await assertSkuOffered(tx, skuId);
+    const sku = (await skusOf(tx, [skuId])).get(skuId);
+    if (!sku) throw skuNotFound();
+    const supplier = await sql<{ id: string | null; currency: string | null }>`
+      SELECT s.id, s.currency FROM skus k JOIN models m ON m.id = k.model_id LEFT JOIN models main ON main.id = m.variant_of
+        LEFT JOIN suppliers s ON s.id = coalesce(k.supplier_id, m.supplier_id, main.supplier_id) AND s.active
+       WHERE k.id = ${skuId}`.execute(tx);
+    const s = supplier.rows[0];
+    if (!s?.id) throw noSupplier(sku);
+    let o = await tx.selectFrom('supplier_orders').selectAll().where('supplier_id', '=', s.id).where('location_id', '=', locationId).where('status', '=', 'DRAFT').forUpdate().executeTakeFirst();
+    if (!o) {
+      o = await tx
+        .insertInto('supplier_orders')
+        .values({ supplier_id: s.id, location_id: locationId, currency: s.currency, created_by: actor.id!, created_at: now, updated_at: now })
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      notes.push(await recordOrderChange(tx, o, 'supplier_order.create', { supplierId: s.id, locationId, currency: s.currency }, actor, now));
+    }
+    const line = await tx.selectFrom('supplier_order_lines').selectAll().where('supplier_order_id', '=', o.id).where('sku_id', '=', skuId).forUpdate().executeTakeFirst();
+    if (line) {
+      if (line.quantity + quantity > SUPPLIER_ORDER_LIMITS.quantity) throw validationError(`A line orders at most ${SUPPLIER_ORDER_LIMITS.quantity} pieces.`);
+      await tx.updateTable('supplier_order_lines').set({ quantity: line.quantity + quantity }).where('id', '=', line.id).execute();
+    } else {
+      const count = await tx.selectFrom('supplier_order_lines').select((eb) => eb.fn.countAll<number>().as('n')).where('supplier_order_id', '=', o.id).executeTakeFirstOrThrow();
+      if (Number(count.n) >= SUPPLIER_ORDER_LIMITS.lines) throw validationError(`A supplier order holds at most ${SUPPLIER_ORDER_LIMITS.lines} lines.`);
+      await tx.insertInto('supplier_order_lines').values({ supplier_order_id: o.id, sku_id: skuId, quantity, unit_price_minor: await this.lastPrice(tx, s.id, skuId), created_at: now }).execute();
+    }
+    o = await tx.updateTable('supplier_orders').set({ updated_at: now }).where('id', '=', o.id).returningAll().executeTakeFirstOrThrow();
+    notes.push(await recordOrderChange(tx, o, 'supplier_order.draft', { skuId, quantity, from }, actor, now));
+    return o.id;
   }
 
   /**

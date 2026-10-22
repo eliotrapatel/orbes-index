@@ -3085,6 +3085,29 @@ export interface SupplierOrderProposal {
   toOrder: number;
 }
 
+/** POST /api/admin/supplier-orders/split (plan MACRO M3 §3.2, Z1): ORDER A MODEL's pieces split by size and location, counts only. */
+export interface SizeSplitProposal {
+  model: { id: string; name: string; variant: string | null };
+  /** The model's size kind; null: no saved size is read (a model of one size). */
+  sizeKind: SizeKind | null;
+  quantity: number;
+  /** The locations considered, the default first. */
+  locations: { id: string; name: string; isDefault: boolean }[];
+  /** Every offered size at every location considered, by size, then location. */
+  lines: { sku: { id: string; code: string; sizeLabel: string | null }; location: { id: string; name: string }; orders: number; savedSizes: number; proposed: number }[];
+  totals: { orders: number; savedSizes: number; proposed: number };
+  /** Saved sizes matching none of the offered sizes (« not matching a size »). */
+  unmatched: number;
+  /** DATA: from orders and saved sizes; EVEN: no data, split evenly at the default location. */
+  source: 'DATA' | 'EVEN';
+}
+
+/** POST /api/admin/supplier-orders/split/drafts (Z2): each draft written, with the lines and pieces this call added. */
+export interface SplitDraftsResult {
+  drafts: { id: string; reference: string; supplier: { id: string; name: string }; location: { id: string; name: string }; lines: number; pieces: number }[];
+  pieces: number;
+}
+
 /** PATCH /api/admin/supplier-orders/:id: a draft's lines (the list becomes its lines), currency, shipping, expected date, note. */
 export interface SupplierDraftChange {
   lines?: { skuId: string; quantity: number; unitPriceMinor?: number | null }[];
@@ -3538,6 +3561,17 @@ export interface StockLocation {
   shopifyLocationId: string | null;
   /** Its postal address (plan NEXT LOT §3.5): the supplier order's « Deliver to », a return's address; null while none. */
   address: string | null;
+  /**
+   * The countries it serves (plan MACRO M3 §3.2, Z1): ISO 3166-1 alpha-2 codes, alphabetical; empty: none (its collectors
+   * then count at the default location when ORBES orders a model by size).
+   */
+  countries: string[];
+}
+
+/** PUT /api/admin/locations/:id/countries: the location with its countries, and those taken from another location. */
+export interface LocationCountriesResult {
+  location: StockLocation;
+  moved: { country: string; from: { id: string; name: string } }[];
 }
 
 export interface Carrier {

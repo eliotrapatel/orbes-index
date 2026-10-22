@@ -58,7 +58,8 @@ describe('Logistics over HTTP (plan NEXT LOT §3.5.6.9)', () => {
       expect(errorOf(await admin.patch(`/api/admin/locations/${logistics}`, { address: 'x'.repeat(501) })).code).toBe('VALIDATION_FAILED');
       expect(errorOf(await admin.patch(`/api/admin/locations/${logistics}`, { address: 'A\u0007B' })).code).toBe('VALIDATION_FAILED');
       const set = safeJson(await admin.patch(`/api/admin/locations/${logistics}`, { address })) as Json;
-      expect(set).toEqual({ id: logistics, name: 'LOGISTICS WAREHOUSE', isDefault: false, shopifyLocationId: null, address: '12 rue des Entrepôts\n93200 Saint-Denis\nFrance' });
+      // Since plan MACRO M3 §3.2 a location is read with the countries it serves (none here).
+      expect(set).toEqual({ id: logistics, name: 'LOGISTICS WAREHOUSE', isDefault: false, shopifyLocationId: null, address: '12 rue des Entrepôts\n93200 Saint-Denis\nFrance', countries: [] });
       const read = (safeJson(await auditor.get('/api/admin/locations')) as { items: Json[] }).items.find((l) => l.id === logistics)!;
       expect(read.address).toBe('12 rue des Entrepôts\n93200 Saint-Denis\nFrance');
       expect(errorOf(await agent.get('/api/admin/locations')).code).toBe('FORBIDDEN');

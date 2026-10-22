@@ -33,7 +33,8 @@
  * options and panels read by an AUDITOR, CUSTOMER INTELLIGENCE §3.6 C.9; the house messages, plan MACRO M2 §1.4, read by an
  * AUDITOR, the moments' words and the custom messages written by an OPERATOR, a moment switched and a message sent or
  * cancelled by an ADMIN; WORN, plan MACRO M2 §2.2, read by an AUDITOR, its photographs published, refused and taken down by
- * an OPERATOR; the returns report and its CSV, plan MACRO M3 §2.2, read by an AUDITOR);
+ * an OPERATOR; the returns report and its CSV, plan MACRO M3 §2.2, read by an AUDITOR; ORDER A MODEL's split and its ADD TO
+ * DRAFTS, plan MACRO M3 §3.2, by an OPERATOR, and a location's countries set by an ADMIN);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. LOGISTICS (plan NEXT LOT §3.5.6.1),
@@ -286,6 +287,9 @@ const PROBES: Probe[] = [
   { group: 'supplier-orders', method: 'GET', url: `/api/admin/supplier-orders?status=SENT&supplierId=${UUID}`, min: 'AUDITOR' },
   { group: 'supplier-orders', method: 'GET', url: '/api/admin/supplier-orders/proposal', min: 'AUDITOR' },
   { group: 'supplier-orders', method: 'POST', url: '/api/admin/supplier-orders/draft-lines', body: INVALID, min: 'OPERATOR' },
+  // Plan MACRO M3 §3.2: ORDER A MODEL's split (it reads saved sizes, in counts) and its ADD TO DRAFTS, by an OPERATOR.
+  { group: 'supplier-orders', method: 'POST', url: '/api/admin/supplier-orders/split', body: INVALID, min: 'OPERATOR' },
+  { group: 'supplier-orders', method: 'POST', url: '/api/admin/supplier-orders/split/drafts', body: INVALID, min: 'OPERATOR' },
   { group: 'supplier-orders', method: 'GET', url: `/api/admin/supplier-orders/${UUID}`, min: 'AUDITOR' },
   { group: 'supplier-orders', method: 'PATCH', url: `/api/admin/supplier-orders/${UUID}`, body: INVALID, min: 'OPERATOR' },
   { group: 'supplier-orders', method: 'DELETE', url: `/api/admin/supplier-orders/${UUID}`, min: 'OPERATOR' },
@@ -394,6 +398,8 @@ const PROBES: Probe[] = [
   { group: 'logistics', method: 'GET', url: '/api/admin/locations', min: 'AUDITOR' },
   { group: 'logistics', method: 'POST', url: '/api/admin/locations', body: INVALID, min: 'ADMIN' },
   { group: 'logistics', method: 'PATCH', url: `/api/admin/locations/${UUID}`, body: INVALID, min: 'ADMIN' },
+  // Plan MACRO M3 §3.2: the countries a location serves, set by an ADMIN as the other location settings.
+  { group: 'logistics', method: 'PUT', url: `/api/admin/locations/${UUID}/countries`, body: INVALID, min: 'ADMIN' },
   { group: 'logistics', method: 'GET', url: '/api/admin/carriers', min: 'AUDITOR' },
   { group: 'logistics', method: 'POST', url: '/api/admin/carriers', body: INVALID, min: 'ADMIN' },
   { group: 'logistics', method: 'PATCH', url: `/api/admin/carriers/${UUID}`, body: INVALID, min: 'ADMIN' },
