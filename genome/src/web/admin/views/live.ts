@@ -78,7 +78,11 @@ import {
   paceLine,
   paceProblem,
   parisClock,
+  parseSetSizes,
   parseSizes,
+  liveSizesField,
+  releasePieceNames,
+  setsOnSale,
   priorityLine,
   questionLine,
   questionStateLine,
@@ -93,9 +97,10 @@ import { livePublicAt, releaseTab } from '../model/campaign.js';
 import { guaranteedText, stockWarning } from '../model/guarantees.js';
 import { liveTestStart } from '../model/test-entrants.js';
 import { toneOf } from '../model/tone.js';
+import { OFFER_TEXT, setOptions, entrySizesText, perPersonText, pieceName, pieceSizeLabel, pieceTotals, setsOnSaleLines } from '../model/sets.js';
 import { modelChoice } from '../model/variants.js';
 import { href } from '../router.js';
-import { LIVE_CURRENCIES, LIVE_ENTRY_STATUSES, type LiveBoard, type LiveEntry, type LiveEntryStatus, type LiveFeasibility, type LiveRelease, type Model } from '../types.js';
+import { LIVE_CURRENCIES, LIVE_ENTRY_STATUSES, type LiveBoard, type LiveEntry, type LiveEntryStatus, type LiveFeasibility, type LiveRelease, type Model, type SetView } from '../types.js';
 import { barList, button, copyButton, defList, field, filterBar, kpi, linkButton, mono, pageHeader, pager, section, select, statusMark, table, type DefRow } from '../ui/components.js';
 import { openDialog, type DialogField } from '../ui/dialog.js';
 import { saveDownload } from '../ui/download.js';
@@ -254,12 +259,16 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   // Its state is announced once, when it changes (set, paused, resumed), not its running figures.
   const paceSaid = h('span', { class: 'visually-hidden', attrs: { 'aria-live': 'polite' } });
 
-  const addPieces = (size: { id: string; label: string; stock: number }) =>
+  // Macro scope K44 T1: a set's release names each size by its piece (« Add pieces · AURA · 52 »).
+  const sizeWords = (z: { label: string; piece?: number | null }) => pieceSizeLabel(r.set, z);
+  const addPieces = (size: { id: string; label: string; stock: number; piece?: number }) =>
     void openDialog({
-      title: `Add pieces · ${size.label}`,
+      title: `Add pieces · ${sizeWords(size)}`,
       eyebrow,
       body: [
         h('p', { class: 'dialog__text' }, `The size holds ${formatCount(size.stock)} ${size.stock === 1 ? 'piece' : 'pieces'}. The pieces added go at once to whoever waits for them in the line.`),
+        // A set's release sells as many sets as its scarcest piece: a size raised alone may add no set.
+        r.set ? h('p', { class: 'dialog__text', data: { testid: 'live-add-pieces-set' } }, 'A set’s release sells as many sets as its scarcest piece: the sets on sale rise only when each piece can make them.') : null,
         h('p', { class: 'dialog__text', data: { testid: 'live-quantity-promise' } }, `The announcement says « ${r.quantityLine} ». Every addition is recorded in the audit log and reported: adding pieces after a fixed number was announced contradicts it.`),
       ],
       fields: [{ name: 'pieces', label: 'Pieces to add', required: true, maxlength: 4, hint: `${LIVE_LIMITS.addPieces.min} to ${formatCount(LIVE_LIMITS.addPieces.max)}.` }],
@@ -282,7 +291,9 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
         'p',
         { class: 'dialog__text' },
         action === 'letIn'
-          ? `This person takes their turn now, before those ahead of them in size ${e.size.label}, within its free pieces.`
+          ? e.sizes?.length
+            ? `This person takes their turn now, before those ahead of them in their sizes (${entrySizesText(e.sizes)}), within each one’s free pieces.`
+            : `This person takes their turn now, before those ahead of them in size ${e.size.label}, within its free pieces.`
           : action === 'free'
             ? 'The piece held returns: the next in line for its size gets a turn at once. Its add-ons are dropped.'
             : 'The entry leaves the release for good: its place, or the piece it holds, goes to the next in line. Its screen says it was removed.',
@@ -307,8 +318,9 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
       kind: ['wide' as const],
     },
     { label: 'Tier', cell: (e: LiveEntry) => tierOf(e.tier), kind: ['nowrap' as const] },
-    { label: 'Size', cell: (e: LiveEntry) => h('span', { class: 'live__size' }, e.size.label), kind: ['nowrap' as const] },
-    { label: 'Pieces', cell: (e: LiveEntry) => formatCount(e.quantity), kind: ['num' as const] },
+    // Macro scope K44 T1: a set's entry, its size for each piece (« 52 · M · 45 CM »), and its sets (T4).
+    { label: r.set ? 'Sizes' : 'Size', cell: (e: LiveEntry) => h('span', { class: 'live__size', data: { testid: 'live-entry-size' } }, e.sizes?.length ? entrySizesText(e.sizes) : e.size.label), kind: ['nowrap' as const] },
+    { label: r.set ? 'Sets' : 'Pieces', cell: (e: LiveEntry) => formatCount(e.quantity), kind: ['num' as const] },
     {
       label: 'Status',
       cell: (e: LiveEntry) => {
@@ -385,7 +397,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
     const signals = liveSignals(b);
     mount(alertsBox, signals.alerts);
     mount(sellOutBox, signals.sellOut);
-    const said = b.alerts.map((a) => `${LIVE_ALERT_LABELS[a.kind]}${a.size ? ` · ${a.size.label}` : ''}`).join(', ');
+    const said = b.alerts.map((a) => `${LIVE_ALERT_LABELS[a.kind]}${a.size ? ` · ${sizeWords(a.size)}` : ''}`).join(', ');
     if (said !== alertsKey) {
       alertsKey = said;
       alertsSaid.textContent = said ? `${said}.` : '';
@@ -395,9 +407,18 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
     messageLine.hidden = !b.message;
     mount(
       sizesBox,
+      // Macro scope K44 T1: a set's release, its sets on sale and each piece's pieces, then its sizes named by their piece.
+      b.pieces?.length
+        ? h(
+            'p',
+            { class: 'live__sets', data: { testid: 'live-sets-on-sale' } },
+            h('span', { class: 'live__sets-figure' }, `Sets on sale: ${formatCount(b.quantity)}`),
+            h('span', { class: 'cell-sub' }, `${b.pieces.map((p) => `${pieceName(r.set, p.piece)} ${formatCount(p.stock)}`).join(' · ')} · ${perPersonText(r.perAccount, true)}`),
+          )
+        : null,
       table(
         [
-          { label: 'Size', cell: (s) => h('span', { class: 'live__size' }, s.label), kind: ['nowrap'] },
+          { label: 'Size', cell: (s) => h('span', { class: 'live__size', data: { testid: 'live-board-size' } }, sizeWords(s)), kind: ['nowrap'] },
           { label: 'Stock', cell: (s) => formatCount(s.stock), kind: ['num'] },
           { label: 'Left', cell: (s) => formatCount(s.left), kind: ['num'] },
           { label: 'Held', cell: (s) => formatCount(s.held), kind: ['num'] },
@@ -674,16 +695,21 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   const releasePart = () => {
     const v = values('release');
     editPart('release', 'The release', [
-      { name: 'modelId', label: 'Model', kind: 'select', required: true, options: modelOptions(v.modelId), value: v.modelId },
+      // Macro scope K44 T1: a set's release keeps its set (Sizes and stock gives its sizes per piece).
+      ...(r.set ? [] : [{ name: 'modelId', label: 'Model', kind: 'select' as const, required: true, options: modelOptions(v.modelId), value: v.modelId }]),
       { name: 'title', label: 'Title', required: true, maxlength: LIVE_LIMITS.title, value: v.title, hint: 'Revealed with the name’s stage.' },
       { name: 'description', label: 'Description', kind: 'textarea', rows: 4, maxlength: LIVE_LIMITS.description, value: v.description, hint: 'Plain paragraphs. Revealed with the name’s stage. Optional.' },
-      { name: 'price', label: 'Price of a piece', required: true, maxlength: 12, value: v.price, hint: 'In units: 4800, or 4800.50. Shown from the announcement.' },
+      { name: 'price', label: r.set ? 'Price of the set' : 'Price of a piece', required: true, maxlength: 12, value: v.price, hint: r.set ? 'One price for the set, in units: 4800, or 4800.50. Shown from the announcement; shared over its pieces’ orders.' : 'In units: 4800, or 4800.50. Shown from the announcement.' },
       { name: 'currency', label: 'Currency', kind: 'select', options: LIVE_CURRENCIES.map((c) => ({ value: c, label: c })), value: v.currency },
-      { name: 'perAccount', label: 'Pieces per person', required: true, maxlength: 1, value: v.perAccount, hint: `${LIVE_LIMITS.perAccount.min} to ${LIVE_LIMITS.perAccount.max}, chosen with the size.` },
-    ]);
+      // T4: on a set's release, a set counts as one: « 1 SET PER PERSON ».
+      r.set
+        ? { name: 'perAccount', label: 'Sets per person', required: true, maxlength: 1, value: v.perAccount, hint: `${LIVE_LIMITS.perAccount.min} to ${LIVE_LIMITS.perAccount.max}: a set counts as one, whatever its pieces.` }
+        : { name: 'perAccount', label: 'Pieces per person', required: true, maxlength: 1, value: v.perAccount, hint: `${LIVE_LIMITS.perAccount.min} to ${LIVE_LIMITS.perAccount.max}, chosen with the size.` },
+    ], r.set ? { body: h('p', { class: 'dialog__text' }, `It sells THE SET ${humanize(r.set.name)}: ${r.set.pieces.map((p) => pieceName(r.set, p.piece)).join(', ')}.`) } : {});
   };
   const sizesPart = () => {
     const v = values('sizes');
+    if (r.set) return setSizesPart(v);
     editPart(
       'sizes',
       'Sizes and stock',
@@ -708,6 +734,50 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
           const warning = stockWarning(total, r.guaranteed);
           const preview = h('p', { class: 'dialog__text', data: { testid: 'live-sizes-preview' } }, `${formatCount(total)} ${total === 1 ? 'piece' : 'pieces'} in all · announced as « ${(x.quantityLine ?? '').trim() || defaultQuantityLine(total)} »`);
           return warning ? h('div', null, preview, h('p', { class: 'dialog__text', data: { testid: 'live-sizes-guaranteed' } }, warning)) : preview;
+        },
+      },
+    );
+  };
+  // Macro scope K44 T1: a set's sizes per piece, each its model's, the sets on sale its scarcest piece's.
+  const setSizesPart = (v: Record<string, string>) => {
+    const set = r.set!;
+    const names = releasePieceNames(r);
+    editPart(
+      'sizes',
+      'Sizes and stock',
+      [
+        ...set.pieces.map((p) => ({
+          name: liveSizesField(p.piece),
+          label: `Sizes · ${pieceName(set, p.piece)}`,
+          kind: 'textarea' as const,
+          rows: 4,
+          required: true,
+          value: v[liveSizesField(p.piece)] ?? '',
+          hint: `This piece’s sizes, one per line, its label then its stock: 52 = 3. Up to ${LIVE_LIMITS.sizes} sizes.`,
+        })),
+        { name: 'quantityLine', label: 'Quantity line', maxlength: LIVE_LIMITS.quantityLine, value: v.quantityLine, hint: 'As the announcement says it, at most 40 characters (25 SETS · NEVER MORE). Empty: the sets on sale, then SETS.' },
+        {
+          name: 'locationId',
+          label: 'Stock location',
+          kind: 'select',
+          options: locationOptions(locations.items, v.locationId, r.locationId ? r.location?.name : undefined),
+          value: v.locationId,
+          hint: 'Where its orders hold a piece in stock, or wait for one: the stock check reads its stock there. ORBES Client Services may move an order elsewhere.',
+        },
+      ],
+      {
+        body: h('p', { class: 'dialog__text' }, `${r.publishedAt ? 'The release is published, announced later: its settings change until then.' : 'A draft: nothing of it is public yet.'} Each piece has its own sizes; the release sells as many sets as its scarcest piece.`),
+        live: (x) => {
+          const p = parseSetSizes(x, names, r.sizes);
+          if ('problem' in p) return h('p', { class: 'dialog__text soft' }, p.problem);
+          const lines = setsOnSaleLines(pieceTotals(p.sizes, names.length), names, 'LIVE');
+          const sets = setsOnSale(p.sizes, names.length);
+          return h(
+            'div',
+            null,
+            h('p', { class: 'dialog__text', data: { testid: 'live-sizes-preview' } }, `${lines.onSale} · announced as « ${(x.quantityLine ?? '').trim() || defaultQuantityLine(sets, true)} »`),
+            lines.uneven ? h('p', { class: 'dialog__text soft', data: { testid: 'live-sets-uneven' } }, lines.uneven) : null,
+          );
         },
       },
     );
@@ -871,11 +941,12 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
             ? [{ label: 'Guests', value: h('span', { data: { testid: 'live-after-room-guests' } }, formatCount(a.guests)), note: `${formatCount(a.entries.CONFIRMED ?? 0)} CONFIRMED` }]
             : []),
         ])
-      : h('p', { class: 'notice' }, 'None: the release closes at its sell-out.'),
+      : h('p', { class: 'notice', data: { testid: 'live-after-room-none' } }, r.set ? 'None: a set’s release never has an after-room.' : 'None: the release closes at its sell-out.'),
     {
       id: 'live-part-after-room',
       tools: [
-        ...edit('Edit', 'live-edit-after-room', afterRoomPart),
+        // Macro scope K44: after-rooms stay a model's; a set's release never has one.
+        ...(r.set ? [] : edit('Edit', 'live-edit-after-room', afterRoomPart)),
         ...(a && opened ? [linkButton('Its live board', href('liveRelease', { dropId: a.id }), 'ghost')] : []),
       ],
     },
@@ -907,18 +978,31 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
     section(
       'The release',
       defList([
-        { label: 'Model', value: `${humanize(r.model.name)} · ${humanize(r.model.type)}`, note: r.model.active ? undefined : 'No longer offered for new pieces.' },
+        // Macro scope K44 T1: a set's release names its set and its pieces, its price the set's, its limit in sets (T4).
+        ...(r.set
+          ? [
+              { label: 'Set', value: h('a', { class: 'idlink', attrs: { href: href('catalogue'), 'data-testid': 'live-set' } }, `THE SET ${humanize(r.set.name)}`), note: r.set.active ? undefined : 'Set aside: no new release of it.' },
+              { label: 'Pieces', value: h('span', { data: { testid: 'live-set-pieces' } }, r.set.pieces.map((p) => pieceName(r.set, p.piece)).join(', ')) },
+            ]
+          : [{ label: 'Model', value: `${humanize(r.model.name)} · ${humanize(r.model.type)}`, note: r.model.active ? undefined : 'No longer offered for new pieces.' }]),
         ...(r.description ? [{ label: 'Description', value: h('span', { class: 'cell-details' }, r.description) }] : []),
-        { label: 'Price', value: h('span', { data: { testid: 'live-price' } }, `${formatMoney(r.priceMinor, r.currency)} a piece`) },
-        { label: 'Per person', value: `${r.perAccount} ${r.perAccount === 1 ? 'piece' : 'pieces'}` },
+        { label: 'Price', value: h('span', { data: { testid: 'live-price' } }, `${formatMoney(r.priceMinor, r.currency)} ${r.set ? 'for the set' : 'a piece'}`) },
+        { label: 'Per person', value: h('span', { data: { testid: 'live-per-person' } }, r.set ? perPersonText(r.perAccount, true) : `${r.perAccount} ${r.perAccount === 1 ? 'piece' : 'pieces'}`), note: r.set ? 'A set counts as one, whatever its pieces.' : undefined },
       ]),
       { id: 'live-part-release', tools: edit('Edit', 'live-edit-release', releasePart) },
     ),
     section(
       'Sizes',
       defList([
-        { label: 'Sizes', value: h('span', { data: { testid: 'live-sizes' } }, sizesLine(r.sizes)) },
-        { label: 'Pieces', value: formatCount(r.quantity) },
+        ...(r.set
+          ? [
+              ...r.set.pieces.map((p) => ({ label: pieceName(r.set, p.piece), value: h('span', { data: { testid: 'live-sizes' } }, sizesLine(r.sizes.filter((z) => z.piece === p.piece))) })),
+              { label: 'Sets on sale', value: h('span', { data: { testid: 'live-sets' } }, formatCount(r.quantity)), note: 'The scarcest piece’s pieces' },
+            ]
+          : [
+              { label: 'Sizes', value: h('span', { data: { testid: 'live-sizes' } }, sizesLine(r.sizes)) },
+              { label: 'Pieces', value: formatCount(r.quantity) },
+            ]),
         { label: 'Quantity line', value: h('span', { data: { testid: 'live-quantity-line' } }, r.quantityLine), note: r.editable ? undefined : 'Announced: only ADD PIECES raises a stock now.' },
         // IN-01: the places the house guarantees, first in line in their size.
         ...(r.guaranteed.places > 0 ? [{ label: 'Guaranteed', value: h('span', { data: { testid: 'live-guaranteed' } }, guaranteedText(r.guaranteed)), note: 'First in line in their size, listed first.' }] : []),
@@ -1127,7 +1211,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
 
   const facts: DefRow[] = [
     { label: 'State', value: h('span', { data: { testid: 'live-state' } }, statusMark(liveStateLabel(r, parent !== null), toneOf('livePhase', r.phase))) },
-    { label: 'Offer', value: `${r.quantityLine} · ${formatMoney(r.priceMinor, r.currency)} · ${sizesLine(r.sizes)}` },
+    { label: 'Offer', value: r.set ? `${r.quantityLine} · ${formatMoney(r.priceMinor, r.currency)} the set · THE SET ${humanize(r.set.name)}` : `${r.quantityLine} · ${formatMoney(r.priceMinor, r.currency)} · ${sizesLine(r.sizes)}` },
     { label: parent ? 'Opened by the sell-out' : 'Published', value: r.publishedAt ? formatDateTime(r.publishedAt) : 'Not yet' },
     ...(r.circlePosts.length
       ? [{ label: 'Circle', value: h('span', { data: { testid: 'live-circle' } }, r.circlePosts.map((p) => (p.publishedAt ? `Post shown from ${formatDateTime(p.publishedAt)}` : 'Post withdrawn')).join(' · ')) }]
@@ -1176,7 +1260,8 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
 
   const readings = liveIntelligenceSections(ctx, r, intelligence, board);
   const best = bestTime ? [bestTimePanel(bestTime, { id: 'live-best-time' })] : [];
-  const testSection = tests ? testEntrantsSection(ctx, { mode: 'LIVE', dropId: r.id, eyebrow, start: liveTestStart(r), sizes: r.sizes, perAccount: r.perAccount }, tests) : null;
+  // A set's release: each bot chooses a size per piece at random (no one size to choose for every bot).
+  const testSection = tests ? testEntrantsSection(ctx, { mode: 'LIVE', dropId: r.id, eyebrow, start: liveTestStart(r), sizes: r.set ? [] : r.sizes, perAccount: r.perAccount }, tests) : null;
   const root = h(
     'div',
     { class: 'view view--live' },
@@ -1227,7 +1312,8 @@ async function liveCampaignView(ctx: ViewContext, id: string): Promise<HTMLEleme
   const asked = screens;
   const r = await ctx.api.liveRelease(id);
   if (r.afterRoomOf) return null;
-  const model = await ctx.api.model(r.model.id).catch(() => null);
+  // A set's release: its pieces' names and photographs come with its campaign (its `offer`).
+  const model = r.set ? null : await ctx.api.model(r.model.id).catch(() => null);
   if (asked !== screens) return h('div', { class: 'view view--live' });
   return h(
     'div',
@@ -1249,14 +1335,35 @@ async function liveCampaignView(ctx: ViewContext, id: string): Promise<HTMLEleme
  * The New live release dialog's fields: the essentials, the stock location (its default preselected) whose stock the
  * sizes are proposed from; every other setting by default, then edited on its page.
  */
-export function newLiveFields(models: readonly Model[], values: Record<string, string>, locations: readonly { id: string; name: string; isDefault: boolean }[] = []): DialogField[] {
+export function newLiveFields(
+  models: readonly Model[],
+  values: Record<string, string>,
+  locations: readonly { id: string; name: string; isDefault: boolean }[] = [],
+  sets: readonly SetView[] = [],
+): DialogField[] {
   const options = models.filter((m) => m.active).map((m) => ({ value: m.id, label: modelChoice(m) }));
+  // Macro scope K44 T1: WHAT IT SELLS, A MODEL (as ever) or A SET; a set's price is the set's, its sizes per piece.
+  const isSet = (v: Record<string, string>) => v.offer === 'SET';
+  const piecesOf = (setId: string | undefined) => sets.find((x) => x.id === setId)?.pieces.length ?? 0;
   return [
-    { name: 'modelId', label: 'Model', kind: 'select', required: true, options: [{ value: '', label: 'Choose a model' }, ...options], value: values.modelId },
+    {
+      name: 'offer',
+      label: OFFER_TEXT.label,
+      kind: 'select',
+      required: true,
+      options: [
+        { value: 'MODEL', label: OFFER_TEXT.model },
+        { value: 'SET', label: OFFER_TEXT.set },
+      ],
+      value: values.offer ?? 'MODEL',
+    },
+    { name: 'modelId', label: 'Model', kind: 'select', required: true, options: [{ value: '', label: 'Choose a model' }, ...options], value: values.modelId, shown: (v) => !isSet(v) },
+    { name: 'setId', label: 'Set', kind: 'select', required: true, options: [{ value: '', label: OFFER_TEXT.chooseSet }, ...setOptions(sets, values.setId ?? '')], value: values.setId ?? '', hint: sets.length ? undefined : OFFER_TEXT.noSet, shown: isSet },
     { name: 'title', label: 'Title', required: true, maxlength: LIVE_LIMITS.title, value: values.title, hint: 'Revealed with the name’s stage.' },
     { name: 'opensAt', label: 'Opening (UTC)', kind: 'datetime', required: true, value: values.opensAt, hint: 'T0: the door opens and the line forms; the room opens 5 minutes before (changed on its page).' },
     { name: 'closesAt', label: 'End of the sales (UTC)', kind: 'datetime', required: true, value: values.closesAt },
-    { name: 'price', label: 'Price of a piece', required: true, maxlength: 12, value: values.price, hint: 'In units: 4800, or 4800.50.' },
+    { name: 'price', label: 'Price of a piece', required: true, maxlength: 12, value: values.price, hint: 'In units: 4800, or 4800.50.', shown: (v) => !isSet(v) },
+    { name: 'priceSet', label: 'Price of the set', required: true, maxlength: 12, value: values.priceSet ?? '', hint: 'One price for the set, in units: 4800, or 4800.50; shared over its pieces’ orders.', shown: isSet },
     { name: 'currency', label: 'Currency', kind: 'select', options: LIVE_CURRENCIES.map((c) => ({ value: c, label: c })), value: values.currency },
     {
       name: 'locationId',
@@ -1266,6 +1373,17 @@ export function newLiveFields(models: readonly Model[], values: Record<string, s
       value: values.locationId ?? '',
       hint: 'Where its orders hold a piece in stock, or wait for one; the sizes are proposed from its stock.',
     },
-    { name: 'sizes', label: 'Sizes', kind: 'textarea', rows: 4, required: true, value: values.sizes, hint: 'One size per line, its label then its stock: 52 = 3. Proposed from the stock, then the planner, once the model is chosen: yours to change.' },
+    { name: 'sizes', label: 'Sizes', kind: 'textarea', rows: 4, required: true, value: values.sizes, hint: 'One size per line, its label then its stock: 52 = 3. Proposed from the stock, then the planner, once the model is chosen: yours to change.', shown: (v) => !isSet(v) },
+    // A set's sizes, one field per piece (named by its model once the set is chosen), proposed per piece.
+    ...[1, 2, 3, 4].map((k) => ({
+      name: liveSizesField(k),
+      label: `Sizes · piece ${k}`,
+      kind: 'textarea' as const,
+      rows: 3,
+      required: true,
+      value: values[liveSizesField(k)] ?? '',
+      hint: 'This piece’s sizes, one per line, its label then its stock: 52 = 3. Proposed per piece once the set is chosen: yours to change.',
+      shown: (v: Record<string, string>) => isSet(v) && piecesOf(v.setId) >= k,
+    })),
   ];
 }

@@ -16,6 +16,10 @@
  * - Artifacts are attachments: they are fetched as blobs and saved by the UI.
  */
 import type {
+  SetInput,
+  SetSizeMix,
+  SetView,
+  SetPieceDecision,
   AddonCreateInput,
   AddonInput,
   AddonView,
@@ -709,6 +713,43 @@ export class AdminApi {
     return this.request('PUT', `/api/admin/models/${encodeURIComponent(id)}/supplier`, { body: change });
   }
 
+  // ── THE SET's catalogue (macro scope K44 T1; plan MACRO M3 §5.3) ──────────
+
+  /** AUDITOR: every set, the active ones first, with its pieces, their sizes and photographs, and its releases. */
+  sets(): Promise<Items<SetView>> {
+    return this.get('/api/admin/sets');
+  }
+
+  /** AUDITOR: one set. */
+  set(id: string): Promise<SetView> {
+    return this.get(`/api/admin/sets/${encodeURIComponent(id)}`);
+  }
+
+  /** OPERATOR: a set of 2 to 4 different models, in order, at one price (409 SET_NAME_TAKEN, SET_CODE_TAKEN; 422 SET_MODELS). */
+  createSet(input: SetInput & { name: string; code: string; modelIds: string[] }): Promise<SetView> {
+    return this.post('/api/admin/sets', input);
+  }
+
+  /** OPERATOR: what changed; its pieces only while no release names it (409 SET_IN_USE). */
+  updateSet(id: string, change: SetInput): Promise<SetView> {
+    return this.patch(`/api/admin/sets/${encodeURIComponent(id)}`, change);
+  }
+
+  /** OPERATOR: no new release of it. */
+  setSetAside(id: string): Promise<SetView> {
+    return this.post(`/api/admin/sets/${encodeURIComponent(id)}/set-aside`, {});
+  }
+
+  /** OPERATOR: offered again. */
+  reinstateSet(id: string): Promise<SetView> {
+    return this.post(`/api/admin/sets/${encodeURIComponent(id)}/reinstate`, {});
+  }
+
+  /** OPERATOR: its Shopify product, pasted back; null clears it (409 SHOPIFY_PRODUCT_TAKEN). */
+  linkSetShopify(id: string, productId: string | null): Promise<SetView> {
+    return this.request('PUT', `/api/admin/sets/${encodeURIComponent(id)}/shopify`, { body: { productId } });
+  }
+
   // ── The add-ons' catalogue (plan MACRO M3 §4.3, D1) ──────────────────────
 
   /** AUDITOR: every add-on, the active ones first, with its SKU, prices and stock per location. */
@@ -1351,7 +1392,7 @@ export class AdminApi {
   /** OPERATOR (a lost parcel and the archive: ADMIN): ORBES's decision; a piece back to stock's new claim code, once. */
   decideOrderCase(
     id: string,
-    input: { decision: 'REFUND' | 'EXCHANGE' | 'RESHIP'; pieceTo?: 'RESTOCKED' | 'ARCHIVED' | null; locationId?: string | null; note?: string | null; addonsOut?: string[] | null },
+    input: { decision: 'REFUND' | 'EXCHANGE' | 'RESHIP'; pieceTo?: 'RESTOCKED' | 'ARCHIVED' | null; locationId?: string | null; note?: string | null; addonsOut?: string[] | null; pieces?: SetPieceDecision[] | null },
   ): Promise<OrderCaseDecided> {
     return this.post(`/api/admin/order-cases/${encodeURIComponent(id)}/decide`, input);
   }
@@ -2061,6 +2102,11 @@ export class AdminApi {
   /** The size mix a new release of a model is proposed: the stock at the location first, then the planner. */
   liveSizeMix(modelId: string, locationId?: string | null): Promise<LiveSizeMix> {
     return this.get('/api/admin/live/size-mix', { modelId, ...(locationId ? { locationId } : {}) });
+  }
+
+  /** Macro scope K44 T1: a new set release's size mix, per piece (each piece's model; the sets its scarcest piece makes). */
+  setSizeMix(setId: string, locationId?: string | null): Promise<SetSizeMix> {
+    return this.get('/api/admin/live/size-mix', { setId, ...(locationId ? { locationId } : {}) });
   }
 
   // ── The Club: drops (P-R03) ──────────────────────────────────────────────

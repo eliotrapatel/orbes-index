@@ -9,6 +9,9 @@
  *    (the monogram, the date and time in Paris, « A RELEASE »: no photograph, no name, while the house names no piece in
  *    public), FULL (the model's photograph, its name and the date) only once the release's name and photograph are
  *    public. The choice is made on the tab, per release, and nothing is stored.
+ *  - A set's release (macro scope K44 T1, plan MACRO M3 §5.3): its tab as a model's; its FULL image draws its pieces'
+ *    photographs side by side (two to four tiles in the photo square, ui/countdown-card.ts) with the set's name, and
+ *    falls back to TEASER while any piece's photograph is missing.
  *  - Every time in Paris. Words calm, no exclamation mark, never atelier, handmade or craft (admin.brand.test.ts).
  */
 import { formatCount } from '../format.js';
@@ -48,6 +51,8 @@ export const CAMPAIGN_COPY = Object.freeze({
   choice: 'Image',
   teaserLine: 'The monogram, the date and time in Paris and « A RELEASE ». No photograph, no name.',
   fullLine: 'The model’s photograph, its name, the date and time in Paris.',
+  fullSetLine: 'The pieces’ photographs side by side, the set’s name, the date and time in Paris.',
+  fullSetNoPhoto: 'FULL needs each piece’s photograph: add it on each model’s page.',
   fullLater: (when: string) => `FULL can be chosen once the release’s name and photograph are public: ${when}.`,
   fullNotPublished: 'FULL can be chosen once the release is published and its name and photograph are public.',
   fullNoPhoto: 'FULL needs the model’s photograph: add it on the model’s page.',
@@ -217,6 +222,22 @@ export interface CountdownRelease {
   publicAt: string | null;
   /** The model's name with its variant (MONOLITHE · Blue → MONOLITHE IN BLUE) and its photograph (this origin's media route). */
   model: { name: string; variant: string | null; photo: string | null };
+  /**
+   * Macro scope K44 T1: a set's release, its 2 to 4 pieces in the set's order, each its photograph (`model` is then the
+   * set: its name, no variant, no photograph of its own); absent for a model's.
+   */
+  pieces?: { name: string; variant: string | null; photo: string | null }[];
+}
+
+/** The release the CAMPAIGN tab draws, completed by its campaign's offer: a set's name and its pieces' photographs. */
+export function withOffer(r: CountdownRelease, offer: ReleaseCampaign['offer']): CountdownRelease {
+  if (!offer || offer.kind !== 'SET') return r;
+  return { ...r, model: { name: offer.name, variant: null, photo: null }, pieces: offer.pieces.map((p) => ({ name: p.name, variant: p.variant, photo: p.photo })) };
+}
+
+/** The photographs FULL draws: a set's every piece's, a model's own. */
+export function countdownPhotos(r: Pick<CountdownRelease, 'model' | 'pieces'>): (string | null)[] {
+  return r.pieces ? r.pieces.map((p) => p.photo) : [r.model.photo];
 }
 
 /** The media route of this origin only: a canvas never draws another origin's photograph. */
@@ -230,8 +251,10 @@ export function fullChoice(r: CountdownRelease, now: Date): { available: boolean
     const m = parisMoment(r.publicAt);
     return { available: false, line: CAMPAIGN_COPY.fullLater(m ? `${m.date} · ${m.time} Paris` : '—') };
   }
-  if (!r.model.photo || !MEDIA_PATH.test(r.model.photo)) return { available: false, line: CAMPAIGN_COPY.fullNoPhoto };
-  return { available: true, line: CAMPAIGN_COPY.fullLine };
+  const set = r.pieces !== undefined;
+  if (set && (r.pieces!.length < 2 || r.pieces!.some((p) => !p.photo || !MEDIA_PATH.test(p.photo) || !p.name.trim()))) return { available: false, line: CAMPAIGN_COPY.fullSetNoPhoto };
+  if (!set && (!r.model.photo || !MEDIA_PATH.test(r.model.photo))) return { available: false, line: CAMPAIGN_COPY.fullNoPhoto };
+  return { available: true, line: set ? CAMPAIGN_COPY.fullSetLine : CAMPAIGN_COPY.fullLine };
 }
 
 /** The image's words and photograph: nothing else is drawn. */
@@ -243,8 +266,10 @@ export interface CountdownCardModel {
   title: string[];
   /** TEASER: `20:00 PARIS`; FULL: `5 NOVEMBER 2026 · 20:00 PARIS`. */
   when: string;
-  /** FULL only. */
+  /** FULL only: a model's photograph (a set's: its first piece's). */
   photo: string | null;
+  /** FULL of a set's release (macro scope K44 T1): its 2 to 4 pieces' photographs, side by side; absent otherwise. */
+  photos?: string[];
   /** `orbes-2026-11-05-teaser.png` */
   filename: string;
 }
@@ -255,6 +280,7 @@ export const COUNTDOWN_WORDS = Object.freeze({
   kind: { DRAW: 'DRAW', LIVE: 'LIVE RELEASE' } as Readonly<Record<'DRAW' | 'LIVE', string>>,
   paris: 'PARIS',
   site: 'THEORBES.COM',
+  set: 'THE SET',
 });
 
 /** A model named with its variant, on two lines when it has one: [MONOLITHE, IN BLUE]. */
@@ -271,6 +297,19 @@ export function countdownCardModel(r: CountdownRelease, kind: CountdownKind, now
   const full = kind === 'full' && fullChoice(r, now).available && r.model.name.trim().length > 0;
   if (!full) {
     return { kind: 'teaser', label: COUNTDOWN_WORDS.teaserLabel, title: [m.date], when: `${m.time} ${COUNTDOWN_WORDS.paris}`, photo: null, filename: `orbes-${m.day}-teaser.png` };
+  }
+  if (r.pieces) {
+    const photos = r.pieces.map((p) => p.photo!);
+    return {
+      kind: 'full',
+      label: COUNTDOWN_WORDS.kind[r.mode],
+      // THE SET over its name, on two lines, as a model's name over its variant.
+      title: [COUNTDOWN_WORDS.set, ...countdownName(r.model.name, null)],
+      when: `${m.date} · ${m.time} ${COUNTDOWN_WORDS.paris}`,
+      photo: photos[0]!,
+      photos,
+      filename: `orbes-${m.day}-full.png`,
+    };
   }
   return {
     kind: 'full',

@@ -199,8 +199,8 @@ export function liveReference(entryId: string): string {
 }
 
 /** The quantity line a release says by default: `25 PIECES`. */
-export function defaultQuantityLine(quantity: number): string {
-  return `${quantity} ${quantity === 1 ? 'PIECE' : 'PIECES'}`;
+export function defaultQuantityLine(quantity: number, set = false): string {
+  return set ? `${quantity} ${quantity === 1 ? 'SET' : 'SETS'}` : `${quantity} ${quantity === 1 ? 'PIECE' : 'PIECES'}`;
 }
 
 /** The sizes as one line: `52 × 3 · 54 × 2`. */
@@ -262,6 +262,46 @@ export function parseSizes(text: string, existing: readonly { id: string; label:
   return { sizes };
 }
 
+// ── A set's sizes per piece (macro scope K44 T1) ───────────────────────────
+
+/** A piece's lines of sizes in a set release's dialog: `sizes1` to `sizes4`. */
+export const liveSizesField = (piece: number): string => `sizes${piece}`;
+
+/** A piece's sizes as its lines: `52 = 3`, one per line. */
+export function pieceSizesText(sizes: readonly { label: string; stock: number; piece?: number | null }[], piece: number): string {
+  return sizesText(sizes.filter((s) => s.piece === piece));
+}
+
+/**
+ * A set release's sizes, each piece's lines (`sizes1` to `sizes4`, `names` its pieces in order) parsed as a model's,
+ * each size keeping the id of the release's size of the same piece and label; the first problem named by its piece.
+ */
+export function parseSetSizes(
+  v: Record<string, string>,
+  names: readonly string[],
+  existing: readonly { id: string; label: string; piece?: number | null }[] = [],
+): { sizes: { id?: string; label: string; stock: number; piece: number }[] } | { problem: string } {
+  const out: { id?: string; label: string; stock: number; piece: number }[] = [];
+  for (const [i, name] of names.entries()) {
+    const piece = i + 1;
+    const p = parseSizes(v[liveSizesField(piece)] ?? '', existing.filter((s) => s.piece === piece));
+    if ('problem' in p) return { problem: `${name}: ${p.problem.charAt(0).toLowerCase()}${p.problem.slice(1)}` };
+    out.push(...p.sizes.map((x) => ({ ...x, piece })));
+  }
+  return { sizes: out };
+}
+
+/** A set release's pieces by name, in order: « AURA », « AURA · STEEL ». */
+export function releasePieceNames(r: Pick<LiveRelease, 'set'>): string[] {
+  return (r.set?.pieces ?? []).map((p) => [p.model.name, ...(p.model.variant ? [p.model.variant] : [])].join(' · ').toUpperCase());
+}
+
+/** A set release's sets on sale: the smallest of its pieces' totals. */
+export function setsOnSale(sizes: readonly { stock: number; piece?: number | null }[], pieces: number): number {
+  if (pieces < 1) return 0;
+  return Math.min(...Array.from({ length: pieces }, (_, i) => sizes.filter((s) => s.piece === i + 1).reduce((n, s) => n + s.stock, 0)));
+}
+
 /** The add-ons, one per line: `ENGRAVING | 150 | Your initials, by hand`. */
 export function addonsText(addons: readonly { label: string; line: string | null; priceMinor: number }[]): string {
   return addons.map((a) => [a.label, moneyField(a.priceMinor), ...(a.line ? [a.line] : [])].join(' | ')).join('\n');
@@ -300,14 +340,22 @@ const inRange = (v: string | undefined, b: { min: number; max: number }) => {
 export function newLiveValues(now: Date): Record<string, string> {
   const opens = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 18));
   return {
+    // Macro scope K44 T1: WHAT IT SELLS, A MODEL by default; a set's price and sizes per piece in their own fields.
+    offer: 'MODEL',
     modelId: '',
+    setId: '',
     title: '',
     opensAt: localUtc(opens.toISOString()),
     closesAt: localUtc(new Date(opens.getTime() + 3_600_000).toISOString()),
     price: '',
+    priceSet: '',
     currency: 'EUR',
     locationId: '',
     sizes: 'ONE SIZE = 25',
+    sizes1: '',
+    sizes2: '',
+    sizes3: '',
+    sizes4: '',
   };
 }
 
@@ -317,29 +365,34 @@ function timesProblem(opens: string | null, closes: string | null): string | nul
   return null;
 }
 
-/** What the server would refuse in the New live release dialog; null when it may be sent. */
-export function newLiveProblem(v: Record<string, string>): string | null {
-  if (!v.modelId) return 'Choose the model of the release.';
+/**
+ * What the server would refuse in the New live release dialog; null when it may be sent. A set's (macro scope K44 T1,
+ * `offer` SET): its set, its one price, each of its pieces' sizes (`pieces`: their names, in order).
+ */
+export function newLiveProblem(v: Record<string, string>, pieces: readonly string[] = []): string | null {
+  const set = v.offer === 'SET';
+  if (set ? !v.setId : !v.modelId) return set ? 'Choose the set of the release.' : 'Choose the model of the release.';
   const title = (v.title ?? '').trim();
   if (!title || title.length > LIVE_LIMITS.title) return `A title is one line of 1 to ${LIVE_LIMITS.title} characters.`;
   const t = timesProblem(utcInstant(v.opensAt), utcInstant(v.closesAt));
   if (t) return t;
-  const price = parseMoney(v.price);
-  if (price === null || price > LIVE_LIMITS.priceMaxMinor) return 'The price of a piece, in units (4800, or 4800.50).';
+  const price = parseMoney(set ? v.priceSet : v.price);
+  if (price === null || price > LIVE_LIMITS.priceMaxMinor) return set ? 'The price of the set, in units (4800, or 4800.50).' : 'The price of a piece, in units (4800, or 4800.50).';
   if (!(LIVE_CURRENCIES as readonly string[]).includes(v.currency)) return 'Choose the currency.';
-  const sizes = parseSizes(v.sizes);
+  const sizes = set ? parseSetSizes(v, pieces) : parseSizes(v.sizes);
   return 'problem' in sizes ? sizes.problem : null;
 }
 
 /** The body of a new release (POST /api/admin/live), from values newLiveProblem accepted: every other setting by default. */
-export function newLiveInput(v: Record<string, string>): LiveSettings {
-  const sizes = parseSizes(v.sizes) as { sizes: { label: string; stock: number }[] };
+export function newLiveInput(v: Record<string, string>, pieces: readonly string[] = []): LiveSettings {
+  const set = v.offer === 'SET';
+  const sizes = (set ? parseSetSizes(v, pieces) : parseSizes(v.sizes)) as { sizes: { label: string; stock: number; piece?: number }[] };
   return {
-    modelId: v.modelId,
+    ...(set ? { setId: v.setId } : { modelId: v.modelId }),
     title: v.title.trim(),
     opensAt: utcInstant(v.opensAt)!,
     closesAt: utcInstant(v.closesAt)!,
-    priceMinor: parseMoney(v.price)!,
+    priceMinor: parseMoney(set ? v.priceSet : v.price)!,
     currency: v.currency as LiveCurrency,
     sizes: sizes.sizes,
     ...(v.locationId ? { stockLocationId: v.locationId } : {}),
@@ -365,8 +418,16 @@ export type LivePart = 'release' | 'sizes' | 'access' | 'times' | 'turns' | 'add
 export function livePartValues(r: LiveRelease, part: LivePart): Record<string, string> {
   switch (part) {
     case 'release':
-      return { modelId: r.model.id, title: r.title, description: r.description ?? '', price: moneyField(r.priceMinor), currency: r.currency, perAccount: String(r.perAccount) };
+      // Macro scope K44 T1: a set's release keeps its set here (another set takes its place with its sizes, in Sizes).
+      return { ...(r.set ? { setId: r.set.id } : { modelId: r.model.id }), title: r.title, description: r.description ?? '', price: moneyField(r.priceMinor), currency: r.currency, perAccount: String(r.perAccount) };
     case 'sizes':
+      if (r.set) {
+        return {
+          ...Object.fromEntries(r.set.pieces.map((p) => [liveSizesField(p.piece), pieceSizesText(r.sizes, p.piece)])),
+          quantityLine: r.quantityLine === defaultQuantityLine(r.quantity, true) ? '' : r.quantityLine,
+          locationId: r.locationId ?? '',
+        };
+      }
       return { sizes: sizesText(r.sizes), quantityLine: r.quantityLine === defaultQuantityLine(r.quantity) ? '' : r.quantityLine, locationId: r.locationId ?? '' };
     case 'access':
       return {
@@ -447,18 +508,19 @@ function questionWords(v: Record<string, string>): { text: string | null; answer
 export function livePartProblem(r: LiveRelease, part: LivePart, v: Record<string, string>): string | null {
   switch (part) {
     case 'release': {
-      if (!v.modelId) return 'Choose the model of the release.';
+      if (!v.modelId && !v.setId) return 'Choose the model of the release.';
       const title = (v.title ?? '').trim();
       if (!title || title.length > LIVE_LIMITS.title) return `A title is one line of 1 to ${LIVE_LIMITS.title} characters.`;
       if ((v.description ?? '').trim().length > LIVE_LIMITS.description) return `The description has at most ${LIVE_LIMITS.description} characters.`;
       const price = parseMoney(v.price);
       if (price === null || price > LIVE_LIMITS.priceMaxMinor) return 'The price of a piece, in units (4800, or 4800.50).';
       if (!(LIVE_CURRENCIES as readonly string[]).includes(v.currency)) return 'Choose the currency.';
-      if (inRange(v.perAccount, LIVE_LIMITS.perAccount) === null) return `A person secures ${LIVE_LIMITS.perAccount.min} to ${LIVE_LIMITS.perAccount.max} pieces.`;
+      // T4: a set counts as one, 1 to 5 sets per person.
+      if (inRange(v.perAccount, LIVE_LIMITS.perAccount) === null) return `A person secures ${LIVE_LIMITS.perAccount.min} to ${LIVE_LIMITS.perAccount.max} ${r.set ? 'sets' : 'pieces'}.`;
       return null;
     }
     case 'sizes': {
-      const sizes = parseSizes(v.sizes, r.sizes);
+      const sizes = r.set ? parseSetSizes(v, releasePieceNames(r), r.sizes) : parseSizes(v.sizes, r.sizes);
       if ('problem' in sizes) return sizes.problem;
       if ((v.quantityLine ?? '').trim().length > LIVE_LIMITS.quantityLine) return `The quantity line has at most ${LIVE_LIMITS.quantityLine} characters.`;
       return null;
@@ -551,7 +613,7 @@ export function livePartChange(r: LiveRelease, part: LivePart, v: Record<string,
   switch (part) {
     case 'release': {
       const description = (v.description ?? '').trim();
-      if (v.modelId !== r.model.id) out.modelId = v.modelId;
+      if (!r.set && v.modelId !== r.model.id) out.modelId = v.modelId;
       if (v.title.trim() !== r.title) out.title = v.title.trim();
       if ((description === '' ? null : description) !== (r.description ?? null)) out.description = description === '' ? null : description;
       if (parseMoney(v.price) !== r.priceMinor) out.priceMinor = parseMoney(v.price)!;
@@ -560,12 +622,14 @@ export function livePartChange(r: LiveRelease, part: LivePart, v: Record<string,
       return out;
     }
     case 'sizes': {
-      const sizes = (parseSizes(v.sizes, r.sizes) as { sizes: { id?: string; label: string; stock: number }[] }).sizes;
-      if (JSON.stringify(sizes.map((s) => [s.id ?? null, s.label, s.stock])) !== JSON.stringify(r.sizes.map((s) => [s.id, s.label, s.stock]))) out.sizes = sizes;
+      // Macro scope K44 T1: a set's release, its sizes per piece, its quantity its sets on sale (the scarcest piece's).
+      const set = r.set ? r.set.pieces.length : 0;
+      const sizes = ((r.set ? parseSetSizes(v, releasePieceNames(r), r.sizes) : parseSizes(v.sizes, r.sizes)) as { sizes: { id?: string; label: string; stock: number; piece?: number }[] }).sizes;
+      if (JSON.stringify(sizes.map((s) => [s.id ?? null, s.label, s.stock, s.piece ?? null])) !== JSON.stringify(r.sizes.map((s) => [s.id, s.label, s.stock, s.piece ?? null]))) out.sizes = sizes;
       const typed = (v.quantityLine ?? '').trim();
-      const quantity = sizes.reduce((n, s) => n + s.stock, 0);
-      const now = r.quantityLine === defaultQuantityLine(r.quantity) ? null : r.quantityLine;
-      const next = typed === '' || typed === defaultQuantityLine(quantity) ? null : typed;
+      const quantity = set ? setsOnSale(sizes, set) : sizes.reduce((n, s) => n + s.stock, 0);
+      const now = r.quantityLine === defaultQuantityLine(r.quantity, set > 0) ? null : r.quantityLine;
+      const next = typed === '' || typed === defaultQuantityLine(quantity, set > 0) ? null : typed;
       if (next !== now) out.quantityLine = next;
       const location = v.locationId || null;
       if (v.locationId !== undefined && location !== r.locationId) out.stockLocationId = location;
@@ -921,13 +985,15 @@ export function livePhrase(action: 'end' | 'cancel', r: Pick<LiveRelease, 'id'>)
 /** The board's figures, in the order the console shows them. */
 export function liveBoardFigures(b: LiveBoard): { label: string; value: string; note: string; testId: string }[] {
   const t = b.totals;
+  const set = (b.pieces?.length ?? 0) > 0;
   return [
     { label: 'In the room', value: formatCount(t.inRoom), note: `${formatCount(t.waiting)} BEFORE T0`, testId: 'live-in-room' },
     { label: 'In line', value: formatCount(t.line), note: `${formatCount(b.lineTotal)} OPEN ${b.lineTotal === 1 ? 'ENTRY' : 'ENTRIES'}`, testId: 'live-line' },
     { label: 'Turns', value: formatCount(t.turns), note: 'HOLDING THE SEAL', testId: 'live-turns' },
     { label: 'Secured', value: formatCount(t.secured), note: 'TO PAY', testId: 'live-secured' },
-    { label: 'Confirmed', value: formatCount(t.confirmed), note: `${formatCount(t.sold)} OF ${formatCount(t.stock)} PIECES`, testId: 'live-confirmed' },
-    { label: 'Pieces left', value: formatCount(t.left), note: `${formatCount(t.held)} HELD MAY RETURN`, testId: 'live-left' },
+    // Macro scope K44 T1: a set's release counts its totals in sets.
+    { label: 'Confirmed', value: formatCount(t.confirmed), note: `${formatCount(t.sold)} OF ${formatCount(t.stock)} ${set ? 'SETS' : 'PIECES'}`, testId: 'live-confirmed' },
+    { label: set ? 'Sets left' : 'Pieces left', value: formatCount(t.left), note: `${formatCount(t.held)} HELD MAY RETURN`, testId: 'live-left' },
     { label: 'Missed turns', value: formatCount(t.missed), note: 'A TURN THAT RAN OUT', testId: 'live-missed' },
     { label: 'Ended holds', value: formatCount(t.expired), note: `${formatCount(t.released)} GIVEN BACK`, testId: 'live-expired' },
   ];

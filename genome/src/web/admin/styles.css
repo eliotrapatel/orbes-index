@@ -7927,3 +7927,44 @@ a.collectors__kpi-link:focus-visible {
   letter-spacing: 0.06em;
   overflow-wrap: break-word;
 }
+
+/* ── THE SET (macro scope K44, plan MACRO M3 §5.3) ──────────────────────── */
+
+/* Catalogue → Sets: the name and code keep room beside the pieces, price, releases and state. */
+.sets__table .col--wide {
+  width: auto;
+  min-width: 180px;
+}
+
+.sets__table .addon-lines__line {
+  white-space: normal;
+}
+
+/* The live board of a set's release: its sets on sale, then each piece's pieces, above its sizes. */
+.live__sets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  margin: 0 0 12px;
+}
+
+.live__sets-figure {
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-display);
+  text-transform: uppercase;
+}
+
+/* The planner of a set's release: each piece named above its table. */
+.live__mix-title + .table-wrap {
+  margin-top: 8px;
+}
+
+/* A set's releases under their count: each title opens its page, quietly underlined. */
+.sets__release {
+  display: block;
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--hairline-strong);
+  text-underline-offset: 3px;
+}

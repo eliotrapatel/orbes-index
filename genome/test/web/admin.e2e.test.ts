@@ -3798,6 +3798,126 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await c.close();
   }, STEP_TIMEOUT);
 
+  it('sells THE SET from the Catalogue and the Club (macro scope K44 T1; plan MACRO M3 §5.3): a set of two models created in Catalogue → Sets, a draw of it with its sizes per piece (the even rule said, then the sets on sale) opened to a segment and published, its page per piece and its CAMPAIGN tab', async () => {
+    const adminId = (await ctx.db.selectFrom('admin_users').select('id').where('email_normalized', '=', ADMIN.email).executeTakeFirstOrThrow()).id;
+    const staff = { type: 'admin' as const, id: adminId };
+    const category = (await ctx.categories.getByCode('J'))!.index;
+    // Two models with their sizes declared: HALO in 52 and 54, LINEA one size.
+    const sized = async (name: string, prefix: string, type: 'RING' | 'ONE_SIZE', labels: (string | null)[]) => {
+      const id = (await ctx.db.insertInto('models').values({ category_id: category, name, type: type === 'ONE_SIZE' ? 'NECKLACE' : 'RING', sku_prefix: prefix, size_type: type, size_kind: type === 'ONE_SIZE' ? null : 'RING' }).returning('id').executeTakeFirstOrThrow()).id;
+      for (const l of labels) await ctx.db.insertInto('skus').values({ model_id: id, size_label: l, code: `${prefix}-${l ?? 'OS'}` }).execute();
+      return id;
+    };
+    const halo = await sized('HALO', 'SET-HALO', 'RING', ['52', '54']);
+    const linea = await sized('LINEA', 'SET-LINEA', 'ONE_SIZE', [null]);
+    const segment = await ctx.services.segments.create({ name: 'Set collectors', criteria: { match: 'ALL', rules: [{ kind: 'TIER', tiers: [0] }] } }, staff);
+
+    const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'reduce' });
+    const p = await c.newPage();
+    await watch(p);
+    await signIn(p, ADMIN.email, ADMIN.password);
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+
+    // Catalogue → Sets, after Add-ons: empty, then New set with its two pieces in order and its price.
+    await go(p, '#/catalogue', 'Catalogue');
+    expect(await p.locator('#sets .empty__text').textContent()).toBe('No set yet: group 2 to 4 models sold at one price.');
+    expect(await p.locator('.panel').evaluateAll((els) => els.map((e) => e.id).filter((id) => ['models', 'addons', 'sets', 'collections'].includes(id)))).toEqual(['models', 'addons', 'sets', 'collections']);
+    await p.click('[data-testid=set-add]');
+    await p.fill('dialog input[name=name]', 'Aura');
+    await p.fill('dialog input[name=code]', 'aura');
+    await p.selectOption('dialog select[name=piece1]', halo);
+    // One model twice is refused before anything is sent.
+    await p.selectOption('dialog select[name=piece2]', halo);
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Each model is in a set once.');
+    await p.selectOption('dialog select[name=piece2]', linea);
+    await p.fill('dialog input[name=price]', '4200');
+    await confirmDialog(p);
+    await p.waitForSelector('.toast:has-text("Set added.")');
+    const row = p.locator('#sets tbody tr');
+    await expect.poll(() => row.count()).toBe(1);
+    expect(await row.locator('[data-testid=set-name]').textContent()).toBe('AURA');
+    expect(await row.locator('[data-testid=set-code]').textContent()).toBe('AURA');
+    expect(await row.locator('[data-testid=set-pieces] .addon-lines__line').allTextContents()).toEqual(['1 · HALO · RING', '2 · LINEA · NECKLACE']);
+    expect(await row.locator('[data-testid=set-price]').textContent()).toBe('€\u00a04\u00a0200');
+    expect(await row.locator('[data-testid=set-releases]').textContent()).toBe('None yet');
+    expect(await row.locator('[data-testid=set-state]').textContent()).toBe('ACTIVE');
+    const set = await ctx.db.selectFrom('sets').select(['id', 'code', 'base_price_minor']).where('name', '=', 'Aura').executeTakeFirstOrThrow();
+    expect(set).toMatchObject({ code: 'AURA', base_price_minor: 420_000 });
+    await shot(p, 'catalogue-sets', { phone: true });
+
+    // Club → New release: WHAT IT SELLS, A SET; its fields of pieces per piece, the even rule said while they differ.
+    await go(p, '#/club?tab=drops', 'Club');
+    await p.click('[data-testid=drop-new]');
+    await p.waitForSelector('dialog select[name=offer]');
+    expect(await p.locator('dialog select[name=setId]').isVisible()).toBe(false);
+    await p.selectOption('dialog select[name=offer]', 'SET');
+    expect(await p.locator('dialog select[name=modelId]').isVisible()).toBe(false);
+    await p.selectOption('dialog select[name=setId]', set.id);
+    await p.click('[data-testid=dialog-confirm]');
+    await p.waitForSelector('dialog input[name=title]');
+    expect(await p.locator('dialog input[name^="piece:"]').evaluateAll((els) => els.map((e) => (e as HTMLInputElement).name))).toEqual(['piece:1:52', 'piece:1:54', 'piece:2:ONE SIZE']);
+    expect(await p.locator('dialog .cfield[data-field="piece:1:52"] .cfield__label').textContent()).toBe('HALO · Size 52');
+    await p.fill('dialog input[name=title]', 'AURA — the set');
+    await p.fill('dialog input[name="piece:1:52"]', '2');
+    await p.fill('dialog input[name="piece:1:54"]', '1');
+    await p.fill('dialog input[name="piece:2:ONE SIZE"]', '2');
+    await expect.poll(() => p.locator('dialog [data-testid=draw-sets-on-sale]').textContent()).toBe('Sets on sale: 2');
+    expect(await p.locator('dialog [data-testid=draw-sets-uneven]').textContent()).toBe('Each piece’s sizes add up to the same sets before the draw is published: HALO 3 · LINEA 2.');
+    await p.fill('dialog input[name="piece:2:ONE SIZE"]', '3');
+    await expect.poll(() => p.locator('dialog [data-testid=draw-sets-on-sale]').textContent()).toBe('Sets on sale: 3');
+    expect(await p.locator('dialog [data-testid=draw-sets-uneven]').count()).toBe(0);
+    const local = (d: Date) => d.toISOString().slice(0, 16);
+    await p.fill('dialog input[name=opensAt]', local(new Date(Date.now() + 86_400_000)));
+    await p.fill('dialog input[name=closesAt]', local(new Date(Date.now() + 2 * 86_400_000)));
+    await p.fill('dialog input[name=earlyAccessHours]', '0');
+    await p.fill('dialog input[name=earlyAccessPlatineHours]', '0');
+    await p.selectOption('dialog select[name=accessSegmentId]', segment.id);
+    await p.fill('dialog input[name=price]', '4200');
+    await shot(p, 'club-set-drop-new', { dialog: true });
+    await confirmDialog(p);
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('AURA — the set');
+    const dropId = decodeURIComponent(new URL(p.url()).hash.split('/').pop()!);
+
+    // Its page: the set and its pieces, its sets, its sizes named by their piece, its price the set's.
+    await expect.poll(() => p.locator('[data-testid=drop-set]').textContent()).toBe('THE SET AURA');
+    expect(await p.locator('[data-testid=drop-set-pieces]').textContent()).toBe('HALO, LINEA');
+    expect(await p.locator('[data-testid=drop-sets]').textContent()).toBe('3');
+    expect(await p.locator('[data-testid=drop-price]').textContent()).toBe('€\u00a04\u00a0200 for the set');
+    expect(await p.locator('#sizes [data-testid=size-label]').allTextContents()).toEqual(['HALO · 52', 'HALO · 54', 'LINEA · ONE SIZE']);
+    expect(await p.locator('#sizes [data-testid=drop-sets-on-sale]').textContent()).toBe('Sets on sale: 3');
+    const row2 = await ctx.db.selectFrom('drops').select(['set_id', 'model_id', 'quantity', 'access_segment_id', 'price_minor']).where('id', '=', dropId).executeTakeFirstOrThrow();
+    expect(row2).toEqual({ set_id: set.id, model_id: null, quantity: 3, access_segment_id: segment.id, price_minor: 420_000 });
+    const sizes = await ctx.db.selectFrom('drop_sizes').select(['piece', 'label', 'stock']).where('drop_id', '=', dropId).orderBy('position').execute();
+    expect(sizes).toEqual([
+      { piece: 1, label: '52', stock: 2 },
+      { piece: 1, label: '54', stock: 1 },
+      { piece: 2, label: 'ONE SIZE', stock: 3 },
+    ]);
+
+    // Published, to the segment's members alone; the Drops list names the set; Catalogue → Sets lists the release.
+    await p.click('[data-testid=drop-publish]');
+    await confirmDialog(p);
+    await p.waitForSelector('.toast:has-text("Release published.")');
+    await expect.poll(() => p.locator('[data-testid=drop-state]').textContent()).toBe('UPCOMING');
+    expect(await p.locator('[data-testid=drop-access]').textContent()).toBe('Segment Set collectors');
+    await shot(p, 'set-drop', { full: true, phone: true });
+    await go(p, '#/club?tab=drops', 'Club');
+    expect(await p.locator('#drops tbody tr', { hasText: 'AURA — the set' }).locator('[data-testid=drop-offer]').textContent()).toBe('Set · HALO · LINEA');
+    await go(p, '#/catalogue', 'Catalogue');
+    expect(await p.locator('#sets [data-testid=set-releases]').textContent()).toBe('1 release');
+
+    // Its CAMPAIGN tab, as a model's: TEASER by default; FULL waits for each piece's photograph.
+    await go(p, `#/club/drops/${dropId}?tab=campaign`, 'AURA — the set');
+    await p.waitForSelector('[data-testid=campaign-image-line]');
+    expect(await p.locator('[data-testid=campaign-image-teaser]').getAttribute('aria-pressed')).toBe('true');
+    expect(await p.locator('[data-testid=campaign-image-full]').isDisabled()).toBe(true);
+    expect(await p.locator('[data-testid=campaign-full-line]').textContent()).toBe('FULL needs each piece’s photograph: add it on each model’s page.');
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    expect(await cspViolations(p)).toEqual([]);
+    await c.close();
+  }, STEP_TIMEOUT);
+
   it('raised no page error or CSP violation', () => {
     expect(problems).toEqual([]);
   });

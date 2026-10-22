@@ -21,6 +21,7 @@ import {
   costCell,
   countdownCardModel,
   countdownWords,
+  withOffer,
   fullChoice,
   linkPageHref,
   makeLinksState,
@@ -76,7 +77,8 @@ export function campaignTab(ctx: ViewContext, dropId: string, release: Countdown
 }
 
 function campaignSections(ctx: ViewContext, c: ReleaseCampaign, release: CountdownRelease, reread: () => void): Child[] {
-  return [linksSection(ctx, c, reread), imageSection(ctx, release), readoutSection(c)];
+  // Macro scope K44 T1: a set's release draws its set's name and its pieces' photographs (its campaign's offer).
+  return [linksSection(ctx, c, reread), imageSection(ctx, withOffer(release, c.offer)), readoutSection(c)];
 }
 
 // ── Links ────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -170,7 +172,7 @@ function imageSection(ctx: ViewContext, release: CountdownRelease): HTMLElement 
     const m = countdownCardModel(release, kind, ctx.now());
     teaserBtn.setAttribute('aria-pressed', String(kind === 'teaser'));
     fullBtn.setAttribute('aria-pressed', String(kind === 'full'));
-    line.textContent = kind === 'teaser' ? K.teaserLine : K.fullLine;
+    line.textContent = kind === 'teaser' ? K.teaserLine : release.pieces ? K.fullSetLine : K.fullLine;
     download.disabled = true;
     blob = null;
     if (!m) {

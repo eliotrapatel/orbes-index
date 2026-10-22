@@ -25,6 +25,10 @@
  *    sizes with pieces and 10 000 pieces in all, the pieces in all said
  *    below, and per size what the stock gives and what will wait for
  *    supplier stock; OFFER NEXT per size; the draw's outcome per size.
+ *  - A set's draw (macro scope K44 T1, plan MACRO M3 §5.3): it sells a set
+ *    (`setId`) in place of a model, its fields of pieces per piece
+ *    (`piece:<n>:<label>`, model/sets.ts), its quantity in sets, the even
+ *    rule said before publication; its outcome per piece's size.
  *  - The tiers (P-X04): the words of each tier's benefits, one per line, as
  *    the server holds them (600 characters, 8 lines), what is sent (null to
  *    restore the default words), and an account's tier on its sheet.
@@ -35,6 +39,7 @@
 import { formatCount, formatDate, formatDateTime } from '../format.js';
 import { formatMoney, moneyField, parseMoney } from './live.js';
 import { can } from './permissions.js';
+import { pieceSizeLabel, sameSetSizes, setDrawSizesInput } from './sets.js';
 import { ONE_SIZE_LABEL, sizeName } from './sizes.js';
 import {
   ORDER_CURRENCIES,
@@ -105,7 +110,7 @@ export function utcInstant(local: string | null | undefined): string | null {
 export function dropFormValues(d: Drop | null, now: Date, early: EarlyAccessDefaults = EARLY_ACCESS_DEFAULTS): Record<string, string> {
   if (d) {
     return {
-      modelId: d.model.id,
+      ...(d.set ? { setId: d.set.id } : { modelId: d.model.id }),
       title: d.title,
       description: d.description ?? '',
       opensAt: localUtc(d.opensAt),
@@ -138,14 +143,17 @@ export function dropFormValues(d: Drop | null, now: Date, early: EarlyAccessDefa
 
 const wholeNumber = (v: string): number | null => (/^\s*\d{1,6}\s*$/.test(v ?? '') ? Number(v) : null);
 
-/** What the server would refuse in the dialog's values, said before anything is sent; null when they hold. */
-export function dropProblem(v: Record<string, string>): string | null {
-  if (!v.modelId) return 'Choose the model of the release.';
+/**
+ * What the server would refuse in the dialog's values, said before anything is sent; null when they hold. A set's draw
+ * (macro scope K44 T1, `setId`) checks its sizes per piece with `sizesProblem` (model/sets.ts setDrawSizesProblem).
+ */
+export function dropProblem(v: Record<string, string>, sizesProblem: (v: Record<string, string>) => string | null = drawSizesProblem): string | null {
+  if (!v.modelId && !v.setId) return 'Choose the model of the release.';
   const title = (v.title ?? '').trim();
   if (!title) return 'Give the release a title.';
   if (title.length > DROP_LIMITS.title) return `A title has at most ${DROP_LIMITS.title} characters.`;
   if ((v.description ?? '').trim().length > DROP_LIMITS.description) return `The description has at most ${DROP_LIMITS.description} characters.`;
-  const sizes = drawSizesProblem(v);
+  const sizes = sizesProblem(v);
   if (sizes) return sizes;
   const opens = utcInstant(v.opensAt);
   const closes = utcInstant(v.closesAt);
@@ -181,10 +189,11 @@ export function drawPriceText(d: Pick<Drop, 'priceMinor' | 'currency'>): string 
 export function dropInput(v: Record<string, string>): DropInput {
   const description = (v.description ?? '').trim();
   return {
-    modelId: v.modelId,
+    // Macro scope K44 T1: a set's draw sells its set, its sizes given per piece.
+    ...(v.setId ? { setId: v.setId } : { modelId: v.modelId }),
     title: v.title.trim(),
     description: description === '' ? null : description,
-    sizes: drawSizesInput(v),
+    sizes: v.setId ? setDrawSizesInput(v) : drawSizesInput(v),
     opensAt: utcInstant(v.opensAt)!,
     closesAt: utcInstant(v.closesAt)!,
     purchaseWindowHours: Number(v.purchaseWindowHours),
@@ -201,11 +210,14 @@ export function dropInput(v: Record<string, string>): DropInput {
 export function dropChange(d: Drop, v: Record<string, string>): DropChange {
   const next = dropInput(v);
   const out: DropChange = {};
-  if (next.modelId !== d.model.id) out.modelId = next.modelId;
+  // Macro scope K44 T1: a set's draw may take another set (its sizes with it), never a model; a model's never a set.
+  if (d.set) {
+    if (next.setId !== d.set.id) out.setId = next.setId;
+  } else if (next.modelId !== d.model.id) out.modelId = next.modelId;
   if (next.title !== d.title) out.title = next.title;
   if ((next.description ?? null) !== (d.description ?? null)) out.description = next.description ?? null;
-  // Plan NEXT LOT §3.6.F: its sizes when they changed, or always for another model (the new model's sizes).
-  if (out.modelId !== undefined || !sameDrawSizes(d.sizes, next.sizes)) out.sizes = next.sizes;
+  // Plan NEXT LOT §3.6.F: its sizes when they changed, or always for another model or set (its own sizes).
+  if (out.modelId !== undefined || out.setId !== undefined || !(d.set ? sameSetSizes(d.sizes, next.sizes) : sameDrawSizes(d.sizes, next.sizes))) out.sizes = next.sizes;
   if (Date.parse(next.opensAt) !== Date.parse(d.opensAt)) out.opensAt = next.opensAt;
   if (Date.parse(next.closesAt) !== Date.parse(d.closesAt)) out.closesAt = next.closesAt;
   if (next.purchaseWindowHours !== d.purchaseWindowHours) out.purchaseWindowHours = next.purchaseWindowHours;
@@ -301,8 +313,12 @@ function sameDrawSizes(had: readonly Pick<DrawSize, 'label' | 'pieces'>[], next:
   return had.length === next.length && had.every((s, i) => s.label.toUpperCase() === next[i]!.label.toUpperCase() && s.pieces === next[i]!.pieces);
 }
 
-/** The change of a draft's sizes from the Sizes and pieces dialog; null when nothing changed. */
-export function drawSizesChange(d: Pick<Drop, 'sizes'>, v: Record<string, string>): DrawSizeInput[] | null {
+/** The change of a draft's sizes from the Sizes and pieces dialog; null when nothing changed (a set's: per piece). */
+export function drawSizesChange(d: Pick<Drop, 'sizes' | 'set'>, v: Record<string, string>): DrawSizeInput[] | null {
+  if (d.set) {
+    const next = setDrawSizesInput(v);
+    return sameSetSizes(d.sizes, next) ? null : next;
+  }
   const next = drawSizesInput(v);
   return sameDrawSizes(d.sizes, next) ? null : next;
 }
@@ -328,9 +344,10 @@ export function drawStockLines(v: Record<string, string>, available: (label: str
 }
 
 /** The draw's outcome as its toast says it: per size, « 17: 5 selected, 12 on the waiting list. »; overall for a draw without sizes. */
-export function drawOutcomeText(r: Pick<DrawOutcome, 'selected' | 'waitlisted' | 'sizes'>): string {
+export function drawOutcomeText(r: Pick<DrawOutcome, 'selected' | 'waitlisted' | 'sizes'> & { drop?: Pick<Drop, 'set'> }): string {
   if (r.sizes.length === 0) return `Drawn: ${formatCount(r.selected)} ${r.selected === 1 ? 'place' : 'places'} held, ${formatCount(r.waitlisted)} on the waiting list.`;
-  return `Drawn. ${r.sizes.map((s) => `${s.label}: ${formatCount(s.selected)} selected, ${formatCount(s.waitlisted)} on the waiting list.`).join(' ')}`;
+  // Macro scope K44 T1: a set's entry counts in each of its sizes, each named by its piece (« AURA · 52 »).
+  return `Drawn. ${r.sizes.map((s) => `${pieceSizeLabel(r.drop?.set, s)}: ${formatCount(s.selected)} selected, ${formatCount(s.waitlisted)} on the waiting list.`).join(' ')}`;
 }
 
 /** OFFER NEXT in a size: the draw drawn, a place free in it and someone on its waiting list (OPERATOR). */

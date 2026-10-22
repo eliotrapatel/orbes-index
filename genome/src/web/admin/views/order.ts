@@ -22,6 +22,11 @@
  *  - Shipping (plan NEXT LOT §3.5.4.4): the agent's steps on its parcel (views/shipping.ts): Start packing, the
  *    checklist, the card's scan, the photo (View the photo), Packed, Ship with a declared value per order of the parcel
  *    (ORBES only), Mark delivered, Report a parcel problem, the parcel's steps; the declared value kept.
+ *  - THE SET (macro scope K44 T1, T3; plan MACRO M3 §5.3): an order of a set
+ *    sale reads « Part of THE SET <name> », the set's price and each of its
+ *    orders linked with its share; Cancel says it cancels the set's orders; a
+ *    set's return is one group, decided together by DECIDE THE SET, each
+ *    piece's destination chosen in one dialog.
  *  - Order case (§3.5.4.4, §3.6.D): its returns, size exchanges and parcel problems; OPEN A RETURN (a return or a size
  *    exchange, sizes in stock only, a reason and a note); DECIDE once the agent has the parcel back (a lost parcel by an
  *    ADMIN as it stands): refund, ship the other size or another piece, the piece back to stock at a location or, by an
@@ -97,12 +102,13 @@ import { can } from '../model/permissions.js';
 import { noCardNotice, orderClaimCodeRow } from '../model/product.js';
 import { toneOf } from '../model/tone.js';
 import { href, productHref } from '../router.js';
-import { ORDER_CURRENCIES, type OrderCaseRecord, type OrderDetail, type OrderDocument, type OrderStatus, type OrderTransitionInput, type ShippingOrderView, type StockLocation } from '../types.js';
+import { ORDER_CURRENCIES, type AdminOrderSet, type OrderCaseRecord, type OrderDetail, type OrderDocument, type OrderStatus, type OrderTransitionInput, type ShippingOrderView, type StockLocation } from '../types.js';
 import { button, defList, linkButton, mono, pageHeader, section, statusMark, table, type DefRow } from '../ui/components.js';
 import { checkedOf, openDialog, type DialogField } from '../ui/dialog.js';
 import { claimCodeDialog } from '../ui/claim-code.js';
 import { saveDownload } from '../ui/download.js';
 import { notify, notifyError } from '../ui/toast.js';
+import { groupCaseLine, groupPieces, ORDER_SET_TEXT, orderSetPieceLine, orderSetPriceText, orderSetShare, pieceAtField, pieceToField, setCancelText, setDecisionInput, setDecisionProblem } from '../model/sets.js';
 import { orderAddonsSection } from './addons.js';
 import type { ViewContext } from './context.js';
 import { parcelSections } from './shipping.js';
@@ -127,6 +133,7 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
     ctx.reload();
   };
   const step = (input: OrderTransitionInput) => ctx.api.transitionOrder(o.id, input).then(() => undefined);
+  const setCancel = setCancelText(o.set, o.id, o.channel);
 
   // ── The step ─────────────────────────────────────────────────────────────
   const noteField = (required: boolean, hint: string): DialogField => ({ name: 'note', label: 'Note', kind: 'textarea', maxlength: ORDER_LIMITS.note, required, hint });
@@ -160,13 +167,17 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
       title: 'Cancel the order',
       eyebrow,
       danger: true,
-      body: h(
-        'p',
-        { class: 'dialog__text' },
-        o.reservation === 'STOCK'
-          ? 'The order reads CANCELLED. The piece it holds in stock is free again, and goes to the next order waiting for it.'
-          : 'The order reads CANCELLED.',
-      ),
+      body: [
+        h(
+          'p',
+          { class: 'dialog__text' },
+          o.reservation === 'STOCK'
+            ? 'The order reads CANCELLED. The piece it holds in stock is free again, and goes to the next order waiting for it.'
+            : 'The order reads CANCELLED.',
+        ),
+        // Macro scope K44 (§15 note 12): a set is cancelled whole.
+        setCancel ? h('p', { class: 'dialog__text', data: { testid: 'order-cancel-set' } }, setCancel) : null,
+      ],
       fields: [noteField(true, 'Why, for Client Services: kept in the order’s history.')],
       validate: (v) => noteProblem(v.note, true),
       live: () => (o.status === 'PAID' ? h('p', { class: 'dialog__text' }, 'It was paid: a credit note cancels its invoice.') : []),
@@ -556,7 +567,10 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
   // ── Add-ons (plan MACRO M3 §4.3, D2) ─────────────────────────────────────
   const addonsSection = orderAddonsSection(ctx, d, eyebrow);
 
-  const sections: Child[] = [stepSection, orderSection, buyerSection, pieceSection, addonsSection, ...shippingSections, caseSection, returnSection, documentsSection, historySection];
+  // ── THE SET (macro scope K44 T1, T3) ─────────────────────────────────────
+  const setSection = o.set ? orderSetSection(o.id, o.set) : null;
+
+  const sections: Child[] = [stepSection, orderSection, setSection, buyerSection, pieceSection, addonsSection, ...shippingSections, caseSection, returnSection, documentsSection, historySection];
   return h(
     'div',
     { class: 'view view--order' },
@@ -568,6 +582,35 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
       actions: [linkButton('Packing slip', href('packingSlip', { orderId: o.id }), 'secondary'), linkButton('All orders', href('orders'), 'ghost')],
     }),
     ...sections,
+  );
+}
+
+/** « Part of THE SET <name> »: the set's price, then each of its orders in the set's order, this one marked. */
+function orderSetSection(orderId: string, s: AdminOrderSet): HTMLElement {
+  return section(
+    ORDER_SET_TEXT.part(s.name),
+    [
+      h('p', { class: 'panel__text' }, ORDER_SET_TEXT.lead),
+      defList([{ label: 'Price', value: h('span', { data: { testid: 'order-set-price' } }, orderSetPriceText(s)) }]),
+      table<AdminOrderSet['orders'][number]>(
+        [
+          { label: 'Piece', cell: (x) => h('span', { data: { testid: 'order-set-piece' } }, orderSetPieceLine(x)), kind: ['wide'] },
+          {
+            label: 'Order',
+            cell: (x) =>
+              x.id === orderId
+                ? h('span', { data: { testid: 'order-set-order' } }, mono(x.reference), h('span', { class: 'cell-sub' }, ORDER_SET_TEXT.thisOrder))
+                : h('a', { class: 'idlink', attrs: { href: href('order', { orderId: x.id }), 'data-testid': 'order-set-order' } }, mono(x.reference), x.channel === 'EXCHANGE' ? h('span', { class: 'cell-sub' }, 'Size exchange') : null),
+            kind: ['nowrap'],
+          },
+          { label: 'Share', cell: (x) => h('span', { data: { testid: 'order-set-share' } }, orderSetShare(x)), kind: ['num', 'nowrap'] },
+          { label: 'Step', cell: (x) => statusMark(humanize(x.status), toneOf('order', x.status)), kind: ['nowrap'] },
+        ],
+        s.orders,
+        { caption: ORDER_SET_TEXT.title },
+      ),
+    ],
+    { id: 'order-set' },
   );
 }
 
@@ -629,7 +672,53 @@ function orderCaseSection(ctx: ViewContext, d: OrderDetail, locations: StockLoca
     }).then(done(CASE_TEXT.opened));
   // The sizes out of stock stay listed, never chosen.
   const shipped = shippedUnits(o.addonItems ?? []);
+  // Macro scope K44 T3: a set's return, decided together: each piece where ORBES says, in one dialog.
+  const decideSet = (c: OrderCaseRecord) => {
+    let result: Awaited<ReturnType<typeof ctx.api.decideOrderCase>> | null = null;
+    const archive = can(role, 'archiveReturn');
+    const pieces = groupPieces(c, o.set);
+    const waiting = pieces.filter((p) => !p.received).length;
+    void openDialog({
+      title: ORDER_SET_TEXT.decide,
+      eyebrow: `${eyebrow} · ${o.set ? ORDER_SET_TEXT.part(o.set.name) : CASE_KIND_LABELS[c.kind]}`,
+      body: [
+        h('p', { class: 'dialog__text' }, ORDER_SET_TEXT.decideLead),
+        waiting > 0 ? h('p', { class: 'dialog__text', data: { testid: 'set-decide-waiting' } }, ORDER_SET_TEXT.waiting(waiting)) : null,
+      ],
+      fields: [
+        { name: 'decision', label: 'Outcome', kind: 'select', required: true, options: [{ value: '', label: 'Choose' }, ...outcomeOptions('RETURN')], value: 'REFUND' },
+        ...pieces.flatMap((p): DialogField[] => [
+          {
+            name: pieceToField(p.caseId),
+            label: p.line,
+            kind: 'select',
+            required: true,
+            options: [{ value: '', label: 'Choose' }, { value: 'RESTOCKED', label: RETURN_LABELS.RESTOCKED }, ...(archive ? [{ value: 'ARCHIVED', label: RETURN_LABELS.ARCHIVED }] : [])],
+            value: '',
+            hint: `${p.reference} · ${p.received ? 'Received' : 'Not back yet'}`,
+          },
+          { name: pieceAtField(p.caseId), label: 'Location', kind: 'select', options: locationOptions, value: o.location.id, hint: 'Back to stock: where it is counted again.', shown: (v) => v[pieceToField(p.caseId)] === 'RESTOCKED' },
+        ]),
+        { name: 'note', label: 'Note', kind: 'textarea', maxlength: ORDER_CASE_LIMITS.decisionNote, required: true },
+      ],
+      danger: (v) => pieces.some((p) => v[pieceToField(p.caseId)] === 'ARCHIVED'),
+      phrase: (v) => (pieces.some((p) => v[pieceToField(p.caseId)] === 'ARCHIVED') ? 'ARCHIVE' : null),
+      validate: (v) => setDecisionProblem(c, v),
+      confirmLabel: ORDER_SET_TEXT.decide,
+      submit: async (v) => {
+        result = await ctx.api.decideOrderCase(c.id, setDecisionInput(c, v));
+      },
+    }).then(async (v) => {
+      const r = result as Awaited<ReturnType<typeof ctx.api.decideOrderCase>> | null;
+      if (!v || !r) return;
+      // Back to stock: each piece's new claim code, once (only its hash is kept), with its card to download.
+      const codes = r.claimCode && r.productId ? [{ productId: r.productId, claimCode: r.claimCode }] : (r.claimCodes ?? []);
+      for (const x of codes) await claimCodeDialog(ctx, { productId: x.productId, code: x.claimCode, text: RETURN_CLAIM_TEXT, testId: 'return-card' });
+      done(CASE_TEXT.decided)(true);
+    });
+  };
   const decide = (c: OrderCaseRecord) => {
+    if (c.group && c.kind === 'RETURN') return decideSet(c);
     let result: Awaited<ReturnType<typeof ctx.api.decideOrderCase>> | null = null;
     const archive = can(role, 'archiveReturn');
     void openDialog({
@@ -703,12 +792,27 @@ function orderCaseSection(ctx: ViewContext, d: OrderDetail, locations: StockLoca
         h(
           'span',
           { class: 'row-actions' },
-          a.decide ? button(CASE_TEXT.decide, { kind: 'primary', testId: 'order-case-decide', onClick: () => decide(c) }) : null,
+          a.decide ? button(c.group && c.kind === 'RETURN' ? ORDER_SET_TEXT.decide : CASE_TEXT.decide, { kind: 'primary', testId: 'order-case-decide', onClick: () => decide(c) }) : null,
           a.cancel ? button(CASE_TEXT.cancel, { kind: 'ghost', testId: 'order-case-cancel', onClick: () => cancel(c) }) : null,
         ),
       ),
       defList([
         ...caseLines(c).map((l) => ({ label: l.label, value: h('span', { class: 'prewrap' }, l.value) as Child })),
+        // Macro scope K44 T3: a set's return, its group: each piece's case, received or not.
+        ...(c.group
+          ? [
+              {
+                label: 'The set',
+                value: h(
+                  'span',
+                  { class: 'addon-lines', data: { testid: 'order-case-group' } },
+                  ...c.group.cases.map((x) =>
+                    h('span', { class: 'addon-lines__line' }, groupCaseLine(x, o.set)),
+                  ),
+                ) as Child,
+              },
+            ]
+          : []),
         // Plan NEXT LOT §3.6.D: the collector's request, written into MESSAGES: its conversation.
         ...(c.conversationId ? [{ label: 'Conversation', value: h('a', { class: 'idlink', attrs: { href: href('conversation', { conversationId: c.conversationId }) }, data: { testid: 'order-case-conversation' } }, 'Open in Messages') as Child }] : []),
       ]),

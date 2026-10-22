@@ -240,6 +240,8 @@ export function openDialog(o: DialogOptions): Promise<DialogValues | null> {
       if (busy) return;
       error.textContent = '';
       for (const el of Array.from(form.querySelectorAll<HTMLInputElement>('input[required], select[required], textarea[required]'))) {
+        // A field hidden for these values (`shown`) asks for nothing.
+        if (el.closest('[hidden]')) continue;
         if (!el.value.trim()) {
           error.textContent = 'Complete the required fields.';
           el.focus();

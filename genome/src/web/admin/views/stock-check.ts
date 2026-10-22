@@ -13,7 +13,8 @@ import { formatCount } from '../format.js';
 import { addToOrderLine, feasibilityLine, orderedLine, toAddOf } from '../model/live.js';
 import { can } from '../model/permissions.js';
 import { noSupplierWords } from '../model/supplier-orders.js';
-import type { LiveFeasibility } from '../types.js';
+import { pieceSizeLabel } from '../model/sets.js';
+import type { LiveFeasibility, ReleaseSet } from '../types.js';
 import { button } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { notify } from '../ui/toast.js';
@@ -22,6 +23,8 @@ import type { ViewContext } from './context.js';
 /** The release the check is of: its model's name names a size without SKU words. */
 export interface CheckedRelease {
   model: { name: string };
+  /** Macro scope K44 T1: a set's release names each size by its piece (« AURA · 52 »). */
+  set?: Pick<ReleaseSet, 'pieces'>;
 }
 
 /** The test ids' prefix: a LIVE RELEASE's, or a draw's. */
@@ -112,7 +115,7 @@ function shortSizesList(ctx: ViewContext, r: CheckedRelease, check: LiveFeasibil
           }),
         );
       }
-      return h('li', { data: { testid: testId } }, h('span', null, `${before}${l.label}: ${formatCount(l.fromStock)} in stock, ${formatCount(l.short)} will wait for supplier stock.`), ...after);
+      return h('li', { data: { testid: testId } }, h('span', null, `${before}${pieceSizeLabel(r.set, l)}: ${formatCount(l.fromStock)} in stock, ${formatCount(l.short)} will wait for supplier stock.`), ...after);
     }),
   );
 }

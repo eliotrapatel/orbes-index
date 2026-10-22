@@ -38,6 +38,10 @@
  * SKU, prices per currency, supplier, weight and stock per location; New add-on, Edit, Set aside / Reinstate and Shopify
  * (OPERATOR, as the models).
  *
+ * Sets (macro scope K44 T1, plan MACRO M3 §5.3), after the add-ons (views/sets.ts): 2 to 4 models sold together at one
+ * price, as their own release; New set, Edit (its pieces frozen once a release names it), Set aside / Reinstate and
+ * Shopify (OPERATOR).
+ *
  * The warranty (plan ORBES CARE, answer 12, D16): New model chooses it
  * (Lifetime preselected); Edit model shows it, an ADMIN changes it (the pieces
  * already sold it reaches said live under it, sent through its own route after
@@ -91,12 +95,13 @@ import { saveDownload } from '../ui/download.js';
 import { photoDialog, photoThumb } from '../ui/photo.js';
 import { notify, notifyError } from '../ui/toast.js';
 import { addonsSection } from './addons.js';
+import { setsSection } from './sets.js';
 import type { ViewContext } from './context.js';
 import { tickSizesOnOpen } from './lookbook.js';
 
 export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
   // Plan MACRO M3 §4.3 (D1): the add-ons after the models, their suppliers for New add-on and Edit.
-  const [cats, cols, models, addons, suppliers] = await Promise.all([ctx.api.categories(), ctx.api.collections(), ctx.api.models(), ctx.api.addons(), ctx.api.suppliers()]);
+  const [cats, cols, models, addons, suppliers, sets] = await Promise.all([ctx.api.categories(), ctx.api.collections(), ctx.api.models(), ctx.api.addons(), ctx.api.suppliers(), ctx.api.sets()]);
   const role = ctx.session.admin.role;
   const canEdit = can(role, 'editCatalog');
   const canToggle = can(role, 'activateCategory');
@@ -475,6 +480,7 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
       ],
     }),
     addonsSection(ctx, addons.items, suppliers.items),
+    setsSection(ctx, sets.items, models.items),
     section('Collections', table(collectionColumns, cols.items, { empty: 'No collection.', caption: 'Collections' }), {
       id: 'collections',
       tools: can(role, 'createCatalog') ? [button('New collection', { kind: 'ghost', onClick: newCollection })] : [],

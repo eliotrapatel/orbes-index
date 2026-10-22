@@ -38,6 +38,11 @@
  *  - Its Access (plan MACRO M1 §3.2, F4): everyone, or a segment's members
  *    alone (the page says FOR SELECTED COLLECTORS), chosen in Edit until the
  *    publication; its row links to the segment.
+ *  - A set's draw (macro scope K44 T1, plan MACRO M3 §5.3): its set and pieces
+ *    in place of a model, Edit and Sizes and pieces with a field per piece's
+ *    size, « Sets on sale » and the even rule under its Sizes (each size named
+ *    by its piece), each entry's sizes (« 52 · M · 45 CM »), the size filter
+ *    and the draw's outcome per piece's size.
  *  - Two tabs under its header (plan MACRO M1 §2.2): RELEASE, all of the
  *    above, and CAMPAIGN (`?tab=campaign`, views/campaign.ts): its links made
  *    in one click, its countdown image, its readout.
@@ -75,12 +80,25 @@ import { drawGuaranteeLine, GUARANTEE_STATE_LABELS, guaranteedText, placesLeftFo
 import { drawTestStart } from '../model/test-entrants.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
-import { DROP_ENTRY_STATUSES, type DrawSize, type Drop, type DropEntry, type DropEntryStatus, type ReleaseGuarantee } from '../types.js';
+import { DROP_ENTRY_STATUSES, type DrawSize, type Drop, type DropEntry, type DropEntryStatus, type ReleaseGuarantee, type SetView } from '../types.js';
 import { button, defList, field, filterBar, linkButton, mono, pageHeader, pager, section, select, statusMark, table } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { notify } from '../ui/toast.js';
 import { campaignTab, releaseTabs } from './campaign.js';
-import { drawSizeFields, drawSizesBody, drawSizesOfModel, drawSizesPreview, dropFields, dropModelField } from './club.js';
+import {
+  drawSizeFields,
+  drawSizesBody,
+  drawSizesOfModel,
+  drawSizesOfSet,
+  drawSizesPreview,
+  dropFields,
+  dropModelField,
+  releaseSetField,
+  setDrawSizeFields,
+  setDrawSizesBody,
+  setDrawSizesPreview,
+} from './club.js';
+import { entrySizesText, OFFER_TEXT, pieceName, pieceSizeLabel, pieceTotals, quantityWords, setDrawSizesProblem, setDrawSizeValues, setsOnSaleLines } from '../model/sets.js';
 import { choicesBlock, leftOutDialog } from './addons.js';
 import { pageParam, type ViewContext } from './context.js';
 import { serverStatusPanel, withServerPanel } from './server-status.js';
@@ -93,7 +111,7 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
   const status = DROP_ENTRY_STATUSES.find((s) => s === ctx.route.query.status) as DropEntryStatus | undefined;
   // Plan NEXT LOT §3.6.F: one size's entries (a UUID only; the server checks it is one of the draw's).
   const sizeId = /^[0-9a-f-]{36}$/i.test(ctx.route.query.size ?? '') ? ctx.route.query.size : undefined;
-  const [d, entries, models, guarantees, tests, stockCheck] = await Promise.all([
+  const [d, entries, models, guarantees, tests, stockCheck, sets] = await Promise.all([
     ctx.api.drop(id),
     ctx.api.dropEntries(id, { ...(status ? { status } : {}), ...(sizeId ? { sizeId } : {}), page: pageParam(ctx), pageSize: 50 }),
     ctx.api.models(),
@@ -101,8 +119,12 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
     loadTestReads(ctx, id),
     // Plan NEXT LOT §3.5.4.3: the stock under its sizes, as a LIVE RELEASE's.
     ctx.api.dropFeasibility(id).catch(() => 'failed' as const),
+    // Macro scope K44 T1: the sets a set's draw may move to while a draft.
+    ctx.api.sets().catch(() => ({ items: [] as SetView[] })),
   ]);
   const role = ctx.session.admin.role;
+  const set = d.set ?? null;
+  const sizeWords = (z: { label: string; piece?: number | null }) => (set ? pieceSizeLabel(set, z) : sizeFieldLabel(z.label));
   const acts = dropActions(d, role);
   const eyebrow = `${humanize(d.model.name)} · ${d.id.slice(0, 8).toUpperCase()}`;
   const done = (msg: string) => (r: unknown) => {
@@ -114,6 +136,7 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
   // ── The release ──────────────────────────────────────────────────────────
   // Plan NEXT LOT §3.6.F: the model first (its sizes are the draw's), then the fields with its sizes' pieces.
   const edit = async () => {
+    if (set) return editSet();
     const chosen = await openDialog({
       title: 'Edit the release',
       eyebrow,
@@ -140,8 +163,52 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
     }).then(done('Release saved.'));
   };
 
+  // Macro scope K44 T1: a set's draw, its set first (another set takes its sizes with it), then its fields per piece.
+  const editSet = async () => {
+    const chosen = await openDialog({
+      title: 'Edit the release',
+      eyebrow,
+      body: h('p', { class: 'dialog__text' }, OFFER_TEXT.setFixed),
+      fields: [releaseSetField(sets.items, set!.id)],
+      validate: (v) => (v.setId ? null : 'Choose the set of the release.'),
+      confirmLabel: 'Next',
+    });
+    if (!chosen) return;
+    const setId = chosen.setId;
+    const [{ pieces, available }, segments] = await Promise.all([drawSizesOfSet(ctx.api, setId), ctx.api.segmentNames()]);
+    await openDialog({
+      title: 'Edit the release',
+      eyebrow,
+      body: [h('p', { class: 'dialog__text' }, 'A draft changes freely. Once published, only its description does.'), ...setDrawSizesBody(pieces)],
+      fields: dropFields(models.items, { ...dropFormValues(d, ctx.now()), ...setDrawSizeValues(pieces, setId === set!.id ? d : null) }, { model: false, sizes: [], segments, setPieces: pieces }),
+      live: (v) => setDrawSizesPreview(v, pieces, available),
+      validate: (v) => dropProblem({ ...v, setId }, (x) => setDrawSizesProblem(x, pieces)) ?? (Object.keys(dropChange(d, { ...v, setId })).length === 0 ? 'Nothing has changed.' : null),
+      confirmLabel: 'Save release',
+      submit: async (v) => {
+        await ctx.api.updateDrop(d.id, dropChange(d, { ...v, setId }));
+      },
+    }).then(done('Release saved.'));
+  };
+
   // Plan NEXT LOT §3.6.F: a DRAFT's sizes and their pieces alone (a draft of before this lot gets its first here).
   const sizesDialog = async () => {
+    if (set) {
+      // Macro scope K44 T1: per piece, each its model's offered sizes.
+      const { pieces, available } = await drawSizesOfSet(ctx.api, set.id);
+      await openDialog({
+        title: 'Sizes and pieces',
+        eyebrow,
+        body: setDrawSizesBody(pieces),
+        fields: setDrawSizeFields(pieces, setDrawSizeValues(pieces, d)),
+        live: (v) => setDrawSizesPreview(v, pieces, available),
+        validate: (v) => setDrawSizesProblem(v, pieces) ?? (drawSizesChange(d, v) === null ? 'Nothing has changed.' : null),
+        confirmLabel: 'Save sizes',
+        submit: async (v) => {
+          await ctx.api.updateDrop(d.id, { sizes: drawSizesChange(d, v)! });
+        },
+      }).then(done('Sizes saved.'));
+      return;
+    }
     const { labels, available } = await drawSizesOfModel(ctx.api, d.model.id);
     await openDialog({
       title: 'Sizes and pieces',
@@ -220,7 +287,7 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
         h(
           'p',
           { class: 'dialog__text' },
-          `${formatCount(ranked)} ${ranked === 1 ? 'entry takes' : 'entries take'} part, for ${formatCount(left)} ${left === 1 ? 'place' : 'places'} of ${formatCount(d.quantity)} ${d.quantity === 1 ? 'piece' : 'pieces'}${placesTaken(d) > 0 ? ` (${formatCount(placesTaken(d))} already held or sold by direct reservations: lapse first those whose time has passed)` : ''}.`,
+          `${formatCount(ranked)} ${ranked === 1 ? 'entry takes' : 'entries take'} part, for ${formatCount(left)} ${left === 1 ? 'place' : 'places'} of ${quantityWords(d.quantity, set !== null)}${placesTaken(d) > 0 ? ` (${formatCount(placesTaken(d))} already held or sold by direct reservations: lapse first those whose time has passed)` : ''}.`,
         ),
         // IN-01: the guaranteed places, selected first, apart from the ranking.
         ...(guaranteedLine ? [h('p', { class: 'dialog__text', data: { testid: 'draw-guaranteed' } }, guaranteedLine)] : []),
@@ -254,8 +321,14 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
   const offerNextIn = (s: DrawSize) =>
     void openDialog({
       title: 'Offer the next place',
-      eyebrow: `${eyebrow} · ${sizeFieldLabel(s.label)}`,
-      body: h('p', { class: 'dialog__text' }, `The first entry by rank on the waiting list of ${sizeInSentence(s.label)} is held a place for ${d.purchaseWindowHours} hours. ORBES Client Services contacts its entrant.`),
+      eyebrow: `${eyebrow} · ${sizeWords(s)}`,
+      body: h(
+        'p',
+        { class: 'dialog__text' },
+        set
+          ? `The first entry by rank on the waiting list of ${sizeWords(s)} whose sizes all have a piece left is held a place for ${d.purchaseWindowHours} hours. ORBES Client Services contacts its entrant.`
+          : `The first entry by rank on the waiting list of ${sizeInSentence(s.label)} is held a place for ${d.purchaseWindowHours} hours. ORBES Client Services contacts its entrant.`,
+      ),
       confirmLabel: 'Offer the place',
       submit: async () => {
         await ctx.api.offerNextDropEntry(d.id, s.id);
@@ -265,10 +338,23 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
   const published = d.publishedAt !== null;
   const rows = [
     { label: 'State', value: h('span', { data: { testid: 'drop-state' } }, statusMark(humanize(d.state), toneOf('drop', d.state))) },
-    { label: 'Model', value: [humanize(d.model.name), humanize(d.model.type), ...(d.model.variant ? [humanize(d.model.variant)] : [])].join(' · '), note: d.model.active ? undefined : 'No longer offered for new pieces.' },
-    { label: 'Pieces', value: formatCount(d.quantity) },
+    // Macro scope K44 T1: a set's draw names its set and pieces; its quantity is in sets, its price the set's.
+    ...(set
+      ? [
+          { label: 'Set', value: h('span', { data: { testid: 'drop-set' } }, `THE SET ${humanize(set.name)}`), note: set.active ? undefined : 'Set aside: no new release of it.' },
+          { label: 'Pieces', value: h('span', { data: { testid: 'drop-set-pieces' } }, set.pieces.map((p) => pieceName(set, p.piece)).join(', ')) },
+          { label: 'Sets', value: h('span', { data: { testid: 'drop-sets' } }, formatCount(d.quantity)), note: d.state === 'DRAFT' ? 'The smallest piece’s pieces until it is published.' : undefined },
+        ]
+      : [
+          { label: 'Model', value: [humanize(d.model.name), humanize(d.model.type), ...(d.model.variant ? [humanize(d.model.variant)] : [])].join(' · '), note: d.model.active ? undefined : 'No longer offered for new pieces.' },
+          { label: 'Pieces', value: formatCount(d.quantity) },
+        ]),
     // NOCTURNE (addition 5): shown on its card and page on /verify; each order of the draw takes it.
-    { label: 'Price', value: h('span', { data: { testid: 'drop-price' } }, drawPriceText(d)), note: d.priceMinor === null ? 'Each order’s price is entered by Client Services.' : 'Each order of the draw takes it.' },
+    {
+      label: 'Price',
+      value: h('span', { data: { testid: 'drop-price' } }, set && d.priceMinor !== null ? `${drawPriceText(d)} for the set` : drawPriceText(d)),
+      note: d.priceMinor === null ? 'Each order’s price is entered by Client Services.' : set ? 'One price for the set, shared over its pieces’ orders by their base prices.' : 'Each order of the draw takes it.',
+    },
     {
       label: 'Early access',
       value: h('span', { data: { testid: 'drop-early-access' } }, earlyAccessLine(d)),
@@ -312,6 +398,7 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
   const release = section('Release', defList(rows), { id: 'release', tools });
 
   // ── Sizes (plan NEXT LOT §3.6.F) ─────────────────────────────────────────
+  const setLines = set ? setsOnSaleLines(pieceTotals(d.sizes, set.pieces.length), set.pieces.map((p) => pieceName(set, p.piece)), 'DRAW') : null;
   const sizesSection =
     d.sizes.length > 0 || d.state === 'DRAFT'
       ? section(
@@ -319,7 +406,7 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
           [
             table<DrawSize>(
               [
-                { label: 'Size', cell: (s) => h('span', { data: { testid: 'size-label' } }, sizeFieldLabel(s.label)), kind: ['nowrap'] },
+                { label: 'Size', cell: (s) => h('span', { data: { testid: 'size-label' } }, sizeWords(s)), kind: ['nowrap'] },
                 { label: 'Pieces', cell: (s) => formatCount(s.pieces), kind: ['num'] },
                 { label: 'Reserved', cell: (s) => formatCount(s.reserved), kind: ['num'] },
                 { label: 'Entered', cell: (s) => formatCount(s.entered), kind: ['num'] },
@@ -334,10 +421,12 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
               d.sizes,
               { empty: 'No sizes yet: give the release its sizes and their pieces before publishing it.', caption: 'Sizes' },
             ),
+            // Macro scope K44 T1: a set's sets on sale, and while its pieces differ, the even rule before publication.
+            ...(set && setLines ? [h('p', { class: 'panel__text', data: { testid: 'drop-sets-on-sale' } }, setLines.onSale), setLines.uneven ? h('p', { class: 'panel__text', data: { testid: 'drop-sets-uneven' } }, setLines.uneven) : null] : []),
             // Plan NEXT LOT §3.5.4.3: its stock, each size against the stock at its location, until its draw.
             ...(d.sizes.length > 0 && !d.drawnAt && !d.cancelledAt ? [defList([{ label: 'Stock', value: stockBlock(ctx, d, stockCheck, 'drop') }])] : []),
           ],
-          { id: 'sizes', note: `${formatCount(d.quantity)} ${d.quantity === 1 ? 'piece' : 'pieces'} in all` },
+          { id: 'sizes', note: set ? `${quantityWords(d.quantity, true)} · ${set.pieces.length} pieces each` : `${formatCount(d.quantity)} ${d.quantity === 1 ? 'piece' : 'pieces'} in all` },
         )
       : null;
 
@@ -378,7 +467,7 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
   statusFilter.addEventListener('change', () => ctx.setQuery({ status: statusFilter.value, page: undefined }));
   // Plan NEXT LOT §3.6.F: a draw with sizes filters its entries by size.
   const sized = d.sizes.length > 0;
-  const sizeFilter = sized ? select('size', [{ value: '', label: 'All sizes' }, ...d.sizes.map((s) => ({ value: s.id, label: sizeFieldLabel(s.label) }))], sizeId ?? '') : null;
+  const sizeFilter = sized ? select('size', [{ value: '', label: 'All sizes' }, ...d.sizes.map((s) => ({ value: s.id, label: sizeWords(s) }))], sizeId ?? '') : null;
   sizeFilter?.addEventListener('change', () => ctx.setQuery({ size: sizeFilter.value, page: undefined }));
   const now = ctx.now();
   const list = section(
@@ -394,7 +483,16 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
             cell: (e) => h('span', null, h('a', { class: 'idlink', attrs: { href: href('owner', { accountId: e.accountId }), 'data-testid': 'entry-account' } }, e.email), testTag(e.email)),
             kind: ['wide'],
           },
-          ...(sized ? [{ label: 'Size', cell: (e: DropEntry) => h('span', { data: { testid: 'entry-size' } }, e.size ? sizeFieldLabel(e.size.label) : '—'), kind: ['nowrap' as const] }] : []),
+          ...(sized
+            ? [
+                {
+                  label: set ? 'Sizes' : 'Size',
+                  // Macro scope K44 T1: a set's entry, its size for each piece in the set's order (« 52 · M · 45 CM »).
+                  cell: (e: DropEntry) => h('span', { data: { testid: 'entry-size' } }, e.sizes?.length ? entrySizesText(e.sizes) : e.size ? sizeFieldLabel(e.size.label) : '—'),
+                  kind: ['nowrap' as const],
+                },
+              ]
+            : []),
           { label: 'Tier', cell: (e) => tierName(e.tier), kind: ['nowrap'] },
           { label: 'Seniority', cell: (e) => (e.seniority === null ? '—' : `${e.seniority} ${e.seniority === 1 ? 'yr' : 'yrs'}`), kind: ['nowrap'] },
           {
@@ -453,7 +551,8 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
     dropHeader(d),
     releaseTabs('drop', d.id, 'release'),
     withServerPanel(
-      [release, ...(sizesSection ? [sizesSection] : []), testEntrantsSection(ctx, { mode: 'DRAW', dropId: d.id, eyebrow, start: drawTestStart(d, ctx.now()), sizes: d.sizes.map((z) => ({ id: z.id, label: z.label })) }, tests), guaranteesSection(guarantees.items), list],
+      // A set's draw: each bot chooses a size per piece at random (no one size to choose for every bot).
+      [release, ...(sizesSection ? [sizesSection] : []), testEntrantsSection(ctx, { mode: 'DRAW', dropId: d.id, eyebrow, start: drawTestStart(d, ctx.now()), sizes: set ? [] : d.sizes.map((z) => ({ id: z.id, label: z.label })) }, tests), guaranteesSection(guarantees.items), list],
       serverStatusPanel(ctx),
     ),
   );
@@ -474,7 +573,8 @@ function dropHeader(d: Drop): HTMLElement {
 /** The CAMPAIGN tab (plan MACRO M1 §2.2): the draw's name and photograph are public from its publication. */
 async function dropCampaignView(ctx: ViewContext, id: string): Promise<HTMLElement> {
   const d = await ctx.api.drop(id);
-  const model = await ctx.api.model(d.model.id).catch(() => null);
+  // A set's draw: its pieces' names and photographs come with its campaign (its `offer`).
+  const model = d.set ? null : await ctx.api.model(d.model.id).catch(() => null);
   return h(
     'div',
     { class: 'view view--drop view--campaign' },

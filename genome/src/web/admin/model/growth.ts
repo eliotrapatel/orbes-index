@@ -342,10 +342,11 @@ export function releaseRow(x: GrowthRelease): { link: string; title: string; met
   return {
     link: x.mode === 'LIVE' ? href('liveRelease', { dropId: x.id }) : href('drop', { dropId: x.id }),
     title: x.title,
-    method: x.mode === 'LIVE' ? 'LIVE RELEASE' : 'DRAW',
+    // Macro scope K44: a set's release says so, its pieces and sold counted in sets.
+    method: `${x.mode === 'LIVE' ? 'LIVE RELEASE' : 'DRAW'}${x.set ? ` · SET OF ${x.set.pieces}` : ''}`,
     opened: formatDate(x.opensAt),
-    pieces: formatCount(x.pieces),
-    sold: formatCount(x.sold),
+    pieces: x.set ? `${formatCount(x.pieces)} ${x.pieces === 1 ? 'set' : 'sets'}` : formatCount(x.pieces),
+    sold: x.set ? `${formatCount(x.sold)} ${x.sold === 1 ? 'set' : 'sets'}` : formatCount(x.sold),
     soldOutIn: x.mode === 'LIVE' ? durationText(x.sellOutMs) : '—',
     entries: x.mode === 'DRAW' ? formatCount(x.entries) : '—',
   };

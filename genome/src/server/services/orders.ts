@@ -490,6 +490,60 @@ export interface OrderView {
   events: { action: string; status: OrderStatus; note: string | null; at: Date; actor: { type: string; id: string | null } }[];
   /** Plan MACRO M3 §4.2 (D1, D2): its catalogue add-ons, unit by unit, oldest first (services/order-addons.ts). */
   addonItems: AdminOrderAddonUnit[];
+  /**
+   * Macro scope K44 (T1, T3): an order of a set sale, its set, the one price and this order's piece, with every order of
+   * the sale in the set's order (a piece's size EXCHANGE order among them, in its piece's place); null for any other order.
+   */
+  set: AdminOrderSet | null;
+}
+
+/** An order's set sale as the console reads it (macro scope K44): the order page's « Part of THE SET ». */
+export interface AdminOrderSet {
+  saleId: string;
+  setId: string;
+  name: string;
+  /** The set's one price and its currency (null for both: a draw without a price). */
+  priceMinor: number | null;
+  currency: string | null;
+  /** This order's piece (1 to 4). */
+  piece: number;
+  orders: { id: string; reference: string; piece: number | null; channel: OrderChannel; status: OrderStatus; model: string; variant: string | null; sizeLabel: string | null; priceMinor: number | null; currency: string | null }[];
+}
+
+/** The set sale of an order (OrderView.set): its set, price and orders in the set's order; null without one. */
+async function adminOrderSet(db: Db, saleId: string | null, piece: number | null): Promise<AdminOrderSet | null> {
+  if (saleId === null) return null;
+  const sale = await db.selectFrom('set_sales as s').innerJoin('sets as t', 't.id', 's.set_id').select(['s.id', 's.set_id', 't.name', 's.price_minor', 's.currency']).where('s.id', '=', saleId).executeTakeFirst();
+  if (!sale) return null;
+  const orders = await db
+    .selectFrom('orders as o')
+    .innerJoin('models as m', 'm.id', 'o.model_id')
+    .select(['o.id', 'o.set_piece', 'o.channel', 'o.status', 'm.name', 'm.variant_label', 'o.size_label', 'o.price_minor', 'o.currency'])
+    .where('o.set_sale_id', '=', saleId)
+    .orderBy('o.set_piece')
+    .orderBy('o.reserved_at')
+    .orderBy('o.id')
+    .execute();
+  return {
+    saleId: sale.id,
+    setId: sale.set_id,
+    name: sale.name,
+    priceMinor: sale.price_minor,
+    currency: sale.currency,
+    piece: piece ?? 1,
+    orders: orders.map((o) => ({
+      id: o.id,
+      reference: orderReference(o.id),
+      piece: o.set_piece,
+      channel: o.channel,
+      status: o.status,
+      model: o.name,
+      variant: o.variant_label,
+      sizeLabel: o.size_label,
+      priceMinor: o.price_minor,
+      currency: o.currency,
+    })),
+  };
 }
 
 /** An invoice or a credit note of an order, as its page lists it. */
@@ -2506,6 +2560,7 @@ export class OrderService {
       invoices: invoices.map((i) => ({ id: i.id, kind: i.kind, number: i.number, issuedAt: i.issuedAt, currency: i.currency, totalMinor: i.totalMinor })),
       events: events.map((e) => ({ action: e.action, status: e.status, note: e.note, at: e.created_at, actor: { type: e.actor_type, id: e.actor_id } })),
       addonItems: await adminAddonUnits(this.db, id),
+      set: await adminOrderSet(this.db, r.set_sale_id, r.set_piece),
     };
   }
 

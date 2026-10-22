@@ -22,11 +22,12 @@ import {
   readoutRows,
   releaseTab,
   releaseTabHref,
+  withOffer,
   type CountdownCardModel,
   type CountdownRelease,
 } from '../../src/web/admin/model/campaign.js';
 import type { CampaignChannel, LinkView, ReleaseCampaign } from '../../src/web/admin/types.js';
-import { COUNTDOWN_CARD, drawCountdownCard, type CountdownContext, type CountdownPhoto } from '../../src/web/admin/ui/countdown-card.js';
+import { COUNTDOWN_CARD, countdownTiles, drawCountdownCard, type CountdownContext, type CountdownPhoto } from '../../src/web/admin/ui/countdown-card.js';
 
 const PHOTO = `/api/v1/media/${'a'.repeat(64)}`;
 const FONTS = { display: '"Gravesend Sans", "Helvetica Neue", sans-serif', reading: '"Helvetica Neue", sans-serif' };
@@ -333,6 +334,60 @@ describe('the CAMPAIGN tab: drawing the countdown image (C3)', () => {
     const wide = new Recorder();
     drawCountdownCard(wide, FULL, photo(1600, 900), FONTS);
     expect(wide.images).toEqual([[0, 0, 1600, 900, 0, 250 + (1080 - 607.5) / 2, 1080, 607.5]]);
+  });
+
+  it('a set\'s release (macro scope K44 T1): TEASER by default, FULL drawing its pieces\' photographs side by side with THE SET over its name, TEASER while a piece has no photograph', () => {
+    const P2 = `/api/v1/media/${'b'.repeat(64)}`;
+    const P3 = `/api/v1/media/${'c'.repeat(64)}`;
+    // The release as its page reads it, completed by its campaign's offer: the set's name and its pieces' photographs.
+    const set = withOffer(
+      { ...RELEASE, mode: 'DRAW', model: { name: 'Aura', variant: null, photo: null } },
+      { kind: 'SET', name: 'Aura', pieces: [{ piece: 1, name: 'HALO', variant: null, photo: PHOTO }, { piece: 2, name: 'ECLAT', variant: 'Steel', photo: P2 }, { piece: 3, name: 'ORBIT', variant: null, photo: P3 }] },
+    );
+    expect(withOffer(RELEASE, { kind: 'MODEL', name: 'Monolithe', pieces: [{ piece: null, name: 'Monolithe', variant: 'Blue', photo: PHOTO }] })).toBe(RELEASE);
+    expect(fullChoice(set, NOW)).toEqual({ available: true, line: K.fullSetLine });
+    // TEASER stays the default: no name, no photograph.
+    const teaser = countdownCardModel(set, 'teaser', NOW)!;
+    expect(teaser).toMatchObject({ kind: 'teaser', label: 'A RELEASE', photo: null });
+    expect(JSON.stringify(teaser)).not.toMatch(/AURA|HALO|media/i);
+    const full = countdownCardModel(set, 'full', NOW)!;
+    expect(full).toEqual({ kind: 'full', label: 'DRAW', title: ['THE SET', 'AURA'], when: '5 NOVEMBER 2026 · 20:00 PARIS', photo: PHOTO, photos: [PHOTO, P2, P3], filename: 'orbes-2026-11-05-full.png' });
+    // A piece without its photograph: FULL cannot be chosen, and is drawn as the TEASER.
+    const missing = { ...set, pieces: set.pieces!.map((x, i) => (i === 1 ? { ...x, photo: null } : x)) };
+    expect(fullChoice(missing, NOW)).toEqual({ available: false, line: K.fullSetNoPhoto });
+    expect(countdownCardModel(missing, 'full', NOW)).toEqual(teaser);
+
+    // Drawn: three tiles across the 1080 square at y 250, 8 px of ground between two, each photograph filling its tile
+    // about its centre, the fade over the whole square; then THE SET over its name.
+    const ctx = new Recorder();
+    drawCountdownCard(ctx, full, [photo(800, 1200), photo(1200, 800), photo(1000, 1000)], FONTS);
+    const w = (1080 - 16) / 3;
+    expect(countdownTiles(3)).toEqual([0, 1, 2].map((i) => ({ x: i * (w + 8), y: 0, w, h: 1080 })));
+    expect(ctx.images).toHaveLength(3);
+    ctx.images.forEach((img, i) => {
+      const [, , sw, sh, dx, dy, dw, dh] = img as number[];
+      expect([dx, dy, dw, dh]).toEqual([i * (w + 8), 250, w, 1080]);
+      // The crop keeps the tile's proportions: never stretched.
+      expect(sw! / sh!).toBeCloseTo(w / 1080);
+    });
+    // The portrait photograph cropped about its centre: its full height, the middle of its width.
+    const [sx, sy, sw, sh] = ctx.images[0] as number[];
+    expect(sy).toBeCloseTo(0);
+    expect(sh).toBeCloseTo(1200);
+    expect(sx! + sw! / 2).toBeCloseTo(400);
+    expect(ctx.gradients.map((g) => g.box)).toEqual([[0, 250, 0, 1330]]);
+    expect(ctx.lines().map((l) => l.text)).toEqual(['ORBES', 'DRAW', 'THE SET', 'AURA', '5 NOVEMBER 2026 · 20:00 PARIS', 'THEORBES.COM']);
+    // Two pieces side by side; four in two rows of two.
+    expect(countdownTiles(2).map((t) => [t.x, t.w, t.h])).toEqual([
+      [0, 536, 1080],
+      [544, 536, 1080],
+    ]);
+    expect(countdownTiles(4)).toEqual([
+      { x: 0, y: 0, w: 536, h: 536 },
+      { x: 544, y: 0, w: 536, h: 536 },
+      { x: 0, y: 544, w: 536, h: 536 },
+      { x: 544, y: 544, w: 536, h: 536 },
+    ]);
   });
 
   it('FULL shrinks a long name to 960 px, then breaks it between its words', () => {

@@ -19,6 +19,10 @@
  *   │       THEORBES.COM       │ y 1810         │       THEORBES.COM       │ ash, 22 px, 0.5 em, ending at y 1810
  *   └──────────────────────────┘                └──────────────────────────┘ on the ground, #0a0a0a
  *
+ * A set's release (macro scope K44 T1, plan MACRO M3 §5.2): FULL draws its 2 to 4 pieces' photographs side by side in
+ * the same 1080 square, each in its own tile cropped to fill it, centred (the house's crop): two or three tiles across, four
+ * in two rows of two, 8 px of ground between two; the fade over the whole square, THE SET over its name.
+ *
  * Tracking is drawn letter by letter (Safari lacks `letterSpacing`); figures take the reading face, as the story card's
  * title does. Nothing about an image is stored or sent: it is drawn here (its photograph this origin's media route
  * only), and DOWNLOAD saves the PNG (ui/download.ts).
@@ -60,8 +64,34 @@ export const COUNTDOWN_CARD = Object.freeze({
     title: Object.freeze({ gap: 56 }),
     when: Object.freeze({ gap: 40, size: 26, tracking: 0.42 }),
     monogram: Object.freeze({ side: 56, alpha: 0.9 }),
+    /** A set's tiles: the ground between two. */
+    tiles: Object.freeze({ gap: 8 }),
   }),
 });
+
+/** A set's tiles in the photo square (x, y, w, h from its top-left): 2 or 3 across, 4 in two rows of two. */
+export function countdownTiles(n: number): { x: number; y: number; w: number; h: number }[] {
+  const side = COUNTDOWN_CARD.full.photo.side;
+  const gap = COUNTDOWN_CARD.full.tiles.gap;
+  if (n <= 1) return [{ x: 0, y: 0, w: side, h: side }];
+  if (n === 4) {
+    const half = (side - gap) / 2;
+    return [0, 1, 2, 3].map((i) => ({ x: (i % 2) * (half + gap), y: Math.floor(i / 2) * (half + gap), w: half, h: half }));
+  }
+  const w = (side - gap * (n - 1)) / n;
+  return Array.from({ length: n }, (_, i) => ({ x: i * (w + gap), y: 0, w, h: side }));
+}
+
+/** A photograph drawn to fill its tile, cropped about its centre (the house's crop). */
+function drawCover(ctx: CountdownContext, photo: CountdownPhoto, x: number, y: number, w: number, h: number): void {
+  const pw = photo.naturalWidth || photo.width;
+  const ph = photo.naturalHeight || photo.height;
+  if (!(pw > 0 && ph > 0)) return;
+  const scale = Math.max(w / pw, h / ph);
+  const sw = w / scale;
+  const sh = h / scale;
+  ctx.drawImage(photo, (pw - sw) / 2, (ph - sh) / 2, sw, sh, x, y, w, h);
+}
 
 /** The face the image waits for: Gravesend Sans 500 (brand.css), loaded within 4 s. */
 export const COUNTDOWN_FONT = '500 88px "Gravesend Sans"';
@@ -186,16 +216,26 @@ function drawTitle(ctx: CountdownContext, lines: readonly string[], top: number,
   return y;
 }
 
-/** Draw the image: TEASER without a photograph, FULL with its photograph (`photo`). */
-export function drawCountdownCard(ctx: CountdownContext, m: CountdownCardModel, photo: CountdownPhoto | null, fonts: CountdownFonts): void {
+/** Draw the image: TEASER without a photograph, FULL with its photograph (`photo`), a set's with each piece's (a list). */
+export function drawCountdownCard(ctx: CountdownContext, m: CountdownCardModel, photo: CountdownPhoto | readonly CountdownPhoto[] | null, fonts: CountdownFonts): void {
   const C = COUNTDOWN_CARD;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalAlpha = 1;
   ctx.fillStyle = C.ground;
   ctx.fillRect(0, 0, C.width, C.height);
 
-  if (m.kind === 'full') {
+  if (m.kind === 'full' && Array.isArray(photo)) {
+    // Macro scope K44 T1: a set's pieces side by side, each tile filled.
     const P = C.full.photo;
+    const tiles = countdownTiles(photo.length);
+    photo.forEach((p, i) => drawCover(ctx, p as CountdownPhoto, tiles[i]!.x, P.top + tiles[i]!.y, tiles[i]!.w, tiles[i]!.h));
+    const fade = ctx.createLinearGradient(0, P.top, 0, P.top + P.side);
+    for (const [at, colour] of P.fade) fade.addColorStop(at, colour);
+    ctx.fillStyle = fade;
+    ctx.fillRect(0, P.top, P.side, P.side);
+  } else if (m.kind === 'full') {
+    const P = C.full.photo;
+    photo = photo as CountdownPhoto | null;
     const pw = photo ? photo.naturalWidth || photo.width : 0;
     const ph = photo ? photo.naturalHeight || photo.height : 0;
     if (photo && pw > 0 && ph > 0) {
@@ -262,9 +302,22 @@ function within<T>(p: Promise<T>, ms: number): Promise<T | null> {
 export async function prepareCountdownCard(m: CountdownCardModel): Promise<Blob | null> {
   try {
     if (typeof Path2D !== 'function' || !document.fonts) return null;
-    let photo: HTMLImageElement | null = null;
+    let photo: HTMLImageElement | HTMLImageElement[] | null = null;
     const face = within(document.fonts.load(COUNTDOWN_FONT, countdownWords(m).join(' ')), COUNTDOWN_FONT_MS);
-    if (m.kind === 'full') {
+    if (m.kind === 'full' && m.photos) {
+      // A set's pieces: every photograph decoded, or no image.
+      if (typeof Image !== 'function' || m.photos.some((x) => !MEDIA_PATH.test(x))) return null;
+      const all = await Promise.all(
+        m.photos.map((src) => {
+          const img = new Image();
+          img.decoding = 'async';
+          img.src = src;
+          return within(img.decode().then(() => img), COUNTDOWN_PHOTO_MS);
+        }),
+      );
+      if (all.some((x) => x === null)) return null;
+      photo = all as HTMLImageElement[];
+    } else if (m.kind === 'full') {
       if (!m.photo || !MEDIA_PATH.test(m.photo) || typeof Image !== 'function') return null;
       const img = new Image();
       img.decoding = 'async';

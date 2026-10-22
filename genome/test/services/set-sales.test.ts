@@ -24,7 +24,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { inTransaction } from '../../src/server/db/connection.js';
 import { DomainError } from '../../src/server/errors.js';
 import { tierOf } from '../../src/server/services/club.js';
-import { orderForDrawEntry } from '../../src/server/services/orders.js';
+import { orderForDrawEntry, orderReference } from '../../src/server/services/orders.js';
 import { parcelOrders } from '../../src/server/services/parcels.js';
 import { ordersForSetSale, setShares, type SetSaleInput } from '../../src/server/services/set-sales.js';
 import type { Actor } from '../../src/server/types.js';
@@ -236,6 +236,20 @@ describe('the set sold (plan MACRO M3 §5.2, T1 to T3)', () => {
     const events = await db().selectFrom('order_events').select(['order_id', 'details']).where('action', '=', 'order.create').where('order_id', 'in', [first!.id, second!.id]).orderBy('id').execute();
     expect(events.map((e) => (e.details as { setSaleId: string; setPiece: number }).setPiece)).toEqual([1, 2]);
     expect(events.every((e) => (e.details as { setSaleId: string }).setSaleId === sold.sale.id)).toBe(true);
+    // The console's order page (plan MACRO M3 §5.3): « Part of THE SET », its one price and every order of the sale; none on another order.
+    const view = await orders().get(second!.id);
+    expect(view.set).toEqual({
+      saleId: sold.sale.id,
+      setId: set.id,
+      name: set.name,
+      priceMinor: 100_000,
+      currency: 'EUR',
+      piece: 2,
+      orders: [
+        { id: first!.id, reference: orderReference(first!.id), piece: 1, channel: 'DRAW', status: 'RESERVED', model: 'HALO', variant: null, sizeLabel: '52', priceMinor: 66_667, currency: 'EUR' },
+        { id: second!.id, reference: orderReference(second!.id), piece: 2, channel: 'DRAW', status: 'RESERVED', model: expect.any(String), variant: null, sizeLabel: '45', priceMinor: 33_333, currency: 'EUR' },
+      ],
+    });
     await orders().transition(first!.id, { to: 'CANCELLED', note: 'Test over.' }, operator);
   });
 

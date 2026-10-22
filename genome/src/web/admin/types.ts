@@ -2173,12 +2173,19 @@ export interface Drop {
   sizes: DrawSize[];
   /** Plan MACRO M1 §3.1 (F4): the segment the draw is opened to (its console name); null: everyone. */
   accessSegment?: { id: string; name: string } | null;
+  /**
+   * Macro scope K44 T1: a set's draw, its set and pieces in order (`model` is then the set itself: its id and name, type
+   * SET; its `quantity` sets). Absent on a model's draw.
+   */
+  set?: ReleaseSet;
 }
 
 /** A draw's size as the console reads it (plan NEXT LOT §3.6.F): its pieces, then its entries counted. */
 export interface DrawSize {
   id: string;
   label: string;
+  /** Macro scope K44 T1: on a set's draw, the piece it is a size of (1 to n); absent on a model's. */
+  piece?: number;
   pieces: number;
   /** The pieces reserved directly in it, held or sold. */
   reserved: number;
@@ -2196,11 +2203,15 @@ export interface DrawSize {
 export interface DrawSizeInput {
   label: string;
   pieces: number;
+  /** Macro scope K44 T1: on a set's draw, the set's piece (1 to n) the size is of. */
+  piece?: number;
 }
 
 /** POST /api/admin/drops; any field of PATCH /api/admin/drops/:id while a DRAFT (the description only once published). */
 export interface DropInput {
-  modelId: string;
+  /** The model it sells, or (macro scope K44 T1) `setId`: one of the two, fixed at the creation (a set's draw may move to another set, its sizes with it). */
+  modelId?: string;
+  setId?: string;
   title: string;
   description?: string | null;
   /** Plan NEXT LOT §3.6.F: its sizes and their pieces; its quantity is their sum (a quantity is no longer sent). */
@@ -2238,8 +2249,10 @@ export interface DropEntry {
   guaranteed: boolean;
   /** IN-01: the pieces of its place. */
   pieces: number;
-  /** Plan NEXT LOT §3.6.F: its size; null in a draw without sizes. */
+  /** Plan NEXT LOT §3.6.F: its size; null in a draw without sizes (and in a set's draw). */
   size: { id: string; label: string } | null;
+  /** Macro scope K44 T1: in a set's draw, its size for each piece; absent otherwise. */
+  sizes?: PieceSizeRef[];
   handledBy: { id: string; email: string } | null;
   handledAt: Iso | null;
   note: string | null;
@@ -2260,7 +2273,7 @@ export interface DrawOutcome {
   guaranteed: number;
   guaranteedPieces: number;
   /** Plan NEXT LOT §3.6.F: per size, the places drawn, the entries selected and waitlisted; [] for a draw without sizes. */
-  sizes: { id: string; label: string; places: number; selected: number; waitlisted: number }[];
+  sizes: { id: string; label: string; piece?: number; places: number; selected: number; waitlisted: number }[];
 }
 
 // ── The Club: the LIVE RELEASES ────────────────────────────────────────────
@@ -2269,7 +2282,10 @@ export interface DrawOutcome {
 export interface LiveCard {
   id: string;
   title: string;
+  /** Its model; a set's release (macro scope K44 T1): the set itself (its id and name, type SET). */
   model: { id: string; name: string; type: string; active: boolean };
+  /** Macro scope K44 T1: a set's release, its set and pieces in order; absent on a model's. */
+  set?: ReleaseSet;
   phase: LivePhase;
   /** Ended, no turn or hold left. */
   over: boolean;
@@ -2316,7 +2332,8 @@ export interface LiveRelease extends LiveCard {
   location: { id: string; name: string } | null;
   /** The question after (choice 11), its answers counted; null for an after-room. */
   question: LiveQuestion | null;
-  sizes: { id: string; label: string; stock: number }[];
+  /** Its sizes in order; on a set's release, each with its piece (1 to 4). */
+  sizes: { id: string; label: string; stock: number; piece?: number }[];
   addons: { id: string; label: string; line: string | null; priceMinor: number }[];
   tierWindows: { tier: number; turnSeconds: number | null; payMinutes: number | null }[];
   /** As set: null, at the publication; a null stage, at the announcement. */
@@ -2369,6 +2386,8 @@ export interface LiveQuestion {
 export interface LiveFeasibilityLine {
   sizeId: string;
   label: string;
+  /** Macro scope K44 T1: a set's release's piece (1 to 4); absent on a model's. */
+  piece?: number;
   onSale: number;
   available: number;
   fromStock: number;
@@ -2461,7 +2480,9 @@ export interface LiveAfterRoom {
 
 /** POST /api/admin/live: every setting (the defaults for those left out); PATCH: any of them until the announcement. */
 export interface LiveSettings {
-  modelId: string;
+  /** What it sells: a model, or (macro scope K44 T1) a set (`setId`): exactly one, fixed at the creation. */
+  modelId?: string;
+  setId?: string;
   title: string;
   description?: string | null;
   opensAt: Iso;
@@ -2483,7 +2504,8 @@ export interface LiveSettings {
   accessCombine?: AccessCombine;
   surpriseEnabled?: boolean;
   surpriseText?: string | null;
-  sizes: { id?: string | null; label: string; stock: number }[];
+  /** On a set's release (macro scope K44 T1), each size names its piece (1 to 4, the set's order). */
+  sizes: { id?: string | null; label: string; stock: number; piece?: number | null }[];
   quantityLine?: string | null;
   addons?: { id?: string | null; label: string; line?: string | null; priceMinor: number }[];
   announceAt?: Iso | null;
@@ -2519,7 +2541,11 @@ export interface LiveEntry {
   accountId: string;
   email: string;
   status: LiveEntryStatus;
+  /** Its size; a set's entry (macro scope K44 T1): its first piece's, `sizes` every piece's. */
   size: { id: string; label: string };
+  /** Macro scope K44 T1: a set's entry, its size for each piece; absent otherwise. */
+  sizes?: PieceSizeRef[];
+  /** Its pieces; a set's entry: its sets (T4, « 1 SET PER PERSON »). */
   quantity: number;
   tier: number;
   position: number | null;
@@ -2561,6 +2587,8 @@ export interface LivePaceState extends LivePace {
 export interface LiveBoardSize {
   id: string;
   label: string;
+  /** Macro scope K44 T1: on a set's release, its piece (1 to 4; an entry counts in each of its sizes); absent on a model's. */
+  piece?: number;
   stock: number;
   left: number;
   held: number;
@@ -2589,8 +2617,11 @@ export interface LiveBoard {
   closesAt: Iso;
   quantity: number;
   quantityLine: string;
-  totals: Omit<LiveBoardSize, 'id' | 'label'> & { inRoom: number; released: number; departed: number; removed: number; ended: number };
+  /** A set's release (macro scope K44 T1): in sets, its stock its sets on sale, `left` the sets its pieces can still make. */
+  totals: Omit<LiveBoardSize, 'id' | 'label' | 'piece'> & { inRoom: number; released: number; departed: number; removed: number; ended: number };
   sizes: LiveBoardSize[];
+  /** Macro scope K44 T1: a set's release, each piece (its model) and its pieces on sale in all; absent on a model's. */
+  pieces?: { piece: number; name: string; variant: string | null; stock: number }[];
   message: { text: string; at: Iso } | null;
   /** The open entries by place, then arrival (the first 200). */
   line: LiveEntry[];
@@ -2615,7 +2646,7 @@ export interface LiveState {
   endedReason: LiveEndReason | null;
   quantity: number;
   quantityLine: string;
-  sizes: { id: string; label: string; stock: number }[];
+  sizes: { id: string; label: string; stock: number; piece?: number }[];
   /** W4: the pace, null without one. */
   pace?: LivePaceState | null;
 }
@@ -2687,6 +2718,21 @@ export interface LiveReleasePlan {
   eligibleByTier: number[];
   modelType: string;
   reasoning: string[];
+  /**
+   * Macro scope K44: a set's release planned per piece, in the set's order (each piece's model, its sizes with their
+   * suggestion, the sizes its collectors hold that it does not offer, its reasoning); null (or absent) on a model's.
+   */
+  pieces?: LiveReleasePlanPiece[] | null;
+}
+
+/** One piece of a set's release in the planner (macro scope K44). */
+export interface LiveReleasePlanPiece {
+  piece: number;
+  model: { id: string; name: string; variant: string | null };
+  modelType: string;
+  sizes: LiveReleasePlan['sizes'];
+  otherSizes: LiveReleasePlan['otherSizes'];
+  reasoning: string[];
 }
 
 /** GET /api/admin/live/:id/radar: the demand radar, before T0. */
@@ -2700,6 +2746,8 @@ export interface LiveDemandRadar {
   sizes: {
     id: string;
     label: string;
+    /** Macro scope K44 T1: a set's release's piece (1 to 4); absent on a model's. */
+    piece?: number;
     stock: number;
     interest: number;
     inRoom: number;
@@ -2761,6 +2809,8 @@ export interface LiveReleaseReport {
   sizes: {
     id: string;
     label: string;
+    /** Macro scope K44 T1: a set's release's piece (1 to 4); absent on a model's. */
+    piece?: number;
     stock: number;
     added: number;
     confirmedPieces: number;
@@ -3028,6 +3078,79 @@ export interface Supplier {
   active: boolean;
   models: number;
   createdAt: Iso;
+}
+
+// ── THE SET's catalogue (macro scope K44 T1; plan MACRO M3 §5.3; routes/admin/sets.ts) ─────────────────────────────
+
+/** A piece of a set: its place, its model, the sizes it offers (ONE SIZE as null) and its base price. */
+export interface SetPieceView {
+  position: number;
+  /** `variantOf`: the main model's id for a variant, else null. */
+  model: { id: string; name: string; variant: string | null; variantOf: string | null; type: string; active: boolean; sizeType: string | null; imageUrl: string | null };
+  sizes: { skuId: string; label: string | null }[];
+  basePrice: { priceMinor: number; currency: string } | null;
+}
+
+/** A release that names a set. */
+export interface SetRelease {
+  id: string;
+  mode: DropMode;
+  title: string;
+  opensAt: Iso;
+  publishedAt: Iso | null;
+  cancelledAt: Iso | null;
+}
+
+/** GET /api/admin/sets: a set as Catalogue → Sets reads it (services/sets.ts SetView). */
+export interface SetView {
+  id: string;
+  name: string;
+  code: string;
+  basePriceMinor: number | null;
+  baseCurrency: string | null;
+  active: boolean;
+  shopifyProductId: string | null;
+  /** Its 2 to 4 pieces, in order. */
+  pieces: SetPieceView[];
+  /** The releases that name it, the newest opening first: once there is one, its pieces are frozen (409 SET_IN_USE). */
+  releases: SetRelease[];
+  createdAt: Iso;
+  updatedAt: Iso;
+}
+
+/** POST /api/admin/sets; PATCH sends only what changed (its pieces while no release names it). */
+export interface SetInput {
+  name?: string;
+  code?: string;
+  modelIds?: string[];
+  /** Both or neither; null for both clears the price. */
+  basePriceMinor?: number | null;
+  baseCurrency?: string | null;
+}
+
+/** A set's release's set, as a draw's or a LIVE RELEASE's console views name it: its set and pieces in order. */
+export interface ReleaseSet {
+  id: string;
+  name: string;
+  code: string;
+  active: boolean;
+  pieces: { piece: number; model: { id: string; name: string; type: string; active: boolean; variant: string | null } }[];
+}
+
+/** A size of one piece of a set (an entry's, a release's). */
+export interface PieceSizeRef {
+  piece: number;
+  id: string;
+  label: string;
+}
+
+/** GET /api/admin/live/size-mix?setId: a new set release's size mix, per piece (each piece's model, the release's sets). */
+export interface SetSizeMix {
+  set: { id: string; name: string };
+  pieces: { piece: number; mix: LiveSizeMix }[];
+  /** The sets the proposal makes: the smallest of its pieces' totals. */
+  sets: number;
+  reasoning: string[];
 }
 
 // ── The add-ons' catalogue (plan MACRO M3 §4.2 and §4.3, D1; routes/admin/addons.ts) ─────
@@ -3527,6 +3650,22 @@ export interface OrderView {
   events: { action: string; status: OrderStatus; note: string | null; at: Iso; actor: { type: string; id: string | null } }[];
   /** Plan MACRO M3 §4.2 (D2): its catalogue add-ons, one row per unit, in the order they were added. */
   addonItems: AdminOrderAddonUnit[];
+  /** Macro scope K44 (T1, T3): an order of a set sale, its set and every order of the sale; null (or absent) for any other. */
+  set?: AdminOrderSet | null;
+}
+
+/** An order's set sale (services/orders.ts AdminOrderSet): the order page's « Part of THE SET ». */
+export interface AdminOrderSet {
+  saleId: string;
+  setId: string;
+  name: string;
+  /** The set's one price with its currency (null for both: a draw without a price). */
+  priceMinor: number | null;
+  currency: string | null;
+  /** This order's piece (1 to 4). */
+  piece: number;
+  /** Every order of the sale, in the set's order (a piece's size EXCHANGE order in its piece's place). */
+  orders: { id: string; reference: string; piece: number | null; channel: OrderChannel; status: OrderStatus; model: string; variant: string | null; sizeLabel: string | null; priceMinor: number | null; currency: string | null }[];
 }
 
 /** A unit of a catalogue add-on on an order (plan MACRO M3 §4.2, D2), as the order page reads it. */
@@ -3639,6 +3778,11 @@ export interface OrderCaseRecord {
   received: { at: Iso; pieceState: 'OK' | 'DAMAGED'; note: string | null } | null;
   decision: { at: Iso; outcome: 'REFUND' | 'EXCHANGE' | 'RESHIP'; pieceTo: 'RESTOCKED' | 'ARCHIVED' | 'REVOKED' | null; exchangeOrder: { id: string; reference: string } | null; note: string | null } | null;
   cancelled: { at: Iso; note: string | null } | null;
+  /**
+   * Macro scope K44 T3: a set's return, its cases opened and decided together: the group and each of its cases (this one
+   * included), in the set's order; null (or absent) for a case of its own.
+   */
+  group?: { id: string; cases: { id: string; order: { id: string; reference: string }; status: OrderCaseStatus; received: boolean }[] } | null;
 }
 
 /** POST /api/admin/order-cases/:id/decide: the case, and the claim code of a piece back to stock (shown once). */
@@ -3647,6 +3791,15 @@ export interface OrderCaseDecided {
   productId?: string;
   claimCode?: string;
   claimCodes?: { productId: string; claimCode: string }[];
+  /** Macro scope K44 T3: a set's return decided together, each piece's case and destination. */
+  group?: { caseId: string; productId: string; pieceTo: 'RESTOCKED' | 'ARCHIVED' }[];
+}
+
+/** DECIDE THE SET (macro scope K44 T3): each piece's destination by its case. */
+export interface SetPieceDecision {
+  caseId: string;
+  pieceTo: 'RESTOCKED' | 'ARCHIVED';
+  locationId?: string | null;
 }
 
 /** POST /api/admin/orders/:id/transition. */
@@ -4349,6 +4502,8 @@ export interface GrowthRelease {
   sellOutMs: number | null;
   /** DRAW: its entries. */
   entries: number | null;
+  /** Macro scope K44: a set's release names its set and its pieces' count (its `pieces` and `sold` are sets); null for a model's. */
+  set?: { name: string; pieces: number } | null;
 }
 
 /** The client sheet's Lifetime value: per currency. */
@@ -4746,8 +4901,20 @@ export interface CampaignChannel {
 }
 
 /** GET /api/admin/releases/:id/campaign (AUDITOR); 404 DROP_NOT_FOUND for an after-room. */
+/**
+ * What a release sells, for the countdown image (C3): a model's release one piece, a set's (macro scope K44) its 2 to 4
+ * pieces in the set's order, each its model's name, variant and photograph (this origin's media route; null without one).
+ */
+export interface CampaignOffer {
+  kind: 'MODEL' | 'SET';
+  name: string;
+  pieces: { piece: number | null; name: string; variant: string | null; photo: string | null }[];
+}
+
 export interface ReleaseCampaign {
   release: { id: string; mode: 'DRAW' | 'LIVE'; title: string; opensAt: Iso; closesAt: Iso; published: boolean; cancelled: boolean };
+  /** What it sells (services/campaign.ts); absent from a server of before THE SET. */
+  offer?: CampaignOffer;
   channels: CampaignChannel[];
   missing: { id: string; name: string }[];
   readout: CampaignReadout;

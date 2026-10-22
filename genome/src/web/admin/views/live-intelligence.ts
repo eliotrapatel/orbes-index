@@ -22,6 +22,7 @@ import {
   type LiveReading,
 } from '../model/live-intelligence.js';
 import { formatMoney, liveEntryActions, tierLabel } from '../model/live.js';
+import { pieceSizeLabel } from '../model/sets.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
 import type {
@@ -94,6 +95,21 @@ const tierName = (t: number) => tierLabel(t);
 const failed = (title: string, id: string) => section(title, h('p', { class: 'notice' }, 'This reading could not be read: read the page again.'), { id });
 
 /** The live alerts and the live sell-out forecast, on the live board (drawn again with each board). */
+/** The planner's table of sizes (a model's release; a set's, one per piece). */
+function planTable(sizes: LiveReleasePlan['sizes'], caption: string): HTMLElement {
+  return table(
+    [
+      { label: 'Size', cell: (s) => h('span', { class: 'live__size' }, s.label), kind: ['nowrap'] },
+      { label: 'Stock now', cell: (s) => formatCount(s.stock), kind: ['num'] },
+      { label: 'Interest', cell: (s) => formatCount(s.interest), kind: ['num'] },
+      { label: 'Collectors', cell: (s) => formatCount(s.collectors), kind: ['num'] },
+      { label: 'Suggested', cell: (s) => h('span', { data: { testid: 'live-plan-size' } }, s.suggested === null ? '—' : formatCount(s.suggested)), kind: ['num'] },
+    ],
+    [...sizes],
+    { caption },
+  );
+}
+
 export function liveSignals(b: LiveBoard): { alerts: HTMLElement | null; sellOut: HTMLElement | null } {
   const alerts = b.alerts.length
     ? h(
@@ -149,20 +165,17 @@ export function liveIntelligenceSections(ctx: ViewContext, r: LiveRelease, data:
             ['Eligible', formatCount(p.forecast.eligible), 'ACCOUNTS THE RULE LETS IN', 'live-plan-eligible'],
             ['In the settings', formatCount(stock), `${formatCount(r.sizes.length)} ${r.sizes.length === 1 ? 'SIZE' : 'SIZES'}`, 'live-plan-stock'],
           ),
-          table(
-            [
-              { label: 'Size', cell: (s) => h('span', { class: 'live__size' }, s.label), kind: ['nowrap'] },
-              { label: 'Stock now', cell: (s) => formatCount(s.stock), kind: ['num'] },
-              { label: 'Interest', cell: (s) => formatCount(s.interest), kind: ['num'] },
-              { label: 'Collectors', cell: (s) => formatCount(s.collectors), kind: ['num'] },
-              { label: 'Suggested', cell: (s) => h('span', { data: { testid: 'live-plan-size' } }, s.suggested === null ? '—' : formatCount(s.suggested)), kind: ['num'] },
-            ],
-            p.sizes,
-            { caption: 'The size mix suggested' },
-          ),
+          // Macro scope K44: a set's release planned per piece, each its model's sizes and suggestion.
+          ...(p.pieces?.length
+            ? p.pieces.flatMap((x) => [
+                h('p', { class: 'live__mix-title', data: { testid: 'live-plan-piece' } }, `${x.model.name}${x.model.variant ? ` · ${x.model.variant}` : ''}`.toUpperCase()),
+                planTable(x.sizes, `The size mix suggested · ${x.model.name}`),
+                x.otherSizes.length ? h('p', { class: 'footnote' }, `Also held, not offered: ${x.otherSizes.map((s) => `${s.label}: ${formatCount(s.collectors)}`).join(' · ')}.`) : null,
+              ])
+            : [planTable(p.sizes, 'The size mix suggested')]),
           h('p', { class: 'footnote' }, `Eligible by tier: ${eligible}. The collectors: eligible accounts whose latest ${humanize(p.modelType)} is in the size.`),
-          p.otherSizes.length ? h('p', { class: 'footnote' }, `Also held, not offered: ${p.otherSizes.map((s) => `${s.label}: ${formatCount(s.collectors)}`).join(' · ')}.`) : null,
-          reasoning(p.reasoning, 'live-plan-why'),
+          !p.pieces?.length && p.otherSizes.length ? h('p', { class: 'footnote' }, `Also held, not offered: ${p.otherSizes.map((s) => `${s.label}: ${formatCount(s.collectors)}`).join(' · ')}.`) : null,
+          reasoning([...p.reasoning, ...(p.pieces ?? []).flatMap((x) => x.reasoning.map((l) => `${x.model.name}: ${l}`))], 'live-plan-why'),
         ],
         { id: 'live-plan', note: 'Before the announcement' },
       ),
@@ -213,7 +226,7 @@ export function liveIntelligenceSections(ctx: ViewContext, r: LiveRelease, data:
           ),
           table(
             [
-              { label: 'Size', cell: (s) => h('span', { class: 'live__size' }, s.label), kind: ['nowrap'] },
+              { label: 'Size', cell: (s) => h('span', { class: 'live__size' }, pieceSizeLabel(r.set, s)), kind: ['nowrap'] },
               { label: 'Stock', cell: (s) => formatCount(s.stock), kind: ['num'] },
               { label: 'Interest', cell: (s) => formatCount(s.interest), kind: ['num'] },
               { label: 'Room', cell: (s) => formatCount(s.inRoom), kind: ['num'] },
@@ -229,7 +242,7 @@ export function liveIntelligenceSections(ctx: ViewContext, r: LiveRelease, data:
             ? h(
                 'p',
                 { class: 'live__promise', data: { testid: 'live-radar-promise' } },
-                `Adding pieces is suggested in ${suggested.map((s) => s.label).join(', ')}. The announcement says « ${d.quantityLine} »: adding pieces after a fixed number was announced contradicts it, and every addition is recorded and reported.`,
+                `Adding pieces is suggested in ${suggested.map((s) => pieceSizeLabel(r.set, s)).join(', ')}. The announcement says « ${d.quantityLine} »: adding pieces after a fixed number was announced contradicts it, and every addition is recorded and reported.`,
               )
             : null,
           subtitle('By tier'),
@@ -282,7 +295,7 @@ export function liveIntelligenceSections(ctx: ViewContext, r: LiveRelease, data:
           subtitle('By size'),
           table(
             [
-              { label: 'Size', cell: (s) => h('span', { class: 'live__size' }, s.label), kind: ['nowrap'] },
+              { label: 'Size', cell: (s) => h('span', { class: 'live__size' }, pieceSizeLabel(r.set, s)), kind: ['nowrap'] },
               { label: 'Stock', cell: (s) => (s.added ? `${formatCount(s.stock)} (${formatCount(s.added)} added)` : formatCount(s.stock)), kind: ['num'] },
               { label: 'Confirmed', cell: (s) => formatCount(s.confirmedPieces), kind: ['num'] },
               { label: 'Sold out in', cell: (s) => durationText(s.sellOutMs), kind: ['num'] },
