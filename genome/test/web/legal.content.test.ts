@@ -47,10 +47,11 @@ import { CONTENT_SECURITY_POLICY } from '../../src/server/http/security.js';
 import { UP as LIVE_MIGRATION } from '../../src/server/db/migrations/0021_live_release.js';
 import { UP as ORDERS_MIGRATION } from '../../src/server/db/migrations/0022_orders_stock.js';
 import { UP as COLLECTORS_MIGRATION } from '../../src/server/db/migrations/0023_releases_collectors.js';
-import { EMAIL_KINDS } from '../../src/server/db/schema.js';
+import { EMAIL_KINDS, HOUSE_MOMENTS } from '../../src/server/db/schema.js';
 import { CARE_CONDITIONS, CARE_CONDITIONS_VERSION } from '../../src/server/render/care-conditions.js';
 import { EMAIL_RETENTION_DAYS } from '../../src/server/services/email.js';
 import { FOUNDING_CONSENT_VERSION } from '../../src/server/services/founding.js';
+import { ABSENCE_DAYS, CREDIT_EXPIRING_DAYS } from '../../src/server/services/house-moments.js';
 import { WORN_CONSENT_VERSION } from '../../src/server/services/worn.js';
 import { CARE_LABEL_RETENTION_MS } from '../../src/server/services/care.js';
 import { INVOICE_ISSUER } from '../../src/server/services/invoices.js';
@@ -658,7 +659,7 @@ describe('legal pages: the privacy policy, written from the code', () => {
     // The anchors the theorbes.com form's consent links to (privacy#founding-list), after the segments, in both languages.
     for (const lang of LANGS) {
       const ids = DOCUMENTS.privacy[lang].sections.map((x) => x.id);
-      expect(ids.slice(ids.indexOf('segments'), ids.indexOf('cookies')), lang).toEqual(['segments', 'founding-list', 'emails']);
+      expect(ids.slice(ids.indexOf('segments'), ids.indexOf('cookies')), lang).toEqual(['segments', 'founding-list', 'emails', 'house-messages', 'worn']);
     }
     // What the form records (services/founding.ts register): the consent with the legal version, the source; an
     // unsubscribe keeps the row (sets unsubscribed_at, never deletes); only a removal on request deletes it, its emails first.
@@ -718,9 +719,68 @@ describe('legal pages: the privacy policy, written from the code', () => {
     }
   });
 
+  it('describes the house messages and WORN as the code keeps them (lot M2, L2): in MESSAGES only, read-only, kept with the account; a photograph on consent, reviewed, its credit, erased at each end', () => {
+    // House messages (services/house-moments.ts, house-messages.ts): six moments, each switched in the console, the 7 and
+    // 90 days their own constants; no email kind carries one (TERMS-FACTS N12); kept with the account (no DELETE) and
+    // exported with when each was read; the console reads counts only.
+    expect(HOUSE_MOMENTS).toHaveLength(6);
+    expect(EMAIL_KINDS.filter((k) => /HOUSE|MOMENT|MESSAGE/.test(k))).toEqual([]);
+    const house = readDoc('genome/src/server/services/house-messages.ts');
+    expect(house).toContain('return r.rows.map((x) => ({ source: x.source, moment: x.moment, ...wordsOf(x), pieceRef: x.piece_ref, deliveredAt: x.delivered_at, readAt: x.read_at }));');
+    expect(readDoc('genome/src/server/services/owners.ts')).toContain('houseMessages: await accountHouseMessages(tx, a.id),');
+    for (const [lang, says, retention] of [
+      ['en', ['in the app only, never by email or by notification', 'These messages cannot be answered', `when a credit ends within ${CREDIT_EXPIRING_DAYS} days`, `after ${ABSENCE_DAYS} days without a visit`, 'each of which ORBES switches on or off', 'the members of a segment', 'the accounts of a tier and the tiers above it', 'ORBES staff see these counts, never who read', 'legitimate interest', 'in the copy of your data'],
+        '- **House messages**, with when you read them: as long as the account exists.'],
+      ['fr', ["dans l'application seulement, jamais par e-mail ni par notification", 'On ne peut pas répondre à ces messages', `quand un crédit prend fin dans les ${CREDIT_EXPIRING_DAYS} jours`, `après ${ABSENCE_DAYS} jours sans visite`, "qu'ORBES active ou désactive chacun", "les membres d'un segment", "les comptes d'un palier et des paliers au-dessus", "le personnel d'ORBES voit ces nombres, jamais qui a lu", 'intérêt légitime', 'dans la copie de vos données'],
+        '- **Messages de la maison**, avec le moment où vous les lisez : tant que le compte existe.'],
+    ] as const) {
+      const text = sectionText(DOCUMENTS.privacy[lang], 'house-messages');
+      for (const x of says) expect(text, `${lang}: ${x}`).toContain(x);
+      expect(sectionText(DOCUMENTS.privacy[lang], 'retention')).toContain(retention);
+    }
+    // The one sentence edited (MOVED in the content test until the baseline was recorded again): a segment's members may
+    // receive a house message; no legal page says a segment sends no message any more.
+    expect(sectionText(DOCUMENTS.privacy.en, 'segments')).toContain('the members of a segment may receive a house message (see [House messages](#house-messages)).');
+    expect(sectionText(DOCUMENTS.privacy.fr, 'segments')).toContain("les membres d'un segment peuvent recevoir un message de la maison (voir [Messages de la maison](#house-messages)).");
+    for (const lang of LANGS) expect(readText(DOCUMENTS.privacy[lang], lang), lang).not.toMatch(/sends no message itself|n'envoie lui-même aucun message/);
+    // WORN (services/worn.ts): the image through sanitizeImage, the credit and the consent with its version written at
+    // sending, the public read only while shown (published, ownership open, piece not revoked, account ACTIVE), the bytes
+    // erased at each end, the export without them.
+    const worn = readDoc('genome/src/server/services/worn.ts');
+    for (const x of ['const clean = sanitizeImage(upload.bytes, upload.mime);', 'consent_version: WORN_CONSENT_VERSION,', "const instagram = opts.instagram === true ? facts.creditRaw.instagram : null;", "if (reader.kind === 'public') q = q.where(shownSql);", "AND EXISTS (SELECT 1 FROM accounts sa WHERE sa.id = w.account_id AND sa.status = 'ACTIVE')`;", "set({ status: 'WITHDRAWN', ...ERASED", "set({ status: 'ENDED', ...ERASED", '...(settles ? { ...ERASED, ended_at: at } : {}),']) expect(worn).toContain(x);
+    const exported = /export async function accountWornPhotos\([\s\S]*?\n\}\n/.exec(worn)?.[0] ?? '';
+    expect(exported).toContain('consentVersion: r.consent_version,');
+    expect(exported).not.toMatch(/'w\.photo'|photo:/);
+    for (const [lang, says, retention, recipient] of [
+      ['en', ['The app re-encodes it on your device and the service removes its metadata', 'your first name and your country from YOUR PROFILE and, if you choose to show it, your Instagram name, as they are when you send it', 'the version of this policy then in force', 'Until it is published, only you and ORBES staff see it', 'shown to everyone, signed in or not', "never the piece's identity, your account or your email address", 'on your consent', 'You withdraw it at any time from the piece, with WITHDRAW: the photograph leaves WORN at once and is erased', 'when ORBES refuses it or takes it down, and when the piece leaves you', 'while your account is locked, it is not shown', 'in the copy of your data, without the image'],
+        '- **WORN**: a photograph, while it is in review or published, then erased; its record, as long as the account exists.',
+        "- Everyone who opens a model's sheet: the WORN photographs published on it, each with its credit (a first name, a country and, if its owner chose it, an Instagram name)."],
+      ['fr', ["L'application la réencode sur votre appareil et le service en retire les métadonnées", 'votre prénom et votre pays tirés de YOUR PROFILE et, si vous choisissez de le montrer, votre nom Instagram, tels qu\'ils sont à l\'envoi', 'la version de cette politique alors en vigueur', "Tant qu'elle n'est pas publiée, seuls vous et le personnel d'ORBES la voyez", 'montrée à tous, connectés ou non', "jamais l'identité ORBES de la pièce, votre compte ni votre adresse e-mail", 'sur votre consentement', 'Vous le retirez à tout moment depuis la pièce, avec WITHDRAW : la photographie quitte WORN aussitôt et est effacée', 'quand ORBES la refuse ou la retire, et quand la pièce vous quitte', "tant que votre compte est verrouillé, elle n'est pas montrée", "dans la copie de vos données, sans l'image"],
+        "- **WORN** : une photographie, tant qu'elle est en examen ou publiée, puis effacée ; sa trace, tant que le compte existe.",
+        "- Toute personne qui ouvre la fiche d'un modèle : les photographies WORN qui y sont publiées, chacune avec son crédit (un prénom, un pays et, si son propriétaire l'a choisi, un nom Instagram)."],
+    ] as const) {
+      const text = sectionText(DOCUMENTS.privacy[lang], 'worn');
+      for (const x of says) expect(text, `${lang}: ${x}`).toContain(x);
+      expect(sectionText(DOCUMENTS.privacy[lang], 'retention')).toContain(retention);
+      expect(sectionText(DOCUMENTS.privacy[lang], 'recipients')).toContain(recipient);
+    }
+    // The terms (article 15): the licence with its credit, the review and the withdrawal; the consent the app asks at
+    // sending says the same (copy.ts WORN.consent). The terms gain no sentence on MESSAGES (D24's line is the privacy
+    // policy's House messages alone).
+    for (const [lang, says] of [
+      ['en', ['**WORN.** The owner of a piece registered to their account', 'that you took it or have its author\'s permission, that anyone recognisable in it agrees', 'the non-exclusive right to reproduce it and show it to everyone in WORN, on the model\'s sheet of the service, with its credit (your first name and your country, and your Instagram name if you choose to show it), until you withdraw it', '**Review and withdrawal.** ORBES looks at each photograph before it appears', 'You may withdraw your photograph at any time from the piece: it leaves WORN at once and is erased.']],
+      ['fr', ['**WORN.** Le propriétaire d\'une pièce enregistrée à son compte', "l'avoir prise ou avoir l'autorisation de son auteur, que toute personne reconnaissable y consent", "le droit non exclusif de la reproduire et de la montrer à tous dans WORN, sur la fiche du modèle du service, avec son crédit (votre prénom et votre pays, et votre nom Instagram si vous choisissez de le montrer), jusqu'à ce que vous la retiriez", '**Examen et retrait.** ORBES examine chaque photographie avant qu\'elle apparaisse', 'Vous pouvez retirer votre photographie à tout moment depuis la pièce : elle quitte WORN aussitôt et est effacée.']],
+    ] as const) {
+      const text = sectionText(DOCUMENTS.terms[lang], 'article-15');
+      for (const x of says) expect(text, `${lang}: ${x}`).toContain(x);
+      expect(readText(DOCUMENTS.terms[lang], lang), lang).not.toMatch(/FROM ORBES|\b[Hh]ouse messages?\b|messages? de la maison/);
+    }
+    expect(readDoc('genome/src/web/verify/copy.ts')).toContain("consent: 'I took this photograph or have its author’s permission, and anyone recognisable in it agrees. ORBES may show it in WORN with my credit until I withdraw it.',");
+  });
+
   it('covers what the plan names: data collected, the IP hash, the device cookie, the location, accounts, retention, hosting, DB-IP', () => {
     const ids = DOCUMENTS.privacy.en.sections.map((s) => s.id);
-    expect(ids).toEqual(expect.arrayContaining(['controller', 'verification', 'account', 'cookies', 'recipients', 'location', 'retention', 'rights', 'live', 'orders', 'segments', 'founding-list', 'emails']));
+    expect(ids).toEqual(expect.arrayContaining(['controller', 'verification', 'account', 'cookies', 'recipients', 'location', 'retention', 'rights', 'live', 'orders', 'segments', 'founding-list', 'emails', 'house-messages', 'worn']));
     // The contact of ORBES Client Services, where the page asks the reader to write to them.
     for (const lang of LANGS) expect(DOCUMENTS.privacy[lang].sections[0].blocks).toContainEqual({ contact: true });
   });
@@ -903,6 +963,11 @@ describe('legal pages: both languages, links, lexicon', () => {
       // The step's verification, the same day: the founding list's unsubscribe by its link only (Client Services erases),
       // an email kept 90 days after it is sent, fails or is cancelled, and "a release by draw" in the segments.
       '2026-10-21': 'd15232f011eb617d',
+      // Lot M2 of the macro plan (L2; step M2.12): the privacy policy's house messages and WORN, their retention, everyone
+      // among the recipients of a published WORN photograph, the segments' sentence on messages; the terms' article 15
+      // (WORN: the licence, the review, the withdrawal). The date of the lot's final legal commit, never M1's 2026-10-21;
+      // article 11 unchanged.
+      '2026-10-22': '9eb139806bb1891b',
     };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
     expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });

@@ -135,6 +135,23 @@
  *    code included, EMAIL_RETENTION_DAYS (90) after it settles (`emailPurge`);
  *    the export lists them by kind, status and dates; STOP THESE EMAILS and
  *    YOUR PROFILE's switch stop the two opt-in kinds;
+ *  - the house messages (D24, services/house-moments.ts, house-messages.ts,
+ *    migration 0052): in MESSAGES only, never an email or a notification,
+ *    read-only; the six moments (each switched in the console, from
+ *    CREDIT_EXPIRING_DAYS and ABSENCE_DAYS) read from the account's pieces,
+ *    credits, tier and last activity; a custom message to a segment or a
+ *    tier and above, its audience frozen at delivery; each delivery's
+ *    read_at; staff read counts only; kept with the account (no DELETE) and
+ *    exported (AccountExport.houseMessages); legitimate interest;
+ *  - WORN (D31, services/worn.ts, migration 0053): the photograph
+ *    re-encoded on the device and stripped by sanitizeImage, its credit
+ *    (first name, country, Instagram only if chosen) and consent with
+ *    WORN_CONSENT_VERSION written at sending; staff review (the email masked
+ *    for an AUDITOR); shown to everyone once published, the credit only;
+ *    the bytes erased when withdrawn, refused, taken down or ended (the
+ *    piece passed on, returned or revoked); not shown while the account is
+ *    locked; the row kept and exported without the bytes
+ *    (AccountExport.wornPhotos); consent;
  *  - the hosting: OVHcloud in Canada (COMPLIANCE §7, H2), Vercel Inc. for
  *    theorbes.com; the email provider ORBES chooses, once emails are on.
  *
@@ -264,7 +281,7 @@ const EN: LegalDocument = {
       title: 'Segments, the client sheet and activity',
       blocks: [
         "ORBES staff may group collectors in segments, from what the service already records: the releases taken part in and the pieces secured; the tier and the models and collections of the pieces held; the sizes (of the pieces held, chosen in a LIVE RELEASE or ordered) and the country (the one the account gave, or the one its latest entry in a LIVE RELEASE came from); I'LL BE THERE, the answers to the questions after, and the last activity (a sign-in, a session in use, a scan); and a place on the founding list (see [The founding list](#founding-list)). A segment is a rule: its members are computed each time it is used, from the accounts as they are then, and are never stored with an account.",
-        'A segment may decide who may enter a LIVE RELEASE or a release by draw, whose page then says FOR SELECTED COLLECTORS and never names the segment, and who reads a post of the circle. ORBES staff may also download the members of a segment as a list with their email addresses, masked for a staff member with read-only access. ORBES processes these data for its legitimate interest in offering its releases and its circle to the collectors they suit; a segment sends no message itself.',
+        'A segment may decide who may enter a LIVE RELEASE or a release by draw, whose page then says FOR SELECTED COLLECTORS and never names the segment, and who reads a post of the circle. ORBES staff may also download the members of a segment as a list with their email addresses, masked for a staff member with read-only access. ORBES processes these data for its legitimate interest in offering its releases and its circle to the collectors they suit; the members of a segment may receive a house message (see [House messages](#house-messages)).',
         "ORBES Client Services reads, on the sheet of a collector in the console, its orders and their steps, the releases it took part in and the pieces it secured there, its answers to the questions after, its I'LL BE THERE, its tier, the segments it belongs to at that moment, and the notes ORBES Client Services wrote on its orders, entries and requests; a staff member with read-only access sees its email address masked. The sheet never shows the buyer's details nor the words of an engraving.",
         'To choose the hour a release opens, the service counts, for each hour, the sign-ins and the scans by country and tier: the country an account gave or the one a scan came from, and the tier its account holds when the hour is counted. These counts name no account, no address and no device, and are kept as counts.',
       ],
@@ -298,6 +315,25 @@ const EN: LegalDocument = {
       ],
     },
     {
+      id: 'house-messages',
+      title: "House messages",
+      blocks: [
+        "ORBES may write to you in MESSAGES, under FROM ORBES: in the app only, never by email or by notification. These messages cannot be answered; to write to ORBES, use ORBES CLIENT SERVICES in MESSAGES.",
+        "Some are written at moments of your account, each of which ORBES switches on or off: the day after a piece is first registered to your account, when your birthday credit opens, when a credit ends within 7 days, when PRIVATE CARE opens to you, a year after a piece was registered to you, and after 90 days without a visit. ORBES writes them from what the service already keeps: your first name, your pieces and since when, your credits, your tier and your last activity (a sign-in, a session in use, a scan). Others are written by ORBES staff to a group of collectors: the members of a segment (see [Segments, the client sheet and activity](#segments)), or the accounts of a tier and the tiers above it, as they are when the message is sent.",
+        "ORBES records when each message reaches your account and when you read it, to show you the new ones and to count how many read each message; ORBES staff see these counts, never who read. ORBES processes these data for its legitimate interest in keeping its collectors informed about their pieces and the service.",
+        "House messages are kept with your account, as long as it exists, and are in the copy of your data (see [Your rights](#rights)).",
+      ],
+    },
+    {
+      id: 'worn',
+      title: "WORN",
+      blocks: [
+        "From a piece registered to your account, you may send a photograph of yourself wearing it to WORN, the owners' gallery at the foot of the model's sheet (see the [terms of use](/legal/terms)). The app re-encodes it on your device and the service removes its metadata (such as the place it was taken and the camera): only the image is kept. With it, ORBES records its credit, your first name and your country from YOUR PROFILE and, if you choose to show it, your Instagram name, as they are when you send it; the piece and its model; when you sent it; and your consent, with its time and the version of this policy then in force.",
+        "ORBES staff look at each photograph before it appears, with the email address of your account, masked for a staff member with read-only access, and publish it, refuse it or take it down. Until it is published, only you and ORBES staff see it. Once published, it is shown to everyone, signed in or not, on the model's sheet, with its credit and nothing else: never the piece's identity, your account or your email address. The service's audit log records each step of a photograph by identifiers, never by your name.",
+        "ORBES processes these data on your consent, given when you send the photograph. You withdraw it at any time from the piece, with WITHDRAW: the photograph leaves WORN at once and is erased. It is erased too when ORBES refuses it or takes it down, and when the piece leaves you (a transfer, a return) or ORBES revokes it; while your account is locked, it is not shown. The record of each photograph (its piece, its status and dates, its credit as sent and the version of your consent) is kept with your account, as long as it exists, and is in the copy of your data, without the image.",
+      ],
+    },
+    {
       id: 'cookies',
       title: 'Cookies',
       blocks: [
@@ -321,6 +357,7 @@ const EN: LegalDocument = {
           "- The carrier ORBES chooses for a shipment, and the logistics partner that keeps and ships pieces for ORBES: the buyer's name, address and phone and the contents of the parcel.",
           "- ORBES's accountant, who receives the invoices, the credit notes and their table of each month, with the buyer's name, address and email address.",
           '- The email provider ORBES chooses, once the service sends emails: the address, subject and words of each email.',
+          "- Everyone who opens a model's sheet: the WORN photographs published on it, each with its credit (a first name, a country and, if its owner chose it, an Instagram name).",
         ].join('\n'),
         'DB-IP supplies the location database, which ORBES installs on its own server: nothing is sent to DB-IP. ORBES sells no data and shares none for advertising.',
       ],
@@ -347,6 +384,8 @@ const EN: LegalDocument = {
           "- **Answers to the circle's invitations and votes in its polls**: as long as the account exists. The daily count of the circle's visits names no one, and is kept.",
           '- **Requests in the private salon**, with their notes: as long as the account exists, open or closed.',
           '- **Your messages with ORBES Client Services**, and their answers: as long as the account exists.',
+          '- **House messages**, with when you read them: as long as the account exists.',
+          '- **WORN**: a photograph, while it is in review or published, then erased; its record, as long as the account exists.',
           '- **The founding list**: kept until a request to erase; unsubscribed rows receive nothing.',
           '- **Emails**, with their address, subject and words: 90 days after they are sent, fail or are cancelled, then erased. **Your choice of release notices**: as long as the account exists.',
           '- **Findings of unusual activity**, which ORBES staff review: kept with the piece they concern.',
@@ -498,7 +537,7 @@ const FR: LegalDocument = {
       title: 'Segments, fiche client et activité',
       blocks: [
         "Le personnel d'ORBES peut regrouper des collectionneurs en segments, à partir de ce que le service enregistre déjà : les sorties auxquelles ils ont pris part et les pièces obtenues ; le palier et les modèles et collections des pièces détenues ; les tailles (des pièces détenues, choisies dans une LIVE RELEASE ou commandées) et le pays (celui que le compte a donné, ou celui d'où venait sa dernière entrée à une LIVE RELEASE) ; I'LL BE THERE, les réponses aux questions d'après, et la dernière activité (une connexion, une session en cours, un scan) ; et une place sur la liste fondatrice (voir [La liste fondatrice](#founding-list)). Un segment est une règle : ses membres sont calculés à chaque usage, à partir des comptes tels qu'ils sont alors, et ne sont jamais conservés avec un compte.",
-        "Un segment peut décider qui peut entrer dans une LIVE RELEASE ou s'inscrire à une sortie, dont la page dit alors FOR SELECTED COLLECTORS sans jamais nommer le segment, et qui lit une publication du cercle. Le personnel d'ORBES peut aussi télécharger les membres d'un segment en une liste avec leurs adresses e-mail, masquées pour un membre du personnel en lecture seule. ORBES traite ces données pour son intérêt légitime à proposer ses sorties et son cercle aux collectionneurs à qui ils conviennent ; un segment n'envoie lui-même aucun message.",
+        "Un segment peut décider qui peut entrer dans une LIVE RELEASE ou s'inscrire à une sortie, dont la page dit alors FOR SELECTED COLLECTORS sans jamais nommer le segment, et qui lit une publication du cercle. Le personnel d'ORBES peut aussi télécharger les membres d'un segment en une liste avec leurs adresses e-mail, masquées pour un membre du personnel en lecture seule. ORBES traite ces données pour son intérêt légitime à proposer ses sorties et son cercle aux collectionneurs à qui ils conviennent ; les membres d'un segment peuvent recevoir un message de la maison (voir [Messages de la maison](#house-messages)).",
         "ORBES Client Services lit, sur la fiche d'un collectionneur dans la console, ses commandes et leurs étapes, les sorties auxquelles il a pris part et les pièces qu'il y a obtenues, ses réponses aux questions d'après, ses I'LL BE THERE, son palier, les segments dont il est membre à ce moment, et les notes qu'ORBES Client Services a écrites sur ses commandes, ses entrées et ses demandes ; un membre du personnel en lecture seule voit son adresse e-mail masquée. La fiche ne montre jamais les données de l'acheteur ni les mots d'une gravure.",
         "Pour choisir l'heure d'ouverture d'une sortie, le service compte, pour chaque heure, les connexions et les scans par pays et par palier : le pays qu'un compte a donné ou celui d'où venait un scan, et le palier de son compte au moment où l'heure est comptée. Ces nombres ne désignent aucun compte, aucune adresse ni aucun appareil, et sont conservés comme tels.",
       ],
@@ -532,6 +571,25 @@ const FR: LegalDocument = {
       ],
     },
     {
+      id: 'house-messages',
+      title: "Messages de la maison",
+      blocks: [
+        "ORBES peut vous écrire dans MESSAGES, sous FROM ORBES : dans l'application seulement, jamais par e-mail ni par notification. On ne peut pas répondre à ces messages ; pour écrire à ORBES, utilisez ORBES CLIENT SERVICES dans MESSAGES.",
+        "Certains sont écrits à des moments de votre compte, qu'ORBES active ou désactive chacun : le lendemain du premier enregistrement d'une pièce à votre compte, quand votre crédit d'anniversaire s'ouvre, quand un crédit prend fin dans les 7 jours, quand PRIVATE CARE vous est ouvert, un an après l'enregistrement d'une pièce à votre nom, et après 90 jours sans visite. ORBES les écrit à partir de ce que le service garde déjà : votre prénom, vos pièces et depuis quand, vos crédits, votre palier et votre dernière activité (une connexion, une session en cours, un scan). D'autres sont écrits par le personnel d'ORBES à un groupe de collectionneurs : les membres d'un segment (voir [Segments, fiche client et activité](#segments)), ou les comptes d'un palier et des paliers au-dessus, tels qu'ils sont au moment de l'envoi.",
+        "ORBES enregistre quand chaque message parvient à votre compte et quand vous le lisez, pour vous montrer les nouveaux et compter combien ont lu chaque message ; le personnel d'ORBES voit ces nombres, jamais qui a lu. ORBES traite ces données pour son intérêt légitime à tenir ses collectionneurs informés de leurs pièces et du service.",
+        "Les messages de la maison sont conservés avec votre compte, tant qu'il existe, et figurent dans la copie de vos données (voir [Vos droits](#rights)).",
+      ],
+    },
+    {
+      id: 'worn',
+      title: "WORN",
+      blocks: [
+        "Depuis une pièce enregistrée à votre compte, vous pouvez envoyer à WORN, la galerie des propriétaires au pied de la fiche du modèle, une photographie de vous la portant (voir les [conditions générales d'utilisation](/legal/terms)). L'application la réencode sur votre appareil et le service en retire les métadonnées (comme le lieu de la prise de vue et l'appareil photo) : seule l'image est gardée. Avec elle, ORBES enregistre son crédit, votre prénom et votre pays tirés de YOUR PROFILE et, si vous choisissez de le montrer, votre nom Instagram, tels qu'ils sont à l'envoi ; la pièce et son modèle ; l'heure de l'envoi ; et votre consentement, avec son heure et la version de cette politique alors en vigueur.",
+        "Le personnel d'ORBES examine chaque photographie avant qu'elle apparaisse, avec l'adresse e-mail de votre compte, masquée pour un membre du personnel en lecture seule, et la publie, la refuse ou la retire. Tant qu'elle n'est pas publiée, seuls vous et le personnel d'ORBES la voyez. Une fois publiée, elle est montrée à tous, connectés ou non, sur la fiche du modèle, avec son crédit et rien d'autre : jamais l'identité ORBES de la pièce, votre compte ni votre adresse e-mail. Le journal d'audit du service inscrit chaque étape d'une photographie par des identifiants, jamais par votre nom.",
+        "ORBES traite ces données sur votre consentement, donné à l'envoi de la photographie. Vous le retirez à tout moment depuis la pièce, avec WITHDRAW : la photographie quitte WORN aussitôt et est effacée. Elle est effacée aussi quand ORBES la refuse ou la retire, et quand la pièce vous quitte (un transfert, un retour) ou qu'ORBES la révoque ; tant que votre compte est verrouillé, elle n'est pas montrée. La trace de chaque photographie (sa pièce, son statut et ses dates, son crédit tel qu'envoyé et la version de votre consentement) est conservée avec votre compte, tant qu'il existe, et figure dans la copie de vos données, sans l'image.",
+      ],
+    },
+    {
       id: 'cookies',
       title: 'Cookies',
       blocks: [
@@ -555,6 +613,7 @@ const FR: LegalDocument = {
           "- Le transporteur qu'ORBES choisit pour un envoi, et le partenaire logistique qui garde et expédie des pièces pour ORBES : le nom, l'adresse et le téléphone de l'acheteur et le contenu du colis.",
           "- Le comptable d'ORBES, qui reçoit les factures, les avoirs et leur tableau de chaque mois, avec le nom, l'adresse et l'adresse e-mail de l'acheteur.",
           "- Le prestataire d'e-mails qu'ORBES choisit, une fois que le service envoie des e-mails : l'adresse, l'objet et les mots de chaque e-mail.",
+          "- Toute personne qui ouvre la fiche d'un modèle : les photographies WORN qui y sont publiées, chacune avec son crédit (un prénom, un pays et, si son propriétaire l'a choisi, un nom Instagram).",
         ].join('\n'),
         "DB-IP fournit la base de localisation, qu'ORBES installe sur son propre serveur : rien n'est envoyé à DB-IP. ORBES ne vend aucune donnée et n'en partage aucune à des fins publicitaires.",
       ],
@@ -581,6 +640,8 @@ const FR: LegalDocument = {
           '- **Réponses aux invitations du cercle et votes de ses sondages** : tant que le compte existe. Le compte quotidien des visites du cercle ne désigne personne, et il est conservé.',
           '- **Demandes au salon privé**, avec leurs notes : tant que le compte existe, ouvertes ou closes.',
           '- **Vos messages avec ORBES Client Services**, et leurs réponses : tant que le compte existe.',
+          '- **Messages de la maison**, avec le moment où vous les lisez : tant que le compte existe.',
+          "- **WORN** : une photographie, tant qu'elle est en examen ou publiée, puis effacée ; sa trace, tant que le compte existe.",
           "- **La liste fondatrice** : conservée jusqu'à une demande d'effacement ; les lignes désinscrites ne reçoivent rien.",
           '- **E-mails**, avec leur adresse, leur objet et leurs mots : 90 jours après leur envoi, leur échec ou leur annulation, puis effacés. **Votre choix des avis de sortie** : tant que le compte existe.',
           "- **Constats d'activité inhabituelle**, examinés par le personnel d'ORBES : conservés avec la pièce qu'ils concernent.",

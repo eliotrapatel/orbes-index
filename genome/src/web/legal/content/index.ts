@@ -59,9 +59,15 @@ export { LANGS, type Block, type Lang, type LegalDocument, type LegalSection } f
  * article 12 (a release reserved for selected collectors; no longer "sends no email") and article 13 (the pace; no
  * email about the end); the FAQ's forgotten password. The date of the lot's legal commit, after ORBES CARE's published
  * 2026-10-15. Article 11 did not change: CARE_CONDITIONS_VERSION stays 2026-10-15, the version whose article 11 the
- * ORBES CARE CONDITIONS print (test/web/legal.content.test.ts pins article 11 to it).
+ * ORBES CARE CONDITIONS print (test/web/legal.content.test.ts pins article 11 to it). 2026-10-22 is the version of lot
+ * M2 of the macro scope (L2; plan step M2.12): the privacy policy's house messages and WORN (sections house-messages and
+ * worn, their retention, everyone among the recipients of a published WORN photograph and its credit), the segments'
+ * sentence that said a segment sends no message (its members may receive a house message); the terms' article 15 (WORN:
+ * the licence with its credit, the review, the withdrawal); the terms gain no sentence on MESSAGES. The date of the lot's
+ * final legal commit, never M1's 2026-10-21. Article 11 did not change: CARE_CONDITIONS_VERSION stays 2026-10-15. The
+ * consents recorded with the version in force move with it (FOUNDING_CONSENT_VERSION, WORN_CONSENT_VERSION).
  */
-export const LEGAL_VERSION = '2026-10-21';
+export const LEGAL_VERSION = '2026-10-22';
 
 export const DOCUMENTS: Readonly<Record<LegalPage, Readonly<Record<Lang, LegalDocument>>>> = Object.freeze({
   privacy: PRIVACY,

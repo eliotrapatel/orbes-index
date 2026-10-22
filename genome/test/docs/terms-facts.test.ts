@@ -14,13 +14,16 @@
  *    steps of the orders, the issuer of their invoices and when their
  *    certificate is offered, the after-room's times, the releases a rule may
  *    require and the week of the question after; the reset links an hour, the
- *    founding list's consent at the version in force, the emails' 90 days),
+ *    founding list's consent at the version in force, the emails' 90 days; a
+ *    WORN photograph's consent at the version in force and its sendings in
+ *    24 hours),
  *    and every absence of §10 (no email but through the outbox, no reset but
  *    with a recovery code, no undoing an accepted transfer, no account
  *    deletion, no age check, no vote of the circle and no note of the private
  *    salon in the audit log, no payment taken, no public view of a LIVE
  *    RELEASE's room, no call to an online store, SMTP the one connection
- *    out) holding in the code;
+ *    out, no house message by email or notification nor answered) holding in
+ *    the code;
  *  - the two production settings that would change a rule
  *    (SESSION_TTL_ACCOUNT_HOURS, TRANSFER_ACCEPT_REQUIRE_PRODUCT) left
  *    commented out in deploy/vps/.env.example and empty in compose.yaml;
@@ -46,7 +49,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SESSION_TTL_HOURS, loadConfig } from '../../src/server/config.js';
-import { WARRANTY_CLAIM_OUTCOMES_BY_BASIS, WARRANTY_CLAIM_REFUSALS_BY_BASIS } from '../../src/server/db/schema.js';
+import { EMAIL_KINDS, WARRANTY_CLAIM_OUTCOMES_BY_BASIS, WARRANTY_CLAIM_REFUSALS_BY_BASIS } from '../../src/server/db/schema.js';
 import { registerAccountBody } from '../../src/server/http/schemas.js';
 import { CARE_CONDITIONS_VERSION } from '../../src/server/render/care-conditions.js';
 import { RECOVERY_ATTEMPT_LIMIT, RECOVERY_ATTEMPT_WINDOW_MS, RECOVERY_CODE_TTL_MS, RESET_REQUEST_LIMIT, TRANSFER_FREEZE_MS } from '../../src/server/services/account-recovery.js';
@@ -93,6 +96,7 @@ import { SALE_TOKEN_TTL_MS } from '../../src/server/services/sale.js';
 import { normalizeShopNote, SHOP_NOTE_MAX } from '../../src/server/services/salon.js';
 import { SCAN_TOKEN_TTL_MS, TRANSFER_TOKEN_TTL_MS } from '../../src/server/services/scan-tokens.js';
 import { WARRANTY_CREDIT_VALIDITY_MONTHS } from '../../src/server/services/warranty-claims.js';
+import { WORN_CONSENT_VERSION, WORN_RATE } from '../../src/server/services/worn.js';
 import { dateInWords, LEGAL_VERSION } from '../../src/web/legal/content/index.js';
 import { LEGAL_IDENTITY } from '../../src/web/legal/content/notice.js';
 import { ASSURANCE_NOTE, LEGAL as LEGAL_COPY, RESALE_GUIDANCE } from '../../src/web/verify/copy.js';
@@ -531,6 +535,17 @@ const CONSTANTS: Record<string, ConstantSpec> = {
   EMAIL_RETENTION_DAYS: {
     value: `${EMAIL_RETENTION_DAYS} jours`,
   },
+  // Lot M2 of the macro plan (scope of 2026-10-20, L2). R174: each WORN photograph's consent recorded with the version of
+  // the legal texts in force, the one the app asks for (GET …/worn's consentVersion).
+  WORN_CONSENT_VERSION: {
+    value: '—',
+    holds: () => expect(WORN_CONSENT_VERSION).toBe(LEGAL_VERSION),
+  },
+  // R175: one photograph at a time, and at most 5 sendings an account in a rolling 24 hours.
+  WORN_RATE: {
+    value: `${WORN_RATE.max} en ${WORN_RATE.windowMs / HOUR} heures`,
+    holds: () => expect(WORN_RATE.windowMs).toBe(DAY),
+  },
   LIVE_QUESTION_OPEN_DAYS: {
     value: `${LIVE_QUESTION_OPEN_DAYS} jours`,
     fr: [`pendant ${LIVE_QUESTION_OPEN_DAYS} jours`],
@@ -631,6 +646,15 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'the founding list\'s consent with its version (F2)': 'consent_version: FOUNDING_CONSENT_VERSION,',
   'an unsubscribed row kept, never written to again (F3, E1)': 'set({ unsubscribed_at: now })',
   'each email erased 90 days after it settles (E0)': 'const cutoff = new Date(now.getTime() - EMAIL_RETENTION_DAYS * DAY_MS);',
+  // Lot M2 of the macro plan (scope of 2026-10-20, L2).
+  'the house\'s moments, each switched on in the console (M1)': "selectFrom('house_moment_settings').selectAll().where('enabled', '=', true)",
+  'house messages to a segment or a tier, the audience frozen at sending (M2)': "let due = tx.selectFrom('house_messages').selectAll().where('status', '=', 'SCHEDULED').where('send_at', '<=', now);",
+  'house messages kept with the account and exported (M3)': 'houseMessages: await accountHouseMessages(tx, a.id),',
+  'WORN: one photograph at a time, 5 sendings in 24 hours (G1)': 'if (Number(recent.n) >= WORN_RATE.max) throw wornLimit();',
+  'WORN: the consent with its version (G1)': 'consent_version: WORN_CONSENT_VERSION,',
+  'WORN: shown to everyone once published, never before (G2, G5)': "if (reader.kind === 'public') q = q.where(shownSql);",
+  'WORN: withdrawn at any time, erased at once (G2)': "set({ status: 'WITHDRAWN', ...ERASED",
+  'WORN: the credit, first name and country, the Instagram name if chosen (G3)': 'instagram: r.credit_instagram,',
 };
 
 // ── Sources, for the absences of §10 ───────────────────────────────────────
@@ -817,6 +841,21 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
     expect(block).not.toMatch(/h\('(?:input|form|textarea|select)'|type: 'file'|FormData/);
     expect(block.match(/\bbutton\(/g) ?? []).toHaveLength(1);
     expect(block).toContain('button(m.download,');
+  },
+  N12: () => {
+    // House messages (plan MACRO M2 §1.1, M3 and M4): in MESSAGES and on NOW's line only; no email kind carries one, the
+    // house's services write no email and no conversation, the collector's only routes read them, and nothing pushes.
+    expect(EMAIL_KINDS.length).toBeGreaterThan(5);
+    expect(EMAIL_KINDS.filter((k) => /HOUSE|MOMENT|MESSAGE/.test(k))).toEqual([]);
+    for (const file of ['house-moments.ts', 'house-messages.ts']) {
+      const text = readDoc(`genome/src/server/services/${file}`);
+      expect(text, file).toContain("insertInto('house_deliveries')");
+      expect(text, file).not.toMatch(/email_outbox|EmailService|insertInto\('client_(?:messages|conversations)'\)|updateTable\('client_(?:messages|conversations)'\)/);
+    }
+    const customer = ROUTES.filter((r) => !r.path.startsWith('/api/admin/') && /house/i.test(r.path)).map((r) => `${r.method} ${r.path}`);
+    expect(customer.sort()).toEqual(['get /api/v1/account/house-messages', 'post /api/v1/account/house-messages/read']);
+    expect(ROUTES.filter((r) => /push|notification/i.test(r.path))).toEqual([]);
+    expect(matches(/\bPushManager\b|\bpushManager\b|showNotification|Notification\.requestPermission/g).map((m) => m.file)).toEqual([]);
   },
 };
 

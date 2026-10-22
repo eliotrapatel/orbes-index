@@ -252,7 +252,8 @@ describe('the runbook of lot MACRO M1 (docs/launch/DEPLOY-MACRO-M1.md)', () => {
     expect(section(runbook, '### 1.4')).toContain("**Note le nom de l'archive et sa taille en octets**");
     expect(section(runbook, '### 1.5')).toContain(`**jamais \`scripts/deploy.sh --image ${PROD_TAG}\`**`);
     // The legal pages: one new version, the code's; the ORBES CARE conditions keep theirs; counsel never holds the deploy.
-    expect(LEGAL_VERSION).toBe(M1_LEGAL_VERSION);
+    // A later lot (macro M2, 2026-10-22) moves LEGAL_VERSION past it; M1's head still publishes M1's.
+    expect(LEGAL_VERSION >= M1_LEGAL_VERSION).toBe(true);
     expect(CARE_CONDITIONS_VERSION).toBe(CARE_VERSION);
     expect(rules).toContain(`une seule nouvelle version, \`${M1_LEGAL_VERSION}\``);
     expect(rules).toContain(`gardent leur version, \`${CARE_VERSION}\``);
@@ -260,7 +261,7 @@ describe('the runbook of lot MACRO M1 (docs/launch/DEPLOY-MACRO-M1.md)', () => {
     const fetch = section(runbook, '### 1.3');
     expect(fetch).toContain(`Sortie attendue : \`export const LEGAL_VERSION = '${M1_LEGAL_VERSION}';\`, la nouvelle version.`);
     expect(fetch).toContain(`Sortie attendue : \`export const CARE_CONDITIONS_VERSION = '${CARE_VERSION}';\`, inchangée.`);
-    expect(readDoc('genome/src/web/legal/content/index.ts')).toContain(`export const LEGAL_VERSION = '${M1_LEGAL_VERSION}';`);
+    expect(readDoc('genome/src/web/legal/content/index.ts')).toContain(`${M1_LEGAL_VERSION} is the version of lot M1`);
     expect(readDoc('genome/src/server/render/care-conditions.ts')).toContain(`export const CARE_CONDITIONS_VERSION = '${CARE_VERSION}';`);
   });
 

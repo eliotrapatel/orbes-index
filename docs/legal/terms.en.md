@@ -1,6 +1,6 @@
 # Terms of use of the ORBES GENOME CODE service
 
-**Draft for legal review, not validated.** Version: 21 October 2026. [Version française](terms.fr.md).
+**Draft for legal review, not validated.** Version: 22 October 2026. [Version française](terms.fr.md).
 
 Each article ends with a *Code: …* line that points to the rules of the code it describes ([TERMS-FACTS](TERMS-FACTS.md)). These lines are for the review and are not published. The [À COMPLÉTER: …] fields await the legal identity of ORBES and counsel's choices ([note for counsel](counsel-note.fr.md), in French). Every field keeps the French marker, so that one search finds them all in both languages.
 
@@ -278,7 +278,11 @@ In the owners' circle (THE CIRCLE), ORBES publishes content of the maison for th
 
 **What is recorded.** Your answer to an invitation is written to the service's audit log; your vote never is. Visits to the circle are counted per day, without any account. Your answers and votes are in the copy of your data you may ask ORBES Client Services for (article 17).
 
-*Code: R76, R77, R78, R79, R80, R81, R82, R83, R139, N6.*
+**WORN.** The owner of a piece registered to their account may send, from that piece, where the service offers it, a photograph of themselves wearing it to WORN, the owners' gallery at the foot of the model's sheet: one photograph at a time for each piece. By sending it, you confirm that you took it or have its author's permission, that anyone recognisable in it agrees, and that it breaks no law and infringes no one's rights. You give ORBES, free of charge, the non-exclusive right to reproduce it and show it to everyone in WORN, on the model's sheet of the service, with its credit (your first name and your country, and your Instagram name if you choose to show it), until you withdraw it or it ends as below.
+
+**Review and withdrawal.** ORBES looks at each photograph before it appears, and may refuse it, or take it down once published, at its discretion; the piece then says so. You may withdraw your photograph at any time from the piece: it leaves WORN at once and is erased. It ends too, and is erased, when the piece leaves you, by a transfer or a return, or ORBES revokes it. ORBES cannot recall the copies others may have made of a published photograph.
+
+*Code: R76, R77, R78, R79, R80, R81, R82, R83, R139, R174, R175, R176, R177, R178, R179, N6.*
 
 ## Article 16 — Locking an account
 
@@ -292,7 +296,7 @@ The lock ends every session of the account, revokes its recovery code, withdraws
 
 ORBES processes the data of the service (account, registrations, scans, entries and reservations in releases, entries, options and reservations in the LIVE RELEASES, answers to the question after, orders and their invoices, answers and votes in the circle, requests in the private salon) as its privacy policy describes, which also says how ORBES groups collectors and counts their activity by hour. The service sends your orders to no online store. You can ask ORBES Client Services for a copy of everything the ORBES registry holds about your account. Your requests in the private salon, with your notes, are in that copy. Your entries in the LIVE RELEASES, with their options, and your I'LL BE THERE are in that copy. Your orders, with the buyer's name and address, their steps and their invoices, and your answers to the questions after are in that copy.
 
-*Code: R21, R90, R117, R133, R139, R144, R145, R151, R162, R168, R169, R170, N10.*
+*Code: R21, R90, R117, R133, R139, R144, R145, R151, R162, R168, R169, R170, R171, R172, R173, N10, N12.*
 
 ## Article 18 — Liability
 
