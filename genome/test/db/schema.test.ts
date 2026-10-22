@@ -1518,6 +1518,27 @@ describe('schema', () => {
     await t.db.updateTable('models').set({ box_id: null, packed_weight_g: null }).where('id', '=', model.id).execute();
   });
 
+  it('location countries (0055): the mirror at work: a country served by a location, by an admin or a script, once; moved to another location, its update stamped; its country never changed', async () => {
+    const admin = await t.db.insertInto('admin_users').values({ email: 'countries-s0055@orbes.test', email_normalized: 'countries-s0055@orbes.test', password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow();
+    const [france, usa] = await t.db.insertInto('stock_locations').values([{ name: 'COUNTRIES S0055 FR' }, { name: 'COUNTRIES S0055 US' }]).returning('id').execute();
+    const served = await t.db.insertInto('stock_location_countries').values({ country: 'FR', location_id: france.id, updated_by: admin.id }).returningAll().executeTakeFirstOrThrow();
+    expect(served).toEqual({ country: 'FR', location_id: france.id, updated_by: admin.id, updated_at: expect.any(Date) });
+    expect(await t.db.insertInto('stock_location_countries').values({ country: 'BE', location_id: france.id }).returning('updated_by').executeTakeFirstOrThrow()).toEqual({ updated_by: null });
+    await expect(t.db.insertInto('stock_location_countries').values({ country: 'FR', location_id: usa.id }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'stock_location_countries_pkey'));
+    await expect(t.db.insertInto('stock_location_countries').values({ country: 'fr', location_id: usa.id }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'stock_location_countries_country_check'));
+    const moved = await t.db
+      .updateTable('stock_location_countries')
+      .set({ location_id: usa.id, updated_by: null, updated_at: new Date('2026-10-22T08:00:00Z') })
+      .where('country', '=', 'FR')
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(moved).toEqual({ country: 'FR', location_id: usa.id, updated_by: null, updated_at: new Date('2026-10-22T08:00:00Z') });
+    await expect(sql`UPDATE stock_location_countries SET country = 'DE' WHERE country = 'FR'`.execute(t.db)).rejects.toSatisfy(isGuardViolation);
+    await expect(t.db.deleteFrom('stock_locations').where('id', '=', usa.id).execute()).rejects.toSatisfy(isForeignKeyViolation);
+    await t.db.deleteFrom('stock_location_countries').execute();
+    await t.db.deleteFrom('stock_locations').where('id', 'in', [france.id, usa.id]).execute();
+  });
+
   it('product_status_history is append-only; genomes and keys are never deleted (key ids never reused)', async () => {
     const { product } = await seedProduct(t.db);
     const h = await t.db

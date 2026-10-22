@@ -455,4 +455,23 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
       await db.updateTable('shipments').set({ weight_g: 200, weight_missing: null }).where('id', '=', parcel.id).returning(['weight_g', 'weight_missing']).executeTakeFirstOrThrow(),
     ).toEqual({ weight_g: 200, weight_missing: null });
   });
+  it('holds a country served by one location (0055)', async () => {
+    // No category: the countries name locations only.
+    const admin = await db.insertInto('admin_users').values({ email: 'countries-pg0055@orbes.test', email_normalized: 'countries-pg0055@orbes.test', password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow();
+    const [france, usa] = await db.insertInto('stock_locations').values([{ name: 'COUNTRIES PG 0055 FR' }, { name: 'COUNTRIES PG 0055 US' }]).returning('id').execute();
+    // char(2) comes back as two letters, unpadded; one location per country; two capital letters.
+    expect(await db.insertInto('stock_location_countries').values({ country: 'FR', location_id: france.id, updated_by: admin.id }).returningAll().executeTakeFirstOrThrow()).toEqual({
+      country: 'FR', location_id: france.id, updated_by: admin.id, updated_at: expect.any(Date),
+    });
+    await expect(db.insertInto('stock_location_countries').values({ country: 'FR', location_id: usa.id }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'stock_location_countries_pkey'));
+    await expect(db.insertInto('stock_location_countries').values({ country: 'us', location_id: usa.id }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'stock_location_countries_country_check'));
+    await expect(db.insertInto('stock_location_countries').values({ country: 'U', location_id: usa.id }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'stock_location_countries_country_check'));
+    // Moved by its location, its update stamped; its country never changed; a location serving it never deleted.
+    await db.updateTable('stock_location_countries').set({ updated_at: new Date('2026-10-01T10:00:00Z') }).where('country', '=', 'FR').execute();
+    const moved = await db.updateTable('stock_location_countries').set({ location_id: usa.id }).where('country', '=', 'FR').returning(['location_id', 'updated_at']).executeTakeFirstOrThrow();
+    expect(moved.location_id).toBe(usa.id);
+    expect(moved.updated_at.getTime()).toBeGreaterThan(new Date('2026-10-01T10:00:00Z').getTime());
+    await expect(sql`UPDATE stock_location_countries SET country = 'DE' WHERE country = 'FR'`.execute(db)).rejects.toSatisfy(isGuardViolation);
+    await expect(db.deleteFrom('stock_locations').where('id', '=', usa.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+  });
 });

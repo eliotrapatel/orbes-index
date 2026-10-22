@@ -1621,6 +1621,20 @@ export interface AdminUserLocationsTable {
 }
 
 /**
+ * A country a location serves (migration 0055, macro scope K11 Z1; lot M3 plan §3.2): when staff order a model by size, a
+ * collector counts at the location that serves their country (their default address's, else their profile's); a country
+ * no location serves counts at the default location. One location per country at most (`country`, ISO 3166-1 alpha-2,
+ * is the key); a country moved changes its location, never itself. updated_at is stamped on every update.
+ */
+export interface StockLocationCountriesTable {
+  country: ColumnType<string, string, never>; // ^[A-Z]{2}$
+  location_id: string; // stock_locations.id
+  /** admin_users.id of the ADMIN who set it last; NULL for a script. */
+  updated_by: ColumnType<string | null, string | null | undefined, string | null>;
+  updated_at: TimestampDefault;
+}
+
+/**
  * A supplier ORBES orders its pieces from (migration 0035, plan NEXT LOT §3.5): its name (1..120, unique whatever the
  * case), its contact, the currency it bills in, a note, `active` (an inactive supplier stays on its orders and is
  * offered for no new draft). Never deleted. id, created_at and created_by never change.
@@ -3264,6 +3278,7 @@ export interface Database {
   live_tier_windows: LiveTierWindowsTable;
   stock_locations: StockLocationsTable;
   admin_user_locations: AdminUserLocationsTable;
+  stock_location_countries: StockLocationCountriesTable;
   suppliers: SuppliersTable;
   supplier_orders: SupplierOrdersTable;
   supplier_order_lines: SupplierOrderLinesTable;
