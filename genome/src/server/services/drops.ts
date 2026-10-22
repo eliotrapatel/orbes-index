@@ -1253,7 +1253,9 @@ async function guaranteedEnteredPieces(db: Db, dropId: string, sizeId: string): 
 async function sizeTallies(db: Db, ids: readonly string[]): Promise<Map<string, AdminDrawSize[]>> {
   const out = new Map<string, AdminDrawSize[]>();
   if (ids.length === 0) return out;
-  // An entry counts in its size (a model's draw) or in each of its sizes per piece (a set's: drop_entry_sizes).
+  // An entry counts in its size (a model's draw) or in each of its sizes per piece (a set's: drop_entry_sizes); both
+  // sources read only the draws of `ids` (drop_entries through drop_entries_size_idx, drop_entry_sizes through its
+  // size_id index), so a draw's page never reads every entry.
   const rows = await sql<{ drop_id: string; id: string; label: string; piece: number | null; stock: number; held: number; reserved: number; entered: number; waitlisted: number; guaranteed_entered: number }>`
     SELECT s.drop_id, s.id, s.label, s.piece, s.stock,
            coalesce(sum(e.pieces) FILTER (WHERE e.status IN ('SELECTED', 'CONFIRMED')), 0)::int AS held,
@@ -1263,8 +1265,9 @@ async function sizeTallies(db: Db, ids: readonly string[]): Promise<Map<string, 
            coalesce(sum(e.pieces) FILTER (WHERE e.status = 'ENTERED' AND e.guarantee_id IS NOT NULL), 0)::int AS guaranteed_entered
       FROM drop_sizes s
       JOIN drops d ON d.id = s.drop_id
-      LEFT JOIN (SELECT id AS entry_id, size_id FROM drop_entries WHERE size_id IS NOT NULL
-                 UNION ALL SELECT entry_id, size_id FROM drop_entry_sizes) c ON c.size_id = s.id
+      LEFT JOIN (SELECT id AS entry_id, size_id FROM drop_entries WHERE drop_id IN (${sql.join([...ids])}) AND size_id IS NOT NULL
+                 UNION ALL SELECT entry_id, size_id FROM drop_entry_sizes
+                  WHERE drop_id IN (${sql.join([...ids])}) AND size_id IN (SELECT id FROM drop_sizes WHERE drop_id IN (${sql.join([...ids])}))) c ON c.size_id = s.id
       LEFT JOIN drop_entries e ON e.id = c.entry_id AND e.drop_id = s.drop_id
       LEFT JOIN house_guarantees g ON g.id = e.guarantee_id
      WHERE s.drop_id IN (${sql.join([...ids])})
