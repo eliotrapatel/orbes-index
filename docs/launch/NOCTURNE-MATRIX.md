@@ -50,7 +50,7 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
   free replacement; refused after inspection; a 2-year piece repaired). Since the desktop plan (step 12, D11, test
   support only), `gallery` tells the full story, then gives MONOLITHE in steel a gallery of the demo's own photographs in
   gold and in blue (two: the media store refuses a model's cover in its own gallery), for a computer's gallery and its
-  viewer. Since lot M1 (2026-10-21, test support only): `queue` tells the live story with two paced releases instead (MONOLITHE IN BLUE, 40 every minute, 5 240 entries, 200 let in: `admitted` at place 150 of the line, `queued` at place 412 of the queue, `queueFar` at 4999; MONOLITHE IN GOLD, its pace paused: `queuePaused` at place 12); `draw-selected` tells the full story, then you join the founding list and the October draw is opened to the segment *Founding list*; and `email` is the full story on a stage whose emails' channel is on (below, the emails' pages). Their phone states are in the shards `queue` (`nocturne.content-queue.e2e.test.ts`, new: the room's shard holds its 28), `draws` and `email` (new), their computer twins in `desk-10`, `desk-11` and `desk-13` (new).
+  viewer. Since lot M1 (2026-10-21, test support only): `queue` tells the live story with two paced releases instead (MONOLITHE IN BLUE, 40 every minute, 5 240 entries, 200 let in: `admitted` at place 150 of the line, `queued` at place 412 of the queue, `queueFar` at 4999; MONOLITHE IN GOLD, its pace paused: `queuePaused` at place 12); `draw-selected` tells the full story, then you join the founding list and the October draw is opened to the segment *Founding list*; and `email` is the full story on a stage whose emails' channel is on (below, the emails' pages). Their phone states are in the shards `queue` (`nocturne.content-queue.e2e.test.ts`, new: the room's shard holds its 28), `draws` and `email` (new), their computer twins in `desk-10`, `desk-11` and `desk-13` (new). Since lot M2 (2026-10-22, test support only): `house` tells the draw-leads story, then gives you three house messages and no conversation (YOUR FIRST PIECE on 16 September and A CREDIT ENDS SOON on 3 October, both read; this morning ORBES's own *THE AUTUMN RELEASES* to TITANE and above, unread); `worn` tells the full story, then WORN: you's profile signs (Camille, France, camille.m), three more pieces of MONOLITHE in steel hold a photograph each (in review, published on 4 October, not published: the piece not clearly visible), a collector without a first name or a country holds one (`l.bernard@example.com`), and seven more owners of MONOLITHE in its three variants and one of ZENITH (RESERVED) have a photograph published, so MONOLITHE's sheet shows eight. Their phone states are in the shards `messages` (its own stage `house`, its writes last) and `worn` (new), their computer twins in `desk-13` and `desk-14` (new). Every existing piece state whose model has a sheet gained the WORN block (CHOOSE A PHOTOGRAPH) in OWNERSHIP: values added, none removed.
 - **Where the demo differs from the boards** (live data excepted: times, ids, a countdown's digits, the GENOME's glyphs):
   - Since N1, MONOLITHE in steel is a model and gold and blue its variants (ADD A VARIANT; the dots Steel · Gold · Blue):
     the lookbook's list gives them as one entry, which THE COLLECTION shows as one model with its dots since N6.
@@ -615,6 +615,35 @@ On the demo stage `email` (`NOCTURNE_EMAIL_CONFIG`: the emails' channel on, an S
 | `unsubscribe-invalid` | *This link could not be read. Open it again from the email it came in.* | a link not the server's | E1, E2 |
 | `unsubscribe-done` | EMAILS STOPPED, *You will no longer receive release notices.*, *To receive them again, switch them on in YOUR PROFILE.* | STOP | E2 |
 
+## FROM ORBES and WORN (lot M2, the stages `house` and `worn`)
+
+On the stage `house`, MESSAGES of an account that has received house messages (D24 M3, M4): on a phone, two tabs at the head of MESSAGES; on a computer, the subject FROM ORBES of the messages page. An account that has none sees MESSAGES, NOW and its account as before: every earlier messages, NOW and account state is unchanged.
+
+| State | What it shows | Shown when | Reference |
+|---|---|---|---|
+| `now-messages-house` | NOW's line: MESSAGES, *A new message from ORBES.*, READ (an unread answer keeps *ORBES Client Services has answered you.*) | a house message unread, no answer unread | macro scope M4 |
+| `account-messages-house` | MESSAGES on FROM ORBES: the tabs ORBES CLIENT SERVICES and FROM ORBES; three messages newest first, each *ORBES · date · time*, NEW on the unread one, its title (THE AUTUMN RELEASES, A CREDIT ENDS SOON, YOUR FIRST PIECE), its words and links (IN USE; CARING FOR YOUR PIECE · YOUR SIZES); no reply; *Messages from ORBES cannot be answered. To write, open* ORBES CLIENT SERVICES | FROM ORBES opened | M3 |
+| `account-messages-house-unread` | the tabs, ORBES CLIENT SERVICES first (the answer unread), FROM ORBES with NEW | an answer and a house message unread | M3, M4 |
+| `account-messages-house-stress` | an 80-character title, 2,000 characters of words, a long model name in its words, 30 of 45 and SHOW EARLIER | the longest FROM ORBES (routes) | same pieces |
+
+On the stage `worn`, a piece's WORN block (D31 G1 to G3), in OWNERSHIP after OWNERSHIP CERTIFICATE (on a computer in the piece's right column, also a drop zone), and WORN at the foot of a model's sheet (G3 to G5), after PAIRS WELL WITH, the same for everyone. A model without a sheet draws no block; a sheet without a published photograph no section.
+
+| State | What it shows | Shown when | Reference |
+|---|---|---|---|
+| `piece-worn` | WORN, *Show how you wear it. ORBES looks at each photograph before it appears on the model’s sheet, with your first name and country.*, CHOOSE A PHOTOGRAPH (*or drop it here* on a computer) | a piece held, no photograph | macro scope G1 |
+| `piece-worn-chosen` | the photograph chosen, cropped 4:5, CAMILLE · FRANCE @camille.m, SHOW MY INSTAGRAM, the consent's sentence and I AGREE, SEND · CANCEL | a photograph chosen (the file set by Playwright) | G1, G3 |
+| `piece-worn-review` | IN REVIEW, the photograph and its credit, *ORBES is looking at your photograph.*, WITHDRAW | a photograph in review | G2 |
+| `piece-worn-published` | PUBLISHED, *In WORN since 4 OCT 2026.*, SEE IT ON THE SHEET, WITHDRAW | a photograph published | G2 |
+| `piece-worn-refused` | NOT PUBLISHED, *The piece is not clearly visible.*, CHOOSE ANOTHER PHOTOGRAPH | a photograph refused | G2 |
+| `piece-worn-profile` | *Add your first name and country in YOUR PROFILE to sign your photograph.*, YOUR PROFILE | no first name or country (`l.bernard`) | G3 |
+| `piece-worn-error` | SEND refused by the 24-hour limit: the server's words under the preview, kept, SEND again | the limit reached (a route) | G1 |
+| `sheet-worn` | WORN, *Worn by the owners of ORBES pieces.*, the first 6 of 8 (every variant alike, never labelled), CAMILLE · FRANCE @camille.m, SHOW MORE; on a computer four columns and all 8 | a sheet with published photographs, signed out | G3 to G5 |
+| `sheet-worn-one` | one photograph alone, HANA · SOUTH KOREA @hana.seo | a RESERVED sheet, to an owner | G4, G5 |
+| `sheet-worn-enlarged` | all 8, then one opened whole with its credit and CLOSE (on a computer the sheet's viewer, its credit under it) | SHOW MORE, then a photograph | G4 |
+| `sheet-worn-loading` | ONE MOMENT… under the photographs shown | SHOW MORE, the next page being read (of 40, routes) | G4 |
+| `sheet-worn-error` | *The next photographs cannot be shown now.*, TRY AGAIN, the photographs shown kept | the next page unreadable (routes) | G4 |
+| `sheet-worn-stress` | 40 photographs, a first name of 50 characters, the longest country, an Instagram name of 30 | every page read (routes) | same pieces |
+
 ## Kept as they are (out of NOCTURNE's look)
 
 | State | What it shows | Reference |
@@ -674,9 +703,12 @@ verification app's own.
 | LEAVE THE LINE (the queue) | an entry waiting for its batch on a paced release (lot M1) |
 | RESET BY EMAIL (EMAIL, SEND LINK under FORGOTTEN PASSWORD) | the emails' channel and PASSWORD_RESET on (lot M1; off: the step as before) |
 | EMAILS, EMAIL ME WHEN A RELEASE IS ANNOUNCED (YOUR PROFILE) | the emails' channel on (lot M1) |
+| ORBES CLIENT SERVICES · FROM ORBES (MESSAGES' tabs on a phone; the subject FROM ORBES on a computer) | the account has received a house message (lot M2) |
+| WORN in a piece's OWNERSHIP (CHOOSE A PHOTOGRAPH, SEND, WITHDRAW) | the piece held now, its model with a sheet, no test entrant (lot M2); a reported or in-service piece or a transfer pending: one sentence, no button; no first name or country: YOUR PROFILE |
+| WORN at the foot of a sheet | a published photograph of the model's group (lot M2) |
 | VOTE | a poll option chosen, not voted |
 | YES · NO | an invitation open, a place left (YES disabled when none) |
-| SHOW MORE | more than a page (THE RELEASES' PAST, the circle, a draw's entries) |
+| SHOW MORE | more than a page (THE RELEASES' PAST, the circle, a draw's entries; the sheet's WORN past 6 on a phone, 8 on a computer) |
 | EARLY ACCESS (MY PIECES) | an account without a piece |
 | AFTER THE RELEASES | a question open for the account |
 | SOUND ON/OFF | the footer of every screen with the chrome (the account sheet repeats it as a switch) and the room's foot |
@@ -686,12 +718,12 @@ verification app's own.
 ## The desktop states (`desk-*`, since the desktop plan of 2026-10-16)
 
 The same screens on a computer (the stage's **Computer**, above): `DESK_GROUPS` in
-`genome/test/support/nocturne-states.ts`, 270 states beside the phone's 282 (since lot M1), after them in `UI_STATES`. Each is either a
+`genome/test/support/nocturne-states.ts`, 291 states beside the phone's 299 (since lot M2), after them in `UI_STATES`. Each is either a
 phone state opened on a computer's window (the same demo, account, address, routes and acts, its `refs` naming its phone
 twin, `phone: <id>`), or a state made for a computer (`refs: ['desktop']`). Its id is `desk-`, then `light-` in light, its
 name, then its window's width unless it is 1440 × 900 (`desk-pieces-orbes-care-1024`, `desk-light-model-1920`). A
 state's `light` stores LIGHT MODE as the app does (`orbes.mode`) before the page opens. Their values are recorded in the
-same baseline (`nocturne-baseline.json`, the desk-* entries), the phone's entries byte for byte as production's but where lot M1 changed them on purpose (ADD TO CALENDAR on the draws to open or open, the legal pages of `2026-10-21`) and its 21 new states.
+same baseline (`nocturne-baseline.json`, the desk-* entries), the phone's entries byte for byte as production's but where lot M1 changed them on purpose (ADD TO CALENDAR on the draws to open or open, the legal pages of `2026-10-21`) and its 21 new states, and where lot M2 did (the WORN block in OWNERSHIP of every piece whose model has a sheet, values added only; the legal pages of `2026-10-22`) and its 17 new states.
 
 | Shard | States | Windows | What it holds |
 |---|---|---|---|
@@ -707,7 +739,8 @@ same baseline (`nocturne-baseline.json`, the desk-* entries), the phone's entrie
 | `desk-10` | 21 | 1440 × 900 | The room's other screens (the line, secured, CONFIRMED, sold out in a size, its five ends, ENTER THE LINE), a LIVE RELEASE's rules and not eligible, the room not eligible and ready, the after-room's join and its ends; the queue of a paced release, its place and estimate, then paused (lot M1: `desk-live-queue`, `desk-live-queue-paused`, `queue`) |
 | `desk-11` | 25 | 1440 × 900, ORDERS also 1024 × 768 | A result's other answers, a piece's incidents, THE PRIVATE SALON in sizes, the draw's other states (lot M1: ADD TO CALENDAR, `desk-draw-open-calendar`; FOR SELECTED COLLECTORS for one among them and for another, `desk-draw-selected`, `desk-draw-selected-not-eligible`), the failures and the pages not found; the full demo's writes last (a transfer code, the ceremony, a piece received, REQUESTED, a draw entered) |
 | `desk-12` | 20 | 1440 × 900 | The extreme content (`stress`, its ceremony last) and the empty demo |
-| `desk-13` | 19 | 1440 × 900, some in light, two at 1024 × 768 | Lot M1's emails' pages (the stage `email`): RESET BY EMAIL and its sentence, SET A NEW PASSWORD and its incomplete, refused and saved states, YOUR PROFILE's release notices, STOP THESE EMAILS (both links, not recognised, stopped); RESET BY EMAIL, the link's page, the release notices and STOP THESE EMAILS also in light, the link's page and STOP THESE EMAILS at 1024 × 768; the writes last (stopped, then the new password) |
+| `desk-13` | 25 | 1440 × 900, some in light, three at 1024 × 768 | Lot M1's emails' pages (the stage `email`): RESET BY EMAIL and its sentence, SET A NEW PASSWORD and its incomplete, refused and saved states, YOUR PROFILE's release notices, STOP THESE EMAILS (both links, not recognised, stopped); RESET BY EMAIL, the link's page, the release notices and STOP THESE EMAILS also in light, the link's page and STOP THESE EMAILS at 1024 × 768; the writes last (stopped, then the new password); then lot M2's FROM ORBES (the stage `house`): NOW's line, the subject at its longest, an answer and FROM ORBES unread, FROM ORBES opened, also in light and at 1024 × 768 |
+| `desk-14` | 13 | 1440 × 900, some in light, two at 1024 × 768 | Lot M2's WORN (the stage `worn`): a piece's block with no photograph, a photograph chosen (the drop zone's preview), in review and published; no photograph and published also in light; chosen at 1024 × 768; the sheet's WORN in four columns with all 8, a photograph enlarged in the sheet's viewer with its credit, the one photograph of a RESERVED sheet; the sheet and the enlarged photograph also in light; the sheet at 1024 × 768 |
 
 Routes (Playwright's, in the test only) make five states the demo cannot reach: the certificate NO LONGER VALID, THE
 PRIVATE SALON locked (the server's own shape: PLATINE, from 5 pieces), YOUR WISHLIST that could not be read, a warranty

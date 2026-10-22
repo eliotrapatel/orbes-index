@@ -70,6 +70,39 @@ La fenêtre FOUNDING ACCESS de theorbes.com inscrit une personne sur la liste fo
 
 > Vous êtes sur la liste fondatrice : nous vous écrirons quand la première sortie ouvrira. Chaque e-mail porte en bas STOP THESE EMAILS ; un clic, et plus rien ne vous sera envoyé. Si vous préférez que votre inscription soit effacée, je m'en occupe.
 
+### Les messages d'ORBES (FROM ORBES)
+
+ORBES écrit aussi à ses collectionneurs (lot M2), **dans l'application seulement** : dans MESSAGES, sous FROM ORBES, et sur la ligne de NOW (*A new message from ORBES.*, READ) ; jamais par e-mail ni par notification. Ces messages **ne se répondent pas** : sous la liste, l'application dit *Messages from ORBES cannot be answered. To write, open ORBES CLIENT SERVICES.* Le client qui veut réagir vous écrit comme avant, dans la conversation ORBES CLIENT SERVICES (sur un téléphone, l'autre onglet de MESSAGES ; sur un ordinateur, le bouton WRITE TO ORBES CLIENT SERVICES sous les messages). Ils n'arrivent jamais dans `Messages` de la console et n'attendent aucune réponse de vous. Ils partent de la page `House messages` (groupe `Clients`, sous `Messages`).
+
+- **Six moments**, chacun éteint au déploiement, jusqu'à ce qu'un ADMIN l'allume (`Switch on`). Allumé, un moment n'envoie **rien pour le passé** : seulement ce qui arrive ensuite, une fois par personne. Les comptes de test et les comptes verrouillés ne reçoivent rien. Ce que chacun dit tant qu'un OPERATOR n'a pas changé ses mots :
+
+| Moment | Quand | Ce que lit le client | Ses liens |
+|---|---|---|---|
+| Le premier enregistrement | le lendemain (jour de Paris) du premier enregistrement du compte | YOUR FIRST PIECE : *MONOLITHE IN STEEL is registered to you. How to care for it is in its ORBES CARE tab, and YOUR SIZES keeps your sizes for the releases to come.* | CARING FOR YOUR PIECE, YOUR SIZES |
+| Le crédit d'anniversaire | quand il s'ouvre (§6) | YOUR BIRTHDAY CREDIT : *A credit of € 20 is yours until 12 November 2026.* | IN USE |
+| Un crédit qui finit | 7 jours avant la fin d'un crédit qui a encore un solde | A CREDIT ENDS SOON : *€ 20 of your credit ends on 12 November 2026.* | IN USE |
+| PRIVATE CARE | quand le compte atteint le palier qui l'ouvre (PLATINE par défaut, §5c) | PRIVATE CARE : *From PLATINE, ORBES offers PRIVATE CARE for your pieces. Ask from the piece, in its ORBES CARE tab.* | MY PIECES |
+| Un an | un an après l'enregistrement d'une pièce encore détenue | ONE YEAR : *MONOLITHE IN STEEL has been yours for a year today.* | SEE THE PIECE |
+| 90 jours | 90 jours sans connexion ni scan, une fois par absence | WHAT IS NEW : *Since your last visit, THE COLLECTION and THE RELEASES have moved on.* | THE COLLECTION |
+
+- **Les messages écrits** (`New message`, un OPERATOR) : un titre et quelques paragraphes, sans lien, le prénom seul comme champ à remplir, pour un segment ou pour un palier et les paliers au-dessus. Un ADMIN les envoie (`Send…` : `Send now` ou `Schedule` à l'heure de Paris, en tapant SEND) ; ils arrivent dans les 30 secondes. Une fois partis, ils ne changent plus et ne se retirent pas : relisez l'aperçu avant. La page montre combien de personnes chacun a atteintes et combien l'ont lu, jamais qui.
+
+> Les messages d'ORBES ne se répondent pas. Pour nous écrire, ouvrez MESSAGES, puis ORBES CLIENT SERVICES : je vous réponds là.
+
+### WORN : la photo d'une pièce portée
+
+Le propriétaire d'une pièce enregistrée peut envoyer, **depuis cette pièce**, une photo de lui la portant (lot M2). ORBES la regarde avant qu'elle n'apparaisse ; publiée, elle se voit **par tout le monde**, connecté ou non, au pied de la fiche du modèle (THE COLLECTION, après PAIRS WELL WITH), signée de son prénom et de son pays, et de son nom Instagram s'il l'a choisi : *CAMILLE · FRANCE*, *@camille.m*. Jamais le numéro de la pièce, son compte ni la variante du modèle.
+
+- **Envoyer.** Connecté, il ouvre sa pièce (MY PIECES), onglet OWNERSHIP, le bloc WORN sous OWNERSHIP CERTIFICATE : CHOOSE A PHOTOGRAPH (sur un ordinateur, il peut aussi la déposer dans le cadre), puis il vérifie l'aperçu et sa signature, coche SHOW MY INSTAGRAM s'il le veut (proposé seulement quand YOUR PROFILE a un nom Instagram), touche I AGREE, puis SEND. L'application prépare la photo sur l'appareil (1 Mo au plus) et le serveur retire tout ce qu'elle cache (position, appareil). Il lit ensuite IN REVIEW et *ORBES is looking at your photograph.*
+- **Ce qu'il faut.** Un prénom et un pays dans YOUR PROFILE (sinon le bloc le dit et mène à YOUR PROFILE) ; une fiche publiée pour le modèle (sans fiche, aucun bloc WORN) ; une pièce ni déclarée (perte ou vol) ni en service, sans transfert en attente (le bloc le dit en une phrase). Une photo à la fois par pièce : pour en envoyer une autre, il retire d'abord la sienne. Au plus 5 envois en 24 heures. Les comptes de test n'envoient rien.
+- **Une bonne photo.** La pièce bien visible et nette, portée, à la lumière ; une photo plutôt en hauteur (la fiche la recadre en 4:5). Seulement une photo qu'il a prise, ou dont l'auteur est d'accord, et où toute personne reconnaissable est d'accord : c'est ce qu'il accepte avec I AGREE.
+- **La revue.** La photo attend dans `WORN` (groupe `Clients`, sous `House messages`), onglet `To review`, la plus ancienne d'abord ; le lien de la barre porte leur nombre. Un OPERATOR choisit `Publish` ou `Refuse…` ; un AUDITOR lit seulement, l'adresse e-mail du client masquée. Une fois WORN annoncé, passez la file **chaque jour** : le client lit IN REVIEW jusque-là, et aucun délai ne lui est promis.
+- **Pourquoi une photo est refusée.** Une des trois raisons, que le client lit telle quelle sous NOT PUBLISHED, jamais un texte libre : *The piece is not clearly visible.* (la pièce ne se voit pas bien), *The photograph is not sharp enough.* (floue, trop sombre), *This photograph cannot be shown in WORN.* (tout le reste : une photo qui n'est pas la sienne, une personne qui n'a pas pu accepter, un contenu qui ne convient pas). Une photo refusée est effacée ; il peut en envoyer une autre (CHOOSE ANOTHER PHOTOGRAPH). Une photo publiée qui ne convient plus se retire par `Take down…`, onglet `Published`, avec les mêmes raisons.
+- **Retirer.** À tout moment, WITHDRAW dans le même bloc, confirmé (*Remove it from WORN?*) : la photo quitte la fiche aussitôt et elle est effacée ; un navigateur peut encore l'afficher 5 minutes au plus. ORBES ne peut rien sur une copie qu'un visiteur aurait faite avant. Pour changer sa signature (un autre prénom, son Instagram), il retire la photo et en envoie une nouvelle : la signature est celle de l'envoi.
+- **Une pièce qui change de mains** (un transfert, un retour, une révocation) : la photo de l'ancien propriétaire quitte la fiche à l'instant même, puis elle est effacée ; le nouveau propriétaire peut envoyer la sienne. Un compte verrouillé ne montre plus ses photos tant qu'il l'est.
+
+> Depuis votre pièce, onglet OWNERSHIP, touchez CHOOSE A PHOTOGRAPH dans WORN, vérifiez votre signature, acceptez, puis SEND. ORBES regarde chaque photo avant qu'elle n'apparaisse sur la fiche du modèle, avec votre prénom et votre pays. Vous pouvez la retirer quand vous voulez avec WITHDRAW : elle disparaît de la fiche et elle est effacée.
+
 ---
 
 ## 1. Vente en boutique
@@ -348,6 +381,7 @@ Une pièce enregistrée change de mains par un **code de transfert**, créé par
 - Le résultat de l'acheteur dit UNUSUAL ACTIVITY DETECTED parce que le code de la pièce, montré dans une annonce, a été scanné par beaucoup de monde : connecté à son compte avant son scan, il trouve sous la ligne d'aide `DO YOU HOLD A TRANSFER CODE?` et le même formulaire, puis `RECEIVE THIS PIECE` ; le code du vendeur suffit. Si rien n'est proposé (une pièce déclarée, un code révoqué), notez la REF et prévenez un OPERATOR.
 - L'écran dit `STAFF SCAN` : le navigateur est connecté à la console (§7). L'acheteur, ou le membre de l'équipe qui achète pour lui-même, scanne depuis un navigateur qui ne l'est pas ; `VERIFY AGAIN` n'y changerait rien.
 - Après la récupération d'un mot de passe (§6), les transferts depuis ce compte sont suspendus 72 heures (`TRANSFERS_PAUSED`).
+- Le vendeur avait une photo dans WORN (§0) : elle quitte la fiche du modèle dès que l'acheteur reçoit la pièce, puis elle est effacée ; l'acheteur peut envoyer la sienne.
 
 Ce que vous dites à l'acheteur, mot pour mot comme l'écran (*Buying this piece? Ask the seller for a transfer code from their ORBES account: only its registered owner can create one.*) :
 

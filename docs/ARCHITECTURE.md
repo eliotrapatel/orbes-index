@@ -112,6 +112,23 @@ THE EMAILS (lot M1, B.16; off until EMAIL_TRANSPORT=smtp and each kind switched 
   sender (every 15 s) ─► release notices' scan ─► claim due rows (FOR UPDATE SKIP LOCKED) ─► cancel what no longer
              applies ─► SMTP over TLS (email/smtp.ts) ─► SENT, retried, or FAILED
   housekeeping ─► every row settled 90 days ago erased
+
+HOUSE MESSAGES (lot M2 of 2026-10-22, B.17; in MESSAGES only, read-only, never emailed)
+  housekeeping, morning window ─► houseMoments: each moment switched on, what fell due since its switch-on
+             ─► house_deliveries, words rendered and stored, once per dedupe key (ON CONFLICT DO NOTHING)
+  console (ADMIN: SEND, now or at a Paris time) ─► house_messages SCHEDULED
+  HouseSender (every 30 s) ─► claim a due message (FOR UPDATE SKIP LOCKED) ─► its audience evaluated now
+             ─► one INSERT … SELECT of a delivery per member (the audience frozen) ─► SENT with its reach
+  verify app ─► GET /api/v1/account/house-messages ─► FROM ORBES (phone tab, computer subject), NOW's line
+
+WORN (lot M2, B.17)
+  piece's OWNERSHIP tab ─► the photograph re-encoded on the device by a canvas (web/shared/photo.ts)
+             ─► POST /api/v1/account/products/<id>/worn, the image itself (the edge's 1200KB, the app's 1 MiB)
+  server  ─► the rules under the account's and the piece's rows ─► sanitizeImage (type by bytes, metadata
+             removed) ─► worn_photos PENDING: bytes private (owner and staff only, no-store)
+  console WORN ─► PUBLISH (or REFUSE, bytes erased) ─► the sheet's worn (the read-time rule: published,
+             ownership open, piece not REVOKED, account ACTIVE) ─► GET /api/v1/worn/<id>/photo, 5 minutes
+  owner WITHDRAW / staff TAKE DOWN / piece passed on (wornEnded) ─► bytes erased, row kept
 ```
 
 ### B.3 Components
@@ -175,7 +192,10 @@ genome/
                          lot M1 (B.16): calendar (the one .ics writer of a draw and a LIVE RELEASE), campaign
                          (CampaignService, a release's links in one click and its readout per link), founding and
                          founding-match (FoundingService, the founding list), email and email-triggers (EmailService,
-                         the outbox, its sender and purge; EmailTriggers, when each email is written)
+                         the outbox, its sender and purge; EmailTriggers, when each email is written);
+                         lot M2 (B.17): house-moments (HouseMomentService, the six moments and their daily job),
+                         house-messages (HouseMessageService and HouseSender, FROM ORBES, the custom messages, their
+                         loop), worn (WornService, WORN: the sending, the review, the sheet's read, wornEnded)
     email/               the emails (lot M1): smtp.ts (the SMTP client on node:net and node:tls, the only outbound
                          connection the app makes), render.ts (the house's look, text and HTML), copy.ts (their
                          default words)
@@ -186,7 +206,9 @@ genome/
                          the device cookie (device.ts) and the device's class (device-class.ts)
     routes/              public, account, ownership, club, live (the LIVE RELEASES), seen (the views), acquisition
                          (GET /go/:code, a console link's short address), founding (theorbes.com's form, lot M1),
-                         email (the monogram, STOP THESE EMAILS), admin
+                         email (the monogram, STOP THESE EMAILS), admin (lot M2: admin/house.ts, admin/worn.ts;
+                         FROM ORBES in messages.ts, WORN's collector routes in ownership.ts, its public ones in
+                         public.ts and club.ts)
     geo/                 location resolver (none | cloudflare | headers | mmdb), haversine; the connection's
                          country and city (place.ts)
     render/              artifacts: SVG, PNG (resvg), vector PDF (pdfkit), print sheets, certificate cards,
@@ -206,7 +228,9 @@ genome/
                          load's arrival (arrival.ts, read in App.start: o and utm_ removed from the address, B.13);
                          lot M1 (B.16): a paced release's queue (views/live.ts), the reset link's page /verify/reset
                          (views/reset.ts) and STOP THESE EMAILS /verify/unsubscribe (views/unsubscribe.ts), in the
-                         frame of views/mail-frame.ts on a computer
+                         frame of views/mail-frame.ts on a computer; lot M2 (B.17): FROM ORBES in MESSAGES
+                         (views/account.ts on a phone, views/desktop-messages.ts on a computer), a piece's WORN
+                         block (views/worn.ts, worn-model.ts) and WORN at the foot of a sheet (views/worn-sheet.ts)
     admin/               admin console: catalogue (Discontinue and Reinstate), generator, keys, anomalies, analytics, audit, the Club
                          (Drops, Circle, Tiers, Requests; a LIVE RELEASE's page, #/club/live/:dropId); the sale mode (decoder worker of verify/);
                          Orders (#/orders, an order's page, the packing slip), Logistics (#/logistics, B.11; #/atelier leads
@@ -214,10 +238,13 @@ genome/
                          Segments, Settings (locations, carriers, alerts), the client sheet, the Catalogue's base price, care
                          guide and Shopify exports; Growth (#/growth, under Overview, plan NEXT-NINE BP-29); lot M1 (B.16):
                          a release's CAMPAIGN tab (views/campaign.ts, the countdown image ui/countdown-card.ts), the
-                         Founding list (#/founding), the Emails page (#/settings/emails, its preview ui/email-frame.ts)
+                         Founding list (#/founding), the Emails page (#/settings/emails, its preview ui/email-frame.ts);
+                         lot M2 (B.17): House messages (#/house-messages, its preview ui/house-preview.ts) and WORN
+                         (#/worn, its sidebar badge; the canvas encoder shared with the collector app, shared/photo.ts)
     legal/               the legal pages (J-06), the third app: privacy policy, terms of use, legal notice and FAQ, in French
                          and English (/legal, /legal/privacy, /legal/terms, /legal/notice, /legal/faq); content/*.ts with LEGAL_VERSION
-    shared/              brand CSS, display font, monogram, DOM helpers; what verify/ and legal/ share (the legal pages' paths,
+    shared/              brand CSS, display font, monogram, DOM helpers; the photographs' canvas encoder (photo.ts,
+                         lot M2, the console's and WORN's); what verify/ and legal/ share (the legal pages' paths,
                          the second-hand sentence and the contact of ORBES Client Services; SUBSCRIBE is gone with plan ORBES CARE);
                          the preferences kept on the device (prefs.ts: the sound, the light mode); the light mode
                          (mode.ts, mode-early.ts before the first paint, light.css)
@@ -376,6 +403,17 @@ Four parts on the existing services, one deployment: migrations `0049_live_pace`
 - **The founding list** (F1 to F6): `routes/founding.ts`, `POST` and `OPTIONS /api/v1/founding`, the platform's one cross-origin route: CORS for `https://theorbes.com` only and the server's own Origin check (`403 FOUNDING_ORIGIN`), JSON of 2 KB at most, the rate group `founding`, a honeypot, the same 202 for any address. `FoundingService` (`services/founding.ts`) classifies the source with `AcquisitionService`'s rules, records the consent with `FOUNDING_CONSENT_VERSION`, matches the account with the same address (at once, or in the sign-up's transaction, `services/founding-match.ts`), and serves the console (list, summary, the CSV in Shopify's customer columns, removal on request, unsubscribe). A LANDING link answers 302 to `https://theorbes.com/?o=<code>`. The segment criterion FOUNDING_LIST reads the matched rows live; a draw may be opened to a segment (`403 DRAW_NOT_ELIGIBLE`, FOR SELECTED COLLECTORS). The pop-up is theorbes.com's own page, outside this repository's app.
 - **The emails** (E0 to E6), off until `EMAIL_TRANSPORT=smtp`: `email/smtp.ts`, an SMTP client on `node:net` and `node:tls` (TLS from the first byte or STARTTLS, the certificate always checked, a server that offers no STARTTLS refused before any credential, every header value and address refused with a CR, LF or other control character, one message per connection), the app's only outbound connection; `email/render.ts` and `email/copy.ts`, the house's look and the default words. `EmailService` (`services/email.ts`): `enqueue` in the transaction of the act that causes the email (the outbox, once per dedupe key, nothing while the channel or the kind is off); the sender, a loop of its own every 15 s started by `createContext` only while the channel is on, claiming due rows `FOR UPDATE SKIP LOCKED` with a lease, cancelling at send time what no longer applies, retrying 1 min, 5 min, 30 min and 2 h, then FAILED; the purge in housekeeping (90 days); the HMAC unsubscribe tokens. `EmailTriggers` (`services/email-triggers.ts`): E1 the founding announcement (now or at a release's opening, cancellable), E2 release notices behind a watermark, E3 the reset link (`AccountRecoveryService.requestByEmail`), E4 and E5 an order's steps and cancellation (through a required `OrderMail` parameter of `orders.ts step`, so no path that moves an order forgets it), a draw's place, a warranty's and a PRIVATE CARE's label; E6, house messages, have no kind. Routes: `routes/email.ts` (the monogram, STOP THESE EMAILS), `routes/account.ts` (reset-request, email preferences), `routes/admin/email.ts`. The account's export lists its emails (kinds, statuses, dates) and preferences; a lock cancels its QUEUED emails.
 - **The web side**: in `web/verify/`, the queue in `views/live.ts`, ADD TO CALENDAR and FOR SELECTED COLLECTORS in `views/releases.ts` (`releases-model.ts`), RESET BY EMAIL in the sign-in (`views/ownership.ts`, `reset-model.ts`), `views/reset.ts` (the link's address and code read from the fragment and removed from the address bar at once), `views/unsubscribe.ts`, `views/mail-frame.ts` (their computer frame), YOUR PROFILE's EMAILS group; every word in `copy.ts`. In `web/admin/`, the pace in `views/live.ts`, `views/campaign.ts`, `views/founding.ts`, `views/emails.ts` and `ui/email-frame.ts`, which draws an email's HTML element by element from its own parser in a shadow root (listed tags and attributes, styles through the CSSOM, images from the console's origin only), never as markup.
+
+### B.17 Lot M2: house messages and WORN (macro scope of 2026-10-20, lot M2 of 2026-10-22)
+
+Two parts on the existing services, one deployment after M1: migrations `0052_house_messages` and `0053_worn` (DATABASE §5.125 to §5.128), no new dependency, no new process: one more loop in the app's process. The host changes by one line of the Caddyfile (the edge below), which `deploy.sh` validates and for which it recreates Caddy. Shopify (scope S1 to S7): the moments read ownership, credits and tiers, never where a piece was paid; WORN hangs on a model and an ownership, never on an order, so a piece bought elsewhere and registered sends like any other; nothing assumes the platform is the only place people pay.
+
+- **The moments** (D24 M1; `services/house-moments.ts`, `src/shared/house-words.ts`): six automatic messages, each off until an ADMIN switches it on, worded in the console. The housekeeping job `houseMoments` runs at every pass of the morning window, after the birthday credits: for each moment on, a coarse window of due events in SQL, the exact due time on pure functions the tests drive on a fake clock (the Paris day after a first ownership, a birthday credit granted, 7 days before a credit with a balance left and usable at the tier now expires, the tier PRIVATE CARE opens from first reached, one year of an open ownership, 90 days after the last activity as the segments read it). **The switch-on rule**: only what falls due at or after `enabled_at` is delivered, so switching a moment on never sends the past, and a missed pass catches up. **Dedupe**: each delivery carries its key (`FIRST_REGISTRATION:<account>`, `CREDIT_EXPIRING:<grant>`, …) under a unique index, inserted `ON CONFLICT DO NOTHING` in batches of 500, so two passes, a restart or two processes never deliver one twice. The words are rendered at delivery and stored; the defaults name no channel, mechanism or count, so they stay true for any THE PROGRAM setting and for a future Shopify checkout (S7), which a unit test holds.
+- **The custom messages** (D24 M2; `services/house-messages.ts`, `routes/admin/house.ts`): written by an OPERATOR to a segment or a tier and above (the tier read with the segments' own TIER criterion, so both go through one code path), counted live, sent by an ADMIN with SEND typed, now or at a Paris time. **`HouseSender`**, started by `createContext` beside the LIVE engine and the email sender, always on, a pass every 30 s, stopped on close: it claims the due messages `FOR UPDATE SKIP LOCKED`, evaluates the audience at that moment and freezes it in one `INSERT … SELECT` of a delivery per member, then marks the message SENT with its reach, in one transaction; tests drive `deliverDue(now)`. A SENT message never changes (a trigger).
+- **The collector's side** (D24 M3, M4): `GET /api/v1/account/house-messages` and its `read`; the unread flag gains `house`, the unread count adds the house messages. House messages never enter `client_conversations`: no Messages board row, no reply, no email, no notification. Only ACTIVE accounts that are no test entrants receive anything.
+- **WORN's path** (D31 G1 to G5; `services/worn.ts`, `routes/ownership.ts`, `routes/public.ts`, `routes/club.ts`, `routes/admin/worn.ts`): the owner chooses a photograph on the piece; the device re-encodes it by a canvas (EXIF orientation applied, 2 000 px at most, a JPEG stepped down until it fits 1 MiB: the console's encoder, moved unchanged to `web/shared/photo.ts`) and sends the image itself to the only collector route that takes one (`WORN_UPLOAD_ROUTE`, its parsers in its own context). The server checks the rules under the account's and the piece's rows (held now, not a test entrant, a held status, no transfer pending, a sheet, first name and country, one live photograph per piece, 5 sendings in 24 hours, the consent's version), passes the bytes through `sanitizeImage` as the console's photographs (type by its own bytes, every metadata block removed, upright only), and writes the photograph PENDING with its credit, in `worn_photos`, **never in `media_objects`**, whose public route serves any stored hash and is cached for good: a pending photograph has no public address; its owner and staff read it `no-store`. Staff publish or refuse it (bytes erased). **The read-time rule**: everyone (the sheet, its pages, the photo route) sees a photograph only while it is PUBLISHED, its ownership still open, its piece not REVOKED and its account ACTIVE, so a piece passed on or a locked account leaves WORN at once, without a job; the public photo route is kept **5 minutes** (`public, max-age=300`, the hash as ETag, never `immutable`), so a withdrawal stops being served within that time. **`wornEnded`**, a housekeeping job at every pass, then ends what the rule already hides and erases its bytes. The sheet carries its first page (`worn`), every variant of the group alike, the credit only (first name, country, the Instagram name when chosen; never a variant, a serial or an account).
+- **The edge** (`deploy/vps/Caddyfile`): Caddy refuses bodies over 64 KB except the console's photographs (1200KB) and the care label (2200KB). The collector's WORN path, `^/api/v1/account/products/[^/]+/worn/?$` for `POST`, joins the `@photo_upload` matcher and leaves `@not_upload`, so exactly one limit still applies to each request; `test/ops/vps-stack.test.ts` ties the pattern to `WORN_UPLOAD_ROUTE` and holds the matchers apart (DEPLOYMENT §15.7).
+- **The web side**: in `web/verify/`, FROM ORBES (the phone's MESSAGES tabs in `views/account.ts`, the computer's subject in `views/desktop-messages.ts`, NOW's line), `views/worn.ts` and `worn-model.ts` (the piece's WORN block, a drop zone on a computer), `views/worn-sheet.ts` (the sheet's WORN; a photograph opened whole, on a computer in the sheet's viewer of `views/desktop-model.ts` with its credit); every word in `copy.ts` (`FROM_ORBES`, `WORN`, and `HOUSE` re-exported from `src/shared/house-words.ts`, which the server reads too). In `web/admin/`, `views/house-messages.ts` with `ui/house-preview.ts` (the FROM ORBES item drawn in the collector's look, its tokens pinned to the collector's CSS by a test), `views/worn.ts`, the WORN badge's poll and a model page's WORN line.
 
 ---
 
