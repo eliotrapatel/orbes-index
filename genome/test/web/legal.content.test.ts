@@ -729,9 +729,9 @@ describe('legal pages: the privacy policy, written from the code', () => {
     expect(house).toContain('return r.rows.map((x) => ({ source: x.source, moment: x.moment, ...wordsOf(x), pieceRef: x.piece_ref, deliveredAt: x.delivered_at, readAt: x.read_at }));');
     expect(readDoc('genome/src/server/services/owners.ts')).toContain('houseMessages: await accountHouseMessages(tx, a.id),');
     for (const [lang, says, retention] of [
-      ['en', ['in the app only, never by email or by notification', 'These messages cannot be answered', `when a credit ends within ${CREDIT_EXPIRING_DAYS} days`, `after ${ABSENCE_DAYS} days without a visit`, 'each of which ORBES switches on or off', 'the members of a segment', 'the accounts of a tier and the tiers above it', 'ORBES staff see these counts, never who read', 'legitimate interest', 'in the copy of your data'],
+      ['en', ['in the app only, never by email or by notification', 'These messages cannot be answered', `when a credit ends within ${CREDIT_EXPIRING_DAYS} days`, `after ${ABSENCE_DAYS} days without a visit`, 'each of which ORBES switches on or off', 'the members of a segment', 'the accounts of a tier and the tiers above it', 'in the console, ORBES staff see only these counts, never who read; your own read times are in the copy of your data', 'the day after the first piece is registered to your account', 'legitimate interest', 'in the copy of your data'],
         '- **House messages**, with when you read them: as long as the account exists.'],
-      ['fr', ["dans l'application seulement, jamais par e-mail ni par notification", 'On ne peut pas répondre à ces messages', `quand un crédit prend fin dans les ${CREDIT_EXPIRING_DAYS} jours`, `après ${ABSENCE_DAYS} jours sans visite`, "qu'ORBES active ou désactive chacun", "les membres d'un segment", "les comptes d'un palier et des paliers au-dessus", "le personnel d'ORBES voit ces nombres, jamais qui a lu", 'intérêt légitime', 'dans la copie de vos données'],
+      ['fr', ["dans l'application seulement, jamais par e-mail ni par notification", 'On ne peut pas répondre à ces messages', `quand un crédit prend fin dans les ${CREDIT_EXPIRING_DAYS} jours`, `après ${ABSENCE_DAYS} jours sans visite`, "qu'ORBES active ou désactive chacun", "les membres d'un segment", "les comptes d'un palier et des paliers au-dessus", "dans la console, le personnel d'ORBES ne voit que ces nombres, jamais qui a lu ; vos propres heures de lecture figurent dans la copie de vos données", "le lendemain du premier enregistrement d'une pièce à votre compte", 'intérêt légitime', 'dans la copie de vos données'],
         '- **Messages de la maison**, avec le moment où vous les lisez : tant que le compte existe.'],
     ] as const) {
       const text = sectionText(DOCUMENTS.privacy[lang], 'house-messages');
@@ -966,8 +966,9 @@ describe('legal pages: both languages, links, lexicon', () => {
       // Lot M2 of the macro plan (L2; step M2.12): the privacy policy's house messages and WORN, their retention, everyone
       // among the recipients of a published WORN photograph, the segments' sentence on messages; the terms' article 15
       // (WORN: the licence, the review, the withdrawal). The date of the lot's final legal commit, never M1's 2026-10-21;
-      // article 11 unchanged.
-      '2026-10-22': '9eb139806bb1891b',
+      // article 11 unchanged. The step's verification, the same day: in the console staff see only the read counts (the
+      // copy of the data holds the read times), and the first piece registered to the account in EN as in FR.
+      '2026-10-22': 'fef6ea1137989f3c',
     };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
     expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });
