@@ -34,11 +34,15 @@
  *                  piece is on its way or kept, its OWNERSHIP CERTIFICATE once the piece is registered to the account;
  *   the reference  ORDER OR-…, what ORBES Client Services finds it by;
  *   the photograph the cover photograph of its model (or of its variant), shown whole above it (plan NOCTURNE,
- *                  addition 3), never a piece's own (decision 9); none when the model has none.
+ *                  addition 3), never a piece's own (decision 9); none when the model has none;
+ *   its set        (macro scope K44 T1 to T3, plan MACRO M3 §5.4) a set's piece: grouped with the set's other pieces under
+ *                  THE SET · <name> with the set's one price and its total (`orderGroups`); its PRICE row PART OF THE
+ *                  SET; RETURN THE SET in place of REQUEST A RETURN (a set is returned whole), EXCHANGE THE SIZE as any;
+ *                  cancelled, the set's sentence (a set is cancelled whole).
  * An order the app cannot read (an unknown step or channel, a reference that is not one) is left out, never guessed.
  */
 import { orderAddonRows, orderAddons, orderAddonsMinor, type OrderAddonsModel } from './addons-model.js';
-import { LIVE, ORDERS } from './copy.js';
+import { LIVE, ORDERS, SETS } from './copy.js';
 import { formatMoney } from './live-model.js';
 import type { OrderDocumentKind } from './api.js';
 import { orderContext } from './messages-model.js';
@@ -99,6 +103,27 @@ export interface OrderModel {
   reference: string;
   /** The model's cover photograph (addition 3), with its alternative text; null when it has none. */
   photo: PhotoModel | null;
+  /** Macro scope K44: the set it is a piece of, said on its group (its one price, its total) and its own page; null for none. */
+  set: OrderSetModel | null;
+}
+
+/** A set's piece (macro scope K44 T1 to T3): its set as YOUR ORDERS groups it, and its place among its pieces. */
+export interface OrderSetModel {
+  saleId: string;
+  /** `THE ORBITAL SET`. */
+  name: string;
+  /** `THE SET · THE ORBITAL SET`. */
+  heading: string;
+  /** `3 PIECES`: the set's pieces (an exchanged piece's new order in its place). */
+  count: string;
+  /** `PIECE 2 OF 3`. */
+  pieceLine: string;
+  /** The set's one price (`€ 9 000`), or TO BE CONFIRMED until entered; null once cancelled without one. */
+  price: string | null;
+  /** The set's price with what its pieces add (add-ons, engravings, shipping, credit); null when they add nothing. */
+  total: string | null;
+  /** The set's orders in its order, each its reference, model and size, for its page's links. */
+  pieces: { id: string; reference: string; title: string; size: string | null; status: OrderStatus }[];
 }
 
 /** YOUR NEW CLAIM CODE of an order (plan NEXT LOT §3.4): what its block offers, never the code (read once, on a press). */
@@ -229,7 +254,15 @@ export function orderSentence(o: AccountOrder): string {
   // A welcome gift waiting says the order it travels with (BP-19 T5).
   if (o.channel === 'GIFT' && parent && (o.status === 'RESERVED' || o.status === 'PAID')) return ORDERS.gift.travels(parent);
   const now = stepNow(o);
+  // Macro scope K44: a set is cancelled whole (a piece's size exchange alone is not the set's).
+  if (o.status === 'CANCELLED' && isSetPiece(o) && o.channel !== 'EXCHANGE') return SETS.orders.cancelled;
   return now === 'IN_PREPARATION' ? ORDERS.sentence.IN_PREPARATION : ORDERS.sentence[o.status];
+}
+
+/** Whether the order is a piece of a set sale (macro scope K44), as the server says it. */
+export function isSetPiece(o: Pick<AccountOrder, 'set'>): boolean {
+  const x = o.set;
+  return !!x && typeof x === 'object' && typeof x.saleId === 'string' && typeof x.name === 'string' && Array.isArray(x.pieces);
 }
 
 const TIER_WORDS: Readonly<Record<2 | 3, string>> = Object.freeze({ 2: 'PLATINE', 3: 'PALLADIUM' });
@@ -275,9 +308,11 @@ export function orderRows(o: AccountOrder): Row[] {
   const size = o.size === null ? ORDERS.toConfirm : o.size.label ? upper(o.size.label) : ORDERS.oneSize;
   // A welcome gift has no price of its own (BP-19 T5): it travels with its order.
   const gift = o.channel === 'GIFT';
+  // Macro scope K44: a set's piece reads the set's one price on its group, never its share.
+  const inSet = isSetPiece(o);
   const rows: Row[] = [
     ...(cancelled && o.size === null ? [] : [[ORDERS.rows.size, size] as Row]),
-    ...(gift ? [[ORDERS.rows.price, ORDERS.gift.price] as Row] : cancelled && !priced ? [] : [[ORDERS.rows.price, priced ? money(o.priceMinor!) : ORDERS.toConfirm] as Row]),
+    ...(gift ? [[ORDERS.rows.price, ORDERS.gift.price] as Row] : inSet ? [[ORDERS.rows.price, SETS.orders.inSet] as Row] : cancelled && !priced ? [] : [[ORDERS.rows.price, priced ? money(o.priceMinor!) : ORDERS.toConfirm] as Row]),
     // An add-on adds to the price: « + € 150 » (C24), its words the app's.
     ...(cancelled && o.currency === null ? [] : o.addons).map((a): Row => [upper(a.label), o.currency ? `+ ${money(a.priceMinor)}` : money(a.priceMinor)]),
     // Plan MACRO M3 §4.4 (D2): its catalogue add-ons, each with its units (POLISHING CLOTH × 2 · + € 30).
@@ -292,8 +327,68 @@ export function orderRows(o: AccountOrder): Row[] {
   const credit = !gift && priced && typeof o.creditMinor === 'number' && Number.isInteger(o.creditMinor) && o.creditMinor > 0 ? o.creditMinor : 0;
   if (credit > 0) rows.push([ORDERS.rows.credit, ORDERS.credit(money(credit))]);
   const items = orderAddonsMinor(o);
-  if (!gift && priced && (o.addons.length > 0 || items > 0 || engravingMinor > 0 || fee > 0 || credit > 0)) rows.push([ORDERS.rows.total, money(o.addons.reduce((n, a) => n + a.priceMinor, o.priceMinor! + items + engravingMinor + fee - credit))]);
+  if (!gift && !inSet && priced && (o.addons.length > 0 || items > 0 || engravingMinor > 0 || fee > 0 || credit > 0)) rows.push([ORDERS.rows.total, money(o.addons.reduce((n, a) => n + a.priceMinor, o.priceMinor! + items + engravingMinor + fee - credit))]);
   return rows;
+}
+
+/** What an order adds to its price (its add-ons, its priced engraving, its own shipping fee, less its credit), in its currency. */
+function orderExtrasMinor(o: AccountOrder): number {
+  const engraving = engravingOf(o);
+  const engravingMinor = engraving?.priceMinor && o.currency ? engraving.priceMinor : 0;
+  const credit = o.channel !== 'GIFT' && typeof o.creditMinor === 'number' && Number.isInteger(o.creditMinor) && o.creditMinor > 0 ? o.creditMinor : 0;
+  return o.addons.reduce((n, a) => n + a.priceMinor, orderAddonsMinor(o) + engravingMinor + shippingFee(o) - credit);
+}
+
+/**
+ * A set's piece's set (macro scope K44): its name, its place among its pieces, the set's one price and its total (the
+ * price with what each of its orders adds, those cancelled alone left out), its orders in the set's order; null for an
+ * order of its own. `list`: the account's orders, the set's other pieces among them.
+ */
+export function orderSet(o: AccountOrder, list: readonly AccountOrder[]): OrderSetModel | null {
+  if (!isSetPiece(o)) return null;
+  const x = o.set!;
+  const orders = x.pieces.map((id) => list.find((y) => y?.id === id)).filter((y): y is AccountOrder => !!y && typeof y.reference === 'string' && REFERENCE.test(y.reference));
+  if (!orders.some((y) => y.id === o.id)) orders.push(o);
+  const pieces = new Set(orders.map((y) => y.set?.piece).filter((n) => Number.isInteger(n)));
+  const of = Math.max(pieces.size, 1);
+  const priced = typeof x.priceMinor === 'number' && Number.isInteger(x.priceMinor) && typeof x.currency === 'string' && x.currency !== '';
+  const everyCancelled = orders.every((y) => y.status === 'CANCELLED');
+  // An exchanged piece's new order carries its own lines; a cancelled one adds nothing.
+  const extras = orders.filter((y) => y.status !== 'CANCELLED' && y.currency === x.currency).reduce((n, y) => n + orderExtrasMinor(y), 0);
+  return {
+    saleId: x.saleId,
+    name: upper(x.name),
+    heading: SETS.orders.group(upper(x.name)),
+    count: SETS.orders.pieces(of),
+    pieceLine: SETS.orders.pieceOf(Number.isInteger(x.piece) ? x.piece : 1, of),
+    price: priced ? formatMoney(x.priceMinor!, x.currency!) : everyCancelled ? null : ORDERS.toConfirm,
+    total: priced && extras !== 0 ? formatMoney(x.priceMinor! + extras, x.currency!) : null,
+    pieces: orders.map((y) => ({ id: y.id, reference: y.reference, title: modelWithVariant(upper(y.model), y.modelVariant).toUpperCase(), size: y.size?.label ? sizeName(y.size.label) : null, status: y.status })),
+  };
+}
+
+/** YOUR ORDERS in the server's order: each order alone, or a set's pieces together where its first one comes (macro scope K44). */
+export type OrderGroup = { kind: 'order'; order: OrderModel } | { kind: 'set'; set: OrderSetModel; orders: OrderModel[] };
+
+export function orderGroups(models: readonly OrderModel[]): OrderGroup[] {
+  const out: OrderGroup[] = [];
+  const sets = new Map<string, Extract<OrderGroup, { kind: 'set' }>>();
+  for (const m of models) {
+    if (!m.set) {
+      out.push({ kind: 'order', order: m });
+      continue;
+    }
+    const g = sets.get(m.set.saleId);
+    if (g) g.orders.push(m);
+    else {
+      const made: Extract<OrderGroup, { kind: 'set' }> = { kind: 'set', set: m.set, orders: [m] };
+      sets.set(m.set.saleId, made);
+      out.push(made);
+    }
+  }
+  // Each set's pieces in the set's order (an exchanged piece's new order after its first).
+  for (const g of sets.values()) g.orders.sort((a, b) => g.set.pieces.findIndex((p) => p.id === a.id) - g.set.pieces.findIndex((p) => p.id === b.id));
+  return out;
 }
 
 // ── The collector's side of the order (plan NEXT LOT §3.6) ──────────────────
@@ -402,6 +497,8 @@ export interface OrderReturnsModel {
    * one of `sizes` in stock; null for none.
    */
   savedSize: string | null;
+  /** Macro scope K44 T3: a set's piece, returned only with the whole set (RETURN THE SET, and why). */
+  set: boolean;
 }
 
 /**
@@ -424,7 +521,8 @@ export function orderReturns(o: AccountOrder, offsetMinutes?: number): OrderRetu
   const concerning = [orderContext({ id: o.id, model: o.model, modelVariant: o.modelVariant }).label, size].filter(Boolean).join(' · ');
   const saved = r.savedSize && typeof r.savedSize.label === 'string' ? r.savedSize.label.trim() : null;
   const savedSize = saved && sizes.some((z) => z.available && z.label === saved) ? saved : null;
-  return { lead: ORDERS.returns.lead(until), sizes, concerning, savedSize };
+  const set = isSetPiece(o);
+  return { lead: set ? SETS.orders.lead(until) : ORDERS.returns.lead(until), sizes, concerning, savedSize, set };
 }
 
 /** A return or a size exchange as asked (plan NEXT LOT §3.6.D): what the card says of it now. */
@@ -456,7 +554,11 @@ export function orderRequest(o: AccountOrder, offsetMinutes?: number): OrderRequ
   switch (c.status) {
     case 'OPEN': {
       const address = typeof c.returnAddress === 'string' && c.returnAddress.trim() !== '' ? c.returnAddress.split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : null;
-      return address ? { label, received: null, sentences: [R.sendBack(reference)], returnAddress: address } : { label, received: null, sentences: [R.noReturnAddress], returnAddress: null };
+      // Macro scope K44 T3: a set's return, every piece sent back together.
+      const together = c.kind === 'RETURN' && isSetPiece(o) ? [SETS.orders.sendTogether] : [];
+      return address
+        ? { label, received: null, sentences: [...together, R.sendBack(reference)], returnAddress: address }
+        : { label, received: null, sentences: [...together, R.noReturnAddress], returnAddress: null };
     }
     case 'RECEIVED': {
       const at = orderDate(c.receivedAt, offsetMinutes);
@@ -474,7 +576,7 @@ export function orderRequest(o: AccountOrder, offsetMinutes?: number): OrderRequ
 }
 
 /** One order → its card; null when the app cannot read it. */
-export function orderModel(o: AccountOrder, offsetMinutes?: number, opts: { parentCancelled?: boolean } = {}): OrderModel | null {
+export function orderModel(o: AccountOrder, offsetMinutes?: number, opts: { parentCancelled?: boolean; list?: readonly AccountOrder[] } = {}): OrderModel | null {
   if (!o || typeof o.reference !== 'string' || !REFERENCE.test(o.reference)) return null;
   if (!ORDER_STATUSES.includes(o.status) || !ORDER_CHANNELS.includes(o.channel) || typeof o.reservedAt !== 'string') return null;
   const shipped = o.status === 'SHIPPED' || o.status === 'DELIVERED' || o.status === 'RETURNED';
@@ -516,6 +618,7 @@ export function orderModel(o: AccountOrder, offsetMinutes?: number, opts: { pare
     documents: orderDocuments(o),
     reference: ORDERS.reference(o.reference),
     photo: photoModels({ model: o.model, type: '', modelVariant: o.modelVariant, imageUrl: o.imageUrl })[0] ?? null,
+    set: orderSet(o, opts.list ?? [o]),
   };
 }
 
@@ -523,5 +626,5 @@ export function orderModel(o: AccountOrder, offsetMinutes?: number, opts: { pare
 export function orderModels(list: readonly AccountOrder[], offsetMinutes?: number): OrderModel[] {
   // An order travelling with one of the account's that was cancelled says so (plan NEXT LOT §3.6, edge cases).
   const cancelled = new Set(list.filter((o) => o && o.status === 'CANCELLED').map((o) => o.reference));
-  return list.map((o) => orderModel(o, offsetMinutes, { parentCancelled: typeof o?.addressOf === 'string' && cancelled.has(o.addressOf) })).filter((m): m is OrderModel => m !== null);
+  return list.map((o) => orderModel(o, offsetMinutes, { parentCancelled: typeof o?.addressOf === 'string' && cancelled.has(o.addressOf), list })).filter((m): m is OrderModel => m !== null);
 }

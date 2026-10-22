@@ -110,7 +110,13 @@
  *                     DRAW (€ 4 200) with a CLOTH chosen; ZENITH priced € 4 800 for the salon's request; you's orders: the
  *                     morning's RESERVED with a CLOTH × 2, a MONOLITHE in blue PAID then given an EXTENDER (its own
  *                     invoice), a MONOLITHE in gold PAID with a TRAVEL POUCH, packing begun
- *
+ *   set               the full story, then THE SET (plan MACRO M3 §5.4, K44 T1 to T3; seedSet): THE ORBITAL SET, three
+ *                     pieces (MONOLITHE in gold, HALO, CONSTELLATION ORBITALE, a necklace: the longest name), € 12 000;
+ *                     its October draw open (6 sets; PLATINE reserved a set in its early access, HALO 56 full since; you's
+ *                     YOUR SIZES a bracelet of 17 and a ring of 52, the necklace unsaved; s.girard entered); its first draw
+ *                     drawn on 4 October (2 sets: you's place held, t.nguyen on the waiting list); you's sets of the draws
+ *                     of September: one RESERVED, one DELIVERED on 28 September whose HALO was exchanged for 54; two LIVE
+ *                     RELEASES of the set, one at its photograph's stage (it leads NOW), one not revealed yet
  * Ids written by the server (scan references, order and entry references, genomes, invoice numbers) are the server's;
  * the parity tool's comparisons treat them as live data.
  */
@@ -129,7 +135,7 @@ import { SYSTEM_ACTOR, type Actor, type ManualClock } from '../../src/server/typ
 import type { DecideClaimInput } from '../../src/server/services/warranty-claims.js';
 import { countPiecesIn, packAndShip, stockPieces } from './fulfil.js';
 import { createLiveRelease, holdPieces, type LiveFixture, type LiveReleaseOptions } from './live.js';
-import { poolDraw, withDrawSizes } from './draws.js';
+import { giveSizes, poolDraw, withDrawSizes } from './draws.js';
 import { HOUSE_DEFAULT_WORDS, houseDate, houseMoney, renderHouseWords, type HouseMomentName, type HouseValues } from '../../src/shared/house-words.js';
 import { WORN_CONSENT_VERSION } from '../../src/server/services/worn.js';
 
@@ -164,7 +170,8 @@ export type DemoVariant =
   | 'gallery'
   | 'house'
   | 'worn'
-  | 'addons';
+  | 'addons'
+  | 'set';
 
 export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'full',
@@ -198,6 +205,7 @@ export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'house',
   'worn',
   'addons',
+  'set',
 ]);
 
 /** NOW: Monday 5 October 2026, 18:49 in Paris (16:49 UTC), the boards' afternoon. Every clock of the stage is fixed here. */
@@ -300,7 +308,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
   // claim-waiting stage (plan NEXT LOT §3.4) tells the full story, its state writing the rest.
   // The draw-sizes stage (plan NEXT LOT §3.6.F) tells the full story, then adds a draw in sizes, open. The stages of the
   // collector's side of an order (plan NEXT LOT §3.6) tell the full story, their state writing the rest.
-  const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'draw-selected', 'email', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes', 'birthday-credit', 'care-used', 'orbes-care', 'gallery', 'worn'] as const;
+  const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'draw-selected', 'email', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes', 'birthday-credit', 'care-used', 'orbes-care', 'gallery', 'worn', 'set'] as const;
   // The house messages' stage (lot M2, FROM ORBES) tells the draw-leads story, MESSAGES' own.
   // The add-ons' stage (lot M3, D2) tells the live story (a hold secured), then its own (seedAddons).
   const story = (variant === 'house' ? 'draw-leads' : variant === 'addons' ? 'live' : (OWN_STAGES as readonly DemoVariant[]).includes(variant) ? 'full' : variant) as Exclude<
@@ -333,6 +341,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
     if (variant === 'house') await seedHouse(w);
     if (variant === 'worn') await seedWorn(w);
     if (variant === 'addons') await seedAddons(w);
+    if (variant === 'set') await seedSet(w);
   }
   clock.set(NOCTURNE_NOW);
   // Every account's session opened now: a capture signs in with its cookie.
@@ -1605,6 +1614,198 @@ async function seedAddons(w: World): Promise<void> {
   clock.advance(MINUTE / 2);
   const blue = await paid('blue', '925 STERLING SILVER, BLUE LACQUER');
   await ctx.services.orderAddons.addForAccount(you.id, blue, { addonId: ids.extender!, units: 1 }, you.actor);
+}
+
+/** THE SET of the demo (plan MACRO M3 §5.4): its name, code, price, and its pieces' sizes by piece. */
+export const NOCTURNE_SET = Object.freeze({ name: 'THE ORBITAL SET', code: 'ORBITAL-SET', priceMinor: 1_200_000, necklace: 'CONSTELLATION ORBITALE' });
+
+/**
+ * THE SET's stage (plan MACRO M3 §5.4, K44 T1 to T3), after the full story: a necklace of the longest name, CONSTELLATION
+ * ORBITALE (42, 45, 50 cm); MONOLITHE in gold (16 to 18), HALO (50 to 56) and the necklace given their size types; THE
+ * ORBITAL SET of the three, € 12 000. Its draws: of 2 September (you's set, delivered on 28 September, its HALO exchanged
+ * for a 54 on 1 October), of 21 September (you's set, RESERVED since the 25th), the first of 1 October (drawn on the 4th:
+ * PLATINE's in 18 · 54 · 45, ranked first by its tier; you's place held in 17 · 52 · 45; t.nguyen on the waiting list in 17 · 52 · 45), and the
+ * October draw, open (6 sets: PLATINE reserved one in 17 · 56 · 45 in its early access, HALO 56 full since; s.girard
+ * entered in 16 · 54 · 42; you's YOUR SIZES a bracelet of 17 and a ring of 52). Its LIVE RELEASES: of 7 October, at its
+ * photograph's stage (it leads NOW), and of 20 October, not revealed yet.
+ */
+async function seedSet(w: World): Promise<void> {
+  const { ctx, admin, clock, demo } = w;
+  const db = ctx.db;
+  const you = demo.accounts.you!;
+  const newcomer = demo.accounts.newcomer!;
+  const platine = demo.accounts.platine!;
+  const sizer = demo.accounts.sizer!;
+  clock.set(at('2026-09-01T08:00:00Z'));
+  const care = 'Store this piece on its own, away from humidity, perfume and cosmetics. Wipe it with a soft, dry cloth after wearing. ORBES Client Services offers inspection, cleaning and polishing.';
+  const neck = (await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: NOCTURNE_SET.necklace, type: 'NECKLACE', skuPrefix: 'CST-NK', defaultMaterial: '18K YELLOW GOLD', careInstructions: care }, admin)).id;
+  await ctx.services.media.setModelImage(neck, { mime: 'image/webp', bytes: nocturnePhoto('blue') }, admin);
+  w.models.necklace = neck;
+  await giveSizes(db, w.models.gold!, ['16', '17', '18'], 'BRACELET');
+  await giveSizes(db, w.models.halo!, ['50', '52', '54', '56'], 'RING');
+  await giveSizes(db, neck, ['42', '45', '50'], 'NECKLACE');
+  const set = await ctx.services.sets.create({ name: NOCTURNE_SET.name, code: NOCTURNE_SET.code, modelIds: [w.models.gold!, w.models.halo!, neck], basePriceMinor: NOCTURNE_SET.priceMinor, baseCurrency: 'EUR' }, admin);
+  await ctx.services.sizes.set(you.id, { BRACELET: 17, RING: 52 }, you.actor);
+  const location = await defaultLocationId(db);
+  type Sizes = readonly [string, string, string];
+  // A set's draw: its sizes per piece, published; each size's id by piece and label.
+  const setDraw = async (o: { title: string; description: string; sizes: { piece: number; label: string; pieces: number }[]; opens: string; closes: string; early?: number }) => {
+    clock.set(new Date(at(o.opens).getTime() - 2 * DAY));
+    const created = await ctx.services.drops.create(
+      {
+        setId: set.id,
+        title: o.title,
+        description: o.description,
+        sizes: o.sizes,
+        opensAt: at(o.opens),
+        closesAt: at(o.closes),
+        purchaseWindowHours: 72,
+        earlyAccessHours: o.early ?? 0,
+        earlyAccessPlatineHours: o.early ?? 0,
+        priceMinor: NOCTURNE_SET.priceMinor,
+        currency: 'EUR',
+      },
+      admin,
+    );
+    const d = await ctx.services.drops.publish(created.id, admin);
+    const choose = (labels: Sizes) => ({ sizes: labels.map((label, i) => ({ piece: i + 1, sizeId: d.sizes.find((z) => z.piece === i + 1 && z.label === label)!.id })) });
+    return { id: d.id, choose };
+  };
+  const confirmFor = async (dropId: string, who: DemoAccount) => {
+    const entry = await db.selectFrom('drop_entries').select('id').where('drop_id', '=', dropId).where('account_id', '=', who.id).executeTakeFirstOrThrow();
+    await ctx.services.drops.confirm(dropId, entry.id, 'Confirmed by phone.', admin);
+    return (await db.selectFrom('orders').select('id').where('drop_entry_id', '=', entry.id).orderBy('set_piece').execute()).map((o) => o.id);
+  };
+  const thirds = [
+    { piece: 1, label: '16', pieces: 1 },
+    { piece: 1, label: '17', pieces: 1 },
+    { piece: 2, label: '52', pieces: 1 },
+    { piece: 2, label: '54', pieces: 1 },
+    { piece: 3, label: '45', pieces: 2 },
+  ];
+
+  // ── The draw of 2 September: you's set, paid, shipped, delivered on 28 September; its HALO exchanged for a 54 ──
+  const sep = await setDraw({ title: 'THE ORBITAL SET, IN SEPTEMBER', description: 'Two sets of THE ORBITAL SET, drawn among the entries of September.', sizes: thirds, opens: '2026-09-02T10:00:00Z', closes: '2026-09-04T18:00:00Z' });
+  clock.set(at('2026-09-03T10:00:00Z'));
+  await ctx.services.drops.enter(you.id, sep.id, you.actor, sep.choose(['17', '52', '45']));
+  clock.set(at('2026-09-04T18:01:00Z'));
+  await ctx.services.drops.draw(sep.id, admin);
+  clock.set(at('2026-09-05T09:00:00Z'));
+  const delivered = await confirmFor(sep.id, you);
+  await ctx.services.orders.setAddress(you.id, delivered[0]!, { address: { name: 'Camille Laurent', address: '14 rue de Turenne\n75004 Paris', country: 'FR', phone: '+33 6 12 34 56 78' }, save: false }, you.actor);
+  clock.set(at('2026-09-20T10:00:00Z'));
+  for (const id of delivered) await ctx.services.orders.transition(id, { to: 'PAID' }, admin);
+  for (const id of delivered) {
+    const held = await db.selectFrom('orders').select(['sku_id', 'location_id']).where('id', '=', id).executeTakeFirstOrThrow();
+    await stockPieces(ctx, { skuId: held.sku_id!, locationId: held.location_id, count: 1, productionBatch: 'B-2026-09-SET', at: at('2026-09-24T09:00:00Z'), clock, forOrderIds: [id] }, admin);
+  }
+  clock.set(at('2026-09-26T10:00:00Z'));
+  await packAndShip(ctx, delivered[0]!, { carrierId: await carrier(w, 'Colissimo'), trackingNumber: '6A10000000033', declaredValueMinor: NOCTURNE_SET.priceMinor }, admin);
+  clock.set(at('2026-09-28T15:00:00Z'));
+  for (const id of delivered) await ctx.services.orders.transition(id, { to: 'DELIVERED' }, admin);
+  // HALO's size exchanged: asked on the 29th, the piece received and exchanged on 1 October.
+  const halo54 = (await db.selectFrom('skus').select('id').where('model_id', '=', w.models.halo!).where('size_label', '=', '54').executeTakeFirstOrThrow()).id;
+  clock.set(at('2026-09-29T09:00:00Z'));
+  await stockPieces(ctx, { skuId: halo54, locationId: location, count: 1, productionBatch: 'B-2026-09-SET' }, admin);
+  await ctx.services.orderCases.request(you.id, delivered[1]!, { kind: 'EXCHANGE', reason: 'SIZE', note: 'One size up, please.', sizeLabel: '54' }, you.actor);
+  const exchange = await db.selectFrom('order_cases').select('id').where('order_id', '=', delivered[1]!).executeTakeFirstOrThrow();
+  clock.set(at('2026-10-01T10:00:00Z'));
+  await ctx.services.orderCases.receive(exchange.id, { pieceState: 'OK' }, admin, null);
+  await ctx.services.orderCases.decide(exchange.id, { decision: 'EXCHANGE', pieceTo: 'RESTOCKED', note: 'Exchanged for a 54.' }, admin, { admin: true });
+
+  // ── The draw of 21 September: you's set, RESERVED since the 25th ──
+  const autumn = await setDraw({ title: 'THE ORBITAL SET, IN AUTUMN', description: 'Two sets of THE ORBITAL SET, drawn among the entries of the autumn.', sizes: thirds, opens: '2026-09-21T10:00:00Z', closes: '2026-09-24T18:00:00Z' });
+  clock.set(at('2026-09-22T10:00:00Z'));
+  await ctx.services.drops.enter(you.id, autumn.id, you.actor, autumn.choose(['17', '52', '45']));
+  clock.set(at('2026-09-24T18:01:00Z'));
+  await ctx.services.drops.draw(autumn.id, admin);
+  clock.set(at('2026-09-25T09:00:00Z'));
+  await confirmFor(autumn.id, you);
+
+  // ── The first draw of October, drawn on the 4th: you's place held, t.nguyen on the waiting list ──
+  const first = await setDraw({ title: 'THE ORBITAL SET, THE FIRST DRAW', description: 'Two sets of THE ORBITAL SET, each piece in its size.', sizes: [{ piece: 1, label: '17', pieces: 1 }, { piece: 1, label: '18', pieces: 1 }, ...thirds.slice(2)], opens: '2026-10-01T10:00:00Z', closes: '2026-10-04T18:00:00Z' });
+  clock.set(at('2026-10-02T10:00:00Z'));
+  await ctx.services.drops.enter(you.id, first.id, you.actor, first.choose(['17', '52', '45']));
+  clock.set(at('2026-10-02T11:00:00Z'));
+  await ctx.services.drops.enter(platine.id, first.id, platine.actor, first.choose(['18', '54', '45']));
+  clock.set(at('2026-10-02T12:00:00Z'));
+  await ctx.services.drops.enter(newcomer.id, first.id, newcomer.actor, first.choose(['17', '52', '45']));
+  clock.set(at('2026-10-04T18:01:00Z'));
+  await ctx.services.drops.draw(first.id, admin);
+  demo.releases.setDrawn = first.id;
+
+  // ── The October draw, open: PLATINE's set reserved in its early access (HALO 56 full since), s.girard entered ──
+  const october = await setDraw({
+    title: 'THE ORBITAL SET, THE OCTOBER DRAW',
+    description: 'Six sets of THE ORBITAL SET: a bracelet, a ring and a necklace, each in its size, drawn among the entries of October.',
+    sizes: [
+      { piece: 1, label: '16', pieces: 2 },
+      { piece: 1, label: '17', pieces: 3 },
+      { piece: 1, label: '18', pieces: 1 },
+      { piece: 2, label: '50', pieces: 1 },
+      { piece: 2, label: '52', pieces: 2 },
+      { piece: 2, label: '54', pieces: 2 },
+      { piece: 2, label: '56', pieces: 1 },
+      { piece: 3, label: '42', pieces: 2 },
+      { piece: 3, label: '45', pieces: 3 },
+      { piece: 3, label: '50', pieces: 1 },
+    ],
+    opens: '2026-10-03T10:00:00Z',
+    closes: '2026-10-09T18:00:00Z',
+    early: 24,
+  });
+  clock.set(at('2026-10-02T12:00:00Z'));
+  await ctx.services.drops.reserve(platine.id, october.id, platine.actor, october.choose(['17', '56', '45']));
+  clock.set(at('2026-10-04T09:00:00Z'));
+  await ctx.services.drops.enter(sizer.id, october.id, sizer.actor, october.choose(['16', '54', '42']));
+  demo.releases.setDraw = october.id;
+
+  // ── Its LIVE RELEASES: of 7 October at its photograph's stage, of 20 October not revealed yet ──
+  const liveSizes = [
+    { piece: 1, label: '16', stock: 4 },
+    { piece: 1, label: '17', stock: 4 },
+    { piece: 1, label: '18', stock: 4 },
+    { piece: 2, label: '52', stock: 6 },
+    { piece: 2, label: '54', stock: 6 },
+    { piece: 3, label: '45', stock: 12 },
+  ];
+  clock.set(at('2026-10-01T09:00:00Z'));
+  const live = await ctx.services.liveConsole.create(
+    {
+      setId: set.id,
+      title: 'THE ORBITAL SET, RELEASED LIVE',
+      description: 'THE ORBITAL SET released live: twelve sets, a bracelet, a ring and a necklace, each in its size.',
+      opensAt: at('2026-10-07T19:00:00Z'),
+      closesAt: at('2026-10-07T20:00:00Z'),
+      minTier: 1,
+      sizes: liveSizes,
+      priceMinor: NOCTURNE_SET.priceMinor,
+      currency: 'EUR',
+      nameAt: at('2026-10-02T10:00:00Z'),
+      photoAt: at('2026-10-03T10:00:00Z'),
+    },
+    admin,
+  );
+  await ctx.services.liveConsole.publish(live.id, {}, admin);
+  demo.releases.setLive = live.id;
+  clock.set(at('2026-10-04T09:00:00Z'));
+  const veiled = await ctx.services.liveConsole.create(
+    {
+      setId: set.id,
+      title: 'THE ORBITAL SET, THE SECOND LIVE',
+      opensAt: at('2026-10-20T19:00:00Z'),
+      closesAt: at('2026-10-20T20:00:00Z'),
+      minTier: 2,
+      sizes: liveSizes,
+      priceMinor: NOCTURNE_SET.priceMinor,
+      currency: 'EUR',
+      nameAt: at('2026-10-18T10:00:00Z'),
+      photoAt: at('2026-10-19T10:00:00Z'),
+    },
+    admin,
+  );
+  await ctx.services.liveConsole.publish(veiled.id, {}, admin);
+  demo.releases.setVeiled = veiled.id;
 }
 
 async function seedSizes(w: World, variant: 'full' | 'room'): Promise<void> {

@@ -2661,3 +2661,76 @@ export const WORN = Object.freeze({
     close: 'CLOSE',
   }),
 });
+
+/**
+ * THE SET (macro scope of 2026-10-20, K44 T1 to T3; plan MACRO M3 §5.4): 2 to 4 models sold as one release, at one price,
+ * a size chosen for each piece at entry. A set's release in THE RELEASES, NOW and PAST (THE SET · 3 PIECES, its pieces'
+ * photographs side by side from the photograph's stage, their names from the name's); a set's draw (a size picker per
+ * piece, YOUR SIZES' preselection for each, ENTER THE DRAW once every piece has a size, every size on the entry's label,
+ * ONE PRICE FOR THE SET, its own rule); YOUR ORDERS (the pieces of one set grouped under THE SET · <name> with its one
+ * price, RETURN THE SET in place of REQUEST A RETURN, a piece's size exchanged as any, the set cancelled whole).
+ */
+export const SETS = Object.freeze({
+  /** Under a set's title, wherever its release is shown: `THE SET · 3 PIECES`. */
+  line: (pieces: number) => `THE SET · ${pieces} PIECES`,
+  /** A piece of a set before its name's stage, and a picker's label without one. */
+  piece: (n: number) => `PIECE ${n}`,
+  /** A set's quantity: `25 SETS`. */
+  sets: (n: number) => (n === 1 ? '1 SET' : `${n} SETS`),
+  /** The sets reserved directly, of the draw's (`1 OF 6 SETS`). */
+  reservedOf: (n: number, quantity: number) => `${n} OF ${quantity === 1 ? '1 SET' : `${quantity} SETS`}`,
+  /** A set's LIVE RELEASE: a set counts as one toward the limit per person (T4). */
+  perPerson: (n: number) => (n === 1 ? '1 SET PER PERSON' : `UP TO ${n} SETS PER PERSON`),
+  /** The price of a set's release, said once for all its pieces. */
+  onePrice: 'ONE PRICE FOR THE SET',
+  /** THE RELEASE's rows of a set's draw. */
+  rows: Object.freeze({ sets: 'SETS', pieces: 'THE PIECES' }),
+  /** One of a set's pieces photographed (each tile's words for a screen reader). */
+  photoLabel: (name: string) => `${name}, a piece of the set, photographed by ORBES`,
+  /** YOUR ENTRY of a set's draw: over the pickers, one per piece (its model's name, else PIECE 1), each a group named so. */
+  yourSizes: 'YOUR SIZES',
+  pickerLabel: (name: string) => `Your size of ${name}`,
+  /** Under the pickers while a piece has no size yet: ENTER THE DRAW waits for every one. */
+  chooseEach: 'Choose a size for each piece of the set.',
+  /** An entry's label with every size, in the set's order: `ENTERED · SIZE 17 · 52 · 45`. */
+  label: (status: string, sizes: readonly string[]) => `${status} · ${sizesWords(sizes)}`,
+  /** A line of THE ENTRIES with the sizes the entry was drawn in: `12 · PLATINE · 2 YEARS · SIZE 17 · 52 · 45`. */
+  entryLine: (line: string, sizes: readonly string[]) => `${line} · ${sizesWords(sizes)}`,
+  /** An entry of a set's draw while entries are open (its sizes are on its label). */
+  entered: 'You are entered in the draw with a size for each piece. You may change a size until entries close, and withdraw until the draw.',
+  /** A size picked whose pieces are all reserved, while entries are open: said under that piece's sizes. */
+  openFull: (size: string, name: string) => `Every piece of ${name} ${setInSize(size)} has been reserved. You may still enter: the draw places an entry while each of its sizes has a piece left.`,
+  /** The rule of a set's draw, exactly as the server applies it (services/drops.ts draw). */
+  rule:
+    'Each entry chooses a size for each piece of the set. The entries are ranked by tier, from PALLADIUM to PLATINE to TITANE, then the accounts that hold no piece; then by seniority, the full years since the account’s first piece, the most first; then by the SHA-256 of the 32 bytes of the seed followed by the entry’s identifier in lower-case letters, in increasing hexadecimal order. The tier and the seniority are those of the moment of the draw. In that order, an entry is selected while every one of its sizes has a piece left after the direct reservations of PLATINE and PALLADIUM owners; the others form the waiting list, in that order.',
+  /**
+   * YOUR ORDERS (T1 to T3): the pieces of one set under THE SET · <name>, the one price and the total of the set; on each
+   * piece, PART OF THE SET in its PRICE row; RETURN THE SET in place of REQUEST A RETURN, with why; the set cancelled whole.
+   */
+  orders: Object.freeze({
+    group: (name: string) => `THE SET · ${name}`,
+    pieces: (n: number) => (n === 1 ? '1 PIECE' : `${n} PIECES`),
+    total: 'TOTAL',
+    /** A piece's PRICE row: its price is the set's. */
+    inSet: 'PART OF THE SET',
+    /** Its piece among the set's: `PIECE 2 OF 3`. */
+    pieceOf: (n: number, of: number) => `PIECE ${n} OF ${of}`,
+    cancelled: 'This set has been cancelled, with every piece of it.',
+    returnSet: 'RETURN THE SET',
+    returnWhole: 'A set is returned whole: every piece of it is sent back together.',
+    lead: (until: string) => `You may return this set or exchange this piece’s size until ${until}. It is sent back at your cost, with the carrier of your choice.`,
+    /** Once a set's return is asked, on each of its pieces. */
+    sendTogether: 'Send every piece of the set back together, in one parcel.',
+    /** The order's page on a computer: the set's part, its pieces each a link to its own page. */
+    title: 'THE SET',
+    pieceLabel: (title: string, reference: string) => `${title}, order ${reference}`,
+  }),
+});
+
+/** A set's sizes in its pieces' order (`SIZE 17 · 52 · 45`), each without the word its label may carry. */
+function sizesWords(sizes: readonly string[]): string {
+  const bare = (Array.isArray(sizes) ? sizes : [String(sizes)]).map((s) => (isOneSize(s) ? 'ONE SIZE' : bareSize(s)));
+  return bare.length > 0 && bare[0] !== 'ONE SIZE' ? `SIZE ${bare.join(' · ')}` : bare.join(' · ');
+}
+
+const setInSize = (size: string) => (isOneSize(size) ? 'in ONE SIZE' : `in size ${bareSize(size)}`);

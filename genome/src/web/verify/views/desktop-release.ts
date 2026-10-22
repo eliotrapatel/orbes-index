@@ -108,6 +108,12 @@ function between(text: string, sep: string, part: string, each: (t: string) => (
  * cells (§10.30).
  */
 function entryCells(line: string): (string | Node)[] {
+  // Macro scope K44 T1: a set's entry, its sizes one cell (SIZE 17 · 52 · 45), its own separators kept in it.
+  const parts = line.split(' · ');
+  if (parts.length > 4 && /^\d+$/.test(parts[0]!)) {
+    const sizes = parts.slice(3).join(' · ');
+    return [...between(parts.slice(0, 3).join(' · '), 'n-release__sep', 'n-release__cell', (t) => withNumerals(t)), h('span', { class: 'n-release__sep', text: ' · ' }), h('span', { class: 'n-release__cell' }, ...withNumerals(sizes))];
+  }
   return between(line, 'n-release__sep', 'n-release__cell', (t) => withNumerals(t));
 }
 

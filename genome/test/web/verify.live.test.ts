@@ -615,6 +615,8 @@ describe('the release announced, and its card in THE RELEASES', () => {
       picture: { src: media(1), alt: 'The model of MONOLITHE, photographed by ORBES', kind: 'photo' },
       reveals: [],
       interest: null,
+      // Lot M3 (K44 T1): a model's release, no set.
+      set: null,
     });
     expect(room0!.kind).toBe('LIVE RELEASE · THE ROOM IS OPEN');
     expect(live!.kind).toBe('LIVE RELEASE · LIVE NOW');

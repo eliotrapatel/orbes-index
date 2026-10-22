@@ -26,7 +26,7 @@ import { h } from '../../shared/dom.js';
 import type { ApiClient } from '../api.js';
 import { mayAddAddress, sameAddress, savedChoice } from '../addresses-model.js';
 import { addonSheet, addonPrice, rowsChoice, rowsLimit, rowsTotal, withUnits, type AddonRowModel, type AddonSheetModel } from '../addons-model.js';
-import { ACCOUNT_ADDRESSES, LIVE, MESSAGES, ORDERS, PIECES } from '../copy.js';
+import { ACCOUNT_ADDRESSES, LIVE, MESSAGES, ORDERS, PIECES, SETS } from '../copy.js';
 import { savedSizeLine, type OrderEngravingModel, type OrderModel, type OrderReturnsModel } from '../orders-model.js';
 import type { SessionStore } from '../session.js';
 import type { AccountAddresses, AccountOrder, OrderCaseRequest } from '../types.js';
@@ -202,7 +202,9 @@ export class OrderSheet {
           : req.kind === 'addons'
             ? ORDERS.addons.add
             : req.kind === 'RETURN'
-              ? ORDERS.returns.requestReturn
+              ? req.returns.set
+                ? SETS.orders.returnSet
+                : ORDERS.returns.requestReturn
               : ORDERS.returns.exchange;
     const concerning = req.kind === 'RETURN' || req.kind === 'EXCHANGE' ? req.returns.concerning : req.order.concerning;
     const head = h(
@@ -565,10 +567,12 @@ export class OrderSheet {
       note,
       h('p', { class: 'n-sm n-fld__hint', id: 'order-request-note-hint', text: R.noteHint }),
     );
+    // Macro scope K44 T3: a set is returned whole, said before its reason.
+    const whole = kind === 'RETURN' && m.set ? [h('p', { class: 'n-sm n-osheet__whole', text: SETS.orders.returnWhole })] : [];
     const form = nocturneForm(
       this.deps.session,
       'order-request',
-      [...sizes, reason.el, noteField, h('p', { class: 'n-sm n-osheet__decides', text: R.decides })],
+      [...whole, ...sizes, reason.el, noteField, h('p', { class: 'n-sm n-osheet__decides', text: R.decides })],
       R.send,
       async () => {
         if (kind === 'EXCHANGE' && (this.size === null || !inStock.some((z) => z.label === this.size))) {

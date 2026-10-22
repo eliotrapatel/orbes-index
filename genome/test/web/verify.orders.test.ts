@@ -525,6 +525,8 @@ describe('YOUR ORDERS: the collector\'s side of an order (plan NEXT LOT §3.6)',
       concerning: 'ORDER OR-1A2B3C4D · MONOLITHE · SIZE 52',
       // A server before plan CUSTOMER INTELLIGENCE §3.7 sends no YOUR SIZES' size: none preselected.
       savedSize: null,
+      // Lot M3 (K44 T3): an order of its own, not a set's piece.
+      set: false,
     });
     expect(orderReturns({ ...delivered, returnable: { until: '2026-10-21T10:00:00.000Z', sizes: [] } }, 0)!.sizes).toEqual([]);
     expect(orderReturns({ ...delivered, channel: 'GIFT' }, 0)).toBeNull();

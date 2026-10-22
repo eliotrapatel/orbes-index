@@ -16,11 +16,11 @@
  * COLLECTION (a photograph of the newest entry, of a model the hero does not show); the scan.
  */
 import { circleCards, type CircleCardModel } from './circle-model.js';
-import { LIVE, LOOKBOOK, NOW, PHOTOS, RELEASES, TIER } from './copy.js';
-import { countdown, formatMoney, interestLine, pictureOf, releaseTime, type LivePicture } from './live-model.js';
+import { LIVE, LOOKBOOK, NOW, PHOTOS, RELEASES, SETS, TIER } from './copy.js';
+import { countdown, formatMoney, interestLine, liveSet, perAccountLine, pictureOf, releaseTime, type LivePicture } from './live-model.js';
 import { entryDots, entryPhoto, entryPublishedAt, sizesLine, youOwn, type EntryDot, type LookbookPhoto } from './lookbook-model.js';
 import { drawLeads } from './nocturne-model.js';
-import { isReleaseId, releaseCards, releasePath, twoClocks } from './releases-model.js';
+import { isReleaseId, releaseCards, releasePath, twoClocks, type SetCardModel } from './releases-model.js';
 import { isLookbookSlug } from '../shared/lookbook.js';
 import type { CircleCard, ClubStatus, DropCard, LiveCard, LookbookCard, OwnedPiece } from './types.js';
 import { formatDateTime, modelWithVariant, upper } from './view-model.js';
@@ -90,21 +90,26 @@ export interface LiveHeroModel {
   roomOpensAt: number;
   opensAt: number;
   closesAt: number;
+  /** Macro scope K44 T1: a set's release, its line, its pieces' names and photographs, each from its stage; null for a model's. */
+  set: SetCardModel | null;
 }
 
 export function liveHero(c: LiveCard, localZone: string): LiveHeroModel {
   const named = typeof c.name === 'string' && c.name.trim() !== '';
   const title = typeof c.title === 'string' && c.title.trim() ? upper(c.title) : named ? upper(modelWithVariant(c.name!, c.variant)) : LIVE.unnamed;
   const access = typeof c.access?.text === 'string' && c.access.text.trim() ? LIVE.forWhom(c.access.text.trim()) : null;
+  const set = liveSet(c);
   return {
     id: c.id,
     href: releasePath(c.id),
     title,
     model: named ? upper(c.name) : null,
-    line: named ? [upper(c.type), upper(c.collection)].filter((x) => x.length > 0).join(' · ') || null : null,
+    // A set's line is its own (THE SET · 3 PIECES), its pieces' names under it once said.
+    line: set ? set.line : named ? [upper(c.type), upper(c.collection)].filter((x) => x.length > 0).join(' · ') || null : null,
     picture: pictureOf(c),
+    set,
     when: releaseTime(c.opensAt, localZone),
-    lines: [upper(c.quantityLine), Number.isInteger(c.perAccount) && c.perAccount > 0 ? LIVE.perAccount(c.perAccount) : '', access ?? ''].filter((x) => x.length > 0),
+    lines: [upper(c.quantityLine), Number.isInteger(c.perAccount) && c.perAccount > 0 ? perAccountLine(c) : '', access ?? ''].filter((x) => x.length > 0),
     interest: interestLine(c.interest),
     roomOpensAt: Date.parse(c.roomOpensAt),
     opensAt: Date.parse(c.opensAt),
@@ -146,12 +151,16 @@ export interface DrawLeadModel {
   /** The same time on this phone (`11 OCT 2026 · 20:00 on this phone (UTC+02:00)`), when it is not UTC. */
   local: string | null;
   image: { src: string; alt: string } | null;
+  /** Macro scope K44 T1: a set's draw, its line, its pieces' names and photographs; null for a model's. */
+  set: SetCardModel | null;
+  /** The name its title begins with, set on a line of its own (the model's, or a set's). */
+  titleName: string | null;
 }
 
 export function drawLead(d: DropCard, offsetMinutes: number): DrawLeadModel | null {
   const card = releaseCards([d])[0];
   if (!card) return null;
-  const pieces = RELEASES.pieces(Number(d.quantity) || 0);
+  const pieces = card.set ? SETS.sets(Number(d.quantity) || 0) : RELEASES.pieces(Number(d.quantity) || 0);
   const soon = card.state === 'UPCOMING';
   const at = soon ? d.opensAt : d.closesAt;
   const time = RELEASES.utc(formatDateTime(at, 0));
@@ -168,6 +177,8 @@ export function drawLead(d: DropCard, offsetMinutes: number): DrawLeadModel | nu
     line: { lead, time: full.endsWith(time) ? time : '' },
     local: twoClocks(at, offsetMinutes).local,
     image: card.image,
+    set: card.set,
+    titleName: card.titleName,
   };
 }
 

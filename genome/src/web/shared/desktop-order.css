@@ -141,6 +141,89 @@
     color: var(--vault-ink);
   }
 
+  /* THE SET (lot M3): a set's head row over its pieces' rows, its name on 1–8, its one price at the row's end. */
+  html:not(.d-touch) body.nocturne .d-oset {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+    align-items: end;
+    padding: var(--d-s7) 0 var(--d-s4);
+    border-bottom: 1px solid var(--vault-hairline);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.d-oset__name, .d-oset__price) {
+    display: flex;
+    flex-direction: column;
+    gap: var(--d-s2);
+    min-width: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .d-oset__name {
+    grid-column: 1 / span 8;
+  }
+
+  html:not(.d-touch) body.nocturne .d-oset__title {
+    font-size: var(--d-fs-t2);
+    line-height: 1.2;
+    letter-spacing: var(--d-tr-mid);
+    overflow-wrap: anywhere;
+  }
+
+  html:not(.d-touch) body.nocturne :is(.d-oset__count, .d-oset__label) {
+    color: var(--vault-soft);
+  }
+
+  html:not(.d-touch) body.nocturne .d-oset__price {
+    grid-column: 9 / span 4;
+    align-items: flex-end;
+    padding-right: calc(16px + var(--d-s5));
+    white-space: nowrap;
+  }
+
+  html:not(.d-touch) body.nocturne .d-oset__amount {
+    font-size: var(--n-fs-kv);
+  }
+
+  html:not(.d-touch) body.nocturne .d-orows__set + .d-orows__item:not(.d-orows__set) > .d-orow {
+    margin-top: var(--d-s5);
+  }
+
+  /* The order's page: THE SET's part, its pieces each a link to its own page, this one marked. */
+  html:not(.d-touch) body.nocturne :is(.d-oset__count, .d-oset__terms, .d-oset__pieces) {
+    margin-top: var(--d-s3);
+  }
+
+  html:not(.d-touch) body.nocturne .d-oset__pieces {
+    margin-bottom: 0;
+    padding: 0;
+    border-top: 1px solid var(--vault-hairline);
+    list-style: none;
+  }
+
+  html:not(.d-touch) body.nocturne :is(.d-oset__piece-link, .d-oset__piece.is-current) {
+    display: flex;
+    flex-direction: column;
+    gap: var(--d-s2);
+    padding: var(--d-s4) 0;
+    border-bottom: 1px solid var(--vault-hairline);
+    color: var(--vault-ink);
+    text-decoration: none;
+  }
+
+  html:not(.d-touch) body.nocturne .d-oset__piece.is-current {
+    padding-left: var(--d-s4);
+    border-left: 1px solid var(--vault-ink);
+  }
+
+  html:not(.d-touch) body.nocturne .d-oset__piece-link:is(:hover, :focus-visible) .d-oset__piece-title {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+
+  html:not(.d-touch) body.nocturne .d-oset__piece-line {
+    color: var(--vault-soft);
+  }
+
   /* Its reference (9–10) and its price (11–12), the chevron at the row's end. */
   html:not(.d-touch) body.nocturne .d-orow__end {
     display: contents;

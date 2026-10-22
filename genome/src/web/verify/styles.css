@@ -2873,6 +2873,60 @@ body.nocturne .view--release.n-release {
   margin-top: 6px;
 }
 
+/* THE SET (lot M3): a picker per piece, its name over its sizes; the set's lines under a release's title. */
+.release__piece {
+  margin-top: 18px;
+}
+
+.release__piece > .release__sizes,
+.release__piece > .release__yours-size {
+  margin-top: 10px;
+}
+
+.n-releases__set,
+.n-releases__pieces,
+.now__pieces,
+.n-pieces__order-piece,
+.n-pieces__returns-whole,
+.n-osheet__whole {
+  margin-top: 8px;
+}
+
+.n-releases__pieces,
+.now__pieces {
+  color: var(--vault-soft);
+}
+
+.release__group,
+.release__note {
+  display: inline-block;
+  margin-top: 10px;
+}
+
+.release__group:first-child {
+  margin-top: 0;
+}
+
+/* YOUR ORDERS: a set's pieces under its head, the set's price on its hairline rows. */
+.n-pieces__orders > * + .n-pieces__set,
+.n-pieces__set + .n-pieces__order {
+  padding-top: var(--n-section);
+}
+
+.n-pieces__set-head {
+  padding-bottom: 26px;
+}
+
+.n-pieces__set-title {
+  margin-top: 10px;
+  overflow-wrap: anywhere;
+}
+
+.n-pieces__set-rows {
+  margin-top: 16px;
+  border-top: 1px solid var(--vault-hairline);
+}
+
 .n-release__action {
   margin-top: 22px;
 }

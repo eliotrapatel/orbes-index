@@ -1457,6 +1457,7 @@ class App {
         void this.showPieces();
       },
       onSignIn: () => this.pageSignIn('order', DESKTOP.signIn.lead),
+      onOrder: (other) => this.openOrder(other),
     });
     if (await this.swap(view.root, 'order', focus)) this.live = view;
     else view.dispose();

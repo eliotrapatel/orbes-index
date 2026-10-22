@@ -38,6 +38,9 @@
  *     RETURNS AND EXCHANGES                      on a delivered order for 14 days (§3.6.D): REQUEST A RETURN, EXCHANGE THE
  *     [ REQUEST A RETURN ] [ EXCHANGE THE SIZE ] SIZE (its sheet: the sizes in stock, a reason, a note)
  *     ORDER OR-3F9A21C4                          its reference, for ORBES Client Services
+ *   (macro scope K44: a set's pieces grouped under THE SET · <name>, the set's one price and its total over them; each
+ *   piece's PRICE PART OF THE SET, PIECE 2 OF 3, RETURN THE SET in place of REQUEST A RETURN; on a computer the rows of
+ *   a set under its head row, its price at the row's end)
  *     [ WRITE TO ORBES CLIENT SERVICES ]         the write sheet, the order attached (plan NEXT-NINE, CS-01)
  *     DOCUMENTS                                  INVOICE, CREDIT NOTE (PDFs), CARE GUIDE (opens under it), OWNERSHIP
  *                                                CERTIFICATE (PDF, once the piece is registered to the account)
@@ -60,11 +63,12 @@
 import { h } from '../../shared/dom.js';
 import { saveDownload } from '../../shared/download.js';
 import { ApiError, type ApiClient, type OrderDocumentKind } from '../api.js';
-import { CLAIM_HELD, DEFAULT_CARE, DESKTOP, GUARANTEE, LIVE, ORDERS, PIECES, QUESTION, RELEASES } from '../copy.js';
+import { CLAIM_HELD, DEFAULT_CARE, DESKTOP, GUARANTEE, LIVE, ORDERS, PIECES, QUESTION, RELEASES, SETS } from '../copy.js';
 import { isDesktop, onDesktopChange } from '../../shared/desktop.js';
 import { orderContext } from '../messages-model.js';
 import { myLiveEntries } from '../live-model.js';
-import { orderDate, orderModels, type OrderClaimModel, type OrderModel } from '../orders-model.js';
+import { orderDate, orderGroups, orderModels, type OrderClaimModel, type OrderModel, type OrderSetModel } from '../orders-model.js';
+import type { Row } from '../view-model.js';
 import { openOrderSheet } from './order-sheet.js';
 import { orderAddonsBlock } from './order-addons.js';
 import { pieceModel, type PieceModel } from '../pieces-model.js';
@@ -522,10 +526,31 @@ class PiecesPage {
 
   private ordersPanel(orders: OrderModel[] | null): HTMLElement[] {
     if (orders === null) return [h('div', { class: 'n-px n-pieces__quiet' }, h('p', { class: 'n-sm n-pieces__failed', attrs: { role: 'alert' }, text: ORDERS.loadFailed }))];
+    // Macro scope K44: a set's pieces together, under its head (THE SET · <name>, its one price).
+    const groups = orderGroups(orders);
     // Desktop (decision 5): each order a hairline row that opens its own page.
-    if (isDesktop()) return [h('ul', { class: 'd-orows', attrs: { 'aria-label': ORDERS.title } }, ...orders.map((m) => h('li', { class: 'd-orows__item' }, orderRow(m, this.orders?.find((o) => o.id === m.id), this.deps.onOrder))))];
+    if (isDesktop()) {
+      const row = (m: OrderModel) => orderRow(m, this.orders?.find((o) => o.id === m.id), this.deps.onOrder);
+      return [
+        h(
+          'ul',
+          { class: 'd-orows', attrs: { 'aria-label': ORDERS.title } },
+          ...groups.map((g) =>
+            g.kind === 'order'
+              ? h('li', { class: 'd-orows__item' }, row(g.order))
+              : h('li', { class: 'd-orows__item d-orows__set', data: { set: g.set.saleId } }, setHeadRow(g.set), ...g.orders.map(row)),
+          ),
+        ),
+      ];
+    }
     const deps: OrderDeps = { api: this.deps.api, session: this.deps.session, onChanged: (order, focus) => this.orderChanged(order, focus) };
-    return [h('div', { class: 'n-pieces__orders' }, ...orders.map((m) => orderCard(m, deps, this.claimBlockFor(m, deps))))];
+    return [
+      h(
+        'div',
+        { class: 'n-pieces__orders' },
+        ...groups.map((g) => (g.kind === 'order' ? orderCard(g.order, deps, this.claimBlockFor(g.order, deps)) : setGroup(g.set, g.orders.map((m) => orderCard(m, deps, this.claimBlockFor(m, deps)))))),
+      ),
+    ];
   }
 
   /**
@@ -537,6 +562,8 @@ class PiecesPage {
       const at = this.orders.findIndex((o) => o.id === next.id);
       if (at >= 0) this.orders[at] = next;
     }
+    // Macro scope K44 T3: a set's return asked on one piece is every piece's: the orders read again, quietly.
+    if (next.set && next.case?.kind === 'RETURN') void this.setReturned(next.reference);
     this.render();
     const card = this.root.querySelector<HTMLElement>(`article[data-order="${CSS.escape(next.reference)}"]`);
     const control = card?.querySelector<HTMLElement>(`[data-focus="${focus}"]`);
@@ -544,6 +571,21 @@ class PiecesPage {
     const heading = card?.querySelector<HTMLElement>('h2') ?? null;
     if (heading) heading.tabIndex = -1;
     return heading;
+  }
+
+  /** A set's return asked (macro scope K44 T3): its other pieces read as the server now has them, the request's line keeping the focus. */
+  private async setReturned(reference: string): Promise<void> {
+    try {
+      const orders = await this.deps.api.orders();
+      if (this.disposed || this.load.kind !== 'ready') return;
+      this.orders = orders;
+    } catch (e) {
+      this.deps.session.noteError(e);
+      return;
+    }
+    const had = this.root.contains(document.activeElement);
+    this.render();
+    if (had) this.root.querySelector<HTMLElement>(`article[data-order="${CSS.escape(reference)}"] [data-focus="request"]`)?.focus({ preventScroll: true });
   }
 
   /** ORDER OR-… opened from a piece's page: its order in view, its heading focused. */
@@ -648,6 +690,8 @@ function orderCard(m: OrderModel, deps: OrderDeps, claim: HTMLElement | null = n
   const words: (HTMLElement | null)[] = [
     h('p', { class: 'n-g n-lb n-pieces__order-line' }, ...withNumerals(m.line)),
     h('h2', { class: 'n-g n-t2 n-pieces__order-title', id: titleId }, ...withNumerals(m.title)),
+    // Macro scope K44: a set's piece, its place among the set's pieces.
+    m.set ? h('p', { class: 'n-g n-lb n-pieces__order-piece' }, ...withNumerals(m.set.pieceLine)) : null,
     steps,
     h('p', { class: 'n-tx n-pieces__order-sentence', text: m.sentence }),
     claim,
@@ -685,6 +729,43 @@ function orderCard(m: OrderModel, deps: OrderDeps, claim: HTMLElement | null = n
   return article;
 }
 
+/** A set's one price and its total, as its group's rows (macro scope K44): ONE PRICE FOR THE SET, then TOTAL with what its pieces add. */
+function setRows(set: OrderSetModel): Row[] {
+  return [...(set.price ? [[SETS.onePrice, set.price] as Row] : []), ...(set.total ? [[SETS.orders.total, set.total] as Row] : [])];
+}
+
+/**
+ * A set's pieces in ORDERS on a phone (macro scope K44 T1 to T3): its head (3 PIECES, THE SET · <name>, the set's one
+ * price and its total), then each piece's card as any order's.
+ */
+function setGroup(set: OrderSetModel, cards: HTMLElement[]): HTMLElement {
+  const id = `set-${set.saleId}`;
+  const rows = setRows(set);
+  return h(
+    'section',
+    { class: 'n-pieces__set', attrs: { 'aria-labelledby': id }, data: { set: set.saleId } },
+    h(
+      'header',
+      { class: 'n-px n-pieces__set-head' },
+      h('p', { class: 'n-g n-lb n-pieces__set-count' }, ...withNumerals(set.count)),
+      h('h2', { class: 'n-g n-t2 n-pieces__set-title', id }, ...withNumerals(set.heading)),
+      rows.length > 0 ? h('div', { class: 'n-pieces__set-rows' }, definitionList(rows, { kind: 'kv' })) : null,
+    ),
+    ...cards,
+  );
+}
+
+/** A set's head row in ORDERS on a computer (macro scope K44): THE SET · <name> and its pieces, its one price at the row's end. */
+function setHeadRow(set: OrderSetModel): HTMLElement {
+  const rows = setRows(set);
+  return h(
+    'div',
+    { class: 'd-oset' },
+    h('span', { class: 'd-oset__name' }, h('span', { class: 'n-g d-oset__title', id: `set-${set.saleId}` }, ...withNumerals(set.heading)), h('span', { class: 'n-g n-lb d-oset__count' }, ...withNumerals(set.count))),
+    h('span', { class: 'd-oset__price' }, ...rows.flatMap(([k, v]) => [h('span', { class: 'n-g n-lb d-oset__label', text: k }), h('span', { class: 'n-num d-oset__amount', text: v })])),
+  );
+}
+
 /**
  * An order's row of ORDERS on a computer (desktop, decision 5; §10.16's hairline row): its model's photograph,
  * the model and where it was sold, where it is now (its step and that step's date; YOUR NEW CLAIM CODE while one waits,
@@ -697,7 +778,8 @@ function orderRow(m: OrderModel, o: AccountOrder | undefined, onOrder?: (referen
   // The step's date in full, as one step alone is dated (the card's row of five drops a shared year).
   const at: Record<string, string | null | undefined> = o ? { RESERVED: o.reservedAt, PAID: o.paidAt, IN_PREPARATION: o.preparingAt, SHIPPED: o.shippedAt, DELIVERED: o.deliveredAt, CANCELLED: o.cancelledAt, RETURNED: o.returnedAt } : {};
   const date = orderDate(at[now.status]) || now.date;
-  const amount = (m.rows.find(([k]) => k === ORDERS.rows.total) ?? m.rows.find(([k]) => k === ORDERS.rows.price))?.[1] ?? null;
+  // A set's piece: its price is the set's, on its head row.
+  const amount = m.set ? null : ((m.rows.find(([k]) => k === ORDERS.rows.total) ?? m.rows.find(([k]) => k === ORDERS.rows.price))?.[1] ?? null);
   const mark = m.claim ? ORDERS.claim.label : (m.request?.label ?? null);
   const photo = m.photo ? h('img', { attrs: { src: m.photo.src, alt: '', decoding: 'async', loading: 'lazy' } }) : null;
   const frame = h('span', { class: ['d-orow__photo', photo ? null : 'is-bare'], attrs: { 'aria-hidden': 'true' } }, photo);
@@ -707,7 +789,7 @@ function orderRow(m: OrderModel, o: AccountOrder | undefined, onOrder?: (referen
     ['d-orow', m.status === 'CANCELLED' || m.status === 'RETURNED' ? 'is-ended' : null],
     onOrder ? () => onOrder(reference) : undefined,
     frame,
-    h('span', { class: 'd-orow__name' }, h('span', { class: 'n-g d-orow__title' }, ...withNumerals(m.title)), h('span', { class: 'n-g n-lb d-orow__line' }, ...listLine(m.line))),
+    h('span', { class: 'd-orow__name' }, h('span', { class: 'n-g d-orow__title' }, ...withNumerals(m.title)), h('span', { class: 'n-g n-lb d-orow__line' }, ...listLine(m.set ? `${m.set.pieceLine} · ${m.line}` : m.line))),
     h(
       'span',
       { class: 'd-orow__now' },
@@ -813,12 +895,14 @@ function returnsBlock(m: OrderModel, deps: OrderDeps): HTMLElement {
     });
     return b;
   };
-  const buttons = [ask('RETURN', R.requestReturn, 'pieces__return'), ...(r.sizes.length > 0 ? [ask('EXCHANGE', R.exchange, 'pieces__exchange')] : [])];
+  // Macro scope K44 T3: a set's piece is returned only with its set (RETURN THE SET); its size exchanged as any.
+  const buttons = [ask('RETURN', r.set ? SETS.orders.returnSet : R.requestReturn, 'pieces__return'), ...(r.sizes.length > 0 ? [ask('EXCHANGE', R.exchange, 'pieces__exchange')] : [])];
   return h(
     'section',
     { class: 'n-pieces__returns pieces__returns', attrs: { 'aria-labelledby': id } },
     h('p', { class: 'n-g n-lb n-pieces__returns-label', id, text: R.label }),
     h('p', { class: 'n-tx n-pieces__returns-lead', text: r.lead }),
+    r.set ? h('p', { class: 'n-sm n-pieces__returns-whole', text: SETS.orders.returnWhole }) : null,
     h('div', { class: buttons.length > 1 ? 'n-duo n-pieces__returns-actions' : 'n-pieces__returns-actions' }, ...buttons),
   );
 }

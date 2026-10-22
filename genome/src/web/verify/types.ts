@@ -667,6 +667,17 @@ export interface DropCard {
   /** NOCTURNE (addition 5): the price of a piece in minor units with its currency; null for both when ORBES gave none. */
   priceMinor?: number | null;
   currency?: string | null;
+  /**
+   * Macro scope K44 T1 (plan MACRO M3 §5.4): a set's draw, the set's name and its pieces in order, each its model (`model`
+   * is then the set itself, type SET; `quantity` and `priceMinor` are per set). Absent on a model's draw.
+   */
+  set?: PublicDropSet;
+}
+
+/** Macro scope K44 T1: a set's draw as the public reads it (services/drops.ts PublicDropSet). */
+export interface PublicDropSet {
+  name: string;
+  pieces: (DropModel & { piece: number })[];
 }
 
 /** A release's page (GET /api/v1/drops/:id): the seed's SHA-256 from the publication, the seed itself once drawn. */
@@ -702,8 +713,15 @@ export interface DrawSizeRef {
   label: string;
 }
 
+/** Macro scope K44 T1: the size an entry of a set's draw chose for one piece (1 to n, the set's order). */
+export interface PieceSizeRef extends DrawSizeRef {
+  piece: number;
+}
+
 /** A draw's size on its page (plan NEXT LOT §3.6.F): its pieces, those reserved directly, and full before the draw. */
 export interface DrawSheetSize extends DrawSizeRef {
+  /** Macro scope K44 T1: on a set's draw, the piece it is a size of (1 to n); absent on a model's. */
+  piece?: number;
   pieces: number;
   reserved: number;
   full: boolean;
@@ -717,12 +735,16 @@ export interface DrawEntry {
   rank: number;
   /** Plan NEXT LOT §3.6.F: the size it was drawn in; null in a draw without sizes. */
   size?: DrawSizeRef | null;
+  /** Macro scope K44 T1: in a set's draw, the size it was drawn in for each piece; absent otherwise. */
+  sizes?: PieceSizeRef[];
 }
 
 /** GET /api/v1/club/drops/:id/entry (plan NEXT LOT §3.6.F): the account's entry, and the size YOUR SIZES suggests. */
 export interface DrawEntryRead {
   entry: ClubEntry | null;
   savedSize: DrawSizeRef | null;
+  /** Macro scope K44 T1: on a set's draw, the size YOUR SIZES preselects for each piece that has one; absent otherwise. */
+  savedSizes?: PieceSizeRef[];
   /** Plan MACRO M1 §3.1 (F4): whether the account may enter now (a draw opened to a segment: its members only). */
   eligible?: boolean;
   /**
@@ -744,8 +766,13 @@ export interface PastRelease {
   imageUrl: string | null;
   /** The opening: a LIVE RELEASE's T0, a draw's opening of its entries. */
   opensAt: string;
-  /** The quantity as announced (« 25 PIECES »). */
+  /** The quantity as announced (« 25 PIECES »; a set's release, « 25 SETS »). */
   quantityLine: string;
+  /**
+   * Macro scope K44 T1: a set's release, its set's name and its pieces in order, each its model's name and variant (at
+   * the name stage, null before) and photograph (at the photo stage); `model` then all null. Absent on a model's.
+   */
+  set?: { name: string | null; pieces: { name: string | null; variant: string | null; imageUrl: string | null }[] };
 }
 
 /** A page of GET /api/v1/releases/past, the newest first. */
@@ -811,6 +838,8 @@ export interface ClubEntry {
   drawnAt: string | null;
   /** Plan NEXT LOT §3.6.F: the size it chose (kept when withdrawn); null in a draw without sizes. */
   size?: DrawSizeRef | null;
+  /** Macro scope K44 T1: in a set's draw (`size` null), the size it chose for each piece, kept as `size` is; absent otherwise. */
+  sizes?: PieceSizeRef[];
 }
 
 /**
@@ -1015,6 +1044,18 @@ export interface LiveCard {
   surprise: boolean;
   /** I'LL BE THERE: how many accounts said so (public). */
   interest: number;
+  /**
+   * Macro scope K44 T1: a set's release, each part from its stage (its name, then its pieces' names, then their
+   * photographs); `name` is then the set's, `type` SET, `imageUrl` null. Absent on a model's release.
+   */
+  set?: LiveSetView;
+}
+
+/** Macro scope K44 T1: a set's LIVE RELEASE as the public reads it (services/live-room.ts LiveSetView). */
+export interface LiveSetView {
+  /** The set's name, from the name's stage; null before. */
+  name: string | null;
+  pieces: { piece: number; name: string | null; variant: string | null; type: string | null; collection: string | null; imageUrl: string | null; lookbook: string | null }[];
 }
 
 /**
@@ -1307,6 +1348,13 @@ export interface AccountOrder {
   shipping?: { service: 'STANDARD' | 'EXPRESS' | null; minor: number | null; benefit: 2 | 3 | null; withOrder: string | null } | null;
   /** BP-19: the reference of the order it travels with (a welcome gift's), or null; absent from a server before it. */
   withOrder?: string | null;
+  /**
+   * Macro scope K44 (plan MACRO M3 §5.4): the set sale this order is a piece of (YOUR ORDERS groups the pieces of one set
+   * under THE SET · <name>, its one price): the sale, the set's name, the one price and currency (null until entered),
+   * this order's piece, and the set's orders (their ids) in its order; null or absent for an order of its own. Each
+   * order's own price is its share of the set's.
+   */
+  set?: AccountOrderSet | null;
   /** BP-19 T5: a welcome gift's tier (PLATINE, PALLADIUM); null for any other order. */
   giftTier?: 'PLATINE' | 'PALLADIUM' | null;
   /** BP-19 T5: the credit taken off it, in its currency; 0 for none. */
@@ -1368,6 +1416,17 @@ export interface AccountOrder {
     outcome: 'REFUND' | 'EXCHANGE' | 'RESHIP' | null;
     exchangeOrder: { id: string; reference: string } | null;
   } | null;
+}
+
+/** A set's piece in YOUR ORDERS (macro scope K44; services/orders.ts AccountOrderSet). */
+export interface AccountOrderSet {
+  saleId: string;
+  name: string;
+  priceMinor: number | null;
+  currency: string | null;
+  piece: number;
+  /** The set's orders (their ids), in the set's order. */
+  pieces: string[];
 }
 
 /** REQUEST A RETURN or EXCHANGE THE SIZE (POST /api/v1/account/orders/:id/case, API §10.23). */

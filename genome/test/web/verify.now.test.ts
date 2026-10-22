@@ -165,6 +165,9 @@ describe('NOW: the heroes', () => {
       line: { lead: '12 PIECES · ENTRIES CLOSE', time: '11 OCT 2026 · 18:00 UTC' },
       local: '11 OCT 2026 · 20:00 on this phone (UTC+02:00)',
       image: { src: MEDIA('a'), alt: 'The model of MONOLITHE, THE OCTOBER DRAW, photographed by ORBES' },
+      // Lot M3 (K44 T1): a model's draw, no set; its model's name begins its title.
+      set: null,
+      titleName: 'MONOLITHE',
     });
     // Before entries open: ENTRIES OPEN SOON and its opening; in its early access: EARLY ACCESS; no price: none said.
     expect(drawLead(draw({ state: 'UPCOMING', opensAt: '2026-10-07T10:00:00Z' }), 0)).toMatchObject({

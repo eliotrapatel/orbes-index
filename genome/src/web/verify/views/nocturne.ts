@@ -323,6 +323,29 @@ export function fadedPhoto(src: string, alt: string, opts: { height?: number; fa
   return box;
 }
 
+/**
+ * A set's pieces photographed side by side (macro scope K44 T1, plan MACRO M3 §15 note 13): two to four tiles in one
+ * frame, each the house's crop, faded as `fadedPhoto` is; a tile that cannot be loaded leaves its place to the others,
+ * and `onEmpty` is told once none is left (the frame then gives way, as a photograph's does).
+ */
+export function photoTiles(images: readonly { src: string; alt: string }[], opts: { height?: number; eager?: boolean; extraClass?: string; onEmpty?: () => void } = {}): HTMLElement {
+  const box = h('div', { class: ['n-ph', 'n-fade', 'n-tiles', opts.extraClass] });
+  box.style.height = `var(--d-ph-h, ${opts.height ?? 390}px)`;
+  for (const image of images) {
+    const img = h('img', { attrs: { src: image.src, alt: image.alt, decoding: 'async', loading: opts.eager ? 'eager' : 'lazy' } });
+    img.addEventListener(
+      'error',
+      () => {
+        img.remove();
+        if (!box.querySelector('img')) opts.onEmpty?.();
+      },
+      { once: true },
+    );
+    box.append(img);
+  }
+  return box;
+}
+
 /** The text that rises onto a faded photograph's foot (56 px), in the column's margin. */
 export function lift(children: (Node | null)[], opts: { center?: boolean; extraClass?: string } = {}): HTMLElement {
   return h('div', { class: ['n-px', 'n-lift', opts.center ? 'n-ctr' : null, opts.extraClass] }, ...children);

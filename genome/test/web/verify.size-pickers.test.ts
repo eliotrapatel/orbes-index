@@ -20,12 +20,15 @@ import type { AccountOrder } from '../../src/web/verify/types.js';
 
 const VIEWS = join(dirname(fileURLToPath(import.meta.url)), '../../src/web/verify/views');
 
-/** Each view that draws a size picker, and the way its picker reads YOUR SIZES (a name its code calls or reads). */
-const PRESELECTION: Readonly<Record<string, RegExp>> = Object.freeze({
-  'live.ts': /\binitialPick\(/,
-  'lookbook.ts': /\bsalonSizePick\(/,
-  'releases.ts': /\bdrawPick\(/,
-  'order-sheet.ts': /\breturns\.savedSize\b/,
+/**
+ * Each view that draws a size picker, and the way each of its pickers reads YOUR SIZES (a name its code calls or reads):
+ * a draw's page has two, a model's draw's (`drawPick`) and a set's per piece (`setPick`, lot M3, K44 T1).
+ */
+const PRESELECTION: Readonly<Record<string, readonly RegExp[]>> = Object.freeze({
+  'live.ts': [/\binitialPick\(/],
+  'lookbook.ts': [/\bsalonSizePick\(/],
+  'releases.ts': [/\bdrawPick\(/, /\bsetPick\(/],
+  'order-sheet.ts': [/\breturns\.savedSize\b/],
 });
 
 describe('the size preselected everywhere (plan CUSTOMER INTELLIGENCE §3.7)', () => {
@@ -38,14 +41,14 @@ describe('the size preselected everywhere (plan CUSTOMER INTELLIGENCE §3.7)', (
     }
     // A picker in a view not listed here: give it its preselection from YOUR SIZES, then list it.
     expect(Object.keys(calls).sort()).toEqual(Object.keys(PRESELECTION).sort());
-    for (const [file, way] of Object.entries(PRESELECTION)) {
-      // One picker each: a second one in the same view needs its own preselection too.
-      expect(calls[file], file).toBe(1);
+    for (const [file, ways] of Object.entries(PRESELECTION)) {
+      // One picker per way: another one in the same view needs its own preselection too.
+      expect(calls[file], file).toBe(ways.length);
       const code = readFileSync(join(VIEWS, file), 'utf8')
         .split('\n')
         .filter((l) => !/^\s*(import|\*|\/\/|\/\*\*)/.test(l))
         .join('\n');
-      expect(code, `${file} reads YOUR SIZES' size`).toMatch(way);
+      for (const way of ways) expect(code, `${file} reads YOUR SIZES' size`).toMatch(way);
     }
   });
 

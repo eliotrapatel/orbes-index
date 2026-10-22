@@ -27,14 +27,18 @@
  *    size, YOUR SIZES', the only one) with the sizes full greyed out during
  *    the early access, and every label and sentence of an entry with its
  *    size. A draw without sizes reads as before.
+ *  - THE SET (macro scope K44 T1, plan MACRO M3 §5.4): a set's release reads THE SET · 3 PIECES under its title, its
+ *    pieces' photographs side by side (from the photograph's stage) and their names (from the name's); a set's draw a
+ *    size picker per piece (YOUR SIZES' preselection for each), every size on the entry's label and the list's line,
+ *    ONE PRICE FOR THE SET, its quantity in sets and its own rule.
  *
  * Nothing the server did not send: a photograph is taken from this origin's
  * media route only, an address only if it is one.
  */
 import { onComputer } from '../shared/desktop.js';
 import { isLookbookSlug } from '../shared/lookbook.js';
-import { RELEASES } from './copy.js';
-import type { ClubEntry, DrawSizeRef, DropCard, DropEntryStatus, DropSheet, DropState, DrawEntry, Participation, PastRelease } from './types.js';
+import { RELEASES, SETS } from './copy.js';
+import type { ClubEntry, DrawSizeRef, DropCard, DropEntryStatus, DropSheet, DropState, DrawEntry, Participation, PastRelease, PieceSizeRef } from './types.js';
 import { formatDate, formatDateTime, formatDateTimeLong, formatMoney, modelWithVariant, upper, utcOffsetLabel } from './view-model.js';
 import { releaseContext, type WriteContext } from './messages-model.js';
 import { storyCardModel, type StoryCardModel } from './story-card.js';
@@ -167,6 +171,30 @@ export interface ReleaseCardModel {
   /** `€ 4 200` (addition 5), or null when ORBES gave the draw no price. */
   price: string | null;
   image: ReleasePhoto | null;
+  /** Macro scope K44 T1: a set's draw, its line and pieces (their photographs side by side in `images`); null for a model's. */
+  set: SetCardModel | null;
+  /** The name its title begins with, set on a line of its own (the model's, or a set's). */
+  titleName: string | null;
+}
+
+/** A set's release on a card (macro scope K44 T1): `THE SET · 3 PIECES`, its pieces' names once said, their photographs. */
+export interface SetCardModel {
+  line: string;
+  /** `MONOLITHE IN STEEL · HALO · LINEA`, from the name's stage; null before. */
+  names: string | null;
+  /** Each piece's photograph, in the set's order, from the photograph's stage (none before, or without one). */
+  images: ReleasePhoto[];
+}
+
+/** A set's pieces as a card shows them: its line, their names (null each before its stage), their photographs. */
+export function setCard(pieces: readonly { name: string | null; variant?: string | null; imageUrl: string | null }[]): SetCardModel | null {
+  if (!Array.isArray(pieces) || pieces.length < 2) return null;
+  const names = pieces.map((p) => (typeof p?.name === 'string' && p.name.trim() ? upper(modelWithVariant(p.name, p.variant ?? null)) : null));
+  const images: ReleasePhoto[] = [];
+  pieces.forEach((p, i) => {
+    if (typeof p?.imageUrl === 'string' && MEDIA_SRC.test(p.imageUrl)) images.push({ src: p.imageUrl, alt: SETS.photoLabel(names[i] ?? SETS.piece(i + 1)) });
+  });
+  return { line: SETS.line(pieces.length), names: names.every((n) => n !== null) ? names.join(' · ') : null, images };
 }
 
 /** A draw's price (addition 5): `€ 4 200`, or null when ORBES gave none (both its amount and its currency, or neither). */
@@ -182,7 +210,8 @@ export function releaseCards(cards: readonly DropCard[]): ReleaseCardModel[] {
   for (const c of cards) {
     if (!isReleaseId(c?.id) || typeof c.title !== 'string') continue;
     const state = stateOf(c.state);
-    const pieces = RELEASES.pieces(Number(c.quantity) || 0);
+    const set = c.set ? setCard(c.set.pieces) : null;
+    const pieces = set ? SETS.sets(Number(c.quantity) || 0) : RELEASES.pieces(Number(c.quantity) || 0);
     const line = state === 'UPCOMING' ? RELEASES.opensLine(pieces, formatDateTime(c.opensAt, 0)) : state === 'OPEN' ? RELEASES.closesLine(pieces, formatDateTime(c.closesAt, 0)) : pieces;
     out.push({
       id: c.id,
@@ -190,10 +219,12 @@ export function releaseCards(cards: readonly DropCard[]): ReleaseCardModel[] {
       title: upper(c.title),
       state,
       stateLabel: stateLabelOf(state, earlyAccessOf(c)),
-      model: modelLine(c.model ?? { name: '', type: '' }),
+      model: set ? set.line : modelLine(c.model ?? { name: '', type: '' }),
       line,
       price: drawPrice(c),
-      image: typeof c.model?.imageUrl === 'string' && MEDIA_SRC.test(c.model.imageUrl) ? { src: c.model.imageUrl, alt: RELEASES.photosLabel(upper(c.title)) } : null,
+      image: set ? null : typeof c.model?.imageUrl === 'string' && MEDIA_SRC.test(c.model.imageUrl) ? { src: c.model.imageUrl, alt: RELEASES.photosLabel(upper(c.title)) } : null,
+      set,
+      titleName: set ? upper(c.set!.name) || null : upper(c.model?.name ?? '') || null,
     });
   }
   return out;
@@ -206,12 +237,18 @@ export interface ReleaseRow {
   local?: string | null;
   /** Plan NEXT LOT §3.6.F: the SIZES row's further lines, one per size after the first (`value`). */
   more?: string[];
+  /** Macro scope K44 T1: a word under its value (ONE PRICE FOR THE SET). */
+  note?: string;
+  /** Macro scope K44 T1: a set's SIZES, each piece's name over its lines (in place of `value`). */
+  groups?: { head: string; lines: string[] }[];
 }
 
 /** A draw's size on its page (plan NEXT LOT §3.6.F): its pieces, those reserved directly in it, full before the draw. */
 export interface DrawSizeModel {
   id: string;
   label: string;
+  /** Macro scope K44 T1: on a set's draw, the piece it is a size of (1 to n); absent on a model's. */
+  piece?: number;
   pieces: number;
   reserved: number;
   full: boolean;
@@ -266,6 +303,36 @@ export interface ReleaseSheetModel {
    * `rule: 'SELECTED'`, the segment never named), as a LIVE RELEASE's page says its rule; null for a draw open to all.
    */
   selected: string | null;
+  /** Macro scope K44 T1: a set's draw, its name, line, pieces' photographs and pieces with their sizes; null for a model's. */
+  set: SetSheetModel | null;
+}
+
+/** A set's draw on its page (macro scope K44 T1): its name, `THE SET · 3 PIECES`, and each piece with its sizes. */
+export interface SetSheetModel {
+  name: string;
+  line: string;
+  images: ReleasePhoto[];
+  pieces: SetPieceModel[];
+}
+
+/** One piece of a set's draw: its place in the set, its name (`HALO`, else PIECE 2), its line (`HALO · RING`), its sizes. */
+export interface SetPieceModel {
+  piece: number;
+  name: string;
+  line: string;
+  sizes: DrawSizeModel[];
+}
+
+/** A set's pieces with their sizes, in the set's order; a piece without sizes is left out (the server publishes each). */
+export function setPieces(s: Pick<DropSheet, 'set' | 'sizes' | 'state'>): SetPieceModel[] {
+  const sizes = drawSizes(s);
+  return (Array.isArray(s.set?.pieces) ? s.set.pieces : [])
+    .filter((p) => p && Number.isInteger(p.piece))
+    .map((p) => {
+      const name = typeof p.name === 'string' && p.name.trim() ? upper(modelWithVariant(p.name, p.variant ?? null)) : SETS.piece(p.piece);
+      return { piece: p.piece, name, line: [name, upper(p.type ?? '')].filter((x) => x.length > 0).join(' · '), sizes: sizes.filter((z) => z.piece === p.piece) };
+    })
+    .filter((p) => p.sizes.length > 0);
 }
 
 /** Hexadecimal in groups of four, for reading and comparing by eye. */
@@ -281,12 +348,25 @@ export function releaseSheet(s: DropSheet, offsetMinutes: number): ReleaseSheetM
   const quantity = Number(s.quantity) || 0;
   const reserved = Number.isInteger(s.reserved) && s.reserved > 0 ? s.reserved : 0;
   const price = drawPrice(s);
-  const rows: ReleaseRow[] = [...(price ? [{ label: RELEASES.rows.price, value: price }] : []), { label: RELEASES.rows.pieces, value: String(quantity) }];
+  // Macro scope K44 T1: a set's draw, its price said once for the set, its quantity in sets, each piece's sizes.
+  const pieces = s.set ? setPieces(s) : [];
+  const set = s.set && pieces.length > 1 ? s.set : null;
+  const rows: ReleaseRow[] = [
+    ...(price ? [{ label: RELEASES.rows.price, value: price, ...(set ? { note: SETS.onePrice } : {}) }] : []),
+    { label: set ? SETS.rows.sets : RELEASES.rows.pieces, value: String(quantity) },
+  ];
   // Plan NEXT LOT §3.6.F: each size's pieces, public; the places reserved directly in it from the early access on (and
   // once drawn), FULL before the draw. A one-size draw has no SIZES row.
   const sizes = drawSizes(s);
   const reservedShown = early !== null && (early.open || state !== 'UPCOMING');
-  if (sizes.length > 1) {
+  if (set) {
+    // Each piece's name over its sizes: `HALO`, then `SIZE 52 · 2 PIECES`.
+    rows.push({
+      label: RELEASES.rows.sizes,
+      value: '',
+      groups: pieces.map((p) => ({ head: p.name, lines: p.sizes.map((z) => RELEASES.sizes.line(z.label, z.pieces, reservedShown ? z.reserved : 0, z.full)) })),
+    });
+  } else if (sizes.length > 1) {
     const lines = sizes.map((z) => RELEASES.sizes.line(z.label, z.pieces, reservedShown ? z.reserved : 0, z.full));
     rows.push({ label: RELEASES.rows.sizes, value: lines[0]!, more: lines.slice(1) });
   }
@@ -301,7 +381,7 @@ export function releaseSheet(s: DropSheet, offsetMinutes: number): ReleaseSheetM
   );
   // The places reserved directly, once the early access has begun: before the draw, what is left of the pieces; once
   // drawn, the release is over and says no end figure (plan LIVE RELEASE+, choice 5).
-  if (early && state !== 'DRAWN' && (early.open || state !== 'UPCOMING' || reserved > 0)) rows.push({ label: RELEASES.rows.reserved, value: RELEASES.reservedOf(reserved, quantity) });
+  if (early && state !== 'DRAWN' && (early.open || state !== 'UPCOMING' || reserved > 0)) rows.push({ label: RELEASES.rows.reserved, value: set ? SETS.reservedOf(reserved, quantity) : RELEASES.reservedOf(reserved, quantity) });
   if (s.drawnAt) {
     const drawn = twoClocks(s.drawnAt, offsetMinutes);
     rows.push({ label: RELEASES.rows.drawn, value: drawn.utc, local: drawn.local });
@@ -311,6 +391,7 @@ export function releaseSheet(s: DropSheet, offsetMinutes: number): ReleaseSheetM
   const seedHashHex = typeof s.seedHash === 'string' && HEX64.test(s.seedHash) ? s.seedHash : '';
   const seedHex = state === 'DRAWN' && typeof s.seed === 'string' && HEX64.test(s.seed) ? s.seed : null;
   const model = s.model ?? { name: '', type: '', collection: null, imageUrl: null, lookbook: null };
+  const tiles = set ? setCard(set.pieces) : null;
   return {
     id: s.id,
     title: upper(s.title),
@@ -321,11 +402,11 @@ export function releaseSheet(s: DropSheet, offsetMinutes: number): ReleaseSheetM
     access: earlyAt && opens.utc ? (sameEarlyTime(early!) ? RELEASES.access(earlyAt.utc, opens.utc) : RELEASES.accessByTier(earlyAt.utc, platineAt?.utc ?? null, opens.utc)) : null,
     earlyNote: early ? (sameEarlyTime(early) ? RELEASES.earlyNote : RELEASES.earlyNoteByTier) : null,
     full,
-    eyebrow: model.collection && model.collection.trim() ? upper(model.collection) : upper(model.name),
-    model: modelLine(model),
-    lookbookSlug: isLookbookSlug(model.lookbook) ? model.lookbook : null,
+    eyebrow: set ? SETS.line(pieces.length) : model.collection && model.collection.trim() ? upper(model.collection) : upper(model.name),
+    model: set ? pieces.map((p) => p.name).join(' · ') : modelLine(model),
+    lookbookSlug: !set && isLookbookSlug(model.lookbook) ? model.lookbook : null,
     opensAt: s.opensAt,
-    image: typeof model.imageUrl === 'string' && MEDIA_SRC.test(model.imageUrl) ? { src: model.imageUrl, alt: RELEASES.photosLabel(upper(s.title)) } : null,
+    image: set ? null : typeof model.imageUrl === 'string' && MEDIA_SRC.test(model.imageUrl) ? { src: model.imageUrl, alt: RELEASES.photosLabel(upper(s.title)) } : null,
     description: s.description && s.description.trim() ? s.description.trim() : null,
     rows,
     seedHash: groupHex(seedHashHex),
@@ -335,9 +416,10 @@ export function releaseSheet(s: DropSheet, offsetMinutes: number): ReleaseSheetM
     drawn: state === 'DRAWN',
     guaranteed: state === 'DRAWN' && Array.isArray(s.guaranteed) ? s.guaranteed.filter((x) => x && isReleaseId(x.id) && Number.isInteger(x.pieces)) : [],
     sizes,
-    rule: sizes.length > 0 ? RELEASES.ruleSizes : RELEASES.rule,
+    rule: set ? SETS.rule : sizes.length > 0 ? RELEASES.ruleSizes : RELEASES.rule,
     calendarHref: state === 'UPCOMING' || state === 'OPEN' ? `/api/v1/drops/${encodeURIComponent(s.id)}/calendar.ics` : null,
     selected: s.rule === 'SELECTED' ? RELEASES.selected : null,
+    set: set ? { name: upper(set.name), line: SETS.line(pieces.length), images: tiles?.images ?? [], pieces } : null,
   };
 }
 
@@ -346,7 +428,14 @@ export function drawSizes(s: Pick<DropSheet, 'sizes' | 'state'>): DrawSizeModel[
   const open = stateOf(s.state) !== 'DRAWN' && stateOf(s.state) !== 'CANCELLED';
   return (Array.isArray(s.sizes) ? s.sizes : [])
     .filter((z) => z && typeof z.id === 'string' && typeof z.label === 'string' && z.label.trim() !== '' && Number.isInteger(z.pieces) && z.pieces > 0)
-    .map((z) => ({ id: z.id, label: z.label.trim(), pieces: z.pieces, reserved: Number.isInteger(z.reserved) && z.reserved > 0 ? z.reserved : 0, full: open && z.full === true }));
+    .map((z) => ({
+      id: z.id,
+      label: z.label.trim(),
+      ...(Number.isInteger(z.piece) ? { piece: z.piece } : {}),
+      pieces: z.pieces,
+      reserved: Number.isInteger(z.reserved) && z.reserved > 0 ? z.reserved : 0,
+      full: open && z.full === true,
+    }));
 }
 
 /** Where YOUR SIZE's first size comes from: the entry's, YOUR SIZES' (to be confirmed), the only one. */
@@ -362,6 +451,47 @@ export function drawPick(sizes: readonly DrawSizeModel[], entry: { size?: DrawSi
   if (entry?.size && known(entry.size.id)) return { sizeId: entry.size.id, from: 'entry' };
   if (savedSize && known(savedSize.id)) return { sizeId: savedSize.id, from: 'saved' };
   return sizes.length === 1 ? { sizeId: sizes[0]!.id, from: 'only' } : { sizeId: null, from: null };
+}
+
+/**
+ * A set's draw (macro scope K44 T1): each piece's size preselected, as a model's draw's (`drawPick`): the entry's, YOUR
+ * SIZES' for that piece (the server's `savedSizes`), the only one; none otherwise (the collector picks one).
+ */
+export function setPick(
+  pieces: readonly SetPieceModel[],
+  entry: { sizes?: readonly PieceSizeRef[] | null } | null,
+  saved: readonly PieceSizeRef[] | null | undefined,
+): Map<number, { sizeId: string; from: DrawPickFrom }> {
+  const out = new Map<number, { sizeId: string; from: DrawPickFrom }>();
+  for (const p of pieces) {
+    const own = Array.isArray(entry?.sizes) ? entry.sizes.find((x) => x?.piece === p.piece) : undefined;
+    const yours = Array.isArray(saved) ? saved.find((x) => x?.piece === p.piece) : undefined;
+    const known = (id: string | undefined) => typeof id === 'string' && p.sizes.some((z) => z.id === id);
+    if (own && known(own.id)) out.set(p.piece, { sizeId: own.id, from: 'entry' });
+    else if (yours && known(yours.id)) out.set(p.piece, { sizeId: yours.id, from: 'saved' });
+    else if (p.sizes.length === 1) out.set(p.piece, { sizeId: p.sizes[0]!.id, from: 'only' });
+  }
+  return out;
+}
+
+/** The sizes a set's entry sends, in the set's order, once every piece has one; null while one is missing. */
+export function setChoice(pieces: readonly SetPieceModel[], picked: ReadonlyMap<number, { sizeId: string }>): { piece: number; sizeId: string }[] | null {
+  const out = pieces.map((p) => ({ piece: p.piece, sizeId: picked.get(p.piece)?.sizeId ?? '' }));
+  return out.length > 0 && out.every((x) => x.sizeId !== '' && pieces.find((p) => p.piece === x.piece)!.sizes.some((z) => z.id === x.sizeId)) ? out : null;
+}
+
+/** Under a piece's sizes while entries are open: its size picked whose pieces are all reserved, said with the piece; else null. */
+export function setPickNote(p: SetPieceModel, picked: string | null, state: DropState): string | null {
+  const z = p.sizes.find((x) => x.id === picked);
+  return z && z.full && state === 'OPEN' ? SETS.openFull(z.label, p.name) : null;
+}
+
+/** An entry's sizes (a set's draw) in the set's order, as labels; empty without them. */
+export function entrySizes(entry: { sizes?: readonly PieceSizeRef[] | null } | null): string[] {
+  return (Array.isArray(entry?.sizes) ? [...entry.sizes] : [])
+    .filter((x) => x && Number.isInteger(x.piece) && typeof x.label === 'string' && x.label.trim() !== '')
+    .sort((a, b) => a.piece - b.piece)
+    .map((x) => x.label.trim());
 }
 
 /**
@@ -402,7 +532,9 @@ export function drawLines(entries: readonly DrawEntry[], yours: string | null): 
     .map((e) => {
       const line = RELEASES.entryLine(e.rank, tierLabel(e.tier), Math.max(0, Math.trunc(e.seniority) || 0));
       const size = e.size && typeof e.size.label === 'string' && e.size.label.trim() ? e.size.label.trim() : null;
-      return { id: e.id, rank: e.rank, line: size ? RELEASES.entryLineIn(line, size) : line, yours: e.id === yours };
+      // Macro scope K44 T1: a set's entry, every size it was drawn in.
+      const sizes = entrySizes(e);
+      return { id: e.id, rank: e.rank, line: sizes.length > 0 ? SETS.entryLine(line, sizes) : size ? RELEASES.entryLineIn(line, size) : line, yours: e.id === yours };
     });
 }
 
@@ -448,7 +580,7 @@ function reservingTier(tier: number | undefined): string | null {
  */
 export function entryModel(
   release: { id: string; title: string; state: DropState; opensAt: string; earlyAccess?: EarlyAccess | null; full?: boolean; eligible?: boolean },
-  entry: (Pick<ClubEntry, 'id' | 'status' | 'rank' | 'respondBy'> & { reserved?: boolean; size?: DrawSizeRef | null }) | null,
+  entry: (Pick<ClubEntry, 'id' | 'status' | 'rank' | 'respondBy'> & { reserved?: boolean; size?: DrawSizeRef | null; sizes?: PieceSizeRef[] }) | null,
   opts: { offsetMinutes: number; tier?: number },
 ): EntryModel {
   const st = RELEASES.status;
@@ -505,12 +637,14 @@ export function entryModel(
   const status = reserved ? RELEASES.reservedLabel : (RELEASES.statusLabel[entry.status as DropEntryStatus] ?? null);
   // Plan NEXT LOT §3.6.F: an entry in a draw with sizes says its size, on its label line and in its sentence.
   const size = entry.size && typeof entry.size.label === 'string' && entry.size.label.trim() ? entry.size.label.trim() : null;
-  const label = status && size ? RELEASES.sizes.label(status, size) : status;
+  // Macro scope K44 T1: an entry of a set's draw, every size on its label (ENTERED · SIZE 17 · 52 · 45).
+  const sizes = entrySizes(entry);
+  const label = status && sizes.length > 0 ? SETS.label(status, sizes) : status && size ? RELEASES.sizes.label(status, size) : status;
   const base = { label, entryId: isReleaseId(entry.id) ? entry.id : null, canEnter: false, canWithdraw: false, canReserve: false, write: null };
   if (release.state === 'CANCELLED') return { ...base, sentence: st.cancelled };
   switch (entry.status) {
     case 'ENTERED':
-      return { ...base, sentence: open ? (size ? st.enteredIn(size) : st.entered) : st.enteredClosed, canWithdraw: release.state === 'OPEN' || release.state === 'CLOSED' };
+      return { ...base, sentence: open ? (sizes.length > 0 ? SETS.entered : size ? st.enteredIn(size) : st.entered) : st.enteredClosed, canWithdraw: release.state === 'OPEN' || release.state === 'CLOSED' };
     case 'WITHDRAWN':
       return { ...base, sentence: open ? st.withdrawn : st.withdrawnClosed, canEnter: open };
     case 'SELECTED': {
@@ -600,6 +734,8 @@ export interface PastCardModel {
   /** `25 PIECES`: the quantity as announced. */
   pieces: string;
   image: ReleasePhoto | null;
+  /** Macro scope K44 T1: a set's release, its line, its pieces' names and photographs, each from its stage; null for a model's. */
+  set: SetCardModel | null;
 }
 
 const dayFormatters = new Map<string, Intl.DateTimeFormat>();
@@ -628,6 +764,25 @@ export function pastCards(items: readonly PastRelease[], localZone: string): Pas
     if (!isReleaseId(c?.id) || (c.kind !== 'LIVE' && c.kind !== 'DRAW')) continue;
     const m = c.model ?? { name: null, type: null, collection: null };
     const live = c.kind === 'LIVE';
+    // Macro scope K44 T1: a set's release, under its set's name (a LIVE RELEASE's from its name's stage).
+    const set = c.set ? setCard(c.set.pieces) : null;
+    if (set) {
+      const name = typeof c.set!.name === 'string' && c.set!.name.trim() ? upper(c.set!.name) : null;
+      const title = live ? (name ?? RELEASES.past.kind.LIVE) : upper(c.title ?? '');
+      out.push({
+        id: c.id,
+        href: releasePath(c.id),
+        kind: RELEASES.past.kind[c.kind],
+        title,
+        model: set.names ?? '',
+        line: RELEASES.past.line(zonedDate(c.opensAt, localZone), upper(c.quantityLine)),
+        date: zonedDate(c.opensAt, localZone),
+        pieces: upper(c.quantityLine),
+        image: null,
+        set,
+      });
+      continue;
+    }
     // A LIVE RELEASE is named by its model, from its name's stage (one ended before it: LIVE RELEASE); a draw by its title.
     const named = typeof m.name === 'string' && m.name.trim() !== '';
     const title = live ? (named ? upper(modelWithVariant(m.name!, m.variant)) : RELEASES.past.kind.LIVE) : upper(c.title ?? '');
@@ -642,6 +797,7 @@ export function pastCards(items: readonly PastRelease[], localZone: string): Pas
       date: zonedDate(c.opensAt, localZone),
       pieces: upper(c.quantityLine),
       image: typeof c.imageUrl === 'string' && MEDIA_SRC.test(c.imageUrl) ? { src: c.imageUrl, alt: RELEASES.photosLabel(title) } : null,
+      set: null,
     });
   }
   return out;

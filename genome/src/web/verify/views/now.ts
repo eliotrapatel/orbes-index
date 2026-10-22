@@ -48,11 +48,12 @@ import {
   type NowTop,
 } from '../now-model.js';
 import { lookbookSheetPath } from '../lookbook-model.js';
+import type { SetCardModel } from '../releases-model.js';
 import type { SessionStore } from '../session.js';
 import type { CircleCard, ClubStatus, DropCard, LiveCard, LookbookCard, MessagesUnread, OwnedPiece } from '../types.js';
 import { CIRCLE_PATH, computerClock, listLine, LOOKBOOK_PATH, PIECES_PATH, viewRoot, withNumerals } from './common.js';
 import { CircleCardLines } from './invitation.js';
-import { appAnchor, countdown, fadedPhoto, icon, lift, loadingState, modelTitle, plateCard, textLink, variantDots } from './nocturne.js';
+import { appAnchor, countdown, fadedPhoto, icon, lift, loadingState, modelTitle, photoTiles, plateCard, textLink, variantDots } from './nocturne.js';
 import { openMessages, type MessagesPart } from './write.js';
 
 export interface NowDeps {
@@ -290,12 +291,40 @@ class Now implements NowView {
     return modelTitle(tag, cls, text, model);
   }
 
+  /**
+   * A release's photograph at the head of NOW, or (macro scope K44 T1) a set's pieces side by side; without one, or once
+   * none can be loaded, the words open where it would have been.
+   */
+  private heroPicture(single: { src: string; alt: string } | null, set: SetCardModel | null): HTMLElement | null {
+    if (set && set.images.length > 1) {
+      const tiles = photoTiles(set.images, {
+        eager: true,
+        onEmpty: () => {
+          const hero = tiles.parentElement;
+          tiles.remove();
+          hero?.classList.add('now__hero--bare');
+          hero?.querySelector('.n-lift')?.classList.add('now__bare');
+        },
+      });
+      return tiles;
+    }
+    const one = set && set.images.length === 1 ? set.images[0]! : single;
+    return one ? fadedPhoto(one.src, one.alt, { eager: true }) : null;
+  }
+
+  /** A set's pieces' names under its line, each kept whole (macro scope K44 T1); none for a model's release. */
+  private setNames(set: SetCardModel | null): HTMLElement | null {
+    if (!set?.names) return null;
+    // Each piece's name kept whole on its line (no-break spaces inside it), the line breaking only between them.
+    return h('p', { class: 'n-g n-lb now__pieces' }, ...withNumerals(set.names.split(' · ').map((n) => n.replace(/ /g, '\u00a0')).join(' · ')));
+  }
+
   /** A LIVE RELEASE leads (C1, C10). */
   private liveSection(m: LiveHeroModel): HTMLElement {
     const kind = h('p', { class: 'n-g n-lb' });
     const clock = h('div', { class: 'now__clock', attrs: { 'aria-live': 'off' } });
     this.hero = { model: m, kind, clock, key: '' };
-    const picture = m.picture ? fadedPhoto(m.picture.src, m.picture.alt, { eager: true }) : null;
+    const picture = this.heroPicture(m.set ? null : m.picture, m.set);
     return h(
       'section',
       { class: ['now__hero', picture ? null : 'now__hero--bare'], attrs: { 'aria-label': NOW.sections.release } },
@@ -305,6 +334,7 @@ class Now implements NowView {
           kind,
           this.title('h1', ['n-g', 'n-t1', 'now__title'], m.title, m.model),
           m.line ? h('p', { class: 'n-g n-lb now__type' }, ...withNumerals(m.line)) : null,
+          this.setNames(m.set),
           clock,
           h('p', { class: 'n-g n-lb now__when' }, ...withNumerals(m.when.paris)),
           m.when.local ? h('p', { class: 'n-g n-lb now__local' }, ...withNumerals(m.when.local)) : null,
@@ -348,7 +378,7 @@ class Now implements NowView {
 
   /** A draw leads (C42). */
   private drawSection(m: DrawLeadModel): HTMLElement {
-    const picture = m.image ? fadedPhoto(m.image.src, m.image.alt, { eager: true }) : null;
+    const picture = this.heroPicture(m.image, m.set);
     return h(
       'section',
       { class: ['now__hero', picture ? null : 'now__hero--bare'], attrs: { 'aria-label': NOW.sections.release } },
@@ -356,8 +386,9 @@ class Now implements NowView {
       lift(
         [
           h('p', { class: 'n-g n-lb', text: m.kind }),
-          this.title('h1', ['n-g', 'n-t1', 'now__title'], m.title, firstWord(m.model)),
+          this.title('h1', ['n-g', 'n-t1', 'now__title'], m.title, m.set ? m.titleName : firstWord(m.model)),
           h('p', { class: 'n-g n-lb now__type' }, ...withNumerals(m.model)),
+          this.setNames(m.set),
           m.price ? h('p', { class: 'n-num now__price', text: m.price }) : null,
           this.drawLine(m, 'now__line'),
           m.local ? h('p', { class: 'n-sm n-num now__local-time' }, ...computerClock(m.local)) : null,
@@ -389,6 +420,7 @@ class Now implements NowView {
           h('p', { class: 'n-g n-lb', text: m.kind }),
           h('h2', { class: 'n-g n-t2 now__card-title' }, ...withNumerals(m.title)),
           h('p', { class: 'n-g n-lb now__card-model' }, ...withNumerals(m.model)),
+          m.set?.names ? h('p', { class: 'n-g n-lb now__card-model now__card-pieces' }, ...withNumerals(m.set.names)) : null,
           m.price ? h('p', { class: 'n-num now__card-price', text: m.price }) : null,
           this.drawLine(m, 'now__card-line'),
           h('p', { class: 'now__card-link' }, textLink(RELEASES.see, { href: m.href, onOpen: () => this.deps.onRelease(m.id) })),

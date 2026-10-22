@@ -1997,6 +1997,65 @@ export const PHONE_STATES: readonly UiState[] = [
   // refusal in its place, as a LIVE RELEASE's; signed out, the sign-in's lead says the release is for selected collectors.
   { id: 'draw-selected', title: 'A draw FOR SELECTED COLLECTORS, open, for a collector among them: the rule in THE RELEASE, ENTER THE DRAW', refs: ['F4'], variant: 'draw-selected', as: you, path: release('draw'), ready: '.view--release:has(.release__for) .release__enter' },
   { id: 'draw-selected-not-eligible', title: 'A draw FOR SELECTED COLLECTORS, open, for a collector not among them: FOR SELECTED COLLECTORS, why, and that the account does not meet the rule, in place of ENTER THE DRAW', refs: ['F4'], variant: 'draw-selected', as: 'guest', path: release('draw'), ready: '.view--release:has(.release__for) .release__refusal' },
+  // ── THE SET (lot M3, K44 T1 to T3), on its own stage (set): THE RELEASES with its LIVE RELEASES (at the photograph's
+  // stage: its pieces side by side, their names; not revealed yet) and its October draw; PAST; NOW led by its LIVE
+  // RELEASE; the October draw's pickers (YOUR SIZES' preselection), every size chosen with a size full in one piece, an
+  // entry with every size; the first draw drawn (PLACE HELD, WAITING LIST); YOUR ORDERS (a set RESERVED, a set delivered
+  // with RETURN THE SET, its HALO exchanged), then RETURN THE SET asked (its write, last) ──
+  { id: 'set-releases', title: 'THE RELEASES with THE SET: its LIVE RELEASE at the photograph’s stage (its pieces side by side, THE SET · 3 PIECES, their names, 1 SET PER PERSON), its second not revealed yet, its October draw (lot M3, T1)', refs: ['M3'], variant: 'set', as: you, path: at('/verify/releases'), ready: '.view--releases article.live-card .n-tiles' },
+  {
+    id: 'set-past',
+    title: 'THE RELEASES, PAST, with THE SET’s draws drawn: their pieces side by side, THE SET · 3 PIECES, 2 SETS (lot M3, T1)',
+    refs: ['M3'],
+    variant: 'set',
+    as: you,
+    path: at('/verify/releases'),
+    act: async (run) => {
+      await tab(run, 'PAST').click();
+      await run.page.locator('#releases-panel-past article.release-card .n-tiles').first().waitFor({ timeout: 20_000 });
+    },
+    ready: '#releases-panel-past article.release-card .n-tiles',
+  },
+  { id: 'set-now', title: 'NOW led by THE SET’s LIVE RELEASE: its pieces side by side, THE SET · 3 PIECES and their names; its October draw under it (lot M3, T1)', refs: ['M3'], variant: 'set', as: you, path: at('/verify'), ready: '.view--now[data-ready] .now__hero .n-tiles' },
+  { id: 'set-draw', title: 'THE SET’s October draw, open: ONE PRICE FOR THE SET, its sets and each piece’s sizes (HALO 56 full); YOUR SIZES, a picker per piece, the bracelet and the ring from YOUR SIZES, the necklace to choose; ENTER THE DRAW waiting (lot M3, T1)', refs: ['M3'], variant: 'set', as: you, path: release('setDraw'), ready: '.view--release .release__piece .release__yours-size' },
+  {
+    id: 'set-draw-chosen',
+    title: 'THE SET’s October draw: a size chosen for every piece, HALO 56 (every piece of it reserved, said under it), ENTER THE DRAW ready (lot M3, T1)',
+    refs: ['M3'],
+    variant: 'set',
+    as: you,
+    path: release('setDraw'),
+    act: async (run) => {
+      await run.page.locator('.view--release .release__piece[data-piece="2"] .release__sizes button', { hasText: /^56$/ }).click();
+      await run.page.locator('.view--release .release__piece[data-piece="3"] .release__sizes button', { hasText: /^45$/ }).click();
+      await run.page.locator('.view--release .release__enter:not([disabled])').waitFor();
+    },
+    ready: '.view--release .release__piece[data-piece="2"] .release__size-note',
+  },
+  { id: 'set-draw-entered', title: 'THE SET’s October draw, entered: ENTERED · SIZE 16 · 54 · 42, each piece’s size to change, WITHDRAW (lot M3, T1)', refs: ['M3'], variant: 'set', as: 'sizer', path: release('setDraw'), ready: '.view--release .release__piece .release__sizes button[aria-pressed="true"]' },
+  { id: 'set-draw-held', title: 'THE SET’s first draw, drawn: PLACE HELD · SIZE 17 · 52 · 45, THE ENTRIES with every size (lot M3, T1)', refs: ['M3'], variant: 'set', as: you, path: release('setDrawn'), ready: '.view--release .release__list .is-yours' },
+  { id: 'set-draw-waiting', title: 'THE SET’s first draw, drawn: WAITING LIST · SIZE 17 · 52 · 45, rank 3 (lot M3, T1)', refs: ['M3'], variant: 'set', as: 'newcomer', path: release('setDrawn'), ready: '.view--release .release__list .is-yours' },
+  {
+    id: 'set-orders',
+    title: 'MY PIECES, ORDERS with THE SET: a set RESERVED and a set delivered, each under THE SET · THE ORBITAL SET with ONE PRICE FOR THE SET; PIECE 1 OF 3; RETURN THE SET on the delivered pieces; the HALO exchanged for 54 (lot M3, T1 to T3)',
+    refs: ['M3'],
+    variant: 'set',
+    as: you,
+    path: at('/verify/pieces'),
+    act: (run) => piecesTab(run, 'ORDERS'),
+    ready: '.view--pieces :is(.n-pieces__set .pieces__return, .d-oset)',
+  },
+  {
+    id: 'set-orders-return',
+    title: 'RETURN THE SET asked on a piece of the delivered set: RETURN REQUESTED on every piece sent back, every piece of the set together (lot M3, T3)',
+    refs: ['M3'],
+    variant: 'set',
+    as: you,
+    path: at('/verify/pieces'),
+    mutates: true,
+    act: (run) => returnTheSet(run),
+    ready: '.view--pieces .n-pieces__set .n-pieces__request-label, .view--order .n-pieces__request-label',
+  },
   { id: 'draw-selected-signed-out', title: 'A draw FOR SELECTED COLLECTORS, signed out: the rule in THE RELEASE, the sign-in says the release is for selected collectors', refs: ['F4'], variant: 'draw-selected', path: release('draw'), ready: '.view--release:has(.release__for) :is(form, .d-signin-line)' },
   {
     id: 'pieces-draws',
@@ -2772,6 +2831,23 @@ async function openAddons(run: StateRun): Promise<void> {
   await run.page.locator(':is(.n-osheet, .d-oform) :is(form.form--order-addons, .n-osheet__none, .n-osheet__unreadable)').first().waitFor({ timeout: 20_000 });
 }
 
+/**
+ * RETURN THE SET (lot M3, T3) on the first piece of you's delivered set: on a phone its card's button and its sheet; on a
+ * computer that order's own page and its form; a reason given, the request sent, read once it is on the page.
+ */
+async function returnTheSet(run: StateRun): Promise<void> {
+  if (await onComputer(run)) {
+    await openOrderPage(run, /IN SEPTEMBER/);
+    await run.page.locator('.view--order .pieces__return').click();
+  } else {
+    await piecesTab(run, 'ORDERS');
+    await run.page.locator('.view--pieces .n-pieces__set .pieces__return').first().click();
+  }
+  await run.page.locator('#order-request-reason').selectOption('SIZE');
+  await button(run, 'SEND THE REQUEST').click();
+  await run.page.locator(':is(.view--pieces .n-pieces__set, .view--order) .n-pieces__request-label').first().waitFor({ timeout: 20_000 });
+}
+
 /** No unit left of the add-on `name` at the default location (written once per stage): a correction down to 0. */
 async function noneLeft(run: StateRun, name: string): Promise<void> {
   const { db, services } = run.stage.ctx;
@@ -2836,6 +2912,9 @@ const voidWarrantyAt = (w: DeskWidth): UiState =>
 /** The paid order IN BLUE's own page, packing begun (orders-delivery's writes): DELIVERY ADDRESS, ENGRAVING, DOCUMENTS with ORBES CARE CONDITIONS · PDF. */
 const orderDeliveryAt = (w: DeskWidth): UiState =>
   onDesk(phoneState('orders-delivery'), w, { name: 'order-delivery', extra: { ...andThen(phoneState('orders-delivery'), (run) => openOrderPage(run, /IN BLUE/)), ready: '.view--order .pieces__engraving-locked' } });
+/** A piece of you's delivered set on its own page (lot M3, T1 to T3): THE SET's part, RETURN THE SET. */
+const setOrderAt = (w: DeskWidth, light: boolean): UiState =>
+  onDesk(phoneState('set-orders'), w, { name: 'set-order', light, extra: { ...andThen(phoneState('set-orders'), (run) => openOrderPage(run, /IN SEPTEMBER/)), ready: '.view--order .d-order__row--set .d-oset__pieces' } });
 /** The add-ons' stage's reserved order on its own page (lot M3, D2): REMOVE and ADD AN ADD-ON in its ADD-ONS part. */
 const addonsOrderAt = (light: boolean): UiState =>
   onDesk(phoneState('addons-orders'), 1440, { name: 'addons-order', light, extra: { ...andThen(phoneState('addons-orders'), (run) => openOrderPage(run, /RESERVED/)), ready: '.view--order .pieces__addons-add' } });
@@ -2953,6 +3032,14 @@ const DESK_SHARDS: Record<string, readonly UiState[]> = {
     ...desk(1440, 'legal-terms', 'legal-terms-fr', 'legal-privacy', 'legal-faq', 'legal-index'),
     // An answer of ORBES Client Services (HANDOVER §5.8), on NOW: it writes, after the full demo's other desktop states.
     ...desk(1440, 'now-messages'),
+    // THE SET (lot M3, K44 T1) on its stage: THE RELEASES (also in light), NOW, PAST; the October draw's pickers (also in
+    // light and at 1024 × 768), every size chosen, an entry; the first draw's place held.
+    ...desk(1440, 'set-releases'),
+    onDesk(phoneState('set-releases'), 1440, { light: true }),
+    ...desk(1440, 'set-now', 'set-past', 'set-draw'),
+    onDesk(phoneState('set-draw'), 1440, { light: true }),
+    ...desk(1024, 'set-draw'),
+    ...desk(1440, 'set-draw-chosen', 'set-draw-entered', 'set-draw-held'),
   ],
   'desk-4': [
     // ── The other stages at 1440 × 900 ──
@@ -3067,7 +3154,16 @@ function inLight(name: string): UiState {
 export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.freeze({
   ...DESK_SHARDS,
   // ── HANDOVER §5.8's states in light at 1440 × 900 (each stage fresh: its writes once, in order) ──
-  'desk-9': UNSHOWN_IN_PREVIEW.map(inLight),
+  'desk-9': [
+    ...UNSHOWN_IN_PREVIEW.map(inLight),
+    // THE SET (lot M3, K44 T1 to T3) on its stage: YOUR ORDERS' rows under the set's head row; a set's piece on its own
+    // page (THE SET's part; also in light and at 1024 × 768); RETURN THE SET asked there, last.
+    ...desk(1440, 'set-orders'),
+    setOrderAt(1440, false),
+    setOrderAt(1440, true),
+    setOrderAt(1024, false),
+    ...desk(1440, 'set-orders-return'),
+  ],
   // ── The room's other screens at 1440 × 900, each staged for a computer (HANDOVER §5.4) ──
   // The line, secured with PAY, CONFIRMED, sold out in a size, the five ends, ENTER THE LINE; a LIVE RELEASE's rules and
   // not eligible; the room not eligible, then entered (its write, last of its stage); the after-room's join and its ends;

@@ -18,8 +18,8 @@
  */
 import { onComputer } from '../shared/desktop.js';
 import { isLookbookSlug } from '../shared/lookbook.js';
-import { LIVE, RELEASES } from './copy.js';
-import { afterRoomPath, isReleaseId, releasePath, tierLabel, zonedDate, type EntryModel, type MyEntryModel } from './releases-model.js';
+import { LIVE, RELEASES, SETS } from './copy.js';
+import { afterRoomPath, isReleaseId, releasePath, setCard, tierLabel, zonedDate, type EntryModel, type MyEntryModel, type SetCardModel } from './releases-model.js';
 import type {
   AfterRoomDoor,
   LiveAccess,
@@ -795,6 +795,18 @@ export interface LiveCardModel {
   reveals: RevealDate[];
   /** `428 COLLECTORS WILL BE THERE`, or null. */
   interest: string | null;
+  /** Macro scope K44 T1: a set's release, its line, its pieces' names and photographs, each from its stage; null for a model's. */
+  set: SetCardModel | null;
+}
+
+/** A set's LIVE RELEASE (macro scope K44 T1): its pieces as a card shows them; null for a model's release. */
+export function liveSet(c: Pick<LiveCard, 'set'>): SetCardModel | null {
+  return c.set ? setCard(c.set.pieces) : null;
+}
+
+/** The limit per collector: a set's counts sets (T4: `1 SET PER PERSON`). */
+export function perAccountLine(c: Pick<LiveCard, 'perAccount' | 'set'>): string {
+  return c.set ? SETS.perPerson(c.perAccount) : LIVE.perAccount(c.perAccount);
 }
 
 export function liveCards(cards: readonly LiveCard[], localZone: string): LiveCardModel[] {
@@ -806,14 +818,15 @@ export function liveCards(cards: readonly LiveCard[], localZone: string): LiveCa
       kind: c.phase === 'ANNOUNCED' ? LIVE.kind : `${LIVE.kind} · ${LIVE.phase[c.phase]}`,
       title: liveHeading(c) ?? LIVE.unnamed,
       when: releaseTime(c.opensAt, localZone),
-      line: [offerLine(c), LIVE.perAccount(c.perAccount)].join(' · '),
+      line: [offerLine(c), perAccountLine(c)].join(' · '),
       access: LIVE.forWhom(c.access.text),
       price: formatMoney(c.priceMinor, c.currency),
-      lines: [upper(c.quantityLine), LIVE.perAccount(c.perAccount), LIVE.forWhom(c.access.text)].filter((x) => x.length > 0),
+      lines: [upper(c.quantityLine), perAccountLine(c), LIVE.forWhom(c.access.text)].filter((x) => x.length > 0),
       opensAt: Date.parse(c.opensAt),
       picture: pictureOf(c),
       reveals: revealCalendar(c),
       interest: interestLine(c.interest),
+      set: liveSet(c),
     }));
 }
 

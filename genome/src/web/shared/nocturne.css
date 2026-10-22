@@ -166,6 +166,18 @@ body.nocturne .n-column > * {
   object-fit: contain;
 }
 
+/* THE SET (lot M3): its pieces' photographs side by side, each the house's crop. */
+.n-tiles {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  gap: 2px;
+}
+
+.n-tiles > img {
+  min-width: 0;
+}
+
 .n-sb {
   display: flex;
   justify-content: space-between;

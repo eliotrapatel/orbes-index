@@ -1050,6 +1050,11 @@
     inset: 0;
   }
 
+  /* THE SET (lot M3): its pieces' photographs stand side by side in the light too, each its tile. */
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) :is(.now__hero, .d-pframe, .n-releases__release) > .n-ph.n-tiles > img {
+    position: static;
+  }
+
   /* …24 px of white between the photograph's dissolve and the words (a short window's page frame may give them back:
      --d-gap, shared/desktop.ts fitFoot); a block without a photograph has none to keep, so its words stand as in the
      dark. */
@@ -1845,8 +1850,12 @@
     letter-spacing: var(--d-tr-d23);
   }
 
-  html:not(.d-touch) body.nocturne .n-releases__release :is(.n-releases__price, .n-releases__draw-price, .n-releases__model) {
+  html:not(.d-touch) body.nocturne .n-releases__release :is(.n-releases__price, .n-releases__draw-price, .n-releases__model, .n-releases__set) {
     margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne :is(.n-releases__release .n-releases__pieces, .now__hero .now__pieces) {
+    margin-top: var(--d-s2);
   }
 
   /* PAST: each release a list frame as LIVE's: its kind and date, its title (D3), its model and its pieces on the left;
@@ -2440,6 +2449,19 @@
   }
 
   html:not(.d-touch) body.nocturne .release__entry > :is(.release__yours, .release__size-note) {
+    margin-top: var(--d-s4);
+  }
+
+  /* THE SET (lot M3): a picker per piece, its name over its sizes, as YOUR SIZE's. */
+  html:not(.d-touch) body.nocturne .release__entry > .release__piece {
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .release__piece > :is(.release__sizes, .release__yours-size, .release__size-note) {
+    margin-top: var(--d-s3);
+  }
+
+  html:not(.d-touch) body.nocturne .release__entry > .release__yours-check {
     margin-top: var(--d-s4);
   }
 

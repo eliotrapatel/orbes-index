@@ -147,14 +147,15 @@ const PHONE_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> = Object.f
   draws: (s) => s.variant === 'draws' || s.variant === 'draw-sizes' || s.variant === 'draw-selected',
   stress: (s) => s.variant === 'stress' && !named('account')(s),
   // The queue of a paced release (macro scope of 2026-10-20, W2, W5, W6; lot M1, step M1.5), on its own stage: the room's
-  // shard holds its limit of states.
-  queue: (s) => s.variant === 'queue',
+  // shard holds its limit of states; THE SET (lot M3, K44: its releases, its draws, YOUR ORDERS), on its own stage (the
+  // draws' shard holds its limit).
+  queue: (s) => s.variant === 'queue' || s.variant === 'set',
   // The emails' screens (lot M1, step M1.19, E1–E3), on their own stage (the emails' channel on), their writes last.
   email: (s) => s.variant === 'email',
   // WORN (lot M2, D31), on its own stage: a piece's block in each state (the pieces' shard holds its limit of states);
   // the catalogue add-ons (lot M3, D2), on theirs: the hold, a place held, the salon, YOUR ORDERS and ADD AN ADD-ON.
   worn: (s) => s.variant === 'worn' || s.variant === 'addons',
-  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'queue' && s.variant !== 'email' && s.variant !== 'house' && s.variant !== 'worn' && s.variant !== 'addons' && s.variant !== 'draws' && s.variant !== 'draw-sizes' && s.variant !== 'draw-selected' && s.variant !== 'stress' && s.variant !== 'pairs' && !ORDER_STAGES.includes(s.variant) && !named('account')(s) && !profile(s) && !wishlist(s) && !birthday(s) && !careUsed(s) && !orbesCare(s),
+  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'queue' && s.variant !== 'email' && s.variant !== 'house' && s.variant !== 'worn' && s.variant !== 'addons' && s.variant !== 'draws' && s.variant !== 'draw-sizes' && s.variant !== 'draw-selected' && s.variant !== 'set' && s.variant !== 'stress' && s.variant !== 'pairs' && !ORDER_STAGES.includes(s.variant) && !named('account')(s) && !profile(s) && !wishlist(s) && !birthday(s) && !careUsed(s) && !orbesCare(s),
 });
 
 /** A computer's state (desktop: test/support/nocturne-states.ts DESK_STATES), never in a phone's shard. */

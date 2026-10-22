@@ -13,6 +13,8 @@
  *                              SIZE · PRICE · ENGRAVING · … · TOTAL       its terms; CARRIER, TRACKING NUMBER once shipped
  *                              TRACK THE SHIPMENT  [ WRITE TO ORBES CLIENT SERVICES ]
  *   ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ *   THE SET                    a set's piece (macro scope K44): THE SET · <name>, ONE PRICE FOR THE SET and its total,
+ *                              its pieces, each a link to its own page, this one marked
  *   DELIVERY ADDRESS           its address and CHANGE (the form in its place), ADD THE DELIVERY ADDRESS, or packing begun
  *   ENGRAVING                  what it is, ADD AN ENGRAVING or CHANGE THE ENGRAVING (the form), or packing begun
  *   ADD-ONS                    what they are, each REMOVE, ADD AN ADD-ON (the form: the add-ons available, their units,
@@ -27,12 +29,12 @@
  */
 import { h } from '../../shared/dom.js';
 import type { ApiClient } from '../api.js';
-import { ORDERS, PIECES } from '../copy.js';
+import { ORDERS, PIECES, SETS } from '../copy.js';
 import { orderContext } from '../messages-model.js';
 import { orderModels, type OrderModel } from '../orders-model.js';
 import type { SessionStore } from '../session.js';
 import type { AccountOrder } from '../types.js';
-import { listLine, PIECES_PATH, viewRoot, withNumerals } from './common.js';
+import { listLine, orderPagePath, PIECES_PATH, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
 import { appAnchor, button, definitionList, failedState, icon, loadingState, orderSteps, textLink } from './nocturne.js';
 import { OrderSheet, type OrderSheetRequest } from './order-sheet.js';
@@ -72,6 +74,8 @@ export interface OrderPageDeps {
   onMissing(): void;
   /** Signed out (reached by its address, or the session ended here): the sign-in page, then this page. */
   onSignIn(): void;
+  /** Macro scope K44: another piece of its set, its own page. */
+  onOrder?(reference: string): void;
 }
 
 export interface OrderPageView {
@@ -264,6 +268,7 @@ class OrderPage {
   /** The order's sections, each a row of the page: its label on the left, what it holds (or its form) on the right. */
   private sections(m: OrderModel): HTMLElement[] {
     const out: HTMLElement[] = [];
+    if (m.set) out.push(this.section('set', SETS.orders.title, this.setPart(m)));
     if (m.address) out.push(this.section('address', ORDERS.address.label, this.addressPart(m)));
     if (m.engraving) out.push(this.section('engraving', ORDERS.engraving.title, this.engravingPart(m)));
     if (m.addons) out.push(this.section('addons', ORDERS.addons.title, this.addonsPart(m)));
@@ -280,6 +285,29 @@ class OrderPage {
       h('div', { class: 'd-order__row-side' }, h('h2', { class: 'n-g d-order__row-label', id, text: label })),
       h('div', { class: 'd-order__row-main' }, ...content.filter((c): c is HTMLElement => c !== null)),
     );
+  }
+
+  /**
+   * THE SET (macro scope K44 T1 to T3): THE SET · <name> and its pieces, the set's one price and its total, then each of
+   * its pieces (its model, its size, its reference), a link to its own page, this one marked as the page's.
+   */
+  private setPart(m: OrderModel): (HTMLElement | null)[] {
+    const set = m.set!;
+    const rows = [...(set.price ? [[SETS.onePrice, set.price] as [string, string]] : []), ...(set.total ? [[SETS.orders.total, set.total] as [string, string]] : [])];
+    const pieces = set.pieces.map((p) => {
+      const reference = p.reference;
+      const words = [h('span', { class: 'n-g d-oset__piece-title' }, ...withNumerals(p.title)), h('span', { class: 'n-g n-lb d-oset__piece-line' }, ...listLine([p.size, reference].filter(Boolean).join(' · ')))];
+      if (p.id === m.id) return h('li', { class: 'd-oset__piece is-current', attrs: { 'aria-current': 'page' } }, ...words);
+      const a = appAnchor(orderPagePath(reference), ['d-oset__piece-link'], this.deps.onOrder ? () => this.deps.onOrder!(reference) : undefined, ...words);
+      a.setAttribute('aria-label', SETS.orders.pieceLabel(p.title, reference));
+      return h('li', { class: 'd-oset__piece' }, a);
+    });
+    return [
+      h('p', { class: 'n-g n-t3 d-oset__heading' }, ...withNumerals(set.name)),
+      h('p', { class: 'n-g n-lb d-oset__count' }, ...withNumerals(set.count)),
+      rows.length > 0 ? h('div', { class: 'd-order__terms d-oset__terms' }, definitionList(rows, { kind: 'kv' })) : null,
+      h('ul', { class: 'd-oset__pieces' }, ...pieces),
+    ];
   }
 
   /** DELIVERY ADDRESS: its lines and CHANGE (the form in their place), ADD THE DELIVERY ADDRESS, or why it no longer changes. */
@@ -344,7 +372,9 @@ class OrderPage {
       };
       out.push(
         h('p', { class: 'n-tx d-order__text pieces__returns-lead', text: r.lead }),
-        h('div', { class: 'd-order__asks' }, ask('RETURN', R.requestReturn, 'pieces__return'), ...(r.sizes.length > 0 ? [ask('EXCHANGE', R.exchange, 'pieces__exchange')] : [])),
+        // Macro scope K44 T3: a set's piece is returned only with its set.
+        r.set ? h('p', { class: 'n-sm d-order__note n-pieces__returns-whole', text: SETS.orders.returnWhole }) : null,
+        h('div', { class: 'd-order__asks' }, ask('RETURN', r.set ? SETS.orders.returnSet : R.requestReturn, 'pieces__return'), ...(r.sizes.length > 0 ? [ask('EXCHANGE', R.exchange, 'pieces__exchange')] : [])),
       );
     }
     return out;
@@ -403,6 +433,8 @@ class OrderPage {
     if (at >= 0) this.orders[at] = order;
     else this.orders.push(order);
     this.place();
+    // Macro scope K44 T3: a set's return asked here is every piece's: the orders read again, quietly.
+    if (order.set && order.case?.kind === 'RETURN') void this.read({ quiet: true });
   }
 
   /** A part of the card changed the order (DOCUMENTS never does; kept for the card's own interface). */

@@ -40,7 +40,11 @@
  * RELEASE's SIZES row; YOUR SIZE over the sizes, right above the actions it serves, preselected (the entry's size, YOUR
  * SIZES' with its two lines, the only one), ENTER THE DRAW waiting for a size, a size tapped changing an entry's at once
  * while entries are open, the sizes full greyed out during the early access; every label and sentence with the size;
- * its own rule; the list's size of each entry. THE DRAW: what a place drawn obliges to,
+ * its own rule; the list's size of each entry. A set's draw (macro scope K44 T1, plan MACRO M3 §5.4): its pieces'
+ * photographs side by side, THE SET · 3 PIECES, ONE PRICE FOR THE SET, its sets and each piece's sizes; YOUR SIZES, a
+ * picker per piece (its model's name over it), each preselected (the entry's, YOUR SIZES' with its line, the only one),
+ * ENTER THE DRAW once every piece has a size, a size tapped changing that piece's at once while entered and open, every
+ * size on the entry's label and the list's line, its own rule. THE DRAW: what a place drawn obliges to,
  * its rule word for word, its commitment, the seed's fingerprint; once drawn the seed, checked on this phone against the
  * fingerprint, and the entries by rank, the account's own marked, a hundred at a time, never said how many. Its last
  * line, HOW RELEASES WORK (plan NEXT-NINE, FT-01). After a reservation the page is read again: its places. The scan is the SCAN ring's, THE RELEASES the crumb's and the rail's.
@@ -53,7 +57,7 @@ import { h } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { addonRows, chosenUnits, rowsChoice, rowsLimit, withUnits, type AddonRowModel } from '../addons-model.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { ADDONS, GUARANTEE, HOW, LIVE, LOOKBOOK, RELEASES } from '../copy.js';
+import { ADDONS, GUARANTEE, HOW, LIVE, LOOKBOOK, RELEASES, SETS } from '../copy.js';
 import { HOW_PATH } from '../how-model.js';
 import { guaranteeBox, guaranteedLines, guaranteeFor } from '../guarantee-model.js';
 import { CHANGE_RETRY_MS, countdown as countdownGroups, liveCards, measureClock, nextChange, type LiveCardModel } from '../live-model.js';
@@ -64,24 +68,32 @@ import {
   drawSizeChoices,
   drawStoryModel,
   entryModel,
+  entrySizes,
   participationModel,
   pastCards,
   PastPages,
   PAST_PAGE_SIZE,
   releaseCards,
   releaseSheet,
+  setChoice,
+  setPick,
+  setPickNote,
+  type DrawPickFrom,
   type EntryModel,
   type ParticipationModel,
   type PastCardModel,
   type ReleaseCardModel,
+  type ReleasePhoto,
   type ReleaseRow,
   type ReleaseSheetModel,
+  type SetCardModel,
+  type SetPieceModel,
 } from '../releases-model.js';
 import type { SessionStore } from '../session.js';
-import type { ClubEntry, ClubGuarantee, DrawEntry, DrawEntryRead, DrawSizeRef } from '../types.js';
+import type { ClubEntry, ClubGuarantee, DrawEntry, DrawEntryRead, DrawSizeRef, PieceSizeRef } from '../types.js';
 import { lookbookSheetPath } from '../lookbook-model.js';
 import { dayAndHour, RELEASES_PATH, viewRoot, withNumerals } from './common.js';
-import { appAnchor, button, countdown, fadedPhoto, failedState, icon, loadingState, modelTitle, monogram, quietLine, sizeButtons, textLink } from './nocturne.js';
+import { appAnchor, button, countdown, fadedPhoto, failedState, icon, loadingState, modelTitle, monogram, photoTiles, quietLine, sizeButtons, textLink } from './nocturne.js';
 import { writeButton } from './write.js';
 import { storyButton } from './story.js';
 import { StoryCards } from '../story-card.js';
@@ -172,12 +184,24 @@ function timedLine(line: string, cls: (string | null)[]): HTMLParagraphElement {
  * A release's photograph, whole and faded, and its words lifted onto its foot; without one (or once it cannot be
  * loaded) the words open where it would have been, never a broken image.
  */
-function photographed(image: { src: string; alt: string } | null, words: HTMLElement, opts: { eager?: boolean; extraClass?: string; imgClass?: string; bare: string }): HTMLElement[] {
-  if (!image) {
+function photographed(image: { src: string; alt: string } | readonly ReleasePhoto[] | null, words: HTMLElement, opts: { eager?: boolean; extraClass?: string; imgClass?: string; bare: string }): HTMLElement[] {
+  // Macro scope K44 T1: a set's pieces, their photographs side by side; one alone stands as a release's.
+  const images = Array.isArray(image) ? image : null;
+  if (images && images.length > 1) {
+    const tiles = photoTiles(images, { eager: opts.eager, extraClass: opts.extraClass, onEmpty: () => {
+      tiles.remove();
+      words.classList.add(opts.bare);
+    } });
+    tiles.dataset.photo = '';
+    if (opts.imgClass) for (const img of tiles.querySelectorAll('img')) img.classList.add(opts.imgClass);
+    return [tiles, words];
+  }
+  const one = images ? (images[0] ?? null) : (image as { src: string; alt: string } | null);
+  if (!one) {
     words.classList.add(opts.bare);
     return [words];
   }
-  const photo = fadedPhoto(image.src, image.alt, { eager: opts.eager, extraClass: opts.extraClass });
+  const photo = fadedPhoto(one.src, one.alt, { eager: opts.eager, extraClass: opts.extraClass });
   photo.dataset.photo = '';
   if (opts.imgClass) photo.querySelector('img')?.classList.add(opts.imgClass);
   photo.querySelector('img')?.addEventListener(
@@ -189,6 +213,18 @@ function photographed(image: { src: string; alt: string } | null, words: HTMLEle
     { once: true },
   );
   return [photo, words];
+}
+
+/**
+ * A set's lines under its title (macro scope K44 T1): THE SET · 3 PIECES, then its pieces' names once said
+ * (`MONOLITHE IN STEEL · HALO · LINEA`), each piece kept whole on its line.
+ */
+function setLines(set: SetCardModel | null, cls: string, withLine = true): HTMLElement[] {
+  if (!set) return [];
+  const out: HTMLElement[] = [];
+  if (withLine) out.push(h('p', { class: ['n-g', 'n-lb', 'n-releases__set', `${cls}-set`] }, ...withNumerals(set.line)));
+  if (set.names) out.push(h('p', { class: ['n-g', 'n-lb', 'n-releases__pieces', `${cls}-pieces`] }, ...set.names.split(' · ').flatMap((n, i) => [...(i > 0 ? [' · '] : []), h('span', { class: 'n-nw' }, ...withNumerals(n))])));
+  return out;
 }
 
 /** OPENS IN and its countdown, on the server's clock, while T0 is ahead; nothing once it has come. */
@@ -467,6 +503,7 @@ class ListPage {
       { class: 'n-px n-ctr n-releases__words' },
       h('p', { class: 'n-g n-lb live-card__kind', text: c.kind }),
       h('h2', { class: 'n-g n-t1 n-releases__title live-card__title', id: titleId }, ...withNumerals(c.title)),
+      ...setLines(c.set, 'live-card'),
       h('p', { class: 'n-num n-releases__price live-card__price', text: c.price }),
       h('p', { class: 'n-g n-lb n-releases__when live-card__when' }, ...withNumerals(c.when.paris)),
       c.when.local ? h('p', { class: 'n-g n-lb n-releases__local live-card__when live-card__when--local' }, ...withNumerals(c.when.local)) : null,
@@ -489,7 +526,17 @@ class ListPage {
       this.see(c.id, c.href, titleId, primary, 'live-card__link'),
     );
     const article = h('article', { class: 'live-card n-releases__release', attrs: { 'aria-labelledby': titleId } });
-    if (c.picture) {
+    // Macro scope K44 T1: a set's pieces, side by side from the photograph's stage; the seal again should none load.
+    if (c.set && c.set.images.length > 0) {
+      words.classList.add('n-lift');
+      const tiles = photoTiles(c.set.images, { extraClass: 'n-releases__photo', onEmpty: () => {
+        tiles.replaceWith(this.seal());
+        words.classList.remove('n-lift');
+        words.classList.add('n-releases__sealed');
+      } });
+      for (const img of tiles.querySelectorAll('img')) img.classList.add('live-card__img', 'live-card__img--photo');
+      article.append(tiles, words);
+    } else if (c.picture) {
       words.classList.add('n-lift');
       const photo = fadedPhoto(c.picture.src, c.picture.alt, { extraClass: ['n-releases__photo', c.picture.kind === 'silhouette' ? 'n-releases__photo--silhouette' : null].filter(Boolean).join(' ') });
       photo.querySelector('img')?.classList.add('live-card__img', `live-card__img--${c.picture.kind}`);
@@ -520,11 +567,12 @@ class ListPage {
       { class: 'n-px n-ctr n-lift n-releases__words' },
       h('p', { class: 'n-g n-lb release-card__state', text: `${RELEASES.past.kind.DRAW} · ${c.stateLabel}` }),
       (() => {
-        const t = modelTitle('h2', ['n-g', 'n-t1', 'n-releases__title', 'n-releases__title--draw', 'release-card__title'], c.title, modelName(c.model));
+        const t = modelTitle('h2', ['n-g', 'n-t1', 'n-releases__title', 'n-releases__title--draw', 'release-card__title'], c.title, c.set ? c.titleName : modelName(c.model));
         t.id = titleId;
         return t;
       })(),
       c.model ? h('p', { class: 'n-g n-lb n-releases__model release-card__model' }, ...withNumerals(c.model)) : null,
+      ...setLines(c.set, 'release-card', false),
       c.price ? h('p', { class: 'n-num n-releases__draw-price release-card__price', text: c.price }) : null,
       timedLine(c.line, ['n-g', 'n-lb', 'n-ivc', 'n-num', 'n-releases__line', 'release-card__line']),
       this.see(c.id, c.href, titleId, primary, 'release-card__link'),
@@ -532,7 +580,7 @@ class ListPage {
     return h(
       'article',
       { class: 'release-card n-releases__release', data: { state: c.state }, attrs: { 'aria-labelledby': titleId } },
-      ...photographed(c.image, words, { bare: 'n-releases__bare', extraClass: 'n-releases__photo release-card__frame', imgClass: 'release-card__img' }),
+      ...photographed(c.set ? c.set.images : c.image, words, { bare: 'n-releases__bare', extraClass: 'n-releases__photo release-card__frame', imgClass: 'release-card__img' }),
     );
   }
 }
@@ -661,12 +709,12 @@ class PastList {
       { class: 'n-px n-lift n-releases__words' },
       h('p', { class: 'n-g n-lb release-card__state' }, ...withNumerals([c.kind, c.date].filter(Boolean).join(' · '))),
       h('h2', { class: 'n-g n-t2 n-releases__past-title release-card__title', id: titleId }, ...withNumerals(c.title)),
-      c.model ? h('p', { class: 'n-g n-lb n-releases__past-model release-card__model' }, ...withNumerals(c.model)) : null,
+      ...(c.set ? setLines(c.set, 'release-card') : [c.model ? h('p', { class: 'n-g n-lb n-releases__past-model release-card__model' }, ...withNumerals(c.model)) : null]),
       h('p', { class: 'n-g n-lb n-ivc n-releases__past-pieces release-card__line' }, ...withNumerals(c.pieces)),
       mark,
       h('p', { class: 'n-releases__see-line' }, link),
     );
-    return h('article', { class: 'release-card release-card--past n-releases__release', attrs: { 'aria-labelledby': titleId } }, ...photographed(c.image, words, { bare: 'n-releases__bare', extraClass: 'n-releases__photo release-card__frame', imgClass: 'release-card__img' }));
+    return h('article', { class: 'release-card release-card--past n-releases__release', attrs: { 'aria-labelledby': titleId } }, ...photographed(c.set ? c.set.images : c.image, words, { bare: 'n-releases__bare', extraClass: 'n-releases__photo release-card__frame', imgClass: 'release-card__img' }));
   }
 
   // ── The account's part ──────────────────────────────────────────────────
@@ -747,11 +795,19 @@ function releaseRows(rows: readonly ReleaseRow[]): HTMLDListElement {
         h(
           'dd',
           { class: 'n-kv__value n-release__value' },
-          h('span', { class: 'n-num release__utc', text: r.value }),
+          r.groups ? null : h('span', { class: 'n-num release__utc', text: r.value }),
+          // Macro scope K44 T1: a set's SIZES, each piece's name over its sizes.
+          ...(r.groups ?? []).flatMap((g, i) => [
+            ...(i > 0 ? [h('br')] : []),
+            h('span', { class: 'n-g n-lb release__group', text: g.head }),
+            ...g.lines.flatMap((line) => [h('br'), h('span', { class: 'n-num release__utc', text: line })]),
+          ]),
           r.local ? h('br') : null,
           r.local ? h('span', { class: 'n-sm n-num release__local', text: r.local }) : null,
           // Plan NEXT LOT §3.6.F: the SIZES row's further lines, one per size.
           ...(r.more ?? []).flatMap((line) => [h('br'), h('span', { class: 'n-num release__utc', text: line })]),
+          // Macro scope K44 T1: ONE PRICE FOR THE SET under a set's price.
+          ...(r.note ? [h('br'), h('span', { class: 'n-g n-lb release__note', text: r.note })] : []),
         ),
       ),
     ),
@@ -797,6 +853,12 @@ class ReleasePage {
   /** The size picked in YOUR SIZE (preselected, or tapped), and where a preselection came from. */
   private picked: string | null = null;
   private pickedFrom: 'entry' | 'saved' | 'only' | 'hand' | null = null;
+  /**
+   * Macro scope K44 T1, a set's draw: the sizes YOUR SIZES suggests for its pieces (the server's), and each piece's size
+   * picked (preselected, or tapped: `hand`), by piece.
+   */
+  private savedSizes: PieceSizeRef[] | null = null;
+  private setPicked = new Map<number, { sizeId: string; from: DrawPickFrom | 'hand' }>();
   /**
    * Plan MACRO M1 §3.3 (F4): whether the account may enter a draw opened to a segment (the server's `eligible`, read
    * with the entry; a DRAW_NOT_ELIGIBLE answer sets it false). True until known otherwise, the server refusing anyway.
@@ -877,6 +939,8 @@ class ReleasePage {
       this.savedSize = null;
       this.picked = null;
       this.pickedFrom = null;
+      this.savedSizes = null;
+      this.setPicked = new Map();
       this.eligible = true;
       this.addons = null;
       this.addonsError = null;
@@ -906,6 +970,7 @@ class ReleasePage {
       this.tier = Number(status.tier?.level) || 0;
       this.guarantee = guaranteeFor(status, id);
       this.savedSize = sized ? (read?.savedSize ?? null) : null;
+      this.savedSizes = sized && Array.isArray(read?.savedSizes) ? read.savedSizes : null;
       this.eligible = read?.eligible !== false;
       const entry = status.entries.find((e) => e.dropId === id) ?? null;
       // Plan MACRO M3 §4.4 (D2): a place held, its add-ons read with it (left out should they not be read).
@@ -958,7 +1023,16 @@ class ReleasePage {
 
   /** YOUR SIZE's preselection (plan NEXT LOT §3.6.F), unless the collector tapped a size: the entry's, YOUR SIZES', the only one. */
   private preselect(entry: ClubEntry | null): void {
-    if (this.load.kind !== 'ready' || this.pickedFrom === 'hand') return;
+    if (this.load.kind !== 'ready') return;
+    const set = this.load.sheet.set;
+    if (set) {
+      // Each piece as a model's draw's size: a size tapped is kept; the others from the entry, YOUR SIZES, the only one.
+      const next = new Map<number, { sizeId: string; from: DrawPickFrom | 'hand' }>(setPick(set.pieces, entry, this.savedSizes));
+      for (const [piece, v] of this.setPicked) if (v.from === 'hand') next.set(piece, v);
+      this.setPicked = next;
+      return;
+    }
+    if (this.pickedFrom === 'hand') return;
     const pick = drawPick(this.load.sheet.sizes, entry, this.savedSize);
     this.picked = pick.sizeId;
     this.pickedFrom = pick.from;
@@ -981,8 +1055,25 @@ class ReleasePage {
     this.renderEntry();
   }
 
+  /**
+   * Macro scope K44 T1, a set's draw: a size tapped for a piece. An entry in the draw changes that piece's size at once
+   * (CHANGE SIZE, the other pieces kept) while entries are open; otherwise it is the size ENTER THE DRAW or RESERVE A
+   * PLACE will send for that piece, its YOUR SIZES line gone.
+   */
+  private pickPiece(piece: number, sizeId: string): void {
+    if (this.busy || this.load.kind !== 'ready') return;
+    const entry = this.entry.kind === 'ready' ? this.entry.entry : null;
+    if (entry && entry.status === 'ENTERED' && this.load.sheet.state === 'OPEN') {
+      if (!entry.sizes?.some((x) => x.piece === piece && x.id === sizeId)) void this.changeSize([{ piece, sizeId }], piece);
+      return;
+    }
+    this.setPicked.set(piece, { sizeId, from: 'hand' });
+    this.actionError = null;
+    this.renderEntry();
+  }
+
   /** CHANGE SIZE of the account's entry; a refusal reads as the server wrote it, the size kept as it was. */
-  private async changeSize(sizeId: string): Promise<void> {
+  private async changeSize(sizeId: string | { piece: number; sizeId: string }[], piece: number | null = null): Promise<void> {
     if (this.load.kind !== 'ready') return;
     const id = this.load.sheet.id;
     this.busy = true;
@@ -992,8 +1083,12 @@ class ReleasePage {
       const entry = await this.deps.api.changeDrawSize(id, sizeId);
       if (this.disposed) return;
       this.entry = { kind: 'ready', entry };
-      this.picked = entry.size?.id ?? sizeId;
-      this.pickedFrom = 'entry';
+      if (typeof sizeId === 'string') {
+        this.picked = entry.size?.id ?? sizeId;
+        this.pickedFrom = 'entry';
+      } else {
+        for (const x of entry.sizes ?? []) this.setPicked.set(x.piece, { sizeId: x.id, from: 'entry' });
+      }
     } catch (e) {
       if (this.disposed) return;
       this.deps.session.noteError(e);
@@ -1003,7 +1098,8 @@ class ReleasePage {
     }
     if (this.disposed) return;
     this.renderEntry();
-    this.entrySection.querySelector<HTMLElement>('.release__sizes button[aria-pressed="true"]')?.focus({ preventScroll: true });
+    const group = piece === null ? '.release__sizes' : `.release__sizes[data-piece="${piece}"]`;
+    this.entrySection.querySelector<HTMLElement>(`${group} button[aria-pressed="true"]`)?.focus({ preventScroll: true });
   }
 
   private async act(kind: 'enter' | 'withdraw' | 'reserve'): Promise<void> {
@@ -1014,8 +1110,10 @@ class ReleasePage {
     this.renderEntry();
     try {
       const api = this.deps.api;
-      // Plan NEXT LOT §3.6.F: ENTER and RESERVE in the size picked (a draw without sizes takes none).
-      const size = this.load.sheet.sizes.length > 0 ? this.picked : null;
+      // Plan NEXT LOT §3.6.F: ENTER and RESERVE in the size picked (a draw without sizes takes none); macro scope K44 T1,
+      // a set's draw in a size for each piece.
+      const set = this.load.sheet.set;
+      const size = set ? setChoice(set.pieces, this.setPicked) : this.load.sheet.sizes.length > 0 ? this.picked : null;
       const entry = kind === 'enter' ? await api.enterDrop(id, size) : kind === 'withdraw' ? await api.withdrawDrop(id) : await api.reserveDrop(id, size);
       if (this.disposed) return;
       this.entry = { kind: 'ready', entry };
@@ -1023,6 +1121,7 @@ class ReleasePage {
         this.picked = entry.size.id;
         this.pickedFrom = 'entry';
       }
+      for (const x of entry.sizes ?? []) this.setPicked.set(x.piece, { sizeId: x.id, from: 'entry' });
     } catch (e) {
       if (this.disposed) return;
       this.deps.session.noteError(e);
@@ -1125,10 +1224,10 @@ class ReleasePage {
    * or open (macro scope C1); drawn, the account's part in it (C29).
    */
   private renderHero(s: ReleaseSheetModel): void {
-    const key = JSON.stringify([s.id, s.image, s.eyebrow, s.title, s.stateLabel, s.access, s.calendarHref, s.drawn, this.part]);
+    const key = JSON.stringify([s.id, s.image, s.set?.images, s.eyebrow, s.title, s.stateLabel, s.access, s.calendarHref, s.drawn, this.part]);
     if (key === this.heroKey) return;
     this.heroKey = key;
-    const title = modelTitle('h1', ['n-g', 'n-t1', 'n-release__title', 'release__title'], s.title, modelName(s.model));
+    const title = modelTitle('h1', ['n-g', 'n-t1', 'n-release__title', 'release__title'], s.title, s.set ? s.set.name : modelName(s.model));
     title.id = 'release-title';
     // On a computer the frame's right block holds, under the state, the page's main action (YOUR ENTRY's): an element
     // of the desktop layout only, never shown on a phone (shared/desktop.css). When entries close is THE RELEASE's row
@@ -1150,7 +1249,7 @@ class ReleasePage {
       s.drawn ? h('p', { class: 'n-g n-t2 n-ivc n-release__over-word', text: RELEASES.over }) : null,
       s.drawn && this.part ? h('p', { class: 'n-state n-release__part release__part' }, ...(this.part === RELEASES.past.secured ? [icon('check', { small: true })] : []), this.part) : null,
     );
-    this.hero.replaceChildren(...photographed(s.image, words, { eager: true, bare: 'n-release__bare', extraClass: 'n-release__photo release__photo', imgClass: 'release__img' }));
+    this.hero.replaceChildren(...photographed(s.set ? s.set.images : s.image, words, { eager: true, bare: 'n-release__bare', extraClass: 'n-release__photo release__photo', imgClass: 'release__img' }));
     // Desktop: signed in, a draw that may offer ENTER THE DRAW or RESERVE A PLACE draws that button in its
     // frame's right block once the account's entry is read; until then (400 ms at most) the words are kept unseen in
     // their place, so the block never grows under the eye (a phone shows them at once, as before).
@@ -1200,7 +1299,9 @@ class ReleasePage {
         if (!now) return;
         // A draw with sizes: never entered from the frame with a size not seen; YOUR SIZE first (its size picked, else
         // the first it offers), where the size is checked, right above the action.
-        const sizes = this.entrySection.querySelector<HTMLElement>('.release__sizes');
+        // A set's draw: its first piece without a size, else its first.
+        const groups = [...this.entrySection.querySelectorAll<HTMLElement>('.release__sizes')];
+        const sizes = groups.find((g) => !g.querySelector('button[aria-pressed="true"]')) ?? groups[0];
         if (sizes) (sizes.querySelector<HTMLElement>('button[aria-pressed="true"]:not([disabled])') ?? sizes.querySelector<HTMLElement>('button:not([disabled])') ?? now).focus();
         else if (!now.disabled) {
           // The answer (ENTERED, PLACE RESERVED, or why not) is YOUR ENTRY's: the page is taken there, at once.
@@ -1261,8 +1362,14 @@ class ReleasePage {
       const entered = this.entry.entry?.status === 'ENTERED' && s.state === 'OPEN';
       const sized = s.sizes.length > 0 && (m.canEnter || m.canReserve || entered);
       const mode = m.canReserve && !m.canEnter ? 'reserve' : 'enter';
-      const choices = sized ? drawSizeChoices(s.sizes, this.picked, mode) : [];
-      if (sized) out.push(...this.sizePicker(s, choices, entered ? (this.entry.entry?.size?.label ?? null) : null));
+      const set = s.set;
+      const choices = sized && !set ? drawSizeChoices(s.sizes, this.picked, mode) : [];
+      // Macro scope K44 T1: a set's draw, a picker per piece; its actions wait for a size of every piece (one that can
+      // still be reserved, for RESERVE A PLACE).
+      const setWaits = set && sized ? setChoice(set.pieces, this.setPicked) === null : false;
+      const setFull = set && sized ? set.pieces.some((p) => drawSizeChoices(p.sizes, this.setPicked.get(p.piece)?.sizeId ?? null, 'reserve').some((c) => c.selected && c.unavailable)) : false;
+      if (sized && set) out.push(...this.setPickers(s, set.pieces, mode, entered ? entrySizes(this.entry.entry) : null, setWaits));
+      else if (sized) out.push(...this.sizePicker(s, choices, entered ? (this.entry.entry?.size?.label ?? null) : null));
       if (this.actionError) out.push(h('p', { class: 'n-sm n-ivc n-release__error form__error', attrs: { role: 'alert' }, text: this.actionError }));
       // The one filled button of the page: ENTER THE DRAW, or RESERVE A PLACE (P-X02, a PLATINE or PALLADIUM account
       // during the early access); should both be offered, the second is a hairline button. In a draw with sizes, each
@@ -1274,8 +1381,10 @@ class ReleasePage {
         return b;
       };
       const picked = choices.find((c) => c.selected) ?? null;
-      if (m.canEnter) out.push(action(RELEASES.enter, 'release__enter', () => void this.act('enter'), false, sized && picked === null));
-      if (m.canReserve) out.push(action(RELEASES.reserve, 'release__reserve', () => void this.act('reserve'), false, sized && (picked === null || drawSizeChoices(s.sizes, this.picked, 'reserve').some((c) => c.selected && c.unavailable))));
+      const enterWaits = set ? setWaits : sized && picked === null;
+      const reserveWaits = set ? setWaits || setFull : sized && (picked === null || drawSizeChoices(s.sizes, this.picked, 'reserve').some((c) => c.selected && c.unavailable));
+      if (m.canEnter) out.push(action(RELEASES.enter, 'release__enter', () => void this.act('enter'), false, enterWaits));
+      if (m.canReserve) out.push(action(RELEASES.reserve, 'release__reserve', () => void this.act('reserve'), false, reserveWaits));
       if (m.canWithdraw) out.push(action(RELEASES.withdraw, 'release__withdraw', () => void this.act('withdraw'), true));
       // BP-10: a place selected (drawn, reserved directly, concluded): SHARE TO STORIES, its card SELECTED.
       out.push(this.storyOpen(s, this.entry.entry));
@@ -1375,6 +1484,52 @@ class ReleasePage {
     }
     const note = drawPickNote(s.sizes, this.picked, s.state);
     if (note) out.push(h('p', { class: 'n-sm release__size-note', text: note }));
+    return out;
+  }
+
+  /**
+   * YOUR SIZES of a set's draw (macro scope K44 T1): its label (once entered and while entries are open, ENTERED · SIZE
+   * 17 · 52 · 45), then for each piece its name and type over its sizes in NOCTURNE's buttons (the one picked doubly
+   * ringed; during the early access a size whose pieces are all reserved greyed out), the size YOUR SIZES preselects for
+   * it said under them while it stands, or the sentence of a size picked whose pieces are all reserved; YOUR SIZES' check
+   * once under them all; while a piece has no size, that ENTER THE DRAW waits for every one.
+   */
+  private setPickers(s: ReleaseSheetModel, pieces: readonly SetPieceModel[], mode: 'enter' | 'reserve', entered: string[] | null, waits: boolean): HTMLElement[] {
+    const said = entered && entered.length > 0 ? SETS.label(RELEASES.statusLabel.ENTERED, entered) : SETS.yourSizes;
+    const out: HTMLElement[] = [h('p', { class: 'n-g n-lb release__size-label' }, ...withNumerals(said))];
+    let fromYours = false;
+    for (const p of pieces) {
+      const picked = this.setPicked.get(p.piece) ?? null;
+      const choices = drawSizeChoices(p.sizes, picked?.sizeId ?? null, mode);
+      const group = sizeButtons(
+        choices.map((c) => ({ id: c.id, label: c.label })),
+        { selected: picked?.sizeId ?? null, label: SETS.pickerLabel(p.name), onSelect: (id) => this.pickPiece(p.piece, id) },
+      );
+      group.classList.add('release__sizes');
+      group.dataset.piece = String(p.piece);
+      [...group.querySelectorAll<HTMLButtonElement>('button')].forEach((b, i) => {
+        const c = choices[i];
+        if (!c) return;
+        b.disabled = this.busy || (c.unavailable && !c.selected);
+        b.classList.toggle('is-gone', c.unavailable);
+        if (c.aria) b.setAttribute('aria-label', c.aria);
+      });
+      const saved = picked?.from === 'saved' ? p.sizes.find((z) => z.id === picked.sizeId) : undefined;
+      if (saved) fromYours = true;
+      const note = setPickNote(p, picked?.sizeId ?? null, s.state);
+      out.push(
+        h(
+          'div',
+          { class: 'release__piece', data: { piece: String(p.piece) } },
+          h('p', { class: 'n-g n-lb n-ivc release__piece-name' }, ...withNumerals(p.line)),
+          group,
+          saved ? h('p', { class: 'n-g n-lb release__yours-size' }, ...withNumerals(LIVE.there.fromYours(saved.label))) : null,
+          note ? h('p', { class: 'n-sm release__size-note', text: note }) : null,
+        ),
+      );
+    }
+    if (fromYours) out.push(h('p', { class: 'n-sm release__yours-check', text: LIVE.there.checkSize }));
+    if (waits && !entered) out.push(h('p', { class: 'n-sm release__size-note release__choose-each', text: SETS.chooseEach }));
     return out;
   }
 

@@ -165,6 +165,9 @@ describe('the releases\' list and pages (P-R03)', () => {
       line: '3 PIECES · ENTRIES CLOSE 14 OCT 2026 · 10:00 UTC',
       price: null,
       image: { src: media(1), alt: 'The model of MONOLITHE — RELEASE I, photographed by ORBES' },
+      // Lot M3 (K44 T1): a model's draw, no set; its model's name begins its title.
+      set: null,
+      titleName: 'MONOLITHE',
     });
     // NOCTURNE (addition 5): a draw's price on its card, as the house writes it; none without both its amount and currency.
     expect(releaseCards([card({ priceMinor: 420000, currency: 'EUR' })])[0]!.price).toBe('€\u00a04\u00a0200');
@@ -488,9 +491,10 @@ describe('THE RELEASES\' PAST (plan LIVE RELEASE+, choice 5)', () => {
       date: '11 OCT 2026',
       pieces: '25 PIECES',
       image: { src: media(1), alt: 'The model of MONOLITHE, photographed by ORBES' },
+      set: null,
     });
     expect(pastCards([past({ model: { name: 'Monolithe', type: 'Ring', collection: 'Orbit 2026', variant: 'Steel' } })], 'UTC')[0]).toMatchObject({ title: 'MONOLITHE IN STEEL' });
-    expect(draw).toEqual({ id: DRAW, href: `/verify/releases/${DRAW}`, kind: 'DRAW', title: 'ECLIPSE — RELEASE I', model: 'ECLIPSE · PENDANT', line: '1 SEP 2026 · 3 PIECES', date: '1 SEP 2026', pieces: '3 PIECES', image: null });
+    expect(draw).toEqual({ id: DRAW, href: `/verify/releases/${DRAW}`, kind: 'DRAW', title: 'ECLIPSE — RELEASE I', model: 'ECLIPSE · PENDANT', line: '1 SEP 2026 · 3 PIECES', date: '1 SEP 2026', pieces: '3 PIECES', image: null, set: null });
     // Ended before its name was revealed: LIVE RELEASE, nothing more; a photograph from the media route only.
     expect(pastCards([past({ title: null, model: { name: null, type: null, collection: null }, imageUrl: 'https://elsewhere.example/x.jpg' })], 'UTC')[0]).toMatchObject({ title: 'LIVE RELEASE', model: '', image: null });
     // Not a release: left out.

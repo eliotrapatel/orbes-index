@@ -188,6 +188,14 @@ export const DESKTOP_MOVED: readonly DesktopMoved[] = [
     now: 'Every photograph of the sheet on the computer’s grid; SHOW MORE under it once a sheet has more than 8.',
     removed: true,
   },
+  // Lot M3 (step M3.18, K44): THE SET's first draw, every entry with its sizes, the account's place held.
+  {
+    states: ['set-draw-held'],
+    values: ['1 · PLATINE · 0 YEARS · SIZE 18 · 54 · 45', '2 · TITANE · 0 YEARS · SIZE 17 · 52 · 45', '3 · NO TIER · 0 YEARS · SIZE 17 · 52 · 45', 'YOURS'],
+    reason: 'Desktop (§10.30): THE ENTRIES is a table on a computer, its rows drawn as they near the window (content-visibility), the first window showing its head.',
+    now: 'In THE ENTRIES’ rows, read as the page is scrolled to them: RANK, TIER, SENIORITY, SIZE (every piece’s), IDENTIFIER and YOURS in their cells.',
+    where: 'scrolled' as const,
+  },
   // Lot M3 (step M3.12): the add-ons' stage's draw with a price, its one entry the account's place held.
   ...[['draw-drawn'], ['draw-place-held', '2 · NO TIER · 0 YEARS'], ['addons-place-held']].map(([id, more]) => ({
     states: [id!],
@@ -211,7 +219,8 @@ export const DESKTOP_MOVED: readonly DesktopMoved[] = [
   },
   {
     // Lot M3 (step M3.12, D2): YOUR ORDERS with add-ons, and ADD AN ADD-ON (its form in an order's page on a computer).
-    states: ['pieces-orders', 'pieces-orders-stress', 'claim-waiting', 'orders-delivery', 'orders-case', 'addons-orders', 'addons-sheet', 'addons-sheet-none', 'addons-sheet-error'],
+    // Lot M3 (step M3.18, K44): YOUR ORDERS with THE SET (its head row over its pieces' rows), RETURN THE SET asked.
+    states: ['pieces-orders', 'pieces-orders-stress', 'claim-waiting', 'orders-delivery', 'orders-case', 'addons-orders', 'addons-sheet', 'addons-sheet-none', 'addons-sheet-error', 'set-orders', 'set-orders-return'],
     reason: 'Decision 5: MY PIECES’ ORDERS lists rows on a computer, each opening its order’s page.',
     now: 'On MY PIECES’ ORDERS rows and on each order’s page (/verify/orders/OR-…).',
     where: 'orders',

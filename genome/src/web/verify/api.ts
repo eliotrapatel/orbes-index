@@ -101,6 +101,20 @@ export interface AddonUnits {
   units: number;
 }
 
+/** Macro scope K44 T1: one piece's size of a set's draw, as ENTER, RESERVE and CHANGE SIZE send it. */
+export interface PieceSize {
+  piece: number;
+  sizeId: string;
+}
+
+/** What ENTER and RESERVE send: a model's draw's size (`sizeId`), a set's sizes per piece (`sizes`), or nothing. */
+export type DrawSizesBody = string | readonly PieceSize[] | null | undefined;
+
+function drawSizesBody(v: DrawSizesBody): { sizeId: string } | { sizes: PieceSize[] } | undefined {
+  if (Array.isArray(v)) return v.length > 0 ? { sizes: v.map((x: PieceSize) => ({ piece: x.piece, sizeId: x.sizeId })) } : undefined;
+  return typeof v === 'string' && v ? { sizeId: v } : undefined;
+}
+
 export type TransportCode = 'NETWORK' | 'TIMEOUT' | 'BAD_RESPONSE';
 
 export class ApiError extends Error {
@@ -386,15 +400,15 @@ export class ApiClient {
    * ENTER THE DRAW of an open release (the same entry again after a withdrawal); plan NEXT LOT §3.6.F: in the size chosen
    * of a draw with sizes (400 DROP_SIZE_REQUIRED without one).
    */
-  async enterDrop(id: string, sizeId?: string | null): Promise<ClubEntry> {
-    const r = await this.request<{ entry?: ClubEntry }>('POST', `/api/v1/club/drops/${encodeURIComponent(id)}/enter`, sizeId ? { sizeId } : undefined, { csrf: true });
+  async enterDrop(id: string, sizeId?: DrawSizesBody): Promise<ClubEntry> {
+    const r = await this.request<{ entry?: ClubEntry }>('POST', `/api/v1/club/drops/${encodeURIComponent(id)}/enter`, drawSizesBody(sizeId), { csrf: true });
     if (!r?.entry) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
     return r.entry;
   }
 
   /** Plan NEXT LOT §3.6.F: an entry's size changed, while entries are open (409 DROP_SIZE_FIXED for a place reserved directly). */
-  async changeDrawSize(id: string, sizeId: string): Promise<ClubEntry> {
-    const r = await this.request<{ entry?: ClubEntry }>('POST', `/api/v1/club/drops/${encodeURIComponent(id)}/size`, { sizeId }, { csrf: true });
+  async changeDrawSize(id: string, sizeId: string | readonly PieceSize[]): Promise<ClubEntry> {
+    const r = await this.request<{ entry?: ClubEntry }>('POST', `/api/v1/club/drops/${encodeURIComponent(id)}/size`, drawSizesBody(sizeId), { csrf: true });
     if (!r?.entry) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
     return r.entry;
   }
@@ -411,8 +425,8 @@ export class ApiClient {
    * DROP_TIER_REQUIRED below, 409 outside the early access or once every piece is held); plan NEXT LOT §3.6.F: in the
    * size chosen of a draw with sizes (409 DROP_SIZE_FULL once every piece of it is reserved).
    */
-  async reserveDrop(id: string, sizeId?: string | null): Promise<ClubEntry> {
-    const r = await this.request<{ entry?: ClubEntry }>('POST', `/api/v1/club/drops/${encodeURIComponent(id)}/reserve`, sizeId ? { sizeId } : undefined, { csrf: true });
+  async reserveDrop(id: string, sizeId?: DrawSizesBody): Promise<ClubEntry> {
+    const r = await this.request<{ entry?: ClubEntry }>('POST', `/api/v1/club/drops/${encodeURIComponent(id)}/reserve`, drawSizesBody(sizeId), { csrf: true });
     if (!r?.entry) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
     return r.entry;
   }
