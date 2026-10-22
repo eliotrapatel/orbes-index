@@ -34,7 +34,8 @@
  * AUDITOR, the moments' words and the custom messages written by an OPERATOR, a moment switched and a message sent or
  * cancelled by an ADMIN; WORN, plan MACRO M2 §2.2, read by an AUDITOR, its photographs published, refused and taken down by
  * an OPERATOR; the returns report and its CSV, plan MACRO M3 §2.2, read by an AUDITOR; ORDER A MODEL's split and its ADD TO
- * DRAFTS, plan MACRO M3 §3.2, by an OPERATOR, and a location's countries set by an ADMIN);
+ * DRAFTS, plan MACRO M3 §3.2, by an OPERATOR, and a location's countries set by an ADMIN; the add-ons' catalogue, plan MACRO
+ * M3 §4.2, read by an AUDITOR, listed, changed, priced, set aside, reinstated and linked to Shopify by an OPERATOR);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. LOGISTICS (plan NEXT LOT §3.5.6.1),
@@ -411,6 +412,15 @@ const PROBES: Probe[] = [
   { group: 'boxes', method: 'POST', url: `/api/admin/boxes/${UUID}/reinstate`, min: 'ADMIN' },
   // B1, B2: a model's box and packed weight, set by an OPERATOR.
   { group: 'boxes', method: 'PUT', url: `/api/admin/models/${UUID}/packing`, body: INVALID, min: 'OPERATOR' },
+  // Plan MACRO M3 §4.2 (D1): the add-ons' catalogue, read by an AUDITOR, written by an OPERATOR (as the models).
+  { group: 'addons', method: 'GET', url: '/api/admin/addons', min: 'AUDITOR' },
+  { group: 'addons', method: 'GET', url: `/api/admin/addons/${UUID}`, min: 'AUDITOR' },
+  { group: 'addons', method: 'POST', url: '/api/admin/addons', body: INVALID, min: 'OPERATOR' },
+  { group: 'addons', method: 'PATCH', url: `/api/admin/addons/${UUID}`, body: INVALID, min: 'OPERATOR' },
+  { group: 'addons', method: 'PUT', url: `/api/admin/addons/${UUID}/prices`, body: INVALID, min: 'OPERATOR' },
+  { group: 'addons', method: 'POST', url: `/api/admin/addons/${UUID}/set-aside`, min: 'OPERATOR' },
+  { group: 'addons', method: 'POST', url: `/api/admin/addons/${UUID}/reinstate`, min: 'OPERATOR' },
+  { group: 'addons', method: 'PUT', url: `/api/admin/addons/${UUID}/shopify`, body: INVALID, min: 'OPERATOR' },
   { group: 'analytics', method: 'GET', url: '/api/admin/analytics/circle', min: 'AUDITOR' },
   { group: 'analytics', method: 'GET', url: '/api/admin/analytics/circle?days=367', min: 'AUDITOR' },
   { group: 'analytics', method: 'GET', url: '/api/admin/analytics/best-time?days=367', min: 'AUDITOR' },
@@ -615,6 +625,7 @@ describe('admin role enforcement', () => {
       'logistics-stock',
       'packing',
       'boxes',
+      'addons',
       'order-cases',
       'sign-up',
       'links',

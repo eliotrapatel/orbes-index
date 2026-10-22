@@ -57,7 +57,7 @@ describe('supplier orders over HTTP (plan NEXT LOT §3.5.6.9)', () => {
           location: { id: france, name: 'FRANCE WAREHOUSE' },
           draft: null,
           toOrder: 2,
-          rows: [{ sku: { id: sku, code: expect.any(String), model: { id: catalog.modelId, name: 'MONOLITHE' }, variant: null, sizeLabel: '52', setAside: false }, waiting: 2, underMinimum: 0, expected: 0, inDraft: 0, toOrder: 2 }],
+          rows: [{ sku: { id: sku, code: expect.any(String), model: { id: catalog.modelId, name: 'MONOLITHE' }, addon: null, variant: null, sizeLabel: '52', setAside: false }, waiting: 2, underMinimum: 0, expected: 0, inDraft: 0, toOrder: 2 }],
         },
       ],
     });

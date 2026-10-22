@@ -19,7 +19,9 @@
  *    opens: skipped and erased; a sold piece's card never printed (its copy erased by the packing scan, or at printing
  *    without being opened); Cards attached erases the rest, then CARDS_ATTACHED;
  *  - the rejected pieces sent back by the agent; every row of another location 404 for the agent;
- *  - no claim code in an audit, the journal or a log.
+ *  - no claim code in an audit, the journal or a log;
+ *  - an add-on's line (macro scope K48 D1, plan MACRO M3 §4.2): named by its add-on, counted in at the confirmation
+ *    without an identity, a material or a card; the identities owed and the cards are the models' pieces only.
  */
 import { randomBytes, scryptSync } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -581,5 +583,48 @@ describe('ReceptionService (plan NEXT LOT §3.5.6.5)', () => {
     const pieces = await productsOf(r.id);
     expect(pieces.every((p) => p.claim_secret_hash!.startsWith('scrypt$15$'))).toBe(true);
     expect(supplierOrderReference(order.id)).toBe(order.reference);
+  });
+
+  it('counts an add-on\'s line in without an identity or a card (macro scope K48 D1): its units in the stock at the confirmation, no material asked, `issued` 0; the identities owed and the cards read the models\' pieces only', async () => {
+    const nord = (await h.ctx.services.suppliers.list()).find((x) => x.name === 'Maison Nord')!;
+    const cloth = await h.ctx.services.addons.create({ name: 'Polishing Cloth', skuCode: 'RC-CLOTH', supplierId: nord.id }, admin);
+    const order = await sentOrder(logistics, [[k50, 2], [cloth.sku.id, 6]]);
+    // The agent reads the line by its add-on, after the models' sizes, and may count it.
+    const found = await rs.findForReception(order.reference, agentScope());
+    expect(found.lines.map((l) => [l.sku.model?.name ?? l.sku.addon?.name, l.sku.code, l.ordered])).toEqual([
+      ['MONOLITHE', found.lines[0]!.sku.code, 2],
+      ['Polishing Cloth', 'RC-CLOTH', 6],
+    ]);
+    expect(found.offered.at(-1)).toEqual({ id: cloth.sku.id, code: 'RC-CLOTH', model: null, addon: { id: cloth.id, name: 'Polishing Cloth' }, variant: null, sizeLabel: null, setAside: false });
+    const r = await rs.record(order.id, { lines: [{ skuId: k50, accepted: 2, rejected: 0 }, { skuId: cloth.sku.id, accepted: 5, rejected: 1 }] }, agent, agentScope());
+    await rs.confirm(r.id, admin);
+    // At once: the cloth's 5 units in the stock (one RECEIVED movement), the rings' still to issue.
+    expect(await receivedMovements(r.id)).toEqual([{ delta: 5, reason: 'RECEIVED', location_id: logistics, sku_id: cloth.sku.id }]);
+    expect((await h.ctx.services.addons.get(cloth.id)).stock.find((x) => x.location.id === logistics)).toMatchObject({ onHand: 5, available: 5 });
+    let view = await rs.view(r.id, null);
+    expect(view.issuing).toEqual({ issued: 0, accepted: 2, done: false });
+    expect(Object.fromEntries(view.lines.map((l) => [l.sku.code, [l.accepted, l.rejected, l.issued]]))).toEqual({ [found.lines[0]!.sku.code]: [2, 0, 0], 'RC-CLOTH': [5, 1, 0] });
+    const confirmed = await h.t.db.selectFrom('audit_logs').select('details').where('action', '=', 'reception.confirm').where('target_id', '=', r.id).executeTakeFirstOrThrow();
+    expect(confirmed.details).toMatchObject({ accepted: 7, rejected: 1, countedIn: [{ skuId: cloth.sku.id, units: 5 }] });
+    // The worker issues the rings only: two identities, two cards; the cloth's line keeps `issued` 0, no card, no piece.
+    expect(await rs.issuePending()).toBe(2);
+    view = await rs.view(r.id, null);
+    expect(view.issuing).toEqual({ issued: 2, accepted: 2, done: true });
+    expect(view.lines.find((l) => l.sku.id === cloth.sku.id)).toMatchObject({ accepted: 5, issued: 0 });
+    expect(view.cards.sealed).toBe(2);
+    expect((await productsOf(r.id)).map((p) => p.sku_id)).toEqual([k50, k50]);
+    expect(await h.t.db.selectFrom('products').select('id').where('sku_id', '=', cloth.sku.id).execute()).toEqual([]);
+    expect((await receivedMovements(r.id)).map((m) => [m.sku_id, m.delta])).toEqual([
+      [cloth.sku.id, 5],
+      [k50, 2],
+    ]);
+    // The rejected unit goes back to the supplier; the order still expects one.
+    expect(await h.t.db.selectFrom('supplier_returns').select(['sku_id', 'quantity', 'status']).where('reception_id', '=', r.id).execute()).toEqual([{ sku_id: cloth.sku.id, quantity: 1, status: 'TO_RETURN' }]);
+    expect((await so().get(order.id)).status).toBe('PARTLY_RECEIVED');
+    // A reception of an add-on only: issued as soon as the worker runs, no card to print.
+    const only = await received(logistics, [[cloth.sku.id, 3]]);
+    expect(only.reception.issuing).toEqual({ issued: 0, accepted: 0, done: true });
+    expect(only.reception.cards).toMatchObject({ sealed: 0, printed: 0 });
+    expect((await h.ctx.services.addons.get(cloth.id)).stock.find((x) => x.location.id === logistics)).toMatchObject({ onHand: 8 });
   });
 });

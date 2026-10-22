@@ -106,6 +106,7 @@ import { LogisticsService } from './services/logistics.js';
 import { OrderCaseService } from './services/order-cases.js';
 import { purgePackingPhotos } from './services/parcels.js';
 import { SupplierService } from './services/suppliers.js';
+import { AddonService } from './services/addons.js';
 import { BoxService } from './services/boxes.js';
 import { ReturnsReportService } from './services/returns-report.js';
 import { SizeSplitService } from './services/size-split.js';
@@ -228,6 +229,8 @@ export interface AppServices {
   suppliers: SupplierService;
   /** The standard boxes (plan MACRO M3 §1.2, B1): Orders → Settings' Boxes, the box each model and parcel uses. */
   boxes: BoxService;
+  /** The add-ons' catalogue (plan MACRO M3 §4.2, D1): each add-on, its SKU, its prices, set aside, its Shopify ids. */
+  addons: AddonService;
   /** The returns and exchanges report (plan MACRO M3 §2, R1): Orders → Returns, by reason, model and size, with the runs small / runs large flag; reads only. */
   returnsReport: ReturnsReportService;
   /** The supplier orders (plan NEXT LOT §3.5.6.3): the proposal, the drafts, their steps, invoices and PDFs; ORBES's only. */
@@ -422,6 +425,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const suppliers = new SupplierService({ db, audit, clock });
     const supplierOrders = new SupplierOrderService({ db, audit, clock });
     const boxes = new BoxService({ db, audit, clock });
+    const addons = new AddonService({ db, audit, clock });
     const returnsReport = new ReturnsReportService({ db, clock });
     const sizeSplit = new SizeSplitService({ db });
     const logistics = new LogisticsService({ db, audit, stock, verification, warranty, clock, mail: emails.orderStep });
@@ -494,6 +498,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       intelligenceSizes,
       suppliers,
       boxes,
+      addons,
       returnsReport,
       supplierOrders,
       sizeSplit,

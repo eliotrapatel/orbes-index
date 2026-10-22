@@ -1827,7 +1827,7 @@ export interface SkusTable {
   id: Generated<string>;
   /**
    * The model this SKU is a size of; NULL for an add-on's SKU (migration 0056: exactly one of model_id and addon_id,
-   * `skus_owner`). Read through `skuModelId` (services/sku-owner.ts) where a model's SKU is meant.
+   * `skus_owner`). Named by its owner through services/sku-owner.ts (`skuOwnerOf`, `skuRefs`).
    */
   model_id: ColumnType<string | null, string | null | undefined, string | null>;
   /** Migration 0056 (D1): the add-on this SKU is (addon_items.id, one SKU per add-on); NULL for a model's size. No size, no fit. */

@@ -184,14 +184,16 @@ async function supplierRows(db: Db, id?: string): Promise<SupplierView[]> {
 
 /**
  * The supplier of a size (plan NEXT LOT §3.5.6.2): the size's own (`skus.supplier_id`), else its model's, else, for a
- * variant, its main model's; null when none is set. Read in `tx` (a supplier order's draft, the proposal).
+ * variant, its main model's; for an add-on's SKU (macro scope K48 D1), its add-on's; null when none is set. Read in
+ * `tx` (a supplier order's draft, the proposal).
  */
 export async function supplierOf(tx: Db, skuId: string): Promise<string | null> {
   const r = await sql<{ supplier_id: string | null }>`
-    SELECT coalesce(k.supplier_id, m.supplier_id, main.supplier_id) AS supplier_id
+    SELECT coalesce(k.supplier_id, m.supplier_id, main.supplier_id, a.supplier_id) AS supplier_id
       FROM skus k
-      JOIN models m ON m.id = k.model_id
+      LEFT JOIN models m ON m.id = k.model_id
       LEFT JOIN models main ON main.id = m.variant_of
+      LEFT JOIN addon_items a ON a.id = k.addon_id
      WHERE k.id = ${skuId}`.execute(tx);
   return r.rows[0]?.supplier_id ?? null;
 }

@@ -15,9 +15,11 @@
  *   the ledger every movement of a SKU at a location (stock_movements), never changed: a piece finished (+1), a count
  *              corrected (± `adjust`), a transfer between locations (`transfer`: two movements, out and in, paired by
  *              their transfer id), an order shipped (−1) or returned (+1).
- *   balances   per SKU and location, derived from the ledger: on hand (the sum of its movements), reserved (the orders
- *              holding one of them, `orders.reservation` STOCK), available (on hand less reserved). An adjustment or a
- *              transfer never takes a reserved piece: on hand never falls below what is reserved.
+ *   balances   per SKU and location, derived from the ledger: on hand (the sum of its movements), reserved (what holds
+ *              one of them, read from the view `stock_holds` (migration 0056): the orders, `orders.reservation` STOCK,
+ *              and the add-on units HELD on orders), available (on hand less reserved). An adjustment or a transfer
+ *              never takes a reserved piece nor a held add-on unit: on hand never falls below what is reserved. An
+ *              add-on's SKU (macro scope K48 D1) is in the same ledger, counted without an identity.
  *
  * The console's settings (Locations and carriers): a location added or renamed, made the default; a carrier added, its
  * name or tracking link changed, set aside (`active` false: never offered for a shipment again, the orders shipped with
@@ -49,7 +51,6 @@ import type { AuditService } from './audit.js';
 import { writeJournal } from './journal.js';
 import { serveWaiting } from './orders.js';
 import { offeredSku } from './sizes.js';
-import { skuModelId } from './sku-owner.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -131,11 +132,8 @@ export async function skuSizes(db: Db, modelIds: readonly string[]): Promise<Map
   const out = new Map<string, string[]>();
   if (modelIds.length === 0) return out;
   const rows = await db.selectFrom('skus').select(['model_id', 'size_label']).where('model_id', 'in', [...modelIds]).where('set_aside_at', 'is', null).orderBy('created_at').orderBy('id').execute();
-  for (const r of rows) {
-    if (r.size_label === null) continue;
-    const modelId = skuModelId(r);
-    out.set(modelId, [...(out.get(modelId) ?? []), r.size_label]);
-  }
+  // Read by its model (an add-on's SKU has none, and no size).
+  for (const r of rows) if (r.model_id !== null && r.size_label !== null) out.set(r.model_id, [...(out.get(r.model_id) ?? []), r.size_label]);
   for (const [id, sizes] of out) out.set(id, sizesOnce(sizes));
   return out;
 }
@@ -447,7 +445,7 @@ export async function lockSku(tx: Db, skuId: string): Promise<void> {
 export interface StockLevel {
   /** The sum of the ledger's movements. */
   onHand: number;
-  /** The orders holding one of them (orders.reservation STOCK). */
+  /** What holds one of them: the orders (orders.reservation STOCK) and the add-on units HELD (`stock_holds`). */
   reserved: number;
   /** On hand less reserved. */
   available: number;
@@ -461,8 +459,9 @@ export async function stockLevel(db: Db, skuId: string, locationId: string): Pro
     .where('sku_id', '=', skuId)
     .where('location_id', '=', locationId)
     .executeTakeFirstOrThrow();
+  // Every hold from one source (migration 0056): the orders' pieces held in stock and the add-on units HELD.
   const held = await db
-    .selectFrom('orders')
+    .selectFrom('stock_holds')
     .select((eb) => eb.fn.countAll<number>().as('n'))
     .where('sku_id', '=', skuId)
     .where('location_id', '=', locationId)
@@ -480,8 +479,9 @@ export interface StockBalance extends StockLevel {
 }
 
 /**
- * The stock per SKU and location, derived from the ledger and the orders' reservations: every pair that ever moved or
- * is reserved, by model, size and location; narrowed to a SKU, a model or a location.
+ * The models' stock per SKU and location, derived from the ledger and the holds (`stock_holds`): every pair that ever
+ * moved or is reserved, by model, size and location; narrowed to a SKU, a model or a location. A model's sizes only (an
+ * add-on's SKU has no model: Logistics' stock names those, services/logistics.ts).
  */
 export async function stockBalances(db: Db, filter: { skuId?: string; modelId?: string; locationId?: string } = {}): Promise<StockBalance[]> {
   const rows = await sql<{
@@ -496,7 +496,7 @@ export async function stockBalances(db: Db, filter: { skuId?: string; modelId?: 
     location: string;
   }>`
     WITH moved AS (SELECT sku_id, location_id, sum(delta)::int AS on_hand FROM stock_movements GROUP BY sku_id, location_id),
-         held AS (SELECT sku_id, location_id, count(*)::int AS reserved FROM orders WHERE reservation = 'STOCK' GROUP BY sku_id, location_id),
+         held AS (SELECT sku_id, location_id, count(*)::int AS reserved FROM stock_holds WHERE reservation = 'STOCK' GROUP BY sku_id, location_id),
          pairs AS (SELECT coalesce(m.sku_id, h.sku_id) AS sku_id, coalesce(m.location_id, h.location_id) AS location_id,
                           coalesce(m.on_hand, 0) AS on_hand, coalesce(h.reserved, 0) AS reserved
                      FROM moved m FULL JOIN held h ON h.sku_id = m.sku_id AND h.location_id = m.location_id)

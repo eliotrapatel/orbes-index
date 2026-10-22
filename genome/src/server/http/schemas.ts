@@ -65,6 +65,11 @@ import {
   BOX_EMPTY_WEIGHT_G_MAX,
   BOX_INSIDE_MM_MAX,
   BOX_NAME_MAX,
+  ADDON_LINE_MAX,
+  ADDON_NAME_MAX,
+  ADDON_POSITION_MAX,
+  ADDON_PRICE_MINOR_MAX,
+  ADDON_WEIGHT_G_MAX,
   PACKED_WEIGHT_G_MAX,
 } from '../db/schema.js';
 import { BASE_PRICE_MAX_MINOR, CARE_GUIDE_MAX, MODEL_IDENTITY_MESSAGE, VARIANT_LABEL_MAX } from '../services/catalog.js';
@@ -2626,3 +2631,44 @@ export const modelSizeParams = z.object({ id: uuid, skuId: uuid });
 export const modelPairsBody = body({
   models: z.array(uuid).max(3, 'At most three models'),
 });
+
+// ── Admin: the add-ons (routes/admin/addons.ts, plan MACRO M3 §4.2, D1) ───
+
+export const addonParams = z.object({ id: uuid });
+
+/** An add-on's price in a house currency, in cents (0 to 1 000 000.00); null removes it (not offered in that currency). */
+const addonPrice = z.number().int('Must be a whole number of cents').min(0, 'At least 0').max(ADDON_PRICE_MINOR_MAX, `At most ${ADDON_PRICE_MINOR_MAX} cents`).nullable();
+/** Prices by house currency: the currencies given only. */
+const addonPrices = z.strictObject({ EUR: addonPrice.optional(), GBP: addonPrice.optional(), USD: addonPrice.optional(), CHF: addonPrice.optional() });
+const addonLine = z.preprocess(emptyToNull, text(ADDON_LINE_MAX).nullable());
+const addonWeight = whole(1, ADDON_WEIGHT_G_MAX, 'grams').nullable();
+const addonPosition = whole(0, ADDON_POSITION_MAX, 'places');
+
+/** POST /api/admin/addons: its name, line, SKU code (at the creation only), supplier, weight, position and prices. */
+export const createAddonBody = body({
+  name: text(ADDON_NAME_MAX),
+  line: addonLine.optional(),
+  skuCode: text(64),
+  supplierId: uuid.nullable().optional(),
+  weightG: addonWeight.optional(),
+  position: addonPosition.optional(),
+  prices: addonPrices.optional(),
+});
+
+/** PATCH /api/admin/addons/:id: its name, line, supplier, weight and position (its SKU code never changes). At least one. */
+export const updateAddonBody = body({
+  name: text(ADDON_NAME_MAX).optional(),
+  line: addonLine.optional(),
+  supplierId: uuid.nullable().optional(),
+  weightG: addonWeight.optional(),
+  position: addonPosition.optional(),
+}).refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one field of the add-on to change');
+
+/** PUT /api/admin/addons/:id/prices: the prices by currency, each set or removed (null). At least one. */
+export const addonPricesBody = body({ prices: addonPrices }).refine((b) => Object.values(b.prices).some((v) => v !== undefined), {
+  message: 'Send at least one price, or null to remove one',
+  path: ['prices'],
+});
+
+/** PUT /api/admin/addons/:id/shopify: its Shopify product and variant, pasted back; null clears one. */
+export const addonShopifyBody = body({ productId: shopifyPasted, variantId: shopifyPasted });

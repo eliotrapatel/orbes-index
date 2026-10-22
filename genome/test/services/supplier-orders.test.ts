@@ -13,7 +13,9 @@
  *  - send: refused while incomplete (422 SUPPLIER_ORDER_INCOMPLETE), then fixed (SUPPLIER_ORDER_NOT_DRAFT); confirmed by
  *    the supplier; its statuses through receptions, credits and Cancel the rest (refused while a reception is open);
  *    the pieces not on the order (`extras`); the supplier's answer to rejected pieces; the invoice and its payment;
- *  - the PDF's document: Deliver to with the location's address, never an email; the journal and the audit.
+ *  - the PDF's document: Deliver to with the location's address, never an email; the journal and the audit;
+ *  - an add-on's SKU (macro scope K48 D1, plan MACRO M3 §4.2): proposed by its minimum from its add-on's supplier,
+ *    after the models' sizes, drafted, named by its add-on on the order and its PDF, left out once set aside.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
@@ -116,7 +118,7 @@ describe('SupplierOrderService (plan NEXT LOT §3.5.6.3)', () => {
     const kLoose = await skuOf('50', loose);
     await salonOrder('50', loose);
     const apart = (await so().proposal()).groups.find((g) => g.supplier === null)!;
-    expect(apart.rows.map((r) => [r.sku.model.name, r.sku.sizeLabel, r.toOrder])).toEqual([['ORBITE', '50', 1]]);
+    expect(apart.rows.map((r) => [r.sku.model?.name, r.sku.sizeLabel, r.toOrder])).toEqual([['ORBITE', '50', 1]]);
     expect((await so().proposal()).groups.at(-1)!.supplier).toBeNull();
     expect(await refusal(so().addToDraft({ skuId: kLoose, locationId: france, quantity: 1 }, admin))).toEqual({ code: 'SKU_NO_SUPPLIER', status: 409, message: "Set the supplier of ORBITE · 50 on its model's page first." });
     // An inactive supplier counts as none.
@@ -394,5 +396,44 @@ describe('SupplierOrderService (plan NEXT LOT §3.5.6.3)', () => {
     expect(o).toMatchObject({ status: 'DRAFT', supplier: { id: east.id }, location: { id: france }, lines: [{ sku: { id: k }, quantity: 500 }] });
     // Ordered ahead of any need: the proposal's figure stays 0, the size is not marked TO ORDER.
     expect(await row()).toMatchObject({ toOrder: 0 });
+  });
+
+  it('proposes an add-on by its minimum from its add-on\'s supplier, after the models\' sizes (macro scope K48 D1); drafts it, names it on the order and its PDF; without a supplier apart, set aside left out', async () => {
+    const care = await h.ctx.services.suppliers.create({ name: 'Care Supplies', currency: 'EUR' }, admin);
+    const cloth = await h.ctx.services.addons.create({ name: 'Polishing Cloth', skuCode: 'SO-CLOTH', supplierId: care.id, prices: { EUR: 1500 } }, admin);
+    const kit = await h.ctx.services.addons.create({ name: 'Care Kit', skuCode: 'SO-KIT', supplierId: care.id }, admin);
+    const pouch = await h.ctx.services.addons.create({ name: 'Travel Pouch', skuCode: 'SO-POUCH' }, admin);
+    const named = (a: { id: string; name: string; sku: { id: string; code: string } }) => ({ id: a.sku.id, code: a.sku.code, model: null, addon: { id: a.id, name: a.name }, variant: null, sizeLabel: null, setAside: false });
+    // Under its minimum at FRANCE: 4 to order (1 on hand of a minimum of 5); the kit 2; the pouch has no supplier.
+    await receive(cloth.sku.id, france, 1);
+    for (const [a, n] of [[cloth, 5], [kit, 2], [pouch, 3]] as const) await h.ctx.services.logistics.setMinimum({ skuId: a.sku.id, locationId: france, minimum: n }, admin);
+    // A size of the supplier too: the models' sizes first.
+    const model = (await h.ctx.db.insertInto('models').values({ category_id: (await h.ctx.categories.getByCode('J'))!.index, name: 'ZENITH', type: 'RING', sku_prefix: 'ZEN-RG', default_material: 'SILVER', supplier_id: care.id }).returning('id').executeTakeFirstOrThrow()).id;
+    const k = await skuOf('50', model);
+    await h.ctx.services.logistics.setMinimum({ skuId: k, locationId: france, minimum: 1 }, admin);
+    const proposal = await so().proposal({ supplierId: care.id });
+    expect(proposal.groups.map((g) => [g.supplier?.name, g.location.name, g.rows.map((r) => [r.sku.model?.name ?? r.sku.addon?.name, r.waiting, r.underMinimum, r.toOrder])])).toEqual([
+      ['Care Supplies', 'FRANCE WAREHOUSE', [['ZENITH', 0, 1, 1], ['Care Kit', 0, 2, 2], ['Polishing Cloth', 0, 4, 4]]],
+    ]);
+    expect(proposal.groups[0]!.rows[2]!.sku).toEqual(named(cloth));
+    const apart = (await so().proposal()).groups.find((g) => g.supplier === null)!;
+    expect(apart.rows.find((r) => r.sku.id === pouch.sku.id)).toMatchObject({ sku: named(pouch), toOrder: 3 });
+    expect(await refusal(so().addToDraft({ skuId: pouch.sku.id, locationId: france, quantity: 3 }, admin))).toEqual({ code: 'SKU_NO_SUPPLIER', status: 409, message: 'Set the supplier of Travel Pouch in Catalogue → Add-ons first.' });
+    // Drafted from the proposal, then named on the order and its PDF.
+    const o = await so().addToDraft({ skuId: cloth.sku.id, locationId: france, quantity: 4 }, admin);
+    expect(o).toMatchObject({ supplier: { id: care.id }, currency: 'EUR', lines: [{ sku: named(cloth), quantity: 4 }] });
+    expect((await so().proposal({ supplierId: care.id })).groups[0]!.rows.find((r) => r.sku.id === cloth.sku.id)).toMatchObject({ inDraft: 4, toOrder: 0 });
+    await so().updateDraft(o.id, { lines: [{ skuId: cloth.sku.id, quantity: 4, unitPriceMinor: 250 }, { skuId: k, quantity: 1, unitPriceMinor: 9_000 }], expectedOn: '2026-11-20' }, admin);
+    const doc = await so().document(o.id);
+    expect(doc.lines).toEqual([
+      { description: 'Polishing Cloth', sku: 'SO-CLOTH', quantity: 4, unitPriceMinor: 250 },
+      { description: 'ZENITH · 50', sku: (await so().get(o.id)).lines[1]!.sku.code, quantity: 1, unitPriceMinor: 9_000 },
+    ]);
+    expect(supplierOrderTexts(doc).flat()).toEqual(expect.arrayContaining(['POLISHING CLOTH', 'SO-CLOTH']));
+    // Set aside: left out of the proposal, refused in a draft.
+    await h.ctx.services.addons.setAside(kit.id, admin);
+    expect((await so().proposal({ supplierId: care.id })).groups[0]!.rows.some((r) => r.sku.id === kit.sku.id)).toBe(false);
+    expect((await refusal(so().addToDraft({ skuId: kit.sku.id, locationId: france, quantity: 2 }, admin))).code).toBe('ADDON_SET_ASIDE');
+    await so().discardDraft(o.id, admin);
   });
 });

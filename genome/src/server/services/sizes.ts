@@ -53,7 +53,7 @@ import { badRequest, conflict, forbidden, notFound, validationError } from '../e
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import { compareSizes, ensureSku, ONE_SIZE_LABEL, sizeLabelOf, stockLevel } from './stock.js';
-import { skuModelId } from './sku-owner.js';
+import { addonSetAside, skuOwnerOf } from './sku-owner.js';
 import { modelSupplier, type ModelSupplier } from './suppliers.js';
 
 export { SIZE_KINDS, SIZE_TYPES, type SizeKind, type SizeType };
@@ -314,7 +314,7 @@ export async function declaredSizes(db: Db, modelId: string): Promise<ModelSizeR
   const type = m?.size_type ?? null;
   const rows = await sql<SkuRow & { used: boolean; awaiting: number }>`
     SELECT k.id, k.size_label, k.code, k.fit_min_mm, k.fit_max_mm, k.set_aside_at, k.created_at, ${usedSql} AS used,
-           (SELECT count(*)::int FROM orders o WHERE o.sku_id = k.id AND o.reservation = 'AWAITING') AS awaiting
+           (SELECT count(*)::int FROM stock_holds o WHERE o.sku_id = k.id AND o.reservation = 'AWAITING') AS awaiting
       FROM skus k WHERE k.model_id = ${modelId}`.execute(db);
   const entries = rows.rows.map((r) => ({ r, entry: listEntryOf(type, r.size_label) }));
   return entries
@@ -355,12 +355,20 @@ export const sizeSetAside = (label: string | null, named: string) =>
 /**
  * A SKU that must be offered (the stock's minimum, a piece to make for the stock: plan NEXT LOT §3.3, step 3.5), read
  * FOR KEY SHARE in the caller's transaction: 409 SIZE_SET_ASIDE for a size set aside, 404 SKU_NOT_FOUND when it is gone.
+ * An add-on's SKU (macro scope K48 D1) is offered while its add-on is active: 409 ADDON_SET_ASIDE otherwise.
  */
 export async function assertSkuOffered(tx: Db, skuId: string): Promise<void> {
-  const k = await tx.selectFrom('skus').select(['model_id', 'size_label', 'set_aside_at']).where('id', '=', skuId).forKeyShare().executeTakeFirst();
+  const k = await tx.selectFrom('skus').select(['model_id', 'addon_id', 'size_label', 'set_aside_at']).where('id', '=', skuId).forKeyShare().executeTakeFirst();
   if (!k) throw notFound('SKU', 'SKU_NOT_FOUND');
+  const owner = skuOwnerOf(k);
+  if (owner.kind === 'ADD_ON') {
+    // Macro scope K48 D1: an add-on's SKU is offered while its add-on is active (409 ADDON_SET_ASIDE otherwise).
+    const a = await tx.selectFrom('addon_items').select(['name', 'active']).where('id', '=', owner.addonId).executeTakeFirstOrThrow();
+    if (!a.active) throw addonSetAside(a.name);
+    return;
+  }
   if (k.set_aside_at === null) return;
-  const model = await sizedModel(tx, skuModelId(k));
+  const model = await sizedModel(tx, owner.modelId);
   throw sizeSetAside(k.size_label, model?.named ?? 'its model');
 }
 

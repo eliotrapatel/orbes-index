@@ -18,6 +18,10 @@
  *                        base price and photographs, its cover as the image of its variants (« Variant image URL »);
  *                        archived once none of them is active. Each variant carries its model's packed weight in grams
  *                        (plan MACRO M3 §1.2, B2: its own, else a variant's main model's), empty when unknown.
+ *                        After the models, each active add-on priced in the store's currency (macro scope K48 D1, plan
+ *                        MACRO M3 §4.2, S5): one product of a single variant, its SKU's code, its price and weight,
+ *                        type « Add-on », a draft, a handle no model's product has. Its ids pasted back are the
+ *                        add-on's (services/addons.ts setShopify), the same advisory lock as a model's.
  *   the ids pasted back  N2: once imported, the product's id and each variant's, from Shopify's admin, are kept on the
  *                        model's SKUs (`skus.shopify_product_id`, one product per model; `skus.shopify_variant_id`, unique):
  *                        both sides are linked. A size of the export without its SKU yet has it created (ensureSku), on
@@ -40,7 +44,7 @@
 import { sql } from 'kysely';
 import { advisoryXactLock, ADVISORY_LOCK, inTransaction, type Db } from '../db/connection.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
-import type { OrderChannel, OrderStatus } from '../db/schema.js';
+import type { HouseCurrency, OrderChannel, OrderStatus } from '../db/schema.js';
 import { conflict, notFound, validationError } from '../errors.js';
 import { csvDocument, CSV_CONTENT_TYPE } from '../render/csv.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
@@ -121,6 +125,8 @@ export const SHOPIFY_SIZE_OPTION = 'Size';
 /** NOCTURNE N1: the option a model's variants are (each its label), before its sizes. */
 export const SHOPIFY_VARIANT_OPTION = 'Variant';
 export const SHOPIFY_SINGLE_OPTION = Object.freeze({ name: 'Title', value: 'Default Title' });
+/** The product type of an add-on (macro scope K48 D1, S5). */
+export const SHOPIFY_ADDON_TYPE = 'Add-on';
 /** The longest period one order export covers, in days. */
 export const SHOPIFY_PERIOD_MAX_DAYS = 366;
 /** A Shopify id as its admin shows it: a positive decimal (the CHECK of migration 0022). */
@@ -327,8 +333,59 @@ export class ShopifyExportService {
         rows.push(SHOPIFY_PRODUCT_COLUMNS.map((c) => row[c]));
       }
     }
+    // Macro scope K48 D1 (plan MACRO M3 §4.2, S5): each active add-on priced in the store's currency, one product of one
+    // variant after the models, its SKU, price and weight, a draft as the models are.
+    rows.push(...(await this.addonRows(currency, new Set(handles.values()))));
     const day = this.clock().toISOString().slice(0, 10);
     return { filename: `ORBES-shopify-products-${currency}-${day}.csv`, contentType: CSV_CONTENT_TYPE, body: csvDocument([[...SHOPIFY_PRODUCT_COLUMNS], ...rows]) };
+  }
+
+  /**
+   * The product export's add-ons (S5): each active add-on priced in `currency`, in its order (position, then name), one
+   * product with Shopify's single variant (« Title » / « Default Title »), its SKU's code, its price and weight, type
+   * « Add-on », a draft, no image (an add-on has no photograph). Its handle is its name's words, never one a model's
+   * product has (`taken`): its SKU code is added, then a number, until it is free.
+   */
+  private async addonRows(currency: string, taken: Set<string>): Promise<string[][]> {
+    const addons = await this.db
+      .selectFrom('addon_items as a')
+      .innerJoin('skus as k', 'k.addon_id', 'a.id')
+      .innerJoin('addon_item_prices as p', (j) => j.onRef('p.addon_id', '=', 'a.id').on('p.currency', '=', currency as HouseCurrency))
+      .select(['a.id', 'a.name', 'a.weight_g', 'k.code', 'p.price_minor'])
+      .where('a.active', '=', true)
+      .orderBy('a.position')
+      .orderBy(sql`lower(a.name)`)
+      .orderBy('a.id')
+      .execute();
+    const used = new Set(taken);
+    return addons.map((a) => {
+      const base = shopifyHandle({ name: a.name, slug: null, skuPrefix: a.code });
+      const withCode = `${base}-${shopifyHandle({ name: a.code, slug: null, skuPrefix: a.code })}`;
+      let handle = used.has(base) ? withCode : base;
+      for (let n = 2; used.has(handle); n++) handle = `${withCode}-${n}`;
+      used.add(handle);
+      const row: Record<(typeof SHOPIFY_PRODUCT_COLUMNS)[number], string> = {
+        Title: a.name,
+        'URL handle': handle,
+        Vendor: SHOPIFY_VENDOR,
+        Type: SHOPIFY_ADDON_TYPE,
+        'Published on online store': 'false',
+        Status: 'draft',
+        SKU: a.code,
+        'Option1 name': SHOPIFY_SINGLE_OPTION.name,
+        'Option1 value': SHOPIFY_SINGLE_OPTION.value,
+        'Option2 name': '',
+        'Option2 value': '',
+        Price: majorUnits(Number(a.price_minor)),
+        'Weight value (grams)': a.weight_g === null ? '' : String(a.weight_g),
+        'Requires shipping': 'true',
+        'Product image URL': '',
+        'Image position': '',
+        'Image alt text': '',
+        'Variant image URL': '',
+      };
+      return SHOPIFY_PRODUCT_COLUMNS.map((c) => row[c]);
+    });
   }
 
   /** A model's Shopify product: its handle, its product id, its sizes as the export gives them with their variant ids. */
@@ -381,8 +438,15 @@ export class ShopifyExportService {
         if (productId !== null) {
           // Two links of one product run one after the other, so the check below sees the other's SKUs.
           await advisoryXactLock(tx, ADVISORY_LOCK.SHOPIFY_PRODUCT, lockKeyOf(productId));
-          const other = await tx.selectFrom('skus').select('id').where('shopify_product_id', '=', productId).where('model_id', 'not in', group).executeTakeFirst();
-          if (other) throw shopifyProductTaken();
+          // Another model's SKUs, or an add-on's (its SKU has no model; macro scope K48 D1, S5: one product each).
+          const other = await tx
+            .selectFrom('skus')
+            .select('id')
+            .where('shopify_product_id', '=', productId)
+            .where((eb) => eb.or([eb('model_id', 'not in', group), eb('model_id', 'is', null)]))
+            .executeTakeFirst();
+          const addon = await tx.selectFrom('addon_items').select('id').where('shopify_product_id', '=', productId).executeTakeFirst();
+          if (other || addon) throw shopifyProductTaken();
         }
         // A size of the export without its SKU yet (a model in one size never issued nor sold) has it now, given or not:
         // the product's id is kept on the model's SKUs, so a linked model has at least one. A typed model's sizes are
@@ -553,8 +617,11 @@ function variantsOf(prefix: string, skus: readonly { size_label: string | null; 
     .map((k) => ({ size: k.size_label, sku: k.code, known: true, variantId: k.shopify_variant_id }));
 }
 
-/** A Shopify product id as the second part of its advisory lock: an int4 (FNV-1a over its digits). */
-function lockKeyOf(productId: string): number {
+/**
+ * A Shopify product id as the second part of its advisory lock (ADVISORY_LOCK.SHOPIFY_PRODUCT): an int4 (FNV-1a over
+ * its digits). A model's link and an add-on's (services/addons.ts) take the same lock, so a product goes to one of them.
+ */
+export function lockKeyOf(productId: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < productId.length; i++) h = Math.imul(h ^ productId.charCodeAt(i), 0x01000193);
   return h | 0;
@@ -566,4 +633,4 @@ function modelKey(modelId: string): string {
 }
 
 /** 409 SHOPIFY_PRODUCT_TAKEN: another model is linked to that Shopify product. */
-const shopifyProductTaken = () => conflict('SHOPIFY_PRODUCT_TAKEN', 'Another model is already linked to this Shopify product.');
+export const shopifyProductTaken = () => conflict('SHOPIFY_PRODUCT_TAKEN', 'Another model or add-on is already linked to this Shopify product.');

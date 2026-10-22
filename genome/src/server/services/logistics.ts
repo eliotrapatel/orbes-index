@@ -46,7 +46,12 @@
  *                  a piece there), minimum; for ORBES staff also expected (what sent supplier orders still owe there),
  *                  to order (the proposal's figure, services/supplier-orders.ts toOrderOf) and the pieces counted
  *                  without an ORBES identity behind them (`unbacked`, per SKU, every location together). The agent's view
- *                  has none of those three, and only its own locations (a location outside them: 404).
+ *                  has none of those three, and only its own locations (a location outside them: 404). Reserved and
+ *                  waiting are read from `stock_holds` (migration 0056: the orders' holds and the add-on units HELD).
+ *   add-ons        (macro scope K48 D1, plan MACRO M3 §4.2) every active add-on's SKU is listed after the models'
+ *                  sizes, named by its add-on (`sku.addon`, `sku.model` null), with the same figures; it is counted
+ *                  without an identity: never unbacked, a correction up needs no piece behind it, and a count in (of
+ *                  named pieces) never names one. A transfer or a correction down never takes a unit an order holds.
  *   unbacked       per SKU: the on-hand count of every location together minus the identities that back it (that SKU,
  *                  `stock_entered_at` set, unregistered, not retired, revoked, lost, stolen or flagged, not on a SHIPPED
  *                  or DELIVERED order). A hand count and a Generator piece have none until counted in.
@@ -98,10 +103,11 @@ import {
 } from './parcels.js';
 import type { ScanMeta, VerificationService, VerifyInput } from './verification.js';
 import type { WarrantyService } from './warranty.js';
-import { skusOf, type LocationScope } from './receptions.js';
+import type { LocationScope } from './receptions.js';
+import { addonsLast, skuRefs as skusOf, skuWords, type SupplierOrderSku } from './sku-owner.js';
 import { assertSkuOffered } from './sizes.js';
 import { knownLocation, lockSku, notAvailable, recordMovement, STOCK_MOVE_MAX, STOCK_NOTE_MAX, stockLevel, type StockLevel, type StockService } from './stock.js';
-import { expectedBySku, skuWords, toOrderOf, type SupplierOrderSku } from './supplier-orders.js';
+import { expectedBySku, toOrderOf } from './supplier-orders.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -216,6 +222,12 @@ export async function backingPieces(db: Db, skuId: string): Promise<number> {
   return Number(r.rows[0]?.n ?? 0);
 }
 
+/** Whether a SKU is an add-on's (macro scope K48 D1: counted, never identified). */
+async function isAddonSku(db: Db, skuId: string): Promise<boolean> {
+  const k = await db.selectFrom('skus').select('addon_id').where('id', '=', skuId).executeTakeFirst();
+  return k?.addon_id != null;
+}
+
 /** A SKU's on-hand count, every location together. */
 async function onHandEverywhere(db: Db, skuId: string): Promise<number> {
   const r = await sql<{ n: number }>`SELECT coalesce(sum(delta), 0)::int AS n FROM stock_movements WHERE sku_id = ${skuId}`.execute(db);
@@ -237,8 +249,10 @@ async function unbackedOf(db: Db, skuIds: readonly string[]): Promise<Map<string
   const out = new Map<string, number>();
   if (skuIds.length === 0) return out;
   const ids = sql.join(skuIds.map((id) => sql`${id}::uuid`));
+  // An add-on's SKU (macro scope K48 D1) is counted without an identity: never unbacked.
   const onHand = await sql<{ sku_id: string; n: number }>`
-    SELECT sku_id, coalesce(sum(delta), 0)::int AS n FROM stock_movements WHERE sku_id IN (${ids}) GROUP BY sku_id`.execute(db);
+    SELECT mv.sku_id, coalesce(sum(mv.delta), 0)::int AS n FROM stock_movements mv JOIN skus k ON k.id = mv.sku_id
+     WHERE mv.sku_id IN (${ids}) AND k.addon_id IS NULL GROUP BY mv.sku_id`.execute(db);
   const backing = await sql<{ sku_id: string; n: number }>`
     SELECT p.sku_id, count(*)::int AS n FROM products p
      WHERE p.sku_id IN (${ids}) AND p.stock_entered_at IS NOT NULL AND p.ownership_state = 'UNREGISTERED'
@@ -319,12 +333,13 @@ export class LogisticsService {
     const model = filter.modelId === undefined ? null : known(filter.modelId, () => notFound('Model', 'MODEL_NOT_FOUND'));
     const rows = await sql<{ sku_id: string; location_id: string; on_hand: number; reserved: number; waiting: number; minimum: number | null; location: string }>`
       WITH moved AS (SELECT sku_id, location_id, sum(delta)::int AS on_hand FROM stock_movements GROUP BY sku_id, location_id),
-           held AS (SELECT sku_id, location_id, count(*)::int AS reserved FROM orders WHERE reservation = 'STOCK' GROUP BY sku_id, location_id),
-           waits AS (SELECT sku_id, location_id, count(*)::int AS waiting FROM orders WHERE reservation = 'AWAITING' GROUP BY sku_id, location_id),
+           held AS (SELECT sku_id, location_id, count(*)::int AS reserved FROM stock_holds WHERE reservation = 'STOCK' GROUP BY sku_id, location_id),
+           waits AS (SELECT sku_id, location_id, count(*)::int AS waiting FROM stock_holds WHERE reservation = 'AWAITING' GROUP BY sku_id, location_id),
            pairs AS (SELECT sku_id, location_id FROM moved UNION SELECT sku_id, location_id FROM held UNION SELECT sku_id, location_id FROM waits
                      UNION SELECT sku_id, location_id FROM sku_thresholds
-                     UNION SELECT k.id, l.id FROM skus k JOIN models m ON m.id = k.model_id CROSS JOIN stock_locations l
-                            WHERE k.set_aside_at IS NULL AND m.active)
+                     UNION SELECT k.id, l.id FROM skus k LEFT JOIN models m ON m.id = k.model_id LEFT JOIN addon_items a ON a.id = k.addon_id
+                            CROSS JOIN stock_locations l
+                            WHERE k.set_aside_at IS NULL AND coalesce(m.active, a.active))
       SELECT p.sku_id, p.location_id, coalesce(m.on_hand, 0) AS on_hand, coalesce(h.reserved, 0) AS reserved,
              coalesce(w.waiting, 0) AS waiting, t.minimum, l.name AS location
         FROM pairs p
@@ -333,27 +348,36 @@ export class LogisticsService {
         LEFT JOIN waits w ON w.sku_id = p.sku_id AND w.location_id = p.location_id
         LEFT JOIN sku_thresholds t ON t.sku_id = p.sku_id AND t.location_id = p.location_id
         JOIN skus k ON k.id = p.sku_id
-        JOIN models md ON md.id = k.model_id
+        LEFT JOIN models md ON md.id = k.model_id
+        LEFT JOIN addon_items a ON a.id = k.addon_id
         JOIN stock_locations l ON l.id = p.location_id
        WHERE (${model}::uuid IS NULL OR k.model_id = ${model}::uuid)
          AND (${loc}::uuid IS NULL OR p.location_id = ${loc}::uuid)
-         AND ((k.set_aside_at IS NULL AND md.active)
+         AND ((k.set_aside_at IS NULL AND coalesce(md.active, a.active))
               OR coalesce(m.on_hand, 0) <> 0 OR coalesce(h.reserved, 0) > 0 OR coalesce(w.waiting, 0) > 0 OR t.minimum IS NOT NULL)`.execute(this.db);
     const kept = rows.rows.filter((r) => inScope(scope, r.location_id));
+    // Every offered size of an active model, and every active add-on's SKU (macro scope K48 D1), a model filter aside.
     const offered = await this.db
       .selectFrom('skus as k')
-      .innerJoin('models as m', 'm.id', 'k.model_id')
+      .leftJoin('models as m', 'm.id', 'k.model_id')
+      .leftJoin('addon_items as a', 'a.id', 'k.addon_id')
       .select('k.id')
       .where('k.set_aside_at', 'is', null)
-      .where('m.active', '=', true)
+      .where((eb) => eb.or([eb('m.active', '=', true), eb('a.active', '=', true)]))
       .execute();
     const skus = await skusOf(this.db, [...kept.map((r) => r.sku_id), ...offered.map((k) => k.id)]);
+    // The models' sizes by model, variant and size; the add-ons' SKUs after them, by add-on (the console's ADD-ONS).
     const natural = (a: SupplierOrderSku, b: SupplierOrderSku) =>
-      a.model.name.localeCompare(b.model.name, 'en', { numeric: true }) ||
-      a.model.id.localeCompare(b.model.id) ||
-      (a.variant ?? '').localeCompare(b.variant ?? '', 'en') ||
-      (a.sizeLabel ?? '').localeCompare(b.sizeLabel ?? '', 'en', { numeric: true }) ||
-      a.code.localeCompare(b.code);
+      addonsLast(
+        a,
+        b,
+        (x, y) =>
+          x.model.name.localeCompare(y.model.name, 'en', { numeric: true }) ||
+          x.model.id.localeCompare(y.model.id) ||
+          (x.variant ?? '').localeCompare(y.variant ?? '', 'en') ||
+          (x.sizeLabel ?? '').localeCompare(y.sizeLabel ?? '', 'en', { numeric: true }) ||
+          x.code.localeCompare(y.code),
+      );
     const locations = (await this.db.selectFrom('stock_locations').select(['id', 'name', 'is_default']).orderBy('is_default', 'desc').orderBy('name').execute())
       .filter((l) => inScope(scope, l.id))
       .map((l) => ({ id: l.id, name: l.name, isDefault: l.is_default }));
@@ -404,6 +428,7 @@ export class LogisticsService {
   /** A SKU's pieces counted without an ORBES identity behind them, every location together (ORBES staff, the runbook). */
   async unbacked(skuId: string): Promise<number> {
     const id = known(skuId, skuNotFound);
+    if (await isAddonSku(this.db, id)) return 0;
     return Math.max(0, (await onHandEverywhere(this.db, id)) - (await backingPieces(this.db, id)));
   }
 
@@ -467,7 +492,8 @@ export class LogisticsService {
     if (c.status !== 'TO_APPROVE') throw notPending();
     const level = await stockLevel(tx, c.sku_id, c.location_id);
     if (c.delta < 0 && level.available + c.delta < 0) throw notAvailable(Math.max(0, level.available));
-    if (c.delta > 0) {
+    // An add-on's SKU (macro scope K48 D1) has no ORBES identity: its count is never backed by pieces.
+    if (c.delta > 0 && !(await isAddonSku(tx, c.sku_id))) {
       const backing = await backingPieces(tx, c.sku_id);
       if ((await onHandEverywhere(tx, c.sku_id)) + c.delta > backing) {
         const sku = (await skusOf(tx, [c.sku_id])).get(c.sku_id)!;

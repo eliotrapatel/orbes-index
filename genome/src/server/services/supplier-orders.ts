@@ -11,6 +11,9 @@
  *                 shortfall is never ordered twice. Grouped by supplier (the size's, else its model's, else its main
  *                 model's: services/suppliers.ts supplierOf; an inactive supplier counts as none) and location; the sizes
  *                 without a supplier apart. Test orders count like real ones (the owner: test entrants count everywhere).
+ *                 The holds are read from `stock_holds` (the orders' and the add-on units', migration 0056). An add-on's
+ *                 SKU (macro scope K48 D1, plan MACRO M3 §4.2) is proposed like a size, by its minimum (no order ever
+ *                 waits for one), while its add-on is active, from its add-on's supplier, after the models' sizes.
  *   the draft     one per supplier and location (`supplier_orders_one_draft`): `addToDraft` (the proposal's Add to the
  *                 draft, a release's Add to supplier order) creates it in its supplier's currency and adds the pieces
  *                 to the SKU's line, its unit price prefilled from the last sent line of that SKU with that supplier;
@@ -27,7 +30,8 @@
  *                 (`markInvoicePaid`).
  *   returns       the supplier's answer to rejected pieces (`settleReturn`): a REPLACEMENT keeps them expected; a CREDIT
  *                 (its amount) stops expecting them (the line's `credited_quantity`).
- *   its PDF       render/supplier-order.ts: ORBES sends it to the supplier itself (the console sends no email).
+ *   its PDF       render/supplier-order.ts: ORBES sends it to the supplier itself (the console sends no email). A
+ *                 line names its size (MONOLITHE · BLUE · 52) or its add-on (POLISHING CLOTH), with its SKU code.
  *
  * Audited `supplier_order.create`, `.draft`, `.update` (the fields' names), `.discard`, `.send`, `.confirm`,
  * `.cancel_rest`, `.invoice`, `.invoice_paid`, `supplier_return.settle`, by ids, counts and amounts, never a note's words
@@ -48,7 +52,7 @@ import { INVOICE_ISSUER } from './invoices.js';
 import { writeJournal } from './journal.js';
 import { assertSkuOffered } from './sizes.js';
 import { cleanCurrency } from './suppliers.js';
-import { ONE_SIZE_LABEL } from './stock.js';
+import { addonsLast, skuRefs as skusOf, skuWords, type SupplierOrderSku } from './sku-owner.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -110,17 +114,8 @@ const locationNotFound = () => notFound('Location', 'STOCK_LOCATION_NOT_FOUND');
 
 // ── Views ──────────────────────────────────────────────────────────────────
 
-/** A size as the supplier orders name it: its model, the model's variant, its size and its SKU code. */
-export interface SupplierOrderSku {
-  id: string;
-  code: string;
-  model: { id: string; name: string };
-  /** The variant's label (BLUE) of a variant model; null otherwise. */
-  variant: string | null;
-  /** Its size; null for a model in one size (ONE SIZE). */
-  sizeLabel: string | null;
-  setAside: boolean;
-}
+/** A size or an add-on as the supplier orders name it (services/sku-owner.ts): its owner, its size and its SKU code. */
+export type { SupplierOrderSku };
 
 /** A line of a supplier order. */
 export interface SupplierOrderLineView {
@@ -308,12 +303,11 @@ function cleanNote(v: unknown, max: number, label: string, required: boolean): s
 
 const dateOf = (d: Date | string | null): string | null => (d === null ? null : typeof d === 'string' ? d.slice(0, 10) : d.toISOString().slice(0, 10));
 
-/** A size named as the console and its errors say it: MONOLITHE · BLUE · 52 (ONE SIZE for a model in one size). */
-export function skuWords(s: { model: { name: string }; variant: string | null; sizeLabel: string | null }): string {
-  return [s.model.name, s.variant, s.sizeLabel ?? ONE_SIZE_LABEL].filter((x): x is string => x !== null && x !== '').join(' · ');
-}
+/** A size named as the console and its errors say it (services/sku-owner.ts): MONOLITHE · BLUE · 52, or an add-on by its name. */
+export { skuWords };
 
-const noSupplier = (s: SupplierOrderSku) => conflict('SKU_NO_SUPPLIER', `Set the supplier of ${skuWords(s)} on its model's page first.`);
+const noSupplier = (s: SupplierOrderSku) =>
+  conflict('SKU_NO_SUPPLIER', s.model === null ? `Set the supplier of ${skuWords(s)} in Catalogue → Add-ons first.` : `Set the supplier of ${skuWords(s)} on its model's page first.`);
 
 /** The supplier order as the journal says it (prices included: the journal is internal). */
 async function journalPayload(tx: Db, o: SupplierOrderRow): Promise<JsonObject> {
@@ -344,20 +338,6 @@ async function journalPayload(tx: Db, o: SupplierOrderRow): Promise<JsonObject> 
 async function recordOrderChange(tx: Db, o: SupplierOrderRow, action: string, details: JsonObject, actor: Actor, now: Date): Promise<AuditRecordInput> {
   await writeJournal(tx, [{ type: action, entityType: 'supplier_order', entityId: o.id, payload: await journalPayload(tx, o) }], now);
   return { actor, action, targetType: 'supplier_order', targetId: o.id, details: { reference: supplierOrderReference(o.id), ...details } };
-}
-
-/** The SKUs named, with their model, variant and size. */
-async function skusOf(db: Db, ids: readonly string[]): Promise<Map<string, SupplierOrderSku>> {
-  if (ids.length === 0) return new Map();
-  const rows = await db
-    .selectFrom('skus as k')
-    .innerJoin('models as m', 'm.id', 'k.model_id')
-    .select(['k.id', 'k.code', 'k.size_label', 'k.set_aside_at', 'm.id as model_id', 'm.name', 'm.variant_label'])
-    .where('k.id', 'in', [...new Set(ids)])
-    .execute();
-  return new Map(
-    rows.map((r) => [r.id, { id: r.id, code: r.code, model: { id: r.model_id, name: r.name }, variant: r.variant_label, sizeLabel: r.size_label, setAside: r.set_aside_at !== null }]),
-  );
 }
 
 /**
@@ -443,9 +423,9 @@ export class SupplierOrderService {
       supplier_id: string | null;
       supplier: string | null;
     }>`
-      WITH waiting AS (SELECT sku_id, location_id, count(*)::int AS n FROM orders WHERE reservation = 'AWAITING' GROUP BY sku_id, location_id),
+      WITH waiting AS (SELECT sku_id, location_id, count(*)::int AS n FROM stock_holds WHERE reservation = 'AWAITING' GROUP BY sku_id, location_id),
            moved AS (SELECT sku_id, location_id, sum(delta)::int AS n FROM stock_movements GROUP BY sku_id, location_id),
-           held AS (SELECT sku_id, location_id, count(*)::int AS n FROM orders WHERE reservation = 'STOCK' GROUP BY sku_id, location_id),
+           held AS (SELECT sku_id, location_id, count(*)::int AS n FROM stock_holds WHERE reservation = 'STOCK' GROUP BY sku_id, location_id),
            expected AS (SELECT l.sku_id, o.location_id,
                                sum(greatest(0, l.quantity - l.accepted_quantity - l.credited_quantity - l.rest_cancelled_quantity))::int AS n
                           FROM supplier_order_lines l JOIN supplier_orders o ON o.id = l.supplier_order_id
@@ -460,8 +440,9 @@ export class SupplierOrderService {
              s.id AS supplier_id, s.name AS supplier
         FROM pairs p
         JOIN skus k ON k.id = p.sku_id
-        JOIN models m ON m.id = k.model_id
+        LEFT JOIN models m ON m.id = k.model_id
         LEFT JOIN models main ON main.id = m.variant_of
+        LEFT JOIN addon_items a ON a.id = k.addon_id
         JOIN stock_locations loc ON loc.id = p.location_id
         LEFT JOIN waiting w ON w.sku_id = p.sku_id AND w.location_id = p.location_id
         LEFT JOIN moved mv ON mv.sku_id = p.sku_id AND mv.location_id = p.location_id
@@ -469,8 +450,8 @@ export class SupplierOrderService {
         LEFT JOIN sku_thresholds t ON t.sku_id = p.sku_id AND t.location_id = p.location_id
         LEFT JOIN expected e ON e.sku_id = p.sku_id AND e.location_id = p.location_id
         LEFT JOIN drafted d ON d.sku_id = p.sku_id AND d.location_id = p.location_id
-        LEFT JOIN suppliers s ON s.id = coalesce(k.supplier_id, m.supplier_id, main.supplier_id) AND s.active
-       WHERE k.set_aside_at IS NULL
+        LEFT JOIN suppliers s ON s.id = coalesce(k.supplier_id, m.supplier_id, main.supplier_id, a.supplier_id) AND s.active
+       WHERE k.set_aside_at IS NULL AND (k.addon_id IS NULL OR a.active)
          AND (${locationId}::uuid IS NULL OR p.location_id = ${locationId}::uuid)
          AND (${supplierId}::uuid IS NULL OR s.id = ${supplierId}::uuid)`.execute(this.db);
     const skus = await skusOf(this.db, rows.rows.map((r) => r.sku_id));
@@ -502,7 +483,7 @@ export class SupplierOrderService {
     }
     const natural = (a: string, b: string) => a.localeCompare(b, 'en', { numeric: true, sensitivity: 'base' });
     const out = [...groups.values()];
-    for (const g of out) g.rows.sort((a, b) => natural(a.sku.model.name, b.sku.model.name) || natural(a.sku.variant ?? '', b.sku.variant ?? '') || natural(a.sku.sizeLabel ?? '', b.sku.sizeLabel ?? '') || a.sku.code.localeCompare(b.sku.code));
+    for (const g of out) g.rows.sort((a, b) => addonsLast(a.sku, b.sku, (x, y) => natural(x.model.name, y.model.name) || natural(x.variant ?? '', y.variant ?? '') || natural(x.sizeLabel ?? '', y.sizeLabel ?? '') || x.code.localeCompare(y.code)));
     // The suppliers by name, the sizes without a supplier last; then the location.
     out.sort((a, b) => (a.supplier === null ? 1 : 0) - (b.supplier === null ? 1 : 0) || natural(a.supplier?.name ?? '', b.supplier?.name ?? '') || natural(a.location.name, b.location.name));
     return { groups: out, toOrder: out.reduce((n, g) => n + g.toOrder, 0) };
@@ -605,8 +586,9 @@ export class SupplierOrderService {
     const sku = (await skusOf(tx, [skuId])).get(skuId);
     if (!sku) throw skuNotFound();
     const supplier = await sql<{ id: string | null; currency: string | null }>`
-      SELECT s.id, s.currency FROM skus k JOIN models m ON m.id = k.model_id LEFT JOIN models main ON main.id = m.variant_of
-        LEFT JOIN suppliers s ON s.id = coalesce(k.supplier_id, m.supplier_id, main.supplier_id) AND s.active
+      SELECT s.id, s.currency FROM skus k LEFT JOIN models m ON m.id = k.model_id LEFT JOIN models main ON main.id = m.variant_of
+        LEFT JOIN addon_items a ON a.id = k.addon_id
+        LEFT JOIN suppliers s ON s.id = coalesce(k.supplier_id, m.supplier_id, main.supplier_id, a.supplier_id) AND s.active
        WHERE k.id = ${skuId}`.execute(tx);
     const s = supplier.rows[0];
     if (!s?.id) throw noSupplier(sku);

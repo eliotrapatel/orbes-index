@@ -37,7 +37,7 @@ export interface StockSupply {
   available: number;
 }
 
-/** The supply of each SKU at a location, from the ledger and the orders' reservations. */
+/** The supply of each SKU at a location, from the ledger and the holds (`stock_holds`: the orders' and the add-on units'). */
 export async function stockSupply(db: Db, skuIds: readonly string[], locationId: string): Promise<Map<string, StockSupply>> {
   const ids = [...new Set(skuIds)];
   const out = new Map<string, StockSupply>(ids.map((id) => [id, { available: 0 }]));
@@ -45,7 +45,7 @@ export async function stockSupply(db: Db, skuIds: readonly string[], locationId:
   const rows = await sql<{ sku_id: string; on_hand: number; reserved: number }>`
     SELECT k.id AS sku_id,
            coalesce((SELECT sum(m.delta) FROM stock_movements m WHERE m.sku_id = k.id AND m.location_id = ${locationId}::uuid), 0)::int AS on_hand,
-           (SELECT count(*) FROM orders o WHERE o.sku_id = k.id AND o.location_id = ${locationId}::uuid AND o.reservation = 'STOCK')::int AS reserved
+           (SELECT count(*) FROM stock_holds o WHERE o.sku_id = k.id AND o.location_id = ${locationId}::uuid AND o.reservation = 'STOCK')::int AS reserved
       FROM skus k
      WHERE k.id IN (${sql.join(ids.map((id) => sql`${id}::uuid`))})`.execute(db);
   for (const r of rows.rows) out.set(r.sku_id, { available: Math.max(0, Number(r.on_hand) - Number(r.reserved)) });

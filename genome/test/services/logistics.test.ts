@@ -11,7 +11,9 @@
  *    waiting orders served, the oldest first;
  *  - a transfer serves the orders waiting at its destination;
  *  - counted without a piece: a hand count and a Generator piece read as NO PIECE; the pieces counted in (countIn) and
- *    its refusals.
+ *    its refusals;
+ *  - an add-on's SKU (macro scope K48 D1, plan MACRO M3 §4.2): listed after the models' sizes, named by its add-on,
+ *    counted without an identity, a unit held on an order reserved (`stock_holds`), set aside like a size.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
@@ -102,7 +104,7 @@ describe('LogisticsService (plan NEXT LOT §3.5.6.6)', () => {
       ['54', 'LOGISTICS WAREHOUSE', 0, 0, 0, 0, 2, 0, 2, 0],
     ]);
     expect(staff.unbackedSizes).toBeGreaterThanOrEqual(1);
-    expect(staff.skus.filter((k) => k.model.id === model).map((k) => k.sizeLabel)).toEqual(['52', '54']);
+    expect(staff.skus.filter((k) => k.model?.id === model).map((k) => k.sizeLabel)).toEqual(['52', '54']);
     expect(staff.locations.map((l) => [l.name, l.isDefault])).toEqual([
       ['FRANCE WAREHOUSE', true],
       ['LOGISTICS WAREHOUSE', false],
@@ -259,6 +261,51 @@ describe('LogisticsService (plan NEXT LOT §3.5.6.6)', () => {
     await lg().transfer({ skuId: s50, fromLocationId: logistics, toLocationId: france, quantity: 1 }, admin);
     expect(await reservation(waiting)).toBe('STOCK');
     expect((await lg().stock({ modelId: model, locationId: france })).rows[0]).toMatchObject({ onHand: 1, reserved: 1, waiting: 0 });
+  });
+
+  it('lists an active add-on\'s SKU after the models\' sizes, named by its add-on (macro scope K48 D1): counted without an identity (never NO PIECE, a correction up needs no piece), a unit held on an order reserved, set aside only where something remains', async () => {
+    const a = await h.ctx.services.addons.create({ name: 'Polishing Cloth', skuCode: 'LG-CLOTH', prices: { EUR: 1500 } }, admin);
+    const named = { id: a.sku.id, code: 'LG-CLOTH', model: null, addon: { id: a.id, name: 'Polishing Cloth' }, variant: null, sizeLabel: null, setAside: false };
+    // Offered at once: 0 at each location, after every model's size.
+    let staff = await lg().stock();
+    expect(staff.skus.at(-1)).toEqual(named);
+    expect(staff.rows.filter((r) => r.sku.id === a.sku.id).map((r) => [r.location.name, r.onHand, r.reserved, r.available, r.waiting, r.minimum, r.expected, r.toOrder, r.unbacked])).toEqual([
+      ['FRANCE WAREHOUSE', 0, 0, 0, 0, null, 0, 0, 0],
+      ['LOGISTICS WAREHOUSE', 0, 0, 0, 0, null, 0, 0, 0],
+    ]);
+    expect(staff.rows.findIndex((r) => r.sku.model === null)).toBe(staff.rows.length - 2);
+    // A model filter leaves it out.
+    expect((await lg().stock({ modelId: catalog.modelId })).rows.some((r) => r.sku.id === a.sku.id)).toBe(false);
+    // The agent's correction up: approved without a piece behind it, never NO PIECE.
+    const c = await lg().proposeCorrection({ skuId: a.sku.id, locationId: logistics, delta: 5, reason: 'Delivered by hand.' }, agent, agentScope());
+    expect(c).toMatchObject({ sku: named, status: 'TO_APPROVE' });
+    expect((await lg().approveCorrection(c.id, admin)).status).toBe('APPROVED');
+    expect(await lg().unbacked(a.sku.id)).toBe(0);
+    // A unit held on an order (M3.10's flow, written here directly): reserved, never taken by a correction down.
+    const order = await salonOrder('52', catalog.modelId);
+    await h.t.db.insertInto('order_addon_items').values({ order_id: order, addon_id: a.id, sku_id: a.sku.id, location_id: logistics, price_minor: 1500, currency: 'EUR', added_by_type: 'STAFF' }).execute();
+    const mine = await lg().stock({ locationId: logistics }, agentScope());
+    expect(mine.rows.find((r) => r.sku.id === a.sku.id)).toEqual({ sku: named, location: { id: logistics, name: 'LOGISTICS WAREHOUSE' }, onHand: 5, reserved: 1, available: 4, waiting: 0, minimum: null });
+    expect(await refusal(lg().proposeCorrection({ skuId: a.sku.id, locationId: logistics, delta: -5, reason: 'Lost.' }, admin, null))).toMatchObject({ code: 'STOCK_NOT_AVAILABLE', status: 409 });
+    // A count in names pieces: none is ever an add-on's.
+    const other = await piece(catalog.modelId, '52', { countIn: false });
+    expect(await refusal(lg().countIn(a.sku.id, { productRefs: [other.productId], note: 'On the shelf.' }, admin))).toEqual({
+      code: 'PIECE_NOT_COUNTABLE',
+      status: 409,
+      message: `${other.productId} is not a piece of Polishing Cloth.`,
+    });
+    // Under a minimum, it is to order; set aside, only where something remains, never to order.
+    await lg().setMinimum({ skuId: a.sku.id, locationId: france, minimum: 2 }, admin);
+    staff = await lg().stock();
+    expect(staff.rows.find((r) => r.sku.id === a.sku.id && r.location.id === france)).toMatchObject({ minimum: 2, toOrder: 2, unbacked: 0 });
+    await h.ctx.services.addons.setAside(a.id, admin);
+    staff = await lg().stock();
+    expect(staff.skus.some((k) => k.id === a.sku.id)).toBe(false);
+    expect(staff.rows.filter((r) => r.sku.id === a.sku.id).map((r) => [r.location.name, r.sku.setAside, r.toOrder])).toEqual([
+      ['FRANCE WAREHOUSE', true, 0],
+      ['LOGISTICS WAREHOUSE', true, 0],
+    ]);
+    await h.ctx.services.addons.reinstate(a.id, admin);
   });
 });
 

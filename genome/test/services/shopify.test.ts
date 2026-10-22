@@ -11,6 +11,8 @@
  *    Size, naturally sorted, ONE SIZE first; a model in one size is Shopify's single variant), each with its SKU and the
  *    base price, its photographs by their absolute address (the cover, then the gallery), a draft not published
  *    (archived once inactive); the handle its lookbook address or its name, never shared;
+ *  - the add-ons (macro scope K48 D1, plan MACRO M3 §4.2, S5): each active add-on priced in the store's currency, one
+ *    product of one variant after the models, its own handle;
  *  - the ids pasted back: the number or the address of the page, on the model's SKUs, the SKU of a model never issued
  *    made for it, audited `model.shopify`; refusals: an unknown size, an id given twice, a variant without its product,
  *    another model's product, another size's variant; nothing written when nothing changes;
@@ -523,6 +525,52 @@ describe('the Shopify exports and the ids pasted back (plan LIVE RELEASE+, S9)',
     // old one is the one shown.
     await shopify().link(model, { productId: '5990', variants: [{ size: '50', variantId: '6150' }] }, f.admin);
     expect((await ctx.services.catalog.getModel(model)).shopify).toEqual({ productId: '5990', variants: 2, linked: 1 });
+  });
+
+  it('exports each active add-on priced in the store\'s currency after the models (macro scope K48 D1, S5): one product of one variant, its SKU, price and weight, type Add-on, a draft, a handle no model has', async () => {
+    const taken = await createModel(t.db, 'CARE KIT');
+    await t.db.updateTable('models').set({ slug: null }).where('id', '=', taken).execute();
+    await price(taken, 90_00);
+    const kit = await ctx.services.addons.create({ name: 'Care Kit', skuCode: 'SH-KIT', weightG: 180, position: 2, prices: { EUR: 45_00, USD: 50_00 } }, f.admin);
+    await ctx.services.addons.create({ name: 'Polishing Cloth', skuCode: 'SH-CLOTH', weightG: 20, position: 1, prices: { EUR: 15_00 } }, f.admin);
+    await ctx.services.addons.create({ name: 'Travel Pouch', skuCode: 'SH-POUCH', position: 3, prices: { USD: 30_00 } }, f.admin);
+    const aside = await ctx.services.addons.create({ name: 'Spare Strap', skuCode: 'SH-STRAP', position: 0, prices: { EUR: 35_00 } }, f.admin);
+    await ctx.services.addons.setAside(aside.id, f.admin);
+    const rows = records((await shopify().productCsv('EUR')).body);
+    const addons = rows.filter((r) => r.Type === 'Add-on');
+    expect(addons).toEqual([
+      {
+        Title: 'Polishing Cloth',
+        'URL handle': 'polishing-cloth',
+        Vendor: 'ORBES',
+        Type: 'Add-on',
+        'Published on online store': 'false',
+        Status: 'draft',
+        SKU: 'SH-CLOTH',
+        'Option1 name': 'Title',
+        'Option1 value': 'Default Title',
+        'Option2 name': '',
+        'Option2 value': '',
+        Price: '15.00',
+        'Weight value (grams)': '20',
+        'Requires shipping': 'true',
+        'Product image URL': '',
+        'Image position': '',
+        'Image alt text': '',
+        'Variant image URL': '',
+      },
+      // The model CARE KIT has the handle care-kit: the add-on takes its SKU code with it.
+      expect.objectContaining({ Title: 'Care Kit', 'URL handle': 'care-kit-sh-kit', SKU: 'SH-KIT', Price: '45.00', 'Weight value (grams)': '180' }),
+    ]);
+    expect(rows.find((r) => r.Title === 'CARE KIT')!['URL handle']).toBe('care-kit');
+    // After every model's rows.
+    expect(rows.slice(-2).map((r) => r.Type)).toEqual(['Add-on', 'Add-on']);
+    // In USD: the kit and the pouch, its weight unknown.
+    expect(records((await shopify().productCsv('USD')).body).filter((r) => r.Type === 'Add-on').map((r) => [r.Title, r.Price, r['Weight value (grams)']])).toEqual([
+      ['Care Kit', '50.00', '180'],
+      ['Travel Pouch', '30.00', ''],
+    ]);
+    expect(kit.sku.code).toBe('SH-KIT');
   });
 
   it('exports the priced orders of a period in Shopify\'s order format: line items, statuses, dates, the buyer, the email', async () => {

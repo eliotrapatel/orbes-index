@@ -28,7 +28,6 @@ import { CARRIER_PRESETS, ensureSku, stockBalances, stockLevel } from '../../src
 import { createManualClock, SYSTEM_ACTOR, type Actor, type ManualClock } from '../../src/server/types.js';
 import { verifyClaimCode } from '../../src/server/services/claim-codes.js';
 import { withdrawOnCancel } from '../../src/server/services/claim-renewals.js';
-import { skuModelId } from '../../src/server/services/sku-owner.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { countPiecesIn, scanIntoParcel } from '../support/fulfil.js';
 import { jpegPhoto } from '../support/images.js';
@@ -141,8 +140,9 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
   async function linkPiece(orderId: string) {
     const o = await orderRow(orderId);
     if (o.product_id !== null || o.reservation !== 'STOCK' || o.status !== 'PAID') return;
-    const sku = await t.db.selectFrom('skus').select(['model_id', 'size_label']).where('id', '=', o.sku_id!).executeTakeFirstOrThrow();
-    const { product } = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: skuModelId(sku), ...(sku.size_label !== null ? { variant: sku.size_label } : {}), material: '925 STERLING SILVER' }, admin);
+    // An order's SKU is always its model's size (orders_sku_fkey): the piece is issued of the order's model.
+    const sku = await t.db.selectFrom('skus').select(['size_label']).where('id', '=', o.sku_id!).where('model_id', '=', o.model_id).executeTakeFirstOrThrow();
+    const { product } = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: o.model_id, ...(sku.size_label !== null ? { variant: sku.size_label } : {}), material: '925 STERLING SILVER' }, admin);
     await ctx.services.logistics.countIn(o.sku_id!, { productRefs: [product.productId], note: 'On the shelf.' }, admin);
     await scanIntoParcel(ctx, orderId, { pieces: { [orderId]: product.productId } }, admin);
   }

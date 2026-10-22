@@ -44,6 +44,11 @@
  *                  `card.print`.
  *                  `cardsAttached` erases every sealed copy left (ATTACHED): from then on a lost card needs a new claim
  *                  code (409 CARDS_ATTACHED).
+ *   add-ons        (macro scope K48 D1, plan MACRO M3 §4.2) a line of an add-on's SKU is counted and confirmed like any,
+ *                  and takes no ORBES identity and no card: at `confirm` its units accepted enter the stock at once (one
+ *                  RECEIVED movement of +n, under the SKU's lock; audited in `reception.confirm`'s `countedIn`), no
+ *                  material is asked for it, its `issued` stays 0, and the identities owed, the issuing worker and the
+ *                  cards read the models' lines only (a reception of add-ons only is issued as one of rejected pieces).
  *   back to the    the rejected pieces sent back by the agent (`supplierReturnSent`: TO_RETURN → RETURNED, an optional
  *   supplier       carrier and tracking number); the supplier's answer is ORBES's (services/supplier-orders.ts).
  *
@@ -69,7 +74,8 @@ import { writeJournal } from './journal.js';
 import { serveWaiting } from './orders.js';
 import { assertSkuOffered } from './sizes.js';
 import { lockSku, recordMovement } from './stock.js';
-import { lineExpected, receptionOpen, refreshStatus, SUPPLIER_ORDER_OPEN, supplierOrderClosed, supplierOrderNotFound, supplierOrderReference, type SupplierOrderSku } from './supplier-orders.js';
+import { addonsLast, skuRefs, type SupplierOrderSku } from './sku-owner.js';
+import { lineExpected, receptionOpen, refreshStatus, SUPPLIER_ORDER_OPEN, supplierOrderClosed, supplierOrderNotFound, supplierOrderReference } from './supplier-orders.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -178,6 +184,7 @@ export interface ReceptionView {
   lines: ReceptionLineView[];
   accepted: number;
   rejected: number;
+  /** The identities issued and owed (`accepted`: the models' pieces accepted; an add-on's units take none). */
   issuing: { issued: number; accepted: number; done: boolean };
   cards: { sealed: number; printed: number; erased: Partial<Record<CardErasedReason, number>>; attachedAt: Date | null; runs: { sheet: CardRun[]; card: CardRun[] } };
 }
@@ -284,17 +291,11 @@ function cleanInput(input: ReceptionInput): { lines: { skuId: string; accepted: 
 const dateOf = (d: Date | string | null): string | null => (d === null ? null : typeof d === 'string' ? d.slice(0, 10) : d.toISOString().slice(0, 10));
 const lockKey = (uuid: string) => Number.parseInt(uuid.replace(/-/g, '').slice(0, 8), 16) | 0;
 
-/** The SKUs named, as the supplier orders name them. */
-export async function skusOf(db: Db, ids: readonly string[]): Promise<Map<string, SupplierOrderSku>> {
-  if (ids.length === 0) return new Map();
-  const rows = await db
-    .selectFrom('skus as k')
-    .innerJoin('models as m', 'm.id', 'k.model_id')
-    .select(['k.id', 'k.code', 'k.size_label', 'k.set_aside_at', 'm.id as model_id', 'm.name', 'm.variant_label'])
-    .where('k.id', 'in', [...new Set(ids)])
-    .execute();
-  return new Map(rows.map((r) => [r.id, { id: r.id, code: r.code, model: { id: r.model_id, name: r.name }, variant: r.variant_label, sizeLabel: r.size_label, setAside: r.set_aside_at !== null }]));
-}
+/** The SKUs named, as the supplier orders name them (services/sku-owner.ts: a model's size or an add-on). */
+const skusOf = skuRefs;
+
+/** A reception line's pieces that take an ORBES identity: a model's size, never an add-on's SKU (macro scope K48 D1). */
+const identifiedLineSql = sql<boolean>`EXISTS (SELECT 1 FROM skus k WHERE k.id = rl.sku_id AND k.addon_id IS NULL)`;
 
 // ── Service ────────────────────────────────────────────────────────────────
 
@@ -452,21 +453,21 @@ export class ReceptionService {
       await trx.updateTable('reception_lines').set({ issued: l.issued + n }).where('id', '=', l.id).execute();
       await recordMovement(trx, { skuId: l.sku_id, locationId: r.location_id, delta: n, reason: 'RECEIVED', receptionLineId: l.id }, actor, now);
       notes.push(...(await serveWaiting(trx, l.sku_id, r.location_id, actor, now)));
-      const left = await trx.selectFrom('reception_lines').select('id').where('reception_id', '=', r.id).whereRef('issued', '<', 'accepted').executeTakeFirst();
+      const left = await trx.selectFrom('reception_lines as rl').select('rl.id').where('rl.reception_id', '=', r.id).whereRef('rl.issued', '<', 'rl.accepted').where(identifiedLineSql).executeTakeFirst();
       if (!left) notes.push(...(await this.markIssued(trx, r, now)));
       for (const note of notes) await this.audit.record(note, trx);
       return n;
     });
   }
 
-  /** The confirmed receptions with nothing left to issue and no `issued_at` yet (rejected pieces only): issued now. */
+  /** The confirmed receptions with nothing left to issue and no `issued_at` yet (rejected pieces, or add-ons, only): issued now. */
   private async finishIssued(): Promise<void> {
     const done = await this.db
       .selectFrom('receptions as r')
       .select('r.id')
       .where('r.status', '=', 'CONFIRMED')
       .where('r.issued_at', 'is', null)
-      .where((eb) => eb.not(eb.exists(eb.selectFrom('reception_lines as rl').select('rl.id').whereRef('rl.reception_id', '=', 'r.id').whereRef('rl.issued', '<', 'rl.accepted'))))
+      .where((eb) => eb.not(eb.exists(eb.selectFrom('reception_lines as rl').select('rl.id').whereRef('rl.reception_id', '=', 'r.id').whereRef('rl.issued', '<', 'rl.accepted').where(identifiedLineSql))))
       .execute();
     for (const d of done) {
       await inTransaction(this.db, async (tx) => {
@@ -522,17 +523,28 @@ export class ReceptionService {
       .executeTakeFirst();
     if (!o || !SUPPLIER_ORDER_OPEN.includes(o.status) || !inScope(scope, o.location_id)) throw notFoundError();
     const lines = await this.db.selectFrom('supplier_order_lines').selectAll().where('supplier_order_id', '=', id).execute();
-    // The sizes a piece not on the order may be: the offered sizes of the models the order names, and of its supplier.
+    // The sizes a piece not on the order may be: the offered sizes of the models the order names, and of its supplier;
+    // and the active add-ons (macro scope K48 D1) the order names or its supplier supplies.
     const offered = await sql<{ id: string }>`
       SELECT k.id FROM skus k
-        JOIN models m ON m.id = k.model_id
+        LEFT JOIN models m ON m.id = k.model_id
         LEFT JOIN models main ON main.id = m.variant_of
-       WHERE k.set_aside_at IS NULL AND m.active
+        LEFT JOIN addon_items a ON a.id = k.addon_id
+       WHERE k.set_aside_at IS NULL AND coalesce(m.active, a.active)
          AND (k.model_id IN (SELECT k2.model_id FROM supplier_order_lines l JOIN skus k2 ON k2.id = l.sku_id WHERE l.supplier_order_id = ${id})
-              OR coalesce(k.supplier_id, m.supplier_id, main.supplier_id) = ${o.supplier_id})`.execute(this.db);
+              OR k.id IN (SELECT l.sku_id FROM supplier_order_lines l WHERE l.supplier_order_id = ${id})
+              OR coalesce(k.supplier_id, m.supplier_id, main.supplier_id, a.supplier_id) = ${o.supplier_id})`.execute(this.db);
     const skus = await skusOf(this.db, [...lines.map((l) => l.sku_id), ...offered.rows.map((r) => r.id)]);
     const natural = (a: SupplierOrderSku, b: SupplierOrderSku) =>
-      a.model.name.localeCompare(b.model.name, 'en', { numeric: true }) || (a.variant ?? '').localeCompare(b.variant ?? '', 'en') || (a.sizeLabel ?? '').localeCompare(b.sizeLabel ?? '', 'en', { numeric: true }) || a.code.localeCompare(b.code);
+      addonsLast(
+        a,
+        b,
+        (x, y) =>
+          x.model.name.localeCompare(y.model.name, 'en', { numeric: true }) ||
+          (x.variant ?? '').localeCompare(y.variant ?? '', 'en') ||
+          (x.sizeLabel ?? '').localeCompare(y.sizeLabel ?? '', 'en', { numeric: true }) ||
+          x.code.localeCompare(y.code),
+      );
     return {
       id: o.id,
       reference: supplierOrderReference(o.id),
@@ -671,10 +683,12 @@ export class ReceptionService {
           FROM skus k JOIN models m ON m.id = k.model_id LEFT JOIN models main ON main.id = m.variant_of
          WHERE k.id IN (${sql.join(lines.map((l) => sql`${l.sku_id}::uuid`))})`.execute(tx);
       const skus = await skusOf(tx, lines.map((l) => l.sku_id));
-      const missing = lines.find((l) => l.accepted > 0 && !materials.rows.find((m) => m.sku_id === l.sku_id)?.material);
+      // An add-on's line (macro scope K48 D1) takes no identity, so no material: it is counted in below.
+      const counted = lines.filter((l) => skus.get(l.sku_id)!.model === null);
+      const missing = lines.find((l) => l.accepted > 0 && skus.get(l.sku_id)!.model !== null && !materials.rows.find((m) => m.sku_id === l.sku_id)?.material);
       if (missing) {
         const s = skus.get(missing.sku_id)!;
-        throw materialMissing([s.model.name, s.variant].filter((x): x is string => x !== null).join(' · '));
+        throw materialMissing([s.model!.name, s.variant].filter((x): x is string => x !== null).join(' · '));
       }
       await tx.updateTable('receptions').set({ status: 'CONFIRMED', confirmed_at: now, confirmed_by: actor.id! }).where('id', '=', r.id).execute();
       for (const l of lines) {
@@ -684,13 +698,35 @@ export class ReceptionService {
         }
         if (l.rejected > 0) await tx.insertInto('supplier_returns').values({ supplier_order_id: o.id, reception_id: r.id, sku_id: l.sku_id, quantity: l.rejected, created_at: now }).execute();
       }
+      // The add-ons' units accepted enter the stock now, without an identity or a card: one RECEIVED movement per line,
+      // under the SKU's lock (`issued` stays 0: no identity is owed for them).
+      for (const l of counted) {
+        if (l.accepted === 0) continue;
+        await lockSku(tx, l.sku_id);
+        await recordMovement(tx, { skuId: l.sku_id, locationId: r.location_id, delta: l.accepted, reason: 'RECEIVED', receptionLineId: l.id }, actor, now);
+      }
       const after = await refreshStatus(tx, o.id, now);
       await tx.updateTable('supplier_orders').set({ updated_at: now }).where('id', '=', o.id).execute();
       await writeJournal(tx, [{ type: 'reception.confirm', entityType: 'supplier_order', entityId: o.id, payload: { id: o.id, reference: supplierOrderReference(o.id), status: after.status, receptionId: r.id } }], now);
       const accepted = lines.reduce((n, l) => n + l.accepted, 0);
       const rejected = lines.reduce((n, l) => n + l.rejected, 0);
       await this.audit.record(
-        { actor, action: 'reception.confirm', targetType: 'reception', targetId: r.id, details: { supplierOrderId: o.id, reference: supplierOrderReference(o.id), accepted, rejected, lines: lines.map((l) => ({ skuId: l.sku_id, accepted: l.accepted, rejected: l.rejected })), status: after.status } },
+        {
+          actor,
+          action: 'reception.confirm',
+          targetType: 'reception',
+          targetId: r.id,
+          details: {
+            supplierOrderId: o.id,
+            reference: supplierOrderReference(o.id),
+            accepted,
+            rejected,
+            lines: lines.map((l) => ({ skuId: l.sku_id, accepted: l.accepted, rejected: l.rejected })),
+            status: after.status,
+            // The add-ons' units counted in at once, without an identity (macro scope K48 D1).
+            ...(counted.some((l) => l.accepted > 0) ? { countedIn: counted.filter((l) => l.accepted > 0).map((l) => ({ skuId: l.sku_id, units: l.accepted })) } : {}),
+          },
+        },
         tx,
       );
     });
@@ -933,6 +969,8 @@ export class ReceptionService {
     for (const c of cards) if (c.erased_reason) erased[c.erased_reason] = (erased[c.erased_reason] ?? 0) + 1;
     const accepted = lines.reduce((n, l) => n + l.accepted, 0);
     const issued = lines.reduce((n, l) => n + l.issued, 0);
+    // The identities owed: the models' pieces accepted (an add-on's units take none, macro scope K48 D1).
+    const owed = lines.filter((l) => skus.get(l.sku_id)!.model !== null).reduce((n, l) => n + l.accepted, 0);
     return {
       id: r.id,
       supplierOrder: { id: r.supplier_order_id, reference: supplierOrderReference(r.supplier_order_id) },
@@ -947,7 +985,7 @@ export class ReceptionService {
       lines: lines.map((l) => ({ id: l.id, sku: skus.get(l.sku_id)!, onOrder: l.supplier_order_line_id !== null, accepted: l.accepted, rejected: l.rejected, issued: l.issued, note: l.note })),
       accepted,
       rejected: lines.reduce((n, l) => n + l.rejected, 0),
-      issuing: { issued, accepted, done: r.issued_at !== null },
+      issuing: { issued, accepted: owed, done: r.issued_at !== null },
       cards: {
         sealed: cards.filter((c) => c.sealed_claim_code !== null).length,
         printed: cards.filter((c) => c.printed_count > 0).length,
