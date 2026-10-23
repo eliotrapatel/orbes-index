@@ -367,7 +367,9 @@ function arrangeLive(page: HTMLElement): void {
   const frame = box(picture.matches('.n-live__seal') ? `${FRAME} ${FRAME}--sealed` : FRAME, picture);
   place(picture, frame);
   place(words, frame);
-  pairUp(words, '.n-live__type', ':is(.n-live__price, .n-live__pieces-line)');
+  // A set's price stands beside ONE PRICE FOR THE SET, under its type and its pieces' names (lot M3).
+  if (words.querySelector(':scope > .n-live__one-price')) pairUp(words, '.n-live__price', '.n-live__one-price');
+  else pairUp(words, '.n-live__type', ':is(.n-live__price, .n-live__pieces-line)');
   pairUp(words, '.n-live__surprise', '.n-live__see-line');
   // The frame's right block: ADD TO CALENDAR (after WHO MAY ENTER, it stands with I'LL BE THERE on a phone), THIS
   // RELEASE IS OVER (the phone's plate under the frame), what happened at the end of a visit.

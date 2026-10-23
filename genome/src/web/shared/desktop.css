@@ -2998,7 +2998,7 @@
     margin-top: var(--d-s4);
   }
 
-  /* Its pieces' names and ONE PRICE FOR THE SET in the frame, a line each under the title's. */
+  /* A set's pieces' names in the frame, a line under its type; ONE PRICE FOR THE SET beside its price (views/desktop-release.ts). */
   html:not(.d-touch) body.nocturne .n-live__words .d-frame__main > :is(.n-live__set-names, .n-live__one-price) {
     margin-top: var(--d-s3);
   }
