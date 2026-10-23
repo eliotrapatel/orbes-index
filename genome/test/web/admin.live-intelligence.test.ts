@@ -17,6 +17,7 @@ import {
   LIVE_FUNNEL_LABELS,
   liveReadings,
   pressureText,
+  queueReportFigures,
   rangeText,
   sellOutText,
   shareText,
@@ -69,7 +70,28 @@ describe('the intelligence\'s figures in the console', () => {
     expect(sellOutText({ outlook: 'LINE_SHORT', at: null, expectedLeft: 2 })).toBe('About 2 left once the line is served');
     expect(sellOutText({ outlook: 'CLOSE_FIRST', at: null, expectedLeft: 1 })).toBe('About 1 left at the close');
     expect(sellOutText({ outlook: 'PARTIAL', at: null, expectedLeft: 3 })).toBe('About 3 left');
-    expect(sellOutText({ outlook: 'NO_PACE', at: null, expectedLeft: null })).toBe('No pace yet');
+    // ONE QUEUE (D11): no rate of sales yet, never « No pace yet » (every LIVE release has a pace).
+    expect(sellOutText({ outlook: 'NO_PACE', at: null, expectedLeft: null })).toBe('No sales rate yet');
+  });
+
+  it('adds the queue to the release report (ONE QUEUE, D11): the longest wait, the turns given by the pace, the people who left the queue; no figure in a label', () => {
+    const rows = queueReportFigures({ longestWaitMs: 4_512_000, turnsByPace: 4750, leftQueue: 12 });
+    expect(rows).toEqual([
+      ['Longest wait', '1 h 15 min', 'IN THE QUEUE, TO ITS TURN', 'live-report-longest-wait'],
+      ['Turns given', '4\u2009750', 'BY THE PACE', 'live-report-turns-by-pace'],
+      ['Left the queue', '12', 'PEOPLE WHO LEFT THEIR PLACE', 'live-report-left-queue'],
+    ]);
+    expect(rows.every(([label]) => !/\d/.test(label))).toBe(true);
+    expect(queueReportFigures({ longestWaitMs: null, turnsByPace: 0, leftQueue: 1 })).toEqual([
+      ['Longest wait', '—', 'NOBODY IN THE QUEUE', 'live-report-longest-wait'],
+      ['Turns given', '0', 'BY THE PACE', 'live-report-turns-by-pace'],
+      ['Left the queue', '1', 'PERSON WHO LEFT THEIR PLACE', 'live-report-left-queue'],
+    ]);
+    // An after-room has no pace: its turns come at once.
+    expect(queueReportFigures({ longestWaitMs: 90_000, turnsByPace: 0, leftQueue: 0 }, true).map(([label, value]) => [label, value])).toEqual([
+      ['Longest wait', '1 min 30 s'],
+      ['Left the queue', '0'],
+    ]);
   });
 
   it('draws the funnel as bars against its largest step, each its share of the step before', () => {

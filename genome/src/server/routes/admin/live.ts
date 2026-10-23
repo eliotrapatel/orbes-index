@@ -15,7 +15,7 @@
  *   DELETE /api/admin/live/:id/board-link                    OPERATOR  revoked
  *   GET    /api/admin/live/:id/board                         AUDITOR   the live board: the counters, per size, the line
  *   GET    /api/admin/live/:id/stream                        AUDITOR   the live board in real time (SSE, `console` events)
- *   GET    /api/admin/live/:id/entries                       AUDITOR   the entries (?status=, OPEN for the open ones)
+ *   GET    /api/admin/live/:id/entries                       AUDITOR   the entries (?status=, OPEN for the open ones, BEYOND beyond the pieces)
  *   POST   /api/admin/live/:id/pause, /resume                OPERATOR  no new turn, the deadlines frozen; and back
  *   PUT    /api/admin/live/:id/pace                          OPERATOR  SET PACE: X turns every Y minutes, slower or faster, until the end
  *   POST   /api/admin/live/:id/pace/pause, /pace/resume      OPERATOR  no batch given, from T0; and back

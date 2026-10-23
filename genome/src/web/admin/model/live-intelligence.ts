@@ -10,7 +10,7 @@
  *   always                    the release comparison, once another release's T0 has passed.
  */
 import { formatCount } from '../format.js';
-import type { LiveAlertKind, LiveBotSign, LiveComparedRelease, LiveFunnelStep, LivePhase, LiveRelease, LiveSellOutOutlook } from '../types.js';
+import type { LiveAlertKind, LiveBotSign, LiveComparedRelease, LiveFunnelStep, LivePhase, LiveRelease, LiveReleaseReport, LiveSellOutOutlook } from '../types.js';
 import type { BarRow } from './dashboard.js';
 import { formatMoney } from './live.js';
 
@@ -91,9 +91,23 @@ export function sellOutText(s: { outlook: LiveSellOutOutlook | 'PARTIAL'; at: st
       return `About ${formatCount(s.expectedLeft ?? 0)} left at the close`;
     case 'PARTIAL':
       return `About ${formatCount(s.expectedLeft ?? 0)} left`;
+    // ONE QUEUE (D11): no rate of sales to read yet (never the release's pace, which every LIVE release has).
     default:
-      return 'No pace yet';
+      return 'No sales rate yet';
   }
+}
+
+/**
+ * The release report's queue (ONE QUEUE, D11, added rows): the longest wait in the queue, the turns given by the pace
+ * (its batches; an after-room has none: its turns come at once) and the people who left the queue; each its label (no
+ * figure: the display face sets it), value, note and test id.
+ */
+export function queueReportFigures(q: NonNullable<LiveReleaseReport['queue']>, afterRoom = false): [label: string, value: string, note: string, testId: string][] {
+  return [
+    ['Longest wait', durationText(q.longestWaitMs), q.longestWaitMs === null ? 'NOBODY IN THE QUEUE' : 'IN THE QUEUE, TO ITS TURN', 'live-report-longest-wait'],
+    ...(afterRoom ? [] : [['Turns given', formatCount(q.turnsByPace), 'BY THE PACE', 'live-report-turns-by-pace'] as [string, string, string, string]]),
+    ['Left the queue', formatCount(q.leftQueue), q.leftQueue === 1 ? 'PERSON WHO LEFT THEIR PLACE' : 'PEOPLE WHO LEFT THEIR PLACE', 'live-report-left-queue'],
+  ];
 }
 
 /** The room forecast at T0: `750 – 1 500`. */

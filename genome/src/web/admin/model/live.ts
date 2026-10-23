@@ -14,8 +14,11 @@
  *    reservation on the Orders board (plan LIVE RELEASE+: model/orders.ts).
  *  - The live board's figures, and a reservation's reference.
  *  - The pace and the hold (ONE QUEUE, D1): X people per batch every Y minutes and the hold after the opening (minutes,
- *    0 for none), required in the New live release dialog and in the times part, and the live board's Pace block: its figures (in the queue, admitted, the batches, the next batch in Paris time), SET PACE,
- *    PAUSE PACE / RESUME PACE and NEXT BATCH NOW (OPERATOR), and the line's admission (its batch and when).
+ *    0 = none), required in the New live release dialog and in the times part, and the live board's Pace block (D11, add
+ *    only): its figures (in the queue, admitted all ways, the batches, the next batch in Paris time, kept; the turns
+ *    given by the pace, beyond the pieces and the hold's end in Paris time, added), its controls (OPERATOR: SET PACE,
+ *    PAUSE PACE / RESUME PACE, NEXT BATCH NOW, SHORTEN THE HOLD and END THE HOLD NOW, D4, D6, D7), the close guard's
+ *    warning (D10, advice only), and the line's turn (its batch and when), queue place and estimated turn.
  *  - The after-room (plan LIVE RELEASE+, choice 2): where it stands and why it never opened, said; its own page has the
  *    live board and controls, never a setting, a publication, a cancellation or a board link of its own.
  *  - Plan LIVE RELEASE+, step S8: the question after (choice 11), its words one answer per line and its answers
@@ -85,6 +88,17 @@ export const LIVE_LIMITS = Object.freeze({
   /** The hold after the opening (services/live.ts LIVE_HOLD_MINUTES), in minutes: 0 for none. */
   hold: LIVE_HOLD_MINUTES,
 });
+
+/** The hold's field, in the owner's words (ANSWERS r5, D1): 'Hold after the opening (minutes, 0 = none)'. */
+export const LIVE_HOLD_LABEL = 'Hold after the opening (minutes, 0 = none)';
+
+/**
+ * The host message's dialog says where the line shows (ONE QUEUE, D11; the mockup's FROM ORBES under ORBES on #queue,
+ * #sold, #after-wait, #turn and #secured, none on #confirmed and #after-door; production's room, draw and late comer's
+ * entry, unchanged, D32).
+ */
+export const LIVE_MESSAGE_HINT =
+  'One line, shown on the room, the draw, the late comer’s entry, the queue, SOLD OUT for your size, the after-room’s waiting screen, the turn and SECURED, until the next one.';
 
 /** The question after when the console does not rewrite it (services/live.ts LIVE_QUESTION_DEFAULT). */
 export const LIVE_QUESTION_DEFAULT = Object.freeze({
@@ -386,7 +400,7 @@ export function newLiveProblem(v: Record<string, string>, pieces: readonly strin
   const price = parseMoney(set ? v.priceSet : v.price);
   if (price === null || price > LIVE_LIMITS.priceMaxMinor) return set ? 'The price of the set, in units (4800, or 4800.50).' : 'The price of a piece, in units (4800, or 4800.50).';
   if (!(LIVE_CURRENCIES as readonly string[]).includes(v.currency)) return 'Choose the currency.';
-  const pace = paceProblem(v.paceBatch, v.paceMinutes, false) ?? holdProblem(v.holdMinutes);
+  const pace = paceProblem(v.paceBatch, v.paceMinutes) ?? holdProblem(v.holdMinutes);
   if (pace) return pace;
   const sizes = set ? parseSetSizes(v, pieces) : parseSizes(v.sizes);
   return 'problem' in sizes ? sizes.problem : null;
@@ -555,7 +569,7 @@ export function livePartProblem(r: LiveRelease, part: LivePart, v: Record<string
       }
       // Emptied on a published release, the announcement would be its publication, already past: announced at once.
       if (r.publishedAt !== null && utcInstant(v.announceAt) === null) return 'A published release keeps an announcement time; set one later than now.';
-      return paceProblem(v.paceBatch, v.paceMinutes, false) ?? holdProblem(v.holdMinutes);
+      return paceProblem(v.paceBatch, v.paceMinutes) ?? holdProblem(v.holdMinutes);
     }
     case 'turns': {
       if (inRange(v.turnSeconds, LIVE_LIMITS.turnSeconds) === null) return `A turn lasts ${LIVE_LIMITS.turnSeconds.min} to ${LIVE_LIMITS.turnSeconds.max} seconds.`;
@@ -826,9 +840,15 @@ export function combineLine(combine: LiveRelease['access']['combine']): string {
 
 // ── The pace (W4) ──────────────────────────────────────────────────────────
 
-/** A pace said: `250 buyers every minute`, `1 buyer every 5 minutes`. */
+/** A pace said as the New live release dialog sets it (D1): `250 people per batch, every minute`, `1 person per batch, every 5 minutes`. */
 export function paceLine(p: LivePace): string {
-  return `${formatCount(p.batch)} ${p.batch === 1 ? 'buyer' : 'buyers'} every ${p.minutes === 1 ? 'minute' : `${p.minutes} minutes`}`;
+  return `${formatCount(p.batch)} ${p.batch === 1 ? 'person' : 'people'} per batch, every ${p.minutes === 1 ? 'minute' : `${p.minutes} minutes`}`;
+}
+
+/** The hold after the opening said (D1, the times part): `10 minutes after the opening`, or `None` (0). */
+export function holdLine(minutes: number | null | undefined): string {
+  const m = minutes ?? 0;
+  return m > 0 ? `${m} ${m === 1 ? 'minute' : 'minutes'} after the opening` : 'None';
 }
 
 /** What the server would refuse in the hold after the opening (D1): a whole number of minutes, 0 (none) to the bound. */
@@ -845,14 +865,15 @@ function paceOf(batch: string | undefined, minutes: string | undefined): LivePac
 
 /**
  * What the server would refuse in a pace's two figures, said before anything is sent; null when they may be sent. Both
- * blank is no pace where `blank` allows it (the settings' times part), never in SET PACE.
+ * are needed everywhere (ONE QUEUE, D1: every LIVE release has a pace; M1's « both blank: no pace » gone).
  */
-export function paceProblem(batch: string | undefined, minutes: string | undefined, blank: boolean): string | null {
+export function paceProblem(batch: string | undefined, minutes: string | undefined): string | null {
   const b = (batch ?? '').trim();
   const m = (minutes ?? '').trim();
-  if (b === '' && m === '') return blank ? null : 'Say how many people per batch, every how many minutes.';
-  const bounds = `A pace gives ${formatCount(LIVE_PACE_BATCH.min)} to ${formatCount(LIVE_PACE_BATCH.max)} turns every ${LIVE_PACE_MINUTES.min} to ${LIVE_PACE_MINUTES.max} minutes`;
-  if (inRange(b, LIVE_PACE_BATCH) === null || inRange(m, LIVE_PACE_MINUTES) === null) return `${bounds}${blank ? '; leave both blank for none.' : '.'}`;
+  if (b === '' && m === '') return 'Say how many people per batch, every how many minutes.';
+  if (inRange(b, LIVE_PACE_BATCH) === null || inRange(m, LIVE_PACE_MINUTES) === null) {
+    return `A pace gives ${formatCount(LIVE_PACE_BATCH.min)} to ${formatCount(LIVE_PACE_BATCH.max)} turns every ${LIVE_PACE_MINUTES.min} to ${LIVE_PACE_MINUTES.max} minutes.`;
+  }
   return null;
 }
 
@@ -878,50 +899,106 @@ export function parisClock(v: string | Date | null | undefined, opts: { seconds?
 }
 
 /**
- * The Pace block's figures, in the order the board shows them: those in the queue, those admitted, the batches so far,
- * and the next batch in Paris time (an em dash, its note PACE PAUSED or RELEASE PAUSED, while either pause holds it: the
- * figure keeps a time's width).
+ * The Pace block's figures, in the order the board shows them (ONE QUEUE, D11: add only): those in the queue, those given
+ * a turn all ways (the batches and LET IN: the M1 « Admitted »), the batches so far and the next batch in Paris time (an
+ * em dash, its note PACE PAUSED or RELEASE PAUSED, while either pause holds it: the figure keeps a time's width), kept;
+ * then the turns given by the pace (the batches, NEXT BATCH NOW included), those in the queue beyond the pieces of their
+ * size, and, while the hold after the opening lasts, when it ends in Paris time (held like the next batch), added.
  */
 export function livePaceFigures(b: Pick<LiveBoard, 'phase' | 'paused' | 'endedAt'> & { pace: LivePaceState }): { label: string; value: string; note: string; testId: string }[] {
   const p = b.pace;
   const ended = b.endedAt !== null || b.phase === 'ENDED';
+  const hold = p.holdMinutes ?? 0;
+  const held = p.paused ? 'PACE PAUSED' : b.paused ? 'RELEASE PAUSED' : null;
   const next = ended
     ? { value: '—', note: 'NONE AFTER THE END' }
-    : p.paused
-      ? { value: '—', note: 'PACE PAUSED' }
-      : b.paused
-        ? { value: '—', note: 'RELEASE PAUSED' }
-        : { value: parisClock(p.nextAt), note: b.phase === 'LIVE' ? 'PARIS TIME' : 'PARIS · AT T0' };
+    : held
+      ? { value: '—', note: held }
+      : { value: parisClock(p.nextAt), note: b.phase === 'LIVE' ? 'PARIS TIME' : hold > 0 && p.holdEndsAt ? `PARIS · T0 + ${hold} MIN` : 'PARIS · AT T0' };
+  const holdEnds = !ended && p.holdEndsAt ? (held ? { value: '—', note: held } : { value: parisClock(p.holdEndsAt), note: b.phase === 'LIVE' ? 'PARIS TIME' : `PARIS · T0 + ${hold} MIN` }) : null;
   return [
-    { label: 'In the queue', value: formatCount(p.waiting), note: 'WAITING FOR THEIR BATCH', testId: 'live-pace-waiting' },
-    { label: 'Admitted', value: formatCount(p.admitted), note: 'MAY TAKE A TURN', testId: 'live-pace-admitted' },
+    { label: 'In the queue', value: formatCount(p.waiting), note: 'WAITING IN THE QUEUE', testId: 'live-pace-waiting' },
+    { label: 'Admitted', value: formatCount(p.admitted), note: 'GIVEN A TURN, ALL WAYS', testId: 'live-pace-admitted' },
     { label: 'Batches', value: formatCount(p.batches), note: `${formatCount(p.batch)} EVERY ${p.minutes === 1 ? 'MINUTE' : `${p.minutes} MINUTES`}`, testId: 'live-pace-batches' },
     { label: 'Next batch', value: next.value, note: next.note, testId: 'live-pace-next' },
+    { label: 'Turns given', value: formatCount(p.turnsGiven ?? p.admitted - (p.letIn ?? 0)), note: 'BY THE PACE', testId: 'live-pace-turns' },
+    { label: 'Beyond the pieces', value: formatCount(p.beyond ?? 0), note: 'PAST THEIR SIZE’S PIECES', testId: 'live-pace-beyond' },
+    ...(holdEnds ? [{ label: 'Hold ends', value: holdEnds.value, note: holdEnds.note, testId: 'live-pace-hold' }] : []),
   ];
 }
 
 /**
- * What `role` may do to the pace now (the server checks again): SET PACE until the end, on a release that is not an
- * after-room; PAUSE PACE or RESUME PACE from T0 to the end, on a paced release, and NEXT BATCH NOW there while someone
- * waits in the queue (OPERATOR: an empty batch would admit nobody). No control
- * takes a pace away: a pace left blank in the settings before the announcement is no pace.
+ * What `role` may do to the pace now (the server checks again; this hides only what would be refused): SET PACE until
+ * the end (D7, slower or faster), on a release that is not an after-room; PAUSE PACE or RESUME PACE from T0 to the end;
+ * NEXT BATCH NOW there while someone waits in the queue and the release is not PAUSED (N3: its turns are frozen; it still
+ * works under PAUSE PACE); SHORTEN THE HOLD and END THE HOLD NOW from the announcement while the hold lasts (D4, N14:
+ * before it the hold is a setting). OPERATOR. No control takes a pace away: every LIVE release has one (D1).
  */
-export function livePaceActions(b: Pick<LiveBoard, 'phase' | 'endedAt'> & { pace?: LivePaceState | null }, role: AdminRole | null | undefined, afterRoom: boolean): { set: boolean; pause: boolean; resume: boolean; next: boolean } {
+export function livePaceActions(
+  b: Pick<LiveBoard, 'phase' | 'endedAt'> & { paused?: boolean; pace?: LivePaceState | null },
+  role: AdminRole | null | undefined,
+  afterRoom: boolean,
+): { set: boolean; pause: boolean; resume: boolean; next: boolean; shorten: boolean; endHold: boolean } {
   const manage = can(role, 'manageDrops') && !afterRoom;
   const running = b.endedAt === null && hasBoard(b.phase) && b.phase !== 'ENDED';
   const live = running && b.phase === 'LIVE';
+  const announced = running && b.phase !== 'HIDDEN';
   const p = b.pace ?? null;
-  return { set: manage && running, pause: manage && live && p !== null && !p.paused, resume: manage && live && p !== null && p.paused, next: manage && live && p !== null && p.waiting > 0 };
+  const hold = manage && announced && p !== null && !!p.holdEndsAt;
+  return {
+    set: manage && running,
+    pause: manage && live && p !== null && !p.paused,
+    resume: manage && live && p !== null && p.paused,
+    next: manage && live && p !== null && p.waiting > 0 && b.paused !== true,
+    shorten: hold && (p?.holdMinutes ?? 0) > 0,
+    endHold: hold,
+  };
+}
+
+/** The close guard's warning (D10, advice only): `AT THIS PACE, 120 PIECES REMAIN AT THE CLOSE` (sets on a set's release). */
+export function closeGuardLine(remain: number, set = false): string {
+  const unit = set ? (remain === 1 ? 'SET REMAINS' : 'SETS REMAIN') : remain === 1 ? 'PIECE REMAINS' : 'PIECES REMAIN';
+  return `AT THIS PACE, ${formatCount(remain)} ${unit} AT THE CLOSE`;
 }
 
 /**
- * An entry's admission, as the line's Admitted column says it: LET IN by the console, its batch, or at once, and when
- * (Paris); WAITING for its batch; or none.
+ * The close guard for a pace typed in SET PACE, as the server reads it (services/live-queue.ts closeGuard): the turns
+ * the pace can still give before the close (the batches from the next one, which keeps its time, every Y minutes, each
+ * strictly before the close, times X) against the pieces not confirmed yet; the pieces left over, or null.
+ */
+export function paceCloseGuard(pace: LivePace, nextAt: string, closesAt: string, notConfirmed: number): number | null {
+  if (notConfirmed <= 0) return null;
+  const next = Date.parse(nextAt);
+  const close = Date.parse(closesAt);
+  const step = pace.minutes * 60_000;
+  const batches = next < close && step > 0 ? Math.ceil((close - next) / step) : 0;
+  const remain = notConfirmed - batches * pace.batch;
+  return remain > 0 ? remain : null;
+}
+
+/** What the server would refuse in SHORTEN THE HOLD's new length (D4: earlier only), said before anything is sent. */
+export function holdShortenProblem(minutes: string | undefined, current: number): string | null {
+  const n = inRange(minutes, LIVE_HOLD_MINUTES);
+  if (current < 1) return 'This release has no hold left to shorten.';
+  return n === null || n >= current ? `A shorter hold: ${LIVE_HOLD_MINUTES.min} to ${current - 1} ${current - 1 === 1 ? 'minute' : 'minutes'} after the opening.` : null;
+}
+
+/**
+ * An entry's turn, as the line's Admitted column says it: LET IN by the console, the batch that gave it, or at once
+ * (an after-room), and when (Paris); WAITING in the queue; or none.
  */
 export function liveEntryAdmission(e: Pick<LiveEntry, 'status' | 'admittedAt' | 'batch' | 'letIn'>): { text: string; at: string | null } {
   if (e.admittedAt && e.letIn) return { text: 'Let in', at: `${parisClock(e.admittedAt)} Paris` };
   if (e.admittedAt) return { text: e.batch ? `Batch ${formatCount(e.batch)}` : 'At once', at: `${parisClock(e.admittedAt)} Paris` };
   return { text: e.status === 'QUEUED' ? 'Waiting' : '—', at: null };
+}
+
+/** D11: an entry's queue place (its place in its size) and estimated turn (Paris), while it waits in the queue; dashes otherwise. */
+export function liveEntryQueue(e: Pick<LiveEntry, 'placeInSize' | 'estimatedTurnAt'>): { place: string; turn: string } {
+  return {
+    place: e.placeInSize != null ? formatCount(e.placeInSize) : '—',
+    turn: e.estimatedTurnAt ? `${parisClock(e.estimatedTurnAt)} Paris` : '—',
+  };
 }
 
 // ── What may be done now ───────────────────────────────────────────────────

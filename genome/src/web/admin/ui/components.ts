@@ -326,7 +326,7 @@ export function select(name: string, options: { value: string; label: string; di
   return el;
 }
 
-export function checkbox(name: string, label: string, checked = false): HTMLLabelElement {
+export function checkbox(name: string, label: string | Node, checked = false): HTMLLabelElement {
   const box = h('input', { class: 'ccheck__box', attrs: { type: 'checkbox', name } });
   box.checked = checked;
   return h('label', { class: 'ccheck' }, box, h('span', { class: 'ccheck__mark', attrs: { 'aria-hidden': 'true' } }), h('span', { class: 'ccheck__label' }, label));

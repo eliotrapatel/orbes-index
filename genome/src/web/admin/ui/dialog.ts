@@ -20,7 +20,8 @@ import { button, checkbox, field, input, select, textarea } from './components.j
 
 export interface DialogField {
   name: string;
-  label: string;
+  /** Its words; a node where a figure inside it reads in --font (`figureLabel`), the words in the display face. */
+  label: string | Node;
   /**
    * `checkbox`: its value is `'true'` when ticked, `''` otherwise (`value: 'true'` ticks it at first). 'password'
    * fields are masked and take `autocomplete` ('current-password' or 'new-password'). `color`: the browser's colour
@@ -39,6 +40,14 @@ export interface DialogField {
   rows?: number;
   /** Shown only while this holds for the dialog's values (re-read at every input or change); always shown without it. */
   shown?: (values: DialogValues) => boolean;
+}
+
+/**
+ * A field's label whose figures read in --font, its words in the display face (BRAND-DESIGN-SYSTEM §3.1: Gravesend's
+ * one is its capital I, its zero an oval): for a label whose words carry a figure.
+ */
+export function figureLabel(text: string): HTMLElement {
+  return h('span', null, ...text.split(/(\d+)/).filter(Boolean).map((part) => (/^\d+$/.test(part) ? h('span', { class: 'cfield__figure' }, part) : part)));
 }
 
 /** The values of a `checklist` field, as ticked. */

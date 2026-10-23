@@ -1161,11 +1161,20 @@ export class LiveConsoleService {
     };
   }
 
-  /** The entries of a release: one status, the open ones (OPEN), or all; by place, then arrival. */
-  async entries(dropId: string, filter: { status?: LiveEntryStatus | 'OPEN' }, page: PageRequest): Promise<Page<AdminLiveEntry>> {
+  /**
+   * The entries of a release: one status, the open ones (OPEN), those in the queue past the pieces of their size
+   * (BEYOND, ONE QUEUE D11: none without a pace), or all; by place, then arrival.
+   */
+  async entries(dropId: string, filter: { status?: LiveEntryStatus | 'OPEN' | 'BEYOND' }, page: PageRequest): Promise<Page<AdminLiveEntry>> {
     const id = knownId(dropId, dropNotFound);
     const d = await this.db.selectFrom('drops').selectAll().where('id', '=', id).where('mode', '=', 'LIVE').executeTakeFirst();
     if (!d) throw dropNotFound();
+    if (filter.status === 'BEYOND') {
+      const beyond = d.pace_batch !== null ? await liveBeyond(this.db, d) : null;
+      const ids = [...(beyond?.entries ?? [])];
+      const items = ids.length ? await this.adminEntries(this.db, d, { statuses: ['QUEUED'], ids }, page.pageSize, pageOffset(page), this.clock(), beyond) : [];
+      return makePage(items, ids.length, page);
+    }
     const statuses = filter.status === 'OPEN' ? [...LIVE_OPEN_STATUSES] : filter.status ? [filter.status] : null;
     let q = this.db.selectFrom('live_entries').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', id);
     if (statuses) q = q.where('status', 'in', statuses);
@@ -2042,7 +2051,7 @@ export class LiveConsoleService {
   private async adminEntries(
     db: Db,
     d: DropRow,
-    filter: { statuses: readonly LiveEntryStatus[] | null },
+    filter: { statuses: readonly LiveEntryStatus[] | null; ids?: readonly string[] },
     limit: number,
     offset: number,
     now: Date,
@@ -2059,6 +2068,7 @@ export class LiveConsoleService {
       ])
       .where('e.drop_id', '=', d.id);
     if (filter.statuses) q = q.where('e.status', 'in', [...filter.statuses]);
+    if (filter.ids) q = q.where('e.id', 'in', [...filter.ids]);
     const rows = await q
       .orderBy(sql`e.position IS NULL`)
       // IN-01: the places guaranteed by the house first, as the line gives them turns in their size.

@@ -9,11 +9,14 @@
  *    stream (`console` events, http/live-stream.ts) and, should the stream be refused or lost, the board every 5 s; it
  *    stops when the console moves elsewhere (`disposeLiveView`, main.ts). A board in another state than the page was
  *    drawn for (the announcement or T0 passed, a pause, the end) has the page read again, its controls with it.
- *  - The pace (plan MACRO M1, W4), on the release's board (never an after-room's): X buyers admitted every Y minutes,
- *    its figures (in the queue, admitted, the batches, the next batch in Paris time, PAUSED while held) and its
- *    controls, drawn with each board: SET PACE until the end, PAUSE PACE / RESUME PACE and NEXT BATCH NOW from T0
- *    (OPERATOR); nothing takes a pace away. The line says each entry's admission (its batch and when) on a paced
- *    release; the times part of the settings holds the pace, blank for none.
+ *  - The pace (ONE QUEUE, lot Q1 §4), on the release's board (never an after-room's): X people per batch every Y
+ *    minutes, its figures (D11, add only: in the queue, admitted all ways, the batches, the next batch in Paris time,
+ *    PAUSED while held; the turns given by the pace, beyond the pieces, the hold's end in Paris time) and its controls,
+ *    drawn with each board: SET PACE until the end, PAUSE PACE / RESUME PACE and NEXT BATCH NOW from T0, SHORTEN THE
+ *    HOLD and END THE HOLD NOW from the announcement while the hold lasts (OPERATOR); the close guard's warning (D10,
+ *    advice only: EXTEND, SET PACE, NEXT BATCH NOW); nothing takes a pace away. The line says each entry's turn (its
+ *    batch and when), its queue place and estimated turn; the filters add those waiting in the queue and those beyond
+ *    the pieces. The times part of the settings holds the pace and the hold, both required (D1).
  *  - The entries: the line itself, live (its open entries by place: the account, its email masked for an AUDITOR, its
  *    tier, size, pieces, status and deadline, the gesture's length), or every entry of one status, page by page; LET IN
  *    a QUEUED one and FREE a hold (OPERATOR), REMOVE an open one (ADMIN).
@@ -53,17 +56,23 @@ import {
   AFTER_ROOM_SKIPS,
   afterRoomStateLabel,
   afterRoomTiming,
+  closeGuardLine,
   combineLine,
   defaultQuantityLine,
   formatMoney,
   hasBoard,
+  holdLine,
+  holdShortenProblem,
+  LIVE_HOLD_LABEL,
   LIVE_LIMITS,
+  LIVE_MESSAGE_HINT,
   LIVE_TIER_OPTIONS,
   liveActions,
   liveBoardFigures,
   liveEntryActions,
   liveEntryAdmission,
   liveEntryDeadline,
+  liveEntryQueue,
   liveLead,
   livePaceActions,
   livePaceFigures,
@@ -74,6 +83,7 @@ import {
   livePhrase,
   liveStateLabel,
   locationOptions,
+  paceCloseGuard,
   paceHint,
   paceLine,
   paceProblem,
@@ -102,7 +112,7 @@ import { modelChoice } from '../model/variants.js';
 import { href } from '../router.js';
 import { LIVE_CURRENCIES, LIVE_ENTRY_STATUSES, type LiveBoard, type LiveEntry, type LiveEntryStatus, type LiveFeasibility, type LiveRelease, type Model, type SetView } from '../types.js';
 import { barList, button, copyButton, defList, field, filterBar, kpi, linkButton, mono, pageHeader, pager, section, select, statusMark, table, type DefRow } from '../ui/components.js';
-import { openDialog, type DialogField } from '../ui/dialog.js';
+import { figureLabel, openDialog, type DialogField } from '../ui/dialog.js';
 import { saveDownload } from '../ui/download.js';
 import { photoDialog, photoThumb } from '../ui/photo.js';
 import { notify, notifyError } from '../ui/toast.js';
@@ -195,7 +205,7 @@ const tierOf = (t: number) => (t === 0 ? 'None' : tierLabel(t));
 export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   const asked = screens;
   const id = ctx.route.params.dropId ?? '';
-  const status = (['OPEN', ...LIVE_ENTRY_STATUSES] as const).find((s) => s === ctx.route.query.status) as LiveEntryStatus | 'OPEN' | undefined;
+  const status = (['OPEN', 'BEYOND', ...LIVE_ENTRY_STATUSES] as const).find((s) => s === ctx.route.query.status) as LiveEntryStatus | 'OPEN' | 'BEYOND' | undefined;
   const entriesPage = Math.max(1, Number(ctx.route.query.page) || 1);
   if (releaseTab(ctx.route.query) === 'campaign') {
     const shown = await liveCampaignView(ctx, id);
@@ -266,7 +276,12 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
       title: `Add pieces · ${sizeWords(size)}`,
       eyebrow,
       body: [
-        h('p', { class: 'dialog__text' }, `The size holds ${formatCount(size.stock)} ${size.stock === 1 ? 'piece' : 'pieces'}. The pieces added go at once to whoever waits for them in the line.`),
+        // ONE QUEUE (D5, D11): offered at the next batches on a paced release; at once in an after-room (no batches).
+        h(
+          'p',
+          { class: 'dialog__text', data: { testid: 'live-add-pieces-text' } },
+          `The size holds ${formatCount(size.stock)} ${size.stock === 1 ? 'piece' : 'pieces'}. ${parent ? 'The pieces added go at once to whoever waits for them.' : 'The pieces added are offered at the next batches, at the release’s pace.'}`,
+        ),
         // A set's release sells as many sets as its scarcest piece: a size raised alone may add no set.
         r.set ? h('p', { class: 'dialog__text', data: { testid: 'live-add-pieces-set' } }, 'A set’s release sells as many sets as its scarcest piece: the sets on sale rise only when each piece can make them.') : null,
         h('p', { class: 'dialog__text', data: { testid: 'live-quantity-promise' } }, `The announcement says « ${r.quantityLine} ». Every addition is recorded in the audit log and reported: adding pieces after a fixed number was announced contradicts it.`),
@@ -295,7 +310,9 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
             ? `This person takes their turn now, before those ahead of them in their sizes (${entrySizesText(e.sizes)}), within each one’s free pieces.`
             : `This person takes their turn now, before those ahead of them in size ${e.size.label}, within its free pieces.`
           : action === 'free'
-            ? 'The piece held returns: the next in line for its size gets a turn at once. Its add-ons are dropped.'
+            ? parent
+              ? 'The piece held returns: the next in line for its size gets a turn at once. Its add-ons are dropped.'
+              : 'The piece held returns and is offered at the next batch. Its add-ons are dropped.'
             : 'The entry leaves the release for good: its place, or the piece it holds, goes to the next in line. Its screen says it was removed.',
       ),
       confirmLabel: action === 'letIn' ? 'Let in' : action === 'free' ? 'Free the hold' : 'Remove',
@@ -336,7 +353,17 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
         );
       },
     },
-    // W4: on a paced release, each entry's admission: its batch and when, or WAITING for its batch.
+    // ONE QUEUE (D11): in the queue, each person's place in its size (an after-room's too) from the queue's snapshot.
+    {
+      label: 'Queue place',
+      cell: (e: LiveEntry) => {
+        const q = liveEntryQueue(e);
+        return h('span', { data: { testid: 'live-entry-queue-place' } }, q.place === '—' ? h('span', { class: 'soft' }, '—') : q.place);
+      },
+      kind: ['num' as const],
+    },
+    // On a paced release, each entry's turn: the batch that gave it and when, or WAITING in the queue; and, while it
+    // waits, its estimated turn in Paris time (D11).
     ...((b ?? board)?.pace || r.pace
       ? [
           {
@@ -344,6 +371,14 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
             cell: (e: LiveEntry) => {
               const a = liveEntryAdmission(e);
               return h('span', { data: { testid: 'live-entry-admitted' } }, a.text === '—' ? h('span', { class: 'soft' }, '—') : a.text, a.at ? h('span', { class: 'cell-sub' }, a.at) : null);
+            },
+            kind: ['nowrap' as const],
+          },
+          {
+            label: 'Estimated turn',
+            cell: (e: LiveEntry) => {
+              const q = liveEntryQueue(e);
+              return h('span', { data: { testid: 'live-entry-estimated' } }, q.turn === '—' ? h('span', { class: 'soft' }, '—') : q.turn);
             },
             kind: ['nowrap' as const],
           },
@@ -425,6 +460,8 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
           { label: 'Sold', cell: (s) => formatCount(s.sold), kind: ['num'] },
           { label: 'Room', cell: (s) => formatCount(s.waiting), kind: ['num'] },
           { label: 'Line', cell: (s) => formatCount(s.line), kind: ['num'] },
+          // ONE QUEUE (D11): those in the queue past the size's pieces, on a paced release.
+          ...(b.pace ? [{ label: 'Beyond the pieces', cell: (s: LiveBoard['sizes'][number]) => h('span', { data: { testid: 'live-size-beyond' } }, formatCount(s.beyond ?? 0)), kind: ['num' as const] }] : []),
           { label: 'Turns', cell: (s) => formatCount(s.turns), kind: ['num'] },
           { label: 'Secured', cell: (s) => formatCount(s.secured), kind: ['num'] },
           { label: 'Confirmed', cell: (s) => formatCount(s.confirmed), kind: ['num'] },
@@ -454,23 +491,29 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
     }
   };
 
-  // ── The pace (W4) ────────────────────────────────────────────────────────
-  // The block is built once: its line, mark and figures follow each board, while its controls are drawn again only when
-  // what may be done changes, so a focused control keeps its focus and a click is not lost to the next frame. They act
-  // on the latest board.
+  // ── The pace (ONE QUEUE, lot Q1 §4) ─────────────────────────────────────
+  // The block is built once: its line, mark, figures and close guard follow each board, while its controls (and the
+  // guard's) are drawn again only when what may be done changes, so a focused control keeps its focus and a click is not
+  // lost to the next frame. They act on the latest board.
   let paceKey = '';
   let paceToolsKey: string | null = null;
+  let guardToolsKey: string | null = null;
   const paceText = h('span', { class: 'live__pace-text', data: { testid: 'live-pace-line' } });
   const pacePausedMark = statusMark('PACE PAUSED', 'alert');
   const paceTools = h('span', { class: 'live__pace-tools' });
   const paceFigures = h('div', { class: ['kpis', 'live__pace-figures'] });
-  mount(paceBox, h('div', { class: 'live__pace-head' }, h('span', { class: 'live__message-label' }, 'Pace'), paceText, paceTools), paceFigures);
+  // D10, the close guard: a warning, advice only (nothing happens by itself): EXTEND, SET PACE or NEXT BATCH NOW.
+  const guardText = h('span', { class: 'live__alert-text', data: { testid: 'live-close-guard-text' } });
+  const guardTools = h('span', { class: 'live__pace-tools' });
+  const guardBox = h('div', { class: 'live__alert live__guard', data: { testid: 'live-close-guard' } }, h('p', { class: 'live__alert-head' }, guardText, guardTools));
+  guardBox.hidden = true;
+  mount(paceBox, h('div', { class: 'live__pace-head' }, h('span', { class: 'live__message-label' }, 'Pace'), paceText, paceTools), guardBox, paceFigures);
   function drawPace(b: LiveBoard): void {
     const p = b.pace ?? null;
     const ended = b.endedAt !== null || b.phase === 'ENDED';
-    // A release that never had a pace and has ended: nothing to say or do.
+    // A release without a pace (an after-room never draws this block) that has ended: nothing to say or do.
     paceBox.hidden = !p && ended;
-    paceText.textContent = p ? paceLine(p) : 'None: everyone is admitted at T0';
+    paceText.textContent = p ? paceLine(p) : '—';
     if (p?.paused && !ended) {
       if (!pacePausedMark.isConnected) paceTools.before(pacePausedMark);
     } else pacePausedMark.remove();
@@ -479,7 +522,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
     if (toolsKey !== paceToolsKey) {
       paceToolsKey = toolsKey;
       const pausePace = button('Pause pace', { kind: 'secondary', testId: 'live-pace-pause' });
-      pausePace.addEventListener('click', () => void control(pausePace, () => ctx.api.pauseLivePace(r.id), 'Pace paused: no batch is admitted; the turns go on.'));
+      pausePace.addEventListener('click', () => void control(pausePace, () => ctx.api.pauseLivePace(r.id), 'Pace paused: no batch is given; the turns go on.'));
       const resumePace = button('Resume pace', { kind: 'primary', testId: 'live-pace-resume' });
       resumePace.addEventListener('click', () => void control(resumePace, () => ctx.api.resumeLivePace(r.id), 'Pace resumed: the next batch moves later by the time paused.'));
       const tools = [
@@ -487,9 +530,29 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
         a.pause ? pausePace : null,
         a.resume ? resumePace : null,
         a.next ? button('Next batch now', { kind: 'ghost', testId: 'live-pace-next-now', onClick: () => board && nextBatch(board) }) : null,
+        // D4: from the announcement while the hold lasts (before it, the hold is a setting).
+        a.shorten ? button('Shorten the hold', { kind: 'ghost', testId: 'live-hold-shorten', onClick: () => board && shortenHold(board) }) : null,
+        a.endHold ? button('End the hold now', { kind: 'ghost', testId: 'live-hold-end', onClick: () => board && endHold(board) }) : null,
       ].filter((x): x is HTMLButtonElement => x !== null);
       mount(paceTools, ...tools);
       paceTools.hidden = tools.length === 0;
+    }
+    const remain = !ended ? (p?.closeGuard?.remain ?? 0) : 0;
+    guardBox.hidden = remain <= 0;
+    guardText.textContent = remain > 0 ? closeGuardLine(remain, !!r.set) : '';
+    const guardKey = JSON.stringify([remain > 0, acts.extend, a.set, a.next]);
+    if (guardKey !== guardToolsKey) {
+      guardToolsKey = guardKey;
+      mount(
+        guardTools,
+        ...(remain > 0
+          ? [
+              acts.extend ? button('Extend', { kind: 'ghost', testId: 'live-guard-extend', onClick: extend }) : null,
+              a.set ? button('Set pace', { kind: 'ghost', testId: 'live-guard-set-pace', onClick: () => board && setPace(board) }) : null,
+              a.next ? button('Next batch now', { kind: 'ghost', testId: 'live-guard-next-now', onClick: () => board && nextBatch(board) }) : null,
+            ]
+          : []),
+      );
     }
     paceFigures.hidden = !p;
     mount(
@@ -511,7 +574,16 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
 
   const setPace = (b: LiveBoard) => {
     const p = b.pace ?? null;
+    if (!p) return;
     const started = b.phase === 'LIVE';
+    const hold = p.holdMinutes ?? 0;
+    // D10 in SET PACE: the close guard for the pace typed, from the next batch (which keeps its time).
+    const notConfirmed = Math.max(0, b.totals.stock - b.totals.sold);
+    const guard = (batch: string, minutes: string): Child => {
+      const typed = paceProblem(batch, minutes) === null ? { batch: Number(batch), minutes: Number(minutes) } : { batch: p.batch, minutes: p.minutes };
+      const remain = b.endedAt === null ? paceCloseGuard(typed, p.nextAt, b.closesAt, notConfirmed) : null;
+      return remain ? h('p', { class: 'dialog__text', data: { testid: 'live-pace-guard' } }, closeGuardLine(remain, !!r.set)) : null;
+    };
     void openDialog({
       title: 'Set the pace',
       eyebrow,
@@ -519,24 +591,25 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
         h(
           'p',
           { class: 'dialog__text' },
-          'Buyers are admitted from the line in batches, in its order (the guarantees first), counted across the whole release; inside the room the turns per size, the holds and the pay windows stay as they are.',
+          'Turns are given from the line in batches, in its order (the guarantees first), only where a piece of the size is free; the turns, the holds and the pay windows stay as they are.',
         ),
         h(
           'p',
           { class: 'dialog__text', data: { testid: 'live-pace-effect' } },
           !started
-            ? 'The first batch is admitted at T0.'
-            : p
-              ? `The change takes effect from the next batch, which keeps its time (${b.pace?.paused || b.paused ? 'held while paused' : `${parisClock(p.nextAt)} Paris`}).`
-              : 'Until now everyone was admitted at once. From now on, those who join the line wait for a batch: the first comes as many minutes from now as set below.',
+            ? hold > 0
+              ? `The first batch comes at the end of the hold, ${hold} ${hold === 1 ? 'minute' : 'minutes'} after T0.`
+              : 'The first batch comes at T0.'
+            : `The change takes effect from the next batch, which keeps its time (${p.paused || b.paused ? 'held while paused' : `${parisClock(p.nextAt)} Paris`}).`,
         ),
-        h('p', { class: 'dialog__text' }, 'Recorded in the audit log. No control takes a pace away once set: raise the buyers, shorten the minutes, or admit the next batch now.'),
+        h('p', { class: 'dialog__text' }, 'Slower or faster, until the end. The waiting screens show their new estimated time at their next reading. Recorded in the audit log.'),
       ],
       fields: [
-        { name: 'batch', label: 'Buyers per batch', required: true, maxlength: 4, value: p ? String(p.batch) : '', hint: `${formatCount(LIVE_LIMITS.pace.batch.min)} to ${formatCount(LIVE_LIMITS.pace.batch.max)}.` },
-        { name: 'minutes', label: 'Every (minutes)', required: true, maxlength: 2, value: p ? String(p.minutes) : '', hint: `${LIVE_LIMITS.pace.minutes.min} to ${LIVE_LIMITS.pace.minutes.max}.` },
+        { name: 'batch', label: 'People per batch', required: true, maxlength: 4, value: String(p.batch), hint: `${formatCount(LIVE_LIMITS.pace.batch.min)} to ${formatCount(LIVE_LIMITS.pace.batch.max)}.` },
+        { name: 'minutes', label: 'Every (minutes)', required: true, maxlength: 2, value: String(p.minutes), hint: `${LIVE_LIMITS.pace.minutes.min} to ${LIVE_LIMITS.pace.minutes.max}.` },
       ],
-      validate: (v) => paceProblem(v.batch, v.minutes, false) ?? (p && Number(v.batch) === p.batch && Number(v.minutes) === p.minutes ? 'Nothing has changed.' : null),
+      live: (v) => guard(v.batch ?? '', v.minutes ?? ''),
+      validate: (v) => paceProblem(v.batch, v.minutes) ?? (Number(v.batch) === p.batch && Number(v.minutes) === p.minutes ? 'Nothing has changed.' : null),
       confirmLabel: 'Set pace',
       submit: async (v) => {
         await ctx.api.setLivePace(r.id, { batch: Number(v.batch), minutes: Number(v.minutes) });
@@ -544,20 +617,70 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
     }).then(done('Pace set.'));
   };
 
+  // D6: an extra batch now, up to X turns where a piece is free; refused when none (the server's words in the dialog).
   const nextBatch = (b: LiveBoard) => {
     const p = b.pace;
     if (!p) return;
     void openDialog({
-      title: 'Admit the next batch now',
+      title: 'Next batch now',
       eyebrow,
       body: [
-        h('p', { class: 'dialog__text', data: { testid: 'live-pace-next-text' } }, `The next ${formatCount(Math.min(p.batch, p.waiting))} of the ${formatCount(p.waiting)} waiting in the queue are admitted now, in the line’s order: an extra batch. The batches keep their times; the next one stays due as before.`),
+        h('p', { class: 'dialog__text', data: { testid: 'live-pace-next-text' } }, `Up to ${formatCount(p.batch)} ${p.batch === 1 ? 'turn' : 'turns'} now, in the line’s order, where a piece is free: an extra batch. The batches keep their times.`),
       ],
-      confirmLabel: 'Admit now',
+      confirmLabel: 'Give the batch',
       submit: async () => {
         await ctx.api.nextLiveBatch(r.id);
       },
-    }).then(done('Batch admitted.'));
+    }).then(done('Batch given.'));
+  };
+
+  // D4: the hold, once announced, only shortened or ended (before the announcement it is a setting, N14).
+  const shortenHold = (b: LiveBoard) => {
+    const p = b.pace;
+    if (!p?.holdEndsAt) return;
+    const current = p.holdMinutes ?? 0;
+    void openDialog({
+      title: 'Shorten the hold',
+      eyebrow,
+      body: [
+        h(
+          'p',
+          { class: 'dialog__text', data: { testid: 'live-hold-shorten-text' } },
+          `The hold after the opening lasts ${current} ${current === 1 ? 'minute' : 'minutes'}: the first batch comes at ${p.paused || b.paused ? 'its time once resumed' : `${parisClock(p.holdEndsAt)} Paris`}. A shorter hold brings it earlier, never later; the waiting screens show their new estimated time at their next reading.`,
+        ),
+        h('p', { class: 'dialog__text' }, 'Recorded in the audit log.'),
+      ],
+      fields: [{ name: 'minutes', label: 'New length (minutes)', required: true, maxlength: 3, hint: `After the opening (T0), shorter than now; END THE HOLD NOW starts the turns at once.` }],
+      validate: (v) => holdShortenProblem(v.minutes, current),
+      confirmLabel: 'Shorten the hold',
+      submit: async (v) => {
+        await ctx.api.shortenLiveHold(r.id, Number(v.minutes));
+      },
+    }).then(done('Hold shortened.'));
+  };
+
+  const endHold = (b: LiveBoard) => {
+    const p = b.pace;
+    if (!p?.holdEndsAt) return;
+    const started = b.phase === 'LIVE';
+    void openDialog({
+      title: 'End the hold now',
+      eyebrow,
+      body: [
+        h(
+          'p',
+          { class: 'dialog__text', data: { testid: 'live-hold-end-text' } },
+          started
+            ? `The first batch is given now: up to ${formatCount(p.batch)} ${p.batch === 1 ? 'turn' : 'turns'}, in the line’s order, where a piece is free; the next ones follow every ${p.minutes === 1 ? 'minute' : `${p.minutes} minutes`}.`
+            : `The first batch comes at T0, without a hold; the next ones follow every ${p.minutes === 1 ? 'minute' : `${p.minutes} minutes`}.`,
+        ),
+        h('p', { class: 'dialog__text' }, 'Recorded in the audit log.'),
+      ],
+      confirmLabel: 'End the hold',
+      submit: async () => {
+        await ctx.api.endLiveHold(r.id);
+      },
+    }).then(done('Hold ended.'));
   };
 
   async function refreshBoard(): Promise<void> {
@@ -603,7 +726,9 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
     void openDialog({
       title: 'Host message',
       eyebrow,
-      body: h('p', { class: 'dialog__text' }, 'One line, shown under the header of every screen of the room, the line and the turn, until the next one.'),
+      // ONE QUEUE (D11): said where it shows (FROM ORBES: the room, the draw, the late comer's entry, the queue, SOLD OUT
+      // for one's size, the after-room's waiting screen, the turn and SECURED; never CONFIRMED nor the after-room's door).
+      body: h('p', { class: 'dialog__text', data: { testid: 'live-message-hint' } }, LIVE_MESSAGE_HINT),
       fields: [{ name: 'text', label: 'Message', required: true, maxlength: LIVE_LIMITS.message, hint: `At most ${LIVE_LIMITS.message} characters, in the house’s words.` }],
       validate: (v) => (v.text.trim().length < 1 || v.text.trim().length > LIVE_LIMITS.message ? `A message is one line of 1 to ${LIVE_LIMITS.message} characters.` : null),
       confirmLabel: 'Send to the room',
@@ -644,15 +769,30 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
     : null;
 
   // ── The entries ──────────────────────────────────────────────────────────
-  const statusFilter = select('status', [{ value: '', label: 'The line, live' }, { value: 'OPEN', label: 'Open entries' }, ...LIVE_ENTRY_STATUSES.map((s) => ({ value: s, label: humanize(s) }))], status ?? '');
+  // ONE QUEUE (D11, OP-12): the QUEUED filter reads 'Waiting in the queue' (the WAITING status keeps its name), and a
+  // paced release adds those beyond the pieces of their size.
+  const statusFilter = select(
+    'status',
+    [
+      { value: '', label: 'The line, live' },
+      { value: 'OPEN', label: 'Open entries' },
+      ...LIVE_ENTRY_STATUSES.map((s) => ({ value: s, label: s === 'QUEUED' ? 'Waiting in the queue' : humanize(s) })),
+      ...(r.pace ? [{ value: 'BEYOND', label: 'Beyond the pieces' }] : []),
+    ],
+    status ?? '',
+  );
   statusFilter.addEventListener('change', () => ctx.setQuery({ status: statusFilter.value, page: undefined }));
   let entriesSection: HTMLElement | null = null;
   if (published) {
     const body: Child[] = [filterBar(field('Entries', statusFilter))];
     if (entries) {
       const open = status === 'OPEN';
+      const beyond = status === 'BEYOND';
       body.push(
-        table(entryColumns(board), entries.items, { caption: open ? 'Open entries' : 'Entries', empty: open ? 'No open entry.' : 'No entry has this status.' }),
+        table(entryColumns(board), entries.items, {
+          caption: open ? 'Open entries' : beyond ? 'Beyond the pieces' : 'Entries',
+          empty: open ? 'No open entry.' : beyond ? 'Nobody in the queue is beyond the pieces of their size.' : 'No entry has this status.',
+        }),
         pager(entries, (p) => ctx.setQuery({ page: p })),
       );
     } else body.push(lineBox);
@@ -863,8 +1003,8 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
         // D1: X people per batch every Y minutes and the hold after the opening, all required.
         { name: 'paceBatch', label: 'People per batch', required: true, maxlength: 4, value: v.paceBatch, hint: paceHint(planCapacity) },
         { name: 'paceMinutes', label: 'Every (minutes)', required: true, maxlength: 2, value: v.paceMinutes, hint: 'SET PACE on the live board changes it until the end.' },
-        // (Its figures in the hint: no field label carries one, BRAND-DESIGN-SYSTEM §8 item 18.)
-        { name: 'holdMinutes', label: 'Hold after the opening (minutes)', required: true, maxlength: 3, value: v.holdMinutes, hint: `0 = none; up to ${LIVE_LIMITS.hold.max}. Everyone waits it; once announced it can only be shortened or ended.` },
+        // The owner's words (ANSWERS r5): its figure in --font inside the display-face label (BRAND-DESIGN-SYSTEM §3.1).
+        { name: 'holdMinutes', label: figureLabel(LIVE_HOLD_LABEL), required: true, maxlength: 3, value: v.holdMinutes, hint: `Up to ${LIVE_LIMITS.hold.max}. Everyone waits it, guarantees included; once announced it can only be shortened or ended.` },
       ],
     );
   };
@@ -1046,12 +1186,17 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
         { label: 'Room opens', value: formatDateTime(r.roomOpensAt), note: `${r.roomOpensMinutes} ${r.roomOpensMinutes === 1 ? 'minute' : 'minutes'} before T0` },
         { label: 'Opening', value: h('span', { data: { testid: 'live-t0' } }, formatDateTime(r.opensAt)), note: 'T0: the door opens, the line forms' },
         { label: 'End of the sales', value: formatDateTime(r.closesAt) },
-        {
-          label: 'Pace',
-          value: h('span', { data: { testid: 'live-pace-setting' } }, r.pace ? paceLine(r.pace) : 'None: everyone admitted at T0'),
-          // ONE QUEUE (D1): never blank; SET PACE changes it until the end.
-          note: 'SET PACE on the live board until the end',
-        },
+        // ONE QUEUE (D1): the pace and the hold after the opening, both set at creation (an after-room has neither).
+        ...(r.pace
+          ? [
+              { label: 'Pace', value: h('span', { data: { testid: 'live-pace-setting' } }, paceLine(r.pace)), note: 'SET PACE on the live board until the end' },
+              {
+                label: 'Hold after the opening',
+                value: h('span', { data: { testid: 'live-hold-setting' } }, holdLine(r.holdMinutes)),
+                note: r.editable ? 'Everyone waits it, guarantees included' : 'Once announced: only shortened or ended, on the live board',
+              },
+            ]
+          : []),
       ]),
       { id: 'live-part-times', tools: edit('Edit', 'live-edit-times', timesPart) },
     ),
@@ -1368,7 +1513,7 @@ export function newLiveFields(
     // D1: every release has a pace and a hold after the opening (0: none).
     { name: 'paceBatch', label: 'People per batch', required: true, maxlength: 4, value: values.paceBatch ?? '', hint: `${formatCount(LIVE_LIMITS.pace.batch.min)} to ${formatCount(LIVE_LIMITS.pace.batch.max)} turns per batch, in the line’s order, where a piece is free.` },
     { name: 'paceMinutes', label: 'Every (minutes)', required: true, maxlength: 2, value: values.paceMinutes ?? '', hint: `${LIVE_LIMITS.pace.minutes.min} to ${LIVE_LIMITS.pace.minutes.max}.` },
-    { name: 'holdMinutes', label: 'Hold after the opening (minutes)', required: true, maxlength: 3, value: values.holdMinutes ?? '0', hint: `0 = none; up to ${LIVE_LIMITS.hold.max}: everyone waits it before the first batch.` },
+    { name: 'holdMinutes', label: figureLabel(LIVE_HOLD_LABEL), required: true, maxlength: 3, value: values.holdMinutes ?? '0', hint: `Up to ${LIVE_LIMITS.hold.max}: everyone waits it before the first batch.` },
     { name: 'price', label: 'Price of a piece', required: true, maxlength: 12, value: values.price, hint: 'In units: 4800, or 4800.50.', shown: (v) => !isSet(v) },
     { name: 'priceSet', label: 'Price of the set', required: true, maxlength: 12, value: values.priceSet ?? '', hint: 'One price for the set, in units: 4800, or 4800.50; shared over its pieces’ orders.', shown: isSet },
     { name: 'currency', label: 'Currency', kind: 'select', options: LIVE_CURRENCIES.map((c) => ({ value: c, label: c })), value: values.currency },

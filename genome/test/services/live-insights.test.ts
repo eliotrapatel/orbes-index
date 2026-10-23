@@ -396,7 +396,7 @@ describe('the live sell-out forecast', () => {
     // Just resumed: no pace yet.
     const fresh = sellOutForecast(r, xs, { resumedAt: at(9.9 * MINUTE) }, at(10 * MINUTE))!;
     expect(fresh.windowMs).toBe(6 * SECOND);
-    expect(fresh.sizes[0]!.reasoning[0]).toContain('no pace to forecast from: the sales have run less than 30 s since the RESUME.');
+    expect(fresh.sizes[0]!.reasoning[0]).toContain('no sales rate to forecast from: the sales have run less than 30 s since the RESUME.');
     // Paused again at 10:09:30: the 30 s since the RESUME, that pause left out too.
     const again = sellOutForecast({ ...r, pausedAt: at(9.5 * MINUTE) }, xs, { resumedAt: at(9 * MINUTE) }, at(10 * MINUTE))!;
     expect(again.windowMs).toBe(30 * SECOND);

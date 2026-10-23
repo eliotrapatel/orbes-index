@@ -37,6 +37,13 @@ import { AdminApi, type FetchLike } from '../../src/web/admin/api.js';
 import {
   addonsText,
   AFTER_ROOM_SKIPS,
+  closeGuardLine,
+  holdLine,
+  holdShortenProblem,
+  LIVE_HOLD_LABEL,
+  LIVE_MESSAGE_HINT,
+  liveEntryQueue,
+  paceCloseGuard,
   afterRoomStateLabel,
   afterRoomTiming,
   combineLine,
@@ -525,7 +532,7 @@ describe('the console of the LIVE RELEASES', () => {
   });
 });
 
-describe('the console of a LIVE RELEASE’s pace (W4)', () => {
+describe('the console of a LIVE RELEASE’s pace and hold (ONE QUEUE, lot Q1 §4)', () => {
   it('holds the pace and the hold in the times part, both required (ONE QUEUE, D1; M1 « both figures or neither (blank: no pace) » gone), sending only what changed', () => {
     const r = release();
     expect(LIVE_LIMITS.pace).toEqual({ batch: { min: 1, max: 5000 }, minutes: { min: 1, max: 60 } });
@@ -543,14 +550,18 @@ describe('the console of a LIVE RELEASE’s pace (W4)', () => {
     }
     for (const hold of ['', '-1', '121', '2.5']) expect(livePartProblem(r, 'times', { ...v, holdMinutes: hold })).toBe('A hold after the opening lasts 0 to 120 minutes (0 for none).');
     // SET PACE: both figures needed there too.
-    expect(paceProblem('', '', false)).toBe('Say how many people per batch, every how many minutes.');
-    expect(paceProblem('5001', '1', false)).toBe('A pace gives 1 to 5\u2009000 turns every 1 to 60 minutes.');
-    expect(paceProblem('5000', '60', false)).toBeNull();
+    expect(paceProblem('', '')).toBe('Say how many people per batch, every how many minutes.');
+    expect(paceProblem('5001', '1')).toBe('A pace gives 1 to 5\u2009000 turns every 1 to 60 minutes.');
+    expect(paceProblem('5000', '60')).toBeNull();
+    // Said in the owner's words of the New live release dialog (D1: « People per batch », « Every (minutes) »).
     expect([paceLine({ batch: 250, minutes: 1 }), paceLine({ batch: 1, minutes: 5 }), paceLine({ batch: 5000, minutes: 60 })]).toEqual([
-      '250 buyers every minute',
-      '1 buyer every 5 minutes',
-      '5\u2009000 buyers every 60 minutes',
+      '250 people per batch, every minute',
+      '1 person per batch, every 5 minutes',
+      '5\u2009000 people per batch, every 60 minutes',
     ]);
+    // The hold after the opening, in the times part: its label the owner's (its figure in --font: views/live.ts).
+    expect(LIVE_HOLD_LABEL).toBe('Hold after the opening (minutes, 0 = none)');
+    expect([holdLine(0), holdLine(undefined), holdLine(1), holdLine(10)]).toEqual(['None', 'None', '1 minute after the opening', '10 minutes after the opening']);
     expect(paceHint(500)).toBe('Turns given from the line, 1 to 5\u2009000 per batch, every 1 to 60 minutes, in the line’s order, where a piece is free. The room holds 500, as the load test measured.');
     expect(paceHint(null)).toBe('Turns given from the line, 1 to 5\u2009000 per batch, every 1 to 60 minutes, in the line’s order, where a piece is free.');
   });
@@ -558,13 +569,32 @@ describe('the console of a LIVE RELEASE’s pace (W4)', () => {
   it('draws the Pace block’s figures in Paris time, a dash while held, and offers its controls to an OPERATOR from T0 to the end', () => {
     // 18:04 UTC in November is 19:04 in Paris; in July, 20:04.
     expect([parisClock('2026-11-10T18:04:09.000Z'), parisClock('2026-07-10T18:04:09.000Z', { seconds: true }), parisClock(null)]).toEqual(['19:04', '20:04:09', '—']);
-    const pace = { batch: 250, minutes: 1, nextAt: '2026-11-10T18:04:00.000Z', pausedAt: null, paused: false, batches: 4, waiting: 4120, admitted: 1000 };
+    const pace = {
+      batch: 250,
+      minutes: 1,
+      nextAt: '2026-11-10T18:04:00.000Z',
+      pausedAt: null,
+      paused: false,
+      batches: 4,
+      waiting: 4120,
+      admitted: 1000,
+      turnsGiven: 996,
+      letIn: 4,
+      holdMinutes: 0,
+      holdEndsAt: null,
+      beyond: 3870,
+      closeGuard: null,
+    };
     const live = { phase: 'LIVE' as const, paused: false, endedAt: null, pace };
+    // D11, add only: the four M1 figures kept (their meanings said), then the turns given by the pace and those beyond
+    // the pieces; the hold's end only while the hold lasts.
     expect(livePaceFigures(live).map((f) => [f.label, f.value, f.note, f.testId])).toEqual([
-      ['In the queue', '4\u2009120', 'WAITING FOR THEIR BATCH', 'live-pace-waiting'],
-      ['Admitted', '1\u2009000', 'MAY TAKE A TURN', 'live-pace-admitted'],
+      ['In the queue', '4\u2009120', 'WAITING IN THE QUEUE', 'live-pace-waiting'],
+      ['Admitted', '1\u2009000', 'GIVEN A TURN, ALL WAYS', 'live-pace-admitted'],
       ['Batches', '4', '250 EVERY MINUTE', 'live-pace-batches'],
       ['Next batch', '19:04', 'PARIS TIME', 'live-pace-next'],
+      ['Turns given', '996', 'BY THE PACE', 'live-pace-turns'],
+      ['Beyond the pieces', '3\u2009870', 'PAST THEIR SIZE’S PIECES', 'live-pace-beyond'],
     ]);
     const next = (b: Parameters<typeof livePaceFigures>[0]) => livePaceFigures(b)[3]!;
     expect(next({ ...live, phase: 'ROOM', pace: { ...pace, minutes: 5, batches: 0 } })).toMatchObject({ value: '19:04', note: 'PARIS · AT T0' });
@@ -572,19 +602,39 @@ describe('the console of a LIVE RELEASE’s pace (W4)', () => {
     expect(next({ ...live, paused: true })).toMatchObject({ value: '—', note: 'RELEASE PAUSED' });
     expect(next({ ...live, phase: 'ENDED', endedAt: '2026-11-10T18:30:00.000Z' })).toMatchObject({ value: '—', note: 'NONE AFTER THE END' });
     expect(livePaceFigures({ ...live, pace: { ...pace, minutes: 5 } })[2]!.note).toBe('250 EVERY 5 MINUTES');
+    // The hold after the opening (D4): before T0 the first batch and the hold's end at T0 + the hold, in Paris; held
+    // like the next batch while a pause holds it; gone with the hold (and after the end).
+    const held = { ...pace, batches: 0, nextAt: '2026-11-10T18:10:00.000Z', holdMinutes: 10, holdEndsAt: '2026-11-10T18:10:00.000Z' };
+    const hold = (b: Parameters<typeof livePaceFigures>[0]) => livePaceFigures(b).find((f) => f.testId === 'live-pace-hold') ?? null;
+    expect(next({ ...live, phase: 'ROOM', pace: held })).toMatchObject({ value: '19:10', note: 'PARIS · T0 + 10 MIN' });
+    expect(hold({ ...live, phase: 'ROOM', pace: held })).toEqual({ label: 'Hold ends', value: '19:10', note: 'PARIS · T0 + 10 MIN', testId: 'live-pace-hold' });
+    expect(hold({ ...live, pace: held })).toMatchObject({ value: '19:10', note: 'PARIS TIME' });
+    expect(hold({ ...live, pace: { ...held, paused: true } })).toMatchObject({ value: '—', note: 'PACE PAUSED' });
+    expect(hold({ ...live, paused: true, pace: held })).toMatchObject({ value: '—', note: 'RELEASE PAUSED' });
+    expect(hold({ ...live, phase: 'ENDED', endedAt: '2026-11-10T18:30:00.000Z', pace: held })).toBeNull();
+    expect(hold(live)).toBeNull();
+    expect(livePaceFigures({ ...live, pace: held }).map((f) => f.label)).toEqual(['In the queue', 'Admitted', 'Batches', 'Next batch', 'Turns given', 'Beyond the pieces', 'Hold ends']);
 
-    // SET PACE until the end (a release with no pace too); PAUSE or RESUME PACE and NEXT BATCH NOW from T0, paced.
-    expect(livePaceActions(live, 'OPERATOR', false)).toEqual({ set: true, pause: true, resume: false, next: true });
-    expect(livePaceActions({ ...live, pace: { ...pace, paused: true } }, 'OPERATOR', false)).toEqual({ set: true, pause: false, resume: true, next: true });
-    expect(livePaceActions({ ...live, pace: null }, 'OPERATOR', false)).toEqual({ set: true, pause: false, resume: false, next: false });
-    // Nobody in the queue: no NEXT BATCH NOW (an empty batch would admit nobody).
-    expect(livePaceActions({ ...live, pace: { ...pace, waiting: 0 } }, 'OPERATOR', false)).toEqual({ set: true, pause: true, resume: false, next: false });
-    for (const phase of ['HIDDEN', 'ANNOUNCED', 'ROOM'] as const) expect([phase, livePaceActions({ ...live, phase }, 'OPERATOR', false)]).toEqual([phase, { set: true, pause: false, resume: false, next: false }]);
-    expect(livePaceActions({ ...live, phase: 'ENDED', endedAt: '2026-11-10T18:30:00.000Z' }, 'ADMIN', false)).toEqual({ set: false, pause: false, resume: false, next: false });
-    expect(livePaceActions({ ...live, endedAt: '2026-11-10T18:30:00.000Z' }, 'ADMIN', false)).toEqual({ set: false, pause: false, resume: false, next: false });
-    expect(livePaceActions(live, 'AUDITOR', false)).toEqual({ set: false, pause: false, resume: false, next: false });
+    // SET PACE until the end; PAUSE or RESUME PACE and NEXT BATCH NOW from T0 (NEXT BATCH NOW not while the release is
+    // PAUSED, N3; under PAUSE PACE it works); SHORTEN THE HOLD and END THE HOLD NOW from the announcement while the hold
+    // lasts (D4; before the announcement the hold is a setting, N14).
+    const none = { set: false, pause: false, resume: false, next: false, shorten: false, endHold: false };
+    expect(livePaceActions(live, 'OPERATOR', false)).toEqual({ ...none, set: true, pause: true, next: true });
+    expect(livePaceActions({ ...live, pace: { ...pace, paused: true } }, 'OPERATOR', false)).toEqual({ ...none, set: true, resume: true, next: true });
+    expect(livePaceActions({ ...live, paused: true }, 'OPERATOR', false)).toEqual({ ...none, set: true, pause: true });
+    // Nobody in the queue: no NEXT BATCH NOW (an empty batch would give no turn).
+    expect(livePaceActions({ ...live, pace: { ...pace, waiting: 0 } }, 'OPERATOR', false)).toEqual({ ...none, set: true, pause: true });
+    for (const phase of ['HIDDEN', 'ANNOUNCED', 'ROOM'] as const) expect([phase, livePaceActions({ ...live, phase }, 'OPERATOR', false)]).toEqual([phase, { ...none, set: true }]);
+    for (const phase of ['ANNOUNCED', 'ROOM'] as const) expect([phase, livePaceActions({ ...live, phase, pace: held }, 'OPERATOR', false)]).toEqual([phase, { ...none, set: true, shorten: true, endHold: true }]);
+    expect(livePaceActions({ ...live, phase: 'HIDDEN', pace: held }, 'OPERATOR', false)).toEqual({ ...none, set: true });
+    expect(livePaceActions({ ...live, pace: held }, 'OPERATOR', false)).toEqual({ ...none, set: true, pause: true, next: true, shorten: true, endHold: true });
+    // A hold already shortened to 0 (its first batch due at T0): only ended.
+    expect(livePaceActions({ ...live, phase: 'ROOM', pace: { ...held, holdMinutes: 0 } }, 'OPERATOR', false)).toEqual({ ...none, set: true, endHold: true });
+    expect(livePaceActions({ ...live, phase: 'ENDED', endedAt: '2026-11-10T18:30:00.000Z', pace: held }, 'ADMIN', false)).toEqual(none);
+    expect(livePaceActions({ ...live, endedAt: '2026-11-10T18:30:00.000Z' }, 'ADMIN', false)).toEqual(none);
+    expect(livePaceActions({ ...live, pace: held }, 'AUDITOR', false)).toEqual(none);
     // An after-room never has a pace.
-    expect(livePaceActions({ ...live, pace: null }, 'ADMIN', true)).toEqual({ set: false, pause: false, resume: false, next: false });
+    expect(livePaceActions({ ...live, pace: null }, 'ADMIN', true)).toEqual(none);
 
     // The line's Admitted column: the batch and when, in Paris; WAITING for a batch; none before the line.
     expect(liveEntryAdmission({ status: 'TURN', admittedAt: '2026-11-10T18:02:00.000Z', batch: 3, letIn: false })).toEqual({ text: 'Batch 3', at: '19:02 Paris' });
@@ -593,9 +643,46 @@ describe('the console of a LIVE RELEASE’s pace (W4)', () => {
     expect(liveEntryAdmission({ status: 'TURN', admittedAt: '2026-11-10T18:02:30.000Z', batch: 3, letIn: true })).toEqual({ text: 'Let in', at: '19:02 Paris' });
     expect(liveEntryAdmission({ status: 'QUEUED', admittedAt: null, batch: null, letIn: false })).toEqual({ text: 'Waiting', at: null });
     expect(liveEntryAdmission({ status: 'WAITING', admittedAt: null, batch: null, letIn: false })).toEqual({ text: '—', at: null });
+    // D11: each person's queue place (in its size) and estimated turn in Paris time, while in the queue.
+    expect(liveEntryQueue({ placeInSize: 1240, estimatedTurnAt: '2026-11-10T18:12:00.000Z' })).toEqual({ place: '1\u2009240', turn: '19:12 Paris' });
+    expect(liveEntryQueue({ placeInSize: 3, estimatedTurnAt: null })).toEqual({ place: '3', turn: '—' });
+    expect(liveEntryQueue({ placeInSize: null, estimatedTurnAt: null })).toEqual({ place: '—', turn: '—' });
+    expect(liveEntryQueue({})).toEqual({ place: '—', turn: '—' });
   });
 
-  it('sends SET PACE, PAUSE PACE, RESUME PACE and NEXT BATCH NOW on their paths', async () => {
+  it('warns when the pace cannot offer every piece before the close (D10, advice only), and shortens the hold only (D4)', () => {
+    expect(closeGuardLine(120)).toBe('AT THIS PACE, 120 PIECES REMAIN AT THE CLOSE');
+    expect(closeGuardLine(1)).toBe('AT THIS PACE, 1 PIECE REMAINS AT THE CLOSE');
+    expect(closeGuardLine(1200)).toBe('AT THIS PACE, 1\u2009200 PIECES REMAIN AT THE CLOSE');
+    expect([closeGuardLine(3, true), closeGuardLine(1, true)]).toEqual(['AT THIS PACE, 3 SETS REMAIN AT THE CLOSE', 'AT THIS PACE, 1 SET REMAINS AT THE CLOSE']);
+    // As the server reads it (services/live-queue.ts closeGuard): the batches from the next one (which keeps its time),
+    // every Y minutes, each strictly before the close, times X, against the pieces not confirmed.
+    const next = '2026-11-10T18:10:00.000Z';
+    const close = '2026-11-10T19:00:00.000Z';
+    // 50 minutes: 50 batches of 1 every minute for 170 pieces: 120 remain; 5 every 10 minutes: 5 batches, 25 turns.
+    expect(paceCloseGuard({ batch: 1, minutes: 1 }, next, close, 170)).toBe(120);
+    expect(paceCloseGuard({ batch: 5, minutes: 10 }, next, close, 30)).toBe(5);
+    expect(paceCloseGuard({ batch: 5, minutes: 10 }, next, close, 25)).toBeNull();
+    // 50 minutes every 15: batches at 0, 15, 30, 45 (4).
+    expect(paceCloseGuard({ batch: 10, minutes: 15 }, next, close, 41)).toBe(1);
+    expect(paceCloseGuard({ batch: 1, minutes: 1 }, close, close, 3)).toBe(3);
+    expect(paceCloseGuard({ batch: 1, minutes: 1 }, next, close, 0)).toBeNull();
+    // SHORTEN THE HOLD: a whole number of minutes, shorter than the hold now; none to shorten at 0.
+    expect(holdShortenProblem('5', 10)).toBeNull();
+    expect(holdShortenProblem('0', 10)).toBeNull();
+    for (const v of ['10', '11', '', '-1', '2.5', 'soon']) expect([v, holdShortenProblem(v, 10)]).toEqual([v, 'A shorter hold: 0 to 9 minutes after the opening.']);
+    expect(holdShortenProblem('0', 2)).toBeNull();
+    expect(holdShortenProblem('1', 2)).toBeNull();
+    expect(holdShortenProblem('2', 2)).toBe('A shorter hold: 0 to 1 minute after the opening.');
+    expect(holdShortenProblem('0', 0)).toBe('This release has no hold left to shorten.');
+  });
+
+  it('says where the host message shows, as the collector screens show it (D11; mockup FROM ORBES on #queue, #sold, #after-wait, #turn, #secured; none on #confirmed and #after-door)', () => {
+    expect(LIVE_MESSAGE_HINT).toBe('One line, shown on the room, the draw, the late comer’s entry, the queue, SOLD OUT for your size, the after-room’s waiting screen, the turn and SECURED, until the next one.');
+    expect(LIVE_MESSAGE_HINT).not.toMatch(/CONFIRMED|door/i);
+  });
+
+  it('sends SET PACE, PAUSE PACE, RESUME PACE, NEXT BATCH NOW, SHORTEN THE HOLD and END THE HOLD NOW on their paths, and reads those beyond the pieces', async () => {
     const calls: { url: string; init: RequestInit }[] = [];
     const fetch: FetchLike = async (url, init = {}) => {
       calls.push({ url, init });
@@ -607,9 +694,21 @@ describe('the console of a LIVE RELEASE’s pace (W4)', () => {
     await api.pauseLivePace(ID);
     await api.resumeLivePace(ID);
     await api.nextLiveBatch(ID);
-    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual([`PUT /api/admin/live/${ID}/pace`, `POST /api/admin/live/${ID}/pace/pause`, `POST /api/admin/live/${ID}/pace/resume`, `POST /api/admin/live/${ID}/pace/next`]);
+    await api.shortenLiveHold(ID, 5);
+    await api.endLiveHold(ID);
+    await api.liveEntries(ID, { status: 'BEYOND', page: 1, pageSize: 50 });
+    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual([
+      `PUT /api/admin/live/${ID}/pace`,
+      `POST /api/admin/live/${ID}/pace/pause`,
+      `POST /api/admin/live/${ID}/pace/resume`,
+      `POST /api/admin/live/${ID}/pace/next`,
+      `POST /api/admin/live/${ID}/hold/shorten`,
+      `POST /api/admin/live/${ID}/hold/end`,
+      `GET /api/admin/live/${ID}/entries?status=BEYOND&page=1&pageSize=50`,
+    ]);
     expect(JSON.parse(calls[0]!.init.body as string)).toEqual({ batch: 250, minutes: 1 });
-    expect(calls.every((c) => (c.init.headers as Record<string, string>)['x-csrf-token'] === 'tok')).toBe(true);
+    expect(JSON.parse(calls[4]!.init.body as string)).toEqual({ minutes: 5 });
+    expect(calls.every((c) => c.init.method === 'GET' || (c.init.headers as Record<string, string>)['x-csrf-token'] === 'tok')).toBe(true);
   });
 });
 

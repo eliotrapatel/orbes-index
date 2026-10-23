@@ -1108,8 +1108,8 @@ export const bestTimeQuery = z.object({
   tier: queryOptional(z.preprocess((v) => (typeof v === 'string' && /^\s*[0-3]\s*$/.test(v) ? Number(v) : v), z.number().int('Must be a tier: 0 to 3').min(0, 'At least 0').max(3, 'At most 3'))),
 });
 
-/** GET /api/admin/live/:id/entries: one status, the open ones (OPEN), or every entry. */
-export const liveEntriesQuery = z.object({ status: queryOptional(z.enum(['OPEN', ...LIVE_ENTRY_STATUSES])) });
+/** GET /api/admin/live/:id/entries: one status, the open ones (OPEN), those beyond the pieces (BEYOND, ONE QUEUE D11), or every entry. */
+export const liveEntriesQuery = z.object({ status: queryOptional(z.enum(['OPEN', 'BEYOND', ...LIVE_ENTRY_STATUSES])) });
 
 // ── Admin: test entrants (routes/admin/test-entrants.ts) ───────────────────
 

@@ -1241,7 +1241,8 @@ export class AdminApi {
     return `${this.base}/api/admin/live/${encodeURIComponent(id)}/stream`;
   }
 
-  liveEntries(id: string, q: { status?: LiveEntryStatus | 'OPEN'; page?: number; pageSize?: number } = {}): Promise<Paged<LiveEntry>> {
+  /** The entries: one status, the open ones (OPEN), those in the queue past the pieces of their size (BEYOND, ONE QUEUE D11), or all. */
+  liveEntries(id: string, q: { status?: LiveEntryStatus | 'OPEN' | 'BEYOND'; page?: number; pageSize?: number } = {}): Promise<Paged<LiveEntry>> {
     return this.get(`/api/admin/live/${encodeURIComponent(id)}/entries`, q);
   }
 
@@ -1257,12 +1258,12 @@ export class AdminApi {
     return this.post(`/api/admin/live/${encodeURIComponent(id)}/extend`, { minutes });
   }
 
-  /** W4, SET PACE: X buyers admitted every Y minutes, until the end (no request takes a pace away). */
+  /** SET PACE: X people per batch every Y minutes, slower or faster, until the end (no request takes a pace away). */
   setLivePace(id: string, pace: LivePace): Promise<LiveState> {
     return this.request('PUT', `/api/admin/live/${encodeURIComponent(id)}/pace`, { body: { batch: pace.batch, minutes: pace.minutes } });
   }
 
-  /** PAUSE PACE: no batch admitted until RESUME PACE; the turns of those admitted go on. */
+  /** PAUSE PACE: no batch given until RESUME PACE; the turns already given go on. */
   pauseLivePace(id: string): Promise<LiveState> {
     return this.post(`/api/admin/live/${encodeURIComponent(id)}/pace/pause`);
   }
@@ -1271,9 +1272,19 @@ export class AdminApi {
     return this.post(`/api/admin/live/${encodeURIComponent(id)}/pace/resume`);
   }
 
-  /** NEXT BATCH NOW: one batch admitted at once, the clock of the batches kept. */
+  /** NEXT BATCH NOW: up to X extra turns now, where a piece is free, the clock of the batches kept. */
   nextLiveBatch(id: string): Promise<LiveState> {
     return this.post(`/api/admin/live/${encodeURIComponent(id)}/pace/next`);
+  }
+
+  /** SHORTEN THE HOLD (ONE QUEUE, D4): the hold after the opening set to `minutes` from T0, earlier only. */
+  shortenLiveHold(id: string, minutes: number): Promise<LiveState> {
+    return this.post(`/api/admin/live/${encodeURIComponent(id)}/hold/shorten`, { minutes });
+  }
+
+  /** END THE HOLD NOW (ONE QUEUE, D4): the first batch due now (at T0 before it). */
+  endLiveHold(id: string): Promise<LiveState> {
+    return this.post(`/api/admin/live/${encodeURIComponent(id)}/hold/end`);
   }
 
   /** ADD PIECES to a size. */

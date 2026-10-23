@@ -389,8 +389,9 @@ describe('the runbook of lot MACRO M1 (docs/launch/DEPLOY-MACRO-M1.md)', () => {
     expect(checks).toContain('`END TEST <les mêmes 8 caractères>`');
     // The board's Pace block, as livePaceFigures says it, and the line's Admitted column.
     const figures = livePaceFigures({ phase: 'LIVE', paused: false, endedAt: null, pace: { batch: 250, minutes: 1, paused: false, waiting: 4750, admitted: 250, batches: 1, nextAt: '2026-10-21T12:01:00.000Z' } as never });
-    expect(figures.map((f) => f.label)).toEqual(['In the queue', 'Admitted', 'Batches', 'Next batch']);
-    for (const f of figures) expect(checks, f.label).toContain(`\`${f.label}\``);
+    // ONE QUEUE (lot Q1, D11: add only) keeps the four the runbook names, first, and adds its own after them.
+    expect(figures.map((f) => f.label)).toEqual(['In the queue', 'Admitted', 'Batches', 'Next batch', 'Turns given', 'Beyond the pieces']);
+    for (const f of figures.slice(0, 4)) expect(checks, f.label).toContain(`\`${f.label}\``);
     expect(liveEntryAdmission({ status: 'WAITING', admittedAt: '2026-10-21T12:01:00.000Z', batch: 2, letIn: false } as never).text).toBe('Batch 2');
     expect(checks).toContain('la colonne `Admitted` lit `Batch 1`, `Batch 2`');
     // The report's sixth check, PASSED or FAILED, and the server panel's red line.

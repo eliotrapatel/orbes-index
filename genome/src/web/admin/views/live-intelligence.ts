@@ -16,6 +16,7 @@ import {
   LIVE_COMPARISON_COLUMNS,
   liveReadings,
   pressureText,
+  queueReportFigures,
   rangeText,
   sellOutText,
   shareText,
@@ -290,6 +291,8 @@ export function liveIntelligenceSections(ctx: ViewContext, r: LiveRelease, data:
             ['Unserved', formatCount(unserved), 'PIECES NEVER OFFERED A TURN', 'live-report-unserved'],
             ['Revenue', formatMoney(rep.piecesRevenueMinor + rep.addonsRevenueMinor, rep.currency), `${formatMoney(rep.addonsRevenueMinor, rep.currency)} IN ADD-ONS`, 'live-report-revenue'],
           ),
+          // ONE QUEUE (D11, added rows): the longest wait, the turns given by the pace, the people who left the queue.
+          rep.queue ? [subtitle('The queue'), figures(...queueReportFigures(rep.queue, r.afterRoomOf !== null))] : null,
           subtitle('The funnel'),
           h('div', { data: { testid: 'live-report-funnel' } }, barList(funnelBars(rep.funnel))),
           subtitle('By size'),

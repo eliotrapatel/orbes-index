@@ -925,6 +925,11 @@ describe('LiveService: ONE QUEUE’s batches', () => {
       [5, null, null, false],
       [6, null, null, true],
     ]);
+    // The console's filters (D11): those waiting in the queue, and those beyond the pieces of their size.
+    const queued = await f.liveConsole.entries(r.id, { status: 'QUEUED' }, { page: 1, pageSize: 10 });
+    expect([queued.total, queued.items.map((e) => e.position)]).toEqual([4, [3, 4, 5, 6]]);
+    const beyondOnly = await f.liveConsole.entries(r.id, { status: 'BEYOND' }, { page: 1, pageSize: 10 });
+    expect([beyondOnly.total, beyondOnly.items.map((e) => [e.position, e.status, e.beyond, e.placeInSize])]).toEqual([1, [[6, 'QUEUED', true, 4]]]);
     // The export: when its turn was given, never a batch's figures.
     const rows = await entriesOf(t.db, r.id);
     expect((await accountLiveData(t.db, rows[0]!.account_id)).entries[0]).toMatchObject({ admittedAt: T0, queuedAt: T0 });

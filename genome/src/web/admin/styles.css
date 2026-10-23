@@ -3216,12 +3216,15 @@ fieldset.cfield--checks > .cfield__label {
   font-variant-numeric: tabular-nums;
 }
 
-.live__figures .kpi:nth-child(4n + 1) {
+/* The board's eight figures, and the pace's (ONE QUEUE: four kept, then those added on a second row), four a row. */
+.live__figures .kpi:nth-child(4n + 1),
+.live__pace-figures .kpi:nth-child(4n + 1) {
   padding-left: 0;
   border-left: 0;
 }
 
-.live__figures .kpi:nth-child(n + 5) {
+.live__figures .kpi:nth-child(n + 5),
+.live__pace-figures .kpi:nth-child(n + 5) {
   border-top: 1px solid var(--hairline);
   padding-top: 18px;
 }
@@ -3255,7 +3258,7 @@ fieldset.cfield--checks > .cfield__label {
   margin-top: 22px;
 }
 
-/* W4, the pace: its line and controls, then its four figures, under the board's. */
+/* The pace: its line and controls, the close guard, then its figures, under the board's. */
 .live__pace {
   margin-top: 22px;
 }
@@ -3282,6 +3285,25 @@ fieldset.cfield--checks > .cfield__label {
   flex-wrap: wrap;
   gap: 8px;
   margin-left: auto;
+}
+
+/* The pace's notes say what each figure means (ONE QUEUE, D11: GIVEN A TURN, ALL WAYS): whole, on two lines if need be. */
+.live__pace-figures .kpi__note {
+  white-space: normal;
+  overflow: visible;
+}
+
+/* ONE QUEUE (D10): the close guard's warning, under the pace's line, its three controls on its right; advice only. */
+.live__guard {
+  margin-bottom: 18px;
+}
+
+.live__guard[hidden] {
+  display: none;
+}
+
+.live__guard .live__alert-head {
+  align-items: center;
 }
 
 /* A size's label is a value (52, 54, ONE SIZE): the reading face, its figures aligned. */
@@ -3854,8 +3876,10 @@ fieldset.cfield--checks > .cfield__label {
   font-family: var(--font);
 }
 
-/* The phrase a confirmation asks to type (REVOKE O26-J-00184) reads in --font inside its display-face label. */
-.cfield__phrase {
+/* The phrase a confirmation asks to type (REVOKE O26-J-00184) reads in --font inside its display-face label, and so
+   does a figure a field's label must carry (HOLD AFTER THE OPENING (MINUTES, 0 = NONE), ONE QUEUE D1). */
+.cfield__phrase,
+.cfield__figure {
   font-family: var(--font);
 }
 

@@ -25,10 +25,15 @@
  *     question after rewritten (choice 11); the best time to open beside its settings and in Analytics, by tier and
  *     country (choice 10); PUBLISH shows the feasibility check per size and publishes all the same (choice 12); once a
  *     release has ended, who was asked where and each answer counted.
- *  7. The pace (plan MACRO M1, W4): blank in the times part (no pace), then X every Y; the board's Pace block, the next
- *     batch in Paris time; at T0 the first batch admits X in the line's order, the line says each entry's batch; SET PACE
- *     during the release keeps the next batch's time; PAUSE PACE shows PAUSED, RESUME PACE; NEXT BATCH NOW admits the
- *     rest, each control audited.
+ *  7. The pace (plan MACRO M1, W4; ONE QUEUE, D1: required, never blank): X every Y in the times part; the board's
+ *     Pace block, the next batch in Paris time; at T0 the first batch gives X turns in the line's order, the line says
+ *     each entry's batch; SET PACE during the release keeps the next batch's time; PAUSE PACE shows PAUSED, RESUME PACE;
+ *     NEXT BATCH NOW gives the rest, each control audited.
+ *  8. ONE QUEUE (lot Q1 §4): New live release with its pace and its hold (the owner's label, its figure in --font);
+ *     announced, the board's added figures (turns given, beyond the pieces, the hold's end in Paris time), the close
+ *     guard's warning and its controls, SHORTEN THE HOLD (earlier only), END THE HOLD NOW giving the first batch, the
+ *     line's queue place and estimated turn, the filters 'Waiting in the queue' and 'Beyond the pieces', the host
+ *     message's hint.
  * No CSP violation, no page error, no figure in the display face.
  */
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -401,7 +406,8 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await secure(x, r.id);
     await expect.poll(() => fig(p, 'live-secured').textContent(), { timeout: 10_000 }).toBe('1');
     await expect.poll(() => line.first().locator('[data-testid=live-entry-status]').textContent(), POLL).toMatch(/^SECUREDTo pay until /);
-    expect(await line.first().locator('td.col--num').nth(2).textContent()).toMatch(/^1\.\d{2} s$/);
+    // The gesture's length: the line's numbers are its place, its pieces, its queue place (ONE QUEUE, D11), then the hold.
+    expect(await line.first().locator('td.col--num').nth(3).textContent()).toMatch(/^1\.\d{2} s$/);
     await line.first().locator('[data-testid=live-free]').click();
     await confirmDialog(p);
     await expect.poll(() => fig(p, 'live-expired').textContent(), { timeout: 10_000 }).toBe('1');
@@ -850,8 +856,9 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
 
     // ONE QUEUE (D1): the pace it was created with (M1's « None: everyone is admitted at T0 » gone); the times part
     // changes it until the announcement, never blank.
-    await expect.poll(paceLine, POLL).toBe('5\u2009000 buyers every minute');
-    expect(await p.locator('[data-testid=live-pace-setting]').textContent()).toBe('5\u2009000 buyers every minute');
+    await expect.poll(paceLine, POLL).toBe('5\u2009000 people per batch, every minute');
+    expect(await p.locator('[data-testid=live-pace-setting]').textContent()).toBe('5\u2009000 people per batch, every minute');
+    expect(await p.locator('[data-testid=live-hold-setting]').textContent()).toBe('None');
     await shot(p, 'pace-created');
     await p.click('[data-testid=live-edit-times]');
     await p.fill('dialog input[name=paceBatch]', '');
@@ -861,8 +868,8 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await p.fill('dialog input[name=paceBatch]', '2');
     await p.fill('dialog input[name=paceMinutes]', '5');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=live-pace-setting]').textContent(), POLL).toBe('2 buyers every 5 minutes');
-    await expect.poll(paceLine, POLL).toBe('2 buyers every 5 minutes');
+    await expect.poll(() => p.locator('[data-testid=live-pace-setting]').textContent(), POLL).toBe('2 people per batch, every 5 minutes');
+    await expect.poll(paceLine, POLL).toBe('2 people per batch, every 5 minutes');
     // Before T0 the first batch is due at T0, said in Paris time.
     expect(await fig(p, 'live-pace-next').textContent()).toBe(parisClock(r.opensAt));
     expect(await note('live-pace-next')).toBe('PARIS · AT T0');
@@ -895,7 +902,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await p.fill('dialog input[name=batch]', '3');
     await p.fill('dialog input[name=minutes]', '2');
     await confirmDialog(p);
-    await expect.poll(paceLine, { timeout: 10_000 }).toBe('3 buyers every 2 minutes');
+    await expect.poll(paceLine, { timeout: 10_000 }).toBe('3 people per batch, every 2 minutes');
     expect(await fig(p, 'live-pace-next').textContent()).toBe(due);
     expect(await note('live-pace-batches')).toBe('3 EVERY 2 MINUTES');
 
@@ -908,9 +915,9 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await p.click('[data-testid=live-pace-resume]');
     await expect.poll(() => fig(p, 'live-pace-next').textContent(), { timeout: 10_000 }).toMatch(/^\d{2}:\d{2}$/);
 
-    // NEXT BATCH NOW: the three waiting admitted at once, an extra batch.
+    // NEXT BATCH NOW: the three waiting given their turns at once, an extra batch.
     await p.click('[data-testid=live-pace-next-now]');
-    await expect.poll(() => p.locator('dialog [data-testid=live-pace-next-text]').textContent(), POLL).toMatch(/^The next 3 of the 3 waiting in the queue are admitted now/);
+    await expect.poll(() => p.locator('dialog [data-testid=live-pace-next-text]').textContent(), POLL).toBe('Up to 3 turns now, in the line’s order, where a piece is free: an extra batch. The batches keep their times.');
     await confirmDialog(p);
     await expect.poll(() => fig(p, 'live-pace-waiting').textContent(), { timeout: 10_000 }).toBe('0');
     expect(await fig(p, 'live-pace-admitted').textContent()).toBe('5');
@@ -922,6 +929,133 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     expect(actions.map((a) => a.action)).toEqual(['drop.live.pace', 'drop.live.pace.pause', 'drop.live.pace.resume', 'drop.live.pace.next']);
     expect(await figuresInDisplayFace(p)).toEqual([]);
     await shot(p, 'pace');
+    expect(await csp(p)).toEqual([]);
+    await p.context().close();
+  }, STEP_TIMEOUT);
+
+  it('creates a release with its pace and hold (ONE QUEUE, D1), SHORTEN THE HOLD and END THE HOLD NOW (D4), the board’s added figures, the close guard (D10), the line’s queue place and estimated turn, BEYOND THE PIECES (D11)', async () => {
+    const p = await open(ADMIN);
+    await go(p, '#/club?tab=drops', 'Club');
+    await p.click('[data-testid=live-new]');
+    await p.selectOption('dialog select[name=modelId]', modelId);
+    await p.fill('dialog input[name=title]', 'THE HELD RING');
+    const t0 = new Date(Math.ceil((Date.now() + 2 * HOUR) / 60_000) * 60_000);
+    const local = (d: Date) => d.toISOString().slice(0, 16);
+    await p.fill('dialog input[name=opensAt]', local(t0));
+    await p.fill('dialog input[name=closesAt]', local(new Date(t0.getTime() + 50 * 60_000)));
+    await p.fill('dialog input[name=price]', '1 000');
+    await p.fill('dialog textarea[name=sizes]', '52 = 3');
+    // D1: the pace and the hold, required, in the owner's words (the hold's figure in --font).
+    const holdLabel = p.locator('dialog .cfield[data-field=holdMinutes] .cfield__label');
+    expect(await holdLabel.textContent()).toBe('Hold after the opening (minutes, 0 = none) ·');
+    expect(await holdLabel.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Gravesend Sans/);
+    expect(await holdLabel.locator('.cfield__figure').evaluate((el) => [el.textContent, getComputedStyle(el).fontFamily])).toEqual(['0', expect.not.stringMatching(/^"?Gravesend Sans/)]);
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('Complete the required fields.');
+    await shot(p, 'new-paced');
+    await p.fill('dialog input[name=paceBatch]', '1');
+    await p.fill('dialog input[name=paceMinutes]', '30');
+    await p.fill('dialog input[name=holdMinutes]', '30');
+    await confirmDialog(p);
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('THE HELD RING');
+    const id = decodeURIComponent(new URL(p.url()).hash.split('/').pop()!);
+    expect(await p.locator('[data-testid=live-pace-setting]').textContent()).toBe('1 person per batch, every 30 minutes');
+    expect(await p.locator('[data-testid=live-hold-setting]').textContent()).toBe('30 minutes after the opening');
+
+    // Announced at its publication: the hold now only shortened or ended, on the board.
+    await ctx.services.liveConsole.publish(id, {}, admin);
+    await p.reload();
+    await expect.poll(() => fig(p, 'live-pace-hold').textContent(), POLL).toBe(parisClock(new Date(t0.getTime() + 30 * 60_000)));
+    const note = (tid: string) => p.locator(`[data-testid=${tid}] .kpi__note`).textContent();
+    expect(await note('live-pace-hold')).toBe('PARIS · T0 + 30 MIN');
+    expect(await note('live-pace-next')).toBe('PARIS · T0 + 30 MIN');
+    expect(await fig(p, 'live-pace-turns').textContent()).toBe('0');
+    expect(await fig(p, 'live-pace-beyond').textContent()).toBe('0');
+    // D10: one batch of one before the close (T0 + 30; T0 + 60 is past it) for three pieces: advice only.
+    expect(await p.locator('[data-testid=live-close-guard-text]').textContent()).toBe('AT THIS PACE, 2 PIECES REMAIN AT THE CLOSE');
+    for (const [tid, n] of [['live-guard-extend', 1], ['live-guard-set-pace', 1], ['live-guard-next-now', 0], ['live-hold-shorten', 1], ['live-hold-end', 1], ['live-pace-next-now', 0]] as const) expect(await p.locator(`[data-testid=${tid}]`).count(), tid).toBe(n);
+    // The host message's dialog says where the line shows.
+    await p.click('[data-testid=live-message-new]');
+    expect(await p.locator('dialog [data-testid=live-message-hint]').textContent()).toBe(
+      'One line, shown on the room, the draw, the late comer’s entry, the queue, SOLD OUT for your size, the after-room’s waiting screen, the turn and SECURED, until the next one.',
+    );
+    await p.click('[data-testid=dialog-cancel]');
+
+    // SHORTEN THE HOLD: earlier only.
+    await p.click('[data-testid=live-hold-shorten]');
+    await p.fill('dialog input[name=minutes]', '30');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('A shorter hold: 0 to 29 minutes after the opening.');
+    await p.fill('dialog input[name=minutes]', '20');
+    await confirmDialog(p);
+    await expect.poll(() => fig(p, 'live-pace-hold').textContent(), { timeout: 10_000 }).toBe(parisClock(new Date(t0.getTime() + 20 * 60_000)));
+    expect(await note('live-pace-hold')).toBe('PARIS · T0 + 20 MIN');
+    await shot(p, 'hold-shortened');
+
+    // Five in the room, then T0 (its close 50 minutes later): everyone waits the hold, nobody given a turn yet.
+    const move = (set: { opens_at?: Date; closes_at?: Date }) => ctx.db.updateTable('drops').set(set).where('id', '=', id).execute();
+    await move({ opens_at: new Date(Date.now() + 2 * 60_000) });
+    const size = (await ctx.services.liveConsole.get(id)).sizes[0]!.id;
+    for (const n of [81, 82, 83, 84, 85]) {
+      const c = await collector(n, 0);
+      await ctx.services.live.enter(c.id, id, { sizeId: size }, c.actor);
+    }
+    await ctx.db.updateTable('live_entries').set({ joined_at: new Date(Date.now() - 60_000) }).where('drop_id', '=', id).execute();
+    const live0 = new Date(Date.now() - 1000);
+    await move({ opens_at: live0, closes_at: new Date(live0.getTime() + 50 * 60_000) });
+    await ctx.services.live.advance(id);
+    await expect.poll(() => p.locator('[data-testid=live-state]').textContent(), { timeout: 15_000 }).toBe('LIVE');
+    await expect.poll(() => fig(p, 'live-pace-waiting').textContent(), { timeout: 10_000 }).toBe('5');
+    expect(await fig(p, 'live-pace-turns').textContent()).toBe('0');
+    expect(await note('live-pace-hold')).toBe('PARIS TIME');
+    // Each person's place in its size, and an estimated turn in Paris time.
+    await expect.poll(() => p.locator('#live-entries [data-testid=live-entry-queue-place]').allTextContents(), POLL).toEqual(['1', '2', '3', '4', '5']);
+    expect(await p.locator('#live-entries [data-testid=live-entry-estimated]').allTextContents()).toEqual(Array.from({ length: 5 }, () => expect.stringMatching(/^\d{2}:\d{2} Paris$/)));
+
+    // END THE HOLD NOW: the first batch now, one turn; the hold's end gone; the fifth beyond the three pieces.
+    await p.click('[data-testid=live-hold-end]');
+    expect(await p.locator('dialog [data-testid=live-hold-end-text]').textContent()).toBe('The first batch is given now: up to 1 turn, in the line’s order, where a piece is free; the next ones follow every 30 minutes.');
+    await confirmDialog(p);
+    await expect
+      .poll(async () => {
+        await ctx.services.live.advance(id);
+        return fig(p, 'live-pace-turns').textContent();
+      }, { timeout: 15_000, interval: 500 })
+      .toBe('1');
+    await expect.poll(() => fig(p, 'live-pace-waiting').textContent(), POLL).toBe('4');
+    expect(await fig(p, 'live-pace-admitted').textContent()).toBe('1');
+    expect(await p.locator('[data-testid=live-pace-hold]').count()).toBe(0);
+    await expect.poll(() => fig(p, 'live-pace-beyond').textContent(), POLL).toBe('1');
+    expect(await p.locator('[data-testid=live-size-beyond]').allTextContents()).toEqual(['1']);
+    // D10: the next batch at +30, one before the close, for the three pieces not confirmed: EXTEND, SET PACE, NEXT BATCH NOW.
+    await expect.poll(() => p.locator('[data-testid=live-close-guard-text]').textContent(), POLL).toBe('AT THIS PACE, 2 PIECES REMAIN AT THE CLOSE');
+    for (const tid of ['live-guard-extend', 'live-guard-set-pace', 'live-guard-next-now']) expect(await p.locator(`[data-testid=${tid}]`).count(), tid).toBe(1);
+    expect(await p.locator('[data-testid=live-hold-shorten], [data-testid=live-hold-end]').count()).toBe(0);
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'hold-ended');
+    if (SCREENSHOTS) {
+      await p.setViewportSize({ width: 1024, height: 768 });
+      await shot(p, 'hold-ended-1024');
+      await p.setViewportSize({ width: 1440, height: 900 });
+    }
+    // SET PACE says the close guard of the pace typed: faster, none (batches at +30 and +40 give four turns).
+    await p.click('[data-testid=live-guard-set-pace]');
+    await expect.poll(() => p.locator('dialog [data-testid=live-pace-guard]').textContent(), POLL).toBe('AT THIS PACE, 2 PIECES REMAIN AT THE CLOSE');
+    await shot(p, 'set-pace-guard');
+    await p.fill('dialog input[name=batch]', '2');
+    await p.fill('dialog input[name=minutes]', '10');
+    await expect.poll(() => p.locator('dialog [data-testid=live-pace-guard]').count(), POLL).toBe(0);
+    await p.click('[data-testid=dialog-cancel]');
+
+    // The filters: those waiting in the queue, and those beyond the pieces of their size.
+    const options = await p.locator('#live-entries select[name=status] option').allTextContents();
+    // The WAITING status keeps its name (OP-12); QUEUED reads 'Waiting in the queue'.
+    expect(options).toEqual(['The line, live', 'Open entries', 'WAITING', 'Waiting in the queue', 'TURN', 'SECURED', 'CONFIRMED', 'MISSED', 'EXPIRED', 'RELEASED', 'LEFT', 'REMOVED', 'ENDED', 'Beyond the pieces']);
+    await p.selectOption('#live-entries select[name=status]', 'BEYOND');
+    await expect.poll(() => p.locator('#live-entries [data-testid=live-entry-queue-place]').allTextContents(), POLL).toEqual(['4']);
+    const actions = await ctx.db.selectFrom('audit_logs').select('action').where('target_id', '=', id).where('action', 'like', 'drop.live.%').orderBy('id').execute();
+    expect(actions.map((a) => a.action)).toEqual(expect.arrayContaining(['drop.live.hold.shorten', 'drop.live.hold.end', 'drop.live.batch']));
+    expect(await figuresInDisplayFace(p)).toEqual([]);
     expect(await csp(p)).toEqual([]);
     await p.context().close();
   }, STEP_TIMEOUT);

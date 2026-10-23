@@ -1015,7 +1015,7 @@ export function sellOutForecast(r: InsightRelease, entries: readonly InsightEntr
     }
     if (r.pausedAt || windowMs < LIVE_INSIGHT_RULES.pace.minSeconds * SECOND || pace * c <= 0) {
       const reason = r.pausedAt ? 'the release is paused' : windowMs < LIVE_INSIGHT_RULES.pace.minSeconds * SECOND ? `the sales have run less than ${duration(LIVE_INSIGHT_RULES.pace.minSeconds * SECOND)}${fromResume ? ' since the RESUME' : ''}` : `no piece was secured in ${duration(windowMs)}`;
-      sizes.push({ ...base, outlook: 'NO_PACE', at: null, expectedLeft: null, reasoning: [`${head}; no pace to forecast from: ${reason}.`] });
+      sizes.push({ ...base, outlook: 'NO_PACE', at: null, expectedLeft: null, reasoning: [`${head}; no sales rate to forecast from: ${reason}.`] });
       continue;
     }
     const rate = pace * c;
