@@ -435,7 +435,7 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await db.updateTable('models').set({ box_id: box.id, packed_weight_g: 140 }).where('id', '=', model.id).execute();
     await expect(db.deleteFrom('boxes').where('id', '=', box.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e));
     // A parcel's weight or what was missing only once packed, never both; the list comes back as an array.
-    const request = await db.insertInto('shop_requests').values({ account_id: account.id, model_id: model.id, status: 'CLOSED', handled_at: new Date(), outcome: 'ACCEPTED' }).returning('id').executeTakeFirstOrThrow();
+    const request = await db.insertInto('shop_requests').values({ account_id: account.id, model_id: model.id, status: 'CLOSED', created_at: new Date(Date.now() - 60_000), handled_at: new Date(), outcome: 'ACCEPTED' }).returning('id').executeTakeFirstOrThrow();
     const order = await db
       .insertInto('orders')
       .values({ channel: 'SALON', shop_request_id: request.id, account_id: account.id, model_id: model.id, location_id: location.id, price_minor: 1000, currency: 'EUR' })
@@ -494,7 +494,7 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await expect(db.insertInto('skus').values({ addon_id: cloth.id, code: 'CLOTH-PG0056-B' }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'skus_addon_id_key'));
     await expect(sql`UPDATE skus SET addon_id = ${pouch.id} WHERE id = ${clothSku.id}`.execute(db)).rejects.toSatisfy(isGuardViolation);
     // An order holding its piece, and a unit of the add-on held with it; its state with its own time.
-    const request = await db.insertInto('shop_requests').values({ account_id: account.id, model_id: model.id, status: 'CLOSED', handled_at: new Date(), outcome: 'ACCEPTED' }).returning('id').executeTakeFirstOrThrow();
+    const request = await db.insertInto('shop_requests').values({ account_id: account.id, model_id: model.id, status: 'CLOSED', created_at: new Date(Date.now() - 60_000), handled_at: new Date(), outcome: 'ACCEPTED' }).returning('id').executeTakeFirstOrThrow();
     const order = await db
       .insertInto('orders')
       .values({ channel: 'SALON', shop_request_id: request.id, account_id: account.id, model_id: model.id, location_id: location.id, sku_id: sized.id, reservation: 'STOCK', price_minor: 1000, currency: 'EUR' })

@@ -1573,7 +1573,7 @@ describe('schema', () => {
     expect(sized).toMatchObject({ model_id: model.id, addon_id: null });
     await expect(t.db.insertInto('skus').values({ model_id: model.id, addon_id: addon.id, code: 'BOTH-S0056' }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'skus_owner'));
     // A unit held on an order, read in stock_holds beside the order's own hold.
-    const request = await t.db.insertInto('shop_requests').values({ account_id: account.id, model_id: model.id, status: 'CLOSED', handled_at: new Date(), outcome: 'ACCEPTED' }).returning('id').executeTakeFirstOrThrow();
+    const request = await t.db.insertInto('shop_requests').values({ account_id: account.id, model_id: model.id, status: 'CLOSED', created_at: new Date(Date.now() - 60_000), handled_at: new Date(), outcome: 'ACCEPTED' }).returning('id').executeTakeFirstOrThrow();
     const order = await t.db
       .insertInto('orders')
       .values({ channel: 'SALON', shop_request_id: request.id, account_id: account.id, model_id: model.id, location_id: location.id, sku_id: sized.id, reservation: 'STOCK', price_minor: 1000, currency: 'EUR' })
