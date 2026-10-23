@@ -237,10 +237,20 @@ export const adminLiveRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
     return live.resumePace(id, adminActor(request));
   });
 
-  app.post('/api/admin/live/:id/pace/next', async (request) => {
+  app.post('/api/admin/live/:id/pace/next', async (request, reply) => {
     const { id } = parse(liveAdminParams, request.params);
     parse(emptyBody, request.body);
-    return live.nextBatch(id, adminActor(request));
+    // A press whose request closes before it is given (the console gone, the connection cut) is withdrawn: never given.
+    const gone = new AbortController();
+    const onClose = () => {
+      if (!reply.raw.writableFinished) gone.abort();
+    };
+    reply.raw.on('close', onClose);
+    try {
+      return await live.nextBatch(id, adminActor(request), { signal: gone.signal });
+    } finally {
+      reply.raw.off('close', onClose);
+    }
   });
 
   app.post('/api/admin/live/:id/hold/shorten', async (request) => {

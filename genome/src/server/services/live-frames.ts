@@ -49,6 +49,12 @@ export interface PendingBatch {
   resolve(batch: number): void;
   reject(e: unknown): void;
   settled: boolean;
+  /**
+   * Taken by the transaction that gives it (services/live.ts giveDue), until that transaction ends: it cannot be
+   * withdrawn meanwhile (its request's wait over, or its request closed), so a press answered "nothing given" is never
+   * given afterwards.
+   */
+  giving: boolean;
 }
 
 interface ReleaseFrames {
@@ -181,6 +187,7 @@ export class LiveFrameGate {
       actorId,
       done,
       settled: false,
+      giving: false,
       resolve: (n) => {
         p.settled = true;
         resolve(n);
@@ -194,11 +201,11 @@ export class LiveFrameGate {
     return p;
   }
 
-  /** The first NEXT BATCH NOW still waiting, if any. */
+  /** The first NEXT BATCH NOW still waiting, if any (one a transaction is giving is not: its outcome settles it). */
   firstPending(dropId: string): PendingBatch | null {
     const r = this.of(dropId);
     while (r.pending.length > 0 && r.pending[0]!.settled) r.pending.shift();
-    return r.pending[0] ?? null;
+    return r.pending.find((p) => !p.giving && !p.settled) ?? null;
   }
 
   /** A pending batch done with (given or refused): out of the queue. */

@@ -172,11 +172,11 @@ describe('LiveService: ONE QUEUE’s batches', () => {
    * place in the line reading its state (its own entry, as the stream's `you` event and GET /state serve it), recorded
    * as the app records it; `readings` lists them, in order.
    */
-  const process = (o: { readings?: boolean } = {}) => {
+  const process = (o: { readings?: boolean; pressWaitMs?: number } = {}) => {
     const frames = new LiveFrameGate();
     frames.usePublisher(() => {});
     frames.useReadings(o.readings ?? false);
-    const live = new LiveService({ db: t.db, audit: f.audit, seedKey: f.seedKey, turnKey: f.turnKey, clock: f.clock.now, frames });
+    const live = new LiveService({ db: t.db, audit: f.audit, seedKey: f.seedKey, turnKey: f.turnKey, clock: f.clock.now, frames, pressWaitMs: o.pressWaitMs });
     const readings: { position: number; next: boolean; at: number }[] = [];
     const read = async (r: LiveRelease, position: number) => {
       const e = (await entriesOf(t.db, r.id)).find((x) => x.position === position)!;
@@ -783,6 +783,42 @@ describe('LiveService: ONE QUEUE’s batches', () => {
     expect((await third).pace).toMatchObject({ batches: 4 });
     expect(await turnsRead(r, p.readings, 6)).toBe('every turn read');
     expect((await check(r, at(120 * SECOND))).pass).toBe(true);
+  });
+
+  it('NEXT BATCH NOW held past its wait (25 s, under the server’s 30 s idle timeout; 1 s here), or whose request closes, is withdrawn: 503 LIVE_BATCH_WAITING, nothing given, never given afterwards', async () => {
+    const r = await release({ pace: { batch: 1, minutes: 5 }, turnSeconds: 300 });
+    await room(r, 6);
+    const p = process({ readings: true, pressWaitMs: 1_000 });
+    p.frame(r);
+    expect(await advance(r, T0, p.live)).toMatchObject({ batch: 1, turns: 1 });
+    // A press reaching the 2nd, whose phone has not read yet: held by its reading; its request closes.
+    f.clock.set(at(10 * SECOND));
+    const gone = new AbortController();
+    const closed = p.live.nextBatch(r.id, f.admin, { signal: gone.signal });
+    p.frame(r);
+    expect(await settledWithin(closed, 300)).toBe(false);
+    gone.abort();
+    await rejects(closed, 'LIVE_BATCH_WAITING', 503);
+    // Pressed again: still unread when its wait is over.
+    f.clock.set(at(20 * SECOND));
+    const late = p.live.nextBatch(r.id, f.admin);
+    p.frame(r);
+    expect((await rejects(late, 'LIVE_BATCH_WAITING', 503)).message).toBe('The batch could not be given yet: nothing was given. Press NEXT BATCH NOW again in a moment.');
+    // The phone then reads that it is next and frames come: neither press is given, the scheduled batch keeps its time.
+    f.clock.set(at(30 * SECOND));
+    expect(await p.read(r, 2)).toBe(true);
+    p.frame(r);
+    expect(await advance(r, at(30 * SECOND), p.live)).toMatchObject({ batch: null, turns: 0 });
+    expect(await pace(r.id)).toMatchObject({ pace_batches: 1, pace_extra_batches: 0, pace_next_at: at(5 * MINUTE) });
+    expect((await entriesOf(t.db, r.id)).filter((e) => e.admitted_batch !== null).map((e) => e.position)).toEqual([1]);
+    expect(await audits(r.id, 'drop.live.pace.next')).toEqual([]);
+    // A press now, the phone having read: given, as the batch after the first.
+    f.clock.set(at(40 * SECOND));
+    const now = p.live.nextBatch(r.id, f.admin);
+    p.frame(r);
+    expect((await now).pace).toMatchObject({ batches: 2 });
+    expect((await audits(r.id, 'drop.live.pace.next')).map((a) => a.details)).toEqual([{ batch: 2, turns: 1 }]);
+    expect((await check(r, at(40 * SECOND))).pass).toBe(true);
   });
 
   it('gives a set’s turns by the set rule within the cap (macro scope K44 T1)', async () => {

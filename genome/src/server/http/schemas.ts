@@ -1073,7 +1073,7 @@ export const publishLiveBody = optionalBody({ circlePost: z.boolean().optional()
 /** POST /api/admin/live/:id/extend: the end of the sales moved later by 1 to 240 minutes. */
 export const liveExtendBody = body({ minutes: whole(LIVE_EXTEND_MINUTES.min, LIVE_EXTEND_MINUTES.max, 'minutes') });
 
-/** PUT /api/admin/live/:id/pace: SET PACE, X people per batch every Y minutes; no body turns a pace off. */
+/** PUT /api/admin/live/:id/pace: SET PACE, X people per batch every Y minutes; every LIVE release keeps a pace: no route takes it away. */
 export const livePaceBody = body(livePaceFields);
 
 /** POST /api/admin/live/:id/hold/shorten: SHORTEN THE HOLD, its new length from T0 (earlier only: the service checks). */

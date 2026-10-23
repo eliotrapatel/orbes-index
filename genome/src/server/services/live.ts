@@ -133,7 +133,7 @@ import type { AuditRecordInput, AuditService } from './audit.js';
 import { clubCounts, clubStandings, isTestEntrant, tierName, tierOf, type ClubTier } from './club.js';
 import { DROP_QUANTITY_MAX, drawKey, dropNotFound, openDropSeed } from './drops.js';
 import { holderGuarantee, holdsGuaranteeFor, releaseCovered, sizeServesGuarantee, useGuarantees, visibleGuaranteeIds } from './guarantees.js';
-import { LiveFrameGate, READ_WAIT_MS, type PendingBatch } from './live-frames.js';
+import { LiveFrameGate, type PendingBatch } from './live-frames.js';
 import { closeGuard, type LiveCloseGuard } from './live-queue.js';
 import { addonOffer, choicesOf, cleanAddonItems, clearChoices, setChoices, type AddonOfferItem, type AddonUnitsInput, type ChosenAddon, type LeftOutAddon } from './order-addons.js';
 import { ordersForLiveEntry } from './orders.js';
@@ -1466,6 +1466,8 @@ export interface LiveServiceDeps {
   /** At most one batch per published frame (live-frames.ts); one of its own when none is given. */
   frames?: LiveFrameGate;
   clock?: Clock;
+  /** How long a NEXT BATCH NOW waits to be given at most (PRESS_WAIT_MS; tests shorten it). */
+  pressWaitMs?: number;
 }
 
 /** What one pass of the batches did (giveDue): the batch it gave, and whether one waits for a frame. */
@@ -1478,14 +1480,18 @@ interface BatchPass {
   readings: boolean;
   /** Whether this transaction gave a batch (the gate shut by it, settled once it ends). */
   gave: boolean;
+  /** The NEXT BATCH NOW this transaction is giving (`giving`, released if the transaction fails). */
+  taking: PendingBatch | null;
 }
 
 /**
- * How long a NEXT BATCH NOW waits to be given at most: for its frame (one comes every second while anyone follows the
- * release), then for the readings of those it reaches (READ_WAIT_MS at most after the previous batch). Past it, a hub
- * that publishes no frame: 503 LIVE_BATCH_WAITING, nothing given.
+ * How long a NEXT BATCH NOW waits to be given at most, its request held open meanwhile: for its frame (one comes every
+ * second while anyone follows the release), then for the readings of those it reaches (READ_WAIT_MS at most after the
+ * previous batch). Under the server's 30 s idle timeout (app.ts connectionTimeout), so its answer always reaches the
+ * console. Past it (a hub that publishes no frame, phones that have not read yet), the press is withdrawn: 503
+ * LIVE_BATCH_WAITING, nothing given, and never given afterwards.
  */
-const PRESS_WAIT_MS = READ_WAIT_MS + 30_000;
+const PRESS_WAIT_MS = 25_000;
 
 interface SizeTotal {
   id: string;
@@ -1536,6 +1542,7 @@ export class LiveService {
   private readonly clock: Clock;
   /** At most one batch per published frame (live-frames.ts): the live streams publish the frames it waits for. */
   readonly frames: LiveFrameGate;
+  private readonly pressWaitMs: number;
 
   constructor(deps: LiveServiceDeps) {
     for (const [name, key] of [['seedKey', deps.seedKey], ['turnKey', deps.turnKey]] as const) {
@@ -1547,6 +1554,7 @@ export class LiveService {
     this.turnKey = deps.turnKey;
     this.clock = deps.clock ?? systemClock;
     this.frames = deps.frames ?? new LiveFrameGate();
+    this.pressWaitMs = deps.pressWaitMs ?? PRESS_WAIT_MS;
   }
 
   // ── Reads ────────────────────────────────────────────────────────────────
@@ -2171,10 +2179,13 @@ export class LiveService {
    * its turns are frozen), working while PAUSE PACE holds the batches; refused with 409 LIVE_NOTHING_FREE when it would
    * give no turn. At most one batch per frame (live-frames.ts): pressed when a batch has been given since the last frame
    * (a scheduled one, or another press within the same second), it is checked at once, waits for the next frame and is
-   * then given with its press time, in the order due; the answer comes once it is given. Audited `drop.live.pace.next`
-   * with its batch and turns (and `drop.live.batch`, the system's record of the batch, `extra`).
+   * then given with its press time, in the order due (G2: once those it reaches have read that they are next); the answer
+   * comes once it is given. Not given within PRESS_WAIT_MS, or its request closed (`signal`) before, it is withdrawn:
+   * 503 LIVE_BATCH_WAITING, nothing given, never given afterwards (one being given at that moment is answered as given).
+   * Audited `drop.live.pace.next` with its batch and turns (and `drop.live.batch`, the system's record of the batch,
+   * `extra`).
    */
-  async nextBatch(dropId: string, actor: Actor): Promise<LiveReleaseState> {
+  async nextBatch(dropId: string, actor: Actor, opts: { signal?: AbortSignal } = {}): Promise<LiveReleaseState> {
     const admin = assertStaff(actor, 'give the next batch now');
     const id = knownId(dropId, dropNotFound);
     let press: PendingBatch | null = null;
@@ -2201,17 +2212,24 @@ export class LiveService {
     });
     const mine = pressed();
     if (!mine) throw nothingFree();
-    const until = Date.now() + PRESS_WAIT_MS;
+    const until = Date.now() + this.pressWaitMs;
+    const { signal } = opts;
+    const closed = signal ? new Promise<void>((resolve) => (signal.aborted ? resolve() : signal.addEventListener('abort', () => resolve(), { once: true }))) : null;
     // Held by the readings of those it reaches (G2) rather than by a frame: tried again every 250 ms (the engine too).
     let readings = false;
     while (!mine.settled) {
-      if (Date.now() > until) {
-        this.frames.drop(id, mine);
-        mine.reject(batchWaiting());
-        break;
+      if (Date.now() >= until || signal?.aborted) {
+        // Withdrawn, unless a transaction is giving it this moment: then its outcome is the answer.
+        if (!mine.giving) {
+          this.frames.drop(id, mine);
+          mine.reject(batchWaiting());
+          break;
+        }
+        await Promise.race([mine.done.then(noop, noop), delay(50)]);
+        continue;
       }
       if (!readings) void this.frames.ask(id);
-      await Promise.race([mine.done.then(noop, noop), ...(readings ? [] : [this.frames.whenOpen(id)]), delay(250)]);
+      await Promise.race([mine.done.then(noop, noop), ...(readings ? [] : [this.frames.whenOpen(id)]), ...(closed ? [closed] : []), delay(250)]);
       if (mine.settled) break;
       if (!this.frames.open(id)) {
         readings = false;
@@ -2225,7 +2243,7 @@ export class LiveService {
         });
         readings = held;
       } catch (e) {
-        if (!mine.settled) {
+        if (!mine.settled && !mine.giving) {
           this.frames.drop(id, mine);
           mine.reject(e);
         }
@@ -2435,8 +2453,9 @@ export class LiveService {
   }
 
   private async advanceOnce(id: string, db: Db): Promise<LiveAdvance | null> {
-    const pass: BatchPass = { given: null, waiting: false, readings: false, gave: false };
+    const pass: BatchPass = { given: null, waiting: false, readings: false, gave: false, taking: null };
     let out: LiveAdvance | null;
+    let committed = false;
     try {
       out = await inTransaction(db, async (tx) => {
         const d = await tx.selectFrom('drops').selectAll().where('id', '=', id).forNoKeyUpdate().executeTakeFirst();
@@ -2460,8 +2479,11 @@ export class LiveService {
         await this.record(tx, notes);
         return out;
       });
+      committed = true;
     } finally {
       if (pass.gave) this.frames.settle(id);
+      // Not given after all: the press waits again (and may be withdrawn).
+      if (!committed && pass.taking) pass.taking.giving = false;
     }
     this.afterBatches(id, pass);
     return out;
@@ -2879,7 +2901,8 @@ export class LiveService {
    * its audit entries last. Once it ends: the gate settled if it gave one, then afterBatches.
    */
   private async batches(id: string, fn: (tx: Db, d: LiveDrop, now: Date, notes: AuditRecordInput[], pass: BatchPass) => Promise<void>): Promise<void> {
-    const pass: BatchPass = { given: null, waiting: false, readings: false, gave: false };
+    const pass: BatchPass = { given: null, waiting: false, readings: false, gave: false, taking: null };
+    let committed = false;
     try {
       await inTransaction(this.db, async (tx) => {
         const d = await this.lockLive(tx, id, 'update');
@@ -2887,8 +2910,11 @@ export class LiveService {
         await fn(tx, d, this.clock(), notes, pass);
         await this.record(tx, notes);
       });
+      committed = true;
     } finally {
       if (pass.gave) this.frames.settle(id);
+      // Not given after all: the press waits again (and may be withdrawn).
+      if (!committed && pass.taking) pass.taking.giving = false;
     }
     this.afterBatches(id, pass);
   }
@@ -2952,6 +2978,10 @@ export class LiveService {
         continue;
       }
       if (this.unread(d, grants, now, pass)) return;
+      // Withdrawn while its turns were read (its request's wait over or closed): never given.
+      if (p.settled) continue;
+      p.giving = true;
+      pass.taking = p;
       this.frames.giving(d.id, now);
       pass.gave = true;
       await this.grant(tx, d, grants, now, null, notes, { at: p.at, batch });
