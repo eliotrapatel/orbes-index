@@ -1074,6 +1074,35 @@ describe('LiveService: ONE QUEUE’s batches', () => {
       line: '4 batches gave 8 turns at 2 every 5 min, the first on the pace at 11:06:00 PARIS, each on its time and in the line’s order; none gave more than the pace, and none left anyone waiting while a piece of their size was free.',
     });
   });
+
+  it('the PACE check passes when PAUSE PACE, the release’s PAUSE or SET PACE comes 0.5 s after a due slot whose frame has not come: the slot kept (W4: one due before a pause keeps its time; SET PACE: the next batch keeps its time), its batch on its time after the resume or the frame', async () => {
+    for (const kind of ['PACE', 'RELEASE', 'SET PACE', 'NOBODY'] as const) {
+      const r = await release({ pace: { batch: 2, minutes: 5 } });
+      await room(r, kind === 'NOBODY' ? 2 : 6);
+      const p = process();
+      await p.formed(r);
+      expect(await advance(r, T0, p.live)).toMatchObject({ batch: 1, turns: 2 });
+      // T0+5: the slot due, its frame not published yet.
+      expect(await advance(r, at(5 * MINUTE), p.live)).toMatchObject({ batch: null, waiting: true });
+      f.clock.set(at(5 * MINUTE + 500));
+      if (kind === 'SET PACE') await p.live.setPace(r.id, { batch: 2, minutes: 2 }, f.admin);
+      else if (kind === 'RELEASE') await p.live.pause(r.id, f.admin);
+      else await p.live.pausePace(r.id, f.admin);
+      p.frame(r);
+      if (kind !== 'SET PACE') {
+        f.clock.set(at(7 * MINUTE));
+        expect((kind === 'RELEASE' ? await p.live.resume(r.id, f.admin) : await p.live.resumePace(r.id, f.admin)).pace).toMatchObject({ nextAt: at(5 * MINUTE) });
+        p.frame(r);
+      }
+      const given = kind === 'SET PACE' ? at(5 * MINUTE + 1500) : at(7 * MINUTE + SECOND);
+      expect(await advance(r, given, p.live)).toMatchObject({ batch: 2, turns: kind === 'NOBODY' ? 0 : 2 });
+      expect((await entriesOf(t.db, r.id)).filter((e) => e.admitted_batch === 2).map((e) => [e.position, e.admitted_at, e.turn_at])).toEqual(
+        kind === 'NOBODY' ? [] : [3, 4].map((n) => [n, at(5 * MINUTE), given]),
+      );
+      expect(await pace(r.id)).toMatchObject({ pace_next_at: at(kind === 'SET PACE' ? 7 * MINUTE : 10 * MINUTE) });
+      expect(await check(r, at(kind === 'SET PACE' ? 6 * MINUTE : 9 * MINUTE)), kind).toMatchObject({ pass: true });
+    }
+  });
 });
 
 describe('the TEST REPORT’s PACE check finds a fault planted (D14: both checks, step Q1.4)', () => {
@@ -1319,5 +1348,46 @@ describe('the TEST REPORT’s PACE check finds a fault planted (D14: both checks
     expect(lineOf(f)).toBe('Place 4 had its turn in batch 2 while place 3, ahead of it, waited with a piece of its size free.');
     // Its size with no piece left: the batch is right.
     expect(lineOf({ ...f, entries: f.entries.map((e) => (e.position === 3 ? { ...e, sizeIds: ['s54'] } : e)) })).toMatch(/^PASS /);
+  });
+
+  it('a pause or SET PACE 0.5 s after a due slot whose frame has not come: the slot kept, judged from the resume; a batch that never came, a slot passed in the frame’s wait, a SET PACE record off the slot found', () => {
+    const pending = (by: 'PACE' | 'RELEASE', nextAt: number): PaceFacts => {
+      const p = facts();
+      for (const n of [3, 4]) turn(p, n, null, null);
+      p.events = [p.events[0]!, { kind: 'HOLD', at: at(5 * MINUTE + 500), hold: { by, on: true } }, { kind: 'HOLD', at: at(7 * MINUTE), hold: { by, on: false }, nextAt: at(nextAt) }];
+      p.end = at(9 * MINUTE);
+      return p;
+    };
+    for (const by of ['PACE', 'RELEASE'] as const) {
+      // Its batch after the resume, on the slot's time.
+      const kept = pending(by, 5 * MINUTE);
+      for (const n of [3, 4]) kept.entries[n - 1] = { ...kept.entries[n - 1]!, batch: 2, admittedAt: at(5 * MINUTE), turnAt: at(7 * MINUTE + SECOND) };
+      kept.events.push({ kind: 'BATCH', at: at(5 * MINUTE), batch: 2, entries: 2, extra: false, recordedAt: at(7 * MINUTE + SECOND) });
+      expect(lineOf(kept)).toMatch(/^PASS 2 batches gave 4 turns /);
+      // No batch ever after the resume.
+      expect(lineOf({ ...pending(by, 5 * MINUTE), end: at(20 * MINUTE) })).toBe('No batch came at 11:05:00 PARIS while place 3 waited with a piece of its size free.');
+    }
+    // Nobody to serve at the slot: the resume keeps it, or (passed in its frame's wait) moves the next one.
+    const nobody = (nextAt: number) => ({ ...pending('PACE', nextAt), entries: facts().entries.slice(0, 2) });
+    expect(lineOf(nobody(5 * MINUTE))).toMatch(/^PASS 1 batch gave 2 turns /);
+    expect(lineOf(nobody(11 * MINUTE + 59.5 * SECOND))).toMatch(/^PASS 1 batch gave 2 turns /);
+    // The slot passed in its frame's wait while place 3 waited: the resume moved the one after it.
+    expect(lineOf(pending('PACE', 11 * MINUTE + 59.5 * SECOND))).toBe('The resume at 11:07:00 PARIS put the next batch at 11:11:59 PARIS; held since 11:05:00 PARIS, it was due at 11:05:00 PARIS.');
+    // SET PACE 0.5 s after the slot: the batch on it, 1 s later.
+    const set = (nextAt?: number): PaceFacts => {
+      const p = facts();
+      p.entries[2] = { ...p.entries[2]!, turnAt: at(5 * MINUTE + 1500) };
+      p.entries[3] = { ...p.entries[3]!, turnAt: at(5 * MINUTE + 1500) };
+      p.events = [
+        p.events[0]!,
+        { kind: 'PACE', at: at(5 * MINUTE + 500), before: { batch: 2, minutes: 5 }, after: { batch: 2, minutes: 2 }, ...(nextAt !== undefined ? { nextAt: at(nextAt) } : {}) },
+        { ...(p.events[1] as Extract<PaceEvent, { kind: 'BATCH' }>), recordedAt: at(5 * MINUTE + 1500) },
+      ];
+      p.end = at(6 * MINUTE);
+      return p;
+    };
+    expect(lineOf(set(5 * MINUTE))).toMatch(/^PASS 2 batches gave 4 turns at 2 every 5 min, then 2 every 2 min/);
+    expect(lineOf(set())).toMatch(/^PASS 2 batches gave 4 turns /);
+    expect(lineOf(set(7 * MINUTE))).toBe('SET PACE at 11:05:00 PARIS kept the next batch at 11:07:00 PARIS; it was due at 11:05:00 PARIS.');
   });
 });
