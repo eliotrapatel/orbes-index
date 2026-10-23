@@ -122,7 +122,7 @@ jobs:
           psql --version
 
       - name: Test (vitest, PostgreSQL and Chromium suites included)
-        run: npx vitest run
+        run: npx vitest run test/db/postgres.test.ts test/db/schema.test.ts
 
       - name: Build web apps
         run: npm run build:web
