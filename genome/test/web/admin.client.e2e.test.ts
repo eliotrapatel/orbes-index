@@ -307,8 +307,9 @@ describe.skipIf(!HAS_CHROMIUM)('the client sheet and the Shopify exports in the 
     const csv = readFileSync((await download.path())!, 'utf8').split('\r\n');
     expect(csv[0]).toBe(SHOPIFY_PRODUCT_COLUMNS.map((c) => `"${c}"`).join(','));
     expect(csv.filter((l) => l.includes('"monolithe"'))).toHaveLength(4);
-    // A model alone: its sizes as Option1, no Option2 (NOCTURNE N1: Option2 is a model with variants' Size).
-    expect(csv[1]).toMatch(/^"MONOLITHE","monolithe","ORBES","RING","false","draft","[^"]+-52","Size","52","","","4800.50","true"/);
+    // A model alone: its sizes as Option1, no Option2 (NOCTURNE N1: Option2 is a model with variants' Size); an empty
+    // Description, and an empty weight while the model has no packed weight (plan MACRO M3 §1.2, B2).
+    expect(csv[1]).toMatch(/^"MONOLITHE","monolithe","","ORBES","RING","false","draft","[^"]+-52","Size","52","","","4800.50","","true"/);
 
     // The ids Shopify gave: the product by its address, one size by its id.
     await row.locator('[data-testid=model-shopify-ids]').click();
