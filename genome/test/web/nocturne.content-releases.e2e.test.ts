@@ -22,6 +22,8 @@ import { contentSuite } from './nocturne.content.harness.js';
 contentSuite('releases');
 
 const HAS_CHROMIUM = existsSync(CHROMIUM_PATH);
+/** expect.poll's budget (its default, 1 s, is too short on a shared CI runner). */
+const POLL = { timeout: 10_000 };
 const HOW = '/verify/releases/how';
 
 const derived = (id: string, newId: string, extra: Partial<UiState> = {}): UiState => ({ ...stateById(id), id: newId, ...extra });
@@ -67,7 +69,7 @@ async function opensInApp(page: Page, selector: string, back: string): Promise<v
   await howShown(page);
   expect(page.context().pages()).toHaveLength(tabs);
   await page.goBack();
-  await expect.poll(() => pathOf(page)).toBe(back);
+  await expect.poll(() => pathOf(page), POLL).toBe(back);
   await expect.poll(() => page.locator('.view--how:visible').count(), { timeout: 10_000 }).toBe(0);
 }
 
@@ -97,7 +99,7 @@ const CASES: { state: UiState; check: (page: Page, run: Run) => Promise<void> }[
       expect(await crumb.getAttribute('href')).toBe('/verify/releases');
       expect((await crumb.innerText()).trim()).toBe('THE RELEASES');
       await crumb.click();
-      await expect.poll(() => pathOf(page)).toBe('/verify/releases');
+      await expect.poll(() => pathOf(page), POLL).toBe('/verify/releases');
       await page.locator('.view--releases article').first().waitFor({ timeout: 20_000 });
       expect(await page.title()).not.toContain('HOW RELEASES WORK');
     },
@@ -117,7 +119,7 @@ const CASES: { state: UiState; check: (page: Page, run: Run) => Promise<void> }[
       expect(await text('draw')).toContain(`held for you ${rules.placeHeldHours} hours`);
       // The crumb of a page opened directly: the list under it.
       await page.locator('.view--how .n-crumb').click();
-      await expect.poll(() => pathOf(page)).toBe('/verify/releases');
+      await expect.poll(() => pathOf(page), POLL).toBe('/verify/releases');
       // THE PROGRAM's windows changed: the page says the new ones (a new phone, nothing kept a minute).
       const admin = await adminActor(stage);
       const before = await stage.ctx.services.clubProgram.sheet();

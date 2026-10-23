@@ -154,14 +154,14 @@ describe.skipIf(!HAS_CHROMIUM)('the after-room of a LIVE RELEASE in /verify (Chr
     await textOf(page.locator('.live__after-until'), /^OPEN UNTIL \d{2}:\d{2}$/);
     expect(await page.locator('.live-door--after').getAttribute('aria-hidden')).toBe('true');
     expect(await page.locator('.live-door--after .live-seal__ring').count()).toBe(13);
-    await expect.poll(() => page.locator('[role="status"][aria-live="polite"]').innerText()).toBe(LIVE.afterRoom.announce);
+    await expect.poll(() => page.locator('[role="status"][aria-live="polite"]').innerText(), POLL).toBe(LIVE.afterRoom.announce);
     expect(await page.locator('.view--live').evaluate((el) => el.classList.contains('vault'))).toBe(true);
     await keepsVault(page, 'ENTER THE AFTER-ROOM', ['ENTER THE AFTER-ROOM', 'THE RELEASES']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-after-room-door.png'), fullPage: true });
 
     // Its page, read through the release: its model, its one size, the place kept from the line.
     await page.getByRole('button', { name: 'ENTER THE AFTER-ROOM' }).click();
-    await expect.poll(() => new URL(page.url()).pathname).toBe(`/verify/releases/${r.id}/after-room`);
+    await expect.poll(() => new URL(page.url()).pathname, POLL).toBe(`/verify/releases/${r.id}/after-room`);
     await textOf(page.locator('.live__join > .live__overline'), 'THE AFTER-ROOM');
     await textOf(page.locator('.live__join > h1'), 'AFTERGLOW');
     // Its price, read here first (the door says neither the model nor the price).
@@ -194,7 +194,7 @@ describe.skipIf(!HAS_CHROMIUM)('the after-room of a LIVE RELEASE in /verify (Chr
 
     // CONFIRMED, out into the light: the after-room's piece; its order at its price.
     await textOf(page.locator('h1'), 'CONFIRMED');
-    await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(IVORY);
+    await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor), POLL).toBe(IVORY);
     await textOf(page.locator('.live__confirmed-of'), 'THE AFTER-ROOM · AFTERGLOW');
     await textOf(page.locator('.live__receipt .rows__row', { hasText: 'TOTAL' }), 'TOTAL € 950');
     const light = await screenChecks(page);
@@ -216,7 +216,7 @@ describe.skipIf(!HAS_CHROMIUM)('the after-room of a LIVE RELEASE in /verify (Chr
     expect(await entry.getByRole('link', { name: 'MONOLITHE — LIVE · THE AFTER-ROOM' }).getAttribute('href')).toBe(`/verify/releases/${r.id}/after-room`);
     await textOf(page.locator('.pieces__entry-card', { hasText: 'LIVE RELEASE · ENDED' }).locator('.pieces__entry-sentence'), LIVE.sentence.ENDED);
     await entry.getByRole('link', { name: 'MONOLITHE — LIVE · THE AFTER-ROOM' }).click();
-    await expect.poll(() => new URL(page.url()).pathname).toBe(`/verify/releases/${r.id}/after-room`);
+    await expect.poll(() => new URL(page.url()).pathname, POLL).toBe(`/verify/releases/${r.id}/after-room`);
     await textOf(page.locator('h1'), 'CONFIRMED');
     expect(problems).toEqual([]);
 

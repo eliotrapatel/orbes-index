@@ -23,6 +23,8 @@ import { contentSuite } from './nocturne.content.harness.js';
 contentSuite('collection');
 
 const HAS_CHROMIUM = existsSync(CHROMIUM_PATH);
+/** expect.poll's budget (its default, 1 s, is too short on a shared CI runner). */
+const POLL = { timeout: 20_000 };
 
 const derived = (id: string, newId: string, extra: Partial<UiState> = {}): UiState => ({ ...stateById(id), id: newId, ...extra });
 const pathOf = (page: Page) => new URL(page.url()).pathname;
@@ -82,7 +84,7 @@ const CASES: { state: UiState; check: (page: Page) => Promise<void> }[] = [
       // A row opens its release's page (the past LIVE RELEASE of 28 September, its final page).
       const href = rows.hrefs[1]!;
       await page.getByRole('link', { name: MONOLITHE_LABELS[1]! }).click();
-      await expect.poll(() => pathOf(page)).toBe(href);
+      await expect.poll(() => pathOf(page), POLL).toBe(href);
       await page.locator('.view--live .n-live__past').waitFor({ timeout: 20_000 });
     },
   },
@@ -126,7 +128,7 @@ const CASES: { state: UiState; check: (page: Page) => Promise<void> }[] = [
       expect(await more.evaluate((el) => el.tagName)).toBe('BUTTON');
       expect(await more.evaluate((el) => getComputedStyle(el.parentElement!).textAlign)).toBe('center');
       await more.click();
-      await expect.poll(() => page.locator('.view--sheet .n-model__release').count()).toBe(9);
+      await expect.poll(() => page.locator('.view--sheet .n-model__release').count(), POLL).toBe(9);
       const all = await releaseRows(page);
       expect(all.words.slice(0, 6)).toEqual(six.words);
       expect(all.words.slice(6)).toEqual([
@@ -199,12 +201,12 @@ const PAIRS_CASES: { state: UiState; check: (page: Page) => Promise<void> }[] = 
       // A card opens its sheet in this sheet's history entry; the focus on its title; back returns to THE COLLECTION.
       const depth = await page.evaluate(() => history.length);
       await page.getByRole('link', { name: 'MONOLITHE ARCHITECTURALE, articulated bracelet: see the model' }).click();
-      await expect.poll(() => pathOf(page)).toBe('/verify/lookbook/monolithe-architecturale');
+      await expect.poll(() => pathOf(page), POLL).toBe('/verify/lookbook/monolithe-architecturale');
       await expect.poll(() => page.locator('.view--sheet #sheet-title').allInnerTexts(), { timeout: 20_000 }).toEqual(['MONOLITHE ARCHITECTURALE']);
-      await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe('sheet-title');
+      await expect.poll(() => page.evaluate(() => document.activeElement?.id), POLL).toBe('sheet-title');
       expect(await page.evaluate(() => history.length)).toBe(depth);
       await page.goBack();
-      await expect.poll(() => pathOf(page)).toBe('/verify/lookbook');
+      await expect.poll(() => pathOf(page), POLL).toBe('/verify/lookbook');
       await page.locator('.view--lookbook[data-state="ready"]').waitFor({ timeout: 20_000 });
     },
   },

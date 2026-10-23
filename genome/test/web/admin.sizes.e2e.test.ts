@@ -39,6 +39,8 @@ const AUDITOR = { email: 'sizes.auditor@orbes.test', password: 'sizes auditor pa
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'out');
 const SCREENSHOTS = !!process.env.ORBES_SCREENSHOTS;
 const STEP_TIMEOUT = 180_000;
+/** expect.poll's budget (its default, 1 s, is too short on a shared CI runner). */
+const POLL = { timeout: 15_000 };
 const HOUR = 3_600_000;
 
 async function freePort(): Promise<number> {
@@ -84,7 +86,7 @@ describe.skipIf(!HAS_CHROMIUM)('a model\'s declared sizes in the console (plan N
     await p.fill('input[name=email]', who.email);
     await p.fill('input[name=password]', who.password);
     await p.click('[data-testid=login-submit]');
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dashboard');
     return p;
   }
 
@@ -189,7 +191,7 @@ describe.skipIf(!HAS_CHROMIUM)('a model\'s declared sizes in the console (plan N
     await shot(p, 'size-type-dialog', { dialog: true });
     await confirmDialog(p);
     await p.waitForSelector('.toast:has-text("Sizes saved.")');
-    await expect.poll(() => p.locator('#sizes [data-testid=model-size-kind]').textContent()).toBe('Ring size · French sizes 40 to 76');
+    await expect.poll(() => p.locator('#sizes [data-testid=model-size-kind]').textContent(), POLL).toBe('Ring size · French sizes 40 to 76');
 
     // Tick sizes: the list's 37 sizes, none ticked; three ticked, the line saying so; nothing ticked is refused.
     await p.click('[data-testid=model-sizes-tick]');
@@ -199,13 +201,13 @@ describe.skipIf(!HAS_CHROMIUM)('a model\'s declared sizes in the console (plan N
     expect(await p.locator('dialog [data-testid=size-grid-caption]').count()).toBe(0);
     expect(await p.locator('dialog [data-testid=size-tick-line]').textContent()).toBe('Nothing changes.');
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Leave at least one size offered.');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('Leave at least one size offered.');
     for (const size of ['50', '52', '54']) await p.locator('dialog label.ccheck', { hasText: new RegExp(`^${size}$`) }).click();
-    await expect.poll(() => p.locator('dialog [data-testid=size-tick-line]').textContent()).toBe('Adds 50, 52, 54.');
+    await expect.poll(() => p.locator('dialog [data-testid=size-tick-line]').textContent(), POLL).toBe('Adds 50, 52, 54.');
     await shot(p, 'tick-dialog', { dialog: true });
     await confirmDialog(p);
     await p.waitForSelector('.toast:has-text("Sizes saved.")');
-    await expect.poll(() => p.locator('#sizes [data-testid=model-size-label]').allTextContents()).toEqual(['50', '52', '54']);
+    await expect.poll(() => p.locator('#sizes [data-testid=model-size-label]').allTextContents(), POLL).toEqual(['50', '52', '54']);
     expect(await rows(p).locator('td:nth-child(2)').allTextContents()).toEqual(['HAL-RG-50', 'HAL-RG-52', 'HAL-RG-54']);
     expect(await p.locator('#sizes [data-testid=model-size-state]').allTextContents()).toEqual(['Offered', 'Offered', 'Offered']);
     expect(await p.locator('#sizes [data-testid=model-sizes-count]').textContent()).toBe('3 offered');
@@ -214,7 +216,7 @@ describe.skipIf(!HAS_CHROMIUM)('a model\'s declared sizes in the console (plan N
     // The stock page (Logistics → Stock, in the Atelier's place, plan NEXT LOT §3.5.4.1): each size at every location, at 0.
     await go(p, '#/logistics?tab=stock', 'Logistics');
     const stock = p.locator('#logistics-stock tbody tr', { hasText: 'HAL-RG-' });
-    await expect.poll(() => stock.count()).toBe(6);
+    await expect.poll(() => stock.count(), POLL).toBe(6);
     expect(await stock.evaluateAll((trs) => trs.map((tr) => [tr.querySelector('.cell-sub.mono')?.textContent, tr.children[3]?.textContent, tr.children[4]?.textContent]))).toEqual([
       ['HAL-RG-50', 'FRANCE WAREHOUSE', '0'],
       ['HAL-RG-50', 'LOGISTICS WAREHOUSE', '0'],
@@ -238,7 +240,7 @@ describe.skipIf(!HAS_CHROMIUM)('a model\'s declared sizes in the console (plan N
     expect(await p.locator('[data-testid=dialog-confirm]').textContent()).toBe('Remove');
     await confirmDialog(p);
     await p.waitForSelector('.toast:has-text("Size removed.")');
-    await expect.poll(() => p.locator('#sizes [data-testid=model-size-label]').allTextContents()).toEqual(['50', '52']);
+    await expect.poll(() => p.locator('#sizes [data-testid=model-size-label]').allTextContents(), POLL).toEqual(['50', '52']);
     expect(await ctx.db.selectFrom('skus').select('code').where('code', '=', 'HAL-RG-54').execute()).toEqual([]);
 
     // 52: two pieces counted in at FRANCE WAREHOUSE, so set aside.
@@ -253,7 +255,7 @@ describe.skipIf(!HAS_CHROMIUM)('a model\'s declared sizes in the console (plan N
     expect(await p.locator('[data-testid=dialog-confirm]').textContent()).toBe('Set aside');
     await confirmDialog(p);
     await p.waitForSelector('.toast:has-text("Size set aside.")');
-    await expect.poll(() => sizeRow(p, '52').locator('[data-testid=model-size-state]').textContent()).toMatch(/^Set aside · \d{2} [A-Z]{3} \d{4}$/);
+    await expect.poll(() => sizeRow(p, '52').locator('[data-testid=model-size-state]').textContent(), POLL).toMatch(/^Set aside · \d{2} [A-Z]{3} \d{4}$/);
     expect(await p.locator('#sizes [data-testid=model-sizes-count]').textContent()).toBe('1 offered · 1 set aside');
     // The last offered size: Remove is not pressed, and says why.
     const last = sizeRow(p, '50').locator('[data-testid=model-size-remove]');
@@ -266,7 +268,7 @@ describe.skipIf(!HAS_CHROMIUM)('a model\'s declared sizes in the console (plan N
     // order's line or a correction may name) 50 only.
     await go(p, '#/logistics?tab=stock', 'Logistics');
     const stock = p.locator('#logistics-stock tbody tr', { hasText: 'HAL-RG-52' });
-    await expect.poll(() => stock.count()).toBe(1);
+    await expect.poll(() => stock.count(), POLL).toBe(1);
     expect(await stock.locator('td').nth(3).textContent()).toBe('FRANCE WAREHOUSE');
     expect(await stock.locator('[data-testid=stock-set-aside]').textContent()).toBe('Set aside');
     expect(await stock.locator('[data-testid=stock-add-to-order]').count()).toBe(0);
@@ -280,7 +282,7 @@ describe.skipIf(!HAS_CHROMIUM)('a model\'s declared sizes in the console (plan N
     expect(await p.locator('dialog .dialog__text').textContent()).toBe('New releases, supplier orders and the private salon offer it again.');
     await confirmDialog(p);
     await p.waitForSelector('.toast:has-text("Size reinstated.")');
-    await expect.poll(() => p.locator('#sizes [data-testid=model-size-state]').allTextContents()).toEqual(['Offered', 'Offered']);
+    await expect.poll(() => p.locator('#sizes [data-testid=model-size-state]').allTextContents(), POLL).toEqual(['Offered', 'Offered']);
     expect(await figuresInDisplayFace(p)).toEqual([]);
     expect(await csp(p)).toEqual([]);
     await p.context().close();
@@ -292,7 +294,7 @@ describe.skipIf(!HAS_CHROMIUM)('a model\'s declared sizes in the console (plan N
     await p.click('[data-testid=variant-add]');
     await p.fill('dialog input[name=mainLabel]', 'Silver');
     await p.fill('dialog input[name=label]', 'Blue');
-    await expect.poll(() => p.locator('dialog [data-testid=variant-sizes]').textContent()).toBe(
+    await expect.poll(() => p.locator('dialog [data-testid=variant-sizes]').textContent(), POLL).toBe(
       'Its sizes are copied: Ring size, 50, 52. Each gets its own SKU under its own prefix (HAL-BL-50), at 0 in LOGISTICS. Change them on its page; later changes to this model never reach it.',
     );
     await shot(p, 'add-variant', { dialog: true });
@@ -301,7 +303,7 @@ describe.skipIf(!HAS_CHROMIUM)('a model\'s declared sizes in the console (plan N
     await p.waitForSelector('dialog [data-testid=photo-impact]', { timeout: 15_000 });
     await p.click('[data-testid=dialog-cancel]');
     await expect.poll(async () => (await title(p).textContent())?.trim(), { timeout: 15_000 }).toBe('HALO · BLUE');
-    await expect.poll(() => p.locator('#sizes [data-testid=model-size-label]').allTextContents()).toEqual(['50', '52']);
+    await expect.poll(() => p.locator('#sizes [data-testid=model-size-label]').allTextContents(), POLL).toEqual(['50', '52']);
     expect(await rows(p).locator('td:nth-child(2)').allTextContents()).toEqual(['HAL-BL-50', 'HAL-BL-52']);
     expect(await p.locator('#sizes [data-testid=model-size-kind]').textContent()).toBe('Ring size · French sizes 40 to 76');
 
@@ -332,7 +334,7 @@ describe.skipIf(!HAS_CHROMIUM)('a model\'s declared sizes in the console (plan N
   it('adds the suppliers on Supplier orders (plan NEXT LOT §3.5.4.2), then gives the model its supplier and a size its own (§3.5.4.5)', async () => {
     const p = await open(ADMIN);
     await p.locator('.side__link', { hasText: 'Supplier orders' }).click();
-    await expect.poll(async () => (await p.locator('h1.page-head__title').textContent())?.trim()).toBe('Supplier orders');
+    await expect.poll(async () => (await p.locator('h1.page-head__title').textContent())?.trim(), POLL).toBe('Supplier orders');
     expect(await p.locator('#suppliers .empty').textContent()).toContain('No supplier yet: add the first one.');
     await shot(p, 'suppliers-empty');
     // A currency without cents is refused, in the dialog.
@@ -342,7 +344,7 @@ describe.skipIf(!HAS_CHROMIUM)('a model\'s declared sizes in the console (plan N
     await p.fill('dialog input[name=email]', 'orders@nord.example');
     await p.fill('dialog input[name=currency]', 'jpy');
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('This currency is not supported: choose one with cents.');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('This currency is not supported: choose one with cents.');
     await p.fill('dialog input[name=currency]', 'eur');
     await shot(p, 'supplier-dialog', { dialog: true });
     await confirmDialog(p);
@@ -351,7 +353,7 @@ describe.skipIf(!HAS_CHROMIUM)('a model\'s declared sizes in the console (plan N
     await p.fill('dialog input[name=name]', 'SOUTH SETTINGS');
     await p.fill('dialog input[name=currency]', 'GBP');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('#suppliers tbody tr').count()).toBe(2);
+    await expect.poll(() => p.locator('#suppliers tbody tr').count(), POLL).toBe(2);
     expect(await p.locator('#suppliers tbody tr').first().textContent()).toContain('orders@nord.example');
 
     // The model's Sizes section: no supplier yet; the model's and one size's own set in one dialog.
@@ -361,13 +363,13 @@ describe.skipIf(!HAS_CHROMIUM)('a model\'s declared sizes in the console (plan N
     await p.click('[data-testid=model-supplier-edit]');
     const size52 = (await ctx.db.selectFrom('skus').select('id').where('code', '=', 'HAL-RG-52').executeTakeFirstOrThrow()).id;
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Nothing has changed.');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('Nothing has changed.');
     await p.selectOption('dialog select[name=supplier]', { label: 'NORD RINGS' });
     await p.selectOption(`dialog select[name=size_${size52}]`, { label: 'SOUTH SETTINGS' });
     await shot(p, 'model-supplier-dialog', { dialog: true });
     await confirmDialog(p);
     await p.waitForSelector('.toast:has-text("Supplier saved.")');
-    await expect.poll(() => p.locator('#sizes [data-testid=model-supplier]').textContent()).toBe('NORD RINGS');
+    await expect.poll(() => p.locator('#sizes [data-testid=model-supplier]').textContent(), POLL).toBe('NORD RINGS');
     expect(await p.locator('#sizes [data-testid=model-size-supplier]').allTextContents()).toEqual(['', 'SOUTH SETTINGS']);
     await shot(p, 'model-supplier');
     await go(p, '#/supplier-orders', 'Supplier orders');
@@ -381,7 +383,7 @@ describe.skipIf(!HAS_CHROMIUM)('a model\'s declared sizes in the console (plan N
   it('an AUDITOR reads the section without one action', async () => {
     const p = await open(AUDITOR);
     await go(p, `#/catalogue/${modelId}`, 'HALO · SILVER');
-    await expect.poll(() => p.locator('#sizes [data-testid=model-size-label]').allTextContents()).toEqual(['50', '52']);
+    await expect.poll(() => p.locator('#sizes [data-testid=model-size-label]').allTextContents(), POLL).toEqual(['50', '52']);
     expect(await p.locator('#sizes [data-testid=model-size-kind]').textContent()).toBe('Ring size · French sizes 40 to 76');
     expect(await p.locator('#sizes button').count()).toBe(0);
     await p.context().close();

@@ -193,7 +193,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await textOf(card.locator('.live-card__when').first(), /^[A-Z]+DAY \d{1,2} [A-Z]+ · \d{2}:\d{2} PARIS$/);
     // OPENS IN and its countdown on the card (addition 4), on the server's clock.
     await textOf(card.locator('.n-releases__opens'), 'OPENS IN');
-    await expect.poll(async () => (await card.locator('.n-cd__unit').allInnerTexts()).map(norm)).toEqual(['DAYS', 'HOURS', 'MINUTES']);
+    await expect.poll(async () => (await card.locator('.n-cd__unit').allInnerTexts()).map(norm), POLL).toEqual(['DAYS', 'HOURS', 'MINUTES']);
     // Its figures are the server's time to T0 (this test's clock, the server's), not this phone's 37 minutes less: within a minute.
     const minutesOf = (groups: { value: string }[]) => groups.reduce((n, g, i) => n + Number(g.value) * [1440, 60, 1][i]!, 0);
     const shown = minutesOf((await card.locator('.n-cd__value').allInnerTexts()).map((value) => ({ value: norm(value) })));
@@ -210,12 +210,12 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await textOf(page.locator('h1'), 'MONOLITHE');
     await textOf(page.locator('.n-live__kind'), 'LIVE RELEASE');
     await textOf(page.locator('.n-live__price'), '€ 5 050');
-    await expect.poll(async () => (await page.locator('.n-live__countdown .n-cd__unit').allInnerTexts()).map(norm)).toEqual(['DAYS', 'HOURS', 'MINUTES']);
+    await expect.poll(async () => (await page.locator('.n-live__countdown .n-cd__unit').allInnerTexts()).map(norm), POLL).toEqual(['DAYS', 'HOURS', 'MINUTES']);
     await textOf(page.locator('.n-live__lines'), '25 PIECES ONE PER COLLECTOR THE ROOM OPENS 5 MINUTES BEFORE FOR OWNERS FROM PLATINE');
     expect(await page.getByRole('link', { name: 'ADD TO CALENDAR' }).getAttribute('href')).toBe(`/api/v1/live/${later.id}/calendar.ics`);
     expect(await page.locator('.view--live').evaluate((el) => el.classList.contains('vault'))).toBe(true);
     // Before the room, NOCTURNE's ground and chrome (choice 4): the header, the rail, the SCAN ring.
-    await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(GROUND);
+    await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor), POLL).toBe(GROUND);
     expect(await page.locator('.n-rail').isVisible()).toBe(true);
     expect(await page.locator('.n-scan').isVisible()).toBe(true);
     await keepsVault(page, null, ['ADD TO CALENDAR', 'THE RELEASES', 'SOUND ON']);
@@ -263,7 +263,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     expect(await focusRingContrast(page, size('52'))).toBeGreaterThanOrEqual(3);
     await size('50').click();
     await expect.poll(async () => (await statusOf(r.id, me.id))?.size_id, POLL).toBe(s50!.id);
-    await expect.poll(() => size('50').getAttribute('aria-pressed')).toBe('true');
+    await expect.poll(() => size('50').getAttribute('aria-pressed'), POLL).toBe('true');
     await size('52').click();
     await expect.poll(async () => (await statusOf(r.id, me.id))?.size_id, POLL).toBe(s52!.id);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-ready.png'), fullPage: true });
@@ -275,7 +275,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     // T0: the lock aligned, the door open on the piece under its light, the places drawn.
     await expect.poll(() => page.locator('.live-door').getAttribute('class'), { timeout: 45_000, interval: 50 }).toMatch(/is-aligned/);
     expect(await page.locator('.live-door__seal .live-seal__ring').evaluateAll((gs) => gs.every((g) => /rotate\((-)?0(\.00)?deg\)/.test((g as SVGGElement).style.transform)))).toBe(true);
-    await expect.poll(() => page.locator('.live-door').getAttribute('class')).toMatch(/is-open/);
+    await expect.poll(() => page.locator('.live-door').getAttribute('class'), POLL).toMatch(/is-open/);
     await textOf(page.locator('.live__room > .live__overline'), 'LIVE NOW');
     await visible(page.getByText(LIVE.drawing));
     expect(await page.locator('.live-door .live__sweep').evaluate((el) => getComputedStyle(el).animationName)).toBe('live-sweep');
@@ -291,14 +291,14 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await textOf(page.locator('.live__held'), '1 HELD PIECE MAY RETURN');
     expect(await page.locator('.live__meter .live__cell').count()).toBe(3);
     expect(await page.locator('.live__size').count()).toBe(0);
-    await expect.poll(() => page.locator('[role="status"][aria-live="polite"]').innerText()).toBe('Your place: 2. You are next in size 52.');
+    await expect.poll(() => page.locator('[role="status"][aria-live="polite"]').innerText(), POLL).toBe('Your place: 2. You are next in size 52.');
     await keepsVault(page, null, ['THE RELEASES']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-line.png'), fullPage: true });
 
     // B4: the rival lets its turn go: a piece has returned, the collector's turn, said aloud, the seal focused.
     await srv.ctx.services.live.leave(rival.id, r.id, rival.actor);
     await textOf(page.locator('.live__turn > .live__overline'), 'A PIECE HAS RETURNED');
-    await expect.poll(() => page.locator('[aria-live="assertive"]').innerText()).toBe(LIVE.announce.returned);
+    await expect.poll(() => page.locator('[aria-live="assertive"]').innerText(), POLL).toBe(LIVE.announce.returned);
     expect(await page.evaluate(() => document.activeElement?.classList.contains('live-hold'))).toBe(true);
     await textOf(page.locator('.live__turn-left'), /^00:(2\d|30)$/);
     await textOf(page.locator('.live__turn-piece'), 'MONOLITHE · SIZE 52 · € 5 050');
@@ -313,9 +313,9 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await sleep(500);
     expect(await page.locator('.live__turn').getAttribute('class')).toMatch(/is-holding/);
     await page.mouse.up();
-    await expect.poll(() => page.locator('.live__turn').getAttribute('class')).not.toMatch(/is-holding/);
+    await expect.poll(() => page.locator('.live__turn').getAttribute('class'), POLL).not.toMatch(/is-holding/);
     expect(await page.locator('.live-hold__fill').getAttribute('stroke-dashoffset')).toBe((2 * Math.PI * 116).toFixed(2));
-    await expect.poll(() => page.locator('[role="status"][aria-live="polite"]').innerText()).toBe(LIVE.announce.reset);
+    await expect.poll(() => page.locator('[role="status"][aria-live="polite"]').innerText(), POLL).toBe(LIVE.announce.reset);
     expect((await statusOf(r.id, me.id))?.status).toBe('TURN');
     // The secure's own answer held back 3 s: the stream says SECURED first, and the reveal still plays.
     let answered = false;
@@ -338,9 +338,9 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     expect(answered).toBe(false);
     expect(await page.locator('.live__secured').getAttribute('class')).toMatch(/is-revealing/);
     expect(await page.locator('.live__piece-seal g[data-layer="genome"]').first().evaluate((g) => getComputedStyle(g).animationName)).toBe('ceremony-glyph');
-    await expect.poll(async () => (await live(page)).tones.filter((t) => t === 293.66).length).toBe(1);
+    await expect.poll(async () => (await live(page)).tones.filter((t) => t === 293.66).length, POLL).toBe(1);
     expect((await live(page)).vibrations).toEqual(expect.arrayContaining([12, [18, 90, 18]]));
-    await expect.poll(() => page.locator('[role="status"][aria-live="polite"]').innerText()).toBe(LIVE.announce.secured('MONOLITHE'));
+    await expect.poll(() => page.locator('[role="status"][aria-live="polite"]').innerText(), POLL).toBe(LIVE.announce.secured('MONOLITHE'));
     await textOf(page.locator('.live__secured-at'), /^SECURED AT \d{2}:\d{2}:\d{2}$/);
     await textOf(page.locator('.live__deadline'), /^0[45]:\d{2} TO CONFIRM$/);
     // The answer, once it comes, plays nothing twice.
@@ -362,7 +362,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
 
     // B6: CONFIRMED, out into the light.
     await textOf(page.locator('h1'), 'CONFIRMED');
-    await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(IVORY);
+    await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor), POLL).toBe(IVORY);
     expect(await page.locator('.view--live').evaluate((el) => [el.classList.contains('vault'), el.classList.contains('is-light')])).toEqual([false, true]);
     await textOf(page.locator('.live__confirmed-text'), 'Your piece is reserved in size 52. ORBES Client Services will contact you to settle payment. Add your delivery address in YOUR ORDERS.');
     const entryId = (await srv.ctx.db.selectFrom('live_entries').select('id').where('drop_id', '=', r.id).where('account_id', '=', me.id).executeTakeFirstOrThrow()).id;
@@ -434,7 +434,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     // The first collector lets the turn go: the piece has returned. The keyboard holds the seal with the space bar.
     await srv.ctx.services.live.leave(first.id, r.id, first.actor);
     await textOf(page.locator('.live__turn > .live__overline'), 'A PIECE HAS RETURNED');
-    await expect.poll(() => page.evaluate(() => document.activeElement?.classList.contains('live-hold'))).toBe(true);
+    await expect.poll(() => page.evaluate(() => document.activeElement?.classList.contains('live-hold')), POLL).toBe(true);
     // Without a stream the page reads the state every two seconds, and follows the room all the same.
     expect(await page.evaluate(() => 'EventSource' in window)).toBe(false);
     await expect.poll(() => polls.length, POLL).toBeGreaterThan(2);

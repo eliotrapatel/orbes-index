@@ -66,6 +66,8 @@ const AUDITOR = { email: 'orders.auditor@orbes.test', password: 'orders auditor 
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'out');
 const SCREENSHOTS = !!process.env.ORBES_SCREENSHOTS;
 const STEP_TIMEOUT = 180_000;
+/** expect.poll's budget (its default, 1 s, is too short on a shared CI runner). */
+const POLL = { timeout: 15_000 };
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
@@ -121,7 +123,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await p.fill('input[name=email]', who.email);
     await p.fill('input[name=password]', who.password);
     await p.click('[data-testid=login-submit]');
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dashboard');
     return p;
   }
 
@@ -290,10 +292,10 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
       expect(box.y + box.height, id).toBeLessThanOrEqual(900);
     }
     await p.locator('.side__link', { hasText: /^Orders$/ }).click();
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Orders');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Orders');
     expect(await p.locator('.board__title').allTextContents()).toEqual(['RESERVED', 'PAID', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'RETURNED']);
     const reserved = p.locator('[data-testid=column-RESERVED] [data-testid=order-card]');
-    await expect.poll(() => reserved.count()).toBe(3);
+    await expect.poll(() => reserved.count(), POLL).toBe(3);
     expect(await p.locator('[data-testid=orders-summary]').textContent()).toContain('3 orders · 1 late');
     expect(await p.locator('[data-testid=late-RESERVED]').textContent()).toBe('1 late');
     // The longest waiting first: the late one, with why.
@@ -315,15 +317,15 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
 
     // Late only; a channel; a search by reference.
     await p.locator('label.ccheck', { hasText: 'Late only' }).click();
-    await expect.poll(() => p.locator('[data-testid=order-card]').count()).toBe(1);
+    await expect.poll(() => p.locator('[data-testid=order-card]').count(), POLL).toBe(1);
     await p.locator('label.ccheck', { hasText: 'Late only' }).click();
-    await expect.poll(() => p.locator('[data-testid=order-card]').count()).toBe(3);
+    await expect.poll(() => p.locator('[data-testid=order-card]').count(), POLL).toBe(3);
     await p.selectOption('select[name=channel]', 'LIVE');
-    await expect.poll(() => p.locator('[data-testid=order-card]').count()).toBe(1);
+    await expect.poll(() => p.locator('[data-testid=order-card]').count(), POLL).toBe(1);
     await p.selectOption('select[name=channel]', '');
     await p.fill('input[name=q]', orderReference(o.stock));
     await p.press('input[name=q]', 'Enter');
-    await expect.poll(() => p.locator('[data-testid=order-card]').count()).toBe(1);
+    await expect.poll(() => p.locator('[data-testid=order-card]').count(), POLL).toBe(1);
     const [download] = await Promise.all([p.waitForEvent('download'), p.click('[data-testid=orders-csv]')]);
     expect(download.suggestedFilename()).toMatch(/^ORBES-orders-\d{4}-\d{2}-\d{2}\.csv$/);
     const csv = readFileSync((await download.path())!, 'utf8').trim().split('\r\n');
@@ -349,11 +351,11 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await p.selectOption('dialog select[name=currency]', 'EUR');
     await p.fill('dialog input[name=engraving]', 'A. & L.');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('#order-facts').textContent()).toMatch(/€\s4\s800/u);
+    await expect.poll(() => p.locator('#order-facts').textContent(), POLL).toMatch(/€\s4\s800/u);
     expect(await p.locator('#order-facts').textContent()).toContain('A. & L.');
     // Paid before its buyer is entered, its invoice would carry the account's email only: the dialog says so.
     await p.click('[data-testid=order-pay]');
-    await expect.poll(() => p.locator('dialog [data-testid=pay-no-buyer]').textContent()).toBe(
+    await expect.poll(() => p.locator('dialog [data-testid=pay-no-buyer]').textContent(), POLL).toBe(
       'No buyer is entered on the order: its invoice will carry the account’s email only. An invoice is never changed: enter the buyer first.',
     );
     await p.click('[data-testid=dialog-cancel]');
@@ -365,10 +367,10 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await p.selectOption('dialog select[name=country]', 'FR');
     await p.fill('dialog input[name=phone]', '01 23 45 67 89');
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Enter a phone number with its country code.');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('Enter a phone number with its country code.');
     await p.fill('dialog input[name=phone]', '+33 1 23 45 67 89');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=buyer-name]').textContent()).toBe('Jane Doe');
+    await expect.poll(() => p.locator('[data-testid=buyer-name]').textContent(), POLL).toBe('Jane Doe');
     expect(await p.locator('[data-testid=buyer-country]').textContent()).toBe('France');
     expect(await p.locator('[data-testid=buyer-phone]').textContent()).toBe('+33 1 23 45 67 89');
     expect(await p.locator('[data-testid=buyer-entered-by]').textContent()).toMatch(/^Client Services · \d{2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC$/);
@@ -378,7 +380,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await p.fill('dialog textarea[name=note]', 'Paid by transfer.');
     expect(await p.locator('dialog [data-testid=pay-no-buyer]').count()).toBe(0);
     await confirmDialog(p);
-    await expect.poll(() => p.locator('#order-step .osteps__step.is-current .osteps__label').textContent()).toBe('PAID');
+    await expect.poll(() => p.locator('#order-step .osteps__step.is-current .osteps__label').textContent(), POLL).toBe('PAID');
     expect(await p.locator('[data-testid=order-late]').count()).toBe(0);
     expect(await p.locator('#order-history tbody tr').first().textContent()).toContain('Paid by transfer.');
     await shot(p, 'order-paid');
@@ -389,37 +391,37 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     lateClaim = made!.claimCode!;
     // Its delivery country, without which it is not packed (plan NEXT LOT §1.1 (d)), entered above in the Buyer dialog.
     await p.reload();
-    await expect.poll(() => p.locator('[data-testid=order-holds]').textContent()).toBe('In stock at FRANCE WAREHOUSE');
+    await expect.poll(() => p.locator('[data-testid=order-holds]').textContent(), POLL).toBe('In stock at FRANCE WAREHOUSE');
     expect(await p.locator('[data-testid=order-link]').count()).toBe(0);
     expect(await p.locator('#order-step').textContent()).toContain('It ships with its parcel: the agent packs it and scans its card (Shipping).');
 
     // Its Shipping section: the agent's steps, from here (plan NEXT LOT §3.5.4.4).
     await p.click('[data-testid=parcel-start]');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=parcel-step]').textContent()).toBe('PACKING');
+    await expect.poll(() => p.locator('[data-testid=parcel-step]').textContent(), POLL).toBe('PACKING');
     await p.setInputFiles('[data-testid=parcel-scan-photo]', cardPhoto(made!, 'late-card.png'));
     await p.waitForSelector(`.toast:has-text("${made!.productId}: the right piece.")`, { timeout: 30_000 });
-    await expect.poll(() => p.locator('[data-testid=order-holds]').textContent()).toBe(`Piece ${made!.productId}`);
+    await expect.poll(() => p.locator('[data-testid=order-holds]').textContent(), POLL).toBe(`Piece ${made!.productId}`);
     const photo = join(workDir, 'parcel.jpg');
     writeFileSync(photo, jpegPhoto(1200, 900));
     await p.setInputFiles('[data-testid=parcel-photo-file]', photo);
     await p.waitForSelector('.toast:has-text("Photo added.")');
-    await expect.poll(() => p.locator('[data-testid=parcel-photo-view]').count()).toBe(1);
+    await expect.poll(() => p.locator('[data-testid=parcel-photo-view]').count(), POLL).toBe(1);
     for (const line of await p.locator('[data-testid=parcel-check]').all()) await line.click();
     await p.click('[data-testid=parcel-packed]');
-    await expect.poll(() => p.locator('[data-testid=parcel-step]').textContent()).toBe('PACKED');
+    await expect.poll(() => p.locator('[data-testid=parcel-step]').textContent(), POLL).toBe('PACKED');
     // Ship: a carrier, the tracking number with its link, a declared value (ORBES's, in the order's currency).
     await p.click('[data-testid=parcel-ship]');
     await p.selectOption('dialog select[name=carrierId]', { label: 'Colissimo' });
     await p.fill('dialog input[name=trackingNumber]', '6A12345678901');
     await p.fill(`dialog input[name=declared_${o.late}]`, '4800');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=parcel-tracking]').getAttribute('href')).toBe('https://www.laposte.fr/outils/suivre-vos-envois?code=6A12345678901');
+    await expect.poll(() => p.locator('[data-testid=parcel-tracking]').getAttribute('href'), POLL).toBe('https://www.laposte.fr/outils/suivre-vos-envois?code=6A12345678901');
     expect(await p.locator('[data-testid=order-declared]').textContent()).toMatch(/€\s4\s800/u);
     await shot(p, 'order-shipping');
     await p.click('#order-shipping [data-testid=parcel-delivered]');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('#order-step .osteps__step.is-current .osteps__label').textContent()).toBe('DELIVERED');
+    await expect.poll(() => p.locator('#order-step .osteps__step.is-current .osteps__label').textContent(), POLL).toBe('DELIVERED');
     const history = (await p.locator('#order-history tbody tr').allTextContents()).join('\n');
     for (const step of ['Piece held in stock', 'Packing started', 'Card scanned', 'Photo added', 'Packed', 'Shipped', 'Delivered']) expect(history, step).toContain(step);
     expect(await figuresInDisplayFace(p)).toEqual([]);
@@ -466,15 +468,15 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     expect(await p.locator('.side__link', { hasText: /^Atelier$/ }).count()).toBe(0);
     for (const old of ['#/atelier', '#/atelier/sheets?origin=STOCK']) {
       await p.evaluate((x) => (location.hash = x), old);
-      await expect.poll(() => p.evaluate(() => location.hash)).toBe('#/logistics');
-      await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Logistics');
+      await expect.poll(() => p.evaluate(() => location.hash), POLL).toBe('#/logistics');
+      await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Logistics');
     }
     await p.click('[data-testid=logistics-tab-stock]');
     const row = p.locator('#logistics-stock tbody tr', { hasText: 'MNL-RG-54' }).filter({ hasText: 'LOGISTICS WAREHOUSE' });
     await row.locator('[data-testid=stock-minimum]').click();
     await p.fill('dialog input[name=minimum]', '2');
     await confirmDialog(p);
-    await expect.poll(() => row.locator('[data-testid=stock-to-order]').textContent()).toBe('TO ORDER2');
+    await expect.poll(() => row.locator('[data-testid=stock-to-order]').textContent(), POLL).toBe('TO ORDER2');
     expect(await figuresInDisplayFace(p)).toEqual([]);
     expect(await csp(p)).toEqual([]);
     await p.context().close();
@@ -491,7 +493,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await go(p, `#/orders/${o.late}`, orderReference(o.late));
     // Its invoice, issued when it was paid: its PDF.
     const documents = p.locator('#order-documents tbody tr');
-    await expect.poll(() => documents.count()).toBe(1);
+    await expect.poll(() => documents.count(), POLL).toBe(1);
     expect(await documents.first().textContent()).toMatch(/INV-\d{4}-000001\s*Invoice/);
     expect(await documents.first().textContent()).toMatch(/€\s4\s800/u);
     const [invoicePdf] = await Promise.all([p.waitForEvent('download'), documents.first().locator('[data-testid=document-pdf]').click()]);
@@ -509,19 +511,19 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     expect(sizeOptions).toEqual([{ value: '', disabled: false }, ...exchange.map((x) => ({ value: x.skuId, disabled: !x.selectable }))]);
     await p.selectOption('dialog select[name=kind]', 'RETURN');
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Complete the required fields.');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('Complete the required fields.');
     await p.selectOption('dialog select[name=reason]', 'SIZE');
     await p.fill('dialog textarea[name=note]', 'Returned unworn within the delay.');
     await confirmDialog(p);
     await p.waitForSelector('.toast:has-text("Return opened.")');
-    await expect.poll(() => p.locator('[data-testid=order-case-status]').textContent()).toBe('OPEN');
+    await expect.poll(() => p.locator('[data-testid=order-case-status]').textContent(), POLL).toBe('OPEN');
     expect(await p.locator('[data-testid=order-case-kind]').textContent()).toBe('RETURN');
     expect(await p.locator('[data-testid=order-case-decide]').count()).toBe(0);
     expect(await p.locator('[data-testid=order-return]').count()).toBe(0);
     const opened = (await ctx.services.orderCases.forOrder(o.late))[0]!;
     await ctx.services.orderCases.receive(opened.id, { pieceState: 'OK', note: 'Unworn, in its box.' }, admin, null);
     await p.reload();
-    await expect.poll(() => p.locator('[data-testid=order-case-status]').textContent()).toBe('RECEIVED');
+    await expect.poll(() => p.locator('[data-testid=order-case-status]').textContent(), POLL).toBe('RECEIVED');
     // Decided back to stock: where, and why.
     await p.click('[data-testid=order-case-decide]');
     expect(await p.locator('dialog [data-testid=case-received-state]').textContent()).toBe('The agent recorded the piece: OK. Unworn, in its box.');
@@ -531,7 +533,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await p.fill('dialog textarea[name=note]', 'Returned unworn within the delay.');
     await p.click('[data-testid=dialog-confirm]');
     // Back to stock: the new claim code, once, with its card (ORBES took the ownership back).
-    await expect.poll(() => p.locator('dialog [data-testid=claim-code]').textContent()).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/);
+    await expect.poll(() => p.locator('dialog [data-testid=claim-code]').textContent(), POLL).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/);
     const fresh = (await p.locator('dialog [data-testid=claim-code]').textContent())!;
     expect(fresh).not.toBe(lateClaim);
     // Its words unchanged since the dialog became the one New claim code shares (plan NEXT LOT §3.4).
@@ -542,10 +544,10 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     expect(card.suggestedFilename()).toMatch(/\.pdf$/);
     await shot(p, 'return-claim-code');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('#order-step .osteps__step.is-current .osteps__label').textContent()).toBe('RETURNED');
+    await expect.poll(() => p.locator('#order-step .osteps__step.is-current .osteps__label').textContent(), POLL).toBe('RETURNED');
     expect(await p.locator('[data-testid=return-outcome]').textContent()).toBe('Back to stock · FRANCE WAREHOUSE');
     expect(await p.locator('#order-return').textContent()).toContain('Taken back by ORBES from its buyer');
-    await expect.poll(() => documents.count()).toBe(2);
+    await expect.poll(() => documents.count(), POLL).toBe(2);
     expect(await documents.nth(1).textContent()).toMatch(/CN-\d{4}-000001\s*Credit note/);
     expect(await p.locator('[data-testid=order-return]').count()).toBe(0);
     expect(await p.locator('body').textContent()).not.toContain(fresh);
@@ -554,9 +556,9 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
 
     // The Invoices page: the month's documents, the latest first, and their totals.
     await p.locator('.side__link', { hasText: /^Invoices$/ }).click();
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Invoices');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Invoices');
     const rows = p.locator('#invoices-list tbody tr');
-    await expect.poll(() => rows.count()).toBe(3);
+    await expect.poll(() => rows.count(), POLL).toBe(3);
     const texts = await rows.allTextContents();
     expect(texts[0]).toMatch(/CN-\d{4}-000001\s*Credit note/);
     expect(texts[0]).toContain('Jane Doe');
@@ -567,13 +569,13 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     expect(totals).toMatch(/EUR\s*€\s7\s800\s*€\s4\s800\s*€\s3\s000/u);
     // One kind; a search; the order's page from its reference.
     await p.selectOption('select[name=kind]', 'CREDIT_NOTE');
-    await expect.poll(() => rows.count()).toBe(1);
+    await expect.poll(() => rows.count(), POLL).toBe(1);
     // The month's totals stay the whole month's, whatever the list keeps.
     expect(await p.locator('#invoices-totals tbody tr').textContent()).toBe(totals);
     await p.selectOption('select[name=kind]', '');
     await p.fill('input[name=q]', orderReference(o.stock));
     await p.press('input[name=q]', 'Enter');
-    await expect.poll(() => rows.count()).toBe(1);
+    await expect.poll(() => rows.count(), POLL).toBe(1);
     const [pdf] = await Promise.all([p.waitForEvent('download'), rows.first().locator('[data-testid=invoice-pdf]').click()]);
     expect(pdf.suggestedFilename()).toMatch(/^ORBES-invoice-INV-\d{4}-000002\.pdf$/);
     const [csv] = await Promise.all([p.waitForEvent('download'), p.click('[data-testid=invoices-csv]')]);
@@ -583,11 +585,11 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     expect(lines[0]).toContain('"vat rate","vat","total"');
     await p.fill('input[name=q]', '');
     await p.press('input[name=q]', 'Enter');
-    await expect.poll(() => rows.count()).toBe(3);
+    await expect.poll(() => rows.count(), POLL).toBe(3);
     expect(await figuresInDisplayFace(p)).toEqual([]);
     await shot(p, 'invoices');
     await rows.first().locator('a.idlink').click();
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe(orderReference(o.late));
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe(orderReference(o.late));
     expect(await csp(p)).toEqual([]);
     await p.context().close();
   }, STEP_TIMEOUT);
@@ -601,38 +603,38 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     }
     await go(p, '#/orders', 'Orders');
     await p.click('a.cbtn:has-text("Settings")');
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Settings');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Settings');
     expect(await p.locator('[data-testid=alert-reserved]').textContent()).toBe('Over 2 days');
     await p.click('[data-testid=alerts-edit]');
     await p.fill('dialog input[name=reservedDays]', '0');
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Reserved: 1 to 90 days.');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('Reserved: 1 to 90 days.');
     await p.fill('dialog input[name=reservedDays]', '5');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=alert-reserved]').textContent()).toBe('Over 5 days');
+    await expect.poll(() => p.locator('[data-testid=alert-reserved]').textContent(), POLL).toBe('Over 5 days');
 
     await p.click('[data-testid=carrier-add]');
     await p.fill('dialog input[name=name]', 'FedEx');
     await p.fill('dialog input[name=trackingUrl]', 'https://www.fedex.com/fedextrack/?trknbr={tracking}');
-    await expect.poll(() => p.locator('dialog [data-testid=carrier-example]').textContent()).toBe('With 6A12345678901: https://www.fedex.com/fedextrack/?trknbr=6A12345678901');
+    await expect.poll(() => p.locator('dialog [data-testid=carrier-example]').textContent(), POLL).toBe('With 6A12345678901: https://www.fedex.com/fedextrack/?trknbr=6A12345678901');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=carrier-name]').allTextContents()).toContain('FedEx');
+    await expect.poll(() => p.locator('[data-testid=carrier-name]').allTextContents(), POLL).toContain('FedEx');
 
     await p.locator('#settings-locations tbody tr', { hasText: 'LOGISTICS WAREHOUSE' }).locator('[data-testid=location-rename]').click();
     await p.fill('dialog input[name=name]', 'LOGISTICS PARTNER');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=location-name]').allTextContents()).toEqual(['FRANCE WAREHOUSE', 'LOGISTICS PARTNER']);
+    await expect.poll(() => p.locator('[data-testid=location-name]').allTextContents(), POLL).toEqual(['FRANCE WAREHOUSE', 'LOGISTICS PARTNER']);
 
     // SHIPPING (BP-19 T2), optional: none preset, a rate set, refused when it is not an amount, cleared again.
     expect(await p.locator('#settings-shipping [data-testid^=rate-]').allTextContents()).toEqual(Array(8).fill('—'));
     await p.click('[data-testid=shipping-edit]');
     await p.fill('dialog input[name="EUR-STANDARD"]', 'twenty');
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('EUR Standard: an amount in units, 20 or 20.50, or empty for none.');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('EUR Standard: an amount in units, 20 or 20.50, or empty for none.');
     await p.fill('dialog input[name="EUR-STANDARD"]', '20');
     await p.fill('dialog input[name="EUR-EXPRESS"]', '40');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid="rate-EUR-STANDARD"]').textContent()).toBe('€\u00a020');
+    await expect.poll(() => p.locator('[data-testid="rate-EUR-STANDARD"]').textContent(), POLL).toBe('€\u00a020');
     expect(await p.locator('[data-testid="rate-EUR-EXPRESS"]').textContent()).toBe('€\u00a040');
     expect(await p.locator('[data-testid="rate-GBP-STANDARD"]').textContent()).toBe('—');
     expect(await ctx.db.selectFrom('shipping_rates').select(['currency', 'service', 'fee_minor']).orderBy('service', 'desc').execute()).toEqual([
@@ -645,7 +647,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await p.fill('dialog input[name="EUR-STANDARD"]', '');
     await p.fill('dialog input[name="EUR-EXPRESS"]', '');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid="rate-EUR-STANDARD"]').textContent()).toBe('—');
+    await expect.poll(() => p.locator('[data-testid="rate-EUR-STANDARD"]').textContent(), POLL).toBe('—');
     expect(await ctx.db.selectFrom('shipping_rates').selectAll().execute()).toEqual([]);
 
     // ENGRAVING (plan NEXT LOT §3.6.C), beside Shipping: none preset; a price set, refused when it is not an amount.
@@ -655,10 +657,10 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await p.click('[data-testid=engraving-edit]');
     await p.fill('dialog input[name=EUR]', 'thirty');
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('EUR: an amount in units, or empty for none.');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('EUR: an amount in units, or empty for none.');
     await p.fill('dialog input[name=EUR]', '30');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=engraving-EUR]').textContent()).toBe('€\u00a030');
+    await expect.poll(() => p.locator('[data-testid=engraving-EUR]').textContent(), POLL).toBe('€\u00a030');
     expect(await engraving.allTextContents()).toEqual(['€\u00a030', '—', '—', '—']);
     expect(await ctx.db.selectFrom('engraving_prices').select(['currency', 'price_minor']).execute()).toEqual([{ currency: 'EUR', price_minor: 3000 }]);
     await shot(p, 'settings-engraving');
@@ -673,7 +675,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
   it('lets an AUDITOR read the board and an order, the emails and the buyer masked, without one action', async () => {
     const a = await open(AUDITOR);
     await go(a, '#/orders', 'Orders');
-    await expect.poll(() => a.locator('[data-testid=order-card]').count()).toBe(3);
+    await expect.poll(() => a.locator('[data-testid=order-card]').count(), POLL).toBe(3);
     expect(await a.locator('body').textContent()).not.toContain(collector);
     expect(await a.locator(`[data-order="${o.late}"]`).textContent()).toContain(`${collector[0]}***@example.com`);
     await go(a, `#/orders/${o.late}`, orderReference(o.late));
@@ -686,9 +688,9 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
       expect(await a.locator(`[data-testid=${action}]`).count(), action).toBe(0);
     }
     // Its documents read; on the Invoices page, the buyer masked.
-    await expect.poll(() => a.locator('#order-documents tbody tr').count()).toBe(2);
+    await expect.poll(() => a.locator('#order-documents tbody tr').count(), POLL).toBe(2);
     await go(a, '#/invoices', 'Invoices');
-    await expect.poll(() => a.locator('#invoices-list tbody tr').count()).toBe(3);
+    await expect.poll(() => a.locator('#invoices-list tbody tr').count(), POLL).toBe(3);
     expect(await a.locator('[data-testid=invoice-buyer]').first().textContent()).toBe('J*** D***');
     expect(await a.locator('#invoices-list').textContent()).not.toContain('Jane Doe');
     await go(a, `#/orders/${o.late}`, orderReference(o.late));
@@ -750,15 +752,15 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     expect(await p.locator('dialog input[name=amount]').inputValue()).toBe('50');
     await p.fill('dialog input[name=amount]', '60');
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toContain('At most €');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toContain('At most €');
     await p.fill('dialog input[name=amount]', '50');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=order-credit-applied]').textContent()).toMatch(/^\u2212 €\s50 \(PLATINE\)$/u);
+    await expect.poll(() => p.locator('[data-testid=order-credit-applied]').textContent(), POLL).toMatch(/^\u2212 €\s50 \(PLATINE\)$/u);
     expect(await p.locator('[data-testid=order-credit-available]').textContent()).toBe('None');
     expect(await p.locator('[data-testid=order-credit-remove]').count()).toBe(1);
     // The gift's page: its tier and its order; its size chosen among its model's.
     await p.click('[data-testid=order-gift]');
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe(orderReference(giftOrder));
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe(orderReference(giftOrder));
     expect(await p.locator('.page-head').textContent()).toContain(`Welcome gift · PLATINE · travels with ${orderReference(parent)}`);
     expect(await p.locator('[data-testid=order-pay]').count()).toBe(0);
     // Plan NEXT LOT §3.6.B: it travels with its order, whose buyer and address are its own: read only, no EDIT.
@@ -779,7 +781,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     expect(await p.locator('dialog select[name=giftSize]').inputValue()).toBe('');
     await p.selectOption('dialog select[name=giftSize]', '52');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('#order-step').textContent()).toContain(`It is paid with ${orderReference(parent)}.`);
+    await expect.poll(() => p.locator('#order-step').textContent(), POLL).toContain(`It is paid with ${orderReference(parent)}.`);
     expect(await p.locator('[data-testid=order-size]').textContent()).toBe('52');
     expect(await p.locator('[data-testid=order-gift-size]').count()).toBe(0);
     await shot(p, 'gift-order', { phone: true });
@@ -787,8 +789,8 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await go(p, `#/orders/${parent}`, orderReference(parent));
     await p.click('[data-testid=order-pay]');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('#order-step .osteps__step.is-current .osteps__label').textContent()).toBe('PAID');
-    await expect.poll(() => p.locator('#order-documents tbody tr').first().textContent()).toMatch(/€\s2\s950/u);
+    await expect.poll(() => p.locator('#order-step .osteps__step.is-current .osteps__label').textContent(), POLL).toBe('PAID');
+    await expect.poll(() => p.locator('#order-documents tbody tr').first().textContent(), POLL).toMatch(/€\s2\s950/u);
     expect(await p.locator('#order-history').textContent()).toContain('Credit applied');
     await shot(p, 'credit-paid', { phone: true });
     // The gift, paid with its order, ships in its order's parcel (plan NEXT LOT §3.5.6.6): its Shipping section is that
@@ -825,7 +827,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
 
     const p = await open(OPERATOR);
     await go(p, `#/orders/${legacy}`, orderReference(legacy));
-    await expect.poll(() => p.locator('#order-step .osteps__step.is-current .osteps__label').textContent()).toBe('SHIPPED');
+    await expect.poll(() => p.locator('#order-step .osteps__step.is-current .osteps__label').textContent(), POLL).toBe('SHIPPED');
     const shipment = p.locator('#order-shipment');
     expect(await shipment.locator('.panel__title').textContent()).toBe('Shipment');
     expect(await shipment.textContent()).toContain('Colissimo');
@@ -869,7 +871,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     expect(await p.locator('[data-testid=buyer-changed]').textContent()).toMatch(/^ADDRESS CHANGED Address changed on \d{2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC, after it was first entered: check the parcel’s label\.$/);
     expect(await p.locator('[data-testid=order-engraving]').textContent()).toBe('J.M. · €\u00a030');
     // Its invoice and the engraving's own (a supplementary invoice).
-    await expect.poll(() => p.locator('#order-documents tbody tr').count()).toBe(2);
+    await expect.poll(() => p.locator('#order-documents tbody tr').count(), POLL).toBe(2);
     expect(await figuresInDisplayFace(p)).toEqual([]);
     await shot(p, 'order-buyer-engraving');
 
@@ -881,11 +883,11 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await stockPieces(ctx, { skuId: sku62, locationId: france, count: 1, material: '925 STERLING SILVER' }, admin);
     await services.orderCases.request(account, sale.id, { kind: 'EXCHANGE', reason: 'SIZE', note: 'One size larger, please.', sizeLabel: '62' }, client);
     await p.reload();
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe(orderReference(sale.id));
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe(orderReference(sale.id));
     // Shipped: the change no longer highlighted.
     expect(await p.locator('[data-testid=buyer-changed]').count()).toBe(0);
     const c = p.locator('#order-case [data-testid=order-case]');
-    await expect.poll(() => c.locator('[data-testid=order-case-kind]').textContent()).toBe('SIZE EXCHANGE');
+    await expect.poll(() => c.locator('[data-testid=order-case-kind]').textContent(), POLL).toBe('SIZE EXCHANGE');
     const lines = (await c.locator('dd').allTextContents()).join(' | ');
     expect(lines).toMatch(/by the collector/);
     expect(lines).toContain('The size does not fit');
@@ -908,7 +910,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     // An AUDITOR: the client's note withheld; the conversation still linked.
     const a = await open(AUDITOR);
     await go(a, `#/orders/${sale.id}`, orderReference(sale.id));
-    await expect.poll(() => a.locator('#order-case [data-testid=order-case]').count()).toBe(1);
+    await expect.poll(() => a.locator('#order-case [data-testid=order-case]').count(), POLL).toBe(1);
     expect(await a.locator('#order-case').textContent()).not.toContain('One size larger, please.');
     expect(await a.locator('[data-testid=buyer-phone]').textContent()).toBe('***');
     await a.context().close();
@@ -943,7 +945,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     expect(await p.locator('dialog').textContent()).toMatch(/Available: Birthday €\s20 until/u);
     await p.fill('dialog input[name=amount]', '30');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=order-credit-applied]').textContent()).toMatch(/^\u2212 €\s20 \(BIRTHDAY\) · \u2212 €\s10 \(PLATINE\)$/u);
+    await expect.poll(() => p.locator('[data-testid=order-credit-applied]').textContent(), POLL).toMatch(/^\u2212 €\s20 \(BIRTHDAY\) · \u2212 €\s10 \(PLATINE\)$/u);
     expect(await p.locator('[data-testid=order-credit-available]').textContent()).toMatch(/^PLATINE €\s40 until \d{2} [A-Z]{3} \d{4}$/u);
     expect(await figuresInDisplayFace(p)).toEqual([]);
     await shot(p, 'birthday-credit-applied', { phone: true });
@@ -954,7 +956,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
       return Promise.all((await rows.all()).map(async (r) => `${(await r.locator('dt').textContent())?.trim()}: ${(await r.locator('[data-testid=owner-club]').textContent())?.trim()}`));
     };
     await go(p, `#/owners/${account.id}`, account.email);
-    await expect.poll(async () => (await club()).filter((l) => l.startsWith('Birthday credit: ')).length).toBe(2);
+    await expect.poll(async () => (await club()).filter((l) => l.startsWith('Birthday credit: ')).length, POLL).toBe(2);
     const used = await club();
     expect(used.find((l) => l.startsWith('Credit PLATINE: '))).toMatch(/^Credit PLATINE: €\s50, €\s40 left, until \d{2} [A-Z]{3} \d{4}$/u);
     expect(used.at(-2)).toMatch(/^Birthday credit: €\s20, €\s0 left, until \d{2} [A-Z]{3} \d{4} · birthday \d{2} [A-Z]{3} \d{4}$/u);
@@ -967,21 +969,21 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await p.click('[data-testid=order-credit-remove]');
     expect(await p.locator('dialog .dialog__text').textContent()).toMatch(/\(\u2212 €\s20 \(BIRTHDAY\) · \u2212 €\s10 \(PLATINE\)\)/u);
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=order-credit-applied]').textContent()).toBe('None');
+    await expect.poll(() => p.locator('[data-testid=order-credit-applied]').textContent(), POLL).toBe('None');
     await go(p, `#/owners/${account.id}`, account.email);
-    await expect.poll(async () => (await club()).filter((l) => l.startsWith('Birthday credit: '))).toHaveLength(1);
+    await expect.poll(async () => (await club()).filter((l) => l.startsWith('Birthday credit: ')), POLL).toHaveLength(1);
     expect((await club()).at(-1)).toMatch(/^Birthday credit: €\s20, €\s20 left, until \d{2} [A-Z]{3} \d{4} · birthday \d{2} [A-Z]{3} \d{4}$/u);
 
     // A client without a date of birth, then THE PROGRAM switched off: why none comes.
     const other = await createAccount(ctx.db);
     await go(p, `#/owners/${other.id}`, other.email);
-    await expect.poll(club).toEqual(['Birthday credit: No date of birth']);
+    await expect.poll(club, POLL).toEqual(['Birthday credit: No date of birth']);
     const program = await ctx.services.clubProgram.read();
     try {
       await ctx.services.clubProgram.update({ ...program, birthdayCreditOn: false }, admin);
       await p.reload();
-      await expect.poll(async () => (await title(p).textContent())?.trim()).toBe(other.email);
-      await expect.poll(club).toEqual(['Birthday credit: Off in THE PROGRAM']);
+      await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe(other.email);
+      await expect.poll(club, POLL).toEqual(['Birthday credit: Off in THE PROGRAM']);
     } finally {
       await ctx.services.clubProgram.update(program, admin);
     }
@@ -1000,7 +1002,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     const p = await open(OPERATOR);
     await go(p, '#/orders', 'Orders');
     const cards = p.locator('[data-testid=order-card]');
-    await expect.poll(() => cards.count()).toBeGreaterThan(0);
+    await expect.poll(() => cards.count(), POLL).toBeGreaterThan(0);
     const before = await cards.count();
     const summary = async () => (await p.locator('[data-testid=orders-summary] .board__figures').textContent())!.trim();
     const figures = await summary();
@@ -1015,8 +1017,8 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
 
     // By default: not a card, not in a count.
     await p.reload();
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Orders');
-    await expect.poll(() => cards.count()).toBe(before);
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Orders');
+    await expect.poll(() => cards.count(), POLL).toBe(before);
     expect(await summary()).toBe(figures);
     expect(await reservedCount()).toBe(String(reserved));
     expect(await p.locator(`[data-order="${test.id}"]`).count()).toBe(0);
@@ -1032,7 +1034,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
 
     // Show test orders: its card, marked TEST under its reference, counted; the others unmarked.
     await toggle.click();
-    await expect.poll(() => cards.count()).toBe(before + 1);
+    await expect.poll(() => cards.count(), POLL).toBe(before + 1);
     expect(await p.evaluate(() => location.hash)).toBe('#/orders?test=true');
     expect(await p.locator('label.ccheck', { hasText: 'Show test orders' }).locator('input').isChecked()).toBe(true);
     expect(await summary()).toMatch(new RegExp(`^${total + 1} orders · `));
@@ -1048,10 +1050,10 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
 
     // Its page, from its card; back on the board without the switch, it is gone again.
     await card.click();
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe(orderReference(test.id));
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe(orderReference(test.id));
     await go(p, '#/orders?test=true', 'Orders');
     await p.locator('label.ccheck', { hasText: 'Show test orders' }).click();
-    await expect.poll(() => cards.count()).toBe(before);
+    await expect.poll(() => cards.count(), POLL).toBe(before);
     expect(await p.evaluate(() => location.hash)).toBe('#/orders');
     expect(await summary()).toBe(figures);
     // By its address, the page still opens while the board hides it.
@@ -1071,7 +1073,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     // An AUDITOR has the switch too.
     const a = await open(AUDITOR);
     await go(a, '#/orders?test=true', 'Orders');
-    await expect.poll(() => a.locator(`[data-order="${test.id}"] [data-testid=order-card-test]`).count()).toBe(1);
+    await expect.poll(() => a.locator(`[data-order="${test.id}"] [data-testid=order-card-test]`).count(), POLL).toBe(1);
     expect(await a.locator('label.ccheck', { hasText: 'Show test orders' }).locator('input').isChecked()).toBe(true);
     await a.context().close();
   }, STEP_TIMEOUT);
@@ -1094,14 +1096,14 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     expect(period).toMatch(/^\d{2} [A-Z]{3} \d{4} – \d{2} [A-Z]{3} \d{4}$/);
     expect(await p.locator('[data-testid=returns-period-choice]').inputValue()).toBe('12m');
     // Every model: HALO among the order cases of this file's orders.
-    await expect.poll(() => p.locator('[data-testid=returns-by-model] tbody tr', { hasText: 'HALO' }).count()).toBe(1);
+    await expect.poll(() => p.locator('[data-testid=returns-by-model] tbody tr', { hasText: 'HALO' }).count(), POLL).toBe(1);
     expect(await p.locator('[data-testid=returns-rule]').textContent()).toContain('RUNS SMALL: at least 3 size exchanges');
     await shot(p, 'returns', { phone: true });
 
     // Filtered by HALO: its flag, its line, its sizes.
     await p.selectOption('[data-testid=returns-model]', halo);
-    await expect.poll(() => p.evaluate(() => location.hash)).toBe(`#/orders/returns?model=${halo}`);
-    await expect.poll(async () => (await p.locator('[data-testid=returns-summary] .board__figures').textContent())?.trim()).toBe('4 requests · 1 return · 3 exchanges');
+    await expect.poll(() => p.evaluate(() => location.hash), POLL).toBe(`#/orders/returns?model=${halo}`);
+    await expect.poll(async () => (await p.locator('[data-testid=returns-summary] .board__figures').textContent())?.trim(), POLL).toBe('4 requests · 1 return · 3 exchanges');
     const row = p.locator('[data-testid=returns-by-model] tbody tr');
     expect(await row.count()).toBe(1);
     expect((await row.locator('[data-testid=returns-flag] .status__text').textContent())!.trim()).toBe('RUNS SMALL');
@@ -1124,14 +1126,14 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
 
     // All time, then a Custom period with nothing in it.
     await p.selectOption('[data-testid=returns-period-choice]', 'all');
-    await expect.poll(async () => (await p.locator('[data-testid=returns-period]').textContent())?.trim()).toBe('All time');
+    await expect.poll(async () => (await p.locator('[data-testid=returns-period]').textContent())?.trim(), POLL).toBe('All time');
     expect(await p.evaluate(() => location.hash)).toBe(`#/orders/returns?model=${halo}&period=all`);
     await p.selectOption('[data-testid=returns-period-choice]', 'custom');
     await p.waitForSelector('[data-testid=returns-from]');
     await p.fill('[data-testid=returns-from]', '2020-01-01');
     await p.fill('[data-testid=returns-to]', '2020-01-31');
     await p.click('[data-testid=returns-apply]');
-    await expect.poll(async () => (await p.locator('[data-testid=returns-empty]').textContent())?.trim()).toBe('No return or exchange in this period.');
+    await expect.poll(async () => (await p.locator('[data-testid=returns-empty]').textContent())?.trim(), POLL).toBe('No return or exchange in this period.');
     expect((await p.locator('[data-testid=returns-period]').textContent())!.trim()).toBe('01 JAN 2020 – 31 JAN 2020');
     expect(await p.locator('[data-testid=returns-csv]').count()).toBe(0);
     await shot(p, 'returns-empty', { phone: true });

@@ -60,6 +60,8 @@ const AUDITOR = { email: 'live.auditor@orbes.test', password: 'live auditor pass
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'out');
 const SCREENSHOTS = !!process.env.ORBES_SCREENSHOTS;
 const STEP_TIMEOUT = 180_000;
+/** expect.poll's budget (its default, 1 s, is too short on a shared CI runner). */
+const POLL = { timeout: 15_000 };
 const HOUR = 3_600_000;
 
 async function freePort(): Promise<number> {
@@ -106,7 +108,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await p.fill('input[name=email]', who.email);
     await p.fill('input[name=password]', who.password);
     await p.click('[data-testid=login-submit]');
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dashboard');
     return p;
   }
 
@@ -209,7 +211,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
       expect(box.y + box.height, id).toBeLessThanOrEqual(900);
     }
     await go(p, '#/club?tab=drops', 'Club');
-    await expect.poll(() => p.locator('#live-releases .empty__text').textContent()).toMatch(/^No live release yet/);
+    await expect.poll(() => p.locator('#live-releases .empty__text').textContent(), POLL).toMatch(/^No live release yet/);
     // One primary action on the tab: New live release; a draw's New release beside it, a ghost.
     expect(await p.locator('.club__drops .cbtn--primary').count()).toBe(1);
     expect(await p.locator('[data-testid=live-new]').getAttribute('class')).toContain('cbtn--primary');
@@ -225,22 +227,22 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     // A wrong line is said before anything is sent.
     await p.fill('dialog textarea[name=sizes]', '52');
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Line 1: a size’s label, then its stock (52 = 3).');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('Line 1: a size’s label, then its stock (52 = 3).');
     await p.fill('dialog textarea[name=sizes]', 'ONE SIZE = 25');
     await confirmDialog(p);
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('THE MONOLITHE RING');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('THE MONOLITHE RING');
     const id = decodeURIComponent(new URL(p.url()).hash.split('/').pop()!);
-    await expect.poll(() => p.locator('[data-testid=live-state]').textContent()).toBe('DRAFT');
+    await expect.poll(() => p.locator('[data-testid=live-state]').textContent(), POLL).toBe('DRAFT');
     expect(await p.locator('[data-testid=live-price]').textContent()).toBe('€ 4 800 a piece');
     expect(await p.locator('[data-testid=live-quantity-line]').textContent()).toBe('25 PIECES');
 
     // The sizes, previewed as typed, and the quantity line as the announcement will say it.
     await p.click('[data-testid=live-edit-sizes]');
     await p.fill('dialog textarea[name=sizes]', '52 = 3\n54 = 2');
-    await expect.poll(() => p.locator('dialog [data-testid=live-sizes-preview]').textContent()).toBe('5 pieces in all · announced as « 5 PIECES »');
+    await expect.poll(() => p.locator('dialog [data-testid=live-sizes-preview]').textContent(), POLL).toBe('5 pieces in all · announced as « 5 PIECES »');
     await p.fill('dialog input[name=quantityLine]', '5 PIECES · NEVER MORE');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=live-sizes]').textContent()).toBe('52 × 3 · 54 × 2');
+    await expect.poll(() => p.locator('[data-testid=live-sizes]').textContent(), POLL).toBe('52 × 3 · 54 × 2');
     expect(await p.locator('[data-testid=live-quantity-line]').textContent()).toBe('5 PIECES · NEVER MORE');
 
     // Access: owners from PLATINE of MONOLITHE, the line at random.
@@ -250,41 +252,41 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     expect(await p.locator('dialog input[name=tierPriority]').isChecked()).toBe(true);
     await p.locator('dialog label.ccheck', { hasText: 'Tier priority' }).click();
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=live-access]').textContent()).toBe('owners from PLATINE of MONOLITHE');
+    await expect.poll(() => p.locator('[data-testid=live-access]').textContent(), POLL).toBe('owners from PLATINE of MONOLITHE');
     expect(await p.locator('#live-part-access').textContent()).toContain('At random for all');
 
     // Turns and holds: PALLADIUM has ten minutes to pay.
     await p.click('[data-testid=live-edit-turns]');
     await p.fill('dialog input[name="pay:3"]', '10');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=live-windows]').textContent()).toBe('PALLADIUM · 10 min to pay');
+    await expect.poll(() => p.locator('[data-testid=live-windows]').textContent(), POLL).toBe('PALLADIUM · 10 min to pay');
 
     // The add-ons, one per line.
     await p.click('[data-testid=live-edit-addons]');
     await p.fill('dialog textarea[name=addons]', 'ENGRAVING | 150 | Your initials, by hand\nGIFT BOX | 0');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('#live-part-addons').textContent()).toContain('Your initials, by hand');
+    await expect.poll(() => p.locator('#live-part-addons').textContent(), POLL).toContain('Your initials, by hand');
 
     // The after-room: a second door after a sell-out, its own model, price, stock and delay; none until set.
-    await expect.poll(() => p.locator('#live-part-after-room .notice').textContent()).toBe('None: the release closes at its sell-out.');
+    await expect.poll(() => p.locator('#live-part-after-room .notice').textContent(), POLL).toBe('None: the release closes at its sell-out.');
     await p.click('[data-testid=live-edit-after-room]');
     await p.locator('dialog label.ccheck', { hasText: 'An after-room after a sell-out' }).click();
     await p.selectOption('dialog select[name=modelId]', modelId);
     await p.fill('dialog input[name=price]', '900');
     await p.fill('dialog input[name=delay]', '0');
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('The after-room opens 1 to 60 minutes after the sell-out.');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('The after-room opens 1 to 60 minutes after the sell-out.');
     await p.fill('dialog input[name=delay]', '5');
     await p.fill('dialog textarea[name=sizes]', 'ONE SIZE = 3');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=live-after-room-state]').textContent()).toBe('AFTER A SELL-OUT');
+    await expect.poll(() => p.locator('[data-testid=live-after-room-state]').textContent(), POLL).toBe('AFTER A SELL-OUT');
     expect(await p.locator('[data-testid=live-after-room-timing]').textContent()).toBe('5 min after the sell-out, open 15 min');
     expect(await p.locator('[data-testid=live-after-room-sizes]').textContent()).toBe('ONE SIZE × 3');
 
     // Nothing changed: said in the dialog, nothing sent.
     await p.click('[data-testid=live-edit-release]');
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Nothing has changed.');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('Nothing has changed.');
     await p.click('[data-testid=dialog-cancel]');
 
     // The silhouette, a photograph prepared as it will be sent.
@@ -296,14 +298,14 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await p.setInputFiles('dialog [data-testid=photo-file]', file);
     await expect.poll(() => p.locator('dialog [data-testid=photo-facts]').textContent(), { timeout: 15_000 }).toMatch(/^To be sent: 240 × 320 PX/);
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=live-silhouette] img').count()).toBe(1);
+    await expect.poll(() => p.locator('[data-testid=live-silhouette] img').count(), POLL).toBe(1);
 
     // The board's link: shown once, its secret in the fragment.
     await p.click('[data-testid=live-board-issue]');
     await p.click('[data-testid=dialog-confirm]');
     await expect.poll(() => p.locator('dialog .live__link').textContent(), { timeout: 15_000 }).toMatch(new RegExp(`^${origin}/verify/releases/${id}/board#[A-Za-z0-9_-]{43}$`));
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=live-board-link]').textContent()).toMatch(/^Issued /);
+    await expect.poll(() => p.locator('[data-testid=live-board-link]').textContent(), POLL).toMatch(/^Issued /);
     expect(await p.locator('body').textContent()).not.toContain('/board#');
 
     expect(await figuresInDisplayFace(p)).toEqual([]);
@@ -313,17 +315,17 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await p.click('[data-testid=live-publish]');
     await p.locator('dialog label.ccheck', { hasText: 'Post it in the circle' }).click();
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=live-state]').textContent()).toBe('ANNOUNCED');
-    await expect.poll(() => p.locator('[data-testid=live-circle]').textContent()).toMatch(/^Post shown from /);
+    await expect.poll(() => p.locator('[data-testid=live-state]').textContent(), POLL).toBe('ANNOUNCED');
+    await expect.poll(() => p.locator('[data-testid=live-circle]').textContent(), POLL).toMatch(/^Post shown from /);
     for (const edit of ['live-edit-release', 'live-edit-sizes', 'live-edit-access', 'live-edit-times', 'live-edit-turns', 'live-edit-addons', 'live-edit-after-room', 'live-silhouette-edit', 'live-publish']) {
       expect(await p.locator(`[data-testid=${edit}]`).count(), edit).toBe(0);
     }
     const post = await ctx.db.selectFrom('circle_posts').select(['min_tier', 'drop_id']).where('drop_id', '=', id).executeTakeFirstOrThrow();
     expect(post.min_tier).toBe(2);
     // Its live board is there, before the room: nobody yet.
-    await expect.poll(() => fig(p, 'live-in-room').textContent()).toBe('0');
+    await expect.poll(() => fig(p, 'live-in-room').textContent(), POLL).toBe('0');
     await go(p, '#/club?tab=drops', 'Club');
-    await expect.poll(() => p.locator('#live-releases tbody tr', { hasText: 'THE MONOLITHE RING' }).textContent()).toContain('ANNOUNCED');
+    await expect.poll(() => p.locator('#live-releases tbody tr', { hasText: 'THE MONOLITHE RING' }).textContent(), POLL).toContain('ANNOUNCED');
     expect(await csp(p)).toEqual([]);
     await p.context().close();
   }, STEP_TIMEOUT);
@@ -363,17 +365,17 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
 
     const p = await open(ADMIN);
     await go(p, `#/club/live/${r.id}`, 'THE VAULT RING');
-    await expect.poll(() => p.locator('[data-testid=live-state]').textContent()).toBe('LIVE');
-    await expect.poll(() => fig(p, 'live-line').textContent()).toBe('4');
+    await expect.poll(() => p.locator('[data-testid=live-state]').textContent(), POLL).toBe('LIVE');
+    await expect.poll(() => fig(p, 'live-line').textContent(), POLL).toBe('4');
     const line = p.locator('#live-entries tbody tr');
-    await expect.poll(() => line.count()).toBe(4);
+    await expect.poll(() => line.count(), POLL).toBe(4);
     expect(await line.locator('[data-testid=live-entry-account]').allTextContents()).toEqual([x.email, y.email, z.email, w.email]);
 
     // LET IN the fourth: their turn now, out of order.
     await line.nth(3).locator('[data-testid=live-let-in]').click();
-    await expect.poll(() => p.locator('dialog').textContent()).toContain('takes their turn now, before those ahead of them in size 54');
+    await expect.poll(() => p.locator('dialog').textContent(), POLL).toContain('takes their turn now, before those ahead of them in size 54');
     await confirmDialog(p);
-    await expect.poll(() => line.nth(3).locator('[data-testid=live-entry-status]').textContent()).toMatch(/^TURNLet in by the consoleUntil /);
+    await expect.poll(() => line.nth(3).locator('[data-testid=live-entry-status]').textContent(), POLL).toMatch(/^TURNLet in by the consoleUntil /);
 
     // The engine gives the turns; the board follows its stream, no reload.
     const before = await p.locator('[data-testid=live-updated]').textContent();
@@ -386,7 +388,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     // A seal held: SECURED, then the hold freed by the console.
     await secure(x, r.id);
     await expect.poll(() => fig(p, 'live-secured').textContent(), { timeout: 10_000 }).toBe('1');
-    await expect.poll(() => line.first().locator('[data-testid=live-entry-status]').textContent()).toMatch(/^SECUREDTo pay until /);
+    await expect.poll(() => line.first().locator('[data-testid=live-entry-status]').textContent(), POLL).toMatch(/^SECUREDTo pay until /);
     expect(await line.first().locator('td.col--num').nth(2).textContent()).toMatch(/^1\.\d{2} s$/);
     await line.first().locator('[data-testid=live-free]').click();
     await confirmDialog(p);
@@ -412,7 +414,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
 
     // ADD PIECES, with what the quantity line promised.
     await p.locator('.live__sizes tbody tr', { hasText: '54' }).locator('[data-testid=live-add-pieces]').click();
-    await expect.poll(() => p.locator('dialog [data-testid=live-quantity-promise]').textContent()).toContain('« 4 PIECES · NEVER MORE »');
+    await expect.poll(() => p.locator('dialog [data-testid=live-quantity-promise]').textContent(), POLL).toContain('« 4 PIECES · NEVER MORE »');
     await p.fill('dialog input[name=pieces]', '1');
     await confirmDialog(p);
     await expect.poll(() => p.locator('.live__sizes tbody tr', { hasText: '54' }).locator('td').nth(1).textContent(), { timeout: 10_000 }).toBe('4');
@@ -424,13 +426,13 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await ctx.services.live.setAddons(y.id, r.id, [engraving.id], y.actor);
     await ctx.services.live.confirm(y.id, r.id, y.actor);
     await p.reload();
-    await expect.poll(() => p.locator('[data-testid=live-orders]').textContent()).toBe('1 confirmed reservation: each piece is an order, followed step by step on the Orders board, from payment to delivery.');
+    await expect.poll(() => p.locator('[data-testid=live-orders]').textContent(), POLL).toBe('1 confirmed reservation: each piece is an order, followed step by step on the Orders board, from payment to delivery.');
     expect(await p.locator('#live-services tbody tr').count()).toBe(0);
     await p.locator('#live-services a', { hasText: 'Orders of this release' }).click();
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Orders');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Orders');
     expect(decodeURIComponent(new URL(p.url()).hash)).toBe(`#/orders?dropId=${r.id}`);
     const cards = p.locator('[data-testid=column-RESERVED] [data-testid=order-card]');
-    await expect.poll(() => cards.count()).toBe(2);
+    await expect.poll(() => cards.count(), POLL).toBe(2);
     expect(await cards.first().textContent()).toContain(y.email);
     expect(await cards.first().textContent()).toContain('ENGRAVING');
     await go(p, `#/club/live/${r.id}`, 'THE VAULT RING');
@@ -439,9 +441,9 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
 
     // END NOW: an ADMIN, after the typed phrase.
     await p.click('[data-testid=live-end]');
-    await expect.poll(() => p.locator('dialog [data-testid=dialog-confirm]').isDisabled()).toBe(true);
+    await expect.poll(() => p.locator('dialog [data-testid=dialog-confirm]').isDisabled(), POLL).toBe(true);
     await confirmDialog(p, `END ${r.id.slice(0, 8).toUpperCase()}`);
-    await expect.poll(() => p.locator('[data-testid=live-state]').textContent()).toBe('ENDED');
+    await expect.poll(() => p.locator('[data-testid=live-state]').textContent(), POLL).toBe('ENDED');
     for (const control of ['live-pause', 'live-extend', 'live-message-new', 'live-end', 'live-add-pieces', 'live-let-in']) {
       expect(await p.locator(`[data-testid=${control}]`).count(), control).toBe(0);
     }
@@ -455,7 +457,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await ctx.services.live.enter(w.id, live2.id, { sizeId: live2.sizes[0]!.id }, w.actor);
     const o = await open(OPERATOR);
     await go(o, `#/club/live/${live2.id}`, 'THE SECOND RING');
-    await expect.poll(() => o.locator('[data-testid=live-pause]').count()).toBe(1);
+    await expect.poll(() => o.locator('[data-testid=live-pause]').count(), POLL).toBe(1);
     expect(await o.locator('[data-testid=live-let-in]').count()).toBe(1);
     expect(await o.locator('[data-testid=live-end]').count()).toBe(0);
     expect(await o.locator('[data-testid=live-remove]').count()).toBe(0);
@@ -475,9 +477,9 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
       (window as unknown as { __streams: () => string[] }).__streams = () => all.filter((e) => e.readyState !== EventSource.CLOSED).map((e) => new URL(e.url).pathname);
     });
     await o.reload();
-    await expect.poll(() => o.locator('[data-testid=live-pause]').count()).toBe(1);
+    await expect.poll(() => o.locator('[data-testid=live-pause]').count(), POLL).toBe(1);
     const streams = () => o.evaluate(() => (window as unknown as { __streams: () => string[] }).__streams());
-    await expect.poll(streams).toEqual([`/api/admin/live/${live2.id}/stream`]);
+    await expect.poll(streams, POLL).toEqual([`/api/admin/live/${live2.id}/stream`]);
     let arrive!: () => void;
     const held = new Promise<void>((resolve) => (arrive = resolve));
     let asked!: () => void;
@@ -494,7 +496,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await pending;
     await go(o, '#/club?tab=drops', 'Club');
     await go(o, `#/club/live/${live2.id}`, 'THE SECOND RING');
-    await expect.poll(streams).toEqual([`/api/admin/live/${live2.id}/stream`]);
+    await expect.poll(streams, POLL).toEqual([`/api/admin/live/${live2.id}/stream`]);
     arrive();
     await sleep(1000);
     expect(await streams()).toEqual([`/api/admin/live/${live2.id}/stream`]);
@@ -507,14 +509,14 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     // An AUDITOR reads the board, the line and the release's orders, the emails masked, without one action.
     const a = await open(AUDITOR);
     await go(a, `#/club/live/${r.id}`, 'THE VAULT RING');
-    await expect.poll(() => a.locator('[data-testid=live-orders]').textContent()).toMatch(/^1 confirmed reservation/);
+    await expect.poll(() => a.locator('[data-testid=live-orders]').textContent(), POLL).toMatch(/^1 confirmed reservation/);
     await go(a, `#/orders?dropId=${r.id}`, 'Orders');
-    await expect.poll(() => a.locator('[data-testid=order-card]').count()).toBe(2);
+    await expect.poll(() => a.locator('[data-testid=order-card]').count(), POLL).toBe(2);
     expect(await a.locator('[data-testid=order-card]').first().textContent()).toContain('l***@example.com');
     expect(await a.locator('body').textContent()).not.toContain(y.email);
     await go(a, `#/club/live/${r.id}`, 'THE VAULT RING');
     await go(a, `#/club/live/${live2.id}`, 'THE SECOND RING');
-    await expect.poll(() => a.locator('[data-testid=live-entry-account]').first().textContent()).toBe('l***@example.com');
+    await expect.poll(() => a.locator('[data-testid=live-entry-account]').first().textContent(), POLL).toBe('l***@example.com');
     for (const action of ['live-pause', 'live-extend', 'live-message-new', 'live-end', 'live-add-pieces', 'live-let-in', 'live-free', 'live-remove', 'live-board-issue', 'live-cancel']) {
       expect(await a.locator(`[data-testid=${action}]`).count(), action).toBe(0);
     }
@@ -536,18 +538,18 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     const state = () => p.locator('[data-testid=live-state]').textContent();
     const lead = () => p.locator('.page-head__lead').textContent();
     const count = (id: string) => p.locator(`[data-testid=${id}]`).count();
-    await expect.poll(state).toBe('SCHEDULED');
+    await expect.poll(state, POLL).toBe('SCHEDULED');
 
     // Published, announced later: its post of the circle is added, then withdrawn, on its page.
     expect(await count('live-circle')).toBe(0);
     await p.click('[data-testid=live-circle-post]');
-    await expect.poll(() => p.locator('dialog').textContent()).toContain('shown from the announcement');
+    await expect.poll(() => p.locator('dialog').textContent(), POLL).toContain('shown from the announcement');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=live-circle]').textContent()).toMatch(/^Post shown from /);
+    await expect.poll(() => p.locator('[data-testid=live-circle]').textContent(), POLL).toMatch(/^Post shown from /);
     expect(await count('live-circle-post')).toBe(0);
     await p.click('[data-testid=live-circle-withdraw]');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=live-circle]').textContent()).toBe('Post withdrawn');
+    await expect.poll(() => p.locator('[data-testid=live-circle]').textContent(), POLL).toBe('Post withdrawn');
     expect(await ctx.db.selectFrom('circle_posts').select('published_at').where('drop_id', '=', r.id).execute()).toEqual([{ published_at: null }]);
     for (const [id, n] of [['live-circle-post', 1], ['live-edit-sizes', 1], ['live-cancel', 1], ['live-add-pieces', 0], ['live-message-new', 0], ['live-pause', 0]] as const) {
       expect(await count(id), id).toBe(n);
@@ -559,7 +561,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     // Announced: the settings and the post's choice go, ADD PIECES and the host message come.
     await move({ announce_at: new Date(Date.now() - HOUR) });
     await expect.poll(state, { timeout: 15_000 }).toBe('ANNOUNCED');
-    await expect.poll(() => count('live-add-pieces')).toBe(1);
+    await expect.poll(() => count('live-add-pieces'), POLL).toBe(1);
     expect(await lead()).toMatch(/^Announced on \/verify/);
     for (const [id, n] of [['live-circle-post', 0], ['live-edit-sizes', 0], ['live-cancel', 1], ['live-message-new', 1], ['live-pause', 0], ['live-end', 1]] as const) {
       expect(await count(id), id).toBe(n);
@@ -568,7 +570,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     // The room open: no cancellation any more, no pause before T0.
     await move({ opens_at: new Date(Date.now() + 2 * 60_000) });
     await expect.poll(state, { timeout: 15_000 }).toBe('ROOM OPEN');
-    await expect.poll(() => count('live-cancel')).toBe(0);
+    await expect.poll(() => count('live-cancel'), POLL).toBe(0);
     expect(await count('live-pause')).toBe(0);
 
     // T0: PAUSE comes with LIVE, the Publication's mark and the lead with it.
@@ -577,7 +579,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await expect.poll(() => count('live-pause'), { timeout: 15_000 }).toBe(1);
     expect(await state()).toBe('LIVE');
     expect(await lead()).toMatch(/^Live: /);
-    await expect.poll(() => p.locator('[data-testid=live-board-state]').textContent()).toContain('LIVE');
+    await expect.poll(() => p.locator('[data-testid=live-board-state]').textContent(), POLL).toContain('LIVE');
 
     // The end of the sales: no control is left.
     await move({ closes_at: new Date(Date.now() - 1000) });
@@ -617,8 +619,8 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
 
     const p = await open(ADMIN);
     await go(p, `#/club/live/${r.id}`, 'THE NIGHT RING');
-    await expect.poll(() => p.locator('[data-testid=live-state]').textContent()).toBe('SOLD OUT');
-    await expect.poll(() => p.locator('[data-testid=live-after-room-state]').textContent()).toBe('OPENS SOON');
+    await expect.poll(() => p.locator('[data-testid=live-state]').textContent(), POLL).toBe('SOLD OUT');
+    await expect.poll(() => p.locator('[data-testid=live-after-room-state]').textContent(), POLL).toBe('OPENS SOON');
     expect(await p.locator('[data-testid=live-after-room-guests]').textContent()).toBe('1');
     expect(await p.locator('[data-testid=live-after-room-timing]').textContent()).toBe('10 min after the sell-out, open 15 min');
     expect(await p.locator('#live-part-after-room').textContent()).toContain('Its guests see it from its opening');
@@ -629,9 +631,9 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await expect.poll(async () => (await title(p).textContent())?.trim(), { timeout: 15_000 }).toBe('THE NIGHT RING · THE AFTER-ROOM');
     expect(await p.locator('.page-head__lead').textContent()).toMatch(/^Opened by the release’s sell-out/);
     expect(await p.locator('[data-testid=live-after-room-of]').textContent()).toBe('THE NIGHT RING');
-    await expect.poll(() => p.locator('[data-testid=live-state]').textContent()).toBe('OPENS SOON');
+    await expect.poll(() => p.locator('[data-testid=live-state]').textContent(), POLL).toBe('OPENS SOON');
     expect(await p.locator('#live-part-after-room-own').textContent()).toContain('30 s to hold the seal · 5 min to press PAY · 1 piece per person');
-    await expect.poll(() => p.locator('[data-testid=live-in-room]').count()).toBe(1);
+    await expect.poll(() => p.locator('[data-testid=live-in-room]').count(), POLL).toBe(1);
     for (const id of ['live-edit-release', 'live-edit-sizes', 'live-edit-after-room', 'live-publish', 'live-cancel', 'live-circle-post', 'live-board-issue', 'live-silhouette-edit', 'live-page']) {
       expect(await p.locator(`[data-testid=${id}]`).count(), id).toBe(0);
     }
@@ -641,7 +643,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await shot(p, 'after-room-own');
     // Never listed among the drops on its own.
     await go(p, '#/club?tab=drops', 'Club');
-    await expect.poll(() => p.locator('#live-releases tbody tr', { hasText: 'THE NIGHT RING' }).count()).toBe(1);
+    await expect.poll(() => p.locator('#live-releases tbody tr', { hasText: 'THE NIGHT RING' }).count(), POLL).toBe(1);
     expect(await csp(p)).toEqual([]);
     await p.context().close();
   }, STEP_TIMEOUT);
@@ -682,11 +684,11 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     const p = await open(ADMIN);
     await go(p, '#/club?tab=drops', 'Club');
     await p.click('[data-testid=live-new]');
-    await expect.poll(() => p.locator('dialog select[name=locationId] option').first().textContent()).toBe('The default (FRANCE WAREHOUSE)');
+    await expect.poll(() => p.locator('dialog select[name=locationId] option').first().textContent(), POLL).toBe('The default (FRANCE WAREHOUSE)');
     await p.selectOption('dialog select[name=modelId]', nocturne);
     // The stock first: written into the sizes, said with where each comes from.
     await expect.poll(() => p.locator('dialog [data-testid=live-size-mix-line]').textContent(), { timeout: 15_000 }).toBe('52 = 2 (2 in stock) · 54 = 1 (1 in stock)');
-    await expect.poll(() => p.locator('dialog textarea[name=sizes]').inputValue()).toBe('52 = 2\n54 = 1');
+    await expect.poll(() => p.locator('dialog textarea[name=sizes]').inputValue(), POLL).toBe('52 = 2\n54 = 1');
     expect(await p.locator('dialog [data-testid=live-size-mix-why]').textContent()).toContain('In stock at FRANCE WAREHOUSE: 52: 2, 54: 1, offered first.');
     // Yours to change: typed by hand, the proposal never writes over it.
     await p.fill('dialog textarea[name=sizes]', '52 = 3\n54 = 1\n56 = 1');
@@ -698,9 +700,9 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await p.fill('dialog input[name=price]', '2 400');
     expect(await p.locator('dialog textarea[name=sizes]').inputValue()).toBe('52 = 3\n54 = 1\n56 = 1');
     await confirmDialog(p);
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('THE NOCTURNE RING');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('THE NOCTURNE RING');
     const id = decodeURIComponent(new URL(p.url()).hash.split('/').pop()!);
-    await expect.poll(() => p.locator('[data-testid=live-sizes]').textContent()).toBe('52 × 3 · 54 × 1 · 56 × 1');
+    await expect.poll(() => p.locator('[data-testid=live-sizes]').textContent(), POLL).toBe('52 × 3 · 54 × 1 · 56 × 1');
     expect(await p.locator('[data-testid=live-location]').textContent()).toBe('FRANCE WAREHOUSE');
     // Its stock under its sizes from its creation on (plan NEXT LOT §3.5.4.3): per size, the owner's sentence; a size of a
     // model with its supplier, Add to supplier order, into that supplier's draft for ORBES to confirm.
@@ -729,14 +731,14 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await p.fill('dialog input[name=text]', 'WHICH FINISH?');
     await p.fill('dialog textarea[name=answers]', 'GOLD\nGOLD');
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('The answer GOLD is listed twice.');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('The answer GOLD is listed twice.');
     await p.fill('dialog textarea[name=answers]', 'GOLD\nSILVER\nBLACK');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=live-question]').textContent()).toBe('WHICH FINISH? · GOLD · SILVER · BLACK');
+    await expect.poll(() => p.locator('[data-testid=live-question]').textContent(), POLL).toBe('WHICH FINISH? · GOLD · SILVER · BLACK');
 
     // The best time to open, for every collector (its tiers): the busiest hour, its T0 beside it.
     const panel = p.locator('#live-best-time');
-    await expect.poll(() => panel.locator('[data-testid=best-time-suggested]').textContent()).toMatch(new RegExp(`^${hh(usHour)} Paris · \\d+ % of the activity of every collector$`));
+    await expect.poll(() => panel.locator('[data-testid=best-time-suggested]').textContent(), POLL).toMatch(new RegExp(`^${hh(usHour)} Paris · \\d+ % of the activity of every collector$`));
     expect(await panel.locator('[data-testid=best-time-release]').textContent()).toMatch(new RegExp(`^Its T0 · ${hh(paris(t0))} Paris · \\d+ % of that activity$`));
     expect(await panel.locator(`.best__col--suggested`).getAttribute('data-hour')).toBe(String(usHour));
     expect(await panel.locator('.best__col').count()).toBe(24);
@@ -756,18 +758,18 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     // Added from the PUBLISH dialog (§3.5.4.3): its own dialog over it, then the block read again in place.
     await p.locator('dialog [data-testid=live-feasibility-warning]', { hasText: '56:' }).locator('[data-testid=live-add-to-order]').click();
     const adding = p.locator('dialog.dialog').last();
-    await expect.poll(() => adding.locator('[data-testid=live-add-to-order-text]').textContent()).toBe(
+    await expect.poll(() => adding.locator('[data-testid=live-add-to-order-text]').textContent(), POLL).toBe(
       'Add 1 piece of NOCTURNE · BLUE · 56 to the draft of MAISON NORD, to deliver to FRANCE WAREHOUSE. You confirm the draft before it is sent.',
     );
     await adding.locator('[data-testid=dialog-confirm]').click();
     await p.waitForSelector('.toast:has-text("Added to the draft.")');
-    await expect.poll(() => p.locator('dialog.dialog').count()).toBe(1);
+    await expect.poll(() => p.locator('dialog.dialog').count(), POLL).toBe(1);
     await expect
       .poll(() => p.locator('dialog [data-testid=live-feasibility-warning]').allTextContents())
       .toEqual(['52: 2 in stock, 1 will wait for supplier stock. Already ordered: 1 in a draft.', '56: 0 in stock, 1 will wait for supplier stock. Already ordered: 1 in a draft.']);
     expect((await ctx.services.supplierOrders.list({ status: 'DRAFT' })).map((d) => d.pieces.ordered)).toEqual([2]);
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=live-state]').textContent()).toBe('ANNOUNCED');
+    await expect.poll(() => p.locator('[data-testid=live-state]').textContent(), POLL).toBe('ANNOUNCED');
     const published = await ctx.db.selectFrom('audit_logs').select('details').where('target_id', '=', id).where('action', '=', 'drop.live.publish').executeTakeFirstOrThrow();
     expect(published.details).toMatchObject({ locationId: france, waitForStock: 2, shortSizes: ['52:1', '56:1'] });
     // Announced: the question is fixed, the best time no longer read.
@@ -806,7 +808,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await ctx.services.questions.answer(second.id, r.id, 1, second.actor);
     await ctx.services.questions.answer(absent.id, r.id, 1, absent.actor);
     await go(p, `#/club/live/${r.id}`, 'THE ASKED RING');
-    await expect.poll(() => p.locator('[data-testid=live-question-state]').textContent()).toMatch(/^Open until \d{2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC$/);
+    await expect.poll(() => p.locator('[data-testid=live-question-state]').textContent(), POLL).toMatch(/^Open until \d{2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC$/);
     expect(await p.locator('[data-testid=live-question-asked]').textContent()).toBe('2');
     expect(await p.locator('#live-part-question').textContent()).toContain('1 on the end page (took part, no piece) · 1 in MY PIECES (I’LL BE THERE, did not come)');
     expect(await p.locator('[data-testid=live-question-answered]').textContent()).toBe('2');
@@ -830,18 +832,18 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     const note = (id: string) => p.locator(`[data-testid=${id}] .kpi__note`).textContent();
 
     // No pace: everyone admitted at T0, as before; the times part holds it, blank.
-    await expect.poll(paceLine).toBe('None: everyone is admitted at T0');
+    await expect.poll(paceLine, POLL).toBe('None: everyone is admitted at T0');
     expect(await p.locator('[data-testid=live-pace-setting]').textContent()).toBe('None: everyone admitted at T0');
     expect(await p.locator('[data-testid=live-pace] .kpi').count()).toBe(0);
     await shot(p, 'pace-none');
     await p.click('[data-testid=live-edit-times]');
     await p.fill('dialog input[name=paceBatch]', '2');
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toContain('leave both blank for none');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toContain('leave both blank for none');
     await p.fill('dialog input[name=paceMinutes]', '5');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=live-pace-setting]').textContent()).toBe('2 buyers every 5 minutes');
-    await expect.poll(paceLine).toBe('2 buyers every 5 minutes');
+    await expect.poll(() => p.locator('[data-testid=live-pace-setting]').textContent(), POLL).toBe('2 buyers every 5 minutes');
+    await expect.poll(paceLine, POLL).toBe('2 buyers every 5 minutes');
     // Before T0 the first batch is due at T0, said in Paris time.
     expect(await fig(p, 'live-pace-next').textContent()).toBe(parisClock(r.opensAt));
     expect(await note('live-pace-next')).toBe('PARIS · AT T0');
@@ -866,11 +868,11 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     const due = parisClock(new Date(t0.getTime() + 5 * 60_000));
     expect(await fig(p, 'live-pace-next').textContent()).toBe(due);
     const admitted = p.locator('#live-entries [data-testid=live-entry-admitted]');
-    await expect.poll(() => admitted.allTextContents()).toEqual([expect.stringMatching(/^Batch 1\d{2}:\d{2} Paris$/), expect.stringMatching(/^Batch 1/), 'Waiting', 'Waiting', 'Waiting']);
+    await expect.poll(() => admitted.allTextContents(), POLL).toEqual([expect.stringMatching(/^Batch 1\d{2}:\d{2} Paris$/), expect.stringMatching(/^Batch 1/), 'Waiting', 'Waiting', 'Waiting']);
 
     // SET PACE during the release: from the next batch, which keeps its time.
     await p.click('[data-testid=live-pace-set]');
-    await expect.poll(() => p.locator('dialog [data-testid=live-pace-effect]').textContent()).toBe(`The change takes effect from the next batch, which keeps its time (${due} Paris).`);
+    await expect.poll(() => p.locator('dialog [data-testid=live-pace-effect]').textContent(), POLL).toBe(`The change takes effect from the next batch, which keeps its time (${due} Paris).`);
     await p.fill('dialog input[name=batch]', '3');
     await p.fill('dialog input[name=minutes]', '2');
     await confirmDialog(p);
@@ -889,14 +891,14 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
 
     // NEXT BATCH NOW: the three waiting admitted at once, an extra batch.
     await p.click('[data-testid=live-pace-next-now]');
-    await expect.poll(() => p.locator('dialog [data-testid=live-pace-next-text]').textContent()).toMatch(/^The next 3 of the 3 waiting in the queue are admitted now/);
+    await expect.poll(() => p.locator('dialog [data-testid=live-pace-next-text]').textContent(), POLL).toMatch(/^The next 3 of the 3 waiting in the queue are admitted now/);
     await confirmDialog(p);
     await expect.poll(() => fig(p, 'live-pace-waiting').textContent(), { timeout: 10_000 }).toBe('0');
     expect(await fig(p, 'live-pace-admitted').textContent()).toBe('5');
     expect(await fig(p, 'live-pace-batches').textContent()).toBe('2');
     // Nobody left in the queue: no NEXT BATCH NOW.
-    await expect.poll(() => p.locator('[data-testid=live-pace-next-now]').count()).toBe(0);
-    await expect.poll(() => admitted.allTextContents()).toEqual([expect.stringMatching(/^Batch 1/), expect.stringMatching(/^Batch 1/), expect.stringMatching(/^Batch 2/), expect.stringMatching(/^Batch 2/), expect.stringMatching(/^Batch 2/)]);
+    await expect.poll(() => p.locator('[data-testid=live-pace-next-now]').count(), POLL).toBe(0);
+    await expect.poll(() => admitted.allTextContents(), POLL).toEqual([expect.stringMatching(/^Batch 1/), expect.stringMatching(/^Batch 1/), expect.stringMatching(/^Batch 2/), expect.stringMatching(/^Batch 2/), expect.stringMatching(/^Batch 2/)]);
     const actions = await ctx.db.selectFrom('audit_logs').select('action').where('target_id', '=', r.id).where('action', 'like', 'drop.live.pace%').orderBy('id').execute();
     expect(actions.map((a) => a.action)).toEqual(['drop.live.pace', 'drop.live.pace.pause', 'drop.live.pace.resume', 'drop.live.pace.next']);
     expect(await figuresInDisplayFace(p)).toEqual([]);

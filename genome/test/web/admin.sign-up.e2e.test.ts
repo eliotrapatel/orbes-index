@@ -35,6 +35,8 @@ const AUDITOR = { email: 'signup.auditor@orbes.test', password: 'sign-up auditor
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'out');
 const SCREENSHOTS = !!process.env.ORBES_SCREENSHOTS;
 const STEP_TIMEOUT = 180_000;
+/** expect.poll's budget (its default, 1 s, is too short on a shared CI runner). */
+const POLL = { timeout: 15_000 };
 const PRESETS = ['Instagram', 'TikTok', 'A friend', 'The press', 'A shop', 'A web search', 'An influencer', 'Other'];
 
 async function freePort(): Promise<number> {
@@ -71,7 +73,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Sign-up page (plan CUSTOMER INTEL
     await p.fill('input[name=email]', who.email);
     await p.fill('input[name=password]', who.password);
     await p.click('[data-testid=login-submit]');
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dashboard');
     return p;
   }
 
@@ -180,53 +182,53 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Sign-up page (plan CUSTOMER INTEL
       await dialogWith(p, 'A podcast');
       await confirmed(p);
       await toast(p, C.added);
-      await expect.poll(() => labels(p)).toEqual([...PRESETS.slice(0, 7), 'A podcast', 'Other']);
+      await expect.poll(() => labels(p), POLL).toEqual([...PRESETS.slice(0, 7), 'A podcast', 'Other']);
       // A label taken whatever the case is refused in the dialog.
       await p.click('[data-testid=heard-add]');
       await dialogWith(p, 'instagram');
-      await expect.poll(async () => (await p.locator('dialog.dialog .dialog__error').textContent())?.trim()).toBe(C.taken);
+      await expect.poll(async () => (await p.locator('dialog.dialog .dialog__error').textContent())?.trim(), POLL).toBe(C.taken);
       await p.keyboard.press('Escape');
       await p.waitForSelector('dialog.dialog', { state: 'detached' });
       // Edit: unchanged, then renamed.
       await row(p, 'A podcast').locator('[data-testid=heard-edit]').click();
       expect(await p.locator('dialog.dialog .dialog__text').first().textContent()).toBe(C.editText);
       await dialogWith(p, null);
-      await expect.poll(async () => (await p.locator('dialog.dialog .dialog__error').textContent())?.trim()).toBe(C.unchanged);
+      await expect.poll(async () => (await p.locator('dialog.dialog .dialog__error').textContent())?.trim(), POLL).toBe(C.unchanged);
       await dialogWith(p, 'A radio show');
       await confirmed(p);
       await toast(p, C.saved);
-      await expect.poll(() => labels(p)).toEqual([...PRESETS.slice(0, 7), 'A radio show', 'Other']);
+      await expect.poll(() => labels(p), POLL).toEqual([...PRESETS.slice(0, 7), 'A radio show', 'Other']);
       // Move up and down: at once.
       expect(await row(p, 'Instagram').locator('[data-testid=heard-up]').isDisabled()).toBe(true);
       expect(await row(p, 'A radio show').locator('[data-testid=heard-down]').isDisabled()).toBe(true);
       await row(p, 'A radio show').locator('[data-testid=heard-up]').click();
       await toast(p, C.orderSaved);
-      await expect.poll(() => labels(p)).toEqual([...PRESETS.slice(0, 6), 'A radio show', 'An influencer', 'Other']);
+      await expect.poll(() => labels(p), POLL).toEqual([...PRESETS.slice(0, 6), 'A radio show', 'An influencer', 'Other']);
       await row(p, 'Instagram').locator('[data-testid=heard-down]').click();
-      await expect.poll(() => labels(p)).toEqual(['TikTok', 'Instagram', ...PRESETS.slice(2, 6), 'A radio show', 'An influencer', 'Other']);
+      await expect.poll(() => labels(p), POLL).toEqual(['TikTok', 'Instagram', ...PRESETS.slice(2, 6), 'A radio show', 'An influencer', 'Other']);
       // Set aside, then offer again.
       await row(p, 'TikTok').locator('[data-testid=heard-toggle]').click();
       expect(await p.locator('dialog.dialog .dialog__text').first().textContent()).toBe(C.setAsideText);
       await dialogWith(p, null);
       await confirmed(p);
       await toast(p, C.setAsideDone);
-      await expect.poll(() => row(p, 'TikTok').locator('.status__text').textContent()).toBe(C.setAside);
+      await expect.poll(() => row(p, 'TikTok').locator('.status__text').textContent(), POLL).toBe(C.setAside);
       await row(p, 'TikTok').locator('[data-testid=heard-toggle]').click();
       expect(await p.locator('dialog.dialog .dialog__text').first().textContent()).toBe(C.offerAgainText);
       await dialogWith(p, null);
       await confirmed(p);
       await toast(p, C.offeredAgain);
-      await expect.poll(() => row(p, 'TikTok').locator('.status__text').textContent()).toBe(C.offered);
+      await expect.poll(() => row(p, 'TikTok').locator('.status__text').textContent(), POLL).toBe(C.offered);
       // Up to 12 offered: three more, then Add says so.
       for (const label of ['A newsletter', 'A concierge', 'An event']) {
         await p.click('[data-testid=heard-add]');
         await dialogWith(p, label);
         await confirmed(p);
-        await expect.poll(async () => (await labels(p)).includes(label)).toBe(true);
+        await expect.poll(async () => (await labels(p)).includes(label), POLL).toBe(true);
       }
       await p.click('[data-testid=heard-add]');
       await dialogWith(p, 'A billboard');
-      await expect.poll(async () => (await p.locator('dialog.dialog .dialog__error').textContent())?.trim()).toBe(C.limit);
+      await expect.poll(async () => (await p.locator('dialog.dialog .dialog__error').textContent())?.trim(), POLL).toBe(C.limit);
       await p.keyboard.press('Escape');
       await p.waitForSelector('dialog.dialog', { state: 'detached' });
       // Audited, by label (house words).
@@ -245,7 +247,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Sign-up page (plan CUSTOMER INTEL
     async () => {
       const p = await open(AUDITOR);
       await go(p, '#/sign-up', 'Sign-up');
-      await expect.poll(async () => (await labels(p)).length).toBeGreaterThan(8);
+      await expect.poll(async () => (await labels(p)).length, POLL).toBeGreaterThan(8);
       expect(await p.locator('#sign-up-heard').getByRole('button').count()).toBe(0);
       expect(await p.locator('[data-testid=heard-add]').count()).toBe(0);
       await p.context().close();

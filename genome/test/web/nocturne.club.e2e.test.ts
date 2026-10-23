@@ -23,6 +23,8 @@ import { openState, settle, stateById, type UiState } from '../support/nocturne-
 import { CHROMIUM_PATH, type UiStage } from '../support/ui-stage.js';
 
 const HAS_CHROMIUM = existsSync(CHROMIUM_PATH);
+/** expect.poll's budget (its default, 1 s, is too short on a shared CI runner). */
+const POLL = { timeout: 10_000 };
 const CLUB = '/verify/club';
 const TIERS = ['TITANE', 'PLATINE', 'PALLADIUM'];
 
@@ -86,7 +88,7 @@ const CASES: { state: UiState; check: (page: Page, run: Run) => Promise<void> }[
       await link.click();
       await clubShown(page);
       expect(page.context().pages()).toHaveLength(pages);
-      await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe('club-title');
+      await expect.poll(() => page.evaluate(() => document.activeElement?.id), POLL).toBe('club-title');
       // FROM n PIECES in the reading face, as the tier's lines; its name in the display face.
       const faces = await page.locator('.view--club .n-club__plate').first().evaluate((plate) => {
         const font = (sel: string) => getComputedStyle(plate.querySelector(sel)!).fontFamily;
@@ -98,7 +100,7 @@ const CASES: { state: UiState; check: (page: Page, run: Run) => Promise<void> }[
       await noHowLink(page);
       // Back: the landing again, in the same tab.
       await page.goBack();
-      await expect.poll(() => pathOf(page)).toBe('/verify');
+      await expect.poll(() => pathOf(page), POLL).toBe('/verify');
       await page.locator('footer.n-foot').waitFor();
       await expect.poll(() => page.locator('.view--club:visible').count(), { timeout: 10_000 }).toBe(0);
       await page.goForward();
@@ -106,7 +108,7 @@ const CASES: { state: UiState; check: (page: Page, run: Run) => Promise<void> }[
       // Signed out: MY PIECES' sign-in.
       expect(await wayOf(page)).toEqual({ text: 'SIGN IN TO SEE YOUR TIER', href: '/verify/pieces', to: 'signIn', target: null });
       await page.locator('.view--club .n-club__yours').click();
-      await expect.poll(() => pathOf(page)).toBe('/verify/pieces');
+      await expect.poll(() => pathOf(page), POLL).toBe('/verify/pieces');
       await page.locator('input[name=email]').first().waitFor({ timeout: 20_000 });
       expect(await page.locator('input[type=password]').count()).toBeGreaterThan(0);
       expect(page.context().pages()).toHaveLength(pages);
@@ -126,7 +128,7 @@ const CASES: { state: UiState; check: (page: Page, run: Run) => Promise<void> }[
       await row.scrollIntoViewIfNeeded();
       await row.click();
       await clubShown(page);
-      await expect.poll(() => page.locator('.n-account:not([hidden])').count()).toBe(0);
+      await expect.poll(() => page.locator('.n-account:not([hidden])').count(), POLL).toBe(0);
       await noHowLink(page);
       // YOUR TIER: PLATINE · n PIECES HELD, n the pieces the account holds now (GET /api/v1/club/status).
       const held = await stage.ctx.services.club.status(demo.accounts.platine!.id);
@@ -139,11 +141,11 @@ const CASES: { state: UiState; check: (page: Page, run: Run) => Promise<void> }[
       expect(pathOf(page)).toBe(CLUB);
       // Closed: THE CLUB still there, the focus back on the link.
       await page.keyboard.press('Escape');
-      await expect.poll(() => page.locator('.n-account:not([hidden])').count()).toBe(0);
-      await expect.poll(() => yours.evaluate((el) => el === document.activeElement)).toBe(true);
+      await expect.poll(() => page.locator('.n-account:not([hidden])').count(), POLL).toBe(0);
+      await expect.poll(() => yours.evaluate((el) => el === document.activeElement), POLL).toBe(true);
       // Back: the landing again.
       await page.goBack();
-      await expect.poll(() => pathOf(page)).toBe('/verify');
+      await expect.poll(() => pathOf(page), POLL).toBe('/verify');
       await page.locator('footer.n-foot').waitFor();
       await expect.poll(() => page.locator('.view--club:visible').count(), { timeout: 10_000 }).toBe(0);
     },
@@ -155,7 +157,7 @@ const CASES: { state: UiState; check: (page: Page, run: Run) => Promise<void> }[
       await clubShown(page);
       expect(await wayOf(page)).toEqual({ text: 'YOUR FIRST PIECE OPENS TITANE', href: '/verify/pieces', to: 'pieces', target: null });
       await page.locator('.view--club .n-club__yours').click();
-      await expect.poll(() => pathOf(page)).toBe('/verify/pieces');
+      await expect.poll(() => pathOf(page), POLL).toBe('/verify/pieces');
       await page.locator('.view--pieces').waitFor({ timeout: 20_000 });
       await settle(page, 400);
       expect(await page.locator('.view--pieces input[type=password]').count()).toBe(0);

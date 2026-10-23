@@ -36,6 +36,8 @@ const ADMIN = { email: 'console@orbes.test', password: 'orbes console passphrase
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'out');
 const SCREENSHOTS = !!process.env.ORBES_SCREENSHOTS;
 const STEP_TIMEOUT = 180_000;
+/** expect.poll's budget (its default, 1 s, is too short on a shared CI runner). */
+const POLL = { timeout: 15_000 };
 
 async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -82,7 +84,7 @@ describe.skipIf(!HAS_CHROMIUM)('Supplier orders in the console (plan NEXT LOT §
     await p.fill('input[name=email]', who.email);
     await p.fill('input[name=password]', who.password);
     await p.click('[data-testid=login-submit]');
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe(heading);
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe(heading);
     return p;
   }
 
@@ -180,32 +182,32 @@ describe.skipIf(!HAS_CHROMIUM)('Supplier orders in the console (plan NEXT LOT §
     const a = await open(ADMIN, 'Dashboard');
     await go(a, `#/logistics?tab=stock&locationId=${france}`, 'Logistics');
     const row54 = a.locator('#logistics-stock tbody tr', { has: a.locator('.cell-sub.mono', { hasText: new RegExp(`^${code54}$`) }) });
-    await expect.poll(() => row54.locator('[data-testid=stock-to-order]').textContent()).toBe('TO ORDER2');
+    await expect.poll(() => row54.locator('[data-testid=stock-to-order]').textContent(), POLL).toBe('TO ORDER2');
     expect(await row54.locator('[data-testid=stock-add-to-order]').getAttribute('class')).toBe('cbtn cbtn--secondary');
     await row54.locator('[data-testid=stock-add-to-order]').click();
     expect(await a.locator('dialog .dialog__text').textContent()).toBe('The pieces of MONOLITHE · 54 go to the draft of its supplier, to deliver to FRANCE WAREHOUSE. You confirm the draft before it is sent.');
     expect(await a.locator('dialog input[name=quantity]').inputValue()).toBe('2');
     await confirmDialog(a);
     await a.waitForSelector('.toast:has-text("Added to the draft.")');
-    await expect.poll(() => row54.locator('[data-testid=stock-to-order]').count()).toBe(0);
+    await expect.poll(() => row54.locator('[data-testid=stock-to-order]').count(), POLL).toBe(0);
 
     // To order: 52 for its waiting order; ORBITE 48 without a supplier, apart.
     await a.click('.side__link[data-route=supplierOrders]');
-    await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Supplier orders');
+    await expect.poll(async () => (await title(a).textContent())?.trim(), POLL).toBe('Supplier orders');
     const group = a.locator('[data-testid=proposal-group]', { hasText: 'MAISON NORD · FRANCE WAREHOUSE' });
-    await expect.poll(() => group.locator('tbody tr').count()).toBe(2);
+    await expect.poll(() => group.locator('tbody tr').count(), POLL).toBe(2);
     expect(await group.locator('thead th').allTextContents()).toEqual(['Model', 'Variant', 'Size', 'Waiting orders', 'Under the minimum', 'Expected', 'In the draft', 'To order']);
     expect(await group.locator('[data-testid=proposal-to-order]').allTextContents()).toEqual(['1', '0']);
     expect(await a.locator('[data-testid=proposal-no-supplier]').textContent()).toBe('No supplier set for ORBITE · 48: set it on the model’s page.');
     await shot(a, 'proposal');
     await group.locator('[data-testid=proposal-add]').click();
     await a.waitForSelector('.toast:has-text("Added to the draft.")');
-    await expect.poll(() => group.locator('[data-testid=proposal-to-order]').allTextContents()).toEqual(['0', '0']);
+    await expect.poll(() => group.locator('[data-testid=proposal-to-order]').allTextContents(), POLL).toEqual(['0', '0']);
     expect(await a.locator('#supplier-orders-list [data-testid=supplier-order-status]').allTextContents()).toEqual(['DRAFT']);
 
     // The draft: Edit, a line added then removed, Mark sent refused without its prices, then sent.
     await group.locator('[data-testid=proposal-draft]').click();
-    await expect.poll(() => a.locator('[data-testid=supplier-order-mark]').textContent()).toBe('DRAFT');
+    await expect.poll(() => a.locator('[data-testid=supplier-order-mark]').textContent(), POLL).toBe('DRAFT');
     const reference = (await title(a).textContent())!.trim();
     expect(reference).toMatch(/^SO-[0-9A-F]{8}$/);
     expect(await a.locator('#supplier-order-lines tbody tr').count()).toBe(2);
@@ -216,18 +218,18 @@ describe.skipIf(!HAS_CHROMIUM)('Supplier orders in the console (plan NEXT LOT §
     await confirmDialog(a);
     await a.waitForSelector('.toast:has-text("Supplier order saved.")');
     await a.click('[data-testid=line-add]');
-    await expect.poll(() => a.locator('dialog select[name=skuId] option').count()).toBeGreaterThan(1);
+    await expect.poll(() => a.locator('dialog select[name=skuId] option').count(), POLL).toBeGreaterThan(1);
     await a.selectOption('dialog select[name=skuId]', other);
     await a.fill('dialog input[name=quantity]', '3');
     await confirmDialog(a);
-    await expect.poll(() => a.locator('#supplier-order-lines tbody tr').count()).toBe(3);
+    await expect.poll(() => a.locator('#supplier-order-lines tbody tr').count(), POLL).toBe(3);
     await a.locator('#supplier-order-lines tbody tr', { hasText: 'ORBITE' }).locator('[data-testid=line-remove]').click();
     await confirmDialog(a);
-    await expect.poll(() => a.locator('#supplier-order-lines tbody tr').count()).toBe(2);
+    await expect.poll(() => a.locator('#supplier-order-lines tbody tr').count(), POLL).toBe(2);
     await a.click('[data-testid=supplier-order-send]');
     expect(await a.locator('dialog .dialog__text').textContent()).toBe('The order is SENT: its lines and prices no longer change. Download its PDF and send it to the supplier yourself.');
     await a.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => a.locator('dialog .dialog__error').textContent()).toBe('Before it is sent, an order needs at least one line, a unit price on each, its currency and its expected delivery date.');
+    await expect.poll(() => a.locator('dialog .dialog__error').textContent(), POLL).toBe('Before it is sent, an order needs at least one line, a unit price on each, its currency and its expected delivery date.');
     await a.click('[data-testid=dialog-cancel]');
     for (let i = 0; i < 2; i++) {
       await a.locator('#supplier-order-lines tbody tr').nth(i).locator('[data-testid=line-edit]').click();
@@ -235,12 +237,12 @@ describe.skipIf(!HAS_CHROMIUM)('Supplier orders in the console (plan NEXT LOT §
       await confirmDialog(a);
       await a.waitForSelector('dialog.dialog', { state: 'detached' });
     }
-    await expect.poll(async () => (await a.locator('[data-testid=supplier-order-total]').textContent())?.replace(/\s/g, ' ')).toBe('€ 385');
+    await expect.poll(async () => (await a.locator('[data-testid=supplier-order-total]').textContent())?.replace(/\s/g, ' '), POLL).toBe('€ 385');
     await shot(a, 'draft');
     await a.click('[data-testid=supplier-order-send]');
     await confirmDialog(a);
     await a.waitForSelector('.toast:has-text("Supplier order sent.")');
-    await expect.poll(() => a.locator('[data-testid=supplier-order-mark]').textContent()).toBe('SENT');
+    await expect.poll(() => a.locator('[data-testid=supplier-order-mark]').textContent(), POLL).toBe('SENT');
     expect(await a.locator('[data-testid=line-edit]').count()).toBe(0);
     const [pdf] = await Promise.all([a.waitForEvent('download'), a.click('[data-testid=supplier-order-pdf]')]);
     expect(pdf.suggestedFilename()).toBe(`ORBES-${reference}.pdf`);
@@ -254,7 +256,7 @@ describe.skipIf(!HAS_CHROMIUM)('Supplier orders in the console (plan NEXT LOT §
     await a.click('[data-testid=supplier-order-confirmed]');
     expect(await a.locator('dialog input[name=expectedOn]').inputValue()).toBe('2026-11-20');
     await confirmDialog(a);
-    await expect.poll(() => a.locator('[data-testid=supplier-order-mark]').textContent()).toBe('EXPECTED');
+    await expect.poll(() => a.locator('[data-testid=supplier-order-mark]').textContent(), POLL).toBe('EXPECTED');
     // The invoice, entered then paid.
     await a.click('[data-testid=invoice-enter]');
     await a.fill('dialog input[name=number]', 'MN-2026-114');
@@ -265,16 +267,16 @@ describe.skipIf(!HAS_CHROMIUM)('Supplier orders in the console (plan NEXT LOT §
     await a.click('[data-testid=invoice-paid-button]');
     expect(await a.locator('dialog .dialog__text').textContent()).toBe('ORBES has paid this invoice.');
     await confirmDialog(a);
-    await expect.poll(() => a.locator('[data-testid=invoice-paid]').textContent()).not.toBe('—');
+    await expect.poll(() => a.locator('[data-testid=invoice-paid]').textContent(), POLL).not.toBe('—');
     expect(await a.locator('#supplier-order-history tbody tr').count()).toBeGreaterThan(4);
     await shot(a, 'order');
     await go(a, '#/supplier-orders', 'Supplier orders');
     const listed = a.locator('#supplier-orders-list tbody tr');
     expect((await listed.locator('td').allTextContents()).map((x) => x.replace(/\s/g, ' '))).toEqual([reference, 'MAISON NORD', 'FRANCE WAREHOUSE', 'EXPECTED', '0 / 3', '€ 385', '20 NOV 2026', 'MN-2026-114 · PAID']);
     await a.selectOption('[data-testid=supplier-orders-status]', 'DRAFT');
-    await expect.poll(() => a.locator('#supplier-orders-list .empty__text').textContent()).toBe('No supplier order yet: the console proposes one under To order.');
+    await expect.poll(() => a.locator('#supplier-orders-list .empty__text').textContent(), POLL).toBe('No supplier order yet: the console proposes one under To order.');
     await go(a, `#/logistics?tab=stock&locationId=${france}`, 'Logistics');
-    await expect.poll(() => row54.locator('[data-testid=stock-expected]').textContent()).toBe('2');
+    await expect.poll(() => row54.locator('[data-testid=stock-expected]').textContent(), POLL).toBe('2');
     for (const p of [a]) {
       expect(await figuresInDisplayFace(p)).toEqual([]);
       expect(await csp(p)).toEqual([]);
@@ -285,11 +287,11 @@ describe.skipIf(!HAS_CHROMIUM)('Supplier orders in the console (plan NEXT LOT §
     await go(r, '#/supplier-orders', 'Supplier orders');
     expect(await r.locator('[data-testid=proposal-add], [data-testid=supplier-create]').count()).toBe(0);
     await r.locator('[data-testid=supplier-order-link]').first().click();
-    await expect.poll(async () => (await title(r).textContent())?.trim()).toBe(reference);
+    await expect.poll(async () => (await title(r).textContent())?.trim(), POLL).toBe(reference);
     expect(await r.locator('[data-testid=supplier-order-cancel-rest], [data-testid=invoice-enter], [data-testid=line-edit]').count()).toBe(0);
     const g = await open(agentLogin, 'Logistics');
     await g.evaluate(() => (location.hash = '#/supplier-orders'));
-    await expect.poll(() => g.evaluate(() => location.hash)).toBe('#/logistics');
+    await expect.poll(() => g.evaluate(() => location.hash), POLL).toBe('#/logistics');
     expect(await g.evaluate(async () => (await fetch('/api/admin/supplier-orders')).status)).toBe(403);
 
     // Ordered in advance: 54, which nothing calls for any more (its minimum is covered by what is expected: no TO ORDER),
@@ -301,18 +303,18 @@ describe.skipIf(!HAS_CHROMIUM)('Supplier orders in the console (plan NEXT LOT §
     await row54.locator('[data-testid=stock-add-to-order]').click();
     expect(await a.locator('dialog input[name=quantity]').inputValue()).toBe('');
     await a.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => a.locator('dialog .dialog__error').textContent()).toBe('Complete the required fields.');
+    await expect.poll(() => a.locator('dialog .dialog__error').textContent(), POLL).toBe('Complete the required fields.');
     await a.fill('dialog input[name=quantity]', '500');
     await confirmDialog(a);
     await expect
       .poll(() => h.t.db.selectFrom('supplier_order_lines as l').innerJoin('supplier_orders as o', 'o.id', 'l.supplier_order_id').select(['l.sku_id', 'l.quantity', 'o.location_id']).where('o.status', '=', 'DRAFT').execute())
       .toEqual([{ sku_id: sku54, quantity: 500, location_id: france }]);
-    await expect.poll(() => row54.locator('[data-testid=stock-add-to-order]').count()).toBe(1);
+    await expect.poll(() => row54.locator('[data-testid=stock-add-to-order]').count(), POLL).toBe(1);
     expect(await row54.locator('[data-testid=stock-to-order]').count()).toBe(0);
     expect(await csp(a)).toEqual([]);
     for (const p of [r, g]) {
       await go(p, '#/logistics?tab=stock', 'Logistics');
-      await expect.poll(() => p.locator('#logistics-stock tbody tr').count()).toBeGreaterThan(0);
+      await expect.poll(() => p.locator('#logistics-stock tbody tr').count(), POLL).toBeGreaterThan(0);
       expect(await p.locator('[data-testid=stock-add-to-order]').count()).toBe(0);
     }
     for (const p of [a, r, g]) await p.context().close();
@@ -345,19 +347,19 @@ describe.skipIf(!HAS_CHROMIUM)('Supplier orders in the console (plan NEXT LOT §
     const row = (name: string) => a.locator('#settings-locations tbody tr', { hasText: name });
     await row('LOGISTICS WAREHOUSE').locator('[data-testid=location-countries-edit]').click();
     await a.selectOption('dialog [data-testid=countries-add]', 'BE');
-    await expect.poll(() => a.locator('dialog [data-testid=countries-chosen] .chip').allTextContents()).toEqual(['Belgium×']);
+    await expect.poll(() => a.locator('dialog [data-testid=countries-chosen] .chip').allTextContents(), POLL).toEqual(['Belgium×']);
     await confirmDialog(a);
     await a.waitForSelector('.toast:has-text("Countries saved.")');
-    await expect.poll(() => row('LOGISTICS WAREHOUSE').locator('[data-testid=location-serves] .chip').allTextContents()).toEqual(['Belgium']);
+    await expect.poll(() => row('LOGISTICS WAREHOUSE').locator('[data-testid=location-serves] .chip').allTextContents(), POLL).toEqual(['Belgium']);
     await row('FRANCE WAREHOUSE').locator('[data-testid=location-countries-edit]').click();
     expect(await a.locator('dialog [data-testid=countries-chosen]').textContent()).toBe('None chosen: as the default location, it counts every country no other location serves.');
     await a.selectOption('dialog [data-testid=countries-add]', 'FR');
     await a.selectOption('dialog [data-testid=countries-add]', 'BE');
-    await expect.poll(() => a.locator('dialog [data-testid=countries-moving]').textContent()).toBe('Belgium moves here from LOGISTICS WAREHOUSE.');
+    await expect.poll(() => a.locator('dialog [data-testid=countries-moving]').textContent(), POLL).toBe('Belgium moves here from LOGISTICS WAREHOUSE.');
     await shot(a, 'countries', { dialog: true });
     await confirmDialog(a);
     await a.waitForSelector('.toast:has-text("Countries saved. Belgium moved here from LOGISTICS WAREHOUSE.")');
-    await expect.poll(() => row('FRANCE WAREHOUSE').locator('[data-testid=location-serves] .chip').allTextContents()).toEqual(['Belgium', 'France']);
+    await expect.poll(() => row('FRANCE WAREHOUSE').locator('[data-testid=location-serves] .chip').allTextContents(), POLL).toEqual(['Belgium', 'France']);
     expect(await row('LOGISTICS WAREHOUSE').locator('[data-testid=location-serves]').textContent()).toBe('—');
     expect(await h.t.db.selectFrom('stock_location_countries').select(['country', 'location_id']).orderBy('country').execute()).toEqual([
       { country: 'BE', location_id: france },
@@ -376,14 +378,14 @@ describe.skipIf(!HAS_CHROMIUM)('Supplier orders in the console (plan NEXT LOT §
     await a.selectOption('[data-testid=split-model]', nova);
     await a.fill('[data-testid=split-pieces]', '10');
     await a.click('[data-testid=split-propose]');
-    await expect.poll(() => panel.locator('[data-testid=split-no-sizes] .empty__text').textContent()).toBe('This model has no offered size: declare its sizes in the Catalogue.');
+    await expect.poll(() => panel.locator('[data-testid=split-no-sizes] .empty__text').textContent(), POLL).toBe('This model has no offered size: declare its sizes in the Catalogue.');
     expect(await panel.locator('[data-testid=split-add]').isDisabled()).toBe(true);
 
     // ECLIPSE, 10 pieces at both locations: 52 at FRANCE weighs 2, 54 at LOGISTICS 1: 7 and 3.
     await a.selectOption('[data-testid=split-model]', eclipse);
     await a.click('[data-testid=split-propose]');
     const rows = panel.locator('[data-testid=split-row]');
-    await expect.poll(() => rows.count()).toBe(6);
+    await expect.poll(() => rows.count(), POLL).toBe(6);
     expect(await panel.locator('thead th').allTextContents()).toEqual(['Size', 'Location', 'Orders', 'Saved sizes', 'Proposed', 'To order']);
     const cells = async () => (await rows.evaluateAll((trs) => trs.map((tr) => [...tr.querySelectorAll('td')].slice(1, 5).map((td) => td.textContent).join(' | '))));
     expect(await cells()).toEqual([
@@ -403,21 +405,21 @@ describe.skipIf(!HAS_CHROMIUM)('Supplier orders in the console (plan NEXT LOT §
     // Two lines changed: 54 at LOGISTICS to 4, 50 at FRANCE to 2: 13 of 10, said, never refused.
     const qty = (i: number) => panel.locator('[data-testid=split-to-order]').nth(i);
     await qty(5).fill('4');
-    await expect.poll(() => panel.locator('[data-testid=split-total]').textContent()).toBe('11 of 10 pieces');
+    await expect.poll(() => panel.locator('[data-testid=split-total]').textContent(), POLL).toBe('11 of 10 pieces');
     await qty(0).fill('2');
-    await expect.poll(() => panel.locator('[data-testid=split-warning]').textContent()).toBe('3 more than the 10 asked.');
+    await expect.poll(() => panel.locator('[data-testid=split-warning]').textContent(), POLL).toBe('3 more than the 10 asked.');
     expect(await panel.locator('[data-testid=split-total]').textContent()).toBe('13 of 10 pieces');
     expect(await panel.locator('[data-testid=split-add]').isDisabled()).toBe(false);
     await shot(a, 'order-a-model', { dialog: true });
     // Escape asks before the changed lines are discarded; staying keeps them.
     await a.keyboard.press('Escape');
-    await expect.poll(() => a.locator('dialog.dialog .dialog__title').allTextContents()).toContain('Discard the split?');
+    await expect.poll(() => a.locator('dialog.dialog .dialog__title').allTextContents(), POLL).toContain('Discard the split?');
     await a.click('[data-testid=dialog-cancel]');
     expect(await qty(0).inputValue()).toBe('2');
 
     // ADD TO DRAFTS: MAISON SUD's draft at each location, named in the toast and linked in the panel.
     await a.click('[data-testid=split-add]');
-    await expect.poll(() => panel.locator('[data-testid=split-draft]').count()).toBe(2);
+    await expect.poll(() => panel.locator('[data-testid=split-draft]').count(), POLL).toBe(2);
     const refs = await panel.locator('[data-testid=split-draft]').allTextContents();
     for (const ref of refs) expect(ref).toMatch(/^SO-[0-9A-F]{8}$/);
     await a.waitForSelector(`.toast:has-text("13 pieces added to 2 drafts: ${refs.join(', ')}.")`);
@@ -437,9 +439,9 @@ describe.skipIf(!HAS_CHROMIUM)('Supplier orders in the console (plan NEXT LOT §
     await shot(a, 'order-a-model-added', { dialog: true });
     // The draft read: its link closes the panel and opens it.
     await panel.locator('[data-testid=split-draft]').first().click();
-    await expect.poll(async () => (await title(a).textContent())?.trim()).toBe(refs[0]);
+    await expect.poll(async () => (await title(a).textContent())?.trim(), POLL).toBe(refs[0]);
     expect(await a.locator('dialog[data-testid=split-dialog]').count()).toBe(0);
-    await expect.poll(() => a.locator('#supplier-order-lines tbody tr').count()).toBe(2);
+    await expect.poll(() => a.locator('#supplier-order-lines tbody tr').count(), POLL).toBe(2);
     expect(await a.locator('[data-testid=supplier-order-mark]').textContent()).toBe('DRAFT');
     expect(await figuresInDisplayFace(a)).toEqual([]);
     expect(await csp(a)).toEqual([]);

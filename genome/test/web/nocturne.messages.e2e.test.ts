@@ -23,6 +23,8 @@ import { openState, settle, stateById, type UiState } from '../support/nocturne-
 import { CHROMIUM_PATH, codePhoto, type UiStage } from '../support/ui-stage.js';
 
 const HAS_CHROMIUM = existsSync(CHROMIUM_PATH);
+/** expect.poll's budget (its default, 1 s, is too short on a shared CI runner). */
+const POLL = { timeout: 15_000 };
 const WRITE = 'WRITE TO ORBES CLIENT SERVICES';
 const WIDTHS = [390, 375, 360, 320] as const;
 
@@ -105,7 +107,7 @@ async function sendFrom(page: Page, stage: UiStage, button: Locator, body: strin
   await sheet.locator('.n-write__sent').waitFor({ timeout: 15_000 });
   const row = await stage.ctx.db.selectFrom('client_messages').select('context_label').where('body', '=', body).executeTakeFirstOrThrow();
   await page.keyboard.press('Escape');
-  await expect.poll(() => sheet.isHidden()).toBe(true);
+  await expect.poll(() => sheet.isHidden(), POLL).toBe(true);
   return { sheet: label, stored: row.context_label };
 }
 
@@ -117,7 +119,7 @@ async function concerningOf(page: Page, button: Locator): Promise<string> {
   await sheet.locator('[data-testid=write-concerning]').waitFor({ timeout: 15_000 });
   const label = (await sheet.locator('[data-testid=write-concerning]').innerText()).trim();
   await page.keyboard.press('Escape');
-  await expect.poll(() => sheet.isHidden()).toBe(true);
+  await expect.poll(() => sheet.isHidden(), POLL).toBe(true);
   return label;
 }
 
@@ -155,7 +157,7 @@ const CASES: { state: UiState; check: Check }[] = [
       // FORGOTTEN PASSWORD? from this first open: ORBES Client Services' email alone, as on the result's own panel.
       await sheet.getByRole('button', { name: 'FORGOTTEN PASSWORD?' }).click();
       await sheet.locator('#recover-title').waitFor();
-      await expect.poll(() => sheet.locator('a[href^="mailto:"]').allInnerTexts()).toEqual(['CONTACT ORBES CLIENT SERVICES']);
+      await expect.poll(() => sheet.locator('a[href^="mailto:"]').allInnerTexts(), POLL).toEqual(['CONTACT ORBES CLIENT SERVICES']);
       expect(await sheet.locator('a[href^="tel:"]').count()).toBe(0);
       await sheet.getByRole('button', { name: 'BACK TO SIGN IN' }).click();
       await sheet.locator('input[name=email]').fill(demo.accounts.you!.email);
@@ -203,7 +205,7 @@ const CASES: { state: UiState; check: Check }[] = [
       expect(order.indexOf('MESSAGES')).toBe(order.indexOf('Your pieces') - 1);
       await page.locator('button.n-acct').click();
       const row = page.locator('.n-account__messages');
-      await expect.poll(() => row.innerText()).toMatch(/^MESSAGES\s+NEW$/);
+      await expect.poll(() => row.innerText(), POLL).toMatch(/^MESSAGES\s+NEW$/);
       await page.locator('.n-account__close').first().click();
       // READ: MESSAGES, the answer signed ORBES CLIENT SERVICES, never a name; the line goes.
       await line.getByRole('button', { name: 'READ' }).click();
@@ -211,12 +213,12 @@ const CASES: { state: UiState; check: Check }[] = [
       const answer = account.locator('[data-testid=message]').nth(1);
       expect(await answer.locator('.n-messages__author').innerText()).toMatch(/^ORBES CLIENT SERVICES · /);
       expect(await account.innerText()).not.toContain(NOCTURNE_ADMIN.email);
-      await expect.poll(() => page.locator('.now__messages').count()).toBe(0);
+      await expect.poll(() => page.locator('.now__messages').count(), POLL).toBe(0);
       expect((await stage.ctx.services.messages.unread(you.id)).unread).toBe(false);
       // The reply, from MESSAGES: no context.
       await account.locator('textarea').fill('Thank you.');
       await account.getByRole('button', { name: 'SEND' }).click();
-      await expect.poll(() => account.locator('[data-testid=message]').count()).toBe(3);
+      await expect.poll(() => account.locator('[data-testid=message]').count(), POLL).toBe(3);
       expect(await account.locator('[data-testid=message]').nth(2).locator('.n-messages__concerning').count()).toBe(0);
       // Back to the sheet: NEW is gone.
       await account.getByRole('button', { name: 'YOUR ACCOUNT' }).click();
@@ -296,7 +298,7 @@ const CASES: { state: UiState; check: Check }[] = [
       await page.locator('.view--sheet').getByRole('button', { name: WRITE }).click();
       expect(await page.locator(WRITE_SHEET).locator('[data-testid=write-concerning]').innerText()).toMatch(/· PRIVATE SALON REQUEST$/);
       await page.keyboard.press('Escape');
-      await expect.poll(() => page.locator(WRITE_SHEET).isHidden()).toBe(true);
+      await expect.poll(() => page.locator(WRITE_SHEET).isHidden(), POLL).toBe(true);
       await fitsEveryWidth(page, 'the salon');
       const sent = await sendFrom(page, stage, page.locator('.view--sheet').getByRole('button', { name: WRITE }), 'About my salon request.');
       expect(sent.stored).toBe(sent.sheet);
@@ -398,7 +400,7 @@ const CASES: { state: UiState; check: Check }[] = [
       expect(await sheet.locator('#messages-part-house').getAttribute('aria-selected')).toBe('true');
       expect(await sheet.locator('.n-house__item').first().locator('.n-house__new').innerText()).toBe('NEW');
       expect(await sheet.locator('.n-house__item').allInnerTexts()).toHaveLength(3);
-      await expect.poll(unread).toBe(0);
+      await expect.poll(unread, POLL).toBe(0);
       // No reply under them (M3): no field; the line's link opens the conversation, its reply ready to write.
       expect(await sheet.locator('.n-messages__part textarea').count()).toBe(0);
       await sheet.locator('.n-house__note').getByRole('button', { name: 'ORBES CLIENT SERVICES' }).click();
@@ -406,12 +408,12 @@ const CASES: { state: UiState; check: Check }[] = [
       expect(await page.evaluate(() => document.activeElement?.id)).toBe('messages-reply');
       // NOW's line went once read.
       await page.keyboard.press('Escape');
-      await expect.poll(() => page.locator('.now__messages').count()).toBe(0);
+      await expect.poll(() => page.locator('.now__messages').count(), POLL).toBe(0);
       // Nothing unread: MESSAGES opens on the conversation, FROM ORBES a tab away; a moment's link opens its place.
       await page.locator('.n-hd .n-acct:has(> .n-mono):not([hidden])').click();
       const row = sheet.locator('[data-key="messages"]');
       await row.waitFor();
-      await expect.poll(() => row.innerText()).not.toContain('NEW');
+      await expect.poll(() => row.innerText(), POLL).not.toContain('NEW');
       await row.click();
       await sheet.locator('.n-messages__parts').waitFor({ timeout: 15_000 });
       expect(await sheet.locator('#messages-part-conversation').getAttribute('aria-selected')).toBe('true');
@@ -441,7 +443,7 @@ const CASES: { state: UiState; check: Check }[] = [
       await page.locator('.d-msg ol.d-msg__house').waitFor({ timeout: 15_000 });
       expect(await page.locator('.d-msg__subject.is-current').getAttribute('data-key')).toBe('from-orbes');
       expect(await page.locator('.d-msg__house-new').count()).toBe(1);
-      await expect.poll(() => stage.ctx.db.selectFrom('house_deliveries').select('id').where('account_id', '=', you.id).where('read_at', 'is', null).execute().then((r) => r.length)).toBe(0);
+      await expect.poll(() => stage.ctx.db.selectFrom('house_deliveries').select('id').where('account_id', '=', you.id).where('read_at', 'is', null).execute().then((r) => r.length), POLL).toBe(0);
       // In place of the reply: the sentence and WRITE TO ORBES CLIENT SERVICES, which opens GENERAL ready to write.
       expect(await page.locator('.d-msg__pane textarea').count()).toBe(0);
       expect(await page.locator('.d-msg__noreply').innerText()).toContain('Messages from ORBES cannot be answered.');
