@@ -5,13 +5,13 @@
  *  - Announced: its vault plate in THE RELEASES among the draws' ivory ones, then its page (B1): the piece, OPENS IN,
  *    the time in Paris then on this phone, the rule, ADD TO CALENDAR.
  *  - The room (B2): the model, its price and the quantity line; the closed door, its lock the seal; READY CHECK; the size
- *    of I'LL BE THERE preselected; ENTER; the size changeable until T0. The last minute the lock's orbits turn back, the last ten seconds tick (ten soft voices
- *    of the sound module); at T0 the lock aligns and the door opens on the piece under its light sweep.
+ *    of I'LL BE THERE preselected; ENTER; the size changeable until T0. The last minute the lock's orbits turn back, the last ten seconds tick (room-tick.mp3
+ *    ten times, lot Q1 §3.10, no synthesized voice); at T0 the lock aligns and the door opens on the piece under its light sweep.
  *  - The one queue (ONE QUEUE, lot Q1 step Q1.3): LIVE NOW, its place in its size, its time left, the pieces left (no
  *    held piece, no one ahead), the size never offered again.
  *  - The turn (B4), a piece returned: a pointer let go too early resets the seal; held, it secures the piece. The
  *    reveal (B5), even when the stream says SECURED before the secure's own answer: P-D01's motion on the seal's glyphs,
- *    the chord, the vibrations; the add-ons, PAY · total, 5:00.
+ *    secured.mp3 (no chord), the vibrations; the add-ons, PAY · total, 5:00.
  *  - CONFIRMED (B6), out into the light: ivory; the reservation in MY PIECES, and its order (plan LIVE RELEASE+).
  *  - A phone whose clock is wrong counts on the server's; the host message under the header.
  *  - With reduced motion and no stream (the state polled every 2 s): no orbit turned, no reveal motion; after T0, its one
@@ -78,9 +78,28 @@ interface Watched {
   problems: string[];
 }
 
-/** The page's stand-ins: the vibrations asked for, and the frequency of every voice the sound module schedules. */
+/**
+ * The page's stand-ins: the vibrations asked for, the frequency of every synthesized voice (none in the room since lot
+ * Q1 §3.10), and the name of every designed sound started (live-sound.ts: its file read from the response that carried
+ * it, `room-tick` for /assets/room-tick-HASH.mp3).
+ */
 const STAND_INS = `
-  window.__live = { vibrations: [], tones: [] };
+  window.__live = { vibrations: [], tones: [], sounds: [], files: 0 };
+  const fileOf = new WeakMap();
+  const soundOf = new WeakMap();
+  const bytes = Response.prototype.arrayBuffer;
+  Response.prototype.arrayBuffer = function () { const url = this.url; if (/[.]mp3$/.test(url)) window.__live.files += 1; return bytes.call(this).then((b) => { fileOf.set(b, url); return b; }); };
+  const base = (window.BaseAudioContext || window.AudioContext).prototype;
+  const decode = base.decodeAudioData;
+  base.decodeAudioData = function (data, ok, fail) {
+    const m = /([a-z-]+?)-[A-Z0-9]{8}[.]mp3$/.exec(fileOf.get(data) || '');
+    const name = m ? m[1] : '?';
+    const p = decode.call(this, data, ok && ((b) => { soundOf.set(b, name); ok(b); }), fail);
+    if (p && p.then) p.then((b) => soundOf.set(b, name), () => undefined);
+    return p;
+  };
+  const begin = AudioBufferSourceNode.prototype.start;
+  AudioBufferSourceNode.prototype.start = function (...a) { window.__live.sounds.push(soundOf.get(this.buffer) || '?'); return begin.apply(this, a); };
   Object.defineProperty(navigator, 'vibrate', { configurable: true, value: (p) => { window.__live.vibrations.push(p); return true; } });
   const proto = (window.AudioContext || window.webkitAudioContext).prototype;
   const create = proto.createOscillator;
@@ -92,7 +111,9 @@ const STAND_INS = `
   };
 `;
 
-const live = (page: Page) => page.evaluate(() => (window as unknown as { __live: { vibrations: unknown[]; tones: number[] } }).__live);
+const live = (page: Page) => page.evaluate(() => (window as unknown as { __live: { vibrations: unknown[]; tones: number[]; sounds: string[] } }).__live);
+/** The designed sounds this page fetched (live-sound.ts: none before a gesture of the room). */
+const soundFiles = (page: Page) => page.evaluate(() => (window as unknown as { __live: { files: number } }).__live.files);
 
 describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, phone)', () => {
   let srv: VerifyServer;
@@ -306,8 +327,11 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     expect(await page.locator('.live-door .live__sweep').evaluate((el) => getComputedStyle(el).animationName)).toBe('live-sweep');
     expect(Date.now()).toBeGreaterThanOrEqual(t0.getTime() - 1_000);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-open.png') });
-    const ticks = (await live(page)).tones.filter((t) => t === 1318.51);
-    expect(ticks).toHaveLength(10);
+    // Lot Q1 §3.10: room-tick.mp3 at each of the last ten seconds' figures, the eleven files loaded from the room's taps,
+    // and no synthesized voice.
+    expect((await live(page)).sounds.filter((n) => n === 'room-tick')).toHaveLength(10);
+    expect((await live(page)).tones).toEqual([]);
+    expect(await soundFiles(page)).toBe(11);
 
     // B3: the one queue (ONE QUEUE). The rival has the turn in size 52: the collector is first in its size, its time left
     // said, the pieces left; never a held piece nor anyone ahead. At the line's own frame (T0, before the batch) its size's
@@ -363,12 +387,13 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await sleep(2_100);
     await page.mouse.up();
 
-    // B5: the reveal (P-D01's motion on the seal's glyphs), the chord, the vibrations; then the add-ons and PAY.
+    // B5: the reveal (P-D01's motion on the seal's glyphs), secured.mp3 (lot Q1 §3.10), the vibrations; then the add-ons and PAY.
     await textOf(page.locator('.live__secured > .live__overline').first(), 'SECURED');
     expect(answered).toBe(false);
     expect(await page.locator('.live__secured').getAttribute('class')).toMatch(/is-revealing/);
     expect(await page.locator('.live__piece-seal g[data-layer="genome"]').first().evaluate((g) => getComputedStyle(g).animationName)).toBe('ceremony-glyph');
-    await expect.poll(async () => (await live(page)).tones.filter((t) => t === 293.66).length, POLL).toBe(1);
+    await expect.poll(async () => (await live(page)).sounds.filter((n) => n === 'secured').length, POLL).toBe(1);
+    expect((await live(page)).tones).toEqual([]);
     expect((await live(page)).vibrations).toEqual(expect.arrayContaining([12, [18, 90, 18]]));
     await expect.poll(() => page.locator('[role="status"][aria-live="polite"]').innerText(), POLL).toBe(LIVE.announce.secured('MONOLITHE'));
     await textOf(page.locator('.live__secured-at'), /^SECURED AT \d{2}:\d{2}:\d{2}$/);
@@ -377,7 +402,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await expect.poll(() => answered, POLL).toBe(true);
     await page.unroute((u) => u.pathname === `/api/v1/live/${r.id}/secure`);
     await sleep(300);
-    expect((await live(page)).tones.filter((t) => t === 293.66)).toHaveLength(1);
+    expect((await live(page)).sounds.filter((n) => n === 'secured')).toHaveLength(1);
     expect(await page.locator('.live__secured').getAttribute('class')).toMatch(/is-revealing/);
     const pay = page.locator('.live__pay');
     await textOf(pay, 'PAY · € 5 050');
@@ -843,8 +868,12 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     // A tap on the room's title, nothing that acts: the gesture alone.
     await back.page.locator('.live__room > h1').click();
     for (const p of [quiet, back]) await expect.poll(() => p.page.locator('.live-door').getAttribute('class'), { timeout: 45_000, interval: 100 }).toMatch(/is-open/);
-    expect((await live(back.page)).tones.filter((t) => t === 1318.51)).toHaveLength(10);
+    expect((await live(back.page)).sounds.filter((n) => n === 'room-tick')).toHaveLength(10);
+    expect((await live(back.page)).tones).toEqual([]);
+    // Untouched: no context, no file fetched, nothing heard.
+    expect((await live(quiet.page)).sounds).toEqual([]);
     expect((await live(quiet.page)).tones).toEqual([]);
+    expect(await soundFiles(quiet.page)).toBe(0);
     for (const p of [quiet, back]) {
       expect(p.problems).toEqual([]);
       await p.context.close();

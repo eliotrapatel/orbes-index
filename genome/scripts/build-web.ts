@@ -22,6 +22,10 @@
  * for the CSS `url()`, so the preload and the stylesheet fetch one URL; a
  * shell that preloads a font no stylesheet loads fails the build.
  *
+ * A sound the verify bundle imports (`sounds/*.mp3`, a LIVE RELEASE's, lot
+ * Q1 §3.10) is published by esbuild's file loader as dist/web/assets/<name>-HASH.mp3
+ * and the bundle carries its /assets/ URL.
+ *
  * Bundles are ESM, minified, content-hashed (`-[A-Z0-9]{8}`, which the
  * static server caches as immutable) and without sourcemaps in production.
  * The shell is checked for CSP compliance (no inline scripts, styles or
@@ -240,7 +244,8 @@ export async function buildWeb(opts: BuildWebOptions = {}): Promise<BuildWebResu
       entryNames: '[name]-[hash]',
       assetNames: '[name]-[hash]',
       publicPath: ASSET_PREFIX.replace(/\/$/, ''),
-      loader: { '.svg': 'file', '.png': 'file', '.jpg': 'file', '.woff2': 'file' },
+      // A LIVE RELEASE's designed sounds (lot Q1 §3.10): each .mp3 the bundle imports is published as a hashed file.
+      loader: { '.svg': 'file', '.png': 'file', '.jpg': 'file', '.woff2': 'file', '.mp3': 'file' },
       define: { 'process.env.NODE_ENV': JSON.stringify(mode) },
       drop: production ? ['debugger'] : [],
       metafile: true,
@@ -252,7 +257,7 @@ export async function buildWeb(opts: BuildWebOptions = {}): Promise<BuildWebResu
 
     // entry source path → published URL
     const published = new Map<string, string>();
-    // source path → published URL of a file the bundles reference (file loader: fonts, images)
+    // source path → published URL of a file the bundles reference (file loader: fonts, images, sounds)
     const emitted = new Map<string, string>();
     for (const [outPath, meta] of Object.entries(result.metafile.outputs)) {
       if (outPath.endsWith('.map')) continue;

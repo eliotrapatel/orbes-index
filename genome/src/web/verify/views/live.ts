@@ -20,9 +20,9 @@
  *               the closed vault door, its lock the seal ·
  *               the countdown on ORBES time · N IN THE ROOM · READY CHECK · YOUR SIZE (the size of I'LL BE THERE
  *               preselected) · ENTER THE ROOM, then YOU'RE READY.
- *               The last minute the seal's orbits turn back into alignment, the last ten seconds tick (P-D07's
- *               sound, its preference); at T0, on the server's second, the lock aligns, the door opens and the piece
- *               appears under a light sweep: DRAWING THE PLACES
+ *               The last minute the seal's orbits turn back into alignment, the last ten seconds tick (room-tick.mp3,
+ *               lot Q1 §3.10, the SOUND preference); at T0, on the server's second, the lock aligns, the door opens
+ *               and the piece appears under a light sweep: DRAWING THE PLACES
  *   join        after T0, an account not in the line: the piece, its size, ENTER THE LINE (behind those in it)
  *   queue       ONE QUEUE (lot Q1, ANSWERS C3): after T0 every entry waiting for its turn (the after-room's too, headed
  *               THE AFTER-ROOM, with no time): LIVE NOW, YOUR PLACE (its place in its size), PAUSED or THE QUEUE IS
@@ -32,8 +32,8 @@
  *               SOLD OUT, its one sentence, LEAVE THE LINE
  *   turn        PRESS AND HOLD THE SEAL: the turn's ring runs out, the hold's ring fills in 1.5 s, letting go
  *               resets it; the space bar or Enter holds it from the keyboard; a short vibration where allowed
- *   secured     the reveal: the seal's GENOME glyphs with P-D01's ceremony motion, the seal's glow, the chord and the
- *               vibration; then the piece, its size, the add-ons, PAY · total, 5:00 to confirm, RELEASE MY PLACE
+ *   secured     the reveal: the seal's GENOME glyphs with P-D01's ceremony motion, the seal's glow, secured.mp3 and
+ *               the vibration; then the piece, its size, the add-ons, PAY · total, 5:00 to confirm, RELEASE MY PLACE
  *   confirmed   out into the light: the page turns ivory (house style), the reservation, its reference, SHARE TO
  *               STORIES under it (plan NEXT-NINE, BP-10: the CONFIRMED story card), ORBES Client Services
  *   edge pages  inside the room: not signed in (the sign-in), not eligible, sold out in its size: a vault page with
@@ -130,7 +130,7 @@ import { sealSvg, turnRings } from '../live-seal.js';
 import { entrySizes, participationModel, RELEASES_PATH, zonedDate, type SetCardModel } from '../releases-model.js';
 import { lookbookSheetPath } from '../lookbook-model.js';
 import type { SessionStore } from '../session.js';
-import type { SoundSignature } from '../sound.js';
+import type { LiveSound } from '../live-sound.js';
 import type { AccountQuestion, LiveAccess, LiveEndedSheet, LiveEntry, LiveInterest, LiveRoom, LiveSheet, LiveState, PieceSizeRef } from '../types.js';
 import { formatMoney as money, upper } from '../view-model.js';
 import { referenceWords, releaseContext } from '../messages-model.js';
@@ -197,8 +197,8 @@ export interface LiveView {
 export interface LiveDeps {
   api: ApiClient;
   session: SessionStore;
-  /** P-D07's sound: the ticks and the chord, its preference (SOUND ON / OFF). */
-  sound: Pick<SoundSignature, 'on' | 'set' | 'prime' | 'tick' | 'play'>;
+  /** The LIVE flow's designed sounds (lot Q1 §3.10, live-sound.ts), the device's SOUND preference (SOUND ON / OFF). */
+  sound: Pick<LiveSound, 'on' | 'set' | 'prime' | 'cue' | 'stopAll'>;
   /** The release's page as read; null when it could not be read (`failure` says why). */
   sheet: LiveSheet | LiveEndedSheet | null;
   failure?: string;
@@ -389,6 +389,7 @@ class LivePage {
 
   dispose(): void {
     this.disposed = true;
+    this.deps.sound.stopAll();
     this.unsubscribe?.();
     this.unsubscribe = null;
     this.offDesktop?.();
@@ -1004,6 +1005,8 @@ class LivePage {
   private mount(kind: LiveScreenKind | 'failed'): void {
     const hadFocus = this.root.contains(document.activeElement) || document.activeElement === document.body;
     const previous = this.screen?.kind;
+    // Lot Q1 §3.10: a screen change stops what still sounds (or waits to) for the screen leaving.
+    if (previous !== kind) this.deps.sound.stopAll();
     this.screen?.dispose?.();
     this.error = previous === kind ? this.error : null;
     const revealing = kind === 'secured' && this.reveal;
@@ -1805,7 +1808,8 @@ class LivePage {
       setFact(until, `${LIVE.untilOpening} · ${local?.clock ?? ''}`);
       if (!prefersReducedMotion()) turnRings(lock, (k) => lockAngle(k, remaining));
       const tick = tickSecond(remaining);
-      if (tick !== null && tick !== this.lastTick && this.synced) this.deps.sound.tick();
+      // N4: room-tick.mp3 at each change of the last ten seconds' figures (lot Q1 §3.10, SFX_AT tick).
+      if (tick !== null && tick !== this.lastTick && this.synced) this.deps.sound.cue('tick');
       this.lastTick = tick;
       setFact(presence.lastChild as HTMLElement, LIVE.inRoom(this.room?.inRoom ?? 0));
       presence.hidden = !this.room?.inRoom;
@@ -2329,8 +2333,9 @@ class LivePage {
       release,
     );
     if (revealing) {
-      // The reveal (P-D01's motion on the seal's glyphs): the chord and the vibration where the phone allows it; once.
-      this.deps.sound.play();
+      // The reveal (P-D01's motion on the seal's glyphs): secured.mp3 0.6 s into it (lot Q1 §3.10, SFX_AT secured) and the
+      // vibration where the phone allows it; once.
+      this.deps.sound.cue('secured');
       navigator.vibrate?.([...CEREMONY_VIBRATION]);
     }
     this.frozenHold = null;

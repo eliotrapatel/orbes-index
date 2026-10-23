@@ -48,7 +48,9 @@ const TIMEOUT = 8 * 60_000;
 
 /** The sound module's voices and the vibrations asked for (an init script: a string, no transpiler helper in it). */
 const STAND_INS = `
-  window.__flows = { tones: [] };
+  window.__flows = { tones: [], sounds: 0 };
+  const begin = AudioBufferSourceNode.prototype.start;
+  AudioBufferSourceNode.prototype.start = function (...a) { window.__flows.sounds += 1; return begin.apply(this, a); };
   const proto = (window.AudioContext || window.webkitAudioContext).prototype;
   const create = proto.createOscillator;
   proto.createOscillator = function () {
@@ -654,8 +656,11 @@ describe.skipIf(!HAS_CHROMIUM)('desktop flows against the real server (Chromium,
             else await page.keyboard.up(way);
             await page.locator('.view--live .live__secured').first().waitFor({ timeout: 20_000 });
             await expect.poll(status, POLL).toBe('SECURED');
-            // A computer starts with the sound off: no tone was played, SOUND OFF in the room's foot.
+            // A computer starts with the sound off: no tone and no designed sound (lot Q1 §3.10) played, none fetched, SOUND
+            // OFF in the room's foot.
             expect(await page.evaluate(() => (window as unknown as { __flows: { tones: number[] } }).__flows.tones)).toEqual([]);
+            expect(await page.evaluate(() => (window as unknown as { __flows: { sounds: number } }).__flows.sounds)).toBe(0);
+            expect(await page.evaluate(() => performance.getEntriesByType('resource').filter((e) => /\.mp3$/.test(e.name)).length)).toBe(0);
             expect(await text(page, 'button.live__sound')).toBe('SOUND OFF');
             await f.holds('SECURED', { h1: false });
           } finally {

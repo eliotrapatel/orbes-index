@@ -7,9 +7,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { assertCspSafeHtml, buildWeb, discoverApps, entryOutName, rewriteHtml, WebBuildError, type BuildWebResult } from '../../scripts/build-web.js';
 import { cacheControlFor, HASHED_ASSET_RE, IMMUTABLE_CACHE } from '../../src/server/http/static.js';
 import { DESKTOP_QUERY } from '../../src/web/shared/desktop.js';
+import { LIVE_SOUNDS } from '../../src/web/verify/live-sound.js';
 
 const FONT_SRC = join(dirname(fileURLToPath(import.meta.url)), '../../src/web/shared/fonts/gravesend-sans-500.woff2');
 const FONT_REF = '../shared/fonts/gravesend-sans-500.woff2';
+/** A LIVE RELEASE's designed sounds (lot Q1 §3.10), as the repository keeps them. */
+const SOUNDS_SRC = join(dirname(fileURLToPath(import.meta.url)), '../../src/web/verify/sounds');
 /** The desktop's hover and pressed states: a computer's pointer at any window width (D8, decision 13). */
 const POINTER_QUERY = '(hover: hover) and (pointer: fine)';
 /** gzip -9 size of a built file, as scripts/bench.ts measures the bundles. */
@@ -142,6 +145,24 @@ describe('build-web: production build of the real apps', () => {
     for (const r of refs) expect(r, r).toMatch(/^(data:|\/assets\/)/);
   });
 
+  it('publishes exactly the eleven LIVE sounds as hashed /assets/*.mp3, byte for byte, cached as immutable, each URL in the bundle (lot Q1 §3.10)', () => {
+    const app = result.apps.find((a) => a.name === 'verify')!;
+    const main = readFileSync(asset(app.assets['main.ts']), 'utf8');
+    const mp3 = readdirSync(join(result.outDir, 'assets')).filter((f) => f.endsWith('.mp3')).sort();
+    // The LIVE flow's eleven of the sixteen chosen: the five vault-* come with lot Q3, welcome.prev-confident never.
+    expect(mp3.map((f) => f.replace(/-[A-Z0-9]{8}\.mp3$/, '')).sort()).toEqual([...LIVE_SOUNDS].sort());
+    for (const file of mp3) {
+      const url = `/assets/${file}`;
+      expect(file).toMatch(/^[a-z-]+-[A-Z0-9]{8}\.mp3$/);
+      expect(HASHED_ASSET_RE.test(url), url).toBe(true);
+      expect(cacheControlFor(url)).toBe(IMMUTABLE_CACHE);
+      const name = file.replace(/-[A-Z0-9]{8}\.mp3$/, '');
+      expect(readFileSync(asset(url)).equals(readFileSync(join(SOUNDS_SRC, `${name}.mp3`))), file).toBe(true);
+      expect(main, file).toContain(`"${url}"`);
+    }
+    expect(mp3.some((f) => /^vault-|prev-confident/.test(f))).toBe(false);
+  });
+
   it('writes a manifest of published names', () => {
     const manifest = JSON.parse(readFileSync(join(result.outDir, 'manifest.json'), 'utf8')) as { mode: string; apps: Record<string, Record<string, string>> };
     expect(manifest.mode).toBe('production');
@@ -201,6 +222,14 @@ describe('build-web: the display font, preloaded by both shells', () => {
     }
     // One URL for every app: a visitor of /verify, /legal and /admin downloads the font once.
     expect(urls.size).toBe(1);
+  });
+
+  it('publishes the eleven LIVE sounds once for the whole build, only the verify bundle naming them (lot Q1 §3.10)', () => {
+    expect(readdirSync(join(result.outDir, 'assets')).filter((f) => f.endsWith('.mp3'))).toHaveLength(LIVE_SOUNDS.length);
+    for (const app of result.apps) {
+      const js = read(app.assets['main.ts']).toString('utf8');
+      expect(/\/assets\/[a-z-]+-[A-Z0-9]{8}\.mp3/.test(js), app.name).toBe(app.name === 'verify');
+    }
   });
 
   it('builds the legal pages (J-06), discovered like the others: shell, bundle, stylesheets, tab icon, preloaded font, no decoder', () => {

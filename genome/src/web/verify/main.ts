@@ -79,6 +79,7 @@ import type { DecodeReply } from './protocol.js';
 import { Camera, CameraError, DecoderClient, DecoderUnavailableError, PhotoError, readPhoto, ScanSession, workerUrl } from './scanner.js';
 import { SessionStore } from './session.js';
 import { SoundSignature } from './sound.js';
+import { LiveSound } from './live-sound.js';
 import { DeviceMode } from '../shared/mode.js';
 import type { ClientServices, LiveEndedSheet, LiveSheet, VerifyInput } from './types.js';
 import { certificateTokenOf } from './certificate-model.js';
@@ -302,6 +303,8 @@ class App {
   private readonly camera = new Camera();
   /** The sound signature of an authentic result (P-D07), on unless turned off on this device. */
   private readonly sound = new SoundSignature();
+  /** A LIVE RELEASE's designed sounds (lot Q1 §3.10), on the same SOUND preference; its context made in the room's taps. */
+  private readonly liveSound = new LiveSound(this.sound);
   /** The light mode (shared/mode.ts), off unless turned on on this device; a switch redraws the browser's bar. */
   private readonly mode = new DeviceMode(undefined, () => this.shell?.modeChanged());
   private decoder: DecoderClient | null = null;
@@ -1660,7 +1663,7 @@ class App {
     const view = liveView({
       api: this.api,
       session: this.session,
-      sound: this.sound,
+      sound: this.liveSound,
       sheet,
       failure: failure ?? undefined,
       onRetry: () => void this.showRelease(id, true, afterRoom),
