@@ -488,7 +488,8 @@ class LiveRecordingContext implements LiveAudioContext {
       return;
     }
     this.decoded.push(url);
-    ok({ url, duration: url.includes('welcome') ? 12 : 1 } as FakeBuffer);
+    // The welcome's voice is long, room-tick.mp3 lasts 0.522 s as published, the others a second.
+    ok({ url, duration: url.includes('welcome') ? 12 : url.includes('room-tick') ? 0.522 : 1 } as FakeBuffer);
   }
   resume(): Promise<void> {
     this.resumes++;
@@ -718,6 +719,74 @@ describe('a LIVE RELEASE\'s designed sounds (lot Q1 §3.10, live-sound.ts)', () 
     sound.cue('tick');
     expect(ctx.state).toBe('running');
     expect(ctx.resumes).toBeGreaterThan(0);
+  });
+
+  it('keeps the context running through the ten ticks of the last ten seconds, a second apart, and suspends it once after the last', async () => {
+    const { env, contexts, timers, advance } = liveEnvironment();
+    const sound = new LiveSound(switchOn(env.storage), env);
+    sound.prime();
+    for (const t of timers.splice(0)) t.fn();
+    await advance(0);
+    const ctx = contexts[0]!;
+    const resumesBefore = ctx.resumes;
+    // Each figure change a second apart: the context never rests between two, so each tick starts on its change.
+    for (let i = 0; i < 10; i++) {
+      sound.cue('tick');
+      expect(ctx.state).toBe('running');
+      expect(ctx.played.at(-1)!.start).toBeCloseTo(ctx.currentTime, 6);
+      await advance(1_000);
+    }
+    expect(ctx.played).toHaveLength(10);
+    expect(ctx.suspends).toBe(0);
+    expect(ctx.resumes).toBe(resumesBefore);
+    expect(0.522 * 1000 + REST_MARGIN_MS).toBeGreaterThan(1_000);
+    // After the last: suspended once, the margin after its end.
+    await advance(0.522 * 1000 + REST_MARGIN_MS);
+    expect(ctx.state).toBe('suspended');
+    expect(ctx.suspends).toBe(1);
+  });
+
+  it('never holds a sound scheduled while a suspend is still settling: it asks the context to resume at once', async () => {
+    const { env, contexts, timers, advance } = liveEnvironment();
+    const sound = new LiveSound(switchOn(env.storage), env);
+    sound.prime();
+    for (const t of timers.splice(0)) t.fn();
+    await advance(0);
+    const ctx = contexts[0]!;
+    // A browser's suspend() and resume() change the state later, in the order asked (Web Audio's control messages).
+    const asked: string[] = [];
+    ctx.suspend = () => {
+      ctx.suspends++;
+      asked.push('suspended');
+      return Promise.resolve();
+    };
+    ctx.resume = () => {
+      ctx.resumes++;
+      asked.push('running');
+      return Promise.resolve();
+    };
+    const settleState = () => {
+      for (const state of asked.splice(0)) ctx.state = state;
+    };
+    sound.cue('place');
+    // place.mp3 (a second here) has ended and the margin passed: the suspend is asked, the state still 'running'.
+    await advance(1_000 + REST_MARGIN_MS);
+    expect(ctx.suspends).toBe(1);
+    expect(ctx.state).toBe('running');
+    const resumesBefore = ctx.resumes;
+    // The next tick in that window: a resume is asked after the suspend, so the context runs on and the tick sounds.
+    sound.cue('tick');
+    expect(ctx.resumes).toBe(resumesBefore + 1);
+    settleState();
+    expect(ctx.state).toBe('running');
+    expect(ctx.played).toHaveLength(2);
+    // Its own rest comes once the tick has ended: one suspend more, not before.
+    await advance(0.522 * 1000 + REST_MARGIN_MS - 1);
+    expect(ctx.suspends).toBe(1);
+    await advance(1);
+    expect(ctx.suspends).toBe(2);
+    settleState();
+    expect(ctx.state).toBe('suspended');
   });
 
   it('follows the device\'s SOUND preference with the scan\'s chord: off, nothing is made, loaded or heard; off in the room stops what plays', async () => {

@@ -11,9 +11,11 @@
  *   a screen change ──▶ stopAll(): what still sounds or waits to sound is stopped
  *
  * It follows the SOUND preference of the device (shared/prefs.ts, the foot's SOUND ON / OFF): the same switch as the
- * scan's chord (`SoundSignature`); SOUND OFF stops what plays and fetches nothing. Between sounds the context is
- * suspended, so it holds no audio output while nothing plays (as sound.ts does), and nothing starts while the page is
- * in the background. The welcome voice (`welcome.mp3`, D46) is heard once per entry, never in the after-room (N6):
+ * scan's chord (`SoundSignature`); SOUND OFF stops what plays and fetches nothing. Once nothing has sounded for a
+ * second the context is suspended, so it holds no audio output while nothing plays (as sound.ts does), yet runs on
+ * through sounds that follow each other closely (the ten ticks a second apart, N4: each on its figure change, never
+ * waiting for a resume); a sound scheduled while a suspend is still pending resumes it at once. Nothing starts while
+ * the page is in the background. The welcome voice (`welcome.mp3`, D46) is heard once per entry, never in the after-room (N6):
  * the entries that heard it are remembered on the device (WELCOME_KEY), never sent. Vibration is the page's, as
  * before. Nothing here may break the page: every call into Web Audio, the network and the storage is wrapped, and a
  * sound that cannot play is simply not heard.
@@ -80,8 +82,12 @@ export type LivePassage = keyof typeof SFX_AT;
 
 /** A sound asked for later than this after its time (its file still loading) is not heard: late, it would mislead. */
 export const LATE_S = 0.5;
-/** The context is suspended this long after the last sound scheduled has ended. */
-export const REST_MARGIN_MS = 300;
+/**
+ * The context is suspended this long after the last sound scheduled has ended: longer than the gap between two ticks of
+ * the last ten seconds (a figure change each second, room-tick.mp3 lasting 0.52 s), so the ten keep it running, as the
+ * room's synthesized tick did (SUSPEND_AFTER_MS 1040 ms from each tick).
+ */
+export const REST_MARGIN_MS = 1000;
 
 /** The device's memory of the entries that heard the welcome voice (their ids, space-separated, the newest last). */
 export const WELCOME_KEY = 'orbes.live.welcome';
@@ -202,6 +208,8 @@ export class LiveSound implements SoundSwitch {
   private generation = 0;
   private rest: unknown = null;
   private restUntil = 0;
+  /** The last state asked of the context (resume() and suspend() settle later): a pending suspend is never trusted. */
+  private asked: 'resume' | 'suspend' | null = null;
 
   constructor(
     private readonly preference: SoundSwitch,
@@ -345,9 +353,14 @@ export class LiveSound implements SoundSwitch {
     }, Math.max(0, this.restUntil - this.env.now()));
   }
 
+  /** Running again: also when it still reads 'running' but a suspend asked earlier has not settled yet. */
   private resume(ctx: LiveAudioContext): void {
     try {
-      if (ctx.state !== 'running' && ctx.state !== 'closed') void ctx.resume().catch(() => undefined);
+      if (ctx.state === 'closed') return;
+      if (ctx.state !== 'running' || this.asked === 'suspend') {
+        this.asked = 'resume';
+        void ctx.resume().catch(() => undefined);
+      }
     } catch {
       // A context that refuses: nothing is heard.
     }
@@ -360,7 +373,12 @@ export class LiveSound implements SoundSwitch {
     }
     const ctx = this.ctx;
     try {
-      if (ctx?.state === 'running') void ctx.suspend().catch(() => undefined);
+      if (!ctx || ctx.state === 'closed' || this.asked === 'suspend') return;
+      // Running, or a resume asked that has not settled yet: suspended after it.
+      if (ctx.state === 'running' || this.asked === 'resume') {
+        this.asked = 'suspend';
+        void ctx.suspend().catch(() => undefined);
+      }
     } catch {
       // Nothing to release.
     }
