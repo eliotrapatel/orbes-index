@@ -38,6 +38,8 @@ const AUDITOR = { email: 'intel.auditor@orbes.test', password: 'intel auditor pa
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'out');
 const SCREENSHOTS = !!process.env.ORBES_SCREENSHOTS;
 const STEP_TIMEOUT = 240_000;
+/** expect.poll's budget (its default, 1 s, is too short on a shared CI runner). */
+const POLL = { timeout: 15_000 };
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
 const HOUR = 60 * MINUTE;
@@ -85,7 +87,7 @@ describe.skipIf(!HAS_CHROMIUM)('the intelligence of the LIVE RELEASES in the con
     await p.fill('input[name=email]', who.email);
     await p.fill('input[name=password]', who.password);
     await p.click('[data-testid=login-submit]');
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dashboard');
     return p;
   }
 
@@ -206,12 +208,12 @@ describe.skipIf(!HAS_CHROMIUM)('the intelligence of the LIVE RELEASES in the con
     );
     const p = await open(ADMIN);
     await page(p, draft.id, 'THE VAULT RING');
-    await expect.poll(() => p.locator('#live-plan').count()).toBe(1);
+    await expect.poll(() => p.locator('#live-plan').count(), POLL).toBe(1);
     // Every ACTIVE account may enter: the five collectors.
     expect(await fig(p, 'live-plan-eligible').textContent()).toBe('5');
     expect(await p.locator('[data-testid=live-plan-why] li').count()).toBeGreaterThan(1);
     expect(await p.locator('[data-testid=live-forecast-why] li').count()).toBeGreaterThan(1);
-    await expect.poll(() => p.locator('[data-testid=live-forecast-capacity]').textContent()).toContain('WITHIN THE ROOM’S LIMIT');
+    await expect.poll(() => p.locator('[data-testid=live-forecast-capacity]').textContent(), POLL).toContain('WITHIN THE ROOM’S LIMIT');
     expect(await p.locator('#live-comparison tbody tr').count()).toBe(2);
     expect(await p.locator('#live-comparison tbody tr.is-current').textContent()).toContain('THE VAULT RING');
     expect(await p.locator('#live-radar, #live-bots, #live-report').count()).toBe(0);
@@ -228,7 +230,7 @@ describe.skipIf(!HAS_CHROMIUM)('the intelligence of the LIVE RELEASES in the con
       await ctx.services.live.enter(a.id, draft.id, { sizeId: draft.sizes[i % 2]!.id }, a.actor, { networkHash: liveNetworkHash(ctx.config.ipHashPepper, i < 3 ? `203.0.113.${i + 1}` : '198.51.100.4') });
     }
     await page(p, draft.id, 'THE VAULT RING');
-    await expect.poll(() => p.locator('#live-radar').count()).toBe(1);
+    await expect.poll(() => p.locator('#live-radar').count(), POLL).toBe(1);
     expect(await fig(p, 'live-radar-people').textContent()).toBe('4');
     expect(await p.locator('[data-testid=live-radar-add]').allTextContents()).toEqual(['Add 1', 'Add 1']);
     expect(await p.locator('[data-testid=live-radar-promise]').textContent()).toContain('« 2 PIECES · NEVER MORE »');
@@ -239,8 +241,8 @@ describe.skipIf(!HAS_CHROMIUM)('the intelligence of the LIVE RELEASES in the con
     await shot(p, 'intel-radar');
     // One tap: the new account's entry is removed.
     await p.locator('#live-bots tbody tr', { hasText: fresh.email }).locator('[data-testid=live-bots-remove]').click();
-    await expect.poll(async () => (await ctx.services.live.entry(fresh.id, draft.id))?.status).toBe('REMOVED');
-    await expect.poll(() => p.locator('#live-bots tbody tr', { hasText: fresh.email }).locator('[data-testid=live-bots-remove]').count()).toBe(0);
+    await expect.poll(async () => (await ctx.services.live.entry(fresh.id, draft.id))?.status, POLL).toBe('REMOVED');
+    await expect.poll(() => p.locator('#live-bots tbody tr', { hasText: fresh.email }).locator('[data-testid=live-bots-remove]').count(), POLL).toBe(0);
 
     // 3. T0: a turn in each size; the engine then stops and the turns run out: the stream brings the alerts.
     clock.set(t0);
@@ -272,7 +274,7 @@ describe.skipIf(!HAS_CHROMIUM)('the intelligence of the LIVE RELEASES in the con
     expect(download.suggestedFilename()).toMatch(new RegExp(`^ORBES-live-${draft.id.slice(0, 8).toUpperCase()}-report-\\d{4}-\\d{2}-\\d{2}\\.csv$`));
     expect(readFileSync((await download.path())!, 'utf8')).toContain('"funnel","confirmed","1"');
     // Who came without a piece: the two whose turns ran out (a removed entry left out).
-    await expect.poll(() => p.locator('#live-collectors [data-testid=live-collectors-account]').count()).toBe(2);
+    await expect.poll(() => p.locator('#live-collectors [data-testid=live-collectors-account]').count(), POLL).toBe(2);
     expect(await p.locator('[data-testid=live-collectors-repeat]').textContent()).toMatch(/^1 · /);
     expect(await figuresInDisplayFace(p)).toEqual([]);
     await shot(p, 'intel-report');
@@ -282,7 +284,7 @@ describe.skipIf(!HAS_CHROMIUM)('the intelligence of the LIVE RELEASES in the con
     // 5. An AUDITOR: the same readings, the emails masked, no REMOVE.
     const a = await open(AUDITOR);
     await page(a, draft.id, 'THE VAULT RING');
-    await expect.poll(() => a.locator('#live-collectors [data-testid=live-collectors-account]').count()).toBe(2);
+    await expect.poll(() => a.locator('#live-collectors [data-testid=live-collectors-account]').count(), POLL).toBe(2);
     for (const email of await a.locator('#live-collectors [data-testid=live-collectors-account], #live-bots [data-testid=live-bots-account]').allTextContents()) expect(email).toMatch(/^.\*\*\*@example\.com$/);
     expect(await a.locator('[data-testid=live-bots-remove]').count()).toBe(0);
     expect(await csp(a)).toEqual([]);

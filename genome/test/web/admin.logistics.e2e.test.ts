@@ -49,6 +49,8 @@ const ADMIN = { email: 'console@orbes.test', password: 'orbes console passphrase
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'out');
 const SCREENSHOTS = !!process.env.ORBES_SCREENSHOTS;
 const STEP_TIMEOUT = 180_000;
+/** expect.poll's budget (its default, 1 s, is too short on a shared CI runner). */
+const POLL = { timeout: 15_000 };
 const MINUTE = 60_000;
 
 async function freePort(): Promise<number> {
@@ -97,7 +99,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await p.fill('input[name=email]', who.email);
     await p.fill('input[name=password]', who.password);
     await p.click('[data-testid=login-submit]');
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe(heading);
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe(heading);
     return p;
   }
 
@@ -195,7 +197,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     expect(await tabTexts(g)).toEqual(['To ship (0)', 'Receptions (0)', 'Stock', 'Returns (0)', 'Corrections (0)']);
     expect(await g.locator('[data-testid=logistics-tab-ship]').getAttribute('aria-current')).toBe('page');
     await g.click('[data-testid=logistics-tab-stock]');
-    await expect.poll(() => g.locator('[data-testid=logistics-tab-stock]').getAttribute('aria-current')).toBe('page');
+    await expect.poll(() => g.locator('[data-testid=logistics-tab-stock]').getAttribute('aria-current'), POLL).toBe('page');
     // One location: no Location filter, no Location column; never what ORBES alone reads.
     expect(await g.locator('[data-testid=logistics-location]').count()).toBe(0);
     expect(await g.locator('#logistics-stock thead th').allTextContents()).toEqual(['Model', 'Variant', 'Size', 'On hand', 'Reserved', 'Available', 'Waiting', 'Minimum', '']);
@@ -216,7 +218,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await g.fill('dialog input[name=delta]', '0');
     await g.fill('dialog textarea[name=reason]', 'Counted.');
     await g.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => g.locator('dialog .dialog__error').textContent()).toBe('Correct the count by a number of pieces, up (12) or down (-2).');
+    await expect.poll(() => g.locator('dialog .dialog__error').textContent(), POLL).toBe('Correct the count by a number of pieces, up (12) or down (-2).');
     await g.fill('dialog input[name=delta]', '-1');
     await g.fill('dialog textarea[name=reason]', 'One piece scratched in its box.');
     await shot(g, 'agent-propose', { dialog: true });
@@ -228,11 +230,11 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await g.fill('dialog textarea[name=reason]', 'Found on the shelf.');
     await confirmDialog(g);
     // Nothing moved yet.
-    await expect.poll(() => stockRow(g, sku).locator('td').nth(3).textContent()).toBe('2');
-    await expect.poll(() => tabTexts(g)).toEqual(['To ship (0)', 'Receptions (0)', 'Stock', 'Returns (0)', 'Corrections (2)']);
+    await expect.poll(() => stockRow(g, sku).locator('td').nth(3).textContent(), POLL).toBe('2');
+    await expect.poll(() => tabTexts(g), POLL).toEqual(['To ship (0)', 'Receptions (0)', 'Stock', 'Returns (0)', 'Corrections (2)']);
     await g.click('[data-testid=logistics-tab-corrections]');
     // Its two, and ORBES's own count of the pieces, applied at once.
-    await expect.poll(() => g.locator('[data-testid=correction-status]').allTextContents()).toEqual(['TO APPROVE', 'TO APPROVE', 'APPROVED']);
+    await expect.poll(() => g.locator('[data-testid=correction-status]').allTextContents(), POLL).toEqual(['TO APPROVE', 'TO APPROVE', 'APPROVED']);
     expect(await g.locator('[data-testid=correction-delta]').allTextContents()).toEqual(['+3', '-1', '+2']);
     expect(await g.locator('[data-testid=correction-approve]').count()).toBe(0);
 
@@ -241,22 +243,22 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     const registry = a.locator('.side__group', { hasText: 'Registry' }).locator('.side__link');
     expect(await registry.evaluateAll((links) => links.map((x) => x.getAttribute('data-route')))).toEqual(['products', 'genomes', 'codes', 'catalogue', 'logistics', 'supplierOrders']);
     await a.click('.side__link[data-route=logistics]');
-    await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Logistics');
+    await expect.poll(async () => (await title(a).textContent())?.trim(), POLL).toBe('Logistics');
     expect(await a.locator('.side__link.is-active').textContent()).toBe('Logistics');
     expect(await tabTexts(a)).toEqual(['To ship (0)', 'Receptions (0)', 'Stock', 'Returns (0)', 'Corrections (2)']);
     await a.click('[data-testid=logistics-tab-stock]');
-    await expect.poll(() => a.locator('#logistics-stock thead th').count()).toBeGreaterThan(0);
+    await expect.poll(() => a.locator('#logistics-stock thead th').count(), POLL).toBeGreaterThan(0);
     expect(await a.locator('#logistics-stock thead th').allTextContents()).toEqual(['Model', 'Variant', 'Size', 'Location', 'On hand', 'Reserved', 'Available', 'Waiting', 'Minimum', 'Expected', 'To order', '']);
-    await expect.poll(() => stockRow(a, sku).count()).toBe(2);
+    await expect.poll(() => stockRow(a, sku).count(), POLL).toBe(2);
     await a.selectOption('[data-testid=logistics-location]', warehouse);
-    await expect.poll(() => stockRow(a, sku).count()).toBe(1);
+    await expect.poll(() => stockRow(a, sku).count(), POLL).toBe(1);
     expect(await stockRow(a, sku).locator('td').nth(3).textContent()).toBe('LOGISTICS WAREHOUSE');
     await a.selectOption('[data-testid=logistics-location]', '');
-    await expect.poll(() => stockRow(a, sku).count()).toBe(2);
+    await expect.poll(() => stockRow(a, sku).count(), POLL).toBe(2);
 
     // The agent's corrections: the one down approved, the one up declined with a note.
     await a.click('[data-testid=logistics-tab-corrections]');
-    await expect.poll(() => a.locator('[data-testid=correction-approve]').count()).toBe(2);
+    await expect.poll(() => a.locator('[data-testid=correction-approve]').count(), POLL).toBe(2);
     expect(await a.locator('#logistics-corrections .panel__text').textContent()).toBe('A correction proposed by the agent moves the stock only once ORBES approves it.');
     const down = a.locator('#logistics-corrections tbody tr', { hasText: 'scratched' });
     await down.locator('[data-testid=correction-approve]').click();
@@ -269,28 +271,28 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await shot(a, 'decline', { dialog: true });
     await confirmDialog(a);
     await a.waitForSelector('.toast:has-text("Correction declined.")');
-    await expect.poll(() => tabTexts(a)).toEqual(['To ship (0)', 'Receptions (0)', 'Stock', 'Returns (0)', 'Corrections (0)']);
+    await expect.poll(() => tabTexts(a), POLL).toEqual(['To ship (0)', 'Receptions (0)', 'Stock', 'Returns (0)', 'Corrections (0)']);
     expect(await a.locator('[data-testid=correction-status]').allTextContents()).toEqual(['DECLINEDCounted again at ORBES: two pieces.', 'APPROVED', 'APPROVED']);
     await shot(a, 'corrections');
 
     // The agent reads both, ORBES's note with the declined one; the stock moved by the approved one only.
     await g.reload();
-    await expect.poll(() => g.locator('[data-testid=correction-status] .status__text').allTextContents()).toEqual(['DECLINED', 'APPROVED', 'APPROVED']);
+    await expect.poll(() => g.locator('[data-testid=correction-status] .status__text').allTextContents(), POLL).toEqual(['DECLINED', 'APPROVED', 'APPROVED']);
     expect(await g.locator('[data-testid=correction-note]').allTextContents()).toEqual(['Counted again at ORBES: two pieces.']);
     await g.click('[data-testid=logistics-tab-stock]');
-    await expect.poll(() => stockRow(g, sku).locator('td').nth(3).textContent()).toBe('1');
+    await expect.poll(() => stockRow(g, sku).locator('td').nth(3).textContent(), POLL).toBe('1');
 
     // A count no ORBES identity backs (a hand count of before): NO PIECE for ORBES, with the notice; never for the agent.
     await h.ctx.services.stock.adjust({ skuId: sku54, locationId: france, delta: 1, note: 'Counted by hand.' }, admin);
     await a.click('[data-testid=logistics-tab-stock]');
-    await expect.poll(() => a.locator('[data-testid=stock-unbacked]').textContent()).toBe(
+    await expect.poll(() => a.locator('[data-testid=stock-unbacked]').textContent(), POLL).toBe(
       '1 size has pieces counted that no ORBES identity backs. An order holding them cannot be packed: count their pieces in, or correct the count down.',
     );
     const row54 = stockRow(a, code54, 'FRANCE WAREHOUSE');
     expect(await row54.locator('[data-testid=stock-no-piece]').textContent()).toBe('NO PIECE · 1');
     expect(await stockRow(a, sku, 'FRANCE WAREHOUSE').locator('[data-testid=stock-count-in]').count()).toBe(0);
     await g.reload();
-    await expect.poll(() => stockRow(g, code54).locator('td').nth(3).textContent()).toBe('1');
+    await expect.poll(() => stockRow(g, code54).locator('td').nth(3).textContent(), POLL).toBe('1');
     expect(await g.locator('[data-testid=stock-no-piece], [data-testid=stock-unbacked]').count()).toBe(0);
     // Its piece, a one-off of the Generator, counted in.
     const oneOff = await h.ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: catalog.modelId, material: '925 STERLING SILVER', variant: '54' }, admin);
@@ -301,12 +303,12 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await a.fill('dialog textarea[name=serials]', 'O26-J-99999');
     await a.fill('dialog textarea[name=note]', 'The one-off on the shelf.');
     await a.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => a.locator('dialog .dialog__error').textContent()).toBe('Product not found.');
+    await expect.poll(() => a.locator('dialog .dialog__error').textContent(), POLL).toBe('Product not found.');
     await a.fill('dialog textarea[name=serials]', oneOff.product.productId.toLowerCase());
     await shot(a, 'count-in', { dialog: true });
     await confirmDialog(a);
     await a.waitForSelector('.toast:has-text("Pieces counted in.")');
-    await expect.poll(() => a.locator('[data-testid=stock-unbacked]').count()).toBe(0);
+    await expect.poll(() => a.locator('[data-testid=stock-unbacked]').count(), POLL).toBe(0);
     expect(await a.locator('[data-testid=stock-no-piece]').count()).toBe(0);
     await shot(a, 'staff-stock');
     for (const p of [a, g]) {
@@ -329,7 +331,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     const g = await open(agentLogin, 'Logistics');
     expect(await tabTexts(g)).toEqual(['To ship (0)', 'Receptions (0)', 'Stock', 'Returns (1)', 'Corrections (0)']);
     await g.click('[data-testid=logistics-tab-returns]');
-    await expect.poll(() => g.locator('#logistics-returns thead th').allTextContents()).toEqual(['Order', 'Kind', 'Piece', 'Opened on', '']);
+    await expect.poll(() => g.locator('#logistics-returns thead th').allTextContents(), POLL).toEqual(['Order', 'Kind', 'Piece', 'Opened on', '']);
     const row = g.locator('#logistics-returns tbody tr');
     expect(await row.count()).toBe(1);
     // The agent reads the reference only, never a link to the order's page.
@@ -342,13 +344,13 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     expect(await g.locator('dialog .dialog__title').textContent()).toBe('The parcel is back');
     expect(await g.locator('dialog .dialog__text').textContent()).toBe('ORBES then decides: back to stock, a refund, or the other size.');
     await g.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => g.locator('dialog .dialog__error').textContent()).toBe('Complete the required fields.');
+    await expect.poll(() => g.locator('dialog .dialog__error').textContent(), POLL).toBe('Complete the required fields.');
     await g.selectOption('dialog select[name=pieceState]', 'OK');
     await g.fill('dialog textarea[name=note]', 'In its box, unworn.');
     await shot(g, 'received', { dialog: true });
     await confirmDialog(g);
     await g.waitForSelector('.toast:has-text("Recorded: ORBES decides.")');
-    await expect.poll(() => g.locator('#logistics-returns .empty__text').textContent()).toBe('No parcel expected back.');
+    await expect.poll(() => g.locator('#logistics-returns .empty__text').textContent(), POLL).toBe('No parcel expected back.');
     expect(await tabTexts(g)).toEqual(['To ship (0)', 'Receptions (0)', 'Stock', 'Returns (0)', 'Corrections (0)']);
     expect(await h.ctx.services.orderCases.get(opened.id)).toMatchObject({ status: 'RECEIVED', received: { pieceState: 'OK', note: 'In its box, unworn.' } });
     expect(await csp(g)).toEqual([]);
@@ -386,7 +388,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
 
     // The parcel's page: Start packing locks the address and the engraving for the collector.
     await row.locator('[data-testid=parcel-link]').click();
-    await expect.poll(async () => (await title(g).textContent())?.trim()).toBe(reference);
+    await expect.poll(async () => (await title(g).textContent())?.trim(), POLL).toBe(reference);
     expect(await g.locator('.side__link.is-active').textContent()).toBe('Logistics');
     expect(await g.locator('[data-testid=parcel-piece]').allTextContents()).toEqual(['MONOLITHE']);
     expect(await g.locator('[data-testid=parcel-name]').textContent()).toBe('Ada Martin');
@@ -395,7 +397,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     expect(await g.locator('dialog .dialog__text').textContent()).toBe('From now on, the collector can no longer change the address or the engraving: only ORBES Client Services can.');
     await confirmDialog(g);
     await g.waitForSelector('.toast:has-text("Packing started.")');
-    await expect.poll(() => g.locator('[data-testid=parcel-step]').textContent()).toBe('PACKING');
+    await expect.poll(() => g.locator('[data-testid=parcel-step]').textContent(), POLL).toBe('PACKING');
     expect((await g.locator('#parcel-checklist .ccheck__label, [data-testid=parcel-checklist] .ccheck__label').allTextContents())).toEqual(['The right piece: its card scanned', 'The card, its claim code visible', 'The box and the pouch']);
     expect(await g.locator('[data-testid=parcel-check-scan] input').isDisabled()).toBe(true);
     expect(await g.locator('[data-testid=parcel-packed]').isDisabled()).toBe(true);
@@ -408,7 +410,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     );
     await g.setInputFiles('[data-testid=parcel-scan-photo]', cardPhoto(right!, 'right-card.png'));
     await g.waitForSelector(`.toast:has-text("MONOLITHE · 54 · ${right!.productId}: the right piece.")`, { timeout: 30_000 });
-    await expect.poll(() => g.locator('[data-testid=parcel-check-scan] input').isChecked()).toBe(true);
+    await expect.poll(() => g.locator('[data-testid=parcel-check-scan] input').isChecked(), POLL).toBe(true);
 
     // The photo, scaled in the browser under the edge's 64 KB on its path (deploy/vps/Caddyfile, nothing changed on the
     // host): its quality, then its side, stepped down from 1600 px to 1024 px. Every body the console sends to the
@@ -430,13 +432,13 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await g.waitForSelector('.toast:has-text("This photo stays over 64 KB, even at 1 024 px. Take it again, closer to the parcel.")', { timeout: 30_000 });
     expect(await photoBodies()).toEqual([]);
     expect(await g.locator('[data-testid=parcel-photo-view]').count()).toBe(0);
-    await expect.poll(() => g.locator('[data-testid=parcel-photo]').isDisabled()).toBe(false);
+    await expect.poll(() => g.locator('[data-testid=parcel-photo]').isDisabled(), POLL).toBe(false);
     // A detailed photo, over 64 KB at 1600 px, goes once stepped down; then every line ticked: Packed.
     const photo = join(workDir, 'parcel.jpg');
     writeFileSync(photo, texturedPhoto(2400, 1800, 20));
     await g.setInputFiles('[data-testid=parcel-photo-file]', photo);
     await g.waitForSelector('.toast:has-text("Photo added.")', { timeout: 30_000 });
-    await expect.poll(() => g.locator('[data-testid=parcel-photo-view]').count()).toBe(1);
+    await expect.poll(() => g.locator('[data-testid=parcel-photo-view]').count(), POLL).toBe(1);
     const [sentBytes, ...more] = await photoBodies();
     expect(more).toEqual([]);
     expect(sentBytes).toBeGreaterThan(0);
@@ -448,7 +450,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     expect(Math.max(sent.width, sent.height)).toBeLessThan(1600);
     expect(Math.max(sent.width, sent.height)).toBeGreaterThanOrEqual(1024);
     for (const label of ['The card, its claim code visible', 'The box and the pouch']) await g.locator('[data-testid=parcel-check]', { hasText: label }).click();
-    await expect.poll(() => g.locator('[data-testid=parcel-packed]').isDisabled()).toBe(false);
+    await expect.poll(() => g.locator('[data-testid=parcel-packed]').isDisabled(), POLL).toBe(false);
     await shot(g, 'packing');
     await shot(g, 'packing-phone', { phone: true });
     // On a touch screen (the agent's phone): each checklist line spans the column at 44 px at least, the text links 44 px
@@ -475,7 +477,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await cdp.detach();
     await g.click('[data-testid=parcel-packed]');
     await g.waitForSelector('.toast:has-text("Packed.")');
-    await expect.poll(() => g.locator('[data-testid=parcel-step]').textContent()).toBe('PACKED');
+    await expect.poll(() => g.locator('[data-testid=parcel-step]').textContent(), POLL).toBe('PACKED');
 
     // Ship: the carriers come with the parcel's reply; never a declared value from the agent.
     await g.click('[data-testid=parcel-ship]');
@@ -484,18 +486,18 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await g.selectOption('dialog select[name=carrierId]', colissimo);
     await g.fill('dialog input[name=trackingNumber]', '6A');
     await g.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => g.locator('dialog .dialog__error').textContent()).toBe('A tracking number has 3 to 40 letters and digits.');
+    await expect.poll(() => g.locator('dialog .dialog__error').textContent(), POLL).toBe('A tracking number has 3 to 40 letters and digits.');
     await g.fill('dialog input[name=trackingNumber]', '6A98765432101');
     await shot(g, 'ship', { dialog: true });
     await confirmDialog(g);
     await g.waitForSelector('.toast:has-text("Shipped.")');
-    await expect.poll(() => g.locator('[data-testid=parcel-tracking]').textContent()).toBe('6A98765432101');
+    await expect.poll(() => g.locator('[data-testid=parcel-tracking]').textContent(), POLL).toBe('6A98765432101');
     expect(await h.t.db.selectFrom('orders').select(['status', 'product_id']).where('id', '=', orderId).executeTakeFirstOrThrow()).toEqual({ status: 'SHIPPED', product_id: right!.uuid });
     expect(await h.ctx.services.warranty.get(right!.productId)).toMatchObject({ status: 'ACTIVE' });
 
     // Its slip: each piece and what goes with it, no channel, release or price.
     await g.click('a:has-text("Packing slip")');
-    await expect.poll(() => g.locator('[data-testid=slip-reference]').textContent()).toBe(reference);
+    await expect.poll(() => g.locator('[data-testid=slip-reference]').textContent(), POLL).toBe(reference);
     expect(await g.locator('[data-testid=slip-model]').textContent()).toBe('MONOLITHE');
     expect(await g.locator('[data-testid=slip-piece]').textContent()).toBe(right!.productId);
     expect(await g.locator('.printdoc__foot').textContent()).toBe('ORBES Client Services');
@@ -516,7 +518,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     expect(await g.locator('dialog .dialog__text').textContent()).toBe('The parcel has reached the collector. It is also marked delivered by itself when the collector registers the piece with its card.');
     await confirmDialog(g);
     await g.waitForSelector('.toast:has-text("Delivered.")');
-    await expect.poll(() => g.locator('#logistics-on-its-way .empty__text').textContent()).toBe('No parcel on its way.');
+    await expect.poll(() => g.locator('#logistics-on-its-way .empty__text').textContent(), POLL).toBe('No parcel on its way.');
     expect((await h.t.db.selectFrom('orders').select('status').where('id', '=', orderId).executeTakeFirstOrThrow()).status).toBe('DELIVERED');
     expect(await figuresInDisplayFace(g)).toEqual([]);
     expect(await csp(g)).toEqual([]);
@@ -534,16 +536,16 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     // The agent: a wrong reference refused, the right one opens the count; never a list of the orders on their way.
     const g = await open(agentLogin, 'Logistics');
     await g.click('[data-testid=logistics-tab-receptions]');
-    await expect.poll(() => g.locator('#logistics-receive .panel__text').textContent()).toBe(
+    await expect.poll(() => g.locator('#logistics-receive .panel__text').textContent(), POLL).toBe(
       'A delivery has arrived: enter the supplier order’s reference from its delivery note, then count what is in it.',
     );
     expect(await g.locator('#logistics-expected').count()).toBe(0);
     await g.fill('[data-testid=reception-reference]', 'SO-00000000');
     await g.click('[data-testid=reception-open]');
-    await expect.poll(() => g.locator('[data-testid=reception-reference-error]').textContent()).toBe('No supplier order SO-00000000 is expected here. Check the reference, or ask ORBES.');
+    await expect.poll(() => g.locator('[data-testid=reception-reference-error]').textContent(), POLL).toBe('No supplier order SO-00000000 is expected here. Check the reference, or ask ORBES.');
     await g.fill('[data-testid=reception-reference]', order.reference.toLowerCase());
     await g.click('[data-testid=reception-open]');
-    await expect.poll(async () => (await title(g).textContent())?.trim()).toBe(`Reception · ${order.reference} · MAISON NORD`);
+    await expect.poll(async () => (await title(g).textContent())?.trim(), POLL).toBe(`Reception · ${order.reference} · MAISON NORD`);
     expect(await g.locator('.reception__lines thead th').allTextContents()).toEqual(['Model', 'Variant', 'Size', 'Ordered', 'Already received', 'Expected on', 'Received OK', 'Rejected', 'Note']);
     expect(await g.locator('[data-testid=reception]').textContent()).not.toMatch(/120|EUR|€/);
     // Each count cell is named by its column and its line for a screen reader.
@@ -561,11 +563,11 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await shot(g, 'reception-count');
     await g.fill(`input[name=note_${sku52}]`, '');
     await g.click('[data-testid=reception-record]');
-    await expect.poll(() => g.locator('[data-testid=reception-error]').textContent()).toBe('Say in a note why more pieces than expected, or a piece not on the order, came in.');
+    await expect.poll(() => g.locator('[data-testid=reception-error]').textContent(), POLL).toBe('Say in a note why more pieces than expected, or a piece not on the order, came in.');
     await g.fill(`input[name=note_${sku52}]`, 'One more in the box.');
     await g.click('[data-testid=reception-record]');
     await g.waitForSelector('.toast:has-text("Reception recorded: ORBES confirms it.")');
-    await expect.poll(() => g.locator('[data-testid=reception-summary]').textContent()).toBe(`${order.reference} · 3 OK · 1 rejected · waiting for ORBES`);
+    await expect.poll(() => g.locator('[data-testid=reception-summary]').textContent(), POLL).toBe(`${order.reference} · 3 OK · 1 rejected · waiting for ORBES`);
     expect(await tabTexts(g)).toEqual(['To ship (0)', 'Receptions (1)', 'Stock', 'Returns (0)', 'Corrections (0)']);
     expect(await g.locator('[data-testid=reception-confirm]').count()).toBe(0);
 
@@ -573,7 +575,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     const a = await open(ADMIN, 'Dashboard');
     await go(a, '#/logistics?tab=receptions', 'Logistics');
     expect(await a.locator('#logistics-receive').count()).toBe(0);
-    await expect.poll(() => a.locator('#logistics-expected tbody tr').filter({ hasText: order.reference }).locator('td').nth(1).textContent()).toBe('MAISON NORD');
+    await expect.poll(() => a.locator('#logistics-expected tbody tr').filter({ hasText: order.reference }).locator('td').nth(1).textContent(), POLL).toBe('MAISON NORD');
     await shot(a, 'receptions');
     await a.click('[data-testid=reception-confirm]');
     expect(await a.locator('[data-testid=reception-confirm-text]').textContent()).toBe(
@@ -582,18 +584,18 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await shot(a, 'reception-confirm', { dialog: true });
     await confirmDialog(a);
     await a.waitForSelector('.toast:has-text("Reception confirmed: the identities are being issued.")');
-    await expect.poll(() => a.locator('#logistics-to-confirm .empty__text').textContent()).toBe('No reception waiting for ORBES.');
+    await expect.poll(() => a.locator('#logistics-to-confirm .empty__text').textContent(), POLL).toBe('No reception waiting for ORBES.');
 
     // While the identities are issued: the progress, nothing to print yet.
     await g.reload();
     const cards = g.locator('[data-testid=reception-cards]');
-    await expect.poll(() => cards.locator('.cards-to-print__title').textContent()).toBe(`${order.reference} · 3 cards`);
+    await expect.poll(() => cards.locator('.cards-to-print__title').textContent(), POLL).toBe(`${order.reference} · 3 cards`);
     expect(await cards.locator('[data-testid=reception-issuing]').textContent()).toBe('Issuing the identities: 0 of 3.');
     expect(await cards.locator('[data-testid=reception-print-sheet]').isDisabled()).toBe(true);
     expect(await cards.locator('[data-testid=reception-attached]').isDisabled()).toBe(true);
     await h.ctx.services.receptions.issuePending();
     await g.reload();
-    await expect.poll(() => cards.locator('[data-testid=reception-issuing]').count()).toBe(0);
+    await expect.poll(() => cards.locator('[data-testid=reception-issuing]').count(), POLL).toBe(0);
     expect(await cards.locator('[data-testid=reception-print-sheet]').textContent()).toBe('Print A4 sheets');
     expect(await cards.locator('[data-testid=reception-print-card]').textContent()).toBe('Print one per page');
     expect(await g.locator('#logistics-cards .panel__text').textContent()).toBe(
@@ -607,7 +609,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     expect(await g.locator('dialog .dialog__text').textContent()).toBe('Every card is with its piece. The cards can no longer be printed from here: a lost card needs a new claim code from ORBES.');
     await confirmDialog(g);
     await g.waitForSelector('.toast:has-text("Cards attached.")');
-    await expect.poll(() => g.locator('#logistics-cards .empty__text').textContent()).toBe('No cards to print.');
+    await expect.poll(() => g.locator('#logistics-cards .empty__text').textContent(), POLL).toBe('No cards to print.');
     expect(await tabTexts(g)).toEqual(['To ship (0)', 'Receptions (0)', 'Stock', 'Returns (0)', 'Corrections (0)']);
 
     // The rejected piece goes back to its supplier.
@@ -616,11 +618,11 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await g.click('[data-testid=supplier-return-sent]');
     await g.fill('dialog input[name=trackingNumber]', 'RET-0001');
     await g.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => g.locator('dialog .dialog__error').textContent()).toBe('A tracking number comes with its carrier.');
+    await expect.poll(() => g.locator('dialog .dialog__error').textContent(), POLL).toBe('A tracking number comes with its carrier.');
     await g.selectOption('dialog select[name=carrierId]', colissimo);
     await confirmDialog(g);
     await g.waitForSelector('.toast:has-text("Sent back to the supplier.")');
-    await expect.poll(() => g.locator('#logistics-back-to-supplier .empty__text').textContent()).toBe('Nothing to send back to a supplier.');
+    await expect.poll(() => g.locator('#logistics-back-to-supplier .empty__text').textContent(), POLL).toBe('Nothing to send back to a supplier.');
     expect((await so.get(order.id)).status).toBe('RECEIVED');
     expect(await h.t.db.selectFrom('supplier_returns').select(['status', 'carrier_id', 'tracking_number']).where('supplier_order_id', '=', order.id).execute()).toEqual([{ status: 'RETURNED', carrier_id: colissimo, tracking_number: 'RET-0001' }]);
     for (const p of [a, g]) {
@@ -641,13 +643,13 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     expect(await a.locator('dialog [data-field=insideHeightMm] .cfield__hint').textContent()).toBe('Inside, it must take the 95 × 62 mm certificate card flat.');
     for (const [name, value] of [['name', 'CUBE 80'], ['insideLengthMm', '94'], ['insideWidthMm', '90'], ['insideHeightMm', '40'], ['emptyWeightG', '85'], ['cost', '1.20'], ['currency', 'EUR']] as const) await a.fill(`dialog input[name=${name}]`, value);
     await a.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => a.locator('dialog .dialog__error').textContent()).toBe('This box cannot take the 95 × 62 mm certificate card flat.');
+    await expect.poll(() => a.locator('dialog .dialog__error').textContent(), POLL).toBe('This box cannot take the 95 × 62 mm certificate card flat.');
     await a.fill('dialog input[name=insideLengthMm]', '120');
     await shot(a, 'box-new', { dialog: true });
     await confirmDialog(a);
     await a.waitForSelector('.toast:has-text("Box added.")');
     const boxRow = a.locator('#settings-boxes tbody tr');
-    await expect.poll(() => boxRow.count()).toBe(1);
+    await expect.poll(() => boxRow.count(), POLL).toBe(1);
     expect(await a.locator('#settings-boxes thead th').allTextContents()).toEqual(['Box', 'Inside (L × W × H)', 'Empty weight', 'Cost', 'Models', 'Status', '']);
     expect(await boxRow.locator('td').evaluateAll((tds) => tds.slice(0, 6).map((td) => td.textContent))).toEqual(['CUBE 80', '120 × 90 × 40 mm', '85 g', expect.stringMatching(/^€.1\.20$/), '0', 'ACTIVE']);
     const cube = (await h.t.db.selectFrom('boxes').select('id').where('name', '=', 'CUBE 80').executeTakeFirstOrThrow()).id;
@@ -667,7 +669,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await shot(a, 'model-packing-edit', { dialog: true });
     await confirmDialog(a);
     await a.waitForSelector('.toast:has-text("Packing saved.")');
-    await expect.poll(() => a.locator('[data-testid=model-packing-box]').textContent()).toBe('CUBE 80 · 120 × 90 × 40 mm');
+    await expect.poll(() => a.locator('[data-testid=model-packing-box]').textContent(), POLL).toBe('CUBE 80 · 120 × 90 × 40 mm');
     expect(await a.locator('[data-testid=model-packing-weight]').textContent()).toBe('140 g');
     await shot(a, 'model-packing');
     await go(a, '#/catalogue', 'Catalogue');
@@ -693,7 +695,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await shot(a, 'parcel-change-box', { dialog: true });
     await confirmDialog(a);
     await a.waitForSelector('.toast:has-text("Box changed.")');
-    await expect.poll(() => a.locator('[data-testid=parcel-box]').textContent()).toBe('FLAT 140 · 160 × 110 × 30 mm');
+    await expect.poll(() => a.locator('[data-testid=parcel-box]').textContent(), POLL).toBe('FLAT 140 · 160 × 110 × 30 mm');
     expect(await a.locator('[data-testid=parcel-box-note]').textContent()).toBe('Chosen while packing.');
     expect(await a.locator('[data-testid=parcel-weight]').textContent()).toBe('260 g');
     await shot(a, 'parcel-packing-box');
@@ -705,7 +707,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await h.ctx.services.logistics.checkPacked(orderId, { ticked: view.checklist.filter((l) => !l.byScan).map((l) => l.key) }, admin, null);
     expect(await h.t.db.selectFrom('shipments').select(['box_id', 'weight_g', 'weight_missing']).where('order_id', '=', orderId).executeTakeFirstOrThrow()).toEqual({ box_id: flat, weight_g: 260, weight_missing: null });
     await a.reload();
-    await expect.poll(() => a.locator('[data-testid=parcel-step]').textContent()).toBe('PACKED');
+    await expect.poll(() => a.locator('[data-testid=parcel-step]').textContent(), POLL).toBe('PACKED');
     expect(await a.locator('[data-testid=parcel-box]').textContent()).toBe('FLAT 140 · 160 × 110 × 30 mm');
     expect(await a.locator('[data-testid=parcel-box-note]').textContent()).toBe('As recorded when the parcel was packed.');
     expect(await a.locator('[data-testid=parcel-weight]').textContent()).toBe('260 g');
@@ -713,7 +715,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
 
     // The packing slip prints both, never a cost.
     await a.click('a:has-text("Packing slip")');
-    await expect.poll(() => a.locator('[data-testid=slip-reference]').textContent()).toBe(reference);
+    await expect.poll(() => a.locator('[data-testid=slip-reference]').textContent(), POLL).toBe(reference);
     expect(await a.locator('[data-testid=slip-box]').textContent()).toBe('FLAT 140 · 160 × 110 × 30 mm');
     expect(await a.locator('[data-testid=slip-weight]').textContent()).toBe('260 g');
     expect(await a.locator('[data-testid=packing-slip]').textContent()).not.toMatch(/€|EUR|1\.20/);

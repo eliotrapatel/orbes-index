@@ -21,6 +21,8 @@ import { openState, stateById } from '../support/nocturne-states.js';
 import { CHROMIUM_PATH } from '../support/ui-stage.js';
 
 const HAS_CHROMIUM = existsSync(CHROMIUM_PATH);
+/** expect.poll's budget (its default, 1 s, is too short on a shared CI runner). */
+const POLL = { timeout: 15_000 };
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 // The rulebook's colours (C_CSS .C), as computed.
@@ -1242,7 +1244,7 @@ async function theCollection(page: Page): Promise<void> {
   expect(await gold.locator('.n-lookbook__photo img').getAttribute('alt')).toBe('The MONOLITHE BRACELET model in gold, photographed by ORBES');
   expect(await gold.getByRole('link', { name: 'SEE THE MODEL' }).getAttribute('href')).toBe('/verify/lookbook/monolithe-gold');
   // The card re-drawn in silence (the pressed dot says what changed), the live region polite again for what follows.
-  await expect.poll(() => page.locator('.n-lookbook__body').getAttribute('aria-live')).toBe('polite');
+  await expect.poll(() => page.locator('.n-lookbook__body').getAttribute('aria-live'), POLL).toBe('polite');
   expect(await page.locator('.n-lookbook__owned').innerText()).toBe('You own two: steel and gold');
 }
 
@@ -1338,7 +1340,7 @@ async function aModel(page: Page): Promise<void> {
   expect(await page.locator('.n-model__photo img').getAttribute('src')).not.toBe(steelSrc);
   expect(await page.locator('.n-model__facts .n-kv__value').first().innerText()).toBe('18K YELLOW GOLD');
   // The sheet re-drawn in silence (never read whole on a dot's press), the live region polite again for what follows.
-  await expect.poll(() => page.locator('.n-model__body').getAttribute('aria-live')).toBe('polite');
+  await expect.poll(() => page.locator('.n-model__body').getAttribute('aria-live'), POLL).toBe('polite');
   expect(await page.locator('.n-model__owned').innerText()).toBe('You own two: steel and gold');
   expect(await page.locator('.n-model__next p').allInnerTexts()).toEqual(['LIVE RELEASE', 'IN BLUE, THURSDAY 21:00 PARIS']);
   // A variant whose label holds figures (18K Gold): its digits in the reading face, never in Gravesend.
@@ -1362,7 +1364,7 @@ async function aModel(page: Page): Promise<void> {
   await page.unroute('**/api/v1/live');
   // The heart pressed (plan CUSTOMER INTELLIGENCE §3.2 W.10.1): its path filled in ivory, its status line under it in ash.
   await page.locator('.n-heart').click();
-  await expect.poll(() => page.locator('.n-heart').getAttribute('aria-pressed')).toBe('true');
+  await expect.poll(() => page.locator('.n-heart').getAttribute('aria-pressed'), POLL).toBe('true');
   await check(page, '.n-heart .n-ic path', { fill: IV });
   await check(page, '.n-model__heart-line', { 'margin-top': 6, 'font-size': 13, color: ASH });
 }

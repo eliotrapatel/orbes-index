@@ -124,13 +124,13 @@ describe.skipIf(!adminUrl)('the Collectors page and Segments at 20,000 collector
 
   it('times the same readings over LAST 12 MONTHS, and holds the panels that fit their budget', async () => {
     for (const panel of COLLECTOR_PANELS) {
-      const t = await timeBest(cold({ panel, p: '12m' }), 2);
+      const t = await timeBest(cold({ panel, p: '12m' }));
       const budget = PERF_BUDGETS_MS[panel as CollectorPanel];
       note(`${panel} 12m: ${t.best} ms (budget ${budget}${PRINTED_ONLY_12M.has(panel) ? ', printed only' : ''}; ${t.all.join(', ')})`);
       if (!PRINTED_ONLY_12M.has(panel)) expect.soft(t.best, `${panel} 12m`).toBeLessThan(budget);
     }
     for (const figure of TREND_FIGURES) {
-      const t = await timeBest(cold({ panel: 'trends', p: '12m', figure }), 2);
+      const t = await timeBest(cold({ panel: 'trends', p: '12m', figure }));
       note(`trends ${figure} 12m: ${t.best} ms (${t.all.join(', ')})`);
       expect.soft(t.best, `trends ${figure} 12m`).toBeLessThan(PERF_BUDGETS_MS.trends);
     }

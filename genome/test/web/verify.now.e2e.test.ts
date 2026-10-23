@@ -14,6 +14,8 @@ import { openState, stateById, type UiState } from '../support/nocturne-states.j
 import { CHROMIUM_PATH, codePhoto, type UiStage } from '../support/ui-stage.js';
 
 const HAS_CHROMIUM = existsSync(CHROMIUM_PATH);
+/** expect.poll's budget (its default, 1 s, is too short on a shared CI runner). */
+const POLL = { timeout: 10_000 };
 
 const READY = '.view--now[data-ready]';
 
@@ -71,7 +73,7 @@ const CASES: { state: UiState; check: Check }[] = [
       expect(await hero(page)).toEqual({ label: 'LIVE RELEASE', title: 'MONOLITHE IN BLUE' });
       expect(await sections(page)).toEqual(['The next release', 'Also announced', 'Your pieces', 'The circle', 'The collection', 'Scan']);
       const top = page.locator('.now__hero');
-      await expect.poll(() => top.locator('.n-cd').getAttribute('aria-label')).toMatch(/^OPENS IN 03 DAYS 02 HOURS 11 MINUTES$/);
+      await expect.poll(() => top.locator('.n-cd').getAttribute('aria-label'), POLL).toMatch(/^OPENS IN 03 DAYS 02 HOURS 11 MINUTES$/);
       expect(await top.innerText()).toMatch(/THURSDAY 8 OCTOBER · 21:00 PARIS/);
       expect((await top.locator('.now__lines').innerText()).split('\n')).toEqual(['25 PIECES', 'ONE PER COLLECTOR', 'FOR OWNERS']);
       expect(await top.locator('.now__interest').innerText()).toBe('5 COLLECTORS WILL BE THERE');
@@ -250,11 +252,11 @@ const ANSWER: { state: UiState; check: Check } = {
     const before = await visits();
     const inv = page.locator('.now__invitation');
     await inv.getByRole('button', { name: 'NO' }).click();
-    await expect.poll(() => page.locator('.now__invitation').getByRole('button', { name: 'NO' }).getAttribute('aria-pressed')).toBe('true');
+    await expect.poll(() => page.locator('.now__invitation').getByRole('button', { name: 'NO' }).getAttribute('aria-pressed'), POLL).toBe('true');
     expect(await page.locator('.now__invitation').getByRole('button', { name: 'YES' }).getAttribute('aria-pressed')).toBe('false');
     expect(await page.locator('.now__invitation .n-circle-card__places').innerText()).toBe('4 LEFT OF 12');
     await page.locator('.now__invitation').getByRole('button', { name: 'YES' }).click();
-    await expect.poll(() => page.locator('.now__invitation').getByRole('button', { name: 'YES' }).getAttribute('aria-pressed')).toBe('true');
+    await expect.poll(() => page.locator('.now__invitation').getByRole('button', { name: 'YES' }).getAttribute('aria-pressed'), POLL).toBe('true');
     expect(await page.locator('.now__invitation .n-circle-card__places').innerText()).toBe('3 LEFT OF 12');
     // NOW's read of the feed is no visit to the circle.
     await page.reload();

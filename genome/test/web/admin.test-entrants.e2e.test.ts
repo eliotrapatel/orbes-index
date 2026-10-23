@@ -36,6 +36,8 @@ const HAS_CHROMIUM = existsSync(CHROMIUM);
 const ADMIN = { email: 'console@orbes.test', password: 'orbes console passphrase 2026' };
 const AUDITOR = { email: 'tests.auditor@orbes.test', password: 'tests auditor passphrase 2026' };
 const STEP_TIMEOUT = 240_000;
+/** expect.poll's budget (its default, 1 s, is too short on a shared CI runner). */
+const POLL = { timeout: 15_000 };
 const HOUR = 3_600_000;
 
 async function freePort(): Promise<number> {
@@ -80,7 +82,7 @@ describe.skipIf(!HAS_CHROMIUM)('test entrants and the server’s status in the c
     await p.fill('input[name=email]', who.email);
     await p.fill('input[name=password]', who.password);
     await p.click('[data-testid=login-submit]');
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dashboard');
     return p;
   }
 
@@ -174,7 +176,7 @@ describe.skipIf(!HAS_CHROMIUM)('test entrants and the server’s status in the c
     await p.fill('dialog input[name=seconds]', '2');
     // None confirms by itself: the one confirmed below is confirmed by hand.
     await p.fill('dialog input[name=confirmPct]', '0');
-    await expect.poll(() => text(p, 'test-total')).toBe('12 test entrants in this press.');
+    await expect.poll(() => text(p, 'test-total'), POLL).toBe('12 test entrants in this press.');
     expect(await p.isDisabled('[data-testid=dialog-confirm]')).toBe(true);
     await confirmDialog(p, `TEST ${id8}`);
     await expect.poll(() => text(p, 'test-status'), { timeout: 30_000 }).toBe('DONE');
@@ -183,7 +185,7 @@ describe.skipIf(!HAS_CHROMIUM)('test entrants and the server’s status in the c
     expect((await p.locator('[data-testid=test-release] .kpi__value').allTextContents()).map((x) => x.trim())).toEqual(['1', '12', '13']);
     expect((await p.locator('[data-testid=test-tiers] tbody tr').last().locator('td').allTextContents()).map((x) => x.trim())).toEqual(['TOTAL', '12', '0', '0', '0', '0']);
     await p.reload();
-    await expect.poll(() => p.locator('#entries [data-testid=test-tag]').count()).toBe(12);
+    await expect.poll(() => p.locator('#entries [data-testid=test-tag]').count(), POLL).toBe(12);
     expect(await p.locator('#entries tbody tr', { hasText: 'tests.collector@example.com' }).locator('[data-testid=test-tag]').count()).toBe(0);
     expect(await figuresInDisplayFace(p)).toEqual([]);
 
@@ -214,7 +216,7 @@ describe.skipIf(!HAS_CHROMIUM)('test entrants and the server’s status in the c
     await p.waitForSelector('dialog.dialog--danger');
     await confirmDialog(p, `END TEST ${id8}`);
     await expect.poll(() => p.locator('[data-testid=test-status]').count(), { timeout: 30_000 }).toBe(0);
-    await expect.poll(() => text(p, 'test-past-checks')).toBe('5/5');
+    await expect.poll(() => text(p, 'test-past-checks'), POLL).toBe('5/5');
     await p.click('[data-testid=test-report]');
     await p.waitForSelector('dialog.dialog');
     expect(await p.locator('dialog [data-testid=test-report-check]').count()).toBe(5);
@@ -253,7 +255,7 @@ describe.skipIf(!HAS_CHROMIUM)('test entrants and the server’s status in the c
     await expect.poll(() => text(p, 'test-status'), { timeout: 30_000 }).toBe('DONE');
     expect(await text(p, 'test-settings')).toContain('confirm by themselves 0 % · size 17 · seniority');
     await p.reload();
-    await expect.poll(() => p.locator('#entries [data-testid=test-tag]').count()).toBe(4);
+    await expect.poll(() => p.locator('#entries [data-testid=test-tag]').count(), POLL).toBe(4);
     expect(await p.locator('#entries [data-testid=entry-size]').allTextContents()).toEqual(['Size 17', 'Size 17', 'Size 17', 'Size 17']);
     // Drawn per size, then END TEST: the report 5/5.
     await ctx.db.updateTable('drops').set({ closes_at: new Date(Date.now() - 1000) }).where('id', '=', drop.id).execute();
@@ -336,7 +338,7 @@ describe.skipIf(!HAS_CHROMIUM)('test entrants and the server’s status in the c
     const [main, aside] = await Promise.all([p.locator('.with-server__main').boundingBox(), p.locator('.with-server__aside').boundingBox()]);
     expect(aside!.y).toBeLessThan(main!.y);
     expect(await p.locator('[data-testid=server-rows]').isVisible()).toBe(false);
-    await expect.poll(() => text(p, 'server-summary')).toMatch(/UTC$/);
+    await expect.poll(() => text(p, 'server-summary'), POLL).toMatch(/UTC$/);
     await p.click('[data-testid=server-toggle]');
     expect(await p.locator('[data-testid=server-rows]').isVisible()).toBe(true);
     expect(await p.getAttribute('[data-testid=server-toggle]', 'aria-expanded')).toBe('true');

@@ -53,6 +53,8 @@ const OPERATOR = { email: 'collectors.operator@orbes.test', password: 'collector
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'out');
 const SCREENSHOTS = !!process.env.ORBES_SCREENSHOTS;
 const STEP_TIMEOUT = 240_000;
+/** expect.poll's budget (its default, 1 s, is too short on a shared CI runner). */
+const POLL = { timeout: 15_000 };
 const DAY = 86_400_000;
 
 async function freePort(): Promise<number> {
@@ -114,7 +116,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Collectors page (plan CUSTOMER IN
     await p.fill('input[name=email]', who.email);
     await p.fill('input[name=password]', who.password);
     await p.click('[data-testid=login-submit]');
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dashboard');
     return p;
   }
 
@@ -344,7 +346,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Collectors page (plan CUSTOMER IN
     async () => {
       const p = await open(ADMIN);
       await p.click('.side__link[data-route=collectors]');
-      await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Collectors');
+      await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Collectors');
       await loaded(p, 'overview');
       await loaded(p, 'who');
       expect(await p.locator('main section.collectors__panel .panel__title').allTextContents()).toEqual(expect.arrayContaining(['At a glance', 'Who they are']));
@@ -447,7 +449,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Collectors page (plan CUSTOMER IN
       await act(p, () => p.locator('[data-testid=collectors-country] label', { hasText: 'FR · France' }).click(), '#/collectors?c=FR');
       expect(await p.locator('[data-testid=collectors-country]').evaluate((d) => (d as HTMLDetailsElement).open)).toBe(true);
       expect(await p.evaluate(() => window.scrollY)).toBe(y);
-      await expect.poll(() => p.evaluate(() => (document.activeElement as HTMLInputElement | null)?.name)).toBe('collectors-country-FR');
+      await expect.poll(() => p.evaluate(() => (document.activeElement as HTMLInputElement | null)?.name), POLL).toBe('collectors-country-FR');
       await act(p, () => p.locator('[data-testid=collectors-country] label', { hasText: 'IT · Italy' }).click(), '#/collectors?c=FR,IT');
       expect(await p.locator('[data-testid=collectors-country]').evaluate((d) => (d as HTMLDetailsElement).open)).toBe(true);
       expect(await p.locator('[data-testid=collectors-country] summary').textContent()).toBe('Country · 2');
@@ -612,14 +614,14 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Collectors page (plan CUSTOMER IN
       expect(await p.locator(`${trends} tbody tr`).last().locator('td').nth(1).textContent()).toBe('6');
       await p.locator(`${trends} [data-testid=collectors-trend-split]`).selectOption('country');
       await loaded(p, 'trends');
-      await expect.poll(async () => (await p.locator(`${trends} [data-testid=collectors-trend-legend] li`).allTextContents()).sort()).toEqual(['FR · France', 'GB · United Kingdom', 'IT · Italy', 'Not given']);
+      await expect.poll(async () => (await p.locator(`${trends} [data-testid=collectors-trend-legend] li`).allTextContents()).sort(), POLL).toEqual(['FR · France', 'GB · United Kingdom', 'IT · Italy', 'Not given']);
       expect(await p.locator(`${trends} [data-testid=collectors-trend-legend] li`).first().textContent()).toBe('FR · France');
       const fr = p.locator(`${trends} tbody tr`).last().locator('td').nth(2).locator('a');
       expect(await fr.getAttribute('aria-label')).toMatch(/^Open the 3 collectors behind collectors in \d{2} [A-Z]{3} \d{4}, FR · France$/);
       expect(decodeURIComponent((await fr.getAttribute('href'))!)).toMatch(/slice=bucket:trend:collectors:\d{4}-\d{2}-\d{2}:FR&figure=collectors&split=country$/);
       await p.locator(`${trends} [data-testid=collectors-trend-figure]`).selectOption('medianscore');
       await loaded(p, 'trends');
-      await expect.poll(() => p.locator(`${trends} thead th`).first().textContent()).toBe('Period');
+      await expect.poll(() => p.locator(`${trends} thead th`).first().textContent(), POLL).toBe('Period');
       await shot(p, 'panels');
       await p.context().close();
 
@@ -684,11 +686,11 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Collectors page (plan CUSTOMER IN
       await split.focus();
       await split.selectOption('country');
       await loaded(p, 'trends');
-      await expect.poll(focused).toMatch(/ collectors-trend-split$/u);
+      await expect.poll(focused, POLL).toMatch(/ collectors-trend-split$/u);
       // Compare, applied from the keyboard: the page drawn again, the focus on Compare.
       await p.focus('[data-testid=collectors-compare] input');
       await act(p, () => p.keyboard.press('Space'), '#/collectors?cmp=0');
-      await expect.poll(() => p.evaluate(() => (document.activeElement as HTMLInputElement | null)?.name ?? '')).toBe('cmp');
+      await expect.poll(() => p.evaluate(() => (document.activeElement as HTMLInputElement | null)?.name ?? ''), POLL).toBe('cmp');
       await p.context().close();
 
       const phone = await open(ADMIN, 320);

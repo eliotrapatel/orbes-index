@@ -252,7 +252,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     await holdsUntil(photoAt, hidden([photoSha]));
     await visible(card.locator('.live-card__img--photo'));
     expect(Date.now()).toBeGreaterThanOrEqual(photoAt);
-    await expect.poll(() => card.locator('.live-card__reveals').count()).toBe(0);
+    await expect.poll(() => card.locator('.live-card__reveals').count(), POLL).toBe(0);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-calendar-revealed.png'), fullPage: true });
 
     // The end: the release leaves the LIVE tab (for PAST, plan LIVE RELEASE+ choice 5), the other stays.
@@ -561,12 +561,12 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     // It opens the release's page (and is gone from it); back, the list of the releases, then NOW (no banner there:
     // the release leads it); MY PIECES and the banner again.
     await banner.click();
-    await expect.poll(() => new URL(page.url()).pathname).toBe(`/verify/releases/${announced.id}`);
+    await expect.poll(() => new URL(page.url()).pathname, POLL).toBe(`/verify/releases/${announced.id}`);
     await visible(page.locator('.live__announced'));
     expect(await page.locator('.live-banner-host').isHidden()).toBe(true);
     await page.goBack();
     await page.goBack();
-    await expect.poll(() => new URL(page.url()).pathname).toBe('/verify');
+    await expect.poll(() => new URL(page.url()).pathname, POLL).toBe('/verify');
     await page.locator('.view--now[data-ready]').waitFor();
     expect(await page.locator('.live-banner-host').isHidden()).toBe(true);
     await page.goto(`${srv.origin}/verify/pieces`);
@@ -617,7 +617,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     await textOf(page.locator('.board__title'), 'MONOLITHE');
     await textOf(page.locator('.board__quantity'), '2 PIECES');
     await textOf(page.locator('.board__count-label'), 'UNTIL THE OPENING');
-    await expect.poll(async () => (await page.locator('.board__countdown .live__unit-label').allInnerTexts()).map(norm)).toEqual(['HOURS', 'MINUTES', 'SECONDS']);
+    await expect.poll(async () => (await page.locator('.board__countdown .live__unit-label').allInnerTexts()).map(norm), POLL).toEqual(['HOURS', 'MINUTES', 'SECONDS']);
     await textOf(page.locator('.board__left-line'), '2 OF 2 LEFT');
     await textOf(page.locator('.board__status'), 'LIVE');
     expect(await page.locator('.board__door').getAttribute('class')).not.toMatch(/is-open/);
@@ -632,7 +632,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     const [door, info] = await Promise.all([page.locator('.board__door').boundingBox(), page.locator('.board__info').boundingBox()]);
     expect(info!.x).toBeGreaterThan(door!.x + door!.width);
     // The ground of the vault (eased in from the page's).
-    await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(INK);
+    await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor), POLL).toBe(INK);
     await keepsVault(page, null, ['FULL SCREEN']);
     await boardAsItIs(page);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-board.png') });
@@ -640,7 +640,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     // T0: the lock aligns, the door opens on the piece, LIVE NOW; the pieces left follow the line, live.
     await expect.poll(() => page.locator('.board__door').getAttribute('class'), { timeout: 20_000, interval: 50 }).toMatch(/is-aligned/);
     expect(Date.now()).toBeGreaterThanOrEqual(t0 - 1_000);
-    await expect.poll(() => page.locator('.board__door').getAttribute('class')).toMatch(/is-open/);
+    await expect.poll(() => page.locator('.board__door').getAttribute('class'), POLL).toMatch(/is-open/);
     await textOf(page.locator('.board__overline'), 'LIVE NOW');
     expect(await page.locator('.board__count').isHidden()).toBe(true);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-board-open.png') });
@@ -684,7 +684,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     await page.goto(`${srv.origin}/verify/releases/${next.id}/board#${nextToken}`);
     await textOf(page.locator('.board__overline'), 'LIVE RELEASE');
     await textOf(page.locator('.board__count-label'), 'OPENS IN');
-    await expect.poll(async () => (await page.locator('.board__countdown .live__unit-label').allInnerTexts()).map(norm)).toEqual(['DAYS', 'HOURS', 'MINUTES']);
+    await expect.poll(async () => (await page.locator('.board__countdown .live__unit-label').allInnerTexts()).map(norm), POLL).toEqual(['DAYS', 'HOURS', 'MINUTES']);
     await textOf(page.locator('.board__status'), 'LIVE');
     // A larger screen, 1920 × 1080: as it is too.
     await page.setViewportSize({ width: 1920, height: 1080 });

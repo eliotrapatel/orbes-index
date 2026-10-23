@@ -97,6 +97,8 @@ const ADMIN = { email: 'console@orbes.test', password: 'orbes console passphrase
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'out');
 const SCREENSHOTS = !!process.env.ORBES_SCREENSHOTS;
 const STEP_TIMEOUT = 120_000;
+/** expect.poll's budget (its default, 1 s, is too short on a shared CI runner). */
+const POLL = { timeout: 15_000 };
 
 async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -373,12 +375,12 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await shot(page, 'login');
     expect(await page.isVisible('input[name=totp]')).toBe(false);
     await signIn(page, ADMIN.email, 'not the password at all');
-    await expect.poll(async () => page.locator('.login__error').textContent()).toMatch(/invalid email or password/i);
+    await expect.poll(async () => page.locator('.login__error').textContent(), POLL).toMatch(/invalid email or password/i);
     expect(await page.inputValue('input[name=password]')).toBe('');
 
     await page.fill('input[name=password]', ADMIN.password);
     await page.click('[data-testid=login-submit]');
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe('Dashboard');
     // Dashboard figures come from the seeded registry.
     expect(await page.locator('.kpi').first().locator('.kpi__value').textContent()).toBe('9');
     expect(await page.locator('.side__link.is-active').textContent()).toBe('Dashboard');
@@ -404,7 +406,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await page.fill('dialog input[name=defaultMaterial]', '18K YELLOW GOLD');
     // Plan NEXT LOT §3.3 item 6b: every new model is given its size type, required.
     await page.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => page.locator('dialog .dialog__error').textContent()).toBe('Complete the required fields.');
+    await expect.poll(() => page.locator('dialog .dialog__error').textContent(), POLL).toBe('Complete the required fields.');
     expect(await page.locator('dialog select[name=sizeType] option').allTextContents()).toEqual(['Choose', 'Ring size', 'Bracelet size', 'Necklace length', 'Watch (one size)', 'One size']);
     await page.selectOption('dialog select[name=sizeType]', 'NECKLACE');
     // Plan ORBES CARE (answer 12): after the size type, its warranty, Lifetime preselected, with what each covers.
@@ -425,12 +427,12 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await page.locator('dialog [data-testid=size-grid] input[type=checkbox]').count()).toBe(66);
     expect(await page.locator('dialog [data-testid=size-grid-caption]').textContent()).toBe('In centimetres.');
     await page.locator('dialog label.ccheck', { hasText: /^45$/ }).click();
-    await expect.poll(() => page.locator('dialog [data-testid=size-tick-line]').textContent()).toBe('Adds 45.');
+    await expect.poll(() => page.locator('dialog [data-testid=size-tick-line]').textContent(), POLL).toBe('Adds 45.');
     await confirmDialog(page);
     await page.waitForSelector('.toast:has-text("Sizes saved.")');
-    await expect.poll(() => page.locator('#sizes [data-testid=model-size-label]').allTextContents()).toEqual(['45']);
+    await expect.poll(() => page.locator('#sizes [data-testid=model-size-label]').allTextContents(), POLL).toEqual(['45']);
     await go(page, '#/catalogue', 'Catalogue');
-    await expect.poll(() => page.locator('td:has-text("ECL-PD")').count()).toBe(1);
+    await expect.poll(() => page.locator('td:has-text("ECL-PD")').count(), POLL).toBe(1);
     expect(await page.locator('#models tbody tr', { hasText: 'ECL-PD' }).locator('[data-testid=model-size-type]').textContent()).toBe('Necklace length · 1 size');
     // Plan ORBES CARE (answer 12): the Models table's Warranty, after the Category; MONOLITHE, inserted by plain SQL, at
     // 2 years (the column's default), ECLIPSE, created through New model, Lifetime.
@@ -459,11 +461,11 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await preview.locator('.care-preview__text').textContent()).toBe('Wipe with a soft, dry cloth.');
     // The preview follows the field: the instructions, or the general care text of /verify when there are none.
     await page.fill('dialog textarea[name=careInstructions]', '   ');
-    await expect.poll(() => preview.getAttribute('data-general')).toBe('true');
+    await expect.poll(() => preview.getAttribute('data-general'), POLL).toBe('true');
     expect(await preview.locator('.care-preview__text').textContent()).toMatch(/^Store this piece on its own, away from humidity/);
     const care = 'Wipe with a soft, dry cloth after wearing. Store it on its own, away from perfume.';
     await page.fill('dialog textarea[name=careInstructions]', care);
-    await expect.poll(() => preview.locator('.care-preview__text').textContent()).toBe(care);
+    await expect.poll(() => preview.locator('.care-preview__text').textContent(), POLL).toBe(care);
     expect(await preview.getAttribute('data-general')).toBe('false');
     // Set as /verify's ORBES CARE tab (plan ORBES CARE, step 3.3): the tab in the display face, the words in .prose
     // (Helvetica Neue 13 px, line 1.75, --ink-soft).
@@ -481,10 +483,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await page.locator('dialog select[name=warranty]').inputValue()).toBe('two-years');
     expect((await ctx.services.catalog.getModel(modelId)).soldPieces).toBe(6);
     await page.selectOption('dialog select[name=warranty]', 'lifetime');
-    await expect.poll(() => page.locator('dialog [data-testid=model-warranty-reach]').textContent()).toBe('Its 6 pieces already sold take a warranty without an end date.');
+    await expect.poll(() => page.locator('dialog [data-testid=model-warranty-reach]').textContent(), POLL).toBe('Its 6 pieces already sold take a warranty without an end date.');
     await shot(page, 'catalogue-model-warranty', { dialog: true });
     await page.selectOption('dialog select[name=warranty]', 'two-years');
-    await expect.poll(() => page.locator('dialog [data-testid=model-warranty-reach]').count()).toBe(0);
+    await expect.poll(() => page.locator('dialog [data-testid=model-warranty-reach]').count(), POLL).toBe(0);
     await confirmDialog(page);
     await page.waitForSelector('.toast:has-text("Model saved.")');
     expect(await ctx.services.catalog.getModel(modelId)).toMatchObject({ careInstructions: care, name: 'MONOLITHE', active: true, products: 9 });
@@ -494,7 +496,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await impact.waitFor();
     expect(await impact.textContent()).toMatch(/^Touches no issued piece yet\./);
     await page.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => page.locator('dialog .dialog__error').textContent()).toBe('Nothing has changed.');
+    await expect.poll(() => page.locator('dialog .dialog__error').textContent(), POLL).toBe('Nothing has changed.');
     // Plan ORBES CARE (answer 12, D16): an ADMIN changes its warranty alone, the pieces it reaches said first (none sold);
     // saved through its own route only, no PATCH, one notice.
     const ecWarranty = page.locator('dialog select[name=warranty]');
@@ -502,7 +504,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await ecWarranty.locator('option[disabled]').count()).toBe(0);
     expect(await page.locator('dialog [data-testid=model-warranty-reach]').count()).toBe(0);
     await page.selectOption('dialog select[name=warranty]', 'two-years');
-    await expect.poll(() => page.locator('dialog [data-testid=model-warranty-reach]').textContent()).toBe('No piece of it is sold yet: its pieces will take a 2-year warranty from their start.');
+    await expect.poll(() => page.locator('dialog [data-testid=model-warranty-reach]').textContent(), POLL).toBe('No piece of it is sold yet: its pieces will take a 2-year warranty from their start.');
     const modelRequests: string[] = [];
     const onModelRequest = (r: { url(): string; method(): string }) => {
       if (/\/api\/admin\/models\//.test(r.url()) && r.method() !== 'GET') modelRequests.push(`${r.method()} ${new URL(r.url()).pathname}`);
@@ -517,7 +519,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     });
     await confirmDialog(page);
     await page.waitForSelector('.toast:has-text("Model saved.")');
-    await expect.poll(() => model('ECL-PD').locator('[data-testid=model-warranty]').textContent()).toBe('2 YEARS');
+    await expect.poll(() => model('ECL-PD').locator('[data-testid=model-warranty]').textContent(), POLL).toBe('2 YEARS');
     page.off('request', onModelRequest);
     const eclipseRow = await ctx.db.selectFrom('models').select(['id', 'warranty_lifetime']).where('sku_prefix', '=', 'ECL-PD').executeTakeFirstOrThrow();
     expect(modelRequests).toEqual([`POST /api/admin/models/${eclipseRow.id}/warranty`]);
@@ -530,10 +532,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await impact.waitFor();
     expect(await page.locator('dialog select[name=warranty]').inputValue()).toBe('two-years');
     await page.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => page.locator('dialog .dialog__error').textContent()).toBe('Nothing has changed.');
+    await expect.poll(() => page.locator('dialog .dialog__error').textContent(), POLL).toBe('Nothing has changed.');
     await page.selectOption('dialog select[name=status]', 'inactive');
     await confirmDialog(page);
-    await expect.poll(() => model('ECL-PD').locator('[data-testid=model-active] .status__text').textContent()).toBe('INACTIVE');
+    await expect.poll(() => model('ECL-PD').locator('[data-testid=model-active] .status__text').textContent(), POLL).toBe('INACTIVE');
     expect(await model('MNL-RG').locator('[data-testid=model-active] .status__text').textContent()).toBe('ACTIVE');
 
     // A collection renamed, then named again as it was: each time, the pieces it is shown on are said first.
@@ -543,12 +545,12 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await impact.textContent()).toBe('Touches 9 issued pieces: the result of each on /verify reads the new name as soon as it is saved.');
     await page.fill('dialog input[name=name]', 'ORBIT NOIR');
     await confirmDialog(page);
-    await expect.poll(() => collection.textContent()).toContain('ORBIT NOIR');
+    await expect.poll(() => collection.textContent(), POLL).toContain('ORBIT NOIR');
     expect((await ctx.services.catalog.getModel(modelId)).collection?.name).toBe('ORBIT NOIR');
     await collection.locator('[data-testid=rename-collection]').click();
     await page.fill('dialog input[name=name]', 'ORBIT');
     await confirmDialog(page);
-    await expect.poll(() => collection.textContent()).not.toContain('NOIR');
+    await expect.poll(() => collection.textContent(), POLL).not.toContain('NOIR');
 
     // An ADMIN deactivates a category: the generator stops offering it; activated again, it is offered again.
     const leather = page.locator('#categories tbody tr', { hasText: 'LEATHER GOODS' });
@@ -557,7 +559,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await impact.waitFor();
     expect(await impact.textContent()).toBe('No piece has been issued in this category yet. No new piece can be issued in it, and the generator stops offering it; it can be activated again.');
     await confirmDialog(page);
-    await expect.poll(() => leather.locator('.status__text').textContent()).toBe('INACTIVE');
+    await expect.poll(() => leather.locator('.status__text').textContent(), POLL).toBe('INACTIVE');
     expect(await leather.locator('[data-testid=toggle-category]').textContent()).toBe('Activate');
     await go(page, '#/generator', 'Issue a product');
     expect(await page.locator('select[name=categoryCode] option').allTextContents()).toEqual(['JEWELRY · J']);
@@ -566,7 +568,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await go(page, '#/catalogue', 'Catalogue');
     await leather.locator('[data-testid=toggle-category]').click();
     await confirmDialog(page);
-    await expect.poll(() => leather.locator('.status__text').textContent()).toBe('ACTIVE');
+    await expect.poll(() => leather.locator('.status__text').textContent(), POLL).toBe('ACTIVE');
     const audited = await ctx.db.selectFrom('audit_logs').select('action').where('action', 'in', ['model.update', 'collection.update', 'category.activate', 'category.deactivate']).orderBy('id').execute();
     expect(audited.map((a) => a.action)).toEqual(['model.update', 'model.update', 'collection.update', 'collection.update', 'category.deactivate', 'category.activate']);
 
@@ -582,7 +584,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await page.isDisabled('[data-testid=dialog-confirm]')).toBe(true);
     await confirmDialog(page, 'DISCONTINUE ECL-PD');
     await page.waitForSelector('.toast:has-text("Model discontinued.")');
-    await expect.poll(() => eclipse.locator('[data-testid=model-active] .status__text').textContent()).toBe('DISCONTINUED');
+    await expect.poll(() => eclipse.locator('[data-testid=model-active] .status__text').textContent(), POLL).toBe('DISCONTINUED');
     const eclipseId = (await ctx.db.selectFrom('models').select('id').where('sku_prefix', '=', 'ECL-PD').executeTakeFirstOrThrow()).id;
     expect(await ctx.services.catalog.getModel(eclipseId)).toMatchObject({ active: false, discontinuedAt: expect.any(Date) });
     await eclipse.locator('[data-testid=edit-model]').click();
@@ -594,11 +596,11 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await impact.waitFor();
     expect(await impact.textContent()).toMatch(/^Discontinued in \d{4}\. Reinstated, it is active again/);
     await confirmDialog(page, 'REINSTATE ECL-PD');
-    await expect.poll(() => eclipse.locator('[data-testid=model-active] .status__text').textContent()).toBe('ACTIVE');
+    await expect.poll(() => eclipse.locator('[data-testid=model-active] .status__text').textContent(), POLL).toBe('ACTIVE');
     expect(await ctx.services.catalog.getModel(eclipseId)).toMatchObject({ active: true, discontinuedAt: null });
     await eclipse.locator('[data-testid=discontinue-model]').click();
     await confirmDialog(page, 'discontinue  ecl-pd');
-    await expect.poll(() => eclipse.locator('[data-testid=model-active] .status__text').textContent()).toBe('DISCONTINUED');
+    await expect.poll(() => eclipse.locator('[data-testid=model-active] .status__text').textContent(), POLL).toBe('DISCONTINUED');
     const lifecycle = await ctx.db.selectFrom('audit_logs').select('action').where('action', 'in', ['model.discontinue', 'model.reinstate']).orderBy('id').execute();
     expect(lifecycle.map((a) => a.action)).toEqual(['model.discontinue', 'model.reinstate', 'model.discontinue']);
     expect(await figuresInDisplayFace(page)).toEqual([]);
@@ -615,7 +617,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const op = await oc.newPage();
     await watch(op);
     await signIn(op, operator.email, operator.password);
-    await expect.poll(async () => (await title(op).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(op).textContent())?.trim(), POLL).toBe('Dashboard');
     await go(op, '#/catalogue', 'Catalogue');
     await op.locator('#models tbody tr', { hasText: 'MNL-RG' }).locator('[data-testid=edit-model]').click();
     const opWarranty = op.locator('dialog select[name=warranty]');
@@ -628,7 +630,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await op.locator('dialog .cfield[data-field=warranty] .cfield__hint').textContent()).toBe('An ADMIN changes it: it changes the warranty of the pieces already sold.');
     expect(await op.locator('dialog [data-testid=model-warranty-reach]').count()).toBe(0);
     await op.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => op.locator('dialog .dialog__error').textContent()).toBe('Nothing has changed.');
+    await expect.poll(() => op.locator('dialog .dialog__error').textContent(), POLL).toBe('Nothing has changed.');
     await shot(op, 'catalogue-model-warranty-operator', { dialog: true });
     await op.click('[data-testid=dialog-cancel]');
     await op.waitForSelector('dialog.dialog', { state: 'detached' });
@@ -667,7 +669,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(issuedProductId).toMatch(/^O26-J-\d{5}$/);
     expect(issuedProductId).toBe('O26-J-00010');
 
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe(issuedProductId);
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe(issuedProductId);
     expect(await page.locator('[data-testid=claim-code]').textContent()).toBe(body.claimCode);
     expect(body.claimCode).toMatch(/^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
     expect(await page.locator('[data-testid=genome-figure] svg path').count()).toBeGreaterThan(8);
@@ -698,12 +700,12 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
 
     // Print size: a quiet warning under 30 mm, a refusal under 15 mm unless marked as a test print.
     await page.fill('input[name=widthMm]', '25');
-    await expect.poll(() => page.locator('[data-testid=artifact-size-advice]').textContent()).toMatch(/below the 30 mm minimum/);
+    await expect.poll(() => page.locator('[data-testid=artifact-size-advice]').textContent(), POLL).toMatch(/below the 30 mm minimum/);
     await page.fill('input[name=widthMm]', '12');
     await page.click('[data-testid=download-svg]');
-    await expect.poll(() => page.locator('.artifact__error').textContent()).toMatch(/test print/);
+    await expect.poll(() => page.locator('.artifact__error').textContent(), POLL).toMatch(/test print/);
     await page.fill('input[name=widthMm]', '30');
-    await expect.poll(() => page.locator('[data-testid=artifact-size-advice]').textContent()).toBe('');
+    await expect.poll(() => page.locator('[data-testid=artifact-size-advice]').textContent(), POLL).toBe('');
 
     // ── Download the SVG, rasterise it, decode it, verify it ──────────────
     const [download] = await Promise.all([page.waitForEvent('download'), page.click('[data-testid=download-svg]')]);
@@ -734,9 +736,9 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
 
   it('opens the product page (spec §22) and runs product actions', async () => {
     await page.getByRole('link', { name: 'Open product page' }).click();
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe(issuedProductId);
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe(issuedProductId);
     const row = (key: string) => page.locator(`[data-testid=product-sheet] [data-row=${key}]`);
-    await expect.poll(() => row('code').textContent()).toContain('ACTIVE');
+    await expect.poll(() => row('code').textContent(), POLL).toContain('ACTIVE');
     expect(await row('signature').textContent()).toContain('VALID');
     expect(await row('scans').textContent()).toMatch(/^Scan count1/i);
     expect(await row('warranty').textContent()).toContain('NOT STARTED');
@@ -755,17 +757,17 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await page.locator('dialog select[name=retailerId] option').allTextContents()).toEqual(['None recorded', 'ORBES Paris — Saint-Honoré · Paris · FR']);
     await page.selectOption('dialog select[name=retailerId]', { label: 'ORBES Paris — Saint-Honoré · Paris · FR' });
     await confirmDialog(page);
-    await expect.poll(() => row('warranty').textContent()).toContain('ACTIVE');
-    await expect.poll(() => row('status').textContent()).toContain('ACTIVATED');
+    await expect.poll(() => row('warranty').textContent(), POLL).toContain('ACTIVE');
+    await expect.poll(() => row('status').textContent(), POLL).toContain('ACTIVATED');
     // Shown by its name, the country taken from it.
     expect(await ctx.services.warranty.get(issuedProductId)).toMatchObject({ retailer: 'ORBES Paris — Saint-Honoré', country: 'FR' });
-    await expect.poll(() => page.locator('#warranty').textContent()).toContain('ORBES Paris — Saint-Honoré · FR');
+    await expect.poll(() => page.locator('#warranty').textContent(), POLL).toContain('ORBES Paris — Saint-Honoré · FR');
     await shot(page, 'product', { full: true });
 
     // Extend the warranty by 12 months (the dialog's default).
     await page.click('[data-testid=action-warranty-extend]');
     await confirmDialog(page);
-    await expect.poll(async () => (await ctx.services.warranty.get(issuedProductId))?.durationMonths).toBe(36);
+    await expect.poll(async () => (await ctx.services.warranty.get(issuedProductId))?.durationMonths, POLL).toBe(36);
 
     // Re-issue: the new code is signed and previewed; the old one is superseded.
     await page.click('[data-testid=action-reissue]');
@@ -776,7 +778,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await page.fill('dialog textarea[name=reason]', 'Engraving damaged during sizing');
     await confirmDialog(page);
     await page.waitForSelector('#fresh-code [data-testid=code-figure] svg');
-    await expect.poll(() => row('code').textContent()).toContain('Issue 2');
+    await expect.poll(() => row('code').textContent(), POLL).toContain('Issue 2');
     expect(await page.locator('#codes tbody tr').count()).toBe(2);
     expect(await page.locator('#codes tbody tr').nth(1).textContent()).toContain('SUPERSEDED');
   }, STEP_TIMEOUT);
@@ -787,17 +789,17 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await row.locator('.photo-thumb--empty').count()).toBe(1);
     await row.locator('[data-testid=model-photo]').click();
     // Before anything is saved: the results it reaches.
-    await expect.poll(() => page.locator('dialog [data-testid=photo-impact]').textContent()).toMatch(/^Shown at once on the 10 issued pieces of this model above the GENOME/);
+    await expect.poll(() => page.locator('dialog [data-testid=photo-impact]').textContent(), POLL).toMatch(/^Shown at once on the 10 issued pieces of this model above the GENOME/);
     await page.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => page.locator('dialog .dialog__error').textContent()).toBe('Choose a photograph first.');
+    await expect.poll(() => page.locator('dialog .dialog__error').textContent(), POLL).toBe('Choose a photograph first.');
     // A large photograph is sent at 2 000 px on its longer side.
     await page.setInputFiles('dialog [data-testid=photo-file]', writePhotoPng(join(workDir, 'model.png'), 2400, 1600));
-    await expect.poll(() => page.locator('dialog [data-testid=photo-facts]').textContent()).toMatch(/^To be sent: 2\s000 × 1\s333 PX · \d+ KB$/);
+    await expect.poll(() => page.locator('dialog [data-testid=photo-facts]').textContent(), POLL).toMatch(/^To be sent: 2\s000 × 1\s333 PX · \d+ KB$/);
     expect(await page.locator('dialog .dialog__error').textContent()).toBe('');
     await shot(page, 'catalogue-photo-dialog');
     await confirmDialog(page);
     await page.waitForSelector('.toast:has-text("Photograph saved.")');
-    await expect.poll(() => row.locator('img.photo-thumb').count()).toBe(1);
+    await expect.poll(() => row.locator('img.photo-thumb').count(), POLL).toBe(1);
     const model = await ctx.services.catalog.getModel(modelId);
     const stored = await ctx.db.selectFrom('media_objects').selectAll().where('sha256', '=', model.imageUrl!.split('/').pop()!).executeTakeFirstOrThrow();
     expect([stored.mime, stored.width, stored.height]).toEqual(['image/jpeg', 2000, 1333]);
@@ -808,12 +810,12 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // The product page: the piece's own photograph and the model's.
     await go(page, `#/products/${issuedProductId}`, issuedProductId);
     const photos = page.locator('#photographs');
-    await expect.poll(() => photos.locator('img.photo-thumb').count()).toBe(2);
+    await expect.poll(() => photos.locator('img.photo-thumb').count(), POLL).toBe(2);
     // In view, so that both load (the thumbs load lazily).
     await photos.scrollIntoViewIfNeeded();
     expect(await photos.locator('[data-testid=model-photo] img').getAttribute('src')).toBe(model.imageUrl);
     const pieceUrl = await photos.locator('[data-testid=product-photo] img').getAttribute('src');
-    await expect.poll(() => photos.locator('img.photo-thumb').evaluateAll((els) => els.map((el) => (el as HTMLImageElement).naturalWidth > 0))).toEqual([true, true]);
+    await expect.poll(() => photos.locator('img.photo-thumb').evaluateAll((els) => els.map((el) => (el as HTMLImageElement).naturalWidth > 0)), POLL).toEqual([true, true]);
     await photos.scrollIntoViewIfNeeded();
     if (SCREENSHOTS) await page.screenshot({ path: join(OUT_DIR, 'admin-product-photographs.png') });
     // /verify shows the model's alone on the piece's authentic result (its ACTIVE code, re-issued above), never the piece's own.
@@ -833,7 +835,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await page.locator('dialog.dialog--danger').count()).toBe(1);
     await confirmDialog(page);
     await page.waitForSelector('.toast:has-text("Photograph removed.")');
-    await expect.poll(() => page.locator('#photographs img.photo-thumb').count()).toBe(1);
+    await expect.poll(() => page.locator('#photographs img.photo-thumb').count(), POLL).toBe(1);
     const audited = await ctx.db.selectFrom('audit_logs').select('action').where('action', 'like', '%.photo.%').orderBy('id').execute();
     expect(audited.map((a) => a.action)).toEqual(['product.photo.set', 'product.photo.remove']);
     expect((await ctx.db.selectFrom('audit_logs').select('action').where('action', '=', 'model.image.set').execute()).length).toBe(1);
@@ -849,27 +851,27 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await expect.poll(async () => (await title(page).textContent())?.trim(), { timeout: 15_000 }).toBe('MONOLITHE');
     expect(new URL(page.url()).hash).toBe(`#/catalogue/${modelId}`);
     // Under the Catalogue, which the sidebar marks; no link of its own there.
-    await expect.poll(() => page.locator('.side__link.is-active').textContent()).toBe('Catalogue');
+    await expect.poll(() => page.locator('.side__link.is-active').textContent(), POLL).toBe('Catalogue');
     expect(await page.locator('.side__link[href*="/catalogue/"]').count()).toBe(0);
     expect(await page.locator('[data-testid=lookbook-state]').textContent()).toBe('HIDDEN');
 
     // The story, previewed as the client reads it while it is typed: a hidden model's sheet is not public.
     await page.click('[data-testid=story-edit]');
     await page.fill('dialog textarea[name=story]', 'The first ring of ORBES.\n\nCast in Paris.\nPolished by hand.');
-    await expect.poll(() => page.locator('dialog [data-testid=story-preview] .sheet-preview__paragraph').count()).toBe(2);
+    await expect.poll(() => page.locator('dialog [data-testid=story-preview] .sheet-preview__paragraph').count(), POLL).toBe(2);
     expect(await page.locator('dialog [data-testid=story-preview] .sheet-preview__paragraph').nth(1).evaluate((el) => el.querySelectorAll('br').length)).toBe(1);
     await shot(page, 'lookbook-story-dialog');
     await confirmDialog(page);
     await page.waitForSelector('.toast:has-text("Story saved.")');
-    await expect.poll(() => page.locator('[data-testid=story-shown] .sheet-preview__paragraph').count()).toBe(2);
+    await expect.poll(() => page.locator('[data-testid=story-shown] .sheet-preview__paragraph').count(), POLL).toBe(2);
 
     // The specifications: a label with a figure is said before anything is sent, as the server would say it.
     await page.click('[data-testid=specs-edit]');
     await page.fill('dialog textarea[name=specs]', 'Size 52: yes');
     await page.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => page.locator('dialog .dialog__error').textContent()).toMatch(/^Specifications, line 1: a label has no figure/);
+    await expect.poll(() => page.locator('dialog .dialog__error').textContent(), POLL).toMatch(/^Specifications, line 1: a label has no figure/);
     await page.fill('dialog textarea[name=specs]', 'Metal: 925 sterling silver\nWeight: 12 g');
-    await expect.poll(() => page.locator('dialog [data-testid=specs-preview] .sheet-preview__row').count()).toBe(2);
+    await expect.poll(() => page.locator('dialog [data-testid=specs-preview] .sheet-preview__row').count(), POLL).toBe(2);
     await confirmDialog(page);
     await page.waitForSelector('.toast:has-text("Specifications saved.")');
 
@@ -880,7 +882,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await page.selectOption('dialog select[name=lookbook]', 'PUBLIC');
     await confirmDialog(page);
     await page.waitForSelector('.toast:has-text("Publication saved.")');
-    await expect.poll(() => page.locator('[data-testid=lookbook-state]').textContent()).toBe('PUBLIC');
+    await expect.poll(() => page.locator('[data-testid=lookbook-state]').textContent(), POLL).toBe('PUBLIC');
     expect(await page.locator('[data-testid=lookbook-address]').textContent()).toBe('/verify/lookbook/monolithe');
     await page.click('[data-testid=lookbook-edit]');
     expect(await page.locator('dialog input[name=slug]').count()).toBe(0);
@@ -891,26 +893,26 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
       await page.click('[data-testid=gallery-add]');
       expect(await page.locator('dialog [data-testid=photo-impact]').textContent()).toMatch(/^Shown at once on the model’s sheet \(everyone\), after its cover/);
       await page.setInputFiles('dialog [data-testid=photo-file]', writePhotoPng(join(workDir, name), w, h));
-      await expect.poll(() => page.locator('dialog [data-testid=photo-facts]').textContent()).toMatch(/^To be sent: /);
+      await expect.poll(() => page.locator('dialog [data-testid=photo-facts]').textContent(), POLL).toMatch(/^To be sent: /);
       await confirmDialog(page);
       await page.waitForSelector('.toast:has-text("Photograph added.")');
     }
     const items = page.locator('[data-testid=gallery-item]');
-    await expect.poll(() => items.count()).toBe(2);
+    await expect.poll(() => items.count(), POLL).toBe(2);
     const second = (await items.nth(1).getAttribute('data-sha256'))!;
     await items.nth(1).locator('[data-testid=gallery-earlier]').click();
-    await expect.poll(() => items.first().getAttribute('data-sha256')).toBe(second);
+    await expect.poll(() => items.first().getAttribute('data-sha256'), POLL).toBe(second);
     expect(await items.first().locator('[data-testid=gallery-earlier]').isDisabled()).toBe(true);
     await items.first().locator('[data-testid=gallery-alt]').click();
     await page.fill('dialog input[name=alt]', 'The ring on its side, the stone up');
     await confirmDialog(page);
     await page.waitForSelector('.toast:has-text("Alternative text saved.")');
-    await expect.poll(() => items.first().locator('[data-testid=gallery-alt-text]').textContent()).toBe('The ring on its side, the stone up');
+    await expect.poll(() => items.first().locator('[data-testid=gallery-alt-text]').textContent(), POLL).toBe('The ring on its side, the stone up');
     await items.nth(1).locator('[data-testid=gallery-remove]').click();
     expect(await page.locator('dialog.dialog--danger').count()).toBe(1);
     await confirmDialog(page);
     await page.waitForSelector('.toast:has-text("Photograph removed.")');
-    await expect.poll(() => items.count()).toBe(1);
+    await expect.poll(() => items.count(), POLL).toBe(1);
     await shot(page, 'lookbook', { full: true });
 
     // What /verify reads now: the sheet as the console set it.
@@ -928,8 +930,8 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(actions.filter((a) => a.startsWith('model.gallery.'))).toEqual(['model.gallery.add', 'model.gallery.add', 'model.gallery.update', 'model.gallery.update', 'model.gallery.remove']);
     // Back to the Catalogue: the model's row says where it stands.
     await page.click('a.cbtn:has-text("All models")');
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Catalogue');
-    await expect.poll(() => row.locator('[data-testid=model-lookbook-state]').textContent()).toBe('PUBLIC');
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe('Catalogue');
+    await expect.poll(() => row.locator('[data-testid=model-lookbook-state]').textContent(), POLL).toBe('PUBLIC');
     expect(await figuresInDisplayFace(page)).toEqual([]);
     expect(await cspViolations(page)).toEqual([]);
   }, STEP_TIMEOUT);
@@ -937,10 +939,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
   it('downloads a print sheet of codes selected in the codes list', async () => {
     await go(page, '#/codes', 'Codes');
     const picks = page.locator('[data-testid=sheet-select]');
-    await expect.poll(() => picks.count()).toBeGreaterThan(2);
+    await expect.poll(() => picks.count(), POLL).toBeGreaterThan(2);
     await picks.nth(0).check();
     await picks.nth(1).check();
-    await expect.poll(() => page.locator('[data-testid=sheet-count]').textContent()).toBe('2 codes selected');
+    await expect.poll(() => page.locator('[data-testid=sheet-count]').textContent(), POLL).toBe('2 codes selected');
     const [download] = await Promise.all([page.waitForEvent('download'), page.click('[data-testid=download-sheet]')]);
     expect(download.suggestedFilename()).toMatch(/^ORBES-sheet-\d{4}-\d{2}-\d{2}-2-classic-30mm\.pdf$/);
     expect(readFileSync((await download.path())!).subarray(0, 5).toString('latin1')).toBe('%PDF-');
@@ -950,7 +952,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await go(page, `#/products?q=${issuedProductId}`, 'Products');
     expect(await page.locator('table.table tbody tr').count()).toBe(1);
     await go(page, '#/products?status=LOST', 'Products');
-    await expect.poll(() => page.locator('table.table tbody tr').count()).toBe(1);
+    await expect.poll(() => page.locator('table.table tbody tr').count(), POLL).toBe(1);
     await go(page, '#/products', 'Products');
     await shot(page, 'products');
     for (const [hash, heading, name] of [
@@ -976,7 +978,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // Its scans in Verification events list the same signal under the same name among their reasons.
     await go(page, `#/scans?productId=${issuedProductId}`, 'Verification events');
     const reasons = page.locator('table.table tbody tr .cell-details');
-    await expect.poll(() => reasons.filter({ hasText: 'ANOMALY: UNSOLD PIECE SCANNED' }).count()).toBeGreaterThanOrEqual(1);
+    await expect.poll(() => reasons.filter({ hasText: 'ANOMALY: UNSOLD PIECE SCANNED' }).count(), POLL).toBeGreaterThanOrEqual(1);
     expect(await reasons.filter({ hasText: /UNSOLD PIECE SCAN(?!NED)/ }).count()).toBe(0);
   }, STEP_TIMEOUT);
 
@@ -986,12 +988,12 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // Resolving needs a note: the dialog refuses without one.
     await page.selectOption('dialog select[name=status]', 'RESOLVED');
     await page.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => page.locator('.dialog__error').textContent()).toMatch(/note/i);
+    await expect.poll(() => page.locator('.dialog__error').textContent(), POLL).toMatch(/note/i);
     await page.selectOption('dialog select[name=status]', 'ACKNOWLEDGED');
     await confirmDialog(page);
     await page.waitForSelector('.toast:has-text("ACKNOWLEDGED")');
     await go(page, '#/anomalies?status=ACKNOWLEDGED', 'Anomalies');
-    await expect.poll(() => page.locator('table.table tbody tr').count()).toBe(1);
+    await expect.poll(() => page.locator('table.table tbody tr').count(), POLL).toBe(1);
   }, STEP_TIMEOUT);
 
   it('follows a customer\'s report from the Cases queue to its scan, its anomaly and its piece, then closes it with a note', async () => {
@@ -1001,7 +1003,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const activity = page.locator('.side__group', { hasText: 'Activity' }).locator('.side__link');
     expect(await activity.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['scans', 'anomalies', 'cases', 'analytics']);
     expect(await activity.locator('nth=2').textContent()).toBe('Cases');
-    await expect.poll(() => rows.count()).toBe(1);
+    await expect.poll(() => rows.count(), POLL).toBe(1);
     expect(await rows.first().locator('[data-testid=case-where]').textContent()).toBe('ONLINE · a marketplace listing');
     expect(await rows.first().textContent()).toContain('Offered at a third of the boutique price.');
     // The stranger's scan (from Italy, seconds after one in Great Britain) took part in the LOST_STOLEN_SCAN and
@@ -1014,19 +1016,19 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
 
     // Its scan: Verification events narrowed to that one, which leads back to its case.
     await rows.first().locator('[data-testid=case-scan]').click();
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Verification events');
-    await expect.poll(() => rows.count()).toBe(1);
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe('Verification events');
+    await expect.poll(() => rows.count(), POLL).toBe(1);
     expect(await page.locator('[data-testid=narrowed]').textContent()).toMatch(/One verification event/i);
     expect(await page.locator('[data-testid=scan-report]').textContent()).toBe('ONLINE');
     expect(await rows.first().textContent()).toMatch(/a marketplace listing.*Offered at a third of the boutique price\..*OPEN/);
     await page.locator('[data-testid=scan-report]').click();
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Cases');
-    await expect.poll(() => rows.count()).toBe(1);
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe('Cases');
+    await expect.poll(() => rows.count(), POLL).toBe(1);
 
     // Its anomaly: the finding the scan took part in, with the case counted.
     await rows.first().locator('[data-testid=case-anomaly]').click();
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Anomalies');
-    await expect.poll(() => rows.count()).toBe(1);
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe('Anomalies');
+    await expect.poll(() => rows.count(), POLL).toBe(1);
     expect(await rows.first().textContent()).toContain(finding);
     expect(await page.locator('[data-testid=anomaly-reports]').textContent()).toBe('1 case');
     // The latest answer as the scans list shows it: where, and the customer's note.
@@ -1036,38 +1038,38 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await rows.first().locator('[data-testid=anomaly-details]').click();
     await page.waitForSelector('#finding');
     expect(await page.locator('[data-testid=finding-cases]').textContent()).toBe('1 case');
-    await expect.poll(() => page.locator('#finding [data-testid=timeline-report]').count()).toBe(1);
+    await expect.poll(() => page.locator('#finding [data-testid=timeline-report]').count(), POLL).toBe(1);
     expect(await page.locator('#finding [data-testid=timeline-report]').textContent()).toBe('Customer report: ONLINE · a marketplace listing · OPEN');
     await page.locator('[data-testid=finding-cases]').click();
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Cases');
-    await expect.poll(() => rows.count()).toBe(1);
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe('Cases');
+    await expect.poll(() => rows.count(), POLL).toBe(1);
     await page.goBack();
     await page.waitForSelector('#finding');
     await page.locator('#finding [data-testid=timeline-report] a').click();
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Cases');
-    await expect.poll(() => rows.count()).toBe(1);
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe('Cases');
+    await expect.poll(() => rows.count(), POLL).toBe(1);
     await page.goBack();
     await page.waitForSelector('#finding');
     await page.locator('[data-testid=narrowed]').getByText('Show all').click();
-    await expect.poll(() => rows.count()).toBeGreaterThan(1);
+    await expect.poll(() => rows.count(), POLL).toBeGreaterThan(1);
 
     // Its piece.
     await go(page, '#/cases', 'Cases');
     await rows.first().locator('[data-testid=case-piece]').click();
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('O26-J-00005');
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe('O26-J-00005');
 
     // Closing needs a note; then the case reads CLOSED, by whom and why, and leaves the OPEN filter.
     await go(page, '#/cases', 'Cases');
     await page.click('[data-testid=close-case]');
     await page.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => page.locator('.dialog__error').textContent()).toBe('Complete the required fields.');
+    await expect.poll(() => page.locator('.dialog__error').textContent(), POLL).toBe('Complete the required fields.');
     await page.fill('dialog textarea[name=note]', 'Listing reported to the platform.');
     await confirmDialog(page);
     await page.waitForSelector('.toast:has-text("Case closed.")');
-    await expect.poll(() => rows.first().textContent()).toMatch(/CLOSED.*console@orbes\.test.*Listing reported to the platform\./);
+    await expect.poll(() => rows.first().textContent(), POLL).toMatch(/CLOSED.*console@orbes\.test.*Listing reported to the platform\./);
     expect(await page.locator('[data-testid=close-case]').count()).toBe(0);
     await go(page, '#/cases?status=OPEN', 'Cases');
-    await expect.poll(() => page.locator('.empty__text').textContent()).toBe('No case matches these filters.');
+    await expect.poll(() => page.locator('.empty__text').textContent(), POLL).toBe('No case matches these filters.');
   }, STEP_TIMEOUT);
 
   it('issues a one-time recovery code from an owner\'s row, shown once, which the client then uses', async () => {
@@ -1075,10 +1077,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const owner = await ctx.services.auth.registerAccount({ email, password: 'correct horse battery staple' }, {});
     await go(page, '#/owners', 'Owners');
     const row = page.locator('table.table tbody tr', { hasText: email });
-    await expect.poll(() => row.count()).toBe(1);
+    await expect.poll(() => row.count(), POLL).toBe(1);
     // An ADMIN, after an identity check: the dialog says what the code does before it exists.
     await row.locator('[data-testid=issue-recovery-code]').click();
-    await expect.poll(() => page.locator('dialog.dialog').textContent()).toMatch(/Only after checking the identity of the client\..*expires after 30 minutes.*paused for 72 hours/);
+    await expect.poll(() => page.locator('dialog.dialog').textContent(), POLL).toMatch(/Only after checking the identity of the client\..*expires after 30 minutes.*paused for 72 hours/);
     const [response] = await Promise.all([
       page.waitForResponse((r) => r.url().endsWith(`/api/admin/owners/${owner.account.id}/recovery-code`) && r.request().method() === 'POST'),
       confirmDialog(page),
@@ -1086,21 +1088,21 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(response.status()).toBe(201);
     expect(response.headers()['cache-control']).toBe('no-store');
     const code = page.locator('[data-testid=recovery-code]');
-    await expect.poll(() => code.textContent()).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/);
+    await expect.poll(() => code.textContent(), POLL).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/);
     const recoveryCode = (await code.textContent())!;
     expect(await page.locator('.claim--recovery').textContent()).toContain(`For ${email}, valid once until`);
     expect(await figuresInDisplayFace(page)).toEqual([]);
     await shot(page, 'owners-recovery-code');
     // Hidden once given: the console keeps no copy, and the row now says a code is open.
     await page.click('[data-testid=hide-recovery-code]');
-    await expect.poll(() => page.locator('[data-testid=recovery-code]').count()).toBe(0);
-    await expect.poll(() => row.locator('[data-testid=owner-status]').textContent()).toMatch(/ACTIVE.*Recovery code open until/);
+    await expect.poll(() => page.locator('[data-testid=recovery-code]').count(), POLL).toBe(0);
+    await expect.poll(() => row.locator('[data-testid=owner-status]').textContent(), POLL).toMatch(/ACTIVE.*Recovery code open until/);
     expect(await page.content()).not.toContain(recoveryCode);
     // The client enters it on /verify: the row then says that transfers are paused.
     await ctx.services.recovery.recover({ email, recoveryCode, newPassword: 'a brand new passphrase' });
     await go(page, '#/warranties', 'Warranties');
     await go(page, '#/owners', 'Owners');
-    await expect.poll(() => row.locator('[data-testid=owner-status]').textContent()).toMatch(/ACTIVE.*Transfers paused until/);
+    await expect.poll(() => row.locator('[data-testid=owner-status]').textContent(), POLL).toMatch(/ACTIVE.*Transfers paused until/);
     expect(await row.locator('[data-testid=owner-status]').textContent()).not.toMatch(/Recovery code open/);
   }, STEP_TIMEOUT);
 
@@ -1123,10 +1125,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // By exact email, in any case: one account, which opens its sheet.
     await go(page, '#/owners', 'Owners');
     await search(email.toUpperCase());
-    await expect.poll(() => rows.count()).toBe(1);
+    await expect.poll(() => rows.count(), POLL).toBe(1);
     expect(await page.locator('[data-testid=narrowed]').textContent()).toContain(`Search: ${email.toUpperCase()}`);
     await rows.first().locator('[data-testid=owner-link]').click();
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe(email);
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe(email);
     expect(await page.locator('#account').textContent()).toMatch(/ACTIVE.*Ada Client.*FR/);
     expect(await page.locator('#pieces').textContent()).toContain(piece.product.productId);
     expect(await page.locator('#transfers .empty__text').textContent()).toBe('No transfer in progress.');
@@ -1137,21 +1139,21 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // The recovery code from the sheet too (the mechanism of C-04): shown once above the sheet, then hidden; the
     // account then reads that a code is open.
     await page.click('[data-testid=issue-recovery-code]');
-    await expect.poll(() => page.locator('dialog.dialog').textContent()).toMatch(/Only after checking the identity of the client\./);
+    await expect.poll(() => page.locator('dialog.dialog').textContent(), POLL).toMatch(/Only after checking the identity of the client\./);
     await confirmDialog(page);
-    await expect.poll(() => page.locator('[data-testid=recovery-code]').textContent()).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/);
+    await expect.poll(() => page.locator('[data-testid=recovery-code]').textContent(), POLL).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/);
     await page.click('[data-testid=hide-recovery-code]');
-    await expect.poll(() => page.locator('[data-testid=recovery-code]').count()).toBe(0);
-    await expect.poll(() => page.locator('#account [data-testid=owner-status]').textContent()).toMatch(/ACTIVE.*Recovery code open until/);
+    await expect.poll(() => page.locator('[data-testid=recovery-code]').count(), POLL).toBe(0);
+    await expect.poll(() => page.locator('#account [data-testid=owner-status]').textContent(), POLL).toMatch(/ACTIVE.*Recovery code open until/);
 
     // Lock: the dialog says what it does; the sheet then reads LOCKED and offers the unlock; the client cannot sign in.
     await page.click('[data-testid=lock-account]');
-    await expect.poll(() => page.locator('dialog.dialog').textContent()).toMatch(/Every session of the account ends now.*cannot sign in or use a recovery code/);
+    await expect.poll(() => page.locator('dialog.dialog').textContent(), POLL).toMatch(/Every session of the account ends now.*cannot sign in or use a recovery code/);
     await confirmDialog(page);
     // The lock revoked the code just issued, and says so.
     await page.waitForSelector('.toast:has-text("Account locked.")');
     expect(await page.locator('.toast', { hasText: 'Account locked.' }).textContent()).toContain('the open recovery code revoked');
-    await expect.poll(() => page.locator('#account [data-testid=owner-status]').textContent()).toMatch(/LOCKED/);
+    await expect.poll(() => page.locator('#account [data-testid=owner-status]').textContent(), POLL).toMatch(/LOCKED/);
     expect(await page.locator('#account [data-testid=owner-status]').textContent()).not.toMatch(/Recovery code open/);
     expect(await page.locator('[data-testid=lock-account]').count()).toBe(0);
     expect(await page.locator('[data-testid=issue-recovery-code]').count()).toBe(0);
@@ -1159,7 +1161,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await page.click('[data-testid=unlock-account]');
     await confirmDialog(page);
     await page.waitForSelector('.toast:has-text("Account unlocked.")');
-    await expect.poll(() => page.locator('#account [data-testid=owner-status]').textContent()).toMatch(/ACTIVE/);
+    await expect.poll(() => page.locator('#account [data-testid=owner-status]').textContent(), POLL).toMatch(/ACTIVE/);
     expect((await ctx.services.auth.login({ email, password }, {})).account.id).toBe(client.account.id);
 
     // The right-of-access export: a JSON file of what the registry holds about the account.
@@ -1174,27 +1176,27 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await go(page, '#/owners', 'Owners');
     await search(`REF ${ref}`);
     const reference = page.locator('#reference');
-    await expect.poll(() => reference.locator('tbody tr').count()).toBe(1);
+    await expect.poll(() => reference.locator('tbody tr').count(), POLL).toBe(1);
     expect(await reference.locator('.panel__note').textContent()).toContain(`REF ${ref}`);
     expect(await reference.locator('tbody tr').first().textContent()).toMatch(new RegExp(`REF ${ref}.*AUTHENTIC FIRST REGISTRATION.*${piece.product.productId}.*${email}.*${email}`));
-    await expect.poll(() => page.locator('#accounts tbody tr').count()).toBe(1);
+    await expect.poll(() => page.locator('#accounts tbody tr').count(), POLL).toBe(1);
     expect(await figuresInDisplayFace(page)).toEqual([]);
     await shot(page, 'owners-reference');
     await reference.locator('[data-testid=ref-scan]').click();
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Verification events');
-    await expect.poll(() => rows.count()).toBe(1);
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe('Verification events');
+    await expect.poll(() => rows.count(), POLL).toBe(1);
 
     // A search that is neither an email nor a REF is said on the field.
     await go(page, '#/owners', 'Owners');
     await search('ada');
-    await expect.poll(() => page.locator('[data-testid=owner-search] .cfield__hint').textContent()).toBe('Enter an exact email, or a REF of 8 characters (0–9, A–F).');
+    await expect.poll(() => page.locator('[data-testid=owner-search] .cfield__hint').textContent(), POLL).toBe('Enter an exact email, or a REF of 8 characters (0–9, A–F).');
     expect(await page.locator('[data-testid=owner-search] .cfield__hint').isVisible()).toBe(true);
     expect(await page.locator('.empty__text').textContent()).toBe('Nothing searched.');
 
     // The product page leads to the owner's sheet.
     await go(page, `#/products/${piece.product.productId}`, piece.product.productId);
     await page.click('[data-testid=current-owner]');
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe(email);
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe(email);
   }, STEP_TIMEOUT);
 
   it('resolves an anomaly and revokes its code in one dialog; the badge and the tab title follow', async () => {
@@ -1210,26 +1212,26 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(before).toBeGreaterThanOrEqual(2);
     const badge = page.locator('.side__link[data-route=anomalies] [data-testid=anomaly-badge]');
     await go(page, `#/products/${pid}`, pid);
-    await expect.poll(() => badge.locator('.side__badge-count').textContent()).toBe(String(before));
+    await expect.poll(() => badge.locator('.side__badge-count').textContent(), POLL).toBe(String(before));
     expect(await badge.isVisible()).toBe(true);
     expect(await badge.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Helvetica Neue"?,/);
-    await expect.poll(() => page.title()).toBe(`(${before}) ${pid} — ORBES Genome Console`);
+    await expect.poll(() => page.title(), POLL).toBe(`(${before}) ${pid} — ORBES Genome Console`);
 
     // Triage from the product page: the list of this piece's findings, with every type the server records.
     await page.click('#anomalies a.cbtn:has-text("Triage")');
-    await expect.poll(() => page.evaluate(() => location.hash)).toBe(`#/anomalies?productId=${pid}`);
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Anomalies');
+    await expect.poll(() => page.evaluate(() => location.hash), POLL).toBe(`#/anomalies?productId=${pid}`);
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe('Anomalies');
     expect(await page.title()).toBe(`(${before}) Anomalies — ORBES Genome Console`);
     expect(await page.inputValue('input[name=productId]')).toBe(pid);
     const ofPiece = (await anomaly.list({ productId: pid }, { page: 1, pageSize: 50 })).total;
-    await expect.poll(() => page.locator('table.table tbody tr').count()).toBe(ofPiece);
+    await expect.poll(() => page.locator('table.table tbody tr').count(), POLL).toBe(ofPiece);
     expect(await page.locator('select[name=type] option').evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value))).toEqual(['', ...ANOMALY_TYPES]);
     expect(await page.locator('select[name=sort] option').allTextContents()).toEqual(['Severity, then risk', 'Risk', 'Last seen']);
     await page.selectOption('select[name=type]', 'IMPOSSIBLE_TRAVEL');
-    await expect.poll(() => page.evaluate(() => location.hash)).toBe(`#/anomalies?productId=${pid}&type=IMPOSSIBLE_TRAVEL`);
+    await expect.poll(() => page.evaluate(() => location.hash), POLL).toBe(`#/anomalies?productId=${pid}&type=IMPOSSIBLE_TRAVEL`);
     await page.selectOption('select[name=sort]', 'risk');
-    await expect.poll(() => page.evaluate(() => location.hash)).toBe(`#/anomalies?productId=${pid}&type=IMPOSSIBLE_TRAVEL&sort=risk`);
-    await expect.poll(() => page.locator('table.table tbody tr').count()).toBe(1);
+    await expect.poll(() => page.evaluate(() => location.hash), POLL).toBe(`#/anomalies?productId=${pid}&type=IMPOSSIBLE_TRAVEL&sort=risk`);
+    await expect.poll(() => page.locator('table.table tbody tr').count(), POLL).toBe(1);
 
     // The detail: the piece's scans in the finding's window, their countries, the devices, the scan that raised it.
     await page.click('[data-testid=anomaly-details]');
@@ -1247,9 +1249,9 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
 
     // The triggering scan opens in Verification events, marked, within the second it was made in.
     await page.click('[data-testid=trigger-scan]');
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Verification events');
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe('Verification events');
     await page.waitForSelector('[data-testid=scans-window]');
-    await expect.poll(() => page.locator('table.table tbody tr.is-current').count()).toBe(1);
+    await expect.poll(() => page.locator('table.table tbody tr.is-current').count(), POLL).toBe(1);
     expect(await page.locator('table.table tbody tr.is-current').getAttribute('aria-current')).toBe('true');
     await page.goBack();
     await page.waitForSelector('#finding [data-testid=anomaly-timeline]');
@@ -1297,7 +1299,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     page.on('request', onTransition);
     await page.click('[data-testid=dialog-confirm]');
     // While a step is in flight, typing in the note never makes Confirm pressable, and a second submission is ignored.
-    await expect.poll(() => confirmButton.getAttribute('aria-busy')).toBe('true');
+    await expect.poll(() => confirmButton.getAttribute('aria-busy'), POLL).toBe('true');
     await page.focus('dialog textarea[name=note]');
     await page.keyboard.type(' x');
     expect(await confirmButton.isDisabled()).toBe(true);
@@ -1306,7 +1308,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await page.locator('dialog form').evaluate((f) => (f as HTMLFormElement).requestSubmit());
     expect(await confirmButton.isDisabled()).toBe(true);
     answer();
-    await expect.poll(() => page.locator('.dialog__error').textContent()).toMatch(/^Revoke the code: The server is busy\. The steps done stay done/);
+    await expect.poll(() => page.locator('.dialog__error').textContent(), POLL).toMatch(/^Revoke the code: The server is busy\. The steps done stay done/);
     page.off('request', onTransition);
     expect(transitions).toHaveLength(1);
     const report = page.locator('[data-testid=decision-steps] .steps__item');
@@ -1334,8 +1336,8 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await anomaly.get(travel.id)).toMatchObject({ status: 'RESOLVED', resolutionNote: 'Seized at a market stall in Lyon' });
 
     // The finding has left the badge and the title.
-    await expect.poll(() => badge.locator('.side__badge-count').textContent()).toBe(String(before - 1));
-    await expect.poll(() => page.title()).toBe(`(${before - 1}) Anomalies — ORBES Genome Console`);
+    await expect.poll(() => badge.locator('.side__badge-count').textContent(), POLL).toBe(String(before - 1));
+    await expect.poll(() => page.title(), POLL).toBe(`(${before - 1}) Anomalies — ORBES Genome Console`);
     expect(await cspViolations(page)).toEqual([]);
   }, STEP_TIMEOUT);
 
@@ -1343,7 +1345,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await go(page, '#/anomalies', 'Anomalies');
     await page.fill('input[name=productId]', 'O26-J');
     await page.click('[data-testid=anomalies-apply]');
-    await expect.poll(() => page.locator('.cfield[data-field=productId] .cfield__hint').textContent()).toBe('Enter a full product id (O26-J-00184).');
+    await expect.poll(() => page.locator('.cfield[data-field=productId] .cfield__hint').textContent(), POLL).toBe('Enter a full product id (O26-J-00184).');
     expect(await page.evaluate(() => location.hash)).toBe('#/anomalies');
     expect(await page.getAttribute('input[name=productId]', 'aria-invalid')).toBe('true');
     expect(await page.locator('table.table').count()).toBe(1);
@@ -1355,7 +1357,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await page.inputValue('select[name=type]')).toBe('NOT_A_TYPE');
     expect(await page.locator('form[aria-label="Filter anomalies"]').count()).toBe(1);
     await page.click('[data-testid=anomalies-refused] a.cbtn:has-text("Clear filters")');
-    await expect.poll(() => page.evaluate(() => location.hash)).toBe('#/anomalies');
+    await expect.poll(() => page.evaluate(() => location.hash), POLL).toBe('#/anomalies');
     await page.waitForSelector('table.table');
     expect(await cspViolations(page)).toEqual([]);
   }, STEP_TIMEOUT);
@@ -1370,7 +1372,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await shot(page, 'dialog');
     await confirmDialog(page, 'ROTATE');
     await page.waitForSelector('.toast:has-text("New signing key active.")');
-    await expect.poll(() => page.locator('table.table tbody tr').count()).toBe(2);
+    await expect.poll(() => page.locator('table.table tbody tr').count(), POLL).toBe(2);
     const rows = await page.locator('table.table tbody tr').allTextContents();
     expect(rows[0]).toMatch(/#2.*ACTIVE/);
     expect(rows[1]).toMatch(/#1.*RETIRED/);
@@ -1394,20 +1396,20 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await page.fill('[data-testid=dialog-phrase]', 'REVOKE O26-J-00008');
     expect(await page.isDisabled('[data-testid=dialog-confirm]')).toBe(true);
     await confirmDialog(page, `revoke ${pid.toLowerCase()}`);
-    await expect.poll(() => row('status').textContent()).toContain('REVOKED');
+    await expect.poll(() => row('status').textContent(), POLL).toContain('REVOKED');
 
     await page.click('[data-testid=action-reinstate]');
     await confirmDialog(page);
-    await expect.poll(() => row('status').textContent()).toContain('ISSUED');
+    await expect.poll(() => row('status').textContent(), POLL).toContain('ISSUED');
 
     await go(page, '#/revocations', 'Revocations');
-    await expect.poll(() => page.locator(`td a:has-text("${pid}")`).count()).toBe(1);
+    await expect.poll(() => page.locator(`td a:has-text("${pid}")`).count(), POLL).toBe(1);
   }, STEP_TIMEOUT);
 
   it('verifies the audit chain', async () => {
     await go(page, '#/audit', 'Audit log');
     expect(await page.locator('table.table tbody tr').count()).toBeGreaterThan(10);
-    await expect.poll(() => page.locator('td:has-text("key.rotate")').count()).toBeGreaterThanOrEqual(1);
+    await expect.poll(() => page.locator('td:has-text("key.rotate")').count(), POLL).toBeGreaterThanOrEqual(1);
     await page.click('[data-testid=audit-verify]');
     await page.waitForSelector('[data-testid=chain-result][data-ok=true]');
     expect(await page.locator('[data-testid=chain-result]').textContent()).toMatch(/CHAIN INTACT.*entries re-hashed/);
@@ -1417,11 +1419,11 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
   it('reads the staff documents in the console: the playbook with its contents and tables, the kit with its card', async () => {
     await page.setViewportSize({ width: 1440, height: 1000 });
     await go(page, '#/documents', 'Documents');
-    await expect.poll(() => page.locator('[data-testid=documents] .docs__card').count()).toBe(2);
+    await expect.poll(() => page.locator('[data-testid=documents] .docs__card').count(), POLL).toBe(2);
     await page.click('[data-testid=document-sales-playbook]');
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Sales and shipping playbook');
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe('Sales and shipping playbook');
     const article = page.locator('.doc__article');
-    await expect.poll(() => article.locator('h2.md__h2').count()).toBeGreaterThan(5);
+    await expect.poll(() => article.locator('h2.md__h2').count(), POLL).toBeGreaterThan(5);
     expect(await article.locator('table.md__table').count()).toBeGreaterThan(2);
     expect(await article.locator('blockquote.md__quote').count()).toBeGreaterThan(0);
     expect(await article.locator('pre.md__pre').count()).toBeGreaterThan(0);
@@ -1468,7 +1470,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await aggregateScanStats(ctx.db, new Date());
 
     await page.click('.side__link[data-route=analytics]');
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Analytics');
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe('Analytics');
     expect(await page.locator('.side__link.is-active').textContent()).toBe('Analytics');
     // Ninety days by default: four figures, the curve of every day, one curve per state.
     expect(await page.locator('[data-testid=range-90]').getAttribute('aria-current')).toBe('page');
@@ -1504,14 +1506,14 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const back = daySpan(utcDay(at(3)), lastCompleteDay(new Date())) - 1;
     for (let i = 0; i < back; i++) await page.keyboard.press('ArrowLeft');
     const tip = page.locator('[data-testid=analytics-tip]');
-    await expect.poll(() => tip.isVisible()).toBe(true);
+    await expect.poll(() => tip.isVisible(), POLL).toBe(true);
     expect(await tip.locator('.trend__tip-total').textContent()).toBe('10 SCANS');
     expect(await tip.locator('.trend__tip-line').allTextContents()).toEqual(['AUTHENTIC5', 'AUTHENTIC OWNERSHIP VERIFIED2', 'UNKNOWN1', 'INVALID SIGNATURE2']);
     expect(await trend.getAttribute('aria-valuetext')).toContain('10 SCANS');
     // And from the pointer, over the last day.
     const box = (await trend.boundingBox())!;
     await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2);
-    await expect.poll(() => tip.locator('.trend__tip-total').textContent()).toBe('0 SCANS');
+    await expect.poll(() => tip.locator('.trend__tip-total').textContent(), POLL).toBe('0 SCANS');
     expect(await page.locator('table.table caption', { hasText: 'Scans per day' }).count()).toBe(1);
     // Counts and dates read in Helvetica Neue, as everywhere in the console.
     expect(await figuresInDisplayFace(page)).toEqual([]);
@@ -1553,13 +1555,13 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
 
     // Thirty days: Japan and the United States fall out of the window.
     await page.click('[data-testid=range-30]');
-    await expect.poll(() => kpis.first().locator('.kpi__value').textContent()).toBe('14');
+    await expect.poll(() => kpis.first().locator('.kpi__value').textContent(), POLL).toBe('14');
     expect(await page.evaluate(() => location.hash)).toBe('#/analytics?days=30');
     expect((await trend.locator('polyline.trend__line').getAttribute('points'))!.split(' ')).toHaveLength(30);
     expect(await signals.locator('.bar .bar__label').allTextContents()).toEqual(['CN · China', 'IT · Italy', 'Unknown location']);
     // A state's scans open in Verification events over the window's whole days, its last day to 23:59:59.
     await page.click('.srow[data-state=INVALID_SIGNATURE] a.srow__label');
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Verification events');
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe('Verification events');
     expect(await page.locator('[data-testid=scans-window]').textContent()).toMatch(/^Window \d{2} [A-Z]{3} \d{4} · 00:00:00 UTC → \d{2} [A-Z]{3} \d{4} · 23:59:59 UTC/);
     expect(await page.locator('table.table tbody tr').count()).toBeGreaterThanOrEqual(2);
     expect(await cspViolations(page)).toEqual([]);
@@ -1582,24 +1584,24 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
 
     // From the batch's products to its codes.
     await go(page, `#/products?productionBatch=${batch}`, 'Products');
-    await expect.poll(() => page.locator('.pager__range').textContent()).toMatch(/of 120$/);
+    await expect.poll(() => page.locator('.pager__range').textContent(), POLL).toMatch(/of 120$/);
     await page.click('a.cbtn:has-text("Print this batch")');
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Codes');
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe('Codes');
     expect(await page.inputValue('input[name=productionBatch]')).toBe(batch);
-    await expect.poll(() => pick.textContent()).toBe('Select the 120 codes of this batch');
+    await expect.poll(() => pick.textContent(), POLL).toBe('Select the 120 codes of this batch');
     expect(await count.textContent()).toBe('No code selected');
     expect(await preview.textContent()).toBe('30 per A4');
 
     // Click 1: the whole batch, across the list's three pages; the layout shows before anything renders.
     await pick.click();
-    await expect.poll(() => count.textContent()).toBe('120 codes selected');
+    await expect.poll(() => count.textContent(), POLL).toBe('120 codes selected');
     expect(await preview.textContent()).toBe('30 per A4 · 4 pages');
     expect(await page.locator('[data-testid=sheet-select]:checked').count()).toBe(50);
     // Counts and the preview read in Helvetica Neue, the button's count too (BRAND §3.1).
     expect(await figuresInDisplayFace(page)).toEqual([]);
     await page.click('.pager button:has-text("Next")');
-    await expect.poll(() => page.locator('.pager__page').textContent()).toBe('2 / 3');
-    await expect.poll(() => page.locator('[data-testid=sheet-select]:checked').count()).toBe(50);
+    await expect.poll(() => page.locator('.pager__page').textContent(), POLL).toBe('2 / 3');
+    await expect.poll(() => page.locator('[data-testid=sheet-select]:checked').count(), POLL).toBe(50);
     expect(await count.textContent()).toBe('120 codes selected');
 
     // Click 2: one PDF of 120 labelled codes on 4 A4 pages.
@@ -1623,9 +1625,9 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await page.fill('input[name=issuedFrom]', '2026-01-01');
     expect(await page.getAttribute('input[name=issuedTo]', 'min')).toBe('2026-01-01');
     await page.click('[data-testid=codes-apply]');
-    await expect.poll(() => page.evaluate(() => location.hash)).toBe('#/codes?productionBatch=B-2026-09-A&issuedFrom=2026-01-01');
-    await expect.poll(() => count.textContent()).toBe('No code selected');
-    await expect.poll(() => pick.textContent()).toMatch(/^Select the \d+ codes of this batch$/);
+    await expect.poll(() => page.evaluate(() => location.hash), POLL).toBe('#/codes?productionBatch=B-2026-09-A&issuedFrom=2026-01-01');
+    await expect.poll(() => count.textContent(), POLL).toBe('No code selected');
+    await expect.poll(() => pick.textContent(), POLL).toMatch(/^Select the \d+ codes of this batch$/);
     expect(await cspViolations(page)).toEqual([]);
   }, STEP_TIMEOUT);
 
@@ -1637,7 +1639,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const count = page.locator('[data-testid=sheet-count]');
     await go(page, `#/codes?productionBatch=${batch}`, 'Codes');
     await page.click('[data-testid=sheet-select-batch]');
-    await expect.poll(() => count.textContent()).toBe('201 codes selected');
+    await expect.poll(() => count.textContent(), POLL).toBe('201 codes selected');
     // 200 codes on 7 pages of 30, then 1 on a last page.
     expect(await page.locator('[data-testid=sheet-preview]').textContent()).toBe('30 per A4 · 8 pages · 2 PDFs of up to 200 codes');
     const files: string[] = [];
@@ -1654,12 +1656,12 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
       expect.stringMatching(/^ORBES-sheet-\d{4}-\d{2}-\d{2}-1-classic-30mm-part-2-of-2\.pdf$/),
     ]);
     page.removeAllListeners('download');
-    await expect.poll(() => page.locator('[data-testid=download-sheet]').textContent()).toBe('Download print sheet');
+    await expect.poll(() => page.locator('[data-testid=download-sheet]').textContent(), POLL).toBe('Download print sheet');
 
     // A selection the next test expects the sign-out to forget.
     await go(page, '#/codes', 'Codes');
     await page.locator('[data-testid=sheet-select]').first().check();
-    await expect.poll(() => count.textContent()).toBe('1 code selected');
+    await expect.poll(() => count.textContent(), POLL).toBe('1 code selected');
     expect(await cspViolations(page)).toEqual([]);
   }, STEP_TIMEOUT);
 
@@ -1681,7 +1683,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await go(page, '#/generator', 'Issue a product');
     expect(await page.locator('.gen__mode[aria-current=page]').textContent()).toBe('Single piece');
     await page.click('[data-testid=mode-batch]');
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Issue a batch');
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe('Issue a batch');
     expect(await page.evaluate(() => location.hash)).toBe('#/generator?mode=batch');
     expect(await page.locator('.gen__mode[aria-current=page]').textContent()).toBe('Batch');
     expect(await page.locator('.gen__mode').first().evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Gravesend Sans"?,/);
@@ -1696,9 +1698,9 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
 
     // A file with a wrong line is refused, line by line, before anything is signed.
     await page.setInputFiles('[data-testid=batch-file]', { name: 'wrong.csv', mimeType: 'text/csv', buffer: Buffer.from('variant;sku\nSize 52;-bad\nSize 54;MNL\n') });
-    await expect.poll(() => page.locator('[data-testid=batch-problems] li').allTextContents()).toEqual(['Line 2 · SKU: Letters, digits, space, . _ - / only (64 max).']);
+    await expect.poll(() => page.locator('[data-testid=batch-problems] li').allTextContents(), POLL).toEqual(['Line 2 · SKU: Letters, digits, space, . _ - / only (64 max).']);
     await page.click('[data-testid=batch-submit]');
-    await expect.poll(() => page.locator('[data-testid=batch-form] .form-error').textContent()).toBe('Fix the pieces listed above.');
+    await expect.poll(() => page.locator('[data-testid=batch-form] .form-error').textContent(), POLL).toBe('Fix the pieces listed above.');
 
     // Excel's plain CSV is Windows-1252: read as such, its accents whole, and said above the preview.
     const legacy = Buffer.concat([Buffer.from('variant;sku\r\n', 'latin1'), Buffer.from([0xc9]), Buffer.from('crin 7,5 cm;\r\n', 'latin1')]);
@@ -1709,7 +1711,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
 
     // The production file: its first rows and the plan, before anything is signed.
     await page.setInputFiles('[data-testid=batch-file]', { name: 'batch.csv', mimeType: 'text/csv', buffer: Buffer.from(csv, 'utf8') });
-    await expect.poll(() => page.locator('[data-testid=batch-plan]').textContent()).toBe('120 pieces · 3 requests of up to 50');
+    await expect.poll(() => page.locator('[data-testid=batch-plan]').textContent(), POLL).toBe('120 pieces · 3 requests of up to 50');
     expect(await page.locator('[data-testid=batch-problems] li').count()).toBe(0);
     expect(await page.locator('[data-testid=batch-count]').textContent()).toBe('120');
     expect(await page.locator('[data-testid=batch-encoding]').count()).toBe(0); // UTF-8 this time
@@ -1762,7 +1764,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(rows).toHaveLength(121);
     expect(rows[0]).toBe('"line","piece","status","productId","sku","size","serial","codeId","claimCode","message"');
     expect(rows[1]).toBe(`"2","1","ISSUED","${first[2]}","MNL-RG-44-P","Size 44","${first[5]}","${await ctx.db.selectFrom('codes as c').innerJoin('products as p', 'p.id', 'c.product_id').select('c.id').where('p.product_id', '=', first[2]).executeTakeFirstOrThrow().then((r) => r.id)}","${first[6]}",""`);
-    await expect.poll(() => page.locator('[data-testid=batch-saved]').textContent()).toBe('Results saved, with the claim codes.');
+    await expect.poll(() => page.locator('[data-testid=batch-saved]').textContent(), POLL).toBe('Results saved, with the claim codes.');
     expect(await unloadPrevented()).toBe(false);
 
     // The certificate cards (D-01), A4 sheets of eight in requests of 48, six full sheets (plan NEXT LOT §3.2): each
@@ -1785,13 +1787,13 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
       expect.stringMatching(/^ORBES-certificates-\d{4}-\d{2}-\d{2}-48-sheet-part-2-of-3\.pdf$/),
       expect.stringMatching(/^ORBES-certificates-\d{4}-\d{2}-\d{2}-24-sheet-part-3-of-3\.pdf$/),
     ]);
-    await expect.poll(() => page.locator('[data-testid=batch-saved]').textContent()).toBe('Certificate cards saved, in 3 files.');
+    await expect.poll(() => page.locator('[data-testid=batch-saved]').textContent(), POLL).toBe('Certificate cards saved, in 3 files.');
 
     // All 120 in Products, under the same production batch.
     await page.click('a.cbtn:has-text("Open in Products")');
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Products');
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe('Products');
     expect(await page.evaluate(() => location.hash)).toBe(`#/products?productionBatch=${batch}`);
-    await expect.poll(() => page.locator('.pager__range').textContent()).toMatch(/of 120$/);
+    await expect.poll(() => page.locator('.pager__range').textContent(), POLL).toMatch(/of 120$/);
     const stored = await ctx.db.selectFrom('products').select(['variant', 'sku', 'serial', 'claim_secret_hash']).where('production_batch', '=', batch).orderBy('serial').execute();
     expect(stored).toHaveLength(120);
     expect(stored[0]).toMatchObject({ variant: 'Size 44', sku: 'MNL-RG-44-P' });
@@ -1809,10 +1811,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await page.isVisible('[data-testid=batch-file]')).toBe(false);
     await page.fill('input[name=quantity]', '2');
     await page.fill('input[name=variant]', '50 ML');
-    await expect.poll(() => page.locator('[data-testid=batch-plan]').textContent()).toBe('2 pieces · one request');
+    await expect.poll(() => page.locator('[data-testid=batch-plan]').textContent(), POLL).toBe('2 pieces · one request');
     expect(await page.locator('[data-testid=batch-preview] th').first().textContent()).toBe('Piece');
     await page.click('[data-testid=batch-submit]');
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Batch signed');
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe('Batch signed');
     const rows = page.locator('[data-testid=batch-results] tbody tr');
     expect(await rows.count()).toBe(2);
     expect(await rows.locator('td:nth-child(4)').allTextContents()).toEqual(['50 ML', '50 ML']);
@@ -1828,7 +1830,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     ).toBe(false);
     // Nothing held any more: another batch starts without a question.
     await page.click('[data-testid=batch-again]');
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Issue a batch');
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe('Issue a batch');
     expect(await page.locator('dialog.dialog').count()).toBe(0);
     expect(await cspViolations(page)).toEqual([]);
   }, STEP_TIMEOUT);
@@ -1848,7 +1850,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await page.selectOption('select[name=source]', 'quantity');
     await page.fill('input[name=quantity]', '2');
     await page.click('[data-testid=batch-submit]');
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Batch signed');
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe('Batch signed');
     const codes = await rows.locator('td:nth-child(7)').allTextContents();
     expect(codes.every((c) => /^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/.test(c))).toBe(true);
 
@@ -1886,7 +1888,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await page.fill('input[name=email]', ADMIN.email);
     await page.fill('input[name=password]', ADMIN.password);
     await page.click('[data-testid=login-submit]');
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Products');
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe('Products');
     expect(await cspViolations(page)).toEqual([]);
   }, STEP_TIMEOUT);
 
@@ -1898,7 +1900,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await page.fill('input[name=productionBatch]', 'B-2026-10-ENDED');
     await page.selectOption('select[name=source]', 'quantity');
     await page.fill('input[name=quantity]', '51');
-    await expect.poll(() => page.locator('[data-testid=batch-plan]').textContent()).toBe('51 pieces · 2 requests of up to 50');
+    await expect.poll(() => page.locator('[data-testid=batch-plan]').textContent(), POLL).toBe('51 pieces · 2 requests of up to 50');
     // The session ends between the two requests: the second one answers 401.
     const batchUrl = '**/api/admin/products/batch';
     let sent = 0;
@@ -1929,7 +1931,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await page.fill('input[name=email]', ADMIN.email);
     await page.fill('input[name=password]', ADMIN.password);
     await page.click('[data-testid=login-submit]');
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe('Dashboard');
     expect(await cspViolations(page)).toEqual([]);
   }, 240_000);
 
@@ -1942,7 +1944,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await page.fill('input[name=email]', ADMIN.email);
     await page.fill('input[name=password]', ADMIN.password);
     await page.click('[data-testid=login-submit]');
-    await expect.poll(async () => (await title(page).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe('Dashboard');
     await go(page, `#/products/${issuedProductId}`, issuedProductId);
     expect(await page.locator('#fresh-code').count()).toBe(0);
     // So is a print-sheet selection.
@@ -1959,7 +1961,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const p = await context.newPage();
     await watch(p);
     await signIn(p, operator.email, operator.password);
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dashboard');
     // OPERATOR: no key management in the console, and no Generator since it is ADMIN's (plan NEXT LOT step 5.13).
     expect(await p.locator('.side__link', { hasText: 'Generator' }).count()).toBe(0);
     expect(await p.locator('.side__link', { hasText: 'Logistics' }).count()).toBe(1);
@@ -1971,7 +1973,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(secret).toMatch(/^[A-Z2-7]{32}$/);
     await p.fill('input[name=code]', totp(base32Decode(secret), Date.now()));
     await p.click('[data-testid=totp-confirm]');
-    await expect.poll(async () => p.locator('.side__role').textContent()).toContain('2FA');
+    await expect.poll(async () => p.locator('.side__role').textContent(), POLL).toContain('2FA');
 
     await p.click('[data-testid=sign-out]');
     await p.fill('input[name=email]', operator.email);
@@ -1982,7 +1984,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // The enrolment consumed the current step; the next one is within the accepted window.
     await p.fill('input[name=totp]', totp(base32Decode(secret), Date.now() + 30_000));
     await p.click('[data-testid=login-submit]');
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dashboard');
     expect(await cspViolations(p)).toEqual([]);
     await p.close();
 
@@ -1992,13 +1994,13 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const a = await adminContext.newPage();
     await watch(a);
     await signIn(a, ADMIN.email, ADMIN.password);
-    await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(a).textContent())?.trim(), POLL).toBe('Dashboard');
     await go(a, '#/team', 'Team');
     const userRow = a.locator('[data-testid=admin-users] tr', { hasText: operator.email });
     await userRow.locator('[data-testid=reset-totp]').click();
     await confirmDialog(a, `RESET 2FA ${operator.email}`);
-    await expect.poll(async () => (await ctx.services.auth.getAdmin(operatorId)).totpEnabled).toBe(false);
-    await expect.poll(() => userRow.textContent()).toContain('NOT ENROLLED');
+    await expect.poll(async () => (await ctx.services.auth.getAdmin(operatorId)).totpEnabled, POLL).toBe(false);
+    await expect.poll(() => userRow.textContent(), POLL).toContain('NOT ENROLLED');
     expect(await cspViolations(a)).toEqual([]);
     await a.click('[data-testid=sign-out]');
     await adminContext.close();
@@ -2010,7 +2012,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const a = await adminContext.newPage();
     await watch(a);
     await signIn(a, ADMIN.email, ADMIN.password);
-    await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(a).textContent())?.trim(), POLL).toBe('Dashboard');
     // The ADMIN's sidebar, its longest: SIGN OUT and CHANGE PASSWORD show on a 900 px screen without scrolling it.
     for (const id of ['sign-out', 'change-password']) {
       const box = (await a.locator(`[data-testid=${id}]`).boundingBox())!;
@@ -2018,7 +2020,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
       expect(box.x + box.width, id).toBeLessThanOrEqual(248 - 32);
     }
     await a.locator('.side__link', { hasText: 'Team' }).click();
-    await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Team');
+    await expect.poll(async () => (await title(a).textContent())?.trim(), POLL).toBe('Team');
     expect(await a.locator('.side__link.is-active').textContent()).toBe('Team');
     // One's own row offers nothing but its own second factor.
     const selfRow = a.locator('[data-testid=admin-users] tr', { hasText: ADMIN.email });
@@ -2031,7 +2033,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const temporary = ((await a.locator('[data-testid=temporary-password]').textContent()) ?? '').trim();
     expect(temporary).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){3}$/);
     const staffRow = a.locator('[data-testid=admin-users] tr', { hasText: staffEmail });
-    await expect.poll(() => staffRow.textContent()).toContain('TEMPORARY PASSWORD');
+    await expect.poll(() => staffRow.textContent(), POLL).toContain('TEMPORARY PASSWORD');
     expect(await figuresInDisplayFace(a)).toEqual([]);
     await shot(a, 'team');
     await a.click('[data-testid=temporary-password-hide]');
@@ -2042,7 +2044,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const s = await staffContext.newPage();
     await watch(s);
     await signIn(s, staffEmail, temporary);
-    await expect.poll(async () => (await title(s).textContent())?.trim()).toBe('New password');
+    await expect.poll(async () => (await title(s).textContent())?.trim(), POLL).toBe('New password');
     // The screen is the change itself: no CHANGE PASSWORD beside it, whose dialog would leave this form asking for a temporary password that no longer works.
     expect(await s.locator('[data-testid=change-password]').count()).toBe(0);
     expect(await s.isVisible('[data-testid=sign-out]')).toBe(true);
@@ -2053,11 +2055,11 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await s.fill('input[name=newPassword]', 'atelier passphrase 2026');
     await s.fill('input[name=confirmPassword]', 'atelier passphrase 2026');
     await s.click('[data-testid=password-save]');
-    await expect.poll(() => s.locator('[data-testid=password-form] .form-error').textContent()).toMatch(/current password is not correct/i);
+    await expect.poll(() => s.locator('[data-testid=password-form] .form-error').textContent(), POLL).toMatch(/current password is not correct/i);
     expect(await s.isVisible('[data-testid=login-form]')).toBe(false); // a refusal, not a sign-out
     await s.fill('input[name=currentPassword]', temporary);
     await s.click('[data-testid=password-save]');
-    await expect.poll(async () => (await title(s).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(s).textContent())?.trim(), POLL).toBe('Dashboard');
     expect(await s.locator('.side__role').textContent()).toContain('OPERATOR');
     expect(await s.locator('.side__link', { hasText: 'Team' }).count()).toBe(0);
 
@@ -2068,35 +2070,35 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await s.fill('dialog input[name=newPassword]', 'atelier passphrase 2027');
     await s.fill('dialog input[name=confirmPassword]', 'atelier passphrase 2028');
     await s.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => s.locator('.dialog__error').textContent()).toMatch(/differ/);
+    await expect.poll(() => s.locator('.dialog__error').textContent(), POLL).toMatch(/differ/);
     await s.fill('dialog input[name=confirmPassword]', 'atelier passphrase 2027');
     await confirmDialog(s);
     await s.waitForSelector('.toast:has-text("Password changed.")');
 
     // The ADMIN changes the role, then the staff member leaves: their open console is signed out.
     await a.reload();
-    await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Team');
-    await expect.poll(() => staffRow.textContent()).toContain('ACTIVE');
+    await expect.poll(async () => (await title(a).textContent())?.trim(), POLL).toBe('Team');
+    await expect.poll(() => staffRow.textContent(), POLL).toContain('ACTIVE');
     await staffRow.locator('[data-testid=team-role]').click();
     await a.selectOption('dialog select[name=role]', 'AUDITOR');
     await confirmDialog(a);
-    await expect.poll(() => staffRow.textContent()).toContain('AUDITOR');
+    await expect.poll(() => staffRow.textContent(), POLL).toContain('AUDITOR');
     await staffRow.locator('[data-testid=team-sessions]').click();
-    await expect.poll(() => a.locator('dialog.dialog tbody tr').count()).toBe(1);
+    await expect.poll(() => a.locator('dialog.dialog tbody tr').count(), POLL).toBe(1);
     expect(await a.locator('dialog.dialog tbody tr').textContent()).toMatch(/Chrome · macOS|Chrome · Linux/);
     await shot(a, 'team-sessions');
     await a.click('[data-testid=dialog-cancel]');
     await staffRow.locator('[data-testid=team-disable]').click();
     expect(await a.locator('dialog.dialog--danger').count()).toBe(1);
     await confirmDialog(a);
-    await expect.poll(() => staffRow.textContent()).toContain('DISABLED');
+    await expect.poll(() => staffRow.textContent(), POLL).toContain('DISABLED');
     await s.evaluate(() => (location.hash = '#/products'));
     await s.waitForSelector('[data-testid=login-form]');
-    await expect.poll(() => s.locator('.login__error').textContent()).toMatch(/session has ended/i);
+    await expect.poll(() => s.locator('.login__error').textContent(), POLL).toMatch(/session has ended/i);
 
     // Who did it: the audit log and the anomaly triage name the console user by email.
     await go(a, '#/audit?action=admin.disable', 'Audit log');
-    await expect.poll(() => a.locator('table.table tbody tr').first().textContent()).toContain(ADMIN.email);
+    await expect.poll(() => a.locator('table.table tbody tr').first().textContent(), POLL).toContain(ADMIN.email);
     expect(await a.locator('table.table tbody tr').first().textContent()).toContain(staffEmail); // the account acted upon
     await go(a, '#/anomalies?status=OPEN', 'Anomalies');
     expect(await a.locator('[data-testid=anomaly-actor]').count()).toBe(0); // never triaged
@@ -2104,7 +2106,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await a.selectOption('dialog select[name=status]', 'ACKNOWLEDGED');
     await confirmDialog(a);
     await go(a, '#/anomalies?status=ACKNOWLEDGED', 'Anomalies');
-    await expect.poll(() => a.locator('[data-testid=anomaly-actor]').first().textContent()).toBe(`by ${ADMIN.email}`);
+    await expect.poll(() => a.locator('[data-testid=anomaly-actor]').first().textContent(), POLL).toBe(`by ${ADMIN.email}`);
     expect(await cspViolations(a)).toEqual([]);
     expect(await cspViolations(s)).toEqual([]);
     await staffContext.close();
@@ -2117,7 +2119,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const a = await adminContext.newPage();
     await watch(a);
     await signIn(a, ADMIN.email, ADMIN.password);
-    await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(a).textContent())?.trim(), POLL).toBe('Dashboard');
     await go(a, '#/team', 'Team');
     const locations = await ctx.services.stock.locations();
     expect(locations.length).toBeGreaterThan(1);
@@ -2137,12 +2139,12 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await list.locator('input[type=checkbox]:checked').count()).toBe(0);
     await shot(a, 'team-logistics-dialog');
     await a.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => a.locator('.dialog__error').textContent()).toBe('Choose at least one location.');
+    await expect.poll(() => a.locator('.dialog__error').textContent(), POLL).toBe('Choose at least one location.');
     await list.locator('label', { hasText: 'LOGISTICS WAREHOUSE' }).click();
     await confirmDialog(a);
     const temporary = ((await a.locator('[data-testid=temporary-password]').textContent()) ?? '').trim();
     const agentRow = a.locator('[data-testid=admin-users] tr', { hasText: agentEmail });
-    await expect.poll(() => agentRow.textContent()).toContain('LOGISTICS WAREHOUSE');
+    await expect.poll(() => agentRow.textContent(), POLL).toContain('LOGISTICS WAREHOUSE');
     expect(await agentRow.textContent()).toContain('LOGISTICS');
     const agent = (await ctx.services.auth.listAdmins()).find((x) => x.email === agentEmail)!;
     expect(agent).toMatchObject({ role: 'LOGISTICS', stockLocationIds: [warehouse.id] });
@@ -2153,12 +2155,12 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const g = await agentContext.newPage();
     await watch(g);
     await signIn(g, agentEmail, temporary);
-    await expect.poll(async () => (await title(g).textContent())?.trim()).toBe('New password');
+    await expect.poll(async () => (await title(g).textContent())?.trim(), POLL).toBe('New password');
     await g.fill('input[name=currentPassword]', temporary);
     await g.fill('input[name=newPassword]', 'agent passphrase 2026');
     await g.fill('input[name=confirmPassword]', 'agent passphrase 2026');
     await g.click('[data-testid=password-save]');
-    await expect.poll(async () => (await title(g).textContent())?.trim()).toBe('Logistics');
+    await expect.poll(async () => (await title(g).textContent())?.trim(), POLL).toBe('Logistics');
     expect(await g.evaluate(() => location.hash)).toBe('#/logistics');
     expect((await g.locator('.side__link').allTextContents()).map((t) => t.trim())).toEqual(['Logistics']);
     expect(await g.locator('.side__link.is-active').textContent()).toBe('Logistics');
@@ -2184,14 +2186,14 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await list.locator('input[type=checkbox]:checked').evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value))).toEqual([warehouse.id]);
     for (const l of locations.filter((x) => x.id !== warehouse.id)) await list.locator('label', { hasText: l.name }).click();
     await confirmDialog(a);
-    await expect.poll(async () => (await ctx.services.auth.adminLocations(agent.id)).length).toBe(locations.length);
-    for (const l of locations) await expect.poll(() => agentRow.textContent()).toContain(l.name);
+    await expect.poll(async () => (await ctx.services.auth.adminLocations(agent.id)).length, POLL).toBe(locations.length);
+    for (const l of locations) await expect.poll(() => agentRow.textContent(), POLL).toContain(l.name);
     // Stepped down to AUDITOR: the list hides and its locations go.
     await agentRow.locator('[data-testid=team-role]').click();
     await a.selectOption('dialog select[name=role]', 'AUDITOR');
     expect(await list.isHidden()).toBe(true);
     await confirmDialog(a);
-    await expect.poll(async () => ctx.services.auth.adminLocations(agent.id)).toEqual([]);
+    await expect.poll(async () => ctx.services.auth.adminLocations(agent.id), POLL).toEqual([]);
     expect(await cspViolations(a)).toEqual([]);
     expect(await cspViolations(g)).toEqual([]);
     await agentContext.close();
@@ -2203,7 +2205,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const p = await c.newPage();
     await watch(p);
     await signIn(p, ADMIN.email, ADMIN.password);
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dashboard');
     // Club in the Clients group after Owners, then Segments, Orders and Invoices (plan LIVE RELEASE+), Messages first
     // (plan NEXT-NINE, CS-01), PRIVATE CARE after Warranties (BP-19 T6; plan ORBES CARE), Links after Segments; the ADMIN's sidebar, twenty-nine links with
     // Growth under Overview (BP-29), Logistics in the Atelier's place and Supplier orders under it (plan NEXT LOT
@@ -2225,9 +2227,9 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
       expect(box.y + box.height, id).toBeLessThanOrEqual(900);
     }
     await p.locator('.side__link', { hasText: 'Club' }).click();
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Club');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Club');
     expect(await p.locator('.side__link.is-active').textContent()).toBe('Club');
-    await expect.poll(() => p.locator('[data-testid=club-tab-drops]').getAttribute('aria-current')).toBe('page');
+    await expect.poll(() => p.locator('[data-testid=club-tab-drops]').getAttribute('aria-current'), POLL).toBe('page');
 
     // A draw's sizes are its model's (plan NEXT LOT §5.1 #20): MONOLITHE, of no type for this file's other flows, is given
     // its ring size (its sizes 52 and 54 among them) until the draw is published, then its own type and kind back.
@@ -2250,7 +2252,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await p.fill('dialog input[name=title]', 'MONOLITHE — release I');
     await p.fill('dialog input[name="size:52"]', '2');
     await p.fill('dialog input[name="size:54"]', '1');
-    await expect.poll(() => p.locator('dialog [data-testid=draw-pieces-in-all]').textContent()).toBe('3 pieces in all');
+    await expect.poll(() => p.locator('dialog [data-testid=draw-pieces-in-all]').textContent(), POLL).toBe('3 pieces in all');
     await shot(p, 'club-drop-new-sizes', { dialog: true });
     const opens = new Date(Date.now() - 3_600_000);
     const closes = new Date(Date.now() + 3_600_000);
@@ -2263,10 +2265,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await p.fill('dialog input[name=earlyAccessHours]', '24');
     await p.fill('dialog input[name=earlyAccessPlatineHours]', '12');
     await confirmDialog(p);
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('MONOLITHE — release I');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('MONOLITHE — release I');
     const dropId = decodeURIComponent(new URL(p.url()).hash.split('/').pop()!);
-    await expect.poll(() => p.locator('[data-testid=drop-state]').textContent()).toBe('DRAFT');
-    await expect.poll(() => p.locator('[data-testid=drop-early-access]').textContent()).toMatch(
+    await expect.poll(() => p.locator('[data-testid=drop-state]').textContent(), POLL).toBe('DRAFT');
+    await expect.poll(() => p.locator('[data-testid=drop-early-access]').textContent(), POLL).toMatch(
       /^PALLADIUM 24 hours · from \d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC; PLATINE 12 hours · from (?:\d{1,2} [A-Z]{3} \d{4} · )?\d{2}:\d{2} UTC$/,
     );
     expect(await p.locator('[data-testid=drop-reserved]').textContent()).toBe('0 of 3');
@@ -2287,35 +2289,35 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.inputValue('dialog input[name="size:52"]')).toBe('2');
     await p.fill('dialog input[name="size:52"]', '1');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('#release .deflist__row', { hasText: 'Pieces' }).locator('.deflist__value').textContent()).toBe('2');
+    await expect.poll(() => p.locator('#release .deflist__row', { hasText: 'Pieces' }).locator('.deflist__value').textContent(), POLL).toBe('2');
     // Sizes and pieces, alone: the same fields; a size at 0 leaves it out, the pieces in all follow.
     await p.click('[data-testid=drop-sizes]');
     await p.waitForSelector('dialog input[name="size:52"]');
     expect(await p.locator('dialog .dialog__title, dialog h2').first().textContent()).toContain('Sizes and pieces');
     await shot(p, 'club-drop-sizes-dialog', { dialog: true });
     await p.fill('dialog input[name="size:54"]', '0');
-    await expect.poll(() => p.locator('dialog [data-testid=draw-pieces-in-all]').textContent()).toBe('1 piece in all');
+    await expect.poll(() => p.locator('dialog [data-testid=draw-pieces-in-all]').textContent(), POLL).toBe('1 piece in all');
     await p.fill('dialog input[name="size:54"]', '1');
     await p.fill('dialog input[name="size:52"]', '1');
     await p.click('[data-testid=dialog-confirm]');
     // Nothing changed: said in the dialog, nothing sent.
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Nothing has changed.');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('Nothing has changed.');
     await p.click('dialog [data-testid=dialog-cancel]');
     await p.waitForSelector('dialog.dialog', { state: 'detached' });
     // Published: its page on /verify; only the description changes from then on. Its entries are open already: no early access.
     await p.click('[data-testid=drop-publish]');
-    await expect.poll(() => p.locator('dialog').textContent()).toContain('Direct reservations of PLATINE and PALLADIUM owners: none.');
+    await expect.poll(() => p.locator('dialog').textContent(), POLL).toContain('Direct reservations of PLATINE and PALLADIUM owners: none.');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=drop-state]').textContent()).toBe('OPEN');
+    await expect.poll(() => p.locator('[data-testid=drop-state]').textContent(), POLL).toBe('OPEN');
     await ctx.db.updateTable('models').set({ size_type: null, size_kind: kindBefore }).where('id', '=', modelId).execute();
-    await expect.poll(() => p.locator('[data-testid=drop-early-access]').textContent()).toBe('None');
+    await expect.poll(() => p.locator('[data-testid=drop-early-access]').textContent(), POLL).toBe('None');
     expect(await p.locator('[data-testid=drop-edit]').count()).toBe(0);
     expect(await p.locator('[data-testid=drop-sizes]').count()).toBe(0);
     expect(await p.locator('[data-testid=drop-page]').getAttribute('href')).toBe(`/verify/releases/${dropId}`);
     await p.click('[data-testid=drop-describe]');
     await p.fill('dialog textarea[name=description]', 'Two pieces, cast in Paris.');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('#release').textContent()).toContain('Two pieces, cast in Paris.');
+    await expect.poll(() => p.locator('#release').textContent(), POLL).toContain('Two pieces, cast in Paris.');
     expect(await figuresInDisplayFace(p)).toEqual([]);
 
     // Three accounts enter on /verify; one holds a piece (TITANE): the draw ranks it first.
@@ -2333,28 +2335,28 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const sizeIdOf = (label: string) => sized.sizes.find((s) => s.label === label)!.id;
     for (const [i, id] of entrants.entries()) await ctx.services.drops.enter(id, dropId, { type: 'account', id }, { sizeId: sizeIdOf(i < 2 ? '52' : '54') });
     await p.reload();
-    await expect.poll(() => p.locator('#entries tbody tr').count()).toBe(3);
+    await expect.poll(() => p.locator('#entries tbody tr').count(), POLL).toBe(3);
     // The Size column, and the size filter (All sizes, then each).
     expect((await p.locator('#entries [data-testid=entry-size]').allTextContents()).sort()).toEqual(['Size 52', 'Size 52', 'Size 54']);
     await p.selectOption('#entries select[name=size]', sizeIdOf('54'));
-    await expect.poll(() => p.locator('#entries tbody tr').count()).toBe(1);
+    await expect.poll(() => p.locator('#entries tbody tr').count(), POLL).toBe(1);
     expect(await p.locator('#entries [data-testid=entry-size]').allTextContents()).toEqual(['Size 54']);
     await p.selectOption('#entries select[name=size]', '');
-    await expect.poll(() => p.locator('#entries tbody tr').count()).toBe(3);
+    await expect.poll(() => p.locator('#entries tbody tr').count(), POLL).toBe(3);
     // The entries close; an OPERATOR never draws, an ADMIN does, once, after the phrase.
     await ctx.db.updateTable('drops').set({ opens_at: new Date(Date.now() - 7_200_000), closes_at: new Date(Date.now() - 1_000) }).where('id', '=', dropId).execute();
     await p.reload();
-    await expect.poll(() => p.locator('[data-testid=drop-state]').textContent()).toBe('CLOSED');
+    await expect.poll(() => p.locator('[data-testid=drop-state]').textContent(), POLL).toBe('CLOSED');
     await p.click('[data-testid=drop-draw]');
-    await expect.poll(() => p.locator('dialog [data-testid=dialog-confirm]').isDisabled()).toBe(true);
+    await expect.poll(() => p.locator('dialog [data-testid=dialog-confirm]').isDisabled(), POLL).toBe(true);
     await confirmDialog(p, `DRAW ${dropId.slice(0, 8).toUpperCase()}`);
     // Its outcome per size (plan NEXT LOT §3.6.F).
     await p.waitForSelector('.toast:has-text("Drawn. 52: 1 selected, 1 on the waiting list. 54: 1 selected, 0 on the waiting list.")');
-    await expect.poll(() => p.locator('[data-testid=drop-state]').textContent()).toBe('DRAWN');
-    await expect.poll(() => p.locator('[data-testid=drop-seed]').count()).toBe(1);
+    await expect.poll(() => p.locator('[data-testid=drop-state]').textContent(), POLL).toBe('DRAWN');
+    await expect.poll(() => p.locator('[data-testid=drop-seed]').count(), POLL).toBe(1);
     const rows = p.locator('#entries tbody tr');
     const rowOf = (n: number) => rows.filter({ hasText: `club.entrant${n}@example.com` });
-    await expect.poll(() => rows.locator('td.col--num').first().textContent()).toBe('1');
+    await expect.poll(() => rows.locator('td.col--num').first().textContent(), POLL).toBe('1');
     expect(await rows.first().textContent()).toContain('TITANE');
     expect(await rows.first().textContent()).toContain('club.entrant1@example.com');
     expect(await rowOf(2).locator('[data-testid=entry-status]').textContent()).toContain('WAITLISTED');
@@ -2368,26 +2370,26 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await rowOf(3).locator('[data-testid=entry-confirm]').click();
     await p.fill('dialog textarea[name=note]', 'Sold in the Paris boutique.');
     await confirmDialog(p);
-    await expect.poll(() => rowOf(3).locator('[data-testid=entry-status]').textContent()).toContain('CONFIRMED');
+    await expect.poll(() => rowOf(3).locator('[data-testid=entry-status]').textContent(), POLL).toContain('CONFIRMED');
     expect(await rowOf(1).locator('[data-testid=entry-lapse]').count()).toBe(0);
     await ctx.db.updateTable('drop_entries').set({ respond_by: new Date(Date.now() - 1_000) }).where('drop_id', '=', dropId).where('rank', '=', 1).execute();
     await p.reload();
     await rowOf(1).locator('[data-testid=entry-lapse]').click();
     await confirmDialog(p);
-    await expect.poll(() => rowOf(1).locator('[data-testid=entry-status]').textContent()).toContain('LAPSED');
+    await expect.poll(() => rowOf(1).locator('[data-testid=entry-status]').textContent(), POLL).toContain('LAPSED');
     // OFFER NEXT in 52, its place free and its waiting list: the next of 52 is held a place.
-    await expect.poll(() => sizeRow('52').locator('[data-testid=size-offer-next]').count()).toBe(1);
+    await expect.poll(() => sizeRow('52').locator('[data-testid=size-offer-next]').count(), POLL).toBe(1);
     expect(await sizeRow('54').locator('[data-testid=size-offer-next]').count()).toBe(0);
     await sizeRow('52').locator('[data-testid=size-offer-next]').click();
-    await expect.poll(() => p.locator('dialog').textContent()).toContain('The first entry by rank on the waiting list of size 52');
+    await expect.poll(() => p.locator('dialog').textContent(), POLL).toContain('The first entry by rank on the waiting list of size 52');
     await confirmDialog(p);
-    await expect.poll(() => rowOf(2).locator('[data-testid=entry-status]').textContent()).toContain('SELECTED');
+    await expect.poll(() => rowOf(2).locator('[data-testid=entry-status]').textContent(), POLL).toContain('SELECTED');
     expect(await p.locator('[data-testid=size-offer-next]').count()).toBe(0);
     expect(await figuresInDisplayFace(p)).toEqual([]);
     await shot(p, 'club-drop', { full: true });
     // The Drops tab lists it, its row leading to its page.
     await go(p, '#/club', 'Club');
-    await expect.poll(() => p.locator('#drops tbody tr', { hasText: 'MONOLITHE — release I' }).count()).toBe(1);
+    await expect.poll(() => p.locator('#drops tbody tr', { hasText: 'MONOLITHE — release I' }).count(), POLL).toBe(1);
     expect(await cspViolations(p)).toEqual([]);
     await c.close();
 
@@ -2398,12 +2400,12 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const ap = await ac.newPage();
     await watch(ap);
     await signIn(ap, auditor.email, auditor.password);
-    await expect.poll(async () => (await title(ap).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(ap).textContent())?.trim(), POLL).toBe('Dashboard');
     await go(ap, '#/club', 'Club');
     expect(await ap.locator('[data-testid=drop-new]').count()).toBe(0);
     await ap.locator('#drops [data-testid=drop-link]', { hasText: 'MONOLITHE — release I' }).click();
-    await expect.poll(async () => (await title(ap).textContent())?.trim()).toBe('MONOLITHE — release I');
-    await expect.poll(() => ap.locator('#entries tbody tr').count()).toBe(3);
+    await expect.poll(async () => (await title(ap).textContent())?.trim(), POLL).toBe('MONOLITHE — release I');
+    await expect.poll(() => ap.locator('#entries tbody tr').count(), POLL).toBe(3);
     for (const shown of await ap.locator('[data-testid=entry-account]').allTextContents()) expect(shown).toMatch(/^c\*\*\*@example\.com$/);
     for (const action of ['drop-edit', 'drop-sizes', 'drop-describe', 'drop-publish', 'drop-cancel', 'drop-draw', 'drop-offer-next', 'size-offer-next', 'entry-confirm', 'entry-lapse']) {
       expect(await ap.locator(`[data-testid=${action}]`).count(), action).toBe(0);
@@ -2417,13 +2419,13 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const p = await c.newPage();
     await watch(p);
     await signIn(p, ADMIN.email, ADMIN.password);
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dashboard');
     await go(p, '#/club', 'Club');
     await p.click('[data-testid=club-tab-circle]');
-    await expect.poll(() => p.locator('[data-testid=club-tab-circle]').getAttribute('aria-current')).toBe('page');
+    await expect.poll(() => p.locator('[data-testid=club-tab-circle]').getAttribute('aria-current'), POLL).toBe('page');
     expect(await p.evaluate(() => location.hash)).toBe('#/club?tab=circle');
     expect(await p.locator('.side__link.is-active').textContent()).toBe('Club');
-    await expect.poll(() => p.locator('#circle .empty__text').count()).toBe(1);
+    await expect.poll(() => p.locator('#circle .empty__text').count(), POLL).toBe(1);
 
     // An invitation: the fields of its kind only; refused before anything is sent when a link goes elsewhere.
     await p.click('[data-testid=circle-new-invitation]');
@@ -2446,31 +2448,31 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await p.fill('dialog input[name=capacity]', '2');
     await p.fill('dialog input[name=externalUrl]', 'https://example.com/film');
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toMatch(/^A link is an https address on theorbes\.com, youtube\.com, vimeo\.com/);
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toMatch(/^A link is an https address on theorbes\.com, youtube\.com, vimeo\.com/);
     await p.fill('dialog input[name=externalUrl]', 'https://vimeo.com/1');
     await confirmDialog(p);
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dinner at the atelier');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dinner at the atelier');
     const postId = decodeURIComponent(new URL(p.url()).hash.split('/').pop()!);
     expect(new URL(p.url()).hash).toBe(`#/club/circle/${postId}`);
-    await expect.poll(() => p.locator('.side__link.is-active').textContent()).toBe('Club');
-    await expect.poll(() => p.locator('[data-testid=circle-state]').textContent()).toBe('Not published');
+    await expect.poll(() => p.locator('.side__link.is-active').textContent(), POLL).toBe('Club');
+    await expect.poll(() => p.locator('[data-testid=circle-state]').textContent(), POLL).toBe('Not published');
     // Its text as a member reads it.
-    await expect.poll(() => p.locator('[data-testid=circle-text] .sheet-preview__paragraph').count()).toBe(2);
+    await expect.poll(() => p.locator('[data-testid=circle-text] .sheet-preview__paragraph').count(), POLL).toBe(2);
     expect(await p.locator('#post .deflist__row', { hasText: 'Places' }).locator('.deflist__value').textContent()).toBe('2');
     expect(await p.locator('[data-testid=circle-external]').getAttribute('rel')).toBe('noopener noreferrer');
 
     // A photograph, through the photograph dialog.
     await p.click('[data-testid=circle-photo-add]');
     await p.setInputFiles('dialog [data-testid=photo-file]', writePhotoPng(join(workDir, 'circle.png'), 1200, 800));
-    await expect.poll(() => p.locator('dialog [data-testid=photo-facts]').textContent()).toMatch(/^To be sent: /);
+    await expect.poll(() => p.locator('dialog [data-testid=photo-facts]').textContent(), POLL).toMatch(/^To be sent: /);
     await confirmDialog(p);
     await p.waitForSelector('.toast:has-text("Photograph added.")');
-    await expect.poll(() => p.locator('[data-testid=circle-photo]').count()).toBe(1);
+    await expect.poll(() => p.locator('[data-testid=circle-photo]').count(), POLL).toBe(1);
 
     // Published: its page on /verify; then two owners answer, the second refused once the places are taken.
     await p.click('[data-testid=circle-publish]');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=circle-state]').textContent()).toBe('Published');
+    await expect.poll(() => p.locator('[data-testid=circle-state]').textContent(), POLL).toBe('Published');
     expect(await p.locator('[data-testid=circle-page]').getAttribute('href')).toBe(`/verify/circle/${postId}`);
     const owners: string[] = [];
     for (const n of [1, 2, 3]) {
@@ -2486,21 +2488,21 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await ctx.services.circle.rsvp(owners[2]!, postId, 'YES', { type: 'account', id: owners[2]! });
     await expect(ctx.services.circle.rsvp(owners[1]!, postId, 'YES', { type: 'account', id: owners[1]! })).rejects.toMatchObject({ code: 'CIRCLE_FULL' });
     await p.reload();
-    await expect.poll(() => p.locator('#answers tbody tr').count()).toBe(3);
+    await expect.poll(() => p.locator('#answers tbody tr').count(), POLL).toBe(3);
     expect(await p.locator('#answers .panel__note').textContent()).toBe('2 yes · 1 no · 0 of 2 places left');
     expect(await p.locator('[data-testid=answer-account]').allTextContents()).toEqual(expect.arrayContaining(['circle.owner1@example.com', 'circle.owner2@example.com']));
     await p.selectOption('#answers select[name=answer]', 'NO');
-    await expect.poll(() => p.locator('#answers tbody tr').count()).toBe(1);
+    await expect.poll(() => p.locator('#answers tbody tr').count(), POLL).toBe(1);
     expect(await p.locator('[data-testid=answer-account]').textContent()).toBe('circle.owner2@example.com');
     // A change: three places; a capacity under its YES is the server's refusal, said in the dialog.
     await p.click('[data-testid=circle-edit]');
     await p.fill('dialog input[name=capacity]', '1');
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('2 places are taken already: the capacity cannot go under that.');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('2 places are taken already: the capacity cannot go under that.');
     await p.fill('dialog input[name=capacity]', '3');
     await confirmDialog(p);
     await p.waitForSelector('.toast:has-text("Post saved.")');
-    await expect.poll(() => p.locator('#post .deflist__row', { hasText: 'Places' }).locator('.deflist__value').textContent()).toBe('3');
+    await expect.poll(() => p.locator('#post .deflist__row', { hasText: 'Places' }).locator('.deflist__value').textContent(), POLL).toBe('3');
     expect(await figuresInDisplayFace(p)).toEqual([]);
     await shot(p, 'club-circle-post', { full: true });
 
@@ -2511,7 +2513,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await p.fill('dialog textarea[name=pollOptions]', 'Onyx\nOpal\nJade');
     await p.selectOption('dialog select[name=minTier]', '1');
     await confirmDialog(p);
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('The next stone');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('The next stone');
     const pollId = decodeURIComponent(new URL(p.url()).hash.split('/').pop()!);
     await p.click('[data-testid=circle-publish]');
     await confirmDialog(p);
@@ -2519,22 +2521,22 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await ctx.services.circle.vote(owners[1]!, pollId, 1);
     await ctx.services.circle.vote(owners[2]!, pollId, 2);
     await p.reload();
-    await expect.poll(() => p.locator('#results .bar').count()).toBe(3);
+    await expect.poll(() => p.locator('#results .bar').count(), POLL).toBe(3);
     expect(await p.locator('#results .bar__label').allTextContents()).toEqual(['Onyx', 'Opal', 'Jade']);
     expect(await p.locator('#results .bar__value').allTextContents()).toEqual(['0', '2', '1']);
     expect(await p.locator('#results .panel__note').textContent()).toBe('3 votes');
     await p.click('[data-testid=circle-edit]');
     await p.fill('dialog textarea[name=pollOptions]', 'Onyx\nOpal');
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Votes have been cast: the options of this poll no longer change.');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('Votes have been cast: the options of this poll no longer change.');
     await p.click('[data-testid=dialog-cancel]');
     // Withdrawn: out of the circle, its votes kept.
     await p.click('[data-testid=circle-unpublish]');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=circle-state]').textContent()).toBe('Not published');
+    await expect.poll(() => p.locator('[data-testid=circle-state]').textContent(), POLL).toBe('Not published');
     // The tab lists both, its rows leading to their pages.
     await go(p, '#/club?tab=circle', 'Club');
-    await expect.poll(() => p.locator('#circle tbody tr').count()).toBe(2);
+    await expect.poll(() => p.locator('#circle tbody tr').count(), POLL).toBe(2);
     expect(await p.locator('#circle [data-testid=circle-link]').allTextContents()).toEqual(['The next stone', 'Dinner at the atelier']);
     expect(await figuresInDisplayFace(p)).toEqual([]);
     await shot(p, 'club-circle', { full: true });
@@ -2543,7 +2545,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await ctx.services.circle.feed(owners[0]!, { page: 1, pageSize: 20 });
     await go(p, '#/analytics?days=30', 'Analytics');
     const panel = p.locator('.panel--circle');
-    await expect.poll(() => panel.locator('[data-testid=circle-members] .bar__label').allTextContents()).toEqual(['TITANE', 'PLATINE', 'PALLADIUM']);
+    await expect.poll(() => panel.locator('[data-testid=circle-members] .bar__label').allTextContents(), POLL).toEqual(['TITANE', 'PLATINE', 'PALLADIUM']);
     // The accounts the club counts now: ACTIVE, holding a piece that is neither revoked, flagged nor retired.
     const members = await ctx.db
       .selectFrom('ownership as o')
@@ -2570,12 +2572,12 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const ap = await ac.newPage();
     await watch(ap);
     await signIn(ap, auditor.email, auditor.password);
-    await expect.poll(async () => (await title(ap).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(ap).textContent())?.trim(), POLL).toBe('Dashboard');
     await go(ap, '#/club?tab=circle', 'Club');
     for (const action of ['circle-new-note', 'circle-new-invitation', 'circle-new-poll']) expect(await ap.locator(`[data-testid=${action}]`).count(), action).toBe(0);
     await ap.locator('#circle [data-testid=circle-link]', { hasText: 'Dinner at the atelier' }).click();
-    await expect.poll(async () => (await title(ap).textContent())?.trim()).toBe('Dinner at the atelier');
-    await expect.poll(() => ap.locator('#answers tbody tr').count()).toBe(3);
+    await expect.poll(async () => (await title(ap).textContent())?.trim(), POLL).toBe('Dinner at the atelier');
+    await expect.poll(() => ap.locator('#answers tbody tr').count(), POLL).toBe(3);
     for (const shown of await ap.locator('[data-testid=answer-account]').allTextContents()) expect(shown).toMatch(/^c\*\*\*@example\.com$/);
     for (const action of ['circle-edit', 'circle-publish', 'circle-unpublish', 'circle-photo-add', 'circle-photo-remove', 'circle-photo-alt']) {
       expect(await ap.locator(`[data-testid=${action}]`).count(), action).toBe(0);
@@ -2589,14 +2591,14 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const p = await c.newPage();
     await watch(p);
     await signIn(p, ADMIN.email, ADMIN.password);
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dashboard');
     await go(p, '#/club', 'Club');
     await p.click('[data-testid=club-tab-tiers]');
-    await expect.poll(() => p.locator('[data-testid=club-tab-tiers]').getAttribute('aria-current')).toBe('page');
+    await expect.poll(() => p.locator('[data-testid=club-tab-tiers]').getAttribute('aria-current'), POLL).toBe('page');
     expect(await p.evaluate(() => location.hash)).toBe('#/club?tab=tiers');
     expect(await p.locator('.side__link.is-active').textContent()).toBe('Club');
     // The three tiers, each from its threshold, with the words by default.
-    await expect.poll(() => p.locator('.tiers .panel:not(#tier-program) .panel__title').allTextContents()).toEqual(['TITANE', 'PLATINE', 'PALLADIUM']);
+    await expect.poll(() => p.locator('.tiers .panel:not(#tier-program) .panel__title').allTextContents(), POLL).toEqual(['TITANE', 'PLATINE', 'PALLADIUM']);
     expect(await p.locator('.tiers .deflist__row', { hasText: 'Reached' }).locator('.deflist__value').evaluateAll((els) => els.map((e) => e.firstChild?.textContent))).toEqual([
       'From 1 piece held',
       'From 5 pieces held',
@@ -2610,11 +2612,11 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await p.click('[data-testid=tier-edit-PLATINE]');
     expect(await p.locator('dialog textarea[name=benefits]').inputValue()).toBe(CLUB_TIER_DEFAULT_BENEFITS.PLATINE);
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Nothing has changed.');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('Nothing has changed.');
     await p.fill('dialog textarea[name=benefits]', 'Priority care for your pieces.\n\nA private viewing of each release.');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=tier-benefits-PLATINE] li').allTextContents()).toEqual(['Priority care for your pieces.', 'A private viewing of each release.']);
-    await expect.poll(() => p.locator('[data-testid=tier-words-PLATINE] .status__text').textContent()).toBe('Edited');
+    await expect.poll(() => p.locator('[data-testid=tier-benefits-PLATINE] li').allTextContents(), POLL).toEqual(['Priority care for your pieces.', 'A private viewing of each release.']);
+    await expect.poll(() => p.locator('[data-testid=tier-words-PLATINE] .status__text').textContent(), POLL).toBe('Edited');
     expect(await p.locator('[data-testid=tier-words-PLATINE] .cell-sub').textContent()).toMatch(/UTC$/);
     expect((await ctx.db.selectFrom('club_tiers').select(['tier', 'benefits']).execute())).toEqual([{ tier: 'PLATINE', benefits: 'Priority care for your pieces.\nA private viewing of each release.' }]);
     expect(await figuresInDisplayFace(p)).toEqual([]);
@@ -2622,7 +2624,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // Restored: the row goes, the words by default are back.
     await p.click('[data-testid=tier-restore-PLATINE]');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=tier-words-PLATINE]').textContent()).toBe('Default');
+    await expect.poll(() => p.locator('[data-testid=tier-words-PLATINE]').textContent(), POLL).toBe('Default');
     expect(await p.locator('[data-testid=tier-benefits-PLATINE] li').allTextContents()).toEqual(CLUB_TIER_DEFAULT_BENEFITS.PLATINE.split('\n').filter(Boolean));
     expect(await ctx.db.selectFrom('club_tiers').selectAll().execute()).toEqual([]);
     expect(await cspViolations(p)).toEqual([]);
@@ -2636,10 +2638,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
       await ctx.services.ownership.registerFirst(a.account.id, { registrationToken: scan.registration!.token, claimCode: owned.claimCode! }, { type: 'account', id: a.account.id });
     }
     await go(p, `#/owners/${a.account.id}`, 'tier.owner@example.com');
-    await expect.poll(() => p.locator('[data-testid=owner-tier]').textContent()).toBe('PLATINE · 5 pieces held');
+    await expect.poll(() => p.locator('[data-testid=owner-tier]').textContent(), POLL).toBe('PLATINE · 5 pieces held');
     // The Club block under the tier (plan NEXT-NINE, BP-19 T10): PLATINE's yearly care of the year, none asked for yet;
     // every piece since plan ORBES CARE, step 1.4 (PRIVATE CARE).
-    await expect.poll(() => p.locator('[data-testid=owner-club]').allTextContents()).toContainEqual(expect.stringMatching(/^\d{4}: 0 · every piece$/));
+    await expect.poll(() => p.locator('[data-testid=owner-club]').allTextContents(), POLL).toContainEqual(expect.stringMatching(/^\d{4}: 0 · every piece$/));
     expect(await figuresInDisplayFace(p)).toEqual([]);
     await shot(p, 'owner-club', { full: true, phone: true });
     await c.close();
@@ -2651,9 +2653,9 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const ap = await ac.newPage();
     await watch(ap);
     await signIn(ap, auditor.email, auditor.password);
-    await expect.poll(async () => (await title(ap).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(ap).textContent())?.trim(), POLL).toBe('Dashboard');
     await go(ap, '#/club?tab=tiers', 'Club');
-    await expect.poll(() => ap.locator('.tiers .panel:not(#tier-program) .panel__title').count()).toBe(3);
+    await expect.poll(() => ap.locator('.tiers .panel:not(#tier-program) .panel__title').count(), POLL).toBe(3);
     expect(await ap.locator('[data-testid^=tier-edit-], [data-testid^=tier-restore-]').count()).toBe(0);
     expect(await cspViolations(ap)).toEqual([]);
     await ac.close();
@@ -2664,10 +2666,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const p = await c.newPage();
     await watch(p);
     await signIn(p, ADMIN.email, ADMIN.password);
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dashboard');
     await go(p, '#/club?tab=tiers', 'Club');
     // THE PROGRAM first, above the three tiers, with the defaults.
-    await expect.poll(() => p.locator('.tiers .panel__title').allTextContents()).toEqual(['THE PROGRAM', 'TITANE', 'PLATINE', 'PALLADIUM']);
+    await expect.poll(() => p.locator('.tiers .panel__title').allTextContents(), POLL).toEqual(['THE PROGRAM', 'TITANE', 'PLATINE', 'PALLADIUM']);
     expect(await p.locator('[data-testid=program-early]').textContent()).toBe('PALLADIUM 4 hours · PLATINE 2 hours');
     expect(await p.locator('[data-testid=program-shipping]').textContent()).toBe('PLATINE Standard · PALLADIUM Express');
     // PRIVATE CARE (plan ORBES CARE): every piece from PLATINE; the warranty credit after the free replacement, 30 %.
@@ -2702,13 +2704,13 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.locator('dialog .cfield[data-field=warrantyCreditPercent] .cfield__hint').textContent()).toBe('The terms, article 11, state this rate: change them with it.');
     await p.fill('dialog input[name=warrantyCreditPercent]', '101');
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('The warranty credit is 1 to 100 % of the piece’s value.');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('The warranty credit is 1 to 100 % of the piece’s value.');
     await p.fill('dialog input[name=warrantyCreditPercent]', '30');
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Nothing has changed.');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('Nothing has changed.');
     await p.fill('dialog input[name=earlyAccessPalladiumHours]', '1');
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('PALLADIUM’s early access starts no later than PLATINE’s.');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('PALLADIUM’s early access starts no later than PLATINE’s.');
     // Saved: 6 hours and 3, the welcome gift of PALLADIUM, a credit of € 75 for PLATINE, express for PLATINE too.
     await p.fill('dialog input[name=earlyAccessPalladiumHours]', '6');
     await p.fill('dialog input[name=earlyAccessPlatineHours]', '3');
@@ -2718,7 +2720,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await p.selectOption('dialog select[name=giftPalladiumModelId]', modelId);
     await p.fill('dialog input[name=creditPlatine]', '75');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=program-early]').textContent()).toBe('PALLADIUM 6 hours · PLATINE 3 hours');
+    await expect.poll(() => p.locator('[data-testid=program-early]').textContent(), POLL).toBe('PALLADIUM 6 hours · PLATINE 3 hours');
     expect(await p.locator('[data-testid=program-shipping]').textContent()).toBe('PLATINE Express · PALLADIUM Express');
     expect(await p.locator('[data-testid=program-credit-platine]').textContent()).toBe('€\u00a075 · valid 12 months');
     expect(await p.locator('[data-testid=program-changed]').textContent()).toMatch(new RegExp(`^Changed by ${ADMIN.email.replace('.', '\\.')} on .+ UTC$`));
@@ -2736,12 +2738,12 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.locator('dialog input[name=birthdayDays]').inputValue()).toBe('30');
     await p.fill('dialog input[name=birthdayDays]', '366');
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('A birthday credit is valid 1 to 365 days.');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('A birthday credit is valid 1 to 365 days.');
     await p.fill('dialog input[name=birthdayDays]', '30');
     await p.locator('dialog label.ccheck', { hasText: 'Birthday credit given' }).click();
     expect(await p.locator('dialog input[name=birthdayOn]').isChecked()).toBe(false);
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=program-birthday]').textContent()).toBe('Off');
+    await expect.poll(() => p.locator('[data-testid=program-birthday]').textContent(), POLL).toBe('Off');
     expect(await ctx.db.selectFrom('club_program_settings').select(['birthday_credit_on', 'birthday_credit_minor', 'birthday_credit_days']).executeTakeFirstOrThrow()).toEqual({
       birthday_credit_on: false,
       birthday_credit_minor: 2000,
@@ -2759,9 +2761,9 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const op = await oc.newPage();
     await watch(op);
     await signIn(op, operator.email, operator.password);
-    await expect.poll(async () => (await title(op).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(op).textContent())?.trim(), POLL).toBe('Dashboard');
     await go(op, '#/club?tab=tiers', 'Club');
-    await expect.poll(() => op.locator('[data-testid=program-early]').textContent()).toBe('PALLADIUM 6 hours · PLATINE 3 hours');
+    await expect.poll(() => op.locator('[data-testid=program-early]').textContent(), POLL).toBe('PALLADIUM 6 hours · PLATINE 3 hours');
     expect(await op.locator('[data-testid=program-edit]').count()).toBe(0);
     expect(await op.locator('[data-testid^=tier-edit-]').count()).toBe(3);
     expect(await cspViolations(op)).toEqual([]);
@@ -2784,17 +2786,17 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const p = await c.newPage();
     await watch(p);
     await signIn(p, ADMIN.email, ADMIN.password);
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dashboard');
     // Its link in the sidebar, under Clients after Warranties.
     expect(await p.locator('.side__link[data-route=care]').textContent()).toBe('PRIVATE CARE');
     // The client's Messages row links the open request.
     await go(p, '#/messages', 'Messages');
-    await expect.poll(() => p.locator('[data-testid=conversation-care]').first().textContent()).toBe(`PRIVATE CARE · ${serial}`);
+    await expect.poll(() => p.locator('[data-testid=conversation-care]').first().textContent(), POLL).toBe(`PRIVATE CARE · ${serial}`);
     await p.click('[data-testid=conversation-care]');
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe(serial);
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe(serial);
     // The board: Requested first; the request's page with the address the client gave, in clear.
     await go(p, '#/care', 'PRIVATE CARE');
-    await expect.poll(() => p.locator('[data-testid=care-piece]').allTextContents()).toContain(serial);
+    await expect.poll(() => p.locator('[data-testid=care-piece]').allTextContents(), POLL).toContain(serial);
     await shot(p, 'yearly-care-board', { full: true, phone: true });
     await go(p, `#/care/${careId}`, serial);
     expect(await p.locator('[data-testid=care-status]').textContent()).toBe('Requested');
@@ -2806,15 +2808,15 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await p.selectOption('dialog select[name=carrierId]', carrier!);
     await p.fill('dialog input[name=tracking]', '6A12345678901');
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Choose the label, a PDF.');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('Choose the label, a PDF.');
     await p.setInputFiles('dialog [data-testid=care-label-file]', { name: 'label.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n%%EOF\n', 'latin1') });
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=care-status]').textContent()).toBe('Label sent');
+    await expect.poll(() => p.locator('[data-testid=care-status]').textContent(), POLL).toBe('Label sent');
     expect(await p.locator('[data-testid=care-label-shipment]').textContent()).toMatch(/ · 6A12345678901$/);
     // RECEIVED BY ORBES: the YEARLY_CARE record opened (PRIVATE CARE on screen).
     await p.click('[data-testid=care-receive]');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=care-status]').textContent()).toBe('With ORBES');
+    await expect.poll(() => p.locator('[data-testid=care-status]').textContent(), POLL).toBe('With ORBES');
     const record = await ctx.db.selectFrom('service_records as s').innerJoin('products as p', 'p.id', 's.product_id').select(['s.type', 's.status']).where('p.product_id', '=', serial).executeTakeFirstOrThrow();
     expect(record).toEqual({ type: 'YEARLY_CARE', status: 'OPEN' });
     // Nothing was written in the client's messages.
@@ -2830,7 +2832,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const ap = await ac.newPage();
     await watch(ap);
     await signIn(ap, auditor.email, auditor.password);
-    await expect.poll(async () => (await title(ap).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(ap).textContent())?.trim(), POLL).toBe('Dashboard');
     await go(ap, `#/care/${careId}`, serial);
     expect(await ap.locator('[data-testid=care-return-address]').innerText()).not.toContain('rue de la Paix');
     expect(await ap.locator('button[data-testid=care-label], button[data-testid=care-receive], button[data-testid=care-return], button[data-testid=care-complete], button[data-testid=care-cancel]').count()).toBe(0);
@@ -2845,7 +2847,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const p = await c.newPage();
     await watch(p);
     await signIn(p, auditor.email, auditor.password);
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dashboard');
     expect(await p.locator('.side__link', { hasText: 'Generator' }).count()).toBe(0);
     // Reads the points of sale, never sells (A-08): the sale mode starts warranties, which an AUDITOR cannot.
     expect(await p.locator('.side__link', { hasText: 'Points of sale' }).count()).toBe(1);
@@ -2859,7 +2861,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.locator('[data-testid=product-sheet] [data-row=signature]').textContent()).toContain('VALID');
     // Anomalies: the badge and every finding's detail, no decision.
     await go(p, '#/anomalies', 'Anomalies');
-    await expect.poll(() => p.locator('[data-testid=anomaly-badge] .side__badge-count').textContent()).toBe(String((await ctx.services.anomaly.summary()).attention));
+    await expect.poll(() => p.locator('[data-testid=anomaly-badge] .side__badge-count').textContent(), POLL).toBe(String((await ctx.services.anomaly.summary()).attention));
     expect(await p.locator('[data-testid=anomaly-details]').count()).toBeGreaterThan(0);
     expect(await p.locator('[data-testid=triage]').count()).toBe(0);
     await p.locator('[data-testid=anomaly-details]').first().click();
@@ -2869,27 +2871,27 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.locator('[data-testid=key-rotate]').count()).toBe(0);
     // Owners read with every email masked, without the recovery code reserved to an ADMIN (A-06).
     await go(p, '#/owners', 'Owners');
-    await expect.poll(() => p.locator('table.table tbody tr').count()).toBeGreaterThanOrEqual(2);
+    await expect.poll(() => p.locator('table.table tbody tr').count(), POLL).toBeGreaterThanOrEqual(2);
     expect(await p.locator('[data-testid=issue-recovery-code]').count()).toBe(0);
     for (const shown of await p.locator('[data-testid=owner-link]').allTextContents()) expect(shown).toMatch(/^[^@*]\*\*\*@[^@]+$/);
     expect(await p.locator('.page-head__lead').textContent()).toContain('Emails are masked for your role.');
     // The sheet reads, masked, without the lock, the export or the recovery code.
     await p.locator('table.table tbody tr', { hasText: 's***@example.com' }).locator('[data-testid=owner-link]').click();
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('s***@example.com');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('s***@example.com');
     expect(await p.locator('#pieces tbody tr').count()).toBe(1);
     for (const action of ['lock-account', 'unlock-account', 'export-account', 'issue-recovery-code']) expect(await p.locator(`[data-testid=${action}]`).count(), action).toBe(0);
     for (const email of ['sheet.client@example.com', 'lost.password@example.com']) expect(await p.content()).not.toContain(email);
     // The catalogue reads, without its edits (A-10); a model's Lookbook page reads too, without its edits (P-R02).
     await go(p, '#/catalogue', 'Catalogue');
-    await expect.poll(() => p.locator('#models tbody tr').count()).toBe(2);
+    await expect.poll(() => p.locator('#models tbody tr').count(), POLL).toBe(2);
     for (const action of ['edit-model', 'rename-collection', 'toggle-category', 'model-photo', 'discontinue-model', 'reinstate-model']) expect(await p.locator(`[data-testid=${action}]`).count(), action).toBe(0);
     await p.locator('#models tbody tr', { hasText: 'MNL-RG' }).locator('[data-testid=model-lookbook]').click();
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('MONOLITHE');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('MONOLITHE');
     await p.waitForSelector('[data-testid=story-shown]');
     for (const action of ['lookbook-edit', 'salon-edit', 'story-edit', 'specs-edit', 'gallery-add', 'gallery-earlier', 'gallery-alt', 'gallery-remove']) expect(await p.locator(`[data-testid=${action}]`).count(), action).toBe(0);
     // The Cases queue reads, without the action that closes a case.
     await go(p, '#/cases', 'Cases');
-    await expect.poll(() => p.locator('table.table tbody tr').count()).toBe(1);
+    await expect.poll(() => p.locator('table.table tbody tr').count(), POLL).toBe(1);
     expect(await p.locator('[data-testid=close-case]').count()).toBe(0);
     await go(p, '#/audit', 'Audit log');
     await p.click('[data-testid=audit-verify]');
@@ -2904,7 +2906,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const a = await adminContext.newPage();
     await watch(a);
     await signIn(a, ADMIN.email, ADMIN.password);
-    await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(a).textContent())?.trim(), POLL).toBe('Dashboard');
     for (const label of ['Points of sale', 'Sale mode']) expect(await a.locator('.side__link', { hasText: label }).count(), label).toBe(1);
 
     // A point of sale added from the console.
@@ -2914,7 +2916,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await a.fill('dialog input[name=city]', 'London');
     await a.fill('dialog input[name=country]', 'gb');
     await confirmDialog(a);
-    await expect.poll(() => a.locator('table.table tbody tr', { hasText: 'ORBES London — Mount Street' }).count()).toBe(1);
+    await expect.poll(() => a.locator('table.table tbody tr', { hasText: 'ORBES London — Mount Street' }).count(), POLL).toBe(1);
     await shot(a, 'retailers');
     const london = (await ctx.services.retailers.list()).find((r) => r.name === 'ORBES London — Mount Street')!;
     expect(london).toMatchObject({ city: 'London', country: 'GB', active: true });
@@ -2927,7 +2929,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await confirmDialog(a);
     const temporary = ((await a.locator('[data-testid=temporary-password]').textContent()) ?? '').trim();
     expect(temporary).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){3}$/);
-    await expect.poll(() => a.locator('[data-testid=admin-users] tr', { hasText: seller.email }).textContent()).toContain('RETAIL');
+    await expect.poll(() => a.locator('[data-testid=admin-users] tr', { hasText: seller.email }).textContent(), POLL).toContain('RETAIL');
 
     // The piece on the counter, filmed by the phone's camera (Chromium's fake device plays a hand-held clip).
     const piece = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId, material: '925 STERLING SILVER', year: 2026, variant: '54' }, SYSTEM_ACTOR);
@@ -2945,7 +2947,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
       for (const sel of ['input[name=email]', 'input[name=password]']) expect(await fontPx(sel), sel).toBeGreaterThanOrEqual(16);
       await signIn(p, seller.email, temporary);
       // The first sign-in: the new password, framed by the sale shell (no console sidebar).
-      await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('New password');
+      await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('New password');
       expect(await p.locator('[data-testid=sale-shell]').count()).toBe(1);
       expect(await p.locator('.side').count()).toBe(0);
       expect(await p.locator('[data-testid=change-password]').count()).toBe(0);
@@ -2956,7 +2958,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
       await p.fill('input[name=newPassword]', seller.password);
       await p.fill('input[name=confirmPassword]', seller.password);
       await p.click('[data-testid=password-save]');
-      await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Sale mode');
+      await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Sale mode');
       expect(await p.locator('.saleshell__role').textContent()).toBe('RETAIL');
       expect(await p.locator('[data-testid=to-console]').count()).toBe(0);
       expect(await p.locator('[data-testid=change-password]').count()).toBe(1);
@@ -2967,7 +2969,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
         await p.evaluate((h) => (location.hash = h), hash);
         await expect.poll(() => p.evaluate(() => location.hash), { timeout: 5_000 }).toBe('#/sale');
       }
-      await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Sale mode');
+      await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Sale mode');
       const refused = await p.evaluate(async () =>
         Promise.all(['/api/admin/products', '/api/admin/scans', '/api/admin/owners', '/api/admin/dashboard', '/api/admin/codes'].map(async (u) => (await fetch(u)).status)),
       );
@@ -3025,7 +3027,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
 
       // The point of sale stays chosen on this phone.
       await p.reload();
-      await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Sale mode');
+      await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Sale mode');
       expect(await p.inputValue('[data-testid=sale-retailer]')).toBe(london.id);
       expect(await cspViolations(p)).toEqual([]);
       await phone.close();
@@ -3035,13 +3037,13 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
 
     // The console names the seller on the scan.
     await go(a, `#/scans?productId=${piece.product.productId}`, 'Verification events');
-    await expect.poll(() => a.locator('[data-testid=scan-staff]').first().textContent()).toBe(`by ${seller.email}`);
+    await expect.poll(() => a.locator('[data-testid=scan-staff]').first().textContent(), POLL).toBe(`by ${seller.email}`);
     // An ADMIN opens the sale mode too, in the same phone-first shell, and comes back with CONSOLE.
     await a.locator('.side__link', { hasText: 'Sale mode' }).click();
-    await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Sale mode');
+    await expect.poll(async () => (await title(a).textContent())?.trim(), POLL).toBe('Sale mode');
     expect(await a.locator('.side').count()).toBe(0);
     await a.click('[data-testid=to-console]');
-    await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(a).textContent())?.trim(), POLL).toBe('Dashboard');
     expect(await cspViolations(a)).toEqual([]);
     await adminContext.close();
   }, STEP_TIMEOUT);
@@ -3051,7 +3053,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const p = await c.newPage();
     await watch(p);
     await signIn(p, ADMIN.email, ADMIN.password);
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dashboard');
     // A model of its own, Reserved in the lookbook.
     const category = (await ctx.categories.getByCode('J'))!;
     const solstice = await ctx.db.insertInto('models').values({ category_id: category.index, name: 'SOLSTICE', type: 'RING', sku_prefix: 'SOL-RG' }).returning('id').executeTakeFirstOrThrow();
@@ -3063,12 +3065,12 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await p.click('[data-testid=salon-edit]');
     expect(await p.locator('dialog [data-testid=salon-impact]').textContent()).toMatch(/in the private salon now\.$/);
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Nothing has changed.');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('Nothing has changed.');
     await p.fill('dialog input[name=priceLabel]', '  €   4 800 ');
     await p.selectOption('dialog select[name=minTier]', '2');
     await confirmDialog(p);
     await p.waitForSelector('.toast:has-text("Private salon saved.")');
-    await expect.poll(() => p.locator('[data-testid=salon-price]').textContent()).toBe('€ 4 800');
+    await expect.poll(() => p.locator('[data-testid=salon-price]').textContent(), POLL).toBe('€ 4 800');
     expect(await p.locator('[data-testid=salon-tier]').textContent()).toBe('PLATINE');
     expect(await ctx.db.selectFrom('models').select(['price_label', 'private_min_tier']).where('id', '=', solstice.id).executeTakeFirstOrThrow()).toEqual({ price_label: '€ 4 800', private_min_tier: 2 });
     expect(await figuresInDisplayFace(p)).toEqual([]);
@@ -3091,17 +3093,17 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.locator('dialog [data-testid=size-type-live]').allTextContents()).toEqual(['Then tick its sizes.']);
     await confirmDialog(p);
     await p.waitForSelector('.toast:has-text("Sizes saved.")');
-    await expect.poll(() => p.locator('#sizes [data-testid=model-size-kind]').textContent()).toBe('Ring size · French sizes 40 to 76');
+    await expect.poll(() => p.locator('#sizes [data-testid=model-size-kind]').textContent(), POLL).toBe('Ring size · French sizes 40 to 76');
     await p.locator('#sizes [data-testid=model-size-edit]').nth(1).click();
     expect(await p.locator('dialog .cfield__hint').first().textContent()).toContain('Empty: the size’s label itself is read, for example 52 or 17.5 CM.');
     await p.fill('dialog input[name=fitFrom]', '55');
     await p.fill('dialog input[name=fitTo]', '53');
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Fits from is at most Fits to.');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('Fits from is at most Fits to.');
     await p.fill('dialog input[name=fitFrom]', '53');
     await p.fill('dialog input[name=fitTo]', '55');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('#sizes [data-testid=model-size-fits]').allTextContents()).toEqual(['By its label (52)', '53 to 55']);
+    await expect.poll(() => p.locator('#sizes [data-testid=model-size-fits]').allTextContents(), POLL).toEqual(['By its label (52)', '53 to 55']);
     expect(await ctx.db.selectFrom('skus').select(['size_label', 'fit_min_mm', 'fit_max_mm']).where('model_id', '=', solstice.id).orderBy('size_label').execute()).toEqual([
       { size_label: '52', fit_min_mm: null, fit_max_mm: null },
       { size_label: '54', fit_min_mm: 53, fit_max_mm: 55 },
@@ -3122,10 +3124,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // The Club's Requests tab: the open request, its client (in clear for an ADMIN), its model and price, its note.
     await go(p, '#/club', 'Club');
     await p.click('[data-testid=club-tab-requests]');
-    await expect.poll(() => p.locator('[data-testid=club-tab-requests]').getAttribute('aria-current')).toBe('page');
+    await expect.poll(() => p.locator('[data-testid=club-tab-requests]').getAttribute('aria-current'), POLL).toBe('page');
     expect(await p.evaluate(() => location.hash)).toBe('#/club?tab=requests');
     const row = p.locator('#requests tbody tr', { hasText: 'vesper.owner@example.com' });
-    await expect.poll(() => row.count()).toBe(1);
+    await expect.poll(() => row.count(), POLL).toBe(1);
     expect(await row.locator('[data-testid=request-model]').textContent()).toBe('SOLSTICE');
     expect(await row.locator('.cell-sub').first().textContent()).toBe('RING · € 4 800');
     expect(await row.locator('[data-testid=request-note]').textContent()).toBe('A size 54, and a call after six.');
@@ -3141,10 +3143,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.locator('dialog [data-testid=request-order-size]').count()).toBe(0);
     await p.selectOption('dialog select[name=outcome]', 'ACCEPTED');
     // AC-01: ACCEPTED, its order takes the size asked.
-    await expect.poll(() => p.locator('dialog [data-testid=request-order-size]').textContent()).toBe('The order takes size 54.');
+    await expect.poll(() => p.locator('dialog [data-testid=request-order-size]').textContent(), POLL).toBe('The order takes size 54.');
     await confirmDialog(p);
     await p.waitForSelector('.toast:has-text("Request closed.")');
-    await expect.poll(() => row.locator('.status__text').textContent()).toBe('CLOSED');
+    await expect.poll(() => row.locator('.status__text').textContent(), POLL).toBe('CLOSED');
     expect(await row.locator('[data-testid=request-outcome]').textContent()).toMatch(/^ACCEPTED · /);
     expect(await row.locator('.cell-details').last().textContent()).toBe('Called the client: a fitting on Tuesday.');
     expect(await row.locator('[data-testid=close-request]').count()).toBe(0);
@@ -3154,8 +3156,8 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await ctx.db.selectFrom('orders').select(['channel', 'status', 'size_label']).where('account_id', '=', a.account.id).execute()).toEqual([{ channel: 'SALON', status: 'RESERVED', size_label: '54' }]);
     // Narrowed to the open requests: none is left.
     await p.selectOption('#requests select[name=status]', 'OPEN');
-    await expect.poll(() => p.evaluate(() => location.hash)).toBe('#/club?tab=requests&status=OPEN');
-    await expect.poll(() => p.locator('#requests tbody tr', { hasText: 'vesper.owner@example.com' }).count()).toBe(0);
+    await expect.poll(() => p.evaluate(() => location.hash), POLL).toBe('#/club?tab=requests&status=OPEN');
+    await expect.poll(() => p.locator('#requests tbody tr', { hasText: 'vesper.owner@example.com' }).count(), POLL).toBe(0);
     expect(await cspViolations(p)).toEqual([]);
     await c.close();
 
@@ -3167,13 +3169,13 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const ap = await ac.newPage();
     await watch(ap);
     await signIn(ap, auditor.email, auditor.password);
-    await expect.poll(async () => (await title(ap).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(ap).textContent())?.trim(), POLL).toBe('Dashboard');
     await go(ap, '#/club?tab=requests&status=OPEN', 'Club');
-    await expect.poll(() => ap.locator('#requests [data-testid=request-client]').allTextContents()).toEqual(['v***@example.com']);
+    await expect.poll(() => ap.locator('#requests [data-testid=request-client]').allTextContents(), POLL).toEqual(['v***@example.com']);
     expect(await ap.locator('[data-testid=close-request]').count()).toBe(0);
     expect(await ap.locator('#requests [data-testid=request-size]').allTextContents()).toEqual(['Not given']);
     await go(ap, `#/catalogue/${solstice.id}`, 'SOLSTICE');
-    await expect.poll(() => ap.locator('[data-testid=salon-price]').textContent()).toBe('€ 4 800');
+    await expect.poll(() => ap.locator('[data-testid=salon-price]').textContent(), POLL).toBe('€ 4 800');
     expect(await ap.locator('[data-testid=salon-edit]').count()).toBe(0);
     // Its Sizes read, without an edit.
     expect(await ap.locator('#sizes [data-testid=model-size-fits]').allTextContents()).toEqual(['By its label (52)', '53 to 55']);
@@ -3187,14 +3189,14 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const p = await c.newPage();
     await watch(p);
     await signIn(p, ADMIN.email, ADMIN.password);
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dashboard');
     // A model of its own, with what ADD A VARIANT copies.
     // Created with its size type, as every model is since plan NEXT LOT §3.3: its variant copies it.
     const main = await ctx.services.catalog.createModel({ categoryCode: 'J', name: 'CONSTELLATION', type: 'PENDANT', skuPrefix: 'CST-PD', careInstructions: 'Wipe it with a soft, dry cloth.', sizeType: 'ONE_SIZE' }, SYSTEM_ACTOR);
     await ctx.services.catalog.updateModel(main.id, { story: 'Seven stones, as the stars of the north.', specs: 'Metal: 18k white gold' }, SYSTEM_ACTOR);
     await go(p, `#/catalogue/${main.id}`, 'CONSTELLATION');
     const section = p.locator('#variants');
-    await expect.poll(() => section.locator('[data-testid=variant-own]').textContent()).toBe('None');
+    await expect.poll(() => section.locator('[data-testid=variant-own]').textContent(), POLL).toBe('None');
     expect(await section.locator('[data-testid=variant-list]').textContent()).toContain('No variant yet.');
     // ADD A VARIANT: the main model's own dot first (it has none yet), then the variant's; refused while a label is missing.
     await p.click('[data-testid=variant-add]');
@@ -3203,21 +3205,21 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.locator('dialog [data-testid=variant-sizes]').textContent()).toBe('Its one size is copied.');
     expect(await p.locator('dialog select[name=sizeType]').count()).toBe(0);
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Complete the required fields.');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('Complete the required fields.');
     await p.fill('dialog input[name=mainLabel]', 'Silver');
     await p.fill('dialog input[name=mainSwatch]', '#d7d5d0');
     // A label of the group is another dot's: said before anything is sent.
     await p.fill('dialog input[name=label]', 'silver');
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('This model or another of its variants already has this label.');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('This model or another of its variants already has this label.');
     await p.fill('dialog input[name=label]', 'Night blue');
     await p.fill('dialog input[name=swatch]', '#16224a');
     // The SKU prefix proposed from the main model's and the label, sent when the field is left empty.
-    await expect.poll(() => p.locator('dialog [data-testid=variant-prefix]').textContent()).toBe('SKU prefix: CST-NI');
+    await expect.poll(() => p.locator('dialog [data-testid=variant-prefix]').textContent(), POLL).toBe('SKU prefix: CST-NI');
     await p.click('[data-testid=dialog-confirm]');
     // Its photographs next: the reference photograph's dialog opens on the variant created (left for later here), then its own page.
     await p.waitForSelector('dialog [data-testid=photo-impact]', { timeout: 15_000 });
-    await expect.poll(() => p.locator('dialog .dialog__eyebrow').textContent()).toBe('CONSTELLATION · CST-NI');
+    await expect.poll(() => p.locator('dialog .dialog__eyebrow').textContent(), POLL).toBe('CONSTELLATION · CST-NI');
     await p.click('[data-testid=dialog-cancel]');
     await expect.poll(async () => (await title(p).textContent())?.trim(), { timeout: 15_000 }).toBe('CONSTELLATION · NIGHT BLUE');
     const variant = await ctx.db.selectFrom('models').selectAll().where('variant_of', '=', main.id).executeTakeFirstOrThrow();
@@ -3232,7 +3234,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     ]);
     expect(new URL(p.url()).hash).toBe(`#/catalogue/${variant.id}`);
     // A variant's page names its main model; it adds no variant of its own.
-    await expect.poll(() => p.locator('[data-testid=variant-main]').textContent()).toBe('CONSTELLATION · SILVER');
+    await expect.poll(() => p.locator('[data-testid=variant-main]').textContent(), POLL).toBe('CONSTELLATION · SILVER');
     expect(await p.locator('[data-testid=variant-own]').textContent()).toBe('Night blue · #16224A');
     expect(await p.locator('[data-testid=variant-add]').count()).toBe(0);
     // Its main model's page lists it, with its dot; the main model's own dot given.
@@ -3256,7 +3258,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     ]);
     await shot(p, 'product-variant-line', { full: true });
     await go(p, `#/products?q=${inBlue.product.productId}`, 'Products');
-    await expect.poll(() => p.locator('table.table tbody tr').count()).toBe(1);
+    await expect.poll(() => p.locator('table.table tbody tr').count(), POLL).toBe(1);
     expect(await p.locator('table.table tbody tr td').nth(1).locator('.cell-sub').allTextContents()).toEqual(['NIGHT BLUE', 'PENDANT']);
     await shot(p, 'products-variant-line');
     // A piece of a model without a label shows neither.
@@ -3288,7 +3290,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const p = await c.newPage();
     await watch(p);
     await signIn(p, ADMIN.email, ADMIN.password);
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dashboard');
     // Overview: Dashboard, Growth, …; the ADMIN's sidebar with Growth, Messages and PRIVATE CARE still fits 1 440 × 900.
     const overview = p.locator('.side__group', { hasText: 'Overview' }).locator('.side__link');
     expect(await overview.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['dashboard', 'growth', 'generator', 'documents']);
@@ -3303,7 +3305,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
       expect(box.y + box.height, id).toBeLessThanOrEqual(900);
     }
     await p.click('.side__link[data-route=growth]');
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Growth');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Growth');
     expect(await p.locator('.side__link.is-active').textContent()).toBe('Growth');
     expect(await p.locator('.page-head__eyebrow').textContent()).toBe('Overview');
     expect(await p.locator('.page-head__lead').textContent()).toBe(
@@ -3344,14 +3346,14 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
 
     // The window's tabs and the breakdowns' tabs are links.
     await p.click('[data-testid=growth-window-24]');
-    await expect.poll(() => p.locator('[data-testid=growth-window-24]').getAttribute('aria-current')).toBe('page');
+    await expect.poll(() => p.locator('[data-testid=growth-window-24]').getAttribute('aria-current'), POLL).toBe('page');
     expect(await p.evaluate(() => location.hash)).toBe('#/growth?months=24&ltv=tier&rev=channel');
-    await expect.poll(() => p.locator('#growth-funnel tbody tr').count()).toBe(24);
+    await expect.poll(() => p.locator('#growth-funnel tbody tr').count(), POLL).toBe(24);
     await p.click('[data-testid=growth-ltv-country]');
-    await expect.poll(() => p.locator('[data-testid=growth-ltv-groups] thead th').first().textContent()).toBe('Country');
+    await expect.poll(() => p.locator('[data-testid=growth-ltv-groups] thead th').first().textContent(), POLL).toBe('Country');
     expect(await p.locator('[data-testid=growth-ltv-groups] tbody td:first-child').allTextContents()).toContain('Not given');
     await p.click('[data-testid=growth-rev-model]');
-    await expect.poll(() => p.locator('[data-testid=growth-revenue-groups] thead th').first().textContent()).toBe('Model');
+    await expect.poll(() => p.locator('[data-testid=growth-revenue-groups] thead th').first().textContent(), POLL).toBe('Model');
     expect(await p.evaluate(() => location.hash)).toBe('#/growth?months=24&ltv=country&rev=model');
 
     // COLLECTORS BY VALUE: 25 a page, Next and Previous; a row opens the client sheet.
@@ -3362,12 +3364,12 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.locator('[data-testid=growth-collectors-range]').textContent()).toBe(`1–25 of ${collectors.total}`);
     expect(await p.locator('[data-testid=growth-collectors-previous]').isDisabled()).toBe(true);
     await p.click('[data-testid=growth-collectors-next]');
-    await expect.poll(() => p.locator('[data-testid=growth-collectors-range]').textContent()).toBe(`26–${collectors.total} of ${collectors.total}`);
+    await expect.poll(() => p.locator('[data-testid=growth-collectors-range]').textContent(), POLL).toBe(`26–${collectors.total} of ${collectors.total}`);
     expect(await p.evaluate(() => location.hash)).toContain('page=2');
     await p.click('[data-testid=growth-collectors-previous]');
-    await expect.poll(() => p.locator('[data-testid=growth-collectors-range]').textContent()).toBe(`1–25 of ${collectors.total}`);
+    await expect.poll(() => p.locator('[data-testid=growth-collectors-range]').textContent(), POLL).toBe(`1–25 of ${collectors.total}`);
     await p.locator('[data-testid=growth-collector]').first().click();
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe(collectors.items[0]!.email);
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe(collectors.items[0]!.email);
     // The client sheet's Lifetime value, as GROWTH counts it.
     expect((await p.locator('[data-testid=owner-lifetime-value]').textContent())!.replace(/ /g, ' ')).toBe(
       (await ctx.services.growth.collectorValue(collectors.items[0]!.accountId)).map((v) => `€ ${String(v.valueMinor / 100).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}`).join(' · '),
@@ -3376,7 +3378,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // The console's own figures, each linking to its detailed page.
     await go(p, '#/growth', 'Growth');
     const elsewhere = p.locator('[data-testid=growth-elsewhere]');
-    await expect.poll(() => elsewhere.locator('.panel--growth-releases tbody tr').count()).toBe(Math.min(6, (await ctx.services.growth.releases()).length));
+    await expect.poll(() => elsewhere.locator('.panel--growth-releases tbody tr').count(), POLL).toBe(Math.min(6, (await ctx.services.growth.releases()).length));
     expect(await elsewhere.locator('.panel--growth-scans .panel__tools a').getAttribute('href')).toBe('#/analytics?days=30');
     expect(await elsewhere.locator('.panel--growth-circle .panel__tools a').getAttribute('href')).toBe('#/analytics');
     expect(await elsewhere.locator('.panel--growth-releases .panel__tools a').getAttribute('href')).toBe('#/club?tab=drops');
@@ -3389,7 +3391,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // One panel that fails says so; the rest of the page stands.
     await p.route('**/api/admin/growth/releases', (r) => r.fulfill({ status: 500, contentType: 'application/json', body: '{"error":{"code":"INTERNAL","message":"x"}}' }));
     await p.evaluate(() => (location.hash = '#/growth?months=12'));
-    await expect.poll(() => elsewhere.locator('.panel--growth-releases .empty__text').textContent()).toBe('This figure could not be read. The rest of the page is current.');
+    await expect.poll(() => elsewhere.locator('.panel--growth-releases .empty__text').textContent(), POLL).toBe('This figure could not be read. The rest of the page is current.');
     expect(await p.locator('[data-testid=growth-collectors] tbody tr').count()).toBe(25);
     expect(await elsewhere.locator('.panel--growth-scans .growth__failed').count()).toBe(0);
     await p.unroute('**/api/admin/growth/releases');
@@ -3398,7 +3400,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await p.setViewportSize({ width: 390, height: 844 });
     try {
       await go(p, '#/growth?months=24', 'Growth');
-      await expect.poll(() => p.locator('[data-testid=growth-collectors] tbody tr').count()).toBe(25);
+      await expect.poll(() => p.locator('[data-testid=growth-collectors] tbody tr').count(), POLL).toBe(25);
       expect(await p.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
       await shot(p, 'growth-phone', { full: true });
     } finally {
@@ -3414,10 +3416,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const auditor = { email: 'growth-audit@orbes.test', password: 'growth auditor passphrase 2026' };
     await ctx.services.auth.createAdmin({ ...auditor, role: 'AUDITOR' }, SYSTEM_ACTOR);
     await signIn(ap, auditor.email, auditor.password);
-    await expect.poll(async () => (await title(ap).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(ap).textContent())?.trim(), POLL).toBe('Dashboard');
     expect(await ap.locator('.side__link[data-route=growth]').count()).toBe(1);
     await go(ap, '#/growth', 'Growth');
-    await expect.poll(() => ap.locator('[data-testid=growth-collector]').count()).toBe(25);
+    await expect.poll(() => ap.locator('[data-testid=growth-collector]').count(), POLL).toBe(25);
     for (const shown of await ap.locator('[data-testid=growth-collector]').allTextContents()) expect(shown).toMatch(/^[^@*]\*\*\*@[^@]+$/);
     expect(await ap.content()).not.toContain(collectors.items[0]!.email);
     expect(await cspViolations(ap)).toEqual([]);
@@ -3430,10 +3432,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const rp = await rc.newPage();
     await watch(rp);
     await signIn(rp, seller.email, seller.password);
-    await expect.poll(async () => (await title(rp).textContent())?.trim()).toBe('Sale mode');
+    await expect.poll(async () => (await title(rp).textContent())?.trim(), POLL).toBe('Sale mode');
     expect(await rp.locator('.side__link[data-route=growth]').count()).toBe(0);
     await rp.evaluate(() => (location.hash = '#/growth'));
-    await expect.poll(async () => (await title(rp).textContent())?.trim()).toBe('Sale mode');
+    await expect.poll(async () => (await title(rp).textContent())?.trim(), POLL).toBe('Sale mode');
     expect(await rp.locator('.view--growth').count()).toBe(0);
     await rc.close();
   }, STEP_TIMEOUT);
@@ -3464,7 +3466,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await page.locator('dialog .cfield__hint').first().textContent()).toBe('Kept in the audit log. For example: card lost at the warehouse, card damaged.');
     expect((await page.locator('[data-testid=dialog-confirm]').textContent())?.trim()).toBe('Make a new claim code');
     await page.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => page.locator('dialog .dialog__error').textContent()).toBe('Complete the required fields.');
+    await expect.poll(() => page.locator('dialog .dialog__error').textContent(), POLL).toBe('Complete the required fields.');
     await page.fill('dialog textarea[name=reason]', 'Card damaged at the warehouse.');
     await page.click('[data-testid=dialog-confirm]');
     // Shown once, with its card to print (the dialog a return uses, its own words).
@@ -3479,7 +3481,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(readFileSync((await card.path())!).subarray(0, 5).toString()).toBe('%PDF-');
     await shot(page, 'claim-code-in-stock');
     await confirmDialog(page);
-    await expect.poll(() => sectionOf(page).locator('tbody tr').count()).toBe(1);
+    await expect.poll(() => sectionOf(page).locator('tbody tr').count(), POLL).toBe(1);
     expect(await sectionOf(page).locator('tbody tr').first().textContent()).toMatch(/Staff · in stock\s*Shown once to staff\s*Card damaged at the warehouse\./);
     expect(await page.locator('body').textContent()).not.toContain(code);
 
@@ -3517,13 +3519,13 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
       await confirmDialog(page);
       await page.waitForSelector(`.toast:has-text("New claim code made. It waits for the buyer on order ${ref}.")`);
       expect(await page.locator('dialog [data-testid=claim-code]').count()).toBe(0);
-      await expect.poll(() => sectionOf(page).locator('tbody tr').count()).toBe(1);
+      await expect.poll(() => sectionOf(page).locator('tbody tr').count(), POLL).toBe(1);
       expect(await sectionOf(page).locator('tbody tr').first().textContent()).toContain(`Buyer · order ${ref}`);
       expect(await sectionOf(page).locator('tbody tr').first().textContent()).toContain('Waiting for the buyer');
       if (SCREENSHOTS) await sectionOf(page).screenshot({ path: join(OUT_DIR, 'admin-claim-code-section.png') });
       // The order page's row, for Client Services answering the buyer.
       await go(page, `#/orders/${orderId}`, ref);
-      await expect.poll(() => page.locator('[data-testid=order-claim-code]').textContent()).toBe('WAITING FOR THE BUYER');
+      await expect.poll(() => page.locator('[data-testid=order-claim-code]').textContent(), POLL).toBe('WAITING FOR THE BUYER');
       expect(await page.locator('#order-piece').textContent()).toMatch(/New code made \d{2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC/);
       if (SCREENSHOTS) await page.locator('#order-piece').screenshot({ path: join(OUT_DIR, 'admin-claim-code-order.png') });
       // The code, read from its sealed copy here only: in no DOM and no answer the console received.
@@ -3583,7 +3585,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const p = await c.newPage();
     await watch(p);
     await signIn(p, ADMIN.email, ADMIN.password);
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dashboard');
     // Under its Sizes: per size, the owner's sentence; 54 is covered, 52 waits, with Add to supplier order.
     await go(p, `#/club/drops/${short.id}`, 'HALO — release in sizes');
     const stock = p.locator('#sizes [data-testid=drop-stock]');
@@ -3610,7 +3612,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.locator('dialog [data-testid=drop-feasibility-warning]').allTextContents()).toEqual(['52: 0 in stock, 2 will wait for supplier stock. Already ordered: 2 in a draft.']);
     await shot(p, 'club-drop-publish-stock');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=drop-state]').textContent()).toBe('UPCOMING');
+    await expect.poll(() => p.locator('[data-testid=drop-state]').textContent(), POLL).toBe('UPCOMING');
 
     // A draw the stock covers: every piece on sale is in stock, no size listed, no Add to supplier order.
     await go(p, `#/club/drops/${covered.id}`, 'HALO — release in stock');
@@ -3647,11 +3649,11 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const p = await c.newPage();
     await watch(p);
     await signIn(p, ADMIN.email, ADMIN.password);
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dashboard');
     // The sidebar's WORN, under House messages, counts the photograph to review.
     await expect.poll(() => p.locator('[data-testid=worn-badge] .side__badge-count').textContent(), { timeout: 15_000 }).toBe('1');
     await p.click('.side__link[data-route=worn]');
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('WORN');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('WORN');
     expect(await p.locator('[data-testid=worn-tab-review]').getAttribute('aria-current')).toBe('page');
     const card = p.locator(`[data-testid=worn-card][data-id="${photoId}"]`);
     await card.waitFor();
@@ -3670,7 +3672,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await card.locator('[data-testid=worn-publish]').click();
     await p.waitForSelector('.toast:has-text("Published: it is on the model’s sheet.")');
     await expect.poll(() => p.locator('[data-testid=worn-empty]').textContent(), { timeout: 15_000 }).toBe('Nothing to review.');
-    await expect.poll(() => p.locator('[data-testid=worn-badge]').isHidden()).toBe(true);
+    await expect.poll(() => p.locator('[data-testid=worn-badge]').isHidden(), POLL).toBe(true);
     // The sheet's public route lists it with its credit, and serves its photograph to everyone.
     const sheet = (await (await fetch(`${origin}/api/v1/lookbook/orbit-cuff/worn`)).json()) as { photos: { id: string; url: string; credit: unknown }[]; total: number };
     expect(sheet.total).toBe(1);
@@ -3680,7 +3682,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await go(p, `#/catalogue/${worn}`, 'ORBIT CUFF');
     expect(await p.locator('[data-testid=lookbook-worn]').textContent()).toBe('1 published');
     await p.click('[data-testid=lookbook-worn]');
-    await expect.poll(() => p.locator('[data-testid=worn-tab-published]').getAttribute('aria-current')).toBe('page');
+    await expect.poll(() => p.locator('[data-testid=worn-tab-published]').getAttribute('aria-current'), POLL).toBe('page');
     expect(await p.locator('[data-testid=worn-filter-model]').inputValue()).toBe(worn);
     expect(await p.locator('[data-testid=worn-tile]').evaluateAll((tiles) => tiles.map((t) => (t as HTMLElement).dataset.id))).toEqual([photoId]);
     expect(await p.locator('[data-testid=worn-take-down]').count()).toBe(1);
@@ -3717,7 +3719,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const p = await c.newPage();
     await watch(p);
     await signIn(p, ADMIN.email, ADMIN.password);
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dashboard');
 
     // Catalogue → Add-ons, after Models: empty, then New add-on with its SKU code and a price in EUR.
     await go(p, '#/catalogue', 'Catalogue');
@@ -3731,7 +3733,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await confirmDialog(p);
     await p.waitForSelector('.toast:has-text("Add-on added.")');
     const row = p.locator('#addons tbody tr');
-    await expect.poll(() => row.count()).toBe(1);
+    await expect.poll(() => row.count(), POLL).toBe(1);
     expect(await p.locator('#addons thead th').allTextContents()).toEqual(['Add-on', 'Prices', 'Supplier', 'Weight', 'Available · minimum', 'Status · Shopify', '']);
     expect(await row.locator('[data-testid=addon-sku]').textContent()).toBe('ADD-CLOTH');
     expect(await row.locator('[data-testid=addon-prices]').textContent()).toBe('€ 15');
@@ -3744,7 +3746,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // Logistics → Stock: the ADD-ONS group; Correct counts five in at the default location.
     await go(p, `#/logistics?tab=stock&locationId=${france}`, 'Logistics');
     const stockRow = p.locator('#logistics-addons tbody tr');
-    await expect.poll(() => stockRow.count()).toBe(1);
+    await expect.poll(() => stockRow.count(), POLL).toBe(1);
     expect(await stockRow.locator('[data-testid=stock-addon]').textContent()).toBe('POLISHING CLOTHADD-CLOTH');
     expect(await p.locator('#logistics-stock [data-testid=stock-addon]').count()).toBe(0);
     await stockRow.locator('[data-testid=stock-correct]').click();
@@ -3816,7 +3818,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const p = await c.newPage();
     await watch(p);
     await signIn(p, ADMIN.email, ADMIN.password);
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dashboard');
 
     // Catalogue → Sets, after Add-ons: empty, then New set with its two pieces in order and its price.
     await go(p, '#/catalogue', 'Catalogue');
@@ -3829,13 +3831,13 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // One model twice is refused before anything is sent.
     await p.selectOption('dialog select[name=piece2]', halo);
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Each model is in a set once.');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('Each model is in a set once.');
     await p.selectOption('dialog select[name=piece2]', linea);
     await p.fill('dialog input[name=price]', '4200');
     await confirmDialog(p);
     await p.waitForSelector('.toast:has-text("Set added.")');
     const row = p.locator('#sets tbody tr');
-    await expect.poll(() => row.count()).toBe(1);
+    await expect.poll(() => row.count(), POLL).toBe(1);
     expect(await row.locator('[data-testid=set-name]').textContent()).toBe('AURA');
     expect(await row.locator('[data-testid=set-code]').textContent()).toBe('AURA');
     expect(await row.locator('[data-testid=set-pieces] .addon-lines__line').allTextContents()).toEqual(['1 · HALO · RING', '2 · LINEA · NECKLACE']);
@@ -3862,10 +3864,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await p.fill('dialog input[name="piece:1:52"]', '2');
     await p.fill('dialog input[name="piece:1:54"]', '1');
     await p.fill('dialog input[name="piece:2:ONE SIZE"]', '2');
-    await expect.poll(() => p.locator('dialog [data-testid=draw-sets-on-sale]').textContent()).toBe('Sets on sale: 2');
+    await expect.poll(() => p.locator('dialog [data-testid=draw-sets-on-sale]').textContent(), POLL).toBe('Sets on sale: 2');
     expect(await p.locator('dialog [data-testid=draw-sets-uneven]').textContent()).toBe('Each piece’s sizes add up to the same sets before the draw is published: HALO 3 · LINEA 2.');
     await p.fill('dialog input[name="piece:2:ONE SIZE"]', '3');
-    await expect.poll(() => p.locator('dialog [data-testid=draw-sets-on-sale]').textContent()).toBe('Sets on sale: 3');
+    await expect.poll(() => p.locator('dialog [data-testid=draw-sets-on-sale]').textContent(), POLL).toBe('Sets on sale: 3');
     expect(await p.locator('dialog [data-testid=draw-sets-uneven]').count()).toBe(0);
     const local = (d: Date) => d.toISOString().slice(0, 16);
     await p.fill('dialog input[name=opensAt]', local(new Date(Date.now() + 86_400_000)));
@@ -3876,11 +3878,11 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await p.fill('dialog input[name=price]', '4200');
     await shot(p, 'club-set-drop-new', { dialog: true });
     await confirmDialog(p);
-    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('AURA — the set');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('AURA — the set');
     const dropId = decodeURIComponent(new URL(p.url()).hash.split('/').pop()!);
 
     // Its page: the set and its pieces, its sets, its sizes named by their piece, its price the set's.
-    await expect.poll(() => p.locator('[data-testid=drop-set]').textContent()).toBe('THE SET AURA');
+    await expect.poll(() => p.locator('[data-testid=drop-set]').textContent(), POLL).toBe('THE SET AURA');
     expect(await p.locator('[data-testid=drop-set-pieces]').textContent()).toBe('HALO, LINEA');
     expect(await p.locator('[data-testid=drop-sets]').textContent()).toBe('3');
     expect(await p.locator('[data-testid=drop-price]').textContent()).toBe('€\u00a04\u00a0200 for the set');
@@ -3899,7 +3901,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await p.click('[data-testid=drop-publish]');
     await confirmDialog(p);
     await p.waitForSelector('.toast:has-text("Release published.")');
-    await expect.poll(() => p.locator('[data-testid=drop-state]').textContent()).toBe('UPCOMING');
+    await expect.poll(() => p.locator('[data-testid=drop-state]').textContent(), POLL).toBe('UPCOMING');
     expect(await p.locator('[data-testid=drop-access]').textContent()).toBe('Segment Set collectors');
     await shot(p, 'set-drop', { full: true, phone: true });
     await go(p, '#/club?tab=drops', 'Club');
