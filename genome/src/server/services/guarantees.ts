@@ -43,6 +43,7 @@ import { conflict, DomainError, forbidden, notFound, validationError } from '../
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
 import { customerAccountLocked } from './auth.js';
+import { withLiveChanges, type LiveChanges, type LiveFrameGate } from './live-frames.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -353,9 +354,11 @@ export async function sizeServesGuarantee(tx: Db, dropId: string, sizeId: string
  * Bind a guarantee just set aside to its account's entry in that release, when one is waiting (a draw's ENTERED, a LIVE
  * WAITING or QUEUED). A LIVE entry, and a draw's entry in a size (plan NEXT LOT §3.6.F), is bound only when its size
  * can still serve the guarantee (sizeServesGuarantee); otherwise it stays an ordinary entry, the guarantee set aside and
- * unused, and a CHANGE SIZE checks again.
+ * unused, and a CHANGE SIZE checks again. A QUEUED entry bound moves ahead in the turns (the guarantee first): the
+ * release's next batch waits for a frame read after it (`changes`, live-frames.ts; the release's row is held FOR UPDATE
+ * by the caller, coverNextRelease or the grant).
  */
-async function bindWaitingEntry(tx: Db, g: { id: string; account_id: string; pieces: number }, d: Pick<DropRow, 'id' | 'mode'>): Promise<string | null> {
+async function bindWaitingEntry(tx: Db, g: { id: string; account_id: string; pieces: number }, d: Pick<DropRow, 'id' | 'mode'>, changes?: LiveChanges): Promise<string | null> {
   if (d.mode === 'DRAW') {
     const waiting = await tx
       .selectFrom('drop_entries')
@@ -380,7 +383,7 @@ async function bindWaitingEntry(tx: Db, g: { id: string; account_id: string; pie
   }
   const waiting = await tx
     .selectFrom('live_entries')
-    .select(['id', 'size_id', 'quantity'])
+    .select(['id', 'size_id', 'quantity', 'status'])
     .where('drop_id', '=', d.id)
     .where('account_id', '=', g.account_id)
     .where('status', 'in', [...LIVE_WAITING])
@@ -394,8 +397,9 @@ async function bindWaitingEntry(tx: Db, g: { id: string; account_id: string; pie
     .where('id', '=', waiting.id)
     .where('status', 'in', [...LIVE_WAITING])
     .where('guarantee_id', 'is', null)
-    .returning('id')
+    .returning(['id', 'status'])
     .executeTakeFirst();
+  if (e?.status === 'QUEUED') changes?.changed(d.id);
   return e?.id ?? null;
 }
 
@@ -503,6 +507,8 @@ export async function releaseCovered(
   now: Date,
   actor: Actor,
   notes: AuditRecordInput[],
+  /** A guarantee carried to a running release and bound to a QUEUED entry there shuts its gate (bindWaitingEntry). */
+  changes?: LiveChanges,
 ): Promise<{ carried: number; expired: number }> {
   const rows = await tx.selectFrom('house_guarantees').selectAll().where('covered_drop_id', '=', dropId).where('status', '=', 'ACTIVE').orderBy('granted_at').orderBy('id').forUpdate().execute();
   if (rows.length === 0) return { carried: 0, expired: 0 };
@@ -524,7 +530,7 @@ export async function releaseCovered(
     const next = await coverNextRelease(tx, g, now, { except: dropId });
     if (next) {
       await tx.updateTable('house_guarantees').set({ covered_drop_id: next.id, covered_at: now }).where('id', '=', g.id).execute();
-      await bindWaitingEntry(tx, g, next);
+      await bindWaitingEntry(tx, g, next, changes);
     }
     notes.push({ actor, action: 'guarantee.carry', targetType: 'house_guarantee', targetId: g.id, details: { accountId: g.account_id, from: dropId, to: next?.id ?? null, reason } });
     carried++;
@@ -955,6 +961,11 @@ export interface GuaranteeServiceDeps {
   db: Db;
   audit: AuditService;
   clock?: Clock;
+  /**
+   * The LIVE releases' frame gate (live-frames.ts; LiveService's): a guarantee bound to a QUEUED entry or taken from it
+   * changes whom the next batches reach (D9). Without it (a service built alone), no release's gate is told.
+   */
+  liveFrames?: LiveFrameGate;
 }
 
 export interface GrantOutcome {
@@ -967,11 +978,13 @@ export class GuaranteeService {
   private readonly db: Db;
   private readonly audit: AuditService;
   private readonly clock: Clock;
+  private readonly liveFrames: LiveFrameGate | null;
 
   constructor(deps: GuaranteeServiceDeps) {
     this.db = deps.db;
     this.audit = deps.audit;
     this.clock = deps.clock ?? systemClock;
+    this.liveFrames = deps.liveFrames ?? null;
   }
 
   // ── Reads ────────────────────────────────────────────────────────────────
@@ -1051,7 +1064,7 @@ export class GuaranteeService {
           ? notFound('Model', 'MODEL_NOT_FOUND')
           : notFound('Collection', 'COLLECTION_NOT_FOUND');
     const targetId = knownId(input.targetId, missing);
-    const { id, cover } = await inTransaction(this.db, async (tx) => {
+    const { id, cover } = await withLiveChanges(this.liveFrames, (changes) => inTransaction(this.db, async (tx) => {
       const now = this.clock();
       const validUntil = cleanValidUntil(input.validUntil, now);
       const a = await tx.selectFrom('accounts').select(['id', 'status']).where('id', '=', account).forShare().executeTakeFirst();
@@ -1106,7 +1119,7 @@ export class GuaranteeService {
         if (isUniqueViolation(e, 'house_guarantees_one_per_release')) throw already();
         throw e;
       }
-      const entryId = cover ? await bindWaitingEntry(tx, { id: inserted.id, account_id: account, pieces }, cover) : null;
+      const entryId = cover ? await bindWaitingEntry(tx, { id: inserted.id, account_id: account, pieces }, cover, changes) : null;
       await this.audit.record(
         {
           actor,
@@ -1128,7 +1141,7 @@ export class GuaranteeService {
         tx,
       );
       return { id: inserted.id, cover };
-    });
+    }));
     const guarantee = await this.view(id);
     return { guarantee, setAsideFor: cover ? { id: cover.id, title: cover.title } : null };
   }
@@ -1213,12 +1226,16 @@ export class GuaranteeService {
     const admin = assertStaff(actor, 'revoke a guarantee');
     const id = knownId(guaranteeId, guaranteeNotFound);
     const text = cleanNote(note);
-    await inTransaction(this.db, async (tx) => {
+    await withLiveChanges(this.liveFrames, (changes) => inTransaction(this.db, async (tx) => {
       const now = this.clock();
       const { g } = await this.lockForChange(tx, id);
       if (g.status === 'USED') throw used();
       if (g.status !== 'ACTIVE') throw notActive();
       await tx.updateTable('drop_entries').set({ guarantee_id: null, pieces: 1 }).where('guarantee_id', '=', g.id).execute();
+      // A QUEUED entry unbound goes back to its place (and its quantity within the per collector): its release's next
+      // batch waits for a frame read after it (D9; the release's row held FOR UPDATE by lockForChange).
+      const queued = await tx.selectFrom('live_entries').select('drop_id').where('guarantee_id', '=', g.id).where('status', '=', 'QUEUED').execute();
+      for (const q of queued) changes.changed(q.drop_id);
       await tx
         .updateTable('live_entries as e')
         .from('drops as d')
@@ -1238,7 +1255,7 @@ export class GuaranteeService {
         { actor, action: 'guarantee.revoke', targetType: 'house_guarantee', targetId: g.id, details: { accountId: g.account_id, coveredDropId: g.covered_drop_id, noted: text !== null } },
         tx,
       );
-    });
+    }));
     return this.view(id);
   }
 

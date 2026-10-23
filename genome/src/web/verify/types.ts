@@ -1153,7 +1153,8 @@ export interface LiveBoard {
 
 /**
  * A size in the room: its stock, the pieces free now, and what it can still serve one collector (`serves`: the pieces not
- * confirmed, at most the limit per collector, never how many are held: ONE QUEUE D25, D32); `out` once it serves no one.
+ * confirmed, at most the most any one entry may take (5, a guarantee's pieces included), never how many are held: ONE
+ * QUEUE D25, D32); `out` once it serves no one.
  */
 export interface LiveRoomSize {
   id: string;

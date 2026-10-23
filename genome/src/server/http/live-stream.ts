@@ -72,8 +72,8 @@ export const LIVE_PULSE_MS = 1000;
  */
 export const LIVE_ROOM_POLL_MS = 2000;
 /**
- * …and, further behind (no stream), as its queue's `pollMs` says (services/live-queue.ts: half the time until it could
- * be next, within these bounds, `held` while the batches are held). Between two readings its page counts its own time
+ * …and, further behind (no stream), as its queue's `pollMs` says (services/live-queue.ts: a quarter of its estimate,
+ * never the pace, within these bounds, `held` while the batches are held). Between two readings its page counts its own time
  * down; its place moves at the readings (D9).
  */
 export { LIVE_QUEUE_FAR_POLL_MS };

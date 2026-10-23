@@ -87,6 +87,7 @@ import { isAfterRoom } from './after-room.js';
 import type { ClubTier } from './club.js';
 import { dropNotFound, dropState, drawOrder, earlyAccessOpensAt, inEarlyAccess, inSize } from './drops.js';
 import { isAnnounced, LIVE_OPEN_STATUSES, LIVE_PER_ACCOUNT, roomOpensAt } from './live.js';
+import { withLiveChanges } from './live-frames.js';
 import { clearChoices } from './order-addons.js';
 import { orderReference } from './orders.js';
 import { sessionCookieName } from './sessions.js';
@@ -1649,10 +1650,11 @@ export class TestEntrantService {
    * release's row lock (FOR UPDATE, as LiveService's controls take it), as REMOVE closes an open one: `removed_at` =
    * `ended_at` now, `confirmed_at` cleared (`live_entries_status_confirmed`), their add-ons let go. The room then counts
    * their pieces free: while the release runs, the engine's next pass gives them to the line. Audited `drop.live.remove`
-   * with `from: "CONFIRMED"` and `reason: "test_ended"`.
+   * with `from: "CONFIRMED"` and `reason: "test_ended"`. What a size can serve widens: on a paced release, the next batch
+   * waits for a frame read after it (D9, live-frames.ts `changed`), as after REMOVE.
    */
   private async removeConfirmed(d: DropRow, accounts: readonly string[], actor: Actor): Promise<number> {
-    return inTransaction(this.db, async (tx) => {
+    return withLiveChanges(this.ctx.services.live.frames, (changes) => inTransaction(this.db, async (tx) => {
       await tx.selectFrom('drops').select('id').where('id', '=', d.id).forUpdate().execute();
       const now = this.now();
       let n = 0;
@@ -1667,12 +1669,13 @@ export class TestEntrantService {
           .where('resolution', 'is', null)
           .returning('id')
           .execute();
+        if (gone.length && d.pace_batch !== null) changes.changed(d.id);
         if (gone.length) await tx.deleteFrom('live_entry_addons').where('entry_id', 'in', gone.map((e) => e.id)).execute();
         for (const e of gone) await this.ctx.audit.record({ actor, action: 'drop.live.remove', targetType: 'drop', targetId: d.id, details: { entryId: e.id, from: 'CONFIRMED', reason: 'test_ended' } }, tx);
         n += gone.length;
       }
       return n;
-    });
+    }));
   }
 
   /** The test's I'LL BE THERE in a LIVE RELEASE not opened yet, withdrawn (audited `drop.live.interest.withdraw`, `reason: "test_ended"`). */

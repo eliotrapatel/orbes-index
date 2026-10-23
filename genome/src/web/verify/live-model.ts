@@ -383,9 +383,9 @@ export interface SizeChoice {
 
 /**
  * The pieces of a size the line can still serve one collector, as the server counts them when an account enters after
- * T0: its stock less what is confirmed (free, or held and possibly returning), at most the limit per collector (the
- * room's `serves`: ONE QUEUE never says how many pieces are held, D25; ENTER THE LINE and the sizes read it as before,
- * D32). Null without the room.
+ * T0: its stock less what is confirmed (free, or held and possibly returning), at most the most any one entry may take,
+ * a guarantee's pieces included (the room's `serves`: ONE QUEUE never says how many pieces are held, D25; ENTER THE LINE
+ * and the sizes read it as before, D32). Null without the room.
  */
 export function servable(size: LiveRoomSize | null): number | null {
   return size ? size.serves : null;

@@ -30,9 +30,11 @@
  *   out       its size can no longer serve its quantity (stock − confirmed < quantity; a set's, in one of its sizes):
  *             SOLD OUT for your size (D27);
  *   beyond    its place in a size is past the pieces of that size not yet confirmed (the console's figure, D11);
- *   pollMs    behind the next ones (no stream: http/live-stream.ts), how soon its page reads its state again: half the
- *             time until it could join them (its estimate less one batch's gap), within LIVE_QUEUE_FAR_POLL_MS (10 s to a
- *             minute, 30 s while paused), in whole seconds; null while it is next. It says nothing of the pace.
+ *   pollMs    behind the next ones (no stream: http/live-stream.ts), how soon its page reads its state again: a quarter
+ *             of its estimate, within LIVE_QUEUE_FAR_POLL_MS (10 s to a minute, 30 s while paused), in whole seconds;
+ *             null while it is next. A function of its own `waitMs` alone, so it says nothing of the pace (D8: the gap Y
+ *             never reaches a phone; an entry behind waits two batches at least, so a quarter of its estimate is at
+ *             most half the time until it could be next, and G2's readings cover the rest).
  *
  * The close guard (D10, ANSWERS B10: "a console warning (EXTEND / SET PACE / NEXT BATCH NOW), advice only", e.g.
  * « AT THIS PACE, 120 PIECES REMAIN AT THE CLOSE »).
@@ -50,8 +52,8 @@ const SECOND = 1000;
 const MINUTE_MS = 60_000;
 
 /**
- * How soon a page whose entry waits behind the next ones reads its state (it holds no stream): half the time until it
- * could join them, within `min` and `max`; `held` while the pace is held (PAUSE, PAUSE PACE). Whole seconds.
+ * How soon a page whose entry waits behind the next ones reads its state (it holds no stream): a quarter of its
+ * estimate, within `min` and `max`; `held` while the pace is held (PAUSE, PAUSE PACE). Whole seconds.
  */
 export const LIVE_QUEUE_FAR_POLL_MS = Object.freeze({ min: 10_000, max: 60_000, held: 30_000 });
 
@@ -138,12 +140,15 @@ export interface QueueInput {
   entries: readonly QueueEntryInput[];
 }
 
-/** How soon a page behind the next ones reads its state again (LIVE_QUEUE_FAR_POLL_MS). */
-export function queuePollMs(waitMs: number, minutes: number, paused: boolean): number {
+/**
+ * How soon a page behind the next ones reads its state again (LIVE_QUEUE_FAR_POLL_MS): from its own estimate only, never
+ * the pace (D8: "never batch size, gap"), so no reading gives the gap away (`waitMs − 2·pollMs` was Y when it read
+ * half the time until it could be next).
+ */
+export function queuePollMs(waitMs: number, paused: boolean): number {
   const { min, max, held } = LIVE_QUEUE_FAR_POLL_MS;
   if (paused) return held;
-  const untilNext = waitMs - minutes * MINUTE_MS;
-  return Math.min(max, Math.max(min, Math.round(untilNext / 2 / SECOND) * SECOND));
+  return Math.min(max, Math.max(min, Math.round(waitMs / 4 / SECOND) * SECOND));
 }
 
 /** The non-empty subsets of a few sizes (a set's entry has at most four), each with its inclusion–exclusion sign. */
@@ -302,7 +307,7 @@ export function queuePlaces(input: QueueInput): Map<string, LiveQueuePlace> {
       next,
       out: out_[k]!,
       beyond: beyond[k]!,
-      pollMs: next ? null : queuePollMs(waitMs, pace.minutes, paused),
+      pollMs: next ? null : queuePollMs(waitMs, paused),
     });
     if (!out_[k]) {
       for (const p of parts) ahead.set(p.key, (ahead.get(p.key) ?? 0) + 1);

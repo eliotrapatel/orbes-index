@@ -133,7 +133,7 @@ import type { AuditRecordInput, AuditService } from './audit.js';
 import { clubCounts, clubStandings, isTestEntrant, tierName, tierOf, type ClubTier } from './club.js';
 import { DROP_QUANTITY_MAX, drawKey, dropNotFound, openDropSeed } from './drops.js';
 import { holderGuarantee, holdsGuaranteeFor, releaseCovered, sizeServesGuarantee, useGuarantees, visibleGuaranteeIds } from './guarantees.js';
-import { LiveFrameGate, type PendingBatch } from './live-frames.js';
+import { LiveChanges, LiveFrameGate, withLiveChanges, type PendingBatch } from './live-frames.js';
 import { closeGuard, liveQueueSnapshot, queueView, type LiveCloseGuard, type LiveQueueSnapshot, type LiveQueueView } from './live-queue.js';
 import { addonOffer, choicesOf, cleanAddonItems, clearChoices, setChoices, type AddonOfferItem, type AddonUnitsInput, type ChosenAddon, type LeftOutAddon } from './order-addons.js';
 import { ordersForLiveEntry } from './orders.js';
@@ -1848,27 +1848,30 @@ export class LiveService {
    * PAY (a placeholder for now): the held piece CONFIRMED, and its orders created in the same transaction, one per piece,
    * RESERVED (services/orders.ts ordersForLiveEntry: each holds a piece in stock or one to make), which ORBES Client
    * Services follows to their delivery. Its hold must be running (409 LIVE_HOLD_ENDED). The last piece confirmed ends
-   * the release, SOLD_OUT. Audited `drop.live.confirm`, and `order.create` for each order.
+   * the release, SOLD_OUT. Audited `drop.live.confirm`, and `order.create` for each order. On a paced release, a piece
+   * confirmed lowers what its size can still serve (a multi-piece entry ahead may then be passed over): the next batch
+   * waits for a frame read after it (D9, live-frames.ts `changed`).
    */
   async confirm(accountId: string, dropId: string, actor: Actor): Promise<LiveEntryView> {
     const account = assertAccount(accountId);
     const id = knownId(dropId, dropNotFound);
     let leftOut: LeftOutAddon[] = [];
-    await inTransaction(this.db, async (tx) => {
+    await this.changing(id, (mark, changes) => inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
       const { d, now } = await this.lockAnnouncedLive(tx, id, 'update', account);
       const e = await this.runningHold(tx, d, account, now);
+      if (d.pace_batch !== null) mark();
       await tx.updateTable('live_entries').set({ status: 'CONFIRMED', confirmed_at: now }).where('id', '=', e.id).where('status', '=', 'SECURED').execute();
       const confirmed: AuditRecordInput = { actor, action: 'drop.live.confirm', targetType: 'drop', targetId: id, details: { entryId: e.id, quantity: e.quantity } };
       const notes: AuditRecordInput[] = [confirmed];
-      await this.settleEnd(tx, d, now, notes);
+      await this.settleEnd(tx, d, now, notes, changes);
       const created = await ordersForLiveEntry(tx, e.id, actor, now);
       notes.push(...created.notes);
       // Plan MACRO M3 §4.2 (D2): the add-ons that could not be added, said in PAY's answer and its audit entry.
       leftOut = created.addonsLeftOut;
       if (leftOut.length > 0) confirmed.details = { ...confirmed.details, addonsLeftOut: leftOut.map((l) => ({ addonId: l.addonId, units: l.units, reason: l.reason })) };
       await this.record(tx, notes);
-    });
+    }));
     const entry = (await this.viewerEntry(this.db, account, id))!;
     return leftOut.length > 0 ? { ...entry, addonsLeftOut: leftOut } : entry;
   }
@@ -2281,11 +2284,11 @@ export class LiveService {
    */
   async end(dropId: string, actor: Actor): Promise<LiveReleaseState> {
     assertStaff(actor, 'end a release');
-    return this.control(dropId, async (tx, d, now) => {
+    return this.control(dropId, async (tx, d, now, changes) => {
       if (d.ended_at || now.getTime() >= d.closes_at.getTime()) throw liveEnded();
       const resumed = d.paused_at ? await this.unpause(tx, d, now) : null;
       const notes: AuditRecordInput[] = [];
-      await this.endRelease(tx, d, 'ENDED', now, actor, resumed === null ? {} : { pausedMs: resumed }, notes);
+      await this.endRelease(tx, d, 'ENDED', now, actor, resumed === null ? {} : { pausedMs: resumed }, notes, changes);
       await this.record(tx, notes);
     });
   }
@@ -2403,6 +2406,8 @@ export class LiveService {
 
   private async advanceOnce(id: string, db: Db): Promise<LiveAdvance | null> {
     const pass: BatchPass = { given: null, waiting: false, readings: false, gave: false, mark: 0, taking: null };
+    // Its end may carry a guarantee to another running release, bound there to a QUEUED entry (guarantees.ts).
+    const changes = new LiveChanges(this.frames);
     let out: LiveAdvance | null;
     let committed = false;
     try {
@@ -2416,7 +2421,7 @@ export class LiveService {
         out.queued = await this.formLine(tx, d, now, notes, pass);
         if (!d.paused_at) await this.runOut(tx, d, now, out);
         const paused = d.paused_at !== null;
-        out.ended = await this.settleEnd(tx, d, now, notes);
+        out.ended = await this.settleEnd(tx, d, now, notes, changes);
         // A pause the end has just ended (settleEnd): what ran out before it began is marked now, as a pass after it would.
         if (paused && !d.paused_at) await this.runOut(tx, d, now, out);
         if (d.pace_batch !== null) {
@@ -2431,6 +2436,7 @@ export class LiveService {
       committed = true;
     } finally {
       if (pass.mark) this.frames.settle(id, pass.mark);
+      changes.settle();
       // Not given after all: the press waits again (and may be withdrawn).
       if (!committed && pass.taking) pass.taking.giving = false;
     }
@@ -2766,7 +2772,7 @@ export class LiveService {
    * CLOSED once `closes_at` has passed (at `closes_at`). A pause in progress ends with it, the deadlines moved as by
    * RESUME (a turn in progress may still be secured, a hold confirmed, until its deadline). Returns its reason, or null.
    */
-  private async settleEnd(tx: Db, d: LiveDrop, now: Date, notes: AuditRecordInput[]): Promise<LiveEndReason | null> {
+  private async settleEnd(tx: Db, d: LiveDrop, now: Date, notes: AuditRecordInput[], changes?: LiveChanges): Promise<LiveEndReason | null> {
     if (d.ended_at) return null;
     const totals = await this.sizeTotals(tx, d);
     // Macro scope K44 T1: a set's release sells out by sets, its sets on sale confirmed (each counted once, in its first piece).
@@ -2781,7 +2787,7 @@ export class LiveService {
     const reason: LiveEndReason | null = soldOutAt && soldOutAt.getTime() < d.closes_at.getTime() ? 'SOLD_OUT' : now.getTime() >= d.closes_at.getTime() ? 'CLOSED' : null;
     if (!reason) return null;
     const pausedMs = d.paused_at ? await this.unpause(tx, d, now) : null;
-    await this.endRelease(tx, d, reason, reason === 'SOLD_OUT' ? soldOutAt! : d.closes_at, SYSTEM_ACTOR, pausedMs === null ? {} : { pausedMs }, notes);
+    await this.endRelease(tx, d, reason, reason === 'SOLD_OUT' ? soldOutAt! : d.closes_at, SYSTEM_ACTOR, pausedMs === null ? {} : { pausedMs }, notes, changes);
     return reason;
   }
 
@@ -2789,7 +2795,16 @@ export class LiveService {
    * Begin the end at `at`: `ended_at` and its reason on the release (and on `d`); WAITING and QUEUED entries ENDED, and
    * TURN ones too for an ADMIN's END. Noted for the audit log: `drop.live.end` with the reason and the entries ended.
    */
-  private async endRelease(tx: Db, d: LiveDrop, reason: LiveEndReason, at: Date, actor: Actor, extra: Record<string, unknown>, notes: AuditRecordInput[]): Promise<void> {
+  private async endRelease(
+    tx: Db,
+    d: LiveDrop,
+    reason: LiveEndReason,
+    at: Date,
+    actor: Actor,
+    extra: Record<string, unknown>,
+    notes: AuditRecordInput[],
+    changes?: LiveChanges,
+  ): Promise<void> {
     const statuses: LiveEntryStatus[] = reason === 'ENDED' ? ['WAITING', 'QUEUED', 'TURN'] : ['WAITING', 'QUEUED'];
     // Its after-room first, while the line still says who waits in it: opened for them at a sell-out, never otherwise.
     const afterRoom: AuditRecordInput[] = [];
@@ -2806,7 +2821,7 @@ export class LiveService {
       .execute();
     // IN-01: the guarantees set aside for it and not used, unbound from their entries: carried, or expired.
     const guarantees: AuditRecordInput[] = [];
-    await releaseCovered(tx, d.id, 'ENDED', at, actor, guarantees);
+    await releaseCovered(tx, d.id, 'ENDED', at, actor, guarantees, changes);
     notes.push({ actor, action: 'drop.live.end', targetType: 'drop', targetId: d.id, details: { reason, at: at.toISOString(), ended: ended.length, ...extra } }, ...afterRoom, ...guarantees);
   }
 
@@ -3122,15 +3137,15 @@ export class LiveService {
    * plan §1.3 "recomputed at once"): the next batch waits for a frame read after it (live-frames.ts `changed`), and one
    * is asked for at once.
    */
-  private async control(dropId: string, fn: (tx: Db, d: LiveDrop, now: Date) => Promise<void>): Promise<LiveReleaseState> {
+  private async control(dropId: string, fn: (tx: Db, d: LiveDrop, now: Date, changes: LiveChanges) => Promise<void>): Promise<LiveReleaseState> {
     const id = knownId(dropId, dropNotFound);
-    return this.changing(id, (mark) =>
+    return this.changing(id, (mark, changes) =>
       inTransaction(this.db, async (tx) => {
         const d = await this.lockLive(tx, id, 'update');
         mark();
         const now = this.clock();
         if (d.cancelled_at) throw liveCancelled();
-        await fn(tx, d, now);
+        await fn(tx, d, now, changes);
         return this.releaseState(tx, id);
       }),
     );
@@ -3160,20 +3175,11 @@ export class LiveService {
   /**
    * A transaction that may change whom the next batches reach (D9): `run` takes the release's row lock first, and from
    * then on the frame gate is shut (live-frames.ts `changed`, taken lazily by `mark`) until a frame begun after it is
-   * published; settled once it has ended, a frame then asked for.
+   * published; settled once it has ended, a frame then asked for. `changes` marks another release the same way (a
+   * guarantee carried at this one's end to a running release, bound there to a QUEUED entry: guarantees.ts).
    */
-  private async changing<T>(id: string, run: (mark: () => void) => Promise<T>): Promise<T> {
-    let mark = 0;
-    try {
-      return await run(() => {
-        if (mark === 0) mark = this.frames.changed(id);
-      });
-    } finally {
-      if (mark) {
-        this.frames.settle(id, mark);
-        void this.frames.ask(id);
-      }
-    }
+  private async changing<T>(id: string, run: (mark: () => void, changes: LiveChanges) => Promise<T>): Promise<T> {
+    return withLiveChanges(this.frames, (changes) => run(() => changes.changed(id), changes));
   }
 
   private async releaseState(db: Db, id: string): Promise<LiveReleaseState> {

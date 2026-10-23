@@ -152,6 +152,7 @@ import { CALENDAR_ALARM_MINUTES, releaseIcs, type IcsAlarm } from './calendar.js
 import { CLUB_TIER_THRESHOLDS, clubStandings, tierName, tierOf, type ClubTier } from './club.js';
 import { readProgram } from './club-program.js';
 import { coverOnPublish, guaranteedPieces, holderGuarantee, releaseCovered, releaseGuaranteed, sizeServesGuarantee, useGuarantees, type ReleaseGuaranteed } from './guarantees.js';
+import { withLiveChanges, type LiveFrameGate } from './live-frames.js';
 import { storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
 import { addonOffer, choicesOf, cleanAddonItems, clearChoices, setChoices, type AddonOfferItem, type ChosenAddon, type LeftOutAddon } from './order-addons.js';
@@ -1381,6 +1382,11 @@ export interface DropServiceDeps {
   clock?: Clock;
   /** The places drawn and offered, emailed when switched on (lot M1 step M1.17, E5: DRAW_SELECTED, DRAW_OFFERED). */
   emails?: Pick<EmailTriggers, 'drawPlaces'>;
+  /**
+   * The LIVE releases' frame gate (live-frames.ts; LiveService's): a guarantee this release's end carries to a running
+   * LIVE release, bound there to a QUEUED entry, changes whom its next batches reach (D9). Without it, none is told.
+   */
+  liveFrames?: LiveFrameGate;
 }
 
 /** A draw's row with its model (all null on a set's draw: its set is read with `releaseOffers`). */
@@ -1403,6 +1409,7 @@ export class DropService {
   private readonly seedKey: Uint8Array;
   private readonly clock: Clock;
   private readonly emails: Pick<EmailTriggers, 'drawPlaces'> | null;
+  private readonly liveFrames: LiveFrameGate | null;
 
   constructor(deps: DropServiceDeps) {
     const key = deps.seedKey ?? new Uint8Array(randomBytes(32));
@@ -1412,6 +1419,7 @@ export class DropService {
     this.seedKey = key;
     this.clock = deps.clock ?? systemClock;
     this.emails = deps.emails ?? null;
+    this.liveFrames = deps.liveFrames ?? null;
   }
 
   // ── Public ───────────────────────────────────────────────────────────────
@@ -2212,7 +2220,7 @@ export class DropService {
   async cancel(dropId: string, actor: Actor): Promise<AdminDrop> {
     assertStaff(actor, 'cancel a release');
     const id = knownId(dropId, dropNotFound);
-    return inTransaction(this.db, async (tx) => {
+    return withLiveChanges(this.liveFrames, (changes) => inTransaction(this.db, async (tx) => {
       const now = this.clock();
       const d = await this.lockDraw(tx, id);
       if (d.drawn_at) throw dropDrawn();
@@ -2221,7 +2229,7 @@ export class DropService {
       const counts = (await this.tallies(tx, [id])).get(id)?.counts ?? EMPTY_COUNTS();
       // IN-01: its guarantees not used, carried to the next release of their model or collection, or expired.
       const notes: AuditRecordInput[] = [];
-      await releaseCovered(tx, id, 'CANCELLED', now, actor, notes);
+      await releaseCovered(tx, id, 'CANCELLED', now, actor, notes, changes);
       // Its founding announcements and release notices still queued are not sent (M1.17).
       const emails = await cancelReleaseEmails(tx, id, now);
       await this.audit.record(
@@ -2230,7 +2238,7 @@ export class DropService {
       );
       for (const n of notes) await this.audit.record(n, tx);
       return this.adminDrop(tx, id);
-    });
+    }));
   }
 
   /**
@@ -2246,7 +2254,7 @@ export class DropService {
   async draw(dropId: string, actor: Actor): Promise<DrawOutcome> {
     assertStaff(actor, 'draw a release');
     const id = knownId(dropId, dropNotFound);
-    return inTransaction(this.db, async (tx) => {
+    return withLiveChanges(this.liveFrames, (changes) => inTransaction(this.db, async (tx) => {
       const now = this.clock();
       const d = await this.lock(tx, id);
       if (d.mode === 'LIVE') throw dropLive();
@@ -2350,7 +2358,7 @@ export class DropService {
         respondBy,
       );
       // IN-01: the guarantees set aside for it and not used: a model's or a collection's carried, a chosen release's expired.
-      await releaseCovered(tx, id, 'ENDED', now, actor, notes);
+      await releaseCovered(tx, id, 'ENDED', now, actor, notes, changes);
       const perSize = [...bySize.values()];
       // A set's draw draws sets: its quantity less the sets held or sold.
       const places = sizes.length === 0 || d.set_id !== null ? Math.max(0, d.quantity - held - guaranteedPieceCount) : perSize.reduce((n, z) => n + z.places, 0);
@@ -2387,7 +2395,7 @@ export class DropService {
         guaranteedPieces: guaranteedPieceCount,
         sizes: perSize,
       };
-    });
+    }));
   }
 
   /**

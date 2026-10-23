@@ -26,8 +26,9 @@
  *
  * Not only a batch shuts the gate (step Q1.3, plan §1.3: "the snapshot is recomputed at once on SET PACE, SHORTEN THE
  * HOLD / END THE HOLD NOW and ADD PIECES"): any change that can widen whom the next batches reach, made under the
- * release's row lock (a console control, an entry placed in the line, at T0 or later, a place left in it), counts as one
- * (`changed`), so the next batch waits for a frame read after it. Each change is settled with its own mark once its
+ * release's row lock (a console control, an entry placed in the line, at T0 or later, a place left in it, a PAY on a
+ * paced release, the house's guarantee bound to a QUEUED entry or taken from it, a test's paid place removed: LiveChanges
+ * below), counts as one (`changed`), so the next batch waits for a frame read after it. Each change is settled with its own mark once its
  * transaction has ended (`settle`): the release's row lock orders them, so a mark is never settled before an earlier one.
  *
  * The readings (PLAN amendment 1, G2: "a batch after the first may only give a turn to an entry whose phone has READ that
@@ -232,5 +233,46 @@ export class LiveFrameGate {
     const r = this.of(dropId);
     const i = r.pending.indexOf(p);
     if (i >= 0) r.pending.splice(i, 1);
+  }
+}
+
+/**
+ * The changes one transaction makes that can widen whom the next batches reach in a running release (D9, `changed`), in
+ * that release or another: a PAY that lowers what a size can still serve (a multi-piece entry ahead then passed over),
+ * the house's guarantee bound to a QUEUED entry or taken from it (its order in the turns and its quantity), a test's
+ * confirmed place REMOVED (what a size can serve widened). `changed` takes one mark per release, inside the transaction,
+ * under that release's row lock (so the row lock orders the marks, as `changed` asks); `settle` settles them once the
+ * transaction has ended (committed or not), a frame then asked for each. Without a gate (a service built alone), nothing.
+ */
+export class LiveChanges {
+  private readonly marks = new Map<string, number>();
+
+  constructor(private readonly gate: LiveFrameGate | null | undefined) {}
+
+  /** A change to release `dropId` is being made (inside the transaction, under its row lock): its gate shuts. */
+  changed(dropId: string): void {
+    if (!this.gate || this.marks.has(dropId)) return;
+    this.marks.set(dropId, this.gate.changed(dropId));
+  }
+
+  /** The transaction has ended: each mark settled, a frame asked for. */
+  settle(): void {
+    const gate = this.gate;
+    if (!gate) return;
+    for (const [dropId, mark] of this.marks) {
+      gate.settle(dropId, mark);
+      void gate.ask(dropId);
+    }
+    this.marks.clear();
+  }
+}
+
+/** Run `run` (one transaction, begun inside it) with its LiveChanges, settled once it has ended. */
+export async function withLiveChanges<T>(gate: LiveFrameGate | null | undefined, run: (changes: LiveChanges) => Promise<T>): Promise<T> {
+  const changes = new LiveChanges(gate);
+  try {
+    return await run(changes);
+  } finally {
+    changes.settle();
   }
 }

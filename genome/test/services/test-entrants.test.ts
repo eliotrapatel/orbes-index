@@ -962,8 +962,8 @@ describe('a LIVE RELEASE end to end', () => {
     try {
       w.h.clock.set(t0);
       // The first minute: two given their turn at T0 and served; of the eight waiting, the four the scheduled batch and
-      // one extra can reach read every 2 s, the four behind them every 30 s to a minute (half the time until they could
-      // be next: the queue's snapshot, ONE QUEUE §1.3).
+      // one extra can reach read every 2 s, the four behind them every 30 s to a minute (a quarter of their estimate:
+      // the queue's snapshot, ONE QUEUE §1.3).
       await drive(w, 50_000, 500, release.id);
       const reads = inject.mock.calls.filter((call) => String(((call as unknown[])[0] as { url?: string } | undefined)?.url).endsWith('/state')).length;
       // About 4 × 25 reads in 50 s at 2 s and 4 × 1 or 2 behind (8 × 25 if every one read every 2 s); a few more before the turns.

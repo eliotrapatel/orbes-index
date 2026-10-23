@@ -44,6 +44,7 @@ import {
 } from '../../src/server/services/live.js';
 import { GuaranteeService, LIVE_PER_ACCOUNT_DEFAULT } from '../../src/server/services/guarantees.js';
 import { LifecycleService } from '../../src/server/services/lifecycle.js';
+import { LIVE_SERVES_MAX, LiveRoomService } from '../../src/server/services/live-room.js';
 import { OwnershipService } from '../../src/server/services/ownership.js';
 import { OwnerService } from '../../src/server/services/owners.js';
 import { SessionService } from '../../src/server/services/sessions.js';
@@ -1038,6 +1039,21 @@ describe('LiveService', () => {
       unmarked(moved);
       expect((await entry(r.id, hidden.id)).guarantee_id).toBeNull();
       expect(await guaranteeOf(hidden.id)).toMatchObject({ status: 'ACTIVE', covered_drop_id: r.id });
+    });
+
+    it('a holder of 3 pieces on a release of one per collector, 3 pieces not confirmed after T0: the room says its size serves 3, so ENTER THE LINE stays open for 3 (D32, A 14:50 "don’t change it"), and the server takes it', async () => {
+      expect(LIVE_SERVES_MAX).toBe(5);
+      const r = await release({ perAccount: 1, sizes: [{ label: '52', stock: 3 }] });
+      const [first, holder] = [await accountOfTier(f, 0), await accountOfTier(f, 0)];
+      await grant(holder.id, r.id, { pieces: 3 });
+      f.clock.set(at(-MINUTE));
+      await f.live.enter(first.id, r.id, { sizeId: r.sizes[0]!.id }, first.actor);
+      await advance(r, T0);
+      // One piece in a turn, two free: the size serves 3, not the 1 of the per collector (never more than LIVE_SERVES_MAX).
+      const room = new LiveRoomService({ db: t.db, turnKey: f.turnKey, publicOrigin: 'https://verify.orbes.test', clock: f.clock.now });
+      expect((await room.frame(r.id))!.room.sizes[0]).toMatchObject({ left: 2, serves: 3, out: false });
+      f.clock.set(at(10_000));
+      expect(await f.live.enter(holder.id, r.id, { sizeId: r.sizes[0]!.id, quantity: 3 }, holder.actor)).toMatchObject({ quantity: 3, guaranteed: true });
     });
 
     it('revoked while its holder waits: the entry stays an ordinary one, its quantity brought back within the per collector, its turn for that', async () => {

@@ -25,7 +25,7 @@
  * stage and show its photograph from the photograph's, as its card's `set` does.
  *
  * The room (`frame`): built once for all of a release's viewers (routes/live.ts fans it out once a second): its phase,
- * the pieces left per size and what each size can still serve (`serves`, at most the release's limit per collector:
+ * the pieces left per size and what each size can still serve (`serves`, at most the most any one entry may take:
  * never how many pieces are held, D25), the people in the room, the latest host message; and the board's share of it
  * (the countdown, the door, the pieces left overall: no personal data); from T0, the queue's snapshot (live-queue.ts:
  * ONE QUEUE, lot Q1 §1.3), from which each viewer reads its own entry's place and estimate, never sent whole: no
@@ -44,6 +44,7 @@ import type { DropRow, LiveEndReason } from '../db/schema.js';
 import { DomainError } from '../errors.js';
 import { systemClock, type Clock } from '../types.js';
 import { afterRoomPlace, isAfterRoom } from './after-room.js';
+import { GUARANTEE_PIECES } from './guarantees.js';
 import { CALENDAR_ALARM_MINUTES, releaseIcs } from './calendar.js';
 import { dropNotFound } from './drops.js';
 import {
@@ -242,9 +243,16 @@ export interface LiveBanner {
 }
 
 /**
+ * The most pieces any one entry may take (LIVE_PER_ACCOUNT.max; IN-01, a guarantee's GUARANTEE_PIECES.max): what a size's
+ * `serves` says at most. Not the release's own limit per collector: a guarantee holder may enter for more than it, and
+ * ENTER THE LINE reads `serves` as it read `left + held` before (D32, A 14:50 "don't change it").
+ */
+export const LIVE_SERVES_MAX = Math.max(LIVE_PER_ACCOUNT.max, GUARANTEE_PIECES.max);
+
+/**
  * A size in the room: its stock, the pieces free now (`left`), and what it can still serve an entry (`serves`: the
- * pieces not confirmed, free or held, at most the release's limit per collector, so it never says how many are held,
- * D25; ONE QUEUE, lot Q1 §1.3: the late comer's ENTER THE LINE and the room's sizes read it as they read `left + held`
+ * pieces not confirmed, free or held, at most LIVE_SERVES_MAX, the most any one entry may take, so it never says how
+ * many are held beyond "at least that many", D25; ONE QUEUE, lot Q1 §1.3: the late comer's ENTER THE LINE and the room's sizes read it as they read `left + held`
  * before, D32); `out` once it can serve no one (every piece confirmed).
  */
 export interface LiveRoomSize {
@@ -772,12 +780,12 @@ export class LiveRoomService {
     const people = (statuses: readonly string[]) => counts.filter((c) => statuses.includes(c.status)).reduce((n, c) => n + Number(c.n), 0);
     const pieces = (sizeId: string, statuses: readonly string[]) =>
       (bySize ?? counts).filter((c) => c.size_id === sizeId && statuses.includes(c.status)).reduce((n, c) => n + Number(c.q ?? 0), 0);
-    const perAccount = r.per_account ?? LIVE_PER_ACCOUNT.default;
     const roomSizes: LiveRoomSize[] = sizes.map((s) => {
       const held = pieces(s.id, ['TURN', 'SECURED']);
       const servable = Math.max(0, s.stock - pieces(s.id, ['CONFIRMED']));
-      // D32: what it can still serve, never more than one collector may take: the held pieces never told (D25).
-      const serves = Math.min(servable, perAccount);
+      // D32: what it can still serve, never more than any one entry may take (LIVE_SERVES_MAX: a guarantee holder's JOIN
+      // unchanged), so it never says more than "at least that many" of the held pieces (D25).
+      const serves = Math.min(servable, LIVE_SERVES_MAX);
       return { id: s.id, label: s.label, ...(s.piece !== null ? { piece: s.piece } : {}), stock: s.stock, left: Math.max(0, servable - held), serves, out: serves === 0 };
     });
     const stages = liveStages(r, now)!;

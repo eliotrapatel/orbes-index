@@ -450,6 +450,25 @@ function paceFindings(value: unknown, path = '$'): string[] {
   return out;
 }
 
+/**
+ * The pace's unambiguous keys (plan §1.6) found anywhere in a payload, at any depth: the narrow scope of `paceFindings`
+ * stays only for the ambiguous `line`, `hold` and `minutes` (an add-on's `line` is its words, an entry's `hold` its own).
+ */
+const PACE_KEYS_ANYWHERE = new Set(['pace', 'batch', 'batches', 'nextBatchAt', 'waiting', 'beyond', 'holdMinutes', 'holdEndsAt']);
+function paceKeysAnywhere(value: unknown, path = '$'): string[] {
+  const out: string[] = [];
+  const walk = (v: unknown, at: string) => {
+    if (Array.isArray(v)) return v.forEach((x, i) => walk(x, `${at}[${i}]`));
+    if (!v || typeof v !== 'object') return;
+    for (const [k, x] of Object.entries(v)) {
+      if (PACE_KEYS_ANYWHERE.has(k) || k.startsWith('admitted')) out.push(`key ${at}.${k}`);
+      walk(x, `${at}.${k}`);
+    }
+  };
+  walk(value, path);
+  return out;
+}
+
 describe('the collector never reads the pace, the line or a held piece (ONE QUEUE, D8, D25; plan §1.6)', () => {
   it('on a paced release with a queue (next and behind), no collector payload of it carries them, nor the queue’s length', async () => {
     const h = await createHarness({ app: { liveHub: { pulseMs: 0, cacheMs: 0 } } });
@@ -501,6 +520,8 @@ describe('the collector never reads the pace, the line or a held piece (ONE QUEU
         // A stream's event carries the room's or the entry's fields at its top: read as what it is.
         const shaped = what.startsWith('stream room') ? { room: json } : json;
         for (const x of paceFindings(shaped)) found.push(`${what}: ${x}`);
+        // The unambiguous keys, anywhere: at the top of a page's answer (a release, the list, the banner, MY PIECES) too.
+        for (const x of paceKeysAnywhere(json)) found.push(`${what}: ${x}`);
         // The queue's length (4 waiting) is never said, under any name.
         if (/"(waiting|line|inLine|queued|queueLength)":/.test(body)) found.push(`${what}: a count of the line`);
       }
@@ -509,6 +530,8 @@ describe('the collector never reads the pace, the line or a held piece (ONE QUEU
       const admin = await adminClient(h, 'AUDITOR');
       const consoleBoard = safeJson(await admin.get(`/api/admin/live/${r.id}/board`));
       expect(paceFindings(consoleBoard)).toEqual(expect.arrayContaining(['key $.board.pace']));
+      expect(paceKeysAnywhere(consoleBoard)).toEqual(expect.arrayContaining(['key $.board.pace']));
+      expect(paceKeysAnywhere({ id: r.id, holdMinutes: 1, release: { pace: null } })).toEqual(['key $.holdMinutes', 'key $.release.pace']);
     } finally {
       await h.close();
     }

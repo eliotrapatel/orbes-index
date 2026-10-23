@@ -127,6 +127,16 @@ export const MOVED: readonly Moved[] = [
   { state: 'desk-set-live-sold-out', value: '2', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D19; ANSWERS C3): YOUR PLACE is the place in your size (one number), the drawn place staying in the console', now: 'YOUR PLACE 1' },
 ];
 
+/**
+ * The states removed on purpose since the baseline was recorded, each with its reason and where its values went; gone
+ * from the baseline with them (MOVED records a value; these, a whole screen). Kept until the baseline is recorded again.
+ */
+export const REMOVED_STATES: readonly { state: string; reason: string; now: string }[] = [
+  { state: 'live-line', reason: 'ONE QUEUE, lot Q1 step Q1.3 (ANSWERS r1, C3; plan §3.11): the classic line screen gives way to the one queue', now: 'live-queue and its states (LIVE NOW, YOUR PLACE in your size, ESTIMATED … LEFT, the one note)' },
+  { state: 'live-queue-admitted', reason: 'ONE QUEUE, lot Q1 step Q1.3 (ANSWERS r1, C3; plan §3.11): M1’s admitted queue page gives way to the one queue, never a batch said', now: 'live-queue; the turn itself (live-turn)' },
+  { state: 'desk-live-line', reason: 'ONE QUEUE, lot Q1 step Q1.3 (ANSWERS r1, C3; plan §3.11): the computer’s line screen gives way to the one queue', now: 'desk-live-queue and its states' },
+];
+
 const movedKey = (state: string, value: string) => `${state}\u0000${normalizeText(value)}`;
 const moved = new Map(MOVED.map((m) => [movedKey(m.state, m.value), m] as const));
 

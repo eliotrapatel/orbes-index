@@ -60,6 +60,7 @@ import { morningWindowOpen, parisDay } from './services/schedule.js';
 import { aggregateViews, IntelligenceSizes, purgeViews } from './services/tracking-jobs.js';
 import { deriveDropSeedKey, DropService } from './services/drops.js';
 import { deriveLiveTurnKey, eraseLiveNetworkHashes, LiveService } from './services/live.js';
+import { LiveFrameGate } from './services/live-frames.js';
 import { LiveConsoleService } from './services/live-console.js';
 import { LiveEngine } from './services/live-engine.js';
 import { LiveInsightsService } from './services/live-insights.js';
@@ -368,18 +369,21 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const sale = new SaleService({ db, verification, warranty, clock });
     const media = new MediaService({ db, audit, clock, log });
     const lookbook = new LookbookService({ db, clock });
-    const drops = new DropService({ db, audit, seedKey: deriveDropSeedKey(config), clock, emails });
+    // ONE QUEUE (lot Q1, D9): one frame gate for the LIVE releases, told by every service whose changes can widen whom
+    // a paced release's next batches reach (live-frames.ts): a release's end or cancel carrying a guarantee, a grant.
+    const liveFrames = new LiveFrameGate();
+    const drops = new DropService({ db, audit, seedKey: deriveDropSeedKey(config), clock, emails, liveFrames });
     const club = new ClubService({ db, drops, audit, clock });
     const salon = new SalonService({ db, audit, lookbook, club, clock });
     const circle = new CircleService({ db, audit, clock, log });
     const turnKey = deriveLiveTurnKey(config);
-    const live = new LiveService({ db, audit, seedKey: deriveDropSeedKey(config), turnKey, clock });
+    const live = new LiveService({ db, audit, seedKey: deriveDropSeedKey(config), turnKey, frames: liveFrames, clock });
     const liveRoom = new LiveRoomService({ db, turnKey, publicOrigin: config.publicOrigin, clock });
     const pastReleases = new PastReleaseService({ db, clock });
     const liveInsights = new LiveInsightsService({ db, clock });
     const questions = new QuestionService({ db, audit, clock });
     const activity = new ActivityService({ db, clock });
-    const liveConsole = new LiveConsoleService({ db, audit, seedKey: deriveDropSeedKey(config), publicOrigin: config.publicOrigin, insights: liveInsights, questions, clock });
+    const liveConsole = new LiveConsoleService({ db, audit, seedKey: deriveDropSeedKey(config), publicOrigin: config.publicOrigin, insights: liveInsights, questions, clock, liveFrames });
     const stock = new StockService({ db, audit, clock });
     const orders = new OrderService({ db, audit, lifecycle, clock, log, mail: emails.orderStep });
     const invoices = new InvoiceService({ db, clock });
@@ -397,7 +401,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const engagement = new EngagementService({ db, clock, log });
     const care = new CareService({ db, audit, warranty, clock, claimOf: collectorClaim, emails });
     const warrantyClaims = new WarrantyClaimService({ db, audit, warranty, lifecycle, clock, emails });
-    const guarantees = new GuaranteeService({ db, audit, clock });
+    const guarantees = new GuaranteeService({ db, audit, clock, liveFrames });
     const sizes = new SizeService({ db, audit, clock });
     const addresses = new AddressService({ db, audit, clock });
     const tastes = new TasteService({ db, clock });

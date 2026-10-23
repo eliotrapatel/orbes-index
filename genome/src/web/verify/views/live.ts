@@ -2047,19 +2047,21 @@ class LivePage {
         const m = queueModel(e, this.queueRead, this.now());
         el.dataset.state = m.kind === 'reading' ? 'reading' : m.paused ? 'paused' : 'waiting';
         const known = m.kind === 'waiting';
+        // OP-6, N10: the release's PAUSE or PAUSE PACE, with its line, above the time it freezes; while its place is still
+        // read, the release's PAUSE from the room (the notice above never says it on this screen).
+        const hold = known ? m.paused : this.room?.paused ? 'RELEASE' : null;
         reading.hidden = known;
         label.hidden = !known;
         place.hidden = !known;
-        paused.hidden = !known || !m.paused;
-        pausedLine.hidden = !known || !m.paused;
+        paused.hidden = !hold;
+        pausedLine.hidden = !hold;
         time.hidden = !known || m.time === null;
         left.hidden = !known || !this.room;
+        setFact(paused, hold === 'RELEASE' ? LIVE.paused : hold === 'PACE' ? LIVE.queue.paused : '');
+        pausedLine.textContent = hold === 'RELEASE' ? LIVE.pausedLine : hold === 'PACE' ? LIVE.queue.pausedLine : '';
         if (known) {
           if (said.textContent !== `${m.placeSaid} `) said.textContent = `${m.placeSaid} `;
           if (figure.textContent !== String(m.place)) figure.textContent = String(m.place);
-          // OP-6, N10: the release's PAUSE or PAUSE PACE, with its line, above the time it freezes.
-          setFact(paused, m.paused === 'RELEASE' ? LIVE.paused : m.paused === 'PACE' ? LIVE.queue.paused : '');
-          pausedLine.textContent = m.paused === 'RELEASE' ? LIVE.pausedLine : m.paused === 'PACE' ? LIVE.queue.pausedLine : '';
           setFact(time, m.time ?? '');
           if (this.room) setFact(left, stockLine(this.room, e));
           if (m.announce !== this.lastPlace) {

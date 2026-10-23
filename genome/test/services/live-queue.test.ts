@@ -10,6 +10,7 @@ import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { LiveService } from '../../src/server/services/live.js';
 import { LiveFrameGate } from '../../src/server/services/live-frames.js';
+import { GuaranteeService } from '../../src/server/services/guarantees.js';
 import { liveQueueSnapshot, queuePlaces, queuePollMs, queueView, type QueueEntryInput, type QueueInput, type QueueSizeInput } from '../../src/server/services/live-queue.js';
 import { livePaceFacts, paceCheck } from '../../src/server/services/test-entrants.js';
 import { createTestDb, type TestDb } from '../support/db.js';
@@ -152,20 +153,44 @@ describe('the queue’s snapshot (pure)', () => {
     expect([...m.values()]).toEqual([1, 2, 3].map((place) => ({ place, waitMs: null, estimatedAt: null, next: true, out: true, beyond: true, pollMs: null })));
   });
 
-  it('tells those behind how soon to read again: half the time until they could be next, 10 s to a minute, 30 s while paused, in whole seconds; never those next', () => {
-    expect(queuePollMs(0, 1, false)).toBe(10_000);
-    expect(queuePollMs(MINUTE + 45_400, 1, false)).toBe(23_000);
-    expect(queuePollMs(60 * MINUTE, 1, false)).toBe(60_000);
-    expect(queuePollMs(60 * MINUTE, 1, true)).toBe(30_000);
+  it('tells those behind how soon to read again: a quarter of their estimate, 10 s to a minute, 30 s while paused, in whole seconds; never those next', () => {
+    expect(queuePollMs(0, false)).toBe(10_000);
+    expect(queuePollMs(MINUTE + 45_400, false)).toBe(26_000);
+    expect(queuePollMs(60 * MINUTE, false)).toBe(60_000);
+    expect(queuePollMs(60 * MINUTE, true)).toBe(30_000);
     const m = places({ sizes: [size('A', { stock: 100 })], entries: entries(40, 'A') }, { batch: 2, minutes: 2 });
     expect(m.get('A1')!.pollMs).toBeNull();
-    // The 40th: its batch the 20th (38 minutes away); it could be next a batch before: (38 − 2) / 2 → 60 s at most.
+    // The 40th: its batch the 20th (38 minutes away) → 60 s at most.
     expect(m.get('A40')!.pollMs).toBe(60_000);
-    // The 5th (2·X ahead, not next): its batch the 3rd, 4 minutes away: (4 − 2) / 2 = 1 minute.
+    // The 5th (2·X ahead, not next): its batch the 3rd, 4 minutes away: a minute.
     expect(m.get('A5')).toMatchObject({ next: false, pollMs: 60_000 });
-    // X = 1 every minute: the 3rd, 2 minutes away, (2 − 1) / 2 = 30 s; the 4th, 3 minutes away, 60 s.
+    // X = 1 every minute: the 3rd, 2 minutes away, 30 s; the 4th, 3 minutes away, 45 s.
     const near = places({ sizes: [size('A', { stock: 100 })], entries: entries(6, 'A') }, { batch: 1, minutes: 1 });
-    expect([near.get('A3'), near.get('A4')]).toMatchObject([{ next: false, pollMs: 30_000 }, { next: false, pollMs: 60_000 }]);
+    expect([near.get('A3'), near.get('A4')]).toMatchObject([{ next: false, pollMs: 30_000 }, { next: false, pollMs: 45_000 }]);
+  });
+
+  it('never gives the gap away (D8: "never batch size, gap"): pollMs follows the estimate alone, so waitMs − 2·pollMs is not Y', () => {
+    // The same estimate under two paces (X = 1 every minute, after a 1-minute hold; X = 1 every minute, no hold): the
+    // same pollMs, whatever the gap.
+    const held = places({ sizes: [size('A', { stock: 100 })], entries: entries(3, 'A') }, { batch: 1, minutes: 1, nextAt: at(MINUTE).getTime() }).get('A3')!;
+    const open = places({ sizes: [size('A', { stock: 100 })], entries: entries(4, 'A') }, { batch: 1, minutes: 1 }).get('A4')!;
+    expect([held, open]).toMatchObject([{ next: false, waitMs: 3 * MINUTE, pollMs: 45_000 }, { next: false, waitMs: 3 * MINUTE, pollMs: 45_000 }]);
+    expect(held.waitMs! - 2 * held.pollMs!).not.toBe(MINUTE);
+    // Under every pace, the same estimate always reads the same pollMs: a reading tells nothing its waitMs does not.
+    const seen = new Map<number, number>();
+    for (const minutes of [1, 2, 3, 5, 10]) {
+      for (const batch of [1, 2, 5]) {
+        for (const hold of [0, 1, 2]) {
+          const q = places({ sizes: [size('A', { stock: 200 })], entries: entries(60, 'A') }, { batch, minutes, nextAt: at(hold * MINUTE).getTime() });
+          for (const p of q.values()) {
+            if (p.next) continue;
+            expect(p.pollMs).toBe(queuePollMs(p.waitMs!, false));
+            expect(seen.get(p.waitMs!) ?? p.pollMs).toBe(p.pollMs);
+            seen.set(p.waitMs!, p.pollMs!);
+          }
+        }
+      }
+    }
   });
 });
 
@@ -404,6 +429,58 @@ describe('the queue’s snapshot on the engine: no batch gives a turn to an entr
     expect(await e.batch(() => e.advance(T0))).toEqual([bId]);
     f.clock.set(at(200));
     expect(await e.press()).toEqual([eId]);
+  });
+
+  it('PAY of a held piece that makes a multi-piece head entry passed over (S: 10, 7 confirmed, 1 held, 2 free; A wanting 3, then B, e; X = 2): the scheduled batch waits for a frame read after it, and reaches only B and e, next in it', async () => {
+    const r = await release({ pace: { batch: 3, minutes: 1 }, perAccount: 5, sizes: [{ label: 'S', stock: 10 }] });
+    const [p1, p2, h, aId, bId, eId] = await line(r, [{ size: 'S', quantity: 5 }, { size: 'S', quantity: 2 }, { size: 'S' }, { size: 'S', quantity: 3 }, { size: 'S' }, { size: 'S' }]);
+    const e = engine(r);
+    const accountOf = async (id: string) => (await t.db.selectFrom('live_entries').select('account_id').where('id', '=', id).executeTakeFirstOrThrow()).account_id;
+    f.clock.set(T0);
+    await e.frame();
+    expect(await e.batch(() => e.advance(T0))).toEqual([p1, p2, h]);
+    // The three secure their pieces; two pay (7 confirmed), the third holds its piece: 2 free, 3 not confirmed.
+    for (const id of [p1, p2, h]) {
+      const account = await accountOf(id);
+      const token = (await e.live.entry(account, r.id))!.turn!.token!;
+      await e.live.press(account, r.id, token);
+      f.clock.set(f.clock.now().getTime() + 1500);
+      await e.live.secure(account, r.id, token, { type: 'account', id: account });
+    }
+    for (const id of [p1, p2]) {
+      const account = await accountOf(id);
+      await e.live.confirm(account, r.id, { type: 'account', id: account });
+    }
+    await e.live.setPace(r.id, { batch: 2, minutes: 1 }, f.admin);
+    f.clock.set(at(30 * SECOND));
+    const before = await e.frame();
+    // A's 3 fit the 3 pieces not confirmed: A is next; B and e behind it are not.
+    expect([aId!, bId!, eId!].map((id) => before.entries.get(id)!.next)).toEqual([true, false, false]);
+    // The held piece is paid: S can serve 2, A (3) is passed over. The gate shut by PAY: the scheduled batch waits.
+    const holder = await accountOf(h!);
+    await e.live.confirm(holder, r.id, { type: 'account', id: holder });
+    expect(e.frames.open(r.id)).toBe(false);
+    expect(await e.advance(at(MINUTE))).toMatchObject({ batch: null, waiting: true });
+    const after = await e.frame();
+    expect(after.entries.get(aId!)).toMatchObject({ out: true, next: false });
+    expect(new Set(await e.batch(() => e.advance(at(MINUTE))))).toEqual(new Set([bId, eId]));
+  });
+
+  it('the house’s guarantee bound to a QUEUED entry, then revoked: each shuts the gate until a frame read after it (the entry’s order in the turns changes)', async () => {
+    const r = await release({ pace: { batch: 1, minutes: 1 }, perAccount: 2, sizes: [{ label: 'S', stock: 10 }] });
+    const ids = await line(r, [{ size: 'S', n: 4 }]);
+    const e = engine(r);
+    const guarantees = new GuaranteeService({ db: t.db, audit: f.audit, clock: f.clock.now, liveFrames: e.frames });
+    const last = (await t.db.selectFrom('live_entries').select('account_id').where('id', '=', ids[3]!).executeTakeFirstOrThrow()).account_id;
+    f.clock.set(T0);
+    await e.frame();
+    expect(e.next().has(ids[3]!)).toBe(false);
+    const { guarantee } = await guarantees.grant(last, { scope: 'RELEASE', targetId: r.id, pieces: 2, validUntil: '2026-12-31', visible: true }, f.admin);
+    expect(e.frames.open(r.id)).toBe(false);
+    expect((await e.frame()).entries.get(ids[3]!)).toMatchObject({ place: 1, next: true });
+    await guarantees.revoke(guarantee.id, null, f.admin);
+    expect(e.frames.open(r.id)).toBe(false);
+    expect((await e.frame()).entries.get(ids[3]!)).toMatchObject({ place: 4, next: false });
   });
 
   it('the restart catch-up: 5 slots overdue (X = 250) go one per published frame, each reaching only entries next in the frame before it, with its slot’s time and number; the PACE check green', async () => {

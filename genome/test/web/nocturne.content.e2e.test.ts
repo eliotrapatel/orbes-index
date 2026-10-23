@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { DEMO_VARIANTS } from '../support/nocturne-demo.js';
 import { BOARD_STATES, normalizeText, stateById, UI_STATES } from '../support/nocturne-states.js';
-import { CONTENT_SHARDS, contentShard, MOVED, readBaseline } from './nocturne.content.harness.js';
+import { CONTENT_SHARDS, contentShard, MOVED, readBaseline, REMOVED_STATES } from './nocturne.content.harness.js';
 
 const baseline = readBaseline();
 
@@ -29,6 +29,11 @@ describe('NOCTURNE content baseline', () => {
       expect(m.reason.trim().length, `${m.state}: ${m.value}`).toBeGreaterThan(0);
       expect(m.now.trim().length, `${m.state}: ${m.value}`).toBeGreaterThan(0);
       expect(baseline.states[m.state]?.values.map(normalizeText), `${m.state}: ${m.value}`).toContain(normalizeText(m.value));
+    }
+    // A state removed on purpose is gone from the stage and the baseline, with its reason and where its values went.
+    for (const r of REMOVED_STATES) {
+      expect([r.reason.trim().length > 0, r.now.trim().length > 0], r.state).toEqual([true, true]);
+      expect([baseline.states[r.state], UI_STATES.find((s) => s.id === r.state)], r.state).toEqual([undefined, undefined]);
     }
   });
 

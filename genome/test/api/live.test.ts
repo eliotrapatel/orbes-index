@@ -869,10 +869,11 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       // Before T0: the room, read every 2 s; no queue yet.
       const early = await state(members[0]!);
       expect(early).toMatchObject({ pollMs: 2000, room: { phase: 'ROOM', inRoom: 4 }, entry: { status: 'WAITING', queue: null } });
-      // The room never says the line's length nor a held piece: each size what it still serves one collector (D32).
+      // The room never says the line's length nor a held piece: each size what it still serves an entry, at most what any
+      // one entry may take (5, a guarantee's pieces included: D32).
       expect(early.room).not.toHaveProperty('line');
       expect(early.room).not.toHaveProperty('held');
-      expect(early.room.sizes).toEqual([{ id: r.sizes[0]!.id, label: '52', stock: 10, left: 10, serves: 1, out: false }]);
+      expect(early.room.sizes).toEqual([{ id: r.sizes[0]!.id, label: '52', stock: 10, left: 10, serves: 5, out: false }]);
 
       // T0: one turn by the first batch; then three in the queue, places 1, 2 (next: the scheduled batch and one extra
       // can reach them) and 3 (behind).
@@ -884,9 +885,9 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       expect(members.filter((m) => states.get(m)!.entry.status === 'TURN')).toHaveLength(1);
       expect(states.get(at(1))).toMatchObject({ pollMs: 2000, room: { phase: 'LIVE' }, entry: { status: 'QUEUED', queue: { place: 1, waitMs: MINUTE, paused: null, next: true, out: false } } });
       expect(states.get(at(2))).toMatchObject({ pollMs: 2000, entry: { queue: { place: 2, waitMs: 2 * MINUTE, next: true } } });
-      // Behind: 3 minutes to its turn, 2 until it could be next: read again in a minute.
+      // Behind: 3 minutes to its turn: read again in a quarter of it, 45 s (its estimate alone, never the pace: D8).
       const waiter = at(3);
-      expect(states.get(waiter)).toMatchObject({ pollMs: 60_000, entry: { queue: { place: 3, waitMs: 3 * MINUTE, paused: null, next: false, out: false } } });
+      expect(states.get(waiter)).toMatchObject({ pollMs: 45_000, entry: { queue: { place: 3, waitMs: 3 * MINUTE, paused: null, next: false, out: false } } });
       for (const m of members) {
         const st = states.get(m)!;
         expect(st).not.toHaveProperty('queue');

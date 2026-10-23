@@ -103,6 +103,7 @@ import {
 } from './live.js';
 import { liveQueueSnapshot } from './live-queue.js';
 import { coverOnPublish, guaranteedPieces, releaseCovered, releaseGuaranteed, type ReleaseGuaranteed } from './guarantees.js';
+import { withLiveChanges, type LiveFrameGate } from './live-frames.js';
 import { storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
 import { knownLocation, linkDropSizes } from './stock.js';
@@ -963,6 +964,11 @@ export interface LiveConsoleServiceDeps {
   /** The question after's answers (services/question.ts); one of its own when none is given. */
   questions?: QuestionService;
   clock?: Clock;
+  /**
+   * The LIVE releases' frame gate (live-frames.ts; LiveService's): a guarantee this release's end carries to a running
+   * LIVE release, bound there to a QUEUED entry, changes whom its next batches reach (D9). Without it, none is told.
+   */
+  liveFrames?: LiveFrameGate;
 }
 
 export class LiveConsoleService {
@@ -973,6 +979,7 @@ export class LiveConsoleService {
   private readonly insights: LiveConsoleServiceDeps['insights'];
   private readonly questions: QuestionService;
   private readonly clock: Clock;
+  private readonly liveFrames: LiveFrameGate | null;
 
   constructor(deps: LiveConsoleServiceDeps) {
     if (!(deps.seedKey instanceof Uint8Array) || deps.seedKey.length !== 32) throw new RangeError('seedKey must be 32 bytes');
@@ -983,6 +990,7 @@ export class LiveConsoleService {
     this.insights = deps.insights;
     this.clock = deps.clock ?? systemClock;
     this.questions = deps.questions ?? new QuestionService({ db: deps.db, audit: deps.audit, clock: this.clock });
+    this.liveFrames = deps.liveFrames ?? null;
   }
 
   /** The boutique board's address for a link's secret: the secret in the fragment, never sent to a server. */
@@ -1429,7 +1437,7 @@ export class LiveConsoleService {
   async cancel(dropId: string, actor: Actor): Promise<AdminLiveRelease> {
     assertStaff(actor, 'cancel a release');
     const id = knownId(dropId, dropNotFound);
-    return inTransaction(this.db, async (tx) => {
+    return withLiveChanges(this.liveFrames, (changes) => inTransaction(this.db, async (tx) => {
       const d = await this.lock(tx, id);
       const now = this.clock();
       if (d.parent_drop_id) throw afterRoomOwn();
@@ -1447,7 +1455,7 @@ export class LiveConsoleService {
         .execute();
       const interest = await tx.selectFrom('live_interest').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', id).executeTakeFirstOrThrow();
       // IN-01: its guarantees not used, carried to the next release of their model or collection, or expired.
-      await releaseCovered(tx, id, 'CANCELLED', now, actor, afterRoom);
+      await releaseCovered(tx, id, 'CANCELLED', now, actor, afterRoom, changes);
       // Its founding announcements and release notices still queued are not sent (M1.17), as its posts are withdrawn.
       const emails = await cancelReleaseEmails(tx, id, now);
       await this.audit.record(
@@ -1463,7 +1471,7 @@ export class LiveConsoleService {
       for (const p of withdrawn) await this.audit.record({ actor, action: 'circle.post.unpublish', targetType: 'circle_post', targetId: p.id, details: { dropId: id, by: 'drop.live.cancel' } }, tx);
       for (const n of afterRoom) await this.audit.record(n, tx);
       return this.release(tx, id);
-    });
+    }));
   }
 
   // ── internals ────────────────────────────────────────────────────────────
