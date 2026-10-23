@@ -2,7 +2,7 @@
  * The LIVE RELEASES' load test (plan of 2026-10-04, Architecture › Load; Quality bar 6).
  *
  *   npx tsx scripts/live-load.ts [--levels 500,1000,1500,2000] [--vps-factor 2] [--burst-seconds 10] [--seed N]
- *                                [--pace X,Y] [--database-url postgres://…] [--json PATH]
+ *                                [--one-queue] [--pace X,Y] [--hold M] [--database-url postgres://…] [--json PATH]
  *
  * For each level N, three processes, as on the VPS: the app (this file with --serve: the server's own createContext,
  * buildApp, logger and LIVE engine, as src/server/index.ts starts them; ORBES_ENV=development, so the production rate
@@ -69,30 +69,32 @@
  * meeting them too: the room the server holds (LIVE_ROOM_CAPACITY, services/live-insights.ts), which the audience
  * forecast warns against.
  *
- * --pace X,Y (W4, the plan of 2026-10-20 §1.5: `--pace 250,1 --levels 5000`) gives the release a pace, X buyers admitted
- * every Y minutes (LIVE_PACE_BATCH, LIVE_PACE_MINUTES), and measures its queue (W2): from T0 the phones not admitted yet
- * wait on the queue's frame (`queue` events and their own `you` events, their place and estimated entry time) until
- * their batch lets them into the room. As the page does (web/verify/views/live.ts), only a phone whose batch is the
- * next one keeps its stream: the server ends the stream of one behind it after its place, and that phone reads GET
- * /state instead, first at a moment of its own within LIVE_QUEUE_SPREAD_MS, then as the state's `pollMs` says, until
- * its batch is the next one and it opens its stream again. Reported besides: those state reads, the streams the server
- * ended so and opened again, and the app's memory before T0 and from T0 on with the streams then open. The door before T0 is the house's for that many people: the room opens
- * PACED_ROOM_MINUTES (5) before T0, the console's default, the streams and I'LL BE THERE come over up to two minutes
- * before it, and the entries over the room's first four minutes (--burst-seconds sets another burst). So that the
- * release lasts until its last batch, a phone whose turn comes before
- * the last batch's time takes it (PRESS, SECURE, the add-ons for half) and then RELEASES MY PLACE, the piece going to
- * the next admitted in its size; from the last batch on, the phones act as in the room (PAY seven in ten) and the
- * release sells out. A paced release is published without an after-room (step 6 is left out): the pace meters the
- * release's line, not the after-room's door, which would open to the thousands the sell-out ended at the same second,
- * the door measured without a pace (docs/reports/live-load.md, §3); the run measures the queue. Measured besides, and held against the targets: the
- * queue's fan-out (each pulse's queue frame, from its time to the last waiting phone that read it, over the pulses that
- * reached 95 % of those waiting); every batch on the server (pacedBatchesProblem: exactly X, the last the rest, the k-th
- * at T0 + (k − 1) × Y to the millisecond, and the TEST REPORT's own PACE check, services/test-entrants.ts paceCheck, on
- * the release's entries and audit log); and on the phones (queueVerdict): every phone that waited admitted, none from
- * a place beyond X, at the time the queue first estimated, and how long its admission took to reach it. The action
- * target is held against the actions behind the pace (the turns, PAY, RELEASE); the door's (I'LL BE
- * THERE and ENTER, before T0, which the pace does not meter) are reported beside them. Its verdict is the queue's, not a
- * capacity: no LIVE_ROOM_CAPACITY is read from it.
+ * --one-queue (ONE QUEUE, lot Q1 §1.5, D14: `--one-queue --pace 250,1 --hold 2 --levels 5000`) gives the release its
+ * pace, X turns every Y minutes (--pace X,Y: LIVE_PACE_BATCH, LIVE_PACE_MINUTES; 250 every minute by default) after a
+ * hold of M minutes (--hold M: LIVE_HOLD_MINUTES; none by default), more pieces than entrants in every size (each size
+ * ONE_QUEUE_STOCK_SHARE of the level, as the runbook's run A), and measures the one queue: from T0 each waiting phone
+ * reads only its own figures (its `you` events and GET /state: `queue` = its place in its size, its estimated wait,
+ * what holds the batches, whether a batch can reach it next, whether its size can still serve it; never the pace, the
+ * line or a queue frame, D8). As the page does (web/verify/views/live.ts), only a phone a batch can reach next keeps its
+ * stream: the server ends the others' after their place, and each reads GET /state instead, first at a moment of its
+ * own within LIVE_QUEUE_SPREAD_MS, then as the state's `pollMs` says (10 s to a minute), until a batch can reach it and
+ * it opens its stream again. A batch after the first waits until the phones it reaches have read that they are next
+ * (G2, at most 60 s), keeping its time. Each turn is taken (PRESS, SECURE, the add-ons for half) and its place given
+ * back (RELEASE MY PLACE, as the runbook's run A: nothing sold, every entrant served once); the run ends once every
+ * entrant has had its turn. The door before T0 is the house's for that many people: the room opens PACED_ROOM_MINUTES
+ * (5) before T0, the console's default, the streams and I'LL BE THERE come over up to two minutes before it, and the
+ * entries over the room's first four minutes (--burst-seconds sets another burst). The release is published without
+ * an after-room (step 6 is left out): the run measures the queue. Measured besides, and held against the targets:
+ * every batch on the server (pacedBatchesProblem: exactly X, the last the rest, the k-th at T0 + the hold + (k − 1) × Y
+ * to the millisecond, and the TEST REPORT's own PACE check, services/test-entrants.ts paceCheck, on the release's
+ * entries and audit log); and on the phones (queueVerdict): every phone that waited had its turn, each after the first
+ * batch read « next » before it, none read a figure of the pace (D8), how far its first estimate fell from its turn,
+ * and how long its turn took to reach it. Reported besides: the state reads (how many, how fast, the most in a
+ * second), the streams the server ended and opened again, and the app's memory before T0 and from T0 on with the
+ * streams then open. The action target is held against the actions behind the pace (the turns, RELEASE); the door's
+ * (I'LL BE THERE and ENTER, before T0, which the pace does not meter) are reported beside them. Its verdict is the
+ * queue's, not a capacity: no LIVE_ROOM_CAPACITY is read from it. --pace alone runs the one queue too (M1's queue
+ * frame is gone since lot Q1).
  *
  * Prints a table per level and the capacity; writes every figure to genome/out/live-load/results.json (or --json
  * PATH) and the app's log of each level beside it (server-<N>.log). Seeded: the same arguments give the same
@@ -108,7 +110,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import v8 from 'node:v8';
-import { LIVE_PACE_BATCH, LIVE_PACE_MINUTES } from '../src/server/db/schema.js';
+import { LIVE_HOLD_MINUTES, LIVE_PACE_BATCH, LIVE_PACE_MINUTES } from '../src/server/db/schema.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SELF = fileURLToPath(import.meta.url);
@@ -116,11 +118,12 @@ const SELF = fileURLToPath(import.meta.url);
 const ORIGIN = 'https://verify.orbes.load';
 /** As the page (web/verify/views/live.ts LIVE_QUEUE_SPREAD_MS): its first state read once the server ended its stream behind the next batch. */
 const LIVE_QUEUE_SPREAD_MS = 60_000;
-/**
- * M1's queue reading cadence, which --pace still follows: ONE QUEUE (lot Q1, step Q1.3) reads each entry's own figures
- * (`queue.waitMs`, `pollMs`) and no longer sends a queue frame; step Q1.4 measures the one queue (--one-queue).
- */
-const LIVE_QUEUE_POLL_MS = 10_000;
+/** A state read without `pollMs` (ONE QUEUE's carry it) is read again after this long, the page's far minimum (LIVE_QUEUE_FAR_POLL_MS.min). */
+const QUEUE_POLL_FALLBACK_MS = 10_000;
+/** A waiting entry's own figures (ONE QUEUE §1.3, D8): a phone reading any other key in them reads too much. */
+const QUEUE_KEYS: ReadonlySet<string> = new Set(['place', 'waitMs', 'paused', 'next', 'out']);
+/** --one-queue: each size's stock, this share of the level: three sizes, more pieces than entrants in each (the runbook's run A). */
+export const ONE_QUEUE_STOCK_SHARE = 0.4;
 /** As the page (web/verify/views/live.ts FINAL): an entry in one of these is over for its page, which closes its stream. */
 const FINAL_STATUSES: ReadonlySet<string> = new Set(['CONFIRMED', 'MISSED', 'EXPIRED', 'RELEASED', 'REMOVED']);
 /** From T0, this long for the streams behind the next batch to end: the memory and streams "from T0" are read after it. */
@@ -227,9 +230,11 @@ interface SetupMessage {
   databaseUrl: string;
   databaseSocket: string | null;
   seed: number;
-  /** --pace: the release's pace (W4), or none. */
+  /** --one-queue: the release's pace, or the most a batch gives every minute (everyone's turn at T0). */
   pace: LoadPace | null;
-  /** The release has its after-room (step 6); false with a pace. */
+  /** --one-queue: the hold after the opening, in minutes. */
+  holdMinutes: number;
+  /** The release has its after-room (step 6); false with --one-queue. */
   afterRoom: boolean;
 }
 
@@ -331,17 +336,19 @@ interface Options {
   seed: number;
   databaseUrl: string;
   json: string;
-  /** --pace X,Y: X buyers admitted every Y minutes (W4); null, no pace (everyone admitted at T0). */
+  /** --one-queue (or --pace X,Y): X turns every Y minutes, ONE QUEUE; null: the room without a queue (everyone's turn at T0). */
   pace: LoadPace | null;
+  /** --hold M: the hold after the opening, in minutes (--one-queue). */
+  holdMinutes: number;
 }
 
-/** A release's pace in this test (W4): X buyers admitted every Y minutes. */
+/** A release's pace in this test (ONE QUEUE): X turns every Y minutes. */
 export interface LoadPace {
   batch: number;
   minutes: number;
 }
 
-/** --pace's value, `X,Y`: X buyers (LIVE_PACE_BATCH) every Y minutes (LIVE_PACE_MINUTES), the console's bounds. */
+/** --pace's value, `X,Y`: X turns (LIVE_PACE_BATCH) every Y minutes (LIVE_PACE_MINUTES), the console's bounds. */
 export function parsePace(value: string | undefined): LoadPace {
   const m = /^\s*(\d+)\s*,\s*(\d+)\s*$/.exec(value ?? '');
   const batch = m ? Number(m[1]) : NaN;
@@ -369,13 +376,14 @@ export function releaseTimes(o: Pick<Options, 'pace'>, viewers: number): { leadM
 }
 
 /**
- * The batches a paced level needs: every viewer enters, so ceil(N / X) batches, the first at T0 and the k-th at
- * T0 + (k − 1) × Y; the last admits the rest. `spanMs` runs from T0 to the last batch.
+ * The batches a level of the one queue needs: every viewer enters before T0 and every size has more pieces than its
+ * entrants, so ceil(N / X) batches, the first at `firstAt` (T0 + the hold) and the k-th Y minutes apart; the last gives
+ * the rest. `spanMs` runs from the first batch to the last.
  */
-export function pacePlan(viewers: number, pace: LoadPace, opensAt: number): { batches: number; lastBatchAt: number; lastBatchSize: number; spanMs: number } {
+export function pacePlan(viewers: number, pace: LoadPace, firstAt: number): { batches: number; lastBatchAt: number; lastBatchSize: number; spanMs: number } {
   const batches = Math.max(1, Math.ceil(viewers / pace.batch));
   const spanMs = (batches - 1) * pace.minutes * 60_000;
-  return { batches, lastBatchAt: opensAt + spanMs, lastBatchSize: viewers - (batches - 1) * pace.batch, spanMs };
+  return { batches, lastBatchAt: firstAt + spanMs, lastBatchSize: viewers - (batches - 1) * pace.batch, spanMs };
 }
 
 export function parseArgs(argv: string[]): Options {
@@ -387,7 +395,9 @@ export function parseArgs(argv: string[]): Options {
     databaseUrl: 'pglite:memory',
     json: join(ROOT, 'out', 'live-load', 'results.json'),
     pace: null,
+    holdMinutes: 0,
   };
+  let oneQueue = false;
   const num = (v: string | undefined, name: string): number => {
     const n = Number(v);
     if (!Number.isInteger(n) || n <= 0) throw new Error(`${name} needs a positive whole number`);
@@ -407,12 +417,21 @@ export function parseArgs(argv: string[]): Options {
     }
     else if (a === '--json') o.json = resolve(argv[++i] ?? '');
     else if (a === '--pace') o.pace = parsePace(argv[++i]);
+    else if (a === '--one-queue') oneQueue = true;
+    else if (a === '--hold') {
+      const m = Number(argv[++i]);
+      if (!Number.isInteger(m) || m < LIVE_HOLD_MINUTES.min || m > LIVE_HOLD_MINUTES.max) throw new Error(`--hold is the hold after the opening, ${LIVE_HOLD_MINUTES.min} to ${LIVE_HOLD_MINUTES.max} minutes`);
+      o.holdMinutes = m;
+    }
     else if (a === '--help' || a === '-h') {
       process.stdout.write(readFileSync(SELF, 'utf8').split('*/')[0]!.replace(/^\/\*\*\n/, '').replace(/^ \* ?/gm, ''));
       process.exit(0);
     } else throw new Error(`unknown argument ${a}`);
   }
   if (o.levels.length === 0) throw new Error('--levels needs at least one level');
+  // --one-queue: 250 turns every minute unless --pace says otherwise; a hold only with it.
+  if (oneQueue) o.pace ??= { batch: 250, minutes: 1 };
+  if (o.holdMinutes > 0 && !o.pace) throw new Error('--hold needs --one-queue');
   return o;
 }
 
@@ -730,6 +749,8 @@ async function serve(): Promise<void> {
     admin,
   );
 
+  // --one-queue: more pieces than entrants in every size (ONE_QUEUE_STOCK_SHARE of the level each), as the runbook's run A.
+  const sizes = setup.pace ? SIZES.map((s) => ({ label: s.label, stock: Math.ceil(setup.viewers * ONE_QUEUE_STOCK_SHARE) })) : SIZES;
   const publishedAt = Date.now();
   const roomOpensAt = publishedAt + setup.leadMs;
   const opensAt = roomOpensAt + setup.roomMinutes * 60_000;
@@ -741,7 +762,7 @@ async function serve(): Promise<void> {
       closesAt: new Date(opensAt + 3_600_000),
       roomOpensMinutes: setup.roomMinutes,
       priceMinor: 480_000,
-      sizes: SIZES,
+      sizes,
       addons: ADDONS,
       // LIVE RELEASE+: both rules read at each check, joined by AND (the heavier: neither stops the other).
       minParticipations: 1,
@@ -749,10 +770,11 @@ async function serve(): Promise<void> {
       accessCombine: 'AND',
       surpriseEnabled: true,
       surpriseText: 'A polishing cloth in the house black.',
-      // --pace: X people per batch every Y minutes, the first batch at T0; without it (ONE QUEUE, D1: every release has a
-      // pace), the most a batch gives every minute, so everyone in the room has a turn at T0 as the door was measured.
+      // --one-queue: X turns per batch every Y minutes, the first batch at T0 + the hold; without it (ONE QUEUE, D1: every
+      // release has a pace), the most a batch gives every minute, so everyone in the room has a turn at T0 as the door
+      // was measured.
       pace: setup.pace ?? { batch: 5000, minutes: 1 },
-      holdMinutes: 0,
+      holdMinutes: setup.holdMinutes,
       afterRoom: setup.afterRoom
         ? {
             modelId: afterModelId,
@@ -948,7 +970,7 @@ interface StreamState {
   status: number | null;
   ended: boolean;
   dropped: boolean;
-  /** --pace: ended by the server (or refused, 204) while the entry waits behind the next batch (W2): neither dropped nor refused. */
+  /** --one-queue: ended by the server (or refused, 204) while no batch can reach the entry next: neither dropped nor refused. */
   parked: boolean;
   /** Closed by its phone, its entry over (as the page does, web/verify/views/live.ts `done`): not dropped. */
   closedByPhone: boolean;
@@ -968,50 +990,45 @@ interface Viewer {
   outcome: Record<RoomKey, string | null>;
   /** The after-room's T0, from the second door its last frame of the main room carried: a guest. */
   door: number | null;
-  /** --pace: what its phone read of the queue. */
+  /** --one-queue: what its phone read of the queue. */
   queue: QueuePhone;
-  /** --pace: its entry waits behind the next batch (its last `you` or state said `queue.next` false); its state read meanwhile. */
+  /** --one-queue: no batch can reach its entry next (its last `you` or state said `queue.next` false); its state read meanwhile. */
   behind: boolean;
   polling: boolean;
 }
 
-/** What a phone read of the queue (W2) on a paced release: from its `you` events and the queue's frames. */
+/** What a phone read of the one queue (ONE QUEUE §1.3): its own figures, from its `you` events and its state reads. */
 export interface QueuePhone {
-  /** It waited for a batch: a `you` event carried its queue. */
+  /** It waited in the queue: a reading carried its own figures. */
   waited: boolean;
-  /** The estimated entry time its first queue view gave, and its last place in the queue. */
-  firstEta: number | null;
+  /** When its first reading put its turn (the reading's time on the server's clock + its estimated wait), and its last place in its size. */
+  firstEstimate: number | null;
   lastPlace: number | null;
-  /** The next batch's time, from the last queue frame it read: the batch it waits for. */
-  waitingFor: number | null;
-  /** When its phone read its admission (a `you` event, QUEUED or TURN, its queue gone), and the batch's time it waited for then. */
-  admittedSeenAt: number | null;
-  admittedFor: number | null;
-}
-
-/** One queue frame a waiting phone read: its pulse's time, when it was read, and how many waiting phones held a stream then. */
-interface QueueEvent {
-  now: number;
-  at: number;
-  streaming: number;
+  /** Whether its last reading before its turn said a batch could reach it next. */
+  lastNext: boolean | null;
+  /** When its turn began (the server's clock), and when its phone read it. */
+  turnAt: number | null;
+  turnSeenAt: number | null;
+  /** Readings that carried more than its own five figures, or a queue frame (D8: never the pace, the line, a batch). */
+  leaks: number;
 }
 
 /**
- * The queue on the phones (W2, W4): every phone that waited was admitted; none from a place beyond X (the published
- * order: its last place before its batch within the batch); at the time its first estimate gave (the queue held no
- * pause, nobody left: the estimate is exact); the batches it saw; and how long each admission took to reach its phone
- * after the batch's time.
+ * The one queue on the phones: every phone that waited had its turn; each turn after the first batch (from `laterAt`)
+ * reached a phone whose last reading said a batch could reach it next (G2: a batch after the first waits for it); no
+ * reading carried a figure of the pace (D8); how far each first estimate fell from its turn (ms, either way), and how
+ * long each turn took to reach its phone.
  */
-export function queueVerdict(phones: readonly QueuePhone[], pace: LoadPace): { waited: number; admitted: number; orderBroken: number; etaKept: number; batchesSeen: number; delivery: number[] } {
+export function queueVerdict(phones: readonly QueuePhone[], laterAt: number): { waited: number; served: number; unread: number; leaks: number; estimateError: number[]; delivery: number[] } {
   const waited = phones.filter((q) => q.waited);
-  const admitted = waited.filter((q) => q.admittedSeenAt !== null && q.admittedFor !== null);
+  const served = waited.filter((q) => q.turnAt !== null && q.turnSeenAt !== null);
   return {
     waited: waited.length,
-    admitted: admitted.length,
-    orderBroken: admitted.filter((q) => q.lastPlace === null || q.lastPlace > pace.batch).length,
-    etaKept: admitted.filter((q) => q.firstEta !== null && q.firstEta === q.admittedFor).length,
-    batchesSeen: new Set(admitted.map((q) => q.admittedFor)).size,
-    delivery: admitted.map((q) => q.admittedSeenAt! - q.admittedFor!),
+    served: served.length,
+    unread: served.filter((q) => q.turnAt! >= laterAt && q.lastNext !== true).length,
+    leaks: phones.reduce((n, q) => n + q.leaks, 0),
+    estimateError: served.filter((q) => q.firstEstimate !== null).map((q) => Math.abs(q.turnAt! - q.firstEstimate!)),
+    delivery: served.map((q) => q.turnSeenAt! - q.turnAt!),
   };
 }
 
@@ -1073,17 +1090,19 @@ export function peakPerSecond(moments: readonly number[]): number {
 }
 
 /**
- * The batches on the server against the plan (pacePlan): as many as needed, numbered 1 to B, each of X but the last (the
- * rest), the k-th at T0 + (k − 1) × Y to the millisecond. A line saying what is wrong, or null.
+ * The batches on the server against the plan (pacePlan, more pieces than entrants): as many as needed, numbered 1 to B,
+ * each of X turns but the last (the rest), the k-th at `firstAt` (T0 + the hold) + (k − 1) × Y to the millisecond, its
+ * logical time. A line saying what is wrong, or null.
  */
-export function pacedBatchesProblem(batches: readonly PacedBatch[], viewers: number, pace: LoadPace, opensAt: number): string | null {
-  const plan = pacePlan(viewers, pace, opensAt);
+export function pacedBatchesProblem(batches: readonly PacedBatch[], viewers: number, pace: LoadPace, firstAt: number): string | null {
+  const plan = pacePlan(viewers, pace, firstAt);
   if (batches.length !== plan.batches) return `${batches.length} batches recorded, ${plan.batches} expected.`;
   for (const [i, b] of [...batches].sort((x, y) => x.batch - y.batch).entries()) {
     const size = i === plan.batches - 1 ? plan.lastBatchSize : pace.batch;
     if (b.batch !== i + 1) return `Batch ${b.batch} recorded where batch ${i + 1} was expected.`;
-    if (b.entries !== size) return `Batch ${b.batch} admitted ${b.entries}, ${size} expected.`;
-    if (b.at !== opensAt + i * pace.minutes * 60_000) return `Batch ${b.batch} came at T0 + ${b.at - opensAt} ms, T0 + ${i * pace.minutes * 60_000} ms expected.`;
+    if (b.entries !== size) return `Batch ${b.batch} gave ${b.entries} turns, ${size} expected.`;
+    const due = firstAt + i * pace.minutes * 60_000;
+    if (b.at !== due) return `Batch ${b.batch} came ${Math.abs(b.at - due)} ms ${b.at > due ? 'after' : 'before'} its time (the first + ${i * pace.minutes} min).`;
   }
   return null;
 }
@@ -1168,36 +1187,39 @@ interface LevelResult {
   };
   /** What the rooms left in the database: the orders (held in stock or waiting), the after-room's guests, the journal. */
   facts: ReleaseFacts;
-  /** --pace: the queue and its batches; null without a pace. */
+  /** --one-queue: the queue and its batches; null without it. */
   pace: PacedResult | null;
   appErrors: number;
   messageErrors: number;
-  /** pace: the queue held exactly (its batches, the PACE check, the phones); queueFanOut: its frames against the fan-out target. */
-  verdict: { action: boolean; fanOut: boolean; memory: boolean; cpu: boolean; clean: boolean; pace: boolean; queueFanOut: boolean; pass: boolean };
+  /** pace: the one queue held exactly (its batches, the PACE check, the phones). */
+  verdict: { action: boolean; fanOut: boolean; memory: boolean; cpu: boolean; clean: boolean; pace: boolean; pass: boolean };
 }
 
 interface PacedResult {
   pace: LoadPace;
+  /** The hold after the opening, in minutes, and the first batch's time (T0 + the hold). */
+  holdMinutes: number;
+  firstAt: number;
   /** The batches planned (pacePlan), and those the audit log recorded: their problem against the plan, or null. */
   planned: number;
   batches: PacedBatch[];
   problem: string | null;
-  /** From each batch's time to the engine's writing it. */
+  /** From each batch's logical time to the engine's writing it (a batch after the first waits for its phones' readings, G2). */
   engineLag: Stats;
   /** The TEST REPORT's PACE check on the release's entries and log. */
   check: { pass: boolean; line: string };
   placed: number;
   admitted: number;
-  /** The queue on the phones (queueVerdict), its admissions on the phone after their batch's time. */
-  phones: Omit<ReturnType<typeof queueVerdict>, 'delivery'> & { delivery: Stats };
-  /** The queue's frames: from each pulse's time to the last phone waiting on a stream that read it, over the pulses that reached 95 % of them. */
-  fanOut: { pulses: number; full: number; received: Stats };
-  /** W2: the app's memory before T0 (everyone in the room on a stream) and from T0 + QUEUE_SETTLE_MS on: its peak, the streams open then, the most open. */
+  /** The one queue on the phones (queueVerdict): its first estimates' error and its turns on the phone after they began. */
+  phones: Omit<ReturnType<typeof queueVerdict>, 'estimateError' | 'delivery'> & { estimateError: Stats; delivery: Stats };
+  /** Queue frames read by a phone: none since lot Q1 (D8). */
+  queueFrames: number;
+  /** The app's memory before T0 (everyone in the room on a stream) and from T0 + QUEUE_SETTLE_MS on: its peak, the streams open then, the most open. */
   memory: { beforeT0: PhaseFigures; fromT0: PhaseFigures };
-  /** macOS: the two readings of `footprint` (just before T0, once the release is over). */
+  /** macOS: the two readings of `footprint` (just before T0, once the queue is over). */
   footprints: FootprintSample[];
   memoryByMinute: { minute: number; rssMib: number; footprintMib: number | null; streams: number }[];
-  /** W2: the phones behind the next batch: their streams ended (or refused) by the server, opened again once their batch was the next one, their state reads. */
+  /** The phones no batch could reach next: their streams ended (or refused) by the server, opened again once one could, their state reads. */
   queueStreams: { parked: number; reopened: number; stateReads: Stats; stateReadsNot200: number; stateReadsPeakPerSecond: number };
 }
 
@@ -1286,15 +1308,27 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
             done();
           });
         });
-  child.send({ type: 'setup', viewers: viewersWanted, ...releaseTimes(o, viewersWanted), databaseUrl: o.databaseUrl, databaseSocket: pglite ? socketPath : null, seed: o.seed, pace: o.pace } satisfies SetupMessage);
+  child.send({
+    type: 'setup',
+    viewers: viewersWanted,
+    ...releaseTimes(o, viewersWanted),
+    databaseUrl: o.databaseUrl,
+    databaseSocket: pglite ? socketPath : null,
+    seed: o.seed,
+    pace: o.pace,
+    holdMinutes: o.holdMinutes,
+  } satisfies SetupMessage);
   const ready = await nextMessage<ReadyMessage>(child, 'ready');
   process.stdout.write(`  ${viewersWanted}: app ready (port ${ready.port}, seeded in ${(ready.seedMs / 1000).toFixed(1)} s, calibration ${ready.calibrationMs} ms)\n`);
 
   const random = prng(o.seed + viewersWanted);
-  // --pace: the batches the level needs; until the last, a turn ends in RELEASE MY PLACE, so the release lasts.
-  const plan = o.pace ? pacePlan(viewersWanted, o.pace, ready.opensAt) : null;
-  /** The queue's frames the waiting phones read. */
-  const queueEvents: QueueEvent[] = [];
+  // --one-queue: the batches the level needs, the first at T0 + the hold; each turn ends in RELEASE MY PLACE.
+  const firstAt = ready.opensAt + o.holdMinutes * 60_000;
+  const plan = o.pace ? pacePlan(viewersWanted, o.pace, firstAt) : null;
+  /** Queue frames a phone read (`queue` events, or a state's `queue`): none since lot Q1 (D8). */
+  let queueFrames = 0;
+  /** The phones whose ENTER was answered 200. */
+  const entered = new Set<Viewer>();
   const agent = new Agent({ keepAlive: true });
   const actions: ActionRecord[] = [];
   /** Guests who came after the after-room, or their size, had sold out. */
@@ -1325,13 +1359,11 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
     acting: { main: false, after: false },
     outcome: { main: null, after: null },
     door: null,
-    queue: { waited: false, firstEta: null, lastPlace: null, waitingFor: null, admittedSeenAt: null, admittedFor: null },
+    queue: { waited: false, firstEstimate: null, lastPlace: null, lastNext: null, turnAt: null, turnSeenAt: null, leaks: 0 },
     behind: false,
     polling: false,
   }));
-  /** --pace: the phones waiting for their batch on a stream (the next batch's), which the queue's frames reach. */
-  const queueStreaming = new Set<Viewer>();
-  /** --pace: the state reads of the phones behind the next batch (W2), and the streams opened again once it was theirs. */
+  /** --one-queue: the state reads of the phones no batch could reach next, and the streams opened again once one could. */
   const stateReads: { ms: number; status: number; at: number }[] = [];
   let reopened = 0;
   /** The phones whose stream the server ended (or refused) behind the next batch. */
@@ -1399,8 +1431,8 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
         if (ids.length) await call(v, room, 'addons', 'PUT', '/addons', { addonIds: [ids[Math.floor(random() * ids.length)]!] });
       }
       await sleep(random() * 1000);
-      // --pace: before the last batch, the place given back, so that the pieces last until every batch is admitted.
-      if (plan && room === 'main' && Date.now() < plan.lastBatchAt) {
+      // --one-queue: the place given back (the runbook's run A: nothing sold, every entrant served once).
+      if (plan && room === 'main') {
         if ((await call(v, room, 'release', 'POST', '/release', {})).status === 200) v.outcome[room] = 'RELEASED';
       } else if (random() < 0.7) {
         if ((await call(v, room, 'confirm', 'POST', '/confirm', {})).status === 200) v.outcome[room] = 'CONFIRMED';
@@ -1408,6 +1440,16 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
     } finally {
       v.acting[room] = false;
     }
+  };
+
+  /** A reading of its own queue figures (a `you` event or a state read) at `now` on the server's clock. */
+  const readQueue = (v: Viewer, queue: Record<string, unknown> | null | undefined, now: number) => {
+    if (!queue) return;
+    if (Object.keys(queue).some((k) => !QUEUE_KEYS.has(k))) v.queue.leaks++;
+    v.queue.waited = true;
+    v.queue.lastPlace = typeof queue.place === 'number' ? queue.place : v.queue.lastPlace;
+    v.queue.lastNext = queue.next === true;
+    if (v.queue.firstEstimate === null && typeof queue.waitMs === 'number') v.queue.firstEstimate = now + queue.waitMs;
   };
 
   const onEvent = (v: Viewer, room: RoomKey, block: string, at: number) => {
@@ -1426,31 +1468,25 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
       last[room] = body as (typeof last)[RoomKey];
       if (last[room].endedReason && endRead[room] === null) endRead[room] = at;
     } else if (name === 'queue') {
-      // W2: the queue's frame, shared by the phones waiting for their batch.
-      queueEvents.push({ now: Date.parse(body.now as string), at, streaming: queueStreaming.size });
-      v.queue.waitingFor = Date.parse(body.nextBatchAt as string);
+      // M1's queue frame: gone since lot Q1 (D8), a fault if it comes.
+      queueFrames++;
     } else if (name === 'you') {
       const entry = body.entry as {
         status: string;
         position: number | null;
         turn: { at: string; token: string | null } | null;
         afterRoom?: { opensAt: string } | null;
-        queue?: { place: number; etaAt: string | null; paused: boolean; next: boolean } | null;
+        queue?: Record<string, unknown> | null;
       } | null;
       if (room === 'main') {
-        // W2: behind the next batch, the server ends this stream after this chunk (the phone then reads its state).
+        // ONE QUEUE: when no batch can reach it next, the server ends this stream after this chunk (the phone then
+        // reads its state).
         v.behind = entry?.queue?.next === false;
-        if (entry?.queue && !v.behind) queueStreaming.add(v);
-        else queueStreaming.delete(v);
-      }
-      if (room === 'main' && entry?.queue) {
-        v.queue.waited = true;
-        v.queue.lastPlace = entry.queue.place;
-        if (v.queue.firstEta === null && entry.queue.etaAt) v.queue.firstEta = Date.parse(entry.queue.etaAt);
-      } else if (room === 'main' && v.queue.waited && v.queue.admittedSeenAt === null && (entry?.status === 'QUEUED' || entry?.status === 'TURN')) {
-        // Its batch let it in: its queue gone, its entry in the line.
-        v.queue.admittedSeenAt = at;
-        v.queue.admittedFor = v.queue.waitingFor;
+        readQueue(v, entry?.queue, Date.parse(body.now as string));
+        if (entry?.status === 'TURN' && entry.turn && v.queue.turnAt === null) {
+          v.queue.turnAt = Date.parse(entry.turn.at);
+          v.queue.turnSeenAt = at;
+        }
       }
       if (room === 'main' && entry?.position != null && !v.placed) {
         v.placed = true;
@@ -1486,15 +1522,15 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
       }
       const r = await request(v, 'GET', `/api/v1/live/${ready.dropId}/state`, undefined);
       stateReads.push({ ms: r.ms, status: r.status, at: Date.now() });
-      const entry = r.json?.entry as { status: string; queue: { place: number; etaAt: string | null; next: boolean } | null } | null | undefined;
-      const frame = r.json?.queue as { nextBatchAt?: string } | undefined;
-      const pollMs = typeof r.json?.pollMs === 'number' ? r.json.pollMs : LIVE_QUEUE_POLL_MS;
+      const entry = r.json?.entry as { status: string; turn: { at: string } | null; queue: Record<string, unknown> | null } | null | undefined;
+      // D8: a state carries the room and the entry's own figures, never a queue frame.
+      if (r.json && 'queue' in r.json) queueFrames++;
+      const pollMs = typeof r.json?.pollMs === 'number' ? r.json.pollMs : QUEUE_POLL_FALLBACK_MS;
       if (r.status === 200 && entry) {
-        if (entry.queue) {
-          v.queue.waited = true;
-          v.queue.lastPlace = entry.queue.place;
-          if (v.queue.firstEta === null && entry.queue.etaAt) v.queue.firstEta = Date.parse(entry.queue.etaAt);
-          if (frame?.nextBatchAt) v.queue.waitingFor = Date.parse(frame.nextBatchAt);
+        readQueue(v, entry.queue, typeof r.json?.now === 'string' ? Date.parse(r.json.now) : Date.now());
+        if (entry.status === 'TURN' && entry.turn && v.queue.turnAt === null) {
+          v.queue.turnAt = Date.parse(entry.turn.at);
+          v.queue.turnSeenAt = Date.now();
         }
         v.behind = entry.queue?.next === false;
         if (!['QUEUED', 'TURN', 'SECURED', 'WAITING'].includes(entry.status)) {
@@ -1529,11 +1565,11 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
         stream.status = res.statusCode ?? 0;
         if (res.statusCode !== 200) {
           res.resume();
-          // W2: still behind the next batch for the server: its state read again.
+          // ONE QUEUE: still out of the next batches' reach for the server: its state read again.
           if (room === 'main' && res.statusCode === 204 && v.queue.waited && !last.main.over) {
             stream.parked = true;
             parked.add(v);
-            pollState(v, LIVE_QUEUE_POLL_MS);
+            pollState(v, QUEUE_POLL_FALLBACK_MS);
           }
           return;
         }
@@ -1549,8 +1585,7 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
         });
         res.on('close', () => {
           stream.ended = true;
-          if (room === 'main') queueStreaming.delete(v);
-          // W2: ended by the server behind the next batch: the state read, from a moment of its own.
+          // ONE QUEUE: ended by the server, no batch reaching it next: the state read, from a moment of its own.
           if (room === 'main' && v.behind && !last.main.over) {
             stream.parked = true;
             parked.add(v);
@@ -1589,19 +1624,27 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
 
   // The burst of entries, in the first seconds of the room.
   await sleep(ready.roomOpensAt - Date.now() + 50);
-  const entries = viewers.map((v) => sleep(random() * entryBurstSeconds(o) * 1000).then(() => call(v, 'main', 'enter', 'POST', '/enter', { sizeId: v.sizeId })));
+  const entries = viewers.map((v) =>
+    sleep(random() * entryBurstSeconds(o) * 1000)
+      .then(() => call(v, 'main', 'enter', 'POST', '/enter', { sizeId: v.sizeId }))
+      .then((r) => {
+        if (r.status === 200) entered.add(v);
+      }),
+  );
   await Promise.all([...interest, ...entries]);
 
-  // T0, then until the release is over and its streams have ended (--pace: the app's footprint read just before T0).
+  // T0, then until the release is over and its streams have ended (--one-queue: until every entrant has had its turn and
+  // given its place back; the app's footprint read just before T0).
   if (o.pace) {
     await sleep(ready.opensAt - 2000 - Date.now());
     await readFootprint();
   }
   await sleep(ready.opensAt - Date.now());
   const roomDone = (room: RoomKey, among: Viewer[]) => last[room].over === true && among.every((v) => { const s = v.streams[room]; return !s || s.ended || s.status !== 200; });
-  // With a pace, the release sells out after its last batch.
-  const deadline = ready.opensAt + (plan?.spanMs ?? 0) + SELL_OUT_LIMIT_MS;
-  while (Date.now() < deadline && !roomDone('main', viewers)) await sleep(200);
+  const queueDone = () => [...entered].every((v) => v.outcome.main !== null && !v.acting.main && (!v.streams.main || v.streams.main.ended || v.streams.main.status !== 200));
+  // --one-queue: every entrant served after the last batch.
+  const deadline = (plan ? plan.lastBatchAt : ready.opensAt) + SELL_OUT_LIMIT_MS;
+  while (Date.now() < deadline && !(plan ? queueDone() : roomDone('main', viewers))) await sleep(200);
   while (viewers.some((v) => v.acting.main) && Date.now() < deadline + 10_000) await sleep(100);
 
   // The after-room: its guests read its door at its T0, in a burst, open its stream and ENTER with a size.
@@ -1727,23 +1770,31 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
     afterStreams.dropped === 0 &&
     appErrors === 0 &&
     report.messageErrors === 0 &&
-    outcome.reason === 'SOLD_OUT' &&
-    outcome.confirmed === quantity &&
-    (hasAfterRoom
+    (plan
+      ? // --one-queue: every entrant in, every one served once and its place given back, nothing sold, no after-room.
+        entered.size === viewersWanted &&
+        outcome.released === viewersWanted &&
+        outcome.confirmed === 0 &&
+        guests.length === 0 &&
+        facts.afterRoom.guests === 0 &&
+        facts.orders.main === 0 &&
+        facts.orders.afterRoom === 0
+      : outcome.reason === 'SOLD_OUT' &&
+        outcome.confirmed === quantity &&
+        (hasAfterRoom
       ? // Every phone the sell-out ended read the second door, and only they.
         guests.length === facts.afterRoom.guests &&
         guests.length > 0 &&
         afterOutcome.reason === 'SOLD_OUT' &&
         afterOutcome.confirmed === afterQuantity &&
         facts.afterRoom.confirmed === afterQuantity
-      : // --pace: no after-room, so no door in the last frames, no guest.
-        guests.length === 0 && facts.afterRoom.guests === 0) &&
-    // One order per piece confirmed; those of STOCKED held in stock, every other one waiting for supplier stock (plan NEXT LOT §3.5).
-    facts.orders.main === quantity &&
-    facts.orders.afterRoom === (hasAfterRoom ? afterQuantity : 0) &&
-    facts.orders.stock === stocked &&
-    facts.orders.awaiting === quantity + (hasAfterRoom ? afterQuantity : 0) - stocked &&
-    facts.orders.other === 0;
+      : guests.length === 0 && facts.afterRoom.guests === 0) &&
+        // One order per piece confirmed; those of STOCKED held in stock, every other one waiting for supplier stock (plan NEXT LOT §3.5).
+        facts.orders.main === quantity &&
+        facts.orders.afterRoom === (hasAfterRoom ? afterQuantity : 0) &&
+        facts.orders.stock === stocked &&
+        facts.orders.awaiting === quantity + (hasAfterRoom ? afterQuantity : 0) - stocked &&
+        facts.orders.other === 0);
   // The busiest five seconds of the app's CPU.
   let busiest = 0;
   for (let i = 0; i + 5 <= report.cpuBySecond.length; i++) busiest = Math.max(busiest, report.cpuBySecond.slice(i, i + 5).reduce((a, b) => a + b, 0) / 5);
@@ -1751,15 +1802,14 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
   // An action's time is the app's share (waiting for its thread, then its own work) and the database's wait. Only the
   // first runs on the app's core; the second is PGlite's one connection here, a stand-in already pessimistic.
   const appShare = report.loopDelayMs.p99 + (report.cpuMs.user + report.cpuMs.system) / Math.max(1, actions.length + doorReads.length);
-  // --pace: the door (I'LL BE THERE, ENTER in the main room, before T0) apart from what the pace meters.
+  // --one-queue: the door (I'LL BE THERE, ENTER in the main room, before T0) apart from what the pace meters.
   const atDoor = (a: ActionRecord) => a.room === 'main' && (a.kind === 'interest' || a.kind === 'enter');
   const door = stats(actions.filter(atDoor).map((a) => a.ms));
   const behind = stats(actions.filter((a) => !atDoor(a)).map((a) => a.ms));
   const vpsP95 = (o.pace ? behind.p95 : all.p95) + (f - 1) * appShare;
 
-  // --pace: the queue's frames, the batches on the server, the queue on the phones.
-  // W2: the memory and the streams before T0 (everyone in the room on a stream) and from T0 + QUEUE_SETTLE_MS on (the
-  // streams behind the next batch ended).
+  // --one-queue: the batches on the server, the queue on the phones; the memory and the streams before T0 (everyone in
+  // the room on a stream) and from T0 + QUEUE_SETTLE_MS on (the streams of those no batch can reach next ended).
   const phase = (from: number, to: number): PhaseFigures => {
     const m = report.memory.filter((x) => x.at >= from && x.at < to);
     const peak = m.reduce<MemorySample | null>((a, x) => (a === null || x.rss > a.rss ? x : a), null);
@@ -1774,30 +1824,22 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
   };
   let paced: PacedResult | null = null;
   if (o.pace && plan) {
-    // The phones a pulse's frame was for: those waiting on a stream then (W2: the next batch's; at T0 every waiting
-    // phone reads one frame before its stream ends behind it).
-    const byPulse = new Map<number, { n: number; last: number; streaming: number }>();
-    for (const e of queueEvents) {
-      const r = byPulse.get(e.now) ?? { n: 0, last: 0, streaming: 0 };
-      r.n++;
-      r.last = Math.max(r.last, e.at);
-      r.streaming = Math.max(r.streaming, e.streaming);
-      byPulse.set(e.now, r);
-    }
-    const fullQueue = [...byPulse.entries()].filter(([, r]) => r.streaming > 0 && r.n >= FULL_PULSE * r.streaming);
     const batches = facts.pace?.batches ?? [];
-    const phones = queueVerdict(viewers.map((v) => v.queue), o.pace);
+    // A turn from half a gap after the first batch's time is a later batch's: G2 holds for it.
+    const phones = queueVerdict(viewers.map((v) => v.queue), firstAt + (o.pace.minutes * 60_000) / 2);
     paced = {
       pace: o.pace,
+      holdMinutes: o.holdMinutes,
+      firstAt,
       planned: plan.batches,
       batches,
-      problem: facts.pace ? pacedBatchesProblem(batches, viewersWanted, o.pace, ready.opensAt) : 'The release has no pace.',
+      problem: facts.pace ? pacedBatchesProblem(batches, viewersWanted, o.pace, firstAt) : 'The release has no pace.',
       engineLag: stats(batches.map((b) => b.recordedAt - b.at)),
       check: facts.pace?.check ?? { pass: false, line: 'No PACE check.' },
       placed: facts.pace?.placed ?? 0,
       admitted: facts.pace?.admitted ?? 0,
-      phones: { ...phones, delivery: stats(phones.delivery) },
-      fanOut: { pulses: byPulse.size, full: fullQueue.length, received: stats(fullQueue.map(([now, r]) => r.last - now)) },
+      phones: { ...phones, estimateError: stats(phones.estimateError), delivery: stats(phones.delivery) },
+      queueFrames,
       memory: { beforeT0: phase(0, ready.opensAt), fromT0: phase(ready.opensAt + QUEUE_SETTLE_MS, Number.POSITIVE_INFINITY) },
       footprints,
       // Each minute from the streams' opening: the app's peak resident memory and footprint, the streams then (results.json only).
@@ -1817,13 +1859,13 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
       paced.check.pass &&
       paced.placed === viewersWanted &&
       paced.admitted === viewersWanted &&
-      // Everyone beyond the first batch waited (the first batch too, when a pulse came between T0 and its pass).
+      // Everyone waited (the line formed at T0, the first batch at its end of the hold or with the first frame), every
+      // one had its turn, each after the first batch having read that it was next (G2), none read the pace (D8).
       paced.phones.waited >= viewersWanted - o.pace!.batch &&
-      paced.phones.admitted === paced.phones.waited &&
-      paced.phones.orderBroken === 0);
-  // The queue's frames held against the fan-out target, apart from the queue's exactness (none to read when no one waited).
-  const queueFanOut =
-    paced === null || viewersWanted <= o.pace!.batch || (paced.fanOut.received.n > 0 && paced.fanOut.received.p95 * f < LIVE_LOAD_TARGETS.fanOutP95Ms);
+      paced.phones.served === paced.phones.waited &&
+      paced.phones.unread === 0 &&
+      paced.phones.leaks === 0 &&
+      paced.queueFrames === 0);
   const verdict = {
     action: vpsP95 < LIVE_LOAD_TARGETS.actionP95Ms,
     fanOut: fan.n > 0 && fan.p95 * f < LIVE_LOAD_TARGETS.fanOutP95Ms,
@@ -1831,10 +1873,9 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
     cpu: busiest * f < LIVE_LOAD_TARGETS.cpuCores,
     clean,
     pace: queueHeld,
-    queueFanOut,
     pass: false,
   };
-  verdict.pass = verdict.action && verdict.fanOut && verdict.memory && verdict.cpu && verdict.clean && verdict.pace && verdict.queueFanOut;
+  verdict.pass = verdict.action && verdict.fanOut && verdict.memory && verdict.cpu && verdict.clean && verdict.pace;
 
   return {
     viewers: viewersWanted,
@@ -1899,7 +1940,7 @@ function printLevel(r: LevelResult): void {
   const p = r.pace;
   const paris = (at: number) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).format(at);
   const lines = [
-    `### ${r.viewers} ${p ? `with a pace of ${p.pace.batch} every ${p.pace.minutes} min` : 'in the room'} (calibration ${r.calibrationMs} ms; a VPS vCPU taken as ${f} times slower)`,
+    `### ${r.viewers} ${p ? `in the one queue, ${p.pace.batch} turns every ${p.pace.minutes} min${p.holdMinutes ? ` after a hold of ${p.holdMinutes} min` : ''}` : 'in the room'} (calibration ${r.calibrationMs} ms; a VPS vCPU taken as ${f} times slower)`,
     '',
     '| Figure | Measured | Target, on the VPS |',
     '|---|---|---|',
@@ -1928,23 +1969,22 @@ function printLevel(r: LevelResult): void {
     `| CPU, the app | busiest five seconds **${r.cpu.busiest5s} of a core** (× ${f}: ${round(r.cpu.busiest5s * f)}) · ${r.cpu.cores} over ${(r.cpu.wallMs / 1000).toFixed(0)} s (user ${r.cpu.userMs} ms, system ${r.cpu.systemMs} ms) | < ${LIVE_LOAD_TARGETS.cpuCores} core: ${yes(r.verdict.cpu)} |`,
     `| The end | ${r.outcome.reason ?? 'not over'} ${r.outcome.endedMs !== null ? `${(r.outcome.endedMs / 1000).toFixed(1)} s after T0` : ''} · ${r.outcome.confirmed} confirmed · ${r.outcome.released} released | every piece confirmed |`,
     r.afterRoom.none
-      ? `| The after-room | none: a paced release is published without one (the run measures the queue) | |`
+      ? `| The after-room | none: a release of the one queue is published without one (the run measures the queue) | |`
       : `| The after-room | ${r.afterRoom.guests} guests (${r.facts.afterRoom.guests} remembered) · door read p95 ${ms(r.afterRoom.doorRead.p95)} · ${r.afterRoom.streams.opened} streams, ${r.afterRoom.streams.refused} refused, ${r.afterRoom.streams.dropped} dropped · ${r.afterRoom.late} came after their size or the room sold out · ${r.afterRoom.outcome.reason ?? 'not over'} ${r.afterRoom.outcome.endedMs !== null ? `${(r.afterRoom.outcome.endedMs / 1000).toFixed(1)} s after its T0` : ''} · ${r.afterRoom.outcome.confirmed} confirmed · ${r.afterRoom.outcome.released} released | every piece confirmed |`,
     `| The orders | ${r.facts.orders.main} + ${r.facts.orders.afterRoom} (after-room) · ${r.facts.orders.stock} held in stock · ${r.facts.orders.awaiting} awaiting stock · ${r.facts.orders.other} other · ${r.facts.journal} journal rows | one per piece |`,
     `| Answers other than 200 · app errors | ${r.actions.unexpected.length} · ${r.appErrors} | none: ${yes(r.verdict.clean)} |`,
     ...(p
       ? [
-          `| The queue's frames, the pulse's time → the last waiting phone (${p.fanOut.full} full pulses of ${p.fanOut.pulses}) | p50 ${ms(p.fanOut.received.p50)} · **p95 ${ms(p.fanOut.received.p95)}**${vps(p.fanOut.received.p95)} · max ${ms(p.fanOut.received.max)} | p95 < ${LIVE_LOAD_TARGETS.fanOutP95Ms} ms: ${yes(r.verdict.queueFanOut)} |`,
-          `| The batches on the server (${p.batches.length} of ${p.planned} planned) | ${p.batches.map((b) => b.entries).join(' · ')} admitted, the first at ${p.batches.length ? `${paris(p.batches[0]!.at)} Paris` : '—'} (T0), each ${p.pace.minutes} min after the last · the engine wrote each p95 ${ms(p.engineLag.p95)} · max ${ms(p.engineLag.max)} after its time · ${p.admitted} of ${p.placed} placed admitted | ${p.problem ?? 'exactly X every Y, on their times'} |`,
+          `| The batches on the server (${p.batches.length} of ${p.planned} planned) | ${p.batches.map((b) => b.entries).join(' · ')} turns, the first at ${p.batches.length ? `${paris(p.batches[0]!.at)} Paris` : '—'} (T0${p.holdMinutes ? ` + the hold of ${p.holdMinutes} min` : ''}), each ${p.pace.minutes} min after the last on its logical time · the engine wrote each p95 ${ms(p.engineLag.p95)} · max ${ms(p.engineLag.max)} after its time · ${p.admitted} of ${p.placed} placed given a turn | ${p.problem ?? 'exactly X every Y, on their times'} |`,
           `| The PACE check (TEST REPORT) | ${p.check.line} | ${p.check.pass ? 'passed' : 'FAILED'} |`,
-          `| The queue on the phones | ${p.phones.waited} waited · ${p.phones.admitted} admitted, in ${p.phones.batchesSeen} batches · ${p.phones.orderBroken} from a place beyond ${p.pace.batch} · ${p.phones.etaKept} at the time first estimated · the admission on the phone p50 ${ms(p.phones.delivery.p50)} · p95 ${ms(p.phones.delivery.p95)} · max ${ms(p.phones.delivery.max)} after the batch's time | every one admitted, in the line's order |`,
-          `| The queue held | | ${yes(r.verdict.pace)} |`,
-          `| Behind the next batch (W2) | ${p.queueStreams.parked} streams ended by the server · ${p.queueStreams.reopened} opened again once their batch was the next · ${p.queueStreams.stateReads.n} state reads instead, p50 ${ms(p.queueStreams.stateReads.p50)} · p95 ${ms(p.queueStreams.stateReads.p95)} · max ${ms(p.queueStreams.stateReads.max)}, at most ${p.queueStreams.stateReadsPeakPerSecond} in a second, ${p.queueStreams.stateReadsNot200} other than 200 | |`,
+          `| The queue on the phones | ${p.phones.waited} waited · ${p.phones.served} had their turn · ${p.phones.unread} after the first batch without having read « next » (G2) · ${p.phones.leaks} readings with more than their own figures, ${p.queueFrames} queue frames (D8) · the first estimate off by p50 ${ms(p.phones.estimateError.p50)} · p95 ${ms(p.phones.estimateError.p95)} · max ${ms(p.phones.estimateError.max)} · the turn on the phone p50 ${ms(p.phones.delivery.p50)} · p95 ${ms(p.phones.delivery.p95)} · max ${ms(p.phones.delivery.max)} after it began | every one served, each having read « next », none the pace |`,
+          `| The one queue held | | ${yes(r.verdict.pace)} |`,
+          `| Out of the next batches' reach | ${p.queueStreams.parked} streams ended by the server · ${p.queueStreams.reopened} opened again once a batch could reach them · ${p.queueStreams.stateReads.n} state reads instead, p50 ${ms(p.queueStreams.stateReads.p50)} · p95 ${ms(p.queueStreams.stateReads.p95)} · max ${ms(p.queueStreams.stateReads.max)}, at most ${p.queueStreams.stateReadsPeakPerSecond} in a second, ${p.queueStreams.stateReadsNot200} other than 200 | |`,
           `| Memory before T0 / from T0 + ${QUEUE_SETTLE_MS / 1000} s | ${phaseLine(p.memory.beforeT0)} / ${phaseLine(p.memory.fromT0)} | |`,
         ]
       : []),
     '',
-    `**${r.verdict.pass ? 'Every target met' : 'A target not met'}** at ${r.viewers} ${p ? `with a pace of ${p.pace.batch} every ${p.pace.minutes} min` : 'in the room'}.`,
+    `**${r.verdict.pass ? 'Every target met' : 'A target not met'}** at ${r.viewers} ${p ? `in the one queue, ${p.pace.batch} turns every ${p.pace.minutes} min` : 'in the room'}.`,
     '',
   ];
   if (r.actions.unexpected.length) {
@@ -1960,7 +2000,7 @@ function printLevel(r: LevelResult): void {
 
 async function drive(o: Options): Promise<void> {
   process.stdout.write(
-    `LIVE RELEASES load test (${o.pace ? 'a paced release: the queue, the rules, the stock' : 'LIVE RELEASE+: the rules, the stock, the after-room'}): levels ${o.levels.join(', ')}, a VPS vCPU taken as ${o.vpsFactor} times slower, a burst of ${entryBurstSeconds(o)} s, seed ${o.seed}, ${o.databaseUrl === 'pglite:memory' ? 'PGlite in its own process' : 'PostgreSQL'}${o.pace ? `, a pace of ${o.pace.batch} every ${o.pace.minutes} min (W4)` : ''}\n`,
+    `LIVE RELEASES load test (${o.pace ? 'ONE QUEUE: the queue, the rules, the stock' : 'LIVE RELEASE+: the rules, the stock, the after-room'}): levels ${o.levels.join(', ')}, a VPS vCPU taken as ${o.vpsFactor} times slower, a burst of ${entryBurstSeconds(o)} s, seed ${o.seed}, ${o.databaseUrl === 'pglite:memory' ? 'PGlite in its own process' : 'PostgreSQL'}${o.pace ? `, ${o.pace.batch} turns every ${o.pace.minutes} min${o.holdMinutes ? ` after a hold of ${o.holdMinutes} min` : ''} (--one-queue)` : ''}\n`,
   );
   const results: LevelResult[] = [];
   for (const level of o.levels) {
@@ -1977,7 +2017,7 @@ async function drive(o: Options): Promise<void> {
   }
   process.stdout.write(
     o.pace
-      ? `With a pace: ${passing.length ? `the queue held and every target met at ${passing.join(', ')}` : 'no level met every target'}. A paced run measures the queue; LIVE_ROOM_CAPACITY is not read from it.\n`
+      ? `The one queue: ${passing.length ? `it held and every target met at ${passing.join(', ')}` : 'no level met every target'}. A run of the one queue measures the queue; LIVE_ROOM_CAPACITY is not read from it.\n`
       : capacity === null
         ? 'No level met every target.\n'
         : `Capacity: ${capacity} in the room (levels met: ${passing.join(', ')}). LIVE_ROOM_CAPACITY (services/live-insights.ts) is set from it.\n`,

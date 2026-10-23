@@ -1947,9 +1947,12 @@ function ordersCheck(missing: number, confirmed: number): TestReportCheck {
     : { id: 'ORDERS', label: 'Every confirmed place has its order', pass: false, line: `${missing} of ${confirmed} confirmed ${confirmed === 1 ? 'place has' : 'places have'} no order.` };
 }
 
-// ── The PACE check (ONE QUEUE; lot Q1: step Q1.2 reads the batches of turns, step Q1.4 rewrites it whole) ─────
+// ── The PACE check (ONE QUEUE, D14: the 5,000 proof's two checks; lot Q1, step Q1.4) ──────────────────────────────
 
-/** The audit actions the PACE check reads, in their order: the pace set, the batches, LET IN, every pause and resume, the hold shortened or ended. */
+/**
+ * The audit actions the PACE check reads, in their order: the pace set, the batches, LET IN, every pause and resume, the
+ * hold shortened or ended, ADD PIECES.
+ */
 const PACE_ACTIONS = Object.freeze([
   'drop.live.pace',
   'drop.live.batch',
@@ -1960,7 +1963,15 @@ const PACE_ACTIONS = Object.freeze([
   'drop.live.resume',
   'drop.live.hold.shorten',
   'drop.live.hold.end',
+  'drop.live.stock',
 ] as const);
+
+/**
+ * A slot of the pace that gave no turn records nothing (services/live.ts giveDue audits a batch that gave turns): it is
+ * judged on what the engine's pass could see, from the slot (or the batch before it, when that one ran later) for this
+ * long. The engine passes every second, and an empty batch waits at most for the next frame.
+ */
+const PACE_SLOT_MARGIN_MS = 5000;
 
 interface PaceOf {
   batch: number;
@@ -1971,56 +1982,78 @@ interface PaceOf {
 export type PaceEvent =
   /** SET PACE: from the next batch on (the next batch keeps its time when there was a pace already). */
   | { kind: 'PACE'; at: Date; before: PaceOf | null; after: PaceOf }
-  /** A batch that gave turns (`drop.live.batch`), at its logical time: the engine's scheduled one, or NEXT BATCH NOW's (`extra`). */
+  /** A batch that gave turns (`drop.live.batch`), at its logical time: the engine's scheduled one, or NEXT BATCH NOW's (`extra`, its press time). */
   | { kind: 'BATCH'; at: Date; batch: number; entries: number; extra: boolean; recordedAt: Date }
   /** LET IN gave this entry its turn out of the batches. */
   | { kind: 'LET_IN'; at: Date; entryId: string }
   /**
-   * A pause or a resume, the pace's own or the release's, or the hold shortened or ended (`firstAt`: the first batch's
-   * time before it): the times of the batches start again from the next one.
+   * A pause or a resume, the pace's own or the release's (`hold`: the times of the batches start again from the next
+   * one), or the hold shortened or ended: `firstAt` the first batch's time before it, `nextAt` its time after it.
    */
-  | { kind: 'HOLD'; at: Date; firstAt?: Date };
+  | { kind: 'HOLD'; at: Date; hold?: { by: 'PACE' | 'RELEASE'; on: boolean }; firstAt?: Date; nextAt?: Date }
+  /** ADD PIECES: a size's stock grew by `pieces`. */
+  | { kind: 'STOCK'; at: Date; sizeId: string; pieces: number };
 
-/** What the PACE check reads: the release's entries placed in the line, and its pace's history. */
+/** What the PACE check reads: the release's sizes, its entries placed in the line, and its pace's history. */
 export interface PaceFacts {
   opensAt: Date;
-  /** The release's end, or now. */
+  /** The release's end (its close at the latest), or now. */
   end: Date;
   /** The pace now. */
   pace: PaceOf;
   /** The hold after the opening, in minutes, as it stands (a hold shortened or ended says the first batch's time before it). */
   holdMinutes?: number;
+  /** Each size's stock now (ADD PIECES, in `events`, says when it grew). */
+  sizes: { id: string; stock: number }[];
   entries: {
     id: string;
     position: number;
     guaranteed: boolean;
-    /** Its size (a set's entry: its first piece's) and its pieces: the order of the turns is kept within a size. */
-    sizeId?: string;
-    quantity?: number;
+    /** Its sizes (a set's entry: one per piece of the set), and its pieces in each. */
+    sizeIds: string[];
+    quantity: number;
     queuedAt: Date | null;
+    /** Its batch's logical time and number (LET IN: the batches given before it). */
     admittedAt: Date | null;
     batch: number | null;
+    /** When its turn was given, on the engine's clock (a batch's moment). */
+    turnAt: Date | null;
+    /** When it paid (kept for a paid place removed since). */
+    confirmedAt: Date | null;
     endedAt: Date | null;
   }[];
   events: PaceEvent[];
 }
 
-/** What the PACE check reads of a paced release: its entries placed in the line, and its pace's and pauses' history in audit order. */
+/** What the PACE check reads of a paced release: its sizes, its entries placed in the line, and its pace's and pauses' history in audit order. */
 export async function livePaceFacts(db: Db, d: DropRow, now: Date): Promise<PaceFacts> {
   const rows = await db
     .selectFrom('live_entries')
-    .select(['id', 'position', 'size_id', 'quantity', 'guarantee_id', 'queued_at', 'admitted_at', 'admitted_batch', 'ended_at'])
+    .select(['id', 'position', 'size_id', 'quantity', 'guarantee_id', 'queued_at', 'admitted_at', 'admitted_batch', 'turn_at', 'confirmed_at', 'ended_at'])
     .where('drop_id', '=', d.id)
     .where('position', 'is not', null)
     .execute();
-  const audits = await db
-    .selectFrom('audit_logs')
-    .select(['action', 'occurred_at', 'details'])
-    .where('target_type', '=', 'drop')
-    .where('target_id', '=', d.id)
-    .where('action', 'in', [...PACE_ACTIONS])
-    .orderBy('id')
-    .execute();
+  const sizes = await db.selectFrom('drop_sizes').select(['id', 'stock']).where('drop_id', '=', d.id).execute();
+  // Macro scope K44 T1: a set's entry takes its turn in each of its sizes.
+  const setSizes = new Map<string, string[]>();
+  if (d.set_id !== null) {
+    const pieces = await db
+      .selectFrom('live_entry_sizes as x')
+      .innerJoin('live_entries as e', 'e.id', 'x.entry_id')
+      .select(['x.entry_id', 'x.size_id'])
+      .where('e.drop_id', '=', d.id)
+      .orderBy('x.piece')
+      .execute();
+    for (const p of pieces) setSizes.set(p.entry_id, [...(setSizes.get(p.entry_id) ?? []), p.size_id]);
+  }
+  const target = () => db.selectFrom('audit_logs').select(['action', 'occurred_at', 'details']).where('target_type', '=', 'drop').where('target_id', '=', d.id);
+  const audits = await target().where('action', 'in', [...PACE_ACTIONS]).orderBy('id').execute();
+  // A paid place removed since (END TEST, the console's REMOVE) loses its `confirmed_at`: PAY's own record keeps it.
+  const paid = new Map<string, Date>();
+  for (const a of await target().where('action', '=', 'drop.live.confirm').execute()) {
+    const x = (typeof a.details === 'string' ? JSON.parse(a.details) : (a.details ?? {})) as Record<string, unknown>;
+    if (typeof x.entryId === 'string') paid.set(x.entryId, new Date(a.occurred_at));
+  }
   const events: PaceEvent[] = [];
   for (const a of audits) {
     const x = (typeof a.details === 'string' ? JSON.parse(a.details) : (a.details ?? {})) as Record<string, unknown>;
@@ -2032,23 +2065,33 @@ export async function livePaceFacts(db: Db, d: DropRow, now: Date): Promise<Pace
     } else if (a.action === 'drop.live.batch') events.push({ kind: 'BATCH', at: new Date(String(x.at)), batch: Number(x.batch), entries: Number(x.turns), extra: x.extra === true, recordedAt: at });
     else if (a.action === 'drop.live.let_in') {
       if (x.admitted === true && typeof x.entryId === 'string') events.push({ kind: 'LET_IN', at, entryId: x.entryId });
-    } else if (a.action === 'drop.live.hold.shorten' || a.action === 'drop.live.hold.end') events.push({ kind: 'HOLD', at, firstAt: new Date(String(x.before)) });
-    else events.push({ kind: 'HOLD', at });
+    } else if (a.action === 'drop.live.hold.shorten') events.push({ kind: 'HOLD', at, firstAt: new Date(String(x.before)), nextAt: new Date(String(x.after)) });
+    else if (a.action === 'drop.live.hold.end') events.push({ kind: 'HOLD', at, firstAt: new Date(String(x.before)), nextAt: new Date(String(x.at)) });
+    else if (a.action === 'drop.live.stock') {
+      if (typeof x.sizeId === 'string') events.push({ kind: 'STOCK', at, sizeId: x.sizeId, pieces: Number(x.pieces) });
+    } else {
+      const by = a.action === 'drop.live.pace.pause' || a.action === 'drop.live.pace.resume' ? 'PACE' : 'RELEASE';
+      events.push({ kind: 'HOLD', at, hold: { by, on: a.action.endsWith('.pause') } });
+    }
   }
+  const last = Math.min(d.ended_at ? d.ended_at.getTime() : now.getTime(), now.getTime(), d.closes_at.getTime());
   return {
     opensAt: d.opens_at,
-    end: d.ended_at && d.ended_at.getTime() < now.getTime() ? d.ended_at : now,
+    end: new Date(last),
     pace: { batch: d.pace_batch!, minutes: d.pace_minutes! },
     holdMinutes: Number(d.pace_hold_minutes ?? 0),
+    sizes: sizes.map((s) => ({ id: s.id, stock: s.stock })),
     entries: rows.map((r) => ({
       id: r.id,
       position: r.position!,
       guaranteed: r.guarantee_id !== null,
-      sizeId: r.size_id,
+      sizeIds: d.set_id === null ? [r.size_id] : (setSizes.get(r.id) ?? [r.size_id]),
       quantity: r.quantity,
       queuedAt: r.queued_at,
       admittedAt: r.admitted_at,
       batch: r.admitted_batch,
+      turnAt: r.turn_at,
+      confirmedAt: r.confirmed_at ?? paid.get(r.id) ?? null,
       endedAt: r.ended_at,
     })),
     events,
@@ -2062,66 +2105,182 @@ const parisClock = (at: Date): string =>
 const paceWords = (p: PaceOf): string => `${p.batch} every ${p.minutes} min`;
 
 /**
- * The PACE check of a LIVE RELEASE (ONE QUEUE, lot Q1 step Q1.2; step Q1.4 rewrites it whole with the free pieces, D14):
- * every turn given by a batch (LET IN apart) is in a batch the log recorded (`drop.live.batch`), at its logical time; no
- * batch gave more than X (the pace in force); within each size, nobody waiting with as few pieces was passed over by a
- * batch (the order of the turns: the house's guarantee first, then the place); and the scheduled batches came on the
- * pace's times, the first at T0 + the hold, none before its time (a pause, a resume, a hold shortened or ended, or a
- * pace set starts the times again from the next batch; NEXT BATCH NOW is an extra batch that moves no time). A batch
- * that gave fewer than X turns while people waited, or a slot that gave none, is ONE QUEUE's rule whenever no piece of
- * their size was free: judging it needs the free pieces at each batch, which Q1.4's check reads (N5).
+ * The PACE check of a LIVE RELEASE (ONE QUEUE, D14, ANSWERS B13: "Proof: 5,000 entrants, both checks (more pieces than
+ * entrants: exactly X turns every Y, hold respected; fewer pieces: at most X per batch, in order, nobody eligible left
+ * waiting while a piece of their size was free)"; eligible: past the hold and placed by the batch's time), from the
+ * release's entries and its audit log:
+ *
+ *  1. every turn was given by a batch the log recorded (`drop.live.batch`, at its logical time, its turns given at one
+ *     moment) or by LET IN; no batch gave more than X (the pace in force); and each batch, walked in the order of the
+ *     turns as the engine walks it (the house's guarantee first, then the place; a place wanting more than its size can
+ *     still serve passed over, one that does not fit stopping its sizes), gave no turn behind someone of its size who
+ *     waited, and left nobody eligible waiting while a piece of their size was free, unless it had given its X before
+ *     reaching them (N5: read per batch, from the pieces each size held, had paid and had in stock at that moment);
+ *  2. the hold respected: the first scheduled batch at T0 + the hold (or when SHORTEN THE HOLD or END THE HOLD NOW put
+ *     it), none before; a turn before it only by NEXT BATCH NOW or LET IN, each in the log;
+ *  3. the scheduled batches on the pace's times, Y apart from the first (a pause, a resume or the hold shortened or
+ *     ended starting the times again from the next batch; SET PACE from the next batch, which keeps its time; NEXT
+ *     BATCH NOW an extra batch that moves no time), and no slot passed without a batch while someone eligible waited
+ *     with a piece of their size free: so with more pieces than entrants, exactly X turns every Y while entrants
+ *     remained.
+ *
+ * Moments on the same millisecond are read the way that assumes no piece free that might not have been, so the check
+ * never fails a release on a tie.
  */
 export function paceCheck(f: PaceFacts): TestReportCheck {
   const fail = (line: string): TestReportCheck => ({ id: 'PACE', label: 'The pace', pass: false, line });
-  const t = (d: Date | null) => (d ? new Date(d).getTime() : null);
-  const entries = f.entries.map((e) => ({ ...e, q: t(e.queuedAt), a: t(e.admittedAt), x: t(e.endedAt), key: (e.guaranteed ? 0 : 1) * 1e9 + e.position }));
+  const ms = (d: Date | null) => (d ? new Date(d).getTime() : null);
+  const entries = f.entries.map((e) => ({
+    ...e,
+    q: ms(e.queuedAt),
+    a: ms(e.admittedAt),
+    turn: ms(e.turnAt),
+    paid: ms(e.confirmedAt),
+    x: ms(e.endedAt),
+    key: (e.guaranteed ? 0 : 1) * 1e9 + e.position,
+  }));
+  type Entry = (typeof entries)[number];
+  /** The order of the turns: the house's guarantee first, then the place. */
+  const order = [...entries].sort((p, q) => p.key - q.key);
   const letIn = new Set(f.events.filter((e): e is Extract<PaceEvent, { kind: 'LET_IN' }> => e.kind === 'LET_IN').map((e) => e.entryId));
-  // Waiting for a batch due at `at` that the engine ran at `by` (an overdue batch runs late, a slot within the margin):
-  // placed by `at`, not admitted by then, nor let in or out of the line before the engine ran.
-  const waitingAt = (at: number, by: number) =>
-    entries.filter((e) => e.q !== null && e.q <= at && (e.a === null || e.a > at) && !(letIn.has(e.id) && e.a !== null && e.a <= by) && (e.x === null || e.x > by));
+  const added = f.events.filter((e): e is Extract<PaceEvent, { kind: 'STOCK' }> => e.kind === 'STOCK');
+  const stockNow = new Map(f.sizes.map((s) => [s.id, s.stock]));
+  const inSize = new Map<string, Entry[]>(f.sizes.map((s) => [s.id, []]));
+  for (const e of entries) for (const s of e.sizeIds) inSize.get(s)?.push(e);
+  const sum = (list: readonly Entry[], on: (e: Entry) => boolean) => list.reduce((n, e) => (on(e) ? n + e.quantity : n), 0);
+  /** A size's stock at `t` (ADD PIECES at `t` itself not yet counted). */
+  const stockAt = (s: string, t: number) => (stockNow.get(s) ?? 0) - added.reduce((n, x) => (x.sizeId === s && x.at.getTime() >= t ? n + x.pieces : n), 0);
+  /** A size's pieces in a turn, a hold or paid at `t`: given before `t` (`atToo`: or at it), not ended by it. */
+  const heldAt = (s: string, t: number, atToo: boolean) => sum(inSize.get(s) ?? [], (e) => e.turn !== null && (atToo ? e.turn <= t : e.turn < t) && (e.x === null || e.x > t));
+  /** A size's pieces paid at `t`. */
+  const paidAt = (s: string, t: number) => sum(inSize.get(s) ?? [], (e) => e.paid !== null && e.paid <= t && (e.x === null || e.x > t));
+  /** The fewest pieces of a size free from `lo` to `hi`, both included (the turns given at `lo` held). */
+  const leastFree = (s: string, lo: number, hi: number) => {
+    const times = new Set([lo]);
+    for (const e of inSize.get(s) ?? []) for (const t of [e.turn, e.x]) if (t !== null && t > lo && t <= hi) times.add(t);
+    for (const x of added) if (x.sizeId === s && x.at.getTime() > lo && x.at.getTime() <= hi) times.add(x.at.getTime());
+    return Math.min(...[...times].map((t) => stockAt(s, t) - heldAt(s, t, true)));
+  };
+
+  /**
+   * One batch given at `run` (the engine's moment) for the line as placed by `at`, `own` its turns: walked in the order
+   * of the turns as the engine walks it, up to its X.
+   */
+  const batchFault = (n: number, at: number, run: number, own: ReadonlySet<string>, cap: number): string | null => {
+    const free = new Map(f.sizes.map((s) => [s.id, stockAt(s.id, run) - heldAt(s.id, run, false)]));
+    const servable = new Map(f.sizes.map((s) => [s.id, stockAt(s.id, run) - paidAt(s.id, run)]));
+    const stoppedBy = new Map<string, number>();
+    let given = 0;
+    for (const e of order) {
+      if (given >= cap) break;
+      if (own.has(e.id)) {
+        const ahead = e.sizeIds.map((s) => stoppedBy.get(s)).find((p) => p !== undefined);
+        if (ahead !== undefined) return `Place ${e.position} had its turn in batch ${n} while place ${ahead}, ahead of it in its size, waited.`;
+        for (const s of e.sizeIds) free.set(s, (free.get(s) ?? 0) - e.quantity);
+        given++;
+        continue;
+      }
+      const waiting = e.q !== null && e.q <= at && (e.turn === null || e.turn > run) && (e.x === null || e.x > run);
+      if (!waiting || e.sizeIds.length === 0 || e.sizeIds.some((s) => e.quantity > (servable.get(s) ?? 0))) continue;
+      if (!e.sizeIds.some((s) => stoppedBy.has(s)) && e.sizeIds.every((s) => e.quantity <= (free.get(s) ?? 0))) {
+        const behind = order.find((x) => own.has(x.id) && x.key > e.key);
+        return behind
+          ? `Place ${behind.position} had its turn in batch ${n} while place ${e.position}, ahead of it, waited with a piece of its size free.`
+          : `Batch ${n} gave ${own.size} of ${cap} turns while place ${e.position} waited with a piece of its size free.`;
+      }
+      for (const s of e.sizeIds) if (!stoppedBy.has(s)) stoppedBy.set(s, e.position);
+    }
+    return null;
+  };
+
+  /**
+   * A slot of the pace that gave no turn, its pass run between `lo` and `hi`: nobody placed by the slot, waiting all that
+   * while, could be served from the pieces free all that while, behind nobody of their size who might have waited.
+   */
+  const slotFault = (slot: number, lo: number, hi: number): string | null => {
+    if (hi < lo) return null;
+    const free = new Map(f.sizes.map((s) => [s.id, leastFree(s.id, lo, hi)]));
+    const stopped = new Set<string>();
+    for (const e of order) {
+      if (e.q === null || e.q > slot || e.sizeIds.length === 0 || (e.turn !== null && e.turn <= lo) || (e.x !== null && e.x <= lo)) continue;
+      // Passed over when its size could not serve it even at the most: else it may have stopped its sizes.
+      if (e.sizeIds.some((s) => e.quantity > stockAt(s, hi) - paidAt(s, lo))) continue;
+      const surely = (e.turn === null || e.turn > hi) && (e.x === null || e.x > hi) && e.sizeIds.every((s) => e.quantity <= stockAt(s, lo) - paidAt(s, hi));
+      if (surely && !e.sizeIds.some((s) => stopped.has(s)) && e.sizeIds.every((s) => e.quantity <= (free.get(s) ?? 0))) {
+        return `No batch came at ${parisClock(new Date(slot))} while place ${e.position} waited with a piece of its size free.`;
+      }
+      for (const s of e.sizeIds) stopped.add(s);
+    }
+    return null;
+  };
 
   // The pace in force at each batch, from the first SET PACE's « before » (the settings' pace), else the pace now.
   const firstSet = f.events.find((e): e is Extract<PaceEvent, { kind: 'PACE' }> => e.kind === 'PACE');
   let pace: PaceOf | null = firstSet ? firstSet.before : f.pace;
   const paces: PaceOf[] = pace ? [pace] : [];
 
-  // 1. Every entry admitted by a paced batch (1 and up, LET IN apart) belongs to a batch the log recorded, at its time.
+  // 1. Every turn given is a recorded batch's, at its logical time and at one moment, or LET IN's.
+  for (const e of entries) {
+    if (e.turn !== null && !letIn.has(e.id) && (e.batch === null || e.batch < 1)) return fail(`Place ${e.position} had a turn that no batch gave.`);
+  }
   const batches = f.events.filter((e): e is Extract<PaceEvent, { kind: 'BATCH' }> => e.kind === 'BATCH');
   const byBatch = new Map(batches.map((b) => [b.batch, b]));
-  const members = new Map<number, typeof entries>();
+  const members = new Map<number, Entry[]>();
   for (const e of entries) {
     if (e.a === null || e.batch === null || e.batch < 1 || letIn.has(e.id)) continue;
-    const b = byBatch.get(e.batch);
-    if (!b) return fail(`Place ${e.position} was admitted in batch ${e.batch}, which no batch recorded.`);
-    const list = members.get(e.batch) ?? [];
-    list.push(e);
-    members.set(e.batch, list);
+    if (!byBatch.has(e.batch)) return fail(`Place ${e.position} had its turn in batch ${e.batch}, which no batch recorded.`);
+    members.set(e.batch, [...(members.get(e.batch) ?? []), e]);
   }
+  const runs = new Map<number, number>();
   for (const b of batches) {
     const own = members.get(b.batch) ?? [];
-    // NEXT BATCH NOW's time is its entries' own (the log's is a moment later).
-    const at = b.extra && own.length > 0 ? own[0]!.a! : b.at.getTime();
-    if (own.length !== b.entries) return fail(`Batch ${b.batch} recorded ${count(b.entries, 'entry', 'entries')}; ${own.length} carry its number.`);
-    if (own.some((e) => e.a !== at)) return fail(`Batch ${b.batch} admitted its entries at different times.`);
+    if (own.length !== b.entries) return fail(`Batch ${b.batch} recorded ${count(b.entries, 'turn')}; ${own.length} carry its number.`);
+    const run = own[0]?.turn ?? b.recordedAt.getTime();
+    if (own.some((e) => e.a !== b.at.getTime() || e.turn !== run)) return fail(`Batch ${b.batch} gave its turns at different times.`);
+    runs.set(b.batch, run);
   }
 
-  // 2 to 4: walk the history in order: each batch's size and order, and the times between batches. The first batch is due
-  // at T0 + the hold as set (a hold shortened or ended says the first batch's time before it).
+  // 2 and 3: the history in order. The first batch is due at T0 + the hold as set (a hold shortened or ended says the
+  // first batch's time before it, and its time after it).
   const firstHold = f.events.find((e): e is Extract<PaceEvent, { kind: 'HOLD' }> => e.kind === 'HOLD' && e.firstAt !== undefined);
   const firstAt = firstHold?.firstAt ? new Date(firstHold.firstAt).getTime() : new Date(f.opensAt).getTime() + (f.holdMinutes ?? 0) * 60_000;
+  const end = new Date(f.end).getTime();
   let expect: number | null = pace ? firstAt : null;
   let stepMs = pace ? pace.minutes * 60_000 : 0;
+  let lastRun = Number.NEGATIVE_INFINITY;
+  /** PAUSE PACE and the release's PAUSE, holding the batches while on. */
+  const held = { PACE: false, RELEASE: false };
+  let firstGiven: number | null = null;
   let extra = 0;
-  let admitted = 0;
+  let turns = 0;
+  /**
+   * The slots from `expect` before `until` (`inclusive`: or at it) that gave no turn, their passes run by `runBy`: each
+   * judged, `expect` moved past them. At the end (`pending`), a slot whose pass may still be to come (its margin not
+   * over by then: an overdue slot waits for its frame) is not judged.
+   */
+  const emptySlots = (until: number, inclusive: boolean, runBy: number, pending = false): string | null => {
+    if (expect === null || stepMs <= 0) return null;
+    for (; inclusive ? expect <= until : expect < until; expect += stepMs) {
+      const lo = Math.max(expect, lastRun);
+      if (pending && lo + PACE_SLOT_MARGIN_MS > runBy) continue;
+      const fault = slotFault(expect, lo, Math.min(lo + PACE_SLOT_MARGIN_MS, runBy));
+      if (fault) return fault;
+    }
+    return null;
+  };
   for (const ev of f.events) {
     const at = ev.at.getTime();
-    if (ev.kind === 'LET_IN') continue;
+    if (ev.kind === 'LET_IN' || ev.kind === 'STOCK') continue;
     if (ev.kind === 'HOLD') {
-      expect = null;
+      const gap = emptySlots(at, false, at);
+      if (gap) return fail(gap);
+      if (ev.hold) held[ev.hold.by] = ev.hold.on;
+      expect = ev.nextAt && !held.PACE && !held.RELEASE ? new Date(ev.nextAt).getTime() : null;
       continue;
     }
     if (ev.kind === 'PACE') {
+      const gap = emptySlots(at, false, at);
+      if (gap) return fail(gap);
       if (at < new Date(f.opensAt).getTime()) expect = firstAt;
       else if (!pace) expect = null;
       // During the release the next batch keeps its time; from it on, the new Y.
@@ -2132,33 +2291,41 @@ export function paceCheck(f: PaceFacts): TestReportCheck {
     }
     if (!pace) return fail(`Batch ${ev.batch} came before the release had a pace.`);
     const own = members.get(ev.batch) ?? [];
-    const time = ev.extra && own.length > 0 ? own[0]!.a! : at;
-    if (own.length > pace.batch) return fail(`Batch ${ev.batch} admitted ${own.length}, more than the ${pace.batch} of the pace.`);
-    // The order of the turns within each size: nobody waiting ahead in the size, wanting no more pieces, was passed over.
-    const waiting = waitingAt(time, Math.max(time, ev.recordedAt.getTime()));
-    for (const g of own) {
-      const ahead = waiting.find((w) => w.sizeId === g.sizeId && w.key < g.key && (w.quantity ?? 1) <= (g.quantity ?? 1));
-      if (ahead) return fail(`Place ${g.position} was admitted in batch ${ev.batch} while place ${ahead.position}, ahead of it, waited.`);
-    }
-    admitted += own.length;
+    const run = runs.get(ev.batch)!;
+    if (own.length > pace.batch) return fail(`Batch ${ev.batch} gave ${own.length} turns, more than the ${pace.batch} of the pace.`);
     if (ev.extra) {
+      // NEXT BATCH NOW: the slots due by its press went before it.
+      const gap = emptySlots(at, true, run);
+      if (gap) return fail(gap);
       extra++;
-      continue;
+    } else {
+      if (expect !== null) {
+        if (at < expect) return fail(`Batch ${ev.batch} came at ${parisClock(new Date(at))}, before its time, ${parisClock(new Date(expect))}.`);
+        if ((at - expect) % stepMs !== 0) return fail(`Batch ${ev.batch} came at ${parisClock(new Date(at))}, off the pace of every ${pace.minutes} min.`);
+        const gap = emptySlots(at, false, run);
+        if (gap) return fail(gap);
+      }
+      firstGiven ??= at;
+      expect = at + stepMs;
     }
-    if (expect !== null) {
-      if (time < expect) return fail(`Batch ${ev.batch} came at ${parisClock(new Date(time))}, before its time, ${parisClock(new Date(expect))}.`);
-      if ((time - expect) % stepMs !== 0) return fail(`Batch ${ev.batch} came at ${parisClock(new Date(time))}, off the pace of every ${pace.minutes} min.`);
-    }
-    expect = time + stepMs;
+    const fault = batchFault(ev.batch, at, run, new Set(own.map((e) => e.id)), pace.batch);
+    if (fault) return fail(fault);
+    turns += own.length;
+    lastRun = Math.max(lastRun, run);
   }
+  const tail = emptySlots(end - PACE_SLOT_MARGIN_MS, true, end, true);
+  if (tail) return fail(tail);
 
   const recorded = batches.length;
-  if (recorded === 0 && letIn.size === 0) return { id: 'PACE', label: 'The pace', pass: true, line: `No batch has admitted anyone yet (${paceWords(f.pace)}): nothing to check.` };
+  if (recorded === 0 && letIn.size === 0) return { id: 'PACE', label: 'The pace', pass: true, line: `No batch has given a turn yet (${paceWords(f.pace)}): nothing to check.` };
   const set = [...new Map(paces.map((p) => [paceWords(p), p])).keys()].join(', then ');
+  const from = firstGiven !== null ? `, the first on the pace at ${parisClock(new Date(firstGiven))}` : '';
   return {
     id: 'PACE',
     label: 'The pace',
     pass: true,
-    line: `${count(recorded, 'batch', 'batches')} admitted ${count(admitted, 'entry', 'entries')} at ${set}, each on its time and in the line’s order${extra ? `, ${extra} by NEXT BATCH NOW` : ''}${letIn.size ? `; ${count(letIn.size, 'entry', 'entries')} let in by hand` : ''}.`,
+    line:
+      `${count(recorded, 'batch', 'batches')} gave ${count(turns, 'turn')} at ${set}${from}, each on its time and in the line’s order; none gave more than the pace, ` +
+      `and none left anyone waiting while a piece of their size was free${extra ? `; ${extra} by NEXT BATCH NOW` : ''}${letIn.size ? `; ${count(letIn.size, 'entry', 'entries')} let in by hand` : ''}.`,
   };
 }

@@ -21,9 +21,11 @@
  *  - M1 « 5 000 entries in 20 batches of 250 » → 20 batches of 250 turns (more pieces than entrants);
  *  - M1 « the console's live board » → its figures, with ONE QUEUE's added: turns given, LET IN, the hold, beyond the
  *    pieces, the close guard (D10, D11);
- *  - M1 « the PACE check passes / finds a fault planted » → read from ONE QUEUE's records (`drop.live.batch`); its two
- *    rules that need each batch's free pieces (« too few while others waited », « a batch skipped while people waited »)
- *    come back in step Q1.4's check (D14, N5), named in the planted faults below.
+ *  - M1 « the PACE check passes / finds a fault planted » → the ONE QUEUE check (D14, both checks; step Q1.4), read
+ *    from ONE QUEUE's records (`drop.live.batch`) and each batch's free pieces: M1's « too few while others waited »
+ *    is now « nobody eligible left waiting while a piece of their size was free » (N5, per batch), its « a batch
+ *    skipped while people waited » a slot that gave none while someone waited with a piece free, both planted below;
+ *    the 5,000 proof is test/services/one-queue-proof.test.ts.
  * New: the hold after the opening (D4: everyone waits it; SHORTEN THE HOLD and END THE HOLD NOW, never later; before
  * the announcement a setting, after it the house's settings lock: N14), at most one batch per published frame (D9: a
  * restart's overdue slots one per frame, a NEXT BATCH NOW within the frame of another batch waiting for the next one),
@@ -569,7 +571,8 @@ describe('LiveService: ONE QUEUE’s batches', () => {
     await rejects(f.live.setPace(r.id, { batch: 1, minutes: 5 }, { type: 'account', id: randomUUID() }), 'FORBIDDEN', 403);
     f.clock.set(at(61 * MINUTE));
     await rejects(f.live.setPace(r.id, { batch: 1, minutes: 5 }, f.admin), 'LIVE_ENDED', 409);
-    expect((await check(r, at(60 * MINUTE))).pass).toBe(true);
+    // The PACE check on what the engine did: this test last ran it at T0 + 14 (from T0 + 24 a batch due would be missing).
+    expect((await check(r, at(15 * MINUTE))).pass).toBe(true);
   });
 
   it('NEXT BATCH NOW gives up to X extra turns where a piece is free, the clock keeping its time; refused when none is free, while PAUSED, before T0 (D6; M1 « NEXT BATCH NOW admits one batch at once »); LET IN as today', async () => {
@@ -631,7 +634,7 @@ describe('LiveService: ONE QUEUE’s batches', () => {
     // Their turns run from when they went, about a second apart in production.
     expect((await entriesOf(t.db, r.id)).slice(2, 12).every((e) => e.turn_at!.getTime() === when.getTime())).toBe(true);
     expect(await pace(r.id)).toMatchObject({ pace_batches: 6, pace_next_at: at(6 * MINUTE) });
-    expect(await check(r, when)).toMatchObject({ pass: true, line: '6 batches admitted 12 entries at 2 every 1 min, each on its time and in the line’s order.' });
+    expect(await check(r, when)).toMatchObject({ pass: true, line: '6 batches gave 12 turns at 2 every 1 min, the first on the pace at 11:00:00 PARIS, each on its time and in the line’s order; none gave more than the pace, and none left anyone waiting while a piece of their size was free.' });
   });
 
   it('waits for the next frame with a NEXT BATCH NOW pressed in the frame of another batch (D9): checked at once, given after the frame with its press time; two presses within a second, two frames', async () => {
@@ -982,7 +985,7 @@ describe('LiveService: ONE QUEUE’s batches', () => {
       id: 'PACE',
       label: 'The pace',
       pass: true,
-      line: '20 batches admitted 5000 entries at 250 every 1 min, each on its time and in the line’s order.',
+      line: '20 batches gave 5000 turns at 250 every 1 min, the first on the pace at 11:00:00 PARIS, each on its time and in the line’s order; none gave more than the pace, and none left anyone waiting while a piece of their size was free.',
     });
   }, 180_000);
 
@@ -1026,29 +1029,42 @@ describe('LiveService: ONE QUEUE’s batches', () => {
       id: 'PACE',
       label: 'The pace',
       pass: true,
-      line: '5 batches admitted 10 entries at 2 every 5 min, then 3 every 2 min, each on its time and in the line’s order, 1 by NEXT BATCH NOW; 1 entry let in by hand.',
+      line: '5 batches gave 10 turns at 2 every 5 min, then 3 every 2 min, the first on the pace at 11:03:00 PARIS, each on its time and in the line’s order; none gave more than the pace, and none left anyone waiting while a piece of their size was free; 1 by NEXT BATCH NOW; 1 entry let in by hand.',
     });
   });
 });
 
-describe('the TEST REPORT’s PACE check finds a fault planted', () => {
-  /** Five entries in the line at T0, a pace of 2 every 5 minutes: batch 1 at T0 (places 1, 2), batch 2 at T0+5 (3, 4). */
+describe('the TEST REPORT’s PACE check finds a fault planted (D14: both checks, step Q1.4)', () => {
+  /**
+   * Five entries in the line at T0 in size 52 (10 pieces), a pace of 2 every 5 minutes: batch 1 at T0 (places 1, 2),
+   * batch 2 at T0+5 (3, 4), each turn still running; place 5 waits.
+   */
   const facts = (): PaceFacts => ({
     opensAt: T0,
     end: at(7 * MINUTE),
     pace: { batch: 2, minutes: 5 },
     holdMinutes: 0,
-    entries: [1, 2, 3, 4, 5].map((p) => ({
-      id: `e${p}`,
-      position: p,
-      guaranteed: false,
-      sizeId: 's52',
-      quantity: 1,
-      queuedAt: T0,
-      admittedAt: p <= 2 ? T0 : p <= 4 ? at(5 * MINUTE) : null,
-      batch: p <= 2 ? 1 : p <= 4 ? 2 : null,
-      endedAt: null,
-    })),
+    sizes: [
+      { id: 's52', stock: 10 },
+      { id: 's54', stock: 0 },
+      { id: 's56', stock: 1 },
+    ],
+    entries: [1, 2, 3, 4, 5].map((p) => {
+      const given = p <= 2 ? T0 : p <= 4 ? at(5 * MINUTE) : null;
+      return {
+        id: `e${p}`,
+        position: p,
+        guaranteed: false,
+        sizeIds: ['s52'],
+        quantity: 1,
+        queuedAt: T0,
+        admittedAt: given,
+        batch: p <= 2 ? 1 : p <= 4 ? 2 : null,
+        turnAt: given,
+        confirmedAt: null,
+        endedAt: null,
+      };
+    }),
     events: [
       { kind: 'BATCH', at: T0, batch: 1, entries: 2, extra: false, recordedAt: T0 },
       { kind: 'BATCH', at: at(5 * MINUTE), batch: 2, entries: 2, extra: false, recordedAt: at(5 * MINUTE) },
@@ -1058,60 +1074,128 @@ describe('the TEST REPORT’s PACE check finds a fault planted', () => {
     const c = paceCheck(f);
     return c.pass ? `PASS ${c.line}` : c.line;
   };
+  /** The entry at place `p` given its turn in `batch` at `when` (both its logical time and its moment), or none. */
+  const turn = (f: PaceFacts, p: number, batch: number | null, when: Date | null) => {
+    f.entries[p - 1] = { ...f.entries[p - 1]!, batch, admittedAt: when, turnAt: when };
+  };
 
   it('passes the history as it should be', () => {
-    expect(lineOf(facts())).toBe('PASS 2 batches admitted 4 entries at 2 every 5 min, each on its time and in the line’s order.');
-    const nothing = { ...facts(), entries: facts().entries.map((e) => ({ ...e, admittedAt: null, batch: null })), events: [], end: at(-MINUTE) };
-    expect(lineOf(nothing)).toBe('PASS No batch has admitted anyone yet (2 every 5 min): nothing to check.');
+    expect(lineOf(facts())).toBe(
+      'PASS 2 batches gave 4 turns at 2 every 5 min, the first on the pace at 11:00:00 PARIS, each on its time and in the line’s order; none gave more than the pace, and none left anyone waiting while a piece of their size was free.',
+    );
+    const nothing = { ...facts(), entries: facts().entries.map((e) => ({ ...e, admittedAt: null, batch: null, turnAt: null })), events: [], end: at(-MINUTE) };
+    expect(lineOf(nothing)).toBe('PASS No batch has given a turn yet (2 every 5 min): nothing to check.');
   });
 
-  it('a batch not recorded, or recorded with another count', () => {
+  it('a batch not recorded, or recorded with another count; a turn no batch gave; a batch’s turns at different times', () => {
     const f = facts();
-    f.entries[4] = { ...f.entries[4]!, admittedAt: at(6 * MINUTE), batch: 7 };
-    expect(lineOf(f)).toBe('Place 5 was admitted in batch 7, which no batch recorded.');
+    turn(f, 5, 7, at(6 * MINUTE));
+    expect(lineOf(f)).toBe('Place 5 had its turn in batch 7, which no batch recorded.');
     const g = facts();
     g.events[0] = { kind: 'BATCH', at: T0, batch: 1, entries: 3, extra: false, recordedAt: T0 };
-    expect(lineOf(g)).toBe('Batch 1 recorded 3 entries; 2 carry its number.');
+    expect(lineOf(g)).toBe('Batch 1 recorded 3 turns; 2 carry its number.');
+    const k = facts();
+    turn(k, 5, null, null);
+    k.entries[4]!.turnAt = at(6 * MINUTE);
+    expect(lineOf(k)).toBe('Place 5 had a turn that no batch gave.');
+    const m = facts();
+    m.entries[3]!.turnAt = at(5 * MINUTE + SECOND);
+    expect(lineOf(m)).toBe('Batch 2 gave its turns at different times.');
   });
 
-  it('too many in a batch (« too few while others waited » needs the free pieces of each batch: step Q1.4’s check, N5)', () => {
+  it('at most X a batch: more than the pace fails', () => {
     const f = facts();
-    f.entries[2] = { ...f.entries[2]!, admittedAt: T0, batch: 1 };
+    turn(f, 3, 1, T0);
     f.events[0] = { kind: 'BATCH', at: T0, batch: 1, entries: 3, extra: false, recordedAt: T0 };
     f.events[1] = { kind: 'BATCH', at: at(5 * MINUTE), batch: 2, entries: 1, extra: false, recordedAt: at(5 * MINUTE) };
-    expect(lineOf(f)).toBe('Batch 1 admitted 3, more than the 2 of the pace.');
+    expect(lineOf(f)).toBe('Batch 1 gave 3 turns, more than the 2 of the pace.');
   });
 
-  it('a batch out of the line’s order within a size; the house’s guarantee first; another size, or a place wanting more pieces, may be passed over', () => {
+  it('nobody eligible left waiting while a piece of their size was free and the batch had fewer than X (N5); fewer is right when no piece was free', () => {
     const f = facts();
-    f.entries[1] = { ...f.entries[1]!, admittedAt: at(5 * MINUTE), batch: 2 };
-    f.entries[2] = { ...f.entries[2]!, admittedAt: T0, batch: 1 };
-    expect(lineOf(f)).toBe('Place 3 was admitted in batch 1 while place 2, ahead of it, waited.');
-    // A guaranteed place 5 admitted first is in order.
+    turn(f, 4, null, null);
+    f.events[1] = { kind: 'BATCH', at: at(5 * MINUTE), batch: 2, entries: 1, extra: false, recordedAt: at(5 * MINUTE) };
+    expect(lineOf(f)).toBe('Batch 2 gave 1 of 2 turns while place 4 waited with a piece of its size free.');
+    // Three pieces in all, two held by places 1 and 2: the batch of T0+5 had one to give.
+    expect(lineOf({ ...f, sizes: [{ id: 's52', stock: 3 }] })).toMatch(/^PASS 2 batches gave 3 turns /);
+    // Not eligible: placed after the batch’s time.
+    const late = facts();
+    turn(late, 4, null, null);
+    late.events[1] = { kind: 'BATCH', at: at(5 * MINUTE), batch: 2, entries: 1, extra: false, recordedAt: at(5 * MINUTE) };
+    for (const p of [4, 5]) late.entries[p - 1]!.queuedAt = at(5 * MINUTE + SECOND);
+    expect(lineOf(late)).toMatch(/^PASS /);
+    // A piece paid back to nobody: place 1 paid, place 2 missed its turn at T0+30 s, its piece free at T0+5 with 3 in all.
+    const back = facts();
+    back.sizes = [{ id: 's52', stock: 3 }];
+    back.entries[0]!.confirmedAt = at(20 * SECOND);
+    back.entries[1]!.endedAt = at(30 * SECOND);
+    expect(lineOf(back)).toMatch(/^PASS /);
+    turn(back, 4, null, null);
+    back.events[1] = { kind: 'BATCH', at: at(5 * MINUTE), batch: 2, entries: 1, extra: false, recordedAt: at(5 * MINUTE) };
+    expect(lineOf(back)).toBe('Batch 2 gave 1 of 2 turns while place 4 waited with a piece of its size free.');
+  });
+
+  it('in the line’s order within a size, the house’s guarantee first; a place its size can no longer serve is passed over, one that does not fit stops its size', () => {
+    const f = facts();
+    turn(f, 2, 2, at(5 * MINUTE));
+    turn(f, 3, 1, T0);
+    expect(lineOf(f)).toBe('Place 3 had its turn in batch 1 while place 2, ahead of it, waited with a piece of its size free.');
+    // A guaranteed place 5 given its turn first is in order.
     const g = facts();
-    g.entries[4] = { ...g.entries[4]!, guaranteed: true, admittedAt: T0, batch: 1 };
-    g.entries[1] = { ...g.entries[1]!, admittedAt: at(5 * MINUTE), batch: 2 };
-    g.entries[3] = { ...g.entries[3]!, admittedAt: null, batch: null };
+    g.entries[4] = { ...g.entries[4]!, guaranteed: true };
+    turn(g, 5, 1, T0);
+    turn(g, 2, 2, at(5 * MINUTE));
+    turn(g, 4, null, null);
     expect(lineOf(g)).toMatch(/^PASS /);
-    // Place 2 in another size (none free there), or wanting two pieces: place 3 may go before it.
-    for (const ahead of [{ sizeId: 's54' }, { quantity: 2 }]) {
+    // Place 2 in another size with no piece, or wanting more pieces than its size has: place 3 may go before it.
+    for (const ahead of [{ sizeIds: ['s54'] }, { sizeIds: ['s56'], quantity: 2 }]) {
       const k = facts();
-      k.entries[1] = { ...k.entries[1]!, ...ahead, admittedAt: at(5 * MINUTE), batch: 2 };
-      k.entries[2] = { ...k.entries[2]!, admittedAt: T0, batch: 1 };
+      k.entries[1] = { ...k.entries[1]!, ...ahead };
+      turn(k, 2, null, null);
+      turn(k, 3, 1, T0);
+      turn(k, 5, 2, at(5 * MINUTE));
       expect(lineOf(k)).toMatch(/^PASS /);
     }
+    // Place 2 wanting 2 pieces where 1 is free: it stops its size, place 3 behind it waits.
+    const s = facts();
+    s.sizes = [{ id: 's52', stock: 2 }];
+    s.entries[1] = { ...s.entries[1]!, quantity: 2 };
+    turn(s, 2, null, null);
+    turn(s, 3, 1, T0);
+    turn(s, 4, null, null);
+    s.events.pop();
+    expect(lineOf(s)).toBe('Place 3 had its turn in batch 1 while place 2, ahead of it in its size, waited.');
   });
 
-  it('a batch before its time (T0 + the hold for the first) or off the pace (« a batch skipped while people waited » needs the free pieces: step Q1.4’s check)', () => {
+  it('the hold respected and the times kept: a batch before its time (T0 + the hold for the first, or where the hold was shortened) or off the pace', () => {
     const f = facts();
-    for (const e of f.entries.slice(2, 4)) e.admittedAt = at(4 * MINUTE);
+    for (const p of [3, 4]) turn(f, p, 2, at(4 * MINUTE));
     f.events[1] = { kind: 'BATCH', at: at(4 * MINUTE), batch: 2, entries: 2, extra: false, recordedAt: at(4 * MINUTE) };
     expect(lineOf(f)).toBe('Batch 2 came at 11:04:00 PARIS, before its time, 11:05:00 PARIS.');
     const g = facts();
-    for (const e of g.entries.slice(2, 4)) e.admittedAt = at(6 * MINUTE);
+    for (const p of [3, 4]) turn(g, p, 2, at(6 * MINUTE));
     g.events[1] = { kind: 'BATCH', at: at(6 * MINUTE), batch: 2, entries: 2, extra: false, recordedAt: at(6 * MINUTE) };
     expect(lineOf(g)).toBe('Batch 2 came at 11:06:00 PARIS, off the pace of every 5 min.');
-    // A hold of 3 minutes: the first batch at T0 is before its time.
+    // A hold of 3 minutes: the first batch at T0 is before its time; shortened to none before T0, it is on time.
     expect(lineOf({ ...facts(), holdMinutes: 3 })).toBe('Batch 1 came at 11:00:00 PARIS, before its time, 11:03:00 PARIS.');
+    const shortened: PaceFacts = { ...facts(), holdMinutes: 0, events: [{ kind: 'HOLD', at: at(-MINUTE), firstAt: at(3 * MINUTE), nextAt: T0 }, ...facts().events] };
+    expect(lineOf(shortened)).toMatch(/^PASS /);
+  });
+
+  it('no slot passed without a batch while someone eligible waited with a piece of their size free (more pieces than entrants: exactly X every Y); a slot is right to give none when nothing was free, ADD PIECES counted from its time', () => {
+    const f = facts();
+    for (const p of [3, 4]) turn(f, p, null, null);
+    f.events.pop();
+    expect(lineOf(f)).toBe('No batch came at 11:05:00 PARIS while place 3 waited with a piece of its size free.');
+    // Two pieces, both held: nothing to give at T0+5.
+    expect(lineOf({ ...f, sizes: [{ id: 's52', stock: 2 }] })).toBe(
+      'PASS 1 batch gave 2 turns at 2 every 5 min, the first on the pace at 11:00:00 PARIS, each on its time and in the line’s order; none gave more than the pace, and none left anyone waiting while a piece of their size was free.',
+    );
+    // Three pieces now, the third added at T0+6: at T0+5 nothing was free.
+    const added: PaceFacts = { ...f, sizes: [{ id: 's52', stock: 3 }], events: [...f.events, { kind: 'STOCK', at: at(6 * MINUTE), sizeId: 's52', pieces: 1 }] };
+    expect(lineOf(added)).toMatch(/^PASS /);
+    expect(lineOf({ ...added, events: f.events })).toBe('No batch came at 11:05:00 PARIS while place 3 waited with a piece of its size free.');
+    // PAUSE PACE from T0+4 to the end: no slot due.
+    expect(lineOf({ ...f, events: [...f.events, { kind: 'HOLD', at: at(4 * MINUTE), hold: { by: 'PACE', on: true } }] })).toMatch(/^PASS /);
   });
 });

@@ -988,7 +988,9 @@ describe('a LIVE RELEASE end to end', () => {
       ['ORDERS', true],
       ['PACE', true],
     ]);
-    expect(ended.report?.checks.at(-1)).toMatchObject({ label: 'The pace', line: '5 batches admitted 10 entries at 2 every 1 min, each on its time and in the line’s order.' });
+    expect(ended.report?.checks.at(-1)?.line).toMatch(
+      /^5 batches gave 10 turns at 2 every 1 min, the first on the pace at \d\d:\d\d:\d\d PARIS, each on its time and in the line’s order; none gave more than the pace, and none left anyone waiting while a piece of their size was free\.$/,
+    );
     expect([ended.report?.passed, ended.report?.total]).toEqual([6, 6]);
   });
 

@@ -1,16 +1,22 @@
 /**
  * TEST ENTRANTS over HTTP (routes/admin/test-entrants.ts): the bodies' schemas (strict, bounded, the LIVE shares 100 in
  * all), the answers' shapes (`{ run }`, `{ runs }`, the RUNNING test anywhere), ADMIN for every change, an AUDITOR
- * reading the test entrants' emails masked, and the 404s of an unknown release or test.
+ * reading the test entrants' emails masked, the 404s of an unknown release or test, and END TEST's report on a LIVE
+ * RELEASE: its PACE check, ONE QUEUE's (D14, lot Q1 step Q1.4), green on the batches as the engine gave them and naming
+ * a slot the engine skipped while someone waited with a piece of their size free.
  */
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { testPhrase } from '../../src/server/services/test-entrants.js';
-import { liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { createLiveRelease, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { adminClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
 import { poolDraw } from '../support/draws.js';
 
 const HOUR = 3_600_000;
+const MINUTE = 60_000;
+/** A time as the TEST REPORT says it: `10:02:00 PARIS`. */
+const paris = (at: Date) =>
+  `${new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).format(at)} PARIS`;
 
 /** A full body, as the console sends one. */
 const body = (dropId: string, over: Record<string, unknown> = {}) => ({
@@ -143,6 +149,81 @@ describe('admin: test entrants', () => {
     expect(runs[0]).toMatchObject({ id: run.id, status: 'ENDED', entrants: 4, checksPassed: 5, checksTotal: 5 });
     const orders = await h.ctx.db.selectFrom('orders').select('status').where('drop_id', '=', dropId).execute();
     expect(orders.map((o) => o.status)).toEqual(['CANCELLED']);
+  });
+
+  describe('END TEST on a LIVE RELEASE: the PACE check (ONE QUEUE, D14)', () => {
+    /** A paced release of 3 pieces, 2 turns a minute after a hold of 1 minute, opening in 2 minutes, and its 6 test entrants missing every turn. */
+    const paced = async () => {
+      const t0 = new Date(h.clock.now().getTime() + 2 * MINUTE);
+      const r = await createLiveRelease(f, { opensAt: t0, sizes: [{ label: '52', stock: 3 }], pace: { batch: 2, minutes: 1 }, holdMinutes: 1, accessModels: [f.modelId] });
+      const res = await admin.post(
+        `/api/admin/drops/${r.id}/test-runs`,
+        body(r.id, {
+          tiers: { none: 0, titane: 6, platine: 0, palladium: 0 },
+          arrival: { mode: 'all', interestPct: 0 },
+          behaviour: { payPct: 0, releasePct: 0, missPct: 100, leavePct: 0, holdSeconds: 1.5, withdrawPct: 0, reservePct: 0, confirmPct: 0 },
+          choices: { size: '52', quantity: 1, addOnsPct: 0 },
+        }),
+      );
+      expect(res.statusCode).toBe(201);
+      return { r, t0, runId: (safeJson(res) as { run: { id: string } }).run.id };
+    };
+    /** The bots and the engine for `ms`, a pass every `step`, as their timers run them. */
+    const drive = async (dropId: string, ms: number, step = 1000) => {
+      for (let t = 0; ; t += step) {
+        await h.ctx.services.live.advance(dropId);
+        for (let pass = 0; pass < 2; pass++) {
+          await h.app.testEntrants.tick();
+          await h.app.testEntrants.settle();
+        }
+        if (t >= ms) break;
+        h.clock.advance(step);
+      }
+    };
+    type Report = { passed: number; total: number; checks: { id: string; label: string; pass: boolean; line: string }[] };
+    const end = async (runId: string, dropId: string) => {
+      const res = await admin.post(`/api/admin/test-runs/${runId}/end`, { phrase: testPhrase(dropId, true) });
+      expect(res.statusCode).toBe(200);
+      return (safeJson(res) as { run: { status: string; report: Report } }).run;
+    };
+
+    it('green on the batches as given: no turn before the hold’s end, at most X a batch, in the line’s order, pieces given back going to the next batch; the report 6/6, its line read by an AUDITOR', async () => {
+      const { r, t0, runId } = await paced();
+      await drive(r.id, 0);
+      h.clock.set(t0);
+      await drive(r.id, 5 * MINUTE);
+      const turns = await h.ctx.db.selectFrom('live_entries').select(['admitted_batch', 'admitted_at']).where('drop_id', '=', r.id).orderBy('position').execute();
+      expect(turns.map((e) => [e.admitted_batch, e.admitted_at!.getTime() - t0.getTime()])).toEqual([1, 1, 2, 2, 3, 3].map((k) => [k, k * MINUTE]));
+      const run = await end(runId, r.id);
+      expect(run).toMatchObject({ status: 'ENDED', report: { passed: 6, total: 6 } });
+      expect(run.report.checks.at(-1)).toEqual({
+        id: 'PACE',
+        label: 'The pace',
+        pass: true,
+        line: `3 batches gave 6 turns at 2 every 1 min, the first on the pace at ${paris(new Date(t0.getTime() + MINUTE))}, each on its time and in the line’s order; none gave more than the pace, and none left anyone waiting while a piece of their size was free.`,
+      });
+      const { runs } = safeJson(await auditor.get(`/api/admin/drops/${r.id}/test-runs`)) as { runs: { report: Report; checksPassed: number; checksTotal: number }[] };
+      expect(runs[0]).toMatchObject({ checksPassed: 6, checksTotal: 6 });
+      expect(runs[0]!.report.checks.at(-1)!.line).toBe(run.report.checks.at(-1)!.line);
+    });
+
+    it('names a slot the engine skipped while someone waited with a piece of their size free (planted: the next batch moved a minute on); the report 5/6', async () => {
+      const { r, t0, runId } = await paced();
+      await drive(r.id, 0);
+      h.clock.set(t0);
+      await drive(r.id, MINUTE);
+      // After the first batch, the batch due at T0 + 2 skipped: no engine moves its clock so; the check finds it.
+      await h.ctx.db.updateTable('drops').set({ pace_next_at: new Date(t0.getTime() + 3 * MINUTE) }).where('id', '=', r.id).execute();
+      await drive(r.id, 4 * MINUTE);
+      const run = await end(runId, r.id);
+      expect(run.report).toMatchObject({ passed: 5, total: 6 });
+      expect(run.report.checks.at(-1)).toEqual({
+        id: 'PACE',
+        label: 'The pace',
+        pass: false,
+        line: `No batch came at ${paris(new Date(t0.getTime() + 2 * MINUTE))} while place 3 waited with a piece of its size free.`,
+      });
+    });
   });
 
   it('answers 404 for an unknown release or test', async () => {
