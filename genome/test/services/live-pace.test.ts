@@ -42,7 +42,7 @@ import { accountLiveData, holdEndsAt, liveReadsNext, LiveService, paceNextAt, pa
 import { LiveFrameGate } from '../../src/server/services/live-frames.js';
 import { LiveInsightsService, queueFigures } from '../../src/server/services/live-insights.js';
 import { closeGuard, queuePlaces } from '../../src/server/services/live-queue.js';
-import { livePaceFacts, paceCheck, type PaceFacts } from '../../src/server/services/test-entrants.js';
+import { livePaceFacts, paceCheck, type PaceEvent, type PaceFacts } from '../../src/server/services/test-entrants.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { accountOfTier, createLiveRelease, createSet, createSetLiveRelease, entriesOf, liveFixture, pieceSize, sizedModel, type LiveFixture, type LiveRelease } from '../support/live.js';
 
@@ -1032,6 +1032,48 @@ describe('LiveService: ONE QUEUE’s batches', () => {
       line: '5 batches gave 10 turns at 2 every 5 min, then 3 every 2 min, the first on the pace at 11:03:00 PARIS, each on its time and in the line’s order; none gave more than the pace, and none left anyone waiting while a piece of their size was free; 1 by NEXT BATCH NOW; 1 entry let in by hand.',
     });
   });
+
+  it('the PACE check passes on the engine’s PAUSE PACE and RESUME PACE, one during the hold, and a stretch both pauses held: each batch on its moved time (W4)', async () => {
+    const r = await release({ pace: { batch: 2, minutes: 5 }, holdMinutes: 4 });
+    await room(r, 8);
+    await advance(r, T0);
+    // Held from T0+1 to T0+3 during the hold: the first batch at T0+6.
+    f.clock.set(at(MINUTE));
+    await f.live.pausePace(r.id, f.admin);
+    f.clock.set(at(3 * MINUTE));
+    expect((await f.live.resumePace(r.id, f.admin)).pace).toMatchObject({ nextAt: at(6 * MINUTE) });
+    expect(await advance(r, at(6 * MINUTE - 1))).toMatchObject({ batch: null });
+    await advance(r, at(6 * MINUTE));
+    // PAUSE PACE at T0+8, the release’s PAUSE at T0+10, RESUME PACE at T0+12, RESUME at T0+13: held 5 min, T0+11 → T0+16.
+    f.clock.set(at(8 * MINUTE));
+    await f.live.pausePace(r.id, f.admin);
+    f.clock.set(at(10 * MINUTE));
+    await f.live.pause(r.id, f.admin);
+    f.clock.set(at(12 * MINUTE));
+    await f.live.resumePace(r.id, f.admin);
+    f.clock.set(at(13 * MINUTE));
+    expect((await f.live.resume(r.id, f.admin)).pace).toMatchObject({ nextAt: at(16 * MINUTE) });
+    await advance(r, at(16 * MINUTE));
+    await advance(r, at(21 * MINUTE));
+    await advance(r, at(26 * MINUTE));
+    expect((await line(r)).map((x) => [x[0], x[2], x[3]])).toEqual([
+      [1, 1, 6 * MINUTE],
+      [2, 1, 6 * MINUTE],
+      [3, 2, 16 * MINUTE],
+      [4, 2, 16 * MINUTE],
+      [5, 3, 21 * MINUTE],
+      [6, 3, 21 * MINUTE],
+      [7, 4, 26 * MINUTE],
+      [8, 4, 26 * MINUTE],
+    ]);
+    expect((await audits(r.id, 'drop.live.resume')).map((a) => a.details)).toEqual([{ pausedMs: 3 * MINUTE, nextAt: at(16 * MINUTE).toISOString() }]);
+    expect(await check(r, at(27 * MINUTE))).toEqual({
+      id: 'PACE',
+      label: 'The pace',
+      pass: true,
+      line: '4 batches gave 8 turns at 2 every 5 min, the first on the pace at 11:06:00 PARIS, each on its time and in the line’s order; none gave more than the pace, and none left anyone waiting while a piece of their size was free.',
+    });
+  });
 });
 
 describe('the TEST REPORT’s PACE check finds a fault planted (D14: both checks, step Q1.4)', () => {
@@ -1197,5 +1239,85 @@ describe('the TEST REPORT’s PACE check finds a fault planted (D14: both checks
     expect(lineOf({ ...added, events: f.events })).toBe('No batch came at 11:05:00 PARIS while place 3 waited with a piece of its size free.');
     // PAUSE PACE from T0+4 to the end: no slot due.
     expect(lineOf({ ...f, events: [...f.events, { kind: 'HOLD', at: at(4 * MINUTE), hold: { by: 'PACE', on: true } }] })).toMatch(/^PASS /);
+  });
+
+  it('across a pause: the hold kept, the next batch at its time moved by the time held (W4), no slot passed after a resume, no batch while held; the resume’s record checked', () => {
+    const pause = (from: number, to: number, by: 'PACE' | 'RELEASE' = 'PACE', nextAt?: Date): PaceEvent[] => [
+      { kind: 'HOLD', at: at(from), hold: { by, on: true } },
+      { kind: 'HOLD', at: at(to), hold: { by, on: false }, ...(nextAt ? { nextAt } : {}) },
+    ];
+    // A hold of 10 minutes, held from T0+1 to T0+2: the first batch at T0+11, never inside the hold.
+    const hold = (first: number): PaceFacts => {
+      const h = facts();
+      h.holdMinutes = 10;
+      h.end = at(first + 2 * MINUTE);
+      for (const p of [1, 2]) turn(h, p, 1, at(first));
+      for (const p of [3, 4]) turn(h, p, null, null);
+      h.sizes = [{ id: 's52', stock: 2 }];
+      h.events = [...pause(MINUTE, 2 * MINUTE, 'PACE', at(11 * MINUTE)), { kind: 'BATCH', at: at(first), batch: 1, entries: 2, extra: false, recordedAt: at(first) }];
+      return h;
+    };
+    expect(lineOf(hold(11 * MINUTE))).toMatch(/^PASS 1 batch gave 2 turns at 2 every 5 min, the first on the pace at 11:11:00 PARIS/);
+    expect(lineOf(hold(3 * MINUTE))).toBe('Batch 1 came at 11:03:00 PARIS, before its time, 11:11:00 PARIS.');
+    expect(lineOf(hold(10 * MINUTE))).toBe('Batch 1 came at 11:10:00 PARIS, before its time, 11:11:00 PARIS.');
+    // The resume not recorded with its time: the check moves it itself.
+    const unsaid = hold(3 * MINUTE);
+    unsaid.events = [...pause(MINUTE, 2 * MINUTE), unsaid.events.at(-1)!];
+    expect(lineOf(unsaid)).toBe('Batch 1 came at 11:03:00 PARIS, before its time, 11:11:00 PARIS.');
+    // Batch 1 at T0, held from T0+1 to T0+2: the next batch due at T0+6.
+    const after = (): PaceFacts => {
+      const a = facts();
+      for (const p of [3, 4]) turn(a, p, null, null);
+      a.events = [a.events[0]!, ...pause(MINUTE, 2 * MINUTE, 'PACE', at(6 * MINUTE))];
+      return a;
+    };
+    // No batch for 28 minutes after the resume while places 3 to 5 waited with pieces free.
+    expect(lineOf({ ...after(), end: at(28 * MINUTE) })).toBe('No batch came at 11:06:00 PARIS while place 3 waited with a piece of its size free.');
+    // A batch 2 min 30 s after the resume, ahead of its moved time; then one on it.
+    const early = after();
+    for (const p of [3, 4]) turn(early, p, 2, at(2.5 * MINUTE));
+    early.events.push({ kind: 'BATCH', at: at(2.5 * MINUTE), batch: 2, entries: 2, extra: false, recordedAt: at(2.5 * MINUTE) });
+    expect(lineOf(early)).toBe('Batch 2 came at 11:02:30 PARIS, before its time, 11:06:00 PARIS.');
+    const onTime = after();
+    for (const p of [3, 4]) turn(onTime, p, 2, at(6 * MINUTE));
+    onTime.events.push({ kind: 'BATCH', at: at(6 * MINUTE), batch: 2, entries: 2, extra: false, recordedAt: at(6 * MINUTE) });
+    expect(lineOf({ ...onTime, end: at(8 * MINUTE) })).toMatch(/^PASS 2 batches gave 4 turns /);
+    // The release’s PAUSE as well: the same.
+    const release = { ...onTime, end: at(8 * MINUTE), events: onTime.events.map((e) => (e.kind === 'HOLD' && e.hold ? { ...e, hold: { ...e.hold, by: 'RELEASE' as const } } : e)) };
+    expect(lineOf(release)).toMatch(/^PASS 2 batches gave 4 turns /);
+    // Both pauses, crossing: held from T0+1 to T0+3 once, the batch of T0+5 at T0+7.
+    const both = after();
+    both.events = [
+      both.events[0]!,
+      { kind: 'HOLD', at: at(MINUTE), hold: { by: 'PACE', on: true } },
+      { kind: 'HOLD', at: at(1.5 * MINUTE), hold: { by: 'RELEASE', on: true } },
+      { kind: 'HOLD', at: at(2 * MINUTE), hold: { by: 'PACE', on: false } },
+      { kind: 'HOLD', at: at(3 * MINUTE), hold: { by: 'RELEASE', on: false }, nextAt: at(7 * MINUTE) },
+    ];
+    for (const p of [3, 4]) turn(both, p, 2, at(7 * MINUTE));
+    both.events.push({ kind: 'BATCH', at: at(7 * MINUTE), batch: 2, entries: 2, extra: false, recordedAt: at(7 * MINUTE) });
+    expect(lineOf({ ...both, end: at(8 * MINUTE) })).toMatch(/^PASS 2 batches gave 4 turns /);
+    // A resume whose record did not move the next batch by the time held.
+    const unmoved = after();
+    unmoved.events[2] = { kind: 'HOLD', at: at(2 * MINUTE), hold: { by: 'PACE', on: false }, nextAt: at(5 * MINUTE) };
+    expect(lineOf(unmoved)).toBe('The resume at 11:02:00 PARIS put the next batch at 11:05:00 PARIS; held since 11:01:00 PARIS, it was due at 11:06:00 PARIS.');
+    // A scheduled batch while the pace was held, or any batch while the release was paused.
+    const during = facts();
+    during.events.splice(1, 0, { kind: 'HOLD', at: at(4 * MINUTE), hold: { by: 'PACE', on: true } });
+    expect(lineOf(during)).toBe('Batch 2 came at 11:05:00 PARIS, while the pace was paused.');
+    const paused = facts();
+    paused.events.splice(1, 0, { kind: 'HOLD', at: at(4 * MINUTE), hold: { by: 'RELEASE', on: true } });
+    paused.events[2] = { ...(paused.events[2] as Extract<PaceEvent, { kind: 'BATCH' }>), extra: true };
+    expect(lineOf(paused)).toBe('Batch 2 came at 11:05:00 PARIS, while the release was paused.');
+  });
+
+  it('in the line’s order across sizes: a full batch gives no turn behind a place of another size that waited with a piece of its size free', () => {
+    const f = facts();
+    f.entries[2] = { ...f.entries[2]!, sizeIds: ['s56'] };
+    turn(f, 3, null, null);
+    turn(f, 5, 2, at(5 * MINUTE));
+    expect(lineOf(f)).toBe('Place 4 had its turn in batch 2 while place 3, ahead of it, waited with a piece of its size free.');
+    // Its size with no piece left: the batch is right.
+    expect(lineOf({ ...f, entries: f.entries.map((e) => (e.position === 3 ? { ...e, sizeIds: ['s54'] } : e)) })).toMatch(/^PASS /);
   });
 });

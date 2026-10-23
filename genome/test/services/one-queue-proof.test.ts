@@ -15,7 +15,7 @@
  *      T0 + 10 + k minutes (k = 0 … 19), in the line's order, every entrant served once; the TEST REPORT's PACE check
  *      green with "exactly X every Y" read in its line;
  *  (b) 300 pieces, the entrants securing, paying, giving back or missing their turns on a seeded draw: no turn before
- *      T0 + 10, at most 250 a batch, in the line's order in each size, and after every batch that gave fewer than 250
+ *      T0 + 10, at most 250 a batch, in the line's order in each size and across the sizes, and after every batch that gave fewer than 250
  *      nobody eligible waiting in a size with a piece free (N5), asserted on the database right after each batch; the
  *      PACE check green.
  *
@@ -224,15 +224,22 @@ describe('ONE QUEUE: the 5,000 proof (D14, both checks)', () => {
         if (s < HOLD_MINUTES * 60) expect(out?.batch ?? null).toBeNull();
         ended = (await row(r.id)).ended_at !== null;
         if (out?.batch == null) continue;
-        // Right after each batch, on the database: at most X, in the line's order in each size, and (fewer than X)
-        // nobody placed by its time waiting in a size with a piece free (N5).
+        // Right after each batch, on the database: at most X, in the line's order in each size and across the sizes (no
+        // turn behind a place of another size that waited with a piece of its size free), and (fewer than X) nobody
+        // placed by its time waiting in a size with a piece free (N5).
         if (out.turns > X) faults.push(`batch ${out.batch}: ${out.turns} turns`);
         const slot = (await t.db.selectFrom('live_entries').select('admitted_at').where('drop_id', '=', r.id).where('admitted_batch', '=', out.batch).executeTakeFirst())?.admitted_at ?? null;
-        const entries = await t.db.selectFrom('live_entries').select(['size_id', 'status', 'position', 'queued_at', 'admitted_batch']).where('drop_id', '=', r.id).execute();
+        const entries = await t.db.selectFrom('live_entries').select(['size_id', 'status', 'position', 'queued_at', 'admitted_batch', 'guarantee_id']).where('drop_id', '=', r.id).execute();
         const stock = new Map((await t.db.selectFrom('drop_sizes').select(['id', 'stock']).where('drop_id', '=', r.id).execute()).map((x) => [x.id, x.stock]));
+        const freeIn = new Map([...sizeIds].map((size) => [size, stock.get(size)! - entries.filter((e) => e.size_id === size && (e.status === 'TURN' || e.status === 'SECURED' || e.status === 'CONFIRMED')).length]));
+        /** The order of the turns: the house's guarantee first, then the place. */
+        const key = (e: (typeof entries)[number]) => (e.guarantee_id === null ? 1e9 : 0) + e.position!;
+        const lastKey = Math.max(...entries.filter((e) => e.admitted_batch === out.batch).map(key));
+        const skipped = entries.find((e) => e.status === 'QUEUED' && (slot === null || e.queued_at!.getTime() <= slot.getTime()) && key(e) < lastKey && freeIn.get(e.size_id)! > 0);
+        if (skipped) faults.push(`batch ${out.batch}: a turn behind place ${skipped.position} of another size, waiting with a piece free`);
         for (const size of sizeIds) {
           const own = entries.filter((e) => e.size_id === size);
-          const free = stock.get(size)! - own.filter((e) => e.status === 'TURN' || e.status === 'SECURED' || e.status === 'CONFIRMED').length;
+          const free = freeIn.get(size)!;
           const waiting = own.filter((e) => e.status === 'QUEUED' && (slot === null || e.queued_at!.getTime() <= slot.getTime()));
           const given = own.filter((e) => e.admitted_batch === out.batch);
           const first = Math.min(...waiting.map((e) => e.position!));

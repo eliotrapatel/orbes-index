@@ -1917,16 +1917,18 @@ export class LiveService {
 
   /**
    * RESUME: every running turn and hold moved by the time paused, and the next batch too; then turns again, at the next
-   * batch (an after-room: at once). Audited `drop.live.resume` with the time paused.
+   * batch (an after-room: at once). Audited `drop.live.resume` with the time paused and, on a paced release, the next
+   * batch's time after it (as RESUME PACE: the TEST REPORT's PACE check reads it).
    */
   async resume(dropId: string, actor: Actor): Promise<LiveReleaseState> {
     assertStaff(actor, 'resume a release');
     return this.control(dropId, async (tx, d, now) => {
       if (!d.paused_at) throw notPaused();
       const pausedMs = await this.unpause(tx, d, now);
+      const next = paceNextAt(d);
       const notes: AuditRecordInput[] = [];
       await this.giveTurnsAtOnce(tx, d, now, notes);
-      await this.audit.record({ actor, action: 'drop.live.resume', targetType: 'drop', targetId: d.id, details: { pausedMs } }, tx);
+      await this.audit.record({ actor, action: 'drop.live.resume', targetType: 'drop', targetId: d.id, details: { pausedMs, ...(next ? { nextAt: next.toISOString() } : {}) } }, tx);
       await this.record(tx, notes);
     });
   }

@@ -1987,8 +1987,9 @@ export type PaceEvent =
   /** LET IN gave this entry its turn out of the batches. */
   | { kind: 'LET_IN'; at: Date; entryId: string }
   /**
-   * A pause or a resume, the pace's own or the release's (`hold`: the times of the batches start again from the next
-   * one), or the hold shortened or ended: `firstAt` the first batch's time before it, `nextAt` its time after it.
+   * A pause or a resume, the pace's own or the release's (`hold`; a resume's `nextAt`: the next batch's time after it,
+   * as the engine moved it), or the hold shortened or ended: `firstAt` the first batch's time before it, `nextAt` its
+   * time after it.
    */
   | { kind: 'HOLD'; at: Date; hold?: { by: 'PACE' | 'RELEASE'; on: boolean }; firstAt?: Date; nextAt?: Date }
   /** ADD PIECES: a size's stock grew by `pieces`. */
@@ -2071,7 +2072,9 @@ export async function livePaceFacts(db: Db, d: DropRow, now: Date): Promise<Pace
       if (typeof x.sizeId === 'string') events.push({ kind: 'STOCK', at, sizeId: x.sizeId, pieces: Number(x.pieces) });
     } else {
       const by = a.action === 'drop.live.pace.pause' || a.action === 'drop.live.pace.resume' ? 'PACE' : 'RELEASE';
-      events.push({ kind: 'HOLD', at, hold: { by, on: a.action.endsWith('.pause') } });
+      // A resume says the next batch's time after it (W4: moved by the time paused).
+      const next = typeof x.nextAt === 'string' ? { nextAt: new Date(x.nextAt) } : {};
+      events.push({ kind: 'HOLD', at, hold: { by, on: a.action.endsWith('.pause') }, ...next });
     }
   }
   const last = Math.min(d.ended_at ? d.ended_at.getTime() : now.getTime(), now.getTime(), d.closes_at.getTime());
@@ -2117,12 +2120,15 @@ const paceWords = (p: PaceOf): string => `${p.batch} every ${p.minutes} min`;
  *     waited, and left nobody eligible waiting while a piece of their size was free, unless it had given its X before
  *     reaching them (N5: read per batch, from the pieces each size held, had paid and had in stock at that moment);
  *  2. the hold respected: the first scheduled batch at T0 + the hold (or when SHORTEN THE HOLD or END THE HOLD NOW put
- *     it), none before; a turn before it only by NEXT BATCH NOW or LET IN, each in the log;
- *  3. the scheduled batches on the pace's times, Y apart from the first (a pause, a resume or the hold shortened or
- *     ended starting the times again from the next batch; SET PACE from the next batch, which keeps its time; NEXT
- *     BATCH NOW an extra batch that moves no time), and no slot passed without a batch while someone eligible waited
- *     with a piece of their size free: so with more pieces than entrants, exactly X turns every Y while entrants
- *     remained.
+ *     it, or later by a pause), none before, across pauses too; a turn before it only by NEXT BATCH NOW or LET IN,
+ *     each in the log;
+ *  3. the scheduled batches on the pace's times, Y apart from the first (the hold shortened or ended starting the
+ *     times again from the next batch; SET PACE from the next batch, which keeps its time; NEXT BATCH NOW an extra
+ *     batch that moves no time; PAUSE PACE and the release's PAUSE holding every scheduled batch, the next one moved by
+ *     the time they held it once both are over (W4, paceShiftMs: a batch already due before keeping its time), the
+ *     resume's record saying where), and no slot passed without a batch while someone eligible waited with a piece of
+ *     their size free, no slot judged while a pause held: so with more pieces than entrants, exactly X turns every Y
+ *     while entrants remained.
  *
  * Moments on the same millisecond are read the way that assumes no piece free that might not have been, so the check
  * never fails a release on a tie.
@@ -2243,13 +2249,34 @@ export function paceCheck(f: PaceFacts): TestReportCheck {
   // 2 and 3: the history in order. The first batch is due at T0 + the hold as set (a hold shortened or ended says the
   // first batch's time before it, and its time after it).
   const firstHold = f.events.find((e): e is Extract<PaceEvent, { kind: 'HOLD' }> => e.kind === 'HOLD' && e.firstAt !== undefined);
-  const firstAt = firstHold?.firstAt ? new Date(firstHold.firstAt).getTime() : new Date(f.opensAt).getTime() + (f.holdMinutes ?? 0) * 60_000;
+  /** The time the pauses over before the first hold shortened or ended moved its `before` (W4), back to T0 + the hold as set. */
+  const movedBefore = (() => {
+    const on = { PACE: false, RELEASE: false };
+    let since = 0;
+    let moved = 0;
+    for (const e of f.events) {
+      if (e === firstHold) break;
+      if (e.kind !== 'HOLD' || !e.hold) continue;
+      const was = on.PACE || on.RELEASE;
+      on[e.hold.by] = e.hold.on;
+      if (!was && (on.PACE || on.RELEASE)) since = e.at.getTime();
+      else if (was && !(on.PACE || on.RELEASE)) moved += e.at.getTime() - since;
+    }
+    return moved;
+  })();
+  const firstAt = firstHold?.firstAt ? new Date(firstHold.firstAt).getTime() - movedBefore : new Date(f.opensAt).getTime() + (f.holdMinutes ?? 0) * 60_000;
   const end = new Date(f.end).getTime();
   let expect: number | null = pace ? firstAt : null;
   let stepMs = pace ? pace.minutes * 60_000 : 0;
   let lastRun = Number.NEGATIVE_INFINITY;
-  /** PAUSE PACE and the release's PAUSE, holding the batches while on. */
+  /** PAUSE PACE and the release's PAUSE, holding the batches while on; `heldSince` when the stretch either held began. */
   const held = { PACE: false, RELEASE: false };
+  const holding = () => held.PACE || held.RELEASE;
+  let heldSince = Number.NEGATIVE_INFINITY;
+  /** The last resume: no slot's pass ran before it. */
+  let resumedAt = Number.NEGATIVE_INFINITY;
+  /** The first scheduled batch's time (T0 + the hold, or where SHORTEN THE HOLD or END THE HOLD NOW put it): none before. */
+  let holdEnd = firstAt;
   let firstGiven: number | null = null;
   let extra = 0;
   let turns = 0;
@@ -2259,9 +2286,9 @@ export function paceCheck(f: PaceFacts): TestReportCheck {
    * over by then: an overdue slot waits for its frame) is not judged.
    */
   const emptySlots = (until: number, inclusive: boolean, runBy: number, pending = false): string | null => {
-    if (expect === null || stepMs <= 0) return null;
+    if (expect === null || stepMs <= 0 || holding()) return null;
     for (; inclusive ? expect <= until : expect < until; expect += stepMs) {
-      const lo = Math.max(expect, lastRun);
+      const lo = Math.max(expect, lastRun, resumedAt);
       if (pending && lo + PACE_SLOT_MARGIN_MS > runBy) continue;
       const fault = slotFault(expect, lo, Math.min(lo + PACE_SLOT_MARGIN_MS, runBy));
       if (fault) return fault;
@@ -2274,14 +2301,37 @@ export function paceCheck(f: PaceFacts): TestReportCheck {
     if (ev.kind === 'HOLD') {
       const gap = emptySlots(at, false, at);
       if (gap) return fail(gap);
-      if (ev.hold) held[ev.hold.by] = ev.hold.on;
-      expect = ev.nextAt && !held.PACE && !held.RELEASE ? new Date(ev.nextAt).getTime() : null;
+      if (!ev.hold) {
+        // SHORTEN THE HOLD or END THE HOLD NOW (while a pause holds too: the resume moves it as ever).
+        if (ev.nextAt) expect = new Date(ev.nextAt).getTime();
+        if (firstGiven === null && expect !== null) holdEnd = expect;
+        continue;
+      }
+      const was = holding();
+      held[ev.hold.by] = ev.hold.on;
+      if (!was && holding()) heldSince = at;
+      else if (was && !holding()) {
+        resumedAt = at;
+        if (expect === null) continue;
+        // W4: the next batch moved by the time held (a stretch both pauses held once); one due before it keeps its time.
+        // The resume's record says where the engine put it: read on its clock, a few seconds either way (a batch due
+        // right at the pause either way).
+        const before = expect;
+        const due = before > heldSince ? before + (at - heldSince) : before;
+        const ways = [...(before > heldSince - PACE_SLOT_MARGIN_MS ? [before + (at - heldSince)] : []), ...(before <= heldSince + PACE_SLOT_MARGIN_MS ? [before] : [])];
+        const told = ev.nextAt ? new Date(ev.nextAt).getTime() : null;
+        if (told !== null && !ways.some((t) => Math.abs(told - t) <= PACE_SLOT_MARGIN_MS)) {
+          return fail(`The resume at ${parisClock(new Date(at))} put the next batch at ${parisClock(new Date(told))}; held since ${parisClock(new Date(heldSince))}, it was due at ${parisClock(new Date(due))}.`);
+        }
+        expect = told ?? due;
+        if (firstGiven === null) holdEnd = Math.max(holdEnd, expect);
+      }
       continue;
     }
     if (ev.kind === 'PACE') {
       const gap = emptySlots(at, false, at);
       if (gap) return fail(gap);
-      if (at < new Date(f.opensAt).getTime()) expect = firstAt;
+      if (at < new Date(f.opensAt).getTime()) expect = holdEnd;
       else if (!pace) expect = null;
       // During the release the next batch keeps its time; from it on, the new Y.
       pace = ev.after;
@@ -2293,12 +2343,14 @@ export function paceCheck(f: PaceFacts): TestReportCheck {
     const own = members.get(ev.batch) ?? [];
     const run = runs.get(ev.batch)!;
     if (own.length > pace.batch) return fail(`Batch ${ev.batch} gave ${own.length} turns, more than the ${pace.batch} of the pace.`);
+    if (held.RELEASE || (!ev.extra && held.PACE)) return fail(`Batch ${ev.batch} came at ${parisClock(new Date(at))}, while ${held.RELEASE ? 'the release was paused' : 'the pace was paused'}.`);
     if (ev.extra) {
       // NEXT BATCH NOW: the slots due by its press went before it.
       const gap = emptySlots(at, true, run);
       if (gap) return fail(gap);
       extra++;
     } else {
+      if (firstGiven === null && at < holdEnd) return fail(`Batch ${ev.batch} came at ${parisClock(new Date(at))}, before its time, ${parisClock(new Date(holdEnd))}.`);
       if (expect !== null) {
         if (at < expect) return fail(`Batch ${ev.batch} came at ${parisClock(new Date(at))}, before its time, ${parisClock(new Date(expect))}.`);
         if ((at - expect) % stepMs !== 0) return fail(`Batch ${ev.batch} came at ${parisClock(new Date(at))}, off the pace of every ${pace.minutes} min.`);

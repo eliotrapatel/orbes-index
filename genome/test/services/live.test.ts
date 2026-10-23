@@ -702,7 +702,7 @@ describe('LiveService', () => {
       await advance(r, new Date(at(MINUTE).getTime() + pausedMs));
       expect(await entry(r.id, c.id)).toMatchObject({ status: 'TURN', turn_at: new Date(at(MINUTE).getTime() + pausedMs) });
       expect(holdEnd.getTime()).toBeGreaterThan(at(12 * SECOND).getTime());
-      expect((await audits(r.id)).filter((x) => x.action === 'drop.live.resume').map((x) => x.details)).toEqual([{ pausedMs }]);
+      expect((await audits(r.id)).filter((x) => x.action === 'drop.live.resume').map((x) => x.details)).toEqual([{ pausedMs, nextAt: new Date(at(MINUTE).getTime() + pausedMs).toISOString() }]);
     });
 
     it('EXTEND moves the close; ADD PIECES raises a size and the quantity, audited with the line the announcement promised', async () => {
