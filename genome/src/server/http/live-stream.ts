@@ -56,7 +56,7 @@ import { liveReadsNext, type LiveEntryView } from '../services/live.js';
 import type { AdminLiveBoard } from '../services/live-console.js';
 import type { LiveFrameGate } from '../services/live-frames.js';
 import { LIVE_QUEUE_FAR_POLL_MS, queueView } from '../services/live-queue.js';
-import type { LiveBoard, LiveFrame, LiveRoom, LiveRoomService, LiveSavedSize } from '../services/live-room.js';
+import { roomFor, type LiveBoard, type LiveFrame, type LiveRoom, type LiveRoomService, type LiveSavedSize } from '../services/live-room.js';
 import { noopLogger, systemClock, type Clock, type Logger } from '../types.js';
 
 /**
@@ -137,6 +137,8 @@ interface ViewerStream extends Stream {
   accountId: string;
   /** Its session (SessionInfo.id), checked at every pulse. */
   sessionId: string;
+  /** IN-01: the pieces of the guarantee shown to it when its stream opened (0: none), for its own room (`roomFor`, D32). */
+  guaranteed: number;
 }
 
 interface BoardStream extends Stream {
@@ -157,6 +159,8 @@ interface Outgoing {
   at: number;
   room?: Shared;
   board?: Shared;
+  /** D32: the rooms of the viewers who may take more than the limit per collector, by that number, made once each. */
+  rooms?: Map<number, Shared>;
 }
 
 interface Shared {
@@ -239,16 +243,17 @@ export class LiveHub {
    * cache's time): the room, its own entry with its figures from the frame's queue snapshot (an entry newer than the
    * frame, a late comer's first reading, reads a frame built afresh), and how soon to read again: its queue's `pollMs`
    * behind the next ones, LIVE_ROOM_POLL_MS otherwise. The reading is recorded (G2: live-frames.ts `read`). Null once
-   * the release is no longer one to read.
+   * the release is no longer one to read. `guaranteed`: the pieces of the guarantee shown to it (IN-01), whose sizes in
+   * its room serve up to them, as up to its own entry's quantity (`roomFor`, D32).
    */
-  async stateOf(dropId: string, entry: LiveEntryView | null): Promise<{ room: LiveRoom; entry: LiveEntryView | null; pollMs: number } | null> {
+  async stateOf(dropId: string, entry: LiveEntryView | null, guaranteed = 0): Promise<{ room: LiveRoom; entry: LiveEntryView | null; pollMs: number } | null> {
     let frame = await this.frame(dropId, false);
     if (frame && entry?.status === 'QUEUED' && frame.queue && !frame.queue.entries.has(entry.id)) frame = await this.frame(dropId, true);
     if (!frame) return null;
     const own = withQueue(entry, frame, this.clock().getTime());
     if (own?.status === 'QUEUED') this.gate?.read(dropId, own.id, liveReadsNext(own));
     const behind = behindNextBatch(own) ? frame.queue?.entries.get(own!.id)?.pollMs : null;
-    return { room: frame.room, entry: own, pollMs: behind ?? LIVE_ROOM_POLL_MS };
+    return { room: roomFor(frame, Math.max(guaranteed, own?.quantity ?? 0)), entry: own, pollMs: behind ?? LIVE_ROOM_POLL_MS };
   }
 
   /** A release's board, as the board's page reads it before its stream. */
@@ -282,7 +287,9 @@ export class LiveHub {
       const savedSize = views.has(accountId) ? null : await this.room.savedSize(accountId, dropId);
       // Macro scope K44 T1: a set's release, YOUR SIZES' size per piece.
       const savedSizes = frame.room.pieces ? (views.has(accountId) ? [] : await this.room.savedSizesNow(accountId, dropId)) : undefined;
-      const stream: ViewerStream = { kind: 'viewer', dropId, accountId, sessionId, res: this.begin(request, reply), lastWrite: 0, sent: undefined, you: undefined, closed: false };
+      // IN-01, D32: a guarantee's holder reads its sizes up to its own pieces.
+      const guaranteed = (await this.room.guaranteeShown(accountId, dropId))?.pieces ?? 0;
+      const stream: ViewerStream = { kind: 'viewer', dropId, accountId, sessionId, guaranteed, res: this.begin(request, reply), lastWrite: 0, sent: undefined, you: undefined, closed: false };
       this.register(stream);
       registered = true;
       this.deliver(stream, this.outgoing(frame), views, { savedSize, ...(savedSizes ? { savedSizes } : {}) });
@@ -557,6 +564,23 @@ export class LiveHub {
   }
 
   /**
+   * D32: the room for a viewer who may take `pieces` (its guarantee's, its entry's quantity): the shared one, or, past the
+   * limit per collector, its own copy (`roomFor`), made once per pulse for each such number.
+   */
+  private roomOf(out: Outgoing, pieces: number): Shared {
+    const room = roomFor(out.frame, pieces);
+    if (room === out.frame.room) return this.shared(out, 'room');
+    out.rooms ??= new Map();
+    let shared = out.rooms.get(pieces);
+    if (!shared) {
+      const json = JSON.stringify(room);
+      shared = { json, event: `event: room\ndata: {"now":${out.now},${json.slice(1)}\n\n` };
+      out.rooms.set(pieces, shared);
+    }
+    return shared;
+  }
+
+  /**
    * Send what changed for this stream since its last events, in one write: the viewer's own entry first (QUEUED, with its
    * figures from the frame's queue snapshot: its reading recorded, G2), then the room, so a page that stops following at
    * a room that is over has already read its final entry.
@@ -570,7 +594,7 @@ export class LiveHub {
     if (s.closed) return;
     const entry = s.kind === 'viewer' ? withQueue(views.get(s.accountId) ?? null, out.frame, out.at) : null;
     if (entry?.status === 'QUEUED') this.gate?.read(s.dropId, entry.id, liveReadsNext(entry));
-    const shared = this.shared(out, s.kind === 'board' ? 'board' : 'room');
+    const shared = s.kind === 'board' ? this.shared(out, 'board') : this.roomOf(out, Math.max(s.guaranteed, entry?.quantity ?? 0));
     let chunk = '';
     if (s.kind === 'viewer') {
       const you = JSON.stringify(entry);

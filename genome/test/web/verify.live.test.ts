@@ -428,9 +428,9 @@ describe('the room', () => {
     const two = room({ sizes: [{ id: S48, label: '48', stock: 3, left: 2, serves: 3, out: false }] });
     expect([3, 4].map((q) => (servable(two.sizes[0]!) ?? 0) >= q)).toEqual([true, false]);
     expect(sizeChoices(s, two, null)[0]).toMatchObject({ id: S48, available: true });
-    // IN-01: a guarantee holder of 3 pieces on a release of one per collector, 3 pieces not confirmed: the server says its
-    // size serves 3 (at most the most any one entry may take, not the per collector), so ENTER THE LINE stays open for 3
-    // as it did with `left + held` (D32), and the queue's fallback before its first reading is no SOLD OUT.
+    // IN-01: a guarantee holder of 3 pieces on a release of one per collector, 3 pieces not confirmed: its own room (the
+    // server's roomFor, from the guarantee shown to it and its entry) says its size serves 3, so ENTER THE LINE stays open
+    // for 3 as it did with `left + held` (D32), and the queue's fallback before its first reading is no SOLD OUT.
     const held = room({ phase: 'LIVE', sizes: [{ id: S48, label: '48', stock: 3, left: 2, serves: 3, out: false }] });
     expect((servable(held.sizes[0]!) ?? 0) >= 3).toBe(true);
     expect(screen({ sheet: s, room: held, entry: entry({ status: 'QUEUED', size: { id: S48, label: '48' }, quantity: 3, guaranteed: true, queue: null }), now: T0 + 10_000 })).toBe('queue');

@@ -44,7 +44,7 @@ import {
 } from '../../src/server/services/live.js';
 import { GuaranteeService, LIVE_PER_ACCOUNT_DEFAULT } from '../../src/server/services/guarantees.js';
 import { LifecycleService } from '../../src/server/services/lifecycle.js';
-import { LIVE_SERVES_MAX, LiveRoomService } from '../../src/server/services/live-room.js';
+import { LiveRoomService, roomFor } from '../../src/server/services/live-room.js';
 import { OwnershipService } from '../../src/server/services/ownership.js';
 import { OwnerService } from '../../src/server/services/owners.js';
 import { SessionService } from '../../src/server/services/sessions.js';
@@ -1041,19 +1041,44 @@ describe('LiveService', () => {
       expect(await guaranteeOf(hidden.id)).toMatchObject({ status: 'ACTIVE', covered_drop_id: r.id });
     });
 
-    it('a holder of 3 pieces on a release of one per collector, 3 pieces not confirmed after T0: the room says its size serves 3, so ENTER THE LINE stays open for 3 (D32, A 14:50 "don’t change it"), and the server takes it', async () => {
-      expect(LIVE_SERVES_MAX).toBe(5);
+    it('a holder of 3 pieces on a release of one per collector, 3 pieces not confirmed after T0: its own room says its size serves 3, so ENTER THE LINE stays open for 3 (D32, A 14:50 "don’t change it"), and the server takes it; the shared room says 1', async () => {
       const r = await release({ perAccount: 1, sizes: [{ label: '52', stock: 3 }] });
       const [first, holder] = [await accountOfTier(f, 0), await accountOfTier(f, 0)];
       await grant(holder.id, r.id, { pieces: 3 });
       f.clock.set(at(-MINUTE));
       await f.live.enter(first.id, r.id, { sizeId: r.sizes[0]!.id }, first.actor);
       await advance(r, T0);
-      // One piece in a turn, two free: the size serves 3, not the 1 of the per collector (never more than LIVE_SERVES_MAX).
+      // One piece in a turn, two free: the shared room serves 1 (the per collector: never the held pieces, D25); the
+      // holder's own room (its guarantee shown to it, read with its state and stream) serves 3.
       const room = new LiveRoomService({ db: t.db, turnKey: f.turnKey, publicOrigin: 'https://verify.orbes.test', clock: f.clock.now });
-      expect((await room.frame(r.id))!.room.sizes[0]).toMatchObject({ left: 2, serves: 3, out: false });
+      const frame = (await room.frame(r.id))!;
+      expect(frame.room.sizes[0]).toMatchObject({ left: 2, serves: 1, out: false });
+      expect(await room.guaranteeShown(holder.id, r.id)).toEqual({ pieces: 3 });
+      expect(roomFor(frame, 3).sizes[0]).toMatchObject({ left: 2, serves: 3, out: false });
+      expect(roomFor(frame, 0)).toBe(frame.room);
       f.clock.set(at(10_000));
       expect(await f.live.enter(holder.id, r.id, { sizeId: r.sizes[0]!.id, quantity: 3 }, holder.actor)).toMatchObject({ quantity: 3, guaranteed: true });
+    });
+
+    it('an ordinary viewer on a release of one per collector, no piece free and 3 held: its size serves 1, never the 3 held (D25, plan §1.3)', async () => {
+      const r = await release({ perAccount: 1, sizes: [{ label: '52', stock: 4 }] });
+      const line = [await accountOfTier(f, 0), await accountOfTier(f, 0), await accountOfTier(f, 0), await accountOfTier(f, 0)];
+      f.clock.set(at(-MINUTE));
+      for (const a of line) await f.live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id }, a.actor);
+      await advance(r, T0);
+      const turns = (await entriesOf(t.db, r.id)).filter((e) => e.status === 'TURN');
+      expect(turns).toHaveLength(4);
+      const payer = line.find((a) => a.id === turns[0]!.account_id)!;
+      await holdAndSecure(r.id, payer.id, payer.actor);
+      await f.live.confirm(payer.id, r.id, payer.actor);
+      const room = new LiveRoomService({ db: t.db, turnKey: f.turnKey, publicOrigin: 'https://verify.orbes.test', clock: f.clock.now });
+      const frame = (await room.frame(r.id))!;
+      // 1 confirmed, 3 in turns, 0 free: the room reads left 0 and serves 1 (not 3, which with left would say 3 are held).
+      expect(frame.room.sizes[0]).toEqual({ id: r.sizes[0]!.id, label: '52', stock: 4, left: 0, serves: 1, out: false });
+      expect(roomFor(frame, 0).sizes[0]!.serves).toBe(1);
+      expect(roomFor(frame, 1).sizes[0]!.serves).toBe(1);
+      // A holder of 2 reads up to 2, no more.
+      expect(roomFor(frame, 2).sizes[0]!.serves).toBe(2);
     });
 
     it('revoked while its holder waits: the entry stays an ordinary one, its quantity brought back within the per collector, its turn for that', async () => {

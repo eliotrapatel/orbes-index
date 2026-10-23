@@ -222,14 +222,14 @@ describe('a set\'s LIVE RELEASE (macro scope K44 T1, T2, T4; plan MACRO M3 §5.1
     // ONE QUEUE: its place in its sizes (the most before it in any of them, + 1).
     expect((await f.live.entry(e4!.id, r.id))!.queue).toMatchObject({ place: 2, out: false });
 
-    // The room per piece, its figures in sets (no held piece told: ONE QUEUE D25; what each size still serves an entry,
-    // at most what any one entry may take, LIVE_SERVES_MAX); the console's board and line per piece.
+    // The room per piece, its figures in sets (no held piece told: ONE QUEUE D25; what each size still serves one
+    // collector, at most its limit); the console's board and line per piece.
     const frame = (await room.frame(r.id))!;
     expect(frame.room).toMatchObject({ quantity: 3, left: 1 });
     expect(frame.room).not.toHaveProperty('held');
     expect(frame.room.pieces?.map((p) => [p.piece, p.sizes.map((s) => [s.label, s.left, s.serves, s.out])])).toEqual([
-      [1, [['52', 0, 1, false], ['54', 1, 2, false]]],
-      [2, [['45', 0, 2, false], ['50', 1, 1, false]]],
+      [1, [['52', 0, 1, false], ['54', 1, 1, false]]],
+      [2, [['45', 0, 1, false], ['50', 1, 1, false]]],
     ]);
     const board = (await f.liveConsole.board(r.id))!;
     expect(board).toMatchObject({ quantity: 3, totals: { stock: 3, left: 1, held: 2, turns: 2, line: 2 } });

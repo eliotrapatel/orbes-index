@@ -25,8 +25,8 @@
  * stage and show its photograph from the photograph's, as its card's `set` does.
  *
  * The room (`frame`): built once for all of a release's viewers (routes/live.ts fans it out once a second): its phase,
- * the pieces left per size and what each size can still serve (`serves`, at most the most any one entry may take:
- * never how many pieces are held, D25), the people in the room, the latest host message; and the board's share of it
+ * the pieces left per size and what each size can still serve (`serves`, at most the release's limit per collector:
+ * never how many pieces are held, D25; a viewer who may take more, IN-01, reads its own copy: `roomFor`), the people in the room, the latest host message; and the board's share of it
  * (the countdown, the door, the pieces left overall: no personal data); from T0, the queue's snapshot (live-queue.ts:
  * ONE QUEUE, lot Q1 §1.3), from which each viewer reads its own entry's place and estimate, never sent whole: no
  * pace, no line's length, no held piece ever reaches a phone (D8). `viewer` says who may read it: a
@@ -44,7 +44,6 @@ import type { DropRow, LiveEndReason } from '../db/schema.js';
 import { DomainError } from '../errors.js';
 import { systemClock, type Clock } from '../types.js';
 import { afterRoomPlace, isAfterRoom } from './after-room.js';
-import { GUARANTEE_PIECES } from './guarantees.js';
 import { CALENDAR_ALARM_MINUTES, releaseIcs } from './calendar.js';
 import { dropNotFound } from './drops.js';
 import {
@@ -243,17 +242,11 @@ export interface LiveBanner {
 }
 
 /**
- * The most pieces any one entry may take (LIVE_PER_ACCOUNT.max; IN-01, a guarantee's GUARANTEE_PIECES.max): what a size's
- * `serves` says at most. Not the release's own limit per collector: a guarantee holder may enter for more than it, and
- * ENTER THE LINE reads `serves` as it read `left + held` before (D32, A 14:50 "don't change it").
- */
-export const LIVE_SERVES_MAX = Math.max(LIVE_PER_ACCOUNT.max, GUARANTEE_PIECES.max);
-
-/**
- * A size in the room: its stock, the pieces free now (`left`), and what it can still serve an entry (`serves`: the
- * pieces not confirmed, free or held, at most LIVE_SERVES_MAX, the most any one entry may take, so it never says how
- * many are held beyond "at least that many", D25; ONE QUEUE, lot Q1 §1.3: the late comer's ENTER THE LINE and the room's sizes read it as they read `left + held`
- * before, D32); `out` once it can serve no one (every piece confirmed).
+ * A size in the room: its stock, the pieces free now (`left`), and what it can still serve one collector (`serves`: the
+ * pieces not confirmed, free or held, at most the release's limit per collector, so it never says how many are held,
+ * D25; a viewer who may take more, a guarantee's holder, IN-01, reads up to its own pieces: `roomFor`; ONE QUEUE, lot Q1
+ * §1.3: the late comer's ENTER THE LINE and the room's sizes read it as they read `left + held` before, D32); `out` once
+ * it can serve no one (every piece confirmed).
  */
 export interface LiveRoomSize {
   id: string;
@@ -335,6 +328,29 @@ export interface LiveFrame {
    * stream opened with a link since replaced or revoked. Internal: never in `room` or `board`, never sent.
    */
   boardTokenHash: Uint8Array | null;
+  /**
+   * D32 (lot Q1 §1.3): per size, the pieces not confirmed (free or held), and the release's limit per collector, at which
+   * the room's `serves` stops; a viewer who may take more reads its own copy (`roomFor`). Internal: never sent.
+   */
+  servable: ReadonlyMap<string, number>;
+  perAccount: number;
+}
+
+/**
+ * The room as one viewer reads it (D32, D25): the shared room, or, for a viewer who may take more pieces than the
+ * release's limit per collector (IN-01: the guarantee shown to it, or its own entry's quantity), a copy whose sizes serve
+ * up to that many, so its ENTER THE LINE and its place's fallback read as they did with `left + held`. Each viewer is
+ * told no more than "at least as many as I may take" of the held pieces, as ENTER's state already showed it.
+ */
+export function roomFor(frame: LiveFrame, pieces: number): LiveRoom {
+  const cap = Math.max(frame.perAccount, pieces);
+  if (cap === frame.perAccount) return frame.room;
+  const size = (z: LiveRoomSize): LiveRoomSize => {
+    const serves = Math.min(frame.servable.get(z.id) ?? z.serves, cap);
+    return serves === z.serves ? z : { ...z, serves, out: serves === 0 };
+  };
+  const { room } = frame;
+  return { ...room, sizes: room.sizes.map(size), ...(room.pieces ? { pieces: room.pieces.map((p) => ({ ...p, sizes: p.sizes.map(size) })) } : {}) };
 }
 
 /** An account's standing in a release, as its state and stream are opened with it. */
@@ -651,14 +667,7 @@ export class LiveRoomService {
         .where('i.drop_id', '=', viewer.dropId)
         .where('i.account_id', '=', accountId)
         .executeTakeFirst(),
-      this.db
-        .selectFrom('house_guarantees')
-        .select('pieces')
-        .where('account_id', '=', accountId)
-        .where('covered_drop_id', '=', viewer.dropId)
-        .where('status', '=', 'ACTIVE')
-        .where('visible', '=', true)
-        .executeTakeFirst(),
+      this.guaranteeShown(accountId, viewer.dropId),
     ]);
     const entry = views.get(accountId) ?? null;
     // Macro scope K44 T1: on a set's release, the interest's size per piece and YOUR SIZES' preselection per piece.
@@ -670,10 +679,26 @@ export class LiveRoomService {
       interest: interest
         ? { dropId: interest.drop_id, size: { id: interest.size_id, label: interest.label }, ...(interestSizes.length ? { sizes: interestSizes } : {}), since: interest.created_at }
         : null,
-      guarantee: guarantee ? { pieces: guarantee.pieces } : null,
+      guarantee,
       savedSize: entry || interest ? null : await this.matchSavedSize(accountId, viewer.dropId),
       ...(isSet ? { savedSizes: entry || interest ? [] : await this.savedSizesByPiece(accountId, viewer.dropId) } : {}),
     };
+  }
+
+  /**
+   * IN-01: the house's guarantee set aside for this release for the account, its pieces, when it is shown to the client
+   * (its state; its stream's own room, `roomFor`, D32); null otherwise. Reads only.
+   */
+  async guaranteeShown(accountId: string, dropId: string): Promise<{ pieces: number } | null> {
+    const g = await this.db
+      .selectFrom('house_guarantees')
+      .select('pieces')
+      .where('account_id', '=', accountId)
+      .where('covered_drop_id', '=', dropId)
+      .where('status', '=', 'ACTIVE')
+      .where('visible', '=', true)
+      .executeTakeFirst();
+    return g ? { pieces: g.pieces } : null;
   }
 
   /**
@@ -780,12 +805,15 @@ export class LiveRoomService {
     const people = (statuses: readonly string[]) => counts.filter((c) => statuses.includes(c.status)).reduce((n, c) => n + Number(c.n), 0);
     const pieces = (sizeId: string, statuses: readonly string[]) =>
       (bySize ?? counts).filter((c) => c.size_id === sizeId && statuses.includes(c.status)).reduce((n, c) => n + Number(c.q ?? 0), 0);
+    const perAccount = r.per_account ?? LIVE_PER_ACCOUNT.default;
+    const servableBySize = new Map<string, number>();
     const roomSizes: LiveRoomSize[] = sizes.map((s) => {
       const held = pieces(s.id, ['TURN', 'SECURED']);
       const servable = Math.max(0, s.stock - pieces(s.id, ['CONFIRMED']));
-      // D32: what it can still serve, never more than any one entry may take (LIVE_SERVES_MAX: a guarantee holder's JOIN
-      // unchanged), so it never says more than "at least that many" of the held pieces (D25).
-      const serves = Math.min(servable, LIVE_SERVES_MAX);
+      servableBySize.set(s.id, servable);
+      // D32: what it can still serve, never more than one collector may take: the held pieces never told (D25). A
+      // guarantee's holder reads up to its own pieces (`roomFor`).
+      const serves = Math.min(servable, perAccount);
       return { id: s.id, label: s.label, ...(s.piece !== null ? { piece: s.piece } : {}), stock: s.stock, left: Math.max(0, servable - held), serves, out: serves === 0 };
     });
     const stages = liveStages(r, now)!;
@@ -840,7 +868,7 @@ export class LiveRoomService {
         ...(set ? { set: setView(set, stages) } : {}),
       },
     };
-    return { room, board, queue, boardTokenHash: r.board_token_hash ? new Uint8Array(r.board_token_hash) : null };
+    return { room, board, queue, boardTokenHash: r.board_token_hash ? new Uint8Array(r.board_token_hash) : null, servable: servableBySize, perAccount };
   }
 
   /**

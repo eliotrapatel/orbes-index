@@ -160,8 +160,8 @@ export const liveRoutes: FastifyPluginAsync<LiveRouteDeps> = async (app, { ctx, 
     const own = await liveRoom.own(account.id, viewer);
     // ONE QUEUE (lot Q1 §1.3): the room, and its own entry with its figures from the queue's snapshot (its place, its
     // estimate, never the pace: D8), read again as `pollMs` says (2 s; 10 s to a minute behind the next ones, which hold
-    // no stream); the reading recorded (G2).
-    const state = await hub.stateOf(viewer.dropId, own.entry);
+    // no stream); the reading recorded (G2). Its sizes serve up to the guarantee shown to it, as up to its entry (D32).
+    const state = await hub.stateOf(viewer.dropId, own.entry, own.guarantee?.pieces ?? 0);
     if (!state) throw dropNotFound();
     return { now: ctx.clock(), ...own, ...state };
   });

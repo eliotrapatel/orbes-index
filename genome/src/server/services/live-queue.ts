@@ -33,8 +33,9 @@
  *   pollMs    behind the next ones (no stream: http/live-stream.ts), how soon its page reads its state again: a quarter
  *             of its estimate, within LIVE_QUEUE_FAR_POLL_MS (10 s to a minute, 30 s while paused), in whole seconds;
  *             null while it is next. A function of its own `waitMs` alone, so it says nothing of the pace (D8: the gap Y
- *             never reaches a phone; an entry behind waits two batches at least, so a quarter of its estimate is at
- *             most half the time until it could be next, and G2's readings cover the rest).
+ *             never reaches a phone). An entry that becomes next between two of its readings is covered by G2: a batch
+ *             after the first waits for the reading of every entry it would reach, up to READ_WAIT_MS (live-frames.ts),
+ *             the far-poll maximum.
  *
  * The close guard (D10, ANSWERS B10: "a console warning (EXTEND / SET PACE / NEXT BATCH NOW), advice only", e.g.
  * « AT THIS PACE, 120 PIECES REMAIN AT THE CLOSE »).

@@ -869,11 +869,10 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       // Before T0: the room, read every 2 s; no queue yet.
       const early = await state(members[0]!);
       expect(early).toMatchObject({ pollMs: 2000, room: { phase: 'ROOM', inRoom: 4 }, entry: { status: 'WAITING', queue: null } });
-      // The room never says the line's length nor a held piece: each size what it still serves an entry, at most what any
-      // one entry may take (5, a guarantee's pieces included: D32).
+      // The room never says the line's length nor a held piece: each size what it still serves one collector (D32).
       expect(early.room).not.toHaveProperty('line');
       expect(early.room).not.toHaveProperty('held');
-      expect(early.room.sizes).toEqual([{ id: r.sizes[0]!.id, label: '52', stock: 10, left: 10, serves: 5, out: false }]);
+      expect(early.room.sizes).toEqual([{ id: r.sizes[0]!.id, label: '52', stock: 10, left: 10, serves: 1, out: false }]);
 
       // T0: one turn by the first batch; then three in the queue, places 1, 2 (next: the scheduled batch and one extra
       // can reach them) and 3 (behind).
@@ -908,6 +907,28 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       h.clock.advance(MINUTE);
       await advance(h, r.id);
       expect(await state(waiter)).toMatchObject({ pollMs: 2000, entry: { queue: { place: 2, next: true } } });
+    });
+
+    it('ONE QUEUE (Q1.3, D32, D25): each size serves the limit per collector in the shared room, never the held pieces; a holder of a guarantee shown to it reads up to its own pieces, in its state and its stream, so its ENTER THE LINE stays as it was', async () => {
+      const r = await release(h, f, { inMinutes: 4, sizes: [{ label: '52', stock: 3 }] });
+      const [first, holder, other] = [await member(h, f, 1), await member(h, f, 1), await member(h, f, 1)];
+      await h.ctx.services.guarantees.grant(holder.id, { scope: 'RELEASE', targetId: r.id, pieces: 3, validUntil: '2026-12-31', visible: true }, f.admin);
+      expect((await first.client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[0]!.id })).statusCode).toBe(200);
+      h.clock.advance(4 * MINUTE);
+      await advance(h, r.id);
+      type Sized = { guarantee: unknown; room: { sizes: { left: number; serves: number }[] } };
+      const state = async (m: Member) => safeJson(await m.client.get(`/api/v1/live/${r.id}/state`)) as Sized;
+      // One piece in a turn, two free: the ordinary viewer reads serves 1 (left + serves never says a held piece); the
+      // holder of 3, serves 3, as it read left + held before.
+      expect((await state(other)).room.sizes[0]).toMatchObject({ left: 2, serves: 1 });
+      expect(await state(holder)).toMatchObject({ guarantee: { pieces: 3 }, room: { sizes: [{ left: 2, serves: 3 }] } });
+      const [mine, theirs] = [await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: holder.client.cookies }), await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: other.client.cookies })];
+      expect((await mine.next((e) => e.event === 'room')).data).toMatchObject({ sizes: [{ left: 2, serves: 3 }] });
+      expect((await theirs.next((e) => e.event === 'room')).data).toMatchObject({ sizes: [{ left: 2, serves: 1 }] });
+      mine.close();
+      theirs.close();
+      await until(() => h.app.liveHub.open.streams === 0);
+      expect((await holder.client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[0]!.id, quantity: 3 })).statusCode).toBe(200);
     });
 
     it('ONE QUEUE (Q1.3, D9): only an entry a batch can reach next keeps its stream (its `you` events carry its own figures, never a queue event): one behind is sent its place and the room, then its stream ends, a new one answers 204 until it is next', async () => {
