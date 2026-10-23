@@ -1399,6 +1399,11 @@ export interface DropsTable {
    * DEFAULT 0; 0, no hold); above 0 only with a pace.
    */
   pace_hold_minutes: WithDefault<number>;
+  /**
+   * Migration 0058 (ONE QUEUE, lot Q1, step Q1.2): the batches of `pace_batches` given by NEXT BATCH NOW (int NOT NULL
+   * DEFAULT 0, 0 to `pace_batches`); the hold lasts while every batch given is one of them.
+   */
+  pace_extra_batches: WithDefault<number>;
 }
 
 /**

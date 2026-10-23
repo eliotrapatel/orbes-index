@@ -27,14 +27,16 @@
  * New: the hold after the opening (D4: everyone waits it; SHORTEN THE HOLD and END THE HOLD NOW, never later; before
  * the announcement a setting, after it the house's settings lock: N14), at most one batch per published frame (D9: a
  * restart's overdue slots one per frame, a NEXT BATCH NOW within the frame of another batch waiting for the next one),
- * sets under the cap.
+ * a batch after the first waiting until the phones it reaches have READ that they are next (G2, PLAN amendment 1: a
+ * restart's overdue slots, NEXT BATCH NOW twice right after a scheduled batch, a back-of-line reader on a 60 s cadence;
+ * capped at 60 s), sets under the cap.
  */
 import { randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
 import { GuaranteeService } from '../../src/server/services/guarantees.js';
-import { accountLiveData, holdEndsAt, liveQueueEta, LiveService, paceNextAt, paceShiftMs } from '../../src/server/services/live.js';
+import { accountLiveData, holdEndsAt, liveQueueEta, liveReadsNext, LiveService, paceNextAt, paceShiftMs } from '../../src/server/services/live.js';
 import { LiveFrameGate } from '../../src/server/services/live-frames.js';
 import { LiveInsightsService, queueFigures } from '../../src/server/services/live-insights.js';
 import { closeGuard } from '../../src/server/services/live-queue.js';
@@ -60,7 +62,7 @@ async function rejects(p: Promise<unknown>, code: string, status?: number): Prom
 }
 
 describe('the rules of the pace', () => {
-  const d = { opens_at: T0, paused_at: null, pace_batch: 250, pace_minutes: 2, pace_paused_at: null, pace_next_at: null, pace_hold_minutes: 0, pace_batches: 0 } as const;
+  const d = { opens_at: T0, paused_at: null, pace_batch: 250, pace_minutes: 2, pace_paused_at: null, pace_next_at: null, pace_hold_minutes: 0, pace_batches: 0, pace_extra_batches: 0 } as const;
 
   it('dues the first batch at T0 + the hold, then at the stored next batch; none without a pace (an after-room)', () => {
     expect(paceNextAt(d)).toEqual(T0);
@@ -69,10 +71,13 @@ describe('the rules of the pace', () => {
     expect(paceNextAt({ ...d, pace_batch: null, pace_minutes: null })).toBeNull();
   });
 
-  it('says when the hold ends while it lasts: a hold set, no batch given yet', () => {
+  it('says when the hold ends while it lasts: a hold set, no scheduled batch given yet (a NEXT BATCH NOW leaves it: D4, A 157, A 160)', () => {
     expect(holdEndsAt({ ...d, pace_hold_minutes: 10 })).toEqual(at(10 * MINUTE));
     expect(holdEndsAt(d)).toBeNull();
     expect(holdEndsAt({ ...d, pace_hold_minutes: 10, pace_batches: 1 })).toBeNull();
+    // Two NEXT BATCH NOW batches during the hold, its first scheduled batch still to come at T0 + 10.
+    expect(holdEndsAt({ ...d, pace_hold_minutes: 10, pace_batches: 2, pace_extra_batches: 2, pace_next_at: at(10 * MINUTE) })).toEqual(at(10 * MINUTE));
+    expect(holdEndsAt({ ...d, pace_hold_minutes: 10, pace_batches: 3, pace_extra_batches: 2, pace_next_at: at(12 * MINUTE) })).toBeNull();
     expect(holdEndsAt({ ...d, pace_hold_minutes: 10, pace_batch: null })).toBeNull();
   });
 
@@ -144,7 +149,7 @@ describe('LiveService: ONE QUEUE’s batches', () => {
       details: a.details as Record<string, unknown>,
     }));
   const pace = (id: string) =>
-    t.db.selectFrom('drops').select(['pace_batch', 'pace_minutes', 'pace_next_at', 'pace_paused_at', 'pace_batches', 'pace_hold_minutes']).where('id', '=', id).executeTakeFirstOrThrow();
+    t.db.selectFrom('drops').select(['pace_batch', 'pace_minutes', 'pace_next_at', 'pace_paused_at', 'pace_batches', 'pace_extra_batches', 'pace_hold_minutes']).where('id', '=', id).executeTakeFirstOrThrow();
   /** `n` accounts entered in the room before T0 (in the release's size `sizeIndex`). */
   async function room(r: LiveRelease, n: number, sizeIndex = 0) {
     f.clock.set(at(-MINUTE));
@@ -161,12 +166,49 @@ describe('LiveService: ONE QUEUE’s batches', () => {
     (await entriesOf(t.db, r.id)).map((e) => [e.position, e.status, e.admitted_batch, e.admitted_at ? e.admitted_at.getTime() - T0.getTime() : null]);
   const statuses = async (r: LiveRelease) => (await entriesOf(t.db, r.id)).map((e) => e.status);
   const check = async (r: LiveRelease, now: Date) => paceCheck(await livePaceFacts(t.db, await t.db.selectFrom('drops').selectAll().where('id', '=', r.id).executeTakeFirstOrThrow(), now));
-  /** A LiveService whose frames are published only when the test says (`frame`): the engine of one process. */
-  const process = () => {
+  /**
+   * A LiveService whose frames are published only when the test says (`frame`): the engine of one process. With
+   * `readings` (G2), its batches after the first wait for the phones' readings: `read` is the phone of the entry at a
+   * place in the line reading its state (its own entry, as the stream's `you` event and GET /state serve it), recorded
+   * as the app records it; `readings` lists them, in order.
+   */
+  const process = (o: { readings?: boolean } = {}) => {
     const frames = new LiveFrameGate();
     frames.usePublisher(() => {});
+    frames.useReadings(o.readings ?? false);
     const live = new LiveService({ db: t.db, audit: f.audit, seedKey: f.seedKey, turnKey: f.turnKey, clock: f.clock.now, frames });
-    return { live, frame: (r: LiveRelease) => frames.published(r.id, frames.begin(r.id)) };
+    const readings: { position: number; next: boolean; at: number }[] = [];
+    const read = async (r: LiveRelease, position: number) => {
+      const e = (await entriesOf(t.db, r.id)).find((x) => x.position === position)!;
+      const view = (await live.entry(e.account_id, r.id))!;
+      const next = liveReadsNext(view);
+      frames.read(r.id, view.id, next);
+      readings.push({ position, next, at: f.clock.now().getTime() - T0.getTime() });
+      return next;
+    };
+    return { live, frame: (r: LiveRelease) => frames.published(r.id, frames.begin(r.id)), read, readings };
+  };
+  /**
+   * Whether every turn given by a batch after the first, up to the place `upTo`, went to an entry whose phone's last
+   * reading before it (by the clock) said it was next.
+   */
+  const turnsRead = async (r: LiveRelease, readings: readonly { position: number; next: boolean; at: number }[], upTo = Infinity) => {
+    for (const e of await entriesOf(t.db, r.id)) {
+      if (e.admitted_batch === null || e.admitted_batch < 2 || e.let_in_by || e.position! > upTo) continue;
+      const given = e.turn_at!.getTime() - T0.getTime();
+      const last = readings.filter((x) => x.position === e.position && x.at <= given).at(-1);
+      if (!last?.next) return `place ${e.position} (batch ${e.admitted_batch}) was given its turn without having read that it was next`;
+    }
+    return 'every turn read';
+  };
+  const settledWithin = async <T,>(p: Promise<T>, ms = 400): Promise<boolean> => {
+    let done = false;
+    void p.then(
+      () => (done = true),
+      () => (done = true),
+    );
+    await new Promise((resolve) => setTimeout(resolve, ms));
+    return done;
   };
 
   it('gives TURNS by batches (D3; M1 « admits exactly X every Y … only the admitted take turns »): up to X every Y minutes on the batches’ logical times, in the line’s order, each turn stamped with its batch', async () => {
@@ -312,7 +354,7 @@ describe('LiveService: ONE QUEUE’s batches', () => {
     await rejects(f.live.setPace(parent.afterRoom!.id, { batch: 1, minutes: 5 }, f.admin), 'LIVE_AFTER_ROOM', 409);
   });
 
-  it('holds the opening for everyone, guarantees included (D4): the first batch at T0 + the hold; LET IN works during it; NEXT BATCH NOW starts the first turns early, the first batch keeping its time', async () => {
+  it('holds the opening for everyone, guarantees included (D4): the first batch at T0 + the hold; LET IN works during it; NEXT BATCH NOW starts the first turns early, the first scheduled batch keeping its time and the hold lasting until it (still shortened or ended: A 157, A 160)', async () => {
     const r = await release({ pace: { batch: 2, minutes: 5 }, holdMinutes: 10, turnSeconds: 300 });
     const holder = await accountOfTier(f, 0);
     await new GuaranteeService({ db: t.db, audit: f.audit, clock: f.clock.now }).grant(holder.id, { scope: 'RELEASE', targetId: r.id, pieces: 1, validUntil: '2026-12-31', visible: true }, f.admin);
@@ -330,13 +372,23 @@ describe('LiveService: ONE QUEUE’s batches', () => {
     expect(await f.live.letIn(r.id, last.id, f.admin)).toMatchObject({ status: 'TURN', letIn: true, admittedAt: at(2 * MINUTE), batch: 0 });
     // NEXT BATCH NOW during the hold: up to X turns now; the first scheduled batch keeps T0 + 10.
     f.clock.set(at(3 * MINUTE));
-    expect((await f.live.nextBatch(r.id, f.admin)).pace).toMatchObject({ batches: 1, nextAt: at(10 * MINUTE), holdEndsAt: null, turnsGiven: 2, letIn: 1, admitted: 3 });
+    expect((await f.live.nextBatch(r.id, f.admin)).pace).toMatchObject({ batches: 1, nextAt: at(10 * MINUTE), holdEndsAt: at(10 * MINUTE), turnsGiven: 2, letIn: 1, admitted: 3 });
+    expect(await pace(r.id)).toMatchObject({ pace_batches: 1, pace_extra_batches: 1, pace_next_at: at(10 * MINUTE), pace_hold_minutes: 10 });
     // The guarantee first, then the line's first place.
     expect((await entriesOf(t.db, r.id)).filter((e) => e.admitted_batch === 1).map((e) => e.account_id)).toContain(holder.id);
-    // The first batch at T0 + 10 gives the next two (the turns given at T0 + 2 and + 3 ran out meanwhile, 5 minutes each).
-    expect(await advance(r, at(10 * MINUTE))).toMatchObject({ batch: 2, turns: 2, missed: 3 });
+    // The hold lasts after it: the board still shows its end, and it can still be shortened (or ended).
+    expect((await f.liveConsole.board(r.id))!.pace).toMatchObject({ holdEndsAt: at(10 * MINUTE), nextAt: at(10 * MINUTE), batches: 1 });
+    f.clock.set(at(4 * MINUTE));
+    expect((await f.live.shortenHold(r.id, 9, f.admin)).pace).toMatchObject({ holdMinutes: 9, holdEndsAt: at(9 * MINUTE), nextAt: at(9 * MINUTE), batches: 1 });
+    // The turns given at T0 + 2 and + 3 have run out (5 minutes each); no batch before the hold's end.
+    expect(await advance(r, at(9 * MINUTE - 1))).toMatchObject({ batch: null, missed: 3 });
+    // The first scheduled batch at T0 + 9 gives the next two and ends the hold.
+    expect(await advance(r, at(9 * MINUTE))).toMatchObject({ batch: 2, turns: 2 });
     expect(await statuses(r)).toEqual(['MISSED', 'MISSED', 'TURN', 'TURN', 'MISSED']);
-    expect((await check(r, at(10 * MINUTE))).pass).toBe(true);
+    expect(await pace(r.id)).toMatchObject({ pace_batches: 2, pace_extra_batches: 1, pace_next_at: at(14 * MINUTE) });
+    expect((await f.liveConsole.board(r.id))!.pace).toMatchObject({ holdEndsAt: null, nextAt: at(14 * MINUTE) });
+    await rejects(f.live.endHold(r.id, f.admin), 'LIVE_NO_HOLD', 409);
+    expect((await check(r, at(9 * MINUTE))).pass).toBe(true);
   });
 
   it('SHORTENS THE HOLD and ENDS THE HOLD NOW from the announcement, earlier only (D4); before the announcement the hold is a setting, set longer or shorter; after it, the settings are locked as ever (N14)', async () => {
@@ -606,6 +658,131 @@ describe('LiveService: ONE QUEUE’s batches', () => {
     await p.live.resume(r.id, f.admin);
     expect((await audits(r.id, 'drop.live.pace.next')).map((a) => a.details.batch)).toEqual([3, 4, 5]);
     expect((await check(r, at(MINUTE + 1600))).pass).toBe(true);
+  });
+
+  it('G2 (PLAN amendment 1): after a restart, an overdue batch after the first waits until every phone it reaches has READ that it is next, a frame not being enough; each keeps its slot’s time and number; an absent phone holds it 60 s at most after the previous batch', async () => {
+    const r = await release({ pace: { batch: 2, minutes: 1 } });
+    await room(r, 10);
+    const before = process({ readings: true });
+    before.frame(r);
+    // The first batch never waits for readings: everyone has waited for it (T0, or the hold's end).
+    expect(await advance(r, T0, before.live)).toMatchObject({ batch: 1, turns: 2 });
+    // The phones read: the 3rd and 4th are next, the 5th and 6th behind (a 10 to 60 s cadence).
+    expect([await before.read(r, 3), await before.read(r, 4), await before.read(r, 5), await before.read(r, 6)]).toEqual([true, true, false, false]);
+    // The engine down from T0 + 30 s until T0 + 3 min 10 s: a new process, 3 slots overdue (T0+1, +2, +3), no reading in it yet.
+    const after = process({ readings: true });
+    const when = at(3 * MINUTE + 10 * SECOND);
+    after.frame(r);
+    expect(await advance(r, when, after.live)).toMatchObject({ batch: null, waiting: true, turns: 0 });
+    // The 3rd reads (its stream back): the 4th has not yet, the batch still waits, frames or not.
+    expect(await after.read(r, 3)).toBe(true);
+    after.frame(r);
+    expect(await advance(r, when, after.live)).toMatchObject({ batch: null, waiting: true });
+    expect(await after.read(r, 4)).toBe(true);
+    expect(await advance(r, when, after.live)).toMatchObject({ batch: 2, turns: 2 });
+    // The next slot (T0 + 2) reaches the 5th and 6th, who last read that they were behind: a fresh frame is not enough.
+    after.frame(r);
+    expect(await advance(r, when, after.live)).toMatchObject({ batch: null, waiting: true });
+    expect([await after.read(r, 5), await after.read(r, 6)]).toEqual([true, true]);
+    expect(await advance(r, when, after.live)).toMatchObject({ batch: 3, turns: 2 });
+    // The slot of T0 + 3 reaches the 7th and 8th, whose phones are away: it waits up to 60 s after the batch before it.
+    after.frame(r);
+    expect(await advance(r, at(3 * MINUTE + 69 * SECOND), after.live)).toMatchObject({ batch: null, waiting: true });
+    expect(await advance(r, at(3 * MINUTE + 70 * SECOND), after.live)).toMatchObject({ batch: 4, turns: 2 });
+    // Each with its slot's time and number; the PACE check green.
+    expect((await line(r)).filter((x) => x[2] !== null).map((x) => [x[0], x[2], x[3]])).toEqual([
+      [1, 1, 0],
+      [2, 1, 0],
+      [3, 2, MINUTE],
+      [4, 2, MINUTE],
+      [5, 3, 2 * MINUTE],
+      [6, 3, 2 * MINUTE],
+      [7, 4, 3 * MINUTE],
+      [8, 4, 3 * MINUTE],
+    ]);
+    // What the phones read: every turn of batches 2 and 3 went to a phone that had read that it was next.
+    expect(await turnsRead(r, after.readings, 6)).toBe('every turn read');
+    expect((await check(r, at(3 * MINUTE + 70 * SECOND))).pass).toBe(true);
+  });
+
+  it('G2: NEXT BATCH NOW pressed twice right after a scheduled batch waits each time until the phones it reaches have READ that they are next, then goes with its press time and number', async () => {
+    const r = await release({ pace: { batch: 1, minutes: 1 }, turnSeconds: 300 });
+    await room(r, 6);
+    const p = process({ readings: true });
+    p.frame(r);
+    expect(await advance(r, T0, p.live)).toMatchObject({ batch: 1, turns: 1 });
+    // The 2nd has read that it is next: the scheduled batch of T0 + 1 goes after the frame.
+    f.clock.set(at(30 * SECOND));
+    expect([await p.read(r, 2), await p.read(r, 3)]).toEqual([true, false]);
+    p.frame(r);
+    expect(await advance(r, at(MINUTE), p.live)).toMatchObject({ batch: 2, turns: 1 });
+    // A press right after it: its frame comes, but the 3rd last read that it was behind.
+    f.clock.set(at(MINUTE + 300));
+    const first = p.live.nextBatch(r.id, f.admin);
+    expect(await settledWithin(first)).toBe(false);
+    p.frame(r);
+    expect(await settledWithin(first)).toBe(false);
+    expect((await pace(r.id)).pace_batches).toBe(2);
+    // Its phone reads that it is next (its next reading): the press goes, with its press time.
+    f.clock.set(at(MINUTE + 900));
+    expect(await p.read(r, 3)).toBe(true);
+    expect((await first).pace).toMatchObject({ batches: 3, nextAt: at(2 * MINUTE) });
+    expect((await entriesOf(t.db, r.id)).find((e) => e.admitted_batch === 3)).toMatchObject({ position: 3, admitted_at: at(MINUTE + 300), turn_at: at(MINUTE + 900) });
+    // Pressed again at once: it waits for a frame, then for the 4th to read that it is next.
+    f.clock.set(at(MINUTE + 1000));
+    const second = p.live.nextBatch(r.id, f.admin);
+    p.frame(r);
+    expect(await settledWithin(second)).toBe(false);
+    f.clock.set(at(MINUTE + 1800));
+    expect(await p.read(r, 4)).toBe(true);
+    expect((await second).pace).toMatchObject({ batches: 4 });
+    expect((await entriesOf(t.db, r.id)).find((e) => e.admitted_batch === 4)).toMatchObject({ position: 4, admitted_at: at(MINUTE + 1000), turn_at: at(MINUTE + 1800) });
+    expect((await audits(r.id, 'drop.live.pace.next')).map((a) => a.details)).toEqual([{ batch: 3, turns: 1 }, { batch: 4, turns: 1 }]);
+    expect(await turnsRead(r, p.readings)).toBe('every turn read');
+    expect((await check(r, at(MINUTE + 1800))).pass).toBe(true);
+  });
+
+  it('G2: a phone at the back of the line reading every 60 s is never given a turn before it has read that it is next: two quick presses, the second waiting for its reading, not for the cap', async () => {
+    const r = await release({ pace: { batch: 2, minutes: 5 }, turnSeconds: 300 });
+    await room(r, 8);
+    const p = process({ readings: true });
+    p.frame(r);
+    expect(await advance(r, T0, p.live)).toMatchObject({ batch: 1, turns: 2 });
+    // At T0 every phone reads: the 3rd and 4th are next (they follow the stream), the 5th to 8th behind (every 60 s).
+    for (const position of [3, 4, 5, 6, 7, 8]) await p.read(r, position);
+    expect(p.readings.map((x) => x.next)).toEqual([true, true, false, false, false, false]);
+    // NEXT BATCH NOW at T0 + 10 s reaches the 3rd and 4th, who have read it: given after its frame.
+    f.clock.set(at(10 * SECOND));
+    const first = p.live.nextBatch(r.id, f.admin);
+    p.frame(r);
+    expect((await first).pace).toMatchObject({ batches: 2 });
+    // Pressed again at T0 + 11 s: it reaches the 5th and 6th, whose last reading (T0) said they were behind.
+    f.clock.set(at(11 * SECOND));
+    const second = p.live.nextBatch(r.id, f.admin);
+    p.frame(r);
+    expect(await settledWithin(second)).toBe(false);
+    f.clock.set(at(40 * SECOND));
+    expect(await settledWithin(second)).toBe(false);
+    // Their 60 s cadence: they read at T0 + 60 s, before the cap (T0 + 70 s, 60 s after the batch before): given then.
+    f.clock.set(at(60 * SECOND));
+    expect(await p.read(r, 5)).toBe(true);
+    expect(await settledWithin(second)).toBe(false);
+    expect(await p.read(r, 6)).toBe(true);
+    expect((await second).pace).toMatchObject({ batches: 3 });
+    expect((await entriesOf(t.db, r.id)).filter((e) => e.admitted_batch === 3).map((e) => [e.position, e.admitted_at, e.turn_at])).toEqual([
+      [5, at(11 * SECOND), at(60 * SECOND)],
+      [6, at(11 * SECOND), at(60 * SECOND)],
+    ]);
+    // The 7th and 8th then read nothing (away): a third press waits 60 s after the batch before it, then goes.
+    f.clock.set(at(61 * SECOND));
+    const third = p.live.nextBatch(r.id, f.admin);
+    p.frame(r);
+    f.clock.set(at(119 * SECOND));
+    expect(await settledWithin(third)).toBe(false);
+    f.clock.set(at(120 * SECOND));
+    expect((await third).pace).toMatchObject({ batches: 4 });
+    expect(await turnsRead(r, p.readings, 6)).toBe('every turn read');
+    expect((await check(r, at(120 * SECOND))).pass).toBe(true);
   });
 
   it('gives a set’s turns by the set rule within the cap (macro scope K44 T1)', async () => {

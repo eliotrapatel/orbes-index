@@ -8,7 +8,12 @@
  *    after T0 the first batch waits, everyone included (`drops_pace_hold_minutes_check`); a hold only with a pace
  *    (`drops_pace_hold`), so never on an after-room and never on a DRAW;
  *  - every LIVE release that is not an after-room carries a pace (`drops_live_paced`; step Q1.2, with the engine and the
- *    console's creation that require one), unless it has ended or was cancelled: those rows of history stay as they are.
+ *    console's creation that require one), unless it has ended or was cancelled: those rows of history stay as they are;
+ *  - `pace_extra_batches` (integer NOT NULL DEFAULT 0, step Q1.2): the batches of `pace_batches` given by NEXT BATCH NOW,
+ *    never more than they (`drops_pace_extra_batches`). The hold lasts until the first SCHEDULED batch (D4, ANSWERS
+ *    A 157 and A 160: NEXT BATCH NOW "starts the first turns early", "the batch clock keeps its time", and the hold can
+ *    still be shortened or ended), so the engine tells the two apart: no scheduled batch yet while `pace_batches` equals
+ *    it.
  *
  * `live_entries` does not change: 0049's `admitted_at` and `admitted_batch` now mean "given its turn by batch N at the
  * batch's logical time" (0 with no pace, i.e. an after-room; LET IN: the batches so far), and its partial index
@@ -17,9 +22,11 @@
  * `up` refuses, naming the count, while an open LIVE release (not an after-room, not ended, not cancelled) has no pace:
  * no unpaced LIVE release existed on 21 Oct, and "if a LIVE release was created on M1 without a pace, ask him" (ANSWERS
  * r8); the owner's runbook checks it read-only before the deploy. On the previous image during the roll-out: it never
- * names `pace_hold_minutes` (its DEFAULT 0 applies). No row is inserted. `down` refuses, naming the count, while a
- * release has a hold (above 0); otherwise it drops the three CHECKs and the column: the schema of 0057 exactly. One
- * statement per array entry (PGlite's extended protocol); Kysely's Migrator applies the migration inside a transaction.
+ * names `pace_hold_minutes` nor `pace_extra_batches` (their DEFAULT 0 applies). No row is inserted. `down` refuses,
+ * naming the count, while a release has a hold (above 0); otherwise it drops the four CHECKs and the two columns (the
+ * count of NEXT BATCH NOW batches matters only to a hold, which the previous image does not know): the schema of 0057
+ * exactly. One statement per array entry (PGlite's extended protocol); Kysely's Migrator applies the migration inside
+ * a transaction.
  */
 import { sql, type Kysely } from 'kysely';
 
@@ -30,6 +37,8 @@ const HOLD_MAX = 120;
 
 /** A hold only with a pace. */
 const HOLD = `pace_hold_minutes = 0 OR pace_batch IS NOT NULL`;
+/** The batches given by NEXT BATCH NOW: some of the batches given, never more. */
+const EXTRA = `pace_extra_batches >= 0 AND pace_extra_batches <= pace_batches`;
 /** Every LIVE release that is not an after-room carries a pace, unless it has ended or was cancelled. */
 const PACED = `mode <> 'LIVE' OR parent_drop_id IS NOT NULL OR pace_batch IS NOT NULL OR ended_at IS NOT NULL OR cancelled_at IS NOT NULL`;
 
@@ -47,6 +56,8 @@ export const UP: readonly string[] = [
   `ALTER TABLE drops ADD COLUMN pace_hold_minutes smallint NOT NULL DEFAULT 0 CONSTRAINT drops_pace_hold_minutes_check CHECK (pace_hold_minutes BETWEEN ${HOLD_MIN} AND ${HOLD_MAX})`,
   `ALTER TABLE drops ADD CONSTRAINT drops_pace_hold CHECK (${HOLD})`,
   `ALTER TABLE drops ADD CONSTRAINT drops_live_paced CHECK (${PACED})`,
+  `ALTER TABLE drops ADD COLUMN pace_extra_batches integer NOT NULL DEFAULT 0`,
+  `ALTER TABLE drops ADD CONSTRAINT drops_pace_extra_batches CHECK (${EXTRA})`,
 ];
 
 export const DOWN: readonly string[] = [
@@ -59,6 +70,8 @@ export const DOWN: readonly string[] = [
        RAISE EXCEPTION 'migration 0058_one_queue cannot be rolled back: % releases with a hold after the opening exist', held;
      END IF;
    END $$`,
+  `ALTER TABLE drops DROP CONSTRAINT IF EXISTS drops_pace_extra_batches`,
+  `ALTER TABLE drops DROP COLUMN IF EXISTS pace_extra_batches`,
   `ALTER TABLE drops DROP CONSTRAINT IF EXISTS drops_live_paced`,
   `ALTER TABLE drops DROP CONSTRAINT IF EXISTS drops_pace_hold`,
   `ALTER TABLE drops DROP COLUMN IF EXISTS pace_hold_minutes`,

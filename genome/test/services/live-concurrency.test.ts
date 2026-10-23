@@ -276,12 +276,11 @@ for (const backend of BACKENDS) {
         () => f.live.shortenHold(r.id, 1, f.admin),
         () => f.live.nextBatch(r.id, f.admin),
       ]);
-      // SHORTEN THE HOLD after NEXT BATCH NOW's batch finds no hold left (PostgreSQL may run them in that order).
-      const shortened = outcomes[4] === 'ok';
-      expect(['ok', 'LIVE_NO_HOLD']).toContain(outcomes[4]);
-      expect(outcomes.filter((_, i) => i !== 4)).toEqual(['ok', 'ok', 'ok', 'ok', 'ok']);
-      // The engine's passes after them, at the first scheduled batch (T0 + 1 shortened, else T0 + 2): it goes if it has not yet.
-      f.clock.set(at((shortened ? 60 : 120) * SECOND));
+      // SHORTEN THE HOLD in any order: NEXT BATCH NOW's batch leaves the hold until the first scheduled batch (A 157,
+      // A 160), which only the shortened hold brings to now.
+      expect(outcomes).toEqual(['ok', 'ok', 'ok', 'ok', 'ok', 'ok']);
+      // The engine's passes after them, at the first scheduled batch (T0 + 1, shortened): it goes if it has not yet.
+      f.clock.set(at(60 * SECOND));
       while ((await f.live.advance(r.id))?.batch) {
         // one per pass
       }
@@ -293,12 +292,12 @@ for (const backend of BACKENDS) {
       expect(after.map((x) => [x.position, x.status])).toEqual([...[1, 2, 3, 4, 5, 6].map((p) => [p, 'TURN']), [7, 'QUEUED'], [8, 'QUEUED'], [9, 'QUEUED'], [10, 'TURN']]);
       expect(after[9]).toMatchObject({ admitted_at: at(60 * SECOND) });
       expect([0, 1, 2]).toContain(after[9]!.admitted_batch);
-      const d = await handle.db.selectFrom('drops').select(['pace_batches', 'pace_next_at', 'pace_hold_minutes']).where('id', '=', r.id).executeTakeFirstOrThrow();
-      expect(d).toEqual({ pace_batches: 2, pace_next_at: at((shortened ? 180 : 240) * SECOND), pace_hold_minutes: shortened ? 1 : 2 });
+      const d = await handle.db.selectFrom('drops').select(['pace_batches', 'pace_extra_batches', 'pace_next_at', 'pace_hold_minutes']).where('id', '=', r.id).executeTakeFirstOrThrow();
+      expect(d).toEqual({ pace_batches: 2, pace_extra_batches: 1, pace_next_at: at(180 * SECOND), pace_hold_minutes: 1 });
       const turns = await handle.db.selectFrom('audit_logs').select('details').where('target_id', '=', r.id).where('action', '=', 'drop.live.batch').execute();
       expect(turns.map((a) => (a.details as { turns: number }).turns)).toEqual([3, 3]);
       expect(await auditCount(r, 'drop.live.pace.next')).toBe(1);
-      expect(await auditCount(r, 'drop.live.hold.shorten')).toBe(shortened ? 1 : 0);
+      expect(await auditCount(r, 'drop.live.hold.shorten')).toBe(1);
     });
 
     it('double presses: the last press counts; a SECURE needs 1.4 s from it', async () => {

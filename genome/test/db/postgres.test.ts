@@ -600,19 +600,23 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await expect(sql`UPDATE order_cases SET group_id = NULL WHERE order_id = ${first.id}`.execute(db)).rejects.toSatisfy(isGuardViolation);
   });
 
-  it('holds ONE QUEUE\'s hold after the opening and every open LIVE release\'s pace by their CHECKs (0058: drops_pace_hold_minutes_check, drops_pace_hold, drops_live_paced), with the previous image\'s insert at 0 and the same JS types as PGlite; down refused while a hold exists and up refused while an open LIVE release has no pace, each naming its count', async () => {
+  it('holds ONE QUEUE\'s hold after the opening, every open LIVE release\'s pace and NEXT BATCH NOW\'s batches by their CHECKs (0058: drops_pace_hold_minutes_check, drops_pace_hold, drops_live_paced, drops_pace_extra_batches), with the previous image\'s insert at 0 and the same JS types as PGlite; down refused while a hold exists and up refused while an open LIVE release has no pace, each naming its count', async () => {
     // Its own letter: this database's categories already hold A to F, S, W, P, H, G, K, N and Q (the tests above).
     await db.insertInto('categories').values({ id: 28, code: 'O', name: 'One queue parity' }).execute();
-    const model = await db.insertInto('models').values({ category_id: 23, name: 'QUEUE', type: 'RING', sku_prefix: 'QUEUE-PG' }).returning('id').executeTakeFirstOrThrow();
+    const model = await db.insertInto('models').values({ category_id: 28, name: 'QUEUE', type: 'RING', sku_prefix: 'QUEUE-PG' }).returning('id').executeTakeFirstOrThrow();
     const live = {
       model_id: model.id, title: 'ONE QUEUE PG', quantity: 2, opens_at: new Date('2026-12-01T10:00:00Z'), closes_at: new Date('2026-12-01T11:00:00Z'), seed_enc: `v1.${'A'.repeat(16)}.${'B'.repeat(64)}`,
       seed_hash: new Uint8Array(32), early_access_hours: 0, mode: 'LIVE' as const, live_min_tier: 0, tier_priority: true, room_opens_minutes: 5, turn_seconds: 30, pay_minutes: 5, per_account: 1,
       price_minor: 1000, currency: 'EUR', quantity_line: '2 PIECES', published_at: new Date('2026-11-30T10:00:00Z'),
     };
-    // Inserted as the previous image does, naming the pace but not the hold: 0, a number.
-    const release = await db.insertInto('drops').values({ ...live, pace_batch: 250, pace_minutes: 1 }).returning(['id', 'pace_hold_minutes']).executeTakeFirstOrThrow();
-    expect(release).toEqual({ id: expect.any(String), pace_hold_minutes: 0 });
+    // Inserted as the previous image does, naming the pace but not the hold nor NEXT BATCH NOW's batches: 0, numbers.
+    const release = await db.insertInto('drops').values({ ...live, pace_batch: 250, pace_minutes: 1 }).returning(['id', 'pace_hold_minutes', 'pace_extra_batches']).executeTakeFirstOrThrow();
+    expect(release).toEqual({ id: expect.any(String), pace_hold_minutes: 0, pace_extra_batches: 0 });
     const set = (v: Record<string, unknown>, id = release.id) => db.updateTable('drops').set(v).where('id', '=', id).execute();
+    // NEXT BATCH NOW's batches: some of the batches given, never more (drops_pace_extra_batches).
+    await expect(set({ pace_extra_batches: 1 })).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_pace_extra_batches'));
+    await set({ pace_batches: 1, pace_extra_batches: 1 });
+    await set({ pace_batches: 0, pace_extra_batches: 0 });
     await expect(set({ pace_hold_minutes: 121 })).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_pace_hold_minutes_check'));
     await expect(set({ pace_hold_minutes: -1 })).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_pace_hold_minutes_check'));
     await set({ pace_hold_minutes: 30 });

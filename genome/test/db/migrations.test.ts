@@ -8391,10 +8391,10 @@ describe('migrations', () => {
     }
   });
 
-  /** What names an object of 0058 in a snapshot: the hold's column and its two CHECKs, and every LIVE release paced. */
-  const of0058 = (o: string) => /\b(pace_hold_minutes|drops_pace_hold(_minutes_check)?|drops_live_paced)\b/.test(o);
+  /** What names an object of 0058 in a snapshot: the hold's column and its two CHECKs, every LIVE release paced, and the NEXT BATCH NOW batches' count and its CHECK. */
+  const of0058 = (o: string) => /\b(pace_hold_minutes|drops_pace_hold(_minutes_check)?|drops_live_paced|pace_extra_batches|drops_pace_extra_batches)\b/.test(o);
 
-  it('0058 adds ONE QUEUE\'s hold after the opening (one column of drops and its two CHECKs) and every LIVE release paced (one CHECK), and nothing else; down restores 0057 exactly, and up again', async () => {
+  it('0058 adds ONE QUEUE\'s hold after the opening (one column of drops and its two CHECKs), every LIVE release paced (one CHECK) and the count of NEXT BATCH NOW batches (one column, one CHECK), and nothing else; down restores 0057 exactly, and up again', async () => {
     const latest = await snapshot();
     const { with: withIt, without: before } = await rollBackTo('0058_one_queue');
     // A PostgreSQL that lists NOT NULL as a constraint (PGlite's does) names pace_hold_minutes' too, as in 0049's test.
@@ -8403,9 +8403,10 @@ describe('migrations', () => {
     expect(before.filter((o) => !withIt.includes(o) && !notNull(o))).toEqual([]);
     expect(added.filter((o) => !of0058(o))).toEqual([]);
     expect(before.filter(of0058)).toEqual([]);
-    expect(added.filter((o) => o.startsWith('table '))).toEqual(['table drops pace_hold_minutes smallint NO 0']);
+    expect(added.filter((o) => o.startsWith('table '))).toEqual(['table drops pace_extra_batches integer NO 0', 'table drops pace_hold_minutes smallint NO 0']);
     expect(added.filter((o) => o.startsWith('constraint '))).toEqual([
       "constraint drops drops_live_paced CHECK (((mode <> 'LIVE'::text) OR (parent_drop_id IS NOT NULL) OR (pace_batch IS NOT NULL) OR (ended_at IS NOT NULL) OR (cancelled_at IS NOT NULL)))",
+      'constraint drops drops_pace_extra_batches CHECK (((pace_extra_batches >= 0) AND (pace_extra_batches <= pace_batches)))',
       'constraint drops drops_pace_hold CHECK (((pace_hold_minutes = 0) OR (pace_batch IS NOT NULL)))',
       'constraint drops drops_pace_hold_minutes_check CHECK (((pace_hold_minutes >= 0) AND (pace_hold_minutes <= 120)))',
     ]);
@@ -8415,7 +8416,7 @@ describe('migrations', () => {
     expect(await snapshot()).toEqual(latest);
   });
 
-  it('0058: a hold of 0 to 120 minutes, 0 by default, only with a pace (never on a DRAW, an after-room or an unpaced release); every open LIVE release that is not an after-room paced; down refused while a hold exists, naming the count; up refused while an open LIVE release has no pace, naming the count (an after-room, an ended or a cancelled release never counts)', async () => {
+  it('0058: a hold of 0 to 120 minutes, 0 by default, only with a pace (never on a DRAW, an after-room or an unpaced release); every open LIVE release that is not an after-room paced; NEXT BATCH NOW\'s batches 0 by default, never more than the batches; down refused while a hold exists, naming the count; up refused while an open LIVE release has no pace, naming the count (an after-room, an ended or a cancelled release never counts)', async () => {
     const run = (q: string) => sql.raw(q).execute(t.db);
     const one = async <T,>(q: string) => (await sql.raw<T>(q).execute(t.db)).rows[0] as T;
     const check = (p: Promise<unknown>, label: string, constraint?: string) => expect(p, label).rejects.toSatisfy((e) => isCheckViolation(e, constraint));
@@ -8456,6 +8457,16 @@ describe('migrations', () => {
     await set(`pace_hold_minutes = 15`, endedPaced);
     await check(set(`pace_batch = NULL, pace_minutes = NULL`, endedPaced), 'a pace taken away, its hold kept', 'drops_pace_hold');
     await set(`pace_hold_minutes = 0`, endedPaced);
+
+    // The batches given by NEXT BATCH NOW (step Q1.2): 0 by default, never NULL, some of the batches given, never more.
+    const extra = (id: string) => one<{ pace_extra_batches: number }>(`SELECT pace_extra_batches FROM drops WHERE id = '${id}'`);
+    for (const id of [draw, paced, child, ended, cancelled, endedPaced]) expect(await extra(id)).toEqual({ pace_extra_batches: 0 });
+    await check(set(`pace_extra_batches = 1`), 'an extra batch with no batch given', 'drops_pace_extra_batches');
+    await check(set(`pace_batches = 2, pace_extra_batches = -1`), 'a count below 0', 'drops_pace_extra_batches');
+    await expect(set(`pace_extra_batches = NULL`)).rejects.toSatisfy((e) => pgError(e)?.code === PG_ERROR.NOT_NULL_VIOLATION);
+    await set(`pace_batches = 2, pace_extra_batches = 2`);
+    await check(set(`pace_batches = 1`), 'fewer batches than NEXT BATCH NOW gave', 'drops_pace_extra_batches');
+    await set(`pace_batches = 0, pace_extra_batches = 0`);
 
     // Down refuses while a release has a hold, naming the count; this database stays at 0058.
     await expect(down(t.db)).rejects.toThrow(/0058_one_queue cannot be rolled back: 1 releases with a hold after the opening exist/);

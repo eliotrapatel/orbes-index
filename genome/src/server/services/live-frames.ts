@@ -23,7 +23,20 @@
  *
  * NEXT BATCH NOW pressed while the gate is shut waits here (`pending`), in the order pressed, with its press time: the
  * first pass after the next frame gives it, in the order due among the scheduled slots (services/live.ts giveDue).
+ *
+ * The readings (PLAN amendment 1, G2: "a batch after the first may only give a turn to an entry whose phone has READ that
+ * it is next"): a frame published is not yet a frame read, as a phone further back reads its state every 10 to 60 s. Once
+ * switched on (`useReadings`), the gate keeps, per release, the `next` flag of each entry's last reading (`read`: the
+ * stream's `you` event, GET /state), and a batch after the first (scheduled, overdue after a restart, or NEXT BATCH NOW
+ * pressed again) waits (`unread`) until every entry it would give a turn to has read that it is next, capped at
+ * READ_WAIT_MS (60 s, the far-poll limit) after the previous batch was given in this process (after a restart, after the
+ * moment it first waited); it keeps its logical time and its number (services/live.ts giveDue). Off, every reading counts
+ * as made: a process with no hub (tests, a script), and, until step Q1.3 records the readings from the queue's
+ * snapshot `next` and switches it on, the app.
  */
+
+/** How long a batch after the first waits at most for the entries it reaches to read that they are next (the far-poll limit). */
+export const READ_WAIT_MS = 60_000;
 
 /** A NEXT BATCH NOW waiting for a fresh frame. */
 export interface PendingBatch {
@@ -44,11 +57,18 @@ interface ReleaseFrames {
   seen: number;
   waiters: (() => void)[];
   pending: PendingBatch[];
+  /** The `next` flag of each entry's last reading. */
+  readings: Map<string, boolean>;
+  /** When the last batch was given in this process (the service's clock), or null. */
+  givenAt: number | null;
+  /** When a batch first waited for readings since the last batch given (after a restart: the cap counts from it). */
+  heldSince: number | null;
 }
 
 export class LiveFrameGate {
   private readonly releases = new Map<string, ReleaseFrames>();
   private publisher: ((dropId: string) => Promise<void> | void) | null = null;
+  private readingsOn = false;
 
   /** The hub that builds and publishes frames (http/live-stream.ts); null: a frame asked for is published at once. */
   usePublisher(publisher: ((dropId: string) => Promise<void> | void) | null): void {
@@ -57,7 +77,7 @@ export class LiveFrameGate {
 
   private of(dropId: string): ReleaseFrames {
     let r = this.releases.get(dropId);
-    if (!r) this.releases.set(dropId, (r = { given: 0, settled: 0, seen: -1, waiters: [], pending: [] }));
+    if (!r) this.releases.set(dropId, (r = { given: 0, settled: 0, seen: -1, waiters: [], pending: [], readings: new Map(), givenAt: null, heldSince: null }));
     return r;
   }
 
@@ -81,9 +101,41 @@ export class LiveFrameGate {
     for (const w of waiters) w();
   }
 
-  /** A batch is being given (inside its transaction): the gate shuts. */
-  giving(dropId: string): void {
-    this.of(dropId).given += 1;
+  /** A batch is being given (inside its transaction) at `at` (the service's clock): the gate shuts. */
+  giving(dropId: string, at?: Date): void {
+    const r = this.of(dropId);
+    r.given += 1;
+    if (at) r.givenAt = at.getTime();
+    r.heldSince = null;
+  }
+
+  /** Whether batches wait for the readings (G2); off, every reading counts as made. */
+  useReadings(on: boolean): void {
+    this.readingsOn = on;
+  }
+
+  /** An entry's phone has read its state: whether that reading said it is next (its last reading counts). */
+  read(dropId: string, entryId: string, next: boolean): void {
+    this.of(dropId).readings.set(entryId, next);
+  }
+
+  /** Whether the entry's last reading said it is next (always, with the readings off). */
+  hasReadNext(dropId: string, entryId: string): boolean {
+    return !this.readingsOn || this.of(dropId).readings.get(entryId) === true;
+  }
+
+  /**
+   * Whether a batch after the first, which would give its turns to `entryIds`, waits for their readings at `now`: one of
+   * them has not read that it is next, and READ_WAIT_MS have not passed since the previous batch was given in this
+   * process (or, after a restart, since the batch first waited). False with the readings off.
+   */
+  unread(dropId: string, entryIds: readonly string[], now: Date): boolean {
+    if (!this.readingsOn) return false;
+    const r = this.of(dropId);
+    if (entryIds.every((id) => r.readings.get(id) === true)) return false;
+    r.heldSince ??= now.getTime();
+    const since = r.givenAt ?? r.heldSince;
+    return now.getTime() - since < READ_WAIT_MS;
   }
 
   /** The transaction that may have given a batch has ended: a frame begun from now on reads its outcome. */

@@ -44,9 +44,9 @@
  *              the next batch, which keeps its time; NEXT BATCH NOW gives up to X extra turns now (409
  *              LIVE_NOTHING_FREE when no piece is free for anyone waiting), the clock keeping its time; SHORTEN THE HOLD
  *              and END THE HOLD NOW bring the first batch forward, never later, from the announcement until it (before
- *              the announcement the hold is a setting); LET IN gives one entry its turn now, out of order, during the
- *              hold too. An entry keeps its place whatever happens; an absent one's turn runs out (MISSED) and its piece
- *              goes at the next batch.
+ *              the announcement the hold is a setting; a NEXT BATCH NOW during the hold leaves it: `pace_extra_batches`);
+ *              LET IN gives one entry its turn now, out of order, during the hold too. An entry keeps its place
+ *              whatever happens; an absent one's turn runs out (MISSED) and its piece goes at the next batch.
  *   the end    SOLD_OUT, every piece confirmed: WAITING and QUEUED entries ENDED at once. CLOSED at `closes_at`: no new
  *              turn, WAITING and QUEUED ENDED at once; a turn in progress may still be secured, a hold confirmed, until
  *              their deadlines. ENDED by an ADMIN: WAITING, QUEUED and TURN ENDED at once; holds may still be
@@ -133,7 +133,7 @@ import type { AuditRecordInput, AuditService } from './audit.js';
 import { clubCounts, clubStandings, isTestEntrant, tierName, tierOf, type ClubTier } from './club.js';
 import { DROP_QUANTITY_MAX, drawKey, dropNotFound, openDropSeed } from './drops.js';
 import { holderGuarantee, holdsGuaranteeFor, releaseCovered, sizeServesGuarantee, useGuarantees, visibleGuaranteeIds } from './guarantees.js';
-import { LiveFrameGate, type PendingBatch } from './live-frames.js';
+import { LiveFrameGate, READ_WAIT_MS, type PendingBatch } from './live-frames.js';
 import { closeGuard, type LiveCloseGuard } from './live-queue.js';
 import { addonOffer, choicesOf, cleanAddonItems, clearChoices, setChoices, type AddonOfferItem, type AddonUnitsInput, type ChosenAddon, type LeftOutAddon } from './order-addons.js';
 import { ordersForLiveEntry } from './orders.js';
@@ -311,9 +311,14 @@ export function paceNextAt(d: LivePaceRow): Date | null {
   return new Date(d.pace_next_at ?? new Date(new Date(d.opens_at).getTime() + (d.pace_hold_minutes ?? 0) * MINUTE_MS));
 }
 
-/** When the hold after the opening ends (the first batch's time) while it lasts: a hold set, no batch given yet; else null. */
-export function holdEndsAt(d: LivePaceRow & Pick<DropRow, 'pace_batches'>): Date | null {
-  if (d.pace_batch === null || !(Number(d.pace_hold_minutes) > 0) || Number(d.pace_batches) > 0) return null;
+/**
+ * When the hold after the opening ends (the first scheduled batch's time) while it lasts: a hold set, no scheduled batch
+ * given yet; else null. A NEXT BATCH NOW during the hold starts the first turns early and leaves the hold as it was (D4,
+ * ANSWERS A 157 "The batch clock keeps its time", A 160 "You can bring the first turns forward (or start them now with
+ * NEXT BATCH NOW)"): its batches (`pace_extra_batches`) do not end it, so it can still be shortened or ended.
+ */
+export function holdEndsAt(d: LivePaceRow & Pick<DropRow, 'pace_batches' | 'pace_extra_batches'>): Date | null {
+  if (d.pace_batch === null || !(Number(d.pace_hold_minutes) > 0) || Number(d.pace_batches) > Number(d.pace_extra_batches ?? 0)) return null;
   return paceNextAt(d);
 }
 
@@ -489,6 +494,7 @@ const paceNotPaused = () => conflict('LIVE_PACE_NOT_PAUSED', 'The pace of this r
 const paceInvalid = () =>
   validationError(`A pace gives ${LIVE_PACE_BATCH.min} to ${LIVE_PACE_BATCH.max} turns every ${LIVE_PACE_MINUTES.min} to ${LIVE_PACE_MINUTES.max} minutes.`);
 const nothingFree = () => conflict('LIVE_NOTHING_FREE', 'No piece is free for anyone waiting.');
+const batchWaiting = () => new DomainError('LIVE_BATCH_WAITING', 503, 'The batch could not be given yet: nothing was given. Press NEXT BATCH NOW again in a moment.');
 const noHold = () => conflict('LIVE_NO_HOLD', 'This release has no hold left: its first turns have been given or are due now.');
 const holdLater = () => conflict('LIVE_HOLD_LATER', 'A hold can only be shortened.');
 const holdTooEarly = () => conflict('LIVE_NOT_ANNOUNCED', 'This release is not announced yet: change its hold in the settings until the announcement.');
@@ -827,6 +833,15 @@ export interface LiveQueueView {
    * next batch can reach reads the line (no queue view), so a queue view is never the next one until step Q1.3.
    */
   next: boolean;
+}
+
+/**
+ * Whether a reading of an entry tells its phone that it is next (G2, PLAN amendment 1; live-frames.ts `read`): QUEUED and
+ * within the next batch's reach. ONE QUEUE, step Q1.2: an entry the next batch can reach reads the line (no queue
+ * view); step Q1.3 reads it from the queue's snapshot (`next`).
+ */
+export function liveReadsNext(entry: Pick<LiveEntryView, 'status' | 'queue'> | null | undefined): boolean {
+  return entry?.status === 'QUEUED' && (entry.queue === null || entry.queue.next);
 }
 
 /** An account's interest (I'LL BE THERE). */
@@ -1457,14 +1472,20 @@ export interface LiveServiceDeps {
 interface BatchPass {
   /** The batch given: its number, its turns, the NEXT BATCH NOW it was (null for a scheduled slot); null when none. */
   given: { batch: number; turns: number; press: PendingBatch | null } | null;
-  /** A batch is due, or a NEXT BATCH NOW waits, until the next frame. */
+  /** A batch is due, or a NEXT BATCH NOW waits, until the next frame, or until the entries it reaches have read that they are next. */
   waiting: boolean;
+  /** It waits for readings (live-frames.ts `unread`), not for a frame: a frame asked for does not let it go. */
+  readings: boolean;
   /** Whether this transaction gave a batch (the gate shut by it, settled once it ends). */
   gave: boolean;
 }
 
-/** How long a NEXT BATCH NOW waits for its frame at most (one comes every second while anyone follows the release). */
-const PRESS_WAIT_MS = 30_000;
+/**
+ * How long a NEXT BATCH NOW waits to be given at most: for its frame (one comes every second while anyone follows the
+ * release), then for the readings of those it reaches (READ_WAIT_MS at most after the previous batch). Past it, a hub
+ * that publishes no frame: 503 LIVE_BATCH_WAITING, nothing given.
+ */
+const PRESS_WAIT_MS = READ_WAIT_MS + 30_000;
 
 interface SizeTotal {
   id: string;
@@ -2181,18 +2202,28 @@ export class LiveService {
     const mine = pressed();
     if (!mine) throw nothingFree();
     const until = Date.now() + PRESS_WAIT_MS;
+    // Held by the readings of those it reaches (G2) rather than by a frame: tried again every 250 ms (the engine too).
+    let readings = false;
     while (!mine.settled) {
       if (Date.now() > until) {
-        mine.reject(new Error('NEXT BATCH NOW waited too long for a frame of its release'));
         this.frames.drop(id, mine);
+        mine.reject(batchWaiting());
         break;
       }
-      void this.frames.ask(id);
-      await Promise.race([mine.done.then(noop, noop), this.frames.whenOpen(id), delay(250)]);
+      if (!readings) void this.frames.ask(id);
+      await Promise.race([mine.done.then(noop, noop), ...(readings ? [] : [this.frames.whenOpen(id)]), delay(250)]);
       if (mine.settled) break;
-      if (!this.frames.open(id)) continue;
+      if (!this.frames.open(id)) {
+        readings = false;
+        continue;
+      }
       try {
-        await this.batches(id, (tx, d, now, notes, pass) => this.giveDue(tx, d, now, notes, pass));
+        let held = false;
+        await this.batches(id, async (tx, d, now, notes, pass) => {
+          await this.giveDue(tx, d, now, notes, pass);
+          held = pass.readings;
+        });
+        readings = held;
       } catch (e) {
         if (!mine.settled) {
           this.frames.drop(id, mine);
@@ -2208,7 +2239,8 @@ export class LiveService {
    * SHORTEN THE HOLD (D4, ANSWERS B4: "once open it can only be shortened or ended"): the hold after the opening set to
    * `minutes` from T0, so the first batch comes earlier, never later (409 LIVE_HOLD_LATER) and not before now (400: END
    * THE HOLD NOW does that). From the announcement (409 LIVE_NOT_ANNOUNCED before: the hold is a setting until then,
-   * set longer or shorter freely) until the first batch (409 LIVE_NO_HOLD once it has gone or is due, or with no hold);
+   * set longer or shorter freely) until the first scheduled batch, a NEXT BATCH NOW during the hold leaving it as it was
+   * (409 LIVE_NO_HOLD once that batch has gone or is due, or with no hold);
    * never on an after-room (409 LIVE_AFTER_ROOM). Audited `drop.live.hold.shorten` with the first batch before and after.
    */
   async shortenHold(dropId: string, minutes: number, actor: Actor): Promise<LiveReleaseState> {
@@ -2231,7 +2263,7 @@ export class LiveService {
 
   /**
    * END THE HOLD NOW: the first batch due now (at T0 before T0), the next ones every Y minutes from it; the engine gives
-   * it at its next pass. From the announcement until the first batch, as SHORTEN THE HOLD (409 LIVE_NOT_ANNOUNCED,
+   * it at its next pass. From the announcement until the first scheduled batch, as SHORTEN THE HOLD (409 LIVE_NOT_ANNOUNCED,
    * LIVE_NO_HOLD, LIVE_AFTER_ROOM). Audited `drop.live.hold.end` with the first batch's time.
    */
   async endHold(dropId: string, actor: Actor): Promise<LiveReleaseState> {
@@ -2403,7 +2435,7 @@ export class LiveService {
   }
 
   private async advanceOnce(id: string, db: Db): Promise<LiveAdvance | null> {
-    const pass: BatchPass = { given: null, waiting: false, gave: false };
+    const pass: BatchPass = { given: null, waiting: false, readings: false, gave: false };
     let out: LiveAdvance | null;
     try {
       out = await inTransaction(db, async (tx) => {
@@ -2847,7 +2879,7 @@ export class LiveService {
    * its audit entries last. Once it ends: the gate settled if it gave one, then afterBatches.
    */
   private async batches(id: string, fn: (tx: Db, d: LiveDrop, now: Date, notes: AuditRecordInput[], pass: BatchPass) => Promise<void>): Promise<void> {
-    const pass: BatchPass = { given: null, waiting: false, gave: false };
+    const pass: BatchPass = { given: null, waiting: false, readings: false, gave: false };
     try {
       await inTransaction(this.db, async (tx) => {
         const d = await this.lockLive(tx, id, 'update');
@@ -2900,9 +2932,10 @@ export class LiveService {
       }
       const batch = d.pace_batches + 1;
       if (slotDue && (!press || slot.getTime() <= press.at.getTime())) {
-        this.frames.giving(d.id);
-        pass.gave = true;
         const grants = await this.batchGrants(tx, d, slot, d.pace_batch);
+        if (this.unread(d, grants, now, pass)) return;
+        this.frames.giving(d.id, now);
+        pass.gave = true;
         if (grants.length) await this.grant(tx, d, grants, now, null, notes, { at: slot, batch });
         const nextAt = new Date(slot.getTime() + d.pace_minutes * MINUTE_MS);
         await tx.updateTable('drops').set({ pace_next_at: nextAt, pace_batches: batch }).where('id', '=', d.id).execute();
@@ -2918,13 +2951,16 @@ export class LiveService {
         p.reject(nothingFree());
         continue;
       }
-      this.frames.giving(d.id);
+      if (this.unread(d, grants, now, pass)) return;
+      this.frames.giving(d.id, now);
       pass.gave = true;
       await this.grant(tx, d, grants, now, null, notes, { at: p.at, batch });
-      // The batch clock keeps its time: the next scheduled batch (the first, during the hold) stays where it was.
+      // The batch clock keeps its time: the next scheduled batch (the first, during the hold) stays where it was, and
+      // the hold lasts until it (holdEndsAt: an extra batch is counted apart).
       const nextAt = paceNextAt(d)!;
-      await tx.updateTable('drops').set({ pace_batches: batch, pace_next_at: nextAt }).where('id', '=', d.id).execute();
-      Object.assign(d, { pace_batches: batch, pace_next_at: nextAt });
+      const extra = Number(d.pace_extra_batches) + 1;
+      await tx.updateTable('drops').set({ pace_batches: batch, pace_extra_batches: extra, pace_next_at: nextAt }).where('id', '=', d.id).execute();
+      Object.assign(d, { pace_batches: batch, pace_extra_batches: extra, pace_next_at: nextAt });
       notes.push(
         { actor: { type: 'admin', id: p.actorId }, action: 'drop.live.pace.next', targetType: 'drop', targetId: d.id, details: { batch, turns: grants.length } },
         { actor: SYSTEM_ACTOR, action: 'drop.live.batch', targetType: 'drop', targetId: d.id, details: { batch, at: p.at.toISOString(), turns: grants.length, extra: true } },
@@ -2932,6 +2968,18 @@ export class LiveService {
       pass.given = { batch, turns: grants.length, press: p };
       return;
     }
+  }
+
+  /**
+   * G2 (PLAN amendment 1): whether a batch after the first, which would give `grants` their turns, waits for their
+   * phones to read that they are next (live-frames.ts `unread`, capped at READ_WAIT_MS); noted on `pass`. The first
+   * batch never waits: everyone has waited the hold for it.
+   */
+  private unread(d: LiveDrop, grants: readonly EntryRow[], now: Date, pass: BatchPass): boolean {
+    if (d.pace_batches < 1 || !this.frames.unread(d.id, grants.map((e) => e.id), now)) return false;
+    pass.waiting = true;
+    pass.readings = true;
+    return true;
   }
 
   /**
@@ -3200,7 +3248,7 @@ export class LiveService {
  */
 export async function livePaceState(
   db: Db,
-  d: LivePaceRow & Pick<DropRow, 'id' | 'set_id' | 'pace_batches' | 'quantity' | 'closes_at' | 'ended_at'>,
+  d: LivePaceRow & Pick<DropRow, 'id' | 'set_id' | 'pace_batches' | 'pace_extra_batches' | 'quantity' | 'closes_at' | 'ended_at'>,
   /** liveBeyond's answer when the caller has read it already. */
   known?: { entries: Set<string> },
 ): Promise<LivePaceState | null> {
