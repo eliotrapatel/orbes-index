@@ -6,12 +6,15 @@
 # The ORBES website (index.html at the repository root) is static and is not
 # built here.
 #
-#   test    npm ci → typecheck → the whole vitest suite, including the opt-in
-#           PostgreSQL suites (postgres:16 service container; with psql, which
-#           runs the deploy scripts' own psql lines) and the Chromium E2E suites
-#           (Chromium installed by playwright-core, same version as
-#           package-lock.json) → web build → production dependency audit
-#           (report only, never blocks)
+#   test    4 parallel shards (vitest --shard=N/4, fail-fast off), each with
+#           its own runner: npm ci → its quarter of the vitest suite, including
+#           the opt-in PostgreSQL suites (postgres:16 service container; with
+#           psql, which runs the deploy scripts' own psql lines) and the
+#           Chromium E2E suites (Chromium installed by playwright-core, same
+#           version as package-lock.json). Split so a failure is re-checked in
+#           one shard's time, and a failed shard can be re-run alone.
+#   build   npm ci → typecheck → web build → production dependency audit
+#           (report only, never blocks), once rather than in every shard
 #   image   docker build of genome/Dockerfile (no push), so the production
 #           image is proven to build on every change; then deploy.sh's
 #           schema probe (deploy/vps/scripts/lib.sh IMAGE_MIGRATIONS_JS) runs
@@ -47,9 +50,13 @@ defaults:
 
 jobs:
   test:
-    name: typecheck, tests, web build
+    name: tests (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
     services:
       postgres:
@@ -88,9 +95,6 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit
 
-      - name: Typecheck
-        run: npm run typecheck
-
       # The E2E suites (test/e2e/*, test/web/*.e2e.test.ts) drive a real Chromium.
       # Most of them skip when the binary is missing, but test/web/admin.e2e.test.ts
       # does not, so CI installs the Chromium build that matches the locked
@@ -121,8 +125,41 @@ jobs:
           sudo apt-get install -y -qq --no-install-recommends poppler-utils postgresql-client
           psql --version
 
-      - name: Test (vitest, PostgreSQL and Chromium suites included)
-        run: npx vitest run
+      - name: Test shard ${{ matrix.shard }}/4 (vitest, PostgreSQL and Chromium suites included)
+        run: npx vitest run --shard=${{ matrix.shard }}/4
+
+      - name: Upload test artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: genome-test-output-shard-${{ matrix.shard }}
+          path: genome/out/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  build:
+    name: typecheck, web build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      npm_config_fund: 'false'
+      npm_config_update_notifier: 'false'
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: genome/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit
+
+      - name: Typecheck
+        run: npm run typecheck
 
       - name: Build web apps
         run: npm run build:web
@@ -130,15 +167,6 @@ jobs:
       - name: Audit production dependencies (report only)
         continue-on-error: true
         run: npm audit --omit=dev --audit-level=high
-
-      - name: Upload test artifacts on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: genome-test-output
-          path: genome/out/
-          if-no-files-found: ignore
-          retention-days: 7
 
   image:
     name: docker image builds
