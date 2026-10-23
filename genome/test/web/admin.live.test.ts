@@ -103,6 +103,9 @@ function release(o: Partial<LiveRelease> = {}): LiveRelease {
     description: null,
     editable: true,
     roomOpensMinutes: 5,
+    // ONE QUEUE (D1): every release has a pace and a hold after the opening.
+    pace: { batch: 250, minutes: 1 },
+    holdMinutes: 0,
     turnSeconds: 30,
     payMinutes: 5,
     perAccount: 1,
@@ -276,10 +279,27 @@ describe('the console of the LIVE RELEASES', () => {
   it('creates a release from its essentials, every other setting by default', () => {
     const v = newLiveValues(NOW);
     expect(v).toMatchObject({ opensAt: '2026-11-10T18:00', closesAt: '2026-11-10T19:00', currency: 'EUR', sizes: 'ONE SIZE = 25' });
+    expect(v).toMatchObject({ paceBatch: '', paceMinutes: '', holdMinutes: '0' });
     expect(newLiveProblem(v)).toBe('Choose the model of the release.');
-    const ok: Record<string, string> = { ...v, modelId: 'm1', title: ' THE RING ', price: '4 800' };
+    // ONE QUEUE (D1): the pace and the hold are required (a hold of 0: none).
+    const noPace: Record<string, string> = { ...v, modelId: 'm1', title: ' THE RING ', price: '4 800' };
+    expect(newLiveProblem(noPace)).toBe('Say how many people per batch, every how many minutes.');
+    expect(newLiveProblem({ ...noPace, paceBatch: '250', paceMinutes: '61' })).toBe('A pace gives 1 to 5\u2009000 turns every 1 to 60 minutes.');
+    expect(newLiveProblem({ ...noPace, paceBatch: '250', paceMinutes: '1', holdMinutes: '' })).toBe('A hold after the opening lasts 0 to 120 minutes (0 for none).');
+    expect(newLiveProblem({ ...noPace, paceBatch: '250', paceMinutes: '1', holdMinutes: '121' })).toBe('A hold after the opening lasts 0 to 120 minutes (0 for none).');
+    const ok: Record<string, string> = { ...noPace, paceBatch: '250', paceMinutes: '1', holdMinutes: '10' };
     expect(newLiveProblem(ok)).toBeNull();
-    expect(newLiveInput(ok)).toEqual({ modelId: 'm1', title: 'THE RING', opensAt: '2026-11-10T18:00:00.000Z', closesAt: '2026-11-10T19:00:00.000Z', priceMinor: 480_000, currency: 'EUR', sizes: [{ label: 'ONE SIZE', stock: 25 }] });
+    expect(newLiveInput(ok)).toEqual({
+      modelId: 'm1',
+      title: 'THE RING',
+      opensAt: '2026-11-10T18:00:00.000Z',
+      closesAt: '2026-11-10T19:00:00.000Z',
+      priceMinor: 480_000,
+      currency: 'EUR',
+      pace: { batch: 250, minutes: 1 },
+      holdMinutes: 10,
+      sizes: [{ label: 'ONE SIZE', stock: 25 }],
+    });
     expect(newLiveProblem({ ...ok, closesAt: ok.opensAt })).toBe('The release ends after T0.');
     expect(newLiveProblem({ ...ok, price: 'x' })).toMatch(/price of a piece/);
     expect(newLiveProblem({ ...ok, currency: 'JPY' })).toBe('Choose the currency.');
@@ -506,38 +526,33 @@ describe('the console of the LIVE RELEASES', () => {
 });
 
 describe('the console of a LIVE RELEASE’s pace (W4)', () => {
-  it('holds the pace in the times part: both figures or neither (blank: no pace), sending only what changed', () => {
+  it('holds the pace and the hold in the times part, both required (ONE QUEUE, D1; M1 « both figures or neither (blank: no pace) » gone), sending only what changed', () => {
     const r = release();
     expect(LIVE_LIMITS.pace).toEqual({ batch: { min: 1, max: 5000 }, minutes: { min: 1, max: 60 } });
-    expect(livePartValues(r, 'times')).toMatchObject({ paceBatch: '', paceMinutes: '' });
-    const paced = release({ pace: { batch: 250, minutes: 1 } });
-    const v = livePartValues(paced, 'times');
-    expect(v).toMatchObject({ paceBatch: '250', paceMinutes: '1' });
-    expect(livePartProblem(paced, 'times', v)).toBeNull();
-    expect(livePartChange(paced, 'times', v)).toEqual({});
-    expect(livePartChange(r, 'times', { ...livePartValues(r, 'times'), paceBatch: ' 90 ', paceMinutes: '2' })).toEqual({ pace: { batch: 90, minutes: 2 } });
-    expect(livePartChange(paced, 'times', { ...v, paceBatch: '', paceMinutes: '' })).toEqual({ pace: null });
-    expect(livePartChange(paced, 'times', { ...v, paceMinutes: '5' })).toEqual({ pace: { batch: 250, minutes: 5 } });
+    expect(LIVE_LIMITS.hold).toEqual({ min: 0, max: 120 });
+    const v = livePartValues(r, 'times');
+    expect(v).toMatchObject({ paceBatch: '250', paceMinutes: '1', holdMinutes: '0' });
+    expect(livePartProblem(r, 'times', v)).toBeNull();
+    expect(livePartChange(r, 'times', v)).toEqual({});
+    expect(livePartChange(r, 'times', { ...v, paceBatch: ' 90 ', paceMinutes: '2' })).toEqual({ pace: { batch: 90, minutes: 2 } });
+    expect(livePartChange(r, 'times', { ...v, paceMinutes: '5' })).toEqual({ pace: { batch: 250, minutes: 5 } });
+    expect(livePartChange(r, 'times', { ...v, holdMinutes: '15' })).toEqual({ holdMinutes: 15 });
+    expect(livePartProblem(r, 'times', { ...v, paceBatch: '', paceMinutes: '' })).toBe('Say how many people per batch, every how many minutes.');
     for (const [batch, minutes] of [['250', ''], ['', '1'], ['0', '1'], ['5001', '1'], ['250', '61'], ['2.5', '1'], ['250', 'soon']]) {
-      expect([batch, minutes, livePartProblem(r, 'times', { ...livePartValues(r, 'times'), paceBatch: batch, paceMinutes: minutes })]).toEqual([
-        batch,
-        minutes,
-        'A pace admits 1 to 5\u2009000 buyers every 1 to 60 minutes; leave both blank for none.',
-      ]);
+      expect([batch, minutes, livePartProblem(r, 'times', { ...v, paceBatch: batch, paceMinutes: minutes })]).toEqual([batch, minutes, 'A pace gives 1 to 5\u2009000 turns every 1 to 60 minutes.']);
     }
-    // SET PACE never takes a pace away: both figures are needed there.
-    expect(paceProblem('', '', false)).toBe('Say how many buyers are admitted, every how many minutes.');
-    expect(paceProblem('5001', '1', false)).toBe('A pace admits 1 to 5\u2009000 buyers every 1 to 60 minutes.');
+    for (const hold of ['', '-1', '121', '2.5']) expect(livePartProblem(r, 'times', { ...v, holdMinutes: hold })).toBe('A hold after the opening lasts 0 to 120 minutes (0 for none).');
+    // SET PACE: both figures needed there too.
+    expect(paceProblem('', '', false)).toBe('Say how many people per batch, every how many minutes.');
+    expect(paceProblem('5001', '1', false)).toBe('A pace gives 1 to 5\u2009000 turns every 1 to 60 minutes.');
     expect(paceProblem('5000', '60', false)).toBeNull();
     expect([paceLine({ batch: 250, minutes: 1 }), paceLine({ batch: 1, minutes: 5 }), paceLine({ batch: 5000, minutes: 60 })]).toEqual([
       '250 buyers every minute',
       '1 buyer every 5 minutes',
       '5\u2009000 buyers every 60 minutes',
     ]);
-    expect(paceHint(500)).toBe(
-      'Buyers admitted from the line, 1 to 5\u2009000, every 1 to 60 minutes, counted across the release, in its order. Both blank: no pace, everyone admitted at T0. The room holds 500, as the load test measured.',
-    );
-    expect(paceHint(null)).toBe('Buyers admitted from the line, 1 to 5\u2009000, every 1 to 60 minutes, counted across the release, in its order. Both blank: no pace, everyone admitted at T0.');
+    expect(paceHint(500)).toBe('Turns given from the line, 1 to 5\u2009000 per batch, every 1 to 60 minutes, in the line’s order, where a piece is free. The room holds 500, as the load test measured.');
+    expect(paceHint(null)).toBe('Turns given from the line, 1 to 5\u2009000 per batch, every 1 to 60 minutes, in the line’s order, where a piece is free.');
   });
 
   it('draws the Pace block’s figures in Paris time, a dash while held, and offers its controls to an OPERATOR from T0 to the end', () => {

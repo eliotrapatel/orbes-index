@@ -213,13 +213,14 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await db.insertInto('categories').values({ id: 22, code: 'P', name: 'Pace parity' }).execute();
     const model = await db.insertInto('models').values({ category_id: 22, name: 'PACE', type: 'RING', sku_prefix: 'PACE-PG' }).returning('id').executeTakeFirstOrThrow();
     const account = await db.insertInto('accounts').values({ email: 'pace-pg@example.com', email_normalized: 'pace-pg@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
-    // Inserted as the previous image does, naming none of the pace's columns.
+    // Inserted as the previous image does, naming none of the pace's columns (ended: at 0058 an open LIVE release has a
+    // pace, drops_live_paced; 0049's rules hold whatever the release).
     const release = await db
       .insertInto('drops')
       .values({
         model_id: model.id, title: 'PACE PG', quantity: 2, opens_at: new Date('2026-12-01T10:00:00Z'), closes_at: new Date('2026-12-01T11:00:00Z'), seed_enc: `v1.${'A'.repeat(16)}.${'B'.repeat(64)}`,
         seed_hash: new Uint8Array(32), early_access_hours: 0, mode: 'LIVE', live_min_tier: 0, tier_priority: true, room_opens_minutes: 5, turn_seconds: 30, pay_minutes: 5, per_account: 1,
-        price_minor: 1000, currency: 'EUR', quantity_line: '2 PIECES', published_at: new Date('2026-11-30T10:00:00Z'),
+        price_minor: 1000, currency: 'EUR', quantity_line: '2 PIECES', published_at: new Date('2026-11-30T10:00:00Z'), ended_at: new Date('2026-12-01T11:00:00Z'), ended_reason: 'CLOSED',
       })
       .returning(['id', 'pace_batch', 'pace_minutes', 'pace_next_at', 'pace_paused_at', 'pace_batches'])
       .executeTakeFirstOrThrow();
@@ -271,7 +272,8 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
       seed_hash: new Uint8Array(32), early_access_hours: 0, mode: 'LIVE' as const, live_min_tier: 0, tier_priority: true, room_opens_minutes: 5, turn_seconds: 30, pay_minutes: 5, per_account: 1,
       price_minor: 1000, currency: 'EUR' as const, quantity_line: '1 PIECE',
     };
-    const parent = await db.insertInto('drops').values({ ...live, access_segment_id: segment.id }).returning('id').executeTakeFirstOrThrow();
+    // (Its pace: every open LIVE release has one at 0058, drops_live_paced.)
+    const parent = await db.insertInto('drops').values({ ...live, access_segment_id: segment.id, pace_batch: 250, pace_minutes: 1 }).returning('id').executeTakeFirstOrThrow();
     await expect(
       db.insertInto('drops').values({ ...live, parent_drop_id: parent.id, after_room_delay_minutes: 10, after_room_length_minutes: 15, surprise_enabled: false, question_enabled: false, access_segment_id: segment.id }).execute(),
     ).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_after_room'));
@@ -598,7 +600,7 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await expect(sql`UPDATE order_cases SET group_id = NULL WHERE order_id = ${first.id}`.execute(db)).rejects.toSatisfy(isGuardViolation);
   });
 
-  it('holds ONE QUEUE\'s hold after the opening by its CHECKs (0058: drops_pace_hold_minutes_check, drops_pace_hold), with the previous image\'s insert at 0 and the same JS types as PGlite; down refused while a hold exists and up refused while an open LIVE release has no pace, each naming its count', async () => {
+  it('holds ONE QUEUE\'s hold after the opening and every open LIVE release\'s pace by their CHECKs (0058: drops_pace_hold_minutes_check, drops_pace_hold, drops_live_paced), with the previous image\'s insert at 0 and the same JS types as PGlite; down refused while a hold exists and up refused while an open LIVE release has no pace, each naming its count', async () => {
     // Its own letter: this database's categories already hold A to F, S, W, P, H, G, K, N and Q (the tests above).
     await db.insertInto('categories').values({ id: 28, code: 'O', name: 'One queue parity' }).execute();
     const model = await db.insertInto('models').values({ category_id: 23, name: 'QUEUE', type: 'RING', sku_prefix: 'QUEUE-PG' }).returning('id').executeTakeFirstOrThrow();
@@ -615,7 +617,16 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await expect(set({ pace_hold_minutes: -1 })).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_pace_hold_minutes_check'));
     await set({ pace_hold_minutes: 30 });
     expect(await db.selectFrom('drops').select('pace_hold_minutes').where('id', '=', release.id).executeTakeFirstOrThrow()).toEqual({ pace_hold_minutes: 30 });
-    await expect(set({ pace_batch: null, pace_minutes: null })).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_pace_hold'));
+    // Every open LIVE release that is not an after-room keeps a pace (drops_live_paced): written without one, or its pace
+    // taken away, refused; an ended one may have none. A pace with a hold is never taken away (drops_pace_hold).
+    await expect(db.insertInto('drops').values({ ...live, title: 'ONE QUEUE PG NO PACE' }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_live_paced'));
+    await set({ pace_hold_minutes: 0 });
+    await expect(set({ pace_batch: null, pace_minutes: null })).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_live_paced'));
+    const ended = await db.insertInto('drops').values({ ...live, title: 'ONE QUEUE PG ENDED', pace_batch: 250, pace_minutes: 1, pace_hold_minutes: 30, ended_at: new Date('2026-12-01T11:00:00Z'), ended_reason: 'CLOSED' }).returning('id').executeTakeFirstOrThrow();
+    await expect(set({ pace_batch: null, pace_minutes: null }, ended.id)).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_pace_hold'));
+    await set({ pace_hold_minutes: 0 }, ended.id);
+    await set({ pace_batch: null, pace_minutes: null }, ended.id);
+    await set({ pace_hold_minutes: 30 });
     // Down refused while a hold exists; without one it restores 0057.
     await expect(migrateDown(db)).rejects.toThrow(/0058_one_queue cannot be rolled back: 1 releases with a hold after the opening exist/);
     await set({ pace_hold_minutes: 0 });

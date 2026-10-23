@@ -154,8 +154,12 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     return { id: account.id, email, actor: { type: 'account', id: account.id } };
   }
 
-  /** The account's turn taken on the server's clock: the seal pressed, held 1.5 s, secured. */
+  /**
+   * The account's turn taken on the server's clock: the seal pressed, held 1.5 s, secured. A collector who came after T0
+   * has its turn at the next batch (ONE QUEUE, D15): given now, by NEXT BATCH NOW.
+   */
   async function secure(a: { id: string; actor: Actor }, dropId: string): Promise<void> {
+    if (!(await ctx.services.live.entry(a.id, dropId))?.turn) await ctx.services.live.nextBatch(dropId, admin);
     const e = await ctx.services.live.entry(a.id, dropId);
     const token = e!.turn!.token!;
     await ctx.services.live.press(a.id, dropId, token);
@@ -222,6 +226,9 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await p.fill('dialog input[name=opensAt]', local(t0));
     await p.fill('dialog input[name=closesAt]', local(new Date(t0.getTime() + HOUR)));
     await p.fill('dialog input[name=price]', '4 800');
+    // ONE QUEUE (lot Q1, D1): the pace, required (the hold after the opening 0 by default).
+    await p.fill('dialog input[name=paceBatch]', '250');
+    await p.fill('dialog input[name=paceMinutes]', '1');
     // A wrong line is said before anything is sent.
     await p.fill('dialog textarea[name=sizes]', '52');
     await p.click('[data-testid=dialog-confirm]');
@@ -331,6 +338,8 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
   it('follows a release live on its board: the line, LET IN, FREE, REMOVE, PAUSE, a message, ADD PIECES, Client Services, END NOW', async () => {
     const r = await ctx.services.liveConsole.create(
       {
+        pace: { batch: 5000, minutes: 1 },
+        holdMinutes: 0,
         modelId,
         title: 'THE VAULT RING',
         opensAt: new Date(Date.now() + 2 * HOUR),
@@ -375,9 +384,10 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await confirmDialog(p);
     await expect.poll(() => line.nth(3).locator('[data-testid=live-entry-status]').textContent()).toMatch(/^TURNLet in by the consoleUntil /);
 
-    // The engine gives the turns; the board follows its stream, no reload.
+    // NEXT BATCH NOW gives the turns (ONE QUEUE, D15: those who came after T0 at the next batch, given now); the board
+    // follows its stream, no reload.
     const before = await p.locator('[data-testid=live-updated]').textContent();
-    await ctx.services.live.advance(r.id);
+    await ctx.services.live.nextBatch(r.id, admin);
     await expect.poll(() => fig(p, 'live-turns').textContent(), { timeout: 10_000 }).toBe('3');
     expect(await p.locator('[data-testid=live-updated]').textContent()).toMatch(/^LIVE · /);
     expect(await p.locator('[data-testid=live-updated]').textContent()).not.toBe(before);
@@ -449,7 +459,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await p.context().close();
 
     // An OPERATOR runs the controls of a release live, but neither ends it nor removes anyone.
-    const live2 = await ctx.services.liveConsole.create({ modelId, title: 'THE SECOND RING', opensAt: new Date(Date.now() + 2 * HOUR), closesAt: new Date(Date.now() + 3 * HOUR), priceMinor: 100_000, sizes: [{ label: '52', stock: 2 }] }, admin);
+    const live2 = await ctx.services.liveConsole.create({ pace: { batch: 5000, minutes: 1 }, holdMinutes: 0, modelId, title: 'THE SECOND RING', opensAt: new Date(Date.now() + 2 * HOUR), closesAt: new Date(Date.now() + 3 * HOUR), priceMinor: 100_000, sizes: [{ label: '52', stock: 2 }] }, admin);
     await ctx.services.liveConsole.publish(live2.id, {}, admin);
     await ctx.db.updateTable('drops').set({ opens_at: new Date(Date.now() - 1000), closes_at: new Date(Date.now() + HOUR) }).where('id', '=', live2.id).execute();
     await ctx.services.live.enter(w.id, live2.id, { sizeId: live2.sizes[0]!.id }, w.actor);
@@ -526,7 +536,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
 
   it('draws the page again as the release moves on, without a reload: its post of the circle until the announcement, ADD PIECES once announced, PAUSE at T0, no control after the end', async () => {
     const r = await ctx.services.liveConsole.create(
-      { modelId, title: 'THE THIRD RING', announceAt: new Date(Date.now() + 2 * HOUR), opensAt: new Date(Date.now() + 4 * HOUR), closesAt: new Date(Date.now() + 5 * HOUR), priceMinor: 100_000, sizes: [{ label: '52', stock: 2 }] },
+      { pace: { batch: 5000, minutes: 1 }, holdMinutes: 0, modelId, title: 'THE THIRD RING', announceAt: new Date(Date.now() + 2 * HOUR), opensAt: new Date(Date.now() + 4 * HOUR), closesAt: new Date(Date.now() + 5 * HOUR), priceMinor: 100_000, sizes: [{ label: '52', stock: 2 }] },
       admin,
     );
     await ctx.services.liveConsole.publish(r.id, {}, admin);
@@ -596,6 +606,8 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
   it('shows a release’s after-room once its sell-out opened it, then its own page: the live board and controls, never a setting, a publication or a board link', async () => {
     const r = await ctx.services.liveConsole.create(
       {
+        pace: { batch: 5000, minutes: 1 },
+        holdMinutes: 0,
         modelId,
         title: 'THE NIGHT RING',
         opensAt: new Date(Date.now() + 4 * HOUR),
@@ -696,6 +708,9 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await p.fill('dialog input[name=opensAt]', local(t0));
     await p.fill('dialog input[name=closesAt]', local(new Date(t0.getTime() + HOUR)));
     await p.fill('dialog input[name=price]', '2 400');
+    // ONE QUEUE (lot Q1, D1): the pace, required (the hold after the opening 0 by default).
+    await p.fill('dialog input[name=paceBatch]', '250');
+    await p.fill('dialog input[name=paceMinutes]', '1');
     expect(await p.locator('dialog textarea[name=sizes]').inputValue()).toBe('52 = 3\n54 = 1\n56 = 1');
     await confirmDialog(p);
     await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('THE NOCTURNE RING');
@@ -790,7 +805,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
 
     // A release ended: who was asked where, the answers counted.
     const r = await ctx.services.liveConsole.create(
-      { modelId: nocturne, title: 'THE ASKED RING', opensAt: new Date(Date.now() + 6 * HOUR), closesAt: new Date(Date.now() + 7 * HOUR), priceMinor: 100_000, sizes: [{ label: '52', stock: 1 }] },
+      { pace: { batch: 5000, minutes: 1 }, holdMinutes: 0, modelId: nocturne, title: 'THE ASKED RING', opensAt: new Date(Date.now() + 6 * HOUR), closesAt: new Date(Date.now() + 7 * HOUR), priceMinor: 100_000, sizes: [{ label: '52', stock: 1 }] },
       admin,
     );
     await ctx.services.liveConsole.publish(r.id, {}, admin);
@@ -817,9 +832,9 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await p.context().close();
   }, STEP_TIMEOUT);
 
-  it('sets a release’s pace (W4): blank in its times, then X every Y; the board’s Pace block in Paris time, SET PACE, PAUSE and RESUME PACE, NEXT BATCH NOW, the line’s admission', async () => {
+  it('sets a release’s pace (W4; ONE QUEUE, D1: from its creation, never blank): X every Y in its times; the board’s Pace block in Paris time, SET PACE, PAUSE and RESUME PACE, NEXT BATCH NOW, the line’s turns by batch', async () => {
     const r = await ctx.services.liveConsole.create(
-      { modelId, title: 'THE PACED RING', announceAt: new Date(Date.now() + 2 * HOUR), opensAt: new Date(Date.now() + 4 * HOUR), closesAt: new Date(Date.now() + 5 * HOUR), priceMinor: 100_000, turnSeconds: 300, sizes: [{ label: '52', stock: 10 }] },
+      { pace: { batch: 5000, minutes: 1 }, holdMinutes: 0, modelId, title: 'THE PACED RING', announceAt: new Date(Date.now() + 2 * HOUR), opensAt: new Date(Date.now() + 4 * HOUR), closesAt: new Date(Date.now() + 5 * HOUR), priceMinor: 100_000, turnSeconds: 300, sizes: [{ label: '52', stock: 10 }] },
       admin,
     );
     await ctx.services.liveConsole.publish(r.id, {}, admin);
@@ -829,15 +844,17 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     const paceLine = () => p.locator('[data-testid=live-pace-line]').textContent();
     const note = (id: string) => p.locator(`[data-testid=${id}] .kpi__note`).textContent();
 
-    // No pace: everyone admitted at T0, as before; the times part holds it, blank.
-    await expect.poll(paceLine).toBe('None: everyone is admitted at T0');
-    expect(await p.locator('[data-testid=live-pace-setting]').textContent()).toBe('None: everyone admitted at T0');
-    expect(await p.locator('[data-testid=live-pace] .kpi').count()).toBe(0);
-    await shot(p, 'pace-none');
+    // ONE QUEUE (D1): the pace it was created with (M1's « None: everyone is admitted at T0 » gone); the times part
+    // changes it until the announcement, never blank.
+    await expect.poll(paceLine).toBe('5\u2009000 buyers every minute');
+    expect(await p.locator('[data-testid=live-pace-setting]').textContent()).toBe('5\u2009000 buyers every minute');
+    await shot(p, 'pace-created');
     await p.click('[data-testid=live-edit-times]');
-    await p.fill('dialog input[name=paceBatch]', '2');
+    await p.fill('dialog input[name=paceBatch]', '');
+    await p.fill('dialog input[name=paceMinutes]', '');
     await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toContain('leave both blank for none');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Complete the required fields.');
+    await p.fill('dialog input[name=paceBatch]', '2');
     await p.fill('dialog input[name=paceMinutes]', '5');
     await confirmDialog(p);
     await expect.poll(() => p.locator('[data-testid=live-pace-setting]').textContent()).toBe('2 buyers every 5 minutes');

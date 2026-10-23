@@ -92,7 +92,8 @@ describe('a set\'s release read by the release readers (plan MACRO M3 §5.2)', (
         seed_enc: SEED_ENC,
         seed_hash: o.drawn ? new Uint8Array(createHash('sha256').update(seed).digest()) : new Uint8Array(32),
         ...(o.drawn ? { seed: new Uint8Array(seed), drawn_at: new Date(opens.getTime() + 7_200_000) } : {}),
-        ...(live ? { early_access_hours: 0, live_min_tier: 0, tier_priority: true, room_opens_minutes: 5, turn_seconds: 30, pay_minutes: 5, per_account: 1, price_minor: 100_000, currency: 'EUR', quantity_line: '3 SETS' } : {}),
+        // (ONE QUEUE, lot Q1, D1: a LIVE release has a pace.)
+        ...(live ? { early_access_hours: 0, live_min_tier: 0, tier_priority: true, room_opens_minutes: 5, turn_seconds: 30, pay_minutes: 5, per_account: 1, price_minor: 100_000, currency: 'EUR', quantity_line: '3 SETS', pace_batch: 5000, pace_minutes: 1 } : {}),
       })
       .returning('id')
       .executeTakeFirstOrThrow();

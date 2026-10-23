@@ -269,7 +269,8 @@ describe('a set\'s release, as the club and its pages name it', () => {
 
   it('gives a set\'s LIVE RELEASE its lines per piece, its sets on sale the scarcest piece\'s, and sends its set, its one price and each size\'s piece', () => {
     const names = ['HALO', 'ECLAT · STEEL'];
-    const v = { offer: 'SET', setId: S1, title: 'The set', opensAt: '2026-11-01T18:00', closesAt: '2026-11-01T19:00', price: '', priceSet: '4200', currency: 'EUR', locationId: '', sizes: '', sizes1: '52 = 10\n54 = 15', sizes2: 'M = 20' };
+    // (ONE QUEUE, lot Q1, D1: the pace and the hold, required.)
+    const v = { offer: 'SET', setId: S1, title: 'The set', opensAt: '2026-11-01T18:00', closesAt: '2026-11-01T19:00', price: '', priceSet: '4200', currency: 'EUR', locationId: '', paceBatch: '250', paceMinutes: '1', holdMinutes: '0', sizes: '', sizes1: '52 = 10\n54 = 15', sizes2: 'M = 20' };
     expect(newLiveProblem(v, names)).toBeNull();
     expect(newLiveProblem({ ...v, sizes2: '' }, names)).toBe('ECLAT · STEEL: list the sizes, one per line: its label, then its stock (52 = 3).');
     expect(newLiveProblem({ ...v, setId: '' }, names)).toBe('Choose the set of the release.');

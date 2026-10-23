@@ -188,6 +188,8 @@ describe.skipIf(!HAS_CHROMIUM)('the intelligence of the LIVE RELEASES in the con
     const start = clock.now().getTime();
     const draft = await ctx.services.liveConsole.create(
       {
+        pace: { batch: 5000, minutes: 1 },
+        holdMinutes: 0,
         modelId: f.modelId,
         title: 'THE VAULT RING',
         opensAt: new Date(start + 2 * HOUR),
@@ -244,7 +246,8 @@ describe.skipIf(!HAS_CHROMIUM)('the intelligence of the LIVE RELEASES in the con
     clock.set(t0);
     await ctx.services.live.advance(draft.id);
     await expect.poll(() => p.locator('[data-testid=live-state]').textContent(), { timeout: 15_000 }).toBe('LIVE');
-    clock.set(new Date(t0.getTime() + 21 * SECOND));
+    // ONE QUEUE (D5): the pieces they return are due at the next batch, T0 + 1 min: stalled ten seconds after it.
+    clock.set(new Date(t0.getTime() + 71 * SECOND));
     await expect.poll(() => p.locator('[data-testid=live-alerts] [data-testid=live-alert-line_stalled]').count(), { timeout: 15_000 }).toBe(1);
     expect(await p.locator('[data-testid=live-alert-line_stalled]').textContent()).toContain('LINE STALLED');
     expect(await p.locator('[data-testid=live-sellout-text]').textContent()).toBeTruthy();

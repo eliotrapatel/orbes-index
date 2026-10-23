@@ -129,6 +129,7 @@ import { packIdentity } from '../../src/core/identity.js';
 import { encodePayload, frameCodeData, signingMessage, unframeCodeData } from '../../src/core/payload.js';
 import type { AppContext } from '../../src/server/context.js';
 import { deriveDropSeedKey } from '../../src/server/services/drops.js';
+import { isDomainError } from '../../src/server/errors.js';
 import { deriveLiveTurnKey } from '../../src/server/services/live.js';
 import { defaultLocationId, ensureSku } from '../../src/server/services/stock.js';
 import { SYSTEM_ACTOR, type Actor, type ManualClock } from '../../src/server/types.js';
@@ -847,6 +848,17 @@ async function seedRoom(w: World): Promise<void> {
 }
 
 /**
+ * ONE QUEUE (lot Q1, step Q1.2): a release's turns come by its batches, the next one on the minute from T0. The demo
+ * gives each collector its turn at the second the room gave it before ONE QUEUE (NEXT BATCH NOW, at most the 5 000 of
+ * the fixtures' pace, where a piece is free), so every state keeps its times; nothing free, nothing given.
+ */
+async function turnsNow(w: World, dropId: string): Promise<void> {
+  await w.ctx.services.live.nextBatch(dropId, w.admin).catch((e: unknown) => {
+    if (!isDomainError(e) || e.code !== 'LIVE_NOTHING_FREE') throw e;
+  });
+}
+
+/**
  * A LIVE RELEASE live now (T0 twenty minutes ago), a collector at each step: in the line, at its turn, a piece secured,
  * confirmed, sold out in its size; and each end: the turn passed, the hold ended, the place released, left, removed.
  * Everyone joins after T0, in order of arrival: their places do not depend on the draw's seed.
@@ -880,6 +892,7 @@ async function seedLive(w: World): Promise<void> {
   const step = async (ms: number) => {
     clock.advance(ms);
     await live.advance(r.id);
+    await turnsNow(w, r.id);
   };
   const join = async (key: string, size: { id: string }) => {
     const a = await account(w, key, `${key}@example.com`, 1, w.models.blue);
@@ -1009,6 +1022,9 @@ async function seedQueue(w: World): Promise<void> {
     clock.set(new Date(t0.getTime() + k * MINUTE));
     await live.advance(r.id);
   }
+  // Until steps Q1.3 and Q1.8 give the one queue its screens (the M1 queue's states are replaced there): the five
+  // batches of 40 as M1 admitted them, places 1 to 200 (the nine turns the batch of T0 + 1 gave are those of M1 too).
+  await mAdmitted(w, r.id, 200, 40, t0);
 
   clock.set(at('2026-10-04T12:00:00Z'));
   const t1 = new Date(NOCTURNE_NOW.getTime() - 4 * MINUTE);
@@ -1034,8 +1050,27 @@ async function seedQueue(w: World): Promise<void> {
   await bulkLine(w, g.id, g.sizes, second, new Date(t1.getTime() + 20_000), new Map([[paused.id, g.sizes[1]!.id]]));
   clock.set(new Date(t1.getTime() + 2 * MINUTE));
   await live.advance(g.id);
+  await mAdmitted(w, g.id, 10, 10, t1, 2);
   clock.set(new Date(NOCTURNE_NOW.getTime() - MINUTE));
   await live.pausePace(g.id, w.admin);
+}
+
+/**
+ * M1's admission of places 1 to `upTo` still waiting in the line, `per` a batch, the first at `t0` + `minutes`, numbered
+ * from 2 (M1's batch of T0 found nobody): until steps Q1.3 and Q1.8 replace the M1 queue's states.
+ */
+async function mAdmitted(w: World, dropId: string, upTo: number, per: number, t0: Date, minutes = 1): Promise<void> {
+  for (let b = 0; b * per < upTo; b++) {
+    await w.ctx.db
+      .updateTable('live_entries')
+      .set({ admitted_at: new Date(t0.getTime() + (b + 1) * minutes * MINUTE), admitted_batch: b + 2 })
+      .where('drop_id', '=', dropId)
+      .where('status', '=', 'QUEUED')
+      .where('admitted_at', 'is', null)
+      .where('position', '>', b * per)
+      .where('position', '<=', (b + 1) * per)
+      .execute();
+  }
 }
 
 /** A LIVE RELEASE of one piece, sold out five minutes ago with you still in the line: its after-room is open. */
@@ -1788,6 +1823,8 @@ async function seedSet(w: World): Promise<void> {
   clock.set(at('2026-10-01T09:00:00Z'));
   const live = await ctx.services.liveConsole.create(
     {
+      pace: { batch: 5000, minutes: 1 },
+      holdMinutes: 0,
       setId: set.id,
       title: 'THE ORBITAL SET, RELEASED LIVE',
       description: 'THE ORBITAL SET released live: twelve sets, a bracelet, a ring and a necklace, each in its size.',
@@ -1807,6 +1844,8 @@ async function seedSet(w: World): Promise<void> {
   clock.set(at('2026-10-04T09:00:00Z'));
   const veiled = await ctx.services.liveConsole.create(
     {
+      pace: { batch: 5000, minutes: 1 },
+      holdMinutes: 0,
       setId: set.id,
       title: 'THE ORBITAL SET, THE SECOND LIVE',
       opensAt: at('2026-10-20T19:00:00Z'),
@@ -1857,7 +1896,7 @@ async function seedSetLive(w: World): Promise<void> {
   // ── In its room: T0 three minutes from now ──
   clock.set(at('2026-10-04T09:00:00Z'));
   const room = await ctx.services.liveConsole.create(
-    { setId: set.id, title: 'THE ORBITAL SET, RELEASED LIVE', description, opensAt: new Date(NOCTURNE_NOW.getTime() + 3 * MINUTE), closesAt: new Date(NOCTURNE_NOW.getTime() + 63 * MINUTE), roomOpensMinutes: 10, minTier: 1, sizes, priceMinor: NOCTURNE_SET.priceMinor, currency: 'EUR' },
+    { pace: { batch: 5000, minutes: 1 }, holdMinutes: 0, setId: set.id, title: 'THE ORBITAL SET, RELEASED LIVE', description, opensAt: new Date(NOCTURNE_NOW.getTime() + 3 * MINUTE), closesAt: new Date(NOCTURNE_NOW.getTime() + 63 * MINUTE), roomOpensMinutes: 10, minTier: 1, sizes, priceMinor: NOCTURNE_SET.priceMinor, currency: 'EUR' },
     admin,
   );
   await ctx.services.liveConsole.publish(room.id, {}, admin);
@@ -1876,6 +1915,8 @@ async function seedSetLive(w: World): Promise<void> {
   clock.set(at('2026-10-04T10:00:00Z'));
   const r = await ctx.services.liveConsole.create(
     {
+      pace: { batch: 5000, minutes: 1 },
+      holdMinutes: 0,
       setId: set.id,
       title: 'THE ORBITAL SET, LIVE NOW',
       description,
@@ -1899,6 +1940,7 @@ async function seedSetLive(w: World): Promise<void> {
   const step = async (ms: number) => {
     clock.advance(ms);
     await live.advance(r.id);
+    await turnsNow(w, r.id);
   };
   const join = async (key: string, labels: Sizes) => {
     const a = await account(w, key, `${key}@example.com`, 1, w.models.blue);

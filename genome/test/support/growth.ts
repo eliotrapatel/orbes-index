@@ -160,7 +160,21 @@ export class GrowthWorld {
           mode: o.mode,
           early_access_hours: live ? 0 : 48,
           ...(live
-            ? { live_min_tier: 0, tier_priority: true, room_opens_minutes: 5, turn_seconds: 30, pay_minutes: 5, per_account: 1, price_minor: 480_000, currency: 'EUR', quantity_line: `${o.quantity} PIECES`, ...(o.parentId ? { parent_drop_id: o.parentId, after_room_delay_minutes: 10, after_room_length_minutes: 15, surprise_enabled: false, question_enabled: false } : {}) }
+            ? {
+                live_min_tier: 0,
+                tier_priority: true,
+                room_opens_minutes: 5,
+                turn_seconds: 30,
+                pay_minutes: 5,
+                per_account: 1,
+                price_minor: 480_000,
+                currency: 'EUR',
+                quantity_line: `${o.quantity} PIECES`,
+                // ONE QUEUE (lot Q1, D1): every LIVE release but an after-room has a pace (drops_live_paced).
+                ...(o.parentId
+                  ? { parent_drop_id: o.parentId, after_room_delay_minutes: 10, after_room_length_minutes: 15, surprise_enabled: false, question_enabled: false }
+                  : { pace_batch: 5000, pace_minutes: 1 }),
+              }
             : {}),
         })
         .returning('id')

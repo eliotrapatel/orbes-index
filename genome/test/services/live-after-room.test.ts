@@ -163,6 +163,8 @@ describe('the after-room', () => {
       f.clock.set('2026-11-01T09:00:00.000Z');
       const created = await f.liveConsole.create(
         {
+          pace: { batch: 5000, minutes: 1 },
+          holdMinutes: 0,
           modelId: f.modelId,
           title: 'NIGHT',
           opensAt: T0,
@@ -466,8 +468,9 @@ describe('the after-room', () => {
     const lone = await createLiveRelease(f, { opensAt: T0, published: false });
     const draw = await poolDraw(f.drops, f.db, { modelId: f.modelId, title: 'A draw', quantity: 1, opensAt: T0, closesAt: at(MINUTE) }, f.admin, { publish: false });
     await expect(sql`UPDATE drops SET parent_drop_id = ${lone.id}, after_room_delay_minutes = 10, after_room_length_minutes = 15 WHERE id = ${draw.id}`.execute(t.db)).rejects.toThrow(/check constraint/);
+    // (An after-room has no pace: ONE QUEUE's every LIVE release has one, so the would-be second after-room drops it.)
     await expect(
-      sql`UPDATE drops SET parent_drop_id = ${r.id}, after_room_delay_minutes = 10, after_room_length_minutes = 15, surprise_enabled = false, question_enabled = false WHERE id = ${lone.id}`.execute(t.db),
+      sql`UPDATE drops SET parent_drop_id = ${r.id}, after_room_delay_minutes = 10, after_room_length_minutes = 15, surprise_enabled = false, question_enabled = false, pace_batch = NULL, pace_minutes = NULL WHERE id = ${lone.id}`.execute(t.db),
     ).rejects.toThrow(/duplicate key|unique/);
     expect(afterRoomTitle('x'.repeat(120))).toHaveLength(120);
     expect(afterRoomTitle('NIGHT')).toBe('NIGHT · THE AFTER-ROOM');

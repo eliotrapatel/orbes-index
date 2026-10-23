@@ -1155,7 +1155,7 @@ describe('schema', () => {
     expect(await bounds('drops_pace_minutes_check')).toEqual(S.LIVE_PACE_MINUTES);
   });
 
-  it('the LIVE waiting room\'s pace (0049): the mirror at work: a release without a pace, 0 batches; a pace with its next batch and its pause; an entry not admitted, then admitted with its batch', async () => {
+  it('the LIVE waiting room\'s pace (0049): the mirror at work: a release without a pace (an ended one: 0058 wants a pace on an open one), 0 batches; a pace with its next batch and its pause; an entry not admitted, then admitted with its batch', async () => {
     const { model } = await seedProduct(t.db);
     const account = await t.db.insertInto('accounts').values({ email: 'pace-s0049@example.com', email_normalized: 'pace-s0049@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
     const release = await t.db
@@ -1163,7 +1163,7 @@ describe('schema', () => {
       .values({
         model_id: model.id, title: 'PACE 0049', quantity: 4, opens_at: new Date('2026-12-01T10:00:00Z'), closes_at: new Date('2026-12-01T11:00:00Z'), seed_enc: `v1.${'A'.repeat(16)}.${'B'.repeat(64)}`,
         seed_hash: new Uint8Array(32), early_access_hours: 0, mode: 'LIVE', live_min_tier: 0, tier_priority: true, room_opens_minutes: 5, turn_seconds: 30, pay_minutes: 5, per_account: 1,
-        price_minor: 1000, currency: 'EUR', quantity_line: '4 PIECES',
+        price_minor: 1000, currency: 'EUR', quantity_line: '4 PIECES', published_at: new Date('2026-11-01T10:00:00Z'), ended_at: new Date('2026-12-01T11:00:00Z'), ended_reason: 'CLOSED',
       })
       .returning(['id', 'pace_batch', 'pace_minutes', 'pace_paused_at', 'pace_next_at', 'pace_batches'])
       .executeTakeFirstOrThrow();
@@ -1207,6 +1207,10 @@ describe('schema', () => {
     const held = await t.db.updateTable('drops').set({ pace_hold_minutes: S.LIVE_HOLD_MINUTES.max }).where('id', '=', release.id).returning('pace_hold_minutes').executeTakeFirstOrThrow();
     expect(held).toEqual({ pace_hold_minutes: 120 });
     await expect(t.db.updateTable('drops').set({ pace_hold_minutes: S.LIVE_HOLD_MINUTES.max + 1 }).where('id', '=', release.id).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_pace_hold_minutes_check'));
+    // A pace never taken away from an open LIVE release (drops_live_paced), nor from one with a hold (drops_pace_hold).
+    await t.db.updateTable('drops').set({ pace_hold_minutes: 0 }).where('id', '=', release.id).execute();
+    await expect(t.db.updateTable('drops').set({ pace_batch: null, pace_minutes: null }).where('id', '=', release.id).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_live_paced'));
+    await t.db.updateTable('drops').set({ pace_hold_minutes: 10, published_at: new Date('2026-11-01T10:00:00Z'), ended_at: new Date('2026-12-01T11:00:00Z'), ended_reason: 'CLOSED' }).where('id', '=', release.id).execute();
     await expect(t.db.updateTable('drops').set({ pace_batch: null, pace_minutes: null }).where('id', '=', release.id).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_pace_hold'));
   });
 

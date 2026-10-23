@@ -172,7 +172,7 @@ describe.skipIf(!HAS_CHROMIUM)('the Segments page and the access rules in the co
     await holdPieces(ctx.db, b.id, 5, modelId, { variant: '50' });
     // A LIVE RELEASE, a draft, and a post of the circle.
     const opensAt = new Date(Date.now() + 24 * HOUR);
-    releaseId = (await ctx.services.liveConsole.create({ modelId, title: 'MONOLITHE — LIVE', opensAt, closesAt: new Date(opensAt.getTime() + HOUR), priceMinor: 480_000, sizes: [{ label: '52', stock: 3 }] }, admin)).id;
+    releaseId = (await ctx.services.liveConsole.create({ pace: { batch: 5000, minutes: 1 }, holdMinutes: 0, modelId, title: 'MONOLITHE — LIVE', opensAt, closesAt: new Date(opensAt.getTime() + HOUR), priceMinor: 480_000, sizes: [{ label: '52', stock: 3 }] }, admin)).id;
     postId = (await ctx.services.circle.create({ kind: 'NOTE', title: 'A word for the size 58', minTier: 1 }, admin)).id;
 
     app = await buildApp(ctx, { serveStatic: true, staticDir: webDir });

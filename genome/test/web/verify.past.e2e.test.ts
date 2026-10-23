@@ -113,7 +113,8 @@ describe.skipIf(!HAS_CHROMIUM)("THE RELEASES' LIVE and PAST tabs, a past release
     const r = await createLiveRelease(f, { modelId: nocturne, opensAt: new Date(Date.now() - 60_000), closesAt: new Date(Date.now() + HOUR), quantityLine: '25 PIECES', sizes: [{ label: '52', stock: 2 }] });
     await ctx.db.updateTable('drops').set({ title: 'NOCTURNE — LIVE', description: 'Twenty-five rings, cast in Paris.' }).where('id', '=', r.id).execute();
     await ctx.services.live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id }, a.actor);
-    await ctx.services.live.advance(r.id);
+    // Its turn at the next batch (ONE QUEUE, D15: a late comer), given now.
+    await ctx.services.live.nextBatch(r.id, f.admin);
     const token = (await ctx.services.live.entry(a.id, r.id))!.turn!.token!;
     await ctx.services.live.press(a.id, r.id, token);
     await sleep(1_600);

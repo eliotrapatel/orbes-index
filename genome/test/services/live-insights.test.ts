@@ -664,7 +664,9 @@ describe('LiveInsightsService on a database', () => {
 
   it('runs a past release with the live service, then reads it back for the next one', async () => {
     const opensAt = later(HOUR);
-    const past = await createLiveRelease(f, { opensAt, closesAt: new Date(opensAt.getTime() + HOUR), sizes: [{ label: '52', stock: 1 }, { label: '54', stock: 1 }] });
+    // Turns of 90 s: the late TITANE's, given by the batch of T0 + 59 min (ONE QUEUE, D15: a late comer at the next
+    // batch), runs on past the close.
+    const past = await createLiveRelease(f, { opensAt, closesAt: new Date(opensAt.getTime() + HOUR), turnSeconds: 90, sizes: [{ label: '52', stock: 1 }, { label: '54', stock: 1 }] });
     pastId = past.id;
     const [s52, s54] = past.sizes;
     for (const a of [titane, platine, palladium]) await f.live.setInterest(a.id, past.id, s52!.id, a.actor);
@@ -691,10 +693,14 @@ describe('LiveInsightsService on a database', () => {
     await f.live.advance(past.id);
     f.clock.set(new Date(opensAt.getTime() + 31 * SECOND));
     await f.live.advance(past.id);
-    // A late TITANE in 54, ten seconds before the close: its turn runs on past it.
-    f.clock.set(new Date(opensAt.getTime() + HOUR - 10 * SECOND));
+    // A late TITANE in 54, a minute and ten seconds before the close: its turn, from the next batch, runs on past it. The
+    // engine away until then: the batches due meanwhile go one per frame, each at its own time (ONE QUEUE, D9).
+    f.clock.set(new Date(opensAt.getTime() + HOUR - 70 * SECOND));
     await f.live.enter(titane.id, past.id, { sizeId: s54!.id }, titane.actor);
-    await f.live.advance(past.id);
+    f.clock.set(new Date(opensAt.getTime() + HOUR - MINUTE));
+    while ((await f.live.advance(past.id))?.batch) {
+      // the overdue batches, one per pass
+    }
     f.clock.set(new Date(opensAt.getTime() + HOUR));
     await f.live.advance(past.id);
 
@@ -751,13 +757,16 @@ describe('LiveInsightsService on a database', () => {
     f.clock.set(opensAt);
     await f.live.advance(r.id);
     const drop = async () => t.db.selectFrom('drops').selectAll().where('id', '=', r.id).executeTakeFirstOrThrow();
-    // The first turn runs out at T0 + 30 s, the engine stopped: 10 s after it, the line has stalled.
-    f.clock.set(new Date(opensAt.getTime() + 39 * SECOND));
-    expect((await insights.signals(await drop(), now())).alerts).toEqual([]);
+    // The first turn runs out at T0 + 30 s, the engine stopped. ONE QUEUE (D5): the piece is due at the next batch, T0 + 1
+    // min, never before it: no stall until then; 10 s after it, the line has stalled.
     f.clock.set(new Date(opensAt.getTime() + 41 * SECOND));
+    expect((await insights.signals(await drop(), now())).alerts).toEqual([]);
+    f.clock.set(new Date(opensAt.getTime() + 69 * SECOND));
+    expect((await insights.signals(await drop(), now())).alerts).toEqual([]);
+    f.clock.set(new Date(opensAt.getTime() + 71 * SECOND));
     const stalled = (await insights.signals(await drop(), now())).alerts;
-    expect(stalled.map((x) => [x.kind, x.since])).toEqual([['LINE_STALLED', new Date(opensAt.getTime() + 30 * SECOND)]]);
-    // ADD PIECES gives the next its turn at once; the engine marks the missed turn.
+    expect(stalled.map((x) => [x.kind, x.since])).toEqual([['LINE_STALLED', new Date(opensAt.getTime() + MINUTE)]]);
+    // ADD PIECES; the engine marks the missed turn and gives the batch due.
     await f.live.addPieces(r.id, r.sizes[0]!.id, 1, f.admin);
     await f.live.advance(r.id);
     const after = await insights.signals(await drop(), now());

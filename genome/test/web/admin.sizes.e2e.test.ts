@@ -320,6 +320,9 @@ describe.skipIf(!HAS_CHROMIUM)('a model\'s declared sizes in the console (plan N
     await p.fill('dialog input[name=opensAt]', local(t0));
     await p.fill('dialog input[name=closesAt]', local(new Date(t0.getTime() + HOUR)));
     await p.fill('dialog input[name=price]', '4 800');
+    // ONE QUEUE (lot Q1, D1): the pace, required (the hold after the opening 0 by default).
+    await p.fill('dialog input[name=paceBatch]', '250');
+    await p.fill('dialog input[name=paceMinutes]', '1');
     await p.fill('dialog textarea[name=sizes]', '52 = 2\n53 = 1');
     await p.click('[data-testid=dialog-confirm]');
     await expect.poll(() => p.locator('dialog .dialog__error').textContent(), { timeout: 15_000 }).toBe('Size 53 is not one of HALO · BLUE’s sizes (50, 52). Add it on the model’s page, in the Catalogue.');

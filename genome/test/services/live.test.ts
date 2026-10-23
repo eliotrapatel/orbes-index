@@ -11,7 +11,9 @@
  *  - T0: the line by tier then seed (or the seed alone), the tier read at T0, late arrivals behind by arrival;
  *  - turns per size by quantity, PRESS and SECURE (its secret, 1.4 s on the server's clock, a running turn), the
  *    per-tier windows, add-ons and the total, PAY, RELEASE, the second chance after a miss, a hold that ends, a release,
- *    a leave, a freed hold and a removal;
+ *    a leave, a freed hold and a removal (ONE QUEUE, lot Q1 §1.2, D5: every release has a pace, the fixtures' default
+ *    giving everyone placed at T0 a turn at T0; a piece that returns, or ADD PIECES, waits for the next batch, on the
+ *    minute from T0, where M1's room gave it at once: each case says so where it moved);
  *  - the console's controls: PAUSE and RESUME (no turn, frozen deadlines, moved on resume), EXTEND, ADD PIECES, LET IN,
  *    a host message, END NOW, REMOVE;
  *  - the three ends with their exact effects (SOLD_OUT, CLOSED, ENDED), then the release over;
@@ -262,7 +264,8 @@ describe('LiveService', () => {
       await f.live.leave(a.id, r.id, a.actor);
       await rejects(f.live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id }, a.actor), 'LIVE_ALREADY_ENTERED', 409);
       expect((await audits(r.id)).map((x) => x.action)).toEqual([
-        'drop.create', 'drop.live.enter', 'drop.live.size', 'drop.live.leave', 'drop.live.enter', 'drop.live.queue', 'drop.live.leave',
+        // ONE QUEUE (D3): the first batch gave the turn at T0, noted `drop.live.batch` (counts, the system).
+        'drop.create', 'drop.live.enter', 'drop.live.size', 'drop.live.leave', 'drop.live.enter', 'drop.live.queue', 'drop.live.batch', 'drop.live.leave',
       ]);
     });
 
@@ -497,9 +500,12 @@ describe('LiveService', () => {
       // Nor is it given back: a turn that has run out is MISSED, not LEFT.
       await rejects(f.live.leave(a.id, r.id, a.actor), 'LIVE_TURN_PASSED', 409);
       expect((await entry(r.id, a.id)).status).toBe('TURN');
-      expect(await advance(r, at(31 * SECOND))).toMatchObject({ missed: 1, turns: 1 });
+      // ONE QUEUE (D5): the piece the missed turn returns waits for the next batch (T0 + 1 min), not « at once ».
+      expect(await advance(r, at(31 * SECOND))).toMatchObject({ missed: 1, turns: 0 });
       expect(await entry(r.id, a.id)).toMatchObject({ status: 'MISSED', ended_at: at(30 * SECOND) });
-      expect(await entry(r.id, b.id)).toMatchObject({ status: 'TURN', turn_at: at(31 * SECOND), turn_expires_at: at(61 * SECOND) });
+      expect((await entry(r.id, b.id)).status).toBe('QUEUED');
+      expect(await advance(r, at(MINUTE))).toMatchObject({ batch: 2, turns: 1 });
+      expect(await entry(r.id, b.id)).toMatchObject({ status: 'TURN', turn_at: at(MINUTE), turn_expires_at: at(MINUTE + 30 * SECOND), admitted_at: at(MINUTE), admitted_batch: 2 });
       // Once the engine has marked it MISSED, a late PRESS or SECURE still says the turn has passed, not "not your turn".
       await rejects(f.live.press(a.id, r.id, token), 'LIVE_TURN_PASSED', 409);
       await rejects(f.live.secure(a.id, r.id, token, a.actor), 'LIVE_TURN_PASSED', 409);
@@ -518,13 +524,19 @@ describe('LiveService', () => {
       expect((await entriesOf(t.db, r.id)).map((x) => [x.account_id, x.status])).toEqual([[a.id, 'TURN'], [b.id, 'QUEUED'], [c.id, 'QUEUED'], [d.id, 'QUEUED']]);
       await holdAndSecure(r.id, a.id, a.actor);
       await f.live.confirm(a.id, r.id, a.actor);
-      // One piece left that can ever be given: b (2) and c (3) can never be served; d takes it.
+      // One piece left that can ever be given: b (2) and c (3) can never be served; d takes it at the next batch (ONE
+      // QUEUE, D5: not before it).
       await advance(r, at(10 * SECOND));
+      expect((await entriesOf(t.db, r.id)).map((x) => x.status)).toEqual(['CONFIRMED', 'QUEUED', 'QUEUED', 'QUEUED']);
+      await advance(r, at(MINUTE));
       expect((await entriesOf(t.db, r.id)).map((x) => x.status)).toEqual(['CONFIRMED', 'QUEUED', 'QUEUED', 'TURN']);
-      // Pieces added serve b again, in its place.
-      f.clock.set(at(20 * SECOND));
+      // Pieces added serve b again, in its place, at the next batch (ONE QUEUE, D5: ADD PIECES through the pace).
+      f.clock.set(at(MINUTE + 20 * SECOND));
       await f.live.addPieces(r.id, r.sizes[0]!.id, 2, f.admin);
-      expect((await entriesOf(t.db, r.id)).map((x) => x.status)).toEqual(['CONFIRMED', 'TURN', 'QUEUED', 'TURN']);
+      expect((await entriesOf(t.db, r.id)).map((x) => x.status)).toEqual(['CONFIRMED', 'QUEUED', 'QUEUED', 'TURN']);
+      // d's turn ran out meanwhile (MISSED at T0 + 1 min 30 s): b takes 2 of the 3 now free, c (3) waits behind it.
+      await advance(r, at(2 * MINUTE));
+      expect((await entriesOf(t.db, r.id)).map((x) => x.status)).toEqual(['CONFIRMED', 'TURN', 'QUEUED', 'MISSED']);
     });
 
     it('applies the windows of the entry’s tier to its turn and its hold', async () => {
@@ -594,7 +606,7 @@ describe('LiveService', () => {
       await rejects(f.live.release(b.id, r.id, b.actor), 'LIVE_HOLD_ENDED', 409);
     });
 
-    it('gives the piece back on RELEASE MY PLACE, on a LEAVE during a turn, a freed hold and a removal: the next in line at once', async () => {
+    it('gives the piece back on RELEASE MY PLACE, on a LEAVE during a turn, a freed hold and a removal: the next in line at the next batch (ONE QUEUE, D5; « at once » before)', async () => {
       const r = await release({ sizes: [{ label: '52', stock: 1 }] });
       const people = [await accountOfTier(f, 3), await accountOfTier(f, 2), await accountOfTier(f, 1), await accountOfTier(f, 0), await accountOfTier(f, 0)];
       f.clock.set(at(-MINUTE));
@@ -606,17 +618,25 @@ describe('LiveService', () => {
       f.clock.set(at(SECOND));
       await holdAndSecure(r.id, who(0).id, who(0).actor);
       await f.live.release(who(0).id, r.id, who(0).actor);
+      expect(await statuses()).toEqual(['RELEASED', 'QUEUED', 'QUEUED', 'QUEUED', 'QUEUED']);
+      await advance(r, at(MINUTE));
       expect(await statuses()).toEqual(['RELEASED', 'TURN', 'QUEUED', 'QUEUED', 'QUEUED']);
       await f.live.leave(who(1).id, r.id, who(1).actor);
+      expect(await statuses()).toEqual(['RELEASED', 'LEFT', 'QUEUED', 'QUEUED', 'QUEUED']);
+      await advance(r, at(2 * MINUTE));
       expect(await statuses()).toEqual(['RELEASED', 'LEFT', 'TURN', 'QUEUED', 'QUEUED']);
       await holdAndSecure(r.id, who(2).id, who(2).actor);
       const freed = await f.live.freeHold(r.id, (await entry(r.id, who(2).id)).id, f.admin);
       expect(freed).toMatchObject({ status: 'EXPIRED', email: who(2).email });
+      expect(await statuses()).toEqual(['RELEASED', 'LEFT', 'EXPIRED', 'QUEUED', 'QUEUED']);
+      await advance(r, at(3 * MINUTE));
       expect(await statuses()).toEqual(['RELEASED', 'LEFT', 'EXPIRED', 'TURN', 'QUEUED']);
       await rejects(f.live.freeHold(r.id, (await entry(r.id, who(3).id)).id, f.admin), 'LIVE_ENTRY_NOT_SECURED', 409);
       const removed = await f.live.remove(r.id, (await entry(r.id, who(3).id)).id, f.admin);
       expect(removed).toMatchObject({ status: 'REMOVED', endedAt: f.clock.now() });
       expect(await entry(r.id, who(3).id)).toMatchObject({ removed_by: f.admin.id, removed_at: f.clock.now() });
+      expect(await statuses()).toEqual(['RELEASED', 'LEFT', 'EXPIRED', 'REMOVED', 'QUEUED']);
+      await advance(r, at(4 * MINUTE));
       expect(await statuses()).toEqual(['RELEASED', 'LEFT', 'EXPIRED', 'REMOVED', 'TURN']);
       await rejects(f.live.remove(r.id, (await entry(r.id, who(3).id)).id, f.admin), 'LIVE_ENTRY_CLOSED', 409);
       expect((await audits(r.id)).filter((x) => x.actor === 'admin' && x.action.startsWith('drop.live.')).map((x) => [x.action, x.details])).toEqual([
@@ -636,7 +656,11 @@ describe('LiveService', () => {
       const holdEnd = (await entry(r.id, a.id)).hold_expires_at!;
       f.clock.set(new Date(holdEnd.getTime() + 10 * SECOND));
       expect(await f.live.freeHold(r.id, (await entry(r.id, a.id)).id, f.admin)).toMatchObject({ status: 'EXPIRED', endedAt: holdEnd });
-      expect(await entry(r.id, b.id)).toMatchObject({ status: 'TURN', turn_at: f.clock.now() });
+      // ONE QUEUE (D5): the piece goes at the next batch, on the minute from T0.
+      expect((await entry(r.id, b.id)).status).toBe('QUEUED');
+      const nextBatch = at(Math.ceil((f.clock.now().getTime() - T0.getTime()) / MINUTE) * MINUTE);
+      await advance(r, nextBatch);
+      expect(await entry(r.id, b.id)).toMatchObject({ status: 'TURN', turn_at: nextBatch });
     });
   });
 
@@ -669,9 +693,13 @@ describe('LiveService', () => {
       const pausedMs = 10 * MINUTE - 12 * SECOND;
       expect(resumed).toMatchObject({ pausedAt: null, pausedMs });
       await rejects(f.live.resume(r.id, f.admin), 'LIVE_NOT_PAUSED', 409);
-      // b keeps the 18 s it had; the piece a gave back goes to c at once.
+      // b keeps the 18 s it had; the piece a gave back goes to c at the next batch (ONE QUEUE, D5; « at once » before), which
+      // RESUME moved by the pause: T0 + 1 min + the time paused.
       expect((await entry(r.id, b.id)).turn_expires_at).toEqual(new Date(at(30 * SECOND).getTime() + pausedMs));
-      expect(await entry(r.id, c.id)).toMatchObject({ status: 'TURN', turn_at: at(10 * MINUTE) });
+      expect((await entry(r.id, c.id)).status).toBe('QUEUED');
+      expect(resumed.pace).toMatchObject({ nextAt: new Date(at(MINUTE).getTime() + pausedMs) });
+      await advance(r, new Date(at(MINUTE).getTime() + pausedMs));
+      expect(await entry(r.id, c.id)).toMatchObject({ status: 'TURN', turn_at: new Date(at(MINUTE).getTime() + pausedMs) });
       expect(holdEnd.getTime()).toBeGreaterThan(at(12 * SECOND).getTime());
       expect((await audits(r.id)).filter((x) => x.action === 'drop.live.resume').map((x) => x.details)).toEqual([{ pausedMs }]);
     });
@@ -691,7 +719,11 @@ describe('LiveService', () => {
       const state = await f.live.addPieces(r.id, r.sizes[0]!.id, 3, f.admin);
       expect(state).toMatchObject({ quantity: 5, quantityLine: '2 PIECES · NEVER MORE', sizes: [{ label: '52', stock: 4 }, { label: '54', stock: 1 }] });
       expect((await t.db.selectFrom('drops').select('quantity').where('id', '=', r.id).executeTakeFirstOrThrow()).quantity).toBe(5);
-      expect([(await entry(r.id, a.id)).status, (await entry(r.id, b.id)).status]).toEqual(['TURN', 'TURN']);
+      // ONE QUEUE (D5): the pieces added are offered at the next batch, at the release's pace.
+      expect((await entriesOf(t.db, r.id)).map((x) => x.status)).toEqual(['TURN', 'QUEUED']);
+      // The first turn ran out meanwhile (MISSED at T0 + 30 s); the second has its turn.
+      await advance(r, at(MINUTE));
+      expect((await entriesOf(t.db, r.id)).map((x) => x.status)).toEqual(['MISSED', 'TURN']);
       expect((await audits(r.id)).filter((x) => x.action === 'drop.live.stock' || x.action === 'drop.live.extend').map((x) => [x.action, x.details])).toEqual([
         ['drop.live.extend', { minutes: 30, before: at(60 * MINUTE).toISOString(), after: at(90 * MINUTE).toISOString() }],
         ['drop.live.stock', { sizeId: r.sizes[0]!.id, size: '52', pieces: 3, before: 1, after: 4, quantity: 5, quantityLine: '2 PIECES · NEVER MORE' }],
@@ -718,7 +750,9 @@ describe('LiveService', () => {
       expect(await entry(r.id, c.id)).toMatchObject({ let_in_by: f.admin.id });
       expect((await f.live.entry(c.id, r.id))!.letIn).toBe(true);
       expect((await entry(r.id, b.id)).status).toBe('QUEUED');
-      expect((await audits(r.id)).filter((x) => x.action === 'drop.live.let_in').map((x) => x.details)).toEqual([{ entryId: (await entry(r.id, c.id)).id, position: 3 }]);
+      // ONE QUEUE: its turn stamped by the LET IN (`admitted`), with the batches given so far as its batch.
+      expect((await audits(r.id)).filter((x) => x.action === 'drop.live.let_in').map((x) => x.details)).toEqual([{ entryId: (await entry(r.id, c.id)).id, position: 3, admitted: true }]);
+      expect(await entry(r.id, c.id)).toMatchObject({ admitted_at: at(5 * SECOND), admitted_batch: 1 });
 
       await rejects(f.live.message(r.id, '   ', f.admin), 'VALIDATION_FAILED', 400);
       await rejects(f.live.message(r.id, 'x'.repeat(141), f.admin), 'VALIDATION_FAILED', 400);
@@ -916,8 +950,9 @@ describe('LiveService', () => {
       ]);
       expect(await guaranteeOf(holder.id)).toMatchObject({ status: 'USED', used_drop_id: r.id, closed_reason: 'USED' });
       expect((await audits(r.id)).find((x) => x.action === 'drop.live.queue')!.details).toEqual({ entries: 2, guaranteed: 1 });
-      // A turn missed never gives it back.
-      expect(await advance(r, at(31 * SECOND))).toMatchObject({ missed: 1, turns: 1 });
+      // A turn missed never gives it back (its piece goes at the next batch: ONE QUEUE, D5).
+      expect(await advance(r, at(31 * SECOND))).toMatchObject({ missed: 1, turns: 0 });
+      expect(await advance(r, at(MINUTE))).toMatchObject({ turns: 1 });
       expect((await guaranteeOf(holder.id)).status).toBe('USED');
 
       // A late holder: first among those still waiting in its size, wherever its place in the line.
@@ -939,8 +974,9 @@ describe('LiveService', () => {
         ['QUEUED', 2, 1],
         ['QUEUED', 3, 2],
       ]);
-      // The first turn runs out: the late holder takes the piece, before the second of the room.
-      expect(await advance(r2, at(31 * SECOND))).toMatchObject({ missed: 1, turns: 1 });
+      // The first turn runs out: the late holder takes the piece at the next batch, before the second of the room.
+      expect(await advance(r2, at(31 * SECOND))).toMatchObject({ missed: 1, turns: 0 });
+      expect(await advance(r2, at(MINUTE))).toMatchObject({ turns: 1 });
       expect((await entry(r2.id, late.id)).status).toBe('TURN');
       expect((await entry(r2.id, line[1]!.account_id)).status).toBe('QUEUED');
     });

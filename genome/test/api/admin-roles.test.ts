@@ -198,6 +198,9 @@ const PROBES: Probe[] = [
   { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/extend`, body: INVALID, min: 'OPERATOR' },
   { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/stock`, body: INVALID, min: 'OPERATOR' },
   { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/messages`, body: INVALID, min: 'OPERATOR' },
+  // ONE QUEUE (lot Q1 §1.2): the hold's controls.
+  { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/hold/shorten`, body: INVALID, min: 'OPERATOR' },
+  { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/hold/end`, body: INVALID, min: 'OPERATOR' },
   { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/end`, body: INVALID, min: 'ADMIN' },
   { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/entries/${UUID}/free`, body: INVALID, min: 'OPERATOR' },
   { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/entries/${UUID}/let-in`, body: INVALID, min: 'OPERATOR' },

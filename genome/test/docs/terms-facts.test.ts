@@ -655,7 +655,8 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   // The next nine (plan of 2026-10-06), IN-01.
   'the house\'s guarantee, always within the release\'s pieces (IN-01)': 'if (room.taken + pieces > room.capacity) throw exceedsRelease(room.capacity, room.taken);',
   // Lot M1 of the macro plan (scope of 2026-10-20, L2).
-  'a LIVE RELEASE admits its line in batches, at its pace (W4)': 'const entries = await this.admitBatch(tx, d, at, batches);',
+  // (Lot Q1, ONE QUEUE: the batches give turns, M1's admission stage replaced; R165 re-pointed until Q1.12's article 13.)
+  'a LIVE RELEASE gives its line its turns in batches, at its pace (W4; ONE QUEUE, D3)': 'const grants = await this.batchGrants(tx, d, slot, d.pace_batch);',
   'a draw reserved for a segment\'s members (F4)': 'if (d.access_segment_id && !(await isSegmentMember(tx, d.access_segment_id, accountId, now))) throw drawNotEligible();',
   'a reset link at most 3 times an hour (E3)': 'if (Number(asked.n) >= RESET_REQUEST_LIMIT) return;',
   'the founding list\'s consent with its version (F2)': 'consent_version: FOUNDING_CONSENT_VERSION,',

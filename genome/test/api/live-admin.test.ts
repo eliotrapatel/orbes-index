@@ -51,6 +51,8 @@ describe('LIVE RELEASES: the console', () => {
   const settings = (o: Json = {}): Json => ({
     modelId: f.modelId,
     title: 'THE MONOLITHE RING',
+    pace: { batch: 5000, minutes: 1 },
+    holdMinutes: 0,
     opensAt: iso((o.inMinutes ?? 60) * MINUTE),
     closesAt: iso(((o.inMinutes ?? 60) + 60) * MINUTE),
     priceMinor: 480_000,
@@ -563,16 +565,21 @@ describe('LIVE RELEASES: the console', () => {
       const letIn = safeJson(await op.post(`/api/admin/live/${r.id}/entries/${lateEntry.id}/let-in`, {})) as Json;
       expect(letIn).toMatchObject({ status: 'TURN', letIn: true, email: late.email });
       expect(errorOf(await op.post(`/api/admin/live/${r.id}/entries/${lateEntry.id}/let-in`, {})).code).toBe('LIVE_ENTRY_NOT_QUEUED');
-      // 54 has no free piece: refused; ADD PIECES then gives the first in line its turn (the engine's rule).
+      // 54 has no free piece: refused; ADD PIECES then gives the first in line its turn at the next batch (ONE QUEUE, D5:
+      // the engine's rule, through the pace; « at once » before).
       const late54 = await customer(0);
       await f.live.enter(late54.id, r.id, { sizeId: s54!.id }, late54.actor);
       const entry54 = (await f.live.entry(late54.id, r.id))!;
       expect(errorOf(await op.post(`/api/admin/live/${r.id}/entries/${entry54.id}/let-in`, {})).code).toBe('LIVE_NO_FREE_PIECE');
       expect((safeJson(await op.post(`/api/admin/live/${r.id}/stock`, { sizeId: s54!.id, pieces: 1 })) as Json).sizes[1]).toMatchObject({ label: '54', stock: 3 });
+      expect((await f.live.entry(late54.id, r.id))!.status).toBe('QUEUED');
+      h.clock.set(new Date(Date.parse(r.opensAt) + MINUTE));
+      await f.live.advance(r.id);
       expect((await f.live.entry(late54.id, r.id))!.status).toBe('TURN');
 
       // ADMIN only: remove, and end now.
-      const someone = (await f.live.entry(people[1]!.id, r.id))!;
+      // (The turns given at T0 ran out by T0 + 1 min: the one given just now is removed.)
+      const someone = (await f.live.entry(late54.id, r.id))!;
       expect((await op.post(`/api/admin/live/${r.id}/entries/${someone.id}/remove`, {})).statusCode).toBe(403);
       expect((safeJson(await admin.post(`/api/admin/live/${r.id}/entries/${someone.id}/remove`, {})) as Json).status).toBe('REMOVED');
       expect((await op.post(`/api/admin/live/${r.id}/end`, {})).statusCode).toBe(403);
@@ -810,32 +817,51 @@ describe('LIVE RELEASES: the console', () => {
     });
   });
   // Last: it moves the shared clock past T0, which the cases before it do not expect.
-  describe('the pace (W4)', () => {
-    it('sets the pace (W4): in the settings until the announcement (blank: none), then SET PACE, PAUSE PACE, RESUME PACE and NEXT BATCH NOW, OPERATOR, audited; no route takes it away', async () => {
-      const r = await create({ inMinutes: 10, pace: { batch: 1, minutes: 2 } });
-      expect(r.pace).toEqual({ batch: 1, minutes: 2 });
-      expect((await audits('drop.live.create', r.id))[0]!.details).toMatchObject({ pace: { batch: 1, minutes: 2 } });
-      const blank = await op.patch(`/api/admin/live/${r.id}`, { pace: null });
-      expect((safeJson(blank) as Json).pace).toBeNull();
-      expect((await audits('drop.live.update', r.id)).at(-1)!.details).toEqual({ before: { pace: { batch: 1, minutes: 2 } }, after: { pace: null } });
+  describe('the pace and the hold (ONE QUEUE, lot Q1 §1.2)', () => {
+    it('requires the pace and the hold at creation and keeps them in the settings until the announcement (D1; M1 « blank: none » gone); then SHORTEN THE HOLD and END THE HOLD NOW (D4), SET PACE, PAUSE PACE, RESUME PACE and NEXT BATCH NOW (refused when nothing is free: D6), OPERATOR, audited; no route takes a pace away', async () => {
+      // Created without a pace, without a hold: refused by the body.
+      const { pace: _pace, holdMinutes: _hold, ...bare } = settings({ inMinutes: 10 });
+      for (const body of [bare, { ...bare, pace: { batch: 1, minutes: 2 } }, { ...bare, holdMinutes: 0 }, { ...bare, pace: null, holdMinutes: 0 }, { ...bare, pace: { batch: 1, minutes: 2 }, holdMinutes: 121 }]) {
+        expect(errorOf(await op.post('/api/admin/live', body)).code).toBe('VALIDATION_FAILED');
+      }
+      const r = await create({ inMinutes: 10, pace: { batch: 1, minutes: 2 }, holdMinutes: 0 });
+      expect([r.pace, r.holdMinutes]).toEqual([{ batch: 1, minutes: 2 }, 0]);
+      expect((await audits('drop.live.create', r.id))[0]!.details).toMatchObject({ pace: { batch: 1, minutes: 2 }, holdMinutes: 0 });
+      // The settings until the announcement: never without a pace; the hold set longer or shorter.
+      expect(errorOf(await op.patch(`/api/admin/live/${r.id}`, { pace: null })).code).toBe('VALIDATION_FAILED');
       expect(errorOf(await op.patch(`/api/admin/live/${r.id}`, { pace: { batch: 5001, minutes: 2 } })).code).toBe('VALIDATION_FAILED');
-      expect((safeJson(await op.patch(`/api/admin/live/${r.id}`, { pace: { batch: 1, minutes: 2 } })) as Json).pace).toEqual({ batch: 1, minutes: 2 });
+      expect(errorOf(await op.patch(`/api/admin/live/${r.id}`, { holdMinutes: 121 })).code).toBe('VALIDATION_FAILED');
+      expect((safeJson(await op.patch(`/api/admin/live/${r.id}`, { holdMinutes: 3 })) as Json).holdMinutes).toBe(3);
+      expect((await audits('drop.live.update', r.id)).at(-1)!.details).toEqual({ before: { holdMinutes: 0 }, after: { holdMinutes: 3 } });
       await op.post(`/api/admin/live/${r.id}/publish`, {});
+      // Announced: the settings locked, the hold included; the hold shortened from now on, never later.
+      expect(errorOf(await op.patch(`/api/admin/live/${r.id}`, { holdMinutes: 2 })).code).toBe('LIVE_ANNOUNCED');
+      const reader = await adminClient(h, 'AUDITOR');
+      const hold = `/api/admin/live/${r.id}/hold`;
+      expect((await reader.post(`${hold}/shorten`, { minutes: 1 })).statusCode).toBe(403);
+      expect((await reader.post(`${hold}/end`, {})).statusCode).toBe(403);
+      for (const body of [{}, { minutes: -1 }, { minutes: 121 }, { minutes: 1, extra: 1 }, { minutes: 1.5 }]) {
+        expect(errorOf(await op.post(`${hold}/shorten`, body)).code).toBe('VALIDATION_FAILED');
+      }
+      expect(errorOf(await op.post(`${hold}/shorten`, { minutes: 3 })).code).toBe('LIVE_HOLD_LATER');
+      expect((safeJson(await op.post(`${hold}/shorten`, { minutes: 1 })) as Json).pace).toMatchObject({ holdMinutes: 1, holdEndsAt: iso(11 * MINUTE) });
       h.clock.advance(6 * MINUTE);
       const people = [await customer(), await customer(), await customer()];
       for (const p of people) await f.live.enter(p.id, r.id, { sizeId: (r.sizes as Json[])[0]!.id }, p.actor);
       h.clock.advance(4 * MINUTE);
-      await f.live.advance(r.id);
+      // T0: the hold, nobody's turn yet; END THE HOLD NOW: the first batch due now.
+      expect(await f.live.advance(r.id)).toMatchObject({ queued: 3, turns: 0 });
+      expect((safeJson(await op.post(`${hold}/end`, {})) as Json).pace).toMatchObject({ holdEndsAt: null, nextAt: iso(0), batches: 0 });
+      expect(errorOf(await op.post(`${hold}/end`, {})).code).toBe('LIVE_NO_HOLD');
+      expect(await f.live.advance(r.id)).toMatchObject({ batch: 1, turns: 1 });
 
-      // An AUDITOR signed in now (the one of the cases before has been idle since).
-      const reader = await adminClient(h, 'AUDITOR');
       const path = `/api/admin/live/${r.id}/pace`;
       expect((await reader.request('PUT', path, { body: { batch: 2, minutes: 2 } })).statusCode).toBe(403);
       for (const body of [{ batch: 0, minutes: 2 }, { batch: 2 }, { batch: 2, minutes: 61 }, { batch: 2, minutes: 2, extra: 1 }]) {
         expect(errorOf(await op.request('PUT', path, { body })).code).toBe('VALIDATION_FAILED');
       }
       const set = safeJson(await op.request('PUT', path, { body: { batch: 2, minutes: 2 } })) as Json;
-      expect(set.pace).toMatchObject({ batch: 2, minutes: 2, batches: 1, waiting: 2, admitted: 1, paused: false, nextAt: iso(2 * MINUTE) });
+      expect(set.pace).toMatchObject({ batch: 2, minutes: 2, batches: 1, waiting: 2, admitted: 1, turnsGiven: 1, letIn: 0, paused: false, nextAt: iso(2 * MINUTE) });
       // There is no pace-off route.
       expect((await op.request('DELETE', path)).statusCode).toBe(404);
       expect((await reader.post(`${path}/pause`, {})).statusCode).toBe(403);
@@ -844,13 +870,22 @@ describe('LIVE RELEASES: the console', () => {
       h.clock.advance(MINUTE);
       expect((safeJson(await op.post(`${path}/resume`, {})) as Json).pace).toMatchObject({ paused: false, nextAt: iso(2 * MINUTE) });
       expect((await reader.post(`${path}/next`, {})).statusCode).toBe(403);
-      expect((safeJson(await op.post(`${path}/next`, {})) as Json).pace).toMatchObject({ batches: 2, waiting: 0, admitted: 3 });
+      expect((safeJson(await op.post(`${path}/next`, {})) as Json).pace).toMatchObject({ batches: 2, waiting: 0, admitted: 3, turnsGiven: 3 });
+      // Nobody waits: NEXT BATCH NOW gives nothing, refused.
+      const none = await op.post(`${path}/next`, {});
+      expect([none.statusCode, errorOf(none)]).toEqual([409, { code: 'LIVE_NOTHING_FREE', message: 'No piece is free for anyone waiting.' }]);
       const entries = (safeJson(await reader.get(`/api/admin/live/${r.id}/entries`)) as { items: Json[] }).items;
       expect(entries.map((e) => e.batch).sort()).toEqual([1, 2, 2]);
-      expect(entries.every((e) => typeof e.admittedAt === 'string')).toBe(true);
+      expect(entries.every((e) => typeof e.admittedAt === 'string' && e.beyond === false)).toBe(true);
       const opId = (await h.ctx.db.selectFrom('audit_logs').select('actor_id').where('action', '=', 'drop.live.pace').where('target_id', '=', r.id).executeTakeFirstOrThrow()).actor_id;
       expect(opId).not.toBeNull();
-      for (const action of ['drop.live.pace', 'drop.live.pace.pause', 'drop.live.pace.resume', 'drop.live.pace.next']) expect(await audits(action, r.id), action).toHaveLength(1);
+      for (const action of ['drop.live.pace', 'drop.live.pace.pause', 'drop.live.pace.resume', 'drop.live.pace.next', 'drop.live.hold.shorten', 'drop.live.hold.end']) {
+        expect(await audits(action, r.id), action).toHaveLength(1);
+      }
+      expect((await audits('drop.live.batch', r.id)).map((a) => a.details)).toEqual([
+        { batch: 1, at: iso(-MINUTE), turns: 1 },
+        { batch: 2, at: expect.any(String), turns: 2, extra: true },
+      ]);
     });
   });
 

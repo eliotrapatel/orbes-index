@@ -157,6 +157,16 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     return views.get(accountId)!.turn!.token!;
   }
 
+  /**
+   * ONE QUEUE (lot Q1, D5, D6): a piece that returns, and a late comer, are given their turn at the next batch, on the
+   * minute from T0; the tests give it now, as ORBES may with NEXT BATCH NOW (nothing free, nothing given).
+   */
+  async function turnsNow(dropId: string): Promise<void> {
+    await srv.ctx.services.live.nextBatch(dropId, f.admin).catch((e: unknown) => {
+      if ((e as { code?: string })?.code !== 'LIVE_NOTHING_FREE') throw e;
+    });
+  }
+
   /** Another phone secures its turn (press, hold, secure), then confirms it when asked. */
   async function secureAs(dropId: string, a: { id: string; actor: { type: 'account'; id: string } }, confirm: boolean): Promise<void> {
     await expect.poll(async () => (await statusOf(dropId, a.id))?.status, POLL).toBe('TURN');
@@ -297,6 +307,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
 
     // B4: the rival lets its turn go: a piece has returned, the collector's turn, said aloud, the seal focused.
     await srv.ctx.services.live.leave(rival.id, r.id, rival.actor);
+    await turnsNow(r.id);
     await textOf(page.locator('.live__turn > .live__overline'), 'A PIECE HAS RETURNED');
     await expect.poll(() => page.locator('[aria-live="assertive"]').innerText()).toBe(LIVE.announce.returned);
     expect(await page.evaluate(() => document.activeElement?.classList.contains('live-hold'))).toBe(true);
@@ -433,6 +444,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     expect((await statusOf(r.id, me.id))?.status).toBe('QUEUED');
     // The first collector lets the turn go: the piece has returned. The keyboard holds the seal with the space bar.
     await srv.ctx.services.live.leave(first.id, r.id, first.actor);
+    await turnsNow(r.id);
     await textOf(page.locator('.live__turn > .live__overline'), 'A PIECE HAS RETURNED');
     await expect.poll(() => page.evaluate(() => document.activeElement?.classList.contains('live-hold'))).toBe(true);
     // Without a stream the page reads the state every two seconds, and follows the room all the same.
@@ -511,63 +523,65 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     expect(problems).toEqual([]);
   }, 60_000);
 
-  it('a paced release: the queue page (the place, the estimate in Paris, never the pace), read every 10 s without a stream, PAUSED, then let in by a batch into the line', async () => {
-    const r = await release({ opensAt: new Date(Date.now() + 3_000), sizes: [{ label: '52', stock: 1 }], pace: { batch: 1, minutes: 60 }, turnSeconds: 120 });
-    // Two collectors in the room before T0, the higher tier first in the line: the first batch (at T0) lets it in alone.
-    const first = await account(5);
-    await srv.ctx.services.live.enter(first.id, r.id, { sizeId: r.sizes[0]!.id }, first.actor);
+  it('a paced release (W2, W5; ONE QUEUE, step Q1.2, until step Q1.3’s queue): behind the next batch’s reach, the queue page (the place, the estimate in Paris, never the pace), its state read without a stream, PAUSED; within the reach once NEXT BATCH NOW has given the one before it its turn, the line', async () => {
+    const r = await release({ opensAt: new Date(Date.now() + 3_000), sizes: [{ label: '52', stock: 2 }], pace: { batch: 1, minutes: 60 }, turnSeconds: 120 });
+    // Three in the room before T0, one tier each (no draw orders them): the first given its turn at T0, the second within
+    // the next batch's reach, this phone behind it.
+    for (const pieces of [10, 5]) {
+      const a = await account(pieces);
+      await srv.ctx.services.live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id }, a.actor);
+    }
     const me = await account(1);
     await srv.ctx.services.live.enter(me.id, r.id, { sizeId: r.sizes[0]!.id }, me.actor);
     const { page, problems } = await phone(me.token, { noStream: true });
-    const polls: number[] = [];
-    page.on('request', (req) => {
-      if (new URL(req.url()).pathname === `/api/v1/live/${r.id}/state`) polls.push(Date.now());
-    });
+    // Its timers in the test's hand: behind the next batch's reach, the state is read within a minute.
+    await page.clock.install();
     await page.goto(`${srv.origin}/verify/releases/${r.id}`);
-    // The queue: place 1, the next batch an hour after T0, in Paris.
+    // The room's reads every 2 s until T0 passes (the server's clock), then the queue; a read can bring the queue's frame
+    // published just before the batch at T0 (its next batch then T0, so its place less one): the reads go on until the
+    // frame after it.
+    const queued = async () =>
+      (await page.locator('.live__queue[data-state="eta"]').isVisible()) && norm(await page.locator('.live__queue .live__place-figure').innerText()) === '2';
+    for (let i = 0; i < 40 && !(await queued()); i++) {
+      await page.clock.runFor(2_000);
+      await sleep(250);
+    }
+    // The queue: place 2 among those waiting, its batch an hour after the next one, in Paris.
     await visible(page.locator('.live__queue[data-state="eta"]'), 30_000);
     await textOf(page.locator('.live__queue > .live__overline').first(), LIVE.queue.kind);
-    await textOf(page.locator('.live__queue .live__place-figure'), '1');
+    await textOf(page.locator('.live__queue .live__place-figure'), '2');
     const next = (await srv.ctx.db.selectFrom('drops').select('pace_next_at').where('id', '=', r.id).executeTakeFirstOrThrow()).pace_next_at!;
-    await textOf(page.locator('.live__queue-eta'), LIVE.queue.eta(zonedTime(new Date(next).getTime(), PARIS)!.time));
-    await textOf(page.locator('.live__queue-about'), /^ABOUT (59 MIN|1 H 00)$/);
+    await textOf(page.locator('.live__queue-eta'), LIVE.queue.eta(zonedTime(new Date(next).getTime() + 60 * 60_000, PARIS)!.time));
     await textOf(page.locator('.live__queue-note'), LIVE.queue.keep);
     expect(await page.getByRole('button', { name: LIVE.queue.leave }).isEnabled()).toBe(true);
     // Never the pace: no batch, no figure of buyers, no interval.
     expect(norm(await page.locator('.view--live').innerText())).not.toMatch(/BATCH|EVERY|BUYERS|PACE/i);
     await keepsVault(page, null, [LIVE.queue.leave]);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-queue.png'), fullPage: true });
-    // Without a stream, the queue reads its state every 10 seconds (the server's pollMs), not every 2: from here to its
-    // batch (checked below).
-    const from = polls.length;
-    // ORBES holds the pace: PAUSED, the place kept; then it runs again.
+    // ORBES holds the pace: PAUSED at the next read, the place kept; then it runs again.
     await srv.ctx.services.live.pausePace(r.id, f.admin);
+    await page.clock.runFor(61_000);
     await visible(page.locator('.live__queue[data-state="paused"]'), 30_000);
     await textOf(page.locator('.live__queue-paused'), LIVE.queue.paused);
     await textOf(page.locator('.live__queue-paused-line'), LIVE.queue.pausedLine);
     expect(await page.locator('.live__queue-eta').isVisible()).toBe(false);
     await srv.ctx.services.live.resumePace(r.id, f.admin);
+    await page.clock.runFor(61_000);
     await visible(page.locator('.live__queue[data-state="eta"]'), 30_000);
-    // NEXT BATCH NOW lets it in: the line takes the queue's place (its place 2, behind the first collector's turn), said.
+    // NEXT BATCH NOW gives the second its turn (ONE QUEUE: turns, M1's « lets it in » gone): this phone is within the next
+    // batch's reach; at its next read, the line (its place 3, behind the two turns).
     await srv.ctx.services.live.nextBatch(r.id, f.admin);
-    await textOf(page.locator('.live__line .live__place-figure'), '2');
-    const queued = polls.slice(from - 1);
-    expect(queued.length).toBeGreaterThanOrEqual(3);
-    for (let i = 1; i < queued.length; i++) expect(queued[i]! - queued[i - 1]!).toBeGreaterThan(9_000);
-    await textOf(page.locator('.live__held'), '1 HELD PIECE MAY RETURN');
-    await expect.poll(() => page.locator('.view--live > p[role="status"]').textContent(), POLL).toMatch(new RegExp(`^${LIVE.announce.admitted} Your place: 2\\. `));
+    await page.clock.runFor(61_000);
+    await textOf(page.locator('.live__line .live__place-figure'), '3');
+    await textOf(page.locator('.live__held'), '2 HELD PIECES MAY RETURN');
     expect(await page.locator('.live__queue').count()).toBe(0);
-    // In the line, the state is read every 2 seconds again.
-    const inLine = polls.length;
-    await sleep(4_500);
-    expect(polls.length - inLine).toBeGreaterThanOrEqual(2);
     expect(problems).toEqual([]);
   }, 120_000);
 
-  it('a paced release (W2): behind the next batch, its stream ended at T0 and its state read instead; its batch the next one, the stream again, then let in through it', async () => {
-    const r = await release({ opensAt: new Date(Date.now() + 3_000), sizes: [{ label: '52', stock: 1 }], pace: { batch: 1, minutes: 60 }, turnSeconds: 120 });
+  it('a paced release (W2; ONE QUEUE, step Q1.2): behind the next batch’s reach, its stream ended at T0 and its state read instead; within it, the stream again', async () => {
+    const r = await release({ opensAt: new Date(Date.now() + 3_000), sizes: [{ label: '52', stock: 2 }], pace: { batch: 1, minutes: 60 }, turnSeconds: 120 });
     // Three in the room before T0, by tier (PALLADIUM, PLATINE, then this phone's TITANE: one tier each, so no draw
-    // orders them): the first let in at T0, the second next, this phone behind the next batch.
+    // orders them): the first given its turn at T0, the second within the next batch's reach, this phone behind it.
     for (const pieces of [10, 5]) {
       const a = await account(pieces);
       await srv.ctx.services.live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id }, a.actor);
@@ -579,28 +593,25 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     page.on('response', (res) => {
       if (new URL(res.url()).pathname === `/api/v1/live/${r.id}/stream`) streams.push(res.status());
     });
-    // Its timers in the test's hand: the state read behind the next batch comes within a minute.
+    // Its timers in the test's hand: the state read behind the next batch's reach comes within a minute.
     await page.clock.install();
     await page.goto(`${srv.origin}/verify/releases/${r.id}`);
     await visible(page.locator('.live__queue[data-state="eta"]'), 30_000);
     await textOf(page.locator('.live__queue .live__place-figure'), '2');
-    // The room's stream before T0, ended by the server behind the next batch: never asked for again.
+    // The room's stream before T0, ended by the server behind the next batch's reach: never asked for again.
     const before = streams.length;
     await page.clock.runFor(10_000);
     await sleep(1_000);
     expect(streams.length).toBe(before);
     expect(streams.filter((st) => st === 200).length).toBeLessThanOrEqual(1);
-    // NEXT BATCH NOW lets the second in: this phone's batch is now the next one. At its next read (within a minute),
-    // the place 1 and the stream again.
+    // NEXT BATCH NOW gives the second its turn: this phone is within the next batch's reach. At its next read (within a
+    // minute), the line and the stream again (M1's « then let in through it » gone: ONE QUEUE gives turns, at the batches).
     await srv.ctx.services.live.nextBatch(r.id, f.admin);
     await page.clock.runFor(61_000);
-    await textOf(page.locator('.live__queue .live__place-figure'), '1');
-    await expect.poll(() => streams.slice(before).filter((st) => st === 200).length, POLL).toBe(1);
-    // Its batch, through the stream: the line takes the queue's place.
-    await srv.ctx.services.live.nextBatch(r.id, f.admin);
     await visible(page.locator('.live__line .live__place-figure'), 30_000);
+    await textOf(page.locator('.live__line .live__place-figure'), '3');
+    await expect.poll(() => streams.slice(before).filter((st) => st === 200).length, POLL).toBe(1);
     expect(await page.locator('.live__queue').count()).toBe(0);
-    expect(streams.slice(before)).toEqual([200]);
     expect(problems).toEqual([]);
   }, 120_000);
 
@@ -682,6 +693,8 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     const enter = async (dropId: string, sizeId: string, pieces = 1) => {
       const a = await account(pieces);
       await srv.ctx.services.live.enter(a.id, dropId, { sizeId }, a.actor);
+      // A late comer's turn at the next batch (ONE QUEUE, D15): given now.
+      await turnsNow(dropId);
       return a;
     };
     const entryOf = async (dropId: string, accountId: string) => (await srv.ctx.db.selectFrom('live_entries').select('id').where('drop_id', '=', dropId).where('account_id', '=', accountId).executeTakeFirstOrThrow()).id;

@@ -571,8 +571,10 @@ describe('legal pages: the privacy policy, written from the code', () => {
     // (IN-01: the places guaranteed by the house among them, a count too.)
     expect(details.get('drop.live.queue')).toEqual([' entries: placed.length, guaranteed ']);
     expect(details.get('drop.live.end')!.join()).not.toMatch(/entryId|account/);
-    // A paced release's batches (lot M1, W4): each batch admitted, as its number, time and count, naming no entry.
-    expect(details.get('drop.live.admit')).toEqual([' batch: batches, at: at.toISOString(), entries ']);
+    // A release's batches (ONE QUEUE, lot Q1 §1.2; M1's `drop.live.admit` replaced): each batch that gave turns, as its
+    // number, time and count (NEXT BATCH NOW's marked extra), naming no entry.
+    expect(details.get('drop.live.admit')).toBeUndefined();
+    expect(details.get('drop.live.batch')).toEqual([' batch, at: slot.toISOString(), turns: grants.length ', ' batch, at: p.at.toISOString(), turns: grants.length, extra: true ']);
     for (const [lang, i, counts] of [['en', 1, 'The line formed at the opening, each batch of it admitted to the room and the end of a release are written there as counts only.'], ['fr', 2, "La file formée à l'ouverture, chaque lot de celle-ci admis dans la salle et la fin d'une sortie n'y sont inscrits qu'en nombres."]] as const) {
       const text = sectionText(DOCUMENTS.privacy[lang], 'live');
       for (const row of NAMED) expect(text, `${lang}: ${row[0]}`).toContain(row[i]);

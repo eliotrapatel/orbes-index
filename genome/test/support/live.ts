@@ -154,6 +154,13 @@ export async function accountOfTier(f: Pick<LiveFixture, 'db' | 'modelId'>, tier
   return a;
 }
 
+/**
+ * ONE QUEUE (lot Q1, D1): every LIVE release has a pace. The fixtures' default gives every entry placed at T0 its turn
+ * at T0 (the most a batch gives, every minute) with no hold, so a release reads as the room did before ONE QUEUE until a
+ * piece returns: that waits for the next batch, on the minute from T0.
+ */
+export const LIVE_TEST_PACE = Object.freeze({ batch: 5000, minutes: 1 });
+
 export interface LiveReleaseOptions {
   opensAt: Date;
   closesAt?: Date;
@@ -162,8 +169,10 @@ export interface LiveReleaseOptions {
   minTier?: number;
   tierPriority?: boolean;
   roomOpensMinutes?: number;
-  /** W4: X buyers admitted every Y minutes; none by default. */
+  /** X people per batch every Y minutes; LIVE_TEST_PACE by default (null: none, only for a release that has ended). */
   pace?: { batch: number; minutes: number } | null;
+  /** The hold after the opening, in minutes (0 by default). */
+  holdMinutes?: number;
   turnSeconds?: number;
   payMinutes?: number;
   perAccount?: number;
@@ -210,8 +219,9 @@ export async function createLiveRelease(f: LiveFixture, o: LiveReleaseOptions): 
       live_min_tier: o.minTier ?? 0,
       tier_priority: o.tierPriority ?? true,
       room_opens_minutes: o.roomOpensMinutes ?? 5,
-      pace_batch: o.pace?.batch ?? null,
-      pace_minutes: o.pace?.minutes ?? null,
+      pace_batch: o.pace === null ? null : (o.pace ?? LIVE_TEST_PACE).batch,
+      pace_minutes: o.pace === null ? null : (o.pace ?? LIVE_TEST_PACE).minutes,
+      pace_hold_minutes: o.holdMinutes ?? 0,
       turn_seconds: o.turnSeconds ?? 30,
       pay_minutes: o.payMinutes ?? 5,
       per_account: o.perAccount ?? 1,
@@ -302,7 +312,9 @@ export interface SetLiveOptions {
   /** Its sizes per piece (each one of its piece's model's sizes). */
   sizes: { piece: number; label: string; stock: number }[];
   perAccount?: number;
-  pace?: { batch: number; minutes: number } | null;
+  /** LIVE_TEST_PACE by default. */
+  pace?: { batch: number; minutes: number };
+  holdMinutes?: number;
   priceMinor?: number;
   turnSeconds?: number;
   payMinutes?: number;
@@ -330,7 +342,8 @@ export async function createSetLiveRelease(f: LiveFixture, o: SetLiveOptions): P
       priceMinor: o.priceMinor ?? 200_000,
       currency: 'EUR',
       ...(o.perAccount !== undefined ? { perAccount: o.perAccount } : {}),
-      ...(o.pace !== undefined ? { pace: o.pace } : {}),
+      pace: o.pace ?? LIVE_TEST_PACE,
+      holdMinutes: o.holdMinutes ?? 0,
       ...(o.turnSeconds !== undefined ? { turnSeconds: o.turnSeconds } : {}),
       ...(o.payMinutes !== undefined ? { payMinutes: o.payMinutes } : {}),
     },

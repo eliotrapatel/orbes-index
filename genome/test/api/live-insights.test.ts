@@ -49,6 +49,8 @@ describe('LIVE RELEASES: the console’s intelligence over HTTP', () => {
   it('reads every reading at its moment, its reasoning with it, the emails masked for an AUDITOR', async () => {
     const created = await op.post('/api/admin/live', {
       modelId: f.modelId,
+      pace: { batch: 5000, minutes: 1 },
+      holdMinutes: 0,
       title: 'THE MONOLITHE RING',
       opensAt: iso(10 * MINUTE),
       closesAt: iso(70 * MINUTE),
@@ -103,7 +105,8 @@ describe('LIVE RELEASES: the console’s intelligence over HTTP', () => {
     const started = (await read(op, `/api/admin/live/${r.id}/board`)).board;
     expect(started.alerts).toEqual([]);
     expect(started.sellOut).toMatchObject({ outlook: 'NO_PACE', sizes: [{ size: { label: '52' } }, { size: { label: '54' } }] });
-    h.clock.advance(41 * SECOND);
+    // ONE QUEUE (D5): the pieces they return are due at the next batch, T0 + 1 min; ten seconds after it, stalled.
+    h.clock.advance(71 * SECOND);
     const stalled = (await read(auditor, `/api/admin/live/${r.id}/board`)).board;
     expect(stalled.alerts.map((a: Json) => [a.kind, a.size.label])).toEqual([
       ['LINE_STALLED', '52'],

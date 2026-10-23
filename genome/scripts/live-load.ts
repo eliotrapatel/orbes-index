@@ -301,7 +301,7 @@ interface ReleaseFacts {
   pace: PacedFacts | null;
 }
 
-/** What a paced release left: its batches (`drop.live.admit`), its entries placed and admitted, the PACE check. */
+/** What a paced release left: its batches (`drop.live.batch`, ONE QUEUE: those that gave turns), its entries placed and given a turn, the PACE check. */
 interface PacedFacts {
   batches: PacedBatch[];
   placed: number;
@@ -745,8 +745,10 @@ async function serve(): Promise<void> {
       accessCombine: 'AND',
       surpriseEnabled: true,
       surpriseText: 'A polishing cloth in the house black.',
-      // --pace (W4): X buyers admitted every Y minutes, the first batch at T0; none, everyone admitted at T0.
-      pace: setup.pace,
+      // --pace: X people per batch every Y minutes, the first batch at T0; without it (ONE QUEUE, D1: every release has a
+      // pace), the most a batch gives every minute, so everyone in the room has a turn at T0 as the door was measured.
+      pace: setup.pace ?? { batch: 5000, minutes: 1 },
+      holdMinutes: 0,
       afterRoom: setup.afterRoom
         ? {
             modelId: afterModelId,

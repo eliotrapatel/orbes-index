@@ -111,7 +111,7 @@ describe('a set\'s LIVE RELEASE (macro scope K44 T1, T2, T4; plan MACRO M3 §5.1
   it('is created by the console with its set and its sizes per piece, its quantity its sets on sale, « N SETS »; refused in words; stays a set\'s', async () => {
     const t0 = new Date('2026-12-02T09:00:00.000Z');
     f.clock.set('2026-12-02T08:00:00.000Z');
-    const base = { title: 'THE PAIR — LIVE', opensAt: t0, closesAt: new Date(t0.getTime() + 60 * MINUTE), priceMinor: 200_000 };
+    const base = { title: 'THE PAIR — LIVE', opensAt: t0, closesAt: new Date(t0.getTime() + 60 * MINUTE), priceMinor: 200_000, pace: { batch: 5000, minutes: 1 }, holdMinutes: 0 };
     const sizes = [
       { piece: 1, label: '52', stock: 2 },
       { piece: 1, label: '54', stock: 1 },
@@ -206,7 +206,8 @@ describe('a set\'s LIVE RELEASE (macro scope K44 T1, T2, T4; plan MACRO M3 §5.1
 
   it('gives the turns by every size: an entry that does not fit holds back its sizes, others go on; PAY makes a set sale per set, an order per piece; SOLD_OUT by sets', async () => {
     // 52 × 1 and 54 × 2 for the ring, 45 × 2 and 50 × 1 for the chain: 3 sets on sale.
-    const r = await release({ sizes: [{ piece: 1, label: '52', stock: 1 }, { piece: 1, label: '54', stock: 2 }, { piece: 2, label: '45', stock: 2 }, { piece: 2, label: '50', stock: 1 }] });
+    // Turns of 5 minutes: the batch after E1's PAY (ONE QUEUE, D5: on the minute from T0) finds E3 still in its turn.
+    const r = await release({ turnSeconds: 300, sizes: [{ piece: 1, label: '52', stock: 1 }, { piece: 1, label: '54', stock: 2 }, { piece: 2, label: '45', stock: 2 }, { piece: 2, label: '50', stock: 1 }] });
     // The line by tier: E1 first (PALLADIUM) … E4 last.
     const [e1, e2, e3, e4] = [await accountOfTier(f, 3), await accountOfTier(f, 2), await accountOfTier(f, 1), await accountOfTier(f, 0)];
     f.clock.set(r.t0.getTime() - 4 * MINUTE);
@@ -242,7 +243,11 @@ describe('a set\'s LIVE RELEASE (macro scope K44 T1, T2, T4; plan MACRO M3 §5.1
     expect(orders.map((o) => [o.model_id, o.size_label, o.set_piece, o.piece])).toEqual([[ring, '52', 1, 1], [chain, '45', 2, 2]]);
     expect(orders[0]!.with_order_id).toBeNull();
     expect(orders[0]!.price_minor! + orders[1]!.price_minor!).toBe(200_000);
-    // 52 is confirmed in full: E2 can never be served and is passed over; E4 takes its turn (54 and 50 free).
+    // 52 is confirmed in full: E2 can never be served and is passed over; E4 takes its turn (54 and 50 free) at the next
+    // batch (ONE QUEUE, D5: « at once » before).
+    await f.live.advance(r.id);
+    expect([await statusOf(r, e2!), await statusOf(r, e4!)]).toEqual(['QUEUED', 'QUEUED']);
+    f.clock.set(r.t0.getTime() + MINUTE);
     await f.live.advance(r.id);
     expect([await statusOf(r, e2!), await statusOf(r, e4!)]).toEqual(['QUEUED', 'TURN']);
     await pay(r, e3!);
@@ -276,9 +281,10 @@ describe('a set\'s LIVE RELEASE (macro scope K44 T1, T2, T4; plan MACRO M3 §5.1
     await f.live.enter(b!.id, r.id, choose(r, '52', '45'), b!.actor);
     f.clock.set(r.t0);
     await f.live.advance(r.id);
-    // The first batch admits one: A's turn; B waits for its batch.
+    // The first batch gives one turn: A's; B waits for the next, within its reach (ONE QUEUE, step Q1.2: the line until
+    // step Q1.3's queue).
     expect([await statusOf(r, a!), await statusOf(r, b!)]).toEqual(['TURN', 'QUEUED']);
-    expect((await f.live.entry(b!.id, r.id))!.queue).toMatchObject({ place: 1 });
+    expect((await f.live.entry(b!.id, r.id))!.queue).toBeNull();
     const entryB = (await t.db.selectFrom('live_entries').select('id').where('drop_id', '=', r.id).where('account_id', '=', b!.id).executeTakeFirstOrThrow()).id;
     // 45 has no free piece: LET IN is refused, though 52 has one.
     expect(await refusal(f.live.letIn(r.id, entryB, f.admin))).toMatchObject({ code: 'LIVE_NO_FREE_PIECE' });

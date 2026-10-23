@@ -318,6 +318,8 @@ describe('a release’s rules, read at each step', () => {
     const base = () => ({
       modelId: f.modelId,
       title: 'MONOLITHE — LIVE',
+      pace: { batch: 5000, minutes: 1 },
+      holdMinutes: 0,
       opensAt: new Date(f.clock.now().getTime() + 3 * HOUR),
       closesAt: new Date(f.clock.now().getTime() + 4 * HOUR),
       priceMinor: 480_000,

@@ -83,7 +83,8 @@ describe.skipIf(!HAS_CHROMIUM)('the question after a LIVE RELEASE (Chromium)', (
     await ctx.db.insertInto('live_interest').values({ drop_id: r.id, account_id: a.id, size_id: r.sizes[0]!.id, created_at: new Date(Date.now() - 2 * HOUR) }).execute();
     // The buyer then the taker join the line; the buyer secures and pays: SOLD OUT, the taker's place ended by it.
     for (const x of [b, t]) await ctx.services.live.enter(x.id, r.id, { sizeId: r.sizes[0]!.id }, x.actor);
-    await ctx.services.live.advance(r.id);
+    // The buyer's turn at the next batch (ONE QUEUE, D15: late comers), given now.
+    await ctx.services.live.nextBatch(r.id, f.admin);
     const token = (await ctx.services.live.entry(b.id, r.id))!.turn!.token!;
     await ctx.services.live.press(b.id, r.id, token);
     await sleep(1_600);
@@ -187,7 +188,8 @@ describe.skipIf(!HAS_CHROMIUM)('the question after a LIVE RELEASE (Chromium)', (
     // One piece, its first collector's turn long enough to run past the end; the second in the line behind it.
     const r = await createLiveRelease(f, { opensAt: new Date(Date.now() - 60_000), closesAt: new Date(Date.now() + HOUR), quantityLine: '1 PIECE', sizes: [{ label: '52', stock: 1 }], turnSeconds: 300 });
     for (const x of [first, waiting]) await ctx.services.live.enter(x.id, r.id, { sizeId: r.sizes[0]!.id }, x.actor);
-    await ctx.services.live.advance(r.id);
+    // The first one's turn at the next batch (ONE QUEUE, D15: late comers), given now.
+    await ctx.services.live.nextBatch(r.id, f.admin);
     expect((await ctx.services.live.entry(first.id, r.id))?.status).toBe('TURN');
     const { page, context, problems } = await phone(waiting.token);
     await page.goto(`${srv.origin}/verify/releases/${r.id}`);

@@ -19,6 +19,10 @@
  *   consoles  GET /api/admin/live/:id/stream (routes/admin/live.ts), a console session (AUDITOR and up): `console` events
  *             (`{ now, board }`), the live board as LiveConsoleService.board builds it (the counters, the line), the customers' emails in clear
  *             for an OPERATOR or an ADMIN and masked for an AUDITOR (`consoleView`), sent when it changed.
+ * The frames and the batches (services/live-frames.ts, lot Q1 §1.2): a paced release gives at most one batch per published
+ * frame. Each pulse that builds a release's frame for its streams marks it with the gate (`begin` before its reads,
+ * `published` once sent); a release nobody follows has a frame built and cached when the engine or a NEXT BATCH NOW
+ * asks for one (`publishFrame`, at most one a pulse per release), which the pages that poll it read.
  * Every event carries the server's time (`now`: the same for every event of a pulse, the moment its room was read); a
  * comment line keeps a quiet stream open every LIVE_HEARTBEAT_MS (20 s), under the server's idle timeout and the proxies'.
  *
@@ -48,6 +52,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { DomainError } from '../errors.js';
 import type { LiveEntryView, LiveQueueView } from '../services/live.js';
 import type { AdminLiveBoard } from '../services/live-console.js';
+import type { LiveFrameGate } from '../services/live-frames.js';
 import type { LiveBoard, LiveFrame, LiveQueueFrame, LiveRoom, LiveRoomService, LiveSavedSize } from '../services/live-room.js';
 import { noopLogger, systemClock, type Clock, type Logger } from '../types.js';
 
@@ -117,6 +122,8 @@ export interface LiveHubDeps extends LiveHubOptions {
   room: LiveRoomService;
   /** The console's live board; without it, no console stream opens. */
   console?: LiveConsoleSource;
+  /** At most one batch per published frame (services/live-frames.ts): the frames this hub publishes are marked on it. */
+  frames?: LiveFrameGate;
   /** The live board as a console reads it: the emails in clear or masked (routes/admin/live.ts liveBoardJson). */
   consoleView?: (board: AdminLiveBoard, inClear: boolean) => unknown;
   clock?: Clock;
@@ -191,6 +198,9 @@ function sameHash(a: Uint8Array, b: Uint8Array | null): boolean {
 export class LiveHub {
   private readonly room: LiveRoomService;
   private readonly console: LiveConsoleSource | undefined;
+  private readonly gate: LiveFrameGate | undefined;
+  /** When each release's frame was last published, for `publishFrame` (performance.now()). */
+  private readonly publishedAt = new Map<string, number>();
   private readonly consoleView: (board: AdminLiveBoard, inClear: boolean) => unknown;
   private readonly clock: Clock;
   private readonly log: Logger;
@@ -209,6 +219,7 @@ export class LiveHub {
   constructor(deps: LiveHubDeps) {
     this.room = deps.room;
     this.console = deps.console;
+    this.gate = deps.frames;
     this.consoleView = deps.consoleView ?? ((board) => board);
     this.clock = deps.clock ?? systemClock;
     this.log = deps.log ?? noopLogger;
@@ -333,6 +344,35 @@ export class LiveHub {
     return this.pulsing;
   }
 
+  /**
+   * A frame of the release asked for (services/live-frames.ts `ask`: a batch waits for it): built afresh, sent to its
+   * streams and cached for its polls, then marked published; at most one a pulse per release (a release followed by
+   * viewers or boards has one every pulse anyway: nothing more then). Errors are logged; the next ask tries again.
+   */
+  publishFrame(dropId: string): Promise<void> {
+    if (this.stopped || !this.gate) return Promise.resolve();
+    const set = this.streams.get(dropId);
+    if (set && [...set].some((s) => s.kind !== 'console') && this.timer) return Promise.resolve();
+    const last = this.publishedAt.get(dropId);
+    if (last !== undefined && performance.now() - last < this.pulseMs) return Promise.resolve();
+    this.publishedAt.set(dropId, performance.now());
+    return this.publishNow(dropId).catch((e) => this.log.error({ dropId, err: { message: (e as Error)?.message } }, 'live stream: a frame could not be published'));
+  }
+
+  private async publishNow(dropId: string): Promise<void> {
+    const mark = this.gate!.begin(dropId);
+    const frame = await this.frame(dropId, true);
+    const set = this.streams.get(dropId);
+    if (frame && set) {
+      const viewers = [...set].filter((s): s is ViewerStream => s.kind === 'viewer').map((s) => s.accountId);
+      const views = viewers.length ? await this.room.viewerEntries(dropId, [...new Set(viewers)]) : new Map<string, LiveEntryView>();
+      const out = this.outgoing(frame);
+      for (const s of [...set]) if (s.kind !== 'console') this.deliver(s, out, views);
+    }
+    this.publishedAt.set(dropId, performance.now());
+    this.gate!.published(dropId, mark);
+  }
+
   /** End every stream and the pulse (the server's shutdown). */
   stop(): void {
     this.stopped = true;
@@ -362,6 +402,7 @@ export class LiveHub {
           if (board?.over) for (const s of consoles) this.close(s);
         }
         if (consoles.length === set.size) continue;
+        const mark = this.gate?.begin(dropId);
         const frame = await this.frame(dropId, true);
         if (!frame) {
           for (const s of [...set]) if (s.kind !== 'console') this.close(s);
@@ -372,6 +413,11 @@ export class LiveHub {
         const views = await this.room.viewerEntries(dropId, [...new Set(viewers)]);
         const out = this.outgoing(frame);
         for (const s of [...set]) if (s.kind !== 'console') this.deliver(s, out, views);
+        // The frame is out: a batch waiting for it may go (services/live-frames.ts).
+        if (mark !== undefined) {
+          this.publishedAt.set(dropId, performance.now());
+          this.gate!.published(dropId, mark);
+        }
         if (frame.room.over) for (const s of [...set]) if (s.kind !== 'console') this.close(s);
       } catch (e) {
         this.log.error({ dropId, err: { message: (e as Error)?.message } }, 'live stream: a release could not be read');

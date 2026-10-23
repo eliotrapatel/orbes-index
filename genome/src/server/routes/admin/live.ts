@@ -17,11 +17,12 @@
  *   GET    /api/admin/live/:id/stream                        AUDITOR   the live board in real time (SSE, `console` events)
  *   GET    /api/admin/live/:id/entries                       AUDITOR   the entries (?status=, OPEN for the open ones)
  *   POST   /api/admin/live/:id/pause, /resume                OPERATOR  no new turn, the deadlines frozen; and back
- *   PUT    /api/admin/live/:id/pace                          OPERATOR  SET PACE: X buyers admitted every Y minutes (W4), until the end
- *   POST   /api/admin/live/:id/pace/pause, /pace/resume      OPERATOR  no batch admitted, from T0; and back
- *   POST   /api/admin/live/:id/pace/next                     OPERATOR  NEXT BATCH NOW: one batch admitted at once
- *                                                                     (no route takes a pace away: a pace left blank in
- *                                                                     the settings before the announcement is none)
+ *   PUT    /api/admin/live/:id/pace                          OPERATOR  SET PACE: X turns every Y minutes, slower or faster, until the end
+ *   POST   /api/admin/live/:id/pace/pause, /pace/resume      OPERATOR  no batch given, from T0; and back
+ *   POST   /api/admin/live/:id/pace/next                     OPERATOR  NEXT BATCH NOW: up to X extra turns now, where a piece is free
+ *                                                                     (no route takes a pace away: every LIVE release has one)
+ *   POST   /api/admin/live/:id/hold/shorten                  OPERATOR  SHORTEN THE HOLD: the first batch earlier, never later
+ *   POST   /api/admin/live/:id/hold/end                      OPERATOR  END THE HOLD NOW: the first batch due now (at T0 before it)
  *   POST   /api/admin/live/:id/extend                        OPERATOR  the end of the sales later
  *   POST   /api/admin/live/:id/stock                         OPERATOR  ADD PIECES to a size
  *   POST   /api/admin/live/:id/messages                      OPERATOR  a host message for the room
@@ -71,6 +72,7 @@ import {
   liveAdminParams,
   liveEntriesQuery,
   liveExtendBody,
+  liveHoldShortenBody,
   liveMessageBody,
   livePaceBody,
   liveStockBody,
@@ -239,6 +241,18 @@ export const adminLiveRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
     const { id } = parse(liveAdminParams, request.params);
     parse(emptyBody, request.body);
     return live.nextBatch(id, adminActor(request));
+  });
+
+  app.post('/api/admin/live/:id/hold/shorten', async (request) => {
+    const { id } = parse(liveAdminParams, request.params);
+    const { minutes } = parse(liveHoldShortenBody, request.body);
+    return live.shortenHold(id, minutes, adminActor(request));
+  });
+
+  app.post('/api/admin/live/:id/hold/end', async (request) => {
+    const { id } = parse(liveAdminParams, request.params);
+    parse(emptyBody, request.body);
+    return live.endHold(id, adminActor(request));
   });
 
   app.post('/api/admin/live/:id/extend', async (request) => {

@@ -339,6 +339,12 @@ describe('the runbook of lot MACRO M1 (docs/launch/DEPLOY-MACRO-M1.md)', () => {
     expect(checks).toContain("**Visible de tous** : elle paraît dans THE RELEASES et la bannière de sa publication à sa fin, puis pour toujours dans PAST et sur la fiche du modèle d'essai");
     expect(checks).toContain('fais-la à une heure creuse');
     expect(readDoc('genome/src/server/services/live-console.ts')).toContain('is revealed before the room opens.');
+    // ONE QUEUE (lot Q1, D1) named the pace's fields anew, required at creation: the runbook, deployed, keeps M1's words,
+    // the console says them so now.
+    const renamed = new Map([
+      ['Pace · buyers per batch', 'People per batch'],
+      ['Pace · every (minutes)', 'Every (minutes)'],
+    ]);
     const quoted: ReadonlyArray<readonly [label: string, text: string]> = [
       ['New live release', club],
       ['Times (UTC)', live],
@@ -363,7 +369,8 @@ describe('the runbook of lot MACRO M1 (docs/launch/DEPLOY-MACRO-M1.md)', () => {
     ];
     for (const [label, text] of quoted) {
       expect(runbook, label).toContain(label);
-      expect(text, `${label}: not in the console`).toMatch(new RegExp(`['\`]${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['\`]`));
+      const now = renamed.get(label) ?? label;
+      expect(text, `${now}: not in the console`).toMatch(new RegExp(`['\`]${now.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['\`]`));
     }
     // The dialog's fields, as the console labels them (TEST_TIERS' TITANE, the LIVE behaviour).
     for (const label of ['Test entrants · TITANE', 'Arrival', 'Behaviour · PAY (%)', 'Behaviour · RELEASE MY PLACE (%)', 'Behaviour · miss the turn (%)', 'Behaviour · LEAVE (%)']) {

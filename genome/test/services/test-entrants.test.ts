@@ -715,7 +715,8 @@ describe('the report and the house\'s guarantee (plan NEXT-NINE, IN-01)', () => 
     const report = await w.tests.report(d, w.h.clock.now());
     expect(report.checks.find((c) => c.id === 'ORDER')).toEqual({ id: 'ORDER', label: 'The line’s order', pass: true, line: '3 placed at T0 by tier, the highest first.' });
     expect(report.checks.find((c) => c.id === 'ONE_PLACE')).toMatchObject({ pass: true });
-    expect(report.passed).toBe(5);
+    expect(report.checks.find((c) => c.id === 'PACE')).toMatchObject({ pass: true });
+    expect(report.passed).toBe(6); // (ONE QUEUE, D1: every LIVE release has a pace: its PACE check too.)
     await w.tests.stop(run.id, w.f.admin);
   });
 });
@@ -904,7 +905,7 @@ describe('a LIVE RELEASE end to end', () => {
   });
   afterAll(() => w?.h.close());
 
-  it('I\'LL BE THERE, the line at T0 by tier, PRESS, the hold, SECURE, PAY and RELEASE; END TEST cancels the orders; report 5/5', async () => {
+  it('I\'LL BE THERE, the line at T0 by tier, PRESS, the hold, SECURE, PAY and RELEASE; END TEST cancels the orders; report 6/6 (ONE QUEUE: its PACE check too)', async () => {
     const t0 = new Date(w.h.clock.now().getTime() + 2 * MINUTE);
     const release = await createLiveRelease(w.f, { opensAt: t0, sizes: [{ label: '52', stock: 6 }], addons: [{ label: 'Box', priceMinor: 2000 }], accessModels: [w.f.modelId] });
     const run = await w.tests.start(
@@ -937,7 +938,7 @@ describe('a LIVE RELEASE end to end', () => {
     expect((await w.h.ctx.services.liveRoom.frame(release.id))?.room).toMatchObject({ left: 3 });
 
     const ended = await w.tests.end(run.id, testPhrase(release.id, true), w.f.admin);
-    expect(ended.report?.checks.map((c) => c.pass)).toEqual([true, true, true, true, true]);
+    expect(ended.report?.checks.map((c) => c.pass)).toEqual([true, true, true, true, true, true]); // (ONE QUEUE, D1: the PACE check too.)
     expect((await w.h.ctx.db.selectFrom('orders').select('status').where('drop_id', '=', release.id).execute()).every((o) => o.status === 'CANCELLED')).toBe(true);
     // The places paid are closed too (REMOVED, `confirmed_at` cleared): the room sells their three pieces again.
     const after = await w.h.ctx.db.selectFrom('live_entries').select(['status', 'confirmed_at', 'removed_by', 'removed_at', 'ended_at']).where('drop_id', '=', release.id).execute();
@@ -960,13 +961,14 @@ describe('a LIVE RELEASE end to end', () => {
     const inject = vi.spyOn(w.h.app, 'inject');
     try {
       w.h.clock.set(t0);
-      // The first minute: two admitted at T0 and served; four waiting for their batch read their state every 10 s (the
-      // next batch's) or up to 30 s (behind it: half the time until their batch is the next one).
+      // The first minute: two given their turn at T0 and served; of the four waiting, the two the next batch can reach read
+      // the line every 2 s, the two behind it their queue up to every 30 s (half the time until their batch is the next
+      // one: ONE QUEUE, step Q1.2, until step Q1.3's queue snapshot).
       await drive(w, 50_000, 500, release.id);
       const reads = inject.mock.calls.filter((call) => String(((call as unknown[])[0] as { url?: string } | undefined)?.url).endsWith('/state')).length;
-      // At most about 4 × 5 reads in 50 s at 10 s (4 × 25 at 2 s); the two admitted at T0 a few more before their turn.
+      // About 2 × 25 reads in 50 s at 2 s and 2 × 2 at 30 s (6 × 25 if every one read every 2 s); a few more before the turns.
       expect(reads).toBeGreaterThan(4);
-      expect(reads).toBeLessThan(40);
+      expect(reads).toBeLessThan(75);
     } finally {
       inject.mockRestore();
     }
@@ -995,7 +997,7 @@ describe('a LIVE RELEASE end to end', () => {
     expect([ended.report?.passed, ended.report?.total]).toEqual([6, 6]);
   });
 
-  it('a size of the release set aside during the test (plan NEXT LOT §3.3): END TEST cancels the orders, their stock back on that SKU, the report 5/5, the size still there and set aside', async () => {
+  it('a size of the release set aside during the test (plan NEXT LOT §3.3): END TEST cancels the orders, their stock back on that SKU, the report 6/6 (ONE QUEUE: its PACE check too), the size still there and set aside', async () => {
     const db = w.h.ctx.db;
     const model = await createModel(db, 'ECLAT');
     await w.h.ctx.services.sizes.declare(model, { sizeType: 'RING', ticked: ['52', '54'] }, w.f.admin);
@@ -1021,7 +1023,7 @@ describe('a LIVE RELEASE end to end', () => {
     expect((await w.h.ctx.services.sizes.removeSize(model, sku52, w.f.admin)).outcome).toBe('SET_ASIDE');
 
     const ended = await w.tests.end(run.id, testPhrase(release.id, true), w.f.admin);
-    expect(ended.report?.checks.map((c) => [c.id, c.pass])).toEqual([['ONE_ENTRY', true], ['ORDER', true], ['ONE_PLACE', true], ['STOCK', true], ['ORDERS', true]]);
+    expect(ended.report?.checks.map((c) => [c.id, c.pass])).toEqual([['ONE_ENTRY', true], ['ORDER', true], ['ONE_PLACE', true], ['STOCK', true], ['ORDERS', true], ['PACE', true]]);
     expect((await db.selectFrom('orders').select('status').where('drop_id', '=', release.id).execute()).every((o) => o.status === 'CANCELLED')).toBe(true);
     expect(await stockLevel(db, sku52, location)).toEqual({ onHand: 3, reserved: 0, available: 3 });
     const sku = await db.selectFrom('skus').select(['id', 'set_aside_at']).where('id', '=', sku52).executeTakeFirstOrThrow();
@@ -1029,7 +1031,7 @@ describe('a LIVE RELEASE end to end', () => {
     expect(await db.selectFrom('skus').select('id').where('model_id', '=', model).execute()).toHaveLength(2);
   });
 
-  it('END TEST cancels the test\'s orders waiting for supplier stock before those holding stock (plan NEXT LOT §3.5.9): the piece freed serves the real collector waiting, never a test order; no serial is retired; the report 5/5', async () => {
+  it('END TEST cancels the test\'s orders waiting for supplier stock before those holding stock (plan NEXT LOT §3.5.9): the piece freed serves the real collector waiting, never a test order; no serial is retired; the report 6/6 (ONE QUEUE: its PACE check too)', async () => {
     const db = w.h.ctx.db;
     const model = await createModel(db, 'HALO');
     await w.h.ctx.services.sizes.declare(model, { sizeType: 'RING', ticked: ['52'] }, w.f.admin);
@@ -1060,7 +1062,7 @@ describe('a LIVE RELEASE end to end', () => {
     const retired = (await db.selectFrom('products').select('id').where('status', '=', 'RETIRED').execute()).length;
 
     const ended = await w.tests.end(run.id, testPhrase(release.id, true), w.f.admin);
-    expect(ended.report?.checks.map((c) => [c.id, c.pass])).toEqual([['ONE_ENTRY', true], ['ORDER', true], ['ONE_PLACE', true], ['STOCK', true], ['ORDERS', true]]);
+    expect(ended.report?.checks.map((c) => [c.id, c.pass])).toEqual([['ONE_ENTRY', true], ['ORDER', true], ['ONE_PLACE', true], ['STOCK', true], ['ORDERS', true], ['PACE', true]]);
     expect((await db.selectFrom('orders').select('status').where('drop_id', '=', release.id).execute()).every((o) => o.status === 'CANCELLED')).toBe(true);
     // The waiting test orders went first: the piece freed last served the real order, and no test order was served.
     expect((await db.selectFrom('orders').select('reservation').where('id', '=', realOrder).executeTakeFirstOrThrow()).reservation).toBe('STOCK');
@@ -1123,7 +1125,7 @@ describe('a set\'s LIVE RELEASE (macro scope K44 T1, plan MACRO M3 §5.2, M3.16)
       sizes: [{ piece: 1, label: '52', stock: 4 }, { piece: 1, label: '54', stock: 4 }, { piece: 2, label: '45', stock: 4 }, { piece: 2, label: '50', stock: 4 }],
     });
 
-  it('the bots say I\'LL BE THERE and enter with a size per piece, pay one set each; END TEST cancels every order of every set; the report 5/5', async () => {
+  it('the bots say I\'LL BE THERE and enter with a size per piece, pay one set each; END TEST cancels every order of every set; the report 6/6 (ONE QUEUE: its PACE check too)', async () => {
     const t0 = new Date(w.h.clock.now().getTime() + 10 * MINUTE);
     const r = await setRelease(t0);
     w.h.clock.set(t0.getTime() - 4 * MINUTE);
@@ -1158,10 +1160,11 @@ describe('a set\'s LIVE RELEASE (macro scope K44 T1, plan MACRO M3 §5.2, M3.16)
       ['ONE_PLACE', true],
       ['STOCK', true],
       ['ORDERS', true],
+      ['PACE', true], // (ONE QUEUE, D1: the PACE check too.)
     ]);
 
     const ended = await w.tests.end(run.id, testPhrase(r.id, true), w.f.admin);
-    expect(ended.report?.checks.map((c) => c.pass)).toEqual([true, true, true, true, true]);
+    expect(ended.report?.checks.map((c) => c.pass)).toEqual([true, true, true, true, true, true]);
     expect((await w.h.ctx.db.selectFrom('orders').select('status').where('drop_id', '=', r.id).execute()).every((o) => o.status === 'CANCELLED')).toBe(true);
     const endAudit = await w.h.ctx.db.selectFrom('audit_logs').select('details').where('action', '=', 'test_run.end').where('target_id', '=', run.id).executeTakeFirstOrThrow();
     // Every order of every set, though cancelling one of a set's closes its other in the same transition.

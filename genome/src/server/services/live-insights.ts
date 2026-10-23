@@ -68,6 +68,8 @@ import {
   LIVE_NETWORK_RETENTION_DAYS,
   LIVE_OPEN_STATUSES,
   onSaleOf,
+  paceHeld,
+  paceNextAt,
   roomOpensAt,
   setTurns,
   type LivePhase,
@@ -222,6 +224,12 @@ export interface InsightRelease {
   currency: string;
   quantityLine: string;
   sizes: InsightSize[];
+  /**
+   * ONE QUEUE (lot Q1 §1.2): the next batch and whether the pace is held (PAUSE PACE, or the release's PAUSE); null or
+   * omitted without a pace (an after-room; fixtures: as with no pace). A turn on a paced release is due only once its
+   * batch is.
+   */
+  pace?: { nextAt: Date; held: boolean } | null;
 }
 
 /** An entry as the rules read it. */
@@ -257,6 +265,10 @@ export interface InsightEntry {
    * Omitted (fixtures, entries before 0049): admitted, as with no pace.
    */
   admittedAt?: Date | null;
+  /** ONE QUEUE: the batch that gave its turn (by LET IN, the batches given until then); null before its turn. */
+  batch?: number | null;
+  /** Its turn was given by LET IN. */
+  letIn?: boolean;
   /**
    * Macro scope K44 T1: a set's entry, its size for each piece (`sizeId` its first piece's): it counts in each of them,
    * its quantity its sets. Absent on a model's release.
@@ -306,6 +318,7 @@ export function insightRelease(d: DropRow, sizes: readonly InsightSize[]): Insig
     currency: d.currency ?? 'EUR',
     quantityLine: d.quantity_line ?? defaultQuantityLine(d.quantity, d.set_id !== null),
     sizes: sizes.map((s) => ({ id: s.id, label: s.label, stock: s.stock, ...(s.piece !== null && s.piece !== undefined ? { piece: s.piece } : {}) })),
+    pace: d.pace_batch !== null ? { nextAt: paceNextAt(d)!, held: paceHeld(d) } : null,
   };
 }
 
@@ -795,10 +808,20 @@ interface StallCandidate {
   free: number;
 }
 
-/** The sizes where a turn is due now (the engine's rule: services/live.ts giveTurnsNow), and since when by the entries. */
+/**
+ * The sizes where a turn is due now (the engine's rule: services/live.ts batchGrants on a paced release, at its batch;
+ * giveTurnsAtOnce in an after-room), and since when by the entries. ONE QUEUE: on a paced release a turn is due only once
+ * a batch is (its time passed, the pace not held), for those placed by it; the engine gives it within a second.
+ */
 export function dueTurns(r: InsightRelease, entries: readonly InsightEntry[], now: Date): StallCandidate[] {
   const t = now.getTime();
   if (t < r.opensAt.getTime() || r.endedAt || r.pausedAt || t >= r.closesAt.getTime()) return [];
+  const pace = r.pace ?? null;
+  if (pace && (pace.held || pace.nextAt.getTime() > t)) return [];
+  // Waiting for a turn: on a paced release every QUEUED entry placed by the batch due; in an after-room (or with no pace)
+  // the entries admitted, as they take their place.
+  const waits = (e: InsightEntry) =>
+    e.status === 'QUEUED' && (pace ? e.queuedAt !== null && e.queuedAt.getTime() <= pace.nextAt.getTime() : e.admittedAt !== null);
   const out: StallCandidate[] = [];
   const running = (e: InsightEntry) => (e.status === 'TURN' && !lapsed(e.turnExpiresAt, r, now)) || (e.status === 'SECURED' && !lapsed(e.holdExpiresAt, r, now));
   const totals = new Map(
@@ -812,7 +835,7 @@ export function dueTurns(r: InsightRelease, entries: readonly InsightEntry[], no
   // the first entry in it that rule would serve now.
   const granted = r.sizes.some((s) => s.piece !== null && s.piece !== undefined)
     ? setTurns(
-        entries.filter((e) => e.status === 'QUEUED' && e.admittedAt !== null).sort((a, b) => (a.position ?? 0) - (b.position ?? 0)).map((e) => ({ ...e, sizeIds: e.sizeIds ?? [e.sizeId] })),
+        entries.filter(waits).sort((a, b) => (a.position ?? 0) - (b.position ?? 0)).map((e) => ({ ...e, sizeIds: e.sizeIds ?? [e.sizeId] })),
         totals,
       )
     : null;
@@ -822,8 +845,8 @@ export function dueTurns(r: InsightRelease, entries: readonly InsightEntry[], no
     const head = granted
       ? granted.find((e) => inSize(e, s.id))
       : own
-          // W4: only an admitted entry takes a turn; one waiting for its batch is due nothing yet.
-          .filter((e) => e.status === 'QUEUED' && e.admittedAt !== null && e.quantity <= servable)
+          // Only an entry its batch can reach (a paced release) or one admitted (an after-room) is due a turn.
+          .filter((e) => waits(e) && e.quantity <= servable)
           // IN-01: the places guaranteed by the house first in their size, as the engine gives the turns.
           .sort((a, b) => Number(b.guaranteed === true) - Number(a.guaranteed === true) || (a.position ?? 0) - (b.position ?? 0))[0];
     if (!head || head.quantity > free) continue;
@@ -834,8 +857,8 @@ export function dueTurns(r: InsightRelease, entries: readonly InsightEntry[], no
     const place = head.position ?? 0;
     const ahead = (e: InsightEntry) => e.position !== null && e.position < place;
     const passedOver = own.some((e) => e.status === 'QUEUED' && ahead(e));
-    // W4: on a paced release the turn is due from the head's admission, never while it waited for its batch.
-    let since = Math.max(r.opensAt.getTime(), head.queuedAt?.getTime() ?? 0, head.admittedAt?.getTime() ?? 0);
+    // On a paced release the turn is due from its batch's time, never before it; in an after-room from the head's admission.
+    let since = Math.max(r.opensAt.getTime(), head.queuedAt?.getTime() ?? 0, pace ? pace.nextAt.getTime() : (head.admittedAt?.getTime() ?? 0));
     for (const e of own) {
       const moves = [e.turnAt, e.turnAt !== null || ahead(e) ? e.endedAt : null, passedOver ? e.confirmedAt : null];
       for (const d of moves) if (d && d.getTime() > since) since = d.getTime();
@@ -1199,6 +1222,12 @@ export interface ReleaseReport {
   additions: StockAddition[];
   conversion: number;
   next: { quantity: number; sizes: { label: string; pieces: number }[] };
+  /**
+   * ONE QUEUE (D11, added rows): the longest wait in the queue (from its place to its turn, or to the end for one never
+   * served; null with nobody placed), the turns given by the pace (its batches, NEXT BATCH NOW included; LET IN apart),
+   * and the people who left the queue (LEFT with a place).
+   */
+  queue: { longestWaitMs: number | null; turnsByPace: number; leftQueue: number };
   reasoning: string[];
 }
 
@@ -1210,6 +1239,8 @@ export function releaseReport(input: {
   entryAddons: readonly EntryAddonFact[];
   additions: readonly StockAddition[];
   over: boolean;
+  /** When it is read (the queue's longest wait counts one still waiting until then); now by default. */
+  now?: Date;
 }): ReleaseReport {
   const r = input.release;
   const sum = summarize(r, input.entries, input.interest);
@@ -1324,7 +1355,30 @@ export function releaseReport(input: {
     additions: [...input.additions],
     conversion: sum.conversion,
     next,
+    queue: queueFigures(input.entries, r.endedAt, input.now),
     reasoning: why,
+  };
+}
+
+/**
+ * The queue's figures of a report (ONE QUEUE, D11): the longest wait, from a place in the line to the turn (`turn_at −
+ * queued_at`), or to the end of the waiting (`ended_at − queued_at`) for one never given a turn (to the release's end, or
+ * now, while it still waits); the turns given by the batches (`admitted_batch` 1 and up, not let in); the people who left
+ * the queue (LEFT with a place).
+ */
+export function queueFigures(entries: readonly InsightEntry[], endedAt: Date | null, now: Date = new Date()): ReleaseReport['queue'] {
+  let longest: number | null = null;
+  for (const e of entries) {
+    if (!e.queuedAt) continue;
+    const until = e.turnAt ?? e.endedAt ?? (e.status === 'QUEUED' ? (endedAt ?? now) : null);
+    if (!until) continue;
+    const wait = Math.max(0, until.getTime() - e.queuedAt.getTime());
+    if (longest === null || wait > longest) longest = wait;
+  }
+  return {
+    longestWaitMs: longest,
+    turnsByPace: entries.filter((e) => e.turnAt !== null && (e.batch ?? 0) >= 1 && e.letIn !== true).length,
+    leftQueue: entries.filter((e) => e.status === 'LEFT' && e.position !== null).length,
   };
 }
 
@@ -1815,7 +1869,7 @@ export class LiveInsightsService {
     const { d, release } = await this.release(dropId);
     const [entries, interest, addons, additions] = await Promise.all([this.entries([d.id]), this.interest(d.id), this.addonFacts(d.id), this.additions(d.id)]);
     const holding = entries.some((e) => e.status === 'TURN' || e.status === 'SECURED');
-    return releaseReport({ release, entries, interest: interest.length, addons: addons.addons, entryAddons: addons.chosen, additions, over: livePhase(d, now) === 'ENDED' && !holding });
+    return releaseReport({ release, entries, interest: interest.length, addons: addons.addons, entryAddons: addons.chosen, additions, over: livePhase(d, now) === 'ENDED' && !holding, now });
   }
 
   /** The report as a CSV download. */
@@ -1935,7 +1989,7 @@ export class LiveInsightsService {
       .selectFrom('live_entries as e')
       .select([
         'id', 'drop_id', 'account_id', 'size_id', 'quantity', 'status', 'tier', 'position', 'joined_at', 'queued_at', 'turn_at', 'turn_expires_at', 'secured_at',
-        'hold_expires_at', 'confirmed_at', 'ended_at', 'gesture_ms', 'country', 'guarantee_id', 'admitted_at',
+        'hold_expires_at', 'confirmed_at', 'ended_at', 'gesture_ms', 'country', 'guarantee_id', 'admitted_at', 'admitted_batch', 'let_in_by',
       ])
       .select(entryOutcome.as('resolution'))
       .where('drop_id', 'in', [...dropIds])
@@ -1981,6 +2035,8 @@ export class LiveInsightsService {
       country: r.country,
       guaranteed: r.guarantee_id !== null,
       admittedAt: r.admitted_at,
+      batch: r.admitted_batch,
+      letIn: r.let_in_by !== null,
     }));
   }
 

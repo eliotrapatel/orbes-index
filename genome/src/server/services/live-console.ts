@@ -7,8 +7,10 @@
  *                   the members of a segment, and whether every rule is needed or any one: plan LIVE RELEASE+, choices 4
  *                   and 27); the surprise in every box (on or off, its description: internal, choice 3); the line's tier
  *                   priority; T0 (`opens_at`), the end of
- *                   the sales (`closes_at`), the room's opening, the pace (W4: X buyers admitted every Y minutes,
- *                   blank for none; SET PACE in live.ts changes it until the end), the turn and pay windows, the pieces per person, the
+ *                   the sales (`closes_at`), the room's opening, the pace and the hold (ONE QUEUE, D1: X people per
+ *                   batch every Y minutes and a hold after the opening, 0 for none, both required; SET PACE in live.ts
+ *                   changes the pace until the end, SHORTEN THE HOLD and END THE HOLD NOW the hold once announced), the
+ *                   turn and pay windows, the pieces per person, the
  *                   price and its currency; the sizes and their stock, the quantity line (« 25 PIECES » by default, at
  *                   most 40 characters); the add-ons (at most 6); the staged reveals (announcement, silhouette, name,
  *                   photograph); the per-tier turn and pay windows. Everything changes until the announcement (a DRAFT,
@@ -72,6 +74,7 @@ import {
   effectiveDeadline,
   isAnnounced,
   liveAccessRule,
+  liveBeyond,
   livePaceState,
   livePhase,
   livePieceSizes,
@@ -80,6 +83,7 @@ import {
   onSaleOf,
   roomOpensAt,
   LIVE_ADDONS_MAX,
+  LIVE_HOLD_MINUTES,
   LIVE_MIN_PARTICIPATIONS,
   LIVE_OPEN_STATUSES,
   LIVE_PACE_BATCH,
@@ -215,7 +219,7 @@ export interface LiveTierWindowInput {
   payMinutes?: number | null;
 }
 
-/** A release's pace (W4): X buyers (LIVE_PACE_BATCH) admitted every Y minutes (LIVE_PACE_MINUTES). */
+/** A release's pace: X people per batch (LIVE_PACE_BATCH), every Y minutes (LIVE_PACE_MINUTES). */
 export interface LivePaceInput {
   batch: number;
   minutes: number;
@@ -233,8 +237,10 @@ export interface LiveSettingsInput {
   /** The end of the sales. */
   closesAt: Date;
   roomOpensMinutes?: number;
-  /** W4, the times part: X buyers admitted every Y minutes; null or omitted (blank): no pace, everyone admitted at T0. */
+  /** The times part (D1, required at creation): X people per batch every Y minutes. */
   pace?: LivePaceInput | null;
+  /** The hold after the opening, in minutes (LIVE_HOLD_MINUTES; 0: none), required at creation with the pace. */
+  holdMinutes?: number;
   turnSeconds?: number;
   payMinutes?: number;
   perAccount?: number;
@@ -299,7 +305,8 @@ interface Settings {
   opensAt: Date;
   closesAt: Date;
   roomOpensMinutes: number;
-  pace: LivePaceInput | null;
+  pace: LivePaceInput;
+  holdMinutes: number;
   turnSeconds: number;
   payMinutes: number;
   perAccount: number;
@@ -340,12 +347,21 @@ export interface AfterRoomSettings {
   lengthMinutes: number;
 }
 
-/** A pace as the settings hold it: both figures within their bounds, or none (null: no pace). */
-function cleanPace(v: unknown): LivePaceInput | null {
-  if (v === null || v === undefined || v === '') return null;
+/** What a LIVE RELEASE without its pace and hold is refused with (D1: both required at creation). */
+const PACE_REQUIRED = 'A LIVE release needs a pace: people per batch, every how many minutes, and a hold after the opening (0 for none).';
+
+/** A pace as the settings hold it: both figures within their bounds (D1: every LIVE release has one). */
+function cleanPace(v: unknown): LivePaceInput {
+  if (v === null || v === undefined || v === '' || typeof v !== 'object') throw validationError(PACE_REQUIRED);
   const p = v as Partial<LivePaceInput>;
-  const message = `A pace admits ${LIVE_PACE_BATCH.min} to ${LIVE_PACE_BATCH.max} buyers every ${LIVE_PACE_MINUTES.min} to ${LIVE_PACE_MINUTES.max} minutes; leave it blank for none.`;
+  const message = `A pace gives ${LIVE_PACE_BATCH.min} to ${LIVE_PACE_BATCH.max} turns every ${LIVE_PACE_MINUTES.min} to ${LIVE_PACE_MINUTES.max} minutes.`;
   return { batch: wholeIn(p.batch, LIVE_PACE_BATCH.min, LIVE_PACE_BATCH.max, message), minutes: wholeIn(p.minutes, LIVE_PACE_MINUTES.min, LIVE_PACE_MINUTES.max, message) };
+}
+
+/** The hold after the opening as the settings hold it: 0 (none) to LIVE_HOLD_MINUTES.max minutes. */
+function cleanHold(v: unknown): number {
+  if (v === null || v === undefined || v === '') throw validationError(PACE_REQUIRED);
+  return wholeIn(v, LIVE_HOLD_MINUTES.min, LIVE_HOLD_MINUTES.max, `A hold lasts ${LIVE_HOLD_MINUTES.min} to ${LIVE_HOLD_MINUTES.max} minutes after the opening (0 for none).`);
 }
 
 function wholeIn(v: unknown, min: number, max: number, message: string): number {
@@ -564,7 +580,8 @@ function settingsOf(base: Settings | null, change: LiveSettingsChange): Settings
     opensAt: change.opensAt !== undefined || !base ? cleanTime(change.opensAt, 'T0') : base.opensAt,
     closesAt: change.closesAt !== undefined || !base ? cleanTime(change.closesAt, 'The end') : base.closesAt,
     roomOpensMinutes: wholeIn(change.roomOpensMinutes ?? base?.roomOpensMinutes ?? LIVE_ROOM_OPENS_MINUTES.default, LIVE_ROOM_OPENS_MINUTES.min, LIVE_ROOM_OPENS_MINUTES.max, `The room opens ${LIVE_ROOM_OPENS_MINUTES.min} to ${LIVE_ROOM_OPENS_MINUTES.max} minutes before T0.`),
-    pace: change.pace !== undefined ? cleanPace(change.pace) : (base?.pace ?? null),
+    pace: change.pace !== undefined || !base ? cleanPace(change.pace) : base.pace,
+    holdMinutes: change.holdMinutes !== undefined || !base ? cleanHold(change.holdMinutes) : base.holdMinutes,
     turnSeconds: wholeIn(change.turnSeconds ?? base?.turnSeconds ?? LIVE_TURN_SECONDS.default, LIVE_TURN_SECONDS.min, LIVE_TURN_SECONDS.max, `A turn lasts ${LIVE_TURN_SECONDS.min} to ${LIVE_TURN_SECONDS.max} seconds.`),
     payMinutes: wholeIn(change.payMinutes ?? base?.payMinutes ?? LIVE_PAY_MINUTES.default, LIVE_PAY_MINUTES.min, LIVE_PAY_MINUTES.max, `The time to pay is ${LIVE_PAY_MINUTES.min} to ${LIVE_PAY_MINUTES.max} minutes.`),
     perAccount: wholeIn(change.perAccount ?? base?.perAccount ?? LIVE_PER_ACCOUNT.default, LIVE_PER_ACCOUNT.min, LIVE_PER_ACCOUNT.max, `A person secures ${LIVE_PER_ACCOUNT.min} to ${LIVE_PER_ACCOUNT.max} ${isSet ? 'sets' : 'pieces'}.`),
@@ -620,6 +637,8 @@ function settingsOf(base: Settings | null, change: LiveSettingsChange): Settings
  */
 function checkTimes(s: Settings, now: Date, publishedAt: Date | null): void {
   if (!(s.closesAt.getTime() > s.opensAt.getTime())) throw validationError('The release ends after T0.');
+  // The hold ends before the close: the first batch comes while the release still sells.
+  if (!(s.opensAt.getTime() + s.holdMinutes * MINUTE_MS < s.closesAt.getTime())) throw validationError('The hold after the opening ends before the end of the sales.');
   const room = s.opensAt.getTime() - s.roomOpensMinutes * MINUTE_MS;
   if (room <= now.getTime()) throw roomPast();
   if (s.announceAt && s.announceAt.getTime() <= now.getTime()) throw validationError('The announcement comes later than now; leave it empty to announce the release when it is published.');
@@ -648,7 +667,8 @@ function auditSettings(s: Settings): Record<string, unknown> {
     opensAt: t(s.opensAt),
     closesAt: t(s.closesAt),
     roomOpensMinutes: s.roomOpensMinutes,
-    pace: s.pace ? { batch: s.pace.batch, minutes: s.pace.minutes } : null,
+    pace: { batch: s.pace.batch, minutes: s.pace.minutes },
+    holdMinutes: s.holdMinutes,
     turnSeconds: s.turnSeconds,
     payMinutes: s.payMinutes,
     perAccount: s.perAccount,
@@ -742,8 +762,13 @@ export interface AdminLiveRelease extends AdminLiveCard {
   /** Its settings still change (not announced, not cancelled). */
   editable: boolean;
   roomOpensMinutes: number;
-  /** W4: X buyers admitted every Y minutes; null: no pace (everyone admitted at T0). The board's `pace` has its state. */
+  /**
+   * D1: X people per batch every Y minutes; null on an after-room (no pace). The board's `pace` has its state. A release
+   * ended or cancelled before ONE QUEUE may have none.
+   */
   pace: LivePaceInput | null;
+  /** The hold after the opening, in minutes (0: none; an after-room: 0). */
+  holdMinutes: number;
   turnSeconds: number;
   payMinutes: number;
   perAccount: number;
@@ -857,6 +882,8 @@ export interface AdminLiveBoardSize {
   /** Holds that ran out or were freed. */
   expired: number;
   interest: number;
+  /** ONE QUEUE (D11): in the queue past the pieces of the size not yet confirmed (0 without a pace). */
+  beyond: number;
 }
 
 /** The live board (GET /api/admin/live/:id/board and the console's stream): the counters and the line. */
@@ -1033,6 +1060,8 @@ export class LiveConsoleService {
       isSet ? setPieces(this.db, d.set_id!) : Promise.resolve(null),
     ]);
     const perSize = bySize ?? counts;
+    // ONE QUEUE (D11): those in the queue past the pieces of their size, read once for the figures and the line.
+    const beyond = d.pace_batch !== null ? await liveBeyond(this.db, d) : null;
     const people = (sizeId: string | null, statuses: readonly string[]) =>
       (sizeId === null ? counts : perSize).filter((c) => (sizeId === null || c.size_id === sizeId) && statuses.includes(c.status)).reduce((n, c) => n + Number(c.n), 0);
     const pieces = (sizeId: string, statuses: readonly string[]) => perSize.filter((c) => c.size_id === sizeId && statuses.includes(c.status)).reduce((n, c) => n + Number(c.q ?? 0), 0);
@@ -1055,6 +1084,7 @@ export class LiveConsoleService {
         missed: people(s.id, ['MISSED']),
         expired: people(s.id, ['EXPIRED']),
         interest: Number((interestBySize ?? interest).find((i) => i.size_id === s.id)?.n ?? 0),
+        beyond: beyond?.bySize.get(s.id) ?? 0,
       };
     });
     // A set's release: its people and sets counted once, in its first piece's sizes; its sets left, each piece's, the smallest.
@@ -1070,11 +1100,11 @@ export class LiveConsoleService {
     // Over on the recorded end (the clock alone may run ahead of the engine's pass), with no turn or hold left.
     const over = d.ended_at !== null && holding === 0;
     const [line, lineTotal, signals, pace] = await Promise.all([
-      this.adminEntries(this.db, d, { statuses: [...LIVE_OPEN_STATUSES] }, LIVE_CONSOLE_LINE_MAX, 0, now),
+      this.adminEntries(this.db, d, { statuses: [...LIVE_OPEN_STATUSES] }, LIVE_CONSOLE_LINE_MAX, 0, now, beyond),
       this.db.selectFrom('live_entries').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', id).where('status', 'in', [...LIVE_OPEN_STATUSES]).executeTakeFirstOrThrow(),
       // The alerts and the forecast from T0 while the release runs; once it is over, the report says the rest.
       this.insights && !over ? this.insights.signals(d, now) : Promise.resolve<LiveSignals>({ alerts: [], sellOut: null }),
-      livePaceState(this.db, d),
+      livePaceState(this.db, d, beyond ?? undefined),
     ]);
     return {
       id,
@@ -1107,6 +1137,8 @@ export class LiveConsoleService {
         removed: people(null, ['REMOVED']),
         ended: people(null, ['ENDED']),
         interest: sum('interest'),
+        // Each entry once (a set's, past the pieces in any of its sizes).
+        beyond: beyond?.entries.size ?? 0,
       },
       sizes: boardSizes,
       ...(boardPieces ? { pieces: boardPieces } : {}),
@@ -1471,8 +1503,9 @@ export class LiveConsoleService {
       live_min_tier: s.minTier,
       tier_priority: s.tierPriority,
       room_opens_minutes: s.roomOpensMinutes,
-      pace_batch: s.pace?.batch ?? null,
-      pace_minutes: s.pace?.minutes ?? null,
+      pace_batch: s.pace.batch,
+      pace_minutes: s.pace.minutes,
+      pace_hold_minutes: s.holdMinutes,
       turn_seconds: s.turnSeconds,
       pay_minutes: s.payMinutes,
       per_account: s.perAccount,
@@ -1753,7 +1786,10 @@ export class LiveConsoleService {
       opensAt: d.opens_at,
       closesAt: d.closes_at,
       roomOpensMinutes: d.room_opens_minutes ?? LIVE_ROOM_OPENS_MINUTES.default,
-      pace: d.pace_batch !== null && d.pace_minutes !== null ? { batch: d.pace_batch, minutes: d.pace_minutes } : null,
+      // D1: every release that can still change has its pace (drops_live_paced); one ended before ONE QUEUE is read as
+      // the smallest, never written again.
+      pace: d.pace_batch !== null && d.pace_minutes !== null ? { batch: d.pace_batch, minutes: d.pace_minutes } : { batch: LIVE_PACE_BATCH.min, minutes: LIVE_PACE_MINUTES.min },
+      holdMinutes: Number(d.pace_hold_minutes ?? 0),
       turnSeconds: d.turn_seconds ?? LIVE_TURN_SECONDS.default,
       payMinutes: d.pay_minutes ?? LIVE_PAY_MINUTES.default,
       perAccount: d.per_account ?? LIVE_PER_ACCOUNT.default,
@@ -1945,7 +1981,8 @@ export class LiveConsoleService {
       // An after-room is set with its release, never on its own.
       editable: !r.cancelled_at && !isAnnounced(r, now) && !r.parent_drop_id,
       roomOpensMinutes: s.roomOpensMinutes,
-      pace: s.pace,
+      pace: r.pace_batch !== null && r.pace_minutes !== null ? s.pace : null,
+      holdMinutes: s.holdMinutes,
       turnSeconds: s.turnSeconds,
       payMinutes: s.payMinutes,
       perAccount: s.perAccount,
@@ -1988,8 +2025,19 @@ export class LiveConsoleService {
     };
   }
 
-  /** Entries as the console reads them, by place (the line), then arrival; deadlines as they stand now. */
-  private async adminEntries(db: Db, d: DropRow, filter: { statuses: readonly LiveEntryStatus[] | null }, limit: number, offset: number, now: Date): Promise<AdminLiveEntry[]> {
+  /**
+   * Entries as the console reads them, by place (the line), then arrival; deadlines as they stand now; on a paced release
+   * those QUEUED past the pieces of their size (`beyond`: liveBeyond, read here unless given).
+   */
+  private async adminEntries(
+    db: Db,
+    d: DropRow,
+    filter: { statuses: readonly LiveEntryStatus[] | null },
+    limit: number,
+    offset: number,
+    now: Date,
+    known?: { entries: Set<string> } | null,
+  ): Promise<AdminLiveEntry[]> {
     let q = db
       .selectFrom('live_entries as e')
       .innerJoin('accounts as a', 'a.id', 'e.account_id')
@@ -2013,6 +2061,7 @@ export class LiveConsoleService {
       .execute();
     // Macro scope K44 T1: a set's entries, their sizes per piece.
     const pieces = d.set_id !== null ? await livePieceSizes(db, rows.map((r) => r.id)) : new Map<string, LivePieceSize[]>();
+    const beyond = known ?? (d.pace_batch !== null && rows.some((r) => r.status === 'QUEUED') ? await liveBeyond(db, d) : null);
     return rows.map((r) => ({
       id: r.id,
       accountId: r.account_id,
@@ -2035,6 +2084,7 @@ export class LiveConsoleService {
       guaranteed: r.guarantee_id !== null,
       admittedAt: r.admitted_at,
       batch: r.admitted_batch,
+      beyond: r.status === 'QUEUED' && (beyond?.entries.has(r.id) ?? false),
     }));
   }
 }

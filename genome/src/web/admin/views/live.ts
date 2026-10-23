@@ -860,9 +860,11 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
         { name: 'roomOpensMinutes', label: 'Room opens (minutes before)', required: true, maxlength: 2, value: v.roomOpensMinutes, hint: `Before the opening (T0): ${LIVE_LIMITS.roomOpensMinutes.min} to ${LIVE_LIMITS.roomOpensMinutes.max}; ${LIVE_LIMITS.roomOpensMinutes.default} by default.` },
         { name: 'opensAt', label: 'The opening', kind: 'datetime', required: true, value: v.opensAt, hint: 'T0: the door opens and the line forms.' },
         { name: 'closesAt', label: 'End of the sales', kind: 'datetime', required: true, value: v.closesAt, hint: 'No new turn after it; the release also ends at its sell-out.' },
-        // W4: X buyers every Y minutes; both blank, no pace.
-        { name: 'paceBatch', label: 'Pace · buyers per batch', maxlength: 4, value: v.paceBatch, hint: paceHint(planCapacity) },
-        { name: 'paceMinutes', label: 'Pace · every (minutes)', maxlength: 2, value: v.paceMinutes, hint: 'Blank with the buyers: no pace. SET PACE on the live board changes it until the end.' },
+        // D1: X people per batch every Y minutes and the hold after the opening, all required.
+        { name: 'paceBatch', label: 'People per batch', required: true, maxlength: 4, value: v.paceBatch, hint: paceHint(planCapacity) },
+        { name: 'paceMinutes', label: 'Every (minutes)', required: true, maxlength: 2, value: v.paceMinutes, hint: 'SET PACE on the live board changes it until the end.' },
+        // (Its figures in the hint: no field label carries one, BRAND-DESIGN-SYSTEM §8 item 18.)
+        { name: 'holdMinutes', label: 'Hold after the opening (minutes)', required: true, maxlength: 3, value: v.holdMinutes, hint: `0 = none; up to ${LIVE_LIMITS.hold.max}. Everyone waits it; once announced it can only be shortened or ended.` },
       ],
     );
   };
@@ -1047,7 +1049,8 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
         {
           label: 'Pace',
           value: h('span', { data: { testid: 'live-pace-setting' } }, r.pace ? paceLine(r.pace) : 'None: everyone admitted at T0'),
-          note: r.editable ? 'Blank: no pace. SET PACE on the live board until the end' : 'SET PACE on the live board until the end',
+          // ONE QUEUE (D1): never blank; SET PACE changes it until the end.
+          note: 'SET PACE on the live board until the end',
         },
       ]),
       { id: 'live-part-times', tools: edit('Edit', 'live-edit-times', timesPart) },
@@ -1362,6 +1365,10 @@ export function newLiveFields(
     { name: 'title', label: 'Title', required: true, maxlength: LIVE_LIMITS.title, value: values.title, hint: 'Revealed with the name’s stage.' },
     { name: 'opensAt', label: 'Opening (UTC)', kind: 'datetime', required: true, value: values.opensAt, hint: 'T0: the door opens and the line forms; the room opens 5 minutes before (changed on its page).' },
     { name: 'closesAt', label: 'End of the sales (UTC)', kind: 'datetime', required: true, value: values.closesAt },
+    // D1: every release has a pace and a hold after the opening (0: none).
+    { name: 'paceBatch', label: 'People per batch', required: true, maxlength: 4, value: values.paceBatch ?? '', hint: `${formatCount(LIVE_LIMITS.pace.batch.min)} to ${formatCount(LIVE_LIMITS.pace.batch.max)} turns per batch, in the line’s order, where a piece is free.` },
+    { name: 'paceMinutes', label: 'Every (minutes)', required: true, maxlength: 2, value: values.paceMinutes ?? '', hint: `${LIVE_LIMITS.pace.minutes.min} to ${LIVE_LIMITS.pace.minutes.max}.` },
+    { name: 'holdMinutes', label: 'Hold after the opening (minutes)', required: true, maxlength: 3, value: values.holdMinutes ?? '0', hint: `0 = none; up to ${LIVE_LIMITS.hold.max}: everyone waits it before the first batch.` },
     { name: 'price', label: 'Price of a piece', required: true, maxlength: 12, value: values.price, hint: 'In units: 4800, or 4800.50.', shown: (v) => !isSet(v) },
     { name: 'priceSet', label: 'Price of the set', required: true, maxlength: 12, value: values.priceSet ?? '', hint: 'One price for the set, in units: 4800, or 4800.50; shared over its pieces’ orders.', shown: isSet },
     { name: 'currency', label: 'Currency', kind: 'select', options: LIVE_CURRENCIES.map((c) => ({ value: c, label: c })), value: values.currency },

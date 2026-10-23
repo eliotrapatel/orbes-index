@@ -13,8 +13,8 @@
  *    host message; ADMIN: end now with a typed phrase, remove from the line). Client Services follows each confirmed
  *    reservation on the Orders board (plan LIVE RELEASE+: model/orders.ts).
  *  - The live board's figures, and a reservation's reference.
- *  - The pace (plan MACRO M1, W4): X buyers admitted every Y minutes, a field of the times part (blank: none), and the
- *    live board's Pace block: its figures (in the queue, admitted, the batches, the next batch in Paris time), SET PACE,
+ *  - The pace and the hold (ONE QUEUE, D1): X people per batch every Y minutes and the hold after the opening (minutes,
+ *    0 for none), required in the New live release dialog and in the times part, and the live board's Pace block: its figures (in the queue, admitted, the batches, the next batch in Paris time), SET PACE,
  *    PAUSE PACE / RESUME PACE and NEXT BATCH NOW (OPERATOR), and the line's admission (its batch and when).
  *  - The after-room (plan LIVE RELEASE+, choice 2): where it stands and why it never opened, said; its own page has the
  *    live board and controls, never a setting, a publication, a cancellation or a board link of its own.
@@ -27,6 +27,7 @@ import { can } from './permissions.js';
 import { localUtc, tierName, utcInstant } from './club.js';
 import {
   LIVE_CURRENCIES,
+  LIVE_HOLD_MINUTES,
   LIVE_PACE_BATCH,
   LIVE_PACE_MINUTES,
   type AdminRole,
@@ -79,8 +80,10 @@ export const LIVE_LIMITS = Object.freeze({
   afterRoomLength: Object.freeze({ min: 5, max: 120, default: 15 }),
   /** The question after (services/question.ts LIVE_QUESTION_LIMITS): its words, its 2 to 6 answers of one line each. */
   question: Object.freeze({ text: 120, answer: 40, minAnswers: 2, maxAnswers: 6 }),
-  /** W4, the pace (services/live.ts LIVE_PACE_BATCH, LIVE_PACE_MINUTES): X buyers admitted every Y minutes. */
+  /** The pace (services/live.ts LIVE_PACE_BATCH, LIVE_PACE_MINUTES): X people per batch every Y minutes. */
   pace: Object.freeze({ batch: LIVE_PACE_BATCH, minutes: LIVE_PACE_MINUTES }),
+  /** The hold after the opening (services/live.ts LIVE_HOLD_MINUTES), in minutes: 0 for none. */
+  hold: LIVE_HOLD_MINUTES,
 });
 
 /** The question after when the console does not rewrite it (services/live.ts LIVE_QUESTION_DEFAULT). */
@@ -351,6 +354,10 @@ export function newLiveValues(now: Date): Record<string, string> {
     priceSet: '',
     currency: 'EUR',
     locationId: '',
+    // D1: the pace and the hold, required (a hold of 0: none).
+    paceBatch: '',
+    paceMinutes: '',
+    holdMinutes: '0',
     sizes: 'ONE SIZE = 25',
     sizes1: '',
     sizes2: '',
@@ -379,6 +386,8 @@ export function newLiveProblem(v: Record<string, string>, pieces: readonly strin
   const price = parseMoney(set ? v.priceSet : v.price);
   if (price === null || price > LIVE_LIMITS.priceMaxMinor) return set ? 'The price of the set, in units (4800, or 4800.50).' : 'The price of a piece, in units (4800, or 4800.50).';
   if (!(LIVE_CURRENCIES as readonly string[]).includes(v.currency)) return 'Choose the currency.';
+  const pace = paceProblem(v.paceBatch, v.paceMinutes, false) ?? holdProblem(v.holdMinutes);
+  if (pace) return pace;
   const sizes = set ? parseSetSizes(v, pieces) : parseSizes(v.sizes);
   return 'problem' in sizes ? sizes.problem : null;
 }
@@ -394,6 +403,8 @@ export function newLiveInput(v: Record<string, string>, pieces: readonly string[
     closesAt: utcInstant(v.closesAt)!,
     priceMinor: parseMoney(set ? v.priceSet : v.price)!,
     currency: v.currency as LiveCurrency,
+    pace: paceOf(v.paceBatch, v.paceMinutes)!,
+    holdMinutes: Number(v.holdMinutes),
     sizes: sizes.sizes,
     ...(v.locationId ? { stockLocationId: v.locationId } : {}),
   };
@@ -450,6 +461,7 @@ export function livePartValues(r: LiveRelease, part: LivePart): Record<string, s
         closesAt: localUtc(r.closesAt),
         paceBatch: r.pace ? String(r.pace.batch) : '',
         paceMinutes: r.pace ? String(r.pace.minutes) : '',
+        holdMinutes: String(r.holdMinutes ?? 0),
       };
     case 'turns':
       return {
@@ -543,7 +555,7 @@ export function livePartProblem(r: LiveRelease, part: LivePart, v: Record<string
       }
       // Emptied on a published release, the announcement would be its publication, already past: announced at once.
       if (r.publishedAt !== null && utcInstant(v.announceAt) === null) return 'A published release keeps an announcement time; set one later than now.';
-      return paceProblem(v.paceBatch, v.paceMinutes, true);
+      return paceProblem(v.paceBatch, v.paceMinutes, false) ?? holdProblem(v.holdMinutes);
     }
     case 'turns': {
       if (inRange(v.turnSeconds, LIVE_LIMITS.turnSeconds) === null) return `A turn lasts ${LIVE_LIMITS.turnSeconds.min} to ${LIVE_LIMITS.turnSeconds.max} seconds.`;
@@ -665,8 +677,9 @@ export function livePartChange(r: LiveRelease, part: LivePart, v: Record<string,
       if (v.paceBatch !== undefined || v.paceMinutes !== undefined) {
         const next = paceOf(v.paceBatch, v.paceMinutes);
         const now = r.pace ? { batch: r.pace.batch, minutes: r.pace.minutes } : null;
-        if (JSON.stringify(next) !== JSON.stringify(now)) out.pace = next;
+        if (next && JSON.stringify(next) !== JSON.stringify(now)) out.pace = next;
       }
+      if (v.holdMinutes !== undefined && Number(v.holdMinutes) !== (r.holdMinutes ?? 0)) out.holdMinutes = Number(v.holdMinutes);
       return out;
     }
     case 'turns': {
@@ -818,7 +831,12 @@ export function paceLine(p: LivePace): string {
   return `${formatCount(p.batch)} ${p.batch === 1 ? 'buyer' : 'buyers'} every ${p.minutes === 1 ? 'minute' : `${p.minutes} minutes`}`;
 }
 
-/** The pace as two figures typed: both, or neither (null: no pace). Only for figures paceProblem accepted. */
+/** What the server would refuse in the hold after the opening (D1): a whole number of minutes, 0 (none) to the bound. */
+export function holdProblem(minutes: string | undefined): string | null {
+  return inRange(minutes, LIVE_HOLD_MINUTES) === null ? `A hold after the opening lasts ${LIVE_HOLD_MINUTES.min} to ${LIVE_HOLD_MINUTES.max} minutes (0 for none).` : null;
+}
+
+/** The pace as two figures typed: both, or neither (null: none typed). Only for figures paceProblem accepted. */
 function paceOf(batch: string | undefined, minutes: string | undefined): LivePace | null {
   const b = (batch ?? '').trim();
   const m = (minutes ?? '').trim();
@@ -832,16 +850,16 @@ function paceOf(batch: string | undefined, minutes: string | undefined): LivePac
 export function paceProblem(batch: string | undefined, minutes: string | undefined, blank: boolean): string | null {
   const b = (batch ?? '').trim();
   const m = (minutes ?? '').trim();
-  if (b === '' && m === '') return blank ? null : 'Say how many buyers are admitted, every how many minutes.';
-  const bounds = `A pace admits ${formatCount(LIVE_PACE_BATCH.min)} to ${formatCount(LIVE_PACE_BATCH.max)} buyers every ${LIVE_PACE_MINUTES.min} to ${LIVE_PACE_MINUTES.max} minutes`;
+  if (b === '' && m === '') return blank ? null : 'Say how many people per batch, every how many minutes.';
+  const bounds = `A pace gives ${formatCount(LIVE_PACE_BATCH.min)} to ${formatCount(LIVE_PACE_BATCH.max)} turns every ${LIVE_PACE_MINUTES.min} to ${LIVE_PACE_MINUTES.max} minutes`;
   if (inRange(b, LIVE_PACE_BATCH) === null || inRange(m, LIVE_PACE_MINUTES) === null) return `${bounds}${blank ? '; leave both blank for none.' : '.'}`;
   return null;
 }
 
-/** The pace's hint in the times part: its bounds, blank for none, and the room's measured capacity. */
+/** The pace's hint in the times part: its bounds and the room's measured capacity (D1: every release has a pace). */
 export function paceHint(capacity: number | null): string {
   return [
-    `Buyers admitted from the line, ${formatCount(LIVE_PACE_BATCH.min)} to ${formatCount(LIVE_PACE_BATCH.max)}, every ${LIVE_PACE_MINUTES.min} to ${LIVE_PACE_MINUTES.max} minutes, counted across the release, in its order. Both blank: no pace, everyone admitted at T0.`,
+    `Turns given from the line, ${formatCount(LIVE_PACE_BATCH.min)} to ${formatCount(LIVE_PACE_BATCH.max)} per batch, every ${LIVE_PACE_MINUTES.min} to ${LIVE_PACE_MINUTES.max} minutes, in the line’s order, where a piece is free.`,
     capacity !== null ? `The room holds ${formatCount(capacity)}, as the load test measured.` : null,
   ]
     .filter((x): x is string => x !== null)

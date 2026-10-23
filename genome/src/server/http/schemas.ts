@@ -92,6 +92,7 @@ import {
   LIVE_ADD_PIECES,
   LIVE_ADDONS_MAX,
   LIVE_EXTEND_MINUTES,
+  LIVE_HOLD_MINUTES,
   LIVE_MESSAGE_MAX,
   LIVE_MIN_PARTICIPATIONS,
   LIVE_PACE_BATCH,
@@ -954,9 +955,9 @@ const whole = (min: number, max: number, unit: string) =>
   z.number().int(`Must be a whole number of ${unit}`).min(min, `At least ${min} ${unit}`).max(max, `At most ${max} ${unit}`);
 const livePrice = z.number().int('Must be a whole number of cents').min(0, 'At least 0').max(LIVE_PRICE_MAX_MINOR, `At most ${LIVE_PRICE_MAX_MINOR} cents`);
 const liveTime = z.preprocess(emptyToNull, isoDateTime.nullable().optional());
-/** W4: X buyers admitted every Y minutes. */
+/** The pace (ONE QUEUE): X people per batch, every Y minutes. */
 const livePaceFields = {
-  batch: whole(LIVE_PACE_BATCH.min, LIVE_PACE_BATCH.max, 'buyers'),
+  batch: whole(LIVE_PACE_BATCH.min, LIVE_PACE_BATCH.max, 'people'),
   minutes: whole(LIVE_PACE_MINUTES.min, LIVE_PACE_MINUTES.max, 'minutes'),
 };
 /**
@@ -996,8 +997,9 @@ const liveSettingsFields = {
   opensAt: isoDateTime,
   closesAt: isoDateTime,
   roomOpensMinutes: whole(LIVE_ROOM_OPENS_MINUTES.min, LIVE_ROOM_OPENS_MINUTES.max, 'minutes').optional(),
-  /** W4, the times part: the pace; null (or blank): none, everyone admitted at T0. */
-  pace: z.preprocess(emptyToNull, z.strictObject(livePaceFields).nullable().optional()),
+  /** The times part (D1): the pace and the hold after the opening, both required at creation (0: no hold). */
+  pace: z.strictObject(livePaceFields),
+  holdMinutes: whole(LIVE_HOLD_MINUTES.min, LIVE_HOLD_MINUTES.max, 'minutes'),
   turnSeconds: whole(LIVE_TURN_SECONDS.min, LIVE_TURN_SECONDS.max, 'seconds').optional(),
   payMinutes: whole(LIVE_PAY_MINUTES.min, LIVE_PAY_MINUTES.max, 'minutes').optional(),
   perAccount: whole(LIVE_PER_ACCOUNT.min, LIVE_PER_ACCOUNT.max, 'pieces').optional(),
@@ -1071,8 +1073,11 @@ export const publishLiveBody = optionalBody({ circlePost: z.boolean().optional()
 /** POST /api/admin/live/:id/extend: the end of the sales moved later by 1 to 240 minutes. */
 export const liveExtendBody = body({ minutes: whole(LIVE_EXTEND_MINUTES.min, LIVE_EXTEND_MINUTES.max, 'minutes') });
 
-/** PUT /api/admin/live/:id/pace: SET PACE (W4), X buyers admitted every Y minutes; no body turns a pace off. */
+/** PUT /api/admin/live/:id/pace: SET PACE, X people per batch every Y minutes; no body turns a pace off. */
 export const livePaceBody = body(livePaceFields);
+
+/** POST /api/admin/live/:id/hold/shorten: SHORTEN THE HOLD, its new length from T0 (earlier only: the service checks). */
+export const liveHoldShortenBody = body({ minutes: whole(LIVE_HOLD_MINUTES.min, LIVE_HOLD_MINUTES.max, 'minutes') });
 
 /** POST /api/admin/live/:id/stock: ADD PIECES to a size. */
 export const liveStockBody = body({ sizeId: uuid, pieces: whole(LIVE_ADD_PIECES.min, LIVE_ADD_PIECES.max, 'pieces') });

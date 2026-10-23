@@ -1,7 +1,9 @@
 /**
  * The LIVE RELEASE under concurrency (plan of 2026-10-04, Quality bar 2): simultaneous secures and confirms, the
  * engine's pass racing a customer's action at a deadline, entries racing the line's formation at T0, double presses,
- * a restart mid-turn, and the engine's advisory lock; macro scope K44 T1 (M3.16): two set entries at the last set.
+ * a restart mid-turn, and the engine's advisory lock; macro scope K44 T1 (M3.16): two set entries at the last set; ONE
+ * QUEUE (lot Q1 §1.2): the batches under concurrent passes, LET IN, NEXT BATCH NOW and SHORTEN THE HOLD (a piece that
+ * returns waits for the next batch, D5).
  *
  * On PGlite (always) the calls are issued together and the database serialises their transactions: every order must
  * give a correct result. On PostgreSQL (opt-in, a pool of 8: true parallelism) the same cases run, and two engines on
@@ -183,6 +185,10 @@ for (const backend of BACKENDS) {
           expect(outcomes).toEqual(['LIVE_TURN_PASSED', 'ok', 'ok']);
           const row = await handle.db.selectFrom('live_entries').select(['status', 'ended_at', 'secured_at']).where('drop_id', '=', r.id).where('account_id', '=', first!.id).executeTakeFirstOrThrow();
           expect(row).toEqual({ status: 'MISSED', ended_at: at(30 * SECOND), secured_at: null });
+          // ONE QUEUE (D5): the piece goes at the next batch, T0 + 1 min, once.
+          expect(await statusOf(r, second!.id)).toBe('QUEUED');
+          f.clock.set(at(60 * SECOND));
+          expect(await together([() => f.live.advance(r.id), () => f.live.advance(r.id)])).toEqual(['ok', 'ok']);
           expect(await statusOf(r, second!.id)).toBe('TURN');
         }
         expect(await held(r)).toBe(1);
@@ -213,7 +219,7 @@ for (const backend of BACKENDS) {
       }
     });
 
-    it('a piece given back while the engine runs goes to the next in line once', async () => {
+    it('a piece given back while the engine runs goes to the next in line once, at the next batch (ONE QUEUE, D5)', async () => {
       const r = await release({ sizes: [{ label: '52', stock: 1 }] });
       const line = await lineOf(r, [3, 2, 1, 0]);
       const t = await token(r, line[0]!.id);
@@ -222,6 +228,12 @@ for (const backend of BACKENDS) {
       await f.live.secure(line[0]!.id, r.id, t, line[0]!.actor);
       f.clock.set(at(3 * SECOND));
       expect(await together([() => f.live.release(line[0]!.id, r.id, line[0]!.actor), () => f.live.advance(r.id), () => f.live.advance(r.id), () => f.live.leave(line[3]!.id, r.id, line[3]!.actor)])).toEqual(['ok', 'ok', 'ok', 'ok']);
+      expect([await statusOf(r, line[1]!.id), await statusOf(r, line[2]!.id)]).toEqual(['QUEUED', 'QUEUED']);
+      // The next batch, its passes together with NEXT BATCH NOW: the piece goes once, to the next in line.
+      f.clock.set(at(60 * SECOND));
+      const outcomes = await together([() => f.live.advance(r.id), () => f.live.advance(r.id), () => f.live.nextBatch(r.id, f.admin)]);
+      expect(outcomes.slice(0, 2)).toEqual(['ok', 'ok']);
+      expect(['ok', 'LIVE_NOTHING_FREE']).toContain(outcomes[2]);
       expect([await statusOf(r, line[1]!.id), await statusOf(r, line[2]!.id)]).toEqual(['TURN', 'QUEUED']);
       expect(await held(r)).toBe(1);
     });
@@ -247,37 +259,46 @@ for (const backend of BACKENDS) {
       expect(rows.map((x) => x.status)).toEqual(['TURN', 'TURN', 'QUEUED', 'QUEUED', 'QUEUED', 'QUEUED', 'QUEUED']);
     });
 
-    it('admission under concurrent advance, LET IN, SET PACE and NEXT BATCH NOW (W4): no entry admitted twice, the batches exact', async () => {
-      const r = await release({ sizes: [{ label: '52', stock: 100 }], pace: { batch: 3, minutes: 2 } });
+    it('batches under concurrent advance, LET IN, SET PACE, NEXT BATCH NOW and SHORTEN THE HOLD (ONE QUEUE; M1 « admission under … »): no turn given twice, at most X per batch, the batches numbered once', async () => {
+      const r = await release({ sizes: [{ label: '52', stock: 100 }], pace: { batch: 3, minutes: 2 }, holdMinutes: 2, turnSeconds: 300 });
       await lineOf(r, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
       const rows = await entriesOf(handle.db, r.id);
+      expect(rows.every((x) => x.status === 'QUEUED')).toBe(true);
       const tenth = rows.find((x) => x.position === 10)!;
-      // At T0+2 the second batch is due: the engines, SET PACE (the same pace) and NEXT BATCH NOW admit the due batch
-      // first, whoever comes first; NEXT BATCH NOW then the third; LET IN admits the tenth itself.
-      f.clock.set(at(120 * SECOND));
+      // At T0 + 1 min, in the hold: the hold shortened to end now, the engines, SET PACE (the same pace), NEXT BATCH NOW
+      // and LET IN of the tenth, together. Whatever their order, each batch gives at most 3 turns, every turn once.
+      f.clock.set(at(60 * SECOND));
       const outcomes = await together([
         () => f.live.advance(r.id),
         () => f.live.advance(r.id),
         () => f.live.letIn(r.id, tenth.id, f.admin),
         () => f.live.setPace(r.id, { batch: 3, minutes: 2 }, f.admin),
+        () => f.live.shortenHold(r.id, 1, f.admin),
         () => f.live.nextBatch(r.id, f.admin),
       ]);
-      expect(outcomes).toEqual(['ok', 'ok', 'ok', 'ok', 'ok']);
+      // SHORTEN THE HOLD after NEXT BATCH NOW's batch finds no hold left (PostgreSQL may run them in that order).
+      const shortened = outcomes[4] === 'ok';
+      expect(['ok', 'LIVE_NO_HOLD']).toContain(outcomes[4]);
+      expect(outcomes.filter((_, i) => i !== 4)).toEqual(['ok', 'ok', 'ok', 'ok', 'ok']);
+      // The engine's passes after them, at the first scheduled batch (T0 + 1 shortened, else T0 + 2): it goes if it has not yet.
+      f.clock.set(at((shortened ? 60 : 120) * SECOND));
+      while ((await f.live.advance(r.id))?.batch) {
+        // one per pass
+      }
       const after = await entriesOf(handle.db, r.id);
-      expect(after.slice(0, 9).map((x) => [x.position, x.admitted_batch])).toEqual([
-        [1, 1], [2, 1], [3, 1], [4, 2], [5, 2], [6, 2], [7, 3], [8, 3], [9, 3],
-      ]);
-      expect(after.slice(0, 9).map((x) => x.admitted_at!.getTime() - T0.getTime())).toEqual([0, 0, 0, 120_000, 120_000, 120_000, 120_000, 120_000, 120_000]);
-      expect(after[9]).toMatchObject({ position: 10, status: 'TURN', admitted_at: at(120 * SECOND) });
-      // LET IN's batch is the batches so far, whichever order the calls ran in; the one let in is in no batch's count.
-      expect([1, 2, 3]).toContain(after[9]!.admitted_batch);
-      expect(after.filter((x) => x.id !== tenth.id && (x.admitted_batch ?? 0) >= 1)).toHaveLength(9);
-      // The first batch's turns ran out at T0+30 s; every entry admitted now has its turn.
-      expect(after.map((x) => x.status)).toEqual([...Array(3).fill('MISSED'), ...Array(7).fill('TURN')]);
-      const d = await handle.db.selectFrom('drops').select(['pace_batches', 'pace_next_at']).where('id', '=', r.id).executeTakeFirstOrThrow();
-      expect(d).toEqual({ pace_batches: 3, pace_next_at: at(240 * SECOND) });
-      expect(await auditCount(r, 'drop.live.admit')).toBe(2);
+      const byBatch = new Map<number, number>();
+      for (const x of after) if (x.id !== tenth.id && x.admitted_batch !== null) byBatch.set(x.admitted_batch, (byBatch.get(x.admitted_batch) ?? 0) + 1);
+      expect([...byBatch.entries()].sort()).toEqual([[1, 3], [2, 3]]);
+      // In the order of the turns: places 1 to 6, then the tenth let in; 7 to 9 wait.
+      expect(after.map((x) => [x.position, x.status])).toEqual([...[1, 2, 3, 4, 5, 6].map((p) => [p, 'TURN']), [7, 'QUEUED'], [8, 'QUEUED'], [9, 'QUEUED'], [10, 'TURN']]);
+      expect(after[9]).toMatchObject({ admitted_at: at(60 * SECOND) });
+      expect([0, 1, 2]).toContain(after[9]!.admitted_batch);
+      const d = await handle.db.selectFrom('drops').select(['pace_batches', 'pace_next_at', 'pace_hold_minutes']).where('id', '=', r.id).executeTakeFirstOrThrow();
+      expect(d).toEqual({ pace_batches: 2, pace_next_at: at((shortened ? 180 : 240) * SECOND), pace_hold_minutes: shortened ? 1 : 2 });
+      const turns = await handle.db.selectFrom('audit_logs').select('details').where('target_id', '=', r.id).where('action', '=', 'drop.live.batch').execute();
+      expect(turns.map((a) => (a.details as { turns: number }).turns)).toEqual([3, 3]);
       expect(await auditCount(r, 'drop.live.pace.next')).toBe(1);
+      expect(await auditCount(r, 'drop.live.hold.shorten')).toBe(shortened ? 1 : 0);
     });
 
     it('double presses: the last press counts; a SECURE needs 1.4 s from it', async () => {

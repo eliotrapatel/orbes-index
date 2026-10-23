@@ -157,6 +157,8 @@ describe('the release and the stock', () => {
   const receive = (skuId: string, locationId: string, n: number) => ctx.services.stock.adjust({ skuId, locationId, delta: n, note: 'Pieces counted at the atelier.' }, f.admin);
   const settings = (o: Record<string, unknown> = {}) => ({
     modelId: f.modelId,
+    pace: { batch: 5000, minutes: 1 },
+    holdMinutes: 0,
     title: 'STOCK',
     opensAt: new Date('2026-11-03T18:00:00Z'),
     closesAt: new Date('2026-11-03T19:00:00Z'),

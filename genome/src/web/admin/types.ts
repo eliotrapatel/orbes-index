@@ -2311,8 +2311,10 @@ export interface LiveRelease extends LiveCard {
   /** Its settings still change: neither announced nor cancelled. */
   editable: boolean;
   roomOpensMinutes: number;
-  /** W4: X buyers admitted every Y minutes; null: no pace (everyone admitted at T0). */
+  /** ONE QUEUE (D1): X people per batch every Y minutes; null on an after-room (no pace). */
   pace?: LivePace | null;
+  /** The hold after the opening, in minutes (0: none). */
+  holdMinutes?: number;
   turnSeconds: number;
   payMinutes: number;
   perAccount: number;
@@ -2490,8 +2492,10 @@ export interface LiveSettings {
   opensAt: Iso;
   closesAt: Iso;
   roomOpensMinutes?: number;
-  /** W4: the pace; null (blank): none. */
-  pace?: LivePace | null;
+  /** ONE QUEUE (D1): the pace, required at creation (never taken away). */
+  pace?: LivePace;
+  /** The hold after the opening, in minutes (0: none), required at creation with the pace. */
+  holdMinutes?: number;
   turnSeconds?: number;
   payMinutes?: number;
   perAccount?: number;
@@ -2563,26 +2567,42 @@ export interface LiveEntry {
   letIn: boolean;
   /** IN-01: the entry uses the house's guarantee: first in line in its size. */
   guaranteed: boolean;
-  /** W4: when it was admitted to take a turn, null while it waits for its batch. */
+  /** When its turn was given: by a batch, the batch's logical time; by LET IN, then. Null while it waits. */
   admittedAt?: Iso | null;
-  /** Its batch: 0 with no pace (or by LET IN before the first batch). */
+  /** The batch that gave its turn; 0 in an after-room; by LET IN, the batches given until then. */
   batch?: number | null;
+  /** ONE QUEUE (D11): in the queue past the pieces of its size not yet confirmed. */
+  beyond?: boolean;
 }
 
-/** A release's pace (W4): X buyers admitted every Y minutes (LIVE_PACE_BATCH, LIVE_PACE_MINUTES). */
+/** A release's pace (ONE QUEUE): X people per batch, every Y minutes (LIVE_PACE_BATCH, LIVE_PACE_MINUTES). */
 export interface LivePace {
   batch: number;
   minutes: number;
 }
 
-/** The pace as it runs (LiveState.pace): the next batch, its own pause, the batches, those waiting and admitted. */
+/** The pace as it runs (LiveState.pace): the next batch, its own pause, the batches, those in the queue and given a turn, the hold. */
 export interface LivePaceState extends LivePace {
   nextAt: Iso;
   pausedAt: Iso | null;
   paused: boolean;
   batches: number;
+  /** In the queue (QUEUED). */
   waiting: number;
+  /** Given a turn, all ways (the batches and LET IN). */
   admitted: number;
+  /** Given a turn by the batches (NEXT BATCH NOW included). */
+  turnsGiven?: number;
+  /** Given a turn by LET IN. */
+  letIn?: number;
+  /** The hold after the opening as set, in minutes. */
+  holdMinutes?: number;
+  /** When the hold ends (the first batch), while it lasts. */
+  holdEndsAt?: Iso | null;
+  /** In the queue past the pieces of their size not yet confirmed. */
+  beyond?: number;
+  /** D10: the pieces the pace cannot offer before the close (advice only). */
+  closeGuard?: { remain: number } | null;
 }
 
 /** A size on the live board: its pieces and its people. */
@@ -2603,6 +2623,8 @@ export interface LiveBoardSize {
   missed: number;
   expired: number;
   interest: number;
+  /** ONE QUEUE (D11): in the queue past the pieces of the size not yet confirmed. */
+  beyond?: number;
 }
 
 /** The live board (GET /api/admin/live/:id/board, and the `console` events of its stream). */
@@ -2836,6 +2858,8 @@ export interface LiveReleaseReport {
   additions: { at: Iso; sizeId: string; size: string; pieces: number; before: number; after: number }[];
   conversion: number;
   next: { quantity: number; sizes: { label: string; pieces: number }[] };
+  /** ONE QUEUE (D11): the longest wait, the turns given by the pace, the people who left the queue. */
+  queue?: { longestWaitMs: number | null; turnsByPace: number; leftQueue: number };
   reasoning: string[];
 }
 

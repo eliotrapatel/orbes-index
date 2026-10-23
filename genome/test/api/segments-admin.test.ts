@@ -125,6 +125,8 @@ describe('segments and the access rules: the console’s and the public routes',
     const opensAt = new Date(h.clock.now().getTime() + 2 * HOUR);
     const created = await op.post('/api/admin/live', {
       modelId: f.modelId,
+      pace: { batch: 5000, minutes: 1 },
+      holdMinutes: 0,
       title: 'MONOLITHE — LIVE',
       opensAt: opensAt.toISOString(),
       closesAt: new Date(opensAt.getTime() + HOUR).toISOString(),
@@ -156,6 +158,8 @@ describe('segments and the access rules: the console’s and the public routes',
     const draft = safeJson(
       await op.post('/api/admin/live', {
         modelId: f.modelId,
+        pace: { batch: 5000, minutes: 1 },
+        holdMinutes: 0,
         title: 'MONOLITHE — LIVE II',
         opensAt: opensAt.toISOString(),
         closesAt: new Date(opensAt.getTime() + HOUR).toISOString(),

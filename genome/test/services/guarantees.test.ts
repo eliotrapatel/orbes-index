@@ -165,7 +165,7 @@ describe('the house’s guarantee (IN-01)', () => {
     expect(await stateOf(a.id, gMain.guarantee.id)).toBe('SET_ASIDE');
     expect((await g.forAccount(a.id))[0]!.release).toEqual({ id: ofVariant.id, title: 'A DRAW', mode: 'DRAW' });
     // A LIVE RELEASE of a model of the collection, published by the console.
-    const live = await f.liveConsole.create({ modelId: inCollection, title: 'THE RING', opensAt: inDays(5), closesAt: inDays(6), priceMinor: 100_000, sizes: [{ label: '52', stock: 2 }] } as never, f.admin);
+    const live = await f.liveConsole.create({ pace: { batch: 5000, minutes: 1 }, holdMinutes: 0, modelId: inCollection, title: 'THE RING', opensAt: inDays(5), closesAt: inDays(6), priceMinor: 100_000, sizes: [{ label: '52', stock: 2 }] } as never, f.admin);
     expect((await row(gCollection.guarantee.id)).covered_drop_id).toBeNull();
     await f.liveConsole.publish(live.id, {}, f.admin);
     expect((await row(gCollection.guarantee.id)).covered_drop_id).toBe(live.id);

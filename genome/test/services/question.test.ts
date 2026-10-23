@@ -203,7 +203,7 @@ describe('the question after a release', () => {
     f.clock.set('2026-11-05T09:00:00.000Z');
     const opensAt = new Date('2026-11-06T10:00:00.000Z');
     const created = await f.liveConsole.create(
-      { modelId: f.modelId, title: 'WORDS', opensAt, closesAt: new Date(opensAt.getTime() + 3_600_000), priceMinor: 100_000, sizes: [{ label: '52', stock: 1 }], questionText: 'WHICH FINISH?', questionAnswers: ['GOLD', 'SILVER', 'BLACK'] },
+      { pace: { batch: 5000, minutes: 1 }, holdMinutes: 0, modelId: f.modelId, title: 'WORDS', opensAt, closesAt: new Date(opensAt.getTime() + 3_600_000), priceMinor: 100_000, sizes: [{ label: '52', stock: 1 }], questionText: 'WHICH FINISH?', questionAnswers: ['GOLD', 'SILVER', 'BLACK'] },
       f.admin,
     );
     expect(created.question).toMatchObject({ enabled: true, custom: true, text: 'WHICH FINISH?', answers: ['GOLD', 'SILVER', 'BLACK'], state: 'WAITING' });

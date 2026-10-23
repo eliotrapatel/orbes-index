@@ -269,7 +269,7 @@ describe.skipIf(!HAS_CHROMIUM)('test entrants and the server’s status in the c
   }, STEP_TIMEOUT);
 
   it('shows a LIVE RELEASE’s test running on the Drops tab, where STOP halts it; END TEST still cleans up', async () => {
-    const r = await ctx.services.liveConsole.create({ modelId, title: 'THE VAULT RING', opensAt: new Date(Date.now() + 2 * HOUR), closesAt: new Date(Date.now() + 3 * HOUR), priceMinor: 480_000, sizes: [{ label: '52', stock: 3 }] }, admin);
+    const r = await ctx.services.liveConsole.create({ pace: { batch: 5000, minutes: 1 }, holdMinutes: 0, modelId, title: 'THE VAULT RING', opensAt: new Date(Date.now() + 2 * HOUR), closesAt: new Date(Date.now() + 3 * HOUR), priceMinor: 480_000, sizes: [{ label: '52', stock: 3 }] }, admin);
     await ctx.services.liveConsole.publish(r.id, {}, admin);
     // The room open, T0 in two minutes: test entrants spread until then keep the test running.
     await ctx.db.updateTable('drops').set({ opens_at: new Date(Date.now() + 120_000), closes_at: new Date(Date.now() + HOUR) }).where('id', '=', r.id).execute();
@@ -316,13 +316,14 @@ describe.skipIf(!HAS_CHROMIUM)('test entrants and the server’s status in the c
     await p.click('[data-testid=test-past-end]');
     await p.waitForSelector('dialog.dialog--danger');
     await confirmDialog(p, `END TEST ${id8}`);
-    await expect.poll(() => text(p, 'test-past-checks'), { timeout: 30_000 }).toMatch(/^\d\/5$/);
+    // Six checks: a LIVE RELEASE's PACE among them (ONE QUEUE, D1: every one has a pace).
+    await expect.poll(() => text(p, 'test-past-checks'), { timeout: 30_000 }).toMatch(/^\d\/6$/);
     expect(await p.locator('[data-testid=test-past-end]').count()).toBe(0);
     expect(await text(p, 'test-status')).toBe('RUNNING');
     // The test sent since ends from the top.
     await p.click('[data-testid=test-end]');
     await confirmDialog(p, `END TEST ${id8}`);
-    await expect.poll(async () => (await p.locator('[data-testid=test-past-checks]').allTextContents()).filter((x) => /^\d\/5$/.test(x)).length, { timeout: 30_000 }).toBe(2);
+    await expect.poll(async () => (await p.locator('[data-testid=test-past-checks]').allTextContents()).filter((x) => /^\d\/6$/.test(x)).length, { timeout: 30_000 }).toBe(2);
     expect(await p.locator('[data-testid=test-status]').count()).toBe(0);
     expect(await csp(p)).toEqual([]);
     await p.context().close();

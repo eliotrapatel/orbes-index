@@ -23,7 +23,10 @@
  *    `closes_at`, ENDED only by the console; set once, on time, never changed; a pause ends by RESUME, END or with the
  *    release, never outlives it; after it no WAITING or QUEUED entry (nor TURN after ENDED) and no new turn; in the
  *    end every release is over, with no RESUME forced;
- *  - the engine's pass is idempotent: a second pass at the same time changes nothing;
+ *  - the engine's pass is idempotent: once the batches due have gone (ONE QUEUE, lot Q1: every release has a pace, the
+ *    fixtures' giving everyone placed its turn at the minute's batch; at most one batch per published frame, D9, a frame
+ *    published at once here with no hub, so overdue batches go one per pass), a second pass at the same time changes
+ *    nothing;
  *  - the after-room (plan LIVE RELEASE+, choice 2), in half the scenarios: at the release's sell-out exactly the entries
  *    still WAITING or QUEUED are remembered, places 1..n in their order in the line, and the after-room is published
  *    then, its T0 its delay later, its close its length after that; any other end (or nobody waiting) cancels it then.
@@ -38,7 +41,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { DropRow, LiveEntryRow, LiveEntryStatus } from '../../src/server/db/schema.js';
 import { DomainError } from '../../src/server/errors.js';
 import { openDropSeed } from '../../src/server/services/drops.js';
-import { LIVE_GESTURE_MIN_MS, lineOrder, LiveService } from '../../src/server/services/live.js';
+import { LIVE_GESTURE_MIN_MS, lineOrder, LiveService, type LiveAdvance } from '../../src/server/services/live.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { accountOfTier, createLiveRelease, createModel, liveFixture, type LiveFixture, type LiveRelease } from '../support/live.js';
 import { hashSeed, Prng } from '../support/prng.js';
@@ -402,7 +405,14 @@ describe('the LIVE RELEASE engine, simulated', () => {
   }
 
   async function tick(w: World): Promise<void> {
-    await step(w, 'tick', () => w.live.advance(w.dropId));
+    // The batches due, one per pass (a frame between two, published at once here).
+    for (;;) {
+      let r: LiveAdvance | null = null;
+      await step(w, 'tick', async () => {
+        r = await w.live.advance(w.dropId);
+      });
+      if (!(r as LiveAdvance | null)?.batch) break;
+    }
     if (w.rng.chance(0.3)) {
       const before = w.prev!;
       await step(w, 'tick again', () => w.live.advance(w.dropId));

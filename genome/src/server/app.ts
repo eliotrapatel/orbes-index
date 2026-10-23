@@ -131,10 +131,13 @@ export async function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): Pro
   // Shutdown gate: once close() starts, requests still arriving on open keep-alive connections get
   // a 503 SERVICE_UNAVAILABLE (and Connection: close) instead of running against a closing database.
   let closing = false;
-  const liveHub = new LiveHub({ room: ctx.services.liveRoom, console: ctx.services.liveConsole, consoleView: liveBoardJson, clock: ctx.clock, log: ctx.log, ...opts.liveHub });
+  const liveHub = new LiveHub({ room: ctx.services.liveRoom, console: ctx.services.liveConsole, frames: ctx.services.live.frames, consoleView: liveBoardJson, clock: ctx.clock, log: ctx.log, ...opts.liveHub });
   app.decorate('liveHub', liveHub);
+  // At most one batch per published frame (services/live-frames.ts): this hub publishes the frames the engine waits for.
+  ctx.services.live.frames.usePublisher((dropId) => liveHub.publishFrame(dropId));
   app.addHook('preClose', async () => {
     closing = true;
+    ctx.services.live.frames.usePublisher(null);
     // Open streams are requests in progress: ended here, or the server would wait for them.
     liveHub.stop();
   });

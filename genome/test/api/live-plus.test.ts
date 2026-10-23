@@ -140,6 +140,8 @@ describe('the question after, the stock and the best time over HTTP', () => {
 
     res = await operator.post('/api/admin/live', {
       modelId: f.modelId,
+      pace: { batch: 5000, minutes: 1 },
+      holdMinutes: 0,
       title: 'THE QUESTION',
       opensAt: '2026-11-06T18:00:00.000Z',
       closesAt: '2026-11-06T19:00:00.000Z',
