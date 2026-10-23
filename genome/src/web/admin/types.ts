@@ -326,6 +326,8 @@ export type LiveResolution = (typeof LIVE_RESOLUTIONS)[number];
 /** A LIVE RELEASE's pace (drops.pace_batch, drops.pace_minutes, migration 0049, W4): X buyers admitted every Y minutes; X 1..5 000, Y 1..60. */
 export const LIVE_PACE_BATCH = Object.freeze({ min: 1, max: 5000 } as const);
 export const LIVE_PACE_MINUTES = Object.freeze({ min: 1, max: 60 } as const);
+/** A LIVE RELEASE's hold after the opening (drops.pace_hold_minutes, migration 0058, ONE QUEUE): 0 to 120 minutes; 0, none. */
+export const LIVE_HOLD_MINUTES = Object.freeze({ min: 0, max: 120 } as const);
 
 /** The emails (email_templates.kind, migration 0051, macro scope E0; lot M1 plan §4.2), each with its own switch, off by default. */
 export const EMAIL_KINDS = [

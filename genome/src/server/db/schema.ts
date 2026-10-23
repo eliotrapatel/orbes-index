@@ -641,6 +641,11 @@ export type ReportStatus = (typeof REPORT_STATUSES)[number];
  */
 export const LIVE_PACE_BATCH = Object.freeze({ min: 1, max: 5000 } as const);
 export const LIVE_PACE_MINUTES = Object.freeze({ min: 1, max: 60 } as const);
+/**
+ * ONE QUEUE (drops.pace_hold_minutes, migration 0058, lot Q1): the hold after the opening, in minutes, 0 to 120; 0, no
+ * hold. Everyone waits it, guarantees included, before the first batch; only with a pace.
+ */
+export const LIVE_HOLD_MINUTES = Object.freeze({ min: 0, max: 120 } as const);
 
 /** A pre-registration's first name, in characters (preregistrations.first_name, migration 0050, F2): 1 to 80. */
 export const FOUNDING_FIRST_NAME_MAX = 80;
@@ -1389,6 +1394,11 @@ export interface DropsTable {
   pace_next_at: TimestampNullable;
   /** The batches admitted so far (int ≥ 0, NOT NULL DEFAULT 0); above 0 only with a pace. */
   pace_batches: WithDefault<number>;
+  /**
+   * Migration 0058 (ONE QUEUE, lot Q1): the hold after the opening, in minutes (LIVE_HOLD_MINUTES, smallint NOT NULL
+   * DEFAULT 0; 0, no hold); above 0 only with a pace.
+   */
+  pace_hold_minutes: WithDefault<number>;
 }
 
 /**

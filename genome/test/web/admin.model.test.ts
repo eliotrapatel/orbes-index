@@ -481,6 +481,8 @@ describe('admin enums mirror the server', () => {
     // The pace of a LIVE RELEASE (macro scope W4, migration 0049): X and Y's bounds, as the server holds them.
     expect(web.LIVE_PACE_BATCH).toEqual(serverSchema.LIVE_PACE_BATCH);
     expect(web.LIVE_PACE_MINUTES).toEqual(serverSchema.LIVE_PACE_MINUTES);
+    // ONE QUEUE's hold after the opening (lot Q1, migration 0058): its bounds, as the server holds them.
+    expect(web.LIVE_HOLD_MINUTES).toEqual(serverSchema.LIVE_HOLD_MINUTES);
     // A template's bounds (macro scope E0, migration 0051), as the server holds them.
     expect(web.EMAIL_TEMPLATE_SUBJECT_MAX).toBe(serverSchema.EMAIL_TEMPLATE_SUBJECT_MAX);
     expect(web.EMAIL_TEMPLATE_BODY_MAX).toBe(serverSchema.EMAIL_TEMPLATE_BODY_MAX);

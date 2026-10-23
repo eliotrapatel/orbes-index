@@ -14,7 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createHash, randomBytes } from 'node:crypto';
 import { sql } from 'kysely';
 import { closeDb, createDb, type Db } from '../../src/server/db/connection.js';
-import { migrateToLatest } from '../../src/server/db/migrate.js';
+import { migrateDown, migrateToLatest } from '../../src/server/db/migrate.js';
 import { AuditService } from '../../src/server/services/audit.js';
 import { AuthService } from '../../src/server/services/auth.js';
 import { CategoryRegistry } from '../../src/server/services/categories.js';
@@ -596,5 +596,40 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
       .execute();
     expect(kases.map((k) => k.group_id)).toEqual([group, group]);
     await expect(sql`UPDATE order_cases SET group_id = NULL WHERE order_id = ${first.id}`.execute(db)).rejects.toSatisfy(isGuardViolation);
+  });
+
+  it('holds ONE QUEUE\'s hold after the opening by its CHECKs (0058: drops_pace_hold_minutes_check, drops_pace_hold), with the previous image\'s insert at 0 and the same JS types as PGlite; down refused while a hold exists and up refused while an open LIVE release has no pace, each naming its count', async () => {
+    // Its own letter: this database's categories already hold A to F, S, W, P, H, G, K, N and Q (the tests above).
+    await db.insertInto('categories').values({ id: 28, code: 'O', name: 'One queue parity' }).execute();
+    const model = await db.insertInto('models').values({ category_id: 23, name: 'QUEUE', type: 'RING', sku_prefix: 'QUEUE-PG' }).returning('id').executeTakeFirstOrThrow();
+    const live = {
+      model_id: model.id, title: 'ONE QUEUE PG', quantity: 2, opens_at: new Date('2026-12-01T10:00:00Z'), closes_at: new Date('2026-12-01T11:00:00Z'), seed_enc: `v1.${'A'.repeat(16)}.${'B'.repeat(64)}`,
+      seed_hash: new Uint8Array(32), early_access_hours: 0, mode: 'LIVE' as const, live_min_tier: 0, tier_priority: true, room_opens_minutes: 5, turn_seconds: 30, pay_minutes: 5, per_account: 1,
+      price_minor: 1000, currency: 'EUR', quantity_line: '2 PIECES', published_at: new Date('2026-11-30T10:00:00Z'),
+    };
+    // Inserted as the previous image does, naming the pace but not the hold: 0, a number.
+    const release = await db.insertInto('drops').values({ ...live, pace_batch: 250, pace_minutes: 1 }).returning(['id', 'pace_hold_minutes']).executeTakeFirstOrThrow();
+    expect(release).toEqual({ id: expect.any(String), pace_hold_minutes: 0 });
+    const set = (v: Record<string, unknown>, id = release.id) => db.updateTable('drops').set(v).where('id', '=', id).execute();
+    await expect(set({ pace_hold_minutes: 121 })).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_pace_hold_minutes_check'));
+    await expect(set({ pace_hold_minutes: -1 })).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_pace_hold_minutes_check'));
+    await set({ pace_hold_minutes: 30 });
+    expect(await db.selectFrom('drops').select('pace_hold_minutes').where('id', '=', release.id).executeTakeFirstOrThrow()).toEqual({ pace_hold_minutes: 30 });
+    await expect(set({ pace_batch: null, pace_minutes: null })).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_pace_hold'));
+    // Down refused while a hold exists; without one it restores 0057.
+    await expect(migrateDown(db)).rejects.toThrow(/0058_one_queue cannot be rolled back: 1 releases with a hold after the opening exist/);
+    await set({ pace_hold_minutes: 0 });
+    expect((await migrateDown(db)).reverted).toEqual(['0058_one_queue']);
+    // Up refused while an open LIVE release has no pace, naming the count (the releases this suite left open count too).
+    const unpaced = sql<{ n: number }>`SELECT count(*)::int AS n FROM drops WHERE mode = 'LIVE' AND parent_drop_id IS NULL AND pace_batch IS NULL AND ended_at IS NULL AND cancelled_at IS NULL`;
+    const left = (await unpaced.execute(db)).rows[0].n;
+    const open = await db.insertInto('drops').values({ ...live, title: 'ONE QUEUE PG UNPACED' }).returning('id').executeTakeFirstOrThrow();
+    await expect(migrateToLatest(db)).rejects.toThrow(new RegExp(`0058_one_queue cannot be applied: ${left + 1} open LIVE releases have no pace`));
+    // The owner's answer, cancelled (this suite's others with them), then up again.
+    await set({ cancelled_at: new Date() }, open.id);
+    await sql`UPDATE drops SET cancelled_at = now() WHERE mode = 'LIVE' AND parent_drop_id IS NULL AND pace_batch IS NULL AND ended_at IS NULL AND cancelled_at IS NULL`.execute(db);
+    expect((await unpaced.execute(db)).rows[0].n).toBe(0);
+    expect((await migrateToLatest(db)).applied).toEqual(['0058_one_queue']);
+    expect(await db.selectFrom('drops').select('pace_hold_minutes').where('id', '=', release.id).executeTakeFirstOrThrow()).toEqual({ pace_hold_minutes: 0 });
   });
 });

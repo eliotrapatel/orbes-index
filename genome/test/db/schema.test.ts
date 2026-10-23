@@ -1188,6 +1188,28 @@ describe('schema', () => {
     await expect(t.db.updateTable('live_entries').set({ admitted_batch: null }).where('id', '=', entry.id).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'live_entries_admitted'));
   });
 
+  it('ONE QUEUE (0058): the hold\'s bounds are schema.ts\'s LIVE_HOLD_MINUTES; the mirror at work: a release without a hold (0), a hold only with a pace', async () => {
+    const def = (await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = 'drops'::regclass AND conname = 'drops_pace_hold_minutes_check'`.execute(t.db)).rows[0].def;
+    const m = /^CHECK \(\(\(pace_hold_minutes >= (\d+)\) AND \(pace_hold_minutes <= (\d+)\)\)\)$/.exec(def);
+    expect(m, def).not.toBeNull();
+    expect({ min: Number(m![1]), max: Number(m![2]) }).toEqual(S.LIVE_HOLD_MINUTES);
+    const { model } = await seedProduct(t.db);
+    const release = await t.db
+      .insertInto('drops')
+      .values({
+        model_id: model.id, title: 'HOLD 0058', quantity: 4, opens_at: new Date('2026-12-01T10:00:00Z'), closes_at: new Date('2026-12-01T11:00:00Z'), seed_enc: `v1.${'A'.repeat(16)}.${'B'.repeat(64)}`,
+        seed_hash: new Uint8Array(32), early_access_hours: 0, mode: 'LIVE', live_min_tier: 0, tier_priority: true, room_opens_minutes: 5, turn_seconds: 30, pay_minutes: 5, per_account: 1,
+        price_minor: 1000, currency: 'EUR', quantity_line: '4 PIECES', pace_batch: 250, pace_minutes: 1,
+      })
+      .returning(['id', 'pace_hold_minutes'])
+      .executeTakeFirstOrThrow();
+    expect(release).toEqual({ id: expect.any(String), pace_hold_minutes: 0 });
+    const held = await t.db.updateTable('drops').set({ pace_hold_minutes: S.LIVE_HOLD_MINUTES.max }).where('id', '=', release.id).returning('pace_hold_minutes').executeTakeFirstOrThrow();
+    expect(held).toEqual({ pace_hold_minutes: 120 });
+    await expect(t.db.updateTable('drops').set({ pace_hold_minutes: S.LIVE_HOLD_MINUTES.max + 1 }).where('id', '=', release.id).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_pace_hold_minutes_check'));
+    await expect(t.db.updateTable('drops').set({ pace_batch: null, pace_minutes: null }).where('id', '=', release.id).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'drops_pace_hold'));
+  });
+
   it('the founding list (0050): a first name\'s bound is schema.ts\'s FOUNDING_FIRST_NAME_MAX; the mirror at work: a pre-registration from its source, matched to its account, unsubscribed; a LANDING link; a draw with a segment', async () => {
     const def = (await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = 'preregistrations'::regclass AND conname = 'preregistrations_first_name_check'`.execute(t.db)).rows[0].def;
     expect(/length\(first_name\) >= 1\) AND \(length\(first_name\) <= (\d+)\)/.exec(def)?.[1], def).toBe(String(S.FOUNDING_FIRST_NAME_MAX));
