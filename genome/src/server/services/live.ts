@@ -134,7 +134,7 @@ import { clubCounts, clubStandings, isTestEntrant, tierName, tierOf, type ClubTi
 import { DROP_QUANTITY_MAX, drawKey, dropNotFound, openDropSeed } from './drops.js';
 import { holderGuarantee, holdsGuaranteeFor, releaseCovered, sizeServesGuarantee, useGuarantees, visibleGuaranteeIds } from './guarantees.js';
 import { LiveFrameGate, type PendingBatch } from './live-frames.js';
-import { closeGuard, type LiveCloseGuard } from './live-queue.js';
+import { closeGuard, liveQueueSnapshot, queueView, type LiveCloseGuard, type LiveQueueSnapshot, type LiveQueueView } from './live-queue.js';
 import { addonOffer, choicesOf, cleanAddonItems, clearChoices, setChoices, type AddonOfferItem, type AddonUnitsInput, type ChosenAddon, type LeftOutAddon } from './order-addons.js';
 import { ordersForLiveEntry } from './orders.js';
 import { setPieces, type ReleasePiece } from './release-offer.js';
@@ -325,18 +325,6 @@ export function holdEndsAt(d: LivePaceRow & Pick<DropRow, 'pace_batches' | 'pace
 /** Whether a paced release holds its pace now: by the pace's own pause or by the release's PAUSE. */
 export function paceHeld(d: Pick<DropRow, 'paused_at' | 'pace_paused_at'>): boolean {
   return d.paused_at !== null || d.pace_paused_at !== null;
-}
-
-/**
- * The estimated entry time of the `place`-th entry waiting for its batch (1 is the next admitted): the next batch, then
- * one batch of X every Y minutes, `next + (ceil(place / X) − 1) × Y`, never before `now` (W5). Null while the pace is
- * held (PAUSED) or without a pace. The same figure a page computes from a frame read a while ago (web/verify/live-model.ts
- * queueEta): the batches due since then are counted, not added again.
- */
-export function liveQueueEta(d: LivePaceRow, place: number, now: Date): Date | null {
-  const next = paceNextAt(d);
-  if (!next || paceHeld(d) || !d.pace_batch || !d.pace_minutes) return null;
-  return new Date(Math.max(now.getTime(), next.getTime() + (Math.ceil(Math.max(1, place) / d.pace_batch) - 1) * d.pace_minutes * MINUTE_MS));
 }
 
 /**
@@ -775,11 +763,6 @@ export interface LiveEntryView {
   tier: number;
   /** The place in the line; null before T0. */
   position: number | null;
-  /**
-   * While QUEUED: the entries of its size before it in the line (0: it is next); on a set's release, the most before it
-   * in any of its sizes. Null otherwise.
-   */
-  ahead: number | null;
   joinedAt: Date;
   /** The turn: its deadline as it stands now (a pause in progress moves it); `token` only while it is TURN. */
   turn: { at: Date; expiresAt: Date; token: string | null } | null;
@@ -813,35 +796,23 @@ export interface LiveEntryView {
   /** IN-01: the entry uses the house's guarantee and the guarantee is shown to the client (false for one not shown). */
   guaranteed: boolean;
   /**
-   * W5: while QUEUED on a paced release behind the next batch's reach (its place among those waiting beyond X: ONE QUEUE,
-   * step Q1.2, until step Q1.3's snapshot), the queue page's figures; null otherwise (the line).
+   * ONE QUEUE (lot Q1, plan §1.3): while QUEUED, its own figures from the queue's snapshot (live-queue.ts): its place in
+   * its size, its estimated wait, what holds the batches, whether a batch can reach it next (its page then follows the
+   * stream; otherwise it reads its state as `pollMs` says) and whether its size can no longer serve it. Never the pace,
+   * the line's length or a held piece (D8, D25). Null otherwise, and in an action's answer (its page reads its place
+   * at its next reading: READING YOUR PLACE, D15).
    */
   queue: LiveQueueView | null;
 }
 
-/** An entry waiting for its batch (W2, W5): its place among those waiting and when it should come in. */
-export interface LiveQueueView {
-  /** 1 is admitted next: the entries waiting for their batch before it in the line's order, plus one. */
-  place: number;
-  /** The estimated entry time (liveQueueEta); null while the pace is held. */
-  etaAt: Date | null;
-  /** The pace is held (PAUSE PACE, or the release's PAUSE): the place is kept, no batch comes. */
-  paused: boolean;
-  /**
-   * Its batch is the next one (place ≤ X): its page follows the stream. Otherwise it holds no stream
-   * (http/live-stream.ts) and reads its state as often as the state's `pollMs` says. ONE QUEUE, step Q1.2: an entry the
-   * next batch can reach reads the line (no queue view), so a queue view is never the next one until step Q1.3.
-   */
-  next: boolean;
-}
+export type { LiveQueueView };
 
 /**
  * Whether a reading of an entry tells its phone that it is next (G2, PLAN amendment 1; live-frames.ts `read`): QUEUED and
- * within the next batch's reach. ONE QUEUE, step Q1.2: an entry the next batch can reach reads the line (no queue
- * view); step Q1.3 reads it from the queue's snapshot (`next`).
+ * a batch can reach it next, as the queue's snapshot says (`queue.next`; every QUEUED entry of an after-room).
  */
 export function liveReadsNext(entry: Pick<LiveEntryView, 'status' | 'queue'> | null | undefined): boolean {
-  return entry?.status === 'QUEUED' && (entry.queue === null || entry.queue.next);
+  return entry?.status === 'QUEUED' && entry.queue?.next === true;
 }
 
 /** An account's interest (I'LL BE THERE). */
@@ -939,6 +910,16 @@ export interface AdminLiveEntry {
   batch: number | null;
   /** In the queue, its place in its size past the pieces of that size not yet confirmed (the console's « beyond the pieces »). */
   beyond: boolean;
+  /** In the queue (QUEUED), its place in its size, from the queue's snapshot (D11, live-queue.ts); null otherwise. */
+  placeInSize: number | null;
+  /** In the queue of a paced release, its estimated turn from the snapshot; null otherwise (an after-room has no time). */
+  estimatedTurnAt: Date | null;
+}
+
+/** An entry's queue place and estimated turn for the console (AdminLiveEntry), from the release's snapshot. */
+export function adminQueueFigures(snapshot: LiveQueueSnapshot | null, entryId: string): { placeInSize: number | null; estimatedTurnAt: Date | null } {
+  const p = snapshot?.entries.get(entryId);
+  return { placeInSize: p?.place ?? null, estimatedTurnAt: p?.estimatedAt != null ? new Date(p.estimatedAt) : null };
 }
 
 export interface LiveMessageView {
@@ -1214,15 +1195,17 @@ const chunks = <T>(xs: readonly T[], n = VIEW_CHUNK): T[][] => Array.from({ leng
 /**
  * The entries of published LIVE RELEASES as their accounts' own screens read them: those of `accountIds` in one release,
  * by account id (the room's viewers, read once a second for all of them by the live streams, routes/live.ts), or every
- * entry of one account, by release id (MY PIECES). A few statements whatever the number of accounts: the entries, their add-ons, and
- * for those QUEUED how many of their size are before them (`ahead`). Deadlines as they stand at `now` (a pause in
- * progress moves them); the turn's secret only while it is TURN, to its own account.
+ * entry of one account, by release id (MY PIECES). A few statements whatever the number of accounts: the entries and
+ * their add-ons. Deadlines as they stand at `now` (a pause in progress moves them); the turn's secret only while it is
+ * TURN, to its own account. A QUEUED entry's `queue` comes from its release's snapshot when `queues` gives one (the
+ * frame's: live-room.ts), null otherwise (no entry's own read ever reads the whole line: docs/reports/live-load.md).
  */
 export async function liveEntryViews(
   db: Db,
   turnKey: Uint8Array,
   of: { dropId: string; accountIds: readonly string[] } | { accountId: string },
   now: Date,
+  queues?: (dropId: string) => LiveQueueSnapshot | null | undefined,
 ): Promise<Map<string, LiveEntryView>> {
   const base = db
     .selectFrom('live_entries as e')
@@ -1257,54 +1240,6 @@ export async function liveEntryViews(
   ).flat();
   const doors = await afterRoomDoors(db, rows.filter((r) => r.status === 'ENDED').map((r) => r.id));
   const shown = await visibleGuaranteeIds(db, rows.map((r) => r.guarantee_id));
-  const queued = rows.filter((r) => r.status === 'QUEUED');
-  const ahead = new Map<string, number>();
-  // Only the line before them counts: their releases and sizes, up to the last of their places (one entry's own read, at
-  // each of its actions, never sorts the whole line: docs/reports/live-load.md).
-  for (const part of chunks(queued.filter((r) => r.set_id === null))) {
-    const drops = [...new Set(part.map((r) => r.drop_id))];
-    const sizes = [...new Set(part.map((r) => r.size_id))];
-    const last = Math.max(...part.map((r) => r.position ?? 0));
-    // IN-01: the places guaranteed by the house come first in their size, wherever they stand in the line.
-    const r = await sql<{ id: string; ahead: number }>`
-      SELECT q.id, q.ahead
-        FROM (SELECT id, (row_number() OVER (PARTITION BY drop_id, size_id ORDER BY (guarantee_id IS NULL), position) - 1)::int AS ahead
-                FROM live_entries
-               WHERE drop_id IN (${sql.join(drops)}) AND size_id IN (${sql.join(sizes)}) AND status = 'QUEUED' AND (position <= ${last} OR guarantee_id IS NOT NULL)) AS q
-       WHERE q.id IN (${sql.join(part.map((x) => x.id))})`.execute(db);
-    for (const a of r.rows) ahead.set(a.id, Number(a.ahead));
-  }
-  // Macro scope K44 T1: a set's entry, the most before it in any of its sizes (a set's release has no guaranteed place).
-  for (const part of chunks(queued.filter((r) => r.set_id !== null))) {
-    const drops = [...new Set(part.map((r) => r.drop_id))];
-    const last = Math.max(...part.map((r) => r.position ?? 0));
-    const r = await sql<{ id: string; ahead: number }>`
-      SELECT q.entry_id AS id, max(q.ahead)::int AS ahead
-        FROM (SELECT x.entry_id, (row_number() OVER (PARTITION BY x.size_id ORDER BY e.position) - 1)::int AS ahead
-                FROM live_entry_sizes x JOIN live_entries e ON e.id = x.entry_id
-               WHERE e.drop_id IN (${sql.join(drops)}) AND e.status = 'QUEUED' AND e.position <= ${last}) AS q
-       WHERE q.entry_id IN (${sql.join(part.map((x) => x.id))})
-       GROUP BY q.entry_id`.execute(db);
-    for (const a of r.rows) ahead.set(a.id, Number(a.ahead));
-  }
-  // W5: on a paced release, the entries waiting for their batch read their place among those waiting, in the order the
-  // batches give turns (the partial index live_entries_waiting_admission), up to the last of their places. ONE QUEUE (lot
-  // Q1, step Q1.2; step Q1.3 replaces it with the queue's snapshot): every QUEUED entry waits for a batch now, so one the
-  // next batch can reach (its place among those waiting within X) reads the line (its place in its size), and one behind
-  // it the queue (its place, its estimated time, its stream ended: W2).
-  const waiting = queued.filter((r) => r.admitted_at === null && r.pace_batch !== null);
-  const place = new Map<string, number>();
-  for (const part of chunks(waiting)) {
-    const drops = [...new Set(part.map((r) => r.drop_id))];
-    const last = Math.max(...part.map((r) => r.position ?? 0));
-    const r = await sql<{ id: string; place: number }>`
-      SELECT q.id, q.place
-        FROM (SELECT id, row_number() OVER (PARTITION BY drop_id ORDER BY (guarantee_id IS NULL), position)::int AS place
-                FROM live_entries
-               WHERE drop_id IN (${sql.join(drops)}) AND status = 'QUEUED' AND admitted_at IS NULL AND (position <= ${last} OR guarantee_id IS NOT NULL)) AS q
-       WHERE q.id IN (${sql.join(part.map((x) => x.id))})`.execute(db);
-    for (const a of r.rows) place.set(a.id, Number(a.place));
-  }
   // Plan MACRO M3 §4.2 (D2): the catalogue add-ons chosen with a hold, and the units carried onto a confirmed entry's order.
   const items = await liveAddonItems(db, rows);
   // Macro scope K44 T1: a set's entries, their sizes per piece.
@@ -1323,7 +1258,6 @@ export async function liveEntryViews(
       quantity: r.quantity,
       tier: r.tier,
       position: r.position,
-      ahead: r.status === 'QUEUED' ? (ahead.get(r.id) ?? 0) : null,
       joinedAt: r.joined_at,
       turn:
         r.turn_at && r.turn_expires_at
@@ -1348,7 +1282,7 @@ export async function liveEntryViews(
       addonOffer: items.offer.get(r.id) ?? [],
       afterRoom: doors.get(r.id) ?? null,
       guaranteed: r.guarantee_id !== null && shown.has(r.guarantee_id),
-      queue: place.has(r.id) && place.get(r.id)! > (r.pace_batch ?? 0) ? queueOf(r, place.get(r.id)!, now) : null,
+      queue: r.status === 'QUEUED' ? queueOf(queues?.(r.drop_id), r.id, now) : null,
     });
   }
   return out;
@@ -1434,8 +1368,9 @@ async function liveAddonItems(
   return { chosen, offer };
 }
 
-function queueOf(d: LivePaceRow, place: number, now: Date): LiveQueueView {
-  return { place, etaAt: liveQueueEta(d, place, now), paused: paceHeld(d), next: typeof d.pace_batch === 'number' && place <= d.pace_batch };
+/** A QUEUED entry's own figures from its release's snapshot, read at `now`; null without one. */
+function queueOf(snapshot: LiveQueueSnapshot | null | undefined, entryId: string, now: Date): LiveQueueView | null {
+  return snapshot ? queueView(snapshot, entryId, now.getTime()) : null;
 }
 
 /** A set's entry's or interest's size for one piece (macro scope K44 T1), as chosen: its piece and its size with its stock. */
@@ -1480,6 +1415,8 @@ interface BatchPass {
   readings: boolean;
   /** Whether this transaction gave a batch (the gate shut by it, settled once it ends). */
   gave: boolean;
+  /** The gate's mark of this transaction's batch or change (live-frames.ts), settled once it ends; 0 for none. */
+  mark: number;
   /** The NEXT BATCH NOW this transaction is giving (`giving`, released if the transaction fails). */
   taking: PendingBatch | null;
 }
@@ -1571,10 +1508,18 @@ export class LiveService {
   }
 
   /** The account's entry in a published LIVE RELEASE, or null. */
+  /**
+   * The account's entry in a published LIVE RELEASE, or null; while QUEUED, with its own figures from the release's queue
+   * read now (live-queue.ts liveQueueSnapshot), as its phone reads them (the scripts' and the tests' reading).
+   */
   async entry(accountId: string, dropId: string): Promise<LiveEntryView | null> {
     const account = assertAccount(accountId);
     const id = knownId(dropId, dropNotFound);
-    return this.viewerEntry(this.db, account, id);
+    const now = this.clock();
+    const view = (await liveEntryViews(this.db, this.turnKey, { dropId: id, accountIds: [account] }, now)).get(account) ?? null;
+    if (view?.status !== 'QUEUED') return view;
+    const d = await this.db.selectFrom('drops').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
+    return { ...view, queue: queueView(await liveQueueSnapshot(this.db, d, now), view.id, now.getTime()) };
   }
 
   /** The account's interest in a release, or null. */
@@ -1610,7 +1555,8 @@ export class LiveService {
     const networkHash = client.networkHash instanceof Uint8Array && client.networkHash.length === 32 ? client.networkHash : null;
     const country = typeof client.country === 'string' && /^[A-Z]{2}$/.test(client.country) ? client.country : null;
     const early = await this.accessAhead(id, account);
-    await inTransaction(this.db, async (tx) => {
+    // After T0 the entry takes its place at once: the next batch waits for a frame that shows it (D9).
+    await this.changing(id, (mark) => inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
       const { d, now, place } = await this.lockAnnouncedLive(tx, id, 'update', account);
       const notes: AuditRecordInput[] = [];
@@ -1630,6 +1576,7 @@ export class LiveService {
       const g = held ? await this.guaranteeInSize(tx, d, held, size.id, quantity, existing?.id ?? null) : null;
       const late = now.getTime() >= d.opens_at.getTime();
       if (late) {
+        mark();
         await this.formLine(tx, d, now, notes);
         const totals = await this.sizeTotals(tx, d);
         for (const sid of set ? set.map((c) => c.size.id) : [size.id]) if (quantity > servableOf(totals.find((s) => s.id === sid)!)) throw sizeSoldOut();
@@ -1671,7 +1618,7 @@ export class LiveService {
         },
       });
       await this.record(tx, notes);
-    });
+    }));
     return (await this.viewerEntry(this.db, account, id))!;
   }
 
@@ -1729,12 +1676,14 @@ export class LiveService {
   async leave(accountId: string, dropId: string, actor: Actor): Promise<LiveEntryView> {
     const account = assertAccount(accountId);
     const id = knownId(dropId, dropNotFound);
-    await inTransaction(this.db, async (tx) => {
+    // A place left in the line moves those behind it up: the next batch waits for a frame that shows it (D9).
+    await this.changing(id, (mark) => inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
       const { d, now } = await this.lockAnnouncedLive(tx, id, 'update', account);
       const e = await this.lockEntry(tx, id, account);
       if (!e) throw notEntered();
       if (e.status !== 'WAITING' && e.status !== 'QUEUED' && e.status !== 'TURN') throw notInLine();
+      if (e.status === 'QUEUED') mark();
       // A turn that has run out, the engine not having marked it yet: MISSED at its deadline, not LEFT.
       if (e.status === 'TURN' && effectiveDeadline(e.turn_expires_at!, d, now).getTime() <= now.getTime()) throw turnPassed();
       // IN-01: a guarantee not used yet (WAITING, QUEUED) is unbound and stays ACTIVE; one used at the turn stays used.
@@ -1751,7 +1700,7 @@ export class LiveService {
         tx,
       );
       await this.record(tx, notes);
-    });
+    }));
     return (await this.viewerEntry(this.db, account, id))!;
   }
 
@@ -2198,7 +2147,7 @@ export class LiveService {
       if (now.getTime() < d.opens_at.getTime()) throw liveNotStarted();
       if (d.ended_at || now.getTime() >= d.closes_at.getTime()) throw liveEnded();
       if (d.paused_at) throw livePaused();
-      await this.formLine(tx, d, now, notes);
+      await this.formLine(tx, d, now, notes, pass);
       if ((await this.batchGrants(tx, d, now, d.pace_batch)).length === 0) throw nothingFree();
       press = this.frames.press(d.id, now, admin);
       await this.giveDue(tx, d, now, notes, pass);
@@ -2453,7 +2402,7 @@ export class LiveService {
   }
 
   private async advanceOnce(id: string, db: Db): Promise<LiveAdvance | null> {
-    const pass: BatchPass = { given: null, waiting: false, readings: false, gave: false, taking: null };
+    const pass: BatchPass = { given: null, waiting: false, readings: false, gave: false, mark: 0, taking: null };
     let out: LiveAdvance | null;
     let committed = false;
     try {
@@ -2464,7 +2413,7 @@ export class LiveService {
         const out: LiveAdvance = { dropId: id, queued: 0, admitted: 0, batch: null, waiting: false, missed: 0, expired: 0, turns: 0, ended: null };
         if (now.getTime() < d.opens_at.getTime()) return out;
         const notes: AuditRecordInput[] = [];
-        out.queued = await this.formLine(tx, d, now, notes);
+        out.queued = await this.formLine(tx, d, now, notes, pass);
         if (!d.paused_at) await this.runOut(tx, d, now, out);
         const paused = d.paused_at !== null;
         out.ended = await this.settleEnd(tx, d, now, notes);
@@ -2481,7 +2430,7 @@ export class LiveService {
       });
       committed = true;
     } finally {
-      if (pass.gave) this.frames.settle(id);
+      if (pass.mark) this.frames.settle(id, pass.mark);
       // Not given after all: the press waits again (and may be withdrawn).
       if (!committed && pass.taking) pass.taking.giving = false;
     }
@@ -2768,9 +2717,10 @@ export class LiveService {
   /**
    * The line: at T0 (no place given yet) every WAITING entry, its tier read now, ordered by `lineOrder`, places from 1,
    * `queued_at` T0 (noted for the audit log: `drop.live.queue`); afterwards an entry still WAITING (another instance's clock put it
-   * before T0 after the line formed) goes behind, by arrival. Returns the entries placed.
+   * before T0 after the line formed) goes behind, by arrival. Returns the entries placed; with `shut`, the frame gate's
+   * mark of the change when it placed any (no batch reaches them before a frame shows their places).
    */
-  private async formLine(tx: Db, d: LiveDrop, now: Date, notes: AuditRecordInput[]): Promise<number> {
+  private async formLine(tx: Db, d: LiveDrop, now: Date, notes: AuditRecordInput[], shut?: { mark: number }): Promise<number> {
     const waiting = await tx.selectFrom('live_entries').select(['id', 'account_id', 'tier', 'joined_at', 'guarantee_id']).where('drop_id', '=', d.id).where('status', '=', 'WAITING').execute();
     if (waiting.length === 0) return 0;
     const start = await this.lastPosition(tx, d.id);
@@ -2806,6 +2756,8 @@ export class LiveService {
       const guaranteed = waiting.filter((w) => w.guarantee_id !== null).length;
       notes.push({ actor: SYSTEM_ACTOR, action: 'drop.live.queue', targetType: 'drop', targetId: d.id, details: { entries: placed.length, guaranteed } });
     }
+    // Places given (D9): the next batch waits for a frame that shows them (live-frames.ts `changed`).
+    if (shut && placed.length > 0) shut.mark = Math.max(shut.mark, this.frames.changed(d.id));
     return placed.length;
   }
 
@@ -2901,7 +2853,7 @@ export class LiveService {
    * its audit entries last. Once it ends: the gate settled if it gave one, then afterBatches.
    */
   private async batches(id: string, fn: (tx: Db, d: LiveDrop, now: Date, notes: AuditRecordInput[], pass: BatchPass) => Promise<void>): Promise<void> {
-    const pass: BatchPass = { given: null, waiting: false, readings: false, gave: false, taking: null };
+    const pass: BatchPass = { given: null, waiting: false, readings: false, gave: false, mark: 0, taking: null };
     let committed = false;
     try {
       await inTransaction(this.db, async (tx) => {
@@ -2912,7 +2864,7 @@ export class LiveService {
       });
       committed = true;
     } finally {
-      if (pass.gave) this.frames.settle(id);
+      if (pass.mark) this.frames.settle(id, pass.mark);
       // Not given after all: the press waits again (and may be withdrawn).
       if (!committed && pass.taking) pass.taking.giving = false;
     }
@@ -2960,7 +2912,7 @@ export class LiveService {
       if (slotDue && (!press || slot.getTime() <= press.at.getTime())) {
         const grants = await this.batchGrants(tx, d, slot, d.pace_batch);
         if (this.unread(d, grants, now, pass)) return;
-        this.frames.giving(d.id, now);
+        pass.mark = this.frames.giving(d.id, now);
         pass.gave = true;
         if (grants.length) await this.grant(tx, d, grants, now, null, notes, { at: slot, batch });
         const nextAt = new Date(slot.getTime() + d.pace_minutes * MINUTE_MS);
@@ -2982,7 +2934,7 @@ export class LiveService {
       if (p.settled) continue;
       p.giving = true;
       pass.taking = p;
-      this.frames.giving(d.id, now);
+      pass.mark = this.frames.giving(d.id, now);
       pass.gave = true;
       await this.grant(tx, d, grants, now, null, notes, { at: p.at, batch });
       // The batch clock keeps its time: the next scheduled batch (the first, during the hold) stays where it was, and
@@ -3164,31 +3116,64 @@ export class LiveService {
     if (guaranteed.length > 0) await useGuarantees(tx, guaranteed, d.id, now, SYSTEM_ACTOR, notes, 'turn');
   }
 
-  /** A console control on a published LIVE RELEASE, under its row lock (FOR UPDATE); returns its state after. */
+  /**
+   * A console control on a published LIVE RELEASE, under its row lock (FOR UPDATE); returns its state after. Every
+   * control may change whom the next batches reach (SET PACE, SHORTEN or END THE HOLD, ADD PIECES, a place formed: D9,
+   * plan §1.3 "recomputed at once"): the next batch waits for a frame read after it (live-frames.ts `changed`), and one
+   * is asked for at once.
+   */
   private async control(dropId: string, fn: (tx: Db, d: LiveDrop, now: Date) => Promise<void>): Promise<LiveReleaseState> {
     const id = knownId(dropId, dropNotFound);
-    return inTransaction(this.db, async (tx) => {
-      const d = await this.lockLive(tx, id, 'update');
-      const now = this.clock();
-      if (d.cancelled_at) throw liveCancelled();
-      await fn(tx, d, now);
-      return this.releaseState(tx, id);
-    });
+    return this.changing(id, (mark) =>
+      inTransaction(this.db, async (tx) => {
+        const d = await this.lockLive(tx, id, 'update');
+        mark();
+        const now = this.clock();
+        if (d.cancelled_at) throw liveCancelled();
+        await fn(tx, d, now);
+        return this.releaseState(tx, id);
+      }),
+    );
   }
 
-  /** A console control on an entry of a published LIVE RELEASE: the release's row, then the entry's (FOR UPDATE). */
+  /**
+   * A console control on an entry of a published LIVE RELEASE: the release's row, then the entry's (FOR UPDATE). As
+   * `control`, the next batch waits for a frame read after it (LET IN, REMOVE and FREE change the queue).
+   */
   private async entryControl(dropId: string, entryId: string, fn: (tx: Db, d: LiveDrop, e: EntryRow, now: Date) => Promise<void>): Promise<AdminLiveEntry> {
     const id = knownId(dropId, dropNotFound);
     const eid = knownId(entryId, entryNotFound);
-    return inTransaction(this.db, async (tx) => {
-      const d = await this.lockLive(tx, id, 'update');
-      const now = this.clock();
-      if (d.cancelled_at) throw liveCancelled();
-      const e = await tx.selectFrom('live_entries').select([...ENTRY_COLUMNS]).where('id', '=', eid).where('drop_id', '=', id).forUpdate().executeTakeFirst();
-      if (!e) throw entryNotFound();
-      await fn(tx, d, e, now);
-      return this.adminEntry(tx, d, eid, now);
-    });
+    return this.changing(id, (mark) =>
+      inTransaction(this.db, async (tx) => {
+        const d = await this.lockLive(tx, id, 'update');
+        mark();
+        const now = this.clock();
+        if (d.cancelled_at) throw liveCancelled();
+        const e = await tx.selectFrom('live_entries').select([...ENTRY_COLUMNS]).where('id', '=', eid).where('drop_id', '=', id).forUpdate().executeTakeFirst();
+        if (!e) throw entryNotFound();
+        await fn(tx, d, e, now);
+        return this.adminEntry(tx, d, eid, now);
+      }),
+    );
+  }
+
+  /**
+   * A transaction that may change whom the next batches reach (D9): `run` takes the release's row lock first, and from
+   * then on the frame gate is shut (live-frames.ts `changed`, taken lazily by `mark`) until a frame begun after it is
+   * published; settled once it has ended, a frame then asked for.
+   */
+  private async changing<T>(id: string, run: (mark: () => void) => Promise<T>): Promise<T> {
+    let mark = 0;
+    try {
+      return await run(() => {
+        if (mark === 0) mark = this.frames.changed(id);
+      });
+    } finally {
+      if (mark) {
+        this.frames.settle(id, mark);
+        void this.frames.ask(id);
+      }
+    }
   }
 
   private async releaseState(db: Db, id: string): Promise<LiveReleaseState> {
@@ -3222,8 +3207,9 @@ export class LiveService {
       ])
       .where('e.id', '=', entryId)
       .executeTakeFirstOrThrow();
-    const running = await db.selectFrom('drops').select('paused_at').where('id', '=', d.id).executeTakeFirstOrThrow();
+    const running = await db.selectFrom('drops').select(['paused_at', 'pace_paused_at', 'pace_next_at', 'pace_batch', 'pace_minutes', 'pace_hold_minutes']).where('id', '=', d.id).executeTakeFirstOrThrow();
     const beyond = r.status === 'QUEUED' && d.pace_batch !== null ? (await liveBeyond(db, d)).entries.has(r.id) : false;
+    const queue = r.status === 'QUEUED' ? await liveQueueSnapshot(db, { ...d, ...running }, now) : null;
     const pieces = d.set_id !== null ? await livePieceSizes(db, [r.id]) : new Map<string, LivePieceSize[]>();
     return {
       id: r.id,
@@ -3248,6 +3234,7 @@ export class LiveService {
       admittedAt: r.admitted_at,
       batch: r.admitted_batch,
       beyond,
+      ...adminQueueFigures(queue, r.id),
     };
   }
 

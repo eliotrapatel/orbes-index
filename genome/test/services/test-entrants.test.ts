@@ -946,44 +946,39 @@ describe('a LIVE RELEASE end to end', () => {
     expect(after.filter((e) => e.status === 'REMOVED').every((e) => e.confirmed_at === null && e.removed_by === w.f.admin.id && e.removed_at?.getTime() === e.ended_at?.getTime())).toBe(true);
     const removals = await w.h.ctx.db.selectFrom('audit_logs').select('details').where('action', '=', 'drop.live.remove').where('target_id', '=', release.id).execute();
     expect(removals.map((r) => r.details)).toEqual(Array.from({ length: 3 }, () => expect.objectContaining({ from: 'CONFIRMED', reason: 'test_ended' })));
-    expect((await w.h.ctx.services.liveRoom.frame(release.id))?.room).toMatchObject({ left: 6, held: 0 });
+    expect((await w.h.ctx.services.liveRoom.frame(release.id))?.room).toMatchObject({ left: 6 });
   });
 
-  it('a paced release (W2, W4): the bots wait in the queue reading their state as its pollMs says (10 s to 30 s here), admitted 2 every minute; END TEST: the report 6/6 with PACE', async () => {
+  it('a paced release (W2, W4; ONE QUEUE §1.3): the bots wait in the queue reading their state as its pollMs says (2 s for those a batch can reach next, 30 s to a minute behind), given their turns 2 every minute; END TEST: the report 6/6 with PACE', async () => {
     const t0 = new Date(w.h.clock.now().getTime() + 2 * MINUTE);
     const release = await createLiveRelease(w.f, { opensAt: t0, sizes: [{ label: '52', stock: 10 }], pace: { batch: 2, minutes: 1 }, accessModels: [w.f.modelId] });
     const run = await w.tests.start(
       release.id,
-      press(release.id, { titane: 6 }, { behaviour: { payPct: 100, releasePct: 0, missPct: 0, leavePct: 0, holdSeconds: 1.5 }, choices: { size: '52', quantity: 1, addOnsPct: 0 } }),
+      press(release.id, { titane: 10 }, { behaviour: { payPct: 100, releasePct: 0, missPct: 0, leavePct: 0, holdSeconds: 1.5 }, choices: { size: '52', quantity: 1, addOnsPct: 0 } }),
       w.f.admin,
     );
     await drive(w, 0, 500, release.id);
     const inject = vi.spyOn(w.h.app, 'inject');
     try {
       w.h.clock.set(t0);
-      // The first minute: two given their turn at T0 and served; of the four waiting, the two the next batch can reach read
-      // the line every 2 s, the two behind it their queue up to every 30 s (half the time until their batch is the next
-      // one: ONE QUEUE, step Q1.2, until step Q1.3's queue snapshot).
+      // The first minute: two given their turn at T0 and served; of the eight waiting, the four the scheduled batch and
+      // one extra can reach read every 2 s, the four behind them every 30 s to a minute (half the time until they could
+      // be next: the queue's snapshot, ONE QUEUE §1.3).
       await drive(w, 50_000, 500, release.id);
       const reads = inject.mock.calls.filter((call) => String(((call as unknown[])[0] as { url?: string } | undefined)?.url).endsWith('/state')).length;
-      // About 2 × 25 reads in 50 s at 2 s and 2 × 2 at 30 s (6 × 25 if every one read every 2 s); a few more before the turns.
+      // About 4 × 25 reads in 50 s at 2 s and 4 × 1 or 2 behind (8 × 25 if every one read every 2 s); a few more before the turns.
       expect(reads).toBeGreaterThan(4);
-      expect(reads).toBeLessThan(75);
+      expect(reads).toBeLessThan(150);
     } finally {
       inject.mockRestore();
     }
     w.h.clock.set(new Date(t0.getTime() + MINUTE));
-    await drive(w, 2 * MINUTE, 500, release.id);
+    await drive(w, 4 * MINUTE, 500, release.id);
     expect(await statusOf(w, run.id)).toBe('DONE');
     const admitted = await w.h.ctx.db.selectFrom('live_entries').select(['admitted_batch', 'admitted_at', 'status']).where('drop_id', '=', release.id).orderBy('position').execute();
-    expect(admitted.map((e) => [e.admitted_batch, e.admitted_at!.getTime() - t0.getTime(), e.status])).toEqual([
-      [1, 0, 'CONFIRMED'],
-      [1, 0, 'CONFIRMED'],
-      [2, MINUTE, 'CONFIRMED'],
-      [2, MINUTE, 'CONFIRMED'],
-      [3, 2 * MINUTE, 'CONFIRMED'],
-      [3, 2 * MINUTE, 'CONFIRMED'],
-    ]);
+    expect(admitted.map((e) => [e.admitted_batch, e.admitted_at!.getTime() - t0.getTime(), e.status])).toEqual(
+      [0, 0, 1, 1, 2, 2, 3, 3, 4, 4].map((k) => [k + 1, k * MINUTE, 'CONFIRMED']),
+    );
     const ended = await w.tests.end(run.id, testPhrase(release.id, true), w.f.admin);
     expect(ended.report?.checks.map((c) => [c.id, c.pass])).toEqual([
       ['ONE_ENTRY', true],
@@ -993,7 +988,7 @@ describe('a LIVE RELEASE end to end', () => {
       ['ORDERS', true],
       ['PACE', true],
     ]);
-    expect(ended.report?.checks.at(-1)).toMatchObject({ label: 'The pace', line: '3 batches admitted 6 entries at 2 every 1 min, each on its time and in the line’s order.' });
+    expect(ended.report?.checks.at(-1)).toMatchObject({ label: 'The pace', line: '5 batches admitted 10 entries at 2 every 1 min, each on its time and in the line’s order.' });
     expect([ended.report?.passed, ended.report?.total]).toEqual([6, 6]);
   });
 

@@ -2573,6 +2573,10 @@ export interface LiveEntry {
   batch?: number | null;
   /** ONE QUEUE (D11): in the queue past the pieces of its size not yet confirmed. */
   beyond?: boolean;
+  /** ONE QUEUE (D11): in the queue, its place in its size (the queue's snapshot); null otherwise. */
+  placeInSize?: number | null;
+  /** ONE QUEUE (D11): in the queue of a paced release, its estimated turn; null otherwise. */
+  estimatedTurnAt?: Iso | null;
 }
 
 /** A release's pace (ONE QUEUE): X people per batch, every Y minutes (LIVE_PACE_BATCH, LIVE_PACE_MINUTES). */

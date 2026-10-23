@@ -109,7 +109,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import v8 from 'node:v8';
 import { LIVE_PACE_BATCH, LIVE_PACE_MINUTES } from '../src/server/db/schema.js';
-import { LIVE_QUEUE_POLL_MS } from '../src/server/http/live-stream.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SELF = fileURLToPath(import.meta.url);
@@ -117,6 +116,11 @@ const SELF = fileURLToPath(import.meta.url);
 const ORIGIN = 'https://verify.orbes.load';
 /** As the page (web/verify/views/live.ts LIVE_QUEUE_SPREAD_MS): its first state read once the server ended its stream behind the next batch. */
 const LIVE_QUEUE_SPREAD_MS = 60_000;
+/**
+ * M1's queue reading cadence, which --pace still follows: ONE QUEUE (lot Q1, step Q1.3) reads each entry's own figures
+ * (`queue.waitMs`, `pollMs`) and no longer sends a queue frame; step Q1.4 measures the one queue (--one-queue).
+ */
+const LIVE_QUEUE_POLL_MS = 10_000;
 /** As the page (web/verify/views/live.ts FINAL): an entry in one of these is over for its page, which closes its stream. */
 const FINAL_STATUSES: ReadonlySet<string> = new Set(['CONFIRMED', 'MISSED', 'EXPIRED', 'RELEASED', 'REMOVED']);
 /** From T0, this long for the streams behind the next batch to end: the memory and streams "from T0" are read after it. */

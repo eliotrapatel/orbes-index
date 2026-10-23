@@ -8,7 +8,7 @@
  *    page once over in its final state (plan LIVE RELEASE+, decision 30: what was announced, never an end figure);
  *  - the account's routes: I'LL BE THERE and its withdrawal, ENTER, CHANGE SIZE (before T0 only), LEAVE, PRESS,
  *    SECURE (the gesture's rule), the add-ons, PAY, RELEASE MY PLACE and the second chance, the state with the room and
- *    the account's own entry (its place, those ahead, its turn's secret), MY PIECES; the network's keyed hash kept;
+ *    the account's own entry (its place in its size, its turn's secret), MY PIECES; the network's keyed hash kept;
  *  - who reads the room: 401 without a session, 403 LIVE_NOT_ELIGIBLE (the rule in words, the release's own model
  *    unnamed before its stage) for an account the rule leaves out, the state of an entrant whatever its tier now, a REMOVED entry's state but not its stream;
  *  - CSRF and the same-origin rule on every mutation, the board's included;
@@ -17,10 +17,11 @@
  *    of quiet, the turn's secret to its own account only, at most two per account, a disconnection that frees its
  *    place, one frame and one read of the entries per pulse whatever the audience, the last frame then the end once
  *    over (204 afterwards), the end of a REMOVED entry's stream, the end of a stream whose session has ended (signed
- *    out, account locked), the server's shutdown with streams open; on a paced release (W2, W5), the queue's small frame
- *    in place of the room for a viewer waiting for its batch, with its own place, PAUSED, then the room once admitted,
- *    and its state with `pollMs` (10 s in the queue, 2 s in the room); behind the next batch, its stream ended after its
- *    place and refused (204) until its batch is the next one, its `pollMs` up to a minute (30 s while held);
+ *    out, account locked), the server's shutdown with streams open; ONE QUEUE (lot Q1, step Q1.3): each QUEUED entry
+ *    reads its own figures (its place in its size, its estimated wait, PAUSE or PAUSE PACE, next, out) with its state
+ *    and its stream, never a queue frame, the line's length or a held piece; `pollMs` 2 s for those next, 10 s to a
+ *    minute behind (30 s while held); behind, its stream ended after its place and refused (204) until it is next; an
+ *    after-room's entries all next; the phones' readings holding a batch after the first (G2);
  *  - the board by its secret link only: valid, missing, malformed, wrong, another release's, replaced, revoked, a stream
  *    open on a link replaced or revoked ended at the next pulse; never a person in its answers, never indexed;
  *  - the clock for the page's sync, the .ics (its alarm, its lines).
@@ -446,7 +447,7 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       expect((safeJson(await h.client().get(`/api/v1/live/${r.id}`)) as { interest: number }).interest).toBe(1);
       await fan.client.request('PUT', `/api/v1/live/${r.id}/interest`, { body: { sizeId: r.sizes[1]!.id } });
       const state = safeJson(await fan.client.get(`/api/v1/live/${r.id}/state`)) as Record<string, unknown>;
-      expect(state).toMatchObject({ now: h.clock.now().toISOString(), entry: null, interest: { size: { label: '52' } }, access: { allowed: true, tier: 1, missing: null }, room: { id: r.id, phase: 'ANNOUNCED', inRoom: 0, line: 0, quantity: 4, left: 4, held: 0 } });
+      expect(state).toMatchObject({ now: h.clock.now().toISOString(), entry: null, interest: { size: { label: '52' } }, access: { allowed: true, tier: 1, missing: null }, room: { id: r.id, phase: 'ANNOUNCED', inRoom: 0, quantity: 4, left: 4 } });
       expect(errorOf(await fan.client.request('PUT', `/api/v1/live/${r.id}/interest`, { body: { sizeId: 'nope' } })).code).toBe('LIVE_SIZE_UNKNOWN');
       expect(errorOf(await fan.client.request('PUT', `/api/v1/live/${r.id}/interest`, { body: { sizeId: r.sizes[0]!.id, extra: 1 } })).code).toBe('VALIDATION_FAILED');
       const del = await fan.client.request('DELETE', `/api/v1/live/${r.id}/interest`);
@@ -544,7 +545,7 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       const [a, b, c] = [await member(h, f, 5, '198.51.100.7'), await member(h, f, 1), await member(h, f, 1)];
       const enter = await a.client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[1]!.id });
       expect(enter.statusCode).toBe(200);
-      expect((safeJson(enter) as { entry: Record<string, unknown> }).entry).toMatchObject({ status: 'WAITING', size: { label: '52' }, quantity: 1, position: null, ahead: null, turn: null });
+      expect((safeJson(enter) as { entry: Record<string, unknown> }).entry).toMatchObject({ status: 'WAITING', size: { label: '52' }, quantity: 1, position: null, queue: null, turn: null });
       const row = await h.ctx.db.selectFrom('live_entries').select(['network_hash']).where('drop_id', '=', r.id).where('account_id', '=', a.id).executeTakeFirstOrThrow();
       expect(row.network_hash).toEqual(liveNetworkHash(h.ctx.config.ipHashPepper, '198.51.100.7'));
       expect(errorOf(await a.client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[1]!.id })).code).toBe('LIVE_ALREADY_ENTERED');
@@ -557,17 +558,20 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       expect(left.entry).toMatchObject({ status: 'LEFT' });
       await c.client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[0]!.id });
 
-      // T0: the line by tier (PALLADIUM first), a turn for the first of size 50, the others behind with those ahead.
+      // T0: the line by tier (PALLADIUM first), a turn for the first of size 50, the others behind, each its place in it.
       h.clock.advance(4 * MINUTE);
       await advance(h, r.id);
       expect(errorOf(await b.client.post(`/api/v1/live/${r.id}/size`, { sizeId: r.sizes[1]!.id })).code).toBe('LIVE_SIZE_LOCKED');
       const sa = safeJson(await a.client.get(`/api/v1/live/${r.id}/state`)) as { entry: { status: string; position: number; turn: { token: string; expiresAt: string } }; room: Record<string, unknown> };
       expect(sa.entry).toMatchObject({ status: 'TURN', position: 1 });
       expect(sa.entry.turn.expiresAt).toBe(new Date(h.clock.now().getTime() + 30 * SECOND).toISOString());
-      expect(sa.room).toMatchObject({ phase: 'LIVE', inRoom: 3, line: 2, left: 1, held: 1, sizes: [{ label: '50', stock: 1, left: 0, held: 1 }, { label: '52', stock: 1, left: 1, held: 0 }] });
-      const others = [safeJson(await b.client.get(`/api/v1/live/${r.id}/state`)), safeJson(await c.client.get(`/api/v1/live/${r.id}/state`))] as { entry: { status: string; ahead: number; turn: unknown } }[];
+      // ONE QUEUE (D8, D25, D32): no line's length, no held piece; each size what it still serves one collector.
+      expect(sa.room).toMatchObject({ phase: 'LIVE', inRoom: 3, left: 1, sizes: [{ label: '50', stock: 1, left: 0, serves: 1, out: false }, { label: '52', stock: 1, left: 1, serves: 1, out: false }] });
+      expect(sa.room).not.toHaveProperty('line');
+      expect(sa.room).not.toHaveProperty('held');
+      const others = [safeJson(await b.client.get(`/api/v1/live/${r.id}/state`)), safeJson(await c.client.get(`/api/v1/live/${r.id}/state`))] as { entry: { status: string; queue: { place: number }; turn: unknown } }[];
       expect(others.map((o) => o.entry.status)).toEqual(['QUEUED', 'QUEUED']);
-      expect(others.map((o) => o.entry.ahead).sort()).toEqual([0, 1]);
+      expect(others.map((o) => o.entry.queue.place).sort()).toEqual([1, 2]);
       expect(others.map((o) => o.entry.turn)).toEqual([null, null]);
 
       // The seal: the turn's secret, held at least 1.4 s on the server's clock.
@@ -675,12 +679,13 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       expect(changed.entry.sizes.map((s: { label: string }) => s.label)).toEqual(['52', '50']);
       expect(errorOf(await a.client.post(`/api/v1/live/${r.id}/size`, { sizes: [{ piece: 3, sizeId: pieceSize(r, 2, '50') }] }))).toEqual({ code: 'LIVE_SET_SIZES', message: 'This set has no such piece.' });
       expect(errorOf(await a.client.post(`/api/v1/live/${r.id}/size`, { sizes: [{ piece: 5, sizeId: pieceSize(r, 2, '50') }] })).code).toBe('VALIDATION_FAILED');
-      // T0: its turn, held in each of its sizes in the room.
+      // T0: its turn, taken in each of its sizes in the room (no held piece ever told: ONE QUEUE D25).
       h.clock.advance(4 * MINUTE);
       await advance(h, r.id);
       state = safeJson(await a.client.get(`/api/v1/live/${r.id}/state`)) as Record<string, any>;
-      expect(state).toMatchObject({ entry: { status: 'TURN', sizes: [{ label: '52' }, { label: '50' }] }, room: { quantity: 3, held: 1, left: 2 } });
-      expect(state.room.sizes.filter((s: { held: number }) => s.held === 1).map((s: { label: string }) => s.label)).toEqual(['52', '50']);
+      expect(state).toMatchObject({ entry: { status: 'TURN', sizes: [{ label: '52' }, { label: '50' }] }, room: { quantity: 3, left: 2 } });
+      expect(state.room).not.toHaveProperty('held');
+      expect(state.room.sizes.filter((s: { left: number; stock: number }) => s.left < s.stock).map((s: { label: string }) => s.label)).toEqual(['52', '50']);
     });
   });
 
@@ -737,7 +742,7 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       expect(s.headers['x-accel-buffering']).toBe('no');
       expect(s.headers['content-security-policy']).toContain("default-src 'self'");
       const room = await s.next((e) => e.event === 'room');
-      expect(room.data).toMatchObject({ now: h.clock.now().toISOString(), id: r.id, phase: 'ROOM', paused: false, over: false, inRoom: 0, line: 0, left: 2, held: 0, message: null });
+      expect(room.data).toMatchObject({ now: h.clock.now().toISOString(), id: r.id, phase: 'ROOM', paused: false, over: false, inRoom: 0, left: 2, message: null });
       // The first frame also says which size YOUR SIZES preselects (AC-01): none saved here.
       expect((await s.next((e) => e.event === 'you')).data).toEqual({ now: h.clock.now().toISOString(), entry: null, savedSize: null });
       expect(s.retry).toBeGreaterThanOrEqual(2000);
@@ -760,10 +765,11 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       const w = await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: watcher.client.cookies });
       await w.next((e) => e.event === 'you');
       h.clock.advance(4 * MINUTE);
-      await advance(h, r.id);
       const before = s.events.length;
+      // ONE QUEUE (D9): the line formed at T0 is a frame of its own before the batch (live-frames.ts), then the batch's.
+      await advance(h, r.id);
       await h.app.liveHub.pulse();
-      expect((await s.next((e) => e.event === 'room', before)).data).toMatchObject({ phase: 'LIVE', message: { text: 'The atelier is ready.' }, held: 1, left: 1 });
+      expect((await s.next((e) => e.event === 'room' && e.data.left === 1, before)).data).toMatchObject({ phase: 'LIVE', message: { text: 'The atelier is ready.' }, left: 1 });
       const turn = (await s.next((e) => e.event === 'you' && (e.data.entry as { status?: string } | null)?.status === 'TURN', before)).data.entry as { turn: { token: string } };
       expect(turn.turn.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
       expect(JSON.stringify(w.events)).not.toContain(turn.turn.token);
@@ -854,117 +860,139 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       await until(() => h.app.liveHub.open.streams === 0);
     });
 
-    it('on a paced release (W2, W5; ONE QUEUE, step Q1.2, until step Q1.3’s snapshot), an entry behind the next batch’s reach reads the queue’s small frame in place of the room and its own place, one within it the room (the line); once the next batch has gone, the room too; its state the same, with pollMs 30 s in the queue and 2 s in the room', async () => {
-      const r = await release(h, f, { inMinutes: 4, pace: { batch: 1, minutes: 1 } });
-      const [a, b, c] = [await member(h, f, 1), await member(h, f, 1), await member(h, f, 1)];
-      for (const m of [a, b, c]) expect((await m.client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[0]!.id })).statusCode).toBe(200);
-      const state = async (m: Member) => safeJson(await m.client.get(`/api/v1/live/${r.id}/state`)) as Record<string, unknown> & { entry: { status: string; queue: { place: number } | null } };
-      // Before T0 nobody waits for a batch: the room, read every 2 s, as before.
-      const early = await state(a);
-      expect(early).toMatchObject({ pollMs: 2000, room: { phase: 'ROOM', inRoom: 3 }, entry: { status: 'WAITING', queue: null } });
-      expect(early).not.toHaveProperty('queue');
+    it('ONE QUEUE (Q1.3): every QUEUED entry reads its own figures with its state, from the queue’s snapshot: its place in its size, its estimated wait, what holds the batches, whether a batch can reach it next, never the pace, the line or a held piece (D8, D19, D25); pollMs 2 s for those next, 10 s to a minute behind, 30 s while held', async () => {
+      const r = await release(h, f, { inMinutes: 4, pace: { batch: 1, minutes: 1 }, sizes: [{ label: '52', stock: 10 }] });
+      const members = [await member(h, f, 1), await member(h, f, 1), await member(h, f, 1), await member(h, f, 1)];
+      for (const m of members) expect((await m.client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[0]!.id })).statusCode).toBe(200);
+      type State = Record<string, unknown> & { room: Record<string, unknown> & { sizes: Record<string, unknown>[] }; entry: { status: string; queue: { place: number } | null } };
+      const state = async (m: Member) => safeJson(await m.client.get(`/api/v1/live/${r.id}/state`)) as State;
+      // Before T0: the room, read every 2 s; no queue yet.
+      const early = await state(members[0]!);
+      expect(early).toMatchObject({ pollMs: 2000, room: { phase: 'ROOM', inRoom: 4 }, entry: { status: 'WAITING', queue: null } });
+      // The room never says the line's length nor a held piece: each size what it still serves one collector (D32).
+      expect(early.room).not.toHaveProperty('line');
+      expect(early.room).not.toHaveProperty('held');
+      expect(early.room.sizes).toEqual([{ id: r.sizes[0]!.id, label: '52', stock: 10, left: 10, serves: 1, out: false }]);
 
-      // T0: the first batch gives one turn; the next in the line is within the next batch's reach (its place 1 of 1),
-      // the last behind it (its place 2).
+      // T0: one turn by the first batch; then three in the queue, places 1, 2 (next: the scheduled batch and one extra
+      // can reach them) and 3 (behind).
       h.clock.advance(4 * MINUTE);
-      const next = new Date(h.clock.now().getTime() + MINUTE).toISOString();
       await advance(h, r.id);
-      const states = new Map<Member, Awaited<ReturnType<typeof state>>>();
-      for (const m of [a, b, c]) states.set(m, await state(m));
-      const [inside, within, waiter] = [
-        [a, b, c].find((m) => states.get(m)!.entry.status === 'TURN')!,
-        [a, b, c].find((m) => states.get(m)!.entry.status === 'QUEUED' && states.get(m)!.entry.queue === null)!,
-        [a, b, c].find((m) => states.get(m)!.entry.queue !== null)!,
-      ];
-      for (const m of [inside, within]) {
-        expect(states.get(m)).toMatchObject({ pollMs: 2000, room: { phase: 'LIVE' }, entry: { queue: null } });
-        expect(states.get(m)).not.toHaveProperty('queue');
+      const states = new Map<Member, State>();
+      for (const m of members) states.set(m, await state(m));
+      const at = (place: number) => members.find((m) => states.get(m)!.entry.queue?.place === place)!;
+      expect(members.filter((m) => states.get(m)!.entry.status === 'TURN')).toHaveLength(1);
+      expect(states.get(at(1))).toMatchObject({ pollMs: 2000, room: { phase: 'LIVE' }, entry: { status: 'QUEUED', queue: { place: 1, waitMs: MINUTE, paused: null, next: true, out: false } } });
+      expect(states.get(at(2))).toMatchObject({ pollMs: 2000, entry: { queue: { place: 2, waitMs: 2 * MINUTE, next: true } } });
+      // Behind: 3 minutes to its turn, 2 until it could be next: read again in a minute.
+      const waiter = at(3);
+      expect(states.get(waiter)).toMatchObject({ pollMs: 60_000, entry: { queue: { place: 3, waitMs: 3 * MINUTE, paused: null, next: false, out: false } } });
+      for (const m of members) {
+        const st = states.get(m)!;
+        expect(st).not.toHaveProperty('queue');
+        expect(Object.keys(st.entry.queue ?? {}).sort()).toEqual(st.entry.queue ? ['next', 'out', 'paused', 'place', 'waitMs'] : []);
       }
-      const frame = { phase: 'LIVE', nextBatchAt: next, batch: 1, minutes: 1, paused: false, batches: 1, waiting: 2 };
-      expect(states.get(waiter)).toMatchObject({ pollMs: 30_000, queue: frame, entry: { status: 'QUEUED', queue: { place: 2, etaAt: new Date(Date.parse(next) + MINUTE).toISOString(), paused: false, next: false } } });
-      expect(states.get(waiter)).not.toHaveProperty('room');
 
-      // The streams: the room to the one within the next batch's reach, never the queue's frame; the one behind holds
-      // none (204: its page reads its state).
-      const si = await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: within.client.cookies });
-      expect(si.status).toBe(200);
-      await until(() => si.events.some((e) => e.event === 'room'));
-      expect(si.events.map((e) => e.event)).not.toContain('queue');
-      const sw = await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: waiter.client.cookies });
-      expect([sw.status, sw.events]).toEqual([204, []]);
-
-      // PAUSE PACE reaches the queue: PAUSED, no estimate, read every 30 s; RESUME PACE at once moves nothing.
+      // PAUSE PACE: the time stays, frozen (D17), read every 30 s; the release's PAUSE likewise, said RELEASE.
       await f.live.pausePace(r.id, f.admin);
-      expect(await state(waiter)).toMatchObject({ pollMs: 30_000, queue: { paused: true, nextBatchAt: next }, entry: { queue: { place: 2, etaAt: null, paused: true } } });
+      h.clock.advance(20 * SECOND);
+      expect(await state(waiter)).toMatchObject({ pollMs: 30_000, entry: { queue: { place: 3, waitMs: 3 * MINUTE, paused: 'PACE', next: false } } });
       await f.live.resumePace(r.id, f.admin);
+      await f.live.pause(r.id, f.admin);
+      expect(await state(waiter)).toMatchObject({ pollMs: 30_000, entry: { queue: { paused: 'RELEASE', waitMs: 3 * MINUTE } } });
+      await f.live.resume(r.id, f.admin);
 
-      // The next batch: the one behind is now within the next batch's reach: the room again, its state every 2 s.
+      // The next batch (after the phones next have read it: G2): the one behind is now next, read every 2 s.
+      for (const m of [at(1), at(2)]) await state(m);
       h.clock.advance(MINUTE);
       await advance(h, r.id);
-      const moved = await state(waiter);
-      expect(moved).toMatchObject({ pollMs: 2000, room: { phase: 'LIVE' }, entry: { queue: null } });
-      expect(moved).not.toHaveProperty('queue');
-      si.close();
-      await until(() => h.app.liveHub.open.streams === 0);
+      expect(await state(waiter)).toMatchObject({ pollMs: 2000, entry: { queue: { place: 2, next: true } } });
     });
 
-    it('on a paced release (W2; ONE QUEUE, step Q1.2), only an entry the next batch can reach keeps its stream (it reads the line): one behind it is sent its place and the queue’s frame, then its stream ends, a new one answers 204, and its state says to read it again as its batch nears (a minute at most, 30 s while held)', async () => {
-      const r = await release(h, f, { inMinutes: 4, pace: { batch: 1, minutes: 3 } });
-      const [a, b, c] = [await member(h, f, 1), await member(h, f, 1), await member(h, f, 1)];
-      for (const m of [a, b, c]) expect((await m.client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[0]!.id })).statusCode).toBe(200);
-      const state = async (m: Member) => safeJson(await m.client.get(`/api/v1/live/${r.id}/state`)) as Record<string, unknown> & { entry: { queue: { place: number; next: boolean } | null } };
+    it('ONE QUEUE (Q1.3, D9): only an entry a batch can reach next keeps its stream (its `you` events carry its own figures, never a queue event): one behind is sent its place and the room, then its stream ends, a new one answers 204 until it is next', async () => {
+      const r = await release(h, f, { inMinutes: 4, pace: { batch: 1, minutes: 3 }, sizes: [{ label: '52', stock: 10 }] });
+      const members = [await member(h, f, 1), await member(h, f, 1), await member(h, f, 1), await member(h, f, 1)];
+      for (const m of members) expect((await m.client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[0]!.id })).statusCode).toBe(200);
+      const state = async (m: Member) => safeJson(await m.client.get(`/api/v1/live/${r.id}/state`)) as Record<string, unknown> & { entry: { status: string; queue: { place: number; next: boolean } | null } };
       // Before T0, everyone in the room on a stream.
       const streams = new Map<Member, Sse>();
-      for (const m of [a, b, c]) streams.set(m, await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: m.client.cookies }));
-      await until(() => h.app.liveHub.open.streams === 3);
-      // The room's frame before T0, as the pulse sends it every second (ONE QUEUE: the batch of T0 goes after a frame).
+      for (const m of members) streams.set(m, await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: m.client.cookies }));
+      await until(() => h.app.liveHub.open.streams === 4);
       await h.app.liveHub.pulse();
       const from = new Map([...streams].map(([m, s]) => [m, s.events.length]));
 
-      // T0: one given its turn, one for the next batch (3 min later), one behind it (6 min later); the engine has the
-      // frame after the batch published (live-frames.ts).
+      // T0: one given its turn; places 1 and 2 next, 3 behind (6 minutes to its turn: read again in a minute).
       h.clock.advance(4 * MINUTE);
       await advance(h, r.id);
       const states = new Map<Member, Awaited<ReturnType<typeof state>>>();
-      for (const m of [a, b, c]) states.set(m, await state(m));
-      const status = (m: Member) => (states.get(m)!.entry as unknown as { status: string }).status;
-      const inside = [a, b, c].find((m) => status(m) === 'TURN')!;
-      const next = [a, b, c].find((m) => status(m) === 'QUEUED' && states.get(m)!.entry.queue === null)!;
-      const behind = [a, b, c].find((m) => states.get(m)!.entry.queue?.place === 2)!;
-      // Within the next batch's reach: the line (the room, read every 2 s), no queue.
-      expect(states.get(next)).toMatchObject({ pollMs: 2000, entry: { queue: null } });
-      // 6 min to its batch, 3 once it is the next one: read again within half of that, a minute at most.
-      expect(states.get(behind)).toMatchObject({ pollMs: 60_000, entry: { queue: { place: 2, next: false } } });
+      for (const m of members) states.set(m, await state(m));
+      const at = (place: number) => members.find((m) => states.get(m)!.entry.queue?.place === place)!;
+      const inside = members.find((m) => states.get(m)!.entry.status === 'TURN')!;
+      const behind = at(3);
+      expect(states.get(behind)).toMatchObject({ pollMs: 60_000, entry: { queue: { place: 3, next: false } } });
 
-      // The frames: the one behind is sent its place and the queue's frame, then its stream ends; the others keep theirs.
+      // The frames: at T0 the line's own (before the batch: places 1–4, the first two next), then the batch's. Those not
+      // next in a frame are sent their place and the room, then their stream ends: the third and fourth at the line's
+      // frame (the second of now among them), the one behind now; the first two keep theirs.
       await h.app.liveHub.pulse();
       const sb = streams.get(behind)!;
-      expect((await sb.next((e) => e.event === 'you', from.get(behind))).data.entry).toMatchObject({ status: 'QUEUED', queue: { place: 2, next: false } });
-      expect((await sb.next((e) => e.event === 'queue', from.get(behind))).data).toMatchObject({ batch: 1, minutes: 3, waiting: 2 });
+      expect((await sb.next((e) => e.event === 'you', from.get(behind))).data.entry).toMatchObject({ status: 'QUEUED', queue: { next: false } });
       await until(() => sb.ended);
-      expect((await streams.get(next)!.next((e) => e.event === 'you', from.get(next))).data.entry).toMatchObject({ status: 'QUEUED', queue: null });
+      expect((await streams.get(at(1))!.next((e) => e.event === 'you' && (e.data.entry as { queue?: { place: number } | null })?.queue?.place === 1, from.get(at(1)))).data.entry).toMatchObject({ status: 'QUEUED', queue: { next: true } });
+      expect(streams.get(at(1))!.ended).toBe(false);
       await streams.get(inside)!.next((e) => e.event === 'room', from.get(inside));
+      for (const s of streams.values()) expect(s.events.map((e) => e.event)).not.toContain('queue');
       await until(() => h.app.liveHub.open.streams === 2);
-      expect(streams.get(next)!.ended).toBe(false);
+      // The second, next now, reads it at its next reading and follows the stream again.
+      expect(await state(at(2))).toMatchObject({ pollMs: 2000, entry: { queue: { place: 2, next: true } } });
+      const second = await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: at(2).client.cookies });
+      expect(second.status).toBe(200);
+      second.close();
       // Asked again while behind: 204, nothing held.
       const again = await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: behind.client.cookies });
       expect(again.status).toBe(204);
-      expect(h.app.liveHub.open.streams).toBe(2);
       expect(h.app.liveHub.open.accounts.get(behind.id)).toBeUndefined();
 
-      // Held: its state says 30 s, PAUSED.
-      await f.live.pausePace(r.id, f.admin);
-      expect(await state(behind)).toMatchObject({ pollMs: 30_000, queue: { paused: true }, entry: { queue: { place: 2, paused: true, next: false } } });
-      await f.live.resumePace(r.id, f.admin);
-
-      // The next batch: the one behind is now within its reach (the line), its stream allowed again.
+      // The next batch (the next ones have read it on their streams: G2): the one behind is next, its stream allowed again.
       h.clock.advance(3 * MINUTE);
       await advance(h, r.id);
-      expect(await state(behind)).toMatchObject({ pollMs: 2000, entry: { queue: null } });
+      expect(await state(behind)).toMatchObject({ pollMs: 2000, entry: { queue: { place: 2, next: true } } });
       const reopened = await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: behind.client.cookies });
       expect(reopened.status).toBe(200);
-      expect((await reopened.next((e) => e.event === 'you')).data.entry).toMatchObject({ status: 'QUEUED', queue: null });
+      expect((await reopened.next((e) => e.event === 'you')).data.entry).toMatchObject({ status: 'QUEUED', queue: { place: 2, next: true } });
       for (const s of [...streams.values(), reopened]) s.close();
+      await until(() => h.app.liveHub.open.streams === 0);
+    });
+
+    it('ONE QUEUE (Q1.3, G2 through the app): a batch after the first waits until the phones it reaches have read that they are next, with GET /state or on their stream; the frame (the room) carries no place, each entry its own fresh one (D8)', async () => {
+      const r = await release(h, f, { inMinutes: 4, pace: { batch: 1, minutes: 1 }, sizes: [{ label: '52', stock: 10 }] });
+      const members = [await member(h, f, 1), await member(h, f, 1), await member(h, f, 1)];
+      for (const m of members) expect((await m.client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[0]!.id })).statusCode).toBe(200);
+      const state = async (m: Member) => safeJson(await m.client.get(`/api/v1/live/${r.id}/state`)) as Record<string, unknown> & { room: Record<string, unknown>; entry: { status: string; queue: { place: number; next: boolean } | null } };
+      h.clock.advance(4 * MINUTE);
+      await advance(h, r.id);
+      // The line by position: the first in its turn, then the second (place 1) and the third (place 2), both next.
+      const byPosition = new Map((await h.ctx.db.selectFrom('live_entries').select(['account_id', 'position']).where('drop_id', '=', r.id).execute()).map((e) => [e.position, e.account_id]));
+      const [second, third] = [2, 3].map((p) => members.find((m) => m.id === byPosition.get(p))!);
+      // Only the second's phone reads (GET /state): the scheduled batch of T0 + 1 reaches it, and goes.
+      const before = await state(second!);
+      expect(before.entry.queue).toMatchObject({ place: 1, next: true });
+      expect(before.room).not.toHaveProperty('line');
+      expect(before.room).not.toHaveProperty('held');
+      h.clock.advance(MINUTE);
+      expect(await advance(h, r.id)).toMatchObject({ batch: 2, turns: 1 });
+      // NEXT BATCH NOW right after reaches the third, whose phone has not read: it waits, given once its stream's
+      // first `you` event (next) is read.
+      const admin = await adminClient(h, 'OPERATOR');
+      const pressed = admin.post(`/api/admin/live/${r.id}/pace/next`, {});
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect((await h.ctx.db.selectFrom('drops').select('pace_batches').where('id', '=', r.id).executeTakeFirstOrThrow()).pace_batches).toBe(2);
+      const s = await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: third!.client.cookies });
+      expect((await s.next((e) => e.event === 'you')).data.entry).toMatchObject({ status: 'QUEUED', queue: { place: 1, next: true } });
+      expect((await pressed).statusCode).toBe(200);
+      // The entry read after the batches says its own state, never a figure computed from a frame read before them.
+      expect((await state(third!)).entry.status).toBe('TURN');
+      s.close();
       await until(() => h.app.liveHub.open.streams === 0);
     });
 
@@ -1244,11 +1272,51 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       // Its guest enters at its place, follows it, and finds it in MY PIECES through the release it follows.
       const entered = await guest.client.post(`/api/v1/live/${child}/enter`, { sizeId: r.afterRoom!.sizes[0]!.id });
       expect(safeJson(entered)).toMatchObject({ entry: { status: 'QUEUED', position: 1 } });
-      expect(safeJson(await guest.client.get(`/api/v1/live/${child}/state`))).toMatchObject({ entry: { status: 'QUEUED', afterRoom: null } });
+      // ONE QUEUE (D29): in an after-room every QUEUED entry follows its stream (no pace, no time): next, read every 2 s.
+      expect(safeJson(await guest.client.get(`/api/v1/live/${child}/state`))).toMatchObject({ pollMs: 2000, entry: { status: 'QUEUED', afterRoom: null, queue: { place: 1, waitMs: null, paused: null, next: true, out: false } } });
+      const stream = await openSse(base, `/api/v1/live/${child}/stream`, { cookies: guest.client.cookies });
+      expect(stream.status).toBe(200);
+      expect((await stream.next((e) => e.event === 'you')).data.entry).toMatchObject({ status: 'QUEUED', queue: { next: true, waitMs: null } });
+      stream.close();
       const mine = (safeJson(await guest.client.get('/api/v1/live/mine')) as { entries: { release: { id: string; afterRoomOf: string | null } }[] }).entries;
       expect(mine.find((x) => x.release.id === child)?.release.afterRoomOf).toBe(r.id);
       expect(mine.find((x) => x.release.id === r.id)?.release.afterRoomOf).toBeNull();
+      await until(() => h.app.liveHub.open.streams === 0);
     });
+  });
+
+  it('ONE QUEUE (D8, the stale-frame race gone): with frames cached, a state read after a batch says the entry’s own fresh place, and a late comer’s first reading its place (a frame built afresh), never a figure computed from a frame read before', async () => {
+    const g = await createHarness({ app: { liveHub: { pulseMs: 0, cacheMs: 60_000 } } });
+    try {
+      g.clock.set(START);
+      const gf = await liveFixtureOn(g.ctx, g.clock);
+      const r = await release(g, gf, { inMinutes: 4, pace: { batch: 1, minutes: 1 }, sizes: [{ label: '52', stock: 10 }] });
+      const members = [await member(g, gf, 1), await member(g, gf, 1), await member(g, gf, 1)];
+      for (const m of members) expect((await m.client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[0]!.id })).statusCode).toBe(200);
+      type State = { room: Record<string, unknown>; entry: { status: string; queue: { place: number; waitMs: number } | null } };
+      const state = async (m: Member) => safeJson(await m.client.get(`/api/v1/live/${r.id}/state`)) as State;
+      g.clock.advance(4 * MINUTE);
+      await g.ctx.services.live.advance(r.id);
+      const before = new Map<Member, State>();
+      for (const m of members) before.set(m, await state(m));
+      const last = members.find((m) => before.get(m)!.entry.queue?.place === 2)!;
+      // A batch: the frame cached before it is dropped (D9: recomputed at once); the entry read after it, its fresh place.
+      for (const m of members) await state(m);
+      g.clock.advance(MINUTE);
+      expect(await g.ctx.services.live.advance(r.id)).toMatchObject({ batch: 2, turns: 1 });
+      expect((await state(last)).entry.queue).toMatchObject({ place: 1, waitMs: MINUTE });
+      // A late comer, newer than the frame now cached: its first reading reads a frame built afresh, its place.
+      g.clock.advance(5 * SECOND);
+      const late = await member(g, gf, 1);
+      const entered = safeJson(await late.client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[0]!.id })) as State;
+      expect(entered.entry).toMatchObject({ status: 'QUEUED', queue: null });
+      expect((await state(late)).entry.queue).toMatchObject({ place: 2 });
+      // The room never carries a place or a figure of the line to compute one from.
+      const room = (await state(late)).room;
+      for (const key of ['line', 'held', 'queue', 'waiting', 'batch', 'nextBatchAt']) expect(room).not.toHaveProperty(key);
+    } finally {
+      await g.close();
+    }
   });
 
   it('ends every stream when the server shuts down', async () => {

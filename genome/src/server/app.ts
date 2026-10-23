@@ -59,6 +59,11 @@ export interface BuildAppOptions {
   requireAdminMfa?: boolean;
   /** The LIVE RELEASES' streams: their pulse, heartbeat, cache and per-account cap (tests). */
   liveHub?: LiveHubOptions;
+  /**
+   * G2 (ONE QUEUE, PLAN amendment 1): a batch after the first waits until the phones it reaches have read that they are
+   * next (services/live-frames.ts `useReadings`). Default on; a test of something else may switch it off.
+   */
+  liveReadings?: boolean;
 }
 
 declare module 'fastify' {
@@ -135,9 +140,13 @@ export async function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): Pro
   app.decorate('liveHub', liveHub);
   // At most one batch per published frame (services/live-frames.ts): this hub publishes the frames the engine waits for.
   ctx.services.live.frames.usePublisher((dropId) => liveHub.publishFrame(dropId));
+  // G2: the phones' readings (the streams' `you` events and GET /state record them, from the queue's snapshot) hold a
+  // batch after the first until those it reaches have read that they are next (capped at 60 s).
+  ctx.services.live.frames.useReadings(opts.liveReadings ?? true);
   app.addHook('preClose', async () => {
     closing = true;
     ctx.services.live.frames.usePublisher(null);
+    ctx.services.live.frames.useReadings(false);
     // Open streams are requests in progress: ended here, or the server would wait for them.
     liveHub.stop();
   });

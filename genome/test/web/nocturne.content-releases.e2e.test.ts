@@ -189,9 +189,9 @@ const CASES: { state: UiState; check: (page: Page, run: Run) => Promise<void> }[
       expect(await linkOf(page, '.view--live .live__foot .live__how')).toEqual({ text: 'HOW RELEASES WORK', href: HOW, target: null });
     },
   },
-  // ── In the line, an entry held: a new tab, the room stays ──
+  // ── In the queue, an entry held: a new tab, the room stays (ONE QUEUE: the one queue in place of the line) ──
   {
-    state: derived('live-line', 'how-e2e-line'),
+    state: derived('live-queue', 'how-e2e-line'),
     check: async (page) => {
       const foot = await page.locator('.view--live .live__foot').evaluate((f) => [...f.children].map((c) => c.className));
       expect(foot[0]).toContain('live__how');
@@ -203,7 +203,7 @@ const CASES: { state: UiState; check: (page: Page, run: Run) => Promise<void> }[
       await howShown(tab);
       await tab.close();
       expect(pathOf(page)).toBe(room);
-      expect(await page.locator('.view--live .live__ahead').count()).toBe(1);
+      expect(await page.locator('.view--live .live__queue').count()).toBe(1);
     },
   },
   // ── CONFIRMED: in the foot, a new tab ──

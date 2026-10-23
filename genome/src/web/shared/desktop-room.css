@@ -907,17 +907,8 @@
     margin-top: var(--d-s5);
   }
 
-  html:not(.d-touch) .d-room .d-room__body > .live__held {
-    margin-top: var(--d-s1);
-  }
-
   html:not(.d-touch) .d-room .d-room__body > .live__rule {
     display: none;
-  }
-
-  html:not(.d-touch) .d-room .d-room__body > .live__line-note {
-    max-width: min(100%, 26em);
-    margin-top: var(--d-s6);
   }
 
   html:not(.d-touch) .d-room .d-room__br > .live__place-label {
@@ -949,8 +940,8 @@
     color: var(--ink);
   }
 
-  /* ── 7b. The queue (W2, W5, W6): its place large in the centre, the line on leaving and coming back under it; the
-        estimated entry time (or PAUSED) bottom right; the release's name and LEAVE THE LINE bottom left ──────────── */
+  /* ── 7b. The one queue (ONE QUEUE): its place large in the centre, the pieces left and the one note under it; PAUSED
+        (or THE QUEUE IS PAUSED) and the time left bottom right; the release's name and LEAVE THE LINE bottom left ──── */
 
   html:not(.d-touch) .d-room .d-room__body > .live__place-label {
     margin: 0;
@@ -973,16 +964,16 @@
     margin-top: var(--d-s6);
   }
 
-  html:not(.d-touch) .d-room .d-room__br > :is(.live__queue-eta, .live__queue-paused) {
+  html:not(.d-touch) .d-room .d-room__br > :is(.live__queue-time, .live__queue-paused) {
     color: var(--ink);
-  }
-
-  html:not(.d-touch) .d-room .d-room__br > :is(.live__queue-about, .live__queue-local) {
-    margin-top: var(--d-s1);
   }
 
   html:not(.d-touch) .d-room .d-room__br > .live__queue-paused-line {
     margin-top: var(--d-s2);
+  }
+
+  html:not(.d-touch) .d-room .d-room__br > .live__queue-paused-line + .live__queue-time {
+    margin-top: var(--d-s4);
   }
 
   html:not(.d-touch) .d-room .d-room__bl > .btn.live__leave-line {
@@ -1882,7 +1873,7 @@
       padding: var(--d-s2) 0;
     }
 
-    html:not(.d-touch) .d-room .d-room__body > :is(.live__count-block, .live__turn-left, .live__deadline, .live__notice, .live__drawing, .live__line-note) {
+    html:not(.d-touch) .d-room .d-room__body > :is(.live__count-block, .live__turn-left, .live__deadline, .live__notice, .live__drawing) {
       margin-top: var(--d-s5);
     }
   }

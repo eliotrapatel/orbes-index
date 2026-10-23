@@ -10,7 +10,6 @@ import { describe, expect, it } from 'vitest';
 import { ApiClient } from '../../src/web/verify/api.js';
 import { LIVE, SETS } from '../../src/web/verify/copy.js';
 import {
-  aheadLine,
   formatMoney,
   heldPieces,
   initialSetPick,
@@ -22,10 +21,10 @@ import {
   myLiveEntries,
   pickedLabels,
   pieceSizeChoices,
-  placeAnnouncement,
+  queueModel,
   readyChecks,
-  setLineFacts,
   setShort,
+  stockLine,
   setSizesLine,
 } from '../../src/web/verify/live-model.js';
 import type { LiveAccountEntry, LiveEntry, LiveInterest, LiveRoom, LiveSheet } from '../../src/web/verify/types.js';
@@ -86,8 +85,13 @@ function sheet(extra: Partial<LiveSheet> = {}): LiveSheet {
   };
 }
 
+/** The room, a size's [free, held] pieces given by its id (ONE QUEUE: the room says `serves`, at most one set a collector, never `held`). */
 function room(left: Record<string, [number, number]> = {}): LiveRoom {
-  const sizes = SIZES.map((z) => ({ id: z.id, label: z.label, piece: z.piece, stock: z.stock, left: left[z.id]?.[0] ?? z.stock, held: left[z.id]?.[1] ?? 0 }));
+  const sizes = SIZES.map((z) => {
+    const [free, held] = left[z.id] ?? [z.stock, 0];
+    const serves = Math.min(free + held, 1);
+    return { id: z.id, label: z.label, piece: z.piece, stock: z.stock, left: free, serves, out: serves === 0 };
+  });
   return {
     id: ID(1),
     phase: 'LIVE',
@@ -98,11 +102,9 @@ function room(left: Record<string, [number, number]> = {}): LiveRoom {
     opensAt: '2026-10-05T16:52:00.000Z',
     closesAt: '2026-10-05T17:52:00.000Z',
     inRoom: 4,
-    line: 2,
     quantity: 5,
     quantityLine: '5 SETS',
     left: 2,
-    held: 2,
     sizes,
     pieces: PIECES.map((p) => ({ piece: p.piece, name: p.name, variant: p.variant, imageUrl: p.imageUrl, sizes: sizes.filter((z) => z.piece === p.piece) })),
     message: null,
@@ -123,7 +125,6 @@ function entry(extra: Partial<LiveEntry> = {}): LiveEntry {
     quantity: 1,
     tier: 1,
     position: 5,
-    ahead: 1,
     joinedAt: '2026-10-05T16:46:00.000Z',
     turn: null,
     hold: null,
@@ -181,7 +182,7 @@ describe('a set\'s LIVE RELEASE page (K44 T1, T4)', () => {
     ]);
     const interest: LiveInterest = { dropId: ID(1), size: { id: ID(11), label: '16' }, sizes: [{ piece: 1, id: ID(11), label: '16' }, { piece: 2, id: ID(22), label: '56' }, { piece: 3, id: ID(31), label: '45' }], since: '2026-10-04T10:00:00.000Z' };
     expect(initialSetPick(pieces, null, interest, saved).get(1)).toEqual({ sizeId: ID(11), from: 'interest' });
-    const held = entry({ status: 'WAITING', position: null, ahead: null });
+    const held = entry({ status: 'WAITING', position: null });
     expect(initialSetPick(pieces, held, interest, saved).get(2)).toEqual({ sizeId: ID(22), from: 'entry' });
     // A size no longer offered is never preselected.
     expect(initialSetPick(pieces, null, null, [{ piece: 2, id: ID(23), label: '58' }]).has(2)).toBe(false);
@@ -219,13 +220,11 @@ describe('a set\'s LIVE RELEASE page (K44 T1, T4)', () => {
 });
 
 describe('a set\'s line, turn and hold (K44 T1, T4)', () => {
-  it('counts the line in sets and reads the place in every size', () => {
-    const facts = setLineFacts(room());
-    expect([facts.left, facts.held]).toEqual(['2 OF 5 SETS LEFT', '2 HELD SETS MAY RETURN']);
-    expect(facts.cells).toEqual(['gone', 'held', 'held', 'free', 'free']);
-    expect(aheadLine(entry())).toBe('1 AHEAD OF YOU IN YOUR SIZES');
-    expect(aheadLine(entry({ ahead: 0 }))).toBe('YOU ARE NEXT IN YOUR SIZES');
-    expect(placeAnnouncement(entry())).toBe('Your place: 5. 1 ahead of you in your sizes.');
+  it('counts the pieces left in sets and reads the place in its sizes (ONE QUEUE, N2: SETS’ words, no held set)', () => {
+    expect(stockLine(room(), entry())).toBe('2 OF 5 SETS LEFT');
+    const queued = entry({ queue: { place: 2, waitMs: 3 * 60_000, paused: null, next: true, out: false } });
+    expect(queueModel(queued, 0, 0)).toMatchObject({ kind: 'waiting', place: 2, placeSaid: 'Your place in your sizes:', time: 'ESTIMATED 3 MINUTES LEFT', announce: 'Your place in your sizes: 2. Estimated 3 minutes left.' });
+    expect(SETS.live.queueNote).toBe('When your turn comes, the seal appears here: press and hold it to secure your set. Keep this page open; if you close it, your place is kept when you come back.');
     expect(isSetEntry(entry())).toBe(true);
     expect(isSetEntry(entry({ sizes: undefined }))).toBe(false);
   });
@@ -233,14 +232,16 @@ describe('a set\'s line, turn and hold (K44 T1, T4)', () => {
   it('is sold out in one of its sizes once no piece of it can serve the set, said with its piece', () => {
     const s = sheet({ phase: 'LIVE' });
     const now = Date.parse('2026-10-05T17:00:00.000Z');
-    expect(liveScreen({ sheet: s, viewer: 'ready', room: room(), entry: entry(), now })).toBe('line');
+    expect(liveScreen({ sheet: s, viewer: 'ready', room: room(), entry: entry(), now })).toBe('queue');
     const gone = room({ [ID(22)]: [0, 0] });
-    expect(setShort(gone, entry())).toEqual({ piece: 2, label: '56', name: 'HALO', held: 0 });
+    expect(setShort(gone, entry())).toEqual({ piece: 2, label: '56', name: 'HALO' });
     expect(liveScreen({ sheet: s, viewer: 'ready', room: gone, entry: entry(), now })).toBe('soldOut');
-    // A piece held in a turn may return: still in the line.
-    expect(liveScreen({ sheet: s, viewer: 'ready', room: room({ [ID(22)]: [0, 1] }), entry: entry(), now })).toBe('line');
+    // A piece held in a turn may return: still in the queue.
+    expect(liveScreen({ sheet: s, viewer: 'ready', room: room({ [ID(22)]: [0, 1] }), entry: entry(), now })).toBe('queue');
+    // The entry's own figures, once read, decide.
+    expect(liveScreen({ sheet: s, viewer: 'ready', room: room(), entry: entry({ queue: { place: 1, waitMs: 0, paused: null, next: true, out: true } }), now })).toBe('soldOut');
     expect(SETS.live.soldOut.title('HALO', '56')).toBe('HALO · SOLD OUT IN SIZE 56');
-    expect(SETS.live.soldOut.stay('HALO', '56')).toBe('Every HALO in size 56 is taken. You keep your place in case one returns, or you may leave.');
+    expect(SETS.live.soldOut.none('HALO', '56')).toBe('Every HALO in size 56 is reserved. You keep your place should ORBES add one, or you may leave.');
   });
 
   it('lists the hold\'s pieces, each in its size, in the set\'s order', () => {

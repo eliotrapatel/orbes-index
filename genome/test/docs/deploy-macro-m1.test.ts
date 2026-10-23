@@ -400,9 +400,9 @@ describe('the runbook of lot MACRO M1 (docs/launch/DEPLOY-MACRO-M1.md)', () => {
     expect(checks).toContain('chaque contrôle `PASSED`, dont **`The pace`**');
     expect(readDoc('genome/src/web/admin/model/system-status.ts')).toContain('THE SERVER IS STRAINED');
     expect(checks).toContain('`THE SERVER IS STRAINED`');
-    // The collector's queue page, in its words.
-    expect(LIVE.queue.kind).toBe('THE QUEUE');
-    expect(LIVE.queue.eta('12:20')).toBe('ESTIMATED ENTRY 12:20 PARIS');
+    // The collector's queue page as M1 deployed it (its runbook is history: ONE QUEUE, lot Q1 step Q1.3, replaced THE
+    // QUEUE and ESTIMATED ENTRY with LIVE NOW, YOUR PLACE in its size and ESTIMATED N MINUTES LEFT; Q1.14's runbook
+    // describes those).
     expect(checks).toContain('THE QUEUE, ta place, ESTIMATED ENTRY <heure> PARIS');
     expect(checks).toContain(`choisis la taille et ${LIVE.enterLine}`);
     expect(checks).toContain(LIVE.queue.paused);

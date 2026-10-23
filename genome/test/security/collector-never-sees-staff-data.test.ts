@@ -27,6 +27,14 @@
  * Every reply is scanned: no key `tags`, `privateNotes`, `score`, `scores`, `engagement`, the parts' names or the
  * history's, nor who opened or decided a claim; no tag's or note's words (the claim's note too); no email of a console
  * login; no email nor id of another account.
+ *
+ * ONE QUEUE (lot Q1, step Q1.3; plan §1.6; D8 "Pace hidden everywhere … never batch size, gap, queue length or the
+ * scarcity purpose", D25 "never paid/held figures to collectors"): on a paced LIVE release of its own, with entries in
+ * its queue next and behind, every collector payload of the release (GET /state, the stream's `room` and `you` events,
+ * /api/v1/live, the page, the banner, MY PIECES, the boutique board and its stream) carries none of the pace's keys
+ * (`pace`, `batch`, `minutes`, `nextBatchAt`, `batches`, `waiting`), the line's (`line`, `beyond`), a held count
+ * (`held`), the admission (`admitted…`) nor the hold after the opening (`hold…`, the entry's own `hold`, its pay window,
+ * aside) on the room, the board, an entry, its queue (exactly its five figures) or a size; nor the queue's length.
  */
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -38,7 +46,9 @@ import { sessionCookieName } from '../../src/server/services/sessions.js';
 import { seedNocturne, type NocturneDemo } from '../support/nocturne-demo.js';
 import { NOCTURNE_CONFIG } from '../support/nocturne-stage.js';
 import { seedScore } from '../support/scores.js';
-import { adminClient, createHarness, safeJson, type Client, type Harness } from '../api/support.js';
+import { accountClient, adminClient, createHarness, safeJson, type Client, type Harness } from '../api/support.js';
+import { createLiveRelease, holdPieces, liveFixtureOn } from '../support/live.js';
+import { openSse } from '../support/sse.js';
 
 const ROUTES = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'server', 'routes');
 /** The collector's route files (§3.6 C.9) and the lot's (acquisition.ts: /go/:code). */
@@ -392,4 +402,115 @@ describe('the collector never sees staff data (§3.6 C.9, §3.0 (k); step 9.13)'
     expect((x.warrantyClaims as { id: string }[]).map((c) => c.id)).toEqual([claimId]);
     expect(findings(res.body, forbidden)).toEqual([]);
   });
+});
+
+/** ONE QUEUE (D8, D25): keys of the pace, the line, a held count, the admission, the hold after the opening. */
+const PACE_KEYS = new Set(['pace', 'batch', 'minutes', 'nextBatchAt', 'batches', 'waiting', 'line', 'held', 'beyond']);
+const paceKey = (k: string, v: unknown) =>
+  PACE_KEYS.has(k) || k.startsWith('admitted') || (k.startsWith('hold') && !(k === 'hold' && (v === null || (typeof v === 'object' && v !== null && 'securedAt' in v))));
+
+/**
+ * The pace's keys found on what a LIVE payload carries of the release: the room (and its sizes, its pieces' sizes), the
+ * board (and its release), an entry (and its turn), its queue (its five figures, nothing else). The add-ons' own `line`
+ * (their words) are not the line.
+ */
+function paceFindings(value: unknown, path = '$'): string[] {
+  const out: string[] = [];
+  const own = (o: unknown, at: string) => {
+    if (!o || typeof o !== 'object' || Array.isArray(o)) return;
+    for (const [k, v] of Object.entries(o)) if (paceKey(k, v)) out.push(`key ${at}.${k}`);
+  };
+  const walk = (v: unknown, at: string) => {
+    if (Array.isArray(v)) return v.forEach((x, i) => walk(x, `${at}[${i}]`));
+    if (!v || typeof v !== 'object') return;
+    for (const [k, x] of Object.entries(v)) {
+      const here = `${at}.${k}`;
+      if (k === 'room' || k === 'board') {
+        own(x, here);
+        const r = x as { sizes?: unknown[]; pieces?: { sizes?: unknown[] }[]; release?: unknown } | null;
+        r?.sizes?.forEach((z, i) => own(z, `${here}.sizes[${i}]`));
+        r?.pieces?.forEach((p, i) => {
+          own(p, `${here}.pieces[${i}]`);
+          p.sizes?.forEach((z, j) => own(z, `${here}.pieces[${i}].sizes[${j}]`));
+        });
+        own(r?.release, `${here}.release`);
+      } else if (k === 'entry' && x && typeof x === 'object') {
+        own(x, here);
+        const e = x as { turn?: unknown; queue?: Record<string, unknown> | null };
+        own(e.turn, `${here}.turn`);
+        if (e.queue) {
+          own(e.queue, `${here}.queue`);
+          const keys = Object.keys(e.queue).sort().join(',');
+          if (keys !== 'next,out,paused,place,waitMs') out.push(`queue ${here}.queue: ${keys}`);
+        }
+      } else walk(x, here);
+    }
+  };
+  walk(value, path);
+  return out;
+}
+
+describe('the collector never reads the pace, the line or a held piece (ONE QUEUE, D8, D25; plan §1.6)', () => {
+  it('on a paced release with a queue (next and behind), no collector payload of it carries them, nor the queue’s length', async () => {
+    const h = await createHarness({ app: { liveHub: { pulseMs: 0, cacheMs: 0 } } });
+    try {
+      h.clock.set('2026-11-02T09:00:00.000Z');
+      const f = await liveFixtureOn(h.ctx, h.clock);
+      await h.app.listen({ port: 0, host: '127.0.0.1' });
+      const base = `http://127.0.0.1:${(h.app.server.address() as { port: number }).port}`;
+      const opensAt = new Date(h.clock.now().getTime() + 4 * 60_000);
+      const r = await createLiveRelease(f, { opensAt, closesAt: new Date(opensAt.getTime() + 3_600_000), pace: { batch: 1, minutes: 2 }, holdMinutes: 1, sizes: [{ label: '52', stock: 3 }] });
+      const members: { client: Client; id: string }[] = [];
+      for (let i = 0; i < 5; i++) {
+        const { client, email } = await accountClient(h);
+        const { id } = await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', email.toLowerCase()).executeTakeFirstOrThrow();
+        await holdPieces(h.ctx.db, id, 1, f.modelId);
+        expect((await client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[0]!.id })).statusCode).toBe(200);
+        members.push({ client, id });
+      }
+      const { token } = await f.live.issueBoardLink(r.id, f.admin);
+      // T0 + the hold: the first batch; then four in the queue, the first two next, the others behind; one held piece.
+      h.clock.set(new Date(opensAt.getTime() + 60_000));
+      await h.ctx.services.live.advance(r.id);
+      const bodies: [string, string][] = [];
+      for (const m of members) {
+        const res = await m.client.get(`/api/v1/live/${r.id}/state`);
+        expect(res.statusCode).toBe(200);
+        bodies.push([`GET /state (${m.id})`, res.body]);
+      }
+      const queues = bodies.map(([, b]) => (JSON.parse(b) as { entry: { queue: { next: boolean } | null } }).entry.queue);
+      expect(queues.filter((q) => q?.next === true)).toHaveLength(2);
+      expect(queues.filter((q) => q?.next === false)).toHaveLength(2);
+      const you = members[1]!.client;
+      for (const url of ['/api/v1/live', `/api/v1/live/${r.id}`, '/api/v1/live/next', '/api/v1/live/mine']) bodies.push([`GET ${url}`, (await you.get(url)).body]);
+      bodies.push(['POST /board', (await h.client().post(`/api/v1/live/${r.id}/board`, { token })).body]);
+      // The streams: every viewer's `room` and `you` events; the board's.
+      for (const m of members) {
+        const sse = await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: m.client.cookies });
+        if (sse.status === 200) await sse.next((e) => e.event === 'room');
+        for (const e of sse.events) bodies.push([`stream ${e.event} (${m.id})`, JSON.stringify(e.data)]);
+        sse.close();
+      }
+      const board = await openSse(base, `/api/v1/live/${r.id}/board/stream`, { method: 'POST', body: { token }, origin: 'https://verify.orbes.test' });
+      await board.next((e) => e.event === 'board');
+      for (const e of board.events) bodies.push([`board ${e.event}`, JSON.stringify({ board: e.data })]);
+      board.close();
+      const found: string[] = [];
+      for (const [what, body] of bodies) {
+        const json = JSON.parse(body) as unknown;
+        // A stream's event carries the room's or the entry's fields at its top: read as what it is.
+        const shaped = what.startsWith('stream room') ? { room: json } : json;
+        for (const x of paceFindings(shaped)) found.push(`${what}: ${x}`);
+        // The queue's length (4 waiting) is never said, under any name.
+        if (/"(waiting|line|inLine|queued|queueLength)":/.test(body)) found.push(`${what}: a count of the line`);
+      }
+      expect(found).toEqual([]);
+      // The scanner is not blind: the console's board carries them.
+      const admin = await adminClient(h, 'AUDITOR');
+      const consoleBoard = safeJson(await admin.get(`/api/admin/live/${r.id}/board`));
+      expect(paceFindings(consoleBoard)).toEqual(expect.arrayContaining(['key $.board.pace']));
+    } finally {
+      await h.close();
+    }
+  }, 120_000);
 });

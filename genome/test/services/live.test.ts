@@ -965,14 +965,16 @@ describe('LiveService', () => {
       await advance(r2, T0);
       f.clock.set(at(10 * SECOND));
       const lateView = await f.live.enter(late.id, r2.id, { sizeId: r2.sizes[0]!.id }, late.actor);
-      expect(lateView).toMatchObject({ status: 'QUEUED', position: 4, ahead: 0, guaranteed: true });
-      // The room in the order of the line: its first in its turn, the two others behind the holder.
+      // An action's answer carries no place (ONE QUEUE §1.3: its page reads it at its next reading); the reading does.
+      expect(lateView).toMatchObject({ status: 'QUEUED', position: 4, queue: null, guaranteed: true });
+      expect((await f.live.entry(late.id, r2.id))!.queue).toMatchObject({ place: 1 });
+      // The room in the order of the line: its first in its turn, the two others behind the holder (their place in size).
       const line = (await entriesOf(t.db, r2.id)).filter((x) => x.account_id !== late.id);
       const views = await Promise.all(line.map((x) => f.live.entry(x.account_id, r2.id)));
-      expect(views.map((v) => [v!.status, v!.position, v!.ahead])).toEqual([
+      expect(views.map((v) => [v!.status, v!.position, v!.queue?.place ?? null])).toEqual([
         ['TURN', 1, null],
-        ['QUEUED', 2, 1],
-        ['QUEUED', 3, 2],
+        ['QUEUED', 2, 2],
+        ['QUEUED', 3, 3],
       ]);
       // The first turn runs out: the late holder takes the piece at the next batch, before the second of the room.
       expect(await advance(r2, at(31 * SECOND))).toMatchObject({ missed: 1, turns: 0 });

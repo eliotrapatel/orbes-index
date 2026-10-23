@@ -219,14 +219,17 @@ describe('a set\'s LIVE RELEASE (macro scope K44 T1, T2, T4; plan MACRO M3 §5.1
     await f.live.advance(r.id);
     // E2 waits for 52 and holds 50 back; E3 needs neither and goes on; E4 needs 50 and waits behind E2.
     expect([await statusOf(r, e1!), await statusOf(r, e2!), await statusOf(r, e3!), await statusOf(r, e4!)]).toEqual(['TURN', 'QUEUED', 'TURN', 'QUEUED']);
-    expect((await f.live.entry(e4!.id, r.id))!.ahead).toBe(1);
+    // ONE QUEUE: its place in its sizes (the most before it in any of them, + 1).
+    expect((await f.live.entry(e4!.id, r.id))!.queue).toMatchObject({ place: 2, out: false });
 
-    // The room per piece, its figures in sets; the console's board and line per piece.
+    // The room per piece, its figures in sets (no held piece told: ONE QUEUE D25; what each size still serves one
+    // collector, at most its limit); the console's board and line per piece.
     const frame = (await room.frame(r.id))!;
-    expect(frame.room).toMatchObject({ quantity: 3, left: 1, held: 2 });
-    expect(frame.room.pieces?.map((p) => [p.piece, p.sizes.map((s) => [s.label, s.left, s.held])])).toEqual([
-      [1, [['52', 0, 1], ['54', 1, 1]]],
-      [2, [['45', 0, 2], ['50', 1, 0]]],
+    expect(frame.room).toMatchObject({ quantity: 3, left: 1 });
+    expect(frame.room).not.toHaveProperty('held');
+    expect(frame.room.pieces?.map((p) => [p.piece, p.sizes.map((s) => [s.label, s.left, s.serves, s.out])])).toEqual([
+      [1, [['52', 0, 1, false], ['54', 1, 1, false]]],
+      [2, [['45', 0, 1, false], ['50', 1, 1, false]]],
     ]);
     const board = (await f.liveConsole.board(r.id))!;
     expect(board).toMatchObject({ quantity: 3, totals: { stock: 3, left: 1, held: 2, turns: 2, line: 2 } });
@@ -281,10 +284,10 @@ describe('a set\'s LIVE RELEASE (macro scope K44 T1, T2, T4; plan MACRO M3 §5.1
     await f.live.enter(b!.id, r.id, choose(r, '52', '45'), b!.actor);
     f.clock.set(r.t0);
     await f.live.advance(r.id);
-    // The first batch gives one turn: A's; B waits for the next, within its reach (ONE QUEUE, step Q1.2: the line until
-    // step Q1.3's queue).
+    // The first batch gives one turn: A's; B waits for the next, which can reach it (ONE QUEUE: its place in its sizes,
+    // its estimate, next).
     expect([await statusOf(r, a!), await statusOf(r, b!)]).toEqual(['TURN', 'QUEUED']);
-    expect((await f.live.entry(b!.id, r.id))!.queue).toBeNull();
+    expect((await f.live.entry(b!.id, r.id))!.queue).toMatchObject({ place: 1, next: true, out: false, paused: null });
     const entryB = (await t.db.selectFrom('live_entries').select('id').where('drop_id', '=', r.id).where('account_id', '=', b!.id).executeTakeFirstOrThrow()).id;
     // 45 has no free piece: LET IN is refused, though 52 has one.
     expect(await refusal(f.live.letIn(r.id, entryB, f.admin))).toMatchObject({ code: 'LIVE_NO_FREE_PIECE' });

@@ -156,7 +156,9 @@ describe.skipIf(!HAS_CHROMIUM)('the intelligence of the LIVE RELEASES in the con
     await ctx.db.updateTable('admin_users').set({ password_change_required: false }).execute();
     const row = await ctx.db.selectFrom('admin_users').select('id').where('email_normalized', '=', ADMIN.email).executeTakeFirstOrThrow();
     admin = { type: 'admin', id: row.id };
-    app = await buildApp(ctx, { serveStatic: true, staticDir: webDir });
+    // The console's readings (G2's readings are the collectors' phones', tested in test/api/live.test.ts and live-pace):
+    // the accounts the test plays have no phone to read their state, so a batch after the first does not wait for them.
+    app = await buildApp(ctx, { serveStatic: true, staticDir: webDir, liveReadings: false });
     await app.listen({ port, host: '127.0.0.1' });
     browser = await chromium.launch({ executablePath: CHROMIUM, headless: true, args: ['--no-sandbox'] });
   }, 180_000);
@@ -246,7 +248,14 @@ describe.skipIf(!HAS_CHROMIUM)('the intelligence of the LIVE RELEASES in the con
 
     // 3. T0: a turn in each size; the engine then stops and the turns run out: the stream brings the alerts.
     clock.set(t0);
-    await ctx.services.live.advance(draft.id);
+    // ONE QUEUE (D9): the line formed at T0 is shown in a frame of its own before the first batch; the engine's next pass
+    // gives it (a frame is asked for at most once a second).
+    await expect
+      .poll(async () => {
+        await ctx.services.live.advance(draft.id);
+        return Number((await ctx.db.selectFrom('drops').select('pace_batches').where('id', '=', draft.id).executeTakeFirstOrThrow()).pace_batches);
+      }, POLL)
+      .toBe(1);
     await expect.poll(() => p.locator('[data-testid=live-state]').textContent(), { timeout: 15_000 }).toBe('LIVE');
     // ONE QUEUE (D5): the pieces they return are due at the next batch, T0 + 1 min: stalled ten seconds after it.
     clock.set(new Date(t0.getTime() + 71 * SECOND));

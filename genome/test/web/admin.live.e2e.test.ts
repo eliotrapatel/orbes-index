@@ -193,7 +193,9 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await ctx.db.updateTable('admin_users').set({ password_change_required: false }).execute();
     const row = await ctx.db.selectFrom('admin_users').select('id').where('email_normalized', '=', ADMIN.email).executeTakeFirstOrThrow();
     admin = { type: 'admin', id: row.id };
-    app = await buildApp(ctx, { serveStatic: true, staticDir: webDir });
+    // The console's flows (G2's readings are the collectors' phones', tested in test/api/live.test.ts and live-pace): the
+    // accounts the test plays have no phone to read their state, so a batch after the first does not wait for readings.
+    app = await buildApp(ctx, { serveStatic: true, staticDir: webDir, liveReadings: false });
     await app.listen({ port, host: '127.0.0.1' });
     browser = await chromium.launch({ executablePath: CHROMIUM, headless: true, args: ['--no-sandbox'] });
   }, 180_000);

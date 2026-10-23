@@ -24,13 +24,12 @@
  *               sound, its preference); at T0, on the server's second, the lock aligns, the door opens and the piece
  *               appears under a light sweep: DRAWING THE PLACES
  *   join        after T0, an account not in the line: the piece, its size, ENTER THE LINE (behind those in it)
- *   queue       macro scope of 2026-10-20 (W2, W5, W6): after T0 on a release that lets its line in at a pace, while
- *               the entry waits for its batch: THE QUEUE, YOUR PLACE, the estimated entry time in Paris (then on this
- *               phone when its zone differs) and how long until it, or THE QUEUE IS PAUSED; the place kept if the
- *               collector leaves and comes back; LEAVE THE LINE on a second tap. Never the pace itself. READING YOUR
- *               PLACE until the queue's frame is read. Let in by its batch, the line cross-fades in, YOU'RE IN said
- *   line        YOUR PLACE, who is ahead in your size, the pieces left overall and in your size, the held pieces
- *               that may return; sold out in your size: stay in case one returns, or LEAVE THE LINE
+ *   queue       ONE QUEUE (lot Q1, ANSWERS C3): after T0 every entry waiting for its turn (the after-room's too, headed
+ *               THE AFTER-ROOM, with no time): LIVE NOW, YOUR PLACE (its place in its size), PAUSED or THE QUEUE IS
+ *               PAUSED with its line above the time, ESTIMATED 17 MINUTES LEFT (counted down on the page, frozen while
+ *               paused), the pieces left, the one note, LEAVE THE LINE on a second tap; READING YOUR PLACE until its
+ *               place is read. Never the pace, the line ahead of it, a clock time or a held piece. Sold out in its size:
+ *               SOLD OUT, its one sentence, LEAVE THE LINE
  *   turn        PRESS AND HOLD THE SEAL: the turn's ring runs out, the hold's ring fills in 1.5 s, letting go
  *               resets it; the space bar or Enter holds it from the keyboard; a short vibration where allowed
  *   secured     the reveal: the seal's GENOME glyphs with P-D01's ceremony motion, the seal's glow, the chord and the
@@ -62,11 +61,10 @@
  * The room's foot (its screens out of NOCTURNE): HOW RELEASES WORK first (plan NEXT-NINE, FT-01; in a new tab while the
  * collector holds an entry, so the room stays), THE RELEASES, SOUND, the legal pages.
  *
- * Real time: the stream (EventSource, `room` and `you` events; `queue` in place of `room` while the entry waits for its
- * batch) while it is open; its state polled while it is not, as often as the server's `pollMs` says (2 s in the room,
- * LIVE_POLL_MS by default; 10 s in the queue), the stream tried again later. Behind the next batch (W2) the server
- * ends the stream and the page reads its state only (10 s to a minute, its first read spread over LIVE_QUEUE_SPREAD_MS),
- * until its batch is the next one. Every countdown counts on the server's
+ * Real time: the stream (EventSource, `room` and `you` events) while it is open; its state polled while it is not, as
+ * often as the server's `pollMs` says (2 s, LIVE_POLL_MS by default), the stream tried again later. Behind the next ones
+ * in the one queue (ONE QUEUE §1.3: no batch can reach it next) the server ends the stream and the page reads its state
+ * only (10 s to a minute, its first read spread over LIVE_QUEUE_SPREAD_MS), until a batch can reach it. Every countdown counts on the server's
  * clock, synced by three round trips (clockOffset). Every action is a same-origin JSON call through ApiClient (the session, the CSRF token);
  * the server's refusals read as it wrote them. Reduced motion: cross-fades only. aria-live: the place, the turn, the
  * piece secured. One primary action per screen (filled ivory): ENTER, the size chosen, PAY.
@@ -82,7 +80,6 @@ import { isDesktop, onDesktopChange, touchLayout } from '../../shared/desktop.js
 import { HOW_PATH } from '../how-model.js';
 import {
   addonChoices,
-  aheadLine,
   clockOffset,
   clockText,
   CLOCK_SAMPLES,
@@ -95,7 +92,6 @@ import {
   initialSetPick,
   interestLine,
   isEndedSheet,
-  lineFacts,
   liveReference,
   liveScreen,
   liveSet,
@@ -110,17 +106,16 @@ import {
   pickedLabels,
   pictureOf,
   pieceSizeChoices,
-  placeAnnouncement,
   queueModel,
   PRESS_GAP_MS,
   readyChecks,
   revealCalendar,
   roomSize,
   servable,
-  setLineFacts,
   setShort,
   setSizesLine,
   sizeChoices,
+  stockLine,
   tickSecond,
   windowLeft,
   zonedTime,
@@ -136,7 +131,7 @@ import { entrySizes, participationModel, RELEASES_PATH, zonedDate, type SetCardM
 import { lookbookSheetPath } from '../lookbook-model.js';
 import type { SessionStore } from '../session.js';
 import type { SoundSignature } from '../sound.js';
-import type { AccountQuestion, LiveAccess, LiveEndedSheet, LiveEntry, LiveInterest, LiveQueueFrame, LiveRoom, LiveSheet, LiveState, PieceSizeRef } from '../types.js';
+import type { AccountQuestion, LiveAccess, LiveEndedSheet, LiveEntry, LiveInterest, LiveRoom, LiveSheet, LiveState, PieceSizeRef } from '../types.js';
 import { formatMoney as money, upper } from '../view-model.js';
 import { referenceWords, releaseContext } from '../messages-model.js';
 import { dayAndHour, legalLinks, lookbookLink, PIECES_PATH, piecesLink, releasesLink, soundToggle, toneMark, viewRoot, withNumerals } from './common.js';
@@ -277,8 +272,8 @@ class LivePage {
   private readonly assertive = h('p', { class: 'visually-hidden', attrs: { 'aria-live': 'assertive' } });
   private sheet: LiveSheet | LiveEndedSheet | null;
   private room: LiveRoom | null = null;
-  /** W2: the queue's frame, read while the account's entry waits for its batch (the stream's `queue`, the state's); null otherwise. */
-  private queueFrame: LiveQueueFrame | null = null;
+  /** ONE QUEUE: the server's time of the reading that brought the entry's place and estimate (its `queue`), or null. */
+  private queueRead: number | null = null;
   /** How often the state is read without a stream: the server's `pollMs` (10 s to a minute in the queue), 2 s by default. */
   private pollMs = LIVE_POLL_MS;
   private entry: LiveEntry | null = null;
@@ -536,11 +531,9 @@ class LivePage {
     this.guarantee = state.guarantee ?? null;
     this.savedSize = state.savedSize ?? null;
     this.savedSizes = Array.isArray(state.savedSizes) ? state.savedSizes : [];
-    // W2: while the entry waits for its batch the state carries the queue's frame in place of the room.
     if (state.room) this.setRoom(state.room);
-    this.queueFrame = state.queue ?? null;
     this.setPollMs(state.pollMs);
-    this.setEntry(state.entry);
+    this.setEntry(state.entry, Date.parse(state.now));
     this.settle();
   }
 
@@ -579,7 +572,8 @@ class LivePage {
     this.room = room;
   }
 
-  private setEntry(entry: LiveEntry | null): void {
+  /** `readAt`: the server's time of the reading that brought it (a stream's event, a state read); none for an action's answer. */
+  private setEntry(entry: LiveEntry | null, readAt?: number): void {
     const before = this.entry?.status;
     if (entry?.status === 'TURN' && before !== 'TURN') this.returned = this.sizeWasFull;
     // The reveal on the transition itself, whichever brings it first (the secure's answer, the stream, a poll).
@@ -587,9 +581,11 @@ class LivePage {
     if (entry?.status !== 'TURN') this.securing = false;
     if (entry?.status !== 'QUEUED' && entry?.status !== 'TURN') this.sizeWasFull = false;
     this.entry = entry;
-    // W2: in the queue without its frame (entered after the opening, the stream lost): the frame read now, not at the
-    // next poll; the page reads its place meanwhile.
-    if (entry?.queue && !this.queueFrame && this.connection !== 'live' && this.viewer === 'ready' && !this.done()) void this.readState(false);
+    // ONE QUEUE: the time left counts down from the reading that brought it (D9: the time ticks, the place moves at readings).
+    if (entry?.queue) this.queueRead = readAt !== undefined && Number.isFinite(readAt) ? readAt : this.now();
+    // In the line without its place (an action's answer: ENTER THE LINE after the opening, D15), the stream lost: its
+    // place read now, not at the next poll; READING YOUR PLACE meanwhile.
+    if (entry?.status === 'QUEUED' && !entry.queue && this.connection !== 'live' && this.viewer === 'ready' && !this.done()) void this.readState(false);
     const held = heldEntry(entry);
     if (held) {
       this.picked = { sizeId: held.size.id, quantity: held.quantity };
@@ -606,9 +602,9 @@ class LivePage {
   }
 
   /**
-   * W2: only an entry whose batch is the next one follows the stream. Behind it, the server ends its stream (the page
-   * stops it there, `follow`'s error) and refuses a new one: its state is read as often as `pollMs` says, and the page
-   * counts the batches due between two reads (live-model queuePlace). Its batch the next one, or let in: the stream.
+   * ONE QUEUE (§1.3): only an entry a batch can reach next follows the stream. Behind, the server ends its stream (the
+   * page stops it there, `follow`'s error) and refuses a new one: its state is read as often as `pollMs` says, its time
+   * counted down between two readings. Next, or its turn come: the stream.
    */
   private trackQueue(): void {
     const was = this.behind;
@@ -799,24 +795,17 @@ class LivePage {
       this.settle();
       this.render();
     });
-    // W2: while the entry waits for its batch, the queue's frame in place of the room's.
-    es.addEventListener('queue', (ev) => {
-      const data = parse<LiveQueueFrame & { now: string }>(ev);
-      if (!data || this.stream !== es) return;
-      this.queueFrame = data;
-      this.render();
-    });
     es.addEventListener('you', (ev) => {
       const data = parse<{ now: string; entry: LiveEntry | null }>(ev);
       if (!data || this.stream !== es) return;
-      this.setEntry(data.entry);
+      this.setEntry(data.entry, Date.parse(data.now));
       this.settle();
       this.render();
     });
     es.addEventListener('error', () => {
       if (this.stream !== es) return;
       this.connection = 'reconnecting';
-      // W2: behind the next batch, the server has ended the stream after its place and the queue's frame: not asked for
+      // Behind the next ones (ONE QUEUE), the server has ended the stream after its place and the room: not asked for
       // again; the state read from a moment of its own within LIVE_QUEUE_SPREAD_MS, then as `pollMs` says.
       if (this.behind) {
         es.close();
@@ -920,8 +909,8 @@ class LivePage {
     if (!sheet) return 'failed';
     if (this.gone) return 'over';
     const kind = liveScreen({ sheet, viewer: this.viewer, room: this.room, entry: this.entry, now: this.now() });
-    // The opening at T0 plays to its end before the line (or the late arrivals' size) takes its place.
-    if (this.screen?.kind === 'room' && (kind === 'line' || kind === 'queue' || kind === 'turn' || kind === 'join' || kind === 'soldOut' || kind === 'room')) {
+    // The opening at T0 plays to its end before the queue (or the late arrivals' size) takes its place.
+    if (this.screen?.kind === 'room' && (kind === 'queue' || kind === 'turn' || kind === 'join' || kind === 'soldOut' || kind === 'room')) {
       if (this.opening === null || performance.now() - this.opening < OPENING_MS) return 'room';
     }
     return kind;
@@ -955,7 +944,7 @@ class LivePage {
     const e = heldEntry(this.entry);
     const kind = this.screen?.kind;
     let choice: string | null = null;
-    if (e && (kind === 'line' || kind === 'soldOut' || kind === 'turn')) {
+    if (e && (kind === 'queue' || kind === 'soldOut' || kind === 'turn')) {
       // Macro scope K44 T1: a set's, every size and its sets (`SIZE 17 · 52 · 45 · 1 SET`).
       const parts = e.sizes?.length ? [setSizesLine(e), SETS.live.sets(e.quantity)] : [LIVE.size(e.size.label), DESKTOP.room.pieces(e.quantity)];
       if (kind === 'turn') parts.push(formatMoney(e.priceMinor * e.quantity, e.currency));
@@ -1042,12 +1031,6 @@ class LivePage {
     if (kind !== previous && kind === 'turn') this.say(this.returned ? LIVE.announce.returned : LIVE.announce.turn, true);
     if (kind !== previous && revealing) this.say(LIVE.announce.secured(this.name()));
     if (kind !== previous && kind === 'afterRoom') this.say(LIVE.afterRoom.announce);
-    // W2: let in from the queue, the line in its place (a cross-fade, as every screen comes in): said, then the place.
-    if (previous === 'queue' && kind === 'line' && this.entry) {
-      const place = placeAnnouncement(this.entry);
-      this.lastPlace = place;
-      this.say([LIVE.announce.admitted, place].filter(Boolean).join(' '));
-    }
   }
 
   /** Whether screen `kind` is one of NOCTURNE's, with its chrome: announced, failed, the final page, an end page (or loading it). */
@@ -1071,13 +1054,16 @@ class LivePage {
     });
   }
 
-  /** The host message and the pause, under the header, on the screens of the room and the line. */
+  /**
+   * The host message and the pause, under the header, on the screens of the room and the queue: on the queue the host
+   * message only, its PAUSED (or THE QUEUE IS PAUSED) above its frozen time (ONE QUEUE, OP-6, N10: never twice).
+   */
   private renderNotice(): void {
     const kind = this.screen?.kind;
-    const live = kind === 'room' || kind === 'join' || kind === 'line' || kind === 'soldOut' || kind === 'turn' || kind === 'secured';
+    const live = kind === 'room' || kind === 'join' || kind === 'queue' || kind === 'soldOut' || kind === 'turn' || kind === 'secured';
     const room = this.room;
     const parts: HTMLElement[] = [];
-    if (live && room?.paused) parts.push(h('p', { class: 'live__paused' }, h('span', { class: 'live__notice-label', text: LIVE.paused }), h('span', { class: 'live__notice-text', text: LIVE.pausedLine })));
+    if (live && kind !== 'queue' && room?.paused) parts.push(h('p', { class: 'live__paused' }, h('span', { class: 'live__notice-label', text: LIVE.paused }), h('span', { class: 'live__notice-text', text: LIVE.pausedLine })));
     if (live && room?.message) parts.push(h('p', { class: 'live__message' }, h('span', { class: 'live__notice-label', text: LIVE.message }), h('span', { class: 'live__notice-text', text: room.message.text })));
     const key = parts.map((p) => p.textContent).join('|');
     if (this.notice.dataset.key === key) return;
@@ -1126,8 +1112,6 @@ class LivePage {
         return this.joinScreen();
       case 'queue':
         return this.queueScreen();
-      case 'line':
-        return this.lineScreen();
       case 'soldOut':
         return this.soldOutScreen();
       case 'turn':
@@ -2016,101 +2000,41 @@ class LivePage {
     );
   }
 
-  /** B3: the line. */
-  private lineScreen(): Screen {
-    // The figure read with its words (a paragraph cannot be named): the label above is the eye's, hidden from readers.
-    const figure = h('span', { class: 'live__place-figure' });
-    const place = h('p', { class: 'live__place' }, h('span', { class: 'visually-hidden', text: `${LIVE.yourPlaceSaid} ` }), figure);
-    const ahead = this.fact('', 'live__ahead');
-    const meter = h('div', { class: 'live__meter', attrs: { 'aria-hidden': 'true' } });
-    const left = this.fact('', 'live__left');
-    const held = this.fact('', 'live__held');
-    const el = h(
-      'section',
-      { class: 'live__line' },
-      this.overline(this.liveLine()),
-      this.title(this.name()),
-      h('p', { class: 'live__overline live__place-label', attrs: { 'aria-hidden': 'true' }, text: LIVE.yourPlace }),
-      place,
-      ahead,
-      meter,
-      left,
-      held,
-      this.hairline(),
-      this.note(this.isSet() ? SETS.live.lineNote : LIVE.lineNote, 'live__line-note'),
-    );
-    let cells = '';
-    return {
-      kind: 'line',
-      el,
-      update: () => {
-        const e = this.entry;
-        const room = this.room;
-        if (!e || !room) return;
-        figure.textContent = e.position === null ? '' : String(e.position);
-        setFact(ahead, aheadLine(e));
-        // Macro scope K44 T1: a set's line in sets, its place read in every one of its sizes (aheadLine).
-        const facts = e.sizes?.length ? setLineFacts(room) : lineFacts(room, e.size.id, e.size.label);
-        setFact(left, facts.left);
-        setFact(held, facts.held ?? '');
-        held.hidden = facts.held === null;
-        const key = facts.cells ? facts.cells.join('') : `bar:${facts.taken.toFixed(3)}`;
-        if (key !== cells) {
-          cells = key;
-          meter.classList.toggle('live__meter--bar', facts.cells === null);
-          if (facts.cells) {
-            meter.style.setProperty('--cells', String(facts.cells.length));
-            meter.replaceChildren(...facts.cells.map((c) => h('span', { class: `live__cell live__cell--${c}` })));
-          } else {
-            const bar = h('span', { class: 'live__bar' });
-            bar.style.transform = `scaleX(${facts.taken})`;
-            meter.replaceChildren(bar);
-          }
-        }
-        const said = placeAnnouncement(e);
-        if (said && said !== this.lastPlace) {
-          this.lastPlace = said;
-          this.say(said);
-        }
-      },
-    };
-  }
-
   /**
-   * W2, W5, W6: the queue, between the opening and the batch that lets the entry in (a paced release): its place, then
-   * when it should come in (Paris first, then this phone's clock when its zone says it otherwise) and how long until
-   * then, or PAUSED; the place kept if the collector leaves and comes back; LEAVE THE LINE on a second tap. Never the
-   * pace itself. READING YOUR PLACE until the queue's figures are read. Once let in, the line takes its place.
+   * ONE QUEUE (lot Q1, ANSWERS C3; plan §3.3): the one waiting screen, from the opening to the turn, every entry waiting
+   * (a set's in SETS' words, N2; the after-room's headed THE AFTER-ROOM with no time, D29): LIVE NOW, its name, YOUR
+   * PLACE (its place in its size, said with its size), PAUSED or THE QUEUE IS PAUSED with its line above the time, the
+   * time left (counted down from the reading, frozen while paused), the pieces left, the one note, LEAVE THE LINE on a
+   * second tap. READING YOUR PLACE until its place is read (D15). The place moves at readings only, said then.
    */
   private queueScreen(): Screen {
     const id = this.sheet!.id;
     const label = h('p', { class: 'live__overline live__place-label', attrs: { 'aria-hidden': 'true' }, text: LIVE.yourPlace });
     // The figure read with its words (a paragraph cannot be named): the label above is the eye's, hidden from readers.
+    const said = h('span', { class: 'visually-hidden' });
     const figure = h('span', { class: 'live__place-figure' });
-    const place = h('p', { class: 'live__place' }, h('span', { class: 'visually-hidden', text: `${LIVE.queue.placeSaid} ` }), figure);
+    const place = h('p', { class: 'live__place' }, said, figure);
     const reading = h('p', { class: 'live__fact live__queue-reading', attrs: { role: 'status' }, text: LIVE.queue.reading });
-    const eta = this.fact('', 'live__queue-eta');
-    const about = this.fact('', 'live__queue-about');
-    const local = this.fact('', 'live__queue-local');
-    const paused = this.fact(LIVE.queue.paused, 'live__queue-paused');
-    const pausedLine = this.note(LIVE.queue.pausedLine, 'live__queue-paused-line');
+    const paused = this.fact('', 'live__queue-paused');
+    const pausedLine = this.note('', 'live__queue-paused-line');
+    const time = this.fact('', 'live__queue-time');
+    const left = this.fact('', 'live__left');
     const errorLine = this.errorLine();
     const leave = this.action(LIVE.queue.leave, () => this.armed(() => this.act(() => this.deps.api.liveLeave(id))), 'live__leave-line');
     const el = h(
       'section',
       { class: 'live__queue' },
-      this.overline(LIVE.queue.kind),
+      this.overline(this.liveLine()),
       this.title(this.name()),
       label,
       place,
       reading,
-      eta,
-      about,
-      local,
       paused,
       pausedLine,
+      time,
+      left,
       this.hairline(),
-      this.note(LIVE.queue.keep, 'live__queue-note'),
+      this.note(this.isSet() ? SETS.live.queueNote : LIVE.queue.note, 'live__queue-note'),
       errorLine,
       leave,
     );
@@ -2118,27 +2042,30 @@ class LivePage {
       kind: 'queue',
       el,
       update: () => {
-        const q = this.entry?.queue;
-        if (!q) return;
-        const m = queueModel(q, this.queueFrame, this.now(), this.deps.localZone);
-        el.dataset.state = m.kind;
-        const known = m.kind !== 'reading';
+        const e = this.entry;
+        if (!e) return;
+        const m = queueModel(e, this.queueRead, this.now());
+        el.dataset.state = m.kind === 'reading' ? 'reading' : m.paused ? 'paused' : 'waiting';
+        const known = m.kind === 'waiting';
         reading.hidden = known;
         label.hidden = !known;
         place.hidden = !known;
-        if (known && figure.textContent !== String(m.place)) figure.textContent = String(m.place);
-        for (const x of [eta, about, local]) x.hidden = m.kind !== 'eta';
-        paused.hidden = m.kind !== 'paused';
-        pausedLine.hidden = m.kind !== 'paused';
-        if (m.kind === 'eta') {
-          setFact(eta, m.eta);
-          setFact(about, m.about);
-          setFact(local, m.local ?? '');
-          local.hidden = m.local === null;
-        }
-        if (known && m.announce !== this.lastPlace) {
-          this.lastPlace = m.announce;
-          this.say(m.announce);
+        paused.hidden = !known || !m.paused;
+        pausedLine.hidden = !known || !m.paused;
+        time.hidden = !known || m.time === null;
+        left.hidden = !known || !this.room;
+        if (known) {
+          if (said.textContent !== `${m.placeSaid} `) said.textContent = `${m.placeSaid} `;
+          if (figure.textContent !== String(m.place)) figure.textContent = String(m.place);
+          // OP-6, N10: the release's PAUSE or PAUSE PACE, with its line, above the time it freezes.
+          setFact(paused, m.paused === 'RELEASE' ? LIVE.paused : m.paused === 'PACE' ? LIVE.queue.paused : '');
+          pausedLine.textContent = m.paused === 'RELEASE' ? LIVE.pausedLine : m.paused === 'PACE' ? LIVE.queue.pausedLine : '';
+          setFact(time, m.time ?? '');
+          if (this.room) setFact(left, stockLine(this.room, e));
+          if (m.announce !== this.lastPlace) {
+            this.lastPlace = m.announce;
+            this.say(m.announce);
+          }
         }
         this.showError(errorLine);
         leave.disabled = this.busy;
@@ -2147,7 +2074,7 @@ class LivePage {
     };
   }
 
-  /** Sold out in your size: stay in line in case a piece returns, or leave (no size switch after T0). */
+  /** Sold out in your size: its one sentence (ONE QUEUE, D27), the place kept, LEAVE THE LINE (no size switch after T0). */
   private soldOutScreen(): Screen {
     const s = this.live()!;
     const text = this.note('');
@@ -2164,11 +2091,10 @@ class LivePage {
       update: () => {
         const e = this.entry;
         const now = e?.sizes?.length ? setShort(this.room, e) : null;
-        const sizeId = now ? e?.sizes?.find((x) => x.piece === now.piece)?.id : e?.size.id;
-        const size = e ? roomSize(this.room, sizeId) : null;
-        const held = size !== null && size.held > 0;
-        text.textContent = now ? (held ? SETS.live.soldOut.stay(now.name, now.label) : SETS.live.soldOut.none(now.name, now.label)) : held ? LIVE.edge.soldOut.stay : LIVE.edge.soldOut.none;
-        setFact(place, size && size.held > 0 ? LIVE.held(size.held) : e?.position ? `${LIVE.yourPlace} ${e.position}` : '');
+        text.textContent = now ? SETS.live.soldOut.none(now.name, now.label) : LIVE.edge.soldOut.text;
+        // D19: its place in its size, as the server read it for the entry.
+        const at = e?.queue?.place ?? null;
+        setFact(place, at !== null ? `${LIVE.yourPlace} ${at}` : '');
         this.showError(errorLine);
         leave.disabled = this.busy;
         leave.textContent = this.armedUntil ? LIVE.edge.soldOut.leaveConfirm : LIVE.edge.soldOut.leave;

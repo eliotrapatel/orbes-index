@@ -17,12 +17,12 @@
  *   GET    /api/v1/live/mine                its entries, with their releases (MY PIECES)
  *   GET    /api/v1/live/:id/after-room      the after-room of release :id, for one of its guests from its T0 (404 for
  *                                           anyone else: nobody else ever sees it); then its own id for the routes below
- *   GET    /api/v1/live/:id/state           the room, its own entry and interest: the page's fallback when its stream is lost;
- *                                           while its entry waits for its batch (W2), the queue's frame in place of the
- *                                           room; `pollMs`, how soon to read it again (2 s; in the queue 10 s, up to
- *                                           a minute behind the next batch, whose entry holds no stream)
+ *   GET    /api/v1/live/:id/state           the room, its own entry (QUEUED: its own figures from the queue's snapshot,
+ *                                           never the pace) and interest: the page's fallback when its stream is lost,
+ *                                           and the reading of an entry behind the next ones; `pollMs`, how soon to read
+ *                                           it again (2 s; 10 s to a minute behind the next ones, which hold no stream)
  *   GET    /api/v1/live/:id/stream          the room and its own entry in real time (SSE), at most two per account (204
- *                                           while its entry waits behind the next batch, W2)
+ *                                           while its entry is behind the next ones, ONE QUEUE §1.3)
  *   PUT    /api/v1/live/:id/interest        I'LL BE THERE, with a size ({ sizeId }; a set's release, macro scope K44 T1:
  *                                           a size per piece, { sizes: [{ piece, sizeId }] })
  *   DELETE /api/v1/live/:id/interest        withdrawn
@@ -158,11 +158,12 @@ export const liveRoutes: FastifyPluginAsync<LiveRouteDeps> = async (app, { ctx, 
     const { id } = parse(liveParams, request.params);
     const viewer = await liveRoom.viewer(account.id, id, 'state');
     const own = await liveRoom.own(account.id, viewer);
-    // W2: while its entry waits for its batch, the queue's small frame in place of the room, read again as `pollMs` says
-    // (10 s for the next batch, up to a minute further behind, which holds no stream).
-    const state = await hub.stateOf(viewer.dropId, own.entry?.queue ?? null);
+    // ONE QUEUE (lot Q1 §1.3): the room, and its own entry with its figures from the queue's snapshot (its place, its
+    // estimate, never the pace: D8), read again as `pollMs` says (2 s; 10 s to a minute behind the next ones, which hold
+    // no stream); the reading recorded (G2).
+    const state = await hub.stateOf(viewer.dropId, own.entry);
     if (!state) throw dropNotFound();
-    return { now: ctx.clock(), ...state, ...own };
+    return { now: ctx.clock(), ...own, ...state };
   });
 
   app.get('/api/v1/live/:id/stream', async (request, reply) => {

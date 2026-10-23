@@ -74,6 +74,7 @@ import {
   effectiveDeadline,
   isAnnounced,
   liveAccessRule,
+  adminQueueFigures,
   liveBeyond,
   livePaceState,
   livePhase,
@@ -100,6 +101,7 @@ import {
   type LivePaceState,
   type LivePhase,
 } from './live.js';
+import { liveQueueSnapshot } from './live-queue.js';
 import { coverOnPublish, guaranteedPieces, releaseCovered, releaseGuaranteed, type ReleaseGuaranteed } from './guarantees.js';
 import { storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
@@ -2062,6 +2064,8 @@ export class LiveConsoleService {
     // Macro scope K44 T1: a set's entries, their sizes per piece.
     const pieces = d.set_id !== null ? await livePieceSizes(db, rows.map((r) => r.id)) : new Map<string, LivePieceSize[]>();
     const beyond = known ?? (d.pace_batch !== null && rows.some((r) => r.status === 'QUEUED') ? await liveBeyond(db, d) : null);
+    // D11: each person's queue place and estimated turn, from the queue's snapshot (live-queue.ts).
+    const queue = rows.some((r) => r.status === 'QUEUED') ? await liveQueueSnapshot(db, d, now) : null;
     return rows.map((r) => ({
       id: r.id,
       accountId: r.account_id,
@@ -2085,6 +2089,7 @@ export class LiveConsoleService {
       admittedAt: r.admitted_at,
       batch: r.admitted_batch,
       beyond: r.status === 'QUEUED' && (beyond?.entries.has(r.id) ?? false),
+      ...adminQueueFigures(queue, r.id),
     }));
   }
 }

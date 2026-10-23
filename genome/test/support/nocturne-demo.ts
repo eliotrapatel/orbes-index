@@ -34,10 +34,9 @@
  *   collection-leads  nothing announced: the newest public model leads NOW (C43)
  *   room              a LIVE RELEASE whose room is open, three minutes before its opening (C21)
  *   live              a LIVE RELEASE live now, a collector at each step of the line and each end (the room's screens)
- *   queue             the live story without its release live now: two LIVE RELEASES that let their line in at a pace
- *                     (macro scope of 2026-10-20, W2, W5; lot M1), live now: one at 40 buyers a minute, a collector let
- *                     in and two in its queue (places 412 and 4999, the crowd ahead of them written in bulk), and one
- *                     whose pace ORBES paused, a collector in its queue (seedQueue)
+ *   queue             the live story without its release live now: two LIVE RELEASES with a pace (ONE QUEUE; first
+ *                     written for M1), live now: one at 40 turns a minute, three collectors in its one queue (the crowd
+ *                     ahead of them written in bulk), and one whose pace ORBES paused, a collector in its queue (seedQueue)
  *   afterroom         a LIVE RELEASE sold out a few minutes ago, its after-room open (C26)
  *   afterroom-ends    three LIVE RELEASES of the last two hours whose after-rooms ended with a guest still in their
  *                     line: sold out, closed at their time, ended by ORBES; and a guest who never entered one
@@ -981,11 +980,12 @@ async function bulkLine(w: World, dropId: string, sizes: readonly { id: string }
 }
 
 /**
- * W2, W5, W6 (lot M1): two LIVE RELEASES live now that let their line in at a pace. MONOLITHE IN BLUE, 40 buyers every
- * minute from its T0 five minutes ago: its line (5 240, written in bulk half a minute after T0) let in 200 by five
- * batches, its next batch due in a minute; `admitted` let in with the fourth (place 150, the line), `queued` at place 412
- * of the queue (19:00 PARIS, about 11 minutes), `queueFar` at place 4999 (about 2 h 05). MONOLITHE IN GOLD, 10 every
- * two minutes from its T0 four minutes ago, its pace paused by ORBES a minute ago: `queuePaused` at place 12.
+ * ONE QUEUE (lot Q1; first written for M1's W2, W5, W6): two LIVE RELEASES live now, each with its pace. MONOLITHE IN
+ * BLUE, 40 turns every minute from its T0 five minutes ago: its line (5 240, written in bulk half a minute after T0), its
+ * batches giving the turns its nine pieces allow, its next batch due in a minute; `admitted` (drawn place 150), `queued`
+ * (612) and `queueFar` (5 199) in its one queue, in size 17, each reading its place in that size and its time left
+ * (the queue's snapshot). MONOLITHE IN GOLD, 10 every two minutes from its T0 four minutes ago, its pace paused by ORBES
+ * a minute ago: `queuePaused` (drawn place 22) in size 17, its time frozen.
  */
 async function seedQueue(w: World): Promise<void> {
   const { ctx, clock, demo } = w;
@@ -1022,9 +1022,6 @@ async function seedQueue(w: World): Promise<void> {
     clock.set(new Date(t0.getTime() + k * MINUTE));
     await live.advance(r.id);
   }
-  // Until steps Q1.3 and Q1.8 give the one queue its screens (the M1 queue's states are replaced there): the five
-  // batches of 40 as M1 admitted them, places 1 to 200 (the nine turns the batch of T0 + 1 gave are those of M1 too).
-  await mAdmitted(w, r.id, 200, 40, t0);
 
   clock.set(at('2026-10-04T12:00:00Z'));
   const t1 = new Date(NOCTURNE_NOW.getTime() - 4 * MINUTE);
@@ -1050,27 +1047,8 @@ async function seedQueue(w: World): Promise<void> {
   await bulkLine(w, g.id, g.sizes, second, new Date(t1.getTime() + 20_000), new Map([[paused.id, g.sizes[1]!.id]]));
   clock.set(new Date(t1.getTime() + 2 * MINUTE));
   await live.advance(g.id);
-  await mAdmitted(w, g.id, 10, 10, t1, 2);
   clock.set(new Date(NOCTURNE_NOW.getTime() - MINUTE));
   await live.pausePace(g.id, w.admin);
-}
-
-/**
- * M1's admission of places 1 to `upTo` still waiting in the line, `per` a batch, the first at `t0` + `minutes`, numbered
- * from 2 (M1's batch of T0 found nobody): until steps Q1.3 and Q1.8 replace the M1 queue's states.
- */
-async function mAdmitted(w: World, dropId: string, upTo: number, per: number, t0: Date, minutes = 1): Promise<void> {
-  for (let b = 0; b * per < upTo; b++) {
-    await w.ctx.db
-      .updateTable('live_entries')
-      .set({ admitted_at: new Date(t0.getTime() + (b + 1) * minutes * MINUTE), admitted_batch: b + 2 })
-      .where('drop_id', '=', dropId)
-      .where('status', '=', 'QUEUED')
-      .where('admitted_at', 'is', null)
-      .where('position', '>', b * per)
-      .where('position', '<=', (b + 1) * per)
-      .execute();
-  }
 }
 
 /** A LIVE RELEASE of one piece, sold out five minutes ago with you still in the line: its after-room is open. */

@@ -2079,11 +2079,12 @@ export const PHONE_STATES: readonly UiState[] = [
   { id: 'set-room', title: 'THE SET’s room: its pieces behind the door, READY CHECK SIZES TO CHOOSE, YOUR SIZES a picker per piece (17 and 52 from YOUR SIZES), ENTER THE ROOM waiting for the necklace (lot M3, T1)', refs: ['M3'], variant: 'set-live', as: you, path: release('setRoom'), ready: '.view--live .live__set-pickers .live__yours:not([hidden])' },
   { id: 'set-room-ready', title: 'THE SET’s room, entered with SIZE 18 · 54 · 42: YOU’RE READY, each size to change until the opening (lot M3, T1)', refs: ['M3'], variant: 'set-live', as: 'platine', path: release('setRoom'), ready: '.view--live .live__ready:not([hidden])' },
   { id: 'set-live-join', title: 'THE SET live now, not in the line: 2 OF 5 SETS LEFT, a picker per piece (HALO 56 greyed, sold), 1 SET PER PERSON, ENTER THE LINE (lot M3, T1, T4)', refs: ['M3'], variant: 'set-live', as: you, path: release('setNow'), ready: '.view--live .live__join .live__set-pickers' },
-  { id: 'set-live-line', title: 'THE SET’s line: YOUR PLACE, 1 AHEAD OF YOU IN YOUR SIZES, 2 OF 5 SETS LEFT, 2 HELD SETS MAY RETURN (lot M3, T1)', refs: ['M3'], variant: 'set-live', as: 'setLine', path: release('setNow'), ready: '.view--live .live__ahead' },
+  // ONE QUEUE (lot Q1, step Q1.3): THE SET's waiting state is the one queue, in SETS' words (N2), its id kept.
+  { id: 'set-live-line', title: 'THE SET’s one queue: LIVE NOW, YOUR PLACE in your sizes, its time left, 2 OF 5 SETS LEFT, the one note (lot M3, T1; ONE QUEUE)', refs: ['M3'], variant: 'set-live', as: 'setLine', path: release('setNow'), ready: '.view--live .live__queue[data-state="waiting"]' },
   { id: 'set-live-turn', title: 'THE SET’s turn: PRESS AND HOLD THE SEAL, TO SECURE YOUR SET, THE ORBITAL SET · SIZE 16 · 54 · 42 · € 12 000 (lot M3, T1)', refs: ['M3'], variant: 'set-live', as: 'setTurn', path: release('setNow'), ready: '.view--live .live-hold' },
   { id: 'set-live-secured', title: 'THE SET held: YOUR SET, THE SET · 3 PIECES, each piece in its size, the GIFT BOX chosen, PAY · total (lot M3, T1)', refs: ['M3'], variant: 'set-live', as: 'setSecured', path: release('setNow'), ready: '.view--live .live__set-pieces .live__set-piece' },
   { id: 'set-live-confirmed', title: 'THE SET confirmed: CONFIRMED, YOUR SET IS RESERVED, each piece in its size on the receipt, the GIFT BOX, TOTAL, REFERENCE (lot M3, T1)', refs: ['M3'], variant: 'set-live', as: 'setBuyer', path: release('setNow'), ready: '.view--live .live__set-reserved' },
-  { id: 'set-live-sold-out', title: 'THE SET sold out in one of its sizes: HALO · SOLD OUT IN SIZE 56, stay or LEAVE THE LINE (lot M3, T1)', refs: ['M3'], variant: 'set-live', as: 'setSoldout', path: release('setNow'), ready: '.view--live .live__edge' },
+  { id: 'set-live-sold-out', title: 'THE SET sold out in one of its sizes: HALO · SOLD OUT IN SIZE 56, its one sentence, LEAVE THE LINE (lot M3, T1; ONE QUEUE)', refs: ['M3'], variant: 'set-live', as: 'setSoldout', path: release('setNow'), ready: '.view--live .live__edge' },
   { id: 'draw-selected-signed-out', title: 'A draw FOR SELECTED COLLECTORS, signed out: the rule in THE RELEASE, the sign-in says the release is for selected collectors', refs: ['F4'], variant: 'draw-selected', path: release('draw'), ready: '.view--release:has(.release__for) :is(form, .d-signin-line)' },
   {
     id: 'pieces-draws',
@@ -2143,11 +2144,12 @@ export const PHONE_STATES: readonly UiState[] = [
   // THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01): an account without a piece let in by its guarantee, shown or not.
   { id: 'room-guaranteed', title: 'The room for a holder of the house’s guarantee (2 pieces): ACCESS GRANTED, first in line in its size', refs: ['IN-01'], variant: 'room', as: 'roomHolder', path: release('room'), ready: '.view--live .live__guarantee:not([hidden])' },
   { id: 'room-guarantee-hidden', title: 'The room for a holder of a guarantee not shown: ACCESS GRANTED, no line of it', refs: ['IN-01'], variant: 'room', as: 'roomQuiet', path: release('room'), ready: '.view--live .live-door' },
-  { id: 'live-line', title: 'The line: YOUR PLACE, ahead in your size, the pieces left', refs: ['live-09'], variant: 'live', as: 'line', path: release('live'), ready: '.view--live .live__ahead' },
+  // ONE QUEUE (lot Q1, step Q1.3; ANSWERS r1, C3): the classic line screen is gone; every entry waiting reads the one
+  // queue (`live-queue` and its states). `live-line` and `live-queue-admitted` went with it.
   { id: 'live-turn', title: 'The turn: PRESS AND HOLD THE SEAL', refs: ['live-10'], variant: 'live', as: 'turn', path: release('live'), ready: '.view--live .live-hold' },
   { id: 'live-secured', title: 'Secured: the piece, the add-ons, PAY · total', refs: ['live-11'], variant: 'live', as: 'secured', path: release('live'), ready: '.view--live .live__pay' },
   { id: 'live-confirmed', title: 'CONFIRMED, in ivory', refs: ['live-12'], variant: 'live', as: 'confirmed', path: release('live'), ready: '.view--live:has(h1) .n-story__open:not([hidden])' },
-  { id: 'live-sold-out-size', title: 'SOLD OUT IN SIZE 17: stay, or LEAVE THE LINE', refs: ['live-20'], variant: 'live', as: 'soldout', path: release('live'), ready: '.view--live .live__edge' },
+  { id: 'live-sold-out-size', title: 'SOLD OUT IN SIZE 17: its one sentence (ONE QUEUE, D27), YOUR PLACE in its size, LEAVE THE LINE', refs: ['live-20'], variant: 'live', as: 'soldout', path: release('live'), ready: '.view--live .live__edge' },
   { id: 'live-missed', title: 'YOUR TURN HAS PASSED', refs: ['live-15', 'C30'], variant: 'live', as: 'missed', path: release('live'), ready: '.view--live .n-live__end' },
   { id: 'live-expired', title: 'YOUR HOLD HAS ENDED', refs: ['live-16', 'C30'], variant: 'live', as: 'expired', path: release('live'), ready: '.view--live .n-live__end' },
   { id: 'live-released', title: 'YOUR PLACE IS RELEASED', refs: ['live-17', 'C30'], variant: 'live', as: 'released', path: release('live'), ready: '.view--live .n-live__end' },
@@ -2191,10 +2193,9 @@ export const PHONE_STATES: readonly UiState[] = [
   { id: 'room-stress', title: 'A room open with the longest host message, a 24-character name, a price of € 125 400', refs: ['same pieces'], variant: 'stress', as: you, path: release('soon'), ready: '.view--live', stress: true },
   { id: 'live-far-stress', title: 'A LIVE RELEASE more than 9 days away, in USD', refs: ['same pieces'], variant: 'stress', as: you, path: release('far'), ready: '.view--live', stress: true },
 
-  // ── The queue (macro scope of 2026-10-20, W2, W5, W6; lot M1, step M1.5): a paced release, before its batch lets the entry in ──
-  { id: 'live-queue', title: 'The queue: YOUR PLACE 412, ESTIMATED ENTRY 19:00 PARIS, ABOUT 11 MIN, the place kept, LEAVE THE LINE', refs: ['W5', 'W6'], variant: 'queue', as: 'queued', path: release('queue'), ready: '.view--live .live__queue[data-state="eta"]' },
-  { id: 'live-queue-paused', title: 'The queue paused by ORBES: YOUR PLACE 12, THE QUEUE IS PAUSED, your place kept', refs: ['W5'], variant: 'queue', as: 'queuePaused', path: release('queuePaused'), ready: '.view--live .live__queue[data-state="paused"]' },
-  { id: 'live-queue-admitted', title: 'Let in from the queue by its batch: the line, YOUR PLACE 150, ahead in your size', refs: ['W2'], variant: 'queue', as: 'admitted', path: release('queue'), ready: '.view--live .live__ahead' },
+  // ── The one queue (ONE QUEUE, lot Q1, step Q1.3; ANSWERS C3): every entry waiting for its turn ──
+  { id: 'live-queue', title: 'The one queue: LIVE NOW, YOUR PLACE in size 17, ESTIMATED … LEFT, the pieces left, the one note, LEAVE THE LINE', refs: ['W5', 'W6'], variant: 'queue', as: 'queued', path: release('queue'), ready: '.view--live .live__queue[data-state="waiting"]' },
+  { id: 'live-queue-paused', title: 'The one queue paused by ORBES (PAUSE PACE): YOUR PLACE, THE QUEUE IS PAUSED over its frozen time', refs: ['W5'], variant: 'queue', as: 'queuePaused', path: release('queuePaused'), ready: '.view--live .live__queue[data-state="paused"]' },
   {
     id: 'live-queue-error',
     title: 'The queue, LEAVE THE LINE refused: the refusal as the server words it',
@@ -2204,14 +2205,14 @@ export const PHONE_STATES: readonly UiState[] = [
     path: release('queue'),
     routes: (page) => page.route('**/api/v1/live/*/leave', (r) => r.fulfill({ status: 429, contentType: 'application/json', body: JSON.stringify({ error: { code: 'RATE_LIMITED', message: 'Too many requests.' } }) })),
     act: async (run) => {
-      await run.page.locator('.view--live .live__queue[data-state="eta"]').waitFor({ timeout: 20_000 });
+      await run.page.locator('.view--live .live__queue[data-state="waiting"]').waitFor({ timeout: 20_000 });
       // A second tap within a few seconds confirms it; the server refuses it.
       await button(run, 'LEAVE THE LINE').click();
       await run.page.locator('.live__queue .live__leave-line', { hasText: /AGAIN TO LEAVE/ }).click();
     },
     ready: '.view--live .live__queue .live__error:not([hidden])',
   },
-  { id: 'live-queue-stress', title: 'The queue at its longest: YOUR PLACE 4999, ESTIMATED ENTRY 20:54 PARIS, ABOUT 2 H 05', refs: ['same pieces'], variant: 'queue', as: 'queueFar', path: release('queue'), ready: '.view--live .live__queue[data-state="eta"]', stress: true },
+  { id: 'live-queue-stress', title: 'The one queue at its longest: the last place in size 17, ESTIMATED … H … MIN LEFT', refs: ['same pieces'], variant: 'queue', as: 'queueFar', path: release('queue'), ready: '.view--live .live__queue[data-state="waiting"]', stress: true },
   {
     id: 'live-queue-loading',
     title: 'The queue just entered after the opening, its figures being read: READING YOUR PLACE',
@@ -3201,7 +3202,7 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
   // not eligible; the room not eligible, then entered (its write, last of its stage); the after-room's join and its ends;
   // the queue (lot M1).
   'desk-10': [
-    ...desk(1440, 'live-line', 'live-secured', 'live-confirmed', 'live-sold-out-size', 'live-missed', 'live-expired', 'live-released', 'live-left', 'live-removed', 'live-join'),
+    ...desk(1440, 'live-secured', 'live-confirmed', 'live-sold-out-size', 'live-missed', 'live-expired', 'live-released', 'live-left', 'live-removed', 'live-join'),
     ...desk(1440, 'live-rules', 'live-rules-not-eligible', 'room-not-eligible', 'room-ready'),
     ...desk(1440, 'after-room-join', 'after-room-sold-out', 'after-room-closed', 'after-room-ended', 'after-room-over'),
     // The queue of a paced release (lot M1, W2, W5): the place and its estimate, then paused.

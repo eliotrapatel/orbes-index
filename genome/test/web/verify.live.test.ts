@@ -26,7 +26,6 @@ import {
   initialPick,
   initialSize,
   isEndedSheet,
-  lineFacts,
   bannerModel,
   interestLine,
   liveCards,
@@ -47,23 +46,21 @@ import {
   myLiveEntries,
   phaseAt,
   pictureOf,
-  placeAnnouncement,
-  queueAbout,
-  queueEta,
   queueModel,
-  queuePlace,
   readyChecks,
   releaseTime,
   servable,
   sizeChoices,
+  stockLine,
   tickSecond,
+  timeLeft,
   windowLeft,
   zonedTime,
   type LiveScreenInput,
 } from '../../src/web/verify/live-model.js';
 import { SEAL_RINGS, SPECIMEN_GLYPHS, specimenData } from '../../src/web/verify/live-seal.js';
 import { StoryCards } from '../../src/web/verify/story-card.js';
-import type { LiveAccountEntry, LiveCard, LiveEndedSheet, LiveEntry, LiveQueue, LiveQueueFrame, LiveRoom, LiveSheet } from '../../src/web/verify/types.js';
+import type { LiveAccountEntry, LiveCard, LiveEndedSheet, LiveEntry, LiveQueue, LiveRoom, LiveSheet } from '../../src/web/verify/types.js';
 
 const ID = '8a1d0c55-4b2e-4f3a-9c1d-0e5f6a7b8c9d';
 const ENTRY = '01edcb93-7b6d-4e5f-8a9b-0c1d2e3f4a5b';
@@ -138,15 +135,13 @@ function room(extra: Partial<LiveRoom> = {}): LiveRoom {
     opensAt: iso(T0),
     closesAt: iso(T0 + 3_600_000),
     inRoom: 214,
-    line: 0,
     quantity: 5,
     quantityLine: '25 PIECES',
     left: 5,
-    held: 0,
     sizes: [
-      { id: S48, label: '48', stock: 3, left: 3, held: 0 },
-      { id: S52, label: '52', stock: 2, left: 2, held: 0 },
-      { id: S56, label: '56', stock: 0, left: 0, held: 0 },
+      { id: S48, label: '48', stock: 3, left: 3, serves: 1, out: false },
+      { id: S52, label: '52', stock: 2, left: 2, serves: 1, out: false },
+      { id: S56, label: '56', stock: 0, left: 0, serves: 0, out: true },
     ],
     message: null,
     ...extra,
@@ -162,7 +157,6 @@ function entry(extra: Partial<LiveEntry> = {}): LiveEntry {
     quantity: 1,
     tier: 2,
     position: null,
-    ahead: null,
     joinedAt: iso(T0 - 120_000),
     turn: null,
     hold: null,
@@ -281,9 +275,9 @@ describe('which screen the page shows', () => {
     expect(screen({ sheet: over({ afterRoom: { parentId: ID } }), viewer: 'signed-out' })).toBe('over');
   });
 
-  it('follows the account\'s entry: the room, the line, the turn, the piece held, confirmed, and every edge page', () => {
+  it('follows the account\'s entry: the room, the one queue, the turn, the piece held, confirmed, and every edge page', () => {
     expect(screen({ entry: entry() })).toBe('room');
-    expect(screen({ entry: entry({ status: 'QUEUED', position: 4, ahead: 1 }), now: T0 + 5_000 })).toBe('line');
+    expect(screen({ entry: entry({ status: 'QUEUED', position: 4 }), now: T0 + 5_000 })).toBe('queue');
     expect(screen({ entry: entry({ status: 'TURN' }) })).toBe('turn');
     expect(screen({ entry: entry({ status: 'SECURED' }) })).toBe('secured');
     expect(screen({ entry: entry({ status: 'CONFIRMED' }) })).toBe('confirmed');
@@ -301,13 +295,17 @@ describe('which screen the page shows', () => {
     expect(screen({ viewer: 'signed-out', entry: entry({ status: 'CONFIRMED' }) })).toBe('signin');
   });
 
-  it('says sold out in your size only when no piece is free nor held that may return', () => {
-    const queued = entry({ status: 'QUEUED', position: 4, ahead: 1 });
+  it('says sold out in your size only when no piece is free nor held that may return: the server’s `out` for the entry (D27), the room’s `serves` until it is read; every piece held, none paid, is the waiting screen (D26)', () => {
+    const queued = entry({ status: 'QUEUED', position: 4 });
     const now = T0 + 5_000;
-    const sizes = (left: number, held: number) => room({ phase: 'LIVE', sizes: [{ id: S52, label: '52', stock: 2, left, held }] });
-    expect(screen({ entry: queued, room: sizes(0, 2), now })).toBe('line');
+    const sizes = (left: number, serves: number) => room({ phase: 'LIVE', sizes: [{ id: S52, label: '52', stock: 2, left, serves, out: serves === 0 }] });
+    expect(screen({ entry: queued, room: sizes(0, 1), now })).toBe('queue');
     expect(screen({ entry: queued, room: sizes(0, 0), now })).toBe('soldOut');
-    expect(screen({ entry: entry({ ...queued, quantity: 2 }), room: sizes(1, 0), now })).toBe('soldOut');
+    expect(screen({ entry: entry({ ...queued, quantity: 2 }), room: sizes(1, 1), now })).toBe('soldOut');
+    // Read: the entry's own figures decide, whatever the room.
+    const own = (out: boolean): LiveQueue => ({ place: 3, waitMs: 60_000, paused: null, next: true, out });
+    expect(screen({ entry: entry({ ...queued, queue: own(false) }), room: sizes(0, 0), now })).toBe('queue');
+    expect(screen({ entry: entry({ ...queued, queue: own(true) }), room: sizes(0, 1), now })).toBe('soldOut');
     expect(phaseAt(sheet(), null, T0 - 400_000)).toBe('ANNOUNCED');
     expect(phaseAt(sheet(), room({ opensAt: iso(T0 + 60_000) }), T0 + 1_000)).toBe('ROOM');
     expect(isEndedSheet(sheet())).toBe(false);
@@ -419,12 +417,20 @@ describe('the room', () => {
       { id: S52, label: '52', available: true, selected: true },
     ]);
     // After T0, the server's rule for a late entry: a size whose pieces are all in turns or held can still be chosen (one
-    // may return, the late arrival joins behind); only a size whose every piece is confirmed cannot.
-    const late = (left: number, held: number) => room({ sizes: [{ id: S48, label: '48', stock: 3, left, held }] });
+    // may return, the late arrival joins behind); only a size whose every piece is confirmed cannot. ONE QUEUE (D32): the
+    // room says what each size still serves one collector (`serves`, never a held count), as `left + held` said before.
+    const late = (left: number, serves: number) => room({ sizes: [{ id: S48, label: '48', stock: 3, left, serves, out: serves === 0 }] });
     expect(sizeChoices(s, late(0, 1), null)[0]!.available).toBe(true);
     expect(sizeChoices(s, late(0, 3), null)[0]!.available).toBe(true);
     expect(sizeChoices(s, late(0, 0), null)[0]!.available).toBe(false);
-    expect([servable(late(0, 1).sizes[0]!), servable(late(2, 1).sizes[0]!), servable(null)]).toEqual([1, 3, null]);
+    expect([servable(late(0, 1).sizes[0]!), servable(late(2, 3).sizes[0]!), servable(null)]).toEqual([1, 3, null]);
+    // 2 left + 1 held, 5 a collector at most: serves 3; ENTER THE LINE's quantity 3 available, 4 not; the size offered.
+    const two = room({ sizes: [{ id: S48, label: '48', stock: 3, left: 2, serves: 3, out: false }] });
+    expect([3, 4].map((q) => (servable(two.sizes[0]!) ?? 0) >= q)).toEqual([true, false]);
+    expect(sizeChoices(s, two, null)[0]).toMatchObject({ id: S48, available: true });
+    // The JOIN screen (views/live.ts) reads the same rule, sets included: unchanged (D32, A 14:50 "don't change it").
+    const view = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../src/web/verify/views/live.ts'), 'utf8');
+    expect(view).toContain('The server\'s rule for a late entry: the pieces of the size not confirmed (held ones may return) serve it');
     const interest = { dropId: ID, size: { id: S48, label: '48' }, since: iso(T0 - 86_400_000) };
     expect(initialSize(s, null, interest)).toBe(S48);
     expect(initialSize(s, entry(), interest)).toBe(S52);
@@ -473,29 +479,12 @@ describe('the room', () => {
   });
 });
 
-describe('the line, the turn and the piece held', () => {
-  it('says the pieces left overall and in your size, the held pieces that may return, and draws them', () => {
-    const r = room({ phase: 'LIVE', quantity: 25, left: 16, held: 2, sizes: [{ id: S52, label: '52', stock: 6, left: 4, held: 1 }] });
-    const f = lineFacts(r, S52, '52');
-    expect(f.left).toBe('16 OF 25 LEFT · 4 IN SIZE 52');
-    expect(f.held).toBe('2 HELD PIECES MAY RETURN');
-    expect(f.cells).toHaveLength(25);
-    expect(f.cells!.filter((c) => c === 'gone')).toHaveLength(7);
-    expect(f.cells!.filter((c) => c === 'held')).toHaveLength(2);
-    expect(f.cells!.slice(0, 9)).toEqual([...Array(7).fill('gone'), 'held', 'held']);
-    expect(lineFacts(room({ held: 1 }), S48, '48').held).toBe('1 HELD PIECE MAY RETURN');
-    expect(lineFacts(room(), S48, '48').held).toBeNull();
-    // Past fifty pieces, a bar.
-    const big = lineFacts(room({ quantity: 1_000, left: 250, held: 0 }), S52, '52');
-    expect(big.cells).toBeNull();
-    expect(big.taken).toBe(0.75);
-  });
-
-  it('announces the place and who is ahead in your size, in words', () => {
-    expect(placeAnnouncement(entry({ status: 'QUEUED', position: 14, ahead: 3 }))).toBe('Your place: 14. 3 ahead of you in size 52.');
-    expect(placeAnnouncement(entry({ status: 'QUEUED', position: 2, ahead: 0 }))).toBe('Your place: 2. You are next in size 52.');
-    expect(placeAnnouncement(entry())).toBeNull();
-    expect(LIVE.ahead(3, '52')).toBe('3 AHEAD OF YOU IN SIZE 52');
+describe('the one queue, the turn and the piece held', () => {
+  it('says the pieces left overall and in your size, two figures only (no held piece, D25)', () => {
+    const r = room({ phase: 'LIVE', quantity: 25, left: 16, sizes: [{ id: S52, label: '52', stock: 6, left: 4, serves: 1, out: false }] });
+    expect(stockLine(r, entry())).toBe('16 OF 25 LEFT · 4 IN SIZE 52');
+    expect(stockLine(r, entry({ size: { id: S48, label: '48' } }))).toBe('16 OF 25 LEFT');
+    expect(stockLine(room({ phase: 'LIVE', quantity: 3, left: 2, sizes: [{ id: S52, label: 'ONE SIZE', stock: 3, left: 2, serves: 1, out: false }] }), entry({ size: { id: S52, label: 'ONE SIZE' } }))).toBe('2 OF 3 LEFT · 2 IN ONE SIZE');
   });
 
   it('ends an after-room\'s entry in the after-room\'s words, never the release\'s', () => {
@@ -512,16 +501,16 @@ describe('the line, the turn and the piece held', () => {
   });
 
   it('says a one-size release ONE SIZE, never SIZE ONE SIZE', () => {
-    const one = { id: S52, label: 'ONE SIZE' };
-    expect(placeAnnouncement(entry({ status: 'QUEUED', position: 2, ahead: 0, size: one }))).toBe('Your place: 2. You are next in ONE SIZE.');
-    expect(placeAnnouncement(entry({ status: 'QUEUED', position: 5, ahead: 3, size: one }))).toBe('Your place: 5. 3 ahead of you in ONE SIZE.');
-    expect([LIVE.ahead(0, 'ONE SIZE'), LIVE.ahead(2, 'One size'), LIVE.inSize(4, 'ONE SIZE')]).toEqual(['YOU ARE NEXT IN ONE SIZE', '2 AHEAD OF YOU IN ONE SIZE', '4 IN ONE SIZE']);
+    expect([LIVE.queue.placeSaid('ONE SIZE'), LIVE.queue.placeSaid('One size'), LIVE.queue.placeSaid('52'), LIVE.inSize(4, 'ONE SIZE')]).toEqual([
+      'Your place in ONE SIZE:',
+      'Your place in ONE SIZE:',
+      'Your place in size 52:',
+      '4 IN ONE SIZE',
+    ]);
     expect(LIVE.reservedIn('ONE SIZE', 1)).toBe('Your piece is reserved in ONE SIZE. ORBES Client Services will contact you to settle payment. Add your delivery address in YOUR ORDERS.');
     expect(LIVE.securedInPieces('ONE SIZE', 2)).toBe('You secured 2 pieces in ONE SIZE. Their steps follow in YOUR ORDERS.');
     expect([LIVE.edge.soldOut.title('ONE SIZE'), LIVE.edge.soldOut.title('52')]).toEqual(['SOLD OUT', 'SOLD OUT IN SIZE 52']);
     expect([LIVE.size('ONE SIZE'), LIVE.size('52'), LIVE.there.said('ONE SIZE'), LIVE.soldOutSize('ONE SIZE')]).toEqual(['ONE SIZE', 'SIZE 52', 'YOU’LL BE THERE · ONE SIZE', 'One size, no piece left']);
-    const r = room({ phase: 'LIVE', quantity: 3, left: 2, held: 0, sizes: [{ id: S52, label: 'ONE SIZE', stock: 3, left: 2, held: 0 }] });
-    expect(lineFacts(r, S52, 'ONE SIZE').left).toBe('2 OF 3 LEFT · 2 IN ONE SIZE');
   });
 
   it('measures a window at the server\'s time: what is left, and its share', () => {
@@ -731,93 +720,70 @@ describe('the announcements: the release calendar, I\'LL BE THERE, the banner', 
   });
 });
 
-describe('the queue (macro scope of 2026-10-20, W2, W5, W6; lot M1)', () => {
+describe('the one queue (ONE QUEUE, lot Q1, step Q1.3; ANSWERS C3)', () => {
   const NOW = Date.parse('2026-10-05T16:49:00.000Z');
-  const frame = (o: Partial<LiveQueueFrame> = {}): LiveQueueFrame => ({ phase: 'LIVE', nextBatchAt: iso(NOW + 60_000), batch: 40, minutes: 1, paused: false, batches: 6, waiting: 5040, ...o });
-  const queue = (place: number, o: Partial<LiveQueue> = {}): LiveQueue => ({ place, etaAt: null, paused: false, next: place <= 40, ...o });
+  const queue = (place: number, o: Partial<LiveQueue> = {}): LiveQueue => ({ place, waitMs: 17 * 60_000, paused: null, next: false, out: false, ...o });
+  const queued = (q: LiveQueue | null, o: Partial<LiveEntry> = {}) => entry({ status: 'QUEUED', position: 612, queue: q, ...o });
 
-  it('shows the queue while the entry waits for its batch, the line once it is let in', () => {
-    const waiting = entry({ status: 'QUEUED', position: 612, ahead: 200, queue: queue(412) });
-    expect(screen({ entry: waiting, now: T0 + 5_000 })).toBe('queue');
-    // Let in: the line (or sold out in its size), as before the pace.
-    expect(screen({ entry: { ...waiting, queue: null }, now: T0 + 5_000 })).toBe('line');
-    expect(placeAnnouncement({ ...waiting, queue: null })).toBe('Your place: 612. 200 ahead of you in size 52.');
+  it('shows every QUEUED entry the one queue screen (paced or after-room), READING YOUR PLACE until its place is read (D15)', () => {
+    expect(screen({ entry: queued(queue(4)), now: T0 + 5_000 })).toBe('queue');
+    expect(screen({ entry: queued(queue(4, { waitMs: null, next: true })), sheet: sheet({ afterRoom: { parentId: ID } }), now: T0 + 5_000 })).toBe('queue');
+    expect(screen({ entry: queued(null), now: T0 + 5_000 })).toBe('queue');
+    expect(queueModel(queued(null), null, NOW)).toEqual({ kind: 'reading' });
   });
 
-  it('estimates the entry time as the server does: the next batch (never before now), then one batch every Y minutes; none while paused', () => {
-    // Place 412 at 40 a minute, the next batch in a minute: ten batches more, 11 minutes.
-    expect(queueEta(412, frame(), NOW)).toBe(NOW + 11 * 60_000);
-    // Places 1 to 40 come with the next batch; 41 with the one after.
-    expect(queueEta(1, frame(), NOW)).toBe(NOW + 60_000);
-    expect(queueEta(40, frame(), NOW)).toBe(NOW + 60_000);
-    expect(queueEta(41, frame(), NOW)).toBe(NOW + 2 * 60_000);
-    // A batch due already: from now.
-    expect(queueEta(1, frame({ nextBatchAt: iso(NOW - 5_000) }), NOW)).toBe(NOW);
-    // A frame read a while ago (W2: behind the next batch, the state is read every 10 s to a minute): the batches due
-    // since are counted, not added again, so the estimate stays the one first given.
-    const read = frame({ nextBatchAt: iso(NOW - 90_000) });
-    expect(queueEta(412, read, NOW)).toBe(NOW - 90_000 + 10 * 60_000);
-    expect(queueEta(412, read, NOW + 5 * 60_000)).toBe(NOW - 90_000 + 10 * 60_000);
-    expect(queueEta(4999, frame(), NOW)).toBe(NOW + 125 * 60_000);
-    expect(queueEta(5, frame({ paused: true }), NOW)).toBeNull();
-    expect(queueEta(5, frame({ batch: 0 }), NOW)).toBeNull();
-    expect(queueEta(5, frame({ nextBatchAt: 'soon' }), NOW)).toBeNull();
+  it('says the time left in the decided words only (OP-11, N9): LESS THAN A MINUTE, N MINUTES, from 60 minutes N H M MIN (whole hours too)', () => {
+    expect(timeLeft(0)).toBe('ESTIMATED LESS THAN A MINUTE LEFT');
+    expect(timeLeft(59_000)).toBe('ESTIMATED LESS THAN A MINUTE LEFT');
+    expect(timeLeft(60_000)).toBe('ESTIMATED 1 MINUTE LEFT');
+    expect(timeLeft(17 * 60_000)).toBe('ESTIMATED 17 MINUTES LEFT');
+    expect(timeLeft(59 * 60_000)).toBe('ESTIMATED 59 MINUTES LEFT');
+    expect(timeLeft(60 * 60_000)).toBe('ESTIMATED 1 H 0 MIN LEFT');
+    expect(timeLeft(72 * 60_000)).toBe('ESTIMATED 1 H 12 MIN LEFT');
+    expect(timeLeft(120 * 60_000)).toBe('ESTIMATED 2 H 0 MIN LEFT');
+    expect(timeLeft(125 * 60_000)).toBe('ESTIMATED 2 H 5 MIN LEFT');
+    for (const ms of [0, 60_000, 17 * 60_000, 72 * 60_000, 120 * 60_000]) expect(timeLeft(ms)).toMatch(/^ESTIMATED (LESS THAN A MINUTE|\d+ MINUTES?|\d+ H \d+ MIN) LEFT$/);
+    expect(timeLeft(120 * 60_000)).not.toBe('ESTIMATED 2 H LEFT');
   });
 
-  it('counts the batches due since the frame was read in the place shown, until its own batch is due (W2)', () => {
-    // Place 412, the next batch read at NOW + 1 min: nothing due before it.
-    expect(queuePlace(412, frame(), NOW)).toBe(412);
-    expect(queuePlace(412, frame(), NOW + 60_000 - 1)).toBe(412);
-    // Its time come: one batch of 40 let in; 2 min 30 s later, three.
-    expect(queuePlace(412, frame(), NOW + 60_000)).toBe(372);
-    expect(queuePlace(412, frame(), NOW + 210_000)).toBe(292);
-    // Its own batch due: the place as read, until the state says it is let in.
-    expect(queuePlace(30, frame(), NOW + 60_000)).toBe(30);
-    expect(queuePlace(41, frame(), NOW + 120_000)).toBe(41);
-    // Held, or no pace to count with: as read.
-    expect(queuePlace(412, frame({ paused: true }), NOW + 600_000)).toBe(412);
-    expect(queuePlace(412, frame({ minutes: 0 }), NOW + 600_000)).toBe(412);
-    // The page: the place counted down, the estimate unchanged.
-    expect(queueModel(queue(412), frame(), NOW + 210_000, 'Europe/Paris')).toMatchObject({ kind: 'eta', place: 292, eta: 'ESTIMATED ENTRY 19:00 PARIS', about: 'ABOUT 8 MIN' });
-  });
-
-  it('says how long until then in minutes, in hours and minutes from an hour, ANY MOMENT NOW within half a minute', () => {
-    expect(queueAbout(11 * 60_000)).toBe('ABOUT 11 MIN');
-    expect(queueAbout(60_000)).toBe('ABOUT 1 MIN');
-    expect(queueAbout(45_000)).toBe('ABOUT 1 MIN');
-    expect(queueAbout(30_000)).toBe('ANY MOMENT NOW');
-    expect(queueAbout(0)).toBe('ANY MOMENT NOW');
-    expect(queueAbout(60 * 60_000)).toBe('ABOUT 1 H 00');
-    expect(queueAbout(125 * 60_000)).toBe('ABOUT 2 H 05');
-  });
-
-  it('reads the place until the queue\'s frame is read, then says the place and the estimate in Paris (then on this phone), or PAUSED', () => {
-    expect(queueModel(queue(412), null, NOW, 'Europe/Paris')).toEqual({ kind: 'reading' });
-    expect(queueModel(queue(412), frame(), NOW, 'Europe/Paris')).toEqual({
-      kind: 'eta',
-      place: 412,
-      eta: 'ESTIMATED ENTRY 19:00 PARIS',
-      local: null,
-      about: 'ABOUT 11 MIN',
-      announce: 'Your place in the queue: 412. Estimated entry at 19:00, Paris time.',
+  it('says its place in its size and its time left as read, counted down on the page since the reading; the place moves at readings only (D9, D19)', () => {
+    const e = queued(queue(4));
+    expect(queueModel(e, NOW, NOW)).toEqual({
+      kind: 'waiting',
+      place: 4,
+      placeSaid: 'Your place in size 52:',
+      paused: null,
+      time: 'ESTIMATED 17 MINUTES LEFT',
+      announce: 'Your place in size 52: 4. Estimated 17 minutes left.',
     });
-    expect(queueModel(queue(412), frame(), NOW, 'America/New_York')).toMatchObject({ eta: 'ESTIMATED ENTRY 19:00 PARIS', local: '13:00 ON THIS PHONE' });
-    expect(queueModel(queue(4999), frame(), NOW, 'Europe/Paris')).toMatchObject({ eta: 'ESTIMATED ENTRY 20:54 PARIS', about: 'ABOUT 2 H 05' });
-    // The frame (shared, followed) says PAUSED, whatever the entry's own read said.
-    expect(queueModel(queue(12, { etaAt: iso(NOW) }), frame({ paused: true }), NOW, 'Europe/Paris')).toEqual({
-      kind: 'paused',
-      place: 12,
-      announce: 'Your place in the queue: 12. The queue is paused. Your place is kept.',
-    });
-    // A frame that cannot estimate: the entry's own estimate.
-    expect(queueModel(queue(3, { etaAt: iso(NOW + 4 * 60_000) }), frame({ minutes: 0 }), NOW, 'Europe/Paris')).toMatchObject({ kind: 'eta', eta: 'ESTIMATED ENTRY 18:53 PARIS', about: 'ABOUT 4 MIN' });
+    // Ten minutes after the reading, the time has ticked; the place and what is said stay those of the reading.
+    expect(queueModel(e, NOW, NOW + 10 * 60_000)).toMatchObject({ place: 4, time: 'ESTIMATED 7 MINUTES LEFT', announce: 'Your place in size 52: 4. Estimated 17 minutes left.' });
+    expect(queueModel(e, NOW, NOW + 30 * 60_000)).toMatchObject({ time: 'ESTIMATED LESS THAN A MINUTE LEFT' });
+    expect(queueModel(queued(queue(1, { waitMs: 72 * 60_000 }), { size: { id: S52, label: 'ONE SIZE' } }), NOW, NOW)).toMatchObject({ placeSaid: 'Your place in ONE SIZE:', time: 'ESTIMATED 1 H 12 MIN LEFT' });
   });
 
-  it('never words the pace itself: no batch, no figure of buyers, no interval', () => {
-    const words = Object.values(LIVE.queue)
-      .map((v) => (typeof v === 'function' ? (v as (...a: unknown[]) => string)(7, 7) : v))
-      .concat(LIVE.queue.leaveConfirm, LIVE.announce.queue(7, '19:00'), LIVE.announce.queue(7, null), LIVE.announce.admitted);
-    for (const w of words) expect(String(w), String(w)).not.toMatch(/batch|pace|every|buyers|per minute|admitted/i);
+  it('freezes the time under PAUSED (the release) or THE QUEUE IS PAUSED (D17), and says no time in an after-room (D29)', () => {
+    expect(queueModel(queued(queue(4, { paused: 'RELEASE' })), NOW, NOW + 10 * 60_000)).toMatchObject({ paused: 'RELEASE', time: 'ESTIMATED 17 MINUTES LEFT', announce: 'Your place in size 52: 4. The release is paused.' });
+    expect(queueModel(queued(queue(4, { paused: 'PACE' })), NOW, NOW + 10 * 60_000)).toMatchObject({ paused: 'PACE', time: 'ESTIMATED 17 MINUTES LEFT', announce: 'Your place in size 52: 4. The queue is paused.' });
+    expect(queueModel(queued(queue(2, { waitMs: null, next: true })), NOW, NOW)).toMatchObject({ kind: 'waiting', place: 2, time: null, announce: 'Your place in size 52: 2.' });
+  });
+
+  it('never words the pace, the line ahead or a held piece: no batch, no figure of buyers, no interval, no AHEAD, no HELD', () => {
+    const words = [
+      ...Object.values(LIVE.queue).map((v) => (typeof v === 'function' ? (v as (...a: unknown[]) => string)(7 * 60_000) : v)),
+      LIVE.queue.leaveConfirm,
+      LIVE.queue.placeSaid('52'),
+      LIVE.announce.queue('Your place in size 52:', 7, LIVE.announce.queueLeft(timeLeft(7 * 60_000))),
+      ...Object.values(LIVE.announce.queuePaused),
+    ];
+    for (const w of words) expect(String(w), String(w)).not.toMatch(/batch|pace|every|buyers|per minute|admitted|ahead|held|in the queue:|THE QUEUE$/i);
+    expect(Object.keys(LIVE.queue)).not.toEqual(expect.arrayContaining(['kind', 'eta', 'about', 'soon', 'keep', 'onThisPhone', 'onThisComputer']));
+    expect(LIVE).not.toHaveProperty('ahead');
+    expect(LIVE).not.toHaveProperty('held');
+    expect(LIVE).not.toHaveProperty('lineNote');
+    // SOLD OUT for your size: its one sentence (D27), never a held piece nor a reason.
+    expect(LIVE.edge.soldOut.text).toBe('Every piece in your size is reserved. You keep your place should ORBES add more, or you may leave.');
+    expect(LIVE.edge.soldOut).not.toHaveProperty('stay');
   });
 });
 
@@ -844,7 +810,7 @@ describe('MY PIECES: the account\'s LIVE RELEASE entries', () => {
 
   it('says an entry waiting in the queue IN LINE, as before the pace and once let in (its place is on the release\'s page)', () => {
     const release = { id: ID, phase: 'LIVE' as const, endedReason: null, title: 'Monolithe in blue', name: 'Monolithe', imageUrl: null, opensAt: iso(T0), closesAt: iso(T0 + 3_600_000), afterRoomOf: null };
-    const queued = entry({ status: 'QUEUED', position: 612, ahead: 200, queue: { place: 412, etaAt: iso(T0), paused: false, next: false } });
+    const queued = entry({ status: 'QUEUED', position: 612, queue: { place: 412, waitMs: 60_000, paused: null, next: false, out: false } });
     expect(myLiveEntries([{ release, entry: queued }])[0]!.entry).toMatchObject({ label: 'IN LINE', sentence: LIVE.sentence.QUEUED, reference: null });
     expect(myLiveEntries([{ release, entry: { ...queued, queue: null } }])[0]!.entry).toMatchObject({ label: 'IN LINE', sentence: LIVE.sentence.QUEUED });
   });

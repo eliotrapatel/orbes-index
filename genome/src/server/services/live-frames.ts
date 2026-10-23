@@ -24,15 +24,20 @@
  * NEXT BATCH NOW pressed while the gate is shut waits here (`pending`), in the order pressed, with its press time: the
  * first pass after the next frame gives it, in the order due among the scheduled slots (services/live.ts giveDue).
  *
+ * Not only a batch shuts the gate (step Q1.3, plan §1.3: "the snapshot is recomputed at once on SET PACE, SHORTEN THE
+ * HOLD / END THE HOLD NOW and ADD PIECES"): any change that can widen whom the next batches reach, made under the
+ * release's row lock (a console control, an entry placed in the line, at T0 or later, a place left in it), counts as one
+ * (`changed`), so the next batch waits for a frame read after it. Each change is settled with its own mark once its
+ * transaction has ended (`settle`): the release's row lock orders them, so a mark is never settled before an earlier one.
+ *
  * The readings (PLAN amendment 1, G2: "a batch after the first may only give a turn to an entry whose phone has READ that
  * it is next"): a frame published is not yet a frame read, as a phone further back reads its state every 10 to 60 s. Once
- * switched on (`useReadings`), the gate keeps, per release, the `next` flag of each entry's last reading (`read`: the
- * stream's `you` event, GET /state), and a batch after the first (scheduled, overdue after a restart, or NEXT BATCH NOW
- * pressed again) waits (`unread`) until every entry it would give a turn to has read that it is next, capped at
- * READ_WAIT_MS (60 s, the far-poll limit) after the previous batch was given in this process (after a restart, after the
- * moment it first waited); it keeps its logical time and its number (services/live.ts giveDue). Off, every reading counts
- * as made: a process with no hub (tests, a script), and, until step Q1.3 records the readings from the queue's
- * snapshot `next` and switches it on, the app.
+ * switched on (`useReadings`: the app), the gate keeps, per release, the `next` flag of each entry's last reading (`read`:
+ * the stream's `you` event and GET /state, from the queue's snapshot, live-queue.ts), and a batch after the first
+ * (scheduled, overdue after a restart, or NEXT BATCH NOW pressed again) waits (`unread`) until every entry it would give a
+ * turn to has read that it is next, capped at READ_WAIT_MS (60 s, the far-poll limit) after the previous batch was given
+ * in this process (after a restart, after the moment it first waited); it keeps its logical time and its number
+ * (services/live.ts giveDue). Off, every reading counts as made: a process with no hub (tests, a script).
  */
 
 /** How long a batch after the first waits at most for the entries it reaches to read that they are next (the far-poll limit). */
@@ -107,12 +112,23 @@ export class LiveFrameGate {
     for (const w of waiters) w();
   }
 
-  /** A batch is being given (inside its transaction) at `at` (the service's clock): the gate shuts. */
-  giving(dropId: string, at?: Date): void {
+  /** A batch is being given (inside its transaction) at `at` (the service's clock): the gate shuts. Its mark, to settle. */
+  giving(dropId: string, at?: Date): number {
     const r = this.of(dropId);
     r.given += 1;
     if (at) r.givenAt = at.getTime();
     r.heldSince = null;
+    return r.given;
+  }
+
+  /**
+   * A change that can widen whom the next batches reach is being made (inside its transaction, under the release's row
+   * lock): the gate shuts until a frame begun after it is published. Its mark, to settle once the transaction has ended.
+   */
+  changed(dropId: string): number {
+    const r = this.of(dropId);
+    r.given += 1;
+    return r.given;
   }
 
   /** Whether batches wait for the readings (G2); off, every reading counts as made. */
@@ -144,10 +160,13 @@ export class LiveFrameGate {
     return now.getTime() - since < READ_WAIT_MS;
   }
 
-  /** The transaction that may have given a batch has ended: a frame begun from now on reads its outcome. */
-  settle(dropId: string): void {
+  /**
+   * The transaction that gave a batch (or made a change) with `mark` has ended: a frame begun from now on reads its
+   * outcome. Never more than that mark: a later transaction's change, not ended yet, stays unsettled.
+   */
+  settle(dropId: string, mark: number): void {
     const r = this.of(dropId);
-    r.settled = r.given;
+    r.settled = Math.max(r.settled, Math.min(mark, r.given));
   }
 
   /**

@@ -25,10 +25,11 @@
  * stage and show its photograph from the photograph's, as its card's `set` does.
  *
  * The room (`frame`): built once for all of a release's viewers (routes/live.ts fans it out once a second): its phase,
- * the pieces left and held per size, the people in the room and in the line, the latest host message; and the board's
- * share of it (the countdown, the door, the pieces left overall: no personal data); on a paced release (W2) the queue's
- * small frame too (`LiveQueueFrame`: the next batch, the pace, held or not, the batches, those waiting), which the
- * viewers waiting for their batch read in place of the room. `viewer` says who may read it: a
+ * the pieces left per size and what each size can still serve (`serves`, at most the release's limit per collector:
+ * never how many pieces are held, D25), the people in the room, the latest host message; and the board's share of it
+ * (the countdown, the door, the pieces left overall: no personal data); from T0, the queue's snapshot (live-queue.ts:
+ * ONE QUEUE, lot Q1 §1.3), from which each viewer reads its own entry's place and estimate, never sent whole: no
+ * pace, no line's length, no held piece ever reaches a phone (D8). `viewer` says who may read it: a
  * signed-in account allowed to enter the release now, or holding an entry in it (a REMOVED one reads its state but
  * follows no stream); never anyone else (spectator mode was declined).
  *
@@ -57,8 +58,6 @@ import {
   livePhase,
   liveRuleText,
   liveStages,
-  paceHeld,
-  paceNextAt,
   roomOpensAt,
   stagesAt,
   onSaleOf,
@@ -73,6 +72,7 @@ import {
   type LivePieceSize,
   type LiveStages,
 } from './live.js';
+import { liveQueueSnapshot, type LiveQueueSnapshot } from './live-queue.js';
 import { mediaUrl } from './media.js';
 import { savedSizeAmong } from './sizes.js';
 import { releaseOffer, savedSizesByPiece, setPiecesOf, type ReleaseOffer } from './release-offer.js';
@@ -241,7 +241,12 @@ export interface LiveBanner {
   closesAt: Date;
 }
 
-/** A size in the room: its stock, the pieces free now (`left`), and those in a turn or held that may return (`held`). */
+/**
+ * A size in the room: its stock, the pieces free now (`left`), and what it can still serve an entry (`serves`: the
+ * pieces not confirmed, free or held, at most the release's limit per collector, so it never says how many are held,
+ * D25; ONE QUEUE, lot Q1 §1.3: the late comer's ENTER THE LINE and the room's sizes read it as they read `left + held`
+ * before, D32); `out` once it can serve no one (every piece confirmed).
+ */
 export interface LiveRoomSize {
   id: string;
   label: string;
@@ -249,7 +254,8 @@ export interface LiveRoomSize {
   piece?: number;
   stock: number;
   left: number;
-  held: number;
+  serves: number;
+  out: boolean;
 }
 
 /** Macro scope K44 T1: a piece of a set's release in the room: its model from its stage, its sizes. */
@@ -276,15 +282,11 @@ export interface LiveRoom {
   closesAt: Date;
   /** The people in the release: waiting in the room, in the line, in their turn, holding a piece. */
   inRoom: number;
-  /** The people in the line (QUEUED). */
-  line: number;
   /** The sum of the stock; on a set's release, its sets on sale (the smallest of its pieces' totals). */
   quantity: number;
   quantityLine: string;
   /** Pieces free now, overall; on a set's release, the sets its pieces can still make now (each piece's free pieces, the smallest). */
   left: number;
-  /** Pieces in a turn or held, which may return; on a set's release, the sets. */
-  held: number;
   sizes: LiveRoomSize[];
   /** Macro scope K44 T1: on a set's release, its pieces in the set's order, each with its sizes; absent on a model's. */
   pieces?: LiveRoomPiece[];
@@ -311,33 +313,15 @@ export interface LiveBoard {
   release: { revealed: LiveCard['revealed']; name: string | null; silhouetteUrl: string | null; imageUrl: string | null; set?: LiveSetView };
 }
 
-/**
- * The queue page's shared frame (W2, W5): what a viewer whose entry waits for its batch reads in place of the room, the
- * same small frame for all of them, once a second: the next batch, the pace (X, Y: the page computes each estimate from
- * them and its own place, never shows them), whether it is held, the batches so far and those waiting. No person.
- */
-export interface LiveQueueFrame {
-  phase: LiveRoom['phase'];
-  /** When the next batch is due (T0 before the first); a pause in progress moves it when it ends. */
-  nextBatchAt: Date;
-  /** X: the buyers admitted per batch. */
-  batch: number;
-  /** Y: the minutes between two batches. */
-  minutes: number;
-  /** The pace held (PAUSE PACE, or the release's PAUSE): no batch comes, every place is kept. */
-  paused: boolean;
-  /** The batches admitted so far. */
-  batches: number;
-  /** The entries in the line waiting for their batch. */
-  waiting: number;
-}
-
 /** One build of a release's room: what its viewers and its boards read. */
 export interface LiveFrame {
   room: LiveRoom;
   board: LiveBoard;
-  /** W2: on a paced release, the queue's frame for the viewers waiting for their batch; null without a pace. */
-  queue: LiveQueueFrame | null;
+  /**
+   * ONE QUEUE (lot Q1 §1.3): the queue's snapshot from T0 (null before), from which each viewer reads its own entry's
+   * figures (live.ts queueView). Internal: never sent whole, never in `room` or `board`.
+   */
+  queue: LiveQueueSnapshot | null;
   /**
    * The SHA-256 of the board link's secret as it stands now (null: revoked or never issued), for the hub to end a board
    * stream opened with a link since replaced or revoked. Internal: never in `room` or `board`, never sent.
@@ -741,15 +725,18 @@ export class LiveRoomService {
     return sizes.map((z) => ({ id: z.id, piece: z.piece, label: z.label, fitMinMm: z.fit_min_mm ?? null, fitMaxMm: z.fit_max_mm ?? null, stock: z.stock }));
   }
 
-  /** The entries of the accounts following a release, by account id (one read for all of them). */
-  async viewerEntries(dropId: string, accountIds: readonly string[]): Promise<Map<string, LiveEntryView>> {
+  /**
+   * The entries of the accounts following a release, by account id (one read for all of them), each QUEUED one with its
+   * own figures from the frame's queue snapshot (`queue`), read now.
+   */
+  async viewerEntries(dropId: string, accountIds: readonly string[], queue: LiveQueueSnapshot | null = null): Promise<Map<string, LiveEntryView>> {
     if (accountIds.length === 0) return new Map();
-    return liveEntryViews(this.db, this.turnKey, { dropId, accountIds }, this.clock());
+    return liveEntryViews(this.db, this.turnKey, { dropId, accountIds }, this.clock(), (id) => (queue?.dropId === id ? queue : null));
   }
 
   /**
    * One build of a release's room, board and queue, for every viewer and board at once: four reads whatever the audience
-   * (five on a paced release: those waiting for their batch). Null once it is no longer an announced, published LIVE
+   * (three more from T0: the queue's snapshot, live-queue.ts). Null once it is no longer an announced, published LIVE
    * RELEASE (cancelled, unpublished).
    */
   async frame(dropId: string): Promise<LiveFrame | null> {
@@ -757,9 +744,8 @@ export class LiveRoomService {
     const now = this.clock();
     const r = await this.reads().where('d.id', '=', id).where('d.mode', '=', 'LIVE').where('d.published_at', 'is not', null).executeTakeFirst();
     if (!r || r.cancelled_at || !isAnnounced(r, stagesAt(r, now))) return null;
-    const paced = r.pace_batch !== null && r.pace_minutes !== null;
     const isSet = r.set_id !== null;
-    const [sizes, counts, message, waiting, bySize, set] = await Promise.all([
+    const [sizes, counts, message, queue, bySize, set] = await Promise.all([
       this.db.selectFrom('drop_sizes').select(['id', 'label', 'stock', 'piece']).where('drop_id', '=', id).orderBy('position').execute(),
       this.db
         .selectFrom('live_entries')
@@ -768,16 +754,8 @@ export class LiveRoomService {
         .groupBy(['size_id', 'status'])
         .execute(),
       this.db.selectFrom('live_messages').select(['text', 'created_at']).where('drop_id', '=', id).orderBy('created_at', 'desc').orderBy('id', 'desc').limit(1).executeTakeFirst(),
-      // W2: a paced release's line waiting for its batch (the partial index live_entries_waiting_admission): one read more.
-      paced
-        ? this.db
-            .selectFrom('live_entries')
-            .select((eb) => eb.fn.countAll<number>().as('n'))
-            .where('drop_id', '=', id)
-            .where('status', '=', 'QUEUED')
-            .where('admitted_at', 'is', null)
-            .executeTakeFirstOrThrow()
-        : Promise.resolve(null),
+      // ONE QUEUE (lot Q1 §1.3): from T0, the queue's snapshot, each viewer's own figures read from it.
+      now.getTime() >= r.opens_at.getTime() ? liveQueueSnapshot(this.db, r, now) : Promise.resolve(null),
       // Macro scope K44 T1: a set's entry counts in each of its sizes (its quantity its sets).
       isSet
         ? this.db
@@ -794,9 +772,13 @@ export class LiveRoomService {
     const people = (statuses: readonly string[]) => counts.filter((c) => statuses.includes(c.status)).reduce((n, c) => n + Number(c.n), 0);
     const pieces = (sizeId: string, statuses: readonly string[]) =>
       (bySize ?? counts).filter((c) => c.size_id === sizeId && statuses.includes(c.status)).reduce((n, c) => n + Number(c.q ?? 0), 0);
+    const perAccount = r.per_account ?? LIVE_PER_ACCOUNT.default;
     const roomSizes: LiveRoomSize[] = sizes.map((s) => {
       const held = pieces(s.id, ['TURN', 'SECURED']);
-      return { id: s.id, label: s.label, ...(s.piece !== null ? { piece: s.piece } : {}), stock: s.stock, left: Math.max(0, s.stock - held - pieces(s.id, ['CONFIRMED'])), held };
+      const servable = Math.max(0, s.stock - pieces(s.id, ['CONFIRMED']));
+      // D32: what it can still serve, never more than one collector may take: the held pieces never told (D25).
+      const serves = Math.min(servable, perAccount);
+      return { id: s.id, label: s.label, ...(s.piece !== null ? { piece: s.piece } : {}), stock: s.stock, left: Math.max(0, servable - held), serves, out: serves === 0 };
     });
     const stages = liveStages(r, now)!;
     // A set's release: its pieces, each with its sizes; its figures in sets (each piece's sizes summed, the smallest).
@@ -809,7 +791,7 @@ export class LiveRoomService {
           sizes: roomSizes.filter((z) => z.piece === p.piece),
         }))
       : null;
-    const perPiece = (k: 'left' | 'held') => (roomPieces ? Math.min(...roomPieces.map((p) => p.sizes.reduce((n, z) => n + z[k], 0))) : roomSizes.reduce((n, z) => n + z[k], 0));
+    const perPiece = (k: 'left') => (roomPieces ? Math.min(...roomPieces.map((p) => p.sizes.reduce((n, z) => n + z[k], 0))) : roomSizes.reduce((n, z) => n + z[k], 0));
     const phase = livePhase(r, now) as LiveRoom['phase'];
     // Over once the engine has recorded the end (with the waiting and queued entries ENDED in the same transaction) and
     // no turn or hold remains: the clock alone (`phase`, for display) may run ahead of the engine's pass.
@@ -824,12 +806,9 @@ export class LiveRoomService {
       opensAt: r.opens_at,
       closesAt: r.closes_at,
       inRoom: people(LIVE_OPEN_STATUSES),
-      line: people(['QUEUED']),
       quantity: onSaleOf(sizes),
       quantityLine: r.quantity_line ?? '',
       left: perPiece('left'),
-      // A set's held sets: each counted once, in its first piece.
-      held: roomPieces ? (roomPieces[0]?.sizes.reduce((n, z) => n + z.held, 0) ?? 0) : roomSizes.reduce((n, s) => n + s.held, 0),
       sizes: roomSizes,
       ...(roomPieces ? { pieces: roomPieces } : {}),
       message: message ? { text: message.text, at: message.created_at } : null,
@@ -853,17 +832,6 @@ export class LiveRoomService {
         ...(set ? { set: setView(set, stages) } : {}),
       },
     };
-    const queue: LiveQueueFrame | null = paced
-      ? {
-          phase,
-          nextBatchAt: paceNextAt(r)!,
-          batch: r.pace_batch!,
-          minutes: r.pace_minutes!,
-          paused: paceHeld(r) && !over,
-          batches: Number(r.pace_batches),
-          waiting: Number(waiting?.n ?? 0),
-        }
-      : null;
     return { room, board, queue, boardTokenHash: r.board_token_hash ? new Uint8Array(r.board_token_hash) : null };
   }
 

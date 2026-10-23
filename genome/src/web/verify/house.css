@@ -1431,7 +1431,7 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   margin-top: 10px;
 }
 
-/* B3: the line. */
+/* ONE QUEUE: the one waiting screen (YOUR PLACE, the time left, the pieces left). */
 .live__place-label {
   margin-top: 40px;
 }
@@ -1490,24 +1490,15 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   margin-top: 12px;
 }
 
-.live__line .live__rule {
-  margin-top: 36px;
-}
-
-.live__line-note {
-  margin-top: 20px;
-}
-
-/* W2, W5: the queue, before the line lets the entry in: its place as the line draws it, then when it should come in. */
-.live__queue-eta,
+/* PAUSED (or THE QUEUE IS PAUSED) with its line above the time left, which it freezes (OP-6, N10). */
+.live__queue-time,
 .live__queue-paused {
   margin-top: 18px;
   color: var(--ink);
 }
 
-.live__queue-about,
-.live__queue-local {
-  margin-top: 2px;
+.live__queue-paused + .live__queue-paused-line + .live__queue-time {
+  margin-top: 12px;
 }
 
 .live__queue-paused-line {

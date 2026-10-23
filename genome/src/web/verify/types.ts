@@ -1151,7 +1151,10 @@ export interface LiveBoard {
   release: { revealed: { silhouette: boolean; name: boolean; photo: boolean }; name: string | null; silhouetteUrl: string | null; imageUrl: string | null; set?: LiveSetView };
 }
 
-/** A size in the room: its stock, the pieces free now, and those in a turn or held that may return. */
+/**
+ * A size in the room: its stock, the pieces free now, and what it can still serve one collector (`serves`: the pieces not
+ * confirmed, at most the limit per collector, never how many are held: ONE QUEUE D25, D32); `out` once it serves no one.
+ */
 export interface LiveRoomSize {
   id: string;
   label: string;
@@ -1159,7 +1162,8 @@ export interface LiveRoomSize {
   piece?: number;
   stock: number;
   left: number;
-  held: number;
+  serves: number;
+  out: boolean;
 }
 
 /** The room as its viewers read it (the stream's `room` event, without its `now`; the state's `room`). */
@@ -1174,14 +1178,11 @@ export interface LiveRoom {
   opensAt: string;
   closesAt: string;
   inRoom: number;
-  line: number;
   /** The sum of the stock; on a set's release, its sets on sale (the smallest of its pieces' totals). */
   quantity: number;
   quantityLine: string;
   /** Free now; on a set's release, the sets its pieces can still make now. */
   left: number;
-  /** In a turn or held, which may return; on a set's release, the sets. */
-  held: number;
   sizes: LiveRoomSize[];
   /** Macro scope K44 T1: on a set's release, its pieces in the set's order, each from its stage, with its sizes; absent on a model's. */
   pieces?: LiveRoomPiece[];
@@ -1211,8 +1212,6 @@ export interface LiveEntry {
   tier: number;
   /** The place in the line; null before T0. */
   position: number | null;
-  /** While QUEUED: the entries of its size before it. */
-  ahead: number | null;
   joinedAt: string;
   /** Its deadline as it stands now; the secret only while it is TURN. */
   turn: { at: string; expiresAt: string; token: string | null } | null;
@@ -1228,7 +1227,7 @@ export interface LiveEntry {
   afterRoom?: AfterRoomDoor | null;
   /** IN-01: the entry uses the house's guarantee, shown to the client: first in line in its size. */
   guaranteed?: boolean;
-  /** W5: while it waits for its batch on a paced release, its place among those waiting and its estimated entry time. */
+  /** ONE QUEUE (lot Q1 §1.3): while QUEUED, its own figures (its place in its size, its estimate); null in an action's answer. */
   queue?: LiveQueue | null;
   /**
    * Plan MACRO M3 §4.2 (D2): the catalogue add-ons of the entry (while SECURED those chosen with the hold, priced now;
@@ -1240,15 +1239,18 @@ export interface LiveEntry {
   addonsLeftOut?: LeftOutAddon[];
 }
 
-/** The queue page's figures (W2, W5). */
+/** The one queue's figures of the account's own entry (ONE QUEUE, D8: never the pace, the line's length or a held piece). */
 export interface LiveQueue {
-  /** 1 is admitted next. */
+  /** Its place in its size (a set's entry: the most in any of its sizes). */
   place: number;
-  /** The estimated entry time; null while the queue is paused. */
-  etaAt: string | null;
-  paused: boolean;
-  /** Its batch is the next one: the page follows the stream. Behind it, the server gives no stream: the page reads its state (`pollMs`). */
+  /** Its estimated wait in ms from the reading's `now` (frozen while paused); null in an after-room (no time). */
+  waitMs: number | null;
+  /** What holds the batches: the release's PAUSE, PAUSE PACE, or nothing. */
+  paused: 'RELEASE' | 'PACE' | null;
+  /** A batch can reach it next: the page follows the stream. Behind, the server gives no stream: the page reads its state (`pollMs`). */
   next: boolean;
+  /** Its size can no longer serve it: SOLD OUT for your size. */
+  out: boolean;
 }
 
 /** The account against the release's rules now. */
@@ -1272,33 +1274,13 @@ export interface LiveInterest {
 }
 
 /**
- * The queue's frame (W2, W5): what a page whose entry waits for its batch reads in place of the room (the stream's
- * `queue` event, the state's `queue`), the same for every one of them: the next batch, the pace, whether it is held.
- * The pace (`batch` every `minutes`) only serves to estimate the entry time on the device; it is never shown.
- */
-export interface LiveQueueFrame {
-  phase: LivePhase | 'ENDED';
-  /** When the next batch is due. */
-  nextBatchAt: string;
-  batch: number;
-  minutes: number;
-  /** The pace held (by ORBES, or the release paused): no batch comes, every place is kept. */
-  paused: boolean;
-  batches: number;
-  waiting: number;
-}
-
-/**
  * GET /api/v1/live/:id/state: the server's time, the room (or, while the entry waits for its batch, the queue's frame),
  * the account's standing, entry and interest, and how soon to read it again while the stream is lost.
  */
 export interface LiveState {
   now: string;
-  /** The room; absent while the account's entry waits for its batch (`queue` then). */
-  room?: LiveRoom;
-  /** W2: the queue's frame while the account's entry waits for its batch on a paced release. */
-  queue?: LiveQueueFrame;
-  /** How soon to read the state again without a stream (2 s in the room, 10 s in the queue's next batch, up to a minute behind it). */
+  room: LiveRoom;
+  /** How soon to read the state again without a stream (2 s; 10 s to a minute behind the next ones in the queue). */
   pollMs?: number;
   access: LiveAccess;
   entry: LiveEntry | null;

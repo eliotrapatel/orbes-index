@@ -42,9 +42,9 @@
  *    ENTER, RESERVE and I'LL BE THERE; its pieces then count as sets (a LIVE's quantity at most its sizes' smallest stock);
  *    the TEST REPORT reads a set's entries in each of their sizes and its orders as one per piece of each set (M3.16);
  *  - a LIVE RELEASE: I'LL BE THERE first for its share (before T0), ENTER with its size and pieces; then it follows its
- *    turn as a phone whose stream is lost does, reading GET /state every POLL_MS (its turn's secret is there), or as
- *    often as the state's `pollMs` says while it waits for its batch on a paced release (W2: 10 s for the next batch, up
- *    to a minute behind it); on its TURN: PRESS, the hold, SECURE, its add-ons, then PAY or RELEASE MY PLACE after a few
+ *    turn as a phone whose stream is lost does, reading GET /state as often as the state's `pollMs` says (its turn's
+ *    secret is there; ONE QUEUE §1.3: 2 s while a batch can reach it next, 10 s to a minute behind, each reading
+ *    recorded as its phone's, G2); on its TURN: PRESS, the hold, SECURE, its add-ons, then PAY or RELEASE MY PLACE after a few
  *    seconds; or it misses its turn, or LEAVES (on its turn, or a while after entering). An after-room is left to the routes, as for anyone.
  * A draw's places confirm themselves from the database (`sweep`, every SWEEP_MS while a draw's test is RUNNING or DONE),
  * so it survives a restart and covers the draw, the early access's reservations and OFFER NEXT alike: a SELECTED test
@@ -1254,8 +1254,8 @@ export class TestEntrantService {
         }
         const entry = (r.json?.entry ?? null) as { status: string; turn: { token: string | null } | null } | null;
         if (!entry) return this.finish(run, bot, 'GONE');
-        // W2: the state says how soon to read it again: every 2 s in the room, every 10 s while waiting for the next batch,
-        // up to a minute behind it.
+        // The state says how soon to read it again (ONE QUEUE §1.3): every 2 s in the room and while a batch can reach it
+        // next, 10 s to a minute behind.
         const pollMs = typeof r.json?.pollMs === 'number' && r.json.pollMs > 0 ? r.json.pollMs : POLL_MS;
         switch (entry.status) {
           case 'WAITING':
@@ -1317,8 +1317,8 @@ export class TestEntrantService {
   }
 
   /**
-   * When a LIVE bot reads its state next: from T0 on (nothing moves before), every `pollMs` (the state's: POLL_MS in the
-   * room, 10 s while it waits for the next batch and up to a minute behind it, W2); a LEAVE bot at its time too.
+   * When a LIVE bot reads its state next: from T0 on (nothing moves before), every `pollMs` (the state's: 2 s in the room
+   * and while a batch can reach it next, 10 s to a minute behind, ONE QUEUE §1.3); a LEAVE bot at its time too.
    */
   private nextWatch(run: ActiveRun, bot: Bot, pollMs = POLL_MS): number {
     const now = this.now().getTime();

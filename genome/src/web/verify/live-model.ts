@@ -4,8 +4,9 @@
  * confirmed, its edge pages, its card in THE RELEASES and its entries in MY PIECES. Pure (no DOM) and unit-tested.
  *
  *  - Which screen: from the release's page, the account's standing (signed out, outside the rule, allowed), the room and
- *    the account's entry, at the server's time (`liveScreen`; the queue while the entry waits for its batch, W2, whose
- *    place and estimated entry time `queueModel` says, never the pace); once over, its final state (`livePastModel`). The size never changes after T0: the picker is only
+ *    the account's entry, at the server's time (`liveScreen`; the one queue while the entry waits for its turn, ONE
+ *    QUEUE: its place in its size and its estimated time left as the server read them for it, `queueModel`, never the
+ *    pace); once over, its final state (`livePastModel`). The size never changes after T0: the picker is only
  *    offered before it (and, after it, to an account that is not in the line yet, which joins behind).
  *  - The server's time: three round trips to /api/v1/live/clock, the offset of the shortest kept (`clockOffset`); every
  *    countdown counts on it, so the door opens on every phone at the same second.
@@ -29,8 +30,6 @@ import type {
   LiveEndedSheet,
   LiveEntry,
   LiveInterest,
-  LiveQueue,
-  LiveQueueFrame,
   LiveRoom,
   LiveRoomSize,
   LiveSheet,
@@ -228,7 +227,6 @@ export type LiveScreenKind =
   | 'room'
   | 'join'
   | 'queue'
-  | 'line'
   | 'soldOut'
   | 'turn'
   | 'secured'
@@ -320,12 +318,12 @@ export function liveScreen(i: LiveScreenInput): LiveScreenKind {
       case 'LEFT':
         return 'left';
       case 'QUEUED': {
-        // W2: waiting for its batch on a paced release, the queue (its place, its estimated entry time) until let in.
-        if (entry.queue) return 'queue';
-        // Sold out in its size (a set's: in one of its sizes): not enough pieces free nor held (which may return) to serve it.
-        if (isSetEntry(entry)) return setShort(i.room, entry) ? 'soldOut' : 'line';
+        // ONE QUEUE (D27): sold out in its size (a set's: in one of its sizes) when it can no longer serve it, as the
+        // server read it for the entry (`queue.out`), the room's sizes until then; the one queue otherwise (D15–D26).
+        if (entry.queue) return entry.queue.out ? 'soldOut' : 'queue';
+        if (isSetEntry(entry)) return setShort(i.room, entry) ? 'soldOut' : 'queue';
         const left = servable(roomSize(i.room, entry.size.id));
-        return left !== null && left < entry.quantity ? 'soldOut' : 'line';
+        return left !== null && left < entry.quantity ? 'soldOut' : 'queue';
       }
       case 'WAITING':
         return 'room';
@@ -384,11 +382,13 @@ export interface SizeChoice {
 }
 
 /**
- * The pieces of a size the line can still serve, as the server counts them when an account enters after T0: its stock
- * less what is confirmed (free, or held and possibly returning). Null without the room.
+ * The pieces of a size the line can still serve one collector, as the server counts them when an account enters after
+ * T0: its stock less what is confirmed (free, or held and possibly returning), at most the limit per collector (the
+ * room's `serves`: ONE QUEUE never says how many pieces are held, D25; ENTER THE LINE and the sizes read it as before,
+ * D32). Null without the room.
  */
 export function servable(size: LiveRoomSize | null): number | null {
-  return size ? size.left + size.held : null;
+  return size ? size.serves : null;
 }
 
 /** The sizes with stock, in order; `available` while the room says a piece of it can still be served. */
@@ -511,15 +511,14 @@ export function setSizesLine(e: { sizes?: readonly PieceSizeRef[] | null } | nul
  * The first of a set entry's sizes that cannot serve it (its pieces free or held, which may return, fewer than its sets),
  * with its piece's name from the room; null while every one can. Null without the room.
  */
-export function setShort(room: LiveRoom | null, entry: LiveEntry): { piece: number; label: string; name: string; held: number } | null {
+export function setShort(room: LiveRoom | null, entry: LiveEntry): { piece: number; label: string; name: string } | null {
   if (!room) return null;
   for (const z of [...(entry.sizes ?? [])].sort((a, b) => a.piece - b.piece)) {
-    const size = roomSize(room, z.id);
-    const n = servable(size);
+    const n = servable(roomSize(room, z.id));
     if (n !== null && n < entry.quantity) {
       const p = room.pieces?.find((x) => x.piece === z.piece);
       const name = p?.name ? upper(modelWithVariant(p.name, p.variant)) : SETS.piece(z.piece);
-      return { piece: z.piece, label: z.label, name, held: size?.held ?? 0 };
+      return { piece: z.piece, label: z.label, name };
     }
   }
   return null;
@@ -557,123 +556,49 @@ export function tickSecond(remainingMs: number): number | null {
   return remainingMs > 0 && s >= 1 && s <= 10 ? s : null;
 }
 
-// ── The line ───────────────────────────────────────────────────────────────
-
-/** The pieces of the release as the line's meter draws them, one cell each (up to METER_CELLS), and its two lines. */
-export interface LineFacts {
-  /** `16 OF 25 LEFT · 4 IN SIZE 52` */
-  left: string;
-  /** `2 HELD PIECES MAY RETURN`, or null when none is held. */
-  held: string | null;
-  /** One per piece, in order: confirmed, held, then free; null above METER_CELLS pieces (a bar then). */
-  cells: ('gone' | 'held' | 'free')[] | null;
-  /** The share of the pieces taken (confirmed or held), for the bar. */
-  taken: number;
-}
-
-export const METER_CELLS = 50;
-
-export function lineFacts(room: LiveRoom, sizeId: string, sizeLabel: string): LineFacts {
-  const size = roomSize(room, sizeId);
-  const gone = Math.max(0, room.quantity - room.left - room.held);
-  const left = LIVE.left(room.left, room.quantity);
-  return {
-    left: size ? `${left} · ${LIVE.inSize(size.left, sizeLabel)}` : left,
-    held: room.held > 0 ? LIVE.held(room.held) : null,
-    cells: room.quantity > 0 && room.quantity <= METER_CELLS ? Array.from({ length: room.quantity }, (_, i) => (i < gone ? 'gone' : i < gone + room.held ? 'held' : 'free')) : null,
-    taken: room.quantity > 0 ? Math.min(1, (gone + room.held) / room.quantity) : 0,
-  };
-}
-
-/** A set's line (macro scope K44 T1): its figures in sets, read in no one size (the entry's place is read in every one). */
-export function setLineFacts(room: LiveRoom): LineFacts {
-  const gone = Math.max(0, room.quantity - room.left - room.held);
-  return {
-    left: SETS.live.left(room.left, room.quantity),
-    held: room.held > 0 ? SETS.live.held(room.held) : null,
-    cells: room.quantity > 0 && room.quantity <= METER_CELLS ? Array.from({ length: room.quantity }, (_, i) => (i < gone ? 'gone' : i < gone + room.held ? 'held' : 'free')) : null,
-    taken: room.quantity > 0 ? Math.min(1, (gone + room.held) / room.quantity) : 0,
-  };
-}
-
-/** What the page says aloud of the account's place. */
-export function placeAnnouncement(entry: LiveEntry): string | null {
-  if (entry.status !== 'QUEUED' || entry.position === null) return null;
-  if (isSetEntry(entry)) return SETS.live.announcePlace(entry.position, entry.ahead ?? 0);
-  return LIVE.announce.place(entry.position, entry.ahead ?? 0, entry.size.label);
-}
-
-export function aheadLine(entry: LiveEntry): string {
-  if (isSetEntry(entry)) return SETS.live.ahead(entry.ahead ?? 0);
-  return LIVE.ahead(entry.ahead ?? 0, entry.size.label);
-}
-
-// ── The queue (W2, W5, W6) ─────────────────────────────────────────────────
+// ── The one queue (ONE QUEUE, lot Q1 §1.3, §3.3) ────────────────────────────
 
 /**
- * The queue page as it reads now: `reading` until the queue's frame has been read (the figures it follows), then the
- * place and either PAUSED or the estimated entry time in Paris (then on this phone when its zone says it otherwise) and
- * how long until it. Never the pace itself: its batch and its minutes only serve the estimate.
+ * The pieces left, in words: `176 OF 300 LEFT · 3 IN SIZE 52` (`… IN ONE SIZE`); a set's release in sets (SETS words,
+ * N2). Two figures only, never a held piece (D25).
+ */
+export function stockLine(room: LiveRoom, entry: Pick<LiveEntry, 'size' | 'sizes'>): string {
+  if (isSetEntry(entry)) return SETS.live.left(room.left, room.quantity);
+  const size = roomSize(room, entry.size.id);
+  const left = LIVE.left(room.left, room.quantity);
+  return size ? `${left} · ${LIVE.inSize(size.left, entry.size.label)}` : left;
+}
+
+/** The estimated time left in the decided words (OP-11, N9): ESTIMATED 17 MINUTES LEFT, ESTIMATED 1 H 12 MIN LEFT, … */
+export function timeLeft(ms: number): string {
+  return LIVE.queue.timeLeft(ms);
+}
+
+/**
+ * The one queue as it reads now: `reading` until the entry's place has been read (a late comer's first reading, D15),
+ * then its place in its size, what holds the batches (the release's PAUSE, PAUSE PACE) and its time left: the estimate
+ * the server read for it (`waitMs` at the server's time `readAt`), counted down on the page since, frozen while paused
+ * (D17); none in an after-room (D29). `announce` says the place and the time as read, never each second.
  */
 export type QueueModel =
   | { kind: 'reading' }
-  | { kind: 'paused'; place: number; announce: string }
-  | { kind: 'eta'; place: number; eta: string; local: string | null; about: string; announce: string };
+  | { kind: 'waiting'; place: number; placeSaid: string; paused: 'RELEASE' | 'PACE' | null; time: string | null; announce: string };
 
-/**
- * The estimated entry time of the `place`-th entry waiting (1 is let in next) at the server's time `now`, as the server
- * estimates it (services/live.ts liveQueueEta): the next batch, then one batch every `minutes`, never before now; null
- * while the queue is paused or its pace is not one. A frame read a while ago gives the same time: the batches due
- * since are counted, not added again.
- */
-export function queueEta(place: number, frame: Pick<LiveQueueFrame, 'nextBatchAt' | 'batch' | 'minutes' | 'paused'>, now: number): number | null {
-  const next = Date.parse(frame.nextBatchAt);
-  if (frame.paused || !Number.isFinite(next) || !(frame.batch >= 1) || !(frame.minutes >= 1)) return null;
-  return Math.max(now, next + (Math.ceil(Math.max(1, place) / frame.batch) - 1) * frame.minutes * MINUTE);
-}
-
-/**
- * The place now of the `place`-th entry waiting as last read with `frame`: less the batches due since the frame's next
- * batch, while the pace runs and the place stays behind them (W2: an entry behind the next batch reads its state only
- * every 10 s to a minute, so its page counts the batches between two reads). Its own batch due: its place as read,
- * until the state says it is let in.
- */
-export function queuePlace(place: number, frame: Pick<LiveQueueFrame, 'nextBatchAt' | 'batch' | 'minutes' | 'paused'>, now: number): number {
-  const next = Date.parse(frame.nextBatchAt);
-  if (frame.paused || !Number.isFinite(next) || now < next || !(frame.batch >= 1) || !(frame.minutes >= 1)) return place;
-  const due = Math.floor((now - next) / (frame.minutes * MINUTE)) + 1;
-  const left = place - due * frame.batch;
-  return left >= 1 ? left : place;
-}
-
-/** How long until the estimate: ANY MOMENT NOW within half a minute; ABOUT 12 MIN; ABOUT 2 H 05 from an hour. */
-export function queueAbout(ms: number): string {
-  if (ms <= 30 * SECOND) return LIVE.queue.soon;
-  return LIVE.queue.about(Math.max(1, Math.round(ms / MINUTE)));
-}
-
-/**
- * The queue page's model: the entry's place (`queue`, its own) and the queue's frame (shared, read with it or after it);
- * without the frame, `reading`. The estimate is the frame's (it follows each batch and pause); the entry's own when the
- * frame cannot give one while the queue is not paused.
- */
-export function queueModel(queue: LiveQueue, frame: LiveQueueFrame | null, now: number, localZone: string): QueueModel {
-  if (!frame) return { kind: 'reading' };
-  if (frame.paused) return { kind: 'paused', place: queue.place, announce: LIVE.announce.queue(queue.place, null) };
-  // The estimate from the place as read (it counts the batches due since); the place shown, less them.
-  const at = queueEta(queue.place, frame, now) ?? (queue.etaAt ? Date.parse(queue.etaAt) : Number.NaN);
-  const place = queuePlace(queue.place, frame, now);
-  const paris = Number.isFinite(at) ? zonedTime(at, PARIS) : null;
-  if (!paris) return { kind: 'reading' };
-  const local = zonedTime(at, localZone);
-  const onThis = onComputer() ? LIVE.queue.onThisComputer : LIVE.queue.onThisPhone;
+export function queueModel(entry: LiveEntry, readAt: number | null, now: number): QueueModel {
+  const q = entry.queue;
+  if (!q || !(q.place >= 1)) return { kind: 'reading' };
+  const placeSaid = isSetEntry(entry) ? SETS.live.placeSaid : LIVE.queue.placeSaid(entry.size.label);
+  const wait = typeof q.waitMs === 'number' && Number.isFinite(q.waitMs) ? q.waitMs : null;
+  const paused = q.paused === 'RELEASE' || q.paused === 'PACE' ? q.paused : null;
+  const left = wait === null ? null : paused || readAt === null ? wait : Math.max(0, wait - Math.max(0, now - readAt));
+  const read = wait === null ? null : timeLeft(wait);
   return {
-    kind: 'eta',
-    place,
-    eta: LIVE.queue.eta(paris.time),
-    local: !local || (local.day === paris.day && local.time === paris.time) ? null : onThis(local.time),
-    about: queueAbout(at - now),
-    announce: LIVE.announce.queue(place, paris.time),
+    kind: 'waiting',
+    place: q.place,
+    placeSaid,
+    paused,
+    time: left === null ? null : timeLeft(left),
+    announce: LIVE.announce.queue(placeSaid, q.place, paused ? LIVE.announce.queuePaused[paused] : read === null ? null : LIVE.announce.queueLeft(read)),
   };
 }
 

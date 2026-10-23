@@ -117,10 +117,10 @@ describe.skipIf(!HAS_CHROMIUM)('the after-room of a LIVE RELEASE in /verify (Chr
     for (const a of [rival, me]) await srv.ctx.services.live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id }, a.actor);
     await expect.poll(async () => statusOf(r.id, rival.id), POLL).toBe('TURN');
 
-    // The collector's phone on the release's page: in the line, behind the rival's turn.
+    // The collector's phone on the release's page: in the one queue, its place in its size behind the rival's turn.
     const { page, problems } = await phone(me.token);
     await page.goto(`${srv.origin}/verify/releases/${r.id}`);
-    await textOf(page.locator('.live__place-figure'), '2');
+    await textOf(page.locator('.live__place-figure'), '1');
 
     const reads: string[] = [];
     page.on('request', (req) => {

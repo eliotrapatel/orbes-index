@@ -2027,36 +2027,36 @@ export const LIVE = Object.freeze({
     tierPriority ? 'By tier, the highest first; at random within each tier.' : 'At random among the collectors present at the opening.',
   /** After T0, for an account not in the line yet. */
   joinLine: 'The release is open. Choose your size to join the line: you take your place behind those already in it.',
-  // The line
+  // The queue
   yourPlace: 'YOUR PLACE',
   /** The place's label as a screen reader says it, before the figure. */
   yourPlaceSaid: 'Your place',
-  ahead: (n: number, size: string) => (n === 0 ? `YOU ARE NEXT ${inSizeLabel(size)}` : `${n} AHEAD OF YOU ${inSizeLabel(size)}`),
   left: (left: number, quantity: number) => `${left} OF ${quantity} LEFT`,
   inSize: (n: number, size: string) => `${n} ${inSizeLabel(size)}`,
-  held: (n: number) => (n === 1 ? '1 HELD PIECE MAY RETURN' : `${n} HELD PIECES MAY RETURN`),
-  lineNote: 'When your turn comes, the seal appears here: press and hold it to secure your piece. Keep this page open.',
   /**
-   * The queue (macro scope of 2026-10-20, W2, W5, W6): after the opening, on a release that lets its line in at a pace,
-   * an entry waiting to be let into the room reads its place and when it should come in, in Paris, never the pace itself.
+   * The one queue (ONE QUEUE, lot Q1: ANSWERS C3, r12): after the opening every entry waiting for its turn reads LIVE NOW,
+   * its place in its size and its estimated time left; never the pace, the line ahead of it, a clock time or a held piece.
    */
   queue: Object.freeze({
-    kind: 'THE QUEUE',
-    /** The place's label as a screen reader says it, before the figure. */
-    placeSaid: 'Your place in the queue',
-    /** While the queue's figures are read (the page's first read of them, or after it lost them). */
+    /** The place's label as a screen reader says it, before the figure: « Your place in size 52: ». */
+    placeSaid: (size: string) => `Your place ${inSizeWords(size)}:`,
+    /** While its place is read (a late comer's first reading, or after the page lost it). */
     reading: 'READING YOUR PLACE',
-    /** The estimated entry time in Paris, then on this phone (computer) when its zone says it otherwise. */
-    eta: (time: string) => `ESTIMATED ENTRY ${time} PARIS`,
-    onThisPhone: (time: string) => `${time} ON THIS PHONE`,
-    onThisComputer: (time: string) => `${time} ON THIS COMPUTER`,
-    /** How long until then: `ABOUT 12 MIN`, `ABOUT 2 H 05`; within half a minute, ANY MOMENT NOW. */
-    about: (minutes: number) => (minutes < 60 ? `ABOUT ${minutes} MIN` : `ABOUT ${Math.floor(minutes / 60)} H ${String(minutes % 60).padStart(2, '0')}`),
-    soon: 'ANY MOMENT NOW',
+    /**
+     * The estimated time left (ANSWERS C3, OP-11): under a minute ESTIMATED LESS THAN A MINUTE LEFT; then ESTIMATED 17
+     * MINUTES LEFT; from 60 minutes always ESTIMATED 1 H 12 MIN LEFT (whole hours too: ESTIMATED 2 H 0 MIN LEFT).
+     */
+    timeLeft: (ms: number) => {
+      if (!(ms >= 60_000)) return 'ESTIMATED LESS THAN A MINUTE LEFT';
+      const minutes = Math.max(1, Math.round(ms / 60_000));
+      if (minutes < 60) return `ESTIMATED ${minutes} ${minutes === 1 ? 'MINUTE' : 'MINUTES'} LEFT`;
+      return `ESTIMATED ${Math.floor(minutes / 60)} H ${minutes % 60} MIN LEFT`;
+    },
+    /** PAUSE PACE (ANSWERS r6): the time stays, frozen, under these lines (r11). */
     paused: 'THE QUEUE IS PAUSED',
     pausedLine: 'It resumes from where it stopped.',
-    /** W6: the place is kept whatever happens; the turn passes on only once it has come. */
-    keep: 'Keep this page open. Your place is kept if you leave and come back.',
+    /** The one merged note (ANSWERS « Kept from both screens »). */
+    note: 'When your turn comes, the seal appears here: press and hold it to secure your piece. Keep this page open; if you close it, your place is kept when you come back.',
     leave: 'LEAVE THE LINE',
     /** LEAVE THE LINE gives the place up: a second tap (click, on a computer) within a few seconds confirms it. */
     get leaveConfirm() {
@@ -2118,8 +2118,8 @@ export const LIVE = Object.freeze({
     removed: Object.freeze({ title: 'YOUR ENTRY IS REMOVED', text: 'ORBES has removed your entry from this release. ORBES Client Services can assist you.' }),
     soldOut: Object.freeze({
       title: (size: string) => (isOneSize(size) ? 'SOLD OUT' : `SOLD OUT IN SIZE ${size}`),
-      stay: 'Every piece in your size is taken. You keep your place in case one returns, or you may leave.',
-      none: 'Every piece in your size is reserved. You keep your place should ORBES add one, or you may leave.',
+      /** ONE QUEUE (ANSWERS C6, r13): one sentence, always (no piece held is ever counted to a collector). */
+      text: 'Every piece in your size is reserved. You keep your place should ORBES add more, or you may leave.',
       leave: 'LEAVE THE LINE',
       get leaveConfirm() {
         return forDevice('TAP AGAIN TO LEAVE', 'CLICK AGAIN TO LEAVE');
@@ -2139,12 +2139,14 @@ export const LIVE = Object.freeze({
   retry: 'TRY AGAIN',
   /** What the page says aloud as it changes (aria-live). */
   announce: Object.freeze({
-    place: (place: number, ahead: number, size: string) => `Your place: ${place}. ${ahead === 0 ? `You are next ${inSizeWords(size)}` : `${ahead} ahead of you ${inSizeWords(size)}`}.`,
-    /** The queue (W5): its place, then when it should come in, Paris time; or that it is paused. */
-    queue: (place: number, time: string | null) =>
-      `Your place in the queue: ${place}. ${time === null ? 'The queue is paused. Your place is kept.' : `Estimated entry at ${time}, Paris time.`}`,
-    /** Let into the room from the queue: then its place in the line, as the line says it. */
-    admitted: 'You’re in.',
+    /**
+     * The one queue, at a reading (never each second): its place in its size, then its time left (none in an after-room),
+     * or that the release or the queue is paused.
+     */
+    queue: (said: string, place: number, then: string | null) => `${said} ${place}.${then ? ` ${then}` : ''}`,
+    /** …then its time left as read (`ESTIMATED 17 MINUTES LEFT` said as a sentence), or what holds the batches. */
+    queueLeft: (left: string) => `${left.charAt(0)}${left.slice(1).toLowerCase()}.`,
+    queuePaused: Object.freeze({ RELEASE: 'The release is paused.', PACE: 'The queue is paused.' }),
     turn: 'Your turn. Press and hold the seal until the ring is full.',
     returned: 'A piece has returned: your turn. Press and hold the seal until the ring is full.',
     secured: (name: string) => `Secured: ${name} is held for you.`,
@@ -2749,17 +2751,14 @@ export const SETS = Object.freeze({
     quantity: 'SETS',
     fewer: 'One set fewer',
     more: 'One set more',
-    /** The line: the place read in every size of the entry (the most entries before it in any of them). */
-    ahead: (n: number) => (n === 0 ? 'YOU ARE NEXT IN YOUR SIZES' : `${n} AHEAD OF YOU IN YOUR SIZES`),
     left: (left: number, sets: number) => `${left} OF ${sets === 1 ? '1 SET' : `${sets} SETS`} LEFT`,
-    held: (n: number) => (n === 1 ? '1 HELD SET MAY RETURN' : `${n} HELD SETS MAY RETURN`),
-    /** What the page says aloud of the place. */
-    announcePlace: (place: number, ahead: number) => `Your place: ${place}. ${ahead === 0 ? 'You are next in your sizes' : `${ahead} ahead of you in your sizes`}.`,
-    lineNote: 'When your turn comes, the seal appears here: press and hold it to secure your set. Keep this page open.',
-    /** One of the entry's sizes with no piece left to serve it: said with its piece. */
+    /** The one queue (ONE QUEUE, N2): the place read in every size of the entry (the most entries before it in any of them). */
+    placeSaid: 'Your place in your sizes:',
+    /** The one merged note, of a set. */
+    queueNote: 'When your turn comes, the seal appears here: press and hold it to secure your set. Keep this page open; if you close it, your place is kept when you come back.',
+    /** One of the entry's sizes with no piece left to serve it: said with its piece (one sentence: no held set is ever counted). */
     soldOut: Object.freeze({
       title: (name: string, size: string) => `${name} · ${isOneSize(size) ? 'SOLD OUT' : `SOLD OUT IN SIZE ${bareSize(size)}`}`,
-      stay: (name: string, size: string) => `Every ${name} ${setInSize(size)} is taken. You keep your place in case one returns, or you may leave.`,
       none: (name: string, size: string) => `Every ${name} ${setInSize(size)} is reserved. You keep your place should ORBES add one, or you may leave.`,
     }),
     /** The turn: the seal secures the set. */

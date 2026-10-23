@@ -80,7 +80,52 @@ export const SPLIT: Readonly<{ states: readonly string[]; reason: string; now: s
  * value of it (plan NEXT-NINE, §4, the boards text-diffed). A step that removes or changes a value on purpose lists it
  * here, its reason naming the plan section and the step, until the baseline is recorded again at the step's end.
  */
-export const MOVED: readonly Moved[] = [];
+export const MOVED: readonly Moved[] = [
+  // ONE QUEUE (lot Q1, step Q1.3; plan §1.3, §3.3, §3.11): the classic line screen and M1's queue page give way to the one
+  // queue (LIVE NOW, YOUR PLACE in your size, ESTIMATED … LEFT, the one note); SOLD OUT for your size says its one sentence.
+  { state: 'live-queue', value: 'THE QUEUE', reason: 'ONE QUEUE, lot Q1 step Q1.3 (ANSWERS C3, r12): never THE QUEUE overline, LIVE NOW only', now: 'LIVE NOW, the one queue’s overline' },
+  { state: 'live-queue', value: '412', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D19; ANSWERS C3): YOUR PLACE is the place in your size (one number), the drawn place staying in the console', now: 'YOUR PLACE 203' },
+  { state: 'live-queue', value: 'ESTIMATED ENTRY 19:00 PARIS', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D20; ANSWERS C3, r12, OP-11): never a clock time; the time left only, in the decided words', now: 'ESTIMATED 16 MINUTES LEFT' },
+  { state: 'live-queue', value: 'ABOUT 11 MIN', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D20; ANSWERS C3, r12, OP-11): never a clock time; the time left only, in the decided words', now: 'ESTIMATED 16 MINUTES LEFT' },
+  { state: 'live-queue', value: 'Keep this page open. Your place is kept if you leave and come back.', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D21; ANSWERS «Kept from both screens»): the one merged note', now: 'When your turn comes, the seal appears here: press and hold it to secure your piece. Keep this page open; if you close it, your place is kept when you come back.' },
+  { state: 'live-queue-paused', value: 'THE QUEUE', reason: 'ONE QUEUE, lot Q1 step Q1.3 (ANSWERS C3, r12): never THE QUEUE overline, LIVE NOW only', now: 'LIVE NOW, the one queue’s overline' },
+  { state: 'live-queue-paused', value: '12', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D19; ANSWERS C3): YOUR PLACE is the place in your size (one number), the drawn place staying in the console', now: 'YOUR PLACE 6' },
+  { state: 'live-queue-paused', value: 'Keep this page open. Your place is kept if you leave and come back.', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D21; ANSWERS «Kept from both screens»): the one merged note', now: 'When your turn comes, the seal appears here: press and hold it to secure your piece. Keep this page open; if you close it, your place is kept when you come back.' },
+  { state: 'live-queue-error', value: 'THE QUEUE', reason: 'ONE QUEUE, lot Q1 step Q1.3 (ANSWERS C3, r12): never THE QUEUE overline, LIVE NOW only', now: 'LIVE NOW, the one queue’s overline' },
+  { state: 'live-queue-error', value: '412', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D19; ANSWERS C3): YOUR PLACE is the place in your size (one number), the drawn place staying in the console', now: 'YOUR PLACE 203' },
+  { state: 'live-queue-error', value: 'ESTIMATED ENTRY 19:00 PARIS', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D20; ANSWERS C3, r12, OP-11): never a clock time; the time left only, in the decided words', now: 'ESTIMATED 16 MINUTES LEFT' },
+  { state: 'live-queue-error', value: 'ABOUT 11 MIN', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D20; ANSWERS C3, r12, OP-11): never a clock time; the time left only, in the decided words', now: 'ESTIMATED 16 MINUTES LEFT' },
+  { state: 'live-queue-error', value: 'Keep this page open. Your place is kept if you leave and come back.', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D21; ANSWERS «Kept from both screens»): the one merged note', now: 'When your turn comes, the seal appears here: press and hold it to secure your piece. Keep this page open; if you close it, your place is kept when you come back.' },
+  { state: 'live-queue-stress', value: 'THE QUEUE', reason: 'ONE QUEUE, lot Q1 step Q1.3 (ANSWERS C3, r12): never THE QUEUE overline, LIVE NOW only', now: 'LIVE NOW, the one queue’s overline' },
+  { state: 'live-queue-stress', value: '4999', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D19; ANSWERS C3): YOUR PLACE is the place in your size (one number), the drawn place staying in the console', now: 'YOUR PLACE 1733' },
+  { state: 'live-queue-stress', value: 'ESTIMATED ENTRY 20:54 PARIS', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D20; ANSWERS C3, r12, OP-11): never a clock time; the time left only, in the decided words', now: 'ESTIMATED 2 H 11 MIN LEFT' },
+  { state: 'live-queue-stress', value: 'ABOUT 2 H 05', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D20; ANSWERS C3, r12, OP-11): never a clock time; the time left only, in the decided words', now: 'ESTIMATED 2 H 11 MIN LEFT' },
+  { state: 'live-queue-stress', value: 'Keep this page open. Your place is kept if you leave and come back.', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D21; ANSWERS «Kept from both screens»): the one merged note', now: 'When your turn comes, the seal appears here: press and hold it to secure your piece. Keep this page open; if you close it, your place is kept when you come back.' },
+  { state: 'live-queue-loading', value: 'THE QUEUE', reason: 'ONE QUEUE, lot Q1 step Q1.3 (ANSWERS C3, r12): never THE QUEUE overline, LIVE NOW only', now: 'LIVE NOW, the one queue’s overline' },
+  { state: 'live-queue-loading', value: 'Keep this page open. Your place is kept if you leave and come back.', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D21; ANSWERS «Kept from both screens»): the one merged note', now: 'When your turn comes, the seal appears here: press and hold it to secure your piece. Keep this page open; if you close it, your place is kept when you come back.' },
+  { state: 'set-live-line', value: '5', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D19; ANSWERS C3): YOUR PLACE is the place in your size (one number), the drawn place staying in the console', now: 'YOUR PLACE 1' },
+  { state: 'set-live-line', value: 'YOU ARE NEXT IN YOUR SIZES', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D19; ANSWERS C3): never an ‘ahead of you’ line', now: 'nowhere: YOUR PLACE in your sizes says it' },
+  { state: 'set-live-line', value: '2 HELD SETS MAY RETURN', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D25; ANSWERS r15, CURRENT STATE I): no held line, never a held figure', now: 'nowhere' },
+  { state: 'set-live-line', value: 'When your turn comes, the seal appears here: press and hold it to secure your set. Keep this page open.', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D21, N2): the one merged note, in SETS’ words', now: 'When your turn comes, the seal appears here: press and hold it to secure your set. Keep this page open; if you close it, your place is kept when you come back.' },
+  { state: 'live-sold-out-size', value: 'YOUR PLACE 7', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D19; ANSWERS C3): YOUR PLACE is the place in your size, the drawn place staying in the console', now: 'YOUR PLACE 1' },
+  { state: 'live-sold-out-size', value: 'Every piece in your size is reserved. You keep your place should ORBES add one, or you may leave.', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D27; ANSWERS C6, r13): the one sentence of SOLD OUT for your size', now: 'Every piece in your size is reserved. You keep your place should ORBES add more, or you may leave.' },
+  { state: 'set-live-sold-out', value: 'YOUR PLACE 2', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D19; ANSWERS C3): YOUR PLACE is the place in your size, the drawn place staying in the console', now: 'YOUR PLACE 1' },
+  { state: 'desk-live-queue', value: 'THE QUEUE', reason: 'ONE QUEUE, lot Q1 step Q1.3 (ANSWERS C3, r12): never THE QUEUE overline, LIVE NOW only', now: 'LIVE NOW, the one queue’s overline' },
+  { state: 'desk-live-queue', value: '412', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D19; ANSWERS C3): YOUR PLACE is the place in your size (one number), the drawn place staying in the console', now: 'YOUR PLACE 203' },
+  { state: 'desk-live-queue', value: 'Keep this page open. Your place is kept if you leave and come back.', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D21; ANSWERS «Kept from both screens»): the one merged note', now: 'When your turn comes, the seal appears here: press and hold it to secure your piece. Keep this page open; if you close it, your place is kept when you come back.' },
+  { state: 'desk-live-queue', value: 'ESTIMATED ENTRY 19:00 PARIS', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D20; ANSWERS C3, r12, OP-11): never a clock time; the time left only, in the decided words', now: 'ESTIMATED 16 MINUTES LEFT' },
+  { state: 'desk-live-queue', value: 'ABOUT 11 MIN', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D20; ANSWERS C3, r12, OP-11): never a clock time; the time left only, in the decided words', now: 'ESTIMATED 16 MINUTES LEFT' },
+  { state: 'desk-live-queue-paused', value: 'THE QUEUE', reason: 'ONE QUEUE, lot Q1 step Q1.3 (ANSWERS C3, r12): never THE QUEUE overline, LIVE NOW only', now: 'LIVE NOW, the one queue’s overline' },
+  { state: 'desk-live-queue-paused', value: '12', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D19; ANSWERS C3): YOUR PLACE is the place in your size (one number), the drawn place staying in the console', now: 'YOUR PLACE 6' },
+  { state: 'desk-live-queue-paused', value: 'Keep this page open. Your place is kept if you leave and come back.', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D21; ANSWERS «Kept from both screens»): the one merged note', now: 'When your turn comes, the seal appears here: press and hold it to secure your piece. Keep this page open; if you close it, your place is kept when you come back.' },
+  { state: 'desk-set-live-line', value: '2 HELD SETS MAY RETURN', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D25; ANSWERS r15, CURRENT STATE I): no held line, never a held figure', now: 'nowhere' },
+  { state: 'desk-set-live-line', value: 'When your turn comes, the seal appears here: press and hold it to secure your set. Keep this page open.', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D21, N2): the one merged note, in SETS’ words', now: 'When your turn comes, the seal appears here: press and hold it to secure your set. Keep this page open; if you close it, your place is kept when you come back.' },
+  { state: 'desk-set-live-line', value: '5', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D19; ANSWERS C3): YOUR PLACE is the place in your size (one number), the drawn place staying in the console', now: 'YOUR PLACE 1' },
+  { state: 'desk-set-live-line', value: 'YOU ARE NEXT IN YOUR SIZES', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D19; ANSWERS C3): never an ‘ahead of you’ line', now: 'nowhere: YOUR PLACE in your sizes says it' },
+  { state: 'desk-live-sold-out-size', value: 'Every piece in your size is reserved. You keep your place should ORBES add one, or you may leave.', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D27; ANSWERS C6, r13): the one sentence of SOLD OUT for your size', now: 'Every piece in your size is reserved. You keep your place should ORBES add more, or you may leave.' },
+  { state: 'desk-live-sold-out-size', value: '7', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D19; ANSWERS C3): YOUR PLACE is the place in your size (one number), the drawn place staying in the console', now: 'YOUR PLACE 1' },
+  { state: 'desk-set-live-sold-out', value: '2', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D19; ANSWERS C3): YOUR PLACE is the place in your size (one number), the drawn place staying in the console', now: 'YOUR PLACE 1' },
+];
 
 const movedKey = (state: string, value: string) => `${state}\u0000${normalizeText(value)}`;
 const moved = new Map(MOVED.map((m) => [movedKey(m.state, m.value), m] as const));
@@ -228,7 +273,9 @@ export function contentSuite(name: string): void {
               if (twin) {
                 const phone = baseline.states[twin];
                 if (!phone) throw new Error(`${state.id}: its phone state ${twin} is not in the baseline`);
-                for (const value of await parityMissing(opened, state, twin, phone.values)) missing.push(`${state.id}: the phone's «${value}» (${twin}) is not shown on the computer`);
+                // A value MOVED on the phone (gone from it on purpose) is not asked of its computer twin either.
+                const kept = phone.values.filter((value) => !moved.has(movedKey(twin, value)));
+                for (const value of await parityMissing(opened, state, twin, kept)) missing.push(`${state.id}: the phone's «${value}» (${twin}) is not shown on the computer`);
               }
             } finally {
               await opened.close();
