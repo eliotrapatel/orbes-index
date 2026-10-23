@@ -3258,6 +3258,24 @@ fieldset.cfield--checks > .cfield__label {
   margin-top: 22px;
 }
 
+/* The sizes: tighter columns (as the returns' sizes on a phone), so a paced release's added 'Beyond the pieces' keeps
+   Missed, Ended holds and Interest in the page at 1440 px ("add only", D11). */
+.live__sizes .table th,
+.live__sizes .table td {
+  padding-right: 12px;
+}
+
+.live__sizes .table th:last-child,
+.live__sizes .table td:last-child {
+  padding-right: 0;
+}
+
+/* A waiting entry's queue place and estimated turn, under its status: « Queue place 2 » and its time (« 17:05 Paris »)
+   each kept on one line. */
+.live__nowrap {
+  white-space: nowrap;
+}
+
 /* The pace: its line and controls, the close guard, then its figures, under the board's. */
 .live__pace {
   margin-top: 22px;

@@ -153,6 +153,26 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
 
   const fig = (p: Page, id: string) => p.locator(`[data-testid=${id}] .kpi__value`);
 
+  /**
+   * What the step's added figures may not push past the page's main column at 1440 px ("add only", D11): any of the
+   * line's columns, its LET IN / FREE / REMOVE included, and the sizes' columns up to Interest (its Forecast and ADD
+   * PIECES, on a release selling out, were past the edge already in M1: the table scrolls, as every wide table).
+   */
+  const pastThePage = (p: Page) =>
+    p.evaluate(() => {
+      const past: string[] = [];
+      const line = document.querySelector<HTMLElement>('#live-entries .table-wrap');
+      if (line && line.scrollWidth > line.clientWidth + 1) past.push(`the line, ${line.scrollWidth - line.clientWidth} px`);
+      const sizes = document.querySelector<HTMLElement>('.live__sizes .table-wrap');
+      if (sizes) {
+        const edge = sizes.getBoundingClientRect().right + 1;
+        const heads = [...sizes.querySelectorAll('th')];
+        const last = heads.findIndex((t) => t.textContent === 'Interest');
+        for (const t of heads.slice(0, last + 1)) if (t.getBoundingClientRect().right > edge) past.push(`the sizes, ${t.textContent}`);
+      }
+      return past;
+    });
+
   /** An ACTIVE account holding `pieces` pieces of the model (its tier). */
   async function collector(n: number, pieces: number): Promise<{ id: string; email: string; actor: Actor }> {
     const email = `live.collector${n}@example.com`;
@@ -406,8 +426,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await secure(x, r.id);
     await expect.poll(() => fig(p, 'live-secured').textContent(), { timeout: 10_000 }).toBe('1');
     await expect.poll(() => line.first().locator('[data-testid=live-entry-status]').textContent(), POLL).toMatch(/^SECUREDTo pay until /);
-    // The gesture's length: the line's numbers are its place, its pieces, its queue place (ONE QUEUE, D11), then the hold.
-    expect(await line.first().locator('td.col--num').nth(3).textContent()).toMatch(/^1\.\d{2} s$/);
+    expect(await line.first().locator('td.col--num').nth(2).textContent()).toMatch(/^1\.\d{2} s$/);
     await line.first().locator('[data-testid=live-free]').click();
     await confirmDialog(p);
     await expect.poll(() => fig(p, 'live-expired').textContent(), { timeout: 10_000 }).toBe('1');
@@ -928,6 +947,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     const actions = await ctx.db.selectFrom('audit_logs').select('action').where('target_id', '=', r.id).where('action', 'like', 'drop.live.pace%').orderBy('id').execute();
     expect(actions.map((a) => a.action)).toEqual(['drop.live.pace', 'drop.live.pace.pause', 'drop.live.pace.resume', 'drop.live.pace.next']);
     expect(await figuresInDisplayFace(p)).toEqual([]);
+    expect(await pastThePage(p)).toEqual([]);
     await shot(p, 'pace');
     expect(await csp(p)).toEqual([]);
     await p.context().close();
@@ -1032,6 +1052,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     for (const tid of ['live-guard-extend', 'live-guard-set-pace', 'live-guard-next-now']) expect(await p.locator(`[data-testid=${tid}]`).count(), tid).toBe(1);
     expect(await p.locator('[data-testid=live-hold-shorten], [data-testid=live-hold-end]').count()).toBe(0);
     expect(await figuresInDisplayFace(p)).toEqual([]);
+    expect(await pastThePage(p)).toEqual([]);
     await shot(p, 'hold-ended');
     if (SCREENSHOTS) {
       await p.setViewportSize({ width: 1024, height: 768 });
@@ -1053,6 +1074,13 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     expect(options).toEqual(['The line, live', 'Open entries', 'WAITING', 'Waiting in the queue', 'TURN', 'SECURED', 'CONFIRMED', 'MISSED', 'EXPIRED', 'RELEASED', 'LEFT', 'REMOVED', 'ENDED', 'Beyond the pieces']);
     await p.selectOption('#live-entries select[name=status]', 'BEYOND');
     await expect.poll(() => p.locator('#live-entries [data-testid=live-entry-queue-place]').allTextContents(), POLL).toEqual(['4']);
+    // NEXT BATCH NOW with no piece free (each of the three held by a turn): the server's refusal, in its dialog.
+    for (let i = 0; i < 2; i++) await ctx.services.live.nextBatch(id, admin);
+    await expect.poll(() => fig(p, 'live-pace-waiting').textContent(), POLL).toBe('2');
+    await p.click('[data-testid=live-pace-next-now]');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('No piece is free for anyone waiting.');
+    await p.click('[data-testid=dialog-cancel]');
     const actions = await ctx.db.selectFrom('audit_logs').select('action').where('target_id', '=', id).where('action', 'like', 'drop.live.%').orderBy('id').execute();
     expect(actions.map((a) => a.action)).toEqual(expect.arrayContaining(['drop.live.hold.shorten', 'drop.live.hold.end', 'drop.live.batch']));
     expect(await figuresInDisplayFace(p)).toEqual([]);

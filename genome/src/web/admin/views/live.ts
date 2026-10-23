@@ -342,6 +342,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
       label: 'Status',
       cell: (e: LiveEntry) => {
         const deadline = liveEntryDeadline(e);
+        const q = liveEntryQueue(e);
         return h(
           'span',
           { data: { testid: 'live-entry-status' } },
@@ -350,20 +351,15 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
           e.guaranteed ? h('span', { class: 'row-marks' }, statusMark('GUARANTEED', 'outline')) : null,
           e.letIn ? h('span', { class: 'cell-sub' }, 'Let in by the console') : null,
           deadline ? h('span', { class: 'cell-sub' }, deadline) : null,
+          // ONE QUEUE (D11): while it waits in the queue, its place in its size (an after-room's too) from the queue's
+          // snapshot and its estimated turn in Paris time, under its status as its deadline is under a turn's, so the
+          // line keeps every column in the page at 1440 px ("add only").
+          q.place === '—' ? null : h('span', { class: ['cell-sub', 'live__nowrap'] }, 'Queue place ', h('span', { data: { testid: 'live-entry-queue-place' } }, q.place)),
+          q.turn === '—' ? null : h('span', { class: 'cell-sub' }, 'Estimated turn ', h('span', { class: 'live__nowrap', data: { testid: 'live-entry-estimated' } }, q.turn)),
         );
       },
     },
-    // ONE QUEUE (D11): in the queue, each person's place in its size (an after-room's too) from the queue's snapshot.
-    {
-      label: 'Queue place',
-      cell: (e: LiveEntry) => {
-        const q = liveEntryQueue(e);
-        return h('span', { data: { testid: 'live-entry-queue-place' } }, q.place === '—' ? h('span', { class: 'soft' }, '—') : q.place);
-      },
-      kind: ['num' as const],
-    },
-    // On a paced release, each entry's turn: the batch that gave it and when, or WAITING in the queue; and, while it
-    // waits, its estimated turn in Paris time (D11).
+    // On a paced release, each entry's turn: the batch that gave it and when, or WAITING in the queue.
     ...((b ?? board)?.pace || r.pace
       ? [
           {
@@ -371,14 +367,6 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
             cell: (e: LiveEntry) => {
               const a = liveEntryAdmission(e);
               return h('span', { data: { testid: 'live-entry-admitted' } }, a.text === '—' ? h('span', { class: 'soft' }, '—') : a.text, a.at ? h('span', { class: 'cell-sub' }, a.at) : null);
-            },
-            kind: ['nowrap' as const],
-          },
-          {
-            label: 'Estimated turn',
-            cell: (e: LiveEntry) => {
-              const q = liveEntryQueue(e);
-              return h('span', { data: { testid: 'live-entry-estimated' } }, q.turn === '—' ? h('span', { class: 'soft' }, '—') : q.turn);
             },
             kind: ['nowrap' as const],
           },
@@ -397,7 +385,8 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
           a.remove ? button('Remove', { kind: 'ghost', testId: 'live-remove', onClick: () => entryAction(e, 'remove') }) : null,
         );
       },
-      kind: ['actions' as const],
+      // Two of them (LET IN and REMOVE on a place in the queue) to a second line rather than past the page's width.
+      kind: ['actions' as const, 'wrap' as const],
     },
   ];
 
@@ -461,12 +450,14 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
           { label: 'Room', cell: (s) => formatCount(s.waiting), kind: ['num'] },
           { label: 'Line', cell: (s) => formatCount(s.line), kind: ['num'] },
           // ONE QUEUE (D11): those in the queue past the size's pieces, on a paced release.
-          ...(b.pace ? [{ label: 'Beyond the pieces', cell: (s: LiveBoard['sizes'][number]) => h('span', { data: { testid: 'live-size-beyond' } }, formatCount(s.beyond ?? 0)), kind: ['num' as const] }] : []),
+          // Its header on two lines (as 'Ended holds'), in the table's tighter columns, so Missed, Ended holds and Interest
+          // stay in the page at 1440 px ("add only").
+          ...(b.pace ? [{ label: 'Beyond the pieces', cell: (s: LiveBoard['sizes'][number]) => h('span', { data: { testid: 'live-size-beyond' } }, formatCount(s.beyond ?? 0)), kind: ['num' as const, 'wrap' as const] }] : []),
           { label: 'Turns', cell: (s) => formatCount(s.turns), kind: ['num'] },
           { label: 'Secured', cell: (s) => formatCount(s.secured), kind: ['num'] },
           { label: 'Confirmed', cell: (s) => formatCount(s.confirmed), kind: ['num'] },
           { label: 'Missed', cell: (s) => formatCount(s.missed), kind: ['num'] },
-          { label: 'Ended holds', cell: (s) => formatCount(s.expired), kind: ['num'] },
+          { label: 'Ended holds', cell: (s) => formatCount(s.expired), kind: ['num', 'wrap'] },
           { label: 'Interest', cell: (s) => formatCount(s.interest), kind: ['num'] },
           ...(b.sellOut ? [{ label: 'Forecast', cell: (s: LiveBoard['sizes'][number]) => h('span', { data: { testid: 'live-size-sellout' } }, sizeSellOut(b, s.id)) }] : []),
           {

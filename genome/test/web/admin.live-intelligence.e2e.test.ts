@@ -265,8 +265,14 @@ describe.skipIf(!HAS_CHROMIUM)('the intelligence of the LIVE RELEASES in the con
     expect(await p.locator('[data-testid=live-size-sellout]').count()).toBe(2);
     expect(await figuresInDisplayFace(p)).toEqual([]);
     await shot(p, 'intel-alerts');
-    await ctx.services.live.advance(draft.id);
-    await expect.poll(() => p.locator('[data-testid=live-alerts]').count(), { timeout: 15_000 }).toBe(0);
+    // The next batch gives the returned piece: once a frame has been published since the last batch (at most one batch a
+    // frame, a frame asked for at most once a second), so the engine's pass is made again until it is given.
+    await expect
+      .poll(async () => {
+        await ctx.services.live.advance(draft.id);
+        return p.locator('[data-testid=live-alerts]').count();
+      }, { timeout: 15_000, interval: 500 })
+      .toBe(0);
 
     // 4. One secures and pays; an ADMIN ends it: the report and the collectors.
     const turns = await ctx.db.selectFrom('live_entries').select('account_id').where('drop_id', '=', draft.id).where('status', '=', 'TURN').execute();
@@ -279,6 +285,13 @@ describe.skipIf(!HAS_CHROMIUM)('the intelligence of the LIVE RELEASES in the con
     expect(await fig(p, 'live-report-confirmed').textContent()).toBe('1');
     expect(await p.locator('[data-testid=live-report-why] li').count()).toBeGreaterThan(3);
     expect(await p.locator('[data-testid=live-report-no-addition]').textContent()).toContain('« 2 PIECES · NEVER MORE »');
+    // ONE QUEUE (D11): the report's queue rows, as drawn.
+    const note = (id: string) => p.locator(`[data-testid=${id}] .kpi__note`).textContent();
+    expect(await fig(p, 'live-report-turns-by-pace').textContent()).toMatch(/^\d+$/);
+    expect(await note('live-report-turns-by-pace')).toBe('BY THE PACE');
+    expect(await note('live-report-longest-wait')).toMatch(/^(IN THE QUEUE, TO ITS TURN|NOBODY IN THE QUEUE)$/);
+    expect(await fig(p, 'live-report-left-queue').textContent()).toMatch(/^\d+$/);
+    expect(await note('live-report-left-queue')).toMatch(/^(PEOPLE|PERSON) WHO LEFT THEIR PLACE$/);
     const [download] = await Promise.all([p.waitForEvent('download'), p.click('[data-testid=live-report-csv]')]);
     expect(download.suggestedFilename()).toMatch(new RegExp(`^ORBES-live-${draft.id.slice(0, 8).toUpperCase()}-report-\\d{4}-\\d{2}-\\d{2}\\.csv$`));
     expect(readFileSync((await download.path())!, 'utf8')).toContain('"funnel","confirmed","1"');
