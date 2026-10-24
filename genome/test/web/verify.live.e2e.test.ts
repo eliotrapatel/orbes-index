@@ -396,7 +396,9 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     // 4b HOLD (OP-8): its overline, the fine ring and its glow filling, the point riding its leading end; hold.mp3 at the press.
     await textOf(page.locator('.live__turn > .live__overline'), 'HOLD');
     expect(Number(await page.locator('.live-hold__fill').getAttribute('stroke-dashoffset'))).toBeLessThan(2 * Math.PI * 116 * 0.8);
-    expect(await page.locator('.live-hold__glow').getAttribute('stroke-dashoffset')).toBe(await page.locator('.live-hold__fill').getAttribute('stroke-dashoffset'));
+    // Both read in one task: the ring fills every frame, so two separate reads may straddle a frame.
+    const [glowAt, fillAt] = await page.evaluate(() => ['.live-hold__glow', '.live-hold__fill'].map((s) => document.querySelector(s)?.getAttribute('stroke-dashoffset')));
+    expect(glowAt).toBe(fillAt);
     expect(await page.locator('.live-hold__pt').evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
     expect((await live(page)).sounds.filter((n) => n === 'hold')).toHaveLength(1);
     await page.mouse.up();
