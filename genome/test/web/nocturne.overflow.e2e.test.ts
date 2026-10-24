@@ -63,6 +63,9 @@ const NARROW_TOO = [
   // The birthday credit under IN USE for an account without a tier (plan CUSTOMER INTELLIGENCE §3.5 SB.4.5), at 375, 360
   // and 320 px too.
   'birthday-credit',
+  // ONE QUEUE's hold (lot Q1 §3.2): its Horizon band full (every piece left), its edge at the column's end, at 390, 375,
+  // 360 and 320 px; the page never scrolls sideways.
+  'live-queue-hold',
 ];
 /** Of NARROW_TOO, opened at the stage's 390 px only: the LIVE room with the guarantee's line. */
 const STAGE_ONLY = ['room-guaranteed'];
@@ -71,6 +74,7 @@ const atNarrow = (id: string) => NARROW_STATES.test(id) || (NARROW_TOO.includes(
 
 const HORIZON = "ONE QUEUE's Horizon band (lot Q1 §3.2, D23; the owner's mockup): its horizon runs past the column on purpose, its ends dissolving at the screen's edges (32 px each side on a phone), drawn by its decorative layer (aria-hidden); the page never scrolls sideways";
 const HORIZON_RUN = "ONE QUEUE's Horizon band at LAST PIECES' rest (lot Q1 §3.2, D24): the slow light's bead and trail wait past the edge of what is left, inside the band's own clip";
+const HORIZON_HALO = "ONE QUEUE's Horizon band, the halo at its edge (lot Q1 §3.2, D24): its light breathes up to 1.3 times its box, drawn by its decorative layer (aria-hidden), unseen and without a size until LAST PIECES; read only when the breath is near its peak";
 /** What overflowed at 5efd4c9 on purpose: a state, the start of the line overflows() writes, and why. */
 const DOOR = "ONE QUEUE's room door (lot Q1 §3.4, D35; the owner's mockup, MK #room-2): one hairline horizon running past the column on purpose, its ends dissolving at the screen's edges (32 px each side on a phone), drawn by its decorative layer (aria-hidden); the page never scrolls sideways";
 /** CONFIRMED's signature (lot Q1 §3.7, D43; the owner's mockup, MK #confirmed): its horizon runs past the column on purpose. */
@@ -89,6 +93,13 @@ const KNOWN: readonly { state: string; starts: string; reason: string }[] = [
   { state: 'live-queue-stress', starts: 'div.live-hz', reason: HORIZON },
   { state: 'live-queue-stress', starts: 'span.live-hz__run spills out of its box', reason: HORIZON_RUN },
   { state: 'live-queue-stress', starts: 'span.live-hz__track spills out of its box', reason: HORIZON_RUN },
+  { state: 'live-queue-hold', starts: 'div.live__stage spills out of its box', reason: HORIZON },
+  { state: 'live-queue-hold', starts: 'section.live__queue.live__screen spills out of its box', reason: HORIZON },
+  { state: 'live-queue-hold', starts: 'div.live-hz', reason: HORIZON },
+  { state: 'live-queue-hold', starts: 'span.live-hz__run spills out of its box', reason: HORIZON_RUN },
+  { state: 'live-queue-hold', starts: 'span.live-hz__track spills out of its box', reason: HORIZON_RUN },
+  { state: 'live-queue-hold', starts: 'span.live-hz__in spills out of its box', reason: HORIZON_RUN },
+  ...['live-queue-stress', 'live-queue-hold'].map((state) => ({ state, starts: 'span.live-hz__halo spills out of its box', reason: HORIZON_HALO })),
 ];
 
 describe.skipIf(!HAS_CHROMIUM)('NOCTURNE overflow: nothing overflows its column in the extreme cases (Chromium)', () => {
