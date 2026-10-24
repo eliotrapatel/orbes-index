@@ -103,9 +103,11 @@ describe('build-web: production build of the real apps', () => {
     for (const css of [pointer, layout]) {
       expect(css.toString('utf8')).not.toMatch(/@property|@import|\.n-post__missing-back\{display:none\}/);
     }
-    // Weight, gzip -9: the phone's stylesheet at most 23 KB (production c3d25c2's was 20.8 KB; 22 KB until lot M3's
-    // add-ons' rows, step M3.12, took it to 22.3 KB); a computer's two more at most 45 KB together.
-    expect(gz(phone)).toBeLessThanOrEqual(23 * 1024);
+    // Weight, gzip -9: the phone's stylesheet at most 25 KB (production c3d25c2's was 20.8 KB; 22 KB until lot M3's
+    // add-ons' rows, step M3.12, took it to 22.3 KB; 23 KB until ONE QUEUE's look, lot Q1 step Q1.7: the photograph on
+    // the phone, the Horizon band and the figures' morph, ported from the owner's mockup, took it to 24.7 KB); a
+    // computer's two more at most 45 KB together.
+    expect(gz(phone)).toBeLessThanOrEqual(25 * 1024);
     expect(gz(pointer) + gz(layout)).toBeLessThanOrEqual(45 * 1024);
   });
 

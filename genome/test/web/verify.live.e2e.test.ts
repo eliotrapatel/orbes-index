@@ -215,7 +215,9 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
 
   it('announced → the room → the door at T0 → the line → the turn (a pointer hold) → the reveal and the add-ons → PAY → CONFIRMED in ivory', async () => {
     const t0 = new Date(Date.now() + 45_000);
-    const r = await release({ opensAt: t0, minTier: 1, sizes: [{ label: '50', stock: 2 }, { label: '52', stock: 1 }], addons: [{ label: 'ENGRAVING', line: 'Your initials', priceMinor: 15_000 }, { label: 'GIFT BOX', priceMinor: 9_000 }] });
+    // A turn of 90 s: the rival still holds its turn when this phone, behind it at the line's frame, first reads its state
+    // (a moment of its own within LIVE_QUEUE_SPREAD_MS, a minute), so the pieces left read its held piece (B3 below).
+    const r = await release({ opensAt: t0, minTier: 1, turnSeconds: 90, sizes: [{ label: '50', stock: 2 }, { label: '52', stock: 1 }], addons: [{ label: 'ENGRAVING', line: 'Your initials', priceMinor: 15_000 }, { label: 'GIFT BOX', priceMinor: 9_000 }] });
     const laterAt = new Date(Date.now() + 3 * 86_400_000);
     const later = await release({ opensAt: laterAt, roomOpensMinutes: 5, minTier: 2 });
     const [s50, s52] = r.sizes;
@@ -340,7 +342,11 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await textOf(page.locator('.live__queue > .live__overline:not(.live__place-label)'), 'LIVE NOW');
     await expect.poll(async () => norm(await page.locator('.live__place-figure').innerText()), { timeout: 75_000, interval: 250 }).toBe('1');
     await textOf(page.locator('.live__queue-time'), /^ESTIMATED (LESS THAN A MINUTE|1 MINUTE) LEFT$/);
-    await textOf(page.locator('.live__left'), '2 OF 3 LEFT · 0 IN SIZE 52');
+    // Lot Q1 §3.2: the pieces left in the Horizon band, its words inside it (no LAST PIECES at 2 of 3: ⌈0.3⌉ = 1).
+    await textOf(page.locator('.live__queue .live-hz__text'), '2 OF 3 LEFT · 0 IN SIZE 52');
+    // Its lit share is what is left (the edge glides there: the share set, not its passage, is read).
+    expect(await page.locator('.live__queue .live-hz').evaluate((el) => [el.classList.contains('is-last'), el.classList.contains('is-out'), (el as HTMLElement).style.getPropertyValue('--live-hz-f').trim()])).toEqual([false, false, '0.6667']);
+    expect(await page.locator('.live__queue .live__rule, .live__queue .live-hz__word:not([hidden])').count()).toBe(0);
     await textOf(page.locator('.live__queue-note'), LIVE.queue.note);
     for (const gone of ['.live__held', '.live__ahead', '.live__meter']) expect(await page.locator(gone).count(), gone).toBe(0);
     expect(await page.locator('.live__size').count()).toBe(0);
@@ -354,7 +360,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await textOf(page.locator('.live__turn > .live__overline'), 'A PIECE HAS RETURNED');
     await expect.poll(() => page.locator('[aria-live="assertive"]').innerText(), POLL).toBe(LIVE.announce.returned);
     expect(await page.evaluate(() => document.activeElement?.classList.contains('live-hold'))).toBe(true);
-    await textOf(page.locator('.live__turn-left'), /^00:(2\d|30)$/);
+    await textOf(page.locator('.live__turn-left'), /^01:(2\d|30)$/);
     await textOf(page.locator('.live__turn-piece'), 'MONOLITHE · SIZE 52 · € 5 050');
     await keepsVault(page, null, ['THE RELEASES']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-turn.png'), fullPage: true });
@@ -598,7 +604,11 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await textOf(page.locator('.live__queue .live__place-figure'), '3');
     // Its turn three batches away (an hour apart, the next in an hour): about three hours, said in the decided words.
     await textOf(page.locator('.live__queue-time'), /^ESTIMATED (2 H 59|3 H 0) MIN LEFT$/);
-    await textOf(page.locator('.live__left'), '3 OF 4 LEFT · 3 IN SIZE 52');
+    await textOf(page.locator('.live__queue .live-hz__text'), '3 OF 4 LEFT · 3 IN SIZE 52');
+    // Lot Q1 §3.1 (D31): the screen in ONE QUEUE's look on the phone: no corner marks, none on any block.
+    expect(await page.locator('.view--live').evaluate((el) => el.classList.contains('live--look'))).toBe(true);
+    expect(await page.evaluate(() => [...document.querySelectorAll('.corners')].every((c) => getComputedStyle(c).display === 'none'))).toBe(true);
+    expect(await page.locator('.view--live .bracket').count()).toBe(0);
     await textOf(page.locator('.live__queue-note'), LIVE.queue.note);
     expect(await page.getByRole('button', { name: LIVE.queue.leave }).isEnabled()).toBe(true);
     // Never the pace, the line ahead or a held piece: no batch, no figure of buyers, no interval, no clock time.
@@ -615,9 +625,23 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await srv.ctx.services.live.resumePace(r.id, f.admin);
     await page.clock.runFor(31_000);
     await visible(page.locator('.live__queue[data-state="waiting"]'), 30_000);
-    // NEXT BATCH NOW gives the second its turn: this phone is next, its place 2 at its next read.
+    // NEXT BATCH NOW gives the second its turn: this phone is next, its place 2 at its next read. Each digit that
+    // morphs in YOUR PLACE is recorded (its old figure, then its new one).
+    await page.locator('.live__queue .live__place-figure').evaluate((fig) => {
+      const seen: string[] = [];
+      (window as unknown as { __morphs: string[] }).__morphs = seen;
+      new MutationObserver((records) => {
+        for (const r of records) for (const n of r.addedNodes) if (n instanceof HTMLElement && n.matches('.live-mf')) seen.push(`${n.dataset.o}>${n.textContent}`);
+      }).observe(fig, { childList: true, subtree: true });
+    });
     await turnsNow(r.id);
     await page.clock.runFor(61_000);
+    await textOf(page.locator('.live__queue .live__place-figure'), '2');
+    // Lot Q1 §3.2 (D30): the place morphed, its changed digit only (3 leaving, 2 resolving: the page's text the new
+    // figure's alone), then plain text again.
+    expect(await page.evaluate(() => (window as unknown as { __morphs?: string[] }).__morphs ?? [])).toEqual(['3>2']);
+    await page.clock.runFor(1_000);
+    await expect.poll(() => page.locator('.live__queue .live__place-figure .live-mf').count(), POLL).toBe(0);
     await textOf(page.locator('.live__queue .live__place-figure'), '2');
     expect(await page.locator('.live__line').count()).toBe(0);
     expect(problems).toEqual([]);

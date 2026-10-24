@@ -570,6 +570,35 @@ export function stockLine(room: LiveRoom, entry: Pick<LiveEntry, 'size' | 'sizes
   return size ? `${left} · ${LIVE.inSize(size.left, entry.size.label)}` : left;
 }
 
+/**
+ * The Horizon band of the stock (ONE QUEUE, lot Q1 §3.2; D23, D24): what is left of the release (`fraction`, 0 to 1:
+ * the lit part, full when full, emptying as pieces go), the stock line's words inside it (stockLine), LAST PIECES at
+ * 10 % left or fewer (OP-3, as the mockup computes it: `left > 0 && left <= Math.ceil(quantity * 0.1)`), and at 0 no
+ * LAST PIECES and the light out (`out`). Two figures only, never a held piece (D25).
+ */
+export interface BandModel {
+  left: number;
+  quantity: number;
+  fraction: number;
+  last: boolean;
+  out: boolean;
+  text: string;
+}
+
+export function bandModel(room: LiveRoom, entry: Pick<LiveEntry, 'size' | 'sizes'>): BandModel {
+  const quantity = Math.max(0, Math.floor(room.quantity));
+  const left = Math.max(0, Math.min(quantity, Math.floor(room.left)));
+  const out = left <= 0;
+  return {
+    left,
+    quantity,
+    fraction: out || quantity <= 0 ? 0 : left / quantity,
+    last: !out && left <= Math.ceil(quantity * 0.1),
+    out,
+    text: stockLine(room, entry),
+  };
+}
+
 /** The estimated time left in the decided words (OP-11, N9): ESTIMATED 17 MINUTES LEFT, ESTIMATED 1 H 12 MIN LEFT, … */
 export function timeLeft(ms: number): string {
   return LIVE.queue.timeLeft(ms);

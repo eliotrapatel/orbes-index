@@ -101,15 +101,14 @@ const PLAN: Partial<Record<Kind, readonly [Place, string][]>> = {
     ['br', ':scope > .live__enter'],
   ],
   // ONE QUEUE (MK #queue, desk): YOUR PLACE large in the centre (READING YOUR PLACE there until it is read), the pieces
-  // left and the one note under it; the release's name, its choice and LEAVE THE LINE bottom left; PAUSED (or THE QUEUE
+  // left (the Horizon band, D23) and the one note under it; the release's name, its choice and LEAVE THE LINE bottom left; PAUSED (or THE QUEUE
   // IS PAUSED) with its line, then the time left, bottom right.
   queue: [
     ['head', ':scope > .live__overline:not(.live__place-label)'],
     ['body', ':scope > .live__place-label'],
     ['body', ':scope > .live__place'],
     ['body', ':scope > .live__queue-reading'],
-    ['body', ':scope > .live__left'],
-    ['body', ':scope > .live__rule'],
+    ['body', ':scope > .live-hz'],
     ['body', ':scope > .live__queue-note'],
     ['bl', ':scope > .live__title'],
     ['bl', ':scope > .live__error'],

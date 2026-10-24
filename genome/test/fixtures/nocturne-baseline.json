@@ -14237,6 +14237,95 @@
         "When your turn comes, the seal appears here: press and hold it to secure your piece. Keep this page open; if you close it, your place is kept when you come back."
       ]
     },
+    "live-queue-small": {
+      "title": "The one queue of a small release: 24 pieces, the Horizon band in place of the cells, 9 OF 24 LEFT · 2 IN SIZE 17, YOUR PLACE 3, FROM ORBES",
+      "refs": [
+        "MK Q9"
+      ],
+      "variant": "queue",
+      "as": "queueSmall",
+      "values": [
+        "ORBES",
+        "Thank you for being here tonight.",
+        "FROM ORBES",
+        "LIVE NOW",
+        "MONOLITHE",
+        "YOUR PLACE",
+        "3",
+        "ESTIMATED 5 MINUTES LEFT",
+        "9 OF 24 LEFT · 2 IN SIZE 17",
+        "When your turn comes, the seal appears here: press and hold it to secure your piece. Keep this page open; if you close it, your place is kept when you come back.",
+        "LEAVE THE LINE",
+        "HOW RELEASES WORK",
+        "THE RELEASES",
+        "SOUND ON",
+        "PRIVACY",
+        "·",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "IP GEOLOCATION BY DB-IP"
+      ]
+    },
+    "live-queue-last": {
+      "title": "The one queue at its LAST PIECES: 18 OF 300 LEFT · 2 IN SIZE 17, LAST PIECES under the band, YOUR PLACE 2, FROM ORBES",
+      "refs": [
+        "MK Q10"
+      ],
+      "variant": "queue",
+      "as": "queueLast",
+      "values": [
+        "ORBES",
+        "Thank you for being here tonight.",
+        "FROM ORBES",
+        "LIVE NOW",
+        "MONOLITHE",
+        "YOUR PLACE",
+        "2",
+        "ESTIMATED 1 MINUTE LEFT",
+        "LAST PIECES",
+        "18 OF 300 LEFT · 2 IN SIZE 17",
+        "When your turn comes, the seal appears here: press and hold it to secure your piece. Keep this page open; if you close it, your place is kept when you come back.",
+        "LEAVE THE LINE",
+        "HOW RELEASES WORK",
+        "THE RELEASES",
+        "SOUND ON",
+        "PRIVACY",
+        "·",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "IP GEOLOCATION BY DB-IP"
+      ]
+    },
+    "live-queue-nophoto": {
+      "title": "The one queue whose photograph cannot be loaded: the vault’s ground alone, the screen moved up, no corner marks",
+      "refs": [
+        "OP-5"
+      ],
+      "variant": "queue",
+      "as": "queued",
+      "values": [
+        "ORBES",
+        "LIVE NOW",
+        "MONOLITHE",
+        "YOUR PLACE",
+        "203",
+        "ESTIMATED 16 MINUTES LEFT",
+        "0 OF 9 LEFT · 0 IN SIZE 17",
+        "When your turn comes, the seal appears here: press and hold it to secure your piece. Keep this page open; if you close it, your place is kept when you come back.",
+        "LEAVE THE LINE",
+        "HOW RELEASES WORK",
+        "THE RELEASES",
+        "SOUND ON",
+        "PRIVACY",
+        "·",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "IP GEOLOCATION BY DB-IP"
+      ]
+    },
     "live-queue-loading": {
       "title": "The queue just entered after the opening, its figures being read: READING YOUR PLACE",
       "refs": [
@@ -29794,6 +29883,71 @@
         "When your turn comes, the seal appears here: press and hold it to secure your piece. Keep this page open; if you close it, your place is kept when you come back.",
         "SIZE 17 · 1 PIECE",
         "ESTIMATED 7 MINUTES LEFT"
+      ]
+    },
+    "desk-live-queue-small": {
+      "title": "The one queue of a small release: 24 pieces, the Horizon band in place of the cells, 9 OF 24 LEFT · 2 IN SIZE 17, YOUR PLACE 3, FROM ORBES (a computer, 1440 × 900)",
+      "refs": [
+        "desktop",
+        "phone: live-queue-small"
+      ],
+      "variant": "queue",
+      "as": "queueSmall",
+      "values": [
+        "ORBES",
+        "18 IN THE ROOM",
+        "LIVE NOW",
+        "YOUR PLACE",
+        "3",
+        "9 OF 24 LEFT · 2 IN SIZE 17",
+        "When your turn comes, the seal appears here: press and hold it to secure your piece. Keep this page open; if you close it, your place is kept when you come back.",
+        "Thank you for being here tonight.",
+        "FROM ORBES",
+        "MONOLITHE IN STEEL",
+        "SIZE 17 · 1 PIECE",
+        "LEAVE THE LINE",
+        "ESTIMATED 5 MINUTES LEFT",
+        "HOW RELEASES WORK",
+        "THE RELEASES",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND OFF",
+        "IP GEOLOCATION BY DB-IP"
+      ]
+    },
+    "desk-live-queue-last": {
+      "title": "The one queue at its LAST PIECES: 18 OF 300 LEFT · 2 IN SIZE 17, LAST PIECES under the band, YOUR PLACE 2, FROM ORBES (a computer, 1440 × 900)",
+      "refs": [
+        "desktop",
+        "phone: live-queue-last"
+      ],
+      "variant": "queue",
+      "as": "queueLast",
+      "values": [
+        "ORBES",
+        "284 IN THE ROOM",
+        "LIVE NOW",
+        "YOUR PLACE",
+        "2",
+        "LAST PIECES",
+        "18 OF 300 LEFT · 2 IN SIZE 17",
+        "When your turn comes, the seal appears here: press and hold it to secure your piece. Keep this page open; if you close it, your place is kept when you come back.",
+        "Thank you for being here tonight.",
+        "FROM ORBES",
+        "MONOLITHE IN GOLD",
+        "SIZE 17 · 1 PIECE",
+        "LEAVE THE LINE",
+        "ESTIMATED 1 MINUTE LEFT",
+        "HOW RELEASES WORK",
+        "THE RELEASES",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND OFF",
+        "IP GEOLOCATION BY DB-IP"
       ]
     },
     "desk-result-unknown": {

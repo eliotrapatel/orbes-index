@@ -16,6 +16,7 @@ import { unframeCodeData } from '../../src/core/payload.js';
 import { LIVE } from '../../src/web/verify/copy.js';
 import {
   addonChoices,
+  bandModel,
   CHANGE_RETRY_MS,
   clockOffset,
   clockText,
@@ -790,6 +791,42 @@ describe('the one queue (ONE QUEUE, lot Q1, step Q1.3; ANSWERS C3)', () => {
     // SOLD OUT for your size: its one sentence (D27), never a held piece nor a reason.
     expect(LIVE.edge.soldOut.text).toBe('Every piece in your size is reserved. You keep your place should ORBES add more, or you may leave.');
     expect(LIVE.edge.soldOut).not.toHaveProperty('stay');
+  });
+});
+
+describe('the Horizon band of the stock (ONE QUEUE, lot Q1, step Q1.7; ANSWERS C4, OP-3; D23, D24)', () => {
+  const at = (quantity: number, left: number, inSize = 3, label = '52') =>
+    bandModel(room({ phase: 'LIVE', quantity, left, sizes: [{ id: S52, label, stock: 9, left: inSize, serves: 1, out: false }] }), entry({ size: { id: S52, label } }));
+
+  it('lights what is LEFT: full when full, emptying as pieces go, the stock line\'s words inside it (two figures, never a held piece)', () => {
+    expect(at(300, 300, 75)).toEqual({ left: 300, quantity: 300, fraction: 1, last: false, out: false, text: '300 OF 300 LEFT · 75 IN SIZE 52' });
+    expect(at(300, 176)).toMatchObject({ fraction: 176 / 300, last: false, out: false, text: '176 OF 300 LEFT · 3 IN SIZE 52' });
+    expect(at(12, 3, 0)).toMatchObject({ fraction: 0.25, last: false, text: '3 OF 12 LEFT · 0 IN SIZE 52' });
+    expect(at(3, 2, 2, 'ONE SIZE').text).toBe('2 OF 3 LEFT · 2 IN ONE SIZE');
+  });
+
+  it('says LAST PIECES at 10 % left or fewer, as the mockup computes it (left > 0 and left ≤ ⌈quantity × 0.1⌉: OP-3)', () => {
+    // MK Q9: 24 pieces, 3 left (⌈2.4⌉ = 3): LAST PIECES.
+    expect(at(24, 3).last).toBe(true);
+    expect(at(24, 4).last).toBe(false);
+    expect(at(300, 30).last).toBe(true);
+    expect(at(300, 31).last).toBe(false);
+    expect(at(300, 18, 2)).toMatchObject({ last: true, out: false, text: '18 OF 300 LEFT · 2 IN SIZE 52' });
+    expect(at(1, 1).last).toBe(true);
+  });
+
+  it('puts the light out at 0, with no LAST PIECES (and never more than the release, never below 0)', () => {
+    expect(at(300, 0, 0)).toEqual({ left: 0, quantity: 300, fraction: 0, last: false, out: true, text: '0 OF 300 LEFT · 0 IN SIZE 52' });
+    expect(at(24, 0, 0)).toMatchObject({ fraction: 0, last: false, out: true });
+    expect(at(300, -2, 0)).toMatchObject({ left: 0, fraction: 0, out: true });
+    expect(at(300, 320)).toMatchObject({ left: 300, fraction: 1 });
+    expect(at(0, 0, 0)).toMatchObject({ fraction: 0, last: false, out: true });
+    expect(LIVE.lastPieces).toBe('LAST PIECES');
+  });
+
+  it('reads a set\'s release in sets (SETS words, N2)', () => {
+    const r = room({ phase: 'LIVE', quantity: 5, left: 2, sizes: [] });
+    expect(bandModel(r, entry({ sizes: [{ piece: 1, id: S52, label: '52' }] }))).toMatchObject({ fraction: 0.4, last: false, text: '2 OF 5 SETS LEFT' });
   });
 });
 

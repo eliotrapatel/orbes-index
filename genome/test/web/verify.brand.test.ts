@@ -1115,7 +1115,9 @@ describe('verify app: SHARE TO STORIES (plan NEXT-NINE, §3.8 BP-10)', () => {
 
   it('stands in the three places the owner named, and only there', () => {
     const confirmed = liveView.slice(liveView.indexOf('private confirmedScreen'), liveView.indexOf('private storyOpen'));
-    expect(confirmed.indexOf('this.storyOpen(e)')).toBeGreaterThan(confirmed.indexOf('bracket('));
+    // Under the receipt (between hairlines since ONE QUEUE's look, lot Q1 §3.1: no plate, no corner marks).
+    expect(confirmed).not.toContain('bracket(');
+    expect(confirmed.indexOf('this.storyOpen(e)')).toBeGreaterThan(confirmed.indexOf("{ class: 'live__receipt-plate' }"));
     expect(confirmed.indexOf('this.storyOpen(e)')).toBeLessThan(confirmed.indexOf('LIVE.clientServices'));
     expect(liveView.match(/this\.storyOpen\(/g)).toHaveLength(1);
     const entry = releasesView.slice(releasesView.indexOf('private renderEntry'), releasesView.indexOf('private storyOpen'));

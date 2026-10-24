@@ -2033,6 +2033,8 @@ export const LIVE = Object.freeze({
   yourPlaceSaid: 'Your place',
   left: (left: number, quantity: number) => `${left} OF ${quantity} LEFT`,
   inSize: (n: number, size: string) => `${n} ${inSizeLabel(size)}`,
+  /** Under the Horizon band of the stock, at 10 % left or fewer (ONE QUEUE, OP-3; MK Q10). */
+  lastPieces: 'LAST PIECES',
   /**
    * The one queue (ONE QUEUE, lot Q1: ANSWERS C3, r12): after the opening every entry waiting for its turn reads LIVE NOW,
    * its place in its size and its estimated time left; never the pace, the line ahead of it, a clock time or a held piece.

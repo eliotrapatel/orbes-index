@@ -2213,6 +2213,20 @@ export const PHONE_STATES: readonly UiState[] = [
     ready: '.view--live .live__queue .live__error:not([hidden])',
   },
   { id: 'live-queue-stress', title: 'The one queue at its longest: the last place in size 17, ESTIMATED … H … MIN LEFT', refs: ['same pieces'], variant: 'queue', as: 'queueFar', path: release('queue'), ready: '.view--live .live__queue[data-state="waiting"]', stress: true },
+  // ONE QUEUE's look (lot Q1, step Q1.7; MK Q9, Q10): the Horizon band of a small release and at its LAST PIECES; the
+  // phone without its photograph (it cannot be loaded): the vault's ground alone, the screen moved up.
+  { id: 'live-queue-small', title: 'The one queue of a small release: 24 pieces, the Horizon band in place of the cells, 9 OF 24 LEFT · 2 IN SIZE 17, YOUR PLACE 3, FROM ORBES', refs: ['MK Q9'], variant: 'queue', as: 'queueSmall', path: release('queueSmall'), ready: '.view--live .live__queue[data-state="waiting"] .live-hz:not([hidden])' },
+  { id: 'live-queue-last', title: 'The one queue at its LAST PIECES: 18 OF 300 LEFT · 2 IN SIZE 17, LAST PIECES under the band, YOUR PLACE 2, FROM ORBES', refs: ['MK Q10'], variant: 'queue', as: 'queueLast', path: release('queueLast'), ready: '.view--live .live__queue[data-state="waiting"] .live-hz.is-last' },
+  {
+    id: 'live-queue-nophoto',
+    title: 'The one queue whose photograph cannot be loaded: the vault’s ground alone, the screen moved up, no corner marks',
+    refs: ['OP-5'],
+    variant: 'queue',
+    as: 'queued',
+    path: release('queue'),
+    routes: (page) => page.route('**/api/v1/media/**', (r) => r.abort('failed')),
+    ready: '.view--live.live--look:not(.live--photo) .live__queue[data-state="waiting"]',
+  },
   {
     id: 'live-queue-loading',
     title: 'The queue just entered after the opening, its figures being read: READING YOUR PLACE',
@@ -3207,6 +3221,8 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
     ...desk(1440, 'after-room-join', 'after-room-sold-out', 'after-room-closed', 'after-room-ended', 'after-room-over'),
     // The queue of a paced release (lot M1, W2, W5): the place and its estimate, then paused.
     ...desk(1440, 'live-queue', 'live-queue-paused'),
+    // ONE QUEUE's Horizon band (lot Q1, step Q1.7): a small release, its LAST PIECES.
+    ...desk(1440, 'live-queue-small', 'live-queue-last'),
   ],
   // ── A result's other answers, a piece's incidents, THE PRIVATE SALON in sizes, the draw's other states, the failures ──
   // The full demo's writes (a transfer code, the ceremony, a piece received, REQUESTED, a draw entered) last, in this order;

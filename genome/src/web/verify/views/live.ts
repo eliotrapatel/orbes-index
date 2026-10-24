@@ -80,6 +80,7 @@ import { isDesktop, onDesktopChange, touchLayout } from '../../shared/desktop.js
 import { HOW_PATH } from '../how-model.js';
 import {
   addonChoices,
+  bandModel,
   clockOffset,
   clockText,
   CLOCK_SAMPLES,
@@ -115,7 +116,6 @@ import {
   setShort,
   setSizesLine,
   sizeChoices,
-  stockLine,
   tickSecond,
   windowLeft,
   zonedTime,
@@ -126,6 +126,7 @@ import {
   type LiveScreenKind,
   type LiveViewer,
 } from '../live-model.js';
+import { horizonBand, morph } from '../live-horizon.js';
 import { sealSvg, turnRings } from '../live-seal.js';
 import { entrySizes, participationModel, RELEASES_PATH, zonedDate, type SetCardModel } from '../releases-model.js';
 import { lookbookSheetPath } from '../lookbook-model.js';
@@ -188,6 +189,15 @@ const OPEN = new Set(['WAITING', 'QUEUED', 'TURN', 'SECURED']);
  * pages that end a visit are the room's too (desktop, decision 7: stagedEnd).
  */
 const END_PAGES: ReadonlySet<string> = new Set(['missed', 'expired', 'released', 'left', 'removed', 'ended', 'over']);
+
+/**
+ * ONE QUEUE's look (lot Q1 §3.1; ANSWERS C1, C2, r15b, r19, r20d; OP-5; D31, D32): on a phone, the model's photograph on
+ * the top 300 of 844 px, ORBES (and the host's message, where the room shows it) on its darkened top, no corner marks,
+ * no grey plate with corners: the room before the opening and its draw (2, 3, 3b), the one queue in every state and the
+ * after-room's wait (A), SOLD OUT in your size (S), the turn and the hold (4, 4b), secured (5), CONFIRMED (6), the
+ * after-room's door (10). Every other screen keeps its look (the late comer's JOIN with its plate, 7, 8, 9, 11; N13).
+ */
+const LOOK: ReadonlySet<string> = new Set(['room', 'queue', 'soldOut', 'turn', 'secured', 'confirmed', 'afterRoom']);
 
 export interface LiveView {
   root: HTMLElement;
@@ -256,6 +266,11 @@ const isApi = (e: unknown, code: string) => e instanceof ApiError && e.code === 
 
 class LivePage {
   readonly root: HTMLElement;
+  /** ONE QUEUE's look, on a phone (LOOK): the model's photograph behind the top of the screen; the Cinema room's on a computer. */
+  private readonly photo = h('div', { class: 'live__photo', attrs: { 'aria-hidden': 'true' } });
+  /** The photograph's address(es) on show (`|`-joined), '' for none; a picture that fails is not tried again. */
+  private photoKey = '';
+  private readonly photoFailed = new Set<string>();
   private readonly notice = h('div', { class: 'live__notice', attrs: { 'aria-live': 'polite' } });
   private readonly head = h('header', { class: 'live__head' }, h('span', { class: 'wordmark wordmark--small live__wordmark', attrs: { 'aria-hidden': 'true' }, text: 'ORBES' }), this.notice);
   private readonly stage = h('div', { class: 'live__stage' });
@@ -365,6 +380,7 @@ class LivePage {
     this.root.classList.add('vault');
     this.sheet = deps.sheet;
     this.root.append(
+      this.photo,
       this.head,
       this.stage,
       this.foot,
@@ -923,6 +939,7 @@ class LivePage {
     if (!this.screen || this.screen.kind !== kind) this.mount(kind);
     else this.screen.update();
     this.renderNotice();
+    this.renderPhoto();
     this.syncHowFoot();
     if (this.cinema && isDesktop()) this.cinema.update(this.roomFacts());
   }
@@ -1029,6 +1046,7 @@ class LivePage {
     this.root.classList.toggle('is-light', kind === 'confirmed');
     this.renderFoot(screen);
     screen.update();
+    this.renderPhoto();
     this.stageRoom();
     if (previous !== undefined && hadFocus) (screen.focus ?? screen.el.querySelector<HTMLElement>('h1'))?.focus({ preventScroll: kind !== 'turn' });
     if (kind !== previous && kind === 'turn') this.say(this.returned ? LIVE.announce.returned : LIVE.announce.turn, true);
@@ -1072,6 +1090,48 @@ class LivePage {
     if (this.notice.dataset.key === key) return;
     this.notice.dataset.key = key;
     this.notice.replaceChildren(...parts);
+  }
+
+  /**
+   * ONE QUEUE's look on a phone (LOOK; D31, OP-5): the release's model (variant) photograph behind the top of the screen
+   * (a set's pieces side by side, as the Cinema room has them), faded at its foot, darkened at its top for ORBES and the
+   * host's message; none before the photograph is revealed, nor once it cannot be loaded: the vault's ground alone, the
+   * screen moved up. The Cinema room draws its own on a computer (house.css shows this one on a phone only).
+   */
+  private renderPhoto(): void {
+    const kind = this.screen?.kind;
+    const look = kind !== undefined && LOOK.has(kind);
+    const sheet = this.sheet;
+    const tiles = sheet ? liveSet(sheet) : null;
+    const picture = sheet ? pictureOf(sheet) : null;
+    const all = tiles && tiles.images.length > 1 ? tiles.images.map((x) => x.src) : picture?.kind === 'photo' ? [picture.src] : [];
+    const srcs = all.filter((src) => !this.photoFailed.has(src));
+    const key = srcs.join('|');
+    if (key !== this.photoKey) {
+      this.photoKey = key;
+      this.photo.classList.toggle('live__photo--tiles', srcs.length > 1);
+      this.photo.replaceChildren(
+        ...srcs.map((src) => {
+          // Drawn as the ground of its frame (CSSOM, the house's pattern: the address is the server's media path), so the
+          // crop runs past the screen's edges without a picture wider than the page; a picture that fails gives way.
+          const shot = h('span', { class: 'live__photo-shot' });
+          shot.style.setProperty('--live-photo', `url("${src}")`);
+          const probe = new Image();
+          probe.addEventListener(
+            'error',
+            () => {
+              this.photoFailed.add(src);
+              if (!this.disposed) this.renderPhoto();
+            },
+            { once: true },
+          );
+          probe.src = src;
+          return shot;
+        }),
+      );
+    }
+    this.root.classList.toggle('live--look', look);
+    this.root.classList.toggle('live--photo', look && srcs.length > 0);
   }
 
   private renderFoot(screen: Screen): void {
@@ -1192,8 +1252,10 @@ class LivePage {
   /**
    * The piece on a plate: its photograph, else its silhouette, else the seal; a picture that fails takes the seal's place.
    * Macro scope K44 T1: a set's pieces, their photographs side by side on the plate (`set`, from the photograph's stage).
+   * Framed by its corner marks (the late comer's JOIN, as today: N13), but behind the room's door (`corners` false: no
+   * corner marks on the screens of ONE QUEUE's look, D31).
    */
-  private piece(picture: LivePicture | null, extra: string, sweep = false, set: SetCardModel | null = null): HTMLElement {
+  private piece(picture: LivePicture | null, extra: string, sweep = false, set: SetCardModel | null = null, corners = true): HTMLElement {
     const plate = h('div', { class: ['live__plate', extra] });
     const seal = () => sealSvg('live__plate-seal');
     if (set && set.images.length > 1) {
@@ -1224,7 +1286,7 @@ class LivePage {
         plate.append(light);
       }
     } else plate.append(seal());
-    return bracket(plate);
+    return corners ? bracket(plate) : plate;
   }
 
   /** SEE THE MODEL, once the photograph is revealed and the model's sheet is public; else nothing. */
@@ -1748,7 +1810,7 @@ class LivePage {
     const door = h(
       'div',
       { class: 'live-door', attrs: { 'aria-hidden': 'true' } },
-      h('div', { class: 'live-door__inside' }, this.piece(m.picture, 'live-door__piece', true, m.set)),
+      h('div', { class: 'live-door__inside' }, this.piece(m.picture, 'live-door__piece', true, m.set, false)),
       h('div', { class: 'live-door__leaf live-door__leaf--left' }),
       h('div', { class: 'live-door__leaf live-door__leaf--right' }),
       h('div', { class: 'live-door__lock' }, lock),
@@ -1759,7 +1821,8 @@ class LivePage {
     const presence = h('p', { class: 'live__presence' }, h('span', { class: 'live__dot', attrs: { 'aria-hidden': 'true' } }), h('span', { class: 'live__presence-text' }));
     const drawing = h('div', { class: 'live__drawing', attrs: { hidden: true } }, h('p', { class: 'live__subtitle', text: LIVE.drawing }), this.note(LIVE.drawingLine(s.tierPriority)));
     const checks = h('dl', { class: 'live__checks-list' });
-    const plate = bracket(h('div', { class: 'live__checks' }, h('p', { class: 'live__overline live__checks-title', text: LIVE.ready.title }), checks));
+    // READY CHECK on hairlines, on the vault: no grey plate, no corner marks (D31; MK #room-3).
+    const plate = h('div', { class: 'live__checks' }, h('p', { class: 'live__overline live__checks-title', text: LIVE.ready.title }), checks);
     const errorLine = this.errorLine();
     // Macro scope K44 T1: a set's, a picker per piece.
     const picker = set
@@ -2022,7 +2085,8 @@ class LivePage {
     const paused = this.fact('', 'live__queue-paused');
     const pausedLine = this.note('', 'live__queue-paused-line');
     const time = this.fact('', 'live__queue-time');
-    const left = this.fact('', 'live__left');
+    // The pieces left: the Horizon band, its words inside (D23); no separator under it (r18).
+    const band = horizonBand();
     const errorLine = this.errorLine();
     const leave = this.action(LIVE.queue.leave, () => this.armed(() => this.act(() => this.deps.api.liveLeave(id))), 'live__leave-line');
     const el = h(
@@ -2036,8 +2100,7 @@ class LivePage {
       paused,
       pausedLine,
       time,
-      left,
-      this.hairline(),
+      band.el,
       this.note(this.isSet() ? SETS.live.queueNote : LIVE.queue.note, 'live__queue-note'),
       errorLine,
       leave,
@@ -2060,14 +2123,15 @@ class LivePage {
         paused.hidden = !hold;
         pausedLine.hidden = !hold;
         time.hidden = !known || m.time === null;
-        left.hidden = !known || !this.room;
+        band.el.hidden = !known || !this.room;
         setFact(paused, hold === 'RELEASE' ? LIVE.paused : hold === 'PACE' ? LIVE.queue.paused : '');
         pausedLine.textContent = hold === 'RELEASE' ? LIVE.pausedLine : hold === 'PACE' ? LIVE.queue.pausedLine : '';
         if (known) {
           if (said.textContent !== `${m.placeSaid} `) said.textContent = `${m.placeSaid} `;
-          if (figure.textContent !== String(m.place)) figure.textContent = String(m.place);
-          setFact(time, m.time ?? '');
-          if (this.room) setFact(left, stockLine(this.room, e));
+          // Every figure morphs (D30): the place at a reading, the time as it counts down, the stock in the band.
+          morph(figure, String(m.place), { numerals: false });
+          morph(time, m.time ?? '');
+          if (this.room) band.set(bandModel(this.room, e), hold);
           if (m.announce !== this.lastPlace) {
             this.lastPlace = m.announce;
             this.say(m.announce);
@@ -2283,7 +2347,10 @@ class LivePage {
     const set = this.isSet();
     const seal = sealSvg('live__piece-seal');
     const securedAt = this.fact('', 'live__secured-at');
-    const reveal = bracket(h('div', { class: 'live__plate live__reveal' }, h('p', { class: 'live__overline', text: set ? SETS.live.yourSet : LIVE.yourPiece }), seal, securedAt));
+    // YOUR PIECE on the vault (D31; MK #secured): no grey plate, no corner marks; the seal in the light pooled over a
+    // hairline horizon that dissolves at its ends, SECURED AT under the line.
+    const floor = h('span', { class: 'live__floor', attrs: { 'aria-hidden': 'true' } }, h('span', { class: 'live__floor-sky' }), h('span', { class: 'live__floor-line' }));
+    const reveal = h('div', { class: 'live__reveal' }, h('p', { class: 'live__overline', text: set ? SETS.live.yourSet : LIVE.yourPiece }), seal, floor, securedAt);
     const detail = this.fact('', 'live__detail');
     // Macro scope K44 T1: the set's pieces, each in its size, under its name (then the add-ons and PAY).
     const setPieces = set ? h('dl', { class: 'live__set-pieces', attrs: { 'aria-label': SETS.live.pieces } }) : null;
@@ -2484,7 +2551,8 @@ class LivePage {
       // Plan MACRO M3 §4.4 (D2): PAY's add-ons that could not be added, each by its name and why (its answer may come
       // after the stream's CONFIRMED: drawn at each update).
       leftOut,
-      bracket(h('div', { class: 'live__receipt-plate' }, rows)),
+      // The receipt between hairlines, on the page: no plate, no corner marks (D31).
+      h('div', { class: 'live__receipt-plate' }, rows),
       this.storyOpen(e),
       h('p', { class: 'live__overline live__cs-title', text: LIVE.clientServices }),
       writeButton(write, { house: true }),

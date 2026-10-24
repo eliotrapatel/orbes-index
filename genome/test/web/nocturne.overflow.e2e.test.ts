@@ -69,10 +69,17 @@ const STAGE_ONLY = ['room-guaranteed'];
 /** Whether a state is opened at the narrower phones too: by its name (NARROW_STATES), or named in NARROW_TOO. */
 const atNarrow = (id: string) => NARROW_STATES.test(id) || (NARROW_TOO.includes(id) && !STAGE_ONLY.includes(id));
 
+const HORIZON = "ONE QUEUE's Horizon band (lot Q1 §3.2, D23; the owner's mockup): its horizon runs past the column on purpose, its ends dissolving at the screen's edges (32 px each side on a phone), drawn by its decorative layer (aria-hidden); the page never scrolls sideways";
+const HORIZON_RUN = "ONE QUEUE's Horizon band at LAST PIECES' rest (lot Q1 §3.2, D24): the slow light's bead and trail wait past the edge of what is left, inside the band's own clip";
 /** What overflowed at 5efd4c9 on purpose: a state, the start of the line overflows() writes, and why. */
 const KNOWN: readonly { state: string; starts: string; reason: string }[] = [
   // (N3: the resting orbit of the landing's wordmark, which reached past its emblem on purpose, left with the landing:
   // NOW replaces it.)
+  { state: 'live-queue-stress', starts: 'div.live__stage spills out of its box', reason: HORIZON },
+  { state: 'live-queue-stress', starts: 'section.live__queue.live__screen spills out of its box', reason: HORIZON },
+  { state: 'live-queue-stress', starts: 'div.live-hz', reason: HORIZON },
+  { state: 'live-queue-stress', starts: 'span.live-hz__run spills out of its box', reason: HORIZON_RUN },
+  { state: 'live-queue-stress', starts: 'span.live-hz__track spills out of its box', reason: HORIZON_RUN },
 ];
 
 describe.skipIf(!HAS_CHROMIUM)('NOCTURNE overflow: nothing overflows its column in the extreme cases (Chromium)', () => {

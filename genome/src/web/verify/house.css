@@ -963,20 +963,14 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   color: var(--ink);
 }
 
-.live__plate .bracket,
-.live__checks .bracket,
-.live__receipt-plate .bracket {
+.live__plate .bracket {
   color: var(--hairline-strong);
 }
 
-.live__plate .bracket--tl,
-.live__checks .bracket--tl { top: 10px; left: 10px; }
-.live__plate .bracket--tr,
-.live__checks .bracket--tr { top: 10px; right: 10px; }
-.live__plate .bracket--bl,
-.live__checks .bracket--bl { bottom: 10px; left: 10px; }
-.live__plate .bracket--br,
-.live__checks .bracket--br { bottom: 10px; right: 10px; }
+.live__plate .bracket--tl { top: 10px; left: 10px; }
+.live__plate .bracket--tr { top: 10px; right: 10px; }
+.live__plate .bracket--bl { bottom: 10px; left: 10px; }
+.live__plate .bracket--br { bottom: 10px; right: 10px; }
 
 .live__img {
   width: 100%;
@@ -1242,19 +1236,17 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   width: 100%;
 }
 
-/* READY CHECK: five rows on a plate, each ticked once ready. */
+/* READY CHECK: five hairline rows on the vault (ONE QUEUE, D31: no grey plate, no corner marks), each ticked once ready. */
 .live__checks {
   position: relative;
   width: 100%;
   max-width: 326px;
   margin-top: 24px;
-  padding: 16px 20px 8px;
-  background: var(--ivory);
   text-align: left;
 }
 
 .live__checks-title {
-  margin-bottom: 6px;
+  margin-bottom: 4px;
   text-indent: 0;
 }
 
@@ -1523,16 +1515,533 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   to { opacity: 0.6; }
 }
 
-.live__queue .live__rule {
-  margin-top: 36px;
+/* The one note under the band (r18: no separator), or under READING YOUR PLACE; further down under LAST PIECES. */
+.live__queue-note {
+  margin-top: 30px;
 }
 
-.live__queue-note {
-  margin-top: 20px;
+.live__queue .live-hz.is-last:not([hidden]) + .live__queue-note {
+  margin-top: 46px;
 }
 
 .live__queue .btn.live__action {
   margin-top: 30px;
+}
+
+/* ── ONE QUEUE's look on a phone (lot Q1 §3.1; ANSWERS C1, r15b, r20d; OP-5; D31) ──
+   The screens of the look (views/live.ts LOOK) on a phone: no corner marks; the model's photograph on the top 300 of
+   844 px, darkened at its top (ORBES and the host's message on it), faded at its foot, the screen's first line just
+   under it. Without a photograph, the vault's ground alone, the screen moved up. The Cinema room keeps its own on a
+   computer (.d-room). Light mode changes nothing here: the room is not one of NOCTURNE's screens (D33). */
+body[data-screen="live"]:has(.view--live.live--look:not(.d-room)) .corners {
+  display: none;
+}
+
+.view--live.live--look:not(.d-room) {
+  padding-top: calc(28px + var(--safe-top));
+}
+
+.live__photo {
+  display: none;
+}
+
+.view--live.live--photo:not(.d-room) {
+  position: relative;
+  isolation: isolate;
+}
+
+.view--live.live--photo:not(.d-room) > .live__photo {
+  display: block;
+  position: absolute;
+  top: -16px;
+  left: 0;
+  right: 0;
+  z-index: -1;
+  height: 316px;
+  overflow: hidden;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(#fff 272px, transparent 316px);
+  mask-image: linear-gradient(#fff 272px, transparent 316px);
+}
+
+/* The piece framed as the mockup frames it: the square photograph 500 px wide on a 390 px phone (128.21 % of the
+   frame), its top 64 px above the frame's (16.41 % of its width), drawn as the frame's ground. */
+.live__photo {
+  container-type: inline-size;
+}
+
+.live__photo-shot {
+  position: absolute;
+  inset: 0;
+  background: var(--live-photo) 50% -16.41cqw / 128.21% auto no-repeat;
+}
+
+/* A set's pieces side by side (the Cinema room's ground on a computer), each the house's crop. */
+.live__photo--tiles {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  gap: 2px;
+}
+
+.live__photo--tiles > .live__photo-shot {
+  position: relative;
+  inset: auto;
+  background-position: 50% 50%;
+  background-size: cover;
+}
+
+.live__photo::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(10, 10, 10, 0.62) 0, rgba(10, 10, 10, 0.35) 96px, rgba(10, 10, 10, 0) 150px);
+}
+
+/* ORBES and the host's message on the darkened top; the screen's first line where the photograph's foot has faded. */
+.view--live.live--photo:not(.d-room) > .live__head {
+  min-height: 96px;
+}
+
+.view--live.live--photo:not(.d-room) > .live__stage {
+  margin-top: 212px;
+}
+
+/* SOLD OUT and the after-room's door open on their own margins (.live__edge, .live__after): their first line where the other screens have theirs (MK drops). */
+.view--live.live--photo:not(.d-room)[data-screen="soldOut"] > .live__stage {
+  margin-top: 156px;
+}
+
+.view--live.live--photo:not(.d-room)[data-screen="afterRoom"] > .live__stage {
+  margin-top: 172px;
+}
+
+/* CONFIRMED in the house's ivory: ORBES stays ivory on the darkened top; the photograph's foot fades into the ivory. */
+.view--live.live--photo.is-light:not(.d-room) > .live__head .live__wordmark {
+  color: var(--vault-ink);
+}
+
+.view--live.live--photo.is-light:not(.d-room) > .live__photo {
+  -webkit-mask-image: linear-gradient(#fff 168px, rgba(255, 255, 255, 0.62) 226px, rgba(255, 255, 255, 0.2) 280px, transparent 316px);
+  mask-image: linear-gradient(#fff 168px, rgba(255, 255, 255, 0.62) 226px, rgba(255, 255, 255, 0.2) 280px, transparent 316px);
+}
+
+/* ── The Horizon band of the stock (ONE QUEUE §3.2; ANSWERS C4, r15–r18; D18, D23, D24; live-horizon.ts) ──
+   V3 · HORIZON as the owner refined it (mockup hz-lib.mjs, round 18): a wide band without a box, a hairline horizon
+   near its foot running past the column and dissolving at both ends; the lit part is what is LEFT (--live-hz-f), its
+   edge feathered and gliding, the light pooled above it with its top faded out, the five lights at 75 %; the sun at
+   the edge breathing every 4.8 s; LAST PIECES deepens the breath and sends a slow light back along what is left, the
+   words under the band; at 0 the light goes out. Two tones only. The release's PAUSE: the light holds still, the sun
+   at a half-glow (OP-4); reduced motion: still. */
+@property --live-hz-f {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+
+.live-hz {
+  --hz-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --hz-breath: 4.8s;
+  --hz-pad: 24px;
+  --hz-tail: 32px;
+  --hz-fade: 60px;
+  --hz-feather: 96px;
+  --hz-line-y: 33.5px;
+  --hz-pt: 15px;
+  --hz-halo-w: 76px;
+  --hz-halo-h: 26px;
+  position: relative;
+  flex: none;
+  width: 100%;
+  max-width: 326px;
+  height: 44px;
+  margin-top: 34px;
+  color: var(--ink);
+  transition: --live-hz-f 1.2s var(--hz-ease);
+}
+
+.live-hz__art {
+  position: absolute;
+  top: calc(-1 * var(--hz-pad));
+  bottom: calc(-1 * var(--hz-pad));
+  left: calc(-1 * var(--hz-tail));
+  right: calc(-1 * var(--hz-tail));
+  z-index: 0;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, rgba(255, 255, 255, 0.104) calc(var(--hz-fade) * 0.2), rgba(255, 255, 255, 0.352) calc(var(--hz-fade) * 0.4), rgba(255, 255, 255, 0.648) calc(var(--hz-fade) * 0.6), rgba(255, 255, 255, 0.896) calc(var(--hz-fade) * 0.8), #fff var(--hz-fade), #fff calc(100% - var(--hz-fade)), rgba(255, 255, 255, 0.896) calc(100% - var(--hz-fade) * 0.8), rgba(255, 255, 255, 0.648) calc(100% - var(--hz-fade) * 0.6), rgba(255, 255, 255, 0.352) calc(100% - var(--hz-fade) * 0.4), rgba(255, 255, 255, 0.104) calc(100% - var(--hz-fade) * 0.2), transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, rgba(255, 255, 255, 0.104) calc(var(--hz-fade) * 0.2), rgba(255, 255, 255, 0.352) calc(var(--hz-fade) * 0.4), rgba(255, 255, 255, 0.648) calc(var(--hz-fade) * 0.6), rgba(255, 255, 255, 0.896) calc(var(--hz-fade) * 0.8), #fff var(--hz-fade), #fff calc(100% - var(--hz-fade)), rgba(255, 255, 255, 0.896) calc(100% - var(--hz-fade) * 0.8), rgba(255, 255, 255, 0.648) calc(100% - var(--hz-fade) * 0.6), rgba(255, 255, 255, 0.352) calc(100% - var(--hz-fade) * 0.4), rgba(255, 255, 255, 0.104) calc(100% - var(--hz-fade) * 0.2), transparent 100%);
+}
+
+.live-hz__in {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--hz-pad);
+  bottom: var(--hz-pad);
+}
+
+.live-hz__ground {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(10, 10, 10, 0) 0, rgba(10, 10, 10, 0.5) 28%, rgba(10, 10, 10, 0.5) 76%, rgba(10, 10, 10, 0) 100%);
+}
+
+.live-hz__line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(var(--hz-line-y) - 0.5px);
+  height: 1px;
+  background: rgba(246, 242, 234, 0.17);
+  transition: background-color 1.6s ease;
+}
+
+/* What is left: from the far start to the exact figure, its edge feathered and centred on it. */
+.live-hz__fill {
+  position: absolute;
+  left: 0;
+  top: -16px;
+  height: calc(var(--hz-line-y) + 25px);
+  width: calc(var(--hz-tail) + var(--live-hz-f) * (100% - 2 * var(--hz-tail)) + var(--hz-feather) / 2);
+  -webkit-mask-image: linear-gradient(90deg, #fff 0, #fff calc(100% - var(--hz-feather)), rgba(255, 255, 255, 0.896) calc(100% - var(--hz-feather) + var(--hz-feather) * 0.2), rgba(255, 255, 255, 0.648) calc(100% - var(--hz-feather) + var(--hz-feather) * 0.4), rgba(255, 255, 255, 0.352) calc(100% - var(--hz-feather) + var(--hz-feather) * 0.6), rgba(255, 255, 255, 0.104) calc(100% - var(--hz-feather) + var(--hz-feather) * 0.8), transparent 100%);
+  mask-image: linear-gradient(90deg, #fff 0, #fff calc(100% - var(--hz-feather)), rgba(255, 255, 255, 0.896) calc(100% - var(--hz-feather) + var(--hz-feather) * 0.2), rgba(255, 255, 255, 0.648) calc(100% - var(--hz-feather) + var(--hz-feather) * 0.4), rgba(255, 255, 255, 0.352) calc(100% - var(--hz-feather) + var(--hz-feather) * 0.6), rgba(255, 255, 255, 0.104) calc(100% - var(--hz-feather) + var(--hz-feather) * 0.8), transparent 100%);
+  transition: opacity 1.6s ease;
+}
+
+.live-hz__fill > span {
+  margin-top: 16px;
+  transition: opacity 1.6s ease, background-color 1.6s ease, box-shadow 1.6s ease;
+}
+
+.live-hz__sky {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -14px;
+  height: calc(var(--hz-line-y) + 13.5px);
+  opacity: 0.85;
+  background: radial-gradient(ellipse 64% 100% at 50% 100%, rgba(246, 242, 234, 0.34) 0, rgba(246, 242, 234, 0.16) 38%, rgba(246, 242, 234, 0.05) 70%, rgba(246, 242, 234, 0) 100%);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, rgba(255, 255, 255, 0.18) 22%, rgba(255, 255, 255, 0.55) 45%, rgba(255, 255, 255, 0.88) 68%, #fff 86%);
+  mask-image: linear-gradient(180deg, transparent 0%, rgba(255, 255, 255, 0.18) 22%, rgba(255, 255, 255, 0.55) 45%, rgba(255, 255, 255, 0.88) 68%, #fff 86%);
+}
+
+.live-hz__lit {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(var(--hz-line-y) - 0.5px);
+  height: 1px;
+  background: rgba(246, 242, 234, 0.78);
+}
+
+.live-hz__reflect {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(var(--hz-line-y) + 0.5px);
+  height: 8px;
+  background: linear-gradient(180deg, rgba(246, 242, 234, 0.1), rgba(246, 242, 234, 0));
+}
+
+/* The light at 75 % (round 18). */
+.live-hz__sky,
+.live-hz__reflect,
+.live-hz__halo,
+.live-hz__pt,
+.live-hz__lit {
+  filter: opacity(0.75);
+}
+
+/* The sun at the edge (outside the mask), breathing. */
+.live-hz__edge {
+  position: absolute;
+  left: calc(var(--live-hz-f) * 100%);
+  top: var(--hz-line-y);
+  z-index: 1;
+  width: 0;
+  height: 0;
+  transition: opacity 2s ease;
+}
+
+.live-hz__pt {
+  position: absolute;
+  left: calc(var(--hz-pt) / -2);
+  top: calc(var(--hz-pt) / -2);
+  width: var(--hz-pt);
+  height: var(--hz-pt);
+  border-radius: 50%;
+  background: radial-gradient(closest-side, #fffdf8 0, rgba(255, 253, 248, 0.92) 24%, rgba(246, 242, 234, 0.32) 58%, rgba(246, 242, 234, 0) 100%);
+  animation: live-hz-breath var(--hz-breath) ease-in-out infinite;
+}
+
+.live-hz__halo {
+  position: absolute;
+  left: calc(var(--hz-halo-w) / -2);
+  top: calc(var(--hz-halo-h) / -2);
+  width: var(--hz-halo-w);
+  height: var(--hz-halo-h);
+  opacity: 0;
+  transition: opacity 1.6s ease;
+}
+
+.live-hz__halo > i {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(246, 242, 234, 0.38), rgba(246, 242, 234, 0.12) 52%, rgba(246, 242, 234, 0) 100%);
+  animation: live-hz-deep var(--hz-breath) ease-in-out infinite;
+}
+
+/* LAST PIECES: the breath deepens, the pool breathes with it, the lit line brightens; a bead of light leaves the edge
+   at the top of every second breath and runs back along what is left, into the dark. */
+.live-hz.is-last .live-hz__halo {
+  opacity: 1;
+}
+
+.live-hz.is-last .live-hz__sky {
+  opacity: 1;
+  animation: live-hz-pool var(--hz-breath) ease-in-out infinite;
+}
+
+.live-hz.is-last .live-hz__lit {
+  background-color: #f6f2ea;
+  box-shadow: 0 0 6px rgba(246, 242, 234, 0.5);
+}
+
+.live-hz__run {
+  position: absolute;
+  left: 0;
+  top: var(--hz-line-y);
+  width: calc(var(--hz-tail) + var(--live-hz-f) * (100% - 2 * var(--hz-tail)));
+  height: 0;
+  opacity: 0;
+  clip-path: inset(-16px 0 -16px 0);
+  transition: opacity 1.6s ease;
+}
+
+.live-hz.is-last .live-hz__run {
+  opacity: 1;
+}
+
+.live-hz__track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 0;
+  opacity: 0;
+  transform: translateX(0);
+}
+
+.live-hz__track::before {
+  content: "";
+  position: absolute;
+  left: 100%;
+  top: -4.5px;
+  width: 9px;
+  height: 9px;
+  margin-left: -4.5px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, #fffdf8 0, rgba(255, 253, 248, 0.85) 26%, rgba(246, 242, 234, 0.25) 62%, rgba(246, 242, 234, 0) 100%);
+}
+
+.live-hz__track > i {
+  position: absolute;
+  left: 100%;
+  top: -0.5px;
+  width: 96px;
+  height: 1px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, rgba(246, 242, 234, 0.42), rgba(246, 242, 234, 0));
+}
+
+.live-hz.is-last .live-hz__track {
+  animation: live-hz-run calc(2 * var(--hz-breath)) cubic-bezier(0.45, 0, 0.25, 1) infinite;
+  animation-delay: var(--live-hz-run-delay, 2.4s);
+}
+
+/* At 0 the light goes out. */
+.live-hz.is-out .live-hz__fill,
+.live-hz.is-out .live-hz__edge {
+  opacity: 0;
+}
+
+/* The release's PAUSE: the light holds still, the sun at a half-glow; under reduced motion, every band. */
+.live-hz.is-still .live-hz__pt {
+  animation: none;
+  opacity: 0.74;
+  transform: none;
+}
+
+.live-hz.is-still .live-hz__halo > i {
+  animation: none;
+  opacity: 0.62;
+  transform: none;
+}
+
+.live-hz.is-still .live-hz__track {
+  animation: none;
+  opacity: 0;
+  transform: none;
+}
+
+.live-hz.is-still .live-hz__sky {
+  animation: none;
+  opacity: 0.85;
+}
+
+/* The first reading in place at once. */
+.live-hz.is-snap,
+.live-hz.is-snap * {
+  transition: none !important;
+}
+
+/* The words inside it: the stock line's, in the display face, its figures in the reading face. */
+.live-hz__text {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-micro);
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: var(--track-label);
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.live-hz__words {
+  padding-left: var(--track-label);
+}
+
+/* The narrowest phones: the words keep to one line inside the column, a little less tracked. */
+@media (max-width: 359px) {
+  .live-hz__text {
+    letter-spacing: 0.2em;
+  }
+
+  .live-hz__words {
+    padding-left: 0.2em;
+  }
+}
+
+.live-hz__text .numeral {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+/* LAST PIECES under the band, resolving and leaving with the light. */
+.live-hz__word {
+  position: absolute;
+  top: calc(100% + 9px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding-left: var(--track-display);
+  font-family: var(--font-display);
+  font-size: var(--fs-overline);
+  line-height: 1;
+  letter-spacing: var(--track-display);
+  text-align: center;
+  white-space: nowrap;
+  color: var(--ink);
+  transition: opacity 1.6s ease;
+}
+
+.live-hz__word.is-hidden {
+  opacity: 0;
+}
+
+@keyframes live-hz-breath {
+  0%, 100% { opacity: 0.36; transform: scale(0.74); }
+  50% { opacity: 1; transform: scale(1.08); }
+}
+
+@keyframes live-hz-deep {
+  0%, 100% { opacity: 0.12; transform: scale(0.55, 0.7); }
+  50% { opacity: 1; transform: scale(1.3, 1.15); }
+}
+
+@keyframes live-hz-run {
+  0% { transform: translateX(0); opacity: 0; }
+  6% { opacity: 1; }
+  22% { opacity: 0.9; }
+  34% { transform: translateX(-100%); opacity: 0; }
+  100% { transform: translateX(-100%); opacity: 0; }
+}
+
+@keyframes live-hz-pool {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+/* ── Every figure morphs (ONE QUEUE §3.2; ANSWERS C8, r18, r20; D30; live-horizon.ts morph) ──
+   Only the changed digits: the old one leaves into a 1.2 px blur at 101.5 %, the new one resolves from a 1.2 px blur
+   at 98.5 %, in 0.8 s; a digit that leaves folds its width away; tabular figures. Reduced motion: at once. */
+.live__place-figure,
+.live__queue-time .numeral,
+.live-hz__words .numeral {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.live-mf {
+  position: relative;
+  display: inline-block;
+}
+
+.live-mf::before {
+  content: attr(data-o);
+  position: absolute;
+  top: 0;
+  left: 0;
+  opacity: 1;
+  filter: blur(0);
+  transform: none;
+  transition: opacity 0.7s cubic-bezier(0.4, 0, 0.2, 1), filter 0.7s cubic-bezier(0.4, 0, 0.2, 1), transform 0.7s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.live-mf__n {
+  display: inline-block;
+  opacity: 0;
+  filter: blur(1.2px);
+  transform: scale(0.985);
+  transition: opacity 0.8s cubic-bezier(0.25, 0.6, 0.2, 1), filter 0.8s cubic-bezier(0.25, 0.6, 0.2, 1), transform 0.8s cubic-bezier(0.25, 0.6, 0.2, 1);
+}
+
+.live-mf.is-on::before {
+  opacity: 0;
+  filter: blur(1.2px);
+  transform: scale(1.015);
+}
+
+.live-mf.is-on > .live-mf__n {
+  opacity: 1;
+  filter: blur(0);
+  transform: none;
+}
+
+.live-mf--out {
+  overflow: hidden;
+  width: 1ch;
+  vertical-align: bottom;
+  opacity: 1;
+  transition: width 0.8s cubic-bezier(0.25, 0.6, 0.2, 1), opacity 0.5s ease;
+}
+
+.live-mf--out::before {
+  content: attr(data-o);
+}
+
+.live-mf--out.is-on {
+  width: 0;
+  opacity: 0;
 }
 
 /* B4: the turn. The seal is the button: the turn's ring runs out around it, the hold's ring fills inside. */
@@ -1633,10 +2142,57 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   color: var(--ink);
 }
 
-/* B5: secured. The reveal: the plate rises, the seal's glyphs appear one by one (P-D01's motion), the seal glows. */
+/* B5: secured. YOUR PIECE on the vault (ONE QUEUE, D31; MK #secured): no grey plate, no corner marks; the seal in the
+   light pooled over a hairline horizon dissolving at its ends, SECURED AT under the line. The reveal: it rises, the
+   seal's glyphs appear one by one (P-D01's motion), the seal glows. */
 .live__reveal {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 326px;
   margin-top: 18px;
-  aspect-ratio: 326 / 296;
+  padding-top: 4px;
+  color: var(--ink);
+}
+
+.live__reveal > .live__piece-seal {
+  position: relative;
+  z-index: 1;
+}
+
+.live__reveal > .live__secured-at {
+  margin-top: 16px;
+}
+
+/* The horizon under a value: a hairline past the column, dissolving at both ends, the light pooled above it. */
+.live__floor {
+  position: relative;
+  align-self: stretch;
+  height: 1px;
+  margin: 18px -32px 0;
+  pointer-events: none;
+}
+
+.live__floor-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(246, 242, 234, 0) 0, rgba(246, 242, 234, 0.45) 30%, rgba(246, 242, 234, 0.55) 50%, rgba(246, 242, 234, 0.45) 70%, rgba(246, 242, 234, 0) 100%);
+}
+
+.live__floor-sky {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 200px;
+  background: radial-gradient(ellipse 40% 100% at 50% 100%, rgba(246, 242, 234, 0.16) 0, rgba(246, 242, 234, 0.06) 45%, rgba(246, 242, 234, 0) 100%);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, rgba(255, 255, 255, 0.4) 45%, #fff 100%);
+  mask-image: linear-gradient(180deg, transparent 0%, rgba(255, 255, 255, 0.4) 45%, #fff 100%);
 }
 
 .live__piece-seal {
@@ -1917,20 +2473,16 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   margin-top: 22px;
 }
 
+/* The receipt between hairlines on the page (ONE QUEUE, D31: no plate, no corner marks). */
 .live__receipt-plate {
   position: relative;
   width: 100%;
   max-width: 326px;
   margin-top: 28px;
-  padding: 6px 20px;
-  background: var(--white);
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
   text-align: left;
 }
-
-.live__receipt-plate .bracket--tl { top: 8px; left: 8px; }
-.live__receipt-plate .bracket--tr { top: 8px; right: 8px; }
-.live__receipt-plate .bracket--bl { bottom: 8px; left: 8px; }
-.live__receipt-plate .bracket--br { bottom: 8px; right: 8px; }
 
 .live__receipt .rows__row:last-child {
   border-bottom: 0;
@@ -2440,6 +2992,31 @@ body[data-screen="board"] .corners {
   .live-banner-host {
     animation: none;
     transition: none;
+  }
+  /* The Horizon band still (as under the release's PAUSE), its edge and its words at once; the figures at once. */
+  .live-hz,
+  .live-hz *,
+  .live-mf,
+  .live-mf::before,
+  .live-mf * {
+    transition: none !important;
+  }
+  .live-hz__pt,
+  .live-hz__halo > i,
+  .live-hz__sky,
+  .live-hz__track {
+    animation: none !important;
+  }
+  .live-hz__pt {
+    opacity: 0.74;
+    transform: none;
+  }
+  .live-hz__halo > i {
+    opacity: 0.62;
+    transform: none;
+  }
+  .live-hz__track {
+    opacity: 0;
   }
   .live-door.is-open .live-door__leaf--left,
   .live-door.is-open .live-door__leaf--right,

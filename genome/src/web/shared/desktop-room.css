@@ -783,10 +783,6 @@
     text-align: left;
   }
 
-  html:not(.d-touch) .d-room .live__checks > .bracket {
-    display: none;
-  }
-
   html:not(.d-touch) .d-room .live__checks-title {
     margin: 0 0 var(--d-s3);
   }
@@ -857,7 +853,7 @@
 
   /* ── 6. After T0, an account not in the line (join): the piece under its light in the centre ─────────────────── */
 
-  html:not(.d-touch) .d-room :is(.live__plate, .live__reveal) > .bracket {
+  html:not(.d-touch) .d-room .live__plate > .bracket {
     display: none;
   }
 
@@ -962,6 +958,54 @@
   html:not(.d-touch) .d-room .d-room__body > .live__queue-note {
     max-width: min(100%, 26em);
     margin-top: var(--d-s6);
+  }
+
+  /* The Horizon band (ONE QUEUE, D23; MK #queue desk): wider, its ends dissolving 168 px past the column; the one note
+     30 px under it (no separator), 52 px under LAST PIECES. */
+  html:not(.d-touch) .d-room .d-room__body > .live-hz {
+    --hz-tail: 168px;
+    --hz-fade: 208px;
+    --hz-feather: 150px;
+    --hz-line-y: 39.5px;
+    --hz-pt: 16px;
+    --hz-halo-w: 90px;
+    --hz-halo-h: 28px;
+    max-width: min(100%, clamp(400px, 33.34vw, 600px));
+    height: 52px;
+    margin-top: var(--d-s7);
+  }
+
+  html:not(.d-touch) .d-room .live-hz__ground {
+    opacity: 0.5;
+  }
+
+  html:not(.d-touch) .d-room .live-hz__sky,
+  html:not(.d-touch) .d-room .live-hz.is-still .live-hz__sky {
+    opacity: 1;
+    background: radial-gradient(ellipse 60% 100% at 50% 100%, rgba(246, 242, 234, 0.42) 0, rgba(246, 242, 234, 0.2) 36%, rgba(246, 242, 234, 0.07) 68%, rgba(246, 242, 234, 0) 100%);
+  }
+
+  html:not(.d-touch) .d-room .live-hz__text {
+    height: 32px;
+    font-size: var(--d-fs-label);
+    letter-spacing: 0.24em;
+  }
+
+  html:not(.d-touch) .d-room .live-hz__words {
+    padding-left: 0.24em;
+  }
+
+  html:not(.d-touch) .d-room .live-hz__word {
+    top: calc(100% + 13px);
+    font-size: var(--fs-micro);
+  }
+
+  html:not(.d-touch) .d-room .d-room__body > .live-hz:not([hidden]) + .live__queue-note {
+    margin-top: 30px;
+  }
+
+  html:not(.d-touch) .d-room .d-room__body > .live-hz.is-last:not([hidden]) + .live__queue-note {
+    margin-top: 52px;
   }
 
   html:not(.d-touch) .d-room .d-room__br > :is(.live__queue-time, .live__queue-paused) {
@@ -1096,6 +1140,11 @@
 
   html:not(.d-touch) .d-room .live__reveal > .live__secured-at {
     margin-top: var(--d-s5);
+  }
+
+  /* YOUR PIECE's horizon (D31): further past the column on the window. */
+  html:not(.d-touch) .d-room .live__reveal > .live__floor {
+    margin: var(--d-s4) -120px 0;
   }
 
   /* The time to confirm: its figure as the turn's, its label under it. */
@@ -1383,7 +1432,6 @@
     width: 100%;
     max-width: none;
     margin: 0;
-    padding: var(--d-s2) var(--d-s5);
   }
 
   html:not(.d-touch) .d-room .live__receipt .rows__row {

@@ -36,7 +36,9 @@
  *   live              a LIVE RELEASE live now, a collector at each step of the line and each end (the room's screens)
  *   queue             the live story without its release live now: two LIVE RELEASES with a pace (ONE QUEUE; first
  *                     written for M1), live now: one at 40 turns a minute, three collectors in its one queue (the crowd
- *                     ahead of them written in bulk), and one whose pace ORBES paused, a collector in its queue (seedQueue)
+ *                     ahead of them written in bulk), and one whose pace ORBES paused, a collector in its queue (seedQueue);
+ *                     ONE QUEUE's Horizon band: a release of 24 pieces, 9 left, and one of 300 at its LAST PIECES, 18
+ *                     left, a collector in each one's queue (seedBand)
  *   afterroom         a LIVE RELEASE sold out a few minutes ago, its after-room open (C26)
  *   afterroom-ends    three LIVE RELEASES of the last two hours whose after-rooms ended with a guest still in their
  *                     line: sold out, closed at their time, ended by ORBES; and a guest who never entered one
@@ -1049,6 +1051,55 @@ async function seedQueue(w: World): Promise<void> {
   await live.advance(g.id);
   clock.set(new Date(NOCTURNE_NOW.getTime() - MINUTE));
   await live.pausePace(g.id, w.admin);
+
+  // ONE QUEUE's Horizon band (lot Q1, step Q1.7; MK Q9, Q10): a small release, and one at its LAST PIECES.
+  await seedBand(w, { key: 'queueSmall', model: w.models.steel!, title: 'MONOLITHE IN STEEL', stock: [8, 8, 8], taken: [5, 6, 4], waiting: 2 });
+  await seedBand(w, { key: 'queueLast', model: w.models.gold!, title: 'MONOLITHE IN GOLD', stock: [100, 100, 100], taken: [92, 98, 92], waiting: 1 });
+}
+
+/**
+ * ONE QUEUE's Horizon band (lot Q1, step Q1.7): a paced LIVE RELEASE live now in sizes 16, 17 and 18 (`stock` each),
+ * its first batch (two minutes after its T0, three minutes ago) giving its turns to the `taken` of each size, first in
+ * its line; then `waiting` in size 17, then the account `key`, in size 17 too: its place in its size `waiting` + 1, the
+ * pieces left the stock less those turns. MK Q9: 24 pieces, 9 left, 2 in size 17, place 3; MK Q10: 300 pieces, 18
+ * left (LAST PIECES), 2 in size 17, place 2.
+ */
+async function seedBand(w: World, o: { key: string; model: string; title: string; stock: [number, number, number]; taken: [number, number, number]; waiting: number }): Promise<void> {
+  const { ctx, clock, demo } = w;
+  const live = ctx.services.live;
+  clock.set(at('2026-10-04T12:00:00Z'));
+  const t0 = new Date(NOCTURNE_NOW.getTime() - 3 * MINUTE);
+  const quantity = o.stock.reduce((n, x) => n + x, 0);
+  const given = o.taken.reduce((n, x) => n + x, 0);
+  const r = await createLiveRelease(w.f, {
+    modelId: o.model,
+    opensAt: t0,
+    closesAt: new Date(t0.getTime() + 2 * HOUR),
+    minTier: 1,
+    turnSeconds: 300,
+    payMinutes: 10,
+    sizes: o.stock.map((stock, i) => ({ label: String(16 + i), stock })),
+    quantityLine: `${quantity} PIECES`,
+    priceMinor: 505_000,
+    pace: { batch: given, minutes: 2 },
+  });
+  await titled(w, r.id, o.title, `${o.title}, released live: ${quantity} pieces, in the sizes of the house.`);
+  demo.releases[o.key] = r.id;
+  const you = await account(w, o.key, `${o.key.toLowerCase()}@example.com`, 1, o.model);
+  clock.set(t0);
+  await live.advance(r.id);
+  const crowd = await crowdOf(w, given + o.waiting, o.key.toLowerCase());
+  const sizeOf = new Map<string, string>();
+  let k = 0;
+  o.taken.forEach((n, i) => {
+    for (let j = 0; j < n; j++) sizeOf.set(crowd[k++]!, r.sizes[i]!.id);
+  });
+  for (let j = 0; j < o.waiting; j++) sizeOf.set(crowd[k++]!, r.sizes[1]!.id);
+  sizeOf.set(you.id, r.sizes[1]!.id);
+  await bulkLine(w, r.id, r.sizes, [...crowd, you.id], new Date(t0.getTime() + 20_000), sizeOf);
+  clock.set(new Date(t0.getTime() + 2 * MINUTE));
+  await live.advance(r.id);
+  await live.message(r.id, 'Thank you for being here tonight.', w.admin);
 }
 
 /** A LIVE RELEASE of one piece, sold out five minutes ago with you still in the line: its after-room is open. */
