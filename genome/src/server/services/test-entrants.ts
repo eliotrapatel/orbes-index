@@ -1101,7 +1101,8 @@ export class TestEntrantService {
   /** A press's bots into the runner (a new test, or ADD MORE into the one under way), its peaks followed. */
   private async begin(runId: string, d: DropRow, bots: Bot[]): Promise<void> {
     if (this.run?.id !== runId) {
-      const addons = d.mode === 'LIVE' ? (await this.db.selectFrom('live_addons').select('id').where('drop_id', '=', d.id).orderBy('position').execute()).map((a) => a.id) : [];
+      // Lot Q2, step Q2.4 (D24): a bot's add-on is one of its release's pick (drop_addons), as anyone's.
+      const addons = d.mode === 'LIVE' ? (await this.db.selectFrom('drop_addons').select('addon_id').where('drop_id', '=', d.id).orderBy('position').execute()).map((a) => a.addon_id) : [];
       this.run = { id: runId, drop: d, mode: d.mode, addons, bots: [], cursor: 0, peaksSavedAt: this.now().getTime() };
       startRunPeaks(runId);
     }
@@ -1298,7 +1299,8 @@ export class TestEntrantService {
           bot.at = this.now().getTime() + (bot.now ? 0 : POLL_MS);
           return;
         }
-        if (plan.addOns && run.addons.length) await this.call(run, bot, 'PUT', `${live}/addons`, 'ADD-ONS', { addonIds: [pick(run.addons)] });
+        // D24: one row of its release's pick, never the engraving's words.
+        if (plan.addOns && run.addons.length) await this.call(run, bot, 'PUT', `${live}/addons`, 'ADD-ONS', { items: [{ addonId: pick(run.addons) }] });
         bot.step = 'DECIDE';
         // A collector pays a few seconds after securing; a bot driven by hand at once.
         bot.at = this.now().getTime() + (bot.now ? 0 : between(2000, 10_000));
@@ -1670,7 +1672,6 @@ export class TestEntrantService {
           .returning('id')
           .execute();
         if (gone.length && d.pace_batch !== null) changes.changed(d.id);
-        if (gone.length) await tx.deleteFrom('live_entry_addons').where('entry_id', 'in', gone.map((e) => e.id)).execute();
         for (const e of gone) await this.ctx.audit.record({ actor, action: 'drop.live.remove', targetType: 'drop', targetId: d.id, details: { entryId: e.id, from: 'CONFIRMED', reason: 'test_ended' } }, tx);
         n += gone.length;
       }

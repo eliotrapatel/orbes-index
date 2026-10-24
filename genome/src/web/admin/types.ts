@@ -2350,8 +2350,7 @@ export interface LiveRelease extends LiveCard {
   question: LiveQuestion | null;
   /** Its sizes in order; on a set's release, each with its piece (1 to 4). */
   sizes: { id: string; label: string; stock: number; piece?: number }[];
-  addons: { id: string; label: string; line: string | null; priceMinor: number }[];
-  /** Lot Q2, step Q2.3: the catalogue add-ons it offers at its purchase, in its order, priced in its currency now. */
+  /** Lot Q2, step Q2.3: the catalogue add-ons it offers at its purchase, in its order, priced in its currency now (step Q2.4: its only add-ons). */
   addonPick?: PickedAddon[];
   tierWindows: { tier: number; turnSeconds: number | null; payMinutes: number | null }[];
   /** As set: null, at the publication; a null stage, at the announcement. */
@@ -2483,8 +2482,7 @@ export interface LiveAfterRoom {
   currency: string;
   sizes: { id: string; label: string; stock: number }[];
   quantity: number;
-  addons: { id: string; label: string; line: string | null; priceMinor: number }[];
-  /** Lot Q2, step Q2.3: the catalogue add-ons it offers at its purchase, in its order, priced in its currency now. */
+  /** Lot Q2, step Q2.3: the catalogue add-ons it offers at its purchase, in its order, priced in its currency now (step Q2.4: its only add-ons). */
   addonPick?: PickedAddon[];
   delayMinutes: number;
   lengthMinutes: number;
@@ -2529,13 +2527,14 @@ export interface LiveSettings {
   /** On a set's release (macro scope K44 T1), each size names its piece (1 to 4, the set's order). */
   sizes: { id?: string | null; label: string; stock: number; piece?: number | null }[];
   quantityLine?: string | null;
-  addons?: { id?: string | null; label: string; line?: string | null; priceMinor: number }[];
+  /** Lot Q2, step Q2.3: its pick of catalogue add-ons, in order (omitted at its creation: every one its LIVE switch offers). */
+  addonIds?: string[];
   announceAt?: Iso | null;
   silhouetteAt?: Iso | null;
   nameAt?: Iso | null;
   photoAt?: Iso | null;
   tierWindows?: { tier: number; turnSeconds?: number | null; payMinutes?: number | null }[];
-  /** The after-room: its own model, price, sizes and stock, add-ons, delay and length; null: none. */
+  /** The after-room: its own model, price, sizes and stock, pick of add-ons, delay and length; null: none. */
   afterRoom?: LiveAfterRoomSettings | null;
   /** Where its orders hold or make their pieces; null: the default location. */
   stockLocationId?: string | null;
@@ -2550,7 +2549,7 @@ export interface LiveAfterRoomSettings {
   modelId: string;
   priceMinor: number;
   sizes: { id?: string | null; label: string; stock: number }[];
-  addons?: { id?: string | null; label: string; line?: string | null; priceMinor: number }[];
+  addonIds?: string[];
   delayMinutes?: number;
   lengthMinutes?: number;
 }

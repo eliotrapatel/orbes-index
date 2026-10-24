@@ -38,7 +38,7 @@ import { inTransaction } from '../../src/server/db/connection.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { packAndShip, stockPieces } from '../support/fulfil.js';
-import { createAccount, createLiveRelease, createModel, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { createAccount, createLiveRelease, createModel, holdPieces, legacyLiveAddons, liveFixtureOn, type LiveFixture } from '../support/live.js';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -101,7 +101,7 @@ describe('an order\'s delivery address (plan NEXT LOT §3.6.B)', () => {
   /** A LIVE sale of `quantity` pieces for the account: its orders by piece (the first keys the parcel, the others travel with it); the add-ons bought when given. */
   async function liveSale(account: { id: string; actor: Actor }, quantity: number, addons: { label: string; priceMinor: number }[] = []): Promise<string[]> {
     const opensAt = new Date(clock.now().getTime() + HOUR);
-    const r = await createLiveRelease(f, { modelId: f.modelId, opensAt, sizes: [{ label: '52', stock: 5 }], perAccount: quantity, priceMinor: 480_000, ...(addons.length ? { addons } : {}) });
+    const r = await createLiveRelease(f, { modelId: f.modelId, opensAt, sizes: [{ label: '52', stock: 5 }], perAccount: quantity, priceMinor: 480_000 });
     clock.set(new Date(opensAt.getTime() - MINUTE));
     await f.live.enter(account.id, r.id, { sizeId: r.sizes[0]!.id, quantity }, account.actor);
     clock.set(opensAt);
@@ -110,8 +110,9 @@ describe('an order\'s delivery address (plan NEXT LOT §3.6.B)', () => {
     await f.live.press(account.id, r.id, token);
     clock.advance(1500);
     await f.live.secure(account.id, r.id, token, account.actor);
-    if (addons.length) await f.live.setAddons(account.id, r.id, r.addons.map((x) => x.id), account.actor);
     await f.live.confirm(account.id, r.id, account.actor);
+    // A sale of before lot Q2 (N15): the release add-ons bought, as that PAY wrote them on each piece's order.
+    if (addons.length) await legacyLiveAddons(t.db, r.id, account.id, addons);
     const entry = await t.db.selectFrom('live_entries').select('id').where('drop_id', '=', r.id).where('account_id', '=', account.id).executeTakeFirstOrThrow();
     return (await t.db.selectFrom('orders').select('id').where('live_entry_id', '=', entry.id).orderBy('piece').execute()).map((o) => o.id);
   }

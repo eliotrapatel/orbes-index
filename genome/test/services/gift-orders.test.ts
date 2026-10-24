@@ -36,7 +36,7 @@ import type { OrderView as AdminOrderView } from '../../src/web/admin/types.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { packAndShip, stockPieces } from '../support/fulfil.js';
-import { createAccount, createLiveRelease, createModel, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { createAccount, createLiveRelease, createModel, holdPieces, legacyLiveAddons, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { poolDraw } from '../support/draws.js';
 
 const MINUTE = 60_000;
@@ -434,7 +434,6 @@ describe('the welcome gift (BP-19 T5)', () => {
       sizes: [{ label: '52', stock: 2 }],
       perAccount: 1,
       priceMinor: 480_000,
-      addons: Array.from({ length: LIVE_ADDONS_MAX }, (_, i) => ({ label: `ADD-ON ${i + 1}`, priceMinor: 1_000 * (i + 1) })),
     });
     clock.set(new Date(opensAt.getTime() - MINUTE));
     await f.live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id, quantity: 1 }, a.actor);
@@ -444,8 +443,9 @@ describe('the welcome gift (BP-19 T5)', () => {
     await f.live.press(a.id, r.id, token);
     clock.advance(1500);
     await f.live.secure(a.id, r.id, token, a.actor);
-    await f.live.setAddons(a.id, r.id, r.addons.map((x) => x.id), a.actor);
     await f.live.confirm(a.id, r.id, a.actor);
+    // A sale of before lot Q2 (N15): the most release add-ons an order carries, as that PAY wrote them.
+    await legacyLiveAddons(t.db, r.id, a.id, Array.from({ length: LIVE_ADDONS_MAX }, (_, i) => ({ label: `ADD-ON ${i + 1}`, priceMinor: 1_000 * (i + 1) })));
     const entry = await t.db.selectFrom('live_entries').select('id').where('drop_id', '=', r.id).where('account_id', '=', a.id).executeTakeFirstOrThrow();
     const order = await t.db.selectFrom('orders').selectAll().where('live_entry_id', '=', entry.id).where('channel', '=', 'LIVE').executeTakeFirstOrThrow();
     expect(await giftsOf(order.id)).toHaveLength(2);

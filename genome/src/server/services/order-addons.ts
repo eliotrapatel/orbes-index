@@ -251,6 +251,21 @@ export function cleanAddonItems(items: unknown): AddonUnitsInput[] {
   });
 }
 
+/** One row chosen at a LIVE hold (lot Q2, step Q2.4, N1): its add-on and, for the engraving, its words. */
+export interface LiveAddonRowInput {
+  addonId: string;
+  text?: string | null;
+}
+
+/**
+ * The rows chosen at a LIVE hold, checked (lot Q2, step Q2.4, N1): each add-on once, at most ADDON_CHOICES_MAX, words as
+ * text (checked against the add-on in setChoices); each a choice of one unit (taken on each piece's order at PAY).
+ */
+export function cleanAddonRows(items: unknown): AddonUnitsInput[] {
+  if (!Array.isArray(items)) throw validationError('Send the add-ons as a list.');
+  return cleanAddonItems(items.map((i: unknown) => ({ ...((i ?? {}) as object), units: 1 })));
+}
+
 /**
  * The engraving's words as typed (Q2.3, D12, N3): runs of spaces kept to one, trimmed; empty: none (they are then
  * entered in YOUR ORDERS); otherwise 1 to `max` characters of letters, figures, spaces and . & ' ’ - (400 with the
@@ -374,13 +389,18 @@ async function offerAtOf(db: Db, owner: AddonChoiceOwner): Promise<OfferAt> {
  * and, at LIVE and DRAW, picked by the release `dropId`, in the release's order; at SALON and ORDERS the switch alone,
  * in the add-ons' order; STAFF bound by neither), each with the units that can still be taken: a product what is
  * available there (at least one), a service ADDON_LIMIT (no count), the engraving one; less `held` (the units of that
- * add-on the order holds already). An add-on whose limit is reached is left out.
+ * add-on the order holds already). An add-on whose limit is reached is left out. At a LIVE hold (`pieces`, lot Q2, step
+ * Q2.4, N1) a row is chosen or not: one unit per piece of the entry (one per set), so each offers one, a product only
+ * while `pieces` are available there.
  */
 export async function addonOffer(
   db: Db,
-  at: OfferAt & { locationId: string; currency: HouseCurrency | null; held?: ReadonlyMap<string, number> },
+  at: OfferAt & { locationId: string; currency: HouseCurrency | null; held?: ReadonlyMap<string, number>; pieces?: number },
 ): Promise<AddonOfferItem[]> {
   const { locationId, currency } = at;
+  // A LIVE hold (lot Q2, step Q2.4, N1): a row chosen is one unit per piece of the entry (one per set), so each row
+  // takes one, and a product is offered only while that many are available.
+  const pieces = at.pieces === undefined ? null : Math.max(1, at.pieces);
   const held = at.held ?? new Map<string, number>();
   if (currency === null) return [];
   const pick = readsPick(at);
@@ -398,6 +418,10 @@ export async function addonOffer(
   return rows.rows
     .map((r) => {
       const limit = r.engraving ? 1 : ADDON_LIMIT;
+      if (pieces !== null) {
+        const enough = r.kind === 'SERVICE' || Number(r.available) >= pieces;
+        return { addonId: r.addon_id, name: r.name, line: r.line, priceMinor: Number(r.price_minor), currency, maxUnits: enough ? 1 : 0, engraving: r.engraving, ...(r.engraving ? { textMax: Number(r.text_max) } : {}) };
+      }
       return {
         addonId: r.addon_id,
         name: r.name,
@@ -443,10 +467,20 @@ export async function choicesOf(db: Db, column: OwnerColumn, ownerIds: readonly 
  * currency or a price in it, once set aside, its moment's switch off, or at a LIVE hold or a draw's place held not
  * picked by the release; 409 ADDON_OUT_OF_STOCK when fewer are available there; 409 ADDON_LIMIT above 3, the engraving
  * above 1). The engraving's words (`text`, its choice only: 400 on another) are at most its most characters of the
- * house's set (400); none is allowed. Nothing is held: the stock is taken when the order is created (`carryChoices`). An
- * empty list clears them. Returns what was chosen, for the caller's audit entry (never the words: `text: true`).
+ * house's set (400); none is allowed. At a LIVE hold (`pieces`, lot Q2, step Q2.4, N1) each choice's units are taken
+ * on each piece's order (each set's), so `pieces` times as many must be available. Nothing is held: the stock is taken
+ * when the order is created (`carryChoices`). An empty list clears them. Returns what was chosen, for the caller's audit entry (never the words: `text: true`).
  */
-export async function setChoices(tx: Db, owner: AddonChoiceOwner, items: readonly AddonUnitsInput[], at: { locationId: string; currency: HouseCurrency | null }, now: Date): Promise<JsonObject[]> {
+export async function setChoices(
+  tx: Db,
+  owner: AddonChoiceOwner,
+  items: readonly AddonUnitsInput[],
+  at: { locationId: string; currency: HouseCurrency | null; pieces?: number },
+  now: Date,
+): Promise<JsonObject[]> {
+  // A LIVE hold (lot Q2, step Q2.4, N1): each choice is one unit per piece of the entry (one per set), checked against
+  // the stock for that many.
+  const pieces = Math.max(1, at.pieces ?? 1);
   const [column, ownerId] = ownerOf(owner);
   const words = new Map<string, string | null>();
   if (items.length > 0) {
@@ -459,7 +493,7 @@ export async function setChoices(tx: Db, owner: AddonChoiceOwner, items: readonl
       const why = notOfferedWhy(s, where, `${s.name} is not offered here.`);
       if (why !== null) throw addonNotOffered(why);
       if (s.engraving && i.units > 1) throw engravingLimit(s.name);
-      if (s.available < i.units) throw addonOutOfStock(s.name);
+      if (s.available < i.units * pieces) throw addonOutOfStock(s.name);
       if (i.text !== undefined && i.text !== null && !s.engraving) throw wordsNotEngraving();
       words.set(i.addonId, s.engraving ? engravingWordsOf(i.text, s.textMax) : null);
     }
@@ -820,37 +854,64 @@ async function removeUnits(tx: Db, o: OrderRow, units: readonly UnitRow[], by: A
 }
 
 /**
- * The choices of a sale's source carried onto its first order (in the transaction that creates it, the order just
- * created): each add-on in `currency`, under its SKU's lock (the SKUs in id order), as many units as are available at
- * the order's location (the rest left out, NONE_LEFT; a service's, all of them, without lock; the engraving one), none
- * when it is no longer offered at its moment (NOT_OFFERED: set aside, no longer priced in it, its switch turned off or,
- * at a LIVE hold or a draw's place held, no longer picked by the release; Q2.3) or without a currency; never blocking
- * the sale. The choices are then deleted. Returns the units' audit entries and what was left out, for the source's
- * answer and audit entry.
+ * The choices of a sale's source carried onto its orders (in the transaction that creates them, the orders just
+ * created): a draw's entry and a salon request onto their first order; a LIVE entry (lot Q2, step Q2.4, N1) onto each
+ * piece's order, a set's entry onto each set's first piece's order (D25), each order taking the choice's units. Each
+ * add-on in `currency`, under its SKU's lock (the SKUs in id order), as many units as are available at the orders'
+ * location, given in the orders' order (the rest left out, NONE_LEFT; a service's, all of them, without lock; the
+ * engraving one an order), none when it is no longer offered at its moment (NOT_OFFERED: set aside, no longer priced in
+ * it, its switch turned off or, at a LIVE hold or a draw's place held, no longer picked by the release; Q2.3) or without
+ * a currency; never blocking the sale. The engraving's words chosen with it are written on each order that takes an
+ * engraving unit (`engraving_text`, by COLLECTOR, D25), never on another. The choices are then deleted. Returns the
+ * units' audit entries and what was left out, for the source's answer and audit entry.
  */
-export async function carryChoices(tx: Db, o: OrderRow, owner: AddonChoiceOwner, currency: HouseCurrency | null, actor: Actor, now: Date): Promise<{ leftOut: LeftOutAddon[]; notes: AuditRecordInput[] }> {
+export async function carryChoices(
+  tx: Db,
+  orders: readonly OrderRow[],
+  owner: AddonChoiceOwner,
+  currency: HouseCurrency | null,
+  actor: Actor,
+  now: Date,
+): Promise<{ leftOut: LeftOutAddon[]; notes: AuditRecordInput[] }> {
   const [column, ownerId] = ownerOf(owner);
-  const choices = await tx.selectFrom('addon_choices').select(['addon_id', 'units']).where(column, '=', ownerId).execute();
   const leftOut: LeftOutAddon[] = [];
   const notes: AuditRecordInput[] = [];
+  const first = orders[0];
+  if (!first) return { leftOut, notes };
+  const choices = await tx.selectFrom('addon_choices').select(['addon_id', 'units', 'text']).where(column, '=', ownerId).execute();
   if (choices.length === 0) return { leftOut, notes };
   const where = await offerAtOf(tx, owner);
-  const found = await standings(tx, choices.map((c) => c.addon_id), o.location_id, currency, where.dropId);
+  const found = await standings(tx, choices.map((c) => c.addon_id), first.location_id, currency, where.dropId);
   const by: AddonBy = { type: 'PURCHASE', id: null, actor };
   // The SKUs in one order (two sales carrying the same add-ons never wait for each other).
   const ordered = [...choices].sort((a, b) => (found.get(a.addon_id)?.skuId ?? '').localeCompare(found.get(b.addon_id)?.skuId ?? ''));
   for (const c of ordered) {
     const s = found.get(c.addon_id)!;
+    // Each order's units: the choice's, at most ADDON_LIMIT (the engraving one).
+    const each = Math.min(c.units, s.engraving ? 1 : ADDON_LIMIT);
+    const wanted = c.units * orders.length;
     if (currency === null || notOfferedWhy(s, where, '') !== null) {
-      leftOut.push({ addonId: s.addonId, name: s.name, units: c.units, reason: 'NOT_OFFERED' });
+      leftOut.push({ addonId: s.addonId, name: s.name, units: wanted, reason: 'NOT_OFFERED' });
       continue;
     }
     // A service has no stock (lot Q2, D4): no lock, as many as chosen.
     if (s.kind === 'PRODUCT') await lockSku(tx, s.skuId);
-    const level = s.kind === 'PRODUCT' ? await stockLevel(tx, s.skuId, o.location_id) : { available: s.engraving ? 1 : ADDON_LIMIT };
-    const units = Math.max(0, Math.min(c.units, level.available, ADDON_LIMIT));
-    if (units > 0) notes.push(...(await insertUnits(tx, o, s, units, currency, by, now)).notes);
-    if (units < c.units) leftOut.push({ addonId: s.addonId, name: s.name, units: c.units - units, reason: 'NONE_LEFT' });
+    let left = s.kind === 'PRODUCT' ? (await stockLevel(tx, s.skuId, first.location_id)).available : Number.POSITIVE_INFINITY;
+    let given = 0;
+    for (const o of orders) {
+      const units = Math.max(0, Math.min(each, left));
+      if (units === 0) continue;
+      // The engraving's words, on the order that carries its unit (D25), never logged; written first, so that the unit's
+      // journal entry carries the order as it now stands.
+      if (s.engraving && c.text !== null) {
+        await tx.updateTable('orders').set({ engraving_text: c.text, engraving_by: 'COLLECTOR' }).where('id', '=', o.id).execute();
+        Object.assign(o, { engraving_text: c.text, engraving_by: 'COLLECTOR' });
+      }
+      notes.push(...(await insertUnits(tx, o, s, units, currency, by, now)).notes);
+      left -= units;
+      given += units;
+    }
+    if (given < wanted) leftOut.push({ addonId: s.addonId, name: s.name, units: wanted - given, reason: 'NONE_LEFT' });
   }
   await clearChoices(tx, column, [ownerId]);
   return { leftOut, notes };

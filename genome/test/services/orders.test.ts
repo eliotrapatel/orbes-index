@@ -31,7 +31,7 @@ import { withdrawOnCancel } from '../../src/server/services/claim-renewals.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { countPiecesIn, scanIntoParcel } from '../support/fulfil.js';
 import { jpegPhoto } from '../support/images.js';
-import { accountOfTier, createAccount, createLiveRelease, createModel, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { accountOfTier, createAccount, createLiveRelease, createModel, liveAddon, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { poolDraw, withDrawSizes } from '../support/draws.js';
 
 const HOUR = 3_600_000;
@@ -97,11 +97,16 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
   const benchOf = (orderId: string) => t.db.selectFrom('bench_items').selectAll().where('order_id', '=', orderId).orderBy('created_at').execute();
   const productRow = (id: string) => t.db.selectFrom('products').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
 
-  /** A LIVE sale as a collector lives it: entered before T0, the line at T0, the seal held, PAY. */
+  /**
+   * A LIVE sale as a collector lives it: entered before T0, the line at T0, the seal held, PAY. Lot Q2, step Q2.4: `addons`
+   * are catalogue services its release picks and its hold chooses (one unit per piece).
+   */
   async function liveSale(o: { quantity?: number; sizes?: { label: string; stock: number }[]; size?: number; addons?: { label: string; priceMinor: number }[]; locationId?: string } = {}) {
     const quantity = o.quantity ?? 1;
     const opensAt = new Date(clock.now().getTime() + HOUR);
-    const r = await createLiveRelease(f, { opensAt, sizes: o.sizes ?? [{ label: '52', stock: 5 }], perAccount: Math.max(1, quantity), addons: o.addons });
+    const picked: string[] = [];
+    for (const a of o.addons ?? []) picked.push(await liveAddon(f, { name: a.label, priceMinor: a.priceMinor }));
+    const r = await createLiveRelease(f, { opensAt, sizes: o.sizes ?? [{ label: '52', stock: 5 }], perAccount: Math.max(1, quantity), addonIds: picked });
     if (o.locationId) await t.db.updateTable('drops').set({ stock_location_id: o.locationId }).where('id', '=', r.id).execute();
     const a = await accountOfTier(f, 0);
     clock.set(new Date(opensAt.getTime() - MINUTE));
@@ -112,11 +117,11 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
     await f.live.press(a.id, r.id, token);
     clock.advance(1500);
     await f.live.secure(a.id, r.id, token, a.actor);
-    if (r.addons.length) await f.live.setAddons(a.id, r.id, r.addons.map((x) => x.id), a.actor);
+    if (picked.length) await f.live.setAddons(a.id, r.id, picked.map((addonId) => ({ addonId })), a.actor);
     await f.live.confirm(a.id, r.id, a.actor);
     const entry = await t.db.selectFrom('live_entries').selectAll().where('drop_id', '=', r.id).where('account_id', '=', a.id).executeTakeFirstOrThrow();
     const rows = await t.db.selectFrom('orders').selectAll().where('live_entry_id', '=', entry.id).orderBy('piece').execute();
-    return { release: r, account: a, entry, orders: rows };
+    return { release: r, account: a, entry, orders: rows, addonIds: picked };
   }
 
   /** A request of the private salon closed as ACCEPTED by Client Services: its order, its size and price entered when given. */
@@ -352,7 +357,7 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
   // ── every channel ────────────────────────────────────────────────────────
 
   describe('every channel creates its orders', () => {
-    it('a LIVE entry CONFIRMED: one order per piece, the release\'s size, price and currency, the add-ons as sold, RESERVED at the release\'s location, in PAY\'s transaction', async () => {
+    it('a LIVE entry CONFIRMED: one order per piece, the release\'s size, price and currency, each add-on chosen one unit on each piece\'s order (no snapshot), RESERVED at the release\'s location, in PAY\'s transaction', async () => {
       const sale = await liveSale({ quantity: 2, addons: [{ label: 'ENGRAVING', priceMinor: 15_000 }, { label: 'GIFT BOX', priceMinor: 5_000 }], locationId: logistics });
       expect(sale.orders).toHaveLength(2);
       const sku = sale.orders[0]!.sku_id!;
@@ -375,7 +380,15 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
           surprise: null,
           buyer_name: null,
         });
-        expect(o.addons).toEqual(sale.release.addons.map((a) => ({ id: a.id, label: a.label, priceMinor: a.priceMinor })));
+        // Lot Q2, step Q2.4 (D2, N1, N15): no snapshot; one unit of each add-on chosen on each piece's order, as sold.
+        expect(o.addons).toEqual([]);
+        const units = await t.db.selectFrom('order_addon_items').select(['addon_id', 'price_minor', 'added_by_type', 'location_id']).where('order_id', '=', o.id).execute();
+        expect(units.map((u) => [u.addon_id, u.price_minor, u.added_by_type, u.location_id]).sort()).toEqual(
+          [
+            [sale.addonIds[0], 15_000, 'PURCHASE', null],
+            [sale.addonIds[1], 5_000, 'PURCHASE', null],
+          ].sort(),
+        );
         expect(o.reserved_at.toISOString()).toBe(sale.entry.confirmed_at!.toISOString());
         // Audited as the collector's, in the transaction of PAY.
         expect((await auditsOf(o.id, 'order.create'))[0]).toMatchObject({ actor_type: 'account', actor_id: sale.account.id, details: { channel: 'LIVE', liveEntryId: sale.entry.id, piece: i + 1, to: 'RESERVED', reservation: 'AWAITING' } });
@@ -1008,7 +1021,9 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       const rows = await t.db.selectFrom('orders').selectAll().execute();
       expect(rows.length).toBeGreaterThan(20);
       for (const o of rows) {
-        expect(replayed.orders.get(o.id), o.id).toEqual(orderPayload(o));
+        // An add-on's entry (order.addon.add/remove) carries the order and the add-on: the order is the rest.
+        const { addon: _addon, ...state } = replayed.orders.get(o.id) ?? {};
+        expect(state, o.id).toEqual(orderPayload(o));
         const events = await eventsOf(o.id);
         expect((await journalOf(o.id)).map((j) => j.type), o.id).toEqual(events.map((e) => e.action));
       }

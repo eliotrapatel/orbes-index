@@ -12,6 +12,7 @@
  *    live service and read back (its show-up, its demand, a repeat collector), the bot radar's network and new account,
  *    the line stalled when the engine stops and cleared once it runs, ADD PIECES in the report, the comparison.
  */
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { inTransaction } from '../../src/server/db/connection.js';
 import { defaultLocationId, ensureSku, recordMovement } from '../../src/server/services/stock.js';
@@ -47,7 +48,18 @@ import { OrderService } from '../../src/server/services/orders.js';
 import { liveNetworkHash, LIVE_GESTURE_MIN_MS } from '../../src/server/services/live.js';
 import { HOLD_MS } from '../../src/web/verify/live-model.js';
 import { createTestDb, type TestDb } from '../support/db.js';
-import { createAccount, createCollection, createLiveRelease, createModel, holdPieces, liveFixture, type LiveFixture } from '../support/live.js';
+import {
+  createAccount,
+  createCollection,
+  createLiveRelease,
+  createModel,
+  holdPieces,
+  legacyAddons,
+  liveAddon,
+  liveFixture,
+  pickAddons,
+  type LiveFixture,
+} from '../support/live.js';
 
 const T0 = new Date('2026-11-02T10:00:00.000Z');
 const SECOND = 1000;
@@ -470,12 +482,13 @@ describe('the release report', () => {
         { id: 'box', label: 'GIFT BOX' },
       ],
       entryAddons: [
-        { entryId: 'x1', addonId: 'eng', priceMinor: 15_000 },
-        { entryId: 'x2', addonId: 'eng', priceMinor: 15_000 },
-        { entryId: 'x7', addonId: 'eng', priceMinor: 15_000 },
-        { entryId: 'x7', addonId: 'box', priceMinor: 0 },
+        // Lot Q2, step Q2.4: each its units at one price (one per piece).
+        { entryId: 'x1', addonId: 'eng', priceMinor: 15_000, units: 1 },
+        { entryId: 'x2', addonId: 'eng', priceMinor: 15_000, units: 1 },
+        { entryId: 'x7', addonId: 'eng', priceMinor: 15_000, units: 1 },
+        { entryId: 'x7', addonId: 'box', priceMinor: 0, units: 1 },
         // An add-on of a hold that ended is not revenue.
-        { entryId: 'x6', addonId: 'eng', priceMinor: 15_000 },
+        { entryId: 'x6', addonId: 'eng', priceMinor: 15_000, units: 1 },
       ],
       additions: [{ at: at(2 * MINUTE), sizeId: 's52', size: '52', pieces: 1, before: 2, after: 3 }],
       over: true,
@@ -813,17 +826,33 @@ describe('LiveInsightsService on a database', () => {
     expect(cmp.releases.length).toBeLessThanOrEqual(LIVE_INSIGHT_RULES.pastReleases + 1);
   });
 
-  it('leaves a reservation ORBES Client Services cancelled out of the revenue, its add-ons included: as its orders say', async () => {
+  it('leaves a reservation ORBES Client Services cancelled out of the revenue, its add-ons included: as its orders say (a release add-on of before lot Q2 from its snapshot, a catalogue add-on from its units)', async () => {
     const reserved = await t.db.selectFrom('live_entries').select(['id', 'quantity']).where('drop_id', '=', pastId).where('status', '=', 'CONFIRMED').executeTakeFirstOrThrow();
     const { price_minor: price } = await t.db.selectFrom('drops').select('price_minor').where('id', '=', pastId).executeTakeFirstOrThrow();
-    const addon = await t.db.insertInto('live_addons').values({ drop_id: pastId, label: 'ENGRAVING', line: null, price_minor: 15_000, position: 1 }).returning('id').executeTakeFirstOrThrow();
-    await t.db.insertInto('live_entry_addons').values({ entry_id: reserved.id, addon_id: addon.id, price_minor: 15_000 }).execute();
+    const sold = await t.db.selectFrom('orders').select('id').where('live_entry_id', '=', reserved.id).orderBy('piece').execute();
+    // Lot Q2, step Q2.4 (N15): a release add-on as that PAY wrote it on each piece's order; and a catalogue service sold
+    // at PAY, one unit on the first order (as carryChoices writes it), picked by the release.
+    const engravingId = randomUUID();
+    for (const o of sold) await legacyAddons(t.db, o.id, [{ id: engravingId, label: 'ENGRAVING', priceMinor: 15_000 }]);
+    const wrap = await liveAddon(f, { name: 'GIFT WRAPPING', priceMinor: 4_000 });
+    await pickAddons(t.db, pastId, [wrap]);
+    const sku = await t.db.selectFrom('skus').select('id').where('addon_id', '=', wrap).executeTakeFirstOrThrow();
+    await t.db
+      .insertInto('order_addon_items')
+      .values({ order_id: sold[0]!.id, addon_id: wrap, sku_id: sku.id, location_id: null, price_minor: 4_000, currency: 'EUR', added_at: f.clock.now(), added_by_type: 'PURCHASE', added_by: null })
+      .execute();
     const revenue = async () => {
       const own = (await insights.comparison(pastId)).releases.find((x) => x.current)!;
       const rep = await insights.report(pastId);
       return [own.piecesRevenueMinor, own.addonsRevenueMinor, rep.piecesRevenueMinor, rep.addonsRevenueMinor, rep.cancelled];
     };
-    expect(await revenue()).toEqual([price! * reserved.quantity, 15_000, price! * reserved.quantity, 15_000, { reservations: 0, pieces: 0 }]);
+    const addons = 15_000 * sold.length + 4_000;
+    expect(await revenue()).toEqual([price! * reserved.quantity, addons, price! * reserved.quantity, addons, { reservations: 0, pieces: 0 }]);
+    // The report's add-on rows: the release's pick first, then the add-ons of its orders' snapshots.
+    expect((await insights.report(pastId)).addons).toEqual([
+      { id: wrap, label: 'GIFT WRAPPING', reservations: 1, pieces: 1, revenueMinor: 4_000 },
+      { id: engravingId, label: 'ENGRAVING', reservations: 1, pieces: sold.length, revenueMinor: 15_000 * sold.length },
+    ]);
     // Cancelled by ORBES Client Services: its orders are (plan LIVE RELEASE+, the Orders board), the entry's own resolution
     // left as the LIVE plan had it.
     const orders = new OrderService({ db: t.db, audit: f.audit, clock: f.clock.now });

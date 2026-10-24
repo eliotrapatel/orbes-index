@@ -73,7 +73,7 @@
  * the server's refusals read as it wrote them. Reduced motion: cross-fades only. aria-live: the place, the turn, the
  * piece secured. One primary action per screen (filled ivory): ENTER, the size chosen, PAY.
  */
-import { addonRows, chosenRows, chosenUnits, leftOutLines, rowsChoice, rowsLimit, withUnits, type AddonRowModel } from '../addons-model.js';
+import { leftOutLines, withUnits, type AddonRowModel } from '../addons-model.js';
 import { h, prefersReducedMotion, s } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
@@ -82,7 +82,6 @@ import { CLUB_PATH } from '../club-model.js';
 import { isDesktop, onDesktopChange, touchLayout } from '../../shared/desktop.js';
 import { HOW_PATH } from '../how-model.js';
 import {
-  addonChoices,
   bandModel,
   clockOffset,
   clockText,
@@ -91,6 +90,8 @@ import {
   formatMoney,
   heldEntry,
   heldPieces,
+  holdChoice,
+  holdRows,
   HOLD_MS,
   initialPick,
   initialSetPick,
@@ -99,6 +100,7 @@ import {
   isSetEntry,
   liveReference,
   liveScreen,
+  receiptAddonRows,
   liveSet,
   liveSetChoice,
   livePieces,
@@ -2813,24 +2815,9 @@ class LivePage {
     const detail = this.fact('', 'live__detail');
     // Macro scope K44 T1: the set's pieces, each in its size, under its name (then the add-ons and PAY).
     const setPieces = set ? h('dl', { class: 'live__set-pieces', attrs: { 'aria-label': SETS.live.pieces } }) : null;
-    const addonsBox = h('div', { class: 'live__addons', attrs: { role: 'group', 'aria-labelledby': 'live-addons' } });
-    const addonButtons = new Map<string, HTMLButtonElement>();
-    const addons = s && s.addons.length > 0 && this.entry ? addonChoices(s, this.entry) : [];
-    for (const a of addons) {
-      // The add-on's one line of words under its button (a control's label stays on one line), read with it.
-      const lineId = `live-addon-${a.id}`;
-      const b = h(
-        'button',
-        { class: 'btn live__addon', attrs: { type: 'button', 'aria-describedby': a.line ? lineId : undefined }, on: { click: () => this.toggleAddon(a.id) } },
-        h('span', { class: 'live__addon-mark', attrs: { 'aria-hidden': 'true' } }),
-        h('span', { class: 'live__addon-label' }, ...withNumerals(a.label)),
-        ' ',
-        h('span', { class: 'live__addon-price', text: a.price }),
-      );
-      addonButtons.set(a.id, b);
-      addonsBox.append(h('div', { class: 'live__addon-item' }, b, a.line ? h('p', { class: 'live__addon-line', id: lineId, text: a.line }) : null));
-    }
-    // Plan MACRO M3 §4.4 (D2): the catalogue add-ons under the release's, drawn from the entry at each change (none: nothing).
+    // Plan MACRO M3 §4.4 (D2); lot Q2, step Q2.4 (D2): the release add-ons are gone, the hold's add-ons are its release's
+    // pick of the catalogue, drawn from the entry at each change (none: nothing), as production draws the catalogue's rows
+    // until 5b (Q2.8): a row is chosen or not (one unit per piece, N1).
     const itemsTitle = h('p', { class: 'live__overline live__items-title', id: 'live-items', attrs: { hidden: true }, text: LIVE.addonItems.title });
     const items = h('div', { class: 'live__items', attrs: { role: 'group', 'aria-labelledby': 'live-items', hidden: true } });
     const itemsNote = h('p', { class: 'live__items-note', attrs: { hidden: true } });
@@ -2876,8 +2863,6 @@ class LivePage {
       this.title(this.name()),
       detail,
       setPieces,
-      addons.length > 0 ? h('p', { class: 'live__overline live__addons-title', id: 'live-addons', text: LIVE.addons }) : null,
-      addons.length > 0 ? addonsBox : null,
       itemsTitle,
       items,
       itemsNote,
@@ -2915,11 +2900,6 @@ class LivePage {
           const collection = s?.collection ? `${upper(s.collection)} · ` : '';
           setFact(detail, `${collection}${LIVE.size(e.size.label)}${e.quantity > 1 ? ` · ${e.quantity} ${LIVE.quantity}` : ''}`);
         }
-        const chosen = new Set(e.addons.map((a) => a.id));
-        for (const [id, b] of addonButtons) {
-          b.setAttribute('aria-pressed', String(chosen.has(id)));
-          b.disabled = this.busy;
-        }
         const rows = this.itemRows(e);
         const key = JSON.stringify([rows, this.busy]);
         if (key !== itemsKey) {
@@ -2927,8 +2907,7 @@ class LivePage {
           const focus = focusedStep(items);
           items.replaceChildren(...(rows.length > 0 ? [addonRowsList({ rows, label: LIVE.addonItems.title, idPrefix: 'live-item', disabled: this.busy, room: true, onChange: (id, n) => this.setItem(rows, id, n) })] : []));
           if (focus) refocusStep(items, focus.addonId, focus.which);
-          const limit = rowsLimit(rows);
-          itemsNote.textContent = limit ? `${LIVE.addonItems.note} ${limit}` : LIVE.addonItems.note;
+          itemsNote.textContent = LIVE.addonItems.note;
           itemsTitle.hidden = items.hidden = itemsNote.hidden = rows.length === 0;
         }
         const total = formatMoney(e.totalMinor, e.currency);
@@ -2965,32 +2944,22 @@ class LivePage {
     };
   }
 
-  private toggleAddon(id: string): void {
-    const s = this.live();
-    const e = this.entry;
-    if (!s || !e || this.busy) return;
-    const ids = new Set(e.addons.map((a) => a.id));
-    if (ids.has(id)) ids.delete(id);
-    else ids.add(id);
-    // In the release's order, as the server keeps them.
-    void this.act(() => this.deps.api.liveAddons(s.id, s.addons.filter((a) => ids.has(a.id)).map((a) => a.id)));
-  }
-
-  /** The catalogue add-ons of the hold (plan MACRO M3 §4.4): what is offered now, then what was chosen and is no longer. */
+  /**
+   * The catalogue add-ons of the hold (plan MACRO M3 §4.4; lot Q2, step Q2.4, N1): what its release offers now, then what
+   * was chosen and is no longer; each row chosen or not (one unit per piece of the entry, one per set: PAY's total says it).
+   */
   private itemRows(e: LiveEntry): AddonRowModel[] {
-    return addonRows(e.addonOffer, this.itemUnits ?? chosenUnits(e.addonItems), e.addonItems ?? [], e.currency);
+    return holdRows(e, this.itemUnits);
   }
 
-  /** A stepper pressed: the hold's whole choice sent at once (the release's add-ons kept as they are). */
+  /** A row chosen or let go: the hold's whole choice sent at once, the engraving keeping its words. */
   private setItem(rows: readonly AddonRowModel[], addonId: string, units: number): void {
     const s = this.live();
     const e = this.entry;
     if (!s || !e || this.busy) return;
     const next = withUnits(rows, addonId, units);
     this.itemUnits = new Map(next.map((r) => [r.addonId, r.units]));
-    void this.act(
-      () => this.deps.api.liveAddons(s.id, s.addons.filter((a) => e.addons.some((x) => x.id === a.id)).map((a) => a.id), rowsChoice(next)),
-    ).finally(() => {
+    void this.act(() => this.deps.api.liveAddons(s.id, holdChoice(next, e))).finally(() => {
       this.itemUnits = null;
       this.screen?.update();
     });
@@ -3039,10 +3008,9 @@ class LivePage {
       row(LIVE.rows.reserved, at ? `${at.date} · ${at.clock}` : ''),
       ...(set ? heldPieces(e, this.room, this.live()).map((p) => row(p.name, p.size)) : [row(LIVE.rows.size, e.size.label)]),
       e.quantity > 1 ? row(set ? SETS.rows.sets : LIVE.rows.pieces, String(e.quantity)) : null,
-      ...e.addons.map((a) => row(upper(a.label), formatMoney(a.priceMinor * e.quantity, e.currency))),
-      // Plan MACRO M3 §4.4 (D2): the catalogue add-ons carried onto its order, written as the release's just above
-      // (POLISHING CLOTH × 2 · € 30).
-      ...chosenRows(e.addonItems, e.currency, formatMoney).map(([label, value]) => row(label, value)),
+      // D20 (lot Q2, step Q2.4): before lot Q2 its release add-ons as its orders sold them, then its catalogue add-ons as
+      // sold (ENGRAVING · € 150; POLISHING CLOTH × 2 · € 30).
+      ...receiptAddonRows(e, formatMoney).map(([label, value]) => row(label, value)),
       row(LIVE.rows.total, formatMoney(e.totalMinor, e.currency)),
       row(LIVE.rows.reference, reference),
     );
@@ -3196,7 +3164,7 @@ class LivePage {
         part.hidden = this.part === null;
         // A piece secured: its reservation, as CONFIRMED said it in the room (C29).
         const e = this.deps.session.state.status === 'signed-in' && this.entry?.status === 'CONFIRMED' ? this.entry : null;
-        const key = e ? JSON.stringify([e.id, e.size, e.quantity, e.addons, e.addonItems, e.totalMinor, e.currency, e.confirmedAt]) : '';
+        const key = e ? JSON.stringify([e.id, e.size, e.quantity, e.legacyAddons, e.addonItems, e.totalMinor, e.currency, e.confirmedAt]) : '';
         if (key !== drawn) {
           drawn = key;
           receipt.replaceChildren(...(e ? [this.receipt(e, m.heading)] : []));
@@ -3224,8 +3192,7 @@ class LivePage {
       row(LIVE.rows.reserved, reserved),
       ...(set ? heldPieces(e, this.room, this.sheet && !isEndedSheet(this.sheet) ? this.sheet : null).map((p) => row(p.name, p.size)) : [row(LIVE.rows.size, e.size.label)]),
       row(set ? SETS.rows.sets : LIVE.rows.pieces, String(e.quantity)),
-      ...e.addons.map((a) => row(upper(a.label), LIVE.addonPrice(money(a.priceMinor * e.quantity, e.currency)))),
-      ...chosenRows(e.addonItems, e.currency),
+      ...receiptAddonRows(e, (minor, currency) => LIVE.addonPrice(money(minor, currency))),
       row(LIVE.rows.total, money(e.totalMinor, e.currency)),
       row(LIVE.rows.reference, reference),
     ];

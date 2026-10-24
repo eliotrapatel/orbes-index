@@ -110,7 +110,7 @@ import { toneOf } from '../model/tone.js';
 import { OFFER_TEXT, setOptions, entrySizesText, perPersonText, pieceName, pieceSizeLabel, pieceTotals, setsOnSaleLines } from '../model/sets.js';
 import { modelChoice } from '../model/variants.js';
 import { href } from '../router.js';
-import { LIVE_CURRENCIES, LIVE_ENTRY_STATUSES, type LiveBoard, type LiveEntry, type LiveEntryStatus, type LiveFeasibility, type LiveRelease, type Model, type SetView } from '../types.js';
+import { LIVE_CURRENCIES, LIVE_ENTRY_STATUSES, type LiveBoard, type LiveEntry, type LiveEntryStatus, type LiveFeasibility, type LiveRelease, type Model, type PickedAddon, type SetView } from '../types.js';
 import { barList, button, copyButton, defList, field, filterBar, kpi, linkButton, mono, pageHeader, pager, section, select, statusMark, table, type DefRow } from '../ui/components.js';
 import { figureLabel, openDialog, type DialogField } from '../ui/dialog.js';
 import { saveDownload } from '../ui/download.js';
@@ -201,6 +201,9 @@ class LiveFollower {
 }
 
 const tierOf = (t: number) => (t === 0 ? 'None' : tierLabel(t));
+/** A release's pick of catalogue add-ons on one line (lot Q2, step Q2.4): each name and its price, or None. */
+const pickLine = (pick: readonly PickedAddon[] | undefined, currency: string) =>
+  pick?.length ? pick.map((x) => (x.priceMinor === null ? x.name : `${x.name} ${formatMoney(x.priceMinor, currency)}`)).join(' · ') : 'None';
 
 export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   const asked = screens;
@@ -1015,20 +1018,6 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
       ]),
     ]);
   };
-  const addonsPart = () => {
-    const v = values('addons');
-    editPart('addons', 'Add-ons', [
-      {
-        name: 'addons',
-        label: 'Add-ons',
-        kind: 'textarea',
-        rows: 6,
-        value: v.addons,
-        hint: `Offered with a piece held, at most ${LIVE_LIMITS.addons}: one per line, its label, its price, then a line (ENGRAVING | 150 | Your initials, by hand). Empty: none.`,
-      },
-    ]);
-  };
-
   const afterRoomPart = () => {
     const v = values('afterRoom');
     editPart(
@@ -1039,7 +1028,6 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
         { name: 'modelId', label: 'Model', kind: 'select', options: [{ value: '', label: 'Choose a model' }, ...modelOptions(v.modelId)], value: v.modelId },
         { name: 'price', label: 'Price of a piece', maxlength: 12, value: v.price, hint: `In units, in the release’s currency (${r.currency}).` },
         { name: 'sizes', label: 'Sizes', kind: 'textarea', rows: 4, value: v.sizes, hint: 'Its own stock, one size per line: 52 = 3.' },
-        { name: 'addons', label: 'Add-ons', kind: 'textarea', rows: 3, value: v.addons, hint: 'One per line: ENGRAVING | 150 | its line. Empty: none.' },
         { name: 'delay', label: 'Opens (minutes after the sell-out)', maxlength: 2, value: v.delay, hint: `${LIVE_LIMITS.afterRoomDelay.min} to ${LIVE_LIMITS.afterRoomDelay.max}; ${LIVE_LIMITS.afterRoomDelay.default} by default.` },
         { name: 'length', label: 'Open (minutes)', maxlength: 3, value: v.length, hint: `${LIVE_LIMITS.afterRoomLength.min} to ${LIVE_LIMITS.afterRoomLength.max}; ${LIVE_LIMITS.afterRoomLength.default} by default. It also closes at its own sell-out.` },
       ],
@@ -1068,7 +1056,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
           { label: 'Model', value: `${humanize(a.model.name)} · ${humanize(a.model.type)}`, note: a.model.active ? undefined : 'No longer offered for new pieces.' },
           { label: 'Price', value: `${formatMoney(a.priceMinor, a.currency)} a piece` },
           { label: 'Sizes', value: h('span', { data: { testid: 'live-after-room-sizes' } }, sizesLine(a.sizes)) },
-          { label: 'Add-ons', value: a.addons.length ? a.addons.map((x) => `${x.label} ${formatMoney(x.priceMinor, a.currency)}`).join(' · ') : 'None' },
+          { label: 'Add-ons', value: pickLine(a.addonPick, a.currency) },
           { label: 'Timing', value: h('span', { data: { testid: 'live-after-room-timing' } }, afterRoomTiming(a)) },
           ...(a.opensAt && a.closesAt ? [{ label: 'Door', value: `${formatDateTime(a.opensAt)} to ${formatDateTime(a.closesAt)}`, note: 'Its guests see it from its opening' }] : []),
           ...(opened
@@ -1201,12 +1189,13 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
       ]),
       { id: 'live-part-turns', tools: edit('Edit', 'live-edit-turns', turnsPart) },
     ),
+    // Lot Q2, step Q2.4 (D2): the release add-ons are gone; its add-ons are its pick of the catalogue (Catalogue → Add-ons).
     section(
       'Add-ons',
-      r.addons.length
-        ? defList(r.addons.map((a): DefRow => ({ label: a.label, value: formatMoney(a.priceMinor, r.currency), note: a.line ?? undefined })))
+      r.addonPick?.length
+        ? defList(r.addonPick.map((a): DefRow => ({ label: a.name, value: a.priceMinor === null ? `No price in ${r.currency}` : formatMoney(a.priceMinor, r.currency), note: a.active ? (a.line ?? undefined) : 'Set aside: offered nowhere.' })))
         : h('p', { class: 'notice' }, 'None: PAY is the piece alone.'),
-      { id: 'live-part-addons', tools: edit('Edit', 'live-edit-addons', addonsPart) },
+      { id: 'live-part-addons' },
     ),
     afterRoomSection,
   ];
@@ -1389,7 +1378,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
             { label: 'Model', value: `${humanize(r.model.name)} · ${humanize(r.model.type)}` },
             { label: 'Price', value: h('span', { data: { testid: 'live-price' } }, `${formatMoney(r.priceMinor, r.currency)} a piece`) },
             { label: 'Sizes', value: h('span', { data: { testid: 'live-sizes' } }, sizesLine(r.sizes)) },
-            { label: 'Add-ons', value: r.addons.length ? r.addons.map((x) => `${x.label} ${formatMoney(x.priceMinor, r.currency)}`).join(' · ') : 'None' },
+            { label: 'Add-ons', value: pickLine(r.addonPick, r.currency) },
             { label: 'Door', value: r.publishedAt ? `${formatDateTime(r.opensAt)} to ${formatDateTime(r.closesAt)}` : 'Opens only after the release’s sell-out' },
             { label: 'From the release', value: `${r.turnSeconds} s to hold the seal · ${r.payMinutes} min to press PAY · ${r.perAccount} ${r.perAccount === 1 ? 'piece' : 'pieces'} per person`, note: 'Its per-tier windows and its surprise too; no question after.' },
           ]),

@@ -21,7 +21,7 @@ import { GuaranteeService } from '../../src/server/services/guarantees.js';
 import { LiveEngine } from '../../src/server/services/live-engine.js';
 import { LiveService } from '../../src/server/services/live.js';
 import { createTestDb } from '../support/db.js';
-import { accountOfTier, createLiveRelease, createSet, createSetLiveRelease, entriesOf, liveFixture, pieceSize, sizedModel, type LiveFixture, type LiveRelease } from '../support/live.js';
+import { accountOfTier, createLiveRelease, createSet, createSetLiveRelease, entriesOf, liveAddon, liveFixture, pieceSize, sizedModel, type LiveFixture, type LiveRelease } from '../support/live.js';
 import { poolDraw } from '../support/draws.js';
 
 const adminUrl = process.env.ORBES_TEST_POSTGRES_URL;
@@ -197,23 +197,25 @@ for (const backend of BACKENDS) {
 
     it('the engine racing PAY at the end of a hold: before it, confirmed and never expired; at it, refused and EXPIRED', async () => {
       for (const offset of [-1, 0]) {
-        const r = await release({ sizes: [{ label: '52', stock: 1 }], addons: [{ label: 'GIFT BOX', priceMinor: 5_000 }] });
+        const box = await liveAddon(f, { name: 'GIFT BOX', priceMinor: 5_000 });
+        const r = await release({ sizes: [{ label: '52', stock: 1 }], addonIds: [box] });
         const [first, second] = await lineOf(r, [3, 0]);
         const t = await token(r, first!.id);
         await f.live.press(first!.id, r.id, t);
         f.clock.set(at(1500));
         const secured = await f.live.secure(first!.id, r.id, t, first!.actor);
-        await f.live.setAddons(first!.id, r.id, [r.addons[0]!.id], first!.actor);
+        await f.live.setAddons(first!.id, r.id, [{ addonId: box }], first!.actor);
         f.clock.set(new Date(secured.hold!.expiresAt.getTime() + offset));
         const outcomes = await together([() => f.live.confirm(first!.id, r.id, first!.actor), () => f.live.advance(r.id)]);
         if (offset < 0) {
           expect(outcomes).toEqual(['ok', 'ok']);
           expect(await statusOf(r, first!.id)).toBe('CONFIRMED');
-          expect((await f.live.entry(first!.id, r.id))!.addons).toHaveLength(1);
+          expect((await f.live.entry(first!.id, r.id))!.addonItems).toHaveLength(1);
         } else {
           expect(outcomes).toEqual(['LIVE_HOLD_ENDED', 'ok']);
           expect(await statusOf(r, first!.id)).toBe('EXPIRED');
-          expect((await f.live.entry(first!.id, r.id))!.addons).toEqual([]);
+          expect((await f.live.entry(first!.id, r.id))!.addonItems).toEqual([]);
+          expect(await f.db.selectFrom('addon_choices').select('id').where('live_entry_id', '=', (await f.db.selectFrom('live_entries').select('id').where('drop_id', '=', r.id).where('account_id', '=', first!.id).executeTakeFirstOrThrow()).id).execute()).toEqual([]);
           expect(await statusOf(r, second!.id)).toBe('TURN');
         }
       }

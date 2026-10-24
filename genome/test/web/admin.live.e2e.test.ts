@@ -295,11 +295,9 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await confirmDialog(p);
     await expect.poll(() => p.locator('[data-testid=live-windows]').textContent(), POLL).toBe('PALLADIUM · 10 min to pay');
 
-    // The add-ons, one per line.
-    await p.click('[data-testid=live-edit-addons]');
-    await p.fill('dialog textarea[name=addons]', 'ENGRAVING | 150 | Your initials, by hand\nGIFT BOX | 0');
-    await confirmDialog(p);
-    await expect.poll(() => p.locator('#live-part-addons').textContent(), POLL).toContain('Your initials, by hand');
+    // The add-ons (lot Q2, step Q2.4, D2): no release add-on any more; its pick of the catalogue, none here, is read.
+    await expect.poll(() => p.locator('#live-part-addons .notice').textContent(), POLL).toBe('None: PAY is the piece alone.');
+    expect(await p.locator('[data-testid=live-edit-addons]').count()).toBe(0);
 
     // The after-room: a second door after a sell-out, its own model, price, stock and delay; none until set.
     await expect.poll(() => p.locator('#live-part-after-room .notice').textContent(), POLL).toBe('None: the release closes at its sell-out.');
@@ -382,7 +380,15 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
           { label: '54', stock: 3 },
         ],
         quantityLine: '4 PIECES · NEVER MORE',
-        addons: [{ label: 'ENGRAVING', priceMinor: 15_000 }],
+        // Lot Q2, step Q2.4 (D2): a catalogue service it picks.
+        addonIds: [
+          (
+            await ctx.services.addons.create(
+              { kind: 'SERVICE', name: 'ENGRAVING', skuCode: 'ADD-E2E-ENGRAVING', engraving: true, prices: { EUR: 15_000 }, offeredAt: { live: true, draw: false, salon: false, orders: false } },
+              admin,
+            )
+          ).id,
+        ],
       },
       admin,
     );
@@ -459,8 +465,8 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     // Client Services: a reservation confirmed on /verify becomes its orders, followed on the Orders board, narrowed to
     // the release from its page (plan LIVE RELEASE+: the LIVE plan's list is retired).
     await secure(y, r.id);
-    const engraving = (await ctx.services.liveConsole.get(r.id)).addons[0]!;
-    await ctx.services.live.setAddons(y.id, r.id, [engraving.id], y.actor);
+    const engraving = (await ctx.services.liveConsole.get(r.id)).addonPick[0]!;
+    await ctx.services.live.setAddons(y.id, r.id, [{ addonId: engraving.id }], y.actor);
     await ctx.services.live.confirm(y.id, r.id, y.actor);
     await p.reload();
     await expect.poll(() => p.locator('[data-testid=live-orders]').textContent(), POLL).toBe('1 confirmed reservation: each piece is an order, followed step by step on the Orders board, from payment to delivery.');
@@ -643,7 +649,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
         closesAt: new Date(Date.now() + 5 * HOUR),
         priceMinor: 100_000,
         sizes: [{ label: '52', stock: 1 }],
-        afterRoom: { modelId, priceMinor: 90_000, sizes: [{ label: 'ONE SIZE', stock: 2 }], addons: [{ label: 'GIFT BOX', priceMinor: 5_000 }] },
+        afterRoom: { modelId, priceMinor: 90_000, sizes: [{ label: 'ONE SIZE', stock: 2 }], addonIds: [] },
       },
       admin,
     );

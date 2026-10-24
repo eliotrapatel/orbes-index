@@ -24,7 +24,6 @@ import {
 import {
   defaultQuantityLine as serverQuantityLine,
   LIVE_ACCESS_MODELS_MAX,
-  LIVE_ADDON_LIMITS,
   LIVE_CONSOLE_LINE_MAX,
   LIVE_CURRENCIES as SERVER_CURRENCIES,
   LIVE_PRICE_MAX_MINOR,
@@ -35,7 +34,6 @@ import {
 import { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES } from '../../src/server/services/after-room.js';
 import { AdminApi, type FetchLike } from '../../src/web/admin/api.js';
 import {
-  addonsText,
   AFTER_ROOM_SKIPS,
   closeGuardLine,
   holdLine,
@@ -73,7 +71,6 @@ import {
   paceLine,
   paceProblem,
   parisClock,
-  parseAddons,
   parseMoney,
   surpriseLine,
   parseSizes,
@@ -142,7 +139,7 @@ function release(o: Partial<LiveRelease> = {}): LiveRelease {
       { id: 's52', label: '52', stock: 3 },
       { id: 's54', label: '54', stock: 2 },
     ],
-    addons: [{ id: 'a1', label: 'ENGRAVING', line: 'Your initials, by hand', priceMinor: 15_000 }],
+    addonPick: [{ id: 'a1', name: 'ENGRAVING', line: 'Your initials inside the band', kind: 'SERVICE', engraving: true, active: true, priceMinor: 15_000 }],
     tierWindows: [{ tier: 3, turnSeconds: null, payMinutes: 10 }],
     announceAt: null,
     silhouetteAt: null,
@@ -177,9 +174,6 @@ describe('the console of the LIVE RELEASES mirrors the server', () => {
       stock: LIVE_SIZE_STOCK_MAX,
       quantity: DROP_QUANTITY_MAX,
       quantityLine: LIVE_QUANTITY_LINE_MAX,
-      addons: LIVE_ADDONS_MAX,
-      addonLabel: LIVE_ADDON_LIMITS.label,
-      addonLine: LIVE_ADDON_LIMITS.line,
       priceMaxMinor: LIVE_PRICE_MAX_MINOR,
       roomOpensMinutes: { ...LIVE_ROOM_OPENS_MINUTES },
       turnSeconds: { ...LIVE_TURN_SECONDS },
@@ -261,28 +255,6 @@ describe('the console of the LIVE RELEASES', () => {
     expect(sizesText([{ label: '52', stock: 3 }, { label: 'ONE SIZE', stock: 25 }])).toBe('52 = 3\nONE SIZE = 25');
   });
 
-  it('reads the add-ons one per line (label | price | line), at most six', () => {
-    expect(parseAddons('ENGRAVING | 150 | Your initials, by hand\nGIFT BOX | 0\nCARE | 90.50 | Two years | of care', [{ id: 'a1', label: 'ENGRAVING' }])).toEqual({
-      addons: [
-        { id: 'a1', label: 'ENGRAVING', line: 'Your initials, by hand', priceMinor: 15_000 },
-        { label: 'GIFT BOX', line: null, priceMinor: 0 },
-        { label: 'CARE', line: 'Two years | of care', priceMinor: 9_050 },
-      ],
-    });
-    expect(parseAddons('')).toEqual({ addons: [] });
-    for (const [text, problem] of [
-      ['ENGRAVING', /the label, then its price/],
-      ['| 150', /label has 1 to 40/],
-      ['ENGRAVING | free', /the label, then its price/],
-      [`ENGRAVING | 1 | ${'x'.repeat(121)}`, /at most 120 characters/],
-      [Array.from({ length: 7 }, (_, i) => `A${i} | 1`).join('\n'), /at most 6 add-ons/],
-    ] as const) {
-      const r = parseAddons(text);
-      expect('problem' in r ? r.problem : '', text).toMatch(problem);
-    }
-    expect(addonsText(release().addons)).toBe('ENGRAVING | 150 | Your initials, by hand');
-  });
-
   it('creates a release from its essentials, every other setting by default', () => {
     const v = newLiveValues(NOW);
     expect(v).toMatchObject({ opensAt: '2026-11-10T18:00', closesAt: '2026-11-10T19:00', currency: 'EUR', sizes: 'ONE SIZE = 25' });
@@ -315,7 +287,8 @@ describe('the console of the LIVE RELEASES', () => {
 
   it('sends only what a part’s dialog changed, and nothing when it changed nothing', () => {
     const r = release();
-    for (const part of ['release', 'sizes', 'access', 'times', 'turns', 'addons'] as const) {
+    // Lot Q2, step Q2.4 (D2): the release add-ons' part is gone (its pick of the catalogue is read in its Add-ons section).
+    for (const part of ['release', 'sizes', 'access', 'times', 'turns'] as const) {
       const v = livePartValues(r, part);
       expect([part, livePartProblem(r, part, v)]).toEqual([part, null]);
       expect([part, livePartChange(r, part, v)]).toEqual([part, {}]);
@@ -365,12 +338,6 @@ describe('the console of the LIVE RELEASES', () => {
     expect(livePartValues(r, 'turns')).toMatchObject({ turnSeconds: '30', payMinutes: '5', 'pay:3': '10', 'turn:3': '', 'pay:0': '' });
     expect(livePartChange(r, 'turns', { ...livePartValues(r, 'turns'), 'turn:2': '60', 'pay:3': '' })).toEqual({ tierWindows: [{ tier: 2, turnSeconds: 60, payMinutes: null }] });
     expect(livePartProblem(r, 'turns', { ...livePartValues(r, 'turns'), 'pay:1': '90' })).toMatch(/^TITANE: the time to pay is 1 to 60 minutes/);
-    expect(livePartChange(r, 'addons', { addons: 'ENGRAVING | 150 | Your initials, by hand\nGIFT BOX | 0' })).toEqual({
-      addons: [
-        { id: 'a1', label: 'ENGRAVING', line: 'Your initials, by hand', priceMinor: 15_000 },
-        { label: 'GIFT BOX', line: null, priceMinor: 0 },
-      ],
-    });
     expect(livePartProblem(r, 'release', { ...livePartValues(r, 'release'), perAccount: '6' })).toMatch(/1 to 5 pieces/);
   });
 
@@ -441,24 +408,23 @@ describe('the console of the LIVE RELEASES', () => {
     expect([livePhrase('end', draft), livePhrase('cancel', draft)]).toEqual(['END 0F8E7D6C', 'CANCEL 0F8E7D6C']);
   });
 
-  it('sets the after-room with the release: on or off, its model, price, sizes, add-ons, delay and length, its ids kept', () => {
+  it('sets the after-room with the release: on or off, its model, price, sizes, delay and length, its ids kept (its add-ons its own pick, lot Q2)', () => {
     const none = release();
-    expect(livePartValues(none, 'afterRoom')).toEqual({ enabled: '', modelId: '', price: '', sizes: 'ONE SIZE = 5', addons: '', delay: '10', length: '15' });
+    expect(livePartValues(none, 'afterRoom')).toEqual({ enabled: '', modelId: '', price: '', sizes: 'ONE SIZE = 5', delay: '10', length: '15' });
     // Off and staying off: nothing to send, nothing to check.
     expect(livePartProblem(none, 'afterRoom', livePartValues(none, 'afterRoom'))).toBeNull();
     expect(livePartChange(none, 'afterRoom', livePartValues(none, 'afterRoom'))).toEqual({});
-    const on = { ...livePartValues(none, 'afterRoom'), enabled: 'true', modelId: 'm2', price: '900', sizes: '52 = 2\n54 = 1', addons: 'GIFT BOX | 50' };
+    const on = { ...livePartValues(none, 'afterRoom'), enabled: 'true', modelId: 'm2', price: '900', sizes: '52 = 2\n54 = 1' };
     expect(livePartProblem(none, 'afterRoom', on)).toBeNull();
     expect(livePartChange(none, 'afterRoom', on)).toEqual({
-      afterRoom: { modelId: 'm2', priceMinor: 90_000, sizes: [{ label: '52', stock: 2 }, { label: '54', stock: 1 }], addons: [{ label: 'GIFT BOX', line: null, priceMinor: 5_000 }], delayMinutes: 10, lengthMinutes: 15 },
+      afterRoom: { modelId: 'm2', priceMinor: 90_000, sizes: [{ label: '52', stock: 2 }, { label: '54', stock: 1 }], delayMinutes: 10, lengthMinutes: 15 },
     });
     expect(livePartProblem(none, 'afterRoom', { ...on, modelId: '' })).toMatch(/model/);
     expect(livePartProblem(none, 'afterRoom', { ...on, price: 'x' })).toMatch(/price/);
     expect(livePartProblem(none, 'afterRoom', { ...on, sizes: '' })).toMatch(/^The after-room: list the sizes/);
-    expect(livePartProblem(none, 'afterRoom', { ...on, addons: 'X | nope' })).toMatch(/^The after-room: line 1/);
     expect(livePartProblem(none, 'afterRoom', { ...on, delay: '0' })).toBe('The after-room opens 1 to 60 minutes after the sell-out.');
     expect(livePartProblem(none, 'afterRoom', { ...on, length: '121' })).toBe('The after-room is open 5 to 120 minutes.');
-    // Set: its values, its sizes and add-ons keeping their ids; the same again changes nothing; off removes it.
+    // Set: its values, its sizes keeping their ids; the same again changes nothing; off removes it.
     const afterRoom = {
       id: 'c1',
       model: { id: 'm2', name: 'AFTERGLOW', type: 'RING', active: true },
@@ -466,7 +432,7 @@ describe('the console of the LIVE RELEASES', () => {
       currency: 'EUR',
       sizes: [{ id: 'z52', label: '52', stock: 2 }],
       quantity: 2,
-      addons: [{ id: 'g1', label: 'GIFT BOX', line: null, priceMinor: 5_000 }],
+      addonPick: [{ id: 'g1', name: 'GIFT BOX', line: null, kind: 'SERVICE' as const, engraving: false, active: true, priceMinor: 5_000 }],
       delayMinutes: 5,
       lengthMinutes: 20,
       state: 'WAITING' as const,
@@ -480,10 +446,10 @@ describe('the console of the LIVE RELEASES', () => {
     };
     const set = release({ afterRoom });
     const values = livePartValues(set, 'afterRoom');
-    expect(values).toEqual({ enabled: 'true', modelId: 'm2', price: '900', sizes: '52 = 2', addons: 'GIFT BOX | 50', delay: '5', length: '20' });
+    expect(values).toEqual({ enabled: 'true', modelId: 'm2', price: '900', sizes: '52 = 2', delay: '5', length: '20' });
     expect(livePartChange(set, 'afterRoom', values)).toEqual({});
     expect(livePartChange(set, 'afterRoom', { ...values, sizes: '52 = 3', length: '30' })).toEqual({
-      afterRoom: { modelId: 'm2', priceMinor: 90_000, sizes: [{ id: 'z52', label: '52', stock: 3 }], addons: [{ id: 'g1', label: 'GIFT BOX', line: null, priceMinor: 5_000 }], delayMinutes: 5, lengthMinutes: 30 },
+      afterRoom: { modelId: 'm2', priceMinor: 90_000, sizes: [{ id: 'z52', label: '52', stock: 3 }], delayMinutes: 5, lengthMinutes: 30 },
     });
     expect(livePartChange(set, 'afterRoom', { ...values, enabled: '' })).toEqual({ afterRoom: null });
     // Where it stands, said.

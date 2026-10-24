@@ -682,6 +682,36 @@ export class FulfilmentService {
         query = query.where((eb) => eb.or([eb('m.name', 'ilike', like), eb('d.title', 'ilike', like)]));
       }
     }
-    return (await query.execute()) as BoardRow[];
+    return withSoldUnits(this.db, (await query.execute()) as BoardRow[]);
   }
+}
+
+/**
+ * The rows' add-ons as sold (lot Q2, step Q2.4, D19 "add only, never degrade"): an order of before lot Q2 its release
+ * add-ons' snapshot, then each order's catalogue add-ons (its units not removed, one line per add-on and price, `POLISHING
+ * CLOTH × 2` at their price), so that a LIVE order's add-ons, now units, still read on its card and in the CSV.
+ */
+async function withSoldUnits(db: Db, rows: BoardRow[]): Promise<BoardRow[]> {
+  if (rows.length === 0) return rows;
+  const units: { order_id: string; name: string; price_minor: number; n: number }[] = [];
+  for (let i = 0; i < rows.length; i += 1000) {
+    const ids = rows.slice(i, i + 1000).map((r) => r.id);
+    const part = await db
+      .selectFrom('order_addon_items as u')
+      .innerJoin('addon_items as a', 'a.id', 'u.addon_id')
+      .select((eb) => ['u.order_id', 'a.name', 'u.price_minor', eb.fn.min('a.position').as('position'), eb.fn.countAll<number>().as('n')])
+      .where('u.order_id', 'in', ids)
+      .where('u.status', '<>', 'REMOVED')
+      .groupBy(['u.order_id', 'a.name', 'u.price_minor'])
+      .orderBy('position')
+      .orderBy(sql`lower(a.name)`)
+      .orderBy('u.price_minor')
+      .execute();
+    units.push(...part.map((u) => ({ order_id: u.order_id, name: u.name, price_minor: Number(u.price_minor), n: Number(u.n) })));
+  }
+  if (units.length === 0) return rows;
+  return rows.map((r) => {
+    const own = units.filter((u) => u.order_id === r.id);
+    return own.length === 0 ? r : { ...r, addons: [...r.addons, ...own.map((u) => ({ label: u.n > 1 ? `${u.name} × ${u.n}` : u.name, priceMinor: u.price_minor * u.n }))] };
+  });
 }

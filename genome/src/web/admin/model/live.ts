@@ -61,9 +61,6 @@ export const LIVE_LIMITS = Object.freeze({
   stock: 10_000,
   quantity: 10_000,
   quantityLine: 40,
-  addons: 6,
-  addonLabel: 40,
-  addonLine: 120,
   priceMaxMinor: 100_000_000,
   roomOpensMinutes: Object.freeze({ min: 1, max: 60, default: 5 }),
   turnSeconds: Object.freeze({ min: 10, max: 300, default: 30 }),
@@ -319,32 +316,6 @@ export function setsOnSale(sizes: readonly { stock: number; piece?: number | nul
   return Math.min(...Array.from({ length: pieces }, (_, i) => sizes.filter((s) => s.piece === i + 1).reduce((n, s) => n + s.stock, 0)));
 }
 
-/** The add-ons, one per line: `ENGRAVING | 150 | Your initials, by hand`. */
-export function addonsText(addons: readonly { label: string; line: string | null; priceMinor: number }[]): string {
-  return addons.map((a) => [a.label, moneyField(a.priceMinor), ...(a.line ? [a.line] : [])].join(' | ')).join('\n');
-}
-
-/** The add-ons typed one per line (label | price | line), each keeping the id of the release's add-on of the same label. */
-export function parseAddons(
-  text: string,
-  existing: readonly { id: string; label: string }[] = [],
-): { addons: { id?: string; label: string; line: string | null; priceMinor: number }[] } | { problem: string } {
-  const lines = (text ?? '').replace(/\r\n?/g, '\n').split('\n').map((l) => l.trim()).filter((l) => l !== '');
-  if (lines.length > LIVE_LIMITS.addons) return { problem: `A release offers at most ${LIVE_LIMITS.addons} add-ons.` };
-  const addons: { id?: string; label: string; line: string | null; priceMinor: number }[] = [];
-  for (const [i, raw] of lines.entries()) {
-    const [label = '', price = '', ...rest] = raw.split('|').map((p) => p.trim());
-    const line = rest.join(' | ').trim();
-    if (!label || label.length > LIVE_LIMITS.addonLabel) return { problem: `Line ${i + 1}: an add-on’s label has 1 to ${LIVE_LIMITS.addonLabel} characters.` };
-    const priceMinor = parseMoney(price);
-    if (priceMinor === null || priceMinor > LIVE_LIMITS.priceMaxMinor) return { problem: `Line ${i + 1}: the label, then its price (ENGRAVING | 150 | its line).` };
-    if (line.length > LIVE_LIMITS.addonLine) return { problem: `Line ${i + 1}: an add-on’s line has at most ${LIVE_LIMITS.addonLine} characters.` };
-    const id = existing.find((a) => a.label === label)?.id;
-    addons.push({ ...(id ? { id } : {}), label, line: line === '' ? null : line, priceMinor });
-  }
-  return { addons };
-}
-
 // ── The dialogs ────────────────────────────────────────────────────────────
 
 const whole = (v: string | undefined): number | null => (/^\s*\d{1,6}\s*$/.test(v ?? '') ? Number(v) : null);
@@ -437,7 +408,7 @@ export function sizeMixLine(mix: Pick<LiveSizeMix, 'sizes'>): string {
 }
 
 /** The parts of a release's settings, each its own dialog. */
-export type LivePart = 'release' | 'sizes' | 'access' | 'times' | 'turns' | 'addons' | 'afterRoom' | 'surprise' | 'question';
+export type LivePart = 'release' | 'sizes' | 'access' | 'times' | 'turns' | 'afterRoom' | 'surprise' | 'question';
 
 /** A part's values, as its dialog's form holds them. */
 export function livePartValues(r: LiveRelease, part: LivePart): Record<string, string> {
@@ -491,8 +462,6 @@ export function livePartValues(r: LiveRelease, part: LivePart): Record<string, s
           }),
         ),
       };
-    case 'addons':
-      return { addons: addonsText(r.addons) };
     case 'afterRoom': {
       const a = r.afterRoom;
       return {
@@ -500,7 +469,6 @@ export function livePartValues(r: LiveRelease, part: LivePart): Record<string, s
         modelId: a?.model.id ?? '',
         price: a ? moneyField(a.priceMinor) : '',
         sizes: a ? sizesText(a.sizes) : 'ONE SIZE = 5',
-        addons: a ? addonsText(a.addons) : '',
         delay: String(a?.delayMinutes ?? LIVE_LIMITS.afterRoomDelay.default),
         length: String(a?.lengthMinutes ?? LIVE_LIMITS.afterRoomLength.default),
       };
@@ -582,10 +550,6 @@ export function livePartProblem(r: LiveRelease, part: LivePart, v: Record<string
       }
       return null;
     }
-    case 'addons': {
-      const addons = parseAddons(v.addons, r.addons);
-      return 'problem' in addons ? addons.problem : null;
-    }
     case 'afterRoom': {
       if (v.enabled !== 'true') return null;
       if (!v.modelId) return 'Choose the after-room’s model.';
@@ -593,8 +557,6 @@ export function livePartProblem(r: LiveRelease, part: LivePart, v: Record<string
       if (price === null || price > LIVE_LIMITS.priceMaxMinor) return 'The after-room’s price of a piece, in units (4800, or 4800.50).';
       const sizes = parseSizes(v.sizes, r.afterRoom?.sizes ?? []);
       if ('problem' in sizes) return `The after-room: ${sizes.problem.charAt(0).toLowerCase()}${sizes.problem.slice(1)}`;
-      const addons = parseAddons(v.addons, r.afterRoom?.addons ?? []);
-      if ('problem' in addons) return `The after-room: ${addons.problem.charAt(0).toLowerCase()}${addons.problem.slice(1)}`;
       const d = LIVE_LIMITS.afterRoomDelay;
       if (inRange(v.delay, d) === null) return `The after-room opens ${d.min} to ${d.max} minutes after the sell-out.`;
       const l = LIVE_LIMITS.afterRoomLength;
@@ -707,11 +669,6 @@ export function livePartChange(r: LiveRelease, part: LivePart, v: Record<string,
       if (JSON.stringify(windows) !== JSON.stringify([...r.tierWindows].sort((a, b) => a.tier - b.tier))) out.tierWindows = windows;
       return out;
     }
-    case 'addons': {
-      const addons = (parseAddons(v.addons, r.addons) as { addons: { id?: string; label: string; line: string | null; priceMinor: number }[] }).addons;
-      if (JSON.stringify(addons.map((a) => [a.id ?? null, a.label, a.line, a.priceMinor])) !== JSON.stringify(r.addons.map((a) => [a.id, a.label, a.line, a.priceMinor]))) out.addons = addons;
-      return out;
-    }
     case 'afterRoom': {
       const a = r.afterRoom;
       if (v.enabled !== 'true') {
@@ -722,7 +679,6 @@ export function livePartChange(r: LiveRelease, part: LivePart, v: Record<string,
         modelId: v.modelId,
         priceMinor: parseMoney(v.price)!,
         sizes: (parseSizes(v.sizes, a?.sizes ?? []) as { sizes: { id?: string; label: string; stock: number }[] }).sizes,
-        addons: (parseAddons(v.addons, a?.addons ?? []) as { addons: { id?: string; label: string; line: string | null; priceMinor: number }[] }).addons,
         delayMinutes: Number(v.delay),
         lengthMinutes: Number(v.length),
       };
@@ -731,11 +687,10 @@ export function livePartChange(r: LiveRelease, part: LivePart, v: Record<string,
           x.modelId,
           x.priceMinor,
           x.sizes.map((s) => [s.id ?? null, s.label, s.stock]),
-          (x.addons ?? []).map((y) => [y.id ?? null, y.label, y.line ?? null, y.priceMinor]),
           x.delayMinutes,
           x.lengthMinutes,
         ]);
-      const now: LiveAfterRoomSettings | null = a ? { modelId: a.model.id, priceMinor: a.priceMinor, sizes: a.sizes, addons: a.addons, delayMinutes: a.delayMinutes, lengthMinutes: a.lengthMinutes } : null;
+      const now: LiveAfterRoomSettings | null = a ? { modelId: a.model.id, priceMinor: a.priceMinor, sizes: a.sizes, delayMinutes: a.delayMinutes, lengthMinutes: a.lengthMinutes } : null;
       if (!now || shape(now) !== shape(next)) out.afterRoom = next;
       return out;
     }

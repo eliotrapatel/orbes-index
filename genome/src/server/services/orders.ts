@@ -1392,8 +1392,8 @@ async function releaseLocation(tx: Db, stockLocationId: string | null): Promise<
 
 /**
  * The orders of an entry of a LIVE RELEASE CONFIRMED, in the transaction that confirms it (the release's row and the
- * entry's held): one per piece of its quantity, each with the release's price and currency, the entry's add-ons as sold
- * and the release's surprise when it has one (an after-room's: its parent's, as its location), RESERVED at the
+ * entry's held): one per piece of its quantity, each with the release's price and currency, one unit of each add-on
+ * chosen with the hold (lot Q2, step Q2.4, N1: carryChoices; no snapshot written), and the release's surprise when it has one (an after-room's: its parent's, as its location), RESERVED at the
  * release's location and holding what it can (`hold` false: nothing, for a reservation cancelled
  * before its orders existed; `reservedAt`: the time of the sale, for one confirmed before its orders existed). Idempotent:
  * only the pieces without an order get one. Returns the orders created and the audit entries to write last.
@@ -1432,13 +1432,6 @@ export async function ordersForLiveEntry(
     skuId = (await offeredSku(tx, e.model_id!, e.label, { allowSetAside: true })).skuId;
     await tx.updateTable('drop_sizes').set({ sku_id: skuId }).where('id', '=', e.size_id).execute();
   }
-  const addons = await tx
-    .selectFrom('live_entry_addons as x')
-    .innerJoin('live_addons as l', 'l.id', 'x.addon_id')
-    .select(['l.id', 'l.label', 'x.price_minor'])
-    .where('x.entry_id', '=', e.id)
-    .orderBy('l.position')
-    .execute();
   const locationId = await releaseLocation(tx, e.stock_location_id);
   // BP-19 T5: the account's grants, its tier read now.
   notes.push(...(await ensureGrants(tx, e.account_id, now)));
@@ -1460,7 +1453,8 @@ export async function ordersForLiveEntry(
         skuId,
         priceMinor: e.price_minor,
         currency: e.currency,
-        addons: addons.map((a) => ({ id: a.id, label: a.label, priceMinor: a.price_minor })),
+        // Lot Q2, step Q2.4 (D2, N15): no add-on snapshot; the add-ons chosen are units (carryChoices below).
+        addons: [],
         surprise: e.surprise_enabled === true ? e.surprise_text : null,
         locationId,
         reservedAt: opts.reservedAt,
@@ -1478,11 +1472,12 @@ export async function ordersForLiveEntry(
   // BP-19 T5: the welcome gift, on the sale's first order only.
   const first = orders.find((o) => o.piece === 1);
   if (first) notes.push(...(await attachGifts(tx, first, actor, now)).notes);
-  // Plan MACRO M3 §4.2 (D2): the catalogue add-ons chosen at the hold, on the sale's first order, in the release's
-  // currency, each unit held or left out (never blocking PAY); a reservation cancelled before its orders existed takes none.
+  // Plan MACRO M3 §4.2 (D2) and lot Q2, step Q2.4 (N1): the catalogue add-ons chosen at the hold, one unit on each
+  // piece's order, in the release's currency, each unit held or left out (never blocking PAY); a reservation cancelled
+  // before its orders existed takes none.
   let addonsLeftOut: LeftOutAddon[] = [];
   if (first && (opts.hold ?? true)) {
-    const carried = await carryChoices(tx, first, { liveEntryId: e.id }, houseCurrencyOf(e.currency), actor, now);
+    const carried = await carryChoices(tx, [...orders].sort((a, b) => a.piece - b.piece), { liveEntryId: e.id }, houseCurrencyOf(e.currency), actor, now);
     notes.push(...carried.notes);
     addonsLeftOut = carried.leftOut;
   }
@@ -1571,7 +1566,7 @@ export async function orderForDrawEntry(
   // Plan MACRO M3 §4.2 (D2): the add-ons chosen on the place held, on the first order, in the draw's currency.
   let addonsLeftOut: LeftOutAddon[] = [];
   if (first) {
-    const carried = await carryChoices(tx, first, { dropEntryId: e.id }, priced ? houseCurrencyOf(e.currency) : null, actor, now);
+    const carried = await carryChoices(tx, [first], { dropEntryId: e.id }, priced ? houseCurrencyOf(e.currency) : null, actor, now);
     notes.push(...carried.notes);
     addonsLeftOut = carried.leftOut;
   }
@@ -1610,16 +1605,11 @@ async function setOrdersForLiveEntry(
   const notes: AuditRecordInput[] = [];
   const orders: OrderRow[] = [];
   if (done.size >= e.quantity) return { orders, notes, addonsLeftOut: [] };
-  const addons = await tx
-    .selectFrom('live_entry_addons as x')
-    .innerJoin('live_addons as l', 'l.id', 'x.addon_id')
-    .select(['l.id', 'l.label', 'x.price_minor'])
-    .where('x.entry_id', '=', e.id)
-    .orderBy('l.position')
-    .execute();
   const locationId = await releaseLocation(tx, e.stock_location_id);
   notes.push(...(await ensureGrants(tx, e.account_id, now)));
   let parent: OrderRow | null = existing.find((o) => o.piece === 1) ?? null;
+  /** Each set's first piece's order, as created (lot Q2, step Q2.4, D25): what carries the set's add-ons. */
+  const carriers: OrderRow[] = [];
   for (let set = 1; set <= e.quantity; set++) {
     if (done.has(set)) continue;
     const sold = await ordersForSetSale(
@@ -1633,7 +1623,6 @@ async function setOrdersForLiveEntry(
         priceMinor: e.price_minor,
         currency: e.currency,
         locationId,
-        addons: addons.map((a) => ({ id: a.id, label: a.label, priceMinor: a.price_minor })),
         surprise: e.surprise_enabled === true ? e.surprise_text : null,
         parent,
         reservedAt: opts.reservedAt,
@@ -1644,14 +1633,16 @@ async function setOrdersForLiveEntry(
     );
     orders.push(...sold.orders);
     notes.push(...sold.notes);
+    carriers.push(sold.orders[0]!);
     if (parent === null) parent = sold.orders[0]!;
   }
-  // BP-19 T5 and plan MACRO M3 §4.2 (D2): the welcome gift and the catalogue add-ons chosen, on the entry's first order.
+  // BP-19 T5: the welcome gift, on the entry's first order. Plan MACRO M3 §4.2 (D2) and lot Q2, step Q2.4 (D25, N1): the
+  // catalogue add-ons chosen, one unit per set, on each set's first piece's order (its words with its engraving unit).
   const first = orders.find((o) => o.piece === 1);
   if (first) notes.push(...(await attachGifts(tx, first, actor, now)).notes);
   let addonsLeftOut: LeftOutAddon[] = [];
   if (first && (opts.hold ?? true)) {
-    const carried = await carryChoices(tx, first, { liveEntryId: e.id }, houseCurrencyOf(e.currency), actor, now);
+    const carried = await carryChoices(tx, carriers, { liveEntryId: e.id }, houseCurrencyOf(e.currency), actor, now);
     notes.push(...carried.notes);
     addonsLeftOut = carried.leftOut;
   }
@@ -1694,7 +1685,7 @@ async function setOrderForDrawEntry(
   notes.push(...sold.notes);
   const first = sold.orders[0]!;
   notes.push(...(await attachGifts(tx, first, actor, now)).notes);
-  const carried = await carryChoices(tx, first, { dropEntryId: e.id }, priced ? houseCurrencyOf(e.currency) : null, actor, now);
+  const carried = await carryChoices(tx, [first], { dropEntryId: e.id }, priced ? houseCurrencyOf(e.currency) : null, actor, now);
   notes.push(...carried.notes);
   return { order: first, orders: sold.orders, notes, addonsLeftOut: carried.leftOut };
 }
@@ -1738,7 +1729,7 @@ export async function orderForShopRequest(tx: Db, requestId: string, actor: Acto
   notes.push(...(await attachGifts(tx, order, actor, now)).notes);
   // Plan MACRO M3 §4.2 (D2): the add-ons chosen with the request, in the currency of the model's base price (the one the
   // collector read them in); Client Services then enters the piece's price in that currency (setTerms).
-  const carried = await carryChoices(tx, order, { shopRequestId: r.id }, await baseCurrency(tx, r.model_id), actor, now);
+  const carried = await carryChoices(tx, [order], { shopRequestId: r.id }, await baseCurrency(tx, r.model_id), actor, now);
   notes.push(...carried.notes);
   return { order, notes, addonsLeftOut: carried.leftOut };
 }

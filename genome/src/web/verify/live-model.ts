@@ -21,6 +21,7 @@
  */
 import { onComputer } from '../shared/desktop.js';
 import { isLookbookSlug } from '../shared/lookbook.js';
+import { addonRows, chosenRows, chosenUnits, rowsChoice, type AddonRowModel } from './addons-model.js';
 import { LIVE, RELEASES, SETS } from './copy.js';
 import { afterRoomPath, entrySizes, isReleaseId, releasePath, setCard, tierLabel, zonedDate, type EntryModel, type MyEntryModel, type SetCardModel } from './releases-model.js';
 import type {
@@ -726,21 +727,33 @@ export function fillEase(t: number): number {
   return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
 }
 
-/** An add-on as the piece held offers it. */
-export interface AddonChoice {
-  id: string;
-  label: string;
-  line: string | null;
-  price: string;
-  selected: boolean;
+/**
+ * The add-on rows of a held piece (lot Q2, step Q2.4, D2, N1): its release's pick of the catalogue as the server offers
+ * it now, then what was chosen and is no longer offered; each row chosen or not (one unit per piece, one per set: the
+ * server counts them, PAY's total says it). `units`: the taps not sent yet, else the server's choice.
+ */
+export function holdRows(e: Pick<LiveEntry, 'addonOffer' | 'addonItems' | 'currency'>, units?: ReadonlyMap<string, number> | null): AddonRowModel[] {
+  const one = (m: ReadonlyMap<string, number>) => new Map([...m].map(([id, n]) => [id, Math.min(1, n)] as const));
+  const kept = (e.addonItems ?? []).map((c) => ({ ...c, units: Math.min(1, c.units) }));
+  return addonRows(e.addonOffer, one(units ?? chosenUnits(e.addonItems)), kept, e.currency).map((r) => ({ ...r, max: Math.min(1, r.max) }));
 }
 
-export function addonChoices(sheet: LiveSheet, entry: LiveEntry): AddonChoice[] {
-  const chosen = new Set(entry.addons.map((a) => a.id));
-  return sheet.addons.map((a) => {
-    const own = entry.addons.find((x) => x.id === a.id);
-    return { id: a.id, label: upper(a.label), line: a.line && a.line.trim() ? a.line.trim() : null, price: LIVE.addonPrice(formatMoney(own?.priceMinor ?? a.priceMinor, entry.currency)), selected: chosen.has(a.id) };
-  });
+/** The hold's choice to send from its rows: each row chosen, in their order, the engraving keeping the words it has. */
+export function holdChoice(rows: readonly AddonRowModel[], e: Pick<LiveEntry, 'addonItems'>): { addonId: string; text: string | null }[] {
+  const words = new Map((e.addonItems ?? []).map((c) => [c.addonId, c.text ?? null] as const));
+  return rowsChoice(rows).map((r) => ({ addonId: r.addonId, text: words.get(r.addonId) ?? null }));
+}
+
+/**
+ * A reservation's add-on rows on its receipt (D20): an entry CONFIRMED before lot Q2, its release add-ons as its orders
+ * sold them (per piece: × its pieces); then its catalogue add-ons as sold (ENGRAVING · € 150; POLISHING CLOTH × 2).
+ * `money` writes an amount (`€ 150` in the room, `+ € 150` on a release's final page).
+ */
+export function receiptAddonRows(e: Pick<LiveEntry, 'legacyAddons' | 'addonItems' | 'quantity' | 'currency'>, money: (minor: number, currency: string) => string): [string, string][] {
+  return [
+    ...(e.legacyAddons ?? []).map((a): [string, string] => [upper(a.label), money(a.priceMinor * e.quantity, e.currency)]),
+    ...chosenRows(e.addonItems, e.currency, money).map(([label, value]): [string, string] => [label, value]),
+  ];
 }
 
 // ── The release's page, announced ──────────────────────────────────────────

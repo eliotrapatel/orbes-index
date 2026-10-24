@@ -480,10 +480,7 @@ describe('the collector never reads an add-on\'s kind, stock, supplier, SKU or s
       await f.live.press(id, r.id, token);
       h.clock.advance(1500);
       await f.live.secure(id, r.id, token, actor);
-      await f.live.setAddons(id, r.id, [], actor, [
-        { addonId: cloth.id, units: 1 },
-        { addonId: wrap.id, units: 1 },
-      ]);
+      await f.live.setAddons(id, r.id, [{ addonId: cloth.id }, { addonId: wrap.id }], actor);
       const bodies: [string, string][] = [];
       const state = await client.get(`/api/v1/live/${r.id}/state`);
       expect(state.statusCode).toBe(200);

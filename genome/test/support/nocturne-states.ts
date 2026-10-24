@@ -1763,7 +1763,7 @@ export const PHONE_STATES: readonly UiState[] = [
   // ── The catalogue add-ons (lot M3, D2), on their own stage (addons): the LIVE hold's rows, a draw's PLACE HELD, the
   // salon request, YOUR ORDERS' rows with REMOVE and ADD AN ADD-ON, its sheet (chosen, none available, could not be
   // read); then their writes: PAY with an add-on none is left of, a request sent with one ──
-  { id: 'addons-hold', title: 'The hold of a LIVE RELEASE: the release’s add-ons, then ADD TO YOUR ORDER, a POLISHING CLOTH × 2 and a CHAIN EXTENDER chosen, the longest name, PAY · total (lot M3, D2)', refs: ['M3'], variant: 'addons', as: 'secured', path: release('live'), ready: '.view--live .live__items .n-addons__item.is-chosen' },
+  { id: 'addons-hold', title: 'The hold of a LIVE RELEASE: its catalogue add-ons as rows under ADD TO YOUR ORDER (the release toggles gone), GIFT WRAPPING, ENGRAVING « M. B. » chosen, THE TRAVEL CASE, PAY € 5 090 · total (lot Q2, step Q2.4: the interim look until 5b)', refs: ['M3', 'Q2'], variant: 'addons', as: 'secured', path: release('live'), ready: '.view--live .live__items .n-addons__item.is-chosen' },
   { id: 'addons-place-held', title: 'A draw drawn with a price, the account’s place held: ADD TO YOUR ORDER, a POLISHING CLOTH chosen, added when Client Services confirms (lot M3, D2)', refs: ['M3'], variant: 'addons', as: you, path: release('autumn'), ready: '.view--release .release__addons .n-addons__item.is-chosen' },
   {
     id: 'addons-salon',
@@ -1828,15 +1828,20 @@ export const PHONE_STATES: readonly UiState[] = [
   },
   {
     id: 'addons-pay',
-    title: 'PAY with a CHAIN EXTENDER none is left of: CONFIRMED, THE CHAIN EXTENDER COULD NOT BE ADDED: NONE LEFT., the receipt with the POLISHING CLOTH × 2 (lot M3, D2)',
-    refs: ['M3'],
+    title: 'PAY with THE TRAVEL CASE chosen and none left of it: CONFIRMED, THE TRAVEL CASE COULD NOT BE ADDED: NONE LEFT., the receipt with the ENGRAVING € 40, TOTAL € 5 090 (lot Q2, step Q2.4)',
+    refs: ['M3', 'Q2'],
     variant: 'addons',
     as: 'secured',
     path: release('live'),
     mutates: true,
     act: async (run) => {
       await run.page.locator('.view--live .live__items .n-addons').waitFor();
-      await noneLeft(run, 'CHAIN EXTENDER');
+      // Lot Q2, step Q2.4 (§3.4): THE TRAVEL CASE chosen, then its last unit taken before PAY.
+      const row = run.page.locator('.view--live .live__items .n-addons__item').filter({ has: run.page.locator('.n-addons__name', { hasText: /^THE TRAVEL CASE$/ }) });
+      await row.locator('.n-step__btn--more').click();
+      await row.and(run.page.locator('.is-chosen')).waitFor({ timeout: 20_000 });
+      await run.page.locator('.view--live .live__pay:not([disabled])').waitFor({ timeout: 20_000 });
+      await noneLeft(run, 'THE TRAVEL CASE');
       await run.page.locator('.view--live .live__pay').click();
       await run.page.locator('.view--live .live__left-out:not([hidden])').waitFor({ timeout: 20_000 });
     },
@@ -2113,7 +2118,7 @@ export const PHONE_STATES: readonly UiState[] = [
   // ONE QUEUE (lot Q1, step Q1.3): THE SET's waiting state is the one queue, in SETS' words (N2), its id kept.
   { id: 'set-live-line', title: 'THE SET’s one queue: LIVE NOW, YOUR PLACE in your sizes, its time left, 2 OF 5 SETS LEFT, the one note (lot M3, T1; ONE QUEUE)', refs: ['M3'], variant: 'set-live', as: 'setLine', path: release('setNow'), ready: '.view--live .live__queue[data-state="waiting"]' },
   { id: 'set-live-turn', title: 'THE SET’s turn: PRESS AND HOLD THE SEAL, TO SECURE YOUR SET, THE ORBITAL SET · SIZE 16 · 54 · 42 · € 12 000 (lot M3, T1)', refs: ['M3'], variant: 'set-live', as: 'setTurn', path: release('setNow'), ready: '.view--live .live-hold' },
-  { id: 'set-live-secured', title: 'THE SET held: YOUR SET, THE SET · 3 PIECES, each piece in its size, the GIFT BOX chosen, PAY · total (lot M3, T1)', refs: ['M3'], variant: 'set-live', as: 'setSecured', path: release('setNow'), ready: '.view--live .live__set-pieces .live__set-piece' },
+  { id: 'set-live-secured', title: 'THE SET held: YOUR SET, THE SET · 3 PIECES, each piece in its size, the GIFT BOX chosen among the catalogue add-ons (lot Q2, step Q2.4: the interim look until 5b), PAY · total (lot M3, T1)', refs: ['M3', 'Q2'], variant: 'set-live', as: 'setSecured', path: release('setNow'), ready: '.view--live .live__set-pieces .live__set-piece' },
   { id: 'set-live-confirmed', title: 'THE SET confirmed: CONFIRMED, YOUR SET IS RESERVED, each piece in its size on the receipt, the GIFT BOX, TOTAL, REFERENCE (lot M3, T1)', refs: ['M3'], variant: 'set-live', as: 'setBuyer', path: release('setNow'), ready: '.view--live .live__set-reserved' },
   { id: 'set-live-sold-out', title: 'THE SET sold out in one of its sizes: HALO · SOLD OUT IN SIZE 56, its one sentence, LEAVE THE LINE (lot M3, T1; ONE QUEUE)', refs: ['M3'], variant: 'set-live', as: 'setSoldout', path: release('setNow'), ready: '.view--live .live__edge' },
   { id: 'draw-selected-signed-out', title: 'A draw FOR SELECTED COLLECTORS, signed out: the rule in THE RELEASE, the sign-in says the release is for selected collectors', refs: ['F4'], variant: 'draw-selected', path: release('draw'), ready: '.view--release:has(.release__for) :is(form, .d-signin-line)' },
@@ -2198,7 +2203,7 @@ export const PHONE_STATES: readonly UiState[] = [
     },
     ready: '.view--live .live__turn.is-holding',
   },
-  { id: 'live-secured', title: 'Secured (MK 5): YOUR PIECE on the horizon, seal C, the add-ons, PAY € 5 200 · 08:11 with the time inside it', refs: ['live-11', 'MK 5'], variant: 'live', as: 'secured', path: release('live'), ready: '.view--live .live__pay' },
+  { id: 'live-secured', title: 'Secured with add-ons: YOUR PIECE on the horizon, seal C, the catalogue add-ons as rows (ENGRAVING chosen, GIFT BOX; lot Q2, step Q2.4: the interim look until 5b), PAY € 5 200 · 08:11 with the time inside it', refs: ['live-11', 'MK 5b'], variant: 'live', as: 'secured', path: release('live'), ready: '.view--live .live__pay' },
   { id: 'live-confirmed', title: 'CONFIRMED in the vault: the photograph 470 px, CONFIRMED, LIVE RELEASE over MONOLITHE, the monogram on its horizon, the sentence, the receipt, SHARE TO STORIES, CLIENT SERVICES, MY PIECES (lot Q1 §3.7)', refs: ['live-12'], variant: 'live', as: 'confirmed', path: release('live'), ready: '.view--live:has(h1) .n-story__open:not([hidden])' },
   { id: 'live-sold-out-size', title: 'SOLD OUT IN SIZE 17: its one sentence (ONE QUEUE, D27), YOUR PLACE in its size, LEAVE THE LINE', refs: ['live-20'], variant: 'live', as: 'soldout', path: release('live'), ready: '.view--live .live__edge' },
   { id: 'live-missed', title: 'YOUR TURN HAS PASSED', refs: ['live-15', 'C30'], variant: 'live', as: 'missed', path: release('live'), ready: '.view--live .n-live__end' },
@@ -2908,7 +2913,8 @@ function onDesk(base: UiState, width: DeskWidth, opts: { light?: boolean; name?:
 async function payOnFirstScreen(page: Page): Promise<string[]> {
   const at = await page.evaluate(() => {
     const pay = document.querySelector('.d-room__br > .live__pay');
-    const rows = document.querySelector('.d-room__br > .live__addons');
+    // The add-on rows: the catalogue's (lot Q2, step Q2.4), shown.
+    const rows = document.querySelector('.d-room__br > :is(.live__addons, .live__items:not([hidden]))');
     if (!pay) return null;
     return {
       bottom: Math.round(pay.getBoundingClientRect().bottom + scrollY),

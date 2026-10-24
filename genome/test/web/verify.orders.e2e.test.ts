@@ -52,7 +52,7 @@ import { claimRevealAad, deriveClaimRevealKey } from '../../src/server/services/
 import { ensureSku } from '../../src/server/services/stock.js';
 import { ACCOUNT_ADDRESSES, DEFAULT_CARE, LIVE, ORDERS } from '../../src/web/verify/copy.js';
 import { orderDate } from '../../src/web/verify/orders-model.js';
-import { createLiveRelease, liveFixture, type LiveFixture } from '../support/live.js';
+import { createLiveRelease, legacyLiveAddons, liveFixture, type LiveFixture } from '../support/live.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
 import { screenChecks } from '../support/vault-checks.js';
 import { CHROMIUM_PATH, launchChromium, mobileContext, startVerifyServer, tabletContext, type VerifyServer } from './verify.harness.js';
@@ -132,7 +132,7 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     const other = await account('other');
 
     const opensAt = new Date(f.clock.now().getTime() + HOUR);
-    const r = await createLiveRelease(f, { opensAt, sizes: [{ label: '52', stock: 3 }], priceMinor: 480_000, addons: [{ label: 'Engraving', priceMinor: 25_000 }] });
+    const r = await createLiveRelease(f, { opensAt, sizes: [{ label: '52', stock: 3 }], priceMinor: 480_000 });
     await srv.ctx.db.updateTable('drops').set({ title: 'MONOLITHE — LIVE' }).where('id', '=', r.id).execute();
     ids.release = r.id;
     const actor = { type: 'account' as const, id: me.id };
@@ -144,8 +144,9 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     await f.live.press(me.id, r.id, token);
     f.clock.advance(1500);
     await f.live.secure(me.id, r.id, token, actor);
-    await f.live.setAddons(me.id, r.id, r.addons.map((a) => a.id), actor);
     await f.live.confirm(me.id, r.id, actor);
+    // A sale of before lot Q2 (N15): its release's engraving as that PAY wrote it.
+    await legacyLiveAddons(srv.ctx.db, r.id, me.id, [{ label: 'Engraving', priceMinor: 25_000 }]);
     ids.live = (await srv.ctx.db.selectFrom('orders').select('id').where('account_id', '=', me.id).where('channel', '=', 'LIVE').executeTakeFirstOrThrow()).id;
 
     // Today, ORBES Client Services marks it paid; a piece counted in serves it (test/support/fulfil.ts stockPieces); the

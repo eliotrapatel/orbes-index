@@ -106,8 +106,10 @@
  *                     one of ZENITH one alone on its sheet (G4, G5)
  *   addons            the live story, then the catalogue add-ons (plan MACRO M3 §4.4, D2; seedAddons): POLISHING CLOTH
  *                     (€ 15), CHAIN EXTENDER (€ 30), TRAVEL POUCH (€ 45) and THE TRAVEL CASE FOR TWO PIECES, LINED
- *                     (€ 12 450.50: the longest name, the largest price), in stock at the default location; the secured
- *                     collector's hold with a CLOTH × 2 and an EXTENDER; you's place held in MONOLITHE IN GOLD, THE AUTUMN
+ *                     (€ 12 450.50: the longest name, the largest price), in stock at the default location; the mockup's
+ *                     three offered at a LIVE purchase only (lot Q2, step Q2.4: GIFT WRAPPING € 15, ENGRAVING repriced
+ *                     € 40 with its 12 characters, THE TRAVEL CASE € 60, ten in stock), the live release picking exactly
+ *                     them; the secured collector's hold with ENGRAVING « M. B. »; you's place held in MONOLITHE IN GOLD, THE AUTUMN
  *                     DRAW (€ 4 200) with a CLOTH chosen; ZENITH priced € 4 800 for the salon's request; you's orders: the
  *                     morning's RESERVED with a CLOTH × 2, a MONOLITHE in blue PAID then given an EXTENDER (its own
  *                     invoice), a MONOLITHE in gold PAID with a TRAVEL POUCH, packing begun
@@ -136,7 +138,7 @@ import { defaultLocationId, ensureSku } from '../../src/server/services/stock.js
 import { SYSTEM_ACTOR, type Actor, type ManualClock } from '../../src/server/types.js';
 import type { DecideClaimInput } from '../../src/server/services/warranty-claims.js';
 import { countPiecesIn, packAndShip, stockPieces } from './fulfil.js';
-import { createLiveRelease, holdPieces, pickAddons, type LiveFixture, type LiveReleaseOptions } from './live.js';
+import { createLiveRelease, holdPieces, legacyAddons, liveAddon, pickAddons, type LiveFixture, type LiveReleaseOptions } from './live.js';
 import { giveSizes, poolDraw, withDrawSizes } from './draws.js';
 import { HOUSE_DEFAULT_WORDS, houseDate, houseMoney, renderHouseWords, type HouseMomentName, type HouseValues } from '../../src/shared/house-words.js';
 import { WORN_CONSENT_VERSION } from '../../src/server/services/worn.js';
@@ -278,6 +280,8 @@ interface World {
   collection: string;
   /** Pieces held by the demo, by role → { uuid, productId, codeId, claimCode }. */
   issued: Record<string, { uuid: string; productId: string; codeId: string; data: string; glyphs: number[]; claimCode?: string }>;
+  /** The catalogue add-ons of every world (lot Q2, step Q2.4, §3.4: the release add-ons as 0060 converts them), by role. */
+  addons: Record<string, string>;
 }
 
 /** Seed the demo `variant` on a fresh context whose clock is `clock` (left at NOW). */
@@ -295,6 +299,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
     models: {},
     collection: '',
     issued: {},
+    addons: {},
     f: {
       db: ctx.db,
       clock,
@@ -428,6 +433,11 @@ async function seedCatalogue(w: World): Promise<void> {
   w.f.modelId = w.models.steel!;
   // The sizes of the house, the SKUs of each MONOLITHE.
   for (const key of ['steel', 'blue', 'gold']) for (const size of ['16', '17', '18']) await ensureSku(w.ctx.db, w.models[key]!, size);
+  // Lot Q2, step Q2.4 (§3.4, D36): the demo's release add-ons as two catalogue services, as 0060 converts them (N6), each
+  // offered at a LIVE purchase only: ENGRAVING (the engraving, its 20 characters by default) and GIFT BOX. Each release
+  // picks them explicitly (createLiveRelease addonIds).
+  w.addons.engraving = await liveAddon(w.f, { name: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000, engraving: true });
+  w.addons.giftBox = await liveAddon(w.f, { name: 'GIFT BOX', priceMinor: 9_000 });
 }
 
 /** Issue a piece of `model` under `role`, its serial named when given; sold (its warranty started) unless `sold` is false. */
@@ -615,7 +625,6 @@ async function seedStory(w: World, variant: DemoVariant): Promise<void> {
     sizes: [{ label: '16', stock: 8 }, { label: '17', stock: 9 }, { label: '18', stock: 8 }],
     quantityLine: '25 PIECES',
     priceMinor: 505_000,
-    addons: [{ label: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000 }],
   });
   await titled(w, morning.id, 'MONOLITHE IN STEEL', 'The steel of MONOLITHE, released live: twenty-five pieces, in the sizes of the house.');
   w.demo.releases.morning = morning.id;
@@ -667,9 +676,12 @@ async function seedStory(w: World, variant: DemoVariant): Promise<void> {
   await ctx.services.live.press(you.id, morning.id, yourTurn);
   clock.advance(1_500);
   await ctx.services.live.secure(you.id, morning.id, yourTurn, you.actor);
-  await ctx.services.live.setAddons(you.id, morning.id, [morning.addons[0]!.id], you.actor);
   clock.set(at('2026-10-05T03:03:20Z'));
   await ctx.services.live.confirm(you.id, morning.id, you.actor);
+  // Lot Q2, step Q2.4 (§3.4, N15): the morning sold before lot Q2: its order keeps the release's ENGRAVING as that PAY
+  // wrote it, a snapshot (history as sold), never a unit.
+  const mornings = await ctx.db.selectFrom('orders').select('id').where('drop_id', '=', morning.id).where('account_id', '=', you.id).execute();
+  for (const o of mornings) await legacyAddons(ctx.db, o.id, [{ label: 'ENGRAVING', priceMinor: 15_000 }]);
   // The guest's turn runs out (5 minutes), then the release closes at its hour.
   clock.set(at('2026-10-05T03:10:00Z'));
   await ctx.services.live.advance(morning.id);
@@ -694,7 +706,7 @@ async function seedStory(w: World, variant: DemoVariant): Promise<void> {
       sizes: [{ label: '16', stock: 8 }, { label: '17', stock: 9 }, { label: '18', stock: 8 }],
       quantityLine: '25 PIECES',
       priceMinor: 505_000,
-      addons: [{ label: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000 }],
+      addonIds: [w.addons.engraving!],
       ...rules,
     });
     await titled(w, blue.id, 'MONOLITHE IN BLUE', 'The blue of MONOLITHE, released live: twenty-five pieces, in the sizes of the house.');
@@ -831,7 +843,7 @@ async function seedRoom(w: World): Promise<void> {
     sizes: [{ label: '16', stock: 8 }, { label: '17', stock: 9 }, { label: '18', stock: 8 }],
     quantityLine: '25 PIECES',
     priceMinor: 505_000,
-    addons: [{ label: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000 }],
+    addonIds: [w.addons.engraving!],
   });
   await titled(w, r.id, 'MONOLITHE IN BLUE', 'The blue of MONOLITHE, released live: twenty-five pieces, in the sizes of the house.');
   demo.releases.room = r.id;
@@ -878,10 +890,7 @@ async function seedLive(w: World): Promise<void> {
     sizes: [{ label: '16', stock: 2 }, { label: '17', stock: 1 }, { label: '18', stock: 6 }],
     quantityLine: '9 PIECES',
     priceMinor: 505_000,
-    addons: [
-      { label: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000 },
-      { label: 'GIFT BOX', priceMinor: 9_000 },
-    ],
+    addonIds: [w.addons.engraving!, w.addons.giftBox!],
   });
   await titled(w, r.id, 'MONOLITHE IN BLUE', 'The blue of MONOLITHE, released live: nine pieces, in the sizes of the house.');
   demo.releases.live = r.id;
@@ -936,13 +945,13 @@ async function seedLive(w: World): Promise<void> {
   await live.confirm(buyer.id, r.id, buyer.actor);
   const confirmed = await join('confirmed', s18!);
   await secure(confirmed);
-  await live.setAddons(confirmed.id, r.id, [r.addons[0]!.id], confirmed.actor);
+  await live.setAddons(confirmed.id, r.id, [{ addonId: w.addons.engraving! }], confirmed.actor);
   await live.confirm(confirmed.id, r.id, confirmed.actor);
   const securedA = await join('secured', s16!);
   await join('turn', s16!);
   await join('line', s16!);
   await secure(securedA);
-  await live.setAddons(securedA.id, r.id, [r.addons[0]!.id], securedA.actor);
+  await live.setAddons(securedA.id, r.id, [{ addonId: w.addons.engraving! }], securedA.actor);
   await step(1_000);
   await live.message(r.id, 'The door is open. Take your time at the seal.', w.admin);
 }
@@ -1311,7 +1320,8 @@ async function seedAfterRoom(w: World): Promise<void> {
     priceMinor: 505_000,
     turnSeconds: 300,
     payMinutes: 10,
-    afterRoom: { modelId: w.models.gold!, priceMinor: 505_000, sizes: [{ label: '16', stock: 2 }, { label: '17', stock: 2 }], addons: [{ label: 'GIFT BOX', line: 'Wrapped by hand in the atelier', priceMinor: 9_000 }], delayMinutes: 1, lengthMinutes: 15 },
+    // Lot Q2, step Q2.4 (§3.4, D31): its after-room picks the world's GIFT BOX (its old line not carried).
+    afterRoom: { modelId: w.models.gold!, priceMinor: 505_000, sizes: [{ label: '16', stock: 2 }, { label: '17', stock: 2 }], addonIds: [w.addons.giftBox!], delayMinutes: 1, lengthMinutes: 15 },
   });
   await titled(w, r.id, 'MONOLITHE IN STEEL', 'One piece of MONOLITHE in steel, released live.');
   await titled(w, r.afterRoom!.id, 'MONOLITHE IN STEEL · THE AFTER-ROOM');
@@ -1796,9 +1806,20 @@ export const NOCTURNE_ADDONS = Object.freeze({
 });
 
 /**
+ * The mockup's three add-ons of a LIVE hold (lot Q2, step Q2.4, §3.4; MK #secured-addons, its illustrative amounts as
+ * data, D15; OP-21's line, D16): GIFT WRAPPING (a service), ENGRAVING (the world's engraving, repriced, its 12
+ * characters), THE TRAVEL CASE (a product), each offered at a LIVE purchase only.
+ */
+export const NOCTURNE_LIVE_ADDONS = Object.freeze({
+  wrapping: { name: 'GIFT WRAPPING', line: 'In the house’s paper, with a card in your words.', priceMinor: 1_500 },
+  engraving: { name: 'ENGRAVING', line: 'Up to 12 characters, engraved by ORBES.', priceMinor: 4_000, textMax: 12 },
+  travelCase: { name: 'THE TRAVEL CASE', line: 'A case made to carry your piece.', priceMinor: 6_000 },
+});
+
+/**
  * The add-ons' stage (plan MACRO M3 §4.4, D2), after the live story: the four add-ons, priced in euros, ten of each
- * counted in at the default location; the secured collector's hold given a CLOTH × 2 and an EXTENDER (the release's
- * ENGRAVING kept); you's place held in a draw with a price (THE AUTUMN DRAW, € 4 200), a CLOTH chosen on it; ZENITH
+ * counted in at the default location; then the mockup's three (lot Q2, step Q2.4, NOCTURNE_LIVE_ADDONS), the live
+ * release picking exactly them and the secured collector's hold choosing ENGRAVING « M. B. »; you's place held in a draw with a price (THE AUTUMN DRAW, € 4 200), a CLOTH chosen on it; ZENITH
  * priced € 4 800 (its salon request offers them); you's orders: the morning's LIVE order (RESERVED) given a CLOTH × 2,
  * a MONOLITHE in blue sold by Client Services, PAID, then given an EXTENDER (its own invoice), and a MONOLITHE in gold,
  * PAID with a TRAVEL POUCH, the agent's packing begun.
@@ -1815,15 +1836,28 @@ async function seedAddons(w: World): Promise<void> {
     await ctx.services.stock.adjust({ skuId: made.sku.id, locationId: location, delta: 10, note: 'Counted in.' }, admin);
     ids[role] = made.id;
   }
-  // The hold: the release's ENGRAVING as chosen, and two add-ons of the catalogue. Lot Q2, step Q2.3: the release, under
-  // way, picks the four (as migration 0060 writes the pick of a release not ended: every catalogue add-on of M3).
+  // Lot Q2, step Q2.4 (§3.4, D15, D16, N3): the mockup's three (MK 5b), after the live story's sales (its ENGRAVING sold
+  // at € 150 keeps that price): ENGRAVING repriced € 40, its line and its 12 characters; GIFT WRAPPING, a service, and
+  // THE TRAVEL CASE, a product, ten counted in; the three offered at a LIVE purchase only. The release picks exactly
+  // them, in MK's order, and the secured hold chooses ENGRAVING with its words.
+  const engraving = w.addons.engraving!;
+  await ctx.services.addons.update(engraving, { line: NOCTURNE_LIVE_ADDONS.engraving.line, textMax: NOCTURNE_LIVE_ADDONS.engraving.textMax }, admin);
+  await ctx.services.addons.setPrices(engraving, { EUR: NOCTURNE_LIVE_ADDONS.engraving.priceMinor }, admin);
+  const liveOnly = { live: true, draw: false, salon: false, orders: false };
+  const wrapping = await ctx.services.addons.create(
+    { kind: 'SERVICE', name: NOCTURNE_LIVE_ADDONS.wrapping.name, line: NOCTURNE_LIVE_ADDONS.wrapping.line, skuCode: 'ADD-WRAPPING', prices: { EUR: NOCTURNE_LIVE_ADDONS.wrapping.priceMinor }, offeredAt: liveOnly },
+    admin,
+  );
+  const travelCase = await ctx.services.addons.create(
+    { name: NOCTURNE_LIVE_ADDONS.travelCase.name, line: NOCTURNE_LIVE_ADDONS.travelCase.line, skuCode: 'ADD-TRAVEL-CASE', weightG: 120, prices: { EUR: NOCTURNE_LIVE_ADDONS.travelCase.priceMinor }, offeredAt: liveOnly },
+    admin,
+  );
+  await ctx.services.stock.adjust({ skuId: travelCase.sku.id, locationId: location, delta: 10, note: 'Counted in.' }, admin);
+  w.addons.wrapping = wrapping.id;
+  w.addons.travelCase = travelCase.id;
   const live = demo.releases.live!;
-  await pickAddons(ctx.db, live, Object.keys(NOCTURNE_ADDONS).map((role) => ids[role]!));
-  const held = await ctx.services.live.entry(secured.id, live);
-  await ctx.services.live.setAddons(secured.id, live, (held?.addons ?? []).map((a) => a.id), secured.actor, [
-    { addonId: ids.cloth!, units: 2 },
-    { addonId: ids.extender!, units: 1 },
-  ]);
+  await pickAddons(ctx.db, live, [wrapping.id, engraving, travelCase.id]);
+  await ctx.services.live.setAddons(secured.id, live, [{ addonId: engraving, text: 'M. B.' }], secured.actor);
   // ZENITH priced in euros: the salon's request offers the add-ons.
   await ctx.services.catalog.updateModel(w.models.zenith!, { basePriceMinor: 480_000, baseCurrency: 'EUR' }, admin);
   // A draw with a price, you's place held in it, a CLOTH chosen on it (Q2.3: its pick, the draws' default, the four).
@@ -2060,6 +2094,8 @@ async function seedSet(w: World): Promise<void> {
       sizes: liveSizes,
       priceMinor: NOCTURNE_SET.priceMinor,
       currency: 'EUR',
+      // Lot Q2, step Q2.4 (§3.4): it offers no add-on, as before the catalogue's LIVE services.
+      addonIds: [],
       nameAt: at('2026-10-02T10:00:00Z'),
       photoAt: at('2026-10-03T10:00:00Z'),
     },
@@ -2080,6 +2116,8 @@ async function seedSet(w: World): Promise<void> {
       sizes: liveSizes,
       priceMinor: NOCTURNE_SET.priceMinor,
       currency: 'EUR',
+      // Lot Q2, step Q2.4 (§3.4): it offers no add-on, as before the catalogue's LIVE services.
+      addonIds: [],
       nameAt: at('2026-10-18T10:00:00Z'),
       photoAt: at('2026-10-19T10:00:00Z'),
     },
@@ -2122,7 +2160,7 @@ async function seedSetLive(w: World): Promise<void> {
   // ── In its room: T0 three minutes from now ──
   clock.set(at('2026-10-04T09:00:00Z'));
   const room = await ctx.services.liveConsole.create(
-    { pace: { batch: 5000, minutes: 1 }, holdMinutes: 0, setId: set.id, title: 'THE ORBITAL SET, RELEASED LIVE', description, opensAt: new Date(NOCTURNE_NOW.getTime() + 3 * MINUTE), closesAt: new Date(NOCTURNE_NOW.getTime() + 63 * MINUTE), roomOpensMinutes: 10, minTier: 1, sizes, priceMinor: NOCTURNE_SET.priceMinor, currency: 'EUR' },
+    { pace: { batch: 5000, minutes: 1 }, holdMinutes: 0, setId: set.id, title: 'THE ORBITAL SET, RELEASED LIVE', description, opensAt: new Date(NOCTURNE_NOW.getTime() + 3 * MINUTE), closesAt: new Date(NOCTURNE_NOW.getTime() + 63 * MINUTE), roomOpensMinutes: 10, minTier: 1, sizes, priceMinor: NOCTURNE_SET.priceMinor, currency: 'EUR', addonIds: [] },
     admin,
   );
   await ctx.services.liveConsole.publish(room.id, {}, admin);
@@ -2139,6 +2177,8 @@ async function seedSetLive(w: World): Promise<void> {
   // ── Live now: T0 twenty minutes ago ──
   const t0 = new Date(NOCTURNE_NOW.getTime() - 20 * MINUTE);
   clock.set(at('2026-10-04T10:00:00Z'));
+  // Lot Q2, step Q2.4 (§3.4): the GIFT BOX's line, staff's, for the set (one box for its pieces).
+  await ctx.services.addons.update(w.addons.giftBox!, { line: 'One box for the three pieces' }, admin);
   const r = await ctx.services.liveConsole.create(
     {
       pace: { batch: 5000, minutes: 1 },
@@ -2154,7 +2194,8 @@ async function seedSetLive(w: World): Promise<void> {
       sizes,
       priceMinor: NOCTURNE_SET.priceMinor,
       currency: 'EUR',
-      addons: [{ label: 'GIFT BOX', line: 'One box for the three pieces', priceMinor: 9_000 }],
+      // Lot Q2, step Q2.4 (§3.4, D25): the world's GIFT BOX, its line for a set, one per set.
+      addonIds: [w.addons.giftBox!],
     },
     admin,
   );
@@ -2181,18 +2222,18 @@ async function seedSetLive(w: World): Promise<void> {
     clock.advance(1_500);
     await live.secure(a.id, r.id, token, a.actor);
   };
-  const gift = (await ctx.db.selectFrom('live_addons').select('id').where('drop_id', '=', r.id).executeTakeFirstOrThrow()).id;
+  const gift = [{ addonId: w.addons.giftBox! }];
   clock.set(new Date(NOCTURNE_NOW.getTime() - 3 * MINUTE));
   const buyer = await join('setBuyer', ['17', '56', '45']);
   await join('setSoldout', ['18', '56', '42']);
   await secure(buyer);
-  await live.setAddons(buyer.id, r.id, [gift], buyer.actor);
+  await live.setAddons(buyer.id, r.id, gift, buyer.actor);
   await live.confirm(buyer.id, r.id, buyer.actor);
   const held = await join('setSecured', ['17', '52', '45']);
   await join('setTurn', ['16', '54', '42']);
   await join('setLine', ['16', '52', '45']);
   await secure(held);
-  await live.setAddons(held.id, r.id, [gift], held.actor);
+  await live.setAddons(held.id, r.id, gift, held.actor);
   await step(1_000);
 }
 
@@ -2575,7 +2616,8 @@ async function seedStress(w: World): Promise<void> {
     quantityLine: '120 PIECES · NEVER MORE, NEVER AGAIN',
     perAccount: 3,
     priceMinor: 12_540_000,
-    addons: [{ label: 'ENGRAVING OF YOUR INITIALS AND A DATE', line: 'Engraved inside the band by the atelier, by hand', priceMinor: 125_000 }],
+    // Lot Q2, step Q2.4 (§3.4, D31): the world's one ENGRAVING (its own add-on, never shown, is not carried).
+    addonIds: [w.addons.engraving!],
   });
   await titled(w, soon.id, 'MONOLITHE ARCHITECTURALE, THE SECOND EDITION', 'The longest name of the house, released live.');
   w.demo.releases.soon = soon.id;

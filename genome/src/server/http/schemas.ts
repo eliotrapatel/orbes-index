@@ -71,6 +71,7 @@ import {
   ADDON_NAME_MAX,
   ADDON_POSITION_MAX,
   ADDON_PRICE_MINOR_MAX,
+  ADDON_CHOICE_TEXT_MAX,
   ADDON_TEXT_MAX,
   ADDON_WEIGHT_G_MAX,
   PACKED_WEIGHT_G_MAX,
@@ -93,7 +94,6 @@ import { SEGMENT_LIMITS, SEGMENT_MATCHES } from '../services/segments.js';
 import { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES } from '../services/after-room.js';
 import {
   LIVE_ADD_PIECES,
-  LIVE_ADDONS_MAX,
   LIVE_EXTEND_MINUTES,
   LIVE_HOLD_MINUTES,
   LIVE_MESSAGE_MAX,
@@ -109,7 +109,6 @@ import {
 } from '../services/live.js';
 import {
   LIVE_ACCESS_MODELS_MAX,
-  LIVE_ADDON_LIMITS,
   LIVE_CURRENCIES,
   LIVE_PRICE_MAX_MINOR,
   LIVE_QUANTITY_LINE_MAX,
@@ -489,7 +488,7 @@ export const circleVoteBody = body({
  */
 export const liveParams = z.object({ id: z.string().max(64) });
 
-/** An id the service checks against the release's own (a size, an add-on): one that is not answers 400 LIVE_SIZE_UNKNOWN or LIVE_ADDON_UNKNOWN. */
+/** An id the service checks against the release's own (a size): one that is not answers 400 LIVE_SIZE_UNKNOWN. */
 const liveRef = z.string().max(64);
 
 /** Macro scope K44 T1: a LIVE RELEASE's size (`sizeId`, a model's), or a size per piece (`sizes`, a set's): exactly one. */
@@ -513,11 +512,15 @@ export const liveEntryBody = body({
 /** POST /api/v1/live/:id/press and /secure: the turn's secret, as the account's state gave it. */
 export const liveTurnBody = body({ token: z.string().trim().min(1, 'Required').max(128, 'Invalid turn').regex(BASE64URL_RE, 'Invalid turn') });
 
-/** PUT /api/v1/live/:id/addons: the add-ons chosen for the piece held, each once, at most six (none: an empty list). */
+/**
+ * PUT /api/v1/live/:id/addons (lot Q2, step Q2.4, D2): the catalogue add-ons chosen for the piece held, each a row (one
+ * unit per piece, one per set: N1), each once, the engraving with its words (`text`, checked by the service: its most
+ * characters, the house's set); an empty list clears them.
+ */
 export const liveAddonsBody = body({
-  addonIds: z.array(liveRef).max(LIVE_ADDONS_MAX, `At most ${LIVE_ADDONS_MAX} add-ons`),
-  /** Plan MACRO M3 §4.2 (D2): the catalogue add-ons chosen with the hold; left out, they stay as they were. */
-  items: addonUnitsList.optional(),
+  items: z
+    .array(z.strictObject({ addonId: uuid, text: z.string().max(ADDON_CHOICE_TEXT_MAX, `At most ${ADDON_CHOICE_TEXT_MAX} characters`).nullable().optional() }))
+    .max(20, 'At most 20 add-ons'),
 });
 
 /**
@@ -985,16 +988,6 @@ const liveSizes = z
   )
   .min(LIVE_SIZES.min, `At least ${LIVE_SIZES.min} size`)
   .max(LIVE_SIZES.max * SET_PIECES_MAX, `At most ${LIVE_SIZES.max * SET_PIECES_MAX} sizes`);
-const liveAddons = z
-  .array(
-    z.strictObject({
-      id: uuid.nullable().optional(),
-      label: text(LIVE_ADDON_LIMITS.label),
-      line: z.preprocess(emptyToNull, text(LIVE_ADDON_LIMITS.line).nullable().optional()),
-      priceMinor: livePrice,
-    }),
-  )
-  .max(LIVE_ADDONS_MAX, `At most ${LIVE_ADDONS_MAX} add-ons`);
 /**
  * The settings of a LIVE RELEASE (services/live-console.ts holds their rules: the times' order, the totals, the lists'
  * ids). Macro scope K44 T1: what it sells, its model or its set (`setId`, its sizes per piece).
@@ -1028,8 +1021,10 @@ const liveSettingsFields = {
   surpriseText: z.preprocess(emptyToNull, z.string().trim().max(LIVE_SURPRISE_MAX, `At most ${LIVE_SURPRISE_MAX} characters`).nullable().optional()),
   sizes: liveSizes,
   quantityLine: z.preprocess(emptyToNull, text(LIVE_QUANTITY_LINE_MAX).nullable().optional()),
-  addons: liveAddons.optional(),
-  /** Lot Q2, step Q2.3: the catalogue add-ons offered at its purchase, in order (omitted at its creation: every one its LIVE switch offers, N7). */
+  /**
+   * Lot Q2, step Q2.3: the catalogue add-ons offered at its purchase, in order (omitted at its creation: every one its
+   * LIVE switch offers, N7); step Q2.4 (D2): the release add-ons (`addons`) are gone, refused as unknown.
+   */
   addonIds: addonPick.optional(),
   announceAt: liveTime,
   silhouetteAt: liveTime,
@@ -1061,7 +1056,6 @@ const liveSettingsFields = {
       modelId: uuid,
       priceMinor: livePrice,
       sizes: liveSizes,
-      addons: liveAddons.optional(),
       addonIds: addonPick.optional(),
       delayMinutes: whole(AFTER_ROOM_DELAY_MINUTES.min, AFTER_ROOM_DELAY_MINUTES.max, 'minutes').optional(),
       lengthMinutes: whole(AFTER_ROOM_LENGTH_MINUTES.min, AFTER_ROOM_LENGTH_MINUTES.max, 'minutes').optional(),

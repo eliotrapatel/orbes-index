@@ -172,9 +172,10 @@ const SIZES = [
   { label: '54', stock: 8 },
   { label: '56', stock: 8 },
 ];
+/** Lot Q2, step Q2.4 (D2): the catalogue services the release picks, offered at a LIVE purchase only. */
 const ADDONS = [
-  { label: 'ENGRAVING', priceMinor: 25_000 },
-  { label: 'GIFT BOX', priceMinor: 5_000 },
+  { name: 'ENGRAVING', skuCode: 'LOAD-ENGRAVING', priceMinor: 25_000, engraving: true },
+  { name: 'GIFT BOX', skuCode: 'LOAD-GIFT-BOX', priceMinor: 5_000, engraving: false },
 ];
 /**
  * The pieces in stock in advance at the release's location, by size (plan LIVE RELEASE+, choice 8): PAY holds one of them
@@ -188,7 +189,8 @@ const AFTER_SIZES = [
   { label: '54', stock: 8 },
   { label: '56', stock: 8 },
 ];
-const AFTER_ADDONS = [{ label: 'GIFT BOX', priceMinor: 5_000 }];
+/** The after-room's pick: the GIFT BOX of ADDONS. */
+const AFTER_ADDONS = ['GIFT BOX'];
 /**
  * What the after-room rightly answers a guest who arrives after its size, or the after-room itself, has sold out: its
  * guests all see the door at the same second, and its turns begin with the first of them to enter, so the last of a
@@ -245,7 +247,9 @@ interface ReadyMessage {
   /** Its after-room's id (the phones read it from its door, and check it is this one); null without one (--pace). */
   afterRoomId: string | null;
   sizes: { id: string; label: string }[];
+  /** The release's pick of catalogue add-ons (lot Q2, step Q2.4), then its after-room's. */
   addons: string[];
+  afterAddons: string[];
   roomOpensAt: number;
   opensAt: number;
   cookie: string;
@@ -754,6 +758,15 @@ async function serve(): Promise<void> {
   const publishedAt = Date.now();
   const roomOpensAt = publishedAt + setup.leadMs;
   const opensAt = roomOpensAt + setup.roomMinutes * 60_000;
+  // Lot Q2, step Q2.4 (D2): the add-ons are catalogue services the release picks (no release add-on any more).
+  const addonIds: Record<string, string> = {};
+  for (const a of ADDONS) {
+    const made = await ctx.services.addons.create(
+      { kind: 'SERVICE', name: a.name, skuCode: a.skuCode, prices: { EUR: a.priceMinor }, offeredAt: { live: true, draw: false, salon: false, orders: false }, ...(a.engraving ? { engraving: true } : {}) },
+      admin,
+    );
+    addonIds[a.name] = made.id;
+  }
   const created = await ctx.services.liveConsole.create(
     {
       modelId,
@@ -763,7 +776,7 @@ async function serve(): Promise<void> {
       roomOpensMinutes: setup.roomMinutes,
       priceMinor: 480_000,
       sizes,
-      addons: ADDONS,
+      addonIds: ADDONS.map((a) => addonIds[a.name]!),
       // LIVE RELEASE+: both rules read at each check, joined by AND (the heavier: neither stops the other).
       minParticipations: 1,
       accessSegmentId: segment.id,
@@ -780,7 +793,7 @@ async function serve(): Promise<void> {
             modelId: afterModelId,
             priceMinor: 120_000,
             sizes: AFTER_SIZES,
-            addons: AFTER_ADDONS,
+            addonIds: AFTER_ADDONS.map((name) => addonIds[name]!),
             delayMinutes: AFTER_ROOM_DELAY_MINUTES.min,
             lengthMinutes: AFTER_ROOM_LENGTH_MINUTES.min,
           }
@@ -801,7 +814,10 @@ async function serve(): Promise<void> {
   if (setup.afterRoom !== (afterRoomId !== null)) throw new Error(`the release was published ${afterRoomId ? 'with' : 'without'} an after-room`);
   const { token: boardToken } = await ctx.services.live.issueBoardLink(created.id, admin);
   const release = await db.selectFrom('drop_sizes').select(['id', 'label']).where('drop_id', '=', created.id).orderBy('position').execute();
-  const addons = await db.selectFrom('live_addons').select('id').where('drop_id', '=', created.id).orderBy('position').execute();
+  const pickOf = (dropId: string | null) =>
+    dropId ? db.selectFrom('drop_addons').select('addon_id').where('drop_id', '=', dropId).orderBy('position').execute() : Promise.resolve([] as { addon_id: string }[]);
+  const addons = await pickOf(created.id);
+  const afterAddons = await pickOf(afterRoomId);
   const seedMs = Math.round(performance.now() - seeded);
 
   // ── What the driver asks for afterwards: the pulses, the engine's passes, memory, CPU, the event loop ──
@@ -933,7 +949,8 @@ async function serve(): Promise<void> {
     dropId: created.id,
     afterRoomId,
     sizes: release,
-    addons: addons.map((a) => a.id),
+    addons: addons.map((a) => a.addon_id),
+    afterAddons: afterAddons.map((a) => a.addon_id),
     roomOpensAt,
     opensAt,
     cookie: sessionCookieName(config, 'account'),
@@ -1428,7 +1445,7 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
       if ((await call(v, room, 'secure', 'POST', '/secure', { token })).status !== 200) return;
       if (random() < 0.5) {
         const ids = addons ?? afterRoom!.addons;
-        if (ids.length) await call(v, room, 'addons', 'PUT', '/addons', { addonIds: [ids[Math.floor(random() * ids.length)]!] });
+        if (ids.length) await call(v, room, 'addons', 'PUT', '/addons', { items: [{ addonId: ids[Math.floor(random() * ids.length)]! }] });
       }
       await sleep(random() * 1000);
       // --one-queue: the place given back (the runbook's run A: nothing sold, every entrant served once).
@@ -1658,7 +1675,7 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
       await sleep(random() * (o.burstSeconds ?? 10) * 1000);
       const door = await request(v, 'GET', `/api/v1/live/${ready.dropId}/after-room`, undefined);
       doorReads.push({ ms: door.ms, status: door.status });
-      const sheet = door.json as { id?: string; phase?: string; sizes?: { id: string }[]; addons?: { id: string }[] } | null;
+      const sheet = door.json as { id?: string; phase?: string; sizes?: { id: string }[] } | null;
       if (door.status !== 200 || sheet?.id !== ready.afterRoomId) return;
       // Over already: the page shows its end (without sizes), and opens nothing.
       if (sheet.phase === 'ENDED') {
@@ -1666,7 +1683,7 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
         return;
       }
       if (!sheet.sizes?.length) return;
-      afterRoom ??= { id: sheet.id, sizes: sheet.sizes, addons: (sheet.addons ?? []).map((a) => a.id) };
+      afterRoom ??= { id: sheet.id, sizes: sheet.sizes, addons: ready.afterAddons };
       openStream(v, 'after');
       await sleep(AFTER_ROOM_READING_MS.min + random() * (AFTER_ROOM_READING_MS.max - AFTER_ROOM_READING_MS.min));
       await call(v, 'after', 'enter', 'POST', '/enter', { sizeId: sheet.sizes[Math.floor(random() * sheet.sizes.length)]!.id });

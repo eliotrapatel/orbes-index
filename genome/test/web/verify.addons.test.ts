@@ -214,7 +214,7 @@ describe('the add-ons’ calls (api.ts)', () => {
     return { api, calls };
   }
 
-  it('sends the hold’s choice beside the release’s add-ons, a place held’s and a request’s, with the CSRF token', async () => {
+  it('sends the hold’s rows (lot Q2, step Q2.4: each an add-on, the engraving with its words), a place held’s and a request’s, with the CSRF token', async () => {
     const entry = { id: 'e', status: 'SECURED' };
     const { api, calls } = fakeApi([
       () => json(200, { account: { email: 'you@example.com', displayName: null }, csrfToken: 't1' }),
@@ -225,11 +225,12 @@ describe('the add-ons’ calls (api.ts)', () => {
       () => json(201, { request: { id: 'r', status: 'OPEN', createdAt: '2026-10-05T16:49:00.000Z', modelId: 'm' } }),
     ]);
     await api.me();
-    await api.liveAddons('d1', ['a1'], [{ addonId: CLOTH, units: 2 }]);
-    expect(calls[1]).toMatchObject({ url: '/api/v1/live/d1/addons', method: 'PUT', csrf: 't1', body: { addonIds: ['a1'], items: [{ addonId: CLOTH, units: 2 }] } });
-    // Without items: the catalogue add-ons stay as they are (the release's body as before).
-    await api.liveAddons('d1', []);
-    expect(calls[2]!.body).toEqual({ addonIds: [] });
+    await api.liveAddons('d1', [{ addonId: CLOTH }, { addonId: 'e1', text: 'M. B.' }]);
+    expect(calls[1]).toMatchObject({ url: '/api/v1/live/d1/addons', method: 'PUT', csrf: 't1', body: { items: [{ addonId: CLOTH }, { addonId: 'e1', text: 'M. B.' }] } });
+    expect(calls[1]!.body).toEqual({ items: [{ addonId: CLOTH }, { addonId: 'e1', text: 'M. B.' }] });
+    // None: an empty list clears them; empty words are not sent.
+    await api.liveAddons('d1', [{ addonId: 'e1', text: '' }]);
+    expect(calls[2]!.body).toEqual({ items: [{ addonId: 'e1' }] });
     await api.drawAddons('d2', [{ addonId: CLOTH, units: 1 }]);
     expect(calls[3]).toMatchObject({ url: '/api/v1/club/drops/d2/addons', method: 'PUT', csrf: 't1', body: { items: [{ addonId: CLOTH, units: 1 }] } });
     await api.requestPiece('zenith', null, '17', [{ addonId: CLOTH, units: 1 }]);

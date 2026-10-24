@@ -24,7 +24,16 @@ import { accountLiveData } from '../../src/server/services/live.js';
 import { LiveRoomService } from '../../src/server/services/live-room.js';
 import type { Actor } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
-import { accountOfTier, createLiveRelease, createModel, entriesOf, liveFixture, type LiveFixture, type LiveRelease } from '../support/live.js';
+import {
+  accountOfTier,
+  createLiveRelease,
+  createModel,
+  entriesOf,
+  liveAddon,
+  liveFixture,
+  type LiveFixture,
+  type LiveRelease,
+} from '../support/live.js';
 import { poolDraw } from '../support/draws.js';
 
 const T0 = new Date('2026-11-02T10:00:00.000Z');
@@ -48,12 +57,15 @@ describe('the after-room', () => {
   let f: LiveFixture;
   let room: LiveRoomService;
   let afterModel: string;
+  /** Lot Q2, step Q2.4 (D2): the after-room's add-on, a catalogue service it picks. */
+  let box: string;
 
   beforeAll(async () => {
     t = await createTestDb();
     f = await liveFixture(t.db, '2026-11-01T09:00:00.000Z');
     room = new LiveRoomService({ db: t.db, turnKey: f.turnKey, publicOrigin: 'https://verify.orbes.test', clock: f.clock.now });
     afterModel = await createModel(t.db, 'AFTERGLOW');
+    box = await liveAddon(f, { name: 'GIFT BOX', priceMinor: 5_000 });
   });
   afterAll(() => t.close());
 
@@ -61,7 +73,7 @@ describe('the after-room', () => {
     modelId: afterModel,
     priceMinor: 90_000,
     sizes: [{ label: 'ONE SIZE', stock: o.stock ?? 1 }],
-    addons: [{ label: 'GIFT BOX', priceMinor: 5_000 }],
+    addonIds: [box],
     ...(o.delayMinutes !== undefined ? { delayMinutes: o.delayMinutes } : {}),
     ...(o.lengthMinutes !== undefined ? { lengthMinutes: o.lengthMinutes } : {}),
   });
@@ -129,7 +141,8 @@ describe('the after-room', () => {
       // A DRAFT whose times say the latest it could open: the release's close plus its delay.
       expect({ opens: child.opens_at, closes: child.closes_at }).toEqual({ opens: at(70 * MINUTE), closes: at(85 * MINUTE) });
       expect(r.afterRoom!.sizes).toEqual([{ id: expect.any(String), label: 'ONE SIZE', stock: 1 }]);
-      expect(r.afterRoom!.addons).toEqual([{ id: expect.any(String), label: 'GIFT BOX', priceMinor: 5_000 }]);
+      // Its own pick of the catalogue (lot Q2, step Q2.4: no release add-on).
+      expect(await t.db.selectFrom('drop_addons').select(['addon_id', 'position']).where('drop_id', '=', child.id).execute()).toEqual([{ addon_id: box, position: 1 }]);
       // Its size is its model's SKU: ONE SIZE is the model in one size (no size label), as its pieces without a variant.
       const size = await t.db.selectFrom('drop_sizes as s').innerJoin('skus as k', 'k.id', 's.sku_id').select(['k.model_id', 'k.size_label']).where('s.drop_id', '=', child.id).executeTakeFirstOrThrow();
       expect(size).toEqual({ model_id: afterModel, size_label: null });
@@ -191,7 +204,7 @@ describe('the after-room', () => {
       });
       // Its own settings change, the ids it keeps kept; the audit log says before and after.
       const own = await f.liveConsole.update(created.id, { afterRoom: { modelId: afterModel, priceMinor: 70_000, sizes: [{ id: kept, label: '52', stock: 4 }], delayMinutes: 30 } }, f.admin);
-      expect(own.afterRoom).toMatchObject({ id: child, priceMinor: 70_000, delayMinutes: 30, lengthMinutes: 20, sizes: [{ id: kept, label: '52', stock: 4 }], addons: [{ label: 'GIFT BOX' }] });
+      expect(own.afterRoom).toMatchObject({ id: child, priceMinor: 70_000, delayMinutes: 30, lengthMinutes: 20, sizes: [{ id: kept, label: '52', stock: 4 }], addonPick: [{ id: box, name: 'GIFT BOX' }] });
       const update = (await audits(created.id, 'drop.live.update')).at(-1)!;
       expect(update.details).toMatchObject({
         before: { afterRoom: { priceMinor: 90_000, sizes: ['50:1', '52:2'], delayMinutes: 5 } },
@@ -201,25 +214,25 @@ describe('the after-room', () => {
       const n = (await audits(created.id, 'drop.live.update')).length;
       await f.liveConsole.update(created.id, { afterRoom: { modelId: afterModel, priceMinor: 70_000, sizes: [{ id: kept, label: '52', stock: 4 }] } }, f.admin);
       expect((await audits(created.id, 'drop.live.update')).length).toBe(n);
-      // Bounds, as the release's own.
-      await rejects(f.liveConsole.update(created.id, { afterRoom: { ...AFTER(), delayMinutes: 0 } }, f.admin), 'VALIDATION_FAILED', 400);
-      await rejects(f.liveConsole.update(created.id, { afterRoom: { ...AFTER(), delayMinutes: 61 } }, f.admin), 'VALIDATION_FAILED', 400);
-      await rejects(f.liveConsole.update(created.id, { afterRoom: { ...AFTER(), lengthMinutes: 4 } }, f.admin), 'VALIDATION_FAILED', 400);
-      await rejects(f.liveConsole.update(created.id, { afterRoom: { ...AFTER(), lengthMinutes: 121 } }, f.admin), 'VALIDATION_FAILED', 400);
-      await rejects(f.liveConsole.update(created.id, { afterRoom: { ...AFTER(), sizes: [] } }, f.admin), 'VALIDATION_FAILED', 400);
-      await rejects(f.liveConsole.update(created.id, { afterRoom: { ...AFTER(), sizes: [{ label: '52', stock: 0 }] } }, f.admin), 'VALIDATION_FAILED', 400);
-      await rejects(f.liveConsole.update(created.id, { afterRoom: { ...AFTER(), sizes: [{ id: r0(), label: '52', stock: 1 }] } }, f.admin), 'VALIDATION_FAILED', 400);
-      await rejects(f.liveConsole.update(created.id, { afterRoom: { ...AFTER(), modelId: r0() } }, f.admin), 'MODEL_NOT_FOUND', 404);
+      // Bounds, as the release's own (its pick none: the release is in CHF now, its GIFT BOX priced in EUR only).
+      await rejects(f.liveConsole.update(created.id, { afterRoom: { ...AFTER(), addonIds: [], delayMinutes: 0 } }, f.admin), 'VALIDATION_FAILED', 400);
+      await rejects(f.liveConsole.update(created.id, { afterRoom: { ...AFTER(), addonIds: [], delayMinutes: 61 } }, f.admin), 'VALIDATION_FAILED', 400);
+      await rejects(f.liveConsole.update(created.id, { afterRoom: { ...AFTER(), addonIds: [], lengthMinutes: 4 } }, f.admin), 'VALIDATION_FAILED', 400);
+      await rejects(f.liveConsole.update(created.id, { afterRoom: { ...AFTER(), addonIds: [], lengthMinutes: 121 } }, f.admin), 'VALIDATION_FAILED', 400);
+      await rejects(f.liveConsole.update(created.id, { afterRoom: { ...AFTER(), addonIds: [], sizes: [] } }, f.admin), 'VALIDATION_FAILED', 400);
+      await rejects(f.liveConsole.update(created.id, { afterRoom: { ...AFTER(), addonIds: [], sizes: [{ label: '52', stock: 0 }] } }, f.admin), 'VALIDATION_FAILED', 400);
+      await rejects(f.liveConsole.update(created.id, { afterRoom: { ...AFTER(), addonIds: [], sizes: [{ id: r0(), label: '52', stock: 1 }] } }, f.admin), 'VALIDATION_FAILED', 400);
+      await rejects(f.liveConsole.update(created.id, { afterRoom: { ...AFTER(), addonIds: [], modelId: r0() } }, f.admin), 'MODEL_NOT_FOUND', 404);
       const retired = await createModel(t.db, 'RETIRED');
       await t.db.updateTable('models').set({ active: false }).where('id', '=', retired).execute();
-      await rejects(f.liveConsole.update(created.id, { afterRoom: { ...AFTER(), modelId: retired } }, f.admin), 'MODEL_INACTIVE', 409);
+      await rejects(f.liveConsole.update(created.id, { afterRoom: { ...AFTER(), addonIds: [], modelId: retired } }, f.admin), 'MODEL_INACTIVE', 409);
       // Turned off: removed, with its sizes and add-ons.
       const off = await f.liveConsole.update(created.id, { afterRoom: null }, f.admin);
       expect(off.afterRoom).toBeNull();
       expect(await t.db.selectFrom('drops').select('id').where('id', '=', child).executeTakeFirst()).toBeUndefined();
       expect(await t.db.selectFrom('drop_sizes').select('id').where('drop_id', '=', child).execute()).toEqual([]);
       // Announced, it changes no more, as every setting.
-      await f.liveConsole.update(created.id, { afterRoom: AFTER() }, f.admin);
+      await f.liveConsole.update(created.id, { afterRoom: { ...AFTER(), addonIds: [] } }, f.admin);
       await f.liveConsole.publish(created.id, {}, f.admin);
       await rejects(f.liveConsole.update(created.id, { afterRoom: null }, f.admin), 'LIVE_ANNOUNCED', 409);
     });
@@ -297,7 +310,8 @@ describe('the after-room', () => {
       const sheet = await room.afterRoomSheet(guests[0]!.id, r.id);
       expect(sheet).toMatchObject({ id: child, kind: 'LIVE', phase: 'LIVE', name: 'AFTERGLOW', priceMinor: 90_000, quantityLine: '1 PIECE', surprise: false, afterRoom: { parentId: r.id } });
       expect('sizes' in sheet && sheet.sizes).toEqual([{ id: r.afterRoom!.sizes[0]!.id, label: 'ONE SIZE', stock: 1 }]);
-      expect('addons' in sheet && sheet.addons).toEqual([{ id: r.afterRoom!.addons[0]!.id, label: 'GIFT BOX', line: null, priceMinor: 5_000 }]);
+      // Lot Q2, step Q2.4 (D2): no add-on on its page; a hold reads its pick from its entry.
+      expect('addons' in sheet).toBe(false);
       // On no public surface: the list, the banner, its page, its .ics, a board.
       expect((await room.list()).map((x) => x.id)).not.toContain(child);
       expect((await room.next())?.id).not.toBe(child);
@@ -347,7 +361,9 @@ describe('the after-room', () => {
       await rejects(f.live.secure(first!.id, child, token, first!.actor), 'LIVE_HOLD_TOO_SHORT', 409);
       f.clock.advance(600);
       await f.live.secure(first!.id, child, token, first!.actor);
-      const withAddon = await f.live.setAddons(first!.id, child, [r.afterRoom!.addons[0]!.id], first!.actor);
+      // Its own pick offered with the hold (lot Q2, step Q2.4), as the release's.
+      expect((await f.live.entry(first!.id, child))!.addonOffer.map((a) => a.addonId)).toEqual([box]);
+      const withAddon = await f.live.setAddons(first!.id, child, [{ addonId: box }], first!.actor);
       expect(withAddon).toMatchObject({ status: 'SECURED', priceMinor: 90_000, totalMinor: 95_000, currency: 'EUR' });
       await f.live.confirm(first!.id, child, first!.actor);
       const order = await t.db.selectFrom('orders').selectAll().where('drop_id', '=', child).executeTakeFirstOrThrow();
@@ -362,7 +378,8 @@ describe('the after-room', () => {
         location_id: location.id,
         status: 'RESERVED',
       });
-      expect(order.addons).toEqual([{ id: r.afterRoom!.addons[0]!.id, label: 'GIFT BOX', priceMinor: 5_000 }]);
+      expect(order.addons).toEqual([]);
+      expect(await t.db.selectFrom('order_addon_items').select(['addon_id', 'price_minor', 'added_by_type']).where('order_id', '=', order.id).execute()).toEqual([{ addon_id: box, price_minor: 5_000, added_by_type: 'PURCHASE' }]);
       // Its own sell-out: closed, the one still waiting ENDED; no after-room of its own; the second guest never came.
       const ended = await childOf(r);
       expect(ended).toMatchObject({ ended_reason: 'SOLD_OUT' });

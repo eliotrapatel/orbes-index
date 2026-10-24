@@ -27,7 +27,7 @@ import { readJournal, replayJournal } from '../../src/server/services/journal.js
 import { createManualClock, SYSTEM_ACTOR, type Actor, type ManualClock } from '../../src/server/types.js';
 import { LEGAL_IDENTITY } from '../../src/web/legal/content/notice.js';
 import { createTestDb, type TestDb } from '../support/db.js';
-import { createAccount, createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { createAccount, createLiveRelease, holdPieces, legacyLiveAddons, liveFixtureOn, type LiveFixture } from '../support/live.js';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -105,10 +105,6 @@ describe('invoices and credit notes (plan LIVE RELEASE+, S4)', () => {
       opensAt,
       sizes: [{ label: '52', stock: 3 }],
       priceMinor: 480_000,
-      addons: [
-        { label: 'Engraving', priceMinor: 15_000 },
-        { label: 'Gift box', priceMinor: 0 },
-      ],
     });
     await t.db.updateTable('drops').set({ title: 'MONOLITHE — LIVE' }).where('id', '=', r.id).execute();
     const a = await createAccount(t.db);
@@ -120,8 +116,12 @@ describe('invoices and credit notes (plan LIVE RELEASE+, S4)', () => {
     await f.live.press(a.id, r.id, token);
     clock.advance(1500);
     await f.live.secure(a.id, r.id, token, a.actor);
-    await f.live.setAddons(a.id, r.id, r.addons.map((x) => x.id), a.actor);
     await f.live.confirm(a.id, r.id, a.actor);
+    // A sale of before lot Q2 (N15): its release add-ons as that PAY wrote them.
+    await legacyLiveAddons(t.db, r.id, a.id, [
+      { label: 'Engraving', priceMinor: 15_000 },
+      { label: 'Gift box', priceMinor: 0 },
+    ]);
     const live = (await t.db.selectFrom('orders').select('id').where('account_id', '=', a.id).executeTakeFirstOrThrow()).id;
     await orders().setBuyer(live, { name: 'Ada Zurbaran-Quill', address: '12 rue Imaginaire\n75003 Paris' }, admin);
     const view = await pay(live);

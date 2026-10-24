@@ -31,9 +31,10 @@ import type { Actor } from '../../src/server/types.js';
 import { createAdmin, createHarness, seedCatalog, type Harness } from '../api/support.js';
 import { giveSizes } from '../support/draws.js';
 import { packAndShip, stockPieces, type StockedPiece } from '../support/fulfil.js';
-import { createAccount } from '../support/live.js';
+import { createAccount, createSetLiveRelease, liveAddon, liveFixtureOn, pieceSize } from '../support/live.js';
 
 const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
 const DAY = 86_400_000;
 
 async function refusal(p: Promise<unknown>): Promise<{ code: string; status: number; message: string }> {
@@ -211,8 +212,8 @@ describe('the set sold (plan MACRO M3 §5.2, T1 to T3)', () => {
     }
   }
 
-  it('makes the set sale and one order per piece, its share its price, in one parcel, the shipping and a release add-on on the first', async () => {
-    const sold = await sell({ addons: [{ id: randomUUID(), label: 'GIFT BOX', priceMinor: 1500 }], surprise: 'A note inside.' });
+  it('makes the set sale and one order per piece, its share its price, in one parcel, the shipping on the first, no add-on snapshot', async () => {
+    const sold = await sell({ surprise: 'A note inside.' });
     expect(sold.sale).toMatchObject({ set_id: set.id, drop_id: draw, account_id: sold.accountId, price_minor: 100_000, currency: 'EUR', shopify_line_item_id: null });
     const [first, second] = sold.orders;
     expect(sold.orders.map((o) => [o.channel, o.drop_entry_id, o.piece, o.set_sale_id, o.set_piece, o.model_id, o.size_label, o.price_minor, o.currency])).toEqual([
@@ -223,11 +224,11 @@ describe('the set sold (plan MACRO M3 §5.2, T1 to T3)', () => {
     const skus = await db().selectFrom('skus').select(['id', 'model_id', 'size_label']).where('id', 'in', [first!.sku_id!, second!.sku_id!]).execute();
     expect(skus.map((k) => [k.model_id, k.size_label]).sort()).toEqual([[chain, '45'], [ring, '52']].sort());
     expect((await db().selectFrom('drop_sizes').select('sku_id').where('id', '=', ring52).executeTakeFirstOrThrow()).sku_id).toBe(first!.sku_id);
-    // One parcel: the second travels with the first, its shipping the first's service at 0; the add-on on the first.
+    // One parcel: the second travels with the first, its shipping the first's service at 0. Lot Q2, step Q2.4 (D2, N15):
+    // no snapshot on any (a set's add-ons are units, per set, on its first piece's order: the next case).
     expect(second!.with_order_id).toBe(first!.id);
     expect([first!.shipping_service, first!.shipping_minor, second!.shipping_service, second!.shipping_minor]).toEqual(['STANDARD', 2000, 'STANDARD', 0]);
-    expect(first!.addons.map((a) => a.label)).toEqual(['GIFT BOX']);
-    expect(second!.addons).toEqual([]);
+    expect([first!.addons, second!.addons]).toEqual([[], []]);
     expect([first!.surprise, second!.surprise]).toEqual(['A note inside.', 'A note inside.']);
     expect((await parcelOrders(db(), first!.id)).map((o) => o.id)).toEqual([first!.id, second!.id]);
     // Audited set.sale; each order.create names the set sale.
@@ -459,5 +460,55 @@ describe('the set sold (plan MACRO M3 §5.2, T1 to T3)', () => {
       { piece: 1, size: '52' },
       { piece: 2, size: '45' },
     ]);
+  });
+
+  it('a set\'s LIVE entry with ENGRAVING and its words: one engraving unit and the words on each set\'s first piece\'s order, neither on the set\'s other pieces\' orders (lot Q2, step Q2.4, D25)', async () => {
+    const f = await liveFixtureOn(h.ctx, h.clock);
+    const engraving = await liveAddon(f, { name: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000, engraving: true });
+    const t0 = new Date(h.clock.now().getTime() + 2 * HOUR);
+    h.clock.set(new Date(t0.getTime() - HOUR));
+    const r = await createSetLiveRelease(f, {
+      setId: set.id,
+      opensAt: t0,
+      sizes: [
+        { piece: 1, label: '52', stock: 2 },
+        { piece: 2, label: '45', stock: 2 },
+      ],
+      perAccount: 2,
+      addonIds: [engraving],
+    });
+    const a = await createAccount(db());
+    h.clock.set(new Date(t0.getTime() - MINUTE));
+    await f.live.enter(a.id, r.id, { sizes: [{ piece: 1, sizeId: pieceSize(r, 1, '52') }, { piece: 2, sizeId: pieceSize(r, 2, '45') }], quantity: 2 }, a.actor);
+    h.clock.set(t0);
+    await f.live.advance(r.id);
+    const token = (await f.live.entry(a.id, r.id))!.turn!.token!;
+    await f.live.press(a.id, r.id, token);
+    h.clock.advance(1500);
+    await f.live.secure(a.id, r.id, token, a.actor);
+    // One per set (D25): two sets, two units at PAY's total.
+    const held = await f.live.setAddons(a.id, r.id, [{ addonId: engraving, text: 'A. & L.' }], a.actor);
+    expect(held.addonItems).toEqual([{ addonId: engraving, name: 'ENGRAVING', line: 'Your initials inside the band', units: 2, priceMinor: 15_000, text: 'A. & L.' }]);
+    expect(held.totalMinor).toBe(2 * (200_000 + 15_000));
+    await f.live.confirm(a.id, r.id, a.actor);
+    const placed = await db()
+      .selectFrom('orders')
+      .select(['id', 'piece', 'set_piece', 'engraving_text', 'engraving_by', 'engraving_minor', 'addons'])
+      .where('live_entry_id', '=', held.id)
+      .orderBy('piece')
+      .execute();
+    const units = await db().selectFrom('order_addon_items').select(['order_id', 'addon_id', 'price_minor', 'location_id']).where('order_id', 'in', placed.map((o) => o.id)).execute();
+    expect(
+      placed.map((o) => [o.piece, o.set_piece, o.engraving_text, o.engraving_by, o.engraving_minor, o.addons, units.filter((u) => u.order_id === o.id).map((u) => [u.addon_id, u.price_minor, u.location_id])]),
+    ).toEqual([
+      [1, 1, 'A. & L.', 'COLLECTOR', null, [], [[engraving, 15_000, null]]],
+      [2, 2, null, null, null, [], []],
+      [3, 1, 'A. & L.', 'COLLECTOR', null, [], [[engraving, 15_000, null]]],
+      [4, 2, null, null, null, [], []],
+    ]);
+    // Cancelled whole, so that no later sale of these sizes waits behind its pieces.
+    await orders().transition(placed[0]!.id, { to: 'CANCELLED', note: 'Test over.' }, operator);
+    await orders().transition(placed[2]!.id, { to: 'CANCELLED', note: 'Test over.' }, operator);
+    await h.ctx.services.addons.setAside(engraving, f.admin);
   });
 });

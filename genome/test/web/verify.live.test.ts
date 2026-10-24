@@ -15,7 +15,9 @@ import { CODE01, CODE01_RINGS } from '../../src/core/code/profile.js';
 import { unframeCodeData } from '../../src/core/payload.js';
 import { LIVE } from '../../src/web/verify/copy.js';
 import {
-  addonChoices,
+  holdChoice,
+  holdRows,
+  receiptAddonRows,
   bandModel,
   CHANGE_RETRY_MS,
   clockOffset,
@@ -67,13 +69,17 @@ import {
 import { MONOGRAM_BOUNDS } from '../../src/core/render/monogram.js';
 import { SEAL_C_MONOGRAM_WIDTH, SEAL_RINGS, SPECIMEN_GLYPHS, sealCMarkup, sealCMonogramPlace, specimenData } from '../../src/web/verify/live-seal.js';
 import { StoryCards } from '../../src/web/verify/story-card.js';
-import type { LiveAccountEntry, LiveCard, LiveEndedSheet, LiveEntry, LiveQueue, LiveRoom, LiveSheet } from '../../src/web/verify/types.js';
+import type { AddonOfferItem, LiveAccountEntry, LiveCard, LiveEndedSheet, LiveEntry, LiveQueue, LiveRoom, LiveSheet } from '../../src/web/verify/types.js';
+import { withUnits } from '../../src/web/verify/addons-model.js';
 
 const ID = '8a1d0c55-4b2e-4f3a-9c1d-0e5f6a7b8c9d';
 const ENTRY = '01edcb93-7b6d-4e5f-8a9b-0c1d2e3f4a5b';
 const S48 = '11111111-1111-4111-8111-111111111111';
 const S52 = '22222222-2222-4222-8222-222222222222';
 const S56 = '33333333-3333-4333-8333-333333333333';
+/** Two catalogue add-ons a release picks (lot Q2, step Q2.4). */
+const E1 = '44444444-4444-4444-8444-444444444444';
+const E2 = '55555555-5555-4555-8555-555555555555';
 const media = (n: number) => `/api/v1/media/${n.toString(16).padStart(2, '0').repeat(32)}`;
 /** T0: Sunday 11 October 2026, 19:00 in Paris (17:00 UTC). */
 const T0 = Date.parse('2026-10-11T17:00:00.000Z');
@@ -117,10 +123,6 @@ function sheet(extra: Partial<LiveSheet> = {}): LiveSheet {
       { id: S48, label: '48', stock: 3 },
       { id: S52, label: '52', stock: 2 },
       { id: S56, label: '56', stock: 0 },
-    ],
-    addons: [
-      { id: 'a1', label: 'Engraving', line: ' Your initials ', priceMinor: 15_000 },
-      { id: 'a2', label: 'Gift box', line: null, priceMinor: 9_000 },
     ],
     interest: 0,
     roomOpensMinutes: 5,
@@ -170,7 +172,6 @@ function entry(extra: Partial<LiveEntry> = {}): LiveEntry {
     confirmedAt: null,
     endedAt: null,
     letIn: false,
-    addons: [],
     currency: 'EUR',
     priceMinor: 480_000,
     totalMinor: 480_000,
@@ -575,12 +576,32 @@ describe('the one queue, the turn and the piece held', () => {
     expect(windowLeft('x', iso(T0), T0)).toEqual({ remainingMs: 0, fraction: 0 });
   });
 
-  it('offers the add-ons with their price per piece, the one kept when chosen', () => {
-    const held = entry({ status: 'SECURED', addons: [{ id: 'a1', label: 'Engraving', priceMinor: 12_000 }] });
-    expect(addonChoices(sheet(), held)).toEqual([
-      { id: 'a1', label: 'ENGRAVING', line: 'Your initials', price: '+ € 120', selected: true },
-      { id: 'a2', label: 'GIFT BOX', line: null, price: '+ € 90', selected: false },
+  it('offers its release\'s pick of the catalogue as rows chosen or not (lot Q2, step Q2.4, N1), sends them with the engraving\'s words, and writes the receipt\'s add-ons as sold, before lot Q2 from its orders\' snapshot', () => {
+    const offer = (addonId: string, name: string, priceMinor: number, more: Partial<AddonOfferItem> = {}): AddonOfferItem => ({ addonId, name, line: null, priceMinor, currency: 'EUR', maxUnits: 1, engraving: false, ...more });
+    const held = entry({
+      status: 'SECURED',
+      quantity: 2,
+      addonOffer: [offer(E1, 'Engraving', 15_000, { engraving: true, textMax: 20, line: ' Your initials ' }), offer(E2, 'Gift box', 9_000)],
+      addonItems: [{ addonId: E1, name: 'Engraving', line: 'Your initials', units: 2, priceMinor: 15_000, text: 'M. B.' }],
+    });
+    const rows = holdRows(held);
+    expect(rows.map((r) => [r.name, r.line, r.price, r.units, r.max])).toEqual([
+      ['ENGRAVING', 'Your initials', '+ € 150', 1, 1],
+      ['GIFT BOX', null, '+ € 90', 0, 1],
     ]);
+    // A tap not sent yet wins; a row chosen is one, whatever the pieces.
+    expect(holdRows(held, new Map([[E2, 3]])).map((r) => r.units)).toEqual([0, 1]);
+    // A row no longer offered, chosen, stays to be let go.
+    expect(holdRows({ ...held, addonOffer: [] }).map((r) => [r.name, r.units, r.max])).toEqual([['ENGRAVING', 1, 1]]);
+    expect(holdChoice(withUnits(rows, E2, 1), held)).toEqual([
+      { addonId: E1, text: 'M. B.' },
+      { addonId: E2, text: null },
+    ]);
+    // The receipt: the units as sold (× units when more than one), and an entry CONFIRMED before lot Q2 its snapshot × pieces.
+    const sold = entry({ status: 'CONFIRMED', quantity: 2, addonItems: [{ addonId: E1, name: 'Engraving', line: null, units: 2, priceMinor: 15_000, text: null }] });
+    expect(receiptAddonRows(sold, formatMoney)).toEqual([['ENGRAVING × 2', '€ 300']]);
+    const before = entry({ status: 'CONFIRMED', legacyAddons: [{ label: 'Engraving', priceMinor: 15_000 }], addonItems: [] });
+    expect(receiptAddonRows(before, (minor, c) => `+ ${formatMoney(minor, c)}`)).toEqual([['ENGRAVING', '+ € 150']]);
   });
 });
 

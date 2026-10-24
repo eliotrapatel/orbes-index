@@ -146,6 +146,39 @@ for (const backend of BACKENDS) {
       expect(await stockLevel(handle.db, sku, france)).toEqual({ onHand: 1, reserved: 1, available: 0 });
     });
 
+    it('two entries of two pieces PAY together for the last three units of an add-on with stock: one unit per piece order, never oversold, the fourth left out NONE_LEFT; a service\'s units never locked, all given (lot Q2, step Q2.4, N1)', async () => {
+      const box = await ctx.services.addons.create({ name: 'Q24 TRAVEL CASE', skuCode: 'ADD-Q24-CASE', prices: { EUR: 6_000 }, offeredAt: { live: true, draw: false, salon: false, orders: false } }, f.admin);
+      const wrap = await ctx.services.addons.create({ kind: 'SERVICE', name: 'Q24 GIFT WRAPPING', skuCode: 'ADD-Q24-WRAP', prices: { EUR: 1_500 }, offeredAt: { live: true, draw: false, salon: false, orders: false } }, f.admin);
+      const location = (await handle.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
+      await receive(box.sku.id, location, 3);
+      const opensAt = new Date(clock.now().getTime() + HOUR);
+      const sales = [];
+      for (let i = 0; i < 2; i++) sales.push({ r: await createLiveRelease(f, { opensAt, sizes: [{ label: '58', stock: 2 }], perAccount: 2, addonIds: [box.id, wrap.id] }), a: await accountOfTier(f, 0) });
+      clock.set(new Date(opensAt.getTime() - MINUTE));
+      for (const s of sales) await f.live.enter(s.a.id, s.r.id, { sizeId: s.r.sizes[0]!.id, quantity: 2 }, s.a.actor);
+      clock.set(opensAt);
+      for (const s of sales) await f.live.advance(s.r.id);
+      for (const s of sales) await f.live.press(s.a.id, s.r.id, (await f.live.entry(s.a.id, s.r.id))!.turn!.token!);
+      clock.advance(1500);
+      for (const s of sales) {
+        await f.live.secure(s.a.id, s.r.id, (await f.live.entry(s.a.id, s.r.id))!.turn!.token!, s.a.actor);
+        // Two pieces take two units each: three are left, so each may choose it.
+        await f.live.setAddons(s.a.id, s.r.id, [{ addonId: box.id }, { addonId: wrap.id }], s.a.actor);
+      }
+      const paid: { addonsLeftOut?: { name: string; units: number; reason: string }[] }[] = [];
+      expect(await together(sales.map((s) => async () => paid.push(await f.live.confirm(s.a.id, s.r.id, s.a.actor))))).toEqual(['ok', 'ok']);
+      const orders = await handle.db.selectFrom('orders').select(['id', 'drop_id', 'piece']).where('drop_id', 'in', sales.map((s) => s.r.id)).execute();
+      const units = await handle.db.selectFrom('order_addon_items').select(['order_id', 'addon_id', 'status']).where('order_id', 'in', orders.map((o) => o.id)).execute();
+      const cases = units.filter((u) => u.addon_id === box.id);
+      // Never oversold: the three units held, at most one on each piece's order; the fourth left out, said at PAY.
+      expect(cases.map((u) => u.status)).toEqual(['HELD', 'HELD', 'HELD']);
+      expect(new Set(cases.map((u) => u.order_id)).size).toBe(3);
+      expect(await stockLevel(handle.db, box.sku.id, location)).toEqual({ onHand: 3, reserved: 3, available: 0 });
+      expect(paid.flatMap((p) => p.addonsLeftOut ?? [])).toEqual([{ addonId: box.id, name: 'Q24 TRAVEL CASE', units: 1, reason: 'NONE_LEFT' }]);
+      // The service: one unit on each of the four orders, held nowhere.
+      expect(units.filter((u) => u.addon_id === wrap.id).map((u) => u.order_id).sort()).toEqual(orders.map((o) => o.id).sort());
+    });
+
     it('a transfer and an order racing for the last piece: one of them has it, never both', async () => {
       for (let round = 0; round < 4; round++) {
         const sku = await skuOf(`6${round}`);

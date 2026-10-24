@@ -15,7 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { orderReference, type OrderTransitionInput } from '../../src/server/services/orders.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { jpegPhoto } from '../support/images.js';
-import { createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { createLiveRelease, holdPieces, legacyLiveAddons, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { accountClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
 import { countPiecesIn, packAndShip, stockPieces } from '../support/fulfil.js';
 import { ensureSku } from '../../src/server/services/stock.js';
@@ -66,7 +66,7 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
 
     // A LIVE RELEASE: two pieces in size 52, with the engraving, PAY.
     const opensAt = new Date(h.clock.now().getTime() + HOUR);
-    const r = await createLiveRelease(f, { opensAt, sizes: [{ label: '52', stock: 5 }], perAccount: 2, priceMinor: 480_000, addons: [{ label: 'Engraving', priceMinor: 25_000 }] });
+    const r = await createLiveRelease(f, { opensAt, sizes: [{ label: '52', stock: 5 }], perAccount: 2, priceMinor: 480_000 });
     await h.ctx.db.updateTable('drops').set({ title: 'MONOLITHE — LIVE' }).where('id', '=', r.id).execute();
     const actor = { type: 'account' as const, id: mineId };
     h.clock.set(new Date(opensAt.getTime() - MINUTE));
@@ -77,8 +77,9 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
     await f.live.press(mineId, r.id, token);
     h.clock.advance(1500);
     await f.live.secure(mineId, r.id, token, actor);
-    await f.live.setAddons(mineId, r.id, r.addons.map((x) => x.id), actor);
     await f.live.confirm(mineId, r.id, actor);
+    // A sale of before lot Q2 (N15): its release's engraving as that PAY wrote it on each piece's order.
+    await legacyLiveAddons(h.ctx.db, r.id, mineId, [{ label: 'Engraving', priceMinor: 25_000 }]);
     const live = await h.ctx.db.selectFrom('orders').select('id').where('account_id', '=', mineId).where('channel', '=', 'LIVE').orderBy('piece').execute();
     [ids.live1, ids.live2] = live.map((o) => o.id) as [string, string];
 

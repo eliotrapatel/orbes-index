@@ -17,8 +17,8 @@
  *                  its invoice says it is « Part of THE SET <name> » (services/invoices.ts). The collector reads one
  *                  price: the set's (YOUR ORDERS' `set`, services/orders.ts forAccount).
  *   on the first   the shipping (THE PROGRAM's free shipping or its fee) is on the entry's first order, the others travel
- *                  with it, as a LIVE entry of several pieces; a release add-on (`live_addons`) of a set's release is per
- *                  set, on its first piece's order.
+ *                  with it, as a LIVE entry of several pieces; an add-on chosen with a set's LIVE entry is per set, one
+ *                  unit on its first piece's order (lot Q2, step Q2.4, D25: services/orders.ts carries the choices).
  *   cancel         a set sold is cancelled whole (§15 note 12): cancelling one of its orders cancels its set's other open
  *                  orders in the same transaction, refused (409 SET_SHIPPED) once one of them has shipped
  *                  (services/orders.ts transition); a size exchange's EXCHANGE order, made after it shipped, is cancelled
@@ -34,7 +34,7 @@
  * the welcome gift and the catalogue add-ons chosen go on the entry's first order there, as for a model's entry.
  */
 import type { Db } from '../db/connection.js';
-import type { OrderAddonSnapshot, OrderRow, SetSaleRow } from '../db/schema.js';
+import type { OrderRow, SetSaleRow } from '../db/schema.js';
 import type { Actor } from '../types.js';
 import type { AuditRecordInput } from './audit.js';
 import { createOrder, orderReference, shippingFor, travellingShipping } from './orders.js';
@@ -92,8 +92,6 @@ export interface SetSaleInput {
   currency: string | null;
   /** Where its orders are served from (the release's location, else the default). */
   locationId: string;
-  /** The release's add-ons as sold with this set (`live_addons`), on its first piece's order. */
-  addons?: readonly OrderAddonSnapshot[];
   /** The release's surprise, on each of its orders (as on each piece of a LIVE entry). */
   surprise?: string | null;
   /** The entry's first order when this set is not its first: every order travels with it. */
@@ -163,8 +161,9 @@ export async function ordersForSetSale(
         skuId,
         priceMinor: shares[k] ?? null,
         currency: priced ? input.currency : null,
-        // A release add-on of a set's release is per set: on its first piece's order.
-        addons: k === 0 ? [...(input.addons ?? [])] : [],
+        // Lot Q2, step Q2.4 (D2, N15): no add-on snapshot; a set's add-ons are units, per set, on its first piece's
+        // order (orders.ts setOrdersForLiveEntry carries them there).
+        addons: [],
         surprise: input.surprise ?? null,
         locationId: input.locationId,
         reservedAt: input.reservedAt,

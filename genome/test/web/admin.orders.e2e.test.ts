@@ -54,7 +54,7 @@ import { codeSource, phonePhoto } from '../e2e/support.js';
 import { packAndShip, stockPieces, type StockedPiece } from '../support/fulfil.js';
 import { writePng } from '../support/image-io.js';
 import { jpegPhoto } from '../support/images.js';
-import { LIVE_TEST_PACE, createAccount, holdPieces } from '../support/live.js';
+import { LIVE_TEST_PACE, createAccount, holdPieces, legacyLiveAddons } from '../support/live.js';
 import { poolDraw } from '../support/draws.js';
 import { ReturnsWorld } from '../support/returns.js';
 
@@ -241,7 +241,6 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
       .where('id', '=', drop.id)
       .execute();
     const size = await ctx.db.insertInto('drop_sizes').values({ drop_id: drop.id, label: '54', position: 1, stock: 3 }).returning('id').executeTakeFirstOrThrow();
-    const addon = await ctx.db.insertInto('live_addons').values({ drop_id: drop.id, label: 'ENGRAVING', line: null, price_minor: 15_000, position: 1 }).returning('id').executeTakeFirstOrThrow();
     const buyer = await createAccount(ctx.db);
     await ctx.services.live.enter(buyer.id, drop.id, { sizeId: size.id, quantity: 1 }, buyer.actor);
     offset = 3 * MINUTE;
@@ -250,8 +249,9 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await ctx.services.live.press(buyer.id, drop.id, token);
     offset += 1500;
     await ctx.services.live.secure(buyer.id, drop.id, token, buyer.actor);
-    await ctx.services.live.setAddons(buyer.id, drop.id, [addon.id], buyer.actor);
     await ctx.services.live.confirm(buyer.id, drop.id, buyer.actor);
+    // A sale of before lot Q2 (N15): its release's engraving as that PAY wrote it.
+    await legacyLiveAddons(ctx.db, drop.id, buyer.id, [{ label: 'ENGRAVING', priceMinor: 15_000 }]);
     offset = 0;
     const entry = await ctx.db.selectFrom('live_entries').select('id').where('account_id', '=', buyer.id).executeTakeFirstOrThrow();
     liveEntryId = entry.id;

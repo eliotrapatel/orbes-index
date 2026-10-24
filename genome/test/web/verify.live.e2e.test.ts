@@ -50,7 +50,7 @@ import { createManualClock, SYSTEM_ACTOR } from '../../src/server/types.js';
 import { LIVE, RELEASES, STORY } from '../../src/web/verify/copy.js';
 import { countdown, PARIS, zonedTime } from '../../src/web/verify/live-model.js';
 import { jpegPhoto } from '../support/images.js';
-import { createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture, type LiveRelease, type LiveReleaseOptions } from '../support/live.js';
+import { createLiveRelease, holdPieces, liveAddon, liveFixtureOn, type LiveFixture, type LiveRelease, type LiveReleaseOptions } from '../support/live.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
 import { focusRingContrast, keepsVault, screenChecks } from '../support/vault-checks.js';
 import { CHROMIUM_PATH, launchChromium, mobileContext, startVerifyServer, type VerifyServer } from './verify.harness.js';
@@ -217,7 +217,9 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     const t0 = new Date(Date.now() + 45_000);
     // A turn of 90 s: the rival still holds its turn when this phone, behind it at the line's frame, first reads its state
     // (a moment of its own within LIVE_QUEUE_SPREAD_MS, a minute), so the pieces left read its held piece (B3 below).
-    const r = await release({ opensAt: t0, minTier: 1, turnSeconds: 90, sizes: [{ label: '50', stock: 2 }, { label: '52', stock: 1 }], addons: [{ label: 'ENGRAVING', line: 'Your initials', priceMinor: 15_000 }, { label: 'GIFT BOX', priceMinor: 9_000 }] });
+    // Lot Q2, step Q2.4 (D2): the release picks two catalogue services.
+    const addonIds = [await liveAddon(f, { name: 'ENGRAVING', line: 'Your initials', priceMinor: 15_000, engraving: true }), await liveAddon(f, { name: 'GIFT BOX', priceMinor: 9_000 })];
+    const r = await release({ opensAt: t0, minTier: 1, turnSeconds: 90, sizes: [{ label: '50', stock: 2 }, { label: '52', stock: 1 }], addonIds });
     const laterAt = new Date(Date.now() + 3 * 86_400_000);
     const later = await release({ opensAt: laterAt, roomOpensMinutes: 5, minTier: 2 });
     const [s50, s52] = r.sizes;
@@ -447,10 +449,14 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     expect(await pay.getAttribute('aria-describedby')).toBe('live-pay-left');
     await expect.poll(async () => Number(await pay.evaluate((b) => (b as HTMLElement).style.getPropertyValue('--live-pay-f'))), POLL).toBeGreaterThan(0.4);
     // PAY is the light now (D39), no filled ground: no control of the screen is filled ivory.
-    await keepsVault(page, null, ['ENGRAVING + € 150', 'GIFT BOX + € 90', 'PAY · € 5 050', 'RELEASE MY PLACE']);
-    await page.getByRole('button', { name: /ENGRAVING/ }).click();
+    // Lot Q2, step Q2.4: the release's catalogue add-ons as production draws their rows (5b in Q2.8), a row chosen or not.
+    // Every control at its tap floor, the rows' steppers included (named by their figures' row, read as icons here).
+    await keepsVault(page, null, ['PAY · € 5 050', 'RELEASE MY PLACE']);
+    expect(await page.locator('.live__items .n-step__btn').count()).toBe(4);
+    await page.getByRole('button', { name: 'One more ENGRAVING' }).click();
     await expect.poll(async () => norm((await pay.getAttribute('aria-label')) ?? ''), POLL).toBe('PAY · € 5 200');
-    expect(await page.getByRole('button', { name: /ENGRAVING/ }).getAttribute('aria-pressed')).toBe('true');
+    await textOf(page.locator('.live__items .n-addons__item.is-chosen .n-addons__name'), 'ENGRAVING');
+    expect(await page.getByRole('button', { name: 'One more ENGRAVING' }).isDisabled()).toBe(true);
     await keepsVault(page, null, ['PAY · € 5 200']);
     expect(await focusRingContrast(page, pay)).toBeGreaterThanOrEqual(3);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-secured.png'), fullPage: true });

@@ -415,7 +415,7 @@ describe('ApiClient', () => {
     await api.liveLeave(ID);
     await api.livePress(ID, 'turn');
     await api.liveSecure(ID, 'turn');
-    expect(await api.liveAddons(ID, ['a1'])).toEqual(entry);
+    expect(await api.liveAddons(ID, [{ addonId: 'a1' }])).toEqual(entry);
     await api.liveConfirm(ID);
     await api.liveGiveBack(ID);
     expect(await api.liveMine()).toEqual([]);
@@ -430,7 +430,7 @@ describe('ApiClient', () => {
       ['POST', `/api/v1/live/${ID}/leave`, {}],
       ['POST', `/api/v1/live/${ID}/press`, { token: 'turn' }],
       ['POST', `/api/v1/live/${ID}/secure`, { token: 'turn' }],
-      ['PUT', `/api/v1/live/${ID}/addons`, { addonIds: ['a1'] }],
+      ['PUT', `/api/v1/live/${ID}/addons`, { items: [{ addonId: 'a1' }] }],
       ['POST', `/api/v1/live/${ID}/confirm`, {}],
       ['POST', `/api/v1/live/${ID}/release`, {}],
     ]);

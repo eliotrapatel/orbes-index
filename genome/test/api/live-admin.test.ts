@@ -121,7 +121,8 @@ describe('LIVE RELEASES: the console', () => {
           { label: '52', stock: 3 },
           { label: '54', stock: 2 },
         ],
-        addons: [],
+        // Lot Q2, step Q2.4 (D2): no release add-on; its pick of the catalogue (none offered yet: N7 picks none).
+        addonPick: [],
         tierWindows: [],
         access: { models: [], collection: null, text: 'every ORBES account' },
         announceAt: null,
@@ -160,10 +161,8 @@ describe('LIVE RELEASES: the console', () => {
         accessModelIds: [other, f.modelId],
         accessCollectionId: collection,
         quantityLine: '5 PIECES · NEVER MORE',
-        addons: [
-          { label: 'ENGRAVING', line: 'Your initials, by hand', priceMinor: 15_000 },
-          { label: 'GIFT BOX', priceMinor: 0 },
-        ],
+        // Lot Q2, step Q2.4 (D2): its add-ons are its pick of the catalogue (the next cases), none here.
+        addonIds: [],
         announceAt: iso(HOUR),
         silhouetteAt: iso(2 * HOUR),
         nameAt: iso(3 * HOUR),
@@ -183,10 +182,7 @@ describe('LIVE RELEASES: the console', () => {
         minTier: 2,
         tierPriority: false,
         quantityLine: '5 PIECES · NEVER MORE',
-        addons: [
-          { label: 'ENGRAVING', line: 'Your initials, by hand', priceMinor: 15_000 },
-          { label: 'GIFT BOX', line: null, priceMinor: 0 },
-        ],
+        addonPick: [],
         tierWindows: [
           { tier: 2, turnSeconds: 60, payMinutes: null },
           { tier: 3, turnSeconds: null, payMinutes: 10 },
@@ -206,7 +202,8 @@ describe('LIVE RELEASES: the console', () => {
         [{ sizes: [{ label: '52', stock: 1 }, { label: '52', stock: 1 }] }, 400, /listed twice/],
         [{ sizes: [{ label: 'S', stock: 1 }, { label: 's', stock: 1 }] }, 400, /listed twice/],
         [{ sizes: Array.from({ length: 25 }, (_, i) => ({ label: `S${i}`, stock: 1 })) }, 400, 'VALIDATION_FAILED'],
-        [{ addons: Array.from({ length: 7 }, (_, i) => ({ label: `A${i}`, priceMinor: 1 })) }, 400, 'VALIDATION_FAILED'],
+        // Lot Q2, step Q2.4 (D2): the release add-ons are gone, their field unknown.
+        [{ addons: [{ label: 'ENGRAVING', priceMinor: 1 }] }, 400, /unknown fields: addons/],
         [{ currency: 'JPY' }, 400, 'VALIDATION_FAILED'],
         [{ priceMinor: -1 }, 400, 'VALIDATION_FAILED'],
         [{ perAccount: 6 }, 400, 'VALIDATION_FAILED'],
@@ -244,7 +241,6 @@ describe('LIVE RELEASES: the console', () => {
       const [s52, s54] = r.sizes as Json[];
       const res = await op.patch(`/api/admin/live/${r.id}`, {
         sizes: [{ id: s54!.id, label: '54', stock: 4 }, { label: '56', stock: 1 }, { id: s52!.id, label: '52', stock: 3 }],
-        addons: [{ label: 'ENGRAVING', priceMinor: 9_000 }],
         title: 'THE RING',
       });
       expect(res.statusCode, res.body).toBe(200);
@@ -307,7 +303,7 @@ describe('LIVE RELEASES: the console', () => {
     });
 
     it('sets the after-room with the release (plan LIVE RELEASE+, choice 2): its own page never set, published, cancelled nor listed on its own', async () => {
-      const afterRoom = { modelId: f.modelId, priceMinor: 90_000, sizes: [{ label: 'ONE SIZE', stock: 2 }], addons: [{ label: 'GIFT BOX', priceMinor: 5_000 }], delayMinutes: 5 };
+      const afterRoom = { modelId: f.modelId, priceMinor: 90_000, sizes: [{ label: 'ONE SIZE', stock: 2 }], addonIds: [], delayMinutes: 5 };
       const r = await create({ afterRoom });
       expect(r.afterRoom).toMatchObject({ state: 'WAITING', priceMinor: 90_000, delayMinutes: 5, lengthMinutes: 15, quantity: 2, sizes: [{ label: 'ONE SIZE', stock: 2 }], guests: 0 });
       expect(r.afterRoomOf).toBeNull();
@@ -584,7 +580,7 @@ describe('LIVE RELEASES: the console', () => {
 
   describe('the live board, its stream and its controls', () => {
     it('counts per size and overall, lists the line with the emails masked for an AUDITOR, and runs every control with its role', async () => {
-      const r = await create({ inMinutes: 10, perAccount: 2, addons: [{ label: 'ENGRAVING', priceMinor: 9_000 }] });
+      const r = await create({ inMinutes: 10, perAccount: 2, addonIds: [] });
       await op.post(`/api/admin/live/${r.id}/publish`, {});
       const [s52, s54] = r.sizes as Json[];
       h.clock.advance(6 * MINUTE);
@@ -755,7 +751,12 @@ describe('LIVE RELEASES: the console', () => {
 
   describe('Client Services: the orders', () => {
     it('follows the confirmed reservations as orders, one per piece, narrowed to the release; pays or cancels them there; the LIVE list is retired; a CSV', async () => {
-      const r = await create({ inMinutes: 10, perAccount: 2, addons: [{ label: 'ENGRAVING', priceMinor: 15_000 }, { label: '=GIFT BOX', priceMinor: 0 }] });
+      // Lot Q2, step Q2.4 (D2): the release picks two catalogue services; each piece's order carries one unit of each chosen.
+      const make = async (name: string, skuCode: string, priceMinor: number) =>
+        (safeJson(await op.post('/api/admin/addons', { name, skuCode, kind: 'SERVICE', prices: { EUR: priceMinor }, offeredAt: { live: true, draw: false, salon: false, orders: false } })) as Json).id as string;
+      const engraving = await make('ENGRAVING', 'ADD-Q24-ENGRAVING', 15_000);
+      const giftBox = await make('=GIFT BOX', 'ADD-Q24-GIFT-BOX', 0);
+      const r = await create({ inMinutes: 10, perAccount: 2, addonIds: [engraving, giftBox] });
       await op.post(`/api/admin/live/${r.id}/publish`, {});
       h.clock.advance(6 * MINUTE);
       const a = await customer(5);
@@ -766,10 +767,10 @@ describe('LIVE RELEASES: the console', () => {
       await f.live.advance(r.id);
       await secure(a, r.id);
       await secure(b, r.id);
-      const addons = (safeJson(await op.get(`/api/admin/live/${r.id}`)) as Json).addons as Json[];
-      await f.live.setAddons(a.id, r.id, [addons[0]!.id, addons[1]!.id], a.actor);
+      expect(((safeJson(await op.get(`/api/admin/live/${r.id}`)) as Json).addonPick as Json[]).map((x) => x.id)).toEqual([engraving, giftBox]);
+      await f.live.setAddons(a.id, r.id, [{ addonId: engraving }, { addonId: giftBox }], a.actor);
       // b's only add-on starts with « = »: its CSV cell starts with it, read as text.
-      await f.live.setAddons(b.id, r.id, [addons[1]!.id], b.actor);
+      await f.live.setAddons(b.id, r.id, [{ addonId: giftBox }], b.actor);
       await f.live.confirm(a.id, r.id, a.actor);
       h.clock.advance(SECOND);
       await f.live.confirm(b.id, r.id, b.actor);
@@ -831,6 +832,7 @@ describe('LIVE RELEASES: the console', () => {
       expect(maskedCsv.body).not.toContain(a.email);
       expect(maskedCsv.body).toContain(`${a.email[0]}***@example.com`);
       expect(createHash('sha256').update(maskedCsv.body).digest('hex')).not.toBe(createHash('sha256').update(csv.body).digest('hex'));
+      for (const id of [engraving, giftBox]) await op.post(`/api/admin/addons/${id}/set-aside`, {});
     });
   });
 
