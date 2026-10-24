@@ -1345,11 +1345,12 @@ const liveCurrency = (c: string | null): 'EUR' | 'GBP' | 'USD' | 'CHF' | null =>
 
 /**
  * The catalogue add-ons of entries (plan MACRO M3 §4.2): a SECURED entry's choices (priced in its release's currency
- * now) and what is offered with it, a CONFIRMED entry's units on its orders (one row per add-on and price).
+ * now) and what is offered with it (lot Q2, step Q2.3: what its release picked, with its LIVE switch on), a CONFIRMED
+ * entry's units on its orders (one row per add-on and price).
  */
 async function liveAddonItems(
   db: Db,
-  rows: readonly { id: string; status: LiveEntryStatus; currency: string | null; stock_location_id: string | null; parent_drop_id: string | null }[],
+  rows: readonly { id: string; drop_id: string; status: LiveEntryStatus; currency: string | null; stock_location_id: string | null; parent_drop_id: string | null }[],
 ): Promise<{ chosen: Map<string, ChosenAddon[]>; offer: Map<string, AddonOfferItem[]> }> {
   const secured = rows.filter((r) => r.status === 'SECURED');
   const currencies = new Map(secured.map((r) => [r.id, liveCurrency(r.currency)]));
@@ -1357,7 +1358,8 @@ async function liveAddonItems(
   const offer = new Map<string, AddonOfferItem[]>();
   for (const r of secured) {
     const currency = liveCurrency(r.currency);
-    if (currency !== null) offer.set(r.id, await addonOffer(db, await liveAddonLocation(db, r), currency));
+    // ONE OFFER RULE (lot Q2, step Q2.3): the LIVE switch on, and picked by the entry's release (an after-room's: its own).
+    if (currency !== null) offer.set(r.id, await addonOffer(db, { moment: 'LIVE', dropId: r.drop_id, locationId: await liveAddonLocation(db, r), currency }));
   }
   const confirmed = rows.filter((r) => r.status === 'CONFIRMED');
   if (confirmed.length > 0) {
@@ -1833,8 +1835,9 @@ export class LiveService {
   /**
    * ADD-ONS: the add-ons of the release chosen for a held piece (at most LIVE_ADDONS_MAX, each once), replacing the
    * previous choice, each with its price now. Plan MACRO M3 §4.2 (D2): `items`, when sent, replaces the catalogue
-   * add-ons chosen with it (services/order-addons.ts setChoices: offered at the release's location in its currency, that
-   * many available there, at most 3 of each), carried onto its order at PAY; left out, they stay as they were. Audited
+   * add-ons chosen with it (services/order-addons.ts setChoices: offered at the release's location in its currency, its
+   * LIVE switch on and picked by the release (lot Q2, step Q2.3; 409 ADDON_NOT_OFFERED), that many available there, at
+   * most 3 of each), carried onto its order at PAY; left out, they stay as they were. Audited
    * `drop.live.addons` with their ids (and the items, when sent).
    */
   async setAddons(accountId: string, dropId: string, addonIds: readonly string[], actor: Actor, items?: readonly AddonUnitsInput[]): Promise<LiveEntryView> {

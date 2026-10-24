@@ -125,7 +125,8 @@ export type SalonRequestFacts = SalonFacts & {
   suggestedSize: string | null;
   /**
    * Plan MACRO M3 §4.2 and §4.4 (D2): the catalogue add-ons the request form offers, when the model has a base price in a
-   * house currency: those available at the default location, priced in that currency; null otherwise.
+   * house currency: those available at the default location, priced in that currency, their salon switch on (lot Q2,
+   * step Q2.3); null otherwise.
    */
   addons: { currency: string; offer: AddonOfferItem[] } | null;
 };
@@ -328,7 +329,8 @@ export class SalonService {
     const kind = sizes.length >= 2 ? await sizeKindOf(this.db, modelId) : null;
     const suggested = kind === null ? null : matchSavedSize(kind, await savedMm(this.db, accountId.toLowerCase(), kind), sizes);
     const currency = await baseCurrency(this.db, modelId);
-    const addons = currency === null ? null : { currency, offer: await addonOffer(this.db, await defaultLocationId(this.db), currency) };
+    // ONE OFFER RULE (lot Q2, step Q2.3): the salon's switch alone (no release, no pick).
+    const addons = currency === null ? null : { currency, offer: await addonOffer(this.db, { moment: 'SALON', dropId: null, locationId: await defaultLocationId(this.db), currency }) };
     return { ...facts, request, sizes: sizes.map((z) => z.label), suggestedSize: suggested?.label ?? null, addons };
   }
 
@@ -374,7 +376,8 @@ export class SalonService {
           .values({ account_id: account, model_id: modelId, note: words, size_label: sizeLabel, created_at: this.clock() })
           .returning(['id', 'status', 'created_at'])
           .executeTakeFirstOrThrow();
-        // Plan MACRO M3 §4.2 (D2): the add-ons chosen with it, offered at the default location in the model's base currency.
+        // Plan MACRO M3 §4.2 (D2): the add-ons chosen with it, offered at the default location in the model's base currency
+        // (lot Q2, step Q2.3: those whose salon switch is on; no release, no pick).
         // (Kept in `addon_choices`, read by the console's Requests and the account's export; the audit entry stays as it was.)
         if (items.length > 0) await setChoices(tx, { shopRequestId: r.id }, items, { locationId: await defaultLocationId(tx), currency: await baseCurrency(tx, modelId) }, this.clock());
         await this.audit.record({ actor, action: 'shop.request', targetType: 'shop_request', targetId: r.id, details: { modelId, sized: sizeLabel !== null } }, tx);

@@ -166,6 +166,11 @@ export interface LiveReleaseOptions {
   closesAt?: Date;
   sizes?: { label: string; stock: number }[];
   addons?: { label: string; line?: string | null; priceMinor: number }[];
+  /**
+   * Lot Q2, step Q2.3 (D3): the catalogue add-ons its purchase offers, in order (`drop_addons`); none by default. A
+   * fixture picks explicitly, never the console's default of a new release (N7): a release offers exactly what it is given.
+   */
+  addonIds?: string[];
   minTier?: number;
   tierPriority?: boolean;
   roomOpensMinutes?: number;
@@ -257,7 +262,9 @@ export async function createLiveRelease(f: LiveFixture, o: LiveReleaseOptions): 
       .execute();
   }
   if (o.accessModels?.length) await f.db.insertInto('live_access_models').values(o.accessModels.map((m) => ({ drop_id: id, model_id: m }))).execute();
-  if (o.afterRoom) await f.liveConsole.update(id, { afterRoom: o.afterRoom }, f.admin);
+  // Q2.3: its pick exactly as given (the draw it was created as took the draws' default: replaced), its after-room's too.
+  await pickAddons(f.db, id, o.addonIds ?? []);
+  if (o.afterRoom) await f.liveConsole.update(id, { afterRoom: { addonIds: [], ...o.afterRoom } }, f.admin);
   if (o.published !== false) await f.db.updateTable('drops').set({ published_at: f.clock.now() }).where('id', '=', id).execute();
   const child = o.afterRoom ? await f.db.selectFrom('drops').select('id').where('parent_drop_id', '=', id).executeTakeFirstOrThrow() : null;
   return {
@@ -266,6 +273,15 @@ export async function createLiveRelease(f: LiveFixture, o: LiveReleaseOptions): 
     addons: addonRows.sort((a, b) => a.position - b.position).map((a) => ({ id: a.id, label: a.label, priceMinor: a.price_minor })),
     afterRoom: child ? { id: child.id, ...(await offerOf(f.db, child.id)) } : null,
   };
+}
+
+/**
+ * A release's pick of catalogue add-ons written as given (lot Q2, step Q2.3: `drop_addons`, in order), whatever its state:
+ * what migration 0060 writes for a release under way, or a fixture's release offering exactly these.
+ */
+export async function pickAddons(db: Db, dropId: string, addonIds: readonly string[]): Promise<void> {
+  await db.deleteFrom('drop_addons').where('drop_id', '=', dropId).execute();
+  if (addonIds.length > 0) await db.insertInto('drop_addons').values(addonIds.map((addon_id, i) => ({ drop_id: dropId, addon_id, position: i + 1 }))).execute();
 }
 
 /** A release's sizes and add-ons, in order. */

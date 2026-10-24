@@ -42,6 +42,12 @@
  *                other value on another add-on; an add-on that stops being the engraving goes back to 20).
  *   releases     how many releases not ended pick it (drop_addons); `convertedFrom`, what it was converted from
  *                (addon_conversions, migration 0060; none before it).
+ *   picked       (step Q2.3, D3) each release with a purchase picks exactly which add-ons it offers, in its order
+ *                (`drop_addons`, 1 to 100: no other cap, N12): a LIVE RELEASE, its after-room and a draw, each its own
+ *                (services/live-console.ts, services/drops.ts `addonIds`), every one active, its moment's switch on and
+ *                priced in the release's currency (`checkPick`: 409 ADDON_NOT_OFFERED naming it); a new release picks
+ *                every such add-on unless told otherwise (`defaultPick`, N7). The salon and YOUR ORDERS have no pick:
+ *                their switch alone (N8). `pickable` lists them for a release's form, with why one cannot be picked.
  *
  * OPERATOR writes (as the models), AUDITOR reads (routes/admin/addons.ts). Audited `addon.create`, `addon.update` (each
  * field before and after), `addon.prices` (each currency before and after), `addon.set_aside`, `addon.reinstate`,
@@ -55,6 +61,7 @@ import {
   ADDON_KINDS,
   ADDON_LINE_MAX,
   ADDON_NAME_MAX,
+  ADDON_PICK_POSITION_MAX,
   ADDON_POSITION_MAX,
   ADDON_PRICE_MINOR_MAX,
   ADDON_TEXT_MAX,
@@ -96,6 +103,26 @@ export type AddonMoment = (typeof ADDON_MOMENTS)[number];
 export type AddonOfferedAt = Record<AddonMoment, boolean>;
 const MOMENT_COLUMN = { live: 'offer_live', draw: 'offer_draw', salon: 'offer_salon', orders: 'offer_orders' } as const;
 
+/**
+ * Where an add-on is offered (lot Q2, step Q2.3, D3 and D8, K48 D2's four moments): a piece held in a LIVE RELEASE (its
+ * after-room included), a place held in a release with a draw, a request of the private salon, YOUR ORDERS until
+ * packing. The two moments with a release (LIVE, DRAW) offer only what the release picked (`drop_addons`).
+ */
+export const OFFER_MOMENTS = ['LIVE', 'DRAW', 'SALON', 'ORDERS'] as const;
+export type OfferMoment = (typeof OFFER_MOMENTS)[number];
+/** The moments a release picks its add-ons for: a LIVE RELEASE (and its after-room), a draw. */
+export type PickMoment = Extract<OfferMoment, 'LIVE' | 'DRAW'>;
+export const PICK_MOMENTS: readonly PickMoment[] = ['LIVE', 'DRAW'];
+/** Each moment's switch (addon_items). */
+export const OFFER_COLUMN = { LIVE: 'offer_live', DRAW: 'offer_draw', SALON: 'offer_salon', ORDERS: 'offer_orders' } as const;
+/** Each moment in words, as a refusal names it. */
+export const OFFER_MOMENT_WORDS: Record<OfferMoment, string> = {
+  LIVE: 'in a LIVE RELEASE',
+  DRAW: 'in a release with a draw',
+  SALON: 'in the private salon',
+  ORDERS: 'in YOUR ORDERS',
+};
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
 
@@ -113,6 +140,8 @@ const kindFixed = () => conflict('ADDON_KIND_FIXED', 'An add-on’s type never c
 const serviceSupplier = () => validationError('A service has no supplier: it holds no stock.');
 const engravingNotService = () => validationError('Only a service can be the engraving.');
 const textMaxNotEngraving = () => validationError('Only the engraving has a most characters.');
+/** 409 ADDON_NOT_OFFERED for a release's pick (as services/order-addons.ts addonNotOffered). */
+const pickNotOffered = (why: string) => conflict('ADDON_NOT_OFFERED', why);
 
 // ── Views ──────────────────────────────────────────────────────────────────
 
@@ -194,6 +223,34 @@ export interface AddonCreateInput extends AddonInput {
   skuCode: string;
   /** Its prices per house currency (none given: not offered yet). */
   prices?: Partial<Record<HouseCurrency, number | null>>;
+}
+
+/** An add-on a release picks (drop_addons), in its order, as the console reads it; its price in the release's currency now. */
+export interface PickedAddon {
+  id: string;
+  name: string;
+  line: string | null;
+  kind: AddonKind;
+  engraving: boolean;
+  /** Set aside since the pick: offered nowhere until reinstated. */
+  active: boolean;
+  /** In the release's currency now; null without one (a draw without a price) or no longer priced in it. */
+  priceMinor: number | null;
+}
+
+/**
+ * An active add-on as a release's form lists it for a moment and a currency (GET /api/admin/addons?moment=&currency=):
+ * whether a release may pick it, and why not (its moment's switch is off, or it has no price in the currency).
+ */
+export interface AddonPickable {
+  id: string;
+  name: string;
+  line: string | null;
+  kind: AddonKind;
+  engraving: boolean;
+  priceMinor: number | null;
+  pickable: boolean;
+  why: 'SWITCH_OFF' | 'NO_PRICE' | null;
 }
 
 /** An add-on offered at a location in a currency (`availableAt`). */
@@ -361,6 +418,86 @@ export async function availableAddons(db: Db, locationId: string, currency: Hous
       weightG: r.weight_g,
       kind: r.kind,
     }));
+}
+
+// ── A release's pick (lot Q2, step Q2.3, D3; N7, N12) ───────────────────────
+
+/**
+ * A pick as staff send it (`addonIds`): a list of add-on ids, each once, at most ADDON_PICK_POSITION_MAX (positions 1 to
+ * 100: no other cap, N12), in the order the release offers them. 400 otherwise; an id that is not an add-on's, 404.
+ */
+export function cleanPickIds(v: unknown): string[] {
+  if (!Array.isArray(v)) throw validationError('Send the add-ons offered as a list.');
+  if (v.length > ADDON_PICK_POSITION_MAX) throw validationError(`A release offers at most ${ADDON_PICK_POSITION_MAX} add-ons.`);
+  const ids = v.map((x) => knownId(x, addonNotFound));
+  if (new Set(ids).size !== ids.length) throw validationError('An add-on is listed twice.');
+  return ids;
+}
+
+/**
+ * The default pick of a new release (N7): every active add-on whose `moment` switch is on and priced in `currency` (a
+ * draw without a price yet: every such add-on, its price read when it is offered), in the catalogue's order.
+ */
+export async function defaultPick(db: Db, moment: PickMoment, currency: string | null): Promise<{ id: string; name: string }[]> {
+  const rows = await db
+    .selectFrom('addon_items as a')
+    .select(['a.id', 'a.name'])
+    .where('a.active', '=', true)
+    .where(sql.ref(`a.${OFFER_COLUMN[moment]}`), '=', true)
+    .$if(currency !== null, (q) => q.where((eb) => eb.exists(eb.selectFrom('addon_item_prices as p').select('p.addon_id').whereRef('p.addon_id', '=', 'a.id').where('p.currency', '=', currency as HouseCurrency))))
+    .orderBy('a.position')
+    .orderBy(sql`lower(a.name)`)
+    .orderBy('a.id')
+    .limit(ADDON_PICK_POSITION_MAX)
+    .execute();
+  return rows.map((r) => ({ id: r.id, name: r.name }));
+}
+
+/**
+ * A pick checked (D3): each add-on known (404 ADDON_NOT_FOUND), active, its `moment` switch on and, when the release
+ * has a currency, priced in it (409 ADDON_NOT_OFFERED naming it otherwise). Returns each with its name, in the pick's order.
+ */
+export async function checkPick(db: Db, moment: PickMoment, ids: readonly string[], currency: string | null): Promise<{ id: string; name: string }[]> {
+  if (ids.length === 0) return [];
+  const rows = await db.selectFrom('addon_items').selectAll().where('id', 'in', [...ids]).execute();
+  const prices = currency === null ? [] : await db.selectFrom('addon_item_prices').select('addon_id').where('addon_id', 'in', [...ids]).where('currency', '=', currency as HouseCurrency).execute();
+  return ids.map((id) => {
+    const a = rows.find((r) => r.id === id);
+    if (!a) throw addonNotFound();
+    if (!a.active) throw pickNotOffered(`${a.name} is set aside: reinstate it to offer it.`);
+    if (!a[OFFER_COLUMN[moment]]) throw pickNotOffered(`${a.name} is not offered ${OFFER_MOMENT_WORDS[moment]}: turn its switch on in Catalogue → Add-ons.`);
+    if (currency !== null && !prices.some((p) => p.addon_id === id)) throw pickNotOffered(`${a.name} has no price in ${currency}.`);
+    return { id, name: a.name };
+  });
+}
+
+/** A release's pick written (in its transaction, the release's row held): replaced, in its order, positions 1 to n. */
+export async function writePick(tx: Db, dropId: string, ids: readonly string[]): Promise<void> {
+  await tx.deleteFrom('drop_addons').where('drop_id', '=', dropId).execute();
+  if (ids.length > 0) await tx.insertInto('drop_addons').values(ids.map((addon_id, i) => ({ drop_id: dropId, addon_id, position: i + 1 }))).execute();
+}
+
+/** Each release's pick, in its order, each add-on priced in its release's currency (`currencyOf`) now. */
+export async function picksOf(db: Db, dropIds: readonly string[], currencyOf: (dropId: string) => string | null): Promise<Map<string, PickedAddon[]>> {
+  const out = new Map<string, PickedAddon[]>();
+  if (dropIds.length === 0) return out;
+  const rows = await db
+    .selectFrom('drop_addons as x')
+    .innerJoin('addon_items as a', 'a.id', 'x.addon_id')
+    .select(['x.drop_id', 'a.id', 'a.name', 'a.line', 'a.kind', 'a.engraving', 'a.active'])
+    .where('x.drop_id', 'in', [...new Set(dropIds)])
+    .orderBy('x.drop_id')
+    .orderBy('x.position')
+    .execute();
+  const prices = rows.length === 0 ? [] : await db.selectFrom('addon_item_prices').select(['addon_id', 'currency', 'price_minor']).where('addon_id', 'in', [...new Set(rows.map((r) => r.id))]).execute();
+  for (const r of rows) {
+    const currency = currencyOf(r.drop_id);
+    const price = currency === null ? undefined : prices.find((p) => p.addon_id === r.id && p.currency === currency);
+    const list = out.get(r.drop_id) ?? [];
+    list.push({ id: r.id, name: r.name, line: r.line, kind: r.kind, engraving: r.engraving, active: r.active, priceMinor: price ? Number(price.price_minor) : null });
+    out.set(r.drop_id, list);
+  }
+  return out;
 }
 
 // ── The service ────────────────────────────────────────────────────────────
@@ -615,6 +752,31 @@ export class AddonService {
     const loc = await knownLocation(this.db, locationId);
     if (!(HOUSE_CURRENCIES as readonly string[]).includes(currency)) throw validationError(`The currency is one of ${HOUSE_CURRENCIES.join(', ')}.`);
     return availableAddons(this.db, loc, currency as HouseCurrency);
+  }
+
+  /**
+   * The active add-ons as a release's form lists them (GET /api/admin/addons?moment=LIVE|DRAW&currency=, AUDITOR): each
+   * with its price in the currency and whether a release may pick it, or why not (SWITCH_OFF: its moment's switch is
+   * off; NO_PRICE: no price in the currency), in the catalogue's order. 400 for another moment or currency.
+   */
+  async pickable(moment: string, currency: string): Promise<AddonPickable[]> {
+    if (!(PICK_MOMENTS as readonly string[]).includes(moment)) throw validationError(`A release picks its add-ons for ${PICK_MOMENTS.join(' or ')}.`);
+    if (!(HOUSE_CURRENCIES as readonly string[]).includes(currency)) throw validationError(`The currency is one of ${HOUSE_CURRENCIES.join(', ')}.`);
+    const column = OFFER_COLUMN[moment as PickMoment];
+    const rows = await this.db
+      .selectFrom('addon_items as a')
+      .leftJoin('addon_item_prices as p', (j) => j.onRef('p.addon_id', '=', 'a.id').on('p.currency', '=', currency as HouseCurrency))
+      .select(['a.id', 'a.name', 'a.line', 'a.kind', 'a.engraving', `a.${column} as on`, 'p.price_minor'])
+      .where('a.active', '=', true)
+      .orderBy('a.position')
+      .orderBy(sql`lower(a.name)`)
+      .orderBy('a.id')
+      .execute();
+    return rows.map((r) => {
+      const priceMinor = r.price_minor === null ? null : Number(r.price_minor);
+      const why = !r.on ? 'SWITCH_OFF' : priceMinor === null ? 'NO_PRICE' : null;
+      return { id: r.id, name: r.name, line: r.line, kind: r.kind, engraving: r.engraving, priceMinor, pickable: why === null, why };
+    });
   }
 
   // ── internals ────────────────────────────────────────────────────────────

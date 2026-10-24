@@ -20,6 +20,11 @@
  *  - packing: one checklist line per add-on, the parcel's weight with each unit's;
  *  - the journal `order.addon.add` / `.remove`, the order CSV's line items, the account's export (its units and the
  *    choices not on an order yet);
+ *  - ONE OFFER RULE (lot Q2, step Q2.3; D3, D8, N8): a LIVE hold and a draw's place held offer what their release picked,
+ *    in its order, with their switch on; the salon and YOUR ORDERS their switch alone (an order of an ended release, an
+ *    add-on its release never picked, one created after it locked: all offered until packing); staff neither; refusals
+ *    name the switch or the pick; a choice switched off before PAY is left out (NOT_OFFERED); the engraving one on an
+ *    order, its words with its choice only (its most characters, the house's set), never in ADD AN ADD-ON;
  *  - under concurrency (PGlite always; PostgreSQL with ORBES_TEST_POSTGRES_URL, a pool of 8): two orders take the last
  *    unit of an add-on at once, added or carried: one holds it, the other is told none is left.
  * The routes are test/api/account-orders.test.ts's, admin-orders.test.ts's, the-club's, live's and salon's.
@@ -34,7 +39,7 @@ import { closeDb, createDb, inTransaction, type Db } from '../../src/server/db/c
 import { migrateToLatest } from '../../src/server/db/migrate.js';
 import { DomainError } from '../../src/server/errors.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
-import { addonWindow, setChoices } from '../../src/server/services/order-addons.js';
+import { accountAddonOpen, addonOffer, addonWindow, setChoices } from '../../src/server/services/order-addons.js';
 import { tierOf } from '../../src/server/services/club.js';
 import { ensureSku, stockLevel } from '../../src/server/services/stock.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
@@ -117,11 +122,15 @@ describe('add-ons on orders (plan MACRO M3 §4.2, D1 and D2)', () => {
 
   /** Each sale in a size of its own, so that a piece counted in serves its order, never an older one waiting. */
   let sizes = 60;
-  /** A LIVE sale as a collector lives it, its catalogue add-ons chosen at the hold (`before` runs between the choice and PAY). */
-  async function liveSale(o: { items?: { addonId: string; units: number }[]; before?: () => Promise<void>; price?: number; quantity?: number } = {}) {
+  /**
+   * A LIVE sale as a collector lives it, its catalogue add-ons chosen at the hold (`before` runs between the choice and
+   * PAY). Lot Q2, step Q2.3: its release picks `pick`, by default the four of the catalogue and any other it chooses.
+   */
+  async function liveSale(o: { items?: { addonId: string; units: number }[]; before?: () => Promise<void>; price?: number; quantity?: number; pick?: string[] } = {}) {
     const quantity = o.quantity ?? 1;
     const opensAt = new Date(clock.now().getTime() + HOUR);
-    const r = await createLiveRelease(f, { opensAt, sizes: [{ label: String(sizes++), stock: 5 }], perAccount: quantity, ...(o.price !== undefined ? { priceMinor: o.price } : {}) });
+    const pick = o.pick ?? [...new Set([cloth.id, extender.id, strap.id, pouch.id, ...(o.items ?? []).map((i) => i.addonId)])];
+    const r = await createLiveRelease(f, { opensAt, sizes: [{ label: String(sizes++), stock: 5 }], perAccount: quantity, addonIds: pick, ...(o.price !== undefined ? { priceMinor: o.price } : {}) });
     const a = await accountOfTier(f, 0);
     clock.set(new Date(opensAt.getTime() - MINUTE));
     await f.live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id, quantity }, a.actor);
@@ -691,6 +700,7 @@ describe('add-ons on orders (plan MACRO M3 §4.2, D1 and D2)', () => {
     let offered: [string, number][] = [];
     const sale = await liveSale({
       items: [{ addonId: wrap.id, units: 2 }],
+      pick: [wrap.id, card.id],
       before: async () => {
         const e = await t.db.selectFrom('live_entries').select(['drop_id', 'account_id']).where('status', '=', 'SECURED').executeTakeFirstOrThrow();
         offered = (await f.live.entry(e.account_id, e.drop_id))!.addonOffer.filter((a) => a.addonId === wrap.id || a.addonId === card.id).map((a) => [a.name, a.maxUnits]);
@@ -775,6 +785,173 @@ describe('add-ons on orders (plan MACRO M3 §4.2, D1 and D2)', () => {
     expect((await unitsOf(other.id)).map((u) => u.status)).toEqual(['CANCELLED']);
     expect(await movesOf(other.id)).toEqual([]);
     expect(await t.db.selectFrom('stock_movements').select('id').where('sku_id', 'in', [wrap.sku.id, card.sku.id]).execute()).toEqual([]);
+  });
+
+  // ── ONE OFFER RULE (lot Q2, step Q2.3; D3, D8, N8) ───────────────────────
+
+  /** A service offered at the moments given only, priced in euros. */
+  const onlyAt = (name: string, skuCode: string, at: { live?: boolean; draw?: boolean; salon?: boolean; orders?: boolean }) =>
+    ctx.services.addons.create({ kind: 'SERVICE', name, skuCode, prices: { EUR: 1000 }, offeredAt: { live: false, draw: false, salon: false, orders: false, ...at } }, admin);
+  const names = (offer: { name: string }[]) => offer.map((a) => a.name);
+  const securedEntry = () => t.db.selectFrom('live_entries').select(['id', 'drop_id', 'account_id']).where('status', '=', 'SECURED').executeTakeFirstOrThrow();
+
+  it('one offer rule: a LIVE hold and a draw\'s place held offer what their release picked, in its order, with their switch on; the salon and YOUR ORDERS their switch alone; staff neither; a choice refused names the switch or the pick, and one switched off before PAY is left out', async () => {
+    const liveOnly = await onlyAt('BOX FOR LIVE', 'ADD-Q23-LIVE', { live: true });
+    const drawOnly = await onlyAt('BOX FOR DRAWS', 'ADD-Q23-DRAW', { draw: true });
+    const salonOnly = await onlyAt('BOX FOR THE SALON', 'ADD-Q23-SALON', { salon: true });
+    const ordersOnly = await onlyAt('BOX FOR ORDERS', 'ADD-Q23-ORDERS', { orders: true });
+    const mine = new Set([liveOnly.id, drawOnly.id, salonOnly.id, ordersOnly.id]);
+
+    // LIVE: the release picks the LIVE box first, the cloth, and the draws' box (a pick never turns a switch on).
+    let offered: string[] = [];
+    let refused: unknown[] = [];
+    const sale = await liveSale({
+      pick: [liveOnly.id, cloth.id, drawOnly.id],
+      items: [{ addonId: liveOnly.id, units: 1 }],
+      before: async () => {
+        const e = await securedEntry();
+        const actor: Actor = { type: 'account', id: e.account_id };
+        offered = names((await f.live.entry(e.account_id, e.drop_id))!.addonOffer);
+        refused = [
+          await refusal(f.live.setAddons(e.account_id, e.drop_id, [], actor, [{ addonId: drawOnly.id, units: 1 }])),
+          await refusal(f.live.setAddons(e.account_id, e.drop_id, [], actor, [{ addonId: strap.id, units: 1 }])),
+        ];
+        await f.live.setAddons(e.account_id, e.drop_id, [], actor, [{ addonId: liveOnly.id, units: 1 }, { addonId: cloth.id, units: 1 }]);
+        // Its LIVE switch turned off before PAY: left out, never blocking it.
+        await ctx.services.addons.update(liveOnly.id, { offeredAt: { live: false } }, admin);
+      },
+    });
+    expect(offered).toEqual(['BOX FOR LIVE', 'POLISHING CLOTH']);
+    expect(refused).toEqual([
+      { code: 'ADDON_NOT_OFFERED', status: 409, message: 'BOX FOR DRAWS is not offered in a LIVE RELEASE.' },
+      { code: 'ADDON_NOT_OFFERED', status: 409, message: 'SPARE STRAP is not one of this release’s add-ons.' },
+    ]);
+    expect(sale.confirmed.addonsLeftOut).toEqual([{ addonId: liveOnly.id, name: 'BOX FOR LIVE', units: 1, reason: 'NOT_OFFERED' }]);
+    expect((await unitsOf(sale.orders[0]!.id)).map((u) => u.addon_id)).toEqual([cloth.id]);
+    await ctx.services.addons.update(liveOnly.id, { offeredAt: { live: true } }, admin);
+
+    // A draw: its pick, in its order (the draws' box first), with its DRAW switch on.
+    const T = new Date(clock.now().getTime() + HOUR);
+    const d = await poolDraw(
+      f.drops,
+      t.db,
+      { modelId: f.modelId, title: 'A draw that picks', quantity: 1, opensAt: T, closesAt: new Date(T.getTime() + HOUR), earlyAccessHours: 0, priceMinor: 480_000, currency: 'EUR', addonIds: [drawOnly.id, cloth.id] },
+      admin,
+    );
+    const a = await createAccount(t.db);
+    clock.set(new Date(T.getTime() + MINUTE));
+    await f.drops.enter(a.id, d.id, a.actor);
+    clock.set(new Date(T.getTime() + 2 * HOUR));
+    await f.drops.draw(d.id, admin);
+    expect(names((await f.drops.entryFor(a.id, d.id)).addons!.offer)).toEqual(['BOX FOR DRAWS', 'POLISHING CLOTH']);
+    expect(await refusal(f.drops.setAddonChoices(a.id, d.id, [{ addonId: liveOnly.id, units: 1 }], a.actor))).toEqual({ code: 'ADDON_NOT_OFFERED', status: 409, message: 'BOX FOR LIVE is not offered in a release with a draw.' });
+    expect(await refusal(f.drops.setAddonChoices(a.id, d.id, [{ addonId: strap.id, units: 1 }], a.actor))).toEqual({ code: 'ADDON_NOT_OFFERED', status: 409, message: 'SPARE STRAP is not one of this release’s add-ons.' });
+    expect((await f.drops.setAddonChoices(a.id, d.id, [{ addonId: drawOnly.id, units: 2 }], a.actor)).addons!.chosen.map((c) => [c.name, c.units])).toEqual([['BOX FOR DRAWS', 2]]);
+
+    // The salon: its switch alone (every M3 add-on, and its own box; no release, no pick).
+    const salonOffer = names(await addonOffer(t.db, { moment: 'SALON', dropId: null, locationId: france, currency: 'EUR' }));
+    expect(salonOffer).toContain('BOX FOR THE SALON');
+    expect(salonOffer).toContain('SPARE STRAP');
+    expect(salonOffer.filter((n) => n.startsWith('BOX FOR'))).toEqual(['BOX FOR THE SALON']);
+    const r = await t.db.insertInto('shop_requests').values({ account_id: a.id, model_id: f.modelId, created_at: clock.now() }).returning('id').executeTakeFirstOrThrow();
+    expect(await refusal(inTransaction(t.db, (tx) => setChoices(tx, { shopRequestId: r.id }, [{ addonId: liveOnly.id, units: 1 }], { locationId: france, currency: 'EUR' }, clock.now())))).toEqual({
+      code: 'ADDON_NOT_OFFERED',
+      status: 409,
+      message: 'BOX FOR LIVE is not offered in the private salon.',
+    });
+    await inTransaction(t.db, (tx) => setChoices(tx, { shopRequestId: r.id }, [{ addonId: salonOnly.id, units: 1 }], { locationId: france, currency: 'EUR' }, clock.now()));
+
+    // YOUR ORDERS: its switch alone (the release's pick is never read); staff are bound by neither.
+    const o = sale.orders[0]!;
+    const yours = (await addons().offerForAccount(sale.account.id, o.id)).offer;
+    expect(yours.filter((x) => mine.has(x.addonId)).map((x) => x.name)).toEqual(['BOX FOR ORDERS']);
+    expect(await refusal(addons().addForAccount(sale.account.id, o.id, { addonId: liveOnly.id, units: 1 }, sale.account.actor))).toEqual({
+      code: 'ADDON_NOT_OFFERED',
+      status: 409,
+      message: 'BOX FOR LIVE is not offered in YOUR ORDERS.',
+    });
+    const staff = (await addons().offerForStaff(o.id)).offer;
+    expect(staff.filter((x) => mine.has(x.addonId)).map((x) => x.name).sort()).toEqual(['BOX FOR DRAWS', 'BOX FOR LIVE', 'BOX FOR ORDERS', 'BOX FOR THE SALON']);
+    await addons().addForStaff(o.id, { addonId: salonOnly.id, units: 1 }, admin);
+    // No collector payload names a switch, a pick or a kind.
+    for (const x of [...yours, ...staff]) expect(Object.keys(x).sort()).toEqual(['addonId', 'currency', 'engraving', 'line', 'maxUnits', 'name', 'priceMinor']);
+    for (const id of mine) await ctx.services.addons.setAside(id, admin);
+  });
+
+  it('YOUR ORDERS follows its switch alone (N8): an order of an ended release, before packing, is still offered every add-on with its YOUR ORDERS switch on, one its release never picked and one created after the release locked included', async () => {
+    const sale = await liveSale({ pick: [cloth.id] });
+    const o = sale.orders[0]!;
+    // The release ends; an add-on for YOUR ORDERS only is created afterwards.
+    await t.db.updateTable('drops').set({ ended_at: clock.now(), ended_reason: 'ENDED' }).where('id', '=', sale.release.id).execute();
+    const late = await onlyAt('A CARD IN YOUR WORDS', 'ADD-Q23-LATE', { orders: true });
+    const offer = await addons().offerForAccount(sale.account.id, o.id);
+    expect(offer).toMatchObject({ canAdd: true, reason: null });
+    expect(names(offer.offer)).toEqual(expect.arrayContaining(['POLISHING CLOTH', 'SPARE STRAP', 'A CARD IN YOUR WORDS']));
+    expect((await accountAddonOpen(t.db, [o])).has(o.id)).toBe(true);
+    await addons().addForAccount(sale.account.id, o.id, { addonId: strap.id, units: 1 }, sale.account.actor);
+    clock.advance(1000);
+    await addons().addForAccount(sale.account.id, o.id, { addonId: late.id, units: 1 }, sale.account.actor);
+    expect((await unitsOf(o.id)).map((u) => [u.addon_id, u.added_by_type])).toEqual([
+      [strap.id, 'COLLECTOR'],
+      [late.id, 'COLLECTOR'],
+    ]);
+    await ctx.services.addons.setAside(late.id, admin);
+  });
+
+  it('the engraving: one on an order (offered at 1, a second refused), its words with its choice only, at most its most characters of the house\'s set, never in the audit log; left out of ADD AN ADD-ON, staff add it', async () => {
+    const engraving = await ctx.services.addons.create(
+      { kind: 'SERVICE', name: 'ENGRAVING', skuCode: 'ADD-Q23-ENGRAVING', engraving: true, textMax: 12, prices: { EUR: 4000 }, offeredAt: { live: true, draw: false, salon: false, orders: true } },
+      admin,
+    );
+    let offer: { name: string; maxUnits: number; engraving: boolean; textMax?: number }[] = [];
+    let refused: unknown[] = [];
+    let stored: unknown[] = [];
+    const sale = await liveSale({
+      pick: [engraving.id, cloth.id],
+      before: async () => {
+        const e = await securedEntry();
+        const actor: Actor = { type: 'account', id: e.account_id };
+        offer = (await f.live.entry(e.account_id, e.drop_id))!.addonOffer;
+        const choose = (items: { addonId: string; units: number; text?: string | null }[]) => f.live.setAddons(e.account_id, e.drop_id, [], actor, items);
+        refused = [
+          await refusal(choose([{ addonId: engraving.id, units: 2 }])),
+          await refusal(choose([{ addonId: cloth.id, units: 1, text: 'M. B.' }])),
+          await refusal(choose([{ addonId: engraving.id, units: 1, text: 'ABCDEFGHIJKLM' }])),
+          await refusal(choose([{ addonId: engraving.id, units: 1, text: 'M@B' }])),
+        ];
+        await choose([{ addonId: engraving.id, units: 1, text: '  M.   B. ' }]);
+        stored.push((await t.db.selectFrom('addon_choices').select('text').where('live_entry_id', '=', e.id).executeTakeFirstOrThrow()).text);
+        await choose([{ addonId: engraving.id, units: 1, text: '' }]);
+        stored.push((await t.db.selectFrom('addon_choices').select('text').where('live_entry_id', '=', e.id).executeTakeFirstOrThrow()).text);
+        await choose([{ addonId: engraving.id, units: 1, text: 'ÉLODIE & M.' }]);
+      },
+    });
+    expect(offer.map((x) => [x.name, x.maxUnits, x.engraving, x.textMax])).toEqual([
+      ['ENGRAVING', 1, true, 12],
+      ['POLISHING CLOTH', 3, false, undefined],
+    ]);
+    expect(refused).toEqual([
+      { code: 'ADDON_LIMIT', status: 409, message: 'At most one ENGRAVING on an order.' },
+      { code: 'VALIDATION_FAILED', status: 400, message: 'Only the engraving takes words.' },
+      { code: 'VALIDATION_FAILED', status: 400, message: 'Up to 12 characters: letters, figures, spaces and . & ’ -' },
+      { code: 'VALIDATION_FAILED', status: 400, message: 'Up to 12 characters: letters, figures, spaces and . & ’ -' },
+    ]);
+    expect(stored).toEqual(['M. B.', null]);
+    const audit = await t.db.selectFrom('audit_logs').select('details').where('action', '=', 'drop.live.addons').where('target_id', '=', sale.release.id).orderBy('id', 'desc').executeTakeFirstOrThrow();
+    expect(audit.details).toMatchObject({ items: [{ addonId: engraving.id, units: 1, text: true }] });
+    expect(JSON.stringify(audit.details)).not.toContain('ÉLODIE');
+    // Carried at PAY: one unit, held nowhere.
+    const o = sale.orders[0]!;
+    expect((await unitsOf(o.id)).map((u) => [u.addon_id, u.location_id])).toEqual([[engraving.id, null]]);
+    // YOUR ORDERS: never in ADD AN ADD-ON (its own ENGRAVING); staff may add it, one on an order.
+    expect((await addons().offerForAccount(sale.account.id, o.id)).offer.some((x) => x.engraving)).toBe(false);
+    expect(await refusal(addons().addForAccount(sale.account.id, o.id, { addonId: engraving.id, units: 1 }, sale.account.actor))).toMatchObject({ code: 'ADDON_NOT_OFFERED', status: 409 });
+    expect((await addons().offerForStaff(o.id)).offer.some((x) => x.addonId === engraving.id)).toBe(false);
+    expect(await refusal(addons().addForStaff(o.id, { addonId: engraving.id, units: 1 }, admin))).toEqual({ code: 'ADDON_LIMIT', status: 409, message: 'At most one ENGRAVING on an order.' });
+    const other = (await liveSale({ pick: [cloth.id] })).orders[0]!;
+    expect((await addons().offerForStaff(other.id)).offer.find((x) => x.addonId === engraving.id)).toMatchObject({ maxUnits: 1, engraving: true, textMax: 12 });
+    await addons().addForStaff(other.id, { addonId: engraving.id, units: 1 }, admin);
+    await ctx.services.addons.setAside(engraving.id, admin);
   });
 });
 

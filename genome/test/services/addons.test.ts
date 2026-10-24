@@ -367,10 +367,9 @@ describe('AddonService (plan MACRO M3 §4.2, D1)', () => {
     const f = await liveFixtureOn(h.ctx, h.clock);
     const cloth = (await addons().list()).find((x) => x.name === 'Polishing Cloth')!;
     const now = h.clock.now();
-    const open = await createLiveRelease(f, { opensAt: new Date(now.getTime() + 3_600_000) });
-    const ended = await createLiveRelease(f, { opensAt: new Date(now.getTime() + 3_600_000) });
-    const draw = await poolDraw(f.drops, h.ctx.db, { modelId: f.modelId, title: 'DRAW', quantity: 2, opensAt: new Date(now.getTime() + 3_600_000), closesAt: new Date(now.getTime() + 7_200_000), earlyAccessHours: 0 }, f.admin);
-    for (const d of [open.id, ended.id, draw.id]) await h.t.db.insertInto('drop_addons').values({ drop_id: d, addon_id: cloth.id, position: 1 }).execute();
+    const open = await createLiveRelease(f, { opensAt: new Date(now.getTime() + 3_600_000), addonIds: [cloth.id] });
+    const ended = await createLiveRelease(f, { opensAt: new Date(now.getTime() + 3_600_000), addonIds: [cloth.id] });
+    const draw = await poolDraw(f.drops, h.ctx.db, { modelId: f.modelId, title: 'DRAW', quantity: 2, opensAt: new Date(now.getTime() + 3_600_000), closesAt: new Date(now.getTime() + 7_200_000), earlyAccessHours: 0, addonIds: [cloth.id] }, f.admin);
     await h.t.db.updateTable('drops').set({ ended_at: now, ended_reason: 'ENDED' }).where('id', '=', ended.id).execute();
     expect(await addons().get(cloth.id)).toMatchObject({ releases: 2, convertedFrom: [] });
     // Drawn: still counted within its place-held window, no longer after it.

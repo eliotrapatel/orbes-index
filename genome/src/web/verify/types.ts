@@ -500,8 +500,11 @@ export interface AddonOfferItem {
   line: string | null;
   priceMinor: number;
   currency: string;
-  /** The units that can be chosen or added now (at most 3 of each on an order, less those it holds). */
+  /** The units that can be chosen or added now (at most 3 of each on an order, less those it holds; the engraving 1). */
   maxUnits: number;
+  /** Lot Q2, step Q2.3: the engraving, whose words the collector types, and its most characters. */
+  engraving?: boolean;
+  textMax?: number;
 }
 
 /** A choice carried onto an order that could not be added: none left (NONE_LEFT), or no longer offered (NOT_OFFERED). */

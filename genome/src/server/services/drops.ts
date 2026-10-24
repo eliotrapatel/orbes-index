@@ -124,6 +124,12 @@
  * A set's release sells its set for good: `setId` changes only to another set (its sizes given again), never to a model,
  * and a model's release never takes a set.
  *
+ * ADD-ONS ONE SYSTEM (lot Q2, step Q2.3, D3; services/addons.ts): a draw picks the catalogue add-ons its places held
+ * offer (`addonIds` at its creation and while it is a DRAFT, as its price; `drop_addons`, in its order), each active, its
+ * DRAW switch on and, when the draw has a price, priced in its currency (409 ADDON_NOT_OFFERED naming it); omitted at its
+ * creation, every such add-on (N7). ADD TO YOUR ORDER offers only what it picked, whose DRAW switch is still on
+ * (services/order-addons.ts addonOffer). Audited with `drop.create` and `drop.update` (`addonIds`, by id and name).
+ *
  * A LIVE RELEASE (services/live.ts, migration 0021) is a row of the same table, `mode` LIVE: the draw's public pages, its
  * entries (ENTER, WITHDRAW, RESERVE), the console's list, change, publication and cancellation, the draw and OFFER NEXT
  * know only the drops whose `mode` is DRAW: a LIVE one is left out of a list, a 404 or a refusal (409 DROP_LIVE).
@@ -156,6 +162,7 @@ import { withLiveChanges, type LiveFrameGate } from './live-frames.js';
 import { storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
 import { addonOffer, choicesOf, cleanAddonItems, clearChoices, setChoices, type AddonOfferItem, type ChosenAddon, type LeftOutAddon } from './order-addons.js';
+import { checkPick, cleanPickIds, defaultPick, picksOf, writePick, type PickedAddon } from './addons.js';
 import { ORDER_AMOUNT_MAX_MINOR, ORDER_CURRENCIES, orderForDrawEntry } from './orders.js';
 import { readActingAccount } from './ownership.js';
 import { releaseFeasibility, type Feasibility } from './release-stock.js';
@@ -457,6 +464,11 @@ export interface CreateDropInput {
   currency?: string | null;
   /** Plan MACRO M1 §3.1 (F4): the segment the draw is opened to (null: everyone, the default). */
   accessSegmentId?: string | null;
+  /**
+   * Lot Q2, step Q2.3 (D3): the catalogue add-ons offered on its places held, in order; omitted: every active add-on with
+   * its DRAW switch on (and priced in its currency, when it has one), N7.
+   */
+  addonIds?: string[];
 }
 
 /** A change of a drop: any field while it is a DRAFT; once published, `description` only. */
@@ -480,6 +492,8 @@ export interface DropChange {
   currency?: string | null;
   /** Plan MACRO M1 §3.1 (F4): the segment the draw is opened to, while it is a DRAFT; null: everyone. */
   accessSegmentId?: string | null;
+  /** Lot Q2, step Q2.3 (D3): its pick of catalogue add-ons, replacing it, while it is a DRAFT (as its price). */
+  addonIds?: string[];
 }
 
 export function cleanTitle(v: unknown): string {
@@ -844,6 +858,8 @@ export interface AdminDrop {
   sizes: AdminDrawSize[];
   /** Plan MACRO M1 §3.1 (F4): the segment the draw is opened to, by its id and console name; null: everyone. */
   accessSegment: { id: string; name: string } | null;
+  /** Lot Q2, step Q2.3 (D3): the catalogue add-ons offered on its places held, in its order, priced in its currency now. */
+  addonPick: PickedAddon[];
   /**
    * Macro scope K44 T1: a set's draw, its set and pieces in order (`model` is then the set itself: its id and name, type
    * SET; its `quantity` sets). Absent on a model's draw.
@@ -1606,7 +1622,8 @@ export class DropService {
         ? {
             currency,
             chosen: (await choicesOf(this.db, 'drop_entry_id', [r.id], () => currency)).get(r.id) ?? [],
-            offer: await addonOffer(this.db, d.stock_location_id ?? (await defaultLocationId(this.db)), currency),
+            // ONE OFFER RULE (lot Q2, step Q2.3): the DRAW switch on, and picked by the draw.
+            offer: await addonOffer(this.db, { moment: 'DRAW', dropId: d.id, locationId: d.stock_location_id ?? (await defaultLocationId(this.db)), currency }),
           }
         : null;
     return { entry: r ? (await withEntrySizes(this.db, [accountEntryView(r, this.clock())]))[0]! : null, savedSize: match ? { id: match.id, label: match.label } : null, ...(savedSizes ? { savedSizes } : {}), eligible, addons };
@@ -1615,7 +1632,8 @@ export class DropService {
   /**
    * ADD TO YOUR ORDER (PUT /api/v1/club/drops/:id/addons; plan MACRO M3 §4.2, D2): the catalogue add-ons the account
    * chooses on its place held (its entry SELECTED: 409 DROP_ENTRY_NOT_SELECTED otherwise), replacing its choice, each
-   * offered at the draw's location in its currency now (409 ADDON_NOT_OFFERED in a draw without a price; 409
+   * offered at the draw's location in its currency now (409 ADDON_NOT_OFFERED in a draw without a price, or for an
+   * add-on the draw did not pick or whose DRAW switch is off, lot Q2 step Q2.3; 409
    * ADDON_OUT_OF_STOCK, 409 ADDON_LIMIT; services/order-addons.ts setChoices); nothing is held until ORBES Client Services
    * confirms the order, when each is added if still in stock. The account ACTIVE. Audited `drop.entry.addons`.
    */
@@ -1899,9 +1917,10 @@ export class DropService {
     const guaranteed = await releaseGuaranteed(this.db, rows.map((r) => r.id));
     const sizes = await sizeTallies(this.db, rows.map((r) => r.id));
     const { offers } = await this.offersOf(this.db, rows);
+    const picks = await picksOf(this.db, rows.map((r) => r.id), (id) => drawCurrency(rows.find((r) => r.id === id)!));
     const now = this.clock();
     return makePage(
-      rows.map((r) => this.adminView(r, now, tallies.get(r.id), creators, guaranteed.get(r.id), sizes.get(r.id), offers.get(r.id))),
+      rows.map((r) => this.adminView(r, now, tallies.get(r.id), creators, guaranteed.get(r.id), sizes.get(r.id), offers.get(r.id), picks.get(r.id))),
       Number(total.n),
       page,
     );
@@ -1963,9 +1982,12 @@ export class DropService {
     const price = cleanDrawPrice(input.priceMinor ?? null, input.currency ?? null);
     const modelId = setId === null ? knownId(input.modelId!, () => notFound('Model', 'MODEL_NOT_FOUND')) : null;
     const segmentId = input.accessSegmentId === undefined || input.accessSegmentId === null || input.accessSegmentId === '' ? null : knownId(input.accessSegmentId, segmentNotFound);
+    const pickIds = input.addonIds === undefined ? null : cleanPickIds(input.addonIds);
     return inTransaction(this.db, async (tx) => {
       const now = this.clock();
       if (segmentId) await existingSegment(tx, segmentId);
+      // Q2.3 (D3, N7): its pick, as given and checked, or every add-on its DRAW switch offers.
+      const pick = pickIds === null ? await defaultPick(tx, 'DRAW', price?.currency ?? null) : await checkPick(tx, 'DRAW', pickIds, price?.currency ?? null);
       const program = await readProgram(tx);
       const early = givenEarly ?? program.earlyAccessPalladiumHours;
       // PLATINE's window as given, or THE PROGRAM's, never longer than PALLADIUM's.
@@ -2012,6 +2034,7 @@ export class DropService {
         })
         .execute();
       await writeDrawSizes(tx, id, modelId, sizes);
+      await writePick(tx, id, pick.map((a) => a.id));
       await this.audit.record(
         {
           actor,
@@ -2032,6 +2055,7 @@ export class DropService {
             seedHash: toHex(seedHash),
             sizes: await auditedSizes(tx, id),
             ...(segmentId ? { accessSegmentId: segmentId } : {}),
+            addonIds: pick,
           },
         },
         tx,
@@ -2063,7 +2087,7 @@ export class DropService {
         after[key] = shown(to);
       };
       if (change.description !== undefined) note('description', 'description', d.description, cleanDescription(change.description), (v) => describedAs((v as string | null) ?? null));
-      const structural = (['modelId', 'setId', 'title', 'quantity', 'sizes', 'opensAt', 'closesAt', 'purchaseWindowHours', 'earlyAccessHours', 'earlyAccessPlatineHours', 'priceMinor', 'currency', 'accessSegmentId'] as const).filter(
+      const structural = (['modelId', 'setId', 'title', 'quantity', 'sizes', 'opensAt', 'closesAt', 'purchaseWindowHours', 'earlyAccessHours', 'earlyAccessPlatineHours', 'priceMinor', 'currency', 'accessSegmentId', 'addonIds'] as const).filter(
         (k) => change[k] !== undefined,
       );
       let resized = false;
@@ -2119,6 +2143,18 @@ export class DropService {
           const price = cleanDrawPrice(change.priceMinor ?? null, change.currency ?? null);
           note('priceMinor', 'price_minor', d.price_minor, price?.minor ?? null);
           note('currency', 'currency', d.currency, price?.currency ?? null);
+        }
+        if (change.addonIds !== undefined) {
+          // Q2.3 (D3): its pick replaced, checked in its currency (the new one when it changes with it).
+          const currency = change.priceMinor !== undefined || change.currency !== undefined ? (cleanDrawPrice(change.priceMinor ?? null, change.currency ?? null)?.currency ?? null) : drawCurrency(d);
+          const next = await checkPick(tx, 'DRAW', cleanPickIds(change.addonIds), currency);
+          const was = (await picksOf(tx, [id], () => null)).get(id)?.map((a) => ({ id: a.id, name: a.name })) ?? [];
+          if (JSON.stringify(was) !== JSON.stringify(next)) {
+            await writePick(tx, id, next.map((a) => a.id));
+            before.addonIds = was;
+            after.addonIds = next;
+            resized = true;
+          }
         }
         if (change.accessSegmentId !== undefined) {
           // Plan MACRO M1 §3.1 (F4): everyone (null), or a segment that exists, until the publication.
@@ -2798,6 +2834,7 @@ export class DropService {
     guaranteed: ReleaseGuaranteed | undefined,
     sizes: AdminDrawSize[] | undefined,
     offer?: ReleaseOffer,
+    addonPick: PickedAddon[] = [],
   ): AdminDrop {
     // Macro scope K44 T1: a set's draw, the set itself in the model's place (its pieces in `set`), never one of its models.
     const set =
@@ -2843,6 +2880,7 @@ export class DropService {
       guaranteedEntered: tally?.guaranteedEntered ?? { places: 0, pieces: 0 },
       sizes: sizes ?? [],
       accessSegment: r.access_segment_id ? { id: r.access_segment_id, name: r.segment_name ?? '' } : null,
+      addonPick,
       ...(set ? { set } : {}),
     };
   }
@@ -2855,7 +2893,8 @@ export class DropService {
     const guaranteed = await releaseGuaranteed(db, [id]);
     const sizes = await sizeTallies(db, [id]);
     const { offers } = await this.offersOf(db, [r]);
-    return this.adminView(r, this.clock(), tallies.get(id), creators, guaranteed.get(id), sizes.get(id), offers.get(id));
+    const picks = await picksOf(db, [id], () => drawCurrency(r));
+    return this.adminView(r, this.clock(), tallies.get(id), creators, guaranteed.get(id), sizes.get(id), offers.get(id), picks.get(id));
   }
 
   /** The rows of a drop's entries as the console reads them: the account's email, the console user who concluded it. */

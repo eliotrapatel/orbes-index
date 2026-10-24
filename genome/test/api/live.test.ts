@@ -42,6 +42,7 @@ import {
   createSetLiveRelease,
   holdPieces,
   liveFixtureOn,
+  pickAddons,
   pieceSize,
   sizedModel,
   type LiveFixture,
@@ -598,6 +599,10 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       const cloth = await h.ctx.services.addons.create({ name: 'POLISHING CLOTH', skuCode: 'ADD-CLOTH-L', prices: { EUR: 1_500 } }, op);
       const france = (await h.ctx.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
       await h.ctx.services.stock.adjust({ skuId: cloth.sku.id, locationId: france, delta: 1, note: 'Counted.' }, op);
+      // Lot Q2, step Q2.3 (D3): an add-on the release did not pick is not offered on its hold, the server says so.
+      const unpicked = await a.client.request('PUT', `/api/v1/live/${r.id}/addons`, { body: { addonIds: [r.addons[0]!.id], items: [{ addonId: cloth.id, units: 1 }] } });
+      expect([unpicked.statusCode, errorOf(unpicked)]).toEqual([409, { code: 'ADDON_NOT_OFFERED', message: 'POLISHING CLOTH is not one of this release’s add-ons.' }]);
+      await pickAddons(h.ctx.db, r.id, [cloth.id]);
       expect(errorOf(await a.client.request('PUT', `/api/v1/live/${r.id}/addons`, { body: { addonIds: [r.addons[0]!.id], items: [{ addonId: cloth.id, units: 4 }] } })).code).toBe('ADDON_LIMIT');
       expect(errorOf(await a.client.request('PUT', `/api/v1/live/${r.id}/addons`, { body: { addonIds: [r.addons[0]!.id], items: [{ addonId: cloth.id }] } })).code).toBe('VALIDATION_FAILED');
       const withCloth = safeJson(await a.client.request('PUT', `/api/v1/live/${r.id}/addons`, { body: { addonIds: [r.addons[0]!.id], items: [{ addonId: cloth.id, units: 1 }] } })) as { entry: Record<string, unknown> };

@@ -2185,6 +2185,8 @@ export interface Drop {
   sizes: DrawSize[];
   /** Plan MACRO M1 §3.1 (F4): the segment the draw is opened to (its console name); null: everyone. */
   accessSegment?: { id: string; name: string } | null;
+  /** Lot Q2, step Q2.3: the catalogue add-ons offered on its places held, in its order (absent from a server before Q2). */
+  addonPick?: PickedAddon[];
   /**
    * Macro scope K44 T1: a set's draw, its set and pieces in order (`model` is then the set itself: its id and name, type
    * SET; its `quantity` sets). Absent on a model's draw.
@@ -2349,6 +2351,8 @@ export interface LiveRelease extends LiveCard {
   /** Its sizes in order; on a set's release, each with its piece (1 to 4). */
   sizes: { id: string; label: string; stock: number; piece?: number }[];
   addons: { id: string; label: string; line: string | null; priceMinor: number }[];
+  /** Lot Q2, step Q2.3: the catalogue add-ons it offers at its purchase, in its order, priced in its currency now. */
+  addonPick?: PickedAddon[];
   tierWindows: { tier: number; turnSeconds: number | null; payMinutes: number | null }[];
   /** As set: null, at the publication; a null stage, at the announcement. */
   announceAt: Iso | null;
@@ -2480,6 +2484,8 @@ export interface LiveAfterRoom {
   sizes: { id: string; label: string; stock: number }[];
   quantity: number;
   addons: { id: string; label: string; line: string | null; priceMinor: number }[];
+  /** Lot Q2, step Q2.3: the catalogue add-ons it offers at its purchase, in its order, priced in its currency now. */
+  addonPick?: PickedAddon[];
   delayMinutes: number;
   lengthMinutes: number;
   state: AfterRoomState;
@@ -3768,6 +3774,32 @@ export interface AddonOfferItem {
   priceMinor: number;
   currency: HouseCurrency;
   maxUnits: number;
+  /** Lot Q2, step Q2.3: the engraving (one on an order), and its most characters. */
+  engraving?: boolean;
+  textMax?: number;
+}
+
+/** Lot Q2, step Q2.3: a catalogue add-on a release picks, in its order, priced in its currency now (null: no price in it). */
+export interface PickedAddon {
+  id: string;
+  name: string;
+  line: string | null;
+  kind: AddonKind;
+  engraving: boolean;
+  active: boolean;
+  priceMinor: number | null;
+}
+
+/** Lot Q2, step Q2.3: an active add-on as a release's form lists it (GET /api/admin/addons?moment=&currency=). */
+export interface AddonPickable {
+  id: string;
+  name: string;
+  line: string | null;
+  kind: AddonKind;
+  engraving: boolean;
+  priceMinor: number | null;
+  pickable: boolean;
+  why: 'SWITCH_OFF' | 'NO_PRICE' | null;
 }
 
 /** Why an order takes no add-on now. */

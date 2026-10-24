@@ -430,6 +430,10 @@ const ADDON_STAFF_KEYS = new Set([
   'offerOrders',
   'releases',
   'picks',
+  'addonPick',
+  'addonIds',
+  'pickable',
+  'why',
   'convertedFrom',
   'shopifyProductId',
   'shopifyVariantId',
@@ -460,8 +464,11 @@ describe('the collector never reads an add-on\'s kind, stock, supplier, SKU or s
       const wrap = await h.ctx.services.addons.create({ kind: 'SERVICE', name: 'GIFT WRAPPING', skuCode: 'SEN-WRAP-QZX', offeredAt: { salon: false }, prices: { EUR: 1500 } }, f.admin);
       const france = (await h.t.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
       await h.ctx.services.stock.adjust({ skuId: cloth.sku.id, locationId: france, delta: 5, note: 'Counted.' }, f.admin);
+      // Lot Q2, step Q2.3: another release picks an add-on of its own; it never reaches this release's collector.
+      const special = await h.ctx.services.addons.create({ kind: 'SERVICE', name: 'THE BOX OF ANOTHER RELEASE QZX', skuCode: 'SEN-BOX-QZX', offeredAt: { orders: false }, prices: { EUR: 9000 } }, f.admin);
       const opensAt = new Date(h.clock.now().getTime() + 4 * 60_000);
-      const r = await createLiveRelease(f, { opensAt, sizes: [{ label: '52', stock: 2 }] });
+      await createLiveRelease(f, { opensAt, sizes: [{ label: '52', stock: 2 }], addonIds: [special.id] });
+      const r = await createLiveRelease(f, { opensAt, sizes: [{ label: '52', stock: 2 }], addonIds: [cloth.id, wrap.id] });
       const { client, email } = await accountClient(h);
       const { id } = await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', email.toLowerCase()).executeTakeFirstOrThrow();
       const actor = { type: 'account' as const, id };
@@ -498,7 +505,9 @@ describe('the collector never reads an add-on\'s kind, stock, supplier, SKU or s
       const found: string[] = [];
       for (const [what, body] of bodies) {
         for (const x of addonStaffFindings(JSON.parse(body))) found.push(`${what}: ${x}`);
-        for (const w of ['SEN-CLOTH-QZX', 'SEN-WRAP-QZX', 'Sentinel Supplies QZX', 'SERVICE', 'PRODUCT', cloth.sku.id, wrap.sku.id, supplier.id]) if (body.includes(w)) found.push(`${what}: text ${w}`);
+        for (const w of ['SEN-CLOTH-QZX', 'SEN-WRAP-QZX', 'Sentinel Supplies QZX', 'SERVICE', 'PRODUCT', cloth.sku.id, wrap.sku.id, supplier.id, special.id, 'THE BOX OF ANOTHER RELEASE QZX']) {
+          if (body.includes(w)) found.push(`${what}: text ${w}`);
+        }
       }
       expect(found).toEqual([]);
       // The scanner is not blind: the console's add-on carries them.

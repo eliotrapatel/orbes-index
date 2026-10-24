@@ -136,7 +136,7 @@ import { defaultLocationId, ensureSku } from '../../src/server/services/stock.js
 import { SYSTEM_ACTOR, type Actor, type ManualClock } from '../../src/server/types.js';
 import type { DecideClaimInput } from '../../src/server/services/warranty-claims.js';
 import { countPiecesIn, packAndShip, stockPieces } from './fulfil.js';
-import { createLiveRelease, holdPieces, type LiveFixture, type LiveReleaseOptions } from './live.js';
+import { createLiveRelease, holdPieces, pickAddons, type LiveFixture, type LiveReleaseOptions } from './live.js';
 import { giveSizes, poolDraw, withDrawSizes } from './draws.js';
 import { HOUSE_DEFAULT_WORDS, houseDate, houseMoney, renderHouseWords, type HouseMomentName, type HouseValues } from '../../src/shared/house-words.js';
 import { WORN_CONSENT_VERSION } from '../../src/server/services/worn.js';
@@ -1815,8 +1815,10 @@ async function seedAddons(w: World): Promise<void> {
     await ctx.services.stock.adjust({ skuId: made.sku.id, locationId: location, delta: 10, note: 'Counted in.' }, admin);
     ids[role] = made.id;
   }
-  // The hold: the release's ENGRAVING as chosen, and two add-ons of the catalogue.
+  // The hold: the release's ENGRAVING as chosen, and two add-ons of the catalogue. Lot Q2, step Q2.3: the release, under
+  // way, picks the four (as migration 0060 writes the pick of a release not ended: every catalogue add-on of M3).
   const live = demo.releases.live!;
+  await pickAddons(ctx.db, live, Object.keys(NOCTURNE_ADDONS).map((role) => ids[role]!));
   const held = await ctx.services.live.entry(secured.id, live);
   await ctx.services.live.setAddons(secured.id, live, (held?.addons ?? []).map((a) => a.id), secured.actor, [
     { addonId: ids.cloth!, units: 2 },
@@ -1824,7 +1826,7 @@ async function seedAddons(w: World): Promise<void> {
   ]);
   // ZENITH priced in euros: the salon's request offers the add-ons.
   await ctx.services.catalog.updateModel(w.models.zenith!, { basePriceMinor: 480_000, baseCurrency: 'EUR' }, admin);
-  // A draw with a price, you's place held in it, a CLOTH chosen on it.
+  // A draw with a price, you's place held in it, a CLOTH chosen on it (Q2.3: its pick, the draws' default, the four).
   clock.set(at('2026-10-01T09:00:00Z'));
   const autumn = await poolDraw(
     ctx.services.drops,

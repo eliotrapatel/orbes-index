@@ -6,6 +6,9 @@
  *    pay, one piece per person, the tier priority, « N PIECES », EUR), its seed sealed and committed, audited; every
  *    refusal of its settings (the sizes and their total, the add-ons, the currency, the times and the stages in order, the
  *    models and the collection of its rule, the per-tier windows);
+ *  - the catalogue add-ons it picks (lot Q2, step Q2.3, D3): every one its LIVE switch offers in its currency at its
+ *    creation (N7) or those given, checked (409 ADDON_NOT_OFFERED naming it), changed until the announcement, audited
+ *    with names; its after-room's own; GET /api/admin/addons?moment=LIVE&currency= says why one cannot be picked;
  *  - edit everything before the announcement (a published release announced later too), the lists replaced, their ids
  *    kept, the quantity line following the stock while it is the default, nothing written when nothing changes; after
  *    the announcement only ADD PIECES raises the stock (409 LIVE_ANNOUNCED), and not before it (409 LIVE_NOT_ANNOUNCED); a
@@ -339,6 +342,88 @@ describe('LIVE RELEASES: the console', () => {
       const off = await op.patch(`/api/admin/live/${r.id}`, { afterRoom: null });
       expect((safeJson(off) as Json).afterRoom).toBeNull();
       expect((await auditor.get(`/api/admin/live/${child}`)).statusCode).toBe(404);
+    });
+
+    it('picks the catalogue add-ons it offers (lot Q2, step Q2.3, D3): every one its LIVE switch offers in its currency at its creation (N7), or those given in order, each checked; changed until its announcement, audited with names; its after-room picks its own; the form\'s list says why one cannot be picked', async () => {
+      const made = async (name: string, skuCode: string, o: Json = {}) =>
+        safeJson(await op.post('/api/admin/addons', { name, skuCode, kind: 'SERVICE', prices: { EUR: 1500 }, ...o })) as Json;
+      const wrap = await made('GIFT WRAPPING', 'ADD-Q23-WRAP');
+      const box = await made('THE BOX FOR ONE RELEASE', 'ADD-Q23-BOX', { prices: { EUR: 9000, GBP: 8000 } });
+      const drawOnly = await made('DRAW CARD', 'ADD-Q23-DRAWCARD', { offeredAt: { live: false } });
+      const ordersOnly = await made('LATER CARD', 'ADD-Q23-LATER', { offeredAt: { live: false, draw: false, salon: false } });
+      const gbpOnly = await made('POUND BOX', 'ADD-Q23-POUND', { prices: { GBP: 1000 } });
+      const mine = new Set([wrap.id, box.id, drawOnly.id, ordersOnly.id, gbpOnly.id]);
+      const picked = (r: Json) => (r.addonPick as Json[]).filter((a) => mine.has(a.id)).map((a) => [a.name, a.priceMinor]);
+      try {
+        // The form's list: every active add-on, pickable or why not.
+        const listed = safeJson(await auditor.get('/api/admin/addons?moment=LIVE&currency=EUR')) as { items: Json[] };
+        expect(listed.items.filter((a) => mine.has(a.id)).map((a) => [a.name, a.priceMinor, a.pickable, a.why])).toEqual([
+          ['GIFT WRAPPING', 1500, true, null],
+          ['THE BOX FOR ONE RELEASE', 9000, true, null],
+          ['DRAW CARD', 1500, false, 'SWITCH_OFF'],
+          ['LATER CARD', 1500, false, 'SWITCH_OFF'],
+          ['POUND BOX', null, false, 'NO_PRICE'],
+        ]);
+        expect(listed.items[0]).not.toHaveProperty('stock');
+        for (const bad of ['?moment=LIVE', '?currency=EUR', '?moment=SALON&currency=EUR', '?moment=LIVE&currency=JPY']) expect((await auditor.get(`/api/admin/addons${bad}`)).statusCode).toBe(400);
+        // N7: at its creation, every add-on its LIVE switch offers in its currency, in the catalogue's order.
+        const r = await create();
+        expect(picked(r)).toEqual([
+          ['GIFT WRAPPING', 1500],
+          ['THE BOX FOR ONE RELEASE', 9000],
+        ]);
+        expect((await audits('drop.live.create', r.id))[0]!.details).toMatchObject({ addonIds: expect.arrayContaining([{ id: wrap.id, name: 'GIFT WRAPPING' }, { id: box.id, name: 'THE BOX FOR ONE RELEASE' }]) });
+        // Given: exactly those, in that order; none at all.
+        const special = await create({ addonIds: [box.id] });
+        expect(special.addonPick.map((a: Json) => a.name)).toEqual(['THE BOX FOR ONE RELEASE']);
+        expect((await create({ addonIds: [] })).addonPick).toEqual([]);
+        // Each checked, its name said.
+        for (const [ids, message] of [
+          [[drawOnly.id], 'DRAW CARD is not offered in a LIVE RELEASE: turn its switch on in Catalogue → Add-ons.'],
+          [[ordersOnly.id], 'LATER CARD is not offered in a LIVE RELEASE: turn its switch on in Catalogue → Add-ons.'],
+          [[gbpOnly.id], 'POUND BOX has no price in EUR.'],
+        ] as const) {
+          const res = await op.post('/api/admin/live', settings({ addonIds: ids }));
+          expect([res.statusCode, errorOf(res).code, errorOf(res).message]).toEqual([409, 'ADDON_NOT_OFFERED', message]);
+        }
+        expect(errorOf(await op.post('/api/admin/live', settings({ addonIds: [wrap.id, wrap.id] }))).code).toBe('VALIDATION_FAILED');
+        expect(errorOf(await op.post('/api/admin/live', settings({ addonIds: ['00000000-0000-4000-8000-000000000000'] }))).code).toBe('ADDON_NOT_FOUND');
+        // In GBP, the box's GBP price; the pick changed and audited before and after, by name.
+        const changed = safeJson(await op.patch(`/api/admin/live/${special.id}`, { currency: 'GBP', addonIds: [gbpOnly.id, box.id] })) as Json;
+        expect(picked(changed)).toEqual([
+          ['POUND BOX', 1000],
+          ['THE BOX FOR ONE RELEASE', 8000],
+        ]);
+        expect((await audits('drop.live.update', special.id)).at(-1)!.details).toMatchObject({
+          before: { addonIds: [{ id: box.id, name: 'THE BOX FOR ONE RELEASE' }] },
+          after: { addonIds: [{ id: gbpOnly.id, name: 'POUND BOX' }, { id: box.id, name: 'THE BOX FOR ONE RELEASE' }] },
+        });
+        // Its after-room: its own pick, every such add-on when it is set without one.
+        const withRoom = safeJson(
+          await op.patch(`/api/admin/live/${special.id}`, { afterRoom: { modelId: f.modelId, priceMinor: 90_000, sizes: [{ label: 'ONE SIZE', stock: 2 }], addonIds: [box.id] } }),
+        ) as Json;
+        expect(picked(withRoom.afterRoom)).toEqual([['THE BOX FOR ONE RELEASE', 8000]]);
+        expect(picked(withRoom)).toEqual([
+          ['POUND BOX', 1000],
+          ['THE BOX FOR ONE RELEASE', 8000],
+        ]);
+        const room = await create({ afterRoom: { modelId: f.modelId, priceMinor: 90_000, sizes: [{ label: 'ONE SIZE', stock: 2 }] } });
+        expect(picked(room.afterRoom)).toEqual([
+          ['GIFT WRAPPING', 1500],
+          ['THE BOX FOR ONE RELEASE', 9000],
+        ]);
+        expect((await op.patch(`/api/admin/live/${room.id}`, { afterRoom: null })).statusCode).toBe(200);
+        // Announced (at its publication): its pick no longer changes (the settings' lock).
+        const announced = await create({ inMinutes: 3 * 60 });
+        expect((safeJson(await op.post(`/api/admin/live/${announced.id}/publish`, {})) as Json).phase).toBe('ANNOUNCED');
+        const locked = await op.patch(`/api/admin/live/${announced.id}`, { addonIds: [box.id] });
+        expect([locked.statusCode, errorOf(locked).code]).toEqual([409, 'LIVE_ANNOUNCED']);
+        // Set aside later: still listed in its pick, read as set aside (the hold no longer offers it).
+        await op.post(`/api/admin/addons/${wrap.id}/set-aside`, {});
+        expect((safeJson(await op.get(`/api/admin/live/${announced.id}`)) as Json).addonPick.find((a: Json) => a.id === wrap.id)).toMatchObject({ active: false });
+      } finally {
+        for (const id of mine) await op.post(`/api/admin/addons/${id}/set-aside`, {});
+      }
     });
   });
 

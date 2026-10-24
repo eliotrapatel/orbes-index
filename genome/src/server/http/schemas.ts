@@ -29,6 +29,7 @@ import {
   OPENED_IN,
   CREDIT_CHANNELS,
   HOUSE_CURRENCIES,
+  ADDON_PICK_POSITION_MAX,
   SHIPPING_FREE_LEVELS,
   SHIPPING_SERVICES,
   DROP_ENTRY_STATUSES,
@@ -887,6 +888,9 @@ const drawPriceTogether = (b: { priceMinor?: number | null; currency?: string | 
  * currency (NOCTURNE, addition 5: optional, both or neither). The description is plain text ('' and null: none). Macro
  * scope K44 T1: a set's draw, `setId` in place of `modelId` (exactly one), its sizes each with its `piece`.
  */
+/** Lot Q2, step Q2.3 (D3): a release's pick of catalogue add-ons, in order, each once (the service's rule: 400, 404, 409). */
+const addonPick = z.array(uuid).max(ADDON_PICK_POSITION_MAX, `At most ${ADDON_PICK_POSITION_MAX} add-ons`);
+
 export const createDropBody = body({
   modelId: uuid.optional(),
   setId: uuid.optional(),
@@ -903,6 +907,8 @@ export const createDropBody = body({
   currency: z.preprocess((v) => (v === '' ? null : v), drawCurrency.nullable().optional()),
   /** Plan MACRO M1 §3.1 (F4): the segment the draw is opened to, until its publication ('' and null: everyone). */
   accessSegmentId: z.preprocess((v) => (v === '' ? null : v), uuid.nullable().optional()),
+  /** Lot Q2, step Q2.3: the catalogue add-ons offered on its places held (omitted: every one its DRAW switch offers, N7). */
+  addonIds: addonPick.optional(),
 })
   .refine((b) => b.closesAt.getTime() > b.opensAt.getTime(), { message: 'Entries close after they open', path: ['closesAt'] })
   .refine((b) => (b.modelId === undefined) !== (b.setId === undefined), { message: 'Send the model, or the set, the release sells', path: ['modelId'] })
@@ -929,6 +935,8 @@ export const updateDropBody = body({
   currency: z.preprocess((v) => (v === '' ? null : v), drawCurrency.nullable().optional()),
   /** Plan MACRO M1 §3.1 (F4): the segment the draw is opened to, until its publication ('' and null: everyone). */
   accessSegmentId: z.preprocess((v) => (v === '' ? null : v), uuid.nullable().optional()),
+  /** Lot Q2, step Q2.3: its pick of catalogue add-ons, replacing it, while a DRAFT. */
+  addonIds: addonPick.optional(),
 })
   .refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one field of the release to change')
   .refine(drawPriceTogether, { message: 'A price is sent with its currency, or both are cleared (null)', path: ['priceMinor'] });
@@ -1021,6 +1029,8 @@ const liveSettingsFields = {
   sizes: liveSizes,
   quantityLine: z.preprocess(emptyToNull, text(LIVE_QUANTITY_LINE_MAX).nullable().optional()),
   addons: liveAddons.optional(),
+  /** Lot Q2, step Q2.3: the catalogue add-ons offered at its purchase, in order (omitted at its creation: every one its LIVE switch offers, N7). */
+  addonIds: addonPick.optional(),
   announceAt: liveTime,
   silhouetteAt: liveTime,
   nameAt: liveTime,
@@ -1052,6 +1062,7 @@ const liveSettingsFields = {
       priceMinor: livePrice,
       sizes: liveSizes,
       addons: liveAddons.optional(),
+      addonIds: addonPick.optional(),
       delayMinutes: whole(AFTER_ROOM_DELAY_MINUTES.min, AFTER_ROOM_DELAY_MINUTES.max, 'minutes').optional(),
       lengthMinutes: whole(AFTER_ROOM_LENGTH_MINUTES.min, AFTER_ROOM_LENGTH_MINUTES.max, 'minutes').optional(),
     })
@@ -2730,6 +2741,14 @@ export const modelPairsBody = body({
 // ── Admin: the add-ons (routes/admin/addons.ts, plan MACRO M3 §4.2, D1) ───
 
 export const addonParams = z.object({ id: uuid });
+
+/**
+ * GET /api/admin/addons?moment=LIVE|DRAW&currency=EUR (lot Q2, step Q2.3): the list a release's form picks from, each
+ * add-on's offerability and why not; both or neither (neither: the catalogue).
+ */
+export const addonsQuery = z
+  .object({ moment: queryOptional(z.enum(['LIVE', 'DRAW'], { message: 'LIVE or DRAW' })), currency: queryOptional(z.enum(HOUSE_CURRENCIES, { message: `One of ${HOUSE_CURRENCIES.join(', ')}` })) })
+  .refine((q) => (q.moment === undefined) === (q.currency === undefined), { message: 'Send the moment with its currency', path: ['moment'] });
 
 /** An add-on's price in a house currency, in cents (0 to 1 000 000.00); null removes it (not offered in that currency). */
 const addonPrice = z.number().int('Must be a whole number of cents').min(0, 'At least 0').max(ADDON_PRICE_MINOR_MAX, `At most ${ADDON_PRICE_MINOR_MAX} cents`).nullable();
