@@ -251,7 +251,7 @@ Chaque LIVE RELEASE a un rythme et une attente après l'ouverture (ONE QUEUE, lo
 
 **« Pourquoi mon temps a bougé ? »** L'estimation est recalculée à chaque lecture de la page, au rythme de la sortie et selon les pièces qui reviennent. Ne l'expliquez pas : rappelez que la place est gardée.
 
-> L'heure affichée est une estimation, mise à jour en direct. Votre place est gardée : gardez la page ouverte, votre tour viendra dans l'ordre de la file.
+> Le temps affiché est une estimation, mise à jour en direct. Votre place est gardée : gardez la page ouverte, votre tour viendra dans l'ordre de la file.
 
 **« Une pièce est libre : pourquoi n'est-elle pas donnée tout de suite ? »** Elle sera proposée avec les prochains tours de la sortie, dans l'ordre de la file. Ne dites ni quand ni pourquoi.
 

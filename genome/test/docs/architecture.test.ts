@@ -71,7 +71,7 @@ describe('the other documents of ONE QUEUE (plan §6)', () => {
     const api = readDoc('docs/API.md');
     const live = section(api, '### 10.12');
     expect(live).toContain('`{ "place", "waitMs", "paused", "next", "out" }`');
-    expect(live).toContain('"sizes": [{ "id", "label", "stock", "left", "serves", "out" }]');
+    expect(live).toContain('"sizes": [{ "id", "label", "piece"?, "stock", "left", "serves", "out" }], "pieces"?: [{ "piece", "name", "variant", "imageUrl", "sizes" }]');
     expect(live).not.toMatch(/"line", "quantity"|"held", "sizes"|"nextBatchAt"|`etaAt`|`ahead`/);
     expect(live).toContain('the `queue` event of lot M1 is gone');
     // pollMs: from the entry's own estimate, within the code's bounds.
