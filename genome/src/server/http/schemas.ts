@@ -65,10 +65,12 @@ import {
   BOX_EMPTY_WEIGHT_G_MAX,
   BOX_INSIDE_MM_MAX,
   BOX_NAME_MAX,
+  ADDON_KINDS,
   ADDON_LINE_MAX,
   ADDON_NAME_MAX,
   ADDON_POSITION_MAX,
   ADDON_PRICE_MINOR_MAX,
+  ADDON_TEXT_MAX,
   ADDON_WEIGHT_G_MAX,
   PACKED_WEIGHT_G_MAX,
   SET_NAME_MAX,
@@ -2736,25 +2738,46 @@ const addonPrices = z.strictObject({ EUR: addonPrice.optional(), GBP: addonPrice
 const addonLine = z.preprocess(emptyToNull, text(ADDON_LINE_MAX).nullable());
 const addonWeight = whole(1, ADDON_WEIGHT_G_MAX, 'grams').nullable();
 const addonPosition = whole(0, ADDON_POSITION_MAX, 'places');
+/** Lot Q2 (D4, N13): PRODUCT (real stock) or SERVICE (none), fixed at the creation. */
+const addonKind = z.enum(ADDON_KINDS, { message: `One of ${ADDON_KINDS.join(', ')}` });
+/** Lot Q2 (D3): its switches, the ones given (on or off). */
+const addonOfferedAt = z.strictObject({ live: z.boolean().optional(), draw: z.boolean().optional(), salon: z.boolean().optional(), orders: z.boolean().optional() });
+/** Lot Q2 (D12, N3): the engraving's most characters, 1 to 20. */
+const addonTextMax = whole(ADDON_TEXT_MAX.min, ADDON_TEXT_MAX.max, 'characters');
 
-/** POST /api/admin/addons: its name, line, SKU code (at the creation only), supplier, weight, position and prices. */
+/**
+ * POST /api/admin/addons: its kind (PRODUCT by default), name, line, SKU code (at the creation only), supplier, weight,
+ * position, switches, the engraving and its most characters, and prices.
+ */
 export const createAddonBody = body({
+  kind: addonKind.optional(),
   name: text(ADDON_NAME_MAX),
   line: addonLine.optional(),
   skuCode: text(64),
   supplierId: uuid.nullable().optional(),
   weightG: addonWeight.optional(),
   position: addonPosition.optional(),
+  offeredAt: addonOfferedAt.optional(),
+  engraving: z.boolean().optional(),
+  textMax: addonTextMax.optional(),
   prices: addonPrices.optional(),
 });
 
-/** PATCH /api/admin/addons/:id: its name, line, supplier, weight and position (its SKU code never changes). At least one. */
+/**
+ * PATCH /api/admin/addons/:id: its name, line, supplier, weight, position, switches, the engraving and its most
+ * characters (its SKU code never changes; its kind neither: another than its own answers 409 ADDON_KIND_FIXED). At
+ * least one.
+ */
 export const updateAddonBody = body({
+  kind: addonKind.optional(),
   name: text(ADDON_NAME_MAX).optional(),
   line: addonLine.optional(),
   supplierId: uuid.nullable().optional(),
   weightG: addonWeight.optional(),
   position: addonPosition.optional(),
+  offeredAt: addonOfferedAt.optional(),
+  engraving: z.boolean().optional(),
+  textMax: addonTextMax.optional(),
 }).refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one field of the add-on to change');
 
 /** PUT /api/admin/addons/:id/prices: the prices by currency, each set or removed (null). At least one. */

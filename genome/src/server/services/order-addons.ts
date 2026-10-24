@@ -42,12 +42,17 @@
  *                `order.addon.remove`: the order as it stands with the add-on, its units and price, for the future
  *                Shopify sync) and one audit entry; the units' stock movements journal themselves (`stock.move`).
  *
+ * A service's unit (lot Q2, step Q2.2, D4: an engraving, a gift wrapping; services/addons.ts) is held nowhere: added
+ * with no location and no SKU lock (always available: no count), shipped and returned with its order by its status and
+ * times only (no stock movement; `returned_to_stock` false), left where it is when the order's location changes, its
+ * weight counted in the parcel when it has one; its documents, packing line and export lines are a product's.
+ *
  * Lock order (orders.ts): the source's rows, the order, the units' SKUs in id order (lockSku), the invoice numbers, the
  * journal, the audit log last.
  */
 import { sql } from 'kysely';
 import { inRetriedTransaction, type Db } from '../db/connection.js';
-import { ADDON_UNITS_MAX, HOUSE_CURRENCIES, jsonText, type HouseCurrency, type JsonObject, type OrderAddonAddedBy, type OrderAddonStatus, type OrderRow } from '../db/schema.js';
+import { ADDON_UNITS_MAX, HOUSE_CURRENCIES, jsonText, type AddonKind, type HouseCurrency, type JsonObject, type OrderAddonAddedBy, type OrderAddonStatus, type OrderRow } from '../db/schema.js';
 import { conflict, forbidden, notFound, validationError } from '../errors.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
@@ -142,7 +147,8 @@ export interface AdminOrderAddonUnit {
   shippedAt: Date | null;
   returnedAt: Date | null;
   returnedToStock: boolean | null;
-  location: { id: string; name: string };
+  /** Where it is held; null for a service's unit (held nowhere, Q2). */
+  location: { id: string; name: string } | null;
   /** Its supplementary invoice (added after PAID), by number; null otherwise. */
   invoiceId: string | null;
 }
@@ -225,14 +231,16 @@ interface AddonStanding {
   active: boolean;
   weightG: number | null;
   priceMinor: number | null;
+  /** Available at the location; a service, without count, always (Infinity). */
   available: number;
+  kind: AddonKind;
 }
 
 /** The standing of each add-on named (unknown ones absent): its SKU, its price in `currency`, what is available at `locationId`. */
 async function standings(db: Db, addonIds: readonly string[], locationId: string, currency: HouseCurrency | null): Promise<Map<string, AddonStanding>> {
   if (addonIds.length === 0) return new Map();
-  const rows = await sql<{ addon_id: string; sku_id: string; name: string; line: string | null; active: boolean; weight_g: number | null; price_minor: number | null; available: number }>`
-    SELECT a.id AS addon_id, k.id AS sku_id, a.name, a.line, a.active, a.weight_g, p.price_minor,
+  const rows = await sql<{ addon_id: string; sku_id: string; name: string; line: string | null; active: boolean; weight_g: number | null; price_minor: number | null; available: number; kind: AddonKind }>`
+    SELECT a.id AS addon_id, k.id AS sku_id, a.name, a.line, a.active, a.weight_g, p.price_minor, a.kind,
            (coalesce((SELECT sum(m.delta) FROM stock_movements m WHERE m.sku_id = k.id AND m.location_id = ${locationId}::uuid), 0)
             - (SELECT count(*) FROM stock_holds h WHERE h.sku_id = k.id AND h.location_id = ${locationId}::uuid AND h.reservation = 'STOCK'))::int AS available
       FROM addon_items a
@@ -250,7 +258,8 @@ async function standings(db: Db, addonIds: readonly string[], locationId: string
         active: r.active,
         weightG: r.weight_g,
         priceMinor: r.price_minor === null ? null : Number(r.price_minor),
-        available: Number(r.available),
+        available: r.kind === 'SERVICE' ? Number.POSITIVE_INFINITY : Number(r.available),
+        kind: r.kind,
       },
     ]),
   );
@@ -258,13 +267,14 @@ async function standings(db: Db, addonIds: readonly string[], locationId: string
 
 /**
  * What is offered at `locationId` in `currency` now (services/addons.ts availableAddons' rule: active, priced, at least
- * one available), each with the units that can still be taken: what is available, within ADDON_LIMIT less `held` (the
- * units of that add-on the order holds already). An add-on whose limit is reached is left out.
+ * one available; a service always), each with the units that can still be taken: what is available (a service: no
+ * count), within ADDON_LIMIT less `held` (the units of that add-on the order holds already). An add-on whose limit is
+ * reached is left out.
  */
 export async function addonOffer(db: Db, locationId: string, currency: HouseCurrency | null, held: ReadonlyMap<string, number> = new Map()): Promise<AddonOfferItem[]> {
   if (currency === null) return [];
-  const rows = await sql<{ addon_id: string; name: string; line: string | null; price_minor: number; available: number }>`
-    SELECT a.id AS addon_id, a.name, a.line, p.price_minor,
+  const rows = await sql<{ addon_id: string; name: string; line: string | null; price_minor: number; available: number; kind: AddonKind }>`
+    SELECT a.id AS addon_id, a.name, a.line, p.price_minor, a.kind,
            (coalesce((SELECT sum(m.delta) FROM stock_movements m WHERE m.sku_id = k.id AND m.location_id = ${locationId}::uuid), 0)
             - (SELECT count(*) FROM stock_holds h WHERE h.sku_id = k.id AND h.location_id = ${locationId}::uuid AND h.reservation = 'STOCK'))::int AS available
       FROM addon_items a
@@ -279,7 +289,7 @@ export async function addonOffer(db: Db, locationId: string, currency: HouseCurr
       line: r.line,
       priceMinor: Number(r.price_minor),
       currency,
-      maxUnits: Math.max(0, Math.min(Number(r.available), ADDON_LIMIT - (held.get(r.addon_id) ?? 0))),
+      maxUnits: Math.max(0, Math.min(r.kind === 'SERVICE' ? ADDON_LIMIT : Number(r.available), ADDON_LIMIT - (held.get(r.addon_id) ?? 0))),
     }))
     .filter((r) => r.maxUnits >= 1);
 }
@@ -351,7 +361,7 @@ async function unitsOf(db: Db, orderIds: readonly string[], statuses?: readonly 
     .selectFrom('order_addon_items as u')
     .innerJoin('addon_items as a', 'a.id', 'u.addon_id')
     .selectAll('u')
-    .select(['a.name', 'a.weight_g'])
+    .select(['a.name', 'a.weight_g', 'a.kind', 'a.engraving'])
     .where('u.order_id', 'in', [...new Set(orderIds)])
     .$if(statuses !== undefined, (q) => q.where('u.status', 'in', [...statuses!]))
     .orderBy('u.added_at')
@@ -438,7 +448,8 @@ export async function adminAddonUnits(db: Db, orderId: string): Promise<AdminOrd
     .selectFrom('order_addon_items as u')
     .innerJoin('addon_items as a', 'a.id', 'u.addon_id')
     .innerJoin('skus as k', 'k.id', 'u.sku_id')
-    .innerJoin('stock_locations as l', 'l.id', 'u.location_id')
+    // A service's unit is held nowhere (Q2): no location.
+    .leftJoin('stock_locations as l', 'l.id', 'u.location_id')
     .selectAll('u')
     .select(['a.name', 'k.code', 'l.id as location_ref', 'l.name as location_name'])
     .where('u.order_id', '=', orderId)
@@ -459,36 +470,51 @@ export async function adminAddonUnits(db: Db, orderId: string): Promise<AdminOrd
     shippedAt: u.shipped_at,
     returnedAt: u.returned_at,
     returnedToStock: u.returned_to_stock,
-    location: { id: u.location_ref, name: u.location_name },
+    location: u.location_ref === null ? null : { id: u.location_ref, name: u.location_name! },
     invoiceId: u.invoice_id,
   }));
+}
+
+/** An add-on a parcel packs: its units and weight (null: unknown), whether it is a service and the engraving (Q2). */
+export interface ParcelAddonItem {
+  addonId: string;
+  name: string;
+  units: number;
+  weightG: number | null;
+  /** A service: its weight counts when it has one, and is never missing (Q2, D4). */
+  service: boolean;
+  /** The engraving: its packing line is the order's « Engraving done » line (services/parcels.ts checklistOf). */
+  engraving: boolean;
 }
 
 /**
  * The add-ons each order of a parcel packs (HELD, or SHIPPED once it has gone): by order, one row per add-on with its
  * units and weight (null: unknown), in the order they were added.
  */
-export async function parcelAddonItems(db: Db, orderIds: readonly string[]): Promise<Map<string, { addonId: string; name: string; units: number; weightG: number | null }[]>> {
-  const out = new Map<string, { addonId: string; name: string; units: number; weightG: number | null }[]>();
+export async function parcelAddonItems(db: Db, orderIds: readonly string[]): Promise<Map<string, ParcelAddonItem[]>> {
+  const out = new Map<string, ParcelAddonItem[]>();
   for (const u of await unitsOf(db, orderIds, ['HELD', 'SHIPPED'])) {
     const list = out.get(u.order_id) ?? [];
     const row = list.find((x) => x.addonId === u.addon_id);
     if (row) row.units += 1;
-    else list.push({ addonId: u.addon_id, name: u.name, units: 1, weightG: u.weight_g });
+    else list.push({ addonId: u.addon_id, name: u.name, units: 1, weightG: u.weight_g, service: u.kind === 'SERVICE', engraving: u.engraving });
     out.set(u.order_id, list);
   }
   return out;
 }
 
-/** An order's units as the Shopify order export lists them (not removed), oldest first: name, SKU code, price. */
-export async function exportAddonUnits(db: Db, orderIds: readonly string[]): Promise<Map<string, { name: string; skuCode: string; priceMinor: number }[]>> {
-  const out = new Map<string, { name: string; skuCode: string; priceMinor: number }[]>();
+/**
+ * An order's units as the Shopify order export lists them (not removed), oldest first: name, SKU code, price, and
+ * whether it is shipped (a service's is not: Q2, S5).
+ */
+export async function exportAddonUnits(db: Db, orderIds: readonly string[]): Promise<Map<string, { name: string; skuCode: string; priceMinor: number; shipping: boolean }[]>> {
+  const out = new Map<string, { name: string; skuCode: string; priceMinor: number; shipping: boolean }[]>();
   if (orderIds.length === 0) return out;
   const rows = await db
     .selectFrom('order_addon_items as u')
     .innerJoin('addon_items as a', 'a.id', 'u.addon_id')
     .innerJoin('skus as k', 'k.id', 'u.sku_id')
-    .select(['u.order_id', 'a.name', 'k.code', 'u.price_minor'])
+    .select(['u.order_id', 'a.name', 'a.kind', 'k.code', 'u.price_minor'])
     .where('u.order_id', 'in', [...new Set(orderIds)])
     .where('u.status', '<>', 'REMOVED')
     .orderBy('u.added_at')
@@ -496,7 +522,7 @@ export async function exportAddonUnits(db: Db, orderIds: readonly string[]): Pro
     .execute();
   for (const r of rows) {
     const list = out.get(r.order_id) ?? [];
-    list.push({ name: r.name, skuCode: r.code, priceMinor: r.price_minor });
+    list.push({ name: r.name, skuCode: r.code, priceMinor: r.price_minor, shipping: r.kind !== 'SERVICE' });
     out.set(r.order_id, list);
   }
   return out;
@@ -576,25 +602,24 @@ export const addonLine = (name: string, priceMinor: number): InvoiceLine => ({ k
  * `units` units of an add-on added to a locked order, in `currency` (the order's; at a salon's ACCEPTED, the model's
  * base currency), under its SKU's lock: offered (404 ADDON_NOT_FOUND; 409 ADDON_NOT_OFFERED, set aside or without a
  * price in it), within ADDON_LIMIT with what the order holds already (409 ADDON_LIMIT), that many available at the
- * order's location (409 ADDON_OUT_OF_STOCK). After PAID, a supplementary invoice of their lines. Returns the units'
- * ids and the audit entries.
+ * order's location (409 ADDON_OUT_OF_STOCK; a service, held nowhere, without lock or count). After PAID, a
+ * supplementary invoice of their lines. Returns the units' ids and the audit entries.
  */
 async function addUnits(tx: Db, o: OrderRow, addonId: string, units: number, currency: HouseCurrency, by: AddonBy, now: Date): Promise<{ unitIds: string[]; notes: AuditRecordInput[] }> {
   const s = (await standings(tx, [addonId], o.location_id, currency)).get(addonId);
   if (!s) throw addonNotFound();
   if (!s.active || s.priceMinor === null) throw addonNotOffered(`${s.name} is not offered on this order.`);
-  await lockSku(tx, s.skuId);
+  if (s.kind === 'PRODUCT') await lockSku(tx, s.skuId);
   const held = (await tx.selectFrom('order_addon_items').select('id').where('order_id', '=', o.id).where('addon_id', '=', addonId).where('status', '=', 'HELD').execute()).length;
   if (held + units > ADDON_LIMIT) throw addonLimit();
-  const level = await stockLevel(tx, s.skuId, o.location_id);
-  if (level.available < units) throw addonOutOfStock(s.name);
+  if (s.kind === 'PRODUCT' && (await stockLevel(tx, s.skuId, o.location_id)).available < units) throw addonOutOfStock(s.name);
   return insertUnits(tx, o, s, units, currency, by, now);
 }
 
 async function insertUnits(
   tx: Db,
   o: OrderRow,
-  s: Pick<AddonStanding, 'addonId' | 'skuId' | 'name'> & { priceMinor: number | null },
+  s: Pick<AddonStanding, 'addonId' | 'skuId' | 'name' | 'kind'> & { priceMinor: number | null },
   units: number,
   currency: HouseCurrency,
   by: AddonBy,
@@ -608,7 +633,8 @@ async function insertUnits(
         order_id: o.id,
         addon_id: s.addonId,
         sku_id: s.skuId,
-        location_id: o.location_id,
+        // A service's unit is held nowhere (order_addon_items_kind_guard).
+        location_id: s.kind === 'SERVICE' ? null : o.location_id,
         price_minor: price,
         currency,
         added_at: now,
@@ -663,8 +689,8 @@ async function removeUnits(tx: Db, o: OrderRow, units: readonly UnitRow[], by: A
 /**
  * The choices of a sale's source carried onto its first order (in the transaction that creates it, the order just
  * created): each add-on in `currency`, under its SKU's lock (the SKUs in id order), as many units as are available at
- * the order's location (the rest left out, NONE_LEFT), none when it is set aside or no longer priced in it (NOT_OFFERED)
- * or without a currency; never blocking the sale. The choices are then deleted. Returns the units' audit entries and
+ * the order's location (the rest left out, NONE_LEFT; a service's, all of them, without lock), none when it is set aside
+ * or no longer priced in it (NOT_OFFERED) or without a currency; never blocking the sale. The choices are then deleted. Returns the units' audit entries and
  * what was left out, for the source's answer and audit entry.
  */
 export async function carryChoices(tx: Db, o: OrderRow, owner: AddonChoiceOwner, currency: HouseCurrency | null, actor: Actor, now: Date): Promise<{ leftOut: LeftOutAddon[]; notes: AuditRecordInput[] }> {
@@ -683,8 +709,9 @@ export async function carryChoices(tx: Db, o: OrderRow, owner: AddonChoiceOwner,
       leftOut.push({ addonId: s.addonId, name: s.name, units: c.units, reason: 'NOT_OFFERED' });
       continue;
     }
-    await lockSku(tx, s.skuId);
-    const level = await stockLevel(tx, s.skuId, o.location_id);
+    // A service has no stock (lot Q2, D4): no lock, as many as chosen.
+    if (s.kind === 'PRODUCT') await lockSku(tx, s.skuId);
+    const level = s.kind === 'PRODUCT' ? await stockLevel(tx, s.skuId, o.location_id) : { available: ADDON_LIMIT };
     const units = Math.max(0, Math.min(c.units, level.available, ADDON_LIMIT));
     if (units > 0) notes.push(...(await insertUnits(tx, o, s, units, currency, by, now)).notes);
     if (units < c.units) leftOut.push({ addonId: s.addonId, name: s.name, units: c.units - units, reason: 'NONE_LEFT' });
@@ -700,12 +727,15 @@ export async function cancelUnits(tx: Db, o: OrderRow, now: Date): Promise<numbe
   return held.length;
 }
 
-/** An order shipped: each unit HELD leaves the ledger with it (SHIPPED, −1, the unit named), under its SKU's lock. */
+/**
+ * An order shipped: each unit HELD leaves the ledger with it (SHIPPED, −1, the unit named), under its SKU's lock; a
+ * service's unit, held nowhere, is SHIPPED without lock nor movement.
+ */
 export async function shipUnits(tx: Db, o: OrderRow, actor: Actor, now: Date): Promise<number> {
   const held = await unitsOf(tx, [o.id], ['HELD']);
   const skus = bySku(held);
   for (const skuId of [...skus.keys()].sort()) {
-    await lockSku(tx, skuId);
+    if (skus.get(skuId)!.units.some((u) => u.location_id !== null)) await lockSku(tx, skuId);
     for (const u of skus.get(skuId)!.units) {
       if (u.location_id !== null) await recordMovement(tx, { skuId, locationId: u.location_id, delta: -1, reason: 'SHIPPED', orderId: o.id, orderAddonItemId: u.id }, actor, now);
       await tx.updateTable('order_addon_items').set({ status: 'SHIPPED', shipped_at: later(now, u.added_at) }).where('id', '=', u.id).execute();
@@ -738,7 +768,8 @@ export async function keptUnits(tx: Db, o: Pick<OrderRow, 'channel' | 'exchange_
  * An order returned (in its transaction): a size exchange (`keep`) leaves its units with the collector; any other
  * return takes back its units SHIPPED (and those a size exchange it replaces had left with the collector): RETURNED,
  * back to stock at `locationId` (the return's, else the order's) with the ledger's RETURNED +1 under each SKU's lock,
- * unless named in `out` (not to be sold again: `returned_to_stock` false, no movement). Returns how many came back.
+ * unless named in `out` (not to be sold again: `returned_to_stock` false, no movement). A service's unit comes back
+ * RETURNED with no lock and no movement, `returned_to_stock` false (it never held stock). Returns how many came back.
  */
 export async function returnUnits(tx: Db, o: OrderRow, r: { keep: boolean; locationId: string | null; out: ReadonlySet<string> }, actor: Actor, now: Date): Promise<{ returned: number; restocked: number }> {
   if (r.keep) return { returned: 0, restocked: 0 };
@@ -747,9 +778,10 @@ export async function returnUnits(tx: Db, o: OrderRow, r: { keep: boolean; locat
   let restocked = 0;
   const skus = bySku(shipped);
   for (const skuId of [...skus.keys()].sort()) {
-    await lockSku(tx, skuId);
-    for (const u of skus.get(skuId)!.units) {
-      const toStock = !r.out.has(u.id);
+    const g = skus.get(skuId)!;
+    if (g.units.some((u) => u.kind === 'PRODUCT')) await lockSku(tx, skuId);
+    for (const u of g.units) {
+      const toStock = u.kind === 'PRODUCT' && !r.out.has(u.id);
       await tx.updateTable('order_addon_items').set({ status: 'RETURNED', returned_at: later(now, u.shipped_at!), returned_to_stock: toStock }).where('id', '=', u.id).execute();
       if (toStock) {
         await recordMovement(tx, { skuId, locationId: location, delta: 1, reason: 'RETURNED', orderId: u.order_id, orderAddonItemId: u.id }, actor, now);
@@ -767,7 +799,7 @@ export async function returnUnits(tx: Db, o: OrderRow, r: { keep: boolean; locat
  * that left is gone with the parcel), never waiting for one: the units held beyond what the order's location has are
  * returned (`short`, by add-on), for the decision's answer and its `order.reship` event, so Client Services counts them
  * in, moves them there or removes them before packing; refunded, they stay as they left (gone), credited with the
- * order's cancellation.
+ * order's cancellation. A service's unit comes back to HELD held nowhere, with no lock, no movement and never short.
  */
 export async function reshipUnits(tx: Db, o: OrderRow, r: { cameBack: boolean; reship: boolean }, actor: Actor, now: Date): Promise<{ units: number; short: { addonId: string; name: string; units: number }[] }> {
   if (!r.cameBack && !r.reship) return { units: 0, short: [] };
@@ -775,8 +807,12 @@ export async function reshipUnits(tx: Db, o: OrderRow, r: { cameBack: boolean; r
   const skus = bySku(shipped);
   const short: { addonId: string; name: string; units: number }[] = [];
   for (const skuId of [...skus.keys()].sort()) {
-    await lockSku(tx, skuId);
     const g = skus.get(skuId)!;
+    if (g.units[0]!.kind === 'SERVICE') {
+      await tx.updateTable('order_addon_items').set({ status: 'HELD', shipped_at: null }).where('id', 'in', g.units.map((u) => u.id)).execute();
+      continue;
+    }
+    await lockSku(tx, skuId);
     for (const u of g.units) {
       if (r.cameBack && u.location_id !== null) await recordMovement(tx, { skuId, locationId: u.location_id, delta: 1, reason: 'RETURNED', orderId: o.id, orderAddonItemId: u.id }, actor, now);
       await tx.updateTable('order_addon_items').set({ status: 'HELD', shipped_at: null, location_id: o.location_id }).where('id', '=', u.id).execute();
@@ -792,10 +828,11 @@ export async function reshipUnits(tx: Db, o: OrderRow, r: { cameBack: boolean; r
 /**
  * An order's location changed (in its transaction, the order's row held): its units HELD move with it, each SKU under
  * its lock, while the new location has them available; otherwise the change is refused (409
- * ORDER_ADDON_NOT_AT_LOCATION: move the stock first, or remove the add-on). Returns how many moved.
+ * ORDER_ADDON_NOT_AT_LOCATION: move the stock first, or remove the add-on). A service's unit, held nowhere, stays as it
+ * is. Returns how many moved.
  */
 export async function moveUnits(tx: Db, o: OrderRow, toLocationId: string): Promise<number> {
-  const moving = (await unitsOf(tx, [o.id], ['HELD'])).filter((u) => u.location_id !== toLocationId);
+  const moving = (await unitsOf(tx, [o.id], ['HELD'])).filter((u) => u.kind === 'PRODUCT' && u.location_id !== toLocationId);
   const skus = bySku(moving);
   for (const skuId of [...skus.keys()].sort()) {
     await lockSku(tx, skuId);

@@ -87,6 +87,12 @@ const CLOTH: AddonView = {
     { location: { id: FR, name: 'FRANCE WAREHOUSE', isDefault: true }, onHand: 12, reserved: 2, available: 10, minimum: 5 },
     { location: { id: UK, name: 'LONDON', isDefault: false }, onHand: 0, reserved: 0, available: 0, minimum: null },
   ],
+  offeredAt: { live: true, draw: true, salon: true, orders: true },
+  engraving: false,
+  textMax: 20,
+  releases: 0,
+  convertedFrom: [],
+  kind: 'PRODUCT',
   createdAt: '2026-10-22T08:00:00.000Z',
   updatedAt: '2026-10-22T08:00:00.000Z',
 };
@@ -251,6 +257,9 @@ describe('the order page\'s Add-ons', () => {
     expect(returnedLine({ status: 'HELD', returnedToStock: null })).toBeNull();
     expect(documentAddonLine(units, 'inv')).toBe('For POLISHING CLOTH × 1');
     expect(documentAddonLine(units, 'other')).toBeNull();
+    // Lot Q2 (D4): a service's units are held nowhere, read as a service, grouped apart from a product's.
+    const wrap = addonGroups([unit({ id: 's1', addon: { id: UK, name: 'GIFT WRAPPING' }, location: null }), unit({ id: 's2', addon: { id: UK, name: 'GIFT WRAPPING' }, location: null })]);
+    expect(wrap.map((g) => [g.name, g.units, g.location])).toEqual([['GIFT WRAPPING', 2, 'Service']]);
   });
 
   it('offers Add an add-on to OPERATOR on an order RESERVED or PAID that takes add-ons, Remove on a unit held on an order RESERVED or PAID (the server refusing once the parcel is packed)', () => {

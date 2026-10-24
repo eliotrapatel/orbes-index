@@ -17,7 +17,8 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
-import { packingSuggestion, parcelWeight } from '../../src/server/services/parcels.js';
+import { checklistOf, packingSuggestion, parcelWeight } from '../../src/server/services/parcels.js';
+import { skuRefs } from '../../src/server/services/sku-owner.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import type { Actor } from '../../src/server/types.js';
 import { createAdmin, createHarness, issue, seedCatalog, type Catalog, type Harness } from '../api/support.js';
@@ -307,6 +308,29 @@ describe('LogisticsService (plan NEXT LOT §3.5.6.6)', () => {
     ]);
     await h.ctx.services.addons.reinstate(a.id, admin);
   });
+
+  it('never lists a service (lot Q2, D4: an engraving, a gift wrapping) and refuses its SKU wherever a SKU takes stock: a correction, a transfer, a count, a minimum, a count in (409 ADDON_SERVICE)', async () => {
+    const wrap = await h.ctx.services.addons.create({ kind: 'SERVICE', name: 'Gift Wrapping', skuCode: 'LG-WRAP', prices: { EUR: 1500 } }, admin);
+    const staff = await lg().stock();
+    expect(staff.skus.some((k) => k.id === wrap.sku.id)).toBe(false);
+    expect(staff.rows.some((r) => r.sku.id === wrap.sku.id)).toBe(false);
+    expect((await lg().stock({ locationId: logistics }, agentScope())).rows.some((r) => r.sku.id === wrap.sku.id)).toBe(false);
+    const refused = { code: 'ADDON_SERVICE', status: 409, message: 'Gift Wrapping is a service: it has no stock.' };
+    expect(await refusal(lg().proposeCorrection({ skuId: wrap.sku.id, locationId: logistics, delta: 5, reason: 'Counted.' }, agent, agentScope()))).toEqual(refused);
+    expect(await refusal(lg().proposeCorrection({ skuId: wrap.sku.id, locationId: logistics, delta: 5, reason: 'Counted.' }, admin, null))).toEqual(refused);
+    expect(await refusal(lg().transfer({ skuId: wrap.sku.id, fromLocationId: france, toLocationId: logistics, quantity: 1 }, admin))).toEqual(refused);
+    expect(await refusal(h.ctx.services.stock.adjust({ skuId: wrap.sku.id, locationId: france, delta: 1, note: 'Counted.' }, admin))).toEqual(refused);
+    expect(await refusal(lg().setMinimum({ skuId: wrap.sku.id, locationId: france, minimum: 2 }, admin))).toEqual(refused);
+    expect(await refusal(lg().setMinimum({ skuId: wrap.sku.id, locationId: france, minimum: null }, admin))).toEqual(refused);
+    const other = await piece(catalog.modelId, '52', { countIn: false });
+    expect(await refusal(lg().countIn(wrap.sku.id, { productRefs: [other.productId], note: 'On the shelf.' }, admin))).toEqual(refused);
+    // Nothing of it was written: no correction, no movement, no minimum.
+    expect(await h.t.db.selectFrom('stock_corrections').select('id').where('sku_id', '=', wrap.sku.id).execute()).toEqual([]);
+    expect(await h.t.db.selectFrom('stock_movements').select('id').where('sku_id', '=', wrap.sku.id).execute()).toEqual([]);
+    expect(await h.t.db.selectFrom('sku_thresholds').select('sku_id').where('sku_id', '=', wrap.sku.id).execute()).toEqual([]);
+    // Its SKU is named nowhere a SKU list reads.
+    expect((await skuRefs(h.ctx.db, [wrap.sku.id])).has(wrap.sku.id)).toBe(false);
+  });
 });
 
 /**
@@ -497,5 +521,24 @@ describe('a parcel\'s box and weight (plan MACRO M3 §1.1)', () => {
     expect(await shipmentOf(key)).toMatchObject({ status: 'PACKED', box_id: flat.id, weight_g: 140, weight_missing: null });
     expect((await lg().parcel(key, scope())).packing).toMatchObject({ box: { id: flat.id }, boxSource: 'CHOSEN', weightG: 140, recorded: true });
     expect(await refusal(lg().chooseBox(key, { boxId: cube.id }, agent, scope()))).toMatchObject({ code: 'PACKING_PACKED', status: 409 });
+  });
+
+  it('lot Q2 (D4, D8): a service packs on its own add-on line and the engraving on its « Engraving done » line while the order has its words; a service without a weight is never missing', () => {
+    const id = '00000000-0000-4000-8000-0000000000a1';
+    const item = (addonId: string, name: string, weightG: number | null, service: boolean, engraving = false) => ({ addonId, name, units: 1, weightG, service, engraving });
+    const items = new Map([[id, [item('w', 'GIFT WRAPPING', 40, true), item('e', 'ENGRAVING', null, true, true), item('c', 'POLISHING CLOTH', null, false)]]]);
+    const lines = (words: string | null) =>
+      checklistOf([{ id, addons: [], engraving_text: words }], new Set(), new Set(), null, items)
+        .map((l) => l.label)
+        .filter((l) => l.startsWith('Add-on') || l.startsWith('Engraving'));
+    expect(lines('M. B.')).toEqual(['Add-on: GIFT WRAPPING × 1', 'Add-on: POLISHING CLOTH × 1', 'Engraving done: "M. B."']);
+    // Without its words yet, the engraving bought is still on the list, as an add-on.
+    expect(lines(null)).toEqual(['Add-on: GIFT WRAPPING × 1', 'Add-on: ENGRAVING × 1', 'Add-on: POLISHING CLOTH × 1']);
+    const cube = { id: 'b', name: 'CUBE', insideLengthMm: 100, insideWidthMm: 70, insideHeightMm: 40, emptyWeightG: 100, active: true };
+    const weights = new Map([[id, 40]]);
+    // The product without a weight is missing; the engraving (a service) without one never is; the wrapping's counts.
+    expect(parcelWeight(cube, { weights, modelsWithoutWeight: [], addonItems: items })).toEqual({ weightG: null, missing: ['POLISHING CLOTH'] });
+    items.get(id)![2]!.weightG = 20;
+    expect(parcelWeight(cube, { weights, modelsWithoutWeight: [], addonItems: items })).toEqual({ weightG: 100 + 40 + 40 + 20, missing: [] });
   });
 });

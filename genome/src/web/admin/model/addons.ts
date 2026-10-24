@@ -310,7 +310,7 @@ export interface AddonGroup {
 export function addonGroups(units: readonly AdminOrderAddonUnit[]): AddonGroup[] {
   const groups = new Map<string, AddonGroup>();
   for (const u of units) {
-    const key = [u.addon.id, u.priceMinor, u.currency, u.status, u.addedBy.type, u.addedBy.id ?? '', u.returnedToStock ?? '', u.invoiceId ?? '', u.location.id].join('|');
+    const key = [u.addon.id, u.priceMinor, u.currency, u.status, u.addedBy.type, u.addedBy.id ?? '', u.returnedToStock ?? '', u.invoiceId ?? '', u.location?.id ?? ''].join('|');
     const g = groups.get(key);
     if (g) {
       g.units += 1;
@@ -328,7 +328,7 @@ export function addonGroups(units: readonly AdminOrderAddonUnit[]): AddonGroup[]
         addedAt: u.addedAt,
         returnedToStock: u.returnedToStock,
         invoiceId: u.invoiceId,
-        location: u.location.name,
+        location: u.location?.name ?? 'Service',
         unitIds: [u.id],
       });
     }

@@ -35,6 +35,11 @@
  * (`pace`, `batch`, `minutes`, `nextBatchAt`, `batches`, `waiting`), the line's (`line`, `beyond`), a held count
  * (`held`), the admission (`admitted…`) nor the hold after the opening (`hold…`, the entry's own `hold`, its pay window,
  * aside) on the room, the board, an entry, its queue (exactly its five figures) or a size; nor the queue's length.
+ *
+ * ADD-ONS ONE SYSTEM (lot Q2, step Q2.2; plan §2.8): what a collector reads of an add-on is its name, line, price,
+ * `maxUnits` (and, for the engraving, `engraving` and `textMax`); never its kind, a stock figure, a supplier, its SKU or
+ * its code, its switches, nor a release's pick: on a LIVE hold with a product and a service chosen (GET /state), then
+ * its order (YOUR ORDERS, and what can be added to it).
  */
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -402,6 +407,108 @@ describe('the collector never sees staff data (§3.6 C.9, §3.0 (k); step 9.13)'
     expect((x.warrantyClaims as { id: string }[]).map((c) => c.id)).toEqual([claimId]);
     expect(findings(res.body, forbidden)).toEqual([]);
   });
+});
+
+/** What an add-on carries for staff only (plan §2.8): its kind, stock, supplier, SKU, switches and releases' picks. */
+const ADDON_STAFF_KEYS = new Set([
+  'kind',
+  'stock',
+  'available',
+  'onHand',
+  'reserved',
+  'minimum',
+  'supplier',
+  'supplierId',
+  'sku',
+  'skuId',
+  'skuCode',
+  'code',
+  'offeredAt',
+  'offerLive',
+  'offerDraw',
+  'offerSalon',
+  'offerOrders',
+  'releases',
+  'picks',
+  'convertedFrom',
+  'shopifyProductId',
+  'shopifyVariantId',
+  'weightG',
+]);
+
+/** The staff keys found on any object of a payload that names an add-on (`addonId`), at any depth. */
+function addonStaffFindings(value: unknown, path = '$'): string[] {
+  const out: string[] = [];
+  const walk = (v: unknown, at: string) => {
+    if (Array.isArray(v)) return v.forEach((x, i) => walk(x, `${at}[${i}]`));
+    if (!v || typeof v !== 'object') return;
+    if ('addonId' in v) for (const k of Object.keys(v)) if (ADDON_STAFF_KEYS.has(k)) out.push(`key ${at}.${k}`);
+    for (const [k, x] of Object.entries(v)) walk(x, `${at}.${k}`);
+  };
+  walk(value, path);
+  return out;
+}
+
+describe('the collector never reads an add-on\'s kind, stock, supplier, SKU or switches (ADD-ONS ONE SYSTEM, plan §2.8)', () => {
+  it('on a LIVE hold with a product and a service chosen, then on its order, no collector payload carries them', async () => {
+    const h = await createHarness();
+    try {
+      h.clock.set('2026-11-02T09:00:00.000Z');
+      const f = await liveFixtureOn(h.ctx, h.clock);
+      const supplier = await h.ctx.services.suppliers.create({ name: 'Sentinel Supplies QZX', currency: 'EUR' }, f.admin);
+      const cloth = await h.ctx.services.addons.create({ name: 'POLISHING CLOTH', skuCode: 'SEN-CLOTH-QZX', supplierId: supplier.id, weightG: 20, prices: { EUR: 1500 } }, f.admin);
+      const wrap = await h.ctx.services.addons.create({ kind: 'SERVICE', name: 'GIFT WRAPPING', skuCode: 'SEN-WRAP-QZX', offeredAt: { salon: false }, prices: { EUR: 1500 } }, f.admin);
+      const france = (await h.t.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
+      await h.ctx.services.stock.adjust({ skuId: cloth.sku.id, locationId: france, delta: 5, note: 'Counted.' }, f.admin);
+      const opensAt = new Date(h.clock.now().getTime() + 4 * 60_000);
+      const r = await createLiveRelease(f, { opensAt, sizes: [{ label: '52', stock: 2 }] });
+      const { client, email } = await accountClient(h);
+      const { id } = await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', email.toLowerCase()).executeTakeFirstOrThrow();
+      const actor = { type: 'account' as const, id };
+      await holdPieces(h.ctx.db, id, 1, f.modelId);
+      expect((await client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[0]!.id })).statusCode).toBe(200);
+      h.clock.set(opensAt);
+      await f.live.advance(r.id);
+      const token = (await f.live.entry(id, r.id))!.turn!.token!;
+      await f.live.press(id, r.id, token);
+      h.clock.advance(1500);
+      await f.live.secure(id, r.id, token, actor);
+      await f.live.setAddons(id, r.id, [], actor, [
+        { addonId: cloth.id, units: 1 },
+        { addonId: wrap.id, units: 1 },
+      ]);
+      const bodies: [string, string][] = [];
+      const state = await client.get(`/api/v1/live/${r.id}/state`);
+      expect(state.statusCode).toBe(200);
+      // A real hold: both chosen, both offered.
+      const entry = (safeJson(state) as { entry: { addonItems: { addonId: string }[]; addonOffer: { addonId: string }[] } }).entry;
+      expect(entry.addonItems.map((a) => a.addonId).sort()).toEqual([cloth.id, wrap.id].sort());
+      expect(entry.addonOffer.map((a) => a.addonId)).toEqual(expect.arrayContaining([cloth.id, wrap.id]));
+      bodies.push(['GET /state (SECURED)', state.body]);
+      await f.live.confirm(id, r.id, actor);
+      const order = await h.t.db.selectFrom('orders').select('id').where('account_id', '=', id).executeTakeFirstOrThrow();
+      for (const url of ['/api/v1/account/orders', `/api/v1/account/orders/${order.id}/addons`, `/api/v1/live/${r.id}/state`, '/api/v1/live/mine']) {
+        const res = await client.get(url);
+        expect(res.statusCode, url).toBe(200);
+        bodies.push([`GET ${url}`, res.body]);
+      }
+      // Real replies: the order carries both units, and YOUR ORDERS offers both.
+      expect((JSON.parse(bodies[1]![1]) as { orders: { addonItems: { addonId: string }[] }[] }).orders[0]!.addonItems.map((a) => a.addonId).sort()).toEqual([cloth.id, wrap.id].sort());
+      expect((JSON.parse(bodies[2]![1]) as { offer: { addonId: string }[] }).offer.map((a) => a.addonId)).toEqual(expect.arrayContaining([cloth.id, wrap.id]));
+      const found: string[] = [];
+      for (const [what, body] of bodies) {
+        for (const x of addonStaffFindings(JSON.parse(body))) found.push(`${what}: ${x}`);
+        for (const w of ['SEN-CLOTH-QZX', 'SEN-WRAP-QZX', 'Sentinel Supplies QZX', 'SERVICE', 'PRODUCT', cloth.sku.id, wrap.sku.id, supplier.id]) if (body.includes(w)) found.push(`${what}: text ${w}`);
+      }
+      expect(found).toEqual([]);
+      // The scanner is not blind: the console's add-on carries them.
+      const admin = await adminClient(h, 'AUDITOR');
+      const staffView = safeJson(await admin.get(`/api/admin/addons/${wrap.id}`)) as Record<string, unknown>;
+      expect(addonStaffFindings({ ...staffView, addonId: wrap.id })).toEqual(expect.arrayContaining(['key $.kind', 'key $.stock', 'key $.sku', 'key $.offeredAt', 'key $.releases']));
+    } finally {
+      await h.close();
+    }
+  }, 120_000);
 });
 
 /** ONE QUEUE (D8, D25): keys of the pace, the line, a held count, the admission, the hold after the opening. */

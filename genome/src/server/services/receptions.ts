@@ -530,7 +530,7 @@ export class ReceptionService {
         LEFT JOIN models m ON m.id = k.model_id
         LEFT JOIN models main ON main.id = m.variant_of
         LEFT JOIN addon_items a ON a.id = k.addon_id
-       WHERE k.set_aside_at IS NULL AND coalesce(m.active, a.active)
+       WHERE k.set_aside_at IS NULL AND coalesce(m.active, a.active AND a.kind = 'PRODUCT')
          AND (k.model_id IN (SELECT k2.model_id FROM supplier_order_lines l JOIN skus k2 ON k2.id = l.sku_id WHERE l.supplier_order_id = ${id})
               OR k.id IN (SELECT l.sku_id FROM supplier_order_lines l WHERE l.supplier_order_id = ${id})
               OR coalesce(k.supplier_id, m.supplier_id, main.supplier_id, a.supplier_id) = ${o.supplier_id})`.execute(this.db);

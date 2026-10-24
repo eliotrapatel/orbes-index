@@ -436,4 +436,20 @@ describe('SupplierOrderService (plan NEXT LOT §3.5.6.3)', () => {
     expect((await refusal(so().addToDraft({ skuId: kit.sku.id, locationId: france, quantity: 2 }, admin))).code).toBe('ADDON_SET_ASIDE');
     await so().discardDraft(o.id, admin);
   });
+
+  it('never proposes nor drafts a service (lot Q2, D4): it has no supplier and no stock (409 ADDON_SERVICE in a draft, its lines and its PDF never name it)', async () => {
+    const wrap = await h.ctx.services.addons.create({ kind: 'SERVICE', name: 'Gift Wrapping', skuCode: 'SO-WRAP', prices: { EUR: 1500 } }, admin);
+    const refused = { code: 'ADDON_SERVICE', status: 409, message: 'Gift Wrapping is a service: it has no stock.' };
+    expect((await so().proposal()).groups.some((g) => g.rows.some((r) => r.sku.id === wrap.sku.id))).toBe(false);
+    expect(await refusal(so().addToDraft({ skuId: wrap.sku.id, locationId: france, quantity: 2 }, admin))).toEqual(refused);
+    // A draft's lines refuse it too, and the draft stays as it was.
+    const care = (await h.ctx.services.suppliers.list()).find((x) => x.name === 'Care Supplies')!;
+    const cloth = (await h.ctx.services.addons.list()).find((x) => x.name === 'Polishing Cloth')!;
+    expect(cloth.supplier?.id).toBe(care.id);
+    const o = await so().addToDraft({ skuId: cloth.sku.id, locationId: france, quantity: 1 }, admin);
+    expect(await refusal(so().updateDraft(o.id, { lines: [{ skuId: cloth.sku.id, quantity: 1 }, { skuId: wrap.sku.id, quantity: 1 }] }, admin))).toEqual(refused);
+    expect((await so().get(o.id)).lines.map((l) => l.sku.id)).toEqual([cloth.sku.id]);
+    expect((await so().document(o.id)).lines.map((l) => l.sku)).toEqual(['SO-CLOTH']);
+    await so().discardDraft(o.id, admin);
+  });
 });

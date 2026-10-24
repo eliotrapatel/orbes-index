@@ -775,4 +775,25 @@ describe('the Shopify exports and the ids pasted back (plan LIVE RELEASE+, S9)',
     await t.db.deleteFrom('test_entrants').where('account_id', '=', test.account).execute();
     expect(records((await shopify().orderCsv({ from: '2026-12-05', to: '2026-12-05' }, asStored)).body).map((x) => x.Name)).toEqual([orderReference(real.id), orderReference(test.id)]);
   });
+
+  it('exports a service as one product of one variant too (lot Q2, D9, S5): its SKU and price, not shipped, no weight; its unit on an order a line item not shipped', async () => {
+    const wrap = await ctx.services.addons.create({ kind: 'SERVICE', name: 'Gift Wrapping', skuCode: 'SH-WRAP', weightG: 40, position: 4, prices: { EUR: 15_00 } }, f.admin);
+    const row = records((await shopify().productCsv('EUR')).body).find((r) => r.Title === 'Gift Wrapping')!;
+    expect(row).toMatchObject({ Type: 'Add-on', SKU: 'SH-WRAP', Price: '15.00', 'Option1 value': 'Default Title', 'Weight value (grams)': '', 'Requires shipping': 'false', Status: 'draft' });
+    // On an order: one line item per unit, its SKU code, not shipped; the piece's line still shipped.
+    clock.set('2026-12-10T10:00:00.000Z');
+    const buyer = await createAccount(t.db);
+    const request = await t.db.insertInto('shop_requests').values({ account_id: buyer.id, model_id: f.modelId, created_at: clock.now() }).returning('id').executeTakeFirstOrThrow();
+    await ctx.services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, f.admin);
+    const o = await t.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow();
+    await ctx.services.orders.setTerms(o.id, { sizeLabel: '52', priceMinor: 300_000, currency: 'EUR' }, f.admin);
+    await ctx.services.orderAddons.addForStaff(o.id, { addonId: wrap.id, units: 1 }, f.admin);
+    const lines = records((await shopify().orderCsv({ from: '2026-12-10', to: '2026-12-10' }, asStored)).body).filter((x) => x.Name === orderReference(o.id));
+    expect(lines.map((x) => [x['Lineitem name'], x['Lineitem price'], x['Lineitem SKU'], x['Lineitem requires shipping']])).toEqual([
+      [expect.any(String), '3000.00', expect.any(String), 'true'],
+      ['Gift Wrapping', '15.00', 'SH-WRAP', 'false'],
+    ]);
+    expect(lines[0]!.Subtotal).toBe('3015.00');
+    await ctx.services.addons.setAside(wrap.id, f.admin);
+  });
 });

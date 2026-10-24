@@ -22,7 +22,8 @@ import { ADDON_SKU_CODE_RE } from '../../src/server/services/addons.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import type { Actor } from '../../src/server/types.js';
 import { createAdmin, createHarness, seedCatalog, type Catalog, type Harness } from '../api/support.js';
-import { createAccount } from '../support/live.js';
+import { poolDraw } from '../support/draws.js';
+import { createAccount, createLiveRelease, liveFixtureOn } from '../support/live.js';
 
 async function refusal(p: Promise<unknown>): Promise<{ code: string; status: number; message: string }> {
   try {
@@ -73,6 +74,8 @@ describe('AddonService (plan MACRO M3 §4.2, D1)', () => {
     );
     expect(a).toEqual({
       id: expect.any(String),
+      // Lot Q2: a product (real stock) by default, offered at the four moments, not the engraving, 20 characters.
+      kind: 'PRODUCT',
       name: 'Polishing Cloth',
       line: 'Microfibre, for silver and steel.',
       supplier: { id: supplier.id, name: 'Care Works', active: true },
@@ -89,6 +92,11 @@ describe('AddonService (plan MACRO M3 §4.2, D1)', () => {
         { location: { id: france, name: 'FRANCE WAREHOUSE', isDefault: true }, onHand: 0, reserved: 0, available: 0, minimum: null },
         { location: { id: logistics, name: 'LOGISTICS WAREHOUSE', isDefault: false }, onHand: 0, reserved: 0, available: 0, minimum: null },
       ],
+      offeredAt: { live: true, draw: true, salon: true, orders: true },
+      engraving: false,
+      textMax: 20,
+      releases: 0,
+      convertedFrom: [],
       createdAt: new Date('2026-10-22T09:00:00.000Z'),
       updatedAt: new Date('2026-10-22T09:00:00.000Z'),
     });
@@ -102,12 +110,16 @@ describe('AddonService (plan MACRO M3 §4.2, D1)', () => {
     });
     expect((await h.t.db.selectFrom('addon_items').select('created_by').where('id', '=', a.id).executeTakeFirstOrThrow()).created_by).toBe(admin.id);
     expect((await auditsOf(a.id, 'addon.create'))[0]!.details).toEqual({
+      kind: 'PRODUCT',
       name: 'Polishing Cloth',
       skuId: a.sku.id,
       skuCode: 'ADD-CLOTH',
       supplierId: supplier.id,
       weightG: 20,
       position: 0,
+      offeredAt: { live: true, draw: true, salon: true, orders: true },
+      engraving: false,
+      textMax: 20,
       prices: { EUR: 1500, CHF: 1600 },
     });
     // The next one goes after it; without a line, supplier, weight or price.
@@ -243,10 +255,10 @@ describe('AddonService (plan MACRO M3 §4.2, D1)', () => {
     await count(kit.sku.id, logistics, 2);
     await count(strap.sku.id, logistics, 1);
     expect(await addons().availableAt(logistics, 'EUR')).toEqual([
-      { addonId: cloth.id, skuId: cloth.sku.id, name: 'Polishing Cloth', line: 'Microfibre, for silver and steel.', currency: 'EUR', priceMinor: 1500, available: 1, weightG: 20 },
+      { addonId: cloth.id, skuId: cloth.sku.id, name: 'Polishing Cloth', line: 'Microfibre, for silver and steel.', currency: 'EUR', priceMinor: 1500, available: 1, weightG: 20, kind: 'PRODUCT' },
       // Both at the last position (10 000, the longest name's): by name.
-      { addonId: kit.id, skuId: kit.sku.id, name: 'Care Kit', line: null, currency: 'EUR', priceMinor: 4500, available: 2, weightG: null },
-      { addonId: strap.id, skuId: strap.sku.id, name: 'Spare Strap', line: null, currency: 'EUR', priceMinor: 3500, available: 1, weightG: null },
+      { addonId: kit.id, skuId: kit.sku.id, name: 'Care Kit', line: null, currency: 'EUR', priceMinor: 4500, available: 2, weightG: null, kind: 'PRODUCT' },
+      { addonId: strap.id, skuId: strap.sku.id, name: 'Spare Strap', line: null, currency: 'EUR', priceMinor: 3500, available: 1, weightG: null, kind: 'PRODUCT' },
     ]);
     expect([cloth.position, kit.position, strap.position]).toEqual([0, 10_000, 10_000]);
     // Priced in CHF: the cloth only. Elsewhere: none.
@@ -266,5 +278,109 @@ describe('AddonService (plan MACRO M3 §4.2, D1)', () => {
     await addons().reinstate(kit.id, admin);
     expect((await refusal(addons().availableAt('00000000-0000-4000-8000-000000000000', 'EUR'))).code).toBe('STOCK_LOCATION_NOT_FOUND');
     expect((await refusal(addons().availableAt(logistics, 'JPY'))).code).toBe('VALIDATION_FAILED');
+  });
+
+  // ── ADD-ONS ONE SYSTEM (lot Q2, step Q2.2; D4, D7, D9, D12, N3, N13, N14) ──
+
+  it('creates a service: no supplier (400), no stock listed, its SKU kept with its code and Shopify variant (S5), always available; its kind fixed (409 ADDON_KIND_FIXED); audited with its kind', async () => {
+    const supplier = await h.ctx.services.suppliers.create({ name: 'Paper House', currency: 'EUR' }, admin);
+    expect(await refusal(addons().create({ kind: 'SERVICE', name: 'Gift Wrapping', skuCode: 'ADD-WRAP', supplierId: supplier.id }, admin))).toEqual({
+      code: 'VALIDATION_FAILED',
+      status: 400,
+      message: 'A service has no supplier: it holds no stock.',
+    });
+    expect((await refusal(addons().create({ kind: 'BUNDLE' as never, name: 'Gift Wrapping', skuCode: 'ADD-WRAP' }, admin))).code).toBe('VALIDATION_FAILED');
+    const wrap = await addons().create({ kind: 'SERVICE', name: 'Gift Wrapping', line: 'In the house’s paper, with a card in your words.', skuCode: 'ADD-WRAP', weightG: 40, prices: { EUR: 1500 } }, admin);
+    expect(wrap).toMatchObject({ kind: 'SERVICE', supplier: null, weightG: 40, stock: [], sku: { code: 'ADD-WRAP', shopifyVariantId: null }, engraving: false, textMax: 20 });
+    expect((await auditsOf(wrap.id, 'addon.create'))[0]!.details).toMatchObject({ kind: 'SERVICE', supplierId: null, engraving: false, textMax: 20 });
+    // Its Shopify product and variant, as any add-on's (S5).
+    expect(await addons().setShopify(wrap.id, { productId: '7301', variantId: '7311' }, admin)).toMatchObject({ shopifyProductId: '7301', sku: { shopifyVariantId: '7311' } });
+    // No stock, no count: offered wherever it is priced, whatever the location holds.
+    for (const at of [france, logistics]) expect((await addons().availableAt(at, 'EUR')).find((x) => x.addonId === wrap.id)).toMatchObject({ kind: 'SERVICE', available: null, priceMinor: 1500 });
+    expect((await addons().availableAt(france, 'GBP')).some((x) => x.addonId === wrap.id)).toBe(false);
+    // A supplier later: refused; its kind never changes, either way.
+    expect((await refusal(addons().update(wrap.id, { supplierId: supplier.id }, admin))).message).toBe('A service has no supplier: it holds no stock.');
+    expect(await refusal(addons().update(wrap.id, { kind: 'PRODUCT' }, admin))).toEqual({
+      code: 'ADDON_KIND_FIXED',
+      status: 409,
+      message: 'An add-on’s type never changes: set this one aside and create the other.',
+    });
+    const cloth = (await addons().list()).find((x) => x.name === 'Polishing Cloth')!;
+    expect((await refusal(addons().update(cloth.id, { kind: 'SERVICE', name: 'Cloth' }, admin))).code).toBe('ADDON_KIND_FIXED');
+    expect((await addons().get(cloth.id)).name).toBe('Polishing Cloth');
+    // Its own kind given again changes nothing.
+    await addons().update(wrap.id, { kind: 'SERVICE' }, admin);
+    expect(await auditsOf(wrap.id, 'addon.update')).toEqual([]);
+    // The database holds the kind too (the identity guard).
+    await expect(h.t.db.updateTable('addon_items').set({ kind: 'PRODUCT' } as never).where('id', '=', wrap.id).execute()).rejects.toThrow();
+  });
+
+  it('switches where an add-on is offered (all on by default), audited together as offeredAt before and after', async () => {
+    const pouch = await addons().create({ name: 'Travel Case', skuCode: 'ADD-TCASE', offeredAt: { salon: false } }, admin);
+    expect(pouch.offeredAt).toEqual({ live: true, draw: true, salon: false, orders: true });
+    expect((await auditsOf(pouch.id, 'addon.create'))[0]!.details).toMatchObject({ offeredAt: { live: true, draw: true, salon: false, orders: true } });
+    const changed = await addons().update(pouch.id, { offeredAt: { live: false, orders: false, draw: true } }, admin);
+    expect(changed.offeredAt).toEqual({ live: false, draw: true, salon: false, orders: false });
+    expect((await auditsOf(pouch.id, 'addon.update')).map((x) => x.details)).toEqual([
+      { offeredAt: { from: { live: true, draw: true, salon: false, orders: true }, to: { live: false, draw: true, salon: false, orders: false } } },
+    ]);
+    // The same again writes nothing; an unknown moment or a word for a switch is refused.
+    await addons().update(pouch.id, { offeredAt: { live: false } }, admin);
+    expect(await auditsOf(pouch.id, 'addon.update')).toHaveLength(1);
+    expect((await refusal(addons().update(pouch.id, { offeredAt: { shop: true } as never }, admin))).code).toBe('VALIDATION_FAILED');
+    expect((await refusal(addons().update(pouch.id, { offeredAt: { live: 'yes' } as never }, admin))).code).toBe('VALIDATION_FAILED');
+  });
+
+  it('keeps one engraving, a service: refused on a product (400), a second active one refused at its creation, its change and its reinstatement (409 ADDON_ENGRAVING_TAKEN); its most characters 1 to 20 on the engraving only, 20 by default', async () => {
+    expect((await refusal(addons().create({ name: 'Engraved Tag', skuCode: 'ADD-TAG', engraving: true }, admin))).message).toBe('Only a service can be the engraving.');
+    // Most characters: the engraving's only; 20 (the house's) by default.
+    expect((await refusal(addons().create({ kind: 'SERVICE', name: 'Monogram', skuCode: 'ADD-MONO', textMax: 12 }, admin))).message).toBe('Only the engraving has a most characters.');
+    expect(await addons().create({ kind: 'SERVICE', name: 'Monogram', skuCode: 'ADD-MONO', textMax: 20 }, admin)).toMatchObject({ engraving: false, textMax: 20 });
+    for (const textMax of [0, 21, 1.5]) expect((await refusal(addons().create({ kind: 'SERVICE', name: 'Engraving', skuCode: 'ADD-ENGR', engraving: true, textMax }, admin))).code, String(textMax)).toBe('VALIDATION_FAILED');
+    const byDefault = await addons().create({ kind: 'SERVICE', name: 'Engraving', skuCode: 'ADD-ENGR', engraving: true, prices: { EUR: 4000 } }, admin);
+    expect(byDefault).toMatchObject({ kind: 'SERVICE', engraving: true, textMax: 20, stock: [] });
+    expect((await auditsOf(byDefault.id, 'addon.create'))[0]!.details).toMatchObject({ engraving: true, textMax: 20 });
+    // 1 to 20, changed on the engraving and audited.
+    expect((await addons().update(byDefault.id, { textMax: 12 }, admin)).textMax).toBe(12);
+    expect((await addons().update(byDefault.id, { textMax: 1 }, admin)).textMax).toBe(1);
+    expect((await refusal(addons().update(byDefault.id, { textMax: 21 }, admin))).code).toBe('VALIDATION_FAILED');
+    expect((await auditsOf(byDefault.id, 'addon.update')).map((x) => x.details)).toEqual([{ textMax: { from: 20, to: 12 } }, { textMax: { from: 12, to: 1 } }]);
+    // A second engraving: refused at its creation and its change.
+    const taken = { code: 'ADDON_ENGRAVING_TAKEN', status: 409, message: 'Another add-on is the engraving: set it aside, or make it another service, first.' };
+    expect(await refusal(addons().create({ kind: 'SERVICE', name: 'Second Engraving', skuCode: 'ADD-ENGR2', engraving: true }, admin))).toEqual(taken);
+    const mono = (await addons().list()).find((x) => x.name === 'Monogram')!;
+    expect(await refusal(addons().update(mono.id, { engraving: true, textMax: 8 }, admin))).toEqual(taken);
+    expect((await addons().get(mono.id)).engraving).toBe(false);
+    // Set aside, another may be the engraving; the first then cannot come back while it is.
+    await addons().setAside(byDefault.id, admin);
+    expect(await addons().update(mono.id, { engraving: true, textMax: 8 }, admin)).toMatchObject({ engraving: true, textMax: 8 });
+    expect(await refusal(addons().reinstate(byDefault.id, admin))).toEqual(taken);
+    expect((await addons().get(byDefault.id)).active).toBe(false);
+    // No longer the engraving: back to 20, audited; a most characters other than 20 then refused.
+    expect(await addons().update(mono.id, { engraving: false }, admin)).toMatchObject({ engraving: false, textMax: 20 });
+    expect((await auditsOf(mono.id, 'addon.update')).at(-1)!.details).toEqual({ engraving: { from: true, to: false }, textMax: { from: 8, to: 20 } });
+    expect((await refusal(addons().update(mono.id, { textMax: 8 }, admin))).message).toBe('Only the engraving has a most characters.');
+    expect((await addons().reinstate(byDefault.id, admin)).engraving).toBe(true);
+  });
+
+  it('counts the releases not ended that pick an add-on (a LIVE RELEASE until its end, a draw until its place-held window closes); none converted before 0060', async () => {
+    const f = await liveFixtureOn(h.ctx, h.clock);
+    const cloth = (await addons().list()).find((x) => x.name === 'Polishing Cloth')!;
+    const now = h.clock.now();
+    const open = await createLiveRelease(f, { opensAt: new Date(now.getTime() + 3_600_000) });
+    const ended = await createLiveRelease(f, { opensAt: new Date(now.getTime() + 3_600_000) });
+    const draw = await poolDraw(f.drops, h.ctx.db, { modelId: f.modelId, title: 'DRAW', quantity: 2, opensAt: new Date(now.getTime() + 3_600_000), closesAt: new Date(now.getTime() + 7_200_000), earlyAccessHours: 0 }, f.admin);
+    for (const d of [open.id, ended.id, draw.id]) await h.t.db.insertInto('drop_addons').values({ drop_id: d, addon_id: cloth.id, position: 1 }).execute();
+    await h.t.db.updateTable('drops').set({ ended_at: now, ended_reason: 'ENDED' }).where('id', '=', ended.id).execute();
+    expect(await addons().get(cloth.id)).toMatchObject({ releases: 2, convertedFrom: [] });
+    // Drawn: still counted within its place-held window, no longer after it.
+    h.clock.set(new Date(now.getTime() + 7_200_000 + 1000));
+    await f.drops.draw(draw.id, f.admin);
+    expect((await addons().get(cloth.id)).releases).toBe(2);
+    h.clock.advance((draw.purchaseWindowHours + 1) * 3_600_000);
+    expect((await addons().get(cloth.id)).releases).toBe(1);
+    // Cancelled: no longer counted.
+    await h.t.db.updateTable('drops').set({ cancelled_at: h.clock.now() }).where('id', '=', open.id).execute();
+    expect((await addons().list()).find((x) => x.id === cloth.id)!.releases).toBe(0);
   });
 });

@@ -53,7 +53,7 @@ import { badRequest, conflict, forbidden, notFound, validationError } from '../e
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import { compareSizes, ensureSku, ONE_SIZE_LABEL, sizeLabelOf, stockLevel } from './stock.js';
-import { addonSetAside, skuOwnerOf } from './sku-owner.js';
+import { addonServiceSku, addonSetAside, skuOwnerOf } from './sku-owner.js';
 import { modelSupplier, type ModelSupplier } from './suppliers.js';
 
 export { SIZE_KINDS, SIZE_TYPES, type SizeKind, type SizeType };
@@ -355,7 +355,8 @@ export const sizeSetAside = (label: string | null, named: string) =>
 /**
  * A SKU that must be offered (the stock's minimum, a piece to make for the stock: plan NEXT LOT §3.3, step 3.5), read
  * FOR KEY SHARE in the caller's transaction: 409 SIZE_SET_ASIDE for a size set aside, 404 SKU_NOT_FOUND when it is gone.
- * An add-on's SKU (macro scope K48 D1) is offered while its add-on is active: 409 ADDON_SET_ASIDE otherwise.
+ * An add-on's SKU (macro scope K48 D1) is offered while its add-on is active: 409 ADDON_SET_ASIDE otherwise; a service's
+ * SKU takes no stock at all (Q2, D4): 409 ADDON_SERVICE.
  */
 export async function assertSkuOffered(tx: Db, skuId: string): Promise<void> {
   const k = await tx.selectFrom('skus').select(['model_id', 'addon_id', 'size_label', 'set_aside_at']).where('id', '=', skuId).forKeyShare().executeTakeFirst();
@@ -363,7 +364,8 @@ export async function assertSkuOffered(tx: Db, skuId: string): Promise<void> {
   const owner = skuOwnerOf(k);
   if (owner.kind === 'ADD_ON') {
     // Macro scope K48 D1: an add-on's SKU is offered while its add-on is active (409 ADDON_SET_ASIDE otherwise).
-    const a = await tx.selectFrom('addon_items').select(['name', 'active']).where('id', '=', owner.addonId).executeTakeFirstOrThrow();
+    const a = await tx.selectFrom('addon_items').select(['name', 'active', 'kind']).where('id', '=', owner.addonId).executeTakeFirstOrThrow();
+    if (a.kind === 'SERVICE') throw addonServiceSku(a.name);
     if (!a.active) throw addonSetAside(a.name);
     return;
   }

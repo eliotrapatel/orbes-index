@@ -361,7 +361,7 @@ describe('add-ons on orders (plan MACRO M3 §4.2, D1 and D2)', () => {
     const before = await available(strap.skuId);
     await addons().addForStaff(o!.id, { addonId: strap.id, units: 2 }, admin);
     const view = await orders().get(o!.id);
-    expect(view.addonItems.map((u) => [u.addon.name, u.skuCode, u.status, u.addedBy.type, u.addedBy.id, u.location.name])).toEqual([
+    expect(view.addonItems.map((u) => [u.addon.name, u.skuCode, u.status, u.addedBy.type, u.addedBy.id, u.location?.name])).toEqual([
       ['SPARE STRAP', 'ADD-STRAP', 'HELD', 'STAFF', admin.id, 'FRANCE WAREHOUSE'],
       ['SPARE STRAP', 'ADD-STRAP', 'HELD', 'STAFF', admin.id, 'FRANCE WAREHOUSE'],
     ]);
@@ -680,6 +680,101 @@ describe('add-ons on orders (plan MACRO M3 §4.2, D1 and D2)', () => {
     });
     await orders().setTerms(order.id, { priceMinor: 400_000, currency: 'EUR' }, admin);
     await countIn(extender.skuId, france, 3);
+  });
+
+  // ── A service (lot Q2, step Q2.2; D4, D8, D9, N14) ──────────────────────
+
+  it('a service\'s units are held nowhere: chosen and carried without stock or lock, added in YOUR ORDERS and by staff, packed on its own line (its weight when it has one), shipped and returned without a movement (returned_to_stock false), invoiced, credited and exported as a product\'s', async () => {
+    const wrap = await ctx.services.addons.create({ kind: 'SERVICE', name: 'GIFT WRAPPING', skuCode: 'ADD-WRAP', prices: { EUR: 1500 }, weightG: 40 }, admin);
+    const card = await ctx.services.addons.create({ kind: 'SERVICE', name: 'GREETING CARD', skuCode: 'ADD-CARD', prices: { EUR: 500 } }, admin);
+    const movesOf = (orderId: string) => t.db.selectFrom('stock_movements').select(['reason', 'delta']).where('order_id', '=', orderId).where('order_addon_item_id', 'is not', null).execute();
+    let offered: [string, number][] = [];
+    const sale = await liveSale({
+      items: [{ addonId: wrap.id, units: 2 }],
+      before: async () => {
+        const e = await t.db.selectFrom('live_entries').select(['drop_id', 'account_id']).where('status', '=', 'SECURED').executeTakeFirstOrThrow();
+        offered = (await f.live.entry(e.account_id, e.drop_id))!.addonOffer.filter((a) => a.addonId === wrap.id || a.addonId === card.id).map((a) => [a.name, a.maxUnits]);
+      },
+    });
+    // No count: three of each may be chosen, whatever any location holds.
+    expect(offered).toEqual([
+      ['GIFT WRAPPING', 3],
+      ['GREETING CARD', 3],
+    ]);
+    const [o] = sale.orders;
+    expect(sale.confirmed.addonsLeftOut ?? []).toEqual([]);
+    expect((await unitsOf(o!.id)).map((u) => [u.addon_id, u.status, u.price_minor, u.added_by_type, u.location_id])).toEqual([
+      [wrap.id, 'HELD', 1500, 'PURCHASE', null],
+      [wrap.id, 'HELD', 1500, 'PURCHASE', null],
+    ]);
+    // YOUR ORDERS offers what is left within three; staff add one held nowhere too.
+    expect((await addons().offerForAccount(sale.account.id, o!.id)).offer.filter((a) => a.addonId === wrap.id || a.addonId === card.id).map((a) => [a.name, a.maxUnits])).toEqual([
+      ['GIFT WRAPPING', 1],
+      ['GREETING CARD', 3],
+    ]);
+    clock.advance(1000);
+    await addons().addForStaff(o!.id, { addonId: card.id, units: 1 }, admin);
+    expect((await orders().get(o!.id)).addonItems.map((u) => [u.addon.name, u.skuCode, u.location])).toEqual([
+      ['GIFT WRAPPING', 'ADD-WRAP', null],
+      ['GIFT WRAPPING', 'ADD-WRAP', null],
+      ['GREETING CARD', 'ADD-CARD', null],
+    ]);
+    // Held nowhere: the stock never sees them.
+    expect(await t.db.selectFrom('stock_holds').select('id').where('sku_id', 'in', [wrap.sku.id, card.sku.id]).execute()).toEqual([]);
+    await stockFor(o!.id);
+    clock.advance(MINUTE);
+    await orders().transition(o!.id, { to: 'PAID' }, admin);
+    const [invoice] = (await invoicesOf(o!.id)).filter((d) => d.kind === 'INVOICE');
+    expect(linesOf(invoice!).filter((l) => l[0] === 'ADD_ON_ITEM')).toEqual([
+      ['ADD_ON_ITEM', 'GIFT WRAPPING', 1500],
+      ['ADD_ON_ITEM', 'GIFT WRAPPING', 1500],
+      ['ADD_ON_ITEM', 'GREETING CARD', 500],
+    ]);
+    // Packed: one line per add-on; the wrapping's weight counted, the card without one never missing.
+    const box = await ctx.services.boxes.create({ name: `WRAP ${o!.id.slice(0, 4)}`, insideLengthMm: 120, insideWidthMm: 100, insideHeightMm: 40, emptyWeightG: 100 }, admin);
+    await ctx.services.catalog.setModelPacking(f.modelId, { boxId: box.id, packedWeightG: 40 }, admin);
+    await linkPiece(o!.id);
+    const parcel = await ctx.services.logistics.parcel(o!.id, null);
+    expect(parcel.checklist.filter((l) => l.key.startsWith('addon-item:')).map((l) => l.label)).toEqual(['Add-on: GIFT WRAPPING × 2', 'Add-on: GREETING CARD × 1']);
+    expect(parcel.packing.weightG).toBe(100 + 40 + 2 * 40);
+    await packAndShip(o!.id);
+    expect((await unitsOf(o!.id)).map((u) => u.status)).toEqual(['SHIPPED', 'SHIPPED', 'SHIPPED']);
+    expect((await t.db.selectFrom('shipments').select('weight_g').where('order_id', '=', o!.id).executeTakeFirstOrThrow()).weight_g).toBe(220);
+    // Returned: back with the order, never to stock.
+    clock.advance(MINUTE);
+    await orders().returnOrder(o!.id, { outcome: 'RESTOCKED', locationId: logistics, note: 'Returned.', addonsOut: [] }, admin);
+    expect((await unitsOf(o!.id)).map((u) => [u.status, u.returned_to_stock, u.location_id])).toEqual([
+      ['RETURNED', false, null],
+      ['RETURNED', false, null],
+      ['RETURNED', false, null],
+    ]);
+    expect(await movesOf(o!.id)).toEqual([]);
+    const full = (await invoicesOf(o!.id)).find((d) => d.kind === 'CREDIT_NOTE')!;
+    expect(linesOf(full).filter((l) => l[0] === 'ADD_ON_ITEM').map((l) => l[1])).toEqual(['GIFT WRAPPING', 'GIFT WRAPPING', 'GREETING CARD']);
+    // Exported as line items, not shipped (S5).
+    const day = o!.reserved_at.toISOString().slice(0, 10);
+    const csv = (await ctx.services.shopify.orderCsv({ from: day, to: day }, { email: (e) => e, buyer: (b) => b })).body;
+    expect(csv).toContain('"GIFT WRAPPING","15.00","ADD-WRAP","false"');
+    expect(csv).toContain('"GREETING CARD","5.00","ADD-CARD","false"');
+
+    // Another sale: its unit stays held nowhere when the order changes location, comes back held nowhere when a lost
+    // parcel is reshipped (never short), and is cancelled with its order.
+    const other = (await liveSale({ items: [{ addonId: wrap.id, units: 1 }] })).orders[0]!;
+    await orders().changeLocation(other.id, logistics, admin);
+    expect((await unitsOf(other.id)).map((u) => [u.status, u.location_id])).toEqual([['HELD', null]]);
+    await stockFor(other.id);
+    clock.advance(MINUTE);
+    await orders().transition(other.id, { to: 'PAID' }, admin);
+    await packAndShip(other.id);
+    const lost = await ctx.services.orderCases.report(other.id, { kind: 'LOST', note: 'No scan for 12 days.' }, admin, null);
+    clock.advance(MINUTE);
+    expect((await ctx.services.orderCases.decide(lost.id, { decision: 'RESHIP', note: 'Another piece.' }, admin, { admin: true })).addonsShort).toBeUndefined();
+    expect((await unitsOf(other.id)).map((u) => [u.status, u.shipped_at, u.location_id])).toEqual([['HELD', null, null]]);
+    clock.advance(MINUTE);
+    await orders().transition(other.id, { to: 'CANCELLED', note: 'Test over.' }, admin);
+    expect((await unitsOf(other.id)).map((u) => u.status)).toEqual(['CANCELLED']);
+    expect(await movesOf(other.id)).toEqual([]);
+    expect(await t.db.selectFrom('stock_movements').select('id').where('sku_id', 'in', [wrap.sku.id, card.sku.id]).execute()).toEqual([]);
   });
 });
 

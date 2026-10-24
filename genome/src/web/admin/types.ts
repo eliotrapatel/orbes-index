@@ -3211,9 +3211,26 @@ export interface AddonStock {
   minimum: number | null;
 }
 
+/** An add-on's switches (Q2, D3): a LIVE RELEASE's purchase, a draw's, the private salon's, YOUR ORDERS until packing. */
+export interface AddonOfferedAt {
+  live: boolean;
+  draw: boolean;
+  salon: boolean;
+  orders: boolean;
+}
+
+/** What an add-on was converted from (migration 0060): a release's add-ons, or Orders → Settings' engraving. */
+export interface AddonConversion {
+  source: 'LIVE_ADDON' | 'ENGRAVING_PRICES';
+  release: { id: string; title: string } | null;
+  convertedAt: Iso;
+}
+
 /** GET /api/admin/addons: an add-on as Catalogue → Add-ons reads it. */
 export interface AddonView {
   id: string;
+  /** PRODUCT (real stock) or SERVICE (none), fixed at its creation. */
+  kind: AddonKind;
   name: string;
   line: string | null;
   supplier: { id: string; name: string; active: boolean } | null;
@@ -3225,24 +3242,36 @@ export interface AddonView {
   shopifyProductId: string | null;
   /** Its prices in the house currencies' order; a currency without one is absent (not offered in it). */
   prices: AddonPrice[];
-  /** Its stock per location, the default first, then by name. */
+  /** Its stock per location, the default first, then by name; none for a service. */
   stock: AddonStock[];
+  offeredAt: AddonOfferedAt;
+  /** The engraving (a service; one active at a time). */
+  engraving: boolean;
+  /** The engraving's most characters, 1 to 20 (20 on every other add-on). */
+  textMax: number;
+  /** How many releases not ended pick it. */
+  releases: number;
+  convertedFrom: AddonConversion[];
   createdAt: Iso;
   updatedAt: Iso;
 }
 
-/** POST /api/admin/addons (`skuCode` and `prices` at the creation only) and PATCH /api/admin/addons/:id. */
+/** POST /api/admin/addons (`kind`, `skuCode` and `prices` at the creation only) and PATCH /api/admin/addons/:id. */
 export interface AddonInput {
   name?: string;
   line?: string | null;
   supplierId?: string | null;
   weightG?: number | null;
   position?: number;
+  offeredAt?: Partial<AddonOfferedAt>;
+  engraving?: boolean;
+  textMax?: number;
 }
 
 export interface AddonCreateInput extends AddonInput {
   name: string;
   skuCode: string;
+  kind?: AddonKind;
   prices?: Partial<Record<HouseCurrency, number | null>>;
 }
 
@@ -3725,7 +3754,8 @@ export interface AdminOrderAddonUnit {
   shippedAt: Iso | null;
   returnedAt: Iso | null;
   returnedToStock: boolean | null;
-  location: { id: string; name: string };
+  /** Where it is held; null for a service's unit (held nowhere). */
+  location: { id: string; name: string } | null;
   /** Its supplementary invoice (added after PAID); null otherwise. */
   invoiceId: string | null;
 }

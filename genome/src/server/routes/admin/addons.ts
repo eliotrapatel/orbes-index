@@ -7,17 +7,21 @@
  *                                                         and stock per location
  *   GET    /api/admin/addons/:id                AUDITOR   one add-on (404 ADDON_NOT_FOUND)
  *   POST   /api/admin/addons                    OPERATOR  an add-on listed with its SKU code (409 ADDON_NAME_TAKEN,
- *                                                         409 SKU_CODE_TAKEN, 404 SUPPLIER_NOT_FOUND)
- *   PATCH  /api/admin/addons/:id                OPERATOR  its name, line, supplier, weight, position
+ *                                                         409 SKU_CODE_TAKEN, 404 SUPPLIER_NOT_FOUND), its kind
+ *                                                         (PRODUCT or SERVICE, lot Q2), its switches, the engraving
+ *                                                         and its most characters (409 ADDON_ENGRAVING_TAKEN)
+ *   PATCH  /api/admin/addons/:id                OPERATOR  its name, line, supplier, weight, position, switches, the
+ *                                                         engraving and its most characters (its kind never: 409
+ *                                                         ADDON_KIND_FIXED)
  *   PUT    /api/admin/addons/:id/prices         OPERATOR  its prices by currency (null removes one)
  *   POST   /api/admin/addons/:id/set-aside      OPERATOR  offered nowhere again
  *   POST   /api/admin/addons/:id/reinstate      OPERATOR  offered again
  *   PUT    /api/admin/addons/:id/shopify        OPERATOR  its Shopify product and variant, pasted back (409
  *                                                         SHOPIFY_PRODUCT_TAKEN, SHOPIFY_VARIANT_TAKEN)
  *
- * Audited by AddonService (`addon.create`, `.update`, `.prices`, `.set_aside`, `.reinstate`, `.shopify`). Its stock is
- * moved through Logistics (corrections, transfers, minimums) and the supplier orders, as a size's
- * (routes/admin/logistics.ts, routes/admin/supplier-orders.ts).
+ * Audited by AddonService (`addon.create`, `.update`, `.prices`, `.set_aside`, `.reinstate`, `.shopify`). A product's
+ * stock is moved through Logistics (corrections, transfers, minimums) and the supplier orders, as a size's
+ * (routes/admin/logistics.ts, routes/admin/supplier-orders.ts); a service has none (409 ADDON_SERVICE there).
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { addonParams, addonPricesBody, addonShopifyBody, createAddonBody, emptyBody, parse, updateAddonBody } from '../../http/schemas.js';
