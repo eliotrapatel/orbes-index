@@ -241,11 +241,27 @@ Sur un ordinateur (une fenêtre d'au moins 1024 px, avec une souris ou un pavé 
 
 ### Une LIVE RELEASE à son rythme : la file d'attente
 
-Une LIVE RELEASE peut faire entrer sa file à un rythme, X acheteurs toutes les Y minutes (lot M1) : `Pace` dans ses réglages avant l'annonce, puis, sur le tableau en direct (OPERATOR), `Set pace`, `Pause pace`, `Resume pace` et `Next batch now`. Aucun bouton ne retire le rythme. Dans la salle, rien ne change : un tour par taille, le temps de payer.
+Chaque LIVE RELEASE a un rythme et une attente après l'ouverture (ONE QUEUE, lot Q1) : `People per batch`, `Every (minutes)` et `Hold after the opening (minutes, 0 = none)`, obligatoires à la création et réglables jusqu'à l'annonce. Ensuite, sur le tableau en direct (OPERATOR) : `Set pace` (plus lent ou plus rapide, à partir du lot suivant), `Pause pace` et `Resume pace`, `Next batch now` (un lot de plus tout de suite, refusé quand aucune pièce n'est libre), `Shorten the hold` et `End the hold now` (l'attente après l'ouverture se raccourcit ou se termine, sans jamais s'allonger). L'after-room n'a pas de rythme : ses tours partent tout de suite, comme avant.
 
-Le client qui attend son lot voit THE QUEUE : sa place, l'heure d'entrée estimée à l'heure de Paris et le temps qui reste, ou THE QUEUE IS PAUSED quand le rythme est en pause ; jamais le rythme lui-même. Sa place est gardée quoi qu'il arrive, même s'il ferme la page et revient. Absent quand son lot entre, il entre quand même ; si son tour passe sans lui, la pièce va au suivant dans sa taille, comme dans la salle. Dans MY PIECES, il lit IN LINE ; sa place est sur la page de la sortie. `Let in` fait entrer une personne tout de suite, hors de son ordre : à réserver à un cas que vous pouvez expliquer, il est inscrit au journal.
+**Comment cela marche.** À l'ouverture, la file se forme dans l'ordre de la maison (les places garanties, le palier, le tirage des places) ; les personnes arrivées ensuite se placent derrière, dans l'ordre d'arrivée. Après l'attente, chaque lot donne des tours, dans l'ordre de la file, seulement là où une pièce de la taille est libre : la personne passe directement de la file à PRESS AND HOLD THE SEAL. Une pièce rendue, libérée, un tour passé sans être pris ou des pièces ajoutées partent au lot suivant, jamais tout de suite : personne ne passe devant le rythme.
 
-> Votre place est gardée : vous pouvez fermer la page et revenir, elle ne change pas. L'heure affichée est une estimation, à l'heure de Paris. Si vous n'êtes pas là quand votre tour arrive, il passe à la personne suivante dans votre taille.
+**Ce que voit le client.** LIVE NOW, YOUR PLACE (sa place dans sa taille), le temps estimé qui reste (ESTIMATED 17 MINUTES LEFT), les pièces qui restent, et la note qui lui dit de garder la page ouverte ; pendant une pause, PAUSED ou THE QUEUE IS PAUSED, et le temps figé. **Il ne voit jamais le rythme**, la taille d'un lot, l'intervalle, l'attente après l'ouverture, la longueur de la file ni une raison d'attendre. Dans MY PIECES, il lit IN LINE ; sa place est sur la page de la sortie.
+
+**Ce que vous voyez.** Sur la page de la sortie, le bloc `Pace` (`In the queue`, `Turns given`, `Beyond the pieces`, `Hold ends` à l'heure de Paris pendant l'attente) et, dans la file, la place de chacun dans sa taille et son tour estimé ; le filtre `Waiting in the queue`. Ces chiffres restent dans la console : **ne donnez jamais au client un chiffre du rythme, la taille d'un lot, l'intervalle, l'attente, la longueur de la file ni la raison d'une attente.** `Let in` donne son tour à une personne tout de suite, hors de son ordre : à réserver à un cas que vous pouvez expliquer, il est inscrit au journal.
+
+**« Pourquoi mon temps a bougé ? »** L'estimation est recalculée à chaque lecture de la page, au rythme de la sortie et selon les pièces qui reviennent. Ne l'expliquez pas : rappelez que la place est gardée.
+
+> L'heure affichée est une estimation, mise à jour en direct. Votre place est gardée : gardez la page ouverte, votre tour viendra dans l'ordre de la file.
+
+**« Une pièce est libre : pourquoi n'est-elle pas donnée tout de suite ? »** Elle sera proposée avec les prochains tours de la sortie, dans l'ordre de la file. Ne dites ni quand ni pourquoi.
+
+> Chaque pièce qui revient est proposée dans l'ordre de la file, au rythme de la sortie. Votre place est gardée, et votre écran vous dit où vous en êtes.
+
+**« La sortie est ouverte, et rien ne bouge. »** C'est souvent l'attente après l'ouverture : n'en parlez pas, ni de sa durée. Le temps affiché du client la compte déjà.
+
+> Les tours sont donnés au rythme de la sortie, dans l'ordre de la file. Votre place et le temps estimé sur votre écran sont à jour : gardez la page ouverte.
+
+**Absent quand son tour arrive**, son tour passe ; la pièce repart au lot suivant, pour la personne suivante dans sa taille. Sa place n'est plus dans la file : il peut lire la page de la sortie, qui le lui dit.
 
 ### Commandes fournisseur
 

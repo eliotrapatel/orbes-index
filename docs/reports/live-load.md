@@ -1,7 +1,7 @@
 # Load report — the LIVE RELEASES
 
-Status: measured 2026-10-05; a paced release of 5 000 measured 2026-10-21 (§7), its queue page lightened the same day (§7.5) · Owner: LIVE RELEASE+ (its
-completeness audit, step PLUS-A), and the macro lot M1 for §7 (step M1.6) · first measured 2026-10-04
+Status: measured 2026-10-05; a paced release of 5 000 measured 2026-10-21 (§7), its queue page lightened the same day (§7.5); ONE QUEUE's 5 000 measured 2026-10-23 (§8) · Owner: LIVE RELEASE+ (its
+completeness audit, step PLUS-A), the macro lot M1 for §7 (step M1.6), and lot Q1 for §8 (step Q1.4) · first measured 2026-10-04
 by the LIVE RELEASE lot (step L7) · Source: `genome/scripts/live-load.ts` · Raw figures:
 `genome/out/live-load/results-<series>.json`, with the app's log of the last series' levels beside them as
 `server-<N>.log` (git-ignored, rewritten by every run).
@@ -59,6 +59,14 @@ footprint, what macOS charges the process, stayed at 380–567 MiB (**505–692 
 container**, above the 60 % margin); its resident size, which also counts memory already given back, still read
 857–930 MiB. The state reads now weigh on PGlite's one connection instead: the actions behind the pace at p95 0.5 to
 1.5 s.
+
+**ONE QUEUE (§8, 2026-10-23).** Since lot Q1 every LIVE release has a pace and a hold, its batches give the turns
+themselves, and each phone reads only its own figures. A local run of **5 000 people at 250 turns every minute after
+a hold of 2 minutes**, on PGlite, held the queue exactly: 20 batches of exactly 250, each on its minute from T0 + the
+hold, the PACE check passed, all 5 000 served, every turn to a phone that had read it was next, no reading with a
+figure of the pace, no answer other than 200. It did not hold the VPS profile's targets: the actions behind the pace
+at p95 2.6 s (250 SECUREs arriving together on PGlite's one connection, where §7's batches gave 25 turns), the
+fan-out at p95 230 ms on the VPS, the memory 731 MiB resident (591 MiB footprint), the CPU 1.5 cores on the VPS.
 
 ## 1. The test
 
@@ -235,12 +243,14 @@ npx tsx scripts/live-load.ts                                   # 500, 1 000, 1 5
 npx tsx scripts/live-load.ts --levels 500,750,1000,1500       # the levels of this report
 npx tsx scripts/live-load.ts --levels 1000 --vps-factor 2.5    # one level, assuming a slower VPS
 npx tsx scripts/live-load.ts --database-url postgres://user:pass@127.0.0.1:5432/orbes_load   # a THROWAWAY database
-npx tsx scripts/live-load.ts --pace 250,1 --levels 5000        # a paced release (§7); about 27 minutes
+npx tsx scripts/live-load.ts --one-queue --pace 250,1 --hold 2 --levels 5000   # ONE QUEUE (§8); about 28 minutes
 ```
 
 Close other heavy work first: every figure depends on what else the machine is running.
 
 ## 7. With a pace: 5 000 people in the queue
+
+*Since lot Q1 (§8) the admission and the queue frame described here are gone, and `--pace` alone runs the one queue.*
 
 The macro lot M1 (scope W2 and W4, 2026-10-20) gives a LIVE release a pace: **X buyers admitted every Y minutes**,
 counted across the whole release. From T0, the people not yet admitted wait on the queue page, which shows their place
@@ -403,6 +413,99 @@ and at the end).
 - **Not met, as before:** the actions' 200 ms, the fan-outs' 100 ms and one core of CPU on the VPS profile. The production
   run of §7.4 now reads the queue as these phones do.
 
+## 8. ONE QUEUE: 5 000 in the one queue
+
+Lot Q1 (ONE QUEUE, 2026-10-24) replaced the admission of §7. Every LIVE release now has a pace and a hold after the
+opening, and **each batch gives up to X turns itself**, in the line's order, only where a piece of the size is free,
+from T0 + the hold. A phone reads only its own figures: its place in its size, its estimated wait, what holds the
+batches, whether a batch can reach it next, whether its size can still serve it. Only the phones a batch can reach next
+keep a stream; the others read their state as their `pollMs` says. The shared queue frame of §7 is gone.
+
+`--one-queue` measures it: `--one-queue --pace 250,1 --hold 2 --levels 5000`. **This is a local measurement, on
+PGlite, on this machine.** It is not a measurement of the VPS.
+
+### 8.1 What the run does
+
+- **The release** has a pace of 250 every minute after a hold of 2 minutes, and three sizes, each stocked with 40 % of
+  the level (`ONE_QUEUE_STOCK_SHARE`): more pieces than entrants in every size, as the runbook's run A, so every batch
+  can give exactly 250. For 5 000 people that is 20 batches: the first at T0 + 2 minutes, the last at T0 + 21.
+- **The door** is §7.1's: the room opens 5 minutes before T0; the streams and I'LL BE THERE come over the 2 minutes
+  before it, the entries over the room's first 4 minutes.
+- **The turns.** Each is taken (PRESS, SECURE, an add-on for half) and the place given back (RELEASE MY PLACE, as the
+  runbook's run A): nothing is sold and every entrant is served once. The run ends once every entrant has had its turn.
+- **The phones** do what the page does: from T0 each reads its own figures only, from its `you` events and
+  `GET /state`; a phone a batch cannot reach next has its stream ended by the server and reads its state instead, first
+  at a moment of its own within a minute, then as `pollMs` says (10 s to a minute), until a batch can reach it.
+- **No after-room**: the run measures the queue.
+- **Measured besides:**
+  - **every batch on the server:** exactly X, the k-th at T0 + the hold + (k − 1) × Y on its logical time, and the
+    TEST REPORT's own PACE check on the release's entries and audit log;
+  - **the queue on the phones:** every phone that waited had its turn; after the first batch, none was given a turn
+    before it had read « next » (G2); none read a figure of the pace or a queue frame (D8); how far its first estimate
+    fell from its turn; how long its turn took to reach it;
+  - **the state reads** behind the next ones, and the streams the server ended and opened again;
+  - **the app's memory** before T0, with every phone on a stream, and from T0 + 10 s, with the streams then open.
+
+### 8.2 Results
+
+One run on 2026-10-23 at 15:30 Paris (T0 at 15:37:36, the first batch at 15:39:36), on the build's step Q1.4, under the
+lock shared with the build's browser suites.
+
+**The queue.** It held exactly.
+
+| | |
+|---|---|
+| Batches on the server | 20 of 20, each 250, the first at T0 + the hold of 2 min, each 1 min after the last on its logical time; the engine wrote each p95 331 ms · max 394 ms after its time |
+| The TEST REPORT's PACE check | passed: *20 batches gave 5000 turns at 250 every 1 min, the first on the pace at 15:39:36 PARIS, each on its time and in the line’s order; none gave more than the pace, and none left anyone waiting while a piece of their size was free.* |
+| People who waited / had their turn | 5 000 / 5 000 |
+| A turn after the first batch to a phone that had not read « next » (G2) | 0 |
+| Readings with more than their own five figures · queue frames sent (D8) | 0 · 0 |
+| Their first estimate, from their turn | p50 137 · p95 279 · max 333 ms |
+| Their turn on the phone, after it began | p50 521 · p95 879 · max 1 001 ms |
+| Streams | 5 000 open · 0 refused · 0 dropped; 4 500 ended by the server behind the next ones, 4 500 opened again once a batch could reach them |
+| State reads behind the next ones | 53 603 · p50 36.5 · p95 922.5 · max 4 710 ms; at most 209 in a second; none other than 200 |
+| Answers other than 200 · errors in the app's log | 0 · 0 |
+| The end | every entrant served, 5 000 places released, nothing confirmed (run A's behaviour) |
+
+**The targets of one app container (1.5 CPU, 768 MB), on the VPS profile of §2.** The bold figures are what the VPS
+would see under §2.
+
+| Target | Measured → VPS | Verdict |
+|---|---|---|
+| Actions behind the pace (the turns, RELEASE), p95 < 200 ms | 2 633 → **2 677 ms** (the app's own share 44.3 ms, twice as slow) | not met |
+| The door before T0 (I'LL BE THERE, ENTER), for information | p95 226.5 ms | |
+| Fan-out of the room, p95 < 100 ms | 115 → **230 ms** | not met |
+| Memory with GeoIP, < 460.8 MiB | 730.8 → **855.8 MiB** resident | not met |
+| CPU, busiest five seconds, < 1 core | 0.76 → **1.5** | not met |
+
+**Memory, before and after T0.** Before T0, with 5 002 streams open: 442 MiB resident at its peak, macOS's footprint
+439 MiB at most (198 MiB reclaimable then). From T0 + 10 s, with at most 620 streams open: 717.8 MiB resident at its
+peak, the footprint 591 MiB at most (479.4 MiB reclaimable then). The pulse took p50 268.8 ms and p95 423.8 ms; the
+engine's passes p95 200.5 ms.
+
+### 8.3 What it means
+
+- **The one queue holds 5 000, exactly.** Every batch gave exactly 250 turns on its minute from T0 + the hold, the
+  PACE check passed, each of the 5 000 was served once, each turn went to a phone that had read it was next, no phone
+  read more than its own figures, and the first estimates fell within a third of a second of the turns.
+- **The actions are slower than §7's, by design of the pace, not by a slower action.** A batch now gives 250 turns at
+  once, where §7's gave 25 (its 25 pieces). Their 250 SECUREs arrive together and wait on PGlite's one connection:
+  SECURE p95 2.95 s, against 0.6 s in §7. PostgreSQL's pool of ten runs them side by side; it is not measured here.
+- **The streams follow the next ones.** After T0 the app held at most 620 streams; the 4 500 behind read their state
+  a few times a minute, at most 209 reads in a second.
+- **Memory: resident above the house's margin, its footprint under the container**, as in §7.5: 591 MiB charged at
+  most, most of the rest memory the allocator had given back. Linux in the container is not measured here.
+- **Not met, as in §7:** the actions' 200 ms, the fan-out's 100 ms, one core of CPU and the memory margin on the VPS
+  profile. **Not measured here:** PostgreSQL, the VPS, and fewer pieces than entrants (the second of the owner's two
+  checks, proved by `test/services/one-queue-proof.test.ts` on 300 pieces, and by the runbook's run B).
+
+### 8.4 The real check
+
+The deployment's runbook for lot Q1 runs **two TEST ENTRANTS runs of 5 000** on a test LIVE release on production, one
+at a time, each followed by END TEST: run A with more pieces than entrants (exactly X turns every Y, the hold
+respected) and run B with 25 pieces (at most X a batch, in the line's order, nobody eligible left waiting while a piece
+of their size was free). Their bots read `GET /state` as these phones do, on PostgreSQL.
+
 ## Machine and conditions
 
 | | |
@@ -416,4 +519,5 @@ and at the end).
 | Runs | 2026-10-05 (CEST): series 1 at 18:01, series 2 at 18:12, series 3 at 18:37 |
 | Paced runs (§7) | 2026-10-21 (CEST): 05:35 and 06:03, branch `orbes-macro` at step M1.6 (after `f57a0cf`), `--pace 250,1 --levels 5000`; calibration 475 and 445 ms; PGlite 0.5.8 |
 | Paced runs (§7.5) | 2026-10-21 (CEST): 16:50, 17:19 and 17:47, branch `orbes-macro` at its completeness audit (after `bdaaead`), the same arguments; calibration 454, 399 and 444 ms; load averages 1.9–8.7 |
+| ONE QUEUE's run (§8) | 2026-10-23 (CEST): 15:30, branch `orbes-one-queue` at step Q1.4 (`c1d2673`), `--one-queue --pace 250,1 --hold 2 --levels 5000`; calibration 452 ms; PGlite 0.5.8; a VPS vCPU taken as twice as slow |
 | Machine load | Another workflow's work ran at the same time, except its Chromium suites (shared lock); load averages 4.2–7.5 |

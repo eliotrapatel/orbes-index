@@ -206,7 +206,8 @@ describe.skipIf(!HAS_CHROMIUM)('the question after a LIVE RELEASE (Chromium)', (
     expect((await ctx.services.live.entry(first.id, r.id))?.status).toBe('TURN');
     const { page, context, problems } = await phone(waiting.token);
     await page.goto(`${srv.origin}/verify/releases/${r.id}`);
-    await textOf(page.locator('.live__place-figure'), '2');
+    // ONE QUEUE (D19): YOUR PLACE is the place in its size among those waiting; the first one holds its turn, so 1.
+    await textOf(page.locator('.live__place-figure'), '1');
     expect(await page.locator('.question').count()).toBe(0);
 
     // The release reaches its closing time: CLOSED, the line ENDED; the page follows it there and asks.
