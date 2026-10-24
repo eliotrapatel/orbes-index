@@ -1051,10 +1051,44 @@ async function seedQueue(w: World): Promise<void> {
   await live.advance(g.id);
   clock.set(new Date(NOCTURNE_NOW.getTime() - MINUTE));
   await live.pausePace(g.id, w.admin);
+  // ONE QUEUE (lot Q1, step Q1.8; MK Q4): the host's message, FROM ORBES alone over the queue, its pause in the screen.
+  await live.message(g.id, 'Thank you for being here tonight.', w.admin);
 
   // ONE QUEUE's Horizon band (lot Q1, step Q1.7; MK Q9, Q10): a small release, and one at its LAST PIECES.
   await seedBand(w, { key: 'queueSmall', model: w.models.steel!, title: 'MONOLITHE IN STEEL', stock: [8, 8, 8], taken: [5, 6, 4], waiting: 2 });
   await seedBand(w, { key: 'queueLast', model: w.models.gold!, title: 'MONOLITHE IN GOLD', stock: [100, 100, 100], taken: [92, 98, 92], waiting: 1 });
+
+  // The one waiting screen in every state (lot Q1, step Q1.8; MK #queue): each a release of 300 pieces in sizes 16, 17
+  // and 18 (one of ONE SIZE), a collector in its queue in size 17, the mockup's figures. MONOLITHE IN BLUE throughout.
+  const blue = { model: w.models.blue!, title: 'MONOLITHE IN BLUE', stock: [100, 100, 100] };
+  // MK Q1: YOUR PLACE 4, 176 OF 300 LEFT · 3 IN SIZE 17.
+  await seedBand(w, { ...blue, key: 'queueWait', taken: [14, 97, 13], waiting: 3 });
+  // MK Q3: the same, the release paused by ORBES a minute ago: PAUSED and its line above the frozen time.
+  await seedBand(w, { ...blue, key: 'queueReleasePaused', taken: [14, 97, 13], waiting: 3, then: (id) => w.ctx.services.live.pause(id, w.admin) });
+  // MK Q8: every piece of size 17 held in a turn, none paid: 176 OF 300 LEFT · 0 IN SIZE 17, still the waiting screen.
+  await seedBand(w, { ...blue, key: 'queueHeld', taken: [14, 100, 10], waiting: 3 });
+  // MK Q5: YOUR PLACE 42, 9 pieces left in size 17, the pace slowed by ORBES to 1 every 5 minutes: the estimate past
+  // the close, from 60 minutes in its decided words (ESTIMATED 1 H … MIN LEFT).
+  await seedBand(w, { ...blue, key: 'queueClose', taken: [19, 91, 19], waiting: 41, then: (id) => w.ctx.services.live.setPace(id, { batch: 1, minutes: 5 }, w.admin) });
+  // MK Q6: a release in ONE SIZE, its next batch in half a minute, this collector next: ESTIMATED LESS THAN A MINUTE LEFT.
+  await seedBand(w, { model: w.models.blue!, title: 'MONOLITHE IN BLUE', key: 'queueOne', labels: ['ONE SIZE'], stock: [300], taken: [112], waiting: 0, sizeOf: 0, sinceMs: 3.5 * MINUTE });
+  // MK Q2: during the 10-minute hold (T0 four minutes ago, 25 turns a minute from its end): YOUR PLACE 39, 300 OF 300
+  // LEFT, nothing said of the hold; MK Q7b: a late comer who entered two minutes ago, after the opening, behind them.
+  await seedBand(w, {
+    ...blue,
+    key: 'queueHold',
+    taken: [0, 0, 0],
+    waiting: 38,
+    holdMinutes: 10,
+    sinceMs: 4 * MINUTE,
+    pace: { batch: 25, minutes: 1 },
+    then: async (id, sizes) => {
+      const late = await account(w, 'queueLate', 'queue.late@example.com', 1, w.models.blue);
+      await w.ctx.services.live.enter(late.id, id, { sizeId: sizes[1]!.id }, late.actor);
+    },
+  });
+  // MK #after-wait: the after-room's waiting screen.
+  await seedAfterWait(w);
 }
 
 /**
@@ -1064,13 +1098,35 @@ async function seedQueue(w: World): Promise<void> {
  * pieces left the stock less those turns. MK Q9: 24 pieces, 9 left, 2 in size 17, place 3; MK Q10: 300 pieces, 18
  * left (LAST PIECES), 2 in size 17, place 2.
  */
-async function seedBand(w: World, o: { key: string; model: string; title: string; stock: [number, number, number]; taken: [number, number, number]; waiting: number }): Promise<void> {
+async function seedBand(
+  w: World,
+  o: {
+    key: string;
+    model: string;
+    title: string;
+    stock: readonly number[];
+    taken: readonly number[];
+    waiting: number;
+    /** Its sizes' labels (16, 17, 18 by default; ['ONE SIZE'] for a release in one size). */
+    labels?: readonly string[];
+    /** The size of the waiting and of `key` (its index; 1, size 17, by default). */
+    sizeOf?: number;
+    /** Its T0 this long before NOW (three minutes by default); its first batch two minutes after T0. */
+    sinceMs?: number;
+    holdMinutes?: number;
+    /** Its pace (by default `taken` turns every two minutes: the first batch gives them all). */
+    pace?: { batch: number; minutes: number };
+    /** Done once the first batch is given (ORBES's controls, a late comer), at that moment. */
+    then?: (dropId: string, sizes: readonly { id: string }[]) => Promise<unknown>;
+  },
+): Promise<void> {
   const { ctx, clock, demo } = w;
   const live = ctx.services.live;
   clock.set(at('2026-10-04T12:00:00Z'));
-  const t0 = new Date(NOCTURNE_NOW.getTime() - 3 * MINUTE);
+  const t0 = new Date(NOCTURNE_NOW.getTime() - (o.sinceMs ?? 3 * MINUTE));
   const quantity = o.stock.reduce((n, x) => n + x, 0);
   const given = o.taken.reduce((n, x) => n + x, 0);
+  const labels = o.labels ?? o.stock.map((_, i) => String(16 + i));
   const r = await createLiveRelease(w.f, {
     modelId: o.model,
     opensAt: t0,
@@ -1078,10 +1134,11 @@ async function seedBand(w: World, o: { key: string; model: string; title: string
     minTier: 1,
     turnSeconds: 300,
     payMinutes: 10,
-    sizes: o.stock.map((stock, i) => ({ label: String(16 + i), stock })),
+    sizes: o.stock.map((stock, i) => ({ label: labels[i]!, stock })),
     quantityLine: `${quantity} PIECES`,
     priceMinor: 505_000,
-    pace: { batch: given, minutes: 2 },
+    pace: o.pace ?? { batch: given, minutes: 2 },
+    holdMinutes: o.holdMinutes,
   });
   await titled(w, r.id, o.title, `${o.title}, released live: ${quantity} pieces, in the sizes of the house.`);
   demo.releases[o.key] = r.id;
@@ -1094,12 +1151,72 @@ async function seedBand(w: World, o: { key: string; model: string; title: string
   o.taken.forEach((n, i) => {
     for (let j = 0; j < n; j++) sizeOf.set(crowd[k++]!, r.sizes[i]!.id);
   });
-  for (let j = 0; j < o.waiting; j++) sizeOf.set(crowd[k++]!, r.sizes[1]!.id);
-  sizeOf.set(you.id, r.sizes[1]!.id);
+  for (let j = 0; j < o.waiting; j++) sizeOf.set(crowd[k++]!, r.sizes[o.sizeOf ?? 1]!.id);
+  sizeOf.set(you.id, r.sizes[o.sizeOf ?? 1]!.id);
   await bulkLine(w, r.id, r.sizes, [...crowd, you.id], new Date(t0.getTime() + 20_000), sizeOf);
   clock.set(new Date(t0.getTime() + 2 * MINUTE));
   await live.advance(r.id);
+  await o.then?.(r.id, r.sizes);
   await live.message(r.id, 'Thank you for being here tonight.', w.admin);
+}
+
+/**
+ * The after-room's waiting screen (lot Q1, step Q1.8; MK #after-wait, D29): a LIVE RELEASE of one piece in size 17, sold
+ * out four minutes ago with eleven guests and `afterWait` still in its line; its after-room (12 pieces: 10 in size 16, 2
+ * in size 17) open since three minutes ago. Its guests took their places two minutes ago, in their order of the line:
+ * two in size 17 and seven in size 16 in a turn at once (no pace), then one in size 17 waiting, then `afterWait`: its
+ * place 2 in size 17, 3 OF 12 LEFT · 0 IN SIZE 17, no time.
+ */
+async function seedAfterWait(w: World): Promise<void> {
+  const { ctx, clock, demo } = w;
+  const live = ctx.services.live;
+  const t0 = new Date(NOCTURNE_NOW.getTime() - 12 * MINUTE);
+  clock.set(at('2026-10-04T12:00:00Z'));
+  const r = await createLiveRelease(w.f, {
+    modelId: w.models.blue!,
+    opensAt: t0,
+    minTier: 0,
+    sizes: [{ label: '17', stock: 1 }],
+    quantityLine: '1 PIECE',
+    priceMinor: 505_000,
+    turnSeconds: 300,
+    payMinutes: 10,
+    afterRoom: { modelId: w.models.blue!, priceMinor: 505_000, sizes: [{ label: '16', stock: 10 }, { label: '17', stock: 2 }], delayMinutes: 1, lengthMinutes: 30 },
+  });
+  await titled(w, r.id, 'MONOLITHE IN BLUE', 'One piece of MONOLITHE in blue, released live.');
+  await titled(w, r.afterRoom!.id, 'MONOLITHE IN BLUE · THE AFTER-ROOM');
+  demo.releases.afterWait = r.id;
+  const actor = (id: string) => ({ type: 'account' as const, id });
+  const [rival, ...guests] = await crowdOf(w, 11, 'afterwait');
+  const you = await account(w, 'afterWait', 'after.wait@example.com', 1, w.models.blue);
+  clock.set(new Date(t0.getTime() - MINUTE));
+  await live.enter(rival!, r.id, { sizeId: r.sizes[0]!.id }, actor(rival!));
+  clock.set(t0);
+  await live.advance(r.id);
+  clock.set(new Date(t0.getTime() + 30_000));
+  for (const g of [...guests, you.id]) await live.enter(g, r.id, { sizeId: r.sizes[0]!.id }, actor(g));
+  await live.advance(r.id);
+  const token = (await live.entry(rival!, r.id))?.turn?.token;
+  if (!token) throw new Error('no turn for the rival');
+  await live.press(rival!, r.id, token);
+  clock.advance(1_500);
+  await live.secure(rival!, r.id, token, actor(rival!));
+  clock.set(new Date(NOCTURNE_NOW.getTime() - 4 * MINUTE));
+  await live.confirm(rival!, r.id, actor(rival!));
+  await live.advance(r.id);
+  clock.set(new Date(NOCTURNE_NOW.getTime() - 3 * MINUTE));
+  await live.advance(r.id);
+  await live.advance(r.afterRoom!.id);
+  clock.set(new Date(NOCTURNE_NOW.getTime() - 2 * MINUTE));
+  const [s16, s17] = r.afterRoom!.sizes;
+  const sizeOf = [s17, s17, s16, s16, s16, s16, s16, s16, s16, s17];
+  for (const [i, g] of guests.entries()) {
+    await live.enter(g, r.afterRoom!.id, { sizeId: sizeOf[i]!.id }, actor(g));
+    await live.advance(r.afterRoom!.id);
+  }
+  await live.enter(you.id, r.afterRoom!.id, { sizeId: s17!.id }, you.actor);
+  await live.advance(r.afterRoom!.id);
+  await live.message(r.afterRoom!.id, 'Thank you for being here tonight.', w.admin);
 }
 
 /** A LIVE RELEASE of one piece, sold out five minutes ago with you still in the line: its after-room is open. */

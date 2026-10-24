@@ -240,7 +240,8 @@ describe('a set\'s line, turn and hold (K44 T1, T4)', () => {
     expect(liveScreen({ sheet: s, viewer: 'ready', room: room({ [ID(22)]: [0, 1] }), entry: entry(), now })).toBe('queue');
     // The entry's own figures, once read, decide.
     expect(liveScreen({ sheet: s, viewer: 'ready', room: room(), entry: entry({ queue: { place: 1, waitMs: 0, paused: null, next: true, out: true } }), now })).toBe('soldOut');
-    expect(SETS.live.soldOut.title('HALO', '56')).toBe('HALO · SOLD OUT IN SIZE 56');
+    // ONE QUEUE (C6, N2): titled SOLD OUT as every SOLD OUT for your size (LIVE.edge.soldOut.title); its piece and size in its sentence.
+    expect(SETS.live.soldOut).not.toHaveProperty('title');
     expect(SETS.live.soldOut.none('HALO', '56')).toBe('Every HALO in size 56 is reserved. You keep your place should ORBES add one, or you may leave.');
   });
 
@@ -306,7 +307,7 @@ describe('the room\'s bodies of a set\'s LIVE RELEASE (K44 T1, T4)', () => {
 
 describe('THE SET\'s LIVE words', () => {
   it('hold to the lexicon', () => {
-    const words = JSON.stringify(SETS.live, (_k, v: unknown) => (typeof v === 'function' ? String((v as (...a: unknown[]) => string)(2, ['17', '52'])) : v)) + SETS.live.soldOut.title('HALO', '56') + SETS.live.soldOut.none('HALO', '56');
+    const words = JSON.stringify(SETS.live, (_k, v: unknown) => (typeof v === 'function' ? String((v as (...a: unknown[]) => string)(2, ['17', '52'])) : v)) + SETS.live.soldOut.none('HALO', '56');
     expect(findForbidden(words, [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
   });
 });

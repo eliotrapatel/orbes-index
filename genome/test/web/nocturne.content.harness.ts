@@ -125,6 +125,20 @@ export const MOVED: readonly Moved[] = [
   { state: 'desk-live-sold-out-size', value: 'Every piece in your size is reserved. You keep your place should ORBES add one, or you may leave.', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D27; ANSWERS C6, r13): the one sentence of SOLD OUT for your size', now: 'Every piece in your size is reserved. You keep your place should ORBES add more, or you may leave.' },
   { state: 'desk-live-sold-out-size', value: '7', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D19; ANSWERS C3): YOUR PLACE is the place in your size (one number), the drawn place staying in the console', now: 'YOUR PLACE 1' },
   { state: 'desk-set-live-sold-out', value: '2', reason: 'ONE QUEUE, lot Q1 step Q1.3 (D19; ANSWERS C3): YOUR PLACE is the place in your size (one number), the drawn place staying in the console', now: 'YOUR PLACE 1' },
+  // ONE QUEUE (lot Q1, step Q1.8; plan §3.3, §3.6, §3.11): SOLD OUT for your size is titled SOLD OUT only, its size on
+  // the line under it; the one queue (live-queue, MK Q1) is shown on its own release of the mockup's figures (the queue's
+  // first release, every piece held, is the error, stress, no-photograph and reading states' still).
+  { state: 'live-sold-out-size', value: 'SOLD OUT IN SIZE 17', reason: 'ONE QUEUE, lot Q1 step Q1.8 (D27; ANSWERS C6, r12): the title reads SOLD OUT only, never SOLD OUT IN SIZE 52', now: 'SOLD OUT, then SIZE 17 · 1 PIECE under it', shownAs: ['SOLD OUT', 'SIZE 17 · 1 PIECE'] },
+  { state: 'desk-live-sold-out-size', value: 'SOLD OUT IN SIZE 17', reason: 'ONE QUEUE, lot Q1 step Q1.8 (D27; ANSWERS C6, r12): the title reads SOLD OUT only, never SOLD OUT IN SIZE 52', now: 'SOLD OUT over the centre, SIZE 17 · 1 PIECE in the corner', shownAs: ['SOLD OUT', 'SIZE 17 · 1 PIECE'] },
+  { state: 'set-live-sold-out', value: 'HALO · SOLD OUT IN SIZE 56', reason: 'ONE QUEUE, lot Q1 step Q1.8 (D27, N2; ANSWERS C6, r12): SOLD OUT only, its piece and size said in its one sentence', now: 'SOLD OUT, then «Every HALO in size 56 is reserved…»', shownAs: ['SOLD OUT', 'Every HALO in size 56 is reserved.'] },
+  { state: 'desk-set-live-sold-out', value: 'HALO · SOLD OUT IN SIZE 56', reason: 'ONE QUEUE, lot Q1 step Q1.8 (D27, N2; ANSWERS C6, r12): SOLD OUT only, its piece and size said in its one sentence', now: 'SOLD OUT, then «Every HALO in size 56 is reserved…»', shownAs: ['SOLD OUT', 'Every HALO in size 56 is reserved.'] },
+  { state: 'live-queue', value: '203', reason: 'ONE QUEUE, lot Q1 step Q1.8 (plan §3.11; MK Q1): the one queue shown on the mockup’s figures, its own release (queueWait)', now: 'YOUR PLACE 4' },
+  { state: 'live-queue', value: 'ESTIMATED 16 MINUTES LEFT', reason: 'ONE QUEUE, lot Q1 step Q1.8 (plan §3.11; MK Q1): the one queue shown on the mockup’s figures, its own release (queueWait)', now: 'ESTIMATED 5 MINUTES LEFT' },
+  { state: 'live-queue', value: '0 OF 9 LEFT · 0 IN SIZE 17', reason: 'ONE QUEUE, lot Q1 step Q1.8 (plan §3.11; MK Q1, Q8): the one queue shown on the mockup’s figures; every piece of a size held is live-queue-held', now: '176 OF 300 LEFT · 3 IN SIZE 17' },
+  { state: 'desk-live-queue', value: '203', reason: 'ONE QUEUE, lot Q1 step Q1.8 (plan §3.11; MK Q1): the one queue shown on the mockup’s figures, its own release (queueWait)', now: 'YOUR PLACE 4' },
+  { state: 'desk-live-queue', value: 'ESTIMATED 16 MINUTES LEFT', reason: 'ONE QUEUE, lot Q1 step Q1.8 (plan §3.11; MK Q1): the one queue shown on the mockup’s figures, its own release (queueWait)', now: 'ESTIMATED 5 MINUTES LEFT' },
+  { state: 'desk-live-queue', value: '0 OF 9 LEFT · 0 IN SIZE 17', reason: 'ONE QUEUE, lot Q1 step Q1.8 (plan §3.11; MK Q1, Q8): the one queue shown on the mockup’s figures; every piece of a size held is live-queue-held', now: '176 OF 300 LEFT · 3 IN SIZE 17' },
+  { state: 'desk-live-queue', value: '5240 IN THE ROOM', reason: 'ONE QUEUE, lot Q1 step Q1.8 (plan §3.11; MK Q1): the one queue shown on its own release, its own room', now: '128 IN THE ROOM' },
 ];
 
 /**
@@ -195,16 +209,16 @@ const PHONE_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> = Object.f
   circle: (s) => full(s) && !s.mutates && named('circle', 'post', 'legal', 'certificate')(s),
   writes: (s) => full(s) && !!s.mutates,
   room: (s) => ROOM_VARIANTS.includes(s.variant),
-  // ORBES CARE (plan ORBES CARE, step 5.1), on its own stage (orbes-care), its states in order.
-  care: orbesCare,
+  // ORBES CARE (plan ORBES CARE, step 5.1), on its own stage (orbes-care), its states in order; THE SET's releases, its
+  // draws and YOUR ORDERS (lot M3, K44), on theirs (set; the queue's shard holds the one queue's every state, lot Q1).
+  care: (s) => orbesCare(s) || s.variant === 'set',
   // The draws in every state; a draw in sizes (plan NEXT LOT §3.6.F) and a draw FOR SELECTED COLLECTORS (plan MACRO M1
   // §3.3, F4), each on its own stage.
   draws: (s) => s.variant === 'draws' || s.variant === 'draw-sizes' || s.variant === 'draw-selected',
   stress: (s) => s.variant === 'stress' && !named('account')(s),
-  // The queue of a paced release (macro scope of 2026-10-20, W2, W5, W6; lot M1, step M1.5), on its own stage: the room's
-  // shard holds its limit of states; THE SET (lot M3, K44: its releases, its draws, YOUR ORDERS), on its own stage (the
-  // draws' shard holds its limit).
-  queue: (s) => s.variant === 'queue' || s.variant === 'set' || s.variant === 'set-live',
+  // The queue of a paced release (macro scope of 2026-10-20, W2, W5, W6; lot M1, step M1.5; the one queue in every state,
+  // lot Q1), on its own stage: the room's shard holds its limit of states; THE SET's LIVE RELEASE (lot M3, K44), on its own.
+  queue: (s) => s.variant === 'queue' || s.variant === 'set-live',
   // The emails' screens (lot M1, step M1.19, E1–E3), on their own stage (the emails' channel on), their writes last.
   email: (s) => s.variant === 'email',
   // WORN (lot M2, D31), on its own stage: a piece's block in each state (the pieces' shard holds its limit of states);
@@ -352,6 +366,50 @@ export function shownSuite(name: string, cases: readonly { state: UiState; prese
               const texts = await pageTexts(opened.page);
               for (const re of c.present) if (!texts.some((t) => re.test(t))) found.push(`${state.id}: does not show ${re}`);
               for (const re of c.absent ?? []) if (texts.some((t) => re.test(t))) found.push(`${state.id}: shows ${re}`);
+            } finally {
+              await opened.close();
+            }
+          },
+          () => {},
+        );
+        expect(found).toEqual([]);
+      },
+      SHARD_TIMEOUT_MS,
+    );
+  });
+}
+
+/**
+ * ONE QUEUE (lot Q1, step Q1.8; plan §3.3; OP-6, N10; MK Q3, Q4, #confirmed, #after-door): the header's notice on the
+ * queue says FROM ORBES alone, the release's PAUSED (or THE QUEUE IS PAUSED) with its line inside the screen, above its
+ * frozen time, never twice; CONFIRMED and the after-room's door show no notice at all. Each case: whether FROM ORBES
+ * shows, and the pause words the screen shows once (null: none anywhere).
+ */
+export function noticeSuite(name: string, cases: readonly { state: UiState; fromOrbes: boolean; paused: string | null }[]): void {
+  describe.skipIf(!HAS_CHROMIUM)(`${name} (Chromium)`, () => {
+    it(
+      `shows FROM ORBES and the pause as the mockup draws them, never twice, in ${cases.length} screens`,
+      async () => {
+        const found: string[] = [];
+        await eachState(
+          cases.map((c) => c.state),
+          async (state, { stage, demo, browser }) => {
+            const c = cases.find((x) => x.state === state)!;
+            const opened = await openState(browser, stage, demo, state);
+            try {
+              const seen = await opened.page.evaluate(() => {
+                const shown = (el: Element) => el.checkVisibility() && el.getBoundingClientRect().width > 1;
+                const notice = document.querySelector('.live__notice');
+                const words = [...document.querySelectorAll('body *')].filter((el) => el.children.length === 0 && shown(el) && /^(PAUSED|THE QUEUE IS PAUSED)$/.test((el.textContent ?? '').trim()));
+                return {
+                  message: [...(notice?.querySelectorAll('.live__message') ?? [])].filter(shown).length,
+                  noticePaused: notice?.querySelectorAll('.live__paused').length ?? 0,
+                  paused: words.map((el) => (el.textContent ?? '').trim()),
+                  inScreen: words.every((el) => el.matches('.live__queue-paused')),
+                };
+              });
+              const want = { message: c.fromOrbes ? 1 : 0, noticePaused: 0, paused: c.paused ? [c.paused] : [], inScreen: true };
+              if (JSON.stringify(seen) !== JSON.stringify(want)) found.push(`${state.id}: ${JSON.stringify(seen)}, not ${JSON.stringify(want)}`);
             } finally {
               await opened.close();
             }

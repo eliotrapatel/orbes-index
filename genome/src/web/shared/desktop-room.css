@@ -1029,6 +1029,11 @@
     margin-top: var(--d-s5);
   }
 
+  /* The phone's lines under the name (its choice, the people in the room): the corners say both on a computer. */
+  html:not(.d-touch) .d-room .d-room__bl > :is(.live__choice, .live__entry-count) {
+    display: none;
+  }
+
   /* ── 8. Sold out in its size: the title over the centre, its sentence and LEAVE THE LINE; the place bottom right ── */
 
   html:not(.d-touch) .d-room .d-room__screen--soldOut .d-room__body > .live__note,
@@ -1059,6 +1064,48 @@
      height 1), a label line's 6 px over its own (11 px, line height 1.6). */
   html:not(.d-touch) .d-room .d-room__screen--soldOut .d-room__br > .live__place {
     margin-bottom: calc(6px - 0.13em);
+  }
+
+  /* SOLD OUT's passage on a computer (house.css .live--tx-sold; MK S desk, TX_END sold 3800 ms): a little slower, its
+     parts in the Cinema room's places. Under reduced motion none of it runs. */
+  @media (prefers-reduced-motion: no-preference) {
+    html:not(.d-touch) .d-room.live--tx-sold .live-tx-shz {
+      animation-delay: 1.8s;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-sold .live-tx-shz__sky {
+      height: 230px;
+      animation-duration: 1.6s;
+      animation-delay: 0.3s;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-sold .live-tx-shz__line {
+      animation-duration: 1.5s;
+      animation-delay: 0.8s;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-sold .live-tx-shz__pt {
+      animation-duration: 1.2s;
+      animation-delay: 0.35s;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-sold > .d-room__photo {
+      animation: live-tx-photo 1.9s cubic-bezier(0.16, 1, 0.3, 1) 1.8s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-sold > :is(.live__head, .live__foot),
+    html:not(.d-touch) .d-room.live--tx-sold .live__sold > .d-room__body > :not(.live__note),
+    html:not(.d-touch) .d-room.live--tx-sold .live__sold > :is(.d-room__bl, .d-room__br) {
+      animation: live-fade-in 0.8s ease 3s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-sold .live__sold > .d-room__head {
+      animation: live-tx-resolve 1s cubic-bezier(0.22, 1, 0.36, 1) 2.4s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-sold .live__sold > .d-room__body > .live__note {
+      animation: live-tx-resolve 0.9s cubic-bezier(0.22, 1, 0.36, 1) 2.7s backwards;
+    }
   }
 
   /* ── 9. The turn (B4): the seal to hold in the centre, its time under it; the piece and its choice bottom left ──── */

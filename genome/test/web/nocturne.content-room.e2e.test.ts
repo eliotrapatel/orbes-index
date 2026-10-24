@@ -1,6 +1,6 @@
 /** NOCTURNE's content test, shard room (test/web/nocturne.content.harness.ts: CONTENT_SHARDS). */
 import { ROOM_SIZE_STATES, stateById } from '../support/nocturne-states.js';
-import { contentSuite, hiddenGuaranteeSuite, shownSuite } from './nocturne.content.harness.js';
+import { contentSuite, hiddenGuaranteeSuite, noticeSuite, shownSuite } from './nocturne.content.harness.js';
 
 contentSuite('room');
 
@@ -14,4 +14,11 @@ const [fromYours, confirmed] = ROOM_SIZE_STATES;
 shownSuite('YOUR SIZES in the room: FROM YOUR SIZES and TO CONFIRM, then ready', [
   { state: fromYours!, present: [/^17 · to confirm$/, /^size 17 · from your sizes$/, /^check it is right for this model before you confirm\.$/] },
   { state: confirmed!, present: [/^your size$/], absent: [/to confirm/, /from your sizes/] },
+]);
+
+// ONE QUEUE (lot Q1, step Q1.8; plan §3.1, §3.3; MK #confirmed, #after-door): CONFIRMED and the after-room's door show ORBES
+// alone, no FROM ORBES and no pause, whatever the room says.
+noticeSuite('CONFIRMED and the after-room’s door: no notice', [
+  { state: stateById('live-confirmed'), fromOrbes: false, paused: null },
+  { state: stateById('after-room-door'), fromOrbes: false, paused: null },
 ]);

@@ -2032,6 +2032,13 @@ export const LIVE = Object.freeze({
   /** The place's label as a screen reader says it, before the figure. */
   yourPlaceSaid: 'Your place',
   left: (left: number, quantity: number) => `${left} OF ${quantity} LEFT`,
+  /**
+   * The account's choice on the screens of its entry (ONE QUEUE, D21, D34: the queue, SOLD OUT, the turn), on the phone
+   * under the name and in the Cinema room's corner: `SIZE 52 · 1 PIECE`, `ONE SIZE · 2 PIECES`.
+   */
+  choice: (size: string, quantity: number) => `${sizeName(size)} · ${quantity === 1 ? '1 PIECE' : `${quantity} PIECES`}`,
+  /** SOLD OUT for your size on the phone (MK S): YOUR PLACE in one small line, not the figure. */
+  placeLine: (place: number) => `YOUR PLACE ${place}`,
   inSize: (n: number, size: string) => `${n} ${inSizeLabel(size)}`,
   /** Under the Horizon band of the stock, at 10 % left or fewer (ONE QUEUE, OP-3; MK Q10). */
   lastPieces: 'LAST PIECES',
@@ -2119,7 +2126,8 @@ export const LIVE = Object.freeze({
     left: Object.freeze({ title: 'YOU LEFT THE LINE', text: 'Your place has gone to the collectors behind you.' }),
     removed: Object.freeze({ title: 'YOUR ENTRY IS REMOVED', text: 'ORBES has removed your entry from this release. ORBES Client Services can assist you.' }),
     soldOut: Object.freeze({
-      title: (size: string) => (isOneSize(size) ? 'SOLD OUT' : `SOLD OUT IN SIZE ${size}`),
+      /** ONE QUEUE (ANSWERS C6, r12): the title SOLD OUT only, never SOLD OUT IN SIZE 52 (its size is said under it). */
+      title: 'SOLD OUT',
       /** ONE QUEUE (ANSWERS C6, r13): one sentence, always (no piece held is ever counted to a collector). */
       text: 'Every piece in your size is reserved. You keep your place should ORBES add more, or you may leave.',
       leave: 'LEAVE THE LINE',
@@ -2758,9 +2766,11 @@ export const SETS = Object.freeze({
     placeSaid: 'Your place in your sizes:',
     /** The one merged note, of a set. */
     queueNote: 'When your turn comes, the seal appears here: press and hold it to secure your set. Keep this page open; if you close it, your place is kept when you come back.',
-    /** One of the entry's sizes with no piece left to serve it: said with its piece (one sentence: no held set is ever counted). */
+    /**
+     * One of the entry's sizes with no piece left to serve it: titled SOLD OUT as every SOLD OUT for your size (ONE QUEUE,
+     * C6, N2), its piece and size said in its one sentence (no held set is ever counted).
+     */
     soldOut: Object.freeze({
-      title: (name: string, size: string) => `${name} · ${isOneSize(size) ? 'SOLD OUT' : `SOLD OUT IN SIZE ${bareSize(size)}`}`,
       none: (name: string, size: string) => `Every ${name} ${setInSize(size)} is reserved. You keep your place should ORBES add one, or you may leave.`,
     }),
     /** The turn: the seal secures the set. */

@@ -74,7 +74,7 @@ import { addonRows, chosenRows, chosenUnits, leftOutLines, rowsChoice, rowsLimit
 import { h, prefersReducedMotion, s } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { DESKTOP, GUARANTEE, HOW, LIVE, LOOKBOOK, PIECES, RELEASES, SETS, TIER } from '../copy.js';
+import { GUARANTEE, HOW, LIVE, LOOKBOOK, PIECES, RELEASES, SETS, TIER } from '../copy.js';
 import { CLUB_PATH } from '../club-model.js';
 import { isDesktop, onDesktopChange, touchLayout } from '../../shared/desktop.js';
 import { HOW_PATH } from '../how-model.js';
@@ -93,6 +93,7 @@ import {
   initialSetPick,
   interestLine,
   isEndedSheet,
+  isSetEntry,
   liveReference,
   liveScreen,
   liveSet,
@@ -209,6 +210,12 @@ export interface LiveDeps {
   session: SessionStore;
   /** The LIVE flow's designed sounds (lot Q1 §3.10, live-sound.ts), the device's SOUND preference (SOUND ON / OFF). */
   sound: Pick<LiveSound, 'on' | 'set' | 'prime' | 'cue' | 'stopAll'>;
+  /**
+   * THE VAULT's place (lot Q1 §3.6, OP-17, D48; filled by lot Q3): on SOLD OUT for your size, under its sentence and
+   * before LEAVE THE LINE, and on the end page of a release sold out, under its sentence. Absent (Q1, or a release whose
+   * vault is off): no element is added and both pages are as without it. `mount` returns what takes it down.
+   */
+  vault?: LiveVault;
   /** The release's page as read; null when it could not be read (`failure` says why). */
   sheet: LiveSheet | LiveEndedSheet | null;
   failure?: string;
@@ -234,6 +241,11 @@ export interface LiveDeps {
    * whether the chrome is on screen, false on a computer for an end page staged as the room (`shown` keeps its meaning).
    */
   onChrome?(shown: boolean, drawn?: boolean): void;
+}
+
+/** THE VAULT on a page of the release (lot Q3 fills it): mounted into its slot, taken down with the screen. */
+export interface LiveVault {
+  mount(slot: HTMLElement, at: 'soldOut' | 'end', ctx: { dropId: string; entryId: string | null }): () => void;
 }
 
 export function liveView(deps: LiveDeps): LiveView {
@@ -405,6 +417,7 @@ class LivePage {
 
   dispose(): void {
     this.disposed = true;
+    this.endPassage();
     this.deps.sound.stopAll();
     this.unsubscribe?.();
     this.unsubscribe = null;
@@ -963,10 +976,8 @@ class LivePage {
     const kind = this.screen?.kind;
     let choice: string | null = null;
     if (e && (kind === 'queue' || kind === 'soldOut' || kind === 'turn')) {
-      // Macro scope K44 T1: a set's, every size and its sets (`SIZE 17 · 52 · 45 · 1 SET`).
-      const parts = e.sizes?.length ? [setSizesLine(e), SETS.live.sets(e.quantity)] : [LIVE.size(e.size.label), DESKTOP.room.pieces(e.quantity)];
-      if (kind === 'turn') parts.push(formatMoney(e.priceMinor * e.quantity, e.currency));
-      choice = parts.join(' · ');
+      choice = this.choiceOf(e);
+      if (kind === 'turn') choice = `${choice} · ${formatMoney(e.priceMinor * e.quantity, e.currency)}`;
     }
     // A set's: its pieces' photographs side by side, the window's ground (from the photograph's stage).
     const tiles = sheet ? liveSet(sheet) : null;
@@ -978,6 +989,40 @@ class LivePage {
       heading: (sheet ? liveHeading(sheet) : null) ?? this.name(),
       choice,
       count: this.room?.inRoom ?? null,
+    };
+  }
+
+  /**
+   * The account's choice (ONE QUEUE, D21, D34): `SIZE 52 · 1 PIECE`; a set's every size and its sets (macro scope K44 T1:
+   * `SIZE 17 · 52 · 45 · 1 SET`). Under the name on the phone, in the Cinema room's corner on a computer.
+   */
+  private choiceOf(e: LiveEntry): string {
+    return e.sizes?.length ? `${setSizesLine(e)} · ${SETS.live.sets(e.quantity)}` : LIVE.choice(e.size.label, e.quantity);
+  }
+
+  /** The release's title with its variant (MONOLITHE IN BLUE), as the Cinema room's corner says it; its name otherwise. */
+  private heading(): string {
+    const s = this.live();
+    return (s ? liveHeading(s) : null) ?? this.name();
+  }
+
+  /**
+   * The phone's lines under the name on the screens of the entry (ONE QUEUE, MK Q1, S; D34): its choice, then the people
+   * in the room; on a computer the Cinema room's corners say both (desktop-room.ts).
+   */
+  private entryLines(): { el: HTMLElement[]; update(): void } {
+    const choice = this.fact('', 'live__choice live__phone-only');
+    const presence = h('p', { class: 'live__presence live__entry-count live__phone-only' }, h('span', { class: 'live__dot', attrs: { 'aria-hidden': 'true' } }), h('span', { class: 'live__presence-text' }));
+    return {
+      el: [choice, presence],
+      update: () => {
+        const e = heldEntry(this.entry);
+        setFact(choice, e ? this.choiceOf(e) : '');
+        choice.hidden = !e;
+        const n = this.room?.inRoom ?? 0;
+        setFact(presence.lastChild as HTMLElement, LIVE.inRoom(n));
+        presence.hidden = n <= 0;
+      },
     };
   }
 
@@ -1028,6 +1073,8 @@ class LivePage {
     this.error = previous === kind ? this.error : null;
     const revealing = kind === 'secured' && this.reveal;
     this.reveal = false;
+    // SOLD OUT's passage starts from the queue's horizon, where its band was (read before the queue gives way).
+    const horizon = previous === 'queue' && kind === 'soldOut' ? this.screen?.el.querySelector('.live-hz__line')?.getBoundingClientRect() ?? null : null;
     const screen = this.build(kind, revealing);
     this.screen = screen;
     screen.el.classList.add('live__screen');
@@ -1052,6 +1099,46 @@ class LivePage {
     if (kind !== previous && kind === 'turn') this.say(this.returned ? LIVE.announce.returned : LIVE.announce.turn, true);
     if (kind !== previous && revealing) this.say(LIVE.announce.secured(this.name()));
     if (kind !== previous && kind === 'afterRoom') this.say(LIVE.afterRoom.announce);
+    this.endPassage();
+    if (horizon && horizon.width > 0) this.soldPassage(horizon);
+  }
+
+  /** The passage under way (its class on the page, its own elements, its end), if any. */
+  private passage: { cls: string; parts: HTMLElement[]; timer: ReturnType<typeof setTimeout> } | null = null;
+
+  /**
+   * SOLD OUT's passage, the quieter one (lot Q1 §3.6; ANSWERS C16, ROUND 5; MK S, gen.mjs TX_END sold 3650 / 3800 ms):
+   * the queue's horizon where its band was, its light withdrawing, its point going, the line dimming, then the screen
+   * coming up (house.css .live--tx-sold); sold-out.mp3 at 0.25 s of its start (SFX_AT sold). Reduced motion: none.
+   */
+  private soldPassage(at: DOMRect): void {
+    if (prefersReducedMotion()) return;
+    const shz = h(
+      'div',
+      { class: 'live-tx-shz', attrs: { 'aria-hidden': 'true' } },
+      h('span', { class: 'live-tx-shz__sky' }),
+      h('span', { class: 'live-tx-shz__line' }),
+      h('span', { class: 'live-tx-shz__pt' }),
+    );
+    // Where the band's horizon stood, in the window (CSSOM custom properties, the house's pattern for a measure).
+    shz.style.setProperty('--live-tx-top', `${Math.round(at.top + at.height / 2)}px`);
+    shz.style.setProperty('--live-tx-left', `${Math.round(at.left)}px`);
+    shz.style.setProperty('--live-tx-width', `${Math.round(at.width)}px`);
+    this.root.prepend(shz);
+    this.root.classList.add('live--tx-sold');
+    this.deps.sound.cue('sold');
+    const ms = isDesktop() ? 3800 : 3650;
+    this.passage = { cls: 'live--tx-sold', parts: [shz], timer: setTimeout(() => this.endPassage(), ms) };
+  }
+
+  /** The passage ends (its time over, the page leaving, or another screen): the page as it is, nothing held. */
+  private endPassage(): void {
+    const p = this.passage;
+    if (!p) return;
+    this.passage = null;
+    clearTimeout(p.timer);
+    this.root.classList.remove(p.cls);
+    for (const part of p.parts) part.remove();
   }
 
   /** Whether screen `kind` is one of NOCTURNE's, with its chrome: announced, failed, the final page, an end page (or loading it). */
@@ -2068,11 +2155,14 @@ class LivePage {
   }
 
   /**
-   * ONE QUEUE (lot Q1, ANSWERS C3; plan §3.3): the one waiting screen, from the opening to the turn, every entry waiting
-   * (a set's in SETS' words, N2; the after-room's headed THE AFTER-ROOM with no time, D29): LIVE NOW, its name, YOUR
-   * PLACE (its place in its size, said with its size), PAUSED or THE QUEUE IS PAUSED with its line above the time, the
-   * time left (counted down from the reading, frozen while paused), the pieces left, the one note, LEAVE THE LINE on a
-   * second tap. READING YOUR PLACE until its place is read (D15). The place moves at readings only, said then.
+   * ONE QUEUE (lot Q1, ANSWERS C3; plan §3.3; MK #queue Q1–Q10, #after-wait): the one waiting screen, from the opening
+   * to the turn, every entry waiting (a set's in SETS' words, N2; the after-room's headed THE AFTER-ROOM with no time,
+   * D29): LIVE NOW, the name with its variant, its choice (SIZE 52 · 1 PIECE) and the people in the room (the phone's
+   * lines; the Cinema room's corners on a computer), YOUR PLACE (its place in its size, said with its size), PAUSED or
+   * THE QUEUE IS PAUSED with its line above the time (OP-6, N10: the notice above says FROM ORBES alone here), the time
+   * left (counted down from the reading, frozen while paused), the band of the pieces left, the one note, LEAVE THE LINE
+   * on a second tap, at every stage. READING YOUR PLACE until its place is read (D15). The place moves at readings only:
+   * said then (with the time read), morphing, place.mp3 with it (SFX place, 0 s).
    */
   private queueScreen(): Screen {
     const id = this.sheet!.id;
@@ -2089,11 +2179,17 @@ class LivePage {
     const band = horizonBand();
     const errorLine = this.errorLine();
     const leave = this.action(LIVE.queue.leave, () => this.armed(() => this.act(() => this.deps.api.liveLeave(id))), 'live__leave-line');
+    const lines = this.entryLines();
+    /** The place last shown (null before the first reading): a place that changes at a reading plays place.mp3. */
+    let shown: number | null = null;
+    // A tap or a key in the queue makes the sounds' context, as the room's do (live-sound.ts: a gesture's).
+    const prime = (): void => this.deps.sound.prime();
     const el = h(
       'section',
-      { class: 'live__queue' },
+      { class: 'live__queue', on: { pointerup: prime, keydown: prime } },
       this.overline(this.liveLine()),
-      this.title(this.name()),
+      this.title(this.heading()),
+      ...lines.el,
       label,
       place,
       reading,
@@ -2110,6 +2206,7 @@ class LivePage {
       el,
       update: () => {
         const e = this.entry;
+        lines.update();
         if (!e) return;
         const m = queueModel(e, this.queueRead, this.now());
         el.dataset.state = m.kind === 'reading' ? 'reading' : m.paused ? 'paused' : 'waiting';
@@ -2130,6 +2227,9 @@ class LivePage {
           if (said.textContent !== `${m.placeSaid} `) said.textContent = `${m.placeSaid} `;
           // Every figure morphs (D30): the place at a reading, the time as it counts down, the stock in the band.
           morph(figure, String(m.place), { numerals: false });
+          // Lot Q1 §3.3, §3.10 (SFX place): the place changed at a reading, its figure morphing: place.mp3 with it.
+          if (shown !== null && m.place !== shown) this.deps.sound.cue('place');
+          shown = m.place;
           morph(time, m.time ?? '');
           if (this.room) band.set(bandModel(this.room, e), hold);
           if (m.announce !== this.lastPlace) {
@@ -2144,31 +2244,53 @@ class LivePage {
     };
   }
 
-  /** Sold out in your size: its one sentence (ONE QUEUE, D27), the place kept, LEAVE THE LINE (no size switch after T0). */
+  /**
+   * SOLD OUT for your size (ONE QUEUE, lot Q1 §3.6; ANSWERS C6, r10, r12, r13; MK S): the name with its variant over
+   * SOLD OUT (the title only, never SOLD OUT IN SIZE 52), its choice and the people in the room (the phone's lines; the
+   * Cinema room's corners on a computer), YOUR PLACE in one small line (the large figure in the computer's corner), the
+   * one sentence (a set's naming its piece and size, N2), the vault's place (OP-17, D48: only when the page is given a
+   * vault, lot Q3; none in Q1: nothing is added), LEAVE THE LINE on a second tap (no size switch after T0).
+   */
   private soldOutScreen(): Screen {
     const s = this.live()!;
     const text = this.note('');
-    const place = this.fact('', 'live__ahead');
+    // YOUR PLACE 4 for the eye; « Your place in size 52: 4 » for a reader (the line's figure as the queue says it).
+    const placeShown = h('span', { attrs: { 'aria-hidden': 'true' } });
+    const placeSaid = h('span', { class: 'visually-hidden' });
+    const place = h('p', { class: 'live__fact live__ahead' }, placeShown, placeSaid);
     const errorLine = this.errorLine();
     const leave = this.action(LIVE.edge.soldOut.leave, () => this.armed(() => this.act(() => this.deps.api.liveLeave(s.id))), 'live__leave-line');
-    // Macro scope K44 T1: a set's entry sold out in one of its sizes: that piece and size said.
-    const short = this.entry?.sizes?.length ? setShort(this.room, this.entry) : null;
-    const title = short ? SETS.live.soldOut.title(short.name, short.label) : LIVE.edge.soldOut.title(this.entry?.size.label ?? '');
-    const el = h('section', { class: 'live__edge' }, this.overline(this.name()), this.title(title), place, text, errorLine, leave);
+    const lines = this.entryLines();
+    // OP-17 (lot Q3): THE VAULT under the sentence, before LEAVE THE LINE, when the page is given one; Q1 gives none.
+    const vault = this.deps.vault && this.entry ? h('div', { class: 'live__vault-slot' }) : null;
+    const el = h('section', { class: 'live__edge live__sold' }, this.overline(this.heading()), this.title(LIVE.edge.soldOut.title), ...lines.el, place, text, vault, errorLine, leave);
+    const unmount = vault && this.deps.vault ? this.deps.vault.mount(vault, 'soldOut', { dropId: s.id, entryId: this.entry?.id ?? null }) : null;
     return {
       kind: 'soldOut',
       el,
       update: () => {
         const e = this.entry;
+        lines.update();
+        // Macro scope K44 T1: a set's entry sold out in one of its sizes: that piece and size said in its sentence.
         const now = e?.sizes?.length ? setShort(this.room, e) : null;
         text.textContent = now ? SETS.live.soldOut.none(now.name, now.label) : LIVE.edge.soldOut.text;
         // D19: its place in its size, as the server read it for the entry.
         const at = e?.queue?.place ?? null;
-        setFact(place, at !== null ? `${LIVE.yourPlace} ${at}` : '');
+        const shown = at !== null ? LIVE.placeLine(at) : '';
+        setFact(placeShown, shown);
+        const said = at !== null && e ? `${isSetEntry(e) ? SETS.live.placeSaid : LIVE.queue.placeSaid(e.size.label)} ${at}` : '';
+        // Its words apart from the eye's line (a space between, so each reads as itself).
+        if (placeSaid.textContent !== (said && ` ${said}`)) placeSaid.textContent = said && ` ${said}`;
+        // The Cinema room's corner draws it as the queue does, its label over its figure (desktop-room.ts).
+        if (at !== null) place.dataset.place = String(at);
+        else delete place.dataset.place;
+        place.dataset.said = said;
+        place.hidden = at === null;
         this.showError(errorLine);
         leave.disabled = this.busy;
         leave.textContent = this.armedUntil ? LIVE.edge.soldOut.leaveConfirm : LIVE.edge.soldOut.leave;
       },
+      dispose: () => unmount?.(),
     };
   }
 
@@ -2819,6 +2941,9 @@ class LivePage {
     // Ended by the release's end with no second door (CLOSED, or SOLD OUT without an after-room): its final end, the
     // question after open (plan LIVE RELEASE+, choice 11). A guest of an after-room is asked on the final page once it ends.
     const ask = kind === 'ended' && !this.entry?.afterRoom ? this.questionBlock() : null;
+    // OP-17 (lot Q3): THE VAULT under the sentence of a release sold out, when the page is given one; Q1 gives none.
+    const vault = kind === 'ended' && this.deps.vault ? h('div', { class: 'n-px live__vault-slot', attrs: { hidden: true } }) : null;
+    let unmount: (() => void) | null = null;
     const words = h(
       'div',
       { class: 'n-px n-ctr n-live__words' },
@@ -2831,6 +2956,7 @@ class LivePage {
       { class: 'n-livepage n-live__end' },
       ...this.hero(sheet ? pictureOf(sheet) : null, words, sheet ? liveSet(sheet) : null),
       h('section', { class: 'n-px n-ctr n-live__outcome-block', attrs: { 'aria-live': 'polite' } }, outcome, note),
+      vault,
       write ? h('div', { class: 'n-px n-live__contact' }, writeButton(write)) : null,
       ask?.el ?? null,
       h('p', { class: 'n-sec n-ctr n-live__back' }, textLink(LIVE.back, { href: RELEASES_PATH, onOpen: () => this.deps.onReleases(), extraClass: 'n-live__back-link' })),
@@ -2842,9 +2968,14 @@ class LivePage {
       if (outcome.textContent !== now.title) outcome.replaceChildren(...withNumerals(now.title));
       if (note.textContent !== now.text) note.textContent = now.text;
       if (ask) this.askQuestion(ask);
+      // The vault once the release says it sold out (its reason may come after the page).
+      if (vault && !unmount && this.deps.vault && sheet && this.room?.endedReason === 'SOLD_OUT') {
+        vault.hidden = false;
+        unmount = this.deps.vault.mount(vault, 'end', { dropId: sheet.id, entryId: this.entry?.id ?? null });
+      }
     };
     // The keyboard and a screen reader land on what happened, under the release's title.
-    return { kind, el, focus: outcome, back: true, update };
+    return { kind, el, focus: outcome, back: true, update, dispose: () => unmount?.() };
   }
 
   private edgeCopy(kind: LiveScreenKind): { title: string; text: string } {

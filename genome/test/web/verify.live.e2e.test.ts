@@ -634,18 +634,55 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
         for (const r of records) for (const n of r.addedNodes) if (n instanceof HTMLElement && n.matches('.live-mf')) seen.push(`${n.dataset.o}>${n.textContent}`);
       }).observe(fig, { childList: true, subtree: true });
     });
+    // A tap in the queue makes the sounds' context (a gesture's): the place that moves is heard (lot Q1 §3.3, place.mp3).
+    await page.locator('.live__queue-note').click();
+    await page.clock.runFor(1_000);
     await turnsNow(r.id);
     await page.clock.runFor(61_000);
     await textOf(page.locator('.live__queue .live__place-figure'), '2');
     // Lot Q1 §3.2 (D30): the place morphed, its changed digit only (3 leaving, 2 resolving: the page's text the new
     // figure's alone), then plain text again.
     expect(await page.evaluate(() => (window as unknown as { __morphs?: string[] }).__morphs ?? [])).toEqual(['3>2']);
+    await expect.poll(async () => (await live(page)).sounds.filter((x) => x === 'place').length, POLL).toBe(1);
     await page.clock.runFor(1_000);
     await expect.poll(() => page.locator('.live__queue .live__place-figure .live-mf').count(), POLL).toBe(0);
     await textOf(page.locator('.live__queue .live__place-figure'), '2');
     expect(await page.locator('.live__line').count()).toBe(0);
     expect(problems).toEqual([]);
   }, 120_000);
+
+  it('SOLD OUT for your size from the queue (ONE QUEUE §3.6, MK S): its quieter passage from the band\'s horizon with sold-out.mp3, then SOLD OUT, SIZE 52 · 1 PIECE, YOUR PLACE 1, the one sentence, LEAVE THE LINE under it (no vault in Q1)', async () => {
+    const r = await release({ opensAt: new Date(Date.now() + 3_000), sizes: [{ label: '52', stock: 1 }, { label: '54', stock: 2 }], pace: { batch: 1, minutes: 60 }, turnSeconds: 120 });
+    const buyer = await account(5);
+    await srv.ctx.services.live.enter(buyer.id, r.id, { sizeId: r.sizes[0]!.id }, buyer.actor);
+    await expect.poll(async () => (await statusOf(r.id, buyer.id))?.status, POLL).toBe('TURN');
+    const me = await account(1);
+    await srv.ctx.services.live.enter(me.id, r.id, { sizeId: r.sizes[0]!.id }, me.actor);
+    const { page, problems } = await phone(me.token);
+    await page.goto(`${srv.origin}/verify/releases/${r.id}`);
+    await textOf(page.locator('.live__queue .live__place-figure'), '1');
+    await textOf(page.locator('.live__queue > .live__choice'), 'SIZE 52 · 1 PIECE');
+    // A tap in the queue makes the sounds' context.
+    await page.locator('.live__queue-note').click();
+    await sleep(500);
+    // The buyer pays the size's one piece: the release goes on in size 54; this collector's size is sold out.
+    await secureAs(r.id, buyer, true);
+    await visible(page.locator('.live__sold'));
+    await expect.poll(() => page.locator('.view--live').evaluate((el) => el.classList.contains('live--tx-sold')), POLL).toBe(true);
+    expect(await page.locator('.live-tx-shz').count()).toBe(1);
+    await expect.poll(async () => (await live(page)).sounds.includes('sold-out'), POLL).toBe(true);
+    await textOf(page.locator('.live__sold > h1'), LIVE.edge.soldOut.title);
+    await textOf(page.locator('.live__sold > .live__choice'), 'SIZE 52 · 1 PIECE');
+    await textOf(page.locator('.live__sold > .live__ahead'), /^YOUR PLACE 1\s*Your place in size 52: 1$/);
+    await textOf(page.locator('.live__sold > .live__note'), LIVE.edge.soldOut.text);
+    expect(await page.locator('.live__vault-slot').count()).toBe(0);
+    // The passage lands (3.65 s on the phone): nothing of it stays.
+    await expect.poll(() => page.locator('.view--live').evaluate((el) => el.classList.contains('live--tx-sold')), { timeout: 8_000, interval: 200 }).toBe(false);
+    expect(await page.locator('.live-tx-shz').count()).toBe(0);
+    expect(await page.getByRole('button', { name: LIVE.edge.soldOut.leave }).isEnabled()).toBe(true);
+    await keepsVault(page, null, [LIVE.edge.soldOut.leave]);
+    expect(problems).toEqual([]);
+  }, 90_000);
 
   it('a paced release (ONE QUEUE §1.3, D9): behind the next ones, its stream ended at T0 and its state read instead; next, the stream again', async () => {
     const r = await release({ opensAt: new Date(Date.now() + 3_000), sizes: [{ label: '52', stock: 4 }], pace: { batch: 1, minutes: 60 }, turnSeconds: 120 });
@@ -811,7 +848,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
       { name: 'removed', token: removed.token, dropId: r.id, title: LIVE.edge.removed.title, text: LIVE.edge.removed.text, action: null, controls: ['THE RELEASES'] , end: true },
       { name: 'missed', token: missed.token, dropId: r.id, title: LIVE.edge.missed.title, text: LIVE.edge.missed.text, action: null, controls: ['THE RELEASES'] , end: true },
       { name: 'expired', token: expired.token, dropId: r.id, title: LIVE.edge.expired.title, text: LIVE.edge.expired.text, action: null, controls: ['THE RELEASES'] , end: true },
-      { name: 'sold-out', token: late.token, dropId: r.id, title: LIVE.edge.soldOut.title('52'), text: LIVE.edge.soldOut.text, action: null, controls: [LIVE.edge.soldOut.leave] },
+      { name: 'sold-out', token: late.token, dropId: r.id, title: LIVE.edge.soldOut.title, text: LIVE.edge.soldOut.text, action: null, controls: [LIVE.edge.soldOut.leave] },
       { name: 'ended', token: waiting.token, dropId: ended.id, title: LIVE.edge.ended.CLOSED.title, text: LIVE.edge.ended.CLOSED.text, action: null, controls: ['THE RELEASES'] , end: true },
       { name: 'past', token: nobody.token, dropId: ended.id, title: 'MONOLITHE', action: null, controls: ['THE RELEASES'] },
     ];
@@ -828,6 +865,19 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
       if (!end) expect(await page.locator('.live__edge .btn:visible').count(), c.name).toBe(1);
       else expect(await page.getByRole('link', { name: 'THE RELEASES', exact: true }).count(), c.name).toBe(1);
       if (c.name === 'past') await textOf(page.locator('.live__past-status'), RELEASES.over);
+      if (c.name === 'sold-out') {
+        // ONE QUEUE (MK S, lot Q1 §3.6): the variant over SOLD OUT, SIZE 52 · 1 PIECE, YOUR PLACE in one small line (its
+        // size said to a reader); no vault given (Q1): no slot, LEAVE THE LINE straight under the sentence.
+        await textOf(page.locator('.live__sold > .live__overline'), /^MONOLITHE/);
+        await textOf(page.locator('.live__sold > .live__choice'), 'SIZE 52 · 1 PIECE');
+        await textOf(page.locator('.live__sold > .live__ahead'), /^YOUR PLACE \d+\s*Your place in size 52: \d+$/);
+        expect(await page.locator('.live__vault-slot').count()).toBe(0);
+        expect(await page.locator('.live__sold > .live__note').evaluate((n) => {
+          let next = n.nextElementSibling;
+          while (next && (next as HTMLElement).hidden) next = next.nextElementSibling;
+          return next?.classList.contains('live__leave-line') ?? false;
+        })).toBe(true);
+      }
       await page.screenshot({ path: join(OUT_DIR, `verify-live-edge-${c.name}.png`), fullPage: true });
       if (c.name === 'signed-out') {
         // CREATE ACCOUNT in the vault's look (plan CUSTOMER INTELLIGENCE §3.1 P.4.1): the names, COUNTRY and the optional

@@ -2194,7 +2194,7 @@ export const PHONE_STATES: readonly UiState[] = [
   { id: 'live-far-stress', title: 'A LIVE RELEASE more than 9 days away, in USD', refs: ['same pieces'], variant: 'stress', as: you, path: release('far'), ready: '.view--live', stress: true },
 
   // ── The one queue (ONE QUEUE, lot Q1, step Q1.3; ANSWERS C3): every entry waiting for its turn ──
-  { id: 'live-queue', title: 'The one queue: LIVE NOW, YOUR PLACE in size 17, ESTIMATED … LEFT, the pieces left, the one note, LEAVE THE LINE', refs: ['W5', 'W6'], variant: 'queue', as: 'queued', path: release('queue'), ready: '.view--live .live__queue[data-state="waiting"]' },
+  { id: 'live-queue', title: 'The one queue (MK Q1): LIVE NOW, MONOLITHE IN BLUE, SIZE 17 · 1 PIECE, the room, YOUR PLACE 4 in size 17, ESTIMATED … LEFT, 176 OF 300 LEFT · 3 IN SIZE 17, the one note, FROM ORBES, LEAVE THE LINE', refs: ['W5', 'W6', 'MK Q1'], variant: 'queue', as: 'queueWait', path: release('queueWait'), ready: '.view--live .live__queue[data-state="waiting"]' },
   { id: 'live-queue-paused', title: 'The one queue paused by ORBES (PAUSE PACE): YOUR PLACE, THE QUEUE IS PAUSED over its frozen time', refs: ['W5'], variant: 'queue', as: 'queuePaused', path: release('queuePaused'), ready: '.view--live .live__queue[data-state="paused"]' },
   {
     id: 'live-queue-error',
@@ -2227,6 +2227,16 @@ export const PHONE_STATES: readonly UiState[] = [
     routes: (page) => page.route('**/api/v1/media/**', (r) => r.abort('failed')),
     ready: '.view--live.live--look:not(.live--photo) .live__queue[data-state="waiting"]',
   },
+  // The one waiting screen in every state (lot Q1, step Q1.8; MK #queue Q2, Q3, Q5–Q8, #after-wait), each on its own
+  // release of the stage (nocturne-demo.ts seedQueue): during the hold, the release's PAUSE, past the close, one size,
+  // a late comer with its place, every piece of its size held; the after-room's waiting screen.
+  { id: 'live-queue-hold', title: 'The one queue during the hold (MK Q2): YOUR PLACE 39, its time counting the hold, 300 OF 300 LEFT, nothing said of the hold', refs: ['MK Q2'], variant: 'queue', as: 'queueHold', path: release('queueHold'), ready: '.view--live .live__queue[data-state="waiting"]' },
+  { id: 'live-queue-release-paused', title: 'The one queue, the release paused by ORBES (MK Q3): PAUSED and its line above the frozen time, FROM ORBES alone above', refs: ['MK Q3'], variant: 'queue', as: 'queueReleasePaused', path: release('queueReleasePaused'), ready: '.view--live .live__queue[data-state="paused"]' },
+  { id: 'live-queue-close', title: 'The one queue past the close (MK Q5): YOUR PLACE 42, ESTIMATED … H … MIN LEFT, 9 IN SIZE 17', refs: ['MK Q5'], variant: 'queue', as: 'queueClose', path: release('queueClose'), ready: '.view--live .live__queue[data-state="waiting"]' },
+  { id: 'live-queue-one', title: 'The one queue of a release in one size (MK Q6): ONE SIZE · 1 PIECE, YOUR PLACE 1, ESTIMATED LESS THAN A MINUTE LEFT, … IN ONE SIZE', refs: ['MK Q6'], variant: 'queue', as: 'queueOne', path: release('queueOne'), ready: '.view--live .live__queue[data-state="waiting"]' },
+  { id: 'live-queue-late', title: 'The one queue of a late comer with its place (MK Q7b): YOUR PLACE 40 behind those waiting at the opening, during the hold', refs: ['MK Q7b'], variant: 'queue', as: 'queueLate', path: release('queueHold'), ready: '.view--live .live__queue[data-state="waiting"]' },
+  { id: 'live-queue-held', title: 'The one queue, every piece of its size held, none paid (MK Q8): still the waiting screen, 176 OF 300 LEFT · 0 IN SIZE 17', refs: ['MK Q8'], variant: 'queue', as: 'queueHeld', path: release('queueHeld'), ready: '.view--live .live__queue[data-state="waiting"]' },
+  { id: 'live-after-wait', title: 'The after-room’s waiting screen (MK A): THE AFTER-ROOM, YOUR PLACE 2 in size 17, 3 OF 12 LEFT · 0 IN SIZE 17, no time', refs: ['MK A', 'D29'], variant: 'queue', as: 'afterWait', path: release('afterWait', '/after-room'), ready: '.view--live .live__queue[data-state="waiting"]' },
   {
     id: 'live-queue-loading',
     title: 'The queue just entered after the opening, its figures being read: READING YOUR PLACE',
@@ -2998,6 +3008,11 @@ const DESK_SHARDS: Record<string, readonly UiState[]> = {
     ...desk(1440, 'problem-network', 'problem-rate-limited', 'problem-server', 'result-registration-closed'),
     deskOwn('sign-in', { title: 'The sign-in page over a photograph: SIGN IN, CREATE ACCOUNT', variant: 'full', path: at('/verify/sign-in'), ready: '.view--signin form' }),
     ...desk(1440, 'sign-up', 'pieces-sign-in-refused', 'result-forgotten-password'),
+    // The one waiting screen's other states on a computer (lot Q1, step Q1.8; MK #queue desk, #after-wait desk), on the
+    // queue's stage (desk-10 holds its limit of states).
+    ...desk(1440, 'live-queue-hold', 'live-queue-release-paused', 'live-queue-close', 'live-queue-one', 'live-queue-late', 'live-queue-held', 'live-after-wait'),
+    // The re-recorded ones that had none: LEAVE THE LINE refused, the longest place, READING YOUR PLACE (its write, last).
+    ...desk(1440, 'live-queue-error', 'live-queue-stress', 'live-queue-loading'),
   ],
   'desk-2': [
     // ── PIECES, an order's page, a piece, the certificate ──

@@ -516,7 +516,9 @@ describe('the one queue, the turn and the piece held', () => {
     ]);
     expect(LIVE.reservedIn('ONE SIZE', 1)).toBe('Your piece is reserved in ONE SIZE. ORBES Client Services will contact you to settle payment. Add your delivery address in YOUR ORDERS.');
     expect(LIVE.securedInPieces('ONE SIZE', 2)).toBe('You secured 2 pieces in ONE SIZE. Their steps follow in YOUR ORDERS.');
-    expect([LIVE.edge.soldOut.title('ONE SIZE'), LIVE.edge.soldOut.title('52')]).toEqual(['SOLD OUT', 'SOLD OUT IN SIZE 52']);
+    // ONE QUEUE (ANSWERS C6, r12): SOLD OUT only, in every size; the size is said on the line under it.
+    expect(LIVE.edge.soldOut.title).toBe('SOLD OUT');
+    expect([LIVE.choice('52', 1), LIVE.choice('ONE SIZE', 1), LIVE.choice('52', 2), LIVE.placeLine(4)]).toEqual(['SIZE 52 · 1 PIECE', 'ONE SIZE · 1 PIECE', 'SIZE 52 · 2 PIECES', 'YOUR PLACE 4']);
     expect([LIVE.size('ONE SIZE'), LIVE.size('52'), LIVE.there.said('ONE SIZE'), LIVE.soldOutSize('ONE SIZE')]).toEqual(['ONE SIZE', 'SIZE 52', 'YOU’LL BE THERE · ONE SIZE', 'One size, no piece left']);
   });
 

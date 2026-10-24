@@ -113,16 +113,25 @@ const PLAN: Partial<Record<Kind, readonly [Place, string][]>> = {
     ['bl', ':scope > .live__title'],
     ['bl', ':scope > .live__error'],
     ['bl', ':scope > .live__leave-line'],
+    // The phone's lines under the name (its choice, the people in the room): the corners say both here (shared CSS).
+    ['bl', ':scope > .live__choice'],
+    ['bl', ':scope > .live__entry-count'],
     ['br', ':scope > .live__queue-paused'],
     ['br', ':scope > .live__queue-paused-line'],
     ['br', ':scope > .live__queue-time'],
   ],
+  // SOLD OUT for your size (MK S, desk): SOLD OUT over the centre, its sentence, THE VAULT's place when there is one
+  // (lot Q3), LEAVE THE LINE, the host's message between hairlines; the name and its choice bottom left; YOUR PLACE with
+  // its large figure bottom right.
   soldOut: [
     ['head', ':scope > .live__title'],
     ['body', ':scope > .live__note'],
+    ['body', ':scope > .live__vault-slot'],
     ['body', ':scope > .live__error'],
     ['body', ':scope > .live__leave-line'],
     ['bl', ':scope > .live__overline'],
+    ['bl', ':scope > .live__choice'],
+    ['bl', ':scope > .live__entry-count'],
     ['br', ':scope > .live__ahead'],
   ],
   turn: [
@@ -441,16 +450,15 @@ export class DesktopRoom {
   }
 
   /**
-   * Sold out in its size: where the phone says `YOUR PLACE 7` in one line, the corner draws it as the line does, its
-   * label over its figure (read as the line's figure is, `Your place 7`); the phone's line steps aside meanwhile. When it
-   * says the held pieces instead (or nothing), that line as it is.
+   * Sold out in its size (MK S, desk): where the phone says `YOUR PLACE 7` in one small line, the corner draws it as the
+   * queue does, its label over its large figure (read as the phone's line is, `Your place in size 52: 7`); the phone's
+   * line steps aside meanwhile. Without a place read, nothing.
    */
   private soldOutPlace(): void {
     const line = this.screen?.querySelector<HTMLElement>(':scope > .d-room__br > .live__ahead');
     if (!line) return;
-    const text = (line.textContent ?? '').trim();
-    const prefix = `${LIVE.yourPlace} `;
-    const figure = text.startsWith(prefix) ? text.slice(prefix.length) : '';
+    const figure = line.dataset.place ?? '';
+    const said = line.dataset.said ?? '';
     line.classList.toggle('d-room__redrawn', figure !== '');
     if (figure === '') {
       this.placeLabel?.remove();
@@ -458,10 +466,14 @@ export class DesktopRoom {
       return;
     }
     this.placeLabel ??= h('p', { class: 'live__overline live__place-label', attrs: { 'aria-hidden': 'true' }, text: LIVE.yourPlace });
-    this.placeFigure ??= h('p', { class: 'live__place' }, h('span', { class: 'visually-hidden', text: `${LIVE.yourPlaceSaid} ` }), h('span', { class: 'live__place-figure' }));
+    this.placeFigure ??= h('p', { class: 'live__place' }, h('span', { class: 'visually-hidden' }), h('span', { class: 'live__place-figure', attrs: { 'aria-hidden': 'true' } }));
     if (this.placeLabel.nextElementSibling !== this.placeFigure || this.placeFigure.nextElementSibling !== line) line.before(this.placeLabel, this.placeFigure);
-    const said = this.placeFigure.lastElementChild as HTMLElement;
-    if (said.textContent !== figure) said.textContent = figure;
+    const reader = this.placeFigure.firstElementChild as HTMLElement;
+    // Said before the figure, a space after it (the figure is the eye's: hidden from readers).
+    const text = `${said || `${LIVE.yourPlaceSaid} ${figure}`} `;
+    if (reader.textContent !== text) reader.textContent = text;
+    const shown = this.placeFigure.lastElementChild as HTMLElement;
+    if (shown.textContent !== figure) shown.textContent = figure;
   }
 
   private place(el: HTMLElement, into: HTMLElement): void {
@@ -479,8 +491,9 @@ export class DesktopRoom {
    */
   private rename(el: HTMLElement, facts: RoomFacts, own = false): void {
     const text = (el.textContent ?? '').trim();
-    // An after-room's edge page says THE AFTER-ROOM over its title, not the model: kept.
-    if (!own && text !== facts.name) return;
+    // An after-room's edge page says THE AFTER-ROOM over its title, not the model: kept. The screens of the entry name
+    // the release with its variant already (ONE QUEUE, D34): set apart here as every corner's name is.
+    if (!own && text !== facts.name && text !== facts.heading) return;
     this.renamed.set(el, [...el.childNodes]);
     el.replaceChildren(...titleParts(own ? text : facts.heading, facts.model));
     el.classList.add('d-room__name');

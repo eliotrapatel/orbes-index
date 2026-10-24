@@ -1428,6 +1428,39 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   margin-top: 40px;
 }
 
+/* The phone's lines under the name on the screens of the entry (MK Q1, S; D21, D34): its choice in ivory, then the
+   people in the room; YOUR PLACE (or READING YOUR PLACE) 30 px under them. */
+.live__choice {
+  margin-top: 10px;
+  color: var(--ink);
+}
+
+.live__entry-count {
+  justify-content: center;
+  margin-top: 10px;
+  color: var(--ink-soft);
+}
+
+.live__queue > .live__entry-count + .live__place-label,
+.live__queue > .live__entry-count ~ .live__queue-reading {
+  margin-top: 30px;
+}
+
+/* SOLD OUT for your size (MK S): the choice 12 px under SOLD OUT, YOUR PLACE in one small ivory line, the sentence; the
+   vault's place under it when there is one (lot Q3), LEAVE THE LINE 34 px under what precedes it. */
+.live__sold > .live__choice {
+  margin-top: 12px;
+}
+
+.live__sold > .live__ahead {
+  margin-top: 18px;
+}
+
+.live__sold > .live__vault-slot {
+  width: 100%;
+  margin-top: 34px;
+}
+
 .live__place {
   margin-top: 6px;
   font-size: var(--fs-place);
@@ -1576,8 +1609,9 @@ body[data-screen="live"]:has(.view--live.live--look:not(.d-room)) .corners {
   background: var(--live-photo) 50% -16.41cqw / 128.21% auto no-repeat;
 }
 
-/* A set's pieces side by side (the Cinema room's ground on a computer), each the house's crop. */
-.live__photo--tiles {
+/* A set's pieces side by side (the Cinema room's ground on a computer), each the house's crop: a grid in place of the
+   shown photograph's block (its row the frame's height, so each piece is drawn). */
+.view--live.live--photo:not(.d-room) > .live__photo--tiles {
   display: grid;
   grid-auto-columns: minmax(0, 1fr);
   grid-auto-flow: column;
@@ -3036,4 +3070,112 @@ body[data-screen="board"] .corners {
 @keyframes live-fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+
+/* ── SOLD OUT's passage, the quieter one (ONE QUEUE §3.6; ANSWERS C16, ROUND 5 "passages kept"; MK S, gen.mjs TX_END
+   sold 3650 / 3800 ms): from the queue's horizon where the band was, its light withdraws, its point goes, the line dims
+   with the ground over the room, then the screen comes up: the photograph with a smaller, slower rise, SOLD OUT, its
+   sentence, the rest; sold-out.mp3 at 0.25 s (views/live.ts). Ported from the mockup's timings and easings. Under
+   reduced motion, the page at once (none of this runs). ── */
+.live-tx-shz {
+  display: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .live--tx-sold .live-tx-shz {
+    display: block;
+    position: fixed;
+    top: var(--live-tx-top);
+    left: var(--live-tx-left);
+    z-index: 0;
+    width: var(--live-tx-width);
+    height: 1px;
+    pointer-events: none;
+    animation: live-tx-out 1.1s cubic-bezier(0.4, 0, 0.2, 1) 1.7s both;
+  }
+
+  .live-tx-shz > span {
+    position: absolute;
+    display: block;
+  }
+
+  .live-tx-shz__sky {
+    left: 0;
+    right: 0;
+    bottom: 0.5px;
+    height: 150px;
+    transform-origin: 50% 100%;
+    background: radial-gradient(ellipse 40% 100% at 50% 100%, rgba(246, 242, 234, 0.13) 0, rgba(246, 242, 234, 0.05) 45%, rgba(246, 242, 234, 0) 100%);
+    -webkit-mask-image: linear-gradient(180deg, transparent 0%, rgba(255, 255, 255, 0.4) 45%, #fff 100%);
+    mask-image: linear-gradient(180deg, transparent 0%, rgba(255, 255, 255, 0.4) 45%, #fff 100%);
+    animation: live-tx-withdraw 1.5s cubic-bezier(0.4, 0, 0.2, 1) 0.25s both;
+  }
+
+  .live-tx-shz__line {
+    left: 0;
+    right: 0;
+    top: -0.5px;
+    height: 1px;
+    background: linear-gradient(90deg, rgba(246, 242, 234, 0) 0, rgba(246, 242, 234, 0.3) 26%, rgba(246, 242, 234, 0.62) 50%, rgba(246, 242, 234, 0.3) 74%, rgba(246, 242, 234, 0) 100%);
+    animation: live-tx-dim 1.4s cubic-bezier(0.4, 0, 0.2, 1) 0.75s both;
+  }
+
+  .live-tx-shz__pt {
+    left: 50%;
+    top: 0;
+    width: 13px;
+    height: 13px;
+    margin: -6.5px 0 0 -6.5px;
+    border-radius: 50%;
+    opacity: 0.74;
+    background: radial-gradient(closest-side, #fffdf8 0, rgba(255, 253, 248, 0.92) 24%, rgba(246, 242, 234, 0.32) 58%, rgba(246, 242, 234, 0) 100%);
+    animation: live-tx-out 1.1s ease 0.3s both;
+  }
+
+  /* The screen's own parts, each from its "from" into its own final value (nothing held once it lands). */
+  .live--tx-sold .live__screen {
+    animation: none;
+  }
+
+  .view--live.live--tx-sold:not(.d-room) > .live__photo {
+    animation: live-tx-photo 1.9s cubic-bezier(0.16, 1, 0.3, 1) 1.7s backwards;
+  }
+
+  .view--live.live--tx-sold:not(.d-room) > .live__head {
+    animation: live-fade-in 1.2s ease 1.7s backwards;
+  }
+
+  .view--live.live--tx-sold:not(.d-room) > .live__foot,
+  .view--live.live--tx-sold:not(.d-room) .live__sold > :not(.live__overline, .live__title, .live__note) {
+    animation: live-fade-in 0.8s ease 2.85s backwards;
+  }
+
+  .view--live.live--tx-sold:not(.d-room) .live__sold > :is(.live__overline, .live__title) {
+    animation: live-tx-resolve 1s cubic-bezier(0.22, 1, 0.36, 1) 2.25s backwards;
+  }
+
+  .view--live.live--tx-sold:not(.d-room) .live__sold > .live__note {
+    animation: live-tx-resolve 0.9s cubic-bezier(0.22, 1, 0.36, 1) 2.55s backwards;
+  }
+
+}
+
+@keyframes live-tx-resolve {
+  from { opacity: 0; filter: blur(3px); transform: translateY(6px); }
+}
+
+@keyframes live-tx-photo {
+  from { opacity: 0; transform: translateY(10px) scale(1.012); }
+}
+
+@keyframes live-tx-withdraw {
+  to { opacity: 0; transform: scale(0.35, 0.5); }
+}
+
+@keyframes live-tx-dim {
+  to { opacity: 0.16; }
+}
+
+@keyframes live-tx-out {
+  to { opacity: 0; }
 }
