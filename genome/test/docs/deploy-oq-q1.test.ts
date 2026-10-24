@@ -19,7 +19,7 @@
  *    (5 250 pieces) and B (25 pieces) of 5,000, their pace, hold and behaviour, which PACE check each proves, the host's
  *    conditions (the day before, a line at the start and at the end, steps of 1,000, one test at a time, the four STOP
  *    thresholds, the sizes after); run A public forever as the owner's choice; one command per shell block, links that
- *    resolve, and the runbook linked from DEPLOYMENT.
+ *    resolve, and the runbook linked from DEPLOYMENT and COMPLIANCE.
  *
  * <SHA_Q1> and <TAG_Q1> stay placeholders until the main session hands the commit over.
  */
@@ -396,6 +396,9 @@ describe('the runbook of lot ONE QUEUE (docs/launch/DEPLOY-OQ-Q1.md)', () => {
       expect(views, w).toContain(w);
     }
     expect(checks).toContain('`Shorten the hold`, `New length (minutes)` `8`, `Shorten the hold` | « Hold shortened. »');
+    // Too late to shorten: the server's refusal, and END THE HOLD NOW instead.
+    expect(source('server/services/live.ts')).toContain("validationError('A shortened hold ends later than now: END THE HOLD NOW starts the turns at once.')");
+    expect(checks).toContain('Fais-le avant T0 + 8 minutes : si le dialogue le refuse (« A shortened hold ends later than now: END THE HOLD NOW starts the turns at once. »), passe directement à END THE HOLD NOW |');
     expect(checks).toContain('`End the hold now`, `End the hold` | « Hold ended. »');
     // The turn, HOLD, SECURED and PAY; a held piece is not SOLD OUT (D26); NEXT BATCH NOW refused in the server's words.
     expect(checks).toContain(`${LIVE.yourTurn}, ${LIVE.pressHold}`);
@@ -504,10 +507,13 @@ describe('the runbook of lot ONE QUEUE (docs/launch/DEPLOY-OQ-Q1.md)', () => {
     expect(open).toContain('« 5 250 PIECES »');
     expect(open).toContain('« 25 PIECES »');
     expect(open).toContain('(la note au juriste, point 29)');
+    // The console's REMOVE says the next-batch rule (D5): no longer a question for the owner.
+    expect(open).not.toContain('REMOVE');
+    expect(source('web/admin/views/live.ts')).toContain('the piece it holds returns and is offered at the next batch. Its screen says it was removed.');
     expect(readDoc('docs/legal/counsel-note.fr.md')).toContain('29. **Le rythme d\'une LIVE RELEASE** (CGU article 13 ; R165, R106 ; lot M1, version 2026-10-21 ; lot Q1, ONE QUEUE, version 2026-10-24)');
   });
 
-  it('gives one command per shell block, in French, links only to what exists, and is linked from DEPLOYMENT', () => {
+  it('gives one command per shell block, in French, links only to what exists, and is linked from DEPLOYMENT and COMPLIANCE', () => {
     expect(commands.length).toBeGreaterThan(35);
     for (const c of commands) expect(c.split('\n'), c).toHaveLength(1);
     expect(commands).toContain("bash -c 'set -Eeuo pipefail; source scripts/lib.sh; db_applied_migrations'");
@@ -527,6 +533,9 @@ describe('the runbook of lot ONE QUEUE (docs/launch/DEPLOY-OQ-Q1.md)', () => {
       if (anchor) expect(anchors(readDoc(file.slice(REPO.length + 1))).has(decodeURIComponent(anchor)), target).toBe(true);
     }
     expect(readDoc('docs/DEPLOYMENT.md')).toContain('[DEPLOY-OQ-Q1](launch/DEPLOY-OQ-Q1.md)');
+    const compliance = section(readDoc('docs/COMPLIANCE.md'), '## 13.');
+    expect(compliance).toContain('(launch/DEPLOY-OQ-Q1.md)');
+    expect(compliance).toContain('(la note au juriste, point 29)');
     // Never the words the brand keeps out of what it says, nor a piece's name, material or price in public.
     expect(runbook).not.toMatch(/\bstolen\b/i);
     expect(runbook).not.toMatch(/\batelier\b/i);
