@@ -3221,8 +3221,9 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
     ...desk(1440, 'after-room-join', 'after-room-sold-out', 'after-room-closed', 'after-room-ended', 'after-room-over'),
     // The queue of a paced release (lot M1, W2, W5): the place and its estimate, then paused.
     ...desk(1440, 'live-queue', 'live-queue-paused'),
-    // ONE QUEUE's Horizon band (lot Q1, step Q1.7): a small release, its LAST PIECES.
-    ...desk(1440, 'live-queue-small', 'live-queue-last'),
+    // ONE QUEUE's Horizon band (lot Q1, step Q1.7): a small release, its LAST PIECES; then the queue whose photograph
+    // cannot be loaded (the same media refusal as on the phone).
+    ...desk(1440, 'live-queue-small', 'live-queue-last', 'live-queue-nophoto'),
   ],
   // ── A result's other answers, a piece's incidents, THE PRIVATE SALON in sizes, the draw's other states, the failures ──
   // The full demo's writes (a transfer code, the ceremony, a piece received, REQUESTED, a draw entered) last, in this order;

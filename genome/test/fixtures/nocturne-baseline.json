@@ -29950,6 +29950,36 @@
         "IP GEOLOCATION BY DB-IP"
       ]
     },
+    "desk-live-queue-nophoto": {
+      "title": "The one queue whose photograph cannot be loaded: the vault’s ground alone, the screen moved up, no corner marks (a computer, 1440 × 900)",
+      "refs": [
+        "desktop",
+        "phone: live-queue-nophoto"
+      ],
+      "variant": "queue",
+      "as": "queued",
+      "values": [
+        "ORBES",
+        "5240 IN THE ROOM",
+        "LIVE NOW",
+        "YOUR PLACE",
+        "203",
+        "0 OF 9 LEFT · 0 IN SIZE 17",
+        "When your turn comes, the seal appears here: press and hold it to secure your piece. Keep this page open; if you close it, your place is kept when you come back.",
+        "MONOLITHE IN BLUE",
+        "SIZE 17 · 1 PIECE",
+        "LEAVE THE LINE",
+        "ESTIMATED 16 MINUTES LEFT",
+        "HOW RELEASES WORK",
+        "THE RELEASES",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND OFF",
+        "IP GEOLOCATION BY DB-IP"
+      ]
+    },
     "desk-result-unknown": {
       "title": "UNKNOWN ORBES CODE: a code ORBES signed for no piece (a computer, 1440 × 900)",
       "refs": [

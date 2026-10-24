@@ -487,9 +487,14 @@ export class DesktopRoom {
   }
 }
 
-/** An image of the window's ground (decorative: the corners name the release). */
+/**
+ * An image of the window's ground (decorative: the corners name the release). One that cannot be loaded gives way to the
+ * window's ground (no broken-image mark), as the phone's photograph does.
+ */
 function groundImage(src?: string): HTMLImageElement {
-  return h('img', { class: 'd-room__img', attrs: { alt: '', decoding: 'async', fetchpriority: 'high', src: src ?? null } });
+  const img = h('img', { class: 'd-room__img', attrs: { alt: '', decoding: 'async', fetchpriority: 'high', src: src ?? null } });
+  img.addEventListener('error', () => img.classList.add('is-failed'), { once: true });
+  return img;
 }
 
 /**
