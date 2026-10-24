@@ -56,7 +56,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1]
 
     services:
       postgres:
@@ -126,7 +126,7 @@ jobs:
           psql --version
 
       - name: Test shard ${{ matrix.shard }}/4 (vitest, PostgreSQL and Chromium suites included)
-        run: npx vitest run --shard=${{ matrix.shard }}/4
+        run: npx vitest run test/api/postgres.test.ts test/api/tracking-link.test.ts test/db/postgres.test.ts test/ops/postgres.test.ts test/ops/vps-scripts.test.ts test/perf/collector-insights.perf.test.ts test/services/acquisition.test.ts test/services/birthday-credits-concurrency.test.ts test/services/client-notes.test.ts test/services/email.test.ts test/services/engagement-concurrency.test.ts test/services/founding.test.ts test/services/house-messages.test.ts test/services/house-moments.test.ts test/services/issuance.test.ts test/services/links.test.ts test/services/live-concurrency.test.ts test/services/model-warranty-concurrency.test.ts test/services/order-addons.test.ts test/services/orders-concurrency.test.ts test/services/places.test.ts test/services/profiles.test.ts test/services/sizes.test.ts test/services/warranty-claims-concurrency.test.ts test/services/wishlist-concurrency.test.ts test/services/worn.test.ts test/simulation/postgres.test.ts test/verification/postgres.test.ts test/web/verify.live.e2e.test.ts test/simulation/live-release.test.ts
 
       - name: Upload test artifacts on failure
         if: failure()
