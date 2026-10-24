@@ -541,8 +541,9 @@ for (const backend of BACKENDS) {
           expect([a.leading, b.leading]).toEqual([true, false]);
           await a.stop();
           await until(async () => b.leading);
-          // b ticks: the first turn runs out and the next gets it.
-          f.clock.set(at(11 * SECOND));
+          // b ticks: the first turn runs out (MISSED at 10 s) and, ONE QUEUE, its piece waits for the next batch, which
+          // gives the next person the turn (as the PGlite restart case above, read at 3 minutes).
+          f.clock.set(at(3 * 60 * SECOND));
           await until(async () => (await entriesOf(handle.db, r.id)).map((x) => x.status).join() === 'MISSED,TURN');
         } finally {
           await a.stop();
