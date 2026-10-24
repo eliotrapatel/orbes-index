@@ -25,6 +25,8 @@
  *  - the report's checks find a fault planted; the sweeper resumes a confirmation due after a restart;
  *  - a LIVE RELEASE with a pace (W2, W4): the bots wait in the queue, reading their state as its `pollMs` says, and
  *    are admitted batch by batch; END TEST: the report 6/6 with its PACE check;
+ *  - a bot's add-on (lot Q2, step Q2.4, D24): one of the rows its hold offers now, none when none is: a product of one
+ *    unit sold once, never refused;
  *  - a set's LIVE RELEASE (macro scope K44 T1, M3.16): the bots say I'LL BE THERE and enter with a size per piece, pay
  *    one set each (a set sale, an order per piece); END TEST cancels every order of every set, the report 5/5 reading
  *    each entry in each of its sizes; ended before T0, their interest is withdrawn with its sizes per piece.
@@ -1012,6 +1014,36 @@ describe('a LIVE RELEASE end to end', () => {
     expect(ended.report?.checks.at(-1)?.line).toMatch(
       /^5 batches gave 10 turns at 2 every 1 min, the first on the pace at \d\d:\d\d:\d\d PARIS, each on its time and in the line’s order; none gave more than the pace, and none left anyone waiting while a piece of their size was free\.$/,
     );
+    expect([ended.report?.passed, ended.report?.total]).toEqual([6, 6]);
+  });
+
+  it('Lot Q2, step Q2.4 (D24): a bot chooses among the rows its hold offers now, as a collector: a product add-on of 1 unit, two bots taking the add-on share, one unit sold and no ADD-ONS refusal', async () => {
+    const db = w.h.ctx.db;
+    const extender = await w.h.ctx.services.addons.create({ name: 'CHAIN EXTENDER', skuCode: 'ADD-TEST-EXT', prices: { EUR: 3000 }, weightG: 15 }, w.f.admin);
+    expect(extender.kind).toBe('PRODUCT');
+    const france = (await db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
+    await w.h.ctx.services.stock.adjust({ skuId: extender.sku.id, locationId: france, delta: 1, note: 'Counted.' }, w.f.admin);
+    const t0 = new Date(w.h.clock.now().getTime() + 2 * MINUTE);
+    // One turn a minute: the second bot's hold comes after the first has taken the only unit.
+    const release = await createLiveRelease(w.f, { opensAt: t0, sizes: [{ label: '52', stock: 2 }], pace: { batch: 1, minutes: 1 }, addonIds: [extender.id], accessModels: [w.f.modelId] });
+    const run = await w.tests.start(
+      release.id,
+      press(release.id, { titane: 2 }, { behaviour: { payPct: 100, releasePct: 0, missPct: 0, leavePct: 0, holdSeconds: 1.5 }, choices: { size: '52', quantity: 1, addOnsPct: 100 } }),
+      w.f.admin,
+    );
+    await drive(w, 0, 500, release.id);
+    w.h.clock.set(t0);
+    await drive(w, 3 * MINUTE, 500, release.id);
+    expect(await statusOf(w, run.id)).toBe('DONE');
+    expect((await db.selectFrom('live_entries').select('status').where('drop_id', '=', release.id).execute()).map((e) => e.status)).toEqual(['CONFIRMED', 'CONFIRMED']);
+    const orders = await db.selectFrom('orders').select('id').where('drop_id', '=', release.id).execute();
+    expect(orders).toHaveLength(2);
+    const units = await db.selectFrom('order_addon_items').select(['addon_id', 'added_by_type']).where('order_id', 'in', orders.map((o) => o.id)).execute();
+    expect(units.map((u) => [u.addon_id, u.added_by_type])).toEqual([[extender.id, 'PURCHASE']]);
+    expect((await stockLevel(db, extender.sku.id, france)).available).toBe(0);
+    // The second bot was offered no row and chose none: nothing refused.
+    expect((await w.tests.view(run.id)).errors.filter((e) => e.message.startsWith('ADD-ONS'))).toEqual([]);
+    const ended = await w.tests.end(run.id, testPhrase(release.id, true), w.f.admin);
     expect([ended.report?.passed, ended.report?.total]).toEqual([6, 6]);
   });
 

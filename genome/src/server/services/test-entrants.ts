@@ -491,7 +491,6 @@ interface ActiveRun {
   id: string;
   drop: DropRow;
   mode: DropMode;
-  addons: string[];
   bots: Bot[];
   /** Where the next tick starts reading the bots, so every one gets its turn under load. */
   cursor: number;
@@ -1101,9 +1100,7 @@ export class TestEntrantService {
   /** A press's bots into the runner (a new test, or ADD MORE into the one under way), its peaks followed. */
   private async begin(runId: string, d: DropRow, bots: Bot[]): Promise<void> {
     if (this.run?.id !== runId) {
-      // Lot Q2, step Q2.4 (D24): a bot's add-on is one of its release's pick (drop_addons), as anyone's.
-      const addons = d.mode === 'LIVE' ? (await this.db.selectFrom('drop_addons').select('addon_id').where('drop_id', '=', d.id).orderBy('position').execute()).map((a) => a.addon_id) : [];
-      this.run = { id: runId, drop: d, mode: d.mode, addons, bots: [], cursor: 0, peaksSavedAt: this.now().getTime() };
+      this.run = { id: runId, drop: d, mode: d.mode, bots: [], cursor: 0, peaksSavedAt: this.now().getTime() };
       startRunPeaks(runId);
     }
     this.run.bots.push(...bots);
@@ -1299,8 +1296,10 @@ export class TestEntrantService {
           bot.at = this.now().getTime() + (bot.now ? 0 : POLL_MS);
           return;
         }
-        // D24: one row of its release's pick, never the engraving's words.
-        if (plan.addOns && run.addons.length) await this.call(run, bot, 'PUT', `${live}/addons`, 'ADD-ONS', { items: [{ addonId: pick(run.addons) }] });
+        // Lot Q2, step Q2.4 (D24): as a collector, one of the rows its hold offers now (its release's pick that can still
+        // be taken: a product while one per piece is available), none when none is offered; never the engraving's words.
+        const offer = ((s.json?.entry as { addonOffer?: { addonId: string; maxUnits: number }[] } | undefined)?.addonOffer ?? []).filter((a) => a.maxUnits > 0);
+        if (plan.addOns && offer.length) await this.call(run, bot, 'PUT', `${live}/addons`, 'ADD-ONS', { items: [{ addonId: pick(offer).addonId }] });
         bot.step = 'DECIDE';
         // A collector pays a few seconds after securing; a bot driven by hand at once.
         bot.at = this.now().getTime() + (bot.now ? 0 : between(2000, 10_000));
@@ -1415,7 +1414,7 @@ export class TestEntrantService {
     if (bot.step === 'DONE' || bot.step === 'ARRIVE') bot.step = 'WATCH';
     bot.at = 0;
     const acting = (b: Bot) => b.step !== 'DONE';
-    const active: ActiveRun = this.run?.id === run.id ? this.run : { id: run.id, drop: d, mode: d.mode, addons: [], bots: [], cursor: 0, peaksSavedAt: 0 };
+    const active: ActiveRun = this.run?.id === run.id ? this.run : { id: run.id, drop: d, mode: d.mode, bots: [], cursor: 0, peaksSavedAt: 0 };
     try {
       for (let steps = 0; steps < 8 && acting(bot); steps++) {
         const wait = bot.at - this.now().getTime();

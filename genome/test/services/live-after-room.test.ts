@@ -323,8 +323,11 @@ describe('the after-room', () => {
 
     it('turns follow the guests’ places, with the release’s windows; the same hold, add-ons and PAY; its orders at its price, the release’s location and surprise; closed at its own sell-out', async () => {
       // The release's per-tier windows (every tier: 20 s to hold the seal) are the after-room's.
-      const r = await release({ windows: [0, 1, 2, 3].map((tier) => ({ tier, turnSeconds: 20 })) });
+      // The release picks another add-on than its after-room's: the after-room's hold is offered its own pick only.
+      const card = await liveAddon(f, { name: 'NOTE CARD', priceMinor: 1_000 });
+      const r = await release({ windows: [0, 1, 2, 3].map((tier) => ({ tier, turnSeconds: 20 })), addonIds: [card] });
       const child = r.afterRoom!.id;
+      expect((await t.db.selectFrom('drop_addons').select('addon_id').where('drop_id', '=', r.id).execute()).map((x) => x.addon_id)).toEqual([card]);
       await t.db.updateTable('drops').set({ surprise_enabled: true, surprise_text: 'A silk pouch, hand-stitched.' }).where('id', '=', r.id).execute();
       const { guests, soldOutAt } = await sellOut(r);
       const opensAt = afterRoomTimes(soldOutAt, 10, 15).opensAt;
@@ -361,8 +364,9 @@ describe('the after-room', () => {
       await rejects(f.live.secure(first!.id, child, token, first!.actor), 'LIVE_HOLD_TOO_SHORT', 409);
       f.clock.advance(600);
       await f.live.secure(first!.id, child, token, first!.actor);
-      // Its own pick offered with the hold (lot Q2, step Q2.4), as the release's.
+      // Its own pick offered with the hold (lot Q2, step Q2.4), as the release's; never the release's own pick.
       expect((await f.live.entry(first!.id, child))!.addonOffer.map((a) => a.addonId)).toEqual([box]);
+      await rejects(f.live.setAddons(first!.id, child, [{ addonId: card }], first!.actor), 'ADDON_NOT_OFFERED', 409);
       const withAddon = await f.live.setAddons(first!.id, child, [{ addonId: box }], first!.actor);
       expect(withAddon).toMatchObject({ status: 'SECURED', priceMinor: 90_000, totalMinor: 95_000, currency: 'EUR' });
       await f.live.confirm(first!.id, child, first!.actor);
