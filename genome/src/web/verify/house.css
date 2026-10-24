@@ -1191,9 +1191,6 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   font-variant-numeric: tabular-nums;
 }
 
-.live__room.is-opening .live__count-block {
-  display: none;
-}
 
 .live__presence {
   display: flex;
@@ -1227,6 +1224,166 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
 
 .live__drawing .live__subtitle {
   margin-top: 0;
+}
+
+/* ── The room's door (ONE QUEUE §3.4; ANSWERS C9, r20d; D35; MK #room-2, #room-3, gen.mjs R20D_CSS, DR_CSS): one
+   hairline horizon running past the column and dissolving at both ends, the point breathing at its seam, the light
+   pooled above it; the countdown, UNTIL THE OPENING and the people in the room stand in that light. The vault door, its
+   seal lock and its plate are gone from the room (the boutique board's and the second door's stay). The draw (D36,
+   MK #room-draw): DRAWING THE PLACES and its sentence take the countdown's place on the line, a soft light (at most
+   14 % ivory, every 6.4 s) travelling with the point. The room stays dark in light mode (D33). ── */
+.live-hzd {
+  --hzd-tail: 32px;
+  --hzd-pt: 15px;
+  --hzd-sky: 190px;
+  --hzd-breath-w: 280px;
+  --hzd-breath-h: 56px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 326px;
+  margin-top: 30px;
+}
+
+.live-hzd__say {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.live-hzd .live__count-block,
+.live-hzd .live__drawing {
+  margin-top: 0;
+}
+
+.live-hzd > .live__presence {
+  position: relative;
+  z-index: 1;
+}
+
+.live-hzd__horizon {
+  position: relative;
+  align-self: stretch;
+  height: 22px;
+  margin: 26px calc(-1 * var(--hzd-tail)) 0;
+  pointer-events: none;
+}
+
+.live-hzd__horizon > span {
+  position: absolute;
+  display: block;
+}
+
+.live-hzd__sky,
+.live-hzd__gap {
+  left: 0;
+  right: 0;
+  bottom: calc(100% - 0.5px);
+  height: var(--hzd-sky);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, rgba(255, 255, 255, 0.35) 40%, #fff 100%);
+  mask-image: linear-gradient(180deg, transparent 0%, rgba(255, 255, 255, 0.35) 40%, #fff 100%);
+}
+
+.live-hzd__sky {
+  background: radial-gradient(ellipse 46% 100% at 50% 100%, rgba(246, 242, 234, 0.2) 0, rgba(246, 242, 234, 0.08) 42%, rgba(246, 242, 234, 0.02) 72%, rgba(246, 242, 234, 0) 100%);
+}
+
+/* THE OPENING's light through the gap (its copy only: .live-tx-ghost--door). */
+.live-hzd__gap {
+  display: none !important;
+  opacity: 0;
+  transform-origin: 50% 100%;
+  background: radial-gradient(ellipse 30% 100% at 50% 100%, rgba(246, 242, 234, 0.2) 0, rgba(246, 242, 234, 0.08) 40%, rgba(246, 242, 234, 0.02) 72%, rgba(246, 242, 234, 0) 100%);
+}
+
+.live-hzd__line {
+  top: -0.5px;
+  height: 1px;
+}
+
+.live-hzd__line--l {
+  left: 0;
+  right: 50%;
+  background: linear-gradient(90deg, rgba(246, 242, 234, 0) 0, rgba(246, 242, 234, 0.3) 30%, rgba(246, 242, 234, 0.78) 100%);
+}
+
+.live-hzd__line--r {
+  left: 50%;
+  right: 0;
+  background: linear-gradient(270deg, rgba(246, 242, 234, 0) 0, rgba(246, 242, 234, 0.3) 30%, rgba(246, 242, 234, 0.78) 100%);
+}
+
+.live-hzd__reflect {
+  left: 20%;
+  right: 20%;
+  top: 0.5px;
+  height: 10px;
+  background: radial-gradient(ellipse 50% 100% at 50% 0, rgba(246, 242, 234, 0.09), rgba(246, 242, 234, 0));
+}
+
+.live-hzd__pt {
+  left: 50%;
+  top: 0;
+  width: var(--hzd-pt);
+  height: var(--hzd-pt);
+  margin: calc(var(--hzd-pt) / -2) 0 0 calc(var(--hzd-pt) / -2);
+  border-radius: 50%;
+  background: radial-gradient(closest-side, #fffdf8 0, rgba(255, 253, 248, 0.92) 24%, rgba(246, 242, 234, 0.32) 58%, rgba(246, 242, 234, 0) 100%);
+  animation: live-hz-breath 4.8s ease-in-out infinite;
+}
+
+/* THE OPENING's two points, one to each parted end (its copy only). */
+.live-hzd__pt--l,
+.live-hzd__pt--r {
+  display: none !important;
+}
+
+/* The draw's soft light on the line, travelling with the point: an ellipse of ivory, at most 14 % at its centre, on a
+   track as wide as the line whose ends fade into the vault where the line does (it never reaches past the horizon). */
+.live-hzd__track {
+  display: none !important;
+  left: 0;
+  right: 0;
+  top: calc(var(--hzd-breath-h) / -2 - 12px);
+  height: calc(var(--hzd-breath-h) + 24px);
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #fff 14%, #fff 86%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #fff 14%, #fff 86%, transparent 100%);
+}
+
+.live-hzd__breath {
+  position: absolute;
+  display: block;
+  left: 40%;
+  top: 50%;
+  width: var(--hzd-breath-w);
+  height: var(--hzd-breath-h);
+  margin: calc(var(--hzd-breath-h) / -2) 0 0 calc(var(--hzd-breath-w) / -2);
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(246, 242, 234, 0.14) 0, rgba(246, 242, 234, 0.07) 34%, rgba(246, 242, 234, 0.02) 68%, rgba(246, 242, 234, 0) 100%);
+  opacity: 0.65;
+}
+
+.live__room:is(.is-drawing, .is-drawn) .live-hzd__track {
+  display: block !important;
+}
+
+/* At rest (reduced motion, or a page come during the draw's still): the point where the mockup's still has it. */
+.live__room:is(.is-drawing, .is-drawn) .live-hzd__pt {
+  left: 40%;
+}
+
+/* The draw in place: the countdown kept in its place as it leaves, the words resolving on the line where it stood. */
+.live__room.is-drawing .live-hzd__say > .live__drawing {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
 }
 
 .live__prep {
@@ -1641,8 +1798,8 @@ body[data-screen="live"]:has(.view--live.live--look:not(.d-room)) .corners {
   margin-top: 212px;
 }
 
-/* SOLD OUT and the after-room's door open on their own margins (.live__edge, .live__after): their first line where the other screens have theirs (MK drops). */
-.view--live.live--photo:not(.d-room)[data-screen="soldOut"] > .live__stage {
+/* SOLD OUT, the room's sign-in and not-eligible variants (lot Q1 §3.11) and the after-room's door open on their own margins (.live__edge, .live__after): their first line where the other screens have theirs (MK drops). */
+.view--live.live--photo:not(.d-room):is([data-screen="soldOut"], [data-screen="signin"], [data-screen="notEligible"]) > .live__stage {
   margin-top: 156px;
 }
 
@@ -3178,4 +3335,259 @@ body[data-screen="board"] .corners {
 
 @keyframes live-tx-out {
   to { opacity: 0; }
+}
+
+/* ── The draw in place and THE OPENING (ONE QUEUE §3.4; ANSWERS C10, C16, 18:00; D36, D42; MK #room-draw PLAY THE DRAW,
+   Q1 PLAY THE OPENING; gen.mjs TX_CSS, TX_END draw 5000 / open 2800 ms, its easings). The draw is counted from the
+   countdown's 00:00 (--live-draw-t: how long after it the page drew it): the countdown and UNTIL THE OPENING resolve out
+   from 0.55 s, DRAWING THE PLACES from 0.85 s and its sentence from 1.05 s, LIVE NOW from 0.75 s; the point leaves the
+   centre at 0.55 s and travels from the left, eased, to 40 % at 3.55 s; past it, while the place is still being read,
+   it travels on slowly toward the right end (never still, never a jump), its soft light with it. THE OPENING then plays
+   over the queue from the draw as it stood (views/live.ts drawAsItIs: a copy of each part where it stood): the point
+   glides back to the centre from wherever it is, the line parts there, a point to each end, the light rises through the
+   gap, the words and the room's lines fade; the queue resolves under the same photograph, YOUR PLACE morphing in at
+   1.65 s. Under reduced motion none of this runs: the draw's still, then the queue at once. ── */
+.live-tx-open {
+  display: none;
+}
+
+.live-tx-ctx {
+  display: contents !important;
+}
+
+.live-tx-ghost {
+  position: fixed !important;
+  top: var(--live-tx-top);
+  left: var(--live-tx-left);
+  width: var(--live-tx-width);
+  max-width: none !important;
+  margin: 0 !important;
+}
+
+/* The room's lines that leave with the draw, on one line each as they stood (their box grows to their words). */
+.live-tx-ghost--was {
+  width: max-content;
+  white-space: nowrap;
+}
+
+/* The draw as THE OPENING found it: its point and its light where they had travelled, at mid-breath; the countdown's
+   place kept, its words on the line; the gap and the parted points ready. */
+.live-tx-ghost--door .live__count-block {
+  visibility: hidden;
+}
+
+.live-tx-ghost--door.is-overlay .live-hzd__say > .live__drawing {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+
+.live-tx-ghost--door .live-hzd__track,
+.live-tx-ghost--door .live-hzd__gap,
+.live-tx-ghost--door .live-hzd__pt--l,
+.live-tx-ghost--door .live-hzd__pt--r {
+  display: block !important;
+}
+
+.live-tx-ghost--door .live-hzd__pt,
+.live-tx-ghost--door .live-hzd__breath {
+  left: var(--live-tx-from, 40%);
+  animation: none;
+}
+
+.live-tx-ghost--door .live-hzd__pt {
+  opacity: 0.8;
+}
+
+.live-tx-ghost--door :is(.live-hzd__pt--l, .live-hzd__pt--r) {
+  left: 50%;
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* The draw, from 00:00. */
+  .live__room:is(.is-drawing, .is-drawn) .live-hzd__pt {
+    animation:
+      live-hz-breath 4.8s ease-in-out infinite,
+      live-draw-travel 3s cubic-bezier(0.45, 0, 0.25, 1) calc(0.55s - var(--live-draw-t, 0ms)) both,
+      live-draw-on 40s cubic-bezier(0.3, 0, 0.45, 1) calc(3.55s - var(--live-draw-t, 0ms)) forwards;
+  }
+
+  .live__room:is(.is-drawing, .is-drawn) .live-hzd__breath {
+    opacity: 0.3;
+    animation:
+      live-draw-breath 6.4s ease-in-out infinite,
+      live-tx-fin 1.4s ease calc(0.9s - var(--live-draw-t, 0ms)) backwards,
+      live-draw-travel-b 3s cubic-bezier(0.45, 0, 0.25, 1) calc(0.55s - var(--live-draw-t, 0ms)) both,
+      live-draw-on 40s cubic-bezier(0.3, 0, 0.45, 1) calc(3.55s - var(--live-draw-t, 0ms)) forwards;
+  }
+
+  .live__room.is-drawing .live-hzd__say > .live__count-block {
+    animation: live-tx-unresolve 0.6s cubic-bezier(0.22, 1, 0.36, 1) calc(0.55s - var(--live-draw-t, 0ms)) both;
+  }
+
+  .live__room.is-drawing .live__drawing > .live__subtitle {
+    animation: live-tx-resolve 0.9s cubic-bezier(0.22, 1, 0.36, 1) calc(0.85s - var(--live-draw-t, 0ms)) backwards;
+  }
+
+  .live__room.is-drawing .live__drawing > .live__note {
+    animation: live-tx-resolve 0.9s cubic-bezier(0.22, 1, 0.36, 1) calc(1.05s - var(--live-draw-t, 0ms)) backwards;
+  }
+
+  .live__room.is-drawing .live__phase {
+    animation: live-tx-resolve 0.9s cubic-bezier(0.22, 1, 0.36, 1) calc(0.75s - var(--live-draw-t, 0ms)) backwards;
+  }
+
+  /* What the room before the opening offered fades where it stands: nothing below or beside it moves. */
+  .live__room.is-drawing .live__gone {
+    animation: live-tx-gone 0.6s ease calc(0s - var(--live-draw-t, 0ms)) forwards;
+  }
+
+  /* THE OPENING, on a phone (2.8 s). */
+  .live--tx-open > .live-tx-open {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 3;
+    pointer-events: none;
+  }
+
+  .live--tx-open .live-tx-ghost--door {
+    animation: live-tx-out 0.8s ease 2s both;
+  }
+
+  .live--tx-open .live-tx-ghost--door .live-hzd__pt:not(.live-hzd__pt--l, .live-hzd__pt--r) {
+    animation: live-tx-home 0.4s cubic-bezier(0.45, 0, 0.2, 1) 0s both, live-tx-out 0.45s ease 0.4s both;
+  }
+
+  .live--tx-open .live-tx-ghost--door .live-hzd__breath {
+    animation: live-tx-home 0.4s cubic-bezier(0.45, 0, 0.2, 1) 0s both, live-tx-out 0.9s ease 0.25s both;
+  }
+
+  .live--tx-open .live-tx-ghost--door .live-hzd__line--l {
+    animation: live-tx-part-l 1.25s cubic-bezier(0.45, 0, 0.2, 1) 0.4s both;
+  }
+
+  .live--tx-open .live-tx-ghost--door .live-hzd__line--r {
+    animation: live-tx-part-r 1.25s cubic-bezier(0.45, 0, 0.2, 1) 0.4s both;
+  }
+
+  .live--tx-open .live-tx-ghost--door .live-hzd__pt--l {
+    animation: live-tx-pt-l 1.25s cubic-bezier(0.45, 0, 0.2, 1) 0.4s both;
+  }
+
+  .live--tx-open .live-tx-ghost--door .live-hzd__pt--r {
+    animation: live-tx-pt-r 1.25s cubic-bezier(0.45, 0, 0.2, 1) 0.4s both;
+  }
+
+  .live--tx-open .live-tx-ghost--door .live-hzd__gap {
+    animation: live-tx-gap 1.6s cubic-bezier(0.4, 0, 0.2, 1) 0.55s both;
+  }
+
+  .live--tx-open .live-tx-ghost--door > :not(.live-hzd__horizon) {
+    animation: live-tx-unresolve 0.75s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both;
+  }
+
+  .live--tx-open .live-tx-ghost--was {
+    animation: live-tx-out 0.7s ease 0.3s both;
+  }
+
+  .view--live.live--tx-open:not(.d-room) .live__queue > .live__title {
+    animation: live-tx-resolve 0.9s cubic-bezier(0.22, 1, 0.36, 1) 1.2s backwards;
+  }
+
+  .view--live.live--tx-open:not(.d-room) .live__queue > :is(.live__choice, .live__entry-count) {
+    animation: live-fade-in 0.8s ease 1.4s backwards;
+  }
+
+  .view--live.live--tx-open:not(.d-room) .live__queue > :is(.live__place-label, .live__place) {
+    animation: live-fade-in 0.35s ease 1.65s backwards;
+  }
+
+  .view--live.live--tx-open:not(.d-room) .live__queue > :is(.live__queue-reading, .live__queue-paused, .live__queue-paused-line, .live__queue-time, .live-hz, .live__queue-note, .live__error, .live__leave-line),
+  .view--live.live--tx-open:not(.d-room) > .live__foot {
+    animation: live-fade-in 0.8s ease 1.95s backwards;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live__room.is-drawing .live-hzd__say > .live__count-block,
+  .live__room.is-drawing .live__gone {
+    visibility: hidden;
+  }
+  .live-hzd__pt {
+    animation: none;
+    opacity: 0.74;
+  }
+}
+
+/* The point leaves the centre (fading there), comes back at the line's left, and travels to where the draw's still
+   has it (gen.mjs dr-travel; filter: opacity, so the breath's own opacity runs on). */
+@keyframes live-draw-travel {
+  0%, 10% { left: 50%; filter: opacity(1); }
+  16% { left: 50%; filter: opacity(0); }
+  16.1% { left: 6%; filter: opacity(0); }
+  24% { left: 6%; filter: opacity(1); }
+  100% { left: 40%; filter: opacity(1); }
+}
+
+@keyframes live-draw-travel-b {
+  0%, 24% { left: 6%; }
+  100% { left: 40%; }
+}
+
+/* While the place is still being read (N16): on, slowly, toward the line's right end. */
+@keyframes live-draw-on {
+  from { left: 40%; }
+  to { left: 94%; }
+}
+
+@keyframes live-draw-breath {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+@keyframes live-tx-fin {
+  from { filter: opacity(0); }
+}
+
+@keyframes live-tx-unresolve {
+  to { opacity: 0; filter: blur(3px); transform: translateY(-6px); }
+}
+
+@keyframes live-tx-gone {
+  to { opacity: 0; visibility: hidden; }
+}
+
+@keyframes live-tx-home {
+  from { left: var(--live-tx-from, 40%); }
+  to { left: 50%; }
+}
+
+@keyframes live-tx-part-l {
+  to { right: 66%; }
+}
+
+@keyframes live-tx-part-r {
+  to { left: 66%; }
+}
+
+@keyframes live-tx-pt-l {
+  from { left: 50%; opacity: 0.6; }
+  to { left: 34%; opacity: 1; }
+}
+
+@keyframes live-tx-pt-r {
+  from { left: 50%; opacity: 0.6; }
+  to { left: 66%; opacity: 1; }
+}
+
+@keyframes live-tx-gap {
+  from { opacity: 0; transform: scale(0.6, 0.35); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes live-tx-glide {
+  from { transform: translate(var(--live-tx-dx, 0), var(--live-tx-dy, 0)); }
 }

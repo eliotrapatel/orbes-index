@@ -599,6 +599,7 @@ describe('a LIVE RELEASE\'s designed sounds (lot Q1 §3.10, live-sound.ts)', () 
         ['opening', 0.4],
         ['welcome', 3.0],
       ],
+      welcome: [['welcome', 0]],
       place: [['place', 0]],
       turn: [['turn', 0.3]],
       hold: [['hold', 0]],
@@ -835,7 +836,7 @@ describe('a LIVE RELEASE\'s designed sounds (lot Q1 §3.10, live-sound.ts)', () 
     expect(contexts[0]!.played).toHaveLength(1);
   });
 
-  it('says the welcome once per entry, 3 s into THE OPENING, never in the after-room: remembered on the device, the last twenty', async () => {
+  it('says the welcome once per entry, 3 s into THE OPENING (a late comer\'s at its first reading), never in the after-room: remembered on the device, the last twenty', async () => {
     const { env, contexts, timers, advance, storage } = liveEnvironment();
     const sound = new LiveSound(switchOn(env.storage), env);
     sound.prime();
@@ -856,6 +857,14 @@ describe('a LIVE RELEASE\'s designed sounds (lot Q1 §3.10, live-sound.ts)', () 
     sound.cue('open', {});
     expect(names().filter((n) => n === 'welcome')).toHaveLength(1);
     expect(welcomed('e-2', storage)).toBe(false);
+    // A late comer's first reading of its place (no opening passage): the voice at once, once; never in the after-room.
+    const before = ctx.played.length;
+    sound.cue('welcome', { entryId: 'e-4' });
+    sound.cue('welcome', { entryId: 'e-4' });
+    sound.cue('welcome', { entryId: 'e-5', afterRoom: true });
+    expect(names().slice(before)).toEqual(['welcome']);
+    expect(welcomed('e-4', storage)).toBe(true);
+    expect(welcomed('e-5', storage)).toBe(false);
     // Not heard (the sound off): not remembered.
     const quiet = new MemoryStorage();
     setSoundPref(false, quiet);
@@ -920,7 +929,12 @@ describe('a LIVE RELEASE\'s designed sounds (lot Q1 §3.10, live-sound.ts)', () 
 
   it('replaces the room\'s two synthesized sounds: the last ten seconds\' tick and SECURED\'s chord; a screen change stops the sounds; the scan keeps its chord (N12)', () => {
     const view = readFileSync(LIVE_VIEW, 'utf8');
-    expect(view).toContain("if (tick !== null && tick !== this.lastTick && this.synced) this.deps.sound.cue('tick');");
+    // Lot Q1 §3.4: each change of the last ten seconds' figures (its 00:00 only after the countdown was seen counting).
+    expect(view).toContain("if (tick !== null && tick !== this.lastTick && this.synced && (tick > 0 || counted)) this.deps.sound.cue('tick');");
+    // The draw 0.85 s after 00:00, THE OPENING's sounds from its start, a late comer's welcome at its first reading.
+    expect(view).toContain("this.deps.sound.cue('draw', { base: this.drawAt });");
+    expect(view).toContain("this.deps.sound.cue('open', { entryId: this.entry?.id ?? null, afterRoom: !!this.afterRoomOf() });");
+    expect(view).toContain("this.deps.sound.cue('welcome', { entryId: e.id, afterRoom: !!this.afterRoomOf() });");
     expect(view).toContain("this.deps.sound.cue('secured');");
     expect(view).toContain('if (previous !== kind) this.deps.sound.stopAll();');
     expect(view).not.toMatch(/sound\.(tick|play)\(/);

@@ -269,16 +269,21 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await keepsVault(page, null, ['ADD TO CALENDAR', 'THE RELEASES', 'SOUND ON']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-announced.png'), fullPage: true });
 
-    // B2: the room, open. The door closed, its lock the seal (the specimen: thirteen orbits, eight glyphs).
+    // B2: the room, open. The door one hairline horizon (ONE QUEUE §3.4, D35): the countdown, UNTIL THE OPENING and the
+    // people in the room above it in its light, the point breathing at its seam; no vault door, no lock, no plate.
     await page.goto(`${srv.origin}/verify/releases/${r.id}`);
     await textOf(page.locator('.live__room > .live__overline'), 'THE ROOM IS OPEN');
     // The model, its price and the quantity line.
     await textOf(page.locator('.live__room > h1'), 'MONOLITHE');
     await textOf(page.locator('.live__room > .live__offer'), '€ 5 050 · 25 PIECES');
-    await visible(page.locator('.live-door .live-door__seal'));
-    expect(await page.locator('.live-door__seal .live-seal__ring').count()).toBe(13);
-    expect(await page.locator('.live-door__seal g[data-layer="genome"]').count()).toBe(8);
-    expect(await page.locator('.live-door').getAttribute('aria-hidden')).toBe('true');
+    const door = page.locator('.live__room > .live-hzd');
+    await visible(door);
+    expect(await page.locator('.live-door, .live__room .live-seal__ring, .live__room .bracket, .live__room .live__plate').count()).toBe(0);
+    expect(await door.locator('.live-hzd__horizon').getAttribute('aria-hidden')).toBe('true');
+    expect(await door.locator('.live-hzd__pt:not(.live-hzd__pt--l, .live-hzd__pt--r)').evaluate((el) => getComputedStyle(el).animationName)).toBe('live-hz-breath');
+    // In that order, over the line: the countdown, UNTIL THE OPENING, the people in the room.
+    const tops = await door.evaluate((el) => ['.live__count', '.live__until', '.live__presence', '.live-hzd__horizon'].map((sel) => el.querySelector(sel)!.getBoundingClientRect().top));
+    expect([...tops].sort((a, b) => a - b)).toEqual(tops);
     await textOf(page.locator('.live__presence'), '1 IN THE ROOM');
     // The latest host message, under the header.
     await textOf(page.locator('.live__notice .live__message'), 'FROM ORBES Welcome to the vault.');
@@ -316,24 +321,33 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await expect.poll(async () => (await statusOf(r.id, me.id))?.size_id, POLL).toBe(s52!.id);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-ready.png'), fullPage: true });
 
-    // The last minute: the lock's orbits turned, turning back; the last ten seconds tick.
-    await expect.poll(() => page.locator('.live-door__seal .live-seal__ring').first().evaluate((g) => (g as SVGGElement).style.transform), POLL).toMatch(/^rotate\(-?\d/);
-    const turned = await page.locator('.live-door__seal .live-seal__ring').evaluateAll((gs) => gs.map((g) => (g as SVGGElement).style.transform));
-    expect(new Set(turned).size).toBeGreaterThan(1);
-    // T0: the lock aligned, the door open on the piece under its light, the places drawn.
-    await expect.poll(() => page.locator('.live-door').getAttribute('class'), { timeout: 45_000, interval: 50 }).toMatch(/is-aligned/);
-    expect(await page.locator('.live-door__seal .live-seal__ring').evaluateAll((gs) => gs.every((g) => /rotate\((-)?0(\.00)?deg\)/.test((g as SVGGElement).style.transform)))).toBe(true);
-    await expect.poll(() => page.locator('.live-door').getAttribute('class'), POLL).toMatch(/is-open/);
+    // The countdown's figures morph (D30): only a changed digit moves, the figure read whole.
+    await expect.poll(() => page.locator('.live__count .live-mf').count(), { timeout: 45_000, interval: 50 }).toBeGreaterThan(0);
+    // 00:00 on ORBES's second: the draw in place (D36), the countdown morphed to 00:00; DRAWING THE PLACES and its sentence
+    // on the line where it stood, LIVE NOW over them, the room count kept (OP-7); what only the room before the opening
+    // offers fades where it stands, out of reach; the point leaves the centre and travels from the left.
+    await expect.poll(() => page.locator('.live__room').getAttribute('class'), { timeout: 45_000, interval: 50 }).toMatch(/is-drawing/);
+    const drawSeen = Date.now();
+    expect(drawSeen).toBeGreaterThanOrEqual(t0.getTime() - 1_000);
+    await textOf(page.locator('.live__count'), '00:00');
     await textOf(page.locator('.live__room > .live__overline'), 'LIVE NOW');
     await visible(page.getByText(LIVE.drawing));
-    expect(await page.locator('.live-door .live__sweep').evaluate((el) => getComputedStyle(el).animationName)).toBe('live-sweep');
-    expect(Date.now()).toBeGreaterThanOrEqual(t0.getTime() - 1_000);
+    await visible(page.locator('.live-hzd > .live__presence'));
+    expect(await page.locator('.live__room .live__prep').getAttribute('inert')).toBe('');
+    await expect.poll(() => page.locator('.live__room .live__prep').isVisible(), POLL).toBe(false);
+    await expect.poll(() => page.locator('.live__room .live__count-block').evaluate((el) => getComputedStyle(el).opacity), POLL).toBe('0');
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-open.png') });
-    // Lot Q1 §3.10: room-tick.mp3 at each of the last ten seconds' figures, the eleven files loaded from the room's taps,
-    // and no synthesized voice.
+    // Lot Q1 §3.10: room-tick.mp3 at each of the last ten seconds' figures (00:09 … 00:00), the eleven files loaded from the
+    // room's taps, and no synthesized voice; draw.mp3 0.85 s after 00:00.
     expect((await live(page)).sounds.filter((n) => n === 'room-tick')).toHaveLength(10);
     expect((await live(page)).tones).toEqual([]);
     expect(await soundFiles(page)).toBe(11);
+    await expect.poll(async () => (await live(page)).sounds.filter((n) => n === 'draw').length, POLL).toBe(1);
+    // THE OPENING (D42, N16) never before the draw has landed (+3.6 s), whenever the place is read; then the queue
+    // resolves in place, opening.mp3 and the welcome voice once (D46).
+    await expect.poll(() => page.evaluate(() => document.querySelector('.view--live')?.classList.contains('live--tx-open') || !!document.querySelector('.live__queue')), { timeout: 75_000, interval: 50 }).toBe(true);
+    expect(Date.now() - t0.getTime()).toBeGreaterThanOrEqual(3_400);
+    await expect.poll(async () => (await live(page)).sounds.filter((n) => n === 'opening' || n === 'welcome'), { timeout: 10_000, interval: 100 }).toEqual(['opening', 'welcome']);
 
     // B3: the one queue (ONE QUEUE). The rival has the turn in size 52: the collector is first in its size, its time left
     // said, the pieces left; never a held piece nor anyone ahead. At the line's own frame (T0, before the batch) its size's
@@ -941,7 +955,8 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     }
     // A tap on the room's title, nothing that acts: the gesture alone.
     await back.page.locator('.live__room > h1').click();
-    for (const p of [quiet, back]) await expect.poll(() => p.page.locator('.live-door').getAttribute('class'), { timeout: 45_000, interval: 100 }).toMatch(/is-open/);
+    // 00:00: the draw in place (its tick the tenth, as the countdown morphs to 00:00).
+    for (const p of [quiet, back]) await expect.poll(() => p.page.locator('.live__room').getAttribute('class'), { timeout: 45_000, interval: 100 }).toMatch(/is-drawing/);
     expect((await live(back.page)).sounds.filter((n) => n === 'room-tick')).toHaveLength(10);
     expect((await live(back.page)).tones).toEqual([]);
     // Untouched: no context, no file fetched, nothing heard.
@@ -951,6 +966,80 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     for (const p of [quiet, back]) {
       expect(p.problems).toEqual([]);
       await p.context.close();
+    }
+  }, 120_000);
+
+  it('the chain room → draw → THE OPENING (ONE QUEUE §3.4, N16): a place read at +1 s waits for the draw to land (+3.6 s); one read at +8 s keeps the draw, its point still travelling, until then', async () => {
+    const t0 = new Date(Date.now() + 20_000);
+    // A hold of ten minutes after the opening: both wait in the one queue (no turn), each reading its place.
+    const r = await release({ opensAt: t0, minTier: 1, sizes: [{ label: '50', stock: 4 }], holdMinutes: 10 });
+    // Each phone follows the room by reading its state (no stream); every reading from just before T0 is held until the
+    // moment given, so its first reading with its place comes then.
+    const phones: { w: Watched; at: number; placeAt: number | null; openAt: number | null }[] = [];
+    for (const at of [1_000, 8_000]) {
+      const me = await account(1);
+      await srv.ctx.services.live.enter(me.id, r.id, { sizeId: r.sizes[0]!.id }, me.actor);
+      const w = await phone(me.token, { noStream: true });
+      const one = { w, at, placeAt: null as number | null, openAt: null as number | null };
+      await w.page.route(
+        (u) => u.pathname === `/api/v1/live/${r.id}/state`,
+        async (route) => {
+          const hold = t0.getTime() + at - Date.now();
+          if (Date.now() >= t0.getTime() - 500 && hold > 0) await sleep(hold);
+          const response = await route.fetch();
+          const body = (await response.json()) as { entry?: { queue?: unknown } | null };
+          if (body.entry?.queue && one.placeAt === null) one.placeAt = Date.now();
+          await route.fulfill({ response, json: body });
+        },
+      );
+      await w.page.goto(`${srv.origin}/verify/releases/${r.id}`);
+      // Entered (its READY CHECK's connection reads RECONNECTING without a stream: YOU'RE READY waits for it).
+      await visible(w.page.locator('.live__ready-line'));
+      phones.push(one);
+    }
+    const opened = (page: Page) => page.evaluate(() => document.querySelector('.view--live')?.classList.contains('live--tx-open') === true || document.querySelector('.view--live')?.getAttribute('data-screen') !== 'room');
+    const pointAt = (page: Page) =>
+      page.evaluate(() => {
+        const line = document.querySelector('.live-hzd__horizon')?.getBoundingClientRect();
+        const pt = document.querySelector('.live-hzd__pt')?.getBoundingClientRect();
+        return line && pt ? (pt.left + pt.width / 2 - line.left) / line.width : null;
+      });
+    // Watch both until each opens, from the draw on.
+    await expect.poll(() => phones[0]!.w.page.locator('.live__room').getAttribute('class'), { timeout: 40_000, interval: 50 }).toMatch(/is-drawing/);
+    let sampled: number[] = [];
+    while (phones.some((p) => p.openAt === null) && Date.now() < t0.getTime() + 25_000) {
+      for (const p of phones) if (p.openAt === null && (await opened(p.w.page))) p.openAt = Date.now();
+      // Between the draw's landing and +8 s, the late one's point is still travelling (never fixed at 40 %).
+      const late = phones[1]!;
+      const since = Date.now() - t0.getTime();
+      if (late.openAt === null && since > 5_000 && since < 7_500) {
+        const x = await pointAt(late.w.page);
+        if (x !== null) sampled.push(x);
+      }
+      await sleep(50);
+    }
+    const [early, late] = phones as [(typeof phones)[0], (typeof phones)[0]];
+    for (const p of phones) expect(p.openAt, `${p.at}: ${await p.w.page.evaluate(() => document.querySelector('.view--live')?.getAttribute('data-screen'))} ${p.placeAt} ${p.w.problems.join(' | ')}`).not.toBeNull();
+    // The place read at about +1 s: THE OPENING at the draw's landing, not before.
+    expect(early.placeAt! - t0.getTime()).toBeLessThan(3_400);
+    expect(early.openAt! - t0.getTime()).toBeGreaterThanOrEqual(3_500);
+    expect(early.openAt! - t0.getTime()).toBeLessThan(4_600);
+    // The place read at +8 s: the draw until then, its point moving on past 40 % toward the right end, never jumping.
+    expect(late.placeAt! - t0.getTime()).toBeGreaterThanOrEqual(7_900);
+    expect(late.openAt!).toBeGreaterThanOrEqual(late.placeAt! - 50);
+    expect(late.openAt! - late.placeAt!).toBeLessThan(1_000);
+    expect(sampled.length).toBeGreaterThan(5);
+    expect(sampled[0]!).toBeGreaterThan(0.4);
+    expect(sampled.at(-1)!).toBeGreaterThan(sampled[0]!);
+    expect(Math.max(...sampled)).toBeLessThan(0.95);
+    for (let i = 1; i < sampled.length; i++) expect(sampled[i]! - sampled[i - 1]!).toBeLessThan(0.02);
+    sampled = [];
+    // THE OPENING's copy of the draw leaves; the queue as it is, the welcome voice nowhere twice.
+    for (const p of phones) {
+      await visible(p.w.page.locator('.live__queue .live__place-figure'));
+      await expect.poll(() => p.w.page.locator('.live-tx-open').count(), POLL).toBe(0);
+      expect(p.w.problems).toEqual([]);
+      await p.w.context.close();
     }
   }, 120_000);
 

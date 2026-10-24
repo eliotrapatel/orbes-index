@@ -37,6 +37,8 @@ import {
   measureClock,
   nextChange,
   revealCalendar,
+  drawnScreen,
+  DRAW_MS,
   liveScreen,
   liveSheetModel,
   livePastModel,
@@ -470,19 +472,60 @@ describe('the room', () => {
     expect(SEAL_RINGS).toBe(CODE01_RINGS.length);
   });
 
-  it('ticks each of the last ten seconds once, never before nor at T0', () => {
-    expect(tickSecond(10_000)).toBe(10);
-    expect(tickSecond(9_400)).toBe(10);
+  it('ticks at each change of the last ten seconds\' figures, as the countdown morphs to it: 00:09 … 00:00 (N4, MK SFX_AT draw)', () => {
     expect(tickSecond(9_000)).toBe(9);
+    expect(tickSecond(8_400)).toBe(9);
+    expect(tickSecond(8_000)).toBe(8);
     expect(tickSecond(1)).toBe(1);
-    expect(tickSecond(10_001)).toBeNull();
-    expect(tickSecond(0)).toBeNull();
-    const seconds = new Set<number>();
-    for (let ms = 12_000; ms > -1_000; ms -= 250) {
+    // 00:00 from T0, a second long; then nothing.
+    expect(tickSecond(0)).toBe(0);
+    expect(tickSecond(-999)).toBe(0);
+    expect(tickSecond(-1_000)).toBeNull();
+    expect(tickSecond(9_001)).toBeNull();
+    // Each figure shown as the countdown shows it.
+    for (const ms of [9_000, 4_500, 1, 0, -500]) expect(clockText(ms)).toBe(`00:0${tickSecond(ms)}`);
+    const seconds: number[] = [];
+    for (let ms = 12_000; ms > -3_000; ms -= 250) {
       const s = tickSecond(ms);
-      if (s !== null) seconds.add(s);
+      if (s !== null && s !== seconds.at(-1)) seconds.push(s);
     }
-    expect([...seconds]).toEqual([10, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
+    // Production's ten (N4), the mockup's last three (00:02, 00:01, 00:00) among them.
+    expect(seconds).toEqual([9, 8, 7, 6, 5, 4, 3, 2, 1, 0]);
+  });
+
+  it('chains the room, the draw and THE OPENING on a clock: the later of the draw\'s landing and the first reading with a place (N16)', () => {
+    expect(DRAW_MS).toEqual({ leave: 550, words: 850, travel: 3000, land: 3600 });
+    // The mockup's passage read from 00:00 (gen.mjs TX_END draw 5000, its 00:00 at 1.4 s; dr-travel 3.0 s from 1.95 s).
+    expect(DRAW_MS.land).toBe(5000 - 1400);
+    expect(DRAW_MS.leave).toBe(1950 - 1400);
+    expect(DRAW_MS.words).toBe(2250 - 1400);
+    const at = 100_000;
+    const chain = (now: number, next: Parameters<typeof drawnScreen>[0]['next'], placed: boolean, reduced = false) => drawnScreen({ next, drawAt: at, opened: true, now: at + now, placed, reduced });
+    // A place read at +1 s waits for the draw to land (+3.6 s), then THE OPENING into the queue.
+    expect(chain(0, 'room', false)).toBe('room');
+    expect(chain(1_000, 'queue', false)).toBe('room');
+    expect(chain(1_000, 'queue', true)).toBe('room');
+    expect(chain(3_599, 'queue', true)).toBe('room');
+    expect(chain(3_600, 'queue', true)).toBe('queue');
+    // A place read only at +8 s: the draw stays until then (READING YOUR PLACE never shows), then THE OPENING at once.
+    for (const t of [3_600, 5_000, 7_999]) expect(chain(t, 'queue', false)).toBe('room');
+    expect(chain(8_000, 'queue', true)).toBe('queue');
+    // An entry whose first reading is another screen leaves the draw at the same moment for it.
+    for (const next of ['turn', 'join', 'soldOut'] as const) {
+      expect(chain(2_000, next, false)).toBe('room');
+      expect(chain(3_600, next, false)).toBe(next);
+    }
+    // Reduced motion: no passage, the screen at once on the first reading.
+    expect(chain(500, 'queue', false, true)).toBe('room');
+    expect(chain(500, 'queue', true, true)).toBe('queue');
+    expect(chain(500, 'turn', false, true)).toBe('turn');
+    // Before 00:00, or another screen (the release ended, the entry left): as the release says.
+    expect(drawnScreen({ next: 'queue', drawAt: null, opened: false, now: at, placed: false, reduced: false })).toBe('queue');
+    expect(drawnScreen({ next: 'left', drawAt: null, opened: false, now: at, placed: false, reduced: false })).toBe('left');
+    // 00:00 reached on the server's clock, its first reading come before the room's pulse: the room begins its draw.
+    for (const next of ['queue', 'turn', 'join'] as const) expect(drawnScreen({ next, drawAt: null, opened: true, now: at, placed: true, reduced: false })).toBe('room');
+    expect(drawnScreen({ next: 'past', drawAt: null, opened: true, now: at, placed: true, reduced: false })).toBe('past');
+    for (const next of ['past', 'left', 'over', 'signin'] as const) expect(chain(100, next, false)).toBe(next);
   });
 });
 

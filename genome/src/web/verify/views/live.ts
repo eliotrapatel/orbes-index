@@ -17,12 +17,15 @@
  *               opens the sign-in; outside the rule, the rule and why (C28) · ADD TO CALENDAR · its description · how the
  *               places are drawn · HOW RELEASES WORK (plan NEXT-NINE, FT-01: the last line of each of NOCTURNE's pages)
  *   room        THE ROOM IS OPEN · the model, its price and the quantity line (SEE THE MODEL, as announced, until T0) ·
- *               the closed vault door, its lock the seal ·
- *               the countdown on ORBES time · N IN THE ROOM · READY CHECK · YOUR SIZE (the size of I'LL BE THERE
- *               preselected) · ENTER THE ROOM, then YOU'RE READY.
- *               The last minute the seal's orbits turn back into alignment, the last ten seconds tick (room-tick.mp3,
- *               lot Q1 §3.10, the SOUND preference); at T0, on the server's second, the lock aligns, the door opens
- *               and the piece appears under a light sweep: DRAWING THE PLACES
+ *               the door, one hairline horizon (ONE QUEUE §3.4, D35): the countdown on ORBES time (its figures
+ *               morphing), UNTIL THE OPENING and N IN THE ROOM in the light pooled above it, the point breathing at its
+ *               seam · READY CHECK on hairlines · YOUR SIZE (the size of I'LL BE THERE preselected) · ENTER THE ROOM,
+ *               then YOU'RE READY. The last ten seconds' figures tick as they morph (room-tick.mp3, the SOUND
+ *               preference). At 00:00, on the server's second, the draw in place (D36): DRAWING THE PLACES and its
+ *               sentence take the countdown's place, LIVE NOW the overline's, the point travels from the left
+ *               along the line, draw.mp3; then THE OPENING (D42) at the later of the draw's landing and the entry's first
+ *               reading with its place: the line parts, its light rises, the queue resolves under the same
+ *               photograph, YOUR PLACE morphing in, opening.mp3 and the welcome voice once per entry (D46)
  *   join        after T0, an account not in the line: the piece, its size, ENTER THE LINE (behind those in it)
  *   queue       ONE QUEUE (lot Q1, ANSWERS C3): after T0 every entry waiting for its turn (the after-room's too, headed
  *               THE AFTER-ROOM, with no time): LIVE NOW, YOUR PLACE (its place in its size), PAUSED or THE QUEUE IS
@@ -103,7 +106,6 @@ import {
   livePastModel,
   liveHeading,
   liveStoryModel,
-  lockAngle,
   pastDay,
   pickedLabels,
   pictureOf,
@@ -118,6 +120,8 @@ import {
   setSizesLine,
   sizeChoices,
   tickSecond,
+  drawnScreen,
+  phaseAt,
   windowLeft,
   zonedTime,
   type ClockSample,
@@ -128,7 +132,7 @@ import {
   type LiveViewer,
 } from '../live-model.js';
 import { horizonBand, morph } from '../live-horizon.js';
-import { sealSvg, turnRings } from '../live-seal.js';
+import { sealSvg } from '../live-seal.js';
 import { entrySizes, participationModel, RELEASES_PATH, zonedDate, type SetCardModel } from '../releases-model.js';
 import { lookbookSheetPath } from '../lookbook-model.js';
 import type { SessionStore } from '../session.js';
@@ -161,10 +165,11 @@ export const LIVE_STREAM_RETRY_MS = 15_000;
 export const LIVE_QUEUE_SPREAD_MS = 60_000;
 /** The page's own pulse: the countdowns, the lock, the ticks. */
 const PULSE_MS = 250;
-/** The opening at T0 (the lock aligning, the door, the sweep) plays this long before the line takes its place. */
-export const OPENING_MS = 2800;
-/** The lock clicks into alignment, then the door opens. */
-const DOOR_DELAY_MS = 420;
+/**
+ * THE OPENING, from the draw into the queue (ONE QUEUE §3.4; MK Q1 PLAY THE OPENING, gen.mjs TX_END open): its length
+ * on a phone and on a computer, and when YOUR PLACE morphs in.
+ */
+const OPENING = Object.freeze({ phone: { ms: 2800, place: 1650 }, desk: { ms: 3000, place: 1750 } });
 /** RELEASE MY PLACE and LEAVE THE LINE wait this long for their second tap. */
 const ARMED_MS = 4000;
 /** A sync that failed is tried again after this long. */
@@ -199,6 +204,12 @@ const END_PAGES: ReadonlySet<string> = new Set(['missed', 'expired', 'released',
  * after-room's door (10). Every other screen keeps its look (the late comer's JOIN with its plate, 7, 8, 9, 11; N13).
  */
 const LOOK: ReadonlySet<string> = new Set(['room', 'queue', 'soldOut', 'turn', 'secured', 'confirmed', 'afterRoom']);
+/**
+ * The room's variants for one who cannot enter yet (lot Q1 §3.11: `room-sign-in`, `room-not-eligible`): before the
+ * opening they are screen 2 for that collector and take the look too, each with its own lines (no door: there is no
+ * countdown to show them); after it they are the late comer's entry, unchanged (D32).
+ */
+const ROOM_EDGES: ReadonlySet<string> = new Set(['signin', 'notEligible']);
 
 export interface LiveView {
   root: HTMLElement;
@@ -348,8 +359,13 @@ class LivePage {
   private error: string | null = null;
   /** The size and quantity picked before entering (the entry's own once entered). */
   private picked: { sizeId: string | null; quantity: number } = { sizeId: null, quantity: 1 };
-  /** The opening at T0 under way on this screen: when it began (performance.now), null otherwise. */
-  private opening: number | null = null;
+  /**
+   * The draw (ONE QUEUE §3.4): when the room's countdown reached 00:00 on this page (performance.now's clock, read back
+   * to the server's second), null before. The room stays the draw until THE OPENING may start (drawnScreen).
+   */
+  private drawAt: number | null = null;
+  /** The entry the welcome voice was asked for on this page (THE OPENING's, or a late comer's first reading). */
+  private welcomeFor: string | null = null;
   /** The turn just came, and a size's pieces were all held before it: a piece has returned. */
   private returned = false;
   /** A room seen while the entry waited in the line had no piece free in its size. */
@@ -939,11 +955,11 @@ class LivePage {
     if (!sheet) return 'failed';
     if (this.gone) return 'over';
     const kind = liveScreen({ sheet, viewer: this.viewer, room: this.room, entry: this.entry, now: this.now() });
-    // The opening at T0 plays to its end before the queue (or the late arrivals' size) takes its place.
-    if (this.screen?.kind === 'room' && (kind === 'queue' || kind === 'turn' || kind === 'join' || kind === 'soldOut' || kind === 'room')) {
-      if (this.opening === null || performance.now() - this.opening < OPENING_MS) return 'room';
-    }
-    return kind;
+    // The chain room → draw → THE OPENING (§3.4, N16): the draw in full from 00:00, the next screen at the later of its
+    // landing and the entry's first reading with its place (at once on that reading under reduced motion).
+    if (this.screen?.kind !== 'room') return kind;
+    const opened = !isEndedSheet(sheet) && this.now() >= Date.parse(this.room?.opensAt ?? sheet.opensAt);
+    return drawnScreen({ next: kind, drawAt: this.drawAt, opened, now: performance.now(), placed: !!this.entry?.queue, reduced: prefersReducedMotion() });
   }
 
   private render(): void {
@@ -1075,6 +1091,10 @@ class LivePage {
     this.reveal = false;
     // SOLD OUT's passage starts from the queue's horizon, where its band was (read before the queue gives way).
     const horizon = previous === 'queue' && kind === 'soldOut' ? this.screen?.el.querySelector('.live-hz__line')?.getBoundingClientRect() ?? null : null;
+    // THE OPENING (§3.4): from the draw as it is, into the queue; the welcome voice is THE OPENING's then (D46).
+    const opening = previous === 'room' && kind === 'queue' && this.drawAt !== null && this.entry !== null;
+    const draw = opening && !prefersReducedMotion() && this.screen ? this.drawAsItIs(this.screen.el) : null;
+    if (opening) this.welcomeFor = this.entry!.id;
     const screen = this.build(kind, revealing);
     this.screen = screen;
     screen.el.classList.add('live__screen');
@@ -1101,10 +1121,15 @@ class LivePage {
     if (kind !== previous && kind === 'afterRoom') this.say(LIVE.afterRoom.announce);
     this.endPassage();
     if (horizon && horizon.width > 0) this.soldPassage(horizon);
+    if (opening) {
+      // Its sounds from its start, the screen mounted (mount stops the room's): opening.mp3, then the welcome voice once.
+      this.deps.sound.cue('open', { entryId: this.entry?.id ?? null, afterRoom: !!this.afterRoomOf() });
+      if (draw) this.openingPassage(draw);
+    }
   }
 
   /** The passage under way (its class on the page, its own elements, its end), if any. */
-  private passage: { cls: string; parts: HTMLElement[]; timer: ReturnType<typeof setTimeout> } | null = null;
+  private passage: { cls: string; parts: HTMLElement[]; timer: ReturnType<typeof setTimeout>; done?: () => void } | null = null;
 
   /**
    * SOLD OUT's passage, the quieter one (lot Q1 §3.6; ANSWERS C16, ROUND 5; MK S, gen.mjs TX_END sold 3650 / 3800 ms):
@@ -1131,6 +1156,86 @@ class LivePage {
     this.passage = { cls: 'live--tx-sold', parts: [shz], timer: setTimeout(() => this.endPassage(), ms) };
   }
 
+  /**
+   * The draw as it stands when THE OPENING begins (§3.4; MK Q1 PLAY THE OPENING, gen.mjs TX_DOOR): its door (the line,
+   * its point wherever it has travelled, its light, the drawing's words and the room count) and the room's lines that
+   * leave with it (the name and its pieces on the phone, the pieces on the computer), each copied where it stands; and
+   * where the parts that glide on the computer stand (LIVE NOW, the name, the host's message).
+   */
+  private drawAsItIs(room: HTMLElement): DrawGhosts | null {
+    const door = room.querySelector<HTMLElement>('.live-hzd');
+    const line = door?.querySelector<HTMLElement>('.live-hzd__horizon');
+    const pt = door?.querySelector<HTMLElement>('.live-hzd__pt');
+    if (!door || !line || !pt) return null;
+    const lr = line.getBoundingClientRect();
+    if (lr.width <= 0) return null;
+    const pr = pt.getBoundingClientRect();
+    const from = Math.min(100, Math.max(0, ((pr.left + pr.width / 2 - lr.left) / lr.width) * 100));
+    const desk = isDesktop() && this.root.classList.contains('d-room');
+    const ghosts = [ghost(door, room, 'live-tx-ghost--door')];
+    const copy = ghosts[0]!.querySelector<HTMLElement>('.live-tx-ghost--door');
+    copy?.style.setProperty('--live-tx-from', `${from.toFixed(3)}%`);
+    // In place (the countdown's place kept, the words on the line where it stood), or the draw's still.
+    copy?.classList.toggle('is-overlay', room.classList.contains('is-drawing'));
+    for (const sel of desk ? [':scope .d-room__bl > .live__offer'] : [':scope > .live__title', ':scope > .live__offer']) {
+      const el = room.querySelector<HTMLElement>(sel);
+      if (el && el.getBoundingClientRect().height > 0) ghosts.push(ghost(el, room, 'live-tx-ghost--was'));
+    }
+    const at = (el: Element | null | undefined) => el?.getBoundingClientRect() ?? null;
+    return {
+      ghosts,
+      glides: desk ? { head: at(room.querySelector('.d-room__head > .live__overline')), name: at(room.querySelector('.d-room__bl > .live__title')), notice: at(this.notice) } : null,
+    };
+  }
+
+  /**
+   * THE OPENING (§3.4; ANSWERS C16, 18:00; MK Q1 PLAY THE OPENING; gen.mjs TX_END open 2800 / 3000 ms, its CSS): over the
+   * queue just mounted, the draw as it stood: its point glides back to the centre from wherever it is, the line parts there
+   * (a point to each end), the light rises through the gap, the drawing's words, the room count, the name and its pieces
+   * fade; LIVE NOW stays (on the computer it glides to its place, as do the name and the host's message); then the queue
+   * resolves under the same photograph, YOUR PLACE morphing in (house.css .live--tx-open). Reduced motion: none of it.
+   */
+  private openingPassage(draw: DrawGhosts): void {
+    const el = this.screen?.el;
+    if (!el) return;
+    const veil = h('div', { class: 'live-tx-open', attrs: { 'aria-hidden': 'true', inert: true } }, ...draw.ghosts);
+    this.root.prepend(veil);
+    const desk = draw.glides !== null;
+    // On the computer, LIVE NOW, the name and the host's message glide from where the draw had them.
+    const glide = (to: Element | null, from: DOMRect | null): void => {
+      if (!(to instanceof HTMLElement) || !from) return;
+      const now = to.getBoundingClientRect();
+      if (now.height <= 0 || from.height <= 0) return;
+      to.classList.add('live-tx-glide');
+      to.style.setProperty('--live-tx-dx', `${Math.round(from.left - now.left)}px`);
+      to.style.setProperty('--live-tx-dy', `${Math.round(from.top - now.top)}px`);
+    };
+    if (draw.glides) {
+      glide(el.querySelector('.d-room__head > .live__overline'), draw.glides.head);
+      glide(el.querySelector('.d-room__bl > .live__title'), draw.glides.name);
+      glide(this.notice, draw.glides.notice);
+    }
+    this.root.classList.add('live--tx-open');
+    const timing = desk ? OPENING.desk : OPENING.phone;
+    // YOUR PLACE morphs in as its line appears (the figures' own morph, from nothing).
+    const figure = el.querySelector<HTMLElement>('.live__place-figure');
+    const placeTimer = figure
+      ? setTimeout(() => {
+          if (figure.isConnected) morph(figure, figure.dataset.morph ?? figure.textContent ?? '', { numerals: false, appear: true });
+        }, timing.place)
+      : null;
+    const parts: HTMLElement[] = [veil];
+    const done = (): void => {
+      if (placeTimer) clearTimeout(placeTimer);
+      for (const g of this.root.querySelectorAll<HTMLElement>('.live-tx-glide')) {
+        g.classList.remove('live-tx-glide');
+        g.style.removeProperty('--live-tx-dx');
+        g.style.removeProperty('--live-tx-dy');
+      }
+    };
+    this.passage = { cls: 'live--tx-open', parts, timer: setTimeout(() => this.endPassage(), timing.ms), done };
+  }
+
   /** The passage ends (its time over, the page leaving, or another screen): the page as it is, nothing held. */
   private endPassage(): void {
     const p = this.passage;
@@ -1139,6 +1244,7 @@ class LivePage {
     clearTimeout(p.timer);
     this.root.classList.remove(p.cls);
     for (const part of p.parts) part.remove();
+    p.done?.();
   }
 
   /** Whether screen `kind` is one of NOCTURNE's, with its chrome: announced, failed, the final page, an end page (or loading it). */
@@ -1187,8 +1293,8 @@ class LivePage {
    */
   private renderPhoto(): void {
     const kind = this.screen?.kind;
-    const look = kind !== undefined && LOOK.has(kind);
     const sheet = this.sheet;
+    const look = kind !== undefined && (LOOK.has(kind) || (ROOM_EDGES.has(kind) && !!sheet && !isEndedSheet(sheet) && phaseAt(sheet, this.room, this.now()) === 'ROOM'));
     const tiles = sheet ? liveSet(sheet) : null;
     const picture = sheet ? pictureOf(sheet) : null;
     const all = tiles && tiles.images.length > 1 ? tiles.images.map((x) => x.src) : picture?.kind === 'photo' ? [picture.src] : [];
@@ -1339,10 +1445,9 @@ class LivePage {
   /**
    * The piece on a plate: its photograph, else its silhouette, else the seal; a picture that fails takes the seal's place.
    * Macro scope K44 T1: a set's pieces, their photographs side by side on the plate (`set`, from the photograph's stage).
-   * Framed by its corner marks (the late comer's JOIN, as today: N13), but behind the room's door (`corners` false: no
-   * corner marks on the screens of ONE QUEUE's look, D31).
+   * Framed by its corner marks: the late comer's JOIN, as today (N13); the room's door is a horizon since lot Q1 §3.4.
    */
-  private piece(picture: LivePicture | null, extra: string, sweep = false, set: SetCardModel | null = null, corners = true): HTMLElement {
+  private piece(picture: LivePicture | null, extra: string, sweep = false, set: SetCardModel | null = null): HTMLElement {
     const plate = h('div', { class: ['live__plate', extra] });
     const seal = () => sealSvg('live__plate-seal');
     if (set && set.images.length > 1) {
@@ -1373,7 +1478,7 @@ class LivePage {
         plate.append(light);
       }
     } else plate.append(seal());
-    return corners ? bracket(plate) : plate;
+    return bracket(plate);
   }
 
   /** SEE THE MODEL, once the photograph is revealed and the model's sheet is public; else nothing. */
@@ -1887,26 +1992,38 @@ class LivePage {
     };
   }
 
-  /** B2: the room, its closed door, the countdown, the ready check, the size; at T0 the opening. */
+  /**
+   * B2: the room (ONE QUEUE §3.4; D35, MK #room-2, #room-3): its door one hairline horizon running past the column and
+   * dissolving at both ends, the point breathing at its seam, the light pooled above it; the countdown (its figures
+   * morphing), UNTIL THE OPENING and the people in the room in that light; READY CHECK on hairlines, the size; then at
+   * 00:00 the draw in place (D36, MK #room-draw): the countdown's last figure morphs to 00:00 with its tick, the countdown
+   * and UNTIL THE OPENING resolve out, DRAWING THE PLACES and its sentence resolve in on the line, LIVE NOW over them,
+   * the point leaves the centre and travels from the left, draw.mp3 0.85 s after 00:00; what only the room before the
+   * opening offers fades where it stands (SEE THE MODEL, READY CHECK, YOUR SIZE, YOU'RE READY, LEAVE THE ROOM), so
+   * nothing moves. A page that comes to the room after 00:00 shows the draw as it stands (the mockup's 3b). The room
+   * stays the draw until THE OPENING (kind(), drawnScreen).
+   */
   private roomScreen(): Screen {
     const s = this.live()!;
     const m = liveSheetModel(s, this.deps.localZone);
     const overline = this.overline(LIVE.phase.ROOM);
-    const lock = sealSvg('live-door__seal');
+    overline.classList.add('live__phase');
     const set = this.isSet();
-    const door = h(
-      'div',
-      { class: 'live-door', attrs: { 'aria-hidden': 'true' } },
-      h('div', { class: 'live-door__inside' }, this.piece(m.picture, 'live-door__piece', true, m.set, false)),
-      h('div', { class: 'live-door__leaf live-door__leaf--left' }),
-      h('div', { class: 'live-door__leaf live-door__leaf--right' }),
-      h('div', { class: 'live-door__lock' }, lock),
-    );
     const count = h('p', { class: 'live__count', attrs: { role: 'timer', 'aria-labelledby': 'live-until' } });
     const until = this.fact('', 'live__until');
     until.id = 'live-until';
     const presence = h('p', { class: 'live__presence' }, h('span', { class: 'live__dot', attrs: { 'aria-hidden': 'true' } }), h('span', { class: 'live__presence-text' }));
+    const countBlock = h('div', { class: 'live__count-block' }, count, until);
     const drawing = h('div', { class: 'live__drawing', attrs: { hidden: true } }, h('p', { class: 'live__subtitle', text: LIVE.drawing }), this.note(LIVE.drawingLine(s.tierPriority)));
+    const part = (cls: string) => h('span', { class: `live-hzd__${cls}` });
+    // The door: the horizon under the countdown (its parted points and its gap are THE OPENING's, shown only then).
+    const door = h(
+      'div',
+      { class: 'live-hzd' },
+      h('div', { class: 'live-hzd__say' }, countBlock, drawing),
+      presence,
+      h('div', { class: 'live-hzd__horizon', attrs: { 'aria-hidden': 'true' } }, part('sky'), part('gap'), part('line live-hzd__line--l'), part('line live-hzd__line--r'), part('reflect'), h('span', { class: 'live-hzd__track' }, part('breath')), part('pt'), part('pt live-hzd__pt--l'), part('pt live-hzd__pt--r')),
+    );
     const checks = h('dl', { class: 'live__checks-list' });
     // READY CHECK on hairlines, on the vault: no grey plate, no corner marks (D31; MK #room-3).
     const plate = h('div', { class: 'live__checks' }, h('p', { class: 'live__overline live__checks-title', text: LIVE.ready.title }), checks);
@@ -1929,7 +2046,7 @@ class LivePage {
     // IN-01: under the size chooser, the house's guarantee shown to the account.
     const guaranteed = this.note('', 'live__guarantee');
     const prep = h('div', { class: 'live__prep' }, plate, picker.el, guaranteed, errorLine, choose, enter, ready, readyLine, leave);
-    // SEE THE MODEL under the model's line while the door is closed; at T0 the room is the piece's alone.
+    // SEE THE MODEL under the model's line until the opening; then the room is the piece's alone.
     const seeModel = this.seeModel(m.lookbook);
     // The ticks sound only from a context a gesture made: any tap or key in the room before T0 makes it (a collector
     // who entered earlier, on this page or another, then came back). A tap's pointerup is the gesture a browser grants.
@@ -1943,40 +2060,51 @@ class LivePage {
       this.surprise(m.surprise),
       seeModel,
       door,
-      h('div', { class: 'live__count-block' }, count, until, presence),
-      drawing,
       prep,
     );
-    let opened = false;
+    /** The countdown was seen counting on this screen: its 00:00 is the draw in place (otherwise the draw as it stands). */
+    let counted = false;
+    let drawn = false;
+    /** 00:00: the draw, `elapsed` ms after it on the server's clock. */
+    const draw = (elapsed: number): void => {
+      drawn = true;
+      const inPlace = counted && !prefersReducedMotion();
+      this.drawAt ??= performance.now() - elapsed;
+      // Every part of the passage counted from 00:00 (CSSOM custom property; house.css .live__room.is-drawing).
+      el.style.setProperty('--live-draw-t', `${Math.max(0, Math.round(performance.now() - this.drawAt))}ms`);
+      el.classList.add(inPlace ? 'is-drawing' : 'is-drawn');
+      overline.replaceChildren(...withNumerals(LIVE.phase.LIVE));
+      drawing.hidden = false;
+      // What the room before the opening offers goes: fading where it stands in the passage (nothing moves), at once
+      // otherwise. Never reachable once the opening has come.
+      for (const gone of [seeModel, prep, picker.el, guaranteed]) {
+        if (!gone) continue;
+        gone.setAttribute('inert', '');
+        if (inPlace) gone.classList.add('live__gone');
+        else gone.hidden = true;
+      }
+      if (!inPlace) countBlock.hidden = true;
+      this.say(LIVE.announce.open);
+      // draw.mp3 0.85 s after 00:00 (SFX_AT draw; a page come later hears nothing late).
+      this.deps.sound.cue('draw', { base: this.drawAt });
+    };
     const update = () => {
       const opensAt = Date.parse(this.room?.opensAt ?? s.opensAt);
       const remaining = opensAt - this.now();
       const entered = heldEntry(this.entry)?.status === 'WAITING';
-      // The countdown, the lock's orbits, the ticks of the last ten seconds.
-      count.textContent = clockText(remaining);
+      // The countdown, its figures morphing (D30); its last ten seconds' figures tick as they morph (N4).
+      morph(count, clockText(remaining), { numerals: false });
       const local = zonedTime(opensAt, this.deps.localZone);
       setFact(until, `${LIVE.untilOpening} · ${local?.clock ?? ''}`);
-      if (!prefersReducedMotion()) turnRings(lock, (k) => lockAngle(k, remaining));
       const tick = tickSecond(remaining);
-      // N4: room-tick.mp3 at each change of the last ten seconds' figures (lot Q1 §3.10, SFX_AT tick).
-      if (tick !== null && tick !== this.lastTick && this.synced) this.deps.sound.cue('tick');
+      if (tick !== null && tick !== this.lastTick && this.synced && (tick > 0 || counted)) this.deps.sound.cue('tick');
       this.lastTick = tick;
       setFact(presence.lastChild as HTMLElement, LIVE.inRoom(this.room?.inRoom ?? 0));
       presence.hidden = !this.room?.inRoom;
-      // T0, on the server's second: the lock aligns, the door opens, the piece under its light.
-      if (remaining <= 0 && !opened) {
-        opened = true;
-        this.opening = performance.now();
-        el.classList.add('is-opening');
-        door.classList.add('is-aligned');
-        overline.replaceChildren(...withNumerals(LIVE.phase.LIVE));
-        drawing.hidden = false;
-        prep.hidden = true;
-        if (seeModel) seeModel.hidden = true;
-        this.say(LIVE.announce.open);
-        setTimeout(() => door.classList.add('is-open'), prefersReducedMotion() ? 0 : DOOR_DELAY_MS);
-      }
-      if (opened) return;
+      // 00:00, on the server's second: the draw (once per screen; a screen built again during it shows it as it stands).
+      if (remaining <= 0 && !drawn) draw(this.drawAt === null ? -remaining : performance.now() - this.drawAt);
+      if (remaining > 0) counted = true;
+      if (drawn) return;
       const checksNow = set
         ? readyChecks({ access: this.access, size: this.setPickedLine(), toConfirm: this.setFromYours(), connection: this.connection, synced: this.synced, set: true })
         : readyChecks({ access: this.access, size: this.sizeLabel(this.picked.sizeId), toConfirm: this.fromYoursLines() !== null, connection: this.connection, synced: this.synced });
@@ -2230,6 +2358,12 @@ class LivePage {
           // Lot Q1 §3.3, §3.10 (SFX place): the place changed at a reading, its figure morphing: place.mp3 with it.
           if (shown !== null && m.place !== shown) this.deps.sound.cue('place');
           shown = m.place;
+          // D46, §3.10: the welcome voice once per entry when the queue first shows its place with no opening before it
+          // (a late comer's first reading; THE OPENING asks for its own); never in the after-room (N6).
+          if (this.welcomeFor !== e.id) {
+            this.welcomeFor = e.id;
+            this.deps.sound.cue('welcome', { entryId: e.id, afterRoom: !!this.afterRoomOf() });
+          }
           morph(time, m.time ?? '');
           if (this.room) band.set(bandModel(this.room, e), hold);
           if (m.announce !== this.lastPlace) {
@@ -3017,6 +3151,38 @@ class LivePage {
 }
 
 /** Set a line's words, its figures in the reading face; nothing when they are the same (no reflow, nothing read again). */
+/** The draw as THE OPENING starts from it: its copies (views/live.ts drawAsItIs) and, on a computer, where its gliding parts stood. */
+interface DrawGhosts {
+  ghosts: HTMLElement[];
+  glides: { head: DOMRect | null; name: DOMRect | null; notice: DOMRect | null } | null;
+}
+
+/**
+ * A copy of `el` where it stands in the window (fixed, its box measured; CSSOM custom properties, the house's pattern
+ * for a measure), inside shallow copies of its ancestors up to the screen `top` (house.css .live-tx-ctx: no box of their
+ * own), so the copy keeps every rule its place gives it. No id is copied; the copy is never read (the veil is hidden).
+ */
+function ghost(el: HTMLElement, top: HTMLElement, cls: string): HTMLElement {
+  const r = el.getBoundingClientRect();
+  const copy = el.cloneNode(true) as HTMLElement;
+  for (const x of [copy, ...copy.querySelectorAll<HTMLElement>('[id]')]) x.removeAttribute('id');
+  copy.classList.add('live-tx-ghost', cls);
+  copy.style.setProperty('--live-tx-top', `${r.top.toFixed(1)}px`);
+  copy.style.setProperty('--live-tx-left', `${r.left.toFixed(1)}px`);
+  copy.style.setProperty('--live-tx-width', `${r.width.toFixed(1)}px`);
+  let node: HTMLElement = copy;
+  for (let p = el.parentElement; p && p !== top.parentElement; p = p.parentElement) {
+    const ctx = p.cloneNode(false) as HTMLElement;
+    ctx.removeAttribute('id');
+    // Its place's rules, not its state's motion (the draw's own passage is not played again).
+    ctx.classList.remove('is-drawing', 'is-drawn');
+    ctx.classList.add('live-tx-ctx');
+    ctx.append(node);
+    node = ctx;
+  }
+  return node;
+}
+
 function setFact(el: HTMLElement, text: string): void {
   if (el.dataset.text === text) return;
   el.dataset.text = text;

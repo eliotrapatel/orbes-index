@@ -12,8 +12,10 @@
  *    countdown counts on it, so the door opens on every phone at the same second.
  *  - A time is said in Paris, then on this phone when its zone says it otherwise; a price as the house writes it
  *    (`€ 4 800`); the countdowns in two-digit groups.
- *  - The lock: during the last minute each data orbit of the seal turns back to its place, a step a second, its
- *    direction alternating with its neighbour's, and all of them align at T0 (`lockAngle`); the last ten seconds tick.
+ *  - The lock of the boutique board's door: during the last minute each data orbit of the seal turns back to its place,
+ *    a step a second, its direction alternating with its neighbour's, and all of them align at T0 (`lockAngle`).
+ *  - The room's last ten seconds tick, each at its figure's change (`tickSecond`); at 00:00 the draw, then THE OPENING at
+ *    the later of its landing and the entry's first reading with its place (`drawnScreen`, ONE QUEUE §3.4).
  *
  * Nothing the server did not send: a picture is taken from this origin's media route only.
  */
@@ -551,10 +553,59 @@ export function lockAngle(ring: number, remainingMs: number): number {
   return (base * Math.ceil(remainingMs / SECOND)) / (LOCK_MS / SECOND);
 }
 
-/** The second of the last ten that `remainingMs` falls in (10 … 1), when it does: each ticks once. */
+/**
+ * The figure the countdown shows during its last ten seconds (9 … 0), when it does: each change of it ticks once, as the
+ * countdown morphs to the new figure (lot Q1 §3.4; N4: production's ten; the mockup's draw ticks at its morphs to 00:02,
+ * 00:01 and 00:00). 00:00 is shown from T0 to a second after it; later, nothing ticks.
+ */
 export function tickSecond(remainingMs: number): number | null {
-  const s = Math.ceil(remainingMs / SECOND);
-  return remainingMs > 0 && s >= 1 && s <= 10 ? s : null;
+  const s = Math.max(0, Math.ceil(remainingMs / SECOND));
+  return remainingMs > -SECOND && s <= 9 ? s : null;
+}
+
+// ── The draw and THE OPENING (ONE QUEUE, lot Q1 §3.4; D35, D36, D42; N16) ───
+
+/**
+ * The draw's passage in the room, counted from the countdown's 00:00 (the mockup's PLAY THE DRAW, gen.mjs TX_END draw
+ * 5000 ms with its 00:00 at 1.4 s): the countdown and UNTIL THE OPENING resolve out from `leave`, DRAWING THE PLACES from
+ * `words` (its sentence 0.2 s later), draw.mp3 at `words` too (SFX_AT draw 2.25 − 1.4); the line's point leaves the
+ * centre at `leave` and travels from the left over `travel`; the passage lands at `land` (5000 − 1400).
+ */
+export const DRAW_MS = Object.freeze({ leave: 550, words: 850, travel: 3000, land: 3600 });
+
+/** The screens that follow the room at the opening: the draw holds them back until THE OPENING may start. */
+const AFTER_DRAW: ReadonlySet<LiveScreenKind> = new Set<LiveScreenKind>(['room', 'queue', 'turn', 'join', 'soldOut']);
+
+export interface DrawChainInput {
+  /** The screen the release and the entry call for now (liveScreen). */
+  next: LiveScreenKind;
+  /** When the countdown reached 00:00 on this page (performance.now()'s clock), null before. */
+  drawAt: number | null;
+  /** 00:00 has passed on the server's clock (the room's own pulse starts the draw at it). */
+  opened: boolean;
+  /** Now, on the same clock. */
+  now: number;
+  /** Whether the entry's place has been read (its `queue`): the one queue opens on it, never on READING YOUR PLACE. */
+  placed: boolean;
+  /** The device asks for reduced motion: no passage, the screen at once on the first reading. */
+  reduced: boolean;
+}
+
+/**
+ * The chain room → draw → THE OPENING (lot Q1 §3.4, N16; it replaces production's fixed OPENING_MS): from 00:00 the room
+ * shows the draw in full; the screen that follows it comes at the later of the draw's landing (DRAW_MS.land after
+ * 00:00) and the entry's first reading with its place; an entry whose first reading is another screen (its turn, JOIN,
+ * SOLD OUT) leaves the draw at the same moment for it. Under reduced motion, at once on that reading. 'room' while the
+ * draw holds.
+ */
+export function drawnScreen(i: DrawChainInput): LiveScreenKind {
+  if (!AFTER_DRAW.has(i.next)) return i.next;
+  // 00:00 reached, the draw not begun yet on this page: the room, whose own pulse begins it now.
+  if (i.drawAt === null) return i.opened ? 'room' : i.next;
+  if (i.next === 'room') return 'room';
+  if (i.next === 'queue' && !i.placed) return 'room';
+  if (!i.reduced && i.now - i.drawAt < DRAW_MS.land) return 'room';
+  return i.next;
 }
 
 // ── The one queue (ONE QUEUE, lot Q1 §1.3, §3.3) ────────────────────────────

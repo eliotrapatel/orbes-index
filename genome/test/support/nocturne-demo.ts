@@ -1089,6 +1089,39 @@ async function seedQueue(w: World): Promise<void> {
   });
   // MK #after-wait: the after-room's waiting screen.
   await seedAfterWait(w);
+  // MK #room-draw: the draw at the opening.
+  await seedDraw(w);
+}
+
+/**
+ * The draw at the opening (lot Q1, step Q1.9; MK #room-draw, 3b): MONOLITHE IN BLUE, 300 pieces in sizes 16, 17 and 18,
+ * its T0 three seconds before NOW, `drawing` in its room in size 17 since two minutes before it; its line not formed yet
+ * (the release not advanced past T0), so the page shows the room at its draw (DRAWING THE PLACES) and waits for its place.
+ */
+async function seedDraw(w: World): Promise<void> {
+  const { ctx, clock, demo } = w;
+  clock.set(at('2026-10-04T12:00:00Z'));
+  const t0 = new Date(NOCTURNE_NOW.getTime() - 3_000);
+  const r = await createLiveRelease(w.f, {
+    modelId: w.models.blue!,
+    opensAt: t0,
+    closesAt: new Date(t0.getTime() + HOUR),
+    minTier: 1,
+    turnSeconds: 300,
+    payMinutes: 10,
+    sizes: [{ label: '16', stock: 100 }, { label: '17', stock: 100 }, { label: '18', stock: 100 }],
+    quantityLine: '300 PIECES',
+    priceMinor: 505_000,
+    pace: { batch: 25, minutes: 1 },
+    holdMinutes: 10,
+  });
+  await titled(w, r.id, 'MONOLITHE IN BLUE', 'MONOLITHE IN BLUE, released live: 300 pieces, in the sizes of the house.');
+  demo.releases.drawing = r.id;
+  const drawing = await account(w, 'drawing', 'drawing@example.com', 1, w.models.blue);
+  clock.set(new Date(t0.getTime() - 2 * MINUTE));
+  await ctx.services.live.enter(drawing.id, r.id, { sizeId: r.sizes[1]!.id }, drawing.actor);
+  clock.set(new Date(t0.getTime() - 30_000));
+  await ctx.services.live.message(r.id, 'Thank you for being here tonight.', w.admin);
 }
 
 /**

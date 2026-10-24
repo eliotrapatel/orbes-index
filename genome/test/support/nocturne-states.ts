@@ -2138,12 +2138,12 @@ export const PHONE_STATES: readonly UiState[] = [
   { id: 'live-past-gold', title: 'A past LIVE RELEASE nobody of the story took part in', refs: ['C25'], variant: 'full', as: you, path: release('live28'), ready: '.view--live .n-live__past' },
 
   // ── The room and the vault (compared with the before-captures) ──
-  { id: 'room', title: 'The room: the door, READY CHECK, YOUR SIZE preselected, ENTER THE ROOM', refs: ['C21', 'live-05'], variant: 'room', as: you, path: release('room'), ready: '.view--live .live-door' },
+  { id: 'room', title: 'The room: the door, READY CHECK, YOUR SIZE preselected, ENTER THE ROOM', refs: ['C21', 'live-05'], variant: 'room', as: you, path: release('room'), ready: '.view--live .live-hzd' },
   { id: 'room-sign-in', title: 'The room, signed out: SIGN IN TO ENTER', refs: ['live-13'], variant: 'room', path: release('room'), ready: '.view--live' },
   { id: 'room-not-eligible', title: 'The room, an account without a piece: not eligible', refs: ['live-14'], variant: 'room', as: 'newcomer', path: release('room'), ready: '.view--live' },
   // THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01): an account without a piece let in by its guarantee, shown or not.
   { id: 'room-guaranteed', title: 'The room for a holder of the house’s guarantee (2 pieces): ACCESS GRANTED, first in line in its size', refs: ['IN-01'], variant: 'room', as: 'roomHolder', path: release('room'), ready: '.view--live .live__guarantee:not([hidden])' },
-  { id: 'room-guarantee-hidden', title: 'The room for a holder of a guarantee not shown: ACCESS GRANTED, no line of it', refs: ['IN-01'], variant: 'room', as: 'roomQuiet', path: release('room'), ready: '.view--live .live-door' },
+  { id: 'room-guarantee-hidden', title: 'The room for a holder of a guarantee not shown: ACCESS GRANTED, no line of it', refs: ['IN-01'], variant: 'room', as: 'roomQuiet', path: release('room'), ready: '.view--live .live-hzd' },
   // ONE QUEUE (lot Q1, step Q1.3; ANSWERS r1, C3): the classic line screen is gone; every entry waiting reads the one
   // queue (`live-queue` and its states). `live-line` and `live-queue-admitted` went with it.
   { id: 'live-turn', title: 'The turn: PRESS AND HOLD THE SEAL', refs: ['live-10'], variant: 'live', as: 'turn', path: release('live'), ready: '.view--live .live-hold' },
@@ -2184,7 +2184,7 @@ export const PHONE_STATES: readonly UiState[] = [
       await page.route('**/api/v1/live/clock', (r) => r.abort('internetdisconnected'));
       await page.route('**/api/v1/live/*/stream', (r) => r.abort('internetdisconnected'));
     },
-    ready: '.view--live .live-door',
+    ready: '.view--live .live-hzd',
   },
   { id: 'after-room-sold-out', title: 'The after-room sold out before your turn: SOLD OUT', refs: ['C30'], variant: 'afterroom-ends', as: 'arSoldOut', path: release('arSoldOut', '/after-room'), ready: '.view--live .n-live__end' },
   { id: 'after-room-closed', title: 'The after-room’s time over before your turn: THE AFTER-ROOM IS CLOSED', refs: ['C30'], variant: 'afterroom-ends', as: 'arClosed', path: release('arClosed', '/after-room'), ready: '.view--live .n-live__end' },
@@ -2236,6 +2236,9 @@ export const PHONE_STATES: readonly UiState[] = [
   { id: 'live-queue-one', title: 'The one queue of a release in one size (MK Q6): ONE SIZE · 1 PIECE, YOUR PLACE 1, ESTIMATED LESS THAN A MINUTE LEFT, … IN ONE SIZE', refs: ['MK Q6'], variant: 'queue', as: 'queueOne', path: release('queueOne'), ready: '.view--live .live__queue[data-state="waiting"]' },
   { id: 'live-queue-late', title: 'The one queue of a late comer with its place (MK Q7b): YOUR PLACE 40 behind those waiting at the opening, during the hold', refs: ['MK Q7b'], variant: 'queue', as: 'queueLate', path: release('queueHold'), ready: '.view--live .live__queue[data-state="waiting"]' },
   { id: 'live-queue-held', title: 'The one queue, every piece of its size held, none paid (MK Q8): still the waiting screen, 176 OF 300 LEFT · 0 IN SIZE 17', refs: ['MK Q8'], variant: 'queue', as: 'queueHeld', path: release('queueHeld'), ready: '.view--live .live__queue[data-state="waiting"]' },
+  // The draw at the opening (lot Q1, step Q1.9; MK #room-draw, 3b): LIVE NOW, the name, its pieces, DRAWING THE PLACES and
+  // its sentence on the horizon, the room count, the point travelling; the page waits for its place.
+  { id: 'live-draw', title: 'The draw at the opening (MK 3b): LIVE NOW, MONOLITHE, 300 PIECES, DRAWING THE PLACES and its sentence on the horizon, the room count, FROM ORBES', refs: ['MK 3b', 'D36'], variant: 'queue', as: 'drawing', path: release('drawing'), ready: '.view--live .live__room.is-drawn .live__drawing:not([hidden])' },
   { id: 'live-after-wait', title: 'The after-room’s waiting screen (MK A): THE AFTER-ROOM, YOUR PLACE 2 in size 17, 3 OF 12 LEFT · 0 IN SIZE 17, no time', refs: ['MK A', 'D29'], variant: 'queue', as: 'afterWait', path: release('afterWait', '/after-room'), ready: '.view--live .live__queue[data-state="waiting"]' },
   {
     id: 'live-queue-loading',
@@ -2627,7 +2630,7 @@ export const PHONE_STATES: readonly UiState[] = [
       await run.page.getByText('YOU’RE READY').first().waitFor({ timeout: 20_000 });
       await run.page.waitForFunction((n) => new RegExp(`(^|\\D)${n} IN THE ROOM`).test(document.body.innerText), before + 1, { timeout: 20_000 });
     },
-    ready: '.view--live .live-door',
+    ready: '.view--live .live-hzd',
   },
   // Plan MACRO M1 §4.4 (E1–E3; lot M1, step M1.19), on the stage `email` (the emails' channel on): FORGOTTEN PASSWORD? with
   // RESET BY EMAIL and its sentence once sent (an address no account uses: nothing is written); the page of the link (its
@@ -3232,13 +3235,17 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
   // the queue (lot M1).
   'desk-10': [
     ...desk(1440, 'live-secured', 'live-confirmed', 'live-sold-out-size', 'live-missed', 'live-expired', 'live-released', 'live-left', 'live-removed', 'live-join'),
-    ...desk(1440, 'live-rules', 'live-rules-not-eligible', 'room-not-eligible', 'room-ready'),
+    // ONE QUEUE (lot Q1, step Q1.9; plan §3.11): the room's other variants in its look (the horizon door, READY CHECK on
+    // hairlines), each with its own lines, before the write.
+    ...desk(1440, 'live-rules', 'live-rules-not-eligible', 'room-sign-in', 'room-guaranteed', 'room-guarantee-hidden', 'room-checks-pending', 'room-not-eligible', 'room-ready'),
     ...desk(1440, 'after-room-join', 'after-room-sold-out', 'after-room-closed', 'after-room-ended', 'after-room-over'),
     // The queue of a paced release (lot M1, W2, W5): the place and its estimate, then paused.
     ...desk(1440, 'live-queue', 'live-queue-paused'),
     // ONE QUEUE's Horizon band (lot Q1, step Q1.7): a small release, its LAST PIECES; then the queue whose photograph
     // cannot be loaded (the same media refusal as on the phone).
     ...desk(1440, 'live-queue-small', 'live-queue-last', 'live-queue-nophoto'),
+    // The draw at the opening (lot Q1, step Q1.9; MK #room-draw, desk).
+    ...desk(1440, 'live-draw'),
   ],
   // ── A result's other answers, a piece's incidents, THE PRIVATE SALON in sizes, the draw's other states, the failures ──
   // The full demo's writes (a transfer code, the ceremony, a piece received, REQUESTED, a draw entered) last, in this order;
@@ -3336,7 +3343,7 @@ export const ROOM_SIZE_STATES: readonly UiState[] = [
       await run.page.locator('.view--live .live__yours-block--room').waitFor({ state: 'hidden', timeout: 20_000 });
       await run.page.waitForFunction(() => [...document.querySelectorAll('.live__check')].some((c) => /^SIZE/.test(c.textContent ?? '') && c.classList.contains('is-ok')), null, { timeout: 20_000 });
     },
-    ready: '.view--live .live-door',
+    ready: '.view--live .live-hzd',
   },
 ];
 
@@ -3477,13 +3484,19 @@ function cameraScript(arg: { failure: string | null; hold: boolean }): void {
   };
 }
 
-/** Wait for the page to rest: its fonts in, no request of its own pending for a moment, every finite motion finished. */
+/**
+ * Wait for the page to rest: its fonts in, no request of its own pending for a moment, every finite motion finished (but
+ * the room's door's: the draw's point travels on while the page waits for its place).
+ */
 export async function settle(page: Page, ms = 400): Promise<void> {
   await page.evaluate(() => document.fonts.ready);
   await sleep(ms);
   await page.evaluate(() => {
     for (const a of document.getAnimations()) {
       const t = a.effect?.getComputedTiming();
+      // The draw's point travels on while the page waits for its place (ONE QUEUE §3.4, N16): never a still to reach.
+      const target = (a.effect as KeyframeEffect | null)?.target;
+      if (target instanceof Element && target.closest('.live-hzd')) continue;
       if (t && t.iterations !== Infinity) {
         try {
           a.finish();

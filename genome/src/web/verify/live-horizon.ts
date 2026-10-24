@@ -12,6 +12,7 @@
  *                   breathing (OP-4). Reduced motion: still. The stock line's words inside it.
  *   morph(el, text) a figure changing: only its changed digits, each resolving from a 1.2 px blur and 1.5 % scale in
  *                   0.8 s, a digit that leaves folding its width away; tabular figures (CSS); reduced motion: at once.
+ *                   `appear`: every digit resolves from nothing (THE OPENING's YOUR PLACE, MK Q1).
  *
  * The DOM is built with shared/dom.ts (no markup from data); the band's share is a custom property (CSSOM), as the
  * house sets its other measures. The look is house.css (the phone) and shared/desktop-room.css (the computer).
@@ -63,15 +64,16 @@ function digits(prev: string, next: string): (string | HTMLSpanElement)[] {
  * under reduced motion, or the first time, at once. `numerals`: the figures at rest in the reading face (withNumerals,
  * as the room's facts set them); false for a figure alone (YOUR PLACE).
  */
-export function morph(el: HTMLElement, text: string, opts: { numerals?: boolean } = {}): void {
+export function morph(el: HTMLElement, text: string, opts: { numerals?: boolean; appear?: boolean } = {}): void {
   const numerals = opts.numerals ?? true;
-  const prev = el.dataset.morph;
-  if (prev === text) return;
+  // `appear` (THE OPENING: YOUR PLACE morphing in): every figure resolves from nothing, its words as they are.
+  const prev = opts.appear ? text.replace(/\d/g, '') : el.dataset.morph;
+  if (prev === text && !opts.appear) return;
   const timer = pending.get(el);
   if (timer !== undefined) clearTimeout(timer);
   pending.delete(el);
   el.dataset.morph = text;
-  const a = prev === undefined ? null : prev.split(/(\d+)/);
+  const a = prev === undefined ? null : opts.appear ? text.split(/(\d+)/).map((part, i) => (i % 2 === 1 ? '' : part)) : prev.split(/(\d+)/);
   const b = text.split(/(\d+)/);
   const same = a !== null && a.length === b.length && a.every((part, i) => i % 2 === 1 || part === b[i]);
   if (!same || reducedMotion()) {

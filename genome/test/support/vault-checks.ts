@@ -48,7 +48,8 @@ export async function screenChecks(page: Page): Promise<{ contrast: string[]; fi
     const figures: string[] = [];
     for (const el of document.querySelectorAll('main *')) {
       const own = [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent ?? '').join('').trim();
-      if (!own || !el.checkVisibility() || el.closest('[aria-hidden="true"], .visually-hidden, :disabled')) continue;
+      // A digit mid-morph (a figure changing, live-horizon.ts) is measured whole once it rests.
+      if (!own || !el.checkVisibility() || el.closest('[aria-hidden="true"], .visually-hidden, :disabled, .live-mf')) continue;
       const style = getComputedStyle(el);
       const bg = ground(el);
       const fg = over(parse(style.color), bg, parse(style.color)[3] * opacity(el));

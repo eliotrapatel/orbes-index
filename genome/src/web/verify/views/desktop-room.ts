@@ -1,7 +1,7 @@
 /**
  * The LIVE RELEASE's room on a computer (desktop, BRIEF §5.7, decision 7: the Cinema room): every screen of the
  * room and the after-room staged over the release's model (variant) photograph, filling the window, darkened; the ORBES
- * wordmark top left and the count in the room top right; in the centre the door, the countdown, the line, the seal to
+ * wordmark top left and the count in the room top right; in the centre the door (its horizon), the countdown, the line, the seal to
  * hold, the piece secured, with the host's messages under them; in the corners, bottom left the release's name and its
  * choice, bottom right the collector's own part (READY CHECK and ENTER THE ROOM, the add-ons and PAY). The one queue
  * (ONE QUEUE): its place and the pieces left in the centre, its time left bottom right, LEAVE THE LINE under the name. The room's own foot (HOW RELEASES WORK, THE RELEASES, SOUND, the legal pages) under the
@@ -77,9 +77,9 @@ const PLAN: Partial<Record<Kind, readonly [Place, string][]>> = {
   ...Object.fromEntries([...END].map((k) => [k, END_PLAN])),
   room: [
     ['head', ':scope > .live__overline'],
-    ['body', ':scope > .live-door'],
-    ['body', ':scope > .live__count-block'],
-    ['body', ':scope > .live__drawing'],
+    // ONE QUEUE (MK #room-2, #room-3, #room-draw, desk): the door, its horizon, with the countdown (then the draw's
+    // words) above it in its light.
+    ['body', ':scope > .live-hzd'],
     ['bl', ':scope > .live__title'],
     ['bl', ':scope > .live__offer'],
     ['bl', ':scope > .live__surprise'],

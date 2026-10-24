@@ -59,7 +59,8 @@ export const LIVE_GAIN = 0.9;
 /**
  * When each passage's sounds start, in seconds from the passage's own start (the mockup's SFX_AT, read for the product,
  * plan §3.4–§3.10): a tick at each figure change of the countdown's last ten seconds (N4); the draw 0.85 s after the
- * countdown reaches 00:00 (SFX_AT draw 2.25 − its 00:00 at 1.4); THE OPENING's sound, then the welcome voice; a place
+ * countdown reaches 00:00 (SFX_AT draw 2.25 − its 00:00 at 1.4); THE OPENING's sound, then the welcome voice (a late
+ * comer's, whose queue shows with no opening, at its first reading of its place); a place
  * that moves; the turn; the hold with the press itself (the ring starts to fill at 0 s); SECURED; SOLD OUT for the
  * size; CONFIRMED; the after-room's door.
  */
@@ -70,6 +71,8 @@ export const SFX_AT = Object.freeze({
     ['opening', 0.4],
     ['welcome', 3.0],
   ],
+  // A late comer's first reading of its place, with no opening passage (plan §3.10): the welcome voice at once.
+  welcome: [['welcome', 0]],
   place: [['place', 0]],
   turn: [['turn', 0.3]],
   hold: [['hold', 0]],

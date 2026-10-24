@@ -658,10 +658,89 @@
     margin-top: var(--d-s2);
   }
 
-  /* At T0 the room is the piece's: the sizes go with READY CHECK and ENTER (house.css hides the prep, the view SEE THE
-     MODEL). */
-  html:not(.d-touch) .d-room .live__room.is-opening .d-room__bl > :is(.live__picker, .live__guarantee) {
-    display: none;
+  /* ONE QUEUE (§3.4; MK #room-2, #room-3, #room-draw, desk): the door's horizon wider for the window, past the centre's
+     column by 40 px each side, its light taller; the countdown (then the draw's words) above it. At 00:00 the sizes go
+     with READY CHECK and ENTER, fading where they stand (views/live.ts: .live__gone, or hidden on a page come later). */
+  html:not(.d-touch) .d-room .d-room__body > .live-hzd {
+    --hzd-tail: 40px;
+    --hzd-pt: 16px;
+    --hzd-sky: 300px;
+    --hzd-breath-w: 420px;
+    --hzd-breath-h: 72px;
+    width: min(100%, 480px);
+    max-width: none;
+    margin: 0;
+  }
+
+  html:not(.d-touch) .d-room .live-hzd .live__count-block,
+  html:not(.d-touch) .d-room .live-hzd .live__drawing {
+    margin-top: 0;
+  }
+
+  html:not(.d-touch) .d-room .live-hzd__horizon {
+    margin: 34px calc(-1 * var(--hzd-tail)) 30px;
+  }
+
+  html:not(.d-touch) .d-room .live-hzd__sky {
+    background: radial-gradient(ellipse 34% 100% at 50% 100%, rgba(246, 242, 234, 0.22) 0, rgba(246, 242, 234, 0.09) 42%, rgba(246, 242, 234, 0.02) 72%, rgba(246, 242, 234, 0) 100%);
+  }
+
+  /* THE OPENING on a computer (house.css .live--tx-open; MK Q1 desk, TX_END open 3000 ms): a little slower; LIVE NOW, the
+     name and the host's message glide to their places (views/live.ts: from where the draw had them). */
+  @media (prefers-reduced-motion: no-preference) {
+    html:not(.d-touch) .d-room.live--tx-open .live-tx-ghost--door {
+      animation: live-tx-out 0.8s ease 2.15s both;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-open .live-tx-ghost--door .live-hzd__pt:not(.live-hzd__pt--l, .live-hzd__pt--r) {
+      animation: live-tx-home 0.45s cubic-bezier(0.45, 0, 0.2, 1) 0s both, live-tx-out 0.5s ease 0.45s both;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-open .live-tx-ghost--door .live-hzd__breath {
+      animation: live-tx-home 0.45s cubic-bezier(0.45, 0, 0.2, 1) 0s both, live-tx-out 0.9s ease 0.3s both;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-open .live-tx-ghost--door .live-hzd__line--l {
+      animation: live-tx-part-l 1.35s cubic-bezier(0.45, 0, 0.2, 1) 0.45s both;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-open .live-tx-ghost--door .live-hzd__line--r {
+      animation: live-tx-part-r 1.35s cubic-bezier(0.45, 0, 0.2, 1) 0.45s both;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-open .live-tx-ghost--door .live-hzd__pt--l {
+      animation: live-tx-pt-l 1.35s cubic-bezier(0.45, 0, 0.2, 1) 0.45s both;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-open .live-tx-ghost--door .live-hzd__pt--r {
+      animation: live-tx-pt-r 1.35s cubic-bezier(0.45, 0, 0.2, 1) 0.45s both;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-open .live-tx-ghost--door .live-hzd__gap {
+      animation: live-tx-gap 1.7s cubic-bezier(0.4, 0, 0.2, 1) 0.6s both;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-open .live-tx-ghost--door > :not(.live-hzd__horizon) {
+      animation: live-tx-unresolve 0.75s cubic-bezier(0.22, 1, 0.36, 1) 0.2s both;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-open .live-tx-glide {
+      animation: live-tx-glide 1.2s cubic-bezier(0.16, 1, 0.3, 1) 0.9s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-open .live__queue > .d-room__body > :is(.live__place-label, .live__place) {
+      animation: live-fade-in 0.35s ease 1.75s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-open .live__queue > .d-room__bl > :not(.live__title) {
+      animation: live-fade-in 0.8s ease 1.6s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-open .live__queue > .d-room__body > :not(.live__place-label, .live__place, .live__notice),
+    html:not(.d-touch) .d-room.live--tx-open .live__queue > .d-room__br,
+    html:not(.d-touch) .d-room.live--tx-open > .live__foot {
+      animation: live-fade-in 0.8s ease 2.05s backwards;
+    }
   }
 
   /* YOUR SIZE: its label, the sizes on the corner's edge, the quantity under them. */

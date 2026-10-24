@@ -436,7 +436,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     expect(floors.checked).toEqual(expect.arrayContaining(['SEE THE MODEL', 'ADD TO CALENDAR']));
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-see-model.png'), fullPage: true });
 
-    // The room open: SEE THE MODEL under the model's line, over the closed door; it opens the sheet.
+    // The room open: SEE THE MODEL under the model's line, over the door (its horizon); it opens the sheet.
     const inRoom = page.locator('.live__room').getByRole('link', { name: 'SEE THE MODEL' });
     await visible(inRoom, 30_000);
     expect(Date.now()).toBeGreaterThanOrEqual(roomAt - SECOND);
@@ -447,15 +447,16 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     expect(new URL(page.url()).pathname).toBe(sheetPath);
     expect(problems).toEqual([]);
 
-    // At T0 the room is the piece's alone: the link gone as the door opens.
+    // At T0 the room is the piece's alone: the link fades where it stands as the draw begins (ONE QUEUE §3.4).
     const other = await phone(me.token);
     await other.page.goto(`${srv.origin}/verify/releases/${opening.id}`);
     const roomLink = other.page.locator('.live__room .live__see-model');
     await visible(roomLink);
     await holdsUntil(t0, async () => expect(await roomLink.isVisible()).toBe(true));
-    await expect.poll(() => roomLink.isVisible(), POLL).toBe(false);
+    await expect.poll(() => other.page.locator('.live__room').getAttribute('class'), POLL).toMatch(/is-drawing/);
     expect(Date.now()).toBeGreaterThanOrEqual(t0 - SECOND);
-    expect(await other.page.locator('.live-door').getAttribute('class')).toMatch(/is-aligned/);
+    expect(await roomLink.getAttribute('inert')).toBe('');
+    await expect.poll(() => roomLink.isVisible(), POLL).toBe(false);
     expect(other.problems).toEqual([]);
     for (const w of [page, other.page]) await w.context().close();
   }, 90_000);

@@ -72,7 +72,13 @@ const atNarrow = (id: string) => NARROW_STATES.test(id) || (NARROW_TOO.includes(
 const HORIZON = "ONE QUEUE's Horizon band (lot Q1 §3.2, D23; the owner's mockup): its horizon runs past the column on purpose, its ends dissolving at the screen's edges (32 px each side on a phone), drawn by its decorative layer (aria-hidden); the page never scrolls sideways";
 const HORIZON_RUN = "ONE QUEUE's Horizon band at LAST PIECES' rest (lot Q1 §3.2, D24): the slow light's bead and trail wait past the edge of what is left, inside the band's own clip";
 /** What overflowed at 5efd4c9 on purpose: a state, the start of the line overflows() writes, and why. */
+const DOOR = "ONE QUEUE's room door (lot Q1 §3.4, D35; the owner's mockup, MK #room-2): one hairline horizon running past the column on purpose, its ends dissolving at the screen's edges (32 px each side on a phone), drawn by its decorative layer (aria-hidden); the page never scrolls sideways";
 const KNOWN: readonly { state: string; starts: string; reason: string }[] = [
+  ...['room-stress', 'room-guaranteed'].flatMap((state) => [
+    { state, starts: 'div.live__stage spills out of its box', reason: DOOR },
+    { state, starts: 'section.live__room.live__screen spills out of its box', reason: DOOR },
+    { state, starts: 'div.live-hzd spills out of its box', reason: DOOR },
+  ]),
   // (N3: the resting orbit of the landing's wordmark, which reached past its emblem on purpose, left with the landing:
   // NOW replaces it.)
   { state: 'live-queue-stress', starts: 'div.live__stage spills out of its box', reason: HORIZON },

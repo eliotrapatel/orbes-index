@@ -211,7 +211,8 @@ export const DESKTOP_MOVED: readonly DesktopMoved[] = [
     where: 'back',
   },
   {
-    states: ['result-registered-signed-out', 'result-unusual-card', 'result-stress'],
+    // The room's sign-in (lot Q1, step Q1.9: its desk twin added, plan §3.11) as every embedded sign-in.
+    states: ['result-registered-signed-out', 'result-unusual-card', 'result-stress', 'room-sign-in'],
     values: ['EMAIL', 'PASSWORD', 'FORGOTTEN PASSWORD?'],
     reason: 'Decision 6: where a phone embeds the sign-in form, a computer shows its lead and the line SIGN IN · CREATE ACCOUNT.',
     now: 'On the sign-in page (/verify/sign-in), which the line opens.',
@@ -241,7 +242,8 @@ export const DESKTOP_MOVED: readonly DesktopMoved[] = [
   },
   {
     // ONE QUEUE (lot Q1, step Q1.3): the queue's screens now say the pieces left (`… LEFT · … IN SIZE 17`), its dot shown.
-    states: ['after-room-door', 'room-not-eligible'],
+    // Lot Q1 (step Q1.9): the room's sign-in, its desk twin added (plan §3.11).
+    states: ['after-room-door', 'room-not-eligible', 'room-sign-in'],
     values: ['·'],
     reason: 'Decision 7: the room’s foot is one row on a computer, its links spaced, without the phone’s dot between PRIVACY and TERMS.',
     now: 'Nowhere: PRIVACY, TERMS, LEGAL and HELP stand in the room’s foot.',
