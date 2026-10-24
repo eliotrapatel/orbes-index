@@ -36295,6 +36295,47 @@
         "IP GEOLOCATION BY DB-IP",
         "LIVE RELEASE · MONOLITHE"
       ]
+    },
+    "desk-set-live-confirmed-1024": {
+      "title": "THE SET confirmed: CONFIRMED, YOUR SET IS RESERVED, each piece in its size on the receipt, the GIFT BOX, TOTAL, REFERENCE (lot M3, T1) (a computer, 1024 × 768)",
+      "refs": [
+        "desktop",
+        "phone: set-live-confirmed"
+      ],
+      "variant": "set-live",
+      "as": "setBuyer",
+      "values": [
+        "ORBES",
+        "CONFIRMED",
+        "LIVE RELEASE",
+        "THE ORBITAL SET",
+        "YOUR SET IS RESERVED",
+        "Each piece is reserved in the size you chose. ORBES Client Services will contact you to settle payment. Add your delivery address in YOUR ORDERS.",
+        "RESERVED",
+        "5 OCTOBER · 18:46:03",
+        "MONOLITHE IN GOLD",
+        "SIZE 17",
+        "HALO",
+        "SIZE 56",
+        "CONSTELLATION ORBITALE",
+        "SIZE 45",
+        "GIFT BOX",
+        "€ 90",
+        "TOTAL",
+        "€ 12 090",
+        "REFERENCE",
+        "LR-«ref»",
+        "CLIENT SERVICES",
+        "WRITE TO ORBES CLIENT SERVICES",
+        "MY PIECES",
+        "HOW RELEASES WORK",
+        "THE RELEASES",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "IP GEOLOCATION BY DB-IP"
+      ]
     }
   }
 }

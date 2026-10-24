@@ -313,9 +313,8 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
             ? parent
               ? 'The piece held returns: the next in line for its size gets a turn at once. Its add-ons are dropped.'
               : 'The piece held returns and is offered at the next batch. Its add-ons are dropped.'
-            : parent
-              ? 'The entry leaves the release for good: its place, or the piece it holds, goes to the next in line. Its screen says it was removed.'
-              : 'The entry leaves the release for good: those behind it move up, and the piece it holds returns and is offered at the next batch. Its screen says it was removed.',
+            : // The owner's choice (24 Oct): REMOVE keeps production's words on every release.
+              'The entry leaves the release for good: its place, or the piece it holds, goes to the next in line. Its screen says it was removed.',
       ),
       confirmLabel: action === 'letIn' ? 'Let in' : action === 'free' ? 'Free the hold' : 'Remove',
       submit: async () => {

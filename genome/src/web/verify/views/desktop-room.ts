@@ -253,6 +253,12 @@ export class DesktopRoom {
   /** Sold out in its size: YOUR PLACE's label and its figure, as the line draws them (the phone's one line says both). */
   private placeLabel: HTMLElement | null = null;
   private placeFigure: HTMLElement | null = null;
+  /**
+   * A set's CONFIRMED (owner, 24 Oct, ANSWERS «Q1 BUILD QUESTIONS — DECIDED»: its title above its pieces' photographs,
+   * nothing removed): the pieces' photographs side by side between the name and the monogram's horizon, in place of the
+   * window's ground under the act; hidden for a single model's (its photograph stays the ground).
+   */
+  private band: HTMLElement | null = null;
   private facts: RoomFacts | null = null;
 
   constructor(
@@ -297,6 +303,13 @@ export class DesktopRoom {
     for (const [p, sel] of plan) {
       const found = el.querySelector<HTMLElement>(sel);
       if (found) this.place(found, box(p));
+    }
+    if (kind === 'confirmed') {
+      const of = boxes.get('head')?.querySelector<HTMLElement>(':scope > .live__confirmed-of');
+      if (of) {
+        this.band = h('div', { class: 'd-room__band', attrs: { 'aria-hidden': 'true', hidden: true } });
+        of.after(this.band);
+      }
     }
     // The places in the eye's order (and the tab order's): the head, the centre, the corners left then right.
     const order: Place[] = ['head', 'body', 'bl', 'br'];
@@ -350,6 +363,16 @@ export class DesktopRoom {
     // Marked on every update (a room's first screen without a photograph is bare too, whatever the key it starts from).
     this.ground.classList.toggle('is-bare', photos.length === 0);
     this.ground.classList.toggle('d-room__photo--tiles', photos.length > 1);
+    if (this.band) {
+      const banded = photos.length > 1;
+      const said = banded ? key : '';
+      if (this.band.dataset.photos !== said) {
+        this.band.dataset.photos = said;
+        this.band.replaceChildren(...(banded ? photos.map((src) => bandImage(src)) : []));
+      }
+      this.band.hidden = !banded;
+      this.root.classList.toggle('d-room--band', banded);
+    }
     const n = RUNNING.has(this.kind) ? (facts.count ?? 0) : 0;
     this.count.hidden = n <= 0;
     const text = this.count.lastElementChild as HTMLElement;
@@ -416,6 +439,8 @@ export class DesktopRoom {
     this.choice = null;
     this.placeLabel = null;
     this.placeFigure = null;
+    this.band = null;
+    this.root.classList.remove('d-room--band');
     this.screen = null;
     this.kind = null;
   }
@@ -449,6 +474,8 @@ export class DesktopRoom {
     this.choice = null;
     this.placeLabel = null;
     this.placeFigure = null;
+    this.band = null;
+    this.root.classList.remove('d-room--band');
     this.ground.remove();
     this.count.remove();
     this.root.classList.remove(ROOM);
@@ -516,6 +543,13 @@ export class DesktopRoom {
  */
 function groundImage(src?: string): HTMLImageElement {
   const img = h('img', { class: 'd-room__img', attrs: { alt: '', decoding: 'async', fetchpriority: 'high', src: src ?? null } });
+  img.addEventListener('error', () => img.classList.add('is-failed'), { once: true });
+  return img;
+}
+
+/** A piece's photograph in a set's CONFIRMED band (decorative: the band is aria-hidden); one that fails leaves its place. */
+function bandImage(src: string): HTMLImageElement {
+  const img = h('img', { class: 'd-room__band-img', attrs: { alt: '', decoding: 'async', src } });
   img.addEventListener('error', () => img.classList.add('is-failed'), { once: true });
   return img;
 }

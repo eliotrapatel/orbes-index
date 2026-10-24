@@ -188,8 +188,9 @@ describe.skipIf(!HAS_CHROMIUM)('SHARE TO STORIES: its places and its preview fit
 /**
  * CONFIRMED on a computer (lot Q1 §3.7; MK #confirmed, desk): WRITE TO ORBES CLIENT SERVICES fills the room's side
  * column, about 272 px wide at 1024 px; its words stay inside its button's hairline at 1024, 1280 and 1440 px (on two
- * centred lines below 1280), on a model's CONFIRMED, a set's and CONFIRMED after the add-ons' PAY. A set's tiles are
- * lifted, as the one photograph is framed higher ("the piece framed higher, the words under it").
+ * centred lines below 1280), on a model's CONFIRMED, a set's and CONFIRMED after the add-ons' PAY. The one photograph is
+ * framed higher ("the piece framed higher, the words under it"); a set's pieces' photographs stand under its title, on
+ * the monogram's horizon, the window's ground showing none of them (owner, 24 Oct: the title above the photographs).
  */
 describe.skipIf(!HAS_CHROMIUM)('CONFIRMED on a computer: WRITE TO ORBES CLIENT SERVICES inside its button (Chromium)', () => {
   it(
@@ -215,18 +216,25 @@ describe.skipIf(!HAS_CHROMIUM)('CONFIRMED on a computer: WRITE TO ORBES CLIENT S
               });
               if (fit.sw > fit.cw || !fit.inside) found.push(`${state.id} at ${width} px: ${fit.sw} px in ${fit.cw}${fit.inside ? '' : ', past its hairline'}`);
             }
-            // The pieces above CONFIRMED: the one photograph framed at 50% 90%; a set's tiles lifted, each piece's middle
-            // (the photograph's) above the title, at 1024 × 768 and 1440 × 900.
+            // The one photograph framed at 50% 90%; a set's pieces' photographs in the band under the name, above the
+            // monogram's horizon, none on the window's ground, at 1024 × 768 and 1440 × 900.
             for (const win of [{ width: 1024, height: 768 }, { width: 1440, height: 900 }]) {
               await page.setViewportSize(win);
               await settle(page, 300);
               const framing = await page.evaluate(() => {
-                const title = document.querySelector('.live__confirmed h1')!.getBoundingClientRect().top;
-                return [...document.querySelectorAll('.d-room > .d-room__photo > .d-room__img')].map((el) => {
-                  if (!el.parentElement!.classList.contains('d-room__photo--tiles')) return getComputedStyle(el).objectPosition === '50% 90%' ? 'ok' : `framed at ${getComputedStyle(el).objectPosition}`;
-                  const r = el.getBoundingClientRect();
-                  return r.top + r.height / 2 < title - 100 ? 'ok' : `a tile's middle at ${Math.round(r.top + r.height / 2)}, the title at ${Math.round(title)}`;
-                });
+                const name = document.querySelector('.live__confirmed .live__confirmed-of')!.getBoundingClientRect().bottom;
+                const sign = document.querySelector('.live__confirmed .live__sign')!.getBoundingClientRect();
+                const ground = [...document.querySelectorAll('.d-room > .d-room__photo > .d-room__img')];
+                if (!document.querySelector('.d-room > .d-room__photo--tiles')) return ground.map((el) => (getComputedStyle(el).objectPosition === '50% 90%' ? 'ok' : `framed at ${getComputedStyle(el).objectPosition}`));
+                const band = [...document.querySelectorAll('.d-room__band:not([hidden]) > .d-room__band-img')];
+                return [
+                  ...ground.map((el) => (getComputedStyle(el).visibility === 'hidden' ? 'ok' : 'a tile shown on the ground')),
+                  ...(band.length > 1 ? [] : [`${band.length} photographs in the band`]),
+                  ...band.map((el) => {
+                    const r = el.getBoundingClientRect();
+                    return r.top >= name && r.bottom <= sign.top + sign.height / 2 ? 'ok' : `a photograph at ${Math.round(r.top)}–${Math.round(r.bottom)}, the name's foot at ${Math.round(name)}, the horizon at ${Math.round(sign.top + sign.height / 2)}`;
+                  }),
+                ];
               });
               if (framing.length === 0 || framing.some((f) => f !== 'ok')) found.push(`${state.id} at ${win.width} px: ${framing.join(', ') || 'no photograph'}`);
             }

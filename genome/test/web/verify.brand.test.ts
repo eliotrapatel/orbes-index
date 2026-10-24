@@ -1253,3 +1253,19 @@ describe('GENOME-01 vocabulary specimen (docs/assets/genome-01-vocabulary.svg)',
     expect([...colours].sort()).toEqual(['#111111', '#5c5c5c', '#f6f2ea']);
   });
 });
+
+describe('verify app: the late comer\'s JOIN (owner, 24 Oct, ANSWERS «Q1 BUILD QUESTIONS — DECIDED»)', () => {
+  const liveView = readFileSync(join(WEB, 'verify/views/live.ts'), 'utf8');
+  const piece = liveView.slice(liveView.indexOf('  private piece('), liveView.indexOf('  private seeModel('));
+
+  it('draws its piece as YOUR PIECE: no plate with corners, no grey plate, the picture over its horizon', () => {
+    // No plate with corners anywhere in the release: the JOIN plate (a set's tiles too) has no corner marks.
+    expect(piece).not.toContain('bracket(');
+    expect(liveView).not.toMatch(/\bbracket\(/);
+    expect(piece).toContain("h('span', { class: 'live__floor', attrs: { 'aria-hidden': 'true' } }, h('span', { class: 'live__floor-sky' }), h('span', { class: 'live__floor-line' }))");
+    expect(rule(styles, '.live__plate--join')).toMatchObject({ background: 'none', overflow: 'visible' });
+    expect(rule(styles, '.live__plate--join > .live__floor')).toMatchObject({ position: 'absolute', bottom: '0', left: '-32px', right: '-32px' });
+    // The picture's edges dissolve into the vault.
+    expect(rule(styles, '.live__plate--join > .live__img:not(.live__img--tile)')['mask-composite']).toBe('intersect');
+  });
+});

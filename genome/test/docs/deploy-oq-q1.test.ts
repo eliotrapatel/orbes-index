@@ -277,11 +277,14 @@ describe('the runbook of lot ONE QUEUE (docs/launch/DEPLOY-OQ-Q1.md)', () => {
     expect(model).toContain("{ label: 'In line', value: formatCount(t.line)");
     expect(model).toContain("{ label: 'Admitted', value: formatCount(p.admitted), note: 'GIVEN A TURN, ALL WAYS'");
     expect(board).toContain('`In line` en haut du tableau, `Admitted` dans le bloc `Pace` (« GIVEN A TURN, ALL WAYS »)');
-    // REMOVE on a paced release (D5) and the radar's line saying the same; SECURED's PAY above the add-on rows on a computer.
-    const remove = 'The entry leaves the release for good: those behind it move up, and the piece it holds returns and is offered at the next batch. Its screen says it was removed.';
+    // REMOVE keeps production's words on every release (the owner, 24 Oct: leave it unchanged), the radar's line too: no
+    // review-board line for it. SECURED's PAY above the add-on rows on a computer.
+    const remove = 'The entry leaves the release for good: its place, or the piece it holds, goes to the next in line. Its screen says it was removed.';
     expect(views).toContain(remove);
-    expect(board).toContain(remove);
-    expect(source('server/services/live-insights.ts')).toContain('those behind it move up, and the piece it holds returns and is offered at the next batch.');
+    expect(views).not.toContain('those behind it move up');
+    expect(board).not.toContain('`Remove`');
+    expect(source('server/services/live-insights.ts')).toContain('an ADMIN removes an entry with one tap; its place, or the piece it holds, goes to the next in line.');
+    expect(source('server/services/live-insights.ts')).not.toContain('those behind it move up');
     expect(board).toContain('PAY (le temps pour payer dedans), sa note et RELEASE MY PLACE en haut de la colonne de droite');
     expect(source('web/admin/model/live-intelligence.ts')).toContain("return 'No sales rate yet';");
     expect(board).toContain('`No sales rate yet`');
@@ -518,9 +521,20 @@ describe('the runbook of lot ONE QUEUE (docs/launch/DEPLOY-OQ-Q1.md)', () => {
     expect(open).toContain('« 5 250 PIECES »');
     expect(open).toContain('« 25 PIECES »');
     expect(open).toContain('(la note au juriste, point 29)');
-    // The console's REMOVE says the next-batch rule (D5): no longer a question for the owner.
-    expect(open).not.toContain('REMOVE');
-    expect(source('web/admin/views/live.ts')).toContain('the piece it holds returns and is offered at the next batch. Its screen says it was removed.');
+    // The owner's answers of 24 Oct (ANSWERS «Q1 BUILD QUESTIONS — DECIDED») recorded as decided: the welcome voice in the
+    // after-room is the only question left (built as no, N6).
+    expect(open).toContain("**La seule question encore ouverte du lot**, sans bloquer : la voix d'accueil dans l'after-room.");
+    for (const decided of [
+      'le halo de PAY seulement dans les derniers 10 % du temps pour payer',
+      "l'écran JOIN d'un retardataire montre sa pièce sans plaque ni coins, comme YOUR PIECE",
+      'le dialogue `Remove` de la console garde ses mots de production',
+      'la politique de confidentialité ne change pas',
+      "le son synthétisé du résultat d'un scan reste tel quel",
+      "le titre CONFIRMED d'un set est au-dessus des photos de ses pièces",
+      'la largeur du tableau des tailles de la console (1440 et 1024) est pour plus tard',
+    ])
+      expect(open, decided).toContain(decided);
+    for (const asked of ['la garder telle quelle', 'ou toujours', 'orbes.live.welcome', 'le lot qui a donné le tour']) expect(open, asked).not.toContain(asked);
     expect(readDoc('docs/legal/counsel-note.fr.md')).toContain('29. **Le rythme d\'une LIVE RELEASE** (CGU article 13 ; R165, R106 ; lot M1, version 2026-10-21 ; lot Q1, ONE QUEUE, version 2026-10-24)');
   });
 

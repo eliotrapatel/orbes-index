@@ -1154,11 +1154,7 @@ export function botRadar(r: InsightRelease, facts: readonly BotEntryFacts[]): Bo
       `A very new account: created less than ${count(rules.newAccountHours)} hours before it entered.`,
       `Many entries from one network: ${count(rules.networkCrowd)} or more entries whose address shares a network (its keyed hash, never the address; erased ${count(LIVE_NETWORK_RETENTION_DAYS)} days after the end). A boutique's or an office's network may be one.`,
       `A machine-regular hold: the seal held less than ${count(rules.gestureFloorMs)} ms (the house's ring fills in ${count(LIVE_HOUSE_RING_MS)} ms; the server refuses under ${count(LIVE_GESTURE_MIN_MS)} ms), or ${count(rules.gestureRepeat.count)} holds or more of one account, across releases, within ${count(rules.gestureRepeat.spreadMs)} ms of each other.`,
-      // As the console's REMOVE says it (ONE QUEUE, D5): on a paced release a piece returned is offered at the next batch;
-      // without a pace (an after-room), it goes at once.
-      r.pace
-        ? 'A sign is a reason to look, not a proof: an ADMIN removes an entry with one tap; those behind it move up, and the piece it holds returns and is offered at the next batch.'
-        : 'A sign is a reason to look, not a proof: an ADMIN removes an entry with one tap; its place, or the piece it holds, goes to the next in line.',
+      'A sign is a reason to look, not a proof: an ADMIN removes an entry with one tap; its place, or the piece it holds, goes to the next in line.',
     ],
   };
 }

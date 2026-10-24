@@ -73,7 +73,6 @@
  * the server's refusals read as it wrote them. Reduced motion: cross-fades only. aria-live: the place, the turn, the
  * piece secured. One primary action per screen (filled ivory): ENTER, the size chosen, PAY.
  */
-import { bracket } from '../../shared/corners.js';
 import { addonRows, chosenRows, chosenUnits, leftOutLines, rowsChoice, rowsLimit, withUnits, type AddonRowModel } from '../addons-model.js';
 import { h, prefersReducedMotion, s } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
@@ -222,7 +221,8 @@ const END_PAGES: ReadonlySet<string> = new Set(['missed', 'expired', 'released',
  * the top 300 of 844 px, ORBES (and the host's message, where the room shows it) on its darkened top, no corner marks,
  * no grey plate with corners: the room before the opening and its draw (2, 3, 3b), the one queue in every state and the
  * after-room's wait (A), SOLD OUT in your size (S), the turn and the hold (4, 4b), secured (5), CONFIRMED (6), the
- * after-room's door (10). Every other screen keeps its look (the late comer's JOIN with its plate, 7, 8, 9, 11; N13).
+ * after-room's door (10). Every other screen keeps its look (7, 8, 9, 11); the late comer's JOIN too, but its piece, drawn
+ * as YOUR PIECE without a plate or corner marks (owner, 24 Oct: piece()).
  */
 const LOOK: ReadonlySet<string> = new Set(['room', 'queue', 'soldOut', 'turn', 'secured', 'confirmed', 'afterRoom']);
 /**
@@ -1570,9 +1570,12 @@ class LivePage {
   }
 
   /**
-   * The piece on a plate: its photograph, else its silhouette, else the seal; a picture that fails takes the seal's place.
-   * Macro scope K44 T1: a set's pieces, their photographs side by side on the plate (`set`, from the photograph's stage).
-   * Framed by its corner marks: the late comer's JOIN, as today (N13); the room's door is a horizon since lot Q1 §3.4.
+   * The piece on the vault: its photograph, else its silhouette, else the seal; a picture that fails takes the seal's place.
+   * Macro scope K44 T1: a set's pieces, their photographs side by side (`set`, from the photograph's stage).
+   * The late comer's JOIN (owner, 24 Oct, ANSWERS «Q1 BUILD QUESTIONS — DECIDED»: no plate with corners anywhere in the
+   * release): drawn as YOUR PIECE on SECURED, no grey plate, no corner marks; the picture's edges dissolving into the
+   * vault, standing in the light pooled over a hairline horizon (house.css .live__plate--join). The room's door is a
+   * horizon since lot Q1 §3.4.
    */
   private piece(picture: LivePicture | null, extra: string, sweep = false, set: SetCardModel | null = null): HTMLElement {
     const plate = h('div', { class: ['live__plate', extra] });
@@ -1605,7 +1608,9 @@ class LivePage {
         plate.append(light);
       }
     } else plate.append(seal());
-    return bracket(plate);
+    // Its horizon, as YOUR PIECE's (securedScreen): a hairline dissolving at its ends, the light pooled above it.
+    plate.append(h('span', { class: 'live__floor', attrs: { 'aria-hidden': 'true' } }, h('span', { class: 'live__floor-sky' }), h('span', { class: 'live__floor-line' })));
+    return plate;
   }
 
   /** SEE THE MODEL, once the photograph is revealed and the model's sheet is public; else nothing. */

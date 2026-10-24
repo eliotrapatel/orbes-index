@@ -921,13 +921,18 @@
     display: none;
   }
 
-  /* The piece under its light: its photograph whole on a square plate (the phone's plate is wider than the square
-     photograph; on the window's photograph its sides would read as bars). */
+  /* The piece under its light: its photograph whole in a square (the phone's is wider than the square photograph),
+     on the vault as YOUR PIECE (owner, 24 Oct: no plate, no corner marks), its horizon further past it on the window. */
   html:not(.d-touch) .d-room .d-room__body > .live__plate--join {
     width: min(100%, clamp(240px, 22.23vw, 400px), max(240px, 100vh - 560px));
     max-width: none;
     margin: 0;
     aspect-ratio: 1;
+  }
+
+  html:not(.d-touch) .d-room .d-room__body > .live__plate--join > .live__floor {
+    right: -80px;
+    left: -80px;
   }
 
   html:not(.d-touch) .d-room .d-room__body > .live__left {
@@ -1586,19 +1591,73 @@
     object-position: 50% 90%;
   }
 
-  /* A set's pieces framed higher too (MK desk: "the piece framed higher, the words under it"): side by side, each tile's
-     photograph fills the window's height and is cropped at its sides, so it has no height to spare for a framing; each
-     is lifted by 22 % of the window instead, its foot dissolving into the ground under the act. */
-  html:not(.d-touch) .d-room[data-d-kind="confirmed"] > .d-room__photo--tiles > .d-room__img {
-    transform: translateY(-22%);
-    -webkit-mask-image: linear-gradient(180deg, #fff 62%, transparent 100%);
-    mask-image: linear-gradient(180deg, #fff 62%, transparent 100%);
-  }
-
   html:not(.d-touch) .d-room .d-room__screen--confirmed {
     grid-template-rows: [top] 312px [head] auto [body] 0 [rest] auto;
     row-gap: 0;
     align-content: start;
+  }
+
+  /* A set's CONFIRMED (owner, 24 Oct 2026: its title above its pieces' photographs, nothing removed; desktop-room.ts
+     band): the act from the top of the window; the pieces' photographs side by side between the name and the monogram's
+     horizon, standing in its light, their edges dissolving into the vault; the window's ground keeps its veils only. */
+  html:not(.d-touch) .d-room.d-room--band {
+    --d-band-h: clamp(180px, calc(var(--d-frame-page) - 630px), 400px);
+  }
+
+  html:not(.d-touch) .d-room.d-room--band > .d-room__photo {
+    background-color: transparent;
+  }
+
+  html:not(.d-touch) .d-room.d-room--band > .d-room__photo > .d-room__img {
+    visibility: hidden;
+  }
+
+  html:not(.d-touch) .d-room.d-room--band .d-room__screen--confirmed {
+    grid-template-rows: [top] 0 [head] auto [body] 0 [rest] auto;
+  }
+
+  html:not(.d-touch) .d-room .d-room__head > .d-room__band {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    grid-auto-columns: minmax(0, 1fr);
+    grid-auto-flow: column;
+    gap: 2px;
+    width: min(100%, calc(var(--d-band-h) * 3.6));
+    height: var(--d-band-h);
+    margin: 32px 0 -40px;
+  }
+
+  html:not(.d-touch) .d-room .d-room__head > .d-room__band[hidden] {
+    display: none;
+  }
+
+  html:not(.d-touch) .d-room .d-room__band-img {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    max-width: none;
+    object-fit: cover;
+    -webkit-mask-image: linear-gradient(180deg, transparent 0, #fff 14%, #fff 62%, transparent 100%);
+    mask-image: linear-gradient(180deg, transparent 0, #fff 14%, #fff 62%, transparent 100%);
+  }
+
+  html:not(.d-touch) .d-room .d-room__band-img:first-child {
+    -webkit-mask-image: linear-gradient(180deg, transparent 0, #fff 14%, #fff 62%, transparent 100%), linear-gradient(90deg, transparent 0, #fff 30%);
+    mask-image: linear-gradient(180deg, transparent 0, #fff 14%, #fff 62%, transparent 100%), linear-gradient(90deg, transparent 0, #fff 30%);
+    -webkit-mask-composite: source-in;
+    mask-composite: intersect;
+  }
+
+  html:not(.d-touch) .d-room .d-room__band-img:last-child {
+    -webkit-mask-image: linear-gradient(180deg, transparent 0, #fff 14%, #fff 62%, transparent 100%), linear-gradient(270deg, transparent 0, #fff 30%);
+    mask-image: linear-gradient(180deg, transparent 0, #fff 14%, #fff 62%, transparent 100%), linear-gradient(270deg, transparent 0, #fff 30%);
+    -webkit-mask-composite: source-in;
+    mask-composite: intersect;
+  }
+
+  html:not(.d-touch) .d-room .d-room__band-img.is-failed {
+    visibility: hidden;
   }
 
   html:not(.d-touch) .d-room .d-room__screen--confirmed > :is(.d-room__bl, .d-room__br) {
@@ -1766,7 +1825,8 @@
       --cm-w: 2.3s;
     }
 
-    html:not(.d-touch) .d-room.live--tx-confirmed > .d-room__photo {
+    html:not(.d-touch) .d-room.live--tx-confirmed > .d-room__photo,
+    html:not(.d-touch) .d-room.live--tx-confirmed .d-room__band {
       animation: live-tx-photo-up 1.7s cubic-bezier(0.16, 1, 0.3, 1) var(--cm-p) backwards;
     }
 

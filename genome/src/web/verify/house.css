@@ -2901,9 +2901,62 @@ body[data-screen="live"]:has(.view--live.live--look:not(.d-room)) .corners {
   margin-top: 26px;
 }
 
-/* After T0, an account not in the line yet. */
+/* After T0, an account not in the line yet. Its piece on the vault as YOUR PIECE stands on SECURED (owner, 24 Oct: no
+   plate with corners anywhere in the release): no grey plate, no corner marks; the picture whole, its edges dissolving
+   into the vault, standing in the light pooled over the hairline horizon at its foot (.live__floor, as SECURED's). */
 .live__plate--join {
   margin-top: 22px;
+  overflow: visible;
+  background: none;
+}
+
+.live__plate--join > :is(.live__img, .live__plate-seal) {
+  position: relative;
+  z-index: 1;
+}
+
+.live__plate--join > .live__img:not(.live__img--tile) {
+  width: auto;
+  max-width: 100%;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #fff 12%, #fff 62%, transparent 100%), linear-gradient(90deg, transparent 0, #fff 14%, #fff 86%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0, #fff 12%, #fff 62%, transparent 100%), linear-gradient(90deg, transparent 0, #fff 14%, #fff 86%, transparent 100%);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+}
+
+.live__plate--join > .live__img--tile {
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #fff 12%, #fff 62%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0, #fff 12%, #fff 62%, transparent 100%);
+}
+
+.live__plate--join > .live__img--tile:first-of-type {
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #fff 12%, #fff 62%, transparent 100%), linear-gradient(90deg, transparent 0, #fff 30%);
+  mask-image: linear-gradient(180deg, transparent 0, #fff 12%, #fff 62%, transparent 100%), linear-gradient(90deg, transparent 0, #fff 30%);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+}
+
+.live__plate--join > .live__img--tile:last-of-type {
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #fff 12%, #fff 62%, transparent 100%), linear-gradient(270deg, transparent 0, #fff 30%);
+  mask-image: linear-gradient(180deg, transparent 0, #fff 12%, #fff 62%, transparent 100%), linear-gradient(270deg, transparent 0, #fff 30%);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+}
+
+.live__plate--join > .live__plate-seal {
+  margin-bottom: 18px;
+}
+
+.live__plate--join > .live__sweep {
+  z-index: 2;
+}
+
+.live__plate--join > .live__floor {
+  position: absolute;
+  right: -32px;
+  bottom: 0;
+  left: -32px;
+  margin: 0;
 }
 
 .live__join-line {

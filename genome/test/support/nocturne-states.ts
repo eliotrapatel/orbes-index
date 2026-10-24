@@ -2923,6 +2923,40 @@ async function payOnFirstScreen(page: Page): Promise<string[]> {
   ];
 }
 
+/**
+ * A set's CONFIRMED on a computer (owner, 24 Oct, ANSWERS «Q1 BUILD QUESTIONS — DECIDED»: its title above its pieces'
+ * photographs): the title block (CONFIRMED, LIVE RELEASE, the set's name) intersects none of the pieces' photographs
+ * shown, and every one of them is below it.
+ */
+async function setConfirmedTitleClear(page: Page): Promise<string[]> {
+  const at = await page.evaluate(() => {
+    const box = (e: Element) => {
+      const r = e.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom, left: r.left, right: r.right };
+    };
+    const parts = [...document.querySelectorAll('.d-room__head > :is(.live__title, .live__confirmed-of)')].map(box);
+    const tiles = [...document.querySelectorAll('.d-room__band-img, .d-room > .d-room__photo--tiles > .d-room__img')]
+      .filter((e) => getComputedStyle(e).visibility !== 'hidden' && (e as HTMLElement).offsetParent !== null && !e.closest('[hidden]'))
+      .map(box);
+    return { parts, tiles };
+  });
+  if (at.parts.length < 2) return ['no CONFIRMED title block in the head'];
+  if (at.tiles.length < 2) return [`${at.tiles.length} of the set's photographs shown`];
+  const title = {
+    top: Math.min(...at.parts.map((p) => p.top)),
+    bottom: Math.max(...at.parts.map((p) => p.bottom)),
+    left: Math.min(...at.parts.map((p) => p.left)),
+    right: Math.max(...at.parts.map((p) => p.right)),
+  };
+  return at.tiles.flatMap((t, i) => {
+    const meets = t.left < title.right && t.right > title.left && t.top < title.bottom && t.bottom > title.top;
+    return [
+      ...(meets ? [`the title block (${Math.round(title.top)}–${Math.round(title.bottom)} px) lies on photograph ${i + 1} (${Math.round(t.top)}–${Math.round(t.bottom)} px)`] : []),
+      ...(t.top < title.bottom ? [`photograph ${i + 1} starts at ${Math.round(t.top)} px, above the title block's foot (${Math.round(title.bottom)} px)`] : []),
+    ];
+  });
+}
+
 /** The phone's states `ids` on a computer's window of `width`. */
 const desk = (width: DeskWidth, ...ids: string[]): UiState[] => ids.map((id) => onDesk(phoneState(id), width));
 /** The phone's states `ids` on each window of `widths` (in light with `light`), in the order of `ids` then of the windows. */
@@ -3350,7 +3384,10 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
     ...desk(1440, 'releases-stress', 'room-stress', 'live-far-stress', 'circle-stress', 'post-stress', 'post-poll-stress', 'result-ceremony-stress'),
     ...desk(1440, 'pieces-empty', 'collection-empty', 'releases-empty', 'circle-empty'),
     // THE SET's LIVE RELEASE in the Cinema room (lot M3, K44 T1, T4; the stage set-live): every screen of its room.
-    ...desk(1440, 'set-room', 'set-room-ready', 'set-live-join', 'set-live-line', 'set-live-turn', 'set-live-secured', 'set-live-confirmed', 'set-live-sold-out'),
+    ...desk(1440, 'set-room', 'set-room-ready', 'set-live-join', 'set-live-line', 'set-live-turn', 'set-live-secured'),
+    // Its CONFIRMED: the title above the pieces' photographs (owner, 24 Oct), held by a geometry.
+    onDesk(phoneState('set-live-confirmed'), 1440, { extra: { check: setConfirmedTitleClear } }),
+    ...desk(1440, 'set-live-sold-out'),
   ],
   // ── The emails' screens (lot M1, step M1.19, E1–E3) on the stage `email`: each at 1440 × 900, RESET BY EMAIL, the
   // link's page, YOUR PROFILE's release notices and STOP THESE EMAILS also in light, the link's form and STOP THESE EMAILS
@@ -3374,7 +3411,7 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
   ],
   // ── WORN (lot M2, D31) on the stage `worn`: a piece's block with no photograph, a photograph chosen (the drop zone's
   // preview), in review and published at 1440 × 900; no photograph and published also in light; chosen at 1024 × 768;
-  // and the sheet's WORN (step M2.11) ──
+  // and the sheet's WORN (step M2.11); then the catalogue add-ons, and last a set's CONFIRMED at 1024 × 768 (lot Q1) ──
   'desk-14': [
     ...desk(1440, 'piece-worn', 'piece-worn-chosen', 'piece-worn-review', 'piece-worn-published'),
     onDesk(phoneState('piece-worn'), 1440, { light: true }),
@@ -3401,6 +3438,9 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
     ...desk(1440, 'addons-sheet', 'addons-sheet-none', 'addons-sheet-error'),
     onDesk(phoneState('addons-sheet'), 1440, { light: true }),
     ...desk(1440, 'addons-pay'),
+    // A set's CONFIRMED at 1024 × 768, last (its own stage, set-live, read only): the title above the pieces' photographs
+    // (owner, 24 Oct).
+    onDesk(phoneState('set-live-confirmed'), 1024, { extra: { check: setConfirmedTitleClear } }),
   ],
 });
 
