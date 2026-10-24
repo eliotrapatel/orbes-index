@@ -1,6 +1,6 @@
 # Terms of use of the ORBES GENOME CODE service
 
-**Draft for legal review, not validated.** Version: 23 October 2026. [Version française](terms.fr.md).
+**Draft for legal review, not validated.** Version: 24 October 2026. [Version française](terms.fr.md).
 
 Each article ends with a *Code: …* line that points to the rules of the code it describes ([TERMS-FACTS](TERMS-FACTS.md)). These lines are for the review and are not published. The [À COMPLÉTER: …] fields await the legal identity of ORBES and counsel's choices ([note for counsel](counsel-note.fr.md), in French). Every field keeps the French marker, so that one search finds them all in both languages.
 
@@ -222,7 +222,7 @@ A LIVE RELEASE is a release that takes place live, without a draw: ORBES announc
 
 **The line.** At the opening, the accounts in the room form the line. Unless the release provides otherwise, the line follows the tier first, read at the opening: PALLADIUM, PLATINE, TITANE, then the accounts without a tier. Within a tier, or for every account when the release does not follow the tiers, the order is that of the SHA-256 of a seed of the release followed by the identifier of the entry: the seed is drawn and sealed when the release is created, and is never published. An account that leaves the room before the opening may enter it again; an entry that has had its place in the line never returns to it. An account that enters after the opening chooses its size as it enters and joins the line behind, in the order of arrival.
 
-**The pace.** A release may admit its line in batches, a number of accounts every few minutes, in the line's order; the page shows your place and an estimated time; your place is kept.
+**The pace.** A release gives turns at its pace, a number of turns every few minutes, in the line's order, after an optional wait following the opening; the page shows your place and an estimated time; your place is kept.
 
 **Your turn.** When enough pieces of your size are free for the quantity you chose and you are next in the line for that size, it is your turn. You then have 30 seconds, unless the release sets another time (from 10 to 300 seconds, which may differ by tier), to press and hold, on your screen, the ORBES CODE of the room, a specimen that is no piece's code, until its ring is full. The service secures the piece only for a hold of at least 1.4 seconds, measured by its own clock. A turn not taken in time passes, and its piece goes to the next in line.
 
@@ -230,7 +230,7 @@ A LIVE RELEASE is a release that takes place live, without a draw: ORBES announc
 
 **PAY.** PAY confirms the reservation of the piece held, with its options and their total, and creates its order, one per piece (article 14). Nothing is paid on the service: ORBES Client Services contacts you for payment and delivery, then concludes the sale with you, outside the service, or cancels the order. MY PIECES shows your reservation, its reference and its order.
 
-**A piece that returns.** A piece whose turn passes, whose hold ends, that is given back, or whose entry ORBES removes returns to the line: the next account in the line for its size gets a turn at once.
+**A piece that returns.** A piece whose turn passes, whose hold ends, that is given back, or whose entry ORBES removes returns to the line and is offered with the release's next turns, at its pace; in an after-room, the next account in its line for its size gets a turn at once.
 
 **What ORBES may do.** During a release, ORBES may pause it, no turn being given meanwhile and the turns and holds under way stopping, then resuming with the time they had left; extend its end; add pieces to a size; let a person in the line take their turn at once; remove an entry; or end the release early. The quantity announced is the quantity ORBES offers; ORBES may nevertheless add pieces during the release, and each addition is recorded.
 

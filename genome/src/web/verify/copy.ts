@@ -1614,6 +1614,11 @@ export const HOW = Object.freeze({
       term: 'IN A LIVE RELEASE',
       text: 'Places guaranteed by ORBES come first in their size. At the opening, the places of the collectors present in the room are drawn by tier, the highest first, then at random within each tier. A release may instead draw every place at random; its page says so. Those who arrive after the opening join the line behind, in order of arrival.',
     }),
+    /** ONE QUEUE (lot Q1, D13; ANSWERS r10 "Add the paragraph"): the pace in one neutral paragraph, no figure, no reason. */
+    pace: Object.freeze({
+      term: 'THE PACE',
+      text: 'In a LIVE RELEASE, turns are given at the release’s pace, in the order of the line. Your screen shows your place and an estimated time.',
+    }),
   }),
   never: Object.freeze({
     title: 'WHAT THE HOUSE NEVER DOES',

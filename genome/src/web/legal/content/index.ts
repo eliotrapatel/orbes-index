@@ -74,8 +74,14 @@ export { LANGS, type Block, type Lang, type LegalDocument, type LegalSection } f
  * and returned whole, a piece's size still exchanged: T1 to T4), and the return paragraph's set returned whole. The date
  * of the lot's final legal commit, never M1's 2026-10-21 nor M2's 2026-10-22. Article 11 did not change:
  * CARE_CONDITIONS_VERSION stays 2026-10-15; the consents recorded with the version in force move with it.
+ * 2026-10-24 is the version of lot Q1, ONE QUEUE (owner's decisions D13 and L2; plan step Q1.12): the terms' article 13,
+ * its two sentences only, "The pace" (turns given at the release's pace, in the line's order, after an optional wait
+ * following the opening) and "A piece that returns" (offered with the release's next turns, at its pace; at once in an
+ * after-room); "What ORBES may do" and every other text unchanged. The date of the lot's final legal commit, never M3's
+ * published 2026-10-23 (the day after it). Article 11 did not change: CARE_CONDITIONS_VERSION stays 2026-10-15; the
+ * consents recorded with the version in force move with it.
  */
-export const LEGAL_VERSION = '2026-10-23';
+export const LEGAL_VERSION = '2026-10-24';
 
 export const DOCUMENTS: Readonly<Record<LegalPage, Readonly<Record<Lang, LegalDocument>>>> = Object.freeze({
   privacy: PRIVACY,

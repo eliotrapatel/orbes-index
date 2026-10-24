@@ -819,6 +819,33 @@ describe('legal pages: the privacy policy, written from the code', () => {
     }
   });
 
+  it('says ONE QUEUE in article 13\'s two sentences only (lot Q1, D13, L2): turns at the release\'s pace after an optional wait, a returned piece offered with the next turns, at once in an after-room; "What ORBES may do" unchanged', () => {
+    // The code (services/live.ts): the batches give turns, up to the pace's number, from the end of the hold; an
+    // after-room gives them at once (TERMS-FACTS R165, R106).
+    const live = readDoc('genome/src/server/services/live.ts');
+    for (const x of ['const grants = await this.batchGrants(tx, d, slot, d.pace_batch);', 'private async giveTurnsAtOnce(', 'async nextBatch(']) expect(live).toContain(x);
+    const says = {
+      en: [
+        "**The pace.** A release gives turns at its pace, a number of turns every few minutes, in the line's order, after an optional wait following the opening; the page shows your place and an estimated time; your place is kept.",
+        "**A piece that returns.** A piece whose turn passes, whose hold ends, that is given back, or whose entry ORBES removes returns to the line and is offered with the release's next turns, at its pace; in an after-room, the next account in its line for its size gets a turn at once.",
+        '**What ORBES may do.** During a release, ORBES may pause it, no turn being given meanwhile and the turns and holds under way stopping, then resuming with the time they had left; extend its end; add pieces to a size; let a person in the line take their turn at once; remove an entry; or end the release early. The quantity announced is the quantity ORBES offers; ORBES may nevertheless add pieces during the release, and each addition is recorded.',
+      ],
+      fr: [
+        "**Le rythme.** Une sortie donne les tours à son rythme, un nombre de tours toutes les quelques minutes, dans l'ordre de la file, après une attente éventuelle suivant l'ouverture ; la page montre votre place et une heure estimée ; votre place est gardée.",
+        "**Une pièce qui revient.** Une pièce dont le tour passe, dont la tenue prend fin, qui est rendue, ou dont ORBES retire l'entrée, revient à la file et est proposée avec les tours suivants de la sortie, à son rythme ; dans une salle d'après, le compte suivant de sa file dans sa taille reçoit aussitôt un tour.",
+        "**Ce qu'ORBES peut faire.** Pendant une sortie, ORBES peut la suspendre, aucun tour n'étant alors donné et les tours et les tenues en cours s'arrêtant, puis reprenant avec le temps qui leur restait ; prolonger sa fin ; ajouter des pièces à une taille ; faire passer une personne de la file à son tour aussitôt ; retirer une entrée ; ou mettre fin à la sortie avant son terme. La quantité annoncée est celle qu'ORBES propose ; ORBES peut néanmoins ajouter des pièces pendant la sortie, et chaque ajout est enregistré.",
+      ],
+    } as const;
+    for (const lang of LANGS) {
+      const blocks = DOCUMENTS.terms[lang].sections.find((x) => x.id === 'article-13')!.blocks;
+      for (const x of says[lang]) expect(blocks, `${lang}: ${x}`).toContain(x);
+      // No figure of the pace or the hold enters the terms, and M1's admission is gone.
+      const pace = blocks.find((b) => typeof b === 'string' && b.startsWith(says[lang][0].slice(0, 12))) as string;
+      expect(pace).not.toMatch(/\d/);
+      expect(readText(DOCUMENTS.terms[lang], lang), lang).not.toMatch(/admit its line|admettre sa file|a number of accounts every|un nombre de comptes toutes/);
+    }
+  });
+
   it('covers what the plan names: data collected, the IP hash, the device cookie, the location, accounts, retention, hosting, DB-IP', () => {
     const ids = DOCUMENTS.privacy.en.sections.map((s) => s.id);
     expect(ids).toEqual(expect.arrayContaining(['controller', 'verification', 'account', 'cookies', 'recipients', 'location', 'retention', 'rights', 'live', 'orders', 'segments', 'founding-list', 'emails', 'house-messages', 'worn']));
@@ -1017,6 +1044,11 @@ describe('legal pages: both languages, links, lexicon', () => {
       // 2026-10-21 nor M2's 2026-10-22; article 11 unchanged. The lot's audit, the same day: article 14's add-ons say
       // ORBES Client Services changes them until the parcel is packed (409 PACKING_PACKED, TERMS-FACTS R182).
       '2026-10-23': '4e94e883d1658b7f',
+      // Lot Q1, ONE QUEUE (D13, L2; step Q1.12): the terms' article 13, its two sentences only, "The pace" (turns at the
+      // release's pace after an optional wait following the opening) and "A piece that returns" (offered with the next
+      // turns, at once in an after-room); "What ORBES may do" unchanged. The date of the lot's final legal commit, never
+      // M3's published 2026-10-23 (the day after it); article 11 unchanged.
+      '2026-10-24': '5f3042053bd6250a',
     };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
     expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });

@@ -1,6 +1,6 @@
 # Conditions générales d'utilisation du service ORBES GENOME CODE
 
-**Brouillon pour revue juridique, non validé.** Version : 23 octobre 2026. [English version](terms.en.md).
+**Brouillon pour revue juridique, non validé.** Version : 24 octobre 2026. [English version](terms.en.md).
 
 Chaque article se termine par une ligne *Code : …* qui renvoie aux règles du code qu'il décrit ([TERMS-FACTS](TERMS-FACTS.md)). Ces lignes servent à la revue et ne sont pas publiées. Les champs [À COMPLÉTER : …] attendent l'identité légale d'ORBES et les choix de l'avocat ([note pour l'avocat](counsel-note.fr.md)).
 
@@ -222,7 +222,7 @@ Une LIVE RELEASE est une sortie qui se vit en direct, sans tirage : ORBES l'anno
 
 **La file.** À l'ouverture, les comptes de la salle forment la file. Sauf si la sortie en dispose autrement, la file suit d'abord le palier, lu à l'ouverture : PALLADIUM, PLATINE, TITANE, puis les comptes sans palier. Dans un palier, ou pour tous les comptes quand la sortie ne suit pas les paliers, l'ordre est celui du SHA-256 d'une graine de la sortie suivie de l'identifiant de l'entrée : la graine est tirée et scellée à la création de la sortie, et n'est jamais publiée. Un compte qui quitte la salle avant l'ouverture peut y entrer de nouveau ; une entrée qui a eu sa place dans la file n'y revient jamais. Un compte qui entre après l'ouverture choisit sa taille en entrant et prend place derrière la file, dans l'ordre d'arrivée.
 
-**Le rythme.** Une sortie peut admettre sa file par lots, un nombre de comptes toutes les quelques minutes, dans l'ordre de la file ; la page montre votre place et une heure estimée ; votre place est gardée.
+**Le rythme.** Une sortie donne les tours à son rythme, un nombre de tours toutes les quelques minutes, dans l'ordre de la file, après une attente éventuelle suivant l'ouverture ; la page montre votre place et une heure estimée ; votre place est gardée.
 
 **Votre tour.** Quand assez de pièces de votre taille sont libres pour la quantité choisie et que vous êtes le suivant de la file dans cette taille, c'est votre tour. Vous avez alors 30 secondes, sauf si la sortie fixe un autre délai (de 10 à 300 secondes, qui peut varier selon le palier), pour appuyer à l'écran sur l'ORBES CODE de la salle, un spécimen qui n'est le code d'aucune pièce, et le maintenir jusqu'à ce que son anneau soit plein. Le service ne sécurise la pièce que pour un appui d'au moins 1,4 seconde, mesuré par sa propre horloge. Un tour qui n'est pas pris à temps passe, et sa pièce va au suivant de la file.
 
@@ -230,7 +230,7 @@ Une LIVE RELEASE est une sortie qui se vit en direct, sans tirage : ORBES l'anno
 
 **PAY.** PAY confirme la réservation de la pièce tenue, avec ses options et leur total, et crée sa commande, une par pièce (article 14). Rien n'est payé sur le service : ORBES Client Services vous contacte pour le paiement et la livraison, puis conclut la vente avec vous, hors du service, ou annule la commande. MY PIECES montre votre réservation, sa référence et sa commande.
 
-**Une pièce qui revient.** Une pièce dont le tour passe, dont la tenue prend fin, qui est rendue, ou dont ORBES retire l'entrée, revient à la file : le compte suivant de la file dans sa taille reçoit aussitôt un tour.
+**Une pièce qui revient.** Une pièce dont le tour passe, dont la tenue prend fin, qui est rendue, ou dont ORBES retire l'entrée, revient à la file et est proposée avec les tours suivants de la sortie, à son rythme ; dans une salle d'après, le compte suivant de sa file dans sa taille reçoit aussitôt un tour.
 
 **Ce qu'ORBES peut faire.** Pendant une sortie, ORBES peut la suspendre, aucun tour n'étant alors donné et les tours et les tenues en cours s'arrêtant, puis reprenant avec le temps qui leur restait ; prolonger sa fin ; ajouter des pièces à une taille ; faire passer une personne de la file à son tour aussitôt ; retirer une entrée ; ou mettre fin à la sortie avant son terme. La quantité annoncée est celle qu'ORBES propose ; ORBES peut néanmoins ajouter des pièces pendant la sortie, et chaque ajout est enregistré.
 

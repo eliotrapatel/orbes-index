@@ -622,6 +622,7 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'arrivals after T0 behind, in arrival order (choice 2)': "? { status: 'QUEUED' as const, position: place ?? (await this.lastPosition(tx, id)) + 1, queued_at: now }",
   'the hold gesture checked on the server (choice 8)': 'if (gesture < LIVE_GESTURE_MIN_MS) throw holdTooShort();',
   'PAY confirms a reservation, nothing paid (choices 4, 33)': ".set({ status: 'CONFIRMED', confirmed_at: now })",
+  // (ONE QUEUE, D13: offered with the next batch, at once in an after-room; R106 and article 13's "A piece that returns".)
   'a piece returned goes to the next in line (choice 5)': ".set((eb) => ({ status: 'MISSED', ended_at: eb.ref('turn_expires_at') }))",
   'add-ons at their price when chosen (choice 34)': 'addons.map((a) => ({ entry_id: e.id, addon_id: a.id, price_minor: a.price_minor }))',
   'pieces added, each recorded with the quantity line (choice 36)': 'quantityLine: d.quantity_line',
@@ -655,7 +656,8 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   // The next nine (plan of 2026-10-06), IN-01.
   'the house\'s guarantee, always within the release\'s pieces (IN-01)': 'if (room.taken + pieces > room.capacity) throw exceedsRelease(room.capacity, room.taken);',
   // Lot M1 of the macro plan (scope of 2026-10-20, L2).
-  // (Lot Q1, ONE QUEUE: the batches give turns, M1's admission stage replaced; R165 re-pointed until Q1.12's article 13.)
+  // (Lot Q1, ONE QUEUE, D3 and D13: the batches give turns, M1's admission stage replaced; R165 says so, article 13's "The
+  // pace" with the optional wait after the opening, no figure and no new fact; step Q1.12.)
   'a LIVE RELEASE gives its line its turns in batches, at its pace (W4; ONE QUEUE, D3)': 'const grants = await this.batchGrants(tx, d, slot, d.pace_batch);',
   'a draw reserved for a segment\'s members (F4)': 'if (d.access_segment_id && !(await isSegmentMember(tx, d.access_segment_id, accountId, now))) throw drawNotEligible();',
   'a reset link at most 3 times an hour (E3)': 'if (Number(asked.n) >= RESET_REQUEST_LIMIT) return;',

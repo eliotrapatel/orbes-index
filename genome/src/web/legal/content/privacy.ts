@@ -123,7 +123,9 @@
  *    is drawn on the device and sent nowhere by ORBES: nothing to declare;
  *  - a paced LIVE RELEASE (lot M1 of the macro plan, W4, migration 0049):
  *    each entry's admission to the room (`admitted_at`, `admitted_batch`,
- *    in the export), each batch audited `drop.live.admit` as counts only;
+ *    in the export; since lot Q1, ONE QUEUE, the time and number of the
+ *    batch that gave its turn), each batch audited as counts only
+ *    (`drop.live.batch` since lot Q1, `drop.live.admit` before);
  *    a draw opened to a segment (F4) as a LIVE RELEASE is;
  *  - the founding list (F2-F4, services/founding.ts, migration 0050): the
  *    theorbes.com form's email, first name, country, consent with its time

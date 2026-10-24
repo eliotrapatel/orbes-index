@@ -80,7 +80,7 @@ describe('HOW RELEASES WORK (how-model.ts)', () => {
     expect(m.sections.map((s) => s.title)).toEqual(['THE WAYS TO TAKE PART', 'HOW THE ORDER IS SET', 'WHAT THE HOUSE NEVER DOES']);
     expect(m.sections.map((s) => s.terms.map((t) => t.term))).toEqual([
       ['DRAW', 'EARLY ACCESS', 'LIVE RELEASE', 'THE PRIVATE SALON'],
-      ['THE TIERS', 'IN A DRAW', 'IN A LIVE RELEASE'],
+      ['THE TIERS', 'IN A DRAW', 'IN A LIVE RELEASE', 'THE PACE'],
       ['NO PAID PRIORITY', 'NO AUCTIONS', 'A FIXED QUANTITY', 'ONE COLLECTOR, ONE ACCOUNT', 'A RETURNED PIECE'],
     ]);
     const [ways, order] = m.sections;
@@ -187,5 +187,19 @@ describe('HOW RELEASES WORK: its words', () => {
     expect(HOW.order.live.text).toMatch(/^Places guaranteed by ORBES come first in their size/);
     // The LIVE seed is not said (§6).
     expect(HOW.order.live.text).not.toMatch(/seed/i);
+  });
+
+  it('says THE PACE of a LIVE RELEASE in one neutral paragraph, last of the order: no figure, no reason (ONE QUEUE, D13; ANSWERS r10)', () => {
+    expect(HOW.order.pace).toEqual({
+      term: 'THE PACE',
+      text: 'In a LIVE RELEASE, turns are given at the release’s pace, in the order of the line. Your screen shows your place and an estimated time.',
+    });
+    const m = howPageModel(RULES);
+    const order = m.sections.find((s) => s.id === 'order')!;
+    expect(order.terms.at(-1)).toEqual({ key: 'pace', term: 'THE PACE', text: HOW.order.pace.text, rows: [] });
+    // No figure (never X, Y, the hold or a batch), no reason given, nothing of the console's words.
+    expect(HOW.order.pace.text).not.toMatch(/\d/);
+    expect(HOW.order.pace.text).not.toMatch(/\b(?:because|so that|to keep|fair|batch|minutes?|every|hold|wait)\b/i);
+    expect(HOW.order.pace.text.split('. ')).toHaveLength(2);
   });
 });

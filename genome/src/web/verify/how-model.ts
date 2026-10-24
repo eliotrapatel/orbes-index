@@ -85,7 +85,7 @@ export function howPageModel(rules: ReleaseRules): HowPageModel {
       {
         id: 'order',
         title: HOW.order.title,
-        terms: [term('tiers', HOW.order.tiers, tierRows(rules)), term('draw', HOW.order.draw), term('live', HOW.order.live)],
+        terms: [term('tiers', HOW.order.tiers, tierRows(rules)), term('draw', HOW.order.draw), term('live', HOW.order.live), term('pace', HOW.order.pace)],
       },
       {
         id: 'never',
