@@ -1,4 +1,5 @@
 # ORBES GENOME CODE: continuous integration.
+# Lot ONE QUEUE Q1 (c177f30) is proven on this file as it stands; this comment only gives GitHub a new commit to run on.
 #
 # Runs on every push and pull request that touches the authentication system
 # (genome/), its specifications (docs/), its production stack (deploy/: the
