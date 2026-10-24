@@ -664,7 +664,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
           'p',
           { class: 'dialog__text', data: { testid: 'live-hold-end-text' } },
           started
-            ? `The first batch is given now: up to ${formatCount(p.batch)} ${p.batch === 1 ? 'turn' : 'turns'}, in the line’s order, where a piece is free; the next ones follow every ${p.minutes === 1 ? 'minute' : `${p.minutes} minutes`}.`
+            ? `The first batch is given ${p.paused || b.paused ? 'at the resume' : 'now'}: up to ${formatCount(p.batch)} ${p.batch === 1 ? 'turn' : 'turns'}, in the line’s order, where a piece is free; the next ones follow every ${p.minutes === 1 ? 'minute' : `${p.minutes} minutes`}.`
             : `The first batch comes at T0, without a hold; the next ones follow every ${p.minutes === 1 ? 'minute' : `${p.minutes} minutes`}.`,
         ),
         h('p', { class: 'dialog__text' }, 'Recorded in the audit log.'),

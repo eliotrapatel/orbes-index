@@ -545,7 +545,7 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       const [a, b, c] = [await member(h, f, 5, '198.51.100.7'), await member(h, f, 1), await member(h, f, 1)];
       const enter = await a.client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[1]!.id });
       expect(enter.statusCode).toBe(200);
-      expect((safeJson(enter) as { entry: Record<string, unknown> }).entry).toMatchObject({ status: 'WAITING', size: { label: '52' }, quantity: 1, position: null, queue: null, turn: null });
+      expect((safeJson(enter) as { entry: Record<string, unknown> }).entry).toMatchObject({ status: 'WAITING', size: { label: '52' }, quantity: 1, placed: false, queue: null, turn: null });
       const row = await h.ctx.db.selectFrom('live_entries').select(['network_hash']).where('drop_id', '=', r.id).where('account_id', '=', a.id).executeTakeFirstOrThrow();
       expect(row.network_hash).toEqual(liveNetworkHash(h.ctx.config.ipHashPepper, '198.51.100.7'));
       expect(errorOf(await a.client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[1]!.id })).code).toBe('LIVE_ALREADY_ENTERED');
@@ -562,8 +562,10 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       h.clock.advance(4 * MINUTE);
       await advance(h, r.id);
       expect(errorOf(await b.client.post(`/api/v1/live/${r.id}/size`, { sizeId: r.sizes[1]!.id })).code).toBe('LIVE_SIZE_LOCKED');
-      const sa = safeJson(await a.client.get(`/api/v1/live/${r.id}/state`)) as { entry: { status: string; position: number; turn: { token: string; expiresAt: string } }; room: Record<string, unknown> };
-      expect(sa.entry).toMatchObject({ status: 'TURN', position: 1 });
+      const sa = safeJson(await a.client.get(`/api/v1/live/${r.id}/state`)) as { entry: { status: string; placed: boolean; turn: { token: string; expiresAt: string } }; room: Record<string, unknown> };
+      // D19: the drawn place stays in the console; the entry says only that it is placed.
+      expect(sa.entry).toMatchObject({ status: 'TURN', placed: true });
+      expect(sa.entry).not.toHaveProperty('position');
       expect(sa.entry.turn.expiresAt).toBe(new Date(h.clock.now().getTime() + 30 * SECOND).toISOString());
       // ONE QUEUE (D8, D25, D32): no line's length, no held piece; each size what it still serves one collector.
       expect(sa.room).toMatchObject({ phase: 'LIVE', inRoom: 3, left: 1, sizes: [{ label: '50', stock: 1, left: 0, serves: 1, out: false }, { label: '52', stock: 1, left: 1, serves: 1, out: false }] });
@@ -1293,7 +1295,7 @@ describe('LIVE RELEASES: the customer API and real time', () => {
 
       // Its guest enters at its place, follows it, and finds it in MY PIECES through the release it follows.
       const entered = await guest.client.post(`/api/v1/live/${child}/enter`, { sizeId: r.afterRoom!.sizes[0]!.id });
-      expect(safeJson(entered)).toMatchObject({ entry: { status: 'QUEUED', position: 1 } });
+      expect(safeJson(entered)).toMatchObject({ entry: { status: 'QUEUED', placed: true } });
       // ONE QUEUE (D29): in an after-room every QUEUED entry follows its stream (no pace, no time): next, read every 2 s.
       expect(safeJson(await guest.client.get(`/api/v1/live/${child}/state`))).toMatchObject({ pollMs: 2000, entry: { status: 'QUEUED', afterRoom: null, queue: { place: 1, waitMs: null, paused: null, next: true, out: false } } });
       const stream = await openSse(base, `/api/v1/live/${child}/stream`, { cookies: guest.client.cookies });

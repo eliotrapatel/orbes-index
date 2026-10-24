@@ -72,7 +72,9 @@ Le point de départ : la production tourne MACRO M3, son commit `33e843081148caf
 - `Shorten the hold` et `End the hold now` ;
 - les chiffres gardés, avec leur sens : `In line` en haut du tableau, `Admitted` dans le bloc `Pace` (« GIVEN A TURN, ALL WAYS ») ;
 - la prévision de rupture, qui dit `No sales rate yet` tant qu'aucune vente ne donne de rythme ;
-- et cette ligne : « L'attente après l'ouverture (Hold after the opening) se règle jusqu'à l'annonce, comme tout réglage ; après l'annonce, seulement SHORTEN THE HOLD ou END THE HOLD NOW, jamais plus longue ».
+- et cette ligne : « L'attente après l'ouverture (Hold after the opening) se règle jusqu'à l'annonce, comme tout réglage ; après l'annonce, seulement SHORTEN THE HOLD ou END THE HOLD NOW, jamais plus longue » ;
+- le dialogue `Remove` d'une entrée, sur une sortie à rythme : « The entry leaves the release for good: those behind it move up, and the piece it holds returns and is offered at the next batch. Its screen says it was removed. » (D5 : une pièce rendue part au lot suivant ; ce n'est pas un des quatre textes que tu avais nommés), et la ligne du radar des signes (« A sign is a reason to look, not a proof… ») qui dit la même chose ; dans une after-room, les deux gardent « its place, or the piece it holds, goes to the next in line » ;
+- sur un ordinateur, SECURED avec des add-ons : PAY (le temps pour payer dedans), sa note et RELEASE MY PLACE en haut de la colonne de droite, les lignes d'add-ons dessous, pour que le temps reste sur le premier écran (1440 × 900 et 1024 × 768) ; leur style reste celui de production jusqu'au lot Q2.
 
 Sans ton accord, rien n'est fusionné ni déployé.
 
@@ -161,6 +163,14 @@ docker compose exec -T postgres sh -c 'exec psql -X -U "$POSTGRES_USER" -d "$POS
 ```
 
 Sortie attendue : `0`. Un autre nombre : une sortie est en cours ou va ouvrir sa salle ; attends sa fin (ou déploie plus tôt un autre jour).
+
+Enfin, aucun test de TEST ENTRANTS sans END TEST sur une LIVE RELEASE à rythme : son rapport, calculé à END TEST, lirait après le déploiement des lots que M3 inscrivait autrement, et son contrôle `PACE` échouerait :
+
+```bash
+docker compose exec -T postgres sh -c 'exec psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from test_runs r join drops d on d.id = r.drop_id where r.ended_at is null and d.room_opens_minutes is not null and d.pace_batch is not null"'
+```
+
+Sortie attendue : `0`. Un autre nombre : un test fini attend son END TEST (ou un test tourne) ; fais END TEST sur sa page avant de déployer.
 
 ### 1.2 Préparer le serveur
 
@@ -639,5 +649,5 @@ Les entrants d'essai lisent leur place par la page. Un vrai téléphone fait de 
 ## 2. Ce qui reste à ta décision (sans bloquer)
 
 1. **La sortie du test A est publique pour toujours** : dans THE RELEASES pendant le test, puis dans PAST et sur la fiche du modèle d'essai, avec son titre, le nom et la photographie du modèle d'essai et « 5 250 PIECES ». Tu choisis : le faire comme écrit ; avec un stock plus petit qui dépasse encore ses entrants (moins d'entrants, ce n'est alors plus la preuve des 5 000) ; ou ne pas le faire. La sortie du test B montre « 25 PIECES », comme celle de M1 l'aurait fait.
-2. **Les questions laissées ouvertes par le lot**, chacune sans bloquer : le son du résultat d'un scan (le seul son encore synthétisé : le garder, ou le remplacer plus tard) ; la plaque à coins de l'écran JOIN d'un retardataire (la garder telle quelle, ou la redessiner comme YOUR PIECE) ; le halo de PAY (seulement dans les derniers 10 %, ou toujours) ; sur un ordinateur, le titre CONFIRMED d'un set posé sur les photos de ses pièces ; la voix d'accueil dans l'after-room (non, aujourd'hui) ; et deux phrases de la politique de confidentialité (le lot qui a donné le tour, la mémoire de la voix d'accueil sur l'appareil).
+2. **Les questions laissées ouvertes par le lot**, chacune sans bloquer : le son du résultat d'un scan (le seul son encore synthétisé : le garder, ou le remplacer plus tard) ; la plaque à coins de l'écran JOIN d'un retardataire (la garder telle quelle, ou la redessiner comme YOUR PIECE) ; le halo de PAY (seulement dans les derniers 10 %, ou toujours) ; sur un ordinateur, le titre CONFIRMED d'un set posé sur les photos de ses pièces ; la voix d'accueil dans l'after-room (non, aujourd'hui) ; et deux phrases de la politique de confidentialité (le lot qui a donné le tour ; la mémoire de la voix d'accueil sur l'appareil, `orbes.live.welcome`, et, pour une liste complète, `orbes.mode` du mode clair, déjà absent en production).
 3. **L'avocat** : les deux phrases de l'article 13 partent avec la version `2026-10-24` (la note au juriste, point 29). Sa réponse ne retient pas le déploiement.

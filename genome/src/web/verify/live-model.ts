@@ -272,7 +272,7 @@ export function phaseAt(sheet: LiveSheet, room: LiveRoom | null, now: number): '
 
 /** An entry that holds the account in the release (a LEFT one before T0 does not: it may enter again). */
 export function heldEntry(entry: LiveEntry | null): LiveEntry | null {
-  return entry && !(entry.status === 'LEFT' && entry.position === null) ? entry : null;
+  return entry && !(entry.status === 'LEFT' && !entry.placed) ? entry : null;
 }
 
 /** A size of the room, by id. */

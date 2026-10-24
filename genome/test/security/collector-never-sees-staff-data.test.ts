@@ -455,6 +455,25 @@ function paceFindings(value: unknown, path = '$'): string[] {
  * stays only for the ambiguous `line`, `hold` and `minutes` (an add-on's `line` is its words, an entry's `hold` its own).
  */
 const PACE_KEYS_ANYWHERE = new Set(['pace', 'batch', 'batches', 'nextBatchAt', 'waiting', 'beyond', 'holdMinutes', 'holdEndsAt']);
+/**
+ * D19 ("the drawn place stays in the console") and D8 (never the queue's length, "not even in page data"): an entry's
+ * drawn place in the whole line (`position`, a late comer's being the line's length plus one) is never in a collector's
+ * payload, under any key path: the state's entry, the `you` events, every action's answer, MY PIECES' entries.
+ */
+function drawnPlaceAnywhere(value: unknown, path = '$'): string[] {
+  const out: string[] = [];
+  const walk = (v: unknown, at: string) => {
+    if (Array.isArray(v)) return v.forEach((x, i) => walk(x, `${at}[${i}]`));
+    if (!v || typeof v !== 'object') return;
+    for (const [k, x] of Object.entries(v)) {
+      if (k === 'position') out.push(`key ${at}.${k}`);
+      walk(x, `${at}.${k}`);
+    }
+  };
+  walk(value, path);
+  return out;
+}
+
 function paceKeysAnywhere(value: unknown, path = '$'): string[] {
   const out: string[] = [];
   const walk = (v: unknown, at: string) => {
@@ -480,24 +499,27 @@ describe('the collector never reads the pace, the line or a held piece (ONE QUEU
       const opensAt = new Date(h.clock.now().getTime() + 4 * 60_000);
       const r = await createLiveRelease(f, { opensAt, closesAt: new Date(opensAt.getTime() + 3_600_000), pace: { batch: 1, minutes: 2 }, holdMinutes: 1, sizes: [{ label: '52', stock: 3 }] });
       const members: { client: Client; id: string }[] = [];
+      const answers: [string, string][] = [];
       for (let i = 0; i < 5; i++) {
         const { client, email } = await accountClient(h);
         const { id } = await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', email.toLowerCase()).executeTakeFirstOrThrow();
         await holdPieces(h.ctx.db, id, 1, f.modelId);
-        expect((await client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[0]!.id })).statusCode).toBe(200);
+        const entered = await client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[0]!.id });
+        expect(entered.statusCode).toBe(200);
         members.push({ client, id });
+        answers.push([`POST /enter (${id})`, entered.body]);
       }
       const { token } = await f.live.issueBoardLink(r.id, f.admin);
       // T0 + the hold: the first batch; then four in the queue, the first two next, the others behind; one held piece.
       h.clock.set(new Date(opensAt.getTime() + 60_000));
       await h.ctx.services.live.advance(r.id);
-      const bodies: [string, string][] = [];
+      const bodies: [string, string][] = [...answers];
       for (const m of members) {
         const res = await m.client.get(`/api/v1/live/${r.id}/state`);
         expect(res.statusCode).toBe(200);
         bodies.push([`GET /state (${m.id})`, res.body]);
       }
-      const queues = bodies.map(([, b]) => (JSON.parse(b) as { entry: { queue: { next: boolean } | null } }).entry.queue);
+      const queues = bodies.slice(answers.length).map(([, b]) => (JSON.parse(b) as { entry: { queue: { next: boolean } | null } }).entry.queue);
       expect(queues.filter((q) => q?.next === true)).toHaveLength(2);
       expect(queues.filter((q) => q?.next === false)).toHaveLength(2);
       const you = members[1]!.client;
@@ -522,6 +544,8 @@ describe('the collector never reads the pace, the line or a held piece (ONE QUEU
         for (const x of paceFindings(shaped)) found.push(`${what}: ${x}`);
         // The unambiguous keys, anywhere: at the top of a page's answer (a release, the list, the banner, MY PIECES) too.
         for (const x of paceKeysAnywhere(json)) found.push(`${what}: ${x}`);
+        // The drawn place in the whole line (D19), anywhere: the state's entry, `you`, the answers, MY PIECES.
+        for (const x of drawnPlaceAnywhere(json)) found.push(`${what}: ${x}`);
         // The queue's length (4 waiting) is never said, under any name.
         if (/"(waiting|line|inLine|queued|queueLength)":/.test(body)) found.push(`${what}: a count of the line`);
       }
@@ -532,6 +556,8 @@ describe('the collector never reads the pace, the line or a held piece (ONE QUEU
       expect(paceFindings(consoleBoard)).toEqual(expect.arrayContaining(['key $.board.pace']));
       expect(paceKeysAnywhere(consoleBoard)).toEqual(expect.arrayContaining(['key $.board.pace']));
       expect(paceKeysAnywhere({ id: r.id, holdMinutes: 1, release: { pace: null } })).toEqual(['key $.holdMinutes', 'key $.release.pace']);
+      // The console's line keeps the drawn place (D19).
+      expect(drawnPlaceAnywhere(safeJson(await admin.get(`/api/admin/live/${r.id}/entries`)))).not.toEqual([]);
     } finally {
       await h.close();
     }

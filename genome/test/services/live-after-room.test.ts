@@ -326,7 +326,8 @@ describe('the after-room', () => {
       expect(sheet).toMatchObject({ surprise: true });
       expect(JSON.stringify(sheet)).not.toContain('silk');
       const late = await f.live.enter(third!.id, child, { sizeId: size }, third!.actor);
-      expect(late).toMatchObject({ status: 'QUEUED', position: places.get(third!.id), size: { label: 'ONE SIZE' } });
+      expect(late).toMatchObject({ status: 'QUEUED', placed: true, size: { label: 'ONE SIZE' } });
+      expect((await entry(child, third!.id)).position).toBe(places.get(third!.id));
       f.clock.advance(SECOND);
       await f.live.enter(first!.id, child, { sizeId: size }, first!.actor);
       expect((await entry(child, first!.id)).position).toBe(1);

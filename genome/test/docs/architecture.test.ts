@@ -31,7 +31,8 @@ describe('ARCHITECTURE B.19: the LIVE engine of ONE QUEUE and its Shopify fit (D
     expect(b19).toContain('**The Shopify fit** (D53; macro scope S1 to S7, "No design may assume the platform is the only place people pay")');
     expect(b19).toContain('**S2**: PAY is the single hand-off point for a future Shopify checkout of that exact order');
     expect(b19).toContain('**S4**: the band shows the platform\'s stock (`drop_sizes`), and ADD PIECES is the event a sync pushes');
-    expect(b19).toContain('**S7**: the tier order is unchanged');
+    expect(b19).toContain('**S7** (perks at checkout): the perks stay with the checkout; PAY carries the order\'s total and applies none of them');
+    expect(b19).toContain('The tier order is unchanged (the line at T0 by the tier read then');
     expect(b19).toContain('S1, S3, S5 and S6 do not change');
   });
 

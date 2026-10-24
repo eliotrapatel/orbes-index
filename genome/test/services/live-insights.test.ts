@@ -432,6 +432,12 @@ describe('the bot radar', () => {
     expect(radar.items[0]!.reasons).toEqual(['Account created 1 h before it entered.', 'One of 3 entries from network 1.']);
     expect(radar.items.at(-1)!.reasons).toEqual(['3 holds across releases within 8 ms of each other (1\u2009503, 1\u2009511, 1\u2009508 ms).']);
     expect(radar.reasoning.join(' ')).toContain('erased 30 days after the end');
+    // REMOVE as the console's dialog says it (ONE QUEUE, D5): a paced release offers the piece at the next batch; one
+    // without a pace (an after-room) gives it at once.
+    expect(radar.reasoning.at(-1)).toBe('A sign is a reason to look, not a proof: an ADMIN removes an entry with one tap; its place, or the piece it holds, goes to the next in line.');
+    expect(botRadar(release({ pace: { nextAt: at(5 * MINUTE), held: false } }), facts).reasoning.at(-1)).toBe(
+      'A sign is a reason to look, not a proof: an ADMIN removes an entry with one tap; those behind it move up, and the piece it holds returns and is offered at the next batch.',
+    );
   });
 });
 

@@ -124,7 +124,7 @@ function entry(extra: Partial<LiveEntry> = {}): LiveEntry {
     ],
     quantity: 1,
     tier: 1,
-    position: 5,
+    placed: true,
     joinedAt: '2026-10-05T16:46:00.000Z',
     turn: null,
     hold: null,
@@ -182,7 +182,7 @@ describe('a set\'s LIVE RELEASE page (K44 T1, T4)', () => {
     ]);
     const interest: LiveInterest = { dropId: ID(1), size: { id: ID(11), label: '16' }, sizes: [{ piece: 1, id: ID(11), label: '16' }, { piece: 2, id: ID(22), label: '56' }, { piece: 3, id: ID(31), label: '45' }], since: '2026-10-04T10:00:00.000Z' };
     expect(initialSetPick(pieces, null, interest, saved).get(1)).toEqual({ sizeId: ID(11), from: 'interest' });
-    const held = entry({ status: 'WAITING', position: null });
+    const held = entry({ status: 'WAITING', placed: false });
     expect(initialSetPick(pieces, held, interest, saved).get(2)).toEqual({ sizeId: ID(22), from: 'entry' });
     // A size no longer offered is never preselected.
     expect(initialSetPick(pieces, null, null, [{ piece: 2, id: ID(23), label: '58' }]).has(2)).toBe(false);

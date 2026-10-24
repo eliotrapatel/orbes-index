@@ -119,7 +119,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { isIPv4 } from 'node:net';
 import { normalizeIP } from '@fastify/rate-limit';
-import { sql, type Expression, type SqlBool } from 'kysely';
+import { sql, type Expression, type RawBuilder, type SqlBool } from 'kysely';
 import { fromBase64Url, utf8 } from '../../core/bytes.js';
 import type { AppConfig } from '../config.js';
 import { deriveSubkey } from '../crypto/secretbox.js';
@@ -325,6 +325,16 @@ export function holdEndsAt(d: LivePaceRow & Pick<DropRow, 'pace_batches' | 'pace
 /** Whether a paced release holds its pace now: by the pace's own pause or by the release's PAUSE. */
 export function paceHeld(d: Pick<DropRow, 'paused_at' | 'pace_paused_at'>): boolean {
   return d.paused_at !== null || d.pace_paused_at !== null;
+}
+
+/**
+ * While a pause holds the batches (paceHeld), when the stretch it holds began: the earlier of the pauses in progress
+ * (the queue's clock stands there too, live-queue.ts `pausedSince`); null when none holds. A next batch after it is
+ * moved by the resumes up to the time held (paceShiftMs), so one put just after it comes at the resume itself.
+ */
+export function paceHeldSince(d: Pick<DropRow, 'paused_at' | 'pace_paused_at'>): Date | null {
+  const since = [d.paused_at, d.pace_paused_at].filter((x): x is Date => x !== null).map((x) => new Date(x).getTime());
+  return since.length ? new Date(Math.min(...since)) : null;
 }
 
 /**
@@ -761,8 +771,12 @@ export interface LiveEntryView {
   quantity: number;
   /** The club's tier at entry, then at T0. */
   tier: number;
-  /** The place in the line; null before T0. */
-  position: number | null;
+  /**
+   * It has been given its place in the line (at T0, or on joining after it). Never the drawn place itself (D19: "the drawn
+   * place stays in the console"; D8: never the queue's length, not even in page data); the console and the personal-data
+   * export keep `position`.
+   */
+  placed: boolean;
   joinedAt: Date;
   /** The turn: its deadline as it stands now (a pause in progress moves it); `token` only while it is TURN. */
   turn: { at: Date; expiresAt: Date; token: string | null } | null;
@@ -1257,7 +1271,7 @@ export async function liveEntryViews(
       ...(pieceSizes.has(r.id) ? { sizes: pieceSizes.get(r.id)! } : {}),
       quantity: r.quantity,
       tier: r.tier,
-      position: r.position,
+      placed: r.position !== null,
       joinedAt: r.joined_at,
       turn:
         r.turn_at && r.turn_expires_at
@@ -2213,16 +2227,21 @@ export class LiveService {
    * THE HOLD NOW does that). From the announcement (409 LIVE_NOT_ANNOUNCED before: the hold is a setting until then,
    * set longer or shorter freely) until the first scheduled batch, a NEXT BATCH NOW during the hold leaving it as it was
    * (409 LIVE_NO_HOLD once that batch has gone or is due, or with no hold);
-   * never on an after-room (409 LIVE_AFTER_ROOM). Audited `drop.live.hold.shorten` with the first batch before and after.
+   * never on an after-room (409 LIVE_AFTER_ROOM). While a pause holds the batches (PAUSE or PAUSE PACE, since S:
+   * paceHeldSince), the hold left from now is what the resume gives: stored as `T0 + minutes - (now - S)` (never at or
+   * before S), which the resume moves by the time held from S, so the first batch comes `T0 + minutes - now` after the
+   * resume, as the phones' frozen time says. Audited `drop.live.hold.shorten` with the first batch before and after, as stored.
    */
   async shortenHold(dropId: string, minutes: number, actor: Actor): Promise<LiveReleaseState> {
     assertStaff(actor, 'shorten the hold of a release');
     if (!Number.isInteger(minutes) || minutes < LIVE_HOLD_MINUTES.min || minutes > LIVE_HOLD_MINUTES.max) throw holdInvalid();
     const state = await this.control(dropId, async (tx, d, now) => {
       const before = this.holdLeft(d, now);
-      const after = new Date(d.opens_at.getTime() + minutes * MINUTE_MS);
+      const at = new Date(d.opens_at.getTime() + minutes * MINUTE_MS);
+      if (at.getTime() < now.getTime()) throw holdPast();
+      const since = paceHeldSince(d);
+      const after = since ? new Date(Math.max(at.getTime() - (now.getTime() - since.getTime()), since.getTime() + 1)) : at;
       if (after.getTime() >= before.getTime()) throw holdLater();
-      if (after.getTime() < now.getTime()) throw holdPast();
       await tx.updateTable('drops').set({ pace_hold_minutes: minutes, pace_next_at: after }).where('id', '=', d.id).execute();
       await this.audit.record(
         { actor, action: 'drop.live.hold.shorten', targetType: 'drop', targetId: d.id, details: { before: before.toISOString(), after: after.toISOString(), minutes } },
@@ -2236,13 +2255,16 @@ export class LiveService {
   /**
    * END THE HOLD NOW: the first batch due now (at T0 before T0), the next ones every Y minutes from it; the engine gives
    * it at its next pass. From the announcement until the first scheduled batch, as SHORTEN THE HOLD (409 LIVE_NOT_ANNOUNCED,
-   * LIVE_NO_HOLD, LIVE_AFTER_ROOM). Audited `drop.live.hold.end` with the first batch's time.
+   * LIVE_NO_HOLD, LIVE_AFTER_ROOM). While a pause holds the batches, due 1 ms after S (paceHeldSince), which the resumes
+   * move to the resume itself (never at S: a batch due before a pause keeps its time, so the slots between it and the
+   * resume would all be due at once): the first batch is given at the resume, the next ones every Y minutes from it. Audited `drop.live.hold.end` with the first batch's time.
    */
   async endHold(dropId: string, actor: Actor): Promise<LiveReleaseState> {
     assertStaff(actor, 'end the hold of a release');
     const state = await this.control(dropId, async (tx, d, now) => {
       const before = this.holdLeft(d, now);
-      const at = maxDate(now, d.opens_at);
+      const since = paceHeldSince(d);
+      const at = since ? new Date(since.getTime() + 1) : maxDate(now, d.opens_at);
       await tx.updateTable('drops').set({ pace_hold_minutes: 0, pace_next_at: at }).where('id', '=', d.id).execute();
       await this.audit.record({ actor, action: 'drop.live.hold.end', targetType: 'drop', targetId: d.id, details: { before: before.toISOString(), at: at.toISOString() } }, tx);
     });
@@ -2250,13 +2272,16 @@ export class LiveService {
     return state;
   }
 
-  /** The first batch's time while a hold is left to shorten or end (the refusals of SHORTEN THE HOLD and END THE HOLD NOW otherwise). */
+  /**
+   * The first batch's time while a hold is left to shorten or end (the refusals of SHORTEN THE HOLD and END THE HOLD NOW
+   * otherwise); while a pause holds the batches, one still after the stretch's start (the resume moves it).
+   */
   private holdLeft(d: LiveDrop, now: Date): Date {
     if (isAfterRoom(d) || d.pace_batch === null) throw afterRoomPace();
     if (!isAnnounced(d, now)) throw holdTooEarly();
     if (d.ended_at || now.getTime() >= d.closes_at.getTime()) throw liveEnded();
     const first = holdEndsAt(d);
-    if (!first || first.getTime() <= now.getTime()) throw noHold();
+    if (!first || first.getTime() <= (paceHeldSince(d) ?? now).getTime()) throw noHold();
     return first;
   }
 
@@ -3318,6 +3343,21 @@ export async function livePaceState(
  * sizes. By entry, and their count per size.
  */
 export async function liveBeyond(db: Db, d: Pick<DropRow, 'id' | 'set_id'>): Promise<{ entries: Set<string>; bySize: Map<string, number> }> {
+  const r = await liveBeyondRows(d).execute(db);
+  const entries = new Set<string>();
+  const bySize = new Map<string, number>();
+  for (const x of r.rows) {
+    entries.add(x.entry_id);
+    bySize.set(x.size_id, (bySize.get(x.size_id) ?? 0) + 1);
+  }
+  return { entries, bySize };
+}
+
+/**
+ * liveBeyond's rows as a query (`entry_id`, `size_id`: a set's entry once per size it is beyond in), to filter or count
+ * inside another (the console's BEYOND filter), so no list of ids is ever bound.
+ */
+export function liveBeyondRows(d: Pick<DropRow, 'id' | 'set_id'>): RawBuilder<{ entry_id: string; size_id: string }> {
   const members =
     d.set_id === null
       ? sql`SELECT e.id AS entry_id, e.size_id, e.guarantee_id, e.position FROM live_entries e WHERE e.drop_id = ${d.id} AND e.status = 'QUEUED'`
@@ -3326,20 +3366,13 @@ export async function liveBeyond(db: Db, d: Pick<DropRow, 'id' | 'set_id'>): Pro
     d.set_id === null
       ? sql`SELECT size_id, sum(quantity) AS n FROM live_entries WHERE drop_id = ${d.id} AND status = 'CONFIRMED' GROUP BY size_id`
       : sql`SELECT x.size_id, sum(e.quantity) AS n FROM live_entry_sizes x JOIN live_entries e ON e.id = x.entry_id WHERE e.drop_id = ${d.id} AND e.status = 'CONFIRMED' GROUP BY x.size_id`;
-  const r = await sql<{ entry_id: string; size_id: string }>`
+  return sql<{ entry_id: string; size_id: string }>`
     SELECT q.entry_id, q.size_id
       FROM (SELECT m.entry_id, m.size_id, row_number() OVER (PARTITION BY m.size_id ORDER BY (m.guarantee_id IS NULL), m.position) AS place
               FROM (${members}) AS m) AS q
       JOIN drop_sizes s ON s.id = q.size_id
       LEFT JOIN (${confirmed}) AS c ON c.size_id = q.size_id
-     WHERE q.place > s.stock - coalesce(c.n, 0)`.execute(db);
-  const entries = new Set<string>();
-  const bySize = new Map<string, number>();
-  for (const x of r.rows) {
-    entries.add(x.entry_id);
-    bySize.set(x.size_id, (bySize.get(x.size_id) ?? 0) + 1);
-  }
-  return { entries, bySize };
+     WHERE q.place > s.stock - coalesce(c.n, 0)`;
 }
 
 /** Whether a release is announced at `now` (its announcement, or its publication). */

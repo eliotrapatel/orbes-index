@@ -308,7 +308,8 @@ describe('LiveService: ONE QUEUE’s batches', () => {
     // Arrivals at T0+12 and T0+17: the first waits for T0+15 (at most Y), the second for T0+20.
     const late = await accountOfTier(f, 0);
     f.clock.set(at(12 * MINUTE));
-    expect(await f.live.enter(late.id, r.id, { sizeId: r.sizes[0]!.id }, late.actor)).toMatchObject({ status: 'QUEUED', position: 3 });
+    expect(await f.live.enter(late.id, r.id, { sizeId: r.sizes[0]!.id }, late.actor)).toMatchObject({ status: 'QUEUED', placed: true });
+    expect((await entriesOf(t.db, r.id)).find((e) => e.account_id === late.id)!.position).toBe(3);
     const later = await accountOfTier(f, 0);
     f.clock.set(at(17 * MINUTE));
     await f.live.enter(later.id, r.id, { sizeId: r.sizes[0]!.id }, later.actor);
@@ -335,7 +336,8 @@ describe('LiveService: ONE QUEUE’s batches', () => {
     await advance(r, T0);
     // The holder arrives after T0: behind in the line, its turn first at the next batch.
     f.clock.set(at(MINUTE));
-    expect(await f.live.enter(holder.id, r.id, { sizeId: r.sizes[0]!.id }, holder.actor)).toMatchObject({ position: 4 });
+    expect(await f.live.enter(holder.id, r.id, { sizeId: r.sizes[0]!.id }, holder.actor)).toMatchObject({ placed: true });
+    expect((await entriesOf(t.db, r.id)).find((e) => e.account_id === holder.id)!.position).toBe(4);
     await advance(r, at(5 * MINUTE));
     const rows = await entriesOf(t.db, r.id);
     expect(rows.find((e) => e.account_id === holder.id)).toMatchObject({ admitted_batch: 2, status: 'TURN' });
@@ -1036,6 +1038,77 @@ describe('LiveService: ONE QUEUE’s batches', () => {
       pass: true,
       line: '5 batches gave 10 turns at 2 every 5 min, then 3 every 2 min, the first on the pace at 11:03:00 PARIS, each on its time and in the line’s order; none gave more than the pace, and none left anyone waiting while a piece of their size was free; 1 by NEXT BATCH NOW; 1 entry let in by hand.',
     });
+  });
+
+  it('END THE HOLD NOW and SHORTEN THE HOLD while a pause holds the batches: the first batch at the resume, or the hold left at the press after it, under PAUSE, PAUSE PACE and both, the PACE check passing', async () => {
+    // The release's PAUSE at T0+2 with the hold to T0+20; END THE HOLD NOW at T0+11; RESUME at T0+12: the first batch at
+    // the resume, the next ones every Y from it, no batch caught up.
+    const a = await release({ pace: { batch: 2, minutes: 2 }, holdMinutes: 20, turnSeconds: 300 });
+    await room(a, 6);
+    await advance(a, T0);
+    f.clock.set(at(2 * MINUTE));
+    await f.live.pause(a.id, f.admin);
+    f.clock.set(at(11 * MINUTE));
+    expect((await f.live.endHold(a.id, f.admin)).pace).toMatchObject({ holdMinutes: 0, holdEndsAt: null });
+    expect(await advance(a, at(11 * MINUTE + SECOND))).toMatchObject({ batch: null });
+    f.clock.set(at(12 * MINUTE));
+    expect((await f.live.resume(a.id, f.admin)).pace).toMatchObject({ nextAt: at(12 * MINUTE + 1) });
+    expect(await advance(a, at(12 * MINUTE + 1))).toMatchObject({ batch: 1, turns: 2 });
+    expect(await advance(a, at(12 * MINUTE + SECOND))).toMatchObject({ batch: null });
+    expect(await pace(a.id)).toMatchObject({ pace_next_at: at(14 * MINUTE + 1) });
+    expect(await advance(a, at(14 * MINUTE + 1))).toMatchObject({ batch: 2, turns: 2 });
+    expect((await check(a, at(15 * MINUTE))).pass).toBe(true);
+
+    // PAUSE PACE at T0+2, the hold to T0+20; END THE HOLD NOW at T0+11; RESUME PACE at T0+12: the same.
+    const b = await release({ pace: { batch: 2, minutes: 2 }, holdMinutes: 20, turnSeconds: 300 });
+    await room(b, 6);
+    await advance(b, T0);
+    f.clock.set(at(2 * MINUTE));
+    await f.live.pausePace(b.id, f.admin);
+    f.clock.set(at(11 * MINUTE));
+    await f.live.endHold(b.id, f.admin);
+    f.clock.set(at(12 * MINUTE));
+    expect((await f.live.resumePace(b.id, f.admin)).pace).toMatchObject({ nextAt: at(12 * MINUTE + 1) });
+    expect(await advance(b, at(12 * MINUTE + 1))).toMatchObject({ batch: 1, turns: 2 });
+    expect(await advance(b, at(12 * MINUTE + SECOND))).toMatchObject({ batch: null });
+    expect(await advance(b, at(14 * MINUTE + 1))).toMatchObject({ batch: 2, turns: 2 });
+    expect((await check(b, at(15 * MINUTE))).pass).toBe(true);
+
+    // PAUSE PACE at T0+2; SHORTEN THE HOLD to 8 at T0+5 (3 minutes left); RESUME PACE at T0+10: the first batch at T0+13,
+    // as the phones' frozen time said (3 minutes).
+    const c = await release({ pace: { batch: 2, minutes: 2 }, holdMinutes: 20, turnSeconds: 300 });
+    await room(c, 6);
+    await advance(c, T0);
+    f.clock.set(at(2 * MINUTE));
+    await f.live.pausePace(c.id, f.admin);
+    f.clock.set(at(5 * MINUTE));
+    await f.live.shortenHold(c.id, 8, f.admin);
+    const queued = (await entriesOf(t.db, c.id))[0]!;
+    expect((await f.live.entry(queued.account_id, c.id))!.queue).toMatchObject({ place: 1, waitMs: 3 * MINUTE, paused: 'PACE' });
+    f.clock.set(at(10 * MINUTE));
+    expect((await f.live.resumePace(c.id, f.admin)).pace).toMatchObject({ nextAt: at(13 * MINUTE) });
+    expect(await advance(c, at(13 * MINUTE - 1))).toMatchObject({ batch: null });
+    expect(await advance(c, at(13 * MINUTE))).toMatchObject({ batch: 1, turns: 2 });
+    expect((await check(c, at(14 * MINUTE))).pass).toBe(true);
+
+    // Both: PAUSE at T0+2, PAUSE PACE at T0+4, RESUME at T0+6 (the pace still paused), END THE HOLD NOW at T0+8, RESUME
+    // PACE at T0+10: the first batch at T0+10.
+    const d = await release({ pace: { batch: 2, minutes: 2 }, holdMinutes: 20, turnSeconds: 300 });
+    await room(d, 6);
+    await advance(d, T0);
+    f.clock.set(at(2 * MINUTE));
+    await f.live.pause(d.id, f.admin);
+    f.clock.set(at(4 * MINUTE));
+    await f.live.pausePace(d.id, f.admin);
+    f.clock.set(at(6 * MINUTE));
+    await f.live.resume(d.id, f.admin);
+    f.clock.set(at(8 * MINUTE));
+    await f.live.endHold(d.id, f.admin);
+    f.clock.set(at(10 * MINUTE));
+    expect((await f.live.resumePace(d.id, f.admin)).pace).toMatchObject({ nextAt: at(10 * MINUTE + 1) });
+    expect(await advance(d, at(10 * MINUTE + 1))).toMatchObject({ batch: 1, turns: 2 });
+    expect(await advance(d, at(10 * MINUTE + SECOND))).toMatchObject({ batch: null });
+    expect((await check(d, at(11 * MINUTE))).pass).toBe(true);
   });
 
   it('the PACE check passes on the engine’s PAUSE PACE and RESUME PACE, one during the hold, and a stretch both pauses held: each batch on its moved time (W4)', async () => {

@@ -1211,8 +1211,8 @@ export interface LiveEntry {
   /** Its pieces; on a set's release, its sets (T4: a set counts as one). */
   quantity: number;
   tier: number;
-  /** The place in the line; null before T0. */
-  position: number | null;
+  /** It has been given its place in the line (at T0, or on joining after it); never the drawn place (D19). */
+  placed: boolean;
   joinedAt: string;
   /** Its deadline as it stands now; the secret only while it is TURN. */
   turn: { at: string; expiresAt: string; token: string | null } | null;

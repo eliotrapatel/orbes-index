@@ -67,6 +67,11 @@ export interface UiState {
    * draws in light from its first paint (the desktop states of Cinema in white).
    */
   light?: boolean;
+  /**
+   * What else the state must hold once shown, read by the content test after its words (a geometry): each problem in
+   * words, none when it holds.
+   */
+  check?(page: Page): Promise<string[]>;
 }
 
 /** Requests a state holds open while it is captured, released when the run ends. */
@@ -2896,6 +2901,28 @@ function onDesk(base: UiState, width: DeskWidth, opts: { light?: boolean; name?:
   };
 }
 
+/**
+ * The hold's PAY (with the time to pay inside it) on the first screen of a computer: its bottom within the window, before
+ * the add-on rows, the page not scrolled.
+ */
+async function payOnFirstScreen(page: Page): Promise<string[]> {
+  const at = await page.evaluate(() => {
+    const pay = document.querySelector('.d-room__br > .live__pay');
+    const rows = document.querySelector('.d-room__br > .live__addons');
+    if (!pay) return null;
+    return {
+      bottom: Math.round(pay.getBoundingClientRect().bottom + scrollY),
+      height: innerHeight,
+      first: !rows || !!(pay.compareDocumentPosition(rows) & Node.DOCUMENT_POSITION_FOLLOWING),
+    };
+  });
+  if (!at) return ['no PAY in the right column'];
+  return [
+    ...(at.bottom > at.height ? [`PAY ends at ${at.bottom} px, below the first screen (${at.height} px)`] : []),
+    ...(at.first ? [] : ['PAY comes after the add-on rows']),
+  ];
+}
+
 /** The phone's states `ids` on a computer's window of `width`. */
 const desk = (width: DeskWidth, ...ids: string[]): UiState[] => ids.map((id) => onDesk(phoneState(id), width));
 /** The phone's states `ids` on each window of `widths` (in light with `light`), in the order of `ids` then of the windows. */
@@ -3363,6 +3390,9 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
     // salon request; each order's own page (the reserved one also in light, the paid one with its own invoice, packing
     // begun); ADD AN ADD-ON's part of the page chosen (also in light), none available, could not be read; PAY, last.
     ...desk(1440, 'addons-hold', 'addons-place-held', 'addons-salon'),
+    // ONE QUEUE review (lot Q1): on a computer of 1024 × 768 the hold's PAY, its time inside it, stays on the first screen
+    // above the add-on rows (desktop-room.ts PLAN.secured; production M3 showed the time there).
+    onDesk(phoneState('addons-hold'), 1024, { extra: { check: payOnFirstScreen } }),
     onDesk(phoneState('addons-place-held'), 1440, { light: true }),
     addonsOrderAt(false),
     addonsOrderAt(true),

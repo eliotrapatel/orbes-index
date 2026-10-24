@@ -163,7 +163,7 @@ function entry(extra: Partial<LiveEntry> = {}): LiveEntry {
     size: { id: S52, label: '52' },
     quantity: 1,
     tier: 2,
-    position: null,
+    placed: false,
     joinedAt: iso(T0 - 120_000),
     turn: null,
     hold: null,
@@ -284,26 +284,26 @@ describe('which screen the page shows', () => {
 
   it('follows the account\'s entry: the room, the one queue, the turn, the piece held, confirmed, and every edge page', () => {
     expect(screen({ entry: entry() })).toBe('room');
-    expect(screen({ entry: entry({ status: 'QUEUED', position: 4 }), now: T0 + 5_000 })).toBe('queue');
+    expect(screen({ entry: entry({ status: 'QUEUED', placed: true }), now: T0 + 5_000 })).toBe('queue');
     expect(screen({ entry: entry({ status: 'TURN' }) })).toBe('turn');
     expect(screen({ entry: entry({ status: 'SECURED' }) })).toBe('secured');
     expect(screen({ entry: entry({ status: 'CONFIRMED' }) })).toBe('confirmed');
     for (const [status, kind] of [['MISSED', 'missed'], ['EXPIRED', 'expired'], ['RELEASED', 'released'], ['REMOVED', 'removed'], ['ENDED', 'ended']] as const) {
-      expect(screen({ entry: entry({ status, position: 3 }) }), status).toBe(kind);
+      expect(screen({ entry: entry({ status, placed: true }) }), status).toBe(kind);
     }
     // LEFT before T0 (no place): it may enter again, the room shows; after T0 (a place), it has left the line.
     expect(screen({ entry: entry({ status: 'LEFT' }) })).toBe('room');
     expect(heldEntry(entry({ status: 'LEFT' }))).toBeNull();
-    expect(screen({ entry: entry({ status: 'LEFT', position: 9 }), now: T0 + 5_000 })).toBe('left');
+    expect(screen({ entry: entry({ status: 'LEFT', placed: true }), now: T0 + 5_000 })).toBe('left');
     // Over, the page opens in its final state, whatever became of the entry (its part said there, never how it ended); an
     // after-room's guest keeps its outcome. Only a ready account's entry counts.
-    for (const status of ['CONFIRMED', 'MISSED', 'EXPIRED', 'RELEASED', 'REMOVED', 'ENDED'] as const) expect(screen({ sheet: over(), entry: entry({ status, position: 3 }) }), status).toBe('past');
+    for (const status of ['CONFIRMED', 'MISSED', 'EXPIRED', 'RELEASED', 'REMOVED', 'ENDED'] as const) expect(screen({ sheet: over(), entry: entry({ status, placed: true }) }), status).toBe('past');
     expect(screen({ sheet: over({ afterRoom: { parentId: ID } }), entry: entry({ status: 'CONFIRMED' }) })).toBe('confirmed');
     expect(screen({ viewer: 'signed-out', entry: entry({ status: 'CONFIRMED' }) })).toBe('signin');
   });
 
   it('says sold out in your size only when no piece is free nor held that may return: the server’s `out` for the entry (D27), the room’s `serves` until it is read; every piece held, none paid, is the waiting screen (D26)', () => {
-    const queued = entry({ status: 'QUEUED', position: 4 });
+    const queued = entry({ status: 'QUEUED', placed: true });
     const now = T0 + 5_000;
     const sizes = (left: number, serves: number) => room({ phase: 'LIVE', sizes: [{ id: S52, label: '52', stock: 2, left, serves, out: serves === 0 }] });
     expect(screen({ entry: queued, room: sizes(0, 1), now })).toBe('queue');
@@ -321,21 +321,21 @@ describe('which screen the page shows', () => {
   it('shows the second door to a guest of the after-room from its T0 until it closes, read from its own entry; nothing of it otherwise', () => {
     const now = T0 + 20 * 60_000;
     const door = (opensIn: number, closesIn = 10 * 60_000) => ({ opensAt: iso(now + opensIn), closesAt: iso(now + closesIn) });
-    const ended = (afterRoom: ReturnType<typeof door> | null) => entry({ status: 'ENDED', position: 3, afterRoom });
+    const ended = (afterRoom: ReturnType<typeof door> | null) => entry({ status: 'ENDED', placed: true, afterRoom });
     expect(screen({ entry: ended(door(-60_000)), now })).toBe('afterRoom');
     expect(screen({ entry: ended(door(0)), now })).toBe('afterRoom');
     // Before its T0, after its close, or without one: how the release ended.
     expect(screen({ entry: ended(door(1_000)), now })).toBe('ended');
     expect(screen({ entry: ended(door(-60_000, 0)), now })).toBe('ended');
     expect(screen({ entry: ended(null), now })).toBe('ended');
-    expect(screen({ entry: entry({ status: 'ENDED', position: 3 }), now })).toBe('ended');
+    expect(screen({ entry: entry({ status: 'ENDED', placed: true }), now })).toBe('ended');
     // The release over: its guest keeps the second door until it closes, then reads the release's final state.
     expect(screen({ sheet: over(), entry: ended(door(1_000)), now })).toBe('ended');
     expect(screen({ sheet: over(), entry: ended(door(-60_000)), now })).toBe('afterRoom');
     expect(screen({ sheet: over(), entry: ended(door(-60_000, 0)), now })).toBe('past');
     expect(screen({ sheet: over(), entry: ended(null), now })).toBe('past');
     // Only an entry the sell-out ENDED is a guest's: every other keeps its own page.
-    for (const status of ['CONFIRMED', 'MISSED', 'EXPIRED', 'RELEASED', 'REMOVED'] as const) expect(screen({ entry: entry({ status, position: 2, afterRoom: door(-60_000) }), now })).not.toBe('afterRoom');
+    for (const status of ['CONFIRMED', 'MISSED', 'EXPIRED', 'RELEASED', 'REMOVED'] as const) expect(screen({ entry: entry({ status, placed: true, afterRoom: door(-60_000) }), now })).not.toBe('afterRoom');
     expect(doorOpen(door(-1), now)).toBe(true);
     expect(doorOpen({ opensAt: 'x', closesAt: 'nonsense' }, now)).toBe(false);
     expect(doorOpen(undefined, now)).toBe(false);
@@ -779,7 +779,7 @@ describe('the announcements: the release calendar, I\'LL BE THERE, the banner', 
 describe('the one queue (ONE QUEUE, lot Q1, step Q1.3; ANSWERS C3)', () => {
   const NOW = Date.parse('2026-10-05T16:49:00.000Z');
   const queue = (place: number, o: Partial<LiveQueue> = {}): LiveQueue => ({ place, waitMs: 17 * 60_000, paused: null, next: false, out: false, ...o });
-  const queued = (q: LiveQueue | null, o: Partial<LiveEntry> = {}) => entry({ status: 'QUEUED', position: 612, queue: q, ...o });
+  const queued = (q: LiveQueue | null, o: Partial<LiveEntry> = {}) => entry({ status: 'QUEUED', placed: true, queue: q, ...o });
 
   it('shows every QUEUED entry the one queue screen (paced or after-room), READING YOUR PLACE until its place is read (D15)', () => {
     expect(screen({ entry: queued(queue(4)), now: T0 + 5_000 })).toBe('queue');
@@ -902,7 +902,7 @@ describe('MY PIECES: the account\'s LIVE RELEASE entries', () => {
 
   it('says an entry waiting in the queue IN LINE, as before the pace and once let in (its place is on the release\'s page)', () => {
     const release = { id: ID, phase: 'LIVE' as const, endedReason: null, title: 'Monolithe in blue', name: 'Monolithe', imageUrl: null, opensAt: iso(T0), closesAt: iso(T0 + 3_600_000), afterRoomOf: null };
-    const queued = entry({ status: 'QUEUED', position: 612, queue: { place: 412, waitMs: 60_000, paused: null, next: false, out: false } });
+    const queued = entry({ status: 'QUEUED', placed: true, queue: { place: 412, waitMs: 60_000, paused: null, next: false, out: false } });
     expect(myLiveEntries([{ release, entry: queued }])[0]!.entry).toMatchObject({ label: 'IN LINE', sentence: LIVE.sentence.QUEUED, reference: null });
     expect(myLiveEntries([{ release, entry: { ...queued, queue: null } }])[0]!.entry).toMatchObject({ label: 'IN LINE', sentence: LIVE.sentence.QUEUED });
   });

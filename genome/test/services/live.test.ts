@@ -231,7 +231,7 @@ describe('LiveService', () => {
       await rejects(f.live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id, quantity: 2 }, a.actor), 'LIVE_SIZE_SOLD_OUT', 409);
       const net = liveNetworkHash('p'.repeat(40), '203.0.113.7');
       const view = await f.live.enter(a.id, r.id, { sizeId: r.sizes[1]!.id, quantity: 2 }, a.actor, { networkHash: net, country: 'FR' });
-      expect(view).toMatchObject({ status: 'WAITING', size: { id: r.sizes[1]!.id, label: '52' }, quantity: 2, tier: 1, position: null, turn: null, hold: null, priceMinor: 505_000, totalMinor: 1_010_000, currency: 'EUR' });
+      expect(view).toMatchObject({ status: 'WAITING', size: { id: r.sizes[1]!.id, label: '52' }, quantity: 2, tier: 1, placed: false, turn: null, hold: null, priceMinor: 505_000, totalMinor: 1_010_000, currency: 'EUR' });
       const row = await entry(r.id, a.id);
       expect([row.network_hash, row.country, row.joined_at]).toEqual([net, 'FR', at(-5 * MINUTE)]);
       await rejects(f.live.enter(a.id, r.id, { sizeId: r.sizes[1]!.id }, a.actor), 'LIVE_ALREADY_ENTERED', 409);
@@ -416,7 +416,10 @@ describe('LiveService', () => {
       const l1 = await f.live.enter(late[0]!.id, r.id, { sizeId: r.sizes[1]!.id }, late[0]!.actor);
       f.clock.set(at(11 * SECOND));
       const l2 = await f.live.enter(late[1]!.id, r.id, { sizeId: r.sizes[1]!.id }, late[1]!.actor);
-      expect([l1.status, l1.position, l2.status, l2.position]).toEqual(['QUEUED', 7, 'QUEUED', 8]);
+      // D19: the drawn place stays in the console; the entry's own view says only that it is placed.
+      expect([l1.status, l1.placed, l2.status, l2.placed]).toEqual(['QUEUED', true, 'QUEUED', true]);
+      expect(l1).not.toHaveProperty('position');
+      expect([(await entry(r.id, late[0]!.id)).position, (await entry(r.id, late[1]!.id)).position]).toEqual([7, 8]);
       expect((await entry(r.id, late[0]!.id)).queued_at).toEqual(at(10 * SECOND));
     });
 
@@ -967,15 +970,17 @@ describe('LiveService', () => {
       f.clock.set(at(10 * SECOND));
       const lateView = await f.live.enter(late.id, r2.id, { sizeId: r2.sizes[0]!.id }, late.actor);
       // An action's answer carries no place (ONE QUEUE §1.3: its page reads it at its next reading); the reading does.
-      expect(lateView).toMatchObject({ status: 'QUEUED', position: 4, queue: null, guaranteed: true });
+      expect(lateView).toMatchObject({ status: 'QUEUED', placed: true, queue: null, guaranteed: true });
+      expect((await entry(r2.id, late.id)).position).toBe(4);
       expect((await f.live.entry(late.id, r2.id))!.queue).toMatchObject({ place: 1 });
       // The room in the order of the line: its first in its turn, the two others behind the holder (their place in size).
       const line = (await entriesOf(t.db, r2.id)).filter((x) => x.account_id !== late.id);
       const views = await Promise.all(line.map((x) => f.live.entry(x.account_id, r2.id)));
-      expect(views.map((v) => [v!.status, v!.position, v!.queue?.place ?? null])).toEqual([
-        ['TURN', 1, null],
-        ['QUEUED', 2, 2],
-        ['QUEUED', 3, 3],
+      expect(line.map((x) => x.position)).toEqual([1, 2, 3]);
+      expect(views.map((v) => [v!.status, v!.queue?.place ?? null])).toEqual([
+        ['TURN', null],
+        ['QUEUED', 2],
+        ['QUEUED', 3],
       ]);
       // The first turn runs out: the late holder takes the piece at the next batch, before the second of the room.
       expect(await advance(r2, at(31 * SECOND))).toMatchObject({ missed: 1, turns: 0 });

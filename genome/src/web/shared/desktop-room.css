@@ -1431,6 +1431,18 @@
     margin-top: var(--d-s4);
   }
 
+  /* The add-on rows under PAY and RELEASE MY PLACE on a computer (desktop-room.ts PLAN.secured): their own group. */
+  html:not(.d-touch) .d-room .d-room__br > .live__release + .live__addons-title {
+    margin-top: var(--d-s6);
+  }
+
+  /* With add-on rows the right column is taller than the window: the room's last row takes only what the column needs
+     (as 1fr, it would make the first row as tall and push the hold below the first screen), so the centre and PAY,
+     with the time to pay inside it, open on the first screen and the rows follow under them. */
+  html:not(.d-touch) .d-room .d-room__screen--secured:has(> .d-room__br > :is(.live__addons, .live__items:not([hidden]))) {
+    grid-template-rows: [top] minmax(0, 1fr) [head] auto [body] auto [rest] auto;
+  }
+
   /* PAY, the light (house.css .live-pay; MK #secured desk): its feathered edge over 90 px, 64 px tall. */
   html:not(.d-touch) .d-room .btn.live-pay {
     --live-pay-feather: 90px;

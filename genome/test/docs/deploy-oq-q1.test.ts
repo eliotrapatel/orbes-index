@@ -256,6 +256,11 @@ describe('the runbook of lot ONE QUEUE (docs/launch/DEPLOY-OQ-Q1.md)', () => {
     expect(readDoc('genome/src/server/db/migrations/0024_model_variants.ts')).toContain('const DRAW_FIELDS_0024 = drawFields([...LIVE_SETTINGS_0021, ...LIVE_ONLY_0021].filter((c) => !DRAW_PRICE.includes(c)));');
     expect(readDoc('genome/src/server/db/migrations/0024_model_variants.ts')).toMatch(/const DRAW_PRICE = \['price_minor', 'currency'\]/);
     expect(before).toContain('Sortie attendue : `0`. Un autre nombre : une LIVE RELEASE (un brouillon compris) a été créée sans rythme.');
+    // A test not ended on a paced release: its TEST REPORT, computed at END TEST, would read M3's batches (drop.live.admit)
+    // after the deploy, which the PACE check does not read (test-entrants.ts PACE_ACTIONS).
+    expect(fenced(before, 'bash')).toContain(psql('select count(*) from test_runs r join drops d on d.id = r.drop_id where r.ended_at is null and d.room_opens_minutes is not null and d.pace_batch is not null'));
+    expect(source('server/services/test-entrants.ts')).toMatch(/const PACE_ACTIONS = [^;]*'drop\.live\.batch'/);
+    expect(readDoc('genome/src/server/db/migrations/0024_z_test_entrants.ts')).toContain("CONSTRAINT test_runs_ended CHECK ((status = 'ENDED') = (ended_at IS NOT NULL)");
     for (const q of commands.filter((c) => c.includes('psql'))) {
       expect(q, q).not.toMatch(/\b(update|insert|delete|alter|drop table|truncate)\b/i);
       // A string literal would end the shell's single quotes.
@@ -272,6 +277,12 @@ describe('the runbook of lot ONE QUEUE (docs/launch/DEPLOY-OQ-Q1.md)', () => {
     expect(model).toContain("{ label: 'In line', value: formatCount(t.line)");
     expect(model).toContain("{ label: 'Admitted', value: formatCount(p.admitted), note: 'GIVEN A TURN, ALL WAYS'");
     expect(board).toContain('`In line` en haut du tableau, `Admitted` dans le bloc `Pace` (« GIVEN A TURN, ALL WAYS »)');
+    // REMOVE on a paced release (D5) and the radar's line saying the same; SECURED's PAY above the add-on rows on a computer.
+    const remove = 'The entry leaves the release for good: those behind it move up, and the piece it holds returns and is offered at the next batch. Its screen says it was removed.';
+    expect(views).toContain(remove);
+    expect(board).toContain(remove);
+    expect(source('server/services/live-insights.ts')).toContain('those behind it move up, and the piece it holds returns and is offered at the next batch.');
+    expect(board).toContain('PAY (le temps pour payer dedans), sa note et RELEASE MY PLACE en haut de la colonne de droite');
     expect(source('web/admin/model/live-intelligence.ts')).toContain("return 'No sales rate yet';");
     expect(board).toContain('`No sales rate yet`');
     expect(board).toContain(

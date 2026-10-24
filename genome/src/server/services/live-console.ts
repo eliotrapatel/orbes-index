@@ -76,6 +76,7 @@ import {
   liveAccessRule,
   adminQueueFigures,
   liveBeyond,
+  liveBeyondRows,
   livePaceState,
   livePhase,
   livePieceSizes,
@@ -1170,10 +1171,12 @@ export class LiveConsoleService {
     const d = await this.db.selectFrom('drops').selectAll().where('id', '=', id).where('mode', '=', 'LIVE').executeTakeFirst();
     if (!d) throw dropNotFound();
     if (filter.status === 'BEYOND') {
-      const beyond = d.pace_batch !== null ? await liveBeyond(this.db, d) : null;
-      const ids = [...(beyond?.entries ?? [])];
-      const items = ids.length ? await this.adminEntries(this.db, d, { statuses: ['QUEUED'], ids }, page.pageSize, pageOffset(page), this.clock(), beyond) : [];
-      return makePage(items, ids.length, page);
+      if (d.pace_batch === null) return makePage([], 0, page);
+      // Filtered and counted inside the query (liveBeyondRows): never a list of ids bound, whatever the queue's length.
+      const total = await sql<{ n: string | number }>`SELECT count(DISTINCT b.entry_id) AS n FROM (${liveBeyondRows(d)}) AS b`.execute(this.db);
+      const n = Number(total.rows[0]?.n ?? 0);
+      const items = n ? await this.adminEntries(this.db, d, { statuses: ['QUEUED'], beyond: true }, page.pageSize, pageOffset(page), this.clock()) : [];
+      return makePage(items, n, page);
     }
     const statuses = filter.status === 'OPEN' ? [...LIVE_OPEN_STATUSES] : filter.status ? [filter.status] : null;
     let q = this.db.selectFrom('live_entries').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', id);
@@ -2051,7 +2054,7 @@ export class LiveConsoleService {
   private async adminEntries(
     db: Db,
     d: DropRow,
-    filter: { statuses: readonly LiveEntryStatus[] | null; ids?: readonly string[] },
+    filter: { statuses: readonly LiveEntryStatus[] | null; beyond?: boolean },
     limit: number,
     offset: number,
     now: Date,
@@ -2068,7 +2071,7 @@ export class LiveConsoleService {
       ])
       .where('e.drop_id', '=', d.id);
     if (filter.statuses) q = q.where('e.status', 'in', [...filter.statuses]);
-    if (filter.ids) q = q.where('e.id', 'in', [...filter.ids]);
+    if (filter.beyond) q = q.where(sql<boolean>`e.id IN (SELECT b.entry_id FROM (${liveBeyondRows(d)}) AS b)`);
     const rows = await q
       .orderBy(sql`e.position IS NULL`)
       // IN-01: the places guaranteed by the house first, as the line gives them turns in their size.

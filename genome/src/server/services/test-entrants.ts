@@ -2273,6 +2273,13 @@ export function paceCheck(f: PaceFacts): TestReportCheck {
   const held = { PACE: false, RELEASE: false };
   const holding = () => held.PACE || held.RELEASE;
   let heldSince = Number.NEGATIVE_INFINITY;
+  /** When each pause in progress began (null when it is not). */
+  const pausedAt: Record<'PACE' | 'RELEASE', number | null> = { PACE: null, RELEASE: null };
+  /**
+   * The hold shortened or ended while a pause held the batches: its time is the engine's then, which each resume moves
+   * as the engine does (paceShiftMs, pause by pause), so the stretch's end reads it that way and not as a whole.
+   */
+  let setWhileHeld = false;
   /** The last resume: no slot's pass ran before it. */
   let resumedAt = Number.NEGATIVE_INFINITY;
   /** The first scheduled batch's time (T0 + the hold, or where SHORTEN THE HOLD or END THE HOLD NOW put it): none before. */
@@ -2343,17 +2350,37 @@ export function paceCheck(f: PaceFacts): TestReportCheck {
       const gap = emptySlots(at, false, at, ev.hold?.on === true);
       if (gap) return fail(gap);
       if (!ev.hold) {
-        // SHORTEN THE HOLD or END THE HOLD NOW (while a pause holds too: the resume moves it as ever).
+        // SHORTEN THE HOLD or END THE HOLD NOW (while a pause holds too: each resume moves it as the engine does).
         if (ev.nextAt) nexts = [new Date(ev.nextAt).getTime()];
+        if (holding()) setWhileHeld = true;
         if (firstGiven === null && nexts !== null) holdEnd = nexts[0]!;
         continue;
       }
       const was = holding();
-      held[ev.hold.by] = ev.hold.on;
+      const by = ev.hold.by;
+      const start = pausedAt[by];
+      const other = pausedAt[by === 'PACE' ? 'RELEASE' : 'PACE'];
+      held[by] = ev.hold.on;
+      pausedAt[by] = ev.hold.on ? at : null;
+      // A hold set while held: this resume moves it as the engine's does (a time after this pause's start, by the time
+      // this pause alone held it).
+      if (!ev.hold.on && setWhileHeld && nexts !== null && start !== null) {
+        nexts = nexts.map((t) => (t > start ? t + Math.max(0, Math.min(at, other ?? at) - start) : t));
+      }
       if (!was && holding()) heldSince = at;
       else if (was && !holding()) {
         resumedAt = at;
         if (nexts === null) continue;
+        if (setWhileHeld) {
+          setWhileHeld = false;
+          const told = ev.nextAt ? new Date(ev.nextAt).getTime() : null;
+          if (told !== null && !nexts.some((t) => Math.abs(told - t) <= PACE_SLOT_MARGIN_MS)) {
+            return fail(`The resume at ${parisClock(new Date(at))} put the next batch at ${parisClock(new Date(told))}; the hold set while paused had it due at ${parisClock(new Date(nexts[0]!))}.`);
+          }
+          if (told !== null) nexts = [told];
+          if (firstGiven === null) holdEnd = Math.max(holdEnd, nexts[0]!);
+          continue;
+        }
         // W4: the next batch moved by the time held (a stretch both pauses held once); one due before it keeps its time.
         // The resume's record says where the engine put it: read on its clock, a few seconds either way (a batch due
         // right at the pause either way).

@@ -1473,7 +1473,8 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
     } else if (name === 'you') {
       const entry = body.entry as {
         status: string;
-        position: number | null;
+        /** D19: placed in the line, never the drawn place. */
+        placed: boolean;
         turn: { at: string; token: string | null } | null;
         afterRoom?: { opensAt: string } | null;
         queue?: Record<string, unknown> | null;
@@ -1488,7 +1489,7 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
           v.queue.turnSeenAt = at;
         }
       }
-      if (room === 'main' && entry?.position != null && !v.placed) {
+      if (room === 'main' && entry?.placed && !v.placed) {
         v.placed = true;
         placed++;
         firstPlaced ??= at;

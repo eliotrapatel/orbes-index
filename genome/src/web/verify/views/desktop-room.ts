@@ -149,21 +149,23 @@ const PLAN: Partial<Record<Kind, readonly [Place, string][]>> = {
   ],
   secured: [
     ['head', ':scope > .live__overline'],
-    // ONE QUEUE (MK #secured, desk): YOUR PIECE in the centre, the time to pay inside PAY bottom right (D39).
+    // ONE QUEUE (MK #secured, desk): YOUR PIECE in the centre, the time to pay inside PAY bottom right (D39). On a
+    // computer PAY, with its time, its note and RELEASE MY PLACE, comes before the add-on rows, so the time to pay is on
+    // the first screen whatever the rows (production M3 showed it there; add only, never degrade).
     ['body', ':scope > .live__reveal'],
     ['bl', ':scope > .live__title'],
     ['bl', ':scope > .live__detail'],
     ['bl', ':scope > .live__set-pieces'],
-    ['br', ':scope > .live__addons-title'],
-    ['br', ':scope > .live__addons'],
-    ['br', ':scope > .live__items-title'],
-    ['br', ':scope > .live__items'],
-    ['br', ':scope > .live__items-note'],
     ['br', ':scope > .live__error'],
     ['br', ':scope > .live__pay'],
     ['br', ':scope > .live__pay-left'],
     ['br', ':scope > .live__pay-note'],
     ['br', ':scope > .live__release'],
+    ['br', ':scope > .live__addons-title'],
+    ['br', ':scope > .live__addons'],
+    ['br', ':scope > .live__items-title'],
+    ['br', ':scope > .live__items'],
+    ['br', ':scope > .live__items-note'],
   ],
   // CONFIRMED (lot Q1 §3.7; MK #confirmed, desk): the act in the centre, a little low so the piece stays clear above it
   // (CONFIRMED, LIVE RELEASE over the name, the monogram on its horizon); a set's YOUR SET IS RESERVED, the sentence, the

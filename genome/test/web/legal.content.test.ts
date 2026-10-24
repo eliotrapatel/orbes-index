@@ -831,7 +831,7 @@ describe('legal pages: the privacy policy, written from the code', () => {
         '**What ORBES may do.** During a release, ORBES may pause it, no turn being given meanwhile and the turns and holds under way stopping, then resuming with the time they had left; extend its end; add pieces to a size; let a person in the line take their turn at once; remove an entry; or end the release early. The quantity announced is the quantity ORBES offers; ORBES may nevertheless add pieces during the release, and each addition is recorded.',
       ],
       fr: [
-        "**Le rythme.** Une sortie donne les tours à son rythme, un nombre de tours toutes les quelques minutes, dans l'ordre de la file, après une attente éventuelle suivant l'ouverture ; la page montre votre place et une heure estimée ; votre place est gardée.",
+        "**Le rythme.** Une sortie donne les tours à son rythme, un nombre de tours toutes les quelques minutes, dans l'ordre de la file, après une attente éventuelle suivant l'ouverture ; la page montre votre place et un temps d'attente estimé ; votre place est gardée.",
         "**Une pièce qui revient.** Une pièce dont le tour passe, dont la tenue prend fin, qui est rendue, ou dont ORBES retire l'entrée, revient à la file et est proposée avec les tours suivants de la sortie, à son rythme ; dans une salle d'après, le compte suivant de sa file dans sa taille reçoit aussitôt un tour.",
         "**Ce qu'ORBES peut faire.** Pendant une sortie, ORBES peut la suspendre, aucun tour n'étant alors donné et les tours et les tenues en cours s'arrêtant, puis reprenant avec le temps qui leur restait ; prolonger sa fin ; ajouter des pièces à une taille ; faire passer une personne de la file à son tour aussitôt ; retirer une entrée ; ou mettre fin à la sortie avant son terme. La quantité annoncée est celle qu'ORBES propose ; ORBES peut néanmoins ajouter des pièces pendant la sortie, et chaque ajout est enregistré.",
       ],
@@ -1047,8 +1047,9 @@ describe('legal pages: both languages, links, lexicon', () => {
       // Lot Q1, ONE QUEUE (D13, L2; step Q1.12): the terms' article 13, its two sentences only, "The pace" (turns at the
       // release's pace after an optional wait following the opening) and "A piece that returns" (offered with the next
       // turns, at once in an after-room); "What ORBES may do" unchanged. The date of the lot's final legal commit, never
-      // M3's published 2026-10-23 (the day after it); article 11 unchanged.
-      '2026-10-24': '5f3042053bd6250a',
+      // M3's published 2026-10-23 (the day after it); article 11 unchanged. The lot's review: the French « un temps
+      // d'attente estimé », never a clock time (ANSWERS r12, C3), under the same version.
+      '2026-10-24': '1cf4c08142f67d2c',
     };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
     expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });
