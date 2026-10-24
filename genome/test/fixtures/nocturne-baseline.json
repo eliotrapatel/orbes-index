@@ -7439,9 +7439,7 @@
         "Lined to keep two pieces apart, with its own cloth, for the longest journeys.",
         "+ € 12 450.50",
         "Added to your order at PAY, while available.",
-        "PAY · € 5 260",
-        "08:11",
-        "TO CONFIRM",
+        "PAY € 5 260 · 08:11",
         "ORBES Client Services will contact you for payment. Your delivery address is added in YOUR ORDERS.",
         "RELEASE MY PLACE",
         "HOW RELEASES WORK",
@@ -7452,7 +7450,9 @@
         "TERMS",
         "LEGAL",
         "HELP",
-        "IP GEOLOCATION BY DB-IP"
+        "IP GEOLOCATION BY DB-IP",
+        "PAY · € 5 260",
+        "TO CONFIRM"
       ]
     },
     "addons-place-held": {
@@ -12000,7 +12000,9 @@
         "PRESS AND HOLD THE SEAL",
         "02:06",
         "TO SECURE YOUR SET",
-        "THE ORBITAL SET · SIZE 16 · 54 · 42 · € 12 000",
+        "THE ORBITAL SET",
+        "SIZE 16 · 54 · 42 · 1 SET · € 12 000",
+        "4 IN THE ROOM",
         "Let go too early and the seal resets.",
         "HOW RELEASES WORK",
         "THE RELEASES",
@@ -12010,7 +12012,8 @@
         "TERMS",
         "LEGAL",
         "HELP",
-        "IP GEOLOCATION BY DB-IP"
+        "IP GEOLOCATION BY DB-IP",
+        "THE ORBITAL SET · SIZE 16 · 54 · 42 · € 12 000"
       ]
     },
     "set-live-secured": {
@@ -12037,9 +12040,7 @@
         "GIFT BOX",
         "+ € 90",
         "One box for the three pieces",
-        "PAY · € 12 090",
-        "07:08",
-        "TO CONFIRM",
+        "PAY € 12 090 · 07:08",
         "ORBES Client Services will contact you for payment. Your delivery address is added in YOUR ORDERS.",
         "RELEASE MY PLACE",
         "HOW RELEASES WORK",
@@ -12050,7 +12051,9 @@
         "TERMS",
         "LEGAL",
         "HELP",
-        "IP GEOLOCATION BY DB-IP"
+        "IP GEOLOCATION BY DB-IP",
+        "PAY · € 12 090",
+        "TO CONFIRM"
       ]
     },
     "set-live-confirmed": {
@@ -13419,9 +13422,10 @@
       ]
     },
     "live-turn": {
-      "title": "The turn: PRESS AND HOLD THE SEAL",
+      "title": "The turn (MK 4): YOUR TURN, PRESS AND HOLD THE SEAL, seal C in its ring, MONOLITHE IN BLUE, SIZE 16 · 1 PIECE · € 5 050, the room count",
       "refs": [
-        "live-10"
+        "live-10",
+        "MK 4"
       ],
       "variant": "live",
       "as": "turn",
@@ -13433,7 +13437,41 @@
         "PRESS AND HOLD THE SEAL",
         "03:08",
         "TO SECURE YOUR PIECE",
-        "MONOLITHE · SIZE 16 · € 5 050",
+        "MONOLITHE IN BLUE",
+        "SIZE 16 · 1 PIECE · € 5 050",
+        "4 IN THE ROOM",
+        "Let go too early and the seal resets.",
+        "HOW RELEASES WORK",
+        "THE RELEASES",
+        "SOUND ON",
+        "PRIVACY",
+        "·",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "IP GEOLOCATION BY DB-IP",
+        "MONOLITHE · SIZE 16 · € 5 050"
+      ]
+    },
+    "live-hold": {
+      "title": "Holding the seal (MK 4b): HOLD, the inner ring filling in its light, its point on the leading end, the seal pressed",
+      "refs": [
+        "MK 4b",
+        "D38"
+      ],
+      "variant": "live",
+      "as": "turn",
+      "values": [
+        "ORBES",
+        "The door is open. Take your time at the seal.",
+        "FROM ORBES",
+        "HOLD",
+        "PRESS AND HOLD THE SEAL",
+        "03:08",
+        "TO SECURE YOUR PIECE",
+        "MONOLITHE IN BLUE",
+        "SIZE 16 · 1 PIECE · € 5 050",
+        "4 IN THE ROOM",
         "Let go too early and the seal resets.",
         "HOW RELEASES WORK",
         "THE RELEASES",
@@ -13447,9 +13485,10 @@
       ]
     },
     "live-secured": {
-      "title": "Secured: the piece, the add-ons, PAY · total",
+      "title": "Secured (MK 5): YOUR PIECE on the horizon, seal C, the add-ons, PAY € 5 200 · 08:11 with the time inside it",
       "refs": [
-        "live-11"
+        "live-11",
+        "MK 5"
       ],
       "variant": "live",
       "as": "secured",
@@ -13468,9 +13507,7 @@
         "Your initials inside the band",
         "GIFT BOX",
         "+ € 90",
-        "PAY · € 5 200",
-        "08:11",
-        "TO CONFIRM",
+        "PAY € 5 200 · 08:11",
         "ORBES Client Services will contact you for payment. Your delivery address is added in YOUR ORDERS.",
         "RELEASE MY PLACE",
         "HOW RELEASES WORK",
@@ -13481,7 +13518,9 @@
         "TERMS",
         "LEGAL",
         "HELP",
-        "IP GEOLOCATION BY DB-IP"
+        "IP GEOLOCATION BY DB-IP",
+        "PAY · € 5 200",
+        "TO CONFIRM"
       ]
     },
     "live-confirmed": {
@@ -14576,6 +14615,37 @@
         "DRAWING THE PLACES",
         "By tier, the highest first; at random within each tier.",
         "1 IN THE ROOM",
+        "HOW RELEASES WORK",
+        "THE RELEASES",
+        "SOUND ON",
+        "PRIVACY",
+        "·",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "IP GEOLOCATION BY DB-IP"
+      ]
+    },
+    "live-turn-returned": {
+      "title": "The turn of a size seen full (N11): production’s A PIECE HAS RETURNED, PRESS AND HOLD THE SEAL",
+      "refs": [
+        "N11",
+        "D51"
+      ],
+      "variant": "queue",
+      "as": "queueReturned",
+      "values": [
+        "ORBES",
+        "Thank you for being here tonight.",
+        "FROM ORBES",
+        "A PIECE HAS RETURNED",
+        "PRESS AND HOLD THE SEAL",
+        "05:00",
+        "TO SECURE YOUR PIECE",
+        "MONOLITHE IN BLUE",
+        "SIZE 17 · 1 PIECE · € 5 050",
+        "1 IN THE ROOM",
+        "Let go too early and the seal resets.",
         "HOW RELEASES WORK",
         "THE RELEASES",
         "SOUND ON",
@@ -22323,7 +22393,7 @@
       ]
     },
     "desk-live-turn": {
-      "title": "The turn: PRESS AND HOLD THE SEAL (a computer, 1440 × 900)",
+      "title": "The turn (MK 4): YOUR TURN, PRESS AND HOLD THE SEAL, seal C in its ring, MONOLITHE IN BLUE, SIZE 16 · 1 PIECE · € 5 050, the room count (a computer, 1440 × 900)",
       "refs": [
         "desktop",
         "phone: live-turn"
@@ -22342,6 +22412,66 @@
         "FROM ORBES",
         "MONOLITHE IN BLUE",
         "SIZE 16 · 1 PIECE · € 5 050",
+        "HOW RELEASES WORK",
+        "THE RELEASES",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND OFF",
+        "IP GEOLOCATION BY DB-IP"
+      ]
+    },
+    "desk-live-hold": {
+      "title": "Holding the seal (MK 4b): HOLD, the inner ring filling in its light, its point on the leading end, the seal pressed (a computer, 1440 × 900)",
+      "refs": [
+        "desktop",
+        "phone: live-hold"
+      ],
+      "variant": "live",
+      "as": "turn",
+      "values": [
+        "ORBES",
+        "4 IN THE ROOM",
+        "HOLD",
+        "PRESS AND HOLD THE SEAL",
+        "03:08",
+        "TO SECURE YOUR PIECE",
+        "Let go too early and the seal resets.",
+        "The door is open. Take your time at the seal.",
+        "FROM ORBES",
+        "MONOLITHE IN BLUE",
+        "SIZE 16 · 1 PIECE · € 5 050",
+        "HOW RELEASES WORK",
+        "THE RELEASES",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND OFF",
+        "IP GEOLOCATION BY DB-IP"
+      ]
+    },
+    "desk-live-turn-returned": {
+      "title": "The turn of a size seen full (N11): production’s A PIECE HAS RETURNED, PRESS AND HOLD THE SEAL (a computer, 1440 × 900)",
+      "refs": [
+        "desktop",
+        "phone: live-turn-returned"
+      ],
+      "variant": "queue",
+      "as": "queueReturned",
+      "values": [
+        "ORBES",
+        "1 IN THE ROOM",
+        "A PIECE HAS RETURNED",
+        "PRESS AND HOLD THE SEAL",
+        "05:00",
+        "TO SECURE YOUR PIECE",
+        "Let go too early and the seal resets.",
+        "Thank you for being here tonight.",
+        "FROM ORBES",
+        "MONOLITHE IN BLUE",
+        "SIZE 17 · 1 PIECE · € 5 050",
         "HOW RELEASES WORK",
         "THE RELEASES",
         "PRIVACY",
@@ -29840,7 +29970,7 @@
       ]
     },
     "desk-live-secured": {
-      "title": "Secured: the piece, the add-ons, PAY · total (a computer, 1440 × 900)",
+      "title": "Secured (MK 5): YOUR PIECE on the horizon, seal C, the add-ons, PAY € 5 200 · 08:11 with the time inside it (a computer, 1440 × 900)",
       "refs": [
         "desktop",
         "phone: live-secured"
@@ -29853,8 +29983,6 @@
         "SECURED",
         "YOUR PIECE",
         "SECURED AT 18:47:10",
-        "08:11",
-        "TO CONFIRM",
         "The door is open. Take your time at the seal.",
         "FROM ORBES",
         "MONOLITHE IN BLUE",
@@ -29865,7 +29993,7 @@
         "Your initials inside the band",
         "GIFT BOX",
         "+ € 90",
-        "PAY · € 5 200",
+        "PAY € 5 200 · 08:11",
         "ORBES Client Services will contact you for payment. Your delivery address is added in YOUR ORDERS.",
         "RELEASE MY PLACE",
         "HOW RELEASES WORK",
@@ -29875,7 +30003,9 @@
         "LEGAL",
         "HELP",
         "SOUND OFF",
-        "IP GEOLOCATION BY DB-IP"
+        "IP GEOLOCATION BY DB-IP",
+        "TO CONFIRM",
+        "PAY · € 5 200"
       ]
     },
     "desk-live-confirmed": {
@@ -33264,8 +33394,6 @@
         "SECURED",
         "YOUR SET",
         "SECURED AT 18:46:08",
-        "07:08",
-        "TO CONFIRM",
         "THE ORBITAL SET",
         "THE SET · 3 PIECES",
         "MONOLITHE IN GOLD",
@@ -33278,7 +33406,7 @@
         "GIFT BOX",
         "+ € 90",
         "One box for the three pieces",
-        "PAY · € 12 090",
+        "PAY € 12 090 · 07:08",
         "ORBES Client Services will contact you for payment. Your delivery address is added in YOUR ORDERS.",
         "RELEASE MY PLACE",
         "HOW RELEASES WORK",
@@ -33288,7 +33416,9 @@
         "LEGAL",
         "HELP",
         "SOUND OFF",
-        "IP GEOLOCATION BY DB-IP"
+        "IP GEOLOCATION BY DB-IP",
+        "TO CONFIRM",
+        "PAY · € 12 090"
       ]
     },
     "desk-set-live-confirmed": {
@@ -35264,8 +35394,6 @@
         "SECURED",
         "YOUR PIECE",
         "SECURED AT 18:47:10",
-        "08:11",
-        "TO CONFIRM",
         "The door is open. Take your time at the seal.",
         "FROM ORBES",
         "MONOLITHE IN BLUE",
@@ -35292,7 +35420,7 @@
         "Lined to keep two pieces apart, with its own cloth, for the longest journeys.",
         "+ € 12 450.50",
         "Added to your order at PAY, while available.",
-        "PAY · € 5 260",
+        "PAY € 5 260 · 08:11",
         "ORBES Client Services will contact you for payment. Your delivery address is added in YOUR ORDERS.",
         "RELEASE MY PLACE",
         "HOW RELEASES WORK",
@@ -35302,7 +35430,9 @@
         "LEGAL",
         "HELP",
         "SOUND OFF",
-        "IP GEOLOCATION BY DB-IP"
+        "IP GEOLOCATION BY DB-IP",
+        "TO CONFIRM",
+        "PAY · € 5 260"
       ]
     },
     "desk-addons-place-held": {

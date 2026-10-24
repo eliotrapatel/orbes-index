@@ -283,7 +283,7 @@
 
   /* ── 3. The room's words (§10.5): labels, the centre's title, figures in tabular lining figures (§10.7) ─────────── */
 
-  html:not(.d-touch) .d-room :is(.live__overline, .live__fact, .live__surprise, .live__subtitle, .live__notice-label, .live__check-label, .live__check-value, .live__deadline-label, .d-room__choice) {
+  html:not(.d-touch) .d-room :is(.live__overline, .live__fact, .live__surprise, .live__subtitle, .live__notice-label, .live__check-label, .live__check-value, .d-room__choice) {
     margin: 0;
     font-size: var(--d-fs-label);
     line-height: 1.6;
@@ -382,7 +382,7 @@
   }
 
   /* The big figures: the reading face, thin, tabular (§10.7); their groups never move as they change. */
-  html:not(.d-touch) .d-room :is(.live__count, .live__place, .live__turn-left, .live__deadline-time) {
+  html:not(.d-touch) .d-room :is(.live__count, .live__place, .live__turn-left) {
     margin: 0;
     font-family: var(--font);
     font-size: var(--d-room-figure);
@@ -1250,8 +1250,8 @@
     margin-top: var(--d-s4);
   }
 
-  /* ── 10. Secured (B5): the reveal and the time to confirm in the centre; the piece bottom left; the add-ons and PAY
-        bottom right ──────────────────────────────────────────────────────────────────────────────────────────── */
+  /* ── 10. Secured (B5): YOUR PIECE in the centre; the piece bottom left; the add-ons and PAY, the time to pay inside
+        it (ONE QUEUE, D39), bottom right ───────────────────────────────────────────────────────────────────── */
 
   html:not(.d-touch) .d-room .d-room__body > .live__reveal {
     width: min(100%, clamp(240px, 22.23vw, 400px), max(240px, (100vh - 520px) * 1.1));
@@ -1276,19 +1276,6 @@
   /* YOUR PIECE's horizon (D31): further past the column on the window. */
   html:not(.d-touch) .d-room .live__reveal > .live__floor {
     margin: var(--d-s4) -120px 0;
-  }
-
-  /* The time to confirm: its figure as the turn's, its label under it. */
-  html:not(.d-touch) .d-room .d-room__body > .live__deadline {
-    flex-direction: column;
-    align-items: center;
-    gap: var(--d-s3);
-    margin-top: var(--d-s6);
-  }
-
-  html:not(.d-touch) .d-room .live__deadline-label {
-    color: var(--d-room-soft);
-    text-indent: var(--d-tr-label);
   }
 
   html:not(.d-touch) .d-room .d-room__br > .live__addons-title {
@@ -1460,6 +1447,139 @@
 
   html:not(.d-touch) .d-room .d-room__br > .live__release {
     margin-top: var(--d-s4);
+  }
+
+  /* PAY, the light (house.css .live-pay; MK #secured desk): its feathered edge over 90 px, 64 px tall. */
+  html:not(.d-touch) .d-room .btn.live-pay {
+    --live-pay-feather: 90px;
+    height: auto;
+    min-height: 64px;
+    border-width: 0;
+    background-color: transparent;
+    color: var(--ink);
+  }
+
+  /* Under the pointer its frame steps to full ivory; pressed, as the light itself (the button keeps no ground). */
+  html:not(.d-touch) .d-room .btn.live-pay:not(:disabled, [aria-disabled="true"]):is(:hover, :active) {
+    background-color: transparent;
+    color: var(--ink);
+  }
+
+  html:not(.d-touch) .d-room .btn.live-pay:not(:disabled, [aria-disabled="true"]):hover .live-pay__art {
+    box-shadow: inset 0 0 0 1px var(--ink);
+  }
+
+  html:not(.d-touch) .d-room .live-pay__words {
+    padding-left: var(--d-tr-label);
+  }
+
+  /* YOUR TURN in place, the hold handing off and SECURED on a computer (house.css; gen.mjs TX_END turn 1850, secured
+     4250 ms): a little slower, the parts in the Cinema room's places. Under reduced motion none of it runs. */
+  @media (prefers-reduced-motion: no-preference) {
+    html:not(.d-touch) .d-room.live--tx-turn .live__turn .live-hold__seal {
+      animation-delay: 0.35s;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-turn .live__turn .live-hold__track {
+      animation-delay: 0.4s;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-turn .live__turn .live-hold__turn {
+      animation-delay: 0.6s;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-turn .live__turn > .d-room__head > .live__overline {
+      animation: live-tx-resolve 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.5s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-turn .live__turn > .d-room__head > .live__title {
+      animation: live-tx-resolve 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.65s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-turn .live__turn > .d-room__body > :is(.live__turn-left, .live__to-secure) {
+      animation: live-tx-resolve 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.85s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-turn .live__turn > .d-room__body > :not(.live-hold, .live__turn-left, .live__to-secure),
+    html:not(.d-touch) .d-room.live--tx-turn .live__turn > :is(.d-room__bl, .d-room__br) {
+      animation: live-fade-in 0.6s ease 1.1s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-handoff > :is(.d-room__photo, .live__head, .live__foot),
+    html:not(.d-touch) .d-room.live--tx-handoff .live__turn > :is(.d-room__head, .d-room__bl, .d-room__br),
+    html:not(.d-touch) .d-room.live--tx-handoff .live__turn > .d-room__body > :not(.live-hold) {
+      animation: live-tx-out 0.8s ease 0s both;
+    }
+
+    html:not(.d-touch) .d-room:is(.live--tx-turn, .live--tx-handoff) .live__turn .btn.live-hold:focus-visible {
+      outline-color: transparent;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-handoff .live-hold__dissolve {
+      width: 190px;
+      height: 140px;
+      margin: -70px 0 0 -95px;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-secured .live__reveal::before {
+      top: 138px;
+      width: 190px;
+      height: 140px;
+      margin: -70px 0 0 -95px;
+      animation-duration: 2.2s;
+      animation-delay: 0.35s;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-secured .live__floor-line {
+      animation-duration: 1.55s;
+      animation-delay: 0.35s;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-secured .live__piece-seal {
+      animation-delay: 0.7s;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-secured .live__floor-sky {
+      animation-delay: 0.95s;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-secured .live-pay__art {
+      animation-delay: 2.75s;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-secured :is(.live-pay__edge, .live-pay__pool) {
+      animation-delay: 3.1s;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-secured > .d-room__photo {
+      animation: live-tx-photo-up 1.7s cubic-bezier(0.16, 1, 0.3, 1) 1.15s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-secured > :is(.live__head, .live__foot),
+    html:not(.d-touch) .d-room.live--tx-secured .live__secured > .d-room__body > :not(.live__reveal),
+    html:not(.d-touch) .d-room.live--tx-secured .live__secured > .d-room__br > :not(.live__pay) {
+      animation: live-fade-in 0.8s ease 3.3s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-secured .live__secured > .d-room__head {
+      animation: live-tx-resolve 0.9s cubic-bezier(0.22, 1, 0.36, 1) 2.05s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-secured .live__reveal > .live__overline {
+      animation: live-tx-resolve 0.9s cubic-bezier(0.22, 1, 0.36, 1) 2.15s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-secured .live__reveal > .live__secured-at {
+      animation: live-tx-resolve 0.9s cubic-bezier(0.22, 1, 0.36, 1) 2.3s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-secured .live__secured > .d-room__bl > .live__title {
+      animation: live-tx-resolve 0.9s cubic-bezier(0.22, 1, 0.36, 1) 2.45s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-secured .live__secured > .d-room__bl > :not(.live__title) {
+      animation: live-fade-in 0.8s ease 2.6s backwards;
+    }
   }
 
   /* ── 11. CONFIRMED (B6): out into the light, the house's ivory; its words beside its receipt, on the grid ─────────── */
@@ -2052,7 +2172,7 @@
       padding: var(--d-s2) 0;
     }
 
-    html:not(.d-touch) .d-room .d-room__body > :is(.live__count-block, .live__turn-left, .live__deadline, .live__notice, .live__drawing) {
+    html:not(.d-touch) .d-room .d-room__body > :is(.live__count-block, .live__turn-left, .live__notice, .live__drawing) {
       margin-top: var(--d-s5);
     }
   }

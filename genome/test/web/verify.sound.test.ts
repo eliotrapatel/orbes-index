@@ -936,6 +936,9 @@ describe('a LIVE RELEASE\'s designed sounds (lot Q1 §3.10, live-sound.ts)', () 
     expect(view).toContain("this.deps.sound.cue('open', { entryId: this.entry?.id ?? null, afterRoom: !!this.afterRoomOf() });");
     expect(view).toContain("this.deps.sound.cue('welcome', { entryId: e.id, afterRoom: !!this.afterRoomOf() });");
     expect(view).toContain("this.deps.sound.cue('secured');");
+    // Lot Q1 §3.5: the turn as it arrives (0.3 s into its passage), hold.mp3 with the press itself (the ring's fill).
+    expect(view).toContain("if (kind === 'turn' && previous !== undefined && previous !== 'turn') this.deps.sound.cue('turn');");
+    expect(view).toMatch(/this\.deps\.sound\.prime\(\);\n\s*this\.deps\.sound\.cue\('hold'\);/);
     expect(view).toContain('if (previous !== kind) this.deps.sound.stopAll();');
     expect(view).not.toMatch(/sound\.(tick|play)\(/);
     expect(view).not.toMatch(/SoundSignature/);

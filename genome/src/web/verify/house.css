@@ -2288,16 +2288,50 @@ body[data-screen="live"]:has(.view--live.live--look:not(.d-room)) .corners {
   transition: stroke-dashoffset 0.25s linear;
 }
 
+/* 4b HOLD (ONE QUEUE §3.5; OP-8, D38; MK #turn-hold): the inner ring a fine ivory line with a soft glow under it (12 %,
+   blurred), the breathing point riding its leading end (views/live.ts sets its place), the seal pressed to 98.5 %. */
 .live-hold__fill {
   fill: none;
-  stroke: var(--ink);
-  stroke-width: 5;
+  stroke: rgba(246, 242, 234, 0.9);
+  stroke-width: 1.6;
   stroke-linecap: round;
   opacity: 0;
-  transition: opacity 0.2s var(--ease);
+  transition: opacity 0.2s ease;
 }
 
-.live__turn.is-holding .live-hold__fill {
+.live-hold__glow {
+  fill: none;
+  stroke: rgba(246, 242, 234, 0.12);
+  stroke-width: 12;
+  stroke-linecap: round;
+  filter: blur(4px);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.live-hold__pt {
+  position: absolute;
+  z-index: 1;
+  left: var(--live-hold-x, 50%);
+  top: var(--live-hold-y, 6.7164%);
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.live-hold__pt > i {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, #fffdf8 0, rgba(255, 253, 248, 0.92) 24%, rgba(246, 242, 234, 0.32) 58%, rgba(246, 242, 234, 0) 100%);
+  animation: live-hz-breath 4.8s ease-in-out infinite;
+}
+
+.live__turn.is-holding :is(.live-hold__fill, .live-hold__glow, .live-hold__pt) {
   opacity: 1;
 }
 
@@ -2308,11 +2342,25 @@ body[data-screen="live"]:has(.view--live.live--look:not(.d-room)) .corners {
   width: 67.2%;
   height: 67.2%;
   pointer-events: none;
-  transition: transform 0.2s var(--ease);
+  transition: transform 0.25s ease;
 }
 
 .live__turn.is-holding .live-hold__seal {
-  transform: scale(0.96);
+  transform: scale(0.985);
+}
+
+/* The faint glow the seal dissolves into as the hold hands off to SECURED (only then: .live--tx-handoff). */
+.live-hold__dissolve {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 150px;
+  height: 110px;
+  margin: -55px 0 0 -75px;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(closest-side, rgba(246, 242, 234, 0.06) 0, rgba(246, 242, 234, 0.02) 46%, rgba(246, 242, 234, 0) 100%);
 }
 
 .live__turn.is-paused .live-hold {
@@ -2332,13 +2380,18 @@ body[data-screen="live"]:has(.view--live.live--look:not(.d-room)) .corners {
 }
 
 .live__turn-piece {
-  margin-top: 26px;
+  margin-top: 22px;
   color: var(--ink);
 }
 
+/* The turn's lines under the name on a phone (MK #turn; D34): its choice and price 4 px under it, the room count. */
+.live__turn > .live__choice {
+  margin-top: 4px;
+}
+
 /* B5: secured. YOUR PIECE on the vault (ONE QUEUE, D31; MK #secured): no grey plate, no corner marks; the seal in the
-   light pooled over a hairline horizon dissolving at its ends, SECURED AT under the line. The reveal: it rises, the
-   seal's glyphs appear one by one (P-D01's motion), the seal glows. */
+   light pooled over a hairline horizon dissolving at its ends, SECURED AT under the line; seal C (live-seal.ts). The
+   passage into it: .live--tx-secured, below. */
 .live__reveal {
   position: relative;
   display: flex;
@@ -2396,31 +2449,6 @@ body[data-screen="live"]:has(.view--live.live--look:not(.d-room)) .corners {
   margin-top: 16px;
 }
 
-.live__secured.is-revealing .live__reveal {
-  animation: live-reveal 0.9s var(--ease) both;
-}
-
-@keyframes live-reveal {
-  from { opacity: 0; transform: scale(0.92); }
-  to { opacity: 1; transform: none; }
-}
-
-.live__secured.is-revealing .live-seal g[data-layer="genome"] {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: ceremony-glyph 0.7s var(--ease) both;
-  animation-delay: calc(0.35s + var(--i, 0) * 0.16s);
-}
-
-.live__secured.is-revealing .live__piece-seal {
-  animation: live-glow 2.6s var(--ease) both;
-}
-
-@keyframes live-glow {
-  0% { filter: drop-shadow(0 0 0 rgba(246, 242, 234, 0)); }
-  45% { filter: drop-shadow(0 0 34px rgba(246, 242, 234, 0.5)); }
-  100% { filter: var(--vault-glow); }
-}
 
 .live__secured .live__title {
   margin-top: 22px;
@@ -2627,25 +2655,6 @@ body[data-screen="live"]:has(.view--live.live--look:not(.d-room)) .corners {
   font-size: var(--fs-micro);
   line-height: 1.6;
   letter-spacing: var(--track-micro);
-}
-
-.live__deadline {
-  display: flex;
-  align-items: baseline;
-  justify-content: center;
-  gap: 8px;
-  margin-top: 14px;
-}
-
-.live__deadline-time {
-  font-size: var(--fs-body);
-  letter-spacing: 0.04em;
-  font-variant-numeric: tabular-nums;
-}
-
-.live__deadline-label {
-  font-size: var(--fs-micro);
-  letter-spacing: var(--track-label);
 }
 
 .live__release {
@@ -3130,7 +3139,6 @@ body[data-screen="board"] .corners {
 .live__presence,
 .live__check-label,
 .live__check-value,
-.live__deadline-label,
 .live-banner,
 .board__status,
 .board__title {
@@ -3177,7 +3185,7 @@ body[data-screen="board"] .corners {
 
 @media (prefers-reduced-motion: reduce) {
   /* The LIVE RELEASE: cross-fades only. The lock's orbits stay still (the view turns none), the door's leaves fade
-     rather than part, the reveal and the sweep are not played (the view sets no .is-revealing). */
+     rather than part, the sweep is not played, and no passage runs (the view sets no .live--tx-* class). */
   .live-seal__ring,
   .live__dot,
   .board__status.is-live .live__dot,
@@ -3590,4 +3598,348 @@ body[data-screen="board"] .corners {
 
 @keyframes live-tx-glide {
   from { transform: translate(var(--live-tx-dx, 0), var(--live-tx-dy, 0)); }
+}
+
+/* ── PAY, the light (ONE QUEUE §3.5; ANSWERS C13, r20c 15:36, 16:41; OP-9; D39, D40; MK #secured, gen.mjs payButton and
+   its round 20c CSS): the time to pay lives in PAY. Its lit part is the time left (--live-pay-f, views/live.ts), emptying
+   from right to left, its edge feathered over 58 px (90 px on a computer); the point of light breathing on its foot at the
+   edge, deeper in the last 10 % (.is-last); a faint pool of light under the lit part, dissolving at its ends; where the
+   light has gone, PAY keeps its hairline frame (ivory 78 %) and its words turn ivory. At 00:00 the light goes out
+   (.is-done). Taller (60 px; 64 on a computer), weight 500. Its accessible name is PAY · the total, the time its
+   description (.live__pay-left). ── */
+.btn.live-pay {
+  --live-pay-feather: 58px;
+  --live-pay-e: calc(var(--live-pay-f, 1) * (100% + var(--live-pay-feather)) - var(--live-pay-feather) / 2);
+  position: relative;
+  min-height: 60px;
+  overflow: visible;
+  border-width: 0;
+  background: transparent;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.btn.live-pay:is(:hover, :active) {
+  background: transparent;
+  color: var(--ink);
+}
+
+.live-pay__art {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px rgba(246, 242, 234, 0.78);
+}
+
+.live-pay__lit {
+  position: absolute;
+  inset: 0;
+  background: var(--ink);
+  -webkit-mask-image: linear-gradient(90deg, #fff calc(var(--live-pay-e) - var(--live-pay-feather) / 2), rgba(255, 255, 255, 0.92) calc(var(--live-pay-e) - var(--live-pay-feather) * 0.32), rgba(255, 255, 255, 0.72) calc(var(--live-pay-e) - var(--live-pay-feather) * 0.16), rgba(255, 255, 255, 0.5) var(--live-pay-e), rgba(255, 255, 255, 0.28) calc(var(--live-pay-e) + var(--live-pay-feather) * 0.16), rgba(255, 255, 255, 0.08) calc(var(--live-pay-e) + var(--live-pay-feather) * 0.32), transparent calc(var(--live-pay-e) + var(--live-pay-feather) / 2));
+  mask-image: linear-gradient(90deg, #fff calc(var(--live-pay-e) - var(--live-pay-feather) / 2), rgba(255, 255, 255, 0.92) calc(var(--live-pay-e) - var(--live-pay-feather) * 0.32), rgba(255, 255, 255, 0.72) calc(var(--live-pay-e) - var(--live-pay-feather) * 0.16), rgba(255, 255, 255, 0.5) var(--live-pay-e), rgba(255, 255, 255, 0.28) calc(var(--live-pay-e) + var(--live-pay-feather) * 0.16), rgba(255, 255, 255, 0.08) calc(var(--live-pay-e) + var(--live-pay-feather) * 0.32), transparent calc(var(--live-pay-e) + var(--live-pay-feather) / 2));
+  transition: opacity 1.6s ease;
+}
+
+.live-pay__words {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-left: var(--track-label);
+  text-indent: 0;
+  white-space: nowrap;
+}
+
+.live-pay__words--in {
+  color: var(--paper);
+  -webkit-mask-image: linear-gradient(90deg, #fff calc(var(--live-pay-e) - 6px), transparent calc(var(--live-pay-e) + 6px));
+  mask-image: linear-gradient(90deg, #fff calc(var(--live-pay-e) - 6px), transparent calc(var(--live-pay-e) + 6px));
+  transition: opacity 1.6s ease;
+}
+
+.live-pay__words--out {
+  color: rgba(246, 242, 234, 0.92);
+  text-shadow: 0 0 6px rgba(10, 10, 10, 0.55);
+  -webkit-mask-image: linear-gradient(90deg, transparent calc(var(--live-pay-e) - 6px), #fff calc(var(--live-pay-e) + 6px));
+  mask-image: linear-gradient(90deg, transparent calc(var(--live-pay-e) - 6px), #fff calc(var(--live-pay-e) + 6px));
+}
+
+.live-pay__clock {
+  font-family: var(--font);
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.live-pay__pool {
+  position: absolute;
+  left: -32px;
+  right: -32px;
+  top: 55%;
+  height: calc(45% + 26px);
+  pointer-events: none;
+  background: radial-gradient(ellipse 52% 100% at 50% 0, rgba(246, 242, 234, 0.15) 0, rgba(246, 242, 234, 0.06) 50%, rgba(246, 242, 234, 0) 100%);
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #fff 44px, #fff calc(32px + var(--live-pay-f, 1) * (100% - 64px + var(--live-pay-feather)) - var(--live-pay-feather)), transparent calc(32px + var(--live-pay-f, 1) * (100% - 64px + var(--live-pay-feather))));
+  mask-image: linear-gradient(90deg, transparent 0, #fff 44px, #fff calc(32px + var(--live-pay-f, 1) * (100% - 64px + var(--live-pay-feather)) - var(--live-pay-feather)), transparent calc(32px + var(--live-pay-f, 1) * (100% - 64px + var(--live-pay-feather))));
+  transition: opacity 1.6s ease;
+}
+
+.live-pay__edge {
+  position: absolute;
+  left: clamp(0px, var(--live-pay-e), 100%);
+  top: 100%;
+  z-index: 1;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  transition: opacity 1.6s ease;
+}
+
+.live-pay__pt {
+  position: absolute;
+  left: -6px;
+  top: -6px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, #fffdf8 0, rgba(255, 253, 248, 0.92) 24%, rgba(246, 242, 234, 0.32) 58%, rgba(246, 242, 234, 0) 100%);
+  animation: live-hz-breath 4.8s ease-in-out infinite;
+}
+
+.live-pay__halo {
+  position: absolute;
+  left: -38px;
+  top: -13px;
+  width: 76px;
+  height: 26px;
+  opacity: 0;
+  transition: opacity 1.6s ease;
+}
+
+.live-pay__halo > i {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(246, 242, 234, 0.38), rgba(246, 242, 234, 0.12) 52%, rgba(246, 242, 234, 0) 100%);
+  animation: live-hz-deep 4.8s ease-in-out infinite;
+}
+
+.live-pay.is-last .live-pay__halo {
+  opacity: 1;
+}
+
+.live-pay.is-done :is(.live-pay__lit, .live-pay__words--in, .live-pay__pool, .live-pay__edge) {
+  opacity: 0;
+}
+
+.live-pay.is-done .live-pay__words--out {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.live__secured > .live__pay-note {
+  margin-top: 20px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-pay__pt,
+  .live-pay__halo > i {
+    animation: none;
+  }
+  .live-pay *,
+  .live-hold__pt > i {
+    transition: none;
+  }
+  .live-hold__pt > i {
+    animation: none;
+  }
+}
+
+/* ── YOUR TURN in place, the hold handing off, SECURED (ONE QUEUE §3.5; ANSWERS C16, 16:42–16:43, 23 Oct 01:03; ROUND 5
+   "hold→SECURED … keep their current passages"; D42; MK #turn PLAY THE TURN, #turn-hold PLAY THE HOLD, #secured PLAY
+   SECURED; gen.mjs TX_CSS, TX_END turn 1750 / 1850, secured 4000 / 4250 ms, the hb-* keyframes, its easings). Each part
+   plays from its "from" into its own final value, so nothing is held once a passage lands. Under reduced motion none of
+   it runs (views/live.ts adds no class): the page at once. ── */
+.live-tx-turn {
+  display: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* YOUR TURN (1.75 s): the queue's place and time fade where they stood; the seal fades in, its countdown ring draws to
+     the time left, then the words resolve, the rest after them. */
+  .live--tx-turn > .live-tx-turn {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 3;
+    pointer-events: none;
+  }
+
+  .live--tx-turn .live-tx-ghost--q {
+    animation: live-tx-unresolve 0.55s cubic-bezier(0.22, 1, 0.36, 1) 0s both;
+  }
+
+  .live--tx-turn .live__turn .live-hold__seal {
+    animation: live-fade-in 0.7s ease 0.3s backwards;
+  }
+
+  .live--tx-turn .live__turn .live-hold__track {
+    animation: live-fade-in 0.6s ease 0.35s backwards;
+  }
+
+  .live--tx-turn .live__turn .live-hold__turn {
+    animation: live-tx-ring 0.9s cubic-bezier(0.33, 0, 0.15, 1) 0.55s backwards;
+  }
+
+  .view--live.live--tx-turn:not(.d-room) .live__turn > .live__overline {
+    animation: live-tx-resolve 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.45s backwards;
+  }
+
+  .view--live.live--tx-turn:not(.d-room) .live__turn > .live__title {
+    animation: live-tx-resolve 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.6s backwards;
+  }
+
+  .view--live.live--tx-turn:not(.d-room) .live__turn > :is(.live__turn-left, .live__to-secure) {
+    animation: live-tx-resolve 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.8s backwards;
+  }
+
+  .view--live.live--tx-turn:not(.d-room) .live__turn > :not(.live__overline, .live__title, .live-hold, .live__turn-left, .live__to-secure) {
+    animation: live-fade-in 0.6s ease 1.05s backwards;
+  }
+
+  /* The hold handing off (1.1 s, from 0.35 s after the ring is full; gen.mjs hb-* 2.2–3.3 s of 4.6 s): the page around
+     dims into the vault, the rings fade, the seal dissolves into a faint glow at its centre. */
+  .view--live.live--tx-handoff:not(.d-room) > :is(.live__photo, .live__head, .live__foot),
+  .view--live.live--tx-handoff:not(.d-room) .live__turn > :not(.live-hold) {
+    animation: live-tx-out 0.8s ease 0s both;
+  }
+
+  .live--tx-handoff .live__turn :is(.live-hold__track, .live-hold__turn, .live-hold__fill, .live-hold__glow, .live-hold__pt) {
+    animation: live-tx-out 0.6s ease 0.1s both;
+  }
+
+  /* The seal's focus ring (it has the focus from the turn's arrival) goes with the rings, and waits for the seal. */
+  .live--tx-turn .live__turn .btn.live-hold:focus-visible,
+  .live--tx-handoff .live__turn .btn.live-hold:focus-visible {
+    outline-color: transparent;
+  }
+
+  .live--tx-handoff .live__turn .live-hold__seal {
+    animation: live-tx-dissolve 0.7s cubic-bezier(0.4, 0, 0.2, 1) 0.3s both;
+  }
+
+  .live--tx-handoff .live__turn .live-hold__dissolve {
+    animation: live-tx-glow-in 0.55s ease 0.19s both;
+  }
+
+  /* SECURED (4 s): the horizon under YOUR PIECE draws out from the centre, a faint glow at the seal, the seal settles from
+     a glow to crisp ink, the light pools; the photograph comes forward; SECURED, YOUR PIECE, SECURED AT, the name resolve,
+     the size; then PAY draws in from its centre (its light filled by views/live.ts from 2.9 s), the rest. */
+  .live--tx-secured .live__reveal::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 113px;
+    z-index: 0;
+    width: 150px;
+    height: 110px;
+    margin: -55px 0 0 -75px;
+    border-radius: 50%;
+    pointer-events: none;
+    opacity: 0;
+    background: radial-gradient(closest-side, rgba(246, 242, 234, 0.06) 0, rgba(246, 242, 234, 0.02) 46%, rgba(246, 242, 234, 0) 100%);
+    animation: live-tx-glow 2.1s cubic-bezier(0.45, 0, 0.3, 1) 0.3s both;
+  }
+
+  .live--tx-secured .live__floor-line {
+    animation: live-tx-draw-c 1.35s cubic-bezier(0.33, 0, 0.15, 1) 0.3s backwards;
+  }
+
+  .live--tx-secured .live__piece-seal {
+    animation: live-tx-settle 1.6s cubic-bezier(0.4, 0, 0.2, 1) 0.6s backwards;
+  }
+
+  .live--tx-secured .live__floor-sky {
+    animation: live-fade-in 1.6s ease 0.85s backwards;
+  }
+
+  .live--tx-secured .live-pay__art {
+    animation: live-tx-draw-c 0.7s cubic-bezier(0.33, 0, 0.15, 1) 2.55s backwards;
+  }
+
+  .live--tx-secured .live-pay__edge {
+    animation: live-fade-in 0.5s ease 2.9s backwards;
+  }
+
+  .live--tx-secured .live-pay__pool {
+    animation: live-fade-in 0.9s ease 2.9s backwards;
+  }
+
+  .view--live.live--tx-secured:not(.d-room) > .live__photo {
+    animation: live-tx-photo-up 1.7s cubic-bezier(0.16, 1, 0.3, 1) 1.05s backwards;
+  }
+
+  .view--live.live--tx-secured:not(.d-room) > .live__head {
+    animation: live-fade-in 1.2s ease 1.05s backwards;
+  }
+
+  .view--live.live--tx-secured:not(.d-room) .live__secured > .live__overline {
+    animation: live-tx-resolve 0.9s cubic-bezier(0.22, 1, 0.36, 1) 1.9s backwards;
+  }
+
+  .view--live.live--tx-secured:not(.d-room) .live__reveal > .live__overline {
+    animation: live-tx-resolve 0.9s cubic-bezier(0.22, 1, 0.36, 1) 2s backwards;
+  }
+
+  .view--live.live--tx-secured:not(.d-room) .live__reveal > .live__secured-at {
+    animation: live-tx-resolve 0.9s cubic-bezier(0.22, 1, 0.36, 1) 2.15s backwards;
+  }
+
+  .view--live.live--tx-secured:not(.d-room) .live__secured > .live__title {
+    animation: live-tx-resolve 0.9s cubic-bezier(0.22, 1, 0.36, 1) 2.3s backwards;
+  }
+
+  .view--live.live--tx-secured:not(.d-room) .live__secured > :not(.live__overline, .live__reveal, .live__title, .live__pay, .live__pay-left, .live__pay-note, .live__release) {
+    animation: live-fade-in 0.8s ease 2.45s backwards;
+  }
+
+  .view--live.live--tx-secured:not(.d-room) .live__secured > :is(.live__pay-note, .live__release),
+  .view--live.live--tx-secured:not(.d-room) > .live__foot {
+    animation: live-fade-in 0.8s ease 3.05s backwards;
+  }
+}
+
+@keyframes live-tx-ring {
+  from { stroke-dashoffset: 804.25px; }
+}
+
+@keyframes live-tx-draw-c {
+  from { clip-path: inset(-24px 50% -24px 50%); }
+  to { clip-path: inset(-24px); }
+}
+
+@keyframes live-tx-glow {
+  0% { opacity: 0; }
+  38% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes live-tx-settle {
+  0% { opacity: 0; filter: blur(9px) drop-shadow(0 0 0 rgba(246, 242, 234, 0)); transform: translateY(-10px) scale(1.03); }
+  45% { opacity: 0.6; filter: blur(3.5px) drop-shadow(0 0 3px rgba(246, 242, 234, 0.08)); }
+  100% { opacity: 1; filter: none; transform: none; }
+}
+
+@keyframes live-tx-photo-up {
+  from { opacity: 0; transform: translateY(26px) scale(1.035); }
+}
+
+@keyframes live-tx-dissolve {
+  to { opacity: 0; filter: blur(9px); }
+}
+
+@keyframes live-tx-glow-in {
+  to { opacity: 1; }
 }

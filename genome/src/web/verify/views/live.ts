@@ -121,6 +121,9 @@ import {
   sizeChoices,
   tickSecond,
   drawnScreen,
+  fillEase,
+  holdPoint,
+  payLight,
   phaseAt,
   windowLeft,
   zonedTime,
@@ -132,7 +135,7 @@ import {
   type LiveViewer,
 } from '../live-model.js';
 import { horizonBand, morph } from '../live-horizon.js';
-import { sealSvg } from '../live-seal.js';
+import { sealCSvg, sealSvg } from '../live-seal.js';
 import { entrySizes, participationModel, RELEASES_PATH, zonedDate, type SetCardModel } from '../releases-model.js';
 import { lookbookSheetPath } from '../lookbook-model.js';
 import type { SessionStore } from '../session.js';
@@ -172,6 +175,19 @@ const PULSE_MS = 250;
 const OPENING = Object.freeze({ phone: { ms: 2800, place: 1650 }, desk: { ms: 3000, place: 1750 } });
 /** RELEASE MY PLACE and LEAVE THE LINE wait this long for their second tap. */
 const ARMED_MS = 4000;
+/** The turn arriving in place from the queue (§3.5, D42 01:03; gen.mjs TX_END turn 1750 / 1850 ms). */
+const TURN_ARRIVAL = Object.freeze({ phone: 1750, desk: 1850 });
+/**
+ * The hold handing off to SECURED (§3.5, ROUND 5 "passages kept"; MK #turn-hold PLAY THE HOLD, gen.mjs hb-* keyframes:
+ * the press at 0.35 s, the ring full at 1.85 s, the hand-off into the vault from 2.2 to 3.3 s, where SECURED begins):
+ * from 0.35 s after the ring is full (or the piece secured, if later), 1.1 s long.
+ */
+const HANDOFF = Object.freeze({ wait: 350, ms: 1100 });
+/**
+ * SECURED's passage (§3.5; gen.mjs TX_END secured 4000 / 4250 ms) and PAY's light filling from 0 to the time left over
+ * 1.1 s, eased, from 2.9 s on a phone and 3.1 s on a computer (gen.mjs TX_JS).
+ */
+const SECURED_TX = Object.freeze({ phone: { ms: 4000, fill: 2900 }, desk: { ms: 4250, fill: 3100 }, fillMs: 1100 });
 /** A sync that failed is tried again after this long. */
 const SYNC_RETRY_MS = 10_000;
 /**
@@ -285,6 +301,16 @@ interface Hold {
   frame: number;
 }
 
+/** The turn's parts the hold draws on: its screen, its overline, the seal, the fill ring, its glow and its point. */
+interface HoldParts {
+  el: HTMLElement;
+  overline: HTMLElement;
+  button: HTMLElement;
+  glow: SVGCircleElement;
+  fill: SVGCircleElement;
+  point: HTMLElement;
+}
+
 const isApi = (e: unknown, code: string) => e instanceof ApiError && e.code === code;
 
 class LivePage {
@@ -375,6 +401,13 @@ class LivePage {
   /** The piece was secured on this page: the secured screen opens with the reveal (consumed when it mounts). */
   private reveal = false;
   private hold: Hold | null = null;
+  /** When the hold's ring was full (performance.now), null before. */
+  private fullAt: number | null = null;
+  /**
+   * The hold handing off to SECURED (§3.5; MK #turn-hold): the turn kept on show until `until` (performance.now) while
+   * its rings and words fade and the seal dissolves into a faint glow; SECURED then mounts with its passage.
+   */
+  private handoff: { until: number; timers: ReturnType<typeof setTimeout>[] } | null = null;
   /** RELEASE MY PLACE or LEAVE THE LINE armed for its second tap until this time (performance.now). */
   private armedUntil = 0;
   /**
@@ -445,6 +478,7 @@ class LivePage {
     this.thereSignIn?.dispose();
     this.thereSignIn = null;
     this.endHold(true);
+    this.endHandoff();
     this.closeStream();
     this.stopPolling();
     for (const t of [this.retryTimer, this.syncTimer, this.questionTimer]) if (t) clearTimeout(t);
@@ -623,7 +657,10 @@ class LivePage {
     const before = this.entry?.status;
     if (entry?.status === 'TURN' && before !== 'TURN') this.returned = this.sizeWasFull;
     // The reveal on the transition itself, whichever brings it first (the secure's answer, the stream, a poll).
-    if (before === 'TURN' && entry?.status === 'SECURED' && this.securing) this.reveal = true;
+    if (before === 'TURN' && entry?.status === 'SECURED' && this.securing) {
+      this.reveal = true;
+      this.handOff();
+    }
     if (entry?.status !== 'TURN') this.securing = false;
     if (entry?.status !== 'QUEUED' && entry?.status !== 'TURN') this.sizeWasFull = false;
     this.entry = entry;
@@ -957,6 +994,8 @@ class LivePage {
     const kind = liveScreen({ sheet, viewer: this.viewer, room: this.room, entry: this.entry, now: this.now() });
     // The chain room → draw → THE OPENING (§3.4, N16): the draw in full from 00:00, the next screen at the later of its
     // landing and the entry's first reading with its place (at once on that reading under reduced motion).
+    // The hold handing off to SECURED (§3.5): the turn stays on show until its hand-off ends.
+    if (this.handoff && this.screen?.kind === 'turn' && kind === 'secured' && performance.now() < this.handoff.until) return 'turn';
     if (this.screen?.kind !== 'room') return kind;
     const opened = !isEndedSheet(sheet) && this.now() >= Date.parse(this.room?.opensAt ?? sheet.opensAt);
     return drawnScreen({ next: kind, drawAt: this.drawAt, opened, now: performance.now(), placed: !!this.entry?.queue, reduced: prefersReducedMotion() });
@@ -1024,16 +1063,17 @@ class LivePage {
 
   /**
    * The phone's lines under the name on the screens of the entry (ONE QUEUE, MK Q1, S; D34): its choice, then the people
-   * in the room; on a computer the Cinema room's corners say both (desktop-room.ts).
+   * in the room; on a computer the Cinema room's corners say both (desktop-room.ts). `choice`: the turn's (its price after
+   * it, as the Cinema room's corner says it there).
    */
-  private entryLines(): { el: HTMLElement[]; update(): void } {
+  private entryLines(choiceOf: (e: LiveEntry) => string = (e) => this.choiceOf(e)): { el: HTMLElement[]; update(): void } {
     const choice = this.fact('', 'live__choice live__phone-only');
     const presence = h('p', { class: 'live__presence live__entry-count live__phone-only' }, h('span', { class: 'live__dot', attrs: { 'aria-hidden': 'true' } }), h('span', { class: 'live__presence-text' }));
     return {
       el: [choice, presence],
       update: () => {
         const e = heldEntry(this.entry);
-        setFact(choice, e ? this.choiceOf(e) : '');
+        setFact(choice, e ? choiceOf(e) : '');
         choice.hidden = !e;
         const n = this.room?.inRoom ?? 0;
         setFact(presence.lastChild as HTMLElement, LIVE.inRoom(n));
@@ -1095,6 +1135,8 @@ class LivePage {
     const opening = previous === 'room' && kind === 'queue' && this.drawAt !== null && this.entry !== null;
     const draw = opening && !prefersReducedMotion() && this.screen ? this.drawAsItIs(this.screen.el) : null;
     if (opening) this.welcomeFor = this.entry!.id;
+    // YOUR TURN in place (§3.5, D42 01:03): the queue's place and time, where they stood, fade as the seal arrives.
+    const arriving = previous === 'queue' && kind === 'turn' && !prefersReducedMotion() && this.screen ? this.queueAsItIs(this.screen.el) : null;
     const screen = this.build(kind, revealing);
     this.screen = screen;
     screen.el.classList.add('live__screen');
@@ -1121,6 +1163,10 @@ class LivePage {
     if (kind !== previous && kind === 'afterRoom') this.say(LIVE.afterRoom.announce);
     this.endPassage();
     if (horizon && horizon.width > 0) this.soldPassage(horizon);
+    // The turn's sound as it arrives (SFX_AT turn, 0.3 s), whatever it came from; its passage from the queue.
+    if (kind === 'turn' && previous !== undefined && previous !== 'turn') this.deps.sound.cue('turn');
+    if (arriving) this.turnPassage(arriving);
+    if (revealing) this.securedPassage();
     if (opening) {
       // Its sounds from its start, the screen mounted (mount stops the room's): opening.mp3, then the welcome voice once.
       this.deps.sound.cue('open', { entryId: this.entry?.id ?? null, afterRoom: !!this.afterRoomOf() });
@@ -1234,6 +1280,42 @@ class LivePage {
       }
     };
     this.passage = { cls: 'live--tx-open', parts, timer: setTimeout(() => this.endPassage(), timing.ms), done };
+  }
+
+  /** The queue's place and time where they stand as the turn arrives (§3.5): a copy of each, to fade where it stood. */
+  private queueAsItIs(queue: HTMLElement): HTMLElement[] {
+    const out: HTMLElement[] = [];
+    for (const sel of ['.live__place-label', '.live__place', '.live__queue-time']) {
+      const el = queue.querySelector<HTMLElement>(sel);
+      if (el && el.getBoundingClientRect().height > 0) out.push(ghost(el, queue, 'live-tx-ghost--q'));
+    }
+    return out;
+  }
+
+  /**
+   * YOUR TURN arriving in place (§3.5; ANSWERS 23 Oct 01:03 "no transition screen"; MK #turn PLAY THE TURN, gen.mjs
+   * TX_END turn 1750 / 1850 ms): under the same photograph, the queue's place and time fade out where the seal arrives,
+   * the seal fades in, its countdown ring draws to the time left, then the words resolve (house.css .live--tx-turn).
+   */
+  private turnPassage(ghosts: HTMLElement[]): void {
+    const veil = h('div', { class: 'live-tx-turn', attrs: { 'aria-hidden': 'true', inert: true } }, ...ghosts);
+    this.root.prepend(veil);
+    this.root.classList.add('live--tx-turn');
+    const ms = isDesktop() ? TURN_ARRIVAL.desk : TURN_ARRIVAL.phone;
+    this.passage = { cls: 'live--tx-turn', parts: [veil], timer: setTimeout(() => this.endPassage(), ms) };
+  }
+
+  /**
+   * SECURED's passage (§3.5; ROUND 5 "passages kept"; MK #secured PLAY SECURED, gen.mjs TX_END secured 4000 / 4250 ms),
+   * from the hold's hand-off: the horizon under YOUR PIECE draws out from the centre, the seal settles from a glow to
+   * crisp ink, the light pools, the photograph comes forward, the words resolve, then PAY draws in and its light fills
+   * to the time left (securedScreen); secured.mp3 at 0.6 s (house.css .live--tx-secured). Reduced motion: none of it.
+   */
+  private securedPassage(): void {
+    if (prefersReducedMotion()) return;
+    this.root.classList.add('live--tx-secured');
+    const ms = isDesktop() ? SECURED_TX.desk.ms : SECURED_TX.phone.ms;
+    this.passage = { cls: 'live--tx-secured', parts: [], timer: setTimeout(() => this.endPassage(), ms) };
   }
 
   /** The passage ends (its time over, the page leaving, or another screen): the page as it is, nothing held. */
@@ -2440,18 +2522,29 @@ class LivePage {
     this.screen?.update();
   }
 
-  /** B4: the turn, the seal to press and hold. */
+  /**
+   * B4: the turn, the seal to press and hold (ONE QUEUE §3.5; D37, D34; MK #turn): seal C, the turn's countdown the ring
+   * around it (r 128), the hold's ring inside (r 116); its clock morphing; the release's title with its variant, the
+   * account's choice with its price and the people in the room under it on a phone (the Cinema room's corners say them
+   * on a computer). Production's A PIECE HAS RETURNED stays when the size was full before the turn (N11).
+   */
   private turnScreen(): Screen {
     const overline = this.overline(this.returned ? LIVE.returned : LIVE.yourTurn);
-    // Both rings start at north and run clockwise.
+    // Both rings start at north and run clockwise; the hold's fill rides a soft glow of its own (OP-8, MK #turn-hold).
     const ring = s('circle', { class: 'live-hold__turn', cx: 134, cy: 134, r: 128, transform: 'rotate(-90 134 134)', 'stroke-dasharray': TURN_RING.toFixed(2) });
+    const glow = s('circle', { class: 'live-hold__glow', cx: 134, cy: 134, r: 116, transform: 'rotate(-90 134 134)', 'stroke-dasharray': HOLD_RING.toFixed(2), 'stroke-dashoffset': HOLD_RING.toFixed(2) });
     const fill = s('circle', { class: 'live-hold__fill', cx: 134, cy: 134, r: 116, transform: 'rotate(-90 134 134)', 'stroke-dasharray': HOLD_RING.toFixed(2), 'stroke-dashoffset': HOLD_RING.toFixed(2) });
-    const svg = s('svg', { class: 'live-hold__rings', viewBox: '0 0 268 268', 'aria-hidden': 'true', focusable: 'false' }, s('circle', { class: 'live-hold__track', cx: 134, cy: 134, r: 128 }), ring, fill);
+    const svg = s('svg', { class: 'live-hold__rings', viewBox: '0 0 268 268', 'aria-hidden': 'true', focusable: 'false' }, s('circle', { class: 'live-hold__track', cx: 134, cy: 134, r: 128 }), ring, glow, fill);
+    // The breathing point on the fill's leading end; the faint glow the seal dissolves into when it hands off to SECURED.
+    const point = h('span', { class: 'live-hold__pt', attrs: { 'aria-hidden': 'true' } }, h('i'));
+    const dissolve = h('span', { class: 'live-hold__dissolve', attrs: { 'aria-hidden': 'true' } });
     // Macro scope K44 T1: the seal secures the set.
     const set = this.isSet();
-    const button = h('button', { class: 'btn live-hold', attrs: { type: 'button', 'aria-label': set ? SETS.live.sealLabel : LIVE.sealLabel, 'aria-describedby': 'live-turn-left' } }, svg, sealSvg('live-hold__seal'));
+    const button = h('button', { class: 'btn live-hold', attrs: { type: 'button', 'aria-label': set ? SETS.live.sealLabel : LIVE.sealLabel, 'aria-describedby': 'live-turn-left' } }, svg, point, sealCSvg('live-hold__seal'), dissolve);
     const left = h('p', { class: 'live__turn-left', id: 'live-turn-left', attrs: { role: 'timer' } });
     const errorLine = this.errorLine();
+    const piece = this.fact('', 'live__turn-piece');
+    const lines = this.entryLines((e) => `${this.choiceOf(e)} · ${formatMoney(e.priceMinor * e.quantity, e.currency)}`);
     const el = h(
       'section',
       { class: 'live__turn' },
@@ -2460,11 +2553,12 @@ class LivePage {
       button,
       left,
       this.fact(set ? SETS.live.toSecure : LIVE.toSecure, 'live__to-secure'),
-      this.fact('', 'live__turn-piece'),
+      piece,
+      ...lines.el,
       this.note(LIVE.letGo, 'live__let-go'),
       errorLine,
     );
-    const piece = el.querySelector<HTMLElement>('.live__turn-piece')!;
+    const parts: HoldParts = { el, overline, button, glow, fill, point };
     // The pointer: captured from the press to the release; the keyboard: the space bar or Enter, held.
     button.addEventListener('pointerdown', (ev) => {
       if (ev.button !== 0) return;
@@ -2474,13 +2568,13 @@ class LivePage {
       } catch {
         // A pointer that cannot be captured still ends with pointerup.
       }
-      this.startHold(el, overline, fill);
+      this.startHold(parts);
     });
     for (const type of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) button.addEventListener(type, () => this.endHold());
     button.addEventListener('keydown', (ev) => {
       if (ev.key !== ' ' && ev.key !== 'Enter') return;
       ev.preventDefault();
-      if (!ev.repeat) this.startHold(el, overline, fill);
+      if (!ev.repeat) this.startHold(parts);
     });
     button.addEventListener('keyup', (ev) => {
       if (ev.key !== ' ' && ev.key !== 'Enter') return;
@@ -2514,9 +2608,11 @@ class LivePage {
           remainingMs = this.frozenTurn;
           fraction = Math.min(1, remainingMs / Math.max(1, Date.parse(e.turn.expiresAt) - Date.parse(e.turn.at)));
         } else this.frozenTurn = null;
-        left.textContent = clockText(remainingMs);
+        // The turn's clock morphs (D30): only its changed digits.
+        morph(left, clockText(remainingMs), { numerals: false });
         ring.setAttribute('stroke-dashoffset', (TURN_RING * (1 - fraction)).toFixed(2));
-        setFact(piece, `${this.name()} · ${e.sizes?.length ? setSizesLine(e) : LIVE.size(e.size.label)} · ${formatMoney(e.priceMinor * e.quantity, e.currency)}`);
+        setFact(piece, this.heading());
+        lines.update();
         // The pause alone: while the secure is sent (busy) the seal stays lit, its hold already done (startHold waits).
         button.setAttribute('aria-disabled', String(paused));
         el.classList.toggle('is-paused', paused);
@@ -2525,18 +2621,24 @@ class LivePage {
     };
   }
 
-  /** The seal pressed: the press sent at once with the turn's secret, the hold's ring filling for HOLD_MS. */
-  private startHold(el: HTMLElement, overline: HTMLElement, fill: SVGCircleElement): void {
+  /**
+   * The seal pressed (4b HOLD; D38, OP-8; MK #turn-hold): the press sent at once with the turn's secret; the overline
+   * reads HOLD, the seal pressed to 98.5 %, the inner ring filling clockwise from the top over HOLD_MS, the breathing
+   * point on its leading end; hold.mp3 with the press itself (§3.10: the sound and the fill start together).
+   */
+  private startHold(p: HoldParts): void {
     const s = this.live();
     const token = this.entry?.status === 'TURN' ? this.entry.turn?.token : null;
-    if (!s || !token || this.hold || this.busy || this.room?.paused) return;
+    if (!s || !token || this.hold || this.busy || this.room?.paused || this.handoff) return;
     this.deps.sound.prime();
+    this.deps.sound.cue('hold');
     navigator.vibrate?.(12);
     this.error = null;
+    this.fullAt = null;
     const hold: Hold = { started: performance.now(), pressedAt: null, sent: false, frame: 0 };
     this.hold = hold;
-    el.classList.add('is-holding');
-    overline.replaceChildren(LIVE.holding);
+    p.el.classList.add('is-holding');
+    p.overline.replaceChildren(LIVE.holding);
     this.screen?.update();
     this.deps.api.livePress(s.id, token).then(
       () => {
@@ -2551,10 +2653,19 @@ class LivePage {
         this.screen?.update();
       },
     );
+    const draw = (progress: number) => {
+      const offset = (HOLD_RING * (1 - progress)).toFixed(2);
+      p.fill.setAttribute('stroke-dashoffset', offset);
+      p.glow.setAttribute('stroke-dashoffset', offset);
+      const at = holdPoint(progress);
+      p.point.style.setProperty('--live-hold-x', `${at.x.toFixed(3)}%`);
+      p.point.style.setProperty('--live-hold-y', `${at.y.toFixed(3)}%`);
+    };
     const step = () => {
       if (this.hold !== hold) return;
       const progress = Math.min(1, (performance.now() - hold.started) / HOLD_MS);
-      fill.setAttribute('stroke-dashoffset', (HOLD_RING * (1 - progress)).toFixed(2));
+      draw(progress);
+      if (progress >= 1) this.fullAt ??= hold.started + HOLD_MS;
       if (progress >= 1 && hold.pressedAt !== null && performance.now() - hold.pressedAt >= PRESS_GAP_MS && !hold.sent) {
         hold.sent = true;
         this.securing = true;
@@ -2563,12 +2674,49 @@ class LivePage {
       }
       hold.frame = requestAnimationFrame(step);
     };
+    draw(0);
     hold.frame = requestAnimationFrame(step);
     this.resetHoldView = () => {
-      el.classList.remove('is-holding');
-      overline.replaceChildren(this.returned ? LIVE.returned : LIVE.yourTurn);
-      fill.setAttribute('stroke-dashoffset', HOLD_RING.toFixed(2));
+      p.el.classList.remove('is-holding');
+      p.overline.replaceChildren(this.returned ? LIVE.returned : LIVE.yourTurn);
+      draw(0);
     };
+  }
+
+  /**
+   * The piece secured from this page's hold (§3.5; ROUND 5 "hold→SECURED … keep their current passages"; MK #turn-hold
+   * PLAY THE HOLD, gen.mjs hb-* 2.2–3.3 s): from 0.35 s after the ring is full (at once, if the piece came later), the
+   * screen withdraws into the vault for 1.1 s (the page around dims, the rings and the words fade, the seal dissolves into
+   * a faint glow at its centre: house.css .live--tx-handoff); SECURED then mounts with its own passage. Reduced motion:
+   * SECURED at once.
+   */
+  private handOff(): void {
+    if (prefersReducedMotion() || this.screen?.kind !== 'turn' || this.handoff) return;
+    const now = performance.now();
+    const start = Math.max(now, (this.fullAt ?? now) + HANDOFF.wait);
+    const until = start + HANDOFF.ms;
+    const begin = () => {
+      if (this.disposed || this.screen?.kind !== 'turn') return;
+      this.endPassage();
+      this.root.classList.add('live--tx-handoff');
+      // Its class leaves when SECURED mounts (mount ends the passage under way); a second later at most, if it never does.
+      this.passage = { cls: 'live--tx-handoff', parts: [], timer: setTimeout(() => this.endPassage(), HANDOFF.ms + 1000) };
+    };
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    this.handoff = { until, timers };
+    if (start > now) timers.push(setTimeout(begin, start - now));
+    else begin();
+    timers.push(
+      setTimeout(() => {
+        this.handoff = null;
+        this.render();
+      }, until - now),
+    );
+  }
+
+  private endHandoff(): void {
+    for (const t of this.handoff?.timers ?? []) clearTimeout(t);
+    this.handoff = null;
   }
 
   private resetHoldView: (() => void) | null = null;
@@ -2597,11 +2745,16 @@ class LivePage {
     if (this.entry?.status === 'TURN') this.resetHoldView?.();
   }
 
-  /** B5: the piece secured, its reveal (`revealing`: secured on this page, just now), the add-ons, PAY. */
+  /**
+   * B5: the piece secured (`revealing`: secured on this page, just now: SECURED's passage), the add-ons, PAY (ONE QUEUE
+   * §3.5; D39, D40; MK #secured): YOUR PIECE on the vault, seal C over a hairline horizon, SECURED AT under it; PAY is
+   * the light, its lit part the time left to pay, emptying from right to left (its words 'PAY € 1 240 · 09:12'; its
+   * accessible name PAY · total, the time its description). The add-ons as production draws them (their look is Q2).
+   */
   private securedScreen(revealing: boolean): Screen {
     const s = this.live();
     const set = this.isSet();
-    const seal = sealSvg('live__piece-seal');
+    const seal = sealCSvg('live__piece-seal');
     const securedAt = this.fact('', 'live__secured-at');
     // YOUR PIECE on the vault (D31; MK #secured): no grey plate, no corner marks; the seal in the light pooled over a
     // hairline horizon that dissolves at its ends, SECURED AT under the line.
@@ -2633,8 +2786,37 @@ class LivePage {
     const itemsNote = h('p', { class: 'live__items-note', attrs: { hidden: true } });
     let itemsKey = '';
     const errorLine = this.errorLine();
-    const pay = h('button', { class: 'btn live__primary live__pay', attrs: { type: 'button' }, on: { click: () => this.payNow() } });
-    const deadline = h('p', { class: 'live__deadline' }, h('span', { class: 'live__deadline-time', attrs: { role: 'timer' } }), h('span', { class: 'live__deadline-label', text: LIVE.toConfirm }));
+    // PAY, the light (D39): its words twice, ink on the lit part and ivory where the light has gone, the edge between them
+    // feathered; its point breathing on the edge's foot, a faint pool of light under the lit part.
+    const words = (cls: string) => h('span', { class: ['live-pay__words', cls] });
+    const wordsIn = words('live-pay__words--in');
+    const wordsOut = words('live-pay__words--out');
+    const pay = h(
+      'button',
+      { class: 'btn live__primary live__pay live-pay', attrs: { type: 'button', 'aria-describedby': 'live-pay-left' }, on: { click: () => this.payNow() } },
+      h('span', { class: 'live-pay__pool', attrs: { 'aria-hidden': 'true' } }),
+      h('span', { class: 'live-pay__art', attrs: { 'aria-hidden': 'true' } }, h('span', { class: 'live-pay__lit' }), wordsOut, wordsIn),
+      h('span', { class: 'live-pay__edge', attrs: { 'aria-hidden': 'true' } }, h('span', { class: 'live-pay__halo' }, h('i')), h('span', { class: 'live-pay__pt' })),
+    );
+    const payTime = h('span', { class: 'live__pay-time' });
+    const payLeft = h('span', { class: 'visually-hidden live__pay-left', id: 'live-pay-left', attrs: { role: 'timer' } }, payTime, ` ${LIVE.toConfirm}`);
+    // SECURED's passage: PAY's light fills from 0 to the time left over 1.1 s, eased, from 2.9 s (3.1 s on a computer).
+    const fillFrom = revealing && !prefersReducedMotion() ? performance.now() + (isDesktop() ? SECURED_TX.desk.fill : SECURED_TX.phone.fill) : null;
+    let fillFrame = 0;
+    let light = { fraction: 1, last: false, done: false };
+    const paint = () => {
+      const k = fillFrom === null ? 1 : fillEase((performance.now() - fillFrom) / SECURED_TX.fillMs);
+      pay.style.setProperty('--live-pay-f', (light.fraction * k).toFixed(4));
+      pay.classList.toggle('is-last', light.last);
+      pay.classList.toggle('is-done', light.done);
+    };
+    if (fillFrom !== null) {
+      const step = () => {
+        paint();
+        if (performance.now() < fillFrom + SECURED_TX.fillMs) fillFrame = requestAnimationFrame(step);
+      };
+      fillFrame = requestAnimationFrame(step);
+    }
     const release = h('button', { class: 'textlink live__release', attrs: { type: 'button' }, on: { click: () => this.armed(() => this.act(() => this.deps.api.liveGiveBack(this.sheet!.id))) } });
     const el = h(
       'section',
@@ -2651,13 +2833,13 @@ class LivePage {
       itemsNote,
       errorLine,
       pay,
-      deadline,
+      payLeft,
       this.note(LIVE.payNote, 'live__pay-note'),
       release,
     );
     if (revealing) {
-      // The reveal (P-D01's motion on the seal's glyphs): secured.mp3 0.6 s into it (lot Q1 §3.10, SFX_AT secured) and the
-      // vibration where the phone allows it; once.
+      // SECURED's passage (mount plays it): secured.mp3 0.6 s into it (lot Q1 §3.10, SFX_AT secured) and the vibration
+      // where the phone allows it, as today; once.
       this.deps.sound.cue('secured');
       navigator.vibrate?.([...CEREMONY_VIBRATION]);
     }
@@ -2665,6 +2847,7 @@ class LivePage {
     return {
       kind: 'secured',
       el,
+      dispose: () => cancelAnimationFrame(fillFrame),
       update: () => {
         const e = this.entry;
         if (!e?.hold) return;
@@ -2699,21 +2882,32 @@ class LivePage {
           itemsTitle.hidden = items.hidden = itemsNote.hidden = rows.length === 0;
         }
         const total = formatMoney(e.totalMinor, e.currency);
-        if (pay.dataset.total !== total) {
-          // The price in the reading face, its groups kept together (not spread by the button's tracking).
-          pay.dataset.total = total;
-          // One inline run (a button lays its children out as flex items, which would drop the space before the price).
-          pay.replaceChildren(h('span', null, LIVE.pay(''), h('span', { class: 'live__money', text: total })));
-        }
-        pay.disabled = this.busy;
-        pay.setAttribute('aria-busy', String(this.busy));
         let { remainingMs } = windowLeft(e.hold.securedAt, e.hold.expiresAt, this.now());
         // Paused: the time to confirm stands still (the server moves the hold's deadline by the pause at every read).
         if (this.room?.paused === true) {
           this.frozenHold ??= remainingMs;
           remainingMs = this.frozenHold;
         } else this.frozenHold = null;
-        (deadline.firstChild as HTMLElement).textContent = clockText(remainingMs);
+        const clock = clockText(remainingMs);
+        if (pay.dataset.total !== total) {
+          // OP-9: the total, then the time; the price in the reading face, its groups kept together (not spread by the
+          // button's tracking), the time a figure that morphs (D30).
+          pay.dataset.total = total;
+          pay.setAttribute('aria-label', LIVE.payName(total));
+          for (const w of [wordsIn, wordsOut]) {
+            const time = h('span', { class: 'live-pay__clock' });
+            // One inline run (a flex box would drop the spaces around the total and the time).
+            w.replaceChildren(h('span', null, ...payRun(LIVE.pay(total, clock), total, clock, time)));
+          }
+        }
+        for (const t of [wordsIn, wordsOut, payLeft]) {
+          const time = t.querySelector<HTMLElement>('.live-pay__clock, .live__pay-time');
+          if (time) morph(time, clock, { numerals: false });
+        }
+        light = payLight(remainingMs, Date.parse(e.hold.expiresAt) - Date.parse(e.hold.securedAt));
+        paint();
+        pay.disabled = this.busy;
+        pay.setAttribute('aria-busy', String(this.busy));
         release.textContent = this.armedUntil ? LIVE.releaseConfirm : LIVE.release;
         release.disabled = this.busy;
         this.showError(errorLine);
@@ -3181,6 +3375,17 @@ function ghost(el: HTMLElement, top: HTMLElement, cls: string): HTMLElement {
     node = ctx;
   }
   return node;
+}
+
+/**
+ * PAY's words (LIVE.pay, OP-9) as one inline run: the total in the reading face (its groups kept together), the time in
+ * `time` (a figure that morphs); the words around them as copy.ts writes them.
+ */
+function payRun(words: string, total: string, clock: string, time: HTMLElement): (string | HTMLElement)[] {
+  const at = words.indexOf(total);
+  const end = words.lastIndexOf(clock);
+  if (at < 0 || end < at + total.length) return [words];
+  return [words.slice(0, at), h('span', { class: 'live__money', text: total }), words.slice(at + total.length, end), time, words.slice(end + clock.length)].filter((x) => x !== '');
 }
 
 function setFact(el: HTMLElement, text: string): void {

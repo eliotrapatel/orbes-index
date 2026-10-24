@@ -143,11 +143,14 @@ const PLAN: Partial<Record<Kind, readonly [Place, string][]>> = {
     ['body', ':scope > .live__let-go'],
     ['body', ':scope > .live__error'],
     ['bl', ':scope > .live__turn-piece'],
+    // The phone's lines under the name (its choice and price, the people in the room): the corners say both here.
+    ['bl', ':scope > .live__choice'],
+    ['bl', ':scope > .live__entry-count'],
   ],
   secured: [
     ['head', ':scope > .live__overline'],
+    // ONE QUEUE (MK #secured, desk): YOUR PIECE in the centre, the time to pay inside PAY bottom right (D39).
     ['body', ':scope > .live__reveal'],
-    ['body', ':scope > .live__deadline'],
     ['bl', ':scope > .live__title'],
     ['bl', ':scope > .live__detail'],
     ['bl', ':scope > .live__set-pieces'],
@@ -158,6 +161,7 @@ const PLAN: Partial<Record<Kind, readonly [Place, string][]>> = {
     ['br', ':scope > .live__items-note'],
     ['br', ':scope > .live__error'],
     ['br', ':scope > .live__pay'],
+    ['br', ':scope > .live__pay-left'],
     ['br', ':scope > .live__pay-note'],
     ['br', ':scope > .live__release'],
   ],

@@ -47,7 +47,9 @@ export async function tapZoneFloors(page: Page, opts: { skip?: string } = {}): P
   return page.evaluate(
     async ({ zone, type, skip, rulebookType, wraps }) => {
       await document.fonts.ready;
-      const name = (el: Element) => (el.textContent ?? '').replace(/\s+/g, ' ').trim() || el.tagName.toLowerCase();
+      // A control's words; PAY, the light (lot Q1 §3.5): its words are drawn twice inside it, hidden from a screen reader,
+      // so its accessible name (PAY · the total) names it.
+      const name = (el: Element) => (el.matches('.live-pay[aria-label]') ? el.getAttribute('aria-label')! : (el.textContent ?? '')).replace(/\s+/g, ' ').trim() || el.tagName.toLowerCase();
       /** The lines the element's text takes: its text fragments, a new line each time one starts below all those before it. */
       const linesOf = (el: Element) => {
         const rects: DOMRect[] = [];

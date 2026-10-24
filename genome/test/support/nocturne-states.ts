@@ -75,6 +75,32 @@ export interface Holds {
   releaseAll(): void;
 }
 
+/**
+ * Production's A PIECE HAS RETURNED (lot Q1, step Q1.10; N11): the page in the one queue of a release (the first of the
+ * demo's whose turn it has not given yet: each run takes one) whose size it reads full; then the turn held there is left,
+ * and ORBES lets the collector in (LET IN): its turn comes on a size it saw full.
+ */
+async function returnedTurn(run: StateRun): Promise<void> {
+  const { db, services } = run.stage.ctx;
+  const you = run.demo.accounts.queueReturned!;
+  let dropId: string | null = null;
+  for (let n = 1; dropId === null && run.demo.releases[`queueReturned${n}`]; n++) {
+    const id = run.demo.releases[`queueReturned${n}`]!;
+    const e = await db.selectFrom('live_entries').select('status').where('drop_id', '=', id).where('account_id', '=', you.id).executeTakeFirst();
+    if (e?.status === 'QUEUED') dropId = id;
+  }
+  if (!dropId) throw new Error('no returned-turn release left');
+  if (!run.page.url().endsWith(dropId)) await run.page.goto(`${run.stage.origin}/verify/releases/${dropId}`);
+  await run.page.locator('.view--live .live__queue .live__place-figure').waitFor();
+  // The room read at least once more after the entry (a stream's, or the next reading): the size seen full.
+  await run.page.waitForTimeout(2_500);
+  const holder = await db.selectFrom('live_entries').select(['id', 'account_id']).where('drop_id', '=', dropId).where('status', '=', 'TURN').executeTakeFirstOrThrow();
+  await services.live.leave(holder.account_id, dropId, { type: 'account', id: holder.account_id });
+  const mine = await db.selectFrom('live_entries').select('id').where('drop_id', '=', dropId).where('account_id', '=', you.id).executeTakeFirstOrThrow();
+  const admin = await db.selectFrom('admin_users').select('id').orderBy('created_at').executeTakeFirstOrThrow();
+  await services.live.letIn(dropId, mine.id, { type: 'admin', id: admin.id });
+}
+
 // ── The states ─────────────────────────────────────────────────────────────
 
 const you = 'you';
@@ -2146,8 +2172,28 @@ export const PHONE_STATES: readonly UiState[] = [
   { id: 'room-guarantee-hidden', title: 'The room for a holder of a guarantee not shown: ACCESS GRANTED, no line of it', refs: ['IN-01'], variant: 'room', as: 'roomQuiet', path: release('room'), ready: '.view--live .live-hzd' },
   // ONE QUEUE (lot Q1, step Q1.3; ANSWERS r1, C3): the classic line screen is gone; every entry waiting reads the one
   // queue (`live-queue` and its states). `live-line` and `live-queue-admitted` went with it.
-  { id: 'live-turn', title: 'The turn: PRESS AND HOLD THE SEAL', refs: ['live-10'], variant: 'live', as: 'turn', path: release('live'), ready: '.view--live .live-hold' },
-  { id: 'live-secured', title: 'Secured: the piece, the add-ons, PAY · total', refs: ['live-11'], variant: 'live', as: 'secured', path: release('live'), ready: '.view--live .live__pay' },
+  // ONE QUEUE (lot Q1, step Q1.10; MK #turn, #turn-hold, #secured): seal C and its rings, the name with its variant, the
+  // choice with its price and the room count on the phone; HOLD; PAY the light, the time inside it.
+  { id: 'live-turn', title: 'The turn (MK 4): YOUR TURN, PRESS AND HOLD THE SEAL, seal C in its ring, MONOLITHE IN BLUE, SIZE 16 · 1 PIECE · € 5 050, the room count', refs: ['live-10', 'MK 4'], variant: 'live', as: 'turn', path: release('live'), ready: '.view--live .live-hold' },
+  {
+    id: 'live-hold',
+    title: 'Holding the seal (MK 4b): HOLD, the inner ring filling in its light, its point on the leading end, the seal pressed',
+    refs: ['MK 4b', 'D38'],
+    variant: 'live',
+    as: 'turn',
+    path: release('live'),
+    // The press never answered (nothing reaches the server: no press, no secure), the seal held down.
+    act: async (run) => {
+      await run.page.route('**/api/v1/live/*/press', () => undefined);
+      const seal = run.page.locator('.view--live .live-hold');
+      await seal.waitFor();
+      const box = (await seal.boundingBox())!;
+      await run.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await run.page.mouse.down();
+    },
+    ready: '.view--live .live__turn.is-holding',
+  },
+  { id: 'live-secured', title: 'Secured (MK 5): YOUR PIECE on the horizon, seal C, the add-ons, PAY € 5 200 · 08:11 with the time inside it', refs: ['live-11', 'MK 5'], variant: 'live', as: 'secured', path: release('live'), ready: '.view--live .live__pay' },
   { id: 'live-confirmed', title: 'CONFIRMED, in ivory', refs: ['live-12'], variant: 'live', as: 'confirmed', path: release('live'), ready: '.view--live:has(h1) .n-story__open:not([hidden])' },
   { id: 'live-sold-out-size', title: 'SOLD OUT IN SIZE 17: its one sentence (ONE QUEUE, D27), YOUR PLACE in its size, LEAVE THE LINE', refs: ['live-20'], variant: 'live', as: 'soldout', path: release('live'), ready: '.view--live .live__edge' },
   { id: 'live-missed', title: 'YOUR TURN HAS PASSED', refs: ['live-15', 'C30'], variant: 'live', as: 'missed', path: release('live'), ready: '.view--live .n-live__end' },
@@ -2239,6 +2285,17 @@ export const PHONE_STATES: readonly UiState[] = [
   // The draw at the opening (lot Q1, step Q1.9; MK #room-draw, 3b): LIVE NOW, the name, its pieces, DRAWING THE PLACES and
   // its sentence on the horizon, the room count, the point travelling; the page waits for its place.
   { id: 'live-draw', title: 'The draw at the opening (MK 3b): LIVE NOW, MONOLITHE, 300 PIECES, DRAWING THE PLACES and its sentence on the horizon, the room count, FROM ORBES', refs: ['MK 3b', 'D36'], variant: 'queue', as: 'drawing', path: release('drawing'), ready: '.view--live .live__room.is-drawn .live__drawing:not([hidden])' },
+  {
+    id: 'live-turn-returned',
+    title: 'The turn of a size seen full (N11): production’s A PIECE HAS RETURNED, PRESS AND HOLD THE SEAL',
+    refs: ['N11', 'D51'],
+    variant: 'queue',
+    as: 'queueReturned',
+    path: release('queueReturned1'),
+    mutates: true,
+    act: returnedTurn,
+    ready: '.view--live .live__turn .live__overline',
+  },
   { id: 'live-after-wait', title: 'The after-room’s waiting screen (MK A): THE AFTER-ROOM, YOUR PLACE 2 in size 17, 3 OF 12 LEFT · 0 IN SIZE 17, no time', refs: ['MK A', 'D29'], variant: 'queue', as: 'afterWait', path: release('afterWait', '/after-room'), ready: '.view--live .live__queue[data-state="waiting"]' },
   {
     id: 'live-queue-loading',
@@ -3106,7 +3163,7 @@ const DESK_SHARDS: Record<string, readonly UiState[]> = {
     // ── The other stages at 1440 × 900 ──
     // YOUR ACCOUNT and MESSAGES' page (the draw-leads stage): empty, writing from a piece, an answer (HANDOVER §5.8).
     ...desk(1440, 'now-draw-leads', 'account-sheet', 'account-messages-empty', 'account-write', 'account-messages-thread'),
-    ...desk(1440, 'now-collection-leads', 'now-empty', 'room', 'live-turn', 'after-room-door', 'model-pairs', 'draw-place-held', 'piece-care-used', 'wishlist'),
+    ...desk(1440, 'now-collection-leads', 'now-empty', 'room', 'live-turn', 'live-hold', 'live-turn-returned', 'after-room-door', 'model-pairs', 'draw-place-held', 'piece-care-used', 'wishlist'),
     // The console's writes on an order (HANDOVER §5.8), each on its order's page: YOUR NEW CLAIM CODE waiting, packing begun, a return asked.
     onDesk(phoneState('claim-waiting'), 1440, { name: 'order-claim-waiting', extra: { ...andThen(phoneState('claim-waiting'), (run) => openOrderPage(run, /IN BLUE/)), ready: '.view--order .pieces__claim' } }),
     orderDeliveryAt(1440),

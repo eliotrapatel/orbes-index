@@ -39,6 +39,9 @@ import {
   revealCalendar,
   drawnScreen,
   DRAW_MS,
+  fillEase,
+  holdPoint,
+  payLight,
   liveScreen,
   liveSheetModel,
   livePastModel,
@@ -61,7 +64,8 @@ import {
   zonedTime,
   type LiveScreenInput,
 } from '../../src/web/verify/live-model.js';
-import { SEAL_RINGS, SPECIMEN_GLYPHS, specimenData } from '../../src/web/verify/live-seal.js';
+import { MONOGRAM_BOUNDS } from '../../src/core/render/monogram.js';
+import { SEAL_C_MONOGRAM_WIDTH, SEAL_RINGS, SPECIMEN_GLYPHS, sealCMarkup, sealCMonogramPlace, specimenData } from '../../src/web/verify/live-seal.js';
 import { StoryCards } from '../../src/web/verify/story-card.js';
 import type { LiveAccountEntry, LiveCard, LiveEndedSheet, LiveEntry, LiveQueue, LiveRoom, LiveSheet } from '../../src/web/verify/types.js';
 
@@ -923,6 +927,60 @@ describe('the seal: the specimen, never a piece\'s code', () => {
     for (const g of SPECIMEN_GLYPHS) expect(g >= 0 && g < 16).toBe(true);
     // Not a code ORBES issued: its frame does not even hold (no valid CRC), so no scan of the screen reads a piece.
     expect(() => unframeCodeData(data)).toThrow();
+  });
+});
+
+describe('seal C at the turn and on the piece secured (ONE QUEUE §3.5; ANSWERS C11, ROUND 5; gen.mjs SEAL_C_SYMBOL)', () => {
+  it('is the specimen minus its GENOME and its centre: the hairlines, the 13 data orbits, the moons and polaris kept', () => {
+    const { fixed, rings } = sealCMarkup();
+    expect(fixed).not.toContain('data-layer="genome"');
+    expect(fixed).not.toContain('data-layer="seal"');
+    for (const layer of ['decor', 'moon', 'polaris']) expect(fixed, layer).toContain(`data-layer="${layer}"`);
+    // The innermost hairline (r 9.53) and the outer ones stay.
+    for (const r of ['9.53', '23.53', '24.04']) expect(fixed, r).toContain(`A${r} ${r}`);
+    expect(rings).toHaveLength(SEAL_RINGS);
+    expect(SEAL_RINGS).toBe(13);
+    for (const ring of rings) expect(ring).toMatch(/data-layer="(data|format)"/);
+  });
+
+  it('holds the ORBES monogram at its centre, 14 u wide: 2.5 u of air to the innermost hairline', () => {
+    const { k, tx, ty } = sealCMonogramPlace();
+    const b = MONOGRAM_BOUNDS;
+    expect(b.w * k).toBeCloseTo(SEAL_C_MONOGRAM_WIDTH, 9);
+    expect(SEAL_C_MONOGRAM_WIDTH).toBe(14);
+    // Its ink box centred on the seal's centre.
+    expect(b.x * k + tx + (b.w * k) / 2).toBeCloseTo(0, 9);
+    expect(b.y * k + ty + (b.h * k) / 2).toBeCloseTo(0, 9);
+    expect(9.53 - SEAL_C_MONOGRAM_WIDTH / 2).toBeCloseTo(2.53, 9);
+  });
+});
+
+describe('the hold and PAY\'s light (ONE QUEUE §3.5; OP-8, D38, D39)', () => {
+  it('rides the hold\'s point on the fill ring\'s leading end, from north clockwise', () => {
+    expect(holdPoint(0)).toEqual({ x: 50, y: expect.closeTo(50 - (116 / 268) * 100, 9) });
+    expect(holdPoint(0.25).x).toBeCloseTo(50 + (116 / 268) * 100, 9);
+    expect(holdPoint(0.25).y).toBeCloseTo(50, 9);
+    expect(holdPoint(0.5).y).toBeCloseTo(50 + (116 / 268) * 100, 9);
+    expect(holdPoint(2)).toEqual(holdPoint(1));
+  });
+
+  it('lights PAY with the time left, deeper in its last 10 %, out at 00:00', () => {
+    const W = 600_000;
+    expect(payLight(552_000, W)).toEqual({ fraction: 0.92, last: false, done: false });
+    expect(payLight(61_000, W)).toEqual({ fraction: 61 / 600, last: false, done: false });
+    expect(payLight(60_000, W)).toEqual({ fraction: 0.1, last: true, done: false });
+    expect(payLight(400, W)).toEqual({ fraction: 1 / 600, last: true, done: false });
+    expect(payLight(0, W)).toEqual({ fraction: 0, last: false, done: true });
+    expect(payLight(W + 5_000, W).fraction).toBe(1);
+  });
+
+  it('fills it in SECURED\'s passage on the mockup\'s ease (cubic, in and out)', () => {
+    expect(fillEase(0)).toBe(0);
+    expect(fillEase(0.5)).toBeCloseTo(0.5, 9);
+    expect(fillEase(0.25)).toBeCloseTo(4 * 0.25 ** 3, 9);
+    expect(fillEase(1)).toBe(1);
+    expect(fillEase(-1)).toBe(0);
+    expect(fillEase(3)).toBe(1);
   });
 });
 

@@ -2096,7 +2096,12 @@ export const LIVE = Object.freeze({
     title: 'ADD TO YOUR ORDER',
     note: 'Added to your order at PAY, while available.',
   }),
-  pay: (total: string) => `PAY · ${total}`,
+  /**
+   * PAY with the time to pay inside it (ONE QUEUE, OP-9, 23 Oct; D39, D40): the total, then the time left
+   * ('PAY € 1 240 · 09:12'). Its accessible name stays `payName`, the time its description (`toConfirm`).
+   */
+  pay: (total: string, time: string) => `PAY ${total} · ${time}`,
+  payName: (total: string) => `PAY · ${total}`,
   toConfirm: 'TO CONFIRM',
   /** Plan NEXT LOT §3.6.B: the delivery address is the collector's own, added in YOUR ORDERS. */
   payNote: 'ORBES Client Services will contact you for payment. Your delivery address is added in YOUR ORDERS.',

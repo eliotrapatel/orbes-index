@@ -700,6 +700,32 @@ export function windowLeft(from: string, until: string, now: number): { remainin
   return { remainingMs, fraction: Math.min(1, remainingMs / total) };
 }
 
+/** The hold's ring point (MK #turn-hold, gen.mjs .live-hold__pt): on the fill ring (r 116 of the 268 square), its leading end. */
+export const HOLD_POINT_RADIUS = 116 / 268;
+
+/** Where the hold's point rides at `progress` (0 to 1): its place in the seal's square, in per cent, from north clockwise. */
+export function holdPoint(progress: number): { x: number; y: number } {
+  const a = Math.min(1, Math.max(0, progress)) * 2 * Math.PI;
+  return { x: 50 + HOLD_POINT_RADIUS * 100 * Math.sin(a), y: 50 - HOLD_POINT_RADIUS * 100 * Math.cos(a) };
+}
+
+/**
+ * PAY's light (ONE QUEUE, D39; MK #secured, gen.mjs payButton): its lit share the time left of the window to pay
+ * (`fraction`), deeper in its last 10 % (`last`: as the mockup computes it, ⌈10 %⌉ of the window's seconds), out at 00:00
+ * (`done`).
+ */
+export function payLight(remainingMs: number, windowMs: number): { fraction: number; last: boolean; done: boolean } {
+  const total = Math.max(1, Math.round(windowMs / 1000));
+  const left = Math.max(0, Math.ceil(remainingMs / 1000));
+  return { fraction: Math.min(1, left / total), last: left > 0 && left <= Math.ceil(total * 0.1), done: left === 0 };
+}
+
+/** The ease of PAY's light filling in SECURED's passage (gen.mjs TX_JS ease: cubic, in and out). */
+export function fillEase(t: number): number {
+  const x = Math.min(1, Math.max(0, t));
+  return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+}
+
 /** An add-on as the piece held offers it. */
 export interface AddonChoice {
   id: string;

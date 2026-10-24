@@ -1087,10 +1087,55 @@ async function seedQueue(w: World): Promise<void> {
       await w.ctx.services.live.enter(late.id, id, { sizeId: sizes[1]!.id }, late.actor);
     },
   });
+  // Production's A PIECE HAS RETURNED on the turn (lot Q1, step Q1.10; N11): the turn of a size seen full.
+  await seedReturned(w);
   // MK #after-wait: the after-room's waiting screen.
   await seedAfterWait(w);
   // MK #room-draw: the draw at the opening.
   await seedDraw(w);
+}
+
+/** How many releases stage the returned turn: each run of its state takes one (a phone, a computer, in dark and light). */
+export const RETURNED_COPIES = 6;
+
+/**
+ * Production's A PIECE HAS RETURNED (lot Q1, step Q1.10; N11, D51): MONOLITHE IN BLUE, 201 pieces in sizes 16, 17 and 18,
+ * size 17's one piece held in a turn by the first in its line (its first batch, two minutes after its T0, three minutes
+ * ago), `queueReturned` second in size 17, first in its queue there: its page sees the size full. Its state's act gives
+ * the piece back (the turn left) and lets `queueReturned` in: its turn comes on a size it saw full. One release per run
+ * of the state (`queueReturned1` …), the account in each, since each run gives its turn.
+ */
+async function seedReturned(w: World): Promise<void> {
+  const { ctx, clock, demo } = w;
+  const live = ctx.services.live;
+  clock.set(at('2026-10-04T12:00:00Z'));
+  const you = await account(w, 'queueReturned', 'queue.returned@example.com', 1, w.models.blue);
+  for (let n = 1; n <= RETURNED_COPIES; n++) {
+    clock.set(at('2026-10-04T12:00:00Z'));
+    const t0 = new Date(NOCTURNE_NOW.getTime() - 3 * MINUTE);
+    const r = await createLiveRelease(w.f, {
+      modelId: w.models.blue!,
+      opensAt: t0,
+      closesAt: new Date(t0.getTime() + 2 * HOUR),
+      minTier: 1,
+      turnSeconds: 300,
+      payMinutes: 10,
+      sizes: [{ label: '16', stock: 100 }, { label: '17', stock: 1 }, { label: '18', stock: 100 }],
+      quantityLine: '201 PIECES',
+      priceMinor: 505_000,
+      pace: { batch: 1, minutes: 2 },
+    });
+    await titled(w, r.id, 'MONOLITHE IN BLUE', 'MONOLITHE IN BLUE, released live: 201 pieces, in the sizes of the house.');
+    demo.releases[`queueReturned${n}`] = r.id;
+    clock.set(t0);
+    await live.advance(r.id);
+    const [holder] = await crowdOf(w, 1, `returned${n}`);
+    const s17 = r.sizes[1]!.id;
+    await bulkLine(w, r.id, r.sizes, [holder!, you.id], new Date(t0.getTime() + 20_000), new Map([[holder!, s17], [you.id, s17]]));
+    clock.set(new Date(t0.getTime() + 2 * MINUTE));
+    await live.advance(r.id);
+    await live.message(r.id, 'Thank you for being here tonight.', w.admin);
+  }
 }
 
 /**

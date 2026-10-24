@@ -10,11 +10,25 @@
  *
  * The ink is `currentColor` (ivory on the vault's ground): the colour is the stylesheet's. The specimen's 79 bytes come
  * from a fixed generator: no signature verifies them, so a camera pointed at the screen reads no piece.
+ *
+ * SEAL C (ONE QUEUE, lot Q1 §3.5; ANSWERS C11, r20c; vault/SCOPE ROUND 5 "KEEP SEAL C"; the mockup's gen.mjs
+ * SEAL_C_SYMBOL): the seal the collector presses and holds at the turn, and the piece secured. The same specimen minus its
+ * GENOME group and its centre layer (`data-layer="seal"`: the solid orb and the seal orbit); it keeps the hairlines, the
+ * 13 data orbits, the moons and polaris. At its centre the ORBES monogram (core/render/monogram.ts, never redrawn), 14 u
+ * wide and centred: 2.5 u of air to the innermost hairline (r 9.53).
+ *
+ *   <svg class="live-seal live-seal--c">
+ *     <g class="live-seal__fixed">     the hairlines, the four moons and polaris's halo
+ *     <g class="live-seal__ring">  ×13 each data orbit
+ *     <g class="live-seal__monogram">  the monogram's five outlines
+ *
+ * The boutique board's door keeps the specimen whole (sealSvg, its lock turning its orbits).
  */
 import { encodeOrbesCode } from '../../core/code/encoder.js';
 import { CODE01, CODE01_GENOME_CENTERS, CODE01_RINGS, CODE01_SIZE } from '../../core/code/profile.js';
 import { genomeGlyphPrimitives } from '../../core/genome/render.js';
 import type { Primitive } from '../../core/geometry.js';
+import { MONOGRAM_BOUNDS, MONOGRAM_PATHS } from '../../core/render/monogram.js';
 import { primitivesToSvg, type ViewBox } from '../../core/render/svg.js';
 import { parseSvg, s } from '../shared/dom.js';
 
@@ -38,6 +52,8 @@ const VIEW: ViewBox = { x: -CODE01_SIZE / 2, y: -CODE01_SIZE / 2, w: CODE01_SIZE
 
 interface SealMarkup {
   fixed: string;
+  /** Seal C's: the fixed parts without the centre layer (`seal`). */
+  fixedC: string;
   rings: string[];
   glyphs: string[];
 }
@@ -53,6 +69,7 @@ function sealMarkup(): SealMarkup {
   const fixed = model.primitives.filter((p) => p.layer !== 'genome' && ringOf(p) < 0);
   markup = {
     fixed: render(fixed),
+    fixedC: render(fixed.filter((p) => p.layer !== 'seal')),
     rings: CODE01_RINGS.map((_, k) => render(model.primitives.filter((p) => ringOf(p) === k))),
     glyphs: SPECIMEN_GLYPHS.map((g, i) => render(genomeGlyphPrimitives(g, CODE01_GENOME_CENTERS[i]!.x, CODE01_GENOME_CENTERS[i]!.y, CODE01.genome.glyphRadius))),
   };
@@ -84,6 +101,39 @@ export function sealSvg(className: string): SVGSVGElement {
     genome.appendChild(g);
   });
   root.appendChild(genome);
+  return root;
+}
+
+/** Seal C's monogram: its width in the seal's units, centred (2.5 u of air to the innermost hairline, r 9.53). */
+export const SEAL_C_MONOGRAM_WIDTH = 14;
+
+/** The monogram's place in seal C: its scale and its offset, the ink box centred on the seal's centre. */
+export function sealCMonogramPlace(): { k: number; tx: number; ty: number } {
+  const b = MONOGRAM_BOUNDS;
+  const k = SEAL_C_MONOGRAM_WIDTH / b.w;
+  return { k, tx: -(b.x + b.w / 2) * k, ty: -(b.y + b.h / 2) * k };
+}
+
+/** Seal C's parts as the core renderer's markup (no DOM): the fixed parts without the centre, each data orbit. */
+export function sealCMarkup(): { fixed: string; rings: readonly string[] } {
+  const m = sealMarkup();
+  return { fixed: m.fixedC, rings: m.rings };
+}
+
+/** Seal C as a decorative inline SVG (`className` its classes): the seal to hold at the turn, the piece secured. */
+export function sealCSvg(className: string): SVGSVGElement {
+  const m = sealMarkup();
+  const root = s('svg', { class: `live-seal live-seal--c ${className}`.trim(), viewBox: `${VIEW.x} ${VIEW.y} ${VIEW.w} ${VIEW.h}`, 'aria-hidden': 'true', focusable: 'false' });
+  root.appendChild(s('g', { class: 'live-seal__fixed' }, inkOf(m.fixedC)));
+  m.rings.forEach((ring, k) => root.appendChild(s('g', { class: 'live-seal__ring', 'data-ring': k }, inkOf(ring))));
+  const p = sealCMonogramPlace();
+  root.appendChild(
+    s(
+      'g',
+      { class: 'live-seal__monogram', fill: 'currentColor', transform: `translate(${p.tx.toFixed(4)} ${p.ty.toFixed(4)}) scale(${p.k.toFixed(6)})` },
+      ...MONOGRAM_PATHS.map((d) => s('path', { d })),
+    ),
+  );
   return root;
 }
 

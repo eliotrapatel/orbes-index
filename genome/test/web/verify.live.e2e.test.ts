@@ -375,7 +375,14 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await expect.poll(() => page.locator('[aria-live="assertive"]').innerText(), POLL).toBe(LIVE.announce.returned);
     expect(await page.evaluate(() => document.activeElement?.classList.contains('live-hold'))).toBe(true);
     await textOf(page.locator('.live__turn-left'), /^01:(2\d|30)$/);
-    await textOf(page.locator('.live__turn-piece'), 'MONOLITHE · SIZE 52 · € 5 050');
+    // Lot Q1 §3.5: seal C (no GENOME, no centre orb; the monogram, the moons and polaris), the name with its variant,
+    // the choice with its price and the room count under it; the turn arrived in place from the queue, turn.mp3.
+    await textOf(page.locator('.live__turn-piece'), 'MONOLITHE');
+    await textOf(page.locator('.live__turn > .live__choice'), 'SIZE 52 · 1 PIECE · € 5 050');
+    expect(await page.locator('.live-hold__seal g[data-layer="genome"], .live-hold__seal g[data-layer="seal"]').count()).toBe(0);
+    expect(await page.locator('.live-hold__seal .live-seal__monogram path').count()).toBe(5);
+    expect(await page.locator('.live-hold__seal g[data-layer="moon"], .live-hold__seal g[data-layer="polaris"]').count()).toBe(2);
+    await expect.poll(async () => (await live(page)).sounds.filter((n) => n === 'turn').length, POLL).toBe(1);
     await keepsVault(page, null, ['THE RELEASES']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-turn.png'), fullPage: true });
     const seal = page.locator('.live-hold');
@@ -386,6 +393,12 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await page.mouse.down();
     await sleep(500);
     expect(await page.locator('.live__turn').getAttribute('class')).toMatch(/is-holding/);
+    // 4b HOLD (OP-8): its overline, the fine ring and its glow filling, the point riding its leading end; hold.mp3 at the press.
+    await textOf(page.locator('.live__turn > .live__overline'), 'HOLD');
+    expect(Number(await page.locator('.live-hold__fill').getAttribute('stroke-dashoffset'))).toBeLessThan(2 * Math.PI * 116 * 0.8);
+    expect(await page.locator('.live-hold__glow').getAttribute('stroke-dashoffset')).toBe(await page.locator('.live-hold__fill').getAttribute('stroke-dashoffset'));
+    expect(await page.locator('.live-hold__pt').evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
+    expect((await live(page)).sounds.filter((n) => n === 'hold')).toHaveLength(1);
     await page.mouse.up();
     await expect.poll(() => page.locator('.live__turn').getAttribute('class'), POLL).not.toMatch(/is-holding/);
     expect(await page.locator('.live-hold__fill').getAttribute('stroke-dashoffset')).toBe((2 * Math.PI * 116).toFixed(2));
@@ -407,30 +420,36 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await sleep(2_100);
     await page.mouse.up();
 
-    // B5: the reveal (P-D01's motion on the seal's glyphs), secured.mp3 (lot Q1 §3.10), the vibrations; then the add-ons and PAY.
+    // B5: the hold hands off (the turn kept a moment), then SECURED's passage (lot Q1 §3.5), secured.mp3 (§3.10), the
+    // vibrations; then the add-ons and PAY, the light.
     await textOf(page.locator('.live__secured > .live__overline').first(), 'SECURED');
     expect(answered).toBe(false);
-    expect(await page.locator('.live__secured').getAttribute('class')).toMatch(/is-revealing/);
-    expect(await page.locator('.live__piece-seal g[data-layer="genome"]').first().evaluate((g) => getComputedStyle(g).animationName)).toBe('ceremony-glyph');
+    expect(await page.locator('.view--live').getAttribute('class')).toMatch(/live--tx-secured/);
+    expect(await page.locator('.live__piece-seal').evaluate((g) => getComputedStyle(g).animationName)).toBe('live-tx-settle');
+    expect(await page.locator('.live__piece-seal g[data-layer="genome"]').count()).toBe(0);
     await expect.poll(async () => (await live(page)).sounds.filter((n) => n === 'secured').length, POLL).toBe(1);
     expect((await live(page)).tones).toEqual([]);
     expect((await live(page)).vibrations).toEqual(expect.arrayContaining([12, [18, 90, 18]]));
     await expect.poll(() => page.locator('[role="status"][aria-live="polite"]').innerText(), POLL).toBe(LIVE.announce.secured('MONOLITHE'));
     await textOf(page.locator('.live__secured-at'), /^SECURED AT \d{2}:\d{2}:\d{2}$/);
-    await textOf(page.locator('.live__deadline'), /^0[45]:\d{2} TO CONFIRM$/);
+    await textOf(page.locator('.live__pay-left'), /^0[45]:\d{2} TO CONFIRM$/);
     // The answer, once it comes, plays nothing twice.
     await expect.poll(() => answered, POLL).toBe(true);
     await page.unroute((u) => u.pathname === `/api/v1/live/${r.id}/secure`);
     await sleep(300);
     expect((await live(page)).sounds.filter((n) => n === 'secured')).toHaveLength(1);
-    expect(await page.locator('.live__secured').getAttribute('class')).toMatch(/is-revealing/);
+    // PAY (OP-9): the total, then the time, inside the light; its name PAY · total, the time its description.
     const pay = page.locator('.live__pay');
-    await textOf(pay, 'PAY · € 5 050');
-    await keepsVault(page, 'PAY · € 5 050', ['ENGRAVING + € 150', 'GIFT BOX + € 90', 'PAY · € 5 050', 'RELEASE MY PLACE']);
+    await textOf(pay.locator('.live-pay__words--in'), /^PAY € 5 050 · 0[45]:\d{2}$/);
+    expect(norm((await pay.getAttribute('aria-label')) ?? '')).toBe('PAY · € 5 050');
+    expect(await pay.getAttribute('aria-describedby')).toBe('live-pay-left');
+    await expect.poll(async () => Number(await pay.evaluate((b) => (b as HTMLElement).style.getPropertyValue('--live-pay-f'))), POLL).toBeGreaterThan(0.4);
+    // PAY is the light now (D39), no filled ground: no control of the screen is filled ivory.
+    await keepsVault(page, null, ['ENGRAVING + € 150', 'GIFT BOX + € 90', 'PAY · € 5 050', 'RELEASE MY PLACE']);
     await page.getByRole('button', { name: /ENGRAVING/ }).click();
-    await textOf(pay, 'PAY · € 5 200');
+    await expect.poll(async () => norm((await pay.getAttribute('aria-label')) ?? ''), POLL).toBe('PAY · € 5 200');
     expect(await page.getByRole('button', { name: /ENGRAVING/ }).getAttribute('aria-pressed')).toBe('true');
-    await keepsVault(page, 'PAY · € 5 200');
+    await keepsVault(page, null, ['PAY · € 5 200']);
     expect(await focusRingContrast(page, pay)).toBeGreaterThanOrEqual(3);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-secured.png'), fullPage: true });
     await pay.click();
@@ -537,17 +556,17 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await sleep(2_100);
     await page.keyboard.up(' ');
     await textOf(page.locator('.live__secured > .live__overline').first(), 'SECURED');
-    expect(await page.locator('.live__secured').getAttribute('class')).not.toMatch(/is-revealing/);
+    expect(await page.locator('.view--live').getAttribute('class')).not.toMatch(/live--tx-secured/);
     // Paused with the piece held: the time to confirm stands still across the polls (each moves the deadline by the
     // pause so far), then runs again.
     await srv.ctx.services.live.pause(r.id, f.admin);
     await textOf(page.locator('.live__notice .live__paused'), `PAUSED ${LIVE.pausedLine}`);
-    const held = await page.locator('.live__deadline-time').innerText();
+    const held = await page.locator('.live__pay-time').textContent();
     await sleep(4_500);
-    expect(await page.locator('.live__deadline-time').innerText()).toBe(held);
+    expect(await page.locator('.live__pay-time').textContent()).toBe(held);
     await srv.ctx.services.live.resume(r.id, f.admin);
     await expect.poll(() => page.locator('.live__notice .live__paused').count(), POLL).toBe(0);
-    await expect.poll(() => page.locator('.live__deadline-time').innerText(), POLL).not.toBe(held);
+    await expect.poll(() => page.locator('.live__pay-time').textContent(), POLL).not.toBe(held);
     // RELEASE MY PLACE: the first tap asks again, the second gives the piece back.
     await page.getByRole('button', { name: 'RELEASE MY PLACE' }).click();
     await visible(page.getByRole('button', { name: LIVE.releaseConfirm }));

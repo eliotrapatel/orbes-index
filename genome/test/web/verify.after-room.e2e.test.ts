@@ -185,10 +185,12 @@ describe.skipIf(!HAS_CHROMIUM)('the after-room of a LIVE RELEASE in /verify (Chr
     await page.mouse.up();
     await textOf(page.locator('.live__secured > .live__overline').first(), 'SECURED');
     const pay = page.locator('.live__pay');
-    await textOf(pay, 'PAY · € 900');
+    // PAY's name says the total (its words, the total and the time, are drawn inside its light).
+    await expect.poll(async () => norm((await pay.getAttribute('aria-label')) ?? ''), POLL).toBe('PAY · € 900');
     await page.getByRole('button', { name: /GIFT BOX/ }).click();
-    await textOf(pay, 'PAY · € 950');
-    await keepsVault(page, 'PAY · € 950', ['GIFT BOX + € 50', 'PAY · € 950', 'RELEASE MY PLACE']);
+    await expect.poll(async () => norm((await pay.getAttribute('aria-label')) ?? ''), POLL).toBe('PAY · € 950');
+    // PAY is the light (lot Q1 §3.5, D39), no filled ground.
+    await keepsVault(page, null, ['GIFT BOX + € 50', 'PAY · € 950', 'RELEASE MY PLACE']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-after-room-secured.png'), fullPage: true });
     await pay.click();
 
