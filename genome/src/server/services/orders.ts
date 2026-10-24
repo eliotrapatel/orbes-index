@@ -59,14 +59,22 @@
  *                say it was entered, its country and who, never its words), and exported to the account under the right
  *                of access (`accountOrders`); the console's routes give it masked to an AUDITOR (the name masked, the
  *                address and the phone withheld, the country shown). The engraving text likewise stays on the order.
- *   engraving    (plan NEXT LOT §3.6.C) the collector types it in YOUR ORDERS (`setEngraving`, at most 20 characters),
- *                RESERVED or PAID, until packing starts. An order whose LIVE RELEASE sold the engraving as one of its
- *                add-ons (a label holding the word ENGRAVING, `hasEngravingAddon`) has paid it there: its words only,
- *                changed until packing, never removed by the collector (409 ORDER_ENGRAVING_INCLUDED). Any other order
- *                takes the price of its currency from Orders → Settings, Engraving (`engraving_minor`, kept if the
- *                setting changes; no price: 409 ORDER_ENGRAVING_UNAVAILABLE): added after PAID, a supplementary invoice;
- *                removed after PAID, a credit note for its line (services/invoices.ts); its words changed, no document.
- *                Client Services' words (`setTerms`) take the same price. Audited `order.engraving`, never the words.
+ *   engraving    (plan NEXT LOT §3.6.C) the collector types it in YOUR ORDERS (`setEngraving`), RESERVED or PAID, until
+ *                packing starts. Since lot Q2, step Q2.5 (D4, N3, N4, N5, N8) it is one system: the engraving is a
+ *                catalogue add-on (a service, services/addons.ts) and an order's engraving is its unit
+ *                (order_addon_items) with the words on the order (`engraving_text`), at most the add-on's `textMax`
+ *                characters. Words on an order without the unit add it (COLLECTOR) at the price of the engraving YOUR
+ *                ORDERS offers in its currency (its switch alone, whatever the order's release; none: 409
+ *                ORDER_ENGRAVING_UNAVAILABLE): added after PAID, a supplementary invoice of its ADD_ON_ITEM line; the
+ *                words removed remove it, after PAID with a credit note for its line; its words changed, no document. A
+ *                unit bought with the order (PURCHASE, chosen at a LIVE hold) has its words changed until packing, and
+ *                is never removed by the collector (409 ORDER_ENGRAVING_INCLUDED). Client Services' words (`setTerms`)
+ *                go the same way through the staff path (STAFF). YOUR ORDERS draws the unit in the order's ENGRAVING,
+ *                never among its add-on rows. An order of before reads as it did, at 20 characters: its LIVE RELEASE's
+ *                ENGRAVING add-on (a label holding the word ENGRAVING, `hasEngravingAddon`), its words only, never
+ *                removed by the collector; words priced from Orders → Settings (`engraving_minor`, their ENGRAVING
+ *                line), changed at that price, removed with a credit note for that line. Audited `order.engraving`,
+ *                never the words.
  *   MY PIECES    the collector reads their own orders (`forAccount`, choice 6): the steps and their times, the model,
  *                the size, the add-ons and the price, the carrier and the tracking link once shipped, and its documents
  *                (M6): the invoice and the credit note, the model's care guide, the ownership certificate once the piece
@@ -153,7 +161,7 @@ import { writeJournal } from './journal.js';
 import { isTransitionAllowed, LifecycleService, returnTargetOf } from './lifecycle.js';
 import { CERTIFICATE_ENDING_STATUSES } from './ownership.js';
 import { tierOf } from './club.js';
-import { engravingPrice, engravingPrices, giftModelOf, readProgram, shippingRate } from './club-program.js';
+import { giftModelOf, readProgram, shippingRate } from './club-program.js';
 import { creditBalances, creditKindOrder, ensureGrants, usableAt, type CreditKind } from './tier-grants.js';
 import { modelSizeCandidates, offeredSku, savedSizeAmong, savedSizeHint, sizesForExchange } from './sizes.js';
 import { ordersForSetSale } from './set-sales.js';
@@ -161,7 +169,16 @@ import { parcelOrders, RETURN_WINDOW_DAYS } from './parcels.js';
 import {
   accountAddonItems,
   accountAddonOpen,
+  addEngravingUnit,
   addonCurrencyFixed,
+  assertEngravingNotPacked,
+  engravingUnits,
+  engravingWordsInvalid,
+  ordersEngraving,
+  removeEngravingUnit,
+  type AddonBy,
+  type EngravingUnit,
+  type OrdersEngraving,
   adminAddonUnits,
   cancelUnits,
   carryChoices,
@@ -262,10 +279,14 @@ const engravingIncluded = () =>
   conflict('ORDER_ENGRAVING_INCLUDED', 'Your engraving was bought with your order: its words may change until packing begins. ORBES Client Services can assist you.');
 const engravingUnavailable = () => conflict('ORDER_ENGRAVING_UNAVAILABLE', 'Engraving is not offered on this order.');
 
-/** The collector's engraving (plan NEXT LOT §3.6.C): at most 20 characters of letters, figures, spaces and . & ' ’ -. */
+/**
+ * The collector's engraving (plan NEXT LOT §3.6.C): at most 20 characters of letters, figures, spaces and . & ' ’ -; since
+ * lot Q2, step Q2.5 (N3), at most its engraving add-on's `textMax` (1 to 20), 20 still for an order of before (its
+ * Settings price or its release's ENGRAVING) and as the ceiling every engraving is first held to.
+ */
 export const ENGRAVING_COLLECTOR_MAX = 20;
-const ENGRAVING_RE = /^[\p{L}\p{M}0-9 .&'’-]{1,20}$/u;
-const engravingWords = () => validationError('Up to 20 characters: letters, figures, spaces and . & ’ -');
+const ENGRAVING_RE = (max: number = ENGRAVING_COLLECTOR_MAX) => new RegExp(`^[\\p{L}\\p{M}0-9 .&'’-]{1,${max}}$`, 'u');
+const engravingWords = (max: number = ENGRAVING_COLLECTOR_MAX) => engravingWordsInvalid(max);
 
 /**
  * Whether an order carries the release's engraving add-on (plan NEXT LOT §3.6.C, Default: one of its add-ons' labels
@@ -427,8 +448,9 @@ export interface OrderView {
   surprise: string | null;
   engravingText: string | null;
   /**
-   * Plan NEXT LOT §3.6.C: the price its engraving was taken at (Orders → Settings), null for one bought as the release's
-   * add-on or entered before; who typed its words (COLLECTOR, STAFF).
+   * Plan NEXT LOT §3.6.C: the price its engraving was taken at (its unit's since lot Q2, step Q2.5; on an order of before,
+   * Orders → Settings'), null for one bought as the release's add-on of before or entered without a price; who typed its
+   * words (COLLECTOR, STAFF).
    */
   engravingMinor: number | null;
   engravingBy: AddressSource | null;
@@ -707,14 +729,17 @@ export interface AccountOrder {
   /** The reference of the order it travels with, whose address it is delivered to; null for an order of its own. */
   addressOf: string | null;
   /**
-   * Plan NEXT LOT §3.6.C: its engraving's words and the price it was taken at (null: bought as the release's add-on, or
-   * entered before, no price); null without one.
+   * Plan NEXT LOT §3.6.C: its engraving's words and the price it was taken at (its unit's since lot Q2, step Q2.5; null:
+   * bought as the release's add-on of before, or entered before, no price); null without words.
    */
   engraving: { text: string; priceMinor: number | null } | null;
   /**
-   * The engraving it may carry: the price of its currency from Orders → Settings (`priceMinor`; the one its engraving
-   * took, when it has one), or the release's add-on (`included`, no price); the words' `maxLength`; null when none is
-   * offered (a welcome gift, a currency without a price or not entered yet).
+   * The engraving it may carry (lot Q2, step Q2.5): its unit's when it carries one (the price it was sold at; `included`
+   * when bought with the order or while its words are not entered: its words only, never removed by the collector),
+   * otherwise the engraving YOUR ORDERS offers in its currency (`priceMinor`); on an order of before, the release's
+   * add-on (`included`, no price) or the price its words took; the words' `maxLength` (the engraving add-on's `textMax`,
+   * 20 on an order of before); null when none is offered (a welcome gift, a currency without a price or not entered yet,
+   * the engraving's YOUR ORDERS switch off).
    */
   engravingOffer: { priceMinor: number | null; included: boolean; maxLength: number } | null;
   /**
@@ -2323,34 +2348,44 @@ export function preparingAt(paidAt: Date | null, events: readonly { at: Date; de
 
 /**
  * An order's delivery address and engraving as its collector reads them (AccountOrder `address`, `addressOf`,
- * `engraving`, `engravingOffer`, `editable`), `prices` the engraving prices per currency now.
+ * `engraving`, `engravingOffer`, `editable`): `engraving` its unit (lot Q2, step Q2.5) when it carries one, `offer` the
+ * engraving YOUR ORDERS offers in its currency now.
  */
 function accountDelivery(
   o: Pick<OrderRow, 'status' | 'channel' | 'with_order_id' | 'packing_started_at' | 'currency' | 'addons' | 'engraving_text' | 'engraving_minor'>,
   a: OrderAddress,
-  prices: Readonly<Record<string, number | null>>,
+  e: { unit: EngravingUnit | null; offer: OrdersEngraving | null },
 ): Pick<AccountOrder, 'address' | 'addressOf' | 'engraving' | 'engravingOffer' | 'editable'> {
   const open = ORDER_HOLDING_STATUSES.includes(o.status) && o.packing_started_at === null;
-  const offer = engravingOfferOf(o, prices);
+  const offer = engravingOfferOf(o, e.unit, e.offer);
+  // Its words with the price its unit was sold at (lot Q2, step Q2.5), or, on an order of before, the price it took.
+  const unit = o.channel === 'GIFT' || hasEngravingAddon(o.addons) ? null : e.unit;
   return {
     address: a.name !== null && a.address !== null ? { name: a.name, lines: a.address, country: a.country, phone: a.phone } : null,
     addressOf: a.travelsWith ? orderReference(a.travelsWith) : null,
-    engraving: o.engraving_text !== null ? { text: o.engraving_text, priceMinor: o.engraving_minor } : null,
+    engraving: o.engraving_text !== null ? { text: o.engraving_text, priceMinor: unit ? unit.priceMinor : o.engraving_minor } : null,
     engravingOffer: offer,
     editable: { address: o.with_order_id === null && open, engraving: open && offer !== null },
   };
 }
 
 /**
- * The engraving an order may carry (plan NEXT LOT §3.6.C): none on a welcome gift; the release's add-on (no price);
- * otherwise the price its engraving took, or its currency's price now; none without either.
+ * The engraving an order may carry (plan NEXT LOT §3.6.C; lot Q2, step Q2.5, N3, N4, N5, N8): none on a welcome gift; an
+ * order of before reads as it did, at 20 characters (its release's ENGRAVING add-on: included, no price; words with the
+ * price they took); its engraving's unit: the price it was sold at, its add-on's most characters, included (its words
+ * only, never removed by the collector) when bought with the order or while it has no words yet; otherwise the
+ * engraving YOUR ORDERS offers in its currency now (its price and most characters); none without one.
  */
-function engravingOfferOf(o: Pick<OrderRow, 'channel' | 'currency' | 'addons' | 'engraving_text' | 'engraving_minor'>, prices: Readonly<Record<string, number | null>>): AccountOrder['engravingOffer'] {
+function engravingOfferOf(
+  o: Pick<OrderRow, 'channel' | 'currency' | 'addons' | 'engraving_text' | 'engraving_minor'>,
+  unit: EngravingUnit | null,
+  offer: OrdersEngraving | null,
+): AccountOrder['engravingOffer'] {
   if (o.channel === 'GIFT') return null;
   if (hasEngravingAddon(o.addons)) return { priceMinor: null, included: true, maxLength: ENGRAVING_COLLECTOR_MAX };
+  if (unit) return { priceMinor: unit.priceMinor, included: unit.addedBy === 'PURCHASE' || o.engraving_text === null, maxLength: unit.textMax };
   if (o.engraving_text !== null) return { priceMinor: o.engraving_minor, included: false, maxLength: ENGRAVING_COLLECTOR_MAX };
-  const price = o.currency === null ? null : (prices[o.currency] ?? null);
-  return price === null ? null : { priceMinor: price, included: false, maxLength: ENGRAVING_COLLECTOR_MAX };
+  return offer === null || o.currency === null ? null : { priceMinor: offer.priceMinor, included: false, maxLength: offer.textMax };
 }
 
 /**
@@ -2467,6 +2502,8 @@ export class OrderService {
       giftOf = { tier: grant.tier as 2 | 3, sizes, savedSize: r.sku_id === null ? await savedSizeHint(this.db, r.account_id, r.model_id) : null };
     }
     const delivery = await addressOf(this.db, r);
+    // Lot Q2, step Q2.5: its engraving's unit, whose price the engraving's line reads.
+    const engravingUnit = r.channel === 'GIFT' || hasEngravingAddon(r.addons) ? null : ((await engravingUnits(this.db, [id])).get(id) ?? null);
     const now = this.clock();
     const standing = await tierOf(this.db, r.account_id, now);
     const credit: OrderView['credit'] = {
@@ -2508,7 +2545,7 @@ export class OrderService {
       addons: r.addons,
       surprise: r.surprise,
       engravingText: r.engraving_text,
-      engravingMinor: r.engraving_minor,
+      engravingMinor: engravingUnit ? engravingUnit.priceMinor : r.engraving_minor,
       engravingBy: r.engraving_by,
       buyer: { name: delivery.name, address: delivery.address, country: delivery.country, phone: delivery.phone },
       addressBy: delivery.by,
@@ -2652,7 +2689,10 @@ export class OrderService {
           ).map((p) => [p.id, p])
         : [],
     );
-    const prices = await engravingPrices(this.db);
+    // Lot Q2, step Q2.5: each order's engraving unit, and the engraving YOUR ORDERS offers in each currency.
+    const engravings = await engravingUnits(this.db, rows.map((r) => r.id));
+    const engravingOffers = new Map<string, OrdersEngraving | null>();
+    for (const c of new Set(rows.map((r) => r.currency).filter((c): c is NonNullable<typeof c> => c !== null))) engravingOffers.set(c, await ordersEngraving(this.db, c));
     const care = await this.accountCases(accountId.toLowerCase(), rows);
     // Plan MACRO M3 §4.2 (D2): each order's catalogue add-ons.
     const addonItems = await accountAddonItems(this.db, rows);
@@ -2712,7 +2752,7 @@ export class OrderService {
       },
       imageUrl: mediaUrl(r.model_image),
       claimCode: claimCodes.get(r.id) ?? null,
-      ...accountDelivery(r, deliveryOf(r), prices),
+      ...accountDelivery(r, deliveryOf(r), { unit: engravings.get(r.id) ?? null, offer: r.currency === null ? null : (engravingOffers.get(r.currency) ?? null) }),
       ...care.get(r.id)!,
     }));
   }
@@ -2860,12 +2900,21 @@ export class OrderService {
    * The collector's engraving on one of its orders (PUT and DELETE /api/v1/account/orders/:id/engraving; plan NEXT LOT
    * §3.6.C: « with its price … until packing starts »), `text` null to remove it. Its own order (404 ORDER_NOT_FOUND),
    * not a welcome gift (409 ORDER_ENGRAVING_UNAVAILABLE), RESERVED or PAID (409 ORDER_CLOSED), packing not started (409
-   * ORDER_PACKING_STARTED); the account ACTIVE (403 ACCOUNT_LOCKED). The words: 1 to 20 letters, figures, spaces and
-   * . & ' ’ - (400). An order with the release's ENGRAVING add-on: its words only, no price, never removed here (409
-   * ORDER_ENGRAVING_INCLUDED). Any other: a new engraving takes its currency's price from the settings (409
-   * ORDER_ENGRAVING_UNAVAILABLE without one), kept; after PAID, its supplementary invoice; removed after PAID, a credit
-   * note for its line; its words changed, no document. The same words again change nothing. The account's lock, then the
-   * order's row. Event and audit `order.engraving` `{ by: 'collector', priced, addon, removed? }`, never the words.
+   * ORDER_PACKING_STARTED); the account ACTIVE (403 ACCOUNT_LOCKED). The words: 1 to its most characters of letters,
+   * figures, spaces and . & ' ’ - (400): its engraving add-on's `textMax` (lot Q2, step Q2.5, N3), 20 on an order of
+   * before. The engraving is one system (lot Q2, step Q2.5, D4, N4, N5, N8):
+   *  - an order carrying the engraving's unit: its words only, no second price; a unit bought with the order (PURCHASE)
+   *    is never removed here (409 ORDER_ENGRAVING_INCLUDED), any other is removed with its words (REMOVED; after PAID a
+   *    credit note for its line);
+   *  - any other order: new words add the engraving's unit (COLLECTOR) at the price of the engraving YOUR ORDERS offers
+   *    in its currency, its switch alone deciding, whatever the order's release (409 ORDER_ENGRAVING_UNAVAILABLE
+   *    without one); after PAID, its supplementary invoice;
+   *  - an order of before reads as it did: its release's ENGRAVING add-on, its words only, never removed (409
+   *    ORDER_ENGRAVING_INCLUDED); words with a Settings price (`engraving_minor`), changed at that price, removed with a
+   *    credit note for its ENGRAVING line after PAID.
+   * Its words changed, no document. The same words again change nothing. The account's lock, then the order's row.
+   * Event and audit `order.engraving` `{ by: 'collector', priced, addon, removed? }`, never the words; a unit added or
+   * removed also `order.addon.add` / `order.addon.remove`.
    */
   async setEngraving(accountId: string, orderId: string, text: string | null, actor: Actor): Promise<AccountOrder> {
     if (typeof accountId !== 'string' || !UUID_RE.test(accountId)) throw orderNotFound();
@@ -2875,7 +2924,8 @@ export class OrderService {
     if (text !== null) {
       if (typeof text !== 'string') throw engravingWords();
       words = text.replace(/\s+/g, ' ').trim();
-      if (!ENGRAVING_RE.test(words)) throw engravingWords();
+      // The house's ceiling first; the engraving's own most characters once the order is read.
+      if (!ENGRAVING_RE().test(words)) throw engravingWords();
     }
     await inRetriedTransaction(this.db, async (tx) => {
       const a = await tx.selectFrom('accounts').select('status').where('id', '=', account).forShare().executeTakeFirst();
@@ -2886,25 +2936,37 @@ export class OrderService {
       if (o.channel === 'GIFT') throw engravingUnavailable();
       if (!ORDER_HOLDING_STATUSES.includes(o.status)) throw orderClosed();
       if (o.packing_started_at !== null) throw packingStarted();
-      const addon = hasEngravingAddon(o.addons);
+      const legacy = hasEngravingAddon(o.addons);
+      const unit = legacy ? null : ((await engravingUnits(tx, [o.id])).get(o.id) ?? null);
+      const by: AddonBy = { type: 'COLLECTOR', id: o.account_id, actor };
       const now = this.clock();
       let next: Pick<OrderRow, 'engraving_text' | 'engraving_minor' | 'engraving_by'>;
+      // What its unit does: added at this price (COLLECTOR), or removed.
+      let adding: OrdersEngraving | null = null;
+      let removing = false;
       if (words === null) {
-        if (addon) throw engravingIncluded();
-        if (o.engraving_text === null) return;
+        if (legacy || unit?.addedBy === 'PURCHASE') throw engravingIncluded();
+        if (o.engraving_text === null && unit === null) return;
         next = { engraving_text: null, engraving_minor: null, engraving_by: null };
-      } else if (o.engraving_text !== null || addon) {
-        // Its words change (or, with the add-on, are typed): the price stays as it is.
+        removing = unit !== null;
+      } else if (o.engraving_text !== null || legacy || unit !== null) {
+        // Its words change (or, with the add-on or its unit, are typed): the price stays as it is.
+        if ([...words].length > (unit ? unit.textMax : ENGRAVING_COLLECTOR_MAX)) throw engravingWords(unit ? unit.textMax : ENGRAVING_COLLECTOR_MAX);
         if (o.engraving_text === words) return;
-        next = { engraving_text: words, engraving_minor: addon ? null : o.engraving_minor, engraving_by: 'COLLECTOR' };
+        next = { engraving_text: words, engraving_minor: legacy ? null : o.engraving_minor, engraving_by: 'COLLECTOR' };
       } else {
-        const price = await engravingPrice(tx, o.currency);
-        if (price === null) throw engravingUnavailable();
-        next = { engraving_text: words, engraving_minor: price, engraving_by: 'COLLECTOR' };
+        adding = await ordersEngraving(tx, o.currency);
+        if (adding === null) throw engravingUnavailable();
+        if ([...words].length > adding.textMax) throw engravingWords(adding.textMax);
+        next = { engraving_text: words, engraving_minor: null, engraving_by: 'COLLECTOR' };
       }
+      // The words first, so that the unit's journal entry carries the order as it now stands.
       const after = await updateOrder(tx, o.id, next);
+      const priced = adding ? adding.priceMinor : unit ? (removing ? null : unit.priceMinor) : after.engraving_minor;
       const notes: AuditRecordInput[] = [
-        await recordChange(tx, o, after, 'order.engraving', { details: { by: 'collector', priced: after.engraving_minor, addon, ...(words === null ? { removed: true } : {}) } }, actor, now),
+        await recordChange(tx, o, after, 'order.engraving', { details: { by: 'collector', priced, addon: legacy || unit?.addedBy === 'PURCHASE', ...(words === null ? { removed: true } : {}) } }, actor, now),
+        ...(adding ? await addEngravingUnit(tx, after, adding, by, now) : []),
+        ...(removing ? await removeEngravingUnit(tx, after, unit!.unitId, by, now) : []),
         ...(await engravingDocuments(tx, o, after, actor, now)),
       ];
       for (const n of notes) await this.audit.record(n, tx);
@@ -3172,11 +3234,13 @@ export class OrderService {
         // Plan MACRO M3 §4.2: its add-ons keep the currency they were added in (a salon's, its model's base currency).
         const held = await heldCurrency(tx, o.id);
         if (held !== null && currency !== null && currency !== held) throw addonCurrencyFixed(held);
-        // Plan NEXT LOT §3.6.C: a currency changed on a RESERVED order: an engraving priced from the settings takes the
-        // new currency's price, or is removed (with its event) when that currency has none, a currency cleared included;
-        // the add-on's (no price of its own) is not touched. Worked out first and written with the price in one update,
-        // so the row never holds an engraving price without its currency (0039's orders_engraving_price).
-        const repriced = o.engraving_minor !== null && currency !== o.currency ? await engravingPrice(tx, currency ?? null) : undefined;
+        // Plan NEXT LOT §3.6.C: a currency changed on a RESERVED order: an engraving of before priced from the settings
+        // takes the new currency's price (since lot Q2, step Q2.5, N4: the engraving YOUR ORDERS offers in it), or is
+        // removed (with its event) when that currency has none, a currency cleared included; the add-on's (no price of
+        // its own) is not touched, nor is an engraving's unit (its currency the units', above). Worked out first and
+        // written with the price in one update, so the row never holds an engraving price without its currency (0039's
+        // orders_engraving_price).
+        const repriced = o.engraving_minor !== null && currency !== o.currency ? ((await ordersEngraving(tx, currency ?? null))?.priceMinor ?? null) : undefined;
         const engravingFields = repriced === undefined ? {} : repriced === null ? { engraving_text: null, engraving_minor: null, engraving_by: null } : { engraving_minor: repriced };
         after = await updateOrder(tx, o.id, { price_minor: price, currency, ...engravingFields });
         fields.push('price');
@@ -3191,14 +3255,26 @@ export class OrderService {
         }
       }
       if (engraving !== undefined && engraving !== after.engraving_text) {
-        // Client Services' words (STAFF). A new engraving without the release's add-on takes its currency's price from the
-        // settings, as the collector's would (none set: no price); its words changed keep their price; removed, none. A
-        // welcome gift takes none: it has no price of its own (plan NEXT LOT §3.6.C), its words only.
+        // Client Services' words (STAFF), the engraving one system (lot Q2, step Q2.5): an order carrying the engraving's
+        // unit, or of before (its release's add-on, or words with a Settings price), has its words changed at its price;
+        // new words on any other order add the engraving's unit (STAFF) at the price of the engraving YOUR ORDERS offers
+        // in its currency, as the collector's would (none offered: the words alone, no price); words removed remove a
+        // unit not bought with the order (a credit note after PAID). A unit added or removed only until the parcel is
+        // packed (409 PACKING_PACKED). A welcome gift takes none: it has no price of its own (plan NEXT LOT §3.6.C), its
+        // words only.
         const addon = hasEngravingAddon(after.addons);
-        const minor = engraving === null || addon || after.channel === 'GIFT' ? null : after.engraving_text !== null ? after.engraving_minor : await engravingPrice(tx, after.currency);
+        const gift = after.channel === 'GIFT';
+        const unit = addon || gift ? null : ((await engravingUnits(tx, [o.id])).get(o.id) ?? null);
+        const adding = engraving !== null && !addon && !gift && unit === null && after.engraving_text === null ? await ordersEngraving(tx, after.currency) : null;
+        const removing = engraving === null && unit !== null && unit.addedBy !== 'PURCHASE';
+        if (adding || removing) await assertEngravingNotPacked(tx, after);
+        const minor = engraving === null || addon || gift || unit !== null || adding !== null ? null : after.engraving_minor;
         const before = after;
         after = await updateOrder(tx, o.id, { engraving_text: engraving, engraving_minor: minor, engraving_by: engraving === null ? null : 'STAFF' });
         fields.push('engraving');
+        const by: AddonBy = { type: 'STAFF', id: actor.type === 'admin' && typeof actor.id === 'string' && UUID_RE.test(actor.id) ? actor.id.toLowerCase() : null, actor };
+        if (adding) extra.push(...(await addEngravingUnit(tx, after, adding, by, now)));
+        if (removing) extra.push(...(await removeEngravingUnit(tx, after, unit.unitId, by, now)));
         extra.push(...(await engravingDocuments(tx, before, after, actor, now)));
       }
       if (sizeChange) {

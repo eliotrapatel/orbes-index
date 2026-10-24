@@ -323,8 +323,6 @@ const PROBES: Probe[] = [
   { group: 'orders', method: 'GET', url: '/api/admin/orders/shipping-rates', min: 'AUDITOR' },
   { group: 'orders', method: 'PUT', url: '/api/admin/orders/shipping-rates', body: INVALID, min: 'ADMIN' },
   // Plan NEXT LOT §3.6.C: the engraving's price per currency (Orders → Settings, Engraving).
-  { group: 'orders', method: 'GET', url: '/api/admin/orders/engraving-prices', min: 'AUDITOR' },
-  { group: 'orders', method: 'PUT', url: '/api/admin/orders/engraving-prices', body: INVALID, min: 'ADMIN' },
   // Plan MACRO M3 §2.2: the returns report and its CSV, counts only, read by an AUDITOR.
   { group: 'orders', method: 'GET', url: '/api/admin/orders/returns', min: 'AUDITOR' },
   { group: 'orders', method: 'GET', url: '/api/admin/orders/returns.csv', min: 'AUDITOR' },

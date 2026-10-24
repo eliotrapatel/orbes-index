@@ -344,7 +344,7 @@ export class OrderSheet {
       { class: 'n-fld-group' },
       h('label', { class: 'n-fld', attrs: { for: 'order-engraving' } }, h('span', { class: 'n-g n-lab', text: E.field })),
       input,
-      h('p', { class: 'n-sm n-fld__hint', id: 'order-engraving-hint', text: E.hint }),
+      h('p', { class: 'n-sm n-fld__hint', id: 'order-engraving-hint', text: E.hint(m.maxLength) }),
     );
     const lines: HTMLElement[] = [];
     if (m.priceLine) lines.push(h('p', { class: m.included ? 'n-sm n-osheet__price' : 'n-g n-lb n-ivc n-osheet__price', text: m.priceLine }));
@@ -357,7 +357,7 @@ export class OrderSheet {
       }
       if ([...text].length > m.maxLength || !ENGRAVING_WORDS.test(text)) {
         input.setAttribute('aria-invalid', 'true');
-        throw new FormError(E.invalid);
+        throw new FormError(E.invalid(m.maxLength));
       }
       await this.sendEngraving(req.order.id, text);
     });

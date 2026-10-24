@@ -15,7 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { orderReference, type OrderTransitionInput } from '../../src/server/services/orders.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { jpegPhoto } from '../support/images.js';
-import { createLiveRelease, holdPieces, legacyLiveAddons, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { createLiveRelease, holdPieces, legacyLiveAddons, liveFixtureOn, ordersEngravingPrices, type LiveFixture } from '../support/live.js';
 import { accountClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
 import { countPiecesIn, packAndShip, stockPieces } from '../support/fulfil.js';
 import { ensureSku } from '../../src/server/services/stock.js';
@@ -550,7 +550,8 @@ describe('YOUR ADDRESSES and an order\'s delivery address over HTTP (plan NEXT L
 
   it('sets and removes an order\'s engraving (plan NEXT LOT §3.6.C; API §10.22): the CSRF token, rate group auth, the server\'s words, the order back; its other documents by their number', async () => {
     const op = { type: 'admin' as const, id: f.admin.id };
-    await h.ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: 3_000, GBP: null, USD: null, CHF: null } }, op);
+    // Lot Q2, step Q2.5: the engraving is the ENGRAVING add-on, priced in euros, its YOUR ORDERS switch on.
+    await ordersEngravingPrices(f, { EUR: 3_000 });
     await h.ctx.services.orders.setTerms(orderId, { sizeLabel: '58', priceMinor: 420_000, currency: 'EUR' }, op);
     const url = `/api/v1/account/orders/${orderId}/engraving`;
     expect((await h.client().request('PUT', url, { body: { text: 'J.M.' } })).statusCode).toBe(401);
@@ -581,7 +582,7 @@ describe('YOUR ADDRESSES and an order\'s delivery address over HTTP (plan NEXT L
     expect(doc.headers['cache-control']).toBe('no-store');
     expect((await other.get(`/api/v1/account/orders/${orderId}/documents/${order.documents.others[0].number}`)).statusCode).toBe(404);
     expect((await mine.get(`/api/v1/account/orders/${orderId}/documents/INV-2026-999999`)).statusCode).toBe(404);
-    await h.ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: null, GBP: null, USD: null, CHF: null } }, op);
+    await ordersEngravingPrices(f, { EUR: null });
   });
 
   it('ADD AN ADD-ON (plan MACRO M3 §4.2, D2): what can be added, added and removed on one\'s own paid order with the CSRF token in rate group auth, its own invoice and credit note; the server\'s words for a refusal; another account\'s order 404', async () => {

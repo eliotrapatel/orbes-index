@@ -496,9 +496,10 @@ export const ORDERS = Object.freeze({
     phoneInvalid: 'Enter a phone number with its country code.',
   }),
   /**
-   * ENGRAVING (plan NEXT LOT §3.6.C): its row (`« J.M. » · + € 30`, or the words alone when the release's add-on paid for
-   * it), its link under the rows until packing begins, and its sheet. After payment, a Settings-priced engraving added
-   * gets its own invoice and one removed a credit note, both in DOCUMENTS.
+   * ENGRAVING (plan NEXT LOT §3.6.C): its row (`« J.M. » · + € 30`, or the words alone when the release's add-on of before
+   * paid for it), its link under the rows until packing begins, and its sheet. After payment, an engraving added gets its
+   * own invoice and one removed a credit note, both in DOCUMENTS. Since lot Q2, step Q2.5 the engraving is an add-on's
+   * unit, read here only, never among the order's add-on rows.
    */
   engraving: Object.freeze({
     value: (text: string, price: string | null) => (price ? `« ${text} » · + ${price}` : `« ${text} »`),
@@ -510,7 +511,8 @@ export const ORDERS = Object.freeze({
     title: 'ENGRAVING',
     lead: 'Engraved on your piece before it is shipped.',
     field: 'YOUR ENGRAVING',
-    hint: 'Up to 20 characters: letters, figures, spaces and . & ’ -',
+    /** Its most characters (lot Q2, step Q2.5, N3): the engraving add-on's, 20 for one of before. */
+    hint: (max: number) => `Up to ${max} characters: letters, figures, spaces and . & ’ -`,
     price: (price: string) => `ENGRAVING · + ${price}`,
     included: 'Your engraving was bought with your order.',
     paidAdd: 'Your order is paid: the engraving is added to it with its own invoice, in DOCUMENTS.',
@@ -520,7 +522,7 @@ export const ORDERS = Object.freeze({
     cancel: 'CANCEL',
     /** Said before the server says it, in its words. */
     empty: 'Enter your engraving.',
-    invalid: 'Up to 20 characters: letters, figures, spaces and . & ’ -',
+    invalid: (max: number) => `Up to ${max} characters: letters, figures, spaces and . & ’ -`,
     /** A failure, followed by the server's message. */
     failed: 'The engraving could not be saved just now.',
   }),

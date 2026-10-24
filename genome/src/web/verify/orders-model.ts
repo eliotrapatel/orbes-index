@@ -296,6 +296,25 @@ function engravingOf(o: AccountOrder): { text: string; priceMinor: number | null
 }
 
 /**
+ * The price of an engraving the order carries whose words are not entered yet (lot Q2, step Q2.5: its unit, bought with
+ * the order or added by ORBES, `included` with the price it was sold at), drawn on its own ENGRAVING row; null otherwise
+ * (no unit, its words entered, or the release's add-on of before, whose price is its add-on's row).
+ */
+function engravingSoldMinor(o: AccountOrder): number | null {
+  if (engravingOf(o)) return null;
+  const offer = o.engravingOffer && typeof o.engravingOffer === 'object' ? o.engravingOffer : null;
+  const p = offer?.included === true ? offer.priceMinor : null;
+  return typeof p === 'number' && Number.isInteger(p) && p > 0 ? p : null;
+}
+
+/** What its engraving adds to its TOTAL, in its currency: the price its words took, or its unit's before its words. */
+function engravingMinorOf(o: AccountOrder): number {
+  if (!o.currency) return 0;
+  const engraving = engravingOf(o);
+  return engraving ? (engraving.priceMinor ?? 0) : (engravingSoldMinor(o) ?? 0);
+}
+
+/**
  * SIZE, PRICE, each add-on at its price (per piece), its ENGRAVING (plan NEXT LOT §3.6.C: its words, with the price of
  * the settings it took; the words alone when the release's add-on paid for it, its price on the add-on's row), its
  * SHIPPING (BP-19 T4), and the TOTAL when there are add-ons, a priced engraving or a fee, and a price. A cancelled order
@@ -319,8 +338,10 @@ export function orderRows(o: AccountOrder): Row[] {
     ...orderAddonRows(o),
   ];
   const engraving = engravingOf(o);
-  const engravingMinor = engraving?.priceMinor && o.currency ? engraving.priceMinor : 0;
+  const engravingMinor = engravingMinorOf(o);
   if (engraving) rows.push([ORDERS.rows.engraving, ORDERS.engraving.value(engraving.text, engravingMinor > 0 ? money(engravingMinor) : null)]);
+  // Lot Q2, step Q2.5: its engraving's unit before its words, at its price (« + € 150 », as an add-on's row reads it).
+  else if (engravingMinor > 0) rows.push([ORDERS.rows.engraving, `+ ${money(engravingMinor)}`]);
   const shipping = shippingValue(o);
   if (shipping) rows.push([ORDERS.rows.shipping, shipping]);
   const fee = shippingFee(o);
@@ -333,8 +354,7 @@ export function orderRows(o: AccountOrder): Row[] {
 
 /** What an order adds to its price (its add-ons, its priced engraving, its own shipping fee, less its credit), in its currency. */
 function orderExtrasMinor(o: AccountOrder): number {
-  const engraving = engravingOf(o);
-  const engravingMinor = engraving?.priceMinor && o.currency ? engraving.priceMinor : 0;
+  const engravingMinor = engravingMinorOf(o);
   const credit = o.channel !== 'GIFT' && typeof o.creditMinor === 'number' && Number.isInteger(o.creditMinor) && o.creditMinor > 0 ? o.creditMinor : 0;
   return o.addons.reduce((n, a) => n + a.priceMinor, orderAddonsMinor(o) + engravingMinor + shippingFee(o) - credit);
 }

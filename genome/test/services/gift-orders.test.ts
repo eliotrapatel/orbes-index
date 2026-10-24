@@ -451,11 +451,10 @@ describe('the welcome gift (BP-19 T5)', () => {
     expect(await giftsOf(order.id)).toHaveLength(2);
     // € 200 of credit: the birthday's € 20 first, the warranty's € 30, PALLADIUM's € 100, then PLATINE's € 50.
     await orders().applyCredit(order.id, 20_000, admin);
-    // An engraving priced from the settings (plan NEXT LOT §3.6.C), entered by Client Services: its own line.
-    await ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: 3_000, GBP: null, USD: null, CHF: null } }, admin);
-    await orders().setTerms(order.id, { engravingText: 'A. & L.' }, admin);
+    // An engraving of before priced from the settings (plan NEXT LOT §3.6.C; lot Q2, step Q2.5, N15: kept as sold), entered
+    // by Client Services: its own line.
+    await t.db.updateTable('orders').set({ engraving_text: 'A. & L.', engraving_minor: 3_000, engraving_by: 'STAFF' }).where('id', '=', order.id).execute();
     await pay(order.id);
-    await ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: null, GBP: null, USD: null, CHF: null } }, admin);
     const invoice = await t.db.selectFrom('invoices').selectAll().where('order_id', '=', order.id).where('kind', '=', 'INVOICE').executeTakeFirstOrThrow();
     const lines = linesOf(invoice.lines);
     expect(lines.map((l) => l.kind)).toEqual(['PIECE', ...Array(LIVE_ADDONS_MAX).fill('ADDON'), 'ENGRAVING', 'SHIPPING', 'CREDIT', 'CREDIT', 'CREDIT', 'CREDIT', 'GIFT', 'GIFT']);

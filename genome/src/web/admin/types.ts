@@ -3558,17 +3558,6 @@ export interface ShippingRatesSheet {
   items: (ShippingRate & { updatedAt: Iso; updatedBy: { id: string; email: string } | null })[];
 }
 
-/**
- * ENGRAVING (plan NEXT LOT §3.6.C; GET /api/admin/orders/engraving-prices): the engraving's price per currency, in minor
- * units, null where none is set (no engraving offered in that currency), for the orders without their release's
- * ENGRAVING add-on; who set them last, and when.
- */
-export interface EngravingPricesSheet {
-  prices: Record<HouseCurrency, number | null>;
-  updatedAt: Iso | null;
-  updatedBy: { id: string; email: string } | null;
-}
-
 // ── Orders (plan LIVE RELEASE+, routes/admin/orders.ts) ───────────────────
 
 /** Why an order stands out (M3): RESERVED too long, READY but not shipped, SHIPPED not delivered, DELIVERED not registered. */

@@ -459,6 +459,26 @@ describe('YOUR ORDERS: the collector\'s side of an order (plan NEXT LOT §3.6)',
       ['PRICE', `€${NBSP}4${NBSP}800`],
       ['ENGRAVING', '« A & B »'],
     ]);
+    // Lot Q2, step Q2.5: an engraving's unit bought with the order, its words not entered yet: its price on its own
+    // ENGRAVING row (never an add-on row), in the TOTAL once; its words entered: one row, its words and its price.
+    const sold = { priceMinor: 15_000, included: true, maxLength: 12 };
+    expect(orderRows(order({ addons: [], addonItems: [], engravingOffer: sold }))).toEqual([
+      ['SIZE', '52'],
+      ['PRICE', `€${NBSP}4${NBSP}800`],
+      ['ENGRAVING', `+ €${NBSP}150`],
+      ['TOTAL', `€${NBSP}4${NBSP}950`],
+    ]);
+    expect(orderRows(order({ addons: [], addonItems: [], engravingOffer: sold, engraving: { text: 'M. B.', priceMinor: 15_000 } }))).toEqual([
+      ['SIZE', '52'],
+      ['PRICE', `€${NBSP}4${NBSP}800`],
+      ['ENGRAVING', `« M. B. » · + €${NBSP}150`],
+      ['TOTAL', `€${NBSP}4${NBSP}950`],
+    ]);
+    // An engraving only offered (not on the order): no row, no TOTAL.
+    expect(orderRows(order({ addons: [], engravingOffer: { priceMinor: 3_000, included: false, maxLength: 20 } }))).toEqual([
+      ['SIZE', '52'],
+      ['PRICE', `€${NBSP}4${NBSP}800`],
+    ]);
   });
 
   it('ENGRAVING\'s link and sheet: ADD, CHANGE or ENTER; once paid, the documents it brings; once packing has begun, its line', () => {
@@ -473,6 +493,11 @@ describe('YOUR ORDERS: the collector\'s side of an order (plan NEXT LOT §3.6)',
     const addon = { priceMinor: null, included: true, maxLength: 20 };
     expect(orderEngraving(order({ editable, engravingOffer: addon }))).toMatchObject({ action: E.enter, included: true, priceLine: E.included, removable: false, removeNote: null });
     expect(orderEngraving(order({ status: 'PAID', editable, engravingOffer: addon, engraving: { text: 'J.M.', priceMinor: null } }))).toMatchObject({ action: E.change, removable: false, removeNote: null });
+    // Lot Q2, step Q2.5: its unit bought with the order: ENTER, its add-on's most characters; never REMOVE.
+    const sold = { priceMinor: 15_000, included: true, maxLength: 12 };
+    expect(orderEngraving(order({ addons: [], editable, engravingOffer: sold }))).toMatchObject({ action: E.enter, maxLength: 12, included: true, priceLine: E.included, removable: false });
+    expect(E.hint(12)).toBe('Up to 12 characters: letters, figures, spaces and . & ’ -');
+    expect([E.hint(20), E.invalid(20)]).toEqual(['Up to 20 characters: letters, figures, spaces and . & ’ -', 'Up to 20 characters: letters, figures, spaces and . & ’ -']);
     // None offered: no link.
     expect(orderEngraving(order({ addons: [], editable: { address: true, engraving: false }, engravingOffer: null }))).toBeNull();
     // Packing has begun (its address no longer the collector's): the line in place of the link.

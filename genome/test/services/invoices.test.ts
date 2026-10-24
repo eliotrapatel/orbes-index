@@ -27,7 +27,7 @@ import { readJournal, replayJournal } from '../../src/server/services/journal.js
 import { createManualClock, SYSTEM_ACTOR, type Actor, type ManualClock } from '../../src/server/types.js';
 import { LEGAL_IDENTITY } from '../../src/web/legal/content/notice.js';
 import { createTestDb, type TestDb } from '../support/db.js';
-import { createAccount, createLiveRelease, holdPieces, legacyLiveAddons, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { createAccount, createLiveRelease, holdPieces, legacyLiveAddons, liveFixtureOn, ordersEngravingPrices, type LiveFixture } from '../support/live.js';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -303,12 +303,11 @@ describe('invoices and credit notes (plan LIVE RELEASE+, S4)', () => {
     expect((await invoices().accountDocument(two.accountId, two.id, 'CREDIT_NOTE')).filename).toBe(`ORBES-credit-note-${credit!.number}.pdf`);
   });
 
-  it('an engraving after PAID (plan NEXT LOT §3.6.C): a supplementary invoice, a credit note for its one line, and at a cancellation each invoice credited for what remains, never a line twice', async () => {
-    await ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: 3_000, GBP: null, USD: null, CHF: null } }, admin);
+  it('an engraving after PAID (plan NEXT LOT §3.6.C; lot Q2, step Q2.5): one of before keeps its ENGRAVING line and its credit note for that one line; a new one is its unit\'s ADD_ON_ITEM line on a supplementary invoice; at a cancellation each invoice credited for what remains, never a line twice', async () => {
     const { id, accountId } = await salonOrder({ priceMinor: 420_000, buyer: { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris' } });
     const collector: Actor = { type: 'account', id: accountId };
-    // Before PAID: its line on the order's invoice.
-    await orders().setEngraving(accountId, id, 'A. M.', collector);
+    // An engraving of before (N15), priced from Orders → Settings before PAID: its ENGRAVING line on the order's invoice.
+    await t.db.updateTable('orders').set({ engraving_text: 'A. M.', engraving_minor: 3_000, engraving_by: 'COLLECTOR' }).where('id', '=', id).execute();
     await pay(id);
     const [main] = await invoiceRows(id);
     expect(linesOf(main!.lines as unknown[]).map((l) => [l.kind, l.label, l.amountMinor])).toEqual([
@@ -320,8 +319,9 @@ describe('invoices and credit notes (plan LIVE RELEASE+, S4)', () => {
     // Removed after PAID: a credit note for that one line, on the order's invoice.
     clock.advance(MINUTE);
     await orders().setEngraving(accountId, id, null, collector);
-    // Added again (the price now € 40): a supplementary invoice of one line, billed as the order's invoice was.
-    await ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: 4_000, GBP: null, USD: null, CHF: null } }, admin);
+    // Added again (the ENGRAVING add-on at € 40, YOUR ORDERS): its unit, a supplementary invoice of its one line, billed as
+    // the order's invoice was.
+    await ordersEngravingPrices(f, { EUR: 4_000 });
     clock.advance(MINUTE);
     await orders().setEngraving(accountId, id, 'A. & M.', collector);
     // Its words changed: no document.
@@ -338,7 +338,7 @@ describe('invoices and credit notes (plan LIVE RELEASE+, S4)', () => {
     expect(linesOf(lineCredit!.lines as unknown[])).toEqual([{ kind: 'ENGRAVING', label: 'Engraving', detail: null, amountMinor: 3_000 }]);
     expect(supplement!.supplements_invoice_id).toBe(main!.id);
     expect(supplement!.buyer).toEqual(main!.buyer);
-    expect(linesOf(supplement!.lines as unknown[])).toEqual([{ kind: 'ENGRAVING', label: 'Engraving', detail: null, amountMinor: 4_000 }]);
+    expect(linesOf(supplement!.lines as unknown[])).toEqual([{ kind: 'ADD_ON_ITEM', label: 'ENGRAVING', detail: null, amountMinor: 4_000 }]);
     // Audited and journaled as invoices are, with what each supplements or credits.
     const issued = (await t.db.selectFrom('audit_logs').select('details').where('action', 'in', ['invoice.issue', 'invoice.credit']).where('target_id', 'in', [lineCredit!.id, supplement!.id]).execute()).map((x) => x.details);
     expect(issued).toEqual(
@@ -390,7 +390,7 @@ describe('invoices and credit notes (plan LIVE RELEASE+, S4)', () => {
     // The journal replays them.
     const journal = await t.db.selectFrom('event_journal').select(['type', 'entity_id']).where('entity_type', '=', 'invoice').where('entity_id', 'in', [lineCredit!.id, supplement!.id, ...full.map((d) => d.id)]).execute();
     expect(journal.map((j) => j.type).sort()).toEqual(['invoice.credit', 'invoice.credit', 'invoice.credit', 'invoice.issue']);
-    await ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: null, GBP: null, USD: null, CHF: null } }, admin);
+    await ordersEngravingPrices(f, { EUR: null });
   });
 
   it('reads every line back with its own kind (plan NEXT-NINE, BP-19): SHIPPING, CREDIT and GIFT beside PIECE and ADDON, on the invoice, its credit note and MY PIECES\' documents; an old invoice unchanged', () => {

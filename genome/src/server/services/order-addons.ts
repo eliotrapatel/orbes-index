@@ -50,7 +50,9 @@
  * are bound by none of it (every active add-on priced in the order's currency). `addonOffer` lists what a moment offers,
  * and every choice, addition and carry checks the same (409 ADDON_NOT_OFFERED naming the switch or the pick). The
  * engraving (services/addons.ts) is one unit at most on an order, and the only add-on whose choice takes words (at most
- * its `textMax` characters, the house's set); YOUR ORDERS' ADD AN ADD-ON leaves it out (it has its own ENGRAVING).
+ * its `textMax` characters, the house's set); YOUR ORDERS' ADD AN ADD-ON leaves it out (it has its own ENGRAVING). In
+ * YOUR ORDERS its unit is added and removed with its words, in the order's ENGRAVING (services/orders.ts setEngraving,
+ * Q2.5), and never read among the order's add-on rows.
  *
  * A service's unit (lot Q2, step Q2.2, D4: an engraving, a gift wrapping; services/addons.ts) is held nowhere: added
  * with no location and no SKU lock (always available: no count), shipped and returned with its order by its status and
@@ -553,10 +555,11 @@ async function heldByAddon(db: Db, orderId: string): Promise<Map<string, number>
 /**
  * An order's add-ons for YOUR ORDERS: one row per add-on and price, its units not removed (a cancelled order's units
  * listed as they were ordered), in the order they were added; removable while the order takes add-ons and a unit is held.
+ * The engraving's unit is never one of them: it is read in the order's own ENGRAVING (lot Q2, step Q2.5).
  */
 export async function accountAddonItems(db: Db, orders: readonly Pick<OrderRow, 'id' | 'channel' | 'status' | 'packing_started_at' | 'shopify_order_id' | 'currency'>[]): Promise<Map<string, AccountOrderAddonItem[]>> {
   const out = new Map<string, AccountOrderAddonItem[]>();
-  const units = (await unitsOf(db, orders.map((o) => o.id))).filter((u) => u.status !== 'REMOVED');
+  const units = (await unitsOf(db, orders.map((o) => o.id))).filter((u) => u.status !== 'REMOVED' && !u.engraving);
   for (const o of orders) {
     const editable = removalWindow(o) === null;
     const items: AccountOrderAddonItem[] = [];
@@ -853,6 +856,95 @@ async function removeUnits(tx: Db, o: OrderRow, units: readonly UnitRow[], by: A
   return notes;
 }
 
+// ── The engraving (lot Q2, step Q2.5) ──────────────────────────────────────
+
+/**
+ * The engraving an order carries as a unit (lot Q2, step Q2.5, D4): the unit of the engraving add-on not removed (the
+ * latest), its price and currency as sold, who added it (PURCHASE: bought with the order, N5), and the most characters
+ * of its add-on's words (`text_max`, N3).
+ */
+export interface EngravingUnit {
+  unitId: string;
+  addonId: string;
+  name: string;
+  status: OrderAddonStatus;
+  priceMinor: number;
+  currency: HouseCurrency;
+  addedBy: OrderAddonAddedBy;
+  textMax: number;
+}
+
+/** The engraving unit of each order of `orderIds` that carries one, by order id. */
+export async function engravingUnits(db: Db, orderIds: readonly string[]): Promise<Map<string, EngravingUnit>> {
+  const out = new Map<string, EngravingUnit>();
+  if (orderIds.length === 0) return out;
+  const rows = await db
+    .selectFrom('order_addon_items as u')
+    .innerJoin('addon_items as a', 'a.id', 'u.addon_id')
+    .select(['u.id', 'u.order_id', 'u.addon_id', 'a.name', 'u.status', 'u.price_minor', 'u.currency', 'u.added_by_type', 'a.text_max'])
+    .where('u.order_id', 'in', [...new Set(orderIds)])
+    .where('a.engraving', '=', true)
+    .where('u.status', '<>', 'REMOVED')
+    .orderBy('u.added_at')
+    .orderBy('u.id')
+    .execute();
+  for (const r of rows) {
+    out.set(r.order_id, { unitId: r.id, addonId: r.addon_id, name: r.name, status: r.status, priceMinor: r.price_minor, currency: r.currency, addedBy: r.added_by_type, textMax: Number(r.text_max) });
+  }
+  return out;
+}
+
+/** The engraving YOUR ORDERS offers in a currency (lot Q2, step Q2.5): its add-on, SKU, name, price and most characters. */
+export interface OrdersEngraving {
+  addonId: string;
+  skuId: string;
+  name: string;
+  priceMinor: number;
+  textMax: number;
+}
+
+/**
+ * The engraving YOUR ORDERS offers in `currency` now (lot Q2, step Q2.5, N8, as Orders → Settings' engraving did): the
+ * active engraving add-on with its YOUR ORDERS switch on, priced in that currency, whatever an order's release; null
+ * otherwise (no engraving offered).
+ */
+export async function ordersEngraving(db: Db, currency: string | null): Promise<OrdersEngraving | null> {
+  if (!isHouseCurrency(currency)) return null;
+  const r = await db
+    .selectFrom('addon_items as a')
+    .innerJoin('skus as k', 'k.addon_id', 'a.id')
+    .innerJoin('addon_item_prices as p', (j) => j.onRef('p.addon_id', '=', 'a.id').on('p.currency', '=', currency))
+    .select(['a.id', 'k.id as sku_id', 'a.name', 'p.price_minor', 'a.text_max'])
+    .where('a.engraving', '=', true)
+    .where('a.active', '=', true)
+    .where('a.offer_orders', '=', true)
+    .executeTakeFirst();
+  return r ? { addonId: r.id, skuId: r.sku_id, name: r.name, priceMinor: Number(r.price_minor), textMax: Number(r.text_max) } : null;
+}
+
+/**
+ * The engraving's unit added to a locked order (lot Q2, step Q2.5): one unit of `e`, held nowhere (a service), at its
+ * price in the order's currency; after PAID, its supplementary invoice (its ADD_ON_ITEM line). Returns the audit entries.
+ */
+export async function addEngravingUnit(tx: Db, o: OrderRow, e: OrdersEngraving, by: AddonBy, now: Date): Promise<AuditRecordInput[]> {
+  return (await insertUnits(tx, o, { addonId: e.addonId, skuId: e.skuId, name: e.name, kind: 'SERVICE', priceMinor: e.priceMinor }, 1, o.currency as HouseCurrency, by, now)).notes;
+}
+
+/**
+ * The engraving's unit `unitId` of a locked order removed (lot Q2, step Q2.5): REMOVED; after PAID, a credit note for its
+ * line. Staff remove it only until the parcel is packed (409 PACKING_PACKED). Returns the audit entries.
+ */
+export async function removeEngravingUnit(tx: Db, o: OrderRow, unitId: string, by: AddonBy, now: Date): Promise<AuditRecordInput[]> {
+  if (by.type === 'STAFF') await assertNotPacked(tx, o);
+  const units = (await unitsOf(tx, [o.id], ['HELD'])).filter((u) => u.id === unitId);
+  return removeUnits(tx, o, units, by, now);
+}
+
+/** Staff add an engraving's unit only until the parcel is packed (409 PACKING_PACKED; lot Q2, step Q2.5). */
+export async function assertEngravingNotPacked(tx: Db, o: Pick<OrderRow, 'id' | 'with_order_id'>): Promise<void> {
+  await assertNotPacked(tx, o);
+}
+
 /**
  * The choices of a sale's source carried onto its orders (in the transaction that creates them, the orders just
  * created): a draw's entry and a salon request onto their first order; a LIVE entry (lot Q2, step Q2.4, N1) onto each
@@ -1107,8 +1199,9 @@ export class OrderAddonService {
 
   /**
    * REMOVE (DELETE /api/v1/account/orders/:id/addons/:addonId): every unit HELD of that add-on on the collector's own
-   * order, until packing starts (404 ADDON_NOT_FOUND when it holds none). After PAID, a credit note for their lines.
-   * Audited `order.addon.remove` by the account.
+   * order, until packing starts (404 ADDON_NOT_FOUND when it holds none; the engraving's, removed with its words in the
+   * order's ENGRAVING, lot Q2, step Q2.5, among them). After PAID, a credit note for their lines. Audited
+   * `order.addon.remove` by the account.
    */
   async removeForAccount(accountId: string, orderId: string, addonId: string, actor: Actor): Promise<string> {
     if (typeof addonId !== 'string' || !UUID_RE.test(addonId)) throw unitNotFound();
@@ -1117,7 +1210,8 @@ export class OrderAddonService {
       const o = await this.ownOrder(tx, accountId, orderId, { forUpdate: true });
       const why = removalWindow(o);
       if (why !== null) throw windowError(why);
-      const units = (await unitsOf(tx, [o.id], ['HELD'])).filter((u) => u.addon_id === addonId.toLowerCase());
+      // The engraving's unit is removed in the order's ENGRAVING, with its words (lot Q2, step Q2.5).
+      const units = (await unitsOf(tx, [o.id], ['HELD'])).filter((u) => u.addon_id === addonId.toLowerCase() && !u.engraving);
       if (units.length === 0) throw unitNotFound();
       const notes = await removeUnits(tx, o, units, { type: 'COLLECTOR', id: o.account_id, actor }, this.clock());
       for (const n of notes) await this.audit.record(n, tx);

@@ -196,7 +196,6 @@ import type {
   OwnerList,
   ShippingRate,
   ShippingRatesSheet,
-  EngravingPricesSheet,
   HouseCurrency,
   ShopifyLink,
   ShopifyProduct,
@@ -1664,16 +1663,6 @@ export class AdminApi {
   /** ADMIN: the rates set whole; a rate left out is cleared. */
   setShippingRates(rates: ShippingRate[]): Promise<ShippingRatesSheet> {
     return this.request('PUT', '/api/admin/orders/shipping-rates', { body: { rates } });
-  }
-
-  /** ENGRAVING (plan NEXT LOT §3.6.C): the engraving's price per currency. */
-  engravingPrices(): Promise<EngravingPricesSheet> {
-    return this.get('/api/admin/orders/engraving-prices');
-  }
-
-  /** ADMIN: the engraving's prices set whole; null: no engraving in that currency. */
-  setEngravingPrices(prices: Record<HouseCurrency, number | null>): Promise<EngravingPricesSheet> {
-    return this.request('PUT', '/api/admin/orders/engraving-prices', { body: { prices } });
   }
 
   // ── Locations and carriers ───────────────────────────────────────────────

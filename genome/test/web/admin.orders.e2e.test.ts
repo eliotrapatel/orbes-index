@@ -650,19 +650,10 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await expect.poll(() => p.locator('[data-testid="rate-EUR-STANDARD"]').textContent(), POLL).toBe('—');
     expect(await ctx.db.selectFrom('shipping_rates').selectAll().execute()).toEqual([]);
 
-    // ENGRAVING (plan NEXT LOT §3.6.C), beside Shipping: none preset; a price set, refused when it is not an amount.
-    const engraving = p.locator('#settings-engraving tbody [data-testid^="engraving-"]');
-    expect(await engraving.allTextContents()).toEqual(['—', '—', '—', '—']);
-    expect(await p.locator('#settings-engraving').textContent()).toContain('What an engraving costs, per currency. A currency without a price offers no engraving to clients.');
-    await p.click('[data-testid=engraving-edit]');
-    await p.fill('dialog input[name=EUR]', 'thirty');
-    await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('EUR: an amount in units, or empty for none.');
-    await p.fill('dialog input[name=EUR]', '30');
-    await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=engraving-EUR]').textContent(), POLL).toBe('€\u00a030');
-    expect(await engraving.allTextContents()).toEqual(['€\u00a030', '—', '—', '—']);
-    expect(await ctx.db.selectFrom('engraving_prices').select(['currency', 'price_minor']).execute()).toEqual([{ currency: 'EUR', price_minor: 3000 }]);
+    // ENGRAVING beside Shipping: since lot Q2, step Q2.5 (N4) an add-on, its prices in Catalogue → Add-ons, said in one line.
+    expect(await p.locator('#settings-engraving [data-testid=engraving-addon]').textContent()).toBe('Engraving is an add-on: its prices are in Catalogue → Add-ons, ENGRAVING.');
+    expect(await p.locator('#settings-engraving [data-testid=engraving-addon] a').getAttribute('href')).toMatch(/#\/catalogue$/);
+    expect(await p.locator('[data-testid=engraving-edit]').count()).toBe(0);
     await shot(p, 'settings-engraving');
 
     // The board says the new delay: the order of three days ago is no longer late.
@@ -849,8 +840,8 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     const { services, db } = ctx;
     const france = (await db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
     const colissimo = (await db.selectFrom('carriers').select('id').where('name', '=', 'Colissimo').executeTakeFirstOrThrow()).id;
-    // The engraving's price in euros, as Settings set it (above).
-    await services.clubProgram.setEngravingPrices({ prices: { EUR: 3_000, GBP: null, USD: null, CHF: null } }, admin);
+    // The engraving's price in euros: the ENGRAVING add-on (lot Q2, step Q2.5, N4), offered in YOUR ORDERS.
+    await services.addons.create({ kind: 'SERVICE', name: 'ENGRAVING', skuCode: 'ADD-ENGRAVING-E2E', prices: { EUR: 3_000 }, offeredAt: { live: false, draw: false, salon: false, orders: true }, engraving: true }, admin);
     const sale = await salonOrder('60');
     const account = (await db.selectFrom('orders').select('account_id').where('id', '=', sale.id).executeTakeFirstOrThrow()).account_id;
     const client = { type: 'account' as const, id: account };

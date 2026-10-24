@@ -45,7 +45,7 @@ import { creditBalances } from '../../src/server/services/tier-grants.js';
 import type { Actor } from '../../src/server/types.js';
 import { createAdmin, createHarness, seedCatalog, type Catalog, type Harness } from '../api/support.js';
 import { packAndShip, stockPieces, type StockedPiece } from '../support/fulfil.js';
-import { createAccount, createModel, holdPieces } from '../support/live.js';
+import { createAccount, createModel, holdPieces, ordersEngravingPrices } from '../support/live.js';
 import { MESSAGE_RATE } from '../../src/server/services/messages.js';
 
 const MINUTE = 60_000;
@@ -445,20 +445,18 @@ describe('order cases (plan NEXT LOT §3.5.6.7)', () => {
       expect(applied.details).toMatchObject({ uses: [{ grantId: grant, kind: 'BIRTHDAY', tier: null, amountMinor: 2_000 }], exchangeOfOrderId: id });
     });
 
-    it('an exchange of an order with a priced engraving: its words, author and price carried onto the EXCHANGE order, whose invoice bills the ENGRAVING line the original\'s credit note credits', async () => {
-      const prices = (EUR: number | null) => h.ctx.services.clubProgram.setEngravingPrices({ prices: { EUR, GBP: null, USD: null, CHF: null } }, admin);
-      await prices(3_000);
+    it('an exchange of an order with a priced engraving of before: its words, author and price carried onto the EXCHANGE order, whose invoice bills the ENGRAVING line the original\'s credit note credits', async () => {
       const label = freshSize();
       const skuId = await skuOf(label);
       const id = await salonOrder(label);
-      await orders().setTerms(id, { engravingText: 'J. M.' }, operator);
-      expect(await row(id)).toMatchObject({ engraving_text: 'J. M.', engraving_minor: 3_000, engraving_by: 'STAFF' });
+      // An engraving of before (lot Q2, step Q2.5, N15): priced from Orders → Settings, as Client Services entered it then.
+      await db().updateTable('orders').set({ engraving_text: 'J. M.', engraving_minor: 3_000, engraving_by: 'STAFF' }).where('id', '=', id).execute();
       h.clock.advance(MINUTE);
       await orders().transition(id, { to: 'PAID' }, operator);
       await stock(skuId, 1, [id]);
       await packAndShip(h.ctx, id, { carrierId: colissimo, trackingNumber: '6A12345678901' }, operator);
-      // The setting changes meanwhile: the exchange keeps the price the original was billed.
-      await prices(4_000);
+      // The engraving add-on priced meanwhile: the exchange keeps the price the original was billed.
+      await ordersEngravingPrices({ db: db(), audit: h.ctx.audit, clock: h.clock, admin: admin as Actor & { id: string } }, { EUR: 4_000 });
       const other = freshSize();
       const otherSku = await skuOf(other);
       await stock(otherSku, 1);
@@ -482,7 +480,40 @@ describe('order cases (plan NEXT LOT §3.5.6.7)', () => {
       // YOUR ORDERS: the exchange's engraving, its price as invoiced.
       const accountId = (await row(id)).account_id!;
       expect((await orders().accountOrder(accountId, exchange)).engraving).toEqual({ text: 'J. M.', priceMinor: 3_000 });
-      await prices(null);
+      await ordersEngravingPrices({ db: db(), audit: h.ctx.audit, clock: h.clock, admin: admin as Actor & { id: string } }, { EUR: null });
+    });
+
+    it('an exchange of an order with an engraving\'s unit (lot Q2, step Q2.5): its words carried onto the EXCHANGE order, whose invoice bills the unit kept with the collector, as the original\'s credit note credits it', async () => {
+      const engravingAt = (EUR: number | null) => ordersEngravingPrices({ db: db(), audit: h.ctx.audit, clock: h.clock, admin: admin as Actor & { id: string } }, { EUR });
+      await engravingAt(3_000);
+      const label = freshSize();
+      const skuId = await skuOf(label);
+      const id = await salonOrder(label);
+      await orders().setTerms(id, { engravingText: 'J. M.' }, operator);
+      expect(await row(id)).toMatchObject({ engraving_text: 'J. M.', engraving_minor: null, engraving_by: 'STAFF' });
+      h.clock.advance(MINUTE);
+      await orders().transition(id, { to: 'PAID' }, operator);
+      await stock(skuId, 1, [id]);
+      await packAndShip(h.ctx, id, { carrierId: colissimo, trackingNumber: '6A12345678901' }, operator);
+      await engravingAt(4_000);
+      const other = freshSize();
+      const otherSku = await skuOf(other);
+      await stock(otherSku, 1);
+      const opened = await cases().open(id, { kind: 'EXCHANGE', reason: 'SIZE', exchangeSkuId: otherSku, note: 'One size up.' }, operator);
+      await cases().receive(opened.id, { pieceState: 'OK' }, agent, scope());
+      const decided = await cases().decide(opened.id, { decision: 'EXCHANGE', pieceTo: 'RESTOCKED', note: 'Exchanged.' }, operator, { admin: false });
+      const exchange = decided.case.decision!.exchangeOrder!.id;
+      expect(await row(exchange)).toMatchObject({ channel: 'EXCHANGE', status: 'PAID', engraving_text: 'J. M.', engraving_minor: null });
+      const docOf = (orderId: string, kind: 'INVOICE' | 'CREDIT_NOTE') => db().selectFrom('invoices').select(['lines', 'total_minor']).where('order_id', '=', orderId).where('kind', '=', kind).executeTakeFirstOrThrow();
+      const unitOf = (doc: { lines: unknown }) => linesOf(doc.lines as unknown[]).filter((l) => l.kind === 'ADD_ON_ITEM' || l.kind === 'ENGRAVING').map((l) => [l.kind, l.label, l.amountMinor]);
+      const paid = await docOf(id, 'INVOICE');
+      const credited = await docOf(id, 'CREDIT_NOTE');
+      const exchanged = await docOf(exchange, 'INVOICE');
+      for (const doc of [paid, credited, exchanged]) expect(unitOf(doc)).toEqual([['ADD_ON_ITEM', 'ENGRAVING', 3_000]]);
+      expect(credited.total_minor).toBe(paid.total_minor);
+      expect(exchanged.total_minor).toBe(paid.total_minor);
+      expect(paid.total_minor).toBe(420_000 + 3_000);
+      await engravingAt(null);
     });
 
     it('a return opened on a parcel shipped and never marked delivered: once decided, the parcel DELIVERED, off On its way, its photo erased 14 days later', async () => {

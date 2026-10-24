@@ -1407,7 +1407,11 @@ export interface AccountOrder {
    * before); null without one. Absent from a server before it: none.
    */
   engraving?: { text: string; priceMinor: number | null } | null;
-  /** The engraving it may carry: a price from the settings, or the release's add-on (`included`); null when none is offered. */
+  /**
+   * The engraving it may carry: its price and most characters (`maxLength`), or the release's add-on of before
+   * (`included`, no price); since lot Q2, step Q2.5 its engraving's unit when it carries one (`included` when bought with
+   * the order or while its words are not entered, with the price it was sold at); null when none is offered.
+   */
   engravingOffer?: { priceMinor: number | null; included: boolean; maxLength: number } | null;
   /** What the collector may change on it now, as the server reads it. Absent from a server before it: nothing. */
   editable?: { address: boolean; engraving: boolean };

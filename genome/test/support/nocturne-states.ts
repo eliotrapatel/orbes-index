@@ -526,18 +526,21 @@ async function bluePaidOrder(run: StateRun, admin: { type: 'admin'; id: string }
 }
 
 /**
- * Plan NEXT LOT §3.6.B and C, the state orders-delivery (its own stage, the full story): ORBES sets an engraving price in
- * euros (€ 30); you save a default address and put it on your reserved LIVE order, then type its engraving (the release's
- * ENGRAVING add-on: its words alone); ORBES Client Services sells you a MONOLITHE in blue, paid, holding its piece (your
- * default address put on it), you add an engraving at the price of the settings (its own invoice), and the agent begins
- * packing it. Written once per stage.
+ * Plan NEXT LOT §3.6.B and C, the state orders-delivery (its own stage, the full story): ORBES sets the ENGRAVING
+ * add-on's price in euros (€ 30) and turns its YOUR ORDERS switch on (lot Q2, step Q2.5, N4: what the settings' engraving
+ * price became, §3.4 item 2); you save a default address and put it on your reserved LIVE order, then type its engraving
+ * (the release's ENGRAVING add-on of before: its words alone); ORBES Client Services sells you a MONOLITHE in blue, paid,
+ * holding its piece (your default address put on it), you add an engraving at the add-on's price (its unit, with its own
+ * invoice), and the agent begins packing it. Written once per stage.
  */
 async function ordersDelivery(run: StateRun): Promise<void> {
   const { db, services } = run.stage.ctx;
   const you = run.demo.accounts.you!;
   if (await db.selectFrom('account_addresses').select('id').where('account_id', '=', you.id).executeTakeFirst()) return;
   const admin = await demoAdmin(run);
-  await services.clubProgram.setEngravingPrices({ prices: { EUR: 3_000, GBP: null, USD: null, CHF: null } }, admin);
+  const engraving = (await db.selectFrom('addon_items').select('id').where('engraving', '=', true).where('active', '=', true).executeTakeFirstOrThrow()).id;
+  await services.addons.setPrices(engraving, { EUR: 3_000 }, admin);
+  await services.addons.update(engraving, { offeredAt: { orders: true } }, admin);
   const saved = await services.addresses.create(you.id, { ...YOUR_ADDRESSES[0], isDefault: true }, you.actor);
   const live = await db.selectFrom('orders').select('id').where('account_id', '=', you.id).where('channel', '=', 'LIVE').where('status', '=', 'RESERVED').executeTakeFirstOrThrow();
   await services.orders.setAddress(you.id, live.id, { addressId: saved.addresses[0]!.id }, you.actor);

@@ -12,7 +12,7 @@ import { sql } from 'kysely';
 import { packIdentity } from '../../src/core/identity.js';
 import { testConfig, type AppConfig } from '../../src/server/config.js';
 import type { Db } from '../../src/server/db/connection.js';
-import { ADDON_TEXT_MAX, jsonText } from '../../src/server/db/schema.js';
+import { ADDON_TEXT_MAX, jsonText, type HouseCurrency } from '../../src/server/db/schema.js';
 import { AddonService } from '../../src/server/services/addons.js';
 import { AuditService } from '../../src/server/services/audit.js';
 import { CLUB_TIER_THRESHOLDS } from '../../src/server/services/club.js';
@@ -322,6 +322,49 @@ export async function liveAddon(
     .onConflict((oc) => oc.columns(['addon_id', 'currency']).doUpdateSet({ price_minor: o.priceMinor }))
     .execute();
   return found.id;
+}
+
+/**
+ * The engraving YOUR ORDERS offers (lot Q2, step Q2.5, N4: what Orders → Settings, Engraving became, as 0060 converts
+ * it): the active engraving add-on (else the add-on named ENGRAVING, reinstated as the engraving, else a new ENGRAVING
+ * service with no other switch) given these prices (null: none in that currency; the others left) and its YOUR ORDERS
+ * switch on while it has a price; its most characters when asked. Through the console's service, audited. Returns its id.
+ */
+export async function ordersEngravingPrices(
+  f: Pick<LiveFixture, 'db' | 'audit' | 'clock' | 'admin'>,
+  prices: Partial<Record<HouseCurrency, number | null>>,
+  o: { textMax?: number } = {},
+): Promise<string> {
+  const addons = new AddonService({ db: f.db, audit: f.audit, clock: f.clock.now });
+  let id = (await f.db.selectFrom('addon_items').select('id').where('engraving', '=', true).where('active', '=', true).executeTakeFirst())?.id;
+  if (!id) {
+    const named = await f.db.selectFrom('addon_items').select('id').where(sql<boolean>`lower(name) = 'engraving'`).executeTakeFirst();
+    if (named) {
+      await f.db.updateTable('addon_items').set({ active: true, engraving: true }).where('id', '=', named.id).execute();
+      id = named.id;
+    }
+  }
+  if (!id) {
+    const made = await addons.create(
+      {
+        kind: 'SERVICE',
+        name: 'ENGRAVING',
+        line: null,
+        skuCode: `ADD-ENGRAVING-${randomUUID().slice(0, 8).toUpperCase()}`,
+        prices: {},
+        offeredAt: { live: false, draw: false, salon: false, orders: true },
+        engraving: true,
+      },
+      f.admin,
+    );
+    id = made.id;
+  }
+  if (Object.keys(prices).length > 0) await addons.setPrices(id, prices, f.admin);
+  const priced = (await f.db.selectFrom('addon_item_prices').select('currency').where('addon_id', '=', id).execute()).length > 0;
+  const now = await f.db.selectFrom('addon_items').select(['offer_orders', 'text_max']).where('id', '=', id).executeTakeFirstOrThrow();
+  const change = { ...(now.offer_orders !== priced ? { offeredAt: { orders: priced } } : {}), ...(o.textMax !== undefined && o.textMax !== now.text_max ? { textMax: o.textMax } : {}) };
+  if (Object.keys(change).length > 0) await addons.update(id, change, f.admin);
+  return id;
 }
 
 /**

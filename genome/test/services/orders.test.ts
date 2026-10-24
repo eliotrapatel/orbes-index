@@ -31,7 +31,7 @@ import { withdrawOnCancel } from '../../src/server/services/claim-renewals.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { countPiecesIn, scanIntoParcel } from '../support/fulfil.js';
 import { jpegPhoto } from '../support/images.js';
-import { accountOfTier, createAccount, createLiveRelease, createModel, liveAddon, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { accountOfTier, createAccount, createLiveRelease, createModel, liveAddon, liveFixtureOn, ordersEngravingPrices, type LiveFixture } from '../support/live.js';
 import { poolDraw, withDrawSizes } from '../support/draws.js';
 
 const HOUR = 3_600_000;
@@ -804,6 +804,43 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       expect([smaller.sku_id, smaller.size_label]).toEqual([small.sku_id, 'SMALL']);
       await rejects(orders().setTerms(small.id, { sizeLabel: 'Small' }, admin), 'VALIDATION_FAILED', 400);
       expect(await orderRow(small.id)).toMatchObject({ size_label: 'SMALL', sku_id: small.sku_id, reservation: small.reservation });
+    });
+
+    it('the engraving, one system (lot Q2, step Q2.5, N3, N8): offered on an ended release\'s order until packing by its add-on\'s YOUR ORDERS switch alone, at its price; its words at most its add-on\'s most characters (12 refuses 13), 20 by default', async () => {
+      const engraving = await ordersEngravingPrices(f, { EUR: 3_000 });
+      const sale = await liveSale();
+      const order = sale.orders[0]!;
+      // Its release ended, and it never picked the engraving: YOUR ORDERS still offers it, by its switch alone.
+      clock.advance(MINUTE);
+      await t.db.updateTable('drops').set({ ended_at: clock.now(), ended_reason: 'ENDED' }).where('id', '=', sale.release.id).where('ended_at', 'is', null).execute();
+      expect(await t.db.selectFrom('drop_addons').select('addon_id').where('drop_id', '=', sale.release.id).execute()).toEqual([]);
+      expect((await orders().accountOrder(sale.account.id, order.id)).engravingOffer).toEqual({ priceMinor: 3_000, included: false, maxLength: 20 });
+      // 20 characters by default: 21 refused, 20 taken (its unit at the add-on's price, held nowhere).
+      await rejects(orders().setEngraving(sale.account.id, order.id, 'A'.repeat(21), sale.account.actor), 'VALIDATION_FAILED', 400);
+      clock.advance(MINUTE);
+      expect((await orders().setEngraving(sale.account.id, order.id, 'A'.repeat(20), sale.account.actor)).engraving).toEqual({ text: 'A'.repeat(20), priceMinor: 3_000 });
+      clock.advance(MINUTE);
+      await orders().setEngraving(sale.account.id, order.id, null, sale.account.actor);
+      // Its add-on's 12: 13 characters refused in the house's words at 12, 12 taken.
+      await ctx.services.addons.update(engraving, { textMax: 12 }, admin);
+      expect((await orders().accountOrder(sale.account.id, order.id)).engravingOffer).toEqual({ priceMinor: 3_000, included: false, maxLength: 12 });
+      await expect(orders().setEngraving(sale.account.id, order.id, 'Thirteen char', sale.account.actor)).rejects.toMatchObject({ code: 'VALIDATION_FAILED', publicMessage: 'Up to 12 characters: letters, figures, spaces and . & ’ -' });
+      clock.advance(MINUTE);
+      expect((await orders().setEngraving(sale.account.id, order.id, 'Twelve chars', sale.account.actor)).engraving).toEqual({ text: 'Twelve chars', priceMinor: 3_000 });
+      expect(
+        await t.db.selectFrom('order_addon_items').select(['addon_id', 'status', 'added_by_type', 'location_id']).where('order_id', '=', order.id).orderBy('added_at').orderBy('id').execute(),
+      ).toEqual([
+        { addon_id: engraving, status: 'REMOVED', added_by_type: 'COLLECTOR', location_id: null },
+        { addon_id: engraving, status: 'HELD', added_by_type: 'COLLECTOR', location_id: null },
+      ]);
+      // Its switch off: no new engraving offered; one already on the order keeps its words' changes.
+      await ctx.services.addons.update(engraving, { offeredAt: { orders: false } }, admin);
+      clock.advance(MINUTE);
+      expect((await orders().setEngraving(sale.account.id, order.id, 'M. B.', sale.account.actor)).engraving).toEqual({ text: 'M. B.', priceMinor: 3_000 });
+      const other = await liveSale();
+      await rejects(orders().setEngraving(other.account.id, other.orders[0]!.id, 'M. B.', other.account.actor), 'ORDER_ENGRAVING_UNAVAILABLE', 409);
+      await ctx.services.addons.update(engraving, { textMax: 20 }, admin);
+      await ordersEngravingPrices(f, { EUR: null });
     });
   });
 
