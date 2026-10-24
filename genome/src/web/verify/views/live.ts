@@ -2820,7 +2820,7 @@ class LivePage {
     const release = h('button', { class: 'textlink live__release', attrs: { type: 'button' }, on: { click: () => this.armed(() => this.act(() => this.deps.api.liveGiveBack(this.sheet!.id))) } });
     const el = h(
       'section',
-      { class: ['live__secured', revealing && !prefersReducedMotion() ? 'is-revealing' : null] },
+      { class: 'live__secured' },
       this.overline(LIVE.secured),
       reveal,
       this.title(this.name()),

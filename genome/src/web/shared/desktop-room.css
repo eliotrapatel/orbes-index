@@ -1273,9 +1273,11 @@
     margin-top: var(--d-s5);
   }
 
-  /* YOUR PIECE's horizon (D31): further past the column on the window. */
+  /* YOUR PIECE's horizon (D31): further past the column on the window, up to 120 px each side, never past the centre
+     (the window's centre column, between the corners and their gaps: at 1024 px it stops short of the add-ons). */
   html:not(.d-touch) .d-room .live__reveal > .live__floor {
-    margin: var(--d-s4) -120px 0;
+    --d-room-centre: calc(var(--d-canvas) - 2 * var(--d-room-side) - 2 * var(--d-room-gap));
+    margin: var(--d-s4) calc(-1 * clamp(0px, (var(--d-room-centre) - 100%) / 2, 120px)) 0;
   }
 
   html:not(.d-touch) .d-room .d-room__br > .live__addons-title {
