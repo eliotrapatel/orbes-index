@@ -45,12 +45,6 @@
     }
   }
 
-  /* Out into the light (CONFIRMED): the house's ivory, its soft grey; the vault's tokens are the house's again there
-     (house.css .vault, which every other screen of the room carries). */
-  html:not(.d-touch) .d-room.is-light {
-    --d-room-soft: var(--ink-soft);
-  }
-
   /* No viewfinder at the window's corners: the room's corners hold its words (round 4's corner marks were not chosen). */
   html:not(.d-touch) body[data-screen="live"]:has(.view--live.d-room) .corners {
     display: none;
@@ -78,11 +72,6 @@
   html:not(.d-touch) .d-room ::selection {
     background: var(--ink);
     color: var(--paper);
-  }
-
-  html:not(.d-touch) .d-room.is-light ::selection {
-    background: var(--ink);
-    color: var(--white);
   }
 
   /* The photograph: the window's height, the piece in its middle, darkened (the words of the centre and the corners at
@@ -150,11 +139,6 @@
       radial-gradient(120% 100% at 50% 46%, color-mix(in srgb, var(--vault-ground) 76%, transparent) 0%, color-mix(in srgb, var(--vault-ground) 80%, transparent) 50%, color-mix(in srgb, var(--vault-ground) 90%, transparent) 100%);
   }
 
-  /* Out into the light: CONFIRMED in the house's ivory, the photograph giving way with the ground (0.9 s, house.css). */
-  html:not(.d-touch) .d-room.is-light > .d-room__photo {
-    opacity: 0;
-  }
-
   /* The top band: ORBES on the left edge, the count in the room on the right one, in the bar's place (no menu, no SCAN,
      no account button: the room's own). */
   html:not(.d-touch) .d-room > .live__head {
@@ -178,10 +162,6 @@
     line-height: 1.5;
     letter-spacing: var(--n-track-wm);
     text-indent: 0;
-  }
-
-  html:not(.d-touch) .d-room.is-light > .live__head {
-    color: var(--ink);
   }
 
   html:not(.d-touch) .d-room .d-room__count {
@@ -1584,107 +1564,121 @@
     }
   }
 
-  /* ── 11. CONFIRMED (B6): out into the light, the house's ivory; its words beside its receipt, on the grid ─────────── */
+  /* ── 11. CONFIRMED (B6; lot Q1 §3.7; OP-2; MK #confirmed, desk, gen.mjs CF_CSS): the Cinema room kept, the photograph
+        full-bleed, the piece framed higher; the act in the centre, a little low so the piece stays clear above it
+        (CONFIRMED in the display face at 66 px, LIVE RELEASE over the name, the monogram alone on its horizon, the
+        light pooled above it); the sentence, the add-ons PAY could not add and the receipt bottom left; the actions
+        bottom right. Its moment's timings, a little slower: below. ─────────────────────────────────────────────── */
+
+  html:not(.d-touch) .d-room[data-d-kind="confirmed"] > .d-room__photo:not(.d-room__photo--tiles) > .d-room__img {
+    object-position: 50% 90%;
+  }
 
   html:not(.d-touch) .d-room .d-room__screen--confirmed {
-    grid-template-columns: repeat(12, minmax(0, 1fr));
-    grid-template-rows: auto;
-    column-gap: var(--d-gutter);
-    align-content: center;
-    align-items: start;
-    padding-top: calc(var(--d-bar) + var(--d-s5));
-    text-align: left;
+    grid-template-rows: [top] 312px [head] auto [body] 0 [rest] auto;
+    row-gap: 0;
+    align-content: start;
   }
 
-  html:not(.d-touch) .d-room .d-room__screen--confirmed > .d-room__a {
-    grid-column: 1 / span 6;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
+  html:not(.d-touch) .d-room .d-room__screen--confirmed > :is(.d-room__bl, .d-room__br) {
+    align-self: start;
+    padding-top: var(--d-s6);
   }
 
-  html:not(.d-touch) .d-room .d-room__screen--confirmed > .d-room__b {
-    grid-column: 8 / -1;
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
+  html:not(.d-touch) .d-room .d-room__screen--confirmed > .d-room__body {
+    display: none;
   }
 
-  @media (max-width: 1279.98px) {
-    html:not(.d-touch) .d-room .d-room__screen--confirmed > .d-room__b {
-      grid-column: 7 / -1;
-    }
+  html:not(.d-touch) .d-room .d-room__screen--confirmed > .d-room__head > .live__title {
+    margin: 0;
+    white-space: nowrap;
+    font-size: var(--d-fs-confirmed);
+    line-height: 1.05;
+    letter-spacing: var(--track-display);
+    text-indent: var(--track-display);
   }
 
-  html:not(.d-touch) .d-room .d-room__a > .live__mark {
-    margin-left: -4px;
-  }
-
-  html:not(.d-touch) .d-room .d-room__a > .live__mark .mark {
-    width: 44px;
-    height: 44px;
-  }
-
-  html:not(.d-touch) .d-room .d-room__a > .live__title {
-    margin: var(--d-s5) 0 0 calc(-1 * var(--d-lsb));
-    font-size: var(--d-fs-d3);
-    line-height: 1.04;
-    letter-spacing: var(--d-tr-d23);
+  html:not(.d-touch) .d-room .d-room__head > .live__confirmed-of {
+    margin: 26px 0 0;
+    line-height: 1;
+    letter-spacing: 0;
     text-indent: 0;
+    white-space: normal;
   }
 
-  html:not(.d-touch) .d-room .d-room__a > .live__confirmed-of {
-    margin-top: var(--d-s4);
-    color: var(--ink-soft);
+  html:not(.d-touch) .d-room .live__confirmed-kind {
+    font-size: var(--d-fs-label);
+    letter-spacing: var(--d-tr-label);
+    text-indent: var(--d-tr-label);
+    color: var(--d-room-soft);
+  }
+
+  html:not(.d-touch) .d-room .live__confirmed-name {
+    margin-top: 10px;
+    font-size: var(--d-fs-confirmed-name);
+    letter-spacing: 0.3em;
+    text-indent: 0.3em;
+  }
+
+  html:not(.d-touch) .d-room .d-room__head > .live__sign {
+    --sign-gap: 52px;
+    height: 72px;
+    margin: 26px 40px 0;
+  }
+
+  html:not(.d-touch) .d-room .live__sign-sky {
+    height: 380px;
+    background: radial-gradient(ellipse 24% 100% at 50% 100%, rgba(246, 242, 234, 0.15) 0, rgba(246, 242, 234, 0.06) 42%, rgba(246, 242, 234, 0.012) 74%, rgba(246, 242, 234, 0) 100%);
+  }
+
+  html:not(.d-touch) .d-room .live__sign-seal {
+    width: 72px;
+    height: 72px;
   }
 
   /* THE SET (lot M3): YOUR SET IS RESERVED, the sentence's own line over it, in ink. */
-  html:not(.d-touch) .d-room .d-room__a > .live__set-reserved {
-    margin: var(--d-s6) 0 0;
+  html:not(.d-touch) .d-room .d-room__bl > .live__set-reserved {
+    margin: 0;
     font-size: var(--d-fs-cap);
     letter-spacing: var(--d-tr-label);
     text-indent: 0;
+    white-space: normal;
     color: var(--ink);
   }
 
-  html:not(.d-touch) .d-room .d-room__a > .live__set-reserved + .live__confirmed-text {
+  html:not(.d-touch) .d-room .d-room__bl > .live__confirmed-text {
+    max-width: 100%;
+    margin: 0;
+    font-size: var(--d-fs-small);
+    line-height: 1.55;
+    letter-spacing: 0;
+    text-align: left;
+    color: var(--d-room-soft);
+    text-wrap: pretty;
+  }
+
+  html:not(.d-touch) .d-room .d-room__bl > .live__set-reserved + .live__confirmed-text {
     margin-top: var(--d-s3);
   }
 
   /* Plan MACRO M3 §4.4 (D2): an add-on PAY could not add, under the sentence, in the label's capitals at a readable size. */
-  html:not(.d-touch) .d-room .d-room__a > .live__left-out {
-    max-width: 640px;
+  html:not(.d-touch) .d-room .d-room__bl > .live__left-out {
+    max-width: 100%;
     margin: var(--d-s4) 0 0;
     text-align: left;
   }
 
-  html:not(.d-touch) .d-room .d-room__a > .live__left-out .live__left-out-line {
+  html:not(.d-touch) .d-room .d-room__bl > .live__left-out .live__left-out-line {
     font-family: var(--font-display);
     font-size: var(--d-fs-cap);
     letter-spacing: var(--d-tr-label);
     line-height: 1.7;
   }
 
-  html:not(.d-touch) .d-room .d-room__a > .live__confirmed-text {
-    max-width: 32em;
-    margin: var(--d-s5) 0 0;
-    font-size: var(--d-fs-lead);
-    line-height: 1.5;
-    text-align: left;
-    color: var(--ink-soft);
-    text-wrap: pretty;
-  }
-
-  html:not(.d-touch) .d-room .d-room__a > .n-story__open {
-    width: auto;
-    min-width: 280px;
-    margin-top: var(--d-s6);
-  }
-
-  html:not(.d-touch) .d-room .d-room__b > .live__receipt-plate {
+  html:not(.d-touch) .d-room .d-room__bl > .live__receipt-plate {
     width: 100%;
     max-width: none;
-    margin: 0;
+    margin: var(--d-s5) 0 0;
   }
 
   html:not(.d-touch) .d-room .live__receipt .rows__row {
@@ -1708,49 +1702,43 @@
     user-select: all;
   }
 
-  html:not(.d-touch) .d-room .d-room__b > .live__cs-title {
-    margin-top: var(--d-s7);
-    color: var(--ink-soft);
+  html:not(.d-touch) .d-room .d-room__br > .n-story__open {
+    width: 100%;
+    margin: 0;
   }
 
-  html:not(.d-touch) .d-room .d-room__b > .write__open {
-    align-self: flex-start;
-    width: auto;
-    min-width: 280px;
-    margin-top: var(--d-s3);
+  html:not(.d-touch) .d-room .d-room__br > .live__cs-title {
+    margin-top: var(--d-s6);
   }
 
-  html:not(.d-touch) .d-room .d-room__b > .live__pieces {
-    align-self: flex-start;
+  html:not(.d-touch) .d-room .d-room__br > .write__open {
+    width: 100%;
+    margin: var(--d-s3) 0 0;
+  }
+
+  html:not(.d-touch) .d-room .d-room__br > .live__pieces {
     margin-top: var(--d-s5);
   }
 
-  /* Its buttons: the house's, outlined in ink on the ivory; the hairline to full ink is already there, so the hover
-     gives a ground, pressed a deeper one (§10.16). */
-  html:not(.d-touch) .d-room.is-light .btn:not(.live__primary) {
-    border-color: var(--ink);
-    background-color: transparent;
-    color: var(--ink);
-  }
+  /* The moment on a computer (house.css .live--tx-confirmed; gen.mjs .fx--desk cm-*: 3.7 s): ORBES comes with the rest. */
+  @media (prefers-reduced-motion: no-preference) {
+    html:not(.d-touch) .d-room.live--tx-confirmed {
+      --cm-l: 0.35s;
+      --cm-ld: 1.55s;
+      --cm-m: 0.7s;
+      --cm-s: 0.95s;
+      --cm-p: 1.15s;
+      --cm-w: 2.3s;
+    }
 
-  html:not(.d-touch) .d-room.is-light .btn:not(.live__primary, :disabled):hover {
-    background-color: color-mix(in srgb, var(--ink) 4%, transparent);
-    color: var(--ink);
-  }
+    html:not(.d-touch) .d-room.live--tx-confirmed > .d-room__photo {
+      animation: live-tx-photo-up 1.7s cubic-bezier(0.16, 1, 0.3, 1) var(--cm-p) backwards;
+    }
 
-  html:not(.d-touch) .d-room.is-light .btn:not(.live__primary, :disabled):active {
-    background-color: color-mix(in srgb, var(--ink) 8%, transparent);
-    color: var(--ink);
-    transition-duration: var(--d-dur-press);
-  }
-
-  html:not(.d-touch) .d-room.is-light .btn:focus-visible {
-    outline: 1px solid var(--ink);
-    outline-offset: 4px;
-  }
-
-  html:not(.d-touch) .d-room.is-light :is(.live__stage, .live__foot) .textlink {
-    color: var(--ink);
+    html:not(.d-touch) .d-room.live--tx-confirmed > .live__head,
+    html:not(.d-touch) .d-room.live--tx-confirmed .live__confirmed > :is(.d-room__bl, .d-room__br) {
+      animation: live-fade-in 0.8s ease calc(var(--cm-w) + 0.55s) backwards;
+    }
   }
 
   /* ── 12. The edge pages: sign in to enter, not eligible; the second door ────────────────────────────────────── */
@@ -1769,10 +1757,68 @@
     color: var(--d-room-soft);
   }
 
-  html:not(.d-touch) .d-room .d-room__body > .live-door--after {
-    width: min(100%, clamp(256px, 27.78vw, 480px), max(256px, (100vh - 520px) * 1.4174));
-    max-width: none;
-    margin: 0;
+  /* The second door (lot Q1 §3.9; MK #after-door, desk): the room's horizon, open, its light taller for the window. */
+  html:not(.d-touch) .d-room .d-room__body > .live-hzd--open > .live-hzd__horizon {
+    margin-top: 250px;
+  }
+
+  html:not(.d-touch) .d-room .live-hzd--open .live-hzd__sky {
+    height: 290px;
+    background: radial-gradient(ellipse 22% 100% at 50% 100%, rgba(246, 242, 234, 0.36) 0, rgba(246, 242, 234, 0.15) 40%, rgba(246, 242, 234, 0.04) 72%, rgba(246, 242, 234, 0) 100%);
+  }
+
+  /* Its opening on a computer (house.css .live--tx-after; gen.mjs TX_END after 3850 ms). */
+  @media (prefers-reduced-motion: no-preference) {
+    html:not(.d-touch) .d-room.live--tx-after > .live-tx-veil {
+      animation: live-tx-veil-out 1s cubic-bezier(0.4, 0, 0.2, 1) 1.15s both;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-after .live-hzd--open .live-hzd__line--l {
+      animation: live-tx-draw-l 1.1s cubic-bezier(0.33, 0, 0.15, 1) 0.3s backwards, live-tx-from-c-l 1.4s cubic-bezier(0.45, 0, 0.2, 1) 1.25s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-after .live-hzd--open .live-hzd__line--r {
+      animation: live-tx-draw-r 1.1s cubic-bezier(0.33, 0, 0.15, 1) 0.3s backwards, live-tx-from-c-r 1.4s cubic-bezier(0.45, 0, 0.2, 1) 1.25s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-after .live-hzd--open .live-hzd__pt--l {
+      animation: live-hz-breath 4.8s ease-in-out -2.4s infinite, live-tx-fin 0.7s ease 0.6s backwards, live-tx-pt-c 1.4s cubic-bezier(0.45, 0, 0.2, 1) 1.25s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-after .live-hzd--open .live-hzd__pt--r {
+      animation: live-hz-breath 4.8s ease-in-out 0s infinite, live-tx-fin 0.7s ease 0.6s backwards, live-tx-pt-c 1.4s cubic-bezier(0.45, 0, 0.2, 1) 1.25s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-after .live-hzd--open .live-hzd__sky {
+      animation: live-tx-gap 1.7s cubic-bezier(0.4, 0, 0.2, 1) 1.45s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-after .live-hzd--open .live-hzd__reflect {
+      animation: live-fade-in 1.2s ease 1.6s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-after > .d-room__photo {
+      animation: live-tx-photo-up 1.7s cubic-bezier(0.16, 1, 0.3, 1) 1.15s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-after > .live__head,
+    html:not(.d-touch) .d-room.live--tx-after > .live__foot,
+    html:not(.d-touch) .d-room.live--tx-after .live__after > .d-room__bl,
+    html:not(.d-touch) .d-room.live--tx-after .live__after > .d-room__br > :not(.live__after-text) {
+      animation: live-fade-in 0.8s ease 3.05s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-after .live__after > .d-room__head > .live__overline {
+      animation: live-tx-resolve 0.9s cubic-bezier(0.22, 1, 0.36, 1) 2.4s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-after .live__after > .d-room__head > .live__title {
+      animation: live-tx-resolve 0.9s cubic-bezier(0.22, 1, 0.36, 1) 2.6s backwards;
+    }
+
+    html:not(.d-touch) .d-room.live--tx-after .live__after > .d-room__br > .live__after-text {
+      animation: live-fade-in 0.8s ease 2.9s backwards;
+    }
   }
 
   html:not(.d-touch) .d-room .d-room__br > .live__after-text {
@@ -1971,10 +2017,6 @@
     border-top: 1px solid var(--hairline);
   }
 
-  html:not(.d-touch) .d-room.is-light > .live__foot {
-    border-top-color: var(--hairline);
-  }
-
   html:not(.d-touch) .d-room > .live__foot > .live__how {
     grid-area: 1 / 1;
   }
@@ -2062,17 +2104,9 @@
     transition: color var(--d-dur-hover) var(--d-ease);
   }
 
-  html:not(.d-touch) .d-room.is-light > .live__foot .textlink {
-    color: var(--ink-soft);
-  }
-
   html:not(.d-touch) .d-room > .live__foot .textlink:not(:disabled):hover {
     color: var(--ink);
     opacity: 1;
-  }
-
-  html:not(.d-touch) .d-room.is-light > .live__foot .textlink:not(:disabled):hover {
-    color: var(--ink);
   }
 
   /* …pressed, the pressed ground behind the word, 12 px past it on each side (on the right past its last letter): its

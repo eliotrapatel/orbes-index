@@ -179,6 +179,9 @@
   /* The LIVE RELEASE's figures: the room's countdown, the place in the line (thin weight, tabular, --font). */
   --fs-count: 58px;
   --fs-place: 104px;
+  /* CONFIRMED (lot Q1 §3.7, MK #confirmed): its word and the model's name under it, in the display face. */
+  --fs-confirmed: 31px;
+  --fs-confirmed-name: 20px;
   --track-micro: 0.22em;
   --track-label: 0.28em;
   --track-display: 0.32em;

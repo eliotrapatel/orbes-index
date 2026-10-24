@@ -2194,7 +2194,7 @@ export const PHONE_STATES: readonly UiState[] = [
     ready: '.view--live .live__turn.is-holding',
   },
   { id: 'live-secured', title: 'Secured (MK 5): YOUR PIECE on the horizon, seal C, the add-ons, PAY € 5 200 · 08:11 with the time inside it', refs: ['live-11', 'MK 5'], variant: 'live', as: 'secured', path: release('live'), ready: '.view--live .live__pay' },
-  { id: 'live-confirmed', title: 'CONFIRMED, in ivory', refs: ['live-12'], variant: 'live', as: 'confirmed', path: release('live'), ready: '.view--live:has(h1) .n-story__open:not([hidden])' },
+  { id: 'live-confirmed', title: 'CONFIRMED in the vault: the photograph 470 px, CONFIRMED, LIVE RELEASE over MONOLITHE, the monogram on its horizon, the sentence, the receipt, SHARE TO STORIES, CLIENT SERVICES, MY PIECES (lot Q1 §3.7)', refs: ['live-12'], variant: 'live', as: 'confirmed', path: release('live'), ready: '.view--live:has(h1) .n-story__open:not([hidden])' },
   { id: 'live-sold-out-size', title: 'SOLD OUT IN SIZE 17: its one sentence (ONE QUEUE, D27), YOUR PLACE in its size, LEAVE THE LINE', refs: ['live-20'], variant: 'live', as: 'soldout', path: release('live'), ready: '.view--live .live__edge' },
   { id: 'live-missed', title: 'YOUR TURN HAS PASSED', refs: ['live-15', 'C30'], variant: 'live', as: 'missed', path: release('live'), ready: '.view--live .n-live__end' },
   { id: 'live-expired', title: 'YOUR HOLD HAS ENDED', refs: ['live-16', 'C30'], variant: 'live', as: 'expired', path: release('live'), ready: '.view--live .n-live__end' },
@@ -2204,7 +2204,7 @@ export const PHONE_STATES: readonly UiState[] = [
   // No before-capture shows ENTER THE LINE (live-09 is the line itself): the room's own pieces.
   { id: 'live-join', title: 'Live now, an account not in the line: ENTER THE LINE', refs: ['same pieces'], variant: 'live', as: you, path: release('live'), ready: '.view--live' },
   { id: 'live-pieces-turn', title: 'MY PIECES of a collector at its turn: YOUR TURN', refs: ['C31'], variant: 'live', as: 'turn', path: at('/verify/pieces'), act: (run) => piecesTab(run, 'RELEASES'), ready: '.view--pieces .pieces__releases' },
-  { id: 'after-room-door', title: 'The after-room’s second door', refs: ['C26', 'plus-07'], variant: 'afterroom', as: you, path: release('afterroom'), ready: '.view--live .live__after' },
+  { id: 'after-room-door', title: 'The after-room’s second door: the horizon open, a point at each parted end, the light through the gap (lot Q1 §3.9)', refs: ['C26', 'plus-07'], variant: 'afterroom', as: you, path: release('afterroom'), ready: '.view--live .live__after' },
   {
     id: 'after-room-join',
     title: 'The after-room: your place from the line, choose your size',

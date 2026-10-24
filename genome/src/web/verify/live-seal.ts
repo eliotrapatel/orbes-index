@@ -137,6 +137,20 @@ export function sealCSvg(className: string): SVGSVGElement {
   return root;
 }
 
+/**
+ * CONFIRMED's signature (lot Q1 §3.7; ANSWERS 22 Oct 16:27 "you can out th eorbes monogram without the code jhere"; the
+ * mockup's gen.mjs monoSeal): the ORBES monogram ALONE, no code rings, as seal C sets it (14 u wide, centred) in a
+ * 14.8 u box, so the box is the monogram with its hairline of air. Decorative (the page says CONFIRMED in words).
+ */
+export function monogramSealSvg(className: string): SVGSVGElement {
+  const p = sealCMonogramPlace();
+  return s(
+    'svg',
+    { class: `live-seal live-seal--mono ${className}`.trim(), viewBox: '-7.4 -7.4 14.8 14.8', 'aria-hidden': 'true', focusable: 'false' },
+    s('g', { class: 'live-seal__monogram', fill: 'currentColor', transform: `translate(${p.tx.toFixed(4)} ${p.ty.toFixed(4)}) scale(${p.k.toFixed(6)})` }, ...MONOGRAM_PATHS.map((d) => s('path', { d }))),
+  );
+}
+
 /** Turn the lock's orbits (degrees, one per data orbit), through the CSSOM. */
 export function turnRings(svg: SVGSVGElement, angles: (ring: number) => number): void {
   svg.querySelectorAll<SVGGElement>('.live-seal__ring').forEach((g, k) => {

@@ -4108,7 +4108,7 @@ body.nocturne[data-screen="live"] {
 
 /* CONFIRMED: directly under the receipt plate, as far below it as the plate stands from the words above. */
 .live__confirmed .n-story__open {
-  margin-top: 28px;
+  margin-top: 30px;
 }
 
 /* The ceremony: under SHARE THE GENOME, rising with it at 2.8 s. */

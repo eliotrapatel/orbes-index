@@ -953,6 +953,18 @@ describe('seal C at the turn and on the piece secured (ONE QUEUE §3.5; ANSWERS 
     expect(b.y * k + ty + (b.h * k) / 2).toBeCloseTo(0, 9);
     expect(9.53 - SEAL_C_MONOGRAM_WIDTH / 2).toBeCloseTo(2.53, 9);
   });
+
+  it('signs CONFIRMED with the monogram alone, as seal C sets it, no code rings (lot Q1 §3.7; ANSWERS 22 Oct 16:27)', () => {
+    const seal = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../src/web/verify/live-seal.ts'), 'utf8');
+    const mono = seal.slice(seal.indexOf('export function monogramSealSvg'), seal.indexOf('export function turnRings'));
+    expect(mono).toContain("viewBox: '-7.4 -7.4 14.8 14.8'");
+    expect(mono).toContain('const p = sealCMonogramPlace();');
+    expect(mono).not.toMatch(/sealMarkup|rings|fixed/);
+    const view = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../src/web/verify/views/live.ts'), 'utf8');
+    const confirmed = view.slice(view.indexOf('private confirmedScreen'), view.indexOf('private storyOpen'));
+    expect(confirmed).toContain("monogramSealSvg('live__sign-seal')");
+    expect(confirmed).not.toMatch(/sealC?Svg\(|toneMark\(/);
+  });
 });
 
 describe('the hold and PAY\'s light (ONE QUEUE §3.5; OP-8, D38, D39)', () => {

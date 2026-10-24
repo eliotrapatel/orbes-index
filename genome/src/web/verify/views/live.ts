@@ -37,8 +37,9 @@
  *               resets it; the space bar or Enter holds it from the keyboard; a short vibration where allowed
  *   secured     the reveal: the seal's GENOME glyphs with P-D01's ceremony motion, the seal's glow, secured.mp3 and
  *               the vibration; then the piece, its size, the add-ons, PAY · total, 5:00 to confirm, RELEASE MY PLACE
- *   confirmed   out into the light: the page turns ivory (house style), the reservation, its reference, SHARE TO
- *               STORIES under it (plan NEXT-NINE, BP-10: the CONFIRMED story card), ORBES Client Services
+ *   confirmed   in the vault (lot Q1 §3.7): its moment and confirmed.mp3, the photograph, CONFIRMED, the monogram on
+ *               its horizon, the reservation, its receipt and reference, SHARE TO STORIES under it (plan NEXT-NINE,
+ *               BP-10: the CONFIRMED story card), ORBES Client Services
  *   edge pages  inside the room: not signed in (the sign-in), not eligible, sold out in its size: a vault page with
  *               one action each. The end of a visit (C30): turn passed, hold ended, place released, left, removed, the
  *               release (or its after-room) ended, gone: the photograph, LIVE RELEASE and its day, its title, the outcome
@@ -135,7 +136,7 @@ import {
   type LiveViewer,
 } from '../live-model.js';
 import { horizonBand, morph } from '../live-horizon.js';
-import { sealCSvg, sealSvg } from '../live-seal.js';
+import { monogramSealSvg, sealCSvg, sealSvg } from '../live-seal.js';
 import { entrySizes, participationModel, RELEASES_PATH, zonedDate, type SetCardModel } from '../releases-model.js';
 import { lookbookSheetPath } from '../lookbook-model.js';
 import type { SessionStore } from '../session.js';
@@ -143,7 +144,7 @@ import type { LiveSound } from '../live-sound.js';
 import type { AccountQuestion, LiveAccess, LiveEndedSheet, LiveEntry, LiveInterest, LiveRoom, LiveSheet, LiveState, PieceSizeRef } from '../types.js';
 import { formatMoney as money, upper } from '../view-model.js';
 import { referenceWords, releaseContext } from '../messages-model.js';
-import { dayAndHour, legalLinks, lookbookLink, PIECES_PATH, piecesLink, releasesLink, soundToggle, toneMark, viewRoot, withNumerals } from './common.js';
+import { dayAndHour, legalLinks, lookbookLink, PIECES_PATH, piecesLink, releasesLink, soundToggle, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
 import { appAnchor, button, copyrightLine, countdown as countdownView, fadedPhoto, failedState, icon, loadingState, modelTitle, monogram, photoTiles, sizeButtons, textLink } from './nocturne.js';
 import { writeButton } from './write.js';
@@ -188,6 +189,10 @@ const HANDOFF = Object.freeze({ wait: 350, ms: 1100 });
  * 1.1 s, eased, from 2.9 s on a phone and 3.1 s on a computer (gen.mjs TX_JS).
  */
 const SECURED_TX = Object.freeze({ phone: { ms: 4000, fill: 2900 }, desk: { ms: 4250, fill: 3100 }, fillMs: 1100 });
+/** The CONFIRMED moment (§3.7; MK #confirmed, gen.mjs cm-* timings: its last part ends at 3.4 s / 3.65 s). */
+const CONFIRMED_TX = Object.freeze({ phone: 3400, desk: 3700 });
+/** THE AFTER-ROOM's door opening (§3.9; gen.mjs TX_END after 3650 / 3850 ms). */
+const AFTER_TX = Object.freeze({ phone: 3650, desk: 3850 });
 /** A sync that failed is tried again after this long. */
 const SYNC_RETRY_MS = 10_000;
 /**
@@ -1150,9 +1155,8 @@ class LivePage {
     const look = nocturne && !this.stagedEnd(kind);
     this.root.classList.toggle('is-nocturne', look);
     this.deps.onChrome?.(nocturne, look);
-    // Out into the light: CONFIRMED in the ivory house style; every other screen in the vault.
-    this.root.classList.toggle('vault', kind !== 'confirmed');
-    this.root.classList.toggle('is-light', kind === 'confirmed');
+    // Every screen in the vault: CONFIRMED too, in both modes (lot Q1 §3.7, OP-2: "CONFIRMED in the dark world").
+    this.root.classList.add('vault');
     this.renderFoot(screen);
     screen.update();
     this.renderPhoto();
@@ -1167,6 +1171,10 @@ class LivePage {
     if (kind === 'turn' && previous !== undefined && previous !== 'turn') this.deps.sound.cue('turn');
     if (arriving) this.turnPassage(arriving);
     if (revealing) this.securedPassage();
+    // The CONFIRMED moment, as the payment goes through on this page (§3.7, D42; MK #confirmed PLAY THE MOMENT).
+    if (kind === 'confirmed' && previous === 'secured') this.confirmedMoment();
+    // The second door opening (§3.9, ROUND 5 "passages kept"; MK #after-door PLAY THE AFTER-ROOM), each time it appears.
+    if (kind === 'afterRoom' && previous !== 'afterRoom') this.afterPassage();
     if (opening) {
       // Its sounds from its start, the screen mounted (mount stops the room's): opening.mp3, then the welcome voice once.
       this.deps.sound.cue('open', { entryId: this.entry?.id ?? null, afterRoom: !!this.afterRoomOf() });
@@ -1316,6 +1324,42 @@ class LivePage {
     this.root.classList.add('live--tx-secured');
     const ms = isDesktop() ? SECURED_TX.desk.ms : SECURED_TX.phone.ms;
     this.passage = { cls: 'live--tx-secured', parts: [], timer: setTimeout(() => this.endPassage(), ms) };
+  }
+
+  /**
+   * The CONFIRMED moment (§3.7; ANSWERS C15, C16, 22 Oct 16:30 "we don't need that seal, do something begtter", liked
+   * 16:42; MK #confirmed PLAY THE MOMENT, gen.mjs cm-* rules, 3.4 s on a phone, 3.7 s on a computer): the screen settles
+   * into the vault (a veil of the vault's ground lifting), the horizon draws out from the centre and fades at both ends,
+   * the monogram resolves at its seam from a soft glow (6 %) to crisp ink (its glow 8 %), the light pools above it, the
+   * photograph comes forward, CONFIRMED resolves, then LIVE RELEASE · MONOLITHE, then the practical part (house.css
+   * .live--tx-confirmed). No seal, no flash, no bounce. confirmed.mp3 0.6 s in (SFX_AT confirmed), reduced motion too;
+   * under reduced motion the page at once.
+   */
+  private confirmedMoment(): void {
+    this.deps.sound.cue('confirmed');
+    if (prefersReducedMotion()) return;
+    const veil = h('div', { class: 'live-tx-veil', attrs: { 'aria-hidden': 'true' } });
+    this.root.prepend(veil);
+    this.root.classList.add('live--tx-confirmed');
+    const ms = isDesktop() ? CONFIRMED_TX.desk : CONFIRMED_TX.phone;
+    this.passage = { cls: 'live--tx-confirmed', parts: [veil], timer: setTimeout(() => this.endPassage(), ms) };
+  }
+
+  /**
+   * THE AFTER-ROOM's door opening (§3.9; ANSWERS 16:42–16:43 "the line opens again", ROUND 5 "passages kept"; MK
+   * #after-door PLAY THE AFTER-ROOM, gen.mjs TX_END after 3650 / 3850 ms): the door's horizon draws out from the centre,
+   * closed, then opens again, a point going to each parted end, the light coming up through the gap; the photograph
+   * comes forward; THE AFTER-ROOM, A SECOND DOOR, then its sentence and the rest (house.css .live--tx-after).
+   * after-room.mp3 1.15 s in (SFX_AT after), reduced motion too; under reduced motion the page at once.
+   */
+  private afterPassage(): void {
+    this.deps.sound.cue('after');
+    if (prefersReducedMotion()) return;
+    const veil = h('div', { class: 'live-tx-veil', attrs: { 'aria-hidden': 'true' } });
+    this.root.prepend(veil);
+    this.root.classList.add('live--tx-after');
+    const ms = isDesktop() ? AFTER_TX.desk : AFTER_TX.phone;
+    this.passage = { cls: 'live--tx-after', parts: [veil], timer: setTimeout(() => this.endPassage(), ms) };
   }
 
   /** The passage ends (its time over, the page leaving, or another screen): the page as it is, nothing held. */
@@ -2964,7 +3008,18 @@ class LivePage {
     return this.leftOut && this.leftOut.entryId === e.id ? this.leftOut.lines : [];
   }
 
-  /** B6: CONFIRMED, out into the light (the ivory house style). */
+  /**
+   * B6: CONFIRMED, redesigned (lot Q1 §3.7; ANSWERS C15, OP-2, 22 Oct 16:14 "something better and more rewarding withotu
+   * deleteing any information", 16:27 the monogram alone; MK #confirmed): in the dark world in both modes, under the
+   * photograph (470 px on a phone). CONFIRMED in the display face; its LIVE RELEASE (or THE AFTER-ROOM) as a label over
+   * the name set large, the dot still read aloud; the ORBES monogram alone at the seam of a hairline horizon, the light
+   * pooled above it; then the practical part, every line of production's page in its order: a set's YOUR SET IS
+   * RESERVED, the sentence, the add-ons PAY could not add (MK caption: "stay under the sentence"), the receipt between
+   * hairlines (RESERVED; SIZE or each set piece in its size; PIECES or SETS when more than one; each add-on of the
+   * release; each catalogue add-on; TOTAL; REFERENCE), SHARE TO STORIES, CLIENT SERVICES with WRITE TO ORBES CLIENT
+   * SERVICES, MY PIECES. On a computer (views/desktop-room.ts): the act in the centre, the sentence and the receipt
+   * bottom left, the actions bottom right. Its moment, from SECURED: views/live.ts confirmedMoment.
+   */
   private confirmedScreen(): Screen {
     const e = this.entry!;
     const reference = liveReference(e.id);
@@ -2985,21 +3040,33 @@ class LivePage {
       row(LIVE.rows.total, formatMoney(e.totalMinor, e.currency)),
       row(LIVE.rows.reference, reference),
     );
-    // WRITE TO ORBES CLIENT SERVICES under the CLIENT SERVICES overline, the release and its reference attached (CS-01): the
-    // house's full-width hairline button on this ivory screen, where the contact stood.
+    // WRITE TO ORBES CLIENT SERVICES under the CLIENT SERVICES overline, the release and its reference attached (CS-01).
     const write = this.sheet ? releaseContext(this.sheet.id, this.releaseTitle(), LIVE.statusLabel.CONFIRMED, referenceWords(reference)) : null;
     const leftOut = h('div', { class: 'live__left-out', attrs: { role: 'status', hidden: true } });
+    // LIVE RELEASE · MONOLITHE (THE AFTER-ROOM · …), word for word: its label over the name set large, the dot read aloud.
+    const of = this.afterRoomOf() ? LIVE.afterRoom.confirmedOf(this.name()) : LIVE.confirmedOf(this.name());
+    const cut = of.indexOf(' · ');
+    const kind = cut < 0 ? '' : of.slice(0, cut);
+    const named = cut < 0 ? of : of.slice(cut + 3);
+    const part = (cls: string) => h('span', { class: `live__sign-${cls}` });
     const el = h(
       'section',
       { class: 'live__confirmed' },
-      h('div', { class: 'live__mark' }, toneMark('authentic')),
       this.title(LIVE.confirmed),
-      this.fact(this.afterRoomOf() ? LIVE.afterRoom.confirmedOf(this.name()) : LIVE.confirmedOf(this.name()), 'live__confirmed-of'),
-      // Macro scope K44 T1: YOUR SET IS RESERVED, each piece in its size.
+      h(
+        'p',
+        { class: 'live__fact live__confirmed-of' },
+        kind ? h('span', { class: 'live__confirmed-kind' }, ...withNumerals(kind)) : null,
+        kind ? h('span', { class: 'visually-hidden', text: ' · ' }) : null,
+        h('span', { class: 'live__confirmed-name' }, ...withNumerals(named)),
+      ),
+      // The signature: the ORBES monogram alone at the seam of a hairline horizon, the light pooled above it (C15).
+      h('div', { class: 'live__sign', attrs: { 'aria-hidden': 'true' } }, part('sky'), part('line live__sign-line--l'), part('line live__sign-line--r'), part('reflect'), monogramSealSvg('live__sign-seal')),
+      // Macro scope K44 T1: YOUR SET IS RESERVED, then the sentence.
       set ? this.fact(SETS.live.reserved(e.quantity), 'live__set-reserved') : null,
       h('p', { class: 'prose live__confirmed-text', text: set ? SETS.live.reservedText : LIVE.reservedIn(e.size.label, e.quantity) }),
-      // Plan MACRO M3 §4.4 (D2): PAY's add-ons that could not be added, each by its name and why (its answer may come
-      // after the stream's CONFIRMED: drawn at each update).
+      // Plan MACRO M3 §4.4 (D2): PAY's add-ons that could not be added, each by its name and why, under the sentence
+      // (its answer may come after the stream's CONFIRMED: drawn at each update).
       leftOut,
       // The receipt between hairlines, on the page: no plate, no corner marks (D31).
       h('div', { class: 'live__receipt-plate' }, rows),
@@ -3036,15 +3103,16 @@ class LivePage {
   /**
    * The second door (plan LIVE RELEASE+, choice 2), in the same vault: still in the line when the last piece was secured,
    * the after-room's delay later; its one action ENTER THE AFTER-ROOM. Until it closes (then the page says how the release
-   * ended).
+   * ended). ONE QUEUE (lot Q1 §3.9; ANSWERS C7, r20d; D29; MK #after-door): the door is the room's horizon, open: parted
+   * at the centre, a point breathing at each parted end, the light spreading up through the gap; its passage
+   * (afterPassage) as the mockup plays it.
    */
   private afterRoomScreen(): Screen {
+    const part = (cls: string) => h('span', { class: `live-hzd__${cls}` });
     const door = h(
       'div',
-      { class: 'live-door live-door--after', attrs: { 'aria-hidden': 'true' } },
-      h('div', { class: 'live-door__leaf live-door__leaf--left' }),
-      h('div', { class: 'live-door__leaf live-door__leaf--right' }),
-      h('div', { class: 'live-door__lock' }, sealSvg('live-door__seal')),
+      { class: 'live-hzd live-hzd--open', attrs: { 'aria-hidden': 'true' } },
+      h('div', { class: 'live-hzd__horizon' }, part('sky'), part('line live-hzd__line--l'), part('line live-hzd__line--r'), part('reflect'), part('pt live-hzd__pt--l'), part('pt live-hzd__pt--r')),
     );
     const until = this.fact('', 'live__until live__after-until');
     const enter = h('button', { class: 'btn live__primary live__after-enter', attrs: { type: 'button' }, on: { click: () => this.deps.onAfterRoom(this.sheet!.id) }, text: LIVE.afterRoom.enter });

@@ -12,7 +12,7 @@
  *  - The turn (B4), a piece returned: a pointer let go too early resets the seal; held, it secures the piece. The
  *    reveal (B5), even when the stream says SECURED before the secure's own answer: P-D01's motion on the seal's glyphs,
  *    secured.mp3 (no chord), the vibrations; the add-ons, PAY · total, 5:00.
- *  - CONFIRMED (B6), out into the light: ivory; the reservation in MY PIECES, and its order (plan LIVE RELEASE+).
+ *  - CONFIRMED (B6), in the vault (lot Q1 §3.7): its moment and confirmed.mp3; the reservation in MY PIECES, and its order (plan LIVE RELEASE+).
  *  - A phone whose clock is wrong counts on the server's; the host message under the header.
  *  - With reduced motion and no stream (the state polled every 2 s): no orbit turned, no reveal motion; after T0, its one
  *    piece in another collector's turn, the size still offered then ENTER THE LINE, behind; the piece returned; a pause
@@ -213,7 +213,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     if (confirm) await srv.ctx.services.live.confirm(a.id, dropId, a.actor);
   }
 
-  it('announced → the room → the door at T0 → the line → the turn (a pointer hold) → the reveal and the add-ons → PAY → CONFIRMED in ivory', async () => {
+  it('announced → the room → the door at T0 → the line → the turn (a pointer hold) → the reveal and the add-ons → PAY → CONFIRMED in the vault', async () => {
     const t0 = new Date(Date.now() + 45_000);
     // A turn of 90 s: the rival still holds its turn when this phone, behind it at the line's frame, first reads its state
     // (a moment of its own within LIVE_QUEUE_SPREAD_MS, a minute), so the pieces left read its held piece (B3 below).
@@ -454,10 +454,25 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-secured.png'), fullPage: true });
     await pay.click();
 
-    // B6: CONFIRMED, out into the light.
+    // B6: CONFIRMED in the vault (lot Q1 §3.7; OP-2): its moment from SECURED (the horizon drawing out, the monogram
+    // resolving at its seam), confirmed.mp3 once (§3.10); the ORBES monogram alone on the horizon, no code rings (C15);
+    // LIVE RELEASE over the name, the dot read; the photograph 470 px on the phone; then the page as it is.
     await textOf(page.locator('h1'), 'CONFIRMED');
-    await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor), POLL).toBe(IVORY);
-    expect(await page.locator('.view--live').evaluate((el) => [el.classList.contains('vault'), el.classList.contains('is-light')])).toEqual([false, true]);
+    expect(await page.locator('.view--live').getAttribute('class')).toMatch(/live--tx-confirmed/);
+    expect(await page.locator('.live__sign-seal').evaluate((g) => getComputedStyle(g).animationName)).toBe('live-tx-mono');
+    expect(await page.locator('.live__sign-line--l').evaluate((g) => getComputedStyle(g).animationName)).toBe('live-tx-draw-l');
+    await expect.poll(async () => (await live(page)).sounds.filter((n) => n === 'confirmed').length, POLL).toBe(1);
+    expect(await page.locator('.live__sign .live-seal__monogram path').count()).toBe(5);
+    expect(await page.locator('.live__sign :is(.live-seal__ring, .live-seal__fixed, .live-seal__genome), .live__confirmed .mark').count()).toBe(0);
+    expect(await page.locator('.live__sign').getAttribute('aria-hidden')).toBe('true');
+    await textOf(page.locator('.live__confirmed-of'), 'LIVE RELEASE · MONOLITHE');
+    await textOf(page.locator('.live__confirmed-name'), 'MONOLITHE');
+    expect(await page.locator('.view--live > .live__photo').evaluate((el) => (el as HTMLElement).offsetHeight)).toBe(470);
+    await expect.poll(async () => (await page.locator('.view--live').getAttribute('class')) ?? '', POLL).not.toMatch(/live--tx-confirmed/);
+    expect(await page.locator('.live-tx-veil').count()).toBe(0);
+    await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor), POLL).toBe(GROUND);
+    expect(await page.locator('.view--live').evaluate((el) => [el.classList.contains('vault'), el.classList.contains('is-light')])).toEqual([true, false]);
+    expect((await live(page)).sounds.filter((n) => n === 'confirmed')).toHaveLength(1);
     await textOf(page.locator('.live__confirmed-text'), 'Your piece is reserved in size 52. ORBES Client Services will contact you to settle payment. Add your delivery address in YOUR ORDERS.');
     const entryId = (await srv.ctx.db.selectFrom('live_entries').select('id').where('drop_id', '=', r.id).where('account_id', '=', me.id).executeTakeFirstOrThrow()).id;
     const reference = `LR-${entryId.replace(/-/g, '').slice(0, 8).toUpperCase()}`;
@@ -780,7 +795,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     expect((await statusOf(r.id, me.id))?.status).toBe('CONFIRMED');
     const open = page.getByRole('button', { name: STORY.button });
     await visible(open);
-    // The house's full-width hairline button on the ivory screen, directly under the receipt plate, above CLIENT SERVICES.
+    // The house's full-width hairline button on CONFIRMED, directly under the receipt between its hairlines, above CLIENT SERVICES.
     expect(
       await open.evaluate((el) => [
         el.classList.contains('btn') && el.classList.contains('btn--block'),

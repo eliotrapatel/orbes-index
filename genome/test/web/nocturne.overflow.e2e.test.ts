@@ -73,6 +73,9 @@ const HORIZON = "ONE QUEUE's Horizon band (lot Q1 §3.2, D23; the owner's mockup
 const HORIZON_RUN = "ONE QUEUE's Horizon band at LAST PIECES' rest (lot Q1 §3.2, D24): the slow light's bead and trail wait past the edge of what is left, inside the band's own clip";
 /** What overflowed at 5efd4c9 on purpose: a state, the start of the line overflows() writes, and why. */
 const DOOR = "ONE QUEUE's room door (lot Q1 §3.4, D35; the owner's mockup, MK #room-2): one hairline horizon running past the column on purpose, its ends dissolving at the screen's edges (32 px each side on a phone), drawn by its decorative layer (aria-hidden); the page never scrolls sideways";
+/** CONFIRMED's signature (lot Q1 §3.7, D43; the owner's mockup, MK #confirmed): its horizon runs past the column on purpose. */
+const SIGN = "ONE QUEUE's CONFIRMED (lot Q1 §3.7, D43; the owner's mockup, MK #confirmed): the monogram's horizon runs past the column on purpose, its ends dissolving at the screen's edges (32 px each side on a phone, 22 px from 350 px down), drawn by its decorative layer (aria-hidden); the page never scrolls sideways";
+const SIGN_KNOWN: readonly { starts: string; reason: string }[] = ['div.live__stage spills out of its box', 'section.live__confirmed.live__screen spills out of its box'].map((starts) => ({ starts, reason: SIGN }));
 const KNOWN: readonly { state: string; starts: string; reason: string }[] = [
   ...['room-stress', 'room-guaranteed'].flatMap((state) => [
     { state, starts: 'div.live__stage spills out of its box', reason: DOOR },
@@ -157,7 +160,7 @@ describe.skipIf(!HAS_CHROMIUM)('SHARE TO STORIES: its places and its preview fit
             for (const width of [size.width, ...NARROW]) {
               await page.setViewportSize({ width, height: size.height });
               await settle(page, 300);
-              for (const line of await overflows(page)) found.push(`${state.id} at ${width} px: ${line}`);
+              for (const line of await overflows(page)) if (!(state.id === 'live-confirmed' && SIGN_KNOWN.some((k) => line.startsWith(k.starts)))) found.push(`${state.id} at ${width} px: ${line}`);
               await tall(page, 'SHARE TO STORIES', `${state.id} at ${width} px`);
             }
             await page.setViewportSize(size);
@@ -166,7 +169,8 @@ describe.skipIf(!HAS_CHROMIUM)('SHARE TO STORIES: its places and its preview fit
             for (const width of [size.width, ...NARROW]) {
               await page.setViewportSize({ width, height: 640 });
               await settle(page, 300);
-              for (const line of await overflows(page)) found.push(`${state.id}, the preview at ${width} px: ${line}`);
+              // CONFIRMED's horizon past the column, under the preview, on purpose (SIGN).
+              for (const line of await overflows(page)) if (!(state.id === 'live-confirmed' && SIGN_KNOWN.some((k) => line.startsWith(k.starts)))) found.push(`${state.id}, the preview at ${width} px: ${line}`);
               for (const name of ['SHARE', 'SAVE IMAGE']) await tall(page, name, `${state.id}, the preview at ${width} px`);
             }
           } finally {

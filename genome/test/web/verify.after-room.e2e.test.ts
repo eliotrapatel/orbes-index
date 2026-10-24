@@ -7,7 +7,7 @@
  *    same vault, the second door: THE AFTER-ROOM · A SECOND DOOR, the door and its lock, when it closes, ENTER THE
  *    AFTER-ROOM (said aloud as it appears).
  *  - Its page, read through the release: THE AFTER-ROOM over it, its own model and price, its size, the place kept from
- *    the line; the turn and the seal held, the add-on, PAY · total; CONFIRMED in ivory, THE AFTER-ROOM · its model; its
+ *    the line; the turn and the seal held, the add-on, PAY · total; CONFIRMED in the vault, THE AFTER-ROOM · its model; its
  *    order at the after-room's price; MY PIECES lists it as THE AFTER-ROOM, its link through the release.
  *  - Nobody else: another collector, and a visitor, at its address are shown the release's own page instead, its address
  *    put back; the door never shows to the collector who secured the release's last piece.
@@ -34,7 +34,7 @@ const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'out')
 const HAS_CHROMIUM = existsSync(CHROMIUM_PATH);
 const POLL = { timeout: 20_000, interval: 100 };
 const PASSWORD = 'correct horse battery staple';
-const IVORY = 'rgb(246, 242, 234)';
+const GROUND = 'rgb(10, 10, 10)';
 
 const norm = (t: string) => t.replace(/\s+/g, ' ').trim();
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -152,8 +152,13 @@ describe.skipIf(!HAS_CHROMIUM)('the after-room of a LIVE RELEASE in /verify (Chr
     await textOf(page.locator('.live__after > h1'), 'A SECOND DOOR');
     await textOf(page.locator('.live__after-text'), LIVE.afterRoom.text);
     await textOf(page.locator('.live__after-until'), /^OPEN UNTIL \d{2}:\d{2}$/);
-    expect(await page.locator('.live-door--after').getAttribute('aria-hidden')).toBe('true');
-    expect(await page.locator('.live-door--after .live-seal__ring').count()).toBe(13);
+    // Its door is the room's horizon, open (lot Q1 §3.9, D29): parted at the centre, a point at each parted end, the light
+    // through the gap; no vault door, no seal. Its passage plays as it appears (ROUND 5 "passages kept"), then the page.
+    const door = page.locator('.live__after > .live-hzd--open');
+    expect(await door.getAttribute('aria-hidden')).toBe('true');
+    expect(await door.locator(':is(.live-hzd__pt--l, .live-hzd__pt--r)').evaluateAll((els) => els.map((el) => getComputedStyle(el).display))).toEqual(['block', 'block']);
+    expect(await page.locator('.live__after :is(.live-door, .live-seal)').count()).toBe(0);
+    await expect.poll(async () => (await page.locator('.view--live').getAttribute('class')) ?? '', POLL).not.toMatch(/live--tx-after/);
     await expect.poll(() => page.locator('[role="status"][aria-live="polite"]').innerText(), POLL).toBe(LIVE.afterRoom.announce);
     expect(await page.locator('.view--live').evaluate((el) => el.classList.contains('vault'))).toBe(true);
     await keepsVault(page, 'ENTER THE AFTER-ROOM', ['ENTER THE AFTER-ROOM', 'THE RELEASES']);
@@ -194,10 +199,13 @@ describe.skipIf(!HAS_CHROMIUM)('the after-room of a LIVE RELEASE in /verify (Chr
     await page.screenshot({ path: join(OUT_DIR, 'verify-after-room-secured.png'), fullPage: true });
     await pay.click();
 
-    // CONFIRMED, out into the light: the after-room's piece; its order at its price.
+    // CONFIRMED in the vault (lot Q1 §3.7, OP-2): the after-room's piece, its words kept (THE AFTER-ROOM over its name);
+    // its order at its price.
     await textOf(page.locator('h1'), 'CONFIRMED');
-    await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor), POLL).toBe(IVORY);
+    await expect.poll(async () => (await page.locator('.view--live').getAttribute('class')) ?? '', POLL).not.toMatch(/live--tx-confirmed/);
+    await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor), POLL).toBe(GROUND);
     await textOf(page.locator('.live__confirmed-of'), 'THE AFTER-ROOM · AFTERGLOW');
+    await textOf(page.locator('.live__confirmed-kind'), 'THE AFTER-ROOM');
     await textOf(page.locator('.live__receipt .rows__row', { hasText: 'TOTAL' }), 'TOTAL € 950');
     const light = await screenChecks(page);
     expect([light.contrast, light.figures]).toEqual([[], []]);

@@ -8087,7 +8087,8 @@
       "values": [
         "ORBES",
         "CONFIRMED",
-        "LIVE RELEASE · MONOLITHE",
+        "LIVE RELEASE",
+        "MONOLITHE",
         "Your piece is reserved in size 16. ORBES Client Services will contact you to settle payment. Add your delivery address in YOUR ORDERS.",
         "THE CHAIN EXTENDER COULD NOT BE ADDED: NONE LEFT.",
         "RESERVED",
@@ -8113,7 +8114,8 @@
         "TERMS",
         "LEGAL",
         "HELP",
-        "IP GEOLOCATION BY DB-IP"
+        "IP GEOLOCATION BY DB-IP",
+        "LIVE RELEASE · MONOLITHE"
       ]
     },
     "addons-salon-requested": {
@@ -12066,7 +12068,8 @@
       "values": [
         "ORBES",
         "CONFIRMED",
-        "LIVE RELEASE · THE ORBITAL SET",
+        "LIVE RELEASE",
+        "THE ORBITAL SET",
         "YOUR SET IS RESERVED",
         "Each piece is reserved in the size you chose. ORBES Client Services will contact you to settle payment. Add your delivery address in YOUR ORDERS.",
         "RESERVED",
@@ -12093,7 +12096,8 @@
         "TERMS",
         "LEGAL",
         "HELP",
-        "IP GEOLOCATION BY DB-IP"
+        "IP GEOLOCATION BY DB-IP",
+        "LIVE RELEASE · THE ORBITAL SET"
       ]
     },
     "set-live-sold-out": {
@@ -13524,7 +13528,7 @@
       ]
     },
     "live-confirmed": {
-      "title": "CONFIRMED, in ivory",
+      "title": "CONFIRMED in the vault: the photograph 470 px, CONFIRMED, LIVE RELEASE over MONOLITHE, the monogram on its horizon, the sentence, the receipt, SHARE TO STORIES, CLIENT SERVICES, MY PIECES (lot Q1 §3.7)",
       "refs": [
         "live-12"
       ],
@@ -13533,7 +13537,8 @@
       "values": [
         "ORBES",
         "CONFIRMED",
-        "LIVE RELEASE · MONOLITHE",
+        "LIVE RELEASE",
+        "MONOLITHE",
         "Your piece is reserved in size 18. ORBES Client Services will contact you to settle payment. Add your delivery address in YOUR ORDERS.",
         "RESERVED",
         "5 OCTOBER · 18:47:06",
@@ -13556,7 +13561,8 @@
         "TERMS",
         "LEGAL",
         "HELP",
-        "IP GEOLOCATION BY DB-IP"
+        "IP GEOLOCATION BY DB-IP",
+        "LIVE RELEASE · MONOLITHE"
       ]
     },
     "live-sold-out-size": {
@@ -13824,7 +13830,7 @@
       ]
     },
     "after-room-door": {
-      "title": "The after-room’s second door",
+      "title": "The after-room’s second door: the horizon open, a point at each parted end, the light through the gap (lot Q1 §3.9)",
       "refs": [
         "C26",
         "plus-07"
@@ -22483,7 +22489,7 @@
       ]
     },
     "desk-after-room-door": {
-      "title": "The after-room’s second door (a computer, 1440 × 900)",
+      "title": "The after-room’s second door: the horizon open, a point at each parted end, the light through the gap (lot Q1 §3.9) (a computer, 1440 × 900)",
       "refs": [
         "desktop",
         "phone: after-room-door"
@@ -30009,7 +30015,7 @@
       ]
     },
     "desk-live-confirmed": {
-      "title": "CONFIRMED, in ivory (a computer, 1440 × 900)",
+      "title": "CONFIRMED in the vault: the photograph 470 px, CONFIRMED, LIVE RELEASE over MONOLITHE, the monogram on its horizon, the sentence, the receipt, SHARE TO STORIES, CLIENT SERVICES, MY PIECES (lot Q1 §3.7) (a computer, 1440 × 900)",
       "refs": [
         "desktop",
         "phone: live-confirmed"
@@ -30019,9 +30025,9 @@
       "values": [
         "ORBES",
         "CONFIRMED",
-        "LIVE RELEASE · MONOLITHE",
+        "LIVE RELEASE",
+        "MONOLITHE",
         "Your piece is reserved in size 18. ORBES Client Services will contact you to settle payment. Add your delivery address in YOUR ORDERS.",
-        "SHARE TO STORIES",
         "RESERVED",
         "5 OCTOBER · 18:47:06",
         "SIZE",
@@ -30032,6 +30038,7 @@
         "€ 5 200",
         "REFERENCE",
         "LR-«ref»",
+        "SHARE TO STORIES",
         "CLIENT SERVICES",
         "WRITE TO ORBES CLIENT SERVICES",
         "MY PIECES",
@@ -30041,7 +30048,8 @@
         "TERMS",
         "LEGAL",
         "HELP",
-        "IP GEOLOCATION BY DB-IP"
+        "IP GEOLOCATION BY DB-IP",
+        "LIVE RELEASE · MONOLITHE"
       ]
     },
     "desk-live-sold-out-size": {
@@ -33432,7 +33440,8 @@
       "values": [
         "ORBES",
         "CONFIRMED",
-        "LIVE RELEASE · THE ORBITAL SET",
+        "LIVE RELEASE",
+        "THE ORBITAL SET",
         "YOUR SET IS RESERVED",
         "Each piece is reserved in the size you chose. ORBES Client Services will contact you to settle payment. Add your delivery address in YOUR ORDERS.",
         "RESERVED",
@@ -33458,7 +33467,8 @@
         "TERMS",
         "LEGAL",
         "HELP",
-        "IP GEOLOCATION BY DB-IP"
+        "IP GEOLOCATION BY DB-IP",
+        "LIVE RELEASE · THE ORBITAL SET"
       ]
     },
     "desk-set-live-sold-out": {
@@ -36193,10 +36203,10 @@
       "values": [
         "ORBES",
         "CONFIRMED",
-        "LIVE RELEASE · MONOLITHE",
+        "LIVE RELEASE",
+        "MONOLITHE",
         "Your piece is reserved in size 16. ORBES Client Services will contact you to settle payment. Add your delivery address in YOUR ORDERS.",
         "THE CHAIN EXTENDER COULD NOT BE ADDED: NONE LEFT.",
-        "SHARE TO STORIES",
         "RESERVED",
         "5 OCTOBER · 18:49:00",
         "SIZE",
@@ -36209,6 +36219,7 @@
         "€ 5 230",
         "REFERENCE",
         "LR-«ref»",
+        "SHARE TO STORIES",
         "CLIENT SERVICES",
         "WRITE TO ORBES CLIENT SERVICES",
         "MY PIECES",
@@ -36218,7 +36229,8 @@
         "TERMS",
         "LEGAL",
         "HELP",
-        "IP GEOLOCATION BY DB-IP"
+        "IP GEOLOCATION BY DB-IP",
+        "LIVE RELEASE · MONOLITHE"
       ]
     }
   }

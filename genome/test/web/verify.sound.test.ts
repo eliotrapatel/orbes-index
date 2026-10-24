@@ -927,7 +927,7 @@ describe('a LIVE RELEASE\'s designed sounds (lot Q1 §3.10, live-sound.ts)', () 
     expect(() => c.stopAll()).not.toThrow();
   });
 
-  it('replaces the room\'s two synthesized sounds: the last ten seconds\' tick and SECURED\'s chord; a screen change stops the sounds; the scan keeps its chord (N12)', () => {
+  it('replaces the room\'s two synthesized sounds: the last ten seconds\' tick and SECURED\'s chord; CONFIRMED\'s and the second door\'s sounds from their passages; a screen change stops the sounds; the scan keeps its chord (N12)', () => {
     const view = readFileSync(LIVE_VIEW, 'utf8');
     // Lot Q1 §3.4: each change of the last ten seconds' figures (its 00:00 only after the countdown was seen counting).
     expect(view).toContain("if (tick !== null && tick !== this.lastTick && this.synced && (tick > 0 || counted)) this.deps.sound.cue('tick');");
@@ -939,6 +939,13 @@ describe('a LIVE RELEASE\'s designed sounds (lot Q1 §3.10, live-sound.ts)', () 
     // Lot Q1 §3.5: the turn as it arrives (0.3 s into its passage), hold.mp3 with the press itself (the ring's fill).
     expect(view).toContain("if (kind === 'turn' && previous !== undefined && previous !== 'turn') this.deps.sound.cue('turn');");
     expect(view).toMatch(/this\.deps\.sound\.prime\(\);\n\s*this\.deps\.sound\.cue\('hold'\);/);
+    // Lot Q1 §3.7, §3.9: confirmed.mp3 as the payment goes through on the page (its moment from SECURED), after-room.mp3
+    // as the second door appears (its passage), both from their passage's start, after the screen mounted.
+    expect(view).toContain("if (kind === 'confirmed' && previous === 'secured') this.confirmedMoment();");
+    expect(view).toContain("if (kind === 'afterRoom' && previous !== 'afterRoom') this.afterPassage();");
+    expect(view).toMatch(/private confirmedMoment\(\): void \{\n\s*this\.deps\.sound\.cue\('confirmed'\);/);
+    expect(view).toMatch(/private afterPassage\(\): void \{\n\s*this\.deps\.sound\.cue\('after'\);/);
+    expect(view.indexOf("if (kind === 'confirmed' && previous === 'secured')")).toBeGreaterThan(view.indexOf('this.stage.replaceChildren(screen.el);'));
     expect(view).toContain('if (previous !== kind) this.deps.sound.stopAll();');
     expect(view).not.toMatch(/sound\.(tick|play)\(/);
     expect(view).not.toMatch(/SoundSignature/);

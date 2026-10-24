@@ -21,6 +21,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sessionCookieName } from '../../src/server/services/sessions.js';
 import { createManualClock } from '../../src/server/types.js';
 import { LIVE, QUESTION, RELEASES } from '../../src/web/verify/copy.js';
+import { liveReadsNext } from '../../src/server/services/live.js';
 import { createLiveRelease, createModel, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
 import { keepsVault, screenChecks } from '../support/vault-checks.js';
@@ -84,6 +85,12 @@ describe.skipIf(!HAS_CHROMIUM)('the question after a LIVE RELEASE (Chromium)', (
     // The buyer then the taker join the line; the buyer secures and pays: SOLD OUT, the taker's place ended by it.
     for (const x of [b, t]) await ctx.services.live.enter(x.id, r.id, { sizeId: r.sizes[0]!.id }, x.actor);
     // The buyer's turn at the next batch (ONE QUEUE, D15: late comers), given now.
+    // G2 (lot Q1 amendment 1): the batch reaches only phones that have read they are next; the collectors the
+    // test plays on the server read their state as their page would.
+    for (const q of await ctx.db.selectFrom('live_entries').select('account_id').where('drop_id', '=', r.id).where('status', '=', 'QUEUED').execute()) {
+      const view = await ctx.services.live.entry(q.account_id, r.id);
+      if (view) ctx.services.live.frames.read(r.id, view.id, liveReadsNext(view));
+    }
     await ctx.services.live.nextBatch(r.id, f.admin);
     const token = (await ctx.services.live.entry(b.id, r.id))!.turn!.token!;
     await ctx.services.live.press(b.id, r.id, token);
@@ -189,6 +196,12 @@ describe.skipIf(!HAS_CHROMIUM)('the question after a LIVE RELEASE (Chromium)', (
     const r = await createLiveRelease(f, { opensAt: new Date(Date.now() - 60_000), closesAt: new Date(Date.now() + HOUR), quantityLine: '1 PIECE', sizes: [{ label: '52', stock: 1 }], turnSeconds: 300 });
     for (const x of [first, waiting]) await ctx.services.live.enter(x.id, r.id, { sizeId: r.sizes[0]!.id }, x.actor);
     // The first one's turn at the next batch (ONE QUEUE, D15: late comers), given now.
+    // G2 (lot Q1 amendment 1): the batch reaches only phones that have read they are next; the collectors the
+    // test plays on the server read their state as their page would.
+    for (const q of await ctx.db.selectFrom('live_entries').select('account_id').where('drop_id', '=', r.id).where('status', '=', 'QUEUED').execute()) {
+      const view = await ctx.services.live.entry(q.account_id, r.id);
+      if (view) ctx.services.live.frames.read(r.id, view.id, liveReadsNext(view));
+    }
     await ctx.services.live.nextBatch(r.id, f.admin);
     expect((await ctx.services.live.entry(first.id, r.id))?.status).toBe('TURN');
     const { page, context, problems } = await phone(waiting.token);

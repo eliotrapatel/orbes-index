@@ -69,6 +69,9 @@
     --d-fs-story: 24px;
     --d-fs-small: 14.5px;
     --d-fs-cap: 13px;
+    /* CONFIRMED in the room (lot Q1 §3.7, MK #confirmed, desk): its word and the model's name under it. */
+    --d-fs-confirmed: 66px;
+    --d-fs-confirmed-name: 28px;
     --d-tr-label: 0.2em;
     --d-tr-mid: 0.14em;
     --d-tr-t1: 0.08em;

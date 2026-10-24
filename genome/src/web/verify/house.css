@@ -788,8 +788,7 @@ h1[tabindex="-1"]:focus,
 }
 
 /* Its page is the vault: ivory on the ink ground (.vault, above), an
-   overhead light at the top; CONFIRMED comes out into the light, the ivory of
-   the house, the ground following in 0.9 s. */
+   overhead light at the top; CONFIRMED too, in both modes (lot Q1 §3.7, OP-2). */
 body[data-screen="live"] {
   background-color: var(--vault-ground);
   background-image: var(--vault-light);
@@ -800,15 +799,6 @@ body[data-screen="live"] {
 
 body[data-screen="live"] .corners {
   color: var(--vault-ink);
-}
-
-body[data-screen="live"]:has(.view--live.is-light) {
-  background-color: var(--ivory);
-  background-image: none;
-}
-
-body[data-screen="live"]:has(.view--live.is-light) .corners {
-  color: var(--ink);
 }
 
 .view--live {
@@ -1804,17 +1794,25 @@ body[data-screen="live"]:has(.view--live.live--look:not(.d-room)) .corners {
 }
 
 .view--live.live--photo:not(.d-room)[data-screen="afterRoom"] > .live__stage {
-  margin-top: 172px;
+  margin-top: 170px;
 }
 
-/* CONFIRMED in the house's ivory: ORBES stays ivory on the darkened top; the photograph's foot fades into the ivory. */
-.view--live.live--photo.is-light:not(.d-room) > .live__head .live__wordmark {
-  color: var(--vault-ink);
+/* CONFIRMED (lot Q1 §3.7; OP-2 "photo 470 px"; MK #confirmed): the photograph given presence, 470 of 844 px, the piece
+   larger and whole (560 px wide on a 390 px phone, 78 px above the frame), its foot dissolving into the vault; the act
+   just under it. */
+.view--live.live--photo:not(.d-room)[data-screen="confirmed"] > .live__photo {
+  height: 470px;
+  -webkit-mask-image: linear-gradient(#fff 318px, rgba(255, 255, 255, 0.58) 392px, rgba(255, 255, 255, 0.16) 440px, transparent 470px);
+  mask-image: linear-gradient(#fff 318px, rgba(255, 255, 255, 0.58) 392px, rgba(255, 255, 255, 0.16) 440px, transparent 470px);
 }
 
-.view--live.live--photo.is-light:not(.d-room) > .live__photo {
-  -webkit-mask-image: linear-gradient(#fff 168px, rgba(255, 255, 255, 0.62) 226px, rgba(255, 255, 255, 0.2) 280px, transparent 316px);
-  mask-image: linear-gradient(#fff 168px, rgba(255, 255, 255, 0.62) 226px, rgba(255, 255, 255, 0.2) 280px, transparent 316px);
+.view--live:not(.d-room)[data-screen="confirmed"] > .live__photo:not(.live__photo--tiles) > .live__photo-shot {
+  background-position: 50% -20cqw;
+  background-size: 143.59% auto;
+}
+
+.view--live.live--photo:not(.d-room)[data-screen="confirmed"] > .live__stage {
+  margin-top: 246px;
 }
 
 /* ── The Horizon band of the stock (ONE QUEUE §3.2; ANSWERS C4, r15–r18; D18, D23, D24; live-horizon.ts) ──
@@ -2649,7 +2647,7 @@ body[data-screen="live"]:has(.view--live.live--look:not(.d-room)) .corners {
   line-height: 1.5;
 }
 
-/* CONFIRMED (in ivory): an add-on PAY could not add, by its name and why, above the receipt. */
+/* CONFIRMED: an add-on PAY could not add, by its name and why, under the sentence, above the receipt. */
 .live__left-out {
   margin-top: 18px;
   font-size: var(--fs-micro);
@@ -2661,19 +2659,114 @@ body[data-screen="live"]:has(.view--live.live--look:not(.d-room)) .corners {
   margin-top: 6px;
 }
 
-/* B6: CONFIRMED, out into the light (the ivory house style). */
-.live__confirmed {
-  padding-top: 28px;
+/* B6: CONFIRMED (lot Q1 §3.7; ANSWERS C15, OP-2; MK #confirmed, gen.mjs CF_CSS): in the vault, both modes. CONFIRMED
+   and the model's name with weight, in the display face, large and tracked, LIVE RELEASE a label between them; the ORBES
+   monogram alone at the seam of a hairline horizon that dissolves at its ends, the light pooled above it; then the
+   practical part, calm, between hairlines. */
+.live__confirmed .live__title {
+  margin-top: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-confirmed);
+  line-height: 1.15;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  color: var(--ink);
 }
 
-.live__confirmed .live__title {
+.live__confirmed-of {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   margin-top: 22px;
-  font-size: var(--fs-title);
+  line-height: 1;
+  letter-spacing: 0;
+  text-indent: 0;
+  white-space: normal;
+}
+
+.live__confirmed-kind {
+  line-height: 1.8;
+  letter-spacing: var(--track-label);
+  text-indent: var(--track-label);
+}
+
+.live__confirmed-name {
+  margin-top: 6px;
+  font-family: var(--font-display);
+  font-size: var(--fs-confirmed-name);
+  line-height: 1.3;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.live__sign {
+  --sign-gap: 42px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  height: 58px;
+  margin: 26px calc(-1 * var(--sign-tail, 32px)) 0;
+  pointer-events: none;
+}
+
+.live__sign > span {
+  position: absolute;
+  display: block;
+}
+
+.live__sign-sky {
+  left: 0;
+  right: 0;
+  bottom: 50%;
+  height: 250px;
+  background: radial-gradient(ellipse 34% 100% at 50% 100%, rgba(246, 242, 234, 0.16) 0, rgba(246, 242, 234, 0.065) 42%, rgba(246, 242, 234, 0.015) 74%, rgba(246, 242, 234, 0) 100%);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, rgba(255, 255, 255, 0.4) 45%, #fff 100%);
+  mask-image: linear-gradient(180deg, transparent 0, rgba(255, 255, 255, 0.4) 45%, #fff 100%);
+}
+
+.live__sign-reflect {
+  left: 26%;
+  right: 26%;
+  top: 50%;
+  height: 14px;
+  background: radial-gradient(ellipse 50% 100% at 50% 0, rgba(246, 242, 234, 0.07), rgba(246, 242, 234, 0));
+}
+
+.live__sign-line {
+  top: calc(50% - 0.5px);
+  height: 1px;
+}
+
+.live__sign-line--l {
+  left: 0;
+  right: calc(50% + var(--sign-gap));
+  background: linear-gradient(90deg, rgba(246, 242, 234, 0) 0, rgba(246, 242, 234, 0.3) 34%, rgba(246, 242, 234, 0.72) 100%);
+}
+
+.live__sign-line--r {
+  left: calc(50% + var(--sign-gap));
+  right: 0;
+  background: linear-gradient(270deg, rgba(246, 242, 234, 0) 0, rgba(246, 242, 234, 0.3) 34%, rgba(246, 242, 234, 0.72) 100%);
+}
+
+.live__sign-seal {
+  position: relative;
+  width: 58px;
+  height: 58px;
+  color: var(--ink);
 }
 
 .live__confirmed-text {
-  max-width: 300px;
-  margin-top: 22px;
+  max-width: 312px;
+  margin-top: 30px;
+}
+
+.live__sign + .live__set-reserved {
+  margin-top: 30px;
 }
 
 /* The receipt between hairlines on the page (ONE QUEUE, D31: no plate, no corner marks). */
@@ -2681,7 +2774,7 @@ body[data-screen="live"]:has(.view--live.live--look:not(.d-room)) .corners {
   position: relative;
   width: 100%;
   max-width: 326px;
-  margin-top: 28px;
+  margin-top: 30px;
   border-top: 1px solid var(--hairline);
   border-bottom: 1px solid var(--hairline);
   text-align: left;
@@ -2750,13 +2843,49 @@ body[data-screen="live"]:has(.view--live.live--look:not(.d-room)) .corners {
   line-height: 1.6;
 }
 
-.live-door--after {
-  animation: live-after-in 1.2s var(--ease) both;
+/* ONE QUEUE (lot Q1 §3.9; ANSWERS C7, r20d; D29; MK #after-door, gen.mjs hz-door--open): the second door is the room's
+   horizon, open: parted at the centre, a point breathing at each parted end (half a breath apart), the light spreading
+   up through the gap and dissolving into the vault. Its passage: .live--tx-after, below. */
+.live-hzd--open {
+  margin-top: 26px;
 }
 
-@keyframes live-after-in {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: none; }
+.live-hzd--open > .live-hzd__horizon {
+  margin-top: 150px;
+}
+
+.live-hzd--open .live-hzd__line--l {
+  right: 66%;
+}
+
+.live-hzd--open .live-hzd__line--r {
+  left: 66%;
+}
+
+.live-hzd--open .live-hzd__pt--l,
+.live-hzd--open .live-hzd__pt--r {
+  display: block !important;
+}
+
+.live-hzd--open .live-hzd__pt--l {
+  left: 34%;
+  animation-delay: -2.4s;
+}
+
+.live-hzd--open .live-hzd__pt--r {
+  left: 66%;
+}
+
+.live-hzd--open .live-hzd__sky {
+  height: 180px;
+  background: radial-gradient(ellipse 30% 100% at 50% 100%, rgba(246, 242, 234, 0.34) 0, rgba(246, 242, 234, 0.14) 40%, rgba(246, 242, 234, 0.04) 72%, rgba(246, 242, 234, 0) 100%);
+}
+
+.live-hzd--open .live-hzd__reflect {
+  left: 30%;
+  right: 30%;
+  height: 16px;
+  background: radial-gradient(ellipse 50% 100% at 50% 0, rgba(246, 242, 234, 0.14), rgba(246, 242, 234, 0));
 }
 
 .live__after-text {
@@ -3170,6 +3299,13 @@ body[data-screen="board"] .corners {
     padding-left: 12px;
     padding-right: 12px;
   }
+  /* CONFIRMED's horizon and the second door's (lot Q1 §3.7, §3.9) end at the screen's edges, never past them. */
+  .live__sign {
+    --sign-tail: 22px;
+  }
+  .live-hzd--open {
+    --hzd-tail: 22px;
+  }
   .tabs__list {
     gap: 6px;
   }
@@ -3225,10 +3361,6 @@ body[data-screen="board"] .corners {
   .live-door.is-open .live-door__lock {
     opacity: 0;
     transform: none;
-  }
-  /* The second door fades in where it stands. */
-  .live-door--after {
-    animation-name: live-fade-in;
   }
 }
 
@@ -3942,4 +4074,182 @@ body[data-screen="board"] .corners {
 
 @keyframes live-tx-glow-in {
   to { opacity: 1; }
+}
+
+/* ── The CONFIRMED moment and THE AFTER-ROOM's door opening (ONE QUEUE §3.7, §3.9; ANSWERS C16, 16:30, 16:42–16:43,
+   ROUND 5 "passages kept"; D42; MK #confirmed PLAY THE MOMENT, gen.mjs cm-* rules; MK #after-door PLAY THE AFTER-ROOM,
+   gen.mjs TX_CSS tx-after). Each plays the page's own elements in place, from a "from" into their own final value, over
+   a veil of the vault's ground that lifts as the photograph comes forward (views/live.ts .live-tx-veil, behind the
+   photograph). CONFIRMED (3.4 s on a phone): the horizon draws out from the centre and fades at both ends, a soft glow
+   at its seam (6 %), the monogram resolving from it to crisp ink (its glow 8 %), the light pooling; the photograph
+   forward; CONFIRMED, then LIVE RELEASE · MONOLITHE, then the practical part. No seal, no flash, no bounce. THE
+   AFTER-ROOM (3.65 s): the door's horizon draws out closed, then opens again, a point going to each parted end, the
+   light coming up through the gap; the photograph forward; THE AFTER-ROOM, A SECOND DOOR, its sentence, the rest. The
+   computer's timings: shared/desktop-room.css. Under reduced motion none of this runs: the page at once. ── */
+.live-tx-veil {
+  display: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .view--live > .live-tx-veil {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    background: var(--vault-ground);
+    pointer-events: none;
+  }
+
+  .live--tx-confirmed {
+    --cm-l: 0.3s;
+    --cm-ld: 1.35s;
+    --cm-m: 0.6s;
+    --cm-s: 0.85s;
+    --cm-p: 1.05s;
+    --cm-w: 2.05s;
+  }
+
+  .live--tx-confirmed > .live-tx-veil {
+    animation: live-tx-veil-out 1s cubic-bezier(0.4, 0, 0.2, 1) var(--cm-p) both;
+  }
+
+  .live--tx-confirmed .live__sign::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 150px;
+    height: 110px;
+    margin: -55px 0 0 -75px;
+    border-radius: 50%;
+    pointer-events: none;
+    opacity: 0;
+    background: radial-gradient(closest-side, rgba(246, 242, 234, 0.06) 0, rgba(246, 242, 234, 0.02) 46%, rgba(246, 242, 234, 0) 100%);
+    animation: live-tx-glow 2.1s cubic-bezier(0.45, 0, 0.3, 1) var(--cm-l) both;
+  }
+
+  .live--tx-confirmed .live__sign-line--l {
+    animation: live-tx-draw-l var(--cm-ld) cubic-bezier(0.33, 0, 0.15, 1) var(--cm-l) backwards;
+  }
+
+  .live--tx-confirmed .live__sign-line--r {
+    animation: live-tx-draw-r var(--cm-ld) cubic-bezier(0.33, 0, 0.15, 1) var(--cm-l) backwards;
+  }
+
+  .live--tx-confirmed .live__sign-seal {
+    animation: live-tx-mono 1.5s cubic-bezier(0.4, 0, 0.2, 1) var(--cm-m) backwards;
+  }
+
+  .live--tx-confirmed :is(.live__sign-sky, .live__sign-reflect) {
+    animation: live-fade-in 1.6s ease var(--cm-s) backwards;
+  }
+
+  .live--tx-confirmed .live__confirmed .live__title {
+    animation: live-tx-resolve 0.9s cubic-bezier(0.22, 1, 0.36, 1) var(--cm-w) backwards;
+  }
+
+  .live--tx-confirmed .live__confirmed .live__confirmed-of {
+    animation: live-tx-resolve 0.9s cubic-bezier(0.22, 1, 0.36, 1) calc(var(--cm-w) + 0.25s) backwards;
+  }
+
+  .view--live.live--tx-confirmed:not(.d-room) > .live__photo {
+    animation: live-tx-photo-up 1.7s cubic-bezier(0.16, 1, 0.3, 1) var(--cm-p) backwards;
+  }
+
+  .view--live.live--tx-confirmed:not(.d-room) > .live__head {
+    animation: live-fade-in 1.2s ease var(--cm-p) backwards;
+  }
+
+  .view--live.live--tx-confirmed:not(.d-room) .live__confirmed > :not(.live__sign, .live__title, .live__confirmed-of),
+  .view--live.live--tx-confirmed > .live__foot {
+    animation: live-fade-in 0.8s ease calc(var(--cm-w) + 0.55s) backwards;
+  }
+
+  /* THE AFTER-ROOM's door opening, on a phone (3.65 s). */
+  .live--tx-after > .live-tx-veil {
+    animation: live-tx-veil-out 1s cubic-bezier(0.4, 0, 0.2, 1) 1.05s both;
+  }
+
+  .live--tx-after .live-hzd--open .live-hzd__line--l {
+    animation: live-tx-draw-l 1s cubic-bezier(0.33, 0, 0.15, 1) 0.25s backwards, live-tx-from-c-l 1.3s cubic-bezier(0.45, 0, 0.2, 1) 1.15s backwards;
+  }
+
+  .live--tx-after .live-hzd--open .live-hzd__line--r {
+    animation: live-tx-draw-r 1s cubic-bezier(0.33, 0, 0.15, 1) 0.25s backwards, live-tx-from-c-r 1.3s cubic-bezier(0.45, 0, 0.2, 1) 1.15s backwards;
+  }
+
+  .live--tx-after .live-hzd--open .live-hzd__pt--l {
+    animation: live-hz-breath 4.8s ease-in-out -2.4s infinite, live-tx-fin 0.7s ease 0.55s backwards, live-tx-pt-c 1.3s cubic-bezier(0.45, 0, 0.2, 1) 1.15s backwards;
+  }
+
+  .live--tx-after .live-hzd--open .live-hzd__pt--r {
+    animation: live-hz-breath 4.8s ease-in-out 0s infinite, live-tx-fin 0.7s ease 0.55s backwards, live-tx-pt-c 1.3s cubic-bezier(0.45, 0, 0.2, 1) 1.15s backwards;
+  }
+
+  .live--tx-after .live-hzd--open .live-hzd__sky {
+    transform-origin: 50% 100%;
+    animation: live-tx-gap 1.6s cubic-bezier(0.4, 0, 0.2, 1) 1.35s backwards;
+  }
+
+  .live--tx-after .live-hzd--open .live-hzd__reflect {
+    animation: live-fade-in 1.2s ease 1.5s backwards;
+  }
+
+  .view--live.live--tx-after:not(.d-room) > .live__photo {
+    animation: live-tx-photo-up 1.7s cubic-bezier(0.16, 1, 0.3, 1) 1.05s backwards;
+  }
+
+  .view--live.live--tx-after:not(.d-room) > .live__head {
+    animation: live-fade-in 1.2s ease 1.05s backwards;
+  }
+
+  .view--live.live--tx-after:not(.d-room) .live__after > .live__overline {
+    animation: live-tx-resolve 0.9s cubic-bezier(0.22, 1, 0.36, 1) 2.25s backwards;
+  }
+
+  .view--live.live--tx-after:not(.d-room) .live__after > .live__title {
+    animation: live-tx-resolve 0.9s cubic-bezier(0.22, 1, 0.36, 1) 2.45s backwards;
+  }
+
+  .view--live.live--tx-after:not(.d-room) .live__after > .live__after-text {
+    animation: live-fade-in 0.8s ease 2.7s backwards;
+  }
+
+  .view--live.live--tx-after:not(.d-room) .live__after > :is(.live__after-until, .live__after-enter),
+  .view--live.live--tx-after:not(.d-room) > .live__foot {
+    animation: live-fade-in 0.8s ease 2.85s backwards;
+  }
+}
+
+@keyframes live-tx-veil-out {
+  from { opacity: 1; }
+  to { opacity: 0; visibility: hidden; }
+}
+
+@keyframes live-tx-draw-l {
+  from { clip-path: inset(-24px -24px -24px 100%); }
+  to { clip-path: inset(-24px); }
+}
+
+@keyframes live-tx-draw-r {
+  from { clip-path: inset(-24px 100% -24px -24px); }
+  to { clip-path: inset(-24px); }
+}
+
+@keyframes live-tx-mono {
+  0% { opacity: 0; filter: blur(9px) drop-shadow(0 0 0 rgba(246, 242, 234, 0)); }
+  45% { opacity: 0.6; filter: blur(3.5px) drop-shadow(0 0 3px rgba(246, 242, 234, 0.08)); }
+  100% { opacity: 1; filter: none; }
+}
+
+@keyframes live-tx-from-c-l {
+  from { right: 50%; }
+}
+
+@keyframes live-tx-from-c-r {
+  from { left: 50%; }
+}
+
+@keyframes live-tx-pt-c {
+  from { left: 50%; }
 }

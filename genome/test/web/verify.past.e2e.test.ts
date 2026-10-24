@@ -26,6 +26,7 @@ import { createManualClock, SYSTEM_ACTOR } from '../../src/server/types.js';
 import { RELEASES } from '../../src/web/verify/copy.js';
 import { PAST_PAGE_SIZE } from '../../src/web/verify/releases-model.js';
 import { jpegPhoto } from '../support/images.js';
+import { liveReadsNext } from '../../src/server/services/live.js';
 import { createLiveRelease, createModel, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
 import { keepsVault, screenChecks } from '../support/vault-checks.js';
@@ -114,6 +115,12 @@ describe.skipIf(!HAS_CHROMIUM)("THE RELEASES' LIVE and PAST tabs, a past release
     await ctx.db.updateTable('drops').set({ title: 'NOCTURNE — LIVE', description: 'Twenty-five rings, cast in Paris.' }).where('id', '=', r.id).execute();
     await ctx.services.live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id }, a.actor);
     // Its turn at the next batch (ONE QUEUE, D15: a late comer), given now.
+    // G2 (lot Q1 amendment 1): the batch reaches only phones that have read they are next; the collectors the
+    // test plays on the server read their state as their page would.
+    for (const q of await ctx.db.selectFrom('live_entries').select('account_id').where('drop_id', '=', r.id).where('status', '=', 'QUEUED').execute()) {
+      const view = await ctx.services.live.entry(q.account_id, r.id);
+      if (view) ctx.services.live.frames.read(r.id, view.id, liveReadsNext(view));
+    }
     await ctx.services.live.nextBatch(r.id, f.admin);
     const token = (await ctx.services.live.entry(a.id, r.id))!.turn!.token!;
     await ctx.services.live.press(a.id, r.id, token);

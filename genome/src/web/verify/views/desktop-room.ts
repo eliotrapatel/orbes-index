@@ -5,8 +5,8 @@
  * hold, the piece secured, with the host's messages under them; in the corners, bottom left the release's name and its
  * choice, bottom right the collector's own part (READY CHECK and ENTER THE ROOM, the add-ons and PAY). The one queue
  * (ONE QUEUE): its place and the pieces left in the centre, its time left bottom right, LEAVE THE LINE under the name. The room's own foot (HOW RELEASES WORK, THE RELEASES, SOUND, the legal pages) under the
- * window, in one row. CONFIRMED comes out into the light: the photograph gives way to the house's ivory, its words
- * beside its receipt. No menu, no SCAN, no account button (the phone's room hides them too); its controls are the room's
+ * window, in one row. CONFIRMED stays in the room (ONE QUEUE, OP-2): its act in the centre under the photograph, its
+ * sentence and receipt bottom left, its actions bottom right. No menu, no SCAN, no account button (the phone's room hides them too); its controls are the room's
  * own, the tab order with them.
  *
  * views/live.ts draws every screen as on the phone, then hands it here on a computer (`arrange`): its elements are moved
@@ -39,7 +39,7 @@ export interface RoomFacts {
 }
 
 type Kind = LiveScreenKind | 'failed';
-type Place = 'head' | 'body' | 'bl' | 'br' | 'a' | 'b';
+type Place = 'head' | 'body' | 'bl' | 'br';
 
 /**
  * The pages that end a visit (YOUR TURN HAS PASSED … YOUR ENTRY IS REMOVED, the release or its after-room ended before
@@ -71,7 +71,7 @@ const END_PLAN: readonly [Place, string][] = [
 /**
  * Where each screen's elements stand (selectors from the screen's own element, in the order they are placed). The head
  * spans the window above the centre (the overline, a screen's title); the body is the centre, between the corners; `bl`
- * and `br` the corners. CONFIRMED is composed as a page in two columns (`a`, `b`).
+ * and `br` the corners.
  */
 const PLAN: Partial<Record<Kind, readonly [Place, string][]>> = {
   ...Object.fromEntries([...END].map((k) => [k, END_PLAN])),
@@ -165,18 +165,22 @@ const PLAN: Partial<Record<Kind, readonly [Place, string][]>> = {
     ['br', ':scope > .live__pay-note'],
     ['br', ':scope > .live__release'],
   ],
+  // CONFIRMED (lot Q1 §3.7; MK #confirmed, desk): the act in the centre, a little low so the piece stays clear above it
+  // (CONFIRMED, LIVE RELEASE over the name, the monogram on its horizon); a set's YOUR SET IS RESERVED, the sentence, the
+  // add-ons PAY could not add and the receipt bottom left; SHARE TO STORIES, CLIENT SERVICES, WRITE TO ORBES CLIENT
+  // SERVICES and MY PIECES bottom right.
   confirmed: [
-    ['a', ':scope > .live__mark'],
-    ['a', ':scope > .live__title'],
-    ['a', ':scope > .live__confirmed-of'],
-    ['a', ':scope > .live__set-reserved'],
-    ['a', ':scope > .live__confirmed-text'],
-    ['a', ':scope > .live__left-out'],
-    ['a', ':scope > .n-story__open'],
-    ['b', ':scope > .live__receipt-plate'],
-    ['b', ':scope > .live__cs-title'],
-    ['b', ':scope > .write__open'],
-    ['b', ':scope > .live__pieces'],
+    ['head', ':scope > .live__title'],
+    ['head', ':scope > .live__confirmed-of'],
+    ['head', ':scope > .live__sign'],
+    ['bl', ':scope > .live__set-reserved'],
+    ['bl', ':scope > .live__confirmed-text'],
+    ['bl', ':scope > .live__left-out'],
+    ['bl', ':scope > .live__receipt-plate'],
+    ['br', ':scope > .n-story__open'],
+    ['br', ':scope > .live__cs-title'],
+    ['br', ':scope > .write__open'],
+    ['br', ':scope > .live__pieces'],
   ],
   signin: [
     ['head', ':scope > .live__title'],
@@ -192,7 +196,7 @@ const PLAN: Partial<Record<Kind, readonly [Place, string][]>> = {
   afterRoom: [
     ['head', ':scope > .live__overline'],
     ['head', ':scope > .live__title'],
-    ['body', ':scope > .live-door--after'],
+    ['body', ':scope > .live-hzd--open'],
     ['br', ':scope > .live__after-text'],
     ['br', ':scope > .live__after-until'],
     ['br', ':scope > .live__after-enter'],
@@ -293,8 +297,8 @@ export class DesktopRoom {
       if (found) this.place(found, box(p));
     }
     // The places in the eye's order (and the tab order's): the head, the centre, the corners left then right.
-    const order: Place[] = kind === 'confirmed' ? ['a', 'b'] : ['head', 'body', 'bl', 'br'];
-    if (kind !== 'confirmed' && kind !== 'loading') for (const p of ['body', 'bl', 'br'] as const) box(p);
+    const order: Place[] = ['head', 'body', 'bl', 'br'];
+    if (kind !== 'loading') for (const p of ['body', 'bl', 'br'] as const) box(p);
     for (const p of order) {
       const b = boxes.get(p);
       if (b) el.append(b);
