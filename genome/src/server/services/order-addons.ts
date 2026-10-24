@@ -440,7 +440,7 @@ export async function adminAddonUnits(db: Db, orderId: string): Promise<AdminOrd
     .innerJoin('skus as k', 'k.id', 'u.sku_id')
     .innerJoin('stock_locations as l', 'l.id', 'u.location_id')
     .selectAll('u')
-    .select(['a.name', 'k.code', 'l.name as location_name'])
+    .select(['a.name', 'k.code', 'l.id as location_ref', 'l.name as location_name'])
     .where('u.order_id', '=', orderId)
     .orderBy('u.added_at')
     .orderBy('u.id')
@@ -459,7 +459,7 @@ export async function adminAddonUnits(db: Db, orderId: string): Promise<AdminOrd
     shippedAt: u.shipped_at,
     returnedAt: u.returned_at,
     returnedToStock: u.returned_to_stock,
-    location: { id: u.location_id, name: u.location_name },
+    location: { id: u.location_ref, name: u.location_name },
     invoiceId: u.invoice_id,
   }));
 }
@@ -707,7 +707,7 @@ export async function shipUnits(tx: Db, o: OrderRow, actor: Actor, now: Date): P
   for (const skuId of [...skus.keys()].sort()) {
     await lockSku(tx, skuId);
     for (const u of skus.get(skuId)!.units) {
-      await recordMovement(tx, { skuId, locationId: u.location_id, delta: -1, reason: 'SHIPPED', orderId: o.id, orderAddonItemId: u.id }, actor, now);
+      if (u.location_id !== null) await recordMovement(tx, { skuId, locationId: u.location_id, delta: -1, reason: 'SHIPPED', orderId: o.id, orderAddonItemId: u.id }, actor, now);
       await tx.updateTable('order_addon_items').set({ status: 'SHIPPED', shipped_at: later(now, u.added_at) }).where('id', '=', u.id).execute();
     }
   }
@@ -778,7 +778,7 @@ export async function reshipUnits(tx: Db, o: OrderRow, r: { cameBack: boolean; r
     await lockSku(tx, skuId);
     const g = skus.get(skuId)!;
     for (const u of g.units) {
-      if (r.cameBack) await recordMovement(tx, { skuId, locationId: u.location_id, delta: 1, reason: 'RETURNED', orderId: o.id, orderAddonItemId: u.id }, actor, now);
+      if (r.cameBack && u.location_id !== null) await recordMovement(tx, { skuId, locationId: u.location_id, delta: 1, reason: 'RETURNED', orderId: o.id, orderAddonItemId: u.id }, actor, now);
       await tx.updateTable('order_addon_items').set({ status: 'HELD', shipped_at: null, location_id: o.location_id }).where('id', '=', u.id).execute();
     }
     if (!r.cameBack) {

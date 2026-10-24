@@ -496,6 +496,11 @@ describe('admin enums mirror the server', () => {
     for (const name of ['ADDON_NAME_MAX', 'ADDON_LINE_MAX', 'ADDON_WEIGHT_G_MAX', 'ADDON_POSITION_MAX', 'ADDON_PRICE_MINOR_MAX', 'ADDON_UNITS_MAX'] as const) expect(web[name], name).toBe(serverSchema[name]);
     expect([...web.ORDER_ADDON_STATUSES]).toEqual([...serverSchema.ORDER_ADDON_STATUSES]);
     expect([...web.ORDER_ADDON_ADDED_BY]).toEqual([...serverSchema.ORDER_ADDON_ADDED_BY]);
+    // ADD-ONS ONE SYSTEM (lot Q2, migration 0059): the kinds, a release's pick, the engraving's most characters and its words, as the server holds them.
+    expect([...web.ADDON_KINDS]).toEqual([...serverSchema.ADDON_KINDS]);
+    expect(web.ADDON_PICK_POSITION_MAX).toBe(serverSchema.ADDON_PICK_POSITION_MAX);
+    expect(web.ADDON_TEXT_MAX).toEqual(serverSchema.ADDON_TEXT_MAX);
+    expect(web.ADDON_CHOICE_TEXT_MAX).toBe(serverSchema.ADDON_CHOICE_TEXT_MAX);
     // THE SET's bounds (macro scope K44, migration 0057), as the server holds them.
     for (const name of ['SET_NAME_MAX', 'SET_PIECES_MIN', 'SET_PIECES_MAX', 'SET_PRICE_MINOR_MAX', 'DROP_SIZE_POSITION_MAX'] as const) expect(web[name], name).toBe(serverSchema[name]);
     expect(web.SET_CODE_PATTERN.source).toBe(serverSchema.SET_CODE_PATTERN.source);

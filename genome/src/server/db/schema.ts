@@ -763,6 +763,21 @@ export const ADDON_POSITION_MAX = 10_000;
 export const ADDON_PRICE_MINOR_MAX = 100_000_000;
 export const ADDON_UNITS_MAX = 3;
 /**
+ * ADD-ONS ONE SYSTEM (migration 0059, lot Q2): an add-on is a PRODUCT (real stock, 0056's) or a SERVICE (no stock count,
+ * no supplier, no warehouse: engraving, gift wrapping), fixed at its creation.
+ */
+export const ADDON_KINDS = ['PRODUCT', 'SERVICE'] as const;
+export type AddonKind = (typeof ADDON_KINDS)[number];
+/** A release's pick of add-ons (drop_addons.position, migration 0059): positions 1 to 100, no other cap. */
+export const ADDON_PICK_POSITION_MAX = 100;
+/**
+ * The engraving's most characters (addon_items.text_max, migration 0059): 1 to 20; 20, the house's
+ * ENGRAVING_COLLECTOR_MAX, is its ceiling and its default.
+ */
+export const ADDON_TEXT_MAX = Object.freeze({ min: 1, max: 20 } as const);
+/** The engraving's words chosen before the order (addon_choices.text, migration 0059), at most, as orders.engraving_text. */
+export const ADDON_CHOICE_TEXT_MAX = 120;
+/**
  * A unit of an add-on on an order (order_addon_items.status, migration 0056): HELD (in stock at its location) →
  * SHIPPED → RETURNED, or REMOVED (taken off before packing) or CANCELLED (with its order).
  */
@@ -2617,6 +2632,31 @@ export interface AddonItemsTable {
   created_at: TimestampDefault;
   created_by: ColumnType<string | null, string | null | undefined, never>; // admin_users.id; NULL for a script
   updated_at: TimestampDefault;
+  /**
+   * Migration 0059 (ADD-ONS ONE SYSTEM, lot Q2): PRODUCT (DEFAULT) or SERVICE (no supplier, no stock, its unit held
+   * nowhere: `addon_items_service_plain`), fixed at its creation.
+   */
+  kind: ColumnType<AddonKind, AddonKind | undefined, never>;
+  /** Migration 0059: the moments it is offered at (DEFAULT true each): a LIVE hold, a draw's place held, the salon, YOUR ORDERS until packing. */
+  offer_live: WithDefault<boolean>;
+  offer_draw: WithDefault<boolean>;
+  offer_salon: WithDefault<boolean>;
+  offer_orders: WithDefault<boolean>;
+  /** Migration 0059: the engraving, whose collector types its words (a SERVICE only; one active at a time). */
+  engraving: WithDefault<boolean>;
+  /** Migration 0059: the engraving's most characters (ADDON_TEXT_MAX, DEFAULT 20), read on the engraving only. */
+  text_max: WithDefault<number>;
+}
+
+/**
+ * A release's pick of add-ons (migration 0059, ADD-ONS ONE SYSTEM, lot Q2): the add-ons a release offers at its purchase
+ * moments, in its order (`position` 1..ADDON_PICK_POSITION_MAX, once per release). Its release and add-on never change.
+ * YOUR ORDERS never reads it.
+ */
+export interface DropAddonsTable {
+  drop_id: ColumnType<string, string, never>;
+  addon_id: ColumnType<string, string, never>;
+  position: number;                    // 1..100
 }
 
 /** An add-on's price in a house currency (migration 0056, D1): no row, not offered in that currency. */
@@ -2639,7 +2679,8 @@ export interface OrderAddonItemsTable {
   order_id: ColumnType<string, string, never>;
   addon_id: ColumnType<string, string, never>;
   sku_id: ColumnType<string, string, never>; // the add-on's SKU (skus.addon_id = addon_id)
-  location_id: string;
+  /** Where it is held; NULL for a SERVICE's unit (migration 0059, `order_addon_items_kind_guard`), never for a PRODUCT's. */
+  location_id: ColumnType<string | null, string | null, string | null>;
   price_minor: ColumnType<number, number, never>;
   currency: ColumnType<HouseCurrency, HouseCurrency, never>;
   status: WithDefault<OrderAddonStatus>;
@@ -2667,6 +2708,8 @@ export interface AddonChoicesTable {
   addon_id: ColumnType<string, string, never>;
   units: number;                       // 1..3
   chosen_at: TimestampDefault;
+  /** Migration 0059: the engraving's words before the order (1..120, trimmed; the engraving's choice only); NULL: none. */
+  text: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
 /**
@@ -3522,6 +3565,7 @@ export interface Database {
   addon_item_prices: AddonItemPricesTable;
   order_addon_items: OrderAddonItemsTable;
   addon_choices: AddonChoicesTable;
+  drop_addons: DropAddonsTable;
   sets: SetsTable;
   set_models: SetModelsTable;
   drop_entry_sizes: EntrySizesTable;

@@ -390,6 +390,16 @@ export const ORDER_ADDON_STATUSES = ['HELD', 'SHIPPED', 'REMOVED', 'CANCELLED', 
 export type OrderAddonStatus = (typeof ORDER_ADDON_STATUSES)[number];
 export const ORDER_ADDON_ADDED_BY = ['PURCHASE', 'COLLECTOR', 'STAFF'] as const;
 export type OrderAddonAddedBy = (typeof ORDER_ADDON_ADDED_BY)[number];
+/**
+ * ADD-ONS ONE SYSTEM (migration 0059, lot Q2): an add-on's kind, PRODUCT (real stock) or SERVICE (no stock, no supplier,
+ * no warehouse), fixed at its creation; a release's pick, positions 1 to 100; the engraving's most characters, 1 to 20
+ * (20 by default); its words before the order, at most.
+ */
+export const ADDON_KINDS = ['PRODUCT', 'SERVICE'] as const;
+export type AddonKind = (typeof ADDON_KINDS)[number];
+export const ADDON_PICK_POSITION_MAX = 100;
+export const ADDON_TEXT_MAX = Object.freeze({ min: 1, max: 20 } as const);
+export const ADDON_CHOICE_TEXT_MAX = 120;
 
 /**
  * THE SET's bounds (sets, set_models, drop_sizes, migration 0057, macro scope K44 T1): a set's name, at most, and its code

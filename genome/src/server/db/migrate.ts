@@ -70,6 +70,7 @@ import * as m0055 from './migrations/0055_location_countries.js';
 import * as m0056 from './migrations/0056_addons.js';
 import * as m0057 from './migrations/0057_sets.js';
 import * as m0058 from './migrations/0058_one_queue.js';
+import * as m0059 from './migrations/0059_addons_one_system.js';
 
 /** Ordered by name; append new migrations here. Never edit an applied one. */
 export const MIGRATIONS: Readonly<Record<string, Migration>> = Object.freeze({
@@ -132,6 +133,7 @@ export const MIGRATIONS: Readonly<Record<string, Migration>> = Object.freeze({
   '0056_addons': m0056,
   '0057_sets': m0057,
   '0058_one_queue': m0058,
+  '0059_addons_one_system': m0059,
 });
 
 class StaticMigrationProvider implements MigrationProvider {

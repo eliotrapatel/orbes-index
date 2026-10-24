@@ -194,6 +194,7 @@ describe('schema', () => {
       ['order_addon_items', 'currency', S.HOUSE_CURRENCIES],
       ['order_addon_items', 'status', S.ORDER_ADDON_STATUSES],
       ['order_addon_items', 'added_by_type', S.ORDER_ADDON_ADDED_BY],
+      ['addon_items', 'kind', S.ADDON_KINDS],
     ];
     for (const [table, column, values] of cases) {
       expect(await checkValues(t.db, table, column), `${table}.${column}`).toEqual(sorted(values));
@@ -1588,6 +1589,8 @@ describe('schema', () => {
     expect(addon).toEqual({
       id: expect.any(String), name: 'CARE KIT', line: 'Everything the piece needs.', supplier_id: null, weight_g: 120, position: 0, active: true, shopify_product_id: null,
       created_at: expect.any(Date), created_by: admin.id, updated_at: expect.any(Date),
+      // 0059's defaults: a product, offered at the four moments, not the engraving, 20 characters.
+      kind: 'PRODUCT', offer_live: true, offer_draw: true, offer_salon: true, offer_orders: true, engraving: false, text_max: 20,
     });
     expect(
       await t.db.insertInto('addon_item_prices').values({ addon_id: addon.id, currency: 'EUR', price_minor: 2500, updated_by: admin.id }).returning(['currency', 'price_minor']).executeTakeFirstOrThrow(),
@@ -1631,9 +1634,61 @@ describe('schema', () => {
     expect(await t.db.selectFrom('stock_holds').select('kind').where('location_id', '=', location.id).execute()).toEqual([{ kind: 'PIECE' }]);
     // A choice on the request, 1 to 3 units.
     const choice = await t.db.insertInto('addon_choices').values({ shop_request_id: request.id, addon_id: addon.id, units: 3 }).returningAll().executeTakeFirstOrThrow();
-    expect(choice).toEqual({ id: expect.any(String), live_entry_id: null, drop_entry_id: null, shop_request_id: request.id, addon_id: addon.id, units: 3, chosen_at: expect.any(Date) });
+    expect(choice).toEqual({ id: expect.any(String), live_entry_id: null, drop_entry_id: null, shop_request_id: request.id, addon_id: addon.id, units: 3, chosen_at: expect.any(Date), text: null });
     await expect(t.db.insertInto('addon_choices').values({ shop_request_id: request.id, addon_id: addon.id, units: 1 }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'addon_choices_shop_request_key'));
     await expect(t.db.deleteFrom('addon_items').where('id', '=', addon.id).execute()).rejects.toSatisfy(isForeignKeyViolation);
+  });
+
+  it('add-ons one system (0059): every bound is schema.ts\'s; the mirror at work: a service without a supplier, its kind fixed; the engraving with its most characters; a release\'s pick; a choice\'s words; a service\'s unit at no location, never in stock_holds', async () => {
+    const def = async (table: string, constraint: string) =>
+      (await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = ${table}::regclass AND conname = ${constraint}`.execute(t.db)).rows[0].def;
+    expect(await def('drop_addons', 'drop_addons_position_check')).toMatch(new RegExp(`>= 1\\) AND \\("?position"? <= ${S.ADDON_PICK_POSITION_MAX}\\)`));
+    expect(await def('addon_items', 'addon_items_text_max_check')).toBe(`CHECK (((text_max >= ${S.ADDON_TEXT_MAX.min}) AND (text_max <= ${S.ADDON_TEXT_MAX.max})))`);
+    expect(await def('addon_choices', 'addon_choices_text_check')).toContain(`<= ${S.ADDON_CHOICE_TEXT_MAX}`);
+    const textMax = (await sql<{ d: string }>`SELECT column_default AS d FROM information_schema.columns WHERE table_name = 'addon_items' AND column_name = 'text_max'`.execute(t.db)).rows[0].d;
+    expect(textMax).toBe(String(S.ADDON_TEXT_MAX.max));
+
+    const { model } = await seedProduct(t.db);
+    const account = await t.db.insertInto('accounts').values({ email: 'addon-s0059@example.com', email_normalized: 'addon-s0059@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const location = await t.db.insertInto('stock_locations').values({ name: 'ADD-ONS S0059' }).returning('id').executeTakeFirstOrThrow();
+    // A service: no supplier, offered at the LIVE purchase only; its kind fixed at its creation.
+    const wrapping = await t.db.insertInto('addon_items').values({ name: 'GIFT WRAPPING S0059', kind: 'SERVICE', offer_draw: false, offer_salon: false, offer_orders: false }).returningAll().executeTakeFirstOrThrow();
+    expect(wrapping).toMatchObject({ kind: 'SERVICE', supplier_id: null, offer_live: true, offer_draw: false, offer_salon: false, offer_orders: false, engraving: false, text_max: 20 });
+    await expect(sql`UPDATE addon_items SET kind = 'PRODUCT' WHERE id = ${wrapping.id}`.execute(t.db)).rejects.toSatisfy(isGuardViolation);
+    // The engraving: a service, one active at a time, its most characters 1 to 20.
+    const engraving = await t.db.insertInto('addon_items').values({ name: 'ENGRAVING S0059', kind: 'SERVICE', engraving: true, text_max: 12 }).returning(['id', 'engraving', 'text_max']).executeTakeFirstOrThrow();
+    expect(engraving).toEqual({ id: expect.any(String), engraving: true, text_max: 12 });
+    await expect(t.db.insertInto('addon_items').values({ name: 'ENGRAVING S0059 II', kind: 'SERVICE', engraving: true }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'addon_items_engraving_key'));
+    await expect(t.db.updateTable('addon_items').set({ text_max: S.ADDON_TEXT_MAX.max + 1 }).where('id', '=', engraving.id).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'addon_items_text_max_check'));
+    // A release's pick, in its order.
+    const release = await t.db
+      .insertInto('drops')
+      .values({ model_id: model.id, title: 'PICK S0059', quantity: 1, opens_at: new Date('2026-12-01T10:00:00Z'), closes_at: new Date('2026-12-02T10:00:00Z'), seed_enc: `v1.${'A'.repeat(16)}.${'B'.repeat(64)}`, seed_hash: new Uint8Array(32) })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const picks = await t.db
+      .insertInto('drop_addons')
+      .values([{ drop_id: release.id, addon_id: wrapping.id, position: 1 }, { drop_id: release.id, addon_id: engraving.id, position: S.ADDON_PICK_POSITION_MAX }])
+      .returningAll()
+      .execute();
+    expect(picks).toEqual([{ drop_id: release.id, addon_id: wrapping.id, position: 1 }, { drop_id: release.id, addon_id: engraving.id, position: 100 }]);
+    await expect(t.db.updateTable('drop_addons').set({ position: S.ADDON_PICK_POSITION_MAX + 1 }).where('addon_id', '=', wrapping.id).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'drop_addons_position_check'));
+    // A choice's words, on the engraving's choice.
+    const request = await t.db.insertInto('shop_requests').values({ account_id: account.id, model_id: model.id }).returning('id').executeTakeFirstOrThrow();
+    const choice = await t.db.insertInto('addon_choices').values({ shop_request_id: request.id, addon_id: engraving.id, units: 1, text: 'M. B.' }).returning(['units', 'text']).executeTakeFirstOrThrow();
+    expect(choice).toEqual({ units: 1, text: 'M. B.' });
+    // A service's unit: its SKU, no location; it never holds stock.
+    const sku = await t.db.insertInto('skus').values({ addon_id: wrapping.id, code: 'WRAP-S0059' }).returning('id').executeTakeFirstOrThrow();
+    const closed = await t.db.insertInto('shop_requests').values({ account_id: account.id, model_id: model.id, status: 'CLOSED', created_at: new Date(Date.now() - 60_000), handled_at: new Date(), outcome: 'ACCEPTED' }).returning('id').executeTakeFirstOrThrow();
+    const order = await t.db.insertInto('orders').values({ channel: 'SALON', shop_request_id: closed.id, account_id: account.id, model_id: model.id, location_id: location.id, price_minor: 1000, currency: 'EUR' }).returning('id').executeTakeFirstOrThrow();
+    const unit = await t.db
+      .insertInto('order_addon_items')
+      .values({ order_id: order.id, addon_id: wrapping.id, sku_id: sku.id, location_id: null, price_minor: 1500, currency: 'EUR', added_by_type: 'PURCHASE' })
+      .returning(['id', 'location_id', 'status'])
+      .executeTakeFirstOrThrow();
+    expect(unit).toEqual({ id: expect.any(String), location_id: null, status: 'HELD' });
+    await expect(t.db.updateTable('order_addon_items').set({ location_id: location.id }).where('id', '=', unit.id).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'order_addon_items_kind_guard'));
+    expect(await t.db.selectFrom('stock_holds').select('id').where('id', '=', unit.id).execute()).toEqual([]);
   });
 
   it('sets (0057): every bound is schema.ts\'s; the mirror at work: a set of two models, its draw with sizes per piece, an entry\'s size per piece, a set sale with one order per piece, a grouped return', async () => {
