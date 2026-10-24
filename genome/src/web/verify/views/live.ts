@@ -1173,8 +1173,9 @@ class LivePage {
     if (revealing) this.securedPassage();
     // The CONFIRMED moment, as the payment goes through on this page (§3.7, D42; MK #confirmed PLAY THE MOMENT).
     if (kind === 'confirmed' && previous === 'secured') this.confirmedMoment();
-    // The second door opening (§3.9, ROUND 5 "passages kept"; MK #after-door PLAY THE AFTER-ROOM), each time it appears.
-    if (kind === 'afterRoom' && previous !== 'afterRoom') this.afterPassage();
+    // The second door opening (§3.9, ROUND 5 "passages kept"; MK #after-door PLAY THE AFTER-ROOM), the passage into it
+    // from the screen before it; a page opened or reloaded on the door shows it at rest.
+    if (kind === 'afterRoom' && previous !== undefined && previous !== 'loading' && previous !== 'afterRoom') this.afterPassage();
     if (opening) {
       // Its sounds from its start, the screen mounted (mount stops the room's): opening.mp3, then the welcome voice once.
       this.deps.sound.cue('open', { entryId: this.entry?.id ?? null, afterRoom: !!this.afterRoomOf() });

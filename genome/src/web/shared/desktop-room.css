@@ -1574,6 +1574,15 @@
     object-position: 50% 90%;
   }
 
+  /* A set's pieces framed higher too (MK desk: "the piece framed higher, the words under it"): side by side, each tile's
+     photograph fills the window's height and is cropped at its sides, so it has no height to spare for a framing; each
+     is lifted by 22 % of the window instead, its foot dissolving into the ground under the act. */
+  html:not(.d-touch) .d-room[data-d-kind="confirmed"] > .d-room__photo--tiles > .d-room__img {
+    transform: translateY(-22%);
+    -webkit-mask-image: linear-gradient(180deg, #fff 62%, transparent 100%);
+    mask-image: linear-gradient(180deg, #fff 62%, transparent 100%);
+  }
+
   html:not(.d-touch) .d-room .d-room__screen--confirmed {
     grid-template-rows: [top] 312px [head] auto [body] 0 [rest] auto;
     row-gap: 0;
@@ -1714,6 +1723,20 @@
   html:not(.d-touch) .d-room .d-room__br > .write__open {
     width: 100%;
     margin: var(--d-s3) 0 0;
+  }
+
+  /* A narrow computer window (1024 to 1279 px), whose side column is about 272 px wide: WRITE TO ORBES CLIENT SERVICES
+     on two centred lines in its button, the house's tracking kept (each line's last letter's tracking balanced by the
+     start's inline padding, not the first line's indent); one line from 1280 px, as the mockup draws it at 1440. */
+  @media (max-width: 1279.98px) {
+    html:not(.d-touch) .d-room .d-room__br > .write__open {
+      padding: 0 var(--d-s4) 0 calc(var(--d-s4) + var(--d-tr-label));
+      text-indent: 0;
+      white-space: normal;
+      text-align: center;
+      text-wrap: balance;
+      line-height: 1.5;
+    }
   }
 
   html:not(.d-touch) .d-room .d-room__br > .live__pieces {

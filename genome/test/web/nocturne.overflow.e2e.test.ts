@@ -13,7 +13,7 @@
 import { existsSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { eachState } from '../support/nocturne-stage.js';
-import { openState, overflows, settle, UI_STATES } from '../support/nocturne-states.js';
+import { openState, overflows, settle, stateById, UI_STATES } from '../support/nocturne-states.js';
 import { CHROMIUM_PATH } from '../support/ui-stage.js';
 
 const HAS_CHROMIUM = existsSync(CHROMIUM_PATH);
@@ -182,5 +182,62 @@ describe.skipIf(!HAS_CHROMIUM)('SHARE TO STORIES: its places and its preview fit
       expect(found).toEqual([]);
     },
     10 * 60_000,
+  );
+});
+
+/**
+ * CONFIRMED on a computer (lot Q1 §3.7; MK #confirmed, desk): WRITE TO ORBES CLIENT SERVICES fills the room's side
+ * column, about 272 px wide at 1024 px; its words stay inside its button's hairline at 1024, 1280 and 1440 px (on two
+ * centred lines below 1280), on a model's CONFIRMED, a set's and CONFIRMED after the add-ons' PAY. A set's tiles are
+ * lifted, as the one photograph is framed higher ("the piece framed higher, the words under it").
+ */
+describe.skipIf(!HAS_CHROMIUM)('CONFIRMED on a computer: WRITE TO ORBES CLIENT SERVICES inside its button (Chromium)', () => {
+  it(
+    'keeps the button\'s words inside its box at 1024, 1280 and 1440 px, and frames every photograph of the window higher',
+    async () => {
+      const found: string[] = [];
+      await eachState(
+        ['desk-live-confirmed', 'desk-set-live-confirmed', 'desk-addons-pay'].map(stateById),
+        async (state, { stage, demo, browser }) => {
+          const opened = await openState(browser, stage, demo, state);
+          const page = opened.page;
+          try {
+            const size = page.viewportSize()!;
+            for (const width of [1024, 1280, 1440]) {
+              await page.setViewportSize({ width, height: size.height });
+              await settle(page, 300);
+              const fit = await page.locator('.d-room__br > .write__open').evaluate((el) => {
+                const box = el.getBoundingClientRect();
+                const range = document.createRange();
+                range.selectNodeContents(el);
+                const text = range.getBoundingClientRect();
+                return { sw: el.scrollWidth, cw: el.clientWidth, inside: text.left >= box.left + 1 && text.right <= box.right - 1 };
+              });
+              if (fit.sw > fit.cw || !fit.inside) found.push(`${state.id} at ${width} px: ${fit.sw} px in ${fit.cw}${fit.inside ? '' : ', past its hairline'}`);
+            }
+            // The pieces above CONFIRMED: the one photograph framed at 50% 90%; a set's tiles lifted, each piece's middle
+            // (the photograph's) above the title, at 1024 × 768 and 1440 × 900.
+            for (const win of [{ width: 1024, height: 768 }, { width: 1440, height: 900 }]) {
+              await page.setViewportSize(win);
+              await settle(page, 300);
+              const framing = await page.evaluate(() => {
+                const title = document.querySelector('.live__confirmed h1')!.getBoundingClientRect().top;
+                return [...document.querySelectorAll('.d-room > .d-room__photo > .d-room__img')].map((el) => {
+                  if (!el.parentElement!.classList.contains('d-room__photo--tiles')) return getComputedStyle(el).objectPosition === '50% 90%' ? 'ok' : `framed at ${getComputedStyle(el).objectPosition}`;
+                  const r = el.getBoundingClientRect();
+                  return r.top + r.height / 2 < title - 100 ? 'ok' : `a tile's middle at ${Math.round(r.top + r.height / 2)}, the title at ${Math.round(title)}`;
+                });
+              });
+              if (framing.length === 0 || framing.some((f) => f !== 'ok')) found.push(`${state.id} at ${win.width} px: ${framing.join(', ') || 'no photograph'}`);
+            }
+          } finally {
+            await opened.close();
+          }
+        },
+        () => {},
+      );
+      expect(found).toEqual([]);
+    },
+    6 * 60_000,
   );
 });

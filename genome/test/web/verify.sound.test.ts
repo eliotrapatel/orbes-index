@@ -942,7 +942,7 @@ describe('a LIVE RELEASE\'s designed sounds (lot Q1 §3.10, live-sound.ts)', () 
     // Lot Q1 §3.7, §3.9: confirmed.mp3 as the payment goes through on the page (its moment from SECURED), after-room.mp3
     // as the second door appears (its passage), both from their passage's start, after the screen mounted.
     expect(view).toContain("if (kind === 'confirmed' && previous === 'secured') this.confirmedMoment();");
-    expect(view).toContain("if (kind === 'afterRoom' && previous !== 'afterRoom') this.afterPassage();");
+    expect(view).toContain("if (kind === 'afterRoom' && previous !== undefined && previous !== 'loading' && previous !== 'afterRoom') this.afterPassage();");
     expect(view).toMatch(/private confirmedMoment\(\): void \{\n\s*this\.deps\.sound\.cue\('confirmed'\);/);
     expect(view).toMatch(/private afterPassage\(\): void \{\n\s*this\.deps\.sound\.cue\('after'\);/);
     expect(view.indexOf("if (kind === 'confirmed' && previous === 'secured')")).toBeGreaterThan(view.indexOf('this.stage.replaceChildren(screen.el);'));
