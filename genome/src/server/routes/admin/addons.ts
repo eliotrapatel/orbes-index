@@ -66,7 +66,8 @@ export const adminAddonRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
 
   app.post('/api/admin/addons', { config: OPERATOR }, async (request, reply) => {
     const b = parse(createAddonBody, request.body);
-    engravingAdminOnly(request, b.engraving === true && (Object.values(b.prices ?? {}).some((v) => v !== undefined) || b.offeredAt?.orders !== undefined));
+    // Judged on the switch after creation, as PATCH does: the service turns YOUR ORDERS on when it is not given.
+    engravingAdminOnly(request, b.engraving === true && (Object.values(b.prices ?? {}).some((v) => v !== undefined) || (b.offeredAt?.orders ?? true)));
     const created = await addons.create({ ...given(b), name: b.name, skuCode: b.skuCode, ...(b.prices ? { prices: given(b.prices) } : {}) }, adminActor(request));
     reply.code(201);
     return created;
