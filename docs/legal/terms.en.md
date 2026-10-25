@@ -1,6 +1,6 @@
 # Terms of use of the ORBES GENOME CODE service
 
-**Draft for legal review, not validated.** Version: 25 October 2026. [Version française](terms.fr.md).
+**Draft for legal review, not validated.** Version: 26 October 2026. [Version française](terms.fr.md).
 
 Each article ends with a *Code: …* line that points to the rules of the code it describes ([TERMS-FACTS](TERMS-FACTS.md)). These lines are for the review and are not published. The [À COMPLÉTER: …] fields await the legal identity of ORBES and counsel's choices ([note for counsel](counsel-note.fr.md), in French). Every field keeps the French marker, so that one search finds them all in both languages.
 
@@ -242,9 +242,11 @@ A LIVE RELEASE is a release that takes place live, without a draw: ORBES announc
 
 **The question after.** Once a LIVE RELEASE has ended, its after-room's end included, ORBES may ask, for 7 days, one question with 2 to 6 answers (unless the release sets another, WHAT WOULD YOU HAVE WANTED?): on its page, to the accounts that took part without securing a piece, and in MY PIECES, to those that said I'LL BE THERE without taking a place in its line. Answering takes one tap, is optional and obliges you to nothing; you may change your answer while the question is open.
 
+**THE VAULT.** ORBES may give a vault on the occasions THE VAULT shows in YOUR ACCOUNT, to eligible collectors, at its discretion. A vault is kept 30 days in your account. Opening it is free: a vault is never sold, and opening one requires no purchase. It holds one reward, drawn by chance when it is opened and shown with its odds; when a reward runs out, its chance goes to the I WAS THERE card. A reward expires as it states, has no cash value and cannot be transferred until it is used, except a credit to give, which you give once, by its link, to a friend for their first piece. The number of vaults each occasion gives an account is limited: a LIVE RELEASE gives at most one per account. A returned piece takes back its vault if it has not been opened.
+
 **What is recorded.** For each entry, the service records the account, the size and the quantity, the tier, the place in the line, the time of each step, the length of the hold, the options chosen, the outcome of the reservation, the place of a guest in an after-room and the answer to the question after; and, from the connection, its country and a keyed fingerprint of its network, never its address. That fingerprint is erased 30 days after the end of the release. These data serve to run the release and to spot automated entries; the privacy policy says more (article 17).
 
-*Code: R93, R94, R95, R96, R97, R98, R99, R100, R101, R102, R103, R104, R105, R106, R107, R108, R109, R110, R111, R112, R113, R114, R115, R118, R134, R135, R136, R137, R138, R140, R141, R142, R143, R165, N8, N9.*
+*Code: R93, R94, R95, R96, R97, R98, R99, R100, R101, R102, R103, R104, R105, R106, R107, R108, R109, R110, R111, R112, R113, R114, R115, R118, R134, R135, R136, R137, R138, R140, R141, R142, R143, R165, R193, R194, R195, R196, R197, R198, R199, R200, R201, N8, N9, N13, N14.*
 
 ## Article 14 — Orders
 
@@ -300,7 +302,7 @@ The lock ends every session of the account, revokes its recovery code, withdraws
 
 ORBES processes the data of the service (account, registrations, scans, entries and reservations in releases, entries, options and reservations in the LIVE RELEASES, answers to the question after, orders and their invoices, answers and votes in the circle, requests in the private salon) as its privacy policy describes, which also says how ORBES groups collectors and counts their activity by hour. The service sends your orders to no online store. You can ask ORBES Client Services for a copy of everything the ORBES registry holds about your account. Your requests in the private salon, with your notes, are in that copy. Your entries in the LIVE RELEASES, with their options, and your I'LL BE THERE are in that copy. Your orders, with the buyer's name and address, their steps and their invoices, and your answers to the questions after are in that copy.
 
-*Code: R21, R90, R117, R133, R139, R144, R145, R151, R162, R168, R169, R170, R171, R172, R173, R185, N10, N12.*
+*Code: R21, R90, R117, R133, R139, R144, R145, R151, R162, R168, R169, R170, R171, R172, R173, R185, R202, N10, N12.*
 
 ## Article 18 — Liability
 

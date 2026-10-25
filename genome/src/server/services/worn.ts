@@ -73,7 +73,7 @@ export const WORN_RATE = Object.freeze({ max: 5, windowMs: 24 * 60 * 60_000 });
  * one recorded with it. The server cannot read the web's files (Dockerfile), so it is written here, as
  * FOUNDING_CONSENT_VERSION is; test/web/legal.content.test.ts holds the two equal.
  */
-export const WORN_CONSENT_VERSION = '2026-10-25';
+export const WORN_CONSENT_VERSION = '2026-10-26';
 
 /** A published photograph, as everyone reads it: the same for all, a withdrawal shown within 5 minutes. */
 export const WORN_PHOTO_CACHE_CONTROL = 'public, max-age=300';

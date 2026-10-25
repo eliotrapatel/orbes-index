@@ -90,8 +90,18 @@ export { LANGS, type Block, type Lang, type LegalDocument, type LegalSection } f
  * the privacy policy unchanged (N17). The date of the lot's final legal commit (N16), never Q1's 2026-10-24 (the day
  * after it). Article 11 did not change: CARE_CONDITIONS_VERSION stays 2026-10-15; the consents recorded with the version
  * in force move with it.
+ * 2026-10-26 is the version of lot Q3, THE VAULT (owner's decisions D22, D23, D59 and L2; plan step Q3.14): the terms'
+ * article 13 gains one paragraph, THE VAULT (given on the occasions THE VAULT shows, to eligible collectors, at ORBES's
+ * discretion; kept 30 days; opening free, a vault never sold and opening one requiring no purchase; one reward drawn by
+ * chance, shown with its odds, a reward run out giving its chance to the I WAS THERE card; rewards expiring as they
+ * state, without cash value, not transferable until used but a credit to give; the vaults each occasion gives limited,
+ * at most one per account for a LIVE RELEASE; a returned piece taking back its unopened vault), with no clause on taking
+ * a vault back for error or abuse (N36), nothing on SOLD OUT and no odds table (D22, D23); the privacy policy gains one
+ * sentence, the invitation link kept with the account (N22, read with D70). HOW RELEASES WORK unchanged. The date of the
+ * lot's final legal commit, never Q2's published 2026-10-25 (the day after it). Article 11 did not change:
+ * CARE_CONDITIONS_VERSION stays 2026-10-15; the consents recorded with the version in force move with it.
  */
-export const LEGAL_VERSION = '2026-10-25';
+export const LEGAL_VERSION = '2026-10-26';
 
 export const DOCUMENTS: Readonly<Record<LegalPage, Readonly<Record<Lang, LegalDocument>>>> = Object.freeze({
   privacy: PRIVACY,
