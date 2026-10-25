@@ -7,7 +7,8 @@
  *                 transaction, after its own writes. Nothing when the source is switched off (a LIVE release also needs
  *                 its own switch, `drops.vault_on`, D4), the account is not ACTIVE, the account is a test entrant (ROUND 5
  *                 "Test accounts: NEVER get a vault", D9: every source, the house's GIVE A VAULT included; `isTestEntrant`)
- *                 or the cap of the source's scope is reached. The account's row is taken FOR NO KEY UPDATE first, so two
+ *                 or the cap of the source's scope is reached. The account's row is taken FOR NO KEY UPDATE first (FOR
+ *                 KEY SHARE for LIVE, whose release's row orders its occasions), so two
  *                 occasions of one account at once count each other; then `per_occasion` rows are inserted at the lowest
  *                 free indexes of the occasion's key, `ON CONFLICT DO NOTHING` on the unique key (two passes, a retry or
  *                 two processes never give one twice: `vaults_occasion_key`). It delivers the arrival (§2.7) in the same
@@ -280,8 +281,12 @@ export async function giveVault(tx: Db, occasion: VaultOccasion, now: Date): Pro
     const d = await tx.selectFrom('drops').select('vault_on').where('id', '=', o.dropId.toLowerCase()).executeTakeFirst();
     if (!d?.vault_on) return none('RELEASE_OFF');
   }
-  // The account's row first: two occasions of one account at once count each other's vaults.
-  const account = await tx.selectFrom('accounts').select('status').where('id', '=', accountId).forNoKeyUpdate().executeTakeFirst();
+  // The account's row first: two occasions of one account at once count each other's vaults. A LIVE vault is given
+  // under its release's row (services/live.ts, held FOR NO KEY UPDATE by every LIVE give), which already orders the
+  // occasions of its one key, so the account's row is only FOR KEY SHARE there: a stronger lock would wait on the FOR
+  // SHARE each LIVE action of that collector takes on its own account before the release's row (deadlock).
+  const q = tx.selectFrom('accounts').select('status').where('id', '=', accountId);
+  const account = await (o.source === 'LIVE' ? q.forKeyShare() : q.forNoKeyUpdate()).executeTakeFirst();
   if (account?.status !== 'ACTIVE') return none('NOT_ACTIVE');
   if (await isTestEntrant(tx, accountId)) return none('TEST_ENTRANT');
   if (o.source === 'FRIEND' && (await isTestEntrant(tx, o.friendAccountId))) return none('TEST_ENTRANT');
@@ -335,6 +340,58 @@ export async function giveVault(tx: Db, occasion: VaultOccasion, now: Date): Pro
     },
   ];
   return { vaults, skipped: null, deliveryId: delivery?.id ?? null, notes };
+}
+
+// ── The LIVE source ────────────────────────────────────────────────────────
+
+/** A LIVE release as its source reads it. */
+export interface LiveVaultRelease {
+  id: string;
+  set_id: string | null;
+  parent_drop_id: string | null;
+  vault_on: boolean;
+}
+
+/**
+ * THE VAULT's LIVE source (step Q3.5; plan §2.3.1; S E2 "late comers who joined and stayed included; leaving the line =
+ * no vault; one per account per release; staff switch per LIVE release, off by default", round 2 trigger "WHEN YOUR
+ * SIZE SELLS OUT", D4). In the transaction of the PAY that sold `sizeIds` out (services/live.ts `confirm`, its
+ * `soldOutSizes`: each of its sizes now fully confirmed, every size when the release sold out whole, D6), before
+ * `settleEnd` ENDS the line: a vault (`giveVault`, its caps and switches) for every entry of those sizes still in the
+ * line, WAITING or QUEUED, a late comer who joined and stayed included; LEFT, RELEASED, REMOVED, MISSED, EXPIRED never.
+ * Nothing on a release with its switch off, nor on an after-room (`drops_vault_on`: its guests were given theirs at
+ * its parent's sell-out, N20; a piece won there never takes it back, D7), nor for a test entrant (D9) or an account not
+ * ACTIVE (left out here already, so a sell-out reads only those it gives to). A release that CLOSES with pieces left
+ * sells no size out at its end and gives none (D8). The release's row is held by the caller (FOR NO KEY UPDATE), so the
+ * accounts are visited in their ids' order. Returns the audit entries for the caller to record.
+ */
+export async function giveLiveVaults(tx: Db, d: LiveVaultRelease, sizeIds: readonly string[], now: Date): Promise<AuditRecordInput[]> {
+  if (sizeIds.length === 0 || !d.vault_on || d.parent_drop_id !== null) return [];
+  const source = await tx.selectFrom('vault_sources').select('enabled').where('source', '=', 'LIVE').executeTakeFirst();
+  if (!source?.enabled) return [];
+  const dropId = d.id.toLowerCase();
+  const key = occasionKey({ source: 'LIVE', accountId: dropId, dropId, entryId: dropId });
+  const entries = await tx
+    .selectFrom('live_entries as e')
+    .innerJoin('accounts as a', 'a.id', 'e.account_id')
+    .select(['e.id', 'e.account_id'])
+    .where('e.drop_id', '=', dropId)
+    .where('e.status', 'in', ['WAITING', 'QUEUED'])
+    .where((eb) =>
+      d.set_id === null
+        ? eb('e.size_id', 'in', [...sizeIds])
+        : eb.exists(eb.selectFrom('live_entry_sizes as x').select('x.entry_id').whereRef('x.entry_id', '=', 'e.id').where('x.size_id', 'in', [...sizeIds])),
+    )
+    .where('a.status', '=', 'ACTIVE')
+    .where((eb) => eb.not(eb.exists(eb.selectFrom('test_entrants as t').select('t.account_id').whereRef('t.account_id', '=', 'e.account_id'))))
+    .where((eb) =>
+      eb.not(eb.exists(eb.selectFrom('vaults as v').select('v.id').whereRef('v.account_id', '=', 'e.account_id').where('v.occasion_key', '=', key).where('v.revoked_at', 'is', null))),
+    )
+    .orderBy('e.account_id')
+    .execute();
+  const notes: AuditRecordInput[] = [];
+  for (const e of entries) notes.push(...(await giveVault(tx, { source: 'LIVE', accountId: e.account_id, dropId, entryId: e.id }, now)).notes);
+  return notes;
 }
 
 // ── THE VAULT page ─────────────────────────────────────────────────────────

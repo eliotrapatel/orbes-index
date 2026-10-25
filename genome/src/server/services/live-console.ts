@@ -35,6 +35,7 @@
  *                   the announcement). It is never listed on its own: the release's page shows it, and its own page
  *                   (`afterRoomOf`) has the live board and controls, never settings, a publication, a cancellation or a
  *                   board link of its own (409 LIVE_AFTER_ROOM).
+ *   THE VAULT       (lot Q3, D4) its switch, off at the creation, on or off until it ends, never an after-room's (`setVault`).
  *   cancel          before the room opens (409 LIVE_ROOM_OPEN after: an ADMIN ends a release with END NOW); its after-room
  *                   with it.
  *   the live board  the counters (in the room, the line, the turns, the pieces secured and confirmed, the missed turns,
@@ -195,6 +196,9 @@ const afterRoomOwn = () => conflict('LIVE_AFTER_ROOM', 'This is the after-room o
 /** Add-ons offered change until the release (or its after-room) ends (review of lot Q2: no lock at the announcement). */
 const addonsEnded = (afterRoom: boolean) => conflict('LIVE_ENDED', afterRoom ? 'This after-room has ended: its add-ons offered no longer change.' : 'This release has ended: its add-ons offered no longer change.');
 const noAfterRoom = () => validationError('This release has no after-room.');
+/** THE VAULT's switch (lot Q3, D4): never an after-room's (its guests had theirs at the sell-out, N20), until the release ends. */
+const vaultAfterRoom = () => conflict('LIVE_AFTER_ROOM', 'An after-room gives no vault of its own: its guests were given theirs at the release’s sell-out.');
+const vaultEnded = () => conflict('LIVE_ENDED', 'This release has ended: THE VAULT no longer changes.');
 
 function assertStaff(actor: Actor, what: string): string {
   if (actor?.type !== 'admin' || typeof actor.id !== 'string' || !UUID_RE.test(actor.id)) throw forbidden(`Only an ORBES admin can ${what}.`);
@@ -835,6 +839,8 @@ export interface AdminLiveRelease extends AdminLiveCard {
   guaranteed: ReleaseGuaranteed;
   /** An after-room's own page: the release it follows; null for a release. */
   afterRoomOf: { id: string; title: string } | null;
+  /** THE VAULT (lot Q3, D4): its sold-out sizes give their line a vault; off by default, never on an after-room (`setVault`). */
+  vaultOn: boolean;
 }
 
 /**
@@ -1361,6 +1367,31 @@ export class LiveConsoleService {
         },
         tx,
       );
+      return this.release(tx, id);
+    });
+  }
+
+  /**
+   * THE VAULT · Off / On (lot Q3, step Q3.5; plan §4.2; S E2 "staff switch per LIVE release, off by default", D4): whether
+   * the release's sizes that sell out give a vault to the entries still in their line (services/vault.ts
+   * giveLiveVaults). Off at its creation (New live release never sets it); changed at any moment until it ends, a DRAFT
+   * or published (409 LIVE_ENDED once its `ended_at` is set or its close has passed), refused on an after-room (409
+   * LIVE_AFTER_ROOM) and once cancelled (DROP_CANCELLED). Audited `drop.live.vault` with the switch before and after;
+   * nothing changed, nothing written. The release's row FOR UPDATE, as every save.
+   */
+  async setVault(dropId: string, on: unknown, actor: Actor): Promise<AdminLiveRelease> {
+    assertStaff(actor, 'change a release');
+    const id = knownId(dropId, dropNotFound);
+    if (typeof on !== 'boolean') throw validationError('THE VAULT is on or off.');
+    return inTransaction(this.db, async (tx) => {
+      const d = await this.lock(tx, id);
+      const now = this.clock();
+      if (d.parent_drop_id) throw vaultAfterRoom();
+      if (d.cancelled_at) throw liveCancelled();
+      if (d.ended_at || now.getTime() >= d.closes_at.getTime()) throw vaultEnded();
+      if (d.vault_on === on) return this.release(tx, id);
+      await tx.updateTable('drops').set({ vault_on: on }).where('id', '=', id).execute();
+      await this.audit.record({ actor, action: 'drop.live.vault', targetType: 'drop', targetId: id, details: { before: d.vault_on, after: on } }, tx);
       return this.release(tx, id);
     });
   }
@@ -2109,6 +2140,7 @@ export class LiveConsoleService {
       afterRoom,
       afterRoomOf: parent ?? null,
       guaranteed,
+      vaultOn: r.vault_on,
     };
   }
 
