@@ -324,6 +324,11 @@ export interface ClubInUse {
    * other two.
    */
   warrantyCredit: { balanceMinor: number; currency: string; expiresAt: Date } | null;
+  /**
+   * Its vaults' credits left (THE VAULT, lot Q3: a house credit won, or a friend's credit for a first piece while it
+   * holds none), whatever its tier, not expired: summed as the others, read apart from them ("credits in YOUR ACCOUNT").
+   */
+  vaultCredit: { balanceMinor: number; currency: string; expiresAt: Date } | null;
   /** Its yearly care of the year (UTC); null when its tier gives none. */
   care: { year: number; used: number; allowance: CareAllowance } | null;
   /**
@@ -456,7 +461,7 @@ export class ClubService {
     };
   }
 
-  /** The account's benefits in use now (ClubInUse): its tiers' credit, its birthday credit, its warranty credit, its yearly care of the year, its welcome gifts. */
+  /** The account's benefits in use now (ClubInUse): its tiers' credit, its birthday, warranty and vaults' credits, its yearly care of the year, its welcome gifts. */
   async inUse(accountId: string, tier: ClubTier, program?: ClubProgram): Promise<ClubInUse> {
     const now = this.clock();
     const p = program ?? (await readProgram(this.db));
@@ -472,6 +477,7 @@ export class ClubService {
     const credit = summed(balances.filter((g) => g.kind === 'CREDIT'));
     const birthdayCredit = summed(balances.filter((g) => g.kind === 'BIRTHDAY'));
     const warrantyCredit = summed(balances.filter((g) => g.kind === 'WARRANTY'));
+    const vaultCredit = summed(balances.filter((g) => g.kind === 'VAULT'));
     const year = await careThisYear(this.db, accountId, now, p);
     const care = year.allowance === 0 ? null : { year: year.year, used: year.used, allowance: year.allowance };
     const grants = await this.db
@@ -496,7 +502,7 @@ export class ClubService {
         if (g.tier !== null && g.tier <= tier && a) gifts.push({ tier: name, model: a.name, state: 'PENDING', orderReference: null });
       }
     }
-    return { credit, birthdayCredit, warrantyCredit, care, gifts, creditChannels: [...p.creditChannels] };
+    return { credit, birthdayCredit, warrantyCredit, vaultCredit, care, gifts, creditChannels: [...p.creditChannels] };
   }
 
   /** THE CLUB (GET /api/v1/the-club, public): every tier's program lines then its words, the credit's currency, the gifts. */

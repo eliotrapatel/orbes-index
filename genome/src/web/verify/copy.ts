@@ -918,6 +918,11 @@ export const TIER = Object.freeze({
    * `creditValue`; for an account without a tier too.
    */
   warrantyCredit: 'WARRANTY CREDIT',
+  /**
+   * A vault's credit (THE VAULT, lot Q3, E9 "credits in YOUR ACCOUNT"): after BIRTHDAY CREDIT, as credits are taken, with
+   * `creditValue`; for an account without a tier too. Its name as the vault's reveal and OPENED say it (OP-32: HOUSE CREDIT).
+   */
+  vaultCredit: 'HOUSE CREDIT',
   credit: 'CREDIT',
   creditValue: (amount: string, date: string) => `${amount} · UNTIL ${date}`,
   /**

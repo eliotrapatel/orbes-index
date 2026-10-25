@@ -234,47 +234,52 @@ export function creditTaken(o: Pick<OrderView, 'credit'>): number {
 }
 
 /**
- * Whether a credit of an order is the warranty credit (plan ORBES CARE: kind WARRANTY, no tier), or the birthday credit
- * (plan CUSTOMER INTELLIGENCE §3.5 SB.4.6): its kind, or, for the birthday credit, no tier from a server before the kind.
+ * Whether a credit of an order is the warranty credit (plan ORBES CARE: kind WARRANTY, no tier), a vault's (THE VAULT:
+ * kind VAULT, no tier), or the birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4.6): its kind, or, for the birthday
+ * credit, no tier from a server before the kind.
  */
 const isWarrantyCredit = (c: { kind?: string }): boolean => c.kind === 'WARRANTY';
-const isBirthdayCredit = (c: { kind?: string; tier: 2 | 3 | null }): boolean => !isWarrantyCredit(c) && (c.kind === 'BIRTHDAY' || c.tier === null);
+const isVaultCredit = (c: { kind?: string }): boolean => c.kind === 'VAULT';
+const isBirthdayCredit = (c: { kind?: string; tier: 2 | 3 | null }): boolean => !isWarrantyCredit(c) && !isVaultCredit(c) && (c.kind === 'BIRTHDAY' || c.tier === null);
+const isTierCredit = (c: { kind?: string; tier: 2 | 3 | null }): boolean => !isBirthdayCredit(c) && !isVaultCredit(c) && !isWarrantyCredit(c);
 
 /**
  * The client's credit usable now: `PLATINE € 50 until 06 OCT 2027`, several joined by ` · `, or None. The birthday
- * credit reads `Birthday € 20 until 12 APR 2027`, then the warranty credit `Warranty € 135 until 15 OCT 2027`, before
- * the tiers': they are taken in that order.
+ * credit reads `Birthday € 20 until 12 APR 2027`, then a vault's `Vault € 25 until 27 NOV 2026`, then the warranty
+ * credit `Warranty € 135 until 15 OCT 2027`, before the tiers': they are taken in that order.
  */
 export function creditAvailableLine(o: Pick<OrderView, 'credit'>): string {
   const a = o.credit?.available ?? [];
   if (a.length === 0) return 'None';
-  const name = (c: (typeof a)[number]) => (isBirthdayCredit(c) ? 'Birthday' : isWarrantyCredit(c) ? 'Warranty' : TIER_NAMES[c.tier as 2 | 3]);
+  const name = (c: (typeof a)[number]) => (isBirthdayCredit(c) ? 'Birthday' : isVaultCredit(c) ? 'Vault' : isWarrantyCredit(c) ? 'Warranty' : TIER_NAMES[c.tier as 2 | 3]);
   const line = (c: (typeof a)[number]) => `${name(c)} ${formatMoney(c.balanceMinor, c.currency)} until ${formatDate(c.expiresAt)}`;
-  return [...a.filter(isBirthdayCredit), ...a.filter(isWarrantyCredit), ...a.filter((c) => !isBirthdayCredit(c) && !isWarrantyCredit(c))].map(line).join(' · ');
+  return [...a.filter(isBirthdayCredit), ...a.filter(isVaultCredit), ...a.filter(isWarrantyCredit), ...a.filter(isTierCredit)].map(line).join(' · ');
 }
 
 /**
- * The credit taken off this order, the birthday credit first, then the warranty credit, then per tier:
- * `− € 20 (BIRTHDAY) · − € 135 (WARRANTY) · − € 30 (PLATINE)`, or None.
+ * The credit taken off this order, the birthday credit first, then a vault's, then the warranty credit, then per tier:
+ * `− € 20 (BIRTHDAY) · − € 25 (VAULT) · − € 135 (WARRANTY) · − € 30 (PLATINE)`, or None.
  */
 export function creditAppliedLine(o: Pick<OrderView, 'credit' | 'currency'>): string {
   const open = (o.credit?.applied ?? []).filter((u) => u.releasedAt === null);
   if (open.length === 0 || !o.currency) return 'None';
   const said = (minor: number, of: string) => `\u2212 ${formatMoney(minor, o.currency!)} (${of})`;
   const birthday = open.filter(isBirthdayCredit).reduce((n, u) => n + u.amountMinor, 0);
+  const vault = open.filter(isVaultCredit).reduce((n, u) => n + u.amountMinor, 0);
   const warranty = open.filter(isWarrantyCredit).reduce((n, u) => n + u.amountMinor, 0);
   const byTier = new Map<2 | 3, number>();
-  for (const u of open) if (!isBirthdayCredit(u) && !isWarrantyCredit(u)) byTier.set(u.tier as 2 | 3, (byTier.get(u.tier as 2 | 3) ?? 0) + u.amountMinor);
+  for (const u of open) if (isTierCredit(u)) byTier.set(u.tier as 2 | 3, (byTier.get(u.tier as 2 | 3) ?? 0) + u.amountMinor);
   return [
     ...(birthday > 0 ? [said(birthday, 'BIRTHDAY')] : []),
+    ...(vault > 0 ? [said(vault, 'VAULT')] : []),
     ...(warranty > 0 ? [said(warranty, 'WARRANTY')] : []),
     ...[...byTier.entries()].sort((x, y) => y[0] - x[0]).map(([tier, minor]) => said(minor, TIER_NAMES[tier])),
   ].join(' · ');
 }
 
-/** APPLY CREDIT's sentence (§3.5 SB.4.6): the birthday credit is taken first, then the warranty credit (plan ORBES CARE), then the tiers'. */
+/** APPLY CREDIT's sentence (§3.5 SB.4.6): the birthday credit is taken first, then a vault's, then the warranty credit (plan ORBES CARE), then the tiers'. */
 export const APPLY_CREDIT_TEXT =
-  'A credit taken off this order’s invoice, in its currency: the birthday credit first, then the warranty credit, then the tiers’. It is given back if the order is cancelled or returned, with its expiry unchanged.';
+  'A credit taken off this order’s invoice, in its currency: the birthday credit first, then a vault’s, then the warranty credit, then the tiers’. It is given back if the order is cancelled or returned, with its expiry unchanged.';
 
 /** The credit usable on this order: the balances in its currency, and what its price leaves (null before it is priced). */
 export function creditRoom(o: Pick<OrderView, 'credit' | 'currency' | 'priceMinor'>): number {

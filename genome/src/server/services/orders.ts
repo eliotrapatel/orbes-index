@@ -104,9 +104,9 @@
  *                `order.create` and `order.gift`.
  *   the credit   (BP-19 T5) taken off a RESERVED order by Client Services (`applyCredit`): its channel one THE PROGRAM
  *                names, its currency the credit's, the account at the grant's tier now (a birthday credit, plan
- *                CUSTOMER INTELLIGENCE §3.5 SB.4, or a warranty credit, plan ORBES CARE, whatever the tier), the
- *                grant not expired, the amount within the balance and the piece's price; the birthday credit first,
- *                then the warranty credit, then PALLADIUM's, then the earliest expiry. A CREDIT line on the invoice.
+ *                CUSTOMER INTELLIGENCE §3.5 SB.4, a vault's or a warranty credit, whatever the tier), the grant not
+ *                expired, the amount within the balance and the piece's price; the birthday credit first, then a
+ *                vault's, the warranty credit, PALLADIUM's, then the earliest expiry. A CREDIT line on the invoice.
  *                Removed while RESERVED (`removeCredit`), released when the order is cancelled or returned, the
  *                expiry unchanged. Audited `order.credit.apply`, `.remove`, `.release`.
  *
@@ -180,6 +180,7 @@ import {
   type EngravingUnit,
   type OrdersEngraving,
   adminAddonUnits,
+  attachVaultAddons,
   cancelUnits,
   carryChoices,
   exportedAddonItems,
@@ -1505,6 +1506,8 @@ export async function ordersForLiveEntry(
     const carried = await carryChoices(tx, [...orders].sort((a, b) => a.piece - b.piece), { liveEntryId: e.id }, houseCurrencyOf(e.currency), actor, now);
     notes.push(...carried.notes);
     addonsLeftOut = carried.leftOut;
+    // THE VAULT (lot Q3, §2.4 ADDON): a free add-on won in a vault, on the sale's first order, after the add-ons bought.
+    notes.push(...(await attachVaultAddons(tx, first, actor, now)).notes);
   }
   return { orders, notes, addonsLeftOut };
 }
@@ -1594,6 +1597,8 @@ export async function orderForDrawEntry(
     const carried = await carryChoices(tx, [first], { dropEntryId: e.id }, priced ? houseCurrencyOf(e.currency) : null, actor, now);
     notes.push(...carried.notes);
     addonsLeftOut = carried.leftOut;
+    // THE VAULT (lot Q3, §2.4 ADDON): a free add-on won in a vault, on the sale's first order, after the add-ons bought.
+    notes.push(...(await attachVaultAddons(tx, first, actor, now)).notes);
   }
   return { order: orders[0] ?? null, orders, notes, addonsLeftOut };
 }
@@ -1670,6 +1675,8 @@ async function setOrdersForLiveEntry(
     const carried = await carryChoices(tx, carriers, { liveEntryId: e.id }, houseCurrencyOf(e.currency), actor, now);
     notes.push(...carried.notes);
     addonsLeftOut = carried.leftOut;
+    // THE VAULT (lot Q3, §2.4 ADDON): a free add-on won in a vault, on the sale's first order, after the add-ons bought.
+    notes.push(...(await attachVaultAddons(tx, first, actor, now)).notes);
   }
   return { orders, notes, addonsLeftOut };
 }
@@ -1712,6 +1719,8 @@ async function setOrderForDrawEntry(
   notes.push(...(await attachGifts(tx, first, actor, now)).notes);
   const carried = await carryChoices(tx, [first], { dropEntryId: e.id }, priced ? houseCurrencyOf(e.currency) : null, actor, now);
   notes.push(...carried.notes);
+  // THE VAULT (lot Q3, §2.4 ADDON): a free add-on won in a vault, on the sale's first order, after the add-ons bought.
+  notes.push(...(await attachVaultAddons(tx, first, actor, now)).notes);
   return { order: first, orders: sold.orders, notes, addonsLeftOut: carried.leftOut };
 }
 
@@ -1756,6 +1765,8 @@ export async function orderForShopRequest(tx: Db, requestId: string, actor: Acto
   // collector read them in); Client Services then enters the piece's price in that currency (setTerms).
   const carried = await carryChoices(tx, [order], { shopRequestId: r.id }, await baseCurrency(tx, r.model_id), actor, now);
   notes.push(...carried.notes);
+  // THE VAULT (lot Q3, §2.4 ADDON): a free add-on won in a vault, on the sale's first order, after the add-ons bought.
+  notes.push(...(await attachVaultAddons(tx, order, actor, now)).notes);
   return { order, notes, addonsLeftOut: carried.leftOut };
 }
 
@@ -2141,13 +2152,13 @@ export async function returnInTransaction(
 export interface CarriedCredit {
   grantId: string;
   kind: CreditKind;
-  /** Null on a birthday or a warranty credit. */
+  /** Null on a birthday, a warranty or a vault's credit. */
   tier: 2 | 3 | null;
   amountMinor: number;
 }
 
 /** A credit grant's kind as an order reads it: a tier's (CREDIT), the birthday credit (BIRTHDAY) or a warranty credit (WARRANTY). */
-const creditKind = (kind: string): CreditKind => (kind === 'BIRTHDAY' || kind === 'WARRANTY' ? kind : 'CREDIT');
+const creditKind = (kind: string): CreditKind => (kind === 'BIRTHDAY' || kind === 'WARRANTY' || kind === 'VAULT' ? kind : 'CREDIT');
 /** A credit grant's tier as an order reads it: a tier's credit's only, none on a birthday or a warranty credit. */
 const creditTier = (g: { kind: string; tier: number | null }): 2 | 3 | null => (g.kind !== 'CREDIT' || g.tier === null ? null : (g.tier as 2 | 3));
 

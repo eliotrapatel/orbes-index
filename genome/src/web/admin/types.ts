@@ -134,10 +134,10 @@ export const CREDIT_CHANNELS = ['DRAW', 'LIVE', 'SALON'] as const;
 export type CreditChannel = (typeof CREDIT_CHANNELS)[number];
 
 /**
- * A credit taken off an order: a tier's, the birthday credit (tier_grants.kind, plan CUSTOMER INTELLIGENCE §3.5 SB.4.3)
- * or a warranty credit (plan ORBES CARE).
+ * A credit taken off an order: a tier's, the birthday credit (tier_grants.kind, plan CUSTOMER INTELLIGENCE §3.5 SB.4.3),
+ * a warranty credit (plan ORBES CARE) or a vault's (THE VAULT).
  */
-export type CreditKind = 'CREDIT' | 'BIRTHDAY' | 'WARRANTY';
+export type CreditKind = 'CREDIT' | 'BIRTHDAY' | 'WARRANTY' | 'VAULT';
 
 /** Why a credit taken off an order was given back (credit_uses.released_reason, BP-19 T5). */
 export const CREDIT_RELEASE_REASONS = ['REMOVED', 'CANCELLED', 'RETURNED'] as const;

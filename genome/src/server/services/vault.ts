@@ -40,16 +40,44 @@
  *                 SERVICE add-on refused as a reward (409 VAULT_REWARD_SERVICE, E7, D64). `settings()` gives the floor's
  *                 published odds: the remainder's, `1 IN round(1 / remainder)`.
  *
+ *   the opening  (step Q3.4; plan §2.2, §2.4, §2.7) `open`: in one transaction the vault FOR UPDATE (404 VAULT_NOT_FOUND
+ *                for another account's; 409 VAULT_EXPIRED, VAULT_REVOKED; an opened vault's outcome read again, so a lost
+ *                answer is never a second draw), the active rewards FOR UPDATE (the floor's row first, as the table's
+ *                settings lock it, then by id), then the draw on the server
+ *                (N26): `crypto.randomInt` over 1 000 000 parts, each active row its round(1 000 000 / N) in the table's
+ *                order, the floor the rest (N15). A row drawn that cannot give (its quantity reached, its add-on set
+ *                aside or no longer a PRODUCT, its model set aside or without a unit to reserve, THE PIECE of a vault
+ *                without a LIVE release or a unit in the entry's size) gives I WAS THERE in its place, at the card's
+ *                published odds: "a reward that runs out sends its odds to the card (published odds never change)"
+ *                (E1, round 2). The outcome is written once (prize, line, odds `1 IN 200`, rare for GUARANTEED, VAULT
+ *                EDITION and THE PIECE (N14), value, cost), its row's `given` + 1, delivered where it belongs (E9:
+ *                credits in YOUR ACCOUNT, products in YOUR ORDERS) with a FROM ORBES receipt (`VAULT_OPENED:<vault>`),
+ *                audited `vault.open` (its kind and rarity, never another row's odds).
+ *   delivered    CREDIT a VAULT credit (services/tier-grants.ts) of the row's amount, 30 days; ADDON the vault's offer
+ *                for 30 days, one unit at 0 attached to the next order at its creation (services/order-addons.ts
+ *                attachVaultAddons), a PRODUCT add-on only (E7: never a service); GUARANTEED a house guarantee of scope
+ *                LIVE (services/guarantees.ts grantFromVault); CREDIT TO GIVE a one-time link (`vault_gifts`, 30 days)
+ *                whose friend, holding no piece, accepts a VAULT credit for a first piece (`acceptGift`; never
+ *                `accounts.invited_by`: the FRIEND source stays the invitation link's alone); I WAS THERE nothing but its
+ *                card. A PRODUCT under its RIGHT TO BUY is its 24-hour offer (round 2); a product won FREE, a VAULT
+ *                EDITION and THE PIECE are a VAULT order with the winner's unit reserved (step Q3.7, plan §2.4: until it
+ *                is built, such a row gives the card, as a row that cannot give).
+ *
  * No pity rule, no budget cap, no account-age rule (E10 "Not chosen: pity guarantee, budget cap (the quantities are the
- * limit), account-age rule", D22): none is built. The draw at the opening and the rewards' delivery are step Q3.4.
+ * limit), account-age rule", D22): none is built.
  */
+import { createHmac, randomBytes, randomInt } from 'node:crypto';
 import { sql } from 'kysely';
+import { utf8 } from '../../core/bytes.js';
+import type { AppConfig } from '../config.js';
+import { deriveSubkey } from '../crypto/secretbox.js';
 import { inTransaction, type Db } from '../db/connection.js';
 import {
   CLUB_TIER_NAMES,
   HOUSE_CURRENCIES,
   VAULT_AMOUNT_MINOR_MAX,
   VAULT_CAP,
+  VAULT_GIFT_DAYS,
   VAULT_ODDS_IN_MAX,
   VAULT_OCCASION_INDEX_MAX,
   VAULT_PER_OCCASION,
@@ -58,6 +86,8 @@ import {
   VAULT_REWARD_MODES,
   VAULT_REWARD_POSITION_MAX,
   VAULT_NOTE_MAX,
+  VAULT_PRIZE_LINE_MAX,
+  VAULT_PRIZE_MAX,
   VAULT_SOURCES,
   VAULT_WAIT_DAYS,
   type ClubTierName,
@@ -65,14 +95,20 @@ import {
   type VaultRewardMode,
   type VaultSource,
 } from '../db/schema.js';
-import { conflict, forbidden, notFound, validationError } from '../errors.js';
+import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
 import { SYSTEM_ACTOR, systemClock, type Actor, type Clock } from '../types.js';
-import { vaultArrivedWords, vaultSourceLine, VAULT_SOURCE_LABELS } from '../../shared/house-words.js';
+import { VAULT_REVEAL, vaultArrivedWords, vaultMoney, vaultOpenedWords, vaultSourceLine, VAULT_SOURCE_LABELS, type VaultWhere } from '../../shared/house-words.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
+import { customerAccountLocked } from './auth.js';
+import { birthdayExpiry } from './birthday-credits.js';
+import { CROCKFORD_ALPHABET, formatGrouped, normalizeCrockford } from './claim-codes.js';
 import { CLUB_TIER_THRESHOLDS, isTestEntrant, tierName, tierOf } from './club.js';
+import { grantFromVault } from './guarantees.js';
 import { deliveredBody, deliveredTitle, pieceName } from './house-moments.js';
+import { withLiveChanges, type LiveChanges, type LiveFrameGate } from './live-frames.js';
 import type { ProfileService } from './profiles.js';
 import { parisDay } from './schedule.js';
+import { defaultLocationId, stockLevel } from './stock.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const HOUR_MS = 3_600_000;
@@ -333,6 +369,11 @@ export interface VaultOpenedRow {
   prizeLine: string | null;
   /** What it held as OPENED says it (OP-32: `€25 · HOUSE CREDIT`, `I WAS THERE`, `€30 TO GIVE`). */
   held: string;
+  /**
+   * A credit to give (N10, N33): its link's code (XXXX-XXXX-XXXX) while it can be accepted (GIVE IT), and whether a
+   * friend accepted it (GIVEN); null on every other reward.
+   */
+  gift: { code: string | null; given: boolean } | null;
 }
 
 /** HOW TO OBTAIN A VAULT: each source's row with this collector's state (N21), in the sources' order. */
@@ -380,6 +421,9 @@ interface VaultReadRow {
   drop_set: string | null;
   piece_model: string | null;
   piece_variant: string | null;
+  gift_id: string | null;
+  gift_accepted_by: string | null;
+  gift_expires_at: Date | null;
 }
 
 /** A vault's detail from its read row (as `occasionDetail`). */
@@ -573,6 +617,220 @@ async function checkOdds(tx: Db): Promise<void> {
   if ((await partsGiven(tx)) > VAULT_DRAW_PARTS) throw vaultOddsOver();
 }
 
+// ── The opening (step Q3.4; plan §2.2, §2.4, §2.7) ─────────────────────────
+
+/** How long a reward won lasts (E10 "rewards expire"; round 2 "House credit: … (30 days)"): a credit, a free add-on's offer. */
+export const VAULT_REWARD_DAYS = 30;
+/** A RIGHT TO BUY's offer (round 2 "Right to buy: 24 HOURS, at its usual price"). */
+export const VAULT_RIGHT_TO_BUY_MS = 24 * HOUR_MS;
+/** A credit to give's code: 12 Crockford characters, shown XXXX-XXXX-XXXX (as a transfer code). */
+export const VAULT_GIFT_CODE_LENGTH = 12;
+/** HKDF `info` of the credit-to-give HMAC key (derived from COOKIE_SECRET, as the transfer codes' key). */
+export const VAULT_GIFT_KEY_INFO = 'orbes/vault-gift/v1';
+
+/**
+ * When a reward won at `at` ends: the last instant (Paris) of its 30th day, the day of `at` being day 1, as the birthday
+ * credit's expiry is computed (services/birthday-credits.ts birthdayExpiry).
+ */
+export function vaultRewardUntil(at: Date): Date {
+  return birthdayExpiry(parisDay(at), VAULT_REWARD_DAYS);
+}
+
+/**
+ * The row a draw lands on: `r`, 0 ≤ r < 1 000 000 (`crypto.randomInt`), walks the active rows other than the floor in the
+ * table's order, each holding round(1 000 000 / N) parts; past them it lands on the floor (null).
+ */
+export function drawRow<T extends { kind: VaultRewardKind; odds_in: number | null }>(rows: readonly T[], r: number): T | null {
+  let edge = 0;
+  for (const row of rows) {
+    if (row.kind === 'I_WAS_THERE' || !row.odds_in) continue;
+    edge += rewardParts(row.odds_in);
+    if (r < edge) return row;
+  }
+  return null;
+}
+
+/** Where what a kind holds goes (E9 "credits in YOUR ACCOUNT, products in YOUR ORDERS"); the card goes nowhere. */
+export function vaultWhereOf(kind: VaultRewardKind): VaultWhere {
+  if (kind === 'CREDIT' || kind === 'CREDIT_TO_GIVE' || kind === 'GUARANTEED') return 'ACCOUNT';
+  if (kind === 'I_WAS_THERE') return 'NONE';
+  return 'ORDERS';
+}
+
+/** A vault opened, as its reveal shows it (POST /api/v1/account/vaults/:id/open, step Q3.9). */
+export interface VaultReveal {
+  vaultId: string;
+  kind: VaultRewardKind;
+  /** The reveal's large words (`€25`, `I WAS THERE`) and its line. */
+  prize: string;
+  line: string | null;
+  /** Its published odds, `1 IN 200` (the card's when the card was given). */
+  odds: string;
+  /** GUARANTEED, VAULT EDITION, THE PIECE (N14): the slower opening and the second note (D15). */
+  rare: boolean;
+  where: VaultWhere;
+  openedAt: Date;
+  /** A credit to give's one-time link code (XXXX-XXXX-XXXX), to its owner while it can be accepted; null otherwise. */
+  giftCode: string | null;
+}
+
+export const vaultNotFound = () => notFound('Vault', 'VAULT_NOT_FOUND');
+export const vaultExpired = () => conflict('VAULT_EXPIRED', 'This vault was kept 30 days and can no longer be opened.');
+export const vaultRevoked = () => conflict('VAULT_REVOKED', 'This vault went back with its piece.');
+export const vaultGiftNotFound = () => notFound('Gift', 'VAULT_GIFT_NOT_FOUND');
+export const vaultGiftEnded = () => conflict('VAULT_GIFT_ENDED', 'This credit can no longer be accepted.');
+export const vaultGiftNotForYou = (own: boolean) =>
+  conflict('VAULT_GIFT_NOT_FOR_YOU', own ? 'This credit is yours to give to a friend.' : 'This credit is for a friend’s first piece: an account that holds a piece cannot accept it.');
+
+/** The HMAC key of the credits to give: HKDF-SHA256 of COOKIE_SECRET, info `orbes/vault-gift/v1` (rotating it ends the open ones). */
+export function deriveVaultGiftKey(config: Pick<AppConfig, 'cookieSecret'>): Uint8Array {
+  return deriveSubkey(utf8(config.cookieSecret), VAULT_GIFT_KEY_INFO, { salt: 'ORBES' });
+}
+
+/**
+ * A vault's credit-to-give code, canonical: 12 Crockford characters from HMAC-SHA256(key, `code:` + its vault), so the
+ * server can show it again to its owner (OPENED's GIVE IT) while no one without the key can make it; one per vault.
+ */
+export function vaultGiftCode(vaultId: string, key: Uint8Array): string {
+  const mac = createHmac('sha256', key).update(`code:${vaultId.toLowerCase()}`, 'utf8').digest();
+  let out = '';
+  for (let i = 0; i < VAULT_GIFT_CODE_LENGTH; i++) out += CROCKFORD_ALPHABET[mac[i]! & 0x1f];
+  return out;
+}
+
+/**
+ * The lookup value of a credit-to-give code (any accepted spelling): HMAC-SHA256 of the canonical code under the key, as
+ * a transfer code's (`vault_gifts.code_hash`); undefined when malformed.
+ */
+export function hashVaultGiftCode(code: unknown, key: Uint8Array): Uint8Array | undefined {
+  const canonical = normalizeCrockford(code, VAULT_GIFT_CODE_LENGTH);
+  if (canonical === undefined) return undefined;
+  return new Uint8Array(createHmac('sha256', key).update(canonical, 'utf8').digest());
+}
+
+/** A credit to give as its link reads it (GET …/vaults/gifts/:code, step Q3.9): never anything of the giver. */
+export interface VaultGiftView {
+  /** `€30`, as the vault writes it. */
+  amount: string;
+  amountMinor: number;
+  currency: string;
+  /** Until when it can be accepted, and its Paris day. */
+  expiresAt: Date;
+  expiresDay: string;
+  /** OPEN, ACCEPTED (by this account: its credit), ENDED (past its 30 days, or accepted by another). */
+  state: 'OPEN' | 'ACCEPTED' | 'ENDED';
+  /** OPEN and this account may accept it; a signed-out reader: null. */
+  canAccept: boolean | null;
+  /** Why this account cannot accept it, in words; null when it can (or nobody is signed in). */
+  refusal: string | null;
+}
+
+/** A row of the house table as the opening reads it. */
+export interface DrawRow {
+  id: string;
+  kind: VaultRewardKind;
+  odds_in: number | null;
+  quantity: number | null;
+  given: number;
+  amount_minor: number | null;
+  currency: string | null;
+  model_id: string | null;
+  addon_id: string | null;
+  mode: VaultRewardMode | null;
+  line: string | null;
+  position: number;
+  created_at: Date;
+}
+
+/** The vault as the opening reads it. */
+interface OpeningVault {
+  id: string;
+  account_id: string;
+  source: VaultSource;
+  drop_id: string | null;
+  entry_id: string | null;
+}
+
+/** What a row drawn can give now: its words and what its delivery needs; or why it cannot (its odds then go to the card). */
+type RewardPick =
+  | { ok: true; prize: string; line: string | null; addonId?: string; amountMinor?: number; currency?: string }
+  | { ok: false; why: 'QUANTITY' | 'ADDON' | 'MODEL' | 'NO_UNIT' | 'NOT_LIVE' | 'AWAITS_Q3_7' };
+
+/** Words cut to a column's length (`…` last). */
+function fit(s: string, max: number): string {
+  const chars = [...s.trim().replace(/\s+/g, ' ')];
+  return chars.length <= max ? chars.join('') : `${chars.slice(0, max - 1).join('')}…`;
+}
+
+/** Whether a model has a unit to reserve for the winner at the house's location: in `size` when named (whatever its case), else in any size offered. */
+async function modelHasUnit(tx: Db, modelId: string, size: string | null): Promise<boolean> {
+  const location = await defaultLocationId(tx);
+  const skus = await tx.selectFrom('skus').select(['id', 'size_label']).where('model_id', '=', modelId).where('set_aside_at', 'is', null).orderBy('code').execute();
+  for (const k of skus) {
+    if (size !== null && (k.size_label ?? '').toUpperCase() !== size.toUpperCase()) continue;
+    if ((await stockLevel(tx, k.id, location)).available >= 1) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether a row drawn can give, and its words (plan §2.2): its quantity not reached; an add-on (ADDON, a PRODUCT of an
+ * add-on) still active and of kind PRODUCT (E7: never a service); a model (a PRODUCT of a model, a VAULT EDITION) still
+ * offered, a VAULT EDITION's marked vault-only and a PRODUCT's not, with a unit to reserve when won FREE (N12); THE PIECE
+ * only for a LIVE vault (N5), the release's model with a unit in the entry's size outside the release. A product won
+ * FREE, a VAULT EDITION and THE PIECE are VAULT orders (step Q3.7): until that step they give the card.
+ */
+export async function rewardPick(tx: Db, row: DrawRow, v: OpeningVault): Promise<RewardPick> {
+  if (row.quantity !== null && row.given >= row.quantity) return { ok: false, why: 'QUANTITY' };
+  switch (row.kind) {
+    case 'CREDIT': {
+      const amount = vaultMoney(row.amount_minor!, row.currency!);
+      return { ok: true, prize: amount, line: VAULT_REVEAL.credit, amountMinor: row.amount_minor!, currency: row.currency! };
+    }
+    case 'CREDIT_TO_GIVE':
+      return { ok: true, prize: VAULT_REVEAL.toGive.prize(vaultMoney(row.amount_minor!, row.currency!)), line: VAULT_REVEAL.toGive.line, amountMinor: row.amount_minor!, currency: row.currency! };
+    case 'GUARANTEED':
+      // Never refused for want of a release: a guarantee waits for the next one (§2.4).
+      return { ok: true, prize: VAULT_REVEAL.guaranteed.prize, line: VAULT_REVEAL.guaranteed.line };
+    case 'I_WAS_THERE':
+      return { ok: true, prize: VAULT_REVEAL.card.prize, line: v.source === 'LIVE' ? VAULT_REVEAL.card.release : VAULT_REVEAL.card.other };
+    case 'ADDON':
+    case 'PRODUCT': {
+      if (row.addon_id) {
+        const a = await tx.selectFrom('addon_items').select(['name', 'active', 'kind']).where('id', '=', row.addon_id).executeTakeFirst();
+        if (!a || !a.active || a.kind !== 'PRODUCT') return { ok: false, why: 'ADDON' };
+        const line = row.kind === 'PRODUCT' && row.mode === 'RIGHT_TO_BUY' ? VAULT_REVEAL.rightToBuy : VAULT_REVEAL.addon;
+        return { ok: true, prize: fit(a.name.toUpperCase(), VAULT_PRIZE_MAX), line, addonId: row.addon_id };
+      }
+      const m = await tx.selectFrom('models').select(['name', 'variant_label', 'active', 'discontinued_at', 'vault_only']).where('id', '=', row.model_id!).executeTakeFirst();
+      if (!m || !m.active || m.discontinued_at !== null || m.vault_only) return { ok: false, why: 'MODEL' };
+      const prize = fit(pieceName(m.name, m.variant_label), VAULT_PRIZE_MAX);
+      if (row.mode === 'RIGHT_TO_BUY') return { ok: true, prize, line: VAULT_REVEAL.rightToBuy };
+      if (!(await modelHasUnit(tx, row.model_id!, null))) return { ok: false, why: 'NO_UNIT' };
+      return { ok: false, why: 'AWAITS_Q3_7' };
+    }
+    case 'VAULT_EDITION': {
+      const m = await tx.selectFrom('models').select(['active', 'discontinued_at', 'vault_only']).where('id', '=', row.model_id!).executeTakeFirst();
+      if (!m || !m.active || m.discontinued_at !== null || !m.vault_only) return { ok: false, why: 'MODEL' };
+      if (!(await modelHasUnit(tx, row.model_id!, null))) return { ok: false, why: 'NO_UNIT' };
+      return { ok: false, why: 'AWAITS_Q3_7' };
+    }
+    case 'THE_PIECE': {
+      if (v.source !== 'LIVE' || !v.drop_id || !v.entry_id) return { ok: false, why: 'NOT_LIVE' };
+      const r = await tx
+        .selectFrom('live_entries as e')
+        .innerJoin('drop_sizes as z', 'z.id', 'e.size_id')
+        .innerJoin('drops as d', 'd.id', 'e.drop_id')
+        .select(['d.model_id', 'z.label'])
+        .where('e.id', '=', v.entry_id)
+        .executeTakeFirst();
+      if (!r?.model_id) return { ok: false, why: 'NOT_LIVE' };
+      if (!(await modelHasUnit(tx, r.model_id, r.label))) return { ok: false, why: 'NO_UNIT' };
+      return { ok: false, why: 'AWAITS_Q3_7' };
+    }
+  }
+}
+
 // ── The service ────────────────────────────────────────────────────────────
 
 export interface VaultServiceDeps {
@@ -581,6 +839,12 @@ export interface VaultServiceDeps {
   /** YOUR PROFILE's completion, for the ledger's row (N21). */
   profiles: ProfileService;
   clock?: Clock;
+  /** The draw's source of randomness: an integer in [0, max). `crypto.randomInt`, a cryptographic source alone; a test injects its own. */
+  random?: (max: number) => number;
+  /** 32-byte HMAC key of the credits to give (deriveVaultGiftKey; the context always passes it, a test gets a random one). */
+  giftKey?: Uint8Array;
+  /** The LIVE releases' frame gate: a guarantee won and bound to a QUEUED entry changes whom the next batches reach (D9). */
+  liveFrames?: LiveFrameGate;
 }
 
 export class VaultService {
@@ -588,12 +852,20 @@ export class VaultService {
   private readonly audit: AuditService;
   private readonly profiles: ProfileService;
   private readonly clock: Clock;
+  private readonly random: (max: number) => number;
+  private readonly giftKey: Uint8Array;
+  private readonly liveFrames: LiveFrameGate | null;
 
   constructor(deps: VaultServiceDeps) {
     this.db = deps.db;
     this.audit = deps.audit;
     this.profiles = deps.profiles;
     this.clock = deps.clock ?? systemClock;
+    this.random = deps.random ?? ((max: number) => randomInt(max));
+    const key = deps.giftKey ?? new Uint8Array(randomBytes(32));
+    if (!(key instanceof Uint8Array) || key.length !== 32) throw new RangeError('giftKey must be 32 bytes');
+    this.giftKey = key;
+    this.liveFrames = deps.liveFrames ?? null;
   }
 
   /** `giveVault` in its own transaction, its audit recorded there (the house's gifts, the tests). */
@@ -602,6 +874,276 @@ export class VaultService {
       const given = await giveVault(tx, occasion, now);
       for (const n of given.notes) await this.audit.record(n, tx);
       return given;
+    });
+  }
+
+  // ── The opening ──────────────────────────────────────────────────────────
+
+  /**
+   * A vault opened by its account (POST /api/v1/account/vaults/:id/open, step Q3.9; see the head of this file): the draw,
+   * the outcome written once, its delivery and its FROM ORBES receipt, in one transaction; an opened vault's outcome read
+   * again. 404 VAULT_NOT_FOUND (unknown, another account's, an account not ACTIVE), 403 ACCOUNT_LOCKED, 409 VAULT_EXPIRED
+   * and VAULT_REVOKED. Audited `vault.open`.
+   */
+  async open(accountId: string, vaultId: string, now: Date = this.clock()): Promise<VaultReveal> {
+    if (typeof accountId !== 'string' || !UUID_RE.test(accountId) || typeof vaultId !== 'string' || !UUID_RE.test(vaultId)) throw vaultNotFound();
+    const account = accountId.toLowerCase();
+    const id = vaultId.toLowerCase();
+    return withLiveChanges(this.liveFrames, (changes) =>
+      inTransaction(this.db, async (tx) => {
+        const v = await tx.selectFrom('vaults').selectAll().where('id', '=', id).forUpdate().executeTakeFirst();
+        if (!v || v.account_id !== account) throw vaultNotFound();
+        // Opened already (a lost answer, a second press, two at once): its outcome, never a second draw.
+        if (v.opened_at) return this.revealOf(tx, v, now);
+        const state = vaultState(v, now);
+        if (state === 'REVOKED') throw vaultRevoked();
+        if (state === 'EXPIRED') throw vaultExpired();
+        const a = await tx.selectFrom('accounts').select('status').where('id', '=', account).executeTakeFirst();
+        if (a?.status === 'LOCKED') throw customerAccountLocked();
+        if (a?.status !== 'ACTIVE') throw vaultNotFound();
+
+        // The table, locked as its settings lock it (the floor's row first, then every active row by id), so an opening and
+        // a change of CLUB > THE VAULT never wait for each other in a circle; drawn in its own order (N15).
+        await lockTable(tx);
+        const rows = (await tx
+          .selectFrom('vault_rewards')
+          .select(['id', 'kind', 'odds_in', 'quantity', 'given', 'amount_minor', 'currency', 'model_id', 'addon_id', 'mode', 'line', 'position', 'created_at'])
+          .where('active', '=', true)
+          .orderBy('id')
+          .forUpdate()
+          .execute()) as DrawRow[];
+        const ordered = [...rows].sort((x, y) => x.position - y.position || new Date(x.created_at).getTime() - new Date(y.created_at).getTime() || x.id.localeCompare(y.id));
+        const floor = ordered.find((r) => r.kind === 'I_WAS_THERE')!;
+        const others = ordered.filter((r) => r.kind !== 'I_WAS_THERE');
+        const floorOdds = floorOddsIn(Math.max(0, VAULT_DRAW_PARTS - others.reduce((n, r) => n + (r.odds_in ? rewardParts(r.odds_in) : 0), 0)));
+        const drawn = drawRow(others, this.random(VAULT_DRAW_PARTS));
+
+        let row = drawn ?? floor;
+        let pick = await rewardPick(tx, row, v);
+        let fellBack: string | null = null;
+        if (!pick.ok) {
+          // "A reward that runs out sends its odds to the card (published odds never change)": the card, at its own odds.
+          fellBack = pick.why;
+          row = floor;
+          pick = await rewardPick(tx, floor, v);
+        }
+        if (!pick.ok) throw new Error('the I WAS THERE floor always gives');
+        // The published odds: the drawn row's own; the card's (the rest of the table) when the card is given. A table that
+        // leaves the card no part gives it only in a row's place: that row's odds then.
+        const odds = row === floor ? oddsText(floorOdds ?? drawn?.odds_in ?? 1) : oddsText(row.odds_in!);
+        const rare = VAULT_RARE_KINDS.includes(row.kind);
+        const notes: AuditRecordInput[] = [];
+        const done = await this.deliver(tx, v, row, pick, now, notes, changes);
+
+        await tx
+          .updateTable('vaults')
+          .set({
+            opened_at: now,
+            reward_id: row.id,
+            reward_kind: row.kind,
+            prize: pick.prize,
+            prize_line: pick.line === null ? null : fit(pick.line, VAULT_PRIZE_LINE_MAX),
+            odds_text: odds,
+            rare,
+            value_minor: done.valueMinor,
+            currency: done.valueMinor === null ? null : done.currency,
+            cost_minor: done.costMinor,
+            grant_id: done.grantId,
+            guarantee_id: done.guaranteeId,
+            gift_id: done.giftId,
+            offer_until: done.offerUntil,
+          })
+          .where('id', '=', v.id)
+          .where('opened_at', 'is', null)
+          .execute();
+        await tx.updateTable('vault_rewards').set({ given: sql<number>`given + 1` }).where('id', '=', row.id).execute();
+
+        // E9 "plus a FROM ORBES message": what it held and where it is.
+        const where = vaultWhereOf(row.kind);
+        const words = vaultOpenedWords({ prize: pick.prize, line: pick.line, where });
+        await tx
+          .insertInto('house_deliveries')
+          .values({ account_id: account, source: 'VAULT', title: deliveredTitle(words.title) ?? words.title, body: deliveredBody(words.body) ?? words.body, dedupe_key: `VAULT_OPENED:${v.id}`, delivered_at: now })
+          .onConflict((oc) => oc.column('dedupe_key').doNothing())
+          .execute();
+
+        await this.audit.record(
+          {
+            actor: { type: 'account', id: account },
+            action: 'vault.open',
+            targetType: 'vault',
+            targetId: v.id,
+            details: {
+              source: v.source,
+              kind: row.kind,
+              rare,
+              rewardId: row.id,
+              ...(fellBack ? { toTheCard: true } : {}),
+              ...(done.grantId ? { grantId: done.grantId } : {}),
+              ...(done.guaranteeId ? { guaranteeId: done.guaranteeId } : {}),
+              ...(done.giftId ? { giftId: done.giftId } : {}),
+              ...(done.offerUntil ? { offerUntil: done.offerUntil.toISOString() } : {}),
+            },
+          },
+          tx,
+        );
+        for (const n of notes) await this.audit.record(n, tx);
+        return { vaultId: v.id, kind: row.kind, prize: pick.prize, line: pick.line, odds, rare, where, openedAt: now, giftCode: done.giftId ? formatGrouped(vaultGiftCode(v.id, this.giftKey)) : null };
+      }),
+    );
+  }
+
+  /**
+   * What the row drawn gives, delivered where it belongs (plan §2.4), in the opening's transaction: the links the vault
+   * keeps (its credit, guarantee, gift), its offer's end, its value (a credit's face value) and its cost (N29: a
+   * credit's face value; the card nothing; a product's at the report, step Q3.12).
+   */
+  private async deliver(
+    tx: Db,
+    v: OpeningVault,
+    row: DrawRow,
+    pick: Extract<RewardPick, { ok: true }>,
+    now: Date,
+    notes: AuditRecordInput[],
+    changes: LiveChanges,
+  ): Promise<{ grantId: string | null; guaranteeId: string | null; giftId: string | null; offerUntil: Date | null; valueMinor: number | null; currency: string | null; costMinor: number | null }> {
+    const none = { grantId: null, guaranteeId: null, giftId: null, offerUntil: null, valueMinor: null, currency: null, costMinor: null };
+    switch (row.kind) {
+      case 'CREDIT': {
+        // A credit like the birthday and warranty credits: creditBalances, Apply credit, CREDIT · VAULT, the export.
+        const grant = await tx
+          .insertInto('tier_grants')
+          .values({ account_id: v.account_id, tier: null, kind: 'VAULT', vault_id: v.id, granted_at: now, amount_minor: pick.amountMinor!, currency: pick.currency!, expires_at: vaultRewardUntil(now) })
+          .returning('id')
+          .executeTakeFirstOrThrow();
+        return { ...none, grantId: grant.id, valueMinor: pick.amountMinor!, currency: pick.currency!, costMinor: pick.amountMinor! };
+      }
+      case 'CREDIT_TO_GIVE': {
+        const gift = await tx
+          .insertInto('vault_gifts')
+          .values({
+            vault_id: v.id,
+            code_hash: hashVaultGiftCode(vaultGiftCode(v.id, this.giftKey), this.giftKey)!,
+            amount_minor: pick.amountMinor!,
+            currency: pick.currency!,
+            created_at: now,
+            expires_at: new Date(now.getTime() + VAULT_GIFT_DAYS * 24 * HOUR_MS),
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow();
+        return { ...none, giftId: gift.id, valueMinor: pick.amountMinor!, currency: pick.currency!, costMinor: pick.amountMinor! };
+      }
+      case 'GUARANTEED': {
+        const g = await grantFromVault(tx, { accountId: v.account_id, vaultId: v.id }, now, notes, changes);
+        return { ...none, guaranteeId: g.id };
+      }
+      case 'ADDON':
+        // A free add-on on the next order, within 30 days (N11).
+        return { ...none, offerUntil: vaultRewardUntil(now) };
+      case 'PRODUCT':
+        // Under its RIGHT TO BUY, 24 hours at its usual price (round 2); an add-on won FREE, as ADDON.
+        return { ...none, offerUntil: row.mode === 'RIGHT_TO_BUY' ? new Date(now.getTime() + VAULT_RIGHT_TO_BUY_MS) : vaultRewardUntil(now) };
+      case 'I_WAS_THERE':
+        // Nothing but its card (saved as an image, D11).
+        return { ...none, costMinor: 0 };
+      default:
+        // VAULT EDITION and THE PIECE give the card until step Q3.7 (rewardPick).
+        throw new Error(`a ${row.kind} is not delivered at the opening yet`);
+    }
+  }
+
+  /** An opened vault's reveal as written at its opening (its gift's code while it can be accepted). */
+  private async revealOf(db: Db, v: { id: string; reward_kind: VaultRewardKind | null; prize: string | null; prize_line: string | null; odds_text: string | null; rare: boolean | null; opened_at: Date | null; gift_id: string | null }, now: Date): Promise<VaultReveal> {
+    const kind = v.reward_kind!;
+    let giftCode: string | null = null;
+    if (v.gift_id) {
+      const g = await db.selectFrom('vault_gifts').select(['accepted_by', 'expires_at']).where('id', '=', v.gift_id).executeTakeFirst();
+      if (g && g.accepted_by === null && new Date(g.expires_at).getTime() > now.getTime()) giftCode = formatGrouped(vaultGiftCode(v.id, this.giftKey));
+    }
+    return { vaultId: v.id, kind, prize: v.prize!, line: v.prize_line, odds: v.odds_text!, rare: v.rare === true, where: vaultWhereOf(kind), openedAt: new Date(v.opened_at!), giftCode };
+  }
+
+  // ── A credit to give (N10) ───────────────────────────────────────────────
+
+  /**
+   * A credit to give as its link reads it (GET /api/v1/account/vaults/gifts/:code, step Q3.9), for `accountId` when
+   * signed in (null otherwise): its amount, until when, its state, and whether this account can accept it (holding no
+   * piece, not its giver). 404 VAULT_GIFT_NOT_FOUND for a code not known. Nothing of the giver.
+   */
+  async gift(code: unknown, accountId: string | null, now: Date = this.clock()): Promise<VaultGiftView> {
+    const hash = hashVaultGiftCode(code, this.giftKey);
+    if (!hash) throw vaultGiftNotFound();
+    const g = await this.db
+      .selectFrom('vault_gifts as g')
+      .innerJoin('vaults as v', 'v.id', 'g.vault_id')
+      .select(['g.amount_minor', 'g.currency', 'g.expires_at', 'g.accepted_by', 'v.account_id as giver'])
+      .where('g.code_hash', '=', hash)
+      .executeTakeFirst();
+    if (!g) throw vaultGiftNotFound();
+    const me = accountId && UUID_RE.test(accountId) ? accountId.toLowerCase() : null;
+    const expiresAt = new Date(g.expires_at);
+    const state: VaultGiftView['state'] = g.accepted_by !== null ? (g.accepted_by === me ? 'ACCEPTED' : 'ENDED') : expiresAt.getTime() <= now.getTime() ? 'ENDED' : 'OPEN';
+    let refusal: string | null = null;
+    if (me && state === 'OPEN') refusal = await this.giftRefusal(this.db, g.giver, me, now);
+    else if (me && state === 'ENDED') refusal = vaultGiftEnded().message;
+    return {
+      amount: vaultMoney(g.amount_minor, g.currency),
+      amountMinor: g.amount_minor,
+      currency: g.currency,
+      expiresAt,
+      expiresDay: parisDay(expiresAt),
+      state,
+      canAccept: me === null ? null : state === 'OPEN' && refusal === null,
+      refusal,
+    };
+  }
+
+  /** Why `me` cannot accept a giver's credit (its giver; an account holding a piece), in words; null when it can. */
+  private async giftRefusal(db: Db, giver: string, me: string, now: Date): Promise<string | null> {
+    if (giver === me) return vaultGiftNotForYou(true).message;
+    if ((await tierOf(db, me, now)).pieces > 0) return vaultGiftNotForYou(false).message;
+    return null;
+  }
+
+  /**
+   * A credit to give accepted (POST /api/v1/account/vaults/gifts/:code/accept, step Q3.9) by a signed-in account that
+   * holds no piece and is not its giver: a VAULT credit of its amount on that account, usable while it holds no piece
+   * ("a credit for a friend's first piece", N10), for 30 days from now; the gift accepted once. Accepting writes nothing
+   * else: never `accounts.invited_by` (the FRIEND source stays the personal invitation link's alone; round 3, N10).
+   * The same account again: its credit, unchanged. 404 VAULT_GIFT_NOT_FOUND, 409 VAULT_GIFT_ENDED (past its 30 days, or
+   * accepted by another), 409 VAULT_GIFT_NOT_FOR_YOU, 403 ACCOUNT_LOCKED. Audited `vault.gift.accept`.
+   */
+  async acceptGift(accountId: string, code: unknown, now: Date = this.clock()): Promise<{ grantId: string; amountMinor: number; currency: string; expiresAt: Date }> {
+    if (typeof accountId !== 'string' || !UUID_RE.test(accountId)) throw vaultGiftNotFound();
+    const me = accountId.toLowerCase();
+    const hash = hashVaultGiftCode(code, this.giftKey);
+    if (!hash) throw vaultGiftNotFound();
+    return inTransaction(this.db, async (tx) => {
+      const g = await tx.selectFrom('vault_gifts').selectAll().where('code_hash', '=', hash).forUpdate().executeTakeFirst();
+      if (!g) throw vaultGiftNotFound();
+      if (g.accepted_by !== null) {
+        if (g.accepted_by !== me) throw vaultGiftEnded();
+        const credit = await tx.selectFrom('tier_grants').select(['id', 'amount_minor', 'currency', 'expires_at']).where('id', '=', g.grant_id!).executeTakeFirstOrThrow();
+        return { grantId: credit.id, amountMinor: credit.amount_minor!, currency: credit.currency!, expiresAt: new Date(credit.expires_at!) };
+      }
+      if (new Date(g.expires_at).getTime() <= now.getTime()) throw vaultGiftEnded();
+      // The friend's row: two first orders or two acceptances of one account count each other.
+      const a = await tx.selectFrom('accounts').select('status').where('id', '=', me).forNoKeyUpdate().executeTakeFirst();
+      if (!a) throw vaultGiftNotFound();
+      if (a.status === 'LOCKED') throw customerAccountLocked();
+      if (a.status !== 'ACTIVE') throw vaultGiftNotFound();
+      const giver = await tx.selectFrom('vaults').select('account_id').where('id', '=', g.vault_id).executeTakeFirstOrThrow();
+      if (giver.account_id === me) throw vaultGiftNotForYou(true);
+      if ((await tierOf(tx, me, now)).pieces > 0) throw vaultGiftNotForYou(false);
+      const expiresAt = vaultRewardUntil(now);
+      const grant = await tx
+        .insertInto('tier_grants')
+        .values({ account_id: me, tier: null, kind: 'VAULT', vault_id: g.vault_id, usable_while_no_piece: true, granted_at: now, amount_minor: g.amount_minor, currency: g.currency, expires_at: expiresAt })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      await tx.updateTable('vault_gifts').set({ accepted_by: me, accepted_at: now, grant_id: grant.id }).where('id', '=', g.id).where('accepted_by', 'is', null).execute();
+      await this.audit.record({ actor: { type: 'account', id: me }, action: 'vault.gift.accept', targetType: 'vault_gift', targetId: g.id, details: { vaultId: g.vault_id, grantId: grant.id } }, tx);
+      return { grantId: grant.id, amountMinor: g.amount_minor, currency: g.currency, expiresAt };
     });
   }
 
@@ -630,6 +1172,7 @@ export class VaultService {
       .leftJoin('sets as ds', 'ds.id', 'd.set_id')
       .leftJoin('products as p', 'p.id', 'v.product_id')
       .leftJoin('models as pm', 'pm.id', 'p.model_id')
+      .leftJoin('vault_gifts as g', 'g.id', 'v.gift_id')
       .select([
         'v.id',
         'v.source',
@@ -645,6 +1188,9 @@ export class VaultService {
         'ds.name as drop_set',
         'pm.name as piece_model',
         'pm.variant_label as piece_variant',
+        'v.gift_id',
+        'g.accepted_by as gift_accepted_by',
+        'g.expires_at as gift_expires_at',
       ])
       .where('v.account_id', '=', id)
       .where('v.revoked_at', 'is', null)
@@ -666,7 +1212,10 @@ export class VaultService {
         const openedAt = new Date(r.opened_at!);
         const kind = r.reward_kind!;
         const prize = r.prize ?? '';
-        return { id: r.id, source: r.source, label: VAULT_SOURCE_LABELS[r.source], openedAt, openedDay: parisDay(openedAt), kind, prize, prizeLine: r.prize_line, held: vaultHeld(kind, prize) };
+        const gift = r.gift_id
+          ? { code: r.gift_accepted_by === null && r.gift_expires_at !== null && new Date(r.gift_expires_at).getTime() > now.getTime() ? formatGrouped(vaultGiftCode(r.id, this.giftKey)) : null, given: r.gift_accepted_by !== null }
+          : null;
+        return { id: r.id, source: r.source, label: VAULT_SOURCE_LABELS[r.source], openedAt, openedDay: parisDay(openedAt), kind, prize, prizeLine: r.prize_line, held: vaultHeld(kind, prize), gift };
       });
     return { waiting, opened, ledger: await this.ledger(id, now), waitingCount: waiting.length };
   }

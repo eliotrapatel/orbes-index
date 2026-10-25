@@ -5,8 +5,9 @@
  *
  *   what it covers  a chosen release (RELEASE: exactly that one; not cancelled nor over, not an after-room, opening by
  *                   the validity date), the next release of a model (MODEL: the model, and its variants when it is a main
- *                   model; a variant covers itself) or of a collection (COLLECTION: any model of it). After-rooms are
- *                   never covered.
+ *                   model; a variant covers itself) or of a collection (COLLECTION: any model of it), or, won in a
+ *                   vault (LIVE, THE VAULT: "a guaranteed piece at the next LIVE release, any model", OP-22), the next
+ *                   LIVE RELEASE of any model. After-rooms are never covered.
  *   set aside       `covered_drop_id`: the release it is kept for. A chosen release's at the grant; the next release's at
  *                   the grant when one is published (`coverNextRelease`: the first eligible published release that opens
  *                   by `valid_until` and still has room), otherwise at the next publication of a release in its scope
@@ -40,7 +41,7 @@ import { isUniqueViolation } from '../db/pg-errors.js';
 import type { DropMode, DropRow, GuaranteeClosedReason, GuaranteeScope, GuaranteeStatus, HouseGuaranteeRow } from '../db/schema.js';
 import { GRANTED_GUARANTEE_SCOPES } from '../db/schema.js';
 import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
-import { systemClock, type Actor, type Clock } from '../types.js';
+import { SYSTEM_ACTOR, systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
 import { customerAccountLocked } from './auth.js';
 import { withLiveChanges, type LiveChanges, type LiveFrameGate } from './live-frames.js';
@@ -53,6 +54,8 @@ export const GUARANTEE_PIECES = Object.freeze({ min: 1, max: 5, default: 1 });
 export const GUARANTEE_VALID_DAYS = Object.freeze({ min: 1, max: 730, default: 90 });
 /** A note for Client Services, or a revocation's: 1 to 500 characters. */
 export const GUARANTEE_NOTE_MAX = 500;
+/** What a guarantee won in a vault covers, as the console and the export name it (scope LIVE, THE VAULT, OP-22). */
+export const LIVE_TARGET_NAME = 'Next LIVE release';
 
 /** A guarantee's state as the console and the app read it (computed, never stored). */
 export const GUARANTEE_STATES = ['WAITING', 'SET_ASIDE', 'ENTERED', 'USED', 'EXPIRED', 'REVOKED'] as const;
@@ -259,10 +262,11 @@ async function releaseScopeOf(db: Db, d: Pick<DropRow, 'model_id'>): Promise<{ m
   return { modelId: m.id, mainId: m.variant_of, collectionId: m.collection_id };
 }
 
-/** Whether a MODEL or COLLECTION guarantee covers a release's model. */
-function inScope(g: Pick<HouseGuaranteeRow, 'scope' | 'model_id' | 'collection_id'>, s: { modelId: string; mainId: string | null; collectionId: string | null }): boolean {
+/** Whether a MODEL or COLLECTION guarantee covers a release's model, or a LIVE one (THE VAULT) a LIVE RELEASE of any model. */
+function inScope(g: Pick<HouseGuaranteeRow, 'scope' | 'model_id' | 'collection_id'>, s: { modelId: string; mainId: string | null; collectionId: string | null; mode?: DropMode }): boolean {
   if (g.scope === 'MODEL') return g.model_id === s.modelId || (s.mainId !== null && g.model_id === s.mainId);
   if (g.scope === 'COLLECTION') return s.collectionId !== null && g.collection_id === s.collectionId;
+  if (g.scope === 'LIVE') return s.mode === 'LIVE';
   return false;
 }
 
@@ -293,9 +297,11 @@ export async function coverNextRelease(
     .where('d.opens_at', '<=', g.valid_until)
     .$if(opts.except !== undefined, (q) => q.where('d.id', '<>', opts.except!))
     .where((eb) =>
-      g.scope === 'MODEL'
-        ? eb.or([eb('m.id', '=', g.model_id!), eb('m.variant_of', '=', g.model_id!)])
-        : eb(eb.fn.coalesce('m.collection_id', 'main.collection_id'), '=', g.collection_id!),
+      g.scope === 'LIVE'
+        ? eb('d.mode', '=', 'LIVE')
+        : g.scope === 'MODEL'
+          ? eb.or([eb('m.id', '=', g.model_id!), eb('m.variant_of', '=', g.model_id!)])
+          : eb(eb.fn.coalesce('m.collection_id', 'main.collection_id'), '=', g.collection_id!),
     )
     .orderBy('d.opens_at')
     .orderBy('d.id')
@@ -405,23 +411,25 @@ async function bindWaitingEntry(tx: Db, g: { id: string; account_id: string; pie
 
 /**
  * A release just published (DropService.publish, LiveConsoleService.publish; its row held FOR UPDATE by the caller): the
- * waiting MODEL and COLLECTION guarantees in its scope, valid at its opening, set aside for it in grant order while they
- * fit, an account that holds one there already passed over. An after-room covers none. Noted `guarantee.cover`.
+ * waiting MODEL and COLLECTION guarantees in its scope, and for a LIVE RELEASE the waiting LIVE ones (THE VAULT), valid
+ * at its opening, set aside for it in grant order while they fit, an account that holds one there already passed over.
+ * An after-room covers none. Noted `guarantee.cover`.
  */
 export async function coverOnPublish(tx: Db, d: ReleaseRow, now: Date, actor: Actor, notes: AuditRecordInput[]): Promise<number> {
   if (d.parent_drop_id || !coverable(d, now)) return 0;
-  const scope = await releaseScopeOf(tx, d);
+  const scope = { ...(await releaseScopeOf(tx, d)), mode: d.mode };
   const waiting = await tx
     .selectFrom('house_guarantees')
     .selectAll()
     .where('status', '=', 'ACTIVE')
     .where('covered_drop_id', 'is', null)
-    .where('scope', 'in', ['MODEL', 'COLLECTION'])
+    .where('scope', 'in', d.mode === 'LIVE' ? ['MODEL', 'COLLECTION', 'LIVE'] : ['MODEL', 'COLLECTION'])
     .where('valid_until', '>=', d.opens_at)
     .where((eb) =>
       eb.or([
         eb.and([eb('scope', '=', 'MODEL'), eb('model_id', 'in', [scope.modelId, ...(scope.mainId ? [scope.mainId] : [])])]),
         ...(scope.collectionId ? [eb.and([eb('scope', '=', 'COLLECTION'), eb('collection_id', '=', scope.collectionId)])] : []),
+        ...(d.mode === 'LIVE' ? [eb('scope', '=', 'LIVE')] : []),
       ]),
     )
     .orderBy('granted_at')
@@ -536,6 +544,54 @@ export async function releaseCovered(
     carried++;
   }
   return { carried, expired };
+}
+
+/**
+ * A guarantee won in a vault (THE VAULT, lot Q3; plan §2.4 GUARANTEED, OP-22 "GUARANTEED · A piece at the next LIVE
+ * release", N13): scope LIVE, 1 piece, valid the settings' default days (to the end of that Paris day, as the Grant
+ * dialog's default), shown to its holder, granted by no one (the vault named instead), in the opening's transaction.
+ * Set aside at once for the next published LIVE RELEASE of any model that is not an after-room, opens by its validity
+ * and has room (`coverNextRelease`), and bound to its holder's waiting entry there; otherwise it waits for the next one
+ * published (`coverOnPublish`), and is carried as a model's guarantee is (`releaseCovered`). Then used as every
+ * guarantee. Noted `guarantee.grant` (the system as actor, with its vault).
+ */
+export async function grantFromVault(
+  tx: Db,
+  v: { accountId: string; vaultId: string },
+  now: Date,
+  notes: AuditRecordInput[],
+  changes?: LiveChanges,
+): Promise<{ id: string; coveredDropId: string | null; validUntil: Date }> {
+  const settings = await readGuaranteeSettings(tx);
+  const validUntil = endOfParisDay(parisDayPlus(now, settings.validDays));
+  const g = { id: '00000000-0000-0000-0000-000000000000', account_id: v.accountId, scope: 'LIVE' as const, model_id: null, collection_id: null, pieces: GUARANTEE_PIECES.min, valid_until: validUntil };
+  const cover = await coverNextRelease(tx, g, now);
+  const inserted = await tx
+    .insertInto('house_guarantees')
+    .values({
+      account_id: v.accountId,
+      scope: 'LIVE',
+      vault_id: v.vaultId,
+      pieces: g.pieces,
+      valid_until: validUntil,
+      visible: true,
+      note: null,
+      covered_drop_id: cover?.id ?? null,
+      covered_at: cover ? now : null,
+      granted_by: null,
+      granted_at: now,
+    })
+    .returning('id')
+    .executeTakeFirstOrThrow();
+  const entryId = cover ? await bindWaitingEntry(tx, { id: inserted.id, account_id: v.accountId, pieces: g.pieces }, cover, changes) : null;
+  notes.push({
+    actor: SYSTEM_ACTOR,
+    action: 'guarantee.grant',
+    targetType: 'house_guarantee',
+    targetId: inserted.id,
+    details: { accountId: v.accountId, scope: 'LIVE', vaultId: v.vaultId, pieces: g.pieces, validUntil: validUntil.toISOString(), visible: true, noted: false, coveredDropId: cover?.id ?? null, ...(entryId ? { entryId } : {}) },
+  });
+  return { id: inserted.id, coveredDropId: cover?.id ?? null, validUntil };
 }
 
 // ── Views ──────────────────────────────────────────────────────────────────
@@ -690,6 +746,8 @@ const waitingEntry = (e: { status: string } | undefined) => e !== undefined && (
 function targetOf(r: ViewRow): GuaranteeTarget {
   if (r.scope === 'MODEL') return { kind: 'MODEL', id: r.model_id!, name: r.model_name ?? '', variant: r.model_variant };
   if (r.scope === 'COLLECTION') return { kind: 'COLLECTION', id: r.collection_id!, name: r.collection_name ?? '', variant: null };
+  // Won in a vault (THE VAULT): the next LIVE RELEASE of any model; its id the vault's.
+  if (r.scope === 'LIVE') return { kind: 'LIVE', id: r.vault_id!, name: LIVE_TARGET_NAME, variant: null };
   return { kind: 'RELEASE', id: r.drop_id!, name: r.release_title ?? '', variant: null };
 }
 
@@ -831,6 +889,8 @@ export async function accountGuarantees(db: Db, accountId: string, now: Date): P
     let target: string | null;
     if (r.scope === 'MODEL') target = modelWords(r.model_name ?? '', r.model_variant);
     else if (r.scope === 'COLLECTION') target = (r.collection_name ?? '').trim().toUpperCase();
+    // Won in a vault: no release named until one is set aside for it (the app's "a coming release").
+    else if (r.scope === 'LIVE') target = null;
     else {
       const d = { mode: r.r_mode!, published_at: r.r_published_at, announce_at: r.r_announce_at, name_at: r.r_name_at };
       target = releaseShown(d, now) && (d.mode === 'DRAW' || liveNamed(d, now)) ? (r.r_title ?? '').toUpperCase() : null;

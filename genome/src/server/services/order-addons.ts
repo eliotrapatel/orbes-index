@@ -72,7 +72,7 @@ import { addonNotFound, OFFER_COLUMN, OFFER_MOMENT_WORDS, type OfferMoment } fro
 import { customerAccountLocked } from './auth.js';
 import { issueAddonCreditNotes, issueSupplementaryInvoice, type InvoiceLine } from './invoices.js';
 import { writeJournal } from './journal.js';
-import { orderPayload, ORDER_HOLDING_STATUSES } from './orders.js';
+import { baseCurrency, orderPayload, ORDER_HOLDING_STATUSES } from './orders.js';
 import { lockSku, recordMovement, stockLevel } from './stock.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
@@ -809,6 +809,8 @@ async function insertUnits(
   currency: HouseCurrency,
   by: AddonBy,
   now: Date,
+  /** THE VAULT's free add-on (source VAULT, at 0): the vault it came from. */
+  vaultId: string | null = null,
 ): Promise<{ unitIds: string[]; notes: AuditRecordInput[] }> {
   const price = s.priceMinor!;
   const rows = await tx
@@ -825,6 +827,7 @@ async function insertUnits(
         added_at: now,
         added_by_type: by.type,
         added_by: by.id,
+        vault_id: vaultId,
       })),
     )
     .returning('id')
@@ -837,10 +840,55 @@ async function insertUnits(
     await tx.updateTable('order_addon_items').set({ invoice_id: invoice.targetId! }).where('id', 'in', unitIds).execute();
     notes.push(await recordAddon(tx, o, 'order.addon.add', { addonId: s.addonId, units, unitIds, priceMinor: price, currency, invoiceId: invoice.targetId! }, by, now), invoice);
   } else {
-    notes.push(await recordAddon(tx, o, 'order.addon.add', { addonId: s.addonId, units, unitIds, priceMinor: price, currency }, by, now));
+    notes.push(await recordAddon(tx, o, 'order.addon.add', { addonId: s.addonId, units, unitIds, priceMinor: price, currency, ...(vaultId ? { vaultId } : {}) }, by, now));
   }
   return { unitIds, notes };
 }
+
+/**
+ * THE VAULT's free add-ons (lot Q3, plan §2.4 ADDON; MK V "A free add-on on your next order."; N11), in the transaction
+ * that creates `parent`, the first order of a sale, as attachGifts gives a welcome gift: each open offer of the account
+ * (a vault opened on an ADDON reward, or on a PRODUCT reward of an add-on won FREE; its 30 days not over and not used)
+ * gives `parent` one unit of its add-on at 0 (source VAULT), never a GIFT, an EXCHANGE, a VAULT order nor an order
+ * travelling with another. Only an add-on still active, of kind PRODUCT (never a service, E7), with one available at the
+ * order's location under its SKU's lock; otherwise nothing is attached and the offer waits until its end. The vaults'
+ * rows are locked first (two sales at once never use one offer twice); the offer is then marked used. Its currency is the
+ * order's (an order without one yet: its model's base currency, as a salon's add-ons). Audited `order.addon.add`.
+ */
+export async function attachVaultAddons(tx: Db, parent: OrderRow, actor: Actor, now: Date): Promise<{ unitIds: string[]; notes: AuditRecordInput[] }> {
+  const out = { unitIds: [] as string[], notes: [] as AuditRecordInput[] };
+  if (parent.channel === 'GIFT' || parent.channel === 'EXCHANGE' || parent.channel === 'VAULT' || parent.with_order_id !== null) return out;
+  const offers = await tx
+    .selectFrom('vaults as v')
+    .innerJoin('vault_rewards as r', 'r.id', 'v.reward_id')
+    .select(['v.id', 'r.addon_id'])
+    .where('v.account_id', '=', parent.account_id)
+    .where('v.offer_until', '>', now)
+    .where('v.offer_used_at', 'is', null)
+    .where('r.addon_id', 'is not', null)
+    .where((eb) => eb.or([eb('v.reward_kind', '=', 'ADDON'), eb.and([eb('v.reward_kind', '=', 'PRODUCT'), eb('r.mode', '=', 'FREE')])]))
+    .orderBy('v.offer_until')
+    .orderBy('v.id')
+    .execute();
+  if (offers.length === 0) return out;
+  const locked = new Set(
+    (await tx.selectFrom('vaults').select('id').where('id', 'in', offers.map((o) => o.id)).where('offer_used_at', 'is', null).orderBy('id').forUpdate().execute()).map((v) => v.id),
+  );
+  const currency = (HOUSE_CURRENCIES as readonly string[]).includes(parent.currency ?? '') ? (parent.currency as HouseCurrency) : ((await baseCurrency(tx, parent.model_id)) ?? 'EUR');
+  for (const offer of offers) {
+    if (!locked.has(offer.id)) continue;
+    const s = (await standings(tx, [offer.addon_id!], parent.location_id, currency)).get(offer.addon_id!);
+    if (!s || !s.active || s.kind !== 'PRODUCT') continue;
+    await lockSku(tx, s.skuId);
+    if ((await stockLevel(tx, s.skuId, parent.location_id)).available < 1) continue;
+    const added = await insertUnits(tx, parent, { ...s, priceMinor: 0 }, 1, currency, { type: 'VAULT', id: null, actor }, now, offer.id);
+    await tx.updateTable('vaults').set({ offer_used_at: now }).where('id', '=', offer.id).where('offer_used_at', 'is', null).execute();
+    out.unitIds.push(...added.unitIds);
+    out.notes.push(...added.notes);
+  }
+  return out;
+}
+
 
 /**
  * Units HELD of a locked order removed (REMOVED, the stock they held free again): after PAID, a credit note for their

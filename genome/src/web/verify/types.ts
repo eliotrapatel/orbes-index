@@ -889,6 +889,11 @@ export interface ClubInUse {
    * until when, apart from the others; for an account without a tier too. Absent from a server before it; null when none.
    */
   warrantyCredit?: { balanceMinor: number; currency: string; expiresAt: string } | null;
+  /**
+   * The vaults' credits (THE VAULT, lot Q3: a house credit won, a friend's credit for a first piece): what is left and
+   * until when, apart from the others; for an account without a tier too. Absent from a server before it; null when none.
+   */
+  vaultCredit?: { balanceMinor: number; currency: string; expiresAt: string } | null;
   care: { year: number; used: number; allowance: number | 'ALL' } | null;
   gifts: { tier: ClubTierName; model: string; state: 'PENDING' | 'WITH_ORDER'; orderReference: string | null }[];
   /** THE PROGRAM's "Credit usable on": the orders the credit is taken off (the note under CREDIT names them). */

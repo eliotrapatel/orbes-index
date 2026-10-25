@@ -15,10 +15,19 @@
  * as a reward, a VAULT EDITION's model, the quantity never below what was given, the floor fixed, the sources' limits,
  * each write audited).
  *
+ * The opening (step Q3.4; plan §2.2, §2.4, §2.7): the draw's walk over its parts and the floor's rest, where each kind
+ * goes, a reward's 30 days, the credit to give's code and its lookup, the vault's € and its FROM ORBES receipt; on the
+ * service with an injected random: each branch by its parts (rare GUARANTEED), the outcome written once with its row
+ * given + 1, its receipt and its audit, an opened vault read again (never a second draw), a row run out sent to the card
+ * at the card's published odds (never changed), the card's line for a LIVE vault and another (N4), the refusals
+ * (another account's, expired, returned, locked), and which rows can give (quantity, add-on never a service, model, a
+ * unit to reserve, THE PIECE only for a LIVE vault).
+ *
  * Under concurrency (PGlite always; PostgreSQL in genome-ci, ORBES_TEST_POSTGRES_URL): four processes giving one
- * occasion give one vault and one message.
+ * occasion give one vault and one message; two opens of one vault at once draw once.
  */
 import { randomBytes, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { testConfig } from '../../src/server/config.js';
@@ -30,21 +39,30 @@ import { AuditService } from '../../src/server/services/audit.js';
 import { ProfileService } from '../../src/server/services/profiles.js';
 import { TasteService } from '../../src/server/services/tastes.js';
 import {
+  drawRow,
   floorOddsIn,
   giveVault,
+  hashVaultGiftCode,
   occasionKey,
   oddsText,
   rewardParts,
+  rewardPick,
+  vaultGiftCode,
   vaultHeld,
+  vaultRewardUntil,
   vaultState,
   VaultService,
+  vaultWhereOf,
   VAULT_DRAW_PARTS,
   VAULT_WAIT_MS,
+  type DrawRow,
   type VaultOccasion,
 } from '../../src/server/services/vault.js';
+import { ensureSku } from '../../src/server/services/stock.js';
+import type { VaultRewardKind } from '../../src/server/db/schema.js';
 import { inTransaction } from '../../src/server/db/connection.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
-import { vaultArrivedWords, vaultSourceLine, VAULT_SOURCE_LABELS } from '../../src/shared/house-words.js';
+import { vaultArrivedWords, vaultMoney, vaultOpenedWords, vaultSourceLine, VAULT_REVEAL, VAULT_SOURCE_LABELS } from '../../src/shared/house-words.js';
 import { createTestDb } from '../support/db.js';
 import { createAccount, createLiveRelease, createModel, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
 
@@ -518,6 +536,278 @@ describe('THE VAULT’s rules (VaultService, giveVault)', () => {
   });
 });
 
+// ── The opening's draw (step Q3.4) ─────────────────────────────────────────
+
+describe('THE VAULT’s opening: the draw (pure)', () => {
+  it('walks the active rows in the table’s order, each its round(1 000 000 / N) parts, the floor the rest', () => {
+    const rows = [
+      { id: 'a', kind: 'CREDIT' as const, odds_in: 10 },
+      { id: 'floor', kind: 'I_WAS_THERE' as const, odds_in: null },
+      { id: 'b', kind: 'GUARANTEED' as const, odds_in: 4 },
+      { id: 'c', kind: 'ADDON' as const, odds_in: 200 },
+    ];
+    expect(drawRow(rows, 0)?.id).toBe('a');
+    expect(drawRow(rows, 99_999)?.id).toBe('a');
+    expect(drawRow(rows, 100_000)?.id).toBe('b');
+    expect(drawRow(rows, 349_999)?.id).toBe('b');
+    expect(drawRow(rows, 350_000)?.id).toBe('c');
+    expect(drawRow(rows, 354_999)?.id).toBe('c');
+    expect(drawRow(rows, 355_000)).toBeNull();
+    expect(drawRow(rows, VAULT_DRAW_PARTS - 1)).toBeNull();
+    expect(drawRow([], 0)).toBeNull();
+  });
+
+  it('says where each kind goes, when a reward ends, the credit to give’s code and its lookup, the vault’s € and its receipt', () => {
+    expect((['CREDIT', 'CREDIT_TO_GIVE', 'GUARANTEED', 'ADDON', 'PRODUCT', 'VAULT_EDITION', 'THE_PIECE', 'I_WAS_THERE'] as const).map(vaultWhereOf)).toEqual([
+      'ACCOUNT', 'ACCOUNT', 'ACCOUNT', 'ORDERS', 'ORDERS', 'ORDERS', 'ORDERS', 'NONE',
+    ]);
+    // 30 days, the opening's Paris day the first: opened 2 November (Paris), it ends with 1 December, Paris.
+    expect(vaultRewardUntil(z('2026-11-02T09:00:00.000Z')).toISOString()).toBe('2026-12-01T22:59:59.999Z');
+    expect(vaultRewardUntil(z('2026-11-01T23:30:00.000Z')).toISOString()).toBe('2026-12-01T22:59:59.999Z');
+    const key = new Uint8Array(randomBytes(32));
+    const id = randomUUID();
+    const code = vaultGiftCode(id, key);
+    expect(code).toMatch(/^[0-9A-HJKMNP-TV-Z]{12}$/);
+    expect(vaultGiftCode(id.toUpperCase(), key)).toBe(code);
+    expect(vaultGiftCode(randomUUID(), key)).not.toBe(code);
+    expect(vaultGiftCode(id, new Uint8Array(randomBytes(32)))).not.toBe(code);
+    const grouped = `${code.slice(0, 4)}-${code.slice(4, 8)}-${code.slice(8)}`;
+    expect(Buffer.from(hashVaultGiftCode(grouped.toLowerCase(), key)!)).toEqual(Buffer.from(hashVaultGiftCode(code, key)!));
+    expect(hashVaultGiftCode(code, key)!.length).toBe(32);
+    for (const bad of ['', 'ABC', `${code}X`, 'UUUU-UUUU-UUUU', 42, null]) expect(hashVaultGiftCode(bad, key)).toBeUndefined();
+    expect(vaultMoney(2_500, 'EUR')).toBe('€25');
+    expect(vaultMoney(3_050, 'GBP')).toBe('£30.50');
+    expect(vaultMoney(100_000_00, 'USD')).toBe('$100 000');
+    expect(vaultMoney(2_500, 'CHF')).toBe('CHF 25');
+    expect(vaultOpenedWords({ prize: '€25', line: VAULT_REVEAL.credit, where: 'ACCOUNT' })).toEqual({ title: 'FROM THE VAULT', body: 'Your vault held €25 · House credit, valid 30 days. It is in YOUR ACCOUNT.' });
+    expect(vaultOpenedWords({ prize: 'POLISHING CLOTH', line: VAULT_REVEAL.addon, where: 'ORDERS' }).body).toBe('Your vault held POLISHING CLOTH · Free on your next order. It is in YOUR ORDERS.');
+    expect(vaultOpenedWords({ prize: 'I WAS THERE', line: VAULT_REVEAL.card.other, where: 'NONE' }).body).toBe('Your vault held I WAS THERE · Your card. Save it. Save your card under THE VAULT.');
+    for (const w of [VAULT_REVEAL.credit, VAULT_REVEAL.addon, VAULT_REVEAL.guaranteed.line, VAULT_REVEAL.rightToBuy, VAULT_REVEAL.free, VAULT_REVEAL.toGive.line, VAULT_REVEAL.card.release]) {
+      expect(w).not.toMatch(/house kept|set aside|paid|odds/i);
+    }
+    // OP-22, word for word; the reference's demo lines (plan §3.11).
+    expect(VAULT_REVEAL.guaranteed).toEqual({ prize: 'GUARANTEED', line: 'A piece at the next LIVE release.' });
+    expect(VAULT_REVEAL.thePiece.line('MONOLITHE IN BLUE', '52')).toBe('MONOLITHE IN BLUE, size 52. Free.');
+    expect(VAULT_REVEAL.toGive.prize('€30')).toBe('€30 TO GIVE');
+  });
+
+  it('draws with crypto.randomInt alone, never Math.random', () => {
+    const source = readFileSync(new URL('../../src/server/services/vault.ts', import.meta.url), 'utf8');
+    expect(source).toContain('randomInt(max)');
+    expect(source).not.toMatch(/Math\.random/);
+  });
+});
+
+describe('THE VAULT’s opening: the draw (VaultService.open)', () => {
+  let t: Awaited<ReturnType<typeof createTestDb>>;
+  let ctx: AppContext;
+  let clock: ManualClock;
+  let f: LiveFixture;
+  let staff: Actor & { id: string };
+  /** The next draw's figure, and how many draws were made. */
+  let next = 0;
+  let draws = 0;
+  let opener: VaultService;
+  let france: string;
+
+  beforeAll(async () => {
+    t = await createTestDb();
+    clock = createManualClock('2026-11-02T09:00:00.000Z');
+    ctx = await createContext(testConfig(), { db: t.db, clock: clock.now, keyProvider: new MemoryKeyProvider({ env: 'test' }), ensureActiveKey: true });
+    f = await liveFixtureOn(ctx, clock);
+    staff = f.admin as Actor & { id: string };
+    opener = new VaultService({
+      db: t.db,
+      audit: ctx.audit,
+      profiles: ctx.services.profiles,
+      clock: clock.now,
+      random: (max) => {
+        expect(max).toBe(VAULT_DRAW_PARTS);
+        draws++;
+        return next;
+      },
+    });
+    france = (await t.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
+  });
+  afterAll(async () => {
+    await ctx.close();
+    await t.close();
+  });
+
+  const vault = () => ctx.services.vault;
+  const houseVault = async (accountId: string) => (await vault().give({ source: 'HOUSE', accountId, giftId: randomUUID(), givenBy: staff.id })).vaults[0]!;
+  const rowOf = (id: string) => t.db.selectFrom('vault_rewards').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
+  const vaultRow = (id: string) => t.db.selectFrom('vaults').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
+  const floorRow = () => t.db.selectFrom('vault_rewards').selectAll().where('kind', '=', 'I_WAS_THERE').executeTakeFirstOrThrow();
+  const receipts = (accountId: string) => t.db.selectFrom('house_deliveries').selectAll().where('account_id', '=', accountId).where('dedupe_key', 'like', 'VAULT_OPENED:%').execute();
+  const opens = (vaultId: string) => t.db.selectFrom('audit_logs').select(['actor_type', 'actor_id', 'details']).where('action', '=', 'vault.open').where('target_id', '=', vaultId).execute();
+
+  it('draws on the server, writes the outcome once, gives its row one more, delivers it and says so FROM ORBES; the card when the floor is drawn, at its published odds', async () => {
+    const credit = (await vault().createReward({ kind: 'CREDIT', oddsIn: 10, quantity: 1, amountMinor: 2_500, currency: 'EUR' }, staff)).rewards.find((r) => r.kind === 'CREDIT')!;
+    await vault().createReward({ kind: 'CREDIT_TO_GIVE', oddsIn: 4, quantity: 100, amountMinor: 3_000, currency: 'EUR' }, staff);
+    await vault().createReward({ kind: 'GUARANTEED', oddsIn: 200, quantity: 5 }, staff);
+    // The card holds what the table leaves: 1 000 000 − 100 000 − 250 000 − 5 000 = 645 000 parts, published 1 IN 2.
+    expect((await vault().settings()).floor).toMatchObject({ parts: 645_000, oddsText: '1 IN 2' });
+
+    const a = await createAccount(t.db);
+    const first = await houseVault(a.id);
+    next = 0;
+    const before = draws;
+    const now = clock.now();
+    const reveal = await opener.open(a.id, first.id);
+    expect(draws).toBe(before + 1);
+    expect(reveal).toEqual({ vaultId: first.id, kind: 'CREDIT', prize: '€25', line: 'House credit, valid 30 days.', odds: '1 IN 10', rare: false, where: 'ACCOUNT', openedAt: now, giftCode: null });
+    const v = await vaultRow(first.id);
+    expect(v).toMatchObject({ reward_id: credit.id, reward_kind: 'CREDIT', prize: '€25', prize_line: 'House credit, valid 30 days.', odds_text: '1 IN 10', rare: false, value_minor: 2_500, currency: 'EUR', cost_minor: 2_500, guarantee_id: null, gift_id: null, offer_until: null });
+    expect(v.opened_at).toEqual(now);
+    expect(v.grant_id).not.toBeNull();
+    expect((await rowOf(credit.id)).given).toBe(1);
+    expect((await receipts(a.id)).map((d) => [d.source, d.dedupe_key, d.title, d.body])).toEqual([
+      ['VAULT', `VAULT_OPENED:${first.id}`, 'FROM THE VAULT', 'Your vault held €25 · House credit, valid 30 days. It is in YOUR ACCOUNT.'],
+    ]);
+    expect(await opens(first.id)).toEqual([
+      { actor_type: 'account', actor_id: a.id, details: { source: 'HOUSE', kind: 'CREDIT', rare: false, rewardId: credit.id, grantId: v.grant_id } },
+    ]);
+
+    // Opened again (a lost answer, a second press): its outcome, never a second draw, no second message.
+    next = 999_999;
+    expect(await opener.open(a.id, first.id)).toEqual(reveal);
+    expect(draws).toBe(before + 1);
+    expect((await rowOf(credit.id)).given).toBe(1);
+    expect(await receipts(a.id)).toHaveLength(1);
+    expect(await opens(first.id)).toHaveLength(1);
+
+    // Each branch by its parts: CREDIT TO GIVE from 100 000, GUARANTEED (rare) from 350 000, the card from 355 000.
+    const b = await createAccount(t.db);
+    next = 100_000;
+    expect(await opener.open(b.id, (await houseVault(b.id)).id)).toMatchObject({ kind: 'CREDIT_TO_GIVE', prize: '€30 TO GIVE', line: 'For a friend’s first piece.', odds: '1 IN 4', rare: false, where: 'ACCOUNT' });
+    next = 354_999;
+    expect(await opener.open(b.id, (await houseVault(b.id)).id)).toMatchObject({ kind: 'GUARANTEED', prize: 'GUARANTEED', line: 'A piece at the next LIVE release.', odds: '1 IN 200', rare: true, where: 'ACCOUNT' });
+    next = 355_000;
+    const floorBefore = (await floorRow()).given;
+    const card = await opener.open(b.id, (await houseVault(b.id)).id);
+    expect(card).toMatchObject({ kind: 'I_WAS_THERE', prize: 'I WAS THERE', line: 'Your card. Save it.', odds: '1 IN 2', rare: false, where: 'NONE', giftCode: null });
+    expect((await floorRow()).given).toBe(floorBefore + 1);
+  });
+
+  it('sends a row that runs out to the card at the card’s published odds, which never change; the row given stays as it was', async () => {
+    const credit = (await vault().settings()).rewards.find((r) => r.kind === 'CREDIT')!;
+    expect(credit).toMatchObject({ quantity: 1, given: 1, left: 0 });
+    const a = await createAccount(t.db);
+    const v = await houseVault(a.id);
+    const floorBefore = (await floorRow()).given;
+    next = 0;
+    const reveal = await opener.open(a.id, v.id);
+    // Drawn: the credit (1 IN 10), run out: the card, at its own published odds, never the credit's.
+    expect(reveal).toMatchObject({ kind: 'I_WAS_THERE', prize: 'I WAS THERE', odds: '1 IN 2', rare: false, where: 'NONE' });
+    expect(await vaultRow(v.id)).toMatchObject({ reward_kind: 'I_WAS_THERE', odds_text: '1 IN 2', grant_id: null, value_minor: null, cost_minor: 0 });
+    expect((await rowOf(credit.id)).given).toBe(1);
+    expect((await floorRow()).given).toBe(floorBefore + 1);
+    expect((await opens(v.id))[0]!.details).toMatchObject({ kind: 'I_WAS_THERE', toTheCard: true });
+    // The table's published odds are unchanged by it: the card still 1 IN 2, the credit still 1 IN 10.
+    const s = await vault().settings();
+    expect(s.floor.oddsText).toBe('1 IN 2');
+    expect(s.rewards.find((r) => r.id === credit.id)).toMatchObject({ oddsText: '1 IN 10', active: true });
+    // The card's line names a release only for a LIVE vault (N4).
+    const blue = await t.db.insertInto('models').values({ category_id: 1, name: 'MONOLITHE', variant_label: 'Blue', variant_swatch: '#1F3A5F', type: 'RING', sku_prefix: `MON-${randomUUID().slice(0, 8)}` }).returning('id').executeTakeFirstOrThrow();
+    const r = await createLiveRelease(f, { opensAt: new Date(clock.now().getTime() + HOUR), modelId: blue.id });
+    await t.db.updateTable('drops').set({ vault_on: true }).where('id', '=', r.id).execute();
+    const start = clock.now();
+    clock.set(new Date(start.getTime() + HOUR - MINUTE));
+    await f.live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id }, a.actor);
+    const entry = await t.db.selectFrom('live_entries').select('id').where('drop_id', '=', r.id).where('account_id', '=', a.id).executeTakeFirstOrThrow();
+    const live = (await vault().give({ source: 'LIVE', accountId: a.id, dropId: r.id, entryId: entry.id })).vaults[0]!;
+    next = VAULT_DRAW_PARTS - 1;
+    expect(await opener.open(a.id, live.id)).toMatchObject({ kind: 'I_WAS_THERE', line: 'Your card for this release. Save it.' });
+  });
+
+  it('refuses another account’s vault (404), an expired one, a returned piece’s, a locked account; unknown ids read as not found', async () => {
+    const a = await createAccount(t.db);
+    const other = await createAccount(t.db);
+    const v = await houseVault(a.id);
+    await expect(opener.open(other.id, v.id)).rejects.toMatchObject({ code: 'VAULT_NOT_FOUND', httpStatus: 404 });
+    await expect(opener.open(a.id, randomUUID())).rejects.toMatchObject({ code: 'VAULT_NOT_FOUND' });
+    await expect(opener.open('nope', v.id)).rejects.toMatchObject({ code: 'VAULT_NOT_FOUND' });
+    await expect(opener.open(a.id, 'nope')).rejects.toMatchObject({ code: 'VAULT_NOT_FOUND' });
+    // Past its 30 days.
+    await expect(opener.open(a.id, v.id, new Date(new Date(v.waitsUntil).getTime()))).rejects.toMatchObject({ code: 'VAULT_EXPIRED', httpStatus: 409 });
+    // A returned piece's.
+    const [p] = await holdPieces(t.db, a.id, 1, f.modelId);
+    const piece = (await vault().give({ source: 'PIECE', accountId: a.id, productId: p! })).vaults[0]!;
+    await t.db.updateTable('vaults').set({ revoked_at: clock.now(), revoked_reason: 'RETURNED' }).where('id', '=', piece.id).execute();
+    await expect(opener.open(a.id, piece.id)).rejects.toMatchObject({ code: 'VAULT_REVOKED', httpStatus: 409 });
+    // A locked account.
+    await t.db.updateTable('accounts').set({ status: 'LOCKED' }).where('id', '=', a.id).execute();
+    await expect(opener.open(a.id, v.id)).rejects.toMatchObject({ code: 'ACCOUNT_LOCKED', httpStatus: 403 });
+    await t.db.updateTable('accounts').set({ status: 'ACTIVE' }).where('id', '=', a.id).execute();
+    expect((await vaultRow(v.id)).opened_at).toBeNull();
+  });
+
+  it('tells which rows can give (plan §2.2): its quantity, its add-on (never a service), its model, a unit to reserve, THE PIECE only for a LIVE vault', async () => {
+    const a = await createAccount(t.db);
+    const v = await vaultRow((await houseVault(a.id)).id);
+    const base: Omit<DrawRow, 'kind'> = { id: randomUUID(), odds_in: 10, quantity: null, given: 0, amount_minor: null, currency: null, model_id: null, addon_id: null, mode: null, line: null, position: 1, created_at: clock.now() };
+    const pick = (row: Partial<DrawRow> & { kind: VaultRewardKind }, onto = v) => inTransaction(t.db, (tx) => rewardPick(tx, { ...base, ...row }, onto));
+    expect(await pick({ kind: 'GUARANTEED', quantity: 3, given: 3 })).toEqual({ ok: false, why: 'QUANTITY' });
+    expect(await pick({ kind: 'GUARANTEED', quantity: 3, given: 2 })).toMatchObject({ ok: true });
+    // An add-on set aside, or a service (E7: never one; the table refuses it, a row may still name one changed since).
+    const cloth = await ctx.services.addons.create({ name: 'POLISHING CLOTH', skuCode: `ADD-CLOTH-${randomUUID().slice(0, 6)}`, prices: { EUR: 1_500 }, weightG: 20 }, staff);
+    const wrap = await ctx.services.addons.create({ kind: 'SERVICE', name: 'GIFT WRAPPING', skuCode: `ADD-WRAP-${randomUUID().slice(0, 6)}`, prices: { EUR: 500 }, offeredAt: { live: true, draw: true, salon: true, orders: true } }, staff);
+    expect(await pick({ kind: 'ADDON', addon_id: cloth.id })).toEqual({ ok: true, prize: 'POLISHING CLOTH', line: 'Free on your next order.', addonId: cloth.id });
+    expect(await pick({ kind: 'PRODUCT', addon_id: cloth.id, mode: 'RIGHT_TO_BUY' })).toMatchObject({ ok: true, line: 'Yours to buy at its price, for 24 hours.' });
+    expect(await pick({ kind: 'ADDON', addon_id: wrap.id })).toEqual({ ok: false, why: 'ADDON' });
+    expect(await pick({ kind: 'PRODUCT', addon_id: wrap.id, mode: 'FREE' })).toEqual({ ok: false, why: 'ADDON' });
+    await t.db.updateTable('addon_items').set({ active: false }).where('id', '=', cloth.id).execute();
+    expect(await pick({ kind: 'ADDON', addon_id: cloth.id })).toEqual({ ok: false, why: 'ADDON' });
+    // A model: offered, not vault-only for a PRODUCT, vault-only for a VAULT EDITION; won FREE, a unit to reserve.
+    const model = await createModel(t.db, 'ECLIPSE');
+    expect(await pick({ kind: 'PRODUCT', model_id: model, mode: 'RIGHT_TO_BUY' })).toEqual({ ok: true, prize: 'ECLIPSE', line: 'Yours to buy at its price, for 24 hours.' });
+    expect(await pick({ kind: 'PRODUCT', model_id: model, mode: 'FREE' })).toEqual({ ok: false, why: 'NO_UNIT' });
+    expect(await pick({ kind: 'VAULT_EDITION', model_id: model })).toEqual({ ok: false, why: 'MODEL' });
+    const sku = await inTransaction(t.db, (tx) => ensureSku(tx, model, '52'));
+    await ctx.services.stock.adjust({ skuId: sku, locationId: france, delta: 1, note: 'Counted.' }, staff);
+    // A unit to reserve: a VAULT order, built with step Q3.7; until then the card.
+    expect(await pick({ kind: 'PRODUCT', model_id: model, mode: 'FREE' })).toEqual({ ok: false, why: 'AWAITS_Q3_7' });
+    await t.db.updateTable('models').set({ vault_only: true }).where('id', '=', model).execute();
+    expect(await pick({ kind: 'PRODUCT', model_id: model, mode: 'RIGHT_TO_BUY' })).toEqual({ ok: false, why: 'MODEL' });
+    expect(await pick({ kind: 'VAULT_EDITION', model_id: model })).toEqual({ ok: false, why: 'AWAITS_Q3_7' });
+    await t.db.updateTable('models').set({ active: false }).where('id', '=', model).execute();
+    expect(await pick({ kind: 'VAULT_EDITION', model_id: model })).toEqual({ ok: false, why: 'MODEL' });
+    // THE PIECE: never for a vault without a release (N5); a LIVE vault's, a unit of its model in the entry's size.
+    expect(await pick({ kind: 'THE_PIECE' })).toEqual({ ok: false, why: 'NOT_LIVE' });
+    const ring = await createModel(t.db, 'ANNEAU');
+    const r = await createLiveRelease(f, { opensAt: new Date(clock.now().getTime() + HOUR), modelId: ring, sizes: [{ label: '54', stock: 1 }] });
+    await t.db.updateTable('drops').set({ vault_on: true }).where('id', '=', r.id).execute();
+    const start = clock.now();
+    clock.set(new Date(start.getTime() + HOUR - MINUTE));
+    await f.live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id }, a.actor);
+    const entry = await t.db.selectFrom('live_entries').select('id').where('drop_id', '=', r.id).where('account_id', '=', a.id).executeTakeFirstOrThrow();
+    const live = await vaultRow((await vault().give({ source: 'LIVE', accountId: a.id, dropId: r.id, entryId: entry.id })).vaults[0]!.id);
+    expect(await pick({ kind: 'THE_PIECE' }, live)).toEqual({ ok: false, why: 'NO_UNIT' });
+    const other = await inTransaction(t.db, (tx) => ensureSku(tx, ring, '56'));
+    await ctx.services.stock.adjust({ skuId: other, locationId: france, delta: 1, note: 'Counted.' }, staff);
+    expect(await pick({ kind: 'THE_PIECE' }, live)).toEqual({ ok: false, why: 'NO_UNIT' });
+    const own = await inTransaction(t.db, (tx) => ensureSku(tx, ring, '54'));
+    await ctx.services.stock.adjust({ skuId: own, locationId: france, delta: 1, note: 'Counted.' }, staff);
+    expect(await pick({ kind: 'THE_PIECE' }, live)).toEqual({ ok: false, why: 'AWAITS_Q3_7' });
+  });
+
+  it('gives the card in place of a row that cannot give, a product won free awaiting its VAULT order (step Q3.7) included', async () => {
+    // The table: a free piece of a model with a unit, alone above the floor (the others made inactive).
+    for (const r of (await vault().settings()).rewards) if (r.kind !== 'I_WAS_THERE' && r.active) await vault().deactivateReward(r.id, staff);
+    const model = await createModel(t.db, 'ORBITE');
+    const sku = await inTransaction(t.db, (tx) => ensureSku(tx, model, null));
+    await ctx.services.stock.adjust({ skuId: sku, locationId: france, delta: 1, note: 'Counted.' }, staff);
+    const product = (await vault().createReward({ kind: 'PRODUCT', oddsIn: 2, quantity: 5, modelId: model, mode: 'FREE' }, staff)).rewards.find((r) => r.kind === 'PRODUCT' && r.active)!;
+    const a = await createAccount(t.db);
+    next = 0;
+    const v = await houseVault(a.id);
+    expect(await opener.open(a.id, v.id)).toMatchObject({ kind: 'I_WAS_THERE', odds: '1 IN 2' });
+    expect((await rowOf(product.id)).given).toBe(0);
+    expect(await vaultRow(v.id)).toMatchObject({ order_id: null, offer_until: null });
+  });
+});
+
 // ── Under concurrency ──────────────────────────────────────────────────────
 
 const adminUrl = process.env.ORBES_TEST_POSTGRES_URL;
@@ -563,7 +853,7 @@ for (const backend of BACKENDS) {
     }, 60_000);
     afterAll(() => close?.());
 
-    it('four processes giving one occasion give one vault and one message; two occasions at once of one account each give theirs', async () => {
+    it('four processes giving one occasion give one vault and one message; two occasions at once of one account each give theirs; two opens at once draw once', async () => {
       const clock = createManualClock('2026-11-02T09:00:00.000Z');
       const services = [0, 1, 2, 3].map(() => {
         const audit = new AuditService({ db, clock: clock.now });
@@ -581,6 +871,16 @@ for (const backend of BACKENDS) {
       expect(await db.selectFrom('audit_logs').select('id').where('action', '=', 'vault.give').where('target_id', '=', a.id).execute()).toHaveLength(1);
       const tiers = await Promise.all([1, 2, 3].map((tier) => services[tier]!.give({ source: 'TIER', accountId: a.id, tier: tier as 1 | 2 | 3 })));
       expect(tiers.map((r) => r.vaults.length)).toEqual([1, 1, 1]);
+
+      // Two opens of one vault at once (step Q3.4): one draw, one outcome answered to both, one receipt.
+      const [v] = (await services[0]!.give({ source: 'PROFILE', accountId: a.id })).vaults;
+      const floor = await db.selectFrom('vault_rewards').select('given').where('kind', '=', 'I_WAS_THERE').executeTakeFirstOrThrow();
+      const [one, two] = await Promise.all([services[1]!.open(a.id, v!.id), services[2]!.open(a.id, v!.id)]);
+      expect(one).toEqual(two);
+      expect(one).toMatchObject({ kind: 'I_WAS_THERE', odds: '1 IN 1' });
+      expect((await db.selectFrom('vault_rewards').select('given').where('kind', '=', 'I_WAS_THERE').executeTakeFirstOrThrow()).given).toBe(floor.given + 1);
+      expect(await db.selectFrom('house_deliveries').select('id').where('dedupe_key', '=', `VAULT_OPENED:${v!.id}`).execute()).toHaveLength(1);
+      expect(await db.selectFrom('audit_logs').select('id').where('action', '=', 'vault.open').where('target_id', '=', v!.id).execute()).toHaveLength(1);
     });
   });
 }

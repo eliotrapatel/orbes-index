@@ -155,6 +155,50 @@ export function vaultArrivedWords(input: { source: VaultSourceName; detail: stri
   return { title: n === 1 ? VAULT_ARRIVED_TITLE.one : VAULT_ARRIVED_TITLE.many(n), body: [occasion, added, kept].filter((s): s is string => !!s).join(' ') };
 }
 
+// ── THE VAULT's reveal and its receipt (lot Q3, step Q3.4; plan §2.4, §2.7, §3.11) ───────────────────────────────────
+//
+// What a vault held is written once at its opening (services/vault.ts open: `vaults.prize`, `prize_line`), in the
+// reveal's words: its large words (the prize) and its line, from the reference's demo pattern (vault/the-vault.html
+// REWARDS; plan §3.11, N30), OP-22's GUARANTEED line, € kept in the reveal (OP-32, N23). Words no mockup has (the card's
+// line for a vault without a release, N4; the receipt, §2.7) are proposed for the owner's review board (N16).
+
+/** The reveal's words of each kind. */
+export const VAULT_REVEAL = Object.freeze({
+  /** Above the prize, inside the box. */
+  from: 'FROM THE VAULT',
+  /** CREDIT: its amount (`€25`) and this line. */
+  credit: 'House credit, valid 30 days.',
+  /** ADDON (and a PRODUCT reward of an add-on won FREE): its name and this line (MK V "A free add-on on your next order."). */
+  addon: 'Free on your next order.',
+  /** GUARANTEED (OP-22 "GUARANTEED · A piece at the next LIVE release"). */
+  guaranteed: Object.freeze({ prize: 'GUARANTEED', line: 'A piece at the next LIVE release.' }),
+  /** A PRODUCT reward under its RIGHT TO BUY (round 2 "24 HOURS, at its usual price"): its name and this line. */
+  rightToBuy: 'Yours to buy at its price, for 24 hours.',
+  /** A product won FREE (a piece, a VAULT EDITION without its own line): its name and this line. */
+  free: 'Yours, free. In YOUR ORDERS.',
+  /** THE PIECE: the release's piece in the entry's size. */
+  thePiece: Object.freeze({ prize: 'THE PIECE', line: (piece: string, size: string | null) => (size ? `${piece}, size ${size}. Free.` : `${piece}. Free.`) }),
+  /** A CREDIT TO GIVE: `€30 TO GIVE` and this line. */
+  toGive: Object.freeze({ prize: (amount: string) => `${amount} TO GIVE`, line: 'For a friend’s first piece.' }),
+  /** I WAS THERE (the floor): its line for a LIVE release's vault, and for a vault without a release (N4, proposed). */
+  card: Object.freeze({ prize: 'I WAS THERE', release: 'Your card for this release. Save it.', other: 'Your card. Save it.' }),
+});
+
+/** Where what a vault held went (E9 "credits in YOUR ACCOUNT, products in YOUR ORDERS"), as its receipt says it. */
+export const VAULT_WHERE = Object.freeze({ ACCOUNT: 'It is in YOUR ACCOUNT.', ORDERS: 'It is in YOUR ORDERS.', NONE: 'Save your card under THE VAULT.' } as const);
+export type VaultWhere = keyof typeof VAULT_WHERE;
+
+/** An amount as the vault writes it (OP-32 "€25 · House credit"): the symbol against the figure, `€25`, `€1 000.50`; `CHF 25`. */
+export function vaultMoney(minor: number, currency: string): string {
+  const said = houseMoney(minor, currency);
+  return currency === 'CHF' || !/^[A-Z]{3}$/.test(currency) ? said : said.replace(NBSP, '');
+}
+
+/** The FROM ORBES receipt of an opened vault (E9 "plus a FROM ORBES message"): what it held and where it is, never other odds. */
+export function vaultOpenedWords(input: { prize: string; line: string | null; where: VaultWhere }): HouseWords {
+  return { title: VAULT_REVEAL.from, body: `Your vault held ${input.prize}${input.line ? ` · ${input.line}` : ''} ${VAULT_WHERE[input.where] ?? ''}`.trim() };
+}
+
 /** The house's words as the collector app reads them (web/verify/copy.ts re-exports it). */
 export const HOUSE = Object.freeze({
   /** Each moment's default title and words (the console's RESET TO DEFAULT; what a moment says until edited). */

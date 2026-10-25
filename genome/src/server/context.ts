@@ -42,7 +42,7 @@ import { ClubProgramService } from './services/club-program.js';
 import { TierGrantService } from './services/tier-grants.js';
 import { BirthdayCreditService } from './services/birthday-credits.js';
 import { HouseMessageService, HouseSender } from './services/house-messages.js';
-import { VaultService } from './services/vault.js';
+import { deriveVaultGiftKey, VaultService } from './services/vault.js';
 import { HouseMomentService } from './services/house-moments.js';
 import { WornService } from './services/worn.js';
 import { EngagementService } from './services/engagement.js';
@@ -269,7 +269,7 @@ export interface AppServices {
   worn: WornService;
   /** The custom messages' sender (plan MACRO M2 §1.3): a pass of houseMessages.deliverDue every 30 s, always on; tests drive deliverDue. */
   houseSender: HouseSender;
-  /** THE VAULT (lot Q3): the vaults given by their sources, THE VAULT page's data, CLUB > THE VAULT's sources and table. */
+  /** THE VAULT (lot Q3): the vaults given by their sources, their opening and delivery, THE VAULT page's data, CLUB > THE VAULT's sources and table. */
   vault: VaultService;
 }
 
@@ -410,7 +410,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const tastes = new TasteService({ db, clock });
     const profiles = new ProfileService({ db, audit, tastes, clock });
     // THE VAULT's rules (lot Q3): the ledger reads YOUR PROFILE's completion.
-    const vault = new VaultService({ db, audit, profiles, clock });
+    const vault = new VaultService({ db, audit, profiles, clock, giftKey: deriveVaultGiftKey(config), liveFrames });
     const clientNotes = new ClientNoteService({ db, audit, clock });
     // The client sheet reads the profile (plan CUSTOMER INTELLIGENCE §3.6 C.4).
     const owners = new OwnerService({ db, audit, sessions, ownership, profiles, clock });
