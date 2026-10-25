@@ -2732,12 +2732,14 @@ body[data-screen="live"]:has(.view--live.live--look:not(.d-room)) .corners {
   }
 }
 
-/* CONFIRMED: an add-on PAY could not add, by its name and why, under the sentence, above the receipt. */
+/* CONFIRMED: an add-on PAY could not add, by its name and why, under the sentence, above the receipt; broken in balance,
+   never its last word alone (THE TRAVEL CASE COULD NOT BE ADDED: NONE LEFT. on a phone). */
 .live__left-out {
   margin-top: 18px;
   font-size: var(--fs-micro);
   line-height: 1.6;
   letter-spacing: var(--track-micro);
+  text-wrap: balance;
 }
 
 .live__release {
