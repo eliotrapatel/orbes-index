@@ -54,6 +54,12 @@
  * YOUR ORDERS its unit is added and removed with its words, in the order's ENGRAVING (services/orders.ts setEngraving,
  * Q2.5), and never read among the order's add-on rows.
  *
+ * THE VAULT's right to buy an add-on (lot Q3, step Q3.7, plan §2.4 PRODUCT: "RIGHT_TO_BUY = for 24 h, YOUR ORDERS offers
+ * ADD on each order still before packing at the add-on's price (Q2's path, its switch bypassed for this offer only)"):
+ * while a vault's offer of an add-on of kind PRODUCT is open (`vaults.offer_until`, not used), YOUR ORDERS offers that
+ * add-on on each order that takes add-ons even when its YOUR ORDERS switch is off (`vaultUntil` on its row), one unit at
+ * its price; added so, the offer is used (`offer_used_at`), audited `vault.buy`. Its switch on, it is added as any.
+ *
  * A service's unit (lot Q2, step Q2.2, D4: an engraving, a gift wrapping; services/addons.ts) is held nowhere: added
  * with no location and no SKU lock (always available: no count), shipped and returned with its order by its status and
  * times only (no stock movement; `returned_to_stock` false), left where it is when the order's location changes, its
@@ -134,6 +140,8 @@ export interface AddonOfferItem {
    * note under the rows); never a stock figure. Absent elsewhere and on a service.
    */
   whileAvailable?: true;
+  /** THE VAULT's right to buy (lot Q3, §2.4): offered in YOUR ORDERS by a vault until then, its switch off. Absent otherwise. */
+  vaultUntil?: Date;
 }
 
 /** A choice carried onto an order that could not be added: no unit left (NONE_LEFT), or no longer offered (NOT_OFFERED). */
@@ -891,6 +899,53 @@ export async function attachVaultAddons(tx: Db, parent: OrderRow, actor: Actor, 
 
 
 /**
+ * The account's rights to buy an add-on still open at `now` (lot Q3, §2.4: a vault opened on a PRODUCT reward of an
+ * add-on under its RIGHT TO BUY, its 24 hours not over and not used), by add-on: its vault and its end (the earliest).
+ */
+async function addonRightsToBuy(db: Db, accountId: string, now: Date, opts: { forUpdate?: boolean } = {}): Promise<Map<string, { vaultId: string; until: Date }>> {
+  let q = db
+    .selectFrom('vaults as v')
+    .innerJoin('vault_rewards as r', 'r.id', 'v.reward_id')
+    .select(['v.id', 'v.offer_until', 'r.addon_id'])
+    .where('v.account_id', '=', accountId)
+    .where('v.reward_kind', '=', 'PRODUCT')
+    .where('r.mode', '=', 'RIGHT_TO_BUY')
+    .where('r.addon_id', 'is not', null)
+    .where('v.offer_until', '>', now)
+    .where('v.offer_used_at', 'is', null)
+    .orderBy('v.offer_until')
+    .orderBy('v.id');
+  if (opts.forUpdate) q = q.forUpdate('v');
+  const out = new Map<string, { vaultId: string; until: Date }>();
+  for (const r of await q.execute()) if (!out.has(r.addon_id!)) out.set(r.addon_id!, { vaultId: r.id, until: new Date(r.offer_until!) });
+  return out;
+}
+
+/**
+ * ADD under a vault's right to buy (lot Q3, §2.4), on a locked order that takes add-ons: when the add-on is not offered
+ * in YOUR ORDERS by its switch and the account holds an open right to buy it (its vault's row locked), one unit (409
+ * ADDON_LIMIT for more) at its price in the order's currency (409 ADDON_NOT_OFFERED set aside, a service or without a
+ * price in it), one available at the order's location under its SKU's lock (409 ADDON_OUT_OF_STOCK); the offer used.
+ * Audited `order.addon.add` (by the collector) and `vault.buy`. Null when no right applies (the add-on is added as any).
+ */
+async function rightToBuyAddon(tx: Db, o: OrderRow, addonId: string, units: number, currency: HouseCurrency, by: AddonBy, now: Date): Promise<{ unitIds: string[]; notes: AuditRecordInput[] } | null> {
+  const s = (await standings(tx, [addonId], o.location_id, currency)).get(addonId);
+  if (!s || s.offered.ORDERS) return null;
+  const right = (await addonRightsToBuy(tx, o.account_id, now, { forUpdate: true })).get(addonId);
+  if (!right) return null;
+  if (!s.active || s.kind !== 'PRODUCT' || s.engraving || s.priceMinor === null) throw addonNotOffered(`${s.name} is not offered on this order.`);
+  if (units !== 1) throw addonLimit();
+  await lockSku(tx, s.skuId);
+  const held = (await tx.selectFrom('order_addon_items').select('id').where('order_id', '=', o.id).where('addon_id', '=', addonId).where('status', '=', 'HELD').execute()).length;
+  if (held + 1 > ADDON_LIMIT) throw addonLimit();
+  if ((await stockLevel(tx, s.skuId, o.location_id)).available < 1) throw addonOutOfStock(s.name);
+  const added = await insertUnits(tx, o, s, 1, currency, by, now);
+  await tx.updateTable('vaults').set({ offer_used_at: now }).where('id', '=', right.vaultId).where('offer_used_at', 'is', null).execute();
+  added.notes.push({ actor: by.actor, action: 'vault.buy', targetType: 'vault', targetId: right.vaultId, details: { orderId: o.id, addonId, unitIds: added.unitIds, priceMinor: s.priceMinor, currency } });
+  return added;
+}
+
+/**
  * Units HELD of a locked order removed (REMOVED, the stock they held free again): after PAID, a credit note for their
  * lines, on the invoice that carries each (its supplementary invoice, or the order's). One event per add-on.
  */
@@ -1236,8 +1291,20 @@ export class OrderAddonService {
     const o = await this.ownOrder(this.db, accountId, orderId);
     const reason = addonWindow(o);
     const currency = isHouseCurrency(o.currency) ? o.currency : null;
-    const offer =
-      reason === null ? (await addonOffer(this.db, { moment: 'ORDERS', dropId: null, locationId: o.location_id, currency, held: await heldByAddon(this.db, o.id) })).filter((a) => !a.engraving) : [];
+    const held = reason === null ? await heldByAddon(this.db, o.id) : new Map<string, number>();
+    const offer = reason === null ? (await addonOffer(this.db, { moment: 'ORDERS', dropId: null, locationId: o.location_id, currency, held })).filter((a) => !a.engraving) : [];
+    // THE VAULT's rights to buy an add-on (lot Q3, §2.4): one unit at its price, its switch off.
+    if (reason === null && currency !== null) {
+      const rights = await addonRightsToBuy(this.db, o.account_id, this.clock());
+      const others = [...rights.keys()].filter((id) => !offer.some((a) => a.addonId === id));
+      const standing = await standings(this.db, others, o.location_id, currency);
+      for (const id of others) {
+        const st = standing.get(id);
+        if (!st || !st.active || st.kind !== 'PRODUCT' || st.priceMinor === null || st.engraving) continue;
+        if (st.available < 1 || (held.get(id) ?? 0) >= ADDON_LIMIT) continue;
+        offer.push({ addonId: id, name: st.name, line: st.line, priceMinor: st.priceMinor, currency, maxUnits: 1, engraving: false, vaultUntil: rights.get(id)!.until });
+      }
+    }
     return { canAdd: reason === null, reason, paid: o.status === 'PAID', currency, offer };
   }
 
@@ -1254,7 +1321,9 @@ export class OrderAddonService {
       const why = addonWindow(o);
       if (why !== null) throw windowError(why);
       const now = this.clock();
-      const done = await addUnits(tx, o, item!.addonId, item!.units, o.currency as HouseCurrency, { type: 'COLLECTOR', id: o.account_id, actor }, now);
+      const by: AddonBy = { type: 'COLLECTOR', id: o.account_id, actor };
+      const right = await rightToBuyAddon(tx, o, item!.addonId, item!.units, o.currency as HouseCurrency, by, now);
+      const done = right ?? (await addUnits(tx, o, item!.addonId, item!.units, o.currency as HouseCurrency, by, now));
       for (const n of done.notes) await this.audit.record(n, tx);
     });
     return orderId.toLowerCase();

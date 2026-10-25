@@ -409,8 +409,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const addresses = new AddressService({ db, audit, clock });
     const tastes = new TasteService({ db, clock });
     const profiles = new ProfileService({ db, audit, tastes, clock });
-    // THE VAULT's rules (lot Q3): the ledger reads YOUR PROFILE's completion.
-    const vault = new VaultService({ db, audit, profiles, clock, giftKey: deriveVaultGiftKey(config), liveFrames });
+    // THE VAULT's rules (lot Q3): the ledger reads YOUR PROFILE's completion; a VAULT order's steps email its buyer.
+    const vault = new VaultService({ db, audit, profiles, clock, giftKey: deriveVaultGiftKey(config), liveFrames, mail: emails.orderStep });
     const clientNotes = new ClientNoteService({ db, audit, clock });
     // The client sheet reads the profile (plan CUSTOMER INTELLIGENCE §3.6 C.4).
     const owners = new OwnerService({ db, audit, sessions, ownership, profiles, clock });
@@ -615,6 +615,7 @@ export interface Housekeeping {
     activity: number;
     birthdayCredits: number;
     houseMoments: number;
+    vaults: number;
     acquisitionConversions: number;
     viewStats: number;
     viewMonths: number;
@@ -669,6 +670,9 @@ export interface Housekeeping {
  *                switched on, each event due since its switch-on delivered
  *                once to MESSAGES (services/house-moments.ts, plan MACRO M2
  *                §1.2);
+ *   vaults       every pass: each piece won in a vault and not claimed by
+ *                its end cancelled, its reserved unit back to stock
+ *                (services/vault.ts expireClaims, lot Q3 §2.5);
  *   acquisitionConversions  every pass: each sign-up, entry and order written
  *                since the recording started gets its conversion with its
  *                last link; once a Paris day in the window, its catch-up
@@ -733,6 +737,7 @@ export function startHousekeeping(
       activity: 0,
       birthdayCredits: 0,
       houseMoments: 0,
+      vaults: 0,
       acquisitionConversions: 0,
       viewStats: 0,
       viewMonths: 0,
@@ -774,6 +779,9 @@ export function startHousekeeping(
     // In the morning window, after the birthday credits (plan MACRO M2 §1.2, D24 M1): the house's moments switched on,
     // each due since its switch-on delivered once (services/house-moments.ts).
     if (morningWindowOpen(ctx.clock())) await job('houseMoments', () => ctx.services.houseMoments.runMoments(ctx.clock()));
+    // Every pass, after the house's moments (lot Q3, plan §2.5; D20 "claimed within 30 days or back to stock"): each piece
+    // won in a vault and not claimed by its end cancelled, its reserved unit back to stock (services/vault.ts).
+    await job('vaults', () => ctx.services.vault.expireClaims(ctx.clock()));
     // Every pass: the conversions with their last link (its daily catch-up in the morning window, §3.4 A.8).
     await job('acquisitionConversions', async () => {
       const r = await ctx.services.acquisition.recordConversions(ctx.clock());

@@ -1251,14 +1251,15 @@ async function settleShipmentDelivered(tx: Db, orderId: string, now: Date): Prom
  * waiting order »); an order waiting for stock stops waiting. The audit entries of the orders served are added to
  * `notes`.
  */
-export async function release(tx: Db, o: OrderRow, actor: Actor, now: Date, notes: AuditRecordInput[]): Promise<OrderRow> {
+export async function release(tx: Db, o: OrderRow, actor: Actor, now: Date, notes: AuditRecordInput[], also: OrderUpdate = {}): Promise<OrderRow> {
   // Its parcel being packed (plan NEXT LOT §3.5.6.7): the shipment is cancelled and this order's piece unbound from it;
   // the other orders of the parcel keep their pieces and their packing start, and Start packing opens a new shipment.
   await cancelOpenShipment(tx, o.id, now);
   if (o.reservation === null) return o;
-  if (o.reservation === 'AWAITING') return updateOrder(tx, o.id, { reservation: null });
+  // `also` (a cancellation's status) in the same write: a VAULT order at 0 holds its unit while RESERVED (orders_vault).
+  if (o.reservation === 'AWAITING') return updateOrder(tx, o.id, { reservation: null, ...also });
   await lockSku(tx, o.sku_id!);
-  const after = await updateOrder(tx, o.id, { reservation: null });
+  const after = await updateOrder(tx, o.id, { reservation: null, ...also });
   notes.push(...(await serveWaiting(tx, o.sku_id!, o.location_id, actor, now)));
   return after;
 }
@@ -1325,6 +1326,10 @@ interface NewOrder {
   /** Macro scope K44 T2 (plan MACRO M3 §5.2): the set sale this order is a piece of, and that piece (services/set-sales.ts). */
   setSaleId?: string;
   setPiece?: number;
+  /** THE VAULT (lot Q3, §2.4): a VAULT order's vault; won free, its end to be claimed and the unit reserved at once (STOCK). */
+  vaultId?: string;
+  claimBy?: Date;
+  reservation?: 'STOCK';
 }
 
 /**
@@ -1357,6 +1362,9 @@ export async function createOrder(tx: Db, n: NewOrder, opts: { hold: boolean }, 
       exchange_of_order_id: n.exchangeOfOrderId ?? null,
       set_sale_id: n.setSaleId ?? null,
       set_piece: n.setSaleId ? (n.setPiece ?? null) : null,
+      // THE VAULT (lot Q3): only on a VAULT order (the other channels' rows are written as before).
+      ...(n.vaultId ? { vault_id: n.vaultId, claim_by: n.claimBy ?? null } : {}),
+      ...(n.reservation ? { reservation: n.reservation } : {}),
       shipping_service: n.shipping?.service ?? null,
       shipping_minor: n.shipping?.service ? n.shipping.minor : null,
       shipping_benefit: n.shipping?.service ? n.shipping.benefit : null,
@@ -1381,7 +1389,9 @@ export async function createOrder(tx: Db, n: NewOrder, opts: { hold: boolean }, 
         ? { giftGrantId: n.giftGrantId }
         : n.exchangeOfOrderId
           ? { exchangeOfOrderId: n.exchangeOfOrderId }
-          : { shopRequestId: n.shopRequestId! };
+          : n.vaultId
+            ? { vaultId: n.vaultId }
+            : { shopRequestId: n.shopRequestId! };
   notes.push(
     await recordChange(
       tx,
@@ -1923,8 +1933,9 @@ export async function step(tx: Db, o: OrderRow, s: CheckedStep, actor: Actor, no
       await settleShipmentDelivered(tx, o.id, now);
       break;
     case 'CANCELLED': {
-      const released = await release(tx, o, actor, now, extra);
-      after = await updateOrder(tx, released.id, { status: 'CANCELLED', cancelled_at: now });
+      const cancelled = { status: 'CANCELLED' as const, cancelled_at: now };
+      const released = await release(tx, o, actor, now, extra, cancelled);
+      after = released.status === 'CANCELLED' ? released : await updateOrder(tx, released.id, cancelled);
       // Plan MACRO M3 §4.2: its add-ons cancelled with it, the stock they held free again.
       const addonUnits = await cancelUnits(tx, after, now);
       details = { released: o.reservation, ...(addonUnits > 0 ? { addonUnits } : {}) };
@@ -2422,6 +2433,58 @@ async function engravingDocuments(tx: Db, before: OrderRow, after: OrderRow, act
   return notes;
 }
 
+/** A collector's delivery address for an order, checked before the transaction (`setAddress`, THE VAULT's claim and right to buy). */
+export interface CheckedOrderAddress {
+  savedId: string | undefined;
+  fresh: DeliveryAddress | null;
+  save: boolean;
+}
+
+/** An address input checked: one of YOUR ADDRESSES by its id (404 ADDRESS_NOT_FOUND), or a new one (400), saved when asked. */
+export function checkOrderAddress(input: OrderAddressInput): CheckedOrderAddress {
+  if (!input || typeof input !== 'object') throw validationError('Enter the name and the address.');
+  const savedId = 'addressId' in input ? input.addressId : undefined;
+  if (savedId !== undefined && (typeof savedId !== 'string' || !UUID_RE.test(savedId))) throw addressNotFound();
+  const fresh = savedId === undefined ? checkAddress((input as { address: unknown }).address) : null;
+  const save = savedId === undefined && (input as { save?: unknown }).save === true;
+  return { savedId, fresh, save };
+}
+
+/**
+ * A collector's address written on a locked order of theirs (`setAddress`'s rule; the account's addresses locked by the
+ * caller): saved to YOUR ADDRESSES when asked; the first address sets `address_at`, a later one `address_changed_at`; the
+ * same address again changes nothing. Returns the order after it and the audit entries (`order.address` first).
+ */
+export async function writeOrderAddress(tx: Db, o: OrderRow, checked: CheckedOrderAddress, actor: Actor, now: Date): Promise<{ order: OrderRow; notes: AuditRecordInput[] }> {
+  const notes: AuditRecordInput[] = [];
+  let a: DeliveryAddress;
+  if (checked.savedId !== undefined) {
+    const row = await tx.selectFrom('account_addresses').select(['name', 'address', 'country', 'phone']).where('id', '=', checked.savedId.toLowerCase()).where('account_id', '=', o.account_id).executeTakeFirst();
+    if (!row) throw addressNotFound();
+    a = row;
+  } else {
+    a = checked.fresh!;
+    if (checked.save) {
+      const saved = await insertAddress(tx, o.account_id, a, false, actor, now);
+      notes.push(saved.note, ...saved.vaulted);
+    }
+  }
+  const same = o.buyer_name === a.name && o.buyer_address === a.address && o.buyer_country === a.country && o.buyer_phone === a.phone;
+  if (same) return { order: o, notes };
+  const changed = o.address_at !== null;
+  const after = await updateOrder(tx, o.id, {
+    buyer_name: a.name,
+    buyer_address: a.address,
+    buyer_country: a.country,
+    buyer_phone: a.phone,
+    address_by: 'COLLECTOR',
+    address_at: o.address_at ?? now,
+    address_changed_at: changed ? (now < o.address_at! ? o.address_at : now) : null,
+  });
+  notes.unshift(await recordChange(tx, o, after, 'order.address', { details: { by: 'collector', country: a.country, changed } }, actor, now));
+  return { order: after, notes };
+}
+
 // ── Service ────────────────────────────────────────────────────────────────
 
 export interface OrderServiceDeps {
@@ -2868,11 +2931,7 @@ export class OrderService {
     if (typeof accountId !== 'string' || !UUID_RE.test(accountId)) throw orderNotFound();
     const account = accountId.toLowerCase();
     const id = knownOrderId(orderId);
-    if (!input || typeof input !== 'object') throw validationError('Enter the name and the address.');
-    const savedId = 'addressId' in input ? input.addressId : undefined;
-    if (savedId !== undefined && (typeof savedId !== 'string' || !UUID_RE.test(savedId))) throw addressNotFound();
-    const fresh = savedId === undefined ? checkAddress((input as { address: unknown }).address) : null;
-    const save = savedId === undefined && (input as { save?: unknown }).save === true;
+    const checked = checkOrderAddress(input);
     await inRetriedTransaction(this.db, async (tx) => {
       await lockAccountAddresses(tx, account);
       const o = await tx.selectFrom('orders').selectAll().where('id', '=', id).where('account_id', '=', account).forUpdate().executeTakeFirst();
@@ -2880,35 +2939,8 @@ export class OrderService {
       if (o.with_order_id !== null) throw travelsWith(o.with_order_id);
       if (!ORDER_HOLDING_STATUSES.includes(o.status)) throw orderClosed();
       if (o.packing_started_at !== null) throw packingStarted();
-      const now = this.clock();
-      const notes: AuditRecordInput[] = [];
-      let a: DeliveryAddress;
-      if (savedId !== undefined) {
-        const row = await tx.selectFrom('account_addresses').select(['name', 'address', 'country', 'phone']).where('id', '=', savedId.toLowerCase()).where('account_id', '=', account).executeTakeFirst();
-        if (!row) throw addressNotFound();
-        a = row;
-      } else {
-        a = fresh!;
-        if (save) {
-          const saved = await insertAddress(tx, account, a, false, actor, now);
-          notes.push(saved.note, ...saved.vaulted);
-        }
-      }
-      const same = o.buyer_name === a.name && o.buyer_address === a.address && o.buyer_country === a.country && o.buyer_phone === a.phone;
-      if (!same) {
-        const changed = o.address_at !== null;
-        const after = await updateOrder(tx, o.id, {
-          buyer_name: a.name,
-          buyer_address: a.address,
-          buyer_country: a.country,
-          buyer_phone: a.phone,
-          address_by: 'COLLECTOR',
-          address_at: o.address_at ?? now,
-          address_changed_at: changed ? (now < o.address_at! ? o.address_at : now) : null,
-        });
-        notes.unshift(await recordChange(tx, o, after, 'order.address', { details: { by: 'collector', country: a.country, changed } }, actor, now));
-      }
-      for (const n of notes) await this.audit.record(n, tx);
+      const written = await writeOrderAddress(tx, o, checked, actor, this.clock());
+      for (const n of written.notes) await this.audit.record(n, tx);
     });
     return this.accountOrder(account, id);
   }

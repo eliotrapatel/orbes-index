@@ -438,7 +438,7 @@ describe('the daily grant of the birthday credit (§3.5 SB.4.4)', () => {
       const first = await hk.runOnce();
       expect(first.birthdayCredits).toBe((await given()) - before);
       expect(first.birthdayCredits).toBeGreaterThanOrEqual(1);
-      expect(Object.keys(first).slice(4, 8)).toEqual(['activity', 'birthdayCredits', 'houseMoments', 'acquisitionConversions']);
+      expect(Object.keys(first).slice(4, 9)).toEqual(['activity', 'birthdayCredits', 'houseMoments', 'vaults', 'acquisitionConversions']);
       expect(await birthdaysOf(a.id)).toEqual(['2033-03-03']);
       clock.advance(10 * 60_000);
       expect((await hk.runOnce()).birthdayCredits).toBe(0);

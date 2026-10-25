@@ -56,8 +56,8 @@ import { poolDraw } from '../support/draws.js';
 import { createAccount, createLiveRelease, legacyLiveAddons, liveFixture, type LiveFixture } from '../support/live.js';
 
 /**
- * THE VAULT's hooks on the paths that make orders (lot Q3: `attachVaultAddons`, `giveTierVaults`, `giveLiveVaults`) read
- * tables that exist from 0061 on. A case that writes the data of before with today's services at an older schema (0060's
+ * THE VAULT's hooks on the paths that make orders (lot Q3: `attachVaultAddons`, `giveTierVaults`, `giveLiveVaults`) and
+ * the sales paths' vault-only check (`assertSellable`, `assertSetSellable`) read tables and columns that exist from 0061 on. A case that writes the data of before with today's services at an older schema (0060's
  * "on the data of before") switches them off while it writes, as the image of before had none; everywhere else they run
  * as they are.
  */
@@ -72,6 +72,14 @@ vi.mock('../../src/server/services/vault.js', async (importOriginal) => {
     ...actual,
     giveTierVaults: (...a: Parameters<typeof actual.giveTierVaults>) => (vaultHooks.off ? Promise.resolve([]) : actual.giveTierVaults(...a)),
     giveLiveVaults: (...a: Parameters<typeof actual.giveLiveVaults>) => (vaultHooks.off ? Promise.resolve([]) : actual.giveLiveVaults(...a)),
+  };
+});
+vi.mock('../../src/server/services/vault-orders.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/server/services/vault-orders.js')>();
+  return {
+    ...actual,
+    assertSellable: (...a: Parameters<typeof actual.assertSellable>) => (vaultHooks.off ? Promise.resolve() : actual.assertSellable(...a)),
+    assertSetSellable: (...a: Parameters<typeof actual.assertSetSellable>) => (vaultHooks.off ? Promise.resolve() : actual.assertSetSellable(...a)),
   };
 });
 
@@ -9392,11 +9400,14 @@ describe('migration 0060_release_addons_converted on the data of before', () => 
     const other = await createTestDb({ migrated: false });
     try {
       expect((await createMigrator(other.db).migrateTo('0059_addons_one_system')).error).toBeUndefined();
+      // The data of before, written at 0059 without THE VAULT's hooks (its tables and columns come with 0061).
+      vaultHooks.off = true;
       const g = await liveFixture(other.db, '2026-11-01T09:00:00.000Z');
       const release = await createLiveRelease(g, { opensAt: new Date('2026-11-20T18:00:00Z') });
       for (const [label, line, price, position] of [['Gift wrapping', 'In the house’s paper.', 1500, 1], ['CARD', null, 0, 2]] as const) {
         await sql`INSERT INTO live_addons (drop_id, label, line, price_minor, position) VALUES (${release.id}, ${label}, ${line}, ${price}, ${position})`.execute(other.db);
       }
+      vaultHooks.off = false;
       expect((await migrateToLatest(other.db)).applied).toEqual(['0060_release_addons_converted', '0061_the_vault', '0062_vault_rewards']);
       expect(
         (await sql.raw(`SELECT a.name, a.kind, a.line, a.offer_live, a.offer_orders, a.engraving, k.code, x.position AS picked, p.price_minor
@@ -9419,6 +9430,8 @@ describe('migration 0060_release_addons_converted on the data of before', () => 
     const other = await createTestDb({ migrated: false });
     try {
       expect((await createMigrator(other.db).migrateTo('0059_addons_one_system')).error).toBeUndefined();
+      // The data of before, written at 0059 without THE VAULT's hooks (its tables and columns come with 0061).
+      vaultHooks.off = true;
       const g = await liveFixture(other.db, '2026-11-01T09:00:00.000Z');
       const m3 = async (name: string, position: number, prices: Record<string, number>, cols: { active?: boolean; offer_live?: boolean } = {}) => {
         const id = (await other.db.insertInto('addon_items').values({ name, position, ...cols }).returning('id').executeTakeFirstOrThrow()).id;
@@ -9435,6 +9448,7 @@ describe('migration 0060_release_addons_converted on the data of before', () => 
       for (const [label, price, position] of [['Card', 200, 1], ['Gift wrapping', 1500, 2]] as const) {
         await sql`INSERT INTO live_addons (drop_id, label, line, price_minor, position) VALUES (${release.id}, ${label}, ${null}, ${price}, ${position})`.execute(other.db);
       }
+      vaultHooks.off = false;
       expect((await migrateToLatest(other.db)).applied).toEqual(['0060_release_addons_converted', '0061_the_vault', '0062_vault_rewards']);
       // CARD (set aside) took the release's Card, untouched; the pick holds GIFT BOX, then Gift wrapping.
       expect((await sql<{ name: string }>`SELECT a.name FROM addon_conversions c JOIN addon_items a ON a.id = c.addon_id ORDER BY a.position`.execute(other.db)).rows.map((x) => x.name)).toEqual(['CARD', 'Gift wrapping']);

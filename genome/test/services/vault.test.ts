@@ -743,7 +743,7 @@ describe('THE VAULT’s opening: the draw (VaultService.open)', () => {
     expect((await vaultRow(v.id)).opened_at).toBeNull();
   });
 
-  it('tells which rows can give (plan §2.2): its quantity, its add-on (never a service), its model, a unit to reserve, THE PIECE only for a LIVE vault', async () => {
+  it('tells which rows can give (plan §2.2): its quantity, its add-on (never a service), its model, its usual price, a unit to reserve, THE PIECE only for a LIVE vault', async () => {
     const a = await createAccount(t.db);
     const v = await vaultRow((await houseVault(a.id)).id);
     const base: Omit<DrawRow, 'kind'> = { id: randomUUID(), odds_in: 10, quantity: null, given: 0, amount_minor: null, currency: null, model_id: null, addon_id: null, mode: null, line: null, position: 1, created_at: clock.now() };
@@ -759,18 +759,22 @@ describe('THE VAULT’s opening: the draw (VaultService.open)', () => {
     expect(await pick({ kind: 'PRODUCT', addon_id: wrap.id, mode: 'FREE' })).toEqual({ ok: false, why: 'ADDON' });
     await t.db.updateTable('addon_items').set({ active: false }).where('id', '=', cloth.id).execute();
     expect(await pick({ kind: 'ADDON', addon_id: cloth.id })).toEqual({ ok: false, why: 'ADDON' });
-    // A model: offered, not vault-only for a PRODUCT, vault-only for a VAULT EDITION; won FREE, a unit to reserve.
+    // A model: offered, not vault-only for a PRODUCT, vault-only for a VAULT EDITION; under its RIGHT TO BUY, a usual
+    // price to buy it at; won FREE, a unit to reserve (step Q3.7: the unit itself, its SKU locked).
     const model = await createModel(t.db, 'ECLIPSE');
+    expect(await pick({ kind: 'PRODUCT', model_id: model, mode: 'RIGHT_TO_BUY' })).toEqual({ ok: false, why: 'PRICE' });
+    await t.db.updateTable('models').set({ base_price_minor: 120_000, base_currency: 'EUR' }).where('id', '=', model).execute();
     expect(await pick({ kind: 'PRODUCT', model_id: model, mode: 'RIGHT_TO_BUY' })).toEqual({ ok: true, prize: 'ECLIPSE', line: 'Yours to buy at its price, for 24 hours.' });
     expect(await pick({ kind: 'PRODUCT', model_id: model, mode: 'FREE' })).toEqual({ ok: false, why: 'NO_UNIT' });
     expect(await pick({ kind: 'VAULT_EDITION', model_id: model })).toEqual({ ok: false, why: 'MODEL' });
     const sku = await inTransaction(t.db, (tx) => ensureSku(tx, model, '52'));
     await ctx.services.stock.adjust({ skuId: sku, locationId: france, delta: 1, note: 'Counted.' }, staff);
-    // A unit to reserve: a VAULT order, built with step Q3.7; until then the card.
-    expect(await pick({ kind: 'PRODUCT', model_id: model, mode: 'FREE' })).toEqual({ ok: false, why: 'AWAITS_Q3_7' });
+    const unit = { modelId: model, skuId: sku, label: '52', locationId: france };
+    expect(await pick({ kind: 'PRODUCT', model_id: model, mode: 'FREE' })).toEqual({ ok: true, prize: 'ECLIPSE', line: 'Yours, free. In YOUR ORDERS.', unit });
     await t.db.updateTable('models').set({ vault_only: true }).where('id', '=', model).execute();
     expect(await pick({ kind: 'PRODUCT', model_id: model, mode: 'RIGHT_TO_BUY' })).toEqual({ ok: false, why: 'MODEL' });
-    expect(await pick({ kind: 'VAULT_EDITION', model_id: model })).toEqual({ ok: false, why: 'AWAITS_Q3_7' });
+    expect(await pick({ kind: 'VAULT_EDITION', model_id: model })).toEqual({ ok: true, prize: 'ECLIPSE', line: 'Yours, free. In YOUR ORDERS.', unit });
+    expect(await pick({ kind: 'VAULT_EDITION', model_id: model, line: 'Made only for the vault, never sold.' })).toMatchObject({ ok: true, line: 'Made only for the vault, never sold.' });
     await t.db.updateTable('models').set({ active: false }).where('id', '=', model).execute();
     expect(await pick({ kind: 'VAULT_EDITION', model_id: model })).toEqual({ ok: false, why: 'MODEL' });
     // THE PIECE: never for a vault without a release (N5); a LIVE vault's, a unit of its model in the entry's size.
@@ -789,15 +793,14 @@ describe('THE VAULT’s opening: the draw (VaultService.open)', () => {
     expect(await pick({ kind: 'THE_PIECE' }, live)).toEqual({ ok: false, why: 'NO_UNIT' });
     const own = await inTransaction(t.db, (tx) => ensureSku(tx, ring, '54'));
     await ctx.services.stock.adjust({ skuId: own, locationId: france, delta: 1, note: 'Counted.' }, staff);
-    expect(await pick({ kind: 'THE_PIECE' }, live)).toEqual({ ok: false, why: 'AWAITS_Q3_7' });
+    expect(await pick({ kind: 'THE_PIECE' }, live)).toEqual({ ok: true, prize: 'THE PIECE', line: 'ANNEAU, size 54. Free.', unit: { modelId: ring, skuId: own, label: '54', locationId: france } });
   });
 
-  it('gives the card in place of a row that cannot give, a product won free awaiting its VAULT order (step Q3.7) included', async () => {
-    // The table: a free piece of a model with a unit, alone above the floor (the others made inactive).
+  it('gives the card in place of a row that cannot give: a product won free with no unit to reserve', async () => {
+    // The table: a free piece of a model without a unit, alone above the floor (the others made inactive).
     for (const r of (await vault().settings()).rewards) if (r.kind !== 'I_WAS_THERE' && r.active) await vault().deactivateReward(r.id, staff);
     const model = await createModel(t.db, 'ORBITE');
-    const sku = await inTransaction(t.db, (tx) => ensureSku(tx, model, null));
-    await ctx.services.stock.adjust({ skuId: sku, locationId: france, delta: 1, note: 'Counted.' }, staff);
+    await inTransaction(t.db, (tx) => ensureSku(tx, model, null));
     const product = (await vault().createReward({ kind: 'PRODUCT', oddsIn: 2, quantity: 5, modelId: model, mode: 'FREE' }, staff)).rewards.find((r) => r.kind === 'PRODUCT' && r.active)!;
     const a = await createAccount(t.db);
     next = 0;

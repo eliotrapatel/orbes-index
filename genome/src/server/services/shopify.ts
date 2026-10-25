@@ -10,7 +10,8 @@
  *                        the gallery as its images, by their absolute address. A model's sizes are its SKUs (one per
  *                        model and size, services/stock.ts), naturally sorted, ONE SIZE first; a model without a SKU
  *                        yet is in one size. Every product is imported as a draft, not published: Shopify is not decided
- *                        (choice 9), the owner publishes there. A model inactive or discontinued is `archived`.
+ *                        (choice 9), the owner publishes there. A model inactive or discontinued is `archived`. A
+ *                        vault-only model (THE VAULT, lot Q3, §4.5: never sold) is never one of its lines.
  *                        A model and its variants (plan NOCTURNE, N1) are ONE product, the main model's (its title, type
  *                        and handle): Option1 « Variant » (each model's label) and Option2 « Size » (its sizes; left out
  *                        when every model of it is in one size), each model of it priced in the store's currency in its
@@ -278,6 +279,8 @@ export class ShopifyExportService {
       .select(['id', 'name', 'type', 'sku_prefix', 'slug', 'active', 'image_sha256', 'base_price_minor', 'variant_of', 'variant_label', 'created_at'])
       .where('base_currency', '=', currency)
       .where('base_price_minor', 'is not', null)
+      // THE VAULT (lot Q3, §4.5, S4): a vault-only model is never sold, so never one of the store's sellable lines.
+      .where('vault_only', '=', false)
       .orderBy('name')
       .orderBy('id')
       .execute();

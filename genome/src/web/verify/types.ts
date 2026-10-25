@@ -507,6 +507,8 @@ export interface AddonOfferItem {
   textMax?: number;
   /** Lot Q2, step Q2.8 (5b, N2): at a LIVE hold, an add-on with stock (added at PAY while available). */
   whileAvailable?: boolean;
+  /** Lot Q3 (THE VAULT, §2.4): in YOUR ORDERS, an add-on a vault's right to buy offers until then (ISO time). */
+  vaultUntil?: string;
 }
 
 /** A choice carried onto an order that could not be added: none left (NONE_LEFT), or no longer offered (NOT_OFFERED). */

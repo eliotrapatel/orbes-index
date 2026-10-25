@@ -56,6 +56,7 @@ import { baseCurrency, orderForShopRequest } from './orders.js';
 import { defaultLocationId } from './stock.js';
 import { matchSavedSize, modelSizeCandidates, savedMm, sizeKindOf } from './sizes.js';
 import type { WornSheetPage } from './worn.js';
+import { assertSellable } from './vault-orders.js';
 
 /** The account's note on a request (shop_requests.note): at most this many characters once trimmed. */
 export const SHOP_NOTE_MAX = 500;
@@ -364,6 +365,8 @@ export class SalonService {
     const tier = await this.ownerTier(accountId);
     const { modelId, sheet } = await this.lookbook.sheetOf(slug, { tier });
     if (!sheet.salon) throw notInSalon();
+    // THE VAULT (lot Q3, §4.5): a vault-only model is never sold, the salon included (409 MODEL_VAULT_ONLY).
+    await assertSellable(this.db, [modelId]);
     const sizeLabel = await this.sizeAsked(modelId, size);
     const account = accountId.toLowerCase();
     try {

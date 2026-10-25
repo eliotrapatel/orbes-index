@@ -76,6 +76,7 @@ import { makePage, pageOffset, systemClock, type Actor, type Clock, type Page, t
 import type { AuditRecordInput, AuditService } from './audit.js';
 import type { LiveAlert, LiveSellOut, LiveSignals } from './live-insights.js';
 import { cleanDescription, cleanTime, cleanTitle, DROP_QUANTITY_MAX, dropNotFound, newSealedSeed, offeredSet, PURCHASE_WINDOW_HOURS } from './drops.js';
+import { assertSellable } from './vault-orders.js';
 import {
   announcedAt,
   effectiveDeadline,
@@ -1421,6 +1422,8 @@ export class LiveConsoleService {
         const own = await tx.selectFrom('models').select('active').where('id', '=', settings.afterRoom.modelId).executeTakeFirstOrThrow();
         if (!own.active) throw afterRoomModelInactive();
       }
+      // THE VAULT (lot Q3, §4.5): a vault-only model is never sold (409 MODEL_VAULT_ONLY), the after-room's included.
+      await assertSellable(tx, [d.model_id, settings.afterRoom?.modelId]);
       // The feasibility check, as the console showed it: recorded, never blocking (K5).
       const feasible = await this.checkFeasibility(tx, d);
       await tx.updateTable('drops').set({ published_at: now }).where('id', '=', id).execute();
@@ -1651,6 +1654,8 @@ export class LiveConsoleService {
     const model = await tx.selectFrom('models').select(['id', 'active']).where('id', '=', modelId).executeTakeFirst();
     if (!model) throw notFound('Model', 'MODEL_NOT_FOUND');
     if (!model.active) throw modelInactive();
+    // THE VAULT (lot Q3, §4.5): a vault-only model is never sold (409 MODEL_VAULT_ONLY).
+    await assertSellable(tx, [modelId]);
   }
 
   /**

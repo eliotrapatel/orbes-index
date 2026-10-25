@@ -60,9 +60,10 @@
  *                LIVE (services/guarantees.ts grantFromVault); CREDIT TO GIVE a one-time link (`vault_gifts`, 30 days)
  *                whose friend, holding no piece, accepts a VAULT credit for a first piece (`acceptGift`; never
  *                `accounts.invited_by`: the FRIEND source stays the invitation link's alone); I WAS THERE nothing but its
- *                card. A PRODUCT under its RIGHT TO BUY is its 24-hour offer (round 2); a product won FREE, a VAULT
- *                EDITION and THE PIECE are a VAULT order with the winner's unit reserved (step Q3.7, plan §2.4: until it
- *                is built, such a row gives the card, as a row that cannot give).
+ *                card. A PRODUCT under its RIGHT TO BUY is its 24-hour offer (round 2; `buy`, or an add-on's ADD on an
+ *                order); a product won FREE, a VAULT EDITION and THE PIECE are a VAULT order at 0 holding the unit
+ *                reserved for the winner at the opening, claimed within 30 days (`claim`) or cancelled by the
+ *                housekeeping with its unit back to stock (`expireClaims`; step Q3.7, services/vault-orders.ts).
  *
  *   the sources  (step Q3.6; plan §2.3.2–7, §2.6) each one hook in the transaction that makes its occasion: PIECE and
  *                FRIEND at a first registration (`giveFirstRegistrationVaults`), TIER right after each `ensureGrants`
@@ -78,7 +79,7 @@ import { sql, type ExpressionBuilder } from 'kysely';
 import { utf8 } from '../../core/bytes.js';
 import type { AppConfig } from '../config.js';
 import { deriveSubkey } from '../crypto/secretbox.js';
-import { inTransaction, type Db } from '../db/connection.js';
+import { inRetriedTransaction, inTransaction, type Db } from '../db/connection.js';
 import {
   CLUB_TIER_NAMES,
   HOUSE_CURRENCIES,
@@ -100,6 +101,7 @@ import {
   VAULT_WAIT_DAYS,
   type ClubTierName,
   type Database,
+  type OrderRow,
   type VaultRewardKind,
   type VaultRewardMode,
   type VaultSource,
@@ -118,10 +120,44 @@ import { withLiveChanges, type LiveChanges, type LiveFrameGate } from './live-fr
 import type { ProfileService } from './profiles.js';
 import { parisDay } from './schedule.js';
 import { cleanCriteria, segmentCondition } from './segments.js';
-import { defaultLocationId, stockLevel } from './stock.js';
+import { lockAccountAddresses } from './addresses.js';
+import {
+  addressOf,
+  checkOrderAddress,
+  createOrder,
+  recordChange,
+  serveWaiting,
+  shippable,
+  shippingFor,
+  step,
+  updateOrder,
+  writeOrderAddress,
+  type OrderAddressInput,
+  type OrderMail,
+} from './orders.js';
+import { offeredSizes } from './sizes.js';
+import { defaultLocationId, ensureSku, lockSku, sizeLabelOf, stockLevel } from './stock.js';
+import {
+  isThePiece,
+  unclaimedVaultOrders,
+  usualPrice,
+  vaultAddressMissing,
+  vaultFreeOrder,
+  vaultOfferEnded,
+  vaultSizeNoneLeft,
+  vaultUnit,
+  type VaultUnit,
+} from './vault-orders.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const HOUR_MS = 3_600_000;
+
+/** An account's id checked and lowercased; `missing` thrown otherwise. */
+function knownAccount(accountId: unknown, missing: () => DomainError): string {
+  if (typeof accountId !== 'string' || !UUID_RE.test(accountId)) throw missing();
+  return accountId.toLowerCase();
+}
+const orderNotFoundError = () => notFound('Order', 'ORDER_NOT_FOUND');
 
 /** How long a vault waits: 30 days of 24 hours from its giving (D17; `vaults_waits`, whatever the summer time). */
 export const VAULT_WAIT_MS = VAULT_WAIT_DAYS * 24 * HOUR_MS;
@@ -1009,6 +1045,53 @@ export interface VaultGiftView {
   refusal: string | null;
 }
 
+/** A piece won free claimed (POST /api/v1/account/orders/:id/claim): its size (only to one with a unit), its address. */
+export interface VaultClaimInput {
+  size?: string | null;
+  address?: OrderAddressInput | null;
+}
+
+/** BUY under a right to buy (POST /api/v1/account/vaults/:id/buy): its size, its address (the default one otherwise). */
+export interface VaultBuyInput {
+  size?: string | null;
+  address?: OrderAddressInput | null;
+}
+
+/** What a piece won free can be claimed in (YOUR ORDERS). */
+export interface VaultClaimSizes {
+  orderId: string;
+  /** Its end to be claimed, and its Paris day ("Yours until 27 NOVEMBER"). */
+  claimBy: Date;
+  claimDay: string;
+  /** Claimed already (or cancelled): nothing to choose. */
+  claimed: boolean;
+  /** THE PIECE: its size never changes. */
+  sizeFixed: boolean;
+  /** Its size now (null: ONE SIZE). */
+  size: string | null;
+  /** Its model's offered sizes: the current one, and whether each can be chosen (a unit left; its own always). */
+  sizes: { label: string | null; current: boolean; available: boolean }[];
+}
+
+/** A right to buy a model, open (YOUR ORDERS: BUY within its 24 hours). */
+export interface VaultRightToBuy {
+  vaultId: string;
+  modelId: string;
+  /** The model's name with its variant (`MONOLITHE IN BLUE`). */
+  name: string;
+  priceMinor: number;
+  currency: string;
+  offerUntil: Date;
+  /** Its offered sizes (null: ONE SIZE). */
+  sizes: (string | null)[];
+}
+
+/** VAULT_OFFER_ENDED's words for a piece won free past its 30 days, and for a right to buy past its 24 hours. */
+export const VAULT_CLAIM_ENDED = 'The 30 days to claim it are over.';
+export const VAULT_BUY_ENDED = 'The 24 hours to buy it are over.';
+/** The note of a piece won free cancelled at its `claim_by` (the order's history). */
+export const VAULT_NOT_CLAIMED = 'Not claimed within 30 days.';
+
 /** A row of the house table as the opening reads it. */
 export interface DrawRow {
   id: string;
@@ -1037,8 +1120,8 @@ interface OpeningVault {
 
 /** What a row drawn can give now: its words and what its delivery needs; or why it cannot (its odds then go to the card). */
 type RewardPick =
-  | { ok: true; prize: string; line: string | null; addonId?: string; amountMinor?: number; currency?: string }
-  | { ok: false; why: 'QUANTITY' | 'ADDON' | 'MODEL' | 'NO_UNIT' | 'NOT_LIVE' | 'AWAITS_Q3_7' };
+  | { ok: true; prize: string; line: string | null; addonId?: string; amountMinor?: number; currency?: string; unit?: VaultUnit }
+  | { ok: false; why: 'QUANTITY' | 'ADDON' | 'MODEL' | 'PRICE' | 'NO_UNIT' | 'NOT_LIVE' };
 
 /** Words cut to a column's length (`…` last). */
 function fit(s: string, max: number): string {
@@ -1046,23 +1129,13 @@ function fit(s: string, max: number): string {
   return chars.length <= max ? chars.join('') : `${chars.slice(0, max - 1).join('')}…`;
 }
 
-/** Whether a model has a unit to reserve for the winner at the house's location: in `size` when named (whatever its case), else in any size offered. */
-async function modelHasUnit(tx: Db, modelId: string, size: string | null): Promise<boolean> {
-  const location = await defaultLocationId(tx);
-  const skus = await tx.selectFrom('skus').select(['id', 'size_label']).where('model_id', '=', modelId).where('set_aside_at', 'is', null).orderBy('code').execute();
-  for (const k of skus) {
-    if (size !== null && (k.size_label ?? '').toUpperCase() !== size.toUpperCase()) continue;
-    if ((await stockLevel(tx, k.id, location)).available >= 1) return true;
-  }
-  return false;
-}
-
 /**
  * Whether a row drawn can give, and its words (plan §2.2): its quantity not reached; an add-on (ADDON, a PRODUCT of an
  * add-on) still active and of kind PRODUCT (E7: never a service); a model (a PRODUCT of a model, a VAULT EDITION) still
- * offered, a VAULT EDITION's marked vault-only and a PRODUCT's not, with a unit to reserve when won FREE (N12); THE PIECE
- * only for a LIVE vault (N5), the release's model with a unit in the entry's size outside the release. A product won
- * FREE, a VAULT EDITION and THE PIECE are VAULT orders (step Q3.7): until that step they give the card.
+ * offered, a VAULT EDITION's marked vault-only and a PRODUCT's not; under its RIGHT TO BUY, a usual price to buy it at;
+ * won FREE (a PRODUCT, a VAULT EDITION), the unit reserved for the winner (step Q3.7, N12: services/vault-orders.ts
+ * vaultUnit, its SKU locked); THE PIECE only for a LIVE vault (N5), the release's model with a unit in the entry's size
+ * outside the release.
  */
 export async function rewardPick(tx: Db, row: DrawRow, v: OpeningVault): Promise<RewardPick> {
   if (row.quantity !== null && row.given >= row.quantity) return { ok: false, why: 'QUANTITY' };
@@ -1089,15 +1162,15 @@ export async function rewardPick(tx: Db, row: DrawRow, v: OpeningVault): Promise
       const m = await tx.selectFrom('models').select(['name', 'variant_label', 'active', 'discontinued_at', 'vault_only']).where('id', '=', row.model_id!).executeTakeFirst();
       if (!m || !m.active || m.discontinued_at !== null || m.vault_only) return { ok: false, why: 'MODEL' };
       const prize = fit(pieceName(m.name, m.variant_label), VAULT_PRIZE_MAX);
-      if (row.mode === 'RIGHT_TO_BUY') return { ok: true, prize, line: VAULT_REVEAL.rightToBuy };
-      if (!(await modelHasUnit(tx, row.model_id!, null))) return { ok: false, why: 'NO_UNIT' };
-      return { ok: false, why: 'AWAITS_Q3_7' };
+      if (row.mode === 'RIGHT_TO_BUY') return (await usualPrice(tx, row.model_id!)) ? { ok: true, prize, line: VAULT_REVEAL.rightToBuy } : { ok: false, why: 'PRICE' };
+      const unit = await vaultUnit(tx, v.account_id, row.model_id!);
+      return unit ? { ok: true, prize, line: VAULT_REVEAL.free, unit } : { ok: false, why: 'NO_UNIT' };
     }
     case 'VAULT_EDITION': {
-      const m = await tx.selectFrom('models').select(['active', 'discontinued_at', 'vault_only']).where('id', '=', row.model_id!).executeTakeFirst();
+      const m = await tx.selectFrom('models').select(['name', 'variant_label', 'active', 'discontinued_at', 'vault_only']).where('id', '=', row.model_id!).executeTakeFirst();
       if (!m || !m.active || m.discontinued_at !== null || !m.vault_only) return { ok: false, why: 'MODEL' };
-      if (!(await modelHasUnit(tx, row.model_id!, null))) return { ok: false, why: 'NO_UNIT' };
-      return { ok: false, why: 'AWAITS_Q3_7' };
+      const unit = await vaultUnit(tx, v.account_id, row.model_id!);
+      return unit ? { ok: true, prize: fit(pieceName(m.name, m.variant_label), VAULT_PRIZE_MAX), line: row.line ?? VAULT_REVEAL.free, unit } : { ok: false, why: 'NO_UNIT' };
     }
     case 'THE_PIECE': {
       if (v.source !== 'LIVE' || !v.drop_id || !v.entry_id) return { ok: false, why: 'NOT_LIVE' };
@@ -1105,12 +1178,15 @@ export async function rewardPick(tx: Db, row: DrawRow, v: OpeningVault): Promise
         .selectFrom('live_entries as e')
         .innerJoin('drop_sizes as z', 'z.id', 'e.size_id')
         .innerJoin('drops as d', 'd.id', 'e.drop_id')
-        .select(['d.model_id', 'z.label'])
+        .leftJoin('models as m', 'm.id', 'd.model_id')
+        .select(['d.model_id', 'z.label', 'm.name', 'm.variant_label'])
         .where('e.id', '=', v.entry_id)
         .executeTakeFirst();
       if (!r?.model_id) return { ok: false, why: 'NOT_LIVE' };
-      if (!(await modelHasUnit(tx, r.model_id, r.label))) return { ok: false, why: 'NO_UNIT' };
-      return { ok: false, why: 'AWAITS_Q3_7' };
+      // The missed model in the entry's size, its size known (N5): never another size.
+      const unit = await vaultUnit(tx, v.account_id, r.model_id, sizeLabelOf(r.label));
+      if (!unit) return { ok: false, why: 'NO_UNIT' };
+      return { ok: true, prize: VAULT_REVEAL.thePiece.prize, line: VAULT_REVEAL.thePiece.line(pieceName(r.name!, r.variant_label), unit.label), unit };
     }
   }
 }
@@ -1129,6 +1205,8 @@ export interface VaultServiceDeps {
   giftKey?: Uint8Array;
   /** The LIVE releases' frame gate: a guarantee won and bound to a QUEUED entry changes whom the next batches reach (D9). */
   liveFrames?: LiveFrameGate;
+  /** The buyer's emails at each step of a VAULT order (EmailTriggers.orderStep, as OrderService's); none when not given. */
+  mail?: OrderMail;
 }
 
 export class VaultService {
@@ -1139,6 +1217,7 @@ export class VaultService {
   private readonly random: (max: number) => number;
   private readonly giftKey: Uint8Array;
   private readonly liveFrames: LiveFrameGate | null;
+  private readonly mail: OrderMail;
 
   constructor(deps: VaultServiceDeps) {
     this.db = deps.db;
@@ -1150,6 +1229,7 @@ export class VaultService {
     if (!(key instanceof Uint8Array) || key.length !== 32) throw new RangeError('giftKey must be 32 bytes');
     this.giftKey = key;
     this.liveFrames = deps.liveFrames ?? null;
+    this.mail = deps.mail ?? null;
   }
 
   /** `giveVault` in its own transaction, its audit recorded there (the house's gifts, the tests). */
@@ -1340,6 +1420,7 @@ export class VaultService {
             currency: done.valueMinor === null ? null : done.currency,
             cost_minor: done.costMinor,
             grant_id: done.grantId,
+            order_id: done.orderId,
             guarantee_id: done.guaranteeId,
             gift_id: done.giftId,
             offer_until: done.offerUntil,
@@ -1371,6 +1452,7 @@ export class VaultService {
               rewardId: row.id,
               ...(fellBack ? { toTheCard: true } : {}),
               ...(done.grantId ? { grantId: done.grantId } : {}),
+              ...(done.orderId ? { orderId: done.orderId } : {}),
               ...(done.guaranteeId ? { guaranteeId: done.guaranteeId } : {}),
               ...(done.giftId ? { giftId: done.giftId } : {}),
               ...(done.offerUntil ? { offerUntil: done.offerUntil.toISOString() } : {}),
@@ -1397,8 +1479,15 @@ export class VaultService {
     now: Date,
     notes: AuditRecordInput[],
     changes: LiveChanges,
-  ): Promise<{ grantId: string | null; guaranteeId: string | null; giftId: string | null; offerUntil: Date | null; valueMinor: number | null; currency: string | null; costMinor: number | null }> {
-    const none = { grantId: null, guaranteeId: null, giftId: null, offerUntil: null, valueMinor: null, currency: null, costMinor: null };
+  ): Promise<{ grantId: string | null; orderId: string | null; guaranteeId: string | null; giftId: string | null; offerUntil: Date | null; valueMinor: number | null; currency: string | null; costMinor: number | null }> {
+    const none = { grantId: null, orderId: null, guaranteeId: null, giftId: null, offerUntil: null, valueMinor: null, currency: null, costMinor: null };
+    if (pick.unit) {
+      // A product won FREE, a VAULT EDITION, THE PIECE (step Q3.7, N12): a VAULT order at 0 holding the unit reserved for
+      // the winner, to be claimed within 30 days (D20); its value the model's usual price where it has one.
+      const order = await vaultFreeOrder(tx, v, pick.unit, vaultRewardUntil(now), now, notes);
+      const price = await usualPrice(tx, pick.unit.modelId);
+      return { ...none, orderId: order.id, valueMinor: price?.minor ?? null, currency: price?.currency ?? null };
+    }
     switch (row.kind) {
       case 'CREDIT': {
         // A credit like the birthday and warranty credits: creditBalances, Apply credit, CREDIT · VAULT, the export.
@@ -1433,14 +1522,15 @@ export class VaultService {
         // A free add-on on the next order, within 30 days (N11).
         return { ...none, offerUntil: vaultRewardUntil(now) };
       case 'PRODUCT':
-        // Under its RIGHT TO BUY, 24 hours at its usual price (round 2); an add-on won FREE, as ADDON.
+        // Under its RIGHT TO BUY, 24 hours at its usual price (round 2; BUY, or an add-on's ADD); an add-on won FREE, as
+        // ADDON. A model won FREE holds its unit (above).
         return { ...none, offerUntil: row.mode === 'RIGHT_TO_BUY' ? new Date(now.getTime() + VAULT_RIGHT_TO_BUY_MS) : vaultRewardUntil(now) };
       case 'I_WAS_THERE':
         // Nothing but its card (saved as an image, D11).
         return { ...none, costMinor: 0 };
       default:
-        // VAULT EDITION and THE PIECE give the card until step Q3.7 (rewardPick).
-        throw new Error(`a ${row.kind} is not delivered at the opening yet`);
+        // A VAULT EDITION and THE PIECE always hold their unit (rewardPick).
+        throw new Error(`a ${row.kind} without its unit`);
     }
   }
 
@@ -1537,6 +1627,235 @@ export class VaultService {
       await this.audit.record({ actor: { type: 'account', id: me }, action: 'vault.gift.accept', targetType: 'vault_gift', targetId: g.id, details: { vaultId: g.vault_id, grantId: grant.id } }, tx);
       return { grantId: grant.id, amountMinor: g.amount_minor, currency: g.currency, expiresAt };
     });
+  }
+
+  // ── Products from the vault (step Q3.7; services/vault-orders.ts) ─────────
+
+  /**
+   * What a piece won free can be claimed in (YOUR ORDERS, §3.8): its end to be claimed, its size (THE PIECE's fixed) and
+   * each offered size of its model with whether it can be chosen (a unit available at its location, its own reserved
+   * one always). Its own VAULT order at 0 only (404 ORDER_NOT_FOUND).
+   */
+  async claimSizes(accountId: string, orderId: string): Promise<VaultClaimSizes> {
+    const o = await this.vaultFreeOrderOf(this.db, accountId, orderId);
+    const fixed = await isThePiece(this.db, o.vault_id);
+    const sizes: VaultClaimSizes['sizes'] = [];
+    for (const z of await offeredSizes(this.db, o.model_id)) {
+      const own = z.skuId === o.sku_id;
+      sizes.push({ label: z.label, current: own, available: own || (!fixed && (await stockLevel(this.db, z.skuId, o.location_id)).available >= 1) });
+    }
+    return { orderId: o.id, claimBy: new Date(o.claim_by!), claimDay: parisDay(new Date(o.claim_by!)), claimed: o.status !== 'RESERVED', sizeFixed: fixed, size: o.size_label, sizes };
+  }
+
+  /**
+   * A piece won free claimed by its winner (POST /api/v1/account/orders/:id/claim, step Q3.9; D20, N12): within its 30
+   * days (409 VAULT_OFFER_ENDED after, or once the housekeeping has cancelled it), its size changed only to one with a unit
+   * available (the reserved unit swaps under both SKUs' locks: the new one taken, the first back to stock where it serves
+   * the next order waiting; 409 VAULT_SIZE_NONE_LEFT; THE PIECE's size never changes, 400), its address the one given
+   * (one of YOUR ADDRESSES or a new one, saved when asked) or the one it holds (the default; 409 ORDER_ADDRESS_MISSING
+   * without one), then PAID at 0 with its invoice and the buyer's email: the Orders board packs it with its card scan.
+   * Claimed already: nothing changes. Its own VAULT order at 0 (404 ORDER_NOT_FOUND), the account ACTIVE (403
+   * ACCOUNT_LOCKED). The account's lock, then the order's row. Audited `order.size` (a size changed, by the collector),
+   * `order.pay` and `vault.claim`.
+   */
+  async claim(accountId: string, orderId: string, input: VaultClaimInput = {}, now?: Date): Promise<{ orderId: string; claimed: true }> {
+    const i = (input && typeof input === 'object' ? input : {}) as VaultClaimInput;
+    const size = i.size === undefined ? undefined : sizeLabelOf(typeof i.size === 'string' ? i.size : null);
+    if (i.size !== undefined && i.size !== null && typeof i.size !== 'string') throw validationError('Choose one of this piece’s sizes.');
+    const address = i.address === undefined || i.address === null ? null : checkOrderAddress(i.address);
+    const account = knownAccount(accountId, () => orderNotFoundError());
+    await inRetriedTransaction(this.db, async (tx) => {
+      const at = now ?? this.clock();
+      await lockAccountAddresses(tx, account);
+      let o = await this.vaultFreeOrderOf(tx, account, orderId, { forUpdate: true });
+      if (o.status !== 'RESERVED') {
+        if (o.status === 'CANCELLED') throw vaultOfferEnded(VAULT_CLAIM_ENDED);
+        return;
+      }
+      if (at.getTime() >= new Date(o.claim_by!).getTime()) throw vaultOfferEnded(VAULT_CLAIM_ENDED);
+      const actor: Actor = { type: 'account', id: account };
+      const notes: AuditRecordInput[] = [];
+      const from = o.sku_id!;
+      if (size !== undefined) {
+        const want = (await offeredSizes(tx, o.model_id)).find((z) => (z.label === null ? size === null : size !== null && z.label.toUpperCase() === size.toUpperCase()));
+        if (!want) throw validationError('Choose one of this piece’s sizes.');
+        if (want.skuId !== o.sku_id) {
+          if (await isThePiece(tx, o.vault_id)) throw validationError('THE PIECE comes in your size: its size does not change.');
+          // Both SKUs locked in one order (their ids), so two claims swapping between them never wait in a circle.
+          for (const k of [from, want.skuId].sort()) await lockSku(tx, k);
+          if ((await stockLevel(tx, want.skuId, o.location_id)).available < 1) throw vaultSizeNoneLeft();
+          const after = await updateOrder(tx, o.id, { sku_id: want.skuId, size_label: want.label });
+          notes.push(await recordChange(tx, o, after, 'order.size', { details: { by: 'collector', from, skuId: want.skuId, reservation: 'STOCK' } }, actor, at));
+          // The first unit back to stock: it serves the next order waiting for that size.
+          notes.push(...(await serveWaiting(tx, from, o.location_id, actor, at)));
+          o = after;
+        }
+      }
+      if (address) {
+        const written = await writeOrderAddress(tx, o, address, actor, at);
+        o = written.order;
+        notes.push(...written.notes);
+      }
+      if (!shippable(await addressOf(tx, o))) throw vaultAddressMissing();
+      const paid = await step(tx, o, { to: 'PAID', note: null }, actor, at, notes, this.mail);
+      notes.push({ actor, action: 'vault.claim', targetType: 'vault', targetId: o.vault_id!, details: { orderId: paid.id, skuId: paid.sku_id, sizeChanged: paid.sku_id !== from } });
+      for (const n of notes) await this.audit.record(n, tx);
+    });
+    return { orderId: orderId.toLowerCase(), claimed: true };
+  }
+
+  /**
+   * The rights to buy a model still open on the account's vaults (YOUR ORDERS, §3.8: BUY within "Until 21:14"), oldest
+   * end first: the vault, the model, its usual price and currency, until when, and its offered sizes (null: ONE SIZE).
+   * An add-on's right to buy is offered on each order (services/order-addons.ts).
+   */
+  async rightsToBuy(accountId: string, now: Date = this.clock()): Promise<VaultRightToBuy[]> {
+    if (typeof accountId !== 'string' || !UUID_RE.test(accountId)) return [];
+    const rows = await this.db
+      .selectFrom('vaults as v')
+      .innerJoin('vault_rewards as r', 'r.id', 'v.reward_id')
+      .innerJoin('models as m', 'm.id', 'r.model_id')
+      .select(['v.id', 'v.offer_until', 'v.prize', 'r.model_id', 'm.name', 'm.variant_label'])
+      .where('v.account_id', '=', accountId.toLowerCase())
+      .where('v.reward_kind', '=', 'PRODUCT')
+      .where('r.mode', '=', 'RIGHT_TO_BUY')
+      .where('v.offer_until', '>', now)
+      .where('v.offer_used_at', 'is', null)
+      .where('v.order_id', 'is', null)
+      .orderBy('v.offer_until')
+      .orderBy('v.id')
+      .execute();
+    const out: VaultRightToBuy[] = [];
+    for (const r of rows) {
+      const price = await usualPrice(this.db, r.model_id!);
+      if (!price) continue;
+      const until = new Date(r.offer_until!);
+      out.push({
+        vaultId: r.id,
+        modelId: r.model_id!,
+        name: pieceName(r.name, r.variant_label),
+        priceMinor: price.minor,
+        currency: price.currency,
+        offerUntil: until,
+        sizes: (await offeredSizes(this.db, r.model_id!)).map((z) => z.label),
+      });
+    }
+    return out;
+  }
+
+  /**
+   * BUY under a vault's right to buy (POST /api/v1/account/vaults/:id/buy, step Q3.9; round 2 "Right to buy: 24 HOURS, at
+   * its usual price"; S2): within its 24 hours (409 VAULT_OFFER_ENDED after, or when its model is no longer offered or
+   * priced), a VAULT order of the model at its usual price in its currency, in the size asked among its offered sizes
+   * (400 otherwise; a model of one size needs none), shipping as the tier gives it, held as any order (STOCK, or AWAITING
+   * supplier stock), the account's default address or the one given; RESERVED, paid as every platform order (Client
+   * Services marks it PAID). Its piece opens a vault at its registration like any bought piece (N8). Bought already: its
+   * order. A model's right to buy only (an add-on's is ADD on an order); its own vault (404 VAULT_NOT_FOUND); the account
+   * ACTIVE (403 ACCOUNT_LOCKED). The account's lock, then the vault's row. Audited `order.create` (VAULT) and `vault.buy`.
+   */
+  async buy(accountId: string, vaultId: string, input: VaultBuyInput = {}, now?: Date): Promise<{ orderId: string }> {
+    const i = (input && typeof input === 'object' ? input : {}) as VaultBuyInput;
+    if (i.size !== undefined && i.size !== null && typeof i.size !== 'string') throw validationError('Choose one of this piece’s sizes.');
+    const size = typeof i.size === 'string' ? sizeLabelOf(i.size) : null;
+    const address = i.address === undefined || i.address === null ? null : checkOrderAddress(i.address);
+    const account = knownAccount(accountId, vaultNotFound);
+    if (typeof vaultId !== 'string' || !UUID_RE.test(vaultId)) throw vaultNotFound();
+    const id = vaultId.toLowerCase();
+    return inRetriedTransaction(this.db, async (tx) => {
+      const at = now ?? this.clock();
+      await lockAccountAddresses(tx, account);
+      const v = await tx.selectFrom('vaults').selectAll().where('id', '=', id).forUpdate().executeTakeFirst();
+      if (!v || v.account_id !== account) throw vaultNotFound();
+      if (v.order_id) return { orderId: v.order_id };
+      const r = v.reward_id ? await tx.selectFrom('vault_rewards').select(['model_id', 'mode']).where('id', '=', v.reward_id).executeTakeFirst() : undefined;
+      if (v.reward_kind !== 'PRODUCT' || r?.mode !== 'RIGHT_TO_BUY' || !r.model_id) throw vaultNotFound();
+      if (!v.offer_until || at.getTime() >= new Date(v.offer_until).getTime() || v.offer_used_at) throw vaultOfferEnded(VAULT_BUY_ENDED);
+      const m = await tx.selectFrom('models').select(['active', 'discontinued_at', 'vault_only', 'size_type']).where('id', '=', r.model_id).executeTakeFirst();
+      const price = await usualPrice(tx, r.model_id);
+      if (!m || !m.active || m.discontinued_at !== null || m.vault_only || !price) throw vaultOfferEnded('This piece is no longer offered.');
+      const sizes = await offeredSizes(tx, r.model_id);
+      let sku: { skuId: string; label: string | null };
+      if (sizes.length === 0 && m.size_type === null) {
+        // A model with no type and no SKU yet: its one size, created as a welcome gift's is.
+        sku = { skuId: await ensureSku(tx, r.model_id, null), label: null };
+      } else {
+        const want = sizes.length === 1 && size === null ? sizes[0] : sizes.find((z) => (z.label === null ? size === null : size !== null && z.label.toUpperCase() === size.toUpperCase()));
+        if (!want) throw validationError('Choose one of this piece’s sizes.');
+        sku = want;
+      }
+      const actor: Actor = { type: 'account', id: account };
+      const notes: AuditRecordInput[] = [];
+      let o = await createOrder(
+        tx,
+        {
+          channel: 'VAULT',
+          vaultId: v.id,
+          dropId: null,
+          accountId: account,
+          modelId: r.model_id,
+          sizeLabel: sku.label,
+          skuId: sku.skuId,
+          priceMinor: price.minor,
+          currency: price.currency,
+          addons: [],
+          surprise: null,
+          locationId: await defaultLocationId(tx),
+          shipping: await shippingFor(tx, account, price.currency, at),
+        },
+        { hold: true },
+        actor,
+        at,
+        notes,
+      );
+      if (address) {
+        const written = await writeOrderAddress(tx, o, address, actor, at);
+        o = written.order;
+        notes.push(...written.notes);
+      }
+      await tx.updateTable('vaults').set({ order_id: o.id, offer_used_at: at }).where('id', '=', v.id).execute();
+      notes.push({ actor, action: 'vault.buy', targetType: 'vault', targetId: v.id, details: { orderId: o.id, modelId: r.model_id, skuId: sku.skuId, priceMinor: price.minor, currency: price.currency } });
+      for (const n of notes) await this.audit.record(n, tx);
+      return { orderId: o.id };
+    });
+  }
+
+  /**
+   * The housekeeping job `vaults` (§2.5; D20 "claimed within 30 days or back to stock"): each VAULT order at 0 still
+   * RESERVED at its `claim_by` CANCELLED by the system ("Not claimed within 30 days."), the unit reserved at the opening
+   * back to stock where it serves the next order waiting, each in its own transaction (its row locked and read again),
+   * audited `order.cancel` and `vault.claim_expired`. Returns how many were cancelled. Expired offers and vaults need no
+   * write (computed). It never touches a test entrant: none holds a vault.
+   */
+  async expireClaims(now: Date = this.clock()): Promise<number> {
+    let n = 0;
+    for (;;) {
+      const ids = await unclaimedVaultOrders(this.db, now, 100);
+      if (ids.length === 0) return n;
+      for (const orderId of ids) {
+        const cancelled = await inRetriedTransaction(this.db, async (tx) => {
+          const o = await tx.selectFrom('orders').selectAll().where('id', '=', orderId).forUpdate().executeTakeFirst();
+          if (!o || o.status !== 'RESERVED' || o.claim_by === null || new Date(o.claim_by).getTime() > now.getTime()) return false;
+          const notes: AuditRecordInput[] = [];
+          await step(tx, o, { to: 'CANCELLED', note: VAULT_NOT_CLAIMED }, SYSTEM_ACTOR, now, notes, this.mail);
+          notes.push({ actor: SYSTEM_ACTOR, action: 'vault.claim_expired', targetType: 'vault', targetId: o.vault_id!, details: { orderId: o.id, skuId: o.sku_id } });
+          for (const x of notes) await this.audit.record(x, tx);
+          return true;
+        });
+        if (cancelled) n += 1;
+      }
+      if (ids.length < 100) return n;
+    }
+  }
+
+  /** The account's own VAULT order at 0 (404 ORDER_NOT_FOUND otherwise), FOR UPDATE when asked. */
+  private async vaultFreeOrderOf(db: Db, accountId: string, orderId: string, opts: { forUpdate?: boolean } = {}): Promise<OrderRow> {
+    const account = knownAccount(accountId, () => orderNotFoundError());
+    if (typeof orderId !== 'string' || !UUID_RE.test(orderId)) throw orderNotFoundError();
+    let q = db.selectFrom('orders').selectAll().where('id', '=', orderId.toLowerCase()).where('account_id', '=', account).where('channel', '=', 'VAULT').where('claim_by', 'is not', null);
+    if (opts.forUpdate) q = q.forUpdate();
+    const o = await q.executeTakeFirst();
+    if (!o) throw orderNotFoundError();
+    return o;
   }
 
   /** How many of the account's vaults wait now (the quiet number, NOW's line; one indexed count). */

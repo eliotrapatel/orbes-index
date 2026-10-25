@@ -169,6 +169,7 @@ import { readActingAccount } from './ownership.js';
 import { releaseFeasibility, type Feasibility } from './release-stock.js';
 import { savedSizeAmong } from './sizes.js';
 import { offerName, releaseOffer, releaseOffers, savedSizesByPiece, setPieces, type ReleaseOffer, type ReleasePiece } from './release-offer.js';
+import { assertSellable, assertSetSellable } from './vault-orders.js';
 import { entryPieceSizes } from './set-sales.js';
 import { defaultLocationId, linkDropSizes } from './stock.js';
 import { isSegmentMember } from './segments.js';
@@ -1363,6 +1364,8 @@ export async function offeredSet(tx: Db, setId: string): Promise<{ id: string; n
   if (!s.active) throw setSetAside(s.name);
   const pieces = await setPieces(tx, s.id);
   if (pieces.some((p) => !p.model.active)) throw modelInactive();
+  // THE VAULT (lot Q3, §4.5): a vault-only model is never sold (409 MODEL_VAULT_ONLY).
+  await assertSetSellable(tx, s.id);
   return { id: s.id, name: s.name, pieces };
 }
 
@@ -2002,6 +2005,7 @@ export class DropService {
         const model = await tx.selectFrom('models').select(['id', 'active']).where('id', '=', modelId).executeTakeFirst();
         if (!model) throw notFound('Model', 'MODEL_NOT_FOUND');
         if (!model.active) throw modelInactive();
+        await assertSellable(tx, [modelId]);
         ({ sizes, quantity } = cleaned!);
       } else {
         // Macro scope K44 T1: the set offered, its sizes per piece.
@@ -2165,6 +2169,7 @@ export class DropService {
             const model = await tx.selectFrom('models').select(['id', 'active']).where('id', '=', modelId).executeTakeFirst();
             if (!model) throw notFound('Model', 'MODEL_NOT_FOUND');
             if (!model.active) throw modelInactive();
+            await assertSellable(tx, [modelId]);
           }
           note('modelId', 'model_id', d.model_id, modelId);
           // Its sizes, kept, are the new model's sizes too (400 SIZE_NOT_DECLARED otherwise).
@@ -2226,6 +2231,7 @@ export class DropService {
       } else {
         const model = await tx.selectFrom('models').select(['active', 'size_type']).where('id', '=', d.model_id!).executeTakeFirstOrThrow();
         if (!model.active) throw modelInactive();
+        await assertSellable(tx, [d.model_id]);
         if (sizes.length === 0) throw sizesRequired();
         if (model.size_type === null) throw modelSizesMissing();
       }
