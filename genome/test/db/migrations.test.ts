@@ -8791,10 +8791,10 @@ describe('migrations', () => {
     expect((await up(t.db)).applied).toEqual(['0059_addons_one_system', '0060_release_addons_converted']);
     expect(await one(`SELECT ${shape} FROM addon_items WHERE id = '${kit}'`)).toEqual({ kind: 'PRODUCT', offer_live: true, offer_draw: true, offer_salon: true, offer_orders: true, engraving: false, text_max: 20 });
 
-    // The rows of this test taken away (0060, up again, picked the product for every release still open, its two among them).
+    // The rows of this test taken away (0060, up again, picked the product for every release still open as its pick may
+    // hold it: the draw without a price, not the LIVE release in EUR, where the product has no price).
     expect(await all(`SELECT drop_id, addon_id, position FROM drop_addons WHERE drop_id IN ('${drop}', '${live}') ORDER BY drop_id = '${drop}' DESC`)).toEqual([
       { drop_id: drop, addon_id: kit, position: 1 },
-      { drop_id: live, addon_id: kit, position: 1 },
     ]);
     for (const q of [
       `DELETE FROM drop_addons WHERE addon_id = '${kit}'`,
@@ -9287,6 +9287,38 @@ describe('migration 0060_release_addons_converted on the data of before', () => 
       ]);
       expect((await sql<{ n: number }>`SELECT count(*)::int AS n FROM addon_conversions WHERE source = 'LIVE_ADDON' AND price_minor IS NOT NULL`.execute(other.db)).rows[0]!.n).toBe(2);
       await expect(migrateDown(other.db)).rejects.toThrow(/0060_release_addons_converted cannot be rolled back: 2 add-on conversions exist/);
+    } finally {
+      await other.close();
+    }
+  });
+
+  it('picks for an open release only what its pick may hold (as checkPick): an M3 add-on without a price in the release\'s currency or with its LIVE switch off is left out, and a converted add-on set aside (merged by name) too', async () => {
+    const other = await createTestDb({ migrated: false });
+    try {
+      expect((await createMigrator(other.db).migrateTo('0059_addons_one_system')).error).toBeUndefined();
+      const g = await liveFixture(other.db, '2026-11-01T09:00:00.000Z');
+      const m3 = async (name: string, position: number, prices: Record<string, number>, cols: { active?: boolean; offer_live?: boolean } = {}) => {
+        const id = (await other.db.insertInto('addon_items').values({ name, position, ...cols }).returning('id').executeTakeFirstOrThrow()).id;
+        await other.db.insertInto('skus').values({ addon_id: id, code: `M3-${position}` }).execute();
+        for (const [currency, price_minor] of Object.entries(prices)) await other.db.insertInto('addon_item_prices').values({ addon_id: id, currency: currency as 'EUR', price_minor }).execute();
+        return id;
+      };
+      await m3('GIFT BOX', 0, { EUR: 2500 });
+      await m3('CARE KIT', 1, { GBP: 2600 });
+      await m3('POLISHING CLOTH', 2, { EUR: 500 }, { offer_live: false });
+      const card = await m3('CARD', 3, { EUR: 300 }, { active: false });
+      const release = await createLiveRelease(g, { opensAt: new Date('2026-11-20T18:00:00Z') });
+      expect((await other.db.selectFrom('drops').select('currency').where('id', '=', release.id).executeTakeFirstOrThrow()).currency).toBe('EUR');
+      for (const [label, price, position] of [['Card', 200, 1], ['Gift wrapping', 1500, 2]] as const) {
+        await sql`INSERT INTO live_addons (drop_id, label, line, price_minor, position) VALUES (${release.id}, ${label}, ${null}, ${price}, ${position})`.execute(other.db);
+      }
+      expect((await migrateToLatest(other.db)).applied).toEqual(['0060_release_addons_converted']);
+      // CARD (set aside) took the release's Card, untouched; the pick holds GIFT BOX, then Gift wrapping.
+      expect((await sql<{ name: string }>`SELECT a.name FROM addon_conversions c JOIN addon_items a ON a.id = c.addon_id ORDER BY a.position`.execute(other.db)).rows.map((x) => x.name)).toEqual(['CARD', 'Gift wrapping']);
+      expect((await other.db.selectFrom('addon_items').select('active').where('id', '=', card).executeTakeFirstOrThrow()).active).toBe(false);
+      expect(
+        (await sql<{ name: string; position: number }>`SELECT a.name, x.position FROM drop_addons x JOIN addon_items a ON a.id = x.addon_id WHERE x.drop_id = ${release.id} ORDER BY x.position`.execute(other.db)).rows,
+      ).toEqual([{ name: 'GIFT BOX', position: 1 }, { name: 'Gift wrapping', position: 2 }]);
     } finally {
       await other.close();
     }

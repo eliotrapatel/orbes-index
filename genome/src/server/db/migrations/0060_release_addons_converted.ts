@@ -21,7 +21,10 @@
  *     its newest release (by `opens_at`), after the last, active, offered at a LIVE purchase only, the engraving when
  *     its label holds the word ENGRAVING (the house's rule, services/orders.ts `hasEngravingAddon`) and it is the
  *     newest such label (the others are not; one engraving at a time), its SKU `ADD-<LABEL WORDS>` (capitals and
- *     figures, the rest one hyphen, 64 at most, `-2`, `-3`… until free), no supplier, no weight.
+ *     figures, the rest one hyphen, 64 at most, `-2`, `-3`… until free), no supplier, no weight. An add-on already
+ *     named as the newest label holding ENGRAVING (an M3 PRODUCT named ENGRAVING, say) is kept as it is and never made
+ *     the engraving (a product cannot be): the releases' ENGRAVING then map to it, and the engraving is only the
+ *     settings' new one (5), or none. The runbook's read-only pre-check lists such a name before the deploy.
  *  4. Its prices: in each house currency, the price of the newest release offering it in that currency; a release in
  *     another currency gives none (recorded without a price).
  *  5. The settings' engraving (N4): its prices become the engraving add-on's (they win in their currencies: the house's
@@ -30,8 +33,11 @@
  *     `ADD-ENGRAVING`) carries them. One record per currency.
  *  6. The picks (`drop_addons`) of every release not ended and not cancelled (a LIVE release, its after-room, a draw not
  *     drawn yet or within its place-held window), so each keeps offering what it offered (D19): every active catalogue
- *     add-on of M3 first (it was offered in every release), then its converted ones in their old order. A release that
- *     already has a pick keeps it and gains its converted ones after it. An ended release needs none: YOUR ORDERS
+ *     add-on of M3 first (it was offered in every release), then its converted ones in their old order. Only what its
+ *     pick may hold (services/addons.ts `checkPick`, so staff sending the pick again are never refused one): active, its
+ *     switch for the release's moment on, and, when the release's currency is a house currency (a draw's only with its
+ *     price), priced in it; a converted add-on set aside (an M3 one merged by name) is left out. A release that already
+ *     has a pick keeps it and gains its converted ones after it. An ended release needs none: YOUR ORDERS
  *     follows the ORDERS switch alone (N8), so its orders, until packing, are still offered every add-on whose ORDERS
  *     switch is on, the converted Settings ENGRAVING included.
  *  7. The choices of release add-ons still kept (CONFIRMED entries only, after 1; their orders hold them as sold,
@@ -207,13 +213,25 @@ export const UP: readonly string[] = [
        END LOOP;
      END IF;
 
-     -- 6. Every release not ended keeps offering what it offered: M3's add-ons, then its converted ones in their order.
-     FOR r IN SELECT d.id FROM drops d WHERE ${NOT_ENDED} ORDER BY d.opens_at, d.id LOOP
+     -- 6. Every release not ended keeps offering what it offered: M3's add-ons, then its converted ones in their order,
+     -- each only as its pick may hold it (active, its moment's switch on, priced in its house currency if it has one).
+     FOR r IN
+       SELECT d.id, d.mode = 'LIVE' AS live,
+              CASE WHEN d.currency IN (${CURRENCIES}) AND (d.mode = 'LIVE' OR d.price_minor IS NOT NULL) THEN d.currency END AS currency
+         FROM drops d WHERE ${NOT_ENDED} ORDER BY d.opens_at, d.id
+     LOOP
        SELECT coalesce(max(position), 0) INTO v_pick FROM drop_addons WHERE drop_id = r.id;
        IF v_pick = 0 THEN
          INSERT INTO drop_addons (drop_id, addon_id, position)
-         SELECT r.id, m.id, m.n FROM unnest(m3) WITH ORDINALITY AS m(id, n) WHERE m.n <= ${PICK_POSITION_MAX};
-         v_pick := least(cardinality(m3), ${PICK_POSITION_MAX});
+         SELECT r.id, x.id, x.position
+           FROM (
+             SELECT a.id, row_number() OVER (ORDER BY m.n) AS position
+               FROM unnest(m3) WITH ORDINALITY AS m(id, n) JOIN addon_items a ON a.id = m.id
+              WHERE a.active AND CASE WHEN r.live THEN a.offer_live ELSE a.offer_draw END
+                AND (r.currency IS NULL OR EXISTS (SELECT 1 FROM addon_item_prices p WHERE p.addon_id = a.id AND p.currency = r.currency))
+           ) x
+          WHERE x.position <= ${PICK_POSITION_MAX};
+         SELECT coalesce(max(position), 0) INTO v_pick FROM drop_addons WHERE drop_id = r.id;
        END IF;
        INSERT INTO drop_addons (drop_id, addon_id, position)
        SELECT r.id, x.addon_id, x.position
@@ -221,8 +239,10 @@ export const UP: readonly string[] = [
            SELECT v.addon_id, v_pick + row_number() OVER (ORDER BY v.first, v.addon_id) AS position
              FROM (
                SELECT c2.addon_id, min(a.position) AS first
-                 FROM addon_conversions c2 JOIN live_addons a ON a.id = c2.source_id
+                 FROM addon_conversions c2 JOIN live_addons a ON a.id = c2.source_id JOIN addon_items i ON i.id = c2.addon_id
                 WHERE c2.drop_id = r.id
+                  AND i.active AND CASE WHEN r.live THEN i.offer_live ELSE i.offer_draw END
+                  AND (r.currency IS NULL OR EXISTS (SELECT 1 FROM addon_item_prices p WHERE p.addon_id = i.id AND p.currency = r.currency))
                   AND NOT EXISTS (SELECT 1 FROM drop_addons p WHERE p.drop_id = r.id AND p.addon_id = c2.addon_id)
                 GROUP BY c2.addon_id
              ) v

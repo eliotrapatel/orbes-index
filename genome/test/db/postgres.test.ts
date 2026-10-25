@@ -731,7 +731,7 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await db.insertInto('skus').values({ addon_id: box.id, code: 'BOX-PG0060' }).execute();
     await db.insertInto('addon_item_prices').values({ addon_id: box.id, currency: 'EUR', price_minor: 2500 }).execute();
     const offered = (
-      await sql<{ name: string }>`SELECT name FROM addon_items WHERE active ORDER BY position, lower(name), id`.execute(db)
+      await sql<{ name: string }>`SELECT a.name FROM addon_items a WHERE a.active AND a.offer_live AND EXISTS (SELECT 1 FROM addon_item_prices p WHERE p.addon_id = a.id AND p.currency = 'EUR') ORDER BY a.position, lower(a.name), a.id`.execute(db)
     ).rows.map((r) => r.name);
     // An open LIVE release in EUR with its own two add-ons; a piece SECURED there with one of them chosen.
     const release = await db
@@ -779,7 +779,8 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
       { id: expect.any(String), source: 'LIVE_ADDON', source_id: boxSource, drop_id: release.id, addon_id: box.id, currency: 'EUR', price_minor: null, converted_at: expect.any(Date) },
       { id: expect.any(String), source: 'ENGRAVING_PRICES', source_id: null, drop_id: null, addon_id: engraving.id, currency: 'EUR', price_minor: 3000, converted_at: expect.any(Date) },
     ]);
-    // The open release offers what it offered: the catalogue add-ons offered then, then its own converted one.
+    // The open release offers what it offered: the catalogue add-ons offered then (as its pick may hold them: offered at a
+    // LIVE purchase, priced in EUR), then its own converted one.
     const pick = await db.selectFrom('drop_addons as x').innerJoin('addon_items as a', 'a.id', 'x.addon_id').select(['a.name', 'x.position']).where('x.drop_id', '=', release.id).orderBy('x.position').execute();
     expect(pick).toEqual([...offered, 'ENGRAVING PG60'].map((name, i) => ({ name, position: i + 1 })));
     const tables = (await sql<{ name: string }>`SELECT table_name AS name FROM information_schema.tables WHERE table_schema = 'public'`.execute(db)).rows.map((r) => r.name);
