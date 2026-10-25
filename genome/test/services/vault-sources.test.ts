@@ -7,8 +7,8 @@
  * transaction, with its FROM ORBES arrival and its audit; never to a LEFT entry, an entry of another size, the buyer, a
  * test entrant or an account not ACTIVE; a 2+ piece entry its size can no longer serve gets none until the size is fully
  * paid (N19); a set's release by its sets; the whole release sold out gives every size's line its vault before the end
- * ENDS it (D6); a release that CLOSES with pieces left gives none, even when a hold pays its last piece after the close
- * (D8); the after-room gives none of its own and a piece won there never takes the vault back (D7, N20); the release's
+ * ENDS it (D6); a release that CLOSES with pieces left gives none, even when a hold pays its last piece after the close,
+ * before or after the engine's pass at the close (D8); a long line is given in a few statements, never one per collector; the after-room gives none of its own and a piece won there never takes the vault back (D7, N20); the release's
  * switch off (the default, D4) or the LIVE source off gives none. The switch itself (LiveConsoleService.setVault): off
  * at the creation, on or off until the end, refused on an after-room, after the end and once cancelled, audited.
  *
@@ -287,6 +287,61 @@ describe('THE VAULT’s LIVE source', () => {
     await f.live.confirm(b.id, r.id, b.actor);
     expect(await statusOf(r, b)).toBe('CONFIRMED');
     expect(await vaultsOf(r)).toEqual([]);
+  });
+
+  it('gives nothing when a hold is paid after the close, before the engine’s next pass, selling one size out of a release with pieces left (D8)', async () => {
+    const r = await release({ sizes: [{ label: '52', stock: 1 }, { label: '54', stock: 3 }], payMinutes: 10, closesInMinutes: 5 });
+    const [s52, s54] = [r.sizes[0]!.id, r.sizes[1]!.id];
+    const [a, b, c] = [await accountOfTier(f, 3), await accountOfTier(f, 0), await accountOfTier(f, 0)];
+    f.clock.set(r.t0.getTime() - MINUTE);
+    await enter(r, a, s52);
+    await enter(r, b, s52);
+    await enter(r, c, s54);
+    f.clock.set(r.t0);
+    await f.live.advance(r.id);
+    const token = (await f.live.entry(a.id, r.id))!.turn!.token!;
+    await f.live.press(a.id, r.id, token);
+    f.clock.advance(1500);
+    await f.live.secure(a.id, r.id, token, a.actor);
+    // The close passes and no engine pass has run yet: a's hold pays 52's only piece.
+    f.clock.set(r.t0.getTime() + 5 * MINUTE + 100);
+    await f.live.confirm(a.id, r.id, a.actor);
+    expect(await statusOf(r, a)).toBe('CONFIRMED');
+    expect((await t.db.selectFrom('drops').select('ended_reason').where('id', '=', r.id).executeTakeFirstOrThrow()).ended_reason).toBe('CLOSED');
+    expect(await statusOf(r, b)).toBe('ENDED');
+    expect(await vaultsOf(r)).toEqual([]);
+  });
+
+  it('gives a long line its vaults in a few statements, whatever its length, each its arrival and its audit (the release’s row held briefly)', async () => {
+    const r = await release({ sizes: [{ label: '52', stock: 1 }] });
+    const s52 = r.sizes[0]!.id;
+    const line: Account[] = [];
+    for (let i = 0; i < 40; i++) line.push(await accountOfTier(f, 0));
+    f.clock.set(r.t0.getTime() - MINUTE);
+    for (const a of line) await enter(r, a, s52);
+    await t.db.updateTable('vault_sources').set({ per_occasion: 2 }).where('source', '=', 'LIVE').execute();
+    try {
+      let statements = 0;
+      const counted = t.db.withPlugin({ transformQuery: (args) => (statements++, args.node), transformResult: async (args) => args.result });
+      const d = await t.db.selectFrom('drops').select(['id', 'set_id', 'parent_drop_id', 'vault_on']).where('id', '=', r.id).executeTakeFirstOrThrow();
+      const at = f.clock.now();
+      const notes = await counted.transaction().execute((tx) => giveLiveVaults(tx, d, [s52], at));
+      // The source, the entries, the vaults, the occasion's detail, the arrivals: never one per collector.
+      expect(statements).toBeLessThanOrEqual(5);
+      expect(notes.map((n) => n.targetId)).toEqual(line.map((a) => a.id).sort());
+      expect(notes.every((n) => n.action === 'vault.give' && (n.details as { count: number }).count === 2)).toBe(true);
+      const given = await vaultsOf(r);
+      expect(given).toHaveLength(80);
+      for (const a of line) expect(given.filter((v) => v.account_id === a.id).map((v) => v.occasion_index).sort()).toEqual([1, 2]);
+      const arrivals = await t.db.selectFrom('house_deliveries').select(['account_id', 'dedupe_key']).where('account_id', 'in', line.map((a) => a.id)).execute();
+      expect(arrivals).toHaveLength(40);
+      for (const m of arrivals) expect(m.dedupe_key).toBe(`VAULT:${given.find((v) => v.account_id === m.account_id && v.occasion_index === 1)!.id}`);
+      // Given again (a second pass): nothing more.
+      expect(await t.db.transaction().execute((tx) => giveLiveVaults(tx, d, [s52], at))).toEqual([]);
+      expect(await vaultsOf(r)).toHaveLength(80);
+    } finally {
+      await t.db.updateTable('vault_sources').set({ per_occasion: 1 }).where('source', '=', 'LIVE').execute();
+    }
   });
 
   it('keeps the vault of a guest who wins a piece in the after-room, which gives none of its own (D7, N20)', async () => {

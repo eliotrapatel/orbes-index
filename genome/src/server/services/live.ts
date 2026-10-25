@@ -1916,7 +1916,9 @@ export class LiveService {
       const confirmed: AuditRecordInput = { actor, action: 'drop.live.confirm', targetType: 'drop', targetId: id, details: { entryId: e.id, quantity: e.quantity } };
       const notes: AuditRecordInput[] = [confirmed];
       // THE VAULT's LIVE source (lot Q3, step Q3.5): the sizes this PAY sold out give their line its vaults before the end ENDS it.
-      if (d.vault_on && !d.ended_at) {
+      // Never once `closes_at` has passed (D8): a hold paid after the close, before the engine's next pass ends the release
+      // CLOSED (settleEnd), however many pieces it leaves, so it sells nothing out for a vault.
+      if (d.vault_on && !d.ended_at && now.getTime() < d.closes_at.getTime()) {
         const own = d.set_id === null ? [e.size_id] : (await tx.selectFrom('live_entry_sizes').select('size_id').where('entry_id', '=', e.id).execute()).map((x) => x.size_id);
         notes.push(...(await giveLiveVaults(tx, d, soldOutSizes(await this.sizeTotals(tx, d), own), now)));
       }
@@ -2537,7 +2539,7 @@ export class LiveService {
 
   /** The audit entries of a transaction, written last: no row is locked after the audit chain's lock. */
   private async record(tx: Db, notes: readonly AuditRecordInput[]): Promise<void> {
-    for (const n of notes) await this.audit.record(n, tx);
+    await this.audit.recordAll(notes, tx);
   }
 
   /** An ACTIVE account, its row FOR SHARE (a lock under way finishes first; 403 ACCOUNT_LOCKED once locked). */

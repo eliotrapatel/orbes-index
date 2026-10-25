@@ -357,20 +357,27 @@ export interface LiveVaultRelease {
  * no vault; one per account per release; staff switch per LIVE release, off by default", round 2 trigger "WHEN YOUR
  * SIZE SELLS OUT", D4). In the transaction of the PAY that sold `sizeIds` out (services/live.ts `confirm`, its
  * `soldOutSizes`: each of its sizes now fully confirmed, every size when the release sold out whole, D6), before
- * `settleEnd` ENDS the line: a vault (`giveVault`, its caps and switches) for every entry of those sizes still in the
- * line, WAITING or QUEUED, a late comer who joined and stayed included; LEFT, RELEASED, REMOVED, MISSED, EXPIRED never.
- * Nothing on a release with its switch off, nor on an after-room (`drops_vault_on`: its guests were given theirs at
- * its parent's sell-out, N20; a piece won there never takes it back, D7), nor for a test entrant (D9) or an account not
- * ACTIVE (left out here already, so a sell-out reads only those it gives to). A release that CLOSES with pieces left
- * sells no size out at its end and gives none (D8). The release's row is held by the caller (FOR NO KEY UPDATE), so the
- * accounts are visited in their ids' order. Returns the audit entries for the caller to record.
+ * `settleEnd` ENDS the line: a vault (`giveVault`'s rules: its source and the release's switches, its cap) for every
+ * entry of those sizes still in the line, WAITING or QUEUED, a late comer who joined and stayed included; LEFT,
+ * RELEASED, REMOVED, MISSED, EXPIRED never. Nothing on a release with its switch off, nor on an after-room
+ * (`drops_vault_on`: its guests were given theirs at its parent's sell-out, N20; a piece won there never takes it back,
+ * D7), nor for a test entrant (D9) or an account not ACTIVE. A release that CLOSES with pieces left sells no size out at
+ * its end and gives none (D8; `confirm` gives nothing once `closes_at` has passed). The release's row is held by the
+ * caller (FOR NO KEY UPDATE) for the whole give, so it is set-based, whatever the line's length: one read of the source,
+ * one of the entries (their accounts FOR KEY SHARE, in their ids' order), the vaults inserted LIVE_GIVE_CHUNK rows a
+ * statement (ON CONFLICT DO NOTHING on `vaults_occasion_key`), the occasion's detail read once and the FROM ORBES
+ * arrivals inserted the same way (`dedupe_key` VAULT:<the account's first vault>). Returns the audit entries
+ * (`vault.give` per account, as `giveVault` writes it) for the caller to record.
  */
 export async function giveLiveVaults(tx: Db, d: LiveVaultRelease, sizeIds: readonly string[], now: Date): Promise<AuditRecordInput[]> {
   if (sizeIds.length === 0 || !d.vault_on || d.parent_drop_id !== null) return [];
-  const source = await tx.selectFrom('vault_sources').select('enabled').where('source', '=', 'LIVE').executeTakeFirst();
+  // The source and the release's switch read once (the caller holds the release's row, so `d.vault_on` is current).
+  const source = (await tx.selectFrom('vault_sources').select(['enabled', 'per_occasion', 'cap']).where('source', '=', 'LIVE').executeTakeFirst()) as SourceRow | undefined;
   if (!source?.enabled) return [];
   const dropId = d.id.toLowerCase();
   const key = occasionKey({ source: 'LIVE', accountId: dropId, dropId, entryId: dropId });
+  // The entries given to, in one read: still in the line, ACTIVE (the account's row FOR KEY SHARE, as `giveVault` takes
+  // it for LIVE), never a test entrant, none already holding this release's vault (one entry per account per release).
   const entries = await tx
     .selectFrom('live_entries as e')
     .innerJoin('accounts as a', 'a.id', 'e.account_id')
@@ -388,10 +395,50 @@ export async function giveLiveVaults(tx: Db, d: LiveVaultRelease, sizeIds: reado
       eb.not(eb.exists(eb.selectFrom('vaults as v').select('v.id').whereRef('v.account_id', '=', 'e.account_id').where('v.occasion_key', '=', key).where('v.revoked_at', 'is', null))),
     )
     .orderBy('e.account_id')
+    .forKeyShare('a')
     .execute();
-  const notes: AuditRecordInput[] = [];
-  for (const e of entries) notes.push(...(await giveVault(tx, { source: 'LIVE', accountId: e.account_id, dropId, entryId: e.id }, now)).notes);
-  return notes;
+  if (entries.length === 0) return [];
+
+  // Each account holds none under the key: its vaults are the indexes 1 to `per_occasion`, within the cap (as `giveVault`).
+  const most = source.cap === null ? VAULT_OCCASION_INDEX_MAX : Math.min(VAULT_OCCASION_INDEX_MAX, source.cap * source.per_occasion);
+  const count = Math.min(source.per_occasion, most);
+  if (count <= 0) return [];
+  const waitsUntil = new Date(now.getTime() + VAULT_WAIT_MS);
+  const rows = entries.flatMap((e) =>
+    Array.from({ length: count }, (_, i) => ({ account_id: e.account_id, source: 'LIVE' as const, drop_id: dropId, entry_id: e.id, occasion_key: key, occasion_index: i + 1, given_at: now, waits_until: waitsUntil })),
+  );
+  const given = new Map<string, { id: string; index: number }[]>();
+  for (const chunk of chunked(rows, LIVE_GIVE_CHUNK)) {
+    const inserted = await tx.insertInto('vaults').values(chunk).onConflict((oc) => oc.doNothing()).returning(['id', 'account_id', 'occasion_index']).execute();
+    for (const v of inserted) given.set(v.account_id, [...(given.get(v.account_id) ?? []), { id: v.id, index: v.occasion_index }]);
+  }
+  if (given.size === 0) return [];
+
+  // The arrivals (E6): one FROM ORBES message per account, the occasion's detail read once, in as few inserts.
+  const detail = await occasionDetail(tx, { source: 'LIVE', accountId: dropId, dropId, entryId: dropId });
+  const until = parisDay(waitsUntil);
+  const accounts = [...given.keys()].sort();
+  const vaultsOf = (accountId: string) => given.get(accountId)!.sort((a, b) => a.index - b.index);
+  const deliveries = accounts.map((accountId) => {
+    const vaults = vaultsOf(accountId);
+    const words = vaultArrivedWords({ source: 'LIVE', detail, count: vaults.length, until });
+    return { account_id: accountId, source: 'VAULT' as const, title: deliveredTitle(words.title) ?? words.title, body: deliveredBody(words.body) ?? words.body, dedupe_key: `VAULT:${vaults[0]!.id}`, delivered_at: now };
+  });
+  for (const chunk of chunked(deliveries, LIVE_GIVE_CHUNK)) await tx.insertInto('house_deliveries').values(chunk).onConflict((oc) => oc.column('dedupe_key').doNothing()).execute();
+
+  return accounts.map((accountId) => {
+    const vaults = vaultsOf(accountId);
+    return { actor: SYSTEM_ACTOR, action: 'vault.give', targetType: 'account', targetId: accountId, details: { source: 'LIVE', occasionKey: key, count: vaults.length, vaults: vaults.map((v) => v.id) } };
+  });
+}
+
+/** The rows one LIVE give inserts per statement (8 parameters each, far under PostgreSQL's 65 535). */
+const LIVE_GIVE_CHUNK = 1_000;
+
+function chunked<T>(items: readonly T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
 }
 
 // ── THE VAULT page ─────────────────────────────────────────────────────────
