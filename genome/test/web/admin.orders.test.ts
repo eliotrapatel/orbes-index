@@ -27,6 +27,7 @@ import {
   canChooseGiftSize,
   countryOptions,
   engravingLine,
+  ENGRAVING_SETTINGS_TEXT,
   carrierProblem,
   cardCase,
   cardHolds,
@@ -697,6 +698,11 @@ describe('the Buyer, the engraving and their settings (plan NEXT LOT §3.6.B, C)
     expect(engravingLine({ engravingText: null, engravingMinor: null, currency: 'EUR' })).toBe('None');
     // The history names the client's own changes (plan NEXT LOT §3.6.B, C), never by their action's code.
     expect([EVENT_LABELS['order.address'], EVENT_LABELS['order.engraving']]).toEqual(['Delivery address entered', 'Engraving entered']);
+  });
+
+  it('says in Orders → Settings that the engraving is an add-on, its prices in Catalogue → Add-ons (lot Q2, N4)', () => {
+    const t = ENGRAVING_SETTINGS_TEXT;
+    expect(`${t.before}${t.link}${t.after}`).toBe('Engraving is an add-on: its prices are in Catalogue → Add-ons, ENGRAVING.');
   });
 
   it('calls the buyer\'s route, the CSRF token on the change; the engraving prices\' routes are gone (lot Q2, step Q2.5: the ENGRAVING add-on\'s prices)', async () => {

@@ -2,20 +2,27 @@
  * The add-ons in the console (macro scope of 2026-10-20, K48 D1 and D2; lot M3 plan §4.3, step M3.11): pure helpers, no
  * DOM.
  *
- *  - Catalogue → Add-ons: an add-on's words as its row reads them (its prices, its stock and minimums per location, its
- *    state, its Shopify link), its dialog's checks (the bounds of migration 0056, the SKU code's rule) and what it sends
- *    (a creation with its SKU code and prices; an edit only what changed, its fields and its prices apart).
+ *  - Catalogue → Add-ons: an add-on's words as its row reads them (its type, WITH STOCK or SERVICE, where it is offered,
+ *    how many releases pick it, the ENGRAVING mark, what it was converted from, its prices, its stock and minimums per
+ *    location or No stock, its state, its Shopify link), its dialog's checks (the bounds of migrations 0056 and 0059, the
+ *    SKU code's rule, the engraving's most characters) and what it sends (a creation with its type, SKU code, switches
+ *    and prices; an edit only what changed, its fields and its prices apart; lot Q2, step Q2.7, D3, D4, D12, N3).
+ *  - A release's pick (lot Q2, step Q2.7, D3, N7): the active add-ons a LIVE RELEASE or a draw may offer, ticked, the ones
+ *    it cannot offer listed with why (its switch is off, no price in its currency), and what its form sends.
  *  - Logistics: an add-on's SKU named by its add-on, never a size (`model` null): the stock's ADD-ONS group, a reception's
  *    line counted in without an ORBES CODE, the supplier orders' lines.
- *  - The order page's Add-ons: the units grouped (name × units, price, who added it, status), Add an add-on's options,
- *    units and total, Remove's words; the draw's Confirm and the salon's Accept: the collector's choices, and what was
- *    left out after.
+ *  - The order page's Add-ons: the units grouped (name × units, price, who added it, status; a service's held nowhere),
+ *    Add an add-on's options, units and total, Remove's words, the engraving's unit beside its words; the draw's Confirm
+ *    and the salon's Accept: the collector's choices, and what was left out after.
  *  - The parcel and its slips: the add-ons to pack (POLISHING CLOTH × 2), never a price.
- * The server stays the authority (409 ADDON_NAME_TAKEN, SKU_CODE_TAKEN, ADDON_OUT_OF_STOCK, ADDON_LIMIT, ADDON_NOT_OFFERED).
+ * The server stays the authority (409 ADDON_NAME_TAKEN, SKU_CODE_TAKEN, ADDON_OUT_OF_STOCK, ADDON_LIMIT, ADDON_NOT_OFFERED,
+ * ADDON_ENGRAVING_TAKEN, ADDON_KIND_FIXED, ADDON_SERVICE).
  */
 import { formatCount } from '../format.js';
 import {
+  ADDON_KINDS,
   ADDON_LINE_MAX,
+  ADDON_TEXT_MAX,
   ADDON_NAME_MAX,
   ADDON_PRICE_MINOR_MAX,
   ADDON_UNITS_MAX,
@@ -23,6 +30,9 @@ import {
   HOUSE_CURRENCIES,
   type AddonCreateInput,
   type AddonInput,
+  type AddonKind,
+  type AddonOfferedAt,
+  type AddonPickable,
   type AddonView,
   type AdminOrderAddonUnit,
   type ChosenAddon,
@@ -33,7 +43,9 @@ import {
   type OrderAddonStatus,
   type OrderView,
   type ParcelPiece,
+  type PickedAddon,
 } from '../types.js';
+import { parisDateTime } from './links.js';
 import { formatMoney, moneyField, parseMoney } from './live.js';
 import { pastedShopifyId } from './shopify.js';
 
@@ -43,11 +55,14 @@ export const ADDON_SKU_CODE_RE = /^[A-Z0-9][A-Z0-9-]{1,63}$/;
 /** The bounds of an add-on (migration 0056, mirrored in types.ts). */
 export const ADDON_LIMITS = Object.freeze({ name: ADDON_NAME_MAX, line: ADDON_LINE_MAX, weightG: ADDON_WEIGHT_G_MAX, priceMinor: ADDON_PRICE_MINOR_MAX, units: ADDON_UNITS_MAX, skuCode: 64 });
 
+/** The engraving's most characters (migration 0059, D12, N3): 1 to 20, 20 by default. */
+export const ADDON_TEXT_LIMITS = Object.freeze({ min: ADDON_TEXT_MAX.min, max: ADDON_TEXT_MAX.max, default: ADDON_TEXT_MAX.max });
+
 // ── Catalogue → Add-ons ────────────────────────────────────────────────────
 
 export const ADDONS_TEXT = Object.freeze({
   title: 'Add-ons',
-  lead: 'Items sold with a piece: a care kit, a polishing cloth, a chain extender. Each has its own SKU and stock, no ORBES CODE, and never counts toward the tier. It is offered when a purchase is confirmed and in YOUR ORDERS until packing begins, in each currency it has a price in, while one is in stock at the order’s location. Its stock moves in Logistics; the Shopify export lists each active add-on priced in the store’s currency.',
+  lead: 'Items sold with a piece: a care kit, a polishing cloth, a chain extender, each WITH STOCK; or a SERVICE without stock, such as gift wrapping or the engraving. Each has its own SKU, no ORBES CODE, and never counts toward the tier. It is offered where its switches say: at the purchase in a LIVE RELEASE, in a release with a draw or in the private salon, and in YOUR ORDERS until packing begins; a release offers at its purchase only the add-ons it picks. It is offered in each currency it has a price in, and one with stock while one is in stock at the order’s location. Its stock moves in Logistics; the Shopify export lists each active add-on priced in the store’s currency.',
   empty: 'No add-on yet.',
   add: 'New add-on',
   addTitle: 'New add-on',
@@ -60,6 +75,15 @@ export const ADDONS_TEXT = Object.freeze({
   lineHint: 'One line under its name, as the collector reads it. Optional.',
   skuHint: 'Its own SKU, for its stock and its supplier orders: capitals, digits and hyphens, such as ADD-CLOTH. It never changes.',
   skuFixed: (code: string) => `Its SKU, ${code}, never changes.`,
+  kindHint: 'Fixed once added. WITH STOCK: counted in Logistics, ordered from its supplier. SERVICE: no stock, no supplier and no warehouse, such as gift wrapping or the engraving.',
+  kindFixed: (kind: string) => `Its type, ${kind}, never changes: set it aside and add another to change it.`,
+  offeredHint: 'On by default. A release offers at its purchase only the add-ons it picks, among those offered there.',
+  ordersHint: 'Every order until packing begins, whatever its release.',
+  engraving: 'The engraving',
+  engravingHint: 'The collector types the words engraved on the piece. One engraving is offered at a time.',
+  textMax: 'Most characters',
+  textMaxHint: `The most characters the collector may type, ${ADDON_TEXT_MAX.max} at most.`,
+  noStock: 'No stock',
   supplierHint: 'Its supplier orders go to this supplier. None: it cannot be ordered yet.',
   weightHint: 'In grams, for the parcel’s weight. Empty: unknown.',
   priceHint: (currency: string, first: boolean) => (first ? `In units: 15, or 15.50. Empty: not offered in ${currency}.` : `Empty: not offered in ${currency}.`),
@@ -78,6 +102,53 @@ export const ADDONS_TEXT = Object.freeze({
   shopifySaved: 'Shopify ids saved.',
 });
 
+/** An add-on's type as the console says it (D4): WITH STOCK (a product) or SERVICE (no stock). */
+export const ADDON_KIND_LABELS: Readonly<Record<AddonKind, string>> = Object.freeze({ PRODUCT: 'WITH STOCK', SERVICE: 'SERVICE' });
+
+/** The Type select of New add-on, WITH STOCK first. */
+export const ADDON_KIND_OPTIONS = Object.freeze(ADDON_KINDS.map((k) => Object.freeze({ value: k, label: ADDON_KIND_LABELS[k] })));
+
+/** The four moments an add-on is offered at (D3, K48 D2): its switch's label in the dialog and its mark in the row. */
+export const ADDON_SWITCHES: readonly { key: keyof AddonOfferedAt; label: string; mark: string }[] = Object.freeze([
+  { key: 'live', label: 'Offered at the purchase in a LIVE RELEASE', mark: 'LIVE' },
+  { key: 'draw', label: 'Offered at the purchase in a release with a draw', mark: 'DRAW' },
+  { key: 'salon', label: 'Offered at the purchase in the private salon', mark: 'SALON' },
+  { key: 'orders', label: 'In YOUR ORDERS, until packing begins', mark: 'YOUR ORDERS' },
+]);
+
+/** Where it is offered, the switches on, one mark each (its row lists them one per line): LIVE, DRAW, SALON, YOUR ORDERS; or Nowhere. */
+export function addonOfferedMarks(a: Pick<AddonView, 'offeredAt'>): string[] {
+  const on = ADDON_SWITCHES.filter((x) => a.offeredAt[x.key]).map((x) => x.mark);
+  return on.length ? on : ['Nowhere'];
+}
+
+/** Where it is offered on one line: `LIVE · DRAW · SALON · YOUR ORDERS`, or Nowhere. */
+export function addonOfferedText(a: Pick<AddonView, 'offeredAt'>): string {
+  return addonOfferedMarks(a).join(' · ');
+}
+
+/** The engraving's mark: `ENGRAVING · 12 characters at most`; null for any other add-on. */
+export function addonEngravingText(a: Pick<AddonView, 'engraving' | 'textMax'>): string | null {
+  return a.engraving ? `ENGRAVING · ${formatCount(a.textMax)} ${a.textMax === 1 ? 'character' : 'characters'} at most` : null;
+}
+
+/** How many releases not ended pick it: `2`, or None. */
+export function addonReleasesText(a: Pick<AddonView, 'releases'>): string {
+  return a.releases > 0 ? formatCount(a.releases) : 'None';
+}
+
+/**
+ * What it was converted from (migration 0060): `Converted from the add-ons of SPRING, AUTUMN (24 OCT 2026)`, and
+ * `Converted from Orders → Settings, Engraving`; none for an add-on staff created.
+ */
+export function addonConvertedLines(a: Pick<AddonView, 'convertedFrom'>): string[] {
+  const releases = a.convertedFrom.filter((c) => c.source === 'LIVE_ADDON' && c.release !== null);
+  const out: string[] = [];
+  if (releases.length) out.push(`Converted from the add-ons of ${releases.map((c) => c.release!.title).join(', ')} (${parisDateTime(releases[0]!.convertedAt).split(' · ')[0]})`);
+  if (a.convertedFrom.some((c) => c.source === 'ENGRAVING_PRICES')) out.push('Converted from Orders → Settings, Engraving');
+  return out;
+}
+
 /** A price of an add-on as its row reads it: `€ 15`. */
 export function addonPriceText(p: { priceMinor: number; currency: string }): string {
   return formatMoney(p.priceMinor, p.currency);
@@ -93,8 +164,9 @@ export function addonWeightText(a: Pick<AddonView, 'weightG'>): string {
   return a.weightG === null ? 'Unknown' : `${formatCount(a.weightG)} g`;
 }
 
-/** Its stock per location, each location listed (0 included): what is available, and its minimum when it has one. */
-export function addonStockLines(a: Pick<AddonView, 'stock'>): string[] {
+/** Its stock per location, each location listed (0 included): what is available, and its minimum when it has one; a service: No stock. */
+export function addonStockLines(a: Pick<AddonView, 'stock'> & { kind?: AddonKind }): string[] {
+  if (a.kind === 'SERVICE') return [ADDONS_TEXT.noStock];
   return a.stock.map((s) => `${s.location.name} · ${formatCount(s.available)}${s.minimum === null ? '' : ` · minimum ${formatCount(s.minimum)}`}`);
 }
 
@@ -109,9 +181,19 @@ export function addonShopifyStatus(a: Pick<AddonView, 'shopifyProductId' | 'sku'
   return a.sku.shopifyVariantId === null ? 'LINKED · NO VARIANT' : 'LINKED';
 }
 
-export type AddonForm = Record<'name' | 'line' | 'skuCode' | 'supplierId' | 'weightG' | 'EUR' | 'GBP' | 'USD' | 'CHF', string>;
+/**
+ * The add-on dialog's values: its fields, its prices, its type (`kind`, at the creation only), its four switches and the
+ * engraving with its most characters (a checkbox's value is 'true' when ticked, '' otherwise).
+ */
+export type AddonForm = Record<
+  'name' | 'line' | 'skuCode' | 'supplierId' | 'weightG' | 'EUR' | 'GBP' | 'USD' | 'CHF' | 'kind' | 'live' | 'draw' | 'salon' | 'orders' | 'engraving' | 'textMax',
+  string
+>;
 
-/** The add-on dialog's values as it opens: the add-on's, or empty for a new one. */
+const ticked = (v: string | undefined) => v === 'true';
+const tick = (b: boolean) => (b ? 'true' : '');
+
+/** The add-on dialog's values as it opens: the add-on's, or empty for a new one (WITH STOCK, offered everywhere, 20 characters). */
 export function addonFormValues(a: AddonView | null): AddonForm {
   const price = (c: HouseCurrency) => {
     const p = a?.prices.find((x) => x.currency === c);
@@ -127,7 +209,37 @@ export function addonFormValues(a: AddonView | null): AddonForm {
     GBP: price('GBP'),
     USD: price('USD'),
     CHF: price('CHF'),
+    kind: a?.kind ?? 'PRODUCT',
+    live: tick(a?.offeredAt.live ?? true),
+    draw: tick(a?.offeredAt.draw ?? true),
+    salon: tick(a?.offeredAt.salon ?? true),
+    orders: tick(a?.offeredAt.orders ?? true),
+    engraving: tick(a?.engraving ?? false),
+    textMax: String(a?.textMax ?? ADDON_TEXT_LIMITS.default),
   };
+}
+
+/** Whether the dialog's values make a service (its type chosen at the creation, the add-on's after). */
+export function isServiceForm(v: Partial<AddonForm>): boolean {
+  return v.kind === 'SERVICE';
+}
+
+/** Whether the dialog's values make the engraving: a service, The engraving ticked. */
+export function isEngravingForm(v: Partial<AddonForm>): boolean {
+  return isServiceForm(v) && ticked(v.engraving);
+}
+
+/** The engraving's most characters typed, 1 to 20; null otherwise. */
+function textMaxOf(text: string | undefined): number | null {
+  const s = (text ?? '').trim();
+  if (!/^\d{1,2}$/.test(s)) return null;
+  const n = Number(s);
+  return n >= ADDON_TEXT_LIMITS.min && n <= ADDON_TEXT_LIMITS.max ? n : null;
+}
+
+/** The four switches as ticked. */
+function offeredOf(v: Partial<AddonForm>): AddonOfferedAt {
+  return { live: ticked(v.live), draw: ticked(v.draw), salon: ticked(v.salon), orders: ticked(v.orders) };
 }
 
 /** The supplier select: None, the active suppliers, and the add-on's own when it is no longer active. */
@@ -160,6 +272,7 @@ export function addonProblem(v: Partial<AddonForm>, creating: boolean): string |
   if (/[\r\n]/.test(line)) return 'Its line holds on one line.';
   if (creating && !ADDON_SKU_CODE_RE.test(skuCodeOf(v.skuCode))) return 'A SKU code is 2 to 64 capitals, digits and hyphens, starting with a capital or a digit: ADD-CLOTH.';
   if ((v.weightG ?? '').trim() !== '' && grams(v.weightG) === null) return `The weight is a whole number of grams, 1 to ${formatCount(ADDON_LIMITS.weightG)}.`;
+  if (isEngravingForm(v) && textMaxOf(v.textMax) === null) return `The engraving takes ${ADDON_TEXT_LIMITS.min} to ${ADDON_TEXT_LIMITS.max} characters at most.`;
   for (const c of HOUSE_CURRENCIES) {
     const text = (v[c] ?? '').trim();
     if (text === '') continue;
@@ -179,31 +292,51 @@ function pricesOf(v: Partial<AddonForm>): Partial<Record<HouseCurrency, number |
   return out;
 }
 
-/** What New add-on sends: its fields, its SKU code, and its prices (the currencies given). */
+/**
+ * What New add-on sends: its fields, its SKU code, its type, its four switches, its prices (the currencies given); a
+ * service never a supplier, the engraving with its most characters.
+ */
 export function addonCreateInput(v: AddonForm): AddonCreateInput {
   const line = v.line.trim();
   const prices = Object.fromEntries(Object.entries(pricesOf(v)).filter(([, p]) => p !== null)) as Partial<Record<HouseCurrency, number>>;
+  const service = isServiceForm(v);
   return {
     name: v.name.trim(),
     skuCode: skuCodeOf(v.skuCode),
+    kind: service ? 'SERVICE' : 'PRODUCT',
     ...(line ? { line } : {}),
-    ...(v.supplierId ? { supplierId: v.supplierId } : {}),
+    ...(v.supplierId && !service ? { supplierId: v.supplierId } : {}),
     ...(v.weightG.trim() ? { weightG: grams(v.weightG)! } : {}),
+    offeredAt: offeredOf(v),
+    ...(isEngravingForm(v) ? { engraving: true, textMax: textMaxOf(v.textMax)! } : {}),
     ...(Object.keys(prices).length ? { prices } : {}),
   };
 }
 
-/** What Edit sends: the fields that changed (PATCH) and the prices that changed (PUT …/prices, null removes one). */
+/**
+ * What Edit sends: the fields that changed (PATCH: its switches that changed, the engraving and its most characters on a
+ * service, never its type) and the prices that changed (PUT …/prices, null removes one).
+ */
 export function addonChange(a: AddonView, v: AddonForm): { fields: AddonInput; prices: Partial<Record<HouseCurrency, number | null>> } {
   const fields: AddonInput = {};
   const name = v.name.trim();
   if (name !== a.name) fields.name = name;
   const line = v.line.trim() || null;
   if (line !== a.line) fields.line = line;
+  const service = a.kind === 'SERVICE';
   const supplierId = v.supplierId || null;
-  if (supplierId !== (a.supplier?.id ?? null)) fields.supplierId = supplierId;
+  if (!service && supplierId !== (a.supplier?.id ?? null)) fields.supplierId = supplierId;
   const weightG = v.weightG.trim() ? grams(v.weightG) : null;
   if (weightG !== a.weightG) fields.weightG = weightG;
+  const offered = offeredOf(v);
+  const switched = Object.fromEntries(ADDON_SWITCHES.filter((x) => offered[x.key] !== a.offeredAt[x.key]).map((x) => [x.key, offered[x.key]])) as Partial<AddonOfferedAt>;
+  if (Object.keys(switched).length) fields.offeredAt = switched;
+  if (service) {
+    const engraving = ticked(v.engraving);
+    if (engraving !== a.engraving) fields.engraving = engraving;
+    const textMax = engraving ? textMaxOf(v.textMax) : null;
+    if (textMax !== null && textMax !== a.textMax) fields.textMax = textMax;
+  }
   const prices: Partial<Record<HouseCurrency, number | null>> = {};
   const typed = pricesOf(v);
   for (const c of HOUSE_CURRENCIES) {
@@ -237,6 +370,93 @@ export function addonShopifyInput(v: Record<string, string>): { productId: strin
   return { productId, variantId: productId === null ? null : (pastedShopifyId(v.variantId, 'variants') ?? null) };
 }
 
+// ── A release's pick (lot Q2, step Q2.7, D3, N7) ───────────────────────────
+
+/** The moments a release picks its add-ons for: a LIVE RELEASE (and its after-room), a draw. */
+export type PickMoment = 'LIVE' | 'DRAW';
+
+export const PICK_TEXT = Object.freeze({
+  label: 'Add-ons offered',
+  liveHint: 'Offered with a piece held, in this order. Each add-on’s switches and prices are set in Catalogue → Add-ons.',
+  drawHint: 'Offered with a place held, in this order. Each add-on’s switches and prices are set in Catalogue → Add-ons.',
+  empty: 'No add-on yet: list one in Catalogue → Add-ons.',
+  none: 'None: PAY is the piece alone.',
+  drawNone: 'None: the place held is the piece alone.',
+  setAside: 'Set aside: offered nowhere',
+  saved: 'Add-ons saved.',
+  lead: 'Ticked: offered with the release’s purchase, until it is announced. Unticked: never offered there; YOUR ORDERS follows each add-on’s own switch.',
+  drawLead: 'Ticked: offered with a place held, while the release is a draft. Unticked: never offered there; YOUR ORDERS follows each add-on’s own switch.',
+});
+
+/** Why a release cannot pick an add-on: `Not offered in a LIVE RELEASE` (its switch is off), `No price in GBP`. */
+export function pickWhy(why: AddonPickable['why'], moment: PickMoment, currency: string | null): string {
+  if (why === 'SWITCH_OFF') return moment === 'LIVE' ? 'Not offered in a LIVE RELEASE' : 'Not offered in a release with a draw';
+  if (why === 'NO_PRICE') return `No price in ${currency ?? 'its currency'}`;
+  return '';
+}
+
+/** Whether a release may pick it now: its switch on and, with a currency, priced in it (a draw without a price: any priced or not). */
+function pickableNow(x: AddonPickable, currency: string | null): boolean {
+  return x.pickable || (currency === null && x.why === 'NO_PRICE');
+}
+
+/**
+ * The release's tick boxes: the add-ons it picks first, in its order (one it can no longer offer still listed, ticked,
+ * with why, so it can be unticked), then the others in the catalogue's order, the ones it cannot pick disabled with why.
+ * Each named with its price in the release's currency.
+ */
+export function pickOptions(pickable: readonly AddonPickable[], picked: readonly PickedAddon[] | null, moment: PickMoment, currency: string | null): { value: string; label: string; disabled?: boolean }[] {
+  const priced = (x: { name: string; priceMinor: number | null }) => (currency !== null && x.priceMinor !== null ? `${x.name} · ${formatMoney(x.priceMinor, currency)}` : x.name);
+  const why = (x: AddonPickable) => `${x.name} · ${pickWhy(x.why, moment, currency)}`;
+  const mine = (picked ?? []).map((p) => {
+    const x = pickable.find((y) => y.id === p.id);
+    return { value: p.id, label: !x ? `${p.name} · ${PICK_TEXT.setAside}` : pickableNow(x, currency) ? priced(x) : why(x) };
+  });
+  const others = pickable
+    .filter((x) => !(picked ?? []).some((p) => p.id === x.id))
+    .map((x) => (pickableNow(x, currency) ? { value: x.id, label: priced(x) } : { value: x.id, label: why(x), disabled: true }));
+  return [...mine, ...others];
+}
+
+/** The boxes ticked as the dialog opens: the release's pick, or for a new one every add-on it may offer (N7). */
+export function pickTicked(pickable: readonly AddonPickable[], picked: readonly PickedAddon[] | null, currency: string | null): string {
+  return (picked ? picked.map((p) => p.id) : pickable.filter((x) => pickableNow(x, currency)).map((x) => x.id)).join(',');
+}
+
+/** The pick to send: the boxes ticked, in their order; null when it is the release's pick unchanged. */
+export function pickChange(picked: readonly PickedAddon[] | null, ticked: readonly string[]): string[] | null {
+  if (picked && picked.length === ticked.length && picked.every((p, i) => p.id === ticked[i])) return null;
+  return [...ticked];
+}
+
+/** What the server would refuse in a pick sent: a box ticked that the release can no longer offer, named with why. */
+export function pickProblem(pickable: readonly AddonPickable[], picked: readonly PickedAddon[] | null, ticked: readonly string[], moment: PickMoment, currency: string | null): string | null {
+  if (pickChange(picked, ticked) === null) return null;
+  for (const id of ticked) {
+    const x = pickable.find((y) => y.id === id);
+    if (!x) return `Untick ${(picked ?? []).find((p) => p.id === id)?.name ?? 'the add-on set aside'}: it is set aside, offered nowhere.`;
+    if (!pickableNow(x, currency)) {
+      const w = pickWhy(x.why, moment, currency);
+      return `Untick ${x.name}: ${w.charAt(0).toLowerCase()}${w.slice(1)}.`;
+    }
+  }
+  return null;
+}
+
+/** A release's pick on one line: `GIFT WRAPPING € 15 · ENGRAVING € 40`, or None. */
+export function pickLine(pick: readonly PickedAddon[] | undefined, currency: string | null): string {
+  return pick?.length ? pick.map((x) => (x.priceMinor === null || currency === null ? x.name : `${x.name} ${formatMoney(x.priceMinor, currency)}`)).join(' · ') : 'None';
+}
+
+/** A release's pick as its Add-ons part lists it: each name, its price in the release's currency, its line or why it is offered nowhere. */
+export function pickRows(pick: readonly PickedAddon[], currency: string | null): { label: string; value: string; note?: string }[] {
+  return pick.map((a) => ({
+    label: a.name,
+    value: currency === null ? 'Its price in the order’s currency' : a.priceMinor === null ? `No price in ${currency}` : formatMoney(a.priceMinor, currency),
+    ...(a.active ? (a.line ? { note: a.line } : {}) : { note: `${PICK_TEXT.setAside}.` }),
+  }));
+}
+
 // ── Logistics and the supplier orders: an add-on's SKU ─────────────────────
 
 /** Whether a SKU is an add-on's (named by its add-on, never a size). */
@@ -253,7 +473,7 @@ export function skuOwnerName(sku: Pick<LogisticsSku, 'model' | 'addon'>): string
 export const ADDON_SKU_TEXT = Object.freeze({
   mark: 'ADD-ON',
   group: 'Add-ons',
-  groupLead: 'The add-ons’ stock at each location: counted without an ORBES CODE, held by the orders they are added to.',
+  groupLead: 'The add-ons’ stock at each location: counted without an ORBES CODE, held by the orders they are added to. A service, such as the engraving, has no stock: it is never listed here.',
   groupEmpty: 'No add-on yet: list one in Catalogue → Add-ons.',
   /** The LOGISTICS agent's, who has no Catalogue page. */
   groupEmptyAgent: 'No add-on yet.',
@@ -273,10 +493,10 @@ export const ADDON_STATUS_LABELS: Readonly<Record<OrderAddonStatus, string>> = O
 
 export const ORDER_ADDONS_TEXT = Object.freeze({
   title: 'Add-ons',
-  lead: 'The catalogue add-ons of this order: each unit held in stock at the order’s location, packed and shipped with it. Credits apply to the piece’s price only.',
+  lead: 'The catalogue add-ons of this order: each unit of an add-on with stock held at the order’s location, a service’s held nowhere; packed and shipped with it. Credits apply to the piece’s price only.',
   empty: 'No add-on on this order.',
   add: 'Add an add-on',
-  addText: 'Units of an add-on in stock at the order’s location, at its price now in the order’s currency, held at once. At most 3 of each add-on on an order.',
+  addText: 'Units of an add-on at its price now in the order’s currency: one with stock from the stock at the order’s location, held at once; a service with no stock. At most 3 of each add-on on an order, and one engraving.',
   paidAdd: 'The order is paid: the add-on is added with its own invoice, in Documents.',
   added: 'Add-on added.',
   remove: 'Remove',
@@ -287,6 +507,7 @@ export const ORDER_ADDONS_TEXT = Object.freeze({
   close: 'Close',
   notToSell: 'Add-ons not to be sold again',
   notToSellHint: 'Ticked: kept out of the stock. The others go back to stock with the piece.',
+  service: 'Service',
 });
 
 /** The units of an order grouped as its Add-ons part lists them: one row per add-on, price, who added it, state and invoice. */
@@ -303,6 +524,8 @@ export interface AddonGroup {
   returnedToStock: boolean | null;
   invoiceId: string | null;
   location: string;
+  /** A service's units (lot Q2): held nowhere, no stock to go back to. */
+  service: boolean;
   /** Its units, oldest first: Remove takes the newest held. */
   unitIds: string[];
 }
@@ -328,7 +551,8 @@ export function addonGroups(units: readonly AdminOrderAddonUnit[]): AddonGroup[]
         addedAt: u.addedAt,
         returnedToStock: u.returnedToStock,
         invoiceId: u.invoiceId,
-        location: u.location?.name ?? 'Service',
+        location: u.location?.name ?? ORDER_ADDONS_TEXT.service,
+        service: u.location === null,
         unitIds: [u.id],
       });
     }
@@ -414,9 +638,24 @@ export function noOfferText(offer: OrderAddonOffer, location: string): string {
   return `No add-on is in stock at ${location} with a price in ${offer.currency ?? 'its currency'} just now.`;
 }
 
-/** Remove's words: one unit released to stock at its location. */
-export function removeAddonText(g: Pick<AddonGroup, 'name' | 'location'>): string {
-  return `One ${g.name} is released, back to the stock at ${g.location}.`;
+/** Remove's words: one unit released to stock at its location; a service's, removed (it holds no stock). */
+export function removeAddonText(g: Pick<AddonGroup, 'name' | 'location'> & { service?: boolean }): string {
+  return g.service ? `One ${g.name} is removed: a service holds no stock.` : `One ${g.name} is released, back to the stock at ${g.location}.`;
+}
+
+/** Where a group of units is held, under its status: `At FRANCE WAREHOUSE`, or Service. */
+export function heldLine(g: Pick<AddonGroup, 'location' | 'service'>): string {
+  return g.service ? ORDER_ADDONS_TEXT.service : `At ${g.location}`;
+}
+
+/**
+ * The order's engraving unit beside its words (lot Q2, step Q2.5 and Q2.7, D4, N5): `ENGRAVING add-on · € 150 · At the
+ * purchase`, and `its words to be entered` when it has none yet; null on an order without one (or one of before Q2).
+ */
+export function engravingUnitLine(units: readonly AdminOrderAddonUnit[], hasWords: boolean, actors: Record<string, string>): string | null {
+  const u = units.find((x) => x.addon.engraving && x.status !== 'REMOVED');
+  if (!u) return null;
+  return [`${u.addon.name} add-on`, formatMoney(u.priceMinor, u.currency), addedByText(u.addedBy, actors), ...(hasWords ? [] : ['its words to be entered'])].join(' · ');
 }
 
 /** A document that is an add-on's own invoice: `For POLISHING CLOTH × 2`; null otherwise. */

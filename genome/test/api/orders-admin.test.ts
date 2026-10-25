@@ -301,6 +301,8 @@ describe('orders, the stock and their settings: the console\'s routes', () => {
       ['SPARE STRAP', 'ADD-STRAP', 2_500, 'HELD', 'STAFF'],
       ['SPARE STRAP', 'ADD-STRAP', 2_500, 'HELD', 'STAFF'],
     ]);
+    // Lot Q2, step Q2.7: each unit says its add-on's type and whether it is the engraving (the order page's Service and engraving line).
+    expect(units[0]!.addon).toEqual({ id: strap.id, name: 'SPARE STRAP', kind: 'PRODUCT', engraving: false });
     expect((safeJson(await auditor.get(`/api/admin/orders/${id}`)) as Json).order.addonItems).toHaveLength(2);
     h.clock.advance(MINUTE);
     const removed = await op.request('DELETE', `/api/admin/orders/${id}/addons/${units[0]!.id}`);

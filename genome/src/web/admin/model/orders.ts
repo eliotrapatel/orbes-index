@@ -573,6 +573,12 @@ export function buyerSection(o: OrderView, masked: boolean): { rows: { label: st
   return { rows, changed, travels };
 }
 
+/**
+ * Orders → Settings, Engraving (lot Q2, steps Q2.5 and Q2.7, N4): the engraving is the ENGRAVING add-on, its prices and
+ * where it is offered set in Catalogue → Add-ons; one line leads there, its link in the middle.
+ */
+export const ENGRAVING_SETTINGS_TEXT = Object.freeze({ before: 'Engraving is an add-on: its prices are in ', link: 'Catalogue → Add-ons', after: ', ENGRAVING.' });
+
 /** The order's engraving (plan NEXT LOT §3.6.C): its words and the price it took (`J.M. · € 30`), the words alone (the release's add-on, or one of before), or None. */
 export function engravingLine(o: Pick<OrderView, 'engravingText' | 'engravingMinor' | 'currency'>): string {
   if (!o.engravingText) return 'None';

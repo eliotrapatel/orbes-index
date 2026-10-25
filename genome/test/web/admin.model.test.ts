@@ -16,6 +16,8 @@ import { MAX_ISSUE_BATCH } from '../../src/server/services/issuance.js';
 import { IMAGE_MIME_TYPES as SERVER_IMAGE_MIME_TYPES, MAX_IMAGE_BYTES as SERVER_MAX_IMAGE_BYTES, MAX_IMAGE_SIDE as SERVER_MAX_IMAGE_SIDE } from '../../src/server/media/image.js';
 import { lookbookWord, pairFormValues, pairModelLabel, pairOptions, pairsChange, pairsNote, pairsProblem, PAIRS_MAX, PAIRS_TEXT, shownLabel, shownNow } from '../../src/web/admin/model/pairs.js';
 import { MODEL_PAIR_SHOWN } from '../../src/server/services/catalog.js';
+import type { AddonPickable as ServerAddonPickable } from '../../src/server/services/addons.js';
+import type { AdminOrderAddonUnit as ServerOrderAddonUnit } from '../../src/server/services/order-addons.js';
 import { clubNowLine, cohortCells, collectorRow, collectorsRange, durationText, EMPTY, funnelBars, funnelNote, growthKpis, growthParams, GROWTH_COLLECTORS_PAGE, lifetimeValueText, ltvGroupRows, money, NOTES, perCollectorFigures, rateText as growthRate, releaseRow, repeatFigures, revenueBars, revenueGroupRows, secondPieceBars } from '../../src/web/admin/model/growth.js';
 import { FUNNEL_STEPS, GROWTH_WINDOWS, PIECE_SOURCES, SECOND_PIECE_BUCKETS, type GrowthReport } from '../../src/web/admin/types.js';
 import {
@@ -501,6 +503,10 @@ describe('admin enums mirror the server', () => {
     expect(web.ADDON_PICK_POSITION_MAX).toBe(serverSchema.ADDON_PICK_POSITION_MAX);
     expect(web.ADDON_TEXT_MAX).toEqual(serverSchema.ADDON_TEXT_MAX);
     expect(web.ADDON_CHOICE_TEXT_MAX).toBe(serverSchema.ADDON_CHOICE_TEXT_MAX);
+    // Lot Q2, step Q2.7: an order's unit says its add-on's type and whether it is the engraving; a release's form reads why one cannot be picked.
+    const unitAddon: web.AdminOrderAddonUnit['addon'] = { id: 'a', name: 'ENGRAVING', kind: 'SERVICE', engraving: true } satisfies ServerOrderAddonUnit['addon'];
+    const why: web.AddonPickable['why'][] = ['SWITCH_OFF', 'NO_PRICE', null] satisfies ServerAddonPickable['why'][];
+    expect([unitAddon.kind, unitAddon.engraving, why]).toEqual(['SERVICE', true, ['SWITCH_OFF', 'NO_PRICE', null]]);
     // THE SET's bounds (macro scope K44, migration 0057), as the server holds them.
     for (const name of ['SET_NAME_MAX', 'SET_PIECES_MIN', 'SET_PIECES_MAX', 'SET_PRICE_MINOR_MAX', 'DROP_SIZE_POSITION_MAX'] as const) expect(web[name], name).toBe(serverSchema[name]);
     expect(web.SET_CODE_PATTERN.source).toBe(serverSchema.SET_CODE_PATTERN.source);

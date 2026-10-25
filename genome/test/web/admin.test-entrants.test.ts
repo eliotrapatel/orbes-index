@@ -46,6 +46,7 @@ import {
   peakRows,
   pressCount,
   reportScore,
+  TEST_ADDONS_HINT,
   TEST_DEFAULTS,
   TEST_TIER_COLUMNS,
   testEntrantActions,
@@ -284,6 +285,10 @@ describe('a press of SEND TEST ENTRANTS and ADD MORE', () => {
     expect(pressCount({ settings: first })).toBe(1);
     expect(lastSettings(null)).toEqual(TEST_DEFAULTS);
     expect(testRunValues(lastSettings(run))['tier:palladium']).toBe('300');
+  });
+
+  it('says a bot’s add-ons share as it plays now (lot Q2, D24): one of the add-ons its release offers, as a collector would', () => {
+    expect(TEST_ADDONS_HINT).toBe('The share that chooses one of the add-ons the release offers (its Add-ons) with the piece held, as a collector would.');
   });
 
   it('says a press’s settings in one line', () => {

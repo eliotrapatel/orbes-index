@@ -81,6 +81,7 @@ import {
   livePartProblem,
   livePartValues,
   livePhrase,
+  newLivePickField,
   liveStateLabel,
   locationOptions,
   paceCloseGuard,
@@ -103,6 +104,7 @@ import {
   windowLine,
   type LivePart,
 } from '../model/live.js';
+import { PICK_TEXT, pickChange, pickLine, pickProblem, pickRows } from '../model/addons.js';
 import { livePublicAt, releaseTab } from '../model/campaign.js';
 import { guaranteedText, stockWarning } from '../model/guarantees.js';
 import { liveTestStart } from '../model/test-entrants.js';
@@ -110,13 +112,14 @@ import { toneOf } from '../model/tone.js';
 import { OFFER_TEXT, setOptions, entrySizesText, perPersonText, pieceName, pieceSizeLabel, pieceTotals, setsOnSaleLines } from '../model/sets.js';
 import { modelChoice } from '../model/variants.js';
 import { href } from '../router.js';
-import { LIVE_CURRENCIES, LIVE_ENTRY_STATUSES, type LiveBoard, type LiveEntry, type LiveEntryStatus, type LiveFeasibility, type LiveRelease, type Model, type PickedAddon, type SetView } from '../types.js';
+import { LIVE_CURRENCIES, LIVE_ENTRY_STATUSES, type AddonPickable, type LiveBoard, type LiveCurrency, type LiveEntry, type LiveEntryStatus, type LiveFeasibility, type LiveRelease, type Model, type SetView } from '../types.js';
 import { barList, button, copyButton, defList, field, filterBar, kpi, linkButton, mono, pageHeader, pager, section, select, statusMark, table, type DefRow } from '../ui/components.js';
-import { figureLabel, openDialog, type DialogField } from '../ui/dialog.js';
+import { checkedOf, figureLabel, openDialog, type DialogField } from '../ui/dialog.js';
 import { saveDownload } from '../ui/download.js';
 import { photoDialog, photoThumb } from '../ui/photo.js';
 import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
+import { pickField } from './addons.js';
 import { bestTimePanel } from './best-time.js';
 import { campaignTab, releaseTabs } from './campaign.js';
 import { guaranteesSection } from './drop.js';
@@ -201,9 +204,6 @@ class LiveFollower {
 }
 
 const tierOf = (t: number) => (t === 0 ? 'None' : tierLabel(t));
-/** A release's pick of catalogue add-ons on one line (lot Q2, step Q2.4): each name and its price, or None. */
-const pickLine = (pick: readonly PickedAddon[] | undefined, currency: string) =>
-  pick?.length ? pick.map((x) => (x.priceMinor === null ? x.name : `${x.name} ${formatMoney(x.priceMinor, currency)}`)).join(' · ') : 'None';
 
 export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   const asked = screens;
@@ -809,13 +809,19 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   );
 
   // ── The settings ─────────────────────────────────────────────────────────
-  const editPart = (part: LivePart, title: string, fields: DialogField[], extra: { body?: Child; live?: (v: Record<string, string>) => Child } = {}) =>
+  const settingsLead = () => h('p', { class: 'dialog__text' }, r.publishedAt ? 'The release is published, announced later: its settings change until then.' : 'A draft: nothing of it is public yet.');
+  const editPart = (
+    part: LivePart,
+    title: string,
+    fields: DialogField[],
+    extra: { body?: Child; live?: (v: Record<string, string>) => Child; problem?: (v: Record<string, string>) => string | null } = {},
+  ) =>
     void openDialog({
       title,
       eyebrow,
-      body: extra.body ?? h('p', { class: 'dialog__text' }, r.publishedAt ? 'The release is published, announced later: its settings change until then.' : 'A draft: nothing of it is public yet.'),
+      body: extra.body ?? settingsLead(),
       fields,
-      validate: (v) => livePartProblem(r, part, v) ?? (Object.keys(livePartChange(r, part, v)).length === 0 ? 'Nothing has changed.' : null),
+      validate: (v) => livePartProblem(r, part, v) ?? extra.problem?.(v) ?? (Object.keys(livePartChange(r, part, v)).length === 0 ? 'Nothing has changed.' : null),
       ...(extra.live ? { live: extra.live } : {}),
       confirmLabel: 'Save',
       submit: async (v) => {
@@ -1018,8 +1024,37 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
       ]),
     ]);
   };
-  const afterRoomPart = () => {
+  // Lot Q2, step Q2.7 (D3, N7): what the release may pick in its currency, read as the dialog opens (null: unread).
+  const pickableNow = async (): Promise<AddonPickable[] | null> => {
+    try {
+      return (await ctx.api.addonPickable('LIVE', r.currency)).items;
+    } catch (e) {
+      notifyError(e);
+      return null;
+    }
+  };
+  // Its Add-ons offered: the boxes of the active add-ons, its pick ticked in its order, the others it cannot offer with why.
+  const addonsPart = async () => {
+    const pickable = await pickableNow();
+    if (!pickable) return;
+    const pick = r.addonPick ?? [];
+    void openDialog({
+      title: PICK_TEXT.label,
+      eyebrow,
+      body: [settingsLead(), h('p', { class: 'dialog__text' }, PICK_TEXT.lead)],
+      fields: [pickField('addonIds', pickable, pick, 'LIVE', r.currency)],
+      validate: (v) => pickProblem(pickable, pick, checkedOf(v, 'addonIds'), 'LIVE', r.currency) ?? (pickChange(pick, checkedOf(v, 'addonIds')) === null ? 'Nothing has changed.' : null),
+      confirmLabel: 'Save',
+      submit: async (v) => {
+        await ctx.api.updateLiveRelease(r.id, { addonIds: pickChange(pick, checkedOf(v, 'addonIds'))! });
+      },
+    }).then(done(PICK_TEXT.saved));
+  };
+
+  const afterRoomPart = async () => {
     const v = values('afterRoom');
+    const pickable = await pickableNow();
+    const pick = r.afterRoom ? (r.afterRoom.addonPick ?? []) : null;
     editPart(
       'afterRoom',
       'After-room',
@@ -1028,6 +1063,8 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
         { name: 'modelId', label: 'Model', kind: 'select', options: [{ value: '', label: 'Choose a model' }, ...modelOptions(v.modelId)], value: v.modelId },
         { name: 'price', label: 'Price of a piece', maxlength: 12, value: v.price, hint: `In units, in the release’s currency (${r.currency}).` },
         { name: 'sizes', label: 'Sizes', kind: 'textarea', rows: 4, value: v.sizes, hint: 'Its own stock, one size per line: 52 = 3.' },
+        // Its own pick (lot Q2, step Q2.7, D3): ticked at first, every add-on it may offer for a new after-room (N7).
+        ...(pickable ? [pickField('addonIds', pickable, pick, 'LIVE', r.currency)] : []),
         { name: 'delay', label: 'Opens (minutes after the sell-out)', maxlength: 2, value: v.delay, hint: `${LIVE_LIMITS.afterRoomDelay.min} to ${LIVE_LIMITS.afterRoomDelay.max}; ${LIVE_LIMITS.afterRoomDelay.default} by default.` },
         { name: 'length', label: 'Open (minutes)', maxlength: 3, value: v.length, hint: `${LIVE_LIMITS.afterRoomLength.min} to ${LIVE_LIMITS.afterRoomLength.max}; ${LIVE_LIMITS.afterRoomLength.default} by default. It also closes at its own sell-out.` },
       ],
@@ -1037,6 +1074,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
           { class: 'dialog__text' },
           'A second door, announced nowhere: only those still in the line when the last piece is secured see it, in the same vault, and keep their place. The turn and pay windows, the pieces per person and the surprise are the release’s; it asks no question after.',
         ),
+        problem: (x) => (pickable && x.enabled === 'true' && x.addonIds !== undefined ? pickProblem(pickable, pick, checkedOf(x, 'addonIds'), 'LIVE', r.currency) : null),
       },
     );
   };
@@ -1056,7 +1094,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
           { label: 'Model', value: `${humanize(a.model.name)} · ${humanize(a.model.type)}`, note: a.model.active ? undefined : 'No longer offered for new pieces.' },
           { label: 'Price', value: `${formatMoney(a.priceMinor, a.currency)} a piece` },
           { label: 'Sizes', value: h('span', { data: { testid: 'live-after-room-sizes' } }, sizesLine(a.sizes)) },
-          { label: 'Add-ons', value: pickLine(a.addonPick, a.currency) },
+          { label: 'Add-ons', value: h('span', { data: { testid: 'live-after-room-addons' } }, pickLine(a.addonPick, a.currency)) },
           { label: 'Timing', value: h('span', { data: { testid: 'live-after-room-timing' } }, afterRoomTiming(a)) },
           ...(a.opensAt && a.closesAt ? [{ label: 'Door', value: `${formatDateTime(a.opensAt)} to ${formatDateTime(a.closesAt)}`, note: 'Its guests see it from its opening' }] : []),
           ...(opened
@@ -1068,7 +1106,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
       id: 'live-part-after-room',
       tools: [
         // Macro scope K44: after-rooms stay a model's; a set's release never has one.
-        ...(r.set ? [] : edit('Edit', 'live-edit-after-room', afterRoomPart)),
+        ...(r.set ? [] : edit('Edit', 'live-edit-after-room', () => void afterRoomPart())),
         ...(a && opened ? [linkButton('Its live board', href('liveRelease', { dropId: a.id }), 'ghost')] : []),
       ],
     },
@@ -1189,13 +1227,12 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
       ]),
       { id: 'live-part-turns', tools: edit('Edit', 'live-edit-turns', turnsPart) },
     ),
-    // Lot Q2, step Q2.4 (D2): the release add-ons are gone; its add-ons are its pick of the catalogue (Catalogue → Add-ons).
+    // Lot Q2 (D2, D3): the release add-ons are gone; its add-ons are its pick of the catalogue, each with its price in its
+    // currency, edited as Add-ons offered until the announcement (step Q2.7).
     section(
       'Add-ons',
-      r.addonPick?.length
-        ? defList(r.addonPick.map((a): DefRow => ({ label: a.name, value: a.priceMinor === null ? `No price in ${r.currency}` : formatMoney(a.priceMinor, r.currency), note: a.active ? (a.line ?? undefined) : 'Set aside: offered nowhere.' })))
-        : h('p', { class: 'notice' }, 'None: PAY is the piece alone.'),
-      { id: 'live-part-addons' },
+      r.addonPick?.length ? h('div', { data: { testid: 'live-addons' } }, defList(pickRows(r.addonPick, r.currency).map((x): DefRow => x))) : h('p', { class: 'notice' }, PICK_TEXT.none),
+      { id: 'live-part-addons', tools: edit('Edit', 'live-edit-addons', () => void addonsPart()) },
     ),
     afterRoomSection,
   ];
@@ -1469,6 +1506,7 @@ export function newLiveFields(
   values: Record<string, string>,
   locations: readonly { id: string; name: string; isDefault: boolean }[] = [],
   sets: readonly SetView[] = [],
+  pickable: Partial<Record<LiveCurrency, readonly AddonPickable[]>> = {},
 ): DialogField[] {
   const options = models.filter((m) => m.active).map((m) => ({ value: m.id, label: modelChoice(m) }));
   // Macro scope K44 T1: WHAT IT SELLS, A MODEL (as ever) or A SET; a set's price is the set's, its sizes per piece.
@@ -1518,5 +1556,10 @@ export function newLiveFields(
       hint: 'This piece’s sizes, one per line, its label then its stock: 52 = 3. Proposed per piece once the set is chosen: yours to change.',
       shown: (v: Record<string, string>) => isSet(v) && piecesOf(v.setId) >= k,
     })),
+    // Lot Q2, step Q2.7 (D3, N7): its Add-ons offered in its currency, every one it may offer ticked at first.
+    ...LIVE_CURRENCIES.flatMap((c) => {
+      const list = pickable[c];
+      return list ? [pickField(newLivePickField(c), list, null, 'LIVE', c, (v) => v.currency === c)] : [];
+    }),
   ];
 }

@@ -43,6 +43,10 @@
  *    size, « Sets on sale » and the even rule under its Sizes (each size named
  *    by its piece), each entry's sizes (« 52 · M · 45 CM »), the size filter
  *    and the draw's outcome per piece's size.
+ *  - Its Add-ons (lot Q2, step Q2.7, D3): the catalogue add-ons it offers with
+ *    a place held, in its order, each with its price; Edit, as Add-ons offered,
+ *    while a DRAFT: the active add-ons, the ones its DRAW switch has off or
+ *    without a price in its currency listed with why.
  *  - Two tabs under its header (plan MACRO M1 §2.2): RELEASE, all of the
  *    above, and CAMPAIGN (`?tab=campaign`, views/campaign.ts): its links made
  *    in one click, its countdown image, its readout.
@@ -74,16 +78,16 @@ import {
   sizeOfferable,
   tierName,
 } from '../model/club.js';
-import { CHOICES_TEXT } from '../model/addons.js';
+import { CHOICES_TEXT, PICK_TEXT, pickChange, pickProblem, pickRows } from '../model/addons.js';
 import { releaseTab } from '../model/campaign.js';
 import { drawGuaranteeLine, GUARANTEE_STATE_LABELS, guaranteedText, placesLeftForDraw, validUntilText } from '../model/guarantees.js';
 import { drawTestStart } from '../model/test-entrants.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
-import { DROP_ENTRY_STATUSES, type DrawSize, type Drop, type DropEntry, type DropEntryStatus, type ReleaseGuarantee, type SetView } from '../types.js';
+import { DROP_ENTRY_STATUSES, type AddonPickable, type DrawSize, type Drop, type DropEntry, type DropEntryStatus, type ReleaseGuarantee, type SetView } from '../types.js';
 import { button, defList, field, filterBar, linkButton, mono, pageHeader, pager, section, select, statusMark, table } from '../ui/components.js';
-import { openDialog } from '../ui/dialog.js';
-import { notify } from '../ui/toast.js';
+import { checkedOf, openDialog } from '../ui/dialog.js';
+import { notify, notifyError } from '../ui/toast.js';
 import { campaignTab, releaseTabs } from './campaign.js';
 import {
   drawSizeFields,
@@ -99,7 +103,7 @@ import {
   setDrawSizesPreview,
 } from './club.js';
 import { entrySizesText, OFFER_TEXT, pieceName, pieceSizeLabel, pieceTotals, quantityWords, setDrawSizesProblem, setDrawSizeValues, setsOnSaleLines } from '../model/sets.js';
-import { choicesBlock, leftOutDialog } from './addons.js';
+import { choicesBlock, leftOutDialog, pickField } from './addons.js';
 import { pageParam, type ViewContext } from './context.js';
 import { serverStatusPanel, withServerPanel } from './server-status.js';
 import { feasibilityBlock, stockBlock } from './stock-check.js';
@@ -397,6 +401,35 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
   ].filter((b): b is HTMLButtonElement => b !== null);
   const release = section('Release', defList(rows), { id: 'release', tools });
 
+  // ── Its add-ons (lot Q2, step Q2.7, D3, N7) ──────────────────────────────
+  // A draw without a price offers any add-on its DRAW switch has on, priced in its orders' currency when offered.
+  const pick = d.addonPick ?? [];
+  const editAddons = async () => {
+    let pickable: AddonPickable[];
+    try {
+      pickable = (await ctx.api.addonPickable('DRAW', d.currency ?? 'EUR')).items;
+    } catch (e) {
+      notifyError(e);
+      return;
+    }
+    void openDialog({
+      title: PICK_TEXT.label,
+      eyebrow,
+      body: h('p', { class: 'dialog__text' }, PICK_TEXT.drawLead),
+      fields: [pickField('addonIds', pickable, pick, 'DRAW', d.currency)],
+      validate: (v) => pickProblem(pickable, pick, checkedOf(v, 'addonIds'), 'DRAW', d.currency) ?? (pickChange(pick, checkedOf(v, 'addonIds')) === null ? 'Nothing has changed.' : null),
+      confirmLabel: 'Save',
+      submit: async (v) => {
+        await ctx.api.updateDrop(d.id, { addonIds: pickChange(pick, checkedOf(v, 'addonIds'))! });
+      },
+    }).then(done(PICK_TEXT.saved));
+  };
+  const addonsSection = section(
+    'Add-ons',
+    pick.length ? h('div', { data: { testid: 'drop-addons' } }, defList(pickRows(pick, d.currency))) : h('p', { class: 'notice', data: { testid: 'drop-addons-none' } }, PICK_TEXT.drawNone),
+    { id: 'drop-addons', tools: acts.edit ? [button('Edit', { kind: 'ghost', testId: 'drop-edit-addons', onClick: () => void editAddons() })] : [] },
+  );
+
   // ── Sizes (plan NEXT LOT §3.6.F) ─────────────────────────────────────────
   const setLines = set ? setsOnSaleLines(pieceTotals(d.sizes, set.pieces.length), set.pieces.map((p) => pieceName(set, p.piece)), 'DRAW') : null;
   const sizesSection =
@@ -552,7 +585,7 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
     releaseTabs('drop', d.id, 'release'),
     withServerPanel(
       // A set's draw: each bot chooses a size per piece at random (no one size to choose for every bot).
-      [release, ...(sizesSection ? [sizesSection] : []), testEntrantsSection(ctx, { mode: 'DRAW', dropId: d.id, eyebrow, start: drawTestStart(d, ctx.now()), sizes: set ? [] : d.sizes.map((z) => ({ id: z.id, label: z.label })) }, tests), guaranteesSection(guarantees.items), list],
+      [release, ...(sizesSection ? [sizesSection] : []), addonsSection, testEntrantsSection(ctx, { mode: 'DRAW', dropId: d.id, eyebrow, start: drawTestStart(d, ctx.now()), sizes: set ? [] : d.sizes.map((z) => ({ id: z.id, label: z.label })) }, tests), guaranteesSection(guarantees.items), list],
       serverStatusPanel(ctx),
     ),
   );

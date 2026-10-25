@@ -2242,6 +2242,8 @@ export interface DropInput {
   currency?: OrderCurrency | null;
   /** Plan MACRO M1 §3.2 (F4): the segment the draw is opened to, a DRAFT's only; null: everyone. */
   accessSegmentId?: string | null;
+  /** Lot Q2 (D3): its pick of catalogue add-ons, in order, a DRAFT's only (omitted at its creation: every one its DRAW switch offers). */
+  addonIds?: string[];
 }
 
 export type DropChange = Partial<DropInput>;
@@ -3734,7 +3736,8 @@ export interface AdminOrderSet {
 /** A unit of a catalogue add-on on an order (plan MACRO M3 §4.2, D2), as the order page reads it. */
 export interface AdminOrderAddonUnit {
   id: string;
-  addon: { id: string; name: string };
+  /** Lot Q2, step Q2.7: a PRODUCT or a SERVICE, and whether it is the engraving. */
+  addon: { id: string; name: string; kind: AddonKind; engraving: boolean };
   skuCode: string;
   /** Per unit, as it was added, in the order's currency. */
   priceMinor: number;

@@ -377,10 +377,20 @@ export function newLiveProblem(v: Record<string, string>, pieces: readonly strin
   return 'problem' in sizes ? sizes.problem : null;
 }
 
+/**
+ * The field of a new release's Add-ons offered in a currency (lot Q2, step Q2.7, D3, N7): one per currency, the one of the
+ * release's currency shown; its boxes ticked are the pick sent.
+ */
+export function newLivePickField(currency: string): string {
+  return `addonIds:${currency}`;
+}
+
 /** The body of a new release (POST /api/admin/live), from values newLiveProblem accepted: every other setting by default. */
 export function newLiveInput(v: Record<string, string>, pieces: readonly string[] = []): LiveSettings {
   const set = v.offer === 'SET';
   const sizes = (set ? parseSetSizes(v, pieces) : parseSizes(v.sizes)) as { sizes: { label: string; stock: number; piece?: number }[] };
+  // Its pick as ticked in its currency (none listed: the server's default, every add-on its LIVE switch offers there).
+  const pick = v[newLivePickField(v.currency)];
   return {
     ...(set ? { setId: v.setId } : { modelId: v.modelId }),
     title: v.title.trim(),
@@ -392,6 +402,7 @@ export function newLiveInput(v: Record<string, string>, pieces: readonly string[
     holdMinutes: Number(v.holdMinutes),
     sizes: sizes.sizes,
     ...(v.locationId ? { stockLocationId: v.locationId } : {}),
+    ...(pick !== undefined ? { addonIds: pick.split(',').filter((x) => x !== '') } : {}),
   };
 }
 
@@ -675,10 +686,14 @@ export function livePartChange(r: LiveRelease, part: LivePart, v: Record<string,
         if (a) out.afterRoom = null;
         return out;
       }
+      // Lot Q2, step Q2.7 (D3, N7): its own pick, the Add-ons offered boxes ticked, sent with a new after-room or once changed.
+      const ticked = v.addonIds === undefined ? null : v.addonIds.split(',').filter((x) => x !== '');
+      const picked = ticked !== null && (!a || JSON.stringify(ticked) !== JSON.stringify((a.addonPick ?? []).map((x) => x.id)));
       const next: LiveAfterRoomSettings = {
         modelId: v.modelId,
         priceMinor: parseMoney(v.price)!,
         sizes: (parseSizes(v.sizes, a?.sizes ?? []) as { sizes: { id?: string; label: string; stock: number }[] }).sizes,
+        ...(picked ? { addonIds: ticked! } : {}),
         delayMinutes: Number(v.delay),
         lengthMinutes: Number(v.length),
       };
@@ -687,6 +702,7 @@ export function livePartChange(r: LiveRelease, part: LivePart, v: Record<string,
           x.modelId,
           x.priceMinor,
           x.sizes.map((s) => [s.id ?? null, s.label, s.stock]),
+          x.addonIds ?? null,
           x.delayMinutes,
           x.lengthMinutes,
         ]);

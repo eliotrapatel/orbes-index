@@ -3734,7 +3734,11 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await p.waitForSelector('.toast:has-text("Add-on added.")');
     const row = p.locator('#addons tbody tr');
     await expect.poll(() => row.count(), POLL).toBe(1);
-    expect(await p.locator('#addons thead th').allTextContents()).toEqual(['Add-on', 'Prices', 'Supplier', 'Weight', 'Available · minimum', 'Status · Shopify', '']);
+    // Lot Q2, step Q2.7 (D3, D4): its type, where it is offered and how many releases pick it.
+    expect(await p.locator('#addons thead th').allTextContents()).toEqual(['Add-on', 'Type', 'Prices', 'Offered', 'Releases', 'Supplier', 'Weight', 'Available · minimum', 'Status · Shopify', '']);
+    expect(await row.locator('[data-testid=addon-kind]').textContent()).toBe('WITH STOCK');
+    expect(await row.locator('[data-testid=addon-offered] .addon-lines__line').allTextContents()).toEqual(['LIVE', 'DRAW', 'SALON', 'YOUR ORDERS']);
+    expect(await row.locator('[data-testid=addon-releases]').textContent()).toBe('None');
     expect(await row.locator('[data-testid=addon-sku]').textContent()).toBe('ADD-CLOTH');
     expect(await row.locator('[data-testid=addon-prices]').textContent()).toBe('€ 15');
     expect(await row.locator('[data-testid=addon-stock]').textContent()).toContain('FRANCE WAREHOUSE · 0');

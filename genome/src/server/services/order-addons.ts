@@ -154,7 +154,7 @@ export interface AccountOrderAddonItem {
 /** A unit as the console's order page reads it. */
 export interface AdminOrderAddonUnit {
   id: string;
-  addon: { id: string; name: string };
+  addon: { id: string; name: string; kind: AddonKind; engraving: boolean };
   skuCode: string;
   priceMinor: number;
   currency: HouseCurrency;
@@ -617,14 +617,14 @@ export async function adminAddonUnits(db: Db, orderId: string): Promise<AdminOrd
     // A service's unit is held nowhere (Q2): no location.
     .leftJoin('stock_locations as l', 'l.id', 'u.location_id')
     .selectAll('u')
-    .select(['a.name', 'k.code', 'l.id as location_ref', 'l.name as location_name'])
+    .select(['a.name', 'a.kind', 'a.engraving', 'k.code', 'l.id as location_ref', 'l.name as location_name'])
     .where('u.order_id', '=', orderId)
     .orderBy('u.added_at')
     .orderBy('u.id')
     .execute();
   return rows.map((u) => ({
     id: u.id,
-    addon: { id: u.addon_id, name: u.name },
+    addon: { id: u.addon_id, name: u.name, kind: u.kind, engraving: u.engraving },
     skuCode: u.code,
     priceMinor: u.price_minor,
     currency: u.currency,

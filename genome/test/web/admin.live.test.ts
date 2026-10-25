@@ -65,6 +65,7 @@ import {
   liveStateLabel,
   moneyField,
   newLiveInput,
+  newLivePickField,
   newLiveProblem,
   newLiveValues,
   paceHint,
@@ -279,6 +280,13 @@ describe('the console of the LIVE RELEASES', () => {
       holdMinutes: 10,
       sizes: [{ label: 'ONE SIZE', stock: 25 }],
     });
+    // Lot Q2, step Q2.7 (D3, N7): its Add-ons offered, one list per currency, the release's currency's boxes sent in their
+    // order; none listed (unread), the server's default; none ticked, none offered.
+    expect(newLivePickField('GBP')).toBe('addonIds:GBP');
+    expect(newLiveInput({ ...ok, 'addonIds:EUR': 'a1,a2', 'addonIds:GBP': 'a3' })).toMatchObject({ currency: 'EUR', addonIds: ['a1', 'a2'] });
+    expect(newLiveInput({ ...ok, currency: 'GBP', 'addonIds:EUR': 'a1,a2', 'addonIds:GBP': 'a3' })).toMatchObject({ currency: 'GBP', addonIds: ['a3'] });
+    expect(newLiveInput({ ...ok, 'addonIds:EUR': '' })).toMatchObject({ addonIds: [] });
+    expect(newLiveInput({ ...ok, 'addonIds:GBP': 'a3' })).not.toHaveProperty('addonIds');
     expect(newLiveProblem({ ...ok, closesAt: ok.opensAt })).toBe('The release ends after T0.');
     expect(newLiveProblem({ ...ok, price: 'x' })).toMatch(/price of a piece/);
     expect(newLiveProblem({ ...ok, currency: 'JPY' })).toBe('Choose the currency.');
@@ -452,6 +460,15 @@ describe('the console of the LIVE RELEASES', () => {
       afterRoom: { modelId: 'm2', priceMinor: 90_000, sizes: [{ id: 'z52', label: '52', stock: 3 }], delayMinutes: 5, lengthMinutes: 30 },
     });
     expect(livePartChange(set, 'afterRoom', { ...values, enabled: '' })).toEqual({ afterRoom: null });
+    // Lot Q2, step Q2.7 (D3): its own pick, sent only once changed (the boxes in their order); a new after-room's always.
+    expect(livePartChange(set, 'afterRoom', { ...values, addonIds: 'g1' })).toEqual({});
+    expect(livePartChange(set, 'afterRoom', { ...values, addonIds: '' })).toEqual({
+      afterRoom: { modelId: 'm2', priceMinor: 90_000, sizes: [{ id: 'z52', label: '52', stock: 2 }], addonIds: [], delayMinutes: 5, lengthMinutes: 20 },
+    });
+    expect(livePartChange(set, 'afterRoom', { ...values, addonIds: 'a1,g1', length: '30' })).toMatchObject({ afterRoom: { addonIds: ['a1', 'g1'], lengthMinutes: 30 } });
+    expect(livePartChange(none, 'afterRoom', { ...on, addonIds: 'g1' })).toEqual({
+      afterRoom: { modelId: 'm2', priceMinor: 90_000, sizes: [{ label: '52', stock: 2 }, { label: '54', stock: 1 }], addonIds: ['g1'], delayMinutes: 10, lengthMinutes: 15 },
+    });
     // Where it stands, said.
     expect(afterRoomTiming(afterRoom)).toBe('5 min after the sell-out, open 20 min');
     expect(afterRoomStateLabel(afterRoom)).toBe('AFTER A SELL-OUT');

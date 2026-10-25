@@ -33,8 +33,9 @@
  *    ADMIN, to the archive; back to stock, the claim code of the piece's new card shown once, with its card to
  *    download; CANCEL THE ORDER CASE with a note.
  *  - Its return: where the piece went, the note, whether ORBES took the ownership back.
- *  - Its add-ons (plan MACRO M3 §4.3, D2; views/addons.ts): each unit grouped, its price, who added it, its status; Add
- *    an add-on and Remove (OPERATOR, until the parcel is packed); a refund's add-ons kept out of the stock when ticked.
+ *  - Its add-ons (plan MACRO M3 §4.3, D2; views/addons.ts): each unit grouped, its price, who added it, its status (a
+ *    service's held nowhere: Service); Add an add-on, the services among them, and Remove (OPERATOR, until the parcel is
+ *    packed); a refund's add-ons kept out of the stock when ticked; the engraving's unit beside its words (lot Q2).
  *  - Its documents (M7): the invoice and the credit note, each with its PDF; an add-on's own invoice said so.
  *  - Its history: each change, its note, who made it.
  * PACKING SLIP opens the printable slip (views/slip.ts). Each request is audited by the server; the page is read again.
@@ -96,7 +97,7 @@ import {
   outcomeOptions,
   pastReturnWindow,
 } from '../model/order-cases.js';
-import { documentAddonLine, ORDER_ADDONS_TEXT, shippedUnits } from '../model/addons.js';
+import { documentAddonLine, engravingUnitLine, ORDER_ADDONS_TEXT, shippedUnits } from '../model/addons.js';
 import { CASE_KIND_LABELS } from '../model/logistics.js';
 import { can } from '../model/permissions.js';
 import { noCardNotice, orderClaimCodeRow } from '../model/product.js';
@@ -352,7 +353,11 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
         ]
       : []),
     // Plan NEXT LOT §3.6.C: its words and the price it took (`J.M. · € 30`); the words alone when its release's add-on paid for it.
-    { label: 'Engraving', value: h('span', { data: { testid: 'order-engraving' } }, engravingLine(o)) },
+    // Lot Q2, step Q2.7 (D4): the ENGRAVING add-on's unit beside its words, who added it, its words still to come.
+    (() => {
+      const unit = engravingUnitLine(o.addonItems ?? [], o.engravingText !== null, d.actors);
+      return { label: 'Engraving', value: h('span', { data: { testid: 'order-engraving' } }, engravingLine(o)), ...(unit ? { note: unit } : {}) };
+    })(),
     { label: 'Surprise', value: o.surprise ?? 'None' },
   ];
   const termsTool = [

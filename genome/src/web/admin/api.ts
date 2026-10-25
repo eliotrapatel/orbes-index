@@ -22,6 +22,7 @@ import type {
   SetPieceDecision,
   AddonCreateInput,
   AddonInput,
+  AddonPickable,
   AddonView,
   OrderAddonOffer,
   AnnouncementState,
@@ -754,6 +755,14 @@ export class AdminApi {
   /** AUDITOR: every add-on, the active ones first, with its SKU, prices and stock per location. */
   addons(): Promise<Items<AddonView>> {
     return this.get('/api/admin/addons');
+  }
+
+  /**
+   * AUDITOR (lot Q2, step Q2.7): the active add-ons a release's form picks from for a moment (LIVE, DRAW) and a currency,
+   * each with its price there, pickable or why not (SWITCH_OFF, NO_PRICE).
+   */
+  addonPickable(moment: 'LIVE' | 'DRAW', currency: string): Promise<Items<AddonPickable>> {
+    return this.get(`/api/admin/addons?moment=${encodeURIComponent(moment)}&currency=${encodeURIComponent(currency)}`);
   }
 
   /** OPERATOR: an add-on listed with its SKU code and prices (409 ADDON_NAME_TAKEN, SKU_CODE_TAKEN). */

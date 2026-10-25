@@ -33,7 +33,7 @@ import { countryName } from '../../../shared/countries.js';
 import { h, mount } from '../../shared/dom.js';
 import { formatCount, formatDateTime } from '../format.js';
 import { BOX_LIMITS, BOXES_TEXT, boxChange, boxCostText, boxFormValues, boxInput, boxProblem, boxSides, boxState, CARD_RULE, grams } from '../model/boxes.js';
-import { alertsInput, alertsProblem, ALERT_LIMITS, carrierProblem, LOGISTICS_LIMITS, locationProblem, TRACKING_PLACEHOLDER, trackingLink } from '../model/orders.js';
+import { alertsInput, alertsProblem, ALERT_LIMITS, carrierProblem, ENGRAVING_SETTINGS_TEXT, LOGISTICS_LIMITS, locationProblem, TRACKING_PLACEHOLDER, trackingLink } from '../model/orders.js';
 import { GUARANTEE_LIMITS, PIECES_OPTIONS, piecesText, settingsInput, settingsProblem, settingsValues } from '../model/guarantees.js';
 import { countriesMovingHere, countriesSavedToast, countryAddOptions, LOCATION_COUNTRIES_TEXT, movingLine, sameCountries, servedNames } from '../model/location-countries.js';
 import { can } from '../model/permissions.js';
@@ -89,11 +89,8 @@ export async function settingsView(ctx: ViewContext): Promise<HTMLElement> {
  * where it is offered are set in Catalogue → Add-ons. One line leads there.
  */
 function engravingSection(): HTMLElement {
-  return section(
-    'Engraving',
-    [h('p', { class: 'notice', data: { testid: 'engraving-addon' } }, 'Engraving is an add-on: its prices are in ', h('a', { attrs: { href: href('catalogue') } }, 'Catalogue → Add-ons'), ', ENGRAVING.')],
-    { id: 'settings-engraving' },
-  );
+  const t = ENGRAVING_SETTINGS_TEXT;
+  return section('Engraving', [h('p', { class: 'notice', data: { testid: 'engraving-addon' } }, t.before, h('a', { attrs: { href: href('catalogue') } }, t.link), t.after)], { id: 'settings-engraving' });
 }
 
 /** IN-01: the Grant dialog's defaults, each grant setting its own terms. */

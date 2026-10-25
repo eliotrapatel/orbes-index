@@ -2,33 +2,46 @@
  * The add-ons in the console (macro scope of 2026-10-20, K48 D1 and D2; lot M3 plan §4.3, step M3.11), the parts other
  * pages place:
  *
- *  - Catalogue → Add-ons (views/catalogue.ts, after Models): the table (name and line, SKU code, prices, supplier,
- *    weight, available and minimum per location, ACTIVE / SET ASIDE with its Shopify link); New add-on and Edit (name,
- *    line, SKU code at the creation only, supplier, weight, a price per house currency), Set aside / Reinstate, Shopify
- *    (the ids pasted back, as a model's). OPERATOR writes; every role that reads the catalogue reads.
- *  - The order page's Add-ons (views/order.ts): each unit grouped (name × units, price, who added it, status), Add an
- *    add-on (the add-ons in stock at the order's location in its currency, 1 to 3 units, the total) and Remove one unit
- *    (OPERATOR, until the parcel is packed); after PAID, their invoice and credit notes in Documents.
+ *  - Catalogue → Add-ons (views/catalogue.ts, after Models): the table (name and line, SKU code, the ENGRAVING mark and
+ *    what it was converted from, its type WITH STOCK or SERVICE, prices, where it is offered, how many releases pick it,
+ *    supplier, weight, available and minimum per location or No stock, ACTIVE / SET ASIDE with its Shopify link); New
+ *    add-on and Edit (its type at the creation only, a service without supplier; name, line, SKU code at the creation
+ *    only, supplier, weight, a price per house currency, the four switches, the engraving and its most characters on a
+ *    service; lot Q2, step Q2.7, D3, D4, D12, N3), Set aside / Reinstate, Shopify (the ids pasted back, as a model's).
+ *    OPERATOR writes; every role that reads the catalogue reads.
+ *  - A release's pick (lot Q2, step Q2.7, D3, N7): the Add-ons offered tick boxes of a LIVE RELEASE, its after-room and a
+ *    draw (views/live.ts, views/club.ts, views/drop.ts), from the add-ons the release may offer and why not.
+ *  - The order page's Add-ons (views/order.ts): each unit grouped (name × units, price, who added it, status, a
+ *    service's held nowhere), Add an add-on (the add-ons in stock at the order's location in its currency and the
+ *    services, 1 to 3 units, the total) and Remove one unit (OPERATOR, until the parcel is packed); after PAID, their
+ *    invoice and credit notes in Documents.
  *  - A SKU's first cell in Logistics and the supplier orders: its model, or its add-on marked ADD-ON.
  *  - The draw's Confirm and the salon's Accept: the collector's choices, and after, what was left out.
  * The words are in model/addons.ts; the server audits each change.
  */
 import { h, type Child } from '../../shared/dom.js';
 import {
+  ADDON_KIND_LABELS,
+  ADDON_KIND_OPTIONS,
   ADDON_LIMITS,
   ADDON_SKU_TEXT,
+  ADDON_SWITCHES,
   ADDON_STATUS_LABELS,
   addAddonProblem,
   addAddonTotal,
   addedByText,
   addonChange,
+  addonConvertedLines,
   addonCreateInput,
+  addonEngravingText,
   addonFormValues,
   addonGroups,
   addonStockLines,
   addonOfferOptions,
+  addonOfferedMarks,
   addonPricesText,
   addonProblem,
+  addonReleasesText,
   ADDONS_TEXT,
   addonShopifyInput,
   addonShopifyProblem,
@@ -43,11 +56,17 @@ import {
   CHOICES_TEXT,
   choiceLines,
   groupPriceText,
+  heldLine,
   isAddonSku,
+  isEngravingForm,
+  isServiceForm,
   leftOutLines,
   noOfferText,
   ORDER_ADDONS_TEXT,
   orderTakesAddons,
+  PICK_TEXT,
+  pickOptions,
+  pickTicked,
   removeAddonText,
   returnedLine,
   skuOwnerName,
@@ -55,12 +74,13 @@ import {
   unitsWords,
   type AddonForm,
   type AddonGroup,
+  type PickMoment,
 } from '../model/addons.js';
 import { parisDateTime } from '../model/links.js';
 import { can } from '../model/permissions.js';
-import { HOUSE_CURRENCIES, type AddonView, type ChosenAddon, type LeftOutAddon, type LogisticsSku, type OrderAddonOffer, type OrderDetail, type Supplier } from '../types.js';
+import { HOUSE_CURRENCIES, type AddonPickable, type AddonView, type ChosenAddon, type LeftOutAddon, type LogisticsSku, type OrderAddonOffer, type OrderDetail, type PickedAddon, type Supplier } from '../types.js';
 import { button, section, statusMark, table, type Column } from '../ui/components.js';
-import { openDialog } from '../ui/dialog.js';
+import { openDialog, type DialogField } from '../ui/dialog.js';
 import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
 
@@ -83,20 +103,42 @@ export function addonsSection(ctx: ViewContext, addons: readonly AddonView[], su
     const values = addonFormValues(a);
     // Fields and prices go by two routes: once the fields are saved, a refusal of the prices does not send them again.
     let patched: string | null = null;
+    // Lot Q2, step Q2.7 (D4, N13): the type is chosen at the creation only; an edit reads the add-on's.
+    const typed = (v: Record<string, string>): Record<string, string> => (a ? { ...v, kind: a.kind } : v);
+    const service = (v: Record<string, string>) => isServiceForm(typed(v));
+    const fields: DialogField[] = [
+      ...(a ? [] : [{ name: 'kind', label: 'Type', kind: 'select' as const, required: true, options: ADDON_KIND_OPTIONS.map((x) => ({ ...x })), value: values.kind, hint: ADDONS_TEXT.kindHint }]),
+      { name: 'name', label: 'Name', required: true, maxlength: ADDON_LIMITS.name, value: values.name, hint: ADDONS_TEXT.nameHint },
+      { name: 'line', label: 'Line', maxlength: ADDON_LIMITS.line, value: values.line, hint: ADDONS_TEXT.lineHint },
+      ...(a ? [] : [{ name: 'skuCode', label: 'SKU code', required: true, maxlength: ADDON_LIMITS.skuCode, value: values.skuCode, hint: ADDONS_TEXT.skuHint }]),
+      // A service has no supplier, no stock and no warehouse (D4): its Supplier is hidden.
+      { name: 'supplierId', label: 'Supplier', kind: 'select' as const, options: addonSupplierOptions(suppliers, a), value: values.supplierId, hint: ADDONS_TEXT.supplierHint, shown: (v) => !service(v) },
+      // The label in the display face carries no figure: the unit is said in the hint.
+      { name: 'weightG', label: 'Weight', maxlength: 6, value: values.weightG, hint: ADDONS_TEXT.weightHint },
+      ...HOUSE_CURRENCIES.map((c, i) => ({ name: c, label: `Price in ${c}`, maxlength: 12, value: values[c], hint: ADDONS_TEXT.priceHint(c, i === 0) })),
+      // D3: the four moments it is offered at, on by default.
+      ...ADDON_SWITCHES.map((x, i) => ({
+        name: x.key,
+        label: x.label,
+        kind: 'checkbox' as const,
+        value: values[x.key],
+        ...(i === 0 ? { hint: ADDONS_TEXT.offeredHint } : x.key === 'orders' ? { hint: ADDONS_TEXT.ordersHint } : {}),
+      })),
+      // D4, D12, N3: the engraving, a service's, and the most characters its words take.
+      { name: 'engraving', label: ADDONS_TEXT.engraving, kind: 'checkbox', value: values.engraving, hint: ADDONS_TEXT.engravingHint, shown: service },
+      { name: 'textMax', label: ADDONS_TEXT.textMax, maxlength: 2, value: values.textMax, hint: ADDONS_TEXT.textMaxHint, shown: (v) => isEngravingForm(typed(v)) },
+    ];
     void openDialog({
       title: a ? ADDONS_TEXT.editTitle : ADDONS_TEXT.addTitle,
       eyebrow: a ? a.name : ADDONS_TEXT.eyebrow,
-      body: a ? h('p', { class: 'dialog__text', data: { testid: 'addon-sku-fixed' } }, ADDONS_TEXT.skuFixed(a.sku.code)) : undefined,
-      fields: [
-        { name: 'name', label: 'Name', required: true, maxlength: ADDON_LIMITS.name, value: values.name, hint: ADDONS_TEXT.nameHint },
-        { name: 'line', label: 'Line', maxlength: ADDON_LIMITS.line, value: values.line, hint: ADDONS_TEXT.lineHint },
-        ...(a ? [] : [{ name: 'skuCode', label: 'SKU code', required: true, maxlength: ADDON_LIMITS.skuCode, value: values.skuCode, hint: ADDONS_TEXT.skuHint }]),
-        { name: 'supplierId', label: 'Supplier', kind: 'select' as const, options: addonSupplierOptions(suppliers, a), value: values.supplierId, hint: ADDONS_TEXT.supplierHint },
-        // The label in the display face carries no figure: the unit is said in the hint.
-        { name: 'weightG', label: 'Weight', maxlength: 6, value: values.weightG, hint: ADDONS_TEXT.weightHint },
-        ...HOUSE_CURRENCIES.map((c, i) => ({ name: c, label: `Price in ${c}`, maxlength: 12, value: values[c], hint: ADDONS_TEXT.priceHint(c, i === 0) })),
-      ],
-      validate: (v) => addonProblem(v, !a) ?? (a && addonUnchanged(addonChange(a, v as AddonForm)) ? ADDONS_TEXT.unchanged : null),
+      body: a
+        ? [
+            h('p', { class: 'dialog__text', data: { testid: 'addon-sku-fixed' } }, ADDONS_TEXT.skuFixed(a.sku.code)),
+            h('p', { class: 'dialog__text', data: { testid: 'addon-kind-fixed' } }, ADDONS_TEXT.kindFixed(ADDON_KIND_LABELS[a.kind])),
+          ]
+        : undefined,
+      fields,
+      validate: (v) => addonProblem(typed(v), !a) ?? (a && addonUnchanged(addonChange(a, v as AddonForm)) ? ADDONS_TEXT.unchanged : null),
       confirmLabel: a ? 'Save' : 'Add',
       submit: async (v) => {
         if (!a) {
@@ -144,23 +186,35 @@ export function addonsSection(ctx: ViewContext, addons: readonly AddonView[], su
     }).then(done(ADDONS_TEXT.shopifySaved));
 
   const columns: Column<AddonView>[] = [
-    // Its name, its SKU code under it (as Logistics names a SKU), then its line.
+    // Its name, its SKU code under it (as Logistics names a SKU), the ENGRAVING mark, its line, what it was converted from.
     {
       label: 'Add-on',
-      cell: (a) =>
-        h(
+      cell: (a) => {
+        const engraving = addonEngravingText(a);
+        const converted = addonConvertedLines(a);
+        return h(
           'span',
           null,
           h('span', { data: { testid: 'addon-name' } }, a.name),
           h('span', { class: 'cell-sub mono', data: { testid: 'addon-sku' } }, a.sku.code),
+          engraving ? h('span', { class: 'cell-sub', data: { testid: 'addon-engraving' } }, statusMark(engraving, 'outline')) : null,
           a.line ? h('span', { class: 'cell-details', data: { testid: 'addon-line' } }, a.line) : null,
-        ),
+          ...converted.map((x) => h('span', { class: 'cell-details', data: { testid: 'addon-converted' } }, x)),
+        );
+      },
       kind: ['wide'],
     },
+    { label: 'Type', cell: (a) => h('span', { data: { testid: 'addon-kind' } }, ADDON_KIND_LABELS[a.kind]), kind: ['nowrap'] },
     { label: 'Prices', cell: (a) => lines(addonPricesText(a), 'addon-prices'), kind: ['nowrap'] },
+    { label: 'Offered', cell: (a) => h('span', { class: a.active ? undefined : 'soft' }, lines(addonOfferedMarks(a), 'addon-offered')), kind: ['nowrap'] },
+    { label: 'Releases', cell: (a) => h('span', { class: a.releases > 0 ? undefined : 'soft', data: { testid: 'addon-releases' } }, addonReleasesText(a)), kind: ['num'] },
     { label: 'Supplier', cell: (a) => (a.supplier ? a.supplier.name : h('span', { class: 'soft' }, 'None')) },
     { label: 'Weight', cell: (a) => h('span', { class: a.weightG === null ? 'soft' : undefined, data: { testid: 'addon-weight' } }, addonWeightText(a)), kind: ['nowrap'] },
-    { label: 'Available · minimum', cell: (a) => lines(addonStockLines(a), 'addon-stock'), kind: ['nowrap'] },
+    {
+      label: 'Available · minimum',
+      cell: (a) => (a.kind === 'SERVICE' ? h('span', { class: 'soft', data: { testid: 'addon-stock' } }, ADDONS_TEXT.noStock) : lines(addonStockLines(a), 'addon-stock')),
+      kind: ['nowrap'],
+    },
     {
       label: 'Status · Shopify',
       cell: (a) =>
@@ -195,6 +249,32 @@ export function addonsSection(ctx: ViewContext, addons: readonly AddonView[], su
     [h('p', { class: 'panel__text' }, ADDONS_TEXT.lead), h('div', { class: 'addons__table', data: { testid: 'addons-table' } }, table(columns, [...addons], { empty: ADDONS_TEXT.empty, caption: ADDONS_TEXT.title }))],
     { id: 'addons', tools: canEdit ? [button(ADDONS_TEXT.add, { kind: 'ghost', testId: 'addon-add', onClick: () => edit(null) })] : [] },
   );
+}
+
+// ── A release's pick ───────────────────────────────────────────────────────
+
+/**
+ * A release's Add-ons offered tick boxes (lot Q2, step Q2.7, D3, N7): its pick first, then the other active add-ons, the
+ * ones it cannot offer disabled with why; for a new release (`picked` null), every one it may offer ticked.
+ */
+export function pickField(
+  name: string,
+  pickable: readonly AddonPickable[],
+  picked: readonly PickedAddon[] | null,
+  moment: PickMoment,
+  currency: string | null,
+  shown?: (v: Record<string, string>) => boolean,
+): DialogField {
+  const options = pickOptions(pickable, picked, moment, currency);
+  return {
+    name,
+    label: PICK_TEXT.label,
+    kind: 'checklist',
+    options,
+    value: pickTicked(pickable, picked, currency),
+    hint: options.length ? (moment === 'LIVE' ? PICK_TEXT.liveHint : PICK_TEXT.drawHint) : PICK_TEXT.empty,
+    ...(shown ? { shown } : {}),
+  };
 }
 
 // ── A SKU's first cell ─────────────────────────────────────────────────────
@@ -293,7 +373,7 @@ export function orderAddonsSection(ctx: ViewContext, d: OrderDetail, eyebrow: st
           'span',
           null,
           h('span', { data: { testid: 'order-addon-status' } }, statusMark(ADDON_STATUS_LABELS[g.status], g.status === 'HELD' ? 'outline' : g.status === 'SHIPPED' ? 'solid' : 'muted')),
-          g.status === 'HELD' ? h('span', { class: 'cell-sub' }, `At ${g.location}`) : null,
+          g.status === 'HELD' ? h('span', { class: 'cell-sub', data: { testid: 'order-addon-held' } }, heldLine(g)) : null,
           returned ? h('span', { class: 'cell-sub' }, returned) : null,
           invoice ? h('span', { class: 'cell-sub', data: { testid: 'order-addon-invoice' } }, `Its invoice ${invoice}`) : null,
         );

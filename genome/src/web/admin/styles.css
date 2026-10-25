@@ -1174,6 +1174,17 @@ fieldset.cfield--checks > .cfield__label {
   padding: 0;
 }
 
+/* A tick box that cannot be ticked (an add-on a release cannot offer, with why): read, softer, its mark dashed. */
+.ccheck--disabled {
+  cursor: default;
+  color: var(--ink-soft);
+}
+
+.ccheck--disabled .ccheck__mark {
+  border-style: dashed;
+  border-color: var(--ink-soft);
+}
+
 .ccheck {
   position: relative;
   display: inline-flex;
