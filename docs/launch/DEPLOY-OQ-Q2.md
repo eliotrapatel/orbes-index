@@ -639,7 +639,7 @@ Dans cet ordre, quand tu veux :
 1. **Tes add-ons convertis** : `Catalogue` → `Add-ons`, chacun avec « Converted from… ». Garde-les, change leur ligne, leurs prix et leurs interrupteurs, ou mets de côté ceux que tu ne veux plus (`Set aside`) ; un add-on qui devrait avoir du stock se crée à nouveau `WITH STOCK`, son type ne changeant pas (§2).
 2. **Les interrupteurs et les prix de chaque add-on** : où il est proposé (LIVE, DRAW, SALON, YOUR ORDERS), et un prix dans chaque devise où tu le vends.
 3. **La gravure** : son prix, ses interrupteurs, son nombre de caractères (`Most characters`, §2).
-4. **Le choix de chaque release à venir** : `Add-ons offered`, d'une LIVE RELEASE jusqu'à son annonce, d'un tirage tant qu'il est un brouillon.
+4. **Le choix de chaque release à venir** : `Add-ons offered`, d'une LIVE RELEASE (et de son after-room) jusqu'à sa fin, d'un tirage jusqu'à la fin du temps de ses places tenues.
 5. **Les identifiants Shopify** de chaque add-on, services compris, plus tard, le jour de la boutique (`Shopify` sur sa ligne).
 6. **Préviens ORBES Client Services** que c'est en place, si ce n'est pas déjà fait (§1.1).
 7. **Les anciennes images (facultatif).** Une fois ADD-ONS stable, `7098341f83f2` et les images d'avant ne peuvent plus servir. Retire-les une par une, par leur tag exact (jamais `<TAG_Q2>`), la liste d'abord :

@@ -31,7 +31,8 @@
  *     NEXT BATCH NOW gives the rest, each control audited.
  *  9. ADD-ONS ONE SYSTEM (lot Q2, step Q2.7, D3, N7): New live release lists Add-ons offered in its currency, every
  *     add-on it may offer ticked, one whose LIVE switch is off disabled with why, in another currency the ones without a
- *     price there; its Add-ons part lists the pick with its prices; Add-ons offered changes it until the announcement.
+ *     price there; its Add-ons part lists the pick with its prices; Add-ons offered changes it until the release ends,
+ *     the announcement included.
  *  8. ONE QUEUE (lot Q1 §4): New live release with its pace and its hold (the owner's label, its figure in --font);
  *     announced, the board's added figures (turns given, beyond the pieces, the hold's end in Paris time), the close
  *     guard's warning and its controls, SHORTEN THE HOLD (earlier only), END THE HOLD NOW giving the first batch, the
