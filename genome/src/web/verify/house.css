@@ -2718,8 +2718,10 @@ body[data-screen="live"]:has(.view--live.live--look:not(.d-room)) .corners {
   line-height: 1.5;
 }
 
-/* The error line under the rows: the house's sentence of an engraving's words broken in balance (never its last mark alone). */
-.live__secured > .live__error {
+/* The error line under the rows: the house's sentence of an engraving's words broken in balance (never its last mark alone),
+   on the phone and in the computer's right column alike. */
+.live__secured > .live__error,
+.live__secured > .d-room__br > .live__error {
   text-wrap: balance;
 }
 
