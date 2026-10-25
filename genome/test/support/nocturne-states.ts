@@ -28,6 +28,11 @@ export type CameraFailure = 'NotAllowedError' | 'NotFoundError' | 'NotReadableEr
 /** 5b shown (lot Q2, step Q2.8): its rows, one of them chosen. */
 const FIVE_B_READY = '.view--live .live__addons:not([hidden]) .live__addon-item.is-on';
 
+/** THE VAULT's door shown (lot Q3, step Q3.10): the box in its slot, on SOLD OUT for your size or the end page. */
+const VAULT_DOOR = '.view--live .live__vault-slot .vault-box .vo-dopen__front';
+const VAULT_END_DOOR = '.view--live.live--end-vault .live__vault-slot .vault-box .vo-dopen__front';
+const VAULT_OPEN = '.view--live .live__vault-slot .vlt.is-open';
+
 /** The demo's service whose name is exactly 40 characters (addons-hold-stress). */
 const LONGEST_ADDON = 'A SECOND BOX OF THE HOUSE, WITH ITS CARD';
 
@@ -2258,6 +2263,17 @@ export const PHONE_STATES: readonly UiState[] = [
   { id: 'live-removed', title: 'YOUR ENTRY IS REMOVED', refs: ['live-19', 'C30'], variant: 'live', as: 'removed', path: release('live'), ready: '.view--live .n-live__end' },
   // No before-capture shows ENTER THE LINE (live-09 is the line itself): the room's own pieces.
   { id: 'live-join', title: 'Live now, an account not in the line: ENTER THE LINE', refs: ['same pieces'], variant: 'live', as: you, path: release('live'), ready: '.view--live' },
+  // ── THE VAULT (lot Q3, step Q3.10; MK #sold, #release-end; the stage `vault`): its door on SOLD OUT for your size and
+  // on the end page of a release sold out whole, closed (also in light: the room stays dark), then opened (the reveal
+  // still under reduced motion: €25 · House credit, valid 30 days. · 1 IN 10; GUARANTEED, rare), each opening its own
+  // collector's vault (they write: last of the stage). ──
+  { id: 'live-sold-out-size-vault', title: 'SOLD OUT for your size with THE VAULT (MK S): the door under the sentence, A vault is waiting for you., DRAW IT DOWN, OR PRESS AND HOLD, then LEAVE THE LINE', refs: ['MK S'], variant: 'vault', as: 'vaultS', path: release('live'), ready: VAULT_DOOR, check: vaultClosed },
+  { id: 'live-sold-out-size-vault-light', title: 'SOLD OUT for your size with THE VAULT, in light mode: the room and the door stay dark', refs: ['MK S'], variant: 'vault', as: 'vaultS', path: release('live'), light: true, ready: VAULT_DOOR, check: allOf(vaultClosed, staysDark) },
+  { id: 'live-end-vault', title: 'The end page of a release sold out whole with THE VAULT (MK 11): LIVE RELEASE and the name, SOLD OUT, its sentence, the door, THE RELEASES', refs: ['MK 11'], variant: 'vault', as: 'vaultEnd', path: release('vaultEnd'), act: (run) => sellOutWhole(run, 'vaultEnd'), ready: VAULT_END_DOOR, mutates: true, check: vaultClosed },
+  { id: 'live-end-vault-light', title: 'The end page with THE VAULT, in light mode: drawn dark, as the room', refs: ['MK 11'], variant: 'vault', as: 'vaultEndLight', path: release('vaultEndLight'), light: true, act: (run) => sellOutWhole(run, 'vaultEndLight'), ready: VAULT_END_DOOR, mutates: true, check: allOf(vaultClosed, staysDark) },
+  { id: 'vault-open', title: 'SOLD OUT for your size, THE VAULT opened (MK S, PLAY THE VAULT): FROM THE VAULT, €25, House credit, valid 30 days., 1 IN 10, OPEN ANOTHER above LEAVE THE LINE, the page dimmed', refs: ['MK S'], variant: 'vault', as: 'vaultSOpen', path: release('live'), act: (run) => openTheVault(run, { reduced: true }), ready: VAULT_OPEN, mutates: true, check: vaultOpened('.live__leave-line') },
+  { id: 'vault-open-rare', title: 'SOLD OUT for your size, THE VAULT opened on a rare reward: GUARANTEED, A piece at the next LIVE release., 1 IN 200, OPEN ANOTHER', refs: ['MK S'], variant: 'vault', as: 'vaultSRare', path: release('live'), act: (run) => openTheVault(run, { rare: true, reduced: true }), ready: VAULT_OPEN, mutates: true, check: vaultOpened('.live__leave-line') },
+  { id: 'live-end-vault-open', title: 'The end page with THE VAULT opened (MK 11): the reward, OPEN ANOTHER above THE RELEASES', refs: ['MK 11'], variant: 'vault', as: 'vaultEndOpen', path: release('vaultEndOpen'), act: async (run) => (await sellOutWhole(run, 'vaultEndOpen'), openTheVault(run, { reduced: true })), ready: VAULT_OPEN, mutates: true, check: vaultOpened('.n-live__back') },
   { id: 'live-pieces-turn', title: 'MY PIECES of a collector at its turn: YOUR TURN', refs: ['C31'], variant: 'live', as: 'turn', path: at('/verify/pieces'), act: (run) => piecesTab(run, 'RELEASES'), ready: '.view--pieces .pieces__releases' },
   { id: 'after-room-door', title: 'The after-room’s second door: the horizon open, a point at each parted end, the light through the gap (lot Q1 §3.9)', refs: ['C26', 'plus-07'], variant: 'afterroom', as: you, path: release('afterroom'), ready: '.view--live .live__after' },
   {
@@ -3037,6 +3053,92 @@ async function fiveBRows(page: Page): Promise<string[]> {
 }
 
 /** Each of `checks`, in order: every problem of each. */
+/**
+ * Open THE VAULT on the page (lot Q3, step Q3.10): its door held with the space bar until the hold is full (HOLD_MS 1 500), the
+ * server's draw landing on the table's first row (€25 HOUSE CREDIT) or on GUARANTEED (`rare`: past the first row's
+ * 100 000 parts of 1 000 000), the reveal under reduced motion (the reward at once) when `reduced`.
+ */
+async function openTheVault(run: StateRun, opts: { rare?: boolean; reduced?: boolean } = {}): Promise<void> {
+  const service = run.stage.ctx.services.vault as unknown as { random: (max: number) => number };
+  service.random = () => (opts.rare ? 100_000 : 0);
+  if (opts.reduced) await run.page.emulateMedia({ reducedMotion: 'reduce' });
+  const front = run.page.locator('.view--live .live__vault-slot .vo-dopen__front');
+  await front.waitFor();
+  await front.focus();
+  await run.page.keyboard.down(' ');
+  // Held until the hold is complete on the page's own clock (a page still loading runs it slower than the test's).
+  await run.page.waitForFunction(() => (document.querySelector('.live__vault-slot .vlt') as HTMLElement | null)?.style.getPropertyValue('--p') === '1.0000', null, { timeout: 15_000 });
+  await run.page.keyboard.up(' ');
+  await run.page.locator(VAULT_OPEN).waitFor({ state: 'attached' });
+}
+
+/**
+ * A release of one piece sold out whole while its page is open (lot Q3 §3.4): the page in the line, its piece's holder
+ * pays (seedVault's `<key>Buyer`), Q3.5's hook gives the line its vaults, the release ends; the page follows the room to
+ * its end page.
+ */
+async function sellOutWhole(run: StateRun, key: string): Promise<void> {
+  const dropId = run.demo.releases[key]!;
+  const buyer = run.demo.accounts[`${key}Buyer`]!;
+  await run.page.locator('.view--live .live__queue').first().waitFor();
+  await run.stage.ctx.services.live.confirm(buyer.id, dropId, buyer.actor);
+}
+
+/** A closed door (lot Q3 §3.3): its line and its hint shown, no OPEN ANOTHER, no number on it (D10). */
+async function vaultClosed(page: Page): Promise<string[]> {
+  const at = await page.evaluate(() => {
+    const vlt = document.querySelector('.live__vault-slot .vlt');
+    const shown = (sel: string) => {
+      const e = vlt?.querySelector(sel);
+      return !!e && getComputedStyle(e).display !== 'none' && Number(getComputedStyle(e).opacity) > 0.5 && e.getBoundingClientRect().height > 0;
+    };
+    return { lead: shown('.vlt__lead'), hint: shown('.vlt__hint'), again: shown('.vlt__again'), digits: /\d/.test(vlt?.querySelector('.vo-dopen')?.textContent ?? '') };
+  });
+  return [...(at.lead ? [] : ['the door\'s line is not shown']), ...(at.hint ? [] : ['its hint is not shown']), ...(at.again ? ['OPEN ANOTHER is shown on a closed door'] : []), ...(at.digits ? ['a number on the box'] : [])];
+}
+
+/**
+ * An opened vault (lot Q3 §3.2, N3, N35): OPEN ANOTHER shown under the reward, wholly above `below` (LEAVE THE LINE on
+ * S, THE RELEASES on the end page) and clear of it; the door's line and hint gone; the page dimmed to 16 % (`below` at
+ * 0.16), OPEN ANOTHER at full strength.
+ */
+function vaultOpened(below: string) {
+  return async (page: Page): Promise<string[]> => {
+    const at = await page.evaluate((sel) => {
+      const vlt = document.querySelector('.live__vault-slot .vlt');
+      const again = vlt?.querySelector('.vlt__again');
+      const next = document.querySelector(`.view--live ${sel}`);
+      const o = (e: Element | null | undefined) => (e ? Number(getComputedStyle(e).opacity) : null);
+      const gone = (e: Element | null | undefined) => !e || getComputedStyle(e).display === 'none' || Number(getComputedStyle(e).opacity) === 0;
+      const box = (e: Element | null | undefined) => (e ? e.getBoundingClientRect() : null);
+      // The page's dim is on the lines themselves or on what holds them (the screen's children, the room's places).
+      let dim = 1;
+      for (let e: Element | null = next; e && e !== document.body; e = e.parentElement) dim *= Number(getComputedStyle(e).opacity);
+      const a = box(again);
+      const n = box(next);
+      return { again: !!again && !gone(again), againOpacity: o(again), lead: gone(vlt?.querySelector('.vlt__lead')), hint: gone(vlt?.querySelector('.vlt__hint')), dim, gap: a && n ? n.top - a.bottom : null, below: !!n };
+    }, below);
+    const out: string[] = [];
+    if (!at.again) out.push('OPEN ANOTHER is not shown');
+    if (at.againOpacity !== null && at.againOpacity < 0.99) out.push(`OPEN ANOTHER at opacity ${at.againOpacity}`);
+    if (!at.lead) out.push('the door\'s line is still shown');
+    if (!at.hint) out.push('the door\'s hint is still shown');
+    if (!at.below) out.push(`no ${below} under the vault`);
+    else if (Math.abs(at.dim - 0.16) > 0.01) out.push(`${below} at opacity ${at.dim.toFixed(2)}, not 0.16`);
+    if (at.gap !== null && at.gap < 0) out.push(`OPEN ANOTHER overlaps ${below} by ${Math.round(-at.gap)} px`);
+    return out;
+  };
+}
+
+/** Light mode kept on the device, the page drawn dark all the same (the room, and the end page with THE VAULT). */
+async function staysDark(page: Page): Promise<string[]> {
+  const at = await page.evaluate(() => {
+    const rgb = getComputedStyle(document.body).backgroundColor.match(/\d+(\.\d+)?/g)?.map(Number) ?? [255, 255, 255];
+    return { mode: document.documentElement.dataset.mode ?? null, luminance: (rgb[0]! + rgb[1]! + rgb[2]!) / 3, nocturne: document.body.classList.contains('nocturne') };
+  });
+  return [...(at.mode === 'light' ? [] : ['light mode is not kept on the device']), ...(at.luminance < 40 ? [] : [`the page's ground is light (${Math.round(at.luminance)})`])];
+}
+
 function allOf(...checks: ((page: Page) => Promise<string[]>)[]) {
   return async (page: Page): Promise<string[]> => {
     const out: string[] = [];
@@ -3594,6 +3696,20 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
     onDesk(phoneState('addons-hold-light'), 1440, { light: true, name: 'addons-hold', extra: { check: allOf(fiveBColumn(false), fiveBRows) } }),
     onDesk(phoneState('addons-hold-stress'), 1440, { extra: { check: fiveBColumn() } }),
     onDesk(phoneState('addons-hold-stress'), 1024, { extra: { check: fiveBColumn() } }),
+  ],
+  // ── THE VAULT (lot Q3, step Q3.10; MK #sold, #release-end, desk) on its stage (vault): the door in the centre column of
+  // SOLD OUT for your size (also at 1024 × 768, and in light: the room dark), on the end page of a release sold out whole
+  // (also in light); then opened, each its own collector's vault (they write, last): S with its reward and OPEN ANOTHER
+  // above LEAVE THE LINE, a rare one, the end page's OPEN ANOTHER clear of THE RELEASES ──
+  'desk-16': [
+    ...desk(1440, 'live-sold-out-size-vault'),
+    ...desk(1024, 'live-sold-out-size-vault'),
+    onDesk(phoneState('live-sold-out-size-vault-light'), 1440, { light: true, name: 'live-sold-out-size-vault' }),
+    onDesk(phoneState('live-end-vault'), 1440, { extra: { as: 'vaultEndDesk', path: release('vaultEndDesk'), act: (run) => sellOutWhole(run, 'vaultEndDesk') } }),
+    onDesk(phoneState('live-end-vault-light'), 1440, { light: true, name: 'live-end-vault', extra: { as: 'vaultEndDeskLight', path: release('vaultEndDeskLight'), act: (run) => sellOutWhole(run, 'vaultEndDeskLight') } }),
+    onDesk(phoneState('vault-open'), 1440, { extra: { as: 'vaultSOpenDesk' } }),
+    onDesk(phoneState('vault-open-rare'), 1440, { extra: { as: 'vaultSRareDesk' } }),
+    onDesk(phoneState('live-end-vault-open'), 1440, { extra: { as: 'vaultEndOpenDesk', path: release('vaultEndOpenDesk'), act: async (run) => (await sellOutWhole(run, 'vaultEndOpenDesk'), openTheVault(run, { reduced: true })) } }),
   ],
 });
 

@@ -8,6 +8,7 @@
  */
 import { CHAPTER_LABELS, RAIL_LABEL } from '../shared/chapters.js';
 import { onComputer } from '../shared/desktop.js';
+import { VAULT_REVEAL } from '../../shared/house-words.js';
 import { ApiError } from './api.js';
 import type { ScanHint } from './capture.js';
 import type { VerificationState } from './types.js';
@@ -2238,6 +2239,37 @@ export const LIVE = Object.freeze({
     /** Said aloud when the door appears. */
     announce: 'A second door has opened.',
   }),
+});
+
+/**
+ * THE VAULT (lot Q3, step Q3.10; vault/SCOPE.md F5–F7, I; MK #sold, #release-end; the vault reference the-vault.html): the
+ * door on SOLD OUT for your size and on the end page of a release sold out whole, its opening and its reveal (the prize,
+ * its line and its odds are the server's words, services/vault.ts). "We" on the vault only (D13); never "paid", never
+ * "the house kept / set aside" (D52); no number anywhere (D10); € only in the reveal and OPENED (D45).
+ */
+export const VAULT = Object.freeze({
+  /** The vault's own name (its section, for a reader). */
+  name: 'THE VAULT',
+  door: Object.freeze({
+    /** Under the closed door (F7). */
+    lead: 'A vault is waiting for you.',
+    /** On SOLD OUT and the end page (F7, OP-23). */
+    hint: 'DRAW IT DOWN, OR PRESS AND HOLD',
+    /** The door's name for a reader (plan §3.2); the hint is its description. */
+    label: 'THE VAULT. A vault is waiting for you. Press and hold to open.',
+  }),
+  reveal: Object.freeze({
+    /** Above the prize, inside the box (the server's receipt says the same). */
+    from: VAULT_REVEAL.from,
+    /** Under the reward once open (F5, MK S and 11): closes the box and leads to THE VAULT page (N3). */
+    again: 'OPEN ANOTHER',
+    /** What a reader hears once it opens (VR's status): « From the vault: €25. House credit, valid 30 days. Odds 1 in 10. » */
+    said: (prize: string, line: string | null, odds: string): string => `From the vault: ${prize}.${line ? ` ${line}` : ''} Odds ${String(odds ?? '').toLowerCase()}.`,
+  }),
+  /** The small wordmark on the lid (VR's vo-dopen__mark). */
+  lidMark: 'ORBES',
+  /** An opening that failed without words of the server's (the box settles back closed). */
+  failed: 'The vault could not be opened. Please try again.',
 });
 
 /**

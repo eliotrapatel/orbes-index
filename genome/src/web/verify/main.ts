@@ -101,6 +101,7 @@ import { howView } from './views/how.js';
 import { CERTIFICATE_PATH, LANDING_PATH, LOOKBOOK_PATH, PIECES_PATH } from './views/common.js';
 import { messageOf } from './views/forms.js';
 import { liveView } from './views/live.js';
+import { liveVault } from './vault/live-vault.js';
 import { liveBannerView } from './views/live-banner.js';
 import { lookbookView, sheetView } from './views/lookbook.js';
 import { WORN_ENTRY_MARK } from './views/worn-sheet.js';
@@ -909,6 +910,16 @@ class App {
   }
 
   /**
+   * OPEN ANOTHER under an opened vault (lot Q3 §3.2, N3): THE VAULT page, where another vault waits or OPENED holds this
+   * one. Until that page is built (lot Q3, step Q3.11) YOUR ACCOUNT, where it is reached from: its page on a computer,
+   * its sheet on a phone.
+   */
+  private openVaultPage(): void {
+    if (isDesktop()) this.openAccount();
+    else this.shell?.sheet.open(document.body);
+  }
+
+  /**
    * YOUR ACCOUNT (desktop, decision 5): the header's account button and every ‹ YOUR ACCOUNT, over the page it
    * is opened from (back returns there); from a section of the account or YOUR WISHLIST over it, back to it.
    */
@@ -1664,6 +1675,14 @@ class App {
       api: this.api,
       session: this.session,
       sound: this.liveSound,
+      // THE VAULT (lot Q3, step Q3.10; D65): on SOLD OUT for your size and the end page of a release sold out whole.
+      vault: liveVault({
+        api: this.api,
+        sound: this.liveSound,
+        messageOf,
+        onVaultPage: () => this.openVaultPage(),
+        surface: () => (view.root.isConnected ? view.root : null),
+      }),
       sheet,
       failure: failure ?? undefined,
       onRetry: () => void this.showRelease(id, true, afterRoom),

@@ -177,7 +177,8 @@ export type DemoVariant =
   | 'worn'
   | 'addons'
   | 'set'
-  | 'set-live';
+  | 'set-live'
+  | 'vault';
 
 export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'full',
@@ -213,6 +214,7 @@ export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'addons',
   'set',
   'set-live',
+  'vault',
 ]);
 
 /** NOW: Monday 5 October 2026, 18:49 in Paris (16:49 UTC), the boards' afternoon. Every clock of the stage is fixed here. */
@@ -320,10 +322,11 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
   // collector's side of an order (plan NEXT LOT §3.6) tell the full story, their state writing the rest.
   const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'draw-selected', 'email', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes', 'birthday-credit', 'care-used', 'orbes-care', 'gallery', 'worn', 'set', 'set-live'] as const;
   // The house messages' stage (lot M2, FROM ORBES) tells the draw-leads story, MESSAGES' own.
-  // The add-ons' stage (lot M3, D2) tells the live story (a hold secured), then its own (seedAddons).
-  const story = (variant === 'house' ? 'draw-leads' : variant === 'addons' ? 'live' : (OWN_STAGES as readonly DemoVariant[]).includes(variant) ? 'full' : variant) as Exclude<
+  // The add-ons' stage (lot M3, D2) tells the live story (a hold secured), then its own (seedAddons); THE VAULT's (lot
+  // Q3, step Q3.10) the live story too, then its own after the deployment (seedVault).
+  const story = (variant === 'house' ? 'draw-leads' : variant === 'addons' || variant === 'vault' ? 'live' : (OWN_STAGES as readonly DemoVariant[]).includes(variant) ? 'full' : variant) as Exclude<
     DemoVariant,
-    (typeof OWN_STAGES)[number] | 'house' | 'addons'
+    (typeof OWN_STAGES)[number] | 'house' | 'addons' | 'vault'
   >;
   // The story is told before THE VAULT's deployment (lot Q3): no vault for it, its tiers held as migration 0061 wrote them.
   await beforeTheVault(ctx.db, async () => {
@@ -357,6 +360,8 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
       if (variant === 'set-live') await seedSetLive(w);
     }
   });
+  // THE VAULT's stage (lot Q3, step Q3.10): its vaults given after the deployment, as in production.
+  if (variant === 'vault') await seedVault(w);
   clock.set(NOCTURNE_NOW);
   // Every account's session opened now: a capture signs in with its cookie.
   for (const a of Object.values(demo.accounts)) {
@@ -959,6 +964,74 @@ async function seedLive(w: World): Promise<void> {
   await step(1_000);
   await live.message(r.id, 'The door is open. Take your time at the seal.', w.admin);
 }
+
+/**
+ * THE VAULT (lot Q3, step Q3.10; plan §3.3, §3.4, §3.12; MK #sold, #release-end), after the deployment: the table of
+ * the mockup's demo (€25 HOUSE CREDIT at 1 IN 10, GUARANTEED at 1 IN 200: example values, OP-27); the live story's
+ * MONOLITHE IN BLUE with THE VAULT switched on, collectors still in the line of size 17 when it sold out, each with its
+ * vault waiting there (`vaultS` its door; `vaultSOpen…` and `vaultSRare…` to open it, a phone's and a computer's each);
+ * and a second MONOLITHE IN BLUE of one piece, its vault on, sold out whole ten minutes ago at its one PAY (Q3.5's hook
+ * gave the line its vaults before the end ENDED it): its end page with the door (`vaultEnd`), and to open it
+ * (`vaultEndOpen…`). The draw is the server's: a state sets the service's source of randomness to land on a row.
+ */
+async function seedVault(w: World): Promise<void> {
+  const { ctx, clock, demo, admin } = w;
+  const live = ctx.services.live;
+  const vault = ctx.services.vault;
+  clock.set(new Date(NOCTURNE_NOW.getTime() - 60 * MINUTE));
+  await vault.createReward({ kind: 'CREDIT', oddsIn: 10, quantity: 1000, amountMinor: 2500, currency: 'EUR' }, admin);
+  await vault.createReward({ kind: 'GUARANTEED', oddsIn: 200, quantity: 20 }, admin);
+  // SOLD OUT for your size: the live story's release, size 17 sold out two minutes ago (its one piece paid).
+  const dropId = demo.releases.live!;
+  await ctx.services.liveConsole.setVault(dropId, true, admin);
+  const s17 = await ctx.db.selectFrom('drop_sizes').select('id').where('drop_id', '=', dropId).where('label', '=', '17').executeTakeFirstOrThrow();
+  const soldAt = new Date(NOCTURNE_NOW.getTime() - 2 * MINUTE);
+  clock.set(soldAt);
+  for (const key of ['vaultS', 'vaultSOpen', 'vaultSOpenDesk', 'vaultSRare', 'vaultSRareDesk', 'vaultSE2e']) {
+    const a = await account(w, key, `${key.toLowerCase()}@example.com`, 1, w.models.blue);
+    // Still in the line of size 17 when it sold out (written as the line's late comers: the size can no longer be entered).
+    const last = await ctx.db.selectFrom('live_entries').select((eb) => eb.fn.max('position').as('p')).where('drop_id', '=', dropId).executeTakeFirst();
+    const entry = await ctx.db
+      .insertInto('live_entries')
+      .values({ drop_id: dropId, account_id: a.id, size_id: s17.id, quantity: 1, tier: 1, status: 'QUEUED', position: Number(last?.p ?? 0) + 1, joined_at: soldAt, queued_at: soldAt })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    await vault.give({ source: 'LIVE', accountId: a.id, dropId, entryId: entry.id }, soldAt);
+  }
+  // The end page of a release sold out whole is shown to a collector whose page follows the room as it ends (a page
+  // opened later shows the release's final page): one release of one piece per state, its vault on, its one piece held by
+  // `<key>Buyer` (secured a minute ago), `<key>` behind it in the line; the state pays it (sellOutWhole), Q3.5's hook
+  // gives the line its vaults, the end ENDS it.
+  for (const key of VAULT_END_KEYS) {
+    clock.set(at('2026-10-04T12:00:00Z'));
+    const t0 = new Date(NOCTURNE_NOW.getTime() - 30 * MINUTE);
+    const r = await createLiveRelease(w.f, { modelId: w.models.blue!, opensAt: t0, closesAt: new Date(t0.getTime() + 2 * HOUR), minTier: 1, turnSeconds: 300, payMinutes: 10, sizes: [{ label: '17', stock: 1 }], quantityLine: '1 PIECE', priceMinor: 505_000 });
+    await titled(w, r.id, 'MONOLITHE IN BLUE', 'The blue of MONOLITHE, released live: one piece.');
+    demo.releases[key] = r.id;
+    await ctx.services.liveConsole.setVault(r.id, true, admin);
+    clock.set(t0);
+    await live.advance(r.id);
+    clock.set(new Date(NOCTURNE_NOW.getTime() - 2 * MINUTE));
+    const join = async (k: string) => {
+      const a = await account(w, k, `${k.toLowerCase()}@example.com`, 1, w.models.blue);
+      await live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id }, a.actor);
+      clock.advance(1_000);
+      await live.advance(r.id);
+      await turnsNow(w, r.id);
+      return a;
+    };
+    const buyer = await join(`${key}Buyer`);
+    await join(key);
+    const token = (await live.entry(buyer.id, r.id))?.turn?.token;
+    if (!token) throw new Error(`no turn for ${key}'s buyer`);
+    await live.press(buyer.id, r.id, token);
+    clock.advance(1_500);
+    await live.secure(buyer.id, r.id, token, buyer.actor);
+  }
+}
+
+/** The collectors of THE VAULT's end page states (seedVault): each its own release of one piece, sold out by its state. */
+export const VAULT_END_KEYS = ['vaultEnd', 'vaultEndLight', 'vaultEndOpen', 'vaultEndDesk', 'vaultEndDeskLight', 'vaultEndOpenDesk', 'vaultEndE2e'] as const;
 
 /** `n` accounts of a crowd, written in bulk (no password to sign in with: they are never signed in). */
 async function crowdOf(w: World, n: number, tag: string): Promise<string[]> {

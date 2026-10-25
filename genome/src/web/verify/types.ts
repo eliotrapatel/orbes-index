@@ -1801,3 +1801,43 @@ export interface SheetWornPage extends SheetWorn {
   page: number;
   pageSize: number;
 }
+
+// ── THE VAULT (lot Q3) ─────────────────────────────────────────────────────
+
+/** Where a vault comes from (vaults.source; vault/SCOPE.md E2): the seven occasions. */
+export type VaultSource = 'LIVE' | 'PIECE' | 'TIER' | 'WORN' | 'FRIEND' | 'PROFILE' | 'HOUSE';
+
+/** What a vault can hold (vault_rewards.kind; E7): I_WAS_THERE is the floor. */
+export type VaultRewardKind = 'CREDIT' | 'ADDON' | 'GUARANTEED' | 'PRODUCT' | 'VAULT_EDITION' | 'THE_PIECE' | 'CREDIT_TO_GIVE' | 'I_WAS_THERE';
+
+/**
+ * A vault that waits (GET /api/v1/account/vaults/live/:dropId, §3.3, §3.4; THE VAULT page's doors, §3.5): its source's
+ * label and detail (`YOUR SIZE SOLD OUT · MONOLITHE IN BLUE`), WAITS UNTIL as a Paris day. No number (D10).
+ */
+export interface VaultDoorView {
+  id: string;
+  source: VaultSource;
+  label: string;
+  detail: string | null;
+  line: string;
+  givenAt: string;
+  waitsUntil: string;
+  /** WAITS UNTIL, a Paris day `YYYY-MM-DD`. */
+  waitsUntilDay: string;
+}
+
+/**
+ * What an opening drew (POST /api/v1/account/vaults/:id/open, §2.2): the reveal's large words and line, its published
+ * odds (`1 IN 200`), whether it is rare (the slower opening and the second note, D15), where it went.
+ */
+export interface VaultRevealView {
+  vaultId: string;
+  kind: VaultRewardKind;
+  prize: string;
+  line: string | null;
+  odds: string;
+  rare: boolean;
+  where: 'ACCOUNT' | 'ORDERS' | 'NONE';
+  openedAt: string;
+  giftCode: string | null;
+}

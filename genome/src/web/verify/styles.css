@@ -2,13 +2,16 @@
  * ORBES verification app — layout and screens.
  * Foundation (tokens, type, brackets, buttons, fields, motion) in ../shared/brand.css; the house look before NOCTURNE
  * (the certificate, the room, the board) in ./house.css; NOCTURNE's foundation (the chrome and its pieces, shared with
- * the legal pages) in ../shared/nocturne.css; NOCTURNE's screens here, in that order of the cascade.
+ * the legal pages) in ../shared/nocturne.css; THE VAULT's object (lot Q3) in ./vault/vault.css, after the rules of the
+ * room it stands in (as the vault reference's stylesheet follows them); NOCTURNE's screens here, in that order of the
+ * cascade.
  */
 @import "../shared/brand.css";
 @import "./house.css";
 @import "../shared/nocturne.css";
 @import "../shared/light.css";
 @import "../shared/desktop-base.css";
+@import "./vault/vault.css";
 
 /* ── NOW (plan NOCTURNE, screen 1, step N3; C1, C10, C42, C43): /verify, in place of the landing ──
    What leads (views/now.ts) as the canvas sets it: the hero's photograph whole at the column's width, faded, its words

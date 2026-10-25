@@ -285,6 +285,12 @@ export interface LiveDeps {
 /** THE VAULT on a page of the release (lot Q3 fills it): mounted into its slot, taken down with the screen. */
 export interface LiveVault {
   mount(slot: HTMLElement, at: 'soldOut' | 'end', ctx: { dropId: string; entryId: string | null }): () => void;
+  /**
+   * Whether the entry's own vault of release `dropId` waits (lot Q3 §3.4, N17): the end page of a release sold out whole
+   * is drawn as MK 11 with it (the room's look on a phone too), and as production's without; read once, before that page
+   * is shown, so its look never changes under the reader. Absent: the end page is production's.
+   */
+  waits?(dropId: string): Promise<boolean>;
 }
 
 export function liveView(deps: LiveDeps): LiveView {
@@ -300,6 +306,8 @@ interface Screen {
   focus?: HTMLElement;
   /** Its one action is THE RELEASES. */
   back?: boolean;
+  /** The end page drawn with THE VAULT, as MK 11 (lot Q3 §3.4): built again should that change. */
+  vaultEnd?: boolean;
   update(): void;
   dispose?(): void;
 }
@@ -438,6 +446,8 @@ class LivePage {
   private frozenTurn: number | null = null;
   /** The hold's time left when a pause began: it stands still until the pause ends. */
   private frozenHold: number | null = null;
+  /** THE VAULT on the end page of a release sold out whole (lot Q3 §3.4): whether its door waits there, read once. */
+  private endVaultRead: { dropId: string; state: 'reading' | 'yes' | 'no' } | null = null;
   /** How many of the stage times and the room's opening had passed at the last pulse. */
   private stagesDue: number | null = null;
   /** Over: the account's part in the release (YOU TOOK PART, YOU SECURED A PIECE), read once signed in; null for none. */
@@ -1021,7 +1031,13 @@ class LivePage {
   private render(): void {
     if (this.disposed) return;
     const kind = this.kind();
-    if (!this.screen || this.screen.kind !== kind) this.mount(kind);
+    // The end page of a release sold out whole waits for its vault to be read (lot Q3 §3.4): the screen on show stays
+    // (the page's loading state at its first reading) until it is, so the page's look never changes under the reader.
+    if (this.readingEndVault(kind)) {
+      if (!this.screen) this.mount('loading');
+      return;
+    }
+    if (!this.screen || this.screen.kind !== kind || (kind === 'ended' && !!this.screen.vaultEnd !== this.endVault(kind))) this.mount(kind);
     else this.screen.update();
     this.renderNotice();
     this.renderPhoto();
@@ -1166,6 +1182,8 @@ class LivePage {
     const nocturne = this.nocturne(kind);
     const look = nocturne && !this.stagedEnd(kind);
     this.root.classList.toggle('is-nocturne', look);
+    // Lot Q3 §3.4: the end page with THE VAULT, drawn as MK 11.
+    this.root.classList.toggle('live--end-vault', this.endVault(kind));
     this.deps.onChrome?.(nocturne, look);
     // Every screen in the vault: CONFIRMED too, in both modes (lot Q1 §3.7, OP-2: "CONFIRMED in the dark world").
     this.root.classList.add('vault');
@@ -1393,9 +1411,36 @@ class LivePage {
     return END_PAGES.has(kind);
   }
 
-  /** Desktop (decision 7): an end page on a computer, staged as the Cinema room (views/desktop-room.ts). */
+  /**
+   * Desktop (decision 7): an end page on a computer, staged as the Cinema room (views/desktop-room.ts). Lot Q3 §3.4 (MK
+   * 11, OP-28; N17): the end page of a release sold out whole with THE VAULT, on a phone too: the room's look (the model's
+   * photograph on the top, ORBES on it, the room's foot; dark in both modes), every production line kept.
+   */
   private stagedEnd(kind: LiveScreenKind | 'failed'): boolean {
-    return END_PAGES.has(kind) && isDesktop();
+    return END_PAGES.has(kind) && (isDesktop() || this.endVault(kind));
+  }
+
+  /** The end page of a release sold out whole whose entry's vault waits (lot Q3 §3.4): drawn as MK 11. */
+  private endVault(kind: LiveScreenKind | 'failed'): boolean {
+    const r = this.endVaultRead;
+    return kind === 'ended' && this.room?.endedReason === 'SOLD_OUT' && r !== null && r.dropId === this.sheet?.id && r.state === 'yes';
+  }
+
+  /** Whether the end page waits for its vault to be read: the reading started once per release. */
+  private readingEndVault(kind: LiveScreenKind | 'failed'): boolean {
+    const id = this.sheet?.id;
+    const waits = this.deps.vault?.waits;
+    if (kind !== 'ended' || !id || !waits || !this.entry || this.room?.endedReason !== 'SOLD_OUT') return false;
+    if (this.endVaultRead?.dropId !== id) {
+      const read: { dropId: string; state: 'reading' | 'yes' | 'no' } = { dropId: id, state: 'reading' };
+      this.endVaultRead = read;
+      const done = (yes: boolean): void => {
+        read.state = yes ? 'yes' : 'no';
+        if (this.endVaultRead === read && !this.disposed) this.render();
+      };
+      waits(id).then(done, () => done(false));
+    }
+    return this.endVaultRead.state === 'reading';
   }
 
   private say(text: string, urgent = false): void {
@@ -1433,7 +1478,8 @@ class LivePage {
   private renderPhoto(): void {
     const kind = this.screen?.kind;
     const sheet = this.sheet;
-    const look = kind !== undefined && (LOOK.has(kind) || (ROOM_EDGES.has(kind) && !!sheet && !isEndedSheet(sheet) && phaseAt(sheet, this.room, this.now()) === 'ROOM'));
+    // Lot Q3 §3.4: the end page with THE VAULT, as MK 11 draws it on a phone, under the model's photograph too.
+    const look = kind !== undefined && (LOOK.has(kind) || this.endVault(kind) || (ROOM_EDGES.has(kind) && !!sheet && !isEndedSheet(sheet) && phaseAt(sheet, this.room, this.now()) === 'ROOM'));
     const tiles = sheet ? liveSet(sheet) : null;
     const picture = sheet ? pictureOf(sheet) : null;
     const all = tiles && tiles.images.length > 1 ? tiles.images.map((x) => x.src) : picture?.kind === 'photo' ? [picture.src] : [];
@@ -2539,8 +2585,9 @@ class LivePage {
     const errorLine = this.errorLine();
     const leave = this.action(LIVE.edge.soldOut.leave, () => this.armed(() => this.act(() => this.deps.api.liveLeave(s.id))), 'live__leave-line');
     const lines = this.entryLines();
-    // OP-17 (lot Q3): THE VAULT under the sentence, before LEAVE THE LINE, when the page is given one; Q1 gives none.
-    const vault = this.deps.vault && this.entry ? h('div', { class: 'live__vault-slot' }) : null;
+    // OP-17 (lot Q3): THE VAULT under the sentence, before LEAVE THE LINE, when the page is given one; its slot hidden
+    // until the entry's vault is read waiting (lot Q3 §3.3, N28: none, nothing shown).
+    const vault = this.deps.vault && this.entry ? h('div', { class: 'live__vault-slot', attrs: { hidden: true } }) : null;
     const el = h('section', { class: 'live__edge live__sold' }, this.overline(this.heading()), this.title(LIVE.edge.soldOut.title), ...lines.el, place, text, vault, errorLine, leave);
     const unmount = vault && this.deps.vault ? this.deps.vault.mount(vault, 'soldOut', { dropId: s.id, entryId: this.entry?.id ?? null }) : null;
     return {
@@ -3428,13 +3475,13 @@ class LivePage {
       if (note.textContent !== now.text) note.textContent = now.text;
       if (ask) this.askQuestion(ask);
       // The vault once the release says it sold out (its reason may come after the page).
+      // Lot Q3 §3.4: shown once its door is read waiting (live-vault.ts); none, nothing shown (N28).
       if (vault && !unmount && this.deps.vault && sheet && this.room?.endedReason === 'SOLD_OUT') {
-        vault.hidden = false;
         unmount = this.deps.vault.mount(vault, 'end', { dropId: sheet.id, entryId: this.entry?.id ?? null });
       }
     };
     // The keyboard and a screen reader land on what happened, under the release's title.
-    return { kind, el, focus: outcome, back: true, update, dispose: () => unmount?.() };
+    return { kind, el, focus: outcome, back: true, vaultEnd: this.endVault(kind), update, dispose: () => unmount?.() };
   }
 
   private edgeCopy(kind: LiveScreenKind): { title: string; text: string } {

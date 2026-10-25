@@ -92,6 +92,8 @@ import type {
   WishRemoved,
   PieceWorn,
   SheetWornPage,
+  VaultDoorView,
+  VaultRevealView,
 } from './types.js';
 import type { SeenBatchBody, SeenSendResult } from './seen-model.js';
 
@@ -601,6 +603,34 @@ export class ApiClient {
   /** RELEASE MY PLACE: the piece held goes back to the line. */
   liveGiveBack(id: string): Promise<LiveEntry> {
     return this.liveAction('POST', id, 'release', {});
+  }
+
+  // ── THE VAULT (lot Q3, step Q3.10) ─────────────────────────────────────────
+
+  /**
+   * THE VAULT's door on SOLD OUT for your size and on the end page of a release sold out whole (§3.3, §3.4): the entry's
+   * own vault of that release while it waits; null when there is none (404 VAULT_NOT_FOUND: none given, opened or kept
+   * past its 30 days, N28).
+   */
+  async liveVault(dropId: string): Promise<VaultDoorView | null> {
+    try {
+      const r = await this.request<{ vault?: VaultDoorView }>('GET', `/api/v1/account/vaults/live/${encodeURIComponent(dropId)}`);
+      if (!r?.vault || typeof r.vault.id !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+      return r.vault;
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) return null;
+      throw e;
+    }
+  }
+
+  /**
+   * The opening (§2.2): the server draws and writes the outcome before it answers; a vault already opened answers its
+   * outcome again (409 VAULT_EXPIRED, VAULT_REVOKED; 429 past ten openings a minute).
+   */
+  async openVault(id: string): Promise<VaultRevealView> {
+    const r = await this.request<{ reveal?: VaultRevealView }>('POST', `/api/v1/account/vaults/${encodeURIComponent(id)}/open`, {}, { csrf: true });
+    if (!r?.reveal || typeof r.reveal.prize !== 'string' || typeof r.reveal.odds !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.reveal;
   }
 
   private async liveAction(method: Method, id: string, action: string, body: Record<string, unknown>): Promise<LiveEntry> {

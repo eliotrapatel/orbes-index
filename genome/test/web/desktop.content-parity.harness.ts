@@ -263,6 +263,26 @@ export const DESKTOP_MOVED: readonly DesktopMoved[] = [
     now: 'On the sign-in page’s CREATE ACCOUNT, the two apart.',
     shownAs: ['Creating an ORBES account means accepting the ORBES terms of use.', 'TERMS OF USE · PRIVACY POLICY'],
   },
+  {
+    // Lot Q3, step Q3.10: an opening writes (the vault opened once), so a computer opens its own collector's vault, in
+    // the same line of size 17 as the phone's: its place is its own.
+    states: ['vault-open'],
+    values: ['YOUR PLACE 3'],
+    twins: ['desk-vault-open'],
+    reason: 'THE VAULT opened writes: the computer\'s opening is another collector\'s vault of the same release, in the same line of size 17, its place its own.',
+    now: 'YOUR PLACE in the Cinema room\'s corner, with its own collector\'s figure.',
+    shownAs: ['YOUR PLACE'],
+  },
+  {
+    // Lot Q3, step Q3.10: an opening writes (the vault opened once), so a computer opens its own collector's vault, in
+    // the same line of size 17 as the phone's: its place is its own.
+    states: ['vault-open-rare'],
+    values: ['YOUR PLACE 5'],
+    twins: ['desk-vault-open-rare'],
+    reason: 'THE VAULT opened writes: the computer\'s opening is another collector\'s vault of the same release, in the same line of size 17, its place its own.',
+    now: 'YOUR PLACE in the Cinema room\'s corner, with its own collector\'s figure.',
+    shownAs: ['YOUR PLACE'],
+  },
 ];
 
 /**
