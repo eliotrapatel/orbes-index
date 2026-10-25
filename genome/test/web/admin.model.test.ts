@@ -16,6 +16,8 @@ import { MAX_ISSUE_BATCH } from '../../src/server/services/issuance.js';
 import { IMAGE_MIME_TYPES as SERVER_IMAGE_MIME_TYPES, MAX_IMAGE_BYTES as SERVER_MAX_IMAGE_BYTES, MAX_IMAGE_SIDE as SERVER_MAX_IMAGE_SIDE } from '../../src/server/media/image.js';
 import { lookbookWord, pairFormValues, pairModelLabel, pairOptions, pairsChange, pairsNote, pairsProblem, PAIRS_MAX, PAIRS_TEXT, shownLabel, shownNow } from '../../src/web/admin/model/pairs.js';
 import { MODEL_PAIR_SHOWN } from '../../src/server/services/catalog.js';
+import type { AddonPickable as ServerAddonPickable } from '../../src/server/services/addons.js';
+import type { AdminOrderAddonUnit as ServerOrderAddonUnit } from '../../src/server/services/order-addons.js';
 import { clubNowLine, cohortCells, collectorRow, collectorsRange, durationText, EMPTY, funnelBars, funnelNote, growthKpis, growthParams, GROWTH_COLLECTORS_PAGE, lifetimeValueText, ltvGroupRows, money, NOTES, perCollectorFigures, rateText as growthRate, releaseRow, repeatFigures, revenueBars, revenueGroupRows, secondPieceBars } from '../../src/web/admin/model/growth.js';
 import { FUNNEL_STEPS, GROWTH_WINDOWS, PIECE_SOURCES, SECOND_PIECE_BUCKETS, type GrowthReport } from '../../src/web/admin/types.js';
 import {
@@ -496,6 +498,15 @@ describe('admin enums mirror the server', () => {
     for (const name of ['ADDON_NAME_MAX', 'ADDON_LINE_MAX', 'ADDON_WEIGHT_G_MAX', 'ADDON_POSITION_MAX', 'ADDON_PRICE_MINOR_MAX', 'ADDON_UNITS_MAX'] as const) expect(web[name], name).toBe(serverSchema[name]);
     expect([...web.ORDER_ADDON_STATUSES]).toEqual([...serverSchema.ORDER_ADDON_STATUSES]);
     expect([...web.ORDER_ADDON_ADDED_BY]).toEqual([...serverSchema.ORDER_ADDON_ADDED_BY]);
+    // ADD-ONS ONE SYSTEM (lot Q2, migration 0059): the kinds, a release's pick, the engraving's most characters and its words, as the server holds them.
+    expect([...web.ADDON_KINDS]).toEqual([...serverSchema.ADDON_KINDS]);
+    expect(web.ADDON_PICK_POSITION_MAX).toBe(serverSchema.ADDON_PICK_POSITION_MAX);
+    expect(web.ADDON_TEXT_MAX).toEqual(serverSchema.ADDON_TEXT_MAX);
+    expect(web.ADDON_CHOICE_TEXT_MAX).toBe(serverSchema.ADDON_CHOICE_TEXT_MAX);
+    // Lot Q2, step Q2.7: an order's unit says its add-on's type and whether it is the engraving; a release's form reads why one cannot be picked.
+    const unitAddon: web.AdminOrderAddonUnit['addon'] = { id: 'a', name: 'ENGRAVING', kind: 'SERVICE', engraving: true } satisfies ServerOrderAddonUnit['addon'];
+    const why: web.AddonPickable['why'][] = ['SWITCH_OFF', 'NO_PRICE', null] satisfies ServerAddonPickable['why'][];
+    expect([unitAddon.kind, unitAddon.engraving, why]).toEqual(['SERVICE', true, ['SWITCH_OFF', 'NO_PRICE', null]]);
     // THE SET's bounds (macro scope K44, migration 0057), as the server holds them.
     for (const name of ['SET_NAME_MAX', 'SET_PIECES_MIN', 'SET_PIECES_MAX', 'SET_PRICE_MINOR_MAX', 'DROP_SIZE_POSITION_MAX'] as const) expect(web[name], name).toBe(serverSchema[name]);
     expect(web.SET_CODE_PATTERN.source).toBe(serverSchema.SET_CODE_PATTERN.source);
@@ -803,8 +814,8 @@ describe('the Club\'s drops (P-R03)', () => {
   });
 
   it('offers each action to the role and in the state the server allows it', () => {
-    expect(dropActions(base, 'OPERATOR')).toEqual({ edit: true, describe: false, publish: true, cancel: true, draw: false, offerNext: false, sizes: true });
-    expect(dropActions(base, 'AUDITOR')).toEqual({ edit: false, describe: false, publish: false, cancel: false, draw: false, offerNext: false, sizes: false });
+    expect(dropActions(base, 'OPERATOR')).toEqual({ edit: true, describe: false, publish: true, cancel: true, draw: false, offerNext: false, sizes: true, addons: true });
+    expect(dropActions(base, 'AUDITOR')).toEqual({ edit: false, describe: false, publish: false, cancel: false, draw: false, offerNext: false, sizes: false, addons: false });
     const published = { ...base, state: 'OPEN' as const, publishedAt: '2026-10-05T10:00:00.000Z' };
     expect(dropActions(published, 'OPERATOR')).toMatchObject({ edit: false, describe: true, publish: false, cancel: true, draw: false });
     const closed = { ...published, state: 'CLOSED' as const };
@@ -816,7 +827,11 @@ describe('the Club\'s drops (P-R03)', () => {
     expect(dropActions(drawn, 'OPERATOR')).toMatchObject({ cancel: false, draw: false, offerNext: true });
     expect(dropActions({ ...drawn, entries: { ...drawn.entries, CONFIRMED: 1 } }, 'OPERATOR').offerNext).toBe(false);
     expect(dropActions({ ...drawn, entries: { ...drawn.entries, WAITLISTED: 0 } }, 'OPERATOR').offerNext).toBe(false);
-    expect(dropActions({ ...base, state: 'CANCELLED', cancelledAt: '2026-10-06T00:00:00.000Z' }, 'OPERATOR')).toMatchObject({ edit: false, publish: false, cancel: false });
+    expect(dropActions({ ...base, state: 'CANCELLED', cancelledAt: '2026-10-06T00:00:00.000Z' }, 'OPERATOR')).toMatchObject({ edit: false, publish: false, cancel: false, addons: false });
+    // Review of lot Q2: its add-ons offered change once published too, and once drawn until its place-held window closes.
+    const inWindow = new Date(Date.parse(drawn.drawnAt) + drawn.purchaseWindowHours * 3_600_000 - 1000);
+    expect([dropActions(published, 'OPERATOR').addons, dropActions(drawn, 'OPERATOR', inWindow).addons]).toEqual([true, true]);
+    expect(dropActions(drawn, 'OPERATOR', new Date(inWindow.getTime() + 1000)).addons).toBe(false);
     expect(dropPhrase('draw', base)).toBe('DRAW 8A1D0C55');
     expect(dropPhrase('cancel', base)).toBe('CANCEL 8A1D0C55');
     expect(releaseAddress(base)).toBe(`/verify/releases/${base.id}`);

@@ -26,7 +26,8 @@ export interface DialogField {
    * `checkbox`: its value is `'true'` when ticked, `''` otherwise (`value: 'true'` ticks it at first). 'password'
    * fields are masked and take `autocomplete` ('current-password' or 'new-password'). `color`: the browser's colour
    * picker, its value `#rrggbb`. `checklist`: a tick box per option under the field's label, its value the ticked
-   * options' values joined by commas (`checkedOf`), `value` the ones ticked at first, comma-joined.
+   * options' values joined by commas (`checkedOf`), `value` the ones ticked at first, comma-joined; a `disabled` option
+   * is shown unticked and never sent.
    */
   kind?: 'text' | 'textarea' | 'select' | 'date' | 'datetime' | 'checkbox' | 'password' | 'email' | 'color' | 'checklist';
   autocomplete?: string;
@@ -96,10 +97,17 @@ function readValues(form: HTMLFormElement): DialogValues {
 function checklistField(f: DialogField): HTMLElement {
   const ticked = new Set((f.value ?? '').split(',').filter((v) => v !== ''));
   const boxes = (f.options ?? []).map((o) => {
-    const label = checkbox(f.name, o.label, ticked.has(o.value));
+    // A figure in an option (an add-on's price) reads in --font, its words in the display face.
+    const label = checkbox(f.name, /\d/.test(o.label) ? figureLabel(o.label) : o.label, ticked.has(o.value));
     const box = label.querySelector('input')!;
     box.value = o.value;
     box.dataset.checklist = '';
+    // An option that cannot be ticked (an add-on a release cannot offer, with why): shown, never sent.
+    if (o.disabled) {
+      box.disabled = true;
+      box.checked = false;
+      label.classList.add('ccheck--disabled');
+    }
     return label;
   });
   return h(

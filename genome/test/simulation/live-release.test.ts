@@ -43,7 +43,7 @@ import { DomainError } from '../../src/server/errors.js';
 import { openDropSeed } from '../../src/server/services/drops.js';
 import { LIVE_GESTURE_MIN_MS, lineOrder, LiveService, type LiveAdvance } from '../../src/server/services/live.js';
 import { createTestDb, type TestDb } from '../support/db.js';
-import { accountOfTier, createLiveRelease, createModel, liveFixture, type LiveFixture, type LiveRelease } from '../support/live.js';
+import { accountOfTier, createLiveRelease, createModel, liveAddon, liveFixture, type LiveFixture, type LiveRelease } from '../support/live.js';
 import { hashSeed, Prng } from '../support/prng.js';
 
 /** Scenarios run, in batches of BATCH (one test each). */
@@ -107,6 +107,8 @@ interface World {
   f: LiveFixture;
   live: LiveService;
   r: LiveRelease;
+  /** Lot Q2, step Q2.4 (D2): the catalogue add-ons the phase's release picked (its after-room's: its own). */
+  addons: string[];
   dropId: string;
   turnSeconds: number;
   payMinutes: number;
@@ -137,6 +139,9 @@ describe('the LIVE RELEASE engine, simulated', () => {
   let t: TestDb;
   let f: LiveFixture;
   let afterModel: string;
+  /** Lot Q2, step Q2.4 (D2): the release add-ons of the scenarios as catalogue services each release may pick. */
+  let engraving: string;
+  let box: string;
   const pool: { id: string; tier: Tier }[] = [];
   const totals: Record<string, number> = {};
 
@@ -144,6 +149,8 @@ describe('the LIVE RELEASE engine, simulated', () => {
     t = await createTestDb();
     f = await liveFixture(t.db, '2027-01-04T09:00:00.000Z');
     afterModel = await createModel(t.db, 'AFTERGLOW');
+    engraving = await liveAddon(f, { name: 'ENGRAVING', priceMinor: 15_000, engraving: true });
+    box = await liveAddon(f, { name: 'GIFT BOX', priceMinor: 5_000 });
     const tiers: Tier[] = [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3];
     for (const tier of [...tiers, ...tiers]) pool.push({ id: (await accountOfTier(f, tier)).id, tier });
   });
@@ -212,7 +219,7 @@ describe('the LIVE RELEASE engine, simulated', () => {
       opensAt: new Date(T0),
       closesAt: new Date(T0 + rng.int(2, 8) * MINUTE),
       sizes,
-      addons: rng.chance(0.6) ? [{ label: 'ENGRAVING', priceMinor: 15_000 }, { label: 'GIFT BOX', priceMinor: 5_000 }] : [],
+      addonIds: rng.chance(0.6) ? [engraving, box] : [],
       minTier,
       tierPriority,
       turnSeconds,
@@ -225,7 +232,7 @@ describe('the LIVE RELEASE engine, simulated', () => {
               modelId: afterModel,
               priceMinor: 90_000,
               sizes: afterRoom.sizes,
-              addons: afterRoom.addons ? [{ label: 'GIFT BOX', priceMinor: 5_000 }] : [],
+              addonIds: afterRoom.addons ? [box] : [],
               delayMinutes: afterRoom.delay,
               lengthMinutes: afterRoom.length,
             },
@@ -249,6 +256,7 @@ describe('the LIVE RELEASE engine, simulated', () => {
       f,
       live: f.live,
       r,
+      addons: (await f.db.selectFrom('drop_addons').select('addon_id').where('drop_id', '=', r.id).orderBy('position').execute()).map((a) => a.addon_id),
       dropId: r.id,
       turnSeconds,
       payMinutes,
@@ -358,12 +366,13 @@ describe('the LIVE RELEASE engine, simulated', () => {
 
     // Its own phase: its id, sizes, add-ons; its guests and their places; its own pauses and presses.
     const sizes = await w.f.db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', child.id).orderBy('position').execute();
-    const addons = await w.f.db.selectFrom('live_addons').select(['id', 'label', 'price_minor']).where('drop_id', '=', child.id).orderBy('position').execute();
+    const addons = await w.f.db.selectFrom('drop_addons').select('addon_id').where('drop_id', '=', child.id).orderBy('position').execute();
     const tiers = new Map(w.people.map((p) => [p.id, p.tier]));
     const strangers = w.people.filter((p) => !guests.some((g) => g.account_id === p.id));
     w.phase = 'afterRoom';
     w.dropId = child.id;
-    w.r = { id: child.id, sizes, addons: addons.map((a) => ({ id: a.id, label: a.label, priceMinor: a.price_minor })), afterRoom: null };
+    w.r = { id: child.id, sizes, afterRoom: null };
+    w.addons = addons.map((a) => a.addon_id);
     w.places = new Map(guests.map((g) => [g.account_id, g.position]));
     w.pauses = [];
     w.freed = new Set();
@@ -468,8 +477,8 @@ describe('the LIVE RELEASE engine, simulated', () => {
       }
       case 'SECURED': {
         const k = rng.float();
-        if (k < 0.2 && w.r.addons.length) {
-          await step(w, 'add-ons', () => w.live.setAddons(p.id, w.dropId, w.r.addons.filter(() => rng.chance(0.5)).map((a) => a.id), actor));
+        if (k < 0.2 && w.addons.length) {
+          await step(w, 'add-ons', () => w.live.setAddons(p.id, w.dropId, w.addons.filter(() => rng.chance(0.5)).map((addonId) => ({ addonId })), actor));
         } else if (k < 0.75) await step(w, 'confirm', () => w.live.confirm(p.id, w.dropId, actor), { person: p });
         else if (k < 0.83) await step(w, 'release', () => w.live.release(p.id, w.dropId, actor));
         else await tick(w);
@@ -589,7 +598,8 @@ describe('the LIVE RELEASE engine, simulated', () => {
     if (now < opens) expect(placed, 'no place before T0').toEqual([]);
 
     // Add-ons only on a held or confirmed piece.
-    for (const id of after.withAddons) expect(['SECURED', 'CONFIRMED'], 'add-ons').toContain(after.entries.get(id)!.status);
+    // A hold's add-ons: only while it is held (PAY carries them onto its orders; a lapse drops them).
+    for (const id of after.withAddons) expect(['SECURED'], 'add-ons').toContain(after.entries.get(id)!.status);
 
     // The end: once, on time, for its reason, never changed.
     if (before.drop.ended_at) {
@@ -707,9 +717,10 @@ describe('the LIVE RELEASE engine, simulated', () => {
     const drop = await db.selectFrom('drops').selectAll().where('id', '=', w.dropId).executeTakeFirstOrThrow();
     const sizes = await db.selectFrom('drop_sizes').select(['id', 'stock']).where('drop_id', '=', w.dropId).execute();
     const rows = await db.selectFrom('live_entries').selectAll().where('drop_id', '=', w.dropId).execute();
-    const addons = rows.length ? await db.selectFrom('live_entry_addons').select('entry_id').distinct().where('entry_id', 'in', rows.map((r) => r.id)).execute() : [];
+    // Lot Q2, step Q2.4: a hold's choices (PAY carries them onto its orders as units and clears them; every lapse clears them).
+    const addons = rows.length ? await db.selectFrom('addon_choices').select('live_entry_id as entry_id').distinct().where('live_entry_id', 'in', rows.map((r) => r.id)).execute() : [];
     for (const r of rows) w.accountEntries.set(r.account_id, r.id);
-    return { now: w.f.clock.now().getTime(), drop, sizes, entries: new Map(rows.map((r) => [r.id, r])), withAddons: new Set(addons.map((a) => a.entry_id)) };
+    return { now: w.f.clock.now().getTime(), drop, sizes, entries: new Map(rows.map((r) => [r.id, r])), withAddons: new Set(addons.map((a) => a.entry_id!)) };
   }
 
   function rowsOf(s: Snapshot) {

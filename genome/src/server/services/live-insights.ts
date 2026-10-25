@@ -1175,10 +1175,16 @@ export interface AddonFact {
   label: string;
 }
 
+/**
+ * An add-on sold with an entry (lot Q2, step Q2.4): its units at one price on the entry's orders (one per piece, one per
+ * set, N1), or, for a release before lot Q2, a release add-on as each order's snapshot sold it (one per order).
+ */
 export interface EntryAddonFact {
   entryId: string;
   addonId: string;
+  /** Per unit. */
   priceMinor: number;
+  units: number;
 }
 
 export interface ReleaseReport {
@@ -1280,14 +1286,16 @@ export function releaseReport(input: {
   // The revenue: the confirmed reservations ORBES Client Services has not cancelled.
   const confirmedIds = new Set(input.entries.filter((e) => e.status === 'CONFIRMED' && e.resolution !== 'CANCELLED').map((e) => e.id));
   const quantityOf = new Map(input.entries.map((e) => [e.id, e.quantity]));
+  // Lot Q2, step Q2.4: each add-on's reservations (entries), its pieces (the units sold: one per piece, one per set) and
+  // its revenue (each unit at its price).
   const addons = input.addons.map((a) => {
     const chosen = input.entryAddons.filter((x) => x.addonId === a.id && confirmedIds.has(x.entryId));
     return {
       id: a.id,
       label: a.label,
-      reservations: chosen.length,
-      pieces: chosen.reduce((n, x) => n + (quantityOf.get(x.entryId) ?? 0), 0),
-      revenueMinor: chosen.reduce((n, x) => n + x.priceMinor * (quantityOf.get(x.entryId) ?? 0), 0),
+      reservations: new Set(chosen.map((x) => x.entryId)).size,
+      pieces: chosen.reduce((n, x) => n + x.units, 0),
+      revenueMinor: chosen.reduce((n, x) => n + x.priceMinor * x.units, 0),
     };
   });
   const piecesRevenueMinor = (sum.confirmedPieces - sum.cancelledPieces) * r.priceMinor;
@@ -2160,33 +2168,81 @@ export class LiveInsightsService {
     });
   }
 
-  /** The add-ons of a release and those chosen with each entry, at their price then. */
+  /**
+   * The add-ons of a release and those sold with each entry (lot Q2, step Q2.4): its pick of the catalogue, then any
+   * other sold with it, each unit carried at PAY at its price (removed ones left out); for a release before lot Q2, its
+   * release add-ons as its orders' snapshots sold them (N15).
+   */
   private async addonFacts(dropId: string): Promise<{ addons: AddonFact[]; chosen: EntryAddonFact[] }> {
-    const [addons, chosen] = await Promise.all([
-      this.db.selectFrom('live_addons').select(['id', 'label']).where('drop_id', '=', dropId).orderBy('position').execute(),
+    const [pick, sold] = await Promise.all([
       this.db
-        .selectFrom('live_entry_addons as x')
-        .innerJoin('live_entries as e', 'e.id', 'x.entry_id')
-        .select(['x.entry_id as entryId', 'x.addon_id as addonId', 'x.price_minor as priceMinor'])
-        .where('e.drop_id', '=', dropId)
+        .selectFrom('drop_addons as x')
+        .innerJoin('addon_items as a', 'a.id', 'x.addon_id')
+        .select(['a.id', 'a.name as label'])
+        .where('x.drop_id', '=', dropId)
+        .orderBy('x.position')
+        .execute(),
+      this.soldAddons([dropId]),
+    ]);
+    const addons: AddonFact[] = [...pick];
+    for (const f of sold) if (!addons.some((a) => a.id === f.addonId)) addons.push({ id: f.addonId, label: f.label });
+    return { addons, chosen: sold.map(({ entryId, addonId, priceMinor, units }) => ({ entryId, addonId, priceMinor, units })) };
+  }
+
+  /**
+   * The add-ons sold with the entries of releases: the catalogue's units carried at PAY (PURCHASE, not removed), one row
+   * per entry, add-on and price; and, for an order of before lot Q2, each release add-on of its snapshot (N15).
+   */
+  private async soldAddons(ids: readonly string[]): Promise<(EntryAddonFact & { dropId: string; label: string })[]> {
+    if (ids.length === 0) return [];
+    const [units, snapshots] = await Promise.all([
+      this.db
+        .selectFrom('order_addon_items as u')
+        .innerJoin('orders as o', 'o.id', 'u.order_id')
+        .innerJoin('live_entries as e', 'e.id', 'o.live_entry_id')
+        .innerJoin('addon_items as a', 'a.id', 'u.addon_id')
+        .select((eb) => ['e.drop_id', 'e.id as entry_id', 'u.addon_id', 'a.name', 'u.price_minor', eb.fn.countAll<number>().as('n')])
+        .where('e.drop_id', 'in', [...ids])
+        .where('u.added_by_type', '=', 'PURCHASE')
+        .where('u.status', '<>', 'REMOVED')
+        .groupBy(['e.drop_id', 'e.id', 'u.addon_id', 'a.name', 'u.price_minor'])
+        .execute(),
+      this.db
+        .selectFrom('orders as o')
+        .innerJoin('live_entries as e', 'e.id', 'o.live_entry_id')
+        .select(['e.drop_id', 'e.id as entry_id', 'o.addons'])
+        .where('e.drop_id', 'in', [...ids])
         .execute(),
     ]);
-    return { addons, chosen };
+    const out: (EntryAddonFact & { dropId: string; label: string })[] = units.map((u) => ({ dropId: u.drop_id, entryId: u.entry_id, addonId: u.addon_id, label: u.name, priceMinor: Number(u.price_minor), units: Number(u.n) }));
+    for (const o of snapshots) {
+      for (const a of Array.isArray(o.addons) ? o.addons : []) {
+        if (!a || typeof a.id !== 'string' || !Number.isInteger(a.priceMinor)) continue;
+        const seen = out.find((x) => x.entryId === o.entry_id && x.addonId === a.id && x.priceMinor === a.priceMinor);
+        if (seen) seen.units += 1;
+        else out.push({ dropId: o.drop_id, entryId: o.entry_id, addonId: a.id, label: a.label, priceMinor: a.priceMinor, units: 1 });
+      }
+    }
+    return out;
   }
 
   /** The add-ons' revenue of confirmed reservations, per release; those ORBES Client Services cancelled left out. */
   private async addonRevenue(ids: readonly string[]): Promise<Map<string, number>> {
     if (ids.length === 0) return new Map();
-    const rows = await this.db
-      .selectFrom('live_entry_addons as x')
-      .innerJoin('live_entries as e', 'e.id', 'x.entry_id')
-      .select((eb) => ['e.drop_id', eb.fn.sum<number>(sql`x.price_minor * e.quantity`).as('minor')])
-      .where('e.drop_id', 'in', [...ids])
-      .where('e.status', '=', 'CONFIRMED')
-      .where(sql<boolean>`(${entryOutcome}) IS DISTINCT FROM 'CANCELLED'`)
-      .groupBy('e.drop_id')
-      .execute();
-    return new Map(rows.map((r) => [r.drop_id, Number(r.minor ?? 0)]));
+    const [sold, kept] = await Promise.all([
+      this.soldAddons(ids),
+      this.db
+        .selectFrom('live_entries as e')
+        .select('e.id')
+        .where('e.drop_id', 'in', [...ids])
+        .where('e.status', '=', 'CONFIRMED')
+        .where(sql<boolean>`(${entryOutcome}) IS DISTINCT FROM 'CANCELLED'`)
+        .execute(),
+    ]);
+    const confirmed = new Set(kept.map((e) => e.id));
+    const out = new Map<string, number>();
+    for (const f of sold) if (confirmed.has(f.entryId)) out.set(f.dropId, (out.get(f.dropId) ?? 0) + f.priceMinor * f.units);
+    return out;
   }
 
   /** Every ADD PIECES of a release, from the audit log (`drop.live.stock`), the earliest first. */

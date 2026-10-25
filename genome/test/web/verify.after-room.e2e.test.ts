@@ -25,7 +25,7 @@ import type { LiveEngine } from '../../src/server/services/live-engine.js';
 import { sessionCookieName } from '../../src/server/services/sessions.js';
 import { createManualClock } from '../../src/server/types.js';
 import { LIVE, RELEASES } from '../../src/web/verify/copy.js';
-import { createLiveRelease, createModel, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { createLiveRelease, createModel, holdPieces, liveAddon, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
 import { keepsVault, screenChecks } from '../support/vault-checks.js';
 import { CHROMIUM_PATH, launchChromium, mobileContext, startVerifyServer, type VerifyServer } from './verify.harness.js';
@@ -103,7 +103,8 @@ describe.skipIf(!HAS_CHROMIUM)('the after-room of a LIVE RELEASE in /verify (Chr
       priceMinor: 505_000,
       quantityLine: '1 PIECE',
       sizes: [{ label: '52', stock: 1 }],
-      afterRoom: { modelId: afterModel, priceMinor: 90_000, sizes: [{ label: 'ONE SIZE', stock: 1 }], addons: [{ label: 'GIFT BOX', line: 'Wrapped by hand', priceMinor: 5_000 }], delayMinutes: 1, lengthMinutes: 15 },
+      // Lot Q2, step Q2.4 (D2): its after-room picks a catalogue service.
+      afterRoom: { modelId: afterModel, priceMinor: 90_000, sizes: [{ label: 'ONE SIZE', stock: 1 }], addonIds: [await liveAddon(f, { name: 'GIFT BOX', line: 'Wrapped in the house’s paper', priceMinor: 5_000 })], delayMinutes: 1, lengthMinutes: 15 },
     });
     const child = r.afterRoom!.id;
     await srv.ctx.db.updateTable('drops').set({ title: 'MONOLITHE — LIVE' }).where('id', '=', r.id).execute();
@@ -192,10 +193,12 @@ describe.skipIf(!HAS_CHROMIUM)('the after-room of a LIVE RELEASE in /verify (Chr
     const pay = page.locator('.live__pay');
     // PAY's name says the total (its words, the total and the time, are drawn inside its light).
     await expect.poll(async () => norm((await pay.getAttribute('aria-label')) ?? ''), POLL).toBe('PAY · € 900');
-    await page.getByRole('button', { name: /GIFT BOX/ }).click();
+    // Lot Q2, steps Q2.4, Q2.8: its pick's row on 5b, tapped (one per piece).
+    await page.getByRole('button', { name: /^GIFT BOX/ }).click();
     await expect.poll(async () => norm((await pay.getAttribute('aria-label')) ?? ''), POLL).toBe('PAY · € 950');
     // PAY is the light (lot Q1 §3.5, D39), no filled ground.
-    await keepsVault(page, null, ['GIFT BOX + € 50', 'PAY · € 950', 'RELEASE MY PLACE']);
+    await keepsVault(page, null, ['PAY · € 950', 'RELEASE MY PLACE']);
+    expect(await page.locator('.live__addons .live__addon-item.is-on').count()).toBe(1);
     await page.screenshot({ path: join(OUT_DIR, 'verify-after-room-secured.png'), fullPage: true });
     await pay.click();
 

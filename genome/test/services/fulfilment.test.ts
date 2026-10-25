@@ -25,7 +25,7 @@ import { ensureSku } from '../../src/server/services/stock.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { countPiecesIn, packAndShip, scanIntoParcel, stockPieces } from '../support/fulfil.js';
-import { accountOfTier, createAccount, createLiveRelease, createModel, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { accountOfTier, createAccount, createLiveRelease, createModel, legacyLiveAddons, liveFixtureOn, type LiveFixture } from '../support/live.js';
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -130,7 +130,7 @@ describe('the fulfilment board (plan LIVE RELEASE+, S2)', () => {
 
   async function liveSale(label: string, quantity = 1) {
     const opensAt = new Date(clock.now().getTime() + HOUR);
-    const r = await createLiveRelease(f, { opensAt, sizes: [{ label, stock: 3 }], perAccount: quantity, addons: [{ label: 'ENGRAVING', priceMinor: 15_000 }] });
+    const r = await createLiveRelease(f, { opensAt, sizes: [{ label, stock: 3 }], perAccount: quantity });
     const a = await accountOfTier(f, 0);
     clock.set(new Date(opensAt.getTime() - MINUTE));
     await f.live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id, quantity }, a.actor);
@@ -140,8 +140,9 @@ describe('the fulfilment board (plan LIVE RELEASE+, S2)', () => {
     await f.live.press(a.id, r.id, token);
     clock.advance(1500);
     await f.live.secure(a.id, r.id, token, a.actor);
-    await f.live.setAddons(a.id, r.id, r.addons.map((x) => x.id), a.actor);
     await f.live.confirm(a.id, r.id, a.actor);
+    // A sale of before lot Q2 (N15): its release's engraving as that PAY wrote it on each piece's order.
+    await legacyLiveAddons(t.db, r.id, a.id, [{ label: 'ENGRAVING', priceMinor: 15_000 }]);
     const entry = await t.db.selectFrom('live_entries').select('id').where('drop_id', '=', r.id).where('account_id', '=', a.id).executeTakeFirstOrThrow();
     const rows = await t.db.selectFrom('orders').selectAll().where('live_entry_id', '=', entry.id).orderBy('piece').execute();
     return { release: r, account: a, entryId: entry.id, orders: rows };

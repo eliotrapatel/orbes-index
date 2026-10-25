@@ -45,7 +45,13 @@ import { SHOPIFY_ORDER_COLUMNS, SHOPIFY_PRODUCT_COLUMNS } from '../../src/server
 import { ensureSku } from '../../src/server/services/stock.js';
 import { createManualClock, SYSTEM_ACTOR, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
-import { createAccount, createLiveRelease, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import {
+  createAccount,
+  createLiveRelease,
+  legacyLiveAddons,
+  liveFixtureOn,
+  type LiveFixture,
+} from '../support/live.js';
 import { poolDraw } from '../support/draws.js';
 
 const CHROMIUM = process.env.ORBES_CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
@@ -186,7 +192,7 @@ describe.skipIf(!HAS_CHROMIUM)('the client sheet and the Shopify exports in the 
     const draw = await poolDraw(f.drops, f.db, { modelId: f.modelId, title: 'ECLIPSE — release I', quantity: 1, opensAt: at(MINUTE), closesAt: at(2 * MINUTE), earlyAccessHours: 0 }, f.admin);
     ids.draw = draw.id;
     // A LIVE RELEASE it secures a piece in, with its engraving; one it said I'LL BE THERE to and missed.
-    const live = await createLiveRelease(f, { opensAt: at(30 * MINUTE), sizes: [{ label: '54', stock: 1 }], addons: [{ label: 'ENGRAVING', priceMinor: 15_000 }] });
+    const live = await createLiveRelease(f, { opensAt: at(30 * MINUTE), sizes: [{ label: '54', stock: 1 }] });
     const missed = await createLiveRelease(f, { opensAt: at(40 * MINUTE), sizes: [{ label: '52', stock: 1 }] });
     await ctx.db.updateTable('drops').set({ title: 'MONOLITHE — LIVE I' }).where('id', '=', live.id).execute();
     await ctx.db.updateTable('drops').set({ title: 'MONOLITHE — LIVE II' }).where('id', '=', missed.id).execute();
@@ -208,8 +214,9 @@ describe.skipIf(!HAS_CHROMIUM)('the client sheet and the Shopify exports in the 
     await f.live.press(a.id, live.id, token);
     clock.advance(1500);
     await f.live.secure(a.id, live.id, token, a.actor);
-    await f.live.setAddons(a.id, live.id, live.addons.map((x) => x.id), a.actor);
     await f.live.confirm(a.id, live.id, a.actor);
+    // A sale of before lot Q2 (N15): its release's engraving as that PAY wrote it.
+    await legacyLiveAddons(f.db, live.id, a.id, [{ label: 'ENGRAVING', priceMinor: 15_000 }]);
     ids.liveOrder = (await ctx.db.selectFrom('orders').select('id').where('drop_id', '=', live.id).executeTakeFirstOrThrow()).id;
     clock.set(at(41 * MINUTE));
     await f.live.advance(missed.id);

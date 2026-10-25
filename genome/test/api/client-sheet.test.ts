@@ -27,7 +27,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FORMULA_LINES } from '../../src/server/services/engagement-formula.js';
 import { orderReference } from '../../src/server/services/orders.js';
 import { birthdayExpiry } from '../../src/server/services/birthday-credits.js';
-import { createAccount, createLiveRelease, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { createAccount, createLiveRelease, legacyLiveAddons, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { accountClient, adminClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
 import { poolDraw } from '../support/draws.js';
 
@@ -63,7 +63,7 @@ describe('the client sheet and the Shopify exports: the console\'s routes', () =
     ids.draw = draw.id;
     // The LIVE RELEASES: one it takes part in and secures a piece with an add-on, one it said I'LL BE THERE to and
     // missed, one still to come it said I'LL BE THERE to.
-    const live = await createLiveRelease(f, { opensAt: at(30 * MINUTE), sizes: [{ label: '54', stock: 1 }], addons: [{ label: 'ENGRAVING', priceMinor: 15_000 }] });
+    const live = await createLiveRelease(f, { opensAt: at(30 * MINUTE), sizes: [{ label: '54', stock: 1 }] });
     const missed = await createLiveRelease(f, { opensAt: at(40 * MINUTE), sizes: [{ label: '52', stock: 1 }] });
     const coming = await createLiveRelease(f, { opensAt: at(48 * HOUR), sizes: [{ label: '56', stock: 1 }] });
     for (const [r, title] of [[live, 'MONOLITHE — LIVE I'], [missed, 'MONOLITHE — LIVE II'], [coming, 'MONOLITHE — LIVE III']] as const) {
@@ -90,8 +90,9 @@ describe('the client sheet and the Shopify exports: the console\'s routes', () =
     await f.live.press(id, live.id, token);
     h.clock.advance(1500);
     await f.live.secure(id, live.id, token, actor);
-    await f.live.setAddons(id, live.id, live.addons.map((x) => x.id), actor);
     await f.live.confirm(id, live.id, actor);
+    // A sale of before lot Q2 (N15): its release's engraving as that PAY wrote it.
+    await legacyLiveAddons(h.ctx.db, live.id, id, [{ label: 'ENGRAVING', priceMinor: 15_000 }]);
     ids.liveOrder = (await h.ctx.db.selectFrom('orders').select('id').where('drop_id', '=', live.id).executeTakeFirstOrThrow()).id;
     h.clock.set(at(41 * MINUTE));
     await f.live.advance(missed.id);

@@ -41,7 +41,9 @@ import {
   createSet,
   createSetLiveRelease,
   holdPieces,
+  liveAddon,
   liveFixtureOn,
+  pickAddons,
   pieceSize,
   sizedModel,
   type LiveFixture,
@@ -117,7 +119,7 @@ describe('LIVE RELEASES: the customer API and real time', () => {
         ['POST', `/api/v1/live/${id}/leave`, {}],
         ['POST', `/api/v1/live/${id}/press`, { token: 'abc' }],
         ['POST', `/api/v1/live/${id}/secure`, { token: 'abc' }],
-        ['PUT', `/api/v1/live/${id}/addons`, { addonIds: [] }],
+        ['PUT', `/api/v1/live/${id}/addons`, { items: [] }],
         ['POST', `/api/v1/live/${id}/confirm`, {}],
         ['POST', `/api/v1/live/${id}/release`, {}],
       ];
@@ -374,7 +376,9 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       // No server time in a public answer kept 15 s: the banner syncs with /clock.
       expect(safeJson(await c.get('/api/v1/live/next'))).toEqual({ release: null });
       const later = await release(h, f, { inMinutes: 120, minTier: 2 });
-      const soon = await release(h, f, { inMinutes: 4, sizes: [{ label: '50', stock: 1 }, { label: '52', stock: 3 }], addons: [{ label: 'ENGRAVING', line: 'Your initials', priceMinor: 15_000 }], perAccount: 2 });
+      // Lot Q2, step Q2.4 (D2): its add-ons are its pick of the catalogue, never on its public page.
+      const engraving = await liveAddon(f, { name: 'ENGRAVING', line: 'Your initials', priceMinor: 15_000, engraving: true });
+      const soon = await release(h, f, { inMinutes: 4, sizes: [{ label: '50', stock: 1 }, { label: '52', stock: 3 }], addonIds: [engraving], perAccount: 2 });
       const banner = safeJson(await c.get('/api/v1/live/next')) as { release: Record<string, unknown> };
       expect(banner.release).toEqual({ id: soon.id, phase: 'ROOM', name: 'MONOLITHE', variant: null, nameAt: expect.any(String), roomOpensAt: expect.any(String), opensAt: expect.any(String), closesAt: expect.any(String) });
       const list = safeJson(await c.get('/api/v1/live')) as { releases: Record<string, unknown>[] };
@@ -390,10 +394,11 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       ]);
       const sheet = await c.get(`/api/v1/live/${soon.id}`);
       expect(sheet.headers['cache-control']).toBe('public, max-age=15');
+      expect(safeJson(sheet)).not.toHaveProperty('addons');
+      expect(sheet.body).not.toContain(engraving);
       expect(safeJson(sheet)).toMatchObject({
         phase: 'ROOM',
         sizes: [{ id: soon.sizes[0]!.id, label: '50', stock: 1 }, { id: soon.sizes[1]!.id, label: '52', stock: 3 }],
-        addons: [{ id: soon.addons[0]!.id, label: 'ENGRAVING', line: 'Your initials', priceMinor: 15_000 }],
         interest: 1,
         perAccount: 2,
         roomOpensMinutes: 5,
@@ -523,7 +528,7 @@ describe('LIVE RELEASES: the customer API and real time', () => {
         ['POST', `/api/v1/live/${r.id}/leave`, {}],
         ['POST', `/api/v1/live/${r.id}/press`, { token: 'abc' }],
         ['POST', `/api/v1/live/${r.id}/secure`, { token: 'abc' }],
-        ['PUT', `/api/v1/live/${r.id}/addons`, { addonIds: [] }],
+        ['PUT', `/api/v1/live/${r.id}/addons`, { items: [] }],
         ['POST', `/api/v1/live/${r.id}/confirm`, {}],
         ['POST', `/api/v1/live/${r.id}/release`, {}],
         ['PUT', `/api/v1/live/${r.id}/interest`, { sizeId: r.sizes[0]!.id }],
@@ -541,7 +546,8 @@ describe('LIVE RELEASES: the customer API and real time', () => {
     });
 
     it('ENTER, CHANGE SIZE before T0, the line at T0, PRESS and SECURE with the gesture, the add-ons, PAY; MY PIECES', async () => {
-      const r = await release(h, f, { inMinutes: 4, sizes: [{ label: '50', stock: 1 }, { label: '52', stock: 1 }], addons: [{ label: 'GIFT BOX', priceMinor: 5_000 }], perAccount: 2 });
+      const box = await liveAddon(f, { name: 'GIFT BOX', priceMinor: 5_000 });
+      const r = await release(h, f, { inMinutes: 4, sizes: [{ label: '50', stock: 1 }, { label: '52', stock: 1 }], addonIds: [box], perAccount: 2 });
       const [a, b, c] = [await member(h, f, 5, '198.51.100.7'), await member(h, f, 1), await member(h, f, 1)];
       const enter = await a.client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[1]!.id });
       expect(enter.statusCode).toBe(200);
@@ -588,33 +594,52 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       const secured = safeJson(await a.client.post(`/api/v1/live/${r.id}/secure`, { token })) as { entry: Record<string, unknown> };
       expect(secured.entry).toMatchObject({ status: 'SECURED', turn: { token: null }, hold: { expiresAt: new Date(h.clock.now().getTime() + 5 * MINUTE).toISOString() } });
 
-      // The add-ons, then PAY.
-      expect(errorOf(await a.client.request('PUT', `/api/v1/live/${r.id}/addons`, { body: { addonIds: ['nope'] } })).code).toBe('LIVE_ADDON_UNKNOWN');
-      const withBox = safeJson(await a.client.request('PUT', `/api/v1/live/${r.id}/addons`, { body: { addonIds: [r.addons[0]!.id] } })) as { entry: Record<string, unknown> };
-      expect(withBox.entry).toMatchObject({ addons: [{ id: r.addons[0]!.id, label: 'GIFT BOX', priceMinor: 5_000 }], totalMinor: 510_000, currency: 'EUR' });
-      // Plan MACRO M3 §4.2 (D2): a catalogue add-on chosen with the hold (`items`), the release's add-ons kept; at PAY,
-      // the order carries it.
+      // The add-ons, then PAY. Lot Q2, step Q2.4 (D2, N1): rows of the release's pick of the catalogue, `{ items: [{ addonId,
+      // text? }] }`; the release add-ons' `addonIds` and a row's units are refused as unknown.
+      const put = (body: unknown) => a.client.request('PUT', `/api/v1/live/${r.id}/addons`, { body });
+      expect(errorOf(await put({ items: [{ addonId: 'nope' }] })).code).toBe('VALIDATION_FAILED');
+      expect(errorOf(await put({ addonIds: [box] })).code).toBe('VALIDATION_FAILED');
+      const withBox = safeJson(await put({ items: [{ addonId: box }] })) as { entry: Record<string, unknown> };
+      expect(withBox.entry).toMatchObject({ addonItems: [{ addonId: box, name: 'GIFT BOX', line: null, units: 1, priceMinor: 5_000, text: null }], totalMinor: 510_000, currency: 'EUR' });
+      expect(withBox.entry).not.toHaveProperty('addons');
+      // Plan MACRO M3 §4.2 (D2): a catalogue add-on with stock chosen with the hold; at PAY, the order carries it.
       const op = { type: 'admin' as const, id: f.admin.id };
       const cloth = await h.ctx.services.addons.create({ name: 'POLISHING CLOTH', skuCode: 'ADD-CLOTH-L', prices: { EUR: 1_500 } }, op);
       const france = (await h.ctx.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
       await h.ctx.services.stock.adjust({ skuId: cloth.sku.id, locationId: france, delta: 1, note: 'Counted.' }, op);
-      expect(errorOf(await a.client.request('PUT', `/api/v1/live/${r.id}/addons`, { body: { addonIds: [r.addons[0]!.id], items: [{ addonId: cloth.id, units: 4 }] } })).code).toBe('ADDON_LIMIT');
-      expect(errorOf(await a.client.request('PUT', `/api/v1/live/${r.id}/addons`, { body: { addonIds: [r.addons[0]!.id], items: [{ addonId: cloth.id }] } })).code).toBe('VALIDATION_FAILED');
-      const withCloth = safeJson(await a.client.request('PUT', `/api/v1/live/${r.id}/addons`, { body: { addonIds: [r.addons[0]!.id], items: [{ addonId: cloth.id, units: 1 }] } })) as { entry: Record<string, unknown> };
+      // Lot Q2, step Q2.3 (D3): an add-on the release did not pick is not offered on its hold, the server says so.
+      const unpicked = await put({ items: [{ addonId: box }, { addonId: cloth.id }] });
+      expect([unpicked.statusCode, errorOf(unpicked)]).toEqual([409, { code: 'ADDON_NOT_OFFERED', message: 'POLISHING CLOTH is not one of this release’s add-ons.' }]);
+      await pickAddons(h.ctx.db, r.id, [box, cloth.id]);
+      expect(errorOf(await put({ items: [{ addonId: cloth.id, units: 1 }] })).code).toBe('VALIDATION_FAILED');
+      expect(errorOf(await put({ items: [{ addonId: cloth.id, text: 'M. B.' }] }))).toEqual({ code: 'VALIDATION_FAILED', message: 'Only the engraving takes words.' });
+      const withCloth = safeJson(await put({ items: [{ addonId: box }, { addonId: cloth.id }] })) as { entry: Record<string, unknown> };
       expect(withCloth.entry).toMatchObject({
-        addons: [{ id: r.addons[0]!.id }],
-        addonItems: [{ addonId: cloth.id, name: 'POLISHING CLOTH', line: null, units: 1, priceMinor: 1_500 }],
-        addonOffer: [{ addonId: cloth.id, maxUnits: 1 }],
+        addonItems: [
+          { addonId: box, name: 'GIFT BOX', units: 1, priceMinor: 5_000 },
+          { addonId: cloth.id, name: 'POLISHING CLOTH', line: null, units: 1, priceMinor: 1_500 },
+        ],
+        addonOffer: [
+          { addonId: box, maxUnits: 1 },
+          { addonId: cloth.id, maxUnits: 1 },
+        ],
         totalMinor: 511_500,
       });
+      // Lot Q2, step Q2.8 (5b, N2): the add-on with stock says it is added while available (M3's note); the service does not.
+      const rows = withCloth.entry.addonOffer as { addonId: string; whileAvailable?: boolean }[];
+      expect(rows.map((o) => [o.addonId, o.whileAvailable ?? null])).toEqual([
+        [box, null],
+        [cloth.id, true],
+      ]);
       const paid = safeJson(await a.client.post(`/api/v1/live/${r.id}/confirm`, {})) as { entry: Record<string, unknown> };
-      expect(paid.entry).toMatchObject({ status: 'CONFIRMED', confirmedAt: h.clock.now().toISOString(), addonItems: [{ addonId: cloth.id, units: 1 }], addonOffer: [] });
+      expect(paid.entry).toMatchObject({ status: 'CONFIRMED', confirmedAt: h.clock.now().toISOString(), addonOffer: [], totalMinor: 511_500 });
+      expect((paid.entry.addonItems as { addonId: string; units: number }[]).map((x) => [x.addonId, x.units]).sort()).toEqual([[box, 1], [cloth.id, 1]].sort());
       expect(paid.entry.addonsLeftOut).toBeUndefined();
       expect(errorOf(await a.client.post(`/api/v1/live/${r.id}/confirm`, {})).code).toBe('LIVE_NOT_SECURED');
 
       // MY PIECES: the entry with its release.
       const mine = safeJson(await a.client.get('/api/v1/live/mine')) as { entries: { release: Record<string, unknown>; entry: Record<string, unknown> }[] };
-      expect(mine.entries.find((e) => e.release.id === r.id)).toMatchObject({ release: { name: 'MONOLITHE', phase: 'LIVE' }, entry: { status: 'CONFIRMED', addons: [{ label: 'GIFT BOX' }] } });
+      expect(mine.entries.find((e) => e.release.id === r.id)).toMatchObject({ release: { name: 'MONOLITHE', phase: 'LIVE' }, entry: { status: 'CONFIRMED', totalMinor: 511_500 } });
       expect((safeJson(await b.client.get('/api/v1/live/mine')) as { entries: unknown[] }).entries).toHaveLength(1);
       expect(JSON.stringify(await h.ctx.db.selectFrom('audit_logs').select(['action', 'details']).where('target_id', '=', r.id).execute())).not.toMatch(/@example\.com/);
     });

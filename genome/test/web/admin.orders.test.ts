@@ -27,10 +27,7 @@ import {
   canChooseGiftSize,
   countryOptions,
   engravingLine,
-  engravingPriceText,
-  engravingPricesInput,
-  engravingPricesProblem,
-  engravingPricesValues,
+  ENGRAVING_SETTINGS_TEXT,
   carrierProblem,
   cardCase,
   cardHolds,
@@ -703,17 +700,12 @@ describe('the Buyer, the engraving and their settings (plan NEXT LOT §3.6.B, C)
     expect([EVENT_LABELS['order.address'], EVENT_LABELS['order.engraving']]).toEqual(['Delivery address entered', 'Engraving entered']);
   });
 
-  it('sets the engraving prices per currency: an amount in units, empty for none', () => {
-    const sheet = { prices: { EUR: 3_000, GBP: null, USD: 3_550, CHF: null }, updatedAt: T, updatedBy: { id: 'a', email: 'admin@example.com' } };
-    expect(engravingPriceText(sheet, 'EUR')).toBe(`€${NB}30`);
-    expect(engravingPriceText(sheet, 'GBP')).toBe('—');
-    expect(engravingPricesValues(sheet)).toEqual({ EUR: '30', GBP: '', USD: '35.50', CHF: '' });
-    expect(engravingPricesProblem({ EUR: '30', GBP: '', USD: 'x', CHF: '' })).toBe('USD: an amount in units, or empty for none.');
-    expect(engravingPricesProblem({ EUR: '30', GBP: '', USD: '', CHF: '' })).toBeNull();
-    expect(engravingPricesInput({ EUR: '30', GBP: ' ', USD: '35.50', CHF: '' })).toEqual({ EUR: 3_000, GBP: null, USD: 3_550, CHF: null });
+  it('says in Orders → Settings that the engraving is an add-on, its prices in Catalogue → Add-ons (lot Q2, N4)', () => {
+    const t = ENGRAVING_SETTINGS_TEXT;
+    expect(`${t.before}${t.link}${t.after}`).toBe('Engraving is an add-on: its prices are in Catalogue → Add-ons, ENGRAVING.');
   });
 
-  it('calls the engraving prices\' routes, the CSRF token on the change', async () => {
+  it('calls the buyer\'s route, the CSRF token on the change; the engraving prices\' routes are gone (lot Q2, step Q2.5: the ENGRAVING add-on\'s prices)', async () => {
     const calls: { url: string; init: RequestInit }[] = [];
     const api = new AdminApi({
       fetch: async (url, init = {}) => {
@@ -722,12 +714,11 @@ describe('the Buyer, the engraving and their settings (plan NEXT LOT §3.6.B, C)
       },
     });
     api.setCsrf('tok');
-    await api.engravingPrices();
-    await api.setEngravingPrices({ EUR: 3_000, GBP: null, USD: null, CHF: null });
+    expect('engravingPrices' in api).toBe(false);
+    expect('setEngravingPrices' in api).toBe(false);
     await api.setOrderBuyer(ID, { name: 'J', address: 'A', country: 'FR', phone: '+33 6 12 34 56 78' });
-    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(['GET /api/admin/orders/engraving-prices', 'PUT /api/admin/orders/engraving-prices', `PUT /api/admin/orders/${ID}/buyer`]);
-    expect(JSON.parse(String(calls[1]!.init.body))).toEqual({ prices: { EUR: 3_000, GBP: null, USD: null, CHF: null } });
-    expect(JSON.parse(String(calls[2]!.init.body))).toEqual({ name: 'J', address: 'A', country: 'FR', phone: '+33 6 12 34 56 78' });
-    expect((calls[1]!.init.headers as Record<string, string>)['x-csrf-token']).toBe('tok');
+    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual([`PUT /api/admin/orders/${ID}/buyer`]);
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ name: 'J', address: 'A', country: 'FR', phone: '+33 6 12 34 56 78' });
+    expect((calls[0]!.init.headers as Record<string, string>)['x-csrf-token']).toBe('tok');
   });
 });

@@ -80,8 +80,18 @@ export { LANGS, type Block, type Lang, type LegalDocument, type LegalSection } f
  * after-room); "What ORBES may do" and every other text unchanged. The date of the lot's final legal commit, never M3's
  * published 2026-10-23 (the day after it). Article 11 did not change: CARE_CONDITIONS_VERSION stays 2026-10-15; the
  * consents recorded with the version in force move with it.
+ * 2026-10-25 is the version of lot Q2, ADD-ONS ONE SYSTEM (owner's decisions D29 and L2; plan step Q2.10): only the
+ * sentences that became false, in both languages. The terms' article 13 "Your piece" (the add-ons the release offers,
+ * one for each piece, or one for each set, each at the price shown, said there only: D25) and article 14 "Delivery" (an
+ * engraving is an add-on, charged at the price shown; the lot's review: one chosen with the purchase keeps its place on
+ * the order and only its words change, any other has its own invoice once paid) and "Add-ons" (offered where ORBES offers it, at the purchase among
+ * those its release offers, in the private salon and in YOUR ORDERS: D3, N8; an add-on with stock only if one is still
+ * in stock, some being services without stock: D4; in YOUR ORDERS an add-on ORBES offers there). HOW RELEASES WORK and
+ * the privacy policy unchanged (N17). The date of the lot's final legal commit (N16), never Q1's 2026-10-24 (the day
+ * after it). Article 11 did not change: CARE_CONDITIONS_VERSION stays 2026-10-15; the consents recorded with the version
+ * in force move with it.
  */
-export const LEGAL_VERSION = '2026-10-24';
+export const LEGAL_VERSION = '2026-10-25';
 
 export const DOCUMENTS: Readonly<Record<LegalPage, Readonly<Record<Lang, LegalDocument>>>> = Object.freeze({
   privacy: PRIVACY,

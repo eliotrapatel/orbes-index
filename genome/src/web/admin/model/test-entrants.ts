@@ -49,6 +49,12 @@ export const TEST_DEFAULTS: Readonly<TestRunSettings> = Object.freeze({
   profile: { seniorityMin: 0, seniorityMax: 3, accountAgeDaysMin: 30, accountAgeDaysMax: 720, countries: [], sharedNetworkPct: 0 },
 });
 
+/**
+ * The add-ons share's hint (lot Q2, D24): a test entrant chooses one add-on among those its release offers (its pick in
+ * its Add-ons part), as a collector would on the piece held; never the engraving's words.
+ */
+export const TEST_ADDONS_HINT = 'The share that chooses one of the add-ons the release offers (its Add-ons) with the piece held, as a collector would.';
+
 /** The arrivals a release offers: all at once, a burst; and on a LIVE RELEASE, spread before the opening. */
 export function arrivalOptions(mode: TestRunMode): { value: TestArrivalMode; label: string }[] {
   return [

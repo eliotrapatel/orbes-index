@@ -46,7 +46,7 @@ import { createManualClock, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { giveSizes } from '../support/draws.js';
 import { countPiecesIn, packAndShip } from '../support/fulfil.js';
-import { accountOfTier, createAccount, createLiveRelease, createModel, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { accountOfTier, createAccount, createLiveRelease, createModel, legacyLiveAddons, liveFixtureOn, type LiveFixture } from '../support/live.js';
 
 /**
  * Shopify's product CSV columns as its help center publishes them (« Using CSV files to import and export products »,
@@ -631,7 +631,7 @@ describe('the Shopify exports and the ids pasted back (plan LIVE RELEASE+, S9)',
     clock.set('2026-12-01T10:00:00.000Z');
     // A LIVE sale with an add-on: its order RESERVED.
     const opensAt = new Date(clock.now().getTime() + 3_600_000);
-    const r = await createLiveRelease(f, { opensAt, sizes: [{ label: '54', stock: 2 }], addons: [{ label: 'ENGRAVING', priceMinor: 15_000 }] });
+    const r = await createLiveRelease(f, { opensAt, sizes: [{ label: '54', stock: 2 }] });
     const a = await accountOfTier(f, 0);
     clock.set(new Date(opensAt.getTime() - 60_000));
     await f.live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id, quantity: 1 }, a.actor);
@@ -641,8 +641,9 @@ describe('the Shopify exports and the ids pasted back (plan LIVE RELEASE+, S9)',
     await f.live.press(a.id, r.id, token);
     clock.advance(1500);
     await f.live.secure(a.id, r.id, token, a.actor);
-    await f.live.setAddons(a.id, r.id, r.addons.map((x) => x.id), a.actor);
     await f.live.confirm(a.id, r.id, a.actor);
+    // A sale of before lot Q2 (N15): its release's engraving as that PAY wrote it.
+    await legacyLiveAddons(t.db, r.id, a.id, [{ label: 'ENGRAVING', priceMinor: 15_000 }]);
     const live = await t.db.selectFrom('orders').selectAll().where('account_id', '=', a.id).executeTakeFirstOrThrow();
 
     // A salon order: priced, paid, shipped from stock, its buyer entered; another paid then cancelled; one unpriced.
@@ -774,5 +775,26 @@ describe('the Shopify exports and the ids pasted back (plan LIVE RELEASE+, S9)',
     // The same order, its account no longer a test account: exported.
     await t.db.deleteFrom('test_entrants').where('account_id', '=', test.account).execute();
     expect(records((await shopify().orderCsv({ from: '2026-12-05', to: '2026-12-05' }, asStored)).body).map((x) => x.Name)).toEqual([orderReference(real.id), orderReference(test.id)]);
+  });
+
+  it('exports a service as one product of one variant too (lot Q2, D9, S5): its SKU and price, not shipped, no weight; its unit on an order a line item not shipped', async () => {
+    const wrap = await ctx.services.addons.create({ kind: 'SERVICE', name: 'Gift Wrapping', skuCode: 'SH-WRAP', weightG: 40, position: 4, prices: { EUR: 15_00 } }, f.admin);
+    const row = records((await shopify().productCsv('EUR')).body).find((r) => r.Title === 'Gift Wrapping')!;
+    expect(row).toMatchObject({ Type: 'Add-on', SKU: 'SH-WRAP', Price: '15.00', 'Option1 value': 'Default Title', 'Weight value (grams)': '', 'Requires shipping': 'false', Status: 'draft' });
+    // On an order: one line item per unit, its SKU code, not shipped; the piece's line still shipped.
+    clock.set('2026-12-10T10:00:00.000Z');
+    const buyer = await createAccount(t.db);
+    const request = await t.db.insertInto('shop_requests').values({ account_id: buyer.id, model_id: f.modelId, created_at: clock.now() }).returning('id').executeTakeFirstOrThrow();
+    await ctx.services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, f.admin);
+    const o = await t.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow();
+    await ctx.services.orders.setTerms(o.id, { sizeLabel: '52', priceMinor: 300_000, currency: 'EUR' }, f.admin);
+    await ctx.services.orderAddons.addForStaff(o.id, { addonId: wrap.id, units: 1 }, f.admin);
+    const lines = records((await shopify().orderCsv({ from: '2026-12-10', to: '2026-12-10' }, asStored)).body).filter((x) => x.Name === orderReference(o.id));
+    expect(lines.map((x) => [x['Lineitem name'], x['Lineitem price'], x['Lineitem SKU'], x['Lineitem requires shipping']])).toEqual([
+      [expect.any(String), '3000.00', expect.any(String), 'true'],
+      ['Gift Wrapping', '15.00', 'SH-WRAP', 'false'],
+    ]);
+    expect(lines[0]!.Subtotal).toBe('3015.00');
+    await ctx.services.addons.setAside(wrap.id, f.admin);
   });
 });

@@ -58,6 +58,7 @@ import {
   createModel,
   entriesOf,
   holdPieces,
+  liveAddon,
   liveFixture,
   type LiveFixture,
   type LiveRelease,
@@ -561,49 +562,61 @@ describe('LiveService', () => {
       expect(n.hold!.expiresAt).toEqual(new Date(n.hold!.securedAt.getTime() + 2 * MINUTE));
     });
 
-    it('takes add-ons for a held piece, the total on the price per piece; PAY confirms; the hold ends with its add-ons', async () => {
-      const r = await release({
-        perAccount: 2,
-        sizes: [{ label: '52', stock: 3 }],
-        addons: [{ label: 'ENGRAVING', priceMinor: 15_000 }, { label: 'GIFT BOX', priceMinor: 5_000 }, { label: 'ORBES CARE', priceMinor: 24_000 }],
-      });
-      const other = await release({ addons: [{ label: 'X', priceMinor: 1 }] });
+    it('takes the catalogue add-ons its release picked for a held piece, a row each (one unit per piece), PAY\'s total on the price per piece; PAY puts one unit on each piece\'s order; the hold ends with its add-ons', async () => {
+      // Lot Q2, step Q2.4 (D2, N1): the release add-ons are gone; the release picks catalogue add-ons.
+      const engraving = await liveAddon(f, { name: 'ENGRAVING', priceMinor: 15_000, engraving: true });
+      const box = await liveAddon(f, { name: 'GIFT BOX', priceMinor: 5_000 });
+      const care = await liveAddon(f, { name: 'ORBES CARE', priceMinor: 24_000 });
+      const x = await liveAddon(f, { name: 'X', priceMinor: 1 });
+      const r = await release({ perAccount: 2, sizes: [{ label: '52', stock: 3 }], addonIds: [engraving, box, care] });
+      await release({ addonIds: [x] });
       const [a, b] = [await accountOfTier(f, 1), await accountOfTier(f, 0)];
       f.clock.set(at(-MINUTE));
       await f.live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id, quantity: 2 }, a.actor);
       await f.live.enter(b.id, r.id, { sizeId: r.sizes[0]!.id }, b.actor);
       await advance(r, T0);
-      await rejects(f.live.setAddons(a.id, r.id, [r.addons[0]!.id], a.actor), 'LIVE_NOT_SECURED', 409);
+      await rejects(f.live.setAddons(a.id, r.id, [{ addonId: engraving }], a.actor), 'LIVE_NOT_SECURED', 409);
       await holdAndSecure(r.id, a.id, a.actor);
-      await rejects(f.live.setAddons(a.id, r.id, ['00000000-0000-4000-8000-000000000000'], a.actor), 'LIVE_ADDON_UNKNOWN', 400);
-      await rejects(f.live.setAddons(a.id, r.id, [other.addons[0]!.id], a.actor), 'LIVE_ADDON_UNKNOWN', 400);
+      await rejects(f.live.setAddons(a.id, r.id, [{ addonId: '00000000-0000-4000-8000-000000000000' }], a.actor), 'ADDON_NOT_FOUND', 404);
+      // Another release's pick is not this one's.
+      await rejects(f.live.setAddons(a.id, r.id, [{ addonId: x }], a.actor), 'ADDON_NOT_OFFERED', 409);
+      await rejects(f.live.setAddons(a.id, r.id, [{ addonId: box }, { addonId: box }], a.actor), 'VALIDATION_FAILED', 400);
       f.clock.set(at(10 * SECOND));
-      const chosen = await f.live.setAddons(a.id, r.id, [r.addons[1]!.id, r.addons[0]!.id, r.addons[0]!.id], a.actor);
-      expect(chosen.addons).toEqual([
-        { id: r.addons[0]!.id, label: 'ENGRAVING', priceMinor: 15_000 },
-        { id: r.addons[1]!.id, label: 'GIFT BOX', priceMinor: 5_000 },
+      const chosen = await f.live.setAddons(a.id, r.id, [{ addonId: box }, { addonId: engraving }], a.actor);
+      expect([...chosen.addonItems].sort((p, q) => p.name.localeCompare(q.name))).toEqual([
+        { addonId: engraving, name: 'ENGRAVING', line: null, units: 2, priceMinor: 15_000, text: null },
+        { addonId: box, name: 'GIFT BOX', line: null, units: 2, priceMinor: 5_000, text: null },
       ]);
       expect(chosen.totalMinor).toBe(2 * (505_000 + 15_000 + 5_000));
-      // The price is the one at the time of the choice.
-      await t.db.updateTable('live_addons').set({ price_minor: 99_000 }).where('id', '=', r.addons[0]!.id).execute();
-      expect((await f.live.entry(a.id, r.id))!.totalMinor).toBe(2 * (505_000 + 15_000 + 5_000));
-      expect((await f.live.setAddons(a.id, r.id, [], a.actor)).addons).toEqual([]);
-      await f.live.setAddons(a.id, r.id, [r.addons[2]!.id], a.actor);
+      expect(chosen).not.toHaveProperty('addons');
+      // A choice reads the add-on's price now (the catalogue's; each unit keeps the price PAY sold it at).
+      await t.db.updateTable('addon_item_prices').set({ price_minor: 99_000 }).where('addon_id', '=', engraving).where('currency', '=', 'EUR').execute();
+      expect((await f.live.entry(a.id, r.id))!.totalMinor).toBe(2 * (505_000 + 99_000 + 5_000));
+      await t.db.updateTable('addon_item_prices').set({ price_minor: 15_000 }).where('addon_id', '=', engraving).where('currency', '=', 'EUR').execute();
+      expect((await f.live.setAddons(a.id, r.id, [], a.actor)).addonItems).toEqual([]);
+      await f.live.setAddons(a.id, r.id, [{ addonId: care }], a.actor);
       const confirmed = await f.live.confirm(a.id, r.id, a.actor);
       expect(confirmed).toMatchObject({ status: 'CONFIRMED', confirmedAt: at(10 * SECOND), totalMinor: 2 * (505_000 + 24_000) });
+      expect(confirmed.addonItems).toEqual([{ addonId: care, name: 'ORBES CARE', line: null, units: 2, priceMinor: 24_000, text: null }]);
+      // One unit on each piece's order, at the price of PAY; no snapshot.
+      const sold = await t.db.selectFrom('orders as o').innerJoin('order_addon_items as u', 'u.order_id', 'o.id').select(['o.piece', 'o.addons', 'u.addon_id', 'u.price_minor']).where('o.live_entry_id', '=', confirmed.id).orderBy('o.piece').execute();
+      expect(sold.map((u) => [u.piece, u.addons, u.addon_id, u.price_minor])).toEqual([
+        [1, [], care, 24_000],
+        [2, [], care, 24_000],
+      ]);
       await rejects(f.live.confirm(a.id, r.id, a.actor), 'LIVE_NOT_SECURED', 409);
       await rejects(f.live.release(a.id, r.id, a.actor), 'LIVE_NOT_SECURED', 409);
       // b's hold runs out: its add-ons go with it, its piece returns.
       f.clock.set(at(11 * SECOND));
       await holdAndSecure(r.id, b.id, b.actor);
-      await f.live.setAddons(b.id, r.id, [r.addons[1]!.id], b.actor);
+      await f.live.setAddons(b.id, r.id, [{ addonId: box }], b.actor);
       const end = (await entry(r.id, b.id)).hold_expires_at!;
       f.clock.set(end);
       await rejects(f.live.confirm(b.id, r.id, b.actor), 'LIVE_HOLD_ENDED', 409);
       await rejects(f.live.setAddons(b.id, r.id, [], b.actor), 'LIVE_HOLD_ENDED', 409);
       expect(await advance(r, end)).toMatchObject({ expired: 1 });
       expect(await entry(r.id, b.id)).toMatchObject({ status: 'EXPIRED', ended_at: end });
-      expect(await t.db.selectFrom('live_entry_addons').select('addon_id').where('entry_id', '=', (await entry(r.id, b.id)).id).execute()).toEqual([]);
+      expect(await t.db.selectFrom('addon_choices').select('addon_id').where('live_entry_id', '=', (await entry(r.id, b.id)).id).execute()).toEqual([]);
       // Once the engine has marked it EXPIRED, a late PAY, add-on change or RELEASE MY PLACE still says the hold has ended.
       await rejects(f.live.confirm(b.id, r.id, b.actor), 'LIVE_HOLD_ENDED', 409);
       await rejects(f.live.setAddons(b.id, r.id, [], b.actor), 'LIVE_HOLD_ENDED', 409);
@@ -1146,7 +1159,8 @@ describe('LiveService', () => {
       const lifecycle = new LifecycleService({ db: t.db, audit: f.audit, clock: f.clock.now });
       const ownership = new OwnershipService({ db: t.db, audit: f.audit, lifecycle, clock: f.clock.now, transferKey: new Uint8Array(32).fill(9), requireScannedPiece: false });
       const owners = new OwnerService({ db: t.db, audit: f.audit, sessions, ownership, clock: f.clock.now });
-      const past = await release({ sizes: [{ label: '52', stock: 2 }], addons: [{ label: 'GIFT BOX', priceMinor: 5_000 }] });
+      const box = await liveAddon(f, { name: 'GIFT BOX', priceMinor: 5_000 });
+      const past = await release({ sizes: [{ label: '52', stock: 2 }], addonIds: [box] });
       const later = await createLiveRelease(f, { opensAt: new Date('2026-12-01T10:00:00Z'), sizes: [{ label: '50', stock: 1 }] });
       const a = await accountOfTier(f, 1);
       const b = await accountOfTier(f, 0);
@@ -1159,14 +1173,14 @@ describe('LiveService', () => {
       await advance(past, T0);
       f.clock.set(at(5 * SECOND));
       await holdAndSecure(past.id, a.id, a.actor);
-      await f.live.setAddons(a.id, past.id, [past.addons[0]!.id], a.actor);
+      await f.live.setAddons(a.id, past.id, [{ addonId: box }], a.actor);
       await holdAndSecure(past.id, b.id, b.actor);
       await f.live.confirm(b.id, past.id, b.actor);
       f.clock.set(at(20 * SECOND));
       const out = await owners.lock(a.id, f.admin);
       expect(out).toMatchObject({ liveEntriesRemoved: 1, liveInterestWithdrawn: 1 });
       expect(await entry(past.id, a.id)).toMatchObject({ status: 'REMOVED', removed_by: f.admin.id, removed_at: at(20 * SECOND), ended_at: at(20 * SECOND) });
-      expect(await t.db.selectFrom('live_entry_addons').selectAll().where('entry_id', '=', (await entry(past.id, a.id)).id).execute()).toEqual([]);
+      expect(await t.db.selectFrom('addon_choices').selectAll().where('live_entry_id', '=', (await entry(past.id, a.id)).id).execute()).toEqual([]);
       // Its interest in the release already open stays (the release's history); the later one is withdrawn.
       expect((await t.db.selectFrom('live_interest').select('drop_id').where('account_id', '=', a.id).execute()).map((x) => x.drop_id)).toEqual([past.id]);
       const lockAudits = await t.db.selectFrom('audit_logs').select(['action', 'target_id', 'details']).where('action', 'in', ['drop.live.remove', 'drop.live.interest.withdraw', 'account.lock']).where('actor_id', '=', f.admin.id).orderBy('id').execute();

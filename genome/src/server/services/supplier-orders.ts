@@ -451,7 +451,7 @@ export class SupplierOrderService {
         LEFT JOIN expected e ON e.sku_id = p.sku_id AND e.location_id = p.location_id
         LEFT JOIN drafted d ON d.sku_id = p.sku_id AND d.location_id = p.location_id
         LEFT JOIN suppliers s ON s.id = coalesce(k.supplier_id, m.supplier_id, main.supplier_id, a.supplier_id) AND s.active
-       WHERE k.set_aside_at IS NULL AND (k.addon_id IS NULL OR a.active)
+       WHERE k.set_aside_at IS NULL AND (k.addon_id IS NULL OR (a.active AND a.kind = 'PRODUCT'))
          AND (${locationId}::uuid IS NULL OR p.location_id = ${locationId}::uuid)
          AND (${supplierId}::uuid IS NULL OR s.id = ${supplierId}::uuid)`.execute(this.db);
     const skus = await skusOf(this.db, rows.rows.map((r) => r.sku_id));

@@ -31,7 +31,7 @@ import { SHIPMENT_WEIGHT_G_MAX, SHIPMENT_WEIGHT_MISSING_MAX, type AdminRole, typ
 import { activeBoxes, boxRefs, insideVolume, modelPackings, type BoxRef } from './boxes.js';
 import { readySince, ORDER_ALERT_DEFAULTS } from './fulfilment.js';
 import { writeJournal } from './journal.js';
-import { parcelAddonItems } from './order-addons.js';
+import { parcelAddonItems, type ParcelAddonItem } from './order-addons.js';
 import { orderReference, trackingLink } from './orders.js';
 import type { LocationScope } from './receptions.js';
 
@@ -272,7 +272,7 @@ export function checklistOf(
   ticked: ReadonlySet<string>,
   scanned: ReadonlySet<string>,
   box: { name: string } | null = null,
-  addonItems: ReadonlyMap<string, readonly { addonId: string; name: string; units: number }[]> = new Map(),
+  addonItems: ReadonlyMap<string, readonly { addonId: string; name: string; units: number; engraving?: boolean }[]> = new Map(),
 ): ChecklistLine[] {
   const many = orders.length > 1;
   const lines: ChecklistLine[] = [];
@@ -285,8 +285,11 @@ export function checklistOf(
   for (const o of orders) {
     o.addons.forEach((a, j) => lines.push({ key: `addon:${o.id}:${j}`, label: `Add-on: ${a.label}`, byScan: false, ticked: ticked.has(`addon:${o.id}:${j}`) }));
     // Plan MACRO M3 §4.1 (D2): one line per catalogue add-on with its units, ticked by hand (no identity, no scan). The
-    // key carries the units, so a line ticked at × 2 no longer counts once staff make it 3.
+    // key carries the units, so a line ticked at × 2 no longer counts once staff make it 3. A service's unit too (lot
+    // Q2, D8: one line per add-on); the engraving's is the order's own « Engraving done » line below, while it has its
+    // words (without them, its add-on line, so the packer still sees it was bought).
     for (const a of addonItems.get(o.id) ?? []) {
+      if (a.engraving && o.engraving_text !== null) continue;
       const key = `addon-item:${o.id}:${a.addonId}:${a.units}`;
       lines.push({ key, label: `Add-on: ${a.name} × ${a.units}`, byScan: false, ticked: ticked.has(key) });
     }
@@ -305,7 +308,7 @@ export interface PackingSuggestion {
   /** The words of each model without a packed weight. */
   modelsWithoutWeight: string[];
   /** Plan MACRO M3 §4.2: the catalogue add-ons packed with the pieces, by order (each with its units and weight). */
-  addonItems: Map<string, { addonId: string; name: string; units: number; weightG: number | null }[]>;
+  addonItems: Map<string, ParcelAddonItem[]>;
 }
 
 /**
@@ -353,9 +356,10 @@ export function parcelWeight(
   box: BoxRef | null,
   s: Pick<PackingSuggestion, 'weights' | 'modelsWithoutWeight'> & { addonItems?: PackingSuggestion['addonItems'] },
 ): { weightG: number | null; missing: string[] } {
-  // Plan MACRO M3 §4.2: each add-on unit's weight too; an add-on without one is missing by its name.
+  // Plan MACRO M3 §4.2: each add-on unit's weight too; an add-on without one is missing by its name (lot Q2, D4: a
+  // service's counts when it has one, and is never missing: an engraving weighs nothing).
   const addons = [...(s.addonItems?.values() ?? [])].flat();
-  const addonsWithoutWeight = [...new Set(addons.filter((a) => a.weightG === null).map((a) => a.name))];
+  const addonsWithoutWeight = [...new Set(addons.filter((a) => a.weightG === null && !a.service).map((a) => a.name))];
   const missing = [...s.modelsWithoutWeight, ...addonsWithoutWeight, ...(box ? [] : ['box'])].slice(0, SHIPMENT_WEIGHT_MISSING_MAX);
   if (missing.length > 0) return { weightG: null, missing };
   const total =

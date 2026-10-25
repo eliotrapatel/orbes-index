@@ -42,16 +42,33 @@
  *                `order.addon.remove`: the order as it stands with the add-on, its units and price, for the future
  *                Shopify sync) and one audit entry; the units' stock movements journal themselves (`stock.move`).
  *
+ * ONE OFFER RULE (lot Q2, step Q2.3, D3 and D8; N8): an add-on is offered at a moment when it is active, priced in the
+ * currency, its moment's switch on (services/addons.ts `offeredAt`) and, at the two purchase moments with a release (a
+ * LIVE RELEASE's hold, its after-room's own; a draw's place held), picked by that release (`drop_addons`, in its order).
+ * A salon request and YOUR ORDERS follow their switch alone: YOUR ORDERS offers every add-on whose YOUR ORDERS switch is
+ * on, on every order until packing, whatever its release and whether it has ended (as M3; its exclusions kept). Staff
+ * are bound by none of it (every active add-on priced in the order's currency). `addonOffer` lists what a moment offers,
+ * and every choice, addition and carry checks the same (409 ADDON_NOT_OFFERED naming the switch or the pick). The
+ * engraving (services/addons.ts) is one unit at most on an order, and the only add-on whose choice takes words (at most
+ * its `textMax` characters, the house's set); YOUR ORDERS' ADD AN ADD-ON leaves it out (it has its own ENGRAVING). In
+ * YOUR ORDERS its unit is added and removed with its words, in the order's ENGRAVING (services/orders.ts setEngraving,
+ * Q2.5), and never read among the order's add-on rows.
+ *
+ * A service's unit (lot Q2, step Q2.2, D4: an engraving, a gift wrapping; services/addons.ts) is held nowhere: added
+ * with no location and no SKU lock (always available: no count), shipped and returned with its order by its status and
+ * times only (no stock movement; `returned_to_stock` false), left where it is when the order's location changes, its
+ * weight counted in the parcel when it has one; its documents, packing line and export lines are a product's.
+ *
  * Lock order (orders.ts): the source's rows, the order, the units' SKUs in id order (lockSku), the invoice numbers, the
  * journal, the audit log last.
  */
 import { sql } from 'kysely';
 import { inRetriedTransaction, type Db } from '../db/connection.js';
-import { ADDON_UNITS_MAX, HOUSE_CURRENCIES, jsonText, type HouseCurrency, type JsonObject, type OrderAddonAddedBy, type OrderAddonStatus, type OrderRow } from '../db/schema.js';
+import { ADDON_UNITS_MAX, HOUSE_CURRENCIES, jsonText, type AddonKind, type HouseCurrency, type JsonObject, type OrderAddonAddedBy, type OrderAddonStatus, type OrderRow } from '../db/schema.js';
 import { conflict, forbidden, notFound, validationError } from '../errors.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
-import { addonNotFound } from './addons.js';
+import { addonNotFound, OFFER_COLUMN, OFFER_MOMENT_WORDS, type OfferMoment } from './addons.js';
 import { customerAccountLocked } from './auth.js';
 import { issueAddonCreditNotes, issueSupplementaryInvoice, type InvoiceLine } from './invoices.js';
 import { writeJournal } from './journal.js';
@@ -74,6 +91,11 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export const addonOutOfStock = (name: string) => conflict('ADDON_OUT_OF_STOCK', `${name} could not be added: none left.`);
 export const addonNotOffered = (why?: string) => conflict('ADDON_NOT_OFFERED', why ?? 'This add-on is not offered here.');
 export const addonLimit = () => conflict('ADDON_LIMIT', `At most ${ADDON_LIMIT} of each add-on on an order.`);
+/** The engraving: one on an order (Q2.3). */
+const engravingLimit = (name: string) => conflict('ADDON_LIMIT', `At most one ${name} on an order.`);
+/** The engraving's words (Q2.3, D12, N3): at most its most characters, of the house's set. */
+export const engravingWordsInvalid = (max: number) => validationError(`Up to ${max} characters: letters, figures, spaces and . & ’ -`);
+const wordsNotEngraving = () => validationError('Only the engraving takes words.');
 const addonNotAtLocation = (name: string) =>
   conflict('ORDER_ADDON_NOT_AT_LOCATION', `${name} is not in stock at the new location: move its stock there first, or remove the add-on.`);
 const orderNotFound = () => notFound('Order', 'ORDER_NOT_FOUND');
@@ -101,8 +123,17 @@ export interface AddonOfferItem {
   line: string | null;
   priceMinor: number;
   currency: HouseCurrency;
-  /** The units that can be chosen or added now: what is available there, within ADDON_LIMIT (less what the order holds). */
+  /** The units that can be chosen or added now: what is available there, within ADDON_LIMIT (less what the order holds); the engraving 1. */
   maxUnits: number;
+  /** The engraving: its collector types the words engraved on the piece (Q2.3). */
+  engraving: boolean;
+  /** The engraving's most characters (1 to 20); on the engraving only. */
+  textMax?: number;
+  /**
+   * At a LIVE hold (lot Q2, step Q2.8, 5b, N2): an add-on with stock, added to the order at PAY while available (its
+   * note under the rows); never a stock figure. Absent elsewhere and on a service.
+   */
+  whileAvailable?: true;
 }
 
 /** A choice carried onto an order that could not be added: no unit left (NONE_LEFT), or no longer offered (NOT_OFFERED). */
@@ -128,7 +159,7 @@ export interface AccountOrderAddonItem {
 /** A unit as the console's order page reads it. */
 export interface AdminOrderAddonUnit {
   id: string;
-  addon: { id: string; name: string };
+  addon: { id: string; name: string; kind: AddonKind; engraving: boolean };
   skuCode: string;
   priceMinor: number;
   currency: HouseCurrency;
@@ -142,7 +173,8 @@ export interface AdminOrderAddonUnit {
   shippedAt: Date | null;
   returnedAt: Date | null;
   returnedToStock: boolean | null;
-  location: { id: string; name: string };
+  /** Where it is held; null for a service's unit (held nowhere, Q2). */
+  location: { id: string; name: string } | null;
   /** Its supplementary invoice (added after PAID), by number; null otherwise. */
   invoiceId: string | null;
 }
@@ -177,10 +209,21 @@ export interface AddonBy {
 /** The owner of a choice: one LIVE entry, one draw entry or one salon request. */
 export type AddonChoiceOwner = { liveEntryId: string } | { dropEntryId: string } | { shopRequestId: string };
 
-/** One add-on chosen or added: its id and units. */
+/** One add-on chosen or added: its id and units; the engraving's words with its choice (Q2.3), none on any other. */
 export interface AddonUnitsInput {
   addonId: string;
   units: number;
+  text?: string | null;
+}
+
+/**
+ * Where an add-on is offered (Q2.3): a moment and, at LIVE and DRAW, the release whose pick it reads; STAFF, the console
+ * (bound by no switch and no pick).
+ */
+export interface OfferAt {
+  moment: OfferMoment | 'STAFF';
+  /** The release (a LIVE RELEASE, its after-room, a draw) at LIVE and DRAW; null otherwise. */
+  dropId: string | null;
 }
 
 type OwnerColumn = 'live_entry_id' | 'drop_entry_id' | 'shop_request_id';
@@ -199,19 +242,48 @@ export function cleanUnits(units: unknown): number {
   return units;
 }
 
-/** A list of add-ons and their units, checked: each add-on once, at most ADDON_CHOICES_MAX. */
+/** A list of add-ons and their units, checked: each add-on once, at most ADDON_CHOICES_MAX; words given as text (checked against the add-on in setChoices). */
 export function cleanAddonItems(items: unknown): AddonUnitsInput[] {
   if (!Array.isArray(items)) throw validationError('Send the add-ons as a list.');
   if (items.length > ADDON_CHOICES_MAX) throw validationError(`At most ${ADDON_CHOICES_MAX} add-ons.`);
   const seen = new Set<string>();
   return items.map((i) => {
-    const x = (i ?? {}) as { addonId?: unknown; units?: unknown };
+    const x = (i ?? {}) as { addonId?: unknown; units?: unknown; text?: unknown };
     if (typeof x.addonId !== 'string' || !UUID_RE.test(x.addonId)) throw addonNotFound();
     const addonId = x.addonId.toLowerCase();
     if (seen.has(addonId)) throw validationError('Each add-on is chosen once, with its units.');
     seen.add(addonId);
-    return { addonId, units: cleanUnits(x.units) };
+    if (x.text !== undefined && x.text !== null && typeof x.text !== 'string') throw validationError('The words are text.');
+    return { addonId, units: cleanUnits(x.units), ...(typeof x.text === 'string' ? { text: x.text } : {}) };
   });
+}
+
+/** One row chosen at a LIVE hold (lot Q2, step Q2.4, N1): its add-on and, for the engraving, its words. */
+export interface LiveAddonRowInput {
+  addonId: string;
+  text?: string | null;
+}
+
+/**
+ * The rows chosen at a LIVE hold, checked (lot Q2, step Q2.4, N1): each add-on once, at most ADDON_CHOICES_MAX, words as
+ * text (checked against the add-on in setChoices); each a choice of one unit (taken on each piece's order at PAY).
+ */
+export function cleanAddonRows(items: unknown): AddonUnitsInput[] {
+  if (!Array.isArray(items)) throw validationError('Send the add-ons as a list.');
+  return cleanAddonItems(items.map((i: unknown) => ({ ...((i ?? {}) as object), units: 1 })));
+}
+
+/**
+ * The engraving's words as typed (Q2.3, D12, N3): runs of spaces kept to one, trimmed; empty: none (they are then
+ * entered in YOUR ORDERS); otherwise 1 to `max` characters of letters, figures, spaces and . & ' ’ - (400 with the
+ * house's sentence at that maximum).
+ */
+export function engravingWordsOf(text: string | null | undefined, max: number): string | null {
+  if (text === null || text === undefined) return null;
+  const words = text.replace(/\s+/g, ' ').trim();
+  if (words === '') return null;
+  if ([...words].length > max || !/^[\p{L}\p{M}0-9 .&'’-]+$/u.test(words)) throw engravingWordsInvalid(max);
+  return words;
 }
 
 // ── Reads ──────────────────────────────────────────────────────────────────
@@ -225,14 +297,44 @@ interface AddonStanding {
   active: boolean;
   weightG: number | null;
   priceMinor: number | null;
+  /** Available at the location; a service, without count, always (Infinity). */
   available: number;
+  kind: AddonKind;
+  /** Its switches by moment (Q2.3). */
+  offered: Record<OfferMoment, boolean>;
+  engraving: boolean;
+  textMax: number;
+  /** Picked by the release named (drop_addons); false without one. */
+  picked: boolean;
 }
 
-/** The standing of each add-on named (unknown ones absent): its SKU, its price in `currency`, what is available at `locationId`. */
-async function standings(db: Db, addonIds: readonly string[], locationId: string, currency: HouseCurrency | null): Promise<Map<string, AddonStanding>> {
+/**
+ * The standing of each add-on named (unknown ones absent): its SKU, its price in `currency`, what is available at
+ * `locationId`, its switches, and whether the release `dropId` picks it.
+ */
+async function standings(db: Db, addonIds: readonly string[], locationId: string, currency: HouseCurrency | null, dropId: string | null = null): Promise<Map<string, AddonStanding>> {
   if (addonIds.length === 0) return new Map();
-  const rows = await sql<{ addon_id: string; sku_id: string; name: string; line: string | null; active: boolean; weight_g: number | null; price_minor: number | null; available: number }>`
-    SELECT a.id AS addon_id, k.id AS sku_id, a.name, a.line, a.active, a.weight_g, p.price_minor,
+  const rows = await sql<{
+    addon_id: string;
+    sku_id: string;
+    name: string;
+    line: string | null;
+    active: boolean;
+    weight_g: number | null;
+    price_minor: number | null;
+    available: number;
+    kind: AddonKind;
+    offer_live: boolean;
+    offer_draw: boolean;
+    offer_salon: boolean;
+    offer_orders: boolean;
+    engraving: boolean;
+    text_max: number;
+    picked: boolean;
+  }>`
+    SELECT a.id AS addon_id, k.id AS sku_id, a.name, a.line, a.active, a.weight_g, p.price_minor, a.kind,
+           a.offer_live, a.offer_draw, a.offer_salon, a.offer_orders, a.engraving, a.text_max,
+           EXISTS (SELECT 1 FROM drop_addons x WHERE x.addon_id = a.id AND x.drop_id = ${dropId}::uuid) AS picked,
            (coalesce((SELECT sum(m.delta) FROM stock_movements m WHERE m.sku_id = k.id AND m.location_id = ${locationId}::uuid), 0)
             - (SELECT count(*) FROM stock_holds h WHERE h.sku_id = k.id AND h.location_id = ${locationId}::uuid AND h.reservation = 'STOCK'))::int AS available
       FROM addon_items a
@@ -250,37 +352,104 @@ async function standings(db: Db, addonIds: readonly string[], locationId: string
         active: r.active,
         weightG: r.weight_g,
         priceMinor: r.price_minor === null ? null : Number(r.price_minor),
-        available: Number(r.available),
+        available: r.kind === 'SERVICE' ? Number.POSITIVE_INFINITY : Number(r.available),
+        kind: r.kind,
+        offered: { LIVE: r.offer_live, DRAW: r.offer_draw, SALON: r.offer_salon, ORDERS: r.offer_orders },
+        engraving: r.engraving,
+        textMax: Number(r.text_max),
+        picked: r.picked === true,
       },
     ]),
   );
 }
 
+/** At a purchase moment with a release (Q2.3, D3): only what it picks. */
+const readsPick = (at: OfferAt): boolean => at.moment === 'LIVE' || at.moment === 'DRAW';
+
 /**
- * What is offered at `locationId` in `currency` now (services/addons.ts availableAddons' rule: active, priced, at least
- * one available), each with the units that can still be taken: what is available, within ADDON_LIMIT less `held` (the
- * units of that add-on the order holds already). An add-on whose limit is reached is left out.
+ * Why an add-on is not offered where `at` says (Q2.3), in words, or null when it is: set aside or without a price in the
+ * currency (`unpriced`, the caller's words), its moment's switch off, or not picked by the release.
  */
-export async function addonOffer(db: Db, locationId: string, currency: HouseCurrency | null, held: ReadonlyMap<string, number> = new Map()): Promise<AddonOfferItem[]> {
+function notOfferedWhy(s: AddonStanding, at: OfferAt, unpriced: string): string | null {
+  if (!s.active || s.priceMinor === null) return unpriced;
+  if (at.moment === 'STAFF') return null;
+  if (!s.offered[at.moment]) return `${s.name} is not offered ${OFFER_MOMENT_WORDS[at.moment]}.`;
+  if (readsPick(at) && !s.picked) return `${s.name} is not one of this release’s add-ons.`;
+  return null;
+}
+
+/** Where a choice's owner chooses (Q2.3): a LIVE entry at LIVE in its release (an after-room's: its own), a draw's entry at DRAW, a salon request at SALON. */
+async function offerAtOf(db: Db, owner: AddonChoiceOwner): Promise<OfferAt> {
+  if ('liveEntryId' in owner) {
+    const e = await db.selectFrom('live_entries').select('drop_id').where('id', '=', owner.liveEntryId).executeTakeFirst();
+    return { moment: 'LIVE', dropId: e?.drop_id ?? null };
+  }
+  if ('dropEntryId' in owner) {
+    const e = await db.selectFrom('drop_entries').select('drop_id').where('id', '=', owner.dropEntryId).executeTakeFirst();
+    return { moment: 'DRAW', dropId: e?.drop_id ?? null };
+  }
+  return { moment: 'SALON', dropId: null };
+}
+
+/**
+ * What a moment offers at `locationId` in `currency` now (ONE OFFER RULE, Q2.3: active, priced, its moment's switch on
+ * and, at LIVE and DRAW, picked by the release `dropId`, in the release's order; at SALON and ORDERS the switch alone,
+ * in the add-ons' order; STAFF bound by neither), each with the units that can still be taken: a product what is
+ * available there (at least one), a service ADDON_LIMIT (no count), the engraving one; less `held` (the units of that
+ * add-on the order holds already). An add-on whose limit is reached is left out. At a LIVE hold (`pieces`, lot Q2, step
+ * Q2.4, N1) a row is chosen or not: one unit per piece of the entry (one per set), so each offers one, a product only
+ * while `pieces` are available there.
+ */
+export async function addonOffer(
+  db: Db,
+  at: OfferAt & { locationId: string; currency: HouseCurrency | null; held?: ReadonlyMap<string, number>; pieces?: number },
+): Promise<AddonOfferItem[]> {
+  const { locationId, currency } = at;
+  // A LIVE hold (lot Q2, step Q2.4, N1): a row chosen is one unit per piece of the entry (one per set), so each row
+  // takes one, and a product is offered only while that many are available.
+  const pieces = at.pieces === undefined ? null : Math.max(1, at.pieces);
+  const held = at.held ?? new Map<string, number>();
   if (currency === null) return [];
-  const rows = await sql<{ addon_id: string; name: string; line: string | null; price_minor: number; available: number }>`
-    SELECT a.id AS addon_id, a.name, a.line, p.price_minor,
+  const pick = readsPick(at);
+  if (pick && at.dropId === null) return [];
+  const rows = await sql<{ addon_id: string; name: string; line: string | null; price_minor: number; available: number; kind: AddonKind; engraving: boolean; text_max: number }>`
+    SELECT a.id AS addon_id, a.name, a.line, p.price_minor, a.kind, a.engraving, a.text_max,
            (coalesce((SELECT sum(m.delta) FROM stock_movements m WHERE m.sku_id = k.id AND m.location_id = ${locationId}::uuid), 0)
             - (SELECT count(*) FROM stock_holds h WHERE h.sku_id = k.id AND h.location_id = ${locationId}::uuid AND h.reservation = 'STOCK'))::int AS available
       FROM addon_items a
       JOIN skus k ON k.addon_id = a.id
       JOIN addon_item_prices p ON p.addon_id = a.id AND p.currency = ${currency}
-     WHERE a.active
-     ORDER BY a.position, lower(a.name), a.id`.execute(db);
+      ${pick ? sql`JOIN drop_addons x ON x.addon_id = a.id AND x.drop_id = ${at.dropId}::uuid` : sql``}
+     WHERE a.active ${at.moment === 'STAFF' ? sql`` : sql`AND ${sql.ref(`a.${OFFER_COLUMN[at.moment]}`)}`}
+     ORDER BY ${pick ? sql`x.position, ` : sql``}a.position, lower(a.name), a.id`.execute(db);
   return rows.rows
-    .map((r) => ({
-      addonId: r.addon_id,
-      name: r.name,
-      line: r.line,
-      priceMinor: Number(r.price_minor),
-      currency,
-      maxUnits: Math.max(0, Math.min(Number(r.available), ADDON_LIMIT - (held.get(r.addon_id) ?? 0))),
-    }))
+    .map((r) => {
+      const limit = r.engraving ? 1 : ADDON_LIMIT;
+      if (pieces !== null) {
+        const enough = r.kind === 'SERVICE' || Number(r.available) >= pieces;
+        return {
+          addonId: r.addon_id,
+          name: r.name,
+          line: r.line,
+          priceMinor: Number(r.price_minor),
+          currency,
+          maxUnits: enough ? 1 : 0,
+          engraving: r.engraving,
+          ...(r.engraving ? { textMax: Number(r.text_max) } : {}),
+          ...(r.kind === 'PRODUCT' ? { whileAvailable: true as const } : {}),
+        };
+      }
+      return {
+        addonId: r.addon_id,
+        name: r.name,
+        line: r.line,
+        priceMinor: Number(r.price_minor),
+        currency,
+        maxUnits: Math.max(0, Math.min(r.kind === 'SERVICE' ? limit : Number(r.available), limit - (held.get(r.addon_id) ?? 0))),
+        engraving: r.engraving,
+        ...(r.engraving ? { textMax: Number(r.text_max) } : {}),
+      };
+    })
     .filter((r) => r.maxUnits >= 1);
 }
 
@@ -310,32 +479,52 @@ export async function choicesOf(db: Db, column: OwnerColumn, ownerIds: readonly 
 }
 
 /**
- * The choices of an owner replaced (in the caller's transaction, the owner's row held): each checked against what is
- * offered at `locationId` in `currency` now (404 ADDON_NOT_FOUND, 409 ADDON_NOT_OFFERED without a currency or a price
- * in it or once set aside, 409 ADDON_OUT_OF_STOCK when fewer are available there, 409 ADDON_LIMIT above 3). Nothing is
- * held: the stock is taken when the order is created (`carryChoices`). An empty list clears them. Returns what was
- * chosen, for the caller's audit entry.
+ * The choices of an owner replaced (in the caller's transaction, the owner's row held): each checked against what its
+ * moment offers at `locationId` in `currency` now (ONE OFFER RULE: 404 ADDON_NOT_FOUND; 409 ADDON_NOT_OFFERED without a
+ * currency or a price in it, once set aside, its moment's switch off, or at a LIVE hold or a draw's place held not
+ * picked by the release; 409 ADDON_OUT_OF_STOCK when fewer are available there; 409 ADDON_LIMIT above 3, the engraving
+ * above 1). The engraving's words (`text`, its choice only: 400 on another) are at most its most characters of the
+ * house's set (400); none is allowed. At a LIVE hold (`pieces`, lot Q2, step Q2.4, N1) each choice's units are taken
+ * on each piece's order (each set's), so `pieces` times as many must be available. Nothing is held: the stock is taken
+ * when the order is created (`carryChoices`). An empty list clears them. Returns what was chosen, for the caller's audit entry (never the words: `text: true`).
  */
-export async function setChoices(tx: Db, owner: AddonChoiceOwner, items: readonly AddonUnitsInput[], at: { locationId: string; currency: HouseCurrency | null }, now: Date): Promise<JsonObject[]> {
+export async function setChoices(
+  tx: Db,
+  owner: AddonChoiceOwner,
+  items: readonly AddonUnitsInput[],
+  at: { locationId: string; currency: HouseCurrency | null; pieces?: number },
+  now: Date,
+): Promise<JsonObject[]> {
+  // A LIVE hold (lot Q2, step Q2.4, N1): each choice is one unit per piece of the entry (one per set), checked against
+  // the stock for that many.
+  const pieces = Math.max(1, at.pieces ?? 1);
   const [column, ownerId] = ownerOf(owner);
+  const words = new Map<string, string | null>();
   if (items.length > 0) {
     if (at.currency === null) throw addonNotOffered('Add-ons are offered once the price is known.');
-    const found = await standings(tx, items.map((i) => i.addonId), at.locationId, at.currency);
+    const where = await offerAtOf(tx, owner);
+    const found = await standings(tx, items.map((i) => i.addonId), at.locationId, at.currency, where.dropId);
     for (const i of items) {
       const s = found.get(i.addonId);
       if (!s) throw addonNotFound();
-      if (!s.active || s.priceMinor === null) throw addonNotOffered(`${s.name} is not offered here.`);
-      if (s.available < i.units) throw addonOutOfStock(s.name);
+      const why = notOfferedWhy(s, where, `${s.name} is not offered here.`);
+      if (why !== null) throw addonNotOffered(why);
+      if (s.engraving && i.units > 1) throw engravingLimit(s.name);
+      if (s.available < i.units * pieces) throw addonOutOfStock(s.name);
+      if (i.text !== undefined && i.text !== null && !s.engraving) throw wordsNotEngraving();
+      words.set(i.addonId, s.engraving ? engravingWordsOf(i.text, s.textMax) : null);
     }
   }
   await tx.deleteFrom('addon_choices').where(column, '=', ownerId).execute();
   if (items.length > 0) {
     await tx
       .insertInto('addon_choices')
-      .values(items.map((i) => ({ [column]: ownerId, addon_id: i.addonId, units: i.units, chosen_at: now }) as { addon_id: string; units: number; chosen_at: Date }))
+      .values(
+        items.map((i) => ({ [column]: ownerId, addon_id: i.addonId, units: i.units, text: words.get(i.addonId) ?? null, chosen_at: now }) as { addon_id: string; units: number; text: string | null; chosen_at: Date }),
+      )
       .execute();
   }
-  return items.map((i) => ({ addonId: i.addonId, units: i.units }));
+  return items.map((i) => ({ addonId: i.addonId, units: i.units, ...(words.get(i.addonId) ? { text: true } : {}) }));
 }
 
 /** The choices of owners deleted (an entry released, expired, removed or lapsed; carried onto its order). */
@@ -351,7 +540,7 @@ async function unitsOf(db: Db, orderIds: readonly string[], statuses?: readonly 
     .selectFrom('order_addon_items as u')
     .innerJoin('addon_items as a', 'a.id', 'u.addon_id')
     .selectAll('u')
-    .select(['a.name', 'a.weight_g'])
+    .select(['a.name', 'a.weight_g', 'a.kind', 'a.engraving'])
     .where('u.order_id', 'in', [...new Set(orderIds)])
     .$if(statuses !== undefined, (q) => q.where('u.status', 'in', [...statuses!]))
     .orderBy('u.added_at')
@@ -381,10 +570,11 @@ async function heldByAddon(db: Db, orderId: string): Promise<Map<string, number>
 /**
  * An order's add-ons for YOUR ORDERS: one row per add-on and price, its units not removed (a cancelled order's units
  * listed as they were ordered), in the order they were added; removable while the order takes add-ons and a unit is held.
+ * The engraving's unit is never one of them: it is read in the order's own ENGRAVING (lot Q2, step Q2.5).
  */
 export async function accountAddonItems(db: Db, orders: readonly Pick<OrderRow, 'id' | 'channel' | 'status' | 'packing_started_at' | 'shopify_order_id' | 'currency'>[]): Promise<Map<string, AccountOrderAddonItem[]>> {
   const out = new Map<string, AccountOrderAddonItem[]>();
-  const units = (await unitsOf(db, orders.map((o) => o.id))).filter((u) => u.status !== 'REMOVED');
+  const units = (await unitsOf(db, orders.map((o) => o.id))).filter((u) => u.status !== 'REMOVED' && !u.engraving);
   for (const o of orders) {
     const editable = removalWindow(o) === null;
     const items: AccountOrderAddonItem[] = [];
@@ -403,8 +593,9 @@ export async function accountAddonItems(db: Db, orders: readonly Pick<OrderRow, 
 /**
  * The orders of `orders` on which YOUR ORDERS offers ADD AN ADD-ON now (plan MACRO M3 §4.1, §4.4, D2): the order takes
  * add-ons (`addonWindow`) and at least one add-on is offered at its location in its currency with a unit it may still
- * take (`addonOffer` less the units of it the order holds), as `OrderAddonService.offerForAccount` would list it. The
- * offer is read once per location and currency. Stock that runs out between this read and the sheet's leaves the
+ * take (`addonOffer` at ORDERS, its switch alone, whatever the order's release (Q2.3, N8), the engraving left out: it
+ * has its own ENGRAVING; less the units of it the order holds), as `OrderAddonService.offerForAccount` would list it.
+ * The offer is read once per location and currency. Stock that runs out between this read and the sheet's leaves the
  * sheet's « none available ».
  */
 export async function accountAddonOpen(db: Db, orders: readonly Pick<OrderRow, 'id' | 'channel' | 'status' | 'packing_started_at' | 'shopify_order_id' | 'currency' | 'location_id'>[]): Promise<Set<string>> {
@@ -423,7 +614,7 @@ export async function accountAddonOpen(db: Db, orders: readonly Pick<OrderRow, '
     const key = `${o.location_id} ${o.currency}`;
     let offer = offers.get(key);
     if (!offer) {
-      offer = await addonOffer(db, o.location_id, o.currency);
+      offer = (await addonOffer(db, { moment: 'ORDERS', dropId: null, locationId: o.location_id, currency: o.currency })).filter((a) => !a.engraving);
       offers.set(key, offer);
     }
     const mine = held.get(o.id);
@@ -438,16 +629,17 @@ export async function adminAddonUnits(db: Db, orderId: string): Promise<AdminOrd
     .selectFrom('order_addon_items as u')
     .innerJoin('addon_items as a', 'a.id', 'u.addon_id')
     .innerJoin('skus as k', 'k.id', 'u.sku_id')
-    .innerJoin('stock_locations as l', 'l.id', 'u.location_id')
+    // A service's unit is held nowhere (Q2): no location.
+    .leftJoin('stock_locations as l', 'l.id', 'u.location_id')
     .selectAll('u')
-    .select(['a.name', 'k.code', 'l.name as location_name'])
+    .select(['a.name', 'a.kind', 'a.engraving', 'k.code', 'l.id as location_ref', 'l.name as location_name'])
     .where('u.order_id', '=', orderId)
     .orderBy('u.added_at')
     .orderBy('u.id')
     .execute();
   return rows.map((u) => ({
     id: u.id,
-    addon: { id: u.addon_id, name: u.name },
+    addon: { id: u.addon_id, name: u.name, kind: u.kind, engraving: u.engraving },
     skuCode: u.code,
     priceMinor: u.price_minor,
     currency: u.currency,
@@ -459,36 +651,51 @@ export async function adminAddonUnits(db: Db, orderId: string): Promise<AdminOrd
     shippedAt: u.shipped_at,
     returnedAt: u.returned_at,
     returnedToStock: u.returned_to_stock,
-    location: { id: u.location_id, name: u.location_name },
+    location: u.location_ref === null ? null : { id: u.location_ref, name: u.location_name! },
     invoiceId: u.invoice_id,
   }));
+}
+
+/** An add-on a parcel packs: its units and weight (null: unknown), whether it is a service and the engraving (Q2). */
+export interface ParcelAddonItem {
+  addonId: string;
+  name: string;
+  units: number;
+  weightG: number | null;
+  /** A service: its weight counts when it has one, and is never missing (Q2, D4). */
+  service: boolean;
+  /** The engraving: its packing line is the order's « Engraving done » line (services/parcels.ts checklistOf). */
+  engraving: boolean;
 }
 
 /**
  * The add-ons each order of a parcel packs (HELD, or SHIPPED once it has gone): by order, one row per add-on with its
  * units and weight (null: unknown), in the order they were added.
  */
-export async function parcelAddonItems(db: Db, orderIds: readonly string[]): Promise<Map<string, { addonId: string; name: string; units: number; weightG: number | null }[]>> {
-  const out = new Map<string, { addonId: string; name: string; units: number; weightG: number | null }[]>();
+export async function parcelAddonItems(db: Db, orderIds: readonly string[]): Promise<Map<string, ParcelAddonItem[]>> {
+  const out = new Map<string, ParcelAddonItem[]>();
   for (const u of await unitsOf(db, orderIds, ['HELD', 'SHIPPED'])) {
     const list = out.get(u.order_id) ?? [];
     const row = list.find((x) => x.addonId === u.addon_id);
     if (row) row.units += 1;
-    else list.push({ addonId: u.addon_id, name: u.name, units: 1, weightG: u.weight_g });
+    else list.push({ addonId: u.addon_id, name: u.name, units: 1, weightG: u.weight_g, service: u.kind === 'SERVICE', engraving: u.engraving });
     out.set(u.order_id, list);
   }
   return out;
 }
 
-/** An order's units as the Shopify order export lists them (not removed), oldest first: name, SKU code, price. */
-export async function exportAddonUnits(db: Db, orderIds: readonly string[]): Promise<Map<string, { name: string; skuCode: string; priceMinor: number }[]>> {
-  const out = new Map<string, { name: string; skuCode: string; priceMinor: number }[]>();
+/**
+ * An order's units as the Shopify order export lists them (not removed), oldest first: name, SKU code, price, and
+ * whether it is shipped (a service's is not: Q2, S5).
+ */
+export async function exportAddonUnits(db: Db, orderIds: readonly string[]): Promise<Map<string, { name: string; skuCode: string; priceMinor: number; shipping: boolean }[]>> {
+  const out = new Map<string, { name: string; skuCode: string; priceMinor: number; shipping: boolean }[]>();
   if (orderIds.length === 0) return out;
   const rows = await db
     .selectFrom('order_addon_items as u')
     .innerJoin('addon_items as a', 'a.id', 'u.addon_id')
     .innerJoin('skus as k', 'k.id', 'u.sku_id')
-    .select(['u.order_id', 'a.name', 'k.code', 'u.price_minor'])
+    .select(['u.order_id', 'a.name', 'a.kind', 'k.code', 'u.price_minor'])
     .where('u.order_id', 'in', [...new Set(orderIds)])
     .where('u.status', '<>', 'REMOVED')
     .orderBy('u.added_at')
@@ -496,7 +703,7 @@ export async function exportAddonUnits(db: Db, orderIds: readonly string[]): Pro
     .execute();
   for (const r of rows) {
     const list = out.get(r.order_id) ?? [];
-    list.push({ name: r.name, skuCode: r.code, priceMinor: r.price_minor });
+    list.push({ name: r.name, skuCode: r.code, priceMinor: r.price_minor, shipping: r.kind !== 'SERVICE' });
     out.set(r.order_id, list);
   }
   return out;
@@ -575,26 +782,29 @@ export const addonLine = (name: string, priceMinor: number): InvoiceLine => ({ k
 /**
  * `units` units of an add-on added to a locked order, in `currency` (the order's; at a salon's ACCEPTED, the model's
  * base currency), under its SKU's lock: offered (404 ADDON_NOT_FOUND; 409 ADDON_NOT_OFFERED, set aside or without a
- * price in it), within ADDON_LIMIT with what the order holds already (409 ADDON_LIMIT), that many available at the
- * order's location (409 ADDON_OUT_OF_STOCK). After PAID, a supplementary invoice of their lines. Returns the units'
- * ids and the audit entries.
+ * price in it; the collector's (YOUR ORDERS, Q2.3) its YOUR ORDERS switch on and never the engraving, which has its own
+ * ENGRAVING; staff bound by no switch), within ADDON_LIMIT with what the order holds already (409 ADDON_LIMIT; the
+ * engraving one), that many available at the order's location (409 ADDON_OUT_OF_STOCK; a service, held nowhere, without
+ * lock or count). After PAID, a supplementary invoice of their lines. Returns the units' ids and the audit entries.
  */
 async function addUnits(tx: Db, o: OrderRow, addonId: string, units: number, currency: HouseCurrency, by: AddonBy, now: Date): Promise<{ unitIds: string[]; notes: AuditRecordInput[] }> {
   const s = (await standings(tx, [addonId], o.location_id, currency)).get(addonId);
   if (!s) throw addonNotFound();
-  if (!s.active || s.priceMinor === null) throw addonNotOffered(`${s.name} is not offered on this order.`);
-  await lockSku(tx, s.skuId);
+  const why = notOfferedWhy(s, { moment: by.type === 'COLLECTOR' ? 'ORDERS' : 'STAFF', dropId: null }, `${s.name} is not offered on this order.`);
+  if (why !== null) throw addonNotOffered(why);
+  if (by.type === 'COLLECTOR' && s.engraving) throw addonNotOffered(`${s.name} is added with its words, in its own section of the order.`);
+  if (s.kind === 'PRODUCT') await lockSku(tx, s.skuId);
   const held = (await tx.selectFrom('order_addon_items').select('id').where('order_id', '=', o.id).where('addon_id', '=', addonId).where('status', '=', 'HELD').execute()).length;
+  if (s.engraving && held + units > 1) throw engravingLimit(s.name);
   if (held + units > ADDON_LIMIT) throw addonLimit();
-  const level = await stockLevel(tx, s.skuId, o.location_id);
-  if (level.available < units) throw addonOutOfStock(s.name);
+  if (s.kind === 'PRODUCT' && (await stockLevel(tx, s.skuId, o.location_id)).available < units) throw addonOutOfStock(s.name);
   return insertUnits(tx, o, s, units, currency, by, now);
 }
 
 async function insertUnits(
   tx: Db,
   o: OrderRow,
-  s: Pick<AddonStanding, 'addonId' | 'skuId' | 'name'> & { priceMinor: number | null },
+  s: Pick<AddonStanding, 'addonId' | 'skuId' | 'name' | 'kind'> & { priceMinor: number | null },
   units: number,
   currency: HouseCurrency,
   by: AddonBy,
@@ -608,7 +818,8 @@ async function insertUnits(
         order_id: o.id,
         addon_id: s.addonId,
         sku_id: s.skuId,
-        location_id: o.location_id,
+        // A service's unit is held nowhere (order_addon_items_kind_guard).
+        location_id: s.kind === 'SERVICE' ? null : o.location_id,
         price_minor: price,
         currency,
         added_at: now,
@@ -660,34 +871,154 @@ async function removeUnits(tx: Db, o: OrderRow, units: readonly UnitRow[], by: A
   return notes;
 }
 
+// ── The engraving (lot Q2, step Q2.5) ──────────────────────────────────────
+
 /**
- * The choices of a sale's source carried onto its first order (in the transaction that creates it, the order just
- * created): each add-on in `currency`, under its SKU's lock (the SKUs in id order), as many units as are available at
- * the order's location (the rest left out, NONE_LEFT), none when it is set aside or no longer priced in it (NOT_OFFERED)
- * or without a currency; never blocking the sale. The choices are then deleted. Returns the units' audit entries and
- * what was left out, for the source's answer and audit entry.
+ * The engraving an order carries as a unit (lot Q2, step Q2.5, D4): the unit of the engraving add-on not removed (the
+ * latest), its price and currency as sold, who added it (PURCHASE: bought with the order, N5), and the most characters
+ * of its add-on's words (`text_max`, N3).
  */
-export async function carryChoices(tx: Db, o: OrderRow, owner: AddonChoiceOwner, currency: HouseCurrency | null, actor: Actor, now: Date): Promise<{ leftOut: LeftOutAddon[]; notes: AuditRecordInput[] }> {
+export interface EngravingUnit {
+  unitId: string;
+  addonId: string;
+  name: string;
+  status: OrderAddonStatus;
+  priceMinor: number;
+  currency: HouseCurrency;
+  addedBy: OrderAddonAddedBy;
+  textMax: number;
+}
+
+/** The engraving unit of each order of `orderIds` that carries one, by order id. */
+export async function engravingUnits(db: Db, orderIds: readonly string[]): Promise<Map<string, EngravingUnit>> {
+  const out = new Map<string, EngravingUnit>();
+  if (orderIds.length === 0) return out;
+  const rows = await db
+    .selectFrom('order_addon_items as u')
+    .innerJoin('addon_items as a', 'a.id', 'u.addon_id')
+    .select(['u.id', 'u.order_id', 'u.addon_id', 'a.name', 'u.status', 'u.price_minor', 'u.currency', 'u.added_by_type', 'a.text_max'])
+    .where('u.order_id', 'in', [...new Set(orderIds)])
+    .where('a.engraving', '=', true)
+    .where('u.status', '<>', 'REMOVED')
+    .orderBy('u.added_at')
+    .orderBy('u.id')
+    .execute();
+  for (const r of rows) {
+    out.set(r.order_id, { unitId: r.id, addonId: r.addon_id, name: r.name, status: r.status, priceMinor: r.price_minor, currency: r.currency, addedBy: r.added_by_type, textMax: Number(r.text_max) });
+  }
+  return out;
+}
+
+/** The engraving YOUR ORDERS offers in a currency (lot Q2, step Q2.5): its add-on, SKU, name, price and most characters. */
+export interface OrdersEngraving {
+  addonId: string;
+  skuId: string;
+  name: string;
+  priceMinor: number;
+  textMax: number;
+}
+
+/**
+ * The engraving YOUR ORDERS offers in `currency` now (lot Q2, step Q2.5, N8, as Orders → Settings' engraving did): the
+ * active engraving add-on with its YOUR ORDERS switch on, priced in that currency, whatever an order's release; null
+ * otherwise (no engraving offered).
+ */
+export async function ordersEngraving(db: Db, currency: string | null): Promise<OrdersEngraving | null> {
+  if (!isHouseCurrency(currency)) return null;
+  const r = await db
+    .selectFrom('addon_items as a')
+    .innerJoin('skus as k', 'k.addon_id', 'a.id')
+    .innerJoin('addon_item_prices as p', (j) => j.onRef('p.addon_id', '=', 'a.id').on('p.currency', '=', currency))
+    .select(['a.id', 'k.id as sku_id', 'a.name', 'p.price_minor', 'a.text_max'])
+    .where('a.engraving', '=', true)
+    .where('a.active', '=', true)
+    .where('a.offer_orders', '=', true)
+    .executeTakeFirst();
+  return r ? { addonId: r.id, skuId: r.sku_id, name: r.name, priceMinor: Number(r.price_minor), textMax: Number(r.text_max) } : null;
+}
+
+/**
+ * The engraving's unit added to a locked order (lot Q2, step Q2.5): one unit of `e`, held nowhere (a service), at its
+ * price in the order's currency; after PAID, its supplementary invoice (its ADD_ON_ITEM line). Returns the audit entries.
+ */
+export async function addEngravingUnit(tx: Db, o: OrderRow, e: OrdersEngraving, by: AddonBy, now: Date): Promise<AuditRecordInput[]> {
+  return (await insertUnits(tx, o, { addonId: e.addonId, skuId: e.skuId, name: e.name, kind: 'SERVICE', priceMinor: e.priceMinor }, 1, o.currency as HouseCurrency, by, now)).notes;
+}
+
+/**
+ * The engraving's unit `unitId` of a locked order removed (lot Q2, step Q2.5): REMOVED; after PAID, a credit note for its
+ * line. Staff remove it only until the parcel is packed (409 PACKING_PACKED). Returns the audit entries.
+ */
+export async function removeEngravingUnit(tx: Db, o: OrderRow, unitId: string, by: AddonBy, now: Date): Promise<AuditRecordInput[]> {
+  if (by.type === 'STAFF') await assertNotPacked(tx, o);
+  const units = (await unitsOf(tx, [o.id], ['HELD'])).filter((u) => u.id === unitId);
+  return removeUnits(tx, o, units, by, now);
+}
+
+/** Staff add an engraving's unit only until the parcel is packed (409 PACKING_PACKED; lot Q2, step Q2.5). */
+export async function assertEngravingNotPacked(tx: Db, o: Pick<OrderRow, 'id' | 'with_order_id'>): Promise<void> {
+  await assertNotPacked(tx, o);
+}
+
+/**
+ * The choices of a sale's source carried onto its orders (in the transaction that creates them, the orders just
+ * created): a draw's entry and a salon request onto their first order; a LIVE entry (lot Q2, step Q2.4, N1) onto each
+ * piece's order, a set's entry onto each set's first piece's order (D25), each order taking the choice's units. Each
+ * add-on in `currency`, under its SKU's lock (the SKUs in id order), as many units as are available at the orders'
+ * location, given in the orders' order (the rest left out, NONE_LEFT; a service's, all of them, without lock; the
+ * engraving one an order), none when it is no longer offered at its moment (NOT_OFFERED: set aside, no longer priced in
+ * it, its switch turned off or, at a LIVE hold or a draw's place held, no longer picked by the release; Q2.3) or without
+ * a currency; never blocking the sale. The engraving's words chosen with it are written on each order that takes an
+ * engraving unit (`engraving_text`, by COLLECTOR, D25), never on another. The choices are then deleted. Returns the
+ * units' audit entries and what was left out, for the source's answer and audit entry.
+ */
+export async function carryChoices(
+  tx: Db,
+  orders: readonly OrderRow[],
+  owner: AddonChoiceOwner,
+  currency: HouseCurrency | null,
+  actor: Actor,
+  now: Date,
+): Promise<{ leftOut: LeftOutAddon[]; notes: AuditRecordInput[] }> {
   const [column, ownerId] = ownerOf(owner);
-  const choices = await tx.selectFrom('addon_choices').select(['addon_id', 'units']).where(column, '=', ownerId).execute();
   const leftOut: LeftOutAddon[] = [];
   const notes: AuditRecordInput[] = [];
+  const first = orders[0];
+  if (!first) return { leftOut, notes };
+  const choices = await tx.selectFrom('addon_choices').select(['addon_id', 'units', 'text']).where(column, '=', ownerId).execute();
   if (choices.length === 0) return { leftOut, notes };
-  const found = await standings(tx, choices.map((c) => c.addon_id), o.location_id, currency);
+  const where = await offerAtOf(tx, owner);
+  const found = await standings(tx, choices.map((c) => c.addon_id), first.location_id, currency, where.dropId);
   const by: AddonBy = { type: 'PURCHASE', id: null, actor };
   // The SKUs in one order (two sales carrying the same add-ons never wait for each other).
   const ordered = [...choices].sort((a, b) => (found.get(a.addon_id)?.skuId ?? '').localeCompare(found.get(b.addon_id)?.skuId ?? ''));
   for (const c of ordered) {
     const s = found.get(c.addon_id)!;
-    if (currency === null || !s.active || s.priceMinor === null) {
-      leftOut.push({ addonId: s.addonId, name: s.name, units: c.units, reason: 'NOT_OFFERED' });
+    // Each order's units: the choice's, at most ADDON_LIMIT (the engraving one).
+    const each = Math.min(c.units, s.engraving ? 1 : ADDON_LIMIT);
+    const wanted = c.units * orders.length;
+    if (currency === null || notOfferedWhy(s, where, '') !== null) {
+      leftOut.push({ addonId: s.addonId, name: s.name, units: wanted, reason: 'NOT_OFFERED' });
       continue;
     }
-    await lockSku(tx, s.skuId);
-    const level = await stockLevel(tx, s.skuId, o.location_id);
-    const units = Math.max(0, Math.min(c.units, level.available, ADDON_LIMIT));
-    if (units > 0) notes.push(...(await insertUnits(tx, o, s, units, currency, by, now)).notes);
-    if (units < c.units) leftOut.push({ addonId: s.addonId, name: s.name, units: c.units - units, reason: 'NONE_LEFT' });
+    // A service has no stock (lot Q2, D4): no lock, as many as chosen.
+    if (s.kind === 'PRODUCT') await lockSku(tx, s.skuId);
+    let left = s.kind === 'PRODUCT' ? (await stockLevel(tx, s.skuId, first.location_id)).available : Number.POSITIVE_INFINITY;
+    let given = 0;
+    for (const o of orders) {
+      const units = Math.max(0, Math.min(each, left));
+      if (units === 0) continue;
+      // The engraving's words, on the order that carries its unit (D25), never logged; written first, so that the unit's
+      // journal entry carries the order as it now stands.
+      if (s.engraving && c.text !== null) {
+        await tx.updateTable('orders').set({ engraving_text: c.text, engraving_by: 'COLLECTOR' }).where('id', '=', o.id).execute();
+        Object.assign(o, { engraving_text: c.text, engraving_by: 'COLLECTOR' });
+      }
+      notes.push(...(await insertUnits(tx, o, s, units, currency, by, now)).notes);
+      left -= units;
+      given += units;
+    }
+    if (given < wanted) leftOut.push({ addonId: s.addonId, name: s.name, units: wanted - given, reason: 'NONE_LEFT' });
   }
   await clearChoices(tx, column, [ownerId]);
   return { leftOut, notes };
@@ -700,14 +1031,17 @@ export async function cancelUnits(tx: Db, o: OrderRow, now: Date): Promise<numbe
   return held.length;
 }
 
-/** An order shipped: each unit HELD leaves the ledger with it (SHIPPED, −1, the unit named), under its SKU's lock. */
+/**
+ * An order shipped: each unit HELD leaves the ledger with it (SHIPPED, −1, the unit named), under its SKU's lock; a
+ * service's unit, held nowhere, is SHIPPED without lock nor movement.
+ */
 export async function shipUnits(tx: Db, o: OrderRow, actor: Actor, now: Date): Promise<number> {
   const held = await unitsOf(tx, [o.id], ['HELD']);
   const skus = bySku(held);
   for (const skuId of [...skus.keys()].sort()) {
-    await lockSku(tx, skuId);
+    if (skus.get(skuId)!.units.some((u) => u.location_id !== null)) await lockSku(tx, skuId);
     for (const u of skus.get(skuId)!.units) {
-      await recordMovement(tx, { skuId, locationId: u.location_id, delta: -1, reason: 'SHIPPED', orderId: o.id, orderAddonItemId: u.id }, actor, now);
+      if (u.location_id !== null) await recordMovement(tx, { skuId, locationId: u.location_id, delta: -1, reason: 'SHIPPED', orderId: o.id, orderAddonItemId: u.id }, actor, now);
       await tx.updateTable('order_addon_items').set({ status: 'SHIPPED', shipped_at: later(now, u.added_at) }).where('id', '=', u.id).execute();
     }
   }
@@ -738,7 +1072,8 @@ export async function keptUnits(tx: Db, o: Pick<OrderRow, 'channel' | 'exchange_
  * An order returned (in its transaction): a size exchange (`keep`) leaves its units with the collector; any other
  * return takes back its units SHIPPED (and those a size exchange it replaces had left with the collector): RETURNED,
  * back to stock at `locationId` (the return's, else the order's) with the ledger's RETURNED +1 under each SKU's lock,
- * unless named in `out` (not to be sold again: `returned_to_stock` false, no movement). Returns how many came back.
+ * unless named in `out` (not to be sold again: `returned_to_stock` false, no movement). A service's unit comes back
+ * RETURNED with no lock and no movement, `returned_to_stock` false (it never held stock). Returns how many came back.
  */
 export async function returnUnits(tx: Db, o: OrderRow, r: { keep: boolean; locationId: string | null; out: ReadonlySet<string> }, actor: Actor, now: Date): Promise<{ returned: number; restocked: number }> {
   if (r.keep) return { returned: 0, restocked: 0 };
@@ -747,9 +1082,10 @@ export async function returnUnits(tx: Db, o: OrderRow, r: { keep: boolean; locat
   let restocked = 0;
   const skus = bySku(shipped);
   for (const skuId of [...skus.keys()].sort()) {
-    await lockSku(tx, skuId);
-    for (const u of skus.get(skuId)!.units) {
-      const toStock = !r.out.has(u.id);
+    const g = skus.get(skuId)!;
+    if (g.units.some((u) => u.kind === 'PRODUCT')) await lockSku(tx, skuId);
+    for (const u of g.units) {
+      const toStock = u.kind === 'PRODUCT' && !r.out.has(u.id);
       await tx.updateTable('order_addon_items').set({ status: 'RETURNED', returned_at: later(now, u.shipped_at!), returned_to_stock: toStock }).where('id', '=', u.id).execute();
       if (toStock) {
         await recordMovement(tx, { skuId, locationId: location, delta: 1, reason: 'RETURNED', orderId: u.order_id, orderAddonItemId: u.id }, actor, now);
@@ -767,7 +1103,7 @@ export async function returnUnits(tx: Db, o: OrderRow, r: { keep: boolean; locat
  * that left is gone with the parcel), never waiting for one: the units held beyond what the order's location has are
  * returned (`short`, by add-on), for the decision's answer and its `order.reship` event, so Client Services counts them
  * in, moves them there or removes them before packing; refunded, they stay as they left (gone), credited with the
- * order's cancellation.
+ * order's cancellation. A service's unit comes back to HELD held nowhere, with no lock, no movement and never short.
  */
 export async function reshipUnits(tx: Db, o: OrderRow, r: { cameBack: boolean; reship: boolean }, actor: Actor, now: Date): Promise<{ units: number; short: { addonId: string; name: string; units: number }[] }> {
   if (!r.cameBack && !r.reship) return { units: 0, short: [] };
@@ -775,10 +1111,14 @@ export async function reshipUnits(tx: Db, o: OrderRow, r: { cameBack: boolean; r
   const skus = bySku(shipped);
   const short: { addonId: string; name: string; units: number }[] = [];
   for (const skuId of [...skus.keys()].sort()) {
-    await lockSku(tx, skuId);
     const g = skus.get(skuId)!;
+    if (g.units[0]!.kind === 'SERVICE') {
+      await tx.updateTable('order_addon_items').set({ status: 'HELD', shipped_at: null }).where('id', 'in', g.units.map((u) => u.id)).execute();
+      continue;
+    }
+    await lockSku(tx, skuId);
     for (const u of g.units) {
-      if (r.cameBack) await recordMovement(tx, { skuId, locationId: u.location_id, delta: 1, reason: 'RETURNED', orderId: o.id, orderAddonItemId: u.id }, actor, now);
+      if (r.cameBack && u.location_id !== null) await recordMovement(tx, { skuId, locationId: u.location_id, delta: 1, reason: 'RETURNED', orderId: o.id, orderAddonItemId: u.id }, actor, now);
       await tx.updateTable('order_addon_items').set({ status: 'HELD', shipped_at: null, location_id: o.location_id }).where('id', '=', u.id).execute();
     }
     if (!r.cameBack) {
@@ -792,10 +1132,11 @@ export async function reshipUnits(tx: Db, o: OrderRow, r: { cameBack: boolean; r
 /**
  * An order's location changed (in its transaction, the order's row held): its units HELD move with it, each SKU under
  * its lock, while the new location has them available; otherwise the change is refused (409
- * ORDER_ADDON_NOT_AT_LOCATION: move the stock first, or remove the add-on). Returns how many moved.
+ * ORDER_ADDON_NOT_AT_LOCATION: move the stock first, or remove the add-on). A service's unit, held nowhere, stays as it
+ * is. Returns how many moved.
  */
 export async function moveUnits(tx: Db, o: OrderRow, toLocationId: string): Promise<number> {
-  const moving = (await unitsOf(tx, [o.id], ['HELD'])).filter((u) => u.location_id !== toLocationId);
+  const moving = (await unitsOf(tx, [o.id], ['HELD'])).filter((u) => u.kind === 'PRODUCT' && u.location_id !== toLocationId);
   const skus = bySku(moving);
   for (const skuId of [...skus.keys()].sort()) {
     await lockSku(tx, skuId);
@@ -839,14 +1180,16 @@ export class OrderAddonService {
 
   /**
    * What the collector can add to one of their orders now (GET /api/v1/account/orders/:id/addons): the add-ons offered
-   * at its location in its currency, each with the units it can still take; `canAdd` false with its reason otherwise.
-   * Their own order only (404 ORDER_NOT_FOUND).
+   * in YOUR ORDERS at its location in its currency (their YOUR ORDERS switch alone, whatever the order's release, Q2.3
+   * N8; the engraving left out: it has its own ENGRAVING), each with the units it can still take; `canAdd` false with
+   * its reason otherwise. Their own order only (404 ORDER_NOT_FOUND).
    */
   async offerForAccount(accountId: string, orderId: string): Promise<AccountAddonOffer> {
     const o = await this.ownOrder(this.db, accountId, orderId);
     const reason = addonWindow(o);
     const currency = isHouseCurrency(o.currency) ? o.currency : null;
-    const offer = reason === null ? await addonOffer(this.db, o.location_id, currency, await heldByAddon(this.db, o.id)) : [];
+    const offer =
+      reason === null ? (await addonOffer(this.db, { moment: 'ORDERS', dropId: null, locationId: o.location_id, currency, held: await heldByAddon(this.db, o.id) })).filter((a) => !a.engraving) : [];
     return { canAdd: reason === null, reason, paid: o.status === 'PAID', currency, offer };
   }
 
@@ -871,8 +1214,9 @@ export class OrderAddonService {
 
   /**
    * REMOVE (DELETE /api/v1/account/orders/:id/addons/:addonId): every unit HELD of that add-on on the collector's own
-   * order, until packing starts (404 ADDON_NOT_FOUND when it holds none). After PAID, a credit note for their lines.
-   * Audited `order.addon.remove` by the account.
+   * order, until packing starts (404 ADDON_NOT_FOUND when it holds none; the engraving's, removed with its words in the
+   * order's ENGRAVING, lot Q2, step Q2.5, among them). After PAID, a credit note for their lines. Audited
+   * `order.addon.remove` by the account.
    */
   async removeForAccount(accountId: string, orderId: string, addonId: string, actor: Actor): Promise<string> {
     if (typeof addonId !== 'string' || !UUID_RE.test(addonId)) throw unitNotFound();
@@ -881,7 +1225,8 @@ export class OrderAddonService {
       const o = await this.ownOrder(tx, accountId, orderId, { forUpdate: true });
       const why = removalWindow(o);
       if (why !== null) throw windowError(why);
-      const units = (await unitsOf(tx, [o.id], ['HELD'])).filter((u) => u.addon_id === addonId.toLowerCase());
+      // The engraving's unit is removed in the order's ENGRAVING, with its words (lot Q2, step Q2.5).
+      const units = (await unitsOf(tx, [o.id], ['HELD'])).filter((u) => u.addon_id === addonId.toLowerCase() && !u.engraving);
       if (units.length === 0) throw unitNotFound();
       const notes = await removeUnits(tx, o, units, { type: 'COLLECTOR', id: o.account_id, actor }, this.clock());
       for (const n of notes) await this.audit.record(n, tx);
@@ -932,7 +1277,8 @@ export class OrderAddonService {
   }
 
   /**
-   * The add-ons offered at a location in a currency now, as the console's Add an add-on dialog lists them for an order;
+   * The add-ons offered at a location in a currency now, as the console's Add an add-on dialog lists them for an order
+   * (staff bound by no switch and no pick, Q2.3: every active add-on priced in its currency, the engraving included);
    * none once its parcel is packed (`PACKED`).
    */
   async offerForStaff(orderId: string): Promise<StaffAddonOffer> {
@@ -943,7 +1289,7 @@ export class OrderAddonService {
     const open = why === null || why === 'PACKING_STARTED';
     const reason: StaffAddonOffer['reason'] = !open ? why : (await packedShipment(this.db, o)) ? 'PACKED' : null;
     const currency = isHouseCurrency(o.currency) ? o.currency : null;
-    const offer = reason === null ? await addonOffer(this.db, o.location_id, currency, await heldByAddon(this.db, o.id)) : [];
+    const offer = reason === null ? await addonOffer(this.db, { moment: 'STAFF', dropId: null, locationId: o.location_id, currency, held: await heldByAddon(this.db, o.id) }) : [];
     return { canAdd: reason === null, reason, paid: o.status === 'PAID', currency, offer };
   }
 
@@ -986,6 +1332,8 @@ export interface ExportedAddonChoice {
   sourceId: string;
   addon: string;
   units: number;
+  /** The engraving's words typed with it (review of lot Q2: the collector's own words, exported); null without any. */
+  text: string | null;
   chosenAt: Date;
 }
 
@@ -997,7 +1345,7 @@ export async function exportedAddonChoices(db: Db, accountId: string): Promise<E
     .leftJoin('live_entries as l', 'l.id', 'c.live_entry_id')
     .leftJoin('drop_entries as d', 'd.id', 'c.drop_entry_id')
     .leftJoin('shop_requests as r', 'r.id', 'c.shop_request_id')
-    .select(['c.live_entry_id', 'c.drop_entry_id', 'c.shop_request_id', 'a.name', 'c.units', 'c.chosen_at'])
+    .select(['c.live_entry_id', 'c.drop_entry_id', 'c.shop_request_id', 'a.name', 'c.units', 'c.text', 'c.chosen_at'])
     .where((eb) => eb.or([eb('l.account_id', '=', accountId), eb('d.account_id', '=', accountId), eb('r.account_id', '=', accountId)]))
     .orderBy('c.chosen_at')
     .orderBy('c.id')
@@ -1007,6 +1355,7 @@ export async function exportedAddonChoices(db: Db, accountId: string): Promise<E
     sourceId: (r.live_entry_id ?? r.drop_entry_id ?? r.shop_request_id)!,
     addon: r.name,
     units: r.units,
+    text: r.text === null || r.text === '' ? null : r.text,
     chosenAt: r.chosen_at,
   }));
 }

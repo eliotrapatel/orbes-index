@@ -360,14 +360,15 @@ export class ShopifyExportService {
    * The product export's add-ons (S5): each active add-on priced in `currency`, in its order (position, then name), one
    * product with Shopify's single variant (« Title » / « Default Title »), its SKU's code, its price and weight, type
    * « Add-on », a draft, no image (an add-on has no photograph). Its handle is its name's words, never one a model's
-   * product has (`taken`): its SKU code is added, then a number, until it is free.
+   * product has (`taken`): its SKU code is added, then a number, until it is free. A service (lot Q2, D9, S5: an
+   * engraving, a gift wrapping) is one product of one variant too, not shipped (`Requires shipping` false), no weight.
    */
   private async addonRows(currency: string, taken: Set<string>): Promise<{ rows: string[][]; taken: Set<string> }> {
     const addons = await this.db
       .selectFrom('addon_items as a')
       .innerJoin('skus as k', 'k.addon_id', 'a.id')
       .innerJoin('addon_item_prices as p', (j) => j.onRef('p.addon_id', '=', 'a.id').on('p.currency', '=', currency as HouseCurrency))
-      .select(['a.id', 'a.name', 'a.weight_g', 'k.code', 'p.price_minor'])
+      .select(['a.id', 'a.name', 'a.weight_g', 'a.kind', 'k.code', 'p.price_minor'])
       .where('a.active', '=', true)
       .orderBy('a.position')
       .orderBy(sql`lower(a.name)`)
@@ -394,8 +395,8 @@ export class ShopifyExportService {
         'Option2 name': '',
         'Option2 value': '',
         Price: majorUnits(Number(a.price_minor)),
-        'Weight value (grams)': a.weight_g === null ? '' : String(a.weight_g),
-        'Requires shipping': 'true',
+        'Weight value (grams)': a.weight_g === null || a.kind === 'SERVICE' ? '' : String(a.weight_g),
+        'Requires shipping': a.kind === 'SERVICE' ? 'false' : 'true',
         'Product image URL': '',
         'Image position': '',
         'Image alt text': '',
@@ -593,7 +594,8 @@ export class ShopifyExportService {
       .orderBy('o.reserved_at')
       .orderBy('o.id')
       .execute()) as OrderRow[];
-    // Plan MACRO M3 §4.2 (S5): each catalogue add-on unit (not removed) is a line item after the piece's.
+    // Plan MACRO M3 §4.2 (S5): each catalogue add-on unit (not removed) is a line item after the piece's; a service's is
+    // not shipped (lot Q2, D9).
     const units = await exportAddonUnits(this.db, rows.map((r) => r.id));
     const out: string[][] = [];
     for (const r of rows) {
@@ -654,7 +656,7 @@ export class ShopifyExportService {
         out.push(SHOPIFY_ORDER_COLUMNS.map((c) => next[c] ?? ''));
       }
       for (const u of items) {
-        const next: Partial<Record<(typeof SHOPIFY_ORDER_COLUMNS)[number], string>> = { Name: name, ...line({ name: u.name, price: u.priceMinor, sku: u.skuCode, shipping: true }), Vendor: SHOPIFY_VENDOR };
+        const next: Partial<Record<(typeof SHOPIFY_ORDER_COLUMNS)[number], string>> = { Name: name, ...line({ name: u.name, price: u.priceMinor, sku: u.skuCode, shipping: u.shipping }), Vendor: SHOPIFY_VENDOR };
         out.push(SHOPIFY_ORDER_COLUMNS.map((c) => next[c] ?? ''));
       }
     }

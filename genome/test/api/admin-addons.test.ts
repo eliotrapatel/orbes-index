@@ -86,4 +86,54 @@ describe('the add-ons\' routes (plan MACRO M3 §4.2, D1)', () => {
     const stock = safeJson(await agent.get('/api/admin/logistics/stock')) as { rows: { sku: { id: string; addon: { name: string } | null; model: unknown } }[] };
     expect(stock.rows.filter((r) => r.sku.id === a.sku.id).map((r) => [r.sku.addon?.name, r.sku.model])).toEqual([['Polishing Cloth', null]]);
   });
+
+  it('creates a service and the engraving with their switches and most characters (lot Q2, step Q2.2): its kind at the creation only (409 ADDON_KIND_FIXED), one engraving (409 ADDON_ENGRAVING_TAKEN), strict bodies, no stock anywhere (409 ADDON_SERVICE)', async () => {
+    const created = await operator.post('/api/admin/addons', {
+      kind: 'SERVICE',
+      name: 'Engraving',
+      line: 'Up to 12 characters, engraved by ORBES.',
+      skuCode: 'ADD-ENGRAVING',
+      offeredAt: { salon: false },
+      engraving: true,
+      textMax: 12,
+      prices: { EUR: 4000 },
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    const e = safeJson(created) as Addon & Record<string, unknown>;
+    expect(e).toMatchObject({ kind: 'SERVICE', offeredAt: { live: true, draw: true, salon: false, orders: true }, engraving: true, textMax: 12, stock: [], releases: 0, convertedFrom: [], supplier: null });
+    // A product by default, all its switches on, 20 characters.
+    expect(safeJson(await operator.post('/api/admin/addons', { name: 'Care Kit', skuCode: 'ADD-KIT' }))).toMatchObject({ kind: 'PRODUCT', offeredAt: { live: true, draw: true, salon: true, orders: true }, engraving: false, textMax: 20 });
+    expect(errorOf(await operator.post('/api/admin/addons', { kind: 'SERVICE', name: 'Second Engraving', skuCode: 'ADD-ENGR2', engraving: true }))).toEqual({
+      code: 'ADDON_ENGRAVING_TAKEN',
+      message: 'Another add-on is the engraving: set it aside first.',
+    });
+    expect(errorOf(await operator.post('/api/admin/addons', { name: 'Engraved Tag', skuCode: 'ADD-TAG', engraving: true }))).toEqual({ code: 'VALIDATION_FAILED', message: 'Only a service can be the engraving.' });
+    for (const bad of [
+      { kind: 'BUNDLE', name: 'Gift Box', skuCode: 'ADD-BOX' },
+      { kind: 'SERVICE', name: 'Gift Box', skuCode: 'ADD-BOX', offeredAt: { shop: true } },
+      { kind: 'SERVICE', name: 'Gift Box', skuCode: 'ADD-BOX', offeredAt: { live: 'yes' } },
+      { kind: 'SERVICE', name: 'Gift Box', skuCode: 'ADD-BOX', engraving: true, textMax: 21 },
+      { kind: 'SERVICE', name: 'Gift Box', skuCode: 'ADD-BOX', engraving: true, textMax: 0 },
+    ]) {
+      expect(errorOf(await operator.post('/api/admin/addons', bad)).code, JSON.stringify(bad)).toBe('VALIDATION_FAILED');
+    }
+    // Its kind never changes; its switches and most characters do.
+    expect(errorOf(await operator.patch(`/api/admin/addons/${e.id}`, { kind: 'PRODUCT' }))).toEqual({ code: 'ADDON_KIND_FIXED', message: 'An add-on’s type never changes: set this one aside and create the other.' });
+    const patched = await operator.patch(`/api/admin/addons/${e.id}`, { offeredAt: { live: false }, textMax: 20 });
+    expect(patched.statusCode, patched.body).toBe(200);
+    expect(safeJson(patched)).toMatchObject({ offeredAt: { live: false, draw: true, salon: false, orders: true }, textMax: 20 });
+    expect(errorOf(await operator.patch(`/api/admin/addons/${e.id}`, { textMax: 21 })).code).toBe('VALIDATION_FAILED');
+    // A service takes no stock: never in Logistics, a minimum refused.
+    const stock = safeJson(await operator.get('/api/admin/logistics/stock')) as { rows: { sku: { id: string } }[]; skus: { id: string }[]; locations: { id: string }[] };
+    expect(stock.skus.some((k) => k.id === (e.sku as { id: string }).id)).toBe(false);
+    expect(stock.rows.some((r) => r.sku.id === (e.sku as { id: string }).id)).toBe(false);
+    const location = stock.locations[0]!.id;
+    expect(errorOf(await put(operator, '/api/admin/logistics/minimums', { skuId: (e.sku as { id: string }).id, locationId: location, minimum: 2 }))).toEqual({
+      code: 'ADDON_SERVICE',
+      message: 'Engraving is a service: it has no stock.',
+    });
+    // An AUDITOR reads it; never writes it.
+    expect(safeJson(await auditor.get(`/api/admin/addons/${e.id}`))).toMatchObject({ kind: 'SERVICE', engraving: true });
+    expect(errorOf(await auditor.patch(`/api/admin/addons/${e.id}`, { engraving: false })).code).toBe('FORBIDDEN');
+  });
 });

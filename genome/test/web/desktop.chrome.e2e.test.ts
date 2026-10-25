@@ -244,6 +244,9 @@ describe.skipIf(!HAS_CHROMIUM)('desktop chrome (Chromium, a computer)', () => {
           for (let attempt = 1; ; attempt++) {
             const context = await st.browser.newContext({ ...options, locale: 'en-GB', timezoneId: 'Europe/Paris' });
             try {
+              // The demo's NOW, as every other window of the case: the phone's offset is read from its clock, and Paris
+              // is UTC+01:00 once summer time ends (25 October 2026), where the words below say UTC+02:00.
+              await context.clock.setFixedTime(new Date('2026-10-05T16:49:00.000Z'));
               if (script) await context.addInitScript({ content: script });
               const page = await context.newPage();
               await page.goto(`${st.stage.origin}/verify/releases/${st.demo.releases.draw}`);

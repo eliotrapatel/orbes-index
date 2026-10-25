@@ -12,6 +12,7 @@
  *  - the calls: the hold's choice beside the release's add-ons, a place held's, a request's, YOUR ORDERS' offer, addition
  *    and removal, each with the CSRF token, and an answer of the wrong shape refused.
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { ADDON_LIMIT } from '../../src/server/services/order-addons.js';
 import {
@@ -31,10 +32,12 @@ import {
   withUnits,
 } from '../../src/web/verify/addons-model.js';
 import { ApiClient } from '../../src/web/verify/api.js';
-import { ADDONS, ORDERS } from '../../src/web/verify/copy.js';
+import { ADDONS, LIVE, ORDERS } from '../../src/web/verify/copy.js';
+import { ENGRAVING_TEXT_MAX, engravingProblem, holdRows, securedAddons, securedChoice, securedColumn } from '../../src/web/verify/live-model.js';
+import { payBelowFirstScreen, SECURED_PARTS } from '../../src/web/verify/views/desktop-room.js';
 import { orderModel, orderRows } from '../../src/web/verify/orders-model.js';
 import { formatMoney } from '../../src/web/verify/view-model.js';
-import type { AccountOrder, AddonOfferItem, ChosenAddon } from '../../src/web/verify/types.js';
+import type { AccountOrder, AddonOfferItem, ChosenAddon, LiveEntry } from '../../src/web/verify/types.js';
 
 const CLOTH = '0b5e7d1a-1c2d-4e5f-9a8b-7c6d5e4f3a2b';
 const EXTENDER = '6f1c7a54-3b1e-4c2a-9a55-0d3b1f2e4c5a';
@@ -79,9 +82,9 @@ describe('the add-ons’ rows (addons-model.ts)', () => {
       'EUR',
     );
     expect(rows).toEqual([
-      { addonId: CLOTH, name: 'POLISHING CLOTH', line: 'A soft cloth.', priceMinor: 1_500, price: '+ €\u00a015', units: 2, max: 3 },
-      { addonId: CASE, name: 'THE TRAVEL CASE FOR TWO PIECES, LINED', line: null, priceMinor: 1_245_050, price: '+ €\u00a012\u00a0450.50', units: 0, max: 1 },
-      { addonId: EXTENDER, name: 'CHAIN EXTENDER', line: null, priceMinor: 3_000, price: '+ €\u00a030', units: 1, max: 1 },
+      { addonId: CLOTH, name: 'POLISHING CLOTH', line: 'A soft cloth.', priceMinor: 1_500, price: '+ €\u00a015', units: 2, max: 3, engraving: false, textMax: null },
+      { addonId: CASE, name: 'THE TRAVEL CASE FOR TWO PIECES, LINED', line: null, priceMinor: 1_245_050, price: '+ €\u00a012\u00a0450.50', units: 0, max: 1, engraving: false, textMax: null },
+      { addonId: EXTENDER, name: 'CHAIN EXTENDER', line: null, priceMinor: 3_000, price: '+ €\u00a030', units: 1, max: 1, engraving: false, textMax: null },
     ]);
     expect(rowsTotal(rows)).toBe(2 * 1_500 + 3_000);
     expect(rowsChoice(rows)).toEqual([
@@ -197,6 +200,130 @@ describe('an order’s add-ons in YOUR ORDERS (orders-model.ts, addons-model.ts)
   });
 });
 
+describe('each moment’s offer: a draw’s PLACE HELD, the salon, YOUR ORDERS (lot Q2, step Q2.9; D3, N8, N9)', () => {
+  const ENGRAVING = '4e6a8c0d-2f1b-4c3d-8e5f-6a7b8c9d0e1f';
+  const WRAPPING = '5f7b9d1e-3a2c-4d4e-9f6a-7b8c9d0e1f2a';
+  // A place held's or a request's offer as the server gives it: its moment's switch (and, on PLACE HELD, the draw's
+  // pick) decided which; a product, a service, and the engraving with its one.
+  const moment = [
+    offered({ addonId: CLOTH, name: 'POLISHING CLOTH', engraving: false }),
+    offered({ addonId: WRAPPING, name: 'GIFT WRAPPING', line: 'In the house’s paper, with a card in your words.', engraving: false }),
+    offered({ addonId: ENGRAVING, name: 'ENGRAVING', priceMinor: 4_000, maxUnits: 1, engraving: true, textMax: 12 }),
+  ];
+
+  it('rows the moment’s offer as M3 drew it: a service like a product, the engraving a row of at most 1 carrying its textMax', () => {
+    const rows = addonRows(moment);
+    expect(rows.map((r) => [r.name, r.price, r.units, r.max, r.engraving, r.textMax])).toEqual([
+      ['POLISHING CLOTH', '+ €\u00a015', 0, 3, false, null],
+      ['GIFT WRAPPING', '+ €\u00a015', 0, 3, false, null],
+      ['ENGRAVING', '+ €\u00a040', 0, 1, true, 12],
+    ]);
+    // At most 1 whatever the offer says, and its taps never past it; its words are not typed here (N9): it is chosen as a row.
+    const wide = addonRows([offered({ addonId: ENGRAVING, name: 'ENGRAVING', maxUnits: 3, engraving: true })], new Map([[ENGRAVING, 2]]));
+    expect(wide.map((r) => [r.units, r.max, r.textMax])).toEqual([[1, 1, ENGRAVING_TEXT_MAX]]);
+    expect(withUnits(rows, ENGRAVING, 3).find((r) => r.engraving)!.units).toBe(1);
+    // A most characters the app cannot read: the house's 20.
+    expect(addonRows([offered({ addonId: ENGRAVING, name: 'ENGRAVING', maxUnits: 1, engraving: true, textMax: 25 })])[0]!.textMax).toBe(20);
+    // The choice sent: units, as M3's rows send them (no words).
+    expect(rowsChoice(withUnits(withUnits(rows, ENGRAVING, 1), WRAPPING, 2))).toEqual([
+      { addonId: WRAPPING, units: 2 },
+      { addonId: ENGRAVING, units: 1 },
+    ]);
+  });
+
+  it('says M3’s note at a row’s most, but never for the engraving at its one (its rule is one on an order)', () => {
+    const rows = addonRows(moment);
+    expect(rowsLimit(withUnits(rows, ENGRAVING, 1))).toBeNull();
+    expect(rowsLimit(withUnits(withUnits(rows, ENGRAVING, 1), CLOTH, 3))).toBe(ADDONS.limit);
+  });
+
+  it('never offers the engraving in ADD AN ADD-ON: its own ENGRAVING section on the order adds it', () => {
+    const sheet = addonSheet({ canAdd: true, reason: null, paid: false, currency: 'EUR', offer: moment });
+    expect(sheet.rows.map((r) => r.name)).toEqual(['POLISHING CLOTH', 'GIFT WRAPPING']);
+    expect(sheet.empty).toBeNull();
+    // The engraving alone: none available.
+    expect(addonSheet({ canAdd: true, reason: null, paid: false, currency: 'EUR', offer: moment.slice(2) })).toEqual({ rows: [], empty: ORDERS.addons.none, paidNote: null, currency: 'EUR' });
+  });
+});
+
+describe('5b, SECURED with add-ons (lot Q2, step Q2.8; live-model.ts, desktop-room.ts)', () => {
+  const ENGRAVING = '1c3e5a7b-9d0f-4a2b-8c4d-6e8f0a1b2c3d';
+  const WRAPPING = '2d4f6b8c-0e1a-4b3c-9d5e-7f9a1b2c3d4e';
+  const hold = (o: Partial<LiveEntry> = {}) =>
+    ({
+      currency: 'EUR',
+      quantity: 1,
+      addonOffer: [
+        offered({ addonId: WRAPPING, name: 'Gift wrapping', line: 'In the house’s paper, with a card in your words.', maxUnits: 1, engraving: false }),
+        offered({ addonId: ENGRAVING, name: 'Engraving', line: 'Up to 12 characters, engraved by ORBES.', priceMinor: 4_000, maxUnits: 1, engraving: true, textMax: 12 }),
+        offered({ addonId: CASE, name: 'The travel case', line: 'A case made to carry your piece.', priceMinor: 6_000, maxUnits: 1, engraving: false, whileAvailable: true }),
+      ],
+      addonItems: [{ ...chosen({ addonId: ENGRAVING, name: 'Engraving', priceMinor: 4_000 }), text: 'M. B.' }],
+      ...o,
+    }) as Pick<LiveEntry, 'addonOffer' | 'addonItems' | 'currency'>;
+
+  it('draws a row per add-on you tap (one per piece), ENGRAVING chosen with YOUR TEXT counted against its textMax, and M3’s note while one has stock', () => {
+    const m = securedAddons(hold())!;
+    expect(m.rows.map((r) => [r.name, r.price, r.chosen, r.text])).toEqual([
+      ['GIFT WRAPPING', '+ € 15', false, null],
+      ['ENGRAVING', '+ € 40', true, { value: 'M. B.', max: 12, count: '5 / 12' }],
+      ['THE TRAVEL CASE', '+ € 60', false, null],
+    ]);
+    expect(m.note).toBe('Added to your order at PAY, while available.');
+    // Services only: no note (N2). The engraving without its own most characters: the house's 20; no words: 0 / 20.
+    const services = securedAddons(hold({ addonOffer: [offered({ addonId: ENGRAVING, name: 'Engraving', priceMinor: 15_000, maxUnits: 1, engraving: true })], addonItems: [{ ...chosen({ addonId: ENGRAVING, name: 'Engraving' }), text: null }] }))!;
+    expect(services.note).toBeNull();
+    expect(services.rows[0]!.text).toEqual({ value: '', max: 20, count: '0 / 20' });
+    // Typed and not saved: the field's words and count; a tap not sent yet: chosen or let go at once (no field when let go).
+    const typed = securedAddons(hold(), { drafts: new Map([[ENGRAVING, 'M. B. R.']]), units: new Map([[WRAPPING, 1]]) })!;
+    expect(typed.rows.map((r) => [r.chosen, r.text?.count ?? null])).toEqual([
+      [true, null],
+      [false, null],
+      [false, null],
+    ]);
+    expect(securedAddons(hold(), { drafts: new Map([[ENGRAVING, 'M. B. R.']]) })!.rows[1]!.text!.count).toBe('8 / 12');
+  });
+
+  it('sends the rows chosen with the engraving’s words (none when empty), checks them against its textMax, and totals one unit per piece', () => {
+    const m = securedAddons(hold(), { units: new Map([[ENGRAVING, 1], [CASE, 1]]) })!;
+    expect(securedChoice(m.rows)).toEqual([
+      { addonId: ENGRAVING, text: 'M. B.' },
+      { addonId: CASE, text: null },
+    ]);
+    expect(securedChoice(m.rows, new Map([[ENGRAVING, '  A.   R. ']]))).toEqual([
+      { addonId: ENGRAVING, text: 'A. R.' },
+      { addonId: CASE, text: null },
+    ]);
+    expect(securedChoice(m.rows, new Map([[ENGRAVING, '   ']]))[0]).toEqual({ addonId: ENGRAVING, text: null });
+    expect(engravingProblem('M. B.', 12)).toBeNull();
+    expect(engravingProblem('', 12)).toBeNull();
+    expect(engravingProblem('ABCDEFGHIJKLM', 12)).toBe('Up to 12 characters: letters, figures, spaces and . & ’ -');
+    expect(engravingProblem('M. B. #', 12)).toBe(LIVE.addonText.invalid(12));
+    expect(engravingProblem('ABCDEFGHIJKLMNOPQRST', ENGRAVING_TEXT_MAX)).toBeNull();
+    // PAY's total is the server's (piece + each add-on chosen) × pieces: two pieces, ENGRAVING and THE TRAVEL CASE.
+    const rows = holdRows({ ...hold(), addonItems: [] }, new Map([[ENGRAVING, 1], [CASE, 1]]));
+    expect((505_000 + rowsTotal(rows)) * 2).toBe(1_030_000);
+  });
+
+  it('orders the computer’s right column as the mockup, or with PAY first when the rows would push it below the first screen, the note and the error line under the rows in both', () => {
+    expect(securedColumn(false)).toEqual(['addons-title', 'addons', 'addons-note', 'error', 'pay', 'pay-left', 'pay-note', 'release']);
+    expect(securedColumn(true)).toEqual(['pay', 'pay-left', 'pay-note', 'release', 'addons-title', 'addons', 'addons-note', 'error']);
+    expect(Object.keys(SECURED_PARTS).sort()).toEqual([...securedColumn(false)].sort());
+    expect([payBelowFirstScreen(900, 900), payBelowFirstScreen(900.4, 900), payBelowFirstScreen(901, 900)]).toEqual([false, false, true]);
+  });
+
+  it('names YOUR TEXT by its visible label and the row’s name, never by a sentence of its own (D37)', () => {
+    const view = readFileSync(new URL('../../src/web/verify/views/secured-addons.ts', import.meta.url), 'utf8');
+    expect(view).not.toMatch(/'aria-label'/);
+    expect(view).toContain("'aria-labelledby': `${base}-text-label ${base}-label`");
+    expect(view).toContain("'aria-describedby': [r.line ? lineId : null, countId]");
+    expect(LIVE.addonText.label).toBe('YOUR TEXT');
+    expect(LIVE.addonText.count(5, 12)).toBe('5 / 12');
+    expect(Object.keys(LIVE.addonText).sort()).toEqual(['count', 'invalid', 'label']);
+    expect(Object.keys(LIVE.addonItems)).toEqual(['note']);
+  });
+});
+
 describe('the add-ons’ calls (api.ts)', () => {
   const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
@@ -214,7 +341,7 @@ describe('the add-ons’ calls (api.ts)', () => {
     return { api, calls };
   }
 
-  it('sends the hold’s choice beside the release’s add-ons, a place held’s and a request’s, with the CSRF token', async () => {
+  it('sends the hold’s rows (lot Q2, step Q2.4: each an add-on, the engraving with its words), a place held’s and a request’s, with the CSRF token', async () => {
     const entry = { id: 'e', status: 'SECURED' };
     const { api, calls } = fakeApi([
       () => json(200, { account: { email: 'you@example.com', displayName: null }, csrfToken: 't1' }),
@@ -225,11 +352,12 @@ describe('the add-ons’ calls (api.ts)', () => {
       () => json(201, { request: { id: 'r', status: 'OPEN', createdAt: '2026-10-05T16:49:00.000Z', modelId: 'm' } }),
     ]);
     await api.me();
-    await api.liveAddons('d1', ['a1'], [{ addonId: CLOTH, units: 2 }]);
-    expect(calls[1]).toMatchObject({ url: '/api/v1/live/d1/addons', method: 'PUT', csrf: 't1', body: { addonIds: ['a1'], items: [{ addonId: CLOTH, units: 2 }] } });
-    // Without items: the catalogue add-ons stay as they are (the release's body as before).
-    await api.liveAddons('d1', []);
-    expect(calls[2]!.body).toEqual({ addonIds: [] });
+    await api.liveAddons('d1', [{ addonId: CLOTH }, { addonId: 'e1', text: 'M. B.' }]);
+    expect(calls[1]).toMatchObject({ url: '/api/v1/live/d1/addons', method: 'PUT', csrf: 't1', body: { items: [{ addonId: CLOTH }, { addonId: 'e1', text: 'M. B.' }] } });
+    expect(calls[1]!.body).toEqual({ items: [{ addonId: CLOTH }, { addonId: 'e1', text: 'M. B.' }] });
+    // None: an empty list clears them; empty words are not sent.
+    await api.liveAddons('d1', [{ addonId: 'e1', text: '' }]);
+    expect(calls[2]!.body).toEqual({ items: [{ addonId: 'e1' }] });
     await api.drawAddons('d2', [{ addonId: CLOTH, units: 1 }]);
     expect(calls[3]).toMatchObject({ url: '/api/v1/club/drops/d2/addons', method: 'PUT', csrf: 't1', body: { items: [{ addonId: CLOTH, units: 1 }] } });
     await api.requestPiece('zenith', null, '17', [{ addonId: CLOTH, units: 1 }]);

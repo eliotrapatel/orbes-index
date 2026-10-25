@@ -52,6 +52,8 @@
  *                  sizes, named by its add-on (`sku.addon`, `sku.model` null), with the same figures; it is counted
  *                  without an identity: never unbacked, a correction up needs no piece behind it, and a count in (of
  *                  named pieces) never names one. A transfer or a correction down never takes a unit an order holds.
+ *                  A service (lot Q2, D4: an engraving, a gift wrapping) holds no stock: never listed, and its SKU is
+ *                  refused by a correction, a transfer, a minimum and a count in (409 ADDON_SERVICE).
  *   unbacked       per SKU: the on-hand count of every location together minus the identities that back it (that SKU,
  *                  `stock_entered_at` set, unregistered, not retired, revoked, lost, stolen or flagged, not on a SHIPPED
  *                  or DELIVERED order). A hand count and a Generator piece have none until counted in.
@@ -104,7 +106,7 @@ import {
 import type { ScanMeta, VerificationService, VerifyInput } from './verification.js';
 import type { WarrantyService } from './warranty.js';
 import type { LocationScope } from './receptions.js';
-import { addonsLast, skuRefs as skusOf, skuWords, type SupplierOrderSku } from './sku-owner.js';
+import { addonsLast, assertNotServiceSku, skuRefs as skusOf, skuWords, type SupplierOrderSku } from './sku-owner.js';
 import { assertSkuOffered } from './sizes.js';
 import { knownLocation, lockSku, notAvailable, recordMovement, STOCK_MOVE_MAX, STOCK_NOTE_MAX, stockLevel, type StockLevel, type StockService } from './stock.js';
 import { expectedBySku, toOrderOf } from './supplier-orders.js';
@@ -339,7 +341,7 @@ export class LogisticsService {
                      UNION SELECT sku_id, location_id FROM sku_thresholds
                      UNION SELECT k.id, l.id FROM skus k LEFT JOIN models m ON m.id = k.model_id LEFT JOIN addon_items a ON a.id = k.addon_id
                             CROSS JOIN stock_locations l
-                            WHERE k.set_aside_at IS NULL AND coalesce(m.active, a.active))
+                            WHERE k.set_aside_at IS NULL AND coalesce(m.active, a.active AND a.kind = 'PRODUCT'))
       SELECT p.sku_id, p.location_id, coalesce(m.on_hand, 0) AS on_hand, coalesce(h.reserved, 0) AS reserved,
              coalesce(w.waiting, 0) AS waiting, t.minimum, l.name AS location
         FROM pairs p
@@ -353,6 +355,7 @@ export class LogisticsService {
         JOIN stock_locations l ON l.id = p.location_id
        WHERE (${model}::uuid IS NULL OR k.model_id = ${model}::uuid)
          AND (${loc}::uuid IS NULL OR p.location_id = ${loc}::uuid)
+         AND (a.id IS NULL OR a.kind = 'PRODUCT')
          AND ((k.set_aside_at IS NULL AND coalesce(md.active, a.active))
               OR coalesce(m.on_hand, 0) <> 0 OR coalesce(h.reserved, 0) > 0 OR coalesce(w.waiting, 0) > 0 OR t.minimum IS NOT NULL)`.execute(this.db);
     const kept = rows.rows.filter((r) => inScope(scope, r.location_id));
@@ -363,7 +366,7 @@ export class LogisticsService {
       .leftJoin('addon_items as a', 'a.id', 'k.addon_id')
       .select('k.id')
       .where('k.set_aside_at', 'is', null)
-      .where((eb) => eb.or([eb('m.active', '=', true), eb('a.active', '=', true)]))
+      .where((eb) => eb.or([eb('m.active', '=', true), eb.and([eb('a.active', '=', true), eb('a.kind', '=', 'PRODUCT')])]))
       .execute();
     const skus = await skusOf(this.db, [...kept.map((r) => r.sku_id), ...offered.map((k) => k.id)]);
     // The models' sizes by model, variant and size; the add-ons' SKUs after them, by add-on (the console's ADD-ONS).
@@ -451,6 +454,7 @@ export class LogisticsService {
     const id = await inRetriedTransaction(this.db, async (tx) => {
       const sku = await tx.selectFrom('skus').select('id').where('id', '=', skuId).executeTakeFirst();
       if (!sku) throw skuNotFound();
+      await assertNotServiceSku(tx, skuId);
       const now = this.clock();
       const row = await tx.insertInto('stock_corrections').values({ sku_id: skuId, location_id: locationId, delta, reason, proposed_by: actor.id!, proposed_at: now }).returning('id').executeTakeFirstOrThrow();
       await this.audit.record({ actor, action: 'stock.correction.propose', targetType: 'sku', targetId: skuId, details: { correctionId: row.id, locationId, delta } }, tx);
@@ -564,6 +568,7 @@ export class LogisticsService {
     await inTransaction(this.db, async (tx) => {
       const sku = await tx.selectFrom('skus').select('id').where('id', '=', skuId).executeTakeFirst();
       if (!sku) throw skuNotFound();
+      await assertNotServiceSku(tx, skuId);
       if (minimum !== null) await assertSkuOffered(tx, skuId);
       const now = this.clock();
       const before = await tx.selectFrom('sku_thresholds').select('minimum').where('sku_id', '=', skuId).where('location_id', '=', locationId).forUpdate().executeTakeFirst();
@@ -604,6 +609,7 @@ export class LogisticsService {
       const now = this.clock();
       const exists = await tx.selectFrom('skus').select('id').where('id', '=', sku).executeTakeFirst();
       if (!exists) throw skuNotFound();
+      await assertNotServiceSku(tx, sku);
       await lockSku(tx, sku);
       const seen = new Set<string>();
       const out: string[] = [];

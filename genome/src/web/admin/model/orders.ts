@@ -35,9 +35,6 @@ import {
   type OrderTermsChange,
   type OrderTransitionInput,
   type OrderView,
-  HOUSE_CURRENCIES,
-  type EngravingPricesSheet,
-  type HouseCurrency,
 } from '../types.js';
 
 /** The words Client Services enters, at most (services/orders.ts ORDER_TEXT_LIMITS; test/web/admin.orders.test.ts). */
@@ -576,38 +573,16 @@ export function buyerSection(o: OrderView, masked: boolean): { rows: { label: st
   return { rows, changed, travels };
 }
 
+/**
+ * Orders → Settings, Engraving (lot Q2, steps Q2.5 and Q2.7, N4): the engraving is the ENGRAVING add-on, its prices and
+ * where it is offered set in Catalogue → Add-ons; one line leads there, its link in the middle.
+ */
+export const ENGRAVING_SETTINGS_TEXT = Object.freeze({ before: 'Engraving is an add-on: its prices are in ', link: 'Catalogue → Add-ons', after: ', ENGRAVING.' });
+
 /** The order's engraving (plan NEXT LOT §3.6.C): its words and the price it took (`J.M. · € 30`), the words alone (the release's add-on, or one of before), or None. */
 export function engravingLine(o: Pick<OrderView, 'engravingText' | 'engravingMinor' | 'currency'>): string {
   if (!o.engravingText) return 'None';
   return typeof o.engravingMinor === 'number' && o.engravingMinor > 0 && o.currency ? `${o.engravingText} · ${formatMoney(o.engravingMinor, o.currency)}` : o.engravingText;
-}
-
-// ── Settings → Engraving (plan NEXT LOT §3.6.C) ─────────────────────────────
-
-/** A currency's engraving price as Settings shows it: `€ 30`, or — without one (no engraving offered in it). */
-export function engravingPriceText(sheet: EngravingPricesSheet, c: HouseCurrency): string {
-  const p = sheet.prices[c];
-  return typeof p === 'number' ? formatMoney(p, c) : '—';
-}
-
-/** The Engraving dialog's values: each currency's price in units, '' for none. */
-export function engravingPricesValues(sheet: EngravingPricesSheet): Record<string, string> {
-  return Object.fromEntries(HOUSE_CURRENCIES.map((c) => [c, typeof sheet.prices[c] === 'number' ? moneyField(sheet.prices[c]!) : '']));
-}
-
-/** An amount in units, from 0 to the bound (services/club-program.ts PROGRAM_LIMITS.fee), or empty for none. */
-export function engravingPricesProblem(v: Record<string, string>): string | null {
-  for (const c of HOUSE_CURRENCIES) {
-    const t = (v[c] ?? '').trim();
-    if (!t) continue;
-    const minor = parseMoney(t);
-    if (minor === null || minor < 0 || minor > ORDER_AMOUNT_MAX_MINOR) return `${c}: an amount in units, or empty for none.`;
-  }
-  return null;
-}
-
-export function engravingPricesInput(v: Record<string, string>): Record<HouseCurrency, number | null> {
-  return Object.fromEntries(HOUSE_CURRENCIES.map((c) => [c, (v[c] ?? '').trim() ? parseMoney(v[c]!.trim()) : null])) as Record<HouseCurrency, number | null>;
 }
 
 /** The delays' dialog: whole days within their bounds. */

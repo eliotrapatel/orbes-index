@@ -29,6 +29,7 @@ import {
   OPENED_IN,
   CREDIT_CHANNELS,
   HOUSE_CURRENCIES,
+  ADDON_PICK_POSITION_MAX,
   SHIPPING_FREE_LEVELS,
   SHIPPING_SERVICES,
   DROP_ENTRY_STATUSES,
@@ -65,10 +66,13 @@ import {
   BOX_EMPTY_WEIGHT_G_MAX,
   BOX_INSIDE_MM_MAX,
   BOX_NAME_MAX,
+  ADDON_KINDS,
   ADDON_LINE_MAX,
   ADDON_NAME_MAX,
   ADDON_POSITION_MAX,
   ADDON_PRICE_MINOR_MAX,
+  ADDON_CHOICE_TEXT_MAX,
+  ADDON_TEXT_MAX,
   ADDON_WEIGHT_G_MAX,
   PACKED_WEIGHT_G_MAX,
   SET_NAME_MAX,
@@ -90,7 +94,6 @@ import { SEGMENT_LIMITS, SEGMENT_MATCHES } from '../services/segments.js';
 import { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES } from '../services/after-room.js';
 import {
   LIVE_ADD_PIECES,
-  LIVE_ADDONS_MAX,
   LIVE_EXTEND_MINUTES,
   LIVE_HOLD_MINUTES,
   LIVE_MESSAGE_MAX,
@@ -106,7 +109,6 @@ import {
 } from '../services/live.js';
 import {
   LIVE_ACCESS_MODELS_MAX,
-  LIVE_ADDON_LIMITS,
   LIVE_CURRENCIES,
   LIVE_PRICE_MAX_MINOR,
   LIVE_QUANTITY_LINE_MAX,
@@ -486,7 +488,7 @@ export const circleVoteBody = body({
  */
 export const liveParams = z.object({ id: z.string().max(64) });
 
-/** An id the service checks against the release's own (a size, an add-on): one that is not answers 400 LIVE_SIZE_UNKNOWN or LIVE_ADDON_UNKNOWN. */
+/** An id the service checks against the release's own (a size): one that is not answers 400 LIVE_SIZE_UNKNOWN. */
 const liveRef = z.string().max(64);
 
 /** Macro scope K44 T1: a LIVE RELEASE's size (`sizeId`, a model's), or a size per piece (`sizes`, a set's): exactly one. */
@@ -510,11 +512,15 @@ export const liveEntryBody = body({
 /** POST /api/v1/live/:id/press and /secure: the turn's secret, as the account's state gave it. */
 export const liveTurnBody = body({ token: z.string().trim().min(1, 'Required').max(128, 'Invalid turn').regex(BASE64URL_RE, 'Invalid turn') });
 
-/** PUT /api/v1/live/:id/addons: the add-ons chosen for the piece held, each once, at most six (none: an empty list). */
+/**
+ * PUT /api/v1/live/:id/addons (lot Q2, step Q2.4, D2): the catalogue add-ons chosen for the piece held, each a row (one
+ * unit per piece, one per set: N1), each once, the engraving with its words (`text`, checked by the service: its most
+ * characters, the house's set); an empty list clears them.
+ */
 export const liveAddonsBody = body({
-  addonIds: z.array(liveRef).max(LIVE_ADDONS_MAX, `At most ${LIVE_ADDONS_MAX} add-ons`),
-  /** Plan MACRO M3 §4.2 (D2): the catalogue add-ons chosen with the hold; left out, they stay as they were. */
-  items: addonUnitsList.optional(),
+  items: z
+    .array(z.strictObject({ addonId: uuid, text: z.string().max(ADDON_CHOICE_TEXT_MAX, `At most ${ADDON_CHOICE_TEXT_MAX} characters`).nullable().optional() }))
+    .max(20, 'At most 20 add-ons'),
 });
 
 /**
@@ -885,6 +891,9 @@ const drawPriceTogether = (b: { priceMinor?: number | null; currency?: string | 
  * currency (NOCTURNE, addition 5: optional, both or neither). The description is plain text ('' and null: none). Macro
  * scope K44 T1: a set's draw, `setId` in place of `modelId` (exactly one), its sizes each with its `piece`.
  */
+/** Lot Q2, step Q2.3 (D3): a release's pick of catalogue add-ons, in order, each once (the service's rule: 400, 404, 409). */
+const addonPick = z.array(uuid).max(ADDON_PICK_POSITION_MAX, `At most ${ADDON_PICK_POSITION_MAX} add-ons`);
+
 export const createDropBody = body({
   modelId: uuid.optional(),
   setId: uuid.optional(),
@@ -901,6 +910,8 @@ export const createDropBody = body({
   currency: z.preprocess((v) => (v === '' ? null : v), drawCurrency.nullable().optional()),
   /** Plan MACRO M1 §3.1 (F4): the segment the draw is opened to, until its publication ('' and null: everyone). */
   accessSegmentId: z.preprocess((v) => (v === '' ? null : v), uuid.nullable().optional()),
+  /** Lot Q2, step Q2.3: the catalogue add-ons offered on its places held (omitted: every one its DRAW switch offers, N7). */
+  addonIds: addonPick.optional(),
 })
   .refine((b) => b.closesAt.getTime() > b.opensAt.getTime(), { message: 'Entries close after they open', path: ['closesAt'] })
   .refine((b) => (b.modelId === undefined) !== (b.setId === undefined), { message: 'Send the model, or the set, the release sells', path: ['modelId'] })
@@ -927,6 +938,8 @@ export const updateDropBody = body({
   currency: z.preprocess((v) => (v === '' ? null : v), drawCurrency.nullable().optional()),
   /** Plan MACRO M1 §3.1 (F4): the segment the draw is opened to, until its publication ('' and null: everyone). */
   accessSegmentId: z.preprocess((v) => (v === '' ? null : v), uuid.nullable().optional()),
+  /** Lot Q2, step Q2.3: its pick of catalogue add-ons, replacing it, while a DRAFT. */
+  addonIds: addonPick.optional(),
 })
   .refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one field of the release to change')
   .refine(drawPriceTogether, { message: 'A price is sent with its currency, or both are cleared (null)', path: ['priceMinor'] });
@@ -975,16 +988,6 @@ const liveSizes = z
   )
   .min(LIVE_SIZES.min, `At least ${LIVE_SIZES.min} size`)
   .max(LIVE_SIZES.max * SET_PIECES_MAX, `At most ${LIVE_SIZES.max * SET_PIECES_MAX} sizes`);
-const liveAddons = z
-  .array(
-    z.strictObject({
-      id: uuid.nullable().optional(),
-      label: text(LIVE_ADDON_LIMITS.label),
-      line: z.preprocess(emptyToNull, text(LIVE_ADDON_LIMITS.line).nullable().optional()),
-      priceMinor: livePrice,
-    }),
-  )
-  .max(LIVE_ADDONS_MAX, `At most ${LIVE_ADDONS_MAX} add-ons`);
 /**
  * The settings of a LIVE RELEASE (services/live-console.ts holds their rules: the times' order, the totals, the lists'
  * ids). Macro scope K44 T1: what it sells, its model or its set (`setId`, its sizes per piece).
@@ -1018,7 +1021,11 @@ const liveSettingsFields = {
   surpriseText: z.preprocess(emptyToNull, z.string().trim().max(LIVE_SURPRISE_MAX, `At most ${LIVE_SURPRISE_MAX} characters`).nullable().optional()),
   sizes: liveSizes,
   quantityLine: z.preprocess(emptyToNull, text(LIVE_QUANTITY_LINE_MAX).nullable().optional()),
-  addons: liveAddons.optional(),
+  /**
+   * Lot Q2, step Q2.3: the catalogue add-ons offered at its purchase, in order (omitted at its creation: every one its
+   * LIVE switch offers, N7); step Q2.4 (D2): the release add-ons (`addons`) are gone, refused as unknown.
+   */
+  addonIds: addonPick.optional(),
   announceAt: liveTime,
   silhouetteAt: liveTime,
   nameAt: liveTime,
@@ -1049,7 +1056,7 @@ const liveSettingsFields = {
       modelId: uuid,
       priceMinor: livePrice,
       sizes: liveSizes,
-      addons: liveAddons.optional(),
+      addonIds: addonPick.optional(),
       delayMinutes: whole(AFTER_ROOM_DELAY_MINUTES.min, AFTER_ROOM_DELAY_MINUTES.max, 'minutes').optional(),
       lengthMinutes: whole(AFTER_ROOM_LENGTH_MINUTES.min, AFTER_ROOM_LENGTH_MINUTES.max, 'minutes').optional(),
     })
@@ -1066,6 +1073,12 @@ export const createLiveBody = body(liveSettingsFields)
 export const updateLiveBody = body(Object.fromEntries(Object.entries(liveSettingsFields).map(([k, v]) => [k, (v as z.ZodType).optional()])) as {
   [K in keyof typeof liveSettingsFields]: z.ZodOptional<(typeof liveSettingsFields)[K]>;
 }).refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one setting of the release to change');
+
+/**
+ * PUT /api/admin/live/:id/addons: ADD-ONS OFFERED, the release's pick of catalogue add-ons (`afterRoom`: its
+ * after-room's), in order, replaced, until it ends (review of lot Q2: never locked at the announcement).
+ */
+export const liveAddonPickBody = body({ addonIds: addonPick, afterRoom: z.boolean().optional() });
 
 /** POST /api/admin/live/:id/publish: with a post of the owners' circle linking the release, or not. */
 export const publishLiveBody = optionalBody({ circlePost: z.boolean().optional() });
@@ -1995,12 +2008,6 @@ export const accountEngravingBody = body({ text: z.string().max(200, 'Up to 20 c
 /** GET /api/v1/account/orders/:id/documents/:number (plan NEXT LOT §3.6.C): a document of the order by its number. */
 export const accountDocumentParams = z.object({ id: uuid, number: z.string().trim().max(20, 'Not a document number') });
 
-/** PUT /api/admin/orders/engraving-prices (plan NEXT LOT §3.6.C): each currency's price in minor units, or null for none. */
-const engravingPrice = whole(PROGRAM_LIMITS.fee.min, PROGRAM_LIMITS.fee.max, 'minor units').nullable();
-export const engravingPricesBody = body({
-  prices: z.strictObject({ EUR: engravingPrice, GBP: engravingPrice, USD: engravingPrice, CHF: engravingPrice }, { error: 'The prices are EUR, GBP, USD and CHF' }),
-});
-
 /** PUT /api/admin/orders/:id/buyer's country and phone (plan NEXT LOT §3.6.B): checked by the service in its own words. */
 const buyerCountry = z.preprocess(emptyToNull, z.string().max(8, 'Choose a country').nullable().optional());
 const buyerPhone = z.preprocess(emptyToNull, z.string().max(60, 'Enter a phone number with its country code').nullable().optional());
@@ -2729,6 +2736,14 @@ export const modelPairsBody = body({
 
 export const addonParams = z.object({ id: uuid });
 
+/**
+ * GET /api/admin/addons?moment=LIVE|DRAW&currency=EUR (lot Q2, step Q2.3): the list a release's form picks from, each
+ * add-on's offerability and why not; both or neither (neither: the catalogue).
+ */
+export const addonsQuery = z
+  .object({ moment: queryOptional(z.enum(['LIVE', 'DRAW'], { message: 'LIVE or DRAW' })), currency: queryOptional(z.enum(HOUSE_CURRENCIES, { message: `One of ${HOUSE_CURRENCIES.join(', ')}` })) })
+  .refine((q) => (q.moment === undefined) === (q.currency === undefined), { message: 'Send the moment with its currency', path: ['moment'] });
+
 /** An add-on's price in a house currency, in cents (0 to 1 000 000.00); null removes it (not offered in that currency). */
 const addonPrice = z.number().int('Must be a whole number of cents').min(0, 'At least 0').max(ADDON_PRICE_MINOR_MAX, `At most ${ADDON_PRICE_MINOR_MAX} cents`).nullable();
 /** Prices by house currency: the currencies given only. */
@@ -2736,25 +2751,46 @@ const addonPrices = z.strictObject({ EUR: addonPrice.optional(), GBP: addonPrice
 const addonLine = z.preprocess(emptyToNull, text(ADDON_LINE_MAX).nullable());
 const addonWeight = whole(1, ADDON_WEIGHT_G_MAX, 'grams').nullable();
 const addonPosition = whole(0, ADDON_POSITION_MAX, 'places');
+/** Lot Q2 (D4, N13): PRODUCT (real stock) or SERVICE (none), fixed at the creation. */
+const addonKind = z.enum(ADDON_KINDS, { message: `One of ${ADDON_KINDS.join(', ')}` });
+/** Lot Q2 (D3): its switches, the ones given (on or off). */
+const addonOfferedAt = z.strictObject({ live: z.boolean().optional(), draw: z.boolean().optional(), salon: z.boolean().optional(), orders: z.boolean().optional() });
+/** Lot Q2 (D12, N3): the engraving's most characters, 1 to 20. */
+const addonTextMax = whole(ADDON_TEXT_MAX.min, ADDON_TEXT_MAX.max, 'characters');
 
-/** POST /api/admin/addons: its name, line, SKU code (at the creation only), supplier, weight, position and prices. */
+/**
+ * POST /api/admin/addons: its kind (PRODUCT by default), name, line, SKU code (at the creation only), supplier, weight,
+ * position, switches, the engraving and its most characters, and prices.
+ */
 export const createAddonBody = body({
+  kind: addonKind.optional(),
   name: text(ADDON_NAME_MAX),
   line: addonLine.optional(),
   skuCode: text(64),
   supplierId: uuid.nullable().optional(),
   weightG: addonWeight.optional(),
   position: addonPosition.optional(),
+  offeredAt: addonOfferedAt.optional(),
+  engraving: z.boolean().optional(),
+  textMax: addonTextMax.optional(),
   prices: addonPrices.optional(),
 });
 
-/** PATCH /api/admin/addons/:id: its name, line, supplier, weight and position (its SKU code never changes). At least one. */
+/**
+ * PATCH /api/admin/addons/:id: its name, line, supplier, weight, position, switches, the engraving and its most
+ * characters (its SKU code never changes; its kind neither: another than its own answers 409 ADDON_KIND_FIXED). At
+ * least one.
+ */
 export const updateAddonBody = body({
+  kind: addonKind.optional(),
   name: text(ADDON_NAME_MAX).optional(),
   line: addonLine.optional(),
   supplierId: uuid.nullable().optional(),
   weightG: addonWeight.optional(),
   position: addonPosition.optional(),
+  offeredAt: addonOfferedAt.optional(),
+  engraving: z.boolean().optional(),
+  textMax: addonTextMax.optional(),
 }).refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one field of the add-on to change');
 
 /** PUT /api/admin/addons/:id/prices: the prices by currency, each set or removed (null). At least one. */

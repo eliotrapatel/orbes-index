@@ -75,6 +75,7 @@ import {
 } from '../../src/web/admin/model/logistics.js';
 import { can, logisticsOnly } from '../../src/web/admin/model/permissions.js';
 import { addQuantityProblem } from '../../src/web/admin/model/supplier-orders.js';
+import { ADDON_SKU_TEXT } from '../../src/web/admin/model/addons.js';
 import { href, parseHash } from '../../src/web/admin/router.js';
 import { ADMIN_ROLES, ORDER_CASE_KINDS, SHIPMENT_STATUSES, STOCK_CORRECTION_STATUSES, type LogisticsSku, type ShippingOrderView } from '../../src/web/admin/types.js';
 
@@ -310,6 +311,11 @@ describe('To ship and a parcel', () => {
       ],
     });
     expect(Object.keys(slip)).not.toEqual(expect.arrayContaining(['channel', 'release', 'sourceReference']));
+    // Lot Q2 (D4, D8): a service's units are packed with the order as any add-on's, the engraving's words its own line.
+    const withService = shippingSlip({ ...PARCEL, orders: [{ ...PARCEL.orders[0]!, addons: [], addonItems: [{ name: 'GIFT WRAPPING', units: 1 }] }, PARCEL.orders[1]!] });
+    expect(withService.pieces[0]).toMatchObject({ addons: ['GIFT WRAPPING × 1'], engraving: 'A. & L.' });
+    // A service has no stock: Logistics' ADD-ONS never lists one, and says so (the server refuses its SKU: 409 ADDON_SERVICE).
+    expect(ADDON_SKU_TEXT.groupLead).toContain('A service, such as the engraving, has no stock: it is never listed here.');
     // With its country (by its English name), its phone, and ADDRESS CHANGED's line while the parcel has not shipped.
     const changed = shippingSlip({ ...PARCEL, shipTo: { ...PARCEL.shipTo, country: 'GB', phone: '+44 20 7946 0000' }, addressChanged: { at: '2026-10-07T12:02:00.000Z', by: 'COLLECTOR' } });
     expect(changed.buyer).toEqual({ name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris', country: 'United Kingdom', phone: '+44 20 7946 0000', changed: expect.stringMatching(/^Changed on 07 OCT 2026 at \d{2}:02 by the collector\.$/) });

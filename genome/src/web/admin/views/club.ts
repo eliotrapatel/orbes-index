@@ -70,7 +70,7 @@ import {
 } from '../model/sets.js';
 import { modelChoice } from '../model/variants.js';
 import { href } from '../router.js';
-import { ORDER_CURRENCIES, type Drop, type LiveCard, type LiveSizeMix, type Model, type SegmentName, type SetSizeMix, type SetView } from '../types.js';
+import { LIVE_CURRENCIES, ORDER_CURRENCIES, type AddonPickable, type Drop, type LiveCard, type LiveCurrency, type LiveSizeMix, type Model, type SegmentName, type SetSizeMix, type SetView } from '../types.js';
 import type { Child } from '../../shared/dom.js';
 import type { AdminApi } from '../api.js';
 import { button, pageHeader, pager, section, statusMark, table } from '../ui/components.js';
@@ -400,12 +400,15 @@ async function dropsTab(ctx: ViewContext): Promise<HTMLElement> {
     });
     return holder;
   };
-  const newLive = () => {
+  const newLive = async () => {
     // Each dialog reads the stock afresh.
     mixes.clear();
     proposed = null;
     setMixes.clear();
     setProposed.clear();
+    // Lot Q2, step Q2.7 (D3, N7): the add-ons it may offer in each currency, ticked at first (one unread: the server's default).
+    const lists = await Promise.all(LIVE_CURRENCIES.map((c) => ctx.api.addonPickable('LIVE', c).then((x) => [c, x.items] as const).catch(() => null)));
+    const pickable = Object.fromEntries(lists.filter((x) => x !== null)) as Partial<Record<LiveCurrency, AddonPickable[]>>;
     void openDialog({
       title: 'New live release',
       eyebrow: 'Club · Drops',
@@ -414,7 +417,7 @@ async function dropsTab(ctx: ViewContext): Promise<HTMLElement> {
         { class: 'dialog__text' },
         'A draft: nothing of it is public until it is published. Its seed is drawn now and committed by its fingerprint: it orders the line within a tier at T0. Every other setting takes its default and is set on its page.',
       ),
-      fields: newLiveFields(models.items, newLiveValues(ctx.now()), locations.items, sets.items),
+      fields: newLiveFields(models.items, newLiveValues(ctx.now()), locations.items, sets.items, pickable),
       live: sizeMix,
       validate: (v) => newLiveProblem(v, pieceNamesOf(v.setId)),
       confirmLabel: 'Create release',
@@ -454,7 +457,7 @@ async function dropsTab(ctx: ViewContext): Promise<HTMLElement> {
       ),
       pager(live, (p) => ctx.setQuery({ lpage: p })),
     ],
-    { id: 'live-releases', tools: canManage ? [button('New live release', { kind: 'primary', testId: 'live-new', onClick: newLive })] : [] },
+    { id: 'live-releases', tools: canManage ? [button('New live release', { kind: 'primary', testId: 'live-new', onClick: () => void newLive() })] : [] },
   );
 
   let created: string | null = null;

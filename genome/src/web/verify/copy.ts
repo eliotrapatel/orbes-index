@@ -496,9 +496,10 @@ export const ORDERS = Object.freeze({
     phoneInvalid: 'Enter a phone number with its country code.',
   }),
   /**
-   * ENGRAVING (plan NEXT LOT §3.6.C): its row (`« J.M. » · + € 30`, or the words alone when the release's add-on paid for
-   * it), its link under the rows until packing begins, and its sheet. After payment, a Settings-priced engraving added
-   * gets its own invoice and one removed a credit note, both in DOCUMENTS.
+   * ENGRAVING (plan NEXT LOT §3.6.C): its row (`« J.M. » · + € 30`, or the words alone when the release's add-on of before
+   * paid for it), its link under the rows until packing begins, and its sheet. After payment, an engraving added gets its
+   * own invoice and one removed a credit note, both in DOCUMENTS. Since lot Q2, step Q2.5 the engraving is an add-on's
+   * unit, read here only, never among the order's add-on rows.
    */
   engraving: Object.freeze({
     value: (text: string, price: string | null) => (price ? `« ${text} » · + ${price}` : `« ${text} »`),
@@ -510,7 +511,8 @@ export const ORDERS = Object.freeze({
     title: 'ENGRAVING',
     lead: 'Engraved on your piece before it is shipped.',
     field: 'YOUR ENGRAVING',
-    hint: 'Up to 20 characters: letters, figures, spaces and . & ’ -',
+    /** Its most characters (lot Q2, step Q2.5, N3): the engraving add-on's, 20 for one of before. */
+    hint: (max: number) => `Up to ${max} characters: letters, figures, spaces and . & ’ -`,
     price: (price: string) => `ENGRAVING · + ${price}`,
     included: 'Your engraving was bought with your order.',
     paidAdd: 'Your order is paid: the engraving is added to it with its own invoice, in DOCUMENTS.',
@@ -520,7 +522,7 @@ export const ORDERS = Object.freeze({
     cancel: 'CANCEL',
     /** Said before the server says it, in its words. */
     empty: 'Enter your engraving.',
-    invalid: 'Up to 20 characters: letters, figures, spaces and . & ’ -',
+    invalid: (max: number) => `Up to ${max} characters: letters, figures, spaces and . & ’ -`,
     /** A failure, followed by the server's message. */
     failed: 'The engraving could not be saved just now.',
   }),
@@ -2094,12 +2096,20 @@ export const LIVE = Object.freeze({
   /** An add-on's price, per piece. */
   addonPrice: (price: string) => `+ ${price}`,
   /**
-   * Plan MACRO M3 §4.4 (D2): the catalogue add-ons under the release's, each with its units, carried onto the order at
-   * PAY; those none left of by then are said on CONFIRMED.
+   * Plan MACRO M3 §4.4 (D2): the catalogue add-ons carried onto the order at PAY; those none left of by then are said on
+   * CONFIRMED. Lot Q2, step Q2.8 (5b, N2): one list titled ADD-ONS; the note under its rows when one of them has stock.
    */
   addonItems: Object.freeze({
-    title: 'ADD TO YOUR ORDER',
     note: 'Added to your order at PAY, while available.',
+  }),
+  /**
+   * Lot Q2, step Q2.8 (5b; MK #secured-addons, D12, D37, N3): ENGRAVING chosen, YOUR TEXT under its line, named by its
+   * visible label; its count of the engraving's most characters (`5 / 12`); words it cannot hold, the house's sentence.
+   */
+  addonText: Object.freeze({
+    label: 'YOUR TEXT',
+    count: (n: number, max: number) => `${n} / ${max}`,
+    invalid: (max: number) => ORDERS.engraving.invalid(max),
   }),
   /**
    * PAY with the time to pay inside it (ONE QUEUE, OP-9, 23 Oct; D39, D40): the total, then the time left

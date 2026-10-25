@@ -167,7 +167,7 @@ import { WarrantyService } from '../src/server/services/warranty.js';
 import { defaultLocationId, ensureSku, linkDropSizes } from '../src/server/services/stock.js';
 import { createManualClock, noopLogger, SYSTEM_ACTOR, systemActor, type ManualClock } from '../src/server/types.js';
 import { seedGrowth } from '../test/support/growth.js';
-import { createLiveRelease, holdPieces, type LiveFixture, type LiveReleaseOptions } from '../test/support/live.js';
+import { createLiveRelease, holdPieces, liveAddon, type LiveFixture, type LiveReleaseOptions } from '../test/support/live.js';
 import { CHROMIUM_PATH, cameraClip, codeOf, codePhoto, fullScreenshot, gate, hideGrain, MOBILE, mobileContext, sleep, startUiStage, watchPage as watchPageInto, webpOf } from '../test/support/ui-stage.js';
 import { eachState } from '../test/support/nocturne-stage.js';
 import { openState, ROOM_SIZE_STATES, stateById, type UiState } from '../test/support/nocturne-states.js';
@@ -966,7 +966,7 @@ async function captureLive(stage: Stage, shots: Shots): Promise<void> {
       minTier: 2,
       sizes: [{ label: '50', stock: 8 }, { label: '52', stock: 9 }, { label: '54', stock: 8 }],
       quantityLine: '25 PIECES',
-      addons: [{ label: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000 }],
+      addonIds: [await liveAddon(f, { name: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000, engraving: true })],
     });
     for (const [i, c] of crowd.entries()) if (i !== 3) await ctx.services.live.setInterest(c.id, later.id, later.sizes[i % 3]!.id, c.actor);
     // Announced in three days, at its silhouette's stage: the name tomorrow, the photograph the day after.
@@ -986,10 +986,7 @@ async function captureLive(stage: Stage, shots: Shots): Promise<void> {
       quantityLine: '25 PIECES · NEVER MORE',
       perAccount: 1,
       windows: [{ tier: 3, payMinutes: 10 }],
-      addons: [
-        { label: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000 },
-        { label: 'GIFT BOX', priceMinor: 9_000 },
-      ],
+      addonIds: [await liveAddon(f, { name: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000, engraving: true }), await liveAddon(f, { name: 'GIFT BOX', priceMinor: 9_000 })],
     });
     await ctx.services.media.setLiveSilhouette(planned.id, { mime: 'image/webp', bytes: silhouette }, f.admin);
     await db.updateTable('drops').set({ silhouette_at: new Date(Date.now() + 2 * day), name_at: new Date(Date.now() + 4 * day), photo_at: new Date(Date.now() + 6 * day) }).where('id', '=', planned.id).execute();
@@ -1020,10 +1017,7 @@ async function captureLive(stage: Stage, shots: Shots): Promise<void> {
       minTier: 1,
       sizes: [{ label: '50', stock: 12 }, { label: '52', stock: 1 }, { label: '54', stock: 12 }],
       quantityLine: '25 PIECES',
-      addons: [
-        { label: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000 },
-        { label: 'GIFT BOX', priceMinor: 9_000 },
-      ],
+      addonIds: [await liveAddon(f, { name: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000, engraving: true }), await liveAddon(f, { name: 'GIFT BOX', priceMinor: 9_000 })],
     });
     const [s50, s52, s54] = r.sizes;
     await ctx.services.live.enter(rival.id, r.id, { sizeId: s52!.id }, rival.actor);
@@ -1300,7 +1294,7 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
       await past.live.press(who.id, dropId, token);
       past.clock.advance(1_500);
       await past.live.secure(who.id, dropId, token, who.actor);
-      if (addonIds.length) await past.live.setAddons(who.id, dropId, addonIds, who.actor);
+      if (addonIds.length) await past.live.setAddons(who.id, dropId, addonIds.map((addonId) => ({ addonId })), who.actor);
       past.clock.advance(2_000);
       await past.live.confirm(who.id, dropId, who.actor);
       past.clock.advance(1_000);
@@ -1336,7 +1330,7 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
       priceMinor: 505_000,
       quantityLine: '4 PIECES',
       sizes: [{ label: '52', stock: 2 }, { label: '54', stock: 2 }],
-      addons: [{ label: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000 }],
+      addonIds: [await liveAddon(past, { name: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000, engraving: true })],
       surprise: 'A polishing cloth in the house black, folded under the ring.',
     });
     await titled(live1.id, 'MONOLITHE — LIVE I');
@@ -1345,7 +1339,7 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
     for (const [who, size] of [[me, l52], [rival, l52], [payer, l54], [canceller, l54]] as const) await past.live.enter(who.id, live1.id, { sizeId: size!.id }, who.actor);
     past.clock.advance(MINUTE);
     await past.live.advance(live1.id);
-    const engraving = [live1.addons[0]!.id];
+    const engraving = [await liveAddon(past, { name: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000, engraving: true })];
     for (const [who, addons] of [[rival, engraving], [me, engraving], [payer, []], [canceller, []]] as const) await buy(live1.id, who, [...addons]);
     const orderOf = async (who: Who, dropId: string) =>
       (await db.selectFrom('orders').select('id').where('account_id', '=', who.id).where('drop_id', '=', dropId).executeTakeFirstOrThrow()).id;
@@ -1462,7 +1456,7 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
       priceMinor: 505_000,
       quantityLine: '25 PIECES',
       sizes: [{ label: '50', stock: 8 }, { label: '52', stock: 9 }, { label: '54', stock: 8 }],
-      addons: [{ label: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000 }],
+      addonIds: [await liveAddon(today, { name: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000, engraving: true })],
       minParticipations: 3,
       accessSegmentId: selected.id,
       accessCombine: 'OR',
@@ -1489,12 +1483,12 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
       priceMinor: 505_000,
       quantityLine: '25 PIECES',
       sizes: [{ label: '50', stock: 8 }, { label: '52', stock: 9 }, { label: '54', stock: 8 }],
-      addons: [{ label: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000 }],
+      addonIds: [await liveAddon(today, { name: 'ENGRAVING', line: 'Your initials inside the band', priceMinor: 15_000, engraving: true })],
       minParticipations: 2,
       accessSegmentId: selected.id,
       accessCombine: 'OR',
       surprise: 'A silk pouch, hand-stitched in the atelier.',
-      afterRoom: { modelId: orbite, priceMinor: 190_000, sizes: [{ label: '52', stock: 4 }, { label: '54', stock: 4 }], addons: [{ label: 'GIFT BOX', line: 'Wrapped by hand in the atelier', priceMinor: 9_000 }] },
+      afterRoom: { modelId: orbite, priceMinor: 190_000, sizes: [{ label: '52', stock: 4 }, { label: '54', stock: 4 }], addonIds: [await liveAddon(today, { name: 'GIFT BOX', priceMinor: 9_000 })] },
     });
     await titled(live6.id, 'MONOLITHE — LIVE VI');
     // Its sizes on sale linked to their SKUs, as the console writes a release; LOGISTICS WAREHOUSE holds all of its
@@ -1533,7 +1527,7 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
       quantityLine: '1 PIECE',
       sizes: [{ label: '52', stock: 1 }],
       surprise: 'A polishing cloth in the house black, folded under the ring.',
-      afterRoom: { modelId: orbite, priceMinor: 190_000, sizes: [{ label: '52', stock: 2 }, { label: '54', stock: 2 }], addons: [{ label: 'GIFT BOX', line: 'Wrapped by hand in the atelier', priceMinor: 9_000 }], delayMinutes: 1, lengthMinutes: 15 },
+      afterRoom: { modelId: orbite, priceMinor: 190_000, sizes: [{ label: '52', stock: 2 }, { label: '54', stock: 2 }], addonIds: [await liveAddon(today, { name: 'GIFT BOX', priceMinor: 9_000 })], delayMinutes: 1, lengthMinutes: 15 },
     });
     await titled(live4.id, 'MONOLITHE — LIVE IV');
     await titled(live4.afterRoom!.id, 'MONOLITHE — LIVE IV · THE AFTER-ROOM');

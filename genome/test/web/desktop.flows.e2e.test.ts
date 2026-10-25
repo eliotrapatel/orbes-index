@@ -655,6 +655,34 @@ describe.skipIf(!HAS_CHROMIUM)('desktop flows against the real server (Chromium,
             if (way === 'mouse') await page.mouse.up();
             else await page.keyboard.up(way);
             await page.locator('.view--live .live__secured').first().waitFor({ timeout: 20_000 });
+            // 5b on a computer (lot Q2, step Q2.8; D33–D35): the release picks ENGRAVING and GIFT BOX. SECURED's passage
+            // plays (is-pay-first decided before it, the same after it), the rows fading in with the right column's
+            // other lines (3.3 s); then PAY on the first screen.
+            const secured = page.locator('.view--live .live__secured').first();
+            await secured.locator('.live__addons:not([hidden]) .live__addon').first().waitFor({ timeout: 20_000 });
+            const payFirst = () => secured.evaluate((el) => el.classList.contains('is-pay-first'));
+            const before = await payFirst();
+            expect(await page.evaluate(() => document.querySelector('.view--live')!.classList.contains('live--tx-secured'))).toBe(true);
+            expect(await secured.locator('.d-room__br > .live__addons').evaluate((el) => [getComputedStyle(el).animationName, getComputedStyle(el).animationDelay])).toEqual(['live-fade-in', '3.3s']);
+            await expect.poll(() => page.evaluate(() => document.querySelector('.view--live')!.classList.contains('live--tx-secured')), { ...POLL, timeout: 10_000 }).toBe(false);
+            expect(await payFirst()).toBe(before);
+            expect(await secured.locator('.d-room__br > .live__pay').evaluate((el) => el.getBoundingClientRect().bottom + scrollY <= innerHeight)).toBe(true);
+            // No box and no ground (D34): a row's ring rests at the strong hairline and lifts to ink under the pointer; the
+            // keyboard's ring frames the row, never a ground.
+            const rowItem = secured.locator('.live__addon-item').filter({ has: page.locator('.live__addon[aria-pressed="false"]') }).first();
+            const ring = () => rowItem.locator('.live__addon-mark').evaluate((el) => getComputedStyle(el).borderTopColor);
+            expect(await ring()).toBe('rgba(246, 242, 234, 0.34)');
+            await rowItem.locator('.live__addon').hover();
+            await expect.poll(ring, POLL).toBe('rgb(246, 242, 234)');
+            await page.mouse.move(2, 2);
+            await expect.poll(ring, POLL).toBe('rgba(246, 242, 234, 0.34)');
+            for (let i = 0; i < 40 && !(await page.evaluate(() => !!document.activeElement?.matches('.live__addon'))); i++) await page.keyboard.press('Tab');
+            const focused = await page.evaluate(() => {
+              const item = document.activeElement!.closest('.live__addon-item')!;
+              const s = getComputedStyle(item);
+              return { ground: s.backgroundColor, outline: s.outlineStyle, ring: getComputedStyle(document.activeElement!).outlineStyle };
+            });
+            expect(focused).toEqual({ ground: 'rgba(0, 0, 0, 0)', outline: 'solid', ring: 'none' });
             await expect.poll(status, POLL).toBe('SECURED');
             // A computer starts with the sound off: no tone and no designed sound (lot Q1 §3.10) played, none fetched, SOUND
             // OFF in the room's foot.

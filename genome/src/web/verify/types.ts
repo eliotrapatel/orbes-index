@@ -500,8 +500,13 @@ export interface AddonOfferItem {
   line: string | null;
   priceMinor: number;
   currency: string;
-  /** The units that can be chosen or added now (at most 3 of each on an order, less those it holds). */
+  /** The units that can be chosen or added now (at most 3 of each on an order, less those it holds; the engraving 1). */
   maxUnits: number;
+  /** Lot Q2, step Q2.3: the engraving, whose words the collector types, and its most characters. */
+  engraving?: boolean;
+  textMax?: number;
+  /** Lot Q2, step Q2.8 (5b, N2): at a LIVE hold, an add-on with stock (added at PAY while available). */
+  whileAvailable?: boolean;
 }
 
 /** A choice carried onto an order that could not be added: none left (NONE_LEFT), or no longer offered (NOT_OFFERED). */
@@ -1067,7 +1072,6 @@ export interface LiveSheet extends Omit<LiveCard, 'phase'> {
   description: string | null;
   /** Its sizes in order, with their stock; on a set's release (macro scope K44 T1) each with its piece (1 to 4). */
   sizes: { id: string; label: string; stock: number; piece?: number }[];
-  addons: { id: string; label: string; line: string | null; priceMinor: number }[];
   roomOpensMinutes: number;
   turnSeconds: number;
   payMinutes: number;
@@ -1220,9 +1224,9 @@ export interface LiveEntry {
   confirmedAt: string | null;
   endedAt: string | null;
   letIn: boolean;
-  addons: { id: string; label: string; priceMinor: number }[];
   currency: string;
   priceMinor: number;
+  /** (price + each add-on chosen) × pieces (sets): PAY's total (OP-9). */
   totalMinor: number;
   /** ENDED by the sell-out while in the line: the after-room's door; null otherwise. */
   afterRoom?: AfterRoomDoor | null;
@@ -1231,13 +1235,16 @@ export interface LiveEntry {
   /** ONE QUEUE (lot Q1 §1.3): while QUEUED, its own figures (its place in its size, its estimate); null in an action's answer. */
   queue?: LiveQueue | null;
   /**
-   * Plan MACRO M3 §4.2 (D2): the catalogue add-ons of the entry (while SECURED those chosen with the hold, priced now;
-   * once CONFIRMED those on its order), what the hold offers now, and PAY's answer only, those that could not be added.
+   * Plan MACRO M3 §4.2 (D2), lot Q2 step Q2.4: the catalogue add-ons of the entry (while SECURED the rows chosen with the
+   * hold, one unit per piece, one per set, priced now, the engraving's words as typed; once CONFIRMED its units on its
+   * orders), what the hold offers now (its release's pick), and PAY's answer only, those that could not be added.
    * Absent from a server before them: none.
    */
-  addonItems?: ChosenAddon[];
+  addonItems?: (ChosenAddon & { text?: string | null })[];
   addonOffer?: AddonOfferItem[];
   addonsLeftOut?: LeftOutAddon[];
+  /** A CONFIRMED entry of before lot Q2 (D20): its release add-ons as its orders sold them, per piece; absent otherwise. */
+  legacyAddons?: { label: string; priceMinor: number }[];
 }
 
 /** The one queue's figures of the account's own entry (ONE QUEUE, D8: never the pace, the line's length or a held piece). */
@@ -1402,7 +1409,11 @@ export interface AccountOrder {
    * before); null without one. Absent from a server before it: none.
    */
   engraving?: { text: string; priceMinor: number | null } | null;
-  /** The engraving it may carry: a price from the settings, or the release's add-on (`included`); null when none is offered. */
+  /**
+   * The engraving it may carry: its price and most characters (`maxLength`), or the release's add-on of before
+   * (`included`, no price); since lot Q2, step Q2.5 its engraving's unit when it carries one (`included` when bought with
+   * the order or while its words are not entered, with the price it was sold at); null when none is offered.
+   */
   engravingOffer?: { priceMinor: number | null; included: boolean; maxLength: number } | null;
   /** What the collector may change on it now, as the server reads it. Absent from a server before it: nothing. */
   editable?: { address: boolean; engraving: boolean };

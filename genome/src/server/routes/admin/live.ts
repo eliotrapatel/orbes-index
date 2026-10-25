@@ -7,6 +7,7 @@
  *   POST   /api/admin/live                                   OPERATOR  a DRAFT with its settings, its seed sealed and committed
  *   GET    /api/admin/live/:id                               AUDITOR   one, every setting
  *   PATCH  /api/admin/live/:id                               OPERATOR  any setting, until its announcement (409 LIVE_ANNOUNCED)
+ *   PUT    /api/admin/live/:id/addons                        OPERATOR  ADD-ONS OFFERED (or its after-room's), until it ends (409 LIVE_ENDED)
  *   POST   /api/admin/live/:id/publish                       OPERATOR  announced at its time; `circlePost`: a post of the circle
  *   POST   /api/admin/live/:id/circle-post                   OPERATOR  its post of the circle, published, until its announcement
  *   DELETE /api/admin/live/:id/circle-post                   OPERATOR  that post withdrawn, until its announcement
@@ -69,6 +70,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import {
   emptyBody,
   liveAdminEntryParams,
+  liveAddonPickBody,
   liveAdminParams,
   liveEntriesQuery,
   liveExtendBody,
@@ -139,6 +141,13 @@ export const adminLiveRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
     const b = parse(updateLiveBody, request.body);
     const change = Object.fromEntries(Object.entries(b).filter(([, v]) => v !== undefined));
     return liveConsole.update(id, change, adminActor(request));
+  });
+
+  // ADD-ONS OFFERED (review of lot Q2): the release's pick, or its after-room's, until it ends.
+  app.put('/api/admin/live/:id/addons', async (request) => {
+    const { id } = parse(liveAdminParams, request.params);
+    const b = parse(liveAddonPickBody, request.body);
+    return liveConsole.setAddonPick(id, { addonIds: b.addonIds, afterRoom: b.afterRoom === true }, adminActor(request));
   });
 
   app.post('/api/admin/live/:id/publish', async (request) => {

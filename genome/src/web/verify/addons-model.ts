@@ -11,6 +11,11 @@
  *                AN ADD-ON while the server offers it, the line once packing has begun;
  *   left out     an add-on chosen that could not be added to the order (none left, no longer offered), by its name.
  *
+ * Lot Q2, step Q2.9 (D3, N8, N9): the rows are what each moment's offer holds (a draw's PLACE HELD: its DRAW switch and
+ * the draw's pick; the salon and YOUR ORDERS: their switch alone), a service listed like a product. The engraving is a
+ * row of at most 1 there (its words typed in YOUR ORDERS, ENTER YOUR ENGRAVING), never in ADD AN ADD-ON (its own
+ * ENGRAVING section); a row carries whether it is the engraving and, for it, its most characters (`textMax`).
+ *
  * Prices are the server's, never computed here but for the sum of what is shown; an add-on the app cannot read is left
  * out, never guessed.
  */
@@ -20,12 +25,18 @@ import { formatMoney, upper, type Row } from './view-model.js';
 
 /** At most this many of one add-on on an order (services/order-addons.ts ADDON_LIMIT). */
 export const ADDON_UNITS_MAX = 3;
+/** The engraving: one on an order (services/order-addons.ts, lot Q2, step Q2.3). */
+export const ENGRAVING_UNITS_MAX = 1;
+/** The house's most characters of an engraving (ENGRAVING_COLLECTOR_MAX): the ceiling and the default of `textMax`. */
+export const ENGRAVING_TEXT_MAX = 20;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const units = (n: unknown): number => (typeof n === 'number' && Number.isInteger(n) && n > 0 ? n : 0);
 const price = (n: unknown): number | null => (typeof n === 'number' && Number.isInteger(n) && n >= 0 ? n : null);
 const words = (t: unknown): string => (typeof t === 'string' ? t.trim().replace(/\s+/g, ' ') : '');
+/** The engraving's most characters as offered (1 to 20); the house's 20 when the offer does not say. */
+const textMaxOf = (n: unknown): number => (typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= ENGRAVING_TEXT_MAX ? n : ENGRAVING_TEXT_MAX);
 
 /** An add-on's price per unit as it adds to an order: `+ € 15`. */
 export function addonPrice(minor: number, currency: string): string {
@@ -44,8 +55,12 @@ export interface AddonRowModel {
   price: string;
   /** The units chosen now (0: none). */
   units: number;
-  /** The most units that may be chosen now (never under `units`). */
+  /** The most units that may be chosen now (never under `units`); the engraving's at most 1. */
   max: number;
+  /** The engraving (lot Q2): its words are typed where the order is (YOUR ORDERS, or 5b at a LIVE hold). */
+  engraving: boolean;
+  /** The engraving's most characters (its add-on's, 1 to 20); null on any other row. */
+  textMax: number | null;
 }
 
 /**
@@ -61,11 +76,12 @@ export function addonRows(offer: readonly AddonOfferItem[] | null | undefined, c
     const name = upper(o.name);
     const p = price(o.priceMinor);
     if (!name || p === null || typeof o.currency !== 'string') continue;
+    const engraving = o.engraving === true;
     const n = units(chosen.get(o.addonId));
-    const max = Math.min(ADDON_UNITS_MAX, Math.max(units(o.maxUnits), n));
+    const max = Math.min(engraving ? ENGRAVING_UNITS_MAX : ADDON_UNITS_MAX, Math.max(units(o.maxUnits), n));
     if (max <= 0) continue;
     seen.add(o.addonId);
-    rows.push({ addonId: o.addonId, name, line: words(o.line) || null, priceMinor: p, price: addonPrice(p, o.currency), units: Math.min(n, max), max });
+    rows.push({ addonId: o.addonId, name, line: words(o.line) || null, priceMinor: p, price: addonPrice(p, o.currency), units: Math.min(n, max), max, engraving, textMax: engraving ? textMaxOf(o.textMax) : null });
   }
   for (const c of kept) {
     if (!c || typeof c.addonId !== 'string' || seen.has(c.addonId)) continue;
@@ -74,7 +90,7 @@ export function addonRows(offer: readonly AddonOfferItem[] | null | undefined, c
     if (!name || n <= 0) continue;
     seen.add(c.addonId);
     const p = price(c.priceMinor);
-    rows.push({ addonId: c.addonId, name, line: words(c.line) || null, priceMinor: p, price: p !== null && currency ? addonPrice(p, currency) : '', units: n, max: n });
+    rows.push({ addonId: c.addonId, name, line: words(c.line) || null, priceMinor: p, price: p !== null && currency ? addonPrice(p, currency) : '', units: n, max: n, engraving: false, textMax: null });
   }
   return rows;
 }
@@ -101,9 +117,12 @@ export function withUnits(rows: readonly AddonRowModel[], addonId: string, n: nu
   return rows.map((r) => (r.addonId === addonId ? { ...r, units: Math.max(0, Math.min(r.max, Math.round(n))) } : r));
 }
 
-/** The note under the rows while one of them stands at what may be taken; null otherwise. */
+/**
+ * The note under the rows while one of them stands at what may be taken; null otherwise. The engraving at its one is
+ * not such a row: the note's "at most 3 of each" is not its rule (one on an order).
+ */
 export function rowsLimit(rows: readonly AddonRowModel[]): string | null {
-  return rows.some((r) => r.units > 0 && r.units >= r.max) ? ADDONS.limit : null;
+  return rows.some((r) => !r.engraving && r.units > 0 && r.units >= r.max) ? ADDONS.limit : null;
 }
 
 /**
@@ -216,6 +235,7 @@ export interface AddonSheetModel {
 export function addonSheet(offer: AccountAddonOffer, chosen: ReadonlyMap<string, number> = new Map()): AddonSheetModel {
   const currency = typeof offer.currency === 'string' ? offer.currency : null;
   if (!offer.canAdd) return { rows: [], empty: offer.reason === 'PACKING_STARTED' ? ORDERS.addons.locked : ORDERS.addons.none, paidNote: null, currency };
-  const rows = addonRows(offer.offer, chosen);
+  // The engraving is never added here: it has its own ENGRAVING section on the order (lot Q2, N9), as the server offers it.
+  const rows = addonRows(offer.offer, chosen).filter((r) => !r.engraving);
   return { rows, empty: rows.length === 0 ? ORDERS.addons.none : null, paidNote: offer.paid === true && rows.length > 0 ? ORDERS.addons.paidAdd : null, currency };
 }

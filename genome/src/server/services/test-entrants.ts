@@ -491,7 +491,6 @@ interface ActiveRun {
   id: string;
   drop: DropRow;
   mode: DropMode;
-  addons: string[];
   bots: Bot[];
   /** Where the next tick starts reading the bots, so every one gets its turn under load. */
   cursor: number;
@@ -1101,8 +1100,7 @@ export class TestEntrantService {
   /** A press's bots into the runner (a new test, or ADD MORE into the one under way), its peaks followed. */
   private async begin(runId: string, d: DropRow, bots: Bot[]): Promise<void> {
     if (this.run?.id !== runId) {
-      const addons = d.mode === 'LIVE' ? (await this.db.selectFrom('live_addons').select('id').where('drop_id', '=', d.id).orderBy('position').execute()).map((a) => a.id) : [];
-      this.run = { id: runId, drop: d, mode: d.mode, addons, bots: [], cursor: 0, peaksSavedAt: this.now().getTime() };
+      this.run = { id: runId, drop: d, mode: d.mode, bots: [], cursor: 0, peaksSavedAt: this.now().getTime() };
       startRunPeaks(runId);
     }
     this.run.bots.push(...bots);
@@ -1298,7 +1296,10 @@ export class TestEntrantService {
           bot.at = this.now().getTime() + (bot.now ? 0 : POLL_MS);
           return;
         }
-        if (plan.addOns && run.addons.length) await this.call(run, bot, 'PUT', `${live}/addons`, 'ADD-ONS', { addonIds: [pick(run.addons)] });
+        // Lot Q2, step Q2.4 (D24): as a collector, one of the rows its hold offers now (its release's pick that can still
+        // be taken: a product while one per piece is available), none when none is offered; never the engraving's words.
+        const offer = ((s.json?.entry as { addonOffer?: { addonId: string; maxUnits: number }[] } | undefined)?.addonOffer ?? []).filter((a) => a.maxUnits > 0);
+        if (plan.addOns && offer.length) await this.call(run, bot, 'PUT', `${live}/addons`, 'ADD-ONS', { items: [{ addonId: pick(offer).addonId }] });
         bot.step = 'DECIDE';
         // A collector pays a few seconds after securing; a bot driven by hand at once.
         bot.at = this.now().getTime() + (bot.now ? 0 : between(2000, 10_000));
@@ -1413,7 +1414,7 @@ export class TestEntrantService {
     if (bot.step === 'DONE' || bot.step === 'ARRIVE') bot.step = 'WATCH';
     bot.at = 0;
     const acting = (b: Bot) => b.step !== 'DONE';
-    const active: ActiveRun = this.run?.id === run.id ? this.run : { id: run.id, drop: d, mode: d.mode, addons: [], bots: [], cursor: 0, peaksSavedAt: 0 };
+    const active: ActiveRun = this.run?.id === run.id ? this.run : { id: run.id, drop: d, mode: d.mode, bots: [], cursor: 0, peaksSavedAt: 0 };
     try {
       for (let steps = 0; steps < 8 && acting(bot); steps++) {
         const wait = bot.at - this.now().getTime();
@@ -1670,7 +1671,6 @@ export class TestEntrantService {
           .returning('id')
           .execute();
         if (gone.length && d.pace_batch !== null) changes.changed(d.id);
-        if (gone.length) await tx.deleteFrom('live_entry_addons').where('entry_id', 'in', gone.map((e) => e.id)).execute();
         for (const e of gone) await this.ctx.audit.record({ actor, action: 'drop.live.remove', targetType: 'drop', targetId: d.id, details: { entryId: e.id, from: 'CONFIRMED', reason: 'test_ended' } }, tx);
         n += gone.length;
       }

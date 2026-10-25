@@ -4,23 +4,31 @@
  * with a piece. Beside the models (routes/admin/catalog.ts): an AUDITOR reads, an OPERATOR writes.
  *
  *   GET    /api/admin/addons                    AUDITOR   every add-on, the active ones first, with its SKU, prices
- *                                                         and stock per location
+ *                                                         and stock per location; with ?moment=LIVE|DRAW&currency=
+ *                                                         (lot Q2), the active ones a release's form picks from, each
+ *                                                         with its price there, pickable or why not (SWITCH_OFF,
+ *                                                         NO_PRICE)
  *   GET    /api/admin/addons/:id                AUDITOR   one add-on (404 ADDON_NOT_FOUND)
  *   POST   /api/admin/addons                    OPERATOR  an add-on listed with its SKU code (409 ADDON_NAME_TAKEN,
- *                                                         409 SKU_CODE_TAKEN, 404 SUPPLIER_NOT_FOUND)
- *   PATCH  /api/admin/addons/:id                OPERATOR  its name, line, supplier, weight, position
+ *                                                         409 SKU_CODE_TAKEN, 404 SUPPLIER_NOT_FOUND), its kind
+ *                                                         (PRODUCT or SERVICE, lot Q2), its switches, the engraving
+ *                                                         and its most characters (409 ADDON_ENGRAVING_TAKEN)
+ *   PATCH  /api/admin/addons/:id                OPERATOR  its name, line, supplier, weight, position, switches, the
+ *                                                         engraving and its most characters (its kind never: 409
+ *                                                         ADDON_KIND_FIXED; the engraving once sold: 409
+ *                                                         ADDON_ENGRAVING_FIXED)
  *   PUT    /api/admin/addons/:id/prices         OPERATOR  its prices by currency (null removes one)
  *   POST   /api/admin/addons/:id/set-aside      OPERATOR  offered nowhere again
  *   POST   /api/admin/addons/:id/reinstate      OPERATOR  offered again
  *   PUT    /api/admin/addons/:id/shopify        OPERATOR  its Shopify product and variant, pasted back (409
  *                                                         SHOPIFY_PRODUCT_TAKEN, SHOPIFY_VARIANT_TAKEN)
  *
- * Audited by AddonService (`addon.create`, `.update`, `.prices`, `.set_aside`, `.reinstate`, `.shopify`). Its stock is
- * moved through Logistics (corrections, transfers, minimums) and the supplier orders, as a size's
- * (routes/admin/logistics.ts, routes/admin/supplier-orders.ts).
+ * Audited by AddonService (`addon.create`, `.update`, `.prices`, `.set_aside`, `.reinstate`, `.shopify`). A product's
+ * stock is moved through Logistics (corrections, transfers, minimums) and the supplier orders, as a size's
+ * (routes/admin/logistics.ts, routes/admin/supplier-orders.ts); a service has none (409 ADDON_SERVICE there).
  */
 import type { FastifyPluginAsync } from 'fastify';
-import { addonParams, addonPricesBody, addonShopifyBody, createAddonBody, emptyBody, parse, updateAddonBody } from '../../http/schemas.js';
+import { addonParams, addonPricesBody, addonShopifyBody, addonsQuery, createAddonBody, emptyBody, parse, updateAddonBody } from '../../http/schemas.js';
 import { adminActor } from '../../http/sessions.js';
 import type { AdminRouteDeps } from './index.js';
 
@@ -32,7 +40,12 @@ const given = <T extends object>(b: T): Partial<T> => Object.fromEntries(Object.
 export const adminAddonRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
   const { addons } = ctx.services;
 
-  app.get('/api/admin/addons', async () => ({ items: await addons.list() }));
+  app.get('/api/admin/addons', async (request) => {
+    const q = parse(addonsQuery, request.query);
+    // Lot Q2, step Q2.3: a release's form lists the add-ons it may pick, and why not.
+    if (q.moment !== undefined && q.currency !== undefined) return { items: await addons.pickable(q.moment, q.currency) };
+    return { items: await addons.list() };
+  });
 
   app.get('/api/admin/addons/:id', async (request) => {
     const { id } = parse(addonParams, request.params);

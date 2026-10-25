@@ -12,6 +12,11 @@
  * join to `models`, so an add-on's SKU never appears among them; the readers that list SKUs (Logistics' stock, the
  * corrections, transfers and minimums, the supplier proposal, drafts, orders and their PDF, the receptions) read
  * `skuRefs`, which names either.
+ *
+ * ADD-ONS ONE SYSTEM (lot Q2, step Q2.2, D4, N14): a service's SKU (an engraving, a gift wrapping) keeps its code and
+ * its Shopify variant (S5) but never takes stock: every path where a SKU takes stock (a minimum, a supplier order and
+ * its draft and PDF, a reception, a transfer, a correction, Logistics' stock) refuses it (409 ADDON_SERVICE,
+ * `assertNotServiceSku`, also inside `assertSkuOffered`), and `skuRefs` leaves it out, so no SKU list ever names one.
  */
 import type { Db } from '../db/connection.js';
 import { conflict } from '../errors.js';
@@ -29,6 +34,15 @@ export function skuOwnerOf(k: { readonly model_id: string | null; readonly addon
 
 /** 409 ADDON_SET_ASIDE: an add-on set aside is offered nowhere (no minimum, no supplier order, no order), named. */
 export const addonSetAside = (name: string) => conflict('ADDON_SET_ASIDE', `${name} is set aside. Reinstate it in Catalogue → Add-ons to offer it again.`);
+
+/** 409 ADDON_SERVICE (Q2, D4): a service's SKU takes no stock, named (« ENGRAVING is a service: it has no stock. »). */
+export const addonServiceSku = (name: string) => conflict('ADDON_SERVICE', `${name} is a service: it has no stock.`);
+
+/** A SKU that takes stock: a service's refused (409 ADDON_SERVICE); a model's size, a product add-on's or an unknown one pass. */
+export async function assertNotServiceSku(db: Db, skuId: string): Promise<void> {
+  const a = await db.selectFrom('skus as k').innerJoin('addon_items as a', 'a.id', 'k.addon_id').select(['a.name', 'a.kind']).where('k.id', '=', skuId).executeTakeFirst();
+  if (a?.kind === 'SERVICE') throw addonServiceSku(a.name);
+}
 
 /**
  * A SKU as the supplier orders, the receptions and Logistics name it: a model's size (its model, the model's variant,
@@ -52,7 +66,7 @@ export interface SupplierOrderSku {
 /** A model's size as SupplierOrderSku names it. */
 export type ModelSku = SupplierOrderSku & { model: { id: string; name: string } };
 
-/** The SKUs named, by id, each with its owner named (a SKU unknown is absent). */
+/** The SKUs named, by id, each with its owner named (a SKU unknown, or a service's, which takes no stock, is absent). */
 export async function skuRefs(db: Db, ids: readonly string[]): Promise<Map<string, SupplierOrderSku>> {
   if (ids.length === 0) return new Map();
   const rows = await db
@@ -61,6 +75,7 @@ export async function skuRefs(db: Db, ids: readonly string[]): Promise<Map<strin
     .leftJoin('addon_items as a', 'a.id', 'k.addon_id')
     .select(['k.id', 'k.code', 'k.size_label', 'k.set_aside_at', 'k.model_id', 'k.addon_id', 'm.name as model_name', 'm.variant_label', 'a.name as addon_name', 'a.active as addon_active'])
     .where('k.id', 'in', [...new Set(ids)])
+    .where((eb) => eb.or([eb('a.kind', 'is', null), eb('a.kind', '<>', 'SERVICE')]))
     .execute();
   return new Map(
     rows.map((r) => {

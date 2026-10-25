@@ -135,7 +135,7 @@ import { DROP_QUANTITY_MAX, drawKey, dropNotFound, openDropSeed } from './drops.
 import { holderGuarantee, holdsGuaranteeFor, releaseCovered, sizeServesGuarantee, useGuarantees, visibleGuaranteeIds } from './guarantees.js';
 import { LiveChanges, LiveFrameGate, withLiveChanges, type PendingBatch } from './live-frames.js';
 import { closeGuard, liveQueueSnapshot, queueView, type LiveCloseGuard, type LiveQueueSnapshot, type LiveQueueView } from './live-queue.js';
-import { addonOffer, choicesOf, cleanAddonItems, clearChoices, setChoices, type AddonOfferItem, type AddonUnitsInput, type ChosenAddon, type LeftOutAddon } from './order-addons.js';
+import { addonOffer, choicesOf, cleanAddonRows, clearChoices, setChoices, type AddonOfferItem, type ChosenAddon, type LeftOutAddon, type LiveAddonRowInput } from './order-addons.js';
 import { ordersForLiveEntry } from './orders.js';
 import { setPieces, type ReleasePiece } from './release-offer.js';
 import { entryPieceSizes } from './set-sales.js';
@@ -151,10 +151,14 @@ export const LIVE_ROOM_OPENS_MINUTES = Object.freeze({ min: 1, max: 60, default:
 export const LIVE_TURN_SECONDS = Object.freeze({ min: 10, max: 300, default: 30 });
 export const LIVE_PAY_MINUTES = Object.freeze({ min: 1, max: 60, default: 5 });
 export const LIVE_PER_ACCOUNT = Object.freeze({ min: 1, max: 5, default: 1 });
+/**
+ * The release add-ons an order of before lot Q2 carries, at most (1 to 6 per release then): its invoice's ADDON lines
+ * (render/invoice.ts). Since step Q2.4 a release picks catalogue add-ons without this cap (N12); since lot Q2's legal
+ * step (Q2.10) the terms no longer state it.
+ */
+export const LIVE_ADDONS_MAX = 6;
 /** A size's stock at most (drop_sizes.stock). */
 export const LIVE_SIZE_STOCK_MAX = 10_000;
-/** The add-ons a release offers, at most (live_addons.position 1..6). */
-export const LIVE_ADDONS_MAX = 6;
 /** The seal held at least this long, from the press to the secure, on the server's clock (live_entries.gesture_ms). */
 export const LIVE_GESTURE_MIN_MS = 1400;
 /** A host message: one line of 1 to 140 characters. */
@@ -471,7 +475,6 @@ const notSecured = () => conflict('LIVE_NOT_SECURED', 'No piece is held for you.
 const holdEnded = () => conflict('LIVE_HOLD_ENDED', 'Your hold has ended.');
 const interestClosed = () => conflict('LIVE_INTEREST_CLOSED', 'The release has opened: the room replaces I’LL BE THERE.');
 const notInterested = () => conflict('LIVE_NOT_INTERESTED', 'You have not said you will be there.');
-const addonUnknown = () => new DomainError('LIVE_ADDON_UNKNOWN', 400, 'Choose among the add-ons of this release.');
 const liveNotStarted = () => conflict('LIVE_NOT_STARTED', 'This release has not opened yet.');
 const liveEnded = () => conflict('LIVE_ENDED', 'This release has ended.');
 const liveNotAnnounced = () => conflict('LIVE_NOT_ANNOUNCED', 'This release is not announced yet: change its sizes in the settings until the announcement.');
@@ -751,10 +754,19 @@ export interface LiveSizeChoice {
   sizes?: readonly { piece: number; sizeId: string }[] | null;
 }
 
-export interface LiveEntryAddon {
-  id: string;
+/**
+ * A catalogue add-on of a LIVE entry (lot Q2, step Q2.4, D2): while SECURED, a row chosen with the hold, its units the
+ * pieces of the entry (one per piece, one per set: N1) and its price per unit in the release's currency now, with the
+ * engraving's words as typed (null without); once CONFIRMED, its units on the entry's orders, as sold (no words: they
+ * are the order's, in YOUR ORDERS).
+ */
+export interface LiveAddonItem extends ChosenAddon {
+  text: string | null;
+}
+
+/** An add-on row of a CONFIRMED entry of before lot Q2 (D20, N15): a release add-on as its orders' snapshot sold it, per piece (per set). */
+export interface LiveLegacyAddon {
   label: string;
-  /** Per piece, at the time it was chosen. */
   priceMinor: number;
 }
 
@@ -786,20 +798,26 @@ export interface LiveEntryView {
   endedAt: Date | null;
   /** The console let this entry take its turn out of order. */
   letIn: boolean;
-  addons: LiveEntryAddon[];
   currency: string;
   /** Per piece. */
   priceMinor: number;
-  /** quantity × (price + the add-ons), plus the catalogue add-ons (`addonItems`). */
+  /**
+   * (price + each add-on chosen) × pieces (sets): the price of its pieces, plus each catalogue add-on's units at its
+   * price (`addonItems`, one unit per piece), plus, for an entry CONFIRMED before lot Q2, its release add-ons per piece
+   * (`legacyAddons`). PAY's total (OP-9, D13).
+   */
   totalMinor: number;
   /**
-   * Plan MACRO M3 §4.2 (D2): the catalogue add-ons of the entry: while SECURED, those chosen with the hold (each its units
-   * and its price per unit in the release's currency now, null when no longer priced); once CONFIRMED, those carried onto
-   * its first order (as added). Empty otherwise.
+   * Plan MACRO M3 §4.2 (D2) and lot Q2, step Q2.4: the catalogue add-ons of the entry: while SECURED, those chosen with
+   * the hold (one unit per piece, one per set: N1; each its price per unit in the release's currency now, null when no
+   * longer priced; the engraving's words as typed); once CONFIRMED, its units on its orders (one row per add-on and
+   * price, as sold). Empty otherwise.
    */
-  addonItems: ChosenAddon[];
-  /** While SECURED: the catalogue add-ons offered with the piece now (available at the release's location, priced in its currency). */
+  addonItems: LiveAddonItem[];
+  /** While SECURED: the catalogue add-ons offered with the piece now (ONE OFFER RULE: its release's pick, its LIVE switch on; a product while one per piece is available). */
   addonOffer: AddonOfferItem[];
+  /** A CONFIRMED entry of before lot Q2 (D20, N15): its release add-ons as its orders' snapshot sold them, per piece; absent otherwise. */
+  legacyAddons?: LiveLegacyAddon[];
   /** PAY's answer only: the add-ons chosen that could not be added to the order (none left, no longer offered). */
   addonsLeftOut?: LeftOutAddon[];
   /**
@@ -1002,7 +1020,6 @@ export async function removeAccountLiveEntries(
       .execute();
     const ids = before.map((e) => e.id);
     if (ids.length > 0) {
-      await tx.deleteFrom('live_entry_addons').where('entry_id', 'in', ids).execute();
       await clearChoices(tx, 'live_entry_id', ids);
       await tx
         .updateTable('live_entries')
@@ -1114,15 +1131,15 @@ export async function accountLiveData(db: Db, accountId: string): Promise<{ entr
     .orderBy('e.joined_at')
     .orderBy('e.id')
     .execute();
-  const addons = rows.length
-    ? await db
-        .selectFrom('live_entry_addons as x')
-        .innerJoin('live_addons as a', 'a.id', 'x.addon_id')
-        .select(['x.entry_id', 'a.label', 'x.price_minor', 'a.position'])
-        .where('x.entry_id', 'in', rows.map((r) => r.id))
-        .orderBy('a.position')
-        .execute()
+  // The release add-ons an entry took before lot Q2, as sold: its first order's snapshot (N15; 0060 dropped their table).
+  const snapshots = rows.length
+    ? await db.selectFrom('orders').select(['live_entry_id', 'addons']).where('live_entry_id', 'in', rows.map((r) => r.id)).where('piece', '=', 1).execute()
     : [];
+  const addons = snapshots.flatMap((o) =>
+    (Array.isArray(o.addons) ? o.addons : [])
+      .filter((a) => a && typeof a.label === 'string' && Number.isInteger(a.priceMinor))
+      .map((a) => ({ entry_id: o.live_entry_id!, label: a.label, price_minor: a.priceMinor })),
+  );
   const guests = rows.length
     ? await db.selectFrom('after_room_guests').select(['entry_id', 'position']).where('entry_id', 'in', rows.map((r) => r.id)).execute()
     : [];
@@ -1239,19 +1256,6 @@ export async function liveEntryViews(
       : (await Promise.all(chunks([...new Set(of.accountIds)]).map((ids) => base.where('e.drop_id', '=', of.dropId).where('e.account_id', 'in', ids).execute()))).flat();
   const out = new Map<string, LiveEntryView>();
   if (rows.length === 0) return out;
-  const addons = (
-    await Promise.all(
-      chunks(rows.map((r) => r.id)).map((ids) =>
-        db
-          .selectFrom('live_entry_addons as x')
-          .innerJoin('live_addons as a', 'a.id', 'x.addon_id')
-          .select(['x.entry_id', 'a.id', 'a.label', 'x.price_minor', 'a.position'])
-          .where('x.entry_id', 'in', ids)
-          .orderBy('a.position')
-          .execute(),
-      ),
-    )
-  ).flat();
   const doors = await afterRoomDoors(db, rows.filter((r) => r.status === 'ENDED').map((r) => r.id));
   const shown = await visibleGuaranteeIds(db, rows.map((r) => r.guarantee_id));
   // Plan MACRO M3 §4.2 (D2): the catalogue add-ons chosen with a hold, and the units carried onto a confirmed entry's order.
@@ -1259,9 +1263,9 @@ export async function liveEntryViews(
   // Macro scope K44 T1: a set's entries, their sizes per piece.
   const pieceSizes = await livePieceSizes(db, rows.filter((r) => r.set_id !== null).map((r) => r.id));
   for (const r of rows) {
-    const own = addons.filter((a) => a.entry_id === r.id);
     const price = r.price_minor ?? 0;
-    const unit = price + own.reduce((n, a) => n + a.price_minor, 0);
+    const legacy = items.legacy.get(r.id);
+    const unit = price + (legacy ?? []).reduce((n, a) => n + a.priceMinor, 0);
     const chosen = items.chosen.get(r.id) ?? [];
     out.set('accountId' in of ? r.drop_id : r.account_id, {
       id: r.id,
@@ -1288,12 +1292,12 @@ export async function liveEntryViews(
       confirmedAt: r.confirmed_at,
       endedAt: r.ended_at,
       letIn: r.let_in_by !== null,
-      addons: own.map((a) => ({ id: a.id, label: a.label, priceMinor: a.price_minor })),
       currency: r.currency ?? 'EUR',
       priceMinor: price,
       totalMinor: r.quantity * unit + chosen.reduce((n, a) => n + a.units * (a.priceMinor ?? 0), 0),
       addonItems: chosen,
       addonOffer: items.offer.get(r.id) ?? [],
+      ...(legacy ? { legacyAddons: legacy } : {}),
       afterRoom: doors.get(r.id) ?? null,
       guaranteed: r.guarantee_id !== null && shown.has(r.guarantee_id),
       queue: r.status === 'QUEUED' ? queueOf(queues?.(r.drop_id), r.id, now) : null,
@@ -1344,29 +1348,44 @@ export async function liveAddonLocation(db: Db, d: { stock_location_id: string |
 const liveCurrency = (c: string | null): 'EUR' | 'GBP' | 'USD' | 'CHF' | null => (c === 'EUR' || c === 'GBP' || c === 'USD' || c === 'CHF' ? c : null);
 
 /**
- * The catalogue add-ons of entries (plan MACRO M3 §4.2): a SECURED entry's choices (priced in its release's currency
- * now) and what is offered with it, a CONFIRMED entry's units on its orders (one row per add-on and price).
+ * The catalogue add-ons of entries (plan MACRO M3 §4.2; lot Q2, step Q2.4): a SECURED entry's choices (priced in its
+ * release's currency now, one unit per piece of the entry, one per set: N1; the engraving's words) and what is offered
+ * with it (ONE OFFER RULE: what its release picked, its LIVE switch on; a product while one per piece is available), a
+ * CONFIRMED entry's units on its orders (one row per add-on and price) and, for one confirmed before lot Q2, its release
+ * add-ons from its first order's snapshot (D20, N15).
  */
 async function liveAddonItems(
   db: Db,
-  rows: readonly { id: string; status: LiveEntryStatus; currency: string | null; stock_location_id: string | null; parent_drop_id: string | null }[],
-): Promise<{ chosen: Map<string, ChosenAddon[]>; offer: Map<string, AddonOfferItem[]> }> {
+  rows: readonly { id: string; drop_id: string; status: LiveEntryStatus; quantity: number; currency: string | null; stock_location_id: string | null; parent_drop_id: string | null }[],
+): Promise<{ chosen: Map<string, LiveAddonItem[]>; offer: Map<string, AddonOfferItem[]>; legacy: Map<string, LiveLegacyAddon[]> }> {
   const secured = rows.filter((r) => r.status === 'SECURED');
   const currencies = new Map(secured.map((r) => [r.id, liveCurrency(r.currency)]));
-  const chosen = await choicesOf(db, 'live_entry_id', secured.map((r) => r.id), (id) => currencies.get(id) ?? null);
+  const choices = await choicesOf(db, 'live_entry_id', secured.map((r) => r.id), (id) => currencies.get(id) ?? null);
+  const words = secured.length
+    ? await db.selectFrom('addon_choices').select(['live_entry_id', 'addon_id', 'text']).where('live_entry_id', 'in', secured.map((r) => r.id)).where('text', 'is not', null).execute()
+    : [];
+  const chosen = new Map<string, LiveAddonItem[]>();
   const offer = new Map<string, AddonOfferItem[]>();
+  const legacy = new Map<string, LiveLegacyAddon[]>();
   for (const r of secured) {
+    // N1: a row chosen is one unit per piece (per set).
+    chosen.set(
+      r.id,
+      (choices.get(r.id) ?? []).map((c) => ({ ...c, units: c.units * r.quantity, text: words.find((w) => w.live_entry_id === r.id && w.addon_id === c.addonId)?.text ?? null })),
+    );
     const currency = liveCurrency(r.currency);
-    if (currency !== null) offer.set(r.id, await addonOffer(db, await liveAddonLocation(db, r), currency));
+    // ONE OFFER RULE (lot Q2, step Q2.3): the LIVE switch on, and picked by the entry's release (an after-room's: its own).
+    if (currency !== null) offer.set(r.id, await addonOffer(db, { moment: 'LIVE', dropId: r.drop_id, locationId: await liveAddonLocation(db, r), currency, pieces: r.quantity }));
   }
   const confirmed = rows.filter((r) => r.status === 'CONFIRMED');
   if (confirmed.length > 0) {
+    const ids = confirmed.map((r) => r.id);
     const units = await db
       .selectFrom('order_addon_items as u')
       .innerJoin('orders as o', 'o.id', 'u.order_id')
       .innerJoin('addon_items as a', 'a.id', 'u.addon_id')
       .select(['o.live_entry_id', 'u.addon_id', 'a.name', 'a.line', 'u.price_minor'])
-      .where('o.live_entry_id', 'in', confirmed.map((r) => r.id))
+      .where('o.live_entry_id', 'in', ids)
       .where('u.status', '<>', 'REMOVED')
       .orderBy('u.added_at')
       .orderBy('u.id')
@@ -1375,11 +1394,18 @@ async function liveAddonItems(
       const list = chosen.get(u.live_entry_id!) ?? [];
       const row = list.find((x) => x.addonId === u.addon_id && x.priceMinor === u.price_minor);
       if (row) row.units += 1;
-      else list.push({ addonId: u.addon_id, name: u.name, line: u.line, units: 1, priceMinor: u.price_minor });
+      else list.push({ addonId: u.addon_id, name: u.name, line: u.line, units: 1, priceMinor: u.price_minor, text: null });
       chosen.set(u.live_entry_id!, list);
     }
+    // N15: history as sold. Before lot Q2, PAY wrote the release add-ons on each piece's order (each set's first): the
+    // entry's first order's snapshot is its rows, per piece.
+    const snapshots = await db.selectFrom('orders').select(['live_entry_id', 'piece', 'addons']).where('live_entry_id', 'in', ids).where('piece', '=', 1).execute();
+    for (const o of snapshots) {
+      const sold = (Array.isArray(o.addons) ? o.addons : []).filter((a) => a && typeof a.label === 'string' && Number.isInteger(a.priceMinor));
+      if (sold.length > 0) legacy.set(o.live_entry_id!, sold.map((a) => ({ label: a.label, priceMinor: a.priceMinor })));
+    }
   }
-  return { chosen, offer };
+  return { chosen, offer, legacy };
 }
 
 /** A QUEUED entry's own figures from its release's snapshot, read at `now`; null without one. */
@@ -1831,29 +1857,23 @@ export class LiveService {
   }
 
   /**
-   * ADD-ONS: the add-ons of the release chosen for a held piece (at most LIVE_ADDONS_MAX, each once), replacing the
-   * previous choice, each with its price now. Plan MACRO M3 §4.2 (D2): `items`, when sent, replaces the catalogue
-   * add-ons chosen with it (services/order-addons.ts setChoices: offered at the release's location in its currency, that
-   * many available there, at most 3 of each), carried onto its order at PAY; left out, they stay as they were. Audited
-   * `drop.live.addons` with their ids (and the items, when sent).
+   * ADD-ONS (lot Q2, step Q2.4, D2): the catalogue add-ons chosen for a held piece, each a row (`{ addonId, text? }`,
+   * each once), replacing the previous choice: one unit per piece of the entry (one per set for a set's entry: N1, D25),
+   * each checked by services/order-addons.ts setChoices (offered at the release's location in its currency, its LIVE
+   * switch on and picked by the release, 409 ADDON_NOT_OFFERED; that many available there, 409 ADDON_OUT_OF_STOCK; the
+   * engraving's words at most its most characters), carried onto its orders at PAY. An empty list clears them. Audited
+   * `drop.live.addons` with the items, never the words (`text: true`).
    */
-  async setAddons(accountId: string, dropId: string, addonIds: readonly string[], actor: Actor, items?: readonly AddonUnitsInput[]): Promise<LiveEntryView> {
+  async setAddons(accountId: string, dropId: string, items: readonly LiveAddonRowInput[], actor: Actor): Promise<LiveEntryView> {
     const account = assertAccount(accountId);
     const id = knownId(dropId, dropNotFound);
-    if (!Array.isArray(addonIds) || addonIds.length > LIVE_ADDONS_MAX) throw addonUnknown();
-    const wanted = [...new Set(addonIds.map((a) => knownId(a, addonUnknown)))].sort();
-    const catalogue = items === undefined ? undefined : cleanAddonItems(items);
+    const rows = cleanAddonRows(items);
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
       const { d, now } = await this.lockAnnouncedLive(tx, id, 'share', account);
       const e = await this.runningHold(tx, d, account, now);
-      const addons = wanted.length ? await tx.selectFrom('live_addons').select(['id', 'price_minor']).where('drop_id', '=', id).where('id', 'in', wanted).execute() : [];
-      if (addons.length !== wanted.length) throw addonUnknown();
-      await tx.deleteFrom('live_entry_addons').where('entry_id', '=', e.id).execute();
-      if (addons.length) await tx.insertInto('live_entry_addons').values(addons.map((a) => ({ entry_id: e.id, addon_id: a.id, price_minor: a.price_minor }))).execute();
-      const chosen =
-        catalogue === undefined ? undefined : await setChoices(tx, { liveEntryId: e.id }, catalogue, { locationId: await liveAddonLocation(tx, d), currency: liveCurrency(d.currency) }, now);
-      await this.audit.record({ actor, action: 'drop.live.addons', targetType: 'drop', targetId: id, details: { entryId: e.id, addonIds: wanted, ...(chosen !== undefined ? { items: chosen } : {}) } }, tx);
+      const chosen = await setChoices(tx, { liveEntryId: e.id }, rows, { locationId: await liveAddonLocation(tx, d), currency: liveCurrency(d.currency), pieces: e.quantity }, now);
+      await this.audit.record({ actor, action: 'drop.live.addons', targetType: 'drop', targetId: id, details: { entryId: e.id, items: chosen } }, tx);
     });
     return (await this.viewerEntry(this.db, account, id))!;
   }
@@ -1898,7 +1918,6 @@ export class LiveService {
       await this.actingAccount(tx, account);
       const { d, now } = await this.lockAnnouncedLive(tx, id, 'update', account);
       const e = await this.runningHold(tx, d, account, now);
-      await tx.deleteFrom('live_entry_addons').where('entry_id', '=', e.id).execute();
       await clearChoices(tx, 'live_entry_id', [e.id]);
       await tx.updateTable('live_entries').set({ status: 'RELEASED', ended_at: now }).where('id', '=', e.id).where('status', '=', 'SECURED').execute();
       const notes: AuditRecordInput[] = [];
@@ -2027,7 +2046,6 @@ export class LiveService {
     return this.entryControl(dropId, entryId, async (tx, d, e, now) => {
       if (e.status !== 'SECURED') throw entryNotSecured();
       const ranOut = effectiveDeadline(e.hold_expires_at!, d, now).getTime() <= now.getTime();
-      await tx.deleteFrom('live_entry_addons').where('entry_id', '=', e.id).execute();
       await clearChoices(tx, 'live_entry_id', [e.id]);
       await tx.updateTable('live_entries').set({ status: 'EXPIRED', ended_at: ranOut ? e.hold_expires_at : now }).where('id', '=', e.id).execute();
       const notes: AuditRecordInput[] = [];
@@ -2326,7 +2344,6 @@ export class LiveService {
     return this.entryControl(dropId, entryId, async (tx, d, e, now) => {
       if (!(LIVE_OPEN_STATUSES as readonly string[]).includes(e.status)) throw entryClosed();
       const at = maxDate(now, e.joined_at);
-      await tx.deleteFrom('live_entry_addons').where('entry_id', '=', e.id).execute();
       await clearChoices(tx, 'live_entry_id', [e.id]);
       // IN-01: a guarantee not used yet (WAITING, QUEUED) is unbound and stays ACTIVE; one used at the turn stays used.
       const unbind = e.guarantee_id !== null && (e.status === 'WAITING' || e.status === 'QUEUED');
@@ -2491,7 +2508,6 @@ export class LiveService {
       .where('hold_expires_at', '<=', now)
       .returning('id')
       .execute();
-    if (expired.length) await tx.deleteFrom('live_entry_addons').where('entry_id', 'in', expired.map((e) => e.id)).execute();
     if (expired.length) await clearChoices(tx, 'live_entry_id', expired.map((e) => e.id));
     out.missed += missed.length;
     out.expired += expired.length;

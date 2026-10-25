@@ -436,9 +436,14 @@ describe('the private salon (P-X08)', () => {
     const pouch = await h.ctx.services.addons.create({ name: 'TRAVEL POUCH', skuCode: 'ADD-POUCH-S', prices: { EUR: 2_000 }, weightG: 30 }, operatorActor);
     const france = (await h.ctx.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
     await h.ctx.services.stock.adjust({ skuId: pouch.sku.id, locationId: france, delta: 2, note: 'Counted.' }, operatorActor);
+    // Lot Q2, step Q2.3 (D3): the salon offers by its switch alone; one switched off for it is neither offered nor taken.
+    const liveOnly = await h.ctx.services.addons.create({ kind: 'SERVICE', name: 'A BOX FOR LIVE ONLY', skuCode: 'ADD-Q23-SALONOFF', prices: { EUR: 1_000 }, offeredAt: { salon: false } }, operatorActor);
     const owner = await member(1);
     const sheet = (safeJson(await owner.client.get('/api/v1/club/lookbook/nimbus')) as SheetJson & { salon: { addons: unknown } }).salon;
-    expect(sheet.addons).toEqual({ currency: 'EUR', offer: [{ addonId: pouch.id, name: 'TRAVEL POUCH', line: null, priceMinor: 2_000, currency: 'EUR', maxUnits: 2 }] });
+    expect(sheet.addons).toEqual({ currency: 'EUR', offer: [{ addonId: pouch.id, name: 'TRAVEL POUCH', line: null, priceMinor: 2_000, currency: 'EUR', maxUnits: 2, engraving: false }] });
+    const off = await requestOf(owner.client, 'nimbus', { addons: [{ addonId: liveOnly.id, units: 1 }] });
+    expect([off.statusCode, errorOf(off)]).toEqual([409, { code: 'ADDON_NOT_OFFERED', message: 'A BOX FOR LIVE ONLY is not offered in the private salon.' }]);
+    await h.ctx.services.addons.setAside(liveOnly.id, operatorActor);
     expect(errorOf(await requestOf(owner.client, 'nimbus', { addons: [{ addonId: pouch.id, units: 4 }] })).code).toBe('ADDON_LIMIT');
     expect(errorOf(await requestOf(owner.client, 'nimbus', { addons: [{ addonId: pouch.id, units: 3 }] })).code).toBe('ADDON_OUT_OF_STOCK');
     const asked = await requestOf(owner.client, 'nimbus', { addons: [{ addonId: pouch.id, units: 2 }] });

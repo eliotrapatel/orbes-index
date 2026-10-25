@@ -36,7 +36,7 @@ import type { OrderView as AdminOrderView } from '../../src/web/admin/types.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { packAndShip, stockPieces } from '../support/fulfil.js';
-import { createAccount, createLiveRelease, createModel, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { createAccount, createLiveRelease, createModel, holdPieces, legacyLiveAddons, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { poolDraw } from '../support/draws.js';
 
 const MINUTE = 60_000;
@@ -434,7 +434,6 @@ describe('the welcome gift (BP-19 T5)', () => {
       sizes: [{ label: '52', stock: 2 }],
       perAccount: 1,
       priceMinor: 480_000,
-      addons: Array.from({ length: LIVE_ADDONS_MAX }, (_, i) => ({ label: `ADD-ON ${i + 1}`, priceMinor: 1_000 * (i + 1) })),
     });
     clock.set(new Date(opensAt.getTime() - MINUTE));
     await f.live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id, quantity: 1 }, a.actor);
@@ -444,18 +443,18 @@ describe('the welcome gift (BP-19 T5)', () => {
     await f.live.press(a.id, r.id, token);
     clock.advance(1500);
     await f.live.secure(a.id, r.id, token, a.actor);
-    await f.live.setAddons(a.id, r.id, r.addons.map((x) => x.id), a.actor);
     await f.live.confirm(a.id, r.id, a.actor);
+    // A sale of before lot Q2 (N15): the most release add-ons an order carries, as that PAY wrote them.
+    await legacyLiveAddons(t.db, r.id, a.id, Array.from({ length: LIVE_ADDONS_MAX }, (_, i) => ({ label: `ADD-ON ${i + 1}`, priceMinor: 1_000 * (i + 1) })));
     const entry = await t.db.selectFrom('live_entries').select('id').where('drop_id', '=', r.id).where('account_id', '=', a.id).executeTakeFirstOrThrow();
     const order = await t.db.selectFrom('orders').selectAll().where('live_entry_id', '=', entry.id).where('channel', '=', 'LIVE').executeTakeFirstOrThrow();
     expect(await giftsOf(order.id)).toHaveLength(2);
     // € 200 of credit: the birthday's € 20 first, the warranty's € 30, PALLADIUM's € 100, then PLATINE's € 50.
     await orders().applyCredit(order.id, 20_000, admin);
-    // An engraving priced from the settings (plan NEXT LOT §3.6.C), entered by Client Services: its own line.
-    await ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: 3_000, GBP: null, USD: null, CHF: null } }, admin);
-    await orders().setTerms(order.id, { engravingText: 'A. & L.' }, admin);
+    // An engraving of before priced from the settings (plan NEXT LOT §3.6.C; lot Q2, step Q2.5, N15: kept as sold), entered
+    // by Client Services: its own line.
+    await t.db.updateTable('orders').set({ engraving_text: 'A. & L.', engraving_minor: 3_000, engraving_by: 'STAFF' }).where('id', '=', order.id).execute();
     await pay(order.id);
-    await ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: null, GBP: null, USD: null, CHF: null } }, admin);
     const invoice = await t.db.selectFrom('invoices').selectAll().where('order_id', '=', order.id).where('kind', '=', 'INVOICE').executeTakeFirstOrThrow();
     const lines = linesOf(invoice.lines);
     expect(lines.map((l) => l.kind)).toEqual(['PIECE', ...Array(LIVE_ADDONS_MAX).fill('ADDON'), 'ENGRAVING', 'SHIPPING', 'CREDIT', 'CREDIT', 'CREDIT', 'CREDIT', 'GIFT', 'GIFT']);

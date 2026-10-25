@@ -101,6 +101,12 @@ export interface AddonUnits {
   units: number;
 }
 
+/** One row of add-ons chosen at a LIVE hold (lot Q2, step Q2.4, N1): its add-on and, for the engraving, its words. */
+export interface LiveAddonRow {
+  addonId: string;
+  text?: string | null;
+}
+
 /** Macro scope K44 T1: one piece's size of a set's draw, as ENTER, RESERVE and CHANGE SIZE send it. */
 export interface PieceSize {
   piece: number;
@@ -580,11 +586,11 @@ export class ApiClient {
   }
 
   /**
-   * The add-ons of the piece held, all of them at once (none: an empty list); plan MACRO M3 §4.2 (D2): with `items`, the
-   * catalogue add-ons chosen with it and their units (left out: kept as they are).
+   * The add-ons of the piece held, all of them at once (none: an empty list); lot Q2, step Q2.4 (D2, N1): each a row of
+   * the catalogue chosen (one unit per piece, one per set), the engraving with its words (`text`, none: left out).
    */
-  liveAddons(id: string, addonIds: readonly string[], items?: readonly AddonUnits[]): Promise<LiveEntry> {
-    return this.liveAction('PUT', id, 'addons', { addonIds: [...addonIds], ...(items ? { items: items.map((i) => ({ addonId: i.addonId, units: i.units })) } : {}) });
+  liveAddons(id: string, items: readonly LiveAddonRow[]): Promise<LiveEntry> {
+    return this.liveAction('PUT', id, 'addons', { items: items.map((i) => ({ addonId: i.addonId, ...(typeof i.text === 'string' && i.text !== '' ? { text: i.text } : {}) })) });
   }
 
   /** PAY (a placeholder): the piece held becomes a reservation ORBES Client Services concludes. */

@@ -185,8 +185,6 @@ export interface LiveSheet extends Omit<LiveCard, 'phase'> {
   description: string | null;
   /** Its sizes in order, with their stock; on a set's release each with its piece (1 to 4). */
   sizes: { id: string; label: string; stock: number; piece?: number }[];
-  /** The add-ons offered with a piece held, in order, their price per piece. */
-  addons: { id: string; label: string; line: string | null; priceMinor: number }[];
   roomOpensMinutes: number;
   turnSeconds: number;
   payMinutes: number;
@@ -576,9 +574,9 @@ export class LiveRoomService {
         };
       }
     }
-    const [sizes, addons, interest] = await Promise.all([
+    // Lot Q2, step Q2.4 (D2): no add-on in the room's sheet; a hold reads its release's pick from its entry (addonOffer).
+    const [sizes, interest] = await Promise.all([
       this.db.selectFrom('drop_sizes').select(['id', 'label', 'stock', 'piece']).where('drop_id', '=', id).orderBy('position').execute(),
-      this.db.selectFrom('live_addons').select(['id', 'label', 'line', 'price_minor']).where('drop_id', '=', id).orderBy('position').execute(),
       this.interestCounts([id]),
     ]);
     const card = await this.card(r, now, interest.get(id) ?? 0, set);
@@ -587,7 +585,6 @@ export class LiveRoomService {
       phase: livePhase(r, now) as LiveSheet['phase'],
       description: stages.name ? r.description : null,
       sizes: sizes.map((z) => ({ id: z.id, label: z.label, stock: z.stock, ...(z.piece !== null ? { piece: z.piece } : {}) })),
-      addons: addons.map((a) => ({ id: a.id, label: a.label, line: a.line, priceMinor: a.price_minor })),
       roomOpensMinutes: r.room_opens_minutes ?? LIVE_ROOM_OPENS_MINUTES.default,
       turnSeconds: r.turn_seconds ?? LIVE_TURN_SECONDS.default,
       payMinutes: r.pay_minutes ?? LIVE_PAY_MINUTES.default,

@@ -66,7 +66,6 @@ import { FOUNDING_CONSENT_VERSION } from '../../src/server/services/founding.js'
 import { INVOICE_ISSUER } from '../../src/server/services/invoices.js';
 import { normalizeMinTier, PRICE_LABEL_MAX } from '../../src/server/services/lookbook.js';
 import {
-  LIVE_ADDONS_MAX,
   LIVE_GESTURE_MIN_MS,
   LIVE_MIN_PARTICIPATIONS,
   LIVE_NETWORK_RETENTION_DAYS,
@@ -419,7 +418,6 @@ const CONSTANTS: Record<string, ConstantSpec> = {
     fr: [`pendant ${LIVE_PAY_MINUTES.default} minutes`, `de ${LIVE_PAY_MINUTES.min} à ${LIVE_PAY_MINUTES.max} minutes`],
     en: [`for ${LIVE_PAY_MINUTES.default} minutes`, `from ${LIVE_PAY_MINUTES.min} to ${LIVE_PAY_MINUTES.max} minutes`],
   },
-  LIVE_ADDONS_MAX: { value: `${LIVE_ADDONS_MAX} options`, fr: [`${LIVE_ADDONS_MAX} au plus`], en: [`at most ${LIVE_ADDONS_MAX}`] },
   LIVE_NETWORK_RETENTION_DAYS: {
     value: `${LIVE_NETWORK_RETENTION_DAYS} jours`,
     fr: [`${LIVE_NETWORK_RETENTION_DAYS} jours`],
@@ -624,7 +622,9 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'PAY confirms a reservation, nothing paid (choices 4, 33)': ".set({ status: 'CONFIRMED', confirmed_at: now })",
   // (ONE QUEUE, D13: offered with the next batch, at once in an after-room; R106 and article 13's "A piece that returns".)
   'a piece returned goes to the next in line (choice 5)': ".set((eb) => ({ status: 'MISSED', ended_at: eb.ref('turn_expires_at') }))",
-  'add-ons at their price when chosen (choice 34)': 'addons.map((a) => ({ entry_id: e.id, addon_id: a.id, price_minor: a.price_minor }))',
+  // (Lot Q2, step Q2.10, D25, D29: R104 and article 13's "Your piece", the add-ons the release offers, one for each piece,
+  // or one for each set, at the price shown; the release's 6 options gone with LIVE_ADDONS_MAX's value.)
+  'add-ons chosen with a piece held, one for each piece (choice 34; lot Q2, step Q2.4)': 'await setChoices(tx, { liveEntryId: e.id }, rows, { locationId: await liveAddonLocation(tx, d), currency: liveCurrency(d.currency), pieces: e.quantity }, now);',
   'pieces added, each recorded with the quantity line (choice 36)': 'quantityLine: d.quantity_line',
   'a person in the line let take their turn (choice 3)': 'await this.grant(tx, d, [entry], now, admin, used);',
   'closed at the sell-out (choice 26)': "soldOutAt && soldOutAt.getTime() < d.closes_at.getTime() ? 'SOLD_OUT'",
@@ -675,7 +675,9 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'WORN: the credit, first name and country, the Instagram name if chosen (G3)': 'instagram: r.credit_instagram,',
   // Lot M3 of the macro plan (scope of 2026-10-20, L2).
   'an add-on: no ORBES CODE, no identity, never toward the tier (D1)': 'const counted = lines.filter((l) => skus.get(l.sku_id)!.model === null);',
-  'add-ons offered at the purchase, carried if in stock, never holding the sale (D2)': 'const units = Math.max(0, Math.min(c.units, level.available, ADDON_LIMIT));',
+  // (Lot Q2, step Q2.10, D3, D4: R181 and article 14's "Add-ons", offered where ORBES offers it, YOUR ORDERS included, an
+  // add-on with stock carried while in stock, a service without stock; R182 what ORBES offers in YOUR ORDERS.)
+  'add-ons offered at the purchase, carried if in stock, never holding the sale (D2)': 'const units = Math.max(0, Math.min(each, left));',
   'add-ons in YOUR ORDERS until packing begins (D2)': "if (o.packing_started_at !== null) return 'PACKING_STARTED';",
   'an add-on added after payment has its own invoice (D2)': 'const invoice = await issueSupplementaryInvoice(tx, o, unitIds.map(() => addonLine(s.name, price)), by.actor, now);',
   'saved sizes counted for supplier orders, never naming anyone (Z1)': 'SELECT c.account_id, s.value_mm, coalesce(ad.country, a.country) AS country',

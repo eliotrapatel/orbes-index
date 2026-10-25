@@ -25,6 +25,8 @@
  *  - the report's checks find a fault planted; the sweeper resumes a confirmation due after a restart;
  *  - a LIVE RELEASE with a pace (W2, W4): the bots wait in the queue, reading their state as its `pollMs` says, and
  *    are admitted batch by batch; END TEST: the report 6/6 with its PACE check;
+ *  - a bot's add-on (lot Q2, step Q2.4, D24): one of the rows its hold offers now, none when none is: a product of one
+ *    unit sold once, never refused;
  *  - a set's LIVE RELEASE (macro scope K44 T1, M3.16): the bots say I'LL BE THERE and enter with a size per piece, pay
  *    one set each (a set sale, an order per piece); END TEST cancels every order of every set, the report 5/5 reading
  *    each entry in each of its sizes; ended before T0, their interest is withdrawn with its sizes per piece.
@@ -42,7 +44,19 @@ import { creditBalances } from '../../src/server/services/tier-grants.js';
 import { shareOf, splitOf, testPhrase, testRunSettings, TEST_RUN_DEFAULTS, TestEntrantService, type TestRunSettingsInput } from '../../src/server/services/test-entrants.js';
 import { createHarness, type Harness } from '../api/support.js';
 import { countPiecesIn, scanIntoParcel } from '../support/fulfil.js';
-import { createAccount, createCollection, createLiveRelease, createModel, createSet, createSetLiveRelease, holdPieces, liveFixtureOn, sizedModel, type LiveFixture } from '../support/live.js';
+import {
+  createAccount,
+  createCollection,
+  createLiveRelease,
+  createModel,
+  createSet,
+  createSetLiveRelease,
+  holdPieces,
+  liveAddon,
+  liveFixtureOn,
+  sizedModel,
+  type LiveFixture,
+} from '../support/live.js';
 import { poolDraw, withDrawSizes } from '../support/draws.js';
 
 const MINUTE = 60_000;
@@ -907,7 +921,9 @@ describe('a LIVE RELEASE end to end', () => {
 
   it('I\'LL BE THERE, the line at T0 by tier, PRESS, the hold, SECURE, PAY and RELEASE; END TEST cancels the orders; report 6/6 (ONE QUEUE: its PACE check too)', async () => {
     const t0 = new Date(w.h.clock.now().getTime() + 2 * MINUTE);
-    const release = await createLiveRelease(w.f, { opensAt: t0, sizes: [{ label: '52', stock: 6 }], addons: [{ label: 'Box', priceMinor: 2000 }], accessModels: [w.f.modelId] });
+    // Lot Q2, step Q2.4 (D24): the bots' add-on is one of the release's pick of the catalogue, as anyone's.
+    const box = await liveAddon(w.f, { name: 'Box', priceMinor: 2000 });
+    const release = await createLiveRelease(w.f, { opensAt: t0, sizes: [{ label: '52', stock: 6 }], addonIds: [box], accessModels: [w.f.modelId] });
     const run = await w.tests.start(
       release.id,
       press(release.id, { titane: 3, palladium: 3 }, {
@@ -932,9 +948,16 @@ describe('a LIVE RELEASE end to end', () => {
     expect(entries.every((e) => (e.gesture_ms ?? 0) >= 1400)).toBe(true);
     expect(new Set(entries.map((e) => Buffer.from(e.network_hash!).toString('hex'))).size).toBe(6);
     expect(entries.slice(0, 3).every((e) => e.tier === 3)).toBe(true);
-    const orders = await w.h.ctx.db.selectFrom('orders').select(['status', 'addons']).where('drop_id', '=', release.id).execute();
+    const orders = await w.h.ctx.db.selectFrom('orders').select(['id', 'status', 'addons']).where('drop_id', '=', release.id).execute();
     expect(orders).toHaveLength(3);
-    expect(orders.every((o) => o.status === 'RESERVED' && (o.addons as unknown[]).length === 1)).toBe(true);
+    expect(orders.every((o) => o.status === 'RESERVED' && (o.addons as unknown[]).length === 0)).toBe(true);
+    // Each paid bot's add-on: one unit of the pick on its order, carried at PAY, never words.
+    const units = await w.h.ctx.db.selectFrom('order_addon_items').select(['order_id', 'addon_id', 'added_by_type']).where('order_id', 'in', orders.map((o) => o.id)).execute();
+    expect(units.map((u) => [u.addon_id, u.added_by_type])).toEqual(orders.map(() => [box, 'PURCHASE']));
+    expect(new Set(units.map((u) => u.order_id)).size).toBe(3);
+    const choiceAudits = await w.h.ctx.db.selectFrom('audit_logs').select('details').where('action', '=', 'drop.live.addons').where('target_id', '=', release.id).execute();
+    expect(choiceAudits.length).toBeGreaterThanOrEqual(3);
+    for (const x of choiceAudits) expect((x.details as { items: unknown }).items).toEqual([{ addonId: box, units: 1 }]);
     expect((await w.h.ctx.services.liveRoom.frame(release.id))?.room).toMatchObject({ left: 3 });
 
     const ended = await w.tests.end(run.id, testPhrase(release.id, true), w.f.admin);
@@ -991,6 +1014,36 @@ describe('a LIVE RELEASE end to end', () => {
     expect(ended.report?.checks.at(-1)?.line).toMatch(
       /^5 batches gave 10 turns at 2 every 1 min, the first on the pace at \d\d:\d\d:\d\d PARIS, each on its time and in the line’s order; none gave more than the pace, and none left anyone waiting while a piece of their size was free\.$/,
     );
+    expect([ended.report?.passed, ended.report?.total]).toEqual([6, 6]);
+  });
+
+  it('Lot Q2, step Q2.4 (D24): a bot chooses among the rows its hold offers now, as a collector: a product add-on of 1 unit, two bots taking the add-on share, one unit sold and no ADD-ONS refusal', async () => {
+    const db = w.h.ctx.db;
+    const extender = await w.h.ctx.services.addons.create({ name: 'CHAIN EXTENDER', skuCode: 'ADD-TEST-EXT', prices: { EUR: 3000 }, weightG: 15 }, w.f.admin);
+    expect(extender.kind).toBe('PRODUCT');
+    const france = (await db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
+    await w.h.ctx.services.stock.adjust({ skuId: extender.sku.id, locationId: france, delta: 1, note: 'Counted.' }, w.f.admin);
+    const t0 = new Date(w.h.clock.now().getTime() + 2 * MINUTE);
+    // One turn a minute: the second bot's hold comes after the first has taken the only unit.
+    const release = await createLiveRelease(w.f, { opensAt: t0, sizes: [{ label: '52', stock: 2 }], pace: { batch: 1, minutes: 1 }, addonIds: [extender.id], accessModels: [w.f.modelId] });
+    const run = await w.tests.start(
+      release.id,
+      press(release.id, { titane: 2 }, { behaviour: { payPct: 100, releasePct: 0, missPct: 0, leavePct: 0, holdSeconds: 1.5 }, choices: { size: '52', quantity: 1, addOnsPct: 100 } }),
+      w.f.admin,
+    );
+    await drive(w, 0, 500, release.id);
+    w.h.clock.set(t0);
+    await drive(w, 3 * MINUTE, 500, release.id);
+    expect(await statusOf(w, run.id)).toBe('DONE');
+    expect((await db.selectFrom('live_entries').select('status').where('drop_id', '=', release.id).execute()).map((e) => e.status)).toEqual(['CONFIRMED', 'CONFIRMED']);
+    const orders = await db.selectFrom('orders').select('id').where('drop_id', '=', release.id).execute();
+    expect(orders).toHaveLength(2);
+    const units = await db.selectFrom('order_addon_items').select(['addon_id', 'added_by_type']).where('order_id', 'in', orders.map((o) => o.id)).execute();
+    expect(units.map((u) => [u.addon_id, u.added_by_type])).toEqual([[extender.id, 'PURCHASE']]);
+    expect((await stockLevel(db, extender.sku.id, france)).available).toBe(0);
+    // The second bot was offered no row and chose none: nothing refused.
+    expect((await w.tests.view(run.id)).errors.filter((e) => e.message.startsWith('ADD-ONS'))).toEqual([]);
+    const ended = await w.tests.end(run.id, testPhrase(release.id, true), w.f.admin);
     expect([ended.report?.passed, ended.report?.total]).toEqual([6, 6]);
   });
 

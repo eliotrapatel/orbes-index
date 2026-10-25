@@ -147,6 +147,15 @@ ONE QUEUE (lot Q1 of 2026-10-24, B.19; every LIVE RELEASE but an after-room)
   LiveHub (once a second) ─► the room + the queue's snapshot (place in size, estimate, next, out; never sent whole)
              ─► next: its stream, a frame a second ─► behind: its place, then GET /state every 10 to 60 s
   a piece returned, freed, missed, expired, ADD PIECES ─► waits for the next batch (an after-room: at once)
+
+ADD-ONS, ONE SYSTEM (lot Q2 of 2026-10-25, B.20)
+  Catalogue → Add-ons ─► addon_items: a PRODUCT (stock) or a SERVICE (none), four switches, the engraving + textMax
+  a release's form ─► drop_addons (its pick: a LIVE RELEASE, its after-room, a draw)
+  addonOffer(moment) ─► LIVE / DRAW: switch on AND picked by the release · SALON / ORDERS: switch alone · staff: unbound
+  5b (a LIVE hold) ─► addon_choices (a row per add-on, ENGRAVING's words) ─► PAY ─► one unit per piece's order
+             (a product under its SKU's lock or left out; a service always, held nowhere) ─► invoice ADD_ON_ITEM
+  YOUR ORDERS ─► ADD AN ADD-ON (never the engraving) · ENGRAVING: its words add / remove its unit (setEngraving)
+  0060 ─► live_addons + engraving_prices converted into catalogue add-ons (addon_conversions), picks given, tables dropped
 ```
 
 ### B.3 Components
@@ -219,7 +228,10 @@ genome/
                          (ReturnsReportService), size-split (SizeSplitService, ORDER A MODEL), addons (AddonService,
                          the catalogue), sku-owner (a SKU's model or add-on), order-addons (OrderAddonService, add-ons
                          on orders), sets (SetService), set-sales (a set sold, its shares, cancel and return whole),
-                         release-offer (what a release sells, and every reader of it)
+                         release-offer (what a release sells, and every reader of it); lot Q2 (B.20): addons gains the
+                         kinds, the switches, the engraving and the releases' picks (defaultPick, checkPick, writePick),
+                         order-addons the ONE OFFER RULE (addonOffer) and the engraving's unit, sku-owner the service's
+                         refusal (addonServiceSku)
     email/               the emails (lot M1): smtp.ts (the SMTP client on node:net and node:tls, the only outbound
                          connection the app makes), render.ts (the house's look, text and HTML), copy.ts (their
                          default words)
@@ -259,7 +271,8 @@ genome/
                          views/order-addons.ts), THE SET's releases, pickers per piece and set in YOUR ORDERS;
                          lot Q1 (B.19): ONE QUEUE's screens of a LIVE RELEASE (views/live.ts, views/desktop-room.ts), the
                          Horizon band and the figures' morph (live-horizon.ts), seal C and the monogram alone on its horizon
-                         (live-seal.ts), the designed sounds (live-sound.ts, sounds/*.mp3, served as /assets/*.mp3)
+                         (live-seal.ts), the designed sounds (live-sound.ts, sounds/*.mp3, served as /assets/*.mp3);
+                         lot Q2 (B.20): 5b, SECURED with add-ons (views/secured-addons.ts, live-model.ts securedAddons)
     admin/               admin console: catalogue (Discontinue and Reinstate), generator, keys, anomalies, analytics, audit, the Club
                          (Drops, Circle, Tiers, Requests; a LIVE RELEASE's page, #/club/live/:dropId); the sale mode (decoder worker of verify/);
                          Orders (#/orders, an order's page, the packing slip), Logistics (#/logistics, B.11; #/atelier leads
@@ -272,7 +285,8 @@ genome/
                          (#/worn, its sidebar badge; the canvas encoder shared with the collector app, shared/photo.ts);
                          lot M3 (B.18): Boxes and SERVES in Settings, Orders → Returns (#/orders/returns), Order a
                          model, Catalogue → Add-ons and Sets, an order's Add-ons and its set (DECIDE THE SET); lot Q1 (B.19):
-                         a LIVE RELEASE's pace and hold, SHORTEN THE HOLD, END THE HOLD NOW, the close guard, the queue's figures
+                         a LIVE RELEASE's pace and hold, SHORTEN THE HOLD, END THE HOLD NOW, the close guard, the queue's figures;
+                         lot Q2 (B.20): an add-on's type, switches and engraving, each release's Add-ons offered
     legal/               the legal pages (J-06), the third app: privacy policy, terms of use, legal notice and FAQ, in French
                          and English (/legal, /legal/privacy, /legal/terms, /legal/notice, /legal/faq); content/*.ts with LEGAL_VERSION
     shared/              brand CSS, display font, monogram, DOM helpers; the photographs' canvas encoder (photo.ts,
@@ -479,6 +493,24 @@ One deployment after M3: migration `0058_one_queue` (DATABASE §5.29, §5.39), n
   - The tier order is unchanged (the line at T0 by the tier read then, when the release gives tier priority).
   - S1, S3, S5 and S6 do not change (no theorbes.com change, no fulfilment change, no catalogue mapping, no ownership change).
 - **The web side**: in `web/verify/`, `views/live.ts` and `views/desktop-room.ts` (the room's horizon door, the draw in place from 00:00 and THE OPENING at the later of its landing and the entry's first reading with its place, `live-model.ts` `drawnScreen`; the one queue in every state, `queueModel`; SOLD OUT for your size; the turn, HOLD, SECURED and PAY's light, `payLight`; CONFIRMED in the vault; the after-room's open door), `live-horizon.ts` (the Horizon band, `horizonBand`, `bandModel`; the figures' morph, `morph`), `live-seal.ts` (seal C, `sealCSvg`, and the monogram alone on its horizon, `monogramSealSvg`), `live-sound.ts`; every word in `copy.ts` (`LIVE`), a computer's through `forDevice` ([BRAND-DESIGN-SYSTEM](BRAND-DESIGN-SYSTEM.md), lot Q1). In `web/admin/`, a LIVE RELEASE's pace and hold at creation, the Pace block's added figures, SHORTEN THE HOLD and END THE HOLD NOW, NEXT BATCH NOW's refusal, the close guard, the line's queue place and estimated turn with its filters, the report's queue rows (`views/live.ts`, `model/live.ts`, `views/live-intelligence.ts`).
+
+### B.20 Lot Q2: Add-ons, one system (decisions of 22 October 2026, lot Q2 of 2026-10-25)
+
+One deployment after ONE QUEUE (or with it): migrations `0059_addons_one_system` and `0060_release_addons_converted` (DATABASE §5.131, §5.133, §5.134, §5.139, §5.140, §6.1), no new dependency, no new process, no change to the host (`deploy/vps` unchanged). The owner's words: "we should keep only the catalogue add ons and we choose where to offer those because each add on will be a product in shopify anyways since it'll go into the checkout" (D1). It builds on lot M3's catalogue add-ons (B.18) and changes nothing else of a LIVE RELEASE (B.19).
+
+- **One table of add-ons** (`services/addons.ts`; D1, D2, D4, D7, N13): every add-on is a row of `addon_items`, with its own SKU, its price per house currency and its unit per sale (`order_addon_items`), whether it is a **product** (`kind` PRODUCT, M3's: real stock, its supplier, its warehouse) or a **service** (`kind` SERVICE: an engraving, a gift wrapping; a price and a product, no stock count, no supplier, no warehouse), fixed at its creation. A service's SKU keeps its code and its Shopify variant and never takes stock: every path that moves stock refuses it (`addonServiceSku`, `assertNotServiceSku`, `409 ADDON_SERVICE`), and the readers that list SKUs leave it out. A service's unit is held nowhere (`location_id` NULL, the trigger `order_addon_items_kind_guard`), so `stock_holds` never counts it; it ships, returns and is invoiced as a product's, by its status and times only.
+- **Where it is offered: per add-on and per release** (D3, D8, N8): four switches per add-on (`offer_live`, `offer_draw`, `offer_salon`, `offer_orders`) and each release's **pick** (`drop_addons`: a LIVE RELEASE, its after-room, a draw), the default at creation every add-on its switch offers priced in its currency (`defaultPick`, N7), checked (`checkPick`) and written whole (`writePick`) until the release ends (a draw: its place-held window), never locked at the announcement (the review of lot Q2: `PUT /api/admin/live/:id/addons` once announced). **The ONE OFFER RULE** (`services/order-addons.ts` `addonOffer`), read by every choice, addition and carry (`setChoices`, `carryChoices`, YOUR ORDERS' `addForAccount`): at a LIVE hold or a draw's place held, the switch **and** the pick; in the salon and YOUR ORDERS the switch alone, YOUR ORDERS on every order until packing whatever its release (as M3 did: add only, never degrade); staff by neither.
+- **The engraving's words** (D4, D12, N3, N5): the engraving is one service flagged `engraving` (one active at a time), with its most characters `textMax` (1 to 20, the house's 20 by default). On screen 5b its words are typed in YOUR TEXT and kept on the hold's choice (`addon_choices.text`) until PAY writes them on each order that takes an engraving unit; in YOUR ORDERS they add or remove its unit (`setEngraving`: `engravingUnits`, `ordersEngraving`, `addEngravingUnit`, `removeEngravingUnit`), a unit bought with the order never removed by the collector. The words are checked by the house's rule wherever they are typed and never logged.
+- **A LIVE hold** (D10 to D13, N1): the hold's offer is its release's pick; each row chosen is **one unit per piece** of the entry (one per set, D25), carried at PAY onto each piece's order (a set's first piece's order), a product's under its SKU's lock or left out (`NONE_LEFT`, `NOT_OFFERED`), a service's always; PAY's total is the pieces and their add-ons.
+- **The conversion** (`0060`; D5, N4, N6, N15): every release add-on set inside a LIVE RELEASE (`live_addons`) and Orders → Settings' engraving price (`engraving_prices`) became catalogue add-ons (one per label, a new one a service offered at a LIVE purchase only; the settings' prices the engraving's, its YOUR ORDERS switch on), each recorded (`addon_conversions`), every release not ended given its pick; then `live_entry_addons`, `live_addons` and `engraving_prices` were dropped, with the code that read them (the release add-ons of the console's LIVE form, `GET`/`PUT /api/admin/orders/engraving-prices`). History stays as sold: `orders.addons` and `orders.engraving_minor` keep the orders of before, their invoices and receipts (`legacyAddons`). A unit at price 0 stays possible, so lot Q3's vault can give a free add-on on this same system (D22).
+- **The Shopify fit** (D9, D26 to D28; macro scope S1 to S7, "No design may assume the platform is the only place people pay"):
+  - **S2** (PAY, the hand-off): PAY's total is the exact order with its units, and every unit, a service's included, is a line item of that order's checkout and of the order export; the switches and the picks say where the platform offers an add-on, and on the store an add-on is sold from its own product.
+  - **S3** (fulfilment): packed by the platform, one checklist line per add-on, a service's included, the engraving's words on the order's own *Engraving done* line.
+  - **S4** (stock): the platform holds the stock truth of a product add-on, as lot M3; a service has none to push.
+  - **S5** (catalogue mapping): one Shopify product of one variant per add-on, a service included (its SKU code; its product and variant ids pasted back with `setShopify`), a service exported with *Requires shipping* `false` and no weight.
+  - **S7** (perks at checkout): an add-on never counts toward the tier, and no perk changes.
+  - S1 and S6 do not change (no theorbes.com change, no ownership change).
+- **The web side**: in `web/verify/`, screen 5b (`views/secured-addons.ts`; `live-model.ts` `securedAddons`, `securedChoice`, `engravingProblem`, `securedColumn`): the rows on hairlines, the ring lit into the point, YOUR TEXT, M3's note, PAY with its total; on a computer the rows above PAY, PAY first only when they would push it below the first screen (`views/desktop-room.ts`, `is-pay-first`); the draw's PLACE HELD, the salon and YOUR ORDERS keep M3's rows fed by each moment's offer (`addons-model.ts`), the engraving a row of at most 1 there and never in ADD AN ADD-ON; every word in `copy.ts` (`LIVE.addonText`), a computer's through `forDevice` ([BRAND-DESIGN-SYSTEM](BRAND-DESIGN-SYSTEM.md), lot Q2). In `web/admin/`, Catalogue → Add-ons' Type, Offered, Releases and the engraving's Most characters, each release's Add-ons offered with why one cannot be (`views/addons.ts` `pickField`, `model/addons.ts`), an order's service units and engraving unit, Orders → Settings' Engraving line.
 
 ---
 

@@ -76,6 +76,7 @@ import {
   sheetModel,
   withRequest,
 } from '../../src/web/verify/lookbook-model.js';
+import { addonRows, rowsLimit, withUnits } from '../../src/web/verify/addons-model.js';
 import type { LookbookCard, LookbookSheet, VerifyOutcome } from '../../src/web/verify/types.js';
 import { resultViewModel } from '../../src/web/verify/view-model.js';
 import { contextInput, modelContext } from '../../src/web/verify/messages-model.js';
@@ -457,6 +458,23 @@ describe('THE PRIVATE SALON on /verify (P-X08)', () => {
     expect(sheetModel(sheet({ salon: { priceLabel: '€ 1', minTier: 1, request: null } })).salon).toBeNull();
     // The tiers it names are the club's.
     expect([1, 2, 3].map((t) => salon({ minTier: t })!.tier)).toEqual([...SERVER_TIER_NAMES]);
+  });
+
+  it('offers with REQUEST THIS PIECE what its SALON switch offers, a service like a product, the engraving a row of at most 1 (lot Q2, step Q2.9; D3, N9)', () => {
+    const offer = [
+      { addonId: '0b5e7d1a-1c2d-4e5f-9a8b-7c6d5e4f3a2b', name: 'POLISHING CLOTH', line: null, priceMinor: 1_500, currency: 'EUR', maxUnits: 3, engraving: false },
+      { addonId: '4e6a8c0d-2f1b-4c3d-8e5f-6a7b8c9d0e1f', name: 'ENGRAVING', line: 'Up to 12 characters, engraved by ORBES.', priceMinor: 4_000, currency: 'EUR', maxUnits: 1, engraving: true, textMax: 12 },
+    ];
+    const m = sheetModel(sheet({ lookbook: 'RESERVED', salon: { priceLabel: null, minTier: 1, request: null, addons: { currency: 'EUR', offer } } })).salon!;
+    // The server's offer as it is: the app adds nothing to it and leaves nothing out.
+    expect(m.addons).toEqual({ currency: 'EUR', offer });
+    const rows = addonRows(m.addons!.offer);
+    expect(rows.map((r) => [r.name, r.max, r.engraving])).toEqual([
+      ['POLISHING CLOTH', 3, false],
+      ['ENGRAVING', 1, true],
+    ]);
+    // Chosen at its one: no "at most 3 of each" note for it; its words are entered in YOUR ORDERS.
+    expect(rowsLimit(withUnits(rows, offer[1]!.addonId, 1))).toBeNull();
   });
 
   it('offers YOUR SIZE for a model of two sizes or more: YOUR SIZES\' suggestion preselected to confirm, else NOT SURE YET, which sends no size; never a size the model lacks (AC-01)', () => {

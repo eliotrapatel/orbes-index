@@ -763,6 +763,27 @@ export const ADDON_POSITION_MAX = 10_000;
 export const ADDON_PRICE_MINOR_MAX = 100_000_000;
 export const ADDON_UNITS_MAX = 3;
 /**
+ * ADD-ONS ONE SYSTEM (migration 0059, lot Q2): an add-on is a PRODUCT (real stock, 0056's) or a SERVICE (no stock count,
+ * no supplier, no warehouse: engraving, gift wrapping), fixed at its creation.
+ */
+export const ADDON_KINDS = ['PRODUCT', 'SERVICE'] as const;
+export type AddonKind = (typeof ADDON_KINDS)[number];
+/** A release's pick of add-ons (drop_addons.position, migration 0059): positions 1 to 100, no other cap. */
+export const ADDON_PICK_POSITION_MAX = 100;
+/**
+ * The engraving's most characters (addon_items.text_max, migration 0059): 1 to 20; 20, the house's
+ * ENGRAVING_COLLECTOR_MAX, is its ceiling and its default.
+ */
+export const ADDON_TEXT_MAX = Object.freeze({ min: 1, max: 20 } as const);
+/** The engraving's words chosen before the order (addon_choices.text, migration 0059), at most, as orders.engraving_text. */
+export const ADDON_CHOICE_TEXT_MAX = 120;
+/**
+ * What a catalogue add-on was converted from (addon_conversions.source, migration 0060, lot Q2): a LIVE release's own
+ * add-on (`live_addons`, 0021) or Orders → Settings' engraving price (`engraving_prices`, 0039).
+ */
+export const ADDON_CONVERSION_SOURCES = ['LIVE_ADDON', 'ENGRAVING_PRICES'] as const;
+export type AddonConversionSource = (typeof ADDON_CONVERSION_SOURCES)[number];
+/**
  * A unit of an add-on on an order (order_addon_items.status, migration 0056): HELD (in stock at its location) →
  * SHIPPED → RETURNED, or REMOVED (taken off before packing) or CANCELLED (with its order).
  */
@@ -1610,23 +1631,6 @@ export interface LiveEntriesTable {
 export interface LiveAccessModelsTable {
   drop_id: string;
   model_id: string;
-}
-
-/** An add-on offered at the reveal of a LIVE RELEASE (migration 0021): at most 6 per drop. id and drop_id never change. */
-export interface LiveAddonsTable {
-  id: Generated<string>;
-  drop_id: string;
-  label: string;                       // 1..40 characters
-  line: string | null;                 // ≤ 120 characters
-  price_minor: number;                 // ≥ 0, per piece
-  position: number;                    // smallint 1..6
-}
-
-/** An add-on an entry chose, with its price at the time (migration 0021). */
-export interface LiveEntryAddonsTable {
-  entry_id: string;
-  addon_id: string;
-  price_minor: number;
 }
 
 /** I'LL BE THERE (migration 0021): one per account and drop, with a size of that drop. */
@@ -2617,6 +2621,48 @@ export interface AddonItemsTable {
   created_at: TimestampDefault;
   created_by: ColumnType<string | null, string | null | undefined, never>; // admin_users.id; NULL for a script
   updated_at: TimestampDefault;
+  /**
+   * Migration 0059 (ADD-ONS ONE SYSTEM, lot Q2): PRODUCT (DEFAULT) or SERVICE (no supplier, no stock, its unit held
+   * nowhere: `addon_items_service_plain`), fixed at its creation.
+   */
+  kind: ColumnType<AddonKind, AddonKind | undefined, never>;
+  /** Migration 0059: the moments it is offered at (DEFAULT true each): a LIVE hold, a draw's place held, the salon, YOUR ORDERS until packing. */
+  offer_live: WithDefault<boolean>;
+  offer_draw: WithDefault<boolean>;
+  offer_salon: WithDefault<boolean>;
+  offer_orders: WithDefault<boolean>;
+  /** Migration 0059: the engraving, whose collector types its words (a SERVICE only; one active at a time). */
+  engraving: WithDefault<boolean>;
+  /** Migration 0059: the engraving's most characters (ADDON_TEXT_MAX, DEFAULT 20), read on the engraving only. */
+  text_max: WithDefault<number>;
+}
+
+/**
+ * A release's pick of add-ons (migration 0059, ADD-ONS ONE SYSTEM, lot Q2): the add-ons a release offers at its purchase
+ * moments, in its order (`position` 1..ADDON_PICK_POSITION_MAX, once per release). Its release and add-on never change.
+ * YOUR ORDERS never reads it.
+ */
+export interface DropAddonsTable {
+  drop_id: ColumnType<string, string, never>;
+  addon_id: ColumnType<string, string, never>;
+  position: number;                    // 1..100
+}
+
+/**
+ * What was converted into a catalogue add-on (migration 0060, lot Q2, D5): one row per release add-on (`source`
+ * LIVE_ADDON, `source_id` its old id, `drop_id` its release) and one per currency of Orders → Settings' engraving price
+ * (ENGRAVING_PRICES, neither); `currency` the source's and `price_minor` the price it gave its add-on in it (NULL: none).
+ * Never changed; read by Catalogue → Add-ons ("Converted from…") and by 0060's `down`.
+ */
+export interface AddonConversionsTable {
+  id: Generated<string>;
+  source: AddonConversionSource;
+  source_id: string | null;
+  drop_id: string | null;
+  addon_id: string;
+  currency: string | null;
+  price_minor: number | null;
+  converted_at: TimestampDefault;
 }
 
 /** An add-on's price in a house currency (migration 0056, D1): no row, not offered in that currency. */
@@ -2639,7 +2685,8 @@ export interface OrderAddonItemsTable {
   order_id: ColumnType<string, string, never>;
   addon_id: ColumnType<string, string, never>;
   sku_id: ColumnType<string, string, never>; // the add-on's SKU (skus.addon_id = addon_id)
-  location_id: string;
+  /** Where it is held; NULL for a SERVICE's unit (migration 0059, `order_addon_items_kind_guard`), never for a PRODUCT's. */
+  location_id: ColumnType<string | null, string | null, string | null>;
   price_minor: ColumnType<number, number, never>;
   currency: ColumnType<HouseCurrency, HouseCurrency, never>;
   status: WithDefault<OrderAddonStatus>;
@@ -2667,6 +2714,8 @@ export interface AddonChoicesTable {
   addon_id: ColumnType<string, string, never>;
   units: number;                       // 1..3
   chosen_at: TimestampDefault;
+  /** Migration 0059: the engraving's words before the order (1..120, trimmed; the engraving's choice only); NULL: none. */
+  text: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
 /**
@@ -2752,10 +2801,13 @@ export interface CarriersTable {
   created_at: TimestampDefault;
 }
 
-/** An add-on of an order, as it was sold (orders.addons). */
+/**
+ * A release add-on of an order, as it was sold before lot Q2 (orders.addons): history, read by its invoices, credit
+ * notes, exchanges and exports (N15); no order writes it since, and migration 0060 converted the release add-ons.
+ */
 export interface OrderAddonSnapshot {
   [key: string]: JsonValue;
-  /** live_addons.id of the release's add-on. */
+  /** The release add-on's id then (live_addons.id, a table migration 0060 dropped). */
   id: string;
   label: string;
   /** Per piece, in the order's currency. */
@@ -3235,17 +3287,6 @@ export interface ShippingRatesTable {
 }
 
 /**
- * The engraving's price per currency (migration 0039, plan NEXT LOT §3.6.C; Orders → Settings, Engraving, ADMIN), for an
- * order whose release did not sell the engraving as an add-on; no row: no engraving offered in that currency.
- */
-export interface EngravingPricesTable {
-  currency: HouseCurrency;
-  price_minor: number;                 // 0..100 000 000
-  updated_by: string | null;
-  updated_at: TimestampDefault;
-}
-
-/**
  * The guests of an after-room (migration 0023, A3): the parent's entries still WAITING or QUEUED at its sell-out, each
  * with its place in the after-room's line (their order in the parent's), remembered once; never changed.
  */
@@ -3497,8 +3538,6 @@ export interface Database {
   drop_sizes: DropSizesTable;
   live_entries: LiveEntriesTable;
   live_access_models: LiveAccessModelsTable;
-  live_addons: LiveAddonsTable;
-  live_entry_addons: LiveEntryAddonsTable;
   live_interest: LiveInterestTable;
   live_messages: LiveMessagesTable;
   live_tier_windows: LiveTierWindowsTable;
@@ -3522,6 +3561,8 @@ export interface Database {
   addon_item_prices: AddonItemPricesTable;
   order_addon_items: OrderAddonItemsTable;
   addon_choices: AddonChoicesTable;
+  drop_addons: DropAddonsTable;
+  addon_conversions: AddonConversionsTable;
   sets: SetsTable;
   set_models: SetModelsTable;
   drop_entry_sizes: EntrySizesTable;
@@ -3540,7 +3581,6 @@ export interface Database {
   order_alert_settings: OrderAlertSettingsTable;
   club_program_settings: ClubProgramSettingsTable;
   shipping_rates: ShippingRatesTable;
-  engraving_prices: EngravingPricesTable;
   tier_grants: TierGrantsTable;
   credit_uses: CreditUsesTable;
   care_requests: CareRequestsTable;
@@ -3682,7 +3722,6 @@ export type SetRow = Selectable<SetsTable>;
 export type SetSaleRow = Selectable<SetSalesTable>;
 export type LiveEntryRow = Selectable<LiveEntriesTable>;
 export type LiveEntryUpdate = Updateable<LiveEntriesTable>;
-export type LiveAddonRow = Selectable<LiveAddonsTable>;
 export type LiveMessageRow = Selectable<LiveMessagesTable>;
 export type LiveTierWindowRow = Selectable<LiveTierWindowsTable>;
 export type StockLocationRow = Selectable<StockLocationsTable>;
@@ -3705,7 +3744,6 @@ export type ClientConversationRow = Selectable<ClientConversationsTable>;
 export type ClientMessageRow = Selectable<ClientMessagesTable>;
 export type ClubProgramSettingsRow = Selectable<ClubProgramSettingsTable>;
 export type ShippingRateRow = Selectable<ShippingRatesTable>;
-export type EngravingPriceRow = Selectable<EngravingPricesTable>;
 export type AccountAddressRow = Selectable<AccountAddressesTable>;
 export type HeardOptionRow = Selectable<HeardOptionsTable>;
 export type AccountProfileRow = Selectable<AccountProfilesTable>;

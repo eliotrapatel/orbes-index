@@ -50,7 +50,7 @@ import { createManualClock, SYSTEM_ACTOR } from '../../src/server/types.js';
 import { LIVE, RELEASES, STORY } from '../../src/web/verify/copy.js';
 import { countdown, PARIS, zonedTime } from '../../src/web/verify/live-model.js';
 import { jpegPhoto } from '../support/images.js';
-import { createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture, type LiveRelease, type LiveReleaseOptions } from '../support/live.js';
+import { createLiveRelease, holdPieces, liveAddon, liveFixtureOn, type LiveFixture, type LiveRelease, type LiveReleaseOptions } from '../support/live.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
 import { focusRingContrast, keepsVault, screenChecks } from '../support/vault-checks.js';
 import { CHROMIUM_PATH, launchChromium, mobileContext, startVerifyServer, type VerifyServer } from './verify.harness.js';
@@ -217,7 +217,9 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     const t0 = new Date(Date.now() + 45_000);
     // A turn of 90 s: the rival still holds its turn when this phone, behind it at the line's frame, first reads its state
     // (a moment of its own within LIVE_QUEUE_SPREAD_MS, a minute), so the pieces left read its held piece (B3 below).
-    const r = await release({ opensAt: t0, minTier: 1, turnSeconds: 90, sizes: [{ label: '50', stock: 2 }, { label: '52', stock: 1 }], addons: [{ label: 'ENGRAVING', line: 'Your initials', priceMinor: 15_000 }, { label: 'GIFT BOX', priceMinor: 9_000 }] });
+    // Lot Q2, step Q2.4 (D2): the release picks two catalogue services.
+    const addonIds = [await liveAddon(f, { name: 'ENGRAVING', line: 'Your initials', priceMinor: 15_000, engraving: true }), await liveAddon(f, { name: 'GIFT BOX', priceMinor: 9_000 })];
+    const r = await release({ opensAt: t0, minTier: 1, turnSeconds: 90, sizes: [{ label: '50', stock: 2 }, { label: '52', stock: 1 }], addonIds });
     const laterAt = new Date(Date.now() + 3 * 86_400_000);
     const later = await release({ opensAt: laterAt, roomOpensMinutes: 5, minTier: 2 });
     const [s50, s52] = r.sizes;
@@ -428,6 +430,12 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     expect(answered).toBe(false);
     expect(await page.locator('.view--live').getAttribute('class')).toMatch(/live--tx-secured/);
     expect(await page.locator('.live__piece-seal').evaluate((g) => getComputedStyle(g).animationName)).toBe('live-tx-settle');
+    // 5b (lot Q2, step Q2.8, D35): ADD-ONS and its rows enter with the screen's other lines, after the name (live-fade-in at
+    // 2.45 s), never resolving with SECURED's overline (live-tx-resolve at 1.9 s).
+    const motion = (sel: string) => page.locator(sel).first().evaluate((el) => [getComputedStyle(el).animationName, getComputedStyle(el).animationDelay]);
+    expect(await motion('.live__secured > .live__addons-title')).toEqual(['live-fade-in', '2.45s']);
+    expect(await motion('.live__secured > .live__addons')).toEqual(['live-fade-in', '2.45s']);
+    expect(await motion('.live__secured > .live__overline:not(.live__addons-title)')).toEqual(['live-tx-resolve', '1.9s']);
     expect(await page.locator('.live__piece-seal g[data-layer="genome"]').count()).toBe(0);
     await expect.poll(async () => (await live(page)).sounds.filter((n) => n === 'secured').length, POLL).toBe(1);
     expect((await live(page)).tones).toEqual([]);
@@ -447,10 +455,13 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     expect(await pay.getAttribute('aria-describedby')).toBe('live-pay-left');
     await expect.poll(async () => Number(await pay.evaluate((b) => (b as HTMLElement).style.getPropertyValue('--live-pay-f'))), POLL).toBeGreaterThan(0.4);
     // PAY is the light now (D39), no filled ground: no control of the screen is filled ivory.
-    await keepsVault(page, null, ['ENGRAVING + € 150', 'GIFT BOX + € 90', 'PAY · € 5 050', 'RELEASE MY PLACE']);
-    await page.getByRole('button', { name: /ENGRAVING/ }).click();
+    // 5b (lot Q2, step Q2.8): the release's catalogue add-ons as rows you tap, each at its tap floor.
+    await keepsVault(page, null, ['PAY · € 5 050', 'RELEASE MY PLACE']);
+    expect(await page.locator('.live__addons .live__addon').count()).toBe(2);
+    await page.getByRole('button', { name: /^ENGRAVING/ }).click();
     await expect.poll(async () => norm((await pay.getAttribute('aria-label')) ?? ''), POLL).toBe('PAY · € 5 200');
-    expect(await page.getByRole('button', { name: /ENGRAVING/ }).getAttribute('aria-pressed')).toBe('true');
+    await textOf(page.locator('.live__addons .live__addon-item.is-on .live__addon-label'), 'ENGRAVING');
+    expect(await page.getByRole('button', { name: /^ENGRAVING/ }).getAttribute('aria-pressed')).toBe('true');
     await keepsVault(page, null, ['PAY · € 5 200']);
     expect(await focusRingContrast(page, pay)).toBeGreaterThanOrEqual(3);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-secured.png'), fullPage: true });
@@ -508,6 +519,59 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await textOf(order.locator('.n-kv__row', { hasText: 'ENGRAVING' }), 'ENGRAVING + € 150');
     expect(problems).toEqual([]);
   }, 240_000);
+
+  it('5b: choose ENGRAVING, type its words, PAY, the receipt (lot Q2, step Q2.8; MK #secured-addons)', async () => {
+    // The release picks the mockup's ENGRAVING (its 12 characters) and GIFT WRAPPING, services both: no M3 note.
+    const engraving = await liveAddon(f, { name: 'ENGRAVING', line: 'Up to 12 characters, engraved by ORBES.', priceMinor: 4_000, engraving: true, textMax: 12 });
+    const wrapping = await liveAddon(f, { name: 'GIFT WRAPPING', line: 'In the house’s paper, with a card in your words.', priceMinor: 1_500 });
+    const r = await release({ opensAt: new Date(Date.now() + 4_000), sizes: [{ label: '52', stock: 1 }], addonIds: [wrapping, engraving] });
+    const me = await account(1);
+    await srv.ctx.services.live.enter(me.id, r.id, { sizeId: r.sizes[0]!.id }, me.actor);
+    await secureAs(r.id, me, false);
+    const { page, problems } = await phone(me.token);
+    await page.goto(`${srv.origin}/verify/releases/${r.id}`);
+    const pay = page.locator('.live__pay');
+    await expect.poll(async () => norm((await pay.getAttribute('aria-label')) ?? ''), POLL).toBe('PAY · € 5 050');
+    // ADD-ONS under the name and the size, its two rows unchosen, no note (no add-on with stock), no YOUR TEXT yet.
+    const order = await page.evaluate(() => {
+      const shown = [...document.querySelectorAll('.live__secured > :not([hidden])')];
+      return ['.live__detail', '.live__addons-title', '.live__addons', '.live__pay'].map((sel) => shown.findIndex((el) => el.matches(sel)));
+    });
+    expect(order.map((i) => i - order[0]!)).toEqual([0, 1, 2, order[3]! - order[0]!]);
+    expect(order[3]).toBeGreaterThan(order[2]!);
+    await textOf(page.locator('.live__addons-title'), 'ADD-ONS');
+    expect((await page.locator('.live__addon-label').allInnerTexts()).map(norm)).toEqual(['GIFT WRAPPING', 'ENGRAVING']);
+    expect(await page.locator('.live__addons-note').isHidden()).toBe(true);
+    expect(await page.locator('.ao-text').count()).toBe(0);
+    const row = page.getByRole('button', { name: /^ENGRAVING/ });
+    expect(await row.getAttribute('aria-describedby')).toMatch(/-line$/);
+    await row.click();
+    await expect.poll(() => row.getAttribute('aria-pressed'), POLL).toBe('true');
+    await expect.poll(async () => norm((await pay.getAttribute('aria-label')) ?? ''), POLL).toBe('PAY · € 5 090');
+    // YOUR TEXT under its line: named by its visible label and the row's name, its count of the engraving's 12.
+    const field = page.getByRole('textbox', { name: 'YOUR TEXT ENGRAVING' });
+    await visible(field);
+    expect([await field.getAttribute('maxlength'), await field.getAttribute('aria-label')]).toEqual(['12', null]);
+    await textOf(page.locator('.ao-text__count'), '0 / 12');
+    // Its focus (D37): the hairline turns ink, no plate.
+    const hairline = () => page.locator('.ao-text').evaluate((el) => getComputedStyle(el).borderBottomColor);
+    const resting = await hairline();
+    await field.click();
+    await expect.poll(hairline, POLL).toBe('rgb(246, 242, 234)');
+    expect(resting).not.toBe('rgb(246, 242, 234)');
+    expect(await page.locator('.ao-text').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
+    await field.pressSequentially('M. B.');
+    await textOf(page.locator('.ao-text__count'), '5 / 12');
+    await page.screenshot({ path: join(OUT_DIR, 'verify-live-5b.png'), fullPage: true });
+    // PAY saves the words first, then confirms.
+    await pay.click();
+    await textOf(page.locator('h1'), 'CONFIRMED');
+    await textOf(page.locator('.live__receipt .rows__row', { hasText: 'ENGRAVING' }), 'ENGRAVING € 40');
+    await textOf(page.locator('.live__receipt .rows__row', { hasText: 'TOTAL' }), 'TOTAL € 5 090');
+    const sold = await srv.ctx.db.selectFrom('orders').select('engraving_text').where('account_id', '=', me.id).where('drop_id', '=', r.id).executeTakeFirstOrThrow();
+    expect(sold.engraving_text).toBe('M. B.');
+    expect(problems).toEqual([]);
+  }, 120_000);
 
   it('with reduced motion and no stream: no orbit turned, no reveal; after T0, its one piece in a turn, the size still offered, ENTER THE LINE, behind; the state polled; a pause; the seal held from the keyboard; a pause on the piece held; RELEASE MY PLACE on a second tap', async () => {
     const r = await release({ opensAt: new Date(Date.now() + 4_000), sizes: [{ label: 'ONE SIZE', stock: 1 }] });

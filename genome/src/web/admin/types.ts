@@ -390,6 +390,16 @@ export const ORDER_ADDON_STATUSES = ['HELD', 'SHIPPED', 'REMOVED', 'CANCELLED', 
 export type OrderAddonStatus = (typeof ORDER_ADDON_STATUSES)[number];
 export const ORDER_ADDON_ADDED_BY = ['PURCHASE', 'COLLECTOR', 'STAFF'] as const;
 export type OrderAddonAddedBy = (typeof ORDER_ADDON_ADDED_BY)[number];
+/**
+ * ADD-ONS ONE SYSTEM (migration 0059, lot Q2): an add-on's kind, PRODUCT (real stock) or SERVICE (no stock, no supplier,
+ * no warehouse), fixed at its creation; a release's pick, positions 1 to 100; the engraving's most characters, 1 to 20
+ * (20 by default); its words before the order, at most.
+ */
+export const ADDON_KINDS = ['PRODUCT', 'SERVICE'] as const;
+export type AddonKind = (typeof ADDON_KINDS)[number];
+export const ADDON_PICK_POSITION_MAX = 100;
+export const ADDON_TEXT_MAX = Object.freeze({ min: 1, max: 20 } as const);
+export const ADDON_CHOICE_TEXT_MAX = 120;
 
 /**
  * THE SET's bounds (sets, set_models, drop_sizes, migration 0057, macro scope K44 T1): a set's name, at most, and its code
@@ -2175,6 +2185,8 @@ export interface Drop {
   sizes: DrawSize[];
   /** Plan MACRO M1 §3.1 (F4): the segment the draw is opened to (its console name); null: everyone. */
   accessSegment?: { id: string; name: string } | null;
+  /** Lot Q2, step Q2.3: the catalogue add-ons offered on its places held, in its order (absent from a server before Q2). */
+  addonPick?: PickedAddon[];
   /**
    * Macro scope K44 T1: a set's draw, its set and pieces in order (`model` is then the set itself: its id and name, type
    * SET; its `quantity` sets). Absent on a model's draw.
@@ -2230,6 +2242,8 @@ export interface DropInput {
   currency?: OrderCurrency | null;
   /** Plan MACRO M1 §3.2 (F4): the segment the draw is opened to, a DRAFT's only; null: everyone. */
   accessSegmentId?: string | null;
+  /** Lot Q2 (D3): its pick of catalogue add-ons, in order, a DRAFT's only (omitted at its creation: every one its DRAW switch offers). */
+  addonIds?: string[];
 }
 
 export type DropChange = Partial<DropInput>;
@@ -2338,7 +2352,8 @@ export interface LiveRelease extends LiveCard {
   question: LiveQuestion | null;
   /** Its sizes in order; on a set's release, each with its piece (1 to 4). */
   sizes: { id: string; label: string; stock: number; piece?: number }[];
-  addons: { id: string; label: string; line: string | null; priceMinor: number }[];
+  /** Lot Q2, step Q2.3: the catalogue add-ons it offers at its purchase, in its order, priced in its currency now (step Q2.4: its only add-ons). */
+  addonPick?: PickedAddon[];
   tierWindows: { tier: number; turnSeconds: number | null; payMinutes: number | null }[];
   /** As set: null, at the publication; a null stage, at the announcement. */
   announceAt: Iso | null;
@@ -2469,7 +2484,8 @@ export interface LiveAfterRoom {
   currency: string;
   sizes: { id: string; label: string; stock: number }[];
   quantity: number;
-  addons: { id: string; label: string; line: string | null; priceMinor: number }[];
+  /** Lot Q2, step Q2.3: the catalogue add-ons it offers at its purchase, in its order, priced in its currency now (step Q2.4: its only add-ons). */
+  addonPick?: PickedAddon[];
   delayMinutes: number;
   lengthMinutes: number;
   state: AfterRoomState;
@@ -2513,13 +2529,14 @@ export interface LiveSettings {
   /** On a set's release (macro scope K44 T1), each size names its piece (1 to 4, the set's order). */
   sizes: { id?: string | null; label: string; stock: number; piece?: number | null }[];
   quantityLine?: string | null;
-  addons?: { id?: string | null; label: string; line?: string | null; priceMinor: number }[];
+  /** Lot Q2, step Q2.3: its pick of catalogue add-ons, in order (omitted at its creation: every one its LIVE switch offers). */
+  addonIds?: string[];
   announceAt?: Iso | null;
   silhouetteAt?: Iso | null;
   nameAt?: Iso | null;
   photoAt?: Iso | null;
   tierWindows?: { tier: number; turnSeconds?: number | null; payMinutes?: number | null }[];
-  /** The after-room: its own model, price, sizes and stock, add-ons, delay and length; null: none. */
+  /** The after-room: its own model, price, sizes and stock, pick of add-ons, delay and length; null: none. */
   afterRoom?: LiveAfterRoomSettings | null;
   /** Where its orders hold or make their pieces; null: the default location. */
   stockLocationId?: string | null;
@@ -2534,7 +2551,7 @@ export interface LiveAfterRoomSettings {
   modelId: string;
   priceMinor: number;
   sizes: { id?: string | null; label: string; stock: number }[];
-  addons?: { id?: string | null; label: string; line?: string | null; priceMinor: number }[];
+  addonIds?: string[];
   delayMinutes?: number;
   lengthMinutes?: number;
 }
@@ -3201,9 +3218,26 @@ export interface AddonStock {
   minimum: number | null;
 }
 
+/** An add-on's switches (Q2, D3): a LIVE RELEASE's purchase, a draw's, the private salon's, YOUR ORDERS until packing. */
+export interface AddonOfferedAt {
+  live: boolean;
+  draw: boolean;
+  salon: boolean;
+  orders: boolean;
+}
+
+/** What an add-on was converted from (migration 0060): a release's add-ons, or Orders → Settings' engraving. */
+export interface AddonConversion {
+  source: 'LIVE_ADDON' | 'ENGRAVING_PRICES';
+  release: { id: string; title: string } | null;
+  convertedAt: Iso;
+}
+
 /** GET /api/admin/addons: an add-on as Catalogue → Add-ons reads it. */
 export interface AddonView {
   id: string;
+  /** PRODUCT (real stock) or SERVICE (none), fixed at its creation. */
+  kind: AddonKind;
   name: string;
   line: string | null;
   supplier: { id: string; name: string; active: boolean } | null;
@@ -3215,24 +3249,36 @@ export interface AddonView {
   shopifyProductId: string | null;
   /** Its prices in the house currencies' order; a currency without one is absent (not offered in it). */
   prices: AddonPrice[];
-  /** Its stock per location, the default first, then by name. */
+  /** Its stock per location, the default first, then by name; none for a service. */
   stock: AddonStock[];
+  offeredAt: AddonOfferedAt;
+  /** The engraving (a service; one active at a time). */
+  engraving: boolean;
+  /** The engraving's most characters, 1 to 20 (20 on every other add-on). */
+  textMax: number;
+  /** How many releases not ended pick it. */
+  releases: number;
+  convertedFrom: AddonConversion[];
   createdAt: Iso;
   updatedAt: Iso;
 }
 
-/** POST /api/admin/addons (`skuCode` and `prices` at the creation only) and PATCH /api/admin/addons/:id. */
+/** POST /api/admin/addons (`kind`, `skuCode` and `prices` at the creation only) and PATCH /api/admin/addons/:id. */
 export interface AddonInput {
   name?: string;
   line?: string | null;
   supplierId?: string | null;
   weightG?: number | null;
   position?: number;
+  offeredAt?: Partial<AddonOfferedAt>;
+  engraving?: boolean;
+  textMax?: number;
 }
 
 export interface AddonCreateInput extends AddonInput {
   name: string;
   skuCode: string;
+  kind?: AddonKind;
   prices?: Partial<Record<HouseCurrency, number | null>>;
 }
 
@@ -3514,17 +3560,6 @@ export interface ShippingRatesSheet {
   items: (ShippingRate & { updatedAt: Iso; updatedBy: { id: string; email: string } | null })[];
 }
 
-/**
- * ENGRAVING (plan NEXT LOT §3.6.C; GET /api/admin/orders/engraving-prices): the engraving's price per currency, in minor
- * units, null where none is set (no engraving offered in that currency), for the orders without their release's
- * ENGRAVING add-on; who set them last, and when.
- */
-export interface EngravingPricesSheet {
-  prices: Record<HouseCurrency, number | null>;
-  updatedAt: Iso | null;
-  updatedBy: { id: string; email: string } | null;
-}
-
 // ── Orders (plan LIVE RELEASE+, routes/admin/orders.ts) ───────────────────
 
 /** Why an order stands out (M3): RESERVED too long, READY but not shipped, SHIPPED not delivered, DELIVERED not registered. */
@@ -3701,7 +3736,8 @@ export interface AdminOrderSet {
 /** A unit of a catalogue add-on on an order (plan MACRO M3 §4.2, D2), as the order page reads it. */
 export interface AdminOrderAddonUnit {
   id: string;
-  addon: { id: string; name: string };
+  /** Lot Q2, step Q2.7: a PRODUCT or a SERVICE, and whether it is the engraving. */
+  addon: { id: string; name: string; kind: AddonKind; engraving: boolean };
   skuCode: string;
   /** Per unit, as it was added, in the order's currency. */
   priceMinor: number;
@@ -3715,7 +3751,8 @@ export interface AdminOrderAddonUnit {
   shippedAt: Iso | null;
   returnedAt: Iso | null;
   returnedToStock: boolean | null;
-  location: { id: string; name: string };
+  /** Where it is held; null for a service's unit (held nowhere). */
+  location: { id: string; name: string } | null;
   /** Its supplementary invoice (added after PAID); null otherwise. */
   invoiceId: string | null;
 }
@@ -3728,6 +3765,32 @@ export interface AddonOfferItem {
   priceMinor: number;
   currency: HouseCurrency;
   maxUnits: number;
+  /** Lot Q2, step Q2.3: the engraving (one on an order), and its most characters. */
+  engraving?: boolean;
+  textMax?: number;
+}
+
+/** Lot Q2, step Q2.3: a catalogue add-on a release picks, in its order, priced in its currency now (null: no price in it). */
+export interface PickedAddon {
+  id: string;
+  name: string;
+  line: string | null;
+  kind: AddonKind;
+  engraving: boolean;
+  active: boolean;
+  priceMinor: number | null;
+}
+
+/** Lot Q2, step Q2.3: an active add-on as a release's form lists it (GET /api/admin/addons?moment=&currency=). */
+export interface AddonPickable {
+  id: string;
+  name: string;
+  line: string | null;
+  kind: AddonKind;
+  engraving: boolean;
+  priceMinor: number | null;
+  pickable: boolean;
+  why: 'SWITCH_OFF' | 'NO_PRICE' | null;
 }
 
 /** Why an order takes no add-on now. */

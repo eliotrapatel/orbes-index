@@ -1265,35 +1265,52 @@
     margin: var(--d-s4) calc(-1 * clamp(0px, (var(--d-room-centre) - 100%) / 2, 120px)) 0;
   }
 
+  /* 5b (lot Q2, step Q2.8; MK #secured-addons, desk; D11, D12, D17, D33, D34, N10): bottom right, ADD-ONS, the rows on
+     their hairlines (YOUR TEXT in the chosen engraving's), M3's note, the error line, then PAY, its note and RELEASE MY
+     PLACE; or, when the rows would push PAY below the first screen (desktop-room.ts measures it before SECURED's passage:
+     is-pay-first), PAY, its note and RELEASE MY PLACE first, then ADD-ONS, the rows, M3's note and the error line (CSS
+     order: the page's order stays the mockup's). */
   html:not(.d-touch) .d-room .d-room__br > .live__addons-title {
     margin: 0 calc(-1 * var(--d-tr-label)) 0 0;
   }
 
   html:not(.d-touch) .d-room .d-room__br > .live__addons {
-    gap: var(--d-s2);
     width: 100%;
-    max-width: none;
+    min-width: 0;
+    max-width: 100%;
     margin-top: var(--d-s3);
     text-align: left;
   }
 
-  /* An add-on is one control, its line with it: its button reaches over the line (the whole box answers the pointer),
-     and the hover's ground, the pressed one and the keyboard's ring are the box's, so one box is drawn, never two. */
+  /* No box and no ground (D34): each row is one control on its hairline, its button reaching over its line (the whole
+     row answers the pointer), YOUR TEXT above that reach. Under the pointer the ring lifts to ink (desktop-pointer.css)
+     and the row's hairline steps to the strong one; pressed, the chosen light at once; never dimmed. */
   html:not(.d-touch) .d-room .live__addon-item {
-    position: relative;
-    border: 0;
-    box-shadow: inset 0 0 0 1px var(--hairline-strong);
-    transition: background-color var(--d-dur-hover) var(--d-ease);
+    transition: border-color var(--d-dur-hover) var(--d-ease);
   }
 
-  html:not(.d-touch) .d-room .live__addon-item:has(.live__addon[aria-pressed="true"]) {
-    box-shadow: inset 0 0 0 1px var(--ink);
+  html:not(.d-touch) .d-room .live__addon-item:has(> .btn.live__addon:not(:disabled):hover) {
+    border-bottom-color: var(--hairline-strong);
   }
 
-  /* An add-on: the whole row its button, the hover's ground across it, its mark to ink; pressed, the pressed ground. */
+  html:not(.d-touch) .d-room .live__addon-item:has(> .btn.live__addon:not(:disabled):active)::after {
+    content: "";
+    position: absolute;
+    left: -24px;
+    right: -24px;
+    bottom: -1px;
+    z-index: -1;
+    height: 1px;
+    pointer-events: none;
+    background: linear-gradient(90deg, rgba(246, 242, 234, 0) 0, rgba(246, 242, 234, 0.35) 30%, rgba(246, 242, 234, 0.62) 50%, rgba(246, 242, 234, 0.35) 70%, rgba(246, 242, 234, 0) 100%);
+  }
+
   html:not(.d-touch) .d-room .btn.live__addon {
+    height: auto;
     min-height: 56px;
-    padding: 0 var(--d-s4);
+    /* The space min-height leaves around one name line (house.css): a two-line name keeps its gap above the line. */
+    padding: calc((56px - 1.5em) / 2) 2px;
+    white-space: normal;
     gap: var(--d-s3);
     border: 0;
     background-color: transparent;
@@ -1315,17 +1332,7 @@
     color: var(--ink);
   }
 
-  html:not(.d-touch) .d-room .live__addon-item:has(> .btn.live__addon:not(:disabled):hover) {
-    background-color: color-mix(in srgb, var(--ink) 4%, transparent);
-  }
-
-  html:not(.d-touch) .d-room .live__addon-item:has(> .btn.live__addon:not(:disabled):active) {
-    background-color: color-mix(in srgb, var(--ink) 8%, transparent);
-    transition-duration: var(--d-dur-press);
-  }
-
-  /* Its keyboard ring round the whole add-on, its line with it (§10.17): one control framed once; the button's own ring
-     gives way to it. */
+  /* Its keyboard ring round the whole row, its line and YOUR TEXT with it (§10.17; house.css): the button's own gives way. */
   html:not(.d-touch) .d-room .live__addon-item:has(> .btn.live__addon:focus-visible) {
     outline: 1px solid var(--ink);
     outline-offset: 4px;
@@ -1335,8 +1342,20 @@
     outline: none;
   }
 
+  /* The ring at rest: the strong hairline (MK's desk frame, 0.34); the phone's ivory 50 % is the phone's. Chosen or
+     pressed: the point, its ring gone, also under the pointer. */
   html:not(.d-touch) .d-room .live__addon-mark {
     border-color: var(--hairline-strong);
+    transition: border-color var(--d-dur-hover) var(--d-ease);
+  }
+
+  html:not(.d-touch) .d-room .btn.live__addon[aria-pressed="true"] .live__addon-mark,
+  html:not(.d-touch) .d-room .btn.live__addon[aria-pressed="true"]:not(:disabled):hover .live__addon-mark,
+  html:not(.d-touch) .d-room .btn.live__addon:not(:disabled):active .live__addon-mark {
+    border-color: transparent;
+    background: radial-gradient(closest-side, #fffdf8 0, rgba(255, 253, 248, 0.92) 45%, rgba(246, 242, 234, 0.4) 75%, rgba(246, 242, 234, 0) 100%);
+    box-shadow: 0 0 10px 3px rgba(246, 242, 234, 0.12);
+    transition-duration: var(--d-dur-press);
   }
 
   html:not(.d-touch) .d-room .live__addon-price {
@@ -1346,76 +1365,24 @@
   }
 
   html:not(.d-touch) .d-room .live__addon-line {
-    margin: calc(-1 * var(--d-s3)) var(--d-s4) 0 calc(var(--d-s4) + 14px + var(--d-s3));
+    margin: calc(-1 * var(--d-s3)) 2px 0 calc(11px + var(--d-s3));
     padding-bottom: var(--d-s4);
     font-size: var(--d-fs-cap);
   }
 
-  /* Plan MACRO M3 §4.4 (D2): the catalogue add-ons under the release's, in the same corner and width; each stepper's
-     buttons answer the pointer with the room's hover ground. */
-  html:not(.d-touch) .d-room .d-room__br > .live__items-title {
-    margin: var(--d-s5) calc(-1 * var(--d-tr-label)) 0 0;
+  html:not(.d-touch) .d-room .ao-text {
+    margin: var(--d-s2) 2px var(--d-s4) calc(11px + var(--d-s3));
   }
 
-  html:not(.d-touch) .d-room .d-room__br > .live__items {
-    width: 100%;
-    max-width: none;
-    margin-top: var(--d-s3);
-  }
-
-  html:not(.d-touch) .d-room .n-addons--room {
-    gap: var(--d-s2);
-  }
-
-  html:not(.d-touch) .d-room .n-addons--room .n-addons__item {
-    padding: var(--d-s3) var(--d-s2) var(--d-s3) var(--d-s4);
-  }
-
-  html:not(.d-touch) .d-room .n-addons--room .n-addons__name {
-    font-size: var(--n-fs-micro);
-    letter-spacing: var(--d-tr-label);
-  }
-
-  html:not(.d-touch) .d-room .n-addons--room .n-addons__line {
-    font-size: var(--d-fs-cap);
-  }
-
-  html:not(.d-touch) .d-room .n-addons--room .n-addons__price {
-    font-size: var(--d-fs-small);
-    letter-spacing: 0;
-    font-variant-numeric: tabular-nums lining-nums;
-  }
-
-  html:not(.d-touch) .d-room .n-addons--room .n-step__btn {
-    transition: background-color var(--d-dur-hover) var(--d-ease);
-  }
-
-  html:not(.d-touch) .d-room .n-addons--room .n-step__btn:not(:disabled):hover {
-    background-color: color-mix(in srgb, var(--ink) 6%, transparent);
-  }
-
-  html:not(.d-touch) .d-room .n-addons--room .n-step__btn:not(:disabled):active {
-    background-color: color-mix(in srgb, var(--ink) 12%, transparent);
-    transition-duration: var(--d-dur-press);
-  }
-
-  /* A narrow computer window (1024 to 1279 px), whose hold column is about 270 px wide: each add-on's words take the
-     row's whole width, its stepper under them (lot M3 review), so a name never breaks word by word. */
-  @media (max-width: 1279.98px) {
-    html:not(.d-touch) .d-room .n-addons--room .n-addons__item {
-      grid-template-columns: minmax(0, 1fr);
-      row-gap: var(--d-s2);
-    }
-
-    html:not(.d-touch) .d-room .n-addons--room .n-step {
-      justify-self: start;
-    }
-  }
-
-  html:not(.d-touch) .d-room .d-room__br > .live__items-note {
+  html:not(.d-touch) .d-room .d-room__br > .live__addons-note {
     max-width: none;
     margin-top: var(--d-s3);
     font-size: var(--d-fs-cap);
+  }
+
+  html:not(.d-touch) .d-room .d-room__br > .live__addons-note + .live__error,
+  html:not(.d-touch) .d-room .d-room__br > .live__addons + .live__error {
+    margin-top: var(--d-s3);
   }
 
   html:not(.d-touch) .d-room .d-room__br > .btn.live__pay {
@@ -1436,15 +1403,45 @@
     margin-top: var(--d-s4);
   }
 
-  /* The add-on rows under PAY and RELEASE MY PLACE on a computer (desktop-room.ts PLAN.secured): their own group. */
-  html:not(.d-touch) .d-room .d-room__br > .live__release + .live__addons-title {
+  /* PAY first (N10): the rows after PAY and RELEASE MY PLACE, their own group. */
+  html:not(.d-touch) .d-room .is-pay-first > .d-room__br > .live__pay {
+    order: 1;
+    margin-top: 0;
+  }
+
+  html:not(.d-touch) .d-room .is-pay-first > .d-room__br > .live__pay-left {
+    order: 2;
+  }
+
+  html:not(.d-touch) .d-room .is-pay-first > .d-room__br > .live__pay-note {
+    order: 3;
+  }
+
+  html:not(.d-touch) .d-room .is-pay-first > .d-room__br > .live__release {
+    order: 4;
+  }
+
+  html:not(.d-touch) .d-room .is-pay-first > .d-room__br > .live__addons-title {
+    order: 5;
     margin-top: var(--d-s6);
   }
 
-  /* With add-on rows the right column is taller than the window: the room's last row takes only what the column needs
-     (as 1fr, it would make the first row as tall and push the hold below the first screen), so the centre and PAY,
-     with the time to pay inside it, open on the first screen and the rows follow under them. */
-  html:not(.d-touch) .d-room .d-room__screen--secured:has(> .d-room__br > :is(.live__addons, .live__items:not([hidden]))) {
+  html:not(.d-touch) .d-room .is-pay-first > .d-room__br > .live__addons {
+    order: 6;
+  }
+
+  html:not(.d-touch) .d-room .is-pay-first > .d-room__br > .live__addons-note {
+    order: 7;
+  }
+
+  html:not(.d-touch) .d-room .is-pay-first > .d-room__br > .live__error {
+    order: 8;
+  }
+
+  /* With add-on rows the right column may be taller than the window: the room's last row takes only what the column
+     needs (as 1fr, it would make the first row as tall and push the hold below the first screen), so the centre and PAY,
+     with the time to pay inside it, open on the first screen. */
+  html:not(.d-touch) .d-room .d-room__screen--secured:has(> .d-room__br > .live__addons:not([hidden])) {
     grid-template-rows: [top] minmax(0, 1fr) [head] auto [body] auto [rest] auto;
   }
 

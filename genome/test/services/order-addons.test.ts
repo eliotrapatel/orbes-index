@@ -20,6 +20,11 @@
  *  - packing: one checklist line per add-on, the parcel's weight with each unit's;
  *  - the journal `order.addon.add` / `.remove`, the order CSV's line items, the account's export (its units and the
  *    choices not on an order yet);
+ *  - ONE OFFER RULE (lot Q2, step Q2.3; D3, D8, N8): a LIVE hold and a draw's place held offer what their release picked,
+ *    in its order, with their switch on; the salon and YOUR ORDERS their switch alone (an order of an ended release, an
+ *    add-on its release never picked, one created after it locked: all offered until packing); staff neither; refusals
+ *    name the switch or the pick; a choice switched off before PAY is left out (NOT_OFFERED); the engraving one on an
+ *    order, its words with its choice only (its most characters, the house's set), never in ADD AN ADD-ON;
  *  - under concurrency (PGlite always; PostgreSQL with ORBES_TEST_POSTGRES_URL, a pool of 8): two orders take the last
  *    unit of an add-on at once, added or carried: one holds it, the other is told none is left.
  * The routes are test/api/account-orders.test.ts's, admin-orders.test.ts's, the-club's, live's and salon's.
@@ -34,7 +39,7 @@ import { closeDb, createDb, inTransaction, type Db } from '../../src/server/db/c
 import { migrateToLatest } from '../../src/server/db/migrate.js';
 import { DomainError } from '../../src/server/errors.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
-import { addonWindow, setChoices } from '../../src/server/services/order-addons.js';
+import { accountAddonOpen, addonOffer, addonWindow, setChoices } from '../../src/server/services/order-addons.js';
 import { tierOf } from '../../src/server/services/club.js';
 import { ensureSku, stockLevel } from '../../src/server/services/stock.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
@@ -117,11 +122,17 @@ describe('add-ons on orders (plan MACRO M3 §4.2, D1 and D2)', () => {
 
   /** Each sale in a size of its own, so that a piece counted in serves its order, never an older one waiting. */
   let sizes = 60;
-  /** A LIVE sale as a collector lives it, its catalogue add-ons chosen at the hold (`before` runs between the choice and PAY). */
-  async function liveSale(o: { items?: { addonId: string; units: number }[]; before?: () => Promise<void>; price?: number; quantity?: number } = {}) {
+  /**
+   * A LIVE sale as a collector lives it, its catalogue add-ons chosen at the hold (`before` runs between the choice and
+   * PAY). Lot Q2, step Q2.3: its release picks `pick`, by default the four of the catalogue and any other it chooses.
+   * Step Q2.4 (N1): a hold chooses rows, one unit per piece; `units` above one is written on the choice as a fixture (an
+   * order holding several of one add-on, as YOUR ORDERS gives one), carried as many on each piece's order.
+   */
+  async function liveSale(o: { items?: { addonId: string; units?: number; text?: string }[]; before?: () => Promise<void>; price?: number; quantity?: number; pick?: string[] } = {}) {
     const quantity = o.quantity ?? 1;
     const opensAt = new Date(clock.now().getTime() + HOUR);
-    const r = await createLiveRelease(f, { opensAt, sizes: [{ label: String(sizes++), stock: 5 }], perAccount: quantity, ...(o.price !== undefined ? { priceMinor: o.price } : {}) });
+    const pick = o.pick ?? [...new Set([cloth.id, extender.id, strap.id, pouch.id, ...(o.items ?? []).map((i) => i.addonId)])];
+    const r = await createLiveRelease(f, { opensAt, sizes: [{ label: String(sizes++), stock: 5 }], perAccount: quantity, addonIds: pick, ...(o.price !== undefined ? { priceMinor: o.price } : {}) });
     const a = await accountOfTier(f, 0);
     clock.set(new Date(opensAt.getTime() - MINUTE));
     await f.live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id, quantity }, a.actor);
@@ -131,7 +142,10 @@ describe('add-ons on orders (plan MACRO M3 §4.2, D1 and D2)', () => {
     await f.live.press(a.id, r.id, token);
     clock.advance(1500);
     await f.live.secure(a.id, r.id, token, a.actor);
-    const held = o.items ? await f.live.setAddons(a.id, r.id, [], a.actor, o.items) : null;
+    let held = o.items ? await f.live.setAddons(a.id, r.id, o.items.map((i) => ({ addonId: i.addonId, ...(i.text !== undefined ? { text: i.text } : {}) })), a.actor) : null;
+    const entryId = (await t.db.selectFrom('live_entries').select('id').where('drop_id', '=', r.id).where('account_id', '=', a.id).executeTakeFirstOrThrow()).id;
+    for (const i of o.items ?? []) if ((i.units ?? 1) > 1) await t.db.updateTable('addon_choices').set({ units: i.units! }).where('live_entry_id', '=', entryId).where('addon_id', '=', i.addonId).execute();
+    if (o.items?.some((i) => (i.units ?? 1) > 1)) held = (await f.live.entry(a.id, r.id))!;
     if (o.before) await o.before();
     const confirmed = await f.live.confirm(a.id, r.id, a.actor);
     const entry = await t.db.selectFrom('live_entries').selectAll().where('drop_id', '=', r.id).where('account_id', '=', a.id).executeTakeFirstOrThrow();
@@ -178,69 +192,85 @@ describe('add-ons on orders (plan MACRO M3 §4.2, D1 and D2)', () => {
 
   // ── LIVE ─────────────────────────────────────────────────────────────────
 
-  it('LIVE: chosen at the hold (each checked), carried at PAY onto the first order, one left out when none is left; the choices deleted; never a piece, an ownership nor the tier', async () => {
+  it('LIVE: rows chosen at the hold (each checked for one unit per piece), carried at PAY one unit on each piece\'s order, the last unit to the first order and the rest left out; the choices deleted; never a piece, an ownership nor the tier', async () => {
     let refusals: unknown[] = [];
-    const before = { cloth: await available(cloth.skuId), extender: await available(extender.skuId) };
+    const before = { cloth: await available(cloth.skuId), strap: await available(strap.skuId) };
     const sale = await liveSale({
       quantity: 2,
-      items: [
-        { addonId: cloth.id, units: 2 },
-        { addonId: extender.id, units: 1 },
-      ],
+      items: [{ addonId: cloth.id }],
       before: async () => {
         const e = (await t.db.selectFrom('live_entries').select(['drop_id', 'account_id']).where('status', '=', 'SECURED').executeTakeFirstOrThrow());
         const actor: Actor = { type: 'account', id: e.account_id };
         refusals = [
-          await refusal(f.live.setAddons(e.account_id, e.drop_id, [], actor, [{ addonId: cloth.id, units: 4 }])),
-          await refusal(f.live.setAddons(e.account_id, e.drop_id, [], actor, [{ addonId: extender.id, units: 2 }])),
-          await refusal(f.live.setAddons(e.account_id, e.drop_id, [], actor, [{ addonId: pouch.id, units: 1 }])),
+          // N1: two pieces take two units; one extender is left.
+          await refusal(f.live.setAddons(e.account_id, e.drop_id, [{ addonId: extender.id }], actor)),
+          await refusal(f.live.setAddons(e.account_id, e.drop_id, [{ addonId: pouch.id }], actor)),
+          await refusal(f.live.setAddons(e.account_id, e.drop_id, [{ addonId: cloth.id }, { addonId: cloth.id }], actor)),
         ];
-        // Its view while held: the choice, its prices and the total, and what is offered (the pouch is priced in CHF only).
+        await f.live.setAddons(e.account_id, e.drop_id, [{ addonId: cloth.id }, { addonId: strap.id }], actor);
+        // Its view while held: the rows, one unit per piece at its price, and the total; what is offered: a row each, a
+        // product only while one per piece is left (the extender is not; the pouch is priced in CHF only).
         const view = (await f.live.entry(e.account_id, e.drop_id))!;
         expect(view.addonItems).toEqual([
-          { addonId: cloth.id, name: 'POLISHING CLOTH', line: null, units: 2, priceMinor: 1500 },
-          { addonId: extender.id, name: 'CHAIN EXTENDER', line: null, units: 1, priceMinor: 3000 },
+          { addonId: cloth.id, name: 'POLISHING CLOTH', line: null, units: 2, priceMinor: 1500, text: null },
+          { addonId: strap.id, name: 'SPARE STRAP', line: null, units: 2, priceMinor: 2500, text: null },
         ]);
-        expect(view.totalMinor).toBe(2 * 505_000 + 2 * 1500 + 3000);
+        expect(view.totalMinor).toBe(2 * (505_000 + 1500 + 2500));
         expect(view.addonOffer.map((a) => [a.name, a.maxUnits])).toEqual([
-          ['POLISHING CLOTH', 3],
-          ['CHAIN EXTENDER', 1],
-          ['SPARE STRAP', 3],
+          ['POLISHING CLOTH', 1],
+          ['SPARE STRAP', 1],
         ]);
         // Nothing is held before PAY.
         expect(await available(cloth.skuId)).toBe(before.cloth);
-        // The last extender goes elsewhere meanwhile: it is left out at PAY, never blocking it.
-        await ctx.services.stock.adjust({ skuId: extender.skuId, locationId: france, delta: -1, note: 'Damaged.' }, admin);
+        // All but one strap go elsewhere meanwhile: the first piece's order takes it, the other is left out at PAY, never blocking it.
+        await ctx.services.stock.adjust({ skuId: strap.skuId, locationId: france, delta: -(before.strap - 1), note: 'Damaged.' }, admin);
       },
     });
     expect(refusals).toEqual([
-      { code: 'ADDON_LIMIT', status: 409, message: 'At most 3 of each add-on on an order.' },
       { code: 'ADDON_OUT_OF_STOCK', status: 409, message: 'CHAIN EXTENDER could not be added: none left.' },
       { code: 'ADDON_NOT_OFFERED', status: 409, message: 'TRAVEL POUCH is not offered here.' },
+      { code: 'VALIDATION_FAILED', status: 400, message: 'Each add-on is chosen once, with its units.' },
     ]);
-    expect(sale.confirmed.addonsLeftOut).toEqual([{ addonId: extender.id, name: 'CHAIN EXTENDER', units: 1, reason: 'NONE_LEFT' }]);
+    expect(sale.confirmed.addonsLeftOut).toEqual([{ addonId: strap.id, name: 'SPARE STRAP', units: 1, reason: 'NONE_LEFT' }]);
     const [first, second] = sale.orders;
-    // On the first order only, each unit held at the release's location at its price.
-    expect((await unitsOf(first!.id)).map((u) => [u.addon_id, u.status, u.price_minor, u.currency, u.added_by_type, u.added_by, u.location_id])).toEqual([
-      [cloth.id, 'HELD', 1500, 'EUR', 'PURCHASE', null, france],
-      [cloth.id, 'HELD', 1500, 'EUR', 'PURCHASE', null, france],
-    ]);
-    expect(await unitsOf(second!.id)).toEqual([]);
+    // One unit on each piece's order, held at the release's location at its price; the last strap on the first.
+    const rowsOf = async (id: string) => (await unitsOf(id)).map((u) => [u.addon_id, u.status, u.price_minor, u.currency, u.added_by_type, u.added_by, u.location_id]);
+    expect((await rowsOf(first!.id)).sort()).toEqual(
+      [
+        [cloth.id, 'HELD', 1500, 'EUR', 'PURCHASE', null, france],
+        [strap.id, 'HELD', 2500, 'EUR', 'PURCHASE', null, france],
+      ].sort(),
+    );
+    expect(await rowsOf(second!.id)).toEqual([[cloth.id, 'HELD', 1500, 'EUR', 'PURCHASE', null, france]]);
+    // No snapshot: the add-ons are units (D2, N15).
+    expect([first!.addons, second!.addons]).toEqual([[], []]);
     expect(await available(cloth.skuId)).toBe(before.cloth - 2);
+    expect(await available(strap.skuId)).toBe(0);
     expect(await t.db.selectFrom('addon_choices').select('id').where('live_entry_id', '=', sale.entry.id).execute()).toEqual([]);
-    // The entry after PAY reads what its order carries.
-    expect((await f.live.entry(sale.account.id, sale.release.id))!.addonItems).toEqual([{ addonId: cloth.id, name: 'POLISHING CLOTH', line: null, units: 2, priceMinor: 1500 }]);
-    // Its journal and audit entries.
-    const journal = await t.db.selectFrom('event_journal').select(['type', 'payload']).where('entity_id', '=', first!.id).where('type', '=', 'order.addon.add').execute();
+    // The entry after PAY reads what its orders carry, as sold.
+    const after = (await f.live.entry(sale.account.id, sale.release.id))!.addonItems;
+    expect([...after].sort((a, b) => a.name.localeCompare(b.name))).toEqual([
+      { addonId: cloth.id, name: 'POLISHING CLOTH', line: null, units: 2, priceMinor: 1500, text: null },
+      { addonId: strap.id, name: 'SPARE STRAP', line: null, units: 1, priceMinor: 2500, text: null },
+    ]);
+    expect((await f.live.entry(sale.account.id, sale.release.id))!.totalMinor).toBe(2 * 505_000 + 2 * 1500 + 2500);
+    // Its journal and audit entries: one addition per order and add-on.
+    const journal = await t.db.selectFrom('event_journal').select(['type', 'payload']).where('entity_id', '=', second!.id).where('type', '=', 'order.addon.add').execute();
     expect(journal.map((j) => (j.payload as { addon: unknown }).addon)).toEqual([
-      { addonId: cloth.id, units: 2, unitIds: expect.any(Array), priceMinor: 1500, currency: 'EUR', by: 'purchase' },
+      { addonId: cloth.id, units: 1, unitIds: expect.any(Array), priceMinor: 1500, currency: 'EUR', by: 'purchase' },
     ]);
     const confirm = await t.db.selectFrom('audit_logs').select('details').where('action', '=', 'drop.live.confirm').where('target_id', '=', sale.release.id).executeTakeFirstOrThrow();
-    expect(confirm.details).toMatchObject({ addonsLeftOut: [{ addonId: extender.id, units: 1, reason: 'NONE_LEFT' }] });
+    expect(confirm.details).toMatchObject({ addonsLeftOut: [{ addonId: strap.id, units: 1, reason: 'NONE_LEFT' }] });
+    const chose = await t.db.selectFrom('audit_logs').select('details').where('action', '=', 'drop.live.addons').where('target_id', '=', sale.release.id).orderBy('id', 'desc').executeTakeFirstOrThrow();
+    expect((chose.details as { items: unknown }).items).toEqual([
+      { addonId: cloth.id, units: 1 },
+      { addonId: strap.id, units: 1 },
+    ]);
     // No identity: never a product row, never an ownership; the tier reads pieces only.
-    expect(await t.db.selectFrom('products').select('id').where('sku_id', 'in', [cloth.skuId, extender.skuId]).execute()).toEqual([]);
+    expect(await t.db.selectFrom('products').select('id').where('sku_id', 'in', [cloth.skuId, strap.skuId]).execute()).toEqual([]);
     expect((await tierOf(t.db, sale.account.id, clock.now())).tier).toBe(0);
-    await countIn(extender.skuId, france, 3);
+    await countIn(strap.skuId, france, 5);
+    await countIn(extender.skuId, france, 2);
   });
 
   // ── YOUR ORDERS ──────────────────────────────────────────────────────────
@@ -361,7 +391,7 @@ describe('add-ons on orders (plan MACRO M3 §4.2, D1 and D2)', () => {
     const before = await available(strap.skuId);
     await addons().addForStaff(o!.id, { addonId: strap.id, units: 2 }, admin);
     const view = await orders().get(o!.id);
-    expect(view.addonItems.map((u) => [u.addon.name, u.skuCode, u.status, u.addedBy.type, u.addedBy.id, u.location.name])).toEqual([
+    expect(view.addonItems.map((u) => [u.addon.name, u.skuCode, u.status, u.addedBy.type, u.addedBy.id, u.location?.name])).toEqual([
       ['SPARE STRAP', 'ADD-STRAP', 'HELD', 'STAFF', admin.id, 'FRANCE WAREHOUSE'],
       ['SPARE STRAP', 'ADD-STRAP', 'HELD', 'STAFF', admin.id, 'FRANCE WAREHOUSE'],
     ]);
@@ -641,7 +671,7 @@ describe('add-ons on orders (plan MACRO M3 §4.2, D1 and D2)', () => {
     const listed = await f.drops.entries(d.id, {}, { page: 1, pageSize: 10 });
     expect(listed.items.find((e) => e.id === ea)!.addonChoices.map((c) => [c.name, c.units])).toEqual([['POLISHING CLOTH', 3]]);
     // The account's export names the choice while it is not on an order yet.
-    expect((await ctx.services.owners.exportData(a.id, admin)).addonChoices).toEqual([{ on: 'DRAW_ENTRY', sourceId: ea, addon: 'POLISHING CLOTH', units: 3, chosenAt: expect.any(Date) }]);
+    expect((await ctx.services.owners.exportData(a.id, admin)).addonChoices).toEqual([{ on: 'DRAW_ENTRY', sourceId: ea, addon: 'POLISHING CLOTH', units: 3, text: null, chosenAt: expect.any(Date) }]);
     const confirmed = await f.drops.confirm(d.id, ea, null, admin);
     expect(confirmed.addonsLeftOut).toBeUndefined();
     expect((await ctx.services.owners.exportData(a.id, admin)).addonChoices).toEqual([]);
@@ -680,6 +710,322 @@ describe('add-ons on orders (plan MACRO M3 §4.2, D1 and D2)', () => {
     });
     await orders().setTerms(order.id, { priceMinor: 400_000, currency: 'EUR' }, admin);
     await countIn(extender.skuId, france, 3);
+  });
+
+  // ── A service (lot Q2, step Q2.2; D4, D8, D9, N14) ──────────────────────
+
+  it('a service\'s units are held nowhere: chosen and carried without stock or lock, added in YOUR ORDERS and by staff, packed on its own line (its weight when it has one), shipped and returned without a movement (returned_to_stock false), invoiced, credited and exported as a product\'s', async () => {
+    const wrap = await ctx.services.addons.create({ kind: 'SERVICE', name: 'GIFT WRAPPING', skuCode: 'ADD-WRAP', prices: { EUR: 1500 }, weightG: 40 }, admin);
+    const card = await ctx.services.addons.create({ kind: 'SERVICE', name: 'GREETING CARD', skuCode: 'ADD-CARD', prices: { EUR: 500 } }, admin);
+    const movesOf = (orderId: string) => t.db.selectFrom('stock_movements').select(['reason', 'delta']).where('order_id', '=', orderId).where('order_addon_item_id', 'is not', null).execute();
+    let offered: [string, number][] = [];
+    const sale = await liveSale({
+      items: [{ addonId: wrap.id, units: 2 }],
+      pick: [wrap.id, card.id],
+      before: async () => {
+        const e = await t.db.selectFrom('live_entries').select(['drop_id', 'account_id']).where('status', '=', 'SECURED').executeTakeFirstOrThrow();
+        offered = (await f.live.entry(e.account_id, e.drop_id))!.addonOffer.filter((a) => a.addonId === wrap.id || a.addonId === card.id).map((a) => [a.name, a.maxUnits]);
+      },
+    });
+    // No count: a row each at the hold (one unit per piece, N1), whatever any location holds.
+    expect(offered).toEqual([
+      ['GIFT WRAPPING', 1],
+      ['GREETING CARD', 1],
+    ]);
+    const [o] = sale.orders;
+    expect(sale.confirmed.addonsLeftOut ?? []).toEqual([]);
+    expect((await unitsOf(o!.id)).map((u) => [u.addon_id, u.status, u.price_minor, u.added_by_type, u.location_id])).toEqual([
+      [wrap.id, 'HELD', 1500, 'PURCHASE', null],
+      [wrap.id, 'HELD', 1500, 'PURCHASE', null],
+    ]);
+    // YOUR ORDERS offers what is left within three; staff add one held nowhere too.
+    expect((await addons().offerForAccount(sale.account.id, o!.id)).offer.filter((a) => a.addonId === wrap.id || a.addonId === card.id).map((a) => [a.name, a.maxUnits])).toEqual([
+      ['GIFT WRAPPING', 1],
+      ['GREETING CARD', 3],
+    ]);
+    clock.advance(1000);
+    await addons().addForStaff(o!.id, { addonId: card.id, units: 1 }, admin);
+    expect((await orders().get(o!.id)).addonItems.map((u) => [u.addon.name, u.skuCode, u.location])).toEqual([
+      ['GIFT WRAPPING', 'ADD-WRAP', null],
+      ['GIFT WRAPPING', 'ADD-WRAP', null],
+      ['GREETING CARD', 'ADD-CARD', null],
+    ]);
+    // Held nowhere: the stock never sees them.
+    expect(await t.db.selectFrom('stock_holds').select('id').where('sku_id', 'in', [wrap.sku.id, card.sku.id]).execute()).toEqual([]);
+    await stockFor(o!.id);
+    clock.advance(MINUTE);
+    await orders().transition(o!.id, { to: 'PAID' }, admin);
+    const [invoice] = (await invoicesOf(o!.id)).filter((d) => d.kind === 'INVOICE');
+    expect(linesOf(invoice!).filter((l) => l[0] === 'ADD_ON_ITEM')).toEqual([
+      ['ADD_ON_ITEM', 'GIFT WRAPPING', 1500],
+      ['ADD_ON_ITEM', 'GIFT WRAPPING', 1500],
+      ['ADD_ON_ITEM', 'GREETING CARD', 500],
+    ]);
+    // Packed: one line per add-on; the wrapping's weight counted, the card without one never missing.
+    const box = await ctx.services.boxes.create({ name: `WRAP ${o!.id.slice(0, 4)}`, insideLengthMm: 120, insideWidthMm: 100, insideHeightMm: 40, emptyWeightG: 100 }, admin);
+    await ctx.services.catalog.setModelPacking(f.modelId, { boxId: box.id, packedWeightG: 40 }, admin);
+    await linkPiece(o!.id);
+    const parcel = await ctx.services.logistics.parcel(o!.id, null);
+    expect(parcel.checklist.filter((l) => l.key.startsWith('addon-item:')).map((l) => l.label)).toEqual(['Add-on: GIFT WRAPPING × 2', 'Add-on: GREETING CARD × 1']);
+    expect(parcel.packing.weightG).toBe(100 + 40 + 2 * 40);
+    await packAndShip(o!.id);
+    expect((await unitsOf(o!.id)).map((u) => u.status)).toEqual(['SHIPPED', 'SHIPPED', 'SHIPPED']);
+    expect((await t.db.selectFrom('shipments').select('weight_g').where('order_id', '=', o!.id).executeTakeFirstOrThrow()).weight_g).toBe(220);
+    // Returned: back with the order, never to stock.
+    clock.advance(MINUTE);
+    await orders().returnOrder(o!.id, { outcome: 'RESTOCKED', locationId: logistics, note: 'Returned.', addonsOut: [] }, admin);
+    expect((await unitsOf(o!.id)).map((u) => [u.status, u.returned_to_stock, u.location_id])).toEqual([
+      ['RETURNED', false, null],
+      ['RETURNED', false, null],
+      ['RETURNED', false, null],
+    ]);
+    expect(await movesOf(o!.id)).toEqual([]);
+    const full = (await invoicesOf(o!.id)).find((d) => d.kind === 'CREDIT_NOTE')!;
+    expect(linesOf(full).filter((l) => l[0] === 'ADD_ON_ITEM').map((l) => l[1])).toEqual(['GIFT WRAPPING', 'GIFT WRAPPING', 'GREETING CARD']);
+    // Exported as line items, not shipped (S5).
+    const day = o!.reserved_at.toISOString().slice(0, 10);
+    const csv = (await ctx.services.shopify.orderCsv({ from: day, to: day }, { email: (e) => e, buyer: (b) => b })).body;
+    expect(csv).toContain('"GIFT WRAPPING","15.00","ADD-WRAP","false"');
+    expect(csv).toContain('"GREETING CARD","5.00","ADD-CARD","false"');
+
+    // Another sale: its unit stays held nowhere when the order changes location, comes back held nowhere when a lost
+    // parcel is reshipped (never short), and is cancelled with its order.
+    const other = (await liveSale({ items: [{ addonId: wrap.id, units: 1 }] })).orders[0]!;
+    await orders().changeLocation(other.id, logistics, admin);
+    expect((await unitsOf(other.id)).map((u) => [u.status, u.location_id])).toEqual([['HELD', null]]);
+    await stockFor(other.id);
+    clock.advance(MINUTE);
+    await orders().transition(other.id, { to: 'PAID' }, admin);
+    await packAndShip(other.id);
+    const lost = await ctx.services.orderCases.report(other.id, { kind: 'LOST', note: 'No scan for 12 days.' }, admin, null);
+    clock.advance(MINUTE);
+    expect((await ctx.services.orderCases.decide(lost.id, { decision: 'RESHIP', note: 'Another piece.' }, admin, { admin: true })).addonsShort).toBeUndefined();
+    expect((await unitsOf(other.id)).map((u) => [u.status, u.shipped_at, u.location_id])).toEqual([['HELD', null, null]]);
+    clock.advance(MINUTE);
+    await orders().transition(other.id, { to: 'CANCELLED', note: 'Test over.' }, admin);
+    expect((await unitsOf(other.id)).map((u) => u.status)).toEqual(['CANCELLED']);
+    expect(await movesOf(other.id)).toEqual([]);
+    expect(await t.db.selectFrom('stock_movements').select('id').where('sku_id', 'in', [wrap.sku.id, card.sku.id]).execute()).toEqual([]);
+  });
+
+  // ── ONE OFFER RULE (lot Q2, step Q2.3; D3, D8, N8) ───────────────────────
+
+  /** A service offered at the moments given only, priced in euros. */
+  const onlyAt = (name: string, skuCode: string, at: { live?: boolean; draw?: boolean; salon?: boolean; orders?: boolean }) =>
+    ctx.services.addons.create({ kind: 'SERVICE', name, skuCode, prices: { EUR: 1000 }, offeredAt: { live: false, draw: false, salon: false, orders: false, ...at } }, admin);
+  const names = (offer: { name: string }[]) => offer.map((a) => a.name);
+  const securedEntry = () => t.db.selectFrom('live_entries').select(['id', 'drop_id', 'account_id']).where('status', '=', 'SECURED').executeTakeFirstOrThrow();
+
+  it('one offer rule: a LIVE hold and a draw\'s place held offer what their release picked, in its order, with their switch on; the salon and YOUR ORDERS their switch alone; staff neither; a choice refused names the switch or the pick, and one switched off before PAY is left out', async () => {
+    const liveOnly = await onlyAt('BOX FOR LIVE', 'ADD-Q23-LIVE', { live: true });
+    const drawOnly = await onlyAt('BOX FOR DRAWS', 'ADD-Q23-DRAW', { draw: true });
+    const salonOnly = await onlyAt('BOX FOR THE SALON', 'ADD-Q23-SALON', { salon: true });
+    const ordersOnly = await onlyAt('BOX FOR ORDERS', 'ADD-Q23-ORDERS', { orders: true });
+    const mine = new Set([liveOnly.id, drawOnly.id, salonOnly.id, ordersOnly.id]);
+
+    // LIVE: the release picks the LIVE box first, the cloth, and the draws' box (a pick never turns a switch on).
+    let offered: string[] = [];
+    let refused: unknown[] = [];
+    const sale = await liveSale({
+      pick: [liveOnly.id, cloth.id, drawOnly.id],
+      items: [{ addonId: liveOnly.id }],
+      before: async () => {
+        const e = await securedEntry();
+        const actor: Actor = { type: 'account', id: e.account_id };
+        offered = names((await f.live.entry(e.account_id, e.drop_id))!.addonOffer);
+        refused = [
+          await refusal(f.live.setAddons(e.account_id, e.drop_id, [{ addonId: drawOnly.id }], actor)),
+          await refusal(f.live.setAddons(e.account_id, e.drop_id, [{ addonId: strap.id }], actor)),
+        ];
+        await f.live.setAddons(e.account_id, e.drop_id, [{ addonId: liveOnly.id }, { addonId: cloth.id }], actor);
+        // Its LIVE switch turned off before PAY: left out, never blocking it.
+        await ctx.services.addons.update(liveOnly.id, { offeredAt: { live: false } }, admin);
+      },
+    });
+    expect(offered).toEqual(['BOX FOR LIVE', 'POLISHING CLOTH']);
+    expect(refused).toEqual([
+      { code: 'ADDON_NOT_OFFERED', status: 409, message: 'BOX FOR DRAWS is not offered in a LIVE RELEASE.' },
+      { code: 'ADDON_NOT_OFFERED', status: 409, message: 'SPARE STRAP is not one of this release’s add-ons.' },
+    ]);
+    expect(sale.confirmed.addonsLeftOut).toEqual([{ addonId: liveOnly.id, name: 'BOX FOR LIVE', units: 1, reason: 'NOT_OFFERED' }]);
+    expect((await unitsOf(sale.orders[0]!.id)).map((u) => u.addon_id)).toEqual([cloth.id]);
+    await ctx.services.addons.update(liveOnly.id, { offeredAt: { live: true } }, admin);
+
+    // A draw: its pick, in its order (the draws' box first), with its DRAW switch on.
+    const T = new Date(clock.now().getTime() + HOUR);
+    const d = await poolDraw(
+      f.drops,
+      t.db,
+      { modelId: f.modelId, title: 'A draw that picks', quantity: 1, opensAt: T, closesAt: new Date(T.getTime() + HOUR), earlyAccessHours: 0, priceMinor: 480_000, currency: 'EUR', addonIds: [drawOnly.id, cloth.id] },
+      admin,
+    );
+    const a = await createAccount(t.db);
+    clock.set(new Date(T.getTime() + MINUTE));
+    await f.drops.enter(a.id, d.id, a.actor);
+    clock.set(new Date(T.getTime() + 2 * HOUR));
+    await f.drops.draw(d.id, admin);
+    expect(names((await f.drops.entryFor(a.id, d.id)).addons!.offer)).toEqual(['BOX FOR DRAWS', 'POLISHING CLOTH']);
+    expect(await refusal(f.drops.setAddonChoices(a.id, d.id, [{ addonId: liveOnly.id, units: 1 }], a.actor))).toEqual({ code: 'ADDON_NOT_OFFERED', status: 409, message: 'BOX FOR LIVE is not offered in a release with a draw.' });
+    expect(await refusal(f.drops.setAddonChoices(a.id, d.id, [{ addonId: strap.id, units: 1 }], a.actor))).toEqual({ code: 'ADDON_NOT_OFFERED', status: 409, message: 'SPARE STRAP is not one of this release’s add-ons.' });
+    expect((await f.drops.setAddonChoices(a.id, d.id, [{ addonId: drawOnly.id, units: 2 }], a.actor)).addons!.chosen.map((c) => [c.name, c.units])).toEqual([['BOX FOR DRAWS', 2]]);
+
+    // The salon: its switch alone (every M3 add-on, and its own box; no release, no pick).
+    const salonOffer = names(await addonOffer(t.db, { moment: 'SALON', dropId: null, locationId: france, currency: 'EUR' }));
+    expect(salonOffer).toContain('BOX FOR THE SALON');
+    expect(salonOffer).toContain('SPARE STRAP');
+    expect(salonOffer.filter((n) => n.startsWith('BOX FOR'))).toEqual(['BOX FOR THE SALON']);
+    const r = await t.db.insertInto('shop_requests').values({ account_id: a.id, model_id: f.modelId, created_at: clock.now() }).returning('id').executeTakeFirstOrThrow();
+    expect(await refusal(inTransaction(t.db, (tx) => setChoices(tx, { shopRequestId: r.id }, [{ addonId: liveOnly.id, units: 1 }], { locationId: france, currency: 'EUR' }, clock.now())))).toEqual({
+      code: 'ADDON_NOT_OFFERED',
+      status: 409,
+      message: 'BOX FOR LIVE is not offered in the private salon.',
+    });
+    await inTransaction(t.db, (tx) => setChoices(tx, { shopRequestId: r.id }, [{ addonId: salonOnly.id, units: 1 }], { locationId: france, currency: 'EUR' }, clock.now()));
+
+    // YOUR ORDERS: its switch alone (the release's pick is never read); staff are bound by neither.
+    const o = sale.orders[0]!;
+    const yours = (await addons().offerForAccount(sale.account.id, o.id)).offer;
+    expect(yours.filter((x) => mine.has(x.addonId)).map((x) => x.name)).toEqual(['BOX FOR ORDERS']);
+    expect(await refusal(addons().addForAccount(sale.account.id, o.id, { addonId: liveOnly.id, units: 1 }, sale.account.actor))).toEqual({
+      code: 'ADDON_NOT_OFFERED',
+      status: 409,
+      message: 'BOX FOR LIVE is not offered in YOUR ORDERS.',
+    });
+    const staff = (await addons().offerForStaff(o.id)).offer;
+    expect(staff.filter((x) => mine.has(x.addonId)).map((x) => x.name).sort()).toEqual(['BOX FOR DRAWS', 'BOX FOR LIVE', 'BOX FOR ORDERS', 'BOX FOR THE SALON']);
+    await addons().addForStaff(o.id, { addonId: salonOnly.id, units: 1 }, admin);
+    // No collector payload names a switch, a pick or a kind.
+    for (const x of [...yours, ...staff]) expect(Object.keys(x).sort()).toEqual(['addonId', 'currency', 'engraving', 'line', 'maxUnits', 'name', 'priceMinor']);
+    for (const id of mine) await ctx.services.addons.setAside(id, admin);
+  });
+
+  it('YOUR ORDERS follows its switch alone (N8): an order of an ended release, before packing, is still offered every add-on with its YOUR ORDERS switch on, one its release never picked and one created after the release locked included', async () => {
+    const sale = await liveSale({ pick: [cloth.id] });
+    const o = sale.orders[0]!;
+    // The release ends; an add-on for YOUR ORDERS only is created afterwards.
+    await t.db.updateTable('drops').set({ ended_at: clock.now(), ended_reason: 'ENDED' }).where('id', '=', sale.release.id).execute();
+    const late = await onlyAt('A CARD IN YOUR WORDS', 'ADD-Q23-LATE', { orders: true });
+    const offer = await addons().offerForAccount(sale.account.id, o.id);
+    expect(offer).toMatchObject({ canAdd: true, reason: null });
+    expect(names(offer.offer)).toEqual(expect.arrayContaining(['POLISHING CLOTH', 'SPARE STRAP', 'A CARD IN YOUR WORDS']));
+    expect((await accountAddonOpen(t.db, [o])).has(o.id)).toBe(true);
+    await addons().addForAccount(sale.account.id, o.id, { addonId: strap.id, units: 1 }, sale.account.actor);
+    clock.advance(1000);
+    await addons().addForAccount(sale.account.id, o.id, { addonId: late.id, units: 1 }, sale.account.actor);
+    expect((await unitsOf(o.id)).map((u) => [u.addon_id, u.added_by_type])).toEqual([
+      [strap.id, 'COLLECTOR'],
+      [late.id, 'COLLECTOR'],
+    ]);
+    await ctx.services.addons.setAside(late.id, admin);
+  });
+
+  it('the engraving: one on an order (offered at 1, a second refused), its words with its choice only, at most its most characters of the house\'s set, never in the audit log; left out of ADD AN ADD-ON, staff add it', async () => {
+    const engraving = await ctx.services.addons.create(
+      { kind: 'SERVICE', name: 'ENGRAVING', skuCode: 'ADD-Q23-ENGRAVING', engraving: true, textMax: 12, prices: { EUR: 4000 }, offeredAt: { live: true, draw: false, salon: false, orders: true } },
+      admin,
+    );
+    let offer: { name: string; maxUnits: number; engraving: boolean; textMax?: number }[] = [];
+    let refused: unknown[] = [];
+    let stored: unknown[] = [];
+    const sale = await liveSale({
+      pick: [engraving.id, cloth.id],
+      before: async () => {
+        const e = await securedEntry();
+        const actor: Actor = { type: 'account', id: e.account_id };
+        offer = (await f.live.entry(e.account_id, e.drop_id))!.addonOffer;
+        const choose = (items: { addonId: string; text?: string | null }[]) => f.live.setAddons(e.account_id, e.drop_id, items, actor);
+        refused = [
+          await refusal(choose([{ addonId: engraving.id }, { addonId: engraving.id, text: 'M. B.' }])),
+          await refusal(choose([{ addonId: cloth.id, text: 'M. B.' }])),
+          await refusal(choose([{ addonId: engraving.id, text: 'ABCDEFGHIJKLM' }])),
+          await refusal(choose([{ addonId: engraving.id, text: 'M@B' }])),
+        ];
+        await choose([{ addonId: engraving.id, text: '  M.   B. ' }]);
+        stored.push((await t.db.selectFrom('addon_choices').select('text').where('live_entry_id', '=', e.id).executeTakeFirstOrThrow()).text);
+        await choose([{ addonId: engraving.id, text: '' }]);
+        stored.push((await t.db.selectFrom('addon_choices').select('text').where('live_entry_id', '=', e.id).executeTakeFirstOrThrow()).text);
+        await choose([{ addonId: engraving.id, text: 'ÉLODIE & M.' }]);
+        // The hold reads its words back (its own), one unit per piece.
+        expect((await f.live.entry(e.account_id, e.drop_id))!.addonItems).toEqual([{ addonId: engraving.id, name: 'ENGRAVING', line: null, units: 1, priceMinor: 4000, text: 'ÉLODIE & M.' }]);
+        // The account's export carries the words of its SECURED hold (review of lot Q2: its right of access).
+        expect((await ctx.services.owners.exportData(e.account_id, admin)).addonChoices).toEqual([
+          { on: 'LIVE_ENTRY', sourceId: e.id, addon: 'ENGRAVING', units: 1, text: 'ÉLODIE & M.', chosenAt: expect.any(Date) },
+        ]);
+      },
+    });
+    expect(offer.map((x) => [x.name, x.maxUnits, x.engraving, x.textMax])).toEqual([
+      ['ENGRAVING', 1, true, 12],
+      ['POLISHING CLOTH', 1, false, undefined],
+    ]);
+    expect(refused).toEqual([
+      { code: 'VALIDATION_FAILED', status: 400, message: 'Each add-on is chosen once, with its units.' },
+      { code: 'VALIDATION_FAILED', status: 400, message: 'Only the engraving takes words.' },
+      { code: 'VALIDATION_FAILED', status: 400, message: 'Up to 12 characters: letters, figures, spaces and . & ’ -' },
+      { code: 'VALIDATION_FAILED', status: 400, message: 'Up to 12 characters: letters, figures, spaces and . & ’ -' },
+    ]);
+    expect(stored).toEqual(['M. B.', null]);
+    const audit = await t.db.selectFrom('audit_logs').select('details').where('action', '=', 'drop.live.addons').where('target_id', '=', sale.release.id).orderBy('id', 'desc').executeTakeFirstOrThrow();
+    expect(audit.details).toMatchObject({ items: [{ addonId: engraving.id, units: 1, text: true }] });
+    expect(JSON.stringify(audit.details)).not.toContain('ÉLODIE');
+    // Carried at PAY: one unit, held nowhere, its words on the order that carries it (step Q2.4, D25), never logged.
+    const o = sale.orders[0]!;
+    expect((await unitsOf(o.id)).map((u) => [u.addon_id, u.location_id])).toEqual([[engraving.id, null]]);
+    expect(await t.db.selectFrom('orders').select(['engraving_text', 'engraving_by', 'engraving_minor']).where('id', '=', o.id).executeTakeFirstOrThrow()).toEqual({ engraving_text: 'ÉLODIE & M.', engraving_by: 'COLLECTOR', engraving_minor: null });
+    expect(JSON.stringify(await t.db.selectFrom('audit_logs').select('details').where('target_id', '=', sale.release.id).execute())).not.toContain('ÉLODIE');
+    // YOUR ORDERS: never in ADD AN ADD-ON (its own ENGRAVING); staff may add it, one on an order.
+    expect((await addons().offerForAccount(sale.account.id, o.id)).offer.some((x) => x.engraving)).toBe(false);
+    expect(await refusal(addons().addForAccount(sale.account.id, o.id, { addonId: engraving.id, units: 1 }, sale.account.actor))).toMatchObject({ code: 'ADDON_NOT_OFFERED', status: 409 });
+    expect((await addons().offerForStaff(o.id)).offer.some((x) => x.addonId === engraving.id)).toBe(false);
+    expect(await refusal(addons().addForStaff(o.id, { addonId: engraving.id, units: 1 }, admin))).toEqual({ code: 'ADDON_LIMIT', status: 409, message: 'At most one ENGRAVING on an order.' });
+    const other = (await liveSale({ pick: [cloth.id] })).orders[0]!;
+    expect((await addons().offerForStaff(other.id)).offer.find((x) => x.addonId === engraving.id)).toMatchObject({ maxUnits: 1, engraving: true, textMax: 12 });
+    await addons().addForStaff(other.id, { addonId: engraving.id, units: 1 }, admin);
+    // Review of lot Q2: the engraving or not, as its units were sold (409 ADDON_ENGRAVING_FIXED), both ways: YOUR ORDERS,
+    // the parcel and the invoices read each unit by it; free again once its units are removed.
+    expect(await refusal(ctx.services.addons.update(engraving.id, { engraving: false }, admin))).toEqual({
+      code: 'ADDON_ENGRAVING_FIXED',
+      status: 409,
+      message: 'This add-on is on orders as the engraving: it stays the engraving. Set it aside to stop offering it.',
+    });
+    await ctx.services.addons.setAside(engraving.id, admin);
+    expect((await ctx.services.addons.get(engraving.id)).engraving).toBe(true);
+    const note = await ctx.services.addons.create({ kind: 'SERVICE', name: 'A NOTE IN THE BOX', skuCode: 'ADD-Q2R-NOTE', prices: { EUR: 500 }, offeredAt: { live: false, draw: false, salon: false, orders: true } }, admin);
+    await addons().addForStaff(other.id, { addonId: note.id, units: 1 }, admin);
+    expect(await refusal(ctx.services.addons.update(note.id, { engraving: true }, admin))).toEqual({
+      code: 'ADDON_ENGRAVING_FIXED',
+      status: 409,
+      message: 'This add-on is on orders: it never becomes the engraving. Create the engraving as a new service.',
+    });
+    expect((await ctx.services.addons.get(note.id)).engraving).toBe(false);
+    await addons().removeForStaff(other.id, (await unitsOf(other.id)).find((u) => u.addon_id === note.id)!.id, admin);
+    expect((await ctx.services.addons.update(note.id, { engraving: true }, admin)).engraving).toBe(true);
+    await ctx.services.addons.setAside(note.id, admin);
+  });
+
+  it('LIVE: the release\'s add-ons offered change after its announcement (review of lot Q2): an add-on created then is picked, audited, and offered at the next reading of a hold; the one unpicked is no longer offered', async () => {
+    const offered: string[][] = [];
+    const late = await ctx.services.addons.create({ kind: 'SERVICE', name: 'A LATE CARD', skuCode: 'ADD-Q2R-LATE', prices: { EUR: 900 }, offeredAt: { live: true, draw: false, salon: false, orders: false } }, admin);
+    try {
+      const sale = await liveSale({
+        pick: [cloth.id],
+        before: async () => {
+          const e = await securedEntry();
+          offered.push(names((await f.live.entry(e.account_id, e.drop_id))!.addonOffer));
+          // Announced (published at once): the settings are fixed, the pick is not.
+          expect(await refusal(f.liveConsole.update(e.drop_id, { addonIds: [late.id] }, admin))).toMatchObject({ code: 'LIVE_ANNOUNCED', status: 409 });
+          await f.liveConsole.setAddonPick(e.drop_id, { addonIds: [late.id] }, admin);
+          offered.push(names((await f.live.entry(e.account_id, e.drop_id))!.addonOffer));
+        },
+      });
+      expect(offered).toEqual([['POLISHING CLOTH'], ['A LATE CARD']]);
+      const audit = await t.db.selectFrom('audit_logs').select('details').where('action', '=', 'drop.live.update').where('target_id', '=', sale.release.id).orderBy('id', 'desc').executeTakeFirstOrThrow();
+      expect(audit.details).toEqual({ before: { addonIds: [{ id: cloth.id, name: 'POLISHING CLOTH' }] }, after: { addonIds: [{ id: late.id, name: 'A LATE CARD' }] } });
+      // Ended: its pick no longer changes (409 LIVE_ENDED).
+      await t.db.updateTable('drops').set({ ended_at: clock.now(), ended_reason: 'ENDED' }).where('id', '=', sale.release.id).execute();
+      expect(await refusal(f.liveConsole.setAddonPick(sale.release.id, { addonIds: [cloth.id] }, admin))).toMatchObject({ code: 'LIVE_ENDED', status: 409 });
+    } finally {
+      await ctx.services.addons.setAside(late.id, admin);
+    }
   });
 });
 

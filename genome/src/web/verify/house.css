@@ -2525,36 +2525,62 @@ body[data-screen="live"]:has(.view--live.live--look:not(.d-room)) .corners {
   margin-top: 10px;
 }
 
+/* 5b, SECURED with add-ons (lot Q2, step Q2.8; MK #secured-addons, gen.mjs 917-937; D11, D12, D21, D37): the release's
+   add-ons as rows on hairlines, no box and no grey plate; each row's mark a 9 px ring that lights into the Horizon's
+   point when chosen; the chosen row's hairline lit as a horizon dissolving at its ends, a faint light pooled above it
+   (7 %); ENGRAVING chosen, YOUR TEXT as a hairline field. The room's tokens: dark in both modes. No sound, no motion of
+   its own beyond the state's change. */
 .live__addons-title {
-  margin-top: 24px;
+  margin-top: 30px;
 }
 
 .live__addons {
   display: grid;
-  gap: 8px;
+  gap: 0;
   width: 100%;
   max-width: 326px;
-  margin-top: 10px;
+  margin-top: 12px;
+  border-top: 1px solid var(--hairline);
 }
 
-/* An add-on: a hairline row, pressed or not, its line of words under its button; never filled (the filled ivory is
-   PAY's). */
 .live__addon-item {
-  border: 1px solid var(--hairline-strong);
-  transition: border-color var(--t-med) var(--ease);
+  position: relative;
+  isolation: isolate;
+  border-bottom: 1px solid var(--hairline);
 }
 
-.live__addon-item:has(.live__addon[aria-pressed="true"]) {
-  border-color: var(--ink);
+/* The chosen row: a faint light pooled above its hairline, the hairline lit as a horizon dissolving 24 px past the column. */
+.live__addon-item.is-on::before,
+.live__addon-item.is-on::after {
+  content: "";
+  position: absolute;
+  left: -24px;
+  right: -24px;
+  z-index: -1;
+  pointer-events: none;
 }
 
+.live__addon-item.is-on::before {
+  bottom: 0;
+  height: 100%;
+  background: radial-gradient(ellipse 50% 100% at 50% 100%, rgba(246, 242, 234, 0.07), rgba(246, 242, 234, 0));
+}
+
+.live__addon-item.is-on::after {
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(246, 242, 234, 0) 0, rgba(246, 242, 234, 0.35) 30%, rgba(246, 242, 234, 0.62) 50%, rgba(246, 242, 234, 0.35) 70%, rgba(246, 242, 234, 0) 100%);
+}
+
+/* Its block padding is the space min-height leaves around one name line, so a name on two lines keeps the same gap
+   above the add-on's line (its -12px margin) as a name on one. */
 .btn.live__addon {
   justify-content: flex-start;
-  gap: 12px;
+  gap: 14px;
   width: 100%;
   min-width: 0;
   min-height: 52px;
-  padding: 0 14px;
+  padding: calc((52px - 1.5em) / 2) 2px;
   border: 0;
   letter-spacing: var(--track-micro);
   text-align: left;
@@ -2574,20 +2600,39 @@ body[data-screen="live"]:has(.view--live.live--look:not(.d-room)) .corners {
   }
 }
 
-.live__addon-mark {
-  flex: none;
-  width: 14px;
-  height: 14px;
-  border: 1px solid var(--hairline-strong);
+/* The keyboard's ring frames the whole row, its line and YOUR TEXT with it (one control framed once): the button's own
+   gives way; never while YOUR TEXT itself has the focus (it shows its own). */
+.live__addon-item:has(> .btn.live__addon:focus-visible) {
+  outline: 1px solid var(--ink);
+  outline-offset: 4px;
 }
 
+.vault .btn.live__addon:focus-visible {
+  outline: none;
+}
+
+.live__addon-mark {
+  position: relative;
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border: 1px solid rgba(246, 242, 234, 0.5);
+  border-radius: 50%;
+  background: transparent;
+}
+
+/* Chosen: the ring lit into the Horizon's point. */
 .live__addon[aria-pressed="true"] .live__addon-mark {
-  border-color: var(--ink);
-  background: var(--ink);
+  border-color: transparent;
+  background: radial-gradient(closest-side, #fffdf8 0, rgba(255, 253, 248, 0.92) 45%, rgba(246, 242, 234, 0.4) 75%, rgba(246, 242, 234, 0) 100%);
+  box-shadow: 0 0 10px 3px rgba(246, 242, 234, 0.12);
 }
 
 .live__addon-label {
   flex: 1;
+  min-width: 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .live__addon-price {
@@ -2598,7 +2643,7 @@ body[data-screen="live"]:has(.view--live.live--look:not(.d-room)) .corners {
 }
 
 .live__addon-line {
-  margin: -12px 14px 0 40px;
+  margin: -12px 2px 0 25px;
   padding-bottom: 12px;
   font-size: var(--fs-micro);
   line-height: 1.5;
@@ -2607,60 +2652,94 @@ body[data-screen="live"]:has(.view--live.live--look:not(.d-room)) .corners {
   color: var(--ink-soft);
 }
 
-/* Plan MACRO M3 §4.4 (D2): the catalogue add-ons on the hold, under the release's: NOCTURNE's rows (views/addon-rows.ts)
-   in the room's tokens and type, the width of the release's add-ons; the note under them says when they are added. */
-.live__items-title {
-  margin-top: 24px;
+/* YOUR TEXT (D12, D37): a hairline field under the engraving's line, its micro label, the words tracked, the count right.
+   Its focus: the hairline and the label to ink, no plate, no box, no glow. */
+.ao-text {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 10px 2px 14px 25px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(246, 242, 234, 0.35);
+  text-align: left;
+  transition: border-color var(--d-dur-hover, 160ms) var(--ease);
 }
 
-.live__items,
-.live__items-note,
+.ao-text__label {
+  flex: none;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+  color: var(--ink-soft);
+  transition: color var(--d-dur-hover, 160ms) var(--ease);
+}
+
+.ao-text__input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-sub);
+  letter-spacing: 0.24em;
+  text-align: left;
+  outline: none;
+}
+
+.ao-text__count {
+  flex: none;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
+.ao-text:has(> .ao-text__input:is(:focus-visible, :focus)) {
+  border-bottom-color: var(--ink);
+}
+
+.ao-text:has(> .ao-text__input:is(:focus-visible, :focus)) > .ao-text__label {
+  color: var(--ink);
+}
+
+.live__addons-note,
 .live__left-out {
   width: 100%;
   max-width: 326px;
   margin-top: 10px;
 }
 
-.n-addons--room {
-  --a-ink: var(--ink);
-  --a-line: var(--hairline-strong);
-  --a-faint: var(--metal);
-}
-
-.n-addons--room .is-chosen {
-  --a-line: var(--ink);
-}
-
-.n-addons--room .n-addons__item {
-  padding: 10px 6px 10px 14px;
-}
-
-.n-addons--room :is(.n-addons__name, .n-addons__line, .n-addons__price, .n-step__count) {
-  font-size: var(--fs-micro);
-  letter-spacing: var(--track-micro);
-}
-
-.n-addons--room :is(.n-addons__line, .n-addons__price, .n-step__count) {
-  font-family: var(--font);
-  letter-spacing: 0.02em;
-}
-
-.n-addons--room :is(.n-addons__price, .n-step__count) {
-  font-size: var(--fs-line);
-}
-
-.live__items-note {
+.live__addons-note {
   color: var(--ink-soft);
   font-size: var(--fs-micro);
   line-height: 1.5;
 }
 
-/* CONFIRMED: an add-on PAY could not add, by its name and why, under the sentence, above the receipt. */
+/* The error line under the rows: the house's sentence of an engraving's words broken in balance (never its last mark alone),
+   on the phone and in the computer's right column alike. */
+.live__secured > .live__error,
+.live__secured > .d-room__br > .live__error {
+  text-wrap: balance;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ao-text,
+  .ao-text__label {
+    transition: none;
+  }
+}
+
+/* CONFIRMED: an add-on PAY could not add, by its name and why, under the sentence, above the receipt; broken in balance,
+   never its last word alone (THE TRAVEL CASE COULD NOT BE ADDED: NONE LEFT. on a phone). */
 .live__left-out {
   margin-top: 18px;
   font-size: var(--fs-micro);
   line-height: 1.6;
   letter-spacing: var(--track-micro);
+  text-wrap: balance;
 }
 
 .live__release {
@@ -4033,7 +4112,9 @@ body[data-screen="board"] .corners {
 
   /* SECURED (4 s): the horizon under YOUR PIECE draws out from the centre, a faint glow at the seal, the seal settles from
      a glow to crisp ink, the light pools; the photograph comes forward; SECURED, YOUR PIECE, SECURED AT, the name resolve,
-     the size; then PAY draws in from its centre (its light filled by views/live.ts from 2.9 s), the rest. */
+     the size; then PAY draws in from its centre (its light filled by views/live.ts from 2.9 s), the rest. On 5b (lot Q2,
+     step Q2.8, D35) ADD-ONS is an overline of the screen but one of its other lines: it fades in with the rows at 2.45 s,
+     after the name, never resolving with SECURED. */
   .live--tx-secured .live__reveal::before {
     content: "";
     position: absolute;
@@ -4082,7 +4163,7 @@ body[data-screen="board"] .corners {
     animation: live-fade-in 1.2s ease 1.05s backwards;
   }
 
-  .view--live.live--tx-secured:not(.d-room) .live__secured > .live__overline {
+  .view--live.live--tx-secured:not(.d-room) .live__secured > .live__overline:not(.live__addons-title) {
     animation: live-tx-resolve 0.9s cubic-bezier(0.22, 1, 0.36, 1) 1.9s backwards;
   }
 
@@ -4098,7 +4179,7 @@ body[data-screen="board"] .corners {
     animation: live-tx-resolve 0.9s cubic-bezier(0.22, 1, 0.36, 1) 2.3s backwards;
   }
 
-  .view--live.live--tx-secured:not(.d-room) .live__secured > :not(.live__overline, .live__reveal, .live__title, .live__pay, .live__pay-left, .live__pay-note, .live__release) {
+  .view--live.live--tx-secured:not(.d-room) .live__secured > :not(.live__overline:not(.live__addons-title), .live__reveal, .live__title, .live__pay, .live__pay-left, .live__pay-note, .live__release) {
     animation: live-fade-in 0.8s ease 2.45s backwards;
   }
 

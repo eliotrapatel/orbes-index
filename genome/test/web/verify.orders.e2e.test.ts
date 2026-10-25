@@ -52,7 +52,7 @@ import { claimRevealAad, deriveClaimRevealKey } from '../../src/server/services/
 import { ensureSku } from '../../src/server/services/stock.js';
 import { ACCOUNT_ADDRESSES, DEFAULT_CARE, LIVE, ORDERS } from '../../src/web/verify/copy.js';
 import { orderDate } from '../../src/web/verify/orders-model.js';
-import { createLiveRelease, liveFixture, type LiveFixture } from '../support/live.js';
+import { createLiveRelease, legacyLiveAddons, liveFixture, ordersEngravingPrices, type LiveFixture } from '../support/live.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
 import { screenChecks } from '../support/vault-checks.js';
 import { CHROMIUM_PATH, launchChromium, mobileContext, startVerifyServer, tabletContext, type VerifyServer } from './verify.harness.js';
@@ -132,7 +132,7 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     const other = await account('other');
 
     const opensAt = new Date(f.clock.now().getTime() + HOUR);
-    const r = await createLiveRelease(f, { opensAt, sizes: [{ label: '52', stock: 3 }], priceMinor: 480_000, addons: [{ label: 'Engraving', priceMinor: 25_000 }] });
+    const r = await createLiveRelease(f, { opensAt, sizes: [{ label: '52', stock: 3 }], priceMinor: 480_000 });
     await srv.ctx.db.updateTable('drops').set({ title: 'MONOLITHE — LIVE' }).where('id', '=', r.id).execute();
     ids.release = r.id;
     const actor = { type: 'account' as const, id: me.id };
@@ -144,8 +144,9 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     await f.live.press(me.id, r.id, token);
     f.clock.advance(1500);
     await f.live.secure(me.id, r.id, token, actor);
-    await f.live.setAddons(me.id, r.id, r.addons.map((a) => a.id), actor);
     await f.live.confirm(me.id, r.id, actor);
+    // A sale of before lot Q2 (N15): its release's engraving as that PAY wrote it.
+    await legacyLiveAddons(srv.ctx.db, r.id, me.id, [{ label: 'Engraving', priceMinor: 25_000 }]);
     ids.live = (await srv.ctx.db.selectFrom('orders').select('id').where('account_id', '=', me.id).where('channel', '=', 'LIVE').executeTakeFirstOrThrow()).id;
 
     // Today, ORBES Client Services marks it paid; a piece counted in serves it (test/support/fulfil.ts stockPieces); the
@@ -780,7 +781,8 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: an order\'s delivery address, engravi
     colissimo = (await db.selectFrom('carriers').select('id').where('name', '=', 'Colissimo').executeTakeFirstOrThrow()).id;
     france = (await db.selectFrom('stock_locations').select('id').where('name', '=', 'FRANCE WAREHOUSE').executeTakeFirstOrThrow()).id;
     await services.stock.updateLocation(france, { address: 'ORBES LOGISTICS\n14 rue des Entrepreneurs\n93400 Saint-Ouen\nFrance' }, f.admin);
-    await services.clubProgram.setEngravingPrices({ prices: { EUR: 3_000, GBP: null, USD: null, CHF: null } }, f.admin);
+    // The engraving YOUR ORDERS offers (lot Q2, step Q2.5, N4): the ENGRAVING add-on at € 30 in euros, its switch on.
+    await ordersEngravingPrices(f, { EUR: 3_000 });
     const { account: a, session } = await services.auth.registerAccount({ email: 'delivery.e2e.me@example.com', password: PASSWORD }, {});
     me = { id: a.id, token: session.token };
     const actor = { type: 'account' as const, id: me.id };
@@ -910,7 +912,7 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: an order\'s delivery address, engravi
     await page.context().close();
   }, 120_000);
 
-  it('ENGRAVING: added at the price of the settings (in the TOTAL), its words changed, then removed; refused words said before the server', async () => {
+  it('ENGRAVING: added at the price of the ENGRAVING add-on (in the TOTAL), its words changed, then removed; refused words said before the server', async () => {
     const { page, problems } = await phone();
     const reserved = card(page, ids.reserved);
     const add = reserved.getByRole('button', { name: E.add });
@@ -922,7 +924,7 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: an order\'s delivery address, engravi
     expect(await s.getByRole('button', { name: E.remove }).count()).toBe(0);
     await s.getByLabel(E.field, { exact: true }).fill('J.M. !');
     await s.getByRole('button', { name: E.save }).click();
-    await textOf(s.getByRole('alert'), E.invalid);
+    await textOf(s.getByRole('alert'), E.invalid(20));
     await s.getByLabel(E.field, { exact: true }).fill('J.M.');
     await page.screenshot({ path: join(OUT_DIR, 'verify-order-engraving-sheet.png') });
     await s.getByRole('button', { name: E.save }).click();

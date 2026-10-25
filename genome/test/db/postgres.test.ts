@@ -631,7 +631,10 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await set({ pace_hold_minutes: 0 }, ended.id);
     await set({ pace_batch: null, pace_minutes: null }, ended.id);
     await set({ pace_hold_minutes: 30 });
-    // Down refused while a hold exists; without one it restores 0057.
+    // Down refused while a hold exists (0060 and 0059, which hold nothing of this suite yet, go down first); without one it
+    // restores 0057.
+    expect((await migrateDown(db)).reverted).toEqual(['0060_release_addons_converted']);
+    expect((await migrateDown(db)).reverted).toEqual(['0059_addons_one_system']);
     await expect(migrateDown(db)).rejects.toThrow(/0058_one_queue cannot be rolled back: 1 releases with a hold after the opening exist/);
     await set({ pace_hold_minutes: 0 });
     expect((await migrateDown(db)).reverted).toEqual(['0058_one_queue']);
@@ -644,7 +647,152 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await set({ cancelled_at: new Date() }, open.id);
     await sql`UPDATE drops SET cancelled_at = now() WHERE mode = 'LIVE' AND parent_drop_id IS NULL AND pace_batch IS NULL AND ended_at IS NULL AND cancelled_at IS NULL`.execute(db);
     expect((await unpaced.execute(db)).rows[0].n).toBe(0);
-    expect((await migrateToLatest(db)).applied).toEqual(['0058_one_queue']);
+    expect((await migrateToLatest(db)).applied).toEqual(['0058_one_queue', '0059_addons_one_system', '0060_release_addons_converted']);
     expect(await db.selectFrom('drops').select('pace_hold_minutes').where('id', '=', release.id).executeTakeFirstOrThrow()).toEqual({ pace_hold_minutes: 0 });
+    // 0060, applied again, gave this suite's open releases its catalogue add-ons as their pick: the next case starts with none.
+    await db.deleteFrom('drop_addons').execute();
+  });
+
+  it('holds ADD-ONS ONE SYSTEM by its CHECKs, index and guards (0059: addon_items_kind_check, addon_items_service_plain, addon_items_engraving_service, addon_items_engraving_key, addon_items_text_max_check, drop_addons, addon_choices_text_check, order_addon_items_kind_guard), with the previous image\'s inserts a product offered everywhere at 20 characters and its unit at a location, the same JS types as PGlite, stock_holds ignoring a service\'s unit; down refused while a service, an engraving, a pick, a choice\'s words or a unit without a location exists, naming the counts', async () => {
+    // Its own letter: this database's categories already hold A to F, S, W, P, H, G, K, N, Q and O (the tests above).
+    await db.insertInto('categories').values({ id: 29, code: 'Y', name: 'One system parity' }).execute();
+    const model = await db.insertInto('models').values({ category_id: 29, name: 'ONE SYSTEM', type: 'RING', sku_prefix: 'ONE-PG' }).returning('id').executeTakeFirstOrThrow();
+    const account = await db.insertInto('accounts').values({ email: 'addon-pg0059@example.com', email_normalized: 'addon-pg0059@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const location = await db.insertInto('stock_locations').values({ name: 'ADD-ONS PG 0059' }).returning('id').executeTakeFirstOrThrow();
+    const supplier = await db.insertInto('suppliers').values({ name: 'ADD-ONS PG 0059 SUPPLIER' }).returning('id').executeTakeFirstOrThrow();
+    // Inserted as the previous image does: a product, offered at the four moments, not the engraving, 20 characters (numbers and booleans).
+    const kit = await db.insertInto('addon_items').values({ name: 'CARE KIT PG', supplier_id: supplier.id }).returning(['id', 'kind', 'offer_live', 'offer_draw', 'offer_salon', 'offer_orders', 'engraving', 'text_max']).executeTakeFirstOrThrow();
+    expect(kit).toEqual({ id: expect.any(String), kind: 'PRODUCT', offer_live: true, offer_draw: true, offer_salon: true, offer_orders: true, engraving: false, text_max: 20 });
+    const refusedBy = (values: Record<string, unknown>, constraint: string) => expect(sql`INSERT INTO addon_items ${sql.raw(`(name, ${Object.keys(values).join(', ')})`)} VALUES ('REFUSED PG', ${sql.join(Object.values(values))})`.execute(db)).rejects.toSatisfy((e) => isCheckViolation(e, constraint));
+    await refusedBy({ kind: 'BOX' }, 'addon_items_kind_check');
+    await refusedBy({ kind: 'SERVICE', supplier_id: supplier.id }, 'addon_items_service_plain');
+    await refusedBy({ engraving: true }, 'addon_items_engraving_service');
+    await refusedBy({ kind: 'SERVICE', text_max: 0 }, 'addon_items_text_max_check');
+    await refusedBy({ kind: 'SERVICE', text_max: 21 }, 'addon_items_text_max_check');
+    await expect(sql`UPDATE addon_items SET kind = 'SERVICE', supplier_id = NULL WHERE id = ${kit.id}`.execute(db)).rejects.toSatisfy(isGuardViolation);
+    // A service and the engraving, one active at a time.
+    const wrapping = await db.insertInto('addon_items').values({ name: 'GIFT WRAPPING PG', kind: 'SERVICE', offer_orders: false }).returning('id').executeTakeFirstOrThrow();
+    const engraving = await db.insertInto('addon_items').values({ name: 'ENGRAVING PG', kind: 'SERVICE', engraving: true, text_max: 12 }).returning(['id', 'text_max']).executeTakeFirstOrThrow();
+    expect(engraving.text_max).toBe(12);
+    await expect(db.insertInto('addon_items').values({ name: 'ENGRAVING PG II', kind: 'SERVICE', engraving: true }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'addon_items_engraving_key'));
+    // A release's pick: positions 1 to 100, each add-on and position once, its identity fixed.
+    const release = await db
+      .insertInto('drops')
+      .values({ model_id: model.id, title: 'PICK PG', quantity: 1, opens_at: new Date('2026-12-01T10:00:00Z'), closes_at: new Date('2026-12-02T10:00:00Z'), seed_enc: `v1.${'A'.repeat(16)}.${'B'.repeat(64)}`, seed_hash: new Uint8Array(32) })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    expect(await db.insertInto('drop_addons').values({ drop_id: release.id, addon_id: wrapping.id, position: 1 }).returning(['position']).executeTakeFirstOrThrow()).toEqual({ position: 1 });
+    await expect(db.insertInto('drop_addons').values({ drop_id: release.id, addon_id: kit.id, position: 101 }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'drop_addons_position_check'));
+    await expect(db.insertInto('drop_addons').values({ drop_id: release.id, addon_id: kit.id, position: 1 }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'drop_addons_position_key'));
+    await expect(db.insertInto('drop_addons').values({ drop_id: release.id, addon_id: wrapping.id, position: 2 }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'drop_addons_pkey'));
+    await expect(sql`UPDATE drop_addons SET addon_id = ${kit.id} WHERE drop_id = ${release.id}`.execute(db)).rejects.toSatisfy(isGuardViolation);
+    // A choice's words, 1 to 120, trimmed.
+    const request = await db.insertInto('shop_requests').values({ account_id: account.id, model_id: model.id }).returning('id').executeTakeFirstOrThrow();
+    await expect(db.insertInto('addon_choices').values({ shop_request_id: request.id, addon_id: engraving.id, units: 1, text: ' M. B.' }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'addon_choices_text_check'));
+    const words = await db.insertInto('addon_choices').values({ shop_request_id: request.id, addon_id: engraving.id, units: 1, text: 'M. B.' }).returning(['id', 'text']).executeTakeFirstOrThrow();
+    expect(words.text).toBe('M. B.');
+    // A product's unit at a location, a service's at none, by the kind guard; only the product's in stock_holds.
+    const closed = await db.insertInto('shop_requests').values({ account_id: account.id, model_id: model.id, status: 'CLOSED', created_at: new Date(Date.now() - 60_000), handled_at: new Date(), outcome: 'ACCEPTED' }).returning('id').executeTakeFirstOrThrow();
+    const order = await db.insertInto('orders').values({ channel: 'SALON', shop_request_id: closed.id, account_id: account.id, model_id: model.id, location_id: location.id, price_minor: 1000, currency: 'EUR' }).returning('id').executeTakeFirstOrThrow();
+    const kitSku = await db.insertInto('skus').values({ addon_id: kit.id, code: 'KIT-PG0059' }).returning('id').executeTakeFirstOrThrow();
+    const wrapSku = await db.insertInto('skus').values({ addon_id: wrapping.id, code: 'WRAP-PG0059' }).returning('id').executeTakeFirstOrThrow();
+    const unit = { order_id: order.id, price_minor: 1500, currency: 'EUR' as const, added_by_type: 'PURCHASE' as const };
+    await expect(db.insertInto('order_addon_items').values({ ...unit, addon_id: kit.id, sku_id: kitSku.id, location_id: null }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'order_addon_items_kind_guard'));
+    await expect(db.insertInto('order_addon_items').values({ ...unit, addon_id: wrapping.id, sku_id: wrapSku.id, location_id: location.id }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'order_addon_items_kind_guard'));
+    const product = await db.insertInto('order_addon_items').values({ ...unit, addon_id: kit.id, sku_id: kitSku.id, location_id: location.id }).returning('id').executeTakeFirstOrThrow();
+    const service = await db.insertInto('order_addon_items').values({ ...unit, addon_id: wrapping.id, sku_id: wrapSku.id, location_id: null }).returning(['id', 'location_id']).executeTakeFirstOrThrow();
+    expect(service.location_id).toBeNull();
+    await expect(db.updateTable('order_addon_items').set({ location_id: null }).where('id', '=', product.id).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'order_addon_items_kind_guard'));
+    expect((await db.selectFrom('stock_holds').select('id').where('id', 'in', [product.id, service.id]).execute()).map((h) => h.id)).toEqual([product.id]);
+    // Down refused while any of them exists, naming the counts (0060, which converted nothing here, goes down first);
+    // without them it restores 0058, the product's unit kept.
+    expect((await migrateDown(db)).reverted).toEqual(['0060_release_addons_converted']);
+    await expect(migrateDown(db)).rejects.toThrow(/0059_addons_one_system cannot be rolled back: 2 service add-ons, 1 engraving add-ons, 1 add-ons picked by releases, 1 add-on choices with words and 1 add-on units without a location exist/);
+    await db.deleteFrom('order_addon_items').where('id', '=', service.id).execute();
+    await db.deleteFrom('addon_choices').where('id', '=', words.id).execute();
+    await db.deleteFrom('drop_addons').where('drop_id', '=', release.id).execute();
+    await expect(migrateDown(db)).rejects.toThrow(/0059_addons_one_system cannot be rolled back: 2 service add-ons, 1 engraving add-ons, 0 add-ons picked by releases, 0 add-on choices with words and 0 add-on units without a location exist/);
+    await db.deleteFrom('skus').where('id', '=', wrapSku.id).execute();
+    await db.deleteFrom('addon_items').where('id', 'in', [wrapping.id, engraving.id]).execute();
+    expect((await migrateDown(db)).reverted).toEqual(['0059_addons_one_system']);
+    expect((await db.selectFrom('stock_holds').select('id').where('id', '=', product.id).execute()).map((h) => h.id)).toEqual([product.id]);
+    expect((await migrateToLatest(db)).applied).toEqual(['0059_addons_one_system', '0060_release_addons_converted']);
+  });
+
+  it('converts the release add-ons and the settings\' engraving into catalogue add-ons (0060: addon_conversions_source_check, addon_conversions_source_fields, addon_conversions_price, addon_conversions_source_key, addon_conversions_immutable): refused while a release add-on is chosen on a piece held, naming the count; each label once, the add-on of that name whatever its case kept, a new SERVICE the engraving, the settings\' price winning; the open release\'s pick; the three tables dropped; the same JS types as PGlite; down refused while a conversion is recorded, naming the count', async () => {
+    expect((await migrateDown(db)).reverted).toEqual(['0060_release_addons_converted']);
+    // Its own letter: this database's categories already hold A to F, S, W, P, H, G, K, N, Q, O and Y (the tests above).
+    await db.insertInto('categories').values({ id: 30, code: 'V', name: 'Conversion parity' }).execute();
+    const model = await db.insertInto('models').values({ category_id: 30, name: 'CONVERTED', type: 'RING', sku_prefix: 'CONV-PG' }).returning('id').executeTakeFirstOrThrow();
+    const account = await db.insertInto('accounts').values({ email: 'addon-pg0060@example.com', email_normalized: 'addon-pg0060@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const admin = await db.insertInto('admin_users').values({ email: 'addon-pg0060@orbes.test', email_normalized: 'addon-pg0060@orbes.test', password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow();
+    // A catalogue add-on of M3, priced in EUR.
+    const box = await db.insertInto('addon_items').values({ name: 'GIFT BOX PG60', position: 9000 }).returning('id').executeTakeFirstOrThrow();
+    await db.insertInto('skus').values({ addon_id: box.id, code: 'BOX-PG0060' }).execute();
+    await db.insertInto('addon_item_prices').values({ addon_id: box.id, currency: 'EUR', price_minor: 2500 }).execute();
+    const offered = (
+      await sql<{ name: string }>`SELECT a.name FROM addon_items a WHERE a.active AND a.offer_live AND EXISTS (SELECT 1 FROM addon_item_prices p WHERE p.addon_id = a.id AND p.currency = 'EUR') ORDER BY a.position, lower(a.name), a.id`.execute(db)
+    ).rows.map((r) => r.name);
+    // An open LIVE release in EUR with its own two add-ons; a piece SECURED there with one of them chosen.
+    const release = await db
+      .insertInto('drops')
+      .values({
+        model_id: model.id, title: 'CONVERTED PG', quantity: 2, opens_at: new Date('2026-12-01T10:00:00Z'), closes_at: new Date('2026-12-01T11:00:00Z'), seed_enc: `v1.${'A'.repeat(16)}.${'B'.repeat(64)}`,
+        seed_hash: new Uint8Array(32), early_access_hours: 0, mode: 'LIVE', live_min_tier: 0, tier_priority: true, room_opens_minutes: 5, turn_seconds: 30, pay_minutes: 5, per_account: 1,
+        price_minor: 1000, currency: 'EUR', quantity_line: '2 PIECES', published_at: new Date('2026-11-30T10:00:00Z'), pace_batch: 250, pace_minutes: 1,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const size = await db.insertInto('drop_sizes').values({ drop_id: release.id, label: '52', position: 1, stock: 2 }).returning('id').executeTakeFirstOrThrow();
+    const releaseAddon = async (label: string, line: string | null, price: number, position: number) =>
+      (await sql<{ id: string }>`INSERT INTO live_addons (drop_id, label, line, price_minor, position) VALUES (${release.id}, ${label}, ${line}, ${price}, ${position}) RETURNING id`.execute(db)).rows[0]!.id;
+    const engravingSource = await releaseAddon('ENGRAVING PG60', 'Your initials.', 4000, 1);
+    const boxSource = await releaseAddon('Gift box pg60', null, 1200, 2);
+    const T = '2026-12-01T10:00:00Z';
+    const entry = (
+      await sql<{ id: string }>`
+        INSERT INTO live_entries (drop_id, account_id, size_id, quantity, tier, status, position, joined_at, queued_at, turn_at, turn_expires_at, turn_token_hash,
+                                  press_started_at, secured_at, hold_expires_at, gesture_ms)
+        VALUES (${release.id}, ${account.id}, ${size.id}, 1, 0, 'SECURED', 1, '2026-12-01T09:00:00Z', '2026-12-01T09:00:00Z', ${T}::timestamptz, ${T}::timestamptz + interval '30 seconds',
+                sha256('t'), ${T}::timestamptz, ${T}::timestamptz + interval '2 seconds', ${T}::timestamptz + interval '5 minutes', 2000) RETURNING id`.execute(db)
+    ).rows[0]!.id;
+    await sql`INSERT INTO live_entry_addons (entry_id, addon_id, price_minor) VALUES (${entry}, ${boxSource}, 1200)`.execute(db);
+    await sql`INSERT INTO engraving_prices (currency, price_minor, updated_by) VALUES ('EUR', 3000, ${admin.id})`.execute(db);
+    await expect(migrateToLatest(db)).rejects.toThrow(/0060_release_addons_converted cannot be applied: 1 release add-ons are chosen on entries in TURN or SECURED/);
+    // The hold lapses (its choices deleted), then it applies.
+    await sql`DELETE FROM live_entry_addons WHERE entry_id = ${entry}`.execute(db);
+    expect((await migrateToLatest(db)).applied).toEqual(['0060_release_addons_converted']);
+    const engraving = await db
+      .selectFrom('addon_items as a')
+      .innerJoin('skus as k', 'k.addon_id', 'a.id')
+      .select(['a.id', 'a.kind', 'a.line', 'a.offer_live', 'a.offer_draw', 'a.offer_salon', 'a.offer_orders', 'a.engraving', 'a.text_max', 'k.code'])
+      .where('a.name', '=', 'ENGRAVING PG60')
+      .executeTakeFirstOrThrow();
+    expect(engraving).toEqual({ id: expect.any(String), kind: 'SERVICE', line: 'Your initials.', offer_live: true, offer_draw: false, offer_salon: false, offer_orders: true, engraving: true, text_max: 20, code: 'ADD-ENGRAVING-PG60' });
+    const prices = await db.selectFrom('addon_item_prices').select(['addon_id', 'currency', 'price_minor']).where('addon_id', 'in', [engraving.id, box.id]).orderBy('price_minor').execute();
+    expect(prices).toEqual([{ addon_id: box.id, currency: 'EUR', price_minor: 2500 }, { addon_id: engraving.id, currency: 'EUR', price_minor: 3000 }]);
+    // Each release add-on recorded (no price given: the settings' EUR won, GIFT BOX PG60 had its own), and the settings' EUR.
+    const order = (c: { source: string; addon_id: string }) => `${c.source === 'LIVE_ADDON' ? 0 : 1}${c.addon_id === engraving.id ? 0 : 1}`;
+    const conversions = (await db.selectFrom('addon_conversions').selectAll().execute()).sort((x, y) => order(x).localeCompare(order(y)));
+    expect(conversions).toEqual([
+      { id: expect.any(String), source: 'LIVE_ADDON', source_id: engravingSource, drop_id: release.id, addon_id: engraving.id, currency: 'EUR', price_minor: null, converted_at: expect.any(Date) },
+      { id: expect.any(String), source: 'LIVE_ADDON', source_id: boxSource, drop_id: release.id, addon_id: box.id, currency: 'EUR', price_minor: null, converted_at: expect.any(Date) },
+      { id: expect.any(String), source: 'ENGRAVING_PRICES', source_id: null, drop_id: null, addon_id: engraving.id, currency: 'EUR', price_minor: 3000, converted_at: expect.any(Date) },
+    ]);
+    // The open release offers what it offered: the catalogue add-ons offered then (as its pick may hold them: offered at a
+    // LIVE purchase, priced in EUR), then its own converted one.
+    const pick = await db.selectFrom('drop_addons as x').innerJoin('addon_items as a', 'a.id', 'x.addon_id').select(['a.name', 'x.position']).where('x.drop_id', '=', release.id).orderBy('x.position').execute();
+    expect(pick).toEqual([...offered, 'ENGRAVING PG60'].map((name, i) => ({ name, position: i + 1 })));
+    const tables = (await sql<{ name: string }>`SELECT table_name AS name FROM information_schema.tables WHERE table_schema = 'public'`.execute(db)).rows.map((r) => r.name);
+    for (const gone of ['live_addons', 'live_entry_addons', 'engraving_prices']) expect(tables, gone).not.toContain(gone);
+    // Its CHECKs, key and guard.
+    await expect(db.insertInto('addon_conversions').values({ source: 'LIVE_ADDON', addon_id: box.id }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'addon_conversions_source_fields'));
+    await expect(db.insertInto('addon_conversions').values({ source: 'ENGRAVING_PRICES', addon_id: box.id, currency: 'JPY', price_minor: 1 }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'addon_conversions_price'));
+    await expect(sql`INSERT INTO addon_conversions (source, addon_id, currency) VALUES ('SETTINGS', ${box.id}, 'EUR')`.execute(db)).rejects.toSatisfy((e) => isCheckViolation(e, 'addon_conversions_source_check'));
+    await expect(db.insertInto('addon_conversions').values({ source: 'LIVE_ADDON', source_id: boxSource, drop_id: release.id, addon_id: box.id }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'addon_conversions_source_key'));
+    await expect(sql`UPDATE addon_conversions SET price_minor = 1 WHERE source_id = ${boxSource}`.execute(db)).rejects.toSatisfy(isGuardViolation);
+    await expect(db.deleteFrom('drops').where('id', '=', release.id).execute()).rejects.toSatisfy(isForeignKeyViolation);
+    // Down refused while a conversion is recorded, naming the count.
+    await expect(migrateDown(db)).rejects.toThrow(/0060_release_addons_converted cannot be rolled back: 3 add-on conversions exist/);
   });
 });

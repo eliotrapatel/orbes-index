@@ -22,6 +22,7 @@ import type {
   SetPieceDecision,
   AddonCreateInput,
   AddonInput,
+  AddonPickable,
   AddonView,
   OrderAddonOffer,
   AnnouncementState,
@@ -196,7 +197,6 @@ import type {
   OwnerList,
   ShippingRate,
   ShippingRatesSheet,
-  EngravingPricesSheet,
   HouseCurrency,
   ShopifyLink,
   ShopifyProduct,
@@ -757,6 +757,14 @@ export class AdminApi {
     return this.get('/api/admin/addons');
   }
 
+  /**
+   * AUDITOR (lot Q2, step Q2.7): the active add-ons a release's form picks from for a moment (LIVE, DRAW) and a currency,
+   * each with its price there, pickable or why not (SWITCH_OFF, NO_PRICE).
+   */
+  addonPickable(moment: 'LIVE' | 'DRAW', currency: string): Promise<Items<AddonPickable>> {
+    return this.get(`/api/admin/addons?moment=${encodeURIComponent(moment)}&currency=${encodeURIComponent(currency)}`);
+  }
+
   /** OPERATOR: an add-on listed with its SKU code and prices (409 ADDON_NAME_TAKEN, SKU_CODE_TAKEN). */
   createAddon(input: AddonCreateInput): Promise<AddonView> {
     return this.post('/api/admin/addons', input);
@@ -1193,6 +1201,11 @@ export class AdminApi {
   /** Any setting, until the announcement (409 LIVE_ANNOUNCED after). */
   updateLiveRelease(id: string, change: LiveSettingsChange): Promise<LiveRelease> {
     return this.patch(`/api/admin/live/${encodeURIComponent(id)}`, change);
+  }
+
+  /** ADD-ONS OFFERED (or its after-room's), until the release ends (409 LIVE_ENDED after; review of lot Q2). */
+  setLiveAddons(id: string, addonIds: string[], afterRoom = false): Promise<LiveRelease> {
+    return this.request('PUT', `/api/admin/live/${encodeURIComponent(id)}/addons`, { body: { addonIds, ...(afterRoom ? { afterRoom: true } : {}) } });
   }
 
   publishLiveRelease(id: string, circlePost: boolean): Promise<LiveRelease> {
@@ -1664,16 +1677,6 @@ export class AdminApi {
   /** ADMIN: the rates set whole; a rate left out is cleared. */
   setShippingRates(rates: ShippingRate[]): Promise<ShippingRatesSheet> {
     return this.request('PUT', '/api/admin/orders/shipping-rates', { body: { rates } });
-  }
-
-  /** ENGRAVING (plan NEXT LOT §3.6.C): the engraving's price per currency. */
-  engravingPrices(): Promise<EngravingPricesSheet> {
-    return this.get('/api/admin/orders/engraving-prices');
-  }
-
-  /** ADMIN: the engraving's prices set whole; null: no engraving in that currency. */
-  setEngravingPrices(prices: Record<HouseCurrency, number | null>): Promise<EngravingPricesSheet> {
-    return this.request('PUT', '/api/admin/orders/engraving-prices', { body: { prices } });
   }
 
   // ── Locations and carriers ───────────────────────────────────────────────

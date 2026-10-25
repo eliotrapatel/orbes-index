@@ -212,20 +212,13 @@ describe('orders, the stock and their settings: the console\'s routes', () => {
     await admin.request('PUT', '/api/admin/orders/alerts', { body: { reservedDays: 2, readyDays: 5, shippedDays: 10, unregisteredDays: 30 } });
   });
 
-  it('sets the engraving\'s price per currency (ADMIN; plan NEXT LOT §3.6.C), read by an AUDITOR, set whole, audited before and after', async () => {
-    expect(safeJson(await auditor.get('/api/admin/orders/engraving-prices'))).toEqual({ prices: { EUR: null, GBP: null, USD: null, CHF: null }, updatedAt: null, updatedBy: null });
-    expect((await op.request('PUT', '/api/admin/orders/engraving-prices', { body: { prices: { EUR: 3_000, GBP: null, USD: null, CHF: null } } })).statusCode).toBe(403);
-    expect(errorOf(await admin.request('PUT', '/api/admin/orders/engraving-prices', { body: { prices: { EUR: 3_000 } } })).code).toBe('VALIDATION_FAILED');
-    expect(errorOf(await admin.request('PUT', '/api/admin/orders/engraving-prices', { body: { prices: { EUR: -1, GBP: null, USD: null, CHF: null } } })).code).toBe('VALIDATION_FAILED');
-    const set = safeJson(await admin.request('PUT', '/api/admin/orders/engraving-prices', { body: { prices: { EUR: 3_000, GBP: 2_500, USD: null, CHF: 0 } } })) as Json;
-    expect(set).toMatchObject({ prices: { EUR: 3_000, GBP: 2_500, USD: null, CHF: 0 }, updatedAt: expect.any(String), updatedBy: { email: expect.any(String) } });
-    const cleared = safeJson(await admin.request('PUT', '/api/admin/orders/engraving-prices', { body: { prices: { EUR: null, GBP: null, USD: null, CHF: null } } })) as Json;
-    expect(cleared.prices).toEqual({ EUR: null, GBP: null, USD: null, CHF: null });
-    const audit = await h.ctx.db.selectFrom('audit_logs').select('details').where('action', '=', 'order.engraving_prices.update').orderBy('id').execute();
-    expect(audit.map((a) => a.details)).toEqual([
-      { before: {}, after: { EUR: 3_000, GBP: 2_500, CHF: 0 } },
-      { before: { EUR: 3_000, GBP: 2_500, CHF: 0 }, after: {} },
-    ]);
+  it('no longer sets an engraving price in Orders → Settings (lot Q2, step Q2.5, N4): the engraving is the ENGRAVING add-on, its prices in Catalogue → Add-ons; GET and PUT /api/admin/orders/engraving-prices are gone', async () => {
+    const read = await auditor.get('/api/admin/orders/engraving-prices');
+    const set = await admin.request('PUT', '/api/admin/orders/engraving-prices', { body: { prices: { EUR: 3_000, GBP: null, USD: null, CHF: null } } });
+    // The read falls to GET /api/admin/orders/:id, which takes an order's id only.
+    expect([read.statusCode, errorOf(read).code]).toEqual([400, 'VALIDATION_FAILED']);
+    expect([set.statusCode, errorOf(set).code]).toEqual([404, 'NOT_FOUND']);
+    expect(await h.ctx.db.selectFrom('audit_logs').select('id').where('action', '=', 'order.engraving_prices.update').execute()).toEqual([]);
   });
 
   it('adds and renames a location, makes it the default; adds a carrier with its tracking link, edits it, sets it aside (ADMIN), audited', async () => {
@@ -308,6 +301,8 @@ describe('orders, the stock and their settings: the console\'s routes', () => {
       ['SPARE STRAP', 'ADD-STRAP', 2_500, 'HELD', 'STAFF'],
       ['SPARE STRAP', 'ADD-STRAP', 2_500, 'HELD', 'STAFF'],
     ]);
+    // Lot Q2, step Q2.7: each unit says its add-on's type and whether it is the engraving (the order page's Service and engraving line).
+    expect(units[0]!.addon).toEqual({ id: strap.id, name: 'SPARE STRAP', kind: 'PRODUCT', engraving: false });
     expect((safeJson(await auditor.get(`/api/admin/orders/${id}`)) as Json).order.addonItems).toHaveLength(2);
     h.clock.advance(MINUTE);
     const removed = await op.request('DELETE', `/api/admin/orders/${id}/addons/${units[0]!.id}`);

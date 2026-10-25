@@ -1,15 +1,19 @@
 /**
  * Fixtures of the LIVE RELEASES' tests (services/live.ts): accounts, the pieces they hold (their tier in the club),
  * models and collections, and a LIVE release made as the console makes one: a drop with its sealed seed
- * (DropService.create), then its LIVE settings, sizes, add-ons, per-tier windows and access rule, its after-room as the
+ * (DropService.create), then its LIVE settings, sizes, its pick of catalogue add-ons, per-tier windows and access rule,
+ * its after-room as the
  * console writes one (LiveConsoleService), published; the stock locations of the first boot, where a confirmed entry's
  * orders go. Macro scope K44 T1 (M3.16): a set of sized models and its LIVE RELEASE, made by the console with its sizes
  * per piece.
  */
 import { randomUUID } from 'node:crypto';
+import { sql } from 'kysely';
 import { packIdentity } from '../../src/core/identity.js';
 import { testConfig, type AppConfig } from '../../src/server/config.js';
 import type { Db } from '../../src/server/db/connection.js';
+import { ADDON_TEXT_MAX, jsonText, type HouseCurrency } from '../../src/server/db/schema.js';
+import { AddonService } from '../../src/server/services/addons.js';
 import { AuditService } from '../../src/server/services/audit.js';
 import { CLUB_TIER_THRESHOLDS } from '../../src/server/services/club.js';
 import { deriveDropSeedKey, DropService } from '../../src/server/services/drops.js';
@@ -165,7 +169,11 @@ export interface LiveReleaseOptions {
   opensAt: Date;
   closesAt?: Date;
   sizes?: { label: string; stock: number }[];
-  addons?: { label: string; line?: string | null; priceMinor: number }[];
+  /**
+   * Lot Q2, step Q2.3 (D3): the catalogue add-ons its purchase offers, in order (`drop_addons`); none by default. A
+   * fixture picks explicitly, never the console's default of a new release (N7): a release offers exactly what it is given.
+   */
+  addonIds?: string[];
   minTier?: number;
   tierPriority?: boolean;
   roomOpensMinutes?: number;
@@ -198,9 +206,8 @@ export interface LiveReleaseOptions {
 export interface LiveRelease {
   id: string;
   sizes: { id: string; label: string; stock: number }[];
-  addons: { id: string; label: string; priceMinor: number }[];
   /** Its after-room, when it has one. */
-  afterRoom: { id: string; sizes: { id: string; label: string; stock: number }[]; addons: { id: string; label: string; priceMinor: number }[] } | null;
+  afterRoom: { id: string; sizes: { id: string; label: string; stock: number }[] } | null;
 }
 
 /** A LIVE release, published at the fixture's clock unless asked otherwise. */
@@ -243,13 +250,6 @@ export async function createLiveRelease(f: LiveFixture, o: LiveReleaseOptions): 
     .values(sizes.map((s, i) => ({ drop_id: id, label: s.label, position: i + 1, stock: s.stock })))
     .returning(['id', 'label', 'stock', 'position'])
     .execute();
-  const addonRows = o.addons?.length
-    ? await f.db
-        .insertInto('live_addons')
-        .values(o.addons.map((a, i) => ({ drop_id: id, label: a.label, line: a.line ?? null, price_minor: a.priceMinor, position: i + 1 })))
-        .returning(['id', 'label', 'price_minor', 'position'])
-        .execute()
-    : [];
   if (o.windows?.length) {
     await f.db
       .insertInto('live_tier_windows')
@@ -257,24 +257,143 @@ export async function createLiveRelease(f: LiveFixture, o: LiveReleaseOptions): 
       .execute();
   }
   if (o.accessModels?.length) await f.db.insertInto('live_access_models').values(o.accessModels.map((m) => ({ drop_id: id, model_id: m }))).execute();
-  if (o.afterRoom) await f.liveConsole.update(id, { afterRoom: o.afterRoom }, f.admin);
+  // Q2.3: its pick exactly as given (the draw it was created as took the draws' default: replaced), its after-room's too.
+  await pickAddons(f.db, id, o.addonIds ?? []);
+  if (o.afterRoom) await f.liveConsole.update(id, { afterRoom: { addonIds: [], ...o.afterRoom } }, f.admin);
   if (o.published !== false) await f.db.updateTable('drops').set({ published_at: f.clock.now() }).where('id', '=', id).execute();
   const child = o.afterRoom ? await f.db.selectFrom('drops').select('id').where('parent_drop_id', '=', id).executeTakeFirstOrThrow() : null;
   return {
     id,
     sizes: sizeRows.sort((a, b) => a.position - b.position).map((s) => ({ id: s.id, label: s.label, stock: s.stock })),
-    addons: addonRows.sort((a, b) => a.position - b.position).map((a) => ({ id: a.id, label: a.label, priceMinor: a.price_minor })),
     afterRoom: child ? { id: child.id, ...(await offerOf(f.db, child.id)) } : null,
   };
 }
 
-/** A release's sizes and add-ons, in order. */
+/**
+ * A release's pick of catalogue add-ons written as given (lot Q2, step Q2.3: `drop_addons`, in order), whatever its state:
+ * what migration 0060 writes for a release under way, or a fixture's release offering exactly these.
+ */
+export async function pickAddons(db: Db, dropId: string, addonIds: readonly string[]): Promise<void> {
+  await db.deleteFrom('drop_addons').where('drop_id', '=', dropId).execute();
+  if (addonIds.length > 0) await db.insertInto('drop_addons').values(addonIds.map((addon_id, i) => ({ drop_id: dropId, addon_id, position: i + 1 }))).execute();
+}
+
+/** A release's sizes, in order. */
 export async function offerOf(db: Db, dropId: string) {
-  const [sizes, addons] = await Promise.all([
-    db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', dropId).orderBy('position').execute(),
-    db.selectFrom('live_addons').select(['id', 'label', 'price_minor']).where('drop_id', '=', dropId).orderBy('position').execute(),
-  ]);
-  return { sizes, addons: addons.map((a) => ({ id: a.id, label: a.label, priceMinor: a.price_minor })) };
+  return { sizes: await db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', dropId).orderBy('position').execute() };
+}
+
+/**
+ * A catalogue service a LIVE release may pick (lot Q2, step Q2.4, D2: what a release add-on became, as 0060 converts
+ * one): its name, line and EUR price, its LIVE switch only, the engraving with its most characters when asked. One per
+ * name (addon_items_name_key): an add-on of that name already there is reinstated and given this line, price and flag.
+ * Returns its id.
+ */
+export async function liveAddon(
+  f: Pick<LiveFixture, 'db' | 'audit' | 'clock' | 'admin'>,
+  o: { name: string; line?: string | null; priceMinor: number; engraving?: boolean; textMax?: number },
+): Promise<string> {
+  const addons = new AddonService({ db: f.db, audit: f.audit, clock: f.clock.now });
+  const found = await f.db.selectFrom('addon_items').select('id').where(sql<boolean>`lower(name) = lower(${o.name})`).executeTakeFirst();
+  if (!found) {
+    const code = `ADD-${o.name.replace(/[^A-Z0-9]+/gi, '-').toUpperCase().slice(0, 24)}-${randomUUID().slice(0, 8).toUpperCase()}`;
+    const made = await addons.create(
+      {
+        kind: 'SERVICE',
+        name: o.name,
+        line: o.line ?? null,
+        skuCode: code,
+        prices: { EUR: o.priceMinor },
+        offeredAt: { live: true, draw: false, salon: false, orders: false },
+        ...(o.engraving ? { engraving: true, ...(o.textMax !== undefined ? { textMax: o.textMax } : {}) } : {}),
+      },
+      f.admin,
+    );
+    return made.id;
+  }
+  await f.db
+    .updateTable('addon_items')
+    .set({ active: true, line: o.line ?? null, engraving: o.engraving === true, text_max: o.engraving ? (o.textMax ?? ADDON_TEXT_MAX.max) : ADDON_TEXT_MAX.max, offer_live: true })
+    .where('id', '=', found.id)
+    .execute();
+  await f.db
+    .insertInto('addon_item_prices')
+    .values({ addon_id: found.id, currency: 'EUR', price_minor: o.priceMinor })
+    .onConflict((oc) => oc.columns(['addon_id', 'currency']).doUpdateSet({ price_minor: o.priceMinor }))
+    .execute();
+  return found.id;
+}
+
+/**
+ * The engraving YOUR ORDERS offers (lot Q2, step Q2.5, N4: what Orders → Settings, Engraving became, as 0060 converts
+ * it): the active engraving add-on (else the add-on named ENGRAVING, reinstated as the engraving, else a new ENGRAVING
+ * service with no other switch) given these prices (null: none in that currency; the others left) and its YOUR ORDERS
+ * switch on while it has a price; its most characters when asked. Through the console's service, audited. Returns its id.
+ */
+export async function ordersEngravingPrices(
+  f: Pick<LiveFixture, 'db' | 'audit' | 'clock' | 'admin'>,
+  prices: Partial<Record<HouseCurrency, number | null>>,
+  o: { textMax?: number } = {},
+): Promise<string> {
+  const addons = new AddonService({ db: f.db, audit: f.audit, clock: f.clock.now });
+  let id = (await f.db.selectFrom('addon_items').select('id').where('engraving', '=', true).where('active', '=', true).executeTakeFirst())?.id;
+  if (!id) {
+    const named = await f.db.selectFrom('addon_items').select('id').where(sql<boolean>`lower(name) = 'engraving'`).executeTakeFirst();
+    if (named) {
+      await f.db.updateTable('addon_items').set({ active: true, engraving: true }).where('id', '=', named.id).execute();
+      id = named.id;
+    }
+  }
+  if (!id) {
+    const made = await addons.create(
+      {
+        kind: 'SERVICE',
+        name: 'ENGRAVING',
+        line: null,
+        skuCode: `ADD-ENGRAVING-${randomUUID().slice(0, 8).toUpperCase()}`,
+        prices: {},
+        offeredAt: { live: false, draw: false, salon: false, orders: true },
+        engraving: true,
+      },
+      f.admin,
+    );
+    id = made.id;
+  }
+  if (Object.keys(prices).length > 0) await addons.setPrices(id, prices, f.admin);
+  const priced = (await f.db.selectFrom('addon_item_prices').select('currency').where('addon_id', '=', id).execute()).length > 0;
+  const now = await f.db.selectFrom('addon_items').select(['offer_orders', 'text_max']).where('id', '=', id).executeTakeFirstOrThrow();
+  const change = { ...(now.offer_orders !== priced ? { offeredAt: { orders: priced } } : {}), ...(o.textMax !== undefined && o.textMax !== now.text_max ? { textMax: o.textMax } : {}) };
+  if (Object.keys(change).length > 0) await addons.update(id, change, f.admin);
+  return id;
+}
+
+/**
+ * A LIVE sale of before lot Q2 (N15): each order of the account's entry in the release given its release add-ons as that
+ * PAY wrote them (every piece's order; a set's, each set's first piece's), the snapshot a test of an order's history reads.
+ */
+export async function legacyLiveAddons(db: Db, dropId: string, accountId: string, addons: readonly { label: string; priceMinor: number }[]): Promise<void> {
+  const rows = await db
+    .selectFrom('orders as o')
+    .innerJoin('live_entries as e', 'e.id', 'o.live_entry_id')
+    .select(['o.id', 'o.set_piece'])
+    .where('e.drop_id', '=', dropId)
+    .where('e.account_id', '=', accountId)
+    .execute();
+  // One release add-on, one id on every order (its release add-on's id then).
+  const sold = addons.map((a) => ({ id: randomUUID(), ...a }));
+  for (const o of rows) if (o.set_piece === null || o.set_piece === 1) await legacyAddons(db, o.id, sold);
+}
+
+/**
+ * An order of before lot Q2 given its release add-ons as that PAY wrote them (N15: `orders.addons`, history as sold):
+ * the snapshot of an order the story closes before its NOW (a past release), each with an id of its own.
+ */
+export async function legacyAddons(db: Db, orderId: string, addons: readonly { id?: string; label: string; priceMinor: number }[]): Promise<void> {
+  await db
+    .updateTable('orders')
+    .set({ addons: jsonText(addons.map((a) => ({ id: a.id ?? randomUUID(), label: a.label, priceMinor: a.priceMinor }))) })
+    .where('id', '=', orderId)
+    .execute();
 }
 
 /** Every entry of a release, by place then arrival. */
@@ -319,6 +438,8 @@ export interface SetLiveOptions {
   turnSeconds?: number;
   payMinutes?: number;
   title?: string;
+  /** Lot Q2, step Q2.4: its pick of catalogue add-ons, in order; none by default (never the console's default, N7). */
+  addonIds?: string[];
   /** Published now unless false (the console's PUBLISH: the clock must be before its room). */
   published?: boolean;
 }
@@ -344,6 +465,7 @@ export async function createSetLiveRelease(f: LiveFixture, o: SetLiveOptions): P
       ...(o.perAccount !== undefined ? { perAccount: o.perAccount } : {}),
       pace: o.pace ?? LIVE_TEST_PACE,
       holdMinutes: o.holdMinutes ?? 0,
+      addonIds: o.addonIds ?? [],
       ...(o.turnSeconds !== undefined ? { turnSeconds: o.turnSeconds } : {}),
       ...(o.payMinutes !== undefined ? { payMinutes: o.payMinutes } : {}),
     },

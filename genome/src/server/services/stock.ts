@@ -51,6 +51,7 @@ import type { AuditService } from './audit.js';
 import { writeJournal } from './journal.js';
 import { serveWaiting } from './orders.js';
 import { offeredSku } from './sizes.js';
+import { assertNotServiceSku } from './sku-owner.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -652,6 +653,7 @@ export class StockService {
     if (from === to) throw validationError('A transfer goes to another location.');
     // It serves the orders waiting at the destination: retried on a deadlock (plan NEXT LOT §3.5.6.7).
     return inRetriedTransaction(this.db, async (tx) => {
+      await assertNotServiceSku(tx, skuId);
       await lockSku(tx, skuId);
       const now = this.clock();
       const level = await stockLevel(tx, skuId, from);
@@ -679,6 +681,7 @@ export class StockService {
     const locationId = await knownLocation(this.db, input.locationId);
     // Up, it serves the orders waiting there: retried on a deadlock (plan NEXT LOT §3.5.6.7).
     return inRetriedTransaction(this.db, async (tx) => {
+      await assertNotServiceSku(tx, skuId);
       await lockSku(tx, skuId);
       const now = this.clock();
       const level = await stockLevel(tx, skuId, locationId);

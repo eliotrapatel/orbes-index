@@ -12,17 +12,23 @@
  *                   changes the pace until the end, SHORTEN THE HOLD and END THE HOLD NOW the hold once announced), the
  *                   turn and pay windows, the pieces per person, the
  *                   price and its currency; the sizes and their stock, the quantity line (« 25 PIECES » by default, at
- *                   most 40 characters); the add-ons (at most 6); the staged reveals (announcement, silhouette, name,
+ *                   most 40 characters); the catalogue add-ons it offers at its purchase (the release add-ons gone, lot Q2 step Q2.4, D2)
+ *                   (`addonIds`, lot Q2 step Q2.3, D3: its pick, in its order, each active, its LIVE switch on and priced
+ *                   in its currency, 409 ADDON_NOT_OFFERED naming it otherwise; at its creation, unless given, every such
+ *                   add-on, N7; written to `drop_addons`); the staged reveals (announcement, silhouette, name,
  *                   photograph); the per-tier turn and pay windows. Everything changes until the announcement (a DRAFT,
  *                   or published and announced later); after it, 409 LIVE_ANNOUNCED: only the stock rises, with ADD
- *                   PIECES (live.ts addPieces). The silhouette's image is MediaService's (setLiveSilhouette).
+ *                   PIECES (live.ts addPieces), and its add-ons offered (and its after-room's) change until it ends
+ *                   (setAddonPick, PUT /api/admin/live/:id/addons; review of lot Q2: never locked at the announcement).
+ *                   The silhouette's image is MediaService's (setLiveSilhouette).
  *   publish         with, optionally, a post of the owners' circle linking the release (the plan's choice 9): a NOTE for
  *                   the release's tier (TITANE at least), shown from the announcement, kept in step with the release's
  *                   times while it is not shown yet, withdrawn if the release is cancelled before it shows; added or
  *                   withdrawn after the publication until the announcement, as every setting (setCirclePost).
  *   after-room      optional (plan LIVE RELEASE+, choice 2; services/after-room.ts): a second door the release's sell-out
  *                   opens for those still in its line, set with the release's settings (`afterRoom`: its model, price,
- *                   sizes and stock, add-ons, delay and length; null: none) and kept until the announcement as they are.
+ *                   sizes and stock, its own pick of catalogue add-ons, `addonIds`, as the release's, delay and
+ *                   length; null: none) and kept until the announcement as they are.
  *                   It is a child LIVE RELEASE written here, a DRAFT until the sell-out: its title the release's
  *                   « · THE AFTER-ROOM », its turn and pay windows, pieces per person and currency the release's (written
  *                   again with every save), its sizes linked to their SKUs; turned off, removed (nothing points to it before
@@ -84,7 +90,6 @@ import {
   liveStages,
   onSaleOf,
   roomOpensAt,
-  LIVE_ADDONS_MAX,
   LIVE_HOLD_MINUTES,
   LIVE_MIN_PARTICIPATIONS,
   LIVE_OPEN_STATUSES,
@@ -111,6 +116,7 @@ import { knownLocation, linkDropSizes } from './stock.js';
 import { cleanQuestionWords, QuestionService, type AdminQuestion } from './question.js';
 import { releaseFeasibility, type Feasibility, type FeasibilitySize } from './release-stock.js';
 import { afterRoomModelId, setPieces, setPiecesOf, type ReleasePiece } from './release-offer.js';
+import { checkPick, cleanPickIds, defaultPick, picksOf, writePick, type PickedAddon } from './addons.js';
 import { cancelMovedAnnouncements, cancelReleaseEmails } from './email.js';
 import { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES, afterRoomTimes, afterRoomTitle, cancelAfterRoom, type AfterRoomSkip } from './after-room.js';
 
@@ -126,7 +132,6 @@ export const LIVE_SIZES = Object.freeze({ min: 1, max: 24, label: 12 });
 /** The quantity as the announcement says it: 1 to 40 characters; « <the sum of the stock> PIECES » by default. */
 export const LIVE_QUANTITY_LINE_MAX = 40;
 /** An add-on: a label of 40 characters, a line of 120. */
-export const LIVE_ADDON_LIMITS = Object.freeze({ label: 40, line: 120 });
 /** The models a release's rule may name. */
 export const LIVE_ACCESS_MODELS_MAX = 20;
 /** The open entries the live board carries, by place (the rest: the entries' list, page by page). */
@@ -187,6 +192,9 @@ const modelInactive = () => conflict('MODEL_INACTIVE', 'This model is no longer 
 const entryNotFound = () => notFound('Entry', 'LIVE_ENTRY_NOT_FOUND');
 const afterRoomModelInactive = () => conflict('MODEL_INACTIVE', 'The after-room’s model is no longer offered for new products: choose another in its settings.');
 const afterRoomOwn = () => conflict('LIVE_AFTER_ROOM', 'This is the after-room of a release: it is set, published and cancelled with that release.');
+/** Add-ons offered change until the release (or its after-room) ends (review of lot Q2: no lock at the announcement). */
+const addonsEnded = (afterRoom: boolean) => conflict('LIVE_ENDED', afterRoom ? 'This after-room has ended: its add-ons offered no longer change.' : 'This release has ended: its add-ons offered no longer change.');
+const noAfterRoom = () => validationError('This release has no after-room.');
 
 function assertStaff(actor: Actor, what: string): string {
   if (actor?.type !== 'admin' || typeof actor.id !== 'string' || !UUID_RE.test(actor.id)) throw forbidden(`Only an ORBES admin can ${what}.`);
@@ -207,13 +215,6 @@ export interface LiveSizeInput {
   stock: number;
   /** Macro scope K44 T1: on a set's release, the piece (1 to 4, the set's order) the size is of; never on a model's. */
   piece?: number | null;
-}
-
-export interface LiveAddonInput {
-  id?: string | null;
-  label: string;
-  line?: string | null;
-  priceMinor: number;
 }
 
 export interface LiveTierWindowInput {
@@ -267,7 +268,11 @@ export interface LiveSettingsInput {
   sizes: LiveSizeInput[];
   /** null or omitted at creation: « <the pieces> PIECES ». */
   quantityLine?: string | null;
-  addons?: LiveAddonInput[];
+  /**
+   * Lot Q2, step Q2.3 (D3): the catalogue add-ons it offers at its purchase, in order (a list given replaces its pick);
+   * omitted at its creation: every active add-on with its LIVE switch on and priced in its currency (N7).
+   */
+  addonIds?: string[];
   /** null: at the publication. */
   announceAt?: Date | null;
   /** null: at the announcement. */
@@ -290,7 +295,8 @@ export interface AfterRoomInput {
   modelId: string;
   priceMinor: number;
   sizes: LiveSizeInput[];
-  addons?: LiveAddonInput[];
+  /** Its own pick of catalogue add-ons (Q2.3), as the release's: omitted when it is created, every such add-on (N7). */
+  addonIds?: string[];
   /** After the sell-out: 1 to 60 minutes, 10 by default. */
   delayMinutes?: number;
   /** Open: 5 to 120 minutes, 15 by default. */
@@ -328,7 +334,8 @@ interface Settings {
   /** Each its piece on a set's release (macro scope K44 T1), null on a model's. */
   sizes: { id: string | null; label: string; stock: number; piece: number | null }[];
   quantityLine: string;
-  addons: { id: string | null; label: string; line: string | null; priceMinor: number }[];
+  /** Its pick of catalogue add-ons (Q2.3), each with its name once checked; null: the default of a new one (N7), until read. */
+  addonPick: PickRow[] | null;
   announceAt: Date | null;
   silhouetteAt: Date | null;
   nameAt: Date | null;
@@ -346,10 +353,16 @@ export interface AfterRoomSettings {
   modelId: string;
   priceMinor: number;
   sizes: { id: string | null; label: string; stock: number; piece: number | null }[];
-  addons: { id: string | null; label: string; line: string | null; priceMinor: number }[];
+  /** Its own pick (Q2.3), as the release's. */
+  addonPick: PickRow[] | null;
   delayMinutes: number;
   lengthMinutes: number;
 }
+
+/** A catalogue add-on a release picks: its id, and its name (the audit log's), '' until checked. */
+type PickRow = { id: string; name: string };
+/** A pick as staff send it, its names read when it is checked. */
+const pickOf = (v: unknown): PickRow[] => cleanPickIds(v).map((id) => ({ id, name: '' }));
 
 /** What a LIVE RELEASE without its pace and hold is refused with (D1: both required at creation). */
 const PACE_REQUIRED = 'A LIVE release needs a pace: people per batch, every how many minutes, and a hold after the opening (0 for none).';
@@ -440,18 +453,6 @@ function cleanSizeList(v: unknown, piece: number | null): Settings['sizes'] {
   return out;
 }
 
-function cleanAddons(v: unknown): Settings['addons'] {
-  if (!Array.isArray(v) || v.length > LIVE_ADDONS_MAX) throw validationError(`A release offers at most ${LIVE_ADDONS_MAX} add-ons.`);
-  const ids = new Set<string>();
-  return v.map((a: LiveAddonInput) => {
-    const id = a?.id === undefined || a?.id === null ? null : knownId(a.id, () => validationError('An add-on to keep is one of the release’s.'));
-    if (id && ids.has(id)) throw validationError('An add-on is listed twice.');
-    if (id) ids.add(id);
-    const line = a?.line === undefined || a?.line === null || (typeof a.line === 'string' && a.line.trim() === '') ? null : oneLine(a.line, LIVE_ADDON_LIMITS.line, 'An add-on’s line');
-    return { id, label: oneLine(a?.label, LIVE_ADDON_LIMITS.label, 'An add-on'), line, priceMinor: price(a?.priceMinor, 'An add-on’s price') };
-  });
-}
-
 function cleanModels(v: unknown): string[] {
   if (!Array.isArray(v) || v.length > LIVE_ACCESS_MODELS_MAX) throw validationError(`A release names at most ${LIVE_ACCESS_MODELS_MAX} models.`);
   const out = v.map((m) => knownId(m, () => notFound('Model', 'MODEL_NOT_FOUND')));
@@ -520,7 +521,7 @@ export function cleanAfterRoom(v: unknown, base: AfterRoomSettings | null): Afte
     modelId: knownId(a.modelId, () => notFound('Model', 'MODEL_NOT_FOUND')),
     priceMinor: price(a.priceMinor, 'The after-room’s price'),
     sizes: cleanSizes(a.sizes, false),
-    addons: a.addons === undefined ? (base?.addons ?? []) : cleanAddons(a.addons),
+    addonPick: a.addonIds === undefined ? (base?.addonPick ?? null) : pickOf(a.addonIds),
     delayMinutes: wholeIn(
       a.delayMinutes ?? base?.delayMinutes ?? AFTER_ROOM_DELAY_MINUTES.default,
       AFTER_ROOM_DELAY_MINUTES.min,
@@ -616,7 +617,7 @@ function settingsOf(base: Settings | null, change: LiveSettingsChange): Settings
     ...cleanSurprise(change, base),
     sizes,
     quantityLine,
-    addons: change.addons !== undefined ? cleanAddons(change.addons) : (base?.addons ?? []),
+    addonPick: change.addonIds !== undefined ? pickOf(change.addonIds) : (base?.addonPick ?? null),
     announceAt: change.announceAt !== undefined ? optionalTime(change.announceAt, 'The announcement') : (base?.announceAt ?? null),
     silhouetteAt: change.silhouetteAt !== undefined ? optionalTime(change.silhouetteAt, 'The silhouette') : (base?.silhouetteAt ?? null),
     nameAt: change.nameAt !== undefined ? optionalTime(change.nameAt, 'The name') : (base?.nameAt ?? null),
@@ -690,7 +691,8 @@ function auditSettings(s: Settings): Record<string, unknown> {
     // A set's size names its piece first (« 2:52:10 »).
     sizes: s.sizes.map((x) => (x.piece !== null ? `${x.piece}:${x.label}:${x.stock}` : `${x.label}:${x.stock}`)),
     quantityLine: s.quantityLine,
-    addons: s.addons.map((a) => ({ label: a.label, line: a.line, priceMinor: a.priceMinor })),
+    // Q2.3: the catalogue add-ons picked, by id and name.
+    addonIds: (s.addonPick ?? []).map((a) => ({ id: a.id, name: a.name })),
     announceAt: t(s.announceAt),
     silhouetteAt: t(s.silhouetteAt),
     nameAt: t(s.nameAt),
@@ -701,7 +703,7 @@ function auditSettings(s: Settings): Record<string, unknown> {
           modelId: s.afterRoom.modelId,
           priceMinor: s.afterRoom.priceMinor,
           sizes: s.afterRoom.sizes.map((x) => `${x.label}:${x.stock}`),
-          addons: s.afterRoom.addons.map((a) => ({ label: a.label, line: a.line, priceMinor: a.priceMinor })),
+          addonIds: (s.afterRoom.addonPick ?? []).map((a) => ({ id: a.id, name: a.name })),
           delayMinutes: s.afterRoom.delayMinutes,
           lengthMinutes: s.afterRoom.lengthMinutes,
         }
@@ -803,7 +805,8 @@ export interface AdminLiveRelease extends AdminLiveCard {
   question: AdminQuestion | null;
   /** Its sizes in order; on a set's release, each with its piece (1 to 4). */
   sizes: { id: string; label: string; stock: number; piece?: number }[];
-  addons: { id: string; label: string; line: string | null; priceMinor: number }[];
+  /** Lot Q2, step Q2.3 (D3): the catalogue add-ons it offers at its purchase, in its order, priced in its currency now. */
+  addonPick: PickedAddon[];
   tierWindows: { tier: number; turnSeconds: number | null; payMinutes: number | null }[];
   /** As set (null: at the publication; a NULL stage: at the announcement). */
   announceAt: Date | null;
@@ -848,7 +851,8 @@ export interface AdminAfterRoom {
   currency: string;
   sizes: { id: string; label: string; stock: number }[];
   quantity: number;
-  addons: { id: string; label: string; line: string | null; priceMinor: number }[];
+  /** Its own pick of catalogue add-ons (Q2.3), in its order, priced in its currency now. */
+  addonPick: PickedAddon[];
   delayMinutes: number;
   lengthMinutes: number;
   state: AfterRoomState;
@@ -1221,6 +1225,7 @@ export class LiveConsoleService {
     return inTransaction(this.db, async (tx) => {
       const now = this.clock();
       checkTimes(s, now, null);
+      await this.resolvePicks(tx, s, null);
       await this.checkOffer(tx, s);
       await this.checkAccess(tx, s);
       if (s.afterRoom) await this.checkModel(tx, s.afterRoom.modelId);
@@ -1248,8 +1253,10 @@ export class LiveConsoleService {
   }
 
   /**
-   * Change a LIVE RELEASE until its announcement (409 LIVE_ANNOUNCED after, DROP_CANCELLED once cancelled): any setting;
-   * a list given (sizes, add-ons, models, per-tier windows) replaces the release's. The same checks as a creation. A
+   * Change a LIVE RELEASE until its announcement (409 LIVE_ANNOUNCED after, DROP_CANCELLED once cancelled; its add-ons
+   * offered change until it ends with setAddonPick): any setting;
+   * a list given (sizes, add-ons, the catalogue add-ons picked, models, per-tier windows) replaces the release's. The same
+   * checks as a creation. A
    * post of the circle the publication scheduled follows the new times and rule; a new opening cancels the founding
    * announcements queued for the old one (cancelMovedAnnouncements). Audited `drop.live.update` with each setting before
    * and after (and `emailsCancelled`); nothing changed, nothing written.
@@ -1266,16 +1273,16 @@ export class LiveConsoleService {
       const before = await this.settings(tx, d);
       const after = settingsOf(before, change ?? {});
       checkTimes(after, now, d.published_at);
+      await this.resolvePicks(tx, after, before);
       const a = auditSettings(before);
       const b = auditSettings(after);
-      // A list written again with other ids (sizes, add-ons sent as new) changes, even saying the same.
+      // A list written again with other ids (sizes sent as new) changes, even saying the same.
       const ids = (xs: readonly { id: string | null }[]) => JSON.stringify(xs.map((x) => x.id));
-      const listIds = (x: Settings['afterRoom']) => (x ? `${ids(x.sizes)}${ids(x.addons)}` : '');
+      const listIds = (x: Settings['afterRoom']) => (x ? ids(x.sizes) : '');
       const changed = Object.keys(b).filter(
         (k) =>
           JSON.stringify(a[k]) !== JSON.stringify(b[k]) ||
           (k === 'sizes' && ids(before.sizes) !== ids(after.sizes)) ||
-          (k === 'addons' && ids(before.addons) !== ids(after.addons)) ||
           (k === 'afterRoom' && listIds(before.afterRoom) !== listIds(after.afterRoom)),
       );
       if (changed.length === 0) return this.release(tx, id);
@@ -1310,6 +1317,50 @@ export class LiveConsoleService {
       ];
       if (d.published_at) await this.syncCirclePosts(tx, { ...d, ...this.columns(after) } as DropRow, now, actor, notes);
       for (const n of notes) await this.audit.record(n, tx);
+      return this.release(tx, id);
+    });
+  }
+
+  /**
+   * ADD-ONS OFFERED (lot Q2, D3; review of lot Q2): the catalogue add-ons a release (`afterRoom`: its after-room) offers
+   * at its purchase, in order, replaced, at any moment until it ends: never locked at the announcement (ANSWERS CURRENT
+   * STATE D, "each release picks which add-ons it offers"). Refused once cancelled (DROP_CANCELLED) or ended (409
+   * LIVE_ENDED: the release's `ended_at`, the after-room's own); each add-on checked as at the creation (addons.ts
+   * checkPick: 409 ADDON_NOT_OFFERED naming it). A hold already SECURED keeps its choices; the next reading of an offer
+   * follows the new pick (order-addons.ts addonOffer). Audited `drop.live.update` with `addonIds` before and after
+   * (`afterRoom: true` for the after-room's); nothing changed, nothing written. The release's row, then its after-room's,
+   * FOR UPDATE, as every save.
+   */
+  async setAddonPick(dropId: string, input: { addonIds: unknown; afterRoom?: boolean }, actor: Actor): Promise<AdminLiveRelease> {
+    assertStaff(actor, 'change a release');
+    const id = knownId(dropId, dropNotFound);
+    const ids = cleanPickIds(input?.addonIds);
+    const afterRoom = input?.afterRoom === true;
+    return inTransaction(this.db, async (tx) => {
+      const d = await this.lock(tx, id);
+      if (d.parent_drop_id) throw afterRoomOwn();
+      if (d.cancelled_at) throw liveCancelled();
+      let target = d;
+      if (afterRoom) {
+        const child = await tx.selectFrom('drops').selectAll().where('parent_drop_id', '=', id).forUpdate().executeTakeFirst();
+        if (!child) throw noAfterRoom();
+        target = child;
+      }
+      if (target.ended_at) throw addonsEnded(afterRoom);
+      const was = (await this.pickRead(tx, target.id)).map((a) => ({ id: a.id, name: a.name }));
+      const next = await checkPick(tx, 'LIVE', ids, d.currency);
+      if (JSON.stringify(was.map((a) => a.id)) === JSON.stringify(next.map((a) => a.id))) return this.release(tx, id);
+      await writePick(tx, target.id, next.map((a) => a.id));
+      await this.audit.record(
+        {
+          actor,
+          action: 'drop.live.update',
+          targetType: 'drop',
+          targetId: id,
+          details: { ...(afterRoom ? { afterRoom: true } : {}), before: { addonIds: was }, after: { addonIds: next } },
+        },
+        tx,
+      );
       return this.release(tx, id);
     });
   }
@@ -1618,8 +1669,8 @@ export class LiveConsoleService {
   private async writeOffer(
     tx: Db,
     id: string,
-    s: Pick<Settings, 'modelId' | 'sizes' | 'addons'> & { setId?: string | null },
-    before: (Pick<Settings, 'modelId' | 'sizes' | 'addons'> & { setId?: string | null }) | null,
+    s: { modelId: string | null; sizes: Settings['sizes']; addonPick: Settings['addonPick']; setId?: string | null },
+    before: { modelId: string | null; sizes: Settings['sizes']; addonPick: Settings['addonPick']; setId?: string | null } | null,
   ): Promise<void> {
     const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
     if (!before || !same(before.sizes, s.sizes)) {
@@ -1633,29 +1684,39 @@ export class LiveConsoleService {
     }
     // Each size its model's SKU in that size; a set's, its piece's model's (stock.ts linkDropSizes reads the release's set).
     if (!before || !same(before.sizes, s.sizes) || before.modelId !== s.modelId || (before.setId ?? null) !== (s.setId ?? null)) await linkDropSizes(tx, id, s.modelId);
-    if (!before || !same(before.addons, s.addons)) {
-      const known = new Set((before?.addons ?? []).map((x) => x.id));
-      for (const x of s.addons) if (x.id && !known.has(x.id)) throw validationError('An add-on to keep is one of the release’s.');
-      await tx.deleteFrom('live_addons').where('drop_id', '=', id).execute();
-      if (s.addons.length) {
-        await tx
-          .insertInto('live_addons')
-          .values(s.addons.map((x, i) => ({ ...(x.id ? { id: x.id } : {}), drop_id: id, label: x.label, line: x.line, price_minor: x.priceMinor, position: i + 1 })))
-          .execute();
-      }
-    }
+    // Q2.3 (D3): the catalogue add-ons it offers at its purchase, in its order.
+    const picked = (s.addonPick ?? []).map((a) => a.id);
+    if (!before || !same((before.addonPick ?? []).map((a) => a.id), picked)) await writePick(tx, id, picked);
   }
 
-  /** A release's (or an after-room's) sizes and add-ons as stored. */
-  private async offer(db: Db, id: string): Promise<Pick<Settings, 'sizes' | 'addons'>> {
-    const [sizes, addons] = await Promise.all([
+  /** A release's (or an after-room's) sizes and pick of catalogue add-ons as stored. */
+  private async offer(db: Db, id: string): Promise<{ sizes: Settings['sizes']; addonPick: PickRow[] }> {
+    const [sizes, addonPick] = await Promise.all([
       db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', id).orderBy('position').execute(),
-      db.selectFrom('live_addons').select(['id', 'label', 'line', 'price_minor']).where('drop_id', '=', id).orderBy('position').execute(),
+      this.pickRead(db, id),
     ]);
     return {
       sizes: sizes.map((x) => ({ id: x.id, label: x.label, stock: x.stock, piece: null })),
-      addons: addons.map((a) => ({ id: a.id, label: a.label, line: a.line, priceMinor: a.price_minor })),
+      addonPick,
     };
+  }
+
+  /** A release's pick of catalogue add-ons as stored (Q2.3), in its order, by id and name. */
+  private async pickRead(db: Db, id: string): Promise<PickRow[]> {
+    return db.selectFrom('drop_addons as x').innerJoin('addon_items as a', 'a.id', 'x.addon_id').select(['a.id', 'a.name']).where('x.drop_id', '=', id).orderBy('x.position').execute();
+  }
+
+  /**
+   * The picks of a release and of its after-room made whole before they are compared and written (Q2.3, D3): a pick not
+   * given at the creation (the release's, or a new after-room's) is every active add-on with its LIVE switch on and
+   * priced in the release's currency (N7); a pick given is checked (addons.ts checkPick: 409 ADDON_NOT_OFFERED naming
+   * it); a pick kept stays as it is (the hold offers only what is still offerable: order-addons.ts addonOffer).
+   */
+  private async resolvePicks(tx: Db, s: Settings, before: Settings | null): Promise<void> {
+    const resolve = async (pick: PickRow[] | null, was: PickRow[] | null): Promise<PickRow[]> =>
+      pick === null ? defaultPick(tx, 'LIVE', s.currency) : pick === was ? pick : checkPick(tx, 'LIVE', pick.map((a) => a.id), s.currency);
+    s.addonPick = await resolve(s.addonPick, before?.addonPick ?? null);
+    if (s.afterRoom) s.afterRoom = { ...s.afterRoom, addonPick: await resolve(s.afterRoom.addonPick, before?.afterRoom?.addonPick ?? null) };
   }
 
   /**
@@ -1677,7 +1738,9 @@ export class LiveConsoleService {
     if (a && (await tx.selectFrom('drops').select('set_id').where('id', '=', parent.id).executeTakeFirst())?.set_id) throw afterRoomSet();
     if (!a) {
       if (child) {
-        await tx.deleteFrom('live_addons').where('drop_id', '=', child.id).execute();
+        // The record of its own add-ons converted by migration 0060 goes with it (the add-ons stay in the catalogue).
+        await tx.deleteFrom('addon_conversions').where('drop_id', '=', child.id).execute();
+        await tx.deleteFrom('drop_addons').where('drop_id', '=', child.id).execute();
         await tx.deleteFrom('drop_sizes').where('drop_id', '=', child.id).execute();
         await tx.deleteFrom('drops').where('id', '=', child.id).execute();
       }
@@ -1754,11 +1817,12 @@ export class LiveConsoleService {
   private async adminAfterRoom(db: Db, parent: DropRow, now: Date): Promise<AdminAfterRoom | null> {
     const c = await this.reads(db).where('d.parent_drop_id', '=', parent.id).executeTakeFirst();
     if (!c) return null;
-    const [offer, counts, guests, holding] = await Promise.all([
+    const [offer, counts, guests, holding, picks] = await Promise.all([
       this.offer(db, c.id),
       this.counts(db, [c.id]),
       db.selectFrom('after_room_guests').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', c.id).executeTakeFirstOrThrow(),
       this.openHolds(db, [c.id]),
+      picksOf(db, [c.id], () => c.currency ?? 'EUR'),
     ]);
     const opened = c.published_at !== null && c.cancelled_at === null;
     const state: AfterRoomState = c.cancelled_at
@@ -1777,7 +1841,7 @@ export class LiveConsoleService {
       currency: c.currency ?? 'EUR',
       sizes: offer.sizes.map((x) => ({ id: x.id!, label: x.label, stock: x.stock })),
       quantity: c.quantity,
-      addons: offer.addons.map((x) => ({ id: x.id!, label: x.label, line: x.line, priceMinor: x.priceMinor })),
+      addonPick: picks.get(c.id) ?? [],
       delayMinutes: c.after_room_delay_minutes ?? AFTER_ROOM_DELAY_MINUTES.default,
       lengthMinutes: c.after_room_length_minutes ?? AFTER_ROOM_LENGTH_MINUTES.default,
       state,
@@ -1793,9 +1857,9 @@ export class LiveConsoleService {
 
   /** A release's settings as stored. */
   private async settings(db: Db, d: DropRow): Promise<Settings> {
-    const [sizes, addons, models, windows] = await Promise.all([
+    const [sizes, addonPick, models, windows] = await Promise.all([
       db.selectFrom('drop_sizes').select(['id', 'label', 'stock', 'piece']).where('drop_id', '=', d.id).orderBy('position').execute(),
-      db.selectFrom('live_addons').select(['id', 'label', 'line', 'price_minor']).where('drop_id', '=', d.id).orderBy('position').execute(),
+      this.pickRead(db, d.id),
       db.selectFrom('live_access_models').select('model_id').where('drop_id', '=', d.id).orderBy('model_id').execute(),
       db.selectFrom('live_tier_windows').select(['tier', 'turn_seconds', 'pay_minutes']).where('drop_id', '=', d.id).orderBy('tier').execute(),
     ]);
@@ -1828,7 +1892,7 @@ export class LiveConsoleService {
       surpriseText: d.surprise_text ?? null,
       sizes: sizes.map((s) => ({ id: s.id, label: s.label, stock: s.stock, piece: s.piece })),
       quantityLine: d.quantity_line ?? defaultQuantityLine(d.quantity, d.set_id !== null),
-      addons: addons.map((a) => ({ id: a.id, label: a.label, line: a.line, priceMinor: a.price_minor })),
+      addonPick,
       announceAt: d.announce_at,
       silhouetteAt: d.silhouette_at,
       nameAt: d.name_at,
@@ -1992,6 +2056,7 @@ export class LiveConsoleService {
       this.locationOf(db, r),
       r.parent_drop_id ? Promise.resolve(null) : this.questions.tally(r, db),
     ]);
+    const picks = await picksOf(db, [id], () => r.currency ?? 'EUR');
     const guaranteed = (await releaseGuaranteed(db, [id])).get(id) ?? { places: 0, pieces: 0 };
     const set = await this.setOf(db, r);
     const stages = liveStages(r, now);
@@ -2023,7 +2088,7 @@ export class LiveConsoleService {
       location,
       question,
       sizes: s.sizes.map((x) => ({ id: x.id!, label: x.label, stock: x.stock, ...(x.piece !== null ? { piece: x.piece } : {}) })),
-      addons: s.addons.map((x) => ({ id: x.id!, label: x.label, line: x.line, priceMinor: x.priceMinor })),
+      addonPick: picks.get(id) ?? [],
       tierWindows: s.tierWindows,
       announceAt: r.announce_at,
       silhouetteAt: r.silhouette_at,

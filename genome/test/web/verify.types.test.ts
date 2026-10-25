@@ -47,7 +47,7 @@ import type {
 import type { LookbookCard as ServerLookbookCard, LookbookSheet as ServerLookbookSheet, ModelPair as ServerModelPair, SalonCard as ServerSalonCard } from '../../src/server/services/lookbook.js';
 import type { SalonSheet as ServerSalonSheet, ShopRequestView as ServerShopRequest } from '../../src/server/services/salon.js';
 import type { AccountOrder as ServerAccountOrder, OrderCareGuide as ServerOrderCareGuide } from '../../src/server/services/orders.js';
-import type { AccountAddonOffer as ServerAccountAddonOffer } from '../../src/server/services/order-addons.js';
+import type { AccountAddonOffer as ServerAccountAddonOffer, AddonOfferItem as ServerAddonOfferItem } from '../../src/server/services/order-addons.js';
 import type { VerifyInput as ServerVerifyInput, VerifyOutcome as ServerVerifyOutcome } from '../../src/server/services/verification.js';
 import type { CollectorProfileView as ServerProfileView, HeardChoice as ServerHeardChoice } from '../../src/server/services/profiles.js';
 import type { WishlistItem as ServerWishlistItem } from '../../src/server/services/wishlist.js';
@@ -64,6 +64,7 @@ import {
   REPORT_CHANNELS,
   VERIFICATION_STATES,
   type AccountAddonOffer,
+  type AddonOfferItem,
   type AccountOrder,
   type DrawEntryRead,
   type AccountProfileView,
@@ -171,6 +172,11 @@ export const liveBannerFits = (b: Json<ServerLiveBanner>): LiveBanner => b;
 export const liveBoardFits = (b: Json<ServerLiveBoard>): LiveBoard => b;
 /** The outcome's product, field for field: the web type names every field the server sends (`lookbook` included). */
 type ProductKeys<T> = T extends { product?: infer P } ? keyof NonNullable<P> : never;
+/**
+ * Lot Q2, step Q2.9 (D3, N9): an add-on offered, field for field, wherever it is offered (a LIVE hold, a draw's PLACE
+ * HELD, the salon, YOUR ORDERS): the app names every field the server sends (the engraving and its most characters).
+ */
+export const addonOfferKeysMatch: [keyof ServerAddonOfferItem] extends [keyof AddonOfferItem] ? ([keyof AddonOfferItem] extends [keyof ServerAddonOfferItem] ? true : false) : false = true;
 export const productKeysMatch: [ProductKeys<ServerVerifyOutcome>] extends [ProductKeys<VerifyOutcome>] ? ([ProductKeys<VerifyOutcome>] extends [ProductKeys<ServerVerifyOutcome>] ? true : false) : false = true;
 
 describe('verify wire types', () => {
@@ -219,5 +225,6 @@ describe('verify wire types', () => {
     for (const fits of [dropCardFits, dropSheetFits, drawEntryFits, drawPageFits, clubEntryFits, clubStatusFits, circleCardFits, circleFeedFits, circlePostFits]) expect(typeof fits).toBe('function');
     for (const fits of [liveCardFits, liveSheetFits, liveEndedFits, liveRoomFits, liveEntryFits, liveAccessFits, liveInterestFits, liveMineFits, accountOrderFits, careGuideFits, addonOfferFits, drawEntryReadFits]) expect(typeof fits).toBe('function');
     expect(productKeysMatch).toBe(true);
+    expect(addonOfferKeysMatch).toBe(true);
   });
 });

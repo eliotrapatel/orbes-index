@@ -29,6 +29,7 @@ import {
   supplierOrderActions,
 } from '../../src/web/admin/model/supplier-orders.js';
 import { can } from '../../src/web/admin/model/permissions.js';
+import { ADDONS_TEXT } from '../../src/web/admin/model/addons.js';
 import { href, parseHash } from '../../src/web/admin/router.js';
 import { ADMIN_ROLES, SUPPLIER_ORDER_STATUSES, type LogisticsSku } from '../../src/web/admin/types.js';
 
@@ -97,6 +98,12 @@ describe('the dialogs', () => {
 
   it('checks a line and sends the draft\'s lines whole, one changed, added or removed', () => {
     expect(lineProblem({ skuId: '', quantity: '1' }, true)).toBe('Choose a size or an add-on.');
+    // Lot Q2 (D4): an add-on with stock is ordered as a size is, named by its add-on, its supplier set in Catalogue → Add-ons;
+    // a service has no stock, so no supplier order lists one (the server refuses its SKU: 409 ADDON_SERVICE).
+    const cloth: LogisticsSku = { id: ID, code: 'ADD-CLOTH', model: null, addon: { id: ID, name: 'POLISHING CLOTH' }, variant: null, sizeLabel: null, setAside: false };
+    expect(noSupplierLine(cloth)).toBe('No supplier set for POLISHING CLOTH: set it in Catalogue → Add-ons.');
+    expect(ADDONS_TEXT.supplierHint).toBe('Its supplier orders go to this supplier. None: it cannot be ordered yet.');
+    expect(ADDONS_TEXT.kindHint).toContain('SERVICE: no stock, no supplier and no warehouse');
     expect(lineProblem({ quantity: '0' }, false)).toMatch(/1 to 10/);
     expect(lineProblem({ quantity: '2', unitPrice: 'x' }, false)).toMatch(/unit price/);
     expect(lineProblem({ quantity: '2', unitPrice: '' }, false)).toBeNull();

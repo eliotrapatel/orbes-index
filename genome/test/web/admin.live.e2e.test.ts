@@ -29,6 +29,10 @@
  *     Pace block, the next batch in Paris time; at T0 the first batch gives X turns in the line's order, the line says
  *     each entry's batch; SET PACE during the release keeps the next batch's time; PAUSE PACE shows PAUSED, RESUME PACE;
  *     NEXT BATCH NOW gives the rest, each control audited.
+ *  9. ADD-ONS ONE SYSTEM (lot Q2, step Q2.7, D3, N7): New live release lists Add-ons offered in its currency, every
+ *     add-on it may offer ticked, one whose LIVE switch is off disabled with why, in another currency the ones without a
+ *     price there; its Add-ons part lists the pick with its prices; Add-ons offered changes it until the release ends,
+ *     the announcement included.
  *  8. ONE QUEUE (lot Q1 §4): New live release with its pace and its hold (the owner's label, its figure in --font);
  *     announced, the board's added figures (turns given, beyond the pieces, the hold's end in Paris time), the close
  *     guard's warning and its controls, SHORTEN THE HOLD (earlier only), END THE HOLD NOW giving the first batch, the
@@ -295,11 +299,10 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await confirmDialog(p);
     await expect.poll(() => p.locator('[data-testid=live-windows]').textContent(), POLL).toBe('PALLADIUM · 10 min to pay');
 
-    // The add-ons, one per line.
-    await p.click('[data-testid=live-edit-addons]');
-    await p.fill('dialog textarea[name=addons]', 'ENGRAVING | 150 | Your initials, by hand\nGIFT BOX | 0');
-    await confirmDialog(p);
-    await expect.poll(() => p.locator('#live-part-addons').textContent(), POLL).toContain('Your initials, by hand');
+    // The add-ons (lot Q2, D2, D3): no release add-on any more; its pick of the catalogue, none here, edited as Add-ons
+    // offered until the announcement (step Q2.7; its own case below).
+    await expect.poll(() => p.locator('#live-part-addons .notice').textContent(), POLL).toBe('None: PAY is the piece alone.');
+    expect(await p.locator('[data-testid=live-edit-addons]').count()).toBe(1);
 
     // The after-room: a second door after a sell-out, its own model, price, stock and delay; none until set.
     await expect.poll(() => p.locator('#live-part-after-room .notice').textContent(), POLL).toBe('None: the release closes at its sell-out.');
@@ -351,9 +354,11 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await confirmDialog(p);
     await expect.poll(() => p.locator('[data-testid=live-state]').textContent(), POLL).toBe('ANNOUNCED');
     await expect.poll(() => p.locator('[data-testid=live-circle]').textContent(), POLL).toMatch(/^Post shown from /);
-    for (const edit of ['live-edit-release', 'live-edit-sizes', 'live-edit-access', 'live-edit-times', 'live-edit-turns', 'live-edit-addons', 'live-edit-after-room', 'live-silhouette-edit', 'live-publish']) {
+    for (const edit of ['live-edit-release', 'live-edit-sizes', 'live-edit-access', 'live-edit-times', 'live-edit-turns', 'live-edit-after-room', 'live-silhouette-edit', 'live-publish']) {
       expect(await p.locator(`[data-testid=${edit}]`).count(), edit).toBe(0);
     }
+    // Review of lot Q2: its add-ons offered still change, until it ends.
+    expect(await p.locator('[data-testid=live-edit-addons]').count()).toBe(1);
     const post = await ctx.db.selectFrom('circle_posts').select(['min_tier', 'drop_id']).where('drop_id', '=', id).executeTakeFirstOrThrow();
     expect(post.min_tier).toBe(2);
     // Its live board is there, before the room: nobody yet.
@@ -382,7 +387,15 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
           { label: '54', stock: 3 },
         ],
         quantityLine: '4 PIECES · NEVER MORE',
-        addons: [{ label: 'ENGRAVING', priceMinor: 15_000 }],
+        // Lot Q2, step Q2.4 (D2): a catalogue service it picks.
+        addonIds: [
+          (
+            await ctx.services.addons.create(
+              { kind: 'SERVICE', name: 'ENGRAVING', skuCode: 'ADD-E2E-ENGRAVING', engraving: true, prices: { EUR: 15_000 }, offeredAt: { live: true, draw: false, salon: false, orders: false } },
+              admin,
+            )
+          ).id,
+        ],
       },
       admin,
     );
@@ -459,8 +472,8 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     // Client Services: a reservation confirmed on /verify becomes its orders, followed on the Orders board, narrowed to
     // the release from its page (plan LIVE RELEASE+: the LIVE plan's list is retired).
     await secure(y, r.id);
-    const engraving = (await ctx.services.liveConsole.get(r.id)).addons[0]!;
-    await ctx.services.live.setAddons(y.id, r.id, [engraving.id], y.actor);
+    const engraving = (await ctx.services.liveConsole.get(r.id)).addonPick[0]!;
+    await ctx.services.live.setAddons(y.id, r.id, [{ addonId: engraving.id }], y.actor);
     await ctx.services.live.confirm(y.id, r.id, y.actor);
     await p.reload();
     await expect.poll(() => p.locator('[data-testid=live-orders]').textContent(), POLL).toBe('1 confirmed reservation: each piece is an order, followed step by step on the Orders board, from payment to delivery.');
@@ -643,7 +656,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
         closesAt: new Date(Date.now() + 5 * HOUR),
         priceMinor: 100_000,
         sizes: [{ label: '52', stock: 1 }],
-        afterRoom: { modelId, priceMinor: 90_000, sizes: [{ label: 'ONE SIZE', stock: 2 }], addons: [{ label: 'GIFT BOX', priceMinor: 5_000 }] },
+        afterRoom: { modelId, priceMinor: 90_000, sizes: [{ label: 'ONE SIZE', stock: 2 }], addonIds: [] },
       },
       admin,
     );
@@ -1083,6 +1096,84 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await p.click('[data-testid=dialog-cancel]');
     const actions = await ctx.db.selectFrom('audit_logs').select('action').where('target_id', '=', id).where('action', 'like', 'drop.live.%').orderBy('id').execute();
     expect(actions.map((a) => a.action)).toEqual(expect.arrayContaining(['drop.live.hold.shorten', 'drop.live.hold.end', 'drop.live.batch']));
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    expect(await csp(p)).toEqual([]);
+    await p.context().close();
+  }, STEP_TIMEOUT);
+
+  it('picks a LIVE RELEASE’s add-ons (lot Q2, step Q2.7, D3, N7): two ticked at its creation, one disabled with why, the pick changed in Add-ons offered', async () => {
+    // The catalogue of this case alone: what earlier cases listed is set aside.
+    for (const a of (await ctx.services.addons.list()).filter((x) => x.active)) await ctx.services.addons.setAside(a.id, admin);
+    const wrapping = await ctx.services.addons.create({ kind: 'SERVICE', name: 'GIFT WRAPPING', skuCode: 'ADD-E2E-WRAP', prices: { EUR: 1_500 }, offeredAt: { live: true, draw: false, salon: false, orders: false } }, admin);
+    const travel = await ctx.services.addons.create({ name: 'THE TRAVEL CASE', skuCode: 'ADD-E2E-CASE', prices: { EUR: 6_000 } }, admin);
+    const box = await ctx.services.addons.create({ kind: 'SERVICE', name: 'GIFT BOX', skuCode: 'ADD-E2E-BOX', prices: { EUR: 1_000, GBP: 900 }, offeredAt: { live: false, draw: true, salon: true, orders: true } }, admin);
+    const p = await open(ADMIN);
+    await go(p, '#/club?tab=drops', 'Club');
+    await p.click('[data-testid=live-new]');
+    await p.selectOption('dialog select[name=modelId]', modelId);
+    await p.fill('dialog input[name=title]', 'THE PICKED RING');
+    const t0 = new Date(Date.now() + 6 * HOUR);
+    const local = (d: Date) => d.toISOString().slice(0, 16);
+    await p.fill('dialog input[name=opensAt]', local(t0));
+    await p.fill('dialog input[name=closesAt]', local(new Date(t0.getTime() + HOUR)));
+    await p.fill('dialog input[name=price]', '1 200');
+    await p.fill('dialog input[name=paceBatch]', '50');
+    await p.fill('dialog input[name=paceMinutes]', '1');
+    await p.fill('dialog textarea[name=sizes]', 'ONE SIZE = 5');
+    // In EUR: the two its LIVE switch offers ticked (N7), GIFT BOX disabled with why; the other currencies' lists hidden.
+    const list = (c: string) => p.locator(`dialog .cfield[data-field="addonIds:${c}"]`);
+    const boxes = (c: string) =>
+      list(c)
+        .locator('input')
+        .evaluateAll((els) => els.map((el) => [(el as HTMLInputElement).value, (el as HTMLInputElement).checked, (el as HTMLInputElement).disabled, el.closest('label')!.textContent]));
+    expect(await list('EUR').locator('.cfield__label').textContent()).toBe('Add-ons offered');
+    expect(await boxes('EUR')).toEqual([
+      [wrapping.id, true, false, 'GIFT WRAPPING · €\u00a015'],
+      [travel.id, true, false, 'THE TRAVEL CASE · €\u00a060'],
+      [box.id, false, true, 'GIFT BOX · Not offered in a LIVE RELEASE'],
+    ]);
+    expect(await list('GBP').isHidden()).toBe(true);
+    // In GBP: the ones without a price there disabled with why.
+    await p.selectOption('dialog select[name=currency]', 'GBP');
+    await expect.poll(() => list('GBP').isVisible(), POLL).toBe(true);
+    expect(await list('EUR').isHidden()).toBe(true);
+    expect((await boxes('GBP')).map(([, checked, disabled, label]) => [checked, disabled, label])).toEqual([
+      [false, true, 'GIFT WRAPPING · No price in GBP'],
+      [false, true, 'THE TRAVEL CASE · No price in GBP'],
+      [false, true, 'GIFT BOX · Not offered in a LIVE RELEASE'],
+    ]);
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'new-addons');
+    await p.selectOption('dialog select[name=currency]', 'EUR');
+    await confirmDialog(p);
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('THE PICKED RING');
+    const id = decodeURIComponent(new URL(p.url()).hash.split('/').pop()!);
+    // Its Add-ons part: the pick, each with its price in its currency and its line.
+    const rows = () => p.locator('#live-part-addons [data-testid=live-addons] .deflist__row').evaluateAll((els) => els.map((el) => [el.querySelector('dt')!.textContent, el.querySelector('dd')!.firstChild!.textContent]));
+    await expect.poll(rows, POLL).toEqual([
+      ['GIFT WRAPPING', '€\u00a015'],
+      ['THE TRAVEL CASE', '€\u00a060'],
+    ]);
+    expect((await ctx.services.liveConsole.get(id)).addonPick.map((a) => a.name)).toEqual(['GIFT WRAPPING', 'THE TRAVEL CASE']);
+
+    // Add-ons offered: the pick first, GIFT BOX still disabled with why; THE TRAVEL CASE unticked, saved.
+    await p.click('[data-testid=live-edit-addons]');
+    const edit = () =>
+      p
+        .locator('dialog .cfield[data-field=addonIds] input')
+        .evaluateAll((els) => els.map((el) => [(el as HTMLInputElement).checked, (el as HTMLInputElement).disabled, el.closest('label')!.textContent]));
+    await expect.poll(edit, POLL).toEqual([
+      [true, false, 'GIFT WRAPPING · €\u00a015'],
+      [true, false, 'THE TRAVEL CASE · €\u00a060'],
+      [false, true, 'GIFT BOX · Not offered in a LIVE RELEASE'],
+    ]);
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('Nothing has changed.');
+    await p.locator('dialog label.ccheck', { hasText: 'THE TRAVEL CASE' }).click();
+    await confirmDialog(p);
+    await expect.poll(rows, POLL).toEqual([['GIFT WRAPPING', '€\u00a015']]);
+    expect((await ctx.services.liveConsole.get(id)).addonPick.map((a) => a.id)).toEqual([wrapping.id]);
+    await shot(p, 'addons-picked');
     expect(await figuresInDisplayFace(p)).toEqual([]);
     expect(await csp(p)).toEqual([]);
     await p.context().close();

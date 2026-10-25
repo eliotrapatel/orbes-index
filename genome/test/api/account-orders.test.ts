@@ -15,7 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { orderReference, type OrderTransitionInput } from '../../src/server/services/orders.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { jpegPhoto } from '../support/images.js';
-import { createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { createLiveRelease, holdPieces, legacyLiveAddons, liveFixtureOn, ordersEngravingPrices, type LiveFixture } from '../support/live.js';
 import { accountClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
 import { countPiecesIn, packAndShip, stockPieces } from '../support/fulfil.js';
 import { ensureSku } from '../../src/server/services/stock.js';
@@ -66,7 +66,7 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
 
     // A LIVE RELEASE: two pieces in size 52, with the engraving, PAY.
     const opensAt = new Date(h.clock.now().getTime() + HOUR);
-    const r = await createLiveRelease(f, { opensAt, sizes: [{ label: '52', stock: 5 }], perAccount: 2, priceMinor: 480_000, addons: [{ label: 'Engraving', priceMinor: 25_000 }] });
+    const r = await createLiveRelease(f, { opensAt, sizes: [{ label: '52', stock: 5 }], perAccount: 2, priceMinor: 480_000 });
     await h.ctx.db.updateTable('drops').set({ title: 'MONOLITHE — LIVE' }).where('id', '=', r.id).execute();
     const actor = { type: 'account' as const, id: mineId };
     h.clock.set(new Date(opensAt.getTime() - MINUTE));
@@ -77,8 +77,9 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
     await f.live.press(mineId, r.id, token);
     h.clock.advance(1500);
     await f.live.secure(mineId, r.id, token, actor);
-    await f.live.setAddons(mineId, r.id, r.addons.map((x) => x.id), actor);
     await f.live.confirm(mineId, r.id, actor);
+    // A sale of before lot Q2 (N15): its release's engraving as that PAY wrote it on each piece's order.
+    await legacyLiveAddons(h.ctx.db, r.id, mineId, [{ label: 'Engraving', priceMinor: 25_000 }]);
     const live = await h.ctx.db.selectFrom('orders').select('id').where('account_id', '=', mineId).where('channel', '=', 'LIVE').orderBy('piece').execute();
     [ids.live1, ids.live2] = live.map((o) => o.id) as [string, string];
 
@@ -337,6 +338,32 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
     expect(JSON.stringify(products)).not.toContain(orderReference(ids.cancelled));
     expect(JSON.stringify(products)).not.toContain(orderReference(ids.delivered));
   });
+
+  it('YOUR ORDERS follows its switch alone (lot Q2, step Q2.3, N8): the order of an ended LIVE RELEASE that picked no catalogue add-on is offered, before packing, every add-on its YOUR ORDERS switch offers, one created after the release locked included; the engraving and one off for YOUR ORDERS left out', async () => {
+    const op = { type: 'admin' as const, id: f.admin.id };
+    const release = (await h.ctx.db.selectFrom('orders as o').innerJoin('live_entries as e', 'e.id', 'o.live_entry_id').select('e.drop_id').where('o.id', '=', ids.live1).executeTakeFirstOrThrow()).drop_id;
+    await h.ctx.db.updateTable('drops').set({ ended_at: h.clock.now(), ended_reason: 'ENDED' }).where('id', '=', release).where('ended_at', 'is', null).execute();
+    expect(await h.ctx.db.selectFrom('drop_addons').select('addon_id').where('drop_id', '=', release).execute()).toEqual([]);
+    const service = (name: string, skuCode: string, o: Record<string, unknown> = {}) => h.ctx.services.addons.create({ kind: 'SERVICE', name, skuCode, prices: { EUR: 500 }, ...o }, op);
+    const card = await service('A CARD IN YOUR WORDS', 'ADD-Q23-CARD');
+    const liveOnly = await service('A BOX FOR LIVE ONLY', 'ADD-Q23-LIVEBOX', { offeredAt: { orders: false } });
+    const engraving = await service('ENGRAVING', 'ADD-Q23-ENGR', { engraving: true });
+    try {
+      const url = `/api/v1/account/orders/${ids.live1}/addons`;
+      const offer = safeJson(await mine.get(url)) as Json;
+      expect(offer).toMatchObject({ canAdd: true, reason: null, currency: 'EUR' });
+      expect(offer.offer).toEqual([{ addonId: card.id, name: 'A CARD IN YOUR WORDS', line: null, priceMinor: 500, currency: 'EUR', maxUnits: 3, engraving: false }]);
+      const added = await mine.request('POST', url, { body: { addonId: card.id, units: 1 } });
+      expect(added.statusCode, added.body).toBe(200);
+      expect((safeJson(added) as Json).order.addonItems).toEqual([{ addonId: card.id, name: 'A CARD IN YOUR WORDS', units: 1, priceMinor: 500, currency: 'EUR', canRemove: true }]);
+      const off = await mine.request('POST', url, { body: { addonId: liveOnly.id, units: 1 } });
+      expect([off.statusCode, errorOf(off)]).toEqual([409, { code: 'ADDON_NOT_OFFERED', message: 'A BOX FOR LIVE ONLY is not offered in YOUR ORDERS.' }]);
+      expect(errorOf(await mine.request('POST', url, { body: { addonId: engraving.id, units: 1 } })).code).toBe('ADDON_NOT_OFFERED');
+      expect((await mine.request('DELETE', `${url}/${card.id}`)).statusCode).toBe(200);
+    } finally {
+      for (const a of [card, liveOnly, engraving]) await h.ctx.services.addons.setAside(a.id, op);
+    }
+  });
 });
 
 /**
@@ -523,7 +550,8 @@ describe('YOUR ADDRESSES and an order\'s delivery address over HTTP (plan NEXT L
 
   it('sets and removes an order\'s engraving (plan NEXT LOT §3.6.C; API §10.22): the CSRF token, rate group auth, the server\'s words, the order back; its other documents by their number', async () => {
     const op = { type: 'admin' as const, id: f.admin.id };
-    await h.ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: 3_000, GBP: null, USD: null, CHF: null } }, op);
+    // Lot Q2, step Q2.5: the engraving is the ENGRAVING add-on, priced in euros, its YOUR ORDERS switch on.
+    await ordersEngravingPrices(f, { EUR: 3_000 });
     await h.ctx.services.orders.setTerms(orderId, { sizeLabel: '58', priceMinor: 420_000, currency: 'EUR' }, op);
     const url = `/api/v1/account/orders/${orderId}/engraving`;
     expect((await h.client().request('PUT', url, { body: { text: 'J.M.' } })).statusCode).toBe(401);
@@ -554,7 +582,7 @@ describe('YOUR ADDRESSES and an order\'s delivery address over HTTP (plan NEXT L
     expect(doc.headers['cache-control']).toBe('no-store');
     expect((await other.get(`/api/v1/account/orders/${orderId}/documents/${order.documents.others[0].number}`)).statusCode).toBe(404);
     expect((await mine.get(`/api/v1/account/orders/${orderId}/documents/INV-2026-999999`)).statusCode).toBe(404);
-    await h.ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: null, GBP: null, USD: null, CHF: null } }, op);
+    await ordersEngravingPrices(f, { EUR: null });
   });
 
   it('ADD AN ADD-ON (plan MACRO M3 §4.2, D2): what can be added, added and removed on one\'s own paid order with the CSRF token in rate group auth, its own invoice and credit note; the server\'s words for a refusal; another account\'s order 404', async () => {
@@ -572,7 +600,7 @@ describe('YOUR ADDRESSES and an order\'s delivery address over HTTP (plan NEXT L
       reason: null,
       paid: true,
       currency: 'EUR',
-      offer: [{ addonId: cloth.id, name: 'POLISHING CLOTH', line: null, priceMinor: 1_500, currency: 'EUR', maxUnits: 2 }],
+      offer: [{ addonId: cloth.id, name: 'POLISHING CLOTH', line: null, priceMinor: 1_500, currency: 'EUR', maxUnits: 2, engraving: false }],
     });
     expect((await other.get(url)).statusCode).toBe(404);
     expect(errorOf(await mine.request('POST', url, { body: { addonId: cloth.id, units: 1 }, noCsrf: true })).code).toBe('CSRF_FAILED');

@@ -31,7 +31,7 @@ import { withdrawOnCancel } from '../../src/server/services/claim-renewals.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { countPiecesIn, scanIntoParcel } from '../support/fulfil.js';
 import { jpegPhoto } from '../support/images.js';
-import { accountOfTier, createAccount, createLiveRelease, createModel, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { accountOfTier, createAccount, createLiveRelease, createModel, liveAddon, liveFixtureOn, ordersEngravingPrices, type LiveFixture } from '../support/live.js';
 import { poolDraw, withDrawSizes } from '../support/draws.js';
 
 const HOUR = 3_600_000;
@@ -97,11 +97,16 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
   const benchOf = (orderId: string) => t.db.selectFrom('bench_items').selectAll().where('order_id', '=', orderId).orderBy('created_at').execute();
   const productRow = (id: string) => t.db.selectFrom('products').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
 
-  /** A LIVE sale as a collector lives it: entered before T0, the line at T0, the seal held, PAY. */
+  /**
+   * A LIVE sale as a collector lives it: entered before T0, the line at T0, the seal held, PAY. Lot Q2, step Q2.4: `addons`
+   * are catalogue services its release picks and its hold chooses (one unit per piece).
+   */
   async function liveSale(o: { quantity?: number; sizes?: { label: string; stock: number }[]; size?: number; addons?: { label: string; priceMinor: number }[]; locationId?: string } = {}) {
     const quantity = o.quantity ?? 1;
     const opensAt = new Date(clock.now().getTime() + HOUR);
-    const r = await createLiveRelease(f, { opensAt, sizes: o.sizes ?? [{ label: '52', stock: 5 }], perAccount: Math.max(1, quantity), addons: o.addons });
+    const picked: string[] = [];
+    for (const a of o.addons ?? []) picked.push(await liveAddon(f, { name: a.label, priceMinor: a.priceMinor }));
+    const r = await createLiveRelease(f, { opensAt, sizes: o.sizes ?? [{ label: '52', stock: 5 }], perAccount: Math.max(1, quantity), addonIds: picked });
     if (o.locationId) await t.db.updateTable('drops').set({ stock_location_id: o.locationId }).where('id', '=', r.id).execute();
     const a = await accountOfTier(f, 0);
     clock.set(new Date(opensAt.getTime() - MINUTE));
@@ -112,11 +117,11 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
     await f.live.press(a.id, r.id, token);
     clock.advance(1500);
     await f.live.secure(a.id, r.id, token, a.actor);
-    if (r.addons.length) await f.live.setAddons(a.id, r.id, r.addons.map((x) => x.id), a.actor);
+    if (picked.length) await f.live.setAddons(a.id, r.id, picked.map((addonId) => ({ addonId })), a.actor);
     await f.live.confirm(a.id, r.id, a.actor);
     const entry = await t.db.selectFrom('live_entries').selectAll().where('drop_id', '=', r.id).where('account_id', '=', a.id).executeTakeFirstOrThrow();
     const rows = await t.db.selectFrom('orders').selectAll().where('live_entry_id', '=', entry.id).orderBy('piece').execute();
-    return { release: r, account: a, entry, orders: rows };
+    return { release: r, account: a, entry, orders: rows, addonIds: picked };
   }
 
   /** A request of the private salon closed as ACCEPTED by Client Services: its order, its size and price entered when given. */
@@ -352,7 +357,7 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
   // ── every channel ────────────────────────────────────────────────────────
 
   describe('every channel creates its orders', () => {
-    it('a LIVE entry CONFIRMED: one order per piece, the release\'s size, price and currency, the add-ons as sold, RESERVED at the release\'s location, in PAY\'s transaction', async () => {
+    it('a LIVE entry CONFIRMED: one order per piece, the release\'s size, price and currency, each add-on chosen one unit on each piece\'s order (no snapshot), RESERVED at the release\'s location, in PAY\'s transaction', async () => {
       const sale = await liveSale({ quantity: 2, addons: [{ label: 'ENGRAVING', priceMinor: 15_000 }, { label: 'GIFT BOX', priceMinor: 5_000 }], locationId: logistics });
       expect(sale.orders).toHaveLength(2);
       const sku = sale.orders[0]!.sku_id!;
@@ -375,7 +380,15 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
           surprise: null,
           buyer_name: null,
         });
-        expect(o.addons).toEqual(sale.release.addons.map((a) => ({ id: a.id, label: a.label, priceMinor: a.priceMinor })));
+        // Lot Q2, step Q2.4 (D2, N1, N15): no snapshot; one unit of each add-on chosen on each piece's order, as sold.
+        expect(o.addons).toEqual([]);
+        const units = await t.db.selectFrom('order_addon_items').select(['addon_id', 'price_minor', 'added_by_type', 'location_id']).where('order_id', '=', o.id).execute();
+        expect(units.map((u) => [u.addon_id, u.price_minor, u.added_by_type, u.location_id]).sort()).toEqual(
+          [
+            [sale.addonIds[0], 15_000, 'PURCHASE', null],
+            [sale.addonIds[1], 5_000, 'PURCHASE', null],
+          ].sort(),
+        );
         expect(o.reserved_at.toISOString()).toBe(sale.entry.confirmed_at!.toISOString());
         // Audited as the collector's, in the transaction of PAY.
         expect((await auditsOf(o.id, 'order.create'))[0]).toMatchObject({ actor_type: 'account', actor_id: sale.account.id, details: { channel: 'LIVE', liveEntryId: sale.entry.id, piece: i + 1, to: 'RESERVED', reservation: 'AWAITING' } });
@@ -792,6 +805,43 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       await rejects(orders().setTerms(small.id, { sizeLabel: 'Small' }, admin), 'VALIDATION_FAILED', 400);
       expect(await orderRow(small.id)).toMatchObject({ size_label: 'SMALL', sku_id: small.sku_id, reservation: small.reservation });
     });
+
+    it('the engraving, one system (lot Q2, step Q2.5, N3, N8): offered on an ended release\'s order until packing by its add-on\'s YOUR ORDERS switch alone, at its price; its words at most its add-on\'s most characters (12 refuses 13), 20 by default', async () => {
+      const engraving = await ordersEngravingPrices(f, { EUR: 3_000 });
+      const sale = await liveSale();
+      const order = sale.orders[0]!;
+      // Its release ended, and it never picked the engraving: YOUR ORDERS still offers it, by its switch alone.
+      clock.advance(MINUTE);
+      await t.db.updateTable('drops').set({ ended_at: clock.now(), ended_reason: 'ENDED' }).where('id', '=', sale.release.id).where('ended_at', 'is', null).execute();
+      expect(await t.db.selectFrom('drop_addons').select('addon_id').where('drop_id', '=', sale.release.id).execute()).toEqual([]);
+      expect((await orders().accountOrder(sale.account.id, order.id)).engravingOffer).toEqual({ priceMinor: 3_000, included: false, maxLength: 20 });
+      // 20 characters by default: 21 refused, 20 taken (its unit at the add-on's price, held nowhere).
+      await rejects(orders().setEngraving(sale.account.id, order.id, 'A'.repeat(21), sale.account.actor), 'VALIDATION_FAILED', 400);
+      clock.advance(MINUTE);
+      expect((await orders().setEngraving(sale.account.id, order.id, 'A'.repeat(20), sale.account.actor)).engraving).toEqual({ text: 'A'.repeat(20), priceMinor: 3_000 });
+      clock.advance(MINUTE);
+      await orders().setEngraving(sale.account.id, order.id, null, sale.account.actor);
+      // Its add-on's 12: 13 characters refused in the house's words at 12, 12 taken.
+      await ctx.services.addons.update(engraving, { textMax: 12 }, admin);
+      expect((await orders().accountOrder(sale.account.id, order.id)).engravingOffer).toEqual({ priceMinor: 3_000, included: false, maxLength: 12 });
+      await expect(orders().setEngraving(sale.account.id, order.id, 'Thirteen char', sale.account.actor)).rejects.toMatchObject({ code: 'VALIDATION_FAILED', publicMessage: 'Up to 12 characters: letters, figures, spaces and . & ’ -' });
+      clock.advance(MINUTE);
+      expect((await orders().setEngraving(sale.account.id, order.id, 'Twelve chars', sale.account.actor)).engraving).toEqual({ text: 'Twelve chars', priceMinor: 3_000 });
+      expect(
+        await t.db.selectFrom('order_addon_items').select(['addon_id', 'status', 'added_by_type', 'location_id']).where('order_id', '=', order.id).orderBy('added_at').orderBy('id').execute(),
+      ).toEqual([
+        { addon_id: engraving, status: 'REMOVED', added_by_type: 'COLLECTOR', location_id: null },
+        { addon_id: engraving, status: 'HELD', added_by_type: 'COLLECTOR', location_id: null },
+      ]);
+      // Its switch off: no new engraving offered; one already on the order keeps its words' changes.
+      await ctx.services.addons.update(engraving, { offeredAt: { orders: false } }, admin);
+      clock.advance(MINUTE);
+      expect((await orders().setEngraving(sale.account.id, order.id, 'M. B.', sale.account.actor)).engraving).toEqual({ text: 'M. B.', priceMinor: 3_000 });
+      const other = await liveSale();
+      await rejects(orders().setEngraving(other.account.id, other.orders[0]!.id, 'M. B.', other.account.actor), 'ORDER_ENGRAVING_UNAVAILABLE', 409);
+      await ctx.services.addons.update(engraving, { textMax: 20 }, admin);
+      await ordersEngravingPrices(f, { EUR: null });
+    });
   });
 
   // ── the buyer ────────────────────────────────────────────────────────────
@@ -1008,7 +1058,9 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       const rows = await t.db.selectFrom('orders').selectAll().execute();
       expect(rows.length).toBeGreaterThan(20);
       for (const o of rows) {
-        expect(replayed.orders.get(o.id), o.id).toEqual(orderPayload(o));
+        // An add-on's entry (order.addon.add/remove) carries the order and the add-on: the order is the rest.
+        const { addon: _addon, ...state } = replayed.orders.get(o.id) ?? {};
+        expect(state, o.id).toEqual(orderPayload(o));
         const events = await eventsOf(o.id);
         expect((await journalOf(o.id)).map((j) => j.type), o.id).toEqual(events.map((e) => e.action));
       }

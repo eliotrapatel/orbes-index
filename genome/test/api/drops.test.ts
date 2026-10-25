@@ -1194,10 +1194,16 @@ describe('draws in sizes over HTTP (plan NEXT LOT §3.6.F)', () => {
 
   it('ADD TO YOUR ORDER on a place held (plan MACRO M3 §4.2, D2): PUT /api/v1/club/drops/:id/addons with the CSRF token, in a draw with a price; read back with the entry; carried at the confirmation', async () => {
     await staff();
-    const d = await sized([{ label: '52', pieces: 1 }], 10 * HOUR, 2, { earlyAccessHours: 48, earlyAccessPlatineHours: 48, priceMinor: 480_000, currency: 'EUR' });
-    await publish(d.id);
     const op = { type: 'admin' as const, id: (await h.ctx.db.selectFrom('admin_users').select('id').where('role', '=', 'OPERATOR').executeTakeFirstOrThrow()).id };
     const cloth = await h.ctx.services.addons.create({ name: 'POLISHING CLOTH', skuCode: 'ADD-CLOTH-D', prices: { EUR: 1_500 } }, op);
+    // Lot Q2, step Q2.3 (D3, N7): the draw picks, at its creation, every add-on its DRAW switch offers in its currency.
+    const d = await sized([{ label: '52', pieces: 1 }], 10 * HOUR, 2, { earlyAccessHours: 48, earlyAccessPlatineHours: 48, priceMinor: 480_000, currency: 'EUR' });
+    expect((safeJson(await auditor.get(adminUrl(d.id))) as Record<string, any>).addonPick).toEqual([
+      { id: cloth.id, name: 'POLISHING CLOTH', line: null, kind: 'PRODUCT', engraving: false, active: true, priceMinor: 1_500 },
+    ]);
+    await publish(d.id);
+    // One created after: offered in no draw that did not pick it.
+    const later = await h.ctx.services.addons.create({ name: 'A LATER CLOTH', skuCode: 'ADD-LATER-D', prices: { EUR: 1_000 } }, op);
     const france = (await h.ctx.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
     await h.ctx.services.stock.adjust({ skuId: cloth.sku.id, locationId: france, delta: 2, note: 'Counted.' }, op);
     const url = `/api/v1/club/drops/${d.id}/addons`;
@@ -1212,8 +1218,10 @@ describe('draws in sizes over HTTP (plan NEXT LOT §3.6.F)', () => {
     expect((safeJson(await platine.client.get(`/api/v1/club/drops/${d.id}/entry`)) as Json).addons).toEqual({
       currency: 'EUR',
       chosen: [],
-      offer: [{ addonId: cloth.id, name: 'POLISHING CLOTH', line: null, priceMinor: 1_500, currency: 'EUR', maxUnits: 2 }],
+      offer: [{ addonId: cloth.id, name: 'POLISHING CLOTH', line: null, priceMinor: 1_500, currency: 'EUR', maxUnits: 2, engraving: false }],
     });
+    const unpicked = await put(platine.client, { items: [{ addonId: later.id, units: 1 }] });
+    expect([unpicked.statusCode, errorOf(unpicked)]).toEqual([409, { code: 'ADDON_NOT_OFFERED', message: 'A LATER CLOTH is not one of this release’s add-ons.' }]);
     expect((await put(platine.client, { items: [{ addonId: cloth.id, units: 1 }] }, { noCsrf: true })).statusCode).toBe(403);
     expect(errorOf(await put(platine.client, { items: [{ addonId: cloth.id, units: 1, price: 0 }] })).code).toBe('VALIDATION_FAILED');
     const tooMany = await put(platine.client, { items: [{ addonId: cloth.id, units: 3 }] });
@@ -1233,6 +1241,70 @@ describe('draws in sizes over HTTP (plan NEXT LOT §3.6.F)', () => {
       { addon_id: cloth.id, price_minor: 1_500, currency: 'EUR' },
       { addon_id: cloth.id, price_minor: 1_500, currency: 'EUR' },
     ]);
+  });
+
+  it('a draw picks the catalogue add-ons its places held offer (lot Q2, step Q2.3, D3): given in order at its creation and later, each active with its DRAW switch on and priced in its currency, audited by name; changed once published until its place-held window closes (the review)', async () => {
+    await staff();
+    const op = { type: 'admin' as const, id: (await h.ctx.db.selectFrom('admin_users').select('id').where('role', '=', 'OPERATOR').executeTakeFirstOrThrow()).id };
+    const make = (name: string, skuCode: string, o: Record<string, unknown> = {}) => h.ctx.services.addons.create({ kind: 'SERVICE', name, skuCode, prices: { EUR: 2_000 }, ...o }, op);
+    const box = await make('A BOX FOR THIS DRAW', 'ADD-Q23-DBOX');
+    const card = await make('A CARD FOR DRAWS', 'ADD-Q23-DCARD');
+    const liveOnly = await make('A BOX FOR LIVE ONLY', 'ADD-Q23-DLIVE', { offeredAt: { draw: false } });
+    const pound = await make('A POUND BOX', 'ADD-Q23-DPOUND', { prices: { GBP: 2_000 } });
+    const mine = new Set([box.id, card.id, liveOnly.id, pound.id]);
+    const picked = (d: Record<string, any>) => (d.addonPick as { id: string; name: string }[]).filter((a) => mine.has(a.id)).map((a) => a.name);
+    try {
+      // The form's list for a draw: the switch and the price said.
+      const listed = safeJson(await auditor.get('/api/admin/addons?moment=DRAW&currency=EUR')) as { items: { id: string; pickable: boolean; why: string | null }[] };
+      expect(listed.items.filter((a) => mine.has(a.id)).map((a) => [a.pickable, a.why])).toEqual([
+        [true, null],
+        [true, null],
+        [false, 'SWITCH_OFF'],
+        [false, 'NO_PRICE'],
+      ]);
+      // Given: exactly those, in that order.
+      const d = await sized([{ label: '52', pieces: 1 }], 10 * HOUR, 2, { priceMinor: 480_000, currency: 'EUR', addonIds: [card.id, box.id] });
+      expect(picked(d)).toEqual(['A CARD FOR DRAWS', 'A BOX FOR THIS DRAW']);
+      expect((await h.ctx.db.selectFrom('audit_logs').select('details').where('action', '=', 'drop.create').where('target_id', '=', d.id).executeTakeFirstOrThrow()).details).toMatchObject({
+        addonIds: [{ id: card.id, name: 'A CARD FOR DRAWS' }, { id: box.id, name: 'A BOX FOR THIS DRAW' }],
+      });
+      // Checked, its name said.
+      for (const [ids, message] of [
+        [[liveOnly.id], 'A BOX FOR LIVE ONLY is not offered in a release with a draw: turn its switch on in Catalogue → Add-ons.'],
+        [[pound.id], 'A POUND BOX has no price in EUR.'],
+      ] as const) {
+        const res = await operator.patch(adminUrl(d.id), { addonIds: ids });
+        expect([res.statusCode, errorOf(res).code, errorOf(res).message]).toEqual([409, 'ADDON_NOT_OFFERED', message]);
+      }
+      // A DRAFT's pick changes, audited before and after; in another currency, checked in it.
+      const changed = safeJson(await operator.patch(adminUrl(d.id), { addonIds: [box.id] })) as Record<string, any>;
+      expect(picked(changed)).toEqual(['A BOX FOR THIS DRAW']);
+      expect((await h.ctx.db.selectFrom('audit_logs').select('details').where('action', '=', 'drop.update').where('target_id', '=', d.id).orderBy('id', 'desc').executeTakeFirstOrThrow()).details).toMatchObject({
+        before: { addonIds: [{ id: card.id }, { id: box.id }] },
+        after: { addonIds: [{ id: box.id, name: 'A BOX FOR THIS DRAW' }] },
+      });
+      expect((await operator.patch(adminUrl(d.id), { priceMinor: 400_000, currency: 'GBP', addonIds: [pound.id] })).statusCode).toBe(200);
+      expect((await operator.patch(adminUrl(d.id), { priceMinor: 480_000, currency: 'EUR', addonIds: [box.id] })).statusCode).toBe(200);
+      // Published: its price is fixed, its pick is not (the review of lot Q2), until its place-held window closes.
+      await publish(d.id);
+      const locked = await operator.patch(adminUrl(d.id), { priceMinor: 400_000, currency: 'EUR', addonIds: [card.id] });
+      expect([locked.statusCode, errorOf(locked).code]).toEqual([409, 'DROP_PUBLISHED']);
+      expect(picked(safeJson(await auditor.get(adminUrl(d.id))) as Record<string, any>)).toEqual(['A BOX FOR THIS DRAW']);
+      expect(picked(safeJson(await operator.patch(adminUrl(d.id), { addonIds: [card.id, box.id] })) as Record<string, any>)).toEqual(['A CARD FOR DRAWS', 'A BOX FOR THIS DRAW']);
+      // Drawn: still within its place-held window, then no longer (the service, the console's sessions being hours away).
+      const was = h.clock.now();
+      const drawnAt = new Date(Date.parse(d.closesAt) + 1000);
+      h.clock.set(drawnAt);
+      const owner = { type: 'admin' as const, id: (await h.ctx.db.selectFrom('admin_users').select('id').where('role', '=', 'ADMIN').executeTakeFirstOrThrow()).id };
+      await h.ctx.services.drops.draw(d.id, owner);
+      h.clock.set(new Date(drawnAt.getTime() + d.purchaseWindowHours * HOUR - 1000));
+      expect(picked(await h.ctx.services.drops.update(d.id, { addonIds: [box.id] }, op))).toEqual(['A BOX FOR THIS DRAW']);
+      h.clock.set(new Date(drawnAt.getTime() + d.purchaseWindowHours * HOUR));
+      await expect(h.ctx.services.drops.update(d.id, { addonIds: [card.id] }, op)).rejects.toMatchObject({ code: 'DROP_ALREADY_DRAWN', message: 'This release’s place-held window has closed: its add-ons offered no longer change.' });
+      h.clock.set(was);
+    } finally {
+      for (const id of mine) await h.ctx.services.addons.setAside(id, op);
+    }
   });
 
   it('draws per size, lists each entry\'s size, filters the console\'s entries by size, and offers the next place per size', async () => {

@@ -627,4 +627,15 @@ describe('ReceptionService (plan NEXT LOT §3.5.6.5)', () => {
     expect(only.reception.cards).toMatchObject({ sealed: 0, printed: 0 });
     expect((await h.ctx.services.addons.get(cloth.id)).stock.find((x) => x.location.id === logistics)).toMatchObject({ onHand: 8 });
   });
+
+  it('never offers nor counts in a service (lot Q2, D4): it has no stock (409 ADDON_SERVICE as a line not on the order)', async () => {
+    const wrap = await h.ctx.services.addons.create({ kind: 'SERVICE', name: 'Gift Wrapping', skuCode: 'RC-WRAP', prices: { EUR: 1500 } }, admin);
+    const order = await sentOrder(logistics, [[k50, 1]]);
+    const found = await rs.findForReception(order.reference, agentScope());
+    expect(found.offered.some((k) => k.id === wrap.sku.id)).toBe(false);
+    expect(
+      await refusal(rs.record(order.id, { lines: [{ skuId: k50, accepted: 1, rejected: 0 }, { skuId: wrap.sku.id, accepted: 1, rejected: 0, note: 'In the box.' }] }, agent, agentScope())),
+    ).toEqual({ code: 'ADDON_SERVICE', status: 409, message: 'Gift Wrapping is a service: it has no stock.' });
+    expect(await h.t.db.selectFrom('stock_movements').select('id').where('sku_id', '=', wrap.sku.id).execute()).toEqual([]);
+  });
 });

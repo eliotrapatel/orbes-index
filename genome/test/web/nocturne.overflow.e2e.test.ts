@@ -80,7 +80,21 @@ const DOOR = "ONE QUEUE's room door (lot Q1 §3.4, D35; the owner's mockup, MK #
 /** CONFIRMED's signature (lot Q1 §3.7, D43; the owner's mockup, MK #confirmed): its horizon runs past the column on purpose. */
 const SIGN = "ONE QUEUE's CONFIRMED (lot Q1 §3.7, D43; the owner's mockup, MK #confirmed): the monogram's horizon runs past the column on purpose, its ends dissolving at the screen's edges (32 px each side on a phone, 22 px from 350 px down), drawn by its decorative layer (aria-hidden); the page never scrolls sideways";
 const SIGN_KNOWN: readonly { starts: string; reason: string }[] = ['div.live__stage spills out of its box', 'section.live__confirmed.live__screen spills out of its box'].map((starts) => ({ starts, reason: SIGN }));
+/** 5b at its longest (lot Q2, step Q2.8; the owner's mockups MK #secured and #secured-addons): SECURED's own decorative light. */
+const SECURED_FLOOR = "ONE QUEUE's SECURED (lot Q1 §3.5, D31; MK #secured): YOUR PIECE's horizon runs past the column on purpose, its ends dissolving at the screen's edges, drawn by its decorative layer (aria-hidden); the page never scrolls sideways";
+const ADDON_LIT = "5b (lot Q2, step Q2.8, D12; MK #secured-addons, gen.mjs .ao): the chosen row's hairline lit as a horizon dissolving 24 px past the column, a faint light pooled above it, drawn by its ::before and ::after (no word, no control); the page never scrolls sideways";
+const PAY_LIGHT = "ONE QUEUE's PAY, the light (lot Q1 §3.5, D39; MK #secured): its point and pool of light at its feathered edge reach past the button on purpose (aria-hidden); its time, read by a screen reader inside the visually hidden line, is the eye's inside PAY";
+const FIVE_B_KNOWN: readonly { state: string; starts: string; reason: string }[] = [
+  { state: 'addons-hold-stress', starts: 'div.live__stage spills out of its box', reason: SECURED_FLOOR },
+  { state: 'addons-hold-stress', starts: 'section.live__secured.live__screen spills out of its box', reason: SECURED_FLOOR },
+  { state: 'addons-hold-stress', starts: 'div.live__reveal spills out of its box', reason: SECURED_FLOOR },
+  { state: 'addons-hold-stress', starts: 'div.live__addons spills out of its box', reason: ADDON_LIT },
+  { state: 'addons-hold-stress', starts: 'div.live__addon-item.is-on spills out of its box', reason: ADDON_LIT },
+  { state: 'addons-hold-stress', starts: 'button.btn.live__primary.live__pay.live-pay spills out of its box', reason: PAY_LIGHT },
+  { state: 'addons-hold-stress', starts: 'span.live__pay-time', reason: PAY_LIGHT },
+];
 const KNOWN: readonly { state: string; starts: string; reason: string }[] = [
+  ...FIVE_B_KNOWN,
   ...['room-stress', 'room-guaranteed'].flatMap((state) => [
     { state, starts: 'div.live__stage spills out of its box', reason: DOOR },
     { state, starts: 'section.live__room.live__screen spills out of its box', reason: DOOR },
