@@ -464,12 +464,14 @@ function chunked<T>(items: readonly T[], size: number): T[][] {
  * piece keeps its own) and a VAULT order at 0 (a product won free, a VAULT EDITION, THE PIECE) were not bought; a VAULT
  * order bought under its RIGHT TO BUY (its price above 0) was, as every LIVE, DRAW and SALON order. A piece no order holds
  * was sold outside the platform's orders (a counter sale, a piece claimed with its code; later a Shopify order, S6):
- * bought.
+ * bought. Given `accountId` (the account registering it first), a piece its order holds counts only for that order's
+ * buyer ("once registered to the buyer"): registered first by anyone else (a box given before its registration), it
+ * opens no PIECE vault, for the buyer or for the registrant.
  */
-export async function pieceBought(tx: Db, productUuid: string): Promise<boolean> {
+export async function pieceBought(tx: Db, productUuid: string, accountId?: string): Promise<boolean> {
   const o = await tx
     .selectFrom('orders')
-    .select(['channel', 'price_minor'])
+    .select(['channel', 'price_minor', 'account_id'])
     .where('product_id', '=', productUuid.toLowerCase())
     .where('status', 'not in', ['CANCELLED', 'RETURNED'])
     .orderBy('reserved_at', 'desc')
@@ -477,6 +479,7 @@ export async function pieceBought(tx: Db, productUuid: string): Promise<boolean>
     .limit(1)
     .executeTakeFirst();
   if (!o) return true;
+  if (accountId !== undefined && o.account_id.toLowerCase() !== accountId.toLowerCase()) return false;
   if (o.channel === 'GIFT' || o.channel === 'EXCHANGE') return false;
   if (o.channel === 'VAULT') return (o.price_minor ?? 0) > 0;
   return true;
@@ -485,7 +488,7 @@ export async function pieceBought(tx: Db, productUuid: string): Promise<boolean>
 /**
  * THE VAULT at a first registration (services/ownership.ts completeFirstRegistration, after the tiers' grants and
  * `giveTierVaults`), in its transaction: EACH PIECE BOUGHT (§2.3.2) a PIECE vault for the piece when it was bought
- * (`pieceBought`), one per piece ever while its last one is not revoked (the cap, default 1); A FRIEND'S FIRST PIECE
+ * (`pieceBought`, by its order's buyer), one per piece ever while its last one is not revoked (the cap, default 1); A FRIEND'S FIRST PIECE
  * (§2.3.5) the inviter's FRIEND vault when this is the account's first ownership ever and it was invited
  * (`accounts.invited_by`, set only by the personal invitation link at sign-up: never by a credit to give, N10); the
  * inviter ACTIVE and neither a test entrant (`giveVault`). A transfer is never a first registration: no vault (D5 "FIRST
@@ -494,7 +497,7 @@ export async function pieceBought(tx: Db, productUuid: string): Promise<boolean>
 export async function giveFirstRegistrationVaults(tx: Db, accountId: string, productUuid: string, now: Date): Promise<AuditRecordInput[]> {
   const account = accountId.toLowerCase();
   const notes: AuditRecordInput[] = [];
-  if (await pieceBought(tx, productUuid)) notes.push(...(await giveVault(tx, { source: 'PIECE', accountId: account, productId: productUuid }, now)).notes);
+  if (await pieceBought(tx, productUuid, account)) notes.push(...(await giveVault(tx, { source: 'PIECE', accountId: account, productId: productUuid }, now)).notes);
   const owned = await tx.selectFrom('ownership').select((eb) => eb.fn.countAll<string>().as('n')).where('account_id', '=', account).executeTakeFirstOrThrow();
   if (Number(owned.n) === 1) {
     const a = await tx.selectFrom('accounts').select('invited_by').where('id', '=', account).executeTakeFirst();
@@ -592,6 +595,11 @@ export interface HouseGiveInput {
   note?: unknown;
   /** The reach only, nothing given. */
   dryRun?: unknown;
+  /**
+   * The gift's id chosen by the console (a UUID, the press's idempotency key): a press sent again with it gives under the
+   * same `HOUSE:<giftId>` and skips the members it already reached (a batch given before one that failed). Absent: a new one.
+   */
+  giftId?: unknown;
 }
 
 /** What GIVE A VAULT did, or would do (`dryRun`). */
@@ -1159,7 +1167,8 @@ export class VaultService {
    * each member of a segment as it reads now (`segmentId`; ADMIN, as the house messages' audience), `per_occasion` vaults
    * each under one gift's key `HOUSE:<giftId>`, with the staff member and the house's note (never audited, never shown).
    * The test entrants (D9) and the accounts not ACTIVE are left out and counted apart; an erased account is no collector.
-   * Given in transactions of HOUSE_GIVE_BATCH accounts, each vault audited `vault.give` with its staff member. `dryRun`:
+   * Given in transactions of HOUSE_GIVE_BATCH accounts, each vault audited `vault.give` with its staff member; a press sent
+   * again with its `giftId` after a failed batch gives only the members that gift has not reached yet. `dryRun`:
    * the reach and the left out, nothing given. 404 ACCOUNT_NOT_FOUND / SEGMENT_NOT_FOUND; 409 VAULT_SOURCE_OFF while THE
    * HOUSE is switched off.
    */
@@ -1169,6 +1178,7 @@ export class VaultService {
     const toOne = (i.accountId !== undefined && i.accountId !== null) || (i.email !== undefined && i.email !== null);
     const toSegment = i.segmentId !== undefined && i.segmentId !== null;
     if (toOne === toSegment) throw validationError('Choose a collector or a segment.');
+    if (i.giftId !== undefined && i.giftId !== null && (typeof i.giftId !== 'string' || !UUID_RE.test(i.giftId))) throw validationError('The gift’s id is not valid.');
     const note = houseNote(i.note);
     const dryRun = i.dryRun === true;
     const now = this.clock();
@@ -1211,12 +1221,18 @@ export class VaultService {
     const reach = members.filter((m) => !m.test && m.status === 'ACTIVE').map((m) => m.id);
     if (dryRun) return { giftId: null, dryRun, reach: reach.length, accounts: 0, vaults: 0, leftOut };
 
-    const giftId = randomUUID();
+    const giftId = typeof i.giftId === 'string' ? i.giftId.toLowerCase() : randomUUID();
     let accounts = 0;
     let vaults = 0;
+    const again = i.giftId !== undefined && i.giftId !== null;
     for (const batch of chunked(reach, HOUSE_GIVE_BATCH)) {
       await inTransaction(this.db, async (tx) => {
+        // A press sent again: the members this gift already reached are skipped (its cap may allow more than one).
+        const reached = again
+          ? new Set((await tx.selectFrom('vaults').select('account_id').where('occasion_key', '=', `HOUSE:${giftId}`).where('account_id', 'in', batch).execute()).map((v) => v.account_id))
+          : new Set<string>();
         for (const accountId of batch) {
+          if (reached.has(accountId)) continue;
           const given = await giveVault(tx, { source: 'HOUSE', accountId, giftId, givenBy: by, segmentId, note }, now);
           if (given.vaults.length > 0) {
             accounts += 1;

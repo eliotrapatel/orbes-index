@@ -698,6 +698,20 @@ describe('THE VAULT’s other sources and the return', () => {
       expect(await keysOf(next)).toEqual(['TIER:1']);
       expect(await keysOf(owner)).toEqual([`PIECE:${piece.uuid}`, 'TIER:1']);
     });
+
+    it('an order’s piece first registered by another account opens no PIECE vault for anyone ("once registered to the buyer"); the registrant’s first tier gives its own', async () => {
+      const buyer = await account();
+      const friend = await account();
+      const { id, piece } = await shippedOrder(buyer);
+      await register(friend, piece);
+      expect(await keysOf(friend)).toEqual(['TIER:1']);
+      expect(await keysOf(buyer)).toEqual([]);
+      expect(await db().selectFrom('vaults').select('id').where('source', '=', 'PIECE').where('product_id', '=', piece.uuid).execute()).toEqual([]);
+      // The buyer's order is not delivered by someone else's registration.
+      expect((await row(id)).status).toBe('SHIPPED');
+      expect(await inTransaction(db(), (tx) => pieceBought(tx, piece.uuid, friend))).toBe(false);
+      expect(await inTransaction(db(), (tx) => pieceBought(tx, piece.uuid, buyer))).toBe(true);
+    });
   });
 
   describe('a returned piece', () => {
@@ -935,6 +949,11 @@ describe('THE VAULT’s other sources and the return', () => {
       expect(given).toMatchObject({ dryRun: false, reach: 2, accounts: 2, vaults: 2, leftOut: { testEntrants: 1, inactive: 1 } });
       for (const m of members) expect(await vaultsOf(m)).toMatchObject([{ source: 'HOUSE', occasion_key: `HOUSE:${given.giftId}`, segment_id: segment.id, given_by: admin.id }]);
       for (const m of [tester, locked]) expect(await vaultsOf(m)).toEqual([]);
+      // The press sent again with its gift's id (a retry after a failed batch): the members already given are skipped.
+      const again = await vault().giveFromHouse({ segmentId: segment.id, giftId: given.giftId!.toUpperCase() }, admin);
+      expect(again).toMatchObject({ giftId: given.giftId, reach: 2, accounts: 0, vaults: 0 });
+      for (const m of members) expect(await vaultsOf(m)).toHaveLength(1);
+      await expect(vault().giveFromHouse({ segmentId: segment.id, giftId: 'not-a-uuid' }, admin)).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
       // The segment deleted later: its gifts keep their vaults and lose its id.
       await h.ctx.services.segments.remove(segment.id, admin);
       for (const m of members) expect(await vaultsOf(m)).toMatchObject([{ occasion_key: `HOUSE:${given.giftId}`, segment_id: null }]);

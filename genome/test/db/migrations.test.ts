@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { sql, type Kysely } from 'kysely';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { isCheckViolation, isForeignKeyViolation, isGuardViolation, isUniqueViolation, PG_ERROR, pgError } from '../../src/server/db/pg-errors.js';
@@ -54,6 +54,26 @@ import { StockService } from '../../src/server/services/stock.js';
 import type { Actor } from '../../src/server/types.js';
 import { poolDraw } from '../support/draws.js';
 import { createAccount, createLiveRelease, legacyLiveAddons, liveFixture, type LiveFixture } from '../support/live.js';
+
+/**
+ * THE VAULT's hooks on the paths that make orders (lot Q3: `attachVaultAddons`, `giveTierVaults`, `giveLiveVaults`) read
+ * tables that exist from 0061 on. A case that writes the data of before with today's services at an older schema (0060's
+ * "on the data of before") switches them off while it writes, as the image of before had none; everywhere else they run
+ * as they are.
+ */
+const vaultHooks = vi.hoisted(() => ({ off: false }));
+vi.mock('../../src/server/services/order-addons.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/server/services/order-addons.js')>();
+  return { ...actual, attachVaultAddons: (...a: Parameters<typeof actual.attachVaultAddons>) => (vaultHooks.off ? Promise.resolve({ unitIds: [], notes: [] }) : actual.attachVaultAddons(...a)) };
+});
+vi.mock('../../src/server/services/vault.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/server/services/vault.js')>();
+  return {
+    ...actual,
+    giveTierVaults: (...a: Parameters<typeof actual.giveTierVaults>) => (vaultHooks.off ? Promise.resolve([]) : actual.giveTierVaults(...a)),
+    giveLiveVaults: (...a: Parameters<typeof actual.giveLiveVaults>) => (vaultHooks.off ? Promise.resolve([]) : actual.giveLiveVaults(...a)),
+  };
+});
 
 /** stock_holds as 0056 wrote it, read back by pg_get_viewdef (whitespace folded). */
 const STOCK_HOLDS_0056 =
@@ -9172,6 +9192,9 @@ describe('migration 0060_release_addons_converted on the data of before', () => 
     f = await liveFixture(t.db, '2026-11-01T09:00:00.000Z');
   });
   afterAll(() => t.close());
+  afterEach(() => {
+    vaultHooks.off = false;
+  });
 
   /** The release add-ons a release sets, as 0021 holds them (label, line, price per piece, position): their ids. */
   async function releaseAddons(dropId: string, addons: readonly { label: string; line: string | null; priceMinor: number }[]): Promise<string[]> {
@@ -9201,6 +9224,8 @@ describe('migration 0060_release_addons_converted on the data of before', () => 
 
   it('refuses while a release add-on is chosen on a held piece, then converts each label into one catalogue add-on with its prices (the settings\' engraving winning), records every conversion, gives every release not ended its pick, keeps the orders\' history and YOUR ORDERS\' offer, drops the three tables, and refuses to go down', async () => {
     const db = t.db;
+    // The data of before, written at 0059 without THE VAULT's hooks (its tables come with 0061).
+    vaultHooks.off = true;
     const stock = new StockService({ db, audit: f.audit, clock: f.clock.now });
     const france = (await db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
 
@@ -9262,6 +9287,7 @@ describe('migration 0060_release_addons_converted on the data of before', () => 
     await sql`INSERT INTO engraving_prices (currency, price_minor, updated_by) VALUES ('EUR', 3000, ${f.admin.id}), ('CHF', 2800, ${f.admin.id})`.execute(db);
 
     // 1. Refused while a release add-on is chosen on a piece held (C's), naming the count; nothing changed.
+    vaultHooks.off = false;
     await expect(migrateToLatest(db)).rejects.toThrow(/0060_release_addons_converted cannot be applied: 1 release add-ons are chosen on entries in TURN or SECURED/);
     expect((await migrationStatus(db)).find((m) => m.name === '0060_release_addons_converted')?.executedAt).toBeUndefined();
     expect((await rows<{ n: number }>(`SELECT count(*)::int AS n FROM addon_items`))[0]!.n).toBe(3);
