@@ -17,12 +17,19 @@
 import { PNG } from 'pngjs';
 import type { Browser, BrowserContext, Page, Route } from 'playwright-core';
 import { sessionCookieName } from '../../src/server/services/sessions.js';
+import { securedColumn, type SecuredPart } from '../../src/web/verify/live-model.js';
 import { countPiecesIn, packAndShip } from './fulfil.js';
 import { NOCTURNE_NOW, nocturnePhoto, type DemoVariant, type NocturneDemo } from './nocturne-demo.js';
 import { codePhoto, gate, hideGrain, mobileContext, sleep, type UiStage } from './ui-stage.js';
 
 /** A camera that refuses to open, the way a browser says it (getUserMedia's DOMException names). */
 export type CameraFailure = 'NotAllowedError' | 'NotFoundError' | 'NotReadableError' | 'AbortError' | 'unsupported';
+
+/** 5b shown (lot Q2, step Q2.8): its rows, one of them chosen. */
+const FIVE_B_READY = '.view--live .live__addons:not([hidden]) .live__addon-item.is-on';
+
+/** The demo's service whose name is exactly 40 characters (addons-hold-stress). */
+const LONGEST_ADDON = 'A SECOND BOX OF THE HOUSE, WITH ITS CARD';
 
 export interface StateRun {
   page: Page;
@@ -1766,7 +1773,26 @@ export const PHONE_STATES: readonly UiState[] = [
   // ── The catalogue add-ons (lot M3, D2), on their own stage (addons): the LIVE hold's rows, a draw's PLACE HELD, the
   // salon request, YOUR ORDERS' rows with REMOVE and ADD AN ADD-ON, its sheet (chosen, none available, could not be
   // read); then their writes: PAY with an add-on none is left of, a request sent with one ──
-  { id: 'addons-hold', title: 'The hold of a LIVE RELEASE: its catalogue add-ons as rows under ADD TO YOUR ORDER (the release toggles gone), GIFT WRAPPING, ENGRAVING « M. B. » chosen, THE TRAVEL CASE, PAY € 5 090 · total (lot Q2, step Q2.4: the interim look until 5b)', refs: ['M3', 'Q2'], variant: 'addons', as: 'secured', path: release('live'), ready: '.view--live .live__items .n-addons__item.is-chosen' },
+  // 5b, SECURED with add-ons (lot Q2, step Q2.8; MK #secured-addons; plan §3.4, §3.7): MK 5b's rows and look. Two
+  // intended differences from MK: the amounts and the time are the demo's in the house's format (MK caption 4,
+  // illustrative amounts), and M3's note sits under the rows, THE TRAVEL CASE having stock (N2; MK caption 5).
+  { id: 'addons-hold', title: '5b, SECURED with add-ons (MK 5b): ADD-ONS, GIFT WRAPPING + € 15, ENGRAVING + € 40 chosen with YOUR TEXT « M. B. » 5 / 12, THE TRAVEL CASE + € 60, PAY € 5 090 · 08:11; differences from MK: the demo\u2019s amounts and time in the house\u2019s format, and M3\u2019s note under the rows (THE TRAVEL CASE has stock) (lot Q2, step Q2.8)', refs: ['MK 5b', 'Q2'], variant: 'addons', as: 'secured', path: release('live'), ready: FIVE_B_READY },
+  {
+    id: 'addons-hold-text-error',
+    title: '5b: the engraving\u2019s words refused, « M. B. # », the house\u2019s sentence under the rows, the row kept chosen (lot Q2, step Q2.8)',
+    refs: ['MK 5b', 'Q2'],
+    variant: 'addons',
+    as: 'secured',
+    path: release('live'),
+    act: async (run) => {
+      const field = run.page.locator('.view--live .live__addons .ao-text__input');
+      await field.fill('M. B. #');
+      await field.press('Enter');
+      await run.page.locator('.view--live .live__error:not([hidden])').waitFor({ timeout: 20_000 });
+    },
+    ready: '.view--live .live__error:not([hidden])',
+  },
+  { id: 'addons-hold-light', title: '5b in light mode: the room stays dark, its rows, YOUR TEXT and PAY as in the dark (lot Q2, step Q2.8; D18)', refs: ['MK 5b', 'Q2'], variant: 'addons', as: 'secured', path: release('live'), light: true, ready: FIVE_B_READY },
   { id: 'addons-place-held', title: 'A draw drawn with a price, the account’s place held: ADD TO YOUR ORDER, a POLISHING CLOTH chosen, added when Client Services confirms (lot M3, D2)', refs: ['M3'], variant: 'addons', as: you, path: release('autumn'), ready: '.view--release .release__addons .n-addons__item.is-chosen' },
   {
     id: 'addons-salon',
@@ -1830,19 +1856,35 @@ export const PHONE_STATES: readonly UiState[] = [
     ready: ':is(.n-osheet, .d-oform) .n-osheet__unreadable',
   },
   {
+    id: 'addons-hold-stress',
+    title: '5b at its longest: six rows (GIFT WRAPPING, ENGRAVING chosen, THE TRAVEL CASE, POLISHING CLOTH, THE TRAVEL CASE FOR TWO PIECES, LINED and its two-line line, a service of 40 characters), each name and line whole (lot Q2, step Q2.8)',
+    refs: ['MK 5b', 'Q2'],
+    variant: 'addons',
+    as: 'secured',
+    path: release('live'),
+    mutates: true,
+    act: async (run) => {
+      await longestPick(run);
+      await run.page.reload();
+      await run.page.locator(FIVE_B_READY).waitFor({ timeout: 20_000 });
+    },
+    ready: '.view--live .live__addons .live__addon-item:nth-child(6)',
+    stress: true,
+  },
+  {
     id: 'addons-pay',
-    title: 'PAY with THE TRAVEL CASE chosen and none left of it: CONFIRMED, THE TRAVEL CASE COULD NOT BE ADDED: NONE LEFT., the receipt with the ENGRAVING € 40, TOTAL € 5 090 (lot Q2, step Q2.4)',
+    title: 'PAY on 5b with THE TRAVEL CASE chosen and none left of it: CONFIRMED, THE TRAVEL CASE COULD NOT BE ADDED: NONE LEFT., the receipt with the ENGRAVING € 40, TOTAL € 5 090 (lot Q2, steps Q2.4, Q2.8)',
     refs: ['M3', 'Q2'],
     variant: 'addons',
     as: 'secured',
     path: release('live'),
     mutates: true,
     act: async (run) => {
-      await run.page.locator('.view--live .live__items .n-addons').waitFor();
-      // Lot Q2, step Q2.4 (§3.4): THE TRAVEL CASE chosen, then its last unit taken before PAY.
-      const row = run.page.locator('.view--live .live__items .n-addons__item').filter({ has: run.page.locator('.n-addons__name', { hasText: /^THE TRAVEL CASE$/ }) });
-      await row.locator('.n-step__btn--more').click();
-      await row.and(run.page.locator('.is-chosen')).waitFor({ timeout: 20_000 });
+      await run.page.locator(FIVE_B_READY).waitFor();
+      // Lot Q2, steps Q2.4, Q2.8 (§3.4): THE TRAVEL CASE's row tapped on 5b, then its last unit taken before PAY.
+      const row = run.page.locator('.view--live .live__addons .live__addon-item').filter({ has: run.page.locator('.live__addon-label', { hasText: /^THE TRAVEL CASE$/ }) });
+      await row.locator('.live__addon').click();
+      await row.and(run.page.locator('.is-on')).waitFor({ timeout: 20_000 });
       await run.page.locator('.view--live .live__pay:not([disabled])').waitFor({ timeout: 20_000 });
       await noneLeft(run, 'THE TRAVEL CASE');
       await run.page.locator('.view--live .live__pay').click();
@@ -2121,7 +2163,7 @@ export const PHONE_STATES: readonly UiState[] = [
   // ONE QUEUE (lot Q1, step Q1.3): THE SET's waiting state is the one queue, in SETS' words (N2), its id kept.
   { id: 'set-live-line', title: 'THE SET’s one queue: LIVE NOW, YOUR PLACE in your sizes, its time left, 2 OF 5 SETS LEFT, the one note (lot M3, T1; ONE QUEUE)', refs: ['M3'], variant: 'set-live', as: 'setLine', path: release('setNow'), ready: '.view--live .live__queue[data-state="waiting"]' },
   { id: 'set-live-turn', title: 'THE SET’s turn: PRESS AND HOLD THE SEAL, TO SECURE YOUR SET, THE ORBITAL SET · SIZE 16 · 54 · 42 · € 12 000 (lot M3, T1)', refs: ['M3'], variant: 'set-live', as: 'setTurn', path: release('setNow'), ready: '.view--live .live-hold' },
-  { id: 'set-live-secured', title: 'THE SET held: YOUR SET, THE SET · 3 PIECES, each piece in its size, the GIFT BOX chosen among the catalogue add-ons (lot Q2, step Q2.4: the interim look until 5b), PAY · total (lot M3, T1)', refs: ['M3', 'Q2'], variant: 'set-live', as: 'setSecured', path: release('setNow'), ready: '.view--live .live__set-pieces .live__set-piece' },
+  { id: 'set-live-secured', title: 'THE SET held on 5b: YOUR SET, THE SET · 3 PIECES, each piece in its size, ADD-ONS, the GIFT BOX + € 90 chosen, One box for the three pieces, PAY € 12 090 · 07:08 (lot M3, T1; lot Q2, step Q2.8, MK 5b)', refs: ['M3', 'MK 5b'], variant: 'set-live', as: 'setSecured', path: release('setNow'), ready: '.view--live .live__set-pieces .live__set-piece' },
   { id: 'set-live-confirmed', title: 'THE SET confirmed: CONFIRMED, YOUR SET IS RESERVED, each piece in its size on the receipt, the GIFT BOX, TOTAL, REFERENCE (lot M3, T1)', refs: ['M3'], variant: 'set-live', as: 'setBuyer', path: release('setNow'), ready: '.view--live .live__set-reserved' },
   { id: 'set-live-sold-out', title: 'THE SET sold out in one of its sizes: HALO · SOLD OUT IN SIZE 56, its one sentence, LEAVE THE LINE (lot M3, T1; ONE QUEUE)', refs: ['M3'], variant: 'set-live', as: 'setSoldout', path: release('setNow'), ready: '.view--live .live__edge' },
   { id: 'draw-selected-signed-out', title: 'A draw FOR SELECTED COLLECTORS, signed out: the rule in THE RELEASE, the sign-in says the release is for selected collectors', refs: ['F4'], variant: 'draw-selected', path: release('draw'), ready: '.view--release:has(.release__for) :is(form, .d-signin-line)' },
@@ -2206,7 +2248,7 @@ export const PHONE_STATES: readonly UiState[] = [
     },
     ready: '.view--live .live__turn.is-holding',
   },
-  { id: 'live-secured', title: 'Secured with add-ons: YOUR PIECE on the horizon, seal C, the catalogue add-ons as rows (ENGRAVING chosen, GIFT BOX; lot Q2, step Q2.4: the interim look until 5b), PAY € 5 200 · 08:11 with the time inside it', refs: ['live-11', 'MK 5b'], variant: 'live', as: 'secured', path: release('live'), ready: '.view--live .live__pay' },
+  { id: 'live-secured', title: '5b, SECURED with add-ons (MK 5b): YOUR PIECE on the horizon, seal C, ADD-ONS, ENGRAVING + € 150 chosen with YOUR TEXT empty 0 / 20, GIFT BOX + € 90, PAY € 5 200 · 08:11 with the time inside it (lot Q2, step Q2.8)', refs: ['live-11', 'MK 5b'], variant: 'live', as: 'secured', path: release('live'), ready: '.view--live .live__pay' },
   { id: 'live-confirmed', title: 'CONFIRMED in the vault: the photograph 470 px, CONFIRMED, LIVE RELEASE over MONOLITHE, the monogram on its horizon, the sentence, the receipt, SHARE TO STORIES, CLIENT SERVICES, MY PIECES (lot Q1 §3.7)', refs: ['live-12'], variant: 'live', as: 'confirmed', path: release('live'), ready: '.view--live:has(h1) .n-story__open:not([hidden])' },
   { id: 'live-sold-out-size', title: 'SOLD OUT IN SIZE 17: its one sentence (ONE QUEUE, D27), YOUR PLACE in its size, LEAVE THE LINE', refs: ['live-20'], variant: 'live', as: 'soldout', path: release('live'), ready: '.view--live .live__edge' },
   { id: 'live-missed', title: 'YOUR TURN HAS PASSED', refs: ['live-15', 'C30'], variant: 'live', as: 'missed', path: release('live'), ready: '.view--live .n-live__end' },
@@ -2909,27 +2951,98 @@ function onDesk(base: UiState, width: DeskWidth, opts: { light?: boolean; name?:
   };
 }
 
+/** 5b's right column, part by part, as the page draws it (desktop-room.ts SECURED_PARTS; the time PAY says is its own part). */
+const FIVE_B_PARTS: Readonly<Record<SecuredPart, string | null>> = {
+  'addons-title': '.live__addons-title',
+  addons: '.live__addons',
+  'addons-note': '.live__addons-note',
+  error: '.live__error',
+  pay: '.live__pay',
+  'pay-left': null,
+  'pay-note': '.live__pay-note',
+  release: '.live__release',
+};
+
 /**
- * The hold's PAY (with the time to pay inside it) on the first screen of a computer: its bottom within the window, before
- * the add-on rows, the page not scrolled.
+ * 5b on a computer (lot Q2, step Q2.8; D11, D17, D33, N10): PAY's foot, with the time to pay inside it, on the first
+ * screen, the page not scrolled; its right column in the mockup's order (ADD-ONS, the rows, M3's note, the error line,
+ * then PAY, its note, RELEASE MY PLACE), or with PAY first (is-pay-first) then the rows, M3's note and the error line,
+ * each part shown below the one before it. `payFirst`: the order this window must take (undefined: either). `firstScreen`
+ * false: a line shown after the screen opened (the engraving's words refused) may push PAY down; the order is decided as
+ * the screen opens and never moves under the collector's hand.
  */
-async function payOnFirstScreen(page: Page): Promise<string[]> {
-  const at = await page.evaluate(() => {
-    const pay = document.querySelector('.d-room__br > .live__pay');
-    // The add-on rows: the catalogue's (lot Q2, step Q2.4), shown.
-    const rows = document.querySelector('.d-room__br > :is(.live__addons, .live__items:not([hidden]))');
-    if (!pay) return null;
-    return {
-      bottom: Math.round(pay.getBoundingClientRect().bottom + scrollY),
-      height: innerHeight,
-      first: !rows || !!(pay.compareDocumentPosition(rows) & Node.DOCUMENT_POSITION_FOLLOWING),
-    };
+function fiveBColumn(payFirst?: boolean, firstScreen = true) {
+  return async (page: Page): Promise<string[]> => {
+    const at = await page.evaluate(
+      ({ parts, rows, first }) => {
+        const screen = document.querySelector('.d-room__screen--secured');
+        const pay = screen?.querySelector(':scope > .d-room__br > .live__pay');
+        if (!screen || !pay) return null;
+        const isFirst = screen.classList.contains('is-pay-first');
+        const shown = (isFirst ? first : rows).flatMap((p) => {
+          const sel = parts[p];
+          const el = sel ? screen.querySelector<HTMLElement>(`:scope > .d-room__br > ${sel}`) : null;
+          if (!el || el.hidden || el.getClientRects().length === 0) return [];
+          const r = el.getBoundingClientRect();
+          return [{ part: p, top: Math.round(r.top), bottom: Math.round(r.bottom) }];
+        });
+        return { isFirst, shown, payBottom: Math.round(pay.getBoundingClientRect().bottom + scrollY), height: innerHeight };
+      },
+      { parts: FIVE_B_PARTS, rows: securedColumn(false), first: securedColumn(true) },
+    );
+    if (!at) return ['no PAY in the right column of SECURED'];
+    const problems: string[] = [];
+    if (firstScreen && at.payBottom > at.height) problems.push(`PAY ends at ${at.payBottom} px, below the first screen (${at.height} px)`);
+    if (payFirst !== undefined && at.isFirst !== payFirst) problems.push(payFirst ? 'PAY does not come first' : 'PAY comes first, the rows fitting above it');
+    for (let i = 1; i < at.shown.length; i++) {
+      const [a, b] = [at.shown[i - 1]!, at.shown[i]!];
+      if (b.top < a.bottom - 1) problems.push(`${b.part} (${b.top} px) is not below ${a.part} (${a.bottom} px)`);
+    }
+    if (!at.shown.some((p) => p.part === 'addons')) problems.push('no add-on rows shown');
+    return problems;
+  };
+}
+
+/**
+ * 5b's rows on a computer (D34, D37): an unchosen row's ring at rest is the strong hairline (MK's desk frame, 0.34), no
+ * ground on a row; YOUR TEXT focused, its hairline turns ink, its label too, and no ring frames the row.
+ */
+async function fiveBRows(page: Page): Promise<string[]> {
+  const at = await page.evaluate(async () => {
+    const rest = document.querySelector('.d-room__br .live__addon[aria-pressed="false"] .live__addon-mark');
+    const item = document.querySelector('.d-room__br .live__addon-item');
+    const input = document.querySelector<HTMLInputElement>('.d-room__br .ao-text__input');
+    const ink = getComputedStyle(document.querySelector('.d-room__br .live__addon-label')!).color;
+    const strong = getComputedStyle(document.querySelector('.d-room')!).getPropertyValue('--hairline-strong').trim();
+    if (!rest || !item || !input) return null;
+    const out = { ring: getComputedStyle(rest).borderTopColor, ground: getComputedStyle(item).backgroundColor, strong, ink, field: '', label: '', outline: '' };
+    input.focus();
+    await new Promise((r) => setTimeout(r, 400));
+    const field = input.closest('.ao-text')!;
+    out.field = getComputedStyle(field).borderBottomColor;
+    out.label = getComputedStyle(field.querySelector('.ao-text__label')!).color;
+    out.outline = getComputedStyle(input.closest('.live__addon-item')!).outlineStyle;
+    input.blur();
+    await new Promise((r) => setTimeout(r, 400));
+    return out;
   });
-  if (!at) return ['no PAY in the right column'];
+  if (!at) return ['no unchosen row, no row or no YOUR TEXT'];
   return [
-    ...(at.bottom > at.height ? [`PAY ends at ${at.bottom} px, below the first screen (${at.height} px)`] : []),
-    ...(at.first ? [] : ['PAY comes after the add-on rows']),
+    ...(at.ring === 'rgba(246, 242, 234, 0.34)' ? [] : [`an unchosen row's ring rests at ${at.ring}, not the strong hairline (rgba(246, 242, 234, 0.34); the room's --hairline-strong ${at.strong})`]),
+    ...(at.ground === 'rgba(0, 0, 0, 0)' ? [] : [`a row has the ground ${at.ground}`]),
+    ...(at.field === at.ink ? [] : [`YOUR TEXT focused draws its hairline ${at.field}, not ink (${at.ink})`]),
+    ...(at.label === at.ink ? [] : [`YOUR TEXT focused keeps its label ${at.label}`]),
+    ...(at.outline === 'none' ? [] : [`YOUR TEXT focused, its row is framed (${at.outline})`]),
   ];
+}
+
+/** Each of `checks`, in order: every problem of each. */
+function allOf(...checks: ((page: Page) => Promise<string[]>)[]) {
+  return async (page: Page): Promise<string[]> => {
+    const out: string[] = [];
+    for (const c of checks) out.push(...(await c(page)));
+    return out;
+  };
 }
 
 /**
@@ -3029,6 +3142,26 @@ async function returnTheSet(run: StateRun): Promise<void> {
   await run.page.locator('#order-request-reason').selectOption('SIZE');
   await button(run, 'SEND THE REQUEST').click();
   await run.page.locator(':is(.view--pieces .n-pieces__set, .view--order) .n-pieces__request-label').first().waitFor({ timeout: 20_000 });
+}
+
+/**
+ * addons-hold-stress's state write (lot Q2, step Q2.8; plan §3.4): the 'addons' release picks six rows, GIFT WRAPPING,
+ * ENGRAVING, THE TRAVEL CASE, POLISHING CLOTH, THE TRAVEL CASE FOR TWO PIECES, LINED (its two-line line) and a service
+ * of 40 characters (its LIVE switch only), made here. Written once per stage.
+ */
+async function longestPick(run: StateRun): Promise<void> {
+  const { db, services } = run.stage.ctx;
+  if (await db.selectFrom('addon_items').select('id').where('name', '=', LONGEST_ADDON).executeTakeFirst()) return;
+  const admin = await demoAdmin(run);
+  const made = await services.addons.create(
+    { kind: 'SERVICE', name: LONGEST_ADDON, line: 'Its card written in your words.', skuCode: 'ADD-SECOND-BOX', prices: { EUR: 2_500 }, offeredAt: { live: true, draw: false, salon: false, orders: false } },
+    admin,
+  );
+  const id = (name: string) => db.selectFrom('addon_items').select('id').where('name', '=', name).executeTakeFirstOrThrow().then((r) => r.id);
+  const ids = [await id('GIFT WRAPPING'), await id('ENGRAVING'), await id('THE TRAVEL CASE'), await id('POLISHING CLOTH'), await id('THE TRAVEL CASE FOR TWO PIECES, LINED'), made.id];
+  const live = run.demo.releases.live!;
+  await db.deleteFrom('drop_addons').where('drop_id', '=', live).execute();
+  await db.insertInto('drop_addons').values(ids.map((addon_id, i) => ({ drop_id: live, addon_id, position: i + 1 }))).execute();
 }
 
 /** No unit left of the add-on `name` at the default location (written once per stage): a correction down to 0. */
@@ -3435,10 +3568,11 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
     // The catalogue add-ons (lot M3, D2) on their stage: the hold in the room, a draw's PLACE HELD (also in light), the
     // salon request; each order's own page (the reserved one also in light, the paid one with its own invoice, packing
     // begun); ADD AN ADD-ON's part of the page chosen (also in light), none available, could not be read; PAY, last.
-    ...desk(1440, 'addons-hold', 'addons-place-held', 'addons-salon'),
-    // ONE QUEUE review (lot Q1): on a computer of 1024 × 768 the hold's PAY, its time inside it, stays on the first screen
-    // above the add-on rows (desktop-room.ts PLAN.secured; production M3 showed the time there).
-    onDesk(phoneState('addons-hold'), 1024, { extra: { check: payOnFirstScreen } }),
+    // 5b (lot Q2, step Q2.8; N10): at 1440 × 900 the rows above PAY, as the mockup; at 1024 × 768 PAY, its time inside
+    // it, on the first screen (production M3 showed the time there), first when the rows would push it below.
+    onDesk(phoneState('addons-hold'), 1440, { extra: { check: allOf(fiveBColumn(false), fiveBRows) } }),
+    ...desk(1440, 'addons-place-held', 'addons-salon'),
+    onDesk(phoneState('addons-hold'), 1024, { extra: { check: fiveBColumn() } }),
     onDesk(phoneState('addons-place-held'), 1440, { light: true }),
     addonsOrderAt(false),
     addonsOrderAt(true),
@@ -3450,6 +3584,16 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
     // A set's CONFIRMED at 1024 × 768, last (its own stage, set-live, read only): the title above the pieces' photographs
     // (owner, 24 Oct).
     onDesk(phoneState('set-live-confirmed'), 1024, { extra: { check: setConfirmedTitleClear } }),
+  ],
+  // ── 5b, SECURED with add-ons (lot Q2, step Q2.8) on its own stage (addons): the engraving's words refused (the error
+  // line right under the rows), in light mode (the room dark, its rings and YOUR TEXT as in the dark), then its longest
+  // pick (its write), at 1440 × 900 and 1024 × 768 ──
+  'desk-15': [
+    onDesk(phoneState('addons-hold-text-error'), 1440, { extra: { check: fiveBColumn(undefined, false) } }),
+    onDesk(phoneState('addons-hold-text-error'), 1024, { extra: { check: fiveBColumn(undefined, false) } }),
+    onDesk(phoneState('addons-hold-light'), 1440, { light: true, name: 'addons-hold', extra: { check: allOf(fiveBColumn(false), fiveBRows) } }),
+    onDesk(phoneState('addons-hold-stress'), 1440, { extra: { check: fiveBColumn() } }),
+    onDesk(phoneState('addons-hold-stress'), 1024, { extra: { check: fiveBColumn() } }),
   ],
 });
 

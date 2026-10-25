@@ -7402,9 +7402,10 @@
       ]
     },
     "addons-hold": {
-      "title": "The hold of a LIVE RELEASE: the release’s add-ons, then ADD TO YOUR ORDER, a POLISHING CLOTH × 2 and a CHAIN EXTENDER chosen, the longest name, PAY · total (lot M3, D2)",
+      "title": "5b, SECURED with add-ons (MK 5b): ADD-ONS, GIFT WRAPPING + € 15, ENGRAVING + € 40 chosen with YOUR TEXT « M. B. » 5 / 12, THE TRAVEL CASE + € 60, PAY € 5 090 · 08:11; differences from MK: the demo’s amounts and time in the house’s format, and M3’s note under the rows (THE TRAVEL CASE has stock) (lot Q2, step Q2.8)",
       "refs": [
-        "M3"
+        "MK 5b",
+        "Q2"
       ],
       "variant": "addons",
       "as": "secured",
@@ -7453,6 +7454,95 @@
         "IP GEOLOCATION BY DB-IP",
         "PAY · € 5 260",
         "TO CONFIRM"
+      ]
+    },
+    "addons-hold-text-error": {
+      "title": "5b: the engraving’s words refused, « M. B. # », the house’s sentence under the rows, the row kept chosen (lot Q2, step Q2.8)",
+      "refs": [
+        "MK 5b",
+        "Q2"
+      ],
+      "variant": "addons",
+      "as": "secured",
+      "values": [
+        "ORBES",
+        "The door is open. Take your time at the seal.",
+        "FROM ORBES",
+        "SECURED",
+        "YOUR PIECE",
+        "SECURED AT 18:47:10",
+        "MONOLITHE",
+        "ORBITAL · SIZE 16",
+        "ADD-ONS",
+        "GIFT WRAPPING",
+        "+ € 15",
+        "In the house’s paper, with a card in your words.",
+        "ENGRAVING",
+        "+ € 40",
+        "Up to 12 characters, engraved by ORBES.",
+        "YOUR TEXT",
+        "7 / 12",
+        "THE TRAVEL CASE",
+        "+ € 60",
+        "A case made to carry your piece.",
+        "Added to your order at PAY, while available.",
+        "Up to 12 characters: letters, figures, spaces and . & ’ -",
+        "PAY € 5 090 · 08:11",
+        "ORBES Client Services will contact you for payment. Your delivery address is added in YOUR ORDERS.",
+        "RELEASE MY PLACE",
+        "HOW RELEASES WORK",
+        "THE RELEASES",
+        "SOUND ON",
+        "PRIVACY",
+        "·",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "IP GEOLOCATION BY DB-IP"
+      ]
+    },
+    "addons-hold-light": {
+      "title": "5b in light mode: the room stays dark, its rows, YOUR TEXT and PAY as in the dark (lot Q2, step Q2.8; D18)",
+      "refs": [
+        "MK 5b",
+        "Q2"
+      ],
+      "variant": "addons",
+      "as": "secured",
+      "values": [
+        "ORBES",
+        "The door is open. Take your time at the seal.",
+        "FROM ORBES",
+        "SECURED",
+        "YOUR PIECE",
+        "SECURED AT 18:47:10",
+        "MONOLITHE",
+        "ORBITAL · SIZE 16",
+        "ADD-ONS",
+        "GIFT WRAPPING",
+        "+ € 15",
+        "In the house’s paper, with a card in your words.",
+        "ENGRAVING",
+        "+ € 40",
+        "Up to 12 characters, engraved by ORBES.",
+        "YOUR TEXT",
+        "5 / 12",
+        "THE TRAVEL CASE",
+        "+ € 60",
+        "A case made to carry your piece.",
+        "Added to your order at PAY, while available.",
+        "PAY € 5 090 · 08:11",
+        "ORBES Client Services will contact you for payment. Your delivery address is added in YOUR ORDERS.",
+        "RELEASE MY PLACE",
+        "HOW RELEASES WORK",
+        "THE RELEASES",
+        "SOUND ON",
+        "PRIVACY",
+        "·",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "IP GEOLOCATION BY DB-IP"
       ]
     },
     "addons-place-held": {
@@ -8077,10 +8167,63 @@
         "TRY AGAIN"
       ]
     },
-    "addons-pay": {
-      "title": "PAY with a CHAIN EXTENDER none is left of: CONFIRMED, THE CHAIN EXTENDER COULD NOT BE ADDED: NONE LEFT., the receipt with the POLISHING CLOTH × 2 (lot M3, D2)",
+    "addons-hold-stress": {
+      "title": "5b at its longest: six rows (GIFT WRAPPING, ENGRAVING chosen, THE TRAVEL CASE, POLISHING CLOTH, THE TRAVEL CASE FOR TWO PIECES, LINED and its two-line line, a service of 40 characters), each name and line whole (lot Q2, step Q2.8)",
       "refs": [
-        "M3"
+        "MK 5b",
+        "Q2"
+      ],
+      "variant": "addons",
+      "as": "secured",
+      "values": [
+        "ORBES",
+        "The door is open. Take your time at the seal.",
+        "FROM ORBES",
+        "SECURED",
+        "YOUR PIECE",
+        "SECURED AT 18:47:10",
+        "MONOLITHE",
+        "ORBITAL · SIZE 16",
+        "ADD-ONS",
+        "GIFT WRAPPING",
+        "+ € 15",
+        "In the house’s paper, with a card in your words.",
+        "ENGRAVING",
+        "+ € 40",
+        "Up to 12 characters, engraved by ORBES.",
+        "YOUR TEXT",
+        "5 / 12",
+        "THE TRAVEL CASE",
+        "+ € 60",
+        "A case made to carry your piece.",
+        "POLISHING CLOTH",
+        "A soft cloth to keep the metal bright.",
+        "THE TRAVEL CASE FOR TWO PIECES, LINED",
+        "+ € 12 450.50",
+        "Lined to keep two pieces apart, with its own cloth, for the longest journeys.",
+        "A SECOND BOX OF THE HOUSE, WITH ITS CARD",
+        "+ € 25",
+        "Its card written in your words.",
+        "Added to your order at PAY, while available.",
+        "PAY € 5 090 · 08:11",
+        "ORBES Client Services will contact you for payment. Your delivery address is added in YOUR ORDERS.",
+        "RELEASE MY PLACE",
+        "HOW RELEASES WORK",
+        "THE RELEASES",
+        "SOUND ON",
+        "PRIVACY",
+        "·",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "IP GEOLOCATION BY DB-IP"
+      ]
+    },
+    "addons-pay": {
+      "title": "PAY on 5b with THE TRAVEL CASE chosen and none left of it: CONFIRMED, THE TRAVEL CASE COULD NOT BE ADDED: NONE LEFT., the receipt with the ENGRAVING € 40, TOTAL € 5 090 (lot Q2, steps Q2.4, Q2.8)",
+      "refs": [
+        "M3",
+        "Q2"
       ],
       "variant": "addons",
       "as": "secured",
@@ -12021,9 +12164,10 @@
       ]
     },
     "set-live-secured": {
-      "title": "THE SET held: YOUR SET, THE SET · 3 PIECES, each piece in its size, the GIFT BOX chosen, PAY · total (lot M3, T1)",
+      "title": "THE SET held on 5b: YOUR SET, THE SET · 3 PIECES, each piece in its size, ADD-ONS, the GIFT BOX + € 90 chosen, One box for the three pieces, PAY € 12 090 · 07:08 (lot M3, T1; lot Q2, step Q2.8, MK 5b)",
       "refs": [
-        "M3"
+        "M3",
+        "MK 5b"
       ],
       "variant": "set-live",
       "as": "setSecured",
@@ -13491,10 +13635,10 @@
       ]
     },
     "live-secured": {
-      "title": "Secured (MK 5): YOUR PIECE on the horizon, seal C, the add-ons, PAY € 5 200 · 08:11 with the time inside it",
+      "title": "5b, SECURED with add-ons (MK 5b): YOUR PIECE on the horizon, seal C, ADD-ONS, ENGRAVING + € 150 chosen with YOUR TEXT empty 0 / 20, GIFT BOX + € 90, PAY € 5 200 · 08:11 with the time inside it (lot Q2, step Q2.8)",
       "refs": [
         "live-11",
-        "MK 5"
+        "MK 5b"
       ],
       "variant": "live",
       "as": "secured",
@@ -29986,7 +30130,7 @@
       ]
     },
     "desk-live-secured": {
-      "title": "Secured (MK 5): YOUR PIECE on the horizon, seal C, the add-ons, PAY € 5 200 · 08:11 with the time inside it (a computer, 1440 × 900)",
+      "title": "5b, SECURED with add-ons (MK 5b): YOUR PIECE on the horizon, seal C, ADD-ONS, ENGRAVING + € 150 chosen with YOUR TEXT empty 0 / 20, GIFT BOX + € 90, PAY € 5 200 · 08:11 with the time inside it (lot Q2, step Q2.8) (a computer, 1440 × 900)",
       "refs": [
         "desktop",
         "phone: live-secured"
@@ -33399,7 +33543,7 @@
       ]
     },
     "desk-set-live-secured": {
-      "title": "THE SET held: YOUR SET, THE SET · 3 PIECES, each piece in its size, the GIFT BOX chosen, PAY · total (lot M3, T1) (a computer, 1440 × 900)",
+      "title": "THE SET held on 5b: YOUR SET, THE SET · 3 PIECES, each piece in its size, ADD-ONS, the GIFT BOX + € 90 chosen, One box for the three pieces, PAY € 12 090 · 07:08 (lot M3, T1; lot Q2, step Q2.8, MK 5b) (a computer, 1440 × 900)",
       "refs": [
         "desktop",
         "phone: set-live-secured"
@@ -35401,7 +35545,7 @@
       ]
     },
     "desk-addons-hold": {
-      "title": "The hold of a LIVE RELEASE: the release’s add-ons, then ADD TO YOUR ORDER, a POLISHING CLOTH × 2 and a CHAIN EXTENDER chosen, the longest name, PAY · total (lot M3, D2) (a computer, 1440 × 900)",
+      "title": "5b, SECURED with add-ons (MK 5b): ADD-ONS, GIFT WRAPPING + € 15, ENGRAVING + € 40 chosen with YOUR TEXT « M. B. » 5 / 12, THE TRAVEL CASE + € 60, PAY € 5 090 · 08:11; differences from MK: the demo’s amounts and time in the house’s format, and M3’s note under the rows (THE TRAVEL CASE has stock) (lot Q2, step Q2.8) (a computer, 1440 × 900)",
       "refs": [
         "desktop",
         "phone: addons-hold"
@@ -35603,7 +35747,7 @@
       ]
     },
     "desk-addons-hold-1024": {
-      "title": "The hold of a LIVE RELEASE: the release’s add-ons, then ADD TO YOUR ORDER, a POLISHING CLOTH × 2 and a CHAIN EXTENDER chosen, the longest name, PAY · total (lot M3, D2) (a computer, 1024 × 768)",
+      "title": "5b, SECURED with add-ons (MK 5b): ADD-ONS, GIFT WRAPPING + € 15, ENGRAVING + € 40 chosen with YOUR TEXT « M. B. » 5 / 12, THE TRAVEL CASE + € 60, PAY € 5 090 · 08:11; differences from MK: the demo’s amounts and time in the house’s format, and M3’s note under the rows (THE TRAVEL CASE has stock) (lot Q2, step Q2.8) (a computer, 1024 × 768)",
       "refs": [
         "desktop",
         "phone: addons-hold"
@@ -36256,7 +36400,7 @@
       ]
     },
     "desk-addons-pay": {
-      "title": "PAY with a CHAIN EXTENDER none is left of: CONFIRMED, THE CHAIN EXTENDER COULD NOT BE ADDED: NONE LEFT., the receipt with the POLISHING CLOTH × 2 (lot M3, D2) (a computer, 1440 × 900)",
+      "title": "PAY on 5b with THE TRAVEL CASE chosen and none left of it: CONFIRMED, THE TRAVEL CASE COULD NOT BE ADDED: NONE LEFT., the receipt with the ENGRAVING € 40, TOTAL € 5 090 (lot Q2, steps Q2.4, Q2.8) (a computer, 1440 × 900)",
       "refs": [
         "desktop",
         "phone: addons-pay"
@@ -36334,6 +36478,244 @@
         "TERMS",
         "LEGAL",
         "HELP",
+        "IP GEOLOCATION BY DB-IP"
+      ]
+    },
+    "desk-addons-hold-text-error": {
+      "title": "5b: the engraving’s words refused, « M. B. # », the house’s sentence under the rows, the row kept chosen (lot Q2, step Q2.8) (a computer, 1440 × 900)",
+      "refs": [
+        "desktop",
+        "phone: addons-hold-text-error"
+      ],
+      "variant": "addons",
+      "as": "secured",
+      "values": [
+        "ORBES",
+        "4 IN THE ROOM",
+        "SECURED",
+        "YOUR PIECE",
+        "SECURED AT 18:47:10",
+        "The door is open. Take your time at the seal.",
+        "FROM ORBES",
+        "MONOLITHE IN BLUE",
+        "ORBITAL · SIZE 16",
+        "ADD-ONS",
+        "GIFT WRAPPING",
+        "+ € 15",
+        "In the house’s paper, with a card in your words.",
+        "ENGRAVING",
+        "+ € 40",
+        "Up to 12 characters, engraved by ORBES.",
+        "YOUR TEXT",
+        "7 / 12",
+        "THE TRAVEL CASE",
+        "+ € 60",
+        "A case made to carry your piece.",
+        "Added to your order at PAY, while available.",
+        "Up to 12 characters: letters, figures, spaces and . & ’ -",
+        "PAY € 5 090 · 08:11",
+        "ORBES Client Services will contact you for payment. Your delivery address is added in YOUR ORDERS.",
+        "RELEASE MY PLACE",
+        "HOW RELEASES WORK",
+        "THE RELEASES",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND OFF",
+        "IP GEOLOCATION BY DB-IP"
+      ]
+    },
+    "desk-addons-hold-text-error-1024": {
+      "title": "5b: the engraving’s words refused, « M. B. # », the house’s sentence under the rows, the row kept chosen (lot Q2, step Q2.8) (a computer, 1024 × 768)",
+      "refs": [
+        "desktop",
+        "phone: addons-hold-text-error"
+      ],
+      "variant": "addons",
+      "as": "secured",
+      "values": [
+        "ORBES",
+        "4 IN THE ROOM",
+        "SECURED",
+        "YOUR PIECE",
+        "SECURED AT 18:47:10",
+        "The door is open. Take your time at the seal.",
+        "FROM ORBES",
+        "MONOLITHE IN BLUE",
+        "ORBITAL · SIZE 16",
+        "ADD-ONS",
+        "GIFT WRAPPING",
+        "+ € 15",
+        "In the house’s paper, with a card in your words.",
+        "ENGRAVING",
+        "+ € 40",
+        "Up to 12 characters, engraved by ORBES.",
+        "YOUR TEXT",
+        "7 / 12",
+        "THE TRAVEL CASE",
+        "+ € 60",
+        "A case made to carry your piece.",
+        "Added to your order at PAY, while available.",
+        "Up to 12 characters: letters, figures, spaces and . & ’ -",
+        "PAY € 5 090 · 08:11",
+        "ORBES Client Services will contact you for payment. Your delivery address is added in YOUR ORDERS.",
+        "RELEASE MY PLACE",
+        "HOW RELEASES WORK",
+        "THE RELEASES",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND OFF",
+        "IP GEOLOCATION BY DB-IP"
+      ]
+    },
+    "desk-light-addons-hold": {
+      "title": "5b in light mode: the room stays dark, its rows, YOUR TEXT and PAY as in the dark (lot Q2, step Q2.8; D18) (a computer, 1440 × 900, in light)",
+      "refs": [
+        "desktop",
+        "phone: addons-hold-light"
+      ],
+      "variant": "addons",
+      "as": "secured",
+      "values": [
+        "ORBES",
+        "4 IN THE ROOM",
+        "SECURED",
+        "YOUR PIECE",
+        "SECURED AT 18:47:10",
+        "The door is open. Take your time at the seal.",
+        "FROM ORBES",
+        "MONOLITHE IN BLUE",
+        "ORBITAL · SIZE 16",
+        "ADD-ONS",
+        "GIFT WRAPPING",
+        "+ € 15",
+        "In the house’s paper, with a card in your words.",
+        "ENGRAVING",
+        "+ € 40",
+        "Up to 12 characters, engraved by ORBES.",
+        "YOUR TEXT",
+        "5 / 12",
+        "THE TRAVEL CASE",
+        "+ € 60",
+        "A case made to carry your piece.",
+        "Added to your order at PAY, while available.",
+        "PAY € 5 090 · 08:11",
+        "ORBES Client Services will contact you for payment. Your delivery address is added in YOUR ORDERS.",
+        "RELEASE MY PLACE",
+        "HOW RELEASES WORK",
+        "THE RELEASES",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND OFF",
+        "IP GEOLOCATION BY DB-IP"
+      ]
+    },
+    "desk-addons-hold-stress": {
+      "title": "5b at its longest: six rows (GIFT WRAPPING, ENGRAVING chosen, THE TRAVEL CASE, POLISHING CLOTH, THE TRAVEL CASE FOR TWO PIECES, LINED and its two-line line, a service of 40 characters), each name and line whole (lot Q2, step Q2.8) (a computer, 1440 × 900)",
+      "refs": [
+        "desktop",
+        "phone: addons-hold-stress"
+      ],
+      "variant": "addons",
+      "as": "secured",
+      "values": [
+        "ORBES",
+        "4 IN THE ROOM",
+        "SECURED",
+        "YOUR PIECE",
+        "SECURED AT 18:47:10",
+        "The door is open. Take your time at the seal.",
+        "FROM ORBES",
+        "MONOLITHE IN BLUE",
+        "ORBITAL · SIZE 16",
+        "ADD-ONS",
+        "GIFT WRAPPING",
+        "+ € 15",
+        "In the house’s paper, with a card in your words.",
+        "ENGRAVING",
+        "+ € 40",
+        "Up to 12 characters, engraved by ORBES.",
+        "YOUR TEXT",
+        "5 / 12",
+        "THE TRAVEL CASE",
+        "+ € 60",
+        "A case made to carry your piece.",
+        "POLISHING CLOTH",
+        "A soft cloth to keep the metal bright.",
+        "THE TRAVEL CASE FOR TWO PIECES, LINED",
+        "+ € 12 450.50",
+        "Lined to keep two pieces apart, with its own cloth, for the longest journeys.",
+        "A SECOND BOX OF THE HOUSE, WITH ITS CARD",
+        "+ € 25",
+        "Its card written in your words.",
+        "Added to your order at PAY, while available.",
+        "PAY € 5 090 · 08:11",
+        "ORBES Client Services will contact you for payment. Your delivery address is added in YOUR ORDERS.",
+        "RELEASE MY PLACE",
+        "HOW RELEASES WORK",
+        "THE RELEASES",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND OFF",
+        "IP GEOLOCATION BY DB-IP"
+      ]
+    },
+    "desk-addons-hold-stress-1024": {
+      "title": "5b at its longest: six rows (GIFT WRAPPING, ENGRAVING chosen, THE TRAVEL CASE, POLISHING CLOTH, THE TRAVEL CASE FOR TWO PIECES, LINED and its two-line line, a service of 40 characters), each name and line whole (lot Q2, step Q2.8) (a computer, 1024 × 768)",
+      "refs": [
+        "desktop",
+        "phone: addons-hold-stress"
+      ],
+      "variant": "addons",
+      "as": "secured",
+      "values": [
+        "ORBES",
+        "4 IN THE ROOM",
+        "SECURED",
+        "YOUR PIECE",
+        "SECURED AT 18:47:10",
+        "The door is open. Take your time at the seal.",
+        "FROM ORBES",
+        "MONOLITHE IN BLUE",
+        "ORBITAL · SIZE 16",
+        "ADD-ONS",
+        "GIFT WRAPPING",
+        "+ € 15",
+        "In the house’s paper, with a card in your words.",
+        "ENGRAVING",
+        "+ € 40",
+        "Up to 12 characters, engraved by ORBES.",
+        "YOUR TEXT",
+        "5 / 12",
+        "THE TRAVEL CASE",
+        "+ € 60",
+        "A case made to carry your piece.",
+        "POLISHING CLOTH",
+        "A soft cloth to keep the metal bright.",
+        "THE TRAVEL CASE FOR TWO PIECES, LINED",
+        "+ € 12 450.50",
+        "Lined to keep two pieces apart, with its own cloth, for the longest journeys.",
+        "A SECOND BOX OF THE HOUSE, WITH ITS CARD",
+        "+ € 25",
+        "Its card written in your words.",
+        "Added to your order at PAY, while available.",
+        "PAY € 5 090 · 08:11",
+        "ORBES Client Services will contact you for payment. Your delivery address is added in YOUR ORDERS.",
+        "RELEASE MY PLACE",
+        "HOW RELEASES WORK",
+        "THE RELEASES",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND OFF",
         "IP GEOLOCATION BY DB-IP"
       ]
     }

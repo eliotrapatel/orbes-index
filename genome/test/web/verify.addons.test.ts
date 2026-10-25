@@ -12,6 +12,7 @@
  *  - the calls: the hold's choice beside the release's add-ons, a place held's, a request's, YOUR ORDERS' offer, addition
  *    and removal, each with the CSRF token, and an answer of the wrong shape refused.
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { ADDON_LIMIT } from '../../src/server/services/order-addons.js';
 import {
@@ -31,10 +32,12 @@ import {
   withUnits,
 } from '../../src/web/verify/addons-model.js';
 import { ApiClient } from '../../src/web/verify/api.js';
-import { ADDONS, ORDERS } from '../../src/web/verify/copy.js';
+import { ADDONS, LIVE, ORDERS } from '../../src/web/verify/copy.js';
+import { ENGRAVING_TEXT_MAX, engravingProblem, holdRows, securedAddons, securedChoice, securedColumn } from '../../src/web/verify/live-model.js';
+import { payBelowFirstScreen, SECURED_PARTS } from '../../src/web/verify/views/desktop-room.js';
 import { orderModel, orderRows } from '../../src/web/verify/orders-model.js';
 import { formatMoney } from '../../src/web/verify/view-model.js';
-import type { AccountOrder, AddonOfferItem, ChosenAddon } from '../../src/web/verify/types.js';
+import type { AccountOrder, AddonOfferItem, ChosenAddon, LiveEntry } from '../../src/web/verify/types.js';
 
 const CLOTH = '0b5e7d1a-1c2d-4e5f-9a8b-7c6d5e4f3a2b';
 const EXTENDER = '6f1c7a54-3b1e-4c2a-9a55-0d3b1f2e4c5a';
@@ -194,6 +197,84 @@ describe('an order’s add-ons in YOUR ORDERS (orders-model.ts, addons-model.ts)
     expect(addonSheet({ canAdd: true, reason: null, paid: true, currency: 'EUR', offer: [] })).toEqual({ rows: [], empty: ORDERS.addons.none, paidNote: null, currency: 'EUR' });
     expect(addonSheet({ canAdd: false, reason: 'PACKING_STARTED', paid: true, currency: 'EUR', offer: [] }).empty).toBe(ORDERS.addons.locked);
     expect(addonSheet({ canAdd: false, reason: 'CLOSED', paid: false, currency: 'EUR', offer: [] }).empty).toBe(ORDERS.addons.none);
+  });
+});
+
+describe('5b, SECURED with add-ons (lot Q2, step Q2.8; live-model.ts, desktop-room.ts)', () => {
+  const ENGRAVING = '1c3e5a7b-9d0f-4a2b-8c4d-6e8f0a1b2c3d';
+  const WRAPPING = '2d4f6b8c-0e1a-4b3c-9d5e-7f9a1b2c3d4e';
+  const hold = (o: Partial<LiveEntry> = {}) =>
+    ({
+      currency: 'EUR',
+      quantity: 1,
+      addonOffer: [
+        offered({ addonId: WRAPPING, name: 'Gift wrapping', line: 'In the house’s paper, with a card in your words.', maxUnits: 1, engraving: false }),
+        offered({ addonId: ENGRAVING, name: 'Engraving', line: 'Up to 12 characters, engraved by ORBES.', priceMinor: 4_000, maxUnits: 1, engraving: true, textMax: 12 }),
+        offered({ addonId: CASE, name: 'The travel case', line: 'A case made to carry your piece.', priceMinor: 6_000, maxUnits: 1, engraving: false, whileAvailable: true }),
+      ],
+      addonItems: [{ ...chosen({ addonId: ENGRAVING, name: 'Engraving', priceMinor: 4_000 }), text: 'M. B.' }],
+      ...o,
+    }) as Pick<LiveEntry, 'addonOffer' | 'addonItems' | 'currency'>;
+
+  it('draws a row per add-on you tap (one per piece), ENGRAVING chosen with YOUR TEXT counted against its textMax, and M3’s note while one has stock', () => {
+    const m = securedAddons(hold())!;
+    expect(m.rows.map((r) => [r.name, r.price, r.chosen, r.text])).toEqual([
+      ['GIFT WRAPPING', '+ € 15', false, null],
+      ['ENGRAVING', '+ € 40', true, { value: 'M. B.', max: 12, count: '5 / 12' }],
+      ['THE TRAVEL CASE', '+ € 60', false, null],
+    ]);
+    expect(m.note).toBe('Added to your order at PAY, while available.');
+    // Services only: no note (N2). The engraving without its own most characters: the house's 20; no words: 0 / 20.
+    const services = securedAddons(hold({ addonOffer: [offered({ addonId: ENGRAVING, name: 'Engraving', priceMinor: 15_000, maxUnits: 1, engraving: true })], addonItems: [{ ...chosen({ addonId: ENGRAVING, name: 'Engraving' }), text: null }] }))!;
+    expect(services.note).toBeNull();
+    expect(services.rows[0]!.text).toEqual({ value: '', max: 20, count: '0 / 20' });
+    // Typed and not saved: the field's words and count; a tap not sent yet: chosen or let go at once (no field when let go).
+    const typed = securedAddons(hold(), { drafts: new Map([[ENGRAVING, 'M. B. R.']]), units: new Map([[WRAPPING, 1]]) })!;
+    expect(typed.rows.map((r) => [r.chosen, r.text?.count ?? null])).toEqual([
+      [true, null],
+      [false, null],
+      [false, null],
+    ]);
+    expect(securedAddons(hold(), { drafts: new Map([[ENGRAVING, 'M. B. R.']]) })!.rows[1]!.text!.count).toBe('8 / 12');
+  });
+
+  it('sends the rows chosen with the engraving’s words (none when empty), checks them against its textMax, and totals one unit per piece', () => {
+    const m = securedAddons(hold(), { units: new Map([[ENGRAVING, 1], [CASE, 1]]) })!;
+    expect(securedChoice(m.rows)).toEqual([
+      { addonId: ENGRAVING, text: 'M. B.' },
+      { addonId: CASE, text: null },
+    ]);
+    expect(securedChoice(m.rows, new Map([[ENGRAVING, '  A.   R. ']]))).toEqual([
+      { addonId: ENGRAVING, text: 'A. R.' },
+      { addonId: CASE, text: null },
+    ]);
+    expect(securedChoice(m.rows, new Map([[ENGRAVING, '   ']]))[0]).toEqual({ addonId: ENGRAVING, text: null });
+    expect(engravingProblem('M. B.', 12)).toBeNull();
+    expect(engravingProblem('', 12)).toBeNull();
+    expect(engravingProblem('ABCDEFGHIJKLM', 12)).toBe('Up to 12 characters: letters, figures, spaces and . & ’ -');
+    expect(engravingProblem('M. B. #', 12)).toBe(LIVE.addonText.invalid(12));
+    expect(engravingProblem('ABCDEFGHIJKLMNOPQRST', ENGRAVING_TEXT_MAX)).toBeNull();
+    // PAY's total is the server's (piece + each add-on chosen) × pieces: two pieces, ENGRAVING and THE TRAVEL CASE.
+    const rows = holdRows({ ...hold(), addonItems: [] }, new Map([[ENGRAVING, 1], [CASE, 1]]));
+    expect((505_000 + rowsTotal(rows)) * 2).toBe(1_030_000);
+  });
+
+  it('orders the computer’s right column as the mockup, or with PAY first when the rows would push it below the first screen, the note and the error line under the rows in both', () => {
+    expect(securedColumn(false)).toEqual(['addons-title', 'addons', 'addons-note', 'error', 'pay', 'pay-left', 'pay-note', 'release']);
+    expect(securedColumn(true)).toEqual(['pay', 'pay-left', 'pay-note', 'release', 'addons-title', 'addons', 'addons-note', 'error']);
+    expect(Object.keys(SECURED_PARTS).sort()).toEqual([...securedColumn(false)].sort());
+    expect([payBelowFirstScreen(900, 900), payBelowFirstScreen(900.4, 900), payBelowFirstScreen(901, 900)]).toEqual([false, false, true]);
+  });
+
+  it('names YOUR TEXT by its visible label and the row’s name, never by a sentence of its own (D37)', () => {
+    const view = readFileSync(new URL('../../src/web/verify/views/secured-addons.ts', import.meta.url), 'utf8');
+    expect(view).not.toMatch(/'aria-label'/);
+    expect(view).toContain("'aria-labelledby': `${base}-text-label ${base}-label`");
+    expect(view).toContain("'aria-describedby': [r.line ? lineId : null, countId]");
+    expect(LIVE.addonText.label).toBe('YOUR TEXT');
+    expect(LIVE.addonText.count(5, 12)).toBe('5 / 12');
+    expect(Object.keys(LIVE.addonText).sort()).toEqual(['count', 'invalid', 'label']);
+    expect(Object.keys(LIVE.addonItems)).toEqual(['note']);
   });
 });
 

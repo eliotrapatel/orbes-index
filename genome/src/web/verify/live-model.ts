@@ -744,6 +744,102 @@ export function holdChoice(rows: readonly AddonRowModel[], e: Pick<LiveEntry, 'a
   return rowsChoice(rows).map((r) => ({ addonId: r.addonId, text: words.get(r.addonId) ?? null }));
 }
 
+// ── 5b, SECURED with add-ons (lot Q2, step Q2.8; MK #secured-addons) ─────────
+
+/** The words an engraving may hold (services/order-addons.ts engravingWordsOf): letters, figures, spaces and . & ' ’ -. */
+const ENGRAVING_WORDS = /^[\p{L}\p{M}0-9 .&'’-]+$/u;
+/** The house's most characters of an engraving (ENGRAVING_COLLECTOR_MAX): the ceiling and the default of `textMax`. */
+export const ENGRAVING_TEXT_MAX = 20;
+
+/** An engraving's words as they are sent: spaces folded, trimmed ('' when none). */
+export function engravingText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+/** The house's sentence when `value` cannot be engraved within `max` characters (LIVE.addonText.invalid); null when it can, or is empty. */
+export function engravingProblem(value: string, max: number): string | null {
+  const words = engravingText(value);
+  if (words === '') return null;
+  return [...words].length > max || !ENGRAVING_WORDS.test(words) ? LIVE.addonText.invalid(max) : null;
+}
+
+/** One row of 5b: an add-on you tap to choose (one unit per piece, one per set), and its words when it is the engraving chosen. */
+export interface SecuredAddonRow {
+  addonId: string;
+  /** `GIFT WRAPPING`, in capitals. */
+  name: string;
+  line: string | null;
+  /** `+ € 15` (LIVE.addonPrice, per piece); '' when it is no longer priced. */
+  price: string;
+  chosen: boolean;
+  /** ENGRAVING chosen: YOUR TEXT, its words (typed or the server's), its most characters (the offer's textMax) and its count. */
+  text: { value: string; max: number; count: string } | null;
+}
+
+/** 5b's add-ons: the rows, and M3's note under them while one of the add-ons offered has stock (N2). */
+export interface SecuredAddonsModel {
+  rows: SecuredAddonRow[];
+  note: string | null;
+}
+
+/**
+ * 5b (D10, D11, D12, N1–N3): the hold's add-ons as rows you tap, from holdRows (its release's pick as offered now, then
+ * what was chosen and is no longer offered); null when there is none, and the screen is screen 5 exactly (D10).
+ * `units`: the taps not sent yet; `drafts`: the engraving's words typed and not yet saved, by add-on.
+ */
+export function securedAddons(
+  e: Pick<LiveEntry, 'addonOffer' | 'addonItems' | 'currency'>,
+  opts: { units?: ReadonlyMap<string, number> | null; drafts?: ReadonlyMap<string, string> } = {},
+): SecuredAddonsModel | null {
+  const rows = holdRows(e, opts.units);
+  if (rows.length === 0) return null;
+  const offer = new Map((e.addonOffer ?? []).map((o) => [o.addonId, o] as const));
+  const words = new Map((e.addonItems ?? []).map((c) => [c.addonId, c.text ?? ''] as const));
+  const out = rows.map((r): SecuredAddonRow => {
+    const o = offer.get(r.addonId);
+    const chosen = r.units > 0;
+    const max = typeof o?.textMax === 'number' && Number.isInteger(o.textMax) && o.textMax >= 1 && o.textMax <= ENGRAVING_TEXT_MAX ? o.textMax : ENGRAVING_TEXT_MAX;
+    const value = opts.drafts?.get(r.addonId) ?? words.get(r.addonId) ?? '';
+    return {
+      addonId: r.addonId,
+      name: r.name,
+      line: r.line,
+      price: r.priceMinor !== null && e.currency ? LIVE.addonPrice(formatMoney(r.priceMinor, e.currency)) : '',
+      chosen,
+      text: chosen && o?.engraving === true ? { value, max, count: LIVE.addonText.count([...value].length, max) } : null,
+    };
+  });
+  const offered = new Set(out.map((r) => r.addonId));
+  const stock = (e.addonOffer ?? []).some((o) => o.whileAvailable === true && offered.has(o.addonId));
+  return { rows: out, note: stock ? LIVE.addonItems.note : null };
+}
+
+/**
+ * The choice 5b sends: each row chosen, in the rows' order; the engraving with its words (`words`: those typed, saved
+ * now; otherwise the server's), never empty words (null: entered later, in YOUR ORDERS, N3).
+ */
+export function securedChoice(rows: readonly SecuredAddonRow[], words?: ReadonlyMap<string, string>): { addonId: string; text: string | null }[] {
+  return rows
+    .filter((r) => r.chosen)
+    .map((r) => {
+      const typed = words?.get(r.addonId);
+      const text = r.text ? engravingText(typed ?? r.text.value) : '';
+      return { addonId: r.addonId, text: text === '' ? null : text };
+    });
+}
+
+/**
+ * The computer's right column on 5b (D11, D17, D33, N10), in the eye's order: the mockup's (the rows above PAY), or, when
+ * the rows would push PAY below the first screen (`payFirst`), PAY, its note and RELEASE MY PLACE first, the rows, M3's
+ * note and the error line after them (the error line always right under the rows).
+ */
+export type SecuredPart = 'addons-title' | 'addons' | 'addons-note' | 'error' | 'pay' | 'pay-left' | 'pay-note' | 'release';
+export function securedColumn(payFirst: boolean): readonly SecuredPart[] {
+  const rows: SecuredPart[] = ['addons-title', 'addons', 'addons-note', 'error'];
+  const pay: SecuredPart[] = ['pay', 'pay-left', 'pay-note', 'release'];
+  return payFirst ? [...pay, ...rows] : [...rows, ...pay];
+}
+
 /**
  * A reservation's add-on rows on its receipt (D20): an entry CONFIRMED before lot Q2, its release add-ons as its orders
  * sold them (per piece: × its pieces); then its catalogue add-ons as sold (ENGRAVING · € 150; POLISHING CLOTH × 2).

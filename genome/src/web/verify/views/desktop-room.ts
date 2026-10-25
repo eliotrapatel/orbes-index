@@ -17,7 +17,7 @@
  */
 import { h } from '../../shared/dom.js';
 import { LIVE } from '../copy.js';
-import type { LiveScreenKind } from '../live-model.js';
+import { securedColumn, type LiveScreenKind, type SecuredPart } from '../live-model.js';
 import { listLine, withNumerals } from './common.js';
 
 /** What the room's corners say, read from the release, the room and the account's entry at each change. */
@@ -40,6 +40,23 @@ export interface RoomFacts {
 
 type Kind = LiveScreenKind | 'failed';
 type Place = 'head' | 'body' | 'bl' | 'br';
+
+/** 5b's right column, part by part (live-model.ts securedColumn): each part's element in the secured screen. */
+export const SECURED_PARTS: Readonly<Record<SecuredPart, string>> = Object.freeze({
+  'addons-title': ':scope > .live__addons-title',
+  addons: ':scope > .live__addons',
+  'addons-note': ':scope > .live__addons-note',
+  error: ':scope > .live__error',
+  pay: ':scope > .live__pay',
+  'pay-left': ':scope > .live__pay-left',
+  'pay-note': ':scope > .live__pay-note',
+  release: ':scope > .live__release',
+});
+
+/** The class of a secured screen whose PAY comes first in its corner (N10). */
+const PAY_FIRST = 'is-pay-first';
+/** SECURED's passage on the room (views/live.ts): the column's order never changes while it plays. */
+const SECURED_PASSAGE = 'live--tx-secured';
 
 /**
  * The pages that end a visit (YOUR TURN HAS PASSED … YOUR ENTRY IS REMOVED, the release or its after-room ended before
@@ -149,23 +166,15 @@ const PLAN: Partial<Record<Kind, readonly [Place, string][]>> = {
   ],
   secured: [
     ['head', ':scope > .live__overline'],
-    // ONE QUEUE (MK #secured, desk): YOUR PIECE in the centre, the time to pay inside PAY bottom right (D39). On a
-    // computer PAY, with its time, its note and RELEASE MY PLACE, comes before the add-on rows, so the time to pay is on
-    // the first screen whatever the rows (production M3 showed it there; add only, never degrade).
+    // ONE QUEUE (MK #secured, desk): YOUR PIECE in the centre, the time to pay inside PAY bottom right (D39). 5b (lot
+    // Q2, step Q2.8; MK #secured-addons, desk; D11, D17): bottom right in the mockup's order, ADD-ONS, the rows, M3's note
+    // and the error line above PAY, its note and RELEASE MY PLACE; PAY first when the rows would push it below the first
+    // screen (payFirst below, N10: production showed the time to pay there; add only, never degrade).
     ['body', ':scope > .live__reveal'],
     ['bl', ':scope > .live__title'],
     ['bl', ':scope > .live__detail'],
     ['bl', ':scope > .live__set-pieces'],
-    ['br', ':scope > .live__error'],
-    ['br', ':scope > .live__pay'],
-    ['br', ':scope > .live__pay-left'],
-    ['br', ':scope > .live__pay-note'],
-    ['br', ':scope > .live__release'],
-    ['br', ':scope > .live__addons-title'],
-    ['br', ':scope > .live__addons'],
-    ['br', ':scope > .live__items-title'],
-    ['br', ':scope > .live__items'],
-    ['br', ':scope > .live__items-note'],
+    ...securedColumn(false).map((part): [Place, string] => ['br', SECURED_PARTS[part]]),
   ],
   // CONFIRMED (lot Q1 §3.7; MK #confirmed, desk): the act in the centre, a little low so the piece stays clear above it
   // (CONFIRMED, LIVE RELEASE over the name, the monogram on its horizon); a set's YOUR SET IS RESERVED, the sentence, the
@@ -260,6 +269,8 @@ export class DesktopRoom {
    */
   private band: HTMLElement | null = null;
   private facts: RoomFacts | null = null;
+  /** 5b's watch of its right column (watchPayFirst), let go with the screen. */
+  private payWatch: (() => void) | null = null;
 
   constructor(
     private readonly root: HTMLElement,
@@ -347,6 +358,55 @@ export class DesktopRoom {
     }
     this.facts = null;
     this.update(facts);
+    if (kind === 'secured') this.watchPayFirst(el);
+  }
+
+  /**
+   * 5b's right column (lot Q2, step Q2.8; D33, D35, N10): PAY first (`is-pay-first`) when, in the mockup's order, the
+   * rows would push PAY's foot below the first screen. Measured as the screen mounts, before SECURED's passage starts
+   * (it moves opacity and transform only, so the layout read is the final one); measured again when the window changes
+   * size or the rows first show, never while the passage plays (applied once it ends), never for a row chosen (the
+   * column would move under the pointer).
+   */
+  private watchPayFirst(el: HTMLElement): void {
+    this.stopPayFirst();
+    let said = '';
+    let pending = false;
+    const measure = () => {
+      if (this.screen !== el) return;
+      const pay = el.querySelector<HTMLElement>(':scope > .d-room__br > .live__pay');
+      const rows = el.querySelector<HTMLElement>(':scope > .d-room__br > .live__addons:not([hidden])');
+      const key = `${innerWidth}x${innerHeight}:${rows ? 1 : 0}`;
+      if (key === said) return;
+      said = key;
+      el.classList.remove(PAY_FIRST);
+      if (!pay || !rows) return;
+      el.classList.toggle(PAY_FIRST, payBelowFirstScreen(pay.getBoundingClientRect().bottom + scrollY, innerHeight));
+    };
+    measure();
+    const br = el.querySelector<HTMLElement>(':scope > .d-room__br');
+    if (!br || typeof ResizeObserver === 'undefined') return;
+    const sized = new ResizeObserver(() => {
+      if (this.root.classList.contains(SECURED_PASSAGE)) pending = true;
+      else measure();
+    });
+    sized.observe(br);
+    const passage = new MutationObserver(() => {
+      if (pending && !this.root.classList.contains(SECURED_PASSAGE)) {
+        pending = false;
+        measure();
+      }
+    });
+    passage.observe(this.root, { attributes: true, attributeFilter: ['class'] });
+    this.payWatch = () => {
+      sized.disconnect();
+      passage.disconnect();
+    };
+  }
+
+  private stopPayFirst(): void {
+    this.payWatch?.();
+    this.payWatch = null;
   }
 
   /** The corners' words and the ground, from the room's facts now (nothing is drawn again when they are the same). */
@@ -428,6 +488,7 @@ export class DesktopRoom {
   }
 
   release(): void {
+    this.stopPayFirst();
     const mark = this.placed.get(this.notice);
     if (mark) {
       if (mark.isConnected) mark.replaceWith(this.notice);
@@ -463,10 +524,11 @@ export class DesktopRoom {
       else mark.remove();
     }
     this.placed.clear();
+    this.stopPayFirst();
     const el = this.screen;
     if (el) {
       for (const b of el.querySelectorAll(':scope > [class^="d-room__"]')) b.remove();
-      el.classList.remove('d-room__screen', `d-room__screen--${this.kind}`, 'd-room__screen--end');
+      el.classList.remove('d-room__screen', `d-room__screen--${this.kind}`, 'd-room__screen--end', PAY_FIRST);
       for (const p of el.querySelectorAll<HTMLElement>('[data-d-last]')) delete p.dataset.dLast;
       for (const p of el.querySelectorAll<HTMLElement>('.d-room__redrawn')) p.classList.remove('d-room__redrawn');
     }
@@ -535,6 +597,11 @@ export class DesktopRoom {
     el.replaceChildren(...titleParts(own ? text : facts.heading, facts.model));
     el.classList.add('d-room__name');
   }
+}
+
+/** Whether PAY's foot (`bottom`, in the page) lies below the first screen of a window `height` high (a pixel's rounding allowed). */
+export function payBelowFirstScreen(bottom: number, height: number): boolean {
+  return bottom > height + 0.5;
 }
 
 /**

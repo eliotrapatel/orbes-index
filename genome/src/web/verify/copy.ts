@@ -2096,12 +2096,20 @@ export const LIVE = Object.freeze({
   /** An add-on's price, per piece. */
   addonPrice: (price: string) => `+ ${price}`,
   /**
-   * Plan MACRO M3 §4.4 (D2): the catalogue add-ons under the release's, each with its units, carried onto the order at
-   * PAY; those none left of by then are said on CONFIRMED.
+   * Plan MACRO M3 §4.4 (D2): the catalogue add-ons carried onto the order at PAY; those none left of by then are said on
+   * CONFIRMED. Lot Q2, step Q2.8 (5b, N2): one list titled ADD-ONS; the note under its rows when one of them has stock.
    */
   addonItems: Object.freeze({
-    title: 'ADD TO YOUR ORDER',
     note: 'Added to your order at PAY, while available.',
+  }),
+  /**
+   * Lot Q2, step Q2.8 (5b; MK #secured-addons, D12, D37, N3): ENGRAVING chosen, YOUR TEXT under its line, named by its
+   * visible label; its count of the engraving's most characters (`5 / 12`); words it cannot hold, the house's sentence.
+   */
+  addonText: Object.freeze({
+    label: 'YOUR TEXT',
+    count: (n: number, max: number) => `${n} / ${max}`,
+    invalid: (max: number) => ORDERS.engraving.invalid(max),
   }),
   /**
    * PAY with the time to pay inside it (ONE QUEUE, OP-9, 23 Oct; D39, D40): the total, then the time left

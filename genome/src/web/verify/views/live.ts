@@ -73,7 +73,7 @@
  * the server's refusals read as it wrote them. Reduced motion: cross-fades only. aria-live: the place, the turn, the
  * piece secured. One primary action per screen (filled ivory): ENTER, the size chosen, PAY.
  */
-import { leftOutLines, withUnits, type AddonRowModel } from '../addons-model.js';
+import { leftOutLines, withUnits } from '../addons-model.js';
 import { h, prefersReducedMotion, s } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
@@ -90,6 +90,8 @@ import {
   formatMoney,
   heldEntry,
   heldPieces,
+  engravingProblem,
+  engravingText,
   holdChoice,
   holdRows,
   HOLD_MS,
@@ -101,6 +103,9 @@ import {
   liveReference,
   liveScreen,
   receiptAddonRows,
+  securedAddons,
+  securedChoice,
+  type SecuredAddonsModel,
   liveSet,
   liveSetChoice,
   livePieces,
@@ -155,7 +160,7 @@ import { CEREMONY_VIBRATION } from './result.js';
 import { storyButton } from './story.js';
 import { StoryCards } from '../story-card.js';
 import { DesktopRoom, type RoomFacts } from './desktop-room.js';
-import { addonRowsList, focusedStep, refocusStep } from './addon-rows.js';
+import { SecuredAddonsView } from './secured-addons.js';
 
 /** The state read while the stream is lost (in the room; the server says how often in the queue: `pollMs`). */
 export const LIVE_POLL_MS = 2000;
@@ -422,6 +427,11 @@ class LivePage {
    * being sent (the entry's own once it answers); and PAY's answer of what could not be added, kept for its entry.
    */
   private itemUnits: Map<string, number> | null = null;
+  /** 5b (lot Q2, step Q2.8): the engraving's words typed on YOUR TEXT and not yet saved, by add-on; the save under way. */
+  private readonly addonDrafts = new Map<string, string>();
+  private textSave: Promise<void> | null = null;
+  /** The engraving whose words typed the house cannot engrave (its sentence in the error line), until they change. */
+  private textInvalid: string | null = null;
   private leftOut: { entryId: string; lines: string[] } | null = null;
   private lastTick: number | null = null;
   private lastPlace: string | null = null;
@@ -2801,9 +2811,13 @@ class LivePage {
    * B5: the piece secured (`revealing`: secured on this page, just now: SECURED's passage), the add-ons, PAY (ONE QUEUE
    * §3.5; D39, D40; MK #secured): YOUR PIECE on the vault, seal C over a hairline horizon, SECURED AT under it; PAY is
    * the light, its lit part the time left to pay, emptying from right to left (its words 'PAY € 1 240 · 09:12'; its
-   * accessible name PAY · total, the time its description). The add-ons as production draws them (their look is Q2).
+   * accessible name PAY · total, the time its description). With add-ons offered or chosen it is 5b (lot Q2, step Q2.8;
+   * MK #secured-addons): ADD-ONS under the name and the size, the rows (views/secured-addons.ts), M3's note, the error
+   * line, then PAY with its total; without, screen 5 exactly (D10).
    */
   private securedScreen(revealing: boolean): Screen {
+    this.addonDrafts.clear();
+    this.textInvalid = null;
     const s = this.live();
     const set = this.isSet();
     const seal = sealCSvg('live__piece-seal');
@@ -2815,13 +2829,25 @@ class LivePage {
     const detail = this.fact('', 'live__detail');
     // Macro scope K44 T1: the set's pieces, each in its size, under its name (then the add-ons and PAY).
     const setPieces = set ? h('dl', { class: 'live__set-pieces', attrs: { 'aria-label': SETS.live.pieces } }) : null;
-    // Plan MACRO M3 §4.4 (D2); lot Q2, step Q2.4 (D2): the release add-ons are gone, the hold's add-ons are its release's
-    // pick of the catalogue, drawn from the entry at each change (none: nothing), as production draws the catalogue's rows
-    // until 5b (Q2.8): a row is chosen or not (one unit per piece, N1).
-    const itemsTitle = h('p', { class: 'live__overline live__items-title', id: 'live-items', attrs: { hidden: true }, text: LIVE.addonItems.title });
-    const items = h('div', { class: 'live__items', attrs: { role: 'group', 'aria-labelledby': 'live-items', hidden: true } });
-    const itemsNote = h('p', { class: 'live__items-note', attrs: { hidden: true } });
-    let itemsKey = '';
+    // 5b (lot Q2, step Q2.8; D10–D12, N1–N3; MK #secured-addons): the hold's add-ons, its release's pick of the
+    // catalogue, as rows on hairlines you tap to choose (one unit per piece, one per set), ENGRAVING chosen with YOUR TEXT;
+    // M3's note under them while one has stock (N2). None offered nor chosen: hidden, and the screen is screen 5 (D10).
+    const addonsTitle = h('p', { class: 'live__overline live__addons-title', id: 'live-addons', attrs: { hidden: true }, text: LIVE.addons });
+    const addonsBox = h('div', { class: 'live__addons', attrs: { role: 'group', 'aria-labelledby': 'live-addons', hidden: true } });
+    const addonsNote = h('p', { class: 'live__addons-note', attrs: { hidden: true } });
+    const addonsView = new SecuredAddonsView(addonsBox, {
+      choose: (addonId) => this.chooseAddon(addonId),
+      typed: (addonId, value) => {
+        this.addonDrafts.set(addonId, value);
+        // The house's sentence said for the words before goes as they change.
+        if (this.textInvalid === addonId) {
+          this.textInvalid = null;
+          this.error = null;
+        }
+        this.screen?.update();
+      },
+      save: (addonId) => void this.saveAddonText(addonId),
+    });
     const errorLine = this.errorLine();
     // PAY, the light (D39): its words twice, ink on the lit part and ivory where the light has gone, the edge between them
     // feathered; its point breathing on the edge's foot, a faint pool of light under the lit part.
@@ -2830,7 +2856,7 @@ class LivePage {
     const wordsOut = words('live-pay__words--out');
     const pay = h(
       'button',
-      { class: 'btn live__primary live__pay live-pay', attrs: { type: 'button', 'aria-describedby': 'live-pay-left' }, on: { click: () => this.payNow() } },
+      { class: 'btn live__primary live__pay live-pay', attrs: { type: 'button', 'aria-describedby': 'live-pay-left' }, on: { click: () => void this.payNow() } },
       h('span', { class: 'live-pay__pool', attrs: { 'aria-hidden': 'true' } }),
       h('span', { class: 'live-pay__art', attrs: { 'aria-hidden': 'true' } }, h('span', { class: 'live-pay__lit' }), wordsOut, wordsIn),
       h('span', { class: 'live-pay__edge', attrs: { 'aria-hidden': 'true' } }, h('span', { class: 'live-pay__halo' }, h('i')), h('span', { class: 'live-pay__pt' })),
@@ -2863,9 +2889,9 @@ class LivePage {
       this.title(this.name()),
       detail,
       setPieces,
-      itemsTitle,
-      items,
-      itemsNote,
+      addonsTitle,
+      addonsBox,
+      addonsNote,
       errorLine,
       pay,
       payLeft,
@@ -2900,16 +2926,11 @@ class LivePage {
           const collection = s?.collection ? `${upper(s.collection)} · ` : '';
           setFact(detail, `${collection}${LIVE.size(e.size.label)}${e.quantity > 1 ? ` · ${e.quantity} ${LIVE.quantity}` : ''}`);
         }
-        const rows = this.itemRows(e);
-        const key = JSON.stringify([rows, this.busy]);
-        if (key !== itemsKey) {
-          itemsKey = key;
-          const focus = focusedStep(items);
-          items.replaceChildren(...(rows.length > 0 ? [addonRowsList({ rows, label: LIVE.addonItems.title, idPrefix: 'live-item', disabled: this.busy, room: true, onChange: (id, n) => this.setItem(rows, id, n) })] : []));
-          if (focus) refocusStep(items, focus.addonId, focus.which);
-          itemsNote.textContent = LIVE.addonItems.note;
-          itemsTitle.hidden = items.hidden = itemsNote.hidden = rows.length === 0;
-        }
+        const model = this.addonsModel(e);
+        addonsView.draw(model?.rows ?? [], this.busy, this.textInvalid);
+        addonsTitle.hidden = addonsBox.hidden = model === null;
+        addonsNote.textContent = model?.note ?? '';
+        addonsNote.hidden = !model?.note;
         const total = formatMoney(e.totalMinor, e.currency);
         let { remainingMs } = windowLeft(e.hold.securedAt, e.hold.expiresAt, this.now());
         // Paused: the time to confirm stands still (the server moves the hold's deadline by the pause at every read).
@@ -2945,29 +2966,98 @@ class LivePage {
   }
 
   /**
-   * The catalogue add-ons of the hold (plan MACRO M3 §4.4; lot Q2, step Q2.4, N1): what its release offers now, then what
-   * was chosen and is no longer; each row chosen or not (one unit per piece of the entry, one per set: PAY's total says it).
+   * 5b's add-ons (lot Q2, step Q2.8): what the hold's release offers now, then what was chosen and is no longer; each row
+   * chosen or not (one unit per piece of the entry, one per set: PAY's total says it), the engraving's words as typed.
    */
-  private itemRows(e: LiveEntry): AddonRowModel[] {
-    return holdRows(e, this.itemUnits);
+  private addonsModel(e: LiveEntry): SecuredAddonsModel | null {
+    return securedAddons(e, { units: this.itemUnits, drafts: this.addonDrafts });
   }
 
-  /** A row chosen or let go: the hold's whole choice sent at once, the engraving keeping its words. */
-  private setItem(rows: readonly AddonRowModel[], addonId: string, units: number): void {
+  /** A row tapped: chosen or let go, the hold's whole choice sent at once, the engraving keeping its words as saved (N1). */
+  private chooseAddon(addonId: string): void {
     const s = this.live();
     const e = this.entry;
-    if (!s || !e || this.busy) return;
-    const next = withUnits(rows, addonId, units);
+    // A choice, or the engraving's words, being sent: one at a time.
+    if (!s || !e || this.busy || this.textSave) return;
+    const rows = holdRows(e, this.itemUnits);
+    const row = rows.find((r) => r.addonId === addonId);
+    if (!row) return;
+    const next = withUnits(rows, addonId, row.units > 0 ? 0 : 1);
     this.itemUnits = new Map(next.map((r) => [r.addonId, r.units]));
+    // Let go: its words typed and not saved go with it.
+    if (row.units > 0) this.addonDrafts.delete(addonId);
+    if (this.textInvalid === addonId) this.textInvalid = null;
     void this.act(() => this.deps.api.liveAddons(s.id, holdChoice(next, e))).finally(() => {
       this.itemUnits = null;
       this.screen?.update();
     });
   }
 
-  private payNow(): void {
+  /**
+   * YOUR TEXT left (its change) or PAY pressed: the engraving's words typed, saved with the hold's choice (N3: empty is
+   * allowed, entered later in YOUR ORDERS). Words it cannot hold say the house's sentence in the error line, unsent, the
+   * row kept chosen; the server's refusal says its own there. PAY stays as it is meanwhile (a save starts as YOUR TEXT
+   * is left, which a press on PAY does: PAY then waits for it). True when nothing is left unsaved.
+   */
+  private async saveAddonText(addonId: string): Promise<boolean> {
+    while (this.textSave) await this.textSave;
     const s = this.live();
-    if (!s) return;
+    const e = this.entry;
+    const draft = this.addonDrafts.get(addonId);
+    if (!s || !e || draft === undefined) return true;
+    // A choice being sent: the words wait for the next change or PAY.
+    if (this.busy) return false;
+    const model = this.addonsModel(e);
+    const row = model?.rows.find((r) => r.addonId === addonId);
+    if (!model || !row?.text) {
+      this.addonDrafts.delete(addonId);
+      return true;
+    }
+    const saved = (e.addonItems ?? []).find((c) => c.addonId === addonId)?.text ?? '';
+    if (engravingText(draft) === engravingText(saved)) {
+      this.addonDrafts.delete(addonId);
+      this.screen?.update();
+      return true;
+    }
+    const problem = engravingProblem(draft, row.text.max);
+    if (problem) {
+      this.error = problem;
+      this.textInvalid = addonId;
+      this.screen?.update();
+      return false;
+    }
+    this.textInvalid = null;
+    let ok = false;
+    const run = (async () => {
+      try {
+        const entry = await this.deps.api.liveAddons(s.id, securedChoice(model.rows, new Map([[addonId, draft]])));
+        if (this.disposed) return;
+        this.error = null;
+        // Saved: the server's words are the field's now, unless they were typed on meanwhile.
+        if (this.addonDrafts.get(addonId) === draft) this.addonDrafts.delete(addonId);
+        this.setEntry(entry);
+        this.settle();
+        ok = true;
+      } catch (err) {
+        if (this.disposed) return;
+        // Refused: the words kept in the field, the row kept chosen, the server's sentence in the error line.
+        this.deps.session.noteError(err);
+        this.error = messageOf(err);
+        if (err instanceof ApiError && err.status === 409) void this.readState(false);
+      }
+      this.render();
+    })();
+    this.textSave = run;
+    await run;
+    if (this.textSave === run) this.textSave = null;
+    return ok;
+  }
+
+  private async payNow(): Promise<void> {
+    const s = this.live();
+    if (!s || this.busy) return;
+    // PAY waits for the engraving's words typed and not yet saved (N3): saved first, PAY only once they are.
+    for (const addonId of [...this.addonDrafts.keys()]) if (!(await this.saveAddonText(addonId))) return;
     // Plan MACRO M3 §4.4 (D2): PAY's answer names the add-ons that could not be added; CONFIRMED says them.
     void this.act(
       () => this.deps.api.liveConfirm(s.id),

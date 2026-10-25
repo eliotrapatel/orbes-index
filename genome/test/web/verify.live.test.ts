@@ -18,6 +18,7 @@ import {
   holdChoice,
   holdRows,
   receiptAddonRows,
+  securedAddons,
   bandModel,
   CHANGE_RETRY_MS,
   clockOffset,
@@ -602,6 +603,22 @@ describe('the one queue, the turn and the piece held', () => {
     expect(receiptAddonRows(sold, formatMoney)).toEqual([['ENGRAVING × 2', '€ 300']]);
     const before = entry({ status: 'CONFIRMED', legacyAddons: [{ label: 'Engraving', priceMinor: 15_000 }], addonItems: [] });
     expect(receiptAddonRows(before, (minor, c) => `+ ${formatMoney(minor, c)}`)).toEqual([['ENGRAVING', '+ € 150']]);
+  });
+
+  it('draws 5b only when its hold offers or holds an add-on; an empty offer and no choice is screen 5 exactly (lot Q2, step Q2.8, D10)', () => {
+    const offer = (addonId: string, name: string, priceMinor: number, more: Partial<AddonOfferItem> = {}): AddonOfferItem => ({ addonId, name, line: null, priceMinor, currency: 'EUR', maxUnits: 1, engraving: false, ...more });
+    // Screen 5: nothing offered, nothing chosen (none picked, or none offerable now).
+    expect(securedAddons(entry({ status: 'SECURED', addonOffer: [], addonItems: [] }))).toBeNull();
+    expect(securedAddons(entry({ status: 'SECURED' }))).toBeNull();
+    // 5b: a row offered, or one chosen and no longer offered (kept, to be let go).
+    expect(securedAddons(entry({ status: 'SECURED', addonOffer: [offer(E2, 'Gift box', 9_000)], addonItems: [] }))?.rows.map((r) => [r.name, r.price, r.chosen])).toEqual([['GIFT BOX', '+ € 90', false]]);
+    expect(securedAddons(entry({ status: 'SECURED', addonOffer: [], addonItems: [{ addonId: E2, name: 'Gift box', line: null, units: 1, priceMinor: 9_000, text: null }] }))?.rows.map((r) => [r.name, r.chosen])).toEqual([['GIFT BOX', true]]);
+    // The receipt of a confirmed entry reads the one list, its legacy rows first (D20).
+    const both = entry({ status: 'CONFIRMED', quantity: 2, legacyAddons: [{ label: 'Gift box', priceMinor: 9_000 }], addonItems: [{ addonId: E1, name: 'Engraving', line: null, units: 2, priceMinor: 4_000, text: 'M. B.' }] });
+    expect(receiptAddonRows(both, formatMoney)).toEqual([
+      ['GIFT BOX', '€ 180'],
+      ['ENGRAVING × 2', '€ 80'],
+    ]);
   });
 });
 

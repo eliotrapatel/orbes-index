@@ -505,6 +505,8 @@ export interface AddonOfferItem {
   /** Lot Q2, step Q2.3: the engraving, whose words the collector types, and its most characters. */
   engraving?: boolean;
   textMax?: number;
+  /** Lot Q2, step Q2.8 (5b, N2): at a LIVE hold, an add-on with stock (added at PAY while available). */
+  whileAvailable?: boolean;
 }
 
 /** A choice carried onto an order that could not be added: none left (NONE_LEFT), or no longer offered (NOT_OFFERED). */

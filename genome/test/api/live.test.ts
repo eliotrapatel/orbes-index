@@ -625,6 +625,12 @@ describe('LIVE RELEASES: the customer API and real time', () => {
         ],
         totalMinor: 511_500,
       });
+      // Lot Q2, step Q2.8 (5b, N2): the add-on with stock says it is added while available (M3's note); the service does not.
+      const rows = withCloth.entry.addonOffer as { addonId: string; whileAvailable?: boolean }[];
+      expect(rows.map((o) => [o.addonId, o.whileAvailable ?? null])).toEqual([
+        [box, null],
+        [cloth.id, true],
+      ]);
       const paid = safeJson(await a.client.post(`/api/v1/live/${r.id}/confirm`, {})) as { entry: Record<string, unknown> };
       expect(paid.entry).toMatchObject({ status: 'CONFIRMED', confirmedAt: h.clock.now().toISOString(), addonOffer: [], totalMinor: 511_500 });
       expect((paid.entry.addonItems as { addonId: string; units: number }[]).map((x) => [x.addonId, x.units]).sort()).toEqual([[box, 1], [cloth.id, 1]].sort());

@@ -129,6 +129,11 @@ export interface AddonOfferItem {
   engraving: boolean;
   /** The engraving's most characters (1 to 20); on the engraving only. */
   textMax?: number;
+  /**
+   * At a LIVE hold (lot Q2, step Q2.8, 5b, N2): an add-on with stock, added to the order at PAY while available (its
+   * note under the rows); never a stock figure. Absent elsewhere and on a service.
+   */
+  whileAvailable?: true;
 }
 
 /** A choice carried onto an order that could not be added: no unit left (NONE_LEFT), or no longer offered (NOT_OFFERED). */
@@ -422,7 +427,17 @@ export async function addonOffer(
       const limit = r.engraving ? 1 : ADDON_LIMIT;
       if (pieces !== null) {
         const enough = r.kind === 'SERVICE' || Number(r.available) >= pieces;
-        return { addonId: r.addon_id, name: r.name, line: r.line, priceMinor: Number(r.price_minor), currency, maxUnits: enough ? 1 : 0, engraving: r.engraving, ...(r.engraving ? { textMax: Number(r.text_max) } : {}) };
+        return {
+          addonId: r.addon_id,
+          name: r.name,
+          line: r.line,
+          priceMinor: Number(r.price_minor),
+          currency,
+          maxUnits: enough ? 1 : 0,
+          engraving: r.engraving,
+          ...(r.engraving ? { textMax: Number(r.text_max) } : {}),
+          ...(r.kind === 'PRODUCT' ? { whileAvailable: true as const } : {}),
+        };
       }
       return {
         addonId: r.addon_id,
