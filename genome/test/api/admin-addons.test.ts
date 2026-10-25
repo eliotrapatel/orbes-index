@@ -3,7 +3,8 @@
  * routes/admin/addons.ts): an AUDITOR reads the list and one add-on, an OPERATOR lists, changes, prices, sets aside,
  * reinstates and links an add-on to Shopify, as the models; an AUDITOR and a LOGISTICS login are refused the writes,
  * LOGISTICS the reads too; the bodies are strict, and the service's refusals answer as it says (test/services/
- * addons.test.ts holds the service).
+ * addons.test.ts holds the service). The ENGRAVING's prices and its YOUR ORDERS switch are an ADMIN's (the owner's
+ * amendment of 25 Oct, lot Q3 step Q3.9): an OPERATOR keeps every other field of it, and every other add-on.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
@@ -22,6 +23,7 @@ interface Addon {
 
 describe('the add-ons\' routes (plan MACRO M3 §4.2, D1)', () => {
   let h: Harness;
+  let admin: Client;
   let operator: Client;
   let auditor: Client;
   let agent: Client;
@@ -29,6 +31,7 @@ describe('the add-ons\' routes (plan MACRO M3 §4.2, D1)', () => {
   beforeAll(async () => {
     h = await createHarness();
     h.clock.set('2026-10-22T09:00:00.000Z');
+    admin = await adminClient(h, 'ADMIN');
     operator = await adminClient(h, 'OPERATOR');
     auditor = await adminClient(h, 'AUDITOR');
     agent = await adminClient(h, 'LOGISTICS');
@@ -88,7 +91,8 @@ describe('the add-ons\' routes (plan MACRO M3 §4.2, D1)', () => {
   });
 
   it('creates a service and the engraving with their switches and most characters (lot Q2, step Q2.2): its kind at the creation only (409 ADDON_KIND_FIXED), one engraving (409 ADDON_ENGRAVING_TAKEN), strict bodies, no stock anywhere (409 ADDON_SERVICE)', async () => {
-    const created = await operator.post('/api/admin/addons', {
+    // The engraving with its price: an ADMIN's (the amendment of 25 Oct; its own case below).
+    const created = await admin.post('/api/admin/addons', {
       kind: 'SERVICE',
       name: 'Engraving',
       line: 'Up to 12 characters, engraved by ORBES.',
@@ -135,5 +139,37 @@ describe('the add-ons\' routes (plan MACRO M3 §4.2, D1)', () => {
     // An AUDITOR reads it; never writes it.
     expect(safeJson(await auditor.get(`/api/admin/addons/${e.id}`))).toMatchObject({ kind: 'SERVICE', engraving: true });
     expect(errorOf(await auditor.patch(`/api/admin/addons/${e.id}`, { engraving: false })).code).toBe('FORBIDDEN');
+  });
+
+  it('the ENGRAVING’s prices and its YOUR ORDERS switch are an ADMIN’s (amendment of 25 Oct, step Q3.9): an OPERATOR is refused them and keeps every other field and every other add-on', async () => {
+    const list = safeJson(await admin.get('/api/admin/addons')) as { items: (Addon & { engraving: boolean; offeredAt: { orders: boolean } })[] };
+    const e = list.items.find((a) => a.engraving)!;
+    const other = list.items.find((a) => !a.engraving)!;
+    const refused = { code: 'FORBIDDEN', message: 'Only an ADMIN changes the ENGRAVING’s prices and its YOUR ORDERS switch.' };
+    // Its prices: refused to an OPERATOR whatever the currency; the same price sent again changes nothing and passes.
+    expect(errorOf(await put(operator, `/api/admin/addons/${e.id}/prices`, { prices: { EUR: 5000 } }))).toEqual(refused);
+    expect(errorOf(await put(operator, `/api/admin/addons/${e.id}/prices`, { prices: { GBP: 3500 } }))).toEqual(refused);
+    expect((await put(operator, `/api/admin/addons/${e.id}/prices`, { prices: { EUR: e.prices.find((p) => p.currency === 'EUR')!.priceMinor } })).statusCode).toBe(200);
+    // Its YOUR ORDERS switch: refused when it changes; the other switches, its words and most characters stay an OPERATOR's.
+    expect(errorOf(await operator.patch(`/api/admin/addons/${e.id}`, { offeredAt: { orders: !e.offeredAt.orders } }))).toEqual(refused);
+    const same = await operator.patch(`/api/admin/addons/${e.id}`, { offeredAt: { orders: e.offeredAt.orders, draw: false }, line: 'Up to 20 characters.' });
+    expect(same.statusCode, same.body).toBe(200);
+    expect(safeJson(same)).toMatchObject({ offeredAt: { draw: false, orders: e.offeredAt.orders }, line: 'Up to 20 characters.' });
+    // An ADMIN changes both, each audited as before.
+    const priced = await put(admin, `/api/admin/addons/${e.id}/prices`, { prices: { EUR: 5000 } });
+    expect(priced.statusCode, priced.body).toBe(200);
+    expect((safeJson(priced) as Addon).prices).toContainEqual({ currency: 'EUR', priceMinor: 5000 });
+    const switched = await admin.patch(`/api/admin/addons/${e.id}`, { offeredAt: { orders: !e.offeredAt.orders } });
+    expect(switched.statusCode, switched.body).toBe(200);
+    expect(await h.t.db.selectFrom('audit_logs').select('action').where('target_id', '=', e.id).where('action', 'in', ['addon.prices', 'addon.update']).execute()).toEqual(
+      expect.arrayContaining([{ action: 'addon.prices' }, { action: 'addon.update' }]),
+    );
+    // Every other add-on: its prices and YOUR ORDERS switch stay an OPERATOR's.
+    expect((await put(operator, `/api/admin/addons/${other.id}/prices`, { prices: { EUR: 1700 } })).statusCode).toBe(200);
+    expect((await operator.patch(`/api/admin/addons/${other.id}`, { offeredAt: { orders: false } })).statusCode).toBe(200);
+    // Creating the engraving with a price or that switch: an ADMIN's (one engraving only: refused as taken to the ADMIN).
+    expect(errorOf(await operator.post('/api/admin/addons', { kind: 'SERVICE', name: 'Engraving Two', skuCode: 'ADD-ENGR3', engraving: true, prices: { EUR: 100 } }))).toEqual(refused);
+    expect(errorOf(await operator.post('/api/admin/addons', { kind: 'SERVICE', name: 'Engraving Two', skuCode: 'ADD-ENGR3', engraving: true, offeredAt: { orders: false } }))).toEqual(refused);
+    expect(errorOf(await admin.post('/api/admin/addons', { kind: 'SERVICE', name: 'Engraving Two', skuCode: 'ADD-ENGR3', engraving: true, prices: { EUR: 100 } })).code).toBe('ADDON_ENGRAVING_TAKEN');
   });
 });

@@ -118,7 +118,7 @@ import { grantFromVault } from './guarantees.js';
 import { deliveredBody, deliveredTitle, pieceName } from './house-moments.js';
 import { withLiveChanges, type LiveChanges, type LiveFrameGate } from './live-frames.js';
 import type { ProfileService } from './profiles.js';
-import { parisDay } from './schedule.js';
+import { parisDay, parisDayStart } from './schedule.js';
 import { cleanCriteria, segmentCondition } from './segments.js';
 import { lockAccountAddresses } from './addresses.js';
 import {
@@ -731,6 +731,78 @@ export interface AccountVaults {
   waitingCount: number;
 }
 
+/**
+ * A client's vault as the console's client sheet reads it (GET /api/admin/vault/vaults?account=, step Q3.9; §4.4):
+ * read-only, every state (N27: an expired one stays in the console), what it held; no route takes one back (N36).
+ */
+export interface AdminVault {
+  id: string;
+  source: VaultSource;
+  /** The source's label, its detail and the two as a door says them. */
+  label: string;
+  detail: string | null;
+  line: string;
+  givenAt: Date;
+  waitsUntil: Date;
+  state: VaultState;
+  openedAt: Date | null;
+  /** RETURNED, a returned piece's (D5): the only taking-back. */
+  revokedAt: Date | null;
+  revokedReason: 'RETURNED' | null;
+  /** What it held (OPENED's words), its kind, odds and rarity; null while unopened. */
+  kind: VaultRewardKind | null;
+  held: string | null;
+  odds: string | null;
+  rare: boolean | null;
+  /** Its VAULT order (a piece won free, a right to buy used), for Client Services. */
+  orderId: string | null;
+  /** THE HOUSE's gift: the staff member who gave it and the note for Client Services (never shown to the collector). */
+  givenBy: { id: string; email: string } | null;
+  note: string | null;
+}
+
+/** A sum of money in one currency. */
+export interface VaultMoney {
+  currency: string;
+  minor: number;
+}
+
+/** A reward's figures over a period: how many were won, their value and their cost (N29; costUnknown: no supplier price). */
+export interface VaultWonFigures {
+  won: number;
+  value: VaultMoney[];
+  cost: VaultMoney[];
+  costUnknown: number;
+}
+
+/**
+ * THE VAULT's report for a period of Paris days (GET /api/admin/vault/report, step Q3.9; §4.3; D24, D25 OP-26 "each
+ * reward's quantity is the limit; the report shows the cost (no monthly cap)", N29): the vaults given by source, opened,
+ * still waiting, expired and revoked; the rewards won by kind and by row with their value and cost (credits at face value
+ * given and used; a product or an add-on given free at its supplier unit price where known, else counted unknown; a
+ * right to buy, a guarantee and the card cost nothing); the total cost; the quantities left (`rows`). Shipping and
+ * packaging are M4's margin.
+ */
+export interface VaultReport {
+  from: string;
+  to: string;
+  given: { source: VaultSource; count: number }[];
+  givenTotal: number;
+  opened: number;
+  /** Given in the period and still waiting now. */
+  waiting: number;
+  /** Unopened at their 30 days' end, within the period. */
+  expired: number;
+  /** Taken back with a returned piece in the period (D5). */
+  revoked: number;
+  byKind: ({ kind: VaultRewardKind } & VaultWonFigures)[];
+  /** Every row of the table, with what it gave in the period and its quantity left. */
+  rows: (VaultRewardSetting & VaultWonFigures)[];
+  credits: { given: VaultMoney[]; used: VaultMoney[] };
+  totalCost: VaultMoney[];
+  costUnknown: number;
+}
+
 /** What an opened vault held as OPENED writes it (OP-32 "KEEP € in the OPENED rows"): a credit's `€25 · HOUSE CREDIT`, else its prize. */
 export function vaultHeld(kind: VaultRewardKind, prize: string): string {
   return kind === 'CREDIT' ? `${prize} · HOUSE CREDIT` : prize;
@@ -816,6 +888,14 @@ export interface VaultSettings {
 
 /** The rare kinds (N14: as the mockup's grid marks them and the reference's demo plays them). */
 export const VAULT_RARE_KINDS: readonly VaultRewardKind[] = Object.freeze(['GUARANTEED', 'VAULT_EDITION', 'THE_PIECE'] as const);
+
+/**
+ * WHAT A VAULT CAN HOLD (D42; MK #vault-page): the eight kinds in the grid's order, the rare ones marked; never an odd
+ * (D22 "Not chosen: … odds table on any page").
+ */
+export const VAULT_GRID: readonly { kind: VaultRewardKind; rare: boolean }[] = Object.freeze(
+  (['CREDIT', 'ADDON', 'GUARANTEED', 'PRODUCT', 'CREDIT_TO_GIVE', 'I_WAS_THERE', 'VAULT_EDITION', 'THE_PIECE'] as const).map((kind) => Object.freeze({ kind, rare: VAULT_RARE_KINDS.includes(kind) })),
+);
 
 /** "1 IN N" as the vault writes it (`vaults.odds_text`). */
 export const oddsText = (n: number): string => `1 IN ${n}`;
@@ -2185,6 +2265,301 @@ export class VaultService {
       return this.settings(tx);
     });
   }
+
+  // ── The routes' reads and the model's switch (step Q3.9) ─────────────────
+
+  /**
+   * The entry's own vault of a LIVE release while it waits (GET /api/v1/account/vaults/live/:dropId; §3.3, §3.4, N28):
+   * the door on SOLD OUT for your size and on the end page. 404 VAULT_NOT_FOUND otherwise (none, opened or expired
+   * elsewhere, another account's; an after-room has none of its own, N18, N20).
+   */
+  async liveVault(accountId: string, dropId: string, now: Date = this.clock()): Promise<VaultDoor> {
+    if (typeof accountId !== 'string' || !UUID_RE.test(accountId) || typeof dropId !== 'string' || !UUID_RE.test(dropId)) throw vaultNotFound();
+    const r = await this.db
+      .selectFrom('vaults as v')
+      .innerJoin('drops as d', 'd.id', 'v.drop_id')
+      .leftJoin('models as m', 'm.id', 'd.model_id')
+      .leftJoin('sets as s', 's.id', 'd.set_id')
+      .select(['v.id', 'v.given_at', 'v.waits_until', 'm.name as model', 'm.variant_label', 's.name as set'])
+      .where('v.account_id', '=', accountId.toLowerCase())
+      .where('v.source', '=', 'LIVE')
+      .where('v.drop_id', '=', dropId.toLowerCase())
+      .where('v.opened_at', 'is', null)
+      .where('v.revoked_at', 'is', null)
+      .where('v.waits_until', '>', now)
+      .orderBy('v.given_at')
+      .orderBy('v.id')
+      .executeTakeFirst();
+    if (!r) throw vaultNotFound();
+    const detail = r.model ? pieceName(r.model, r.variant_label) : (r.set ?? null);
+    const waitsUntil = new Date(r.waits_until);
+    return { id: r.id, source: 'LIVE', label: VAULT_SOURCE_LABELS.LIVE, detail, line: vaultSourceLine('LIVE', detail), givenAt: new Date(r.given_at), waitsUntil, waitsUntilDay: parisDay(waitsUntil) };
+  }
+
+  /**
+   * A client's vaults for the console's client sheet (GET /api/admin/vault/vaults?account=; §4.4), newest given first,
+   * every state, read-only: no revoke (N36). 404 ACCOUNT_NOT_FOUND.
+   */
+  async forConsole(accountId: string, now: Date = this.clock()): Promise<AdminVault[]> {
+    if (typeof accountId !== 'string' || !UUID_RE.test(accountId)) throw notFound('Account', 'ACCOUNT_NOT_FOUND');
+    const id = accountId.toLowerCase();
+    if (!(await this.db.selectFrom('accounts').select('id').where('id', '=', id).executeTakeFirst())) throw notFound('Account', 'ACCOUNT_NOT_FOUND');
+    const rows = await this.db
+      .selectFrom('vaults as v')
+      .leftJoin('drops as d', 'd.id', 'v.drop_id')
+      .leftJoin('models as dm', 'dm.id', 'd.model_id')
+      .leftJoin('sets as ds', 'ds.id', 'd.set_id')
+      .leftJoin('products as p', 'p.id', 'v.product_id')
+      .leftJoin('models as pm', 'pm.id', 'p.model_id')
+      .leftJoin('admin_users as u', 'u.id', 'v.given_by')
+      .select([
+        'v.id',
+        'v.source',
+        'v.tier',
+        'v.given_at',
+        'v.waits_until',
+        'v.opened_at',
+        'v.revoked_at',
+        'v.revoked_reason',
+        'v.reward_kind',
+        'v.prize',
+        'v.prize_line',
+        'v.odds_text',
+        'v.rare',
+        'v.order_id',
+        'v.note',
+        'u.id as by_id',
+        'u.email as by_email',
+        'dm.name as drop_model',
+        'dm.variant_label as drop_variant',
+        'ds.name as drop_set',
+        'pm.name as piece_model',
+        'pm.variant_label as piece_variant',
+      ])
+      .where('v.account_id', '=', id)
+      .orderBy('v.given_at', 'desc')
+      .orderBy('v.id', 'desc')
+      .execute();
+    return rows.map((r) => {
+      const detail = detailOf({ ...r, gift_id: null, gift_accepted_by: null, gift_expires_at: null } as unknown as VaultReadRow);
+      return {
+        id: r.id,
+        source: r.source,
+        label: VAULT_SOURCE_LABELS[r.source],
+        detail,
+        line: vaultSourceLine(r.source, detail),
+        givenAt: new Date(r.given_at),
+        waitsUntil: new Date(r.waits_until),
+        state: vaultState(r, now),
+        openedAt: r.opened_at ? new Date(r.opened_at) : null,
+        revokedAt: r.revoked_at ? new Date(r.revoked_at) : null,
+        revokedReason: r.revoked_reason ?? null,
+        kind: r.reward_kind,
+        held: r.reward_kind && r.prize !== null ? vaultHeld(r.reward_kind, r.prize) : null,
+        odds: r.odds_text,
+        rare: r.rare,
+        orderId: r.order_id,
+        givenBy: r.by_id && r.by_email ? { id: r.by_id, email: r.by_email } : null,
+        note: r.note,
+      };
+    });
+  }
+
+  /** THE VAULT's report for the Paris days `from` to `to` (both or neither: the last 30 days; see VaultReport). 422 PERIOD_INVALID. */
+  async report(q: { from?: string | undefined; to?: string | undefined } = {}, now: Date = this.clock()): Promise<VaultReport> {
+    const p = vaultPeriod(q, now);
+    const { start, end } = p;
+    const db = this.db;
+    const n = (v: unknown) => Number(v ?? 0);
+    const inPeriod = (column: 'given_at' | 'opened_at' | 'revoked_at' | 'waits_until') => (eb: ExpressionBuilder<Database, 'vaults'>) => eb.and([eb(column, '>=', start), eb(column, '<', end)]);
+
+    const given = new Map((await db.selectFrom('vaults').select(['source', (eb) => eb.fn.countAll<string | number>().as('n')]).where(inPeriod('given_at')).groupBy('source').execute()).map((r) => [r.source, n(r.n)]));
+    const count = async (where: (eb: ExpressionBuilder<Database, 'vaults'>) => ReturnType<ExpressionBuilder<Database, 'vaults'>['and']>) =>
+      n((await db.selectFrom('vaults').select((eb) => eb.fn.countAll<string | number>().as('n')).where(where).executeTakeFirstOrThrow()).n);
+    const opened = await count(inPeriod('opened_at'));
+    const revoked = await count(inPeriod('revoked_at'));
+    const waiting = await count((eb) => eb.and([inPeriod('given_at')(eb), eb('opened_at', 'is', null), eb('revoked_at', 'is', null), eb('waits_until', '>', now)]));
+    const expired = await count((eb) => eb.and([inPeriod('waits_until')(eb), eb('opened_at', 'is', null), eb('revoked_at', 'is', null), eb('waits_until', '<=', now)]));
+
+    // What the period's openings gave, row by row.
+    const figures = new Map<string, { kind: VaultRewardKind; won: number; value: Map<string, number>; cost: Map<string, number>; costUnknown: number }>();
+    const of = (rewardId: string, kind: VaultRewardKind) => {
+      let f = figures.get(rewardId);
+      if (!f) figures.set(rewardId, (f = { kind, won: 0, value: new Map(), cost: new Map(), costUnknown: 0 }));
+      return f;
+    };
+    const add = (m: Map<string, number>, currency: string, minor: number) => m.set(currency, (m.get(currency) ?? 0) + minor);
+    const won = await db
+      .selectFrom('vaults')
+      .select(['reward_id', 'reward_kind', 'currency', (eb) => eb.fn.countAll<string | number>().as('n'), (eb) => eb.fn.sum<string | number | null>('value_minor').as('value'), (eb) => eb.fn.sum<string | number | null>('cost_minor').as('cost')])
+      .where(inPeriod('opened_at'))
+      .where('reward_id', 'is not', null)
+      .groupBy(['reward_id', 'reward_kind', 'currency'])
+      .execute();
+    for (const r of won) {
+      const f = of(r.reward_id!, r.reward_kind!);
+      f.won += n(r.n);
+      if (r.currency && r.value !== null) add(f.value, r.currency, n(r.value));
+      // Written at the opening: a credit's face value (CREDIT, CREDIT TO GIVE).
+      if (r.currency && r.cost !== null && n(r.cost) > 0) add(f.cost, r.currency, n(r.cost));
+    }
+    // A piece won free (a model, a VAULT EDITION, THE PIECE) still on its way (never one cancelled: its unit went back to
+    // stock), and a free add-on's unit on an order: their supplier unit price where known.
+    const units = [
+      ...(await db
+        .selectFrom('vaults as v')
+        .innerJoin('orders as o', 'o.id', 'v.order_id')
+        .select(['v.reward_id', 'v.reward_kind', 'o.sku_id'])
+        .where((eb) => eb.and([eb('v.opened_at', '>=', start), eb('v.opened_at', '<', end)]))
+        .where('o.price_minor', '=', 0)
+        .where('o.status', '<>', 'CANCELLED')
+        .execute()),
+      ...(await db
+        .selectFrom('vaults as v')
+        .innerJoin('order_addon_items as u', 'u.vault_id', 'v.id')
+        .select(['v.reward_id', 'v.reward_kind', 'u.sku_id'])
+        .where((eb) => eb.and([eb('v.opened_at', '>=', start), eb('v.opened_at', '<', end)]))
+        .where('u.status', 'not in', ['REMOVED', 'CANCELLED'])
+        .execute()),
+    ];
+    const unitCost = await supplierUnitCosts(db, [...new Set(units.map((u) => u.sku_id).filter((s): s is string => s !== null))]);
+    for (const u of units) {
+      if (!u.reward_id || !u.reward_kind) continue;
+      const f = of(u.reward_id, u.reward_kind);
+      const c = u.sku_id ? unitCost.get(u.sku_id) : undefined;
+      if (c) add(f.cost, c.currency, c.minor);
+      else f.costUnknown += 1;
+    }
+    const credits = { given: new Map<string, number>(), used: new Map<string, number>() };
+    for (const f of figures.values()) if (f.kind === 'CREDIT' || f.kind === 'CREDIT_TO_GIVE') for (const [c, m] of f.value) add(credits.given, c, m);
+    const used = await db
+      .selectFrom('credit_uses as cu')
+      .innerJoin('tier_grants as g', 'g.id', 'cu.grant_id')
+      .innerJoin('vaults as v', 'v.id', 'g.vault_id')
+      .select(['g.currency', (eb) => eb.fn.sum<string | number>('cu.amount_minor').as('n')])
+      .where('g.kind', '=', 'VAULT')
+      .where('cu.released_at', 'is', null)
+      .where((eb) => eb.and([eb('v.opened_at', '>=', start), eb('v.opened_at', '<', end)]))
+      .groupBy('g.currency')
+      .execute();
+    for (const r of used) if (r.currency) add(credits.used, r.currency, n(r.n));
+
+    const money = (m: Map<string, number>): VaultMoney[] => [...m].filter(([, minor]) => minor !== 0).map(([currency, minor]) => ({ currency, minor })).sort(byHouseCurrency);
+    const none = () => ({ won: 0, value: new Map<string, number>(), cost: new Map<string, number>(), costUnknown: 0 });
+    const out = (f: { won: number; value: Map<string, number>; cost: Map<string, number>; costUnknown: number }): VaultWonFigures => ({ won: f.won, value: money(f.value), cost: money(f.cost), costUnknown: f.costUnknown });
+    const table = await this.settings();
+    const byKind = VAULT_GRID.map(({ kind }) => {
+      const sum = none();
+      for (const f of figures.values()) {
+        if (f.kind !== kind) continue;
+        sum.won += f.won;
+        sum.costUnknown += f.costUnknown;
+        for (const [c, m] of f.value) add(sum.value, c, m);
+        for (const [c, m] of f.cost) add(sum.cost, c, m);
+      }
+      return { kind, ...out(sum) };
+    });
+    const total = new Map<string, number>();
+    let costUnknown = 0;
+    for (const f of figures.values()) {
+      for (const [c, m] of f.cost) add(total, c, m);
+      costUnknown += f.costUnknown;
+    }
+    return {
+      from: p.from,
+      to: p.to,
+      given: VAULT_SOURCES.map((source) => ({ source, count: given.get(source) ?? 0 })),
+      givenTotal: [...given.values()].reduce((a, b) => a + b, 0),
+      opened,
+      waiting,
+      expired,
+      revoked,
+      byKind,
+      rows: table.rewards.map((r) => ({ ...r, ...out(figures.get(r.id) ?? none()) })),
+      credits: { given: money(credits.given), used: money(credits.used) },
+      totalCost: money(total),
+      costUnknown,
+    };
+  }
+
+  /**
+   * A model's VAULT ONLY (PUT /api/admin/models/:id/vault-only, OPERATOR; §4.5, D19 "rare VAULT EDITION (catalogue
+   * product marked vault-only, never sold)"): on, every sales path refuses it (MODEL_VAULT_ONLY); off, it is sold again.
+   * Refused while THE VAULT's table holds it the other way: on while an active PRODUCT row names it, off while an active
+   * VAULT EDITION does (409, worded). 404 MODEL_NOT_FOUND. Audited `model.vault_only`.
+   */
+  async setVaultOnly(modelId: string, on: unknown, actor: Actor): Promise<{ modelId: string; vaultOnly: boolean }> {
+    assertStaff(actor, 'change a model');
+    if (typeof modelId !== 'string' || !UUID_RE.test(modelId)) throw notFound('Model', 'MODEL_NOT_FOUND');
+    if (typeof on !== 'boolean') throw validationError('VAULT ONLY is on or off.');
+    const id = modelId.toLowerCase();
+    return inTransaction(this.db, async (tx) => {
+      await lockTable(tx);
+      const m = await tx.selectFrom('models').select('vault_only').where('id', '=', id).forUpdate().executeTakeFirst();
+      if (!m) throw notFound('Model', 'MODEL_NOT_FOUND');
+      if (m.vault_only === on) return { modelId: id, vaultOnly: on };
+      const row = await tx.selectFrom('vault_rewards').select('kind').where('model_id', '=', id).where('active', '=', true).where('kind', '=', on ? 'PRODUCT' : 'VAULT_EDITION').executeTakeFirst();
+      if (row && on) throw conflict('VAULT_ONLY_PRODUCT', 'This model is a product of THE VAULT’s table: deactivate that row before marking it vault-only.');
+      if (row) throw conflict('VAULT_EDITION_MODEL', 'This model is a VAULT EDITION of THE VAULT’s table: deactivate that row before selling it.');
+      await tx.updateTable('models').set({ vault_only: on }).where('id', '=', id).execute();
+      await this.audit.record({ actor, action: 'model.vault_only', targetType: 'model', targetId: id, details: { before: m.vault_only, after: on } }, tx);
+      return { modelId: id, vaultOnly: on };
+    });
+  }
+}
+
+/** The house currencies' order (EUR, GBP, USD, CHF), any other after them. */
+function byHouseCurrency(a: VaultMoney, b: VaultMoney): number {
+  const rank = (c: string) => {
+    const i = (HOUSE_CURRENCIES as readonly string[]).indexOf(c);
+    return i === -1 ? HOUSE_CURRENCIES.length : i;
+  };
+  return rank(a.currency) - rank(b.currency) || a.currency.localeCompare(b.currency);
+}
+
+const VAULT_REPORT_DAYS = 30;
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+const periodInvalid = (message: string) => new DomainError('PERIOD_INVALID', 422, message);
+
+/** A Paris day `days` after `day` (calendar arithmetic). */
+function dayPlus(day: string, days: number): string {
+  const [y, m, d] = day.split('-').map(Number) as [number, number, number];
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
+
+/** The report's Paris days and instants: both days or neither (the last 30 days, today included); 422 PERIOD_INVALID. */
+export function vaultPeriod(q: { from?: string | undefined; to?: string | undefined }, now: Date): { from: string; to: string; start: Date; end: Date } {
+  const from = q.from || null;
+  const to = q.to || null;
+  if ((from === null) !== (to === null)) throw periodInvalid('Give the first and the last day, or neither.');
+  const today = parisDay(now);
+  const period = from !== null && to !== null ? { from, to } : { from: dayPlus(today, 1 - VAULT_REPORT_DAYS), to: today };
+  const isDay = (v: string) => DAY_RE.test(v) && new Date(`${v}T00:00:00.000Z`).toISOString().slice(0, 10) === v;
+  if (!isDay(period.from) || !isDay(period.to)) throw periodInvalid('A day is YYYY-MM-DD.');
+  if (period.to < period.from) throw periodInvalid('The last day is before the first.');
+  return { ...period, start: parisDayStart(period.from), end: parisDayStart(dayPlus(period.to, 1)) };
+}
+
+/**
+ * Each SKU's supplier unit price where known (N29): the price of its latest line on a supplier order that was sent, in
+ * that order's currency; a SKU never ordered with a price is absent.
+ */
+async function supplierUnitCosts(db: Db, skuIds: readonly string[]): Promise<Map<string, VaultMoney>> {
+  if (skuIds.length === 0) return new Map();
+  const rows = await db
+    .selectFrom('supplier_order_lines as l')
+    .innerJoin('supplier_orders as so', 'so.id', 'l.supplier_order_id')
+    .select(['l.sku_id', 'l.unit_price_minor', 'so.currency'])
+    .distinctOn('l.sku_id')
+    .where('l.sku_id', 'in', [...skuIds])
+    .where('l.unit_price_minor', 'is not', null)
+    .where('so.currency', 'is not', null)
+    .where('so.sent_at', 'is not', null)
+    .orderBy('l.sku_id')
+    .orderBy('so.sent_at', 'desc')
+    .orderBy('l.id', 'desc')
+    .execute();
+  return new Map(rows.map((r) => [r.sku_id, { currency: r.currency!, minor: Number(r.unit_price_minor) }]));
 }
 
 /** A row's figures as the audit keeps them (no staff words beyond a VAULT EDITION's line's length). */

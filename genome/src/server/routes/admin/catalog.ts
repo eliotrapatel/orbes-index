@@ -26,7 +26,9 @@
  * (PATCH: 400). Its packing (plan MACRO M3 §1.2, B1 and B2): the box its
  * pieces are packed in and their packed weight, set by OPERATOR (PUT
  * …/packing), read with the model (`packing`, a variant's main model's when it
- * has none). The services validate, write and audit; these routes only
+ * has none). Its VAULT ONLY (lot Q3, §4.5; D19 "rare VAULT EDITION (catalogue product marked vault-only, never
+ * sold)"): set by OPERATOR (PUT …/vault-only, `{ vaultOnly }`; services/vault.ts, audited `model.vault_only`), read
+ * with the model (`vaultOnly`). The services validate, write and audit; these routes only
  * parse and shape.
  */
 import type { FastifyPluginAsync } from 'fastify';
@@ -44,6 +46,7 @@ import {
   modelWarrantyBody,
   modelSizeParams,
   modelSizesBody,
+  modelVaultOnlyBody,
   parse,
   updateCollectionBody,
   updateModelBody,
@@ -229,6 +232,14 @@ export const adminCatalogRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
   });
 
   // Plan ORBES CARE (answer 12, D16): ADMIN only, as it rewrites the warranties of the model's pieces already sold.
+  // THE VAULT (lot Q3, step Q3.9): a vault-only model is refused by every sales path (409 MODEL_VAULT_ONLY).
+  app.put('/api/admin/models/:id/vault-only', async (request) => {
+    const { id } = parse(catalogParams, request.params);
+    const b = parse(modelVaultOnlyBody, request.body);
+    await ctx.services.vault.setVaultOnly(id, b.vaultOnly, adminActor(request));
+    return catalog.getModel(id);
+  });
+
   app.post('/api/admin/models/:id/warranty', { config: { guard: { minRole: 'ADMIN' } } }, async (request) => {
     const { id } = parse(catalogParams, request.params);
     const b = parse(modelWarrantyBody, request.body);

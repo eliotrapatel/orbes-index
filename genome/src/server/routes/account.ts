@@ -32,13 +32,15 @@ import { forbidden } from '../errors.js';
 import { connectionPlace } from '../geo/place.js';
 import { userAgentOf } from '../http/client.js';
 import { rateLimitHook } from '../http/rate-limit.js';
-import { accountAddressBody, accountAddressParams, accountAddressUpdateBody, accountClaimCodeBody, accountDocumentParams, accountEngravingBody, accountOrderAddonParams, accountOrderCaseBody, accountOrderAddressBody, accountOrderParams, orderAddonBody, accountProfileBody, accountSizesBody, careParams, careRequestBody, changePasswordBody, emailPreferencesBody, emptyBody, loginBody, lookbookParams, parse, productParams, recoverAccountBody, registerAccountBody, resetRequestBody, warrantyClaimParams } from '../http/schemas.js';
+import { accountAddressBody, accountAddressParams, accountAddressUpdateBody, accountClaimCodeBody, accountDocumentParams, accountEngravingBody, accountOrderAddonParams, accountOrderCaseBody, accountOrderAddressBody, accountOrderParams, orderAddonBody, accountProfileBody, accountSizesBody, careParams, careRequestBody, changePasswordBody, emailPreferencesBody, emptyBody, loginBody, lookbookParams, parse, productParams, recoverAccountBody, registerAccountBody, resetRequestBody, vaultBuyBody, vaultClaimBody, vaultGiftParams, vaultLiveParams, vaultParams, warrantyClaimParams } from '../http/schemas.js';
 import { accountActor, clearSessionCookie, clientMeta, requireAccount, sessionGuard, sessionToken, setSessionCookie } from '../http/sessions.js';
 import type { AccountProfile } from '../services/auth.js';
 import { emailOff } from '../services/email.js';
 import { findProduct } from '../services/lifecycle.js';
 import { requireSignUp } from '../services/sign-up.js';
 import { WISHLIST_MAX } from '../services/wishlist.js';
+import type { OrderAddressInput } from '../services/orders.js';
+import { VAULT_GRID } from '../services/vault.js';
 import { isCountryCode } from '../../shared/countries.js';
 import { safeFilename } from './admin/codes.js';
 import type { RouteDeps } from './public.js';
@@ -495,5 +497,110 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
         closedAt: s.closedAt,
       })),
     };
+  });
+
+  // ── THE VAULT (lot Q3, step Q3.9; plan §2.9, §2.10) ──────────────────────
+  // The account's own vaults only: another account's, or one unknown, answers 404 VAULT_NOT_FOUND. Never stored by a
+  // cache. The draw is the server's and is written before it is answered: POST …/open answers a vault already opened with
+  // its outcome again (a lost answer is never a second draw), at most VAULT_OPEN_PER_MINUTE openings a minute per account
+  // (http/rate-limit.ts `vaultOpen`). No reply carries THE VAULT's table, its odds or its quantities (D22 "odds table on
+  // any page" not chosen): only an opened vault's own odds. A credit to give's link names nobody (N10); its code's routes
+  // share the `auth` budget with the other codes. Every refusal is a worded DomainError of services/vault.ts.
+  const { vault } = ctx.services;
+  const noStore = (reply: FastifyReply) => reply.header('cache-control', 'no-store');
+
+  // THE VAULT page (§3.5): YOUR VAULTS, OPENED, HOW TO OBTAIN A VAULT (the next LIVE release with its vault on, a Paris
+  // day), WHAT A VAULT CAN HOLD's kinds; and the quiet number (D18) alone.
+  app.get('/api/v1/account/vaults', async (request, reply) => {
+    const { account } = requireAccount(request);
+    noStore(reply);
+    return { ...(await vault.forAccount(account.id)), grid: VAULT_GRID };
+  });
+
+  app.get('/api/v1/account/vaults/summary', async (request, reply) => {
+    const { account } = requireAccount(request);
+    noStore(reply);
+    return { waiting: await vault.waitingCount(account.id) };
+  });
+
+  // The door on SOLD OUT for your size and on the end page (§3.3, §3.4): the entry's own vault of that release while it
+  // waits; 404 VAULT_NOT_FOUND otherwise (N28).
+  app.get('/api/v1/account/vaults/live/:dropId', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { dropId } = parse(vaultLiveParams, request.params);
+    noStore(reply);
+    return { vault: await vault.liveVault(account.id, dropId) };
+  });
+
+  // The opening (§2.2): 409 VAULT_EXPIRED, VAULT_REVOKED (a returned piece's), 403 ACCOUNT_LOCKED.
+  app.post('/api/v1/account/vaults/:id/open', { onRequest: limiters.vaultOpen }, async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(vaultParams, request.params);
+    parse(emptyBody, request.body);
+    noStore(reply);
+    return { reveal: await vault.open(account.id, id) };
+  });
+
+  // INVITE A FRIEND (§2.3.5, N10): the personal link, made at the first press and the same ever after.
+  app.post('/api/v1/account/vaults/invite', async (request, reply) => {
+    const { account } = requireAccount(request);
+    parse(emptyBody, request.body);
+    const { code } = await vault.invitation(account.id);
+    noStore(reply);
+    return { code, url: `${ctx.config.publicOrigin}/verify/join/${code}` };
+  });
+
+  // A credit to give (N10): what it is (its amount, until when, whether this account may accept it; nothing of the giver),
+  // and its acceptance by a friend holding no piece (409 VAULT_GIFT_ENDED, VAULT_GIFT_NOT_FOR_YOU; 404 VAULT_GIFT_NOT_FOUND).
+  app.get('/api/v1/account/vaults/gifts/:code', { config: { rateGroup: 'auth' } }, async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { code } = parse(vaultGiftParams, request.params);
+    noStore(reply);
+    return { gift: await vault.gift(code, account.id) };
+  });
+
+  app.post('/api/v1/account/vaults/gifts/:code/accept', { config: { rateGroup: 'auth' } }, async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { code } = parse(vaultGiftParams, request.params);
+    parse(emptyBody, request.body);
+    const credit = await vault.acceptGift(account.id, code);
+    noStore(reply);
+    return { gift: await vault.gift(code, account.id), credit: { amountMinor: credit.amountMinor, currency: credit.currency, expiresAt: credit.expiresAt } };
+  });
+
+  // YOUR ORDERS (§3.8): the rights to buy still open, and BUY within their 24 hours (409 VAULT_OFFER_ENDED after), the
+  // order as MY PIECES reads it (bought already: the same order).
+  app.get('/api/v1/account/vaults/rights-to-buy', async (request, reply) => {
+    const { account } = requireAccount(request);
+    noStore(reply);
+    return { items: await vault.rightsToBuy(account.id) };
+  });
+
+  app.post('/api/v1/account/vaults/:id/buy', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(vaultParams, request.params);
+    const b = parse(vaultBuyBody, request.body);
+    const { orderId } = await vault.buy(account.id, id, { ...(b.size !== undefined ? { size: b.size } : {}), ...(b.address ? { address: b.address as OrderAddressInput } : {}) });
+    noStore(reply);
+    return { order: await orders.accountOrder(account.id, orderId) };
+  });
+
+  // A piece won free (D20, N12): the sizes it can be claimed in, and CLAIM IT within its 30 days (409 VAULT_OFFER_ENDED
+  // after; a change of size only to one with a unit, 409 VAULT_SIZE_NONE_LEFT; 409 ORDER_ADDRESS_MISSING without an
+  // address); 404 ORDER_NOT_FOUND for any order but the account's own VAULT order at 0.
+  app.get('/api/v1/account/orders/:id/claim', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(accountOrderParams, request.params);
+    noStore(reply);
+    return vault.claimSizes(account.id, id);
+  });
+
+  app.post('/api/v1/account/orders/:id/claim', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(accountOrderParams, request.params);
+    const b = parse(vaultClaimBody, request.body);
+    await vault.claim(account.id, id, { ...(b.size !== undefined ? { size: b.size } : {}), ...(b.address ? { address: b.address as OrderAddressInput } : {}) });
+    noStore(reply);
+    return { order: await orders.accountOrder(account.id, id) };
   });
 };
