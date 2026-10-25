@@ -1074,6 +1074,12 @@ export const updateLiveBody = body(Object.fromEntries(Object.entries(liveSetting
   [K in keyof typeof liveSettingsFields]: z.ZodOptional<(typeof liveSettingsFields)[K]>;
 }).refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one setting of the release to change');
 
+/**
+ * PUT /api/admin/live/:id/addons: ADD-ONS OFFERED, the release's pick of catalogue add-ons (`afterRoom`: its
+ * after-room's), in order, replaced, until it ends (review of lot Q2: never locked at the announcement).
+ */
+export const liveAddonPickBody = body({ addonIds: addonPick, afterRoom: z.boolean().optional() });
+
 /** POST /api/admin/live/:id/publish: with a post of the owners' circle linking the release, or not. */
 export const publishLiveBody = optionalBody({ circlePost: z.boolean().optional() });
 

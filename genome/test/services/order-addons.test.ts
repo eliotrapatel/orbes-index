@@ -671,7 +671,7 @@ describe('add-ons on orders (plan MACRO M3 §4.2, D1 and D2)', () => {
     const listed = await f.drops.entries(d.id, {}, { page: 1, pageSize: 10 });
     expect(listed.items.find((e) => e.id === ea)!.addonChoices.map((c) => [c.name, c.units])).toEqual([['POLISHING CLOTH', 3]]);
     // The account's export names the choice while it is not on an order yet.
-    expect((await ctx.services.owners.exportData(a.id, admin)).addonChoices).toEqual([{ on: 'DRAW_ENTRY', sourceId: ea, addon: 'POLISHING CLOTH', units: 3, chosenAt: expect.any(Date) }]);
+    expect((await ctx.services.owners.exportData(a.id, admin)).addonChoices).toEqual([{ on: 'DRAW_ENTRY', sourceId: ea, addon: 'POLISHING CLOTH', units: 3, text: null, chosenAt: expect.any(Date) }]);
     const confirmed = await f.drops.confirm(d.id, ea, null, admin);
     expect(confirmed.addonsLeftOut).toBeUndefined();
     expect((await ctx.services.owners.exportData(a.id, admin)).addonChoices).toEqual([]);
@@ -947,6 +947,10 @@ describe('add-ons on orders (plan MACRO M3 §4.2, D1 and D2)', () => {
         await choose([{ addonId: engraving.id, text: 'ÉLODIE & M.' }]);
         // The hold reads its words back (its own), one unit per piece.
         expect((await f.live.entry(e.account_id, e.drop_id))!.addonItems).toEqual([{ addonId: engraving.id, name: 'ENGRAVING', line: null, units: 1, priceMinor: 4000, text: 'ÉLODIE & M.' }]);
+        // The account's export carries the words of its SECURED hold (review of lot Q2: its right of access).
+        expect((await ctx.services.owners.exportData(e.account_id, admin)).addonChoices).toEqual([
+          { on: 'LIVE_ENTRY', sourceId: e.id, addon: 'ENGRAVING', units: 1, text: 'ÉLODIE & M.', chosenAt: expect.any(Date) },
+        ]);
       },
     });
     expect(offer.map((x) => [x.name, x.maxUnits, x.engraving, x.textMax])).toEqual([
@@ -976,7 +980,52 @@ describe('add-ons on orders (plan MACRO M3 §4.2, D1 and D2)', () => {
     const other = (await liveSale({ pick: [cloth.id] })).orders[0]!;
     expect((await addons().offerForStaff(other.id)).offer.find((x) => x.addonId === engraving.id)).toMatchObject({ maxUnits: 1, engraving: true, textMax: 12 });
     await addons().addForStaff(other.id, { addonId: engraving.id, units: 1 }, admin);
+    // Review of lot Q2: the engraving or not, as its units were sold (409 ADDON_ENGRAVING_FIXED), both ways: YOUR ORDERS,
+    // the parcel and the invoices read each unit by it; free again once its units are removed.
+    expect(await refusal(ctx.services.addons.update(engraving.id, { engraving: false }, admin))).toEqual({
+      code: 'ADDON_ENGRAVING_FIXED',
+      status: 409,
+      message: 'This add-on is on orders as the engraving: it stays the engraving. Set it aside to stop offering it.',
+    });
     await ctx.services.addons.setAside(engraving.id, admin);
+    expect((await ctx.services.addons.get(engraving.id)).engraving).toBe(true);
+    const note = await ctx.services.addons.create({ kind: 'SERVICE', name: 'A NOTE IN THE BOX', skuCode: 'ADD-Q2R-NOTE', prices: { EUR: 500 }, offeredAt: { live: false, draw: false, salon: false, orders: true } }, admin);
+    await addons().addForStaff(other.id, { addonId: note.id, units: 1 }, admin);
+    expect(await refusal(ctx.services.addons.update(note.id, { engraving: true }, admin))).toEqual({
+      code: 'ADDON_ENGRAVING_FIXED',
+      status: 409,
+      message: 'This add-on is on orders: it never becomes the engraving. Create the engraving as a new service.',
+    });
+    expect((await ctx.services.addons.get(note.id)).engraving).toBe(false);
+    await addons().removeForStaff(other.id, (await unitsOf(other.id)).find((u) => u.addon_id === note.id)!.id, admin);
+    expect((await ctx.services.addons.update(note.id, { engraving: true }, admin)).engraving).toBe(true);
+    await ctx.services.addons.setAside(note.id, admin);
+  });
+
+  it('LIVE: the release\'s add-ons offered change after its announcement (review of lot Q2): an add-on created then is picked, audited, and offered at the next reading of a hold; the one unpicked is no longer offered', async () => {
+    const offered: string[][] = [];
+    const late = await ctx.services.addons.create({ kind: 'SERVICE', name: 'A LATE CARD', skuCode: 'ADD-Q2R-LATE', prices: { EUR: 900 }, offeredAt: { live: true, draw: false, salon: false, orders: false } }, admin);
+    try {
+      const sale = await liveSale({
+        pick: [cloth.id],
+        before: async () => {
+          const e = await securedEntry();
+          offered.push(names((await f.live.entry(e.account_id, e.drop_id))!.addonOffer));
+          // Announced (published at once): the settings are fixed, the pick is not.
+          expect(await refusal(f.liveConsole.update(e.drop_id, { addonIds: [late.id] }, admin))).toMatchObject({ code: 'LIVE_ANNOUNCED', status: 409 });
+          await f.liveConsole.setAddonPick(e.drop_id, { addonIds: [late.id] }, admin);
+          offered.push(names((await f.live.entry(e.account_id, e.drop_id))!.addonOffer));
+        },
+      });
+      expect(offered).toEqual([['POLISHING CLOTH'], ['A LATE CARD']]);
+      const audit = await t.db.selectFrom('audit_logs').select('details').where('action', '=', 'drop.live.update').where('target_id', '=', sale.release.id).orderBy('id', 'desc').executeTakeFirstOrThrow();
+      expect(audit.details).toEqual({ before: { addonIds: [{ id: cloth.id, name: 'POLISHING CLOTH' }] }, after: { addonIds: [{ id: late.id, name: 'A LATE CARD' }] } });
+      // Ended: its pick no longer changes (409 LIVE_ENDED).
+      await t.db.updateTable('drops').set({ ended_at: clock.now(), ended_reason: 'ENDED' }).where('id', '=', sale.release.id).execute();
+      expect(await refusal(f.liveConsole.setAddonPick(sale.release.id, { addonIds: [cloth.id] }, admin))).toMatchObject({ code: 'LIVE_ENDED', status: 409 });
+    } finally {
+      await ctx.services.addons.setAside(late.id, admin);
+    }
   });
 });
 

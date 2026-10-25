@@ -18,7 +18,9 @@
  *                   add-on, N7; written to `drop_addons`); the staged reveals (announcement, silhouette, name,
  *                   photograph); the per-tier turn and pay windows. Everything changes until the announcement (a DRAFT,
  *                   or published and announced later); after it, 409 LIVE_ANNOUNCED: only the stock rises, with ADD
- *                   PIECES (live.ts addPieces). The silhouette's image is MediaService's (setLiveSilhouette).
+ *                   PIECES (live.ts addPieces), and its add-ons offered (and its after-room's) change until it ends
+ *                   (setAddonPick, PUT /api/admin/live/:id/addons; review of lot Q2: never locked at the announcement).
+ *                   The silhouette's image is MediaService's (setLiveSilhouette).
  *   publish         with, optionally, a post of the owners' circle linking the release (the plan's choice 9): a NOTE for
  *                   the release's tier (TITANE at least), shown from the announcement, kept in step with the release's
  *                   times while it is not shown yet, withdrawn if the release is cancelled before it shows; added or
@@ -190,6 +192,9 @@ const modelInactive = () => conflict('MODEL_INACTIVE', 'This model is no longer 
 const entryNotFound = () => notFound('Entry', 'LIVE_ENTRY_NOT_FOUND');
 const afterRoomModelInactive = () => conflict('MODEL_INACTIVE', 'The after-room’s model is no longer offered for new products: choose another in its settings.');
 const afterRoomOwn = () => conflict('LIVE_AFTER_ROOM', 'This is the after-room of a release: it is set, published and cancelled with that release.');
+/** Add-ons offered change until the release (or its after-room) ends (review of lot Q2: no lock at the announcement). */
+const addonsEnded = (afterRoom: boolean) => conflict('LIVE_ENDED', afterRoom ? 'This after-room has ended: its add-ons offered no longer change.' : 'This release has ended: its add-ons offered no longer change.');
+const noAfterRoom = () => validationError('This release has no after-room.');
 
 function assertStaff(actor: Actor, what: string): string {
   if (actor?.type !== 'admin' || typeof actor.id !== 'string' || !UUID_RE.test(actor.id)) throw forbidden(`Only an ORBES admin can ${what}.`);
@@ -1248,7 +1253,8 @@ export class LiveConsoleService {
   }
 
   /**
-   * Change a LIVE RELEASE until its announcement (409 LIVE_ANNOUNCED after, DROP_CANCELLED once cancelled): any setting;
+   * Change a LIVE RELEASE until its announcement (409 LIVE_ANNOUNCED after, DROP_CANCELLED once cancelled; its add-ons
+   * offered change until it ends with setAddonPick): any setting;
    * a list given (sizes, add-ons, the catalogue add-ons picked, models, per-tier windows) replaces the release's. The same
    * checks as a creation. A
    * post of the circle the publication scheduled follows the new times and rule; a new opening cancels the founding
@@ -1311,6 +1317,50 @@ export class LiveConsoleService {
       ];
       if (d.published_at) await this.syncCirclePosts(tx, { ...d, ...this.columns(after) } as DropRow, now, actor, notes);
       for (const n of notes) await this.audit.record(n, tx);
+      return this.release(tx, id);
+    });
+  }
+
+  /**
+   * ADD-ONS OFFERED (lot Q2, D3; review of lot Q2): the catalogue add-ons a release (`afterRoom`: its after-room) offers
+   * at its purchase, in order, replaced, at any moment until it ends: never locked at the announcement (ANSWERS CURRENT
+   * STATE D, "each release picks which add-ons it offers"). Refused once cancelled (DROP_CANCELLED) or ended (409
+   * LIVE_ENDED: the release's `ended_at`, the after-room's own); each add-on checked as at the creation (addons.ts
+   * checkPick: 409 ADDON_NOT_OFFERED naming it). A hold already SECURED keeps its choices; the next reading of an offer
+   * follows the new pick (order-addons.ts addonOffer). Audited `drop.live.update` with `addonIds` before and after
+   * (`afterRoom: true` for the after-room's); nothing changed, nothing written. The release's row, then its after-room's,
+   * FOR UPDATE, as every save.
+   */
+  async setAddonPick(dropId: string, input: { addonIds: unknown; afterRoom?: boolean }, actor: Actor): Promise<AdminLiveRelease> {
+    assertStaff(actor, 'change a release');
+    const id = knownId(dropId, dropNotFound);
+    const ids = cleanPickIds(input?.addonIds);
+    const afterRoom = input?.afterRoom === true;
+    return inTransaction(this.db, async (tx) => {
+      const d = await this.lock(tx, id);
+      if (d.parent_drop_id) throw afterRoomOwn();
+      if (d.cancelled_at) throw liveCancelled();
+      let target = d;
+      if (afterRoom) {
+        const child = await tx.selectFrom('drops').selectAll().where('parent_drop_id', '=', id).forUpdate().executeTakeFirst();
+        if (!child) throw noAfterRoom();
+        target = child;
+      }
+      if (target.ended_at) throw addonsEnded(afterRoom);
+      const was = (await this.pickRead(tx, target.id)).map((a) => ({ id: a.id, name: a.name }));
+      const next = await checkPick(tx, 'LIVE', ids, d.currency);
+      if (JSON.stringify(was.map((a) => a.id)) === JSON.stringify(next.map((a) => a.id))) return this.release(tx, id);
+      await writePick(tx, target.id, next.map((a) => a.id));
+      await this.audit.record(
+        {
+          actor,
+          action: 'drop.live.update',
+          targetType: 'drop',
+          targetId: id,
+          details: { ...(afterRoom ? { afterRoom: true } : {}), before: { addonIds: was }, after: { addonIds: next } },
+        },
+        tx,
+      );
       return this.release(tx, id);
     });
   }

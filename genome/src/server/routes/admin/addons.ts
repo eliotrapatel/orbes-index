@@ -15,7 +15,8 @@
  *                                                         and its most characters (409 ADDON_ENGRAVING_TAKEN)
  *   PATCH  /api/admin/addons/:id                OPERATOR  its name, line, supplier, weight, position, switches, the
  *                                                         engraving and its most characters (its kind never: 409
- *                                                         ADDON_KIND_FIXED)
+ *                                                         ADDON_KIND_FIXED; the engraving once sold: 409
+ *                                                         ADDON_ENGRAVING_FIXED)
  *   PUT    /api/admin/addons/:id/prices         OPERATOR  its prices by currency (null removes one)
  *   POST   /api/admin/addons/:id/set-aside      OPERATOR  offered nowhere again
  *   POST   /api/admin/addons/:id/reinstate      OPERATOR  offered again

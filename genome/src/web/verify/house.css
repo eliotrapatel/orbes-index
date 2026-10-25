@@ -2572,13 +2572,15 @@ body[data-screen="live"]:has(.view--live.live--look:not(.d-room)) .corners {
   background: linear-gradient(90deg, rgba(246, 242, 234, 0) 0, rgba(246, 242, 234, 0.35) 30%, rgba(246, 242, 234, 0.62) 50%, rgba(246, 242, 234, 0.35) 70%, rgba(246, 242, 234, 0) 100%);
 }
 
+/* Its block padding is the space min-height leaves around one name line, so a name on two lines keeps the same gap
+   above the add-on's line (its -12px margin) as a name on one. */
 .btn.live__addon {
   justify-content: flex-start;
   gap: 14px;
   width: 100%;
   min-width: 0;
   min-height: 52px;
-  padding: 10px 2px;
+  padding: calc((52px - 1.5em) / 2) 2px;
   border: 0;
   letter-spacing: var(--track-micro);
   text-align: left;
@@ -2667,7 +2669,6 @@ body[data-screen="live"]:has(.view--live.live--look:not(.d-room)) .corners {
 
 .ao-text__label {
   flex: none;
-  font-family: var(--font-display);
   font-size: var(--fs-micro);
   letter-spacing: var(--track-label);
   color: var(--ink-soft);

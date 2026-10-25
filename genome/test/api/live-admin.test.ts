@@ -409,11 +409,35 @@ describe('LIVE RELEASES: the console', () => {
           ['THE BOX FOR ONE RELEASE', 9000],
         ]);
         expect((await op.patch(`/api/admin/live/${room.id}`, { afterRoom: null })).statusCode).toBe(200);
-        // Announced (at its publication): its pick no longer changes (the settings' lock).
-        const announced = await create({ inMinutes: 3 * 60 });
+        // Announced (at its publication): its settings are fixed, its pick is not (the review of lot Q2): ADD-ONS OFFERED
+        // until it ends, its after-room's too, each checked and audited before and after.
+        const announced = await create({ inMinutes: 3 * 60, afterRoom: { modelId: f.modelId, priceMinor: 90_000, sizes: [{ label: 'ONE SIZE', stock: 2 }], addonIds: [] } });
         expect((safeJson(await op.post(`/api/admin/live/${announced.id}/publish`, {})) as Json).phase).toBe('ANNOUNCED');
         const locked = await op.patch(`/api/admin/live/${announced.id}`, { addonIds: [box.id] });
         expect([locked.statusCode, errorOf(locked).code]).toEqual([409, 'LIVE_ANNOUNCED']);
+        const put = (id: string, body: Json) => op.request('PUT', `/api/admin/live/${id}/addons`, { body });
+        expect(picked(safeJson(await put(announced.id, { addonIds: [box.id, wrap.id] })) as Json)).toEqual([
+          ['THE BOX FOR ONE RELEASE', 9000],
+          ['GIFT WRAPPING', 1500],
+        ]);
+        expect((await audits('drop.live.update', announced.id)).at(-1)!.details).toEqual({
+          before: { addonIds: expect.any(Array) },
+          after: { addonIds: [{ id: box.id, name: 'THE BOX FOR ONE RELEASE' }, { id: wrap.id, name: 'GIFT WRAPPING' }] },
+        });
+        const roomPick = safeJson(await put(announced.id, { addonIds: [wrap.id], afterRoom: true })) as Json;
+        expect([picked(roomPick.afterRoom), picked(roomPick).length]).toEqual([[['GIFT WRAPPING', 1500]], 2]);
+        expect((await audits('drop.live.update', announced.id)).at(-1)!.details).toEqual({ afterRoom: true, before: { addonIds: [] }, after: { addonIds: [{ id: wrap.id, name: 'GIFT WRAPPING' }] } });
+        const refusedPick = await put(announced.id, { addonIds: [drawOnly.id] });
+        expect([refusedPick.statusCode, errorOf(refusedPick).code]).toEqual([409, 'ADDON_NOT_OFFERED']);
+        expect((await put(announced.id, { addonIds: [wrap.id, wrap.id] })).statusCode).toBe(400);
+        const noRoom = await put(r.id, { addonIds: [], afterRoom: true });
+        expect([noRoom.statusCode, errorOf(noRoom).message]).toEqual([400, 'This release has no after-room.']);
+        const ownPage = await put(announced.afterRoom.id, { addonIds: [] });
+        expect([ownPage.statusCode, errorOf(ownPage).code]).toEqual([409, 'LIVE_AFTER_ROOM']);
+        // Ended: no longer (409 LIVE_ENDED).
+        await h.ctx.db.updateTable('drops').set({ ended_at: h.clock.now(), ended_reason: 'ENDED' }).where('id', '=', announced.id).execute();
+        const late = await put(announced.id, { addonIds: [wrap.id] });
+        expect([late.statusCode, errorOf(late).code, errorOf(late).message]).toEqual([409, 'LIVE_ENDED', 'This release has ended: its add-ons offered no longer change.']);
         // Set aside later: still listed in its pick, read as set aside (the hold no longer offers it).
         await op.post(`/api/admin/addons/${wrap.id}/set-aside`, {});
         expect((safeJson(await op.get(`/api/admin/live/${announced.id}`)) as Json).addonPick.find((a: Json) => a.id === wrap.id)).toMatchObject({ active: false });

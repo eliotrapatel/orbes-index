@@ -3,8 +3,8 @@
  * then drawn by tier (P-R03; API §8.9, §10.10, §16.19; DATABASE §5.29, §5.30).
  *
  * A drop is created by the console (OPERATOR) as a DRAFT, edited freely until
- * it is published; published, only its description changes, and it is
- * cancelled only before its draw. Its price (plan NOCTURNE, addition 5;
+ * it is published; published, only its description (and its add-ons
+ * offered, below) changes, and it is cancelled only before its draw. Its price (plan NOCTURNE, addition 5;
  * migration 0024) is optional, with its currency: shown on its card and page,
  * and taken by the order of each entry Client Services confirms
  * (orderForDrawEntry). Its state is computed (`dropState`):
@@ -125,7 +125,8 @@
  * and a model's release never takes a set.
  *
  * ADD-ONS ONE SYSTEM (lot Q2, step Q2.3, D3; services/addons.ts): a draw picks the catalogue add-ons its places held
- * offer (`addonIds` at its creation and while it is a DRAFT, as its price; `drop_addons`, in its order), each active, its
+ * offer (`addonIds` at its creation and later, never locked at its publication: until it is cancelled or, once drawn,
+ * until its place-held window closes, 409 DROP_ALREADY_DRAWN after; review of lot Q2; `drop_addons`, in its order), each active, its
  * DRAW switch on and, when the draw has a price, priced in its currency (409 ADDON_NOT_OFFERED naming it); omitted at its
  * creation, every such add-on (N7). ADD TO YOUR ORDER offers only what it picked, whose DRAW switch is still on
  * (services/order-addons.ts addonOffer). Audited with `drop.create` and `drop.update` (`addonIds`, by id and name).
@@ -349,7 +350,9 @@ export const dropNotFound = () => new DomainError('DROP_NOT_FOUND', 404, 'This r
 const dropEntryNotFound = () => notFound('Entry', 'DROP_ENTRY_NOT_FOUND');
 const dropCancelled = () => conflict('DROP_CANCELLED', 'This release has been cancelled.');
 const dropDrawn = () => conflict('DROP_ALREADY_DRAWN', 'This release has been drawn: its entries no longer change.');
-const dropPublished = () => conflict('DROP_PUBLISHED', 'This release is published: only its description can change.');
+const dropPublished = () => conflict('DROP_PUBLISHED', 'This release is published: only its description and its add-ons offered can change.');
+/** Review of lot Q2: a draw's add-ons offered change until its place-held window closes (addons.ts releaseNotEnded). */
+const drawAddonsSettled = () => conflict('DROP_ALREADY_DRAWN', 'This release’s place-held window has closed: its add-ons offered no longer change.');
 const dropAlreadyPublished = () => conflict('DROP_ALREADY_PUBLISHED', 'This release is already published.');
 const dropWindowPast = () => conflict('DROP_WINDOW_PAST', 'Its entries would already be closed: change its dates first.');
 const dropNotPublished = () => conflict('DROP_NOT_PUBLISHED', 'This release is not published.');
@@ -2066,7 +2069,8 @@ export class DropService {
 
   /**
    * Change a drop: any field while it is a DRAFT (not cancelled), its early access included (P-X02); once published,
-   * its description only (409 DROP_PUBLISHED). Plan NEXT LOT §3.6.F: its sizes and their pieces replace the draft's (a
+   * its description only (409 DROP_PUBLISHED), and its add-ons offered (`addonIds`) until it is cancelled or its
+   * place-held window closes (409 DROP_ALREADY_DRAWN after; review of lot Q2). Plan NEXT LOT §3.6.F: its sizes and their pieces replace the draft's (a
    * draft of before this lot gets its first), its quantity their sum; a quantity given is refused (400); a new model
    * links the sizes again (its own sizes; 409 DROP_MODEL_SIZES_MISSING for a model with no size type). Audited `drop.update` with each value before and after (the description as
    * its length and SHA-256, the sizes as labels and pieces); nothing changed, nothing audited.
@@ -2087,7 +2091,7 @@ export class DropService {
         after[key] = shown(to);
       };
       if (change.description !== undefined) note('description', 'description', d.description, cleanDescription(change.description), (v) => describedAs((v as string | null) ?? null));
-      const structural = (['modelId', 'setId', 'title', 'quantity', 'sizes', 'opensAt', 'closesAt', 'purchaseWindowHours', 'earlyAccessHours', 'earlyAccessPlatineHours', 'priceMinor', 'currency', 'accessSegmentId', 'addonIds'] as const).filter(
+      const structural = (['modelId', 'setId', 'title', 'quantity', 'sizes', 'opensAt', 'closesAt', 'purchaseWindowHours', 'earlyAccessHours', 'earlyAccessPlatineHours', 'priceMinor', 'currency', 'accessSegmentId'] as const).filter(
         (k) => change[k] !== undefined,
       );
       let resized = false;
@@ -2144,18 +2148,6 @@ export class DropService {
           note('priceMinor', 'price_minor', d.price_minor, price?.minor ?? null);
           note('currency', 'currency', d.currency, price?.currency ?? null);
         }
-        if (change.addonIds !== undefined) {
-          // Q2.3 (D3): its pick replaced, checked in its currency (the new one when it changes with it).
-          const currency = change.priceMinor !== undefined || change.currency !== undefined ? (cleanDrawPrice(change.priceMinor ?? null, change.currency ?? null)?.currency ?? null) : drawCurrency(d);
-          const next = await checkPick(tx, 'DRAW', cleanPickIds(change.addonIds), currency);
-          const was = (await picksOf(tx, [id], () => null)).get(id)?.map((a) => ({ id: a.id, name: a.name })) ?? [];
-          if (JSON.stringify(was) !== JSON.stringify(next)) {
-            await writePick(tx, id, next.map((a) => a.id));
-            before.addonIds = was;
-            after.addonIds = next;
-            resized = true;
-          }
-        }
         if (change.accessSegmentId !== undefined) {
           // Plan MACRO M1 §3.1 (F4): everyone (null), or a segment that exists, until the publication.
           const next = change.accessSegmentId === null || change.accessSegmentId === '' ? null : knownId(change.accessSegmentId, segmentNotFound);
@@ -2180,6 +2172,22 @@ export class DropService {
             await assertModelSized(tx, modelId);
             await linkDropSizes(tx, id, modelId);
           }
+        }
+      }
+      if (change.addonIds !== undefined) {
+        // Q2.3 (D3): its pick replaced, checked in its currency (the new one when it changes with it). Review of lot Q2:
+        // never locked at the publication; until it is cancelled or its place-held window closes (the draw's time plus
+        // the hours a place is held: the release is no longer counted then, addons.ts releaseNotEnded).
+        if (d.cancelled_at) throw dropCancelled();
+        if (d.drawn_at && d.drawn_at.getTime() + d.purchase_window_hours * HOUR_MS <= this.clock().getTime()) throw drawAddonsSettled();
+        const currency = change.priceMinor !== undefined || change.currency !== undefined ? (cleanDrawPrice(change.priceMinor ?? null, change.currency ?? null)?.currency ?? null) : drawCurrency(d);
+        const next = await checkPick(tx, 'DRAW', cleanPickIds(change.addonIds), currency);
+        const was = (await picksOf(tx, [id], () => null)).get(id)?.map((a) => ({ id: a.id, name: a.name })) ?? [];
+        if (JSON.stringify(was) !== JSON.stringify(next)) {
+          await writePick(tx, id, next.map((a) => a.id));
+          before.addonIds = was;
+          after.addonIds = next;
+          resized = true;
         }
       }
       if (Object.keys(set).length > 0 || resized) {

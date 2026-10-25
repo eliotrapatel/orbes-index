@@ -427,7 +427,7 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
   const addonsSection = section(
     'Add-ons',
     pick.length ? h('div', { data: { testid: 'drop-addons' } }, defList(pickRows(pick, d.currency))) : h('p', { class: 'notice', data: { testid: 'drop-addons-none' } }, PICK_TEXT.drawNone),
-    { id: 'drop-addons', tools: acts.edit ? [button('Edit', { kind: 'ghost', testId: 'drop-edit-addons', onClick: () => void editAddons() })] : [] },
+    { id: 'drop-addons', tools: acts.addons ? [button('Edit', { kind: 'ghost', testId: 'drop-edit-addons', onClick: () => void editAddons() })] : [] },
   );
 
   // ── Sizes (plan NEXT LOT §3.6.F) ─────────────────────────────────────────

@@ -135,7 +135,13 @@ const skuCodeTaken = () => conflict('SKU_CODE_TAKEN', 'Another SKU has this code
 const supplierNotFound = () => notFound('Supplier', 'SUPPLIER_NOT_FOUND');
 const variantTaken = () => conflict('SHOPIFY_VARIANT_TAKEN', 'Another size or add-on already has this Shopify variant id.');
 /** 409 ADDON_ENGRAVING_TAKEN: one engraving offered at a time (`addon_items_engraving_key`). */
-const engravingTaken = () => conflict('ADDON_ENGRAVING_TAKEN', 'Another add-on is the engraving: set it aside, or make it another service, first.');
+const engravingTaken = () => conflict('ADDON_ENGRAVING_TAKEN', 'Another add-on is the engraving: set it aside first.');
+/**
+ * 409 ADDON_ENGRAVING_FIXED (review of lot Q2): an add-on with units on orders (neither REMOVED nor CANCELLED) stays the
+ * engraving, or not, as it was sold: YOUR ORDERS, the parcel and the invoices read its units by it.
+ */
+const engravingFixed = (engraving: boolean) =>
+  conflict('ADDON_ENGRAVING_FIXED', engraving ? 'This add-on is on orders as the engraving: it stays the engraving. Set it aside to stop offering it.' : 'This add-on is on orders: it never becomes the engraving. Create the engraving as a new service.');
 /** 409 ADDON_KIND_FIXED: a product stays a product, a service a service (N13). */
 const kindFixed = () => conflict('ADDON_KIND_FIXED', 'An add-on’s type never changes: set this one aside and create the other.');
 const serviceSupplier = () => validationError('A service has no supplier: it holds no stock.');
@@ -610,8 +616,9 @@ export class AddonService {
    * engraving and most characters, under its row lock; its SKU code never changes, nor its kind (409 ADDON_KIND_FIXED
    * for another kind than its own). The kind's rules hold on the result (a service names no supplier, only a service
    * is the engraving, a most characters other than 20 is the engraving's only: 400); an add-on that stops being the
-   * engraving goes back to 20; one becoming the engraving while another active one is: 409 ADDON_ENGRAVING_TAKEN. A unit
-   * already on an order keeps its price. Audited `addon.update` with each field changed, before and after (the switches
+   * engraving goes back to 20; one becoming the engraving while another active one is: 409 ADDON_ENGRAVING_TAKEN; the
+   * engraving or not, once one of its units on an order is neither REMOVED nor CANCELLED: 409 ADDON_ENGRAVING_FIXED (review
+   * of lot Q2: YOUR ORDERS, the parcel and the invoices read the unit by it). A unit already on an order keeps its price. Audited `addon.update` with each field changed, before and after (the switches
    * together as `offeredAt`); nothing changed, nothing written.
    */
   async update(addonId: string, input: AddonInput, actor: Actor): Promise<AddonView> {
@@ -632,6 +639,11 @@ export class AddonService {
         const changed = FIELDS.filter(([, column]) => column in c && c[column] !== before[column]);
         const switches = MOMENT_COLUMNS.filter((column) => column in c && c[column] !== before[column]);
         if (changed.length === 0 && switches.length === 0) return;
+        // The engraving or not, as its units on orders were sold (review of lot Q2): fixed once one is neither removed nor cancelled.
+        if (c.engraving !== undefined && c.engraving !== before.engraving) {
+          const sold = await tx.selectFrom('order_addon_items').select('id').where('addon_id', '=', id).where('status', 'not in', ['REMOVED', 'CANCELLED']).limit(1).executeTakeFirst();
+          if (sold) throw engravingFixed(before.engraving);
+        }
         if (c.supplier_id) await this.knownSupplier(tx, c.supplier_id);
         await tx
           .updateTable('addon_items')

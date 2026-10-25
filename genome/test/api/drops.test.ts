@@ -1243,7 +1243,7 @@ describe('draws in sizes over HTTP (plan NEXT LOT §3.6.F)', () => {
     ]);
   });
 
-  it('a draw picks the catalogue add-ons its places held offer (lot Q2, step Q2.3, D3): given in order at its creation and while a DRAFT, each active with its DRAW switch on and priced in its currency, audited by name; refused once published', async () => {
+  it('a draw picks the catalogue add-ons its places held offer (lot Q2, step Q2.3, D3): given in order at its creation and later, each active with its DRAW switch on and priced in its currency, audited by name; changed once published until its place-held window closes (the review)', async () => {
     await staff();
     const op = { type: 'admin' as const, id: (await h.ctx.db.selectFrom('admin_users').select('id').where('role', '=', 'OPERATOR').executeTakeFirstOrThrow()).id };
     const make = (name: string, skuCode: string, o: Record<string, unknown> = {}) => h.ctx.services.addons.create({ kind: 'SERVICE', name, skuCode, prices: { EUR: 2_000 }, ...o }, op);
@@ -1285,11 +1285,23 @@ describe('draws in sizes over HTTP (plan NEXT LOT §3.6.F)', () => {
       });
       expect((await operator.patch(adminUrl(d.id), { priceMinor: 400_000, currency: 'GBP', addonIds: [pound.id] })).statusCode).toBe(200);
       expect((await operator.patch(adminUrl(d.id), { priceMinor: 480_000, currency: 'EUR', addonIds: [box.id] })).statusCode).toBe(200);
-      // Published: its pick no longer changes, as its price.
+      // Published: its price is fixed, its pick is not (the review of lot Q2), until its place-held window closes.
       await publish(d.id);
-      const locked = await operator.patch(adminUrl(d.id), { addonIds: [card.id] });
+      const locked = await operator.patch(adminUrl(d.id), { priceMinor: 400_000, currency: 'EUR', addonIds: [card.id] });
       expect([locked.statusCode, errorOf(locked).code]).toEqual([409, 'DROP_PUBLISHED']);
       expect(picked(safeJson(await auditor.get(adminUrl(d.id))) as Record<string, any>)).toEqual(['A BOX FOR THIS DRAW']);
+      expect(picked(safeJson(await operator.patch(adminUrl(d.id), { addonIds: [card.id, box.id] })) as Record<string, any>)).toEqual(['A CARD FOR DRAWS', 'A BOX FOR THIS DRAW']);
+      // Drawn: still within its place-held window, then no longer (the service, the console's sessions being hours away).
+      const was = h.clock.now();
+      const drawnAt = new Date(Date.parse(d.closesAt) + 1000);
+      h.clock.set(drawnAt);
+      const owner = { type: 'admin' as const, id: (await h.ctx.db.selectFrom('admin_users').select('id').where('role', '=', 'ADMIN').executeTakeFirstOrThrow()).id };
+      await h.ctx.services.drops.draw(d.id, owner);
+      h.clock.set(new Date(drawnAt.getTime() + d.purchaseWindowHours * HOUR - 1000));
+      expect(picked(await h.ctx.services.drops.update(d.id, { addonIds: [box.id] }, op))).toEqual(['A BOX FOR THIS DRAW']);
+      h.clock.set(new Date(drawnAt.getTime() + d.purchaseWindowHours * HOUR));
+      await expect(h.ctx.services.drops.update(d.id, { addonIds: [card.id] }, op)).rejects.toMatchObject({ code: 'DROP_ALREADY_DRAWN', message: 'This release’s place-held window has closed: its add-ons offered no longer change.' });
+      h.clock.set(was);
     } finally {
       for (const id of mine) await h.ctx.services.addons.setAside(id, op);
     }

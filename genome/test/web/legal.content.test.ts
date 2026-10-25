@@ -855,11 +855,13 @@ describe('legal pages: the privacy policy, written from the code', () => {
     const offer = readDoc('genome/src/server/services/order-addons.ts');
     for (const x of ['if (!s.offered[at.moment]) return', 'if (readsPick(at) && !s.picked) return', "let left = s.kind === 'PRODUCT' ? (await stockLevel(tx, s.skuId, first.location_id)).available : Number.POSITIVE_INFINITY;"]) expect(offer).toContain(x);
     expect(readDoc('genome/src/server/services/live.ts')).toContain('await setChoices(tx, { liveEntryId: e.id }, rows, { locationId: await liveAddonLocation(tx, d), currency: liveCurrency(d.currency), pieces: e.quantity }, now);');
+    // Review of lot Q2: an engraving chosen with the purchase stays on the order, its words alone changing (orders.ts).
+    expect(readDoc('genome/src/server/services/orders.ts')).toContain("conflict('ORDER_ENGRAVING_INCLUDED', 'Your engraving was bought with your order: its words may change until packing begins.");
     const says = {
       en: {
         'article-13': ['Meanwhile you may choose the add-ons the release offers (article 14), for example an engraving or a gift wrapping, one for each piece, or one for each set, each at the price shown; then press PAY, or give the piece back with RELEASE MY PLACE.'],
         'article-14': [
-          'An engraving is an add-on (below), charged at the price shown; once the order is paid, it has its own invoice, and a credit note if it is removed.',
+          'An engraving is an add-on (below), charged at the price shown; one chosen with the purchase keeps its place on the order and only its words change; any other, once the order is paid, has its own invoice, and a credit note if it is removed.',
           'It is offered where ORBES offers it: when you confirm a purchase, among those its release offers (on a piece held in a LIVE RELEASE, on a place held in a release with a price), in a request of the private salon, and in YOUR ORDERS.',
           'It is added to the order when the order is created; an add-on with stock only if one is still in stock (some, such as an engraving or a gift wrapping, are services without stock); otherwise it is left out, and the order goes ahead without it.',
           'In YOUR ORDERS, you may add an add-on ORBES offers there to an order, or remove it, until its packing begins, never on a welcome gift or a size exchange; ORBES Client Services may do so until its parcel is packed.',
@@ -868,7 +870,7 @@ describe('legal pages: the privacy policy, written from the code', () => {
       fr: {
         'article-13': ["Pendant ce temps, vous pouvez choisir les articles complémentaires que propose la sortie (article 14), par exemple une gravure ou un emballage cadeau, un pour chaque pièce, ou un pour chaque ensemble, chacun au prix affiché ; puis presser PAY, ou rendre la pièce avec RELEASE MY PLACE."],
         'article-14': [
-          'Une gravure est un article complémentaire (ci-dessous), facturée au prix affiché ; une fois la commande payée, elle a sa propre facture, et un avoir si elle est retirée.',
+          "Une gravure est un article complémentaire (ci-dessous), facturée au prix affiché ; celle choisie avec l'achat reste sur la commande et seuls ses mots changent ; toute autre, une fois la commande payée, a sa propre facture, et un avoir si elle est retirée.",
           'Il est proposé là où ORBES le propose : quand vous confirmez un achat, parmi ceux que propose sa sortie (sur une pièce tenue dans une LIVE RELEASE, sur une place réservée dans une sortie avec un prix), dans une demande du salon privé, et dans YOUR ORDERS.',
           "Il est ajouté à la commande quand elle est créée ; un article complémentaire avec stock seulement s'il en reste en stock (certains, comme une gravure ou un emballage cadeau, sont des services sans stock) ; sinon il est laissé de côté, et la commande se fait sans lui.",
           "Dans YOUR ORDERS, vous pouvez ajouter à une commande un article complémentaire qu'ORBES y propose, ou le retirer, jusqu'au début de son emballage, jamais sur un cadeau de bienvenue ni sur un échange de taille ; ORBES Client Services peut le faire jusqu'à la fermeture de son colis.",
@@ -1097,7 +1099,9 @@ describe('legal pages: both languages, links, lexicon', () => {
       // article 14 "Delivery" (an engraving is an add-on) and "Add-ons" (offered where ORBES offers it, YOUR ORDERS
       // included; stock only for an add-on with stock; in YOUR ORDERS what ORBES offers there). The date of the lot's
       // final legal commit, never Q1's 2026-10-24 (the day after it); HOW RELEASES WORK, privacy and article 11 unchanged.
-      '2026-10-25': '31d86d7ec14dbe00',
+      // The lot's review, the same day: "Delivery" says an engraving chosen with the purchase keeps its place on the order,
+      // its words alone changing, and only any other has its own invoice and a credit note.
+      '2026-10-25': '744c5db1bae6d393',
     };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
     expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });

@@ -353,9 +353,11 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await confirmDialog(p);
     await expect.poll(() => p.locator('[data-testid=live-state]').textContent(), POLL).toBe('ANNOUNCED');
     await expect.poll(() => p.locator('[data-testid=live-circle]').textContent(), POLL).toMatch(/^Post shown from /);
-    for (const edit of ['live-edit-release', 'live-edit-sizes', 'live-edit-access', 'live-edit-times', 'live-edit-turns', 'live-edit-addons', 'live-edit-after-room', 'live-silhouette-edit', 'live-publish']) {
+    for (const edit of ['live-edit-release', 'live-edit-sizes', 'live-edit-access', 'live-edit-times', 'live-edit-turns', 'live-edit-after-room', 'live-silhouette-edit', 'live-publish']) {
       expect(await p.locator(`[data-testid=${edit}]`).count(), edit).toBe(0);
     }
+    // Review of lot Q2: its add-ons offered still change, until it ends.
+    expect(await p.locator('[data-testid=live-edit-addons]').count()).toBe(1);
     const post = await ctx.db.selectFrom('circle_posts').select(['min_tier', 'drop_id']).where('drop_id', '=', id).executeTakeFirstOrThrow();
     expect(post.min_tier).toBe(2);
     // Its live board is there, before the room: nobody yet.

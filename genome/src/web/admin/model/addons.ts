@@ -16,7 +16,7 @@
  *    and the salon's Accept: the collector's choices, and what was left out after.
  *  - The parcel and its slips: the add-ons to pack (POLISHING CLOTH × 2), never a price.
  * The server stays the authority (409 ADDON_NAME_TAKEN, SKU_CODE_TAKEN, ADDON_OUT_OF_STOCK, ADDON_LIMIT, ADDON_NOT_OFFERED,
- * ADDON_ENGRAVING_TAKEN, ADDON_KIND_FIXED, ADDON_SERVICE).
+ * ADDON_ENGRAVING_TAKEN, ADDON_ENGRAVING_FIXED, ADDON_KIND_FIXED, ADDON_SERVICE).
  */
 import { formatCount } from '../format.js';
 import {
@@ -384,8 +384,8 @@ export const PICK_TEXT = Object.freeze({
   drawNone: 'None: the place held is the piece alone.',
   setAside: 'Set aside: offered nowhere',
   saved: 'Add-ons saved.',
-  lead: 'Ticked: offered with the release’s purchase, until it is announced. Unticked: never offered there; YOUR ORDERS follows each add-on’s own switch.',
-  drawLead: 'Ticked: offered with a place held, while the release is a draft. Unticked: never offered there; YOUR ORDERS follows each add-on’s own switch.',
+  lead: 'Ticked: offered with the release’s purchase, until it ends; a piece already held keeps what it chose. Unticked: never offered there; YOUR ORDERS follows each add-on’s own switch.',
+  drawLead: 'Ticked: offered with a place held, until the places are settled; a place already held keeps what it chose. Unticked: never offered there; YOUR ORDERS follows each add-on’s own switch.',
 });
 
 /** Why a release cannot pick an add-on: `Not offered in a LIVE RELEASE` (its switch is off), `No price in GBP`. */

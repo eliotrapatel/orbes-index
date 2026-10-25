@@ -346,7 +346,7 @@ describe('AddonService (plan MACRO M3 §4.2, D1)', () => {
     expect((await refusal(addons().update(byDefault.id, { textMax: 21 }, admin))).code).toBe('VALIDATION_FAILED');
     expect((await auditsOf(byDefault.id, 'addon.update')).map((x) => x.details)).toEqual([{ textMax: { from: 20, to: 12 } }, { textMax: { from: 12, to: 1 } }]);
     // A second engraving: refused at its creation and its change.
-    const taken = { code: 'ADDON_ENGRAVING_TAKEN', status: 409, message: 'Another add-on is the engraving: set it aside, or make it another service, first.' };
+    const taken = { code: 'ADDON_ENGRAVING_TAKEN', status: 409, message: 'Another add-on is the engraving: set it aside first.' };
     expect(await refusal(addons().create({ kind: 'SERVICE', name: 'Second Engraving', skuCode: 'ADD-ENGR2', engraving: true }, admin))).toEqual(taken);
     const mono = (await addons().list()).find((x) => x.name === 'Monogram')!;
     expect(await refusal(addons().update(mono.id, { engraving: true, textMax: 8 }, admin))).toEqual(taken);

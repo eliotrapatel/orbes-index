@@ -181,6 +181,7 @@ const PROBES: Probe[] = [
   { group: 'live', method: 'POST', url: '/api/admin/live', body: INVALID, min: 'OPERATOR' },
   { group: 'live', method: 'GET', url: `/api/admin/live/${UUID}`, min: 'AUDITOR' },
   { group: 'live', method: 'PATCH', url: `/api/admin/live/${UUID}`, body: INVALID, min: 'OPERATOR' },
+  { group: 'live', method: 'PUT', url: `/api/admin/live/${UUID}/addons`, body: INVALID, min: 'OPERATOR' },
   { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/publish`, body: INVALID, min: 'OPERATOR' },
   { group: 'live', method: 'POST', url: `/api/admin/live/${UUID}/circle-post`, body: INVALID, min: 'OPERATOR' },
   { group: 'live', method: 'DELETE', url: `/api/admin/live/${UUID}/circle-post`, min: 'OPERATOR' },

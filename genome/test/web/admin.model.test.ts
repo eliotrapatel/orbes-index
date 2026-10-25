@@ -814,8 +814,8 @@ describe('the Club\'s drops (P-R03)', () => {
   });
 
   it('offers each action to the role and in the state the server allows it', () => {
-    expect(dropActions(base, 'OPERATOR')).toEqual({ edit: true, describe: false, publish: true, cancel: true, draw: false, offerNext: false, sizes: true });
-    expect(dropActions(base, 'AUDITOR')).toEqual({ edit: false, describe: false, publish: false, cancel: false, draw: false, offerNext: false, sizes: false });
+    expect(dropActions(base, 'OPERATOR')).toEqual({ edit: true, describe: false, publish: true, cancel: true, draw: false, offerNext: false, sizes: true, addons: true });
+    expect(dropActions(base, 'AUDITOR')).toEqual({ edit: false, describe: false, publish: false, cancel: false, draw: false, offerNext: false, sizes: false, addons: false });
     const published = { ...base, state: 'OPEN' as const, publishedAt: '2026-10-05T10:00:00.000Z' };
     expect(dropActions(published, 'OPERATOR')).toMatchObject({ edit: false, describe: true, publish: false, cancel: true, draw: false });
     const closed = { ...published, state: 'CLOSED' as const };
@@ -827,7 +827,11 @@ describe('the Club\'s drops (P-R03)', () => {
     expect(dropActions(drawn, 'OPERATOR')).toMatchObject({ cancel: false, draw: false, offerNext: true });
     expect(dropActions({ ...drawn, entries: { ...drawn.entries, CONFIRMED: 1 } }, 'OPERATOR').offerNext).toBe(false);
     expect(dropActions({ ...drawn, entries: { ...drawn.entries, WAITLISTED: 0 } }, 'OPERATOR').offerNext).toBe(false);
-    expect(dropActions({ ...base, state: 'CANCELLED', cancelledAt: '2026-10-06T00:00:00.000Z' }, 'OPERATOR')).toMatchObject({ edit: false, publish: false, cancel: false });
+    expect(dropActions({ ...base, state: 'CANCELLED', cancelledAt: '2026-10-06T00:00:00.000Z' }, 'OPERATOR')).toMatchObject({ edit: false, publish: false, cancel: false, addons: false });
+    // Review of lot Q2: its add-ons offered change once published too, and once drawn until its place-held window closes.
+    const inWindow = new Date(Date.parse(drawn.drawnAt) + drawn.purchaseWindowHours * 3_600_000 - 1000);
+    expect([dropActions(published, 'OPERATOR').addons, dropActions(drawn, 'OPERATOR', inWindow).addons]).toEqual([true, true]);
+    expect(dropActions(drawn, 'OPERATOR', new Date(inWindow.getTime() + 1000)).addons).toBe(false);
     expect(dropPhrase('draw', base)).toBe('DRAW 8A1D0C55');
     expect(dropPhrase('cancel', base)).toBe('CANCEL 8A1D0C55');
     expect(releaseAddress(base)).toBe(`/verify/releases/${base.id}`);

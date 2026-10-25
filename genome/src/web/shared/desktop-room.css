@@ -1308,7 +1308,8 @@
   html:not(.d-touch) .d-room .btn.live__addon {
     height: auto;
     min-height: 56px;
-    padding: var(--d-s3) 2px;
+    /* The space min-height leaves around one name line (house.css): a two-line name keeps its gap above the line. */
+    padding: calc((56px - 1.5em) / 2) 2px;
     white-space: normal;
     gap: var(--d-s3);
     border: 0;
@@ -1371,11 +1372,6 @@
 
   html:not(.d-touch) .d-room .ao-text {
     margin: var(--d-s2) 2px var(--d-s4) calc(11px + var(--d-s3));
-  }
-
-  html:not(.d-touch) .d-room .ao-text__label,
-  html:not(.d-touch) .d-room .ao-text__count {
-    font-size: var(--n-fs-micro);
   }
 
   html:not(.d-touch) .d-room .d-room__br > .live__addons-note {

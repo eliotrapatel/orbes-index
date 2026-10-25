@@ -517,7 +517,10 @@ describe('the runbook of lot ADD-ONS ONE SYSTEM (docs/launch/DEPLOY-OQ-Q2.md)', 
 
   it('leaves the owner’s open points and the data to enter, gives one command per shell block, in French, links only to what exists, linked from DEPLOYMENT and COMPLIANCE', () => {
     const open = section(runbook, '## 2.');
-    expect([...open.matchAll(/^(\d+)\. \*\*/gm)].map((m) => Number(m[1]))).toEqual([1, 2, 3, 4, 5]);
+    expect([...open.matchAll(/^(\d+)\. \*\*/gm)].map((m) => Number(m[1]))).toEqual([1, 2, 3, 4, 5, 6]);
+    // The review of lot Q2: the engraving's price set by an OPERATOR now (ADMIN only before), the owner's to decide.
+    expect(open).toContain('6. **Qui règle le prix de la gravure** (la revue du lot).');
+    expect(open).toContain('On garde OPERATOR, ou ADMIN seul pour l\'add-on ENGRAVING ?');
     expect(open).toContain('**Une par pièce sur l\'écran 5b** (N1).');
     expect(open).toContain('On garde, ou un sélecteur sur la ligne choisie ?');
     expect(open).toContain(`**Le nombre de caractères de la gravure** (N3). Il se règle sur l'add-on ENGRAVING (\`Catalogue\` → \`Add-ons\`, \`${ADDONS_TEXT.textMax}\`, de ${ADDON_TEXT_MAX.min} à ${ADDON_TEXT_MAX.max}).`);

@@ -993,6 +993,8 @@ export interface LiveActions {
   message: boolean;
   /** ADMIN, a phrase to type. */
   end: boolean;
+  /** Add-ons offered (and the after-room's): until the release ends, never locked at the announcement (review of lot Q2). */
+  addons: boolean;
 }
 
 /**
@@ -1019,6 +1021,7 @@ export function liveActions(r: Pick<LiveRelease, 'phase' | 'editable' | 'publish
     addPieces: manage && announced,
     message: manage && announced,
     end: can(role, 'endLiveRelease') && running,
+    addons: manage && own && r.phase !== 'ENDED' && r.phase !== 'CANCELLED',
   };
 }
 

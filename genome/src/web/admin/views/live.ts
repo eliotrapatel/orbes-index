@@ -1034,19 +1034,21 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
     }
   };
   // Its Add-ons offered: the boxes of the active add-ons, its pick ticked in its order, the others it cannot offer with why.
-  const addonsPart = async () => {
+  // Review of lot Q2: until the release ends (its after-room's too, once its settings are announced), never locked at
+  // the announcement; a piece already held keeps what it chose.
+  const addonsPart = async (afterRoom = false) => {
     const pickable = await pickableNow();
     if (!pickable) return;
-    const pick = r.addonPick ?? [];
+    const pick = (afterRoom ? r.afterRoom?.addonPick : r.addonPick) ?? [];
     void openDialog({
-      title: PICK_TEXT.label,
+      title: afterRoom ? `${PICK_TEXT.label} · after-room` : PICK_TEXT.label,
       eyebrow,
-      body: [settingsLead(), h('p', { class: 'dialog__text' }, PICK_TEXT.lead)],
+      body: [...(r.editable ? [settingsLead()] : []), h('p', { class: 'dialog__text' }, PICK_TEXT.lead)],
       fields: [pickField('addonIds', pickable, pick, 'LIVE', r.currency)],
       validate: (v) => pickProblem(pickable, pick, checkedOf(v, 'addonIds'), 'LIVE', r.currency) ?? (pickChange(pick, checkedOf(v, 'addonIds')) === null ? 'Nothing has changed.' : null),
       confirmLabel: 'Save',
       submit: async (v) => {
-        await ctx.api.updateLiveRelease(r.id, { addonIds: pickChange(pick, checkedOf(v, 'addonIds'))! });
+        await ctx.api.setLiveAddons(r.id, pickChange(pick, checkedOf(v, 'addonIds'))!, afterRoom);
       },
     }).then(done(PICK_TEXT.saved));
   };
@@ -1107,6 +1109,10 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
       tools: [
         // Macro scope K44: after-rooms stay a model's; a set's release never has one.
         ...(r.set ? [] : edit('Edit', 'live-edit-after-room', () => void afterRoomPart())),
+        // Once announced, its add-ons offered alone, until it ends (review of lot Q2).
+        ...(a && !acts.edit && acts.addons && a.phase !== 'ENDED' && a.phase !== 'CANCELLED'
+          ? [button(PICK_TEXT.label, { kind: 'ghost', testId: 'live-edit-after-room-addons', onClick: () => void addonsPart(true) })]
+          : []),
         ...(a && opened ? [linkButton('Its live board', href('liveRelease', { dropId: a.id }), 'ghost')] : []),
       ],
     },
@@ -1228,11 +1234,11 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
       { id: 'live-part-turns', tools: edit('Edit', 'live-edit-turns', turnsPart) },
     ),
     // Lot Q2 (D2, D3): the release add-ons are gone; its add-ons are its pick of the catalogue, each with its price in its
-    // currency, edited as Add-ons offered until the announcement (step Q2.7).
+    // currency, edited as Add-ons offered until the release ends (step Q2.7; review of lot Q2: never locked at the announcement).
     section(
       'Add-ons',
       r.addonPick?.length ? h('div', { data: { testid: 'live-addons' } }, defList(pickRows(r.addonPick, r.currency).map((x): DefRow => x))) : h('p', { class: 'notice' }, PICK_TEXT.none),
-      { id: 'live-part-addons', tools: edit('Edit', 'live-edit-addons', () => void addonsPart()) },
+      { id: 'live-part-addons', tools: acts.addons ? [button('Edit', { kind: 'ghost', testId: 'live-edit-addons', onClick: () => void addonsPart() })] : [] },
     ),
     afterRoomSection,
   ];

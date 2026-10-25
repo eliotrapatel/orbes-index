@@ -105,7 +105,7 @@ describe('the add-ons\' routes (plan MACRO M3 §4.2, D1)', () => {
     expect(safeJson(await operator.post('/api/admin/addons', { name: 'Care Kit', skuCode: 'ADD-KIT' }))).toMatchObject({ kind: 'PRODUCT', offeredAt: { live: true, draw: true, salon: true, orders: true }, engraving: false, textMax: 20 });
     expect(errorOf(await operator.post('/api/admin/addons', { kind: 'SERVICE', name: 'Second Engraving', skuCode: 'ADD-ENGR2', engraving: true }))).toEqual({
       code: 'ADDON_ENGRAVING_TAKEN',
-      message: 'Another add-on is the engraving: set it aside, or make it another service, first.',
+      message: 'Another add-on is the engraving: set it aside first.',
     });
     expect(errorOf(await operator.post('/api/admin/addons', { name: 'Engraved Tag', skuCode: 'ADD-TAG', engraving: true }))).toEqual({ code: 'VALIDATION_FAILED', message: 'Only a service can be the engraving.' });
     for (const bad of [

@@ -408,10 +408,12 @@ export interface DropActions {
   offerNext: boolean;
   /** Plan NEXT LOT §3.6.F: its sizes and their pieces, a DRAFT only. */
   sizes: boolean;
+  /** Its add-ons offered: until it is cancelled or its place-held window closes (review of lot Q2). */
+  addons: boolean;
 }
 
 /** What `role` may do to the drop now (the server checks again; this only hides what would be refused). */
-export function dropActions(d: Drop, role: AdminRole | null | undefined): DropActions {
+export function dropActions(d: Drop, role: AdminRole | null | undefined, now: Date = new Date()): DropActions {
   const manage = can(role, 'manageDrops');
   const draft = d.state === 'DRAFT';
   return {
@@ -422,6 +424,7 @@ export function dropActions(d: Drop, role: AdminRole | null | undefined): DropAc
     draw: can(role, 'drawDrop') && d.state === 'CLOSED',
     offerNext: manage && d.sizes.length === 0 && d.state === 'DRAWN' && placesTaken(d) < d.quantity && (d.entries.WAITLISTED ?? 0) > 0,
     sizes: manage && draft,
+    addons: manage && d.state !== 'CANCELLED' && (d.drawnAt === null || Date.parse(d.drawnAt) + d.purchaseWindowHours * 3_600_000 > now.getTime()),
   };
 }
 

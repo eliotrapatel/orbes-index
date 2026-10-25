@@ -1332,6 +1332,8 @@ export interface ExportedAddonChoice {
   sourceId: string;
   addon: string;
   units: number;
+  /** The engraving's words typed with it (review of lot Q2: the collector's own words, exported); null without any. */
+  text: string | null;
   chosenAt: Date;
 }
 
@@ -1343,7 +1345,7 @@ export async function exportedAddonChoices(db: Db, accountId: string): Promise<E
     .leftJoin('live_entries as l', 'l.id', 'c.live_entry_id')
     .leftJoin('drop_entries as d', 'd.id', 'c.drop_entry_id')
     .leftJoin('shop_requests as r', 'r.id', 'c.shop_request_id')
-    .select(['c.live_entry_id', 'c.drop_entry_id', 'c.shop_request_id', 'a.name', 'c.units', 'c.chosen_at'])
+    .select(['c.live_entry_id', 'c.drop_entry_id', 'c.shop_request_id', 'a.name', 'c.units', 'c.text', 'c.chosen_at'])
     .where((eb) => eb.or([eb('l.account_id', '=', accountId), eb('d.account_id', '=', accountId), eb('r.account_id', '=', accountId)]))
     .orderBy('c.chosen_at')
     .orderBy('c.id')
@@ -1353,6 +1355,7 @@ export async function exportedAddonChoices(db: Db, accountId: string): Promise<E
     sourceId: (r.live_entry_id ?? r.drop_entry_id ?? r.shop_request_id)!,
     addon: r.name,
     units: r.units,
+    text: r.text === null || r.text === '' ? null : r.text,
     chosenAt: r.chosen_at,
   }));
 }

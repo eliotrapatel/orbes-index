@@ -219,7 +219,8 @@ describe('the other documents of ADD-ONS ONE SYSTEM (plan §6)', () => {
     const words: [string, string, string][] = [
       ['ADDON_SERVICE', 'server/services/sku-owner.ts', ' is a service: it has no stock.'],
       ['ADDON_KIND_FIXED', 'server/services/addons.ts', 'An add-on’s type never changes: set this one aside and create the other.'],
-      ['ADDON_ENGRAVING_TAKEN', 'server/services/addons.ts', 'Another add-on is the engraving: set it aside, or make it another service, first.'],
+      ['ADDON_ENGRAVING_TAKEN', 'server/services/addons.ts', 'Another add-on is the engraving: set it aside first.'],
+      ['ADDON_ENGRAVING_FIXED', 'server/services/addons.ts', 'This add-on is on orders as the engraving: it stays the engraving. Set it aside to stop offering it.'],
     ];
     for (const [code, file, sentence] of words) {
       expect(api, code).toMatch(new RegExp(`^\\| \`${code}\` \\| 409 \\|`, 'm'));

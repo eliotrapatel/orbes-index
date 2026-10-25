@@ -1203,6 +1203,11 @@ export class AdminApi {
     return this.patch(`/api/admin/live/${encodeURIComponent(id)}`, change);
   }
 
+  /** ADD-ONS OFFERED (or its after-room's), until the release ends (409 LIVE_ENDED after; review of lot Q2). */
+  setLiveAddons(id: string, addonIds: string[], afterRoom = false): Promise<LiveRelease> {
+    return this.request('PUT', `/api/admin/live/${encodeURIComponent(id)}/addons`, { body: { addonIds, ...(afterRoom ? { afterRoom: true } : {}) } });
+  }
+
   publishLiveRelease(id: string, circlePost: boolean): Promise<LiveRelease> {
     return this.post(`/api/admin/live/${encodeURIComponent(id)}/publish`, { circlePost });
   }
