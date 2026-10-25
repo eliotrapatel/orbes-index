@@ -35,7 +35,7 @@ import {
   DROP_ENTRY_STATUSES,
   EMAIL_KINDS,
   EMAIL_STATUSES,
-  GUARANTEE_SCOPES,
+  GRANTED_GUARANTEE_SCOPES,
   INVOICE_KINDS,
   LIVE_ENTRY_STATUSES,
   LOOKBOOK_STATES,
@@ -2292,7 +2292,7 @@ export const guaranteeParams = z.object({ id: uuid });
  * it, and a note for Client Services (optional).
  */
 export const grantGuaranteeBody = body({
-  scope: z.enum(GUARANTEE_SCOPES),
+  scope: z.enum(GRANTED_GUARANTEE_SCOPES),
   targetId: uuid,
   pieces: guaranteePieces,
   validUntil: isoDate,

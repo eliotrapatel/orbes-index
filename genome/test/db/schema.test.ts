@@ -1017,7 +1017,7 @@ describe('schema', () => {
       .values({ account_id: account.id, tier: null, kind: 'BIRTHDAY', granted_at: at, amount_minor: 2000, currency: 'EUR', expires_at: expires, birthday_on: '2027-03-14' })
       .returningAll()
       .executeTakeFirstOrThrow();
-    expect(birthday).toEqual({ id: expect.any(String), account_id: account.id, tier: null, kind: 'BIRTHDAY', granted_at: at, amount_minor: 2000, currency: 'EUR', expires_at: expires, model_id: null, birthday_on: '2027-03-14' });
+    expect(birthday).toEqual({ id: expect.any(String), account_id: account.id, tier: null, kind: 'BIRTHDAY', granted_at: at, amount_minor: 2000, currency: 'EUR', expires_at: expires, model_id: null, birthday_on: '2027-03-14', vault_id: null, usable_while_no_piece: false });
     await expect(
       t.db.insertInto('tier_grants').values({ account_id: account.id, tier: null, kind: 'BIRTHDAY', granted_at: at, amount_minor: 2000, currency: 'EUR', expires_at: expires, birthday_on: '2027-03-14' }).execute(),
     ).rejects.toSatisfy((e) => isUniqueViolation(e, 'tier_grants_birthday_key'));
@@ -1622,7 +1622,7 @@ describe('schema', () => {
     expect(unit).toEqual({
       id: expect.any(String), order_id: order.id, addon_id: addon.id, sku_id: sku.id, location_id: location.id, price_minor: 2500, currency: 'EUR', status: 'HELD',
       added_at: expect.any(Date), removed_at: null, shipped_at: null, cancelled_at: null, returned_at: null, added_by_type: 'COLLECTOR', added_by: account.id,
-      returned_to_stock: null, invoice_id: null, shopify_line_item_id: null,
+      returned_to_stock: null, invoice_id: null, shopify_line_item_id: null, vault_id: null,
     });
     const holds = await t.db.selectFrom('stock_holds').selectAll().where('location_id', '=', location.id).orderBy('kind', 'desc').execute();
     expect(holds).toEqual([
@@ -1755,6 +1755,16 @@ describe('schema', () => {
     expect(sources.every((r) => r.per_occasion === S.VAULT_PER_OCCASION.min && r.cap === (r.source === 'HOUSE' ? null : 1))).toBe(true);
     expect((await t.db.selectFrom('vault_rewards').select('kind').where('kind', '=', 'I_WAS_THERE').execute()).length).toBe(1);
     expect(S.VAULT_REWARD_KINDS.at(-1)).toBe('I_WAS_THERE');
+  });
+
+  it('the vault\'s rewards (0062): a credit to give\'s 30 days of 24 hours and its code\'s HMAC, schema.ts\'s; LIVE a vault\'s scope only, VAULT the last of each list', async () => {
+    const def = async (table: string, constraint: string) =>
+      (await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = ${table}::regclass AND conname = ${constraint}`.execute(t.db)).rows[0].def;
+    expect(await def('vault_gifts', 'vault_gifts_expiry')).toContain(`'${S.VAULT_GIFT_DAYS * 24}:00:00'::interval`);
+    expect(await def('vault_gifts', 'vault_gifts_code_hash_check')).toContain(`= ${S.VAULT_GIFT_CODE_HASH_BYTES}`);
+    expect(await def('house_guarantees', 'house_guarantees_scope')).toContain(`(scope = 'LIVE'::text) = (vault_id IS NOT NULL)`);
+    expect([...S.GUARANTEE_SCOPES]).toEqual([...S.GRANTED_GUARANTEE_SCOPES, 'LIVE']);
+    for (const list of [S.ORDER_CHANNELS, S.TIER_GRANT_KINDS, S.ORDER_ADDON_ADDED_BY] as const) expect(list.at(-1)).toBe('VAULT');
   });
 
   it('sets (0057): every bound is schema.ts\'s; the mirror at work: a set of two models, its draw with sizes per piece, an entry\'s size per piece, a set sale with one order per piece, a grouped return', async () => {

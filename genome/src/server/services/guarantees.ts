@@ -38,7 +38,7 @@ import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
 import type { DropMode, DropRow, GuaranteeClosedReason, GuaranteeScope, GuaranteeStatus, HouseGuaranteeRow } from '../db/schema.js';
-import { GUARANTEE_SCOPES } from '../db/schema.js';
+import { GRANTED_GUARANTEE_SCOPES } from '../db/schema.js';
 import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
@@ -1052,7 +1052,7 @@ export class GuaranteeService {
   async grant(accountId: string, input: GrantInput, actor: Actor): Promise<GrantOutcome> {
     const admin = assertStaff(actor, 'grant a guarantee');
     const account = knownId(accountId, () => notFound('Account', 'ACCOUNT_NOT_FOUND'));
-    if (!(GUARANTEE_SCOPES as readonly unknown[]).includes(input?.scope)) throw validationError('A guarantee covers a release, a model or a collection.');
+    if (!(GRANTED_GUARANTEE_SCOPES as readonly unknown[]).includes(input?.scope)) throw validationError('A guarantee covers a release, a model or a collection.');
     const pieces = cleanPieces(input.pieces);
     if (typeof input.visible !== 'boolean') throw validationError('Shown to the client is yes or no.');
     const note = cleanNote(input.note);

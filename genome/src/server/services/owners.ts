@@ -673,9 +673,9 @@ export class OwnerService {
     const open = (id: string) => balances.some((b) => b.grantId === id && b.balanceMinor > 0 && b.expiresAt.getTime() > now.getTime());
     const birthdays = grants.filter((g): g is typeof g & { kind: 'BIRTHDAY' } => g.kind === 'BIRTHDAY').sort((a, b) => (a.birthday_on! < b.birthday_on! ? 1 : -1));
     const shown = [
-      ...grants.filter((g) => (g.kind === 'GIFT' || g.kind === 'CREDIT') && g.tier !== null).sort((a, b) => a.tier! - b.tier! || (a.kind < b.kind ? 1 : -1)),
+      ...grants.filter((g): g is typeof g & { kind: 'GIFT' | 'CREDIT' } => (g.kind === 'GIFT' || g.kind === 'CREDIT') && g.tier !== null).sort((a, b) => a.tier! - b.tier! || (a.kind < b.kind ? 1 : -1)),
       ...birthdays.filter((g, i) => i < 2 || open(g.id)),
-      ...grants.filter((g) => g.kind === 'WARRANTY').sort((a, b) => b.granted_at.getTime() - a.granted_at.getTime() || (a.id < b.id ? -1 : 1)),
+      ...grants.filter((g): g is typeof g & { kind: 'WARRANTY' } => g.kind === 'WARRANTY').sort((a, b) => b.granted_at.getTime() - a.granted_at.getTime() || (a.id < b.id ? -1 : 1)),
     ];
     const next = nextBirthday({ birthDate: profile?.birth_date ?? null, birthDateAt: profile?.birth_date_at ?? null, granted: birthdays.map((g) => g.birthday_on!), days: program.birthdayCreditDays, now });
     return {

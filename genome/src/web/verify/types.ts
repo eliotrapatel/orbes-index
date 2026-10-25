@@ -855,7 +855,7 @@ export interface ClubEntry {
  */
 export interface ClubGuarantee {
   id: string;
-  scope: 'RELEASE' | 'MODEL' | 'COLLECTION';
+  scope: 'RELEASE' | 'MODEL' | 'COLLECTION' | 'LIVE';
   target: string | null;
   pieces: number;
   validUntil: string;
@@ -1324,11 +1324,12 @@ export interface LiveAccountEntry {
 
 /**
  * The channel an order was sold through (plan LIVE RELEASE+, choice 6): a LIVE RELEASE, a draw, the private salon; a
- * welcome gift; a size exchange (plan NEXT LOT §3.6.D: the other size, an order of its own, SIZE EXCHANGE).
+ * welcome gift; a size exchange (plan NEXT LOT §3.6.D: the other size, an order of its own, SIZE EXCHANGE); a vault's
+ * product (THE VAULT: won free or bought under its right to buy).
  */
-export type OrderChannel = 'LIVE' | 'DRAW' | 'SALON' | 'GIFT' | 'EXCHANGE';
+export type OrderChannel = 'LIVE' | 'DRAW' | 'SALON' | 'GIFT' | 'EXCHANGE' | 'VAULT';
 /** The server's order (ORDER_CHANNELS in db/schema.ts). */
-export const ORDER_CHANNELS: readonly OrderChannel[] = ['LIVE', 'DRAW', 'SALON', 'GIFT', 'EXCHANGE'];
+export const ORDER_CHANNELS: readonly OrderChannel[] = ['LIVE', 'DRAW', 'SALON', 'GIFT', 'EXCHANGE', 'VAULT'];
 
 /** An order's step: RESERVED → PAID → SHIPPED → DELIVERED, or CANCELLED, or RETURNED. */
 export type OrderStatus = 'RESERVED' | 'PAID' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED' | 'RETURNED';

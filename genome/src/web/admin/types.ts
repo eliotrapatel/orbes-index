@@ -179,8 +179,11 @@ export const WARRANTY_CLAIM_REFUSALS_BY_BASIS: Readonly<Record<WarrantyClaimBasi
   LEGAL: Object.freeze(['DAMAGED_ON_PURPOSE', 'DAMAGED_BY_SOMEONE_ELSE', 'NO_FAULT_FOUND'] as const),
 });
 
-/** What THE HOUSE'S GUARANTEE covers (house_guarantees.scope, IN-01): a chosen release, the next of a model, of a collection. */
-export const GUARANTEE_SCOPES = ['RELEASE', 'MODEL', 'COLLECTION'] as const;
+/**
+ * What THE HOUSE'S GUARANTEE covers (house_guarantees.scope, IN-01): a chosen release, the next of a model, of a
+ * collection; a vault's piece at the next LIVE release, any model (LIVE, THE VAULT).
+ */
+export const GUARANTEE_SCOPES = ['RELEASE', 'MODEL', 'COLLECTION', 'LIVE'] as const;
 export type GuaranteeScope = (typeof GUARANTEE_SCOPES)[number];
 
 /** A guarantee as stored (house_guarantees.status, IN-01). */
@@ -207,8 +210,11 @@ export type ClaimRenewalWithdrawnReason = (typeof CLAIM_RENEWAL_WITHDRAWN_REASON
 export const CIRCLE_EXPERIENCES = ['MEMBERS_EVENING', 'LAUNCH_PREVIEW', 'PARTNER_EXPERIENCE'] as const;
 export type CircleExperience = (typeof CIRCLE_EXPERIENCES)[number];
 
-/** Where an order comes from (orders.channel): a LIVE RELEASE, a draw, the private salon, a welcome gift (BP-19 T5), a size exchange (plan NEXT LOT §3.5). */
-export const ORDER_CHANNELS = ['LIVE', 'DRAW', 'SALON', 'GIFT', 'EXCHANGE'] as const;
+/**
+ * Where an order comes from (orders.channel): a LIVE RELEASE, a draw, the private salon, a welcome gift (BP-19 T5), a size
+ * exchange (plan NEXT LOT §3.5), a vault's product (THE VAULT: won free or bought under its right to buy).
+ */
+export const ORDER_CHANNELS = ['LIVE', 'DRAW', 'SALON', 'GIFT', 'EXCHANGE', 'VAULT'] as const;
 export type OrderChannel = (typeof ORDER_CHANNELS)[number];
 
 /** The steps of an order (orders.status): RESERVED → PAID → SHIPPED → DELIVERED, or CANCELLED, or RETURNED. */
@@ -388,7 +394,7 @@ export const ADDON_PRICE_MINOR_MAX = 100_000_000;
 export const ADDON_UNITS_MAX = 3;
 export const ORDER_ADDON_STATUSES = ['HELD', 'SHIPPED', 'REMOVED', 'CANCELLED', 'RETURNED'] as const;
 export type OrderAddonStatus = (typeof ORDER_ADDON_STATUSES)[number];
-export const ORDER_ADDON_ADDED_BY = ['PURCHASE', 'COLLECTOR', 'STAFF'] as const;
+export const ORDER_ADDON_ADDED_BY = ['PURCHASE', 'COLLECTOR', 'STAFF', 'VAULT'] as const;
 export type OrderAddonAddedBy = (typeof ORDER_ADDON_ADDED_BY)[number];
 /**
  * ADD-ONS ONE SYSTEM (migration 0059, lot Q2): an add-on's kind, PRODUCT (real stock) or SERVICE (no stock, no supplier,

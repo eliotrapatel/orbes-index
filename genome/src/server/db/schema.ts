@@ -188,11 +188,11 @@ export const SHOP_REQUEST_OUTCOMES = ['ACCEPTED', 'DECLINED'] as const;
 export type ShopRequestOutcome = (typeof SHOP_REQUEST_OUTCOMES)[number];
 
 /**
- * The channel an order comes from (orders.channel, migration 0022): an entry of a LIVE RELEASE CONFIRMED, an entry of a
- * draw confirmed by Client Services, a request of the private salon closed as ACCEPTED; since migration 0027 (BP-19 T5),
- * a welcome GIFT, its own order at price 0 travelling with the order it was added to.
+ * The channel an order comes from (orders.channel, migration 0022): a LIVE RELEASE CONFIRMED's entry, a draw's confirmed
+ * by Client Services, a salon request ACCEPTED; a welcome GIFT at price 0 travelling with its order (0027), a size
+ * EXCHANGE (0037), a VAULT order (0062, THE VAULT D20: a product won free or bought under its right to buy).
  */
-export const ORDER_CHANNELS = ['LIVE', 'DRAW', 'SALON', 'GIFT', 'EXCHANGE'] as const;
+export const ORDER_CHANNELS = ['LIVE', 'DRAW', 'SALON', 'GIFT', 'EXCHANGE', 'VAULT'] as const;
 export type OrderChannel = (typeof ORDER_CHANNELS)[number];
 
 /**
@@ -446,10 +446,10 @@ export type CircleExperience = (typeof CIRCLE_EXPERIENCES)[number];
 
 /**
  * What an account received on reaching a tier (tier_grants.kind, migration 0027, BP-19 T5): its welcome gift, its credit;
- * and, with no tier, its birthday credit (BIRTHDAY, migration 0045, plan CUSTOMER INTELLIGENCE §3.5 SB.4) and a credit
- * decided on a lifetime warranty claim (WARRANTY, migration 0048, plan ORBES CARE §2(c)).
+ * and, with no tier, its birthday credit (BIRTHDAY, 0045, plan CUSTOMER INTELLIGENCE §3.5 SB.4), a credit decided on a
+ * lifetime warranty claim (WARRANTY, 0048, ORBES CARE §2(c)) and a vault's credit (VAULT, 0062, THE VAULT D19).
  */
-export const TIER_GRANT_KINDS = ['GIFT', 'CREDIT', 'BIRTHDAY', 'WARRANTY'] as const;
+export const TIER_GRANT_KINDS = ['GIFT', 'CREDIT', 'BIRTHDAY', 'WARRANTY', 'VAULT'] as const;
 export type TierGrantKind = (typeof TIER_GRANT_KINDS)[number];
 
 /**
@@ -535,10 +535,13 @@ export const WARRANTY_CLAIM_REFUSALS_BY_BASIS: Readonly<Record<WarrantyClaimBasi
 
 /**
  * What THE HOUSE'S GUARANTEE covers (house_guarantees.scope, migration 0029, IN-01): a chosen release, the next release of
- * a model (a main model's covers its variants), or the next release of a collection.
+ * a model (a main model's covers its variants), or the next release of a collection; since migration 0062 (THE VAULT,
+ * OP-22) a piece at the next LIVE release, any model (LIVE, a vault's).
  */
-export const GUARANTEE_SCOPES = ['RELEASE', 'MODEL', 'COLLECTION'] as const;
+export const GUARANTEE_SCOPES = ['RELEASE', 'MODEL', 'COLLECTION', 'LIVE'] as const;
 export type GuaranteeScope = (typeof GUARANTEE_SCOPES)[number];
+/** The scopes Client Services grant (the Grant dialog); LIVE is a vault's alone (house_guarantees_scope: its vault). */
+export const GRANTED_GUARANTEE_SCOPES = ['RELEASE', 'MODEL', 'COLLECTION'] as const satisfies readonly GuaranteeScope[];
 
 /**
  * A guarantee as stored (house_guarantees.status): ACTIVE (waiting, set aside or entered: computed, never stored), USED
@@ -792,8 +795,11 @@ export type AddonConversionSource = (typeof ADDON_CONVERSION_SOURCES)[number];
  */
 export const ORDER_ADDON_STATUSES = ['HELD', 'SHIPPED', 'REMOVED', 'CANCELLED', 'RETURNED'] as const;
 export type OrderAddonStatus = (typeof ORDER_ADDON_STATUSES)[number];
-/** Who added a unit (order_addon_items.added_by_type): at the PURCHASE (from the choice), the COLLECTOR in YOUR ORDERS, or STAFF. */
-export const ORDER_ADDON_ADDED_BY = ['PURCHASE', 'COLLECTOR', 'STAFF'] as const;
+/**
+ * Who added a unit (order_addon_items.added_by_type): at the PURCHASE (from the choice), the COLLECTOR in YOUR ORDERS, or
+ * STAFF; since migration 0062 (THE VAULT, D19) a VAULT's free add-on, at price 0.
+ */
+export const ORDER_ADDON_ADDED_BY = ['PURCHASE', 'COLLECTOR', 'STAFF', 'VAULT'] as const;
 export type OrderAddonAddedBy = (typeof ORDER_ADDON_ADDED_BY)[number];
 /** What a hold of `stock_holds` is (migration 0056): an order's piece, or an add-on's unit. */
 export const STOCK_HOLD_KINDS = ['PIECE', 'ADD_ON'] as const;
@@ -858,6 +864,10 @@ export const VAULT_PRIZE_LINE_MAX = 160;
 export const VAULT_WAIT_DAYS = 30;
 /** A personal invitation's code (invitations.code): 12 characters of Crockford's base32. */
 export const INVITATION_CODE_PATTERN = /^[0-9A-HJKMNP-TV-Z]{12}$/;
+/** A credit to give's validity (vault_gifts.expires_at = created_at + 30 days of 24 hours; migration 0062, N10). */
+export const VAULT_GIFT_DAYS = 30;
+/** A credit to give's one-time code, stored as its HMAC-SHA256 only (vault_gifts.code_hash). */
+export const VAULT_GIFT_CODE_HASH_BYTES = 32;
 
 // ── Column helpers ─────────────────────────────────────────────────────────
 
@@ -2803,6 +2813,32 @@ export interface VaultsTable {
   grant_id: ColumnType<string | null, string | null | undefined, string | null>;          // tier_grants.id
   order_id: ColumnType<string | null, string | null | undefined, string | null>;          // orders.id
   guarantee_id: ColumnType<string | null, string | null | undefined, string | null>;      // house_guarantees.id
+  /** Migration 0062: the credit to give it held (vault_gifts.id), linked once. */
+  gift_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /**
+   * Migration 0062 (D29, N11, N12): an ADDON or PRODUCT reward's offer, written with the outcome at the opening (a RIGHT
+   * TO BUY's 24 h, a free add-on's 30 days to be used on an order), and when it was used, within it, once.
+   */
+  offer_until: TimestampNullable;
+  offer_used_at: TimestampNullable;
+}
+
+/**
+ * A credit to give (migration 0062, CREDIT TO GIVE, N10): its vault (once), the one-time code's HMAC-SHA256 (32 bytes,
+ * unique; the code is never stored), the credit's amount and currency, valid 30 days from its creation; accepted by a
+ * friend once (`accepted_by`, `accepted_at` and the friend's VAULT `grant_id`, all three or none). Never deleted.
+ */
+export interface VaultGiftsTable {
+  id: Generated<string>;
+  vault_id: ColumnType<string, string, never>;
+  code_hash: ColumnType<Uint8Array, Uint8Array, never>;
+  amount_minor: ColumnType<number, number, never>;
+  currency: ColumnType<string, string, never>;
+  created_at: ColumnType<Date, Date | string | undefined, never>;
+  expires_at: ColumnType<Date, Date | string, never>;
+  accepted_by: ColumnType<string | null, string | null | undefined, string | null>; // accounts.id
+  accepted_at: TimestampNullable;
+  grant_id: ColumnType<string | null, string | null | undefined, string | null>;    // tier_grants.id, kind VAULT
 }
 
 /**
@@ -2856,6 +2892,8 @@ export interface OrderAddonItemsTable {
   returned_to_stock: ColumnType<boolean | null, boolean | null | undefined, boolean | null>;
   invoice_id: ColumnType<string | null, string | null | undefined, string | null>;
   shopify_line_item_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Migration 0062 (THE VAULT, D19): a VAULT unit's vault (its free add-on, at price 0), on it only, never changed. */
+  vault_id: ColumnType<string | null, string | null | undefined, never>;
 }
 
 /**
@@ -3052,6 +3090,17 @@ export interface OrdersTable {
    */
   engraving_minor: ColumnType<number | null, number | null | undefined, number | null>;
   engraving_by: ColumnType<AddressSource | null, AddressSource | null | undefined, AddressSource | null>;
+  /**
+   * Migration 0062 (THE VAULT, D20, N12): a VAULT order's vault (a product won free, a VAULT EDITION, THE PIECE, or a
+   * product bought under its right to buy), on a VAULT order only and never changed; one open per vault. A VAULT order
+   * names its SKU and price, has no release and travels with no order.
+   */
+  vault_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /**
+   * Migration 0062 (D20 "claimed within 30 days or back to stock"): a VAULT order at 0's end to be claimed, on it only
+   * (its unit reserved for the winner: never AWAITING, STOCK while RESERVED).
+   */
+  claim_by: TimestampNullable;
 }
 
 /**
@@ -3291,6 +3340,13 @@ export interface TierGrantsTable {
   model_id: ColumnType<string | null, string | null | undefined, string | null>;
   /** A BIRTHDAY grant's birthday, the Paris day 'YYYY-MM-DD' it was given for; NULL on every other kind (migration 0045). */
   birthday_on: DateNullable;
+  /**
+   * Migration 0062 (THE VAULT, D19, N10): a VAULT grant's vault (a house credit won, or the vault whose credit to give a
+   * friend accepted), on a VAULT grant only, once per vault; never changed.
+   */
+  vault_id: ColumnType<string | null, string | null | undefined, never>;
+  /** Migration 0062: a credit given to a friend, usable while they hold no piece ("for a friend's first piece"); a VAULT grant only. */
+  usable_while_no_piece: ColumnType<boolean, boolean | undefined, never>;
 }
 
 /** A credit taken off an order (migration 0027): released (removed, cancelled, returned) or open; never deleted. */
@@ -3421,6 +3477,8 @@ export interface HouseGuaranteesTable {
   granted_at: TimestampDefault;
   updated_by: ColumnType<string | null, string | null | undefined, string | null>;
   updated_at: TimestampNullable;
+  /** Migration 0062 (THE VAULT, OP-22, N13): a LIVE guarantee's vault ("a piece at the next LIVE release"), on it only, once per vault; never changed. */
+  vault_id: ColumnType<string | null, string | null | undefined, never>;
 }
 
 /** The Grant dialog's defaults (migration 0029, Orders → Settings, House guarantee): one row at most (`id` 1), none inserted. */
@@ -3724,6 +3782,7 @@ export interface Database {
   vaults: VaultsTable;
   vault_occasions_before: VaultOccasionsBeforeTable;
   invitations: InvitationsTable;
+  vault_gifts: VaultGiftsTable;
   sets: SetsTable;
   set_models: SetModelsTable;
   drop_entry_sizes: EntrySizesTable;

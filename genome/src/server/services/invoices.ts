@@ -80,7 +80,7 @@ export function monthRange(month: unknown): { from: Date; to: Date } {
 export const monthOf = (d: Date): string => d.toISOString().slice(0, 7);
 
 /** Where a piece was sold, as its invoice line says it beneath the piece. */
-const CHANNEL_WORDS: Readonly<Record<OrderChannel, string>> = Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW', SALON: 'THE PRIVATE SALON', GIFT: 'WELCOME GIFT', EXCHANGE: 'SIZE EXCHANGE' });
+const CHANNEL_WORDS: Readonly<Record<OrderChannel, string>> = Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW', SALON: 'THE PRIVATE SALON', GIFT: 'WELCOME GIFT', EXCHANGE: 'SIZE EXCHANGE', VAULT: 'THE VAULT' });
 
 /**
  * The kinds of an invoice's lines: the piece, an add-on, and (BP-19) its shipping, a credit taken off it, a welcome gift;

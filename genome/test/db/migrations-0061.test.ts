@@ -36,6 +36,8 @@ import { createAccount, createLiveRelease, holdPieces, liveFixture } from '../su
 
 const BEFORE = '0060_release_addons_converted';
 const NAME = '0061_the_vault';
+/** The migration after it (lot Q3, step Q3.2: the vault's rewards), taken down first and applied again with it. */
+const LATER = '0062_vault_rewards';
 const NOW = new Date('2026-10-01T09:00:00.000Z');
 const DAY = 86_400_000;
 const pgUrl = process.env.ORBES_TEST_POSTGRES_URL;
@@ -54,7 +56,7 @@ async function snapshotOf(db: Kysely<any>): Promise<string[]> {
   ).rows.map((r) => r.object);
 }
 
-/** Down to 0060 (0061 among the migrations reverted). */
+/** Down to 0060 (0062, then 0061, reverted). */
 async function downTo0060(db: Db): Promise<string[]> {
   const rs = await createMigrator(db).migrateTo(BEFORE);
   if (rs.error) throw rs.error;
@@ -97,8 +99,8 @@ function cases(state: { db: () => Db; ctx: () => AppContext; clock: () => Manual
     expect(accounts.every((a) => a.status === 'ACTIVE')).toBe(true);
 
     // 0061 rolled back and applied again on the demo: `up` writes the tiers held then.
-    expect(await downTo0060(db())).toEqual([NAME]);
-    expect((await migrateToLatest(db())).applied).toEqual([NAME]);
+    expect(await downTo0060(db())).toEqual([LATER, NAME]);
+    expect((await migrateToLatest(db())).applied).toEqual([NAME, LATER]);
     const keys = async (account: string) =>
       (await db().selectFrom('vault_occasions_before').select('occasion_key').where('account_id', '=', account).orderBy('occasion_key').execute()).map((r) => r.occasion_key);
     expect(await keys(lucas.id)).toEqual(['TIER:1', 'TIER:2']);
@@ -114,14 +116,18 @@ function cases(state: { db: () => Db; ctx: () => AppContext; clock: () => Manual
 
   it('rolls back to the schema of 0060 exactly without rows, and applies again to the latest', async () => {
     const latest = await snapshotOf(db());
-    expect(latest.filter((o) => VAULT_OBJECTS.test(o)).length).toBeGreaterThan(20);
+    // 0062 down first: the schema 0061 left, which this case reads.
+    const rs = await createMigrator(db()).migrateTo(NAME);
+    if (rs.error) throw rs.error;
+    const at0061 = await snapshotOf(db());
+    expect(at0061.filter((o) => VAULT_OBJECTS.test(o)).length).toBeGreaterThan(20);
     expect(await downTo0060(db())).toEqual([NAME]);
     const without = await snapshotOf(db());
     expect(without.filter((o) => VAULT_OBJECTS.test(o))).toEqual([]);
     const at0060 = await state.schemaAt0060();
     if (at0060) expect(without).toEqual(at0060);
     // What 0061 added, beside its own tables: its columns and constraints on drops, models, accounts and house_deliveries.
-    const added = latest.filter((o) => !without.includes(o) && !/^(table|index|constraint|trigger) (vault_|vaults|invitations)/.test(o) && !/^index CREATE (UNIQUE )?INDEX (vault_|vaults|invitations)/.test(o));
+    const added = at0061.filter((o) => !without.includes(o) && !/^(table|index|constraint|trigger) (vault_|vaults|invitations)/.test(o) && !/^index CREATE (UNIQUE )?INDEX (vault_|vaults|invitations)/.test(o));
     expect(added.filter((o) => o.startsWith('table ')).sort()).toEqual([
       'table accounts invited_at timestamp with time zone YES ',
       'table accounts invited_by uuid YES ',
@@ -130,7 +136,7 @@ function cases(state: { db: () => Db; ctx: () => AppContext; clock: () => Manual
     ]);
     expect(added.filter((o) => o.startsWith('trigger '))).toEqual(['trigger accounts accounts_invited_once']);
     expect(added.filter((o) => o.startsWith('constraint house_deliveries ')).map((o) => o.split(' ')[2]).sort()).toEqual(['house_deliveries_source', 'house_deliveries_source_check']);
-    expect((await migrateToLatest(db())).applied).toEqual([NAME]);
+    expect((await migrateToLatest(db())).applied).toEqual([NAME, LATER]);
     expect(await snapshotOf(db())).toEqual(latest);
   });
 
@@ -355,7 +361,7 @@ function cases(state: { db: () => Db; ctx: () => AppContext; clock: () => Manual
     await expect(downTo0060(db())).rejects.toThrow(
       `migration 0061_the_vault cannot be rolled back: ${vaults} vaults, 1 invitations, 1 invited accounts, 1 vault messages, ${rewards} vault rewards, 2 vault source settings, 1 releases with their vault on and 1 vault-only models exist`,
     );
-    expect((await createMigrator(db()).getMigrations()).filter((m) => m.executedAt).map((m) => m.name).at(-1)).toBe(NAME);
+    expect((await createMigrator(db()).getMigrations()).filter((m) => m.executedAt).map((m) => m.name).at(-1)).toBe(LATER);
   });
 }
 

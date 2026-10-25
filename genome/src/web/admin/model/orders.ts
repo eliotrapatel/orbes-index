@@ -61,7 +61,7 @@ const HOLDING: readonly OrderStatus[] = ['RESERVED', 'PAID'];
 // ── Words ──────────────────────────────────────────────────────────────────
 
 /** A channel as the console names it. */
-export const CHANNEL_LABELS: Readonly<Record<OrderChannel, string>> = Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW', SALON: 'PRIVATE SALON', GIFT: 'Welcome gift', EXCHANGE: 'SIZE EXCHANGE' });
+export const CHANNEL_LABELS: Readonly<Record<OrderChannel, string>> = Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW', SALON: 'PRIVATE SALON', GIFT: 'Welcome gift', EXCHANGE: 'SIZE EXCHANGE', VAULT: 'THE VAULT' });
 
 /** Why an order is late, as its mark says it (no figure: the display face sets it). */
 export const LATE_LABELS: Readonly<Record<OrderLateRule, string>> = Object.freeze({

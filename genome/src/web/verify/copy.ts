@@ -421,7 +421,7 @@ export const ORDERS = Object.freeze({
    * Where the piece was sold; a welcome gift (plan NEXT-NINE, BP-19 T5) travels with an order; the other size of a size
    * exchange is an order of its own (plan NEXT LOT §3.6.D).
    */
-  channel: Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW', SALON: 'THE PRIVATE SALON', GIFT: 'WELCOME GIFT', EXCHANGE: 'SIZE EXCHANGE' }),
+  channel: Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW', SALON: 'THE PRIVATE SALON', GIFT: 'WELCOME GIFT', EXCHANGE: 'SIZE EXCHANGE', VAULT: 'THE VAULT' }),
   rows: Object.freeze({ size: 'SIZE', price: 'PRICE', engraving: 'ENGRAVING', shipping: 'SHIPPING', credit: 'CREDIT', total: 'TOTAL', carrier: 'CARRIER', tracking: 'TRACKING NUMBER' }),
   /**
    * BP-19 T5: a welcome gift, on its own card: its line (WELCOME GIFT · PLATINE), its price (none of its own), and while

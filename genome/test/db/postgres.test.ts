@@ -411,8 +411,9 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await db.updateTable('worn_photos').set({ status: 'WITHDRAWN', ended_at: at, photo: null, photo_mime: null, photo_sha256: null, width: null, height: null }).where('id', '=', row.id).execute();
     await expect(db.updateTable('worn_photos').set({ ended_at: new Date() }).where('id', '=', row.id).execute()).rejects.toSatisfy(isGuardViolation);
     await expect(db.deleteFrom('worn_photos').where('id', '=', row.id).execute()).rejects.toSatisfy(isGuardViolation);
-    // (Since 0061 a vault names its photograph: both in one TRUNCATE, the guard still refuses it.)
-    await expect(sql`TRUNCATE worn_photos, vaults`.execute(db)).rejects.toSatisfy(isGuardViolation);
+    // (Since 0061 a vault names its photograph, and since 0062 the rewards name the vault: even with CASCADE, the guard
+    // still refuses it.)
+    await expect(sql`TRUNCATE worn_photos CASCADE`.execute(db)).rejects.toSatisfy(isGuardViolation);
     // The piece sends again once the first is withdrawn.
     expect(await db.insertInto('worn_photos').values(sending).returning('status').executeTakeFirstOrThrow()).toEqual({ status: 'PENDING' });
   });
@@ -634,6 +635,7 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await set({ pace_hold_minutes: 30 });
     // Down refused while a hold exists (0061, 0060 and 0059, which hold nothing of this suite yet, go down first); without
     // one it restores 0057.
+    expect((await migrateDown(db)).reverted).toEqual(['0062_vault_rewards']);
     expect((await migrateDown(db)).reverted).toEqual(['0061_the_vault']);
     expect((await migrateDown(db)).reverted).toEqual(['0060_release_addons_converted']);
     expect((await migrateDown(db)).reverted).toEqual(['0059_addons_one_system']);
@@ -649,7 +651,7 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await set({ cancelled_at: new Date() }, open.id);
     await sql`UPDATE drops SET cancelled_at = now() WHERE mode = 'LIVE' AND parent_drop_id IS NULL AND pace_batch IS NULL AND ended_at IS NULL AND cancelled_at IS NULL`.execute(db);
     expect((await unpaced.execute(db)).rows[0].n).toBe(0);
-    expect((await migrateToLatest(db)).applied).toEqual(['0058_one_queue', '0059_addons_one_system', '0060_release_addons_converted', '0061_the_vault']);
+    expect((await migrateToLatest(db)).applied).toEqual(['0058_one_queue', '0059_addons_one_system', '0060_release_addons_converted', '0061_the_vault', '0062_vault_rewards']);
     expect(await db.selectFrom('drops').select('pace_hold_minutes').where('id', '=', release.id).executeTakeFirstOrThrow()).toEqual({ pace_hold_minutes: 0 });
     // 0060, applied again, gave this suite's open releases its catalogue add-ons as their pick: the next case starts with none.
     await db.deleteFrom('drop_addons').execute();
@@ -708,6 +710,7 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     expect((await db.selectFrom('stock_holds').select('id').where('id', 'in', [product.id, service.id]).execute()).map((h) => h.id)).toEqual([product.id]);
     // Down refused while any of them exists, naming the counts (0061, which gave no vault here, and 0060, which converted
     // nothing here, go down first); without them it restores 0058, the product's unit kept.
+    expect((await migrateDown(db)).reverted).toEqual(['0062_vault_rewards']);
     expect((await migrateDown(db)).reverted).toEqual(['0061_the_vault']);
     expect((await migrateDown(db)).reverted).toEqual(['0060_release_addons_converted']);
     await expect(migrateDown(db)).rejects.toThrow(/0059_addons_one_system cannot be rolled back: 2 service add-ons, 1 engraving add-ons, 1 add-ons picked by releases, 1 add-on choices with words and 1 add-on units without a location exist/);
@@ -719,10 +722,11 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await db.deleteFrom('addon_items').where('id', 'in', [wrapping.id, engraving.id]).execute();
     expect((await migrateDown(db)).reverted).toEqual(['0059_addons_one_system']);
     expect((await db.selectFrom('stock_holds').select('id').where('id', '=', product.id).execute()).map((h) => h.id)).toEqual([product.id]);
-    expect((await migrateToLatest(db)).applied).toEqual(['0059_addons_one_system', '0060_release_addons_converted', '0061_the_vault']);
+    expect((await migrateToLatest(db)).applied).toEqual(['0059_addons_one_system', '0060_release_addons_converted', '0061_the_vault', '0062_vault_rewards']);
   });
 
   it('converts the release add-ons and the settings\' engraving into catalogue add-ons (0060: addon_conversions_source_check, addon_conversions_source_fields, addon_conversions_price, addon_conversions_source_key, addon_conversions_immutable): refused while a release add-on is chosen on a piece held, naming the count; each label once, the add-on of that name whatever its case kept, a new SERVICE the engraving, the settings\' price winning; the open release\'s pick; the three tables dropped; the same JS types as PGlite; down refused while a conversion is recorded, naming the count', async () => {
+    expect((await migrateDown(db)).reverted).toEqual(['0062_vault_rewards']);
     expect((await migrateDown(db)).reverted).toEqual(['0061_the_vault']);
     expect((await migrateDown(db)).reverted).toEqual(['0060_release_addons_converted']);
     // Its own letter: this database's categories already hold A to F, S, W, P, H, G, K, N, Q, O and Y (the tests above).
@@ -765,7 +769,7 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await expect(migrateToLatest(db)).rejects.toThrow(/0060_release_addons_converted cannot be applied: 1 release add-ons are chosen on entries in TURN or SECURED/);
     // The hold lapses (its choices deleted), then it applies.
     await sql`DELETE FROM live_entry_addons WHERE entry_id = ${entry}`.execute(db);
-    expect((await migrateToLatest(db)).applied).toEqual(['0060_release_addons_converted', '0061_the_vault']);
+    expect((await migrateToLatest(db)).applied).toEqual(['0060_release_addons_converted', '0061_the_vault', '0062_vault_rewards']);
     const engraving = await db
       .selectFrom('addon_items as a')
       .innerJoin('skus as k', 'k.addon_id', 'a.id')
@@ -797,6 +801,7 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await expect(sql`UPDATE addon_conversions SET price_minor = 1 WHERE source_id = ${boxSource}`.execute(db)).rejects.toSatisfy(isGuardViolation);
     await expect(db.deleteFrom('drops').where('id', '=', release.id).execute()).rejects.toSatisfy(isForeignKeyViolation);
     // Down refused while a conversion is recorded, naming the count (0061, which gave no vault here, goes down first).
+    expect((await migrateDown(db)).reverted).toEqual(['0062_vault_rewards']);
     expect((await migrateDown(db)).reverted).toEqual(['0061_the_vault']);
     await expect(migrateDown(db)).rejects.toThrow(/0060_release_addons_converted cannot be rolled back: 3 add-on conversions exist/);
   });
