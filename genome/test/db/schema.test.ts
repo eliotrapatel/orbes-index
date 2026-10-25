@@ -195,6 +195,13 @@ describe('schema', () => {
       ['order_addon_items', 'added_by_type', S.ORDER_ADDON_ADDED_BY],
       ['addon_items', 'kind', S.ADDON_KINDS],
       ['addon_conversions', 'source', S.ADDON_CONVERSION_SOURCES],
+      ['vault_sources', 'source', S.VAULT_SOURCES],
+      ['vault_rewards', 'kind', S.VAULT_REWARD_KINDS],
+      ['vault_rewards', 'mode', S.VAULT_REWARD_MODES],
+      ['vaults', 'source', S.VAULT_SOURCES],
+      ['vaults', 'reward_kind', S.VAULT_REWARD_KINDS],
+      ['vaults', 'revoked_reason', S.VAULT_REVOKED_REASONS],
+      ['vault_occasions_before', 'occasion_key', S.VAULT_OCCASIONS_BEFORE],
     ];
     for (const [table, column, values] of cases) {
       expect(await checkValues(t.db, table, column), `${table}.${column}`).toEqual(sorted(values));
@@ -1723,6 +1730,31 @@ describe('schema', () => {
     await expect(t.db.updateTable('addon_conversions').set({ price_minor: null }).where('id', '=', fromRelease.id).execute()).rejects.toSatisfy(isGuardViolation);
     await expect(t.db.deleteFrom('addon_items').where('id', '=', addon.id).execute()).rejects.toSatisfy(isForeignKeyViolation);
     await expect(t.db.deleteFrom('drops').where('id', '=', release.id).execute()).rejects.toSatisfy(isForeignKeyViolation);
+  });
+
+  it('the vault (0061): every bound is schema.ts\'s; the sources in their order with their defaults, the floor, 30 days of 24 hours to wait, the invitation\'s code', async () => {
+    const def = async (table: string, constraint: string) =>
+      (await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = ${table}::regclass AND conname = ${constraint}`.execute(t.db)).rows[0].def;
+    const between = async (table: string, constraint: string, column: string, bounds: { min: number; max: number }) =>
+      expect(await def(table, constraint), constraint).toContain(`((${column} >= ${bounds.min}) AND (${column} <= ${bounds.max}))`);
+    await between('vault_sources', 'vault_sources_per_occasion_check', 'per_occasion', S.VAULT_PER_OCCASION);
+    await between('vault_sources', 'vault_sources_cap_check', 'cap', S.VAULT_CAP);
+    await between('vault_rewards', 'vault_rewards_odds_in_check', 'odds_in', { min: 1, max: S.VAULT_ODDS_IN_MAX });
+    await between('vault_rewards', 'vault_rewards_amount_minor_check', 'amount_minor', { min: 1, max: S.VAULT_AMOUNT_MINOR_MAX });
+    await between('vault_rewards', 'vault_rewards_position_check', '"position"', { min: 0, max: S.VAULT_REWARD_POSITION_MAX });
+    await between('vaults', 'vaults_occasion_index_check', 'occasion_index', { min: 1, max: S.VAULT_OCCASION_INDEX_MAX });
+    expect(await def('vault_rewards', 'vault_rewards_line_check')).toContain(`<= ${S.VAULT_REWARD_LINE_MAX}`);
+    expect(await def('vaults', 'vaults_note_check')).toContain(`<= ${S.VAULT_NOTE_MAX}`);
+    expect(await def('vaults', 'vaults_prize_check')).toContain(`<= ${S.VAULT_PRIZE_MAX}`);
+    expect(await def('vaults', 'vaults_prize_line_check')).toContain(`<= ${S.VAULT_PRIZE_LINE_MAX}`);
+    expect(await def('vaults', 'vaults_waits')).toContain(`'${S.VAULT_WAIT_DAYS * 24}:00:00'::interval`);
+    expect(await def('invitations', 'invitations_code_check')).toContain(S.INVITATION_CODE_PATTERN.source);
+    // The sources in schema.ts's order, as 0061 inserted them (OP-29's defaults), and the floor.
+    const sources = await t.db.selectFrom('vault_sources').select(['source', 'per_occasion', 'cap']).execute();
+    expect(sources.map((r) => r.source).sort()).toEqual([...S.VAULT_SOURCES].sort());
+    expect(sources.every((r) => r.per_occasion === S.VAULT_PER_OCCASION.min && r.cap === (r.source === 'HOUSE' ? null : 1))).toBe(true);
+    expect((await t.db.selectFrom('vault_rewards').select('kind').where('kind', '=', 'I_WAS_THERE').execute()).length).toBe(1);
+    expect(S.VAULT_REWARD_KINDS.at(-1)).toBe('I_WAS_THERE');
   });
 
   it('sets (0057): every bound is schema.ts\'s; the mirror at work: a set of two models, its draw with sizes per piece, an entry\'s size per piece, a set sale with one order per piece, a grouped return', async () => {

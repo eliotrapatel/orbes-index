@@ -691,8 +691,11 @@ export type HouseMoment = (typeof HOUSE_MOMENTS)[number];
 export const HOUSE_MESSAGE_STATUSES = ['DRAFT', 'SCHEDULED', 'SENT', 'CANCELLED'] as const;
 export type HouseMessageStatus = (typeof HOUSE_MESSAGE_STATUSES)[number];
 
-/** Where a house delivery comes from (house_deliveries.source, migration 0052): a moment (its words rendered) or a custom message. */
-export const HOUSE_DELIVERY_SOURCES = ['MOMENT', 'CUSTOM'] as const;
+/**
+ * Where a house delivery comes from (house_deliveries.source, migration 0052): a moment (its words rendered) or a custom
+ * message; since migration 0061 (THE VAULT, D18, D21) a vault's arrival or its receipt (its words rendered, no moment).
+ */
+export const HOUSE_DELIVERY_SOURCES = ['MOMENT', 'CUSTOM', 'VAULT'] as const;
 export type HouseDeliverySource = (typeof HOUSE_DELIVERY_SOURCES)[number];
 
 /**
@@ -813,6 +816,49 @@ export const DROP_SIZE_POSITION_MAX = 96;
 export const ORDER_PIECE_MAX = 20;
 export type StockHoldKind = (typeof STOCK_HOLD_KINDS)[number];
 
+/**
+ * THE VAULT (migration 0061, lot Q3; vault/SCOPE.md E1 to E7, OP-26, OP-29). Its seven sources (vault_sources.source,
+ * vaults.source), in their order: a LIVE release where your size sells out while you are in the line, each PIECE bought
+ * once registered, a new TIER, a WORN photograph published, a FRIEND's first piece, a complete PROFILE once, given by the
+ * HOUSE.
+ */
+export const VAULT_SOURCES = ['LIVE', 'PIECE', 'TIER', 'WORN', 'FRIEND', 'PROFILE', 'HOUSE'] as const;
+export type VaultSource = (typeof VAULT_SOURCES)[number];
+/** What a vault can hold (vault_rewards.kind, vaults.reward_kind; E7): I_WAS_THERE is the floor, never running out. */
+export const VAULT_REWARD_KINDS = ['CREDIT', 'ADDON', 'GUARANTEED', 'PRODUCT', 'VAULT_EDITION', 'THE_PIECE', 'CREDIT_TO_GIVE', 'I_WAS_THERE'] as const;
+export type VaultRewardKind = (typeof VAULT_REWARD_KINDS)[number];
+/** A PRODUCT reward's mode (vault_rewards.mode; round 3): FREE (a normal order) or RIGHT_TO_BUY (24 h, its usual price). */
+export const VAULT_REWARD_MODES = ['FREE', 'RIGHT_TO_BUY'] as const;
+export type VaultRewardMode = (typeof VAULT_REWARD_MODES)[number];
+/** Why a vault was taken back (vaults.revoked_reason): a RETURNED piece only (round 5, D5; no manual revoke, N36). */
+export const VAULT_REVOKED_REASONS = ['RETURNED'] as const;
+export type VaultRevokedReason = (typeof VAULT_REVOKED_REASONS)[number];
+/** The occasions written once by migration 0061 (vault_occasions_before.occasion_key): the tiers held at the migration. */
+export const VAULT_OCCASIONS_BEFORE = ['TIER:1', 'TIER:2', 'TIER:3'] as const;
+/** The vaults one occasion gives (vault_sources.per_occasion; default 1). */
+export const VAULT_PER_OCCASION = Object.freeze({ min: 1, max: 10 } as const);
+/** The most an account receives per a source's scope (vault_sources.cap; default 1, NULL no cap, HOUSE always NULL). */
+export const VAULT_CAP = Object.freeze({ min: 1, max: 100 } as const);
+/** An occasion's vaults, their index at most (vaults.occasion_index: per occasion × cap at most). */
+export const VAULT_OCCASION_INDEX_MAX = VAULT_PER_OCCASION.max * VAULT_CAP.max;
+/** "1 IN N", N at most (vault_rewards.odds_in). */
+export const VAULT_ODDS_IN_MAX = 1_000_000;
+/** A credit's amount at most, in minor units (vault_rewards.amount_minor). */
+export const VAULT_AMOUNT_MINOR_MAX = 100_000_000;
+/** A VAULT EDITION's line (vault_rewards.line). */
+export const VAULT_REWARD_LINE_MAX = 120;
+/** The console's order of the table (vault_rewards.position). */
+export const VAULT_REWARD_POSITION_MAX = 10_000;
+/** A HOUSE vault's note, staff's only (vaults.note). */
+export const VAULT_NOTE_MAX = 500;
+/** The reveal's large words and their line (vaults.prize, vaults.prize_line). */
+export const VAULT_PRIZE_MAX = 40;
+export const VAULT_PRIZE_LINE_MAX = 160;
+/** How long a vault waits on THE VAULT page (vaults.waits_until = given_at + 30 days of 24 hours; D17). */
+export const VAULT_WAIT_DAYS = 30;
+/** A personal invitation's code (invitations.code): 12 characters of Crockford's base32. */
+export const INVITATION_CODE_PATTERN = /^[0-9A-HJKMNP-TV-Z]{12}$/;
+
 // ── Column helpers ─────────────────────────────────────────────────────────
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -929,6 +975,8 @@ export interface ModelsTable {
    */
   packed_weight_g: ColumnType<number | null, number | null | undefined, number | null>;
   created_at: TimestampDefault;
+  /** Migration 0061 (THE VAULT, D19): a VAULT EDITION, made only for the vault, never sold (DEFAULT false). */
+  vault_only: WithDefault<boolean>;
 }
 
 /**
@@ -1053,6 +1101,12 @@ export interface AccountsTable {
   shopify_customer_id: string | null;
   created_at: TimestampDefault;
   updated_at: TimestampDefault;
+  /**
+   * Migration 0061 (THE VAULT, A FRIEND, N10): the account whose personal invitation link it signed up through, never
+   * itself, and when; both or neither, set once and never changed (`accounts_invited_once`).
+   */
+  invited_by: ColumnType<string | null, string | null | undefined, string | null>;
+  invited_at: TimestampNullable;
 }
 
 /**
@@ -1425,6 +1479,11 @@ export interface DropsTable {
    * DEFAULT 0, 0 to `pace_batches`); the hold lasts while every batch given is one of them.
    */
   pace_extra_batches: WithDefault<number>;
+  /**
+   * Migration 0061 (THE VAULT, D4: "staff switch per LIVE release, off by default"): a vault for those still in the line
+   * when their size sells out; true only on a LIVE release that is not an after-room (`drops_vault_on`).
+   */
+  vault_on: WithDefault<boolean>;
 }
 
 /**
@@ -2665,6 +2724,103 @@ export interface AddonConversionsTable {
   converted_at: TimestampDefault;
 }
 
+/**
+ * A source of vaults and its limits (migration 0061, THE VAULT, D3, D27/OP-29): one row per source, inserted by the
+ * migration, never deleted; `per_occasion` 1..10 (default 1), `cap` 1..100 per the source's scope (default 1; NULL: no
+ * cap; HOUSE always NULL). The LIVE source also needs each release's `drops.vault_on`.
+ */
+export interface VaultSourcesTable {
+  source: ColumnType<VaultSource, VaultSource, never>;
+  enabled: WithDefault<boolean>;
+  per_occasion: WithDefault<number>;
+  cap: ColumnType<number | null, number | null | undefined, number | null>;
+  updated_by: ColumnType<string | null, string | null | undefined, string | null>; // admin_users.id
+  updated_at: TimestampDefault;
+}
+
+/**
+ * The one house table of rewards (migration 0061, D1, D2, D19, D25, D28): "1 IN `odds_in`", `quantity` the limit and
+ * `given` so far (both odds and quantity NULL exactly on the I_WAS_THERE floor, one row, never inactive nor deleted); a
+ * credit's amount; the model (VAULT_EDITION, a PRODUCT piece) or add-on of kind PRODUCT (ADDON, a PRODUCT add-on; never a
+ * SERVICE); a PRODUCT's mode; a VAULT_EDITION's line. A row given is never deleted, only made inactive. id, kind,
+ * created_by and created_at never change.
+ */
+export interface VaultRewardsTable {
+  id: Generated<string>;
+  kind: ColumnType<VaultRewardKind, VaultRewardKind, never>;
+  odds_in: ColumnType<number | null, number | null | undefined, number | null>;      // 1..1 000 000
+  quantity: ColumnType<number | null, number | null | undefined, number | null>;     // ≥ 0
+  given: WithDefault<number>;                                                        // ≤ quantity
+  amount_minor: ColumnType<number | null, number | null | undefined, number | null>; // CREDIT, CREDIT_TO_GIVE
+  currency: ColumnType<string | null, string | null | undefined, string | null>;
+  model_id: ColumnType<string | null, string | null | undefined, string | null>;     // models.id
+  addon_id: ColumnType<string | null, string | null | undefined, string | null>;     // addon_items.id, a PRODUCT
+  mode: ColumnType<VaultRewardMode | null, VaultRewardMode | null | undefined, VaultRewardMode | null>; // PRODUCT only
+  line: ColumnType<string | null, string | null | undefined, string | null>;         // VAULT_EDITION only, ≤ 120
+  active: WithDefault<boolean>;
+  position: WithDefault<number>;                                                     // 0..10 000
+  created_by: ColumnType<string | null, string | null | undefined, never>;           // admin_users.id; NULL: the migration
+  created_at: TimestampDefault;
+  updated_by: ColumnType<string | null, string | null | undefined, string | null>;
+  updated_at: TimestampDefault;
+}
+
+/**
+ * A vault given (migration 0061, D1, D3, D5, D17): its account and source, the occasion's own columns by source
+ * (`vaults_occasion`), `occasion_key` + `occasion_index` unique while not revoked, `waits_until` = `given_at` + 30 days;
+ * opened once, or revoked (RETURNED, a PIECE vault never opened); the outcome written once at the opening, and the link
+ * to what it gave set once. What it was given for never changes (a segment's id may only be cleared); never deleted.
+ */
+export interface VaultsTable {
+  id: Generated<string>;
+  account_id: string;
+  source: VaultSource;
+  drop_id: ColumnType<string | null, string | null | undefined, string | null>;           // LIVE
+  entry_id: ColumnType<string | null, string | null | undefined, string | null>;          // LIVE: live_entries.id
+  product_id: ColumnType<string | null, string | null | undefined, string | null>;        // PIECE, WORN: products.id
+  tier: ColumnType<number | null, number | null | undefined, number | null>;              // TIER: 1..3
+  worn_photo_id: ColumnType<string | null, string | null | undefined, string | null>;     // WORN
+  friend_account_id: ColumnType<string | null, string | null | undefined, string | null>; // FRIEND
+  given_by: ColumnType<string | null, string | null | undefined, string | null>;          // HOUSE: admin_users.id
+  segment_id: ColumnType<string | null, string | null | undefined, string | null>;        // HOUSE to a segment
+  note: ColumnType<string | null, string | null | undefined, string | null>;              // HOUSE: staff's, ≤ 500
+  occasion_key: string;
+  occasion_index: number;                                                                  // 1..1 000
+  given_at: TimestampDefault;
+  waits_until: Timestamp;
+  opened_at: TimestampNullable;
+  revoked_at: TimestampNullable;
+  revoked_reason: ColumnType<VaultRevokedReason | null, VaultRevokedReason | null | undefined, VaultRevokedReason | null>;
+  reward_id: ColumnType<string | null, string | null | undefined, string | null>;
+  reward_kind: ColumnType<VaultRewardKind | null, VaultRewardKind | null | undefined, VaultRewardKind | null>;
+  prize: ColumnType<string | null, string | null | undefined, string | null>;             // ≤ 40
+  prize_line: ColumnType<string | null, string | null | undefined, string | null>;        // ≤ 160
+  odds_text: ColumnType<string | null, string | null | undefined, string | null>;         // "1 IN 200"
+  rare: ColumnType<boolean | null, boolean | null | undefined, boolean | null>;
+  value_minor: ColumnType<number | null, number | null | undefined, number | null>;
+  currency: ColumnType<string | null, string | null | undefined, string | null>;
+  cost_minor: ColumnType<number | null, number | null | undefined, number | null>;
+  grant_id: ColumnType<string | null, string | null | undefined, string | null>;          // tier_grants.id
+  order_id: ColumnType<string | null, string | null | undefined, string | null>;          // orders.id
+  guarantee_id: ColumnType<string | null, string | null | undefined, string | null>;      // house_guarantees.id
+}
+
+/**
+ * The occasions reached before the deploy (migration 0061, N7, N34, D68): each account's tiers held at the migration
+ * (`TIER:1`..`TIER:3`), test entrants left out; written once by the migration, read by the TIER source only.
+ */
+export interface VaultOccasionsBeforeTable {
+  account_id: ColumnType<string, string, never>;
+  occasion_key: ColumnType<(typeof VAULT_OCCASIONS_BEFORE)[number], (typeof VAULT_OCCASIONS_BEFORE)[number], never>;
+}
+
+/** A collector's personal invitation link (migration 0061, A FRIEND, N10): made once, its code naming nobody. */
+export interface InvitationsTable {
+  account_id: ColumnType<string, string, never>;
+  code: ColumnType<string, string, never>;
+  created_at: ColumnType<Date, Date | string | undefined, never>;
+}
+
 /** An add-on's price in a house currency (migration 0056, D1): no row, not offered in that currency. */
 export interface AddonItemPricesTable {
   addon_id: ColumnType<string, string, never>;
@@ -3563,6 +3719,11 @@ export interface Database {
   addon_choices: AddonChoicesTable;
   drop_addons: DropAddonsTable;
   addon_conversions: AddonConversionsTable;
+  vault_sources: VaultSourcesTable;
+  vault_rewards: VaultRewardsTable;
+  vaults: VaultsTable;
+  vault_occasions_before: VaultOccasionsBeforeTable;
+  invitations: InvitationsTable;
   sets: SetsTable;
   set_models: SetModelsTable;
   drop_entry_sizes: EntrySizesTable;

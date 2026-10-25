@@ -21,7 +21,7 @@
  *    `GET /api/admin/addons?moment=`, the releases' `addonIds`, `PUT /api/v1/live/:id/addons` with `items`, the entry
  *    without the release add-ons, the engraving-prices routes gone, the new error codes with the code's own words;
  *  - docs/DATABASE.md: 0059 and 0060, `drop_addons` and `addon_conversions` with the code's bounds, the three tables
- *    dropped, `orders.addons` and `engraving_minor` kept as history, the newest migration the code's;
+ *    dropped, `orders.addons` and `engraving_minor` kept as history, 0060 among the code's migrations;
  *  - docs/SECURITY-MODEL.md and docs/THREAT-MODEL.md: the switches and picks the server's, the words never logged,
  *    the sentinel that holds what a collector reads;
  *  - docs/BRAND-DESIGN-SYSTEM.md's 5b, the matrix's 5b states, COMPLIANCE §13's Q2 deployment.
@@ -236,9 +236,9 @@ describe('the other documents of ADD-ONS ONE SYSTEM (plan §6)', () => {
 
   it('DATABASE: 0059 and 0060, the pick and the record within the code’s bounds, the three tables dropped, the history kept', () => {
     const db = readDoc('docs/DATABASE.md');
-    const newest = Object.keys(MIGRATIONS).at(-1)!;
-    expect(newest).toBe('0060_release_addons_converted');
-    expect(db).toContain('The application now runs on `0001` to `0060`');
+    // Since lot Q3 the newest is later (0061…); 0059 and 0060 stay named among them.
+    expect(Object.keys(MIGRATIONS)).toContain('0060_release_addons_converted');
+    expect(db).toMatch(/The application now runs on `0001` to `00\d\d`/);
     expect(db).toContain('`0059_addons_one_system` (lot Q2, ADD-ONS ONE SYSTEM:');
     expect(db).toContain('`0060_release_addons_converted` (lot Q2: `addon_conversions` (§5.140)');
     expect(db).toContain('### 5.139 `drop_addons`');
