@@ -1,9 +1,9 @@
 /**
  * House messages (macro scope of 2026-10-20, D24 M2 to M4; lot M2 plan §1.3, §1.4, steps M2.2 and M2.3): what ORBES
  * writes to an account, in MESSAGES only (never `client_conversations`: they never reach the Messages board, never make
- * a conversation TO_ANSWER, and no reply is written under them), read-only. Two sources (`house_deliveries`, migration
- * 0052): a moment (services/house-moments.ts), its title and words rendered at delivery and stored with it; a custom
- * message written by staff, its words read from the message itself, {firstName} filled at reading.
+ * a conversation TO_ANSWER, and no reply is written under them), read-only. Sources (`house_deliveries`, 0052, 0061):
+ * a moment (services/house-moments.ts) and a vault's arrival (services/vault.ts), title and words stored at delivery; a
+ * custom message written by staff, its words read from the message itself, {firstName} filled at reading.
  *
  * The collector's side (step M2.2):
  *   list        GET /api/v1/account/house-messages?page=: the account's, newest first, 30 a page, each with whether it
@@ -134,9 +134,9 @@ function rows(db: Db, accountId: string, opts: { limit?: number; offset?: number
      ${opts.limit !== undefined ? sql`LIMIT ${opts.limit} OFFSET ${opts.offset ?? 0}` : sql``}`.execute(db);
 }
 
-/** A delivery's title and words as read: a moment's as stored, a custom message's with {firstName} filled now. */
+/** A delivery's title and words as read: a moment's and a vault's as stored, a custom message's with {firstName} filled now. */
 function wordsOf(r: Row): { title: string; body: string } {
-  if (r.source === 'MOMENT') return { title: r.title ?? '', body: r.body ?? '' };
+  if (r.source !== 'CUSTOM') return { title: r.title ?? '', body: r.body ?? '' };
   const values = { firstName: r.first_name };
   return { title: renderHouseWords(r.custom_title ?? '', values).replace(/\s+/g, ' ').trim(), body: renderHouseWords(r.custom_body ?? '', values).trim() };
 }

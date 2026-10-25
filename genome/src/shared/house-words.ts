@@ -94,6 +94,67 @@ export const HOUSE_LINK_WORDS: Readonly<Record<HouseLinkKind, string>> = Object.
   COLLECTION: 'THE COLLECTION',
 });
 
+// ── THE VAULT (lot Q3, step Q3.3; vault/SCOPE.md E6, ROUND 5) ─────────────────
+//
+// A vault's arrival is a FROM ORBES message (E6 "A new vault: a FROM ORBES message + a line in NOW + a quiet number next
+// to THE VAULT"), delivered with the vault (services/vault.ts giveVault), never a switchable moment: no console words,
+// no placeholder. ROUND 5 "'We': on the card and the vault only": these words say "we", as the card's back does ("With
+// this piece, we have added a vault to your account."); plain, true lines, never "the house kept / set aside" (SCOPE I).
+
+/** THE VAULT's sources (db/schema.ts VAULT_SOURCES), in their order. */
+export const VAULT_SOURCE_NAMES = Object.freeze(['LIVE', 'PIECE', 'TIER', 'WORN', 'FRIEND', 'PROFILE', 'HOUSE'] as const);
+export type VaultSourceName = (typeof VAULT_SOURCE_NAMES)[number];
+
+/**
+ * Each source's label, as a waiting door's line and an OPENED row say it: the mockup's four word for word (section V:
+ * YOUR SIZE SOLD OUT, A NEW PIECE, A NEW TIER, A COMPLETE PROFILE); the other three proposed (plan N16, the owner's
+ * review board).
+ */
+export const VAULT_SOURCE_LABELS: Readonly<Record<VaultSourceName, string>> = Object.freeze({
+  LIVE: 'YOUR SIZE SOLD OUT',
+  PIECE: 'A NEW PIECE',
+  TIER: 'A NEW TIER',
+  WORN: 'A PHOTOGRAPH IN WORN',
+  FRIEND: 'A FRIEND’S FIRST PIECE',
+  PROFILE: 'A COMPLETE PROFILE',
+  HOUSE: 'FROM THE HOUSE',
+});
+
+/** A waiting door's source line: its label, then its detail when it has one (`YOUR SIZE SOLD OUT · MONOLITHE IN BLUE`). */
+export function vaultSourceLine(source: VaultSourceName, detail: string | null): string {
+  const label = VAULT_SOURCE_LABELS[source] ?? '';
+  return detail ? `${label} · ${detail}` : label;
+}
+
+/** The arrival's title, for one vault and for more (an occasion may give up to ten: CLUB > THE VAULT). */
+export const VAULT_ARRIVED_TITLE = Object.freeze({ one: 'A VAULT IS WAITING FOR YOU', many: (n: number) => `${n} VAULTS ARE WAITING FOR YOU` });
+
+/** What the arrival says of its occasion, before "we have added a vault to your account" (null: the sentence alone). */
+const VAULT_ARRIVED_OCCASION: Readonly<Record<VaultSourceName, (detail: string | null) => string | null>> = Object.freeze({
+  LIVE: (d: string | null) => (d ? `Your size sold out at the LIVE release of ${d} while you were in the line.` : 'Your size sold out at a LIVE release while you were in the line.'),
+  PIECE: () => null,
+  TIER: (d: string | null) => (d ? `You have reached ${d}.` : null),
+  WORN: () => 'Your photograph is published in WORN.',
+  FRIEND: () => 'A friend you invited has registered their first piece.',
+  PROFILE: () => 'Your profile is complete.',
+  HOUSE: () => null,
+});
+
+/**
+ * A vault's arrival, rendered at its delivery (house_deliveries, source VAULT, title and words stored): its occasion, the
+ * vaults added, until when they are kept (a Paris day, as a sentence writes it) and where to open them.
+ *   `detail`  the occasion's detail: the release's piece (MONOLITHE IN BLUE), the new piece's, the tier reached (PLATINE).
+ *   `until`   the Paris day `YYYY-MM-DD` its WAITS UNTIL shows.
+ */
+export function vaultArrivedWords(input: { source: VaultSourceName; detail: string | null; count: number; until: string }): HouseWords {
+  const n = Number.isInteger(input.count) && input.count > 1 ? input.count : 1;
+  const vaults = n === 1 ? 'a vault' : `${n} vaults`;
+  const occasion = VAULT_ARRIVED_OCCASION[input.source]?.(input.detail) ?? null;
+  const added = input.source === 'PIECE' ? `With your new piece${input.detail ? `, ${input.detail},` : ''} we have added ${vaults} to your account.` : `We have added ${vaults} to your account.`;
+  const kept = n === 1 ? `It is kept until ${houseDate(input.until)}. Open it in YOUR ACCOUNT, under THE VAULT.` : `They are kept until ${houseDate(input.until)}. Open them in YOUR ACCOUNT, under THE VAULT.`;
+  return { title: n === 1 ? VAULT_ARRIVED_TITLE.one : VAULT_ARRIVED_TITLE.many(n), body: [occasion, added, kept].filter((s): s is string => !!s).join(' ') };
+}
+
 /** The house's words as the collector app reads them (web/verify/copy.ts re-exports it). */
 export const HOUSE = Object.freeze({
   /** Each moment's default title and words (the console's RESET TO DEFAULT; what a moment says until edited). */
@@ -102,6 +163,8 @@ export const HOUSE = Object.freeze({
   author: 'ORBES',
   /** Each link's words. */
   links: HOUSE_LINK_WORDS,
+  /** THE VAULT's source labels (a waiting door's line, an OPENED row). */
+  vaultSources: VAULT_SOURCE_LABELS,
 });
 
 const PLACEHOLDER_RE = /\{([A-Za-z]+)\}/g;

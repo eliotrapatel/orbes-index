@@ -138,13 +138,13 @@ function cut(s: string, max: number): string {
 }
 
 /** A rendered title as stored: one line, spaces made single, at most 400 characters; blank → null. */
-function deliveredTitle(s: string): string | null {
+export function deliveredTitle(s: string): string | null {
   const line = s.replace(/[\r\n\t]+/g, ' ').replace(CONTROL, '').replace(/\s+/g, ' ').trim();
   return line === '' ? null : cut(line, HOUSE_DELIVERED_TITLE_MAX);
 }
 
 /** Rendered words as stored: line breaks kept, at most 8 000 characters; blank → null. */
-function deliveredBody(s: string): string | null {
+export function deliveredBody(s: string): string | null {
   const text = s.replace(/\r\n?/g, '\n').replace(CONTROL, '').trim();
   return /\S/.test(text) ? cut(text, HOUSE_DELIVERED_BODY_MAX) : null;
 }

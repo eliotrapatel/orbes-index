@@ -1556,11 +1556,12 @@ export interface AccountThread {
 /**
  * A house message (macro scope D24, M3 and M4; lot M2 plan §1.5; GET /api/v1/account/house-messages): written by ORBES,
  * read-only. A moment's words were rendered at its delivery; its links are fixed by its kind (src/shared/house-words.ts
- * HOUSE_MOMENT_LINKS); a custom message has none.
+ * HOUSE_MOMENT_LINKS); a custom message has none. Since migration 0061 a vault's arrival (VAULT, THE VAULT D18): its
+ * words rendered at its delivery, no moment.
  */
 export interface AccountHouseMessage {
   id: string;
-  source: 'MOMENT' | 'CUSTOM';
+  source: 'MOMENT' | 'CUSTOM' | 'VAULT';
   /** A moment's kind (FIRST_REGISTRATION…); null for a custom message. */
   moment: string | null;
   title: string;

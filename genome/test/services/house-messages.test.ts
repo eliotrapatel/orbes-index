@@ -11,7 +11,8 @@
  * sender's pass at its time and not before, its audience frozen at the delivery and its reach recorded; read and counted
  * read; the SENT guard; cancelled; SEGMENT_IN_USE for a draft and a scheduled message, and a sent one keeping its
  * segment's name once the segment is deleted; a message that cannot be delivered leaving the others go; the audit with
- * the words as their length and SHA-256; the moments' figures and preview; the HouseSender loop.
+ * the words as their length and SHA-256; the moments' figures and preview; the HouseSender loop; a vault's arrival (THE
+ * VAULT, lot Q3) read as stored, unread then read, in the export, delivered once.
  *
  * Under concurrency (PGlite always; PostgreSQL in genome-ci, ORBES_TEST_POSTGRES_URL): two senders deliver a scheduled
  * message once (FOR UPDATE SKIP LOCKED).
@@ -25,7 +26,7 @@ import { closeDb, createDb, type Db } from '../../src/server/db/connection.js';
 import { migrateToLatest } from '../../src/server/db/migrate.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import { AuditService } from '../../src/server/services/audit.js';
-import { cleanAudience, HOUSE_SENDER, HouseMessageService, HouseSender, tierAudienceLabel } from '../../src/server/services/house-messages.js';
+import { accountHouseMessages, cleanAudience, HOUSE_SENDER, HouseMessageService, HouseSender, tierAudienceLabel } from '../../src/server/services/house-messages.js';
 import { parisLocalInstant } from '../../src/server/services/schedule.js';
 import { createManualClock, type Actor, type Logger, type ManualClock } from '../../src/server/types.js';
 import { createTestDb } from '../support/db.js';
@@ -351,6 +352,57 @@ describe('the custom house messages (HouseMessageService)', () => {
       await sender.stop();
     }
     expect((await house().message(m.id)).status).toBe('SENT');
+  });
+
+  it('reads a vault’s arrival (THE VAULT, D18) as stored: in MESSAGES with no moment and no link, unread then read, in the export, delivered once', async () => {
+    clock.set('2027-08-02T09:00:00Z');
+    const a = await collector(1);
+    const before = await house().list(a.id);
+    const given = await ctx.services.vault.give({ source: 'PROFILE', accountId: a.id });
+    expect(given.vaults).toHaveLength(1);
+    const page = await house().list(a.id);
+    expect(page.total).toBe(before.total + 1);
+    expect(page.unread).toBe(before.unread + 1);
+    expect(page.messages[0]).toEqual({
+      id: given.deliveryId,
+      source: 'VAULT',
+      moment: null,
+      title: 'A VAULT IS WAITING FOR YOU',
+      body: 'Your profile is complete. We have added a vault to your account. It is kept until 1 September 2027. Open it in YOUR ACCOUNT, under THE VAULT.',
+      pieceRef: null,
+      pieceHeld: null,
+      at: z('2027-08-02T09:00:00Z'),
+      unread: true,
+    });
+    expect(await house().unread(a.id)).toEqual({ house: true });
+    // Its dedupe key holds it to one delivery per vault.
+    const key = `VAULT:${given.vaults[0]!.id}`;
+    const again = await t.db
+      .insertInto('house_deliveries')
+      .values({ account_id: a.id, source: 'VAULT', title: 'AGAIN', body: 'Again.', dedupe_key: key, delivered_at: clock.now() })
+      .onConflict((oc) => oc.column('dedupe_key').doNothing())
+      .returning('id')
+      .execute();
+    expect(again).toEqual([]);
+    expect((await t.db.selectFrom('house_deliveries').select('id').where('dedupe_key', '=', key).execute()).length).toBe(1);
+    // A vault's arrival names no message, moment or piece (house_deliveries_source).
+    await expect(
+      t.db.insertInto('house_deliveries').values({ account_id: a.id, source: 'VAULT', moment: 'NINETY_DAYS', title: 'T', body: 'B', dedupe_key: `VAULT:${randomUUID()}` }).execute(),
+    ).rejects.toThrow(/house_deliveries_source/);
+    clock.set('2027-08-02T10:00:00Z');
+    await house().markRead(a.id, clock.now());
+    expect((await house().list(a.id)).messages[0]).toMatchObject({ source: 'VAULT', unread: false });
+    expect(await house().unreadCount(a.id)).toBe(0);
+    const exported = await accountHouseMessages(t.db, a.id);
+    expect(exported.at(-1)).toEqual({
+      source: 'VAULT',
+      moment: null,
+      title: 'A VAULT IS WAITING FOR YOU',
+      body: page.messages[0]!.body,
+      pieceRef: null,
+      deliveredAt: z('2027-08-02T09:00:00Z'),
+      readAt: z('2027-08-02T10:00:00Z'),
+    });
   });
 });
 
