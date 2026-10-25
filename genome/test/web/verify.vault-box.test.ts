@@ -51,6 +51,34 @@ t.mount = (place, phone) => {
 };
 `;
 
+const PAGE_CSS = readFileSync(join(SRC, 'verify/vault/vault-page.css'), 'utf8');
+
+/** THE VAULT page (lot Q3, step Q3.11) mounted with its data as read and its openings answered by the test. */
+const VAULT_PAGE_SCRIPT = `
+import { vaultPageView } from ${JSON.stringify(join(SRC, 'verify/views/vault-page.ts'))};
+const t = (globalThis.P = { answers: [] });
+const door = (id, line, day) => ({ id, source: 'LIVE', label: 'YOUR SIZE SOLD OUT', detail: 'MONOLITHE IN BLUE', line, givenAt: '2026-10-05T16:47:00Z', waitsUntil: day + 'T22:00:00Z', waitsUntilDay: day });
+t.mount = () => {
+  const view = vaultPageView({
+    api: { openVault: () => new Promise((ok) => t.answers.push(ok)), vaults: () => Promise.reject(new Error('unused')), vaultInvite: () => Promise.reject(new Error('unused')) },
+    session: { ensure: async () => ({ status: 'signed-in' }), noteError: () => {}, subscribe: () => () => {} },
+    sound: { prime: () => {}, cue: () => {} },
+    onSignIn: () => {},
+    onPieces: () => {},
+    onProfile: () => {},
+    read: async () => ({
+      waiting: [door('a', 'YOUR SIZE SOLD OUT · MONOLITHE IN BLUE', '2026-11-04'), door('b', 'A NEW TIER · PLATINE', '2026-11-04')],
+      opened: [],
+      ledger: [{ source: 'HOUSE' }],
+      waitingCount: 2,
+      grid: [],
+    }),
+  });
+  document.body.className = 'nocturne';
+  document.body.replaceChildren(view.root);
+};
+`;
+
 describe.skipIf(!HAS_CHROMIUM)('THE VAULT\'s box and its opening (lot Q3, step Q3.10; Chromium)', () => {
   let browser: Browser;
   let bundle = '';
@@ -280,6 +308,55 @@ describe.skipIf(!HAS_CHROMIUM)('THE VAULT\'s box and its opening (lot Q3, step Q
     expect(await page.evaluate(() => document.activeElement?.className ?? '')).not.toContain('vlt__again');
     expect(VAULT_CSS).toMatch(/\.vlt\[data-place="page"\]\[data-variant="door-open"\] \{ padding-top: 0 !important; \}/);
     await page.context().close();
+  });
+
+  it('draws a door of THE VAULT page as MK V: no hairline, no line, no DRAW IT DOWN hint; PRESS AND HOLD under the box and above the source line, gone once it opens in place with its source line and WAITS UNTIL kept and SAVE THE IMAGE for I WAS THERE (lot Q3, step Q3.11; N1, N33)', async () => {
+    const out = await build({ stdin: { contents: VAULT_PAGE_SCRIPT, resolveDir: HERE, loader: 'ts' }, bundle: true, write: false, format: 'iife', platform: 'browser', loader: { '.mp3': 'file', '.json': 'json' }, outdir: '/tmp/unused' });
+    const pageBundle = out.outputFiles.find((f) => f.path.endsWith('.js'))!.text;
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+    const page = await context.newPage();
+    await page.setContent('<!doctype html><html><body></body></html>');
+    await page.addStyleTag({ content: `${VAULT_CSS}\n${PAGE_CSS}\nbody { margin: 0; background: #0a0a0a; color: #f6f2ea; }` });
+    await page.addScriptTag({ content: pageBundle });
+    await page.evaluate(() => (globalThis as unknown as { P: { mount(): void } }).P.mount());
+    await page.waitForSelector('.view--vault[data-state="ready"] .vp-vault .vo-dopen__front');
+    const doors = () =>
+      page.evaluate(() =>
+        [...document.querySelectorAll('.vp-vault')].map((li) => {
+          const shown = (e: Element | null) => !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0;
+          const box = li.querySelector('.vo-dopen__front')!.getBoundingClientRect();
+          const press = li.querySelector('.vp-press');
+          const from = li.querySelector('.vp-from')!.getBoundingClientRect();
+          return {
+            rule: shown(li.querySelector('.vlt__rule')),
+            lead: shown(li.querySelector('.vlt__lead')),
+            drawHint: shown(li.querySelector('.vlt .vlt__hint')),
+            again: shown(li.querySelector('.vlt__again')),
+            press: press ? { text: press.textContent, cls: press.className, under: press.getBoundingClientRect().top >= box.bottom - 1, above: press.getBoundingClientRect().bottom <= from.top + 1 } : null,
+            from: li.querySelector('.vp-from')!.textContent,
+            until: li.querySelector('.vp-until')!.textContent,
+            act: li.querySelector('.vp-act')?.textContent ?? null,
+          };
+        }),
+      );
+    for (const d of await doors()) {
+      expect([d.rule, d.lead, d.drawHint, d.again]).toEqual([false, false, false, false]);
+      expect(d.press).toEqual({ text: 'PRESS AND HOLD', cls: 'live__fact vlt__hint vp-press', under: true, above: true });
+      expect(d.until).toBe('WAITS UNTIL 4 NOVEMBER');
+    }
+    await page.focus('.vp-vault:nth-child(2) .vo-dopen__front');
+    await page.keyboard.down(' ');
+    await page.waitForFunction(() => (globalThis as unknown as { P: { answers: unknown[] } }).P.answers.length === 1, null, { timeout: 10_000 });
+    await page.keyboard.up(' ');
+    await page.evaluate(() => (globalThis as unknown as { P: { answers: ((v: unknown) => void)[] } }).P.answers[0]!({ vaultId: 'b', kind: 'I_WAS_THERE', prize: 'I WAS THERE', line: 'Your card. Save it.', odds: '1 IN 2000', rare: false, where: 'NONE', openedAt: '', giftCode: null }));
+    await page.waitForSelector('.vp-vault:nth-child(2) .vlt.is-open');
+    const [first, second] = await doors();
+    expect(first!.press?.text).toBe('PRESS AND HOLD');
+    expect(second!.press).toBeNull();
+    expect([second!.again, second!.from, second!.until, second!.act]).toEqual([false, 'A NEW TIER · PLATINE', 'WAITS UNTIL 4 NOVEMBER', 'SAVE THE IMAGE']);
+    // The odds as the vault writes them, grouped.
+    expect(await page.evaluate(() => document.querySelector('.vp-vault:nth-child(2) .vo-rw__odds')?.textContent)).toBe('1 IN 2,000');
+    await context.close();
   });
 
   it('dims the page as MK\'s vo-pagedim, on SOLD OUT and the end page only (a slot\'s vault): from 1.8 s over 1.25 s to 0.16, a rare reward from 2.52 s over 1.75 s; never on a door of THE VAULT page', () => {

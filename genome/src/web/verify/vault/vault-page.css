@@ -1,0 +1,473 @@
+/*
+ * THE VAULT page (lot Q3, step Q3.11; plan §3.5; MK #vault-page, value for value: its `.vp*` rules, read from the mockup
+ * one-queue-final.preview.html), the phone's; a computer's places in shared/desktop-account.css. Sober: an overline, the
+ * title in Gravesend Sans, hairlines and the horizon; no cards, no plates. Dark in both modes (D41): the page's own dark
+ * tokens, and shared/light.css leaves the screen `vault` out as it leaves the camera. Each door is the vault's box
+ * (vault.css), 246 px × its zoom tall (MK `calc(246px * var(--dz))`: 0.98 here), 56 px under the line above (D69),
+ * the vault's own top padding off inside it (vault.css), PRESS AND HOLD under a closed one (OP-23, N1: the door hint's own
+ * style), its source line and WAITS UNTIL under it (`.vp-vault__text`).
+ */
+body.nocturne .view--vault.vp {
+  --vp-ink: #f6f2ea;
+  --vp-soft: rgba(246, 242, 234, 0.62);
+  --vp-faint: rgba(246, 242, 234, 0.42);
+  --vp-line: rgba(246, 242, 234, 0.12);
+  --vp-hz: 246, 242, 234;
+  --dz: 0.98;
+  display: block;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0 32px 40px;
+  font-family: var(--font);
+  text-align: left;
+  color: var(--vp-ink);
+}
+
+.vp :where(.vp-over, .vp-until, .vp-opened dt, .vp-occ__of) {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--fs-caption);
+  line-height: 1.6;
+  letter-spacing: var(--track-display);
+  color: var(--vp-faint);
+}
+
+.vp .vp-over--top {
+  margin-top: 44px;
+}
+
+.vp .vp-title {
+  margin: 12px 0 0;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--fs-wordmark);
+  line-height: 1.15;
+  letter-spacing: 0.3em;
+  color: var(--vp-ink);
+}
+
+.vp .vp-title:focus {
+  outline: none;
+}
+
+.vp :is(.vp-lead, .vp-p) {
+  margin: 14px 0 0;
+  max-width: 34em;
+  font-size: var(--fs-sub);
+  line-height: 1.6;
+  color: var(--vp-soft);
+}
+
+.vp .vp-status {
+  margin: 14px 0 0;
+  color: var(--vp-soft);
+}
+
+.vp .vp-sec {
+  margin-top: 34px;
+  padding-top: 18px;
+  border-top: 1px solid var(--vp-line);
+}
+
+.vp .vp-sec > .vp-over {
+  color: var(--vp-ink);
+  opacity: 0.8;
+}
+
+/* The three titles 13 px, ivory (D43); OPENED smaller (OP-24). */
+.vp :is(.vp-sec--vaults, .vp-sec--how, .vp-sec--hold) > .vp-over {
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  letter-spacing: 0.3em;
+  color: var(--vp-ink);
+}
+
+/* ── YOUR VAULTS: the doors ── */
+
+.vp .vp-vaults {
+  display: grid;
+  gap: 26px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vp .vp-vault {
+  margin: 0;
+}
+
+/* The vault keeps its own world: ivory words in the dark. */
+.vp .vp-door {
+  --ink: #f6f2ea;
+  --ink-soft: rgba(246, 242, 234, 0.62);
+  position: relative;
+  height: calc(246px * var(--dz));
+  margin-top: 56px;
+  color: #f6f2ea;
+}
+
+.vp .vp-door .vault-box > .vlt {
+  zoom: var(--dz);
+  max-width: 326px;
+  margin: 0 auto;
+}
+
+.vp .vp-door .vault-box > .vlt .vlt__stage {
+  height: 246px;
+  margin: 0;
+}
+
+/* PRESS AND HOLD under a closed door (OP-23; N1: under the box, above the source line, the door hint's style). */
+/* Above the vault's ground, which reaches under the box (its shadow and floor). */
+.vp :is(.vp-press, .vp-vault__text, .vp-act) {
+  position: relative;
+  z-index: 1;
+}
+
+.vp .vp-press {
+  margin: 4px 0 0;
+  text-align: center;
+  color: var(--vp-soft);
+}
+
+.vp .vp-vault__text {
+  margin-top: 12px;
+  text-align: center;
+}
+
+.vp .vp-from {
+  margin: 4px 0 0;
+  font-size: var(--fs-mono-lg);
+  letter-spacing: 0.04em;
+  color: var(--vp-soft);
+}
+
+.vp .vp-until {
+  margin-top: 6px;
+}
+
+/* A door opened here: its action under the box (SAVE THE IMAGE, GIVE IT; N33), resolving with the reward. */
+.vp .vp-act {
+  margin: 4px 0 0;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .vp .vp-act {
+    animation: vlt-in 0.8s ease 5.65s backwards;
+  }
+
+  .vp .vp-vault:has(.vlt.is-rare) .vp-act {
+    animation: vlt-in 1.12s ease 7.91s backwards;
+  }
+}
+
+/* ── OPENED: compact rows, the day and the source on the left, what it held on the right ── */
+
+.vp .vp-opened {
+  margin: 10px 0 0;
+}
+
+.vp .vp-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--vp-line);
+}
+
+/* The day and the source never break; what it held takes the rest, a long name wrapping on the right (the stress). */
+.vp .vp-opened dt {
+  flex: none;
+  white-space: nowrap;
+}
+
+.vp .vp-opened dt .numeral {
+  display: inline;
+  margin: 0;
+}
+
+.vp .vp-opened dt .vp-src {
+  display: block;
+  margin-top: 0;
+}
+
+.vp .vp-opened dd {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: calc(var(--fs-caption) + 0.5px);
+  letter-spacing: 0.24em;
+  color: var(--vp-ink);
+  text-align: right;
+}
+
+/* On a phone, the row's action on its second line, under what it held (N33). */
+.vp .vp-opened dd > .vp-occ__state {
+  display: flex;
+  justify-content: flex-end;
+  margin: 2px 0 0 auto;
+}
+
+/* ── HOW TO OBTAIN A VAULT: a ledger ── */
+
+.vp .vp-ledger {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vp .vp-occ {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--vp-line);
+}
+
+.vp .vp-occ:last-child {
+  border-bottom: 0;
+}
+
+.vp .vp-occ__k {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-label);
+  line-height: 1.5;
+  letter-spacing: 0.26em;
+  color: var(--vp-ink);
+}
+
+.vp .vp-occ__p {
+  margin: 4px 0 0;
+  font-size: calc(var(--fs-body) + 0.5px);
+  line-height: 1.5;
+  color: var(--vp-soft);
+}
+
+/* The state, MK's `.vp-occ__state`; a link underlined (`--link`): SEND A PHOTOGRAPH, INVITE A FRIEND, SAVE THE IMAGE,
+   GIVE IT. */
+.vp .vp-occ__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--fs-caption);
+  line-height: 1.6;
+  letter-spacing: 0.3em;
+  color: var(--vp-ink);
+  opacity: 0.8;
+  text-decoration: none;
+  cursor: default;
+}
+
+.vp .vp-occ__state--link {
+  opacity: 1;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  text-decoration-color: var(--vp-line);
+}
+
+/* What is acted on in the page (SEND A PHOTOGRAPH, INVITE A FRIEND, YOUR PROFILE's figure, SAVE THE IMAGE, GIVE IT): MK V's
+   9 px text link, its tap zone 44 px tall without moving the line (BRAND §3.8's floor of height; its 9 px the owner's
+   mockup, as the rulebook's 9.5 px controls are the owner's canvas). */
+.vp-link {
+  min-height: 44px;
+  margin-block: -14px;
+  font-size: var(--fs-caption);
+  cursor: pointer;
+}
+
+.vp .vp-occ__state--link:focus-visible {
+  outline: 1px solid var(--vp-soft);
+  outline-offset: 4px;
+}
+
+/* The link's 44 px zone given back above and below, so its line stands where MK's state does. */
+.vp .vp-occ__state.vp-link {
+  margin-top: -6.8px;
+  margin-bottom: -14.8px;
+}
+
+.vp .vp-opened dd > .vp-occ__state.vp-link {
+  margin-top: -12.8px;
+  margin-bottom: -14.8px;
+}
+
+.vp .vp-occ.is-done .vp-occ__state {
+  opacity: 0.45;
+}
+
+.vp .vp-check {
+  width: 10px;
+  height: 10px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+}
+
+.vp .vp-occ__prog {
+  max-width: 260px;
+  margin-top: 10px;
+}
+
+.vp .vp-bar {
+  position: relative;
+  display: block;
+  height: 0;
+  margin-top: 6px;
+  border-top: 1px solid rgba(var(--vp-hz), 0.14);
+}
+
+.vp .vp-bar__line {
+  position: absolute;
+  left: 0;
+  top: -1px;
+  width: calc(var(--f) * 100%);
+  height: 0;
+  border-top: 1px solid rgba(var(--vp-hz), 0.75);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #0a0a0a);
+  mask-image: linear-gradient(90deg, transparent, #0a0a0a);
+}
+
+.vp .vp-bar__pt {
+  position: absolute;
+  left: calc(var(--f) * 100%);
+  top: -1px;
+  width: 11px;
+  height: 11px;
+  margin: -5.5px 0 0 -5.5px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(var(--vp-hz), 0.95) 0, rgba(var(--vp-hz), 0.35) 55%, rgba(var(--vp-hz), 0) 100%);
+}
+
+.vp .vp-occ__of {
+  margin: 8px 0 0;
+  font-size: var(--fs-overline);
+  letter-spacing: 0.3em;
+}
+
+/* ── WHAT A VAULT CAN HOLD: the rewards in their own type ── */
+
+.vp .vp-hold {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 22px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vp .vp-rw {
+  padding: 16px 0 18px;
+  border-top: 1px solid var(--vp-line);
+  text-align: left;
+}
+
+.vp .vp-rw__rare {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 12px;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: calc(var(--fs-nano) - 0.5px);
+  letter-spacing: 0.34em;
+  color: var(--vp-faint);
+}
+
+.vp .vp-rw__pt {
+  position: relative;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(var(--vp-hz), 0.9) 0, rgba(var(--vp-hz), 0.3) 55%, rgba(var(--vp-hz), 0) 100%);
+}
+
+.vp .vp-rw__r {
+  margin: 8px 0 0;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--fs-sub);
+  line-height: 1.2;
+  letter-spacing: 0.14em;
+  white-space: nowrap;
+  color: var(--vp-ink);
+}
+
+.vp .vp-rw__p {
+  margin: 8px 0 0;
+  font-size: var(--fs-line);
+  line-height: 1.5;
+  color: var(--vp-soft);
+}
+
+.vp .vp-waiting,
+.vp .vp-failed {
+  margin-top: 48px;
+}
+
+/* ── The reveal's action on SOLD OUT and the end page (N33): under the box where OPEN ANOTHER stands, OPEN ANOTHER one
+   line lower, the block its own room; OPEN ANOTHER's own text link (brand.css .textlink). ── */
+.vault-box .vlt[data-variant="door-open"] .vlt__reward > .vlt__act { position: absolute; left: 50%; top: 292px; z-index: 3; transform: translateX(-50%); margin: 0; white-space: nowrap; pointer-events: auto; }
+.vault-box .vlt.has-act[data-variant="door-open"] .vlt__reward > .vlt__again { top: 324px; }
+.vault-box .vlt.has-act:not([data-place="page"]) { padding-bottom: 32px; }
+@media (prefers-reduced-motion: no-preference) {
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vlt__act { animation: vlt-in calc(var(--k) * 0.8s) ease calc(var(--k) * 5.65s) backwards !important; }
+}
+
+/* ── A credit to give, as its friend opens it (/verify/gift/<code>; N10): a short page in the account's look ── */
+body.nocturne .view--gift.vp-gift {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0 0 40px;
+}
+
+.vp-gift .vp-gift__head {
+  margin-top: 44px;
+}
+
+.vp-gift .vp-gift__title:focus {
+  outline: none;
+}
+
+.vp-gift .vp-gift__line {
+  margin-top: 14px;
+}
+
+.vp-gift .vp-gift__actions {
+  margin-top: 28px;
+}
+
+.vp-gift :is(.vp-gift__note, .vp-gift__error) {
+  margin-top: 18px;
+}
+
+/* ── THE VAULT in YOUR ORDERS (lot Q3 §3.8): CLAIM IT with its size; a right to buy's BUY ── */
+.n-vault-claim,
+.n-vault-buy__body {
+  margin-top: 18px;
+}
+
+.n-vault-claim__label {
+  margin-bottom: 10px;
+}
+
+:is(.n-vault-claim, .n-vault-buy__body) :is(.n-vault-claim__address, .n-vault-claim__actions, .n-vault-buy__actions, .n-vault-claim__error, .n-vault-buy__error) {
+  margin-top: 14px;
+}
+
+.n-vault-buy__sizes > .n-g {
+  margin-bottom: 10px;
+}
+
+.n-vault-rights + .n-pieces__orders {
+  margin-top: 76px;
+}

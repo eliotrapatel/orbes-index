@@ -67,6 +67,8 @@ export interface ShellDeps {
   onTheClub(): void;
   /** YOUR WISHLIST (plan CUSTOMER INTELLIGENCE §3.2 W.10.2): the account sheet's row, its page in the app. */
   onWishlist(): void;
+  /** THE VAULT (lot Q3 §3.6): the account sheet's row, its page in the app. */
+  onVault(): void;
   /** The SCAN ring: the scanner (a tap: the sound signature's context is created in it). */
   onScan(): void;
   /** Desktop: SCAN in the top bar, the SCAN page (no camera on a computer). */
@@ -85,7 +87,7 @@ export interface ShellDeps {
  * The screens drawn in NOCTURNE with its chrome; the others of NOCTURNE (the scanner, VERIFYING…, a problem of the
  * scan: C11, C12, C17) keep the whole screen, without the rail and the ring.
  */
-const CHROME_SCREENS: readonly string[] = ['landing', 'result', 'pieces', 'piece', 'lookbook', 'sheet', 'releases', 'release', 'circle', 'circlePost', 'club', 'how', 'wishlist', 'scanPage', 'account', 'signIn', 'messages', 'order', 'reset', 'unsubscribe'];
+const CHROME_SCREENS: readonly string[] = ['landing', 'result', 'pieces', 'piece', 'lookbook', 'sheet', 'releases', 'release', 'circle', 'circlePost', 'club', 'how', 'wishlist', 'vault', 'gift', 'scanPage', 'account', 'signIn', 'messages', 'order', 'reset', 'unsubscribe'];
 const NOCTURNE_SCREENS: readonly string[] = [...CHROME_SCREENS, 'scan', 'verifying', 'message'];
 /** Desktop (BRIEF §5.3): on a computer the top bar stays on every page, VERIFYING… and a problem of the scan
  *  too (they open no camera there); the phone keeps them on the whole screen. */
@@ -95,8 +97,9 @@ const DESKTOP_SCAN_SCREENS: readonly string[] = ['verifying', 'result', 'message
 
 /** Safari's bars (addition 13): the ink of NOCTURNE, and the light of the shared certificate, kept as it is. */
 export const THEME_COLOURS = Object.freeze({ nocturne: '#0a0a0a', certificate: '#ffffff' });
-/** The one NOCTURNE screen the light mode leaves dark: the camera (shared/light.css names it the same way). */
-const LIGHT_EXCEPT = 'scan';
+/** The NOCTURNE screens the light mode leaves dark: the camera, and THE VAULT page (lot Q3 §3.5, D41); shared/light.css
+ *  names them the same way. */
+const LIGHT_EXCEPT: readonly string[] = ['scan', 'vault'];
 
 /** The rail's dot is read again no sooner than this (the banner's own cadence). */
 const RAIL_REFRESH_MS = 60_000;
@@ -233,6 +236,7 @@ export class Shell {
       onPieces: () => deps.onChapter('pieces'),
       onTheClub: () => deps.onTheClub(),
       onWishlist: () => deps.onWishlist(),
+      onVault: () => deps.onVault(),
       onSound: () => this.drawSound(),
       onClub: (club) => {
         this.club = club;
@@ -251,6 +255,7 @@ export class Shell {
       onPieces: () => deps.onChapter('pieces'),
       onTheClub: () => deps.onTheClub(),
       onWishlist: () => deps.onWishlist(),
+      onVault: () => deps.onVault(),
       onSound: () => this.drawSound(),
       onClub: (club) => {
         this.club = club;
@@ -385,7 +390,7 @@ export class Shell {
   private drawThemeColour(): void {
     const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
     if (!meta) return;
-    const light = isLight() && document.body.classList.contains('nocturne') && this.screen !== LIGHT_EXCEPT;
+    const light = isLight() && document.body.classList.contains('nocturne') && !LIGHT_EXCEPT.includes(this.screen);
     meta.content = this.screen === 'certificate' ? THEME_COLOURS.certificate : light ? MODE_THEME_COLOURS.light : THEME_COLOURS.nocturne;
   }
 

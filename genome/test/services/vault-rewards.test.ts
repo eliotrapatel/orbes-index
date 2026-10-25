@@ -569,7 +569,7 @@ describe('THE VAULT’s rewards delivered (step Q3.4)', () => {
     expect(await vaultRow(v.id)).toMatchObject({ offer_until: new Date(now.getTime() + 24 * HOUR), order_id: null });
     // Nothing reserved before BUY.
     expect(await level(m.sku['52']!)).toBe(1);
-    expect(await vault().rightsToBuy(a.id)).toEqual([{ vaultId: v.id, modelId: m.id, name: m.name, priceMinor: 120_000, currency: 'EUR', offerUntil: new Date(now.getTime() + 24 * HOUR), sizes: ['52', '54'] }]);
+    expect(await vault().rightsToBuy(a.id)).toEqual([{ vaultId: v.id, modelId: m.id, name: m.name, priceMinor: 120_000, currency: 'EUR', offerUntil: new Date(now.getTime() + 24 * HOUR), sizes: ['52', '54'], savedSize: null }]);
     await expect(vault().buy(a.id, v.id)).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
     await expect(vault().buy((await createAccount(t.db)).id, v.id, { size: '52' })).rejects.toMatchObject({ code: 'VAULT_NOT_FOUND', httpStatus: 404 });
     clock.advance(HOUR);

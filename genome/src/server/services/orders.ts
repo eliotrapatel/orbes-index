@@ -710,6 +710,8 @@ export interface AccountOrder {
   set: AccountOrderSet | null;
   /** BP-19 T5: a welcome gift's tier (PLATINE, PALLADIUM); null for any other order. */
   giftTier: 'PLATINE' | 'PALLADIUM' | null;
+  /** THE VAULT (lot Q3 §3.8): a VAULT order's, won free (at 0, its end to be claimed) or bought under a right to buy; null otherwise. */
+  vault: { free: boolean; claimBy: Date | null } | null;
   /** BP-19 T5: the credit taken off it (its open uses), in its currency; 0 for none. */
   creditMinor: number;
   status: OrderStatus;
@@ -2728,6 +2730,8 @@ export class OrderService {
         'o.location_id',
         'o.set_sale_id',
         'o.set_piece',
+        'o.vault_id',
+        'o.claim_by',
         'm.name as model_name',
         'm.variant_label as model_variant',
         'm.image_sha256 as model_image',
@@ -2816,6 +2820,7 @@ export class OrderService {
       withOrder: r.with_order_id ? orderReference(r.with_order_id) : null,
       set: r.set_sale_id !== null && sets.has(r.set_sale_id) ? { ...sets.get(r.set_sale_id)!, piece: r.set_piece! } : null,
       giftTier: r.gift_grant_id ? (giftTiers.get(r.gift_grant_id) === 3 ? 'PALLADIUM' : 'PLATINE') : null,
+      vault: r.channel === 'VAULT' ? { free: r.price_minor === 0, claimBy: r.claim_by ?? null } : null,
       creditMinor: credits.get(r.id) ?? 0,
       status: r.status,
       reservedAt: r.reserved_at,

@@ -204,7 +204,7 @@
 
   /* The light mode (§3): the photograph keeps the frame's upper part, starts on a clean edge under the white bar and
      dissolves into the white with light.css's eased curve; the words stand on the white foot. */
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) {
     --d-ol-line: color-mix(in srgb, var(--vault-ink) 78%, transparent);
     --d-photo-h: 62%;
     --d-focus-at: 0.39;
@@ -221,9 +221,9 @@
 
   /* The dissolve: light.css's eased curve from --d-dis to the photograph's foot; taken again on a frame's photograph,
      where its frame says where it starts. */
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]),
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) :is(.now__hero > .n-ph, .d-pframe > .n-ph, .n-model__body > .n-model__photo, .n-piece__article > .n-piece__photo > .n-ph),
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) :is(.n-releases__release > .n-ph, .n-lookbook__model:not(:where(.n-wishlist__card)) > .n-ph, .view--now > .n-sec > .now__teaser-photo, .d-res__frame > .n-result__model > .n-ph) {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]),
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) :is(.now__hero > .n-ph, .d-pframe > .n-ph, .n-model__body > .n-model__photo, .n-piece__article > .n-piece__photo > .n-ph),
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) :is(.n-releases__release > .n-ph, .n-lookbook__model:not(:where(.n-wishlist__card)) > .n-ph, .view--now > .n-sec > .now__teaser-photo, .d-res__frame > .n-result__model > .n-ph) {
     --d-scrim-foot: linear-gradient(
       transparent 0%,
       transparent calc(var(--d-dis) * 100%),
@@ -244,7 +244,7 @@
      model's label nearer its title, the lines nearer their action (below). A page frame's dissolve starts as low as
      the piece needs (shared/desktop.ts fitDissolve). */
   @media (max-height: 780px), (min-aspect-ratio: 2/1) {
-    html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) {
+    html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) {
       --d-frame-foot: var(--d-s7);
     }
   }
@@ -275,7 +275,7 @@
     scrollbar-gutter: stable;
   }
 
-  html[data-mode="light"]:not(.d-touch):has(> body.nocturne:not([data-screen="scan"])) {
+  html[data-mode="light"]:not(.d-touch):has(> body.nocturne:not([data-screen="scan"], [data-screen="vault"])) {
     color-scheme: light;
   }
 
@@ -287,13 +287,13 @@
 
   /* An outlined button's line: a border in the inset line's place, so its colour can move (§10.13, §10.16). */
   html:not(.d-touch) body.nocturne .n-btn--ol,
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .n-btn--ol {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-btn--ol {
     border: 1px solid var(--d-ol-line);
     box-shadow: none !important;
   }
 
   /* …to full ink on hover and pressed, in the light mode too (a rule of the light rest's weight and more). */
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .n-btn--ol:not(:disabled, [aria-disabled="true"]):is(:hover, :active) {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-btn--ol:not(:disabled, [aria-disabled="true"]):is(:hover, :active) {
     border-color: var(--vault-ink);
   }
 
@@ -1004,8 +1004,8 @@
 
   /* In the light mode a list's or NOW's frame stacks: the photograph takes what its words leave, the words stand on
      the white under its dissolve. */
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) :is(.now__hero, .d-pframe, .n-releases__release, .n-lookbook__model:not(:where(.n-wishlist__card))) > .n-ph,
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .view--now > .n-sec > .now__teaser-photo {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) :is(.now__hero, .d-pframe, .n-releases__release, .n-lookbook__model:not(:where(.n-wishlist__card))) > .n-ph,
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .view--now > .n-sec > .now__teaser-photo {
     --d-ph-h: auto;
     position: relative;
     flex: 1 1 0;
@@ -1019,8 +1019,8 @@
 
   /* A light list frame's crop: the piece's centre in the middle of what is clear between the bar's room (its height
      and 24 px under the frame's top) and the dissolve, its top never nearer the frame's top than that (§10.10). */
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) :is(.n-releases__release, .n-lookbook__model:not(:where(.n-wishlist__card))),
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .view--now > .n-sec:has(> .now__teaser-photo) {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) :is(.n-releases__release, .n-lookbook__model:not(:where(.n-wishlist__card))),
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .view--now > .n-sec:has(> .now__teaser-photo) {
     --d-focus-at: calc(var(--d-dis) / 2);
     --d-focus-shift: calc((var(--d-bar) + var(--d-s5)) / 2);
   }
@@ -1043,30 +1043,30 @@
   }
 
   /* NOW's page frame: the window's height, its photograph what the words leave, at least what the piece needs. */
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) :is(.now__hero, .d-pframe) > .n-ph {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) :is(.now__hero, .d-pframe) > .n-ph {
     min-height: var(--d-photo-min);
   }
 
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) :is(.now__hero, .d-pframe, .n-releases__release, .n-lookbook__model:not(:where(.n-wishlist__card))) > .n-ph > img,
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .view--now > .n-sec > .now__teaser-photo > img {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) :is(.now__hero, .d-pframe, .n-releases__release, .n-lookbook__model:not(:where(.n-wishlist__card))) > .n-ph > img,
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .view--now > .n-sec > .now__teaser-photo > img {
     position: absolute;
     inset: 0;
   }
 
   /* THE SET (lot M3): its pieces' photographs stand side by side in the light too, each its tile. */
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) :is(.now__hero, .d-pframe, .n-releases__release) > .n-ph.n-tiles > img {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) :is(.now__hero, .d-pframe, .n-releases__release) > .n-ph.n-tiles > img {
     position: static;
   }
 
   /* …24 px of white between the photograph's dissolve and the words (a short window's page frame may give them back:
      --d-gap, shared/desktop.ts fitFoot); a block without a photograph has none to keep, so its words stand as in the
      dark. */
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) :is(.now__hero:not(.now__hero--bare), .d-pframe:not(.d-pframe--sealed), .n-releases__release, .n-lookbook__model:not(:where(.n-wishlist__card)):not(.n-lookbook__model--bare)) > :is(.n-lift, .n-releases__words, .n-live__words) {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) :is(.now__hero:not(.now__hero--bare), .d-pframe:not(.d-pframe--sealed), .n-releases__release, .n-lookbook__model:not(:where(.n-wishlist__card)):not(.n-lookbook__model--bare)) > :is(.n-lift, .n-releases__words, .n-live__words) {
     padding-top: var(--d-gap, var(--d-s5));
   }
 
   /* NOW's collection frame has its words' edge as padding: its photograph reaches the window's edges. */
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .view--now > .n-sec > .now__teaser-photo {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .view--now > .n-sec > .now__teaser-photo {
     width: auto;
     margin: 0 calc(-1 * var(--d-edge)) var(--d-s5);
   }
@@ -1105,11 +1105,11 @@
       );
   }
 
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) :is(.now__hero, .d-pframe, .n-releases__release, .n-lookbook__model:not(:where(.n-wishlist__card))) > .n-ph > img,
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .view--now > .n-sec > .now__teaser-photo > img,
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .n-model__body > .n-model__photo > img,
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .n-piece__article > .n-piece__photo > .n-ph > img,
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .d-res__frame > .n-result__model > .n-ph > img {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) :is(.now__hero, .d-pframe, .n-releases__release, .n-lookbook__model:not(:where(.n-wishlist__card))) > .n-ph > img,
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .view--now > .n-sec > .now__teaser-photo > img,
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-model__body > .n-model__photo > img,
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-piece__article > .n-piece__photo > .n-ph > img,
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .d-res__frame > .n-result__model > .n-ph > img {
     --d-clear-end: calc(var(--d-dis) * (100% + 100vw));
   }
 
@@ -1226,7 +1226,7 @@
 
   /* In the light the frame is a photograph over a white foot: two lines side by side, the on-photo ivory 7 px inside
      the frame (read on the photograph) and the ink under it, 8 px inside (read on the white). */
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) :is(a.n-releases__see, .n-releases__see-line > a, .n-lookbook__see:not(:where(.n-wishlist__actions)) > a, .now__teaser-link > a):focus-visible::after {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) :is(a.n-releases__see, .n-releases__see-line > a, .n-lookbook__see:not(:where(.n-wishlist__actions)) > a, .now__teaser-link > a):focus-visible::after {
     border: 7px solid transparent;
     box-shadow: inset 0 0 0 1px var(--d-on-photo-ink);
     outline-color: var(--vault-ink);
@@ -1463,11 +1463,11 @@
      (shared/desktop.ts `d-one-line`: MONOLITHE IN BLUE; a draw's title keeps its break), its main button 24 px under
      the date line. */
   @media (max-height: 780px), (min-aspect-ratio: 2/1) {
-    html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .now__hero .now__title.d-one-line > :is(br, .d-line-start) {
+    html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .now__hero .now__title.d-one-line > :is(br, .d-line-start) {
       display: none;
     }
 
-    html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .now__hero .d-frame__aside > :is(.n-btn, :has(> .n-btn)) {
+    html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .now__hero .d-frame__aside > :is(.n-btn, :has(> .n-btn)) {
       margin-top: var(--d-s5);
     }
   }
@@ -1587,7 +1587,7 @@
 
   /* MESSAGES' line (signed in, an answer unread): one row on the canvas between its two hairlines, its words on the
      edge with 24 px of air above and below them, READ on the right edge. */
-  html:not(.d-touch) body.nocturne .view--now > .now__messages {
+  html:not(.d-touch) body.nocturne .view--now > :is(.now__messages, .now__vault) {
     padding: var(--d-s5) 0;
   }
 
@@ -1687,7 +1687,7 @@
     background: linear-gradient(var(--vault-ground), transparent);
   }
 
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .view--now > .n-sec > .now__teaser-photo::before {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .view--now > .n-sec > .now__teaser-photo::before {
     display: none;
   }
 
@@ -3054,34 +3054,34 @@
   }
 
   html:not(.d-touch) body.nocturne .d-live__b .n-live__receipt,
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .n-live__receipt {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-live__receipt {
     background: none;
     box-shadow: inset 0 0 0 1px var(--vault-hairline-strong);
     color: var(--vault-ink);
   }
 
   html:not(.d-touch) body.nocturne .d-live__b .n-live__receipt :is(.n-live__receipt-of, .n-kv__label),
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .n-live__receipt :is(.n-live__receipt-of, .n-kv__label) {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-live__receipt :is(.n-live__receipt-of, .n-kv__label) {
     color: var(--vault-soft);
   }
 
   html:not(.d-touch) body.nocturne .d-live__b .n-live__receipt :is(.n-live__receipt-title, .n-kv__value),
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .n-live__receipt :is(.n-live__receipt-title, .n-kv__value) {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-live__receipt :is(.n-live__receipt-title, .n-kv__value) {
     color: var(--vault-ink);
   }
 
   html:not(.d-touch) body.nocturne .d-live__b .n-live__receipt .n-live__receipt-text,
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .n-live__receipt .n-live__receipt-text {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-live__receipt .n-live__receipt-text {
     color: var(--vault-soft);
   }
 
   html:not(.d-touch) body.nocturne .d-live__b .n-live__receipt :is(.n-live__receipt-rows, .n-kv__row),
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .n-live__receipt :is(.n-live__receipt-rows, .n-kv__row) {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-live__receipt :is(.n-live__receipt-rows, .n-kv__row) {
     border-color: var(--vault-hairline);
   }
 
   html:not(.d-touch) body.nocturne .d-live__b .n-live__receipt .n-live__pieces,
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .n-live__receipt .n-live__pieces {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-live__receipt .n-live__pieces {
     border-bottom-color: var(--vault-ink);
     color: var(--vault-ink);
   }
@@ -3389,8 +3389,8 @@
     margin: 0;
   }
 
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .n-model__body > .n-model__photo,
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .n-piece__article > .n-piece__photo > .n-ph {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-model__body > .n-model__photo,
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-piece__article > .n-piece__photo > .n-ph {
     --d-ph-h: calc(var(--d-words-top, calc(var(--d-frame-page) * 0.62 + var(--d-s5))) - var(--d-gap, var(--d-s5)));
   }
 
@@ -3403,13 +3403,13 @@
 
   /* In the light, the words stand under a photograph at least as tall as the piece needs (the frame grows only then),
      their foot where the window leaves it (shared/desktop.ts fitFoot: --d-foot, --d-gap). */
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .n-model__body > .n-model__photo:first-child + .n-model__words,
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .n-piece__article > .n-piece__photo:first-child + .n-piece__lines {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-model__body > .n-model__photo:first-child + .n-model__words,
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-piece__article > .n-piece__photo:first-child + .n-piece__lines {
     padding-top: calc(var(--d-photo-min) + var(--d-gap, var(--d-s5)));
     padding-bottom: var(--d-foot, var(--d-frame-foot));
   }
 
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) :is(.now__hero:not(.now__hero--bare) > .n-lift, .d-pframe:not(.d-pframe--sealed) > :is(.n-release__words, .n-live__words)) {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) :is(.now__hero:not(.now__hero--bare) > .n-lift, .d-pframe:not(.d-pframe--sealed) > :is(.n-release__words, .n-live__words)) {
     padding-bottom: var(--d-foot, var(--d-frame-foot));
   }
 
@@ -3418,12 +3418,12 @@
      label's baseline 3 px over its line's foot), its lines 24 px above WISHLIST; a piece's lines 24 px above SEE THE
      MODEL (§10.10: the room is won from the words). */
   @media (max-height: 780px), (min-aspect-ratio: 2/1) {
-    html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .n-model__words:not(.n-model__bare) .n-model__title {
+    html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-model__words:not(.n-model__bare) .n-model__title {
       margin-top: calc(var(--d-s4) - 0.32em - 3px);
     }
 
-    html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .n-model__words:not(.n-model__bare) .n-model__heart,
-    html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .n-piece__lines .n-result__model-line {
+    html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-model__words:not(.n-model__bare) .n-model__heart,
+    html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-piece__lines .n-result__model-line {
       margin-top: var(--d-s5);
     }
   }
@@ -4387,7 +4387,7 @@
   }
 
   /* In the light, the frame as tall as its lines (under a photograph as tall as the piece needs) when they ask more. */
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .n-piece__article > .n-piece__photo {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-piece__article > .n-piece__photo {
     height: auto;
     min-height: var(--d-frame-page);
   }
@@ -4993,17 +4993,17 @@
 
   /* In the light, as a list's frame: the photograph down to the words, the piece whole the bar's height and 24 px under
      its top, the words on the white under its dissolve. */
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .d-res__frame {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .d-res__frame {
     --d-focus-at: calc(var(--d-dis) / 2);
     --d-focus-shift: calc((var(--d-bar) + var(--d-s5)) / 2);
   }
 
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .d-res__frame > .n-result__model > .n-ph {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .d-res__frame > .n-result__model > .n-ph {
     --d-ph-h: calc(var(--d-words-top, calc(var(--d-frame-list) * 0.62 + var(--d-s5))) - var(--d-s5));
   }
 
   /* (Room above the words for the photograph the whole piece needs there, as a list frame's photograph minimum.) */
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .d-res__frame > .d-res__frame-words {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .d-res__frame > .d-res__frame-words {
     padding-top: calc((var(--d-bar) + var(--d-s5) + var(--frame-focus-h) * 100vw) / 0.9 + var(--d-s5));
   }
 

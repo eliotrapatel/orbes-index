@@ -21,11 +21,11 @@
 @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
   /* The zone: the control's own box where it is 44 px or more, else 44 px centred on it, each way on its own. Its
      layer is placed on the control, so the control holds it (positioned where it is not already). */
-  html.d-tap:not(.d-touch) body.nocturne :is(a.n-wm, .n-fl__link, .n-foot__club-link, .n-release__see, .d-ptile__name, .d-wish__name, .n-account__address-link, .now__messages-read) {
+  html.d-tap:not(.d-touch) body.nocturne :is(a.n-wm, .n-fl__link, .n-foot__club-link, .n-release__see, .d-ptile__name, .d-wish__name, .n-account__address-link, .now__messages-read, .now__vault-open) {
     position: relative;
   }
 
-  html.d-tap:not(.d-touch) body.nocturne :is(a.n-wm, .n-fl__link, .n-foot__club-link, .n-release__see, .d-ptile__name, .d-wish__name, .n-account__address-link, .now__messages-read)::after {
+  html.d-tap:not(.d-touch) body.nocturne :is(a.n-wm, .n-fl__link, .n-foot__club-link, .n-release__see, .d-ptile__name, .d-wish__name, .n-account__address-link, .now__messages-read, .now__vault-open)::after {
     content: "";
     position: absolute;
     top: min(0px, calc(50% - 22px));

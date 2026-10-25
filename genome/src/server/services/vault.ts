@@ -135,7 +135,7 @@ import {
   type OrderAddressInput,
   type OrderMail,
 } from './orders.js';
-import { offeredSizes } from './sizes.js';
+import { offeredSizes, savedSizeAmong } from './sizes.js';
 import { defaultLocationId, ensureSku, lockSku, sizeLabelOf, stockLevel } from './stock.js';
 import {
   isThePiece,
@@ -690,6 +690,10 @@ export interface VaultOpenedRow {
   source: VaultSource;
   /** The source's bare label (`A NEW PIECE`), as OPENED shows it. */
   label: string;
+  /** Its occasion's detail (`MONOLITHE IN BLUE`, `PLATINE`; null without one) and the Paris day it was given, `YYYY-MM-DD`:
+   *  the I WAS THERE image names the release (or the occasion) and its date (D11, N4). */
+  detail: string | null;
+  givenDay: string;
   openedAt: Date;
   /** The Paris day it was opened, `YYYY-MM-DD`. */
   openedDay: string;
@@ -1174,6 +1178,8 @@ export interface VaultRightToBuy {
   offerUntil: Date;
   /** Its offered sizes (null: ONE SIZE). */
   sizes: (string | null)[];
+  /** The size YOUR SIZES preselects among them (plan CUSTOMER INTELLIGENCE §3.7), its label; null without one. */
+  savedSize: string | null;
 }
 
 /** VAULT_OFFER_ENDED's words for a piece won free past its 30 days, and for a right to buy past its 24 hours. */
@@ -1829,6 +1835,7 @@ export class VaultService {
         currency: price.currency,
         offerUntil: until,
         sizes: (await offeredSizes(this.db, r.model_id!)).map((z) => z.label),
+        savedSize: (await savedSizeAmong(this.db, accountId, r.model_id!, (await this.db.selectFrom('skus').select(['id', 'size_label', 'fit_min_mm', 'fit_max_mm']).where('model_id', '=', r.model_id!).where('set_aside_at', 'is', null).execute()).flatMap((k) => (k.size_label === null ? [] : [{ id: k.id, label: k.size_label, fitMinMm: k.fit_min_mm, fitMaxMm: k.fit_max_mm }]))))?.label ?? null,
       });
     }
     return out;
@@ -2017,7 +2024,7 @@ export class VaultService {
         const gift = r.gift_id
           ? { code: r.gift_accepted_by === null && r.gift_expires_at !== null && new Date(r.gift_expires_at).getTime() > now.getTime() ? formatGrouped(vaultGiftCode(r.id, this.giftKey)) : null, given: r.gift_accepted_by !== null }
           : null;
-        return { id: r.id, source: r.source, label: VAULT_SOURCE_LABELS[r.source], openedAt, openedDay: parisDay(openedAt), kind, prize, prizeLine: r.prize_line, held: vaultHeld(kind, prize), gift };
+        return { id: r.id, source: r.source, label: VAULT_SOURCE_LABELS[r.source], detail: detailOf(r), givenDay: parisDay(new Date(r.given_at)), openedAt, openedDay: parisDay(openedAt), kind, prize, prizeLine: r.prize_line, held: vaultHeld(kind, prize), gift };
       });
     return { waiting, opened, ledger: await this.ledger(id, now), waitingCount: waiting.length };
   }

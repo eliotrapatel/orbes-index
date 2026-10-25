@@ -74,10 +74,11 @@ import { orderAddonsBlock } from './order-addons.js';
 import { pieceModel, type PieceModel } from '../pieces-model.js';
 import { myEntries, type MyEntryModel } from '../releases-model.js';
 import type { SessionStore } from '../session.js';
-import type { AccountOrder, AccountQuestion, ClientServices, ClubEntry, LiveAccountEntry, OwnedPiece } from '../types.js';
+import type { AccountOrder, AccountQuestion, ClientServices, ClubEntry, LiveAccountEntry, OwnedPiece, VaultRightToBuyView } from '../types.js';
 import { recoveryContactModel } from '../view-model.js';
 import { listLine, orderPagePath, PIECES_PATH, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
+import { rightToBuyCard, vaultClaimBlock } from './vault-orders.js';
 import { appAnchor, button, definitionList, fadedPhoto, failedState, icon, lift, loadingState, orderSteps, quietLine, tabs, textLink } from './nocturne.js';
 import { writeButton } from './write.js';
 import { OwnershipPanel } from './ownership.js';
@@ -119,6 +120,8 @@ export interface PiecesDeps {
    * narrows to a phone's (CREATE ACCOUNT kept); SIGN IN by default.
    */
   signInTab?: 'signin' | 'create';
+  /** The sign-in's line above its form, in place of MY PIECES' own (lot Q3 §3.10: a friend's invitation). */
+  signInLead?: string;
 }
 
 export interface PiecesView {
@@ -155,6 +158,8 @@ class PiecesPage {
   private orders: AccountOrder[] | null = [];
   /** The questions after open for it (choice 11); none when they could not be read (they are only asked). */
   private questions: AccountQuestion[] = [];
+  /** THE VAULT's rights to buy still open (lot Q3 §3.8): at the head of ORDERS. */
+  private rights: VaultRightToBuyView[] = [];
   /** Each question's block, kept while the page lives (a tap keeps its focus). */
   private questionBlocks = new Map<string, QuestionBlock>();
   /**
@@ -238,13 +243,14 @@ class PiecesPage {
       this.entries = [];
       this.orders = [];
       this.questions = [];
+      this.rights = [];
       this.questionBlocks.clear();
       this.claimBlocks.clear();
       this.focusClaim = null;
       this.tier = null;
       if (!this.signIn) {
         this.signIn = new OwnershipPanel(
-          { kind: 'account' },
+          this.deps.signInLead ? { kind: 'account', lead: this.deps.signInLead } : { kind: 'account' },
           { api: this.deps.api, session: this.deps.session, onRescan: () => this.deps.onScan(), contact: recoveryContactModel(this.contacts, '') ?? undefined },
         );
         if (this.deps.signInTab === 'create') this.signIn.showTab('create');
@@ -272,12 +278,14 @@ class PiecesPage {
     try {
       // The account's entries in the drops (P-R03) and its orders with the pieces: without them, the pieces still show,
       // and their tab says they could not be shown. A question unread is a question not asked: nothing is said of it.
-      const [list, club, live, orders, questions] = await Promise.all([
+      const [list, club, live, orders, questions, rights] = await Promise.all([
         this.deps.api.products(),
         soft(this.deps.api.clubStatus(), null),
         soft(this.deps.api.liveMine(), null),
         soft(this.deps.api.orders(), null),
         soft(this.deps.api.questions(), [] as AccountQuestion[]),
+        // THE VAULT (lot Q3 §3.8): the rights to buy still open, at the head of ORDERS.
+        soft(this.deps.api.vaultRightsToBuy(), [] as VaultRightToBuyView[]),
       ]);
       if (gen !== this.loadGen || this.disposed) return;
       this.pieces = list.map((p: OwnedPiece) => pieceModel(p));
@@ -285,6 +293,7 @@ class PiecesPage {
       this.liveEntries = live;
       this.orders = orders;
       this.questions = questions;
+      this.rights = rights;
       this.tier = club ? Number(club.tier?.level) || 0 : null;
       this.load = { kind: 'ready' };
     } catch (e) {
@@ -380,7 +389,7 @@ class PiecesPage {
   /** The tabs that have something to show (or that say they could not be read): PIECES always. */
   private available(): PiecesTab[] {
     const out: PiecesTab[] = ['pieces'];
-    if (this.orders === null || orderModels(this.orders).length > 0) out.push('orders');
+    if (this.orders === null || orderModels(this.orders).length > 0 || this.rights.length > 0) out.push('orders');
     const items = this.releaseItems();
     if (items === null || items.length > 0) out.push('releases');
     return out;
@@ -403,7 +412,8 @@ class PiecesPage {
     else if (this.tab === 'releases') panel.append(this.releasesPanel(items));
     else panel.append(...this.piecesPanel());
     if (available.length < 2) return [panel];
-    const count: Record<PiecesTab, number | undefined> = { pieces: this.pieces.length, orders: orders?.length, releases: items?.length };
+    // THE VAULT's rights to buy count among ORDERS (lot Q3 §3.8).
+    const count: Record<PiecesTab, number | undefined> = { pieces: this.pieces.length, orders: orders ? orders.length + this.rights.length : undefined, releases: items?.length };
     const list = tabs(
       available.map((id) => ({ id, label: PIECES.pageTabs[id], count: count[id] })),
       {
@@ -525,6 +535,13 @@ class PiecesPage {
   // ── ORDERS ───────────────────────────────────────────────────────────────
 
   private ordersPanel(orders: OrderModel[] | null): HTMLElement[] {
+    // THE VAULT (lot Q3 §3.8): a right to buy at the head of ORDERS, BUY within its 24 hours; bought, ORDERS read again.
+    const rights = this.rights.map((r) => rightToBuyCard(r, { api: this.deps.api, session: this.deps.session, onOrder: () => void this.loadPieces(false, { quiet: true }) }));
+    const head = rights.length > 0 ? h('div', { class: 'n-pieces__orders n-vault-rights' }, ...rights) : null;
+    return [head, ...this.ordersList(orders)].filter((x): x is HTMLElement => x !== null);
+  }
+
+  private ordersList(orders: OrderModel[] | null): HTMLElement[] {
     if (orders === null) return [h('div', { class: 'n-px n-pieces__quiet' }, h('p', { class: 'n-sm n-pieces__failed', attrs: { role: 'alert' }, text: ORDERS.loadFailed }))];
     // Macro scope K44: a set's pieces together, under its head (THE SET · <name>, its one price).
     const groups = orderGroups(orders);
@@ -694,6 +711,8 @@ function orderCard(m: OrderModel, deps: OrderDeps, claim: HTMLElement | null = n
     m.set ? h('p', { class: 'n-g n-lb n-pieces__order-piece' }, ...withNumerals(m.set.pieceLine)) : null,
     steps,
     h('p', { class: 'n-tx n-pieces__order-sentence', text: m.sentence }),
+    // THE VAULT (lot Q3 §3.8): a piece won free, CLAIM IT with its size (its address in DELIVERY ADDRESS).
+    m.vaultClaim ? vaultClaimBlock(m.vaultClaim, { api: deps.api, session: deps.session, onOrder: (order) => void deps.onChanged?.(order, 'claim') }) : null,
     claim,
     m.request ? requestBlock(m) : null,
     rows.length > 0 ? h('div', { class: 'n-pieces__order-rows' }, definitionList(rows, { kind: 'kv' })) : null,

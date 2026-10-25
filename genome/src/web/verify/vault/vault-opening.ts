@@ -24,6 +24,7 @@ import { VAULT } from '../copy.js';
 import type { LivePassage } from '../live-sound.js';
 import type { VaultRevealView } from '../types.js';
 import type { VaultBoxParts } from './vault-box.js';
+import { vaultOdds } from '../vault-model.js';
 import { vaultFloat, type VaultFloat } from './vault-float.js';
 
 /** The press held this long opens it (the reference's HOLD_MS). */
@@ -61,6 +62,11 @@ export interface VaultOpeningDeps {
   onOpened?(reveal: VaultRevealView): void;
   /** OPEN ANOTHER pressed, once the box has closed (S and the end page: THE VAULT page, N3). */
   onAgain?(): void;
+  /**
+   * The reveal's action under its odds (lot Q3 §3.9, N33): SAVE THE IMAGE for I WAS THERE, GIVE IT for a credit to give;
+   * placed under the box, above OPEN ANOTHER where that shows, resolving with it. None (null) for another reward.
+   */
+  action?(reveal: VaultRevealView): HTMLElement | null;
   /** The page's clock and timers (the tests'). */
   now?(): number;
   vibrate?(pattern: readonly number[]): void;
@@ -331,6 +337,7 @@ export class VaultOpening {
   private reveal(r: VaultRevealView): void {
     const { vlt, prize, what, inPrize, inWhat, nichePrize, nicheLine, nicheOdds, status, again } = this.parts;
     const line = r.line ?? '';
+    const odds = vaultOdds(r.odds);
     this.opened = true;
     // FOR YOU: what is left of its second once the opening plays (1 s into one that needed no hold, the CSS's default).
     if (this.fy0 && !vlt.classList.contains('fy-in')) {
@@ -343,14 +350,21 @@ export class VaultOpening {
     prizeLetters(prize, r.prize);
     prize.style.fontSize = '';
     what.textContent = line;
-    what.appendChild(Object.assign(document.createElement('span'), { className: 'vlt__odds', textContent: r.odds }));
+    what.appendChild(Object.assign(document.createElement('span'), { className: 'vlt__odds', textContent: odds }));
     inPrize.replaceChildren(...Array.from(prize.childNodes, (n) => n.cloneNode(true)));
     inPrize.setAttribute('data-len', prize.getAttribute('data-len') ?? '');
     inWhat.replaceChildren(...Array.from(what.childNodes, (n) => n.cloneNode(true)));
     nichePrize.replaceChildren(...Array.from(prize.childNodes, (n) => n.cloneNode(true)));
     nichePrize.setAttribute('data-len', prize.getAttribute('data-len') ?? '');
     nicheLine.textContent = line;
-    nicheOdds.textContent = r.odds;
+    nicheOdds.textContent = odds;
+    // SAVE THE IMAGE or GIVE IT under the box, above OPEN ANOTHER (N33).
+    const act = this.deps.action?.(r) ?? null;
+    if (act) {
+      act.classList.add('vlt__act');
+      this.parts.again.before(act);
+      vlt.classList.add('has-act');
+    }
     nichePrize.style.fontSize = '';
     // The prize's letters shrunk to fit the niche (306 px), never wrapped.
     const width = nichePrize.scrollWidth;
@@ -358,7 +372,7 @@ export class VaultOpening {
     if (width > NICHE_FIT_PX && size > 0) nichePrize.style.fontSize = `${Math.floor((size * NICHE_FIT_PX * 10) / width) / 10}px`;
     vlt.classList.remove('is-holding');
     vlt.classList.toggle('is-rare', r.rare);
-    status.textContent = VAULT.reveal.said(r.prize, r.line, r.odds);
+    status.textContent = VAULT.reveal.said(r.prize, r.line, odds);
     this.clearTimers();
     const k = r.rare ? RARE_K : 1;
     const base = this.now();
@@ -400,7 +414,8 @@ export class VaultOpening {
     this.stop();
     this.holding = false;
     this.drag = null;
-    this.parts.vlt.classList.remove('is-open', 'is-playing', 'is-rare', 'is-holding');
+    this.parts.vlt.classList.remove('is-open', 'is-playing', 'is-rare', 'is-holding', 'has-act');
+    this.parts.vlt.querySelector('.vlt__act')?.remove();
     this.setP(0);
     this.fyClear();
     this.parts.status.textContent = '';

@@ -148,13 +148,14 @@ describe('the light mode: before the first paint, and its stylesheet', () => {
     }
   });
 
-  it('the stylesheet touches nothing outside the mode: every rule is under the root\'s attribute, on a NOCTURNE screen that is not the camera', () => {
+  it('the stylesheet touches nothing outside the mode: every rule is under the root\'s attribute, on a NOCTURNE screen that is not the camera nor THE VAULT page (lot Q3 §3.5, D41: dark in light mode)', () => {
     const css = source('shared/light.css').replace(/\/\*[\s\S]*?\*\//g, '');
     const selectors = [...css.matchAll(/(^|\})\s*([^{}]+)\{/g)].map((m) => m[2]!.trim());
     expect(selectors.length).toBeGreaterThan(8);
     for (const group of selectors) {
-      for (const sel of group.split(/,\s*\n?/)) {
-        expect(sel.startsWith('[data-mode="light"] body.nocturne:not([data-screen="scan"])') || sel === 'html[data-mode="light"]:has(> body.nocturne:not([data-screen="scan"]))', sel).toBe(true);
+      // The selector list split at its top-level commas (the exception's own :not() list holds one).
+      for (const sel of group.split(/,(?![^()]*\))\s*\n?/)) {
+        expect(sel.startsWith('[data-mode="light"] body.nocturne:not([data-screen="scan"], [data-screen="vault"])') || sel === 'html[data-mode="light"]:has(> body.nocturne:not([data-screen="scan"], [data-screen="vault"]))', sel).toBe(true);
       }
     }
     // Colours only come from the palette: white, NOCTURNE's ground as the ink, neutral greys.

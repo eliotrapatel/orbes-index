@@ -8,7 +8,7 @@
  */
 import { CHAPTER_LABELS, RAIL_LABEL } from '../shared/chapters.js';
 import { onComputer } from '../shared/desktop.js';
-import { VAULT_REVEAL } from '../../shared/house-words.js';
+import { VAULT_ARRIVED_TITLE, VAULT_REVEAL } from '../../shared/house-words.js';
 import { ApiError } from './api.js';
 import type { ScanHint } from './capture.js';
 import type { VerificationState } from './types.js';
@@ -422,7 +422,7 @@ export const ORDERS = Object.freeze({
    * Where the piece was sold; a welcome gift (plan NEXT-NINE, BP-19 T5) travels with an order; the other size of a size
    * exchange is an order of its own (plan NEXT LOT §3.6.D).
    */
-  channel: Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW', SALON: 'THE PRIVATE SALON', GIFT: 'WELCOME GIFT', EXCHANGE: 'SIZE EXCHANGE', VAULT: 'THE VAULT' }),
+  channel: Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW', SALON: 'THE PRIVATE SALON', GIFT: 'WELCOME GIFT', EXCHANGE: 'SIZE EXCHANGE', VAULT: 'FROM THE VAULT' }),
   rows: Object.freeze({ size: 'SIZE', price: 'PRICE', engraving: 'ENGRAVING', shipping: 'SHIPPING', credit: 'CREDIT', total: 'TOTAL', carrier: 'CARRIER', tracking: 'TRACKING NUMBER' }),
   /**
    * BP-19 T5: a welcome gift, on its own card: its line (WELCOME GIFT · PLATINE), its price (none of its own), and while
@@ -2270,6 +2270,121 @@ export const VAULT = Object.freeze({
   lidMark: 'ORBES',
   /** An opening that failed without words of the server's (the box settles back closed). */
   failed: 'The vault could not be opened. Please try again.',
+  /**
+   * THE VAULT page (lot Q3, step Q3.11; MK #vault-page, word for word where MK has them: D16 his sentence, D42 the page's
+   * order, OP-21 the house's ledger row, OP-22 GUARANTEED's line, N16 MK's four source labels; the words no mockup has,
+   * proposed for the owner's review board: "No vault is waiting.", PRESS AND HOLD's place (OP-23, N1), SAVE THE IMAGE, GIVE
+   * IT, GIVEN (N33), LINK COPIED).
+   */
+  page: Object.freeze({
+    overline: 'YOUR ACCOUNT · THE VAULT',
+    title: 'THE VAULT',
+    /** D16, his sentence, word for word. */
+    lead: 'Vaults are given on specific occasions, to eligible collectors, at the ORBES team’s discretion.',
+    /** YOUR VAULTS · 2 WAITING; nothing waiting: YOUR VAULTS and its one line. */
+    waiting: (n: number) => (n > 0 ? `YOUR VAULTS · ${n} WAITING` : 'YOUR VAULTS'),
+    none: 'No vault is waiting.',
+    /** WAITS UNTIL 27 NOVEMBER (a Paris day). */
+    until: (day: string) => `WAITS UNTIL ${day}`,
+    /** Under each closed door (OP-23). */
+    press: 'PRESS AND HOLD',
+    /** A door's name for a reader: what it is, where it came from, until when. */
+    doorLabel: (line: string, until: string) => `THE VAULT. ${line}. ${until}. Press and hold to open.`,
+    opened: 'OPENED',
+    /** On an I WAS THERE row and reveal (round 2 "SAVE IMAGE only"; N33). */
+    save: 'SAVE THE IMAGE',
+    /** On a credit to give while no friend accepted it (E7; N33), GIVEN after. */
+    give: 'GIVE IT',
+    given: 'GIVEN',
+    copied: 'LINK COPIED',
+    copyFailed: 'The link could not be copied.',
+    how: 'HOW TO OBTAIN A VAULT',
+    hold: 'WHAT A VAULT CAN HOLD',
+    rare: 'RARE',
+    loading: 'ONE MOMENT…',
+    unreadable: 'THE VAULT could not be shown just now.',
+    retry: 'TRY AGAIN',
+  }),
+  /** HOW TO OBTAIN A VAULT (MK V's ledger, word for word; N21 each state). */
+  ledger: Object.freeze({
+    LIVE: Object.freeze({ label: 'A LIVE RELEASE', line: 'Your size sells out while you stay in the line.' }),
+    PIECE: Object.freeze({ label: 'EACH PIECE', line: 'Each piece you buy, once registered.' }),
+    TIER: Object.freeze({ label: 'A NEW TIER', line: 'Reaching the next tier.' }),
+    WORN: Object.freeze({ label: 'WORN', line: 'A photograph of you wearing a piece, published in WORN.' }),
+    FRIEND: Object.freeze({ label: 'A FRIEND', line: 'A friend’s first piece.' }),
+    PROFILE: Object.freeze({ label: 'YOUR PROFILE', line: 'A complete profile, once.' }),
+    HOUSE: Object.freeze({ label: 'THE HOUSE', line: 'At times, from the house.' }),
+    next: (day: string) => `NEXT: ${day}`,
+    withNext: 'WITH YOUR NEXT PIECE',
+    of: (n: number, of: number) => `${n} OF ${of} PIECES`,
+    away: (tier: string, n: number) => `${tier} · ${n} ${n === 1 ? 'PIECE' : 'PIECES'} AWAY`,
+    highest: (tier: string) => `${tier} · THE HIGHEST TIER`,
+    send: 'SEND A PHOTOGRAPH',
+    invite: 'INVITE A FRIEND',
+    done: 'DONE',
+    discretion: 'AT ITS DISCRETION',
+  }),
+  /** WHAT A VAULT CAN HOLD (MK V's grid, word for word; CREDIT never €, no odds: D45). */
+  grid: Object.freeze({
+    CREDIT: Object.freeze({ label: 'CREDIT', line: 'House credit, valid 30 days.' }),
+    ADDON: Object.freeze({ label: 'AN ADD-ON', line: 'A free add-on on your next order.' }),
+    GUARANTEED: Object.freeze({ label: 'GUARANTEED', line: 'A piece at the next LIVE release.' }),
+    PRODUCT: Object.freeze({ label: 'A PIECE', line: 'A product from the collection, free or yours to buy.' }),
+    CREDIT_TO_GIVE: Object.freeze({ label: 'CREDIT TO GIVE', line: 'A credit for a friend’s first piece.' }),
+    I_WAS_THERE: Object.freeze({ label: 'I WAS THERE', line: 'Your card for that release.' }),
+    VAULT_EDITION: Object.freeze({ label: 'VAULT EDITION', line: 'Made only for the vault, never sold.' }),
+    THE_PIECE: Object.freeze({ label: 'THE PIECE', line: 'The piece you missed, in your size.' }),
+  }),
+  /** YOUR ACCOUNT's row (the phone's sheet) and card (a computer's), its line the quiet number (D18). */
+  row: 'THE VAULT',
+  /** NOW's line while a vault waits (D18), in the messages line's pattern: the arrival's own title, then OPEN. */
+  now: Object.freeze({ label: (n: number) => (n > 1 ? VAULT_ARRIVED_TITLE.many(n) : VAULT_ARRIVED_TITLE.one), open: 'OPEN' }),
+  /** YOUR ORDERS (§3.8; D20): a VAULT order, a right to buy, an add-on's right to buy. */
+  orders: Object.freeze({
+    from: 'FROM THE VAULT',
+    free: 'FREE',
+    /** A piece won free, until it is claimed (claim_by, a Paris day). */
+    claimSentence: (day: string) => `Yours, free. Choose its size and its address, then claim it. Yours until ${day}.`,
+    claim: 'CLAIM IT',
+    claimLabel: (name: string) => `Claim ${name}`,
+    claimed: 'Claimed. It is on its way to being prepared.',
+    size: 'SIZE',
+    address: 'DELIVERY ADDRESS',
+    addressMissing: 'Add the delivery address first.',
+    /** A right to buy (24 hours, Paris time). */
+    buyTitle: 'YOURS TO BUY',
+    buySentence: (time: string) => `From THE VAULT, at its price. Until ${time} in Paris.`,
+    buy: 'BUY',
+    buyLabel: (name: string) => `Buy ${name}`,
+    /** An add-on offered by a vault's right to buy, in ADD AN ADD-ON. */
+    addonUntil: (time: string) => `FROM THE VAULT · UNTIL ${time}`,
+    failed: 'This could not be done just now.',
+  }),
+  /** /verify/join/<code> (N10): the sign-in's CREATE ACCOUNT, one line above it. */
+  join: Object.freeze({ lead: 'A friend invited you to ORBES.' }),
+  /** /verify/gift/<code> (N10): a credit to give, as its friend reads it; never the giver. */
+  gift: Object.freeze({
+    title: 'A FRIEND SENT YOU A CREDIT',
+    line: (amount: string, day: string) => `${amount} for your first piece, until ${day}.`,
+    accept: 'ACCEPT',
+    accepted: 'Accepted. The credit is in YOUR ACCOUNT, for your first piece.',
+    ended: 'This credit can no longer be accepted.',
+    signIn: 'Sign in or create your account to accept it.',
+    unreadable: 'This credit could not be read just now.',
+    notFound: 'This link is not a credit to give.',
+    retry: 'TRY AGAIN',
+    loading: 'ONE MOMENT…',
+  }),
+  /** The I WAS THERE image (D11; N4): 1080 × 1350, the release (or the occasion) and its date, nothing else. */
+  image: Object.freeze({
+    title: 'I WAS THERE',
+    live: 'LIVE RELEASE',
+    wordmark: 'ORBES',
+    filename: 'ORBES-I-WAS-THERE.png',
+    alt: (...words: string[]) => words.filter(Boolean).join('. '),
+  }),
+  /** INVITE A FRIEND and GIVE IT: the share sheet, or the link copied. */
+  share: Object.freeze({ title: 'ORBES' }),
 });
 
 /**

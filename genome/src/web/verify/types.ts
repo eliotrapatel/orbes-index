@@ -1386,6 +1386,11 @@ export interface AccountOrder {
   set?: AccountOrderSet | null;
   /** BP-19 T5: a welcome gift's tier (PLATINE, PALLADIUM); null for any other order. */
   giftTier?: 'PLATINE' | 'PALLADIUM' | null;
+  /**
+   * THE VAULT (lot Q3 §3.8): a VAULT order's, won free (`free`: at 0, CLAIM IT until `claimBy`) or bought under a right to
+   * buy; null (or absent) for any other order.
+   */
+  vault?: { free: boolean; claimBy: string | null } | null;
   /** BP-19 T5: the credit taken off it, in its currency; 0 for none. */
   creditMinor?: number;
   status: OrderStatus;
@@ -1840,4 +1845,83 @@ export interface VaultRevealView {
   where: 'ACCOUNT' | 'ORDERS' | 'NONE';
   openedAt: string;
   giftCode: string | null;
+}
+
+/** An opened vault, a row of OPENED (GET /api/v1/account/vaults, §3.5): its day, its source's bare label, what it held. */
+export interface VaultOpenedRowView {
+  id: string;
+  source: VaultSource;
+  /** `A NEW PIECE`. */
+  label: string;
+  /** Its occasion's detail (`MONOLITHE IN BLUE`; null without one) and its Paris day `YYYY-MM-DD` (the I WAS THERE image). */
+  detail: string | null;
+  givenDay: string;
+  openedAt: string;
+  /** The Paris day it was opened, `YYYY-MM-DD`. */
+  openedDay: string;
+  kind: VaultRewardKind;
+  prize: string;
+  prizeLine: string | null;
+  /** `€25 · HOUSE CREDIT`, `I WAS THERE`, `€30 TO GIVE` (OP-32). */
+  held: string;
+  /** A credit to give: its link's code while it can be given (GIVE IT), and whether a friend accepted it (GIVEN). */
+  gift: { code: string | null; given: boolean } | null;
+}
+
+/** HOW TO OBTAIN A VAULT: each source switched on, with this collector's state (N21). */
+export type VaultLedgerRowView =
+  | { source: 'LIVE'; next: string | null }
+  | { source: 'PIECE' }
+  | { source: 'TIER'; tier: string | null; pieces: number; next: { tier: string; pieces: number; away: number } | null }
+  | { source: 'WORN' }
+  | { source: 'FRIEND' }
+  | { source: 'PROFILE'; done: boolean; percent: number }
+  | { source: 'HOUSE' };
+
+/** THE VAULT page's data (GET /api/v1/account/vaults). */
+export interface AccountVaultsView {
+  waiting: VaultDoorView[];
+  opened: VaultOpenedRowView[];
+  ledger: VaultLedgerRowView[];
+  waitingCount: number;
+  /** WHAT A VAULT CAN HOLD: the eight kinds in the grid's order, the rare ones marked. */
+  grid: { kind: VaultRewardKind; rare: boolean }[];
+}
+
+/** A credit to give as its link reads it (GET /api/v1/account/vaults/gifts/:code): never anything of the giver. */
+export interface VaultGiftView {
+  amount: string;
+  amountMinor: number;
+  currency: string;
+  expiresAt: string;
+  /** Its Paris day `YYYY-MM-DD`. */
+  expiresDay: string;
+  state: 'OPEN' | 'ACCEPTED' | 'ENDED';
+  canAccept: boolean | null;
+  refusal: string | null;
+}
+
+/** A right to buy a model, open (YOUR ORDERS: BUY within its 24 hours). */
+export interface VaultRightToBuyView {
+  vaultId: string;
+  modelId: string;
+  /** `MONOLITHE IN BLUE`. */
+  name: string;
+  priceMinor: number;
+  currency: string;
+  offerUntil: string;
+  sizes: (string | null)[];
+  /** The size YOUR SIZES preselects (its label); null without one. */
+  savedSize?: string | null;
+}
+
+/** What a piece won free can be claimed in (GET /api/v1/account/orders/:id/claim). */
+export interface VaultClaimSizesView {
+  orderId: string;
+  claimBy: string;
+  claimDay: string;
+  claimed: boolean;
+  sizeFixed: boolean;
+  size: string | null;
+  sizes: { label: string | null; current: boolean; available: boolean }[];
 }

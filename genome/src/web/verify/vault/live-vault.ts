@@ -10,6 +10,10 @@ import { isDesktop, onDesktopChange } from '../../shared/desktop.js';
 import type { ApiClient } from '../api.js';
 import type { VaultDoorView } from '../types.js';
 import type { LiveVault } from '../views/live.js';
+import { VAULT } from '../copy.js';
+import { giftUrl, iWasThere, parisYmd, revealAction, type VaultOpenedAction } from '../vault-model.js';
+import { saveIWasThere } from './i-was-there.js';
+import { shareLink } from './share-link.js';
 import { vaultBox } from './vault-box.js';
 import { VaultOpening, type VaultSound } from './vault-opening.js';
 
@@ -69,6 +73,8 @@ export function liveVault(deps: LiveVaultDeps): LiveVault {
             messageOf: deps.messageOf,
             // Opened: this release's door is not shown again (N28).
             onOpened: () => doors.set(ctx.dropId, Promise.resolve(null)),
+            // SAVE THE IMAGE (I WAS THERE) or GIVE IT (a credit to give) under the box, above OPEN ANOTHER (N33).
+            action: (r) => revealButton(revealAction(r, iWasThere('LIVE', d.label, d.detail, parisYmd(d.givenAt)))),
             // OPEN ANOTHER: THE VAULT page; the door it opened is not shown here again (N28).
             onAgain: () => {
               takeDown();
@@ -83,4 +89,21 @@ export function liveVault(deps: LiveVaultDeps): LiveVault {
       };
     },
   };
+}
+
+/** The reveal's action as a text link under the box (N33): SAVE THE IMAGE saves the card, GIVE IT shares its link. */
+function revealButton(a: VaultOpenedAction | null): HTMLElement | null {
+  if (!a || a.kind === 'given') return null;
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'textlink vlt__act';
+  b.textContent = a.kind === 'save' ? VAULT.page.save : VAULT.page.give;
+  b.addEventListener('click', () => {
+    if (a.kind === 'save') void saveIWasThere(a.image);
+    else
+      void shareLink(giftUrl(location.origin, a.code)).then((out) => {
+        if (out === 'copied') b.textContent = VAULT.page.copied;
+      });
+  });
+  return b;
 }

@@ -6,7 +6,10 @@
  * page dimmed to 16 % (LEAVE THE LINE, THE RELEASES) with OPEN ANOTHER at full strength under the reward and clear of the
  * line under it, the open lid's box at least 8 px below the sentence above it (MK's measured minimum, D69), and no error
  * of the page (a CSP report included). Under reduced motion in light mode: the reward at once, the page dimmed at once,
- * the room still dark. Skipped (not failed) when the Chromium binary is absent.
+ * the room still dark. THE VAULT page (lot Q3, step Q3.11; plan §3.5, §3b; MK V): its second door opened in place, no OPEN
+ * ANOTHER, the page never dimmed, PRESS AND HOLD gone from that door alone; then its first, the open lid's box at least
+ * 8 px under YOUR VAULTS · N WAITING (D69), on a phone and a computer. Skipped (not failed) when the Chromium binary is
+ * absent.
  */
 import type { Page } from 'playwright-core';
 import { describe, expect, it } from 'vitest';
@@ -57,6 +60,99 @@ async function measure(page: Page, below: string, above: string | null) {
     { below, above },
   );
 }
+
+/** Hold the door `n` (1-based) of THE VAULT page until it has opened in place and its opening has ended. */
+async function openPageDoor(page: Page, n: number): Promise<void> {
+  const front = page.locator('.view--vault .vp-vault').nth(n - 1).locator('.vo-dopen__front');
+  await front.evaluate((e: HTMLElement) => {
+    e.scrollIntoView({ block: 'center' });
+    e.focus();
+  });
+  await page.keyboard.down(' ');
+  await page.waitForFunction((i) => document.querySelectorAll<HTMLElement>('.view--vault .vp-vault .vlt')[i]?.style.getPropertyValue('--p') === '1.0000', n - 1, { timeout: 15_000 });
+  await page.keyboard.up(' ');
+  await page.waitForFunction((i) => document.querySelectorAll('.view--vault .vp-vault .vlt')[i]?.classList.contains('is-open'), n - 1, { timeout: 15_000 });
+  await page.waitForFunction((i) => !document.querySelectorAll('.view--vault .vp-vault .vlt')[i]?.classList.contains('is-playing'), n - 1, { timeout: 15_000 });
+}
+
+/** THE VAULT page once door `n` opened: its parts, the page's strength, the lid's clearance under the line above it. */
+async function measurePage(page: Page, n: number, desk: boolean) {
+  return page.evaluate(
+    ({ i, desk }) => {
+      const strength = (e: Element | null) => {
+        let o = 1;
+        for (let x = e; x && x !== document.body; x = x.parentElement) o *= Number(getComputedStyle(x).opacity);
+        return o;
+      };
+      const shown = (e: Element | null) => !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0;
+      const doors = [...document.querySelectorAll('.view--vault .vp-vault')];
+      const door = doors[i]!;
+      const lid = door.querySelector('.vo-dopen__lid')!.getBoundingClientRect();
+      // The line above the lid: YOUR VAULTS · N WAITING for the first door (and each of a row on a computer), else the
+      // previous door's WAITS UNTIL (D69).
+      const above = i === 0 || desk ? document.querySelector('.view--vault .vp-sec--vaults > .vp-over')! : doors[i - 1]!.querySelector('.vp-until')!;
+      return {
+        open: door.querySelector('.vlt')!.classList.contains('is-open'),
+        again: shown(door.querySelector('.vlt__again')),
+        press: shown(door.querySelector('.vp-press')),
+        from: door.querySelector('.vp-from')?.textContent ?? '',
+        until: door.querySelector('.vp-until')?.textContent ?? '',
+        others: doors.filter((_, j) => j !== i).map((d) => shown(d.querySelector('.vp-press'))),
+        strength: [strength(document.querySelector('.view--vault .vp-sec--how')), strength(document.querySelector('.view--vault .vp-title')), ...doors.map((d) => strength(d))],
+        lidClear: lid.top - above.getBoundingClientRect().bottom,
+      };
+    },
+    { i: n - 1, desk },
+  );
+}
+
+describe.skipIf(!HAS_CHROMIUM)('THE VAULT page (Chromium)', () => {
+  const { withStage } = stages();
+
+  it(
+    'opens a door in place on THE VAULT page (phone, computer): no OPEN ANOTHER, the page never dimmed, PRESS AND HOLD gone from that door alone, its source line and WAITS UNTIL kept; the first door\'s lid at least 8 px under YOUR VAULTS · N WAITING',
+    async () => {
+      await withStage('vault', async (st) => {
+        const base = stateById('vault-page');
+        for (const [look, as] of [
+          [PHONE, 'vaultPageOpen'],
+          [DESK, 'vaultPageOpenDesk'],
+        ] as const) {
+          const desk = look === DESK;
+          const opened = await openIn(st, { ...base, as, check: undefined }, look);
+          try {
+            const page = opened.page;
+            // The second door first: in place, nothing else changes.
+            await openPageDoor(page, 2);
+            const second = await measurePage(page, 2, desk);
+            expect(second.open, look.name).toBe(true);
+            expect(second.again, `${look.name}: OPEN ANOTHER on THE VAULT page`).toBe(false);
+            expect(second.press, `${look.name}: PRESS AND HOLD once open`).toBe(false);
+            expect(second.others, `${look.name}: the other doors' PRESS AND HOLD`).toEqual([true]);
+            expect(second.from.length, look.name).toBeGreaterThan(0);
+            expect(second.until, look.name).toMatch(/^WAITS UNTIL \d{1,2} [A-Z]+$/);
+            for (const o of second.strength) expect(o, `${look.name}: the page is never dimmed`).toBe(1);
+            expect(second.lidClear, `${look.name}: the second door's lid under the line above it`).toBeGreaterThanOrEqual(8);
+            // Then the first: its open lid clear of YOUR VAULTS · N WAITING (MK's measured minimum, D69), over the float.
+            await openPageDoor(page, 1);
+            let least = Infinity;
+            for (let i = 0; i < 5; i++) {
+              const m = await measurePage(page, 1, desk);
+              least = Math.min(least, m.lidClear);
+              for (const o of m.strength) expect(o, look.name).toBe(1);
+              await page.waitForTimeout(250);
+            }
+            expect(least, `${look.name}: the first lid's box under YOUR VAULTS · N WAITING`).toBeGreaterThanOrEqual(8);
+            expect(opened.errors).toEqual([]);
+          } finally {
+            await opened.close();
+          }
+        }
+      });
+    },
+    TIMEOUT,
+  );
+});
 
 describe.skipIf(!HAS_CHROMIUM)('THE VAULT on SOLD OUT for your size and the end page (Chromium)', () => {
   const { withStage } = stages();
