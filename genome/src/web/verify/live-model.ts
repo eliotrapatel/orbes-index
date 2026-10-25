@@ -21,7 +21,7 @@
  */
 import { onComputer } from '../shared/desktop.js';
 import { isLookbookSlug } from '../shared/lookbook.js';
-import { addonRows, chosenRows, chosenUnits, rowsChoice, type AddonRowModel } from './addons-model.js';
+import { addonRows, chosenRows, chosenUnits, ENGRAVING_TEXT_MAX, rowsChoice, type AddonRowModel } from './addons-model.js';
 import { LIVE, RELEASES, SETS } from './copy.js';
 import { afterRoomPath, entrySizes, isReleaseId, releasePath, setCard, tierLabel, zonedDate, type EntryModel, type MyEntryModel, type SetCardModel } from './releases-model.js';
 import type {
@@ -748,8 +748,8 @@ export function holdChoice(rows: readonly AddonRowModel[], e: Pick<LiveEntry, 'a
 
 /** The words an engraving may hold (services/order-addons.ts engravingWordsOf): letters, figures, spaces and . & ' ’ -. */
 const ENGRAVING_WORDS = /^[\p{L}\p{M}0-9 .&'’-]+$/u;
-/** The house's most characters of an engraving (ENGRAVING_COLLECTOR_MAX): the ceiling and the default of `textMax`. */
-export const ENGRAVING_TEXT_MAX = 20;
+/** The house's most characters of an engraving (ENGRAVING_COLLECTOR_MAX): the ceiling and the default of `textMax` (addons-model.ts). */
+export { ENGRAVING_TEXT_MAX };
 
 /** An engraving's words as they are sent: spaces folded, trimmed ('' when none). */
 export function engravingText(value: string): string {
@@ -793,12 +793,11 @@ export function securedAddons(
 ): SecuredAddonsModel | null {
   const rows = holdRows(e, opts.units);
   if (rows.length === 0) return null;
-  const offer = new Map((e.addonOffer ?? []).map((o) => [o.addonId, o] as const));
   const words = new Map((e.addonItems ?? []).map((c) => [c.addonId, c.text ?? ''] as const));
   const out = rows.map((r): SecuredAddonRow => {
-    const o = offer.get(r.addonId);
     const chosen = r.units > 0;
-    const max = typeof o?.textMax === 'number' && Number.isInteger(o.textMax) && o.textMax >= 1 && o.textMax <= ENGRAVING_TEXT_MAX ? o.textMax : ENGRAVING_TEXT_MAX;
+    // Its most characters as the row reads them from the offer (addons-model.ts: the add-on's textMax, else the house's 20).
+    const max = r.textMax ?? ENGRAVING_TEXT_MAX;
     const value = opts.drafts?.get(r.addonId) ?? words.get(r.addonId) ?? '';
     return {
       addonId: r.addonId,
@@ -806,7 +805,7 @@ export function securedAddons(
       line: r.line,
       price: r.priceMinor !== null && e.currency ? LIVE.addonPrice(formatMoney(r.priceMinor, e.currency)) : '',
       chosen,
-      text: chosen && o?.engraving === true ? { value, max, count: LIVE.addonText.count([...value].length, max) } : null,
+      text: chosen && r.engraving ? { value, max, count: LIVE.addonText.count([...value].length, max) } : null,
     };
   });
   const offered = new Set(out.map((r) => r.addonId));

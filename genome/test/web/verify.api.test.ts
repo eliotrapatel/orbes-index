@@ -437,6 +437,32 @@ describe('ApiClient', () => {
     for (const c of acts) expect(c.headers['x-csrf-token']).toBe('tok');
   });
 
+  it('the add-ons of a place held, a request and YOUR ORDERS (lot Q2, step Q2.9; N9): the offer read as the server gives it, the engraving and its most characters kept; the choice sent as units, never words', async () => {
+    const ENGRAVING = { addonId: 'e1', name: 'ENGRAVING', line: null, priceMinor: 4_000, currency: 'EUR', maxUnits: 1, engraving: true, textMax: 12 };
+    const WRAPPING = { addonId: 'w1', name: 'GIFT WRAPPING', line: null, priceMinor: 1_500, currency: 'EUR', maxUnits: 3, engraving: false };
+    const read = { entry: { id: 'p' }, savedSize: null, addons: { currency: 'EUR', chosen: [], offer: [WRAPPING, ENGRAVING] } };
+    const offer = { canAdd: true, reason: null, paid: false, currency: 'EUR', offer: [WRAPPING] };
+    const f = fakeFetch([
+      () => json(200, SESSION('tok')),
+      () => json(200, read),
+      () => json(200, read),
+      () => json(201, { request: { id: 'r', status: 'OPEN', createdAt: '2026-10-05T16:49:00.000Z', modelId: 'm', addons: [] } }),
+      () => json(200, offer),
+    ]);
+    const api = new ApiClient({ fetch: f.impl });
+    await api.me();
+    expect((await api.drawEntry('d2')).addons?.offer).toEqual([WRAPPING, ENGRAVING]);
+    // A row's words never travel from here: they are typed in YOUR ORDERS (ENTER YOUR ENGRAVING).
+    const withWords = [{ addonId: 'e1', units: 1, text: 'M. B.' }] as unknown as { addonId: string; units: number }[];
+    await api.drawAddons('d2', withWords);
+    await api.requestPiece('zenith', null, null, withWords);
+    expect(await api.orderAddonOffer('o1')).toEqual(offer);
+    expect(f.calls.slice(2, 4).map((c) => [c.method, c.url, c.body])).toEqual([
+      ['PUT', '/api/v1/club/drops/d2/addons', { items: [{ addonId: 'e1', units: 1 }] }],
+      ['POST', '/api/v1/club/lookbook/zenith/request', { addons: [{ addonId: 'e1', units: 1 }] }],
+    ]);
+  });
+
   it('LIVE RELEASE: the state always carries the room (ONE QUEUE: an entry waiting reads its own figures in its entry, no queue frame); one without the room is a bad response', async () => {
     const ID = '8a1d0c55-4b2e-4f3a-9c1d-0e5f6a7b8c9d';
     const room = { id: ID, phase: 'LIVE', inRoom: 3, left: 1, sizes: [] };

@@ -481,6 +481,39 @@ describe('YOUR ORDERS: the collector\'s side of an order (plan NEXT LOT §3.6)',
     ]);
   });
 
+  it('an order of an ended release keeps, until packing, its add-ons with REMOVE, ADD AN ADD-ON and its ENGRAVING, by the switch alone (lot Q2, step Q2.9; N8)', () => {
+    // Its release ended long ago: nothing of the order says it, nor is anything of the release read; the server's offer
+    // (YOUR ORDERS' switch alone, never the release's pick) decides, as M3 and the Settings engraving did.
+    const CLOTH = '0b5e7d1a-1c2d-4e5f-9a8b-7c6d5e4f3a2b';
+    const ended = order({
+      release: 'Monolithe — Live of 5 October',
+      status: 'PAID',
+      paidAt: '2026-10-05T18:10:00.000Z',
+      addons: [],
+      addonItems: [{ addonId: CLOTH, name: 'POLISHING CLOTH', units: 1, priceMinor: 1_500, currency: 'EUR', canRemove: true }],
+      canAddAddons: true,
+      editable,
+      engravingOffer: offer,
+    });
+    const m = orderModel(ended)!;
+    expect(m.addons).toMatchObject({ canAdd: true, removable: [{ addonId: CLOTH, words: 'POLISHING CLOTH' }], removeNote: ORDERS.addons.paidRemove });
+    expect(m.engraving).toMatchObject({ action: ORDERS.engraving.add, maxLength: 20, priceLine: ORDERS.engraving.price(`€${NBSP}30`), addNote: ORDERS.engraving.paidAdd });
+    expect(orderRows(ended)).toEqual([
+      ['SIZE', '52'],
+      ['PRICE', `€${NBSP}4${NBSP}800`],
+      ['POLISHING CLOTH', `+ €${NBSP}15`],
+      ['TOTAL', `€${NBSP}4${NBSP}815`],
+    ]);
+    // Its words entered: its own ENGRAVING row at the add-on's price (after the add-ons, as today), in the TOTAL once.
+    expect(orderRows({ ...ended, engraving: { text: 'J.M.', priceMinor: 3_000 } })).toEqual([
+      ['SIZE', '52'],
+      ['PRICE', `€${NBSP}4${NBSP}800`],
+      ['POLISHING CLOTH', `+ €${NBSP}15`],
+      ['ENGRAVING', `« J.M. » · + €${NBSP}30`],
+      ['TOTAL', `€${NBSP}4${NBSP}845`],
+    ]);
+  });
+
   it('ENGRAVING\'s link and sheet: ADD, CHANGE or ENTER; once paid, the documents it brings; once packing has begun, its line', () => {
     const E = ORDERS.engraving;
     expect(orderEngraving(order({ addons: [], editable, engravingOffer: offer }))).toMatchObject({ action: E.add, text: '', included: false, priceLine: E.price(`€${NBSP}30`), addNote: null, removable: false });

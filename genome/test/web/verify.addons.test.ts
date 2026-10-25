@@ -82,9 +82,9 @@ describe('the add-ons’ rows (addons-model.ts)', () => {
       'EUR',
     );
     expect(rows).toEqual([
-      { addonId: CLOTH, name: 'POLISHING CLOTH', line: 'A soft cloth.', priceMinor: 1_500, price: '+ €\u00a015', units: 2, max: 3 },
-      { addonId: CASE, name: 'THE TRAVEL CASE FOR TWO PIECES, LINED', line: null, priceMinor: 1_245_050, price: '+ €\u00a012\u00a0450.50', units: 0, max: 1 },
-      { addonId: EXTENDER, name: 'CHAIN EXTENDER', line: null, priceMinor: 3_000, price: '+ €\u00a030', units: 1, max: 1 },
+      { addonId: CLOTH, name: 'POLISHING CLOTH', line: 'A soft cloth.', priceMinor: 1_500, price: '+ €\u00a015', units: 2, max: 3, engraving: false, textMax: null },
+      { addonId: CASE, name: 'THE TRAVEL CASE FOR TWO PIECES, LINED', line: null, priceMinor: 1_245_050, price: '+ €\u00a012\u00a0450.50', units: 0, max: 1, engraving: false, textMax: null },
+      { addonId: EXTENDER, name: 'CHAIN EXTENDER', line: null, priceMinor: 3_000, price: '+ €\u00a030', units: 1, max: 1, engraving: false, textMax: null },
     ]);
     expect(rowsTotal(rows)).toBe(2 * 1_500 + 3_000);
     expect(rowsChoice(rows)).toEqual([
@@ -197,6 +197,52 @@ describe('an order’s add-ons in YOUR ORDERS (orders-model.ts, addons-model.ts)
     expect(addonSheet({ canAdd: true, reason: null, paid: true, currency: 'EUR', offer: [] })).toEqual({ rows: [], empty: ORDERS.addons.none, paidNote: null, currency: 'EUR' });
     expect(addonSheet({ canAdd: false, reason: 'PACKING_STARTED', paid: true, currency: 'EUR', offer: [] }).empty).toBe(ORDERS.addons.locked);
     expect(addonSheet({ canAdd: false, reason: 'CLOSED', paid: false, currency: 'EUR', offer: [] }).empty).toBe(ORDERS.addons.none);
+  });
+});
+
+describe('each moment’s offer: a draw’s PLACE HELD, the salon, YOUR ORDERS (lot Q2, step Q2.9; D3, N8, N9)', () => {
+  const ENGRAVING = '4e6a8c0d-2f1b-4c3d-8e5f-6a7b8c9d0e1f';
+  const WRAPPING = '5f7b9d1e-3a2c-4d4e-9f6a-7b8c9d0e1f2a';
+  // A place held's or a request's offer as the server gives it: its moment's switch (and, on PLACE HELD, the draw's
+  // pick) decided which; a product, a service, and the engraving with its one.
+  const moment = [
+    offered({ addonId: CLOTH, name: 'POLISHING CLOTH', engraving: false }),
+    offered({ addonId: WRAPPING, name: 'GIFT WRAPPING', line: 'In the house’s paper, with a card in your words.', engraving: false }),
+    offered({ addonId: ENGRAVING, name: 'ENGRAVING', priceMinor: 4_000, maxUnits: 1, engraving: true, textMax: 12 }),
+  ];
+
+  it('rows the moment’s offer as M3 drew it: a service like a product, the engraving a row of at most 1 carrying its textMax', () => {
+    const rows = addonRows(moment);
+    expect(rows.map((r) => [r.name, r.price, r.units, r.max, r.engraving, r.textMax])).toEqual([
+      ['POLISHING CLOTH', '+ €\u00a015', 0, 3, false, null],
+      ['GIFT WRAPPING', '+ €\u00a015', 0, 3, false, null],
+      ['ENGRAVING', '+ €\u00a040', 0, 1, true, 12],
+    ]);
+    // At most 1 whatever the offer says, and its taps never past it; its words are not typed here (N9): it is chosen as a row.
+    const wide = addonRows([offered({ addonId: ENGRAVING, name: 'ENGRAVING', maxUnits: 3, engraving: true })], new Map([[ENGRAVING, 2]]));
+    expect(wide.map((r) => [r.units, r.max, r.textMax])).toEqual([[1, 1, ENGRAVING_TEXT_MAX]]);
+    expect(withUnits(rows, ENGRAVING, 3).find((r) => r.engraving)!.units).toBe(1);
+    // A most characters the app cannot read: the house's 20.
+    expect(addonRows([offered({ addonId: ENGRAVING, name: 'ENGRAVING', maxUnits: 1, engraving: true, textMax: 25 })])[0]!.textMax).toBe(20);
+    // The choice sent: units, as M3's rows send them (no words).
+    expect(rowsChoice(withUnits(withUnits(rows, ENGRAVING, 1), WRAPPING, 2))).toEqual([
+      { addonId: WRAPPING, units: 2 },
+      { addonId: ENGRAVING, units: 1 },
+    ]);
+  });
+
+  it('says M3’s note at a row’s most, but never for the engraving at its one (its rule is one on an order)', () => {
+    const rows = addonRows(moment);
+    expect(rowsLimit(withUnits(rows, ENGRAVING, 1))).toBeNull();
+    expect(rowsLimit(withUnits(withUnits(rows, ENGRAVING, 1), CLOTH, 3))).toBe(ADDONS.limit);
+  });
+
+  it('never offers the engraving in ADD AN ADD-ON: its own ENGRAVING section on the order adds it', () => {
+    const sheet = addonSheet({ canAdd: true, reason: null, paid: false, currency: 'EUR', offer: moment });
+    expect(sheet.rows.map((r) => r.name)).toEqual(['POLISHING CLOTH', 'GIFT WRAPPING']);
+    expect(sheet.empty).toBeNull();
+    // The engraving alone: none available.
+    expect(addonSheet({ canAdd: true, reason: null, paid: false, currency: 'EUR', offer: moment.slice(2) })).toEqual({ rows: [], empty: ORDERS.addons.none, paidNote: null, currency: 'EUR' });
   });
 });
 
