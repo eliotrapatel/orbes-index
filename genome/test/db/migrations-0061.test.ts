@@ -98,7 +98,9 @@ function cases(state: { db: () => Db; ctx: () => AppContext; clock: () => Manual
     await db().insertInto('test_entrants').values({ account_id: entrant! }).execute();
     expect(accounts.every((a) => a.status === 'ACTIVE')).toBe(true);
 
-    // 0061 rolled back and applied again on the demo: `up` writes the tiers held then.
+    // 0061 rolled back and applied again on the demo: `up` writes the tiers held then. The demo's example rewards (step
+    // Q3.12, OP-27), never given, are taken out first: `down` refuses while a reward other than the floor exists.
+    await db().deleteFrom('vault_rewards').where('kind', '<>', 'I_WAS_THERE').where('given', '=', 0).execute();
     expect(await downTo0060(db())).toEqual([LATER, NAME]);
     expect((await migrateToLatest(db())).applied).toEqual([NAME, LATER]);
     const keys = async (account: string) =>

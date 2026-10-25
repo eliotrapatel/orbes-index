@@ -765,6 +765,8 @@ export interface Model {
    * main model's; `inherited` says which of the two come from the main model (services/catalog.ts ModelPacking).
    */
   packing: ModelPacking;
+  /** THE VAULT (lot Q3, §4.5): VAULT ONLY, never sold (every sales path refuses it), given as a VAULT EDITION. */
+  vaultOnly?: boolean;
   /** Plan NEXT LOT §3.3: its size type (null: to give), and how many of its declared sizes are offered. */
   sizeType: SizeType | null;
   sizesOffered: number;
@@ -2330,6 +2332,8 @@ export interface LiveRelease extends LiveCard {
   description: string | null;
   /** Its settings still change: neither announced nor cancelled. */
   editable: boolean;
+  /** THE VAULT (lot Q3, D4): on, a size sold out gives its line a vault; off by default, never on an after-room. */
+  vaultOn?: boolean;
   roomOpensMinutes: number;
   /** ONE QUEUE (D1): X people per batch every Y minutes; null on an after-room (no pace). */
   pace?: LivePace | null;
@@ -2887,6 +2891,8 @@ export interface LiveReleaseReport {
   next: { quantity: number; sizes: { label: string; pieces: number }[] };
   /** ONE QUEUE (D11): the longest wait, the turns given by the pace, the people who left the queue. */
   queue?: { longestWaitMs: number | null; turnsByPace: number; leftQueue: number };
+  /** THE VAULT (lot Q3, §4.2): the release's switch and the vaults it gave and those opened; null on an after-room. */
+  vaults?: { on: boolean; given: number; opened: number } | null;
   reasoning: string[];
 }
 
@@ -5480,4 +5486,151 @@ export interface ReturnsReportQuery {
   to?: string | null;
   all?: boolean;
   test?: boolean;
+}
+
+// ── THE VAULT (lot Q3, step Q3.12; server services/vault.ts, routes/admin/vault.ts) ──────────────────────────────
+
+/** The seven occasions a vault is given on (server VAULT_SOURCES), in the console's order. */
+export const VAULT_SOURCES = ['LIVE', 'PIECE', 'TIER', 'WORN', 'FRIEND', 'PROFILE', 'HOUSE'] as const;
+export type VaultSource = (typeof VAULT_SOURCES)[number];
+
+/** The house table's kinds (server VAULT_REWARD_KINDS): no access, status or service reward (D64). */
+export const VAULT_REWARD_KINDS = ['CREDIT', 'ADDON', 'GUARANTEED', 'PRODUCT', 'VAULT_EDITION', 'THE_PIECE', 'CREDIT_TO_GIVE', 'I_WAS_THERE'] as const;
+export type VaultRewardKind = (typeof VAULT_REWARD_KINDS)[number];
+
+/** A PRODUCT reward: FREE (a VAULT order at 0) or RIGHT_TO_BUY (24 hours at its usual price). */
+export const VAULT_REWARD_MODES = ['FREE', 'RIGHT_TO_BUY'] as const;
+export type VaultRewardMode = (typeof VAULT_REWARD_MODES)[number];
+
+/** A vault's state, computed by the server (never stored). */
+export type VaultState = 'WAITING' | 'OPENED' | 'EXPIRED' | 'REVOKED';
+
+/** A source's settings (D27, OP-29): its switch, the vaults one occasion gives, the occasions an account receives (null: no cap). */
+export interface VaultSourceSetting {
+  source: VaultSource;
+  enabled: boolean;
+  perOccasion: number;
+  cap: number | null;
+  updatedAt: Iso;
+  updatedBy: { id: string; email: string } | null;
+}
+
+/** A row of the house table. */
+export interface VaultRewardSetting {
+  id: string;
+  kind: VaultRewardKind;
+  /** "1 IN N"; null on the floor (I WAS THERE: the rest). */
+  oddsIn: number | null;
+  oddsText: string | null;
+  /** The draw's parts it holds, of 1 000 000. */
+  parts: number;
+  quantity: number | null;
+  given: number;
+  left: number | null;
+  amountMinor: number | null;
+  currency: string | null;
+  modelId: string | null;
+  modelName: string | null;
+  addonId: string | null;
+  addonName: string | null;
+  mode: VaultRewardMode | null;
+  line: string | null;
+  active: boolean;
+  position: number;
+  rare: boolean;
+}
+
+/** CLUB > THE VAULT's settings: the sources, the table in its order, the parts given (of 1 000 000) and the floor's published odds. */
+export interface VaultSettings {
+  sources: VaultSourceSetting[];
+  rewards: VaultRewardSetting[];
+  partsGiven: number;
+  floor: { id: string; parts: number; oddsIn: number | null; oddsText: string | null };
+}
+
+/** A row of the house table as New reward and Edit send it (the whole row for its kind). */
+export interface VaultRewardInput {
+  kind?: VaultRewardKind;
+  oddsIn: number;
+  quantity: number;
+  amountMinor?: number | null;
+  currency?: string | null;
+  modelId?: string | null;
+  addonId?: string | null;
+  mode?: VaultRewardMode | null;
+  line?: string | null;
+  active?: boolean;
+}
+
+/** GIVE A VAULT's request: one collector (OPERATOR) or a segment (ADMIN); `dryRun` for the reach alone. */
+export interface VaultGiveInput {
+  accountId?: string;
+  email?: string;
+  segmentId?: string;
+  note?: string;
+  dryRun?: boolean;
+  giftId?: string;
+}
+
+/** What GIVE A VAULT did, or would do. */
+export interface VaultGiven {
+  giftId: string | null;
+  dryRun: boolean;
+  reach: number;
+  accounts: number;
+  vaults: number;
+  leftOut: { testEntrants: number; inactive: number };
+}
+
+/** A sum in one currency. */
+export interface VaultMoney {
+  currency: string;
+  minor: number;
+}
+
+/** What a kind or a row gave over the period: how many were won, their value and cost (costUnknown: no supplier price). */
+export interface VaultWonFigures {
+  won: number;
+  value: VaultMoney[];
+  cost: VaultMoney[];
+  costUnknown: number;
+}
+
+/** THE VAULT's report for a period of Paris days (§4.3). */
+export interface VaultReport {
+  from: string;
+  to: string;
+  given: { source: VaultSource; count: number }[];
+  givenTotal: number;
+  opened: number;
+  waiting: number;
+  expired: number;
+  revoked: number;
+  byKind: ({ kind: VaultRewardKind } & VaultWonFigures)[];
+  rows: (VaultRewardSetting & VaultWonFigures)[];
+  credits: { given: VaultMoney[]; used: VaultMoney[] };
+  totalCost: VaultMoney[];
+  costUnknown: number;
+}
+
+/** A client's vault on the client sheet, read-only (N36: no revoke). */
+export interface AdminVault {
+  id: string;
+  source: VaultSource;
+  label: string;
+  detail: string | null;
+  line: string;
+  givenAt: Iso;
+  waitsUntil: Iso;
+  state: VaultState;
+  openedAt: Iso | null;
+  revokedAt: Iso | null;
+  revokedReason: 'RETURNED' | null;
+  kind: VaultRewardKind | null;
+  held: string | null;
+  odds: string | null;
+  rare: boolean | null;
+  orderId: string | null;
+  givenBy: { id: string; email: string } | null;
+  note: string | null;
 }

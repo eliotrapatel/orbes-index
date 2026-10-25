@@ -79,6 +79,7 @@ import { sql, type ExpressionBuilder } from 'kysely';
 import { utf8 } from '../../core/bytes.js';
 import type { AppConfig } from '../config.js';
 import { deriveSubkey } from '../crypto/secretbox.js';
+import { csvDocument, CSV_CONTENT_TYPE } from '../render/csv.js';
 import { inRetriedTransaction, inTransaction, type Db } from '../db/connection.js';
 import {
   CLUB_TIER_NAMES,
@@ -2490,6 +2491,15 @@ export class VaultService {
   }
 
   /**
+   * The report as a CSV (GET /api/admin/vault/report.csv, AUDITOR; §4.3 "CSV export as the console's other reports"): one
+   * figure per row (section, item, value, every field quoted, render/csv.ts), named by the period's Paris days.
+   */
+  async reportCsv(q: { from?: string | undefined; to?: string | undefined } = {}, now: Date = this.clock()): Promise<{ filename: string; contentType: string; body: string }> {
+    const rep = await this.report(q, now);
+    return { filename: `ORBES-vault-report-${rep.from}-to-${rep.to}.csv`, contentType: CSV_CONTENT_TYPE, body: vaultReportCsv(rep) };
+  }
+
+  /**
    * A model's VAULT ONLY (PUT /api/admin/models/:id/vault-only, OPERATOR; §4.5, D19 "rare VAULT EDITION (catalogue
    * product marked vault-only, never sold)"): on, every sales path refuses it (MODEL_VAULT_ONLY); off, it is sold again.
    * Refused while THE VAULT's table holds it the other way: on while an active PRODUCT row names it, off while an active
@@ -2545,6 +2555,56 @@ export function vaultPeriod(q: { from?: string | undefined; to?: string | undefi
   if (!isDay(period.from) || !isDay(period.to)) throw periodInvalid('A day is YYYY-MM-DD.');
   if (period.to < period.from) throw periodInvalid('The last day is before the first.');
   return { ...period, start: parisDayStart(period.from), end: parisDayStart(dayPlus(period.to, 1)) };
+}
+
+/** An amount in minor units as the house's CSVs write it (`25.00`), as live-console.ts `majorUnits`. */
+const csvMajor = (minor: number): string => `${minor < 0 ? '-' : ''}${Math.floor(Math.abs(minor) / 100)}.${String(Math.abs(minor) % 100).padStart(2, '0')}`;
+
+/**
+ * THE VAULT's report as a CSV (§4.3): the period, the vaults given by source, opened, waiting, expired and returned, the
+ * rewards won by kind and by row (their count, value and cost per currency, the cost unknown, each row's quantity, given
+ * and left), the credits given and used, the total cost. One figure per row: section, item, value.
+ */
+export function vaultReportCsv(rep: VaultReport): string {
+  const rows: string[][] = [['section', 'item', 'value']];
+  const add = (section: string, item: string, value: string | number) => rows.push([section, item, String(value)]);
+  const money = (section: string, item: string, list: readonly VaultMoney[]) => {
+    for (const m of list) add(section, `${item} ${m.currency}`, csvMajor(m.minor));
+  };
+  add('period', 'from', rep.from);
+  add('period', 'to', rep.to);
+  for (const g of rep.given) add('given', g.source.toLowerCase(), g.count);
+  add('given', 'total', rep.givenTotal);
+  add('vaults', 'opened', rep.opened);
+  add('vaults', 'waiting', rep.waiting);
+  add('vaults', 'expired', rep.expired);
+  add('vaults', 'returned', rep.revoked);
+  for (const k of rep.byKind) {
+    const s = `kind ${k.kind.toLowerCase()}`;
+    add(s, 'won', k.won);
+    money(s, 'value', k.value);
+    money(s, 'cost', k.cost);
+    if (k.costUnknown > 0) add(s, 'cost unknown', k.costUnknown);
+  }
+  for (const [i, r] of rep.rows.entries()) {
+    const s = `reward ${i + 1} ${r.kind.toLowerCase()}`;
+    const what = r.kind === 'CREDIT' || r.kind === 'CREDIT_TO_GIVE' ? (r.amountMinor !== null && r.currency ? `${r.currency} ${csvMajor(r.amountMinor)}` : '') : (r.modelName ?? r.addonName ?? '');
+    add(s, 'what', [what, r.mode ?? ''].filter(Boolean).join(' '));
+    add(s, 'odds', r.kind === 'I_WAS_THERE' ? 'the rest' : (r.oddsText ?? ''));
+    add(s, 'active', r.active ? 'yes' : 'no');
+    add(s, 'won', r.won);
+    money(s, 'value', r.value);
+    money(s, 'cost', r.cost);
+    if (r.costUnknown > 0) add(s, 'cost unknown', r.costUnknown);
+    add(s, 'quantity', r.quantity === null ? '' : r.quantity);
+    add(s, 'given', r.given);
+    add(s, 'left', r.left === null ? '' : r.left);
+  }
+  money('credits', 'given', rep.credits.given);
+  money('credits', 'used', rep.credits.used);
+  money('cost', 'total', rep.totalCost);
+  add('cost', 'unknown', rep.costUnknown);
+  return csvDocument(rows);
 }
 
 /**

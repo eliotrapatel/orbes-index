@@ -45,6 +45,8 @@
  *  - Test entrants (plan TEST ENTRANTS, views/test-entrants.ts): SEND TEST ENTRANTS once the room is open (ADMIN), the
  *    test not ended, PAST TESTS, on the release's own page (not its after-room's); a test entrant's account carries TEST
  *    in the line, the entries and the bot radar. On the right, the server's status (views/server-status.ts).
+ *  - THE VAULT (lot Q3, step Q3.12; D4): its switch, On or Off (off by default), turned by an OPERATOR until the end,
+ *    never on an after-room; the release report's vaults given and opened (views/live-intelligence.ts).
  *  - Two tabs under the header of a release (plan MACRO M1 §2.2), never of an after-room: RELEASE, all of the above,
  *    and CAMPAIGN (`?tab=campaign`, views/campaign.ts): its links made in one click, its countdown image, its readout;
  *    no board is read nor followed there.
@@ -52,6 +54,8 @@
 import { h, mount, type Child } from '../../shared/dom.js';
 import { formatCount, formatDateTime, groupChars, humanize } from '../format.js';
 import { LIVE_ALERT_LABELS } from '../model/live-intelligence.js';
+import { can } from '../model/permissions.js';
+import { LIVE_VAULT, liveVaultSwitchable } from '../model/vault.js';
 import {
   AFTER_ROOM_SKIPS,
   afterRoomStateLabel,
@@ -1081,6 +1085,32 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
     );
   };
 
+  // THE VAULT (lot Q3, step Q3.12; D4 "staff switch per LIVE release, off by default"): On or Off, an OPERATOR's until
+  // the end; never on an after-room (its own page shows no setting).
+  const vaultOn = r.vaultOn === true;
+  const vaultSwitch = () =>
+    void openDialog({
+      title: vaultOn ? LIVE_VAULT.turnOffTitle : LIVE_VAULT.turnOnTitle,
+      eyebrow,
+      body: h('p', { class: 'dialog__text' }, vaultOn ? LIVE_VAULT.turnOffText : LIVE_VAULT.turnOnText),
+      confirmLabel: vaultOn ? LIVE_VAULT.turnOff : LIVE_VAULT.turnOn,
+      submit: async () => {
+        await ctx.api.setLiveVault(r.id, !vaultOn);
+      },
+    }).then(done(vaultOn ? LIVE_VAULT.offDone : LIVE_VAULT.onDone));
+  const vaultSwitchable = liveVaultSwitchable(r, can(role, 'manageDrops'));
+  const vaultSection = section(
+    LIVE_VAULT.label,
+    defList([
+      {
+        label: LIVE_VAULT.label,
+        value: h('span', { data: { testid: 'live-vault' } }, statusMark(vaultOn ? LIVE_VAULT.on : LIVE_VAULT.off, vaultOn ? 'solid' : 'muted')),
+        note: vaultSwitchable ? (vaultOn ? LIVE_VAULT.onNote : LIVE_VAULT.offNote) : r.phase === 'ENDED' ? LIVE_VAULT.endedNote : vaultOn ? LIVE_VAULT.onNote : LIVE_VAULT.offNote,
+      },
+    ]),
+    { id: 'live-part-vault', tools: vaultSwitchable ? [button(vaultOn ? LIVE_VAULT.turnOff : LIVE_VAULT.turnOn, { kind: 'ghost', testId: 'live-vault-switch', onClick: vaultSwitch })] : [] },
+  );
+
   const t = (iso: string | null, empty: string) => (iso ? formatDateTime(iso) : empty);
   const a = r.afterRoom;
   const opened = a !== null && a.state !== 'WAITING' && a.state !== 'NOT_OPENED';
@@ -1241,6 +1271,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
       { id: 'live-part-addons', tools: acts.addons ? [button('Edit', { kind: 'ghost', testId: 'live-edit-addons', onClick: () => void addonsPart() })] : [] },
     ),
     afterRoomSection,
+    vaultSection,
   ];
 
   // The silhouette: its first staged reveal (without one, the seal stands in).

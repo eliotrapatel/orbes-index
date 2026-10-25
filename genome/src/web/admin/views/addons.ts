@@ -50,6 +50,8 @@ import {
   addonState,
   addonSupplierOptions,
   addonUnchanged,
+  ENGRAVING_ADMIN_ONLY,
+  engravingAdminProblem,
   addonWeightText,
   canAddAddon,
   canRemoveAddon,
@@ -93,6 +95,8 @@ const lines = (items: readonly string[], testid?: string): HTMLElement =>
 export function addonsSection(ctx: ViewContext, addons: readonly AddonView[], suppliers: readonly Supplier[]): HTMLElement {
   const role = ctx.session.admin.role;
   const canEdit = can(role, 'editCatalog');
+  // The amendment of 25 Oct (lot Q3): the ENGRAVING's prices and its YOUR ORDERS switch, an ADMIN's.
+  const engravingAdmin = can(role, 'editEngravingPrices');
   const done = (msg: string) => (r: unknown) => {
     if (!r) return;
     notify(msg);
@@ -106,6 +110,7 @@ export function addonsSection(ctx: ViewContext, addons: readonly AddonView[], su
     // Lot Q2, step Q2.7 (D4, N13): the type is chosen at the creation only; an edit reads the add-on's.
     const typed = (v: Record<string, string>): Record<string, string> => (a ? { ...v, kind: a.kind } : v);
     const service = (v: Record<string, string>) => isServiceForm(typed(v));
+    const lockedEngraving = a !== null && a.engraving && !engravingAdmin;
     const fields: DialogField[] = [
       ...(a ? [] : [{ name: 'kind', label: 'Type', kind: 'select' as const, required: true, options: ADDON_KIND_OPTIONS.map((x) => ({ ...x })), value: values.kind, hint: ADDONS_TEXT.kindHint }]),
       { name: 'name', label: 'Name', required: true, maxlength: ADDON_LIMITS.name, value: values.name, hint: ADDONS_TEXT.nameHint },
@@ -115,7 +120,8 @@ export function addonsSection(ctx: ViewContext, addons: readonly AddonView[], su
       { name: 'supplierId', label: 'Supplier', kind: 'select' as const, options: addonSupplierOptions(suppliers, a), value: values.supplierId, hint: ADDONS_TEXT.supplierHint, shown: (v) => !service(v) },
       // The label in the display face carries no figure: the unit is said in the hint.
       { name: 'weightG', label: 'Weight', maxlength: 6, value: values.weightG, hint: ADDONS_TEXT.weightHint },
-      ...HOUSE_CURRENCIES.map((c, i) => ({ name: c, label: `Price in ${c}`, maxlength: 12, value: values[c], hint: ADDONS_TEXT.priceHint(c, i === 0) })),
+      // The ENGRAVING's prices and YOUR ORDERS switch are not an OPERATOR's to change (the amendment of 25 Oct): hidden.
+      ...HOUSE_CURRENCIES.map((c, i) => ({ name: c, label: `Price in ${c}`, maxlength: 12, value: values[c], hint: ADDONS_TEXT.priceHint(c, i === 0), ...(lockedEngraving ? { shown: () => false } : {}) })),
       // D3: the four moments it is offered at, on by default.
       ...ADDON_SWITCHES.map((x, i) => ({
         name: x.key,
@@ -123,6 +129,7 @@ export function addonsSection(ctx: ViewContext, addons: readonly AddonView[], su
         kind: 'checkbox' as const,
         value: values[x.key],
         ...(i === 0 ? { hint: ADDONS_TEXT.offeredHint } : x.key === 'orders' ? { hint: ADDONS_TEXT.ordersHint } : {}),
+        ...(lockedEngraving && x.key === 'orders' ? { shown: () => false } : {}),
       })),
       // D4, D12, N3: the engraving, a service's, and the most characters its words take.
       { name: 'engraving', label: ADDONS_TEXT.engraving, kind: 'checkbox', value: values.engraving, hint: ADDONS_TEXT.engravingHint, shown: service },
@@ -135,10 +142,12 @@ export function addonsSection(ctx: ViewContext, addons: readonly AddonView[], su
         ? [
             h('p', { class: 'dialog__text', data: { testid: 'addon-sku-fixed' } }, ADDONS_TEXT.skuFixed(a.sku.code)),
             h('p', { class: 'dialog__text', data: { testid: 'addon-kind-fixed' } }, ADDONS_TEXT.kindFixed(ADDON_KIND_LABELS[a.kind])),
+            lockedEngraving ? h('p', { class: 'dialog__text', data: { testid: 'addon-engraving-admin' } }, ENGRAVING_ADMIN_ONLY.note) : null,
           ]
         : undefined,
       fields,
-      validate: (v) => addonProblem(typed(v), !a) ?? (a && addonUnchanged(addonChange(a, v as AddonForm)) ? ADDONS_TEXT.unchanged : null),
+      validate: (v) =>
+        addonProblem(typed(v), !a) ?? engravingAdminProblem(a, typed(v) as AddonForm, engravingAdmin) ?? (a && addonUnchanged(addonChange(a, v as AddonForm)) ? ADDONS_TEXT.unchanged : null),
       confirmLabel: a ? 'Save' : 'Add',
       submit: async (v) => {
         if (!a) {

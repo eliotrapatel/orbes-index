@@ -4,7 +4,8 @@
  * number of pieces, entered from /verify and drawn by tier; Circle (P-X01),
  * what ORBES publishes for the owners of a piece (views/circle.ts); Tiers
  * (P-X04), the words of each tier's benefits (views/tiers.ts); Requests
- * (P-X08), what owners requested from THE PRIVATE SALON (views/requests.ts).
+ * (P-X08), what owners requested from THE PRIVATE SALON (views/requests.ts); THE VAULT (lot Q3, step Q3.12), its
+ * table, sources, GIVE A VAULT and report (views/vault.ts).
  *
  * Drops: the LIVE RELEASES first (the plan of 2026-10-04: an instant drop
  * lived in real time), each with its state, T0, its pieces and price, its
@@ -52,6 +53,7 @@ import {
   sizeFieldLabel,
 } from '../model/club.js';
 import { can } from '../model/permissions.js';
+import { VAULT_COPY } from '../model/vault.js';
 import { sizeMixEmptyLine } from '../model/sizes.js';
 import { toneOf } from '../model/tone.js';
 import {
@@ -83,6 +85,7 @@ import { pageParam, type ViewContext } from './context.js';
 import { requestsTab } from './requests.js';
 import { serverStatusPanel, withServerPanel } from './server-status.js';
 import { tiersTab } from './tiers.js';
+import { vaultTab } from './vault.js';
 
 /** The model of a drop's first dialog (plan NEXT LOT §3.6.F): the active models to choose from. */
 export function dropModelField(models: readonly Model[], modelId: string): DialogField {
@@ -278,11 +281,13 @@ const CLUB_LEADS = Object.freeze({
     'What the owners’ club of /verify offers. Tiers: TITANE, PLATINE and PALLADIUM, reached with 1, 5 and 10 pieces held now. MY PIECES shows each owner the tier, its benefits and the way to the next; the words of the benefits are set here.',
   requests:
     'What the owners’ club of /verify offers. Requests: the models of the private salon (the lookbook’s Reserved models, each from its tier, with its price) that owners asked for. ORBES Client Services contacts each client and concludes the sale, then closes the request with a note.',
+  vault: VAULT_COPY.lead,
 });
 
 export async function clubView(ctx: ViewContext): Promise<HTMLElement> {
   const tab = clubTab(ctx.route.query);
-  const body = tab === 'circle' ? await circleTab(ctx) : tab === 'tiers' ? await tiersTab(ctx) : tab === 'requests' ? await requestsTab(ctx) : await dropsTab(ctx);
+  const body =
+    tab === 'circle' ? await circleTab(ctx) : tab === 'tiers' ? await tiersTab(ctx) : tab === 'requests' ? await requestsTab(ctx) : tab === 'vault' ? await vaultTab(ctx) : await dropsTab(ctx);
   return h(
     'div',
     { class: 'view view--club' },

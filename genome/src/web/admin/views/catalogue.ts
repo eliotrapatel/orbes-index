@@ -82,6 +82,7 @@ import {
 } from '../model/catalogue.js';
 import { catalogueBoxCell } from '../model/boxes.js';
 import { can } from '../model/permissions.js';
+import { VAULT_ONLY } from '../model/vault.js';
 import { basePriceText, productExportSummary, SHOPIFY_CURRENCY_OPTIONS, shopifyLinkInput, shopifyLinkProblem, shopifyStatus, shopifyValues, variantField } from '../model/shopify.js';
 import { modelPhotoImpact } from '../model/photo.js';
 import { catalogueSizeLine, LISTED_SIZE_TYPES, NEW_MODEL_SIZE_TYPE } from '../model/sizes.js';
@@ -228,6 +229,7 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
   const editModel = (m: Model) => {
     const form = modelForm(m);
     let patched: string | null = null;
+    const vaultOnlyChanged = (v: Record<string, string>) => (v.vaultOnly === 'true') !== (m.vaultOnly === true);
     void openDialog({
       title: 'Edit model',
       eyebrow: `${humanize(m.name)} · ${m.skuPrefix}`,
@@ -248,6 +250,8 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
         { name: 'basePrice', label: 'Base price', maxlength: 14, value: form.basePrice, hint: 'The price of the Shopify product export, in units: 4800, or 4800.50. Each release keeps its own. Empty: none.' },
         { name: 'baseCurrency', label: 'Currency', kind: 'select', options: ORDER_CURRENCIES.map((c) => ({ value: c, label: c })), value: form.baseCurrency },
         { name: 'careGuide', label: 'Care guide', kind: 'textarea', rows: 6, maxlength: CARE_GUIDE_MAX, value: form.careGuide, hint: 'MY PIECES shows it with each order of this model. Empty: its care instructions stand in.' },
+        // THE VAULT (lot Q3, step Q3.12, §4.5): VAULT ONLY, never sold, given as a VAULT EDITION; its own route.
+        { name: 'vaultOnly', label: VAULT_ONLY.label, kind: 'checkbox', value: m.vaultOnly ? 'true' : '', hint: VAULT_ONLY.hint },
         // Last, so that what a change reaches is said right under it (the live block follows the fields).
         { name: 'warranty', label: 'Warranty', kind: 'select', options: warrantyOptions(m, canSetWarranty), value: warrantyChoice(m), hint: canSetWarranty ? WARRANTY_HINT : WARRANTY_ADMIN_HINT },
       ],
@@ -257,7 +261,7 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
       },
       validate: (v) =>
         basePriceProblem(v as unknown as ModelForm) ??
-        (Object.keys(modelChange(m, v as unknown as ModelForm)).length === 0 && !(canSetWarranty && warrantyChanged(m, v)) ? 'Nothing has changed.' : null),
+        (Object.keys(modelChange(m, v as unknown as ModelForm)).length === 0 && !(canSetWarranty && warrantyChanged(m, v)) && !vaultOnlyChanged(v) ? 'Nothing has changed.' : null),
       confirmLabel: 'Save model',
       submit: async (v) => {
         const change = modelChange(m, v as unknown as ModelForm);
@@ -267,6 +271,7 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
           patched = sent;
         }
         if (canSetWarranty && warrantyChanged(m, v)) await ctx.api.setModelWarranty(m.id, warrantyLifetimeOf(v.warranty));
+        if (vaultOnlyChanged(v)) await ctx.api.setModelVaultOnly(m.id, v.vaultOnly === 'true');
       },
     }).then(done('Model saved.'));
   };
@@ -413,7 +418,18 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
     },
     { label: 'SKU prefix', cell: (m) => mono(m.skuPrefix), kind: ['nowrap'] },
     { label: 'Default material', cell: (m) => humanize(m.defaultMaterial), kind: ['wide'] },
-    { label: 'Status', cell: (m) => h('span', { data: { testid: 'model-active' } }, modelStatusMark(m)), kind: ['nowrap'] },
+    {
+      label: 'Status',
+      cell: (m) =>
+        h(
+          'span',
+          null,
+          h('span', { data: { testid: 'model-active' } }, modelStatusMark(m)),
+          // THE VAULT (lot Q3, §4.5): a model never sold, given as a VAULT EDITION.
+          m.vaultOnly ? h('span', { class: 'cell-sub', data: { testid: 'model-vault-only' } }, statusMark(VAULT_ONLY.mark, 'outline')) : null,
+        ),
+      kind: ['nowrap'],
+    },
     { label: 'Lookbook', cell: (m) => h('span', { data: { testid: 'model-lookbook-state' } }, statusMark(m.lookbook, toneOf('lookbook', m.lookbook))), kind: ['nowrap'] },
     { label: 'Issued', cell: (m) => formatCount(m.products), kind: ['num'] },
     // N2: the base price, and under it how far the model is linked to its Shopify product.

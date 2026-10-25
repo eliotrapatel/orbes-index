@@ -61,7 +61,15 @@ const HOLDING: readonly OrderStatus[] = ['RESERVED', 'PAID'];
 // ── Words ──────────────────────────────────────────────────────────────────
 
 /** A channel as the console names it. */
-export const CHANNEL_LABELS: Readonly<Record<OrderChannel, string>> = Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW', SALON: 'PRIVATE SALON', GIFT: 'Welcome gift', EXCHANGE: 'SIZE EXCHANGE', VAULT: 'THE VAULT' });
+export const CHANNEL_LABELS: Readonly<Record<OrderChannel, string>> = Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW', SALON: 'PRIVATE SALON', GIFT: 'Welcome gift', EXCHANGE: 'SIZE EXCHANGE', VAULT: 'Vault' });
+
+/**
+ * Where an order comes from, as its card and its page say it (lot Q3, §4.5): its release's title; a VAULT order's
+ * FROM THE VAULT; else its channel.
+ */
+export function orderOrigin(o: { channel: OrderChannel; release?: { title: string } | null }): string {
+  return o.release?.title ?? (o.channel === 'VAULT' ? 'FROM THE VAULT' : CHANNEL_LABELS[o.channel]);
+}
 
 /** Why an order is late, as its mark says it (no figure: the display face sets it). */
 export const LATE_LABELS: Readonly<Record<OrderLateRule, string>> = Object.freeze({

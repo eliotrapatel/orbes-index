@@ -1127,6 +1127,7 @@ export async function seedDemo(ctx: AppContext, opts: SeedDemoOptions): Promise<
     await declareDemoSizes(world);
     await grantDemoGuarantee(world, now);
   });
+  await seedDemoVaultTable(world);
   // What housekeeping would have done day after day: the complete days counted in the daily statistics.
   const statsRows = await aggregateScanStats(ctx.db, now);
   log.info({ statsRows }, 'demo seed: timeline complete');
@@ -1217,6 +1218,53 @@ async function grantDemoGuarantee(w: World, now: Date): Promise<void> {
       },
       tx,
     );
+  });
+}
+
+/**
+ * THE VAULT's house table in the demo (lot Q3, step Q3.12; OP-27 "all odds/values/quantities in the mockup are examples,
+ * set in CLUB > THE VAULT"; N15 production starts with the I WAS THERE floor alone): the reference's example rewards
+ * (vault/the-vault.html REWARDS) the demo's catalogue can hold, under the floor: € 25 of house credit at 1 IN 10, € 30 to
+ * give at 1 IN 20, a MONOLITHE to buy at its price at 1 IN 25 (the reference's THE TRAVEL CASE: the demo has no add-on),
+ * GUARANTEED at 1 IN 200, THE PIECE at 1 IN 2 000. The reference's ENGRAVING is a service (E7: never a reward) and its
+ * VAULT EDITION needs a model marked vault-only, which the demo has none of. The quantities are examples too. Written as
+ * the console's New reward writes them, by the seed (audited `vault.reward.create`).
+ */
+export const DEMO_VAULT_TABLE = Object.freeze([
+  Object.freeze({ kind: 'CREDIT' as const, oddsIn: 10, quantity: 1_000, amountMinor: 2_500, currency: 'EUR' }),
+  Object.freeze({ kind: 'CREDIT_TO_GIVE' as const, oddsIn: 20, quantity: 500, amountMinor: 3_000, currency: 'EUR' }),
+  Object.freeze({ kind: 'PRODUCT' as const, oddsIn: 25, quantity: 40, model: 'MONOLITHE' as const, mode: 'RIGHT_TO_BUY' as const }),
+  Object.freeze({ kind: 'GUARANTEED' as const, oddsIn: 200, quantity: 10 }),
+  Object.freeze({ kind: 'THE_PIECE' as const, oddsIn: 2_000, quantity: 2 }),
+]);
+
+async function seedDemoVaultTable(w: World): Promise<void> {
+  await inTransaction(w.ctx.db, async (tx) => {
+    for (const [i, r] of DEMO_VAULT_TABLE.entries()) {
+      const modelId = 'model' in r ? (w.catalogue.models.get(r.model) ?? null) : null;
+      const values = {
+        kind: r.kind,
+        odds_in: r.oddsIn,
+        quantity: r.quantity,
+        amount_minor: 'amountMinor' in r ? r.amountMinor : null,
+        currency: 'currency' in r ? r.currency : null,
+        model_id: modelId,
+        mode: 'mode' in r ? r.mode : null,
+        position: i + 1,
+      };
+      const row = await tx.insertInto('vault_rewards').values(values).returning('id').executeTakeFirstOrThrow();
+      const { kind, position: _position, ...rest } = values;
+      await w.ctx.audit.record(
+        {
+          actor: DEMO_SEED_ACTOR,
+          action: 'vault.reward.create',
+          targetType: 'vault_reward',
+          targetId: row.id,
+          details: { kind, oddsIn: rest.odds_in, quantity: rest.quantity, amountMinor: rest.amount_minor, currency: rest.currency, modelId: rest.model_id, addonId: null, mode: rest.mode, lineLength: null },
+        },
+        tx,
+      );
+    }
   });
 }
 

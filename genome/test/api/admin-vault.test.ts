@@ -202,6 +202,18 @@ describe('THE VAULT in the console (lot Q3, step Q3.9)', () => {
     expect(r.rows.find((x) => x.id === credit.id)).toMatchObject({ won: 1, quantity: 9, given: 1, left: 8 });
     expect(r.credits).toEqual({ given: [{ currency: 'EUR', minor: 2_000 }], used: [] });
     expect(r.totalCost).toEqual([{ currency: 'EUR', minor: 2_000 }]);
+    // Its CSV (step Q3.12, §4.3): one figure per row, named by its Paris days; an AUDITOR reads it, RETAIL never.
+    const csv = await auditor.get('/api/admin/vault/report.csv?from=2026-11-01&to=2026-11-02');
+    expect(csv.statusCode, csv.body).toBe(200);
+    expect(csv.headers['content-type']).toBe('text/csv; charset=utf-8; header=present');
+    expect(csv.headers['content-disposition']).toBe('attachment; filename="ORBES-vault-report-2026-11-01-to-2026-11-02.csv"');
+    expect(csv.headers['cache-control']).toBe('no-store');
+    const lines = csv.body.split('\r\n');
+    expect(lines[0]).toBe('"section","item","value"');
+    for (const row of ['"period","from","2026-11-01"', '"vaults","opened","1"', '"kind credit","won","1"', '"kind credit","value EUR","20.00"', '"credits","given EUR","20.00"', '"cost","total EUR","20.00"', '"cost","unknown","0"']) expect(lines, row).toContain(row);
+    expect(lines.some((l) => /^"reward \d+ credit","left","8"$/.test(l))).toBe(true);
+    expect(errorOf(await retail.get('/api/admin/vault/report.csv')).code).toBe('FORBIDDEN');
+    expect(errorOf(await auditor.get('/api/admin/vault/report.csv?from=2026-11-02')).code).toBe('PERIOD_INVALID');
     // The default period (the last 30 days) reads the same opening; a period another day reads none.
     expect((safeJson(await auditor.get('/api/admin/vault/report')) as { opened: number }).opened).toBe(1);
     expect((safeJson(await auditor.get('/api/admin/vault/report?from=2026-10-01&to=2026-10-31')) as { opened: number }).opened).toBe(0);
@@ -243,6 +255,12 @@ describe('THE VAULT in the console (lot Q3, step Q3.9)', () => {
     expect(safeJson(on)).toMatchObject({ id: r.id, vaultOn: true });
     expect((await audits('drop.live.vault')).filter((x) => x.target_id === r.id)).toEqual([{ actor_type: 'admin', target_id: r.id, details: { before: false, after: true } }]);
     expect(errorOf(await put(auditor, `/api/admin/live/${r.id}/vault`, { on: false })).code).toBe('FORBIDDEN');
+    // Step Q3.12 (§4.2): the release report reads its switch and the vaults it gave and those opened; an after-room's none.
+    const report = await auditor.get(`/api/admin/live/${r.id}/report`);
+    expect(report.statusCode, report.body).toBe(200);
+    expect((safeJson(report) as Json).vaults).toEqual({ on: true, given: 0, opened: 0 });
+    expect((safeJson(await auditor.get(`/api/admin/live/${r.afterRoom!.id}/report`)) as Json).vaults).toBeNull();
+    expect((await auditor.get(`/api/admin/live/${r.id}/report.csv`)).body).toContain('"the vault","switch","on"');
     expect(errorOf(await put(operator, `/api/admin/live/${r.id}/vault`, { on: 'yes' })).code).toBe('VALIDATION_FAILED');
     expect(errorOf(await put(operator, `/api/admin/live/${r.afterRoom!.id}/vault`, { on: true })).code).toBe('LIVE_AFTER_ROOM');
     expect(errorOf(await put(operator, `/api/admin/live/${randomUUID()}/vault`, { on: true })).code).toBe('DROP_NOT_FOUND');

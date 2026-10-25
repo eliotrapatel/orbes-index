@@ -18,6 +18,7 @@
  *                                                          given                       vault.give (each vault)
  *   GET  /api/admin/vault/report?from&to        AUDITOR   the period's vaults by source and state, the rewards won by kind
  *                                                          and by row with their value and cost, the quantities left
+ *   GET  /api/admin/vault/report.csv?from&to    AUDITOR   the same report as a CSV, one figure per row (step Q3.12, §4.3)
  *   GET  /api/admin/vault/vaults?account=       AUDITOR   a client's vaults for the client sheet, read-only
  *
  * The switch on each LIVE release is PUT /api/admin/live/:id/vault (routes/admin/live.ts) and a model's VAULT ONLY PUT
@@ -85,6 +86,13 @@ export const adminVaultRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
   });
 
   app.get('/api/admin/vault/report', async (request) => vault.report(parse(vaultReportQuery, request.query)));
+
+  // §4.3 "CSV export as the console's other reports" (as Orders → Returns' returns.csv).
+  app.get('/api/admin/vault/report.csv', async (request, reply) => {
+    const file = await vault.reportCsv(parse(vaultReportQuery, request.query));
+    reply.header('content-disposition', `attachment; filename="${file.filename}"`);
+    return reply.type(file.contentType).send(file.body);
+  });
 
   app.get('/api/admin/vault/vaults', async (request) => {
     const { account } = parse(adminVaultsQuery, request.query);
