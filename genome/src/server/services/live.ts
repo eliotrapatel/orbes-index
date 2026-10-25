@@ -153,8 +153,8 @@ export const LIVE_PAY_MINUTES = Object.freeze({ min: 1, max: 60, default: 5 });
 export const LIVE_PER_ACCOUNT = Object.freeze({ min: 1, max: 5, default: 1 });
 /**
  * The release add-ons an order of before lot Q2 carries, at most (1 to 6 per release then): its invoice's ADDON lines
- * (render/invoice.ts). Since step Q2.4 a release picks catalogue add-ons without this cap (N12); the terms state it
- * until lot Q2's legal step (Q2.10).
+ * (render/invoice.ts). Since step Q2.4 a release picks catalogue add-ons without this cap (N12); since lot Q2's legal
+ * step (Q2.10) the terms no longer state it.
  */
 export const LIVE_ADDONS_MAX = 6;
 /** A size's stock at most (drop_sizes.stock). */

@@ -808,10 +808,12 @@ describe('legal pages: the privacy policy, written from the code', () => {
     expect(setLineWords('THE ORBITAL SET')).toBe('Part of THE SET THE ORBITAL SET');
     expect(readDoc('genome/src/server/services/orders.ts')).toContain("export const setShipped = () => conflict('SET_SHIPPED', 'A piece of this set has shipped: a set is cancelled whole, never in part.');");
     expect(readDoc('genome/src/server/services/order-cases.ts')).toContain('if (o.set_sale_id !== null) throw setReturnWhole();');
+    // (Lot Q2, step Q2.10, D3, D29: where an add-on is offered reads Q2's sentence, at the purchase among those its release
+    // offers, in the private salon and in YOUR ORDERS; the other M3 sentences unchanged.)
     for (const [lang, says] of [
-      ['en', ['**Add-ons.** ORBES may offer add-ons: items sold with a piece', 'An add-on has no ORBES CODE and never counts toward the tier (article 12).', 'It is offered when you confirm a purchase: on a piece held in a LIVE RELEASE, on a place held in a release with a price, and in a request of the private salon.', 'otherwise it is left out, and the order goes ahead without it', 'until its packing begins, never on a welcome gift or a size exchange; ORBES Client Services may do so until its parcel is packed', `An order holds at most ${ADDON_LIMIT} of each add-on.`, 'Once the order is paid, an add-on added has its own invoice, and one removed a credit note.', 'An add-on ships with its order, is cancelled with it and is returned with it; a size exchange leaves it with you.',
+      ['en', ['**Add-ons.** ORBES may offer add-ons: items sold with a piece', 'An add-on has no ORBES CODE and never counts toward the tier (article 12).', 'It is offered where ORBES offers it: when you confirm a purchase, among those its release offers (on a piece held in a LIVE RELEASE, on a place held in a release with a price), in a request of the private salon, and in YOUR ORDERS.', 'otherwise it is left out, and the order goes ahead without it', 'until its packing begins, never on a welcome gift or a size exchange; ORBES Client Services may do so until its parcel is packed', `An order holds at most ${ADDON_LIMIT} of each add-on.`, 'Once the order is paid, an add-on added has its own invoice, and one removed a credit note.', 'An add-on ships with its order, is cancelled with it and is returned with it; a size exchange leaves it with you.',
         `**THE SET.** ORBES may offer a set (THE SET): ${SET_PIECES_MIN} to ${SET_PIECES_MAX} different models sold together at one price, in a release of its own, by draw or as a LIVE RELEASE`, 'You choose the size of each piece when you enter', 'In a LIVE RELEASE, a set counts as one toward the pieces each person may take.', 'with its own ORBES identity, and counts toward the tier once registered (article 12)', "Its invoice shows its share of the set's price, and that it is part of the set.", 'A set is cancelled whole, and only until one of its pieces ships.', 'A set is returned whole: a return asked for one of its pieces is the return of the set', 'The size of one piece may still be exchanged.', 'A return is recorded once and is not undone. A set is returned whole (see THE SET).']],
-      ['fr', ['**Articles complémentaires.** ORBES peut proposer des articles complémentaires (add-ons) : des articles vendus avec une pièce', "Un article complémentaire n'a pas d'ORBES CODE et ne compte jamais pour le palier (article 12).", 'Il est proposé quand vous confirmez un achat : sur une pièce tenue dans une LIVE RELEASE, sur une place réservée dans une sortie avec un prix, et dans une demande du salon privé.', 'sinon il est laissé de côté, et la commande se fait sans lui', "jusqu'au début de son emballage, jamais sur un cadeau de bienvenue ni sur un échange de taille ; ORBES Client Services peut le faire jusqu'à la fermeture de son colis", `Une commande compte au plus ${ADDON_LIMIT} de chaque article complémentaire.`, 'Une fois la commande payée, un article complémentaire ajouté a sa propre facture, et un article retiré un avoir.', 'Un article complémentaire est expédié avec sa commande, annulé avec elle et retourné avec elle ; un échange de taille vous le laisse.',
+      ['fr', ['**Articles complémentaires.** ORBES peut proposer des articles complémentaires (add-ons) : des articles vendus avec une pièce', "Un article complémentaire n'a pas d'ORBES CODE et ne compte jamais pour le palier (article 12).", 'Il est proposé là où ORBES le propose : quand vous confirmez un achat, parmi ceux que propose sa sortie (sur une pièce tenue dans une LIVE RELEASE, sur une place réservée dans une sortie avec un prix), dans une demande du salon privé, et dans YOUR ORDERS.', 'sinon il est laissé de côté, et la commande se fait sans lui', "jusqu'au début de son emballage, jamais sur un cadeau de bienvenue ni sur un échange de taille ; ORBES Client Services peut le faire jusqu'à la fermeture de son colis", `Une commande compte au plus ${ADDON_LIMIT} de chaque article complémentaire.`, 'Une fois la commande payée, un article complémentaire ajouté a sa propre facture, et un article retiré un avoir.', 'Un article complémentaire est expédié avec sa commande, annulé avec elle et retourné avec elle ; un échange de taille vous le laisse.',
         `**THE SET.** ORBES peut proposer un ensemble (THE SET) : ${SET_PIECES_MIN} à ${SET_PIECES_MAX} modèles différents vendus ensemble à un seul prix, dans une sortie qui lui est propre, par tirage ou en LIVE RELEASE`, "Vous choisissez la taille de chaque pièce à l'entrée", 'Dans une LIVE RELEASE, un ensemble compte pour un dans les pièces que chaque personne peut prendre.', 'avec sa propre identité ORBES, et compte pour le palier une fois enregistrée (article 12)', "Sa facture montre sa part du prix de l'ensemble, et qu'elle en fait partie.", "Un ensemble est annulé en entier, et seulement tant qu'aucune de ses pièces n'est expédiée.", "Un ensemble est retourné en entier : un retour demandé pour l'une de ses pièces est le retour de l'ensemble", "La taille d'une pièce peut toujours être échangée.", "Un retour s'enregistre une fois et ne se défait pas. Un ensemble est retourné en entier (voir THE SET)."]],
     ] as const) {
       const text = sectionText(DOCUMENTS.terms[lang], 'article-14');
@@ -843,6 +845,46 @@ describe('legal pages: the privacy policy, written from the code', () => {
       const pace = blocks.find((b) => typeof b === 'string' && b.startsWith(says[lang][0].slice(0, 12))) as string;
       expect(pace).not.toMatch(/\d/);
       expect(readText(DOCUMENTS.terms[lang], lang), lang).not.toMatch(/admit its line|admettre sa file|a number of accounts every|un nombre de comptes toutes/);
+    }
+  });
+
+  it('says ADD-ONS ONE SYSTEM in the sentences that became false only (lot Q2, D29, L2): article 13 the add-ons the release offers, one for each piece or set, said there once; article 14 an engraving is an add-on, offered where ORBES offers it, stock only for an add-on with stock, YOUR ORDERS what ORBES offers there', () => {
+    // The code (services/order-addons.ts, live.ts): an add-on is offered by its moment's switch and, at a LIVE hold or a
+    // draw's place held, the release's pick (D3; YOUR ORDERS by its switch alone, N8); a service has no stock, a product's
+    // units are carried while in stock (D4); a hold's row is one unit per piece of the entry, one per set (D25).
+    const offer = readDoc('genome/src/server/services/order-addons.ts');
+    for (const x of ['if (!s.offered[at.moment]) return', 'if (readsPick(at) && !s.picked) return', "let left = s.kind === 'PRODUCT' ? (await stockLevel(tx, s.skuId, first.location_id)).available : Number.POSITIVE_INFINITY;"]) expect(offer).toContain(x);
+    expect(readDoc('genome/src/server/services/live.ts')).toContain('await setChoices(tx, { liveEntryId: e.id }, rows, { locationId: await liveAddonLocation(tx, d), currency: liveCurrency(d.currency), pieces: e.quantity }, now);');
+    const says = {
+      en: {
+        'article-13': ['Meanwhile you may choose the add-ons the release offers (article 14), for example an engraving or a gift wrapping, one for each piece, or one for each set, each at the price shown; then press PAY, or give the piece back with RELEASE MY PLACE.'],
+        'article-14': [
+          'An engraving is an add-on (below), charged at the price shown; once the order is paid, it has its own invoice, and a credit note if it is removed.',
+          'It is offered where ORBES offers it: when you confirm a purchase, among those its release offers (on a piece held in a LIVE RELEASE, on a place held in a release with a price), in a request of the private salon, and in YOUR ORDERS.',
+          'It is added to the order when the order is created; an add-on with stock only if one is still in stock (some, such as an engraving or a gift wrapping, are services without stock); otherwise it is left out, and the order goes ahead without it.',
+          'In YOUR ORDERS, you may add an add-on ORBES offers there to an order, or remove it, until its packing begins, never on a welcome gift or a size exchange; ORBES Client Services may do so until its parcel is packed.',
+        ],
+      },
+      fr: {
+        'article-13': ["Pendant ce temps, vous pouvez choisir les articles complémentaires que propose la sortie (article 14), par exemple une gravure ou un emballage cadeau, un pour chaque pièce, ou un pour chaque ensemble, chacun au prix affiché ; puis presser PAY, ou rendre la pièce avec RELEASE MY PLACE."],
+        'article-14': [
+          'Une gravure est un article complémentaire (ci-dessous), facturée au prix affiché ; une fois la commande payée, elle a sa propre facture, et un avoir si elle est retirée.',
+          'Il est proposé là où ORBES le propose : quand vous confirmez un achat, parmi ceux que propose sa sortie (sur une pièce tenue dans une LIVE RELEASE, sur une place réservée dans une sortie avec un prix), dans une demande du salon privé, et dans YOUR ORDERS.',
+          "Il est ajouté à la commande quand elle est créée ; un article complémentaire avec stock seulement s'il en reste en stock (certains, comme une gravure ou un emballage cadeau, sont des services sans stock) ; sinon il est laissé de côté, et la commande se fait sans lui.",
+          "Dans YOUR ORDERS, vous pouvez ajouter à une commande un article complémentaire qu'ORBES y propose, ou le retirer, jusqu'au début de son emballage, jamais sur un cadeau de bienvenue ni sur un échange de taille ; ORBES Client Services peut le faire jusqu'à la fermeture de son colis.",
+        ],
+      },
+    } as const;
+    const once = { en: 'one for each piece, or one for each set', fr: 'un pour chaque pièce, ou un pour chaque ensemble' } as const;
+    for (const lang of LANGS) {
+      for (const [id, xs] of Object.entries(says[lang])) for (const x of xs) expect(sectionText(DOCUMENTS.terms[lang], id), `${lang} ${id}: ${x}`).toContain(x);
+      // Said once, in article 13 (D25); article 14 has no "one for each piece" and no clause on the engraving's words.
+      const all = readText(DOCUMENTS.terms[lang], lang);
+      expect(all.split(once[lang]).length - 1, lang).toBe(1);
+      expect(sectionText(DOCUMENTS.terms[lang], 'article-14'), lang).not.toMatch(/one for each piece|un pour chaque pièce/);
+      // The sentences that became false are gone: the release's options at most 6 at the price it sets, an engraving
+      // outside the release's options, a purchase as the only moment, in stock for every add-on.
+      expect(all, lang).not.toMatch(/the options the release offers|at most 6|the price the release sets|not one of the options of its release|It is offered when you confirm a purchase|options que propose la sortie|6 au plus|au prix que fixe la sortie|n'est pas une option de sa sortie|Il est proposé quand vous confirmez un achat/);
     }
   });
 
@@ -1050,6 +1092,12 @@ describe('legal pages: both languages, links, lexicon', () => {
       // M3's published 2026-10-23 (the day after it); article 11 unchanged. The lot's review: the French « un temps
       // d'attente estimé », never a clock time (ANSWERS r12, C3), under the same version.
       '2026-10-24': '1cf4c08142f67d2c',
+      // Lot Q2, ADD-ONS ONE SYSTEM (D29, L2; step Q2.10): only the sentences that became false, the terms' article 13
+      // "Your piece" (the add-ons the release offers, one for each piece, or one for each set, at the price shown) and
+      // article 14 "Delivery" (an engraving is an add-on) and "Add-ons" (offered where ORBES offers it, YOUR ORDERS
+      // included; stock only for an add-on with stock; in YOUR ORDERS what ORBES offers there). The date of the lot's
+      // final legal commit, never Q1's 2026-10-24 (the day after it); HOW RELEASES WORK, privacy and article 11 unchanged.
+      '2026-10-25': '31d86d7ec14dbe00',
     };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
     expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });
