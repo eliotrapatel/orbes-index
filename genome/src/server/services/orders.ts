@@ -270,6 +270,15 @@ export const orderNotPacked = () => conflict('ORDER_NOT_PACKED', 'Pack the parce
 const claimUnderWay = () => conflict('CLAIM_OPEN', 'A warranty claim is under way for this piece: finish or close it first.');
 const pieceLinked = () => conflict('ORDER_PIECE_LINKED', 'A piece is already linked to this order: transfer the piece instead.');
 const termsFixed = () => conflict('ORDER_TERMS_FIXED', 'The size and the price of a LIVE RELEASE order are those of its release.');
+/**
+ * THE VAULT (lot Q3, §2.4; 0062's `orders_vault`): a VAULT order at 0 holds the unit reserved for its winner until the
+ * claim (the collector's CLAIM IT chooses its size), never waits for stock, and stays at 0; a VAULT order bought under a
+ * right to buy keeps a price. Client Services' edits that would break that are refused in words.
+ */
+const vaultFree = (o: Pick<OrderRow, 'channel' | 'price_minor'>) => o.channel === 'VAULT' && o.price_minor === 0;
+const vaultUnclaimed = () => conflict('ORDER_VAULT_UNCLAIMED', 'A piece won in a vault keeps the unit held for its winner until it is claimed: its location, size and price do not change before.');
+const vaultNoUnit = () => conflict('ORDER_VAULT_NO_UNIT', 'A piece won in a vault never waits for stock: none is available there in its size.');
+const vaultPrice = () => conflict('ORDER_VAULT_PRICE', 'A piece won in a vault stays free, and one bought from a vault keeps its price.');
 /** Plan NEXT LOT §3.6.F and §3.6.G: a draw's entry and a salon's request with a size fix it; an exchange goes through an order case. */
 const sizeFixed = () => conflict('ORDER_SIZE_FIXED', 'The size of this order is the one chosen at its entry or request.');
 const orderClosed = () => conflict('ORDER_CLOSED', 'This order can no longer change.');
@@ -3169,7 +3178,8 @@ export class OrderService {
    * refused once a piece is linked to it (409 ORDER_PIECE_LINKED: the piece is transferred instead). A parcel ships
    * complete from one location (plan NEXT LOT §3.5.6.6), so the orders travelling together move together: every open
    * order of its parcel (its first order and the orders travelling with it) moves in the same transaction, refused while
-   * any of them has a piece linked. Each order moved is audited `order.location`.
+   * any of them has a piece linked. Each order moved is audited `order.location`. A VAULT order at 0 moves only once
+   * claimed (409 ORDER_VAULT_UNCLAIMED) and only where a unit of its size is (409 ORDER_VAULT_NO_UNIT).
    */
   async changeLocation(orderId: string, locationId: string, actor: Actor): Promise<OrderView> {
     assertOperator(actor);
@@ -3188,6 +3198,8 @@ export class OrderService {
         if (!ORDER_HOLDING_STATUSES.includes(o.status)) throw orderClosed();
         const open = (await parcelOrders(tx, key)).filter((p) => ORDER_HOLDING_STATUSES.includes(p.status));
         if (open.some((p) => p.product_id !== null)) throw pieceLinked();
+        // THE VAULT: a piece won free moves only once claimed, and only where a unit of its size is (below).
+        if (open.some((p) => vaultFree(p) && p.status === 'RESERVED')) throw vaultUnclaimed();
         const moving = open.filter((p) => p.location_id !== to);
         if (moving.length === 0) throw validationError('The order is already served from there.');
         // What they hold is given back first, the orders waiting first, so a piece freed never serves an order of the
@@ -3200,6 +3212,10 @@ export class OrderService {
         }
         for (const m of moving) {
           const r = released.find((x) => x.id === m.id)!;
+          if (vaultFree(r)) {
+            await lockSku(tx, r.sku_id!);
+            if ((await stockLevel(tx, r.sku_id!, to)).available < 1) throw vaultNoUnit();
+          }
           // Plan MACRO M3 §4.2: its add-ons move with it, or the change is refused (ORDER_ADDON_NOT_AT_LOCATION).
           await moveUnits(tx, r, to);
           const after = await hold(tx, await updateOrder(tx, r.id, { location_id: to }), actor, now, extra);
@@ -3236,6 +3252,10 @@ export class OrderService {
    * currency's rate, or no shipping when none is set), while a fee entered by hand stays as entered, for Client Services
    * to enter again. The orders travelling with it follow (its service at 0). Audited
    * `order.shipping` (each order), the service, the fee and the free tier.
+   *
+   * THE VAULT (lot Q3): a VAULT order at 0 changes size or price only once claimed (409 ORDER_VAULT_UNCLAIMED), then a
+   * size only to one with a unit at its location (409 ORDER_VAULT_NO_UNIT); a VAULT order's price is never set to 0 nor
+   * cleared, nor changed from 0 (409 ORDER_VAULT_PRICE).
    */
   async setTerms(orderId: string, input: OrderTermsInput, actor: Actor): Promise<OrderView> {
     assertOperator(actor);
@@ -3272,6 +3292,8 @@ export class OrderService {
       const sizeChange = size !== undefined && o.sku_id !== skuId;
       const priceChange = price !== undefined && (price !== o.price_minor || currency !== o.currency);
       if ((sizeChange || priceChange) && o.channel === 'LIVE') throw termsFixed();
+      if ((sizeChange || priceChange) && vaultFree(o) && o.status === 'RESERVED') throw vaultUnclaimed();
+      if (priceChange && o.channel === 'VAULT' && (o.price_minor === 0 || price === null || price === 0)) throw vaultPrice();
       if (sizeChange && (await sizeChosen(tx, o))) throw sizeFixed();
       if (priceChange && o.channel === 'GIFT') throw giftTermsFixed();
       if (priceChange) {
@@ -3331,6 +3353,8 @@ export class OrderService {
         // Both SKUs locked first, in one order (two orders swapping sizes never wait for each other).
         for (const id of [...new Set([o.sku_id, skuId].filter((x): x is string => x !== null))].sort()) await lockSku(tx, id);
         const released = await release(tx, after, actor, now, extra);
+        // THE VAULT: a piece won free, once claimed, changes only to a size with a unit to hold (never waiting).
+        if (vaultFree(o) && (skuId === null || (await stockLevel(tx, skuId, o.location_id)).available < 1)) throw vaultNoUnit();
         // Named as its SKU names it (Small typed for a SKU created SMALL reads SMALL, on the invoice too).
         const label = skuId === null ? null : (await tx.selectFrom('skus').select('size_label').where('id', '=', skuId).executeTakeFirstOrThrow()).size_label;
         after = await hold(tx, await updateOrder(tx, released.id, { size_label: label, sku_id: skuId }), actor, now, extra);

@@ -174,8 +174,11 @@ export const VAULT_REVEAL = Object.freeze({
   guaranteed: Object.freeze({ prize: 'GUARANTEED', line: 'A piece at the next LIVE release.' }),
   /** A PRODUCT reward under its RIGHT TO BUY (round 2 "24 HOURS, at its usual price"): its name and this line. */
   rightToBuy: 'Yours to buy at its price, for 24 hours.',
-  /** A product won FREE (a piece, a VAULT EDITION without its own line): its name and this line. */
+  /** A product won FREE (a piece): its name and this line. */
   free: 'Yours, free. In YOUR ORDERS.',
+  /** A VAULT EDITION (vault/the-vault.html REWARDS): the kind's word, never the model's name (YOUR ORDERS shows it); its
+   *  line the reward's own, else the reference's. */
+  vaultEdition: Object.freeze({ prize: 'VAULT EDITION', line: 'Numbered, made only for the vault. Free.' }),
   /** THE PIECE: the release's piece in the entry's size. */
   thePiece: Object.freeze({ prize: 'THE PIECE', line: (piece: string, size: string | null) => (size ? `${piece}, size ${size}. Free.` : `${piece}. Free.`) }),
   /** A CREDIT TO GIVE: `€30 TO GIVE` and this line. */

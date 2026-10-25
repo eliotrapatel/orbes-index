@@ -279,7 +279,8 @@ export class ShopifyExportService {
       .select(['id', 'name', 'type', 'sku_prefix', 'slug', 'active', 'image_sha256', 'base_price_minor', 'variant_of', 'variant_label', 'created_at'])
       .where('base_currency', '=', currency)
       .where('base_price_minor', 'is not', null)
-      // THE VAULT (lot Q3, §4.5, S4): a vault-only model is never sold, so never one of the store's sellable lines.
+      // THE VAULT (lot Q3, §4.5, S4): a vault-only model is never sold, so never one of the store's sellable lines; its SKUs
+      // map to an unpublished Shopify product by link only (plan §8).
       .where('vault_only', '=', false)
       .orderBy('name')
       .orderBy('id')
@@ -425,6 +426,19 @@ export class ShopifyExportService {
       .where('active', '=', true)
       .where('base_currency', '=', currency)
       .where('base_price_minor', 'is not', null)
+      // THE VAULT (lot Q3, §4.5): a set holding a vault-only model is never sold (its releases refused, assertSetSellable).
+      .where((eb) =>
+        eb.not(
+          eb.exists(
+            eb
+              .selectFrom('set_models as vs')
+              .innerJoin('models as vm', 'vm.id', 'vs.model_id')
+              .select(sql<number>`1`.as('one'))
+              .whereRef('vs.set_id', '=', 'sets.id')
+              .where('vm.vault_only', '=', true),
+          ),
+        ),
+      )
       .orderBy(sql`lower(name)`)
       .orderBy('id')
       .execute();

@@ -488,6 +488,46 @@ describe('THE VAULT’s rewards delivered (step Q3.4)', () => {
     expect(await t.db.selectFrom('account_addresses').select('name').where('account_id', '=', other.a.id).execute()).toEqual([{ name: PARIS.name }]);
   });
 
+  it('Client Services on a VAULT order: at 0 and unclaimed, its location, size and price refused in words, its unit kept; claimed, moved or resized only where a unit of its size is; a right to buy keeps a price', async () => {
+    const m = await stockedModel('CLAIRE', { '52': 2, '54': 1 });
+    await only({ kind: 'PRODUCT', modelId: m.id, mode: 'FREE' });
+    const won = await winFree(m.id);
+    const id = won.order!.id;
+    const held = { status: 'RESERVED', sku_id: m.sku['52'], reservation: 'STOCK', location_id: france, price_minor: 0 };
+    expect(won.order).toMatchObject(held);
+    const studio = (await ctx.services.stock.createLocation({ name: `STUDIO ${randomUUID().slice(0, 6)}` }, staff)).id;
+    // Unclaimed (0062's orders_vault): refused in words, never a raw error; the order and its unit as they were.
+    const unclaimed = { code: 'ORDER_VAULT_UNCLAIMED', httpStatus: 409, message: 'A piece won in a vault keeps the unit held for its winner until it is claimed: its location, size and price do not change before.' };
+    await expect(orders().changeLocation(id, studio, staff)).rejects.toMatchObject(unclaimed);
+    await expect(orders().setTerms(id, { sizeLabel: '54' }, staff)).rejects.toMatchObject(unclaimed);
+    await expect(orders().setTerms(id, { priceMinor: 50_000, currency: 'EUR' }, staff)).rejects.toMatchObject(unclaimed);
+    expect(await orderOf(id)).toMatchObject(held);
+    expect(await level(m.sku['52']!)).toBe(1);
+    // Claimed: moved only where a unit of its size is, never waiting for stock.
+    await vault().claim(won.a.id, id, { address: { address: PARIS } });
+    const noUnit = { code: 'ORDER_VAULT_NO_UNIT', httpStatus: 409 };
+    await expect(orders().changeLocation(id, studio, staff)).rejects.toMatchObject(noUnit);
+    expect(await orderOf(id)).toMatchObject({ ...held, status: 'PAID' });
+    await ctx.services.stock.adjust({ skuId: m.sku['52']!, locationId: studio, delta: 1, note: 'Counted.' }, staff);
+    await orders().changeLocation(id, studio, staff);
+    expect(await orderOf(id)).toMatchObject({ status: 'PAID', location_id: studio, sku_id: m.sku['52'], reservation: 'STOCK' });
+    await expect(orders().setTerms(id, { sizeLabel: '54' }, staff)).rejects.toMatchObject(noUnit);
+    await ctx.services.stock.adjust({ skuId: m.sku['54']!, locationId: studio, delta: 1, note: 'Counted.' }, staff);
+    await orders().setTerms(id, { sizeLabel: '54' }, staff);
+    expect(await orderOf(id)).toMatchObject({ status: 'PAID', location_id: studio, sku_id: m.sku['54'], reservation: 'STOCK', price_minor: 0 });
+
+    // A right to buy's VAULT order: its price changes as any order's, never to 0 (that is a piece won free).
+    await only({ kind: 'PRODUCT', modelId: m.id, mode: 'RIGHT_TO_BUY' });
+    const a = await createAccount(t.db);
+    const v = await houseVault(a.id);
+    await opener.open(a.id, v.id);
+    const { orderId } = await vault().buy(a.id, v.id, { size: '52' });
+    await expect(orders().setTerms(orderId, { priceMinor: 0, currency: 'EUR' }, staff)).rejects.toMatchObject({ code: 'ORDER_VAULT_PRICE', httpStatus: 409 });
+    await expect(orders().setTerms(orderId, { priceMinor: null, currency: null }, staff)).rejects.toMatchObject({ code: 'ORDER_VAULT_PRICE' });
+    await orders().setTerms(orderId, { priceMinor: 85_000, currency: 'EUR' }, staff);
+    expect(await orderOf(orderId)).toMatchObject({ channel: 'VAULT', price_minor: 85_000, claim_by: null, status: 'RESERVED' });
+  });
+
   it('unclaimed at its claim_by: the housekeeping job vaults cancels it and its reserved unit goes back to stock; a claim after its end is refused', async () => {
     const m = await stockedModel('HALO', { '52': 1 });
     await only({ kind: 'PRODUCT', modelId: m.id, mode: 'FREE' });
@@ -614,18 +654,19 @@ describe('THE VAULT’s rewards delivered (step Q3.4)', () => {
     expect(await orderOf(o.id)).toMatchObject({ status: 'PAID', sku_id: ring.sku['52'] });
   });
 
-  it('VAULT EDITION: a VAULT order at 0 of its vault-only model, rare, with its own line', async () => {
+  it('VAULT EDITION: a VAULT order at 0 of its vault-only model, rare, revealed as VAULT EDITION with its own line', async () => {
     const edition = await stockedModel('EDITION', { '52': 1 });
     await t.db.updateTable('models').set({ vault_only: true }).where('id', '=', edition.id).execute();
     await only({ kind: 'VAULT_EDITION', modelId: edition.id, line: 'Made only for the vault, never sold.' });
     const won = await winFree(edition.id);
-    expect(won.reveal).toMatchObject({ kind: 'VAULT_EDITION', prize: edition.name, line: 'Made only for the vault, never sold.', rare: true, where: 'ORDERS' });
+    // The reveal says the kind (the reference's "VAULT EDITION"); the model is the VAULT order's.
+    expect(won.reveal).toMatchObject({ kind: 'VAULT_EDITION', prize: 'VAULT EDITION', line: 'Made only for the vault, never sold.', rare: true, where: 'ORDERS' });
     expect(won.order).toMatchObject({ channel: 'VAULT', model_id: edition.id, sku_id: edition.sku['52'], price_minor: 0, reservation: 'STOCK' });
     // None left: the card.
     expect((await winFree(edition.id)).reveal).toMatchObject({ kind: 'I_WAS_THERE' });
   });
 
-  it('a vault-only model is refused by every sales path (a draw, a LIVE release and its after-room, the salon, YOUR WISHLIST, the Shopify export) and still listed in the lookbook', async () => {
+  it('a vault-only model is refused by every sales path (a draw, a LIVE release and its after-room, the salon, YOUR WISHLIST, the Shopify export and its sets) and still listed in the lookbook', async () => {
     const vo = await stockedModel('SECRET', { '52': 1 });
     const slug = `vo-${randomUUID().slice(0, 8)}`;
     await t.db.updateTable('models').set({ vault_only: true, slug, lookbook: 'PUBLIC', published_at: new Date('2026-01-01T00:00:00Z'), private_min_tier: 1 }).where('id', '=', vo.id).execute();
@@ -652,10 +693,16 @@ describe('THE VAULT’s rewards delivered (step Q3.4)', () => {
     await holdPieces(t.db, a.id, 1, f.modelId);
     expect((await ctx.services.lookbook.listReserved(1)).map((c) => c.slug)).toContain(slug);
     await expect(ctx.services.salon.request(a.id, slug, null, a.actor)).rejects.toMatchObject({ code: 'MODEL_VAULT_ONLY' });
-    // The Shopify export: never one of its sellable lines; the same model not vault-only is.
+    // The Shopify export: never one of its sellable lines, nor a set holding it; the same model not vault-only is, and its set.
     const skuCode = (await t.db.selectFrom('skus').select('code').where('id', '=', vo.sku['52']!).executeTakeFirstOrThrow()).code;
-    expect((await ctx.services.shopify.productCsv('EUR')).body).not.toContain(skuCode);
+    const setCode = `VO-${randomUUID().slice(0, 6).toUpperCase()}`;
+    await ctx.services.sets.create({ name: 'The Secret Pair', code: setCode, modelIds: [vo.id, later.id], basePriceMinor: 150_000, baseCurrency: 'EUR' }, staff);
+    const sealed = (await ctx.services.shopify.productCsv('EUR')).body;
+    expect(sealed).not.toContain(skuCode);
+    expect(sealed).not.toContain(setCode);
     await t.db.updateTable('models').set({ vault_only: false }).where('id', '=', vo.id).execute();
-    expect((await ctx.services.shopify.productCsv('EUR')).body).toContain(skuCode);
+    const open = (await ctx.services.shopify.productCsv('EUR')).body;
+    expect(open).toContain(skuCode);
+    expect(open).toContain(setCode);
   });
 });

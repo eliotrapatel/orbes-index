@@ -773,8 +773,9 @@ describe('THE VAULT’s opening: the draw (VaultService.open)', () => {
     expect(await pick({ kind: 'PRODUCT', model_id: model, mode: 'FREE' })).toEqual({ ok: true, prize: 'ECLIPSE', line: 'Yours, free. In YOUR ORDERS.', unit });
     await t.db.updateTable('models').set({ vault_only: true }).where('id', '=', model).execute();
     expect(await pick({ kind: 'PRODUCT', model_id: model, mode: 'RIGHT_TO_BUY' })).toEqual({ ok: false, why: 'MODEL' });
-    expect(await pick({ kind: 'VAULT_EDITION', model_id: model })).toEqual({ ok: true, prize: 'ECLIPSE', line: 'Yours, free. In YOUR ORDERS.', unit });
-    expect(await pick({ kind: 'VAULT_EDITION', model_id: model, line: 'Made only for the vault, never sold.' })).toMatchObject({ ok: true, line: 'Made only for the vault, never sold.' });
+    // The reveal says the kind, as the reference's REWARDS ("VAULT EDITION · Numbered, made only for the vault. Free.").
+    expect(await pick({ kind: 'VAULT_EDITION', model_id: model })).toEqual({ ok: true, prize: 'VAULT EDITION', line: 'Numbered, made only for the vault. Free.', unit });
+    expect(await pick({ kind: 'VAULT_EDITION', model_id: model, line: 'Made only for the vault, never sold.' })).toMatchObject({ ok: true, prize: 'VAULT EDITION', line: 'Made only for the vault, never sold.' });
     await t.db.updateTable('models').set({ active: false }).where('id', '=', model).execute();
     expect(await pick({ kind: 'VAULT_EDITION', model_id: model })).toEqual({ ok: false, why: 'MODEL' });
     // THE PIECE: never for a vault without a release (N5); a LIVE vault's, a unit of its model in the entry's size.

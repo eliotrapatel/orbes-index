@@ -1167,10 +1167,11 @@ export async function rewardPick(tx: Db, row: DrawRow, v: OpeningVault): Promise
       return unit ? { ok: true, prize, line: VAULT_REVEAL.free, unit } : { ok: false, why: 'NO_UNIT' };
     }
     case 'VAULT_EDITION': {
-      const m = await tx.selectFrom('models').select(['name', 'variant_label', 'active', 'discontinued_at', 'vault_only']).where('id', '=', row.model_id!).executeTakeFirst();
+      const m = await tx.selectFrom('models').select(['active', 'discontinued_at', 'vault_only']).where('id', '=', row.model_id!).executeTakeFirst();
       if (!m || !m.active || m.discontinued_at !== null || !m.vault_only) return { ok: false, why: 'MODEL' };
       const unit = await vaultUnit(tx, v.account_id, row.model_id!);
-      return unit ? { ok: true, prize: fit(pieceName(m.name, m.variant_label), VAULT_PRIZE_MAX), line: row.line ?? VAULT_REVEAL.free, unit } : { ok: false, why: 'NO_UNIT' };
+      // The reveal says the kind (the reference's "VAULT EDITION"); the model's name is the VAULT order's, in YOUR ORDERS.
+      return unit ? { ok: true, prize: VAULT_REVEAL.vaultEdition.prize, line: row.line ?? VAULT_REVEAL.vaultEdition.line, unit } : { ok: false, why: 'NO_UNIT' };
     }
     case 'THE_PIECE': {
       if (v.source !== 'LIVE' || !v.drop_id || !v.entry_id) return { ok: false, why: 'NOT_LIVE' };
