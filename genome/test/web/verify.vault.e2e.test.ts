@@ -8,11 +8,13 @@
  * of the page (a CSP report included). Under reduced motion in light mode: the reward at once, the page dimmed at once,
  * the room still dark. THE VAULT page (lot Q3, step Q3.11; plan §3.5, §3b; MK V): its second door opened in place, no OPEN
  * ANOTHER, the page never dimmed, PRESS AND HOLD gone from that door alone; then its first, the open lid's box at least
- * 8 px under YOUR VAULTS · N WAITING (D69), on a phone and a computer. Skipped (not failed) when the Chromium binary is
- * absent.
+ * 8 px under YOUR VAULTS · N WAITING (D69), on a phone and a computer; the page never wider than the window, closed or
+ * open (each door's floor clipped sideways). A credit to give opened signed out on a phone: MY PIECES' CREATE ACCOUNT,
+ * then its page again with ACCEPT (plan §3.5, §3.10). Skipped (not failed) when the Chromium binary is absent.
  */
 import type { Page } from 'playwright-core';
 import { describe, expect, it } from 'vitest';
+import { NOCTURNE_PASSWORD } from '../support/nocturne-demo.js';
 import type { NocturneStage } from '../support/nocturne-stage.js';
 import { settle, stateById, type UiState } from '../support/nocturne-states.js';
 import { HAS_CHROMIUM, openIn, stages, type Look } from './desktop.harness.js';
@@ -106,11 +108,16 @@ async function measurePage(page: Page, n: number, desk: boolean) {
   );
 }
 
+/** How much wider than its window the page is (0: it never scrolls sideways). */
+async function sideways(page: Page): Promise<number> {
+  return page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+}
+
 describe.skipIf(!HAS_CHROMIUM)('THE VAULT page (Chromium)', () => {
   const { withStage } = stages();
 
   it(
-    'opens a door in place on THE VAULT page (phone, computer): no OPEN ANOTHER, the page never dimmed, PRESS AND HOLD gone from that door alone, its source line and WAITS UNTIL kept; the first door\'s lid at least 8 px under YOUR VAULTS · N WAITING',
+    'opens a door in place on THE VAULT page (phone, computer): no OPEN ANOTHER, the page never dimmed, PRESS AND HOLD gone from that door alone, its source line and WAITS UNTIL kept; the first door\'s lid at least 8 px under YOUR VAULTS · N WAITING; never wider than the window; a credit to give signed out on a phone comes back after CREATE ACCOUNT with ACCEPT',
     async () => {
       await withStage('vault', async (st) => {
         const base = stateById('vault-page');
@@ -122,8 +129,11 @@ describe.skipIf(!HAS_CHROMIUM)('THE VAULT page (Chromium)', () => {
           const opened = await openIn(st, { ...base, as, check: undefined }, look);
           try {
             const page = opened.page;
+            // Each door's floor reaches wider than the window: the page is clipped sideways, closed and open.
+            expect(await sideways(page), `${look.name}: the page wider than the window, closed`).toBe(0);
             // The second door first: in place, nothing else changes.
             await openPageDoor(page, 2);
+            expect(await sideways(page), `${look.name}: the page wider than the window, a door open`).toBe(0);
             const second = await measurePage(page, 2, desk);
             expect(second.open, look.name).toBe(true);
             expect(second.again, `${look.name}: OPEN ANOTHER on THE VAULT page`).toBe(false);
@@ -143,10 +153,33 @@ describe.skipIf(!HAS_CHROMIUM)('THE VAULT page (Chromium)', () => {
               await page.waitForTimeout(250);
             }
             expect(least, `${look.name}: the first lid's box under YOUR VAULTS · N WAITING`).toBeGreaterThanOrEqual(8);
+            expect(await sideways(page), `${look.name}: the page wider than the window, both doors open`).toBe(0);
             expect(opened.errors).toEqual([]);
           } finally {
             await opened.close();
           }
+        }
+
+        // A credit to give opened signed out on a phone (plan §3.5, §3.10): the sign-in first (MY PIECES), then, the
+        // account created there, its page again at its own address with ACCEPT.
+        const gift = stateById('vault-gift');
+        const out = await openIn(st, { ...gift, as: undefined, ready: '.view--pieces form', check: undefined }, PHONE);
+        try {
+          const page = out.page;
+          await page.locator('.view--pieces').getByRole('button', { name: 'CREATE ACCOUNT', exact: true }).first().click();
+          const form = page.locator('.view--pieces form.form--create');
+          await form.getByLabel('FIRST NAME', { exact: true }).fill('Camille');
+          await form.getByLabel('LAST NAME', { exact: true }).fill('Laurent');
+          await form.getByLabel('EMAIL', { exact: true }).fill('vault.newfriend@example.com');
+          await form.getByLabel('PASSWORD', { exact: true }).fill(NOCTURNE_PASSWORD);
+          await form.getByLabel('COUNTRY', { exact: true }).selectOption('FR');
+          await form.getByRole('button', { name: 'CREATE ACCOUNT', exact: true }).click();
+          await page.locator('.view--gift[data-state="ready"] .vp-gift__accept').waitFor({ timeout: 20_000 });
+          expect(new URL(page.url()).pathname).toBe(`/verify/gift/${st.demo.links.vaultGift}`);
+          expect(await page.evaluate(() => sessionStorage.getItem('orbes.gift')), 'the kept code forgotten').toBeNull();
+          expect(out.errors).toEqual([]);
+        } finally {
+          await out.close();
         }
       });
     },

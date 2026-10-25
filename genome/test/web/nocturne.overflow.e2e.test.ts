@@ -93,8 +93,23 @@ const FIVE_B_KNOWN: readonly { state: string; starts: string; reason: string }[]
   { state: 'addons-hold-stress', starts: 'button.btn.live__primary.live__pay.live-pay spills out of its box', reason: PAY_LIGHT },
   { state: 'addons-hold-stress', starts: 'span.live__pay-time', reason: PAY_LIGHT },
 ];
+/** THE VAULT page's doors (lot Q3, step Q3.11; the vault reference's box, MK V). */
+const VAULT_FLOOR = "THE VAULT page's doors (lot Q3, step Q3.11; the vault reference's box, MK V): each box's floor runs past the column on purpose, fading into the page, and the lid's slab edge past the lid in its 3D turn, drawn by the box's decorative layers (aria-hidden); the app is clipped sideways on this page, so the page never scrolls sideways";
+const VAULT_KNOWN: readonly { state: string; starts: string; reason: string }[] = [
+  'main.view.view--vault.vp spills out of its box',
+  'div.vp-body spills out of its box',
+  'section.vp-sec.vp-sec--vaults spills out of its box',
+  'ul.vp-vaults spills out of its box',
+  'li.vp-vault spills out of its box',
+  'div.vp-door spills out of its box',
+  'div.vault-box.vault-box--phone spills out of its box',
+  'section.vlt spills out of its box',
+  'div.vlt__stage spills out of its box',
+  'span.vo-lid-edge spills out of its box',
+].map((starts) => ({ state: 'vault-page-stress', starts, reason: VAULT_FLOOR }));
 const KNOWN: readonly { state: string; starts: string; reason: string }[] = [
   ...FIVE_B_KNOWN,
+  ...VAULT_KNOWN,
   ...['room-stress', 'room-guaranteed'].flatMap((state) => [
     { state, starts: 'div.live__stage spills out of its box', reason: DOOR },
     { state, starts: 'section.live__room.live__screen spills out of its box', reason: DOOR },

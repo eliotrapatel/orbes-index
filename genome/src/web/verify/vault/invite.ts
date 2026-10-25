@@ -55,3 +55,43 @@ export function forgetInvite(): void {
     // Nothing kept.
   }
 }
+
+/*
+ * A credit to give opened signed out on a phone (plan §3.5, §3.10: the sign-in first, then its page): its code kept in this
+ * tab (sessionStorage `orbes.gift`) while MY PIECES signs in or creates the account, /verify/gift/<code> reopened once
+ * signed in (main.ts), then forgotten. A computer's sign-in page returns to the gift's page by itself.
+ */
+const GIFT_KEY = 'orbes.gift';
+let giftMemory: string | null = null;
+
+/** The code of /verify/gift/<code> kept for the sign-in on a phone. */
+export function keepGift(code: string): void {
+  if (!isVaultCode(code)) return;
+  giftMemory = code.toUpperCase();
+  try {
+    store()?.setItem(GIFT_KEY, giftMemory);
+  } catch {
+    // Kept in memory only.
+  }
+}
+
+/** The kept gift's code, or null. */
+export function keptGift(): string | null {
+  try {
+    const v = store()?.getItem(GIFT_KEY) ?? null;
+    if (v && isVaultCode(v)) return v;
+  } catch {
+    // Read from memory.
+  }
+  return giftMemory;
+}
+
+/** Forgotten once its page is reopened (or the session signs in elsewhere). */
+export function forgetGift(): void {
+  giftMemory = null;
+  try {
+    store()?.removeItem(GIFT_KEY);
+  } catch {
+    // Nothing kept.
+  }
+}

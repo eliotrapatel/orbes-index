@@ -130,8 +130,8 @@ import { releaseArrangement } from './views/desktop-release.js';
 import { piecesArrangement } from './views/desktop-pieces.js';
 import { isScanPagePath, SCAN_PAGE_PATH, scanPageView } from './views/desktop-scan.js';
 import { ACCOUNT_PATH, ACCOUNT_VAULT_PATH, ACCOUNT_WISHLIST_PATH, accountPath, accountRouteOf, isAccountView, type AccountView } from './views/desktop-account.js';
-import { giftCodeOf, isVaultPagePath, joinCodeOf, VAULT_PAGE_PATH, vaultLinkOf } from './vault-model.js';
-import { keepInvite } from './vault/invite.js';
+import { GIFT_PATH, giftCodeOf, isVaultPagePath, joinCodeOf, VAULT_PAGE_PATH, vaultLinkOf } from './vault-model.js';
+import { forgetGift, keepGift, keepInvite, keptGift } from './vault/invite.js';
 import { vaultPageView } from './views/vault-page.js';
 import { vaultGiftView } from './views/vault-gift.js';
 import { isSignInPath, registerSignInPage, SIGN_IN_PATH, signInPageView, type SignInPageView, type SignInRequest, type SignInTab } from './views/desktop-signin.js';
@@ -384,6 +384,17 @@ class App {
     const arrival = readArrival(location, document, tabStorage(), history);
     // What the collector looks at (plan CUSTOMER INTELLIGENCE §3.3 T.9): off in an automated browser, nothing drawn.
     seen.start(this.api);
+    // A credit to give opened signed out on a phone (plan §3.5, §3.10): its page again in MY PIECES' place once signed in
+    // there (SIGN IN or CREATE ACCOUNT); signed in anywhere else, the kept code is forgotten.
+    this.session.subscribe((s) => {
+      if (s.status !== 'signed-in') return;
+      const code = keptGift();
+      if (!code) return;
+      forgetGift();
+      if (isDesktop() || this.screen !== 'pieces' || entryOf(history.state) !== 'pieces') return;
+      replaceEntry({ screen: 'gift' }, `${GIFT_PATH}/${code}`);
+      void this.showGift();
+    });
     this.photoInput.addEventListener('change', () => {
       const file = this.photoInput.files?.[0];
       this.photoInput.value = '';
@@ -1435,15 +1446,22 @@ class App {
     else view.dispose();
   }
 
-  /** A credit to give (N10): its page, signed in; the sign-in first. */
+  /**
+   * A credit to give (N10): its page, signed in; the sign-in first. On a phone its code is kept for MY PIECES' sign-in and
+   * its page reopened once signed in (start()); a computer's sign-in page returns to it by itself.
+   */
   private async showGift(focus = true): Promise<void> {
     this.generation++;
     this.stopCamera();
+    const code = giftCodeOf(location.pathname);
     const view = vaultGiftView({
       api: this.api,
       session: this.session,
-      code: giftCodeOf(location.pathname),
-      onSignIn: () => this.vaultSignIn(),
+      code,
+      onSignIn: () => {
+        if (code && !isDesktop()) keepGift(code);
+        this.vaultSignIn();
+      },
     });
     if (await this.swap(view.root, 'gift', focus)) this.live = view;
     else view.dispose();

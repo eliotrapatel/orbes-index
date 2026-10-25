@@ -86,6 +86,13 @@ body.nocturne .view--vault.vp {
 
 /* ── YOUR VAULTS: the doors ── */
 
+/* Each door's floor (vault.css .vo-floor) reaches wider than the window once projected: the app is clipped sideways on
+   this page, never up or down (the open lid, the float), so the page never scrolls sideways (phone and computer). `clip`
+   makes no scroll container: the sticky menu stays. */
+body.nocturne .app:has(.view--vault) {
+  overflow-x: clip;
+}
+
 .vp .vp-vaults {
   display: grid;
   gap: 26px;
