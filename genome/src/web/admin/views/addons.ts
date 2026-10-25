@@ -204,7 +204,8 @@ export function addonsSection(ctx: ViewContext, addons: readonly AddonView[], su
       },
       kind: ['wide'],
     },
-    { label: 'Type', cell: (a) => h('span', { data: { testid: 'addon-kind' } }, ADDON_KIND_LABELS[a.kind]), kind: ['nowrap'] },
+    // WITH STOCK on two lines when the page needs it (the table's last columns stay in the page at 1440 px).
+    { label: 'Type', cell: (a) => h('span', { data: { testid: 'addon-kind' } }, ADDON_KIND_LABELS[a.kind]) },
     { label: 'Prices', cell: (a) => lines(addonPricesText(a), 'addon-prices'), kind: ['nowrap'] },
     { label: 'Offered', cell: (a) => h('span', { class: a.active ? undefined : 'soft' }, lines(addonOfferedMarks(a), 'addon-offered')), kind: ['nowrap'] },
     { label: 'Releases', cell: (a) => h('span', { class: a.releases > 0 ? undefined : 'soft', data: { testid: 'addon-releases' } }, addonReleasesText(a)), kind: ['num'] },

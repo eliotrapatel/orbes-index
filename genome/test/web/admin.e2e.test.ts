@@ -3744,6 +3744,8 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await row.locator('[data-testid=addon-stock]').textContent()).toContain('FRANCE WAREHOUSE · 0');
     expect(await row.locator('[data-testid=addon-state]').textContent()).toBe('ACTIVE');
     expect(await row.locator('[data-testid=addon-shopify]').textContent()).toBe('NOT LINKED');
+    // Lot Q2's three columns keep Status · Shopify and the row's actions in the page at 1440 px (no sideways scroll).
+    expect(await p.locator('#addons .table-wrap').evaluate((w) => w.scrollWidth - w.clientWidth)).toBeLessThanOrEqual(1);
     const addon = await ctx.db.selectFrom('addon_items as a').innerJoin('skus as k', 'k.addon_id', 'a.id').select(['a.id', 'k.id as sku_id']).where('a.name', '=', 'POLISHING CLOTH').executeTakeFirstOrThrow();
     await shot(p, 'catalogue-addons', { phone: true });
 
