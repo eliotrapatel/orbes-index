@@ -44,6 +44,11 @@
  *                        store matches its customers to the ORBES accounts once it exists. No VAT, no shipping fee:
  *                        taxes and shipping are 0.00. An AUDITOR reads the emails and the buyers masked (the routes).
  *                        Never an order of a test account (the test entrants' pool, services/population.ts).
+ *                        THE VAULT (lot Q3, plan §8, S2-S4): a VAULT order is a platform order like the others (Source
+ *                        « orbes-vault »): bought under its right to buy at its usual price, paid as every platform order
+ *                        (later through a Shopify checkout for that order); won free at 0 (no checkout), PAID once claimed;
+ *                        both packed and shipped by the platform, their units out of its stock. A vault-only model is
+ *                        never one of the product export's lines; its SKUs take its unpublished product's ids (S5).
  *
  * Only the columns ORBES fills are written, in the published order: Shopify leaves the others to their defaults on an
  * import, and its header names are its own (test/services/shopify.test.ts holds them against the published lists).

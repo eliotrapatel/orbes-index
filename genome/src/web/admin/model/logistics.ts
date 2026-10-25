@@ -465,7 +465,7 @@ export interface ShippingSlip {
   buyer: SlipBuyer;
   /** Plan MACRO M3 §1.3: the box to use with its inside sides, and the parcel's weight (or what it misses); never a cost. */
   parcel: { box: string; weight: string };
-  pieces: { reference: string; piece: string; serial: string | null; size: string; addons: string[]; engraving: string | null; surprise: string | null }[];
+  pieces: { reference: string; piece: string; serial: string | null; size: string; addons: string[]; engraving: string | null; surprise: string | null; vaultCard: boolean }[];
 }
 
 export function shippingSlip(view: ShippingOrderView): ShippingSlip {
@@ -482,6 +482,8 @@ export function shippingSlip(view: ShippingOrderView): ShippingSlip {
       addons: parcelAddonWords(o),
       engraving: o.engraving,
       surprise: o.surprise,
+      // Lot Q3 (§2.8): THE VAULT CARD in the box with this piece, as its checklist line says.
+      vaultCard: o.vaultCard === true,
     })),
   };
 }

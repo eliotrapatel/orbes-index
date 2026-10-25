@@ -516,6 +516,16 @@ export async function pieceBought(tx: Db, productUuid: string, accountId?: strin
     .executeTakeFirst();
   if (!o) return true;
   if (accountId !== undefined && o.account_id.toLowerCase() !== accountId.toLowerCase()) return false;
+  return orderOfABoughtPiece(o);
+}
+
+/**
+ * Whether an order's piece was bought (N8): every LIVE, DRAW and SALON order (later a Shopify one, S6), a VAULT order
+ * bought under its RIGHT TO BUY (its price above 0); never a welcome GIFT, an EXCHANGE's replacement nor a VAULT order at
+ * 0. Its piece opens a PIECE vault at its first registration by its buyer (`pieceBought`), and its parcel carries THE
+ * VAULT CARD (services/parcels.ts vaultCardOrders, §2.8, N9).
+ */
+export function orderOfABoughtPiece(o: Pick<OrderRow, 'channel' | 'price_minor'>): boolean {
   if (o.channel === 'GIFT' || o.channel === 'EXCHANGE') return false;
   if (o.channel === 'VAULT') return (o.price_minor ?? 0) > 0;
   return true;

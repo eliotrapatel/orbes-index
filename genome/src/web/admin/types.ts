@@ -4114,6 +4114,8 @@ export interface ParcelPiece {
   surprise: string | null;
   /** The piece bound by its packing scan, and whether it is scanned in the current shipment. */
   piece: { productId: string; scanned: boolean } | null;
+  /** Lot Q3 (§2.8): THE VAULT CARD goes in the box with this piece (its checklist line `vault-card:<order>`). */
+  vaultCard: boolean;
 }
 
 /** A line of the packing checklist: ticked by hand, or (`byScan`) only by the card's scan. */
