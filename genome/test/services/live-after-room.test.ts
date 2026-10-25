@@ -226,11 +226,15 @@ describe('the after-room', () => {
       const retired = await createModel(t.db, 'RETIRED');
       await t.db.updateTable('models').set({ active: false }).where('id', '=', retired).execute();
       await rejects(f.liveConsole.update(created.id, { afterRoom: { ...AFTER(), addonIds: [], modelId: retired } }, f.admin), 'MODEL_INACTIVE', 409);
-      // Turned off: removed, with its sizes and add-ons.
+      // Its own release add-on of before, as migration 0060 recorded its conversion into GIFT BOX.
+      await t.db.insertInto('addon_conversions').values({ source: 'LIVE_ADDON', source_id: r0(), drop_id: child, addon_id: box, currency: 'EUR', price_minor: null }).execute();
+      // Turned off: removed, with its sizes, add-ons and that record; GIFT BOX stays in the catalogue.
       const off = await f.liveConsole.update(created.id, { afterRoom: null }, f.admin);
       expect(off.afterRoom).toBeNull();
       expect(await t.db.selectFrom('drops').select('id').where('id', '=', child).executeTakeFirst()).toBeUndefined();
       expect(await t.db.selectFrom('drop_sizes').select('id').where('drop_id', '=', child).execute()).toEqual([]);
+      expect(await t.db.selectFrom('addon_conversions').select('id').where('drop_id', '=', child).execute()).toEqual([]);
+      expect(await t.db.selectFrom('addon_items').select('name').where('id', '=', box).executeTakeFirstOrThrow()).toEqual({ name: 'GIFT BOX' });
       // Announced, it changes no more, as every setting.
       await f.liveConsole.update(created.id, { afterRoom: { ...AFTER(), addonIds: [] } }, f.admin);
       await f.liveConsole.publish(created.id, {}, f.admin);

@@ -379,7 +379,7 @@ export async function legacyLiveAddons(db: Db, dropId: string, accountId: string
     .where('e.drop_id', '=', dropId)
     .where('e.account_id', '=', accountId)
     .execute();
-  // One release add-on, one id on every order (live_addons' then).
+  // One release add-on, one id on every order (its release add-on's id then).
   const sold = addons.map((a) => ({ id: randomUUID(), ...a }));
   for (const o of rows) if (o.set_piece === null || o.set_piece === 1) await legacyAddons(db, o.id, sold);
 }

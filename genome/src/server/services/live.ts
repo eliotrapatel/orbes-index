@@ -152,7 +152,7 @@ export const LIVE_TURN_SECONDS = Object.freeze({ min: 10, max: 300, default: 30 
 export const LIVE_PAY_MINUTES = Object.freeze({ min: 1, max: 60, default: 5 });
 export const LIVE_PER_ACCOUNT = Object.freeze({ min: 1, max: 5, default: 1 });
 /**
- * The release add-ons an order of before lot Q2 carries, at most (live_addons.position 1..6): its invoice's ADDON lines
+ * The release add-ons an order of before lot Q2 carries, at most (1 to 6 per release then): its invoice's ADDON lines
  * (render/invoice.ts). Since step Q2.4 a release picks catalogue add-ons without this cap (N12); the terms state it
  * until lot Q2's legal step (Q2.10).
  */
@@ -1131,15 +1131,15 @@ export async function accountLiveData(db: Db, accountId: string): Promise<{ entr
     .orderBy('e.joined_at')
     .orderBy('e.id')
     .execute();
-  const addons = rows.length
-    ? await db
-        .selectFrom('live_entry_addons as x')
-        .innerJoin('live_addons as a', 'a.id', 'x.addon_id')
-        .select(['x.entry_id', 'a.label', 'x.price_minor', 'a.position'])
-        .where('x.entry_id', 'in', rows.map((r) => r.id))
-        .orderBy('a.position')
-        .execute()
+  // The release add-ons an entry took before lot Q2, as sold: its first order's snapshot (N15; 0060 dropped their table).
+  const snapshots = rows.length
+    ? await db.selectFrom('orders').select(['live_entry_id', 'addons']).where('live_entry_id', 'in', rows.map((r) => r.id)).where('piece', '=', 1).execute()
     : [];
+  const addons = snapshots.flatMap((o) =>
+    (Array.isArray(o.addons) ? o.addons : [])
+      .filter((a) => a && typeof a.label === 'string' && Number.isInteger(a.priceMinor))
+      .map((a) => ({ entry_id: o.live_entry_id!, label: a.label, price_minor: a.priceMinor })),
+  );
   const guests = rows.length
     ? await db.selectFrom('after_room_guests').select(['entry_id', 'position']).where('entry_id', 'in', rows.map((r) => r.id)).execute()
     : [];

@@ -41,7 +41,8 @@
  *                most characters `textMax`, 1 to 20 (20, the house's, by default), is the engraving's only (400 for any
  *                other value on another add-on; an add-on that stops being the engraving goes back to 20).
  *   releases     how many releases not ended pick it (drop_addons); `convertedFrom`, what it was converted from
- *                (addon_conversions, migration 0060; none before it).
+ *                (addon_conversions, migration 0060, step Q2.6): each release whose own add-on it became, and Orders →
+ *                Settings' engraving price; none for an add-on staff created.
  *   picked       (step Q2.3, D3) each release with a purchase picks exactly which add-ons it offers, in its order
  *                (`drop_addons`, 1 to 100: no other cap, N12): a LIVE RELEASE, its after-room and a draw, each its own
  *                (services/live-console.ts, services/drops.ts `addonIds`), every one active, its moment's switch on and
@@ -823,6 +824,25 @@ export class AddonService {
       .where(releaseNotEnded('d', this.clock()))
       .groupBy('x.addon_id')
       .execute();
+    // What each was converted from (migration 0060): one entry per release, and one for Orders → Settings' engraving.
+    const conversions = await this.db
+      .selectFrom('addon_conversions as c')
+      .leftJoin('drops as d', 'd.id', 'c.drop_id')
+      .select(['c.addon_id', 'c.source', 'c.drop_id', 'd.title', 'c.converted_at'])
+      .where('c.addon_id', 'in', ids)
+      .orderBy('c.converted_at')
+      .orderBy('d.opens_at')
+      .orderBy('c.drop_id')
+      .orderBy('c.id')
+      .execute();
+    const convertedFrom = new Map<string, AddonConversion[]>();
+    for (const c of conversions) {
+      const list = convertedFrom.get(c.addon_id) ?? [];
+      if (!list.some((x) => x.source === c.source && (x.release?.id ?? null) === c.drop_id)) {
+        list.push({ source: c.source, release: c.drop_id ? { id: c.drop_id, title: c.title! } : null, convertedAt: c.converted_at });
+      }
+      convertedFrom.set(c.addon_id, list);
+    }
     const stock = skuIds.length === 0 ? { rows: [] } : await sql<{ sku_id: string; location_id: string; name: string; is_default: boolean; on_hand: number; reserved: number; minimum: number | null }>`
       SELECT k.id AS sku_id, l.id AS location_id, l.name, l.is_default,
              coalesce((SELECT sum(m.delta) FROM stock_movements m WHERE m.sku_id = k.id AND m.location_id = l.id), 0)::int AS on_hand,
@@ -859,8 +879,7 @@ export class AddonService {
       engraving: r.engraving,
       textMax: r.text_max,
       releases: Number(picked.find((p) => p.addon_id === r.id)?.n ?? 0),
-      // Migration 0060 (Q2.6) records what was converted; nothing before it.
-      convertedFrom: [],
+      convertedFrom: convertedFrom.get(r.id) ?? [],
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     }));

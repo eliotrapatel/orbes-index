@@ -26,7 +26,7 @@
  *                 (`setShippingRates`), audited `order.shipping_rates.update`, before and after.
  *   ENGRAVING     since lot Q2, step Q2.5 (D1, D4, N4) the engraving is a catalogue add-on (services/addons.ts, the
  *                 ENGRAVING service, its prices per currency and its YOUR ORDERS switch): Orders → Settings no longer
- *                 sets its price, and `engraving_prices` (migration 0039) is read only by migration 0060's conversion.
+ *                 sets its price; migration 0060 converted its prices (0039) into that add-on's and dropped them.
  *
  * Nothing personal is stored here. The tier of each benefit is read when the benefit is used (services/drops.ts,
  * orders.ts, tier-grants.ts), never kept from an earlier reading.

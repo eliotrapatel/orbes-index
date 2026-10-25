@@ -1688,8 +1688,8 @@ export class LiveConsoleService {
     if (a && (await tx.selectFrom('drops').select('set_id').where('id', '=', parent.id).executeTakeFirst())?.set_id) throw afterRoomSet();
     if (!a) {
       if (child) {
-        // A release add-on written before lot Q2 (step Q2.4: none is written since; 0060 converts the rest).
-        await tx.deleteFrom('live_addons').where('drop_id', '=', child.id).execute();
+        // The record of its own add-ons converted by migration 0060 goes with it (the add-ons stay in the catalogue).
+        await tx.deleteFrom('addon_conversions').where('drop_id', '=', child.id).execute();
         await tx.deleteFrom('drop_addons').where('drop_id', '=', child.id).execute();
         await tx.deleteFrom('drop_sizes').where('drop_id', '=', child.id).execute();
         await tx.deleteFrom('drops').where('id', '=', child.id).execute();
