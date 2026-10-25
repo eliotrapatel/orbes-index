@@ -552,12 +552,14 @@ export async function releaseCovered(
  * dialog's default), shown to its holder, granted by no one (the vault named instead), in the opening's transaction.
  * Set aside at once for the next published LIVE RELEASE of any model that is not an after-room, opens by its validity
  * and has room (`coverNextRelease`), and bound to its holder's waiting entry there; otherwise it waits for the next one
- * published (`coverOnPublish`), and is carried as a model's guarantee is (`releaseCovered`). Then used as every
- * guarantee. Noted `guarantee.grant` (the system as actor, with its vault).
+ * published (`coverOnPublish`), and is carried as a model's guarantee is (`releaseCovered`). A LIVE vault's own release
+ * (`dropId`) is never covered, even while its other sizes still sell (D4, D17: opened right on SOLD OUT): "the next
+ * LIVE release" is another one. Then used as every guarantee. Noted `guarantee.grant` (the system as actor, with its
+ * vault).
  */
 export async function grantFromVault(
   tx: Db,
-  v: { accountId: string; vaultId: string },
+  v: { accountId: string; vaultId: string; dropId?: string | null },
   now: Date,
   notes: AuditRecordInput[],
   changes?: LiveChanges,
@@ -565,7 +567,7 @@ export async function grantFromVault(
   const settings = await readGuaranteeSettings(tx);
   const validUntil = endOfParisDay(parisDayPlus(now, settings.validDays));
   const g = { id: '00000000-0000-0000-0000-000000000000', account_id: v.accountId, scope: 'LIVE' as const, model_id: null, collection_id: null, pieces: GUARANTEE_PIECES.min, valid_until: validUntil };
-  const cover = await coverNextRelease(tx, g, now);
+  const cover = await coverNextRelease(tx, g, now, v.dropId ? { except: v.dropId } : {});
   const inserted = await tx
     .insertInto('house_guarantees')
     .values({

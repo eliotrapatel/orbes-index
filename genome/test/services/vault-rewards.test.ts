@@ -337,13 +337,35 @@ describe('THE VAULT’s rewards delivered (step Q3.4)', () => {
     expect((await opener.open(giver.id, late.id)).giftCode).toBeNull();
   });
 
-  it('I WAS THERE: nothing but its card; the receipt says where to save it', async () => {
+  it('I WAS THERE: nothing but its card; the receipt says where it is', async () => {
     await only({});
     const a = await createAccount(t.db);
     const v = await houseVault(a.id);
     expect(await opener.open(a.id, v.id)).toMatchObject({ kind: 'I_WAS_THERE', prize: 'I WAS THERE', line: 'Your card. Save it.', odds: '1 IN 1', rare: false, where: 'NONE', giftCode: null });
     expect(await vaultRow(v.id)).toMatchObject({ grant_id: null, order_id: null, guarantee_id: null, gift_id: null, offer_until: null, value_minor: null, currency: null, cost_minor: 0 });
-    expect(await receipt(v.id)).toEqual([{ title: 'FROM THE VAULT', body: 'Your vault held I WAS THERE · Your card. Save it. Save your card under THE VAULT.' }]);
+    expect(await receipt(v.id)).toEqual([{ title: 'FROM THE VAULT', body: 'Your vault held I WAS THERE · Your card. Save it. It is under THE VAULT.' }]);
     expect(VAULT_DRAW_PARTS).toBe(1_000_000);
+  });
+
+  it('GUARANTEED in a LIVE vault opened on SOLD OUT while its release still sells: never covers that release, the next LIVE one instead (OP-22, D4, D17)', async () => {
+    await only({ kind: 'GUARANTEED' });
+    const a = await createAccount(t.db);
+    const start = clock.now();
+    // Its release: two sizes, the other still selling; the next LIVE release, published, opening a day later.
+    const r = await createLiveRelease(f, { opensAt: new Date(start.getTime() + HOUR), closesAt: new Date(start.getTime() + 3 * HOUR), sizes: [{ label: '52', stock: 1 }, { label: '54', stock: 1 }] });
+    await t.db.updateTable('drops').set({ vault_on: true }).where('id', '=', r.id).execute();
+    const later = await createLiveRelease(f, { opensAt: new Date(start.getTime() + DAY), sizes: [{ label: '52', stock: 1 }] });
+    clock.set(new Date(start.getTime() + HOUR - MINUTE));
+    await f.live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id }, a.actor);
+    const entry = await t.db.selectFrom('live_entries').select('id').where('drop_id', '=', r.id).where('account_id', '=', a.id).executeTakeFirstOrThrow();
+    const v = (await vault().give({ source: 'LIVE', accountId: a.id, dropId: r.id, entryId: entry.id })).vaults[0]!;
+    // Opened while the release runs (its size sold out, the other still on sale).
+    clock.set(new Date(start.getTime() + 2 * HOUR));
+    expect(await opener.open(a.id, v.id)).toMatchObject({ kind: 'GUARANTEED', where: 'ACCOUNT' });
+    const g = await t.db.selectFrom('house_guarantees').selectAll().where('vault_id', '=', v.id).executeTakeFirstOrThrow();
+    expect(g).toMatchObject({ scope: 'LIVE', covered_drop_id: later.id });
+    expect(await ctx.services.liveRoom.guaranteeShown(a.id, r.id)).toBeNull();
+    expect(await ctx.services.liveRoom.guaranteeShown(a.id, later.id)).toEqual({ pieces: 1 });
+    expect((await t.db.selectFrom('audit_logs').select('details').where('action', '=', 'guarantee.grant').where('target_id', '=', g.id).executeTakeFirstOrThrow()).details).toMatchObject({ coveredDropId: later.id });
   });
 });

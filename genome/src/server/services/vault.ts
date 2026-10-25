@@ -1034,7 +1034,8 @@ export class VaultService {
         return { ...none, giftId: gift.id, valueMinor: pick.amountMinor!, currency: pick.currency!, costMinor: pick.amountMinor! };
       }
       case 'GUARANTEED': {
-        const g = await grantFromVault(tx, { accountId: v.account_id, vaultId: v.id }, now, notes, changes);
+        // A LIVE vault's own release is never the one it covers (OP-22 "the next LIVE release").
+        const g = await grantFromVault(tx, { accountId: v.account_id, vaultId: v.id, dropId: v.source === 'LIVE' ? v.drop_id : null }, now, notes, changes);
         return { ...none, guaranteeId: g.id };
       }
       case 'ADDON':

@@ -185,7 +185,7 @@ export const VAULT_REVEAL = Object.freeze({
 });
 
 /** Where what a vault held went (E9 "credits in YOUR ACCOUNT, products in YOUR ORDERS"), as its receipt says it. */
-export const VAULT_WHERE = Object.freeze({ ACCOUNT: 'It is in YOUR ACCOUNT.', ORDERS: 'It is in YOUR ORDERS.', NONE: 'Save your card under THE VAULT.' } as const);
+export const VAULT_WHERE = Object.freeze({ ACCOUNT: 'It is in YOUR ACCOUNT.', ORDERS: 'It is in YOUR ORDERS.', NONE: 'It is under THE VAULT.' } as const);
 export type VaultWhere = keyof typeof VAULT_WHERE;
 
 /** An amount as the vault writes it (OP-32 "€25 · House credit"): the symbol against the figure, `€25`, `€1 000.50`; `CHF 25`. */

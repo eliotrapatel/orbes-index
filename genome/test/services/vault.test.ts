@@ -581,7 +581,7 @@ describe('THE VAULT’s opening: the draw (pure)', () => {
     expect(vaultMoney(2_500, 'CHF')).toBe('CHF 25');
     expect(vaultOpenedWords({ prize: '€25', line: VAULT_REVEAL.credit, where: 'ACCOUNT' })).toEqual({ title: 'FROM THE VAULT', body: 'Your vault held €25 · House credit, valid 30 days. It is in YOUR ACCOUNT.' });
     expect(vaultOpenedWords({ prize: 'POLISHING CLOTH', line: VAULT_REVEAL.addon, where: 'ORDERS' }).body).toBe('Your vault held POLISHING CLOTH · Free on your next order. It is in YOUR ORDERS.');
-    expect(vaultOpenedWords({ prize: 'I WAS THERE', line: VAULT_REVEAL.card.other, where: 'NONE' }).body).toBe('Your vault held I WAS THERE · Your card. Save it. Save your card under THE VAULT.');
+    expect(vaultOpenedWords({ prize: 'I WAS THERE', line: VAULT_REVEAL.card.other, where: 'NONE' }).body).toBe('Your vault held I WAS THERE · Your card. Save it. It is under THE VAULT.');
     for (const w of [VAULT_REVEAL.credit, VAULT_REVEAL.addon, VAULT_REVEAL.guaranteed.line, VAULT_REVEAL.rightToBuy, VAULT_REVEAL.free, VAULT_REVEAL.toGive.line, VAULT_REVEAL.card.release]) {
       expect(w).not.toMatch(/house kept|set aside|paid|odds/i);
     }
