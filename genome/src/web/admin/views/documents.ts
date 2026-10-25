@@ -1,6 +1,7 @@
 /**
  * Documents: the staff's reference texts in the console. The sales and
- * shipping playbook (J-09) and the packaging kit (D-02), read in full with
+ * shipping playbook (J-09), the packaging kit (D-02) and THE VAULT CARD (lot
+ * Q3, §5, with its print files to download), read in full with
  * their tables, quotes and illustrations, a contents column on the side,
  * and a print button. They come from GET /api/admin/documents (copies of
  * docs/launch, shipped with the server).
@@ -16,6 +17,7 @@ const LANG = { fr: 'Français', en: 'English · Français' } as const;
 const DOCUMENT_IDS: Readonly<Record<string, string>> = Object.freeze({
   'SALES-PLAYBOOK.md': 'sales-playbook',
   'PACKAGING-KIT.md': 'packaging-kit',
+  'VAULT-CARD.md': 'vault-card',
 });
 const assetUrl = (name: string): string => `/api/admin/documents/assets/${encodeURIComponent(name)}`;
 

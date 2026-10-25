@@ -158,20 +158,32 @@ export function cropMarks(placements: readonly SheetPlacement[], cellWmm: number
  * ticks outside the grid on the extension of every cut line, never between
  * cells, where they would land on the neighbouring artwork. Page millimetres.
  */
-export function gridCutMarks(x0: number, y0: number, columns: number, rows: number, cellWmm: number, cellHmm: number): StrokePath {
+export function gridCutMarks(
+  x0: number,
+  y0: number,
+  columns: number,
+  rows: number,
+  cellWmm: number,
+  cellHmm: number,
+  /** Where the ticks start from the grid and how long they are (default 1 mm and 3 mm); a grid printed with a bleed starts them past it. */
+  ticks: { gapMm?: number; lengthMm?: number } = {},
+): StrokePath {
   if (!(Number.isInteger(columns) && columns >= 1 && Number.isInteger(rows) && rows >= 1)) throw new RangeError('a grid needs at least one row and one column');
+  const gap = ticks.gapMm ?? MARK_GAP_MM;
+  const len = ticks.lengthMm ?? MARK_LEN_MM;
+  if (!(gap >= 0 && len > 0)) throw new RangeError('cut marks need a gap of at least 0 and a positive length');
   const x1 = x0 + columns * cellWmm;
   const y1 = y0 + rows * cellHmm;
   let d = '';
   for (let c = 0; c <= columns; c++) {
     const x = x0 + c * cellWmm;
-    d += `M${fmt(x)} ${fmt(y0 - MARK_GAP_MM)}L${fmt(x)} ${fmt(y0 - MARK_GAP_MM - MARK_LEN_MM)}`;
-    d += `M${fmt(x)} ${fmt(y1 + MARK_GAP_MM)}L${fmt(x)} ${fmt(y1 + MARK_GAP_MM + MARK_LEN_MM)}`;
+    d += `M${fmt(x)} ${fmt(y0 - gap)}L${fmt(x)} ${fmt(y0 - gap - len)}`;
+    d += `M${fmt(x)} ${fmt(y1 + gap)}L${fmt(x)} ${fmt(y1 + gap + len)}`;
   }
   for (let r = 0; r <= rows; r++) {
     const y = y0 + r * cellHmm;
-    d += `M${fmt(x0 - MARK_GAP_MM)} ${fmt(y)}L${fmt(x0 - MARK_GAP_MM - MARK_LEN_MM)} ${fmt(y)}`;
-    d += `M${fmt(x1 + MARK_GAP_MM)} ${fmt(y)}L${fmt(x1 + MARK_GAP_MM + MARK_LEN_MM)} ${fmt(y)}`;
+    d += `M${fmt(x0 - gap)} ${fmt(y)}L${fmt(x0 - gap - len)} ${fmt(y)}`;
+    d += `M${fmt(x1 + gap)} ${fmt(y)}L${fmt(x1 + gap + len)} ${fmt(y)}`;
   }
   return { d, width: MARK_WIDTH_MM };
 }
