@@ -427,6 +427,13 @@ describe('the runbook of lot ADD-ONS ONE SYSTEM (docs/launch/DEPLOY-OQ-Q2.md)', 
     expect(catalogue).toContain(`\`Type\` \`${ADDON_KIND_LABELS.SERVICE}\` (le champ \`Supplier\` disparaît), \`Name\` \`GIFT WRAPPING\``);
     expect(catalogue).toContain(`\`Add\` : ${said(ADDONS_TEXT.added)} Sa ligne lit \`SERVICE\`, \`${ADDONS_TEXT.noStock}\`, et LIVE, DRAW, SALON, YOUR ORDERS.`);
     expect(ADDON_SWITCHES.map((s) => s.mark)).toEqual(['LIVE', 'DRAW', 'SALON', 'YOUR ORDERS']);
+    // 0060 converts a release add-on as a SERVICE offered at a LIVE purchase only: an existing GIFT WRAPPING is opened up.
+    expect(migration('0060_release_addons_converted')).toContain("VALUES (g.name, g.line, v_position, 'SERVICE', true, false, false, false,");
+    expect(catalogue).toContain(`Si la conversion a déjà fait un GIFT WRAPPING (proposé en LIVE seulement), prends-le : \`Edit\`, coche les quatre interrupteurs, un \`Price in EUR\`, \`Save\` : ${said(ADDONS_TEXT.saved)}`);
+    expect(catalogue).not.toContain('prends-le tel quel');
+    // The settings' engraving takes the next free name (ENGRAVING 2, …) when ENGRAVING is already in the catalogue.
+    expect(migration('0060_release_addons_converted')).toContain("v_name := 'ENGRAVING ' || v_n;");
+    expect(runbook).toContain('`ENGRAVING|SERVICE|f|f|f|t|t|20` quand elle naît des seuls Réglages (`ENGRAVING 2|…` si ton catalogue avait déjà un add-on nommé ENGRAVING).');
     const neverListed = 'A service, such as the engraving, has no stock: it is never listed here.';
     expect(ADDON_SKU_TEXT.groupLead).toContain(neverListed);
     expect(catalogue).toContain(`\`Logistics\` → \`Stock\`, section \`${ADDON_SKU_TEXT.group}\` : GIFT WRAPPING n'y est pas, et le texte de la section le dit : ${said(neverListed)}`);
