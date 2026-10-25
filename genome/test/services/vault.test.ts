@@ -253,6 +253,11 @@ describe('THE VAULT’s rules (VaultService, giveVault)', () => {
     const audit = (await gives(a.id)).at(-1)!;
     expect(audit).toMatchObject({ actor_type: 'admin', actor_id: staff.id, details: { source: 'HOUSE', occasionKey: `HOUSE:${gift}`, count: 1, segmentId: null, note: true } });
     expect(JSON.stringify(audit.details)).not.toContain('evening');
+    // A blank note is no note: given, stored null, audited without one.
+    const blankGift = randomUUID();
+    expect((await vault().give({ source: 'HOUSE', accountId: a.id, giftId: blankGift, givenBy: staff.id, note: '   ' })).vaults).toHaveLength(1);
+    expect((await vaultsOf(a.id)).find((x) => x.occasion_key === `HOUSE:${blankGift}`)).toMatchObject({ note: null });
+    expect((await gives(a.id)).at(-1)!.details).toMatchObject({ occasionKey: `HOUSE:${blankGift}`, note: false });
     clock.set(at);
   });
 

@@ -136,7 +136,7 @@ function occasionColumns(o: VaultOccasion) {
   }
 }
 
-/** The occasion checked: its source known and its ids UUIDs; a HOUSE note trimmed (1 to 500 characters) or none. */
+/** The occasion checked: its source known and its ids UUIDs; a HOUSE note trimmed (1 to 500 characters) or none (a blank note is none). */
 function checkOccasion(o: VaultOccasion): VaultOccasion {
   if (!o || typeof o !== 'object' || !(VAULT_SOURCES as readonly string[]).includes(o.source)) throw validationError('A vault needs one of its sources.');
   const uuids: unknown[] = [o.accountId];
@@ -149,8 +149,10 @@ function checkOccasion(o: VaultOccasion): VaultOccasion {
   if (o.source === 'TIER' && ![1, 2, 3].includes(o.tier)) throw validationError('A tier is 1, 2 or 3.');
   if (o.source === 'FRIEND' && o.friendAccountId.toLowerCase() === o.accountId.toLowerCase()) throw validationError('A friend is another account.');
   if (o.source === 'HOUSE' && o.note !== undefined && o.note !== null) {
-    const note = typeof o.note === 'string' ? o.note.trim() : '';
-    if (note.length === 0 || [...note].length > VAULT_NOTE_MAX) throw validationError(`A note is 1 to ${VAULT_NOTE_MAX} characters.`);
+    if (typeof o.note !== 'string') throw validationError(`A note is 1 to ${VAULT_NOTE_MAX} characters.`);
+    const note = o.note.trim();
+    if (note.length === 0) return { ...o, note: null };
+    if ([...note].length > VAULT_NOTE_MAX) throw validationError(`A note is 1 to ${VAULT_NOTE_MAX} characters.`);
     return { ...o, note };
   }
   return o;
