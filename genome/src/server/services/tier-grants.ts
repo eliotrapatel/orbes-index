@@ -42,6 +42,7 @@ import type { AuditRecordInput, AuditService } from './audit.js';
 import { CLUB_TIER_THRESHOLDS, clubCounts, tierOf } from './club.js';
 import { creditOf, readProgram } from './club-program.js';
 import { orderReference } from './orders.js';
+import { giveTierVaults } from './vault.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -276,7 +277,7 @@ export class TierGrantService {
   async ensure(accountId: string): Promise<number> {
     return inTransaction(this.db, async (tx) => {
       const notes = await ensureGrants(tx, accountId, this.clock());
-      for (const n of notes) await this.audit.record(n, tx);
+      for (const n of [...notes, ...(await giveTierVaults(tx, accountId, this.clock()))]) await this.audit.record(n, tx);
       return notes.length;
     });
   }

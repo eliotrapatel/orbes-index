@@ -131,6 +131,7 @@ import { computeGenome } from '../../src/core/genome/genome.js';
 import { packIdentity } from '../../src/core/identity.js';
 import { encodePayload, frameCodeData, signingMessage, unframeCodeData } from '../../src/core/payload.js';
 import type { AppContext } from '../../src/server/context.js';
+import { beforeTheVault } from '../../src/server/db/seed/before-the-vault.js';
 import { deriveDropSeedKey } from '../../src/server/services/drops.js';
 import { isDomainError } from '../../src/server/errors.js';
 import { deriveLiveTurnKey } from '../../src/server/services/live.js';
@@ -324,35 +325,38 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
     DemoVariant,
     (typeof OWN_STAGES)[number] | 'house' | 'addons'
   >;
-  if (story === 'empty') await seedEmpty(w);
-  else if (story === 'stress') await seedStress(w);
-  else {
-    await seedCatalogue(w);
-    // The queue's stage tells the live story, its own releases in place of the live one.
-    await seedStory(w, story === 'queue' ? 'live' : story);
-    if (story === 'full' || story === 'rules') await seedScanCases(w);
-    if (story === 'full') await seedYearlyCare(w);
-    if (story === 'room') await seedRoom(w);
-    if (story === 'live') await seedLive(w);
-    if (story === 'queue') await seedQueue(w);
-    if (story === 'afterroom') await seedAfterRoom(w);
-    if (story === 'afterroom-ends') await seedAfterRoomEnds(w);
-    if (story === 'draws') await seedDraws(w);
-    if (story === 'full' || story === 'room' || story === 'draws') await seedGuarantees(w, story);
-    if (story === 'full' || story === 'room') await seedSizes(w, story);
-    if (variant === 'pairs') await seedPairs(w);
-    if (variant === 'draw-sizes') await seedDrawSizes(w);
-    if (variant === 'draw-selected') await seedDrawSelected(w);
-    if (variant === 'email') await seedEmail(w);
-    if (variant === 'care-used') await seedCareUsed(w);
-    if (variant === 'orbes-care') await seedOrbesCare(w);
-    if (variant === 'gallery') await seedGallery(w);
-    if (variant === 'house') await seedHouse(w);
-    if (variant === 'worn') await seedWorn(w);
-    if (variant === 'addons') await seedAddons(w);
-    if (variant === 'set') await seedSet(w);
-    if (variant === 'set-live') await seedSetLive(w);
-  }
+  // The story is told before THE VAULT's deployment (lot Q3): no vault for it, its tiers held as migration 0061 wrote them.
+  await beforeTheVault(ctx.db, async () => {
+    if (story === 'empty') await seedEmpty(w);
+    else if (story === 'stress') await seedStress(w);
+    else {
+      await seedCatalogue(w);
+      // The queue's stage tells the live story, its own releases in place of the live one.
+      await seedStory(w, story === 'queue' ? 'live' : story);
+      if (story === 'full' || story === 'rules') await seedScanCases(w);
+      if (story === 'full') await seedYearlyCare(w);
+      if (story === 'room') await seedRoom(w);
+      if (story === 'live') await seedLive(w);
+      if (story === 'queue') await seedQueue(w);
+      if (story === 'afterroom') await seedAfterRoom(w);
+      if (story === 'afterroom-ends') await seedAfterRoomEnds(w);
+      if (story === 'draws') await seedDraws(w);
+      if (story === 'full' || story === 'room' || story === 'draws') await seedGuarantees(w, story);
+      if (story === 'full' || story === 'room') await seedSizes(w, story);
+      if (variant === 'pairs') await seedPairs(w);
+      if (variant === 'draw-sizes') await seedDrawSizes(w);
+      if (variant === 'draw-selected') await seedDrawSelected(w);
+      if (variant === 'email') await seedEmail(w);
+      if (variant === 'care-used') await seedCareUsed(w);
+      if (variant === 'orbes-care') await seedOrbesCare(w);
+      if (variant === 'gallery') await seedGallery(w);
+      if (variant === 'house') await seedHouse(w);
+      if (variant === 'worn') await seedWorn(w);
+      if (variant === 'addons') await seedAddons(w);
+      if (variant === 'set') await seedSet(w);
+      if (variant === 'set-live') await seedSetLive(w);
+    }
+  });
   clock.set(NOCTURNE_NOW);
   // Every account's session opened now: a capture signs in with its cookie.
   for (const a of Object.values(demo.accounts)) {

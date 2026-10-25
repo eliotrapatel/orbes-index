@@ -60,6 +60,7 @@ import { customerAccountLocked } from './auth.js';
 import { findProduct } from './lifecycle.js';
 import type { ImageUpload } from './media.js';
 import { TRANSFERABLE_STATUSES } from './ownership.js';
+import { giveVault } from './vault.js';
 
 /** The photographs a page of a sheet's WORN holds (the sheet carries the first). */
 export const WORN_PAGE_SIZE = 12;
@@ -638,7 +639,7 @@ export class WornService {
     if (!id) throw wornNotFound();
     const now = this.clock();
     await inTransaction(this.db, async (tx) => {
-      const w = await tx.selectFrom('worn_photos').select(['id', 'product_id', 'status', 'created_at', 'published_at']).where('id', '=', id).forUpdate().executeTakeFirst();
+      const w = await tx.selectFrom('worn_photos').select(['id', 'product_id', 'account_id', 'ownership_id', 'status', 'created_at', 'published_at']).where('id', '=', id).forUpdate().executeTakeFirst();
       if (!w) throw wornNotFound();
       if (w.status !== from) throw wornState(stale);
       const at = now < w.created_at ? w.created_at : now;
@@ -659,6 +660,12 @@ export class WornService {
         { actor, action, targetType: 'worn_photo', targetId: id, details: { id, productId: await serialOf(tx, w.product_id), ...(refusal ? { refusal } : {}) } },
         tx,
       );
+      // THE VAULT (A WORN PHOTOGRAPH PUBLISHED; OP-29 "one per published WORN photograph, at most one per piece"): its
+      // sender's vault while their ownership is open; a photograph taken down later keeps it.
+      if (to === 'PUBLISHED') {
+        const open = await tx.selectFrom('ownership').select('id').where('id', '=', w.ownership_id).where('account_id', '=', w.account_id).where('ended_at', 'is', null).executeTakeFirst();
+        if (open) for (const n of (await giveVault(tx, { source: 'WORN', accountId: w.account_id, productId: w.product_id, wornPhotoId: id }, at)).notes) await this.audit.record(n, tx);
+      }
     });
   }
 

@@ -57,7 +57,8 @@ import { countedCollector, houseAccount } from './population.js';
 import { insertNote } from './client-notes.js';
 import { profileName } from './sign-up.js';
 import { parisDay } from './schedule.js';
-import { accountTastes, TasteService, type AccountTastes, type FinishOption, type Taste, type TasteCounts, type TasteOption, type TasteOptions } from './tastes.js';
+import { giveProfileVault } from './vault.js';
+import { accountTastes, tasteOptions, TasteService, type AccountTastes, type FinishOption, type Taste, type TasteCounts, type TasteOption, type TasteOptions } from './tastes.js';
 
 // ── Shapes ─────────────────────────────────────────────────────────────────
 
@@ -189,6 +190,26 @@ export const BIRTH_DATE_WHY_MAX = 500;
 
 /** A staff write on a DELETED account (plan §3.6 C.11): the sheet still reads, nothing is written. */
 export const accountDeleted = () => conflict('ACCOUNT_DELETED', 'This account is deleted.');
+
+/**
+ * What YOUR PROFILE still misses (`completion().missing`, as `gather` reads it), in `db` (a save's transaction): THE
+ * VAULT's A COMPLETE PROFILE reads it before a save's writes and after them (services/vault.ts giveProfileVault).
+ */
+export async function profileMissing(db: Db, accountId: string): Promise<CompletionKey[]> {
+  const account = await db.selectFrom('accounts').select('country').where('id', '=', accountId).executeTakeFirst();
+  const profile = await db.selectFrom('account_profiles').selectAll().where('account_id', '=', accountId).executeTakeFirst();
+  const address = await db.selectFrom('account_addresses').select('id').where('account_id', '=', accountId).where('is_default', '=', true).executeTakeFirst();
+  const options = await tasteOptions(db);
+  const tastes = await accountTastes(db, accountId, options);
+  return completion(
+    profile
+      ? { firstName: profile.first_name, lastName: profile.last_name, birthDate: profile.birth_date, city: profile.city, phone: profile.phone, instagram: profile.instagram, heard: profile.heard_option_id, tastes }
+      : null,
+    { country: account?.country ?? null },
+    address !== undefined,
+    options,
+  ).missing;
+}
 /** The two voices of PROFILE_CHANGED: the collector's own, and Client Services'. */
 export const profileChanged = (by: 'collector' | 'staff') =>
   conflict('PROFILE_CHANGED', by === 'collector' ? 'Your profile was changed meanwhile.' : 'The client changed the profile meanwhile. It has been read again: check and save.');
@@ -502,6 +523,7 @@ export class ProfileService {
       if (version !== (row?.version ?? 0)) throw profileChanged('staff');
       const current = row?.birth_date ?? null;
       if (next === current) return;
+      const missingBefore = await profileMissing(tx, id);
       const change: 'set' | 'changed' | 'cleared' = next === null ? 'cleared' : current === null ? 'set' : 'changed';
       const columns = {
         birth_date: next,
@@ -518,6 +540,7 @@ export class ProfileService {
         { actor, action: 'account.profile.update', targetType: 'account', targetId: id, details: { by: 'staff', fields: ['birthDate'], birthDate: change, noteId } },
         tx,
       );
+      for (const n of await giveProfileVault(tx, id, missingBefore, await profileMissing(tx, id), now)) await this.audit.record(n, tx);
     });
     return this.forStaff(id, { inClear: true });
   }
@@ -531,6 +554,8 @@ export class ProfileService {
       if (by === 'staff' && account.status === 'DELETED') throw accountDeleted();
       const row = await tx.selectFrom('account_profiles').selectAll().where('account_id', '=', id).forUpdate().executeTakeFirst();
       if (x.version !== (row?.version ?? 0)) throw profileChanged(by);
+      // THE VAULT's A COMPLETE PROFILE: what the profile missed before this save's writes.
+      const missingBefore = await profileMissing(tx, id);
 
       const now = this.clock();
       const was = row ?? null;
@@ -638,6 +663,7 @@ export class ProfileService {
         { actor, action: 'account.profile.update', targetType: 'account', targetId: id, details: { by, fields, ...(tastes ? { tastes } : {}), ...(birth ? { birthDate: birth } : {}) } },
         tx,
       );
+      for (const n of await giveProfileVault(tx, id, missingBefore, await profileMissing(tx, id), now)) await this.audit.record(n, tx);
     });
   }
 

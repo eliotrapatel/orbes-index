@@ -52,6 +52,7 @@ import { lockFoundingAddress, matchPreregistration } from './founding-match.js';
 import type { IssuedSession, SessionInfo, SessionService } from './sessions.js';
 import { insertSignUpProfile, signUpNames, type SignUpHeard } from './sign-up.js';
 import { knownLocation } from './stock.js';
+import { inviterOf } from './vault.js';
 
 export const PASSWORD_MIN_LENGTH = 12;
 export const ADMIN_LOCKOUT_THRESHOLD = 10;
@@ -148,6 +149,11 @@ export interface RegisterAccountInput {
   firstName?: string | null;
   lastName?: string | null;
   heard?: SignUpHeard | null;
+  /**
+   * A friend's personal invitation code (THE VAULT's A FRIEND, N10: `/verify/join/<code>`, kept on the device for the
+   * sign-up): a known code sets `accounts.invited_by` once; an unknown or malformed one is ignored, never a refusal.
+   */
+  invite?: string | null;
 }
 
 export interface CreateAdminInput {
@@ -291,6 +297,8 @@ export class AuthService {
       return await inTransaction(this.db, async (tx) => {
         // The founding list's registration of the same address at the same instant waits, or is waited for (F3).
         await lockFoundingAddress(tx, email.normalized);
+        // A friend's invitation (N10): its inviter, set once with the account (never the account itself: it is new).
+        const invitedBy = input.invite ? await inviterOf(tx, input.invite) : null;
         const row = await tx
           .insertInto('accounts')
           .values({
@@ -300,6 +308,8 @@ export class AuthService {
             display_name: displayName,
             country,
             status: 'ACTIVE',
+            invited_by: invitedBy,
+            invited_at: invitedBy ? now : null,
             created_at: now,
             updated_at: now,
           })
@@ -310,7 +320,8 @@ export class AuthService {
           tx,
         );
         const profile = names ? await insertSignUpProfile(tx, row.id, names, input.heard, now) : null;
-        await this.audit.record({ actor: accountActor(row.id, meta), action: 'account.register', targetType: 'account', targetId: row.id, ...(profile ? { details: { profile: true, heardOptionId: profile.heardOptionId } } : {}) }, tx);
+        const details = { ...(profile ? { profile: true, heardOptionId: profile.heardOptionId } : {}), ...(invitedBy ? { invitedBy } : {}) };
+        await this.audit.record({ actor: accountActor(row.id, meta), action: 'account.register', targetType: 'account', targetId: row.id, ...(Object.keys(details).length ? { details } : {}) }, tx);
         // The founding list (plan MACRO M1 §3.1, F3): the address's pre-registration takes the account, in its transaction.
         await matchPreregistration(tx, this.audit, { accountId: row.id, emailNormalized: email.normalized, now, at: 'SIGN_UP' }, accountActor(row.id, meta));
         return { account: accountProfile(row), session };

@@ -556,6 +556,9 @@ export const registerAccountBody = body({
     .strictObject({ optionId: z.string().max(64, 'At most 64 characters'), other: z.string().max(1000, 'At most 1000 characters').nullable().optional() }, { error: 'The answer is an object' })
     .nullable()
     .optional(),
+  // THE VAULT's A FRIEND (N10): a friend's personal invitation code, kept on the device from /verify/join/<code>; an
+  // unknown one is ignored, never a refusal.
+  invite: z.string().max(64, 'At most 64 characters').nullable().optional(),
 });
 
 /**

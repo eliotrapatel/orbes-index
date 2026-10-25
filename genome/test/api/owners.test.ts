@@ -40,6 +40,8 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
   beforeAll(async () => {
     h = await createHarness({ config: { rateLimits: { verifyPerMinute: 10_000, authPerMinute: 10_000, adminPerMinute: 10_000, apiPerMinute: 10_000 } } });
     catalog = await seedCatalog(h.ctx);
+    // THE VAULT's sources off: the sheet and its export as before them (test/services/vault-sources.test.ts gives vaults).
+    await h.ctx.db.updateTable('vault_sources').set({ enabled: false }).execute();
   });
   afterAll(() => h?.close());
 

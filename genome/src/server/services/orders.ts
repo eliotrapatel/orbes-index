@@ -163,6 +163,7 @@ import { CERTIFICATE_ENDING_STATUSES } from './ownership.js';
 import { tierOf } from './club.js';
 import { giftModelOf, readProgram, shippingRate } from './club-program.js';
 import { creditBalances, creditKindOrder, ensureGrants, usableAt, type CreditKind } from './tier-grants.js';
+import { giveTierVaults, revokeReturnedPieceVaults } from './vault.js';
 import { modelSizeCandidates, offeredSku, savedSizeAmong, savedSizeHint, sizesForExchange } from './sizes.js';
 import { ordersForSetSale } from './set-sales.js';
 import { parcelOrders, RETURN_WINDOW_DAYS } from './parcels.js';
@@ -1460,7 +1461,7 @@ export async function ordersForLiveEntry(
   }
   const locationId = await releaseLocation(tx, e.stock_location_id);
   // BP-19 T5: the account's grants, its tier read now.
-  notes.push(...(await ensureGrants(tx, e.account_id, now)));
+  notes.push(...(await ensureGrants(tx, e.account_id, now)), ...(await giveTierVaults(tx, e.account_id, now)));
   // BP-19 T4: one fee for the entry, on its first piece; the others travel with it (its service at 0).
   let parent = existing.has(1) ? await tx.selectFrom('orders').selectAll().where('live_entry_id', '=', e.id).where('piece', '=', 1).executeTakeFirst() : undefined;
   for (let piece = 1; piece <= e.quantity; piece++) {
@@ -1554,7 +1555,7 @@ export async function orderForDrawEntry(
   const existing = new Set((await tx.selectFrom('orders').select('piece').where('drop_entry_id', '=', e.id).execute()).map((r) => r.piece));
   const pieces = Math.max(1, Number(e.pieces) || 1);
   if (existing.size >= pieces) return { order: null, orders: [], notes: [], addonsLeftOut: [] };
-  const notes: AuditRecordInput[] = [...(await ensureGrants(tx, e.account_id, now))];
+  const notes: AuditRecordInput[] = [...(await ensureGrants(tx, e.account_id, now)), ...(await giveTierVaults(tx, e.account_id, now))];
   const locationId = await releaseLocation(tx, e.stock_location_id);
   let parent = existing.has(1) ? await tx.selectFrom('orders').selectAll().where('drop_entry_id', '=', e.id).where('piece', '=', 1).executeTakeFirst() : undefined;
   const orders: OrderRow[] = [];
@@ -1636,7 +1637,7 @@ async function setOrdersForLiveEntry(
   const orders: OrderRow[] = [];
   if (done.size >= e.quantity) return { orders, notes, addonsLeftOut: [] };
   const locationId = await releaseLocation(tx, e.stock_location_id);
-  notes.push(...(await ensureGrants(tx, e.account_id, now)));
+  notes.push(...(await ensureGrants(tx, e.account_id, now)), ...(await giveTierVaults(tx, e.account_id, now)));
   let parent: OrderRow | null = existing.find((o) => o.piece === 1) ?? null;
   /** Each set's first piece's order, as created (lot Q2, step Q2.4, D25): what carries the set's add-ons. */
   const carriers: OrderRow[] = [];
@@ -1697,7 +1698,7 @@ async function setOrderForDrawEntry(
   if (await tx.selectFrom('orders').select('id').where('drop_entry_id', '=', e.id).executeTakeFirst()) return { order: null, orders: [], notes: [], addonsLeftOut: [] };
   const sizes = await tx.selectFrom('drop_entry_sizes').select(['piece', 'size_id']).where('entry_id', '=', e.id).orderBy('piece').execute();
   const priced = e.price_minor !== null && e.currency !== null && e.price_minor <= ORDER_AMOUNT_MAX_MINOR;
-  const notes: AuditRecordInput[] = [...(await ensureGrants(tx, e.account_id, now))];
+  const notes: AuditRecordInput[] = [...(await ensureGrants(tx, e.account_id, now)), ...(await giveTierVaults(tx, e.account_id, now))];
   const sold = await ordersForSetSale(
     tx,
     {
@@ -1733,7 +1734,7 @@ export async function orderForShopRequest(tx: Db, requestId: string, actor: Acto
   const r = await tx.selectFrom('shop_requests').select(['id', 'account_id', 'model_id', 'status', 'outcome', 'size_label']).where('id', '=', requestId).executeTakeFirst();
   if (!r || r.status !== 'CLOSED' || r.outcome !== 'ACCEPTED') throw new Error(`orderForShopRequest: request ${requestId} is not ACCEPTED`);
   if (await tx.selectFrom('orders').select('id').where('shop_request_id', '=', r.id).executeTakeFirst()) return { order: null, notes: [], addonsLeftOut: [] };
-  const notes: AuditRecordInput[] = [...(await ensureGrants(tx, r.account_id, now))];
+  const notes: AuditRecordInput[] = [...(await ensureGrants(tx, r.account_id, now)), ...(await giveTierVaults(tx, r.account_id, now))];
   // AC-01: the size the collector asked, with its SKU (held as any order's); none asked, entered later. Offered when it
   // was asked (plan NEXT LOT §3.3): a size set aside since stays its own. A typed model's order keeps the declared label
   // of the SKU it resolves to (SIZE 52 asked where 52 is declared too: 52), so the order and its SKU name one size.
@@ -2049,7 +2050,7 @@ export async function attachPiece(tx: Db, o: OrderRow, productUuid: string, via:
 export async function returnInTransaction(
   tx: Db,
   o: OrderRow,
-  r: { outcome: ReturnOutcome; locationId: string | null; note: string; caseId?: string; keepAddons?: boolean; addonsOut?: readonly string[] },
+  r: { outcome: ReturnOutcome; locationId: string | null; note: string; caseId?: string; keepAddons?: boolean; addonsOut?: readonly string[]; keepVault?: boolean },
   expected: { productId: string | null; reclaim: boolean; claimHash: string | null },
   actor: Actor,
   now: Date,
@@ -2134,6 +2135,8 @@ export async function returnInTransaction(
     ...(addons.returned > 0 ? { addonUnits: addons.returned, addonUnitsRestocked: addons.restocked } : {}),
   };
   notes.push(await recordChange(tx, o, after, ORDER_STEP_ACTIONS.RETURNED, { note: r.caseId ? null : r.note, details }, actor, now), ...extra, ...withdrawn);
+  // THE VAULT (round 5, D5): a returned piece takes its unopened PIECE vault back; a size exchange keeps it.
+  if (r.keepVault !== true) notes.push(...(await revokeReturnedPieceVaults(tx, p.id, now)));
   // BP-19 T5: the credit taken off it given back; its welcome gift stays as it is. A size exchange carries it onto its
   // EXCHANGE order (`createExchangeOrder`), from what is released here.
   const carried = (await openCreditUses(tx, after.id, { forUpdate: true })).map((u): CarriedCredit => ({ grantId: u.grant_id, kind: creditKind(u.kind), tier: creditTier(u), amountMinor: u.amount_minor }));
@@ -2886,7 +2889,10 @@ export class OrderService {
         a = row;
       } else {
         a = fresh!;
-        if (save) notes.push((await insertAddress(tx, account, a, false, actor, now)).note);
+        if (save) {
+          const saved = await insertAddress(tx, account, a, false, actor, now);
+          notes.push(saved.note, ...saved.vaulted);
+        }
       }
       const same = o.buyer_name === a.name && o.buyer_address === a.address && o.buyer_country === a.country && o.buyer_phone === a.phone;
       if (!same) {

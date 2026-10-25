@@ -7,9 +7,9 @@
  *                 transaction, after its own writes. Nothing when the source is switched off (a LIVE release also needs
  *                 its own switch, `drops.vault_on`, D4), the account is not ACTIVE, the account is a test entrant (ROUND 5
  *                 "Test accounts: NEVER get a vault", D9: every source, the house's GIVE A VAULT included; `isTestEntrant`)
- *                 or the cap of the source's scope is reached. The account's row is taken FOR NO KEY UPDATE first (FOR
- *                 KEY SHARE for LIVE, whose release's row orders its occasions), so two
- *                 occasions of one account at once count each other; then `per_occasion` rows are inserted at the lowest
+ *                 or the cap of the source's scope is reached. The account's row is taken FOR KEY SHARE first (its
+ *                 callers may hold it FOR SHARE: never raised to an update lock, step Q3.6); then `per_occasion` rows are
+ *                 inserted at the lowest
  *                 free indexes of the occasion's key, `ON CONFLICT DO NOTHING` on the unique key (two passes, a retry or
  *                 two processes never give one twice: `vaults_occasion_key`). It delivers the arrival (§2.7) in the same
  *                 transaction and returns the vaults given and the audit entry `vault.give {source, occasionKey, count,
@@ -64,11 +64,17 @@
  *                EDITION and THE PIECE are a VAULT order with the winner's unit reserved (step Q3.7, plan §2.4: until it
  *                is built, such a row gives the card, as a row that cannot give).
  *
+ *   the sources  (step Q3.6; plan §2.3.2–7, §2.6) each one hook in the transaction that makes its occasion: PIECE and
+ *                FRIEND at a first registration (`giveFirstRegistrationVaults`), TIER right after each `ensureGrants`
+ *                (`giveTierVaults`), WORN at a publication (services/worn.ts), PROFILE at a save that completes it
+ *                (`giveProfileVault`), HOUSE by GIVE A VAULT (`giveFromHouse`); a returned piece takes its unopened PIECE
+ *                vault back (`revokeReturnedPieceVaults`); the personal invitation (`invitation`, `inviterOf`).
+ *
  * No pity rule, no budget cap, no account-age rule (E10 "Not chosen: pity guarantee, budget cap (the quantities are the
  * limit), account-age rule", D22): none is built.
  */
-import { createHmac, randomBytes, randomInt } from 'node:crypto';
-import { sql } from 'kysely';
+import { createHmac, randomBytes, randomInt, randomUUID } from 'node:crypto';
+import { sql, type ExpressionBuilder } from 'kysely';
 import { utf8 } from '../../core/bytes.js';
 import type { AppConfig } from '../config.js';
 import { deriveSubkey } from '../crypto/secretbox.js';
@@ -76,6 +82,7 @@ import { inTransaction, type Db } from '../db/connection.js';
 import {
   CLUB_TIER_NAMES,
   HOUSE_CURRENCIES,
+  INVITATION_CODE_PATTERN,
   VAULT_AMOUNT_MINOR_MAX,
   VAULT_CAP,
   VAULT_GIFT_DAYS,
@@ -92,6 +99,7 @@ import {
   VAULT_SOURCES,
   VAULT_WAIT_DAYS,
   type ClubTierName,
+  type Database,
   type VaultRewardKind,
   type VaultRewardMode,
   type VaultSource,
@@ -100,15 +108,16 @@ import { conflict, DomainError, forbidden, notFound, validationError } from '../
 import { SYSTEM_ACTOR, systemClock, type Actor, type Clock } from '../types.js';
 import { VAULT_REVEAL, vaultArrivedWords, vaultMoney, vaultOpenedWords, vaultSourceLine, VAULT_SOURCE_LABELS, type VaultWhere } from '../../shared/house-words.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
-import { customerAccountLocked } from './auth.js';
+import { customerAccountLocked, normalizeEmail } from './auth.js';
 import { birthdayExpiry } from './birthday-credits.js';
-import { CROCKFORD_ALPHABET, formatGrouped, normalizeCrockford } from './claim-codes.js';
+import { CROCKFORD_ALPHABET, formatGrouped, normalizeCrockford, randomCrockford } from './claim-codes.js';
 import { CLUB_TIER_THRESHOLDS, isTestEntrant, tierName, tierOf } from './club.js';
 import { grantFromVault } from './guarantees.js';
 import { deliveredBody, deliveredTitle, pieceName } from './house-moments.js';
 import { withLiveChanges, type LiveChanges, type LiveFrameGate } from './live-frames.js';
 import type { ProfileService } from './profiles.js';
 import { parisDay } from './schedule.js';
+import { cleanCriteria, segmentCondition } from './segments.js';
 import { defaultLocationId, stockLevel } from './stock.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -185,14 +194,18 @@ function checkOccasion(o: VaultOccasion): VaultOccasion {
   if (uuids.some((u) => typeof u !== 'string' || !UUID_RE.test(u))) throw validationError('A vault’s occasion names an unknown id.');
   if (o.source === 'TIER' && ![1, 2, 3].includes(o.tier)) throw validationError('A tier is 1, 2 or 3.');
   if (o.source === 'FRIEND' && o.friendAccountId.toLowerCase() === o.accountId.toLowerCase()) throw validationError('A friend is another account.');
-  if (o.source === 'HOUSE' && o.note !== undefined && o.note !== null) {
-    if (typeof o.note !== 'string') throw validationError(`A note is 1 to ${VAULT_NOTE_MAX} characters.`);
-    const note = o.note.trim();
-    if (note.length === 0) return { ...o, note: null };
-    if ([...note].length > VAULT_NOTE_MAX) throw validationError(`A note is 1 to ${VAULT_NOTE_MAX} characters.`);
-    return { ...o, note };
-  }
+  if (o.source === 'HOUSE' && o.note !== undefined && o.note !== null) return { ...o, note: houseNote(o.note) };
   return o;
+}
+
+/** A HOUSE vault's note: trimmed, 1 to 500 characters, or none (a blank note is none). */
+function houseNote(v: unknown): string | null {
+  if (v === undefined || v === null) return null;
+  if (typeof v !== 'string') throw validationError(`A note is 1 to ${VAULT_NOTE_MAX} characters.`);
+  const note = v.trim();
+  if (note.length === 0) return null;
+  if ([...note].length > VAULT_NOTE_MAX) throw validationError(`A note is 1 to ${VAULT_NOTE_MAX} characters.`);
+  return note;
 }
 
 // ── The states ─────────────────────────────────────────────────────────────
@@ -281,12 +294,12 @@ export async function giveVault(tx: Db, occasion: VaultOccasion, now: Date): Pro
     const d = await tx.selectFrom('drops').select('vault_on').where('id', '=', o.dropId.toLowerCase()).executeTakeFirst();
     if (!d?.vault_on) return none('RELEASE_OFF');
   }
-  // The account's row first: two occasions of one account at once count each other's vaults. A LIVE vault is given
-  // under its release's row (services/live.ts, held FOR NO KEY UPDATE by every LIVE give), which already orders the
-  // occasions of its one key, so the account's row is only FOR KEY SHARE there: a stronger lock would wait on the FOR
-  // SHARE each LIVE action of that collector takes on its own account before the release's row (deadlock).
-  const q = tx.selectFrom('accounts').select('status').where('id', '=', accountId);
-  const account = await (o.source === 'LIVE' ? q.forKeyShare() : q.forNoKeyUpdate()).executeTakeFirst();
+  // The account's row FOR KEY SHARE: its status read and kept while the vault is given. Two gives of one occasion's key
+  // at once are ordered by the unique key (`vaults_occasion_key`: the second insert of an index waits for the first and
+  // gives nothing), the cap counts one key's vaults only, so no stronger lock is needed; and none may be taken: the
+  // callers already hold the account's row FOR SHARE (a LIVE action, a first registration, an address saved) and two of
+  // them raising it to an update lock at once would deadlock (step Q3.6).
+  const account = await tx.selectFrom('accounts').select('status').where('id', '=', accountId).forKeyShare().executeTakeFirst();
   if (account?.status !== 'ACTIVE') return none('NOT_ACTIVE');
   if (await isTestEntrant(tx, accountId)) return none('TEST_ENTRANT');
   if (o.source === 'FRIEND' && (await isTestEntrant(tx, o.friendAccountId))) return none('TEST_ENTRANT');
@@ -440,6 +453,165 @@ function chunked<T>(items: readonly T[], size: number): T[][] {
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
   return out;
 }
+
+// ── The other sources and the return (step Q3.6; plan §2.3.2–7, §2.6) ──────
+
+/**
+ * Whether a piece registered for the first time was bought (D5, round 5 "ONE VAULT PER PIECE; EVERY CHANNEL (LIVE,
+ * draws, salon, later Shopify) once registered to the buyer"; his words 22 Oct 23:46 "everytime a piece is ordered, they
+ * get a vault when the piece is registered"; N8). Its order is the latest one holding it that was neither CANCELLED nor
+ * RETURNED (a returned piece sold again is its new order's): a welcome GIFT, an EXCHANGE's replacement (the exchanged
+ * piece keeps its own) and a VAULT order at 0 (a product won free, a VAULT EDITION, THE PIECE) were not bought; a VAULT
+ * order bought under its RIGHT TO BUY (its price above 0) was, as every LIVE, DRAW and SALON order. A piece no order holds
+ * was sold outside the platform's orders (a counter sale, a piece claimed with its code; later a Shopify order, S6):
+ * bought.
+ */
+export async function pieceBought(tx: Db, productUuid: string): Promise<boolean> {
+  const o = await tx
+    .selectFrom('orders')
+    .select(['channel', 'price_minor'])
+    .where('product_id', '=', productUuid.toLowerCase())
+    .where('status', 'not in', ['CANCELLED', 'RETURNED'])
+    .orderBy('reserved_at', 'desc')
+    .orderBy('id', 'desc')
+    .limit(1)
+    .executeTakeFirst();
+  if (!o) return true;
+  if (o.channel === 'GIFT' || o.channel === 'EXCHANGE') return false;
+  if (o.channel === 'VAULT') return (o.price_minor ?? 0) > 0;
+  return true;
+}
+
+/**
+ * THE VAULT at a first registration (services/ownership.ts completeFirstRegistration, after the tiers' grants and
+ * `giveTierVaults`), in its transaction: EACH PIECE BOUGHT (§2.3.2) a PIECE vault for the piece when it was bought
+ * (`pieceBought`), one per piece ever while its last one is not revoked (the cap, default 1); A FRIEND'S FIRST PIECE
+ * (§2.3.5) the inviter's FRIEND vault when this is the account's first ownership ever and it was invited
+ * (`accounts.invited_by`, set only by the personal invitation link at sign-up: never by a credit to give, N10); the
+ * inviter ACTIVE and neither a test entrant (`giveVault`). A transfer is never a first registration: no vault (D5 "FIRST
+ * REGISTRATION ONLY (no vault for a second-hand piece)"). Returns the audit entries for the caller to record.
+ */
+export async function giveFirstRegistrationVaults(tx: Db, accountId: string, productUuid: string, now: Date): Promise<AuditRecordInput[]> {
+  const account = accountId.toLowerCase();
+  const notes: AuditRecordInput[] = [];
+  if (await pieceBought(tx, productUuid)) notes.push(...(await giveVault(tx, { source: 'PIECE', accountId: account, productId: productUuid }, now)).notes);
+  const owned = await tx.selectFrom('ownership').select((eb) => eb.fn.countAll<string>().as('n')).where('account_id', '=', account).executeTakeFirstOrThrow();
+  if (Number(owned.n) === 1) {
+    const a = await tx.selectFrom('accounts').select('invited_by').where('id', '=', account).executeTakeFirst();
+    if (a?.invited_by) notes.push(...(await giveVault(tx, { source: 'FRIEND', accountId: a.invited_by, friendAccountId: account }, now)).notes);
+  }
+  return notes;
+}
+
+/**
+ * A NEW TIER (§2.3.3; OP-29 "one per tier reached"; N6, N7, N34, D68), in the caller's transaction, right after
+ * `ensureGrants` at each of its call sites (a first registration, a transfer accepted, a piece counted again, an order
+ * created, a status read) and never inside it (its `tier < 2` early return would skip TITANE): a TIER vault for each tier
+ * the account holds now (`tierOf`) that it first reached after the deployment, so TITANE at the first registration
+ * itself. A tier whose `TIER:n` key is in `vault_occasions_before` (held at migration 0061) or was already given gives
+ * none: the first status read after the deployment gives nothing to a collector already at a tier, and a tier lost and
+ * reached again gives none (a tier is reached once; the cap holds the rest). Returns the audit entries to record.
+ */
+export async function giveTierVaults(tx: Db, accountId: string, now: Date): Promise<AuditRecordInput[]> {
+  if (typeof accountId !== 'string' || !UUID_RE.test(accountId)) return [];
+  const account = accountId.toLowerCase();
+  const { tier } = await tierOf(tx, account, now);
+  if (tier < 1) return [];
+  const keys = ([1, 2, 3] as const).filter((n) => n <= tier).map((n) => `TIER:${n}` as const);
+  const [before, given] = [
+    await tx.selectFrom('vault_occasions_before').select('occasion_key').where('account_id', '=', account).where('occasion_key', 'in', keys).execute(),
+    await tx.selectFrom('vaults').select('occasion_key').where('account_id', '=', account).where('occasion_key', 'in', keys).execute(),
+  ];
+  const known = new Set<string>([...before.map((r) => r.occasion_key), ...given.map((r) => r.occasion_key)]);
+  const notes: AuditRecordInput[] = [];
+  for (const n of [1, 2, 3] as const) {
+    if (n > tier || known.has(`TIER:${n}`)) continue;
+    notes.push(...(await giveVault(tx, { source: 'TIER', accountId: account, tier: n }, now)).notes);
+  }
+  return notes;
+}
+
+/**
+ * A COMPLETE PROFILE, once (§2.3.6; N34, D68), at a save `completion()` reads (YOUR PROFILE's, Client Services' edit and
+ * date of birth, a first address saved as the default): `missingBefore` read before the save's writes and
+ * `missingAfter` after them, in its transaction; only a save that moves `missing` from non-empty to empty gives a
+ * vault, so a profile complete before the deployment and saved again gives none. Returns the audit entries to record.
+ */
+export async function giveProfileVault(tx: Db, accountId: string, missingBefore: readonly string[], missingAfter: readonly string[], now: Date): Promise<AuditRecordInput[]> {
+  if (missingBefore.length === 0 || missingAfter.length > 0) return [];
+  return (await giveVault(tx, { source: 'PROFILE', accountId }, now)).notes;
+}
+
+/**
+ * A RETURNED PIECE TAKES ITS VAULT BACK (§2.6; round 5 "unopened vault removed, opened keeps what it held"), in the
+ * return's transaction (services/orders.ts returnInTransaction: a return decided with the piece back to ORBES, a set's
+ * whole return for each of its pieces, Client Services' RETURNED): the piece's PIECE vault still unopened is revoked
+ * (`revoked_reason` RETURNED, the only taking-back, N36); an opened one keeps what it held; a WORN, TIER or FRIEND vault
+ * is never taken back by a return. A size exchange keeps the vault (the caller does not call this). Returns the audit
+ * entries (`vault.revoke`, the system as actor) for the caller to record.
+ */
+export async function revokeReturnedPieceVaults(tx: Db, productUuid: string, now: Date): Promise<AuditRecordInput[]> {
+  const revoked = await tx
+    .updateTable('vaults')
+    .set({ revoked_at: sql<Date>`greatest(${now}::timestamptz, given_at)`, revoked_reason: 'RETURNED' })
+    .where('source', '=', 'PIECE')
+    .where('product_id', '=', productUuid.toLowerCase())
+    .where('opened_at', 'is', null)
+    .where('revoked_at', 'is', null)
+    .returning(['id', 'account_id', 'occasion_key'])
+    .execute();
+  return revoked.map((v) => ({
+    actor: SYSTEM_ACTOR,
+    action: 'vault.revoke',
+    targetType: 'account',
+    targetId: v.account_id,
+    details: { vaultId: v.id, source: 'PIECE', occasionKey: v.occasion_key, reason: 'RETURNED' },
+  }));
+}
+
+/** A personal invitation's code: 12 Crockford characters (`invitations.code`, INVITATION_CODE_PATTERN). */
+export const INVITATION_CODE_LENGTH = 12;
+
+/**
+ * The inviter a personal invitation's code names (any accepted spelling), or null: unknown, malformed or none. Read by
+ * CREATE ACCOUNT (services/auth.ts registerAccount), which sets `accounts.invited_by` once; an unknown code never
+ * refuses a sign-up.
+ */
+export async function inviterOf(db: Db, code: unknown): Promise<string | null> {
+  const canonical = normalizeCrockford(code, INVITATION_CODE_LENGTH);
+  if (canonical === undefined || !INVITATION_CODE_PATTERN.test(canonical)) return null;
+  const r = await db.selectFrom('invitations').select('account_id').where('code', '=', canonical).executeTakeFirst();
+  return r?.account_id ?? null;
+}
+
+/** THE HOUSE gives (GIVE A VAULT, §2.3.7): one collector (its account id or email) or a segment's members. */
+export interface HouseGiveInput {
+  accountId?: unknown;
+  email?: unknown;
+  segmentId?: unknown;
+  note?: unknown;
+  /** The reach only, nothing given. */
+  dryRun?: unknown;
+}
+
+/** What GIVE A VAULT did, or would do (`dryRun`). */
+export interface HouseGiven {
+  /** The gift's id (`HOUSE:<id>`), shared by a segment's members; null on a dry run. */
+  giftId: string | null;
+  dryRun: boolean;
+  /** The accounts it reaches: ACTIVE, never a test entrant. */
+  reach: number;
+  /** The accounts given their vaults (a dry run: 0), and the vaults given. */
+  accounts: number;
+  vaults: number;
+  /** Left out and counted apart (N25): the test entrants (D9) and the accounts not ACTIVE (an erased one is no collector). */
+  leftOut: { testEntrants: number; inactive: number };
+}
+
+/** The accounts GIVE A VAULT gives to per transaction (N25). */
+export const HOUSE_GIVE_BATCH = 500;
+
+export const vaultSourceOff = () => conflict('VAULT_SOURCE_OFF', 'THE HOUSE is switched off in CLUB > THE VAULT. Switch it on first.');
 
 // ── THE VAULT page ─────────────────────────────────────────────────────────
 
@@ -978,6 +1150,105 @@ export class VaultService {
       const given = await giveVault(tx, occasion, now);
       for (const n of given.notes) await this.audit.record(n, tx);
       return given;
+    });
+  }
+
+  /**
+   * GIVE A VAULT (§2.3.7, §4.4; D3 (7) "given by the house (to a collector or a segment)"; OP-29 "GIVE A VAULT to a
+   * segment gives one to each member"; N25): to one collector (`accountId` or `email`; OPERATOR, the route's role) or to
+   * each member of a segment as it reads now (`segmentId`; ADMIN, as the house messages' audience), `per_occasion` vaults
+   * each under one gift's key `HOUSE:<giftId>`, with the staff member and the house's note (never audited, never shown).
+   * The test entrants (D9) and the accounts not ACTIVE are left out and counted apart; an erased account is no collector.
+   * Given in transactions of HOUSE_GIVE_BATCH accounts, each vault audited `vault.give` with its staff member. `dryRun`:
+   * the reach and the left out, nothing given. 404 ACCOUNT_NOT_FOUND / SEGMENT_NOT_FOUND; 409 VAULT_SOURCE_OFF while THE
+   * HOUSE is switched off.
+   */
+  async giveFromHouse(input: HouseGiveInput, actor: Actor): Promise<HouseGiven> {
+    const by = assertStaff(actor, 'give a vault');
+    const i = (input && typeof input === 'object' ? input : {}) as HouseGiveInput;
+    const toOne = (i.accountId !== undefined && i.accountId !== null) || (i.email !== undefined && i.email !== null);
+    const toSegment = i.segmentId !== undefined && i.segmentId !== null;
+    if (toOne === toSegment) throw validationError('Choose a collector or a segment.');
+    const note = houseNote(i.note);
+    const dryRun = i.dryRun === true;
+    const now = this.clock();
+    const source = await this.db.selectFrom('vault_sources').select('enabled').where('source', '=', 'HOUSE').executeTakeFirst();
+    if (!source?.enabled) throw vaultSourceOff();
+
+    let segmentId: string | null = null;
+    let members: { id: string; status: string; test: boolean }[];
+    const test = (eb: ExpressionBuilder<Database, 'accounts'>) => eb.exists(eb.selectFrom('test_entrants as t').select('t.account_id').whereRef('t.account_id', '=', 'accounts.id')).as('test');
+    if (toOne) {
+      let q = this.db.selectFrom('accounts').select((eb) => ['accounts.id', 'accounts.status', test(eb)]).where('accounts.status', '<>', 'DELETED');
+      if (i.accountId !== undefined && i.accountId !== null) {
+        if (typeof i.accountId !== 'string' || !UUID_RE.test(i.accountId)) throw notFound('Account', 'ACCOUNT_NOT_FOUND');
+        q = q.where('accounts.id', '=', i.accountId.toLowerCase());
+      } else {
+        const email = normalizeEmail(i.email);
+        if (!email) throw notFound('Account', 'ACCOUNT_NOT_FOUND');
+        q = q.where('accounts.email_normalized', '=', email.normalized);
+      }
+      const one = await q.executeTakeFirst();
+      if (!one) throw notFound('Account', 'ACCOUNT_NOT_FOUND');
+      members = [{ id: one.id, status: one.status, test: Boolean(one.test) }];
+    } else {
+      if (typeof i.segmentId !== 'string' || !UUID_RE.test(i.segmentId)) throw notFound('Segment', 'SEGMENT_NOT_FOUND');
+      segmentId = i.segmentId.toLowerCase();
+      const s = await this.db.selectFrom('segments').select('criteria').where('id', '=', segmentId).executeTakeFirst();
+      if (!s) throw notFound('Segment', 'SEGMENT_NOT_FOUND');
+      const criteria = cleanCriteria(s.criteria);
+      const rows = await this.db
+        .selectFrom('accounts as a')
+        .select((eb) => ['a.id', 'a.status', eb.exists(eb.selectFrom('test_entrants as t').select('t.account_id').whereRef('t.account_id', '=', 'a.id')).as('test')])
+        .where('a.status', '<>', 'DELETED')
+        .where((eb) => segmentCondition(this.db, eb, criteria, now))
+        .orderBy('a.id')
+        .execute();
+      members = rows.map((r) => ({ id: r.id, status: r.status, test: Boolean(r.test) }));
+    }
+
+    const leftOut = { testEntrants: members.filter((m) => m.test).length, inactive: members.filter((m) => !m.test && m.status !== 'ACTIVE').length };
+    const reach = members.filter((m) => !m.test && m.status === 'ACTIVE').map((m) => m.id);
+    if (dryRun) return { giftId: null, dryRun, reach: reach.length, accounts: 0, vaults: 0, leftOut };
+
+    const giftId = randomUUID();
+    let accounts = 0;
+    let vaults = 0;
+    for (const batch of chunked(reach, HOUSE_GIVE_BATCH)) {
+      await inTransaction(this.db, async (tx) => {
+        for (const accountId of batch) {
+          const given = await giveVault(tx, { source: 'HOUSE', accountId, giftId, givenBy: by, segmentId, note }, now);
+          if (given.vaults.length > 0) {
+            accounts += 1;
+            vaults += given.vaults.length;
+          }
+          for (const n of given.notes) await this.audit.record(n, tx);
+        }
+      });
+    }
+    return { giftId, dryRun, reach: reach.length, accounts, vaults, leftOut };
+  }
+
+  /**
+   * INVITE A FRIEND (§2.3.5; N10): the collector's personal invitation code, made at the first press and the same ever
+   * after (`invitations`, never changed nor deleted); its link `/verify/join/<code>` names nobody. 404 ACCOUNT_NOT_FOUND,
+   * 403 ACCOUNT_LOCKED for an account not ACTIVE.
+   */
+  async invitation(accountId: string): Promise<{ code: string }> {
+    if (typeof accountId !== 'string' || !UUID_RE.test(accountId)) throw notFound('Account', 'ACCOUNT_NOT_FOUND');
+    const id = accountId.toLowerCase();
+    return inTransaction(this.db, async (tx) => {
+      const a = await tx.selectFrom('accounts').select('status').where('id', '=', id).forKeyShare().executeTakeFirst();
+      if (!a || a.status === 'DELETED') throw notFound('Account', 'ACCOUNT_NOT_FOUND');
+      if (a.status !== 'ACTIVE') throw customerAccountLocked();
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const made = await tx.selectFrom('invitations').select('code').where('account_id', '=', id).executeTakeFirst();
+        if (made) return { code: made.code };
+        // ON CONFLICT DO NOTHING on both keys: a second press at once keeps the first code; a code already taken
+        // (32^12 codes: never in practice) draws another.
+        await tx.insertInto('invitations').values({ account_id: id, code: randomCrockford(INVITATION_CODE_LENGTH), created_at: this.clock() }).onConflict((oc) => oc.doNothing()).execute();
+      }
+      throw new Error('invitation: no code could be made');
     });
   }
 

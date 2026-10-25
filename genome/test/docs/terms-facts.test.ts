@@ -787,7 +787,8 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
   N5: () => {
     // The first and last name and the country are required by the route since the customer intelligence lot (plan §3.1
     // P.4.2), `heard` optional, `displayName` still accepted and ignored with the names: no date of birth, no identity.
-    expect(Object.keys(registerAccountBody.shape).sort()).toEqual(['country', 'displayName', 'email', 'firstName', 'heard', 'lastName', 'password']);
+    // `invite` (THE VAULT, lot Q3) is no question asked: a friend's invitation code the link carries, never shown.
+    expect(Object.keys(registerAccountBody.shape).sort()).toEqual(['country', 'displayName', 'email', 'firstName', 'heard', 'invite', 'lastName', 'password']);
   },
   N6: () => {
     // The vote of the circle (P-X01) writes its row and nothing in the audit log; no audit action names a vote.

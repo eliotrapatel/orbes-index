@@ -112,14 +112,16 @@ export async function createAccount(db: Db): Promise<{ id: string; email: string
 /**
  * `n` pieces held now by the account (open ownerships), of `modelId`; a piece's own collection when given, its size
  * (`products.variant`), the start of its ownership (1 January 2025 by default) and the year of its serial (2026 by
- * default; another year's serials leave those of 2026 as they are).
+ * default; another year's serials leave those of 2026 as they are). Held from before THE VAULT's deployment by default
+ * (`beforeVault`): the tiers they reach are written in `vault_occasions_before`, as migration 0061 wrote the tiers held
+ * then, so a status read or an order gives no A NEW TIER vault for them; `beforeVault: false`, a tier reached after it.
  */
 export async function holdPieces(
   db: Db,
   accountId: string,
   n: number,
   modelId: string,
-  opts: { collectionId?: string | null; variant?: string | null; startedAt?: Date; year?: number } = {},
+  opts: { collectionId?: string | null; variant?: string | null; startedAt?: Date; year?: number; beforeVault?: boolean } = {},
 ): Promise<string[]> {
   const ids: string[] = [];
   const year = opts.year ?? 2026;
@@ -146,6 +148,11 @@ export async function holdPieces(
       .executeTakeFirstOrThrow();
     await db.insertInto('ownership').values({ product_id: product.id, account_id: accountId, acquired_via: 'ADMIN', started_at: opts.startedAt ?? new Date('2025-01-01T00:00:00Z') }).execute();
     ids.push(product.id);
+  }
+  if (opts.beforeVault !== false && n > 0) {
+    const held = await db.selectFrom('ownership').select((eb) => eb.fn.countAll<string>().as('n')).where('account_id', '=', accountId).where('ended_at', 'is', null).executeTakeFirstOrThrow();
+    const keys = CLUB_TIER_THRESHOLDS.flatMap((t, i) => (Number(held.n) >= t ? [`TIER:${i + 1}` as const] : []));
+    if (keys.length) await db.insertInto('vault_occasions_before').values(keys.map((occasion_key) => ({ account_id: accountId, occasion_key: occasion_key as 'TIER:1' }))).onConflict((oc) => oc.doNothing()).execute();
   }
   return ids;
 }

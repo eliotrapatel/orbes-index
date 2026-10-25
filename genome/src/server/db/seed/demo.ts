@@ -68,6 +68,7 @@
 import { randomBytes } from 'node:crypto';
 import type { AppContext } from '../../context.js';
 import { pseudonymize } from '../../http/client.js';
+import { beforeTheVault } from './before-the-vault.js';
 import { REGISTRABLE_STATUSES } from '../../services/ownership.js';
 import { coverNextRelease, endOfParisDay, parisDayPlus } from '../../services/guarantees.js';
 import { aggregateScanStats } from '../../services/scan-stats.js';
@@ -1111,18 +1112,21 @@ export async function seedDemo(ctx: AppContext, opts: SeedDemoOptions): Promise<
     openServices: new Map(),
   };
 
-  for (const step of steps) {
-    opts.clock.set(step.at);
-    try {
-      await step.run(world);
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      throw new DemoSeedError(`demo seed failed at ${step.at.toISOString()} (${step.label}): ${message}`);
+  // The story is told before THE VAULT's deployment: no vault for it, its tiers held as migration 0061 wrote them.
+  await beforeTheVault(ctx.db, async () => {
+    for (const step of steps) {
+      opts.clock.set(step.at);
+      try {
+        await step.run(world);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        throw new DemoSeedError(`demo seed failed at ${step.at.toISOString()} (${step.label}): ${message}`);
+      }
     }
-  }
-  opts.clock.set(now);
-  await declareDemoSizes(world);
-  await grantDemoGuarantee(world, now);
+    opts.clock.set(now);
+    await declareDemoSizes(world);
+    await grantDemoGuarantee(world, now);
+  });
   // What housekeeping would have done day after day: the complete days counted in the daily statistics.
   const statsRows = await aggregateScanStats(ctx.db, now);
   log.info({ statsRows }, 'demo seed: timeline complete');

@@ -63,6 +63,7 @@ import type { AccountDropEntry, DropService } from './drops.js';
 import { accountGuarantees, type AccountGuarantee } from './guarantees.js';
 import { orderReference } from './orders.js';
 import { creditBalances, ensureGrants, usableAt } from './tier-grants.js';
+import { giveTierVaults } from './vault.js';
 
 /** The pieces that count for nothing in the club: revoked, flagged or retired by ORBES, whose ownership stays open (N3). */
 export const CLUB_EXCLUDED_STATUSES: readonly ProductStatus[] = Object.freeze(['REVOKED', 'COUNTERFEIT_FLAGGED', 'RETIRED'] as const);
@@ -430,7 +431,7 @@ export class ClubService {
   async status(accountId: string): Promise<ClubStatus> {
     // The tiers' grants (plan NEXT-NINE, BP-19 T5), made here too when the tier was reached without a write that makes them.
     await inTransaction(this.db, async (tx) => {
-      for (const n of await ensureGrants(tx, accountId, this.clock())) await this.audit.record(n, tx);
+      for (const n of [...(await ensureGrants(tx, accountId, this.clock())), ...(await giveTierVaults(tx, accountId, this.clock()))]) await this.audit.record(n, tx);
     });
     const [standing, words, entries, program] = await Promise.all([this.tierOf(accountId), this.benefitWords(this.db), this.drops.accountEntries(accountId), readProgram(this.db)]);
     const gifts = await activeGifts(this.db, program);

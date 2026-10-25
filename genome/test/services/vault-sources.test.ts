@@ -14,17 +14,29 @@
  *
  * Under concurrency (PGlite always; PostgreSQL in genome-ci, ORBES_TEST_POSTGRES_URL): the PAY that sells a size out
  * racing the LEAVE of those waiting in it never deadlocks; each of them leaves without a vault or keeps one.
+ *
+ * The other sources and the return (step Q3.6; plan §2.3.2–7, §2.6; D3, D5, D27, D68; N6–N8, N10, N25, N34), on the
+ * services as createContext wires them: EACH PIECE BOUGHT at the first registration only (every channel, a piece no order
+ * holds, a VAULT order bought under its right to buy; never a VAULT order at 0, a welcome GIFT, an exchange's replacement
+ * or a transfer), TITANE at the first registration; A NEW TIER only for a tier first reached after the deploy; A WORN
+ * PHOTOGRAPH PUBLISHED, one per piece; A FRIEND'S FIRST PIECE through the personal link (never through a credit to give);
+ * A COMPLETE PROFILE on the save that completes it, never for a profile complete before; THE HOUSE to one collector or a
+ * segment (test entrants and inactive accounts left out and counted); a returned piece taking its unopened vault back.
  */
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { closeDb, createDb, type Db } from '../../src/server/db/connection.js';
+import { closeDb, createDb, inTransaction, type Db } from '../../src/server/db/connection.js';
 import { migrateToLatest } from '../../src/server/db/migrate.js';
 import { DomainError } from '../../src/server/errors.js';
 import { soldOutSizes } from '../../src/server/services/live.js';
-import { giveLiveVaults } from '../../src/server/services/vault.js';
-import type { Actor } from '../../src/server/types.js';
+import { profileMissing } from '../../src/server/services/profiles.js';
+import { ensureSku } from '../../src/server/services/stock.js';
+import { giveLiveVaults, HOUSE_GIVE_BATCH, inviterOf, pieceBought } from '../../src/server/services/vault.js';
+import { SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
+import { createAdmin, createHarness, seedCatalog, type Catalog, type Harness } from '../api/support.js';
 import { createTestDb } from '../support/db.js';
+import { packAndShip, stockPieces, type StockedPiece } from '../support/fulfil.js';
 import {
   accountOfTier,
   createAccount,
@@ -33,6 +45,7 @@ import {
   createSet,
   createSetLiveRelease,
   entriesOf,
+  holdPieces,
   liveFixture,
   pieceSize,
   sizedModel,
@@ -42,6 +55,8 @@ import {
 
 const SECOND = 1000;
 const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
 type Account = Awaited<ReturnType<typeof accountOfTier>>;
 
 async function refusal(p: Promise<unknown>): Promise<DomainError> {
@@ -506,3 +521,432 @@ for (const backend of BACKENDS) {
     });
   });
 }
+
+// ── The other sources and the return (step Q3.6; plan §2.3.2–7, §2.6) ─────
+
+describe('THE VAULT’s other sources and the return', () => {
+  let h: Harness;
+  let catalog: Catalog;
+  let operator: Actor;
+  let admin: Actor;
+  let agent: Actor;
+  let france: string;
+  let colissimo: string;
+  let size = 40;
+  const issued = new Map<string, StockedPiece>();
+
+  beforeAll(async () => {
+    h = await createHarness();
+    h.clock.set('2026-11-03T09:00:00.000Z');
+    catalog = await seedCatalog(h.ctx);
+    operator = { type: 'admin', id: (await createAdmin(h.ctx, 'OPERATOR')).id };
+    admin = { type: 'admin', id: (await createAdmin(h.ctx, 'ADMIN')).id };
+    france = (await h.t.db.selectFrom('stock_locations').select('id').where('name', '=', 'FRANCE WAREHOUSE').executeTakeFirstOrThrow()).id;
+    agent = { type: 'admin', id: (await createAdmin(h.ctx, 'LOGISTICS', { stockLocationIds: [france] })).id };
+    colissimo = (await h.t.db.selectFrom('carriers').select('id').where('name', '=', 'Colissimo').executeTakeFirstOrThrow()).id;
+  });
+  afterAll(() => h?.close());
+
+  const db = () => h.t.db;
+  const scope = () => new Set([france]);
+  const cases = () => h.ctx.services.orderCases;
+  const vault = () => h.ctx.services.vault;
+  const row = (id: string) => db().selectFrom('orders').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
+  const skuOf = (label: string) => h.ctx.db.transaction().execute((tx) => ensureSku(tx, catalog.modelId, label));
+  const freshSize = () => String((size += 2));
+  const actorOf = (accountId: string): Actor => ({ type: 'account', id: accountId });
+
+  /** A salon order of a size of its own for `accountId`, priced and paid, its piece stocked, packed and shipped. */
+  async function shippedOrder(accountId: string): Promise<{ id: string; skuId: string; piece: StockedPiece }> {
+    const label = freshSize();
+    const skuId = await skuOf(label);
+    const request = await db().insertInto('shop_requests').values({ account_id: accountId, model_id: catalog.modelId, created_at: h.clock.now() }).returning('id').executeTakeFirstOrThrow();
+    h.clock.advance(MINUTE);
+    await h.ctx.services.salon.close(request.id, { note: 'Accepted.', outcome: 'ACCEPTED' }, operator);
+    const id = (await db().selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
+    await h.ctx.services.orders.setTerms(id, { sizeLabel: label, priceMinor: 420_000, currency: 'EUR' }, operator);
+    h.clock.advance(MINUTE);
+    await h.ctx.services.orders.transition(id, { to: 'PAID' }, operator);
+    for (const p of await stockPieces(h.ctx, { skuId, locationId: france, count: 1, forOrderIds: [id] }, operator)) issued.set(p.uuid, p);
+    await packAndShip(h.ctx, id, { carrierId: colissimo, trackingNumber: '6A12345678901' }, operator);
+    return { id, skuId, piece: issued.get((await row(id)).product_id!)! };
+  }
+
+  /** A piece in stock that no order holds, ACTIVATED: a counter sale, a piece claimed with its code. */
+  async function pieceSoldApart(): Promise<StockedPiece> {
+    const [p] = await stockPieces(h.ctx, { skuId: await skuOf(freshSize()), locationId: france, count: 1 }, operator);
+    await h.ctx.services.lifecycle.transition(p!.productId, 'ACTIVATED', { reason: 'sold' }, SYSTEM_ACTOR);
+    return p!;
+  }
+
+  /** Its first registration by `accountId`: the scan, then REGISTER with the claim code. */
+  async function register(accountId: string, piece: StockedPiece) {
+    const scan = await h.ctx.services.verification.verify({ code: piece.data }, {});
+    h.clock.advance(MINUTE);
+    return h.ctx.services.ownership.registerFirst(accountId, { registrationToken: scan.registration!.token, claimCode: piece.claimCode ?? null }, actorOf(accountId));
+  }
+
+  const vaultsOf = (accountId: string) => db().selectFrom('vaults').selectAll().where('account_id', '=', accountId).orderBy('given_at').orderBy('occasion_key').execute();
+  /** The account's vaults not revoked, by occasion (a VAULT order's own HOUSE vault left out). */
+  const keysOf = async (accountId: string) => (await vaultsOf(accountId)).filter((v) => v.revoked_at === null && v.source !== 'HOUSE').map((v) => v.occasion_key).sort();
+  const arrivals = async (accountId: string) => (await db().selectFrom('house_deliveries').select('title').where('account_id', '=', accountId).where('source', '=', 'VAULT').execute()).length;
+  const account = async () => (await createAccount(db())).id;
+
+  /** A HOUSE vault of `accountId`, opened as `kind` (a VAULT order names one). */
+  async function openedVault(accountId: string, kind: 'PRODUCT' | 'VAULT_EDITION' | 'THE_PIECE'): Promise<string> {
+    const given = new Date(h.clock.now().getTime() - 2 * DAY);
+    const floor = await db().selectFrom('vault_rewards').select('id').where('kind', '=', 'I_WAS_THERE').executeTakeFirstOrThrow();
+    const v = await db()
+      .insertInto('vaults')
+      .values({ account_id: accountId, source: 'HOUSE', given_by: admin.id!, occasion_key: `HOUSE:${randomUUID()}`, occasion_index: 1, given_at: given, waits_until: new Date(given.getTime() + 30 * DAY) })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    await db()
+      .updateTable('vaults')
+      .set({ opened_at: new Date(given.getTime() + HOUR), reward_id: floor.id, reward_kind: kind, prize: 'MONOLITHE', odds_text: '1 IN 200', rare: kind !== 'PRODUCT' } as never)
+      .where('id', '=', v.id)
+      .execute();
+    return v.id;
+  }
+
+  /** A VAULT order of `accountId` holding `piece` (a product won free at 0, or bought under its right to buy). */
+  async function vaultOrder(accountId: string, piece: StockedPiece, priceMinor: number): Promise<string> {
+    const vaultId = await openedVault(accountId, 'PRODUCT');
+    const sku = await db().selectFrom('products').select('sku_id').where('id', '=', piece.uuid).executeTakeFirstOrThrow();
+    const reservedAt = h.clock.now();
+    const o = await db()
+      .insertInto('orders')
+      .values({
+        channel: 'VAULT',
+        vault_id: vaultId,
+        account_id: accountId,
+        model_id: catalog.modelId,
+        location_id: france,
+        sku_id: sku.sku_id,
+        reservation: priceMinor === 0 ? 'STOCK' : 'AWAITING',
+        price_minor: priceMinor,
+        currency: 'EUR',
+        reserved_at: reservedAt,
+        claim_by: priceMinor === 0 ? new Date(reservedAt.getTime() + 30 * DAY) : null,
+        product_id: piece.uuid,
+      } as never)
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    return o.id;
+  }
+
+  describe('EACH PIECE BOUGHT', () => {
+    it('opens a PIECE vault at a bought piece’s first registration, with TITANE’s at the first piece (not through the grants), each with its FROM ORBES arrival and audit', async () => {
+      const buyer = await account();
+      const first = await shippedOrder(buyer);
+      expect(await keysOf(buyer)).toEqual([]);
+      await register(buyer, first.piece);
+      const at = h.clock.now();
+      expect(await keysOf(buyer)).toEqual([`PIECE:${first.piece.uuid}`, 'TIER:1']);
+      const piece = (await vaultsOf(buyer)).find((v) => v.source === 'PIECE')!;
+      expect(piece).toMatchObject({ product_id: first.piece.uuid, occasion_index: 1, given_at: at, waits_until: new Date(at.getTime() + 30 * DAY), opened_at: null, revoked_at: null });
+      expect((await vaultsOf(buyer)).find((v) => v.source === 'TIER')).toMatchObject({ tier: 1, given_at: at });
+      expect(await arrivals(buyer)).toBe(2);
+      const audited = await db().selectFrom('audit_logs').select(['actor_type', 'details']).where('action', '=', 'vault.give').where('target_id', '=', buyer).execute();
+      expect(audited.map((a) => [a.actor_type, (a.details as { source: string }).source]).sort()).toEqual([['system', 'PIECE'], ['system', 'TIER']]);
+      // The order went DELIVERED in the same registration.
+      expect((await row(first.id)).status).toBe('DELIVERED');
+      // A second piece bought: its own PIECE vault; TITANE once.
+      const second = await shippedOrder(buyer);
+      await register(buyer, second.piece);
+      expect(await keysOf(buyer)).toEqual([`PIECE:${first.piece.uuid}`, `PIECE:${second.piece.uuid}`, 'TIER:1'].sort());
+    });
+
+    it('opens one for a piece no order holds (a counter sale, a piece claimed with its code)', async () => {
+      const buyer = await account();
+      const piece = await pieceSoldApart();
+      await register(buyer, piece);
+      expect(await keysOf(buyer)).toEqual([`PIECE:${piece.uuid}`, 'TIER:1']);
+    });
+
+    it('a VAULT order bought under a RIGHT TO BUY opens its PIECE vault at the first registration; a VAULT order at 0 (a product won free) opens none', async () => {
+      const winner = await account();
+      const bought = await pieceSoldApart();
+      await vaultOrder(winner, bought, 95_000);
+      await register(winner, bought);
+      expect(await keysOf(winner)).toEqual([`PIECE:${bought.uuid}`, 'TIER:1']);
+      const won = await pieceSoldApart();
+      await vaultOrder(winner, won, 0);
+      await register(winner, won);
+      expect(await keysOf(winner)).toEqual([`PIECE:${bought.uuid}`, 'TIER:1']);
+      // And the rule read on its own (N8): a welcome GIFT and an EXCHANGE's replacement were not bought either.
+      const gift = await pieceSoldApart();
+      const salon = (await shippedOrder(winner)).id;
+      const grant = await db().insertInto('tier_grants').values({ account_id: winner, tier: 2, kind: 'GIFT', granted_at: h.clock.now(), model_id: catalog.modelId }).returning('id').executeTakeFirstOrThrow();
+      await db()
+        .insertInto('orders')
+        .values({ channel: 'GIFT', account_id: winner, model_id: catalog.modelId, with_order_id: salon, gift_grant_id: grant.id, price_minor: 0, currency: 'EUR', status: 'PAID', paid_at: h.clock.now(), location_id: france, product_id: gift.uuid } as never)
+        .execute();
+      expect(await inTransaction(db(), (tx) => pieceBought(tx, gift.uuid))).toBe(false);
+      expect(await inTransaction(db(), (tx) => pieceBought(tx, bought.uuid))).toBe(true);
+      expect(await inTransaction(db(), (tx) => pieceBought(tx, won.uuid))).toBe(false);
+    });
+
+    it('a transfer opens no PIECE vault (first registration only); the recipient’s first tier gives its own', async () => {
+      const owner = await account();
+      const next = await account();
+      const { piece } = await shippedOrder(owner);
+      await register(owner, piece);
+      const offer = await h.ctx.services.ownership.initiateTransfer(owner, piece.productId, actorOf(owner));
+      const scan = await h.ctx.services.verification.verify({ code: piece.data }, { accountId: next });
+      await h.ctx.services.ownership.acceptTransfer(next, { transferCode: offer.transferCode, productId: piece.productId, transferToken: scan.transfer!.token }, actorOf(next));
+      expect(await keysOf(next)).toEqual(['TIER:1']);
+      expect(await keysOf(owner)).toEqual([`PIECE:${piece.uuid}`, 'TIER:1']);
+    });
+  });
+
+  describe('a returned piece', () => {
+    it('a RETURN decided with the piece back revokes its unopened PIECE vault (RETURNED), never its TIER vault; an opened one keeps what it held', async () => {
+      const buyer = await account();
+      const kept = await shippedOrder(buyer);
+      const back = await shippedOrder(buyer);
+      await register(buyer, kept.piece);
+      await register(buyer, back.piece);
+      // The first piece's vault opened (I WAS THERE, the floor), then both pieces returned.
+      const opened = (await vaultsOf(buyer)).find((v) => v.occasion_key === `PIECE:${kept.piece.uuid}`)!;
+      await vault().open(buyer, opened.id);
+      for (const o of [kept, back]) {
+        const c = await cases().open(o.id, { kind: 'RETURN', reason: 'NOT_AS_EXPECTED', note: 'Returned.' }, operator);
+        await cases().receive(c.id, { pieceState: 'OK' }, agent, scope());
+        await cases().decide(c.id, { decision: 'REFUND', pieceTo: 'RESTOCKED', note: 'Refunded.' }, operator, { admin: false });
+      }
+      const after = await vaultsOf(buyer);
+      expect(after.find((v) => v.occasion_key === `PIECE:${back.piece.uuid}`)).toMatchObject({ revoked_reason: 'RETURNED', revoked_at: h.clock.now(), opened_at: null });
+      expect(after.find((v) => v.id === opened.id)).toMatchObject({ revoked_at: null, opened_at: expect.any(Date), reward_kind: 'I_WAS_THERE' });
+      expect(after.find((v) => v.source === 'TIER')).toMatchObject({ revoked_at: null });
+      const revoked = await db().selectFrom('audit_logs').select(['actor_type', 'details']).where('action', '=', 'vault.revoke').where('target_id', '=', buyer).execute();
+      expect(revoked).toEqual([{ actor_type: 'system', details: expect.objectContaining({ source: 'PIECE', occasionKey: `PIECE:${back.piece.uuid}`, reason: 'RETURNED' }) }]);
+      // The forAccount page no longer shows the returned piece's vault.
+      expect((await vault().forAccount(buyer)).waiting.map((d) => d.id)).not.toContain(after.find((v) => v.occasion_key === `PIECE:${back.piece.uuid}`)!.id);
+    });
+
+    it('an exchange keeps the first piece’s vault, and its replacement opens none', async () => {
+      const buyer = await account();
+      const first = await shippedOrder(buyer);
+      await register(buyer, first.piece);
+      const other = freshSize();
+      const otherSku = await skuOf(other);
+      for (const p of await stockPieces(h.ctx, { skuId: otherSku, locationId: france, count: 1 }, operator)) issued.set(p.uuid, p);
+      const c = await cases().open(first.id, { kind: 'EXCHANGE', reason: 'SIZE', exchangeSkuId: otherSku, note: 'One size up.' }, operator);
+      await cases().receive(c.id, { pieceState: 'OK' }, agent, scope());
+      const decided = await cases().decide(c.id, { decision: 'EXCHANGE', pieceTo: 'RESTOCKED', note: 'Exchanged.' }, operator, { admin: false });
+      expect((await vaultsOf(buyer)).find((v) => v.source === 'PIECE')).toMatchObject({ product_id: first.piece.uuid, revoked_at: null });
+      const exchange = decided.case.decision!.exchangeOrder!.id;
+      await packAndShip(h.ctx, exchange, { carrierId: colissimo, trackingNumber: '6A12345678902' }, operator);
+      const replacement = issued.get((await row(exchange)).product_id!)!;
+      await register(buyer, replacement);
+      expect(await keysOf(buyer)).toEqual([`PIECE:${first.piece.uuid}`, 'TIER:1']);
+    });
+  });
+
+  describe('A NEW TIER', () => {
+    it('an account holding PLATINE before the deploy reads its status and gets no vault; a tier first reached after it gives one, once', async () => {
+      const held = await account();
+      // Five pieces held at the migration: 0061 wrote TIER:1 and TIER:2 in vault_occasions_before (the fixture does).
+      await holdPieces(db(), held, 5, catalog.modelId, { year: 2024 });
+      expect((await db().selectFrom('vault_occasions_before').select('occasion_key').where('account_id', '=', held).orderBy('occasion_key').execute()).map((r) => r.occasion_key)).toEqual(['TIER:1', 'TIER:2']);
+      await h.ctx.services.club.status(held);
+      expect(await keysOf(held)).toEqual([]);
+      // Ten pieces after the deploy: PALLADIUM is first reached now.
+      await holdPieces(db(), held, 5, catalog.modelId, { year: 2024, beforeVault: false });
+      await h.ctx.services.club.status(held);
+      expect(await keysOf(held)).toEqual(['TIER:3']);
+      expect(await arrivals(held)).toBe(1);
+      await h.ctx.services.club.status(held);
+      await h.ctx.services.tierGrants.ensure(held);
+      expect((await vaultsOf(held)).length).toBe(1);
+      // An account at PLATINE reached after the deploy, without a write that gave it: its status read gives both.
+      const late = await account();
+      await holdPieces(db(), late, 5, catalog.modelId, { year: 2024, beforeVault: false });
+      await h.ctx.services.club.status(late);
+      expect(await keysOf(late)).toEqual(['TIER:1', 'TIER:2']);
+      // A test entrant never.
+      const tester = await account();
+      await db().insertInto('test_entrants').values({ account_id: tester }).execute();
+      await holdPieces(db(), tester, 5, catalog.modelId, { year: 2024, beforeVault: false });
+      await h.ctx.services.club.status(tester);
+      expect(await keysOf(tester)).toEqual([]);
+    });
+  });
+
+  describe('A WORN PHOTOGRAPH PUBLISHED', () => {
+    it('gives its sender a vault at the publication, at most one per piece; a photograph taken down keeps it; a refusal gives none', async () => {
+      const owner = await account();
+      const { piece } = await shippedOrder(owner);
+      await register(owner, piece);
+      const ownership = await db().selectFrom('ownership').select('id').where('product_id', '=', piece.uuid).where('ended_at', 'is', null).executeTakeFirstOrThrow();
+      const photo = Buffer.from('a photograph');
+      const send = async () =>
+        (
+          await db()
+            .insertInto('worn_photos')
+            .values({
+              product_id: piece.uuid,
+              ownership_id: ownership.id,
+              account_id: owner,
+              model_id: catalog.modelId,
+              photo,
+              photo_mime: 'image/jpeg',
+              photo_sha256: createHash('sha256').update(photo).digest('hex'),
+              width: 10,
+              height: 10,
+              credit_first_name: 'Camille',
+              credit_country: 'FR',
+              consent_at: h.clock.now(),
+              consent_version: '2026-10-25',
+            })
+            .returning('id')
+            .executeTakeFirstOrThrow()
+        ).id;
+      const refused = await send();
+      await h.ctx.services.worn.refuse(refused, 'QUALITY', operator);
+      expect(await keysOf(owner)).not.toContain(`WORN:${piece.uuid}`);
+      const first = await send();
+      await h.ctx.services.worn.publish(first, operator);
+      const worn = (await vaultsOf(owner)).filter((v) => v.source === 'WORN');
+      expect(worn).toMatchObject([{ product_id: piece.uuid, worn_photo_id: first, occasion_key: `WORN:${piece.uuid}` }]);
+      await h.ctx.services.worn.takeDown(first, 'QUALITY', operator);
+      const second = await send();
+      await h.ctx.services.worn.publish(second, operator);
+      expect((await vaultsOf(owner)).filter((v) => v.source === 'WORN')).toMatchObject([{ worn_photo_id: first, revoked_at: null }]);
+    });
+  });
+
+  describe('A FRIEND’S FIRST PIECE', () => {
+    it('the personal link is made once; a sign-up with its code is invited (an unknown code ignored); the friend’s first piece gives the inviter one vault, never at the next', async () => {
+      const inviter = await account();
+      const { code } = await vault().invitation(inviter);
+      expect(code).toMatch(/^[0-9A-HJKMNP-TV-Z]{12}$/);
+      expect(await vault().invitation(inviter)).toEqual({ code });
+      expect(await inviterOf(db(), code.toLowerCase())).toBe(inviter);
+      expect(await inviterOf(db(), 'ZZZZZZZZZZZZ')).toBeNull();
+      const signUp = (invite: string | null) =>
+        h.ctx.services.auth.registerAccount({ email: `friend-${randomUUID()}@example.com`, password: 'correct horse battery staple', firstName: 'Ana', lastName: 'Silva', country: 'PT', invite });
+      const friend = (await signUp(`${code.slice(0, 4)}-${code.slice(4, 8)}-${code.slice(8)}`)).account.id;
+      const stranger = (await signUp('ZZZZZZZZZZZZ')).account.id;
+      expect(await db().selectFrom('accounts').select(['invited_by', 'invited_at']).where('id', '=', friend).executeTakeFirstOrThrow()).toEqual({ invited_by: inviter, invited_at: h.clock.now() });
+      expect(await db().selectFrom('accounts').select('invited_by').where('id', '=', stranger).executeTakeFirstOrThrow()).toEqual({ invited_by: null });
+      const audited = await db().selectFrom('audit_logs').select('details').where('action', '=', 'account.register').where('target_id', '=', friend).executeTakeFirstOrThrow();
+      expect(audited.details).toMatchObject({ invitedBy: inviter });
+      // CREATE ACCOUNT sends it (POST /api/v1/account/register's optional `invite`).
+      const email = `joined-${randomUUID()}@example.com`;
+      const created = await h.client().post('/api/v1/account/register', { email, password: 'correct horse battery staple', firstName: 'Ines', lastName: 'Costa', country: 'PT', invite: code });
+      expect(created.statusCode, created.body).toBe(201);
+      expect(await db().selectFrom('accounts').select('invited_by').where('email_normalized', '=', email).executeTakeFirstOrThrow()).toEqual({ invited_by: inviter });
+      await register(friend, (await shippedOrder(friend)).piece);
+      expect((await vaultsOf(inviter)).map((v) => [v.source, v.friend_account_id])).toEqual([['FRIEND', friend]]);
+      await register(friend, (await shippedOrder(friend)).piece);
+      expect((await vaultsOf(inviter)).length).toBe(1);
+      // A locked account has no link to give.
+      const locked = await account();
+      await db().updateTable('accounts').set({ status: 'LOCKED' }).where('id', '=', locked).execute();
+      await expect(vault().invitation(locked)).rejects.toMatchObject({ code: 'ACCOUNT_LOCKED' });
+    });
+
+    it('a friend who accepted a CREDIT TO GIVE is never invited by it: their first piece gives the giver no FRIEND vault', async () => {
+      const giver = await account();
+      const v = await vault().give({ source: 'HOUSE', accountId: giver, giftId: randomUUID(), givenBy: admin.id! });
+      const reward = await vault().createReward({ kind: 'CREDIT_TO_GIVE', oddsIn: 1, quantity: 5, amountMinor: 3_000, currency: 'EUR' }, operator);
+      try {
+        const opened = await vault().open(giver, v.vaults[0]!.id);
+        const friend = await account();
+        await vault().acceptGift(friend, opened.giftCode!);
+        expect(await db().selectFrom('accounts').select(['invited_by', 'invited_at']).where('id', '=', friend).executeTakeFirstOrThrow()).toEqual({ invited_by: null, invited_at: null });
+        await register(friend, (await shippedOrder(friend)).piece);
+        expect((await vaultsOf(giver)).filter((x) => x.source === 'FRIEND')).toEqual([]);
+      } finally {
+        await vault().deactivateReward(reward.rewards.find((r) => r.kind === 'CREDIT_TO_GIVE')!.id, operator);
+      }
+    });
+  });
+
+  describe('A COMPLETE PROFILE', () => {
+    const complete = async (accountId: string, version: number, heard: string) =>
+      h.ctx.services.profiles.save(
+        accountId,
+        { version, firstName: 'Camille', lastName: 'Durand', country: 'FR', city: 'Lyon', phone: { country: 'FR', number: '+33612345678' }, birthDate: '1994-03-14', instagram: '@camille.dl', heard: { optionId: heard } },
+        actorOf(accountId),
+      );
+    const address = (accountId: string) => h.ctx.services.addresses.create(accountId, { name: 'Camille Durand', address: '1 rue de Test\n69001 Lyon', country: 'FR', phone: '+33612345678' }, actorOf(accountId));
+
+    it('a profile completed by a save after the deploy gets one vault (the address book’s first address included), never a second', async () => {
+      const heard = (await h.ctx.services.profiles.offeredHeard())[0]!.id;
+      // Completed by YOUR PROFILE's save, the address already saved.
+      const a = await account();
+      await address(a);
+      expect(await keysOf(a)).toEqual([]);
+      await complete(a, 0, heard);
+      expect(await keysOf(a)).toEqual(['PROFILE']);
+      expect(await profileMissing(db(), a)).toEqual([]);
+      await h.ctx.services.profiles.save(a, { version: 1, city: 'Paris' }, actorOf(a));
+      expect((await vaultsOf(a)).length).toBe(1);
+      // Completed by the first address, the profile saved before.
+      const b = await account();
+      await complete(b, 0, heard);
+      expect(await keysOf(b)).toEqual([]);
+      await address(b);
+      expect(await keysOf(b)).toEqual(['PROFILE']);
+    });
+
+    it('a profile complete before the deploy and saved again gets no vault', async () => {
+      const heard = (await h.ctx.services.profiles.offeredHeard())[0]!.id;
+      const a = await account();
+      // Before the deploy: no source gave a vault (the PROFILE source off stands for it).
+      const before = (await vault().settings()).sources.find((s) => s.source === 'PROFILE')!;
+      await vault().setSource('PROFILE', { enabled: false, perOccasion: before.perOccasion, cap: before.cap }, admin);
+      try {
+        await address(a);
+        await complete(a, 0, heard);
+      } finally {
+        await vault().setSource('PROFILE', { enabled: true, perOccasion: before.perOccasion, cap: before.cap }, admin);
+      }
+      expect(await profileMissing(db(), a)).toEqual([]);
+      await h.ctx.services.profiles.save(a, { version: 1, city: 'Marseille' }, actorOf(a));
+      expect(await keysOf(a)).toEqual([]);
+    });
+  });
+
+  describe('THE HOUSE', () => {
+    it('gives one collector (by account or email) or each member of a segment as it reads now, in batches, test entrants and inactive accounts left out and counted', async () => {
+      const one = await createAccount(db());
+      const byEmail = await vault().giveFromHouse({ email: one.email.toUpperCase(), note: '  For the evening.  ' }, operator);
+      expect(byEmail).toMatchObject({ dryRun: false, reach: 1, accounts: 1, vaults: 1, leftOut: { testEntrants: 0, inactive: 0 } });
+      expect(await vaultsOf(one.id)).toMatchObject([{ source: 'HOUSE', occasion_key: `HOUSE:${byEmail.giftId}`, given_by: operator.id, note: 'For the evening.', segment_id: null }]);
+      await expect(vault().giveFromHouse({ accountId: randomUUID() }, operator)).rejects.toMatchObject({ code: 'ACCOUNT_NOT_FOUND', httpStatus: 404 });
+      await expect(vault().giveFromHouse({ accountId: one.id, segmentId: randomUUID() }, operator)).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+      await expect(vault().giveFromHouse({ accountId: one.id }, actorOf(one.id))).rejects.toMatchObject({ code: 'FORBIDDEN' });
+
+      const members = [await account(), await account()];
+      const tester = await account();
+      const locked = await account();
+      await db().insertInto('test_entrants').values({ account_id: tester }).execute();
+      await db().updateTable('accounts').set({ status: 'LOCKED' }).where('id', '=', locked).execute();
+      await db().updateTable('accounts').set({ country: 'IS' }).where('id', 'in', [...members, tester, locked]).execute();
+      const segment = await h.ctx.services.segments.create({ name: `Iceland ${randomUUID().slice(0, 4)}`, criteria: { match: 'ALL', rules: [{ kind: 'COUNTRY', countries: ['IS'] }] } }, admin);
+      const dry = await vault().giveFromHouse({ segmentId: segment.id, dryRun: true }, admin);
+      expect(dry).toEqual({ giftId: null, dryRun: true, reach: 2, accounts: 0, vaults: 0, leftOut: { testEntrants: 1, inactive: 1 } });
+      expect(await keysOf(members[0]!)).toEqual([]);
+      const given = await vault().giveFromHouse({ segmentId: segment.id }, admin);
+      expect(given).toMatchObject({ dryRun: false, reach: 2, accounts: 2, vaults: 2, leftOut: { testEntrants: 1, inactive: 1 } });
+      for (const m of members) expect(await vaultsOf(m)).toMatchObject([{ source: 'HOUSE', occasion_key: `HOUSE:${given.giftId}`, segment_id: segment.id, given_by: admin.id }]);
+      for (const m of [tester, locked]) expect(await vaultsOf(m)).toEqual([]);
+      // The segment deleted later: its gifts keep their vaults and lose its id.
+      await h.ctx.services.segments.remove(segment.id, admin);
+      for (const m of members) expect(await vaultsOf(m)).toMatchObject([{ occasion_key: `HOUSE:${given.giftId}`, segment_id: null }]);
+      expect(HOUSE_GIVE_BATCH).toBe(500);
+      // THE HOUSE switched off: refused with its words.
+      const house = (await vault().settings()).sources.find((s) => s.source === 'HOUSE')!;
+      await vault().setSource('HOUSE', { enabled: false, perOccasion: house.perOccasion, cap: house.cap }, admin);
+      try {
+        await expect(vault().giveFromHouse({ accountId: one.id }, operator)).rejects.toMatchObject({ code: 'VAULT_SOURCE_OFF', httpStatus: 409 });
+      } finally {
+        await vault().setSource('HOUSE', { enabled: true, perOccasion: house.perOccasion, cap: house.cap }, admin);
+      }
+    });
+  });
+});

@@ -60,7 +60,7 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
     const b = parse(registerAccountBody, request.body);
     requireSignUp(b);
     const { account, session } = await auth.registerAccount(
-      { email: b.email, password: b.password, displayName: b.displayName ?? null, country: b.country ?? null, firstName: b.firstName, lastName: b.lastName, heard: b.heard ?? null },
+      { email: b.email, password: b.password, displayName: b.displayName ?? null, country: b.country ?? null, firstName: b.firstName, lastName: b.lastName, heard: b.heard ?? null, invite: b.invite ?? null },
       clientMeta(request, ctx.config, 'account', userAgentOf(request)),
     );
     setSessionCookie(reply, ctx.config, 'account', session);
