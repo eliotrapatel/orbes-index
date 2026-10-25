@@ -25,7 +25,8 @@
  *
  * The ENGRAVING's prices and its YOUR ORDERS switch are an ADMIN's (the owner's amendment of 25 Oct, single-queue/
  * ANSWERS.md "Q2 BUILD QUESTIONS — DECIDED": "ADMIN ONLY in the console (not OPERATOR)"; lot Q3, step Q3.9): an OPERATOR
- * changing either (or creating the engraving with a price or that switch) gets 403 FORBIDDEN; every other field of the
+ * changing either (or creating the engraving with a price or that switch, or making an add-on the engraving while it
+ * carries a price or that switch is on) gets 403 FORBIDDEN; every other field of the
  * engraving, and every other add-on, stays an OPERATOR's.
  *
  * Audited by AddonService (`addon.create`, `.update`, `.prices`, `.set_aside`, `.reinstate`, `.shopify`). A product's
@@ -74,9 +75,14 @@ export const adminAddonRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
   app.patch('/api/admin/addons/:id', { config: OPERATOR }, async (request) => {
     const { id } = parse(addonParams, request.params);
     const b = parse(updateAddonBody, request.body);
-    if (b.offeredAt?.orders !== undefined) {
+    if (b.offeredAt?.orders !== undefined || b.engraving === true) {
       const a = await addons.get(id);
-      engravingAdminOnly(request, (a.engraving || b.engraving === true) && b.offeredAt.orders !== a.offeredAt.orders);
+      const ordersAfter = b.offeredAt?.orders ?? a.offeredAt.orders;
+      // An add-on that becomes the engraving brings its prices and its YOUR ORDERS switch with it: an ADMIN's when it
+      // carries a price or that switch is on after the change (else an OPERATOR could price one, set the engraving
+      // aside and make it the engraving).
+      const becoming = b.engraving === true && !a.engraving && (a.prices.length > 0 || ordersAfter);
+      engravingAdminOnly(request, becoming || ((a.engraving || b.engraving === true) && ordersAfter !== a.offeredAt.orders));
     }
     return addons.update(id, given(b), adminActor(request));
   });

@@ -231,7 +231,6 @@ export const adminCatalogRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
     return catalog.setModelPacking(id, { boxId: b.boxId, packedWeightG: b.packedWeightG }, adminActor(request));
   });
 
-  // Plan ORBES CARE (answer 12, D16): ADMIN only, as it rewrites the warranties of the model's pieces already sold.
   // THE VAULT (lot Q3, step Q3.9): a vault-only model is refused by every sales path (409 MODEL_VAULT_ONLY).
   app.put('/api/admin/models/:id/vault-only', async (request) => {
     const { id } = parse(catalogParams, request.params);
@@ -240,6 +239,7 @@ export const adminCatalogRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
     return catalog.getModel(id);
   });
 
+  // Plan ORBES CARE (answer 12, D16): ADMIN only, as it rewrites the warranties of the model's pieces already sold.
   app.post('/api/admin/models/:id/warranty', { config: { guard: { minRole: 'ADMIN' } } }, async (request) => {
     const { id } = parse(catalogParams, request.params);
     const b = parse(modelWarrantyBody, request.body);

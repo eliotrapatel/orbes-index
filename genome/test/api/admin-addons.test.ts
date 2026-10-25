@@ -171,5 +171,18 @@ describe('the add-ons\' routes (plan MACRO M3 §4.2, D1)', () => {
     expect(errorOf(await operator.post('/api/admin/addons', { kind: 'SERVICE', name: 'Engraving Two', skuCode: 'ADD-ENGR3', engraving: true, prices: { EUR: 100 } }))).toEqual(refused);
     expect(errorOf(await operator.post('/api/admin/addons', { kind: 'SERVICE', name: 'Engraving Two', skuCode: 'ADD-ENGR3', engraving: true, offeredAt: { orders: false } }))).toEqual(refused);
     expect(errorOf(await admin.post('/api/admin/addons', { kind: 'SERVICE', name: 'Engraving Two', skuCode: 'ADD-ENGR3', engraving: true, prices: { EUR: 100 } })).code).toBe('ADDON_ENGRAVING_TAKEN');
+    // Making an add-on the engraving brings its prices and switch: an OPERATOR who priced a service and set the
+    // engraving aside is refused it; an unpriced one with YOUR ORDERS off stays an OPERATOR's; an ADMIN passes.
+    const svc = safeJson(await operator.post('/api/admin/addons', { kind: 'SERVICE', name: 'Lettering', skuCode: 'ADD-LETTER', prices: { EUR: 900 } })) as Addon;
+    const bare = safeJson(await operator.post('/api/admin/addons', { kind: 'SERVICE', name: 'Lettering Plain', skuCode: 'ADD-LETTER2', offeredAt: { orders: false } })) as Addon;
+    expect((await operator.post(`/api/admin/addons/${e.id}/set-aside`)).statusCode).toBe(200);
+    expect(errorOf(await operator.patch(`/api/admin/addons/${svc.id}`, { engraving: true }))).toEqual(refused);
+    expect(errorOf(await operator.patch(`/api/admin/addons/${bare.id}`, { engraving: true, offeredAt: { orders: true } }))).toEqual(refused);
+    const plain = await operator.patch(`/api/admin/addons/${bare.id}`, { engraving: true });
+    expect(plain.statusCode, plain.body).toBe(200);
+    expect((await operator.post(`/api/admin/addons/${bare.id}/set-aside`)).statusCode).toBe(200);
+    const made = await admin.patch(`/api/admin/addons/${svc.id}`, { engraving: true });
+    expect(made.statusCode, made.body).toBe(200);
+    expect(safeJson(made)).toMatchObject({ engraving: true, prices: [{ currency: 'EUR', priceMinor: 900 }] });
   });
 });
