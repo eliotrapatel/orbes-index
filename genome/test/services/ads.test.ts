@@ -10,11 +10,13 @@
  *    every platform for every act; a pass repeated writes nothing; sent with the event id `orbes-<conversion id>` (a
  *    platform deduplicates a retry);
  *  - the consent at the act's time: granted after the act, nothing; declined after it, the queued event cancelled;
- *  - the device's choice made signed out taken by the account at its sign-up (carry), its click ids with it;
+ *  - the device's choice made signed out taken by the account at its sign-up (carry), its click ids with it, by the
+ *    first account to sign in after it only (a shared device);
  *  - state's precedence: the account's latest choice when signed in, else the device's;
  *  - a paid order: PAID_ORDER with the main invoice's total; an ORDER conversion recorded while its order is unpaid and
  *    PAID on a later pass, enqueued once, as PAID_ORDER, with its value (the watermark and the became-PAID pass);
- *  - adsSendsFor: GIFT, EXCHANGE, a VAULT order at 0 and a Shopify order never; a RIGHT TO BUY order sent;
+ *  - adsSendsFor: GIFT, EXCHANGE, a VAULT order at 0 and a Shopify order never; a RIGHT TO BUY order sent; an order
+ *    cancelled before the pass never queued, one cancelled before the send cancelled by the sender;
  *  - test entrants, the team's own accounts and LOCKED accounts never (a lock cancels what is queued);
  *  - TOO_OLD, NO_CLICK_ID, NOT_READY (keys missing, or Google's action not named);
  *  - retries (1 min, 5 min, 30 min, 2 h) then FAILED, its error scrubbed of the token;
@@ -340,15 +342,15 @@ describe('AdsService (K27, plan §3.2)', () => {
     expect(await db.selectFrom('ad_clicks').select('id').where('device_id', '=', dev2).execute()).toEqual([]);
     await db.transaction().execute((tx) => ads.carry(tx, dev2, b));
     expect(await ads.state(null, b)).toMatchObject({ choice: 'DECLINED' });
-    // A shared device: a choice made signed out, carried to one account, is carried to the next one too (its copy keeps
-    // the device's time); but once someone chose on it signed in, later, the next account is asked again.
+    // A shared device: a choice made signed out is carried to the first account to sign in after it only; the next
+    // account is asked again (the copy already carried hands it on), as it is once someone chose on it signed in, later.
     const dev4 = await device();
     await ads.choose({ deviceId: dev4, accountId: null, choice: 'GRANTED', source: 'BANNER', userAgent: UA });
     clock.advance(MIN);
     const [first, next] = [await account(), await account()];
     await db.transaction().execute((tx) => ads.carry(tx, dev4, first));
     await db.transaction().execute((tx) => ads.carry(tx, dev4, next));
-    expect([await ads.state(null, first), await ads.state(null, next)].map((x) => x.choice)).toEqual(['GRANTED', 'GRANTED']);
+    expect([await ads.state(null, first), await ads.state(null, next)].map((x) => x.choice)).toEqual(['GRANTED', null]);
     const dev3 = await device();
     await ads.choose({ deviceId: dev3, accountId: null, choice: 'GRANTED', source: 'BANNER', userAgent: UA });
     clock.advance(MIN);
@@ -405,6 +407,29 @@ describe('AdsService (K27, plan §3.2)', () => {
     for (const never of [giftConversion, exchangeConversion, store.conversion, vaultAtZero.conversion]) expect(await eventsOf(never)).toEqual([]);
     expect(await eventsOf(salon.conversion)).toEqual([{ platform: 'META', kind: 'PAID_ORDER', status: 'QUEUED', skip_reason: null }]);
     expect(await eventsOf(rightToBuy.conversion)).toEqual([{ platform: 'META', kind: 'PAID_ORDER', status: 'QUEUED', skip_reason: null }]);
+  });
+
+  it('never sends a paid order cancelled or returned before the send: not queued, or cancelled at send time', async () => {
+    const g = await account();
+    await choice(g, ago(DAY));
+    const cancel = (id: string) => db.updateTable('orders').set({ status: 'CANCELLED', cancelled_at: now() }).where('id', '=', id).execute();
+    // Cancelled before the pass: never queued (as the attribution report counts a purchase).
+    const before = await paidOrder(g, src.instagram, 30_000);
+    await cancel(before.id);
+    // Queued, then cancelled before the send: the sender cancels it and the platform receives nothing.
+    const after = await paidOrder(g, src.instagram, 30_000);
+    await pass();
+    expect(await eventsOf(before.conversion)).toEqual([]);
+    expect(await eventsOf(after.conversion)).toEqual([{ platform: 'META', kind: 'PAID_ORDER', status: 'QUEUED', skip_reason: null }]);
+    await cancel(after.id);
+    fake.reset();
+    await ads.sendDue(now());
+    expect(fake.requests.map((r) => JSON.stringify(r.json)).filter((b) => b.includes(`orbes-${after.conversion}`))).toEqual([]);
+    expect(await db.selectFrom('ad_events').select(['status', 'sent_at', 'last_error']).where('conversion_id', '=', after.conversion).executeTakeFirstOrThrow()).toEqual({
+      status: 'CANCELLED',
+      sent_at: null,
+      last_error: AD_CANCELLED_WORDS.orderCancelled,
+    });
   });
 
   it('never sends a test entrant’s, the team’s own or a LOCKED account’s acts; a lock cancels what is queued', async () => {

@@ -12,7 +12,8 @@
  *    the year's restart, a document never changed (the trigger), its one line « Partner experience · <title> · <date> »,
  *    issued by CONGLOMERAT LLC to the partner's billing details, without VAT; the month's list, its totals and its CSV;
  *  - the guests: every YES across two invitations counted, a NO's tick cleared, a name shared once per account, an
- *    account without both names counted only, the test entrants left out; the guest list's CSV, audited by its counts;
+ *    account without both names counted only, a locked account's shared name withheld (still counted), the test
+ *    entrants left out; the guest list's CSV, audited by its counts;
  *  - the journal (`partner_invoice.issue`, `.credit`: never the buyer) and the audit (`partner.*`), never a guest's name;
  *  - two invoices issued at once take consecutive P- numbers: on PGlite always, on PostgreSQL in genome-ci
  *    (ORBES_TEST_POSTGRES_URL, a pool of 8: true parallelism).
@@ -286,7 +287,7 @@ describe('PartnerService (lot M4 plan §2.2, K49)', () => {
     clock.set('2026-11-03T12:00:00.000Z');
   });
 
-  it('gives the experience\'s guests: every YES across its invitations, the names of those who shared them once each, an account without names counted only, the test entrants out; the guest list audited by its counts', async () => {
+  it('gives the experience\'s guests: every YES across its invitations, the names of those who shared them once each, an account without names counted only, a locked account counted without its name, the test entrants out; the guest list audited by its counts', async () => {
     const e = await experienceOf('Maison Invitée');
     clock.set('2026-11-04T09:00:00.000Z');
     const invitation = async (title: string) => {
@@ -308,6 +309,7 @@ describe('PartnerService (lot M4 plan §2.2, K49)', () => {
     const nameless = await guest(null);
     const changed = await guest({ first: 'Noé', last: 'Petit' });
     const entrant = await guest({ first: 'Test', last: 'Entrant' });
+    const locked = await guest({ first: 'Romy', last: 'Lefèvre' });
     // A test entrant stands where its test row puts it (PALLADIUM here), never its pieces.
     await db.insertInto('test_entrants').values({ account_id: entrant.id, tier: 3 }).execute();
     const rsvp = (a: { id: string; actor: Actor }, post: string, answer: 'YES' | 'NO', shareName?: boolean) =>
@@ -320,24 +322,28 @@ describe('PartnerService (lot M4 plan §2.2, K49)', () => {
     await rsvp(changed, first, 'YES', true);
     await rsvp(changed, first, 'NO');
     await rsvp(entrant, first, 'YES', true);
+    // Shared, then locked (a takeover, THREAT-MODEL U): its holder can no longer untick, so the name stays with ORBES.
+    await rsvp(locked, second, 'YES', true);
+    await ctx.services.owners.lock(locked.id, admin);
     // A NO with a tick is impossible: the NO cleared it.
     expect((await db.selectFrom('circle_rsvps').select(['answer', 'share_name', 'share_name_at']).where('account_id', '=', changed.id).executeTakeFirstOrThrow())).toEqual({ answer: 'NO', share_name: false, share_name_at: null });
 
     const g = await partners().guests(e.id);
-    // YES: Camille twice (two sittings), Alix, the account without names; not the NO, not the test entrant.
-    expect(g).toEqual({ experienceId: e.id, headcount: 4, sharedCount: 2, shared: [{ firstName: 'Alix', lastName: 'Bernard' }, { firstName: 'Camille', lastName: 'Durand' }] });
+    // YES: Camille twice (two sittings), Alix, the account without names, the locked one (counted, its name not given);
+    // not the NO, not the test entrant.
+    expect(g).toEqual({ experienceId: e.id, headcount: 5, sharedCount: 2, shared: [{ firstName: 'Alix', lastName: 'Bernard' }, { firstName: 'Camille', lastName: 'Durand' }] });
     // The experience's page lists its invitations with their YES and places.
     expect((await partners().experience(e.id)).invitations.map((i) => [i.title, i.yes, i.minTier, i.published])).toEqual([
       ['Dinner, first sitting', 3, 3, true],
-      ['Dinner, second sitting', 2, 3, true],
+      ['Dinner, second sitting', 3, 3, true],
     ]);
     // The list ORBES sends: the headcount line, then the names; audited by its counts, never a name.
     const csv = await partners().guestsCsv(e.id, operator);
     expect(csv.filename).toBe('ORBES-guests-2026-11-12.csv');
-    expect(csv.body).toBe('"guests","4"\r\n"first name","last name"\r\n"Alix","Bernard"\r\n"Camille","Durand"\r\n');
+    expect(csv.body).toBe('"guests","5"\r\n"first name","last name"\r\n"Alix","Bernard"\r\n"Camille","Durand"\r\n');
     const exported = await audits('partner.guests.export', e.id);
-    expect(exported.map((a) => a.details)).toEqual([{ headcount: 4, names: 2 }]);
-    expect(JSON.stringify(await db.selectFrom('audit_logs').select('details').where('action', 'like', 'partner.%').execute())).not.toMatch(/Camille|Durand|Bernard/);
+    expect(exported.map((a) => a.details)).toEqual([{ headcount: 5, names: 2 }]);
+    expect(JSON.stringify(await db.selectFrom('audit_logs').select('details').where('action', 'like', 'partner.%').execute())).not.toMatch(/Camille|Durand|Bernard|Romy|Lefèvre/);
     await rejects(partners().guests('00000000-0000-4000-8000-000000000000'), 'PARTNER_EXPERIENCE_NOT_FOUND', 404);
   });
 

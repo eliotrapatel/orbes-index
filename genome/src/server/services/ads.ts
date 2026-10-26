@@ -152,6 +152,7 @@ export const AD_CANCELLED_WORDS = Object.freeze({
   withdrawn: 'The collector withdrew their consent.',
   notCounted: 'The account is no longer active or counted.',
   locked: 'The account was locked.',
+  orderCancelled: 'The order was cancelled.',
 });
 
 /** How long each part of the right of access is kept (its retention statements). */
@@ -510,8 +511,9 @@ export class AdsService {
 
   /**
    * At a sign-up or a sign-in (TrackingService.link's attach, in its transaction): the device's choice made signed out
-   * becomes the account's when the account holds none newer (a new row, at the time it was made) and no one chose since
-   * on that device signed in (a shared device: a later choice made signed in is not handed to the next account); the
+   * becomes the account's when the account holds none newer (a new row, at the time it was made) and no account on that
+   * device holds one as late (a shared device: only the first account to sign in after a signed-out choice takes it, and
+   * a later choice made signed in is not handed to the next account either); the
    * device's click ids take the account, or go when the account's choice is DECLINED. Nothing when the device made no
    * choice, and nothing while off (no row moves while conversions are switched off; a later sign-in while on carries).
    */
@@ -535,8 +537,9 @@ export class AdsService {
         .where((eb) =>
           eb.or([
             eb.and([eb('account_id', '=', accountId), eb('chosen_at', '>=', device.chosen_at)]),
-            // Chosen signed in on this device after it (a carried copy keeps the device's time, so it is not later).
-            eb.and([eb('device_id', '=', deviceId), eb('account_id', 'is not', null), eb('chosen_at', '>', device.chosen_at)]),
+            // Held by an account on this device as late: chosen signed in since, or the copy already carried to the first
+            // account to sign in after it (a carried copy keeps the device's time), so the choice is handed on only once.
+            eb.and([eb('device_id', '=', deviceId), eb('account_id', 'is not', null), eb('chosen_at', '>=', device.chosen_at)]),
           ]),
         )
         .limit(1)
@@ -829,7 +832,7 @@ export class AdsService {
                  o.channel, o.price_minor, o.shopify_order_id, o.exchange_of_order_id
             FROM acquisition_conversions c
             JOIN orders o ON o.id = c.ref_id
-           WHERE c.kind = 'ORDER' AND o.paid_at IS NOT NULL AND o.paid_at >= ${from}::timestamptz
+           WHERE c.kind = 'ORDER' AND o.paid_at IS NOT NULL AND o.status NOT IN ('CANCELLED', 'RETURNED') AND o.paid_at >= ${from}::timestamptz
              AND greatest(c.created_at, o.paid_at) >= ${since}::timestamptz AND greatest(c.created_at, o.paid_at) <= ${now}::timestamptz)
         SELECT cand.conversion_id, cand.kind, cand.act_at, cand.channel, cand.price_minor, cand.shopify_order_id, cand.exchange_of_order_id,
                (SELECT array_agg(DISTINCT m.platform) FROM acquisition_sources src
@@ -1017,7 +1020,8 @@ export class AdsService {
 
   /**
    * The AdEvent of a claimed row, read now (§3.1: what is sent, at most), or why it is cancelled: the account no longer
-   * ACTIVE, a test entrant or one of the team's, or its choice now not GRANTED (withdrawn since the act).
+   * ACTIVE, a test entrant or one of the team's, its choice now not GRANTED (withdrawn since the act), or its paid order
+   * CANCELLED or RETURNED before the send (as the attribution report counts a purchase; a refund after it is not recalled).
    */
   private async eventOf(row: Claimed): Promise<{ event: AdEvent } | { cancel: string }> {
     const r = (
@@ -1031,6 +1035,7 @@ export class AdsService {
         choice_now: AdConsentChoice | null;
         user_agent: string | null;
         order_id: string | null;
+        order_status: string | null;
         invoice_minor: string | number | null;
         invoice_currency: string | null;
         price_minor: string | number | null;
@@ -1043,7 +1048,7 @@ export class AdsService {
                (SELECT g.user_agent FROM ad_consents g WHERE g.account_id = c.account_id AND g.choice = 'GRANTED'
                    AND g.chosen_at <= CASE WHEN c.kind = 'ORDER' THEN o.paid_at ELSE c.at END
                  ORDER BY g.chosen_at DESC, g.id DESC LIMIT 1) AS user_agent,
-               o.id AS order_id, i.total_minor AS invoice_minor, i.currency AS invoice_currency, o.price_minor, o.currency
+               o.id AS order_id, o.status AS order_status, i.total_minor AS invoice_minor, i.currency AS invoice_currency, o.price_minor, o.currency
           FROM acquisition_conversions c
           JOIN accounts a ON a.id = c.account_id
           LEFT JOIN orders o ON c.kind = 'ORDER' AND o.id = c.ref_id
@@ -1055,6 +1060,7 @@ export class AdsService {
     ).rows[0];
     if (!r || r.status !== 'ACTIVE' || !r.counted) return { cancel: AD_CANCELLED_WORDS.notCounted };
     if (r.choice_now !== 'GRANTED') return { cancel: AD_CANCELLED_WORDS.withdrawn };
+    if (row.kind === 'PAID_ORDER' && (r.order_status === 'CANCELLED' || r.order_status === 'RETURNED')) return { cancel: AD_CANCELLED_WORDS.orderCancelled };
     const actAt = new Date(r.act_at);
     const clicks = await this.db
       .selectFrom('ad_clicks')

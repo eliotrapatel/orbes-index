@@ -14,8 +14,9 @@
  *   the left, ACCEPT · DECLINE at the right (shared/desktop-account.css)
  *
  * States: shown; saving (ONE MOMENT…, both buttons held); error (Your choice could not be saved. Try again., both buttons
- * again); gone once answered. Never over the screens consent.ts CONSENT_NEVER_ON names (it waits for the next other one).
- * In English whatever the browser's language (`lang`, no hyphenation): the app's own. No motion but its fade in.
+ * again); gone once answered. The line under the buttons keeps its place in each, so the band never changes height.
+ * Never over the screens consent.ts CONSENT_NEVER_ON names (it waits for the next other one). In English whatever the
+ * browser's language (`lang`, no hyphenation): the app's own. No motion but its fade in.
  */
 import { h } from '../../shared/dom.js';
 import { CONSENT } from '../copy.js';
@@ -41,7 +42,8 @@ export class ConsentBanner {
   constructor(private readonly deps: ConsentBannerDeps) {
     this.accept = button(CONSENT.accept, { outline: true, extraClass: 'n-consent__button', attrs: { 'data-choice': 'GRANTED' }, onClick: () => void this.choose('GRANTED') });
     this.decline = button(CONSENT.decline, { outline: true, extraClass: 'n-consent__button', attrs: { 'data-choice': 'DECLINED' }, onClick: () => void this.choose('DECLINED') });
-    this.line = h('p', { class: 'n-err n-consent__line', attrs: { role: 'status', hidden: true } });
+    // Always in the band, empty while shown (its place kept, styles.css), so no state changes the band's height.
+    this.line = h('p', { class: 'n-consent__line', attrs: { role: 'status' } });
     this.el = h(
       'section',
       { class: 'n-consent', attrs: { 'aria-label': CONSENT.region, lang: 'en', hidden: true, 'data-state': 'shown' } },
@@ -98,8 +100,12 @@ export class ConsentBanner {
     this.accept.disabled = saving;
     this.decline.disabled = saving;
     this.el.setAttribute('aria-busy', saving ? 'true' : 'false');
+    // As SHARE MY NAME draws them (views/circle.ts): ONE MOMENT… in the house's label, a status; a refusal an alert.
+    const error = state === 'error';
+    this.line.className = saving ? 'n-g n-lb n-ivc n-consent__line' : error ? 'n-err n-consent__line' : 'n-consent__line';
+    this.line.setAttribute('role', error ? 'alert' : 'status');
     this.line.textContent = text;
-    this.line.hidden = text === '';
+    // Measured again: the same height, unless a refusal wraps (a narrow screen, a large text size).
     if (!this.el.hidden) this.measure();
   }
 

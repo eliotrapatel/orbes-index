@@ -24,7 +24,8 @@
  *                 and one by one (`invoice`, `invoicePdf`).
  *   guests        `guests`: every YES to the experience's invitations (`circle_posts.partner_experience_id`) counted, the
  *                 names of the guests who ticked « Share my name » (P3: the account's first and last name, once per
- *                 account), the test entrants left out; `guestsCsv` (OPERATOR): the headcount line, then the names.
+ *                 account; a locked account's withheld, still counted), the test entrants left out; `guestsCsv`
+ *                 (OPERATOR): the headcount line, then the names.
  *   history       audited `partner.create`, `.update`, `.set_aside`, `.reinstate`, `partner.experience.create`,
  *                 `.update`, `.invoice`, `.paid`, `.cancel`, `partner.guests.export` (its counts only, never a name;
  *                 the contact's email and phone, and a note, as whether they are written);
@@ -736,7 +737,8 @@ export class PartnerService {
 
   /**
    * The experience's guests: every YES to its invitations counted (`headcount`), and the first and last names of the
-   * guests who chose to share them (once per account, both names given), the test entrants left out. 404
+   * guests who chose to share them (once per account, both names given, an ACTIVE account's only: a locked one's
+   * holder can no longer untick it, so it is counted without its name), the test entrants left out. 404
    * PARTNER_EXPERIENCE_NOT_FOUND.
    */
   async guests(experienceId: string): Promise<PartnerGuests> {
@@ -1112,15 +1114,19 @@ async function guestsOf(db: Db, id: string): Promise<PartnerGuests> {
   const e = await db.selectFrom('partner_experiences').select('id').where('id', '=', id).executeTakeFirst();
   if (!e) throw partnerExperienceNotFound();
   const rows = (
-    await sql<{ account_id: string; share_name: boolean; first_name: string | null; last_name: string | null }>`
-      SELECT r.account_id, r.share_name, ap.first_name, ap.last_name
+    await sql<{ account_id: string; share_name: boolean; active: boolean; first_name: string | null; last_name: string | null }>`
+      SELECT r.account_id, r.share_name, a.status = 'ACTIVE' AS active, ap.first_name, ap.last_name
         FROM circle_rsvps r
         JOIN circle_posts p ON p.id = r.post_id
+        JOIN accounts a ON a.id = r.account_id
         LEFT JOIN account_profiles ap ON ap.account_id = r.account_id
        WHERE p.partner_experience_id = ${id} AND r.answer = 'YES' AND ${notTestEntrant('r.account_id')}`.execute(db)
   ).rows;
   const names = new Map<string, { firstName: string; lastName: string }>();
   for (const r of rows) {
+    // A locked account's name stays with ORBES (its holder can no longer untick it, as the RSVP refuses it); it is
+    // still counted, so the headcount is every YES.
+    if (!r.active) continue;
     if (!r.share_name || !r.first_name || !r.last_name) continue;
     names.set(r.account_id, { firstName: r.first_name, lastName: r.last_name });
   }
