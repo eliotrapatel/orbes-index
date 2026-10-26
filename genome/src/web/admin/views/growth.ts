@@ -11,6 +11,9 @@
  *   - Repeat buying: the second piece, the time to it, the cohorts by month of the first piece;
  *   - From scan to PALLADIUM: each step and its share of the one before, the months, the club now;
  *   - Revenue: the net of each month (each opening its Invoices page), BY CHANNEL · BY COUNTRY · BY MODEL;
+ *   - Partner experiences (lot M4 plan §2.3, K49 P1): beside the revenue, never inside it, from the same report: the
+ *     months' invoiced (net of credit notes) and paid, each currency apart, and by partner (each opening its page in
+ *     Club → Partners); "No partner invoice in this window." without any;
  *   - Margin (lot M4 plan §1.3, K43 N1 to N3, D61): from GET /api/admin/margin, the same window in euros at the rates of
  *     Margin settings: Revenue, Costs, Margin and Margin %, BY MODEL · BY CHANNEL · BY TIER (never by release) with
  *     PERKS' and THE VAULT's parts, the orders holding an estimate, THE VAULT's line and its way to Club → THE VAULT's
@@ -73,6 +76,7 @@ import {
   vaultReportHref,
   type MarginRow,
 } from '../model/margin.js';
+import { PARTNER_INCOME_EMPTY, PARTNER_INCOME_NOTE, partnerIncomeByPartner, partnerIncomeEmpty, partnerIncomeMonths, partnerIncomeTotals, type PartnerIncomeRow } from '../model/partners.js';
 import { href } from '../router.js';
 import { FUNNEL_STEPS, GROWTH_WINDOWS, type AnalyticsData, type BestTime, type CircleStats, type GrowthCollectors, type GrowthRelease, type GrowthReport, type MarginReport } from '../types.js';
 import { barList, busy, button, emptyState, kpi, linkButton, pageHeader, section, select, table } from '../ui/components.js';
@@ -326,6 +330,49 @@ function revenueSection(p: GrowthParams, r: GrowthReport): HTMLElement {
   );
 }
 
+// ── Partner experiences (lot M4 plan §2.3, K49 P1) ──────────────────────
+
+function partnerIncomeTable(rows: PartnerIncomeRow[], head: string, caption: string, testid: string): HTMLElement {
+  return table<PartnerIncomeRow>(
+    [
+      {
+        label: head,
+        cell: (x) => (x.link ? h('a', { class: ['idlink', 'partners__brand'], attrs: { href: x.link } }, x.label) : x.label),
+        kind: ['wide'],
+      },
+      { label: 'Currency', cell: (x) => x.currency, kind: ['nowrap'] },
+      { label: 'Invoiced', cell: (x) => h('span', { data: { testid: `${testid}-invoiced` } }, x.invoiced), kind: ['num', 'nowrap'] },
+      { label: 'Credited', cell: (x) => x.credited, kind: ['num', 'nowrap'] },
+      { label: 'Paid', cell: (x) => h('span', { data: { testid: `${testid}-paid` } }, x.paid), kind: ['num', 'nowrap'] },
+    ],
+    rows,
+    { caption },
+  );
+}
+
+function partnerSection(r: GrowthReport): HTMLElement {
+  const income = r.partnerIncome;
+  const partners = linkButton('Partners', href('clubPartners'), 'ghost');
+  partners.setAttribute('data-testid', 'growth-partners-link');
+  if (!income || partnerIncomeEmpty(income)) {
+    return section('Partner experiences', h('div', { data: { testid: 'growth-partners-empty' } }, emptyState(PARTNER_INCOME_EMPTY)), { note: PARTNER_INCOME_NOTE, class: 'panel--growth-partners', id: 'growth-partners', tools: [partners] });
+  }
+  return section(
+    'Partner experiences',
+    [
+      h('ul', { class: 'growth__partner-totals', data: { testid: 'growth-partners-totals' } }, ...partnerIncomeTotals(income).map((t) => h('li', { class: 'growth__headline' }, t))),
+      h('div', { class: 'growth__block', data: { testid: 'growth-partners-months' } }, subtitle('By month'), partnerIncomeTable(partnerIncomeMonths(income), 'Month', 'Partner experiences by month', 'growth-partners-month')),
+      h(
+        'div',
+        { class: 'growth__block', data: { testid: 'growth-partners-by-partner' } },
+        subtitle('By partner'),
+        partnerIncomeTable(partnerIncomeByPartner(income, (partnerId) => href('clubPartner', { partnerId })), 'Partner', 'Partner experiences by partner', 'growth-partners-partner'),
+      ),
+    ],
+    { note: PARTNER_INCOME_NOTE, class: 'panel--growth-partners', id: 'growth-partners', tools: [partners] },
+  );
+}
+
 // ── Margin (lot M4 plan §1.3) ────────────────────────────────────────────
 
 /** A money cell, a loss marked. */
@@ -576,6 +623,7 @@ export async function growthView(ctx: ViewContext): Promise<HTMLElement> {
     repeatSection(r),
     funnelSection(r),
     revenueSection(p, r),
+    partnerSection(r),
     marginSection(ctx, p, margin),
     elsewhere(analytics, circle, releases, best),
   );

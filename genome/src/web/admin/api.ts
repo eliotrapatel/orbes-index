@@ -105,6 +105,13 @@ import type {
   GrowthReport,
   MarginReport,
   MarginSettings,
+  Partner,
+  PartnerDetail,
+  PartnerExperience,
+  PartnerExperienceInput,
+  PartnerGuests,
+  PartnerInput,
+  PartnerInvoiceList,
   MarginUnitCostKey,
   ShippingCostInput,
   StaffDocument,
@@ -1517,6 +1524,96 @@ export class AdminApi {
   async invoicePdf(id: string): Promise<Download> {
     const res = await this.request<Response>('GET', `/api/admin/invoices/${encodeURIComponent(id)}/pdf`, { raw: true });
     return toDownload(res, 'ORBES-invoice.pdf');
+  }
+
+  // ── The partners (lot M4 plan §2.3, K49 P1 to P4; routes/admin/partners.ts) ──
+
+  /** AUDITOR: every partner, ACTIVE first (the contact's email and phone masked for an AUDITOR). */
+  partners(): Promise<Items<Partner>> {
+    return this.get('/api/admin/partners');
+  }
+
+  /** OPERATOR: a partner, ACTIVE (409 PARTNER_BRAND_TAKEN). */
+  createPartner(input: PartnerInput): Promise<PartnerDetail> {
+    return this.post('/api/admin/partners', input);
+  }
+
+  /** AUDITOR: a partner and its experiences. */
+  partner(id: string): Promise<PartnerDetail> {
+    return this.get(`/api/admin/partners/${encodeURIComponent(id)}`);
+  }
+
+  /** OPERATOR: only what changed; null clears an optional field. */
+  updatePartner(id: string, change: PartnerInput): Promise<PartnerDetail> {
+    return this.patch(`/api/admin/partners/${encodeURIComponent(id)}`, change);
+  }
+
+  /** OPERATOR: SET ASIDE, offered for no new experience. */
+  setPartnerAside(id: string): Promise<PartnerDetail> {
+    return this.post(`/api/admin/partners/${encodeURIComponent(id)}/set-aside`);
+  }
+
+  /** OPERATOR: ACTIVE again. */
+  reinstatePartner(id: string): Promise<PartnerDetail> {
+    return this.post(`/api/admin/partners/${encodeURIComponent(id)}/reinstate`);
+  }
+
+  /** OPERATOR: a DRAFT experience of an ACTIVE partner. */
+  createPartnerExperience(partnerId: string, input: Required<Omit<PartnerExperienceInput, 'note'>> & Pick<PartnerExperienceInput, 'note'>): Promise<PartnerExperience> {
+    return this.post(`/api/admin/partners/${encodeURIComponent(partnerId)}/experiences`, input);
+  }
+
+  /** AUDITOR: an experience, its documents and its invitations. */
+  partnerExperience(id: string): Promise<PartnerExperience> {
+    return this.get(`/api/admin/partner-experiences/${encodeURIComponent(id)}`);
+  }
+
+  /** OPERATOR: its title, date and note; its amount and currency while DRAFT. */
+  updatePartnerExperience(id: string, change: PartnerExperienceInput): Promise<PartnerExperience> {
+    return this.patch(`/api/admin/partner-experiences/${encodeURIComponent(id)}`, change);
+  }
+
+  /** ADMIN: ISSUE THE INVOICE, the next P- number (409 PARTNER_BILLING_MISSING). */
+  issuePartnerInvoice(id: string): Promise<PartnerExperience> {
+    return this.post(`/api/admin/partner-experiences/${encodeURIComponent(id)}/invoice`);
+  }
+
+  /** ADMIN: RECORD PAYMENT, the Paris day the money arrived (or that date corrected). */
+  recordPartnerPayment(id: string, paidOn: string): Promise<PartnerExperience> {
+    return this.post(`/api/admin/partner-experiences/${encodeURIComponent(id)}/paid`, { paidOn });
+  }
+
+  /** A DRAFT cancelled by an OPERATOR; an invoiced or paid one by an ADMIN, its PC- credit note issued with it. */
+  cancelPartnerExperience(id: string): Promise<PartnerExperience> {
+    return this.post(`/api/admin/partner-experiences/${encodeURIComponent(id)}/cancel`);
+  }
+
+  /** AUDITOR: the headcount and the names shared (the names for OPERATOR and ADMIN only). */
+  partnerGuests(id: string): Promise<PartnerGuests> {
+    return this.get(`/api/admin/partner-experiences/${encodeURIComponent(id)}/guests`);
+  }
+
+  /** OPERATOR: the guest list ORBES sends the partner (the headcount line, then first name, last name). */
+  async partnerGuestsCsv(id: string): Promise<Download> {
+    const res = await this.request<Response>('GET', `/api/admin/partner-experiences/${encodeURIComponent(id)}/guests.csv`, { raw: true });
+    return toDownload(res, 'ORBES-guests.csv');
+  }
+
+  /** AUDITOR: a month's partner invoices and credit notes (the current one by default). */
+  partnerInvoices(month?: string): Promise<PartnerInvoiceList> {
+    return this.get('/api/admin/partner-invoices', { month });
+  }
+
+  /** AUDITOR: the month's partner CSV for the accountant. */
+  async partnerInvoicesCsv(month: string): Promise<Download> {
+    const res = await this.request<Response>('GET', '/api/admin/partner-invoices.csv', { raw: true, query: { month } });
+    return toDownload(res, `ORBES-partner-invoices-${month}.csv`);
+  }
+
+  /** AUDITOR: one partner document's PDF. */
+  async partnerInvoicePdf(id: string): Promise<Download> {
+    const res = await this.request<Response>('GET', `/api/admin/partner-invoices/${encodeURIComponent(id)}/pdf`, { raw: true });
+    return toDownload(res, 'ORBES-partner-invoice.pdf');
   }
 
   // ── Segments (plan LIVE RELEASE+, choice 27) ─────────────────────────────

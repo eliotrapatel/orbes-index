@@ -3016,6 +3016,8 @@ export interface CirclePost {
   externalUrl: string | null;
   /** Read by this segment's members only (among its tiers); null: by its tiers. */
   segment: { id: string; name: string } | null;
+  /** The partner's experience an invitation of a partner experience is for (lot M4, K49 P2), or null. */
+  partnerExperience?: { id: string; title: string; eventOn: string; status: PartnerExperienceStatus; partner: { id: string; brand: string } } | null;
   published: boolean;
   publishedAt: Iso | null;
   createdAt: Iso;
@@ -3042,6 +3044,8 @@ export interface CirclePostInput {
   segmentId?: string | null;
   /** An invitation's experience (BP-19 T7); its tier then THE PROGRAM's. */
   experience?: CircleExperience | null;
+  /** The partner's experience of an invitation of a partner experience (lot M4, K49 P2); null clears it. */
+  partnerExperienceId?: string | null;
 }
 
 /** PATCH /api/admin/circle/posts/:id: any field but the kind; null clears an optional one. */
@@ -3052,6 +3056,8 @@ export interface CircleAnswer {
   accountId: string;
   email: string;
   answer: CircleRsvpAnswer;
+  /** SHARES NAME (lot M4, K49 P3): the guest shares their name with the invitation's partner. */
+  shareName?: boolean;
   createdAt: Iso;
   answeredAt: Iso;
 }
@@ -4611,6 +4617,8 @@ export interface GrowthReport {
     byCountry: GrowthRevenueGroup[];
     byModel: GrowthRevenueGroup[];
   };
+  /** Partner experiences (lot M4, K49 P1), beside the revenue: each currency apart; absent from an older server. */
+  partnerIncome?: PartnerIncome;
 }
 
 /** A row of COLLECTORS BY VALUE (GET /api/admin/growth/collectors): the email masked for an AUDITOR. */
@@ -4808,6 +4816,154 @@ export interface MarginSettings {
   shippingCosts: ShippingCostView[];
   unitCosts: UnitCostView[];
   allowances: AllowanceView[];
+}
+
+// ── The partners (lot M4 plan §2.2, §2.3; macro scope K49 P1 to P4; server services/partners.ts, routes/admin/partners.ts) ──
+
+/** An amount in one of the house's currencies. */
+export interface PartnerAmount {
+  currency: HouseCurrency;
+  amountMinor: number;
+}
+
+/** A partner (GET /api/admin/partners): its contact's email and phone masked for an AUDITOR by the server. */
+export interface Partner {
+  id: string;
+  brand: string;
+  contact: { name: string | null; email: string | null; phone: string | null };
+  /** As its invoices print them; `country` ISO 3166-1 alpha-2. */
+  billing: { name: string | null; address: string | null; country: string | null; companyNumber: string | null };
+  note: string | null;
+  /** false: SET ASIDE, offered for no new experience. */
+  active: boolean;
+  experienceCount: number;
+  /** Its invoices less its credit notes, per currency. */
+  invoiced: PartnerAmount[];
+  /** Its experiences PAID, per currency. */
+  paid: PartnerAmount[];
+  createdAt: Iso;
+  createdBy: { id: string; email: string } | null;
+  updatedAt: Iso;
+}
+
+/** One experience as its partner's page lists it. */
+export interface PartnerExperienceCard {
+  id: string;
+  title: string;
+  /** The event's date in Paris, `YYYY-MM-DD`. */
+  eventOn: string;
+  amountMinor: number;
+  currency: HouseCurrency;
+  status: PartnerExperienceStatus;
+  invoice: { id: string; number: string; issuedAt: Iso } | null;
+  creditNote: { id: string; number: string; issuedAt: Iso } | null;
+  /** The Paris day the money arrived. */
+  paidOn: string | null;
+}
+
+/** A partner and its experiences (GET /api/admin/partners/:id). */
+export interface PartnerDetail extends Partner {
+  experiences: PartnerExperienceCard[];
+}
+
+/** An invitation of the circle linked to an experience. */
+export interface PartnerInvitation {
+  id: string;
+  title: string;
+  minTier: number;
+  segment: { id: string; name: string } | null;
+  published: boolean;
+  eventAt: Iso | null;
+  yes: number;
+  /** null: no limit. */
+  capacity: number | null;
+}
+
+/** An experience (GET /api/admin/partner-experiences/:id). */
+export interface PartnerExperience extends PartnerExperienceCard {
+  partner: { id: string; brand: string; active: boolean };
+  note: string | null;
+  invoicedAt: Iso | null;
+  paidRecordedAt: Iso | null;
+  paidRecordedBy: { id: string; email: string } | null;
+  cancelledAt: Iso | null;
+  cancelledBy: { id: string; email: string } | null;
+  invitations: PartnerInvitation[];
+  createdAt: Iso;
+  createdBy: { id: string; email: string } | null;
+  updatedAt: Iso;
+}
+
+/** POST /api/admin/partners, PATCH /api/admin/partners/:id: null clears an optional field. */
+export interface PartnerInput {
+  brand?: string;
+  contactName?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+  billingName?: string | null;
+  billingAddress?: string | null;
+  billingCountry?: string | null;
+  companyNumber?: string | null;
+  note?: string | null;
+}
+
+/** POST /api/admin/partners/:id/experiences; PATCH /api/admin/partner-experiences/:id (any of them; the amount and currency while DRAFT). */
+export interface PartnerExperienceInput {
+  title?: string;
+  eventOn?: string;
+  amountMinor?: number;
+  currency?: HouseCurrency;
+  note?: string | null;
+}
+
+/** An experience's guests (GET …/guests): every YES counted; the names shared for OPERATOR and ADMIN only. */
+export interface PartnerGuests {
+  experienceId: string;
+  headcount: number;
+  sharedCount: number;
+  /** Absent for an AUDITOR. */
+  shared?: { firstName: string; lastName: string }[];
+}
+
+/** A partner invoice or credit note (GET /api/admin/partner-invoices). */
+export interface PartnerInvoice {
+  id: string;
+  kind: PartnerInvoiceKind;
+  number: string;
+  issuedAt: Iso;
+  experience: { id: string; title: string; eventOn: string };
+  partner: { id: string; brand: string };
+  credits: { id: string; number: string } | null;
+  creditedBy: { id: string; number: string } | null;
+  issuer: { name: string; address: string[] };
+  buyer: { name: string | null; address: string | null; country: string | null; companyNumber: string | null };
+  lines: { kind: string; label: string; detail: string | null; amountMinor: number }[];
+  currency: HouseCurrency;
+  totalMinor: number;
+}
+
+/** A month's partner documents and their totals per currency. */
+export interface PartnerInvoiceList {
+  month: string;
+  currentMonth: string;
+  items: PartnerInvoice[];
+  totals: { currency: HouseCurrency; invoiced: number; credited: number; net: number }[];
+}
+
+/** A currency's partner income on GROWTH (services/growth.ts PartnerIncomeAmounts). */
+export interface PartnerIncomeAmounts {
+  currency: HouseCurrency;
+  invoicedMinor: number;
+  creditedMinor: number;
+  netMinor: number;
+  paidMinor: number;
+}
+
+/** GROWTH's Partner experiences (since lot M4): per month (the newest first), over the window, per partner; never converted. */
+export interface PartnerIncome {
+  months: { month: string; currencies: PartnerIncomeAmounts[] }[];
+  total: PartnerIncomeAmounts[];
+  byPartner: { partnerId: string; brand: string; currencies: PartnerIncomeAmounts[] }[];
 }
 
 // ── Test entrants and the server's status (plan TEST ENTRANTS, 2026-10-07) ──

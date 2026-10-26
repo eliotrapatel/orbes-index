@@ -91,6 +91,10 @@ const BENCH: Record<string, Tone> = { TO_MAKE: 'outline', IN_PROGRESS: 'solid', 
 const TEST_RUN: Record<string, Tone> = { RUNNING: 'solid', DONE: 'outline', STOPPED: 'alert', INTERRUPTED: 'alert', ENDED: 'muted' };
 /** A post of the circle (P-X01): in force once published; pending while it is not. */
 const CIRCLE: Record<string, Tone> = { PUBLISHED: 'solid', UNPUBLISHED: 'outline' };
+/** A partner (lot M4, K49 P1): ACTIVE, in force; SET ASIDE, offered for no new experience. */
+const PARTNER: Record<string, Tone> = { ACTIVE: 'solid', SET_ASIDE: 'muted' };
+/** A partner's experience (lot M4, K49 P1): a draft or invoiced, pending (the invoice, then the money); paid, in force; cancelled, historical. */
+const PARTNER_EXPERIENCE: Record<string, Tone> = { DRAFT: 'outline', INVOICED: 'outline', PAID: 'solid', CANCELLED: 'muted' };
 /** A request of the private salon (P-X08): an open one waits for ORBES Client Services, as an open case does. */
 const SHOP_REQUEST: Record<string, Tone> = { OPEN: 'alert', CLOSED: 'muted' };
 /** A conversation of the Messages board (CS-01): one to answer waits for ORBES Client Services, as an open case does. */
@@ -140,6 +144,8 @@ export type ToneDomain =
   | 'dropEntry'
   | 'circle'
   | 'circleAnswer'
+  | 'partner'
+  | 'partnerExperience'
   | 'shopRequest'
   | 'conversation'
   | 'care'
@@ -169,6 +175,8 @@ const TABLES: Record<ToneDomain, Record<string, Tone>> = {
   dropEntry: DROP_ENTRY,
   circle: CIRCLE,
   circleAnswer: CIRCLE_ANSWER,
+  partner: PARTNER,
+  partnerExperience: PARTNER_EXPERIENCE,
   shopRequest: SHOP_REQUEST,
   conversation: CONVERSATION,
   care: CARE,

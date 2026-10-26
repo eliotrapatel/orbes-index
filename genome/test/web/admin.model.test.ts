@@ -3731,6 +3731,13 @@ describe('the Growth page (plan NEXT-NINE, BP-29: model/growth.ts)', () => {
     expect(growthParams({}).mg).toBe('model');
     expect(['model', 'channel', 'tier', 'release', 'x'].map((mg) => growthParams({ mg }).mg)).toEqual(['model', 'channel', 'tier', 'model', 'model']);
   });
+
+  it('Club → Partners (lot M4 plan §2.3, step M4.7): its three routes under Club, read by every reader of the Club, recorded by an OPERATOR (managePartners), invoiced by an ADMIN (invoicePartners), as the server', () => {
+    expect([href('clubPartners'), href('clubPartner', { partnerId: 'p1' }), href('partnerExperience', { experienceId: 'e1' })]).toEqual(['#/club/partners', '#/club/partners/p1', '#/club/partner-experiences/e1']);
+    expect(['#/club/partners', '#/club/partners/p1', '#/club/partner-experiences/e1', '#/club/circle/c1'].map((x) => parseHash(x).name)).toEqual(['clubPartners', 'clubPartner', 'partnerExperience', 'circlePost']);
+    expect([CAPABILITY_MIN_ROLE.managePartners, CAPABILITY_MIN_ROLE.invoicePartners]).toEqual(['OPERATOR', 'ADMIN']);
+    expect((['RETAIL', 'LOGISTICS', 'AUDITOR', 'OPERATOR', 'ADMIN'] as const).map((r) => can(r, 'read'))).toEqual([false, false, true, true, true]);
+  });
 });
 
 describe('the Sign-up page\'s answers (plan CUSTOMER INTELLIGENCE §3.1 P.10; model/sign-up.ts)', () => {

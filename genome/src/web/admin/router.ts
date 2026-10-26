@@ -42,6 +42,13 @@ export const ROUTES = [
   /** A LIVE RELEASE's page: from its row of the Drops tab, no link of its own in the sidebar. */
   { name: 'liveRelease', path: '/club/live/:dropId' },
   { name: 'circlePost', path: '/club/circle/:postId' },
+  /**
+   * Club → Partners (lot M4 plan §2.3, K49 P1 to P4): entered from the Circle tab's Partners, no link of its own in the
+   * sidebar; a partner's page and an experience's from their rows.
+   */
+  { name: 'clubPartners', path: '/club/partners' },
+  { name: 'clubPartner', path: '/club/partners/:partnerId' },
+  { name: 'partnerExperience', path: '/club/partner-experiences/:experienceId' },
   /** The orders (plan LIVE RELEASE+): the board; an order's page and its packing slip, from its card. */
   { name: 'orders', path: '/orders' },
   /** Orders → Returns (plan MACRO M3 §2.3, R1): from the board's header, before an order's page so its path is never read as an order's id. */

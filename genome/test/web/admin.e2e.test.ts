@@ -3338,6 +3338,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
       'Repeat buying',
       'From scan to PALLADIUM',
       'Revenue',
+      'Partner experiences',
       'Margin',
       'Elsewhere in the console',
       'Scans by country',
@@ -4090,6 +4091,211 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await go(ap, '#/growth/margin-settings', 'Margin settings');
     expect(plain(await ap.locator('#margin-currencies tbody tr', { hasText: 'GBP' }).locator('[data-testid=margin-rate]').textContent())).toBe('1 GBP = 1.200000 EUR');
     expect(await ap.locator('.view--margin-settings button').count()).toBe(0);
+    expect(await cspViolations(ap)).toEqual([]);
+    await ac.close();
+  }, STEP_TIMEOUT);
+
+  it('records a partner and its experience from Club → Partners (lot M4 plan §2.3, step M4.7; K49 P1 to P4): entered from the Circle tab after New poll, the Club\'s tabs unchanged; a partner and an experience created, linked to a DRAFT invitation through PARTNER EXPERIENCE, ISSUE THE INVOICE naming its P- number, RECORD PAYMENT on a Paris day, the guests counted; Invoices\' Partners switch and Growth\'s Partner experiences read; no sideways scroll at 390 px; an AUDITOR reads without an action', async () => {
+    const plain = (v: string | null) => (v ?? '').replace(/[   ]/g, ' ').trim();
+    const parisDay = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+    const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+    const event = parisDay(new Date(Date.now() + 14 * 86_400_000));
+    const [ey, em, ed] = event.split('-');
+    const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'reduce' });
+    const p = await c.newPage();
+    await watch(p);
+    await signIn(p, ADMIN.email, ADMIN.password);
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dashboard');
+
+    // The Circle tab: Partners after New note, New invitation and New poll; the Club's tabs as they were.
+    await go(p, '#/club?tab=circle', 'Club');
+    expect(await p.locator('.club__tabs .range__tab').allTextContents()).toEqual(['Drops', 'Circle', 'Tiers', 'Requests', 'THE VAULT']);
+    expect((await p.locator('#circle .panel__tools > *').allTextContents()).map((x) => x.trim())).toEqual(['New note', 'New invitation', 'New poll', 'Partners']);
+    await p.click('[data-testid=circle-partners]');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Partners');
+    expect(await p.evaluate(() => location.hash)).toBe('#/club/partners');
+    expect(await p.locator('.side__link.is-active').textContent()).toBe('Club');
+    const before = await p.locator('#partners tbody tr').count();
+    if (before === 0) expect(await p.locator('#partners .empty__text').textContent()).toBe('No partner yet.');
+
+    // A partner: its brand, contact and billing details (P1).
+    await p.click('[data-testid=partner-new]');
+    await p.fill('dialog input[name=brand]', 'MAISON X');
+    await p.fill('dialog input[name=contactName]', 'Claire Martin');
+    await p.fill('dialog input[name=contactEmail]', 'claire');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('Enter a valid email address.');
+    await p.fill('dialog input[name=contactEmail]', 'claire@maison-x.test');
+    await p.fill('dialog input[name=billingName]', 'Maison X SAS');
+    await p.fill('dialog textarea[name=billingAddress]', '12 rue de la Paix\n75002 Paris');
+    await p.selectOption('dialog select[name=billingCountry]', 'FR');
+    await confirmDialog(p);
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('MAISON X');
+    const partnerId = decodeURIComponent(new URL(p.url()).hash.split('/').pop()!);
+    expect(await p.locator('[data-testid=partner-billing] span').allTextContents()).toEqual(['Maison X SAS', '12 rue de la Paix', '75002 Paris', 'France']);
+    expect(await p.locator('#partner-experiences .empty__text').textContent()).toBe('No experience yet.');
+
+    // An experience: a DRAFT of € 12 000 on a Paris day.
+    await p.click('[data-testid=experience-new]');
+    await p.fill('dialog input[name=title]', 'DINNER');
+    await p.fill('dialog input[name=eventOn]', event);
+    await p.fill('dialog input[name=amount]', '12000');
+    await confirmDialog(p);
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('DINNER');
+    const experienceId = decodeURIComponent(new URL(p.url()).hash.split('/').pop()!);
+    expect(new URL(p.url()).hash).toBe(`#/club/partner-experiences/${experienceId}`);
+    expect(await p.locator('#experience [data-testid=experience-state]').textContent()).toBe('Draft');
+    expect(plain(await p.locator('[data-testid=experience-amount]').textContent())).toBe('€ 12 000');
+    expect(await p.locator('[data-testid=experience-event]').textContent()).toBe(`${ed} ${MONTHS[Number(em) - 1]} ${ey}`);
+    expect(await p.locator('#experience-invitations .empty__text').count()).toBe(1);
+
+    // Linked to a DRAFT invitation of the circle: PARTNER EXPERIENCE shown once the experience is a partner's.
+    await go(p, '#/club?tab=circle', 'Club');
+    await p.click('[data-testid=circle-new-invitation]');
+    await p.waitForSelector('dialog select[name=experience]');
+    expect(await p.locator('dialog .cfield[data-field=partnerExperienceId]').isHidden()).toBe(true);
+    await p.selectOption('dialog select[name=experience]', 'PARTNER_EXPERIENCE');
+    expect(await p.locator('dialog .cfield[data-field=partnerExperienceId]').isVisible()).toBe(true);
+    const label = `MAISON X · DINNER · ${ed} ${MONTHS[Number(em) - 1]}`;
+    await expect.poll(() => p.locator('dialog select[name=partnerExperienceId] option').allTextContents(), POLL).toContain(label);
+    await p.selectOption('dialog select[name=partnerExperienceId]', experienceId);
+    await p.fill('dialog input[name=title]', 'Dinner with Maison X');
+    await confirmDialog(p);
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dinner with Maison X');
+    const postId = decodeURIComponent(new URL(p.url()).hash.split('/').pop()!);
+    expect(await p.locator('[data-testid=circle-state]').textContent()).toBe('Not published');
+    expect(await p.locator('[data-testid=circle-partner-experience]').textContent()).toBe(label);
+    expect((await ctx.db.selectFrom('circle_posts').select('partner_experience_id').where('id', '=', postId).executeTakeFirstOrThrow()).partner_experience_id).toBe(experienceId);
+    // A guest's YES with the name shared (K49 P3; the RSVP itself is test/api/circle.test.ts's): SHARES NAME on the post.
+    const guest = await ctx.services.auth.registerAccount({ email: 'partner.guest@example.com', password: 'partner guest passphrase 2026' }, {});
+    await ctx.db.insertInto('account_profiles').values({ account_id: guest.account.id, first_name: 'Camille', last_name: 'Durand' }).execute();
+    const answered = new Date();
+    await ctx.db.insertInto('circle_rsvps').values({ post_id: postId, account_id: guest.account.id, answer: 'YES', created_at: answered, updated_at: answered, share_name: true, share_name_at: answered }).execute();
+    await p.reload();
+    await expect.poll(() => p.locator('#answers thead th').allTextContents(), POLL).toEqual(['Account', 'Answer', 'Shares name', 'Answered']);
+    expect(await p.locator('[data-testid=answer-shares-name]').allTextContents()).toEqual(['Yes']);
+    await shot(p, 'circle-partner-post', { full: true });
+    await p.click('[data-testid=circle-partner-experience]');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('DINNER');
+    expect(await p.locator('[data-testid=experience-invitation]').allTextContents()).toEqual(['Dinner with Maison X']);
+    expect(await p.locator('[data-testid=invitation-yes]').textContent()).toBe('1');
+    // GUESTS FOR THE PARTNER: the headcount, the names shared, their list.
+    expect(await p.locator('[data-testid=guests-line]').textContent()).toBe('1 guest · 1 name shared');
+    expect(await p.locator('#experience-guests tbody td').allTextContents()).toEqual(['Camille', 'Durand']);
+    const [guests] = await Promise.all([p.waitForEvent('download'), p.click('[data-testid=guests-csv]')]);
+    expect(readFileSync((await guests.path())!, 'utf8').split('\r\n').filter(Boolean)).toEqual(['"guests","1"', '"first name","last name"', '"Camille","Durand"']);
+    await shot(p, 'partner-experience-draft', { full: true, phone: true });
+
+    // ISSUE THE INVOICE: its confirmation names the next P- number, the partner and the amount.
+    const year = new Date().getUTCFullYear();
+    const issued = await ctx.db.selectFrom('partner_invoices').select((eb) => eb.fn.max('sequence').as('n')).where('kind', '=', 'INVOICE').where('year', '=', year).executeTakeFirst();
+    const number = `P-${year}-${String(Number(issued?.n ?? 0) + 1).padStart(4, '0')}`;
+    await p.click('[data-testid=experience-issue]');
+    await expect.poll(async () => plain(await p.locator('dialog [data-testid=issue-text]').textContent()), POLL).toBe(`This issues invoice ${number} to MAISON X for € 12 000.00. An invoice is never changed.`);
+    await shot(p, 'partner-issue', { dialog: true });
+    await confirmDialog(p);
+    await p.waitForSelector('.toast:has-text("Invoice issued.")');
+    await expect.poll(() => p.locator('#experience [data-testid=experience-state]').textContent(), POLL).toBe('Invoiced');
+    expect(await p.locator('[data-testid=experience-invoice] .mono').textContent()).toBe(number);
+    const row = await ctx.db.selectFrom('partner_invoices').select(['year', 'sequence', 'total_minor', 'currency']).where('experience_id', '=', experienceId).executeTakeFirstOrThrow();
+    expect(`P-${row.year}-${String(row.sequence).padStart(4, '0')}`).toBe(number);
+    expect([Number(row.total_minor), row.currency]).toEqual([1_200_000, 'EUR']);
+    const [pdf] = await Promise.all([p.waitForEvent('download'), p.click('[data-testid=experience-invoice-pdf]')]);
+    expect(readFileSync((await pdf.path())!).subarray(0, 5).toString()).toBe('%PDF-');
+
+    // RECORD PAYMENT: today in Paris by default; a day after today refused before anything is sent.
+    const today = parisDay(new Date());
+    await p.click('[data-testid=experience-pay]');
+    expect(await p.locator('dialog input[name=paidOn]').inputValue()).toBe(today);
+    await p.fill('dialog input[name=paidOn]', parisDay(new Date(Date.now() + 3 * 86_400_000)));
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent(), POLL).toBe('The money cannot arrive after today.');
+    await p.fill('dialog input[name=paidOn]', today);
+    await confirmDialog(p);
+    await p.waitForSelector('.toast:has-text("Payment recorded.")');
+    await expect.poll(() => p.locator('#experience [data-testid=experience-state]').textContent(), POLL).toBe('Paid');
+    const [ty, tm, td] = today.split('-');
+    expect(await p.locator('[data-testid=experience-paid-on]').textContent()).toBe(`${td} ${MONTHS[Number(tm) - 1]} ${ty}`);
+    expect(await p.locator('[data-testid=experience-pay]').textContent()).toBe('Correct the payment date');
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'partner-experience-paid', { full: true, phone: true });
+    if (SCREENSHOTS) {
+      await p.setViewportSize({ width: 1024, height: 768 });
+      await p.waitForTimeout(300);
+      await p.screenshot({ path: join(OUT_DIR, 'admin-partner-experience-1024.png'), fullPage: true });
+      await p.setViewportSize({ width: 1440, height: 900 });
+    }
+
+    // The partner's page and the list: its experience, its invoice, its money.
+    await p.click('a.cbtn:has-text("MAISON X")');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('MAISON X');
+    expect(await p.locator('#partner-experiences [data-testid=experience-link]').allTextContents()).toEqual(['DINNER']);
+    expect(await p.locator('#partner-experiences tbody .mono').textContent()).toBe(number);
+    await shot(p, 'partner', { full: true, phone: true });
+    await go(p, '#/club/partners', 'Partners');
+    const mine = p.locator('#partners tbody tr', { has: p.locator(`a[href="#/club/partners/${partnerId}"]`) });
+    expect(plain(await mine.locator('[data-testid=partner-invoiced]').textContent())).toBe('€ 12 000');
+    expect(plain(await mine.locator('[data-testid=partner-paid]').textContent())).toBe('€ 12 000');
+    expect(await mine.locator('[data-testid=partner-state]').textContent()).toBe('Active');
+    await shot(p, 'partners', { full: true, phone: true });
+
+    // Invoices → Partners: the month's P- document, its PDF; the collectors' documents by default.
+    await go(p, '#/invoices', 'Invoices');
+    expect(await p.locator('[data-testid=invoices-to]').inputValue()).toBe('collectors');
+    await p.selectOption('[data-testid=invoices-to]', 'partners');
+    await expect.poll(() => p.evaluate(() => location.hash), POLL).toMatch(/to=partners/);
+    await expect.poll(() => p.locator('[data-testid=partner-invoice-number]').allTextContents(), POLL).toContain(number);
+    expect(await p.locator('#invoices-list').textContent()).toContain('MAISON X');
+    await shot(p, 'invoices-partners', { full: true, phone: true });
+
+    // Growth: Partner experiences after Revenue, each currency apart; the partner opening its page.
+    await go(p, '#/growth', 'Growth');
+    const panel = p.locator('#growth-partners');
+    await expect.poll(() => panel.locator('[data-testid=growth-partners-totals] li').count(), POLL).toBeGreaterThan(0);
+    expect((await panel.locator('[data-testid=growth-partners-totals] li').allTextContents()).map(plain)).toContain('€ 12 000 invoiced · € 12 000 paid');
+    expect(await panel.locator('[data-testid=growth-partners-by-partner] a', { hasText: 'MAISON X' }).getAttribute('href')).toBe(`#/club/partners/${partnerId}`);
+    const titles = await p.locator('.view--growth .panel__title').allTextContents();
+    expect(titles.indexOf('Partner experiences')).toBe(titles.indexOf('Revenue') + 1);
+    await panel.scrollIntoViewIfNeeded();
+    if (SCREENSHOTS) await panel.screenshot({ path: join(OUT_DIR, 'admin-growth-partners.png') });
+
+    // On a phone, no page scrolls sideways.
+    await p.setViewportSize({ width: 390, height: 844 });
+    try {
+      for (const [hash, heading] of [
+        ['#/club/partners', 'Partners'],
+        [`#/club/partners/${partnerId}`, 'MAISON X'],
+        [`#/club/partner-experiences/${experienceId}`, 'DINNER'],
+        ['#/invoices?to=partners', 'Invoices'],
+      ] as const) {
+        await go(p, hash, heading);
+        expect(await p.evaluate(() => document.documentElement.scrollWidth), hash).toBeLessThanOrEqual(390);
+      }
+    } finally {
+      await p.setViewportSize({ width: 1440, height: 900 });
+    }
+    expect(await cspViolations(p)).toEqual([]);
+    await c.close();
+
+    // An AUDITOR reads, the contact masked, the guests counted only, without an action.
+    const auditor = { email: 'partners.audit@orbes.test', password: 'partners auditor passphrase 2026' };
+    await ctx.services.auth.createAdmin({ ...auditor, role: 'AUDITOR' }, SYSTEM_ACTOR);
+    const ac = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const ap = await ac.newPage();
+    await watch(ap);
+    await signIn(ap, auditor.email, auditor.password);
+    await expect.poll(async () => (await title(ap).textContent())?.trim(), POLL).toBe('Dashboard');
+    await go(ap, '#/club?tab=circle', 'Club');
+    expect(await ap.locator('[data-testid=circle-partners]').count()).toBe(1);
+    await go(ap, '#/club/partners', 'Partners');
+    expect(await ap.locator('.view--partners button').count()).toBe(0);
+    await go(ap, `#/club/partners/${partnerId}`, 'MAISON X');
+    expect(await ap.locator('[data-testid=partner-email]').textContent()).not.toContain('claire@maison-x.test');
+    expect(await ap.locator('.view--partner button').count()).toBe(0);
+    await go(ap, `#/club/partner-experiences/${experienceId}`, 'DINNER');
+    for (const action of ['experience-edit', 'experience-issue', 'experience-pay', 'experience-cancel', 'guests-csv']) expect(await ap.locator(`[data-testid=${action}]`).count(), action).toBe(0);
+    expect(await ap.locator('[data-testid=guests-hidden]').count()).toBe(1);
+    expect(await ap.locator('[data-testid=experience-invoice-pdf]').count()).toBe(1);
     expect(await cspViolations(ap)).toEqual([]);
     await ac.close();
   }, STEP_TIMEOUT);

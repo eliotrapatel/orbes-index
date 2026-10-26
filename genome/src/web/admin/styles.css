@@ -8230,3 +8230,74 @@ a.collectors__kpi-link:focus-visible {
 .table .col--wrap .row-actions.vault__pair {
   flex-wrap: nowrap;
 }
+
+/* ── Club → Partners (lot M4 plan §2.3, K49 P1 to P4) ───────────────────── */
+
+/* A long brand or title wraps, never cut, even without a space to break at. */
+.partners__brand,
+.partners__title {
+  overflow-wrap: anywhere;
+}
+
+.partners__contact-line {
+  display: block;
+}
+
+/* The billing details as the invoice prints them: one line each. */
+.partners__lines > span {
+  display: block;
+}
+
+.partners__note {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+/* A document's number, its day of issue and its PDF, on one line that wraps on a phone. */
+.partners__doc {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+}
+
+.partners__doc .cell-sub {
+  margin: 0;
+}
+
+.partners__guests {
+  margin: 0;
+  font-size: var(--fs-line);
+  letter-spacing: 0.03em;
+}
+
+/* Growth's Partner experiences: a line per currency over the window. */
+.growth__partner-totals {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.growth__partner-totals .growth__headline {
+  margin-top: 6px;
+}
+
+/* On a phone, a partners page's panel heads wrap as the Profile's: the note under the title, then the tools (New
+   experience, ISSUE THE INVOICE, RECORD PAYMENT…) on their own line, so nothing runs past the screen's edge (390 px). */
+@media (max-width: 599px) {
+  .view--partners > .panel > .panel__head,
+  .view--partner > .panel > .panel__head,
+  .view--partner-experience > .panel > .panel__head {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  .view--partners > .panel > .panel__head .panel__tools,
+  .view--partner > .panel > .panel__head .panel__tools,
+  .view--partner-experience > .panel > .panel__head .panel__tools {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    gap: 10px 18px;
+    margin-left: 0;
+  }
+}

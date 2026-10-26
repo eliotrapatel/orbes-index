@@ -24,7 +24,7 @@
  * Each change is one request, audited by the server, then the page is read
  * again. An AUDITOR reads.
  */
-import { h, type Child } from '../../shared/dom.js';
+import { h, mount, type Child } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { formatCount, formatDateTime, humanize } from '../format.js';
 import {
@@ -50,6 +50,7 @@ import {
   pollResultLines,
 } from '../model/circle.js';
 import { galleryMoved, galleryWithAlt } from '../model/lookbook.js';
+import { eventDay, EXPERIENCE_STATE_LABELS, experienceOptionLabel, partnerExperienceOptions } from '../model/partners.js';
 import { can } from '../model/permissions.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
@@ -64,8 +65,19 @@ import { pageParam, type ViewContext } from './context.js';
 const stateOf = (p: Pick<CirclePost, 'published'>) => (p.published ? 'PUBLISHED' : 'UNPUBLISHED');
 const stateMark = (p: Pick<CirclePost, 'published'>) => statusMark(p.published ? 'Published' : 'Not published', toneOf('circle', stateOf(p)));
 
-/** The fields of a post's dialog of `kind`: its words and tiers, the fields of its kind, its links. */
-export function circleFields(kind: CirclePostKind, values: Record<string, string>, drops: readonly Drop[], models: readonly Model[], segments: readonly SegmentName[]): DialogField[] {
+/**
+ * The fields of a post's dialog of `kind`: its words and tiers, the fields of its kind, its links. An invitation of a
+ * partner experience names the partner's experience it is for (lot M4 plan §2.3, K49 P2): `partnerExperiences`, the
+ * PARTNER EXPERIENCE select's options (None first), shown while the experience is a partner's.
+ */
+export function circleFields(
+  kind: CirclePostKind,
+  values: Record<string, string>,
+  drops: readonly Drop[],
+  models: readonly Model[],
+  segments: readonly SegmentName[],
+  partnerExperiences: readonly { value: string; label: string }[] = [{ value: '', label: 'None' }],
+): DialogField[] {
   const out: DialogField[] = [
     { name: 'title', label: 'Title', required: true, maxlength: CIRCLE_LIMITS.title, value: values.title, hint: 'As the circle names it on /verify.' },
     {
@@ -96,6 +108,15 @@ export function circleFields(kind: CirclePostKind, values: Record<string, string
       options: [...CIRCLE_EXPERIENCE_OPTIONS],
       value: values.experience ?? '',
       hint: 'The members’ evening, a launch preview or a partner experience: shown above its title, read from the tier THE PROGRAM sets.',
+    });
+    out.splice(3, 0, {
+      name: 'partnerExperienceId',
+      label: 'Partner experience',
+      kind: 'select',
+      options: [...partnerExperiences],
+      value: values.partnerExperienceId ?? '',
+      hint: 'The partner’s experience it is for, in Club → Partners: its guests see « WITH <BRAND> » and may share their name with it. Moved to another partner’s, the names shared are cleared.',
+      shown: (v) => v.experience === 'PARTNER_EXPERIENCE',
     });
     out.push(
       { name: 'eventAt', label: 'Event (UTC)', kind: 'datetime', required: true, value: values.eventAt, hint: 'Answers close when it begins.' },
@@ -145,6 +166,41 @@ function lockExperienceTier(program: ClubProgram | null): void {
   sync();
 }
 
+/**
+ * The PARTNER EXPERIENCE select's options (lot M4 plan §2.3, K49 P2): every partner's experiences not cancelled, read from
+ * Club → Partners once the dialog of an invitation is open and its experience is a partner's (it opens at once with None
+ * and the post's own), then written into its select, the choice made meanwhile kept. Unread, the select keeps None and
+ * the post's own.
+ */
+function fillPartnerChoices(ctx: ViewContext, current: CirclePost['partnerExperience'] | null): void {
+  const dialogs = document.querySelectorAll<HTMLDialogElement>('dialog.dialog');
+  const dlg = dialogs[dialogs.length - 1];
+  const target = dlg?.querySelector<HTMLSelectElement>('select[name=partnerExperienceId]');
+  const experience = dlg?.querySelector<HTMLSelectElement>('select[name=experience]');
+  if (!target || !experience) return;
+  let read = false;
+  // Read once, when the experience is (or becomes) a partner's.
+  const load = () => {
+    if (read || experience.value !== 'PARTNER_EXPERIENCE') return;
+    read = true;
+    void fill();
+  };
+  const fill = async () => {
+    try {
+      const list = await ctx.api.partners();
+      const details = await Promise.all(list.items.filter((x) => x.experienceCount > 0).map((x) => ctx.api.partner(x.id)));
+      if (!target.isConnected) return;
+      const chosen = target.value;
+      mount(target, ...partnerExperienceOptions(details, current ?? null).map((o) => h('option', { attrs: { value: o.value } }, o.label)));
+      target.value = [...target.options].some((o) => o.value === chosen) ? chosen : '';
+    } catch {
+      // Unread: None and the post's own stay.
+    }
+  };
+  experience.addEventListener('change', load);
+  load();
+}
+
 /** What a dialog of `kind` says first. */
 const KIND_LEADS: Readonly<Record<CirclePostKind, string>> = Object.freeze({
   NOTE: 'Words and photographs for the owners: a piece of news, the story of a making, a film.',
@@ -169,7 +225,7 @@ export async function circleTab(ctx: ViewContext): Promise<HTMLElement> {
       title: `New ${CIRCLE_KIND_LABELS[kind].toLowerCase()}`,
       eyebrow: 'Club · Circle',
       body: [h('p', { class: 'dialog__text' }, KIND_LEADS[kind]), h('p', { class: 'dialog__text' }, 'Created unpublished: nobody reads it until it is published.')],
-      fields: circleFields(kind, circleFormValues(kind, null, ctx.now()), drops.items, models.items, segments),
+      fields: circleFields(kind, circleFormValues(kind, null, ctx.now()), drops.items, models.items, segments, partnerExperienceOptions([], null)),
       validate: (v) => circleProblem(kind, v),
       confirmLabel: `Create ${CIRCLE_KIND_LABELS[kind].toLowerCase()}`,
       submit: async (v) => {
@@ -177,6 +233,8 @@ export async function circleTab(ctx: ViewContext): Promise<HTMLElement> {
       },
     });
     lockExperienceTier(program);
+    // Lot M4 (K49 P2): an invitation may be for a partner's experience.
+    if (kind === 'INVITATION') fillPartnerChoices(ctx, null);
     void opened.then((r) => {
       if (!r || !created) return;
       notify('Post created, not published yet.');
@@ -215,15 +273,26 @@ export async function circleTab(ctx: ViewContext): Promise<HTMLElement> {
     ],
     {
       id: 'circle',
-      tools: canManage
-        ? [
-            button('New note', { kind: 'primary', testId: 'circle-new-note', onClick: () => newPost('NOTE') }),
-            button('New invitation', { kind: 'ghost', testId: 'circle-new-invitation', onClick: () => newPost('INVITATION') }),
-            button('New poll', { kind: 'ghost', testId: 'circle-new-poll', onClick: () => newPost('POLL') }),
-          ]
-        : [],
+      // Club → Partners (lot M4 plan §2.3): after the three ways to write, for every role that reads the Club.
+      tools: [
+        ...(canManage
+          ? [
+              button('New note', { kind: 'primary', testId: 'circle-new-note', onClick: () => newPost('NOTE') }),
+              button('New invitation', { kind: 'ghost', testId: 'circle-new-invitation', onClick: () => newPost('INVITATION') }),
+              button('New poll', { kind: 'ghost', testId: 'circle-new-poll', onClick: () => newPost('POLL') }),
+            ]
+          : []),
+        partnersLink(),
+      ],
     },
   );
+}
+
+/** Club → Partners, from the Circle tab. */
+function partnersLink(): HTMLAnchorElement {
+  const a = linkButton('Partners', href('clubPartners'), 'ghost');
+  a.setAttribute('data-testid', 'circle-partners');
+  return a;
 }
 
 /** A part of the post as the member reads it on /verify, or a line saying there is none. */
@@ -240,6 +309,8 @@ export async function circlePostView(ctx: ViewContext): Promise<HTMLElement> {
   const id = ctx.route.params.postId ?? '';
   const answer = CIRCLE_RSVP_ANSWERS.find((a) => a === ctx.route.query.answer) as CircleRsvpAnswer | undefined;
   const p = await ctx.api.circlePost(id);
+  const role = ctx.session.admin.role;
+  const acts = circleActions(p, role);
   const [drops, models, segments, answers, program] = await Promise.all([
     ctx.api.drops(1, 50),
     ctx.api.models(),
@@ -247,8 +318,6 @@ export async function circlePostView(ctx: ViewContext): Promise<HTMLElement> {
     p.kind === 'INVITATION' ? ctx.api.circleAnswers(id, { ...(answer ? { answer } : {}), page: pageParam(ctx), pageSize: 50 }) : Promise.resolve(null),
     p.kind === 'INVITATION' ? ctx.api.clubProgram().catch(() => null) : Promise.resolve(null),
   ]);
-  const role = ctx.session.admin.role;
-  const acts = circleActions(p, role);
   const eyebrow = `${CIRCLE_KIND_LABELS[p.kind]} · ${p.id.slice(0, 8).toUpperCase()}`;
   const done = (msg: string) => (r: unknown) => {
     if (!r) return;
@@ -262,7 +331,7 @@ export async function circlePostView(ctx: ViewContext): Promise<HTMLElement> {
       title: `Edit the ${CIRCLE_KIND_LABELS[p.kind].toLowerCase()}`,
       eyebrow,
       body: h('p', { class: 'dialog__text' }, p.published ? 'Published: a change shows in the circle at once. Its kind never changes.' : 'Not published: nobody reads it yet. Its kind never changes.'),
-      fields: circleFields(p.kind, circleFormValues(p.kind, p, ctx.now()), drops.items, models.items, segments),
+      fields: circleFields(p.kind, circleFormValues(p.kind, p, ctx.now()), drops.items, models.items, segments, partnerExperienceOptions([], p.partnerExperience ?? null)),
       validate: (v) => circleProblem(p.kind, v) ?? (Object.keys(circleChange(p, v)).length === 0 ? 'Nothing has changed.' : null),
       confirmLabel: 'Save post',
       submit: async (v) => {
@@ -270,6 +339,8 @@ export async function circlePostView(ctx: ViewContext): Promise<HTMLElement> {
       },
     });
     lockExperienceTier(program);
+    // Lot M4 (K49 P2): an invitation's PARTNER EXPERIENCE choices.
+    if (p.kind === 'INVITATION') fillPartnerChoices(ctx, p.partnerExperience ?? null);
     void opened.then(done('Post saved.'));
   };
 
@@ -309,6 +380,17 @@ export async function circlePostView(ctx: ViewContext): Promise<HTMLElement> {
       { label: 'Place', value: p.eventPlace ?? '—' },
       { label: 'Places', value: p.capacity === null ? 'No limit' : formatCount(p.capacity) },
     );
+    // Lot M4 (K49 P2): the partner's experience it is for, its page in Club → Partners.
+    const x = p.partnerExperience;
+    if (x || p.experience === 'PARTNER_EXPERIENCE') {
+      rows.push({
+        label: 'Partner experience',
+        value: x
+          ? h('a', { class: 'idlink', attrs: { href: href('partnerExperience', { experienceId: x.id }), 'data-testid': 'circle-partner-experience' } }, experienceOptionLabel(x.partner.brand, x))
+          : h('span', { data: { testid: 'circle-partner-experience' } }, 'None'),
+        note: x ? `${EXPERIENCE_STATE_LABELS[x.status]}, on ${eventDay(x.eventOn)}. Its guests see « WITH ${x.partner.brand} ».` : 'Edit to name the partner’s experience it is for.',
+      });
+    }
   }
   if (p.kind === 'POLL') rows.push({ label: 'Options', value: h('span', { class: 'cell-details' }, (p.pollOptions ?? []).join(' · ')), note: p.results && p.results.total > 0 ? 'Votes are cast: the options no longer change.' : undefined });
   if (p.drop) links.push(h('span', { class: 'cell-sub' }, `Release: ${p.drop.title} · ${humanize(p.drop.state)}`));
@@ -412,6 +494,10 @@ export async function circlePostView(ctx: ViewContext): Promise<HTMLElement> {
             [
               { label: 'Account', cell: (a) => h('a', { class: 'idlink', attrs: { href: href('owner', { accountId: a.accountId }), 'data-testid': 'answer-account' } }, a.email), kind: ['wide'] },
               { label: 'Answer', cell: (a) => h('span', { data: { testid: 'answer-value' } }, statusMark(a.answer, toneOf('circleAnswer', a.answer))), kind: ['nowrap'] },
+              // Lot M4 (K49 P3): on an invitation for a partner's experience, whether the guest shares their name with it.
+              ...(p.partnerExperience
+                ? [{ label: 'Shares name', cell: (a: CircleAnswer) => h('span', { data: { testid: 'answer-shares-name' } }, a.answer === 'YES' ? (a.shareName ? 'Yes' : 'No') : '—'), kind: ['nowrap'] as 'nowrap'[] }]
+                : []),
               { label: 'Answered', cell: (a) => formatDateTime(a.answeredAt), kind: ['nowrap'] },
             ],
             answers.items,

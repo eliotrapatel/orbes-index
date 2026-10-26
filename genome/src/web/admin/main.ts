@@ -58,6 +58,7 @@ import { auditView } from './views/audit.js';
 import { casesView } from './views/cases.js';
 import { catalogueView } from './views/catalogue.js';
 import { circlePostView } from './views/circle.js';
+import { partnerExperienceView, partnersView, partnerView } from './views/partners.js';
 import { clubView } from './views/club.js';
 import { codesView, resetCodesViewState } from './views/codes.js';
 import type { View, ViewContext } from './views/context.js';
@@ -217,6 +218,9 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   drop: { view: dropView, title: 'Drop', nav: 'club' },
   liveRelease: { view: liveReleaseView, title: 'Live release', nav: 'club' },
   circlePost: { view: circlePostView, title: 'Circle', nav: 'club' },
+  clubPartners: { view: partnersView, title: 'Partners', nav: 'club' },
+  clubPartner: { view: partnerView, title: 'Partner', nav: 'club' },
+  partnerExperience: { view: partnerExperienceView, title: 'Partner experience', nav: 'club' },
   warranties: { view: warrantiesView, title: 'Warranties', nav: 'warranties' },
   warrantyClaim: { view: warrantyClaimView, title: 'Warranty claim', nav: 'warranties' },
   care: { view: careView, title: 'PRIVATE CARE', nav: 'care' },
